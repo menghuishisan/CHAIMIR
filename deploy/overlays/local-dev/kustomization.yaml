@@ -1,0 +1,48 @@
+# local-dev overlay:kind 单集群,中间件单实例,本地镜像,dev 密钥。
+# 依据 docs/总-部署架构设计.md §四/§五:local-dev 用 kind + 单实例中间件。
+# 一键拉起见 deploy/Makefile(dev-up:建 kind → 装 ingress → apply 本 overlay → 跑 migrate)。
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../base
+
+# 中间件单实例随本地集群一起拉起(SaaS/staging 不 include,用外接托管)。
+components:
+  - ../../components/middleware
+
+# dev 密钥:从本地 secret.env(被 .gitignore 忽略)生成。
+# make dev-up 会在首次运行时由 secret.env.example 生成随机值写入 secret.env。
+# 生成两份(命名空间隔离):chaimir-system 给应用,chaimir-data 给中间件。同源文件,单一来源。
+secretGenerator:
+  - name: chaimir-secret
+    namespace: chaimir-system
+    envs:
+      - secret.env
+  - name: chaimir-data-secret
+    namespace: chaimir-data
+    envs:
+      - secret.env
+
+# 本地镜像:目录2/3 构建后 kind load 进集群,tag=dev。
+images:
+  - name: chaimir/backend
+    newName: chaimir/backend
+    newTag: dev
+  - name: chaimir/frontend
+    newName: chaimir/frontend
+    newTag: dev
+  - name: chaimir/migrate
+    newName: chaimir/migrate
+    newTag: dev
+
+# 本地形态:SaaS 多租户 + 平台层开(便于本地验证全功能)。
+configMapGenerator:
+  - name: chaimir-config
+    namespace: chaimir-system
+    behavior: merge
+    literals:
+      - DEPLOY_MODE=saas
+      - PLATFORM_LAYER_ENABLED=true
+      - LOG_LEVEL=debug
+      - PG_SSLMODE=disable

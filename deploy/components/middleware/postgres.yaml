@@ -1,0 +1,103 @@
+# PostgreSQL 16 单实例(RLS 多租户主库)。
+# 依据 docs/总-技术选型.md §9:PostgreSQL 16+;docs/总-部署架构设计.md §五:
+#   私有化/本地为单实例(可加备),SaaS 用托管/主从(不在本 component,overlay 接外部)。
+# 用官方 postgres 镜像不重打包(docs/镜像 §六之二)。凭据从 chaimir-secret 取。
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  namespace: chaimir-data
+  labels:
+    app.kubernetes.io/name: postgres
+    app.kubernetes.io/part-of: chaimir
+spec:
+  selector:
+    app.kubernetes.io/name: postgres
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: 5432
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgres
+  namespace: chaimir-data
+  labels:
+    app.kubernetes.io/name: postgres
+    app.kubernetes.io/part-of: chaimir
+spec:
+  serviceName: postgres
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: postgres
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: postgres
+        app.kubernetes.io/part-of: chaimir
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 999   # 官方 postgres 镜像的 postgres 用户。
+        fsGroup: 999
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: postgres
+          image: postgres:16-alpine
+          ports:
+            - name: postgres
+              containerPort: 5432
+          env:
+            # 引用 chaimir-data 命名空间内的配置/密钥(ConfigMap/Secret 命名空间隔离,
+            # 不能跨命名空间引用 chaimir-system 的 chaimir-config/chaimir-secret)。
+            # chaimir-data-config / chaimir-data-secret 由 overlay 从同源文件生成,保证单一来源。
+            - name: POSTGRES_DB
+              valueFrom:
+                configMapKeyRef:
+                  name: chaimir-data-config
+                  key: PG_DATABASE
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: chaimir-data-secret
+                  key: PG_PRIV_USER
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: chaimir-data-secret
+                  key: PG_PRIV_PASSWORD
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests: {cpu: 250m, memory: 256Mi}
+            limits: {cpu: "1", memory: 1Gi}
+          readinessProbe:
+            exec:
+              # 用容器已注入的 POSTGRES_USER/DB 环境变量,不硬编码库名/用户。
+              command: ["sh", "-c", "pg_isready -U \"$POSTGRES_USER\" -d \"$POSTGRES_DB\""]
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            exec:
+              command: ["sh", "-c", "pg_isready -U \"$POSTGRES_USER\" -d \"$POSTGRES_DB\""]
+            initialDelaySeconds: 20
+            periodSeconds: 20
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 5Gi  # overlay 覆盖容量。

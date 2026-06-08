@@ -1,0 +1,51 @@
+# Chaimir 仓库忽略清单。
+# 铁律(CLAUDE.md §6/§12):密钥/凭据不入仓库。
+
+# ---- 密钥(绝不提交,仅提交 *.example 模板)----
+**/secret.env
+!**/secret.env.example
+*.kubeconfig
+kubeconfig
+*.pem
+*.key
+!**/*.example
+
+# ---- K8s/部署本地产物 ----
+deploy/**/rendered.yaml
+deploy/**/*.local.yaml
+
+# ---- Go(目录2 backend)----
+/backend/bin/
+/backend/vendor/
+/backend/.gocache/
+*.test
+*.out
+coverage.*
+# 本地 .env(含 dev 密钥)绝不提交;仅提交 .env.example 模板。
+.env
+!**/.env.example
+
+# ---- Node/前端(目录4 frontend)----
+node_modules/
+dist/
+.turbo/
+.vite/
+*.tsbuildinfo
+
+# ---- 镜像构建产物(目录3 images)----
+*.tar
+images/**/build/
+
+# ---- 工具/IDE ----
+.DS_Store
+*.log
+.idea/
+.vscode/
+.claude/
+.mcp.json
+.codegraph/
+.understand-anything/
+
+# ---- AI/本地开发规范文件(不上传公共仓库)----
+AGENTS.md
+CLAUDE.md

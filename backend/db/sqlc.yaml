@@ -1,0 +1,139 @@
+# sqlc 配置:SQL → 类型安全 Go 代码生成。
+# 依据 docs/总-技术选型.md §2.3:sqlc + pgx;SQL-first,RLS 透明。
+# 模块边界(总-工程目录设计 §2.1):生成代码进各模块私有包 internal/modules/<m>/internal/sqlcgen,
+#   绝不被其他模块 import。每模块一个 sql 条目,schema 共用全量迁移(推断列类型)。
+version: "2"
+sql:
+  # M1 identity。
+  - engine: postgresql
+    schema: migrations
+    queries: queries/identity.sql
+    gen:
+      go:
+        package: sqlcgen
+        out: ../internal/modules/identity/internal/sqlcgen
+        sql_package: pgx/v5
+        emit_json_tags: true
+        emit_interface: true
+        emit_empty_slices: true
+        # bytea 默认 []byte,timestamptz 默认 time.Time,无需 override。
+  # M2 sandbox。
+  - engine: postgresql
+    schema: migrations
+    queries: queries/sandbox.sql
+    gen:
+      go:
+        package: sqlcgen
+        out: ../internal/modules/sandbox/internal/sqlcgen
+        sql_package: pgx/v5
+        emit_json_tags: true
+        emit_interface: true
+        emit_empty_slices: true
+  # M3 judge。
+  - engine: postgresql
+    schema: migrations
+    queries: queries/judge.sql
+    gen:
+      go:
+        package: sqlcgen
+        out: ../internal/modules/judge/internal/sqlcgen
+        sql_package: pgx/v5
+        emit_json_tags: true
+        emit_interface: true
+        emit_empty_slices: true
+  # M4 sim。
+  - engine: postgresql
+    schema: migrations
+    queries: queries/sim.sql
+    gen:
+      go:
+        package: sqlcgen
+        out: ../internal/modules/sim/internal/sqlcgen
+        sql_package: pgx/v5
+        emit_json_tags: true
+        emit_interface: true
+        emit_empty_slices: true
+  # M5 content。
+  - engine: postgresql
+    schema: migrations
+    queries: queries/content.sql
+    gen:
+      go:
+        package: sqlcgen
+        out: ../internal/modules/content/internal/sqlcgen
+        sql_package: pgx/v5
+        emit_json_tags: true
+        emit_interface: true
+        emit_empty_slices: true
+  # M6 teaching。
+  - engine: postgresql
+    schema: migrations
+    queries: queries/teaching.sql
+    gen:
+      go:
+        package: sqlcgen
+        out: ../internal/modules/teaching/internal/sqlcgen
+        sql_package: pgx/v5
+        emit_json_tags: true
+        emit_interface: true
+        emit_empty_slices: true
+  # M7 experiment。
+  - engine: postgresql
+    schema: migrations
+    queries: queries/experiment.sql
+    gen:
+      go:
+        package: sqlcgen
+        out: ../internal/modules/experiment/internal/sqlcgen
+        sql_package: pgx/v5
+        emit_json_tags: true
+        emit_interface: true
+        emit_empty_slices: true
+  # M8 contest。
+  - engine: postgresql
+    schema: migrations
+    queries: queries/contest.sql
+    gen:
+      go:
+        package: sqlcgen
+        out: ../internal/modules/contest/internal/sqlcgen
+        sql_package: pgx/v5
+        emit_json_tags: true
+        emit_interface: true
+        emit_empty_slices: true
+  # M9 admin。
+  - engine: postgresql
+    schema: migrations
+    queries: queries/admin.sql
+    gen:
+      go:
+        package: sqlcgen
+        out: ../internal/modules/admin/internal/sqlcgen
+        sql_package: pgx/v5
+        emit_json_tags: true
+        emit_interface: true
+        emit_empty_slices: true
+  # M10 notify。
+  - engine: postgresql
+    schema: migrations
+    queries: queries/notify.sql
+    gen:
+      go:
+        package: sqlcgen
+        out: ../internal/modules/notify/internal/sqlcgen
+        sql_package: pgx/v5
+        emit_json_tags: true
+        emit_interface: true
+        emit_empty_slices: true
+  # M11 grade。
+  - engine: postgresql
+    schema: migrations
+    queries: queries/grade.sql
+    gen:
+      go:
+        package: sqlcgen
+        out: ../internal/modules/grade/internal/sqlcgen
+        sql_package: pgx/v5
+        emit_json_tags: true
+        emit_interface: true
+        emit_empty_slices: true

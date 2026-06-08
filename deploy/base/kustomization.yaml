@@ -1,0 +1,53 @@
+# base 层 Kustomize 聚合:平台通用资源(命名空间/RBAC/应用/配置/入口/策略/定时任务)。
+# 依据 docs/总-部署架构设计.md §四:base 定义通用资源,overlays 覆盖环境差异。
+# 镜像名为逻辑占位,由各 overlay 的 images: 覆盖 registry+tag。
+# ConfigMap/Secret 由 generator 生成(带哈希后缀,变更自动触发滚动更新)。
+#
+# 注:networkpolicy/sandbox-template.yaml 为后端运行时模板,故意不列入资源
+#   (sbx-*/judge-*/battle-* 命名空间部署期不存在)。
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - namespaces/namespaces.yaml
+  - rbac/backend-sa.yaml
+  - backend/deployment.yaml
+  - worker/deployment.yaml
+  - frontend/deployment.yaml
+  - migrate/migrate-job.yaml
+  - ingress/ingress.yaml
+  - networkpolicy/static-namespaces.yaml
+  - admission/sandbox-namespace-policy.yaml
+  - admission/image-signature-policy.yaml
+  - cronjobs/cronjobs.yaml
+
+# 非密配置:由 config component 从「唯一」env 源 ../config/chaimir.env 生成
+#   chaimir-config(chaimir-system)+ chaimir-data-config(chaimir-data)。
+# overlay 用 configMapGenerator behavior: merge 覆盖差异键(DEPLOY_MODE 等)。
+components:
+  - ../config
+
+# 密钥(Secret chaimir-secret / chaimir-data-secret)不放 base —— 因密钥处理按形态不同:
+#   local-dev / prod-school:overlay 用 secretGenerator 从 gitignored secret.env 生成;
+#   staging / prod-saas:overlay 引用 ../config/external-secret component,由 External Secrets/KMS 同步。
+# base 资源以字面名引用;overlay 有 secretGenerator 时 kustomize 自动改写为带哈希名。
+# 模板见 config/secret.env.example(各 overlay 复制为本地 secret.env)。
+
+# 镜像占位:overlay 覆盖。
+images:
+  - name: chaimir/backend
+    newTag: placeholder
+  - name: chaimir/frontend
+    newTag: placeholder
+  - name: chaimir/migrate
+    newTag: placeholder
+
+# generator 默认行为:加哈希后缀(配置变更触发滚动)。
+generatorOptions:
+  disableNameSuffixHash: false
+
+# 统一标签(labels 含 includeSelectors:false,避免污染 Deployment selector/Service selector)。
+labels:
+  - pairs:
+      app.kubernetes.io/managed-by: kustomize
+    includeSelectors: false

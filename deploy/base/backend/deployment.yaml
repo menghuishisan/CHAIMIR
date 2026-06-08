@@ -1,0 +1,92 @@
+# 后端单体 Deployment + Service。
+# 依据 docs/总-部署架构设计.md §三:无状态多副本(会话在 Redis、JWT 无状态),
+# 经 client-go 创建/销毁动态沙箱 Pod;docs/总-工程目录设计:单控制面二进制 cmd/server。
+# 镜像名为逻辑占位 chaimir/backend,由各 overlay 的 images: 覆盖 registry+tag。
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: chaimir-backend
+  namespace: chaimir-system
+  labels:
+    app.kubernetes.io/name: chaimir-backend
+    app.kubernetes.io/component: control-plane
+    app.kubernetes.io/part-of: chaimir
+spec:
+  replicas: 1  # overlay 覆盖:prod-saas 多副本 + HPA。
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: chaimir-backend
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: chaimir-backend
+        app.kubernetes.io/component: control-plane
+        app.kubernetes.io/part-of: chaimir
+    spec:
+      serviceAccountName: chaimir-backend  # 最小 RBAC,管理动态沙箱命名空间。
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: server
+          image: chaimir/backend:placeholder  # overlay images: 覆盖。
+          args: ["serve"]  # 控制面 HTTP/WS 主进程(worker 用不同子命令)。
+          ports:
+            - name: http
+              containerPort: 8080
+          envFrom:
+            - configMapRef:
+                name: chaimir-config
+            - secretRef:
+                name: chaimir-secret
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 250m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 512Mi
+          # 就绪/存活探针:后端暴露 /api/healthz(就绪)/api/livez(存活)。
+          readinessProbe:
+            httpGet:
+              path: /api/healthz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /api/livez
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp  # readOnlyRootFilesystem 下提供可写临时目录。
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: chaimir-backend
+  namespace: chaimir-system
+  labels:
+    app.kubernetes.io/name: chaimir-backend
+    app.kubernetes.io/part-of: chaimir
+spec:
+  selector:
+    app.kubernetes.io/name: chaimir-backend
+  ports:
+    - name: http
+      port: 80
+      targetPort: http

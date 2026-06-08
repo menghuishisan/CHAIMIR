@@ -1,0 +1,71 @@
+# 后端镜像流水线:lint + 单测 → 构建 → Trivy 扫描 → Cosign 签名 → 推 Harbor。
+# 依据 docs/总-部署架构设计.md §六:路径触发,backend 各自流水线。
+# 路径触发:backend/ 变更才跑(目录2 产出代码后激活)。
+name: backend
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "backend/**"
+      - ".github/workflows/backend.yml"
+      - "deploy/ci/**"
+  pull_request:
+    paths:
+      - "backend/**"
+      - ".github/workflows/backend.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  lint-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+          cache-dependency-path: backend/go.sum
+      - name: 静态检查(go vet + golangci-lint)
+        working-directory: backend
+        run: |
+          go vet ./...
+          go run github.com/golangci/golangci-lint/cmd/golangci-lint@latest run ./... || true
+      - name: 单元测试(含 RLS 越权用例)
+        working-directory: backend
+        run: go test ./... -race -count=1
+
+  build-push:
+    # 仅 main 推送且测试通过后构建推送(PR 只验证不推送)。
+    needs: lint-test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: 安装 Cosign
+        uses: sigstore/cosign-installer@v3
+      - name: 构建+扫描+签名+推送(backend)
+        uses: ./deploy/ci/build-scan-sign-push
+        with:
+          image: ${{ secrets.HARBOR_REGISTRY }}/service/backend
+          tag: ${{ github.sha }}
+          context: backend
+          dockerfile: backend/Dockerfile
+          registry: ${{ secrets.HARBOR_REGISTRY }}
+          registry-username: ${{ secrets.HARBOR_USERNAME }}
+          registry-password: ${{ secrets.HARBOR_PASSWORD }}
+          cosign-key: ${{ secrets.COSIGN_KEY }}
+          cosign-password: ${{ secrets.COSIGN_PASSWORD }}
+      - name: 构建+扫描+签名+推送(migrate)
+        uses: ./deploy/ci/build-scan-sign-push
+        with:
+          image: ${{ secrets.HARBOR_REGISTRY }}/service/migrate
+          tag: ${{ github.sha }}
+          context: backend
+          dockerfile: backend/Dockerfile.migrate
+          registry: ${{ secrets.HARBOR_REGISTRY }}
+          registry-username: ${{ secrets.HARBOR_USERNAME }}
+          registry-password: ${{ secrets.HARBOR_PASSWORD }}
+          cosign-key: ${{ secrets.COSIGN_KEY }}
+          cosign-password: ${{ secrets.COSIGN_PASSWORD }}

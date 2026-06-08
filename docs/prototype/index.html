@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Chaimir 区块链教学·实验·竞赛平台 — 高保真原型</title>
+<meta name="description" content="Chaimir 三位一体平台四端高保真交互原型">
+<link rel="stylesheet" href="styles/tokens.css">
+<link rel="stylesheet" href="styles/components.css">
+<script src="https://unpkg.com/lucide@latest"></script>
+</head>
+<body>
+  <a href="#main-content" class="skip-link">跳到主内容</a>
+  <div id="app" aria-live="polite">正在加载原型…</div>
+
+  <!-- 核心:命名空间与工具 → 导航配置 → 假数据 → 路由外壳 -->
+  <script src="core/ui.js"></script>
+  <script src="core/nav-config.js"></script>
+  <script src="core/mock.js"></script>
+
+  <!-- 页面模块(按端分文件注册到 Chaimir.pages) -->
+  <script src="pages/home.js"></script>
+  <script src="pages/auth/auth.js"></script>
+
+  <script src="pages/student/courses.js"></script>
+  <script src="pages/student/practice.js"></script>
+  <script src="pages/student/account.js"></script>
+
+  <script src="pages/teacher/courses.js"></script>
+  <script src="pages/teacher/practice.js"></script>
+  <script src="pages/teacher/resources.js"></script>
+
+  <script src="pages/school-admin/admin.js"></script>
+  <script src="pages/school-admin/grades.js"></script>
+
+  <script src="pages/platform-admin/tenants.js"></script>
+  <script src="pages/platform-admin/engine.js"></script>
+
+  <script src="pages/immersive/exp-ide.js"></script>
+  <script src="pages/immersive/sim.js"></script>
+  <script src="pages/immersive/battle-replay.js"></script>
+  <script src="pages/immersive/solve.js"></script>
+
+  <!-- 共享:通知中心/系统公告(顶栏铃铛落点,四端统一,最后加载以统一覆盖) -->
+  <script src="pages/shared/messages.js"></script>
+
+  <!-- 路由外壳放最后,确保页面已注册 -->
+  <script src="core/shell.js"></script>
+</body>
+</html>

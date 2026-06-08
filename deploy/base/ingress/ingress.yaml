@@ -1,0 +1,48 @@
+# 平台入口 Ingress(ingress-nginx)。
+# 依据 docs/总-部署架构设计.md §三:用户 ──HTTPS──► Ingress ──► 前端(/)/ 后端(/api)。
+# 路由:
+#   /          → 前端静态(chaimir-frontend)
+#   /api       → 后端控制面(chaimir-backend)
+#   /ws        → M10 统一 WebSocket Hub(chaimir-backend,需 upgrade)
+# 注:/platform 不是独立路径,平台管理员前端为 SPA 由 / 提供;平台层关闭由
+#   PLATFORM_LAYER_ENABLED + 后端鉴权 + 前端路由控制(prod-school overlay)。
+# host 为占位,overlay 覆盖真实域名;TLS 经 overlay 注入证书(prod 真实证书)。
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: chaimir
+  namespace: chaimir-system
+  labels:
+    app.kubernetes.io/part-of: chaimir
+  annotations:
+    # WebSocket 长连接(/ws)需要更长读超时。
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: chaimir.local  # overlay 覆盖真实域名。
+      http:
+        paths:
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: chaimir-backend
+                port:
+                  number: 80
+          - path: /ws
+            pathType: Prefix
+            backend:
+              service:
+                name: chaimir-backend
+                port:
+                  number: 80
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: chaimir-frontend
+                port:
+                  number: 80

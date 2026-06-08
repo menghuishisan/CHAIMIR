@@ -1,0 +1,56 @@
+# 数据库迁移 + RLS 初始化 + seed 的一次性 Job。
+# 依据 docs/总-镜像与容器设计.md §二:chaimir/migrate = 迁移 + RLS 初始化 + seed 工具。
+# 依据 docs/总-部署架构设计.md §十:初始化脚本建库 + RLS + 首个学校管理员 + seed 镜像元信息。
+#
+# 运行时机:中间件(PostgreSQL)就绪后由 make dev-up / CD 流程触发(见 deploy/Makefile)。
+# 幂等:迁移工具(golang-migrate/goose)按版本号幂等;seed 用 upsert 语义。
+# 命名带哈希后缀由 kustomize 生成?否 —— Job 不可变,重跑前需删除旧 Job(Makefile migrate 目标处理)。
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: chaimir-migrate
+  namespace: chaimir-system
+  labels:
+    app.kubernetes.io/name: chaimir-migrate
+    app.kubernetes.io/component: migration
+    app.kubernetes.io/part-of: chaimir
+spec:
+  backoffLimit: 3  # 中间件未就绪时允许重试。
+  ttlSecondsAfterFinished: 3600  # 完成后 1 小时自动清理。
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: chaimir-migrate
+        app.kubernetes.io/part-of: chaimir
+    spec:
+      restartPolicy: Never
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: migrate
+          image: chaimir/migrate:placeholder  # overlay images: 覆盖。
+          # 子命令:迁移(建表+RLS策略+索引)→ seed(镜像元信息 runtime/tool/judger + 首个管理员)。
+          args: ["migrate-and-seed"]
+          envFrom:
+            - configMapRef:
+                name: chaimir-config
+            - secretRef:
+                name: chaimir-secret
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi

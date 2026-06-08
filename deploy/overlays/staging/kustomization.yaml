@@ -1,0 +1,108 @@
+# staging overlay:预发布,SaaS 形态,中间件外接,自动部署目标(main 分支)。
+# 依据 docs/总-部署架构设计.md §四/§五/§六:staging 由 main 自动部署;中间件用托管。
+#
+# 密钥:不用 secretGenerator —— Secret chaimir-secret 由 External Secrets Operator / KMS
+#   在集群预创建(base 资源以字面名引用)。镜像从 Harbor 拉取。
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../base
+  # 不 include middleware:用托管 PG/Redis/NATS/MinIO,经 ConfigMap 指向外部端点。
+
+components:
+  - ../../config/external-secret
+
+images:
+  - name: chaimir/backend
+    newName: harbor.chaimir.local/service/backend
+    newTag: staging
+  - name: chaimir/frontend
+    newName: harbor.chaimir.local/service/frontend
+    newTag: staging
+  - name: chaimir/migrate
+    newName: harbor.chaimir.local/service/migrate
+    newTag: staging
+
+# 中间件外接端点 + SaaS 形态(host 为 staging 托管中间件内部域名)。
+configMapGenerator:
+  - name: chaimir-config
+    namespace: chaimir-system
+    behavior: merge
+    literals:
+      - DEPLOY_MODE=saas
+      - PLATFORM_LAYER_ENABLED=true
+      - LOG_LEVEL=info
+      - PG_SSLMODE=require
+      - PG_HOST=postgres.staging-data.internal
+      - REDIS_HOST=redis.staging-data.internal
+      - NATS_URL=nats://nats.staging-data.internal:4222
+      - MINIO_ENDPOINT=minio.staging-data.internal:9000
+
+# 预发布双副本(轻量验证伸缩)。
+replicas:
+  - name: chaimir-backend
+    count: 2
+
+patches:
+  # staging 域名。
+  - target:
+      kind: Ingress
+      name: chaimir
+    patch: |-
+      - op: replace
+        path: /spec/rules/0/host
+        value: staging.chaimir.example.com
+  # staging 密钥 Store 与远端键前缀。ExternalSecret 键集合统一维护在 deploy/config。
+  - target:
+      kind: ExternalSecret
+      name: chaimir-secret
+    patch: |-
+      - op: replace
+        path: /spec/secretStoreRef/name
+        value: chaimir-staging-secret-store
+      - op: replace
+        path: /spec/refreshInterval
+        value: 15m
+      - op: replace
+        path: /spec/data/0/remoteRef/key
+        value: staging/chaimir/JWT_SIGNING_KEY
+      - op: replace
+        path: /spec/data/1/remoteRef/key
+        value: staging/chaimir/APP_ENCRYPTION_KEY
+      - op: replace
+        path: /spec/data/2/remoteRef/key
+        value: staging/chaimir/APP_HMAC_KEY
+      - op: replace
+        path: /spec/data/3/remoteRef/key
+        value: staging/chaimir/PG_PASSWORD
+      - op: replace
+        path: /spec/data/4/remoteRef/key
+        value: staging/chaimir/PG_PRIV_USER
+      - op: replace
+        path: /spec/data/5/remoteRef/key
+        value: staging/chaimir/PG_PRIV_PASSWORD
+      - op: replace
+        path: /spec/data/6/remoteRef/key
+        value: staging/chaimir/REDIS_PASSWORD
+      - op: replace
+        path: /spec/data/7/remoteRef/key
+        value: staging/chaimir/MINIO_ACCESS_KEY
+      - op: replace
+        path: /spec/data/8/remoteRef/key
+        value: staging/chaimir/MINIO_SECRET_KEY
+      - op: replace
+        path: /spec/data/9/remoteRef/key
+        value: staging/chaimir/NATS_TOKEN
+      - op: replace
+        path: /spec/data/10/remoteRef/key
+        value: staging/chaimir/BOOTSTRAP_ADMIN_PHONE
+      - op: replace
+        path: /spec/data/11/remoteRef/key
+        value: staging/chaimir/BOOTSTRAP_ADMIN_NAME
+      - op: replace
+        path: /spec/data/12/remoteRef/key
+        value: staging/chaimir/BOOTSTRAP_ADMIN_PASSWORD
+      - op: replace
+        path: /spec/data/13/remoteRef/key
+        value: staging/chaimir/BOOTSTRAP_PLATFORM_ADMIN_PASSWORD

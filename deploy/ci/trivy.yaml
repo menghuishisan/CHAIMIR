@@ -1,0 +1,19 @@
+# Trivy 扫描配置(全平台镜像统一基线)。
+# 依据 docs/总-镜像与容器设计.md §九:高危漏洞阻断。
+# CI 中经 build-scan-sign-push action 调用;本文件为可被 `trivy --config` 引用的统一基线。
+severity:
+  - HIGH
+  - CRITICAL
+# 命中高危/严重即非零退出,阻断推送。
+exit-code: 1
+# 仅对有修复方案的漏洞阻断,避免无解 CVE 卡死流水线(可由安全评审收紧)。
+ignore-unfixed: true
+vulnerability:
+  type:
+    - os
+    - library
+scan:
+  scanners:
+    - vuln
+    - secret      # 同时扫描镜像内误打包的密钥。
+timeout: 10m

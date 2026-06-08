@@ -1,0 +1,182 @@
+# 静态命名空间 NetworkPolicy:默认 deny-all + 精确放行。
+# 依据 docs/总-部署架构设计.md §二/§九:NetworkPolicy 默认 deny-all,按需精确放行;
+#   最小权限,系统与数据命名空间严格隔离。
+#
+# 说明:NetworkPolicy 为命名空间级。本文件覆盖 chaimir-system 与 chaimir-data。
+# 动态沙箱命名空间(sbx-*/judge-*/battle-*)的 deny-all 模板见 sandbox-template.yaml,
+# 由后端创建沙箱时套用(deploy 提供 SSOT 模板)。
+
+# ===== chaimir-system:默认拒绝所有进出 =====
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-all
+  namespace: chaimir-system
+  labels:
+    app.kubernetes.io/part-of: chaimir
+spec:
+  podSelector: {}
+  policyTypes: ["Ingress", "Egress"]
+# 无 ingress/egress 规则 = 全部拒绝。
+
+# ===== chaimir-system:精确放行 =====
+---
+# 允许 ingress-nginx 访问后端/前端的 http。
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-ingress-from-nginx
+  namespace: chaimir-system
+  labels:
+    app.kubernetes.io/part-of: chaimir
+spec:
+  podSelector:
+    matchExpressions:
+      - key: app.kubernetes.io/name
+        operator: In
+        values: ["chaimir-backend", "chaimir-frontend"]
+  policyTypes: ["Ingress"]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ingress-nginx
+      ports:
+        - protocol: TCP
+          port: 8080
+---
+# 允许 DNS 解析(所有 Pod → kube-dns)。
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-dns-egress
+  namespace: chaimir-system
+  labels:
+    app.kubernetes.io/part-of: chaimir
+spec:
+  podSelector: {}
+  policyTypes: ["Egress"]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+---
+# 允许后端/worker/migrate → chaimir-data 中间件端口。
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-egress-to-data
+  namespace: chaimir-system
+  labels:
+    app.kubernetes.io/part-of: chaimir
+spec:
+  podSelector:
+    matchExpressions:
+      - key: app.kubernetes.io/component
+        operator: In
+        values: ["control-plane", "worker", "migration"]
+  policyTypes: ["Egress"]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: chaimir-data
+      ports:
+        - protocol: TCP
+          port: 5432   # PostgreSQL
+        - protocol: TCP
+          port: 6379   # Redis
+        - protocol: TCP
+          port: 4222   # NATS
+        - protocol: TCP
+          port: 9000   # MinIO
+---
+# 允许后端/worker → kube-apiserver(client-go 管理动态沙箱)。
+# apiserver 通常在 default 命名空间的 kubernetes Service(443),CNI 对 apiserver 的
+# egress 放行依实现而异;此规则放行到 443,生产按 CNI(Cilium/Calico)细化目标。
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-egress-to-apiserver
+  namespace: chaimir-system
+  labels:
+    app.kubernetes.io/part-of: chaimir
+spec:
+  podSelector:
+    matchExpressions:
+      - key: app.kubernetes.io/component
+        operator: In
+        values: ["control-plane", "worker"]
+  policyTypes: ["Egress"]
+  egress:
+    - ports:
+        - protocol: TCP
+          port: 443
+        - protocol: TCP
+          port: 6443
+
+# ===== chaimir-data:默认拒绝 + 仅放行来自 chaimir-system =====
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-all
+  namespace: chaimir-data
+  labels:
+    app.kubernetes.io/part-of: chaimir
+spec:
+  podSelector: {}
+  policyTypes: ["Ingress", "Egress"]
+---
+# 中间件仅接受来自 chaimir-system 的连接;命名空间内部互通(集群中间件需要)。
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-ingress-from-system
+  namespace: chaimir-data
+  labels:
+    app.kubernetes.io/part-of: chaimir
+spec:
+  podSelector: {}
+  policyTypes: ["Ingress"]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: chaimir-system
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: chaimir-data
+---
+# chaimir-data 内 DNS + 命名空间内部互通(中间件集群/备份需要)。
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-dns-and-internal-egress
+  namespace: chaimir-data
+  labels:
+    app.kubernetes.io/part-of: chaimir
+spec:
+  podSelector: {}
+  policyTypes: ["Egress"]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: chaimir-data

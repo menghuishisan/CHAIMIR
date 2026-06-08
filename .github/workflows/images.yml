@@ -1,0 +1,71 @@
+# 镜像流水线:链运行时/工具/判题器/仿真/基础镜像(数据驱动,目录3 产出)。
+# 依据 docs/总-部署架构设计.md §六 + docs/总-镜像与容器设计.md:
+#   images/ 各镜像含 Dockerfile + manifest.yaml;矩阵构建 → 扫描 → 签名 → 推 Harbor。
+# 路径触发:images/ 变更才跑(目录3 产出后激活)。
+name: images
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "images/**"
+      - ".github/workflows/images.yml"
+      - "deploy/ci/**"
+  pull_request:
+    paths:
+      - "images/**"
+      - ".github/workflows/images.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  # 发现变更的镜像目录(每个镜像目录含 Dockerfile + manifest.yaml)。
+  discover:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.set.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: set
+        name: 收集 images/ 下含 Dockerfile 的镜像目录
+        run: |
+          # 输出 {dir, image} 矩阵:dir 为镜像目录,image 由目录相对路径映射为 Harbor project/name。
+          # 例:images/runtimes/evm-hardhat → runtime/evm-hardhat。
+          dirs=$(find images -name Dockerfile -printf '%h\n' | sort -u)
+          json='[]'
+          for d in $dirs; do
+            rel=${d#images/}
+            json=$(echo "$json" | jq --arg d "$d" --arg r "$rel" '. + [{dir:$d, rel:$r}]')
+          done
+          echo "matrix={\"include\":$json}" >> "$GITHUB_OUTPUT"
+
+  build-push:
+    needs: discover
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.discover.outputs.matrix != '{"include":[]}'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.discover.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: 安装 Cosign
+        uses: sigstore/cosign-installer@v3
+      - name: 解析 manifest 镜像名
+        id: meta
+        run: |
+          # 镜像逻辑名取自 manifest.yaml(数据驱动:平台代码不改,加镜像即接入)。
+          name=$(yq '.image' "${{ matrix.dir }}/manifest.yaml")
+          echo "image=${{ secrets.HARBOR_REGISTRY }}/$name" >> "$GITHUB_OUTPUT"
+      - name: 构建+扫描+签名+推送
+        uses: ./deploy/ci/build-scan-sign-push
+        with:
+          image: ${{ steps.meta.outputs.image }}
+          tag: ${{ github.sha }}
+          context: ${{ matrix.dir }}
+          dockerfile: ${{ matrix.dir }}/Dockerfile
+          registry: ${{ secrets.HARBOR_REGISTRY }}
+          registry-username: ${{ secrets.HARBOR_USERNAME }}
+          registry-password: ${{ secrets.HARBOR_PASSWORD }}
+          cosign-key: ${{ secrets.COSIGN_KEY }}
+          cosign-password: ${{ secrets.COSIGN_PASSWORD }}

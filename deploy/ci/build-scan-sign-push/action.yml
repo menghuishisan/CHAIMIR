@@ -1,0 +1,74 @@
+# 可复用 composite action:构建 → Trivy 扫描(高危阻断)→ Cosign 签名 → 推 Harbor。
+# 依据 docs/总-部署架构设计.md §六 + docs/总-镜像与容器设计.md §九:
+#   多阶段构建 → Trivy 漏洞扫描(高危阻断)→ Cosign 签名(未签名不得部署)→ 推 Harbor。
+# 全平台镜像流水线统一调用此 action(CLAUDE.md §4:同类问题统一一种方案)。
+name: build-scan-sign-push
+description: 构建镜像、Trivy 扫描高危阻断、Cosign 签名并推送到 Harbor
+
+inputs:
+  image:
+    description: 镜像完整名(含 registry/project/name,不含 tag)
+    required: true
+  tag:
+    description: 镜像标签
+    required: true
+  context:
+    description: 构建上下文目录
+    required: true
+  dockerfile:
+    description: Dockerfile 路径
+    required: true
+  registry:
+    description: Harbor 仓库地址
+    required: true
+  registry-username:
+    description: Harbor 登录用户(经 secrets 注入)
+    required: true
+  registry-password:
+    description: Harbor 登录密码(经 secrets 注入)
+    required: true
+  cosign-key:
+    description: Cosign 私钥(经 secrets 注入)
+    required: true
+  cosign-password:
+    description: Cosign 私钥口令(经 secrets 注入)
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: 登录 Harbor
+      shell: bash
+      run: |
+        echo "${{ inputs.registry-password }}" | \
+          docker login "${{ inputs.registry }}" -u "${{ inputs.registry-username }}" --password-stdin
+
+    - name: 多阶段构建镜像
+      shell: bash
+      run: |
+        docker build \
+          -f "${{ inputs.dockerfile }}" \
+          -t "${{ inputs.image }}:${{ inputs.tag }}" \
+          "${{ inputs.context }}"
+
+    - name: Trivy 漏洞扫描(高危/严重阻断)
+      uses: aquasecurity/trivy-action@master
+      with:
+        image-ref: "${{ inputs.image }}:${{ inputs.tag }}"
+        format: table
+        exit-code: "1"            # 命中即失败,阻断后续推送。
+        severity: HIGH,CRITICAL
+        ignore-unfixed: true
+
+    - name: 推送镜像到 Harbor
+      shell: bash
+      run: docker push "${{ inputs.image }}:${{ inputs.tag }}"
+
+    - name: Cosign 签名(未签名不得部署)
+      shell: bash
+      env:
+        COSIGN_PASSWORD: ${{ inputs.cosign-password }}
+      run: |
+        echo "${{ inputs.cosign-key }}" > /tmp/cosign.key
+        cosign sign --yes --key /tmp/cosign.key "${{ inputs.image }}:${{ inputs.tag }}"
+        rm -f /tmp/cosign.key

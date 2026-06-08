@@ -1,0 +1,26 @@
+# 动态沙箱命名空间 NetworkPolicy 模板(SSOT)。
+# 重要:本文件不被 kustomization 直接 apply —— sbx-*/judge-*/battle-* 命名空间
+#   在部署时不存在,由后端 client-go 运行时创建。此文件是 deploy 层提供的权威模板,
+#   后端创建每个沙箱命名空间时套用(占位 __SANDBOX_NAMESPACE__ 由代码替换)。
+# 依据 docs/总-部署架构设计.md §二/§九:动态沙箱命名空间间、与系统命名空间严格隔离,
+#   默认 deny-all,按需精确放行(同 Pod 组内容器互通由 podSelector 放行)。
+# 用途:目录2 M2 沙箱控制面 import 此模板渲染;CLAUDE.md 铁律"同类问题全平台统一一种方案"。
+#
+# ⚠ 此文件仅作模板,放在 networkpolicy/ 供后端与运维引用,不进 base kustomization 资源列表。
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: sandbox-deny-all
+  namespace: __SANDBOX_NAMESPACE__  # 占位:后端创建沙箱时替换为实际命名空间名。
+  labels:
+    app.kubernetes.io/part-of: chaimir
+    chaimir.io/sandbox: "true"
+spec:
+  # 默认拒绝该命名空间所有 Pod 的全部进出流量。
+  podSelector: {}
+  policyTypes: ["Ingress", "Egress"]
+# 无 ingress/egress 规则 = 完全隔离。
+# 同一沙箱 Pod 组内容器走 localhost(同 Pod)无需放行;
+# 跨 Pod 的链组网/工具访问由后端按实验需要追加精确放行策略(白名单),
+# 受控出网(如 forked 漏洞题取链上状态)经专用代理白名单(见 docs M2 安全)。

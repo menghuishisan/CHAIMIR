@@ -1,0 +1,72 @@
+# prod-school overlay:私有化单校(k3s),关平台层,单实例中间件随平台交付。
+# 依据 docs/总-部署架构设计.md §一/§四/§五/§十:
+#   单租户(tenant_id 恒定)、无平台管理员、k3s + 单实例中间件、离线镜像包。
+#   私有化 overlay:去掉 /platform 入口、平台级定时任务,初始化脚本建首个学校管理员。
+#
+# 密钥:私有化用 secretGenerator 从本地 secret.env(交付时由运维填入,被 .gitignore 忽略)。
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../base
+
+# 单实例中间件随平台一起部署(校内无托管,k3s 单机全套)。
+components:
+  - ../../components/middleware
+
+# 私有化密钥由交付运维填入本地 secret.env。
+# 生成两份(命名空间隔离):chaimir-system 给应用,chaimir-data 给中间件。同源,单一来源。
+secretGenerator:
+  - name: chaimir-secret
+    namespace: chaimir-system
+    envs:
+      - secret.env
+  - name: chaimir-data-secret
+    namespace: chaimir-data
+    envs:
+      - secret.env
+
+# 镜像来自校内 Harbor(离线导入),版本随平台版本固定。
+images:
+  - name: chaimir/backend
+    newName: harbor.school.local/service/backend
+    newTag: "1.0.0"
+  - name: chaimir/frontend
+    newName: harbor.school.local/service/frontend
+    newTag: "1.0.0"
+  - name: chaimir/migrate
+    newName: harbor.school.local/service/migrate
+    newTag: "1.0.0"
+
+# 私有化形态:school 单租户 + 关平台层。
+configMapGenerator:
+  - name: chaimir-config
+    namespace: chaimir-system
+    behavior: merge
+    literals:
+      - DEPLOY_MODE=school
+      - PLATFORM_LAYER_ENABLED=false
+      - SCHOOL_TENANT_ID=1001
+      - LOG_LEVEL=info
+      - PG_SSLMODE=disable
+
+patches:
+  # 关平台层:删除平台级定时任务(镜像 GC 等带 chaimir.io/platform-level 标签)。
+  - target:
+      kind: CronJob
+      labelSelector: "chaimir.io/platform-level=true"
+    patch: |-
+      $patch: delete
+      apiVersion: batch/v1
+      kind: CronJob
+      metadata:
+        name: chaimir-image-gc
+        namespace: chaimir-system
+  # 校内域名(私有化按校配置)。
+  - target:
+      kind: Ingress
+      name: chaimir
+    patch: |-
+      - op: replace
+        path: /spec/rules/0/host
+        value: chaimir.school.local

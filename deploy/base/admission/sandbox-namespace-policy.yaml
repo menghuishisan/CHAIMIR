@@ -1,0 +1,51 @@
+# 动态沙箱命名空间准入策略。
+# 依据 docs/总-部署架构设计.md §二/§九:后端 ServiceAccount 只能操作 sbx-*/judge-*/battle-* 动态命名空间。
+# Kubernetes RBAC 无法用通配符限制 namespace 名称,因此用 ValidatingAdmissionPolicy 在准入层兜底。
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: chaimir-sandbox-namespace-boundary
+  labels:
+    app.kubernetes.io/part-of: chaimir
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        operations: ["CREATE", "UPDATE", "DELETE"]
+        resources: ["namespaces"]
+  validations:
+    - expression: >
+        !(
+          request.userInfo.username == 'system:serviceaccount:chaimir-system:chaimir-backend'
+        ) ||
+        (
+          object.metadata.name.startsWith('sbx-') ||
+          object.metadata.name.startsWith('judge-') ||
+          object.metadata.name.startsWith('battle-')
+        )
+      message: "Chaimir 后端只能管理 sbx-/judge-/battle- 前缀的动态沙箱命名空间。"
+    - expression: >
+        !(
+          request.userInfo.username == 'system:serviceaccount:chaimir-system:chaimir-backend' &&
+          request.operation in ['CREATE', 'UPDATE']
+        ) ||
+        (
+          has(object.metadata.labels) &&
+          object.metadata.labels['app.kubernetes.io/part-of'] == 'chaimir' &&
+          object.metadata.labels['chaimir.io/sandbox'] == 'true' &&
+          object.metadata.labels['chaimir.io/managed-by'] == 'chaimir-backend'
+        )
+      message: "Chaimir 动态沙箱命名空间必须带平台所有权标签。"
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: chaimir-sandbox-namespace-boundary
+  labels:
+    app.kubernetes.io/part-of: chaimir
+spec:
+  policyName: chaimir-sandbox-namespace-boundary
+  validationActions: ["Deny"]

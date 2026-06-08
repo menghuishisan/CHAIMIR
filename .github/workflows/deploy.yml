@@ -1,0 +1,54 @@
+# 部署流水线:main→自动部署 staging;打 tag→人工审批→部署 prod-saas。
+# 依据 docs/总-部署架构设计.md §六:
+#   main 分支 → 自动部署 staging;打 tag → 人工审批 → 部署 prod-saas;
+#   私有化 → 生成离线镜像包 + 部署清单交付(见 deploy/Makefile / scripts,目录5)。
+name: deploy
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  # main 分支:自动部署 staging。
+  deploy-staging:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: staging  # GitHub Environment(可配审批/保护规则)。
+    steps:
+      - uses: actions/checkout@v4
+      - name: 配置 kubeconfig(staging)
+        run: |
+          mkdir -p ~/.kube
+          echo "${{ secrets.KUBECONFIG_STAGING }}" > ~/.kube/config
+      - name: 应用 staging overlay
+        run: |
+          # 用提交 SHA 作为镜像 tag,确保部署与构建一致。
+          cd deploy/overlays/staging
+          kubectl apply -k .
+          kubectl -n chaimir-system set image deployment/chaimir-backend \
+            server=${{ secrets.HARBOR_REGISTRY }}/service/backend:${{ github.sha }}
+          kubectl -n chaimir-system rollout status deployment/chaimir-backend --timeout=300s
+
+  # 打 tag:人工审批后部署 prod-saas。
+  deploy-prod-saas:
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    environment: prod-saas  # 该 Environment 配置必需审批人(人工审批门禁)。
+    steps:
+      - uses: actions/checkout@v4
+      - name: 配置 kubeconfig(prod-saas)
+        run: |
+          mkdir -p ~/.kube
+          echo "${{ secrets.KUBECONFIG_PROD_SAAS }}" > ~/.kube/config
+      - name: 应用 prod-saas overlay(按 tag 版本)
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          cd deploy/overlays/prod-saas
+          kubectl apply -k .
+          kubectl -n chaimir-system set image deployment/chaimir-backend \
+            server=${{ secrets.HARBOR_REGISTRY }}/service/backend:${version}
+          kubectl -n chaimir-system rollout status deployment/chaimir-backend --timeout=600s

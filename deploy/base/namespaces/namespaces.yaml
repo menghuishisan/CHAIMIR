@@ -1,0 +1,50 @@
+# 静态命名空间定义(平台常驻三命名空间)。
+# 依据 docs/总-部署架构设计.md §二:
+#   chaimir-system  后端单体 / 前端 / worker
+#   chaimir-data    PostgreSQL / Redis / MinIO / NATS(或外接托管)
+#   monitoring      Prometheus / Grafana(外接,M9 嵌入)
+# 动态命名空间 sbx-* / judge-* / battle-* 由后端 ServiceAccount 运行时按需创建/销毁,
+# 不在此处静态声明(见 base/rbac 与 base/networkpolicy 的动态模板)。
+#
+# PodSecurity Admission:
+#   chaimir-system 跑受信平台代码,但统一以最严档位运行 → enforce=restricted。
+#   chaimir-data 中间件(PG/MinIO 等)需要写卷/特定 uid → baseline。
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: chaimir-system
+  labels:
+    app.kubernetes.io/part-of: chaimir
+    chaimir.io/layer: system
+    # Pod Security:平台工作负载强制 restricted(non-root、禁特权、seccomp)。
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/enforce-version: latest
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: chaimir-data
+  labels:
+    app.kubernetes.io/part-of: chaimir
+    chaimir.io/layer: data
+    # 中间件需挂数据卷、部分镜像固定 uid,放宽到 baseline(仍禁特权/主机命名空间)。
+    pod-security.kubernetes.io/enforce: baseline
+    pod-security.kubernetes.io/enforce-version: latest
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: monitoring
+  labels:
+    app.kubernetes.io/part-of: chaimir
+    chaimir.io/layer: monitoring
+    # 监控为外接占位,Prometheus/Grafana 随 M9 落地;暂设 baseline。
+    pod-security.kubernetes.io/enforce: baseline
+    pod-security.kubernetes.io/enforce-version: latest
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted

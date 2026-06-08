@@ -1,0 +1,7 @@
+# ExternalSecret 配置 Component。
+# 职责:集中维护 chaimir-secret 所需密钥键集合;环境 overlay 只覆盖 SecretStore、刷新周期和远端前缀。
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+
+resources:
+  - external-secret.yaml

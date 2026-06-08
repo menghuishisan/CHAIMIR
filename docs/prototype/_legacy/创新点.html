@@ -1,0 +1,730 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Chaimir 区块链三位一体平台 - 修正版高保真原型</title>
+<script src="https://unpkg.com/lucide@latest"></script>
+<style>
+/* ============================================================
+   Chaimir 原版设计系统基线恢复（严格遵循 styles.css）
+   ============================================================ */
+:root {
+  --amber: #F59E0B;
+  --amber-600: #D97706;
+  --amber-400: #FBBF24;
+  --amber-100: #FEF3C7;
+  --amber-50: #FFFBEB;
+
+  /* 框架骨骼 */
+  --slate-900: #0F172A; /* 深色顶栏/Hero */
+  --slate-800: #1E293B;
+  --slate-700: #334155;
+  --slate-600: #475569;
+  --slate-500: #64748B;
+  --slate-400: #94A3B8;
+  --slate-300: #CBD5E1;
+  --slate-200: #E2E8F0;
+  --slate-100: #F1F5F9;
+  --slate-50: #F8FAFC;  /* 核心内容区背景 */
+  --white: #FFFFFF;
+
+  /* 语义色 */
+  --success: #10B981;
+  --warning: #F59E0B;
+  --danger: #EF4444;
+  --info: #3B82F6;
+  --purple: #8B5CF6;
+
+  /* 文字颜色（恢复浅色模式标准） */
+  --text-main: #1E293B;
+  --text-sub: #64748B;
+
+  --topnav-h: 56px;
+  --sidebar-w: 240px;
+  --radius: 10px;
+  --radius-sm: 6px;
+  --shadow: 0 1px 3px rgba(15,23,42,.08), 0 4px 12px rgba(15,23,42,.06);
+  --shadow-lg: 0 10px 40px rgba(15,23,42,.16);
+}
+
+* { margin: 0; padding: 0; box-box-sizing: border-box; box-sizing: border-box; }
+
+body {
+  font-family: -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  color: var(--text-main);
+  background: var(--slate-50); /* 全局回归干净的浅色/白底 */
+  font-size: 14px;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
+
+a { color: inherit; text-decoration: none; }
+button { font-family: inherit; cursor: pointer; border: none; background: none; }
+
+/* 核心视窗路由控制 */
+.view-container { display: none; min-height: 100vh; width: 100vw; }
+.view-container.active { display: block; }
+
+/* ---------- 通用排版 ---------- */
+.page-title { font-size: 22px; font-weight: 700; color: var(--text-main); }
+.page-sub { color: var(--text-sub); font-size: 13px; margin-top: 2px; }
+.muted { color: var(--text-sub); }
+.mono { font-family: "SF Mono", "Cascadia Code", Consolas, monospace; }
+
+.breadcrumb { font-size: 13px; color: var(--text-sub); margin-bottom: 4px; }
+.breadcrumb .sep { margin: 0 6px; color: var(--slate-300); }
+
+/* ---------- 按钮 ---------- */
+.btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 8px 16px; border-radius: var(--radius-sm);
+  font-size: 14px; font-weight: 500; transition: all .15s;
+  white-space: nowrap;
+}
+.btn-primary { background: var(--amber); color: #fff; }
+.btn-primary:hover { background: var(--amber-600); }
+.btn-outline { border: 1px solid var(--slate-200); color: var(--text-main); background: #fff; }
+.btn-outline:hover { border-color: var(--amber); color: var(--amber-600); }
+.btn-sm { padding: 5px 10px; font-size: 13px; }
+.btn-danger { background: var(--danger); color: #fff; }
+
+/* ---------- 卡片 ---------- */
+.card { background: #fff; border: 1px solid var(--slate-200); border-radius: var(--radius); box-shadow: var(--shadow); }
+.card-pad { padding: 18px; }
+.card-hover { transition: all .18s; cursor: pointer; }
+.card-hover:hover { border-color: var(--amber); transform: translateY(-2px); box-shadow: var(--shadow-lg); }
+
+/* ---------- 徽章 ---------- */
+.badge { display: inline-flex; align-items: center; gap: 4px; padding: 2px 9px; border-radius: 20px; font-size: 12px; font-weight: 500; }
+.badge-amber { background: var(--amber-100); color: var(--amber-600); }
+.badge-green { background: #D1FAE5; color: #047857; }
+.badge-red { background: #FEE2E2; color: #B91C1C; }
+.badge-blue { background: #DBEAFE; color: #1D4ED8; }
+.badge-gray { background: var(--slate-100); color: var(--slate-600); }
+.badge-purple { background: #EDE9FE; color: #6D28D9; }
+
+/* ---------- 表格 ---------- */
+.table { width: 100%; border-collapse: collapse; background: #fff; }
+.table th { text-align: left; padding: 11px 14px; font-size: 12px; font-weight: 600; color: var(--text-sub); background: var(--slate-50); border-bottom: 1px solid var(--slate-200); }
+.table td { padding: 12px 14px; border-bottom: 1px solid var(--slate-100); font-size: 13px; }
+.table tr:hover td { background: var(--amber-50); }
+
+/* ---------- 表单 ---------- */
+.field { margin-bottom: 16px; }
+.field label { display: block; font-size: 13px; font-weight: 500; margin-bottom: 6px; }
+.input, .select, .textarea {
+  width: 100%; padding: 9px 12px; border: 1px solid var(--slate-200);
+  border-radius: var(--radius-sm); font-size: 14px; font-family: inherit;
+  background: #fff; color: var(--text-main); transition: border-color .15s;
+}
+.input:focus, .select:focus, .textarea:focus { outline: none; border-color: var(--amber); }
+.input-icon { position: relative; }
+.input-icon .lucide { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); color: var(--slate-400); width: 18px; height: 18px; }
+.input-icon .input { padding-left: 38px; }
+
+/* ============================================================
+   统一导航外壳（顶栏深色，侧栏白底）
+   ============================================================ */
+.topnav { height: var(--topnav-h); background: var(--slate-900); color: #fff; display: flex; align-items: center; padding: 0 18px; gap: 16px; position: sticky; top: 0; z-index: 50; }
+.topnav .brand { display: flex; align-items: center; gap: 9px; font-weight: 700; font-size: 17px; }
+.topnav .brand .logo-mark { width: 28px; height: 28px; border-radius: 7px; background: linear-gradient(135deg, var(--amber), var(--amber-600)); display: grid; place-items: center; color: #fff; }
+.role-switch { display: flex; gap: 4px; background: var(--slate-800); padding: 3px; border-radius: 8px; }
+.role-switch button { padding: 4px 12px; border-radius: 6px; font-size: 12px; color: var(--slate-400); font-weight: 600; }
+.role-switch button.active { background: var(--amber); color: #fff; }
+
+.app-body { display: flex; min-height: calc(100vh - var(--topnav-h)); }
+.sidebar { width: var(--sidebar-w); background: #fff; border-right: 1px solid var(--slate-200); flex-shrink: 0; padding: 14px 10px; }
+.side-group { margin-bottom: 16px; }
+.side-group-title { font-size: 11px; font-weight: 600; color: var(--slate-400); text-transform: uppercase; letter-spacing: .04em; padding: 6px 12px; }
+.side-item { display: flex; align-items: center; gap: 11px; padding: 9px 12px; border-radius: 8px; color: var(--text-sub); font-size: 14px; font-weight: 500; margin-bottom: 2px; cursor: pointer; transition: all .15s; }
+.side-item:hover { background: var(--slate-100); color: var(--text-main); }
+.side-item.active { background: var(--amber-50); color: var(--amber-600); font-weight: 600; position: relative; }
+.side-item.active::before { content: ''; position: absolute; left: 0; top: 8px; bottom: 8px; width: 3px; background: var(--amber); border-radius: 0 3px 3px 0; }
+.content { flex: 1; padding: 24px 28px; overflow-y: auto; background: var(--slate-50); }
+.content-head { margin-bottom: 20px; display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+
+/* ============================================================
+   极简登录端（完全去除花哨动画与背景连线）
+   ============================================================ */
+.login-wrap { display: flex; min-height: 100vh; background: var(--slate-50); }
+.login-hero { flex: 1; background: var(--slate-900); display: flex; flex-direction: column; justify-content: center; padding: 60px; color: #fff; }
+.login-hero .hero-brand { font-size: 36px; font-weight: 800; }
+.login-hero .hero-tagline { font-size: 20px; color: var(--amber-400); font-weight: 600; margin-top: 10px; letter-spacing: .05em; }
+.login-hero .hero-desc { color: var(--slate-400); margin-top: 14px; font-size: 14px; max-width: 380px; line-height: 1.6; }
+.login-form-side { width: 460px; display: flex; align-items: center; justify-content: center; padding: 40px; background: #fff; border-left: 1px solid var(--slate-200); }
+.login-box { width: 100%; max-width: 340px; }
+
+/* ============================================================
+   沉浸工作台与四大优化创意（符合浅色/白底基线重构）
+   ============================================================ */
+.immersive { position: fixed; inset: 0; background: var(--slate-900); z-index: 100; display: none; flex-direction: column; }
+.immersive.open { display: flex; }
+.minibar { height: 44px; background: var(--slate-900); border-bottom: 1px solid var(--slate-700); display: flex; align-items: center; padding: 0 14px; gap: 14px; color: #fff; }
+.minibar .back { display: flex; align-items: center; gap: 6px; color: var(--slate-300); font-size: 13px; cursor: pointer; }
+.workspace { flex: 1; display: flex; overflow: hidden; background: #1e1e1e; }
+.ws-panel { width: 300px; background: #fff; border-right: 1px solid var(--slate-200); display: flex; flex-direction: column; color: var(--text-main); }
+.ws-panel-tabs { display: flex; border-bottom: 1px solid var(--slate-200); background: var(--slate-50); }
+.ws-panel-tab { flex: 1; padding: 10px; text-align: center; font-size: 12px; color: var(--text-sub); cursor: pointer; }
+.ws-panel-tab.active { color: var(--amber-600); font-weight: 600; border-bottom: 2px solid var(--amber); }
+.ws-panel-body { flex: 1; overflow-y: auto; padding: 14px; background: #fff; }
+.ws-main { flex: 1; display: flex; flex-direction: column; background: #1e1e1e; }
+.ws-toolbar { height: 38px; background: var(--slate-800); display: flex; align-items: center; padding: 0 10px; gap: 8px; }
+.ws-tool-tab { padding: 5px 12px; font-size: 12px; color: var(--slate-300); }
+.ws-tool-tab.active { background: #1e1e1e; color: #fff; font-weight: 600; }
+.ws-editor { flex: 1; padding: 16px; color: #d4d4d4; font-family: monospace; font-size: 13px; white-space: pre; background: #1e1e1e; overflow: auto; }
+.ws-terminal { height: 180px; background: #0c0c0c; color: #ccc; font-family: monospace; font-size: 12.5px; padding: 12px; border-top: 1px solid var(--slate-700); overflow-y: auto; }
+
+/* 创意 1：轻量型区块孵化器 */
+.incubator { display: flex; align-items: center; gap: 6px; background: #0c0c0c; padding: 3px 10px; border-radius: 4px; border: 1px solid var(--slate-700); margin-right: 8px; }
+.incubator-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--success); }
+.incubator-dot.mining { background: var(--amber); animation: pulse-dot 0.6s infinite alternate; }
+@keyframes pulse-dot { 0% { opacity: 0.4; } 100% { opacity: 1; } }
+
+/* 创意 2：白底整合型区块时空回溯器 */
+.timeline-box { padding: 12px 0; border-top: 1px solid var(--slate-100); margin-top: 14px; }
+.timeline-axis { position: relative; height: 4px; background: var(--slate-200); margin: 20px 0 10px; }
+.timeline-bar { position: absolute; left: 0; top: 0; height: 100%; background: var(--amber); width: 66%; transition: width 0.3s; }
+.timeline-dots { position: absolute; inset: -6px 0 0; display: flex; justify-content: space-between; }
+.timeline-dot-node { width: 16px; height: 16px; border-radius: 50%; background: var(--slate-400); border: 3px solid #fff; cursor: pointer; }
+.timeline-dot-node.active { background: var(--amber); box-shadow: 0 0 6px var(--amber); }
+.timeline-dot-node.passed { background: var(--success); }
+
+/* 创意 3：净化版教务进度雷达（融入白底监控区） */
+.radar-box { width: 100%; height: 160px; background: var(--slate-900); border-radius: var(--radius); position: relative; overflow: hidden; margin-bottom: 16px; }
+.radar-circle-line { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); border: 1px dashed rgba(245,158,11,0.15); border-radius: 50%; }
+.radar-blip { position: absolute; width: 8px; height: 8px; border-radius: 50%; box-shadow: 0 0 6px currentColor; }
+.radar-wave { position: absolute; inset: 0; background: rgba(245,158,11,0.06); display: none; }
+
+/* 创意 4：虚拟机代码双向追溯高亮 */
+.trace-block { background: var(--slate-50); border: 1px solid var(--slate-200); padding: 10px; border-radius: 6px; margin-top: 12px; display: none; }
+.trace-line-active { background: rgba(245,158,11,0.2); color: var(--amber-600); font-weight: 600; padding: 2px 4px; border-radius: 2px; }
+
+/* 仿真图网络节点布局 */
+.sim-stage-area { flex: 1; background: radial-gradient(circle, #1e293b, #0f172a); position: relative; }
+.sim-node-element { position: absolute; width: 64px; height: 64px; border-radius: 50%; background: var(--slate-800); border: 2px solid var(--slate-600); display: flex; flex-direction: column; align-items: center; justify-content: center; color: #fff; font-size: 11px; transform: translate(-50%, -50%); cursor: pointer; transition: all 0.2s; }
+.sim-node-element.active-byz { border-color: var(--danger); box-shadow: 0 0 12px rgba(239,68,68,0.5); }
+.sim-node-element.active-pri { border-color: var(--amber); box-shadow: 0 0 12px rgba(245,158,11,0.5); }
+
+/* 原型主舱引导 */
+.root-box { max-width: 1040px; margin: 0 auto; padding: 50px 20px; }
+.grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+</style>
+</head>
+<body>
+
+<div id="v-root" class="view-container active">
+  <div class="root-box">
+    <div style="text-align:center; margin-bottom:40px;">
+      <div style="width:48px; height:48px; background:var(--amber); border-radius:10px; display:inline-grid; place-items:center; color:#fff; margin-bottom:16px;"><i data-lucide="link-2"></i></div>
+      <h1 style="font-size:28px; font-weight:800; letter-spacing:-0.02em;">Chaimir 原型验证中枢</h1>
+      <p style="color:var(--slate-500); font-size:14px; margin-top:6px;">已恢复标准浅色内容区、去除了复杂SVG动画，并彻底剔除了Emoji表情。</p>
+    </div>
+    <div class="grid-3">
+      <div class="card card-pad card-hover" onclick="setView('v-login')">
+        <div style="color:var(--amber); margin-bottom:10px;"><i data-lucide="log-in"></i></div>
+        <div style="font-weight:700; font-size:15px; margin-bottom:4px;">1. 极简智能登录端</div>
+        <div style="font-size:12px; color:var(--slate-500);">移除花哨背景。支持手机号与学号无感智能识别表单联动。</div>
+      </div>
+      <div class="card card-pad card-hover" onclick="enterApp('student', 'courses')">
+        <div style="color:var(--info); margin-bottom:10px;"><i data-lucide="graduation-cap"></i></div>
+        <div style="font-weight:700; font-size:15px; margin-bottom:4px;">2. 学生端浅色中枢</div>
+        <div style="font-size:12px; color:var(--slate-500);">白底内容区。可体验【区块孵化器】与【时空回溯滑块】功能。</div>
+      </div>
+      <div class="card card-pad card-hover" onclick="enterApp('teacher', 't-monitor')">
+        <div style="color:var(--success); margin-bottom:10px;"><i data-lucide="presentation"></i></div>
+        <div style="font-weight:700; font-size:15px; margin-bottom:4px;">3. 教师端教务监控</div>
+        <div style="font-size:12px; color:var(--slate-500);">包含融入浅色模式的【教务进度雷达】与一键集中阻断。</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="v-login" class="view-container">
+  <div class="login-wrap">
+    <div class="login-hero">
+      <div class="hero-brand">Chaimir</div>
+      <div class="hero-tagline">构建 · 验证 · 对抗</div>
+      <p class="hero-desc">教学、实验、竞赛三位一体区块链教学闭环。沙箱、评测、题库共享同构底层技术底座。</p>
+    </div>
+    <div class="login-form-side">
+      <div class="login-box">
+        <h2 style="font-size:22px; font-weight:700; margin-bottom:4px;">欢迎回来</h2>
+        <p style="font-size:13px; color:var(--slate-400); margin-bottom:24px;">请输入手机号或学号登录系统</p>
+
+        <div class="field">
+          <label>账号凭证</label>
+          <div class="input-icon">
+            <i data-lucide="user"></i>
+            <input class="input" id="acctInput" placeholder="手机号 / 学号" oninput="detectLoginType()">
+          </div>
+          <div id="loginTipText" style="font-size:12px; color:var(--slate-400); margin-top:6px;">输入凭证系统将自动识别类型</div>
+        </div>
+
+        <div class="field" id="schoolSelectField" style="display:none;">
+          <label style="color:var(--amber-600)">所属学校 (学籍档案核验)</label>
+          <select class="select">
+            <option>北京大学</option>
+            <option>清华大学</option>
+            <option>浙江大学</option>
+          </select>
+        </div>
+
+        <div class="field">
+          <label>密码</label>
+          <div class="input-icon">
+            <i data-lucide="lock"></i>
+            <input class="input" type="password" placeholder="请输入密码">
+          </div>
+        </div>
+
+        <button class="btn btn-primary" style="width:100%; justify-content:center; padding:10px;" onclick="enterApp('student', 'courses')">登 录</button>
+        <button class="btn btn-outline" style="width:100%; justify-content:center; padding:10px; margin-top:10px;" onclick="setView('v-root')">返回原型导航</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="v-app" class="view-container">
+  <div class="topnav">
+    <div class="brand">
+      <div class="logo-mark"><i data-lucide="link-2" style="width:16px; height:16px;"></i></div>
+      Chaimir 平台
+    </div>
+    <div class="role-switch" id="roleSwitchCapsule"></div>
+    <div style="flex:1;"></div>
+    <button class="btn btn-outline btn-sm" onclick="setView('v-root')" style="color:#fff; border-color:var(--slate-700);"><i data-lucide="log-out"></i>退出</button>
+  </div>
+  <div class="app-body">
+    <aside class="sidebar" id="appSidebar"></aside>
+    <main class="content" id="appMainContent"></main>
+  </div>
+</div>
+
+<div id="m-experiment" class="immersive">
+  <div class="minibar">
+    <div class="back" onclick="closeImmersive('m-experiment')"><i data-lucide="arrow-left"></i> 返回课程</div>
+    <span style="font-weight:600; font-size:14px;">代码实验工作台</span>
+    <div style="flex:1;"></div>
+
+    <div class="incubator">
+      <div class="incubator-dot" id="cubeDot"></div>
+      <div class="incubator-text" id="cubeText">VM_Status: EVM_Hardhat Ready</div>
+    </div>
+
+    <button class="btn btn-primary btn-sm" onclick="runSandboxCode()"><i data-lucide="play" style="width:14px; height:14px;"></i> 运行并构建合约</button>
+  </div>
+  <div class="workspace">
+    <div class="ws-panel">
+      <div class="ws-panel-tabs"><div class="ws-panel-tab active">自动化评测检查点</div></div>
+      <div class="ws-panel-body" id="expCheckPointsWrapper" style="display:flex; flex-direction:column; gap:8px;"></div>
+    </div>
+    <div class="ws-main">
+      <div class="ws-toolbar"><div class="ws-tool-tab active">Miner.sol</div></div>
+      <div class="ws-editor">// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.20;
+
+contract Miner {
+    uint256 public difficulty = 4;
+    bytes32 public lastHash;
+
+    function mine(uint256 nonce) external {
+        bytes32 h = keccak256(abi.encodePacked(block.number, nonce));
+        require(uint256(h) < (2**256 - 1) >> difficulty, "not solved");
+        lastHash = h;
+        emit BlockMined(msg.sender, nonce, h);
+    }
+}</div>
+      <div class="ws-terminal" id="sandboxTerminal">
+$ npx hardhat test
+  自动化虚拟机沙箱环境连通测试成功...
+$ _</div>
+    </div>
+  </div>
+</div>
+
+<div id="m-battle" class="immersive">
+  <div class="minibar">
+    <div class="back" onclick="closeImmersive('m-battle')"><i data-lucide="arrow-left"></i> 返回竞赛</div>
+    <span style="font-weight:600; font-size:14px;">智能合约对抗赛复盘明细 #2847</span>
+  </div>
+  <div class="workspace" style="flex-direction:column;">
+    <div style="flex:1; display:flex;">
+      <div class="ws-panel card-pad" style="background:var(--slate-50);">
+        <div style="font-weight:700; font-size:13px; margin-bottom:10px; color:var(--slate-600);">攻防对抗拓扑结构</div>
+        <div class="card card-pad" style="border-color:var(--success); margin-bottom:10px; font-size:12px;">
+          <div style="font-weight:700; color:var(--success);">防守合约 (你)</div>
+          <div style="color:var(--slate-500); margin-top:2px;">内嵌 nonReentrant 状态锁</div>
+        </div>
+        <div class="card card-pad" style="border-color:var(--danger); font-size:12px;">
+          <div style="font-weight:700; color:var(--danger);">攻击脚本 (选手B)</div>
+          <div style="color:var(--slate-500); margin-top:2px;">触发 receive() 递归欺诈提取</div>
+        </div>
+      </div>
+      <div class="ws-main" style="background:#09090b; padding:16px; color:#a1a1aa; font-family:monospace; font-size:13px; overflow-y:auto;" id="battleLogsArea"></div>
+    </div>
+
+    <div class="card-pad" style="height:96px; background:#fff; border-top:1px solid var(--slate-200); padding:10px 24px;">
+      <div style="font-size:12px; font-weight:700; color:var(--slate-500);">区块高度状态调节轮 (拖拽或点击可倒带重组 VM 执行树)</div>
+      <div class="timeline-box">
+        <div class="timeline-axis">
+          <div class="timeline-bar" id="tBar"></div>
+          <div class="timeline-dots" id="tDots"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="m-sim" class="immersive">
+  <div class="minibar">
+    <div class="back" onclick="closeImmersive('m-sim')"><i data-lucide="arrow-left"></i> 返回实验</div>
+    <span style="font-weight:600; font-size:14px;">算法仿真：PBFT 拜占庭容错共识协议模型</span>
+    <div style="flex:1;"></div>
+    <button class="btn btn-primary btn-sm" onclick="runSimConsensus()"><i data-lucide="send"></i> 发起提案共识</button>
+  </div>
+  <div class="workspace">
+    <div class="ws-panel card-pad">
+      <div style="background:var(--amber-50); border-left:3px solid var(--amber); padding:10px; font-size:12px; color:var(--text-main); margin-bottom:12px; border-radius:0 6px 6px 0;">
+        核心引导：点击右侧拓扑网格中的任意副本节点，可将其转为拜占庭作恶节点，观察底层断言变化。
+      </div>
+
+      <div class="trace-block" id="vmCodeTraceBlock" style="display:block;">
+        <div style="font-size:12px; font-weight:700; color:var(--amber-600); margin-bottom:6px; display:flex; align-items:center; gap:4px;"><i data-lucide="code"></i> VM 底层合约断言追溯</div>
+        <pre style="font-family:monospace; font-size:11px; line-height:1.5; margin:0; color:var(--slate-600);" id="tracePreCode">
+1: contract PBFTValidator {
+2:   function checkPrepare(Msg m) {
+3:     require(verify(m.sig), "BadSig");
+4:     require(m.view == currentView, "WrongView");
+5:     votes[m.sender] = m.vote;
+6:   }
+7: }</pre>
+      </div>
+    </div>
+    <div class="sim-stage-area" id="simStage"></div>
+  </div>
+</div>
+
+<script>
+let role = 'student';
+let page = 'courses';
+
+const MENU_CONFIG = {
+  student: [
+    { group: "核心学习系统", items: [["courses", "book-open", "我的课程"], ["experiments", "flask-conical", "我的实验开发"], ["contests", "trophy", "我的竞赛对抗"]] }
+  ],
+  teacher: [
+    { group: "教务教学调度", items: [["t-monitor", "monitor", "学生实时监控"], ["t-courses", "settings", "实验编排管理"]] }
+  ]
+};
+
+const PAGES_TEMPLATES = {
+  courses: () => `
+    <div class="card card-pad" style="background:linear-gradient(120deg, var(--slate-900), var(--slate-800)); color:#fff; border:none; margin-bottom:16px;">
+      <div style="font-size:12px; color:var(--amber-400); font-weight:600;">继续上次学习</div>
+      <div style="font-size:18px; font-weight:700; margin-top:4px;">区块链原理与智能合约开发</div>
+      <div style="font-size:12px; color:var(--slate-400); margin-top:2px;">第三章 共识算法机制与重入漏洞防护 —— 已学习 62%</div>
+    </div>
+    <div style="font-weight:700; font-size:15px; margin-bottom:12px;">全修课程明细</div>
+    <div style="display:grid; grid-template-columns:repeat(2,1fr); gap:14px;">
+      <div class="card card-pad card-hover"><span class="badge badge-green">进行中</span><div style="font-weight:700; margin-top:8px;">区块链原理与智能合约</div><div style="font-size:12px; color:var(--slate-400); margin-top:4px;">主讲：李老师 · 128人选修</div></div>
+      <div class="card card-pad card-hover"><span class="badge badge-gray">未开始</span><div style="font-weight:700; margin-top:8px;">DeFi 协议开发与套利审计</div><div style="font-size:12px; color:var(--slate-400); margin-top:4px;">主讲：王老师 · 86人选修</div></div>
+    </div>
+  `,
+  experiments: () => `
+    <table class="table card">
+      <thead><tr><th>实验主题名称</th><th>覆盖链栈</th><th>状态</th><th>核心控制</th></tr></thead>
+      <tbody>
+        <tr><td style="font-weight:600;">PoW 挖矿与 51% 算力攻击</td><td><span class="badge badge-blue">EVM / Hardhat</span></td><td><span class="badge badge-amber">进行中</span></td><td><button class="btn btn-primary btn-sm" onclick="openImmersive('m-experiment', 'exp')">进入代码实验</button></td></tr>
+        <tr><td style="font-weight:600;">PBFT 拜占庭容错共识交互</td><td><span class="badge badge-purple">图形仿真包</span></td><td><span class="badge badge-green">已通过</span></td><td><button class="btn btn-outline btn-sm" onclick="openImmersive('m-sim', 'sim')">启动仿真机制</button></td></tr>
+      </tbody>
+    </table>
+  `,
+  contests: () => `
+    <div class="card card-pad" style="max-width:540px;">
+      <div style="display:flex; justify-content:space-between; align-items:center;"><span class="badge badge-red">智能合约攻防对抗</span><span class="badge badge-green">公开开放</span></div>
+      <div style="font-weight:700; font-size:16px; margin-top:10px;">「链上夺旗」智能合约金库重入渗透赛</div>
+      <p style="font-size:12px; color:var(--slate-500); margin-top:4px;">利用 Checks-Effects-Interactions 缺陷掏空金库获取 Flag 资产证明。</p>
+      <button class="btn btn-primary btn-sm" style="margin-top:12px;" onclick="openImmersive('m-battle', 'battle')">调取回放历史(时空回溯)</button>
+    </div>
+  `,
+  't-courses': () => `<div class="card card-pad" style="border-style:dashed; background:transparent; text-align:center; padding:30px 0; color:var(--slate-400);">可在此拖拽区块链底栈适配器与自动化测试用例断言组件进行实验编排</div>`,
+  't-monitor': () => {
+    // 教师监控页包含教务雷达组件（优化创意3）
+    setTimeout(() => { renderRadarBlips(); }, 20);
+    return `
+      <div class="radar-box">
+        <div class="radar-circle-line" style="width:50px; height:50px;"></div>
+        <div class="radar-circle-line" style="width:100px; height:100px;"></div>
+        <div class="radar-circle-line" style="width:150px; height:150px;"></div>
+        <div class="radar-wave" id="rWave"></div>
+        <div id="blipsLayer"></div>
+      </div>
+
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+        <div style="font-weight:700; font-size:14px;">班级学生实时状态矩阵</div>
+        <button class="btn btn-danger btn-sm" onclick="triggerGlobalFreeze()"><i data-lucide="octagon"></i> 一键集中阻断控制</button>
+      </div>
+      <div style="display:grid; grid-template-columns:repeat(4,1fr); gap:12px;" id="studentsCardGrid"></div>
+    `;
+  }
+};
+
+function setView(viewId) {
+  document.querySelectorAll('.view-container').forEach(v => v.classList.remove('active'));
+  document.getElementById(viewId).classList.add('active');
+  lucide.createIcons();
+}
+
+function enterApp(targetRole, targetPage) {
+  role = targetRole;
+  page = targetPage;
+  setView('v-app');
+  renderOuterShell();
+}
+
+function renderOuterShell() {
+  // 顶栏角色切换
+  document.getElementById('roleSwitchCapsule').innerHTML = Object.keys(MENU_CONFIG).map(k => `
+    <button class="${k === role ? 'active' : ''}" onclick="enterApp('${k}', '${MENU_CONFIG[k][0].items[0][0]}')">${k === 'student' ? '学生' : '教师'}端</button>
+  `).join('');
+
+  // 侧边栏白底渲染
+  const menuGroup = MENU_CONFIG[role];
+  document.getElementById('appSidebar').innerHTML = menuGroup.map(g => `
+    <div class="side-group">
+      <div class="side-group-title">${g.group}</div>
+      ${g.items.map(([id, icon, label]) => `
+        <div class="side-item ${id === page ? 'active' : ''}" onclick="clickSideNav('${id}')">
+          <i data-lucide="${icon}" style="width:16px; height:16px;"></i><span>${label}</span>
+        </div>
+      `).join('')}
+    </div>
+  `).join('');
+
+  // 主内容区白底渲染
+  document.getElementById('appMainContent').innerHTML = PAGES_TEMPLATES[page]();
+  lucide.createIcons();
+}
+
+function clickSideNav(pageId) {
+  page = pageId;
+  renderOuterShell();
+}
+
+// 登录识别逻辑（去花哨、去特效提示）
+function detectLoginType() {
+  const v = document.getElementById('acctInput').value.trim();
+  const txt = document.getElementById('loginTipText');
+  const school = document.getElementById('schoolSelectField');
+
+  if (/^1[3-9]\d{0,9}$/.test(v)) {
+    txt.textContent = v.length === 11 ? "匹配结果：识别为手机号登录主通道" : "输入手机号或学号系统将自动匹配路由";
+    txt.style.color = "var(--success)";
+    school.style.display = "none";
+  } else if (v.length >= 2 && !/^\d/.test(v)) {
+    txt.textContent = "匹配结果：识别为内部学号凭证，请选择所属学校";
+    txt.style.color = "var(--amber-600)";
+    school.style.display = "block";
+  } else {
+    txt.textContent = "输入凭证系统将自动识别类型";
+    txt.style.color = "var(--slate-400)";
+    school.style.display = "none";
+  }
+}
+
+// ============================================================
+// 创意 1：【区块孵化器】驱动代码
+// ============================================================
+let checkListData = [
+  { text: "沙箱运行时环境连通性探测", done: true },
+  { text: "智能合约核心计算逻辑与 Nonce 判定", done: false },
+  { text: "链上模拟算力分叉与断言审计验证", done: false }
+];
+
+function drawCheckPoints() {
+  document.getElementById('expCheckPointsWrapper').innerHTML = checkListData.map((c, i) => `
+    <div style="display:flex; align-items:start; gap:10px; padding:10px; border:1px solid ${c.done ? 'var(--success)' : 'var(--slate-200)'}; border-radius:6px; font-size:12px; background:#fff;">
+      <div style="width:16px; height:16px; border-radius:50%; background:${c.done ? 'var(--success)' : 'var(--slate-100)'}; color:${c.done ? '#fff' : 'var(--slate-500)'}; display:grid; place-items:center; font-size:10px; font-weight:700;">
+        ${c.done ? '✓' : i+1}
+      </div>
+      <div>
+        <div style="font-weight:700; color:${c.done ? 'var(--success)' : 'var(--text-main)'};">核心检查点 ${i+1}</div>
+        <div style="color:var(--slate-500); margin-top:2px;">${c.text}</div>
+      </div>
+    </div>
+  `).join('');
+}
+
+function runSandboxCode() {
+  const dot = document.getElementById('cubeDot');
+  const txt = document.getElementById('cubeText');
+  const term = document.getElementById('sandboxTerminal');
+
+  dot.classList.add('mining');
+  txt.textContent = "VM_Status: Compiling & Mining Block...";
+  term.innerHTML += `<br><span style="color:var(--amber)">[VM Status] 正在发起自动化虚拟机评测断言校验... 正在寻找哈希目标值...</span>`;
+  term.scrollTop = term.scrollHeight;
+
+  setTimeout(() => {
+    dot.classList.remove('mining');
+    txt.textContent = "VM_Status: Block #8921 Sealed. OK";
+    checkListData[1].done = true;
+    drawCheckPoints();
+    term.innerHTML += `<br><span style="color:var(--success)">[VM Status] 成功打包区块高度 #8921，目标合约检查点断言判定通过。</span>`;
+    term.scrollTop = term.scrollHeight;
+  }, 1400);
+}
+
+// ============================================================
+// 创意 2：【区块时空回溯器】驱动代码
+// ============================================================
+const TIMELINE_DATA = [
+  { h: 1024, log: "[高度 1024] 守方成功发布资产金库合约，开启 nonReentrant 资产重入防护排他锁。" },
+  { h: 1025, log: "[高度 1025] 攻方触发渗透函数，存入 1 ETH 并试图通过递归 receive 强行掏空合约账户。" },
+  { h: 1026, log: "[高度 1026] 互斥判定异常！虚拟机捕捉到资产状态重入深度越界，执行强行 Revert 拦截！" },
+  { h: 1027, log: "[高度 1027] 对局结束。攻方完全被拦截阻断，守方资产零损耗，天梯系统结算完毕。" }
+];
+let timelineIndex = 2;
+
+function drawTimelineView() {
+  document.getElementById('tDots').innerHTML = TIMELINE_DATA.map((t, i) => {
+    let statusClass = i === timelineIndex ? 'active' : (i < timelineIndex ? 'passed' : '');
+    return `<div class="timeline-dot-node ${statusClass}" onclick="moveTimeline(${i})"></div>`;
+  }).join('');
+  document.getElementById('tBar').style.width = (timelineIndex / (TIMELINE_DATA.length - 1)) * 100 + "%";
+
+  // 打印回溯日志明细
+  document.getElementById('battleLogsArea').innerHTML = TIMELINE_DATA.slice(0, timelineIndex + 1).map((t, i) => {
+    let lineStyle = i === 2 ? 'color:var(--amber)' : (i === 3 ? 'color:var(--success)' : 'color:#cbd5e1');
+    return `<div style="padding:4px 0; border-bottom:1px solid #1c1c1e; ${lineStyle}">${t.log}</div>`;
+  }).join('');
+  document.getElementById('battleLogsArea').innerHTML += `<br><span style="color:var(--slate-500)">[时空截面状态已锁定：虚拟机高度 #${TIMELINE_DATA[timelineIndex].h}] _</span>`;
+}
+
+function moveTimeline(idx) {
+  timelineIndex = idx;
+  drawTimelineView();
+}
+
+// ============================================================
+// 创意 3：【教务进度监测雷达】与一键集中暂停
+// ============================================================
+const RADAR_STUDENTS = [
+  { name: "张同学", x: 40, y: 45, type: "var(--success)", state: "通过点2" },
+  { name: "李同学", x: 65, y: 30, type: "var(--success)", state: "通过点2" },
+  { name: "王同学", x: 30, y: 70, type: "var(--warning)", state: "进度落后" },
+  { name: "陈同学", x: 75, y: 65, type: "var(--danger)", state: "编译报错" }
+];
+
+function renderRadarBlips() {
+  const layer = document.getElementById('blipsLayer');
+  if(!layer) return;
+  layer.innerHTML = RADAR_STUDENTS.map(s => `
+    <div class="radar-blip" style="top:${s.y}%; left:${s.x}%; color:${s.type};"></div>
+  `).join('');
+
+  // 渲染下方的卡片矩阵
+  document.getElementById('studentsCardGrid').innerHTML = RADAR_STUDENTS.map(s => `
+    <div class="card card-pad student-teacher-card" style="position:relative; border-color:${s.type === 'var(--danger)' ? 'var(--danger)' : 'var(--slate-200)'}">
+      <div style="display:flex; justify-content:space-between; align-items:center;">
+        <span style="font-weight:700; font-size:13px;">${s.name}</span>
+        <span class="badge" style="background:${s.type}15; color:${s.type}">${s.state}</span>
+      </div>
+      <div style="font-size:11px; color:var(--slate-400); margin-top:8px; background:var(--slate-50); padding:4px; border-radius:4px; font-family:monospace;">
+        VM Status: Streaming...
+      </div>
+      <div class="freeze-overlay" style="display:none; position:absolute; inset:0; background:rgba(255,255,255,0.92); border-radius:var(--radius); place-items:center; color:var(--amber-600); font-weight:700; font-size:12px; border:1px solid var(--amber);">
+        [ 集中讲授 阻断挂起 ]
+      </div>
+    </div>
+  `).join('');
+}
+
+function triggerGlobalFreeze() {
+  const wave = document.getElementById('rWave');
+  wave.style.display = "block";
+  setTimeout(() => { wave.style.display = "none"; }, 800);
+
+  document.querySelectorAll('.student-teacher-card').forEach(card => {
+    const overlay = card.querySelector('.freeze-overlay');
+    if(overlay) overlay.style.display = (overlay.style.display === 'grid') ? 'none' : 'grid';
+  });
+}
+
+// ============================================================
+// 创意 4：【双向代码追溯】与共识机制
+// ============================================================
+let simNodes = [
+  { id: 1, name: "N1", role: "主节点", mode: "active-pri", x: 50, y: 25 },
+  { id: 2, name: "N2", role: "副本", mode: "normal", x: 75, y: 55 },
+  { id: 3, name: "N3", role: "副本", mode: "normal", x: 50, y: 85 },
+  { id: 4, name: "N4", role: "副本", mode: "normal", x: 25, y: 55 }
+];
+
+function drawSimStage() {
+  const stage = document.getElementById('simStage');
+  if(!stage) return;
+  stage.innerHTML = "";
+  simNodes.forEach(n => {
+    const el = document.createElement('div');
+    el.className = `sim-node-element ${n.mode}`;
+    el.style.left = n.x + "%";
+    el.style.top = n.y + "%";
+    el.innerHTML = `<div>${n.name}</div><div style="font-size:9px; opacity:0.7;">${n.role}</div>`;
+    el.onclick = () => clickSimNode(n.id);
+    stage.appendChild(el);
+  });
+}
+
+function clickSimNode(id) {
+  if(id === 1) return; // 主节点不转换为拜占庭
+  const target = simNodes.find(n => n.id === id);
+  target.mode = (target.mode === 'active-byz') ? 'normal' : 'active-byz';
+  target.role = (target.mode === 'active-byz') ? '拜占庭作恶' : '副本';
+  drawSimStage();
+
+  const codeBox = document.getElementById('tracePreCode');
+  if(target.mode === 'active-byz') {
+    // 双向追溯：合约第三行断言高亮激活
+    codeBox.innerHTML = `
+1: contract PBFTValidator {
+2:   function checkPrepare(Msg m) {
+<span class="trace-line-active">3:     require(verify(m.sig), "BadSig"); // 截获虚拟机异常：签名异常校验不匹配</span>
+4:     require(m.view == currentView, "WrongView");
+5:     votes[m.sender] = m.vote;
+6:   }
+7: }`;
+  } else {
+    codeBox.innerHTML = `
+1: contract PBFTValidator {
+2:   function checkPrepare(Msg m) {
+3:     require(verify(m.sig), "BadSig");
+4:     require(m.view == currentView, "WrongView");
+5:     votes[m.sender] = m.vote;
+6:   }
+7: }`;
+  }
+}
+
+function runSimConsensus() {
+  // 简易共识流动模拟
+  clickSimNode(2); // 触发节点2作恶与代码追溯联动
+}
+
+// 沉浸调度机
+function openImmersive(panelId, type) {
+  document.getElementById(panelId).classList.add('open');
+  if(type === 'exp') drawCheckPoints();
+  if(type === 'battle') drawTimelineView();
+  if(type === 'sim') drawSimStage();
+  lucide.createIcons();
+}
+
+function closeImmersive(panelId) {
+  document.getElementById(panelId).classList.remove('remove');
+  document.getElementById(panelId).classList.remove('open');
+}
+</script>
+</body>
+</html>

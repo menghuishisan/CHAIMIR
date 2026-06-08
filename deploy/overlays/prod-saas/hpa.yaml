@@ -1,0 +1,84 @@
+# prod-saas HPA:后端单体按 CPU/内存伸缩;判题/撮合 worker 按队列积压伸缩。
+# 依据 docs/总-部署架构设计.md §三:后端无状态多副本水平扩展;worker 按队列积压伸缩。
+# 生产集群需预装 Prometheus Adapter,将 NATS/Redis 队列积压暴露为 external metric:
+#   chaimir_nats_queue_backlog{queue="judge|matchmaking"}。
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: chaimir-backend
+  namespace: chaimir-system
+  labels:
+    app.kubernetes.io/part-of: chaimir
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: chaimir-backend
+  minReplicas: 3
+  maxReplicas: 20
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: 80
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: chaimir-worker-judge
+  namespace: chaimir-system
+  labels:
+    app.kubernetes.io/part-of: chaimir
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: chaimir-worker-judge
+  minReplicas: 2
+  maxReplicas: 30
+  metrics:
+    - type: External
+      external:
+        metric:
+          name: chaimir_nats_queue_backlog
+          selector:
+            matchLabels:
+              queue: judge
+        target:
+          type: AverageValue
+          averageValue: "20"
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: chaimir-worker-matchmaking
+  namespace: chaimir-system
+  labels:
+    app.kubernetes.io/part-of: chaimir
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: chaimir-worker-matchmaking
+  minReplicas: 2
+  maxReplicas: 15
+  metrics:
+    - type: External
+      external:
+        metric:
+          name: chaimir_nats_queue_backlog
+          selector:
+            matchLabels:
+              queue: matchmaking
+        target:
+          type: AverageValue
+          averageValue: "10"

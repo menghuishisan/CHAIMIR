@@ -1,0 +1,22 @@
+# 平台镜像签名准入策略。
+# 依据 docs/总-部署架构设计.md §九:镜像签名校验门禁;未签名的平台镜像不得部署。
+# 集群需安装 Sigstore policy-controller;公钥由 chaimir-system/cosign-public-key Secret 注入。
+---
+apiVersion: policy.sigstore.dev/v1beta1
+kind: ClusterImagePolicy
+metadata:
+  name: chaimir-require-signed-images
+  labels:
+    app.kubernetes.io/part-of: chaimir
+spec:
+  images:
+    - glob: "harbor.chaimir.io/**"
+    - glob: "harbor.chaimir.local/**"
+    - glob: "harbor.school.local/**"
+  authorities:
+    - name: chaimir-cosign
+      key:
+        secretRef:
+          name: cosign-public-key
+          namespace: chaimir-system
+          key: cosign.pub

@@ -1,0 +1,13 @@
+# Keep repository text files stable across Windows/macOS/Linux.
+* text=auto eol=lf
+
+# Binary/media assets.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.pdf binary
+*.zip binary
+*.tar binary
+*.gz binary
