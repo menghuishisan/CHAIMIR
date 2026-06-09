@@ -4,10 +4,15 @@ FROM node:20-bookworm-slim
 LABEL org.opencontainers.image.title="infra/bridge-relayer"
 LABEL org.opencontainers.image.description="Chaimir bridge relayer toolchain image"
 
+WORKDIR /opt/chaimir/bridge-relayer
+COPY package.json package-lock.json /opt/chaimir/bridge-relayer/
 RUN useradd --system --create-home --home-dir /workspace chaimir \
-    && npm install -g @certusone/wormhole-sdk@0.10.18 \
+    && npm ci --omit=dev --ignore-scripts --no-audit --no-fund \
     && chown -R chaimir:chaimir /workspace
+
+COPY entrypoint.sh /usr/local/bin/chaimir-bridge-relayer-entrypoint
+RUN chmod +x /usr/local/bin/chaimir-bridge-relayer-entrypoint
 
 USER chaimir
 WORKDIR /workspace
-CMD ["node", "-e", "import('@certusone/wormhole-sdk').then(() => console.log('wormhole-sdk ready'))"]
+ENTRYPOINT ["/usr/local/bin/chaimir-bridge-relayer-entrypoint"]

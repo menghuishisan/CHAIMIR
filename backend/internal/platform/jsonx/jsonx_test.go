@@ -1,4 +1,4 @@
-// Package jsonx 测试 JSONB 边界序列化的统一语义。
+// jsonx_test 校验平台统一 JSON 边界语义,避免模块各自发明空值与解析规则。
 package jsonx
 
 import (
@@ -7,7 +7,7 @@ import (
 	"chaimir/pkg/apperr"
 )
 
-// TestObjectBytesUsesEmptyObjectForNil 确认 JSONB 对象空值统一保存为 {},避免各模块自定义空值语义。
+// TestObjectBytesUsesEmptyObjectForNil 确认 JSON 对象空值统一编码为 {}。
 func TestObjectBytesUsesEmptyObjectForNil(t *testing.T) {
 	data, err := ObjectBytes(nil, apperr.ErrBadRequest)
 	if err != nil {
@@ -18,7 +18,7 @@ func TestObjectBytesUsesEmptyObjectForNil(t *testing.T) {
 	}
 }
 
-// TestObjectBytesWrapsMarshalError 确认非法 JSON 对象不会被静默替换为空对象。
+// TestObjectBytesWrapsMarshalError 确认非法对象不会被静默替换为空对象。
 func TestObjectBytesWrapsMarshalError(t *testing.T) {
 	_, err := ObjectBytes(map[string]any{"bad": make(chan int)}, apperr.ErrBadRequest)
 	if err == nil {
@@ -29,15 +29,15 @@ func TestObjectBytesWrapsMarshalError(t *testing.T) {
 	}
 }
 
-// TestObjectMapFallsBackToEmptyObject 确认历史脏 JSONB 只在读取边界降级为空对象。
+// TestObjectMapFallsBackToEmptyObject 确认宽松读取在脏 JSON 下返回空对象。
 func TestObjectMapFallsBackToEmptyObject(t *testing.T) {
 	got := ObjectMap([]byte(`not-json`))
 	if len(got) != 0 {
-		t.Fatalf("invalid JSONB should become empty object, got %#v", got)
+		t.Fatalf("invalid JSON should become empty object, got %#v", got)
 	}
 }
 
-// TestObjectMapStrictReturnsDecodeError 确认安全配置等强校验场景不会把坏 JSON 降级为空对象。
+// TestObjectMapStrictReturnsDecodeError 确认强校验读取不会吞掉解析错误。
 func TestObjectMapStrictReturnsDecodeError(t *testing.T) {
 	_, err := ObjectMapStrict([]byte(`not-json`))
 	if err == nil {
@@ -45,23 +45,20 @@ func TestObjectMapStrictReturnsDecodeError(t *testing.T) {
 	}
 }
 
-// TestCloneObjectCreatesIndependentJSONCopy 确认 JSON 对象深拷贝不会共享嵌套结构。
+// TestCloneObjectCreatesIndependentJSONCopy 确认深拷贝不会共享嵌套结构。
 func TestCloneObjectCreatesIndependentJSONCopy(t *testing.T) {
 	source := map[string]any{"nested": map[string]any{"answer": "old"}}
-
 	clone := CloneObject(source)
 	clone["nested"].(map[string]any)["answer"] = "new"
-
 	if source["nested"].(map[string]any)["answer"] != "old" {
 		t.Fatalf("clone mutation leaked into source: %#v", source)
 	}
 }
 
-// TestEqualNormalizesJSONShapes 确认结构化比较统一处理可 JSON 化的 map/slice 值。
+// TestEqualNormalizesJSONShapes 确认结构化比较基于 JSON 语义而不是 map 顺序。
 func TestEqualNormalizesJSONShapes(t *testing.T) {
 	left := map[string]any{"step": "deploy", "values": []any{float64(1), "ok"}}
 	right := map[string]any{"values": []any{float64(1), "ok"}, "step": "deploy"}
-
 	if !Equal(left, right) {
 		t.Fatalf("expected semantically equal JSON values")
 	}
@@ -70,7 +67,7 @@ func TestEqualNormalizesJSONShapes(t *testing.T) {
 	}
 }
 
-// TestDecodeStrictReturnsDecodeError 确认服务端持久化流程读取坏 JSON 时不会静默降级。
+// TestDecodeStrictReturnsDecodeError 确认严格解码在坏 JSON 下返回错误。
 func TestDecodeStrictReturnsDecodeError(t *testing.T) {
 	var out map[string]any
 	if err := DecodeStrict([]byte(`not-json`), &out); err == nil {
@@ -78,7 +75,7 @@ func TestDecodeStrictReturnsDecodeError(t *testing.T) {
 	}
 }
 
-// TestScalarReadersNormalizeJSONValues 确认各模块读取 JSON 标量时复用同一套宽松边界规则。
+// TestScalarReadersNormalizeJSONValues 确认标量读取辅助使用统一宽松规则。
 func TestScalarReadersNormalizeJSONValues(t *testing.T) {
 	if got := StringFromAny(float64(12.5)); got != "12.5" {
 		t.Fatalf("StringFromAny(float64) = %q, want 12.5", got)
@@ -94,7 +91,7 @@ func TestScalarReadersNormalizeJSONValues(t *testing.T) {
 	}
 }
 
-// TestObjectAndPathReadersNormalizeJSONMaps 确认对象、数组、点路径和字符串映射读取逻辑不散落在业务模块。
+// TestObjectAndPathReadersNormalizeJSONMaps 确认对象、数组和点路径读取逻辑集中在平台层。
 func TestObjectAndPathReadersNormalizeJSONMaps(t *testing.T) {
 	root := map[string]any{"a": map[string]any{"b": float64(3)}, "headers": map[string]any{"X-Test": 1}}
 	if got := StringFromPath(root, "a.b"); got != "3" {

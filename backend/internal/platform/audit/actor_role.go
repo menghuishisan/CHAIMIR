@@ -1,4 +1,4 @@
-// Package audit 统一审计角色解析与条目构造,避免各模块各写一套 actor_role 逻辑。
+// audit 统一审计 actor_role 解析与条目构造,避免模块各自维护角色映射。
 package audit
 
 import (
@@ -10,28 +10,32 @@ import (
 )
 
 const (
-	// ActorRolePlatformAdmin 表示平台管理员角色。
+	// ActorRolePlatformAdmin 表示平台管理员。
 	ActorRolePlatformAdmin = contracts.RoleNumPlatformAdmin
-	// ActorRoleSchoolAdmin 表示学校管理员角色。
+	// ActorRoleSchoolAdmin 表示学校管理员。
 	ActorRoleSchoolAdmin = contracts.RoleNumSchoolAdmin
-	// ActorRoleTeacher 表示教师角色。
+	// ActorRoleTeacher 表示教师。
 	ActorRoleTeacher = contracts.RoleNumTeacher
-	// ActorRoleStudent 表示学生角色。
+	// ActorRoleStudent 表示学生。
 	ActorRoleStudent = contracts.RoleNumStudent
 	// ActorRoleSystem 表示已通过服务签名的内部系统任务。
 	ActorRoleSystem int16 = 5
 )
 
-// IdentityReader 是审计角色解析依赖的最小 M1 只读契约。
+// IdentityReader 是解析审计主体时所需的最小只读身份契约。
 type IdentityReader interface {
+	// GetAccount 读取指定账号摘要,用于确定审计角色。
 	GetAccount(context.Context, int64) (contracts.AccountInfo, error)
 }
 
-// ResolveActor 从服务端租户身份与 M1 账号摘要解析操作者 ID 与审计角色。
+// ResolveActor 从服务端身份上下文与账号摘要解析操作者 ID 和审计角色。
 func ResolveActor(ctx context.Context, identity IdentityReader) (int64, int16, error) {
 	id, ok := tenant.FromContext(ctx)
 	if !ok {
 		return 0, 0, apperr.ErrUnauthorized
+	}
+	if id.IsSystem {
+		return 0, ActorRoleSystem, nil
 	}
 	if id.IsPlatform {
 		return id.AccountID, ActorRolePlatformAdmin, nil
@@ -46,7 +50,7 @@ func ResolveActor(ctx context.Context, identity IdentityReader) (int64, int16, e
 	return id.AccountID, ActorRoleFromAccount(account), nil
 }
 
-// ActorRoleFromAccount 按 M1 角色优先级选择 audit_log.actor_role。
+// ActorRoleFromAccount 按统一优先级把账号摘要映射到审计角色。
 func ActorRoleFromAccount(account contracts.AccountInfo) int16 {
 	for _, code := range account.Roles {
 		if code == contracts.RoleSchoolAdmin {
@@ -64,7 +68,7 @@ func ActorRoleFromAccount(account contracts.AccountInfo) int16 {
 	return ActorRoleStudent
 }
 
-// BuildEntry 构造统一审计条目并完成 detail/IP/trace_id 映射。
+// BuildEntry 构造统一审计条目,补齐 detail、ip 和 trace_id 等横切字段。
 func BuildEntry(ctx context.Context, tenantID, actorID int64, actorRole int16, action, targetType string, targetID int64, detail map[string]any) (Entry, error) {
 	detailText, err := DetailString(detail)
 	if err != nil {

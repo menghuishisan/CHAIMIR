@@ -1,15 +1,15 @@
-// Package storage 的对象引用辅助统一解析持久化对象地址。
+// storage 提供统一对象引用解析,确保模块间传递的 minio:// 引用语义一致。
 package storage
 
 import "strings"
 
-// ObjectRef 表示一个 minio://bucket/key 对象引用。
+// ObjectRef 表示一条 minio://bucket/key 形式的对象引用。
 type ObjectRef struct {
 	Bucket string
 	Key    string
 }
 
-// ParseObjectRef 解析 minio://bucket/key 格式对象引用,并拒绝会混淆 bucket/key 边界的路径段。
+// ParseObjectRef 解析 minio://bucket/key 引用,并拒绝会混淆 bucket/key 边界的非法片段。
 func ParseObjectRef(raw string) (ObjectRef, error) {
 	if !strings.HasPrefix(raw, "minio://") {
 		return ObjectRef{}, ErrObjectRefInvalid
@@ -26,12 +26,12 @@ func ParseObjectRef(raw string) (ObjectRef, error) {
 	return ObjectRef{Bucket: bucket, Key: key}, nil
 }
 
-// safeObjectRefBucket 限制 bucket 为单段名称,防止引用里混入路径分隔。
+// safeObjectRefBucket 限制 bucket 为单段名称,禁止混入路径分隔。
 func safeObjectRefBucket(bucket string) bool {
 	return strings.TrimSpace(bucket) != "" && !strings.Contains(bucket, "/") && !strings.Contains(bucket, "\\")
 }
 
-// safeObjectRefKey 校验 key 的每一段,允许层级但不允许空段、当前目录或上级目录。
+// safeObjectRefKey 校验 key 的每一段,禁止空段、当前目录和上级目录。
 func safeObjectRefKey(key string) bool {
 	for _, seg := range strings.Split(key, "/") {
 		if strings.TrimSpace(seg) == "" || seg == "." || seg == ".." || strings.Contains(seg, "\\") {

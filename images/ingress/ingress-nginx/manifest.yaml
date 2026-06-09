@@ -1,4 +1,4 @@
-# 本文件声明 ingress/ingress-nginx 上游固定镜像的来源、配置、端口和生产门禁。
+﻿# 本文件声明 ingress/ingress-nginx 上游固定镜像的来源、配置、端口和生产门禁。
 schema_version: 1
 category: ingress
 name: ingress-nginx
@@ -22,7 +22,6 @@ upstream:
   image: ingress-nginx/controller
   version: "v1.13.0"
   digest_required: true
-  digest_lock_ref: images/locks/ingress/ingress-nginx.lock.yaml
   license: Apache-2.0
 private_delivery:
   offline_bundle: true

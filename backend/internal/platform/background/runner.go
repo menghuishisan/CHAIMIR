@@ -1,4 +1,4 @@
-// Package background 提供后台轮询任务的统一运行语义,不承载任何业务状态机。
+// background 提供后台轮询任务的统一运行语义,不承载任何业务状态机。
 package background
 
 import (
@@ -10,14 +10,14 @@ import (
 	"chaimir/pkg/logging"
 )
 
-// Task 描述一个可轮询后台任务。
+// Task 描述一个可按固定间隔运行的后台任务。
 type Task struct {
 	Name     string
 	Interval time.Duration
 	Run      func(context.Context) error
 }
 
-// Run 按固定间隔执行任务,单轮错误或 panic 只记录日志,不会杀死后台循环。
+// Run 按固定间隔执行后台任务,单轮错误或 panic 只记录日志而不终止整个循环。
 func Run(ctx context.Context, task Task) {
 	interval := task.Interval
 	if interval <= 0 {
@@ -25,6 +25,7 @@ func Run(ctx context.Context, task Task) {
 	}
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
+
 	for {
 		runOnce(ctx, task)
 		select {
@@ -35,7 +36,7 @@ func Run(ctx context.Context, task Task) {
 	}
 }
 
-// runOnce 包装单轮执行的错误和 panic 边界,统一后台任务失败处理。
+// runOnce 包装单轮执行的错误与 panic 边界,统一后台任务的失败处理方式。
 func runOnce(ctx context.Context, task Task) {
 	defer func() {
 		if v := recover(); v != nil {

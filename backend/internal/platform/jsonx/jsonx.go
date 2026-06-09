@@ -1,4 +1,4 @@
-// Package jsonx 统一平台 JSONB 边界处理,避免业务模块各自定义空值和错误语义。
+// jsonx 统一平台 JSON 序列化、宽松读取和强校验读取边界,避免业务模块各自处理 JSON 语义。
 package jsonx
 
 import (
@@ -10,7 +10,7 @@ import (
 	"chaimir/pkg/apperr"
 )
 
-// ObjectBytes 将 JSONB 对象序列化为数据库字节;nil 对象按空对象保存。
+// ObjectBytes 将 JSON 对象序列化为数据库字节;nil 对象统一按空对象保存。
 func ObjectBytes(v map[string]any, marshalErr *apperr.Error) ([]byte, error) {
 	if v == nil {
 		return []byte("{}"), nil
@@ -22,7 +22,7 @@ func ObjectBytes(v map[string]any, marshalErr *apperr.Error) ([]byte, error) {
 	return data, nil
 }
 
-// AnyBytes 将任意 JSONB 结构序列化为数据库字节;nil 按空对象保存。
+// AnyBytes 将任意 JSON 结构序列化为数据库字节;nil 统一按空对象保存。
 func AnyBytes(v any, marshalErr *apperr.Error) ([]byte, error) {
 	if v == nil {
 		return []byte("{}"), nil
@@ -34,7 +34,7 @@ func AnyBytes(v any, marshalErr *apperr.Error) ([]byte, error) {
 	return data, nil
 }
 
-// ObjectMap 将 JSONB 对象字节解析为 map;展示读取遇到历史脏数据时返回空对象。
+// ObjectMap 将 JSON 对象字节解析为 map;宽松读取场景遇到脏数据时返回空对象。
 func ObjectMap(data []byte) map[string]any {
 	var out map[string]any
 	if err := json.Unmarshal(data, &out); err != nil || out == nil {
@@ -43,7 +43,7 @@ func ObjectMap(data []byte) map[string]any {
 	return out
 }
 
-// ObjectMapStrict 将 JSONB 对象字节解析为 map;配置等强校验场景需要保留解析错误。
+// ObjectMapStrict 将 JSON 对象字节解析为 map;配置等强校验场景保留解析错误。
 func ObjectMapStrict(data []byte) (map[string]any, error) {
 	if len(data) == 0 {
 		return map[string]any{}, nil
@@ -58,7 +58,7 @@ func ObjectMapStrict(data []byte) (map[string]any, error) {
 	return out, nil
 }
 
-// Decode 解析 JSONB 到指定类型,读取边界失败时返回调用方提供的零值。
+// Decode 解析 JSON 到指定类型;宽松读取失败时返回调用方给定零值。
 func Decode[T any](data []byte, zeroValue T) T {
 	if len(data) == 0 {
 		return zeroValue
@@ -70,7 +70,7 @@ func Decode[T any](data []byte, zeroValue T) T {
 	return out
 }
 
-// DecodeStrict 解析 JSON 到调用方传入的目标;持久化流程需要把坏数据作为错误返回。
+// DecodeStrict 解析 JSON 到指定目标;强校验读取时直接返回错误。
 func DecodeStrict(data []byte, out any) error {
 	if len(data) == 0 {
 		return nil
@@ -78,7 +78,7 @@ func DecodeStrict(data []byte, out any) error {
 	return json.Unmarshal(data, out)
 }
 
-// CloneObject 对 JSON 对象做深拷贝;不可序列化或空对象按空对象返回,供业务克隆边界复用。
+// CloneObject 对 JSON 对象做深拷贝;不可序列化时返回空对象。
 func CloneObject(in map[string]any) map[string]any {
 	data, err := json.Marshal(in)
 	if err != nil {
@@ -87,12 +87,12 @@ func CloneObject(in map[string]any) map[string]any {
 	return ObjectMap(data)
 }
 
-// Equal 按 JSON 结构语义比较两个值,避免各模块各自用 JSON 往返归一化。
+// Equal 按 JSON 结构语义比较两个值,避免 map 顺序和具体实现影响比较结果。
 func Equal(left, right any) bool {
 	return reflect.DeepEqual(normalize(left), normalize(right))
 }
 
-// StringFromAny 把 JSON 标量转为字符串,非标量或空值返回空字符串。
+// StringFromAny 把 JSON 标量转换为字符串表示,无效值返回空字符串。
 func StringFromAny(v any) string {
 	switch val := v.(type) {
 	case string:
@@ -114,7 +114,7 @@ func StringFromAny(v any) string {
 	}
 }
 
-// IntFromAny 把 JSON 数字或数字字符串转为 int,无效值返回 0。
+// IntFromAny 把 JSON 数字或数字字符串转换为 int,无效值返回 0。
 func IntFromAny(v any) int {
 	switch val := v.(type) {
 	case float64:
@@ -140,7 +140,7 @@ func IntFromAny(v any) int {
 	}
 }
 
-// Int32FromAny 把 JSON 数字或数字字符串转为 int32,无效值返回调用方给出的默认值。
+// Int32FromAny 把 JSON 数字或数字字符串转换为 int32,无效值返回默认值。
 func Int32FromAny(v any, defaultValue int32) int32 {
 	if v == nil {
 		return defaultValue
@@ -169,7 +169,7 @@ func Int32FromAny(v any, defaultValue int32) int32 {
 	}
 }
 
-// Float64FromAny 把 JSON 数字或数字字符串转为 float64,无效值返回 0。
+// Float64FromAny 把 JSON 数字或数字字符串转换为 float64,无效值返回 0。
 func Float64FromAny(v any) float64 {
 	switch val := v.(type) {
 	case float64:
@@ -227,12 +227,12 @@ func ValueFromPath(root map[string]any, path string) any {
 	return current
 }
 
-// StringFromPath 按点路径读取 JSON 标量字符串值。
+// StringFromPath 按点路径读取 JSON 标量字符串。
 func StringFromPath(root map[string]any, path string) string {
 	return StringFromAny(ValueFromPath(root, path))
 }
 
-// StringMapFromAny 把 JSON 对象转为字符串映射,空键和空值会被丢弃。
+// StringMapFromAny 把 JSON 对象转换为字符串映射,空键和空值会被丢弃。
 func StringMapFromAny(v any) map[string]string {
 	raw, ok := v.(map[string]any)
 	if !ok {

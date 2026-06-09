@@ -1,0 +1,5 @@
+{
+  "dependencies": {
+    "@certusone/wormhole-sdk": "0.10.18"
+  }
+}

@@ -1,4 +1,4 @@
-// Package pgtypex 测试模块共享的 PostgreSQL 可空类型辅助函数。
+// pgtypex 测试模块共享的 PostgreSQL 可空类型辅助函数。
 package pgtypex
 
 import (

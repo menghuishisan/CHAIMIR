@@ -280,8 +280,14 @@ class ImageContractsTest(unittest.TestCase):
                         errors.append(f"{category}/{name}: upstream.{key} 缺失")
                 if upstream.get("digest_required") is not True:
                     errors.append(f"{category}/{name}: upstream.digest_required 必须为 true")
-                if not upstream.get("digest_lock_ref"):
-                    errors.append(f"{category}/{name}: upstream.digest_lock_ref 缺失")
+                digest = upstream.get("digest")
+                lock_ref = upstream.get("digest_lock_ref")
+                components = upstream.get("components", [])
+                has_locked_component = any(component.get("digest") for component in components if isinstance(component, dict))
+                if not digest and not lock_ref and not has_locked_component:
+                    errors.append(f"{category}/{name}: upstream 必须以内联 digest、digest_lock_ref 或组件 digest 锁定")
+                if digest and not re.fullmatch(r"sha256:[0-9a-f]{64}", str(digest)):
+                    errors.append(f"{category}/{name}: upstream.digest 格式非法")
                 delivery = manifest.get("private_delivery", {})
                 if delivery.get("offline_bundle") is not True:
                     errors.append(f"{category}/{name}: private_delivery.offline_bundle 必须为 true")
@@ -381,6 +387,52 @@ class ImageContractsTest(unittest.TestCase):
                     errors.append(f"{category}/{name}: secrets_required {env} runtime_value 必须为 secret-or-kms")
         self.assertEqual([], errors)
 
+    def test_sensitive_node_infra_services_are_self_authenticated_and_manifest_declared(self) -> None:
+        """持有私钥或内部链访问配置的 Node infra 服务必须自身鉴权且声明全部运行期变量。"""
+        errors: list[str] = []
+        sensitive_files = [
+            IMAGES_ROOT / "infra" / "wallet-backend" / "wallet-backend.mjs",
+            IMAGES_ROOT / "infra" / "paymaster" / "paymaster-service.mjs",
+            IMAGES_ROOT / "infra" / "event-listener" / "event-listener.mjs",
+        ]
+        for path in sensitive_files:
+            category, name = path.relative_to(IMAGES_ROOT).parts[:2]
+            source = path.read_text(encoding="utf-8")
+            if "verifyServiceSignature" not in source:
+                errors.append(f"{category}/{name}: 服务入口缺少自身 HMAC 鉴权")
+        self.assertEqual([], errors)
+
+    def test_source_environment_variables_are_manifest_declared(self) -> None:
+        """源码读取的 CHAIMIR_* 环境变量必须在镜像 manifest 和 deploy/config/chaimir.env 中声明。"""
+        errors: list[str] = []
+        deploy_keys = self.deploy_env_keys()
+        patterns = [
+            re.compile(r"process\.env\.([A-Z0-9_]+)"),
+            re.compile(r"os\.environ\.get\([\"']([A-Z0-9_]+)[\"']"),
+            re.compile(r"os\.environ\[[\"']([A-Z0-9_]+)[\"']\]"),
+            re.compile(r"getenv\([\"']([A-Z0-9_]+)[\"']"),
+        ]
+        for path in IMAGES_ROOT.rglob("*"):
+            if path.suffix not in {".py", ".mjs", ".js"} or "tests" in path.parts:
+                continue
+            relative = path.relative_to(IMAGES_ROOT)
+            category, name = relative.parts[:2]
+            manifest_path = IMAGES_ROOT / category / name / "manifest.yaml"
+            if not manifest_path.is_file():
+                continue
+            manifest = self.load_manifest(manifest_path)
+            manifest_envs = set(manifest.get("env_keys", {}).get("config", []))
+            manifest_envs.update(manifest.get("env_keys", {}).get("secret", []))
+            manifest_envs.update(secret.get("env") for secret in manifest.get("secrets_required", []) if secret.get("env"))
+            source = path.read_text(encoding="utf-8")
+            envs = {match.group(1) for pattern in patterns for match in pattern.finditer(source)}
+            for env in sorted(env for env in envs if env.startswith("CHAIMIR_")):
+                if env not in manifest_envs:
+                    errors.append(f"{category}/{name}: {relative} 读取 {env} 但 manifest 未声明")
+                if env not in deploy_keys:
+                    errors.append(f"{category}/{name}: {relative} 读取 {env} 但 deploy/config/chaimir.env 未声明")
+        self.assertEqual([], errors)
+
     def test_secret_env_keys_do_not_enter_configmap_env_file(self) -> None:
         """密钥变量名可以登记在 chaimir.env,但不得以 KEY= 形式进入 ConfigMap。"""
         secret_keys: set[str] = set()
@@ -439,6 +491,23 @@ class ImageContractsTest(unittest.TestCase):
             content = path.read_text(encoding="utf-8")
             if "set -eu" not in content and "set -euo pipefail" not in content:
                 errors.append(str(path.relative_to(IMAGES_ROOT)))
+        self.assertEqual([], errors)
+
+    def test_config_driven_infra_images_do_not_default_to_help_or_ready_placeholders(self) -> None:
+        """配置驱动的真实 infra 镜像不得用 help/ready 作为默认运行实现。"""
+        errors: list[str] = []
+        checked = [
+            IMAGES_ROOT / "infra" / "aa-bundler" / "Dockerfile",
+            IMAGES_ROOT / "infra" / "op-stack" / "Dockerfile",
+            IMAGES_ROOT / "infra" / "bridge-relayer" / "Dockerfile",
+            IMAGES_ROOT / "infra" / "zk-prover" / "Dockerfile",
+        ]
+        for path in checked:
+            content = path.read_text(encoding="utf-8")
+            if re.search(r'CMD\s+\[.*--help|console\.log\(["\'].*ready', content, re.IGNORECASE):
+                errors.append(f"{path.relative_to(IMAGES_ROOT)}: 默认入口仍是 help/ready 占位")
+            if "ENTRYPOINT" not in content:
+                errors.append(f"{path.relative_to(IMAGES_ROOT)}: 缺少显式 ENTRYPOINT")
         self.assertEqual([], errors)
 
     def test_python_sources_follow_image_runtime_contract(self) -> None:
@@ -513,6 +582,19 @@ class ImageContractsTest(unittest.TestCase):
                 stripped = line.strip()
                 if any(pattern.search(stripped) for pattern in sensitive_patterns):
                     errors.append(f"{path.relative_to(IMAGES_ROOT)}: {stripped}")
+        self.assertEqual([], errors)
+
+    def test_node_dependencies_are_lockfile_driven(self) -> None:
+        """Node 依赖必须通过 package-lock.json 与 npm ci 安装,禁止构建时无锁解析。"""
+        errors: list[str] = []
+        for path in IMAGES_ROOT.rglob("Dockerfile"):
+            content = path.read_text(encoding="utf-8")
+            if re.search(r"\bnpm\s+install\b", content):
+                errors.append(f"{path.relative_to(IMAGES_ROOT)}: 禁止 npm install,必须使用 npm ci + package-lock.json")
+            if "npm ci" in content:
+                image_dir = path.parent
+                if not (image_dir / "package.json").is_file() or not (image_dir / "package-lock.json").is_file():
+                    errors.append(f"{path.relative_to(IMAGES_ROOT)}: npm ci 缺少 package.json 或 package-lock.json")
         self.assertEqual([], errors)
 
     def test_every_manifest_has_health_or_command_selftest(self) -> None:
@@ -668,6 +750,28 @@ class ImageContractsTest(unittest.TestCase):
                         )
                 if category in {"service", "judger", "init", "sidecar"}:
                     errors.append(f"{category}/{name}: 敏感分类不允许学生入口")
+        self.assertEqual([], errors)
+
+    def test_runtime_images_with_wide_rpc_flags_declare_m2_controls(self) -> None:
+        """运行时若开放宽 RPC 监听或危险 RPC 标志,manifest 必须声明 M2 强制控制项。"""
+        errors: list[str] = []
+        required_controls = {
+            "network_policy_deny_all",
+            "platform_authenticated_proxy",
+            "no_direct_student_shell_to_rpc_admin",
+            "m2_port_allowlist",
+        }
+        for name in ("evm-geth", "evm-besu", "substrate", "bitcoin"):
+            manifest = self.load_manifest(IMAGES_ROOT / "runtime" / name / "manifest.yaml")
+            exposure = manifest.get("rpc_exposure", {})
+            controls = set(exposure.get("required_controls", []))
+            if exposure.get("bind_all_interfaces") is not True:
+                errors.append(f"runtime/{name}: rpc_exposure.bind_all_interfaces 必须为 true")
+            if not exposure.get("reason"):
+                errors.append(f"runtime/{name}: rpc_exposure.reason 缺失")
+            missing = sorted(required_controls - controls)
+            if missing:
+                errors.append(f"runtime/{name}: rpc_exposure.required_controls 缺少 {missing}")
         self.assertEqual([], errors)
 
     def test_ports_are_unique_and_local_defaults_do_not_collide(self) -> None:

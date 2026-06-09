@@ -1,4 +1,4 @@
-// Package audit 测试审计详情序列化边界,保证各模块不各自定义 JSON 语义。
+// audit_test 校验审计详情序列化边界,避免模块各自定义 JSON 语义。
 package audit
 
 import (

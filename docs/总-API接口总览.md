@@ -118,7 +118,7 @@
 - `/internal/stats`、`/students/{id}/contest-achievements` `[内部]`。
 
 ### M9 管理后台 `/api/v1/admin`
-- `/platform/dashboard`、`/platform/statistics`、`/platform/tenants`、`/platform/applications/*`:平台看板/审核 `[平台管理员]`。
+- `/platform/dashboard`、`/platform/statistics`、`/platform/tenants`、`/platform/applications`:平台看板/审核状态聚合视图 `[平台管理员]`。
 - `/school/dashboard`、`/school/statistics`:学校看板。
 - `/audit`、`/audit/export`:统一审计查询中心(查 M1 audit_log)。
 - `/configs/*`、`/alert-rules`、`/alert-events/*`:配置/告警。
@@ -134,7 +134,7 @@
 
 ### M11 成绩中心 `/api/v1/grade-center`
 - `/level-configs`、`/semesters`:等级映射/学期。
-- `/reviews/*`:成绩审核(approve 锁定/unlock 解锁);锁状态由 M11 自管,M6 不反向查询 M11。
+- `/reviews/*`:成绩审核(approve 锁定/unlock 解锁);审核流程在 M11,单课程写保护投影由 M6 自管。
 - `/students/{id}/grades`、`/gpa`、`/recompute`:GPA 聚合(只读 M6)。
 - `/appeals/*`:申诉(accept 走解锁→改 M6→重算→重锁)。
 - `/warnings/*`:学业预警。
@@ -150,6 +150,6 @@
 | 交作业 | M6 取 M5 题面 → 学生提交 → M3 判(取 M5 full)→ 回写 M6 → 计成绩 |
 | 解题赛 | M8 起 M2 环境 → 提交 → M3 判 → 更新排行 → M10 推送 |
 | 对抗赛 | M8 提交参战物 → 撮合起 M2 对局沙箱 → M3 判 → ELO + replay → M10 推天梯 |
-| 成绩聚合 | M6 单课程成绩 → M11 只读聚合 GPA → 审核锁定 → 申诉解锁改 M6 重算重锁 |
+| 成绩聚合 | M6 单课程成绩/锁定投影 → M11 只读聚合 GPA → 审核状态流转 → 申诉解锁改 M6 → M11 重算重锁 |
 | 漏洞出题 | M8 外部源 → 分级 → 预验证 → M5 system-import 固化 → 竞赛引用 |
 | 通知 | 模块发事件/调 M10 send → 渲染模板 → 站内信 + M10 push 红点 |

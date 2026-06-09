@@ -1,4 +1,4 @@
-# 本文件声明 middleware/redis 上游固定镜像的来源、配置、端口、数据卷和生产门禁。
+﻿# 本文件声明 middleware/redis 上游固定镜像的来源、配置、端口、数据卷和生产门禁。
 schema_version: 1
 category: middleware
 name: redis
@@ -22,7 +22,6 @@ upstream:
   image: redis
   version: "7.4-alpine"
   digest_required: true
-  digest_lock_ref: images/locks/middleware/redis.lock.yaml
   license: BSD-3-Clause
 private_delivery:
   offline_bundle: true

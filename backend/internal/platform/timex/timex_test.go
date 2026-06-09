@@ -1,4 +1,4 @@
-// Package timex 测试平台时间边界,确保数据库和 API 时间不会受容器本地时区影响。
+// timex_test 校验平台统一时间入口的 UTC 与数据库边界语义。
 package timex
 
 import (
@@ -9,7 +9,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-// TestFromTimestamptzNormalizesToUTC 验证 PostgreSQL timestamptz 输出统一为 UTC。
+// TestFromTimestamptzNormalizesToUTC 确认数据库时间输出统一归一到 UTC。
 func TestFromTimestamptzNormalizesToUTC(t *testing.T) {
 	shanghai := time.FixedZone("Asia/Shanghai", 8*60*60)
 	got := FromTimestamptz(pgtype.Timestamptz{
@@ -34,7 +34,7 @@ func TestFromTimestamptzNormalizesToUTC(t *testing.T) {
 	}
 }
 
-// TestOptionalBoundariesPreserveEmptyValues 验证空值在数据库边界不被误标记为有效时间。
+// TestOptionalBoundariesPreserveEmptyValues 确认可空时间在数据库边界不会被误写为有效值。
 func TestOptionalBoundariesPreserveEmptyValues(t *testing.T) {
 	if got := Timestamptz(time.Time{}); got.Valid {
 		t.Fatal("zero time must remain invalid when writing optional timestamptz")
@@ -47,7 +47,7 @@ func TestOptionalBoundariesPreserveEmptyValues(t *testing.T) {
 	}
 }
 
-// TestNowReturnsUTC 验证平台当前时间入口不会继承容器本地时区。
+// TestNowReturnsUTC 确认统一当前时间入口不会泄露容器本地时区。
 func TestNowReturnsUTC(t *testing.T) {
 	if got := Now(); got.Location() != time.UTC {
 		t.Fatalf("expected UTC location, got %s", got.Location())

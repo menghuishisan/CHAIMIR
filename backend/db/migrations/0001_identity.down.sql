@@ -1,0 +1,17 @@
+DROP TABLE IF EXISTS audit_log;
+DROP TABLE IF EXISTS import_batch;
+DROP TABLE IF EXISTS import_preview;
+DROP TABLE IF EXISTS sso_config;
+DROP TABLE IF EXISTS activation_code;
+DROP TABLE IF EXISTS sms_code;
+DROP TABLE IF EXISTS auth_session;
+DROP TABLE IF EXISTS account_profile;
+DROP TABLE IF EXISTS account_role;
+DROP TABLE IF EXISTS account;
+DROP TABLE IF EXISTS class;
+DROP TABLE IF EXISTS major;
+DROP TABLE IF EXISTS department;
+DROP TABLE IF EXISTS tenant_application;
+DROP TABLE IF EXISTS tenant;
+DROP TABLE IF EXISTS platform_auth_session;
+DROP TABLE IF EXISTS platform_admin;

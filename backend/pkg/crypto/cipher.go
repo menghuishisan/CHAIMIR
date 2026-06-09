@@ -1,22 +1,20 @@
-// AES-256-GCM 对称加密(手机号等敏感字段密文存储)。
-// 密钥由 APP_ENCRYPTION_KEY 注入(须 32 字节)。
+// crypto 对称加密:提供 AES-256-GCM,用于手机号等敏感字段密文存储。
 package crypto
 
 import (
 	"crypto/aes"
 	"crypto/cipher"
-	"crypto/rand"
 	"encoding/base64"
 	"errors"
 	"fmt"
 )
 
-// Cipher 封装 AES-GCM 加解密。
+// Cipher 封装 AES-GCM 所需的 AEAD 实例。
 type Cipher struct {
 	gcm cipher.AEAD
 }
 
-// NewCipher 用 32 字节密钥构造 AES-256-GCM;长度不符即报错(边界校验)。
+// NewCipher 用 32 字节密钥构造 AES-256-GCM;长度不符即报错。
 func NewCipher(key []byte) (*Cipher, error) {
 	if len(key) != 32 {
 		return nil, fmt.Errorf("加密密钥须为 32 字节(AES-256),实际 %d", len(key))
@@ -34,9 +32,12 @@ func NewCipher(key []byte) (*Cipher, error) {
 
 // Encrypt 加密明文,输出 nonce 前置的密文。
 func (c *Cipher) Encrypt(plaintext []byte) ([]byte, error) {
-	nonce := make([]byte, c.gcm.NonceSize())
-	if _, err := rand.Read(nonce); err != nil {
-		return nil, fmt.Errorf("生成 nonce 失败: %w", err)
+	if c == nil || c.gcm == nil {
+		return nil, fmt.Errorf("加密器尚未初始化")
+	}
+	nonce, err := RandomBytes(c.gcm.NonceSize())
+	if err != nil {
+		return nil, err
 	}
 	return c.gcm.Seal(nonce, nonce, plaintext, nil), nil
 }
@@ -52,6 +53,9 @@ func (c *Cipher) EncryptString(plaintext string) (string, error) {
 
 // Decrypt 解密 nonce 前置的密文。
 func (c *Cipher) Decrypt(data []byte) ([]byte, error) {
+	if c == nil || c.gcm == nil {
+		return nil, fmt.Errorf("加密器尚未初始化")
+	}
 	ns := c.gcm.NonceSize()
 	if len(data) < ns {
 		return nil, errors.New("密文长度非法")

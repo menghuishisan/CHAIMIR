@@ -6,9 +6,12 @@ LABEL org.opencontainers.image.description="Chaimir Ganache lightweight EVM runt
 
 ARG GANACHE_VERSION=7.9.2
 
+COPY package.json package-lock.json /opt/chaimir/evm-ganache/
 RUN groupadd --system chaimir \
     && useradd --system --gid chaimir --home-dir /workspace --create-home chaimir \
-    && npm install -g "ganache@${GANACHE_VERSION}" \
+    && cd /opt/chaimir/evm-ganache \
+    && npm ci --omit=dev --ignore-scripts --no-audit --no-fund \
+    && ln -s /opt/chaimir/evm-ganache/node_modules/.bin/ganache /usr/local/bin/ganache \
     && mkdir -p /runtime-state \
     && chown -R chaimir:chaimir /workspace /runtime-state
 

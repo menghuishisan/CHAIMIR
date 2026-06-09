@@ -1,147 +1,477 @@
-// M1 SSO 认证服务:CAS 与 LDAP 登录、名单匹配、Token 签发。
+// identity service_sso 文件实现 CAS/LDAP 配置校验和 SSO 入口安全边界。
 package identity
 
 import (
 	"context"
+	"crypto/tls"
+	"encoding/base64"
+	"encoding/xml"
 	"fmt"
+	"io"
+	"net/http"
+	"net/url"
 	"strings"
+	"time"
 
 	"chaimir/internal/contracts"
-	"chaimir/internal/platform/audit"
 	"chaimir/internal/platform/jsonx"
+	"chaimir/internal/platform/netx"
+	"chaimir/internal/platform/timex"
 	"chaimir/pkg/apperr"
+	ldap "github.com/go-ldap/ldap/v3"
 )
 
-// BuildSsoLoginURL 读取租户 CAS 配置并生成登录跳转地址。
-func (s *Service) BuildSsoLoginURL(ctx context.Context, tenantCode, serviceURL string) (string, error) {
-	tenantID, err := s.tenantIDByCode(ctx, tenantCode)
+// casServiceResponse 描述 CAS serviceValidate 成功响应中身份模块需要的字段。
+type casServiceResponse struct {
+	XMLName xml.Name `xml:"serviceResponse"`
+	Success *struct {
+		User string `xml:"user"`
+	} `xml:"authenticationSuccess"`
+	Failure *struct {
+		Code string `xml:"code,attr"`
+		Text string `xml:",chardata"`
+	} `xml:"authenticationFailure"`
+}
+
+// UpsertSSOConfig 保存 CAS/LDAP 配置,校验外部端点避免 SSRF 和明文 LDAP。
+func (s *Service) UpsertSSOConfig(ctx context.Context, req SSOConfigRequest) (SSOConfig, error) {
+	id, err := requireTenantRole(ctx, s, contracts.RoleSchoolAdmin)
+	if err != nil {
+		return SSOConfig{}, err
+	}
+	if err := s.validateSSOConfig(req); err != nil {
+		return SSOConfig{}, err
+	}
+	// 配置入库前先处理敏感字段,避免 LDAP 绑定密码以明文进入 JSON 配置。
+	configData, err := s.secureSSOConfig(req)
+	if err != nil {
+		return SSOConfig{}, err
+	}
+	raw, err := jsonx.ObjectBytes(configData, apperr.ErrIdentitySSOConfigInvalid)
+	if err != nil {
+		return SSOConfig{}, err
+	}
+	var out SSOConfig
+	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
+		row, err := tx.UpsertSSOConfig(ctx, UpsertSSOInput{ID: s.ids.Generate(), TenantID: id.TenantID, Type: req.Type, Config: raw, MatchField: req.MatchField, Enabled: req.Enabled})
+		if err != nil {
+			return err
+		}
+		out = row
+		return nil
+	}); err != nil {
+		return SSOConfig{}, apperr.ErrInternal.WithCause(err)
+	}
+	if err := s.auditTenantOperation(ctx, id, "tenant.sso.update", "identity.sso_config", out.ID, map[string]any{"type": req.Type, "enabled": req.Enabled}); err != nil {
+		return SSOConfig{}, err
+	}
+	return out, nil
+}
+
+// CASLoginURL 生成 CAS 跳转地址,service origin 必须命中白名单。
+func (s *Service) CASLoginURL(ctx context.Context, tenantCode string, serviceURL string) (string, error) {
+	if err := ValidateTenantCode(tenantCode); err != nil {
+		return "", err
+	}
+	if !s.serviceOriginAllowed(serviceURL) {
+		return "", apperr.ErrIdentitySSOServiceOriginDenied
+	}
+	// 只读取已启用配置生成跳转地址,未启用租户不能暴露外部认证入口。
+	_, cfg, err := s.loadEnabledSSOConfig(ctx, tenantCode, SSOTypeCAS)
 	if err != nil {
 		return "", err
 	}
-	cfg, typ, _, err := s.loadSsoConfig(ctx, tenantID)
+	data, err := jsonx.ObjectMapStrict(cfg.Config)
+	if err != nil {
+		return "", apperr.ErrInternal.WithCause(err)
+	}
+	server, _ := data["server_url"].(string)
+	return casLoginURL(server, serviceURL)
+}
+
+// CASCallback 校验 CAS Service Ticket 并按已导入名单签发租户 token。
+func (s *Service) CASCallback(ctx context.Context, tenantCode, ticket, serviceURL, device, ip string) (LoginResponse, error) {
+	if err := ValidateTenantCode(tenantCode); err != nil {
+		return LoginResponse{}, err
+	}
+	if strings.TrimSpace(ticket) == "" {
+		return LoginResponse{}, apperr.ErrIdentitySSOTicketInvalid
+	}
+	if !s.serviceOriginAllowed(serviceURL) {
+		return LoginResponse{}, apperr.ErrIdentitySSOServiceOriginDenied
+	}
+	tenantID, cfg, err := s.loadEnabledSSOConfig(ctx, tenantCode, SSOTypeCAS)
+	if err != nil {
+		return LoginResponse{}, err
+	}
+	username, err := s.validateCASTicket(ctx, cfg, strings.TrimSpace(ticket), serviceURL)
+	if err != nil {
+		return LoginResponse{}, err
+	}
+	// SSO 只验证身份,账号必须已由学校管理员导入,严禁回调时自动建号。
+	account, err := s.matchSSOAccount(ctx, tenantID, cfg.MatchField, username)
+	if err != nil {
+		return LoginResponse{}, err
+	}
+	var tenantSnapshot Tenant
+	if err := s.store.TenantTx(ctx, tenantID, func(ctx context.Context, tx TxStore) error {
+		t, err := tx.GetTenantByID(ctx, tenantID)
+		if err != nil {
+			return err
+		}
+		tenantSnapshot = t
+		return nil
+	}); err != nil {
+		return LoginResponse{}, apperr.ErrInternal.WithCause(err)
+	}
+	if err := EnsureTenantCanLogin(tenantSnapshot, timex.Now()); err != nil {
+		return LoginResponse{}, err
+	}
+	if err := EnsureAccountCanLogin(account, timex.Now()); err != nil {
+		return LoginResponse{}, err
+	}
+	return s.issueTenantLogin(ctx, account, device, ip)
+}
+
+// LDAPLogin 使用学校 LDAPS 配置完成目录绑定,再按已导入名单签发租户 token。
+func (s *Service) LDAPLogin(ctx context.Context, tenantCode string, req LDAPLoginRequest, device, ip string) (LoginResponse, error) {
+	if err := ValidateTenantCode(tenantCode); err != nil {
+		return LoginResponse{}, err
+	}
+	if strings.TrimSpace(req.Username) == "" || strings.TrimSpace(req.Password) == "" {
+		return LoginResponse{}, apperr.ErrIdentityInvalidCredentials
+	}
+	tenantID, cfg, err := s.loadEnabledSSOConfig(ctx, tenantCode, SSOTypeLDAP)
+	if err != nil {
+		return LoginResponse{}, err
+	}
+	matchValue, err := s.validateLDAPCredentials(ctx, cfg, strings.TrimSpace(req.Username), req.Password)
+	if err != nil {
+		return LoginResponse{}, err
+	}
+	// LDAP 与 CAS 统一名单匹配语义:目录认证成功也不能绕过本地已导入名单。
+	account, err := s.matchSSOAccount(ctx, tenantID, cfg.MatchField, matchValue)
+	if err != nil {
+		return LoginResponse{}, err
+	}
+	var tenantSnapshot Tenant
+	if err := s.store.TenantTx(ctx, tenantID, func(ctx context.Context, tx TxStore) error {
+		t, err := tx.GetTenantByID(ctx, tenantID)
+		if err != nil {
+			return err
+		}
+		tenantSnapshot = t
+		return nil
+	}); err != nil {
+		return LoginResponse{}, apperr.ErrInternal.WithCause(err)
+	}
+	if err := EnsureTenantCanLogin(tenantSnapshot, timex.Now()); err != nil {
+		return LoginResponse{}, err
+	}
+	if err := EnsureAccountCanLogin(account, timex.Now()); err != nil {
+		return LoginResponse{}, err
+	}
+	return s.issueTenantLogin(ctx, account, device, ip)
+}
+
+// validateSSOConfig 校验 SSO 配置的协议安全要求。
+func (s *Service) validateSSOConfig(req SSOConfigRequest) error {
+	if req.MatchField != SSOMatchNo && req.MatchField != SSOMatchPhone {
+		return apperr.ErrIdentitySSOMatchFieldInvalid
+	}
+	switch req.Type {
+	case SSOTypeCAS:
+		raw, _ := req.Config["server_url"].(string)
+		u, err := url.Parse(raw)
+		if err != nil || u.Scheme != "https" || u.Host == "" {
+			return apperr.ErrIdentitySSOCASServerInsecure
+		}
+		if _, err := netx.ValidatePublicHTTPURL(raw); err != nil {
+			return apperr.ErrIdentitySSOCASServerInsecure
+		}
+	case SSOTypeLDAP:
+		raw, _ := req.Config["url"].(string)
+		if _, err := netx.ValidatePublicLDAPSURL(raw); err != nil {
+			return apperr.ErrIdentityLDAPServerInsecure
+		}
+	default:
+		return apperr.ErrIdentitySSOTypeInvalid
+	}
+	return nil
+}
+
+// secureSSOConfig 在配置入库前加密 LDAP 绑定密码,避免敏感字段明文落库。
+func (s *Service) secureSSOConfig(req SSOConfigRequest) (map[string]any, error) {
+	out := make(map[string]any, len(req.Config))
+	for key, value := range req.Config {
+		out[key] = value
+	}
+	if req.Type != SSOTypeLDAP {
+		return out, nil
+	}
+	password := stringField(out, "bind_password")
+	if password == "" {
+		return nil, apperr.ErrIdentitySSOConfigInvalid
+	}
+	ciphertext, err := s.cipher.Encrypt([]byte(password))
+	if err != nil {
+		return nil, apperr.ErrIdentitySSOSecretInvalid.WithCause(err)
+	}
+	out["bind_password"] = "enc:" + base64.StdEncoding.EncodeToString(ciphertext)
+	return out, nil
+}
+
+// validateLDAPCredentials 通过 LDAPS 目录验证用户密码并读取名单匹配字段。
+func (s *Service) validateLDAPCredentials(ctx context.Context, cfg SSOConfig, username, password string) (string, error) {
+	data, err := ldapConfigFromJSON(cfg.Config)
 	if err != nil {
 		return "", err
 	}
-	if typ != SsoTypeCAS {
-		return "", apperr.ErrSsoUnavailable
-	}
-	redirectURL, err := buildCASLoginURL(cfg, serviceURL, s.ssoAllowedServiceOrigins)
+	bindPassword, err := s.decryptLDAPBindPassword(data.BindPassword)
 	if err != nil {
-		return "", apperr.ErrSsoUnavailable.WithCause(err)
+		return "", err
 	}
-	return redirectURL, nil
-}
-
-// LoginByCasCallback 校验 CAS ticket 后按名单匹配账号并签发 Token。
-func (s *Service) LoginByCasCallback(ctx context.Context, tenantCode, ticket, serviceURL, device, ip string) (*LoginResult, error) {
-	tenantID, err := s.tenantIDByCode(ctx, tenantCode)
+	resolvedURL, serverName, err := netx.PrivateResolvedURL(ctx, data.URL, "636")
 	if err != nil {
-		return nil, err
+		return "", apperr.ErrIdentityLDAPServerInsecure.WithCause(err)
 	}
-	cfg, typ, matchField, err := s.loadSsoConfig(ctx, tenantID)
+	conn, err := ldap.DialURL(resolvedURL, ldap.DialWithTLSConfig(&tls.Config{MinVersion: tls.VersionTLS12, ServerName: serverName}))
 	if err != nil {
-		return nil, err
+		return "", apperr.ErrIdentityInvalidCredentials.WithCause(err)
 	}
-	if typ != SsoTypeCAS {
-		return nil, apperr.ErrSsoUnavailable
+	defer conn.Close()
+	// 先使用学校配置的服务账号绑定,只用于目录查询,不代表本系统登录成功。
+	if err := conn.Bind(data.BindDN, bindPassword); err != nil {
+		return "", apperr.ErrIdentityInvalidCredentials.WithCause(err)
 	}
-	profile, err := validateCASTicket(cfg, ticket, serviceURL, s.ssoAllowedServiceOrigins, s.ssoNetworkTimeout)
+	// 用户名进入 LDAP filter 前必须转义,避免目录查询注入。
+	filter := strings.ReplaceAll(data.UserFilter, "{username}", ldap.EscapeFilter(username))
+	search := ldap.NewSearchRequest(
+		data.BaseDN,
+		ldap.ScopeWholeSubtree,
+		ldap.NeverDerefAliases,
+		2,
+		s.cfg.SSONetworkTimeoutSeconds,
+		false,
+		filter,
+		[]string{data.MatchAttribute},
+		nil,
+	)
+	result, err := conn.Search(search)
 	if err != nil {
-		return nil, apperr.ErrSsoLoginFailed.WithCause(err)
+		return "", apperr.ErrIdentityInvalidCredentials.WithCause(err)
 	}
-	matchValue := profile.Username
-	if attr := stringFromMap(cfg, "username_attribute"); attr != "" {
-		if vals := profile.Attributes[attr]; len(vals) > 0 && strings.TrimSpace(vals[0]) != "" {
-			matchValue = vals[0]
-		}
+	if len(result.Entries) != 1 {
+		return "", apperr.ErrIdentitySSOAccountNotMatched
 	}
-	return s.finishSsoLogin(ctx, tenantID, matchField, matchValue, device, ip)
-}
-
-// LoginByLDAP 校验 LDAP 账号密码后按名单匹配账号并签发 Token。
-func (s *Service) LoginByLDAP(ctx context.Context, tenantCode string, req LDAPLoginRequest, device, ip string) (*LoginResult, error) {
-	tenantID, err := s.tenantIDByCode(ctx, tenantCode)
-	if err != nil {
-		return nil, err
-	}
-	cfg, typ, matchField, err := s.loadSsoConfig(ctx, tenantID)
-	if err != nil {
-		return nil, err
-	}
-	if typ != SsoTypeLDAP {
-		return nil, apperr.ErrSsoUnavailable
-	}
-	profile, err := authenticateLDAP(ctx, cfg, req.Username, req.Password, s.ssoNetworkTimeout)
-	if err != nil {
-		return nil, apperr.ErrSsoLoginFailed.WithCause(err)
-	}
-	return s.finishSsoLogin(ctx, tenantID, matchField, profile.MatchValue, device, ip)
-}
-
-// loadSsoConfig 读取并解密启用的 SSO 配置。
-func (s *Service) loadSsoConfig(ctx context.Context, tenantID int64) (map[string]any, int16, int16, error) {
-	row, err := s.repo.getEnabledSsoConfig(ctx, tenantID)
-	if err != nil {
-		if ae, ok := apperr.As(err); ok {
-			return nil, 0, 0, ae
-		}
-		return nil, 0, 0, err
-	}
-	raw, err := jsonx.ObjectMapStrict(row.Config)
-	if err != nil {
-		return nil, 0, 0, apperr.ErrSsoConfigReadFailed.WithCause(err)
-	}
-	cfg, err := revealSsoConfig(s.cipher, raw)
-	if err != nil {
-		return nil, 0, 0, apperr.ErrSsoConfigReadFailed.WithCause(err)
-	}
-	return cfg, row.Type, row.MatchField, nil
-}
-
-// finishSsoLogin 根据匹配字段加载已导入账号,校验状态并签发租户账号 Token。
-func (s *Service) finishSsoLogin(ctx context.Context, tenantID int64, matchField int16, matchValue, device, ip string) (*LoginResult, error) {
-	matchValue = strings.TrimSpace(matchValue)
+	// 目录命中后取配置指定的名单匹配字段,仍需后续匹配本地已导入账号。
+	userDN := result.Entries[0].DN
+	matchValue := strings.TrimSpace(result.Entries[0].GetAttributeValue(data.MatchAttribute))
 	if matchValue == "" {
-		return nil, apperr.ErrSsoNotInRoster
+		return "", apperr.ErrIdentitySSOAccountNotMatched
 	}
-	acc, err := s.loadSsoAccountByMatch(ctx, tenantID, matchField, matchValue)
-	if err != nil {
-		return nil, err
+	// 最后用用户 DN 和用户密码绑定,确认密码属于该目录账号本人。
+	if err := conn.Bind(userDN, password); err != nil {
+		return "", apperr.ErrIdentityInvalidCredentials.WithCause(err)
 	}
-	if acc.Status == AccountPending {
-		if err := s.activateSsoAccount(ctx, acc); err != nil {
-			return nil, err
-		}
-		acc.Status = AccountActive
-	} else if err := loginableStatus(acc.Status); err != nil {
-		return nil, err
-	}
-	return s.issueLogin(ctx, acc, device, ip, true)
+	return matchValue, nil
 }
 
-// activateSsoAccount 在 SSO 名单匹配成功后激活待激活账号,SSO 不自动创建账号。
-func (s *Service) activateSsoAccount(ctx context.Context, acc LoginAccountSnapshot) error {
-	entry, err := buildAccountAuditEntry(ctx, acc.TenantID, acc.ID, audit.ActorRoleFromAccount(contracts.AccountInfo{
-		BaseIdentity: acc.BaseIdentity,
-		Roles:        acc.Roles,
-	}), AuditActionAccountUpdate, AuditTargetAccount, acc.ID, map[string]any{
-		"fields": []string{"status"},
-		"source": "sso",
+// decryptLDAPBindPassword 解密 LDAP 绑定密码,拒绝历史或错误格式的明文配置。
+func (s *Service) decryptLDAPBindPassword(value string) (string, error) {
+	raw, ok := strings.CutPrefix(strings.TrimSpace(value), "enc:")
+	if !ok || raw == "" {
+		return "", apperr.ErrIdentitySSOSecretInvalid
+	}
+	ciphertext, err := base64.StdEncoding.DecodeString(raw)
+	if err != nil {
+		return "", apperr.ErrIdentitySSOSecretInvalid.WithCause(err)
+	}
+	plain, err := s.cipher.Decrypt(ciphertext)
+	if err != nil {
+		return "", apperr.ErrIdentitySSOSecretInvalid.WithCause(err)
+	}
+	return string(plain), nil
+}
+
+// ldapConfig 描述租户 LDAP 配置 JSON 中服务端使用的字段。
+type ldapConfig struct {
+	URL            string
+	BindDN         string
+	BindPassword   string
+	BaseDN         string
+	UserFilter     string
+	MatchAttribute string
+}
+
+// ldapConfigFromJSON 解析并校验 LDAP 配置字段,避免缺字段时发起不确定外部请求。
+func ldapConfigFromJSON(raw []byte) (ldapConfig, error) {
+	data, err := jsonx.ObjectMapStrict(raw)
+	if err != nil {
+		return ldapConfig{}, apperr.ErrIdentitySSOConfigInvalid.WithCause(err)
+	}
+	cfg := ldapConfig{
+		URL:            stringField(data, "url"),
+		BindDN:         stringField(data, "bind_dn"),
+		BindPassword:   stringField(data, "bind_password"),
+		BaseDN:         stringField(data, "base_dn"),
+		UserFilter:     stringField(data, "user_filter"),
+		MatchAttribute: stringField(data, "match_attribute"),
+	}
+	if cfg.URL == "" || cfg.BindDN == "" || cfg.BindPassword == "" || cfg.BaseDN == "" || cfg.UserFilter == "" || cfg.MatchAttribute == "" {
+		return ldapConfig{}, apperr.ErrIdentitySSOConfigInvalid
+	}
+	return cfg, nil
+}
+
+// stringField 从配置 JSON map 中读取字符串字段并去除空白。
+func stringField(data map[string]any, key string) string {
+	value, _ := data[key].(string)
+	return strings.TrimSpace(value)
+}
+
+// loadEnabledSSOConfig 读取租户启用中的指定 SSO 配置,避免 API 层碰数据库。
+func (s *Service) loadEnabledSSOConfig(ctx context.Context, tenantCode string, typ int16) (int64, SSOConfig, error) {
+	var tenantID int64
+	if err := s.store.PlatformTx(ctx, func(ctx context.Context, tx TxStore) error {
+		t, err := tx.GetTenantByCode(ctx, tenantCode)
+		if err != nil {
+			return err
+		}
+		tenantID = t.ID
+		return nil
+	}); err != nil {
+		return 0, SSOConfig{}, apperr.ErrIdentitySSONotEnabled
+	}
+	var cfg SSOConfig
+	if err := s.store.TenantTx(ctx, tenantID, func(ctx context.Context, tx TxStore) error {
+		row, err := tx.GetSSOConfig(ctx, tenantID, typ)
+		if err != nil {
+			return err
+		}
+		cfg = row
+		return nil
+	}); err != nil || !cfg.Enabled {
+		return 0, SSOConfig{}, apperr.ErrIdentitySSONotEnabled
+	}
+	return tenantID, cfg, nil
+}
+
+// validateCASTicket 通过 CAS serviceValidate 校验票据并返回 CAS 用户标识。
+func (s *Service) validateCASTicket(ctx context.Context, cfg SSOConfig, ticket, serviceURL string) (string, error) {
+	data, err := jsonx.ObjectMapStrict(cfg.Config)
+	if err != nil {
+		return "", apperr.ErrIdentitySSOResponseInvalid.WithCause(err)
+	}
+	server, _ := data["server_url"].(string)
+	endpoint, err := casValidateURL(server, ticket, serviceURL)
+	if err != nil {
+		return "", err
+	}
+	// CAS 校验请求使用统一公网受限 HTTP client,防止租户配置导致服务端访问内网。
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return "", apperr.ErrIdentitySSOInsecureConfig.WithCause(err)
+	}
+	client := netx.NewPublicHTTPClient(time.Duration(s.cfg.SSONetworkTimeoutSeconds) * time.Second)
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", apperr.ErrIdentitySSOTicketInvalid.WithCause(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return "", apperr.ErrIdentitySSOTicketInvalid
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return "", apperr.ErrIdentitySSOResponseInvalid.WithCause(err)
+	}
+	var parsed casServiceResponse
+	if err := xml.Unmarshal(body, &parsed); err != nil {
+		return "", apperr.ErrIdentitySSOResponseInvalid.WithCause(err)
+	}
+	if parsed.Success == nil || strings.TrimSpace(parsed.Success.User) == "" {
+		return "", apperr.ErrIdentitySSOTicketInvalid
+	}
+	return strings.TrimSpace(parsed.Success.User), nil
+}
+
+// casValidateURL 构造 CAS serviceValidate 地址,只允许 HTTPS CAS 服务端点。
+func casValidateURL(server, ticket, serviceURL string) (string, error) {
+	u, err := url.Parse(strings.TrimSpace(server))
+	if err != nil || u.Scheme != "https" || u.Host == "" {
+		return "", apperr.ErrIdentitySSOCASServerInsecure
+	}
+	u.Path = strings.TrimRight(u.Path, "/") + "/serviceValidate"
+	q := u.Query()
+	q.Set("ticket", ticket)
+	q.Set("service", serviceURL)
+	u.RawQuery = q.Encode()
+	return u.String(), nil
+}
+
+// casLoginURL 构造 CAS 登录跳转地址,显式拼接 /login 避免把用户带到 CAS 根路径。
+func casLoginURL(server, serviceURL string) (string, error) {
+	u, err := url.Parse(strings.TrimSpace(server))
+	if err != nil || u.Scheme != "https" || u.Host == "" {
+		return "", apperr.ErrIdentitySSOCASServerInsecure
+	}
+	u.Path = strings.TrimRight(u.Path, "/") + "/login"
+	q := u.Query()
+	q.Set("service", serviceURL)
+	u.RawQuery = q.Encode()
+	return u.String(), nil
+}
+
+// matchSSOAccount 按 SSO 配置的名单匹配字段查找已导入账号,未命中不得自动创建。
+func (s *Service) matchSSOAccount(ctx context.Context, tenantID int64, matchField int16, value string) (Account, error) {
+	var account Account
+	err := s.store.TenantTx(ctx, tenantID, func(ctx context.Context, tx TxStore) error {
+		switch matchField {
+		case SSOMatchNo:
+			row, err := tx.GetAccountByNo(ctx, strings.TrimSpace(value))
+			if err != nil {
+				return err
+			}
+			account = row
+		case SSOMatchPhone:
+			if err := ValidatePhone(value); err != nil {
+				return err
+			}
+			hash, err := s.phoneHash(value)
+			if err != nil {
+				return err
+			}
+			row, err := tx.GetAccountByPhoneHash(ctx, tenantID, hash)
+			if err != nil {
+				return err
+			}
+			account = row
+		default:
+			return apperr.ErrIdentitySSOMatchFieldInvalid
+		}
+		return nil
 	})
 	if err != nil {
-		return err
+		if _, ok := apperr.As(err); ok {
+			return Account{}, err
+		}
+		return Account{}, apperr.ErrIdentitySSOAccountNotMatched.WithCause(fmt.Errorf("match sso account: %w", err))
 	}
-	return s.repo.activateSsoAccountWithAudit(ctx, acc, buildAuditLogCreate(s.idgen.Generate(), entry))
+	return account, nil
 }
 
-// loadSsoAccountByMatch 按 SSO 配置的名单匹配字段加载账号。
-func (s *Service) loadSsoAccountByMatch(ctx context.Context, tenantID int64, matchField int16, matchValue string) (LoginAccountSnapshot, error) {
-	switch matchField {
-	case 1:
-		return s.repo.loadAccountByNo(ctx, tenantID, matchValue)
-	case 2:
-		return s.repo.loadAccountByPhone(ctx, tenantID, s.phoneHash(matchValue))
-	default:
-		return LoginAccountSnapshot{}, apperr.ErrSsoUnavailable.WithCause(fmt.Errorf("未知 SSO 匹配字段: %d", matchField))
+// serviceOriginAllowed 校验 CAS service 回调 origin 是否在部署白名单内。
+func (s *Service) serviceOriginAllowed(serviceURL string) bool {
+	u, err := url.Parse(serviceURL)
+	if err != nil || u.Scheme == "" || u.Host == "" {
+		return false
 	}
+	origin := u.Scheme + "://" + u.Host
+	for _, allowed := range s.cfg.SSOAllowedServiceOrigins {
+		if strings.EqualFold(strings.TrimSpace(allowed), origin) {
+			return true
+		}
+	}
+	return false
 }

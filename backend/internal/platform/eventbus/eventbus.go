@@ -1,25 +1,25 @@
-// Package eventbus 封装 NATS 事件总线,用于模块反向通信(解耦,杜绝循环依赖)。
-// 依据 docs/总-工程目录设计.md §3.1.1:低层通知高层走事件,不反向 import 业务模块。
+// eventbus 封装 NATS 事件总线,用于跨模块反向通知和解耦通信。
 package eventbus
 
 import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log/slog"
 	"time"
 
 	"chaimir/internal/platform/config"
 	"chaimir/pkg/apperr"
-	"chaimir/pkg/logging"
 
 	"github.com/nats-io/nats.go"
 )
 
-// Bus 是事件总线接口(便于测试替身与契约约束)。
+// Bus 定义事件总线的统一接口,便于装配和测试。
 type Bus interface {
+	// Publish 发布一条事件并等待 flush 确认。
 	Publish(ctx context.Context, subject string, payload any) error
+	// Subscribe 注册普通或队列组订阅。
 	Subscribe(subject, queue string, handler Handler) (Subscription, error)
+	// Close 关闭底层连接。
 	Close()
 }
 
@@ -27,7 +27,10 @@ type Bus interface {
 type Handler func(ctx context.Context, data []byte) error
 
 // Subscription 表示一个可取消的订阅。
-type Subscription interface{ Unsubscribe() error }
+type Subscription interface {
+	// Unsubscribe 取消订阅。
+	Unsubscribe() error
+}
 
 type natsConn interface {
 	Publish(subj string, data []byte) error
@@ -37,9 +40,12 @@ type natsConn interface {
 	Close()
 }
 
-type natsBus struct{ conn natsConn }
+type natsBus struct {
+	conn natsConn
+	cfg  deliveryConfig
+}
 
-// New 连接真实 NATS 事件总线;运行期缺 bus 必须启动失败,不能注入空实现。
+// New 建立真实 NATS 连接;事件总线不可用时启动失败。
 func New(cfg config.NATSConfig) (Bus, error) {
 	opts := []nats.Option{
 		nats.Name("chaimir-backend"),
@@ -53,10 +59,10 @@ func New(cfg config.NATSConfig) (Bus, error) {
 	if err != nil {
 		return nil, fmt.Errorf("连接 NATS 失败: %w", err)
 	}
-	return &natsBus{conn: conn}, nil
+	return &natsBus{conn: conn, cfg: newDeliveryConfig(cfg)}, nil
 }
 
-// Publish 序列化并发布事件,Flush 确认用于避免关键业务事件只停留在客户端缓冲。
+// Publish 序列化并发布事件,同时等待 flush 确认,避免只停留在客户端缓冲。
 func (b *natsBus) Publish(ctx context.Context, subject string, payload any) error {
 	data, err := json.Marshal(payload)
 	if err != nil {
@@ -71,25 +77,17 @@ func (b *natsBus) Publish(ctx context.Context, subject string, payload any) erro
 	return nil
 }
 
-// Decode 统一解码事件 payload,失败时保留调用模块传入的错误码和 JSON 原始错误链。
-func Decode(data []byte, dst any, invalid *apperr.Error) error {
-	if err := json.Unmarshal(data, dst); err != nil {
-		return invalid.WithCause(err)
-	}
-	return nil
-}
-
-// Subscribe 注册普通订阅或队列组订阅,统一把处理失败写入结构化日志。
+// Subscribe 注册订阅,并把处理失败统一写入结构化日志。
 func (b *natsBus) Subscribe(subject, queue string, handler Handler) (Subscription, error) {
 	cb := func(msg *nats.Msg) {
-		dispatchMessage(context.Background(), subject, queue, msg.Data, handler)
+		b.handleMessage(context.Background(), subject, queue, msg.Data, handler)
 	}
 	var (
 		sub *nats.Subscription
 		err error
 	)
 	if queue != "" {
-		sub, err = b.conn.QueueSubscribe(subject, queue, cb) // 队列组负载均衡。
+		sub, err = b.conn.QueueSubscribe(subject, queue, cb)
 	} else {
 		sub, err = b.conn.Subscribe(subject, cb)
 	}
@@ -99,15 +97,15 @@ func (b *natsBus) Subscribe(subject, queue string, handler Handler) (Subscriptio
 	return sub, nil
 }
 
-// Close 关闭底层 NATS 连接,供后端进程退出时释放资源。
-func (b *natsBus) Close() { b.conn.Close() }
+// Close 关闭底层 NATS 连接。
+func (b *natsBus) Close() {
+	b.conn.Close()
+}
 
-// dispatchMessage 执行订阅处理并记录失败上下文,避免事件处理错误静默丢弃。
-func dispatchMessage(ctx context.Context, subject, queue string, data []byte, handler Handler) {
-	if err := handler(ctx, data); err != nil {
-		logging.ErrorContext(ctx, "事件处理失败", err.Error(),
-			slog.String("subject", subject),
-			slog.String("queue", queue),
-		)
+// Decode 统一解码事件 payload,保留调用方给出的模块错误语义。
+func Decode(data []byte, dst any, invalid *apperr.Error) error {
+	if err := json.Unmarshal(data, dst); err != nil {
+		return invalid.WithCause(err)
 	}
+	return nil
 }

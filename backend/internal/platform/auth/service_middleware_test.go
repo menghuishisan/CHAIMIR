@@ -1,4 +1,4 @@
-// Package auth 的服务鉴权测试:确认内部 HTTP 接口只接受带租户、来源、trace 与 HMAC 签名的服务请求。
+// auth_test 校验内部服务 HMAC 鉴权和平台级角色守卫的统一边界。
 package auth
 
 import (
@@ -57,6 +57,35 @@ func TestServiceMiddlewareInjectsTenantIdentity(t *testing.T) {
 	}
 }
 
+// TestServiceMiddlewareMarksInternalServiceIdentity 确认内部服务签名上下文会被明确标记为系统任务身份。
+func TestServiceMiddlewareMarksInternalServiceIdentity(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	mgr := NewManager(serviceAuthTestConfig())
+	engine := gin.New()
+	engine.Use(response.TraceMiddleware())
+	engine.POST("/internal/action", mgr.ServiceMiddleware(), func(c *gin.Context) {
+		id, ok := tenant.FromContext(c.Request.Context())
+		if !ok {
+			c.String(http.StatusInternalServerError, "missing identity")
+			return
+		}
+		if !id.IsSystem {
+			c.String(http.StatusInternalServerError, "missing system identity")
+			return
+		}
+		c.String(http.StatusOK, "system")
+	})
+	req := httptest.NewRequest(http.MethodPost, "/internal/action", strings.NewReader(`{}`))
+	signServiceRequest(req, "test-service-hmac-key", "judge", "10", "experiment:2026:instance:55", "trace-1", currentServiceTimestamp())
+	rec := httptest.NewRecorder()
+
+	engine.ServeHTTP(rec, req)
+
+	if rec.Body.String() != "system" {
+		t.Fatalf("expected internal service identity, got %s", rec.Body.String())
+	}
+}
+
 // TestServiceMiddlewareRejectsExpiredTimestamp 确认服务签名不能被长期重放。
 func TestServiceMiddlewareRejectsExpiredTimestamp(t *testing.T) {
 	gin.SetMode(gin.TestMode)
@@ -73,7 +102,7 @@ func TestServiceMiddlewareRejectsExpiredTimestamp(t *testing.T) {
 	}
 }
 
-// TestServiceMiddlewareInjectsSourceRef 确认签名绑定的来源标识进入上下文,供内部接口做归属校验。
+// TestServiceMiddlewareInjectsSourceRef 确认签名绑定的来源标识进入上下文。
 func TestServiceMiddlewareInjectsSourceRef(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	mgr := NewManager(serviceAuthTestConfig())
@@ -98,7 +127,7 @@ func TestServiceMiddlewareInjectsSourceRef(t *testing.T) {
 	}
 }
 
-// TestValidSourceRefRequiresDocumentedShape 确认服务来源标识统一遵循四段全称规范。
+// TestValidSourceRefRequiresDocumentedShape 确认服务来源标识统一遵循四段规范。
 func TestValidSourceRefRequiresDocumentedShape(t *testing.T) {
 	valid := []string{
 		"exp:2026:instance:55",
@@ -126,7 +155,7 @@ func TestValidSourceRefRequiresDocumentedShape(t *testing.T) {
 	}
 }
 
-// TestServiceSourceRefAuthorizedOnlyRestrictsSignedServiceContext 确认内部服务签名上下文才触发 source_ref 归属限制。
+// TestServiceSourceRefAuthorizedOnlyRestrictsSignedServiceContext 确认只有服务签名上下文才触发来源约束。
 func TestServiceSourceRefAuthorizedOnlyRestrictsSignedServiceContext(t *testing.T) {
 	ctx := context.Background()
 	if !ServiceSourceRefAuthorized(ctx, "exp:2026:instance:55") {
@@ -141,52 +170,7 @@ func TestServiceSourceRefAuthorizedOnlyRestrictsSignedServiceContext(t *testing.
 	}
 }
 
-// serviceAuthTestConfig 显式给出服务签名测试所需的鉴权配置。
-func serviceAuthTestConfig() config.AuthConfig {
-	return config.AuthConfig{
-		JWTSigningKey:             "test-signing-key",
-		AccessTTLMin:              15,
-		JWTIssuer:                 "chaimir-test",
-		HMACKey:                   "test-service-hmac-key",
-		ServiceAuthMaxSkewSeconds: 300,
-	}
-}
-
-func serviceAuthTestEngine(mgr *Manager) *gin.Engine {
-	engine := gin.New()
-	engine.Use(response.TraceMiddleware())
-	engine.POST("/internal/action", mgr.ServiceMiddleware(), func(c *gin.Context) {
-		id, ok := tenant.FromContext(c.Request.Context())
-		if !ok {
-			c.String(http.StatusInternalServerError, "missing identity")
-			return
-		}
-		c.String(http.StatusOK, "tenant=%d", id.TenantID)
-	})
-	return engine
-}
-
-func signServiceRequest(req *http.Request, key, service, tenantID, sourceRef, traceID, timestamp string) {
-	req.Header.Set(ServiceNameHeader, service)
-	req.Header.Set(ServiceTenantHeader, tenantID)
-	req.Header.Set(ServiceSourceRefHeader, sourceRef)
-	req.Header.Set(ServiceTimestampHeader, timestamp)
-	req.Header.Set(response.TraceHeader, traceID)
-	req.Header.Set(ServiceSignatureHeader, serviceSignatureForTest(key, req.Method, req.URL.EscapedPath(), tenantID, sourceRef, timestamp, traceID))
-}
-
-func serviceSignatureForTest(key, method, path, tenantID, sourceRef, timestamp, traceID string) string {
-	mac := hmac.New(sha256.New, []byte(key))
-	mac.Write([]byte(method + "\n" + path + "\n" + tenantID + "\n" + sourceRef + "\n" + timestamp + "\n" + traceID))
-	return hex.EncodeToString(mac.Sum(nil))
-}
-
-// currentServiceTimestamp 返回服务签名测试使用的当前 UTC 秒。
-func currentServiceTimestamp() string {
-	return strconv.FormatInt(timex.Now().Unix(), 10)
-}
-
-// TestRequirePlatformOrAnyRoleAuthorizesTeachersAndPlatform 确认平台层承载通用 API 角色鉴权,避免各模块重复实现教师/管理员入口检查。
+// TestRequirePlatformOrAnyRoleAuthorizesTeachersAndPlatform 确认平台层承载通用角色守卫。
 func TestRequirePlatformOrAnyRoleAuthorizesTeachersAndPlatform(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	engine := roleAuthTestEngine(
@@ -211,7 +195,7 @@ func TestRequirePlatformOrAnyRoleAuthorizesTeachersAndPlatform(t *testing.T) {
 	}
 }
 
-// TestRequirePlatformOrAnyRoleRejectsMissingOrMismatchedRole 确认角色鉴权缺少身份契约或角色不匹配时统一返回禁止访问。
+// TestRequirePlatformOrAnyRoleRejectsMissingOrMismatchedRole 确认角色不匹配时统一返回禁止访问。
 func TestRequirePlatformOrAnyRoleRejectsMissingOrMismatchedRole(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	for _, tc := range []struct {
@@ -233,7 +217,7 @@ func TestRequirePlatformOrAnyRoleRejectsMissingOrMismatchedRole(t *testing.T) {
 	}
 }
 
-// TestRequirePlatformIdentityAcceptsOnlyPlatformContext 确认平台身份入口由平台层统一鉴权。
+// TestRequirePlatformIdentityAcceptsOnlyPlatformContext 确认平台身份入口统一由平台层把关。
 func TestRequirePlatformIdentityAcceptsOnlyPlatformContext(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	platformEngine := platformAuthTestEngine(tenant.Identity{IsPlatform: true, AccountID: 1})
@@ -251,7 +235,7 @@ func TestRequirePlatformIdentityAcceptsOnlyPlatformContext(t *testing.T) {
 	}
 }
 
-// TestRequireTenantAnyRoleRejectsPlatformContext 确认租户角色入口不把平台身份当作学校内角色。
+// TestRequireTenantAnyRoleRejectsPlatformContext 确认平台身份不会被当作租户角色放行。
 func TestRequireTenantAnyRoleRejectsPlatformContext(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	tenantEngine := tenantRoleAuthTestEngine(
@@ -272,43 +256,94 @@ func TestRequireTenantAnyRoleRejectsPlatformContext(t *testing.T) {
 	}
 }
 
-// roleAuthTestEngine 注入已登录租户身份后执行平台层角色中间件。
+// serviceAuthTestConfig 给出服务签名测试所需的最小鉴权配置。
+func serviceAuthTestConfig() config.AuthConfig {
+	return config.AuthConfig{
+		JWTSigningKey:             "test-signing-key",
+		AccessTTLMin:              15,
+		JWTIssuer:                 "chaimir-test",
+		HMACKey:                   "test-service-hmac-key",
+		ServiceAuthMaxSkewSeconds: 300,
+	}
+}
+
+// serviceAuthTestEngine 构造带统一 trace 与服务鉴权的测试路由。
+func serviceAuthTestEngine(mgr *Manager) *gin.Engine {
+	engine := gin.New()
+	engine.Use(response.TraceMiddleware())
+	engine.POST("/internal/action", mgr.ServiceMiddleware(), func(c *gin.Context) {
+		id, ok := tenant.FromContext(c.Request.Context())
+		if !ok {
+			c.String(http.StatusInternalServerError, "missing identity")
+			return
+		}
+		c.String(http.StatusOK, "tenant=%d", id.TenantID)
+	})
+	return engine
+}
+
+// signServiceRequest 用测试密钥生成内部服务鉴权头。
+func signServiceRequest(req *http.Request, key, service, tenantID, sourceRef, traceID, timestamp string) {
+	req.Header.Set(ServiceNameHeader, service)
+	req.Header.Set(ServiceTenantHeader, tenantID)
+	req.Header.Set(ServiceSourceRefHeader, sourceRef)
+	req.Header.Set(ServiceTimestampHeader, timestamp)
+	req.Header.Set(response.TraceHeader, traceID)
+	req.Header.Set(ServiceSignatureHeader, serviceSignatureForTest(key, req.Method, req.URL.EscapedPath(), tenantID, sourceRef, timestamp, traceID))
+}
+
+// serviceSignatureForTest 按生产同一签名输入顺序生成测试签名。
+func serviceSignatureForTest(key, method, path, tenantID, sourceRef, timestamp, traceID string) string {
+	mac := hmac.New(sha256.New, []byte(key))
+	mac.Write([]byte(method + "\n" + path + "\n" + tenantID + "\n" + sourceRef + "\n" + timestamp + "\n" + traceID))
+	return hex.EncodeToString(mac.Sum(nil))
+}
+
+// currentServiceTimestamp 返回服务签名测试使用的 UTC 秒级时间戳。
+func currentServiceTimestamp() string {
+	return strconv.FormatInt(timex.Now().Unix(), 10)
+}
+
+// roleAuthTestEngine 注入已登录身份后执行平台层通用角色守卫。
 func roleAuthTestEngine(id tenant.Identity, identity contracts.IdentityService) *gin.Engine {
 	engine := gin.New()
 	engine.Use(response.TraceMiddleware())
 	engine.GET("/teacher", func(c *gin.Context) {
 		c.Request = c.Request.WithContext(tenant.WithContext(c.Request.Context(), id))
+		c.Next()
 	}, RequirePlatformOrAnyRole(identity, contracts.RoleTeacher, contracts.RoleSchoolAdmin), func(c *gin.Context) {
 		c.String(http.StatusOK, "ok")
 	})
 	return engine
 }
 
-// tenantRoleAuthTestEngine 注入已登录身份后执行租户角色中间件。
+// tenantRoleAuthTestEngine 注入已登录身份后执行租户角色守卫。
 func tenantRoleAuthTestEngine(id tenant.Identity, identity contracts.IdentityService) *gin.Engine {
 	engine := gin.New()
 	engine.Use(response.TraceMiddleware())
 	engine.GET("/tenant-role", func(c *gin.Context) {
 		c.Request = c.Request.WithContext(tenant.WithContext(c.Request.Context(), id))
+		c.Next()
 	}, RequireTenantAnyRole(identity, contracts.RoleSchoolAdmin), func(c *gin.Context) {
 		c.String(http.StatusOK, "ok")
 	})
 	return engine
 }
 
-// platformAuthTestEngine 注入已登录身份后执行平台身份中间件。
+// platformAuthTestEngine 注入已登录身份后执行平台身份守卫。
 func platformAuthTestEngine(id tenant.Identity) *gin.Engine {
 	engine := gin.New()
 	engine.Use(response.TraceMiddleware())
 	engine.GET("/platform", func(c *gin.Context) {
 		c.Request = c.Request.WithContext(tenant.WithContext(c.Request.Context(), id))
+		c.Next()
 	}, RequirePlatformIdentity(), func(c *gin.Context) {
 		c.String(http.StatusOK, "ok")
 	})
 	return engine
 }
 
-// roleAuthIdentity 是角色中间件测试用的只读身份契约实现。
+// roleAuthIdentity 是角色中间件测试用的最小身份契约实现。
 type roleAuthIdentity struct {
 	roles []string
 }
@@ -318,12 +353,12 @@ func (f *roleAuthIdentity) GetAccount(context.Context, int64) (contracts.Account
 	return contracts.AccountInfo{Roles: f.roles}, nil
 }
 
-// BatchGetAccounts 不参与角色中间件测试。
+// BatchGetAccounts 不参与该组测试。
 func (f *roleAuthIdentity) BatchGetAccounts(context.Context, []int64) ([]contracts.AccountInfo, error) {
 	return nil, nil
 }
 
-// HasRole 按测试角色集合判断单个角色。
+// HasRole 按测试角色集合判断角色命中。
 func (f *roleAuthIdentity) HasRole(_ context.Context, _ int64, role string) (bool, error) {
 	return contracts.HasAnyRole(f.roles, role), nil
 }

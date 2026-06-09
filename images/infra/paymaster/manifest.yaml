@@ -20,6 +20,23 @@ source:
 upstream:
   image: node:20-bookworm-slim
   reuse_policy: service-wrapper
+env_keys:
+  config:
+    - CHAIMIR_IMAGE_PORT
+    - CHAIMIR_MAX_BODY_BYTES
+    - CHAIMIR_IMAGE_SERVICE_AUTH_MAX_SKEW_SECONDS
+    - CHAIMIR_EVM_RPC_URL
+    - CHAIMIR_ENTRYPOINT_ADDRESS
+  secret:
+    - CHAIMIR_PAYMASTER_PRIVATE_KEY
+    - CHAIMIR_PAYMASTER_SERVICE_AUTH_SECRET
+secrets_required:
+  - env: CHAIMIR_PAYMASTER_PRIVATE_KEY
+    source: deploy/config/chaimir.env
+    runtime_value: secret-or-kms
+  - env: CHAIMIR_PAYMASTER_SERVICE_AUTH_SECRET
+    source: deploy/config/chaimir.env
+    runtime_value: secret-or-kms
 data_driven: true
 capabilities:
   - erc4337-paymaster
@@ -69,6 +86,11 @@ selftest:
         - node
         - --check
         - /app/paymaster-service.mjs
+    - name: auth-required
+      command:
+        - node
+        - -e
+        - "const fs=require('fs'); const src=fs.readFileSync('/app/paymaster-service.mjs','utf8'); if(!src.includes('verifyServiceSignature') || !src.includes('validateUserOperation')) process.exit(1)"
 supply_chain:
   sbom: true
   trivy_required: true

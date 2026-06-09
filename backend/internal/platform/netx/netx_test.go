@@ -1,4 +1,4 @@
-// Package netx 测试出站网络安全边界。
+// netx 测试出站网络安全边界。
 package netx
 
 import "testing"
@@ -38,8 +38,8 @@ func TestValidatePublicLDAPSURLRequiresLDAPS(t *testing.T) {
 	if _, err := ValidatePublicLDAPSURL("ldap://ldap.example.edu:389"); err == nil {
 		t.Fatalf("plain LDAP endpoint should fail")
 	}
-	if _, err := ValidatePublicLDAPSURL("ldaps://10.0.0.10:636"); err == nil {
-		t.Fatalf("private LDAPS endpoint should fail")
+	if _, err := ValidatePublicLDAPSURL("ldaps://10.0.0.10:636"); err != nil {
+		t.Fatalf("private LDAPS endpoint should pass under controlled config: %v", err)
 	}
 	if _, err := ValidatePublicLDAPSURL("ldaps://ldap.example.edu:636"); err != nil {
 		t.Fatalf("public LDAPS endpoint should pass: %v", err)
@@ -74,7 +74,18 @@ func TestPublicDialAddressRejectsPrivateLiteral(t *testing.T) {
 
 // TestPublicResolvedURLRejectsPrivateLiteral 确认非 HTTP 协议拨号前也会把私网地址挡住。
 func TestPublicResolvedURLRejectsPrivateLiteral(t *testing.T) {
-	if _, _, err := PublicResolvedURL(t.Context(), "ldaps://10.0.0.10:636", "636"); err == nil {
-		t.Fatalf("private resolved URL should fail")
+	if _, _, err := PublicResolvedURL(t.Context(), "https://10.0.0.10:443", "443"); err == nil {
+		t.Fatalf("private HTTPS resolved URL should fail")
+	}
+}
+
+// TestPrivateResolvedURLAllowsPrivateLDAPS 确认受控私网 LDAPS 配置可解析为拨号地址。
+func TestPrivateResolvedURLAllowsPrivateLDAPS(t *testing.T) {
+	resolved, serverName, err := PrivateResolvedURL(t.Context(), "ldaps://10.0.0.10:636", "636")
+	if err != nil {
+		t.Fatalf("private LDAPS resolved URL should pass: %v", err)
+	}
+	if resolved != "ldaps://10.0.0.10:636" || serverName != "10.0.0.10" {
+		t.Fatalf("unexpected private resolved URL or server name: %s %s", resolved, serverName)
 	}
 }

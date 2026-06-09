@@ -1,5 +1,4 @@
-// Package audit 的详情序列化边界。
-// 审计 detail 最终写入 identity.audit_log JSONB,各业务模块只提供结构化 map。
+// audit 统一审计详情的 JSON 序列化边界,保证 detail 写入语义稳定。
 package audit
 
 import (

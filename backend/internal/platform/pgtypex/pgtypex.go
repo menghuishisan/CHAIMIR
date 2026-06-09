@@ -1,4 +1,4 @@
-// Package pgtypex 统一提供后端模块复用的 PostgreSQL 可空类型辅助函数。
+// pgtypex 统一提供后端模块复用的 PostgreSQL 可空类型辅助函数。
 package pgtypex
 
 import (
@@ -36,6 +36,14 @@ func Int8(v int64) pgtype.Int8 {
 // Int8When 按显式有效标记构造可空 int8。
 func Int8When(v int64, valid bool) pgtype.Int8 {
 	return pgtype.Int8{Int64: v, Valid: valid}
+}
+
+// Int8Value 读取可空 int8,数据库 NULL 统一转为零值。
+func Int8Value(v pgtype.Int8) int64 {
+	if !v.Valid {
+		return 0
+	}
+	return v.Int64
 }
 
 // Int2 构造可空 int2,非正数按可选过滤条件缺省处理。
@@ -157,18 +165,18 @@ func DateValue(v pgtype.Date) time.Time {
 	return timex.UTC(v.Time)
 }
 
+// TimestamptzPtr 从可选时间指针构造 PostgreSQL timestamptz,保持 nil 与零值时间的空值语义一致。
+func TimestamptzPtr(v *time.Time) pgtype.Timestamptz {
+	if v == nil {
+		return pgtype.Timestamptz{}
+	}
+	return timex.Timestamptz(*v)
+}
+
 // IDString 把可空 int8 雪花 ID 转为 JSON DTO 使用的字符串。
 func IDString(v pgtype.Int8) string {
 	if !v.Valid {
 		return ""
 	}
 	return ids.Format(v.Int64)
-}
-
-// Int8Value 读取可空 int8,数据库 NULL 统一转为零值。
-func Int8Value(v pgtype.Int8) int64 {
-	if !v.Valid {
-		return 0
-	}
-	return v.Int64
 }

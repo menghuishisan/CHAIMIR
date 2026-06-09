@@ -1,10 +1,13 @@
-// M1 账号管理 + 个人中心 HTTP 处理器。
+// identity api_account 文件承接学校管理员账号管理和账号导入 HTTP 请求。
 package identity
 
 import (
 	"io"
+	"net/http"
+	"strings"
 
 	"chaimir/internal/contracts"
+	"chaimir/internal/platform/auth"
 	"chaimir/internal/platform/httpx"
 	"chaimir/internal/platform/pagex"
 	"chaimir/pkg/apperr"
@@ -13,381 +16,343 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// listAccounts 分页查账号(学校管理员)。
-func (a *API) listAccounts(c *gin.Context) {
-	page, size := pagex.Normalize(httpx.QueryInt(c, "page"), httpx.QueryInt(c, "size"))
-	filter, err := buildAccountListFilter(c.Query("role"), c.Query("class_id"), c.Query("status"), c.Query("keyword"))
-	if err != nil {
-		response.Fail(c, err)
-		return
-	}
-	views, total, err := a.svc.ListAccounts(c.Request.Context(), filter, page, size)
-	if err != nil {
-		response.Fail(c, err)
-		return
-	}
-	response.OKPage(c, views, total, page, size)
+// accountAPI 封装账号管理 HTTP handler 依赖。
+type accountAPI struct {
+	svc *Service
 }
 
-// createAccount 单个建账号。
-func (a *API) createAccount(c *gin.Context) {
+// registerAccountRoutes 注册账号管理和导入路由。
+func registerAccountRoutes(r gin.IRouter, svc *Service, authn *auth.Manager) {
+	api := accountAPI{svc: svc}
+	g := r.Group("/accounts", authn.Middleware(), auth.RequireTenantAnyRole(svc, contracts.RoleSchoolAdmin))
+	api.register(g)
+}
+
+// register 绑定账号管理资源路由到具名 handler。
+func (a accountAPI) register(g gin.IRouter) {
+	g.GET("", a.listAccounts)
+	g.POST("", a.createAccount)
+	g.PATCH("/:id", a.updateAccount)
+	g.POST("/:id/disable", a.disableAccount)
+	g.POST("/:id/enable", a.enableAccount)
+	g.POST("/:id/archive", a.archiveAccount)
+	g.POST("/:id/restore", a.restoreAccount)
+	g.POST("/:id/cancel", a.cancelAccount)
+	g.POST("/:id/force-logout", a.forceLogout)
+	g.POST("/:id/reset-password", a.resetPassword)
+	g.POST("/:id/grant-admin", a.grantAdmin)
+	g.POST("/:id/revoke-admin", a.revokeAdmin)
+	g.POST("/batch/disable", a.batchDisable)
+	g.POST("/batch/archive", a.batchArchive)
+	g.POST("/batch/restore", a.batchRestore)
+	g.POST("/import/preview", a.importPreview)
+	g.POST("/import/commit", a.importCommit)
+	g.GET("/import/template", a.importTemplate)
+	g.GET("/import/batches", a.importBatches)
+}
+
+// listAccounts 绑定账号列表查询参数并委托 service 分页读取。
+func (a accountAPI) listAccounts(c *gin.Context) {
+	query, ok := bindAccountQuery(c)
+	if !ok {
+		return
+	}
+	out, err := a.svc.ListAccountsByAdmin(c.Request.Context(), query)
+	if err != nil {
+		response.Fail(c, err)
+		return
+	}
+	response.OK(c, out)
+}
+
+// createAccount 绑定单个账号创建请求。
+func (a accountAPI) createAccount(c *gin.Context) {
 	var req CreateAccountRequest
-	if !httpx.BindJSONWithError(c, &req, apperr.ErrAccountCreateInvalid) {
+	if !httpx.BindJSON(c, &req) {
 		return
 	}
-	res, err := a.svc.CreateAccount(c.Request.Context(), req)
+	dto, activation, err := a.svc.CreateAccountByAdmin(c.Request.Context(), req)
 	if err != nil {
 		response.Fail(c, err)
 		return
 	}
-	response.OK(c, res)
+	response.OK(c, gin.H{"account": dto, "activation_code": activation})
 }
 
-// updateAccount 更新账号(姓名)。
-func (a *API) updateAccount(c *gin.Context) {
+// updateAccount 绑定账号可编辑字段更新请求。
+func (a accountAPI) updateAccount(c *gin.Context) {
 	id, ok := httpx.PathID(c, "id")
 	if !ok {
 		return
 	}
 	var req UpdateAccountRequest
-	if !httpx.BindJSONWithError(c, &req, apperr.ErrAccountUpdateInvalid) {
+	if !httpx.BindJSON(c, &req) {
 		return
 	}
-	if err := a.svc.UpdateAccount(c.Request.Context(), id, req); err != nil {
-		response.Fail(c, err)
-		return
-	}
-	response.OK(c, gin.H{"updated": true})
-}
-
-// disableAccount 将账号置为停用,保留数据但禁止继续登录。
-func (a *API) disableAccount(c *gin.Context) { a.setStatus(c, AccountDisabled) }
-
-// enableAccount 将账号恢复为正常状态,用于撤销停用。
-func (a *API) enableAccount(c *gin.Context) { a.setStatus(c, AccountActive) }
-
-// archiveAccount 将离校或毕业账号归档,便于保留历史数据。
-func (a *API) archiveAccount(c *gin.Context) { a.setStatus(c, AccountArchived) }
-
-// restoreAccount 将归档账号恢复为正常状态。
-func (a *API) restoreAccount(c *gin.Context) { a.setStatus(c, AccountActive) }
-
-// cancelAccount 将账号注销到终态软删状态,避免后续再次启用。
-func (a *API) cancelAccount(c *gin.Context) { a.setStatus(c, AccountCancelled) }
-
-// setStatus 通用状态迁移处理。
-func (a *API) setStatus(c *gin.Context, target int16) {
-	id, ok := httpx.PathID(c, "id")
-	if !ok {
-		return
-	}
-	if err := a.svc.SetAccountStatus(c.Request.Context(), id, target); err != nil {
-		response.Fail(c, err)
-		return
-	}
-	response.OK(c, gin.H{"status": target})
-}
-
-// forceLogout 踢人(吊销账号全部会话)。
-func (a *API) forceLogout(c *gin.Context) {
-	id, ok := httpx.PathID(c, "id")
-	if !ok {
-		return
-	}
-	if err := a.svc.ForceLogout(c.Request.Context(), id); err != nil {
-		response.Fail(c, err)
-		return
-	}
-	response.OK(c, gin.H{"forced_logout": true})
-}
-
-// resetAccountPassword 管理员重置他人密码(返回临时密码)。
-func (a *API) resetAccountPassword(c *gin.Context) {
-	id, ok := httpx.PathID(c, "id")
-	if !ok {
-		return
-	}
-	temp, err := a.svc.ResetAccountPassword(c.Request.Context(), id)
+	out, err := a.svc.UpdateAccountByAdmin(c.Request.Context(), id, req)
 	if err != nil {
 		response.Fail(c, err)
 		return
 	}
-	response.OK(c, gin.H{"init_password": temp})
+	response.OK(c, out)
 }
 
-// grantAdmin 授予学校管理员。
-func (a *API) grantAdmin(c *gin.Context) {
+// disableAccount 停用账号并吊销会话。
+func (a accountAPI) disableAccount(c *gin.Context) {
+	a.updateStatus(c, AccountStatusDisabled)
+}
+
+// enableAccount 启用账号。
+func (a accountAPI) enableAccount(c *gin.Context) {
+	a.updateStatus(c, AccountStatusActive)
+}
+
+// archiveAccount 归档账号并吊销会话。
+func (a accountAPI) archiveAccount(c *gin.Context) {
+	a.updateStatus(c, AccountStatusArchived)
+}
+
+// restoreAccount 恢复归档账号为正常状态。
+func (a accountAPI) restoreAccount(c *gin.Context) {
+	a.updateStatus(c, AccountStatusActive)
+}
+
+// cancelAccount 注销账号并写软删除标记。
+func (a accountAPI) cancelAccount(c *gin.Context) {
+	a.updateStatus(c, AccountStatusCancelled)
+}
+
+// updateStatus 统一绑定单账号状态流转请求。
+func (a accountAPI) updateStatus(c *gin.Context, status int16) {
 	id, ok := httpx.PathID(c, "id")
 	if !ok {
 		return
 	}
-	if err := a.svc.GrantAdmin(c.Request.Context(), id); err != nil {
+	if err := a.svc.UpdateAccountStatusByAdmin(c.Request.Context(), id, status); err != nil {
 		response.Fail(c, err)
 		return
 	}
-	response.OK(c, gin.H{"granted": true})
+	response.OK(c, gin.H{})
 }
 
-// revokeAdmin 撤销学校管理员。
-func (a *API) revokeAdmin(c *gin.Context) {
+// forceLogout 强制吊销指定账号所有会话。
+func (a accountAPI) forceLogout(c *gin.Context) {
 	id, ok := httpx.PathID(c, "id")
 	if !ok {
 		return
 	}
-	if err := a.svc.RevokeAdmin(c.Request.Context(), id); err != nil {
+	if err := a.svc.ForceLogoutAccountByAdmin(c.Request.Context(), id); err != nil {
 		response.Fail(c, err)
 		return
 	}
-	response.OK(c, gin.H{"revoked": true})
+	response.OK(c, gin.H{})
 }
 
-// importTemplate 下载教师/学生导入模板。
-func (a *API) importTemplate(c *gin.Context) {
-	targetType, ok := importTargetFromQuery(c.Query("type"))
+// resetPassword 绑定管理员重置密码请求。
+func (a accountAPI) resetPassword(c *gin.Context) {
+	id, ok := httpx.PathID(c, "id")
 	if !ok {
-		response.Fail(c, apperr.ErrImportTargetInvalid)
 		return
 	}
-	tpl, err := BuildImportTemplate(targetType, c.Query("format"))
+	var req AdminResetPasswordRequest
+	if !httpx.BindJSON(c, &req) {
+		return
+	}
+	if err := a.svc.ResetAccountPasswordByAdmin(c.Request.Context(), id, req); err != nil {
+		response.Fail(c, err)
+		return
+	}
+	response.OK(c, gin.H{})
+}
+
+// grantAdmin 授予教师学校管理员角色。
+func (a accountAPI) grantAdmin(c *gin.Context) {
+	id, ok := httpx.PathID(c, "id")
+	if !ok {
+		return
+	}
+	if err := a.svc.GrantSchoolAdmin(c.Request.Context(), id); err != nil {
+		response.Fail(c, err)
+		return
+	}
+	response.OK(c, gin.H{})
+}
+
+// revokeAdmin 撤销学校管理员角色。
+func (a accountAPI) revokeAdmin(c *gin.Context) {
+	id, ok := httpx.PathID(c, "id")
+	if !ok {
+		return
+	}
+	if err := a.svc.RevokeSchoolAdmin(c.Request.Context(), id); err != nil {
+		response.Fail(c, err)
+		return
+	}
+	response.OK(c, gin.H{})
+}
+
+// batchDisable 批量停用账号。
+func (a accountAPI) batchDisable(c *gin.Context) {
+	a.batchStatus(c, AccountStatusDisabled)
+}
+
+// batchArchive 按入学年份批量归档学生账号,同时同步班级归档状态。
+func (a accountAPI) batchArchive(c *gin.Context) {
+	var req ArchiveClassesRequest
+	if !httpx.BindJSON(c, &req) {
+		return
+	}
+	if err := a.svc.ArchiveClassesByAdmin(c.Request.Context(), req); err != nil {
+		response.Fail(c, err)
+		return
+	}
+	response.OK(c, gin.H{})
+}
+
+// batchRestore 批量恢复账号。
+func (a accountAPI) batchRestore(c *gin.Context) {
+	a.batchStatus(c, AccountStatusActive)
+}
+
+// batchStatus 绑定批量账号状态流转请求。
+func (a accountAPI) batchStatus(c *gin.Context, status int16) {
+	var req BatchAccountIDsRequest
+	if !httpx.BindJSON(c, &req) {
+		return
+	}
+	if err := a.svc.BatchUpdateAccountStatusByAdmin(c.Request.Context(), req, status); err != nil {
+		response.Fail(c, err)
+		return
+	}
+	response.OK(c, gin.H{})
+}
+
+// importPreview 绑定账号导入预览请求。
+func (a accountAPI) importPreview(c *gin.Context) {
+	targetType, ok := parseImportTarget(c.PostForm("type"))
+	if !ok {
+		response.Fail(c, apperr.ErrIdentityImportTypeInvalid)
+		return
+	}
+	fileHeader, err := c.FormFile("file")
+	if err != nil {
+		response.Fail(c, apperr.ErrIdentityImportContentInvalid.WithCause(err))
+		return
+	}
+	if maxBytes := a.svc.importMaxBytes(); maxBytes > 0 && fileHeader.Size > maxBytes {
+		response.Fail(c, apperr.ErrIdentityImportFileTooLarge)
+		return
+	}
+	// API 层只做上传边界检查和读取,文件类型与逐行校验交给 service 统一处理。
+	file, err := fileHeader.Open()
+	if err != nil {
+		response.Fail(c, apperr.ErrIdentityImportContentInvalid.WithCause(err))
+		return
+	}
+	content, readErr := io.ReadAll(file)
+	closeErr := file.Close()
+	if readErr != nil {
+		response.Fail(c, apperr.ErrIdentityImportContentInvalid.WithCause(readErr))
+		return
+	}
+	if closeErr != nil {
+		response.Fail(c, apperr.ErrInternal.WithCause(closeErr))
+		return
+	}
+	// 组装最小预览请求,避免 API 层理解导入业务状态机。
+	req := ImportPreviewRequest{
+		TargetType:  targetType,
+		FileName:    fileHeader.Filename,
+		ContentType: fileHeader.Header.Get("Content-Type"),
+		Content:     content,
+	}
+	out, err := a.svc.PreviewAccountImport(c.Request.Context(), req)
+	if err != nil {
+		response.Fail(c, err)
+		return
+	}
+	response.OK(c, out)
+}
+
+// importTemplate 绑定模板类型和格式查询参数并返回下载文件。
+func (a accountAPI) importTemplate(c *gin.Context) {
+	targetType, ok := parseImportTarget(c.Query("type"))
+	if !ok {
+		response.Fail(c, apperr.ErrIdentityImportTypeInvalid)
+		return
+	}
+	tpl, err := a.svc.ImportTemplate(targetType, c.Query("format"))
 	if err != nil {
 		response.Fail(c, err)
 		return
 	}
 	c.Header("Content-Disposition", `attachment; filename="`+tpl.FileName+`"`)
-	c.Data(200, tpl.ContentType, tpl.Content)
+	c.Data(http.StatusOK, tpl.ContentType, tpl.Content)
 }
 
-// listImportBatches 查询导入批次历史。
-func (a *API) listImportBatches(c *gin.Context) {
-	page, size := pagex.Normalize(httpx.QueryInt(c, "page"), httpx.QueryInt(c, "size"))
-	rows, total, err := a.svc.ListImportBatches(c.Request.Context(), page, size)
-	if err != nil {
-		response.Fail(c, err)
-		return
-	}
-	response.OKPage(c, rows, total, page, size)
-}
-
-// importPreview 导入预览:上传 CSV/XLSX,服务端解析并持久化预览状态。
-func (a *API) importPreview(c *gin.Context) {
-	// 第一步确认操作者身份和导入目标,避免匿名上传或跨目标解析。
-	id, ok := currentID(c)
-	if !ok {
-		response.Fail(c, apperr.ErrUnauthorized)
-		return
-	}
-	targetType, ok := importTargetFromQuery(c.PostForm("type"))
-	if !ok {
-		response.Fail(c, apperr.ErrImportTargetInvalid)
-		return
-	}
-	fileHeader, err := c.FormFile("file")
-	if err != nil {
-		response.Fail(c, apperr.ErrImportUploadMissing)
-		return
-	}
-	// 第二步在读取前后都校验大小,防止客户端声明和真实内容不一致。
-	if err := ensureImportUploadSize(fileHeader.Size, a.uploadCfg.ImportMaxBytes); err != nil {
-		response.Fail(c, err)
-		return
-	}
-	file, err := fileHeader.Open()
-	if err != nil {
-		response.Fail(c, apperr.ErrImportFormat.WithCause(err))
-		return
-	}
-	content, err := io.ReadAll(io.LimitReader(file, importReadLimit(a.uploadCfg.ImportMaxBytes)))
-	closeErr := file.Close()
-	if err != nil {
-		response.Fail(c, apperr.ErrImportFormat.WithCause(err))
-		return
-	}
-	if closeErr != nil {
-		response.Fail(c, apperr.ErrImportFormat.WithCause(closeErr))
-		return
-	}
-	// 第三步按文件名、MIME 与内容联合判定类型,再交给成熟解析器读取结构化行。
-	if err := ensureImportUploadSize(int64(len(content)), a.uploadCfg.ImportMaxBytes); err != nil {
-		response.Fail(c, err)
-		return
-	}
-	if err := ensureImportUploadType(fileHeader.Filename, fileHeader.Header.Get("Content-Type"), content); err != nil {
-		response.Fail(c, err)
-		return
-	}
-	rows, err := ParseImportFile(fileHeader.Filename, content)
-	if err != nil {
-		response.Fail(c, err)
-		return
-	}
-	// 第四步把预览行持久化到服务端,导入向导刷新后仍以服务端状态为准。
-	res, err := a.svc.CreateImportPreview(c.Request.Context(), id.AccountID, ImportRequest{
-		TargetType: targetType,
-		FileName:   fileHeader.Filename,
-		Rows:       rows,
-	})
-	if err != nil {
-		response.Fail(c, err)
-		return
-	}
-	response.OK(c, res)
-}
-
-// importReadLimit 返回导入文件读取上限,未配置时使用 int64 最大值。
-func importReadLimit(maxBytes int64) int64 {
-	if maxBytes <= 0 {
-		return 1<<63 - 1
-	}
-	return maxBytes + 1
-}
-
-// importCommit 导入提交(仅写通过行)。
-func (a *API) importCommit(c *gin.Context) {
-	id, ok := currentID(c)
-	if !ok {
-		response.Fail(c, apperr.ErrUnauthorized)
-		return
-	}
+// importCommit 绑定账号导入提交请求。
+func (a accountAPI) importCommit(c *gin.Context) {
 	var req ImportCommitRequest
-	if !httpx.BindJSONWithError(c, &req, apperr.ErrImportCommitInvalid) {
+	if !httpx.BindJSON(c, &req) {
 		return
 	}
-	res, err := a.svc.CommitImportPreview(c.Request.Context(), id.AccountID, req)
+	out, err := a.svc.CommitAccountImport(c.Request.Context(), req)
 	if err != nil {
 		response.Fail(c, err)
 		return
 	}
-	response.OK(c, res)
+	response.OK(c, out)
 }
 
-// batchDisableAccounts 批量停用账号。
-func (a *API) batchDisableAccounts(c *gin.Context) {
-	a.batchSetAccountStatus(c, AccountDisabled)
-}
-
-// batchArchiveAccounts 按入学年份批量归档学生账号。
-func (a *API) batchArchiveAccounts(c *gin.Context) {
-	var req BatchArchiveAccountsRequest
-	if !httpx.BindJSONWithError(c, &req, apperr.ErrBatchAccountArchiveInvalid) {
-		return
-	}
-	res, err := a.svc.BatchArchiveAccounts(c.Request.Context(), req)
+// importBatches 读取账号导入批次历史。
+func (a accountAPI) importBatches(c *gin.Context) {
+	out, err := a.svc.ListImportBatchesByAdmin(c.Request.Context())
 	if err != nil {
 		response.Fail(c, err)
 		return
 	}
-	response.OK(c, res)
+	response.OK(c, out)
 }
 
-// batchRestoreAccounts 批量恢复账号。
-func (a *API) batchRestoreAccounts(c *gin.Context) {
-	a.batchSetAccountStatus(c, AccountActive)
-}
-
-// batchSetAccountStatus 执行批量账号状态迁移。
-func (a *API) batchSetAccountStatus(c *gin.Context, target int16) {
-	var req BatchAccountStatusRequest
-	if !httpx.BindJSONWithError(c, &req, apperr.ErrAccountStatusInvalid) {
-		return
-	}
-	res, err := a.svc.BatchSetAccountStatus(c.Request.Context(), req.AccountIDs, target)
-	if err != nil {
-		response.Fail(c, err)
-		return
-	}
-	response.OK(c, res)
-}
-
-// ---- 个人中心 ----
-
-// getMe 取个人信息。
-func (a *API) getMe(c *gin.Context) {
-	id, ok := currentID(c)
+// bindAccountQuery 解析账号列表过滤和分页查询参数。
+func bindAccountQuery(c *gin.Context) (AccountQuery, bool) {
+	query := AccountQuery{}
+	status, ok := httpx.QueryInt(c, "status", httpx.QueryIntRule{BitSize: 16, Min: 0})
 	if !ok {
-		response.Fail(c, apperr.ErrUnauthorized)
-		return
+		return AccountQuery{}, false
 	}
-	me, err := a.svc.GetMe(c.Request.Context(), id.AccountID)
-	if err != nil {
-		response.Fail(c, err)
-		return
-	}
-	response.OK(c, me)
-}
-
-// changeMyPassword 本人改密。
-func (a *API) changeMyPassword(c *gin.Context) {
-	id, ok := currentID(c)
+	query.Status = int16(status)
+	baseIdentity, ok := httpx.QueryInt(c, "role", httpx.QueryIntRule{BitSize: 16, Min: 0})
 	if !ok {
-		response.Fail(c, apperr.ErrUnauthorized)
-		return
+		return AccountQuery{}, false
 	}
-	var req ChangePasswordRequest
-	if !httpx.BindJSONWithError(c, &req, apperr.ErrPasswordChangeInvalid) {
-		return
-	}
-	if err := a.svc.ChangeMyPassword(c.Request.Context(), id.AccountID, req); err != nil {
-		response.Fail(c, err)
-		return
-	}
-	response.OK(c, gin.H{"changed": true})
-}
-
-// changeMyPhone 本人换绑手机。
-func (a *API) changeMyPhone(c *gin.Context) {
-	id, ok := currentID(c)
+	query.BaseIdentity = int16(baseIdentity)
+	classID, ok := httpx.QueryInt(c, "class_id", httpx.QueryIntRule{BitSize: 64, Min: 0})
 	if !ok {
-		response.Fail(c, apperr.ErrUnauthorized)
-		return
+		return AccountQuery{}, false
 	}
-	var req ChangePhoneRequest
-	if !httpx.BindJSONWithError(c, &req, apperr.ErrPhoneChangeInvalid) {
-		return
-	}
-	if err := a.svc.ChangeMyPhone(c.Request.Context(), id.TenantID, id.AccountID, req); err != nil {
-		response.Fail(c, err)
-		return
-	}
-	response.OK(c, gin.H{"changed": true})
-}
-
-// listMySessions 查询当前账号有效会话。
-func (a *API) listMySessions(c *gin.Context) {
-	id, ok := currentID(c)
+	query.ClassID = classID
+	page, ok := httpx.QueryInt(c, "page", httpx.QueryIntRule{BitSize: 32, Default: 1, Min: 1})
 	if !ok {
-		response.Fail(c, apperr.ErrUnauthorized)
-		return
+		return AccountQuery{}, false
 	}
-	rows, err := a.svc.ListMySessions(c.Request.Context(), id.AccountID)
-	if err != nil {
-		response.Fail(c, err)
-		return
+	size, ok := httpx.QueryInt(c, "size", httpx.QueryIntRule{BitSize: 32, Default: 20, Min: 1})
+	if !ok {
+		return AccountQuery{}, false
 	}
-	response.OK(c, rows)
+	normalizedPage, normalizedSize := pagex.Normalize(int(page), int(size))
+	query.Page = int32(normalizedPage)
+	query.Size = int32(normalizedSize)
+	query.Keyword = c.Query("keyword")
+	return query, true
 }
 
-// listAudit 审计查询。
-func (a *API) listAudit(c *gin.Context) {
-	page, size := pagex.Normalize(httpx.QueryInt(c, "page"), httpx.QueryInt(c, "size"))
-	filter, err := buildAuditQueryFilter(c.Query("actor_id"), c.Query("action"), c.Query("from"), c.Query("to"))
-	if err != nil {
-		response.Fail(c, err)
-		return
-	}
-	rows, total, err := a.svc.ListAuditLogs(c.Request.Context(), filter, page, size)
-	if err != nil {
-		response.Fail(c, err)
-		return
-	}
-	response.OKPage(c, rows, total, page, size)
-}
-
-// importTargetFromQuery 把模板类型查询参数转换为导入目标枚举。
-func importTargetFromQuery(v string) (int16, bool) {
-	switch v {
-	case contracts.RoleTeacher:
+// parseImportTarget 解析文档定义的 student/teacher 导入类型,不接受前端传数值角色。
+func parseImportTarget(raw string) (int16, bool) {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "teacher":
 		return ImportTargetTeacher, true
-	case contracts.RoleStudent:
+	case "student":
 		return ImportTargetStudent, true
 	default:
 		return 0, false

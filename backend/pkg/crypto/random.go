@@ -1,4 +1,4 @@
-// Package crypto 提供随机凭证生成,用于 Refresh Token、激活码和一次性短期密码等不透明秘密。
+// crypto 提供随机凭证生成,用于 Refresh Token、激活码和一次性短期密码等不透明秘密。
 package crypto
 
 import (
@@ -9,6 +9,18 @@ import (
 )
 
 const randomTokenAlphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+
+// RandomBytes 生成指定长度的加密安全随机字节,供加密 nonce 或一次性随机值复用。
+func RandomBytes(length int) ([]byte, error) {
+	if length <= 0 {
+		return nil, errors.New("随机字节长度必须大于 0")
+	}
+	raw := make([]byte, length)
+	if _, err := io.ReadFull(rand.Reader, raw); err != nil {
+		return nil, fmt.Errorf("生成随机字节失败: %w", err)
+	}
+	return raw, nil
+}
 
 // RandomToken 使用系统 CSPRNG 生成固定长度的不透明凭证。
 func RandomToken(length int) (string, error) {

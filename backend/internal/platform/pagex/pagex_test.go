@@ -1,4 +1,4 @@
-// Package pagex 的分页测试:确认全平台分页默认值与上限只有一个实现来源。
+// pagex 测试确认全平台分页默认值与上限只有一个实现来源。
 package pagex
 
 import "testing"

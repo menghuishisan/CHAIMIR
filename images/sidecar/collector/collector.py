@@ -6,16 +6,28 @@ import json
 import os
 import time
 from pathlib import Path
+from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 
 
 TARGETS = [target for target in os.environ.get("CHAIMIR_COLLECTOR_TARGETS", "").split(",") if target]
 OUTPUT = Path(os.environ.get("CHAIMIR_COLLECTOR_OUTPUT", "/runtime-state/collector.json"))
 INTERVAL = float(os.environ.get("CHAIMIR_COLLECTOR_INTERVAL_SECONDS", "5"))
+ALLOWED_PREFIXES = [prefix for prefix in os.environ.get("CHAIMIR_COLLECTOR_ALLOWED_PREFIXES", "").split(",") if prefix]
+
+
+def validate_target(target: str) -> None:
+    """校验采集目标只能落在 M2 注入的同环境 HTTP 白名单内。"""
+    parsed = urlparse(target)
+    if parsed.scheme not in {"http", "https"}:
+        raise ValueError("collector target scheme is not allowed")
+    if not ALLOWED_PREFIXES or not any(target.startswith(prefix) for prefix in ALLOWED_PREFIXES):
+        raise ValueError("collector target is outside allowed prefixes")
 
 
 def fetch(target: str) -> dict[str, object]:
     """请求单个受控目标并返回状态摘要。"""
+    validate_target(target)
     request = Request(target, headers={"User-Agent": "chaimir-collector"})
     started = time.time()
     with urlopen(request, timeout=3) as response:  # noqa: S310 - 目标由 M2 manifest 白名单控制。

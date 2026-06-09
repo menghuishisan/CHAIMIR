@@ -11,47 +11,27 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-const addAccountRole = `-- name: AddAccountRole :exec
-
-INSERT INTO account_role (id, tenant_id, account_id, role)
-VALUES ($1, $2, $3, $4)
-ON CONFLICT (tenant_id, account_id, role) DO NOTHING
-`
-
-type AddAccountRoleParams struct {
-	ID        int64 `json:"id"`
-	TenantID  int64 `json:"tenant_id"`
-	AccountID int64 `json:"account_id"`
-	Role      int16 `json:"role"`
-}
-
-// ============================================================
-// account_role
-// ============================================================
-func (q *Queries) AddAccountRole(ctx context.Context, arg AddAccountRoleParams) error {
-	_, err := q.db.Exec(ctx, addAccountRole,
-		arg.ID,
-		arg.TenantID,
-		arg.AccountID,
-		arg.Role,
-	)
-	return err
-}
-
 const approveTenantApplication = `-- name: ApproveTenantApplication :one
-UPDATE tenant_application SET status = 2, reviewed_by = $2, tenant_id = $3
+UPDATE tenant_application
+SET status = $2, reviewed_by = $3, tenant_id = $4, updated_at = now()
 WHERE id = $1 AND status = 1
 RETURNING id, school_name, school_type, contact_name, contact_phone, contact_email, status, reject_reason, reviewed_by, tenant_id, created_at, updated_at
 `
 
 type ApproveTenantApplicationParams struct {
 	ID         int64       `json:"id"`
+	Status     int16       `json:"status"`
 	ReviewedBy pgtype.Int8 `json:"reviewed_by"`
 	TenantID   pgtype.Int8 `json:"tenant_id"`
 }
 
 func (q *Queries) ApproveTenantApplication(ctx context.Context, arg ApproveTenantApplicationParams) (TenantApplication, error) {
-	row := q.db.QueryRow(ctx, approveTenantApplication, arg.ID, arg.ReviewedBy, arg.TenantID)
+	row := q.db.QueryRow(ctx, approveTenantApplication,
+		arg.ID,
+		arg.Status,
+		arg.ReviewedBy,
+		arg.TenantID,
+	)
 	var i TenantApplication
 	err := row.Scan(
 		&i.ID,
@@ -70,51 +50,114 @@ func (q *Queries) ApproveTenantApplication(ctx context.Context, arg ApproveTenan
 	return i, err
 }
 
-const archiveAccountsByClass = `-- name: ArchiveAccountsByClass :exec
-UPDATE account SET status = 4
-WHERE base_identity = 1 AND status = 2
-  AND id IN (SELECT account_id FROM account_profile WHERE org_id = $1)
+const archiveClassesByEnrollmentYear = `-- name: ArchiveClassesByEnrollmentYear :exec
+UPDATE class
+SET status = 2
+WHERE tenant_id = $1 AND enrollment_year = $2 AND deleted_at IS NULL
 `
 
-// 班级归档级联:该班级在读学生账号一并归档(status 2正常 → 4归档)。
-func (q *Queries) ArchiveAccountsByClass(ctx context.Context, orgID int64) error {
-	_, err := q.db.Exec(ctx, archiveAccountsByClass, orgID)
+type ArchiveClassesByEnrollmentYearParams struct {
+	TenantID       int64 `json:"tenant_id"`
+	EnrollmentYear int16 `json:"enrollment_year"`
+}
+
+func (q *Queries) ArchiveClassesByEnrollmentYear(ctx context.Context, arg ArchiveClassesByEnrollmentYearParams) error {
+	_, err := q.db.Exec(ctx, archiveClassesByEnrollmentYear, arg.TenantID, arg.EnrollmentYear)
 	return err
 }
 
-const archiveClass = `-- name: ArchiveClass :exec
-UPDATE class SET status = 2 WHERE id = $1 AND deleted_at IS NULL
+const archiveStudentAccountsByEnrollmentYear = `-- name: ArchiveStudentAccountsByEnrollmentYear :exec
+UPDATE account
+SET status = 4, updated_at = now()
+FROM account_profile
+WHERE account.id = account_profile.account_id
+  AND account.tenant_id = account_profile.tenant_id
+  AND account.tenant_id = $1
+  AND account_profile.enrollment_year = $2
+  AND account.base_identity = 1
+  AND account.status = 2
+  AND account.deleted_at IS NULL
 `
 
-func (q *Queries) ArchiveClass(ctx context.Context, id int64) error {
-	_, err := q.db.Exec(ctx, archiveClass, id)
+type ArchiveStudentAccountsByEnrollmentYearParams struct {
+	TenantID       int64       `json:"tenant_id"`
+	EnrollmentYear pgtype.Int2 `json:"enrollment_year"`
+}
+
+func (q *Queries) ArchiveStudentAccountsByEnrollmentYear(ctx context.Context, arg ArchiveStudentAccountsByEnrollmentYearParams) error {
+	_, err := q.db.Exec(ctx, archiveStudentAccountsByEnrollmentYear, arg.TenantID, arg.EnrollmentYear)
 	return err
 }
 
-const archiveStudentAccountsByEnrollmentYear = `-- name: ArchiveStudentAccountsByEnrollmentYear :many
-UPDATE account a SET status = 4
-FROM account_profile p
-WHERE p.account_id = a.id
-  AND a.base_identity = 1
-  AND a.status = 2
-  AND p.enrollment_year = $1
-RETURNING a.id
+const batchGetAccounts = `-- name: BatchGetAccounts :many
+SELECT a.id, a.tenant_id, a.phone_enc, a.phone_hash, a.password_hash, a.name, a.base_identity, a.status,
+       a.must_change_pwd, a.pwd_failed_count, a.locked_until, a.activated_at, a.deleted_at, a.created_at, a.updated_at,
+       p.no, p.org_id, p.enrollment_year, p.title,
+       COALESCE(array_agg(ar.role ORDER BY ar.role) FILTER (WHERE ar.role IS NOT NULL), ARRAY[]::smallint[])::smallint[] AS roles
+FROM account a
+LEFT JOIN account_profile p ON p.account_id = a.id AND p.tenant_id = a.tenant_id
+LEFT JOIN account_role ar ON ar.account_id = a.id AND ar.tenant_id = a.tenant_id
+WHERE a.id = ANY($1::bigint[]) AND a.deleted_at IS NULL
+GROUP BY a.id, p.no, p.org_id, p.enrollment_year, p.title
 `
 
-// 学年归档:仅归档当前租户内正常状态学生账号,避免教师或停用/注销账号被误改。
-func (q *Queries) ArchiveStudentAccountsByEnrollmentYear(ctx context.Context, enrollmentYear pgtype.Int2) ([]int64, error) {
-	rows, err := q.db.Query(ctx, archiveStudentAccountsByEnrollmentYear, enrollmentYear)
+type BatchGetAccountsRow struct {
+	ID             int64              `json:"id"`
+	TenantID       int64              `json:"tenant_id"`
+	PhoneEnc       []byte             `json:"phone_enc"`
+	PhoneHash      string             `json:"phone_hash"`
+	PasswordHash   pgtype.Text        `json:"password_hash"`
+	Name           string             `json:"name"`
+	BaseIdentity   int16              `json:"base_identity"`
+	Status         int16              `json:"status"`
+	MustChangePwd  bool               `json:"must_change_pwd"`
+	PwdFailedCount int16              `json:"pwd_failed_count"`
+	LockedUntil    pgtype.Timestamptz `json:"locked_until"`
+	ActivatedAt    pgtype.Timestamptz `json:"activated_at"`
+	DeletedAt      pgtype.Timestamptz `json:"deleted_at"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+	No             pgtype.Text        `json:"no"`
+	OrgID          pgtype.Int8        `json:"org_id"`
+	EnrollmentYear pgtype.Int2        `json:"enrollment_year"`
+	Title          pgtype.Text        `json:"title"`
+	Roles          []int16            `json:"roles"`
+}
+
+func (q *Queries) BatchGetAccounts(ctx context.Context, dollar_1 []int64) ([]BatchGetAccountsRow, error) {
+	rows, err := q.db.Query(ctx, batchGetAccounts, dollar_1)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []int64{}
+	items := []BatchGetAccountsRow{}
 	for rows.Next() {
-		var id int64
-		if err := rows.Scan(&id); err != nil {
+		var i BatchGetAccountsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.PhoneEnc,
+			&i.PhoneHash,
+			&i.PasswordHash,
+			&i.Name,
+			&i.BaseIdentity,
+			&i.Status,
+			&i.MustChangePwd,
+			&i.PwdFailedCount,
+			&i.LockedUntil,
+			&i.ActivatedAt,
+			&i.DeletedAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.No,
+			&i.OrgID,
+			&i.EnrollmentYear,
+			&i.Title,
+			&i.Roles,
+		); err != nil {
 			return nil, err
 		}
-		items = append(items, id)
+		items = append(items, i)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -122,171 +165,56 @@ func (q *Queries) ArchiveStudentAccountsByEnrollmentYear(ctx context.Context, en
 	return items, nil
 }
 
-const countAccounts = `-- name: CountAccounts :one
-SELECT count(*) FROM account a
-LEFT JOIN account_profile p ON p.account_id = a.id
-WHERE ($1::SMALLINT IS NULL OR a.status = $1)
-  AND ($2::SMALLINT IS NULL OR a.base_identity = $2)
-  AND ($3::SMALLINT IS NULL OR EXISTS (
-    SELECT 1 FROM account_role ar WHERE ar.account_id = a.id AND ar.role = $3
-  ))
-  AND ($4::BIGINT IS NULL OR (
-    a.base_identity = 1 AND p.org_id = $4
-  ))
-  AND ($5::TEXT IS NULL OR a.name ILIKE '%' || $5 || '%')
+const classExists = `-- name: ClassExists :one
+SELECT EXISTS(SELECT 1 FROM class WHERE id = $1 AND tenant_id = $2 AND deleted_at IS NULL)
 `
 
-type CountAccountsParams struct {
-	Status       pgtype.Int2 `json:"status"`
-	BaseIdentity pgtype.Int2 `json:"base_identity"`
-	Role         pgtype.Int2 `json:"role"`
-	ClassID      pgtype.Int8 `json:"class_id"`
-	Keyword      pgtype.Text `json:"keyword"`
+type ClassExistsParams struct {
+	ID       int64 `json:"id"`
+	TenantID int64 `json:"tenant_id"`
 }
 
-func (q *Queries) CountAccounts(ctx context.Context, arg CountAccountsParams) (int64, error) {
-	row := q.db.QueryRow(ctx, countAccounts,
-		arg.Status,
-		arg.BaseIdentity,
-		arg.Role,
-		arg.ClassID,
-		arg.Keyword,
-	)
-	var count int64
-	err := row.Scan(&count)
-	return count, err
+func (q *Queries) ClassExists(ctx context.Context, arg ClassExistsParams) (bool, error) {
+	row := q.db.QueryRow(ctx, classExists, arg.ID, arg.TenantID)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
 }
 
-const countAllAccounts = `-- name: CountAllAccounts :one
-SELECT count(*)::bigint FROM account
-WHERE status <> 5
-  AND ($1::SMALLINT IS NULL OR base_identity = $1)
+const clearPasswordFailure = `-- name: ClearPasswordFailure :exec
+UPDATE account SET pwd_failed_count = 0, locked_until = NULL, updated_at = now()
+WHERE id = $1 AND tenant_id = $2
 `
 
-func (q *Queries) CountAllAccounts(ctx context.Context, baseIdentity pgtype.Int2) (int64, error) {
-	row := q.db.QueryRow(ctx, countAllAccounts, baseIdentity)
-	var column_1 int64
-	err := row.Scan(&column_1)
-	return column_1, err
+type ClearPasswordFailureParams struct {
+	ID       int64 `json:"id"`
+	TenantID int64 `json:"tenant_id"`
 }
 
-const countAuditLogs = `-- name: CountAuditLogs :one
-SELECT count(*)::bigint FROM audit_log
-WHERE ($1::BIGINT IS NULL OR actor_id = $1)
-  AND ($2::TEXT IS NULL OR action = $2)
-  AND ($3::TEXT IS NULL OR target_type = $3)
-  AND ($4::TIMESTAMPTZ IS NULL OR created_at >= $4)
-  AND ($5::TIMESTAMPTZ IS NULL OR created_at <= $5)
-`
-
-type CountAuditLogsParams struct {
-	ActorID    pgtype.Int8        `json:"actor_id"`
-	Action     pgtype.Text        `json:"action"`
-	TargetType pgtype.Text        `json:"target_type"`
-	FromTime   pgtype.Timestamptz `json:"from_time"`
-	ToTime     pgtype.Timestamptz `json:"to_time"`
-}
-
-func (q *Queries) CountAuditLogs(ctx context.Context, arg CountAuditLogsParams) (int64, error) {
-	row := q.db.QueryRow(ctx, countAuditLogs,
-		arg.ActorID,
-		arg.Action,
-		arg.TargetType,
-		arg.FromTime,
-		arg.ToTime,
-	)
-	var column_1 int64
-	err := row.Scan(&column_1)
-	return column_1, err
-}
-
-const countImportBatches = `-- name: CountImportBatches :one
-SELECT count(*)::bigint FROM import_batch
-`
-
-func (q *Queries) CountImportBatches(ctx context.Context) (int64, error) {
-	row := q.db.QueryRow(ctx, countImportBatches)
-	var column_1 int64
-	err := row.Scan(&column_1)
-	return column_1, err
-}
-
-const countPlatformAuditLogs = `-- name: CountPlatformAuditLogs :one
-SELECT count(*)::bigint FROM audit_log
-WHERE ($1::BIGINT IS NULL OR actor_id = $1)
-  AND ($2::TEXT IS NULL OR action = $2)
-  AND ($3::TEXT IS NULL OR target_type = $3)
-  AND ($4::TIMESTAMPTZ IS NULL OR created_at >= $4)
-  AND ($5::TIMESTAMPTZ IS NULL OR created_at <= $5)
-`
-
-type CountPlatformAuditLogsParams struct {
-	ActorID    pgtype.Int8        `json:"actor_id"`
-	Action     pgtype.Text        `json:"action"`
-	TargetType pgtype.Text        `json:"target_type"`
-	FromTime   pgtype.Timestamptz `json:"from_time"`
-	ToTime     pgtype.Timestamptz `json:"to_time"`
-}
-
-func (q *Queries) CountPlatformAuditLogs(ctx context.Context, arg CountPlatformAuditLogsParams) (int64, error) {
-	row := q.db.QueryRow(ctx, countPlatformAuditLogs,
-		arg.ActorID,
-		arg.Action,
-		arg.TargetType,
-		arg.FromTime,
-		arg.ToTime,
-	)
-	var column_1 int64
-	err := row.Scan(&column_1)
-	return column_1, err
-}
-
-const countTenantApplications = `-- name: CountTenantApplications :one
-SELECT count(*)::bigint FROM tenant_application
-WHERE ($1::SMALLINT IS NULL OR status = $1)
-`
-
-func (q *Queries) CountTenantApplications(ctx context.Context, status pgtype.Int2) (int64, error) {
-	row := q.db.QueryRow(ctx, countTenantApplications, status)
-	var column_1 int64
-	err := row.Scan(&column_1)
-	return column_1, err
-}
-
-const countTenants = `-- name: CountTenants :one
-SELECT count(*) FROM tenant
-WHERE ($1::SMALLINT IS NULL OR status = $1)
-`
-
-func (q *Queries) CountTenants(ctx context.Context, status pgtype.Int2) (int64, error) {
-	row := q.db.QueryRow(ctx, countTenants, status)
-	var count int64
-	err := row.Scan(&count)
-	return count, err
+func (q *Queries) ClearPasswordFailure(ctx context.Context, arg ClearPasswordFailureParams) error {
+	_, err := q.db.Exec(ctx, clearPasswordFailure, arg.ID, arg.TenantID)
+	return err
 }
 
 const createAccount = `-- name: CreateAccount :one
-
-INSERT INTO account (id, tenant_id, phone_enc, phone_hash, password_hash, name, base_identity, status, must_change_pwd)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-RETURNING id, tenant_id, phone_enc, phone_hash, password_hash, name, base_identity, status, must_change_pwd, pwd_failed_count, locked_until, activated_at, created_at, updated_at
+INSERT INTO account (id, tenant_id, phone_enc, phone_hash, password_hash, name, base_identity, status, must_change_pwd, activated_at, created_at, updated_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, now(), now())
+RETURNING id, tenant_id, phone_enc, phone_hash, password_hash, name, base_identity, status, must_change_pwd, pwd_failed_count, locked_until, activated_at, deleted_at, created_at, updated_at
 `
 
 type CreateAccountParams struct {
-	ID            int64       `json:"id"`
-	TenantID      int64       `json:"tenant_id"`
-	PhoneEnc      []byte      `json:"phone_enc"`
-	PhoneHash     string      `json:"phone_hash"`
-	PasswordHash  pgtype.Text `json:"password_hash"`
-	Name          string      `json:"name"`
-	BaseIdentity  int16       `json:"base_identity"`
-	Status        int16       `json:"status"`
-	MustChangePwd bool        `json:"must_change_pwd"`
+	ID            int64              `json:"id"`
+	TenantID      int64              `json:"tenant_id"`
+	PhoneEnc      []byte             `json:"phone_enc"`
+	PhoneHash     string             `json:"phone_hash"`
+	PasswordHash  pgtype.Text        `json:"password_hash"`
+	Name          string             `json:"name"`
+	BaseIdentity  int16              `json:"base_identity"`
+	Status        int16              `json:"status"`
+	MustChangePwd bool               `json:"must_change_pwd"`
+	ActivatedAt   pgtype.Timestamptz `json:"activated_at"`
 }
 
-// ============================================================
-// account
-// ============================================================
 func (q *Queries) CreateAccount(ctx context.Context, arg CreateAccountParams) (Account, error) {
 	row := q.db.QueryRow(ctx, createAccount,
 		arg.ID,
@@ -298,6 +226,7 @@ func (q *Queries) CreateAccount(ctx context.Context, arg CreateAccountParams) (A
 		arg.BaseIdentity,
 		arg.Status,
 		arg.MustChangePwd,
+		arg.ActivatedAt,
 	)
 	var i Account
 	err := row.Scan(
@@ -313,17 +242,16 @@ func (q *Queries) CreateAccount(ctx context.Context, arg CreateAccountParams) (A
 		&i.PwdFailedCount,
 		&i.LockedUntil,
 		&i.ActivatedAt,
+		&i.DeletedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
 	return i, err
 }
 
-const createAccountProfile = `-- name: CreateAccountProfile :one
-
+const createAccountProfile = `-- name: CreateAccountProfile :exec
 INSERT INTO account_profile (account_id, tenant_id, no, org_id, enrollment_year, title)
 VALUES ($1, $2, $3, $4, $5, $6)
-RETURNING account_id, tenant_id, no, org_id, enrollment_year, title
 `
 
 type CreateAccountProfileParams struct {
@@ -335,11 +263,8 @@ type CreateAccountProfileParams struct {
 	Title          pgtype.Text `json:"title"`
 }
 
-// ============================================================
-// account_profile
-// ============================================================
-func (q *Queries) CreateAccountProfile(ctx context.Context, arg CreateAccountProfileParams) (AccountProfile, error) {
-	row := q.db.QueryRow(ctx, createAccountProfile,
+func (q *Queries) CreateAccountProfile(ctx context.Context, arg CreateAccountProfileParams) error {
+	_, err := q.db.Exec(ctx, createAccountProfile,
 		arg.AccountID,
 		arg.TenantID,
 		arg.No,
@@ -347,22 +272,35 @@ func (q *Queries) CreateAccountProfile(ctx context.Context, arg CreateAccountPro
 		arg.EnrollmentYear,
 		arg.Title,
 	)
-	var i AccountProfile
-	err := row.Scan(
-		&i.AccountID,
-		&i.TenantID,
-		&i.No,
-		&i.OrgID,
-		&i.EnrollmentYear,
-		&i.Title,
+	return err
+}
+
+const createAccountRole = `-- name: CreateAccountRole :exec
+INSERT INTO account_role (id, tenant_id, account_id, role)
+VALUES ($1, $2, $3, $4)
+ON CONFLICT (tenant_id, account_id, role) DO NOTHING
+`
+
+type CreateAccountRoleParams struct {
+	ID        int64 `json:"id"`
+	TenantID  int64 `json:"tenant_id"`
+	AccountID int64 `json:"account_id"`
+	Role      int16 `json:"role"`
+}
+
+func (q *Queries) CreateAccountRole(ctx context.Context, arg CreateAccountRoleParams) error {
+	_, err := q.db.Exec(ctx, createAccountRole,
+		arg.ID,
+		arg.TenantID,
+		arg.AccountID,
+		arg.Role,
 	)
-	return i, err
+	return err
 }
 
 const createActivationCode = `-- name: CreateActivationCode :one
-
-INSERT INTO activation_code (id, tenant_id, account_id, code_hash, status, expire_at, created_by)
-VALUES ($1, $2, $3, $4, 1, $5, $6)
+INSERT INTO activation_code (id, tenant_id, account_id, code_hash, status, expire_at, created_by, created_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, now())
 RETURNING id, tenant_id, account_id, code_hash, status, expire_at, used_at, created_by, created_at
 `
 
@@ -371,19 +309,18 @@ type CreateActivationCodeParams struct {
 	TenantID  int64              `json:"tenant_id"`
 	AccountID int64              `json:"account_id"`
 	CodeHash  string             `json:"code_hash"`
+	Status    int16              `json:"status"`
 	ExpireAt  pgtype.Timestamptz `json:"expire_at"`
 	CreatedBy pgtype.Int8        `json:"created_by"`
 }
 
-// ============================================================
-// activation_code
-// ============================================================
 func (q *Queries) CreateActivationCode(ctx context.Context, arg CreateActivationCodeParams) (ActivationCode, error) {
 	row := q.db.QueryRow(ctx, createActivationCode,
 		arg.ID,
 		arg.TenantID,
 		arg.AccountID,
 		arg.CodeHash,
+		arg.Status,
 		arg.ExpireAt,
 		arg.CreatedBy,
 	)
@@ -402,10 +339,10 @@ func (q *Queries) CreateActivationCode(ctx context.Context, arg CreateActivation
 	return i, err
 }
 
-const createAuditLog = `-- name: CreateAuditLog :exec
-
-INSERT INTO audit_log (id, tenant_id, actor_id, actor_role, action, target_type, target_id, detail, ip, trace_id)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+const createAuditLog = `-- name: CreateAuditLog :one
+INSERT INTO audit_log (id, tenant_id, actor_id, actor_role, action, target_type, target_id, detail, ip, trace_id, created_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, now())
+RETURNING id, tenant_id, actor_id, actor_role, action, target_type, target_id, detail, ip, trace_id, created_at
 `
 
 type CreateAuditLogParams struct {
@@ -421,11 +358,8 @@ type CreateAuditLogParams struct {
 	TraceID    pgtype.Text `json:"trace_id"`
 }
 
-// ============================================================
-// audit_log(全平台唯一审计表)
-// ============================================================
-func (q *Queries) CreateAuditLog(ctx context.Context, arg CreateAuditLogParams) error {
-	_, err := q.db.Exec(ctx, createAuditLog,
+func (q *Queries) CreateAuditLog(ctx context.Context, arg CreateAuditLogParams) (AuditLog, error) {
+	row := q.db.QueryRow(ctx, createAuditLog,
 		arg.ID,
 		arg.TenantID,
 		arg.ActorID,
@@ -437,13 +371,26 @@ func (q *Queries) CreateAuditLog(ctx context.Context, arg CreateAuditLogParams) 
 		arg.Ip,
 		arg.TraceID,
 	)
-	return err
+	var i AuditLog
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.ActorID,
+		&i.ActorRole,
+		&i.Action,
+		&i.TargetType,
+		&i.TargetID,
+		&i.Detail,
+		&i.Ip,
+		&i.TraceID,
+		&i.CreatedAt,
+	)
+	return i, err
 }
 
 const createAuthSession = `-- name: CreateAuthSession :one
-
-INSERT INTO auth_session (id, tenant_id, account_id, refresh_token_hash, device_info, ip, status, expire_at)
-VALUES ($1, $2, $3, $4, $5, $6, 1, $7)
+INSERT INTO auth_session (id, tenant_id, account_id, refresh_token_hash, device_info, ip, status, expire_at, created_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, now())
 RETURNING id, tenant_id, account_id, refresh_token_hash, device_info, ip, status, expire_at, created_at
 `
 
@@ -454,12 +401,10 @@ type CreateAuthSessionParams struct {
 	RefreshTokenHash string             `json:"refresh_token_hash"`
 	DeviceInfo       pgtype.Text        `json:"device_info"`
 	Ip               pgtype.Text        `json:"ip"`
+	Status           int16              `json:"status"`
 	ExpireAt         pgtype.Timestamptz `json:"expire_at"`
 }
 
-// ============================================================
-// auth_session
-// ============================================================
 func (q *Queries) CreateAuthSession(ctx context.Context, arg CreateAuthSessionParams) (AuthSession, error) {
 	row := q.db.QueryRow(ctx, createAuthSession,
 		arg.ID,
@@ -468,6 +413,7 @@ func (q *Queries) CreateAuthSession(ctx context.Context, arg CreateAuthSessionPa
 		arg.RefreshTokenHash,
 		arg.DeviceInfo,
 		arg.Ip,
+		arg.Status,
 		arg.ExpireAt,
 	)
 	var i AuthSession
@@ -487,7 +433,8 @@ func (q *Queries) CreateAuthSession(ctx context.Context, arg CreateAuthSessionPa
 
 const createClass = `-- name: CreateClass :one
 INSERT INTO class (id, tenant_id, major_id, name, enrollment_year, status)
-VALUES ($1, $2, $3, $4, $5, 1) RETURNING id, tenant_id, major_id, name, enrollment_year, status, created_at, updated_at, deleted_at
+VALUES ($1, $2, $3, $4, $5, $6)
+RETURNING id, tenant_id, major_id, name, enrollment_year, status, deleted_at
 `
 
 type CreateClassParams struct {
@@ -496,6 +443,7 @@ type CreateClassParams struct {
 	MajorID        int64  `json:"major_id"`
 	Name           string `json:"name"`
 	EnrollmentYear int16  `json:"enrollment_year"`
+	Status         int16  `json:"status"`
 }
 
 func (q *Queries) CreateClass(ctx context.Context, arg CreateClassParams) (Class, error) {
@@ -505,6 +453,7 @@ func (q *Queries) CreateClass(ctx context.Context, arg CreateClassParams) (Class
 		arg.MajorID,
 		arg.Name,
 		arg.EnrollmentYear,
+		arg.Status,
 	)
 	var i Class
 	err := row.Scan(
@@ -514,16 +463,15 @@ func (q *Queries) CreateClass(ctx context.Context, arg CreateClassParams) (Class
 		&i.Name,
 		&i.EnrollmentYear,
 		&i.Status,
-		&i.CreatedAt,
-		&i.UpdatedAt,
 		&i.DeletedAt,
 	)
 	return i, err
 }
 
 const createDepartment = `-- name: CreateDepartment :one
-
-INSERT INTO department (id, tenant_id, name, code) VALUES ($1, $2, $3, $4) RETURNING id, tenant_id, name, code, created_at, updated_at, deleted_at
+INSERT INTO department (id, tenant_id, name, code)
+VALUES ($1, $2, $3, $4)
+RETURNING id, tenant_id, name, code, deleted_at
 `
 
 type CreateDepartmentParams struct {
@@ -533,9 +481,6 @@ type CreateDepartmentParams struct {
 	Code     pgtype.Text `json:"code"`
 }
 
-// ============================================================
-// department / major / class(租户表,RLS 透明)
-// ============================================================
 func (q *Queries) CreateDepartment(ctx context.Context, arg CreateDepartmentParams) (Department, error) {
 	row := q.db.QueryRow(ctx, createDepartment,
 		arg.ID,
@@ -549,16 +494,14 @@ func (q *Queries) CreateDepartment(ctx context.Context, arg CreateDepartmentPara
 		&i.TenantID,
 		&i.Name,
 		&i.Code,
-		&i.CreatedAt,
-		&i.UpdatedAt,
 		&i.DeletedAt,
 	)
 	return i, err
 }
 
 const createImportBatch = `-- name: CreateImportBatch :one
-INSERT INTO import_batch (id, tenant_id, operator_id, target_type, file_name, total, success, failed, error_detail, status)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+INSERT INTO import_batch (id, tenant_id, operator_id, target_type, file_name, total, success, failed, error_detail, status, created_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, now())
 RETURNING id, tenant_id, operator_id, target_type, file_name, total, success, failed, error_detail, status, created_at
 `
 
@@ -606,10 +549,9 @@ func (q *Queries) CreateImportBatch(ctx context.Context, arg CreateImportBatchPa
 }
 
 const createImportPreview = `-- name: CreateImportPreview :one
-
-INSERT INTO import_preview (id, tenant_id, operator_id, target_type, file_name, rows, preview_result, status, expire_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7, 1, $8)
-RETURNING id, tenant_id, operator_id, target_type, file_name, rows, preview_result, status, expire_at, created_at, submitted_at
+INSERT INTO import_preview (id, tenant_id, operator_id, target_type, file_name, rows, preview_result, status, expire_at, created_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, now())
+RETURNING id, tenant_id, operator_id, target_type, file_name, rows, preview_result, status, expire_at, submitted_at, created_at
 `
 
 type CreateImportPreviewParams struct {
@@ -620,12 +562,10 @@ type CreateImportPreviewParams struct {
 	FileName      string             `json:"file_name"`
 	Rows          []byte             `json:"rows"`
 	PreviewResult []byte             `json:"preview_result"`
+	Status        int16              `json:"status"`
 	ExpireAt      pgtype.Timestamptz `json:"expire_at"`
 }
 
-// ============================================================
-// import_batch
-// ============================================================
 func (q *Queries) CreateImportPreview(ctx context.Context, arg CreateImportPreviewParams) (ImportPreview, error) {
 	row := q.db.QueryRow(ctx, createImportPreview,
 		arg.ID,
@@ -635,6 +575,7 @@ func (q *Queries) CreateImportPreview(ctx context.Context, arg CreateImportPrevi
 		arg.FileName,
 		arg.Rows,
 		arg.PreviewResult,
+		arg.Status,
 		arg.ExpireAt,
 	)
 	var i ImportPreview
@@ -648,14 +589,16 @@ func (q *Queries) CreateImportPreview(ctx context.Context, arg CreateImportPrevi
 		&i.PreviewResult,
 		&i.Status,
 		&i.ExpireAt,
-		&i.CreatedAt,
 		&i.SubmittedAt,
+		&i.CreatedAt,
 	)
 	return i, err
 }
 
 const createMajor = `-- name: CreateMajor :one
-INSERT INTO major (id, tenant_id, department_id, name) VALUES ($1, $2, $3, $4) RETURNING id, tenant_id, department_id, name, created_at, updated_at, deleted_at
+INSERT INTO major (id, tenant_id, department_id, name)
+VALUES ($1, $2, $3, $4)
+RETURNING id, tenant_id, department_id, name, deleted_at
 `
 
 type CreateMajorParams struct {
@@ -678,51 +621,14 @@ func (q *Queries) CreateMajor(ctx context.Context, arg CreateMajorParams) (Major
 		&i.TenantID,
 		&i.DepartmentID,
 		&i.Name,
-		&i.CreatedAt,
-		&i.UpdatedAt,
 		&i.DeletedAt,
 	)
 	return i, err
 }
 
-const createPlatformAdmin = `-- name: CreatePlatformAdmin :one
-INSERT INTO platform_admin (id, username, password_hash, name, status)
-VALUES ($1, $2, $3, $4, $5)
-RETURNING id, username, password_hash, name, status, created_at, updated_at
-`
-
-type CreatePlatformAdminParams struct {
-	ID           int64  `json:"id"`
-	Username     string `json:"username"`
-	PasswordHash string `json:"password_hash"`
-	Name         string `json:"name"`
-	Status       int16  `json:"status"`
-}
-
-func (q *Queries) CreatePlatformAdmin(ctx context.Context, arg CreatePlatformAdminParams) (PlatformAdmin, error) {
-	row := q.db.QueryRow(ctx, createPlatformAdmin,
-		arg.ID,
-		arg.Username,
-		arg.PasswordHash,
-		arg.Name,
-		arg.Status,
-	)
-	var i PlatformAdmin
-	err := row.Scan(
-		&i.ID,
-		&i.Username,
-		&i.PasswordHash,
-		&i.Name,
-		&i.Status,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-	)
-	return i, err
-}
-
 const createPlatformAuthSession = `-- name: CreatePlatformAuthSession :one
-INSERT INTO platform_auth_session (id, platform_admin_id, refresh_token_hash, device_info, ip, status, expire_at)
-VALUES ($1, $2, $3, $4, $5, 1, $6)
+INSERT INTO platform_auth_session (id, platform_admin_id, refresh_token_hash, device_info, ip, status, expire_at, created_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, now())
 RETURNING id, platform_admin_id, refresh_token_hash, device_info, ip, status, expire_at, created_at
 `
 
@@ -732,6 +638,7 @@ type CreatePlatformAuthSessionParams struct {
 	RefreshTokenHash string             `json:"refresh_token_hash"`
 	DeviceInfo       pgtype.Text        `json:"device_info"`
 	Ip               pgtype.Text        `json:"ip"`
+	Status           int16              `json:"status"`
 	ExpireAt         pgtype.Timestamptz `json:"expire_at"`
 }
 
@@ -742,6 +649,7 @@ func (q *Queries) CreatePlatformAuthSession(ctx context.Context, arg CreatePlatf
 		arg.RefreshTokenHash,
 		arg.DeviceInfo,
 		arg.Ip,
+		arg.Status,
 		arg.ExpireAt,
 	)
 	var i PlatformAuthSession
@@ -758,27 +666,23 @@ func (q *Queries) CreatePlatformAuthSession(ctx context.Context, arg CreatePlatf
 	return i, err
 }
 
-const createSmsCode = `-- name: CreateSmsCode :one
-
-INSERT INTO sms_code (id, tenant_id, phone_hash, code_hash, scene, expire_at, used)
-VALUES ($1, $2, $3, $4, $5, $6, false)
-RETURNING id, tenant_id, phone_hash, code_hash, scene, expire_at, used, created_at
+const createSMSCode = `-- name: CreateSMSCode :one
+INSERT INTO sms_code (id, tenant_id, phone_hash, code_hash, scene, expire_at, used, created_at)
+VALUES ($1, $2, $3, $4, $5, $6, false, now())
+RETURNING id, tenant_id, phone_hash, code_hash, scene, expire_at, verify_attempts, used, created_at
 `
 
-type CreateSmsCodeParams struct {
+type CreateSMSCodeParams struct {
 	ID        int64              `json:"id"`
-	TenantID  pgtype.Int8        `json:"tenant_id"`
+	TenantID  int64              `json:"tenant_id"`
 	PhoneHash string             `json:"phone_hash"`
 	CodeHash  string             `json:"code_hash"`
 	Scene     int16              `json:"scene"`
 	ExpireAt  pgtype.Timestamptz `json:"expire_at"`
 }
 
-// ============================================================
-// sms_code
-// ============================================================
-func (q *Queries) CreateSmsCode(ctx context.Context, arg CreateSmsCodeParams) (SmsCode, error) {
-	row := q.db.QueryRow(ctx, createSmsCode,
+func (q *Queries) CreateSMSCode(ctx context.Context, arg CreateSMSCodeParams) (SmsCode, error) {
+	row := q.db.QueryRow(ctx, createSMSCode,
 		arg.ID,
 		arg.TenantID,
 		arg.PhoneHash,
@@ -794,6 +698,7 @@ func (q *Queries) CreateSmsCode(ctx context.Context, arg CreateSmsCodeParams) (S
 		&i.CodeHash,
 		&i.Scene,
 		&i.ExpireAt,
+		&i.VerifyAttempts,
 		&i.Used,
 		&i.CreatedAt,
 	)
@@ -801,8 +706,8 @@ func (q *Queries) CreateSmsCode(ctx context.Context, arg CreateSmsCodeParams) (S
 }
 
 const createTenant = `-- name: CreateTenant :one
-INSERT INTO tenant (id, code, name, type, status, deploy_mode, expire_at, auth_mode, enable_activation_code)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+INSERT INTO tenant (id, code, name, type, status, deploy_mode, expire_at, logo_url, display_name, feature_flags, auth_mode, enable_activation_code, created_at, updated_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, now(), now())
 RETURNING id, code, name, type, status, deploy_mode, expire_at, logo_url, display_name, feature_flags, auth_mode, enable_activation_code, created_at, updated_at
 `
 
@@ -814,6 +719,9 @@ type CreateTenantParams struct {
 	Status               int16              `json:"status"`
 	DeployMode           int16              `json:"deploy_mode"`
 	ExpireAt             pgtype.Timestamptz `json:"expire_at"`
+	LogoUrl              pgtype.Text        `json:"logo_url"`
+	DisplayName          pgtype.Text        `json:"display_name"`
+	FeatureFlags         []byte             `json:"feature_flags"`
 	AuthMode             int16              `json:"auth_mode"`
 	EnableActivationCode bool               `json:"enable_activation_code"`
 }
@@ -827,6 +735,9 @@ func (q *Queries) CreateTenant(ctx context.Context, arg CreateTenantParams) (Ten
 		arg.Status,
 		arg.DeployMode,
 		arg.ExpireAt,
+		arg.LogoUrl,
+		arg.DisplayName,
+		arg.FeatureFlags,
 		arg.AuthMode,
 		arg.EnableActivationCode,
 	)
@@ -851,9 +762,8 @@ func (q *Queries) CreateTenant(ctx context.Context, arg CreateTenantParams) (Ten
 }
 
 const createTenantApplication = `-- name: CreateTenantApplication :one
-
-INSERT INTO tenant_application (id, school_name, school_type, contact_name, contact_phone, contact_email, status)
-VALUES ($1, $2, $3, $4, $5, $6, 1)
+INSERT INTO tenant_application (id, school_name, school_type, contact_name, contact_phone, contact_email, status, created_at, updated_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, now(), now())
 RETURNING id, school_name, school_type, contact_name, contact_phone, contact_email, status, reject_reason, reviewed_by, tenant_id, created_at, updated_at
 `
 
@@ -864,11 +774,9 @@ type CreateTenantApplicationParams struct {
 	ContactName  string `json:"contact_name"`
 	ContactPhone string `json:"contact_phone"`
 	ContactEmail string `json:"contact_email"`
+	Status       int16  `json:"status"`
 }
 
-// ============================================================
-// tenant_application
-// ============================================================
 func (q *Queries) CreateTenantApplication(ctx context.Context, arg CreateTenantApplicationParams) (TenantApplication, error) {
 	row := q.db.QueryRow(ctx, createTenantApplication,
 		arg.ID,
@@ -877,6 +785,7 @@ func (q *Queries) CreateTenantApplication(ctx context.Context, arg CreateTenantA
 		arg.ContactName,
 		arg.ContactPhone,
 		arg.ContactEmail,
+		arg.Status,
 	)
 	var i TenantApplication
 	err := row.Scan(
@@ -896,108 +805,76 @@ func (q *Queries) CreateTenantApplication(ctx context.Context, arg CreateTenantA
 	return i, err
 }
 
-const findAccountsByPhoneAllTenants = `-- name: FindAccountsByPhoneAllTenants :many
-SELECT a.id AS account_id, a.tenant_id, a.name, t.code AS tenant_code, t.name AS tenant_name, t.status AS tenant_status
-FROM account a
-JOIN tenant t ON t.id = a.tenant_id
-WHERE a.phone_hash = $1 AND a.status <> 5
+const deleteAccountRole = `-- name: DeleteAccountRole :exec
+DELETE FROM account_role
+WHERE tenant_id = $1 AND account_id = $2 AND role = $3
 `
 
-type FindAccountsByPhoneAllTenantsRow struct {
-	AccountID    int64  `json:"account_id"`
-	TenantID     int64  `json:"tenant_id"`
-	Name         string `json:"name"`
-	TenantCode   string `json:"tenant_code"`
-	TenantName   string `json:"tenant_name"`
-	TenantStatus int16  `json:"tenant_status"`
+type DeleteAccountRoleParams struct {
+	TenantID  int64 `json:"tenant_id"`
+	AccountID int64 `json:"account_id"`
+	Role      int16 `json:"role"`
 }
 
-// 一号多校登录定位:跨租户按 phone_hash 查账号。
-// ★ 必须在特权连接(属主,绕 RLS)上执行;返回登录定位最小字段(不含手机号/密码)。
-func (q *Queries) FindAccountsByPhoneAllTenants(ctx context.Context, phoneHash string) ([]FindAccountsByPhoneAllTenantsRow, error) {
-	rows, err := q.db.Query(ctx, findAccountsByPhoneAllTenants, phoneHash)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []FindAccountsByPhoneAllTenantsRow{}
-	for rows.Next() {
-		var i FindAccountsByPhoneAllTenantsRow
-		if err := rows.Scan(
-			&i.AccountID,
-			&i.TenantID,
-			&i.Name,
-			&i.TenantCode,
-			&i.TenantName,
-			&i.TenantStatus,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
+func (q *Queries) DeleteAccountRole(ctx context.Context, arg DeleteAccountRoleParams) error {
+	_, err := q.db.Exec(ctx, deleteAccountRole, arg.TenantID, arg.AccountID, arg.Role)
+	return err
 }
 
-const findPlatformSessionByTokenHash = `-- name: FindPlatformSessionByTokenHash :one
-SELECT id, platform_admin_id, status, expire_at FROM platform_auth_session WHERE refresh_token_hash = $1
+const departmentExists = `-- name: DepartmentExists :one
+SELECT EXISTS(SELECT 1 FROM department WHERE id = $1 AND tenant_id = $2 AND deleted_at IS NULL)
 `
 
-type FindPlatformSessionByTokenHashRow struct {
-	ID              int64              `json:"id"`
-	PlatformAdminID int64              `json:"platform_admin_id"`
-	Status          int16              `json:"status"`
-	ExpireAt        pgtype.Timestamptz `json:"expire_at"`
+type DepartmentExistsParams struct {
+	ID       int64 `json:"id"`
+	TenantID int64 `json:"tenant_id"`
 }
 
-func (q *Queries) FindPlatformSessionByTokenHash(ctx context.Context, refreshTokenHash string) (FindPlatformSessionByTokenHashRow, error) {
-	row := q.db.QueryRow(ctx, findPlatformSessionByTokenHash, refreshTokenHash)
-	var i FindPlatformSessionByTokenHashRow
-	err := row.Scan(
-		&i.ID,
-		&i.PlatformAdminID,
-		&i.Status,
-		&i.ExpireAt,
-	)
-	return i, err
-}
-
-const findSessionByTokenHash = `-- name: FindSessionByTokenHash :one
-SELECT id, tenant_id, account_id, status, expire_at FROM auth_session WHERE refresh_token_hash = $1
-`
-
-type FindSessionByTokenHashRow struct {
-	ID        int64              `json:"id"`
-	TenantID  int64              `json:"tenant_id"`
-	AccountID int64              `json:"account_id"`
-	Status    int16              `json:"status"`
-	ExpireAt  pgtype.Timestamptz `json:"expire_at"`
-}
-
-// Refresh 轮转/重放检测:跨租户按 refresh_token_hash 定位会话。
-// ★ 必须在特权连接(属主,绕 RLS)上执行(Refresh Token 不含租户信息)。
-func (q *Queries) FindSessionByTokenHash(ctx context.Context, refreshTokenHash string) (FindSessionByTokenHashRow, error) {
-	row := q.db.QueryRow(ctx, findSessionByTokenHash, refreshTokenHash)
-	var i FindSessionByTokenHashRow
-	err := row.Scan(
-		&i.ID,
-		&i.TenantID,
-		&i.AccountID,
-		&i.Status,
-		&i.ExpireAt,
-	)
-	return i, err
+func (q *Queries) DepartmentExists(ctx context.Context, arg DepartmentExistsParams) (bool, error) {
+	row := q.db.QueryRow(ctx, departmentExists, arg.ID, arg.TenantID)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
 }
 
 const getAccountByID = `-- name: GetAccountByID :one
-SELECT id, tenant_id, phone_enc, phone_hash, password_hash, name, base_identity, status, must_change_pwd, pwd_failed_count, locked_until, activated_at, created_at, updated_at FROM account WHERE id = $1
+SELECT a.id, a.tenant_id, a.phone_enc, a.phone_hash, a.password_hash, a.name, a.base_identity, a.status,
+       a.must_change_pwd, a.pwd_failed_count, a.locked_until, a.activated_at, a.deleted_at, a.created_at, a.updated_at,
+       p.no, p.org_id, p.enrollment_year, p.title,
+       COALESCE(array_agg(ar.role ORDER BY ar.role) FILTER (WHERE ar.role IS NOT NULL), ARRAY[]::smallint[])::smallint[] AS roles
+FROM account a
+LEFT JOIN account_profile p ON p.account_id = a.id AND p.tenant_id = a.tenant_id
+LEFT JOIN account_role ar ON ar.account_id = a.id AND ar.tenant_id = a.tenant_id
+WHERE a.id = $1 AND a.deleted_at IS NULL
+GROUP BY a.id, p.no, p.org_id, p.enrollment_year, p.title
 `
 
-func (q *Queries) GetAccountByID(ctx context.Context, id int64) (Account, error) {
+type GetAccountByIDRow struct {
+	ID             int64              `json:"id"`
+	TenantID       int64              `json:"tenant_id"`
+	PhoneEnc       []byte             `json:"phone_enc"`
+	PhoneHash      string             `json:"phone_hash"`
+	PasswordHash   pgtype.Text        `json:"password_hash"`
+	Name           string             `json:"name"`
+	BaseIdentity   int16              `json:"base_identity"`
+	Status         int16              `json:"status"`
+	MustChangePwd  bool               `json:"must_change_pwd"`
+	PwdFailedCount int16              `json:"pwd_failed_count"`
+	LockedUntil    pgtype.Timestamptz `json:"locked_until"`
+	ActivatedAt    pgtype.Timestamptz `json:"activated_at"`
+	DeletedAt      pgtype.Timestamptz `json:"deleted_at"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+	No             pgtype.Text        `json:"no"`
+	OrgID          pgtype.Int8        `json:"org_id"`
+	EnrollmentYear pgtype.Int2        `json:"enrollment_year"`
+	Title          pgtype.Text        `json:"title"`
+	Roles          []int16            `json:"roles"`
+}
+
+func (q *Queries) GetAccountByID(ctx context.Context, id int64) (GetAccountByIDRow, error) {
 	row := q.db.QueryRow(ctx, getAccountByID, id)
-	var i Account
+	var i GetAccountByIDRow
 	err := row.Scan(
 		&i.ID,
 		&i.TenantID,
@@ -1011,19 +888,124 @@ func (q *Queries) GetAccountByID(ctx context.Context, id int64) (Account, error)
 		&i.PwdFailedCount,
 		&i.LockedUntil,
 		&i.ActivatedAt,
+		&i.DeletedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.No,
+		&i.OrgID,
+		&i.EnrollmentYear,
+		&i.Title,
+		&i.Roles,
+	)
+	return i, err
+}
+
+const getAccountByNo = `-- name: GetAccountByNo :one
+SELECT a.id, a.tenant_id, a.phone_enc, a.phone_hash, a.password_hash, a.name, a.base_identity, a.status,
+       a.must_change_pwd, a.pwd_failed_count, a.locked_until, a.activated_at, a.deleted_at, a.created_at, a.updated_at,
+       p.no, p.org_id, p.enrollment_year, p.title,
+       COALESCE(array_agg(ar.role ORDER BY ar.role) FILTER (WHERE ar.role IS NOT NULL), ARRAY[]::smallint[])::smallint[] AS roles
+FROM account a
+JOIN account_profile p ON p.account_id = a.id AND p.tenant_id = a.tenant_id
+LEFT JOIN account_role ar ON ar.account_id = a.id AND ar.tenant_id = a.tenant_id
+WHERE p.no = $1 AND a.deleted_at IS NULL
+GROUP BY a.id, p.no, p.org_id, p.enrollment_year, p.title
+`
+
+type GetAccountByNoRow struct {
+	ID             int64              `json:"id"`
+	TenantID       int64              `json:"tenant_id"`
+	PhoneEnc       []byte             `json:"phone_enc"`
+	PhoneHash      string             `json:"phone_hash"`
+	PasswordHash   pgtype.Text        `json:"password_hash"`
+	Name           string             `json:"name"`
+	BaseIdentity   int16              `json:"base_identity"`
+	Status         int16              `json:"status"`
+	MustChangePwd  bool               `json:"must_change_pwd"`
+	PwdFailedCount int16              `json:"pwd_failed_count"`
+	LockedUntil    pgtype.Timestamptz `json:"locked_until"`
+	ActivatedAt    pgtype.Timestamptz `json:"activated_at"`
+	DeletedAt      pgtype.Timestamptz `json:"deleted_at"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+	No             string             `json:"no"`
+	OrgID          int64              `json:"org_id"`
+	EnrollmentYear pgtype.Int2        `json:"enrollment_year"`
+	Title          pgtype.Text        `json:"title"`
+	Roles          []int16            `json:"roles"`
+}
+
+func (q *Queries) GetAccountByNo(ctx context.Context, no string) (GetAccountByNoRow, error) {
+	row := q.db.QueryRow(ctx, getAccountByNo, no)
+	var i GetAccountByNoRow
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.PhoneEnc,
+		&i.PhoneHash,
+		&i.PasswordHash,
+		&i.Name,
+		&i.BaseIdentity,
+		&i.Status,
+		&i.MustChangePwd,
+		&i.PwdFailedCount,
+		&i.LockedUntil,
+		&i.ActivatedAt,
+		&i.DeletedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.No,
+		&i.OrgID,
+		&i.EnrollmentYear,
+		&i.Title,
+		&i.Roles,
 	)
 	return i, err
 }
 
 const getAccountByPhoneHash = `-- name: GetAccountByPhoneHash :one
-SELECT id, tenant_id, phone_enc, phone_hash, password_hash, name, base_identity, status, must_change_pwd, pwd_failed_count, locked_until, activated_at, created_at, updated_at FROM account WHERE phone_hash = $1
+SELECT a.id, a.tenant_id, a.phone_enc, a.phone_hash, a.password_hash, a.name, a.base_identity, a.status,
+       a.must_change_pwd, a.pwd_failed_count, a.locked_until, a.activated_at, a.deleted_at, a.created_at, a.updated_at,
+       p.no, p.org_id, p.enrollment_year, p.title,
+       COALESCE(array_agg(ar.role ORDER BY ar.role) FILTER (WHERE ar.role IS NOT NULL), ARRAY[]::smallint[])::smallint[] AS roles
+FROM account a
+LEFT JOIN account_profile p ON p.account_id = a.id AND p.tenant_id = a.tenant_id
+LEFT JOIN account_role ar ON ar.account_id = a.id AND ar.tenant_id = a.tenant_id
+WHERE a.tenant_id = $1 AND a.phone_hash = $2 AND a.deleted_at IS NULL
+GROUP BY a.id, p.no, p.org_id, p.enrollment_year, p.title
 `
 
-func (q *Queries) GetAccountByPhoneHash(ctx context.Context, phoneHash string) (Account, error) {
-	row := q.db.QueryRow(ctx, getAccountByPhoneHash, phoneHash)
-	var i Account
+type GetAccountByPhoneHashParams struct {
+	TenantID  int64  `json:"tenant_id"`
+	PhoneHash string `json:"phone_hash"`
+}
+
+type GetAccountByPhoneHashRow struct {
+	ID             int64              `json:"id"`
+	TenantID       int64              `json:"tenant_id"`
+	PhoneEnc       []byte             `json:"phone_enc"`
+	PhoneHash      string             `json:"phone_hash"`
+	PasswordHash   pgtype.Text        `json:"password_hash"`
+	Name           string             `json:"name"`
+	BaseIdentity   int16              `json:"base_identity"`
+	Status         int16              `json:"status"`
+	MustChangePwd  bool               `json:"must_change_pwd"`
+	PwdFailedCount int16              `json:"pwd_failed_count"`
+	LockedUntil    pgtype.Timestamptz `json:"locked_until"`
+	ActivatedAt    pgtype.Timestamptz `json:"activated_at"`
+	DeletedAt      pgtype.Timestamptz `json:"deleted_at"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+	No             pgtype.Text        `json:"no"`
+	OrgID          pgtype.Int8        `json:"org_id"`
+	EnrollmentYear pgtype.Int2        `json:"enrollment_year"`
+	Title          pgtype.Text        `json:"title"`
+	Roles          []int16            `json:"roles"`
+}
+
+func (q *Queries) GetAccountByPhoneHash(ctx context.Context, arg GetAccountByPhoneHashParams) (GetAccountByPhoneHashRow, error) {
+	row := q.db.QueryRow(ctx, getAccountByPhoneHash, arg.TenantID, arg.PhoneHash)
+	var i GetAccountByPhoneHashRow
 	err := row.Scan(
 		&i.ID,
 		&i.TenantID,
@@ -1037,55 +1019,26 @@ func (q *Queries) GetAccountByPhoneHash(ctx context.Context, phoneHash string) (
 		&i.PwdFailedCount,
 		&i.LockedUntil,
 		&i.ActivatedAt,
+		&i.DeletedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
-	)
-	return i, err
-}
-
-const getAccountProfile = `-- name: GetAccountProfile :one
-SELECT account_id, tenant_id, no, org_id, enrollment_year, title FROM account_profile WHERE account_id = $1
-`
-
-func (q *Queries) GetAccountProfile(ctx context.Context, accountID int64) (AccountProfile, error) {
-	row := q.db.QueryRow(ctx, getAccountProfile, accountID)
-	var i AccountProfile
-	err := row.Scan(
-		&i.AccountID,
-		&i.TenantID,
 		&i.No,
 		&i.OrgID,
 		&i.EnrollmentYear,
 		&i.Title,
+		&i.Roles,
 	)
 	return i, err
 }
 
-const getAccountProfileByNo = `-- name: GetAccountProfileByNo :one
-SELECT account_id, tenant_id, no, org_id, enrollment_year, title FROM account_profile WHERE no = $1
+const getActivationCodeByHashPrivileged = `-- name: GetActivationCodeByHashPrivileged :one
+SELECT id, tenant_id, account_id, code_hash, status, expire_at, used_at, created_by, created_at
+FROM activation_code
+WHERE code_hash = $1
 `
 
-func (q *Queries) GetAccountProfileByNo(ctx context.Context, no string) (AccountProfile, error) {
-	row := q.db.QueryRow(ctx, getAccountProfileByNo, no)
-	var i AccountProfile
-	err := row.Scan(
-		&i.AccountID,
-		&i.TenantID,
-		&i.No,
-		&i.OrgID,
-		&i.EnrollmentYear,
-		&i.Title,
-	)
-	return i, err
-}
-
-const getActivationCodeByHash = `-- name: GetActivationCodeByHash :one
-SELECT id, tenant_id, account_id, code_hash, status, expire_at, used_at, created_by, created_at FROM activation_code WHERE code_hash = $1
-`
-
-// 登录前激活码定位:必须在特权连接上执行,仅返回激活码最小字段用于定位租户与账号。
-func (q *Queries) GetActivationCodeByHash(ctx context.Context, codeHash string) (ActivationCode, error) {
-	row := q.db.QueryRow(ctx, getActivationCodeByHash, codeHash)
+func (q *Queries) GetActivationCodeByHashPrivileged(ctx context.Context, codeHash string) (ActivationCode, error) {
+	row := q.db.QueryRow(ctx, getActivationCodeByHashPrivileged, codeHash)
 	var i ActivationCode
 	err := row.Scan(
 		&i.ID,
@@ -1101,105 +1054,42 @@ func (q *Queries) GetActivationCodeByHash(ctx context.Context, codeHash string) 
 	return i, err
 }
 
-const getClassByID = `-- name: GetClassByID :one
-SELECT id, tenant_id, major_id, name, enrollment_year, status, created_at, updated_at, deleted_at FROM class WHERE id = $1 AND deleted_at IS NULL
+const getAuthSessionByRefreshHashPrivileged = `-- name: GetAuthSessionByRefreshHashPrivileged :one
+SELECT id, tenant_id, account_id, refresh_token_hash, device_info, ip, status, expire_at, created_at
+FROM auth_session
+WHERE refresh_token_hash = $1
 `
 
-func (q *Queries) GetClassByID(ctx context.Context, id int64) (Class, error) {
-	row := q.db.QueryRow(ctx, getClassByID, id)
-	var i Class
+func (q *Queries) GetAuthSessionByRefreshHashPrivileged(ctx context.Context, refreshTokenHash string) (AuthSession, error) {
+	row := q.db.QueryRow(ctx, getAuthSessionByRefreshHashPrivileged, refreshTokenHash)
+	var i AuthSession
 	err := row.Scan(
 		&i.ID,
 		&i.TenantID,
-		&i.MajorID,
-		&i.Name,
-		&i.EnrollmentYear,
+		&i.AccountID,
+		&i.RefreshTokenHash,
+		&i.DeviceInfo,
+		&i.Ip,
 		&i.Status,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-		&i.DeletedAt,
-	)
-	return i, err
-}
-
-const getDepartmentByID = `-- name: GetDepartmentByID :one
-SELECT id, tenant_id, name, code, created_at, updated_at, deleted_at FROM department WHERE id = $1 AND deleted_at IS NULL
-`
-
-func (q *Queries) GetDepartmentByID(ctx context.Context, id int64) (Department, error) {
-	row := q.db.QueryRow(ctx, getDepartmentByID, id)
-	var i Department
-	err := row.Scan(
-		&i.ID,
-		&i.TenantID,
-		&i.Name,
-		&i.Code,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-		&i.DeletedAt,
-	)
-	return i, err
-}
-
-const getLatestSmsCode = `-- name: GetLatestSmsCode :one
-SELECT id, tenant_id, phone_hash, code_hash, scene, expire_at, used, created_at FROM sms_code
-WHERE phone_hash = $1 AND scene = $2 AND used = false AND expire_at > now()
-ORDER BY created_at DESC LIMIT 1
-`
-
-type GetLatestSmsCodeParams struct {
-	PhoneHash string `json:"phone_hash"`
-	Scene     int16  `json:"scene"`
-}
-
-func (q *Queries) GetLatestSmsCode(ctx context.Context, arg GetLatestSmsCodeParams) (SmsCode, error) {
-	row := q.db.QueryRow(ctx, getLatestSmsCode, arg.PhoneHash, arg.Scene)
-	var i SmsCode
-	err := row.Scan(
-		&i.ID,
-		&i.TenantID,
-		&i.PhoneHash,
-		&i.CodeHash,
-		&i.Scene,
 		&i.ExpireAt,
-		&i.Used,
 		&i.CreatedAt,
 	)
 	return i, err
 }
 
-const getMajorByID = `-- name: GetMajorByID :one
-SELECT id, tenant_id, department_id, name, created_at, updated_at, deleted_at FROM major WHERE id = $1 AND deleted_at IS NULL
+const getImportPreview = `-- name: GetImportPreview :one
+SELECT id, tenant_id, operator_id, target_type, file_name, rows, preview_result, status, expire_at, submitted_at, created_at
+FROM import_preview
+WHERE id = $1 AND tenant_id = $2
 `
 
-func (q *Queries) GetMajorByID(ctx context.Context, id int64) (Major, error) {
-	row := q.db.QueryRow(ctx, getMajorByID, id)
-	var i Major
-	err := row.Scan(
-		&i.ID,
-		&i.TenantID,
-		&i.DepartmentID,
-		&i.Name,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-		&i.DeletedAt,
-	)
-	return i, err
+type GetImportPreviewParams struct {
+	ID       int64 `json:"id"`
+	TenantID int64 `json:"tenant_id"`
 }
 
-const getPendingImportPreview = `-- name: GetPendingImportPreview :one
-SELECT id, tenant_id, operator_id, target_type, file_name, rows, preview_result, status, expire_at, created_at, submitted_at FROM import_preview
-WHERE id = $1 AND operator_id = $2 AND status = 1 AND expire_at > now()
-FOR UPDATE
-`
-
-type GetPendingImportPreviewParams struct {
-	ID         int64 `json:"id"`
-	OperatorID int64 `json:"operator_id"`
-}
-
-func (q *Queries) GetPendingImportPreview(ctx context.Context, arg GetPendingImportPreviewParams) (ImportPreview, error) {
-	row := q.db.QueryRow(ctx, getPendingImportPreview, arg.ID, arg.OperatorID)
+func (q *Queries) GetImportPreview(ctx context.Context, arg GetImportPreviewParams) (ImportPreview, error) {
+	row := q.db.QueryRow(ctx, getImportPreview, arg.ID, arg.TenantID)
 	var i ImportPreview
 	err := row.Scan(
 		&i.ID,
@@ -1211,47 +1101,49 @@ func (q *Queries) GetPendingImportPreview(ctx context.Context, arg GetPendingImp
 		&i.PreviewResult,
 		&i.Status,
 		&i.ExpireAt,
-		&i.CreatedAt,
 		&i.SubmittedAt,
+		&i.CreatedAt,
 	)
 	return i, err
 }
 
-const getPlatformAdminByID = `-- name: GetPlatformAdminByID :one
-SELECT id, username, password_hash, name, status, created_at, updated_at FROM platform_admin WHERE id = $1
+const getLatestSMSCode = `-- name: GetLatestSMSCode :one
+SELECT id, tenant_id, phone_hash, code_hash, scene, expire_at, verify_attempts, used, created_at
+FROM sms_code
+WHERE tenant_id = $1 AND phone_hash = $2 AND scene = $3
+ORDER BY created_at DESC
+LIMIT 1
 `
 
-func (q *Queries) GetPlatformAdminByID(ctx context.Context, id int64) (PlatformAdmin, error) {
-	row := q.db.QueryRow(ctx, getPlatformAdminByID, id)
-	var i PlatformAdmin
+type GetLatestSMSCodeParams struct {
+	TenantID  int64  `json:"tenant_id"`
+	PhoneHash string `json:"phone_hash"`
+	Scene     int16  `json:"scene"`
+}
+
+func (q *Queries) GetLatestSMSCode(ctx context.Context, arg GetLatestSMSCodeParams) (SmsCode, error) {
+	row := q.db.QueryRow(ctx, getLatestSMSCode, arg.TenantID, arg.PhoneHash, arg.Scene)
+	var i SmsCode
 	err := row.Scan(
 		&i.ID,
-		&i.Username,
-		&i.PasswordHash,
-		&i.Name,
-		&i.Status,
+		&i.TenantID,
+		&i.PhoneHash,
+		&i.CodeHash,
+		&i.Scene,
+		&i.ExpireAt,
+		&i.VerifyAttempts,
+		&i.Used,
 		&i.CreatedAt,
-		&i.UpdatedAt,
 	)
 	return i, err
 }
 
 const getPlatformAdminByUsername = `-- name: GetPlatformAdminByUsername :one
-
-
-SELECT id, username, password_hash, name, status, created_at, updated_at FROM platform_admin WHERE username = $1
+SELECT id, username, password_hash, name, status, created_at, updated_at
+FROM platform_admin
+WHERE username = $1
 `
 
-// M1 identity sqlc 查询源。
-// 约定:租户表查询不显式写 tenant_id 条件(RLS 透明过滤),仅写业务条件;插入带 tenant_id(WITH CHECK)。
-// 雪花 ID 由应用传入。全局表(platform_admin/tenant/tenant_application)无 RLS。
-// 受控特权路径(预认证定位、平台级 tenant_id=NULL 审计/验证码):由 service 在【特权连接】上执行
-//
-//	(属主绕 RLS,见 docs/01 §8);sqlc 正常类型化,无手写 SQL。
-//
-// ============================================================
-// platform_admin
-// ============================================================
 func (q *Queries) GetPlatformAdminByUsername(ctx context.Context, username string) (PlatformAdmin, error) {
 	row := q.db.QueryRow(ctx, getPlatformAdminByUsername, username)
 	var i PlatformAdmin
@@ -1267,16 +1159,41 @@ func (q *Queries) GetPlatformAdminByUsername(ctx context.Context, username strin
 	return i, err
 }
 
-const getSsoConfig = `-- name: GetSsoConfig :one
-
-SELECT id, tenant_id, type, config, match_field, enabled, created_at, updated_at FROM sso_config WHERE tenant_id = $1 AND enabled = true LIMIT 1
+const getPlatformAuthSessionByRefreshHash = `-- name: GetPlatformAuthSessionByRefreshHash :one
+SELECT id, platform_admin_id, refresh_token_hash, device_info, ip, status, expire_at, created_at
+FROM platform_auth_session
+WHERE refresh_token_hash = $1
 `
 
-// ============================================================
-// sso_config
-// ============================================================
-func (q *Queries) GetSsoConfig(ctx context.Context, tenantID int64) (SsoConfig, error) {
-	row := q.db.QueryRow(ctx, getSsoConfig, tenantID)
+func (q *Queries) GetPlatformAuthSessionByRefreshHash(ctx context.Context, refreshTokenHash string) (PlatformAuthSession, error) {
+	row := q.db.QueryRow(ctx, getPlatformAuthSessionByRefreshHash, refreshTokenHash)
+	var i PlatformAuthSession
+	err := row.Scan(
+		&i.ID,
+		&i.PlatformAdminID,
+		&i.RefreshTokenHash,
+		&i.DeviceInfo,
+		&i.Ip,
+		&i.Status,
+		&i.ExpireAt,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const getSSOConfig = `-- name: GetSSOConfig :one
+SELECT id, tenant_id, type, config, match_field, enabled, created_at, updated_at
+FROM sso_config
+WHERE tenant_id = $1 AND type = $2
+`
+
+type GetSSOConfigParams struct {
+	TenantID int64 `json:"tenant_id"`
+	Type     int16 `json:"type"`
+}
+
+func (q *Queries) GetSSOConfig(ctx context.Context, arg GetSSOConfigParams) (SsoConfig, error) {
+	row := q.db.QueryRow(ctx, getSSOConfig, arg.TenantID, arg.Type)
 	var i SsoConfig
 	err := row.Scan(
 		&i.ID,
@@ -1291,12 +1208,14 @@ func (q *Queries) GetSsoConfig(ctx context.Context, tenantID int64) (SsoConfig, 
 	return i, err
 }
 
-const getTenantApplicationByID = `-- name: GetTenantApplicationByID :one
-SELECT id, school_name, school_type, contact_name, contact_phone, contact_email, status, reject_reason, reviewed_by, tenant_id, created_at, updated_at FROM tenant_application WHERE id = $1
+const getTenantApplication = `-- name: GetTenantApplication :one
+SELECT id, school_name, school_type, contact_name, contact_phone, contact_email, status, reject_reason, reviewed_by, tenant_id, created_at, updated_at
+FROM tenant_application
+WHERE id = $1
 `
 
-func (q *Queries) GetTenantApplicationByID(ctx context.Context, id int64) (TenantApplication, error) {
-	row := q.db.QueryRow(ctx, getTenantApplicationByID, id)
+func (q *Queries) GetTenantApplication(ctx context.Context, id int64) (TenantApplication, error) {
+	row := q.db.QueryRow(ctx, getTenantApplication, id)
 	var i TenantApplication
 	err := row.Scan(
 		&i.ID,
@@ -1316,7 +1235,9 @@ func (q *Queries) GetTenantApplicationByID(ctx context.Context, id int64) (Tenan
 }
 
 const getTenantByCode = `-- name: GetTenantByCode :one
-SELECT id, code, name, type, status, deploy_mode, expire_at, logo_url, display_name, feature_flags, auth_mode, enable_activation_code, created_at, updated_at FROM tenant WHERE code = $1
+SELECT id, code, name, type, status, deploy_mode, expire_at, logo_url, display_name, feature_flags, auth_mode, enable_activation_code, created_at, updated_at
+FROM tenant
+WHERE code = $1
 `
 
 func (q *Queries) GetTenantByCode(ctx context.Context, code string) (Tenant, error) {
@@ -1342,13 +1263,11 @@ func (q *Queries) GetTenantByCode(ctx context.Context, code string) (Tenant, err
 }
 
 const getTenantByID = `-- name: GetTenantByID :one
-
-SELECT id, code, name, type, status, deploy_mode, expire_at, logo_url, display_name, feature_flags, auth_mode, enable_activation_code, created_at, updated_at FROM tenant WHERE id = $1
+SELECT id, code, name, type, status, deploy_mode, expire_at, logo_url, display_name, feature_flags, auth_mode, enable_activation_code, created_at, updated_at
+FROM tenant
+WHERE id = $1
 `
 
-// ============================================================
-// tenant
-// ============================================================
 func (q *Queries) GetTenantByID(ctx context.Context, id int64) (Tenant, error) {
 	row := q.db.QueryRow(ctx, getTenantByID, id)
 	var i Tenant
@@ -1371,125 +1290,89 @@ func (q *Queries) GetTenantByID(ctx context.Context, id int64) (Tenant, error) {
 	return i, err
 }
 
-const hasAccountRole = `-- name: HasAccountRole :one
-SELECT EXISTS(SELECT 1 FROM account_role WHERE account_id = $1 AND role = $2)
+const incrementSMSVerifyAttempts = `-- name: IncrementSMSVerifyAttempts :exec
+UPDATE sms_code SET verify_attempts = verify_attempts + 1
+WHERE id = $1 AND tenant_id = $2
 `
 
-type HasAccountRoleParams struct {
-	AccountID int64 `json:"account_id"`
-	Role      int16 `json:"role"`
+type IncrementSMSVerifyAttemptsParams struct {
+	ID       int64 `json:"id"`
+	TenantID int64 `json:"tenant_id"`
 }
 
-func (q *Queries) HasAccountRole(ctx context.Context, arg HasAccountRoleParams) (bool, error) {
-	row := q.db.QueryRow(ctx, hasAccountRole, arg.AccountID, arg.Role)
-	var exists bool
-	err := row.Scan(&exists)
-	return exists, err
-}
-
-const incrAccountPwdFailed = `-- name: IncrAccountPwdFailed :one
-UPDATE account
-SET pwd_failed_count = pwd_failed_count + 1,
-    locked_until = CASE WHEN pwd_failed_count + 1 >= $2
-                        THEN now() + ($3 || ' minutes')::interval
-                        ELSE locked_until END
-WHERE id = $1
-RETURNING id, tenant_id, phone_enc, phone_hash, password_hash, name, base_identity, status, must_change_pwd, pwd_failed_count, locked_until, activated_at, created_at, updated_at
-`
-
-type IncrAccountPwdFailedParams struct {
-	ID             int64       `json:"id"`
-	PwdFailedCount int16       `json:"pwd_failed_count"`
-	Column3        pgtype.Text `json:"column_3"`
-}
-
-// 密码失败计数 +1,达阈值($2)则锁定 $3 分钟;返回更新后账号。
-func (q *Queries) IncrAccountPwdFailed(ctx context.Context, arg IncrAccountPwdFailedParams) (Account, error) {
-	row := q.db.QueryRow(ctx, incrAccountPwdFailed, arg.ID, arg.PwdFailedCount, arg.Column3)
-	var i Account
-	err := row.Scan(
-		&i.ID,
-		&i.TenantID,
-		&i.PhoneEnc,
-		&i.PhoneHash,
-		&i.PasswordHash,
-		&i.Name,
-		&i.BaseIdentity,
-		&i.Status,
-		&i.MustChangePwd,
-		&i.PwdFailedCount,
-		&i.LockedUntil,
-		&i.ActivatedAt,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-	)
-	return i, err
-}
-
-const listAccountRoles = `-- name: ListAccountRoles :many
-SELECT role FROM account_role WHERE account_id = $1 ORDER BY role
-`
-
-func (q *Queries) ListAccountRoles(ctx context.Context, accountID int64) ([]int16, error) {
-	rows, err := q.db.Query(ctx, listAccountRoles, accountID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []int16{}
-	for rows.Next() {
-		var role int16
-		if err := rows.Scan(&role); err != nil {
-			return nil, err
-		}
-		items = append(items, role)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
+func (q *Queries) IncrementSMSVerifyAttempts(ctx context.Context, arg IncrementSMSVerifyAttemptsParams) error {
+	_, err := q.db.Exec(ctx, incrementSMSVerifyAttempts, arg.ID, arg.TenantID)
+	return err
 }
 
 const listAccounts = `-- name: ListAccounts :many
-SELECT a.id, a.tenant_id, a.phone_enc, a.phone_hash, a.password_hash, a.name, a.base_identity, a.status, a.must_change_pwd, a.pwd_failed_count, a.locked_until, a.activated_at, a.created_at, a.updated_at FROM account a
-LEFT JOIN account_profile p ON p.account_id = a.id
-WHERE ($3::SMALLINT IS NULL OR a.status = $3)
-  AND ($4::SMALLINT IS NULL OR EXISTS (
-    SELECT 1 FROM account_role ar WHERE ar.account_id = a.id AND ar.role = $4
-  ))
-  AND ($5::BIGINT IS NULL OR (
-    a.base_identity = 1 AND p.org_id = $5
-  ))
-  AND ($6::TEXT IS NULL OR a.name ILIKE '%' || $6 || '%')
-ORDER BY a.created_at DESC
-LIMIT $1 OFFSET $2
+SELECT a.id, a.tenant_id, a.phone_enc, a.phone_hash, a.password_hash, a.name, a.base_identity, a.status,
+       a.must_change_pwd, a.pwd_failed_count, a.locked_until, a.activated_at, a.deleted_at, a.created_at, a.updated_at,
+       p.no, p.org_id, p.enrollment_year, p.title,
+       COALESCE(array_agg(ar.role ORDER BY ar.role) FILTER (WHERE ar.role IS NOT NULL), ARRAY[]::smallint[])::smallint[] AS roles,
+       COUNT(*) OVER() AS total_count
+FROM account a
+LEFT JOIN account_profile p ON p.account_id = a.id AND p.tenant_id = a.tenant_id
+LEFT JOIN account_role ar ON ar.account_id = a.id AND ar.tenant_id = a.tenant_id
+WHERE a.deleted_at IS NULL
+  AND ($1::smallint = 0 OR a.status = $1)
+  AND ($2::smallint = 0 OR a.base_identity = $2)
+  AND ($3::bigint = 0 OR p.org_id = $3)
+  AND ($4::text = '' OR a.name ILIKE '%' || $4 || '%' OR p.no ILIKE '%' || $4 || '%')
+GROUP BY a.id, p.no, p.org_id, p.enrollment_year, p.title
+ORDER BY a.created_at DESC, a.id DESC
+LIMIT $5 OFFSET $6
 `
 
 type ListAccountsParams struct {
-	Limit   int32       `json:"limit"`
-	Offset  int32       `json:"offset"`
-	Status  pgtype.Int2 `json:"status"`
-	Role    pgtype.Int2 `json:"role"`
-	ClassID pgtype.Int8 `json:"class_id"`
-	Keyword pgtype.Text `json:"keyword"`
+	Column1 int16  `json:"column_1"`
+	Column2 int16  `json:"column_2"`
+	Column3 int64  `json:"column_3"`
+	Column4 string `json:"column_4"`
+	Limit   int32  `json:"limit"`
+	Offset  int32  `json:"offset"`
 }
 
-func (q *Queries) ListAccounts(ctx context.Context, arg ListAccountsParams) ([]Account, error) {
+type ListAccountsRow struct {
+	ID             int64              `json:"id"`
+	TenantID       int64              `json:"tenant_id"`
+	PhoneEnc       []byte             `json:"phone_enc"`
+	PhoneHash      string             `json:"phone_hash"`
+	PasswordHash   pgtype.Text        `json:"password_hash"`
+	Name           string             `json:"name"`
+	BaseIdentity   int16              `json:"base_identity"`
+	Status         int16              `json:"status"`
+	MustChangePwd  bool               `json:"must_change_pwd"`
+	PwdFailedCount int16              `json:"pwd_failed_count"`
+	LockedUntil    pgtype.Timestamptz `json:"locked_until"`
+	ActivatedAt    pgtype.Timestamptz `json:"activated_at"`
+	DeletedAt      pgtype.Timestamptz `json:"deleted_at"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+	No             pgtype.Text        `json:"no"`
+	OrgID          pgtype.Int8        `json:"org_id"`
+	EnrollmentYear pgtype.Int2        `json:"enrollment_year"`
+	Title          pgtype.Text        `json:"title"`
+	Roles          []int16            `json:"roles"`
+	TotalCount     int64              `json:"total_count"`
+}
+
+func (q *Queries) ListAccounts(ctx context.Context, arg ListAccountsParams) ([]ListAccountsRow, error) {
 	rows, err := q.db.Query(ctx, listAccounts,
+		arg.Column1,
+		arg.Column2,
+		arg.Column3,
+		arg.Column4,
 		arg.Limit,
 		arg.Offset,
-		arg.Status,
-		arg.Role,
-		arg.ClassID,
-		arg.Keyword,
 	)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []Account{}
+	items := []ListAccountsRow{}
 	for rows.Next() {
-		var i Account
+		var i ListAccountsRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.TenantID,
@@ -1503,8 +1386,15 @@ func (q *Queries) ListAccounts(ctx context.Context, arg ListAccountsParams) ([]A
 			&i.PwdFailedCount,
 			&i.LockedUntil,
 			&i.ActivatedAt,
+			&i.DeletedAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.No,
+			&i.OrgID,
+			&i.EnrollmentYear,
+			&i.Title,
+			&i.Roles,
+			&i.TotalCount,
 		); err != nil {
 			return nil, err
 		}
@@ -1516,12 +1406,88 @@ func (q *Queries) ListAccounts(ctx context.Context, arg ListAccountsParams) ([]A
 	return items, nil
 }
 
-const listActiveSessions = `-- name: ListActiveSessions :many
-SELECT id, tenant_id, account_id, refresh_token_hash, device_info, ip, status, expire_at, created_at FROM auth_session WHERE account_id = $1 AND status = 1 ORDER BY created_at DESC
+const listAccountsByPhoneHashPrivileged = `-- name: ListAccountsByPhoneHashPrivileged :many
+SELECT a.id, a.tenant_id, a.phone_enc, a.phone_hash, a.password_hash, a.name, a.base_identity, a.status,
+       a.must_change_pwd, a.pwd_failed_count, a.locked_until, a.activated_at, a.deleted_at, a.created_at, a.updated_at,
+       t.code AS tenant_code, t.name AS tenant_name
+FROM account a
+JOIN tenant t ON t.id = a.tenant_id
+WHERE a.phone_hash = $1 AND a.deleted_at IS NULL
+ORDER BY t.name, a.id
 `
 
-func (q *Queries) ListActiveSessions(ctx context.Context, accountID int64) ([]AuthSession, error) {
-	rows, err := q.db.Query(ctx, listActiveSessions, accountID)
+type ListAccountsByPhoneHashPrivilegedRow struct {
+	ID             int64              `json:"id"`
+	TenantID       int64              `json:"tenant_id"`
+	PhoneEnc       []byte             `json:"phone_enc"`
+	PhoneHash      string             `json:"phone_hash"`
+	PasswordHash   pgtype.Text        `json:"password_hash"`
+	Name           string             `json:"name"`
+	BaseIdentity   int16              `json:"base_identity"`
+	Status         int16              `json:"status"`
+	MustChangePwd  bool               `json:"must_change_pwd"`
+	PwdFailedCount int16              `json:"pwd_failed_count"`
+	LockedUntil    pgtype.Timestamptz `json:"locked_until"`
+	ActivatedAt    pgtype.Timestamptz `json:"activated_at"`
+	DeletedAt      pgtype.Timestamptz `json:"deleted_at"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+	TenantCode     string             `json:"tenant_code"`
+	TenantName     string             `json:"tenant_name"`
+}
+
+func (q *Queries) ListAccountsByPhoneHashPrivileged(ctx context.Context, phoneHash string) ([]ListAccountsByPhoneHashPrivilegedRow, error) {
+	rows, err := q.db.Query(ctx, listAccountsByPhoneHashPrivileged, phoneHash)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListAccountsByPhoneHashPrivilegedRow{}
+	for rows.Next() {
+		var i ListAccountsByPhoneHashPrivilegedRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.PhoneEnc,
+			&i.PhoneHash,
+			&i.PasswordHash,
+			&i.Name,
+			&i.BaseIdentity,
+			&i.Status,
+			&i.MustChangePwd,
+			&i.PwdFailedCount,
+			&i.LockedUntil,
+			&i.ActivatedAt,
+			&i.DeletedAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.TenantCode,
+			&i.TenantName,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAuthSessionsByAccount = `-- name: ListAuthSessionsByAccount :many
+SELECT id, tenant_id, account_id, refresh_token_hash, device_info, ip, status, expire_at, created_at
+FROM auth_session
+WHERE tenant_id = $1 AND account_id = $2
+ORDER BY created_at DESC, id DESC
+`
+
+type ListAuthSessionsByAccountParams struct {
+	TenantID  int64 `json:"tenant_id"`
+	AccountID int64 `json:"account_id"`
+}
+
+func (q *Queries) ListAuthSessionsByAccount(ctx context.Context, arg ListAuthSessionsByAccountParams) ([]AuthSession, error) {
+	rows, err := q.db.Query(ctx, listAuthSessionsByAccount, arg.TenantID, arg.AccountID)
 	if err != nil {
 		return nil, err
 	}
@@ -1550,73 +1516,15 @@ func (q *Queries) ListActiveSessions(ctx context.Context, accountID int64) ([]Au
 	return items, nil
 }
 
-const listAuditLogs = `-- name: ListAuditLogs :many
-SELECT id, tenant_id, actor_id, actor_role, action, target_type, target_id, detail, ip, trace_id, created_at FROM audit_log
-WHERE ($3::BIGINT IS NULL OR actor_id = $3)
-  AND ($4::TEXT IS NULL OR action = $4)
-  AND ($5::TEXT IS NULL OR target_type = $5)
-  AND ($6::TIMESTAMPTZ IS NULL OR created_at >= $6)
-  AND ($7::TIMESTAMPTZ IS NULL OR created_at <= $7)
-ORDER BY created_at DESC
-LIMIT $1 OFFSET $2
+const listClasses = `-- name: ListClasses :many
+SELECT id, tenant_id, major_id, name, enrollment_year, status, deleted_at
+FROM class
+WHERE deleted_at IS NULL AND ($1::bigint = 0 OR major_id = $1)
+ORDER BY enrollment_year DESC, name, id
 `
 
-type ListAuditLogsParams struct {
-	Limit      int32              `json:"limit"`
-	Offset     int32              `json:"offset"`
-	ActorID    pgtype.Int8        `json:"actor_id"`
-	Action     pgtype.Text        `json:"action"`
-	TargetType pgtype.Text        `json:"target_type"`
-	FromTime   pgtype.Timestamptz `json:"from_time"`
-	ToTime     pgtype.Timestamptz `json:"to_time"`
-}
-
-func (q *Queries) ListAuditLogs(ctx context.Context, arg ListAuditLogsParams) ([]AuditLog, error) {
-	rows, err := q.db.Query(ctx, listAuditLogs,
-		arg.Limit,
-		arg.Offset,
-		arg.ActorID,
-		arg.Action,
-		arg.TargetType,
-		arg.FromTime,
-		arg.ToTime,
-	)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []AuditLog{}
-	for rows.Next() {
-		var i AuditLog
-		if err := rows.Scan(
-			&i.ID,
-			&i.TenantID,
-			&i.ActorID,
-			&i.ActorRole,
-			&i.Action,
-			&i.TargetType,
-			&i.TargetID,
-			&i.Detail,
-			&i.Ip,
-			&i.TraceID,
-			&i.CreatedAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listClassesByMajor = `-- name: ListClassesByMajor :many
-SELECT id, tenant_id, major_id, name, enrollment_year, status, created_at, updated_at, deleted_at FROM class WHERE major_id = $1 AND deleted_at IS NULL ORDER BY enrollment_year DESC, name
-`
-
-func (q *Queries) ListClassesByMajor(ctx context.Context, majorID int64) ([]Class, error) {
-	rows, err := q.db.Query(ctx, listClassesByMajor, majorID)
+func (q *Queries) ListClasses(ctx context.Context, dollar_1 int64) ([]Class, error) {
+	rows, err := q.db.Query(ctx, listClasses, dollar_1)
 	if err != nil {
 		return nil, err
 	}
@@ -1631,8 +1539,6 @@ func (q *Queries) ListClassesByMajor(ctx context.Context, majorID int64) ([]Clas
 			&i.Name,
 			&i.EnrollmentYear,
 			&i.Status,
-			&i.CreatedAt,
-			&i.UpdatedAt,
 			&i.DeletedAt,
 		); err != nil {
 			return nil, err
@@ -1646,7 +1552,10 @@ func (q *Queries) ListClassesByMajor(ctx context.Context, majorID int64) ([]Clas
 }
 
 const listDepartments = `-- name: ListDepartments :many
-SELECT id, tenant_id, name, code, created_at, updated_at, deleted_at FROM department WHERE deleted_at IS NULL ORDER BY name
+SELECT id, tenant_id, name, code, deleted_at
+FROM department
+WHERE deleted_at IS NULL
+ORDER BY name, id
 `
 
 func (q *Queries) ListDepartments(ctx context.Context) ([]Department, error) {
@@ -1663,8 +1572,6 @@ func (q *Queries) ListDepartments(ctx context.Context) ([]Department, error) {
 			&i.TenantID,
 			&i.Name,
 			&i.Code,
-			&i.CreatedAt,
-			&i.UpdatedAt,
 			&i.DeletedAt,
 		); err != nil {
 			return nil, err
@@ -1678,16 +1585,14 @@ func (q *Queries) ListDepartments(ctx context.Context) ([]Department, error) {
 }
 
 const listImportBatches = `-- name: ListImportBatches :many
-SELECT id, tenant_id, operator_id, target_type, file_name, total, success, failed, error_detail, status, created_at FROM import_batch ORDER BY created_at DESC LIMIT $1 OFFSET $2
+SELECT id, tenant_id, operator_id, target_type, file_name, total, success, failed, error_detail, status, created_at
+FROM import_batch
+WHERE tenant_id = $1
+ORDER BY created_at DESC, id DESC
 `
 
-type ListImportBatchesParams struct {
-	Limit  int32 `json:"limit"`
-	Offset int32 `json:"offset"`
-}
-
-func (q *Queries) ListImportBatches(ctx context.Context, arg ListImportBatchesParams) ([]ImportBatch, error) {
-	rows, err := q.db.Query(ctx, listImportBatches, arg.Limit, arg.Offset)
+func (q *Queries) ListImportBatches(ctx context.Context, tenantID int64) ([]ImportBatch, error) {
+	rows, err := q.db.Query(ctx, listImportBatches, tenantID)
 	if err != nil {
 		return nil, err
 	}
@@ -1718,12 +1623,15 @@ func (q *Queries) ListImportBatches(ctx context.Context, arg ListImportBatchesPa
 	return items, nil
 }
 
-const listMajorsByDepartment = `-- name: ListMajorsByDepartment :many
-SELECT id, tenant_id, department_id, name, created_at, updated_at, deleted_at FROM major WHERE department_id = $1 AND deleted_at IS NULL ORDER BY name
+const listMajors = `-- name: ListMajors :many
+SELECT id, tenant_id, department_id, name, deleted_at
+FROM major
+WHERE deleted_at IS NULL AND ($1::bigint = 0 OR department_id = $1)
+ORDER BY name, id
 `
 
-func (q *Queries) ListMajorsByDepartment(ctx context.Context, departmentID int64) ([]Major, error) {
-	rows, err := q.db.Query(ctx, listMajorsByDepartment, departmentID)
+func (q *Queries) ListMajors(ctx context.Context, dollar_1 int64) ([]Major, error) {
+	rows, err := q.db.Query(ctx, listMajors, dollar_1)
 	if err != nil {
 		return nil, err
 	}
@@ -1736,8 +1644,6 @@ func (q *Queries) ListMajorsByDepartment(ctx context.Context, departmentID int64
 			&i.TenantID,
 			&i.DepartmentID,
 			&i.Name,
-			&i.CreatedAt,
-			&i.UpdatedAt,
 			&i.DeletedAt,
 		); err != nil {
 			return nil, err
@@ -1750,57 +1656,31 @@ func (q *Queries) ListMajorsByDepartment(ctx context.Context, departmentID int64
 	return items, nil
 }
 
-const listPlatformAuditLogs = `-- name: ListPlatformAuditLogs :many
-SELECT id, tenant_id, actor_id, actor_role, action, target_type, target_id, detail, ip, trace_id, created_at FROM audit_log
-WHERE ($3::BIGINT IS NULL OR actor_id = $3)
-  AND ($4::TEXT IS NULL OR action = $4)
-  AND ($5::TEXT IS NULL OR target_type = $5)
-  AND ($6::TIMESTAMPTZ IS NULL OR created_at >= $6)
-  AND ($7::TIMESTAMPTZ IS NULL OR created_at <= $7)
-ORDER BY created_at DESC
-LIMIT $1 OFFSET $2
+const listSSOConfigs = `-- name: ListSSOConfigs :many
+SELECT id, tenant_id, type, config, match_field, enabled, created_at, updated_at
+FROM sso_config
+WHERE tenant_id = $1
+ORDER BY type
 `
 
-type ListPlatformAuditLogsParams struct {
-	Limit      int32              `json:"limit"`
-	Offset     int32              `json:"offset"`
-	ActorID    pgtype.Int8        `json:"actor_id"`
-	Action     pgtype.Text        `json:"action"`
-	TargetType pgtype.Text        `json:"target_type"`
-	FromTime   pgtype.Timestamptz `json:"from_time"`
-	ToTime     pgtype.Timestamptz `json:"to_time"`
-}
-
-// 平台管理员查平台级与全校审计;必须走特权连接,由 M1 contract 收敛权限入口。
-func (q *Queries) ListPlatformAuditLogs(ctx context.Context, arg ListPlatformAuditLogsParams) ([]AuditLog, error) {
-	rows, err := q.db.Query(ctx, listPlatformAuditLogs,
-		arg.Limit,
-		arg.Offset,
-		arg.ActorID,
-		arg.Action,
-		arg.TargetType,
-		arg.FromTime,
-		arg.ToTime,
-	)
+func (q *Queries) ListSSOConfigs(ctx context.Context, tenantID int64) ([]SsoConfig, error) {
+	rows, err := q.db.Query(ctx, listSSOConfigs, tenantID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []AuditLog{}
+	items := []SsoConfig{}
 	for rows.Next() {
-		var i AuditLog
+		var i SsoConfig
 		if err := rows.Scan(
 			&i.ID,
 			&i.TenantID,
-			&i.ActorID,
-			&i.ActorRole,
-			&i.Action,
-			&i.TargetType,
-			&i.TargetID,
-			&i.Detail,
-			&i.Ip,
-			&i.TraceID,
+			&i.Type,
+			&i.Config,
+			&i.MatchField,
+			&i.Enabled,
 			&i.CreatedAt,
+			&i.UpdatedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -1813,20 +1693,14 @@ func (q *Queries) ListPlatformAuditLogs(ctx context.Context, arg ListPlatformAud
 }
 
 const listTenantApplications = `-- name: ListTenantApplications :many
-SELECT id, school_name, school_type, contact_name, contact_phone, contact_email, status, reject_reason, reviewed_by, tenant_id, created_at, updated_at FROM tenant_application
-WHERE ($3::SMALLINT IS NULL OR status = $3)
-ORDER BY created_at DESC
-LIMIT $1 OFFSET $2
+SELECT id, school_name, school_type, contact_name, contact_phone, contact_email, status, reject_reason, reviewed_by, tenant_id, created_at, updated_at
+FROM tenant_application
+WHERE ($1::smallint = 0 OR status = $1)
+ORDER BY created_at DESC, id DESC
 `
 
-type ListTenantApplicationsParams struct {
-	Limit  int32       `json:"limit"`
-	Offset int32       `json:"offset"`
-	Status pgtype.Int2 `json:"status"`
-}
-
-func (q *Queries) ListTenantApplications(ctx context.Context, arg ListTenantApplicationsParams) ([]TenantApplication, error) {
-	rows, err := q.db.Query(ctx, listTenantApplications, arg.Limit, arg.Offset, arg.Status)
+func (q *Queries) ListTenantApplications(ctx context.Context, dollar_1 int16) ([]TenantApplication, error) {
+	rows, err := q.db.Query(ctx, listTenantApplications, dollar_1)
 	if err != nil {
 		return nil, err
 	}
@@ -1859,20 +1733,13 @@ func (q *Queries) ListTenantApplications(ctx context.Context, arg ListTenantAppl
 }
 
 const listTenants = `-- name: ListTenants :many
-SELECT id, code, name, type, status, deploy_mode, expire_at, logo_url, display_name, feature_flags, auth_mode, enable_activation_code, created_at, updated_at FROM tenant
-WHERE ($3::SMALLINT IS NULL OR status = $3)
-ORDER BY created_at DESC
-LIMIT $1 OFFSET $2
+SELECT id, code, name, type, status, deploy_mode, expire_at, logo_url, display_name, feature_flags, auth_mode, enable_activation_code, created_at, updated_at
+FROM tenant
+ORDER BY created_at DESC, id DESC
 `
 
-type ListTenantsParams struct {
-	Limit  int32       `json:"limit"`
-	Offset int32       `json:"offset"`
-	Status pgtype.Int2 `json:"status"`
-}
-
-func (q *Queries) ListTenants(ctx context.Context, arg ListTenantsParams) ([]Tenant, error) {
-	rows, err := q.db.Query(ctx, listTenants, arg.Limit, arg.Offset, arg.Status)
+func (q *Queries) ListTenants(ctx context.Context) ([]Tenant, error) {
+	rows, err := q.db.Query(ctx, listTenants)
 	if err != nil {
 		return nil, err
 	}
@@ -1906,53 +1773,252 @@ func (q *Queries) ListTenants(ctx context.Context, arg ListTenantsParams) ([]Ten
 	return items, nil
 }
 
-const markActivationCodeUsed = `-- name: MarkActivationCodeUsed :exec
-UPDATE activation_code SET status = 2, used_at = now() WHERE id = $1 AND status = 1
+const majorExists = `-- name: MajorExists :one
+SELECT EXISTS(SELECT 1 FROM major WHERE id = $1 AND tenant_id = $2 AND deleted_at IS NULL)
 `
 
-func (q *Queries) MarkActivationCodeUsed(ctx context.Context, id int64) error {
-	_, err := q.db.Exec(ctx, markActivationCodeUsed, id)
-	return err
+type MajorExistsParams struct {
+	ID       int64 `json:"id"`
+	TenantID int64 `json:"tenant_id"`
+}
+
+func (q *Queries) MajorExists(ctx context.Context, arg MajorExistsParams) (bool, error) {
+	row := q.db.QueryRow(ctx, majorExists, arg.ID, arg.TenantID)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
 }
 
 const markImportPreviewSubmitted = `-- name: MarkImportPreviewSubmitted :exec
 UPDATE import_preview SET status = 2, submitted_at = now()
-WHERE id = $1 AND operator_id = $2 AND status = 1
+WHERE id = $1 AND tenant_id = $2 AND status = 1
 `
 
 type MarkImportPreviewSubmittedParams struct {
-	ID         int64 `json:"id"`
-	OperatorID int64 `json:"operator_id"`
+	ID       int64 `json:"id"`
+	TenantID int64 `json:"tenant_id"`
 }
 
 func (q *Queries) MarkImportPreviewSubmitted(ctx context.Context, arg MarkImportPreviewSubmittedParams) error {
-	_, err := q.db.Exec(ctx, markImportPreviewSubmitted, arg.ID, arg.OperatorID)
+	_, err := q.db.Exec(ctx, markImportPreviewSubmitted, arg.ID, arg.TenantID)
 	return err
 }
 
-const markSmsCodeUsed = `-- name: MarkSmsCodeUsed :exec
-UPDATE sms_code SET used = true WHERE id = $1
+const markSMSCodeUsed = `-- name: MarkSMSCodeUsed :exec
+UPDATE sms_code SET used = true
+WHERE id = $1 AND tenant_id = $2
 `
 
-func (q *Queries) MarkSmsCodeUsed(ctx context.Context, id int64) error {
-	_, err := q.db.Exec(ctx, markSmsCodeUsed, id)
+type MarkSMSCodeUsedParams struct {
+	ID       int64 `json:"id"`
+	TenantID int64 `json:"tenant_id"`
+}
+
+func (q *Queries) MarkSMSCodeUsed(ctx context.Context, arg MarkSMSCodeUsedParams) error {
+	_, err := q.db.Exec(ctx, markSMSCodeUsed, arg.ID, arg.TenantID)
 	return err
+}
+
+const platformStats = `-- name: PlatformStats :one
+SELECT
+  (SELECT COUNT(*) FROM tenant) AS tenant_count,
+  (SELECT COUNT(*) FROM account) AS account_count,
+  (SELECT COUNT(*) FROM account WHERE base_identity = 2) AS teacher_count,
+  (SELECT COUNT(*) FROM account WHERE base_identity = 1) AS student_count,
+  (SELECT COUNT(*) FROM account_role WHERE role = 2) AS school_admin_count,
+  (SELECT COUNT(*) FROM platform_admin WHERE status = 1) AS platform_admin_count,
+  (SELECT COUNT(*) FROM account WHERE status = 2) AS active_account_count,
+  (SELECT COUNT(*) FROM tenant WHERE status = 1) AS active_tenant_count,
+  (SELECT COUNT(*) FROM tenant_application WHERE status = 1) AS pending_apply_count,
+  (SELECT COUNT(*) FROM account WHERE status = 3) AS disabled_account_count
+`
+
+type PlatformStatsRow struct {
+	TenantCount          int64 `json:"tenant_count"`
+	AccountCount         int64 `json:"account_count"`
+	TeacherCount         int64 `json:"teacher_count"`
+	StudentCount         int64 `json:"student_count"`
+	SchoolAdminCount     int64 `json:"school_admin_count"`
+	PlatformAdminCount   int64 `json:"platform_admin_count"`
+	ActiveAccountCount   int64 `json:"active_account_count"`
+	ActiveTenantCount    int64 `json:"active_tenant_count"`
+	PendingApplyCount    int64 `json:"pending_apply_count"`
+	DisabledAccountCount int64 `json:"disabled_account_count"`
+}
+
+func (q *Queries) PlatformStats(ctx context.Context) (PlatformStatsRow, error) {
+	row := q.db.QueryRow(ctx, platformStats)
+	var i PlatformStatsRow
+	err := row.Scan(
+		&i.TenantCount,
+		&i.AccountCount,
+		&i.TeacherCount,
+		&i.StudentCount,
+		&i.SchoolAdminCount,
+		&i.PlatformAdminCount,
+		&i.ActiveAccountCount,
+		&i.ActiveTenantCount,
+		&i.PendingApplyCount,
+		&i.DisabledAccountCount,
+	)
+	return i, err
+}
+
+const promoteClasses = `-- name: PromoteClasses :exec
+UPDATE class
+SET enrollment_year = enrollment_year + 1
+WHERE tenant_id = $1 AND status = 1 AND deleted_at IS NULL
+`
+
+func (q *Queries) PromoteClasses(ctx context.Context, tenantID int64) error {
+	_, err := q.db.Exec(ctx, promoteClasses, tenantID)
+	return err
+}
+
+const queryAuditLogs = `-- name: QueryAuditLogs :many
+SELECT id, tenant_id, actor_id, actor_role, action, target_type, target_id, detail, ip, trace_id, created_at, COUNT(*) OVER() AS total_count
+FROM audit_log
+WHERE ($1::bigint = 0 OR tenant_id = $1)
+  AND ($2::bigint = 0 OR actor_id = $2)
+  AND ($3::text = '' OR action = $3)
+  AND ($4::text = '' OR target_type = $4)
+  AND ($5::timestamptz IS NULL OR created_at >= $5)
+  AND ($6::timestamptz IS NULL OR created_at <= $6)
+ORDER BY created_at DESC, id DESC
+LIMIT $7 OFFSET $8
+`
+
+type QueryAuditLogsParams struct {
+	Column1 int64              `json:"column_1"`
+	Column2 int64              `json:"column_2"`
+	Column3 string             `json:"column_3"`
+	Column4 string             `json:"column_4"`
+	Column5 pgtype.Timestamptz `json:"column_5"`
+	Column6 pgtype.Timestamptz `json:"column_6"`
+	Limit   int32              `json:"limit"`
+	Offset  int32              `json:"offset"`
+}
+
+type QueryAuditLogsRow struct {
+	ID         int64              `json:"id"`
+	TenantID   pgtype.Int8        `json:"tenant_id"`
+	ActorID    int64              `json:"actor_id"`
+	ActorRole  int16              `json:"actor_role"`
+	Action     string             `json:"action"`
+	TargetType string             `json:"target_type"`
+	TargetID   pgtype.Int8        `json:"target_id"`
+	Detail     []byte             `json:"detail"`
+	Ip         pgtype.Text        `json:"ip"`
+	TraceID    pgtype.Text        `json:"trace_id"`
+	CreatedAt  pgtype.Timestamptz `json:"created_at"`
+	TotalCount int64              `json:"total_count"`
+}
+
+func (q *Queries) QueryAuditLogs(ctx context.Context, arg QueryAuditLogsParams) ([]QueryAuditLogsRow, error) {
+	rows, err := q.db.Query(ctx, queryAuditLogs,
+		arg.Column1,
+		arg.Column2,
+		arg.Column3,
+		arg.Column4,
+		arg.Column5,
+		arg.Column6,
+		arg.Limit,
+		arg.Offset,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []QueryAuditLogsRow{}
+	for rows.Next() {
+		var i QueryAuditLogsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.ActorID,
+			&i.ActorRole,
+			&i.Action,
+			&i.TargetType,
+			&i.TargetID,
+			&i.Detail,
+			&i.Ip,
+			&i.TraceID,
+			&i.CreatedAt,
+			&i.TotalCount,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const recordPasswordFailure = `-- name: RecordPasswordFailure :one
+UPDATE account
+SET pwd_failed_count = $3, locked_until = $4, updated_at = now()
+WHERE id = $1 AND tenant_id = $2
+RETURNING id, tenant_id, phone_enc, phone_hash, password_hash, name, base_identity, status, must_change_pwd, pwd_failed_count, locked_until, activated_at, deleted_at, created_at, updated_at
+`
+
+type RecordPasswordFailureParams struct {
+	ID             int64              `json:"id"`
+	TenantID       int64              `json:"tenant_id"`
+	PwdFailedCount int16              `json:"pwd_failed_count"`
+	LockedUntil    pgtype.Timestamptz `json:"locked_until"`
+}
+
+func (q *Queries) RecordPasswordFailure(ctx context.Context, arg RecordPasswordFailureParams) (Account, error) {
+	row := q.db.QueryRow(ctx, recordPasswordFailure,
+		arg.ID,
+		arg.TenantID,
+		arg.PwdFailedCount,
+		arg.LockedUntil,
+	)
+	var i Account
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.PhoneEnc,
+		&i.PhoneHash,
+		&i.PasswordHash,
+		&i.Name,
+		&i.BaseIdentity,
+		&i.Status,
+		&i.MustChangePwd,
+		&i.PwdFailedCount,
+		&i.LockedUntil,
+		&i.ActivatedAt,
+		&i.DeletedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
 }
 
 const rejectTenantApplication = `-- name: RejectTenantApplication :one
-UPDATE tenant_application SET status = 3, reviewed_by = $2, reject_reason = $3
+UPDATE tenant_application
+SET status = $2, reject_reason = $3, reviewed_by = $4, updated_at = now()
 WHERE id = $1 AND status = 1
 RETURNING id, school_name, school_type, contact_name, contact_phone, contact_email, status, reject_reason, reviewed_by, tenant_id, created_at, updated_at
 `
 
 type RejectTenantApplicationParams struct {
 	ID           int64       `json:"id"`
-	ReviewedBy   pgtype.Int8 `json:"reviewed_by"`
+	Status       int16       `json:"status"`
 	RejectReason pgtype.Text `json:"reject_reason"`
+	ReviewedBy   pgtype.Int8 `json:"reviewed_by"`
 }
 
 func (q *Queries) RejectTenantApplication(ctx context.Context, arg RejectTenantApplicationParams) (TenantApplication, error) {
-	row := q.db.QueryRow(ctx, rejectTenantApplication, arg.ID, arg.ReviewedBy, arg.RejectReason)
+	row := q.db.QueryRow(ctx, rejectTenantApplication,
+		arg.ID,
+		arg.Status,
+		arg.RejectReason,
+		arg.ReviewedBy,
+	)
 	var i TenantApplication
 	err := row.Scan(
 		&i.ID,
@@ -1971,113 +2037,199 @@ func (q *Queries) RejectTenantApplication(ctx context.Context, arg RejectTenantA
 	return i, err
 }
 
-const removeAccountRole = `-- name: RemoveAccountRole :exec
-DELETE FROM account_role WHERE account_id = $1 AND role = $2
+const revokeAccountSessions = `-- name: RevokeAccountSessions :exec
+UPDATE auth_session SET status = 2
+WHERE tenant_id = $1 AND account_id = $2 AND status = 1
 `
 
-type RemoveAccountRoleParams struct {
+type RevokeAccountSessionsParams struct {
+	TenantID  int64 `json:"tenant_id"`
 	AccountID int64 `json:"account_id"`
-	Role      int16 `json:"role"`
 }
 
-func (q *Queries) RemoveAccountRole(ctx context.Context, arg RemoveAccountRoleParams) error {
-	_, err := q.db.Exec(ctx, removeAccountRole, arg.AccountID, arg.Role)
+func (q *Queries) RevokeAccountSessions(ctx context.Context, arg RevokeAccountSessionsParams) error {
+	_, err := q.db.Exec(ctx, revokeAccountSessions, arg.TenantID, arg.AccountID)
 	return err
 }
 
-const resetAccountPwdFailed = `-- name: ResetAccountPwdFailed :exec
-UPDATE account SET pwd_failed_count = 0, locked_until = NULL WHERE id = $1
+const revokeAuthSessionByID = `-- name: RevokeAuthSessionByID :exec
+UPDATE auth_session SET status = 2
+WHERE tenant_id = $1 AND id = $2
 `
 
-func (q *Queries) ResetAccountPwdFailed(ctx context.Context, id int64) error {
-	_, err := q.db.Exec(ctx, resetAccountPwdFailed, id)
+type RevokeAuthSessionByIDParams struct {
+	TenantID int64 `json:"tenant_id"`
+	ID       int64 `json:"id"`
+}
+
+func (q *Queries) RevokeAuthSessionByID(ctx context.Context, arg RevokeAuthSessionByIDParams) error {
+	_, err := q.db.Exec(ctx, revokeAuthSessionByID, arg.TenantID, arg.ID)
 	return err
 }
 
-const revokeAllAccountSessions = `-- name: RevokeAllAccountSessions :exec
-UPDATE auth_session SET status = 2 WHERE account_id = $1 AND status = 1
+const revokePlatformAuthSessionByID = `-- name: RevokePlatformAuthSessionByID :exec
+UPDATE platform_auth_session SET status = 2
+WHERE id = $1
 `
 
-// 单端登录踢人 / Refresh 重放检测:吊销该账号全部有效会话。
-func (q *Queries) RevokeAllAccountSessions(ctx context.Context, accountID int64) error {
-	_, err := q.db.Exec(ctx, revokeAllAccountSessions, accountID)
+func (q *Queries) RevokePlatformAuthSessionByID(ctx context.Context, id int64) error {
+	_, err := q.db.Exec(ctx, revokePlatformAuthSessionByID, id)
 	return err
 }
 
-const revokeAllPlatformAdminSessions = `-- name: RevokeAllPlatformAdminSessions :exec
-UPDATE platform_auth_session SET status = 2 WHERE platform_admin_id = $1 AND status = 1
+const revokePlatformSessions = `-- name: RevokePlatformSessions :exec
+UPDATE platform_auth_session SET status = 2
+WHERE platform_admin_id = $1 AND status = 1
 `
 
-func (q *Queries) RevokeAllPlatformAdminSessions(ctx context.Context, platformAdminID int64) error {
-	_, err := q.db.Exec(ctx, revokeAllPlatformAdminSessions, platformAdminID)
+func (q *Queries) RevokePlatformSessions(ctx context.Context, platformAdminID int64) error {
+	_, err := q.db.Exec(ctx, revokePlatformSessions, platformAdminID)
 	return err
 }
 
-const revokeAuthSession = `-- name: RevokeAuthSession :exec
-UPDATE auth_session SET status = 2 WHERE id = $1
+const revokeStudentSessionsByEnrollmentYear = `-- name: RevokeStudentSessionsByEnrollmentYear :exec
+UPDATE auth_session
+SET status = 2
+FROM account
+JOIN account_profile ON account.id = account_profile.account_id AND account.tenant_id = account_profile.tenant_id
+WHERE auth_session.account_id = account.id
+  AND auth_session.tenant_id = account.tenant_id
+  AND auth_session.tenant_id = $1
+  AND account_profile.enrollment_year = $2
+  AND account.base_identity = 1
+  AND account.status = 4
+  AND auth_session.status = 1
 `
 
-func (q *Queries) RevokeAuthSession(ctx context.Context, id int64) error {
-	_, err := q.db.Exec(ctx, revokeAuthSession, id)
-	return err
+type RevokeStudentSessionsByEnrollmentYearParams struct {
+	TenantID       int64       `json:"tenant_id"`
+	EnrollmentYear pgtype.Int2 `json:"enrollment_year"`
 }
 
-const revokePlatformAuthSession = `-- name: RevokePlatformAuthSession :exec
-UPDATE platform_auth_session SET status = 2 WHERE id = $1
-`
-
-func (q *Queries) RevokePlatformAuthSession(ctx context.Context, id int64) error {
-	_, err := q.db.Exec(ctx, revokePlatformAuthSession, id)
-	return err
-}
-
-const setAccountActivated = `-- name: SetAccountActivated :exec
-UPDATE account SET status = 2, must_change_pwd = false, activated_at = now() WHERE id = $1
-`
-
-func (q *Queries) SetAccountActivated(ctx context.Context, id int64) error {
-	_, err := q.db.Exec(ctx, setAccountActivated, id)
+func (q *Queries) RevokeStudentSessionsByEnrollmentYear(ctx context.Context, arg RevokeStudentSessionsByEnrollmentYearParams) error {
+	_, err := q.db.Exec(ctx, revokeStudentSessionsByEnrollmentYear, arg.TenantID, arg.EnrollmentYear)
 	return err
 }
 
 const softDeleteClass = `-- name: SoftDeleteClass :exec
-UPDATE class SET deleted_at = now() WHERE id = $1 AND deleted_at IS NULL
+UPDATE class SET deleted_at = now()
+WHERE id = $1 AND tenant_id = $2 AND deleted_at IS NULL
 `
 
-func (q *Queries) SoftDeleteClass(ctx context.Context, id int64) error {
-	_, err := q.db.Exec(ctx, softDeleteClass, id)
+type SoftDeleteClassParams struct {
+	ID       int64 `json:"id"`
+	TenantID int64 `json:"tenant_id"`
+}
+
+func (q *Queries) SoftDeleteClass(ctx context.Context, arg SoftDeleteClassParams) error {
+	_, err := q.db.Exec(ctx, softDeleteClass, arg.ID, arg.TenantID)
 	return err
 }
 
 const softDeleteDepartment = `-- name: SoftDeleteDepartment :exec
-UPDATE department SET deleted_at = now() WHERE id = $1 AND deleted_at IS NULL
+UPDATE department SET deleted_at = now()
+WHERE id = $1 AND tenant_id = $2 AND deleted_at IS NULL
 `
 
-func (q *Queries) SoftDeleteDepartment(ctx context.Context, id int64) error {
-	_, err := q.db.Exec(ctx, softDeleteDepartment, id)
+type SoftDeleteDepartmentParams struct {
+	ID       int64 `json:"id"`
+	TenantID int64 `json:"tenant_id"`
+}
+
+func (q *Queries) SoftDeleteDepartment(ctx context.Context, arg SoftDeleteDepartmentParams) error {
+	_, err := q.db.Exec(ctx, softDeleteDepartment, arg.ID, arg.TenantID)
 	return err
 }
 
 const softDeleteMajor = `-- name: SoftDeleteMajor :exec
-UPDATE major SET deleted_at = now() WHERE id = $1 AND deleted_at IS NULL
+UPDATE major SET deleted_at = now()
+WHERE id = $1 AND tenant_id = $2 AND deleted_at IS NULL
 `
 
-func (q *Queries) SoftDeleteMajor(ctx context.Context, id int64) error {
-	_, err := q.db.Exec(ctx, softDeleteMajor, id)
+type SoftDeleteMajorParams struct {
+	ID       int64 `json:"id"`
+	TenantID int64 `json:"tenant_id"`
+}
+
+func (q *Queries) SoftDeleteMajor(ctx context.Context, arg SoftDeleteMajorParams) error {
+	_, err := q.db.Exec(ctx, softDeleteMajor, arg.ID, arg.TenantID)
 	return err
 }
 
-const updateAccountName = `-- name: UpdateAccountName :one
-UPDATE account SET name = $2 WHERE id = $1 RETURNING id, tenant_id, phone_enc, phone_hash, password_hash, name, base_identity, status, must_change_pwd, pwd_failed_count, locked_until, activated_at, created_at, updated_at
+const tenantStats = `-- name: TenantStats :one
+SELECT
+  COUNT(*) AS account_count,
+  COUNT(*) FILTER (WHERE base_identity = 2) AS teacher_count,
+  COUNT(*) FILTER (WHERE base_identity = 1) AS student_count,
+  COUNT(*) FILTER (WHERE status = 2) AS active_account_count,
+  COUNT(*) FILTER (WHERE status = 3) AS disabled_account_count
+FROM account
+WHERE tenant_id = $1
 `
 
-type UpdateAccountNameParams struct {
-	ID   int64  `json:"id"`
-	Name string `json:"name"`
+type TenantStatsRow struct {
+	AccountCount         int64 `json:"account_count"`
+	TeacherCount         int64 `json:"teacher_count"`
+	StudentCount         int64 `json:"student_count"`
+	ActiveAccountCount   int64 `json:"active_account_count"`
+	DisabledAccountCount int64 `json:"disabled_account_count"`
 }
 
-func (q *Queries) UpdateAccountName(ctx context.Context, arg UpdateAccountNameParams) (Account, error) {
-	row := q.db.QueryRow(ctx, updateAccountName, arg.ID, arg.Name)
+func (q *Queries) TenantStats(ctx context.Context, tenantID int64) (TenantStatsRow, error) {
+	row := q.db.QueryRow(ctx, tenantStats, tenantID)
+	var i TenantStatsRow
+	err := row.Scan(
+		&i.AccountCount,
+		&i.TeacherCount,
+		&i.StudentCount,
+		&i.ActiveAccountCount,
+		&i.DisabledAccountCount,
+	)
+	return i, err
+}
+
+const updateAccountBasic = `-- name: UpdateAccountBasic :exec
+UPDATE account
+SET name = $3, updated_at = now()
+WHERE id = $1 AND tenant_id = $2 AND deleted_at IS NULL
+`
+
+type UpdateAccountBasicParams struct {
+	ID       int64  `json:"id"`
+	TenantID int64  `json:"tenant_id"`
+	Name     string `json:"name"`
+}
+
+func (q *Queries) UpdateAccountBasic(ctx context.Context, arg UpdateAccountBasicParams) error {
+	_, err := q.db.Exec(ctx, updateAccountBasic, arg.ID, arg.TenantID, arg.Name)
+	return err
+}
+
+const updateAccountPassword = `-- name: UpdateAccountPassword :one
+UPDATE account
+SET password_hash = $3, must_change_pwd = $4, status = $5, activated_at = $6, pwd_failed_count = 0, locked_until = NULL, updated_at = now()
+WHERE id = $1 AND tenant_id = $2
+RETURNING id, tenant_id, phone_enc, phone_hash, password_hash, name, base_identity, status, must_change_pwd, pwd_failed_count, locked_until, activated_at, deleted_at, created_at, updated_at
+`
+
+type UpdateAccountPasswordParams struct {
+	ID            int64              `json:"id"`
+	TenantID      int64              `json:"tenant_id"`
+	PasswordHash  pgtype.Text        `json:"password_hash"`
+	MustChangePwd bool               `json:"must_change_pwd"`
+	Status        int16              `json:"status"`
+	ActivatedAt   pgtype.Timestamptz `json:"activated_at"`
+}
+
+func (q *Queries) UpdateAccountPassword(ctx context.Context, arg UpdateAccountPasswordParams) (Account, error) {
+	row := q.db.QueryRow(ctx, updateAccountPassword,
+		arg.ID,
+		arg.TenantID,
+		arg.PasswordHash,
+		arg.MustChangePwd,
+		arg.Status,
+		arg.ActivatedAt,
+	)
 	var i Account
 	err := row.Scan(
 		&i.ID,
@@ -2092,68 +2244,82 @@ func (q *Queries) UpdateAccountName(ctx context.Context, arg UpdateAccountNamePa
 		&i.PwdFailedCount,
 		&i.LockedUntil,
 		&i.ActivatedAt,
+		&i.DeletedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
 	return i, err
 }
 
-const updateAccountPassword = `-- name: UpdateAccountPassword :exec
-UPDATE account SET password_hash = $2, must_change_pwd = $3 WHERE id = $1
-`
-
-type UpdateAccountPasswordParams struct {
-	ID            int64       `json:"id"`
-	PasswordHash  pgtype.Text `json:"password_hash"`
-	MustChangePwd bool        `json:"must_change_pwd"`
-}
-
-func (q *Queries) UpdateAccountPassword(ctx context.Context, arg UpdateAccountPasswordParams) error {
-	_, err := q.db.Exec(ctx, updateAccountPassword, arg.ID, arg.PasswordHash, arg.MustChangePwd)
-	return err
-}
-
 const updateAccountPhone = `-- name: UpdateAccountPhone :exec
-UPDATE account SET phone_enc = $2, phone_hash = $3 WHERE id = $1
+UPDATE account
+SET phone_enc = $3, phone_hash = $4, updated_at = now()
+WHERE id = $1 AND tenant_id = $2 AND deleted_at IS NULL
 `
 
 type UpdateAccountPhoneParams struct {
 	ID        int64  `json:"id"`
+	TenantID  int64  `json:"tenant_id"`
 	PhoneEnc  []byte `json:"phone_enc"`
 	PhoneHash string `json:"phone_hash"`
 }
 
 func (q *Queries) UpdateAccountPhone(ctx context.Context, arg UpdateAccountPhoneParams) error {
-	_, err := q.db.Exec(ctx, updateAccountPhone, arg.ID, arg.PhoneEnc, arg.PhoneHash)
+	_, err := q.db.Exec(ctx, updateAccountPhone,
+		arg.ID,
+		arg.TenantID,
+		arg.PhoneEnc,
+		arg.PhoneHash,
+	)
 	return err
 }
 
-const updateAccountProfileOrg = `-- name: UpdateAccountProfileOrg :exec
-UPDATE account_profile SET org_id = $2, title = $3 WHERE account_id = $1
+const updateAccountProfileEditable = `-- name: UpdateAccountProfileEditable :exec
+UPDATE account_profile
+SET org_id = $3, enrollment_year = $4, title = $5
+WHERE account_id = $1 AND tenant_id = $2
 `
 
-type UpdateAccountProfileOrgParams struct {
-	AccountID int64       `json:"account_id"`
-	OrgID     int64       `json:"org_id"`
-	Title     pgtype.Text `json:"title"`
+type UpdateAccountProfileEditableParams struct {
+	AccountID      int64       `json:"account_id"`
+	TenantID       int64       `json:"tenant_id"`
+	OrgID          int64       `json:"org_id"`
+	EnrollmentYear pgtype.Int2 `json:"enrollment_year"`
+	Title          pgtype.Text `json:"title"`
 }
 
-func (q *Queries) UpdateAccountProfileOrg(ctx context.Context, arg UpdateAccountProfileOrgParams) error {
-	_, err := q.db.Exec(ctx, updateAccountProfileOrg, arg.AccountID, arg.OrgID, arg.Title)
+func (q *Queries) UpdateAccountProfileEditable(ctx context.Context, arg UpdateAccountProfileEditableParams) error {
+	_, err := q.db.Exec(ctx, updateAccountProfileEditable,
+		arg.AccountID,
+		arg.TenantID,
+		arg.OrgID,
+		arg.EnrollmentYear,
+		arg.Title,
+	)
 	return err
 }
 
 const updateAccountStatus = `-- name: UpdateAccountStatus :one
-UPDATE account SET status = $2 WHERE id = $1 RETURNING id, tenant_id, phone_enc, phone_hash, password_hash, name, base_identity, status, must_change_pwd, pwd_failed_count, locked_until, activated_at, created_at, updated_at
+UPDATE account
+SET status = $3, deleted_at = $4, updated_at = now()
+WHERE id = $1 AND tenant_id = $2
+RETURNING id, tenant_id, phone_enc, phone_hash, password_hash, name, base_identity, status, must_change_pwd, pwd_failed_count, locked_until, activated_at, deleted_at, created_at, updated_at
 `
 
 type UpdateAccountStatusParams struct {
-	ID     int64 `json:"id"`
-	Status int16 `json:"status"`
+	ID        int64              `json:"id"`
+	TenantID  int64              `json:"tenant_id"`
+	Status    int16              `json:"status"`
+	DeletedAt pgtype.Timestamptz `json:"deleted_at"`
 }
 
 func (q *Queries) UpdateAccountStatus(ctx context.Context, arg UpdateAccountStatusParams) (Account, error) {
-	row := q.db.QueryRow(ctx, updateAccountStatus, arg.ID, arg.Status)
+	row := q.db.QueryRow(ctx, updateAccountStatus,
+		arg.ID,
+		arg.TenantID,
+		arg.Status,
+		arg.DeletedAt,
+	)
 	var i Account
 	err := row.Scan(
 		&i.ID,
@@ -2168,6 +2334,7 @@ func (q *Queries) UpdateAccountStatus(ctx context.Context, arg UpdateAccountStat
 		&i.PwdFailedCount,
 		&i.LockedUntil,
 		&i.ActivatedAt,
+		&i.DeletedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -2175,17 +2342,30 @@ func (q *Queries) UpdateAccountStatus(ctx context.Context, arg UpdateAccountStat
 }
 
 const updateClass = `-- name: UpdateClass :one
-UPDATE class SET name = $2, enrollment_year = $3 WHERE id = $1 AND deleted_at IS NULL RETURNING id, tenant_id, major_id, name, enrollment_year, status, created_at, updated_at, deleted_at
+UPDATE class
+SET major_id = $3, name = $4, enrollment_year = $5, status = $6
+WHERE id = $1 AND tenant_id = $2 AND deleted_at IS NULL
+RETURNING id, tenant_id, major_id, name, enrollment_year, status, deleted_at
 `
 
 type UpdateClassParams struct {
 	ID             int64  `json:"id"`
+	TenantID       int64  `json:"tenant_id"`
+	MajorID        int64  `json:"major_id"`
 	Name           string `json:"name"`
 	EnrollmentYear int16  `json:"enrollment_year"`
+	Status         int16  `json:"status"`
 }
 
 func (q *Queries) UpdateClass(ctx context.Context, arg UpdateClassParams) (Class, error) {
-	row := q.db.QueryRow(ctx, updateClass, arg.ID, arg.Name, arg.EnrollmentYear)
+	row := q.db.QueryRow(ctx, updateClass,
+		arg.ID,
+		arg.TenantID,
+		arg.MajorID,
+		arg.Name,
+		arg.EnrollmentYear,
+		arg.Status,
+	)
 	var i Class
 	err := row.Scan(
 		&i.ID,
@@ -2194,57 +2374,70 @@ func (q *Queries) UpdateClass(ctx context.Context, arg UpdateClassParams) (Class
 		&i.Name,
 		&i.EnrollmentYear,
 		&i.Status,
-		&i.CreatedAt,
-		&i.UpdatedAt,
 		&i.DeletedAt,
 	)
 	return i, err
 }
 
 const updateDepartment = `-- name: UpdateDepartment :one
-UPDATE department SET name = $2, code = $3 WHERE id = $1 AND deleted_at IS NULL RETURNING id, tenant_id, name, code, created_at, updated_at, deleted_at
+UPDATE department
+SET name = $3, code = $4
+WHERE id = $1 AND tenant_id = $2 AND deleted_at IS NULL
+RETURNING id, tenant_id, name, code, deleted_at
 `
 
 type UpdateDepartmentParams struct {
-	ID   int64       `json:"id"`
-	Name string      `json:"name"`
-	Code pgtype.Text `json:"code"`
+	ID       int64       `json:"id"`
+	TenantID int64       `json:"tenant_id"`
+	Name     string      `json:"name"`
+	Code     pgtype.Text `json:"code"`
 }
 
 func (q *Queries) UpdateDepartment(ctx context.Context, arg UpdateDepartmentParams) (Department, error) {
-	row := q.db.QueryRow(ctx, updateDepartment, arg.ID, arg.Name, arg.Code)
+	row := q.db.QueryRow(ctx, updateDepartment,
+		arg.ID,
+		arg.TenantID,
+		arg.Name,
+		arg.Code,
+	)
 	var i Department
 	err := row.Scan(
 		&i.ID,
 		&i.TenantID,
 		&i.Name,
 		&i.Code,
-		&i.CreatedAt,
-		&i.UpdatedAt,
 		&i.DeletedAt,
 	)
 	return i, err
 }
 
 const updateMajor = `-- name: UpdateMajor :one
-UPDATE major SET name = $2 WHERE id = $1 AND deleted_at IS NULL RETURNING id, tenant_id, department_id, name, created_at, updated_at, deleted_at
+UPDATE major
+SET department_id = $3, name = $4
+WHERE id = $1 AND tenant_id = $2 AND deleted_at IS NULL
+RETURNING id, tenant_id, department_id, name, deleted_at
 `
 
 type UpdateMajorParams struct {
-	ID   int64  `json:"id"`
-	Name string `json:"name"`
+	ID           int64  `json:"id"`
+	TenantID     int64  `json:"tenant_id"`
+	DepartmentID int64  `json:"department_id"`
+	Name         string `json:"name"`
 }
 
 func (q *Queries) UpdateMajor(ctx context.Context, arg UpdateMajorParams) (Major, error) {
-	row := q.db.QueryRow(ctx, updateMajor, arg.ID, arg.Name)
+	row := q.db.QueryRow(ctx, updateMajor,
+		arg.ID,
+		arg.TenantID,
+		arg.DepartmentID,
+		arg.Name,
+	)
 	var i Major
 	err := row.Scan(
 		&i.ID,
 		&i.TenantID,
 		&i.DepartmentID,
 		&i.Name,
-		&i.CreatedAt,
-		&i.UpdatedAt,
 		&i.DeletedAt,
 	)
 	return i, err
@@ -2252,7 +2445,7 @@ func (q *Queries) UpdateMajor(ctx context.Context, arg UpdateMajorParams) (Major
 
 const updateTenantConfig = `-- name: UpdateTenantConfig :one
 UPDATE tenant
-SET logo_url = $2, display_name = $3, feature_flags = $4, auth_mode = $5, enable_activation_code = $6
+SET logo_url = $2, display_name = $3, feature_flags = $4, auth_mode = $5, enable_activation_code = $6, updated_at = now()
 WHERE id = $1
 RETURNING id, code, name, type, status, deploy_mode, expire_at, logo_url, display_name, feature_flags, auth_mode, enable_activation_code, created_at, updated_at
 `
@@ -2296,7 +2489,9 @@ func (q *Queries) UpdateTenantConfig(ctx context.Context, arg UpdateTenantConfig
 }
 
 const updateTenantStatus = `-- name: UpdateTenantStatus :one
-UPDATE tenant SET status = $2, expire_at = $3 WHERE id = $1
+UPDATE tenant
+SET status = $2, expire_at = $3, updated_at = now()
+WHERE id = $1
 RETURNING id, code, name, type, status, deploy_mode, expire_at, logo_url, display_name, feature_flags, auth_mode, enable_activation_code, created_at, updated_at
 `
 
@@ -2328,19 +2523,15 @@ func (q *Queries) UpdateTenantStatus(ctx context.Context, arg UpdateTenantStatus
 	return i, err
 }
 
-const upsertSsoConfig = `-- name: UpsertSsoConfig :one
-INSERT INTO sso_config (id, tenant_id, type, config, match_field, enabled)
-VALUES ($1, $2, $3, $4, $5, $6)
-ON CONFLICT (tenant_id) DO UPDATE
-SET type = EXCLUDED.type,
-    config = EXCLUDED.config,
-    match_field = EXCLUDED.match_field,
-    enabled = EXCLUDED.enabled,
-    updated_at = now()
+const upsertSSOConfig = `-- name: UpsertSSOConfig :one
+INSERT INTO sso_config (id, tenant_id, type, config, match_field, enabled, created_at, updated_at)
+VALUES ($1, $2, $3, $4, $5, $6, now(), now())
+ON CONFLICT (tenant_id, type) DO UPDATE
+SET config = EXCLUDED.config, match_field = EXCLUDED.match_field, enabled = EXCLUDED.enabled, updated_at = now()
 RETURNING id, tenant_id, type, config, match_field, enabled, created_at, updated_at
 `
 
-type UpsertSsoConfigParams struct {
+type UpsertSSOConfigParams struct {
 	ID         int64  `json:"id"`
 	TenantID   int64  `json:"tenant_id"`
 	Type       int16  `json:"type"`
@@ -2349,8 +2540,8 @@ type UpsertSsoConfigParams struct {
 	Enabled    bool   `json:"enabled"`
 }
 
-func (q *Queries) UpsertSsoConfig(ctx context.Context, arg UpsertSsoConfigParams) (SsoConfig, error) {
-	row := q.db.QueryRow(ctx, upsertSsoConfig,
+func (q *Queries) UpsertSSOConfig(ctx context.Context, arg UpsertSSOConfigParams) (SsoConfig, error) {
+	row := q.db.QueryRow(ctx, upsertSSOConfig,
 		arg.ID,
 		arg.TenantID,
 		arg.Type,
@@ -2370,4 +2561,19 @@ func (q *Queries) UpsertSsoConfig(ctx context.Context, arg UpsertSsoConfigParams
 		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const useActivationCode = `-- name: UseActivationCode :exec
+UPDATE activation_code SET status = 2, used_at = now()
+WHERE id = $1 AND tenant_id = $2 AND status = 1
+`
+
+type UseActivationCodeParams struct {
+	ID       int64 `json:"id"`
+	TenantID int64 `json:"tenant_id"`
+}
+
+func (q *Queries) UseActivationCode(ctx context.Context, arg UseActivationCodeParams) error {
+	_, err := q.db.Exec(ctx, useActivationCode, arg.ID, arg.TenantID)
+	return err
 }

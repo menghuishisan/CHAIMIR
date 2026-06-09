@@ -56,10 +56,15 @@ build:
   dockerfile: Dockerfile
 selftest:
   commands:
-    - name: snarkjs-help
+    - name: snarkjs-version
       command:
         - snarkjs
-        - --help
+        - --version
+    - name: entrypoint-syntax
+      command:
+        - sh
+        - -n
+        - /usr/local/bin/chaimir-zk-prover-entrypoint
 supply_chain:
   sbom: true
   trivy_required: true

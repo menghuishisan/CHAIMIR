@@ -1,67 +1,190 @@
-// M1 领域投影:承接 repo 到 service 的内部数据结构,避免 sqlc 行类型扩散到业务层。
+// identity 领域模型定义服务层使用的真实内部快照,避免向业务编排泄漏 sqlc 行类型。
 package identity
 
-import (
-	"time"
+import "time"
 
-	"github.com/jackc/pgx/v5/pgtype"
-)
+// Tenant 是学校租户及其内联配置的领域快照。
+type Tenant struct {
+	ID                   int64
+	Code                 string
+	Name                 string
+	Type                 int16
+	Status               int16
+	DeployMode           int16
+	ExpireAt             *time.Time
+	LogoURL              string
+	DisplayName          string
+	FeatureFlags         []byte
+	AuthMode             int16
+	EnableActivationCode bool
+	CreatedAt            time.Time
+	UpdatedAt            time.Time
+}
 
-// AccountInfoSnapshot 是跨模块账号摘要读取使用的领域投影。
-type AccountInfoSnapshot struct {
-	AccountID    int64
-	TenantID     int64
-	Name         string
-	BaseIdentity int16
-	Roles        []string
+// TenantApplication 是学校入驻申请的领域快照。
+type TenantApplication struct {
+	ID           int64
+	SchoolName   string
+	SchoolType   int16
+	ContactName  string
+	ContactPhone string
+	ContactEmail string
 	Status       int16
+	RejectReason string
+	ReviewedBy   int64
+	TenantID     int64
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
 }
 
-// AccountViewSnapshot 是账号列表视图组装使用的内部投影。
-type AccountViewSnapshot struct {
-	ID             int64
-	Name           string
-	PhoneEnc       []byte
-	BaseIdentity   int16
-	Status         int16
-	Roles          []string
-	No             string
-	OrgID          int64
-	EnrollmentYear *int16
-	Title          string
-	MustChangePwd  bool
-}
-
-// AccountMutationSnapshot 是账号写操作前校验状态和角色时使用的投影。
-type AccountMutationSnapshot struct {
+// Account 是租户账号、角色和组织档案的领域快照。
+type Account struct {
 	ID             int64
 	TenantID       int64
 	PhoneEnc       []byte
+	PhoneHash      string
 	PasswordHash   string
-	HasPassword    bool
 	Name           string
 	BaseIdentity   int16
 	Status         int16
 	MustChangePwd  bool
-	Roles          []string
+	PwdFailedCount int16
+	LockedUntil    *time.Time
+	ActivatedAt    *time.Time
 	No             string
 	OrgID          int64
-	EnrollmentYear *int16
+	EnrollmentYear int16
 	Title          string
+	Roles          []int16
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
 }
 
-// SessionSnapshot 是个人中心会话列表使用的投影。
-type SessionSnapshot struct {
-	ID         int64
-	DeviceInfo string
-	IP         string
-	ExpireAt   time.Time
-	CreatedAt  time.Time
+// LoginCandidate 表示手机号登录预认证时跨租户定位到的候选账号。
+type LoginCandidate struct {
+	AccountID      int64
+	TenantID       int64
+	TenantCode     string
+	TenantName     string
+	PasswordHash   string
+	Name           string
+	BaseIdentity   int16
+	Status         int16
+	MustChangePwd  bool
+	PwdFailedCount int16
+	LockedUntil    *time.Time
 }
 
-// ImportBatchSnapshot 是导入批次列表使用的投影。
-type ImportBatchSnapshot struct {
+// PlatformAdmin 是平台管理员账号领域快照。
+type PlatformAdmin struct {
+	ID           int64
+	Username     string
+	PasswordHash string
+	Name         string
+	Status       int16
+}
+
+// AuthSession 是租户 Refresh 会话快照。
+type AuthSession struct {
+	ID               int64
+	TenantID         int64
+	AccountID        int64
+	RefreshTokenHash string
+	DeviceInfo       string
+	IP               string
+	Status           int16
+	ExpireAt         time.Time
+	CreatedAt        time.Time
+}
+
+// PlatformAuthSession 是平台管理员 Refresh 会话快照。
+type PlatformAuthSession struct {
+	ID               int64
+	PlatformAdminID  int64
+	RefreshTokenHash string
+	DeviceInfo       string
+	IP               string
+	Status           int16
+	ExpireAt         time.Time
+	CreatedAt        time.Time
+}
+
+// ActivationCode 是激活码状态快照,明文激活码永不落入该模型。
+type ActivationCode struct {
+	ID        int64
+	TenantID  int64
+	AccountID int64
+	CodeHash  string
+	Status    int16
+	ExpireAt  time.Time
+}
+
+// SMSCode 是短信验证码状态快照,明文验证码永不落入该模型。
+type SMSCode struct {
+	ID             int64
+	TenantID       int64
+	PhoneHash      string
+	CodeHash       string
+	Scene          int16
+	ExpireAt       time.Time
+	VerifyAttempts int16
+	Used           bool
+	CreatedAt      time.Time
+}
+
+// SSOConfig 是 CAS/LDAP 配置的领域快照,密码字段在 JSON 内以密文保存。
+type SSOConfig struct {
 	ID         int64
+	TenantID   int64
+	Type       int16
+	Config     []byte
+	MatchField int16
+	Enabled    bool
+}
+
+// Department 是租户院系领域快照。
+type Department struct {
+	ID       int64
+	TenantID int64
+	Name     string
+	Code     string
+}
+
+// Major 是租户专业领域快照。
+type Major struct {
+	ID           int64
+	TenantID     int64
+	DepartmentID int64
+	Name         string
+}
+
+// Class 是租户班级领域快照。
+type Class struct {
+	ID             int64
+	TenantID       int64
+	MajorID        int64
+	Name           string
+	EnrollmentYear int16
+	Status         int16
+}
+
+// ImportPreview 是服务端持久化导入预览快照。
+type ImportPreview struct {
+	ID            int64
+	TenantID      int64
+	OperatorID    int64
+	TargetType    int16
+	FileName      string
+	Rows          []byte
+	PreviewResult []byte
+	Status        int16
+	ExpireAt      time.Time
+}
+
+// ImportBatch 是导入提交后的批次结果快照。
+type ImportBatch struct {
+	ID         int64
+	TenantID   int64
 	OperatorID int64
 	TargetType int16
 	FileName   string
@@ -72,184 +195,9 @@ type ImportBatchSnapshot struct {
 	CreatedAt  time.Time
 }
 
-// ImportPreviewSnapshot 是提交阶段读取的服务端预览投影。
-type ImportPreviewSnapshot struct {
-	ID         int64
-	TargetType int16
-	FileName   string
-	Rows       []byte
-}
-
-// ImportAccountCreate 是导入提交阶段写账号所需的已处理数据。
-type ImportAccountCreate struct {
-	AccountID      int64
-	PhoneEnc       []byte
-	PhoneHash      string
-	PasswordHash   pgtype.Text
-	Name           string
-	BaseIdentity   int16
-	MustChangePwd  bool
-	No             string
-	OrgID          int64
-	EnrollmentYear int16
-	Title          string
-	Role           int16
-	ActivationHash string
-	ActivationAt   time.Time
-	HasActivation  bool
-}
-
-// IdentityStatsSnapshot 是身份统计的内部投影。
-type IdentityStatsSnapshot struct {
-	TenantCount             int64
-	AccountCount            int64
-	TeacherCount            int64
-	StudentCount            int64
-	PendingApplicationCount int64
-}
-
-// AuditLogSnapshot 是审计查询输出的内部投影。
-type AuditLogSnapshot struct {
-	ID         int64
-	TenantID   int64
-	ActorID    int64
-	ActorRole  int16
-	Action     string
-	TargetType string
-	TargetID   int64
-	Detail     map[string]any
-	IP         string
-	TraceID    string
-	CreatedAt  time.Time
-}
-
-// SmsCodeSnapshot 是验证码校验流程使用的内部投影。
-type SmsCodeSnapshot struct {
-	ID       int64
-	CodeHash string
-	ExpireAt time.Time
-}
-
-// AccountTenantCandidate 是手机号定位租户时使用的账号候选。
-type AccountTenantCandidate struct {
-	TenantID int64
-}
-
-// LoginTenantCandidate 是登录前按手机号定位学校时使用的候选投影。
-type LoginTenantCandidate struct {
-	AccountID    int64
-	TenantID     int64
-	Name         string
-	TenantCode   string
-	TenantName   string
-	TenantStatus int16
-}
-
-// LoginAccountSnapshot 是认证流程使用的账号投影。
-type LoginAccountSnapshot struct {
-	ID             int64
-	TenantID       int64
-	PasswordHash   string
-	HasPassword    bool
-	Name           string
-	BaseIdentity   int16
-	Status         int16
-	MustChangePwd  bool
-	LockedUntil    time.Time
-	HasLockedUntil bool
-	Roles          []string
-}
-
-// AuthSessionSnapshot 是租户 Refresh 流程定位出的会话投影。
-type AuthSessionSnapshot struct {
-	ID        int64
-	TenantID  int64
-	AccountID int64
-	Status    int16
-	ExpireAt  time.Time
-}
-
-// TenantLoginSnapshot 是认证入口校验租户状态使用的投影。
-type TenantLoginSnapshot struct {
-	ID     int64
-	Status int16
-}
-
-// SsoConfigSnapshot 是启用 SSO 配置的持久化投影。
-type SsoConfigSnapshot struct {
-	ID         int64
-	Type       int16
-	Config     []byte
-	MatchField int16
-	Enabled    bool
-}
-
-// TenantApplicationSnapshot 是平台入驻申请列表使用的投影。
-type TenantApplicationSnapshot struct {
-	ID           int64
-	SchoolName   string
-	SchoolType   int16
-	ContactName  string
-	ContactPhone string
-	ContactEmail string
-	Status       int16
-	RejectReason string
-	CreatedAt    time.Time
-}
-
-// TenantSnapshot 是租户详情和配置读取使用的投影。
-type TenantSnapshot struct {
-	ID                   int64
-	Code                 string
-	Name                 string
-	Type                 int16
-	Status               int16
-	DeployMode           int16
-	LogoURL              string
-	DisplayName          string
-	AuthMode             int16
-	EnableActivationCode bool
-	ExpireAt             time.Time
-	HasExpireAt          bool
-}
-
-// PlatformAdminSnapshot 是平台管理员认证流程需要的最小账号投影。
-type PlatformAdminSnapshot struct {
-	ID           int64
-	PasswordHash string
-	Name         string
-	Status       int16
-}
-
-// PlatformSessionSnapshot 是平台管理员 Refresh 流程定位出的会话投影。
-type PlatformSessionSnapshot struct {
-	ID              int64
-	PlatformAdminID int64
-	Status          int16
-	ExpireAt        time.Time
-}
-
-// ActivationCodeSnapshot 是激活码登录前定位出的租户与账号投影。
-type ActivationCodeSnapshot struct {
-	ID           int64
-	TenantID     int64
-	AccountID    int64
-	Status       int16
-	ExpireAt     time.Time
-	BaseIdentity int16
-	Roles        []string
-}
-
-// AuditLogCreate 是 repo 写入 audit_log 时使用的内部持久化投影。
-type AuditLogCreate struct {
-	ID         int64
-	TenantID   int64
-	ActorID    int64
-	ActorRole  int16
-	Action     string
-	TargetType string
-	TargetID   int64
-	Detail     []byte
-	IP         string
-	TraceID    string
+// ImportTemplateFile 是账号导入模板下载前的内部文件快照。
+type ImportTemplateFile struct {
+	FileName    string
+	ContentType string
+	Content     []byte
 }

@@ -1,4 +1,4 @@
-// Package auth 测试 JWT 鉴权时间边界和载荷约束。
+// auth_test 校验 JWT 鉴权时间边界和载荷约束。
 package auth
 
 import (
@@ -11,7 +11,7 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 )
 
-// TestIssueAccessDoesNotReadLocalCurrentTime 确认 JWT 签发时间通过 platform/timex 入口取得。
+// TestIssueAccessDoesNotReadLocalCurrentTime 确认 JWT 签发统一走 platform/timex。
 func TestIssueAccessDoesNotReadLocalCurrentTime(t *testing.T) {
 	data, err := os.ReadFile("jwt.go")
 	if err != nil {
@@ -22,7 +22,7 @@ func TestIssueAccessDoesNotReadLocalCurrentTime(t *testing.T) {
 	}
 }
 
-// TestIssueAccessKeepsTokenSemantics 确认时间入口收敛后 JWT 仍可签发和校验。
+// TestIssueAccessKeepsTokenSemantics 确认 JWT 仍能按既定语义签发和校验。
 func TestIssueAccessKeepsTokenSemantics(t *testing.T) {
 	mgr := NewManager(config.AuthConfig{
 		JWTSigningKey: "test-signing-key",
@@ -44,7 +44,7 @@ func TestIssueAccessKeepsTokenSemantics(t *testing.T) {
 	}
 }
 
-// TestVerifyAccessRejectsTokenWithoutExpiration 确认 access token 必须携带 exp,避免永久有效令牌被接受。
+// TestVerifyAccessRejectsTokenWithoutExpiration 确认 access token 必须携带有效期声明。
 func TestVerifyAccessRejectsTokenWithoutExpiration(t *testing.T) {
 	mgr := NewManager(config.AuthConfig{
 		JWTSigningKey: "test-signing-key",

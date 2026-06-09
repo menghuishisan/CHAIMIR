@@ -37,6 +37,16 @@ ports:
     protocol: TCP
     expose: proxy
     purpose: Bitcoin regtest RPC
+rpc_exposure:
+  bind_all_interfaces: true
+  reason: bitcoind regtest RPC 只在沙箱网络内监听,外部入口必须由 M2 鉴权代理生成。
+  unsafe_flags:
+    - -rpcallowip=0.0.0.0/0
+  required_controls:
+    - network_policy_deny_all
+    - platform_authenticated_proxy
+    - no_direct_student_shell_to_rpc_admin
+    - m2_port_allowlist
 local_dev:
   host_mappings:
     - host: 127.0.0.1

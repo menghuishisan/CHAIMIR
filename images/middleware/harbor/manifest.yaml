@@ -18,11 +18,30 @@ description: Harbor 私有镜像仓库组件集上游固定入口。
 source:
   type: upstream-pinned
 upstream:
-  registry: goharbor
-  image: harbor
-  version: "2.12"
+  registry: docker.io
+  image: harbor-component-bundle
+  version: "v2.12.0"
   digest_required: true
-  digest_lock_ref: images/locks/middleware/harbor.lock.yaml
+  component_bundle: true
+  components:
+    - image: goharbor/nginx-photon
+      version: v2.12.0
+    - image: goharbor/harbor-core
+      version: v2.12.0
+    - image: goharbor/harbor-jobservice
+      version: v2.12.0
+    - image: goharbor/harbor-portal
+      version: v2.12.0
+    - image: goharbor/harbor-registryctl
+      version: v2.12.0
+    - image: goharbor/registry-photon
+      version: v2.12.0
+    - image: goharbor/harbor-db
+      version: v2.12.0
+    - image: goharbor/redis-photon
+      version: v2.12.0
+    - image: goharbor/trivy-adapter-photon
+      version: v2.12.0
   license: Apache-2.0
 private_delivery:
   offline_bundle: true

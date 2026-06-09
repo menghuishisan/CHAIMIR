@@ -1,16 +1,15 @@
-// 配置读取辅助 + 本地 .env 加载(仅开发便利,生产用环境变量注入)。
+// config 提供环境变量读取辅助和本地 .env 加载能力。
 package config
 
 import (
 	"bufio"
 	"errors"
 	"fmt"
-
 	"os"
 	"strings"
 )
 
-// getCSV 读取逗号分隔配置并去除空白项。
+// getCSV 读取逗号分隔配置并清理空白项。
 func getCSV(key string) []string {
 	raw := strings.TrimSpace(os.Getenv(key))
 	if raw == "" {
@@ -26,7 +25,7 @@ func getCSV(key string) []string {
 	return out
 }
 
-// LoadDotEnv 加载本地 .env(若存在)到环境变量;已存在的不覆盖(注入优先)。
+// LoadDotEnv 在本地开发时加载 .env;已有环境变量优先,避免覆盖外部注入。
 func LoadDotEnv(path string) (err error) {
 	f, err := os.Open(path)
 	if err != nil {

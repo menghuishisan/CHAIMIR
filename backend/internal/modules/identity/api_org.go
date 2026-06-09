@@ -1,230 +1,307 @@
-// M1 组织架构 HTTP 处理器。
+// identity api_org 文件承接组织架构 CRUD、班级归档和升级 HTTP 请求。
 package identity
 
 import (
+	"io"
+	"net/http"
+
+	"chaimir/internal/contracts"
+	"chaimir/internal/platform/auth"
 	"chaimir/internal/platform/httpx"
-	"chaimir/internal/platform/ids"
 	"chaimir/pkg/apperr"
 	"chaimir/pkg/response"
 
 	"github.com/gin-gonic/gin"
 )
 
-// listDepartments 列院系。
-func (a *API) listDepartments(c *gin.Context) {
-	rows, err := a.svc.ListDepartments(c.Request.Context())
+// orgAPI 封装组织架构 HTTP handler 依赖。
+type orgAPI struct {
+	svc *Service
+}
+
+// registerOrgRoutes 注册学校管理员组织架构维护路由。
+func registerOrgRoutes(r gin.IRouter, svc *Service, authn *auth.Manager) {
+	api := orgAPI{svc: svc}
+	g := r.Group("/org", authn.Middleware(), auth.RequireTenantAnyRole(svc, contracts.RoleSchoolAdmin))
+	api.register(g)
+}
+
+// register 把组织架构各资源路由绑定到具名 handler。
+func (a orgAPI) register(g gin.IRouter) {
+	g.GET("/departments", a.listDepartments)
+	g.POST("/departments", a.createDepartment)
+	g.PATCH("/departments/:id", a.updateDepartment)
+	g.DELETE("/departments/:id", a.deleteDepartment)
+	g.GET("/majors", a.listMajors)
+	g.POST("/majors", a.createMajor)
+	g.PATCH("/majors/:id", a.updateMajor)
+	g.DELETE("/majors/:id", a.deleteMajor)
+	g.GET("/classes", a.listClasses)
+	g.POST("/classes", a.createClass)
+	g.PATCH("/classes/:id", a.updateClass)
+	g.DELETE("/classes/:id", a.deleteClass)
+	g.POST("/import/preview", a.importOrgPreview)
+	g.POST("/import/commit", a.importOrgCommit)
+	g.GET("/import/template", a.importOrgTemplate)
+	g.POST("/classes/archive", a.archiveClasses)
+	g.POST("/classes/promote", a.promoteClasses)
+}
+
+// listDepartments 返回当前租户院系列表。
+func (a orgAPI) listDepartments(c *gin.Context) {
+	out, err := a.svc.ListDepartmentsByAdmin(c.Request.Context())
 	if err != nil {
 		response.Fail(c, err)
 		return
 	}
-	response.OK(c, rows)
+	response.OK(c, out)
 }
 
-// createDepartment 建院系。
-func (a *API) createDepartment(c *gin.Context) {
-	var req CreateDepartmentRequest
-	if !httpx.BindJSONWithError(c, &req, apperr.ErrDepartmentCreateInvalid) {
+// createDepartment 绑定创建院系请求。
+func (a orgAPI) createDepartment(c *gin.Context) {
+	var req DepartmentRequest
+	if !httpx.BindJSON(c, &req) {
 		return
 	}
-	node, err := a.svc.CreateDepartment(c.Request.Context(), req)
+	out, err := a.svc.CreateDepartmentByAdmin(c.Request.Context(), req)
 	if err != nil {
 		response.Fail(c, err)
 		return
 	}
-	response.OK(c, node)
+	response.OK(c, out)
 }
 
-// updateDepartment 改院系。
-func (a *API) updateDepartment(c *gin.Context) {
+// updateDepartment 绑定更新院系请求。
+func (a orgAPI) updateDepartment(c *gin.Context) {
 	id, ok := httpx.PathID(c, "id")
 	if !ok {
 		return
 	}
-	var req UpdateDepartmentRequest
-	if !httpx.BindJSONWithError(c, &req, apperr.ErrDepartmentUpdateInvalid) {
+	var req DepartmentRequest
+	if !httpx.BindJSON(c, &req) {
 		return
 	}
-	if err := a.svc.UpdateDepartment(c.Request.Context(), id, req); err != nil {
+	out, err := a.svc.UpdateDepartmentByAdmin(c.Request.Context(), id, req)
+	if err != nil {
 		response.Fail(c, err)
 		return
 	}
-	response.OK(c, gin.H{"updated": true})
+	response.OK(c, out)
 }
 
-// deleteDepartment 删院系。
-func (a *API) deleteDepartment(c *gin.Context) {
+// deleteDepartment 绑定删除院系请求。
+func (a orgAPI) deleteDepartment(c *gin.Context) {
 	id, ok := httpx.PathID(c, "id")
 	if !ok {
 		return
 	}
-	if err := a.svc.DeleteDepartment(c.Request.Context(), id); err != nil {
+	if err := a.svc.DeleteDepartmentByAdmin(c.Request.Context(), id); err != nil {
 		response.Fail(c, err)
 		return
 	}
-	response.OK(c, gin.H{"deleted": true})
+	response.OK(c, gin.H{})
 }
 
-// listMajors 按院系列专业(?department_id=)。
-func (a *API) listMajors(c *gin.Context) {
-	deptID, ok := ids.Parse(c.Query("department_id"))
+// listMajors 返回专业列表,支持 department_id 查询过滤。
+func (a orgAPI) listMajors(c *gin.Context) {
+	departmentID, ok := httpx.QueryInt(c, "department_id", httpx.QueryIntRule{BitSize: 64, Min: 0})
 	if !ok {
-		response.Fail(c, apperr.ErrOrgParentIDInvalid)
 		return
 	}
-	rows, err := a.svc.ListMajorsByDepartment(c.Request.Context(), deptID)
+	out, err := a.svc.ListMajorsByAdmin(c.Request.Context(), departmentID)
 	if err != nil {
 		response.Fail(c, err)
 		return
 	}
-	response.OK(c, rows)
+	response.OK(c, out)
 }
 
-// createMajor 建专业。
-func (a *API) createMajor(c *gin.Context) {
-	var req CreateMajorRequest
-	if !httpx.BindJSONWithError(c, &req, apperr.ErrMajorCreateInvalid) {
+// createMajor 绑定创建专业请求。
+func (a orgAPI) createMajor(c *gin.Context) {
+	var req MajorRequest
+	if !httpx.BindJSON(c, &req) {
 		return
 	}
-	node, err := a.svc.CreateMajor(c.Request.Context(), req)
+	out, err := a.svc.CreateMajorByAdmin(c.Request.Context(), req)
 	if err != nil {
 		response.Fail(c, err)
 		return
 	}
-	response.OK(c, node)
+	response.OK(c, out)
 }
 
-// updateMajor 改专业名称。
-func (a *API) updateMajor(c *gin.Context) {
+// updateMajor 绑定更新专业请求。
+func (a orgAPI) updateMajor(c *gin.Context) {
 	id, ok := httpx.PathID(c, "id")
 	if !ok {
 		return
 	}
-	var req UpdateMajorRequest
-	if !httpx.BindJSONWithError(c, &req, apperr.ErrMajorUpdateInvalid) {
+	var req MajorRequest
+	if !httpx.BindJSON(c, &req) {
 		return
 	}
-	if err := a.svc.UpdateMajor(c.Request.Context(), id, req); err != nil {
+	out, err := a.svc.UpdateMajorByAdmin(c.Request.Context(), id, req)
+	if err != nil {
 		response.Fail(c, err)
 		return
 	}
-	response.OK(c, gin.H{"updated": true})
+	response.OK(c, out)
 }
 
-// deleteMajor 删专业。
-func (a *API) deleteMajor(c *gin.Context) {
+// deleteMajor 绑定删除专业请求。
+func (a orgAPI) deleteMajor(c *gin.Context) {
 	id, ok := httpx.PathID(c, "id")
 	if !ok {
 		return
 	}
-	if err := a.svc.DeleteMajor(c.Request.Context(), id); err != nil {
+	if err := a.svc.DeleteMajorByAdmin(c.Request.Context(), id); err != nil {
 		response.Fail(c, err)
 		return
 	}
-	response.OK(c, gin.H{"deleted": true})
+	response.OK(c, gin.H{})
 }
 
-// listClasses 按专业列班级(?major_id=)。
-func (a *API) listClasses(c *gin.Context) {
-	majorID, ok := ids.Parse(c.Query("major_id"))
+// listClasses 返回班级列表,支持 major_id 查询过滤。
+func (a orgAPI) listClasses(c *gin.Context) {
+	majorID, ok := httpx.QueryInt(c, "major_id", httpx.QueryIntRule{BitSize: 64, Min: 0})
 	if !ok {
-		response.Fail(c, apperr.ErrOrgParentIDInvalid)
 		return
 	}
-	rows, err := a.svc.ListClassesByMajor(c.Request.Context(), majorID)
+	out, err := a.svc.ListClassesByAdmin(c.Request.Context(), majorID)
 	if err != nil {
 		response.Fail(c, err)
 		return
 	}
-	response.OK(c, rows)
+	response.OK(c, out)
 }
 
-// createClass 建班级。
-func (a *API) createClass(c *gin.Context) {
-	var req CreateClassRequest
-	if !httpx.BindJSONWithError(c, &req, apperr.ErrClassCreateInvalid) {
+// createClass 绑定创建班级请求。
+func (a orgAPI) createClass(c *gin.Context) {
+	var req ClassRequest
+	if !httpx.BindJSON(c, &req) {
 		return
 	}
-	node, err := a.svc.CreateClass(c.Request.Context(), req)
+	out, err := a.svc.CreateClassByAdmin(c.Request.Context(), req)
 	if err != nil {
 		response.Fail(c, err)
 		return
 	}
-	response.OK(c, node)
+	response.OK(c, out)
 }
 
-// updateClass 改班级名称与入学年份。
-func (a *API) updateClass(c *gin.Context) {
+// updateClass 绑定更新班级请求。
+func (a orgAPI) updateClass(c *gin.Context) {
 	id, ok := httpx.PathID(c, "id")
 	if !ok {
 		return
 	}
-	var req UpdateClassRequest
-	if !httpx.BindJSONWithError(c, &req, apperr.ErrClassUpdateInvalid) {
+	var req ClassRequest
+	if !httpx.BindJSON(c, &req) {
 		return
 	}
-	if err := a.svc.UpdateClass(c.Request.Context(), id, req); err != nil {
+	out, err := a.svc.UpdateClassByAdmin(c.Request.Context(), id, req)
+	if err != nil {
 		response.Fail(c, err)
 		return
 	}
-	response.OK(c, gin.H{"updated": true})
+	response.OK(c, out)
 }
 
-// deleteClass 删班级。
-func (a *API) deleteClass(c *gin.Context) {
+// deleteClass 绑定删除班级请求。
+func (a orgAPI) deleteClass(c *gin.Context) {
 	id, ok := httpx.PathID(c, "id")
 	if !ok {
 		return
 	}
-	if err := a.svc.DeleteClass(c.Request.Context(), id); err != nil {
+	if err := a.svc.DeleteClassByAdmin(c.Request.Context(), id); err != nil {
 		response.Fail(c, err)
 		return
 	}
-	response.OK(c, gin.H{"deleted": true})
+	response.OK(c, gin.H{})
 }
 
-// importOrg 批量导入组织结构。
-func (a *API) importOrg(c *gin.Context) {
-	id, ok := currentID(c)
-	if !ok {
-		response.Fail(c, apperr.ErrUnauthorized)
+// importOrgPreview 绑定组织架构导入预览 multipart 请求。
+func (a orgAPI) importOrgPreview(c *gin.Context) {
+	fileHeader, err := c.FormFile("file")
+	if err != nil {
+		response.Fail(c, apperr.ErrIdentityImportContentInvalid.WithCause(err))
 		return
 	}
-	var req OrgImportRequest
-	if !httpx.BindJSONWithError(c, &req, apperr.ErrOrgImportRequestInvalid) {
+	if maxBytes := a.svc.importMaxBytes(); maxBytes > 0 && fileHeader.Size > maxBytes {
+		response.Fail(c, apperr.ErrIdentityImportFileTooLarge)
 		return
 	}
-	res, err := a.svc.ImportOrg(c.Request.Context(), id.AccountID, req)
+	file, err := fileHeader.Open()
+	if err != nil {
+		response.Fail(c, apperr.ErrIdentityImportContentInvalid.WithCause(err))
+		return
+	}
+	content, readErr := io.ReadAll(file)
+	closeErr := file.Close()
+	if readErr != nil {
+		response.Fail(c, apperr.ErrIdentityImportContentInvalid.WithCause(readErr))
+		return
+	}
+	if closeErr != nil {
+		response.Fail(c, apperr.ErrInternal.WithCause(closeErr))
+		return
+	}
+	out, err := a.svc.PreviewOrgImportByAdmin(c.Request.Context(), ImportPreviewRequest{
+		TargetType:  ImportTargetOrg,
+		FileName:    fileHeader.Filename,
+		ContentType: fileHeader.Header.Get("Content-Type"),
+		Content:     content,
+	})
 	if err != nil {
 		response.Fail(c, err)
 		return
 	}
-	response.OK(c, res)
+	response.OK(c, out)
 }
 
-// batchArchiveClasses 批量归档班级并级联归档学生账号。
-func (a *API) batchArchiveClasses(c *gin.Context) {
-	var req BatchClassArchiveRequest
-	if !httpx.BindJSONWithError(c, &req, apperr.ErrBatchClassIDsInvalid) {
+// importOrgCommit 绑定组织架构导入提交请求。
+func (a orgAPI) importOrgCommit(c *gin.Context) {
+	var req ImportCommitRequest
+	if !httpx.BindJSON(c, &req) {
 		return
 	}
-	res, err := a.svc.BatchArchiveClasses(c.Request.Context(), req.ClassIDs)
+	out, err := a.svc.CommitOrgImportByAdmin(c.Request.Context(), req)
 	if err != nil {
 		response.Fail(c, err)
 		return
 	}
-	response.OK(c, res)
+	response.OK(c, out)
 }
 
-// batchPromoteClasses 批量升级班级。
-func (a *API) batchPromoteClasses(c *gin.Context) {
-	var req BatchClassPromoteRequest
-	if !httpx.BindJSONWithError(c, &req, apperr.ErrBatchClassPromoteInvalid) {
-		return
-	}
-	res, err := a.svc.BatchPromoteClasses(c.Request.Context(), req.Rows)
+// importOrgTemplate 绑定组织架构导入模板下载请求。
+func (a orgAPI) importOrgTemplate(c *gin.Context) {
+	tpl, err := a.svc.OrgImportTemplate(c.Query("format"))
 	if err != nil {
 		response.Fail(c, err)
 		return
 	}
-	response.OK(c, res)
+	c.Header("Content-Disposition", `attachment; filename="`+tpl.FileName+`"`)
+	c.Data(http.StatusOK, tpl.ContentType, tpl.Content)
+}
+
+// archiveClasses 绑定按入学年份归档班级请求。
+func (a orgAPI) archiveClasses(c *gin.Context) {
+	var req ArchiveClassesRequest
+	if !httpx.BindJSON(c, &req) {
+		return
+	}
+	if err := a.svc.ArchiveClassesByAdmin(c.Request.Context(), req); err != nil {
+		response.Fail(c, err)
+		return
+	}
+	response.OK(c, gin.H{})
+}
+
+// promoteClasses 绑定班级批量升级请求。
+func (a orgAPI) promoteClasses(c *gin.Context) {
+	if err := a.svc.PromoteClassesByAdmin(c.Request.Context()); err != nil {
+		response.Fail(c, err)
+		return
+	}
+	response.OK(c, gin.H{})
 }

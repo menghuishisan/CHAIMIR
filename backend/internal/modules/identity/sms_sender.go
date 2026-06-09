@@ -1,132 +1,95 @@
-// 短信下发能力(SMS sender)。
-// 依据 CLAUDE.md §4 的生产级要求:定义接口由部署注入真实网关;
-//
-//	开发环境用 LogSmsSender(仅记日志,绝不用于生产 —— 通过配置选择)。
-//
-// 真实网关(阿里云/腾讯云短信)作为独立实现接入,不在 M1 内置具体厂商 SDK。
+// identity 短信发送文件封装短信网关调用,验证码明文只存在于发送路径且不写日志。
 package identity
 
 import (
 	"bytes"
 	"context"
-	"encoding/json"
-	"errors"
 	"fmt"
-	"log/slog"
 	"net/http"
 	"strings"
 	"time"
 
-	"chaimir/internal/platform/netx"
+	"chaimir/internal/platform/config"
+	"chaimir/internal/platform/jsonx"
+	"chaimir/pkg/apperr"
 )
 
-// SmsSender 是短信下发能力契约。
-type SmsSender interface {
-	// Send 向手机号下发验证码;scene 用于选择短信模板。
-	Send(ctx context.Context, phone, code string, scene int16) error
+// SMSSender 是短信发送能力契约,便于 service 只依赖明确边界。
+type SMSSender interface {
+	// Send 发送指定场景的验证码短信,不得记录验证码明文。
+	Send(ctx context.Context, phone string, scene int16, code string) error
 }
 
-// LogSmsSender 是开发用 sender:把验证码记到日志(脱敏手机号),不真实发送。
-// ⚠ 仅限非生产环境;生产必须注入真实网关 sender(装配时按 APP_ENV 选择)。
-type LogSmsSender struct{}
-
-// Send 记录验证码到日志(开发用)。
-func (LogSmsSender) Send(ctx context.Context, phone, code string, scene int16) error {
-	slog.WarnContext(ctx, "开发模式短信(未真实发送)",
-		slog.String("phone", maskPhone(phone)),
-		slog.Int("scene", int(scene)),
-		slog.String("code", code), // 开发可见;生产 sender 不记明文。
-	)
-	return nil
-}
-
-// HTTPSmsConfig 是通用 HTTP 短信网关配置,由部署侧接入具体国内服务商代理。
-type HTTPSmsConfig struct {
-	Endpoint       string
-	Token          string
-	LoginTemplate  string
-	ResetTemplate  string
-	ChangeTemplate string
-	Timeout        time.Duration
-}
-
-// HTTPSmsSender 通过受控 HTTP 网关发送验证码,避免在业务代码绑定具体厂商 SDK。
-type HTTPSmsSender struct {
-	cfg    HTTPSmsConfig
+// HTTPSMSSender 通过受控 HTTP 短信代理网关发送验证码。
+type HTTPSMSSender struct {
+	cfg    config.SMSConfig
 	client *http.Client
 }
 
-// NewHTTPSmsSender 构造 HTTP 短信发送器,真实网关超时必须由配置显式注入。
-func NewHTTPSmsSender(cfg HTTPSmsConfig) (*HTTPSmsSender, error) {
-	if cfg.Timeout <= 0 {
-		return nil, fmt.Errorf("短信网关超时时间必须大于 0")
-	}
-	endpoint, err := netx.ValidatePublicHTTPURL(cfg.Endpoint)
-	if err != nil {
-		return nil, fmt.Errorf("短信网关地址非法: %w", err)
-	}
-	cfg.Endpoint = endpoint
-	return &HTTPSmsSender{
+// NewSMSSender 根据统一配置创建短信发送器。
+func NewSMSSender(cfg config.SMSConfig) SMSSender {
+	return &HTTPSMSSender{
 		cfg:    cfg,
-		client: netx.NewPublicHTTPClient(cfg.Timeout),
-	}, nil
+		client: &http.Client{Timeout: time.Duration(cfg.TimeoutSeconds) * time.Second},
+	}
 }
 
-// Send 调用 HTTP 网关发送验证码;失败状态码返回错误并保留状态上下文。
-func (s *HTTPSmsSender) Send(ctx context.Context, phone, code string, scene int16) (err error) {
-	template, err := s.templateForScene(scene)
-	if err != nil {
-		return err
+// Send 按配置发送验证码;log provider 仅允许开发环境显式使用,生产应配置 HTTP 网关。
+func (s *HTTPSMSSender) Send(ctx context.Context, phone string, scene int16, code string) error {
+	switch strings.ToLower(strings.TrimSpace(s.cfg.Provider)) {
+	case "log":
+		return nil
+	case "http":
+		return s.sendHTTP(ctx, phone, scene, code)
+	default:
+		return fmt.Errorf("不支持的短信服务商配置: %s", s.cfg.Provider)
 	}
-	payload := map[string]any{
+}
+
+// sendHTTP 调用统一短信代理网关,避免模块直接耦合具体厂商 SDK。
+func (s *HTTPSMSSender) sendHTTP(ctx context.Context, phone string, scene int16, code string) error {
+	if strings.TrimSpace(s.cfg.Endpoint) == "" || strings.TrimSpace(s.cfg.Token) == "" {
+		return fmt.Errorf("短信 HTTP 网关配置不完整")
+	}
+	template := s.template(scene)
+	if template == "" {
+		return fmt.Errorf("短信模板配置不完整")
+	}
+	body, err := jsonx.AnyBytes(map[string]string{
 		"phone":    phone,
-		"code":     code,
-		"scene":    scene,
 		"template": template,
-	}
-	body, err := json.Marshal(payload)
+		"code":     code,
+	}, apperr.ErrInternal)
 	if err != nil {
-		return fmt.Errorf("短信请求序列化失败: %w", err)
+		return fmt.Errorf("序列化短信请求失败: %w", err)
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, s.cfg.Endpoint, bytes.NewReader(body))
 	if err != nil {
 		return fmt.Errorf("创建短信请求失败: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	if s.cfg.Token != "" {
-		req.Header.Set("Authorization", "Bearer "+s.cfg.Token)
-	}
-
+	req.Header.Set("Authorization", "Bearer "+s.cfg.Token)
 	resp, err := s.client.Do(req)
 	if err != nil {
 		return fmt.Errorf("调用短信网关失败: %w", err)
 	}
-	defer func() {
-		if closeErr := resp.Body.Close(); closeErr != nil {
-			err = errors.Join(err, fmt.Errorf("关闭短信网关响应失败: %w", closeErr))
-		}
-	}()
-	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return fmt.Errorf("短信网关返回异常状态: %d", resp.StatusCode)
 	}
 	return nil
 }
 
-// templateForScene 选择验证码场景对应的短信模板。
-func (s *HTTPSmsSender) templateForScene(scene int16) (string, error) {
-	var template string
+// template 根据验证码场景选择短信模板。
+func (s *HTTPSMSSender) template(scene int16) string {
 	switch scene {
-	case SmsSceneLogin:
-		template = s.cfg.LoginTemplate
-	case SmsSceneReset:
-		template = s.cfg.ResetTemplate
-	case SmsSceneRebind:
-		template = s.cfg.ChangeTemplate
+	case SMSSceneLogin:
+		return s.cfg.LoginTemplate
+	case SMSSceneReset:
+		return s.cfg.ResetTemplate
+	case SMSSceneChangePhone:
+		return s.cfg.ChangeTemplate
 	default:
-		return "", fmt.Errorf("不支持的短信场景: %d", scene)
+		return ""
 	}
-	if strings.TrimSpace(template) == "" {
-		return "", fmt.Errorf("短信场景 %d 未配置模板", scene)
-	}
-	return template, nil
 }

@@ -1,4 +1,4 @@
-# 本文件声明 observability/prometheus 上游固定镜像的来源、配置、端口、数据卷和生产门禁。
+﻿# 本文件声明 observability/prometheus 上游固定镜像的来源、配置、端口、数据卷和生产门禁。
 schema_version: 1
 category: observability
 name: prometheus
@@ -22,7 +22,6 @@ upstream:
   image: prometheus/prometheus
   version: "v3.5.0"
   digest_required: true
-  digest_lock_ref: images/locks/observability/prometheus.lock.yaml
   license: Apache-2.0
 private_delivery:
   offline_bundle: true

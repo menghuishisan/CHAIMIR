@@ -9,7 +9,10 @@ USER root
 RUN mkdir -p /workspace /bundler \
     && chown -R 1000:1000 /workspace /bundler
 
+COPY entrypoint.sh /usr/local/bin/chaimir-aa-bundler-entrypoint
+RUN chmod +x /usr/local/bin/chaimir-aa-bundler-entrypoint
+
 USER 1000
 WORKDIR /workspace
 EXPOSE 4337
-CMD ["stackup-bundler", "--help"]
+ENTRYPOINT ["/usr/local/bin/chaimir-aa-bundler-entrypoint"]

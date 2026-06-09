@@ -20,6 +20,12 @@ source:
 upstream:
   image: python:3.13-alpine
   reuse_policy: self-developed-runtime
+env_keys:
+  config:
+    - CHAIMIR_EDU_CHAIN_PORT
+    - CHAIMIR_EDU_CHAIN_ID
+    - CHAIMIR_MAX_BODY_BYTES
+  secret: []
 data_driven: true
 capabilities:
   - chain-runtime

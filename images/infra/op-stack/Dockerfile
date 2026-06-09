@@ -9,7 +9,10 @@ USER root
 RUN mkdir -p /workspace /op-stack \
     && chown -R 1000:1000 /workspace /op-stack
 
+COPY entrypoint.sh /usr/local/bin/chaimir-op-stack-entrypoint
+RUN chmod +x /usr/local/bin/chaimir-op-stack-entrypoint
+
 USER 1000
 WORKDIR /workspace
 EXPOSE 8545 9003
-CMD ["op-node", "--help"]
+ENTRYPOINT ["/usr/local/bin/chaimir-op-stack-entrypoint"]

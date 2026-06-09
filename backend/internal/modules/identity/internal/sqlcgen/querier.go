@@ -6,149 +6,85 @@ package sqlcgen
 
 import (
 	"context"
-
-	"github.com/jackc/pgx/v5/pgtype"
 )
 
 type Querier interface {
-	// ============================================================
-	// account_role
-	// ============================================================
-	AddAccountRole(ctx context.Context, arg AddAccountRoleParams) error
 	ApproveTenantApplication(ctx context.Context, arg ApproveTenantApplicationParams) (TenantApplication, error)
-	// 班级归档级联:该班级在读学生账号一并归档(status 2正常 → 4归档)。
-	ArchiveAccountsByClass(ctx context.Context, orgID int64) error
-	ArchiveClass(ctx context.Context, id int64) error
-	// 学年归档:仅归档当前租户内正常状态学生账号,避免教师或停用/注销账号被误改。
-	ArchiveStudentAccountsByEnrollmentYear(ctx context.Context, enrollmentYear pgtype.Int2) ([]int64, error)
-	CountAccounts(ctx context.Context, arg CountAccountsParams) (int64, error)
-	CountAllAccounts(ctx context.Context, baseIdentity pgtype.Int2) (int64, error)
-	CountAuditLogs(ctx context.Context, arg CountAuditLogsParams) (int64, error)
-	CountImportBatches(ctx context.Context) (int64, error)
-	CountPlatformAuditLogs(ctx context.Context, arg CountPlatformAuditLogsParams) (int64, error)
-	CountTenantApplications(ctx context.Context, status pgtype.Int2) (int64, error)
-	CountTenants(ctx context.Context, status pgtype.Int2) (int64, error)
-	// ============================================================
-	// account
-	// ============================================================
+	ArchiveClassesByEnrollmentYear(ctx context.Context, arg ArchiveClassesByEnrollmentYearParams) error
+	ArchiveStudentAccountsByEnrollmentYear(ctx context.Context, arg ArchiveStudentAccountsByEnrollmentYearParams) error
+	BatchGetAccounts(ctx context.Context, dollar_1 []int64) ([]BatchGetAccountsRow, error)
+	ClassExists(ctx context.Context, arg ClassExistsParams) (bool, error)
+	ClearPasswordFailure(ctx context.Context, arg ClearPasswordFailureParams) error
 	CreateAccount(ctx context.Context, arg CreateAccountParams) (Account, error)
-	// ============================================================
-	// account_profile
-	// ============================================================
-	CreateAccountProfile(ctx context.Context, arg CreateAccountProfileParams) (AccountProfile, error)
-	// ============================================================
-	// activation_code
-	// ============================================================
+	CreateAccountProfile(ctx context.Context, arg CreateAccountProfileParams) error
+	CreateAccountRole(ctx context.Context, arg CreateAccountRoleParams) error
 	CreateActivationCode(ctx context.Context, arg CreateActivationCodeParams) (ActivationCode, error)
-	// ============================================================
-	// audit_log(全平台唯一审计表)
-	// ============================================================
-	CreateAuditLog(ctx context.Context, arg CreateAuditLogParams) error
-	// ============================================================
-	// auth_session
-	// ============================================================
+	CreateAuditLog(ctx context.Context, arg CreateAuditLogParams) (AuditLog, error)
 	CreateAuthSession(ctx context.Context, arg CreateAuthSessionParams) (AuthSession, error)
 	CreateClass(ctx context.Context, arg CreateClassParams) (Class, error)
-	// ============================================================
-	// department / major / class(租户表,RLS 透明)
-	// ============================================================
 	CreateDepartment(ctx context.Context, arg CreateDepartmentParams) (Department, error)
 	CreateImportBatch(ctx context.Context, arg CreateImportBatchParams) (ImportBatch, error)
-	// ============================================================
-	// import_batch
-	// ============================================================
 	CreateImportPreview(ctx context.Context, arg CreateImportPreviewParams) (ImportPreview, error)
 	CreateMajor(ctx context.Context, arg CreateMajorParams) (Major, error)
-	CreatePlatformAdmin(ctx context.Context, arg CreatePlatformAdminParams) (PlatformAdmin, error)
 	CreatePlatformAuthSession(ctx context.Context, arg CreatePlatformAuthSessionParams) (PlatformAuthSession, error)
-	// ============================================================
-	// sms_code
-	// ============================================================
-	CreateSmsCode(ctx context.Context, arg CreateSmsCodeParams) (SmsCode, error)
+	CreateSMSCode(ctx context.Context, arg CreateSMSCodeParams) (SmsCode, error)
 	CreateTenant(ctx context.Context, arg CreateTenantParams) (Tenant, error)
-	// ============================================================
-	// tenant_application
-	// ============================================================
 	CreateTenantApplication(ctx context.Context, arg CreateTenantApplicationParams) (TenantApplication, error)
-	// 一号多校登录定位:跨租户按 phone_hash 查账号。
-	// ★ 必须在特权连接(属主,绕 RLS)上执行;返回登录定位最小字段(不含手机号/密码)。
-	FindAccountsByPhoneAllTenants(ctx context.Context, phoneHash string) ([]FindAccountsByPhoneAllTenantsRow, error)
-	FindPlatformSessionByTokenHash(ctx context.Context, refreshTokenHash string) (FindPlatformSessionByTokenHashRow, error)
-	// Refresh 轮转/重放检测:跨租户按 refresh_token_hash 定位会话。
-	// ★ 必须在特权连接(属主,绕 RLS)上执行(Refresh Token 不含租户信息)。
-	FindSessionByTokenHash(ctx context.Context, refreshTokenHash string) (FindSessionByTokenHashRow, error)
-	GetAccountByID(ctx context.Context, id int64) (Account, error)
-	GetAccountByPhoneHash(ctx context.Context, phoneHash string) (Account, error)
-	GetAccountProfile(ctx context.Context, accountID int64) (AccountProfile, error)
-	GetAccountProfileByNo(ctx context.Context, no string) (AccountProfile, error)
-	// 登录前激活码定位:必须在特权连接上执行,仅返回激活码最小字段用于定位租户与账号。
-	GetActivationCodeByHash(ctx context.Context, codeHash string) (ActivationCode, error)
-	GetClassByID(ctx context.Context, id int64) (Class, error)
-	GetDepartmentByID(ctx context.Context, id int64) (Department, error)
-	GetLatestSmsCode(ctx context.Context, arg GetLatestSmsCodeParams) (SmsCode, error)
-	GetMajorByID(ctx context.Context, id int64) (Major, error)
-	GetPendingImportPreview(ctx context.Context, arg GetPendingImportPreviewParams) (ImportPreview, error)
-	GetPlatformAdminByID(ctx context.Context, id int64) (PlatformAdmin, error)
-	// M1 identity sqlc 查询源。
-	// 约定:租户表查询不显式写 tenant_id 条件(RLS 透明过滤),仅写业务条件;插入带 tenant_id(WITH CHECK)。
-	// 雪花 ID 由应用传入。全局表(platform_admin/tenant/tenant_application)无 RLS。
-	// 受控特权路径(预认证定位、平台级 tenant_id=NULL 审计/验证码):由 service 在【特权连接】上执行
-	//   (属主绕 RLS,见 docs/01 §8);sqlc 正常类型化,无手写 SQL。
-	// ============================================================
-	// platform_admin
-	// ============================================================
+	DeleteAccountRole(ctx context.Context, arg DeleteAccountRoleParams) error
+	DepartmentExists(ctx context.Context, arg DepartmentExistsParams) (bool, error)
+	GetAccountByID(ctx context.Context, id int64) (GetAccountByIDRow, error)
+	GetAccountByNo(ctx context.Context, no string) (GetAccountByNoRow, error)
+	GetAccountByPhoneHash(ctx context.Context, arg GetAccountByPhoneHashParams) (GetAccountByPhoneHashRow, error)
+	GetActivationCodeByHashPrivileged(ctx context.Context, codeHash string) (ActivationCode, error)
+	GetAuthSessionByRefreshHashPrivileged(ctx context.Context, refreshTokenHash string) (AuthSession, error)
+	GetImportPreview(ctx context.Context, arg GetImportPreviewParams) (ImportPreview, error)
+	GetLatestSMSCode(ctx context.Context, arg GetLatestSMSCodeParams) (SmsCode, error)
 	GetPlatformAdminByUsername(ctx context.Context, username string) (PlatformAdmin, error)
-	// ============================================================
-	// sso_config
-	// ============================================================
-	GetSsoConfig(ctx context.Context, tenantID int64) (SsoConfig, error)
-	GetTenantApplicationByID(ctx context.Context, id int64) (TenantApplication, error)
+	GetPlatformAuthSessionByRefreshHash(ctx context.Context, refreshTokenHash string) (PlatformAuthSession, error)
+	GetSSOConfig(ctx context.Context, arg GetSSOConfigParams) (SsoConfig, error)
+	GetTenantApplication(ctx context.Context, id int64) (TenantApplication, error)
 	GetTenantByCode(ctx context.Context, code string) (Tenant, error)
-	// ============================================================
-	// tenant
-	// ============================================================
 	GetTenantByID(ctx context.Context, id int64) (Tenant, error)
-	HasAccountRole(ctx context.Context, arg HasAccountRoleParams) (bool, error)
-	// 密码失败计数 +1,达阈值($2)则锁定 $3 分钟;返回更新后账号。
-	IncrAccountPwdFailed(ctx context.Context, arg IncrAccountPwdFailedParams) (Account, error)
-	ListAccountRoles(ctx context.Context, accountID int64) ([]int16, error)
-	ListAccounts(ctx context.Context, arg ListAccountsParams) ([]Account, error)
-	ListActiveSessions(ctx context.Context, accountID int64) ([]AuthSession, error)
-	ListAuditLogs(ctx context.Context, arg ListAuditLogsParams) ([]AuditLog, error)
-	ListClassesByMajor(ctx context.Context, majorID int64) ([]Class, error)
+	IncrementSMSVerifyAttempts(ctx context.Context, arg IncrementSMSVerifyAttemptsParams) error
+	ListAccounts(ctx context.Context, arg ListAccountsParams) ([]ListAccountsRow, error)
+	ListAccountsByPhoneHashPrivileged(ctx context.Context, phoneHash string) ([]ListAccountsByPhoneHashPrivilegedRow, error)
+	ListAuthSessionsByAccount(ctx context.Context, arg ListAuthSessionsByAccountParams) ([]AuthSession, error)
+	ListClasses(ctx context.Context, dollar_1 int64) ([]Class, error)
 	ListDepartments(ctx context.Context) ([]Department, error)
-	ListImportBatches(ctx context.Context, arg ListImportBatchesParams) ([]ImportBatch, error)
-	ListMajorsByDepartment(ctx context.Context, departmentID int64) ([]Major, error)
-	// 平台管理员查平台级与全校审计;必须走特权连接,由 M1 contract 收敛权限入口。
-	ListPlatformAuditLogs(ctx context.Context, arg ListPlatformAuditLogsParams) ([]AuditLog, error)
-	ListTenantApplications(ctx context.Context, arg ListTenantApplicationsParams) ([]TenantApplication, error)
-	ListTenants(ctx context.Context, arg ListTenantsParams) ([]Tenant, error)
-	MarkActivationCodeUsed(ctx context.Context, id int64) error
+	ListImportBatches(ctx context.Context, tenantID int64) ([]ImportBatch, error)
+	ListMajors(ctx context.Context, dollar_1 int64) ([]Major, error)
+	ListSSOConfigs(ctx context.Context, tenantID int64) ([]SsoConfig, error)
+	ListTenantApplications(ctx context.Context, dollar_1 int16) ([]TenantApplication, error)
+	ListTenants(ctx context.Context) ([]Tenant, error)
+	MajorExists(ctx context.Context, arg MajorExistsParams) (bool, error)
 	MarkImportPreviewSubmitted(ctx context.Context, arg MarkImportPreviewSubmittedParams) error
-	MarkSmsCodeUsed(ctx context.Context, id int64) error
+	MarkSMSCodeUsed(ctx context.Context, arg MarkSMSCodeUsedParams) error
+	PlatformStats(ctx context.Context) (PlatformStatsRow, error)
+	PromoteClasses(ctx context.Context, tenantID int64) error
+	QueryAuditLogs(ctx context.Context, arg QueryAuditLogsParams) ([]QueryAuditLogsRow, error)
+	RecordPasswordFailure(ctx context.Context, arg RecordPasswordFailureParams) (Account, error)
 	RejectTenantApplication(ctx context.Context, arg RejectTenantApplicationParams) (TenantApplication, error)
-	RemoveAccountRole(ctx context.Context, arg RemoveAccountRoleParams) error
-	ResetAccountPwdFailed(ctx context.Context, id int64) error
-	// 单端登录踢人 / Refresh 重放检测:吊销该账号全部有效会话。
-	RevokeAllAccountSessions(ctx context.Context, accountID int64) error
-	RevokeAllPlatformAdminSessions(ctx context.Context, platformAdminID int64) error
-	RevokeAuthSession(ctx context.Context, id int64) error
-	RevokePlatformAuthSession(ctx context.Context, id int64) error
-	SetAccountActivated(ctx context.Context, id int64) error
-	SoftDeleteClass(ctx context.Context, id int64) error
-	SoftDeleteDepartment(ctx context.Context, id int64) error
-	SoftDeleteMajor(ctx context.Context, id int64) error
-	UpdateAccountName(ctx context.Context, arg UpdateAccountNameParams) (Account, error)
-	UpdateAccountPassword(ctx context.Context, arg UpdateAccountPasswordParams) error
+	RevokeAccountSessions(ctx context.Context, arg RevokeAccountSessionsParams) error
+	RevokeAuthSessionByID(ctx context.Context, arg RevokeAuthSessionByIDParams) error
+	RevokePlatformAuthSessionByID(ctx context.Context, id int64) error
+	RevokePlatformSessions(ctx context.Context, platformAdminID int64) error
+	RevokeStudentSessionsByEnrollmentYear(ctx context.Context, arg RevokeStudentSessionsByEnrollmentYearParams) error
+	SoftDeleteClass(ctx context.Context, arg SoftDeleteClassParams) error
+	SoftDeleteDepartment(ctx context.Context, arg SoftDeleteDepartmentParams) error
+	SoftDeleteMajor(ctx context.Context, arg SoftDeleteMajorParams) error
+	TenantStats(ctx context.Context, tenantID int64) (TenantStatsRow, error)
+	UpdateAccountBasic(ctx context.Context, arg UpdateAccountBasicParams) error
+	UpdateAccountPassword(ctx context.Context, arg UpdateAccountPasswordParams) (Account, error)
 	UpdateAccountPhone(ctx context.Context, arg UpdateAccountPhoneParams) error
-	UpdateAccountProfileOrg(ctx context.Context, arg UpdateAccountProfileOrgParams) error
+	UpdateAccountProfileEditable(ctx context.Context, arg UpdateAccountProfileEditableParams) error
 	UpdateAccountStatus(ctx context.Context, arg UpdateAccountStatusParams) (Account, error)
 	UpdateClass(ctx context.Context, arg UpdateClassParams) (Class, error)
 	UpdateDepartment(ctx context.Context, arg UpdateDepartmentParams) (Department, error)
 	UpdateMajor(ctx context.Context, arg UpdateMajorParams) (Major, error)
 	UpdateTenantConfig(ctx context.Context, arg UpdateTenantConfigParams) (Tenant, error)
 	UpdateTenantStatus(ctx context.Context, arg UpdateTenantStatusParams) (Tenant, error)
-	UpsertSsoConfig(ctx context.Context, arg UpsertSsoConfigParams) (SsoConfig, error)
+	UpsertSSOConfig(ctx context.Context, arg UpsertSSOConfigParams) (SsoConfig, error)
+	UseActivationCode(ctx context.Context, arg UseActivationCodeParams) error
 }
 
 var _ Querier = (*Queries)(nil)

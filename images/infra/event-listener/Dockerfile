@@ -7,7 +7,8 @@ LABEL org.opencontainers.image.description="Chaimir blockchain event listener se
 RUN useradd --system --create-home --home-dir /app chaimir
 
 WORKDIR /app
-RUN npm install --omit=dev --no-package-lock fastify@4.29.0 ethers@6.13.5
+COPY package.json package-lock.json /app/
+RUN npm ci --omit=dev --ignore-scripts --no-audit --no-fund
 COPY event-listener.mjs /app/event-listener.mjs
 RUN chown -R chaimir:chaimir /app
 

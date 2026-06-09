@@ -20,6 +20,10 @@ source:
 upstream:
   image: ghcr.io/stackup-wallet/stackup-bundler:v0.6.25
   reuse_policy: thin-wrapper
+env_keys:
+  config:
+    - CHAIMIR_AA_BUNDLER_CONFIG
+  secret: []
 data_driven: true
 capabilities:
   - erc4337-bundler
@@ -64,10 +68,11 @@ build:
   dockerfile: Dockerfile
 selftest:
   commands:
-    - name: bundler-help
+    - name: entrypoint-syntax
       command:
-        - stackup-bundler
-        - --help
+        - sh
+        - -n
+        - /usr/local/bin/chaimir-aa-bundler-entrypoint
 supply_chain:
   sbom: true
   trivy_required: true

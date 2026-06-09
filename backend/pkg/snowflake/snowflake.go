@@ -1,6 +1,4 @@
-// Package snowflake 实现雪花算法 ID 生成器。
-// 依据 docs/总-数据库表总览.md §一:主键 BIGINT + 雪花算法(非自增)。
-// 64 位:1 符号位 + 41 时间戳(毫秒) + 10 节点 + 12 序列。
+// snowflake 实现全平台雪花算法 ID 生成器,用于 BIGINT 主键生成。
 package snowflake
 
 import (
@@ -10,7 +8,7 @@ import (
 )
 
 const (
-	epochMillis    int64 = 1735689600000 // 自定义纪元 2025-01-01 UTC。
+	epochMillis    int64 = 1735689600000
 	nodeBits             = 10
 	sequenceBits         = 12
 	maxNodeID            = -1 ^ (-1 << nodeBits)
@@ -27,12 +25,12 @@ type Node struct {
 	sequence int64
 }
 
-// Generator 是平台统一 ID 生成契约;业务模块只依赖该契约,不自建备用主键算法。
+// Generator 是平台统一 ID 生成契约;业务模块只依赖该契约。
 type Generator interface {
 	Generate() int64
 }
 
-// NewNode 创建指定节点编号的生成器;越界返回错误(边界校验)。
+// NewNode 创建指定节点编号的生成器;越界返回错误。
 func NewNode(nodeID int64) (*Node, error) {
 	if nodeID < 0 || nodeID > maxNodeID {
 		return nil, errors.New("snowflake: node id 超出范围 [0,1023]")
@@ -47,7 +45,7 @@ func (n *Node) Generate() int64 {
 
 	now := time.Now().UnixMilli()
 	if now < n.lastTime {
-		now = n.lastTime // 时钟回拨保护。
+		now = n.lastTime
 	}
 	if now == n.lastTime {
 		n.sequence = (n.sequence + 1) & maxSequence

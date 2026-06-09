@@ -1,5 +1,4 @@
-// Package logging 配置全平台结构化日志(slog),并提供统一日志上下文与脱敏入口。
-// 依据 CLAUDE.md §5/§8:错误日志必须结构化、含 trace/tenant 等定位字段,敏感值不能落盘。
+// logging 配置全平台结构化日志(slog),并提供统一日志上下文与脱敏入口。
 package logging
 
 import (
@@ -14,26 +13,23 @@ type attrsCtxKey struct{}
 
 // Setup 按配置初始化全局 slog logger(json/text + level)。
 func Setup(level, format string) {
-	var lv slog.Level
+	var lvl slog.Level
 	switch strings.ToLower(level) {
 	case "debug":
-		lv = slog.LevelDebug
+		lvl = slog.LevelDebug
 	case "warn":
-		lv = slog.LevelWarn
+		lvl = slog.LevelWarn
 	case "error":
-		lv = slog.LevelError
+		lvl = slog.LevelError
 	default:
-		lv = slog.LevelInfo
+		lvl = slog.LevelInfo
 	}
-
-	opts := &slog.HandlerOptions{Level: lv}
-	var h slog.Handler
-	if strings.ToLower(format) == "text" {
-		h = slog.NewTextHandler(os.Stdout, opts)
-	} else {
-		h = slog.NewJSONHandler(os.Stdout, opts) // 生产 json,便于集中采集。
+	opts := &slog.HandlerOptions{Level: lvl, ReplaceAttr: redactAttr}
+	if strings.EqualFold(format, "text") {
+		slog.SetDefault(slog.New(slog.NewTextHandler(os.Stdout, opts)))
+		return
 	}
-	slog.SetDefault(slog.New(h))
+	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, opts)))
 }
 
 // WithAttrs 把通用定位字段追加到 context,供响应层、平台层和业务层统一写日志。
@@ -41,8 +37,6 @@ func WithAttrs(ctx context.Context, attrs ...slog.Attr) context.Context {
 	if len(attrs) == 0 {
 		return ctx
 	}
-
-	// pkg 层只保存 slog.Attr,不认识 tenant/auth 等 internal 类型,避免通用日志包反向耦合平台上下文。
 	existing := AttrsFromContext(ctx)
 	merged := make([]slog.Attr, 0, len(existing)+len(attrs))
 	merged = append(merged, existing...)
@@ -56,8 +50,6 @@ func AttrsFromContext(ctx context.Context, extra ...slog.Attr) []slog.Attr {
 	if attrs, ok := ctx.Value(attrsCtxKey{}).([]slog.Attr); ok {
 		base = attrs
 	}
-
-	// 返回新切片,避免调用方追加字段时改到 context 内已保存的共享字段集合。
 	out := make([]slog.Attr, 0, len(base)+len(extra))
 	out = append(out, base...)
 	out = append(out, extra...)
@@ -67,8 +59,6 @@ func AttrsFromContext(ctx context.Context, extra ...slog.Attr) []slog.Attr {
 // ErrorContext 写统一错误日志:上下文字段来自 context,错误链先脱敏再落盘。
 func ErrorContext(ctx context.Context, msg string, err string, attrs ...slog.Attr) {
 	all := AttrsFromContext(ctx, attrs...)
-
-	// 错误链保留给运维排查,但密钥、令牌等敏感值必须在进入 handler 前脱敏。
 	all = append(all, slog.String("error", SanitizeError(err)))
 	slog.Default().LogAttrs(ctx, slog.LevelError, msg, all...)
 }
@@ -93,12 +83,34 @@ var sensitiveValuePatterns = []secretPattern{
 	{regexp.MustCompile(`(?i)(redis://[^:\s/@]+:)([^@\s]+)(@)`), `${1}***${3}`},
 }
 
+var phonePattern = regexp.MustCompile(`\b1[3-9]\d{9}\b`)
+
 // SanitizeError 对日志错误文本做强制脱敏,覆盖 key/value、JSON 和常见连接串凭据形态。
 func SanitizeError(raw string) string {
 	masked := raw
 	for _, pattern := range sensitiveValuePatterns {
-		// 日志入口必须先脱敏再落盘;无法识别的格式由后续规则继续覆盖。
 		masked = pattern.re.ReplaceAllString(masked, pattern.replacement)
 	}
+	masked = phonePattern.ReplaceAllStringFunc(masked, maskPhoneNumber)
 	return masked
+}
+
+// maskPhoneNumber 按文档要求把手机号掩码为 138****1234 形态。
+func maskPhoneNumber(phone string) string {
+	if len(phone) != 11 {
+		return phone
+	}
+	return phone[:3] + "****" + phone[7:]
+}
+
+// redactAttr 在 handler 输出前按字段名兜底脱敏,避免结构化字段绕过字符串规则。
+func redactAttr(_ []string, attr slog.Attr) slog.Attr {
+	key := strings.ToLower(attr.Key)
+	for _, marker := range []string{"password", "secret", "token", "key", "credential"} {
+		if strings.Contains(key, marker) && attr.Value.Kind() == slog.KindString {
+			attr.Value = slog.StringValue(SanitizeError(attr.Value.String()))
+			return attr
+		}
+	}
+	return attr
 }

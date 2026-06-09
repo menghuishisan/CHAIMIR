@@ -1,4 +1,4 @@
-// Package ids 统一雪花 ID 在后端与外部 JSON 字符串之间的边界处理。
+// ids 统一雪花 ID 在后端与外部字符串之间的边界处理。
 package ids
 
 import (

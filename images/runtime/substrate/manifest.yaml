@@ -37,6 +37,16 @@ ports:
     protocol: TCP
     expose: proxy
     purpose: Substrate WebSocket RPC
+rpc_exposure:
+  bind_all_interfaces: true
+  reason: Substrate 开发链需要对 Pod 网络开放 WebSocket RPC,仅允许 M2 代理路由进入。
+  unsafe_flags:
+    - --unsafe-rpc-external
+  required_controls:
+    - network_policy_deny_all
+    - platform_authenticated_proxy
+    - no_direct_student_shell_to_rpc_admin
+    - m2_port_allowlist
 local_dev:
   host_mappings:
     - host: 127.0.0.1

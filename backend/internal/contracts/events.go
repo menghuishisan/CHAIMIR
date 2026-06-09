@@ -1,66 +1,59 @@
-// 事件总线 subject 常量与事件载荷类型(模块反向通信契约)。
-// 依据 docs/总-工程目录设计.md §3.1.1:低层通知高层一律走事件,高层订阅。
-// subject 命名:<模块>.<动作>(过去式),如 judge.completed / sandbox.recycled。
-// 新增反向通信能力时先声明 subject 与载荷,再由发布方/订阅方按契约实现。
+// contracts 定义跨模块反向通信统一使用的事件主题常量与载荷 DTO。
 package contracts
 
 import "time"
 
 const (
-	// SubjectJudgeCompleted 判题完成:judge 发布,teaching/experiment/contest 订阅。
+	// SubjectJudgeCompleted 表示判题完成事件,由 M3 发布供业务模块订阅。
 	SubjectJudgeCompleted = "judge.completed"
-	// SubjectJudgeFailed 判题系统性失败终态:judge 发布,teaching/experiment/contest 订阅。
+	// SubjectJudgeFailed 表示判题失败终态事件,由 M3 发布供业务模块订阅。
 	SubjectJudgeFailed = "judge.failed"
-	// SubjectSandboxRecycled 沙箱回收完成:sandbox 发布,experiment 等订阅。
+	// SubjectSandboxRecycled 表示沙箱回收完成事件,由 M2 发布供来源模块订阅。
 	SubjectSandboxRecycled = "sandbox.recycled"
-	// SubjectSimSessionEnded 仿真会话结束:sim 发布。
-	SubjectSimSessionEnded = "sim.session.ended"
-	// SubjectExperimentScored 实验得分完成:experiment 发布,teaching/grade 等上层流程按需消费。
+	// SubjectExperimentScored 表示实验得分落定事件,由 M7 发布供上层流程消费。
 	SubjectExperimentScored = "experiment.scored"
-	// SubjectTeachingGradeUpdated 单课程成绩变更:teaching 发布,grade 订阅后重算 GPA。
+	// SubjectTeachingGradeUpdated 表示单课程成绩更新事件,由 M6 发布供 M11 重算。
 	SubjectTeachingGradeUpdated = "teaching.grade.updated"
-	// SubjectNotifySend 通知发送事件:各模块发布,M10 消费为站内信。
+	// SubjectGradeReviewLockChanged 表示 M11 审核流程锁定态变化,由 M11 发布供 M6 同步写保护投影。
+	SubjectGradeReviewLockChanged = "grade.review.lock_changed"
+	// SubjectIdentitySessionRevoked 表示账号会话被吊销,由 M1 发布供 M10 踢线联动。
+	SubjectIdentitySessionRevoked = "identity.session.revoked"
+	// SubjectNotifySend 表示异步通知发送事件,由业务模块发布供 M10 消费,载荷直接使用 NotifySendRequest。
 	SubjectNotifySend = "notify.send"
-	// SubjectNotifyPush 实时推送事件:各模块发布,M10 消费为 WS 广播。
+	// SubjectNotifyPush 表示异步实时推送事件,由业务模块发布供 M10 消费,载荷直接使用 NotifyPushRequest。
 	SubjectNotifyPush = "notify.push"
-	// SubjectNotifyDLQ 通知事件死信:notify 重试耗尽后发布,供运维告警消费。
-	SubjectNotifyDLQ = "notify.dlq"
 )
 
-// JudgeCompletedEvent 判题完成事件载荷。
+// JudgeCompletedEvent 是判题完成事件载荷。
 type JudgeCompletedEvent struct {
-	TenantID  int64  `json:"tenant_id"`
-	TaskID    int64  `json:"task_id"`
-	SourceRef string `json:"source_ref"` // <来源>:<年份>:<资源类型>:<id>(总-API §6)。
-	Status    int16  `json:"status"`
-	Score     int    `json:"score"`
+	TenantID   int64     `json:"tenant_id"`
+	TaskID     int64     `json:"task_id"`
+	SourceRef  string    `json:"source_ref"`
+	Status     int16     `json:"status"`
+	Score      int32     `json:"score"`
+	Passed     bool      `json:"passed"`
+	FinishedAt time.Time `json:"finished_at"`
 }
 
-// JudgeFailedEvent 判题失败终态事件载荷。
+// JudgeFailedEvent 是判题失败终态事件载荷。
 type JudgeFailedEvent struct {
-	TenantID  int64  `json:"tenant_id"`
-	TaskID    int64  `json:"task_id"`
-	SourceRef string `json:"source_ref"`
-	Reason    string `json:"reason"`
+	TenantID  int64     `json:"tenant_id"`
+	TaskID    int64     `json:"task_id"`
+	SourceRef string    `json:"source_ref"`
+	Reason    string    `json:"reason"`
+	FailedAt  time.Time `json:"failed_at"`
 }
 
-// SandboxRecycledEvent 沙箱回收事件载荷。
+// SandboxRecycledEvent 是沙箱完成回收后的事件载荷。
 type SandboxRecycledEvent struct {
-	TenantID  int64  `json:"tenant_id"`
-	SandboxID int64  `json:"sandbox_id"`
-	SourceRef string `json:"source_ref"`
-	Reason    string `json:"reason"` // idle / max-lifetime / cascade / manual。
+	TenantID   int64     `json:"tenant_id"`
+	SandboxID  int64     `json:"sandbox_id"`
+	SourceRef  string    `json:"source_ref"`
+	Reason     string    `json:"reason"`
+	RecycledAt time.Time `json:"recycled_at"`
 }
 
-// SimSessionEndedEvent 仿真会话结束事件载荷。
-type SimSessionEndedEvent struct {
-	TenantID  int64  `json:"tenant_id"`
-	SessionID int64  `json:"session_id"`
-	SourceRef string `json:"source_ref"`
-	Reason    string `json:"reason"` // completed / idle / cascade / manual。
-}
-
-// ExperimentScoredEvent 实验得分事件载荷。
+// ExperimentScoredEvent 是实验实例得分落定后的事件载荷。
 type ExperimentScoredEvent struct {
 	TenantID     int64     `json:"tenant_id"`
 	ExperimentID int64     `json:"experiment_id"`
@@ -70,7 +63,7 @@ type ExperimentScoredEvent struct {
 	ScoredAt     time.Time `json:"scored_at"`
 }
 
-// TeachingGradeUpdatedEvent 是 M6 单课程成绩变更事件载荷。
+// TeachingGradeUpdatedEvent 是单课程成绩调整后的事件载荷。
 type TeachingGradeUpdatedEvent struct {
 	TenantID  int64     `json:"tenant_id"`
 	CourseID  int64     `json:"course_id"`
@@ -78,9 +71,22 @@ type TeachingGradeUpdatedEvent struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
-// NotifyDeadLetterEvent 是 M10 事件消费重试耗尽后的死信载荷。
-type NotifyDeadLetterEvent struct {
-	Subject string `json:"subject"`
-	Reason  string `json:"reason"`
-	Payload string `json:"payload"`
+// GradeReviewLockChangedEvent 是 M11 驱动 M6 同步单课程写保护投影时使用的事件载荷。
+type GradeReviewLockChangedEvent struct {
+	TenantID  int64     `json:"tenant_id"`
+	ReviewID  int64     `json:"review_id"`
+	CourseID  int64     `json:"course_id"`
+	Locked    bool      `json:"locked"`
+	Reason    string    `json:"reason"`
+	ChangedAt time.Time `json:"changed_at"`
+}
+
+// IdentitySessionRevokedEvent 是 M1 吊销会话后供 M10 关闭旧连接的事件载荷。
+type IdentitySessionRevokedEvent struct {
+	TenantID   int64     `json:"tenant_id"`
+	AccountID  int64     `json:"account_id"`
+	Scope      string    `json:"scope"`
+	Reason     string    `json:"reason"`
+	RevokedAt  time.Time `json:"revoked_at"`
+	IsPlatform bool      `json:"is_platform"`
 }

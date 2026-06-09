@@ -1,6 +1,4 @@
-// Package k8s 封装 client-go,供 M2 沙箱编排创建/销毁动态命名空间与 Pod。
-// 依据 docs/总-部署架构设计.md §二:后端 ServiceAccount 最小 RBAC。
-// 本层只提供通用 Kubernetes 原语(clientset/exec),具体沙箱编排逻辑属于 M2(sandbox)。
+// k8s 封装 client-go,供 M2 沙箱编排创建/销毁动态命名空间与 Pod。
 package k8s
 
 import (

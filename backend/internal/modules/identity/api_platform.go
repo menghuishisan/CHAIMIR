@@ -1,188 +1,133 @@
-// M1 平台管理与本校配置 HTTP 处理器。
+// identity api_platform 文件承接平台入驻申请和租户审核 HTTP 请求。
 package identity
 
 import (
+	"chaimir/internal/platform/auth"
 	"chaimir/internal/platform/httpx"
-	"chaimir/internal/platform/pagex"
-	"chaimir/pkg/apperr"
 	"chaimir/pkg/response"
 
 	"github.com/gin-gonic/gin"
 )
 
-// createApplication 访客提交入驻申请(公开)。
-func (a *API) createApplication(c *gin.Context) {
+// platformAPI 封装平台管理 HTTP handler 依赖,避免匿名函数承载核心入口。
+type platformAPI struct {
+	svc *Service
+}
+
+// registerPlatformRoutes 注册平台管理员入口路由。
+func registerPlatformRoutes(r gin.IRouter, svc *Service, authn *auth.Manager) {
+	api := platformAPI{svc: svc}
+	g := r.Group("/platform")
+	g.POST("/applications", api.createApplication)
+	g.GET("/applications", authn.Middleware(), auth.RequirePlatformIdentity(), api.listApplications)
+	g.POST("/applications/:id/approve", authn.Middleware(), auth.RequirePlatformIdentity(), api.approveApplication)
+	g.POST("/applications/:id/reject", authn.Middleware(), auth.RequirePlatformIdentity(), api.rejectApplication)
+	g.GET("/tenants", authn.Middleware(), auth.RequirePlatformIdentity(), api.listTenants)
+	g.GET("/tenants/:id", authn.Middleware(), auth.RequirePlatformIdentity(), api.getTenant)
+	g.PATCH("/tenants/:id", authn.Middleware(), auth.RequirePlatformIdentity(), api.updateTenant)
+}
+
+// createApplication 绑定公开入驻申请请求,该入口不创建账号也不直接开通学校。
+func (a platformAPI) createApplication(c *gin.Context) {
 	var req CreateApplicationRequest
-	if !httpx.BindJSONWithError(c, &req, apperr.ErrApplicationInvalid) {
+	if !httpx.BindJSON(c, &req) {
 		return
 	}
-	id, err := a.svc.CreateApplication(c.Request.Context(), req)
+	out, err := a.svc.CreateApplication(c.Request.Context(), req)
 	if err != nil {
 		response.Fail(c, err)
 		return
 	}
-	response.OK(c, gin.H{"application_id": id})
+	response.OK(c, out)
 }
 
-// listApplications 平台列申请(?status=)。
-func (a *API) listApplications(c *gin.Context) {
-	page, size := pagex.Normalize(httpx.QueryInt(c, "page"), httpx.QueryInt(c, "size"))
-	status := httpx.Int16(c.Query("status"))
-	rows, total, err := a.svc.ListApplications(c.Request.Context(), status, page, size)
-	if err != nil {
-		response.Fail(c, err)
-		return
-	}
-	response.OKPage(c, rows, total, page, size)
-}
-
-// approveApplication 通过申请(创建租户 + 首个管理员)。
-func (a *API) approveApplication(c *gin.Context) {
-	appID, ok := httpx.PathID(c, "id")
+// listApplications 读取平台入驻申请列表,状态过滤仅在 service/repo 中使用。
+func (a platformAPI) listApplications(c *gin.Context) {
+	status, ok := httpx.QueryInt(c, "status", httpx.QueryIntRule{BitSize: 16, Min: 0})
 	if !ok {
 		return
 	}
-	id, _ := currentID(c)
-	var body struct {
-		TenantCode string `json:"tenant_code" binding:"required"`
-		AdminPhone string `json:"admin_phone" binding:"required"`
-		AdminName  string `json:"admin_name" binding:"required"`
-	}
-	if !httpx.BindJSONWithError(c, &body, apperr.ErrApplicationInvalid) {
-		return
-	}
-	res, err := a.svc.ApproveApplication(c.Request.Context(), appID, id.AccountID, body.TenantCode, body.AdminPhone, body.AdminName)
+	out, err := a.svc.ListApplicationsByPlatform(c.Request.Context(), int16(status))
 	if err != nil {
 		response.Fail(c, err)
 		return
 	}
-	response.OK(c, res)
+	response.OK(c, out)
 }
 
-// rejectApplication 驳回申请。
-func (a *API) rejectApplication(c *gin.Context) {
-	appID, ok := httpx.PathID(c, "id")
-	if !ok {
-		return
-	}
-	id, _ := currentID(c)
-	var req RejectApplicationRequest
-	if !httpx.BindJSONWithError(c, &req, apperr.ErrApplicationInvalid) {
-		return
-	}
-	if err := a.svc.RejectApplication(c.Request.Context(), appID, id.AccountID, req.Reason); err != nil {
-		response.Fail(c, err)
-		return
-	}
-	response.OK(c, gin.H{"rejected": true})
-}
-
-// listTenants 平台列租户(?status=)。
-func (a *API) listTenants(c *gin.Context) {
-	page, size := pagex.Normalize(httpx.QueryInt(c, "page"), httpx.QueryInt(c, "size"))
-	status := httpx.Int16(c.Query("status"))
-	rows, total, err := a.svc.ListTenants(c.Request.Context(), status, page, size)
-	if err != nil {
-		response.Fail(c, err)
-		return
-	}
-	response.OKPage(c, rows, total, page, size)
-}
-
-// getTenant 平台取租户详情。
-func (a *API) getTenant(c *gin.Context) {
+// approveApplication 绑定平台审核通过请求,创建租户和首个学校管理员由 service 原子编排。
+func (a platformAPI) approveApplication(c *gin.Context) {
 	id, ok := httpx.PathID(c, "id")
 	if !ok {
 		return
 	}
-	m, err := a.svc.GetTenant(c.Request.Context(), id)
+	var req ReviewApplicationRequest
+	if !httpx.BindJSON(c, &req) {
+		return
+	}
+	tenant, activation, err := a.svc.ApproveApplication(c.Request.Context(), id, req)
 	if err != nil {
 		response.Fail(c, err)
 		return
 	}
-	response.OK(c, m)
+	response.OK(c, gin.H{"tenant": tenant, "activation_code": activation})
 }
 
-// updateTenant 平台改租户状态/到期。
-func (a *API) updateTenant(c *gin.Context) {
+// rejectApplication 绑定平台驳回申请请求,驳回原因仅作为业务字段传给 service。
+func (a platformAPI) rejectApplication(c *gin.Context) {
 	id, ok := httpx.PathID(c, "id")
 	if !ok {
 		return
 	}
-	var req UpdateTenantRequest
-	if !httpx.BindJSONWithError(c, &req, apperr.ErrTenantUpdateInvalid) {
+	var req ReviewApplicationRequest
+	if !httpx.BindJSON(c, &req) {
 		return
 	}
-	if err := a.svc.UpdateTenant(c.Request.Context(), id, req); err != nil {
+	if err := a.svc.RejectApplication(c.Request.Context(), id, req.Reason); err != nil {
 		response.Fail(c, err)
 		return
 	}
-	response.OK(c, gin.H{"updated": true})
+	response.OK(c, gin.H{})
 }
 
-// getTenantConfig 学校管理员取本校配置。
-func (a *API) getTenantConfig(c *gin.Context) {
-	id, ok := currentID(c)
-	if !ok {
-		response.Fail(c, apperr.ErrUnauthorized)
-		return
-	}
-	m, err := a.svc.GetTenantConfig(c.Request.Context(), id.TenantID)
+// listTenants 读取平台租户列表,API 层不直接访问 repo。
+func (a platformAPI) listTenants(c *gin.Context) {
+	out, err := a.svc.ListTenantsByPlatform(c.Request.Context())
 	if err != nil {
 		response.Fail(c, err)
 		return
 	}
-	response.OK(c, m)
+	response.OK(c, out)
 }
 
-// updateTenantConfig 学校管理员改本校配置。
-func (a *API) updateTenantConfig(c *gin.Context) {
-	id, ok := currentID(c)
+// getTenant 读取单个租户详情,路径 ID 解析失败时返回统一用户向错误。
+func (a platformAPI) getTenant(c *gin.Context) {
+	id, ok := httpx.PathID(c, "id")
 	if !ok {
-		response.Fail(c, apperr.ErrUnauthorized)
 		return
 	}
-	var req TenantConfigRequest
-	if !httpx.BindJSONWithError(c, &req, apperr.ErrTenantConfigInvalid) {
-		return
-	}
-	if err := a.svc.UpdateTenantConfig(c.Request.Context(), id.TenantID, req); err != nil {
-		response.Fail(c, err)
-		return
-	}
-	response.OK(c, gin.H{"updated": true})
-}
-
-// getSsoConfig 学校管理员读取本校 SSO/LDAP 配置。
-func (a *API) getSsoConfig(c *gin.Context) {
-	id, ok := currentID(c)
-	if !ok {
-		response.Fail(c, apperr.ErrUnauthorized)
-		return
-	}
-	cfg, err := a.svc.GetSsoConfig(c.Request.Context(), id.TenantID)
+	out, err := a.svc.GetTenantByPlatform(c.Request.Context(), id)
 	if err != nil {
 		response.Fail(c, err)
 		return
 	}
-	response.OK(c, cfg)
+	response.OK(c, out)
 }
 
-// upsertSsoConfig 学校管理员保存本校 SSO/LDAP 配置。
-func (a *API) upsertSsoConfig(c *gin.Context) {
-	id, ok := currentID(c)
+// updateTenant 绑定平台租户状态更新请求,状态机校验由 service 执行。
+func (a platformAPI) updateTenant(c *gin.Context) {
+	id, ok := httpx.PathID(c, "id")
 	if !ok {
-		response.Fail(c, apperr.ErrUnauthorized)
 		return
 	}
-	var req SsoConfigRequest
-	if !httpx.BindJSONWithError(c, &req, apperr.ErrSsoConfigRequestInvalid) {
+	var req UpdateTenantStatusRequest
+	if !httpx.BindJSON(c, &req) {
 		return
 	}
-	cfg, err := a.svc.UpsertSsoConfig(c.Request.Context(), id.TenantID, req)
+	out, err := a.svc.UpdateTenantStatusByPlatform(c.Request.Context(), id, req)
 	if err != nil {
 		response.Fail(c, err)
 		return
 	}
-	response.OK(c, cfg)
+	response.OK(c, out)
 }

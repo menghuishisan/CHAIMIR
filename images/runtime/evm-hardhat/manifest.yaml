@@ -18,7 +18,7 @@ description: Hardhat EVM 教学运行时镜像。
 source:
   type: thin-wrapper
 upstream:
-  image: node:20-bookworm-slim
+  image: ghcr.io/foundry-rs/foundry:v1.0.0
   reuse_policy: toolchain-wrapper
 data_driven: true
 capabilities:

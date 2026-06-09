@@ -1,4 +1,4 @@
-// Package background 测试后台任务运行器的通用停止与错误恢复语义。
+// background_test 校验后台任务运行器的通用停止与错误恢复语义。
 package background
 
 import (
@@ -37,7 +37,7 @@ func TestRunnerTicksUntilContextCancelled(t *testing.T) {
 	}
 }
 
-// TestRunnerContinuesAfterErrorAndPanic 确认单轮错误或 panic 不会杀死整个后台任务。
+// TestRunnerContinuesAfterErrorAndPanic 确认单轮错误或 panic 不会杀死整个后台循环。
 func TestRunnerContinuesAfterErrorAndPanic(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	var calls atomic.Int32

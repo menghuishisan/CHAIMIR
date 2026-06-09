@@ -1,4 +1,4 @@
-# 本文件声明 middleware/couchdb 上游固定镜像的来源、配置、端口、数据卷和生产门禁。
+﻿# 本文件声明 middleware/couchdb 上游固定镜像的来源、配置、端口、数据卷和生产门禁。
 schema_version: 1
 category: middleware
 name: couchdb
@@ -22,7 +22,6 @@ upstream:
   image: couchdb
   version: "3.4"
   digest_required: true
-  digest_lock_ref: images/locks/middleware/couchdb.lock.yaml
   license: Apache-2.0
 private_delivery:
   offline_bundle: true

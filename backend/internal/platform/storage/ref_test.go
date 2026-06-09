@@ -1,4 +1,4 @@
-// Package storage 的对象引用测试覆盖 minio://bucket/key 统一解析规则。
+// storage_test 校验 minio://bucket/key 对象引用的统一解析规则。
 package storage
 
 import "testing"

@@ -1,4 +1,4 @@
-// Package secretmap 统一处理 JSON 配置 map 中敏感字段的加密、脱敏和还原。
+// secretmap 统一处理 JSON 配置 map 中敏感字段的加密、脱敏和还原。
 package secretmap
 
 import (
@@ -106,6 +106,10 @@ func Reveal(cipher *crypto.Cipher, value map[string]any, label string) (map[stri
 func IsSensitiveKey(key string) bool {
 	normalized := strings.ToLower(key)
 	return strings.Contains(normalized, "password") ||
+		strings.Contains(normalized, "private_key") ||
+		strings.Contains(normalized, "access_key") ||
+		strings.Contains(normalized, "signing_key") ||
+		strings.Contains(normalized, "session_secret") ||
 		strings.Contains(normalized, "secret") ||
 		strings.Contains(normalized, "token") ||
 		strings.Contains(normalized, "credential") ||

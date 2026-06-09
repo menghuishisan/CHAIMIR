@@ -1,188 +1,122 @@
-// M1 业务逻辑层(service)—— 服务结构与共享依赖/辅助。
-// 职责:认证/账号/组织/导入/租户审核的业务规则与状态机;
-//
-//	经 repo 访问数据(全 sqlc),经 platform 取基础设施。
-//
-// 错误显式处理、分层暴露(对外 apperr 友好文案,内部链入日志)。
+// identity service 文件定义服务依赖注入和通用业务辅助,不接收数据库连接。
 package identity
 
 import (
-	"regexp"
-	"strings"
+	"encoding/base64"
+	"fmt"
 	"time"
 
 	"chaimir/internal/platform/auth"
 	"chaimir/internal/platform/config"
-	"chaimir/internal/platform/db"
-	"chaimir/internal/platform/eventbus"
 	"chaimir/internal/platform/redis"
-	"chaimir/pkg/apperr"
+	"chaimir/internal/platform/timex"
 	"chaimir/pkg/crypto"
 	"chaimir/pkg/snowflake"
 )
 
-// Service 是 M1 的业务服务,聚合依赖。
+// Service 承载 identity 模块业务编排,依赖 repo 接口和平台横切能力。
 type Service struct {
-	repo                     *repo
-	auth                     *auth.Manager
-	bus                      eventbus.Bus
-	redis                    *redis.Client
-	idgen                    *snowflake.Node
-	cipher                   *crypto.Cipher
-	sms                      SmsSender
-	hmacKey                  []byte
-	cfg                      config.DeployConfig
-	activationCodeTTL        time.Duration
-	ssoNetworkTimeout        time.Duration
-	ssoAllowedServiceOrigins []string
-	refreshTTL               time.Duration
-	passwordMaxFailedCount   int16
-	passwordLockMinutes      int
-	smsResendInterval        time.Duration
-	smsDailyLimit            int64
-	smsCodeTTL               time.Duration
-	smsVerifyMaxAttempts     int64
-	importMaxRows            int
-	importPreviewTTL         time.Duration
+	store       Store
+	auth        *auth.Manager
+	redis       *redis.Client
+	ids         snowflake.Generator
+	cipher      *crypto.Cipher
+	hmacKey     []byte
+	cfg         config.IdentityConfig
+	uploadCfg   config.UploadConfig
+	deploy      config.DeployConfig
+	authCfg     config.AuthConfig
+	sms         SMSSender
+	auditWriter *AuditWriter
 }
 
-// NewService 构造 M1 服务;cipher 用 APP_ENCRYPTION_KEY 初始化(手机号加密);
-// sms 由装配按 APP_ENV 注入(dev=LogSmsSender,生产=真实网关)。
-func NewService(
-	database *db.DB,
-	authMgr *auth.Manager,
-	bus eventbus.Bus,
-	rc *redis.Client,
-	idgen *snowflake.Node,
-	cipher *crypto.Cipher,
-	sms SmsSender,
-	hmacKey []byte,
-	deployCfg config.DeployConfig,
-	identityCfg config.IdentityConfig,
-	refreshTTL time.Duration,
-) *Service {
-	return &Service{
-		repo:                     newRepo(database),
-		auth:                     authMgr,
-		bus:                      bus,
-		redis:                    rc,
-		idgen:                    idgen,
-		cipher:                   cipher,
-		sms:                      sms,
-		hmacKey:                  hmacKey,
-		cfg:                      deployCfg,
-		activationCodeTTL:        time.Duration(identityCfg.ActivationCodeTTLHours) * time.Hour,
-		ssoNetworkTimeout:        time.Duration(identityCfg.SSONetworkTimeoutSeconds) * time.Second,
-		ssoAllowedServiceOrigins: identityCfg.SSOAllowedServiceOrigins,
-		refreshTTL:               refreshTTL,
-		passwordMaxFailedCount:   int16(identityCfg.PasswordMaxFailedCount),
-		passwordLockMinutes:      identityCfg.PasswordLockMinutes,
-		smsResendInterval:        time.Duration(identityCfg.SMSResendSeconds) * time.Second,
-		smsDailyLimit:            int64(identityCfg.SMSDailyLimit),
-		smsCodeTTL:               time.Duration(identityCfg.SMSCodeTTLMinutes) * time.Minute,
-		smsVerifyMaxAttempts:     int64(identityCfg.SMSVerifyMaxAttempts),
-		importMaxRows:            identityCfg.ImportMaxRows,
-		importPreviewTTL:         time.Duration(identityCfg.ImportPreviewTTLHours) * time.Hour,
+// NewService 构造 identity 服务,不接收数据库连接,由装配层传入 Store。
+func NewService(deps ServiceDeps) (*Service, error) {
+	if deps.Store == nil {
+		return nil, fmt.Errorf("identity service 缺少 store")
 	}
+	if deps.Auth == nil {
+		return nil, fmt.Errorf("identity service 缺少 auth manager")
+	}
+	if deps.IDs == nil {
+		return nil, fmt.Errorf("identity service 缺少 ID 生成器")
+	}
+	key, err := base64.StdEncoding.DecodeString(deps.AuthConfig.EncryptionKey)
+	if err != nil {
+		return nil, fmt.Errorf("解析 APP_ENCRYPTION_KEY 失败: %w", err)
+	}
+	cipher, err := crypto.NewCipher(key)
+	if err != nil {
+		return nil, err
+	}
+	s := &Service{
+		store:     deps.Store,
+		auth:      deps.Auth,
+		redis:     deps.Redis,
+		ids:       deps.IDs,
+		cipher:    cipher,
+		hmacKey:   []byte(deps.AuthConfig.HMACKey),
+		cfg:       deps.IdentityConfig,
+		uploadCfg: deps.UploadConfig,
+		deploy:    deps.DeployConfig,
+		authCfg:   deps.AuthConfig,
+		sms:       deps.SMSSender,
+	}
+	if s.sms == nil {
+		return nil, fmt.Errorf("identity service 缺少短信发送器")
+	}
+	s.auditWriter = &AuditWriter{store: deps.Store, ids: deps.IDs}
+	return s, nil
 }
 
-// phoneHash 计算手机号的 HMAC(唯一约束与查询用)。
-func (s *Service) phoneHash(phone string) string {
+// ServiceDeps 是 identity service 的装配依赖集合。
+type ServiceDeps struct {
+	Store          Store
+	Auth           *auth.Manager
+	Redis          *redis.Client
+	IDs            snowflake.Generator
+	AuthConfig     config.AuthConfig
+	IdentityConfig config.IdentityConfig
+	UploadConfig   config.UploadConfig
+	DeployConfig   config.DeployConfig
+	SMSSender      SMSSender
+}
+
+// AuditWriter 返回写入全平台唯一 audit_log 的审计实现。
+func (s *Service) AuditWriter() *AuditWriter {
+	return s.auditWriter
+}
+
+// refreshExpireAt 计算 Refresh Token 过期时间。
+func (s *Service) refreshExpireAt() time.Time {
+	return timex.Now().Add(time.Duration(s.authCfg.RefreshTTLDay) * 24 * time.Hour)
+}
+
+// importMaxBytes 返回统一上传配置中的导入文件大小上限,配置缺失应在启动装配阶段失败。
+func (s *Service) importMaxBytes() int64 {
+	return s.uploadCfg.ImportMaxBytes
+}
+
+// hashSecret 使用统一 HMAC 密钥哈希不透明凭证。
+func (s *Service) hashSecret(value string) (string, error) {
+	return crypto.HMACHash(s.hmacKey, value)
+}
+
+// phoneHash 计算手机号查询哈希。
+func (s *Service) phoneHash(phone string) (string, error) {
 	return crypto.HMACHash(s.hmacKey, phone)
 }
 
-// encryptPhone 加密手机号明文(落库 phone_enc)。
+// encryptPhone 加密手机号明文。
 func (s *Service) encryptPhone(phone string) ([]byte, error) {
 	return s.cipher.Encrypt([]byte(phone))
 }
 
-// decryptPhone 解密 phone_enc 为明文(展示前脱敏)。
-func (s *Service) decryptPhone(enc []byte) (string, error) {
-	b, err := s.cipher.Decrypt(enc)
+// decryptPhone 解密手机号密文,解密失败时向上返回错误供日志记录。
+func (s *Service) decryptPhone(ciphertext []byte) (string, error) {
+	plain, err := s.cipher.Decrypt(ciphertext)
 	if err != nil {
 		return "", err
 	}
-	return string(b), nil
-}
-
-// ---- 小工具 ----
-
-// maskPhone 手机号脱敏:138****1234。
-func maskPhone(phone string) string {
-	if len(phone) < 7 {
-		return "***"
-	}
-	return phone[:3] + "****" + phone[len(phone)-4:]
-}
-
-var weakPasswordDictionary = map[string]struct{}{
-	"password":      {},
-	"password123":   {},
-	"qwerty123":     {},
-	"admin123":      {},
-	"admin123456":   {},
-	"chaimir123":    {},
-	"12345678a":     {},
-	"abc123456":     {},
-	"letmein123":    {},
-	"welcome123":    {},
-	"changeme123":   {},
-	"iloveyou123":   {},
-	"student123":    {},
-	"teacher123":    {},
-	"blockchain123": {},
-}
-
-// validPassword 校验密码强度,并拒绝常见弱口令字典命中项。
-func validPassword(pw string) bool {
-	if len(pw) < 8 {
-		return false
-	}
-	if _, weak := weakPasswordDictionary[strings.ToLower(strings.TrimSpace(pw))]; weak {
-		return false
-	}
-	var hasLetter, hasDigit bool
-	for _, c := range pw {
-		switch {
-		case c >= '0' && c <= '9':
-			hasDigit = true
-		case (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z'):
-			hasLetter = true
-		}
-	}
-	return hasLetter && hasDigit
-}
-
-var cnMobilePattern = regexp.MustCompile(`^1[3-9][0-9]{9}$`)
-
-// validCNPhone 校验中国大陆手机号格式。
-func validCNPhone(phone string) bool {
-	return cnMobilePattern.MatchString(phone)
-}
-
-// genTempPassword 生成系统开通账号用临时密码,随机主体来自 CSPRNG。
-func (s *Service) genTempPassword() (string, error) {
-	raw, err := crypto.RandomToken(10)
-	if err != nil {
-		return "", err
-	}
-	return "Cm" + raw + "9", nil // 前缀字母 + 随机主体 + 数字,满足强度。
-}
-
-// loginableStatus 校验账号状态是否可登录(仅"正常")。
-func loginableStatus(status int16) error {
-	switch status {
-	case AccountActive:
-		return nil
-	case AccountPending:
-		return apperr.ErrAccountInactive
-	case AccountDisabled:
-		return apperr.ErrAccountDisabled
-	case AccountArchived:
-		return apperr.ErrAccountArchived
-	case AccountCancelled:
-		return apperr.ErrAccountCancelled
-	default:
-		return apperr.ErrAccountDisabled
-	}
+	return string(plain), nil
 }

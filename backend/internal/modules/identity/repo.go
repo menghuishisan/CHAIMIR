@@ -1,92 +1,143 @@
-// M1 数据访问层(repo)。
-// 边界(CLAUDE.md §3 / §6):只读写 identity 自己的表;数据访问全部经 sqlc 生成的查询,
-//
-//	不手写 SQL。通过 platform/db 的事务入口执行:
-//	· 租户上下文 → WithTenantTx(注入 SET LOCAL app.tenant_id,RLS 生效);
-//	· 显式租户 → WithTenantTxID(鉴权前流程:登录定位租户后加载账号);
-//	· 平台级表(无 RLS)→ WithAppTx;
-//	· 受控特权路径 → WithPrivilegedTx(属主连接绕 RLS,仅限预认证定位与 tenant_id=NULL 场景)。
+// identity repo 文件定义模块持久化接口和数据库事务边界,是 service 访问数据库的唯一入口。
 package identity
 
 import (
 	"context"
-	"errors"
 	"fmt"
+	"time"
 
 	"chaimir/internal/modules/identity/internal/sqlcgen"
 	"chaimir/internal/platform/db"
-	"chaimir/internal/platform/tenant"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn"
 )
 
-// repo 封装数据库访问,仅暴露事务执行入口给 service。
-type repo struct {
-	db *db.DB
+// Store 定义 service 所需的 identity 持久化能力,不暴露 sqlc 行类型。
+type Store interface {
+	PlatformTx(ctx context.Context, fn func(context.Context, TxStore) error) error
+	TenantTx(ctx context.Context, tenantID int64, fn func(context.Context, TxStore) error) error
+	PrivilegedTx(ctx context.Context, fn func(context.Context, TxStore) error) error
 }
 
-// newRepo 绑定平台数据库入口,repo 本身不持有业务状态。
-func newRepo(database *db.DB) *repo {
-	return &repo{db: database}
+// TxStore 定义单个事务内可调用的 identity 数据访问能力。
+type TxStore interface {
+	GetPlatformAdminByUsername(ctx context.Context, username string) (PlatformAdmin, error)
+	GetTenantByCode(ctx context.Context, code string) (Tenant, error)
+	GetTenantByID(ctx context.Context, id int64) (Tenant, error)
+	ListTenants(ctx context.Context) ([]Tenant, error)
+	CreateTenant(ctx context.Context, input CreateTenantInput) (Tenant, error)
+	UpdateTenantConfig(ctx context.Context, input UpdateTenantConfigInput) (Tenant, error)
+	UpdateTenantStatus(ctx context.Context, input UpdateTenantStatusInput) (Tenant, error)
+	CreateTenantApplication(ctx context.Context, input CreateApplicationRequest, id int64) (TenantApplication, error)
+	GetTenantApplication(ctx context.Context, id int64) (TenantApplication, error)
+	ListTenantApplications(ctx context.Context, status int16) ([]TenantApplication, error)
+	ApproveTenantApplication(ctx context.Context, id, reviewerID, tenantID int64) (TenantApplication, error)
+	RejectTenantApplication(ctx context.Context, id, reviewerID int64, reason string) (TenantApplication, error)
+	CreateAccount(ctx context.Context, input CreateAccountInput) (Account, error)
+	GetAccount(ctx context.Context, id int64) (Account, error)
+	BatchGetAccounts(ctx context.Context, ids []int64) ([]Account, error)
+	ListAccountsByPhoneHash(ctx context.Context, phoneHash string) ([]LoginCandidate, error)
+	GetAccountByPhoneHash(ctx context.Context, tenantID int64, phoneHash string) (Account, error)
+	GetAccountByNo(ctx context.Context, no string) (Account, error)
+	ListAccounts(ctx context.Context, query AccountQuery) ([]Account, int64, error)
+	UpdateAccountEditable(ctx context.Context, tenantID, accountID int64, req UpdateAccountRequest) (Account, error)
+	UpdateAccountStatus(ctx context.Context, accountID, tenantID int64, status int16, deleted bool) (Account, error)
+	UpdateAccountPassword(ctx context.Context, accountID, tenantID int64, passwordHash string, mustChange bool, status int16) (Account, error)
+	UpdateAccountPhone(ctx context.Context, tenantID, accountID int64, phoneEnc []byte, phoneHash string) (Account, error)
+	RecordPasswordFailure(ctx context.Context, accountID, tenantID int64, count int16, lockedUntil *time.Time) error
+	ClearPasswordFailure(ctx context.Context, accountID, tenantID int64) error
+	GrantRole(ctx context.Context, tenantID, accountID int64, role int16, roleID int64) error
+	RevokeRole(ctx context.Context, tenantID, accountID int64, role int16) error
+	RevokeAccountSessions(ctx context.Context, tenantID, accountID int64) error
+	CreateAuthSession(ctx context.Context, input CreateSessionInput) (AuthSession, error)
+	GetAuthSessionByRefreshHash(ctx context.Context, hash string) (AuthSession, error)
+	ListAuthSessionsByAccount(ctx context.Context, tenantID, accountID int64) ([]AuthSession, error)
+	RevokeAuthSession(ctx context.Context, tenantID, sessionID int64) error
+	CreatePlatformAuthSession(ctx context.Context, input CreatePlatformSessionInput) (PlatformAuthSession, error)
+	GetPlatformAuthSessionByRefreshHash(ctx context.Context, hash string) (PlatformAuthSession, error)
+	RevokePlatformSessions(ctx context.Context, platformAdminID int64) error
+	RevokePlatformAuthSession(ctx context.Context, sessionID int64) error
+	CreateSMSCode(ctx context.Context, input CreateSMSCodeInput) (SMSCode, error)
+	GetLatestSMSCode(ctx context.Context, tenantID int64, phoneHash string, scene int16) (SMSCode, error)
+	MarkSMSCodeUsed(ctx context.Context, tenantID, id int64) error
+	IncrementSMSVerifyAttempts(ctx context.Context, tenantID, id int64) error
+	CreateActivationCode(ctx context.Context, input CreateActivationInput) (ActivationCode, error)
+	GetActivationCodeByHash(ctx context.Context, codeHash string) (ActivationCode, error)
+	UseActivationCode(ctx context.Context, tenantID, id int64) error
+	UpsertSSOConfig(ctx context.Context, input UpsertSSOInput) (SSOConfig, error)
+	GetSSOConfig(ctx context.Context, tenantID int64, typ int16) (SSOConfig, error)
+	ListSSOConfigs(ctx context.Context, tenantID int64) ([]SSOConfig, error)
+	CreateImportPreview(ctx context.Context, input CreateImportPreviewInput) (ImportPreview, error)
+	GetImportPreview(ctx context.Context, tenantID, id int64) (ImportPreview, error)
+	MarkImportPreviewSubmitted(ctx context.Context, tenantID, id int64) error
+	CreateImportBatch(ctx context.Context, input CreateImportBatchInput) (ImportBatch, error)
+	ListImportBatches(ctx context.Context, tenantID int64) ([]ImportBatch, error)
+	WriteAudit(ctx context.Context, input WriteAuditInput) error
+	QueryAuditLogs(ctx context.Context, query AuditQueryInput) ([]AuditLogRow, int64, error)
+	PlatformStats(ctx context.Context) (StatsRow, error)
+	TenantStats(ctx context.Context, tenantID int64) (StatsRow, error)
+	CreateDepartment(ctx context.Context, tenantID, id int64, req DepartmentRequest) (Department, error)
+	ListDepartments(ctx context.Context) ([]Department, error)
+	DepartmentExists(ctx context.Context, tenantID, id int64) (bool, error)
+	UpdateDepartment(ctx context.Context, tenantID, id int64, req DepartmentRequest) (Department, error)
+	DeleteDepartment(ctx context.Context, tenantID, id int64) error
+	CreateMajor(ctx context.Context, tenantID, id int64, req MajorRequest) (Major, error)
+	ListMajors(ctx context.Context, departmentID int64) ([]Major, error)
+	MajorExists(ctx context.Context, tenantID, id int64) (bool, error)
+	UpdateMajor(ctx context.Context, tenantID, id int64, req MajorRequest) (Major, error)
+	DeleteMajor(ctx context.Context, tenantID, id int64) error
+	CreateClass(ctx context.Context, tenantID, id int64, req ClassRequest) (Class, error)
+	ListClasses(ctx context.Context, majorID int64) ([]Class, error)
+	ClassExists(ctx context.Context, tenantID, id int64) (bool, error)
+	UpdateClass(ctx context.Context, tenantID, id int64, req ClassRequest) (Class, error)
+	DeleteClass(ctx context.Context, tenantID, id int64) error
+	ArchiveClassesByEnrollmentYear(ctx context.Context, tenantID int64, enrollmentYear int16) error
+	ArchiveStudentAccountsByEnrollmentYear(ctx context.Context, tenantID int64, enrollmentYear int16) error
+	RevokeStudentSessionsByEnrollmentYear(ctx context.Context, tenantID int64, enrollmentYear int16) error
+	PromoteClasses(ctx context.Context, tenantID int64) error
 }
 
-// queryFunc 是在某事务上执行的查询闭包,拿到 sqlc 的 *Queries。
-type queryFunc func(q *sqlcgen.Queries) error
-
-// inTenant 在租户事务内执行(从 ctx 取租户,RLS 生效)。
-func (r *repo) inTenant(ctx context.Context, fn queryFunc) error {
-	return r.db.WithTenantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-		return fn(sqlcgen.New(tx))
-	})
+// store 使用 platform/db 统一事务入口实现 identity 自有表访问。
+type store struct {
+	database *db.DB
 }
 
-// inTenantID 用显式租户 ID 执行(鉴权前流程,RLS 生效)。
-func (r *repo) inTenantID(ctx context.Context, tenantID int64, fn queryFunc) error {
-	return r.db.WithTenantTxID(ctx, tenantID, func(ctx context.Context, tx pgx.Tx) error {
-		return fn(sqlcgen.New(tx))
-	})
+// txStore 封装单事务 sqlc 查询对象。
+type txStore struct {
+	q *sqlcgen.Queries
 }
 
-// inApp 在 app 池普通事务执行(仅访问无 RLS 的平台级表:tenant/platform_admin/application)。
-func (r *repo) inApp(ctx context.Context, fn queryFunc) error {
-	return r.db.WithAppTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-		return fn(sqlcgen.New(tx))
-	})
+// NewStore 创建 identity 模块持久化入口,仅装配层应调用。
+func NewStore(database *db.DB) Store {
+	return &store{database: database}
 }
 
-// inAppTenantID 在同一 app 事务内先处理平台表,再注入指定租户 RLS 继续处理租户表。
-// 用于入驻审核这类必须原子完成“平台申请/租户 + 新租户首个管理员”的流程。
-func (r *repo) inAppTenantID(ctx context.Context, tenantID int64, fn queryFunc) error {
-	return r.db.WithAppTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-		if _, err := tx.Exec(ctx, "SELECT set_config('app.tenant_id', $1, true)", fmt.Sprintf("%d", tenantID)); err != nil {
-			return fmt.Errorf("注入 app.tenant_id 失败: %w", err)
-		}
-		return fn(sqlcgen.New(tx))
-	})
-}
-
-// inPrivileged 在特权池(属主,绕 RLS)执行,仅限预认证定位与 tenant_id=NULL 平台级记录。
-func (r *repo) inPrivileged(ctx context.Context, fn queryFunc) error {
-	return r.db.WithPrivilegedTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-		return fn(sqlcgen.New(tx))
-	})
-}
-
-// hasPrivileged 是否配置了特权连接(受控预认证/平台级空租户路径可用)。
-func (r *repo) hasPrivileged() bool { return r.db.HasPrivileged() }
-
-// pgErrCode 提取 PostgreSQL 错误码(如 23505 唯一冲突);非 PG 错误返回空串。
-func pgErrCode(err error) string {
-	var pgErr *pgconn.PgError
-	if errors.As(err, &pgErr) {
-		return pgErr.Code
+// PlatformTx 在应用连接中访问平台级表和平台管理员路径。
+func (s *store) PlatformTx(ctx context.Context, fn func(context.Context, TxStore) error) error {
+	if s == nil || s.database == nil {
+		return fmt.Errorf("identity store 未初始化")
 	}
-	return ""
+	return s.database.WithAppTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		return fn(ctx, &txStore{q: sqlcgen.New(tx)})
+	})
 }
 
-// tenantIdentity 从 ctx 取租户身份(已由鉴权中间件注入)。
-func tenantIdentity(ctx context.Context) (int64, bool) {
-	id, ok := tenant.FromContext(ctx)
-	return id.TenantID, ok
+// TenantTx 在注入 RLS 租户变量后访问租户内自有表。
+func (s *store) TenantTx(ctx context.Context, tenantID int64, fn func(context.Context, TxStore) error) error {
+	if s == nil || s.database == nil {
+		return fmt.Errorf("identity store 未初始化")
+	}
+	return s.database.WithTenantTxID(ctx, tenantID, func(ctx context.Context, tx pgx.Tx) error {
+		return fn(ctx, &txStore{q: sqlcgen.New(tx)})
+	})
+}
+
+// PrivilegedTx 用特权连接处理预认证定位和平台统计,不得作为普通业务路径使用。
+func (s *store) PrivilegedTx(ctx context.Context, fn func(context.Context, TxStore) error) error {
+	if s == nil || s.database == nil {
+		return fmt.Errorf("identity store 未初始化")
+	}
+	return s.database.WithPrivilegedModuleTx(ctx, "identity", func(ctx context.Context, tx pgx.Tx) error {
+		return fn(ctx, &txStore{q: sqlcgen.New(tx)})
+	})
 }

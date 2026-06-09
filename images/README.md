@@ -7,6 +7,7 @@
 - 一个镜像一个目录,目录内至少维护 `manifest.yaml` 和 `README.md`。`source.type=platform-built`、`thin-wrapper`、`build-base` 必须维护 Dockerfile;`source.type=upstream-pinned` 不重打包,不得维护 Dockerfile。
 - 成熟官方镜像能满足需求时优先复用官方镜像,只做安全基线、元数据和必要薄封装;平台确有特殊教学、判题、初始化或安全隔离需求时才自研。
 - 纯上游固定镜像也必须在 manifest 中声明 registry、image、version、license、digest 锁、离线导入、`deploy/config/chaimir.env` 环境变量键、端口、卷、备份、网络策略、学生权限和供应链门禁。
+- 镜像拉取必须使用不可变 digest。`images/pull-images.ps1` 会拒绝任何缺少 `upstream.digest` 或组件 `digest` 的上游固定镜像,不得退回 tag 拉取。
 - 镜像只负责自身进程、依赖和默认容器端口;一个或多个镜像如何组成容器组,由 M2 沙箱控制面和部署层按 manifest 编排。
 - 本目录不得维护固定组合矩阵、固定 bundle 或镜像到镜像白名单。`manifest.yaml` 只声明本镜像能力、生态标签、端口、安全域和资源约束;具体容器组由 `runtime.adapter_spec`、实验/题目配置与 M2 编排器动态校验后生成。
 - 教师脚本、题目固化资产或链上依赖合约即可表达的轻量模拟能力,不得进入平台必需镜像清单。真实链下基础设施必须用真实镜像或官方薄封装,不得用 `*-mock` 服务冒充。

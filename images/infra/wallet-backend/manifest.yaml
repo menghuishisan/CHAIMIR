@@ -20,6 +20,22 @@ source:
 upstream:
   image: node:20-bookworm-slim
   reuse_policy: service-wrapper
+env_keys:
+  config:
+    - CHAIMIR_IMAGE_PORT
+    - CHAIMIR_MAX_BODY_BYTES
+    - CHAIMIR_IMAGE_SERVICE_AUTH_MAX_SKEW_SECONDS
+    - CHAIMIR_WALLET_ALLOWED_DOMAINS
+  secret:
+    - CHAIMIR_WALLET_SIGNER_PRIVATE_KEY
+    - CHAIMIR_WALLET_SESSION_SECRET
+secrets_required:
+  - env: CHAIMIR_WALLET_SIGNER_PRIVATE_KEY
+    source: deploy/config/chaimir.env
+    runtime_value: secret-or-kms
+  - env: CHAIMIR_WALLET_SESSION_SECRET
+    source: deploy/config/chaimir.env
+    runtime_value: secret-or-kms
 data_driven: true
 capabilities:
   - wallet-backend
@@ -72,6 +88,11 @@ selftest:
         - node
         - --check
         - /app/wallet-backend.mjs
+    - name: auth-required
+      command:
+        - node
+        - -e
+        - "const fs=require('fs'); const src=fs.readFileSync('/app/wallet-backend.mjs','utf8'); if(!src.includes('verifyServiceSignature') || !src.includes('CHAIMIR_WALLET_ALLOWED_DOMAINS')) process.exit(1)"
 supply_chain:
   sbom: true
   trivy_required: true

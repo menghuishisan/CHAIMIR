@@ -1,4 +1,4 @@
-// Package db 测试 PostgreSQL 平台辅助能力的统一边界。
+// db_test 校验 PostgreSQL 平台基础设施的统一事务和凭据边界。
 package db
 
 import (
@@ -12,7 +12,7 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// TestIsNoRowsRecognizesWrappedPGXError 确认模块能统一识别直接或包装后的 pgx 未命中错误。
+// TestIsNoRowsRecognizesWrappedPGXError 确认包装后的 pgx 未命中错误仍可统一识别。
 func TestIsNoRowsRecognizesWrappedPGXError(t *testing.T) {
 	if !IsNoRows(pgx.ErrNoRows) {
 		t.Fatalf("expected direct pgx.ErrNoRows to be recognized")
@@ -22,7 +22,7 @@ func TestIsNoRowsRecognizesWrappedPGXError(t *testing.T) {
 	}
 }
 
-// TestPrivilegedModuleTxDocumentsMaintenanceOnlyBoundary 确认特权事务只作为模块自有表维护任务的受控入口。
+// TestPrivilegedModuleTxDocumentsMaintenanceOnlyBoundary 确认特权事务被限制在模块维护路径。
 func TestPrivilegedModuleTxDocumentsMaintenanceOnlyBoundary(t *testing.T) {
 	src, err := os.ReadFile("db.go")
 	if err != nil {
@@ -35,7 +35,7 @@ func TestPrivilegedModuleTxDocumentsMaintenanceOnlyBoundary(t *testing.T) {
 	}
 }
 
-// TestPoolConfigPreservesSpecialCharacters 确认数据库凭据通过结构化字段传递,不会因空格或符号破坏 DSN。
+// TestPoolConfigPreservesSpecialCharacters 确认凭据通过结构化配置传递,不会破坏特殊字符。
 func TestPoolConfigPreservesSpecialCharacters(t *testing.T) {
 	poolCfg, err := buildPoolConfig(config.PostgresConfig{
 		Host:     "postgres.local",

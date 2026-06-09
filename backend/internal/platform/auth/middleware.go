@@ -1,4 +1,4 @@
-// 鉴权中间件:校验 access Token,把租户身份注入 context 供 RLS/授权使用。
+// auth 提供用户 JWT、中间服务 HMAC 和平台角色守卫中间件。
 package auth
 
 import (
@@ -22,15 +22,15 @@ import (
 )
 
 const (
-	// ServiceNameHeader 标识调用方服务,用于内部接口审计和签名输入。
+	// ServiceNameHeader 标识内部服务调用方。
 	ServiceNameHeader = "X-Chaimir-Service"
-	// ServiceTenantHeader 是内部请求显式声明的租户边界,下游 RLS 只使用该服务端校验值。
+	// ServiceTenantHeader 显式携带内部服务请求绑定的租户边界。
 	ServiceTenantHeader = "X-Chaimir-Tenant-Id"
-	// ServiceSourceRefHeader 标识业务来源,用于回收、判题、通知等内部流程追踪。
+	// ServiceSourceRefHeader 携带内部服务调用来源标识。
 	ServiceSourceRefHeader = "X-Chaimir-Source-Ref"
-	// ServiceTimestampHeader 是服务签名时间戳,用于后续接入重放窗口校验。
+	// ServiceTimestampHeader 携带内部服务签名时间戳。
 	ServiceTimestampHeader = "X-Chaimir-Timestamp"
-	// ServiceSignatureHeader 是 HMAC-SHA256 十六进制签名。
+	// ServiceSignatureHeader 携带内部服务 HMAC-SHA256 十六进制签名。
 	ServiceSignatureHeader = "X-Chaimir-Signature"
 )
 
@@ -38,36 +38,35 @@ type serviceSourceRefKey struct{}
 
 var serviceSourceRefRe = regexp.MustCompile(`^[a-z]+:[0-9]{4}:[a-z][a-z0-9-]*:[0-9A-Za-z_-]+$`)
 
-// RoleChecker 是 API 角色守卫需要的最小身份契约,由 identity 模块实现提供。
+// RoleChecker 是平台通用角色守卫所需的最小身份只读契约。
 type RoleChecker interface {
-	// HasRole 判断账号是否具备指定服务端角色。
+	// HasRole 判断账号是否具备指定角色。
 	HasRole(ctx context.Context, accountID int64, role string) (bool, error)
 }
 
-// ValidSourceRef 校验服务来源标识是否符合全局四段规范,不解析来源模块的业务语义。
+// ValidSourceRef 校验 source_ref 是否符合全局四段规范。
 func ValidSourceRef(sourceRef string) bool {
 	return serviceSourceRefRe.MatchString(strings.TrimSpace(sourceRef))
 }
 
-// ServiceSourceRefFromContext 读取服务间鉴权签名绑定的来源标识。
+// ServiceSourceRefFromContext 读取已经服务端验签后的来源标识。
 func ServiceSourceRefFromContext(ctx context.Context) (string, bool) {
 	sourceRef, ok := ctx.Value(serviceSourceRefKey{}).(string)
 	return sourceRef, ok && strings.TrimSpace(sourceRef) != ""
 }
 
-// WithServiceSourceRef 把已验证的来源标识注入上下文,供模块内 contracts 直连和 HTTP 服务鉴权共用。
+// WithServiceSourceRef 把已验证来源标识注入上下文。
 func WithServiceSourceRef(ctx context.Context, sourceRef string) context.Context {
 	return context.WithValue(ctx, serviceSourceRefKey{}, sourceRef)
 }
 
-// ServiceSourceRefAuthorized 校验当前服务签名绑定的来源是否允许访问目标来源;普通用户上下文不受该服务签名规则限制。
+// ServiceSourceRefAuthorized 检查当前上下文是否允许访问目标来源;普通用户上下文不受此限制。
 func ServiceSourceRefAuthorized(ctx context.Context, sourceRef string) bool {
 	signedSourceRef, ok := ServiceSourceRefFromContext(ctx)
 	return !ok || signedSourceRef == strings.TrimSpace(sourceRef)
 }
 
-// Middleware 校验 Authorization: Bearer <access>,失败即 11001;
-// 成功把 tenant.Identity 注入 request.Context(下游 db.WithTenantTx 据此 SET RLS)。
+// Middleware 校验 Bearer access token 并注入租户身份上下文。
 func (m *Manager) Middleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		claims, ok := m.accessClaims(c)
@@ -79,7 +78,7 @@ func (m *Manager) Middleware() gin.HandlerFunc {
 	}
 }
 
-// ServiceMiddleware 校验内部服务请求的 HMAC 签名,并把已验证租户注入 context。
+// ServiceMiddleware 校验内部服务 HMAC 签名并注入租户边界。
 func (m *Manager) ServiceMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if !m.injectServiceIdentity(c) {
@@ -89,7 +88,7 @@ func (m *Manager) ServiceMiddleware() gin.HandlerFunc {
 	}
 }
 
-// PlatformOrServiceMiddleware 接受平台管理员 JWT 或内部服务 HMAC,用于审核等双入口控制面。
+// PlatformOrServiceMiddleware 允许平台管理员 JWT 或内部服务 HMAC 任一通过。
 func (m *Manager) PlatformOrServiceMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if hasServiceAuthHeaders(c) {
@@ -113,7 +112,7 @@ func (m *Manager) PlatformOrServiceMiddleware() gin.HandlerFunc {
 	}
 }
 
-// RequirePlatformIdentity 要求当前请求来自已登录的平台身份。
+// RequirePlatformIdentity 要求当前请求来自平台管理员身份。
 func RequirePlatformIdentity() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id, ok := tenant.FromContext(c.Request.Context())
@@ -131,7 +130,7 @@ func RequirePlatformIdentity() gin.HandlerFunc {
 	}
 }
 
-// RequirePlatformOrAnyRole 要求当前请求来自平台身份,或租户账号具备任一指定角色。
+// RequirePlatformOrAnyRole 要求平台身份或租户账号具备任一指定角色。
 func RequirePlatformOrAnyRole(identity RoleChecker, roles ...string) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if !AuthorizePlatformOrAnyRole(c, identity, roles...) {
@@ -141,7 +140,7 @@ func RequirePlatformOrAnyRole(identity RoleChecker, roles ...string) gin.Handler
 	}
 }
 
-// RequireTenantAnyRole 要求当前请求来自租户账号,且具备任一指定角色。
+// RequireTenantAnyRole 要求租户账号具备任一指定角色,平台身份不会被视为租户角色。
 func RequireTenantAnyRole(identity RoleChecker, roles ...string) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if !AuthorizeTenantAnyRole(c, identity, roles...) {
@@ -151,7 +150,7 @@ func RequireTenantAnyRole(identity RoleChecker, roles ...string) gin.HandlerFunc
 	}
 }
 
-// AuthorizePlatformOrAnyRole 校验当前请求角色并写出统一失败响应,供路由中间件和 handler 内条件鉴权共用。
+// AuthorizePlatformOrAnyRole 执行平台或任一租户角色校验,并在失败时写统一响应。
 func AuthorizePlatformOrAnyRole(c *gin.Context, identity RoleChecker, roles ...string) bool {
 	id, ok := tenant.FromContext(c.Request.Context())
 	if !ok {
@@ -183,7 +182,7 @@ func AuthorizePlatformOrAnyRole(c *gin.Context, identity RoleChecker, roles ...s
 	return false
 }
 
-// AuthorizeTenantAnyRole 校验租户账号角色并写出统一失败响应,平台身份不会被当作租户角色放行。
+// AuthorizeTenantAnyRole 执行租户角色校验,并拒绝平台身份绕过租户范围。
 func AuthorizeTenantAnyRole(c *gin.Context, identity RoleChecker, roles ...string) bool {
 	id, ok := tenant.FromContext(c.Request.Context())
 	if !ok {
@@ -217,7 +216,7 @@ func AuthorizeTenantAnyRole(c *gin.Context, identity RoleChecker, roles ...strin
 	return false
 }
 
-// accessClaims 校验 Bearer access token 并把失败转换为统一响应。
+// accessClaims 提取并校验 Bearer access token。
 func (m *Manager) accessClaims(c *gin.Context) (*Claims, bool) {
 	raw := c.GetHeader("Authorization")
 	token, ok := strings.CutPrefix(raw, "Bearer ")
@@ -235,14 +234,13 @@ func (m *Manager) accessClaims(c *gin.Context) (*Claims, bool) {
 	return claims, true
 }
 
-// injectAccessIdentity 将已验证 JWT claims 写入请求上下文,供 RLS、审计与日志使用。
+// injectAccessIdentity 将已验证 JWT 身份写入上下文和结构化日志字段。
 func injectAccessIdentity(c *gin.Context, claims *Claims) {
 	id := tenant.Identity{
 		TenantID:   claims.TenantID,
 		AccountID:  claims.AccountID,
 		IsPlatform: claims.IsPlatform,
 	}
-	// 鉴权成功后才注入租户日志字段:租户/账号只能来自服务端 JWT claims,不能由请求参数决定。
 	ctx := tenant.WithContext(c.Request.Context(), id)
 	ctx = logging.WithAttrs(ctx,
 		slog.Int64("tenant_id", claims.TenantID),
@@ -250,25 +248,28 @@ func injectAccessIdentity(c *gin.Context, claims *Claims) {
 		slog.Bool("is_platform", claims.IsPlatform),
 	)
 	c.Request = c.Request.WithContext(ctx)
-	// 会话 ID 存入 gin 供 logout 等使用。
 	c.Set("session_id", claims.SessionID)
 }
 
-// injectServiceIdentity 校验服务 HMAC 签名并注入租户与来源边界。
+// injectServiceIdentity 校验内部服务签名并建立租户边界与来源边界。
 func (m *Manager) injectServiceIdentity(c *gin.Context) bool {
-	// 第一步:读取全部签名输入,缺任一字段都拒绝,避免服务端推断产生歧义。
 	service := strings.TrimSpace(c.GetHeader(ServiceNameHeader))
 	tenantIDRaw := strings.TrimSpace(c.GetHeader(ServiceTenantHeader))
 	sourceRef := strings.TrimSpace(c.GetHeader(ServiceSourceRefHeader))
 	timestamp := strings.TrimSpace(c.GetHeader(ServiceTimestampHeader))
 	signature := strings.TrimSpace(c.GetHeader(ServiceSignatureHeader))
 	traceID := response.TraceFromGin(c)
+
 	if service == "" || tenantIDRaw == "" || sourceRef == "" || timestamp == "" || signature == "" || traceID == "" || len(m.hmacKey) == 0 {
 		response.Fail(c, apperr.ErrServiceUnauthorized)
 		c.Abort()
 		return false
 	}
-	// 第二步:校验租户边界和时间窗口,防止非法租户和过期签名进入 RLS 上下文。
+	if !ValidSourceRef(sourceRef) {
+		response.Fail(c, apperr.ErrServiceUnauthorized)
+		c.Abort()
+		return false
+	}
 	tenantID, err := strconv.ParseInt(tenantIDRaw, 10, 64)
 	if err != nil || tenantID <= 0 {
 		response.Fail(c, apperr.ErrServiceUnauthorized)
@@ -280,7 +281,6 @@ func (m *Manager) injectServiceIdentity(c *gin.Context) bool {
 		c.Abort()
 		return false
 	}
-	// 第三步:用固定字段顺序重新计算 HMAC,并用常量时间比较避免泄露签名差异。
 	expected := m.serviceSignature(c.Request.Method, c.Request.URL.EscapedPath(), tenantIDRaw, sourceRef, timestamp, traceID)
 	if !constantTimeHexEqual(signature, expected) {
 		response.Fail(c, apperr.ErrServiceUnauthorized)
@@ -288,9 +288,7 @@ func (m *Manager) injectServiceIdentity(c *gin.Context) bool {
 		return false
 	}
 
-	// 第四步:只注入租户与服务来源,服务请求不得伪装成用户账号身份。
-	// 服务请求没有用户账号语义,只建立租户边界与结构化日志字段,禁止映射成任意用户身份。
-	ctx := tenant.WithContext(c.Request.Context(), tenant.Identity{TenantID: tenantID})
+	ctx := tenant.WithContext(c.Request.Context(), tenant.Identity{TenantID: tenantID, IsSystem: true})
 	ctx = WithServiceSourceRef(ctx, sourceRef)
 	ctx = logging.WithAttrs(ctx,
 		slog.Int64("tenant_id", tenantID),
@@ -301,7 +299,7 @@ func (m *Manager) injectServiceIdentity(c *gin.Context) bool {
 	return true
 }
 
-// serviceTimestampFresh 校验服务签名时间窗口,防止截获的内部请求被长期重放。
+// serviceTimestampFresh 校验服务签名时间窗口,防止内部请求被长期重放。
 func (m *Manager) serviceTimestampFresh(raw string) bool {
 	seconds, err := strconv.ParseInt(raw, 10, 64)
 	if err != nil {
@@ -318,14 +316,14 @@ func hasServiceAuthHeaders(c *gin.Context) bool {
 		strings.TrimSpace(c.GetHeader(ServiceSignatureHeader)) != ""
 }
 
-// serviceSignature 固定内部服务签名输入,保证各模块对同一请求有唯一校验语义。
+// serviceSignature 计算固定字段顺序的内部服务签名。
 func (m *Manager) serviceSignature(method, path, tenantID, sourceRef, timestamp, traceID string) string {
 	mac := hmac.New(sha256.New, m.hmacKey)
 	mac.Write([]byte(strings.ToUpper(method) + "\n" + path + "\n" + tenantID + "\n" + sourceRef + "\n" + timestamp + "\n" + traceID))
 	return hex.EncodeToString(mac.Sum(nil))
 }
 
-// constantTimeHexEqual 比较十六进制 HMAC,格式非法时直接失败且不泄露差异位置。
+// constantTimeHexEqual 比较十六进制 HMAC,避免泄露差异位置。
 func constantTimeHexEqual(actual, expected string) bool {
 	actualBytes, err := hex.DecodeString(actual)
 	if err != nil {

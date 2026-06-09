@@ -1,26 +1,27 @@
-// Package tenant 提供租户上下文的注入与读取。
-// 依据 docs/总-数据库表总览.md §4:多租户经 RLS 隔离,每请求 SET app.tenant_id;
-//   租户 ID 从服务端会话确立,不接受客户端传参(CLAUDE.md §7)。
+// tenant 提供租户身份上下文注入与读取,供鉴权、RLS 与审计统一复用。
 package tenant
 
 import "context"
 
 type ctxKey struct{}
 
-// Identity 是经鉴权确立的租户上下文身份。
+// Identity 是经服务端鉴权后确立的租户身份上下文。
 type Identity struct {
-	TenantID   int64 // 租户(学校)ID;RLS 隔离键。
-	AccountID  int64 // 当前账号 ID。
-	IsPlatform bool  // 平台管理员上下文(可访问平台级表)。
+	TenantID   int64
+	AccountID  int64
+	IsPlatform bool
+	IsSystem   bool
 }
 
-// WithContext 把租户身份注入 context。
+// WithContext 把已验证身份注入上下文,供下游基础设施读取。
 func WithContext(ctx context.Context, id Identity) context.Context {
 	return context.WithValue(ctx, ctxKey{}, id)
 }
 
-// FromContext 取租户身份;ok=false 表示未鉴权上下文。
+// FromContext 读取已注入的租户身份;缺失时返回 ok=false。
 func FromContext(ctx context.Context) (Identity, bool) {
 	id, ok := ctx.Value(ctxKey{}).(Identity)
 	return id, ok
 }
+
+// MustFromContext 读取租户身份;缺失时返回零值和 false 之外的显式 panic 并不适合服务端生产路径,因此不提供。

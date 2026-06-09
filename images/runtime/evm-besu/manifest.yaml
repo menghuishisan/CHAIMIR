@@ -38,6 +38,20 @@ ports:
     protocol: TCP
     expose: proxy
     purpose: Besu JSON-RPC
+rpc_exposure:
+  bind_all_interfaces: true
+  reason: 容器内 RPC 监听 0.0.0.0,仅允许 M2 生成的 Service/Gateway 暴露。
+  allowed_apis:
+    - ETH
+    - NET
+    - WEB3
+    - TXPOOL
+    - DEBUG
+  required_controls:
+    - network_policy_deny_all
+    - platform_authenticated_proxy
+    - no_direct_student_shell_to_rpc_admin
+    - m2_port_allowlist
 local_dev:
   host_mappings:
     - host: 127.0.0.1

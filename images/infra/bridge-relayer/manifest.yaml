@@ -61,7 +61,12 @@ selftest:
       command:
         - node
         - -e
-        - import('@certusone/wormhole-sdk').then(() => console.log('ready'))
+        - import('@certusone/wormhole-sdk').then(() => process.exit(0))
+    - name: entrypoint-syntax
+      command:
+        - sh
+        - -n
+        - /usr/local/bin/chaimir-bridge-relayer-entrypoint
 supply_chain:
   sbom: true
   trivy_required: true

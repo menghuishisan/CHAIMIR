@@ -20,6 +20,13 @@ source:
 upstream:
   image: python:3.13-alpine
   reuse_policy: self-developed-sidecar
+env_keys:
+  config:
+    - CHAIMIR_COLLECTOR_TARGETS
+    - CHAIMIR_COLLECTOR_OUTPUT
+    - CHAIMIR_COLLECTOR_INTERVAL_SECONDS
+    - CHAIMIR_COLLECTOR_ALLOWED_PREFIXES
+  secret: []
 data_driven: false
 capabilities:
   - sidecar

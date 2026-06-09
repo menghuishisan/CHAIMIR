@@ -1,4 +1,4 @@
-# 本文件声明 middleware/nats 上游固定镜像的来源、配置、端口、数据卷和生产门禁。
+﻿# 本文件声明 middleware/nats 上游固定镜像的来源、配置、端口、数据卷和生产门禁。
 schema_version: 1
 category: middleware
 name: nats
@@ -22,7 +22,6 @@ upstream:
   image: nats
   version: "2.11-alpine"
   digest_required: true
-  digest_lock_ref: images/locks/middleware/nats.lock.yaml
   license: Apache-2.0
 private_delivery:
   offline_bundle: true

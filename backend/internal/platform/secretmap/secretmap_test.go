@@ -1,4 +1,4 @@
-// Package secretmap 的测试覆盖敏感配置 map 的统一保护、脱敏和还原规则。
+// secretmap 测试覆盖敏感配置 map 的统一保护、脱敏和还原规则。
 package secretmap
 
 import (
@@ -51,5 +51,15 @@ func TestProtectMaskRevealNestedSensitiveValues(t *testing.T) {
 func TestProtectRequiresCipherForSensitiveValue(t *testing.T) {
 	if _, err := Protect(nil, map[string]any{"api_key": "secret"}, "测试配置"); err == nil {
 		t.Fatalf("expected missing cipher error")
+	}
+}
+
+// TestIsSensitiveKeyCoversProjectCredentialVariants 确认项目常见密钥字段都会进入统一脱敏/加密范围。
+func TestIsSensitiveKeyCoversProjectCredentialVariants(t *testing.T) {
+	cases := []string{"private_key", "access_key", "signing_key", "session_secret", "api_key"}
+	for _, key := range cases {
+		if !IsSensitiveKey(key) {
+			t.Fatalf("expected %q to be treated as sensitive", key)
+		}
 	}
 }

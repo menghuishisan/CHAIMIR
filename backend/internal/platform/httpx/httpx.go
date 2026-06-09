@@ -1,4 +1,4 @@
-// Package httpx 提供 HTTP handler 层的无业务通用辅助。
+// httpx 提供 HTTP handler 层的无业务通用辅助。
 package httpx
 
 import (
@@ -58,9 +58,31 @@ func PathID(c *gin.Context, name string) (int64, bool) {
 	return id, true
 }
 
-// QueryInt 解析可选整数查询参数,缺失或非法都按零值交由模块校验边界处理。
-func QueryInt(c *gin.Context, key string) int {
-	return Int(c.Query(key))
+// QueryIntRule 描述 HTTP 查询整数的统一解析规则,避免每种参数场景各自实现一套函数。
+type QueryIntRule struct {
+	BitSize int
+	Default int64
+	Min     int64
+	Max     int64
+	HasMax  bool
+}
+
+// QueryInt 按统一规则解析整数查询参数,缺失时使用 Default,非法或越界时写统一用户向错误。
+func QueryInt(c *gin.Context, key string, rule QueryIntRule) (int64, bool) {
+	raw := strings.TrimSpace(c.Query(key))
+	if raw == "" {
+		return rule.Default, true
+	}
+	bitSize := rule.BitSize
+	if bitSize == 0 {
+		bitSize = 64
+	}
+	value, err := strconv.ParseInt(raw, 10, bitSize)
+	if err != nil || value < rule.Min || (rule.HasMax && value > rule.Max) {
+		response.Fail(c, apperr.ErrQueryParamInvalid)
+		return 0, false
+	}
+	return value, true
 }
 
 // Int 为 handler 层可选数字字段提供零值解析,必填语义应由 rules/service 校验。

@@ -1,150 +1,224 @@
-// M1 身份与租户错误码(12xxx 账号认证 / 13xxx 租户组织 / 14xxx 导入)。
-// 依据 docs/总-API接口总览.md §5。文案面向用户(CLAUDE.md §8)。
+// apperr identity_codes 文件定义 M1 身份与租户模块专属 12xxx/13xxx/14xxx 错误码。
 package apperr
 
-// ---- 12xxx 账号与认证 ----
-var (
-	ErrAccountNotFound                = New("12001", "账号不存在")
-	ErrWrongCredentials               = New("12002", "手机号或密码不正确")
-	ErrAccountLocked                  = New("12003", "账号已锁定,请稍后再试或联系管理员")
-	ErrAccountInactive                = New("12004", "账号尚未激活,请先完成激活")
-	ErrAccountDisabled                = New("12005", "账号已停用,请联系管理员")
-	ErrAccountArchived                = New("12006", "账号已归档,无法登录")
-	ErrAccountCancelled               = New("12007", "账号已注销")
-	ErrSmsCodeInvalid                 = New("12009", "验证码错误或已过期")
-	ErrSmsRateLimited                 = New("12010", "验证码发送过于频繁,请稍后再试")
-	ErrRefreshInvalid                 = New("12011", "登录已失效,请重新登录")
-	ErrRefreshReused                  = New("12012", "检测到异常登录,请重新登录")
-	ErrWeakPassword                   = New("12013", "密码强度不足,至少8位且含字母和数字")
-	ErrPhoneAlreadyExists             = New("12014", "该手机号在本校已注册")
-	ErrSsoNotInRoster                 = New("12015", "账号未在名单中,请联系管理员")
-	ErrOldPasswordWrong               = New("12016", "原密码不正确")
-	ErrSsoUnavailable                 = New("12017", "学校统一认证暂不可用,请联系管理员")
-	ErrSsoLoginFailed                 = New("12018", "统一认证失败,请检查账号后重试")
-	ErrActivationCodeInvalid          = New("12019", "激活码无效或已过期")
-	ErrAccountInvalid                 = New("12020", "账号信息不完整,请检查后重试")
-	ErrPhoneInvalid                   = New("12021", "手机号格式不正确,请检查后重试")
-	ErrAccountQueryInvalid            = New("12022", "账号筛选条件不正确,请检查后重试")
-	ErrLoginPhoneInvalid              = New("12023", "登录信息不完整,请检查手机号和密码")
-	ErrLoginNoInvalid                 = New("12024", "登录信息不完整,请检查账号和密码")
-	ErrLoginSmsInvalid                = New("12025", "短信登录信息不完整,请检查手机号和验证码")
-	ErrSsoLoginInvalid                = New("12026", "统一认证登录参数不完整,请重新发起登录")
-	ErrSsoCallbackInvalid             = New("12027", "统一认证回调信息不完整,请重新登录")
-	ErrLDAPLoginInvalid               = New("12028", "统一认证账号信息不完整,请检查后重试")
-	ErrSmsRequestInvalid              = New("12029", "验证码请求信息不完整,请检查手机号")
-	ErrRefreshRequestInvalid          = New("12030", "刷新登录状态的信息不完整,请重新登录")
-	ErrResetPasswordInvalid           = New("12031", "找回密码信息不完整,请检查后重试")
-	ErrActivationInvalid              = New("12032", "账号激活信息不完整,请检查后重试")
-	ErrAccountCreateInvalid           = New("12033", "新建账号信息不完整,请检查后重试")
-	ErrAccountUpdateInvalid           = New("12034", "账号更新信息不完整,请检查后重试")
-	ErrAccountStatusInvalid           = New("12035", "账号状态变更信息不完整,请检查后重试")
-	ErrPasswordChangeInvalid          = New("12036", "改密信息不完整,请检查后重试")
-	ErrPhoneChangeInvalid             = New("12037", "换绑手机信息不完整,请检查后重试")
-	ErrAccountNoAlreadyExists         = New("12038", "学号或工号已存在,请检查后重试")
-	ErrAccountStatusTransitionInvalid = New("12039", "账号当前状态不支持该操作")
-	ErrResetPasswordTenantAmbiguous   = New("12040", "该手机号关联多个学校,请先选择学校后重试")
-	ErrAccountIdentityInvalid         = New("12041", "账号身份类型不正确,请检查后重试")
-	ErrAccountOrgIDInvalid            = New("12042", "账号所属组织不正确,请检查后重试")
-	ErrBatchAccountIDsInvalid         = New("12043", "请选择需要操作的账号")
-	ErrSmsTenantRequired              = New("12044", "该手机号关联多个学校,请先选择学校后再获取验证码")
-	ErrSmsTenantInvalid               = New("12045", "验证码所属学校不正确,请重新选择学校")
-	ErrBatchAccountArchiveInvalid     = New("12046", "账号归档信息不完整,请检查学年后重试")
-	ErrPlatformLoginInvalid           = New("12047", "平台管理员登录信息不完整,请检查账号和密码")
-	ErrSmsCodeAttemptsExceeded        = New("12048", "验证码错误次数过多,请重新获取验证码")
-	ErrResetPasswordTenantInvalid     = New("12049", "找回密码所属学校不正确,请重新选择学校")
-	ErrAccountCredentialFailed        = New("12050", "账号凭据处理失败,请稍后重试")
-	ErrAuthTokenIssueFailed           = New("12051", "登录状态签发失败,请稍后重试")
-	ErrAuthSessionStoreFailed         = New("12052", "登录状态保存失败,请稍后重试")
-	ErrAuthLookupUnavailable          = New("12053", "登录服务暂不可用,请稍后重试")
-	ErrAuthReplayRevokeFailed         = New("12054", "登录状态处理失败,请重新登录")
-	ErrSmsRateLimitStoreFailed        = New("12055", "验证码服务暂不可用,请稍后重试")
-	ErrSmsCodeGenerateFailed          = New("12056", "验证码生成失败,请稍后重试")
-	ErrSmsCodeStoreFailed             = New("12057", "验证码保存失败,请稍后重试")
-	ErrSmsSendFailed                  = New("12058", "验证码发送失败,请稍后重试")
-	ErrSmsVerifyStoreFailed           = New("12059", "验证码校验失败,请稍后重试")
-	ErrActivationCodeIssueFailed      = New("12060", "激活码生成失败,请稍后重试")
-	ErrActivationLookupUnavailable    = New("12061", "激活服务暂不可用,请稍后重试")
-	ErrPlatformAuthSessionFailed      = New("12062", "平台登录状态保存失败,请稍后重试")
-	ErrAccountMutationFailed          = New("12063", "账号信息保存失败,请稍后重试")
-	ErrAccountQueryFailed             = New("12064", "账号信息读取失败,请稍后重试")
-	ErrAuthSessionQueryFailed         = New("12065", "登录状态读取失败,请稍后重试")
+const (
+	// CodeIdentityInvalidPhone 表示手机号格式不符合身份模块规则。
+	CodeIdentityInvalidPhone = "12001"
+	// CodeIdentityWeakPassword 表示密码强度不符合身份模块规则。
+	CodeIdentityWeakPassword = "12002"
+	// CodeIdentityInvalidTenantCode 表示学校短码格式不正确。
+	CodeIdentityInvalidTenantCode = "12003"
+	// CodeIdentityInvalidCredentials 表示账号或密码、验证码等认证凭据无效。
+	CodeIdentityInvalidCredentials = "12004"
+	// CodeIdentityAccountDisabled 表示账号当前状态不允许登录或操作。
+	CodeIdentityAccountDisabled = "12005"
+	// CodeIdentityAccountLocked 表示账号因失败次数过多被临时锁定。
+	CodeIdentityAccountLocked = "12006"
+	// CodeIdentityActivationInvalid 表示激活码无效、过期或已使用。
+	CodeIdentityActivationInvalid = "12007"
+	// CodeIdentitySMSNeedsTenant 表示短信场景需要先明确租户。
+	CodeIdentitySMSNeedsTenant = "12008"
+	// CodeIdentitySMSTooFrequent 表示短信发送触发同号短时限频。
+	CodeIdentitySMSTooFrequent = "12009"
+	// CodeIdentitySMSDailyLimited 表示短信发送触发每日上限。
+	CodeIdentitySMSDailyLimited = "12010"
+	// CodeIdentitySMSInvalid 表示短信验证码不正确、过期或已使用。
+	CodeIdentitySMSInvalid = "12011"
+	// CodeIdentitySMSAttemptsLimited 表示短信验证码校验次数超过上限。
+	CodeIdentitySMSAttemptsLimited = "12012"
+	// CodeIdentityTeacherAdminRequired 表示学校管理员权限只能授予教师账号。
+	CodeIdentityTeacherAdminRequired = "12013"
+	// CodeIdentityPlatformLoginDisabled 表示当前部署禁用平台管理员入口。
+	CodeIdentityPlatformLoginDisabled = "12014"
+	// CodeIdentitySessionInvalid 表示 Refresh 或服务端会话无效。
+	CodeIdentitySessionInvalid = "12015"
+	// CodeIdentityBaseRoleInvalid 表示账号基础身份类型不正确。
+	CodeIdentityBaseRoleInvalid = "12016"
+	// CodeIdentitySessionContextMissing 表示已鉴权请求缺少服务端会话上下文。
+	CodeIdentitySessionContextMissing = "12017"
+	// CodeIdentityAccountBatchEmpty 表示批量账号操作没有提交账号。
+	CodeIdentityAccountBatchEmpty = "12018"
+	// CodeIdentityAccountBatchInvalid 表示批量账号操作包含非法账号 ID。
+	CodeIdentityAccountBatchInvalid = "12019"
+	// CodeIdentityAccountUpdateInvalid 表示账号编辑字段不完整或不允许。
+	CodeIdentityAccountUpdateInvalid = "12020"
+	// CodeIdentityPhoneAlreadyUsed 表示换绑手机号已被本租户其他账号使用。
+	CodeIdentityPhoneAlreadyUsed = "12021"
+	// CodeIdentityActivationDisabled 表示租户未启用激活码开通方式。
+	CodeIdentityActivationDisabled = "12022"
 )
 
-// ---- 13xxx 租户与组织 ----
-var (
-	ErrTenantNotFound               = New("13001", "学校不存在")
-	ErrTenantCodeExists             = New("13002", "学校短码已被占用")
-	ErrTenantDisabled               = New("13003", "学校账号已停用或到期")
-	ErrApplicationNotFound          = New("13004", "申请不存在")
-	ErrApplicationHandled           = New("13005", "该申请已处理")
-	ErrDepartmentNotFound           = New("13006", "院系不存在")
-	ErrMajorNotFound                = New("13007", "专业不存在")
-	ErrClassNotFound                = New("13008", "班级不存在")
-	ErrOrgNameExists                = New("13009", "名称已存在")
-	ErrGrantAdminNonTeacher         = New("13010", "仅教师账号可被授予管理员权限")
-	ErrTenantInvalid                = New("13011", "学校信息不完整,请检查后重试")
-	ErrSsoConfigInvalid             = New("13012", "统一认证配置不完整,请检查后重试")
-	ErrOrgInvalid                   = New("13013", "组织信息不完整,请检查后重试")
-	ErrApplicationInvalid           = New("13014", "入驻申请信息不完整,请检查后重试")
-	ErrTenantUpdateInvalid          = New("13015", "学校更新信息不完整,请检查后重试")
-	ErrTenantConfigInvalid          = New("13016", "学校配置不完整,请检查后重试")
-	ErrTenantStatusInvalid          = New("13017", "学校状态不正确,请检查后重试")
-	ErrTenantAuthModeInvalid        = New("13018", "认证方式不正确,请检查后重试")
-	ErrSchoolTypeInvalid            = New("13019", "学校类型不正确,请检查后重试")
-	ErrApplicationStatusInvalid     = New("13020", "申请状态筛选条件不正确,请检查后重试")
-	ErrTenantFeatureFlagsInvalid    = New("13021", "学校功能配置格式不正确,请检查后重试")
-	ErrApplicationApproveInvalid    = New("13022", "审核通过信息不完整,请检查后重试")
-	ErrTenantExpireAtInvalid        = New("13023", "学校到期时间格式不正确,请检查后重试")
-	ErrSsoTypeInvalid               = New("13024", "统一认证类型不正确,请检查后重试")
-	ErrSsoMatchFieldInvalid         = New("13025", "统一认证匹配字段不正确,请检查后重试")
-	ErrSsoCASURLInvalid             = New("13026", "CAS 服务地址不正确,请检查后重试")
-	ErrSsoLDAPConfigInvalid         = New("13027", "LDAP 配置不完整或不安全,请检查后重试")
-	ErrSsoConfigFormatInvalid       = New("13028", "统一认证配置格式不正确,请检查后重试")
-	ErrOrgParentIDInvalid           = New("13029", "上级组织不正确,请检查后重试")
-	ErrClassEnrollmentYearInvalid   = New("13030", "班级入学年份不正确,请检查后重试")
-	ErrBatchClassIDsInvalid         = New("13031", "请选择需要操作的班级")
-	ErrBatchClassPromoteInvalid     = New("13032", "班级升级信息不完整,请检查后重试")
-	ErrDepartmentCreateInvalid      = New("13033", "院系创建信息不完整,请检查后重试")
-	ErrDepartmentUpdateInvalid      = New("13034", "院系更新信息不完整,请检查后重试")
-	ErrMajorCreateInvalid           = New("13035", "专业创建信息不完整,请检查后重试")
-	ErrMajorUpdateInvalid           = New("13036", "专业更新信息不完整,请检查后重试")
-	ErrClassCreateInvalid           = New("13037", "班级创建信息不完整,请检查后重试")
-	ErrClassUpdateInvalid           = New("13038", "班级更新信息不完整,请检查后重试")
-	ErrClassPromoteInvalid          = New("13039", "班级升级信息不完整,请检查后重试")
-	ErrOrgImportRequestInvalid      = New("13040", "组织导入信息不完整,请检查后重试")
-	ErrSsoConfigRequestInvalid      = New("13041", "统一认证保存信息不完整,请检查后重试")
-	ErrBootstrapConfigInvalid       = New("13042", "初始化配置不完整,请检查后重试")
-	ErrBootstrapConflict            = New("13043", "初始化目标已存在但信息不一致,请检查配置")
-	ErrIdentityAuditQueryInvalid    = New("13044", "审计查询条件不正确,请检查后重试")
-	ErrIdentityAuditWriteFailed     = New("13045", "审计记录写入失败,请稍后重试")
-	ErrIdentityStatsQueryFailed     = New("13046", "统计数据读取失败,请稍后重试")
-	ErrIdentityAuditQueryFailed     = New("13047", "审计记录读取失败,请稍后重试")
-	ErrTenantApplicationStoreFailed = New("13048", "入驻申请保存失败,请稍后重试")
-	ErrTenantQueryFailed            = New("13049", "学校信息读取失败,请稍后重试")
-	ErrTenantMutationFailed         = New("13050", "学校信息保存失败,请稍后重试")
-	ErrSsoConfigProtectFailed       = New("13051", "统一认证配置保存失败,请稍后重试")
-	ErrSsoConfigReadFailed          = New("13052", "统一认证配置读取失败,请稍后重试")
-	ErrBootstrapStoreFailed         = New("13053", "初始化信息保存失败,请稍后重试")
-	ErrIdentityDataQueryFailed      = New("13054", "身份数据读取失败,请稍后重试")
-	ErrIdentityPrivilegedRequired   = New("13055", "身份服务配置不完整,请联系管理员")
-	ErrOrgMutationFailed            = New("13056", "组织信息保存失败,请稍后重试")
+const (
+	// CodeIdentityTenantDisabled 表示租户被停用。
+	CodeIdentityTenantDisabled = "13001"
+	// CodeIdentityTenantExpired 表示租户服务已到期。
+	CodeIdentityTenantExpired = "13002"
+	// CodeIdentityApplicationInvalid 表示入驻申请信息不完整或无效。
+	CodeIdentityApplicationInvalid = "13003"
+	// CodeIdentitySSOConfigInvalid 表示统一认证配置格式或字段不正确。
+	CodeIdentitySSOConfigInvalid = "13004"
+	// CodeIdentitySSOServiceOriginDenied 表示统一认证回调来源不在允许列表。
+	CodeIdentitySSOServiceOriginDenied = "13005"
+	// CodeIdentitySSONotEnabled 表示学校不存在或未启用对应统一认证。
+	CodeIdentitySSONotEnabled = "13006"
+	// CodeIdentitySSOInsecureConfig 表示统一认证端点未满足 HTTPS/LDAPS 等安全要求。
+	CodeIdentitySSOInsecureConfig = "13007"
+	// CodeIdentitySSOMatchFieldInvalid 表示统一认证名单匹配字段不正确。
+	CodeIdentitySSOMatchFieldInvalid = "13008"
+	// CodeIdentitySSOCASServerInsecure 表示 CAS 服务地址未使用安全 HTTPS 地址。
+	CodeIdentitySSOCASServerInsecure = "13009"
+	// CodeIdentityLDAPServerInsecure 表示 LDAP 服务地址未使用 LDAPS。
+	CodeIdentityLDAPServerInsecure = "13010"
+	// CodeIdentitySSOTypeInvalid 表示统一认证类型不受支持。
+	CodeIdentitySSOTypeInvalid = "13011"
+	// CodeIdentitySSOTicketInvalid 表示 CAS 票据校验失败或已失效。
+	CodeIdentitySSOTicketInvalid = "13012"
+	// CodeIdentitySSOAccountNotMatched 表示统一认证用户未命中已导入账号名单。
+	CodeIdentitySSOAccountNotMatched = "13013"
+	// CodeIdentitySSOResponseInvalid 表示统一认证服务返回内容不符合协议。
+	CodeIdentitySSOResponseInvalid = "13014"
+	// CodeIdentitySSOSecretInvalid 表示统一认证敏感配置无法安全处理。
+	CodeIdentitySSOSecretInvalid = "13015"
+	// CodeIdentityTenantStatusInvalid 表示平台提交的租户状态不在允许状态机内。
+	CodeIdentityTenantStatusInvalid = "13016"
+	// CodeIdentityTenantConfigInvalid 表示学校管理员提交的租户配置格式不正确。
+	CodeIdentityTenantConfigInvalid = "13017"
+	// CodeIdentityOrgInvalidInput 表示组织架构请求字段不完整或状态不正确。
+	CodeIdentityOrgInvalidInput = "13018"
+	// CodeIdentityPlatformLayerDisabled 表示当前部署不启用 SaaS 平台管理层。
+	CodeIdentityPlatformLayerDisabled = "13019"
+	// CodeIdentityBootstrapInvalid 表示私有化初始化参数不完整或不合法。
+	CodeIdentityBootstrapInvalid = "13020"
 )
 
-// ---- 14xxx 导入 ----
+const (
+	// CodeIdentityImportTypeInvalid 表示导入目标类型不正确。
+	CodeIdentityImportTypeInvalid = "14001"
+	// CodeIdentityImportUnsupportedFile 表示导入文件类型不受支持。
+	CodeIdentityImportUnsupportedFile = "14002"
+	// CodeIdentityImportContentInvalid 表示导入文件内容无法解析或为空。
+	CodeIdentityImportContentInvalid = "14003"
+	// CodeIdentityImportTooManyRows 表示导入行数超过身份模块配置上限。
+	CodeIdentityImportTooManyRows = "14004"
+	// CodeIdentityImportPreviewExpired 表示导入预览已失效或已提交。
+	CodeIdentityImportPreviewExpired = "14005"
+	// CodeIdentityImportCSVFormatInvalid 表示 CSV 导入文件格式不正确。
+	CodeIdentityImportCSVFormatInvalid = "14006"
+	// CodeIdentityImportEmpty 表示导入文件没有可导入的数据。
+	CodeIdentityImportEmpty = "14007"
+	// CodeIdentityImportFormatInvalid 表示导入模板格式参数不受支持。
+	CodeIdentityImportFormatInvalid = "14008"
+	// CodeIdentityImportFileTooLarge 表示导入文件超过上传大小上限。
+	CodeIdentityImportFileTooLarge = "14009"
+)
+
 var (
-	ErrImportFormat              = New("14001", "文件格式不正确,请使用提供的模板")
-	ErrImportEmpty               = New("14002", "文件中没有有效数据")
-	ErrImportTooLarge            = New("14003", "导入数据量超出单次上限")
-	ErrImportInvalid             = New("14004", "导入参数不完整,请检查后重试")
-	ErrImportTargetInvalid       = New("14005", "导入类型不正确,请检查后重试")
-	ErrImportUploadMissing       = New("14006", "请上传需要导入的文件")
-	ErrImportCommitInvalid       = New("14007", "导入提交信息不完整,请检查后重试")
-	ErrImportPreviewNotFound     = New("14008", "导入预览不存在或已失效,请重新上传")
-	ErrImportRowsInvalid         = New("14009", "导入数据格式不正确,请重新上传")
-	ErrOrgImportRowsInvalid      = New("14010", "组织导入数据格式不正确,请重新上传")
-	ErrOrgImportInvalid          = New("14011", "组织导入信息不完整,请检查后重试")
-	ErrImportTemplateBuildFailed = New("14012", "导入模板生成失败,请稍后重试")
-	ErrImportPreviewStoreFailed  = New("14013", "导入预览保存失败,请稍后重试")
-	ErrImportPreviewReadFailed   = New("14014", "导入预览读取失败,请重新上传")
-	ErrImportBatchQueryFailed    = New("14015", "导入记录读取失败,请稍后重试")
+	// ErrIdentityInvalidPhone 表示手机号格式不正确。
+	ErrIdentityInvalidPhone = New(CodeIdentityInvalidPhone, "手机号格式不正确,请检查后重试")
+	// ErrIdentityWeakPassword 表示密码强度不足。
+	ErrIdentityWeakPassword = New(CodeIdentityWeakPassword, "密码至少需要 8 位,并包含字母和数字")
+	// ErrIdentityInvalidTenantCode 表示学校短码格式不正确。
+	ErrIdentityInvalidTenantCode = New(CodeIdentityInvalidTenantCode, "学校短码格式不正确")
+	// ErrIdentityInvalidCredentials 表示认证凭据无效。
+	ErrIdentityInvalidCredentials = New(CodeIdentityInvalidCredentials, "账号或密码不正确")
+	// ErrIdentityAccountDisabled 表示账号状态禁止登录。
+	ErrIdentityAccountDisabled = New(CodeIdentityAccountDisabled, "当前账号暂时无法登录,请联系学校管理员")
+	// ErrIdentityAccountLocked 表示账号被临时锁定。
+	ErrIdentityAccountLocked = New(CodeIdentityAccountLocked, "登录失败次数过多,请稍后再试")
+	// ErrIdentityActivationInvalid 表示激活码不可用。
+	ErrIdentityActivationInvalid = New(CodeIdentityActivationInvalid, "激活码无效或已过期")
+	// ErrIdentitySMSNeedsTenant 表示短信发送需要先选择学校。
+	ErrIdentitySMSNeedsTenant = New(CodeIdentitySMSNeedsTenant, "请选择学校后再获取验证码")
+	// ErrIdentitySMSTooFrequent 表示短信发送过于频繁。
+	ErrIdentitySMSTooFrequent = New(CodeIdentitySMSTooFrequent, "验证码发送过于频繁,请稍后再试")
+	// ErrIdentitySMSDailyLimited 表示短信发送达到每日上限。
+	ErrIdentitySMSDailyLimited = New(CodeIdentitySMSDailyLimited, "今日验证码次数已达上限,请明天再试")
+	// ErrIdentitySMSInvalid 表示短信验证码不可用。
+	ErrIdentitySMSInvalid = New(CodeIdentitySMSInvalid, "验证码不正确或已过期")
+	// ErrIdentitySMSAttemptsLimited 表示短信验证码尝试次数过多。
+	ErrIdentitySMSAttemptsLimited = New(CodeIdentitySMSAttemptsLimited, "验证码错误次数过多,请重新获取")
+	// ErrIdentityTeacherAdminRequired 表示只能向教师授予学校管理员权限。
+	ErrIdentityTeacherAdminRequired = New(CodeIdentityTeacherAdminRequired, "只能授予教师学校管理员权限")
+	// ErrIdentityPlatformLoginDisabled 表示平台登录入口被部署配置关闭。
+	ErrIdentityPlatformLoginDisabled = New(CodeIdentityPlatformLoginDisabled, "当前部署未启用平台管理员入口")
+	// ErrIdentitySessionInvalid 表示登录态或刷新会话无效。
+	ErrIdentitySessionInvalid = New(CodeIdentitySessionInvalid, "登录已失效,请重新登录")
+	// ErrIdentityBaseRoleInvalid 表示账号基础身份类型不正确。
+	ErrIdentityBaseRoleInvalid = New(CodeIdentityBaseRoleInvalid, "账号身份类型不正确")
+	// ErrIdentitySessionContextMissing 表示服务端会话上下文缺失。
+	ErrIdentitySessionContextMissing = New(CodeIdentitySessionContextMissing, "登录状态暂时无法确认,请重新登录")
+	// ErrIdentityAccountBatchEmpty 表示批量账号操作没有账号。
+	ErrIdentityAccountBatchEmpty = New(CodeIdentityAccountBatchEmpty, "请选择要操作的账号")
+	// ErrIdentityAccountBatchInvalid 表示批量账号操作包含无效账号。
+	ErrIdentityAccountBatchInvalid = New(CodeIdentityAccountBatchInvalid, "账号选择不正确,请检查后重试")
+	// ErrIdentityAccountUpdateInvalid 表示账号编辑请求不正确。
+	ErrIdentityAccountUpdateInvalid = New(CodeIdentityAccountUpdateInvalid, "账号信息不正确,请检查后重试")
+	// ErrIdentityPhoneAlreadyUsed 表示手机号已被其他账号使用。
+	ErrIdentityPhoneAlreadyUsed = New(CodeIdentityPhoneAlreadyUsed, "该手机号已被使用,请更换后重试")
+	// ErrIdentityActivationDisabled 表示学校未启用激活码开通。
+	ErrIdentityActivationDisabled = New(CodeIdentityActivationDisabled, "学校未启用激活码开通,请填写初始密码")
+)
+
+var (
+	// ErrIdentityTenantDisabled 表示学校服务停用。
+	ErrIdentityTenantDisabled = New(CodeIdentityTenantDisabled, "学校服务已停用,请联系学校管理员")
+	// ErrIdentityTenantExpired 表示学校服务到期。
+	ErrIdentityTenantExpired = New(CodeIdentityTenantExpired, "学校服务已到期,请联系学校管理员")
+	// ErrIdentityApplicationInvalid 表示入驻申请缺少必要信息。
+	ErrIdentityApplicationInvalid = New(CodeIdentityApplicationInvalid, "请完整填写学校和联系人信息")
+	// ErrIdentitySSOConfigInvalid 表示统一认证配置不合法。
+	ErrIdentitySSOConfigInvalid = New(CodeIdentitySSOConfigInvalid, "认证配置格式不正确")
+	// ErrIdentitySSOServiceOriginDenied 表示统一认证回调地址不受信任。
+	ErrIdentitySSOServiceOriginDenied = New(CodeIdentitySSOServiceOriginDenied, "统一认证回调地址不受信任")
+	// ErrIdentitySSONotEnabled 表示学校不存在或未启用统一认证。
+	ErrIdentitySSONotEnabled = New(CodeIdentitySSONotEnabled, "学校不存在或未启用统一认证")
+	// ErrIdentitySSOInsecureConfig 表示统一认证端点配置不安全。
+	ErrIdentitySSOInsecureConfig = New(CodeIdentitySSOInsecureConfig, "统一认证服务配置不安全")
+	// ErrIdentitySSOMatchFieldInvalid 表示统一认证名单匹配字段不正确。
+	ErrIdentitySSOMatchFieldInvalid = New(CodeIdentitySSOMatchFieldInvalid, "名单匹配字段不正确")
+	// ErrIdentitySSOCASServerInsecure 表示 CAS 服务地址不安全。
+	ErrIdentitySSOCASServerInsecure = New(CodeIdentitySSOCASServerInsecure, "CAS 服务地址必须使用安全的 HTTPS 地址")
+	// ErrIdentityLDAPServerInsecure 表示 LDAP 服务地址不安全。
+	ErrIdentityLDAPServerInsecure = New(CodeIdentityLDAPServerInsecure, "LDAP 服务地址必须使用 LDAPS")
+	// ErrIdentitySSOTypeInvalid 表示统一认证类型不正确。
+	ErrIdentitySSOTypeInvalid = New(CodeIdentitySSOTypeInvalid, "统一认证类型不正确")
+	// ErrIdentitySSOTicketInvalid 表示 CAS 票据校验失败。
+	ErrIdentitySSOTicketInvalid = New(CodeIdentitySSOTicketInvalid, "统一认证票据无效或已过期")
+	// ErrIdentitySSOAccountNotMatched 表示统一认证用户未在导入名单中。
+	ErrIdentitySSOAccountNotMatched = New(CodeIdentitySSOAccountNotMatched, "账号未在学校名单中")
+	// ErrIdentitySSOResponseInvalid 表示统一认证服务响应无法识别。
+	ErrIdentitySSOResponseInvalid = New(CodeIdentitySSOResponseInvalid, "统一认证服务响应异常")
+	// ErrIdentitySSOSecretInvalid 表示统一认证敏感配置无法安全处理。
+	ErrIdentitySSOSecretInvalid = New(CodeIdentitySSOSecretInvalid, "统一认证敏感配置无法处理")
+	// ErrIdentityTenantStatusInvalid 表示租户状态不正确。
+	ErrIdentityTenantStatusInvalid = New(CodeIdentityTenantStatusInvalid, "学校状态不正确")
+	// ErrIdentityTenantConfigInvalid 表示租户配置格式不正确。
+	ErrIdentityTenantConfigInvalid = New(CodeIdentityTenantConfigInvalid, "学校配置格式不正确")
+	// ErrIdentityOrgInvalidInput 表示组织架构请求信息不正确。
+	ErrIdentityOrgInvalidInput = New(CodeIdentityOrgInvalidInput, "组织架构信息不正确,请检查后重试")
+	// ErrIdentityPlatformLayerDisabled 表示当前部署不启用平台管理。
+	ErrIdentityPlatformLayerDisabled = New(CodeIdentityPlatformLayerDisabled, "当前部署未启用平台管理入口")
+	// ErrIdentityBootstrapInvalid 表示私有化初始化参数不正确。
+	ErrIdentityBootstrapInvalid = New(CodeIdentityBootstrapInvalid, "初始化学校信息不完整,请检查配置")
+)
+
+var (
+	// ErrIdentityImportTypeInvalid 表示导入目标类型错误。
+	ErrIdentityImportTypeInvalid = New(CodeIdentityImportTypeInvalid, "导入类型不正确")
+	// ErrIdentityImportUnsupportedFile 表示导入文件类型不支持。
+	ErrIdentityImportUnsupportedFile = New(CodeIdentityImportUnsupportedFile, "当前仅支持 CSV 或 Excel 导入文件")
+	// ErrIdentityImportContentInvalid 表示导入文件内容错误。
+	ErrIdentityImportContentInvalid = New(CodeIdentityImportContentInvalid, "导入文件内容不正确")
+	// ErrIdentityImportTooManyRows 表示导入数据超过配置上限。
+	ErrIdentityImportTooManyRows = New(CodeIdentityImportTooManyRows, "导入行数超过上限,请拆分后重试")
+	// ErrIdentityImportPreviewExpired 表示导入预览已失效。
+	ErrIdentityImportPreviewExpired = New(CodeIdentityImportPreviewExpired, "导入预览已失效,请重新上传")
+	// ErrIdentityImportCSVFormatInvalid 表示 CSV 导入文件格式不正确。
+	ErrIdentityImportCSVFormatInvalid = New(CodeIdentityImportCSVFormatInvalid, "导入文件格式不正确")
+	// ErrIdentityImportEmpty 表示导入文件没有可导入的数据。
+	ErrIdentityImportEmpty = New(CodeIdentityImportEmpty, "导入文件没有可导入的数据")
+	// ErrIdentityImportFormatInvalid 表示模板格式不受支持。
+	ErrIdentityImportFormatInvalid = New(CodeIdentityImportFormatInvalid, "模板格式不正确")
+	// ErrIdentityImportFileTooLarge 表示导入文件过大。
+	ErrIdentityImportFileTooLarge = New(CodeIdentityImportFileTooLarge, "导入文件过大,请拆分后重试")
 )

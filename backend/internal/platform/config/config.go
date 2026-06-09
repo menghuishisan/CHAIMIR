@@ -1,5 +1,4 @@
-// Package config 统一从环境变量加载配置(禁硬编码,总-技术选型 §2.4)。
-// 启动时一次性读取并校验,缺失必填项即 fail-fast(边界处校验)。
+// config 统一从环境变量加载后端与平台基础设施所需配置,启动期一次性校验并 fail-fast。
 package config
 
 import (
@@ -13,7 +12,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 )
 
-// Config 是后端运行所需的全部配置(分组对应 .env.example)。
+// Config 是后端运行所需的全部配置集合。
 type Config struct {
 	Deploy     DeployConfig
 	Server     ServerConfig
@@ -26,6 +25,7 @@ type Config struct {
 	Identity   IdentityConfig
 	SMS        SMSConfig
 	Upload     UploadConfig
+	Transfer   TransferConfig
 	Contest    ContestConfig
 	Notify     NotifyConfig
 	Teaching   TeachingConfig
@@ -36,14 +36,14 @@ type Config struct {
 	Snowflake  SnowflakeConfig
 }
 
-// DeployConfig 部署形态。
+// DeployConfig 描述部署形态和平台管理员层开关。
 type DeployConfig struct {
-	Mode            string // saas / school
+	Mode            string
 	PlatformEnabled bool
 	SchoolTenantID  int64
 }
 
-// ServerConfig 服务监听与日志。
+// ServerConfig 描述 HTTP、WebSocket 与日志运行边界。
 type ServerConfig struct {
 	Addr                   string
 	Port                   int
@@ -56,22 +56,21 @@ type ServerConfig struct {
 	ShutdownTimeoutSeconds int
 }
 
-// PostgresConfig 数据库连接。含特权连接(绕 RLS,仅登录前跨租户定位)。
+// PostgresConfig 描述 PostgreSQL 连接池和可选特权连接。
 type PostgresConfig struct {
-	Host     string
-	Port     int
-	Database string
-	User     string // 应用连接用户(chaimir_app,受 RLS)。
-	Password string
-	SSLMode  string
-	MaxConns int
-	MinConns int
-	// 特权连接(属主,绕 RLS);为空表示不启用。
+	Host         string
+	Port         int
+	Database     string
+	User         string
+	Password     string
+	SSLMode      string
+	MaxConns     int
+	MinConns     int
 	PrivUser     string
 	PrivPassword string
 }
 
-// RedisConfig 缓存/会话。
+// RedisConfig 描述 Redis 连接和探测超时。
 type RedisConfig struct {
 	Host               string
 	Port               int
@@ -80,28 +79,32 @@ type RedisConfig struct {
 	PingTimeoutSeconds int
 }
 
-// NATSConfig 事件总线。
+// NATSConfig 描述事件总线连接参数。
 type NATSConfig struct {
 	URL                  string
 	Token                string
 	ReconnectWaitSeconds int
+	ConsumerRetryMax     int
+	ConsumerRetryDelayMs int
+	DeadLetterPrefix     string
 }
 
-// MinIOConfig 对象存储。
+// MinIOConfig 描述对象存储连接和桶命名。
 type MinIOConfig struct {
-	Endpoint           string
-	UseSSL             bool
-	Region             string
-	AccessKey          string
-	SecretKey          string
-	BucketCode         string
-	BucketAttach       string
-	BucketReport       string
-	BucketBackup       string
-	PingTimeoutSeconds int
+	Endpoint                string
+	UseSSL                  bool
+	Region                  string
+	AccessKey               string
+	SecretKey               string
+	BucketCode              string
+	BucketAttach            string
+	BucketReport            string
+	BucketBackup            string
+	PingTimeoutSeconds      int
+	DownloadGrantTTLSeconds int
 }
 
-// AuthConfig 鉴权与加密密钥。
+// AuthConfig 描述 JWT、服务签名和敏感数据加密密钥。
 type AuthConfig struct {
 	JWTSigningKey             string
 	AccessTTLMin              int
@@ -112,8 +115,7 @@ type AuthConfig struct {
 	ServiceAuthMaxSkewSeconds int
 }
 
-// BootstrapConfig 定义迁移/初始化命令所需的首个管理员参数。
-// SaaS 使用平台管理员字段;私有化使用学校租户与首个学校管理员字段。
+// BootstrapConfig 描述 migrate/seed 所需的首个租户与管理员参数。
 type BootstrapConfig struct {
 	SchoolTenantID        int64
 	SchoolTenantCode      string
@@ -127,7 +129,7 @@ type BootstrapConfig struct {
 	PlatformAdminPassword string
 }
 
-// IdentityConfig 定义 M1 账号开通与 SSO 协议的运行边界。
+// IdentityConfig 描述身份模块的安全和网络运行边界。
 type IdentityConfig struct {
 	ActivationCodeTTLHours   int
 	SSONetworkTimeoutSeconds int
@@ -142,9 +144,9 @@ type IdentityConfig struct {
 	ImportPreviewTTLHours    int
 }
 
-// SMSConfig 短信验证码网关配置。
+// SMSConfig 描述短信网关接入边界。
 type SMSConfig struct {
-	Provider       string // log(仅非生产) / http
+	Provider       string
 	Endpoint       string
 	Token          string
 	LoginTemplate  string
@@ -153,21 +155,33 @@ type SMSConfig struct {
 	TimeoutSeconds int
 }
 
-// UploadConfig 定义用户上传和归档展开的统一服务端边界。
+// UploadConfig 描述统一上传边界。
 type UploadConfig struct {
 	ImportMaxBytes            int64
 	SimBundleMaxBytes         int64
 	SimBundleMaxFiles         int
 	SimBundleMaxUnpackedBytes int64
+	VirusScanRequired         bool
+	VirusScanNetwork          string
+	VirusScanAddress          string
+	VirusScanTimeoutSeconds   int
+	VirusScanMaxBytes         int64
 }
 
-// ContestConfig 定义竞赛模块访问外部系统时的服务端边界。
+// TransferConfig 描述统一导入导出中心的任务重试与下载中心边界。
+type TransferConfig struct {
+	TaskMaxAttempts        int
+	TaskRetryDelayMs       int
+	TaskDownloadTTLSeconds int
+}
+
+// ContestConfig 描述竞赛外部源访问边界。
 type ContestConfig struct {
 	VulnSourceMaxResponseBytes int64
 	VulnSourceTimeoutSeconds   int
 }
 
-// NotifyConfig 定义通知事件消费的重试边界,由事件入口统一使用。
+// NotifyConfig 描述通知事件消费和限频边界。
 type NotifyConfig struct {
 	EventRetryMax         int
 	EventRetryDelayMs     int
@@ -176,7 +190,7 @@ type NotifyConfig struct {
 	SendRateMax           int
 }
 
-// TeachingConfig 定义 M6 对外/跨模块读取边界。
+// TeachingConfig 描述教学跨模块读取与后台任务批量边界。
 type TeachingConfig struct {
 	CourseGradesMaxRows       int
 	JudgeOutboxBatchSize      int
@@ -184,13 +198,13 @@ type TeachingConfig struct {
 	GradeExportBatchSize      int
 }
 
-// GradeConfig 定义 M11 审核、申诉和成绩单流程的运行边界。
+// GradeConfig 描述成绩中心申诉和成绩单签名边界。
 type GradeConfig struct {
 	AppealWindowDays     int
 	TranscriptSigningKey string
 }
 
-// SandboxConfig K8s 沙箱编排。
+// SandboxConfig 描述 K8s 沙箱编排与镜像证明边界。
 type SandboxConfig struct {
 	KubeconfigPath                string
 	NSPrefixStudent               string
@@ -199,6 +213,7 @@ type SandboxConfig struct {
 	PrepullNamespace              string
 	ImageRegistry                 string
 	ImageAttestations             []SandboxImageAttestation
+	CollectorAllowedPrefixes      []string
 	DefaultCPU                    string
 	DefaultMemory                 string
 	DefaultReqCPU                 string
@@ -229,7 +244,7 @@ type SandboxConfig struct {
 	ControlPodLabelValue          string
 }
 
-// SandboxImageAttestation 是 CI/Harbor 产出的受控镜像安全证明。
+// SandboxImageAttestation 描述一条受控镜像的签名与扫描证明。
 type SandboxImageAttestation struct {
 	ImageURL       string `json:"image_url"`
 	Digest         string `json:"digest"`
@@ -237,7 +252,7 @@ type SandboxImageAttestation struct {
 	TrivyStatus    string `json:"trivy_status"`
 }
 
-// JudgeConfig M3 判题队列与限频配置。
+// JudgeConfig 描述判题队列、结果大小和归档边界。
 type JudgeConfig struct {
 	QueuePollIntervalMs          int
 	WorkerBatchSize              int
@@ -251,21 +266,22 @@ type JudgeConfig struct {
 	SimilarityDefaultThreshold   float64
 }
 
-// MonitoringConfig 是 M9 外接监控面板嵌入配置。
+// MonitoringConfig 描述外接监控面板入口。
 type MonitoringConfig struct {
 	PanelsJSON string
 }
 
-// SnowflakeConfig 雪花 ID 节点。
+// SnowflakeConfig 描述雪花 ID 节点编号。
 type SnowflakeConfig struct {
 	NodeID int64
 }
 
-// Load 从环境变量装载并校验配置;任何必填项缺失/格式错即返回错误。
+// Load 从环境变量装载并校验配置;任何必填项缺失或格式错误都统一返回。
 func Load() (*Config, error) {
 	c := &Config{}
 	var errs []string
-	// 第一步:定义只读环境变量的解析器,所有缺失和格式错误都收集后一次性返回。
+
+	// 第一步:统一准备必填/可选读取器,把格式错误收敛到一次启动失败里返回。
 	req := func(key string) string {
 		v := os.Getenv(key)
 		if strings.TrimSpace(v) == "" {
@@ -309,19 +325,19 @@ func Load() (*Config, error) {
 		return n
 	}
 	reqBool := func(key string) bool {
-		v := os.Getenv(key)
-		switch strings.ToLower(strings.TrimSpace(v)) {
+		v := strings.ToLower(strings.TrimSpace(os.Getenv(key)))
+		switch v {
 		case "true", "1", "yes", "y", "on":
 			return true
 		case "false", "0", "no", "n", "off":
 			return false
 		default:
-			errs = append(errs, fmt.Sprintf("环境变量 %s 需为布尔值,实际=%q", key, v))
+			errs = append(errs, fmt.Sprintf("环境变量 %s 需为布尔值,实际=%q", key, os.Getenv(key)))
 			return false
 		}
 	}
 
-	// 第二步:按 .env.example 分组装载配置,避免业务代码再从环境变量旁路读取。
+	// 第二步:按配置域分组装载环境变量,保持 deploy/server/db/... 的职责边界清晰。
 	c.Deploy = DeployConfig{
 		Mode:            req("DEPLOY_MODE"),
 		PlatformEnabled: reqBool("PLATFORM_LAYER_ENABLED"),
@@ -361,18 +377,22 @@ func Load() (*Config, error) {
 		URL:                  req("NATS_URL"),
 		Token:                os.Getenv("NATS_TOKEN"),
 		ReconnectWaitSeconds: reqInt("NATS_RECONNECT_WAIT_SECONDS"),
+		ConsumerRetryMax:     reqInt("NATS_CONSUMER_RETRY_MAX"),
+		ConsumerRetryDelayMs: reqInt("NATS_CONSUMER_RETRY_DELAY_MS"),
+		DeadLetterPrefix:     req("NATS_DEAD_LETTER_PREFIX"),
 	}
 	c.MinIO = MinIOConfig{
-		Endpoint:           req("MINIO_ENDPOINT"),
-		UseSSL:             reqBool("MINIO_USE_SSL"),
-		Region:             req("MINIO_REGION"),
-		AccessKey:          req("MINIO_ACCESS_KEY"),
-		SecretKey:          req("MINIO_SECRET_KEY"),
-		BucketCode:         req("MINIO_BUCKET_CODE"),
-		BucketAttach:       req("MINIO_BUCKET_ATTACHMENT"),
-		BucketReport:       req("MINIO_BUCKET_REPORT"),
-		BucketBackup:       req("MINIO_BUCKET_BACKUP"),
-		PingTimeoutSeconds: reqInt("MINIO_PING_TIMEOUT_SECONDS"),
+		Endpoint:                req("MINIO_ENDPOINT"),
+		UseSSL:                  reqBool("MINIO_USE_SSL"),
+		Region:                  req("MINIO_REGION"),
+		AccessKey:               req("MINIO_ACCESS_KEY"),
+		SecretKey:               req("MINIO_SECRET_KEY"),
+		BucketCode:              req("MINIO_BUCKET_CODE"),
+		BucketAttach:            req("MINIO_BUCKET_ATTACHMENT"),
+		BucketReport:            req("MINIO_BUCKET_REPORT"),
+		BucketBackup:            req("MINIO_BUCKET_BACKUP"),
+		PingTimeoutSeconds:      reqInt("MINIO_PING_TIMEOUT_SECONDS"),
+		DownloadGrantTTLSeconds: reqInt("STORAGE_DOWNLOAD_GRANT_TTL_SECONDS"),
 	}
 	c.Auth = AuthConfig{
 		JWTSigningKey:             req("JWT_SIGNING_KEY"),
@@ -422,6 +442,16 @@ func Load() (*Config, error) {
 		SimBundleMaxBytes:         reqInt64("UPLOAD_SIM_BUNDLE_MAX_BYTES"),
 		SimBundleMaxFiles:         reqInt("UPLOAD_SIM_BUNDLE_MAX_FILES"),
 		SimBundleMaxUnpackedBytes: reqInt64("UPLOAD_SIM_BUNDLE_MAX_UNPACKED_BYTES"),
+		VirusScanRequired:         reqBool("UPLOAD_VIRUS_SCAN_REQUIRED"),
+		VirusScanNetwork:          os.Getenv("UPLOAD_VIRUS_SCAN_NETWORK"),
+		VirusScanAddress:          os.Getenv("UPLOAD_VIRUS_SCAN_ADDRESS"),
+		VirusScanTimeoutSeconds:   reqInt("UPLOAD_VIRUS_SCAN_TIMEOUT_SECONDS"),
+		VirusScanMaxBytes:         reqInt64("UPLOAD_VIRUS_SCAN_MAX_BYTES"),
+	}
+	c.Transfer = TransferConfig{
+		TaskMaxAttempts:        reqInt("TRANSFER_TASK_MAX_ATTEMPTS"),
+		TaskRetryDelayMs:       reqInt("TRANSFER_TASK_RETRY_DELAY_MS"),
+		TaskDownloadTTLSeconds: reqInt("TRANSFER_TASK_DOWNLOAD_TTL_SECONDS"),
 	}
 	c.Contest = ContestConfig{
 		VulnSourceMaxResponseBytes: reqInt64("CONTEST_VULN_SOURCE_MAX_RESPONSE_BYTES"),
@@ -442,7 +472,7 @@ func Load() (*Config, error) {
 	}
 	c.Grade = GradeConfig{
 		AppealWindowDays:     reqInt("GRADE_APPEAL_WINDOW_DAYS"),
-		TranscriptSigningKey: c.Auth.HMACKey,
+		TranscriptSigningKey: req("GRADE_TRANSCRIPT_SIGNING_KEY"),
 	}
 	c.Sandbox = SandboxConfig{
 		KubeconfigPath:                os.Getenv("KUBECONFIG_PATH"),
@@ -452,6 +482,7 @@ func Load() (*Config, error) {
 		PrepullNamespace:              req("SANDBOX_PREPULL_NAMESPACE"),
 		ImageRegistry:                 req("IMAGE_REGISTRY"),
 		ImageAttestations:             readSandboxImageAttestations("SANDBOX_IMAGE_ATTESTATIONS_JSON", &errs),
+		CollectorAllowedPrefixes:      getCSV("CHAIMIR_COLLECTOR_ALLOWED_PREFIXES"),
 		DefaultCPU:                    req("SANDBOX_DEFAULT_CPU"),
 		DefaultMemory:                 req("SANDBOX_DEFAULT_MEMORY"),
 		DefaultReqCPU:                 req("SANDBOX_DEFAULT_REQUEST_CPU"),
@@ -497,10 +528,11 @@ func Load() (*Config, error) {
 	c.Monitoring = MonitoringConfig{
 		PanelsJSON: req("MONITORING_PANELS_JSON"),
 	}
-	c.Snowflake = SnowflakeConfig{NodeID: reqInt64("SNOWFLAKE_NODE_ID")}
+	c.Snowflake = SnowflakeConfig{
+		NodeID: reqInt64("SNOWFLAKE_NODE_ID"),
+	}
 
-	// 第三步:校验跨字段约束和运行边界,把不安全的部署配置挡在启动阶段。
-	// school 形态必须显式给固定租户 ID。
+	// 第三步:集中执行跨字段约束和安全边界校验,避免运行时才暴露配置问题。
 	if c.Deploy.Mode == "school" && c.Deploy.SchoolTenantID == 0 {
 		errs = append(errs, "DEPLOY_MODE=school 时必须设置 SCHOOL_TENANT_ID")
 	}
@@ -519,8 +551,38 @@ func Load() (*Config, error) {
 	if c.NATS.ReconnectWaitSeconds <= 0 {
 		errs = append(errs, "NATS_RECONNECT_WAIT_SECONDS 必须大于 0")
 	}
+	if c.NATS.ConsumerRetryMax <= 0 {
+		errs = append(errs, "NATS_CONSUMER_RETRY_MAX 必须大于 0")
+	}
+	if c.NATS.ConsumerRetryDelayMs <= 0 {
+		errs = append(errs, "NATS_CONSUMER_RETRY_DELAY_MS 必须大于 0")
+	}
+	if strings.TrimSpace(c.NATS.DeadLetterPrefix) == "" {
+		errs = append(errs, "NATS_DEAD_LETTER_PREFIX 不能为空")
+	}
 	if c.MinIO.PingTimeoutSeconds <= 0 {
 		errs = append(errs, "MINIO_PING_TIMEOUT_SECONDS 必须大于 0")
+	}
+	if c.MinIO.DownloadGrantTTLSeconds <= 0 {
+		errs = append(errs, "STORAGE_DOWNLOAD_GRANT_TTL_SECONDS 必须大于 0")
+	}
+	if c.Upload.VirusScanTimeoutSeconds <= 0 {
+		errs = append(errs, "UPLOAD_VIRUS_SCAN_TIMEOUT_SECONDS 必须大于 0")
+	}
+	if c.Upload.VirusScanMaxBytes <= 0 {
+		errs = append(errs, "UPLOAD_VIRUS_SCAN_MAX_BYTES 必须大于 0")
+	}
+	if c.Upload.VirusScanRequired && strings.TrimSpace(c.Upload.VirusScanAddress) == "" {
+		errs = append(errs, "UPLOAD_VIRUS_SCAN_REQUIRED=true 时必须设置 UPLOAD_VIRUS_SCAN_ADDRESS")
+	}
+	if c.Transfer.TaskMaxAttempts <= 0 {
+		errs = append(errs, "TRANSFER_TASK_MAX_ATTEMPTS 必须大于 0")
+	}
+	if c.Transfer.TaskRetryDelayMs <= 0 {
+		errs = append(errs, "TRANSFER_TASK_RETRY_DELAY_MS 必须大于 0")
+	}
+	if c.Transfer.TaskDownloadTTLSeconds <= 0 {
+		errs = append(errs, "TRANSFER_TASK_DOWNLOAD_TTL_SECONDS 必须大于 0")
 	}
 	if c.Contest.VulnSourceTimeoutSeconds < 1 || c.Contest.VulnSourceTimeoutSeconds > 60 {
 		errs = append(errs, "CONTEST_VULN_SOURCE_TIMEOUT_SECONDS 必须在 1 到 60 秒之间")
@@ -552,6 +614,21 @@ func Load() (*Config, error) {
 	if c.Teaching.GradeExportBatchSize <= 0 {
 		errs = append(errs, "TEACHING_GRADE_EXPORT_BATCH_SIZE 必须大于 0")
 	}
+	if c.Judge.QueuePollIntervalMs <= 0 {
+		errs = append(errs, "JUDGE_QUEUE_POLL_INTERVAL_MS 必须大于 0")
+	}
+	if c.Judge.WorkerBatchSize <= 0 {
+		errs = append(errs, "JUDGE_WORKER_BATCH_SIZE 必须大于 0")
+	}
+	if c.Judge.SubmitRateLimitSec <= 0 {
+		errs = append(errs, "JUDGE_SUBMIT_RATE_LIMIT_SECONDS 必须大于 0")
+	}
+	if c.Judge.DefaultMaxRetries < 0 {
+		errs = append(errs, "JUDGE_DEFAULT_MAX_RETRIES 不能小于 0")
+	}
+	if c.Judge.SandboxReadyPollIntervalMs <= 0 {
+		errs = append(errs, "JUDGE_SANDBOX_READY_POLL_INTERVAL_MS 必须大于 0")
+	}
 	if c.Judge.ResultDetailsMaxBytes <= 0 {
 		errs = append(errs, "JUDGE_RESULT_DETAILS_MAX_BYTES 必须大于 0")
 	}
@@ -566,6 +643,21 @@ func Load() (*Config, error) {
 	}
 	if c.Judge.SimilarityDefaultThreshold <= 0 || c.Judge.SimilarityDefaultThreshold >= 1 {
 		errs = append(errs, "JUDGE_SIMILARITY_DEFAULT_THRESHOLD 必须大于 0 且小于 1")
+	}
+	if c.Sandbox.PrepullTimeoutSeconds <= 0 {
+		errs = append(errs, "SANDBOX_PREPULL_TIMEOUT_SECONDS 必须大于 0")
+	}
+	if c.Sandbox.ReadyTimeoutSeconds <= 0 {
+		errs = append(errs, "SANDBOX_READY_TIMEOUT_SECONDS 必须大于 0")
+	}
+	if c.Sandbox.PrepullPollIntervalSeconds <= 0 {
+		errs = append(errs, "SANDBOX_PREPULL_POLL_INTERVAL_SECONDS 必须大于 0")
+	}
+	if c.Sandbox.ReadyPollIntervalSeconds <= 0 {
+		errs = append(errs, "SANDBOX_READY_POLL_INTERVAL_SECONDS 必须大于 0")
+	}
+	if c.Sandbox.ChainRPCTimeoutSeconds <= 0 {
+		errs = append(errs, "SANDBOX_CHAIN_RPC_TIMEOUT_SECONDS 必须大于 0")
 	}
 	if c.Sandbox.InitArchiveMaxFiles <= 0 {
 		errs = append(errs, "SANDBOX_INIT_ARCHIVE_MAX_FILES 必须大于 0")
@@ -591,6 +683,11 @@ func Load() (*Config, error) {
 	if c.Sandbox.SelftestRecycleTimeoutSeconds <= 0 {
 		errs = append(errs, "SANDBOX_SELFTEST_RECYCLE_TIMEOUT_SECONDS 必须大于 0")
 	}
+	for _, prefix := range c.Sandbox.CollectorAllowedPrefixes {
+		if !strings.HasPrefix(prefix, "http://") && !strings.HasPrefix(prefix, "https://") {
+			errs = append(errs, fmt.Sprintf("CHAIMIR_COLLECTOR_ALLOWED_PREFIXES 包含非法前缀: %s", prefix))
+		}
+	}
 	if len(c.Identity.SSOAllowedServiceOrigins) == 0 {
 		errs = append(errs, "IDENTITY_SSO_ALLOWED_SERVICE_ORIGINS 至少配置一个平台 CAS 回调 origin")
 	}
@@ -600,20 +697,19 @@ func Load() (*Config, error) {
 		}
 	}
 
-	// 第四步:统一返回所有配置问题,便于部署一次修完而不是逐项重启试错。
 	if len(errs) > 0 {
 		return nil, fmt.Errorf("配置加载失败:\n  - %s", strings.Join(errs, "\n  - "))
 	}
 	return c, nil
 }
 
-// validOrigin 校验 scheme+host 形式的 origin,避免把完整路径或坏 URL 当作安全白名单。
+// validOrigin 校验 origin 只包含 scheme 和 host,避免把路径误纳入安全白名单。
 func validOrigin(raw string) bool {
 	u, err := url.Parse(strings.TrimSpace(raw))
 	return err == nil && u.Scheme != "" && u.Host != "" && u.Path == "" && u.RawQuery == "" && u.Fragment == ""
 }
 
-// readSandboxImageAttestations 解析受控镜像证明清单;空清单会使镜像登记全部失败。
+// readSandboxImageAttestations 解析镜像证明 JSON 数组,并校验证明字段完整性。
 func readSandboxImageAttestations(key string, errs *[]string) []SandboxImageAttestation {
 	raw := strings.TrimSpace(os.Getenv(key))
 	if raw == "" {
@@ -636,7 +732,7 @@ func readSandboxImageAttestations(key string, errs *[]string) []SandboxImageAtte
 	return out
 }
 
-// validateSandboxQuantities 在启动边界校验 K8s quantity,避免请求路径触发资源解析 panic。
+// validateSandboxQuantities 在启动边界校验 Kubernetes quantity,避免编排路径才失败。
 func validateSandboxQuantities(cfg SandboxConfig) []string {
 	values := map[string]string{
 		"SANDBOX_DEFAULT_CPU":            cfg.DefaultCPU,
@@ -654,6 +750,7 @@ func validateSandboxQuantities(cfg SandboxConfig) []string {
 	}
 	var errs []string
 	for key, value := range values {
+		// 这里统一在启动期校验 quantity,避免不同编排分支各自报错且口径不一致。
 		if strings.TrimSpace(value) == "" {
 			errs = append(errs, "环境变量 "+key+" 不能为空")
 			continue

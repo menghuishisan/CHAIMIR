@@ -20,6 +20,11 @@ source:
 upstream:
   image: python:3.13-alpine
   reuse_policy: self-developed-tool
+env_keys:
+  config:
+    - CHAIMIR_IMAGE_PORT
+    - CHAIMIR_MAX_BODY_BYTES
+  secret: []
 data_driven: true
 capabilities:
   - wallet-simulator

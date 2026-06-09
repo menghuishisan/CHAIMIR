@@ -20,6 +20,20 @@ source:
 upstream:
   image: node:20-bookworm-slim
   reuse_policy: service-wrapper
+env_keys:
+  config:
+    - CHAIMIR_IMAGE_PORT
+    - CHAIMIR_IMAGE_SERVICE_AUTH_MAX_SKEW_SECONDS
+    - CHAIMIR_EVENT_RPC_URL
+    - CHAIMIR_EVENT_CONTRACT_ADDRESS
+    - CHAIMIR_EVENT_TOPIC
+    - CHAIMIR_EVENT_LOOKBACK_BLOCKS
+  secret:
+    - CHAIMIR_EVENT_LISTENER_SERVICE_AUTH_SECRET
+secrets_required:
+  - env: CHAIMIR_EVENT_LISTENER_SERVICE_AUTH_SECRET
+    source: deploy/config/chaimir.env
+    runtime_value: secret-or-kms
 data_driven: true
 capabilities:
   - event-listener
@@ -80,6 +94,11 @@ selftest:
         - node
         - --check
         - /app/event-listener.mjs
+    - name: auth-required
+      command:
+        - node
+        - -e
+        - "const fs=require('fs'); const src=fs.readFileSync('/app/event-listener.mjs','utf8'); if(!src.includes('verifyServiceSignature') || !src.includes('CHAIMIR_EVENT_LISTENER_SERVICE_AUTH_SECRET')) process.exit(1)"
 supply_chain:
   sbom: true
   trivy_required: true

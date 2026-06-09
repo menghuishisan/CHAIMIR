@@ -1,39 +1,71 @@
-// Package apperr 测试身份错误码语义不保留废弃登录路径。
+// apperr identity_codes_test 文件守护 M1 身份与租户错误码的一错一码规范。
 package apperr
 
-import (
-	"os"
-	"strings"
-	"testing"
-)
+import "testing"
 
-// TestMustChangePasswordIsLoginResultFlag 确认首登改密不再作为登录失败错误码暴露。
-func TestMustChangePasswordIsLoginResultFlag(t *testing.T) {
-	data, err := os.ReadFile("identity_codes.go")
-	if err != nil {
-		t.Fatalf("read identity codes: %v", err)
+// TestIdentityErrorsUseDedicatedSegments 验证身份模块错误不复用通用错误码。
+func TestIdentityErrorsUseDedicatedSegments(t *testing.T) {
+	tests := []*Error{
+		ErrIdentityInvalidPhone,
+		ErrIdentityWeakPassword,
+		ErrIdentityInvalidTenantCode,
+		ErrIdentityInvalidCredentials,
+		ErrIdentityAccountDisabled,
+		ErrIdentityAccountLocked,
+		ErrIdentityTenantDisabled,
+		ErrIdentityTenantExpired,
+		ErrIdentityActivationInvalid,
+		ErrIdentitySMSNeedsTenant,
+		ErrIdentitySMSTooFrequent,
+		ErrIdentitySMSDailyLimited,
+		ErrIdentitySMSInvalid,
+		ErrIdentitySMSAttemptsLimited,
+		ErrIdentitySSOServiceOriginDenied,
+		ErrIdentitySSOInsecureConfig,
+		ErrIdentitySSOMatchFieldInvalid,
+		ErrIdentitySSOCASServerInsecure,
+		ErrIdentityLDAPServerInsecure,
+		ErrIdentitySSOTypeInvalid,
+		ErrIdentitySSOTicketInvalid,
+		ErrIdentitySSOAccountNotMatched,
+		ErrIdentitySSOResponseInvalid,
+		ErrIdentitySSOSecretInvalid,
+		ErrIdentityTenantStatusInvalid,
+		ErrIdentityTenantConfigInvalid,
+		ErrIdentityOrgInvalidInput,
+		ErrIdentityPlatformLayerDisabled,
+		ErrIdentityBootstrapInvalid,
+		ErrIdentityImportTypeInvalid,
+		ErrIdentityImportUnsupportedFile,
+		ErrIdentityImportContentInvalid,
+		ErrIdentityImportPreviewExpired,
+		ErrIdentityImportCSVFormatInvalid,
+		ErrIdentityImportEmpty,
+		ErrIdentityImportFormatInvalid,
+		ErrIdentityImportFileTooLarge,
+		ErrIdentityTeacherAdminRequired,
+		ErrIdentityBaseRoleInvalid,
+		ErrIdentitySessionContextMissing,
+		ErrIdentityAccountBatchEmpty,
+		ErrIdentityAccountBatchInvalid,
+		ErrIdentityAccountUpdateInvalid,
+		ErrIdentityPhoneAlreadyUsed,
 	}
-	if strings.Contains(string(data), "ErrMustChangePassword") {
-		t.Fatalf("must_change_pwd is a login result flag, not a standalone login failure error")
-	}
-}
 
-// TestIdentitySpecificCodesCoverAccountAndImportConflicts 确认 M1 不用通用冲突/未命中码承载账号和导入语义。
-func TestIdentitySpecificCodesCoverAccountAndImportConflicts(t *testing.T) {
-	codes := []*Error{
-		ErrAccountNoAlreadyExists,
-		ErrAccountStatusTransitionInvalid,
-		ErrBatchAccountArchiveInvalid,
-		ErrImportPreviewNotFound,
-	}
 	seen := map[string]bool{}
-	for _, item := range codes {
-		if item.Code == "" || item.Code[0] != '1' {
-			t.Fatalf("identity code must be in 1xxxx segment, got %q", item.Code)
+	for _, errTemplate := range tests {
+		if errTemplate == nil {
+			t.Fatalf("identity error template must not be nil")
 		}
-		if seen[item.Code] {
-			t.Fatalf("duplicate identity code %s", item.Code)
+		if errTemplate.Code == CodeBadRequest || errTemplate.Code == CodeUnauthorized || errTemplate.Code == CodeForbidden || errTemplate.Code == CodeConflict || errTemplate.Code == CodeRateLimited {
+			t.Fatalf("identity error %q reused generic code %s", errTemplate.Message, errTemplate.Code)
 		}
-		seen[item.Code] = true
+		if errTemplate.Code[0:2] != "12" && errTemplate.Code[0:2] != "13" && errTemplate.Code[0:2] != "14" {
+			t.Fatalf("identity error %q used code %s outside M1 segments", errTemplate.Message, errTemplate.Code)
+		}
+		if seen[errTemplate.Code] {
+			t.Fatalf("duplicate identity error code %s", errTemplate.Code)
+		}
+		seen[errTemplate.Code] = true
 	}
 }

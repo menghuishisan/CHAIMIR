@@ -1,4 +1,4 @@
-# 本文件声明 middleware/minio 上游固定镜像的来源、配置、端口、数据卷和生产门禁。
+﻿# 本文件声明 middleware/minio 上游固定镜像的来源、配置、端口、数据卷和生产门禁。
 schema_version: 1
 category: middleware
 name: minio
@@ -22,7 +22,6 @@ upstream:
   image: minio/minio
   version: "RELEASE.2026-05-13T20-11-39Z"
   digest_required: true
-  digest_lock_ref: images/locks/middleware/minio.lock.yaml
   license: AGPL-3.0
 private_delivery:
   offline_bundle: true

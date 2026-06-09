@@ -1,271 +1,412 @@
-// M1 平台服务:入驻申请审核、租户管理、本校配置/SSO。
-// 依据 docs/01 §3 接口、§5 §1 入驻状态机、§4 权限(平台层私有化关闭)。
+// identity service_platform 文件实现 SaaS 入驻申请、租户管理和平台审核流程。
 package identity
 
 import (
 	"context"
+	"strings"
 	"time"
 
-	"chaimir/internal/platform/ids"
-	"chaimir/internal/platform/jsonx"
-	"chaimir/internal/platform/secretmap"
+	"chaimir/internal/platform/audit"
+	"chaimir/internal/platform/config"
+	"chaimir/internal/platform/tenant"
 	"chaimir/internal/platform/timex"
 	"chaimir/pkg/apperr"
 	"chaimir/pkg/crypto"
 )
 
-// CreateApplication 访客提交入驻申请(公开,状态=申请中)。
-func (s *Service) CreateApplication(ctx context.Context, req CreateApplicationRequest) (string, error) {
-	if err := validateSchoolType(req.SchoolType); err != nil {
-		return "", err
+// CreateApplication 提交学校入驻申请,这是申请流程而非自助注册。
+func (s *Service) CreateApplication(ctx context.Context, req CreateApplicationRequest) (TenantApplication, error) {
+	if err := s.ensurePlatformLayerEnabled(); err != nil {
+		return TenantApplication{}, err
 	}
-	if !validCNPhone(req.ContactPhone) {
-		return "", apperr.ErrPhoneInvalid
+	if strings.TrimSpace(req.SchoolName) == "" || strings.TrimSpace(req.ContactName) == "" {
+		return TenantApplication{}, apperr.ErrIdentityApplicationInvalid
 	}
-	id := s.idgen.Generate()
-	if err := s.repo.createTenantApplication(ctx, id, req); err != nil {
-		return "", apperr.ErrTenantApplicationStoreFailed.WithCause(err)
+	if err := ValidatePhone(req.ContactPhone); err != nil {
+		return TenantApplication{}, err
 	}
-	return ids.Format(id), nil
-}
-
-// ListApplications 平台管理员列申请。
-func (s *Service) ListApplications(ctx context.Context, status int16, page, size int) ([]map[string]any, int64, error) {
-	if err := validateApplicationStatus(status); err != nil {
-		return nil, 0, err
-	}
-	rows, total, err := s.repo.listTenantApplications(ctx, status, page, size)
-	if err != nil {
-		return nil, 0, apperr.ErrTenantQueryFailed.WithCause(err)
-	}
-	out := make([]map[string]any, 0, len(rows))
-	for _, row := range rows {
-		out = append(out, applicationToMap(row))
-	}
-	return out, total, nil
-}
-
-// ApproveApplication 通过申请:创建租户 + 分配短码 + 建首个学校管理员(激活码开通)。
-// 全程一个事务(平台级表无 RLS;新租户的 account/profile/role 写入需在该租户上下文)。
-func (s *Service) ApproveApplication(ctx context.Context, appID int64, reviewerID int64, tenantCode, adminPhone, adminName string) (*ApproveApplicationResult, error) {
-	if tenantCode == "" || adminPhone == "" || adminName == "" {
-		return nil, apperr.ErrApplicationApproveInvalid
-	}
-	if !validCNPhone(adminPhone) {
-		return nil, apperr.ErrPhoneInvalid
-	}
-	tenantID := s.idgen.Generate()
-	adminID := s.idgen.Generate()
-	phoneEnc, err := s.encryptPhone(adminPhone)
-	if err != nil {
-		return nil, apperr.ErrAccountCredentialFailed.WithCause(err)
-	}
-	ph := s.phoneHash(adminPhone)
-
-	activationCode, err := s.genActivationCode()
-	if err != nil {
-		return nil, apperr.ErrActivationCodeIssueFailed.WithCause(err)
-	}
-	if err := s.repo.approveApplication(ctx, appID, reviewerID, tenantID, adminID, tenantCode, adminName, phoneEnc, ph, s.activationCodeHash(activationCode), timex.Now().Add(s.activationCodeTTL), s.idgen.Generate); err != nil {
-		return nil, toAppErr(err)
-	}
-	if err := s.writePlatformAudit(ctx, reviewerID, AuditActionTenantApprove, AuditTargetApplication, appID, map[string]any{
-		"tenant_id":   ids.Format(tenantID),
-		"tenant_code": tenantCode,
-		"admin_id":    ids.Format(adminID),
-	}); err != nil {
-		return nil, err
-	}
-
-	return &ApproveApplicationResult{
-		TenantID: ids.Format(tenantID), TenantCode: tenantCode,
-		AdminPhone:     maskPhone(adminPhone),
-		ActivationCode: activationCode,
-		ActivationHint: "已创建学校管理员,请使用激活码自设密码后登录",
-	}, nil
-}
-
-// RejectApplication 驳回申请。
-func (s *Service) RejectApplication(ctx context.Context, appID, reviewerID int64, reason string) error {
-	if err := s.repo.rejectApplication(ctx, appID, reviewerID, reason); err != nil {
-		return err
-	}
-	return s.writePlatformAudit(ctx, reviewerID, AuditActionTenantReject, AuditTargetApplication, appID, map[string]any{
-		"reason_recorded": reason != "",
-	})
-}
-
-// ListTenants 平台列租户。
-func (s *Service) ListTenants(ctx context.Context, status int16, page, size int) ([]map[string]any, int64, error) {
-	if err := validateOptionalTenantStatus(status); err != nil {
-		return nil, 0, err
-	}
-	rows, total, err := s.repo.listTenants(ctx, status, page, size)
-	if err != nil {
-		return nil, 0, apperr.ErrTenantQueryFailed.WithCause(err)
-	}
-	out := make([]map[string]any, 0, len(rows))
-	for _, row := range rows {
-		out = append(out, tenantToMap(row))
-	}
-	return out, total, nil
-}
-
-// GetTenant 平台取租户详情。
-func (s *Service) GetTenant(ctx context.Context, id int64) (map[string]any, error) {
-	row, err := s.repo.getTenant(ctx, id)
-	if err != nil {
-		return nil, toAppErr(err)
-	}
-	return tenantToMap(row), nil
-}
-
-// UpdateTenant 平台改租户状态/到期。
-func (s *Service) UpdateTenant(ctx context.Context, id int64, req UpdateTenantRequest) error {
-	if err := validateTenantStatus(req.Status); err != nil {
-		return err
-	}
-	var expire *time.Time
-	if req.ExpireAt != "" {
-		t, err := time.Parse(time.RFC3339, req.ExpireAt)
+	var app TenantApplication
+	if err := s.store.PlatformTx(ctx, func(ctx context.Context, tx TxStore) error {
+		row, err := tx.CreateTenantApplication(ctx, req, s.ids.Generate())
 		if err != nil {
-			return apperr.ErrTenantExpireAtInvalid
+			return err
 		}
-		expire = &t
+		app = row
+		return nil
+	}); err != nil {
+		return TenantApplication{}, apperr.ErrInternal.WithCause(err)
 	}
-	if err := s.repo.updateTenantStatus(ctx, id, req.Status, expire); err != nil {
-		return err
-	}
-	current, ok := CurrentIdentity(ctx)
-	if !ok {
-		return apperr.ErrUnauthorized
-	}
-	return s.writePlatformAudit(ctx, current.AccountID, AuditActionTenantUpdate, AuditTargetTenant, id, map[string]any{
-		"status":            req.Status,
-		"expire_at_updated": req.ExpireAt != "",
-	})
+	return app, nil
 }
 
-// GetTenantConfig 学校管理员取本校配置。
-func (s *Service) GetTenantConfig(ctx context.Context, tenantID int64) (map[string]any, error) {
-	return s.GetTenant(ctx, tenantID)
-}
-
-// UpdateTenantConfig 学校管理员改本校配置。
-func (s *Service) UpdateTenantConfig(ctx context.Context, tenantID int64, req TenantConfigRequest) error {
-	if err := validateAuthMode(req.AuthMode); err != nil {
-		return err
+// ApproveApplication 审核通过入驻申请,创建租户和首个学校管理员账号。
+func (s *Service) ApproveApplication(ctx context.Context, appID int64, req ReviewApplicationRequest) (TenantDTO, string, error) {
+	if err := s.ensurePlatformLayerEnabled(); err != nil {
+		return TenantDTO{}, "", err
 	}
-	flags, err := jsonx.ObjectBytes(req.FeatureFlags, apperr.ErrTenantFeatureFlagsInvalid)
-	if err != nil {
-		return err
+	id, ok := tenant.FromContext(ctx)
+	if !ok || !id.IsPlatform {
+		return TenantDTO{}, "", apperr.ErrForbidden
 	}
-	if err := s.repo.updateTenantConfig(ctx, tenantID, req, flags); err != nil {
-		return err
+	if err := ValidateTenantCode(req.TenantCode); err != nil {
+		return TenantDTO{}, "", err
 	}
-	return s.writeAudit(ctx, RoleSchoolAdmin, AuditActionTenantConfig, AuditTargetTenant, tenantID, map[string]any{
-		"fields":                 []string{"logo_url", "display_name", "feature_flags", "auth_mode", "enable_activation_code"},
-		"auth_mode":              req.AuthMode,
-		"enable_activation_code": req.EnableActivationCode,
-	})
-}
-
-// GetSsoConfig 读取本校启用的 SSO/LDAP 配置。
-func (s *Service) GetSsoConfig(ctx context.Context, tenantID int64) (*SsoConfigView, error) {
-	row, found, err := s.repo.getSsoConfigForView(ctx, tenantID)
-	if err != nil {
-		return nil, toAppErr(err)
+	if err := ValidatePhone(req.AdminPhone); err != nil {
+		return TenantDTO{}, "", err
 	}
-	if !found {
-		return &SsoConfigView{Config: map[string]any{}, Enabled: false}, nil
-	}
-	return ssoConfigViewFromSnapshot(row)
-}
-
-// UpsertSsoConfig 保存本校 SSO/CAS/LDAP 配置,敏感字段加密后才进入 JSONB。
-func (s *Service) UpsertSsoConfig(ctx context.Context, tenantID int64, req SsoConfigRequest) (*SsoConfigView, error) {
-	if req.Type != SsoTypeCAS && req.Type != SsoTypeLDAP {
-		return nil, apperr.ErrSsoTypeInvalid
-	}
-	if req.MatchField != 1 && req.MatchField != 2 {
-		return nil, apperr.ErrSsoMatchFieldInvalid
-	}
-	// 先按类型校验配置完整性和外部地址安全边界,防止保存不可用或可 SSRF 的 SSO 配置。
-	if err := validateSsoConfigForStorage(req.Type, req.Config); err != nil {
-		return nil, err
-	}
-	// 再加密 bind_password/client_secret 等敏感字段,持久化层只接收受保护配置。
-	protected, err := protectSsoConfig(s.cipher, req.Config)
-	if err != nil {
-		return nil, apperr.ErrSsoConfigProtectFailed.WithCause(err)
-	}
-	cfgBytes, err := jsonx.ObjectBytes(protected, apperr.ErrSsoConfigFormatInvalid)
-	if err != nil {
-		return nil, err
-	}
-	row, err := s.repo.upsertSsoConfigWithAudit(ctx, tenantID, s.idgen.Generate(), req, cfgBytes, func(rowID int64) (AuditLogCreate, error) {
-		entry, err := buildAuditEntry(ctx, RoleSchoolAdmin, AuditActionTenantSSO, AuditTargetSSOConfig, rowID, map[string]any{
-			"type":        req.Type,
-			"match_field": req.MatchField,
-			"enabled":     req.Enabled,
+	var created Tenant
+	var activation string
+	if err := s.store.PlatformTx(ctx, func(ctx context.Context, tx TxStore) error {
+		// 平台审核先锁定申请并创建租户,避免申请状态和租户主表出现不一致。
+		app, err := tx.GetTenantApplication(ctx, appID)
+		if err != nil {
+			return err
+		}
+		tenantID := s.ids.Generate()
+		t, err := tx.CreateTenant(ctx, CreateTenantInput{
+			ID:                   tenantID,
+			Code:                 strings.TrimSpace(req.TenantCode),
+			Name:                 app.SchoolName,
+			Type:                 app.SchoolType,
+			Status:               TenantStatusActive,
+			DeployMode:           DeployModeSaaS,
+			FeatureFlags:         []byte(`{}`),
+			AuthMode:             1,
+			EnableActivationCode: true,
 		})
 		if err != nil {
-			return AuditLogCreate{}, err
+			return err
 		}
-		return buildAuditLogCreate(s.idgen.Generate(), entry), nil
-	})
+		if _, err := tx.ApproveTenantApplication(ctx, appID, id.AccountID, tenantID); err != nil {
+			return err
+		}
+		created = t
+		return nil
+	}); err != nil {
+		return TenantDTO{}, "", apperr.ErrInternal.WithCause(err)
+	}
+	// 首个学校管理员允许暂无组织档案,但仍必须通过 M1 账号能力生成激活码。
+	adminReq := CreateAccountRequest{
+		Phone:         req.AdminPhone,
+		Name:          req.AdminName,
+		BaseIdentity:  BaseIdentityTeacher,
+		UseActivation: true,
+	}
+	adminCtx := tenant.WithContext(ctx, tenant.Identity{TenantID: created.ID, AccountID: id.AccountID, IsSystem: true})
+	_, code, err := s.createBootstrapAdmin(adminCtx, created.ID, adminReq)
 	if err != nil {
-		return nil, toAppErrWith(err, apperr.ErrSsoConfigReadFailed)
+		return TenantDTO{}, "", err
 	}
-	return ssoConfigViewFromSnapshot(row)
+	activation = code
+	// 审核通过是平台级敏感操作,审计落在平台范围并关联原申请。
+	if err := s.auditPlatformOperation(ctx, id.AccountID, "tenant.application.approve", "identity.tenant_application", appID, map[string]any{"tenant_id": created.ID}); err != nil {
+		return TenantDTO{}, "", err
+	}
+	return ToTenantDTO(created), activation, nil
 }
 
-// applicationToMap 把入驻申请投影转对外 map。
-func applicationToMap(r TenantApplicationSnapshot) map[string]any {
-	return map[string]any{
-		"id": ids.Format(r.ID), "school_name": r.SchoolName, "school_type": r.SchoolType,
-		"contact_name": r.ContactName, "contact_phone": r.ContactPhone, "contact_email": r.ContactEmail,
-		"status": r.Status, "reject_reason": r.RejectReason, "created_at": r.CreatedAt,
+// RejectApplication 驳回学校入驻申请。
+func (s *Service) RejectApplication(ctx context.Context, appID int64, reason string) error {
+	if err := s.ensurePlatformLayerEnabled(); err != nil {
+		return err
 	}
+	id, ok := tenant.FromContext(ctx)
+	if !ok || !id.IsPlatform {
+		return apperr.ErrForbidden
+	}
+	if err := s.store.PlatformTx(ctx, func(ctx context.Context, tx TxStore) error {
+		_, err := tx.RejectTenantApplication(ctx, appID, id.AccountID, strings.TrimSpace(reason))
+		return err
+	}); err != nil {
+		return apperr.ErrInternal.WithCause(err)
+	}
+	return s.auditPlatformOperation(ctx, id.AccountID, "tenant.application.reject", "identity.tenant_application", appID, map[string]any{})
 }
 
-// tenantToMap 把租户行转对外 map。
-func tenantToMap(r TenantSnapshot) map[string]any {
-	m := map[string]any{
-		"id": ids.Format(r.ID), "code": r.Code, "name": r.Name, "type": r.Type,
-		"status": r.Status, "deploy_mode": r.DeployMode,
-		"logo_url": r.LogoURL, "display_name": r.DisplayName,
-		"auth_mode": r.AuthMode, "enable_activation_code": r.EnableActivationCode,
-	}
-	if r.HasExpireAt {
-		m["expire_at"] = r.ExpireAt
-	}
-	return m
-}
-
-// ssoConfigViewFromSnapshot 把 SSO 配置投影转换为脱敏响应视图。
-func ssoConfigViewFromSnapshot(row SsoConfigSnapshot) (*SsoConfigView, error) {
-	cfg, err := jsonx.ObjectMapStrict(row.Config)
-	if err != nil {
+// ListApplicationsByPlatform 读取入驻申请列表,仅平台管理员可访问。
+func (s *Service) ListApplicationsByPlatform(ctx context.Context, status int16) ([]TenantApplication, error) {
+	if err := s.ensurePlatformLayerEnabled(); err != nil {
 		return nil, err
 	}
-	return &SsoConfigView{
-		ID: ids.Format(row.ID), Type: row.Type, Config: maskSsoConfig(cfg),
-		MatchField: row.MatchField, Enabled: row.Enabled,
-	}, nil
+	id, ok := tenant.FromContext(ctx)
+	if !ok || !id.IsPlatform {
+		return nil, apperr.ErrForbidden
+	}
+	var out []TenantApplication
+	if err := s.store.PlatformTx(ctx, func(ctx context.Context, tx TxStore) error {
+		rows, err := tx.ListTenantApplications(ctx, status)
+		if err != nil {
+			return err
+		}
+		out = rows
+		return nil
+	}); err != nil {
+		return nil, apperr.ErrInternal.WithCause(err)
+	}
+	return out, nil
 }
 
-// protectSsoConfig 加密 SSO/LDAP 配置中的敏感字段。
-func protectSsoConfig(cipher *crypto.Cipher, cfg map[string]any) (map[string]any, error) {
-	return secretmap.Protect(cipher, cfg, "SSO 敏感配置")
+// ListTenantsByPlatform 读取平台租户列表,用于 SaaS 平台学校管理页。
+func (s *Service) ListTenantsByPlatform(ctx context.Context) ([]TenantDTO, error) {
+	if err := s.ensurePlatformLayerEnabled(); err != nil {
+		return nil, err
+	}
+	id, ok := tenant.FromContext(ctx)
+	if !ok || !id.IsPlatform {
+		return nil, apperr.ErrForbidden
+	}
+	var rows []Tenant
+	if err := s.store.PlatformTx(ctx, func(ctx context.Context, tx TxStore) error {
+		items, err := tx.ListTenants(ctx)
+		if err != nil {
+			return err
+		}
+		rows = items
+		return nil
+	}); err != nil {
+		return nil, apperr.ErrInternal.WithCause(err)
+	}
+	out := make([]TenantDTO, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, ToTenantDTO(row))
+	}
+	return out, nil
 }
 
-// maskSsoConfig 脱敏 SSO/LDAP 配置响应。
-func maskSsoConfig(cfg map[string]any) map[string]any {
-	return secretmap.Mask(cfg)
+// GetTenantByPlatform 读取单个租户详情,用于平台管理员管理学校状态。
+func (s *Service) GetTenantByPlatform(ctx context.Context, tenantID int64) (TenantDTO, error) {
+	if err := s.ensurePlatformLayerEnabled(); err != nil {
+		return TenantDTO{}, err
+	}
+	id, ok := tenant.FromContext(ctx)
+	if !ok || !id.IsPlatform {
+		return TenantDTO{}, apperr.ErrForbidden
+	}
+	var row Tenant
+	if err := s.store.PlatformTx(ctx, func(ctx context.Context, tx TxStore) error {
+		item, err := tx.GetTenantByID(ctx, tenantID)
+		if err != nil {
+			return err
+		}
+		row = item
+		return nil
+	}); err != nil {
+		return TenantDTO{}, apperr.ErrInternal.WithCause(err)
+	}
+	return ToTenantDTO(row), nil
 }
 
-// revealSsoConfig 还原服务端内部使用的 SSO/LDAP 配置,仅供协议适配器使用。
-func revealSsoConfig(cipher *crypto.Cipher, cfg map[string]any) (map[string]any, error) {
-	return secretmap.Reveal(cipher, cfg, "SSO 敏感配置")
+// UpdateTenantStatusByPlatform 修改租户启停和到期时间,平台管理员边界由 service 再次校验。
+func (s *Service) UpdateTenantStatusByPlatform(ctx context.Context, tenantID int64, req UpdateTenantStatusRequest) (TenantDTO, error) {
+	if err := s.ensurePlatformLayerEnabled(); err != nil {
+		return TenantDTO{}, err
+	}
+	id, ok := tenant.FromContext(ctx)
+	if !ok || !id.IsPlatform {
+		return TenantDTO{}, apperr.ErrForbidden
+	}
+	if req.Status != TenantStatusActive && req.Status != TenantStatusDisabled && req.Status != TenantStatusExpired {
+		return TenantDTO{}, apperr.ErrIdentityTenantStatusInvalid
+	}
+	var row Tenant
+	if err := s.store.PlatformTx(ctx, func(ctx context.Context, tx TxStore) error {
+		item, err := tx.UpdateTenantStatus(ctx, UpdateTenantStatusInput{TenantID: tenantID, Status: req.Status, ExpireAt: req.ExpireAt})
+		if err != nil {
+			return err
+		}
+		row = item
+		return nil
+	}); err != nil {
+		return TenantDTO{}, apperr.ErrInternal.WithCause(err)
+	}
+	if err := s.auditPlatformOperation(ctx, id.AccountID, "tenant.status.update", "identity.tenant", tenantID, map[string]any{"status": req.Status}); err != nil {
+		return TenantDTO{}, err
+	}
+	return ToTenantDTO(row), nil
+}
+
+// BootstrapSchoolTenant 为私有化初始化创建固定学校租户和首个学校管理员。
+func (s *Service) BootstrapSchoolTenant(ctx context.Context, cfg config.BootstrapConfig) (TenantDTO, error) {
+	if s.deploy.PlatformEnabled {
+		return TenantDTO{}, apperr.ErrIdentityPlatformLayerDisabled
+	}
+	if err := validateBootstrapConfig(cfg); err != nil {
+		return TenantDTO{}, err
+	}
+	tenantID := cfg.SchoolTenantID
+	if tenantID <= 0 {
+		tenantID = s.ids.Generate()
+	}
+	passwordHash, err := crypto.HashPassword(cfg.AdminPassword)
+	if err != nil {
+		return TenantDTO{}, apperr.ErrInternal.WithCause(err)
+	}
+	phoneEnc, err := s.encryptPhone(cfg.AdminPhone)
+	if err != nil {
+		return TenantDTO{}, apperr.ErrInternal.WithCause(err)
+	}
+	phoneHash, err := s.phoneHash(cfg.AdminPhone)
+	if err != nil {
+		return TenantDTO{}, apperr.ErrInternal.WithCause(err)
+	}
+	var created Tenant
+	if err := s.store.PlatformTx(ctx, func(ctx context.Context, tx TxStore) error {
+		// 私有化初始化直接创建学校租户,不经过 SaaS 入驻申请状态机。
+		row, err := tx.CreateTenant(ctx, CreateTenantInput{
+			ID:                   tenantID,
+			Code:                 strings.TrimSpace(cfg.SchoolTenantCode),
+			Name:                 strings.TrimSpace(cfg.SchoolName),
+			Type:                 cfg.SchoolType,
+			Status:               TenantStatusActive,
+			DeployMode:           DeployModeSchool,
+			FeatureFlags:         []byte(`{}`),
+			AuthMode:             AuthModeLocal,
+			EnableActivationCode: false,
+		})
+		if err != nil {
+			return err
+		}
+		created = row
+		return nil
+	}); err != nil {
+		return TenantDTO{}, apperr.ErrInternal.WithCause(err)
+	}
+	if err := s.store.TenantTx(ctx, tenantID, func(ctx context.Context, tx TxStore) error {
+		// 首个学校管理员仍不写虚假组织档案,真实院系由其登录后维护。
+		adminID := s.ids.Generate()
+		if _, err := tx.CreateAccount(ctx, CreateAccountInput{
+			ID:            adminID,
+			TenantID:      tenantID,
+			PhoneEnc:      phoneEnc,
+			PhoneHash:     phoneHash,
+			PasswordHash:  passwordHash,
+			Name:          strings.TrimSpace(cfg.AdminName),
+			BaseIdentity:  BaseIdentityTeacher,
+			Status:        AccountStatusActive,
+			MustChangePwd: true,
+			ActivatedAt:   ptrTime(timex.Now()),
+			Roles: []RoleCreateInput{
+				{ID: s.ids.Generate(), Role: RoleTeacher},
+				{ID: s.ids.Generate(), Role: RoleSchoolAdmin},
+			},
+		}); err != nil {
+			return err
+		}
+		// 初始化由系统任务触发,审计 actor 使用系统角色而不是伪造平台管理员。
+		entry, err := audit.BuildEntry(ctx, tenantID, 0, audit.ActorRoleSystem, "tenant.bootstrap", "identity.tenant", tenantID, map[string]any{"deploy_mode": DeployModeSchool})
+		if err != nil {
+			return err
+		}
+		return tx.WriteAudit(ctx, WriteAuditInput{
+			ID:         s.ids.Generate(),
+			TenantID:   entry.TenantID,
+			ActorID:    entry.ActorID,
+			ActorRole:  entry.ActorRole,
+			Action:     entry.Action,
+			TargetType: entry.TargetType,
+			TargetID:   entry.TargetID,
+			Detail:     []byte(entry.Detail),
+			IP:         entry.IP,
+			TraceID:    entry.TraceID,
+		})
+	}); err != nil {
+		return TenantDTO{}, apperr.AsAppError(err)
+	}
+	return ToTenantDTO(created), nil
+}
+
+// createBootstrapAdmin 创建首个学校管理员,允许缺失组织档案但不臆造默认院系。
+func (s *Service) createBootstrapAdmin(ctx context.Context, tenantID int64, req CreateAccountRequest) (AccountDTO, string, error) {
+	phoneEnc, err := s.encryptPhone(req.Phone)
+	if err != nil {
+		return AccountDTO{}, "", apperr.ErrInternal.WithCause(err)
+	}
+	phoneHash, err := s.phoneHash(req.Phone)
+	if err != nil {
+		return AccountDTO{}, "", apperr.ErrInternal.WithCause(err)
+	}
+	accountID := s.ids.Generate()
+	var activation string
+	var account Account
+	if err := s.store.TenantTx(ctx, tenantID, func(ctx context.Context, tx TxStore) error {
+		// Bootstrap 管理员只建账号和教师/学校管理员角色,不臆造默认院系或虚假档案。
+		row, err := tx.CreateAccount(ctx, CreateAccountInput{
+			ID:           accountID,
+			TenantID:     tenantID,
+			PhoneEnc:     phoneEnc,
+			PhoneHash:    phoneHash,
+			Name:         strings.TrimSpace(req.Name),
+			BaseIdentity: BaseIdentityTeacher,
+			Status:       AccountStatusPending,
+			Roles: []RoleCreateInput{
+				{ID: s.ids.Generate(), Role: RoleTeacher},
+				{ID: s.ids.Generate(), Role: RoleSchoolAdmin},
+			},
+		})
+		if err != nil {
+			return err
+		}
+		// 激活码明文只返回一次,落库只保存 HMAC 哈希。
+		code, err := crypto.RandomToken(16)
+		if err != nil {
+			return err
+		}
+		hash, err := s.hashSecret(code)
+		if err != nil {
+			return err
+		}
+		if _, err := tx.CreateActivationCode(ctx, CreateActivationInput{ID: s.ids.Generate(), TenantID: tenantID, AccountID: accountID, CodeHash: hash, ExpireAt: s.activationExpireAt(), CreatedBy: 0}); err != nil {
+			return err
+		}
+		account = row
+		activation = code
+		return nil
+	}); err != nil {
+		return AccountDTO{}, "", apperr.ErrInternal.WithCause(err)
+	}
+	return ToAccountDTO(account, req.Phone), activation, nil
+}
+
+// ensurePlatformLayerEnabled 校验 SaaS 平台层是否启用,私有化部署所有平台能力都必须关闭。
+func (s *Service) ensurePlatformLayerEnabled() error {
+	if !s.deploy.PlatformEnabled {
+		return apperr.ErrIdentityPlatformLayerDisabled
+	}
+	return nil
+}
+
+// validateBootstrapConfig 校验私有化初始化配置,避免 seed 脚本写入不可登录的半成品租户。
+func validateBootstrapConfig(cfg config.BootstrapConfig) error {
+	if err := ValidateTenantCode(cfg.SchoolTenantCode); err != nil {
+		return err
+	}
+	if strings.TrimSpace(cfg.SchoolName) == "" || cfg.SchoolType <= 0 || strings.TrimSpace(cfg.AdminName) == "" {
+		return apperr.ErrIdentityBootstrapInvalid
+	}
+	if err := ValidatePhone(cfg.AdminPhone); err != nil {
+		return err
+	}
+	if err := ValidatePassword(cfg.AdminPassword); err != nil {
+		return err
+	}
+	return nil
+}
+
+// ptrTime 返回时间指针,用于明确表达账号已激活时间字段。
+func ptrTime(t time.Time) *time.Time {
+	return &t
+}
+
+// activationExpireAt 计算激活码配置化过期时间。
+func (s *Service) activationExpireAt() time.Time {
+	return timex.Now().Add(time.Duration(s.cfg.ActivationCodeTTLHours) * time.Hour)
+}
+
+// auditPlatformOperation 写入平台管理员敏感操作审计,平台级记录 tenant_id 为空。
+func (s *Service) auditPlatformOperation(ctx context.Context, actorID int64, action, targetType string, targetID int64, detail map[string]any) error {
+	entry, err := audit.BuildEntry(ctx, 0, actorID, audit.ActorRolePlatformAdmin, action, targetType, targetID, detail)
+	if err != nil {
+		return err
+	}
+	return s.auditWriter.Write(ctx, entry)
 }

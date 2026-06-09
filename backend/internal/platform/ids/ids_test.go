@@ -1,4 +1,4 @@
-// Package ids 的测试:统一雪花 ID 与外部字符串之间的解析和格式化规则。
+// ids 测试统一雪花 ID 与外部字符串之间的解析和格式化规则。
 package ids
 
 import "testing"

@@ -1,4 +1,4 @@
-// 第0层身份角色契约:定义跨模块授权时使用的稳定角色码和匹配规则。
+// contracts 定义跨模块授权使用的稳定角色编码与匹配辅助。
 package contracts
 
 const (
@@ -13,17 +13,17 @@ const (
 )
 
 const (
-	// RolePlatformAdmin 表示 SaaS 平台管理员角色,仅用于平台级资源与审计范围。
+	// RolePlatformAdmin 表示 SaaS 平台管理员角色。
 	RolePlatformAdmin = "platform_admin"
-	// RoleStudent 表示租户内学生角色,用于学生侧学习、提交、评价等资源边界。
-	RoleStudent = "student"
-	// RoleTeacher 表示租户内教师角色,可管理教学、内容、实验、竞赛等教师侧资源。
-	RoleTeacher = "teacher"
-	// RoleSchoolAdmin 表示租户内学校管理员角色,具备学校范围内的管理授权。
+	// RoleSchoolAdmin 表示租户内学校管理员角色。
 	RoleSchoolAdmin = "school_admin"
+	// RoleTeacher 表示租户内教师角色。
+	RoleTeacher = "teacher"
+	// RoleStudent 表示租户内学生角色。
+	RoleStudent = "student"
 )
 
-// RoleCode 把数据库/审计角色枚举转为跨模块字符串编码。
+// RoleCode 把数据库角色枚举转成跨模块稳定字符串。
 func RoleCode(role int16) string {
 	switch role {
 	case RoleNumPlatformAdmin:
@@ -39,7 +39,7 @@ func RoleCode(role int16) string {
 	}
 }
 
-// RoleNumber 把跨模块字符串角色编码转为数据库/审计角色枚举。
+// RoleNumber 把跨模块稳定字符串转成数据库角色枚举。
 func RoleNumber(role string) (int16, bool) {
 	switch role {
 	case RolePlatformAdmin:
@@ -55,7 +55,7 @@ func RoleNumber(role string) (int16, bool) {
 	}
 }
 
-// HasAnyRole 判断账号角色列表是否包含任一允许角色。
+// HasAnyRole 判断账号角色列表是否命中任一允许角色。
 func HasAnyRole(actual []string, allowed ...string) bool {
 	for _, role := range actual {
 		for _, want := range allowed {

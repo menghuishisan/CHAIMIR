@@ -20,6 +20,13 @@ source:
 upstream:
   image: us-docker.pkg.dev/oplabs-tools-artifacts/images/op-node:v1.10.2
   reuse_policy: thin-wrapper
+env_keys:
+  config:
+    - CHAIMIR_OP_NODE_L1_RPC
+    - CHAIMIR_OP_NODE_L2_RPC
+    - CHAIMIR_OP_NODE_ROLLUP_CONFIG
+    - CHAIMIR_OP_NODE_RPC_PORT
+  secret: []
 data_driven: true
 capabilities:
   - l2-stack
@@ -66,10 +73,11 @@ build:
   dockerfile: Dockerfile
 selftest:
   commands:
-    - name: op-node-help
+    - name: entrypoint-syntax
       command:
-        - op-node
-        - --help
+        - sh
+        - -n
+        - /usr/local/bin/chaimir-op-stack-entrypoint
 supply_chain:
   sbom: true
   trivy_required: true

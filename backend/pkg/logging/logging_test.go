@@ -1,4 +1,4 @@
-// Package logging 的测试覆盖全平台日志上下文字段与敏感信息脱敏约束。
+// logging 测试:验证全平台日志上下文和敏感信息脱敏规则。
 package logging
 
 import (
@@ -28,9 +28,7 @@ func TestAttrsFromContextMergesRequestFields(t *testing.T) {
 // TestSanitizeErrorMasksSensitiveValues 确认日志中的内部错误链不会泄漏常见密钥字段。
 func TestSanitizeErrorMasksSensitiveValues(t *testing.T) {
 	raw := "connect failed password=secret token: abc Authorization=Bearer xyz"
-
 	masked := SanitizeError(raw)
-
 	for _, leaked := range []string{"secret", "abc", "Bearer xyz"} {
 		if strings.Contains(masked, leaked) {
 			t.Fatalf("masked error still contains sensitive value %q: %s", leaked, masked)
@@ -46,12 +44,26 @@ func TestSanitizeErrorMasksSensitiveValues(t *testing.T) {
 // TestSanitizeErrorMasksStructuredSecrets 确认 JSON/URL/DSN 形态的敏感值也不会进入日志。
 func TestSanitizeErrorMasksStructuredSecrets(t *testing.T) {
 	raw := `{"password":"secret","token":"abc","nested":{"secret":"value"}} postgres://owner:p@ss@db/chaimir?sslmode=disable`
-
 	masked := SanitizeError(raw)
-
 	for _, leaked := range []string{`"password":"secret"`, `"token":"abc"`, `"secret":"value"`, "p@ss"} {
 		if strings.Contains(masked, leaked) {
 			t.Fatalf("masked structured error still contains %q: %s", leaked, masked)
+		}
+	}
+}
+
+// TestSanitizeErrorMasksPhoneNumbers 确认日志中的手机号按文档要求掩码显示。
+func TestSanitizeErrorMasksPhoneNumbers(t *testing.T) {
+	raw := "sms login failed for phone=13800138000 and backup 13912345678"
+	masked := SanitizeError(raw)
+	for _, leaked := range []string{"13800138000", "13912345678"} {
+		if strings.Contains(masked, leaked) {
+			t.Fatalf("masked error still contains phone number %q: %s", leaked, masked)
+		}
+	}
+	for _, want := range []string{"138****8000", "139****5678"} {
+		if !strings.Contains(masked, want) {
+			t.Fatalf("masked error missing phone mask %q: %s", want, masked)
 		}
 	}
 }

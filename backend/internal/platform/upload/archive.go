@@ -1,222 +1,121 @@
-// Package upload 的归档辅助统一处理上传包路径、展开大小和文件数安全边界。
+// upload 提供 ZIP/TAR 归档成员的统一安全校验,供沙箱初始化包和判题输入包复用。
 package upload
 
 import (
 	"archive/tar"
 	"archive/zip"
-	"bytes"
-	"compress/gzip"
-	"errors"
+	"fmt"
 	"io"
+	"io/fs"
 )
 
-// 归档通用错误只表达安全边界,由业务模块映射到各自错误码。
-var (
-	ErrArchiveInvalid  = errors.New("archive invalid")
-	ErrArchiveTooLarge = errors.New("archive too large")
-)
-
-// ArchiveLimits 是归档展开的通用安全上限。
+// ArchiveLimits 描述归档校验时允许的文件数和展开总大小上限。
 type ArchiveLimits struct {
 	MaxFiles         int
 	MaxUnpackedBytes int64
 }
 
-// ReadTarGzFiles 安全读取 tar.gz 普通文件,拒绝路径逃逸、重复覆盖和超限展开。
-func ReadTarGzFiles(raw []byte, limits ArchiveLimits) (map[string][]byte, error) {
-	gz, err := gzip.NewReader(bytes.NewReader(raw))
-	if err != nil {
-		return nil, ErrArchiveInvalid
+// ZIPEntryNames 校验 ZIP 成员路径、数量、大小和类型,返回规范化后的成员名列表。
+func ZIPEntryNames(r *zip.Reader, limits ArchiveLimits) ([]string, error) {
+	if r == nil {
+		return nil, fmt.Errorf("ZIP 归档为空")
 	}
-	defer gz.Close()
-
-	tr := tar.NewReader(gz)
-	files := map[string][]byte{}
-	existing := map[string]struct{}{}
-	var total int64
-	for {
-		// 逐条读取归档头,目录只参与路径占用校验,实际内容只接受普通文件。
-		header, err := tr.Next()
-		if errors.Is(err, io.EOF) {
-			break
-		}
-		if err != nil {
-			return nil, ErrArchiveInvalid
-		}
-		if header.Typeflag == tar.TypeDir {
-			if _, ok := safeArchiveName(header.Name, existing); !ok {
-				return nil, ErrArchiveInvalid
+	return walkEntries(len(r.File), limits, func(visit func(name string, size int64) error) error {
+		for _, file := range r.File {
+			// 第一步:目录只校验路径安全,不计入实际文件数量。
+			if file.FileInfo().IsDir() {
+				if _, ok := SafeArchiveEntryName(file.Name, map[string]struct{}{}); !ok {
+					return fmt.Errorf("ZIP 归档成员路径非法: %s", file.Name)
+				}
+				continue
 			}
-			continue
+			// 第二步:拒绝链接等非普通文件,避免解包后逃逸或覆盖。
+			mode := file.Mode()
+			if mode&fs.ModeSymlink != 0 || !mode.IsRegular() {
+				return fmt.Errorf("ZIP 归档包含不受支持的成员类型: %s", file.Name)
+			}
+			if err := visit(file.Name, int64(file.UncompressedSize64)); err != nil {
+				return err
+			}
 		}
-		if header.Typeflag != tar.TypeReg && header.Typeflag != tar.TypeRegA {
-			return nil, ErrArchiveInvalid
-		}
-		name, ok := safeArchiveName(header.Name, existing)
-		if !ok {
-			return nil, ErrArchiveInvalid
-		}
-		// 普通文件按剩余展开预算读取,防止压缩包通过声明大小或实际内容突破上限。
-		content, nextTotal, err := readArchiveFile(tr, header.Size, total, limits)
-		if err != nil {
-			return nil, err
-		}
-		if exceedsArchiveFileLimit(len(files)+1, limits) {
-			return nil, ErrArchiveTooLarge
-		}
-		existing[name] = struct{}{}
-		files[name] = content
-		total = nextTotal
-	}
-	return files, nil
+		return nil
+	})
 }
 
-// ReadZipFiles 安全读取 zip 普通文件,拒绝路径逃逸、重复覆盖和超限展开。
-func ReadZipFiles(raw []byte, limits ArchiveLimits) (map[string][]byte, error) {
-	reader, err := zip.NewReader(bytes.NewReader(raw), int64(len(raw)))
-	if err != nil {
-		return nil, ErrArchiveInvalid
+// TAREntryNames 校验 TAR 成员路径、数量、大小和类型,返回规范化后的成员名列表。
+func TAREntryNames(r *tar.Reader, limits ArchiveLimits) ([]string, error) {
+	if r == nil {
+		return nil, fmt.Errorf("TAR 归档为空")
 	}
-	files := map[string][]byte{}
-	existing := map[string]struct{}{}
-	var total int64
-	for _, file := range reader.File {
-		// Zip 目录同样只参与路径占用校验,避免后续文件覆盖同名目录语义。
-		if file.FileInfo().IsDir() {
-			if _, ok := safeArchiveName(file.Name, existing); !ok {
-				return nil, ErrArchiveInvalid
+	return walkEntries(0, limits, func(visit func(name string, size int64) error) error {
+		for {
+			header, err := r.Next()
+			if err == io.EOF {
+				return nil
 			}
-			continue
-		}
-		name, ok := safeArchiveName(file.Name, existing)
-		if !ok {
-			return nil, ErrArchiveInvalid
-		}
-		if exceedsArchiveFileLimit(len(files)+1, limits) {
-			return nil, ErrArchiveTooLarge
-		}
-		// 文件内容必须通过统一预算读取,Zip64 解包大小也不能绕过平台限制。
-		rc, err := file.Open()
-		if err != nil {
-			return nil, ErrArchiveInvalid
-		}
-		content, nextTotal, readErr := readArchiveFile(rc, int64(file.UncompressedSize64), total, limits)
-		closeErr := rc.Close()
-		if readErr != nil {
-			return nil, readErr
-		}
-		if closeErr != nil {
-			return nil, ErrArchiveInvalid
-		}
-		existing[name] = struct{}{}
-		files[name] = content
-		total = nextTotal
-	}
-	return files, nil
-}
-
-// RewriteTarGz 安全重打包 tar.gz,只保留目录和普通文件并重置权限。
-func RewriteTarGz(raw []byte, limits ArchiveLimits) ([]byte, error) {
-	gz, err := gzip.NewReader(bytes.NewReader(raw))
-	if err != nil {
-		return nil, ErrArchiveInvalid
-	}
-	defer gz.Close()
-
-	var out bytes.Buffer
-	outGz := gzip.NewWriter(&out)
-	tw := tar.NewWriter(outGz)
-	tr := tar.NewReader(gz)
-	existing := map[string]struct{}{}
-	var total int64
-	var fileCount int
-	for {
-		// 重打包时先统一路径校验,剔除符号链接、设备文件等可逃逸或不可控条目。
-		header, err := tr.Next()
-		if errors.Is(err, io.EOF) {
-			break
-		}
-		if err != nil {
-			return nil, ErrArchiveInvalid
-		}
-		name, ok := safeArchiveName(header.Name, existing)
-		if !ok {
-			return nil, ErrArchiveInvalid
-		}
-		existing[name] = struct{}{}
-		switch header.Typeflag {
-		case tar.TypeDir:
-			// 目录只保留规范化名称和固定权限,不继承上传包里的权限位。
-			if err := tw.WriteHeader(&tar.Header{Name: name, Typeflag: tar.TypeDir, Mode: 0o755}); err != nil {
-				return nil, ErrArchiveInvalid
-			}
-		case tar.TypeReg, tar.TypeRegA:
-			// 普通文件重新写入固定权限,调用方拿到的是已净化的 tar.gz。
-			fileCount++
-			if exceedsArchiveFileLimit(fileCount, limits) {
-				return nil, ErrArchiveTooLarge
-			}
-			content, nextTotal, err := readArchiveFile(tr, header.Size, total, limits)
 			if err != nil {
-				return nil, err
+				return fmt.Errorf("读取 TAR 归档失败: %w", err)
 			}
-			if err := tw.WriteHeader(&tar.Header{Name: name, Typeflag: tar.TypeReg, Mode: 0o644, Size: int64(len(content))}); err != nil {
-				return nil, ErrArchiveInvalid
+			switch header.Typeflag {
+			case tar.TypeDir:
+				if _, ok := SafeArchiveEntryName(header.Name, map[string]struct{}{}); !ok {
+					return fmt.Errorf("TAR 归档成员路径非法: %s", header.Name)
+				}
+				continue
+			case tar.TypeReg, tar.TypeRegA:
+				if err := visit(header.Name, header.Size); err != nil {
+					return err
+				}
+			default:
+				return fmt.Errorf("TAR 归档包含不受支持的成员类型: %s", header.Name)
 			}
-			if _, err := tw.Write(content); err != nil {
-				return nil, ErrArchiveInvalid
-			}
-			total = nextTotal
-		default:
-			return nil, ErrArchiveInvalid
 		}
-	}
-	if err := tw.Close(); err != nil {
-		return nil, ErrArchiveInvalid
-	}
-	if err := outGz.Close(); err != nil {
-		return nil, ErrArchiveInvalid
-	}
-	return out.Bytes(), nil
+	})
 }
 
-// safeArchiveName 复用归档条目路径规则并为目录/文件同名覆盖提供统一判定。
-func safeArchiveName(name string, existing map[string]struct{}) (string, bool) {
-	clean, ok := SafeArchiveEntryName(name, existing)
-	if !ok {
-		return "", false
+// walkEntries 复用统一配额和重复路径校验,保证不同归档格式只有一套安全口径。
+func walkEntries(hintCount int, limits ArchiveLimits, iter func(func(name string, size int64) error) error) ([]string, error) {
+	if limits.MaxFiles <= 0 {
+		return nil, fmt.Errorf("归档文件数上限必须大于 0")
 	}
-	return clean, true
-}
-
-// readArchiveFile 按剩余展开预算读取普通文件内容。
-func readArchiveFile(r io.Reader, declaredSize, current int64, limits ArchiveLimits) ([]byte, int64, error) {
-	if declaredSize < 0 {
-		return nil, current, ErrArchiveInvalid
-	}
-	remaining := remainingArchiveBytes(current, limits)
-	if declaredSize > remaining {
-		return nil, current, ErrArchiveTooLarge
-	}
-	data, err := io.ReadAll(io.LimitReader(r, remaining+1))
-	if err != nil {
-		return nil, current, ErrArchiveInvalid
-	}
-	if int64(len(data)) > remaining {
-		return nil, current, ErrArchiveTooLarge
-	}
-	return data, current + int64(len(data)), nil
-}
-
-// remainingArchiveBytes 返回当前归档还能展开的字节数。
-func remainingArchiveBytes(current int64, limits ArchiveLimits) int64 {
 	if limits.MaxUnpackedBytes <= 0 {
-		return 1<<63 - 1
+		return nil, fmt.Errorf("归档展开大小上限必须大于 0")
 	}
-	return limits.MaxUnpackedBytes - current
+
+	seen := make(map[string]struct{}, max(hintCount, 1))
+	names := make([]string, 0, max(hintCount, 1))
+	var total int64
+	count := 0
+	err := iter(func(name string, size int64) error {
+		clean, ok := SafeArchiveEntryName(name, seen)
+		if !ok {
+			return fmt.Errorf("归档成员路径非法或重复: %s", name)
+		}
+		if size < 0 {
+			return fmt.Errorf("归档成员大小非法: %s", name)
+		}
+		count++
+		if count > limits.MaxFiles {
+			return fmt.Errorf("归档成员数量超出上限")
+		}
+		total += size
+		if total > limits.MaxUnpackedBytes {
+			return fmt.Errorf("归档展开大小超出上限")
+		}
+		seen[clean] = struct{}{}
+		names = append(names, clean)
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return names, nil
 }
 
-// exceedsArchiveFileLimit 判断文件数量是否超过配置边界。
-func exceedsArchiveFileLimit(count int, limits ArchiveLimits) bool {
-	return limits.MaxFiles > 0 && count > limits.MaxFiles
+// max 返回两个整数中的较大值,用于避免空容量切片和 map。
+func max(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
 }

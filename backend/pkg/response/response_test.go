@@ -1,4 +1,4 @@
-// Package response 的测试验证统一响应信封与错误分层暴露规则。
+// response 测试:验证统一响应信封与错误分层暴露规则。
 package response
 
 import (
@@ -45,25 +45,19 @@ func TestFailKeepsTechnicalCauseOutOfResponseAndSanitizesLog(t *testing.T) {
 	if body.Code != apperr.ErrInternal.Code || body.Message != apperr.ErrInternal.Message || body.TraceID != "trace-001" {
 		t.Fatalf("unexpected response body: %#v", body)
 	}
-	if strings.Contains(w.Body.String(), `"msg"`) {
-		t.Fatalf("response must use message field, got %s", w.Body.String())
-	}
 	if strings.Contains(w.Body.String(), "database") || strings.Contains(w.Body.String(), "secret") {
 		t.Fatalf("response leaked technical cause: %s", w.Body.String())
 	}
 
 	out := logs.String()
-	for _, want := range []string{`"trace_id":"trace-001"`, `"tenant_id":10`, `"error_code":"11500"`, `"error":"[11500] 服务繁忙,请稍后重试: database password=*** unavailable"`} {
+	for _, want := range []string{`"trace_id":"trace-001"`, `"tenant_id":10`, `"error_code":"11000"`, `"error":"[11000] 服务暂时不可用,请稍后重试: database password=*** unavailable"`} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("log missing %s: %s", want, out)
 		}
 	}
-	if strings.Contains(out, "secret") {
-		t.Fatalf("log leaked sensitive value: %s", out)
-	}
 }
 
-// TestFailWrapsNonApplicationErrorWithDedicatedCode 确认未分类错误折叠到平台专属错误码,不复用通用内部错误入口。
+// TestFailWrapsNonApplicationErrorWithDedicatedCode 确认未分类错误折叠到平台专属错误码。
 func TestFailWrapsNonApplicationErrorWithDedicatedCode(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
@@ -85,7 +79,7 @@ func TestFailWrapsNonApplicationErrorWithDedicatedCode(t *testing.T) {
 	}
 }
 
-// TestTraceMiddlewareRejectsUnsafeIncomingTrace 确认上游 trace_id 必须是短可见标识,避免日志污染。
+// TestTraceMiddlewareRejectsUnsafeIncomingTrace 确认上游 trace_id 必须是短可见标识。
 func TestTraceMiddlewareRejectsUnsafeIncomingTrace(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()

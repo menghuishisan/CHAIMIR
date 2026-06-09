@@ -33,7 +33,14 @@ class ContractUIHandler(BaseHTTPRequestHandler):
             self.send_error(413, "payload too large")
             return
         body = self.rfile.read(length)
-        abi = json.loads(body.decode("utf-8") or "[]")
+        try:
+            abi = json.loads(body.decode("utf-8") or "[]")
+        except json.JSONDecodeError:
+            self.send_error(400, "invalid abi json")
+            return
+        if not isinstance(abi, list):
+            self.send_error(400, "abi must be an array")
+            return
         methods = [item.get("name") for item in abi if item.get("type") == "function" and item.get("name")]
         self.write_json({"methods": methods})
 
