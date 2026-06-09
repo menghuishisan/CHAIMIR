@@ -5,7 +5,6 @@ import (
 	"context"
 
 	"chaimir/internal/contracts"
-	"chaimir/internal/modules/content/internal/sqlcgen"
 	"chaimir/internal/platform/audit"
 	"chaimir/internal/platform/db"
 	"chaimir/internal/platform/ids"
@@ -28,7 +27,7 @@ func NewService(database *db.DB, idgen *snowflake.Node, auditor audit.Writer, id
 	return &Service{repo: newRepo(database), idgen: idgen, auditor: auditor, identity: identity}
 }
 
-// CreateItem 创建内容草稿或系统导入内容。
+// CreateItem 创建教师手动维护的内容草稿。
 func (s *Service) CreateItem(ctx context.Context, req CreateItemRequest) (ItemDTO, error) {
 	id, ok := tenantFromContext(ctx)
 	if !ok {
@@ -49,6 +48,35 @@ func (s *Service) CreateItem(ctx context.Context, req CreateItemRequest) (ItemDT
 	if err := validateCreateItemRequest(req); err != nil {
 		return ItemDTO{}, err
 	}
+	return s.createItemValidated(ctx, id.TenantID, req)
+}
+
+// SystemImportItem 固化系统/外部源内容,仅允许内部调用标记为系统或外部来源。
+func (s *Service) SystemImportItem(ctx context.Context, req CreateItemRequest) (ItemDTO, error) {
+	id, ok := tenantFromContext(ctx)
+	if !ok {
+		return ItemDTO{}, apperr.ErrUnauthorized
+	}
+	if req.Version == "" {
+		req.Version = initialVersion
+	}
+	if req.AuthorID == "" {
+		req.AuthorID = ids.Format(id.AccountID)
+	}
+	if req.AuthorType == 0 {
+		req.AuthorType = AuthorTypeSystem
+	}
+	if req.Visibility == 0 {
+		req.Visibility = VisibilityPrivate
+	}
+	if err := validateSystemImportRequest(req); err != nil {
+		return ItemDTO{}, err
+	}
+	return s.createItemValidated(ctx, id.TenantID, req)
+}
+
+// createItemValidated 写入已完成来源与字段校验的内容外壳和内容体。
+func (s *Service) createItemValidated(ctx context.Context, tenantID int64, req CreateItemRequest) (ItemDTO, error) {
 	authorID, ok := ids.Parse(req.AuthorID)
 	if !ok {
 		return ItemDTO{}, apperr.ErrContentInvalid
@@ -62,47 +90,46 @@ func (s *Service) CreateItem(ctx context.Context, req CreateItemRequest) (ItemDT
 		status = ItemStatusPublished
 	}
 	itemID := s.idgen.Generate()
-	var row sqlcgen.ContentItem
-	if err := s.repo.inTenantID(ctx, id.TenantID, func(q *sqlcgen.Queries) error {
-		created, e := q.CreateContentItem(ctx, sqlcgen.CreateContentItemParams{
-			ID: itemID, TenantID: id.TenantID, Code: req.Code, Version: req.Version, Type: req.Type, Title: req.Title,
-			CategoryID: pgInt8(mustOptionalID(req.CategoryID)), Difficulty: req.Difficulty, Tags: req.Tags,
-			KnowledgePoints: req.KnowledgePoints, AuthorID: authorID, AuthorType: req.AuthorType,
-			Visibility: req.Visibility, Status: status, BodyHash: bodyHash(body),
-		})
-		if e != nil {
-			return e
-		}
-		row = created
-		_, e = q.CreateContentBody(ctx, sqlcgen.CreateContentBodyParams{ItemID: itemID, TenantID: id.TenantID, Body: body, SensitiveFields: req.SensitiveFields})
-		return e
-	}); err != nil {
+	out, err := s.repo.createItem(ctx, tenantID, itemID, authorID, req, body, status)
+	if err != nil {
 		return ItemDTO{}, apperr.ErrContentCodeConflict.WithCause(err)
 	}
-	if err := s.writeAudit(ctx, id.TenantID, auditActionItemCreate, auditTargetItem, itemID, createItemAuditDetail(req)); err != nil {
+	if err := s.writeAudit(ctx, tenantID, auditActionItemCreate, auditTargetItem, itemID, createItemAuditDetail(req)); err != nil {
 		return ItemDTO{}, err
 	}
-	return itemDTOFromShell(row), nil
+	return out, nil
 }
 
 // ListItems 检索本租户内容外壳。
 func (s *Service) ListItems(ctx context.Context, req ListItemsRequest) ([]ItemDTO, int64, error) {
 	page, size := pagex.Normalize(req.Page, req.Size)
-	params := listParams(req, size, (page-1)*size)
-	var rows []sqlcgen.ContentItem
-	var total int64
-	if err := s.repo.inTenant(ctx, func(q *sqlcgen.Queries) error {
-		found, err := q.ListContentItems(ctx, params)
-		if err != nil {
-			return err
-		}
-		rows = found
-		total, err = q.CountContentItems(ctx, countParams(req))
-		return err
-	}); err != nil {
+	rows, total, err := s.repo.listItems(ctx, req, size, (page-1)*size)
+	if err != nil {
 		return nil, 0, apperr.ErrContentQueryFailed.WithCause(err)
 	}
-	return itemsDTOFromShell(rows), total, nil
+	return rows, total, nil
+}
+
+// BatchGetFace 批量读取题面,供内部 HTTP 入口复用 service 层失败策略。
+func (s *Service) BatchGetFace(ctx context.Context, refs []ItemRef) ([]ItemDTO, error) {
+	id, ok := tenantFromContext(ctx)
+	if !ok {
+		return nil, apperr.ErrUnauthorized
+	}
+	return s.batchGetFaceInTenant(ctx, id.TenantID, refs)
+}
+
+// batchGetFaceInTenant 在指定租户下批量展开题面并沿用单题敏感字段过滤。
+func (s *Service) batchGetFaceInTenant(ctx context.Context, tenantID int64, refs []ItemRef) ([]ItemDTO, error) {
+	out := make([]ItemDTO, 0, len(refs))
+	for _, ref := range refs {
+		item, err := s.getContentFaceInTenant(ctx, tenantID, ref.Code, ref.Version)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, item)
+	}
+	return out, nil
 }
 
 // GetFace 读取题面内容并过滤敏感字段。
@@ -126,13 +153,13 @@ func (s *Service) GetFull(ctx context.Context, code, version string) (ItemDTO, e
 	if err != nil {
 		return ItemDTO{}, err
 	}
-	if err := s.ensureCanManage(ctx, mustID(item.AuthorID)); err != nil {
+	if err := s.ensureCanManage(ctx, ids.ParseOrZero(item.AuthorID)); err != nil {
 		return ItemDTO{}, err
 	}
 	return item, nil
 }
 
-// UpdateDraft 更新草稿内容。
+// UpdateDraft 更新草稿题目外壳与正文,只允许作者或平台在草稿态编辑。
 func (s *Service) UpdateDraft(ctx context.Context, itemID int64, req UpdateItemRequest) (ItemDTO, error) {
 	id, ok := tenantFromContext(ctx)
 	if !ok {
@@ -145,40 +172,23 @@ func (s *Service) UpdateDraft(ctx context.Context, itemID int64, req UpdateItemR
 	if err != nil {
 		return ItemDTO{}, err
 	}
-	var row sqlcgen.ContentItem
-	if err := s.repo.inTenantID(ctx, id.TenantID, func(q *sqlcgen.Queries) error {
-		current, e := q.GetContentItemByID(ctx, itemID)
-		if db.IsNoRows(e) {
-			return apperr.ErrContentNotFound
+	out, err := s.repo.updateDraft(ctx, id.TenantID, itemID, req, body, func(current contentItemGuard) error {
+		// 在更新事务内先做权限与草稿状态判断,避免并发下越权修改已发布版本。
+		if err := s.ensureCanManage(ctx, current.AuthorID); err != nil {
+			return err
 		}
-		if e != nil {
-			return e
-		}
-		if e = s.ensureCanManage(ctx, current.AuthorID); e != nil {
-			return e
-		}
-		if e = validateDraftEditable(current.Status); e != nil {
-			return e
-		}
-		row, e = q.UpdateContentDraft(ctx, sqlcgen.UpdateContentDraftParams{
-			ID: itemID, Title: req.Title, CategoryID: pgInt8(mustOptionalID(req.CategoryID)), Difficulty: req.Difficulty,
-			Tags: req.Tags, KnowledgePoints: req.KnowledgePoints, Visibility: req.Visibility, BodyHash: bodyHash(body),
-		})
-		if e != nil {
-			return e
-		}
-		_, e = q.UpdateContentBody(ctx, sqlcgen.UpdateContentBodyParams{ItemID: itemID, Body: body, SensitiveFields: req.SensitiveFields})
-		return e
-	}); err != nil {
+		return validateDraftEditable(current.Status)
+	})
+	if err != nil {
 		if ae, ok := apperr.As(err); ok {
 			return ItemDTO{}, ae
 		}
-		return ItemDTO{}, apperr.ErrContentInvalid.WithCause(err)
+		return ItemDTO{}, apperr.ErrContentUpdateFailed.WithCause(err)
 	}
 	if err := s.writeAudit(ctx, id.TenantID, auditActionItemUpdate, auditTargetItem, itemID, map[string]any{"id": ids.Format(itemID)}); err != nil {
 		return ItemDTO{}, err
 	}
-	return itemDTOFromShell(row), nil
+	return out, nil
 }
 
 // Publish 发布草稿内容并冻结版本。
@@ -197,25 +207,11 @@ func (s *Service) DeleteDraft(ctx context.Context, itemID int64) error {
 	if !ok {
 		return apperr.ErrUnauthorized
 	}
-	if err := s.repo.inTenantID(ctx, id.TenantID, func(q *sqlcgen.Queries) error {
-		current, err := q.GetContentItemByID(ctx, itemID)
-		if db.IsNoRows(err) {
-			return apperr.ErrContentNotFound
-		}
-		if err != nil {
+	if err := s.repo.deleteDraft(ctx, id.TenantID, itemID, func(current contentItemGuard) error {
+		if err := s.ensureCanManage(ctx, current.AuthorID); err != nil {
 			return err
 		}
-		if err = s.ensureCanManage(ctx, current.AuthorID); err != nil {
-			return err
-		}
-		if err = validateDraftDeletable(current.Status, current.UsageCount); err != nil {
-			return err
-		}
-		_, err = q.SoftDeleteContentItem(ctx, itemID)
-		if db.IsNoRows(err) {
-			return apperr.ErrContentDeleteBlocked
-		}
-		return err
+		return validateDraftDeletable(current.Status, current.UsageCount)
 	}); err != nil {
 		if ae, ok := apperr.As(err); ok {
 			return ae
@@ -227,15 +223,11 @@ func (s *Service) DeleteDraft(ctx context.Context, itemID int64) error {
 
 // ListVersions 查询某内容 code 下全部版本。
 func (s *Service) ListVersions(ctx context.Context, code string) ([]ItemDTO, error) {
-	var rows []sqlcgen.ContentItem
-	if err := s.repo.inTenant(ctx, func(q *sqlcgen.Queries) error {
-		found, err := q.ListContentVersions(ctx, code)
-		rows = found
-		return err
-	}); err != nil {
+	rows, err := s.repo.listVersions(ctx, code)
+	if err != nil {
 		return nil, apperr.ErrContentVersionQueryFailed.WithCause(err)
 	}
-	return itemsDTOFromShell(rows), nil
+	return rows, nil
 }
 
 // NewVersion 基于指定源版本或当前最高正式版本创建独立草稿。
@@ -268,7 +260,7 @@ func (s *Service) Clone(ctx context.Context, code, version, newCode string) (Ite
 	source, err := s.getOwnContent(ctx, code, version, false)
 	if err != nil {
 		source, err = s.getSharedContent(ctx, code, version, false)
-	} else if err = s.ensureCanManage(ctx, mustID(source.AuthorID)); err != nil {
+	} else if err = s.ensureCanManage(ctx, ids.ParseOrZero(source.AuthorID)); err != nil {
 		return ItemDTO{}, err
 	}
 	if err != nil {
@@ -286,7 +278,7 @@ func (s *Service) Clone(ctx context.Context, code, version, newCode string) (Ite
 	if err != nil {
 		return ItemDTO{}, err
 	}
-	if err := s.writeAudit(ctx, id.TenantID, auditActionItemClone, auditTargetItem, mustID(out.ID), map[string]any{"source": code + ":" + version}); err != nil {
+	if err := s.writeAudit(ctx, id.TenantID, auditActionItemClone, auditTargetItem, ids.ParseOrZero(out.ID), map[string]any{"source": code + ":" + version}); err != nil {
 		return ItemDTO{}, err
 	}
 	return out, nil
@@ -308,17 +300,11 @@ func (s *Service) ListShared(ctx context.Context, typ int16, keyword string, pag
 		return nil, apperr.ErrContentShareInvalid
 	}
 	page, size = pagex.Normalize(page, size)
-	var rows []sqlcgen.ContentItem
-	if err := s.repo.inPrivileged(ctx, func(q *sqlcgen.Queries) error {
-		found, err := q.ListSharedContentItems(ctx, sqlcgen.ListSharedContentItemsParams{
-			Limit: int32(size), Offset: int32((page - 1) * size), Type: pgInt2(typ), Keyword: pgText(keyword),
-		})
-		rows = found
-		return err
-	}); err != nil {
+	rows, err := s.repo.listShared(ctx, typ, keyword, size, (page-1)*size)
+	if err != nil {
 		return nil, apperr.ErrContentShareInvalid.WithCause(err)
 	}
-	return itemsDTOFromShell(rows), nil
+	return rows, nil
 }
 
 // CreateCategory 创建内容分类。
@@ -330,7 +316,7 @@ func (s *Service) CreateCategory(ctx context.Context, req CategoryRequest) (Cate
 	if req.Name == "" {
 		return CategoryDTO{}, apperr.ErrContentInvalid
 	}
-	parentID := mustOptionalID(req.ParentID)
+	parentID := ids.ParseOrZero(req.ParentID)
 	categories, err := s.ListCategories(ctx)
 	if err != nil {
 		return CategoryDTO{}, err
@@ -339,33 +325,23 @@ func (s *Service) CreateCategory(ctx context.Context, req CategoryRequest) (Cate
 		return CategoryDTO{}, err
 	}
 	rowID := s.idgen.Generate()
-	var row sqlcgen.ContentCategory
-	if err := s.repo.inTenantID(ctx, id.TenantID, func(q *sqlcgen.Queries) error {
-		created, err := q.CreateContentCategory(ctx, sqlcgen.CreateContentCategoryParams{
-			ID: rowID, TenantID: id.TenantID, ParentID: pgInt8(parentID), Name: req.Name, Sort: req.Sort,
-		})
-		row = created
-		return err
-	}); err != nil {
+	row, err := s.repo.createCategory(ctx, id.TenantID, rowID, parentID, req)
+	if err != nil {
 		return CategoryDTO{}, apperr.ErrContentInvalid.WithCause(err)
 	}
 	if err := s.writeAudit(ctx, id.TenantID, auditActionCategorySave, auditTargetCategory, rowID, map[string]any{"name": req.Name}); err != nil {
 		return CategoryDTO{}, err
 	}
-	return categoryDTOFromRow(row), nil
+	return row, nil
 }
 
 // ListCategories 查询分类树。
 func (s *Service) ListCategories(ctx context.Context) ([]CategoryDTO, error) {
-	var rows []sqlcgen.ContentCategory
-	if err := s.repo.inTenant(ctx, func(q *sqlcgen.Queries) error {
-		found, err := q.ListContentCategories(ctx)
-		rows = found
-		return err
-	}); err != nil {
+	rows, err := s.repo.listCategories(ctx)
+	if err != nil {
 		return nil, apperr.ErrContentCategoryQueryFailed.WithCause(err)
 	}
-	return categoriesDTOFromRows(rows), nil
+	return rows, nil
 }
 
 // UpdateCategory 更新分类节点。
@@ -377,7 +353,7 @@ func (s *Service) UpdateCategory(ctx context.Context, categoryID int64, req Cate
 	if req.Name == "" {
 		return CategoryDTO{}, apperr.ErrContentInvalid
 	}
-	parentID := mustOptionalID(req.ParentID)
+	parentID := ids.ParseOrZero(req.ParentID)
 	categories, err := s.ListCategories(ctx)
 	if err != nil {
 		return CategoryDTO{}, err
@@ -385,17 +361,8 @@ func (s *Service) UpdateCategory(ctx context.Context, categoryID int64, req Cate
 	if err := validateCategoryParent(categoryID, parentID, categories); err != nil {
 		return CategoryDTO{}, err
 	}
-	var row sqlcgen.ContentCategory
-	if err := s.repo.inTenantID(ctx, id.TenantID, func(q *sqlcgen.Queries) error {
-		updated, err := q.UpdateContentCategory(ctx, sqlcgen.UpdateContentCategoryParams{
-			ID: categoryID, ParentID: pgInt8(parentID), Name: req.Name, Sort: req.Sort,
-		})
-		if db.IsNoRows(err) {
-			return apperr.ErrContentNotFound
-		}
-		row = updated
-		return err
-	}); err != nil {
+	row, err := s.repo.updateCategory(ctx, id.TenantID, categoryID, parentID, req)
+	if err != nil {
 		if ae, ok := apperr.As(err); ok {
 			return CategoryDTO{}, ae
 		}
@@ -404,7 +371,7 @@ func (s *Service) UpdateCategory(ctx context.Context, categoryID int64, req Cate
 	if err := s.writeAudit(ctx, id.TenantID, auditActionCategorySave, auditTargetCategory, categoryID, map[string]any{"name": req.Name}); err != nil {
 		return CategoryDTO{}, err
 	}
-	return categoryDTOFromRow(row), nil
+	return row, nil
 }
 
 // DeleteCategory 软删分类节点。
@@ -413,13 +380,7 @@ func (s *Service) DeleteCategory(ctx context.Context, categoryID int64) error {
 	if !ok {
 		return apperr.ErrUnauthorized
 	}
-	if err := s.repo.inTenantID(ctx, id.TenantID, func(q *sqlcgen.Queries) error {
-		_, err := q.DeleteContentCategory(ctx, categoryID)
-		if db.IsNoRows(err) {
-			return apperr.ErrContentNotFound
-		}
-		return err
-	}); err != nil {
+	if err := s.repo.deleteCategory(ctx, id.TenantID, categoryID); err != nil {
 		if ae, ok := apperr.As(err); ok {
 			return ae
 		}
@@ -442,19 +403,12 @@ func (s *Service) CreatePaper(ctx context.Context, req PaperRequest) (PaperDTO, 
 		return PaperDTO{}, err
 	}
 	paperID := s.idgen.Generate()
-	var row sqlcgen.Paper
-	var items []PaperItemDTO
-	if err := s.repo.inTenantID(ctx, id.TenantID, func(q *sqlcgen.Queries) error {
-		created, e := q.CreatePaper(ctx, sqlcgen.CreatePaperParams{
-			ID: paperID, TenantID: id.TenantID, Name: req.Name, AuthorID: id.AccountID, GenMode: req.GenMode, GenCriteria: criteria,
-		})
-		if e != nil {
-			return e
-		}
-		row = created
-		items, e = s.createPaperItems(ctx, q, id.TenantID, paperID, req)
-		return e
-	}); err != nil {
+	items, err := s.preparePaperItems(ctx, req)
+	if err != nil {
+		return PaperDTO{}, err
+	}
+	row, itemRows, err := s.repo.createPaperWithItems(ctx, id.TenantID, paperID, id.AccountID, req, criteria, items)
+	if err != nil {
 		if ae, ok := apperr.As(err); ok {
 			return PaperDTO{}, ae
 		}
@@ -463,43 +417,24 @@ func (s *Service) CreatePaper(ctx context.Context, req PaperRequest) (PaperDTO, 
 	if err := s.writeAudit(ctx, id.TenantID, auditActionPaperSave, auditTargetPaper, paperID, map[string]any{"name": req.Name}); err != nil {
 		return PaperDTO{}, err
 	}
-	return paperDTOFromRow(row, items), nil
+	row.Items = paperItemsDTOFromRepoRows(itemRows)
+	return row, nil
 }
 
 // ListPapers 查询试卷列表。
 func (s *Service) ListPapers(ctx context.Context, page, size int) ([]PaperDTO, error) {
 	page, size = pagex.Normalize(page, size)
-	var rows []sqlcgen.Paper
-	if err := s.repo.inTenant(ctx, func(q *sqlcgen.Queries) error {
-		found, err := q.ListPapers(ctx, sqlcgen.ListPapersParams{Limit: int32(size), Offset: int32((page - 1) * size)})
-		rows = found
-		return err
-	}); err != nil {
+	rows, err := s.repo.listPapers(ctx, size, (page-1)*size)
+	if err != nil {
 		return nil, apperr.ErrPaperQueryFailed.WithCause(err)
 	}
-	out := make([]PaperDTO, 0, len(rows))
-	for _, row := range rows {
-		out = append(out, paperDTOFromRow(row, nil))
-	}
-	return out, nil
+	return rows, nil
 }
 
 // GetPaper 查询试卷详情,并以题面视角展开锁定版本题目。
 func (s *Service) GetPaper(ctx context.Context, paperID int64) (PaperDTO, error) {
-	var row sqlcgen.Paper
-	var itemRows []sqlcgen.PaperItem
-	if err := s.repo.inTenant(ctx, func(q *sqlcgen.Queries) error {
-		found, err := q.GetPaperByID(ctx, paperID)
-		if db.IsNoRows(err) {
-			return apperr.ErrPaperNotFound
-		}
-		if err != nil {
-			return err
-		}
-		row = found
-		itemRows, err = q.ListPaperItems(ctx, paperID)
-		return err
-	}); err != nil {
+	row, itemRows, err := s.repo.getPaperWithItems(ctx, paperID)
+	if err != nil {
 		if ae, ok := apperr.As(err); ok {
 			return PaperDTO{}, ae
 		}
@@ -509,7 +444,8 @@ func (s *Service) GetPaper(ctx context.Context, paperID int64) (PaperDTO, error)
 	if err != nil {
 		return PaperDTO{}, err
 	}
-	return paperDTOFromRow(row, items), nil
+	row.Items = items
+	return row, nil
 }
 
 // RegeneratePaper 按原试卷或新请求重新抽题。
@@ -524,23 +460,12 @@ func (s *Service) RegeneratePaper(ctx context.Context, paperID int64, req PaperR
 	if err := validatePaperRequest(req); err != nil {
 		return PaperDTO{}, err
 	}
-	var row sqlcgen.Paper
-	var items []PaperItemDTO
-	if err := s.repo.inTenantID(ctx, id.TenantID, func(q *sqlcgen.Queries) error {
-		found, e := q.GetPaperByID(ctx, paperID)
-		if db.IsNoRows(e) {
-			return apperr.ErrPaperNotFound
-		}
-		if e != nil {
-			return e
-		}
-		row = found
-		if e = q.DeletePaperItems(ctx, paperID); e != nil {
-			return e
-		}
-		items, e = s.createPaperItems(ctx, q, id.TenantID, paperID, req)
-		return e
-	}); err != nil {
+	items, err := s.preparePaperItems(ctx, req)
+	if err != nil {
+		return PaperDTO{}, err
+	}
+	row, itemRows, err := s.repo.replacePaperItems(ctx, id.TenantID, paperID, items)
+	if err != nil {
 		if ae, ok := apperr.As(err); ok {
 			return PaperDTO{}, ae
 		}
@@ -549,22 +474,17 @@ func (s *Service) RegeneratePaper(ctx context.Context, paperID int64, req PaperR
 	if err := s.writeAudit(ctx, id.TenantID, auditActionPaperSave, auditTargetPaper, paperID, map[string]any{"regenerated": true}); err != nil {
 		return PaperDTO{}, err
 	}
-	return paperDTOFromRow(row, items), nil
+	row.Items = paperItemsDTOFromRepoRows(itemRows)
+	return row, nil
 }
 
 // IncrementUsage 记录内容被引用。
 func (s *Service) IncrementUsage(ctx context.Context, tenantID int64, code, version string) error {
-	if err := s.repo.inTenantID(ctx, tenantID, func(q *sqlcgen.Queries) error {
-		_, err := q.IncrementContentUsage(ctx, sqlcgen.IncrementContentUsageParams{Code: code, Version: version})
-		if db.IsNoRows(err) {
-			return apperr.ErrContentUnavailable
-		}
-		return err
-	}); err != nil {
+	if err := s.repo.incrementUsage(ctx, tenantID, code, version); err != nil {
 		if ae, ok := apperr.As(err); ok {
 			return ae
 		}
-		return apperr.ErrContentUnavailable.WithCause(err)
+		return apperr.ErrContentUsageUpdateFailed.WithCause(err)
 	}
 	if err := s.writeAudit(ctx, tenantID, auditActionItemUsage, auditTargetItem, 0, map[string]any{"code": code, "version": version}); err != nil {
 		return err
@@ -574,15 +494,14 @@ func (s *Service) IncrementUsage(ctx context.Context, tenantID int64, code, vers
 
 // getOwnContent 读取本租户内容。
 func (s *Service) getOwnContent(ctx context.Context, code, version string, face bool) (ItemDTO, error) {
-	var row sqlcgen.GetContentByCodeVersionRow
-	if err := s.repo.inTenant(ctx, func(q *sqlcgen.Queries) error {
-		found, err := q.GetContentByCodeVersion(ctx, sqlcgen.GetContentByCodeVersionParams{Code: code, Version: version})
-		row = found
-		return err
-	}); err != nil {
-		return ItemDTO{}, apperr.ErrContentNotFound.WithCause(err)
+	row, err := s.repo.getOwnContent(ctx, code, version)
+	if err != nil {
+		if db.IsNoRows(err) {
+			return ItemDTO{}, apperr.ErrContentNotFound
+		}
+		return ItemDTO{}, apperr.ErrContentReadFailed.WithCause(err)
 	}
-	return itemDTOFromRow(contentRowFromOwn(row), face)
+	return itemDTOFromRow(row, face)
 }
 
 // getSharedContent 读取共享库内容,仅用于浏览题面或克隆源。
@@ -590,15 +509,14 @@ func (s *Service) getSharedContent(ctx context.Context, code, version string, fa
 	if !s.repo.hasPrivileged() {
 		return ItemDTO{}, apperr.ErrContentShareInvalid
 	}
-	var row sqlcgen.GetSharedContentByCodeVersionRow
-	if err := s.repo.inPrivileged(ctx, func(q *sqlcgen.Queries) error {
-		found, err := q.GetSharedContentByCodeVersion(ctx, sqlcgen.GetSharedContentByCodeVersionParams{Code: code, Version: version})
-		row = found
-		return err
-	}); err != nil {
-		return ItemDTO{}, apperr.ErrContentShareInvalid.WithCause(err)
+	row, err := s.repo.getSharedContent(ctx, code, version)
+	if err != nil {
+		if db.IsNoRows(err) {
+			return ItemDTO{}, apperr.ErrContentShareInvalid
+		}
+		return ItemDTO{}, apperr.ErrContentShareReadFailed.WithCause(err)
 	}
-	return itemDTOFromRow(contentRowFromShared(row), face)
+	return itemDTOFromRow(row, face)
 }
 
 // updateStatus 更新内容状态。
@@ -607,34 +525,19 @@ func (s *Service) updateStatus(ctx context.Context, itemID int64, status int16, 
 	if !ok {
 		return ItemDTO{}, apperr.ErrUnauthorized
 	}
-	var row sqlcgen.ContentItem
-	if err := s.repo.inTenantID(ctx, id.TenantID, func(q *sqlcgen.Queries) error {
-		current, err := q.GetContentItemByID(ctx, itemID)
-		if db.IsNoRows(err) {
-			return apperr.ErrContentNotFound
-		}
-		if err != nil {
-			return err
-		}
-		if err = s.ensureCanManage(ctx, current.AuthorID); err != nil {
-			return err
-		}
-		updated, err := q.UpdateContentStatus(ctx, sqlcgen.UpdateContentStatusParams{ID: itemID, Status: status})
-		if db.IsNoRows(err) {
-			return apperr.ErrContentNotFound
-		}
-		row = updated
-		return err
-	}); err != nil {
+	row, err := s.repo.updateStatus(ctx, id.TenantID, itemID, status, func(current contentItemGuard) error {
+		return s.ensureCanManage(ctx, current.AuthorID)
+	})
+	if err != nil {
 		if ae, ok := apperr.As(err); ok {
 			return ItemDTO{}, ae
 		}
-		return ItemDTO{}, apperr.ErrContentInvalid.WithCause(err)
+		return ItemDTO{}, apperr.ErrContentUpdateFailed.WithCause(err)
 	}
 	if err := s.writeAudit(ctx, id.TenantID, action, auditTargetItem, itemID, map[string]any{"status": status}); err != nil {
 		return ItemDTO{}, err
 	}
-	return itemDTOFromShell(row), nil
+	return row, nil
 }
 
 // updateVisibility 更新共享可见性。
@@ -643,41 +546,27 @@ func (s *Service) updateVisibility(ctx context.Context, itemID int64, visibility
 	if !ok {
 		return ItemDTO{}, apperr.ErrUnauthorized
 	}
-	var row sqlcgen.ContentItem
-	if err := s.repo.inTenantID(ctx, id.TenantID, func(q *sqlcgen.Queries) error {
-		current, err := q.GetContentItemByID(ctx, itemID)
-		if db.IsNoRows(err) {
-			return apperr.ErrContentNotFound
-		}
-		if err != nil {
-			return err
-		}
-		if err = s.ensureCanManage(ctx, current.AuthorID); err != nil {
-			return err
-		}
-		updated, err := q.UpdateContentVisibility(ctx, sqlcgen.UpdateContentVisibilityParams{ID: itemID, Visibility: visibility})
-		if db.IsNoRows(err) {
-			return apperr.ErrContentUnavailable
-		}
-		row = updated
-		return err
-	}); err != nil {
+	row, err := s.repo.updateVisibility(ctx, id.TenantID, itemID, visibility, func(current contentItemGuard) error {
+		return s.ensureCanManage(ctx, current.AuthorID)
+	})
+	if err != nil {
 		if ae, ok := apperr.As(err); ok {
 			return ItemDTO{}, ae
 		}
-		return ItemDTO{}, apperr.ErrContentUnavailable.WithCause(err)
+		return ItemDTO{}, apperr.ErrContentUpdateFailed.WithCause(err)
 	}
 	if err := s.writeAudit(ctx, id.TenantID, action, auditTargetItem, itemID, map[string]any{"visibility": visibility}); err != nil {
 		return ItemDTO{}, err
 	}
-	return itemDTOFromShell(row), nil
+	return row, nil
 }
 
-// createPaperItems 创建试卷题目,手动模式锁定请求版本,随机模式锁定抽中的当前版本。
-func (s *Service) createPaperItems(ctx context.Context, q *sqlcgen.Queries, tenantID, paperID int64, req PaperRequest) ([]PaperItemDTO, error) {
+// preparePaperItems 创建试卷题目快照参数,手动模式锁定请求版本,随机模式锁定抽中的当前版本。
+func (s *Service) preparePaperItems(ctx context.Context, req PaperRequest) ([]paperItemInsert, error) {
 	items := req.Items
 	if req.GenMode == PaperGenRandom {
-		selected, err := q.ListPublishedItemsForRandomPaper(ctx, randomParams(req.GenCriteria))
+		// 随机组卷先按条件锁定当前发布版本,不足量时整体失败,避免生成半张试卷。
+		selected, err := s.repo.listRandomPaperItems(ctx, req.GenCriteria)
 		if err != nil {
 			return nil, err
 		}
@@ -691,17 +580,15 @@ func (s *Service) createPaperItems(ctx context.Context, q *sqlcgen.Queries, tena
 		if score <= 0 {
 			score = 1
 		}
-		for idx, item := range selected {
-			items = append(items, PaperItemReq{Code: item.Code, Version: item.Version, Score: score, Seq: int32(idx + 1)})
+		for _, item := range selected {
+			items = append(items, PaperItemReq{Code: item.Code, Version: item.Version, Score: score, Seq: item.Seq})
 		}
 	}
-	out := make([]PaperItemDTO, 0, len(items))
+	out := make([]paperItemInsert, 0, len(items))
 	for idx, item := range items {
 		if req.GenMode == PaperGenManual {
-			current, err := q.GetContentByCodeVersion(ctx, sqlcgen.GetContentByCodeVersionParams{Code: item.Code, Version: item.Version})
-			if db.IsNoRows(err) {
-				return nil, apperr.ErrContentNotFound
-			}
+			// 手动组卷必须逐题确认请求版本仍是已发布内容,防止引用草稿或下架版本。
+			current, err := s.getOwnContent(ctx, item.Code, item.Version, false)
 			if err != nil {
 				return nil, err
 			}
@@ -713,29 +600,32 @@ func (s *Service) createPaperItems(ctx context.Context, q *sqlcgen.Queries, tena
 		if seq <= 0 {
 			seq = int32(idx + 1)
 		}
-		row, err := q.CreatePaperItem(ctx, sqlcgen.CreatePaperItemParams{
-			ID: s.idgen.Generate(), TenantID: tenantID, PaperID: paperID, ItemCode: item.Code,
-			ItemVersion: item.Version, Score: item.Score, Seq: seq,
-		})
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, paperItemDTOFromRow(row, ItemDTO{}))
+		// service 只生成锁定快照参数,实际写入由 repo 在试卷事务里完成。
+		out = append(out, paperItemInsert{ID: s.idgen.Generate(), Code: item.Code, Version: item.Version, Score: item.Score, Seq: seq})
 	}
 	return out, nil
 }
 
 // expandPaperItems 展开试卷题目题面。
-func (s *Service) expandPaperItems(ctx context.Context, rows []sqlcgen.PaperItem) ([]PaperItemDTO, error) {
+func (s *Service) expandPaperItems(ctx context.Context, rows []paperItemRow) ([]PaperItemDTO, error) {
 	out := make([]PaperItemDTO, 0, len(rows))
 	for _, row := range rows {
 		item, err := s.GetFace(ctx, row.ItemCode, row.ItemVersion)
 		if err != nil {
 			return nil, err
 		}
-		out = append(out, paperItemDTOFromRow(row, item))
+		out = append(out, paperItemDTOFromRepoRow(row, item))
 	}
 	return out, nil
+}
+
+// paperItemsDTOFromRepoRows 转换未展开题面的试卷题目快照。
+func paperItemsDTOFromRepoRows(rows []paperItemRow) []PaperItemDTO {
+	out := make([]PaperItemDTO, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, paperItemDTOFromRepoRow(row, ItemDTO{}))
+	}
+	return out
 }
 
 // ensureCanManage 校验当前账号可管理指定作者的内容。
@@ -776,7 +666,7 @@ func (s *Service) ensureCanReadFace(ctx context.Context, item ItemDTO) error {
 	if err != nil {
 		return apperr.ErrForbidden.WithCause(err)
 	}
-	if !canReadOwnContentFace(id.IsPlatform, account, mustID(item.AuthorID), item.Visibility) {
+	if !canReadOwnContentFace(id.IsPlatform, account, ids.ParseOrZero(item.AuthorID), item.Visibility) {
 		return apperr.ErrContentForbidden
 	}
 	return nil
@@ -797,7 +687,7 @@ func validatePaperRequest(req PaperRequest) error {
 			}
 		}
 	}
-	if req.GenMode == PaperGenRandom && numberValue(req.GenCriteria["count"]) <= 0 {
+	if req.GenMode == PaperGenRandom && jsonx.IntFromAny(req.GenCriteria["count"]) <= 0 {
 		return apperr.ErrPaperInvalid
 	}
 	return nil
@@ -809,42 +699,4 @@ func validatePaperItemReference(status int16) error {
 		return apperr.ErrContentUnavailable
 	}
 	return nil
-}
-
-// listParams 构造内容列表查询参数。
-func listParams(req ListItemsRequest, size, offset int) sqlcgen.ListContentItemsParams {
-	return sqlcgen.ListContentItemsParams{
-		Limit: int32(size), Offset: int32(offset), Type: pgInt2(req.Type), CategoryID: pgInt8(mustOptionalID(req.CategoryID)),
-		Difficulty: pgInt2(req.Difficulty), Visibility: pgInt2(req.Visibility), Status: pgInt2(req.Status),
-		Tag: pgText(req.Tag), Kp: pgText(req.KP), Keyword: pgText(req.Keyword),
-	}
-}
-
-// countParams 构造内容计数查询参数。
-func countParams(req ListItemsRequest) sqlcgen.CountContentItemsParams {
-	return sqlcgen.CountContentItemsParams{
-		Type: pgInt2(req.Type), CategoryID: pgInt8(mustOptionalID(req.CategoryID)), Difficulty: pgInt2(req.Difficulty),
-		Visibility: pgInt2(req.Visibility), Status: pgInt2(req.Status), Tag: pgText(req.Tag), Kp: pgText(req.KP), Keyword: pgText(req.Keyword),
-	}
-}
-
-// randomParams 构造随机组卷查询参数。
-func randomParams(criteria map[string]any) sqlcgen.ListPublishedItemsForRandomPaperParams {
-	normalized := normalizeRandomCriteria(criteria)
-	return sqlcgen.ListPublishedItemsForRandomPaperParams{
-		Limit: int32(normalized.Count), Type: pgInt2(normalized.Type),
-		Difficulties: normalized.Difficulties, KnowledgePoints: normalized.KnowledgePoints,
-	}
-}
-
-// mustOptionalID 解析可选 ID,空值返回 0。
-func mustOptionalID(v string) int64 {
-	id, _ := ids.Parse(v)
-	return id
-}
-
-// mustID 解析已知由本服务输出的 ID。
-func mustID(v string) int64 {
-	id, _ := ids.Parse(v)
-	return id
 }

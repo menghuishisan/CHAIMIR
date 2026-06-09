@@ -7,9 +7,7 @@ import (
 	"fmt"
 
 	"chaimir/internal/contracts"
-	"chaimir/internal/modules/identity/internal/sqlcgen"
 	"chaimir/internal/platform/audit"
-	"chaimir/internal/platform/db"
 	"chaimir/internal/platform/ids"
 	"chaimir/internal/platform/timex"
 	"chaimir/pkg/apperr"
@@ -24,7 +22,7 @@ func (s *Service) LoginByPhone(ctx context.Context, req LoginPhoneRequest, devic
 	ph := s.phoneHash(req.Phone)
 
 	// 跨租户定位该手机号的账号(特权连接绕 RLS,只取登录定位最小字段)。
-	accts, err := s.findAccountsByPhone(ctx, ph)
+	accts, err := s.repo.findLoginCandidatesByPhone(ctx, ph)
 	if err != nil {
 		return nil, err
 	}
@@ -42,7 +40,7 @@ func (s *Service) LoginByPhone(ctx context.Context, req LoginPhoneRequest, devic
 	}
 
 	// 在目标租户上下文内校验密码并签发。
-	acc, err := s.loadAccountByPhone(ctx, target.TenantID, ph)
+	acc, err := s.repo.loadAccountByPhone(ctx, target.TenantID, ph)
 	if err != nil {
 		return nil, err
 	}
@@ -55,19 +53,8 @@ func (s *Service) LoginByNo(ctx context.Context, req LoginNoRequest, device, ip 
 	if err != nil {
 		return nil, err
 	}
-	var acc sqlcgen.Account
-	if err := s.repo.inTenantID(ctx, tenantID, func(q *sqlcgen.Queries) error {
-		p, e := q.GetAccountProfileByNo(ctx, req.No)
-		if e != nil {
-			return apperr.ErrWrongCredentials
-		}
-		a, e := q.GetAccountByID(ctx, p.AccountID)
-		if e != nil {
-			return apperr.ErrWrongCredentials
-		}
-		acc = a
-		return nil
-	}); err != nil {
+	acc, err := s.repo.loadAccountByNo(ctx, tenantID, req.No)
+	if err != nil {
 		return nil, err
 	}
 	return s.finishPasswordLogin(ctx, acc, req.Password, device, ip)
@@ -79,7 +66,7 @@ func (s *Service) LoginBySms(ctx context.Context, req LoginSmsRequest, device, i
 		return nil, apperr.ErrPhoneInvalid
 	}
 	ph := s.phoneHash(req.Phone)
-	accts, err := s.findAccountsByPhone(ctx, ph)
+	accts, err := s.repo.findLoginCandidatesByPhone(ctx, ph)
 	if err != nil {
 		return nil, err
 	}
@@ -95,7 +82,7 @@ func (s *Service) LoginBySms(ctx context.Context, req LoginSmsRequest, device, i
 	}
 
 	// 校验验证码(在目标租户上下文)。
-	acc, err := s.loadAccountByPhone(ctx, target.TenantID, ph)
+	acc, err := s.repo.loadAccountByPhone(ctx, target.TenantID, ph)
 	if err != nil {
 		return nil, err
 	}
@@ -109,9 +96,9 @@ func (s *Service) LoginBySms(ctx context.Context, req LoginSmsRequest, device, i
 }
 
 // finishPasswordLogin 完成密码校验 + 状态机检查 + 锁定 + 签发。
-func (s *Service) finishPasswordLogin(ctx context.Context, acc sqlcgen.Account, password, device, ip string) (*LoginResult, error) {
+func (s *Service) finishPasswordLogin(ctx context.Context, acc LoginAccountSnapshot, password, device, ip string) (*LoginResult, error) {
 	// 锁定检查。
-	if acc.LockedUntil.Valid && acc.LockedUntil.Time.After(timex.Now()) {
+	if acc.HasLockedUntil && acc.LockedUntil.After(timex.Now()) {
 		return nil, apperr.ErrAccountLocked
 	}
 	// 状态机:正常账号可登录;初始密码开通的待激活账号允许进入首登改密流程。
@@ -119,23 +106,16 @@ func (s *Service) finishPasswordLogin(ctx context.Context, acc sqlcgen.Account, 
 		return nil, err
 	}
 	// SSO 账号无密码,不能走密码登录。
-	if !acc.PasswordHash.Valid {
+	if !acc.HasPassword {
 		return nil, apperr.ErrWrongCredentials
 	}
-	ok, err := crypto.VerifyPassword(password, acc.PasswordHash.String)
+	ok, err := crypto.VerifyPassword(password, acc.PasswordHash)
 	if err != nil {
 		return nil, apperr.ErrAccountCredentialFailed.WithCause(err)
 	}
 	if !ok {
 		// 失败计数 +1,达阈值锁定。
-		if e := s.repo.inTenantID(ctx, acc.TenantID, func(q *sqlcgen.Queries) error {
-			_, ie := q.IncrAccountPwdFailed(ctx, sqlcgen.IncrAccountPwdFailedParams{
-				ID:             acc.ID,
-				PwdFailedCount: s.passwordMaxFailedCount,
-				Column3:        pgText(fmt.Sprintf("%d", s.passwordLockMinutes)),
-			})
-			return ie
-		}); e != nil {
+		if e := s.repo.incrementPasswordFailure(ctx, acc.TenantID, acc.ID, s.passwordMaxFailedCount, s.passwordLockMinutes); e != nil {
 			return nil, apperr.ErrAccountMutationFailed.WithCause(e)
 		}
 		return nil, apperr.ErrWrongCredentials
@@ -153,20 +133,15 @@ func passwordLoginPostVerifyError(mustChangePwd bool) error {
 }
 
 // passwordLoginableStatus 判断密码登录是否可进入会话签发。
-func passwordLoginableStatus(acc sqlcgen.Account) error {
-	if acc.Status == AccountPending && acc.MustChangePwd && acc.PasswordHash.Valid {
+func passwordLoginableStatus(acc LoginAccountSnapshot) error {
+	if acc.Status == AccountPending && acc.MustChangePwd && acc.HasPassword {
 		return nil
 	}
 	return loginableStatus(acc.Status)
 }
 
 // issueLogin 清失败计数、单端踢人、创建会话、签发双 Token。
-func (s *Service) issueLogin(ctx context.Context, acc sqlcgen.Account, device, ip string, resetFailed bool) (*LoginResult, error) {
-	roles, err := s.loadRoleCodes(ctx, acc.TenantID, acc.ID)
-	if err != nil {
-		return nil, err
-	}
-
+func (s *Service) issueLogin(ctx context.Context, acc LoginAccountSnapshot, device, ip string, resetFailed bool) (*LoginResult, error) {
 	sessionID := s.idgen.Generate()
 	// 不透明 Refresh Token 只返回一次,数据库仅保存其 HMAC 哈希用于校验。
 	refreshPlain, err := crypto.RandomToken(48)
@@ -180,36 +155,17 @@ func (s *Service) issueLogin(ctx context.Context, acc sqlcgen.Account, device, i
 		return nil, apperr.ErrAuthTokenIssueFailed.WithCause(err)
 	}
 
-	if err := s.repo.inTenantID(ctx, acc.TenantID, func(q *sqlcgen.Queries) error {
-		if resetFailed {
-			if e := q.ResetAccountPwdFailed(ctx, acc.ID); e != nil {
-				return e
-			}
-		}
-		// 单端登录:吊销该账号其余有效会话。
-		if e := q.RevokeAllAccountSessions(ctx, acc.ID); e != nil {
-			return e
-		}
-		_, e := q.CreateAuthSession(ctx, sqlcgen.CreateAuthSessionParams{
-			ID:               sessionID,
-			TenantID:         acc.TenantID,
-			AccountID:        acc.ID,
-			RefreshTokenHash: refreshHash,
-			DeviceInfo:       pgText(device),
-			Ip:               pgText(ip),
-			ExpireAt:         timex.RequiredTimestamptz(timex.Now().Add(s.refreshTTL)),
-		})
-		if e != nil {
-			return e
-		}
-		return s.writeAccountAuditInTx(ctx, q, acc.TenantID, acc.ID, audit.ActorRoleFromAccount(contracts.AccountInfo{
-			BaseIdentity: acc.BaseIdentity,
-			Roles:        roles,
-		}), AuditActionAuthLogin, AuditTargetAuthSession, sessionID, map[string]any{
-			"device_recorded": device != "",
-			"ip_recorded":     ip != "",
-		})
-	}); err != nil {
+	entry, err := buildAccountAuditEntry(ctx, acc.TenantID, acc.ID, audit.ActorRoleFromAccount(contracts.AccountInfo{
+		BaseIdentity: acc.BaseIdentity,
+		Roles:        acc.Roles,
+	}), AuditActionAuthLogin, AuditTargetAuthSession, sessionID, map[string]any{
+		"device_recorded": device != "",
+		"ip_recorded":     ip != "",
+	})
+	if err != nil {
+		return nil, err
+	}
+	if err := s.repo.createLoginSession(ctx, acc, sessionID, refreshHash, device, ip, timex.Now().Add(s.refreshTTL), resetFailed, buildAuditLogCreate(s.idgen.Generate(), entry)); err != nil {
 		return nil, apperr.ErrAuthSessionStoreFailed.WithCause(err)
 	}
 
@@ -221,7 +177,7 @@ func (s *Service) issueLogin(ctx context.Context, acc sqlcgen.Account, device, i
 			ID:           ids.Format(acc.ID),
 			Name:         acc.Name,
 			BaseIdentity: acc.BaseIdentity,
-			Roles:        roles,
+			Roles:        acc.Roles,
 		},
 	}, nil
 }
@@ -234,7 +190,7 @@ func (s *Service) Refresh(ctx context.Context, req RefreshRequest, device, ip st
 	}
 
 	// 跨租户按 token hash 定位会话(特权连接绕 RLS)。
-	sess, found, err := s.findSessionByTokenHash(ctx, refreshHash)
+	sess, found, err := s.repo.findSessionByTokenHash(ctx, refreshHash)
 	if err != nil {
 		return nil, err
 	}
@@ -243,14 +199,12 @@ func (s *Service) Refresh(ctx context.Context, req RefreshRequest, device, ip st
 	}
 	// 已吊销的 token 再次出现 → 重放攻击,吊销该账号全部会话并拒绝。
 	if sess.Status == SessionRevoked {
-		if err := s.repo.inTenantID(ctx, sess.TenantID, func(q *sqlcgen.Queries) error {
-			return q.RevokeAllAccountSessions(ctx, sess.AccountID)
-		}); err != nil {
+		if err := s.repo.revokeAllAccountSessions(ctx, sess.TenantID, sess.AccountID); err != nil {
 			return nil, apperr.ErrAuthReplayRevokeFailed.WithCause(fmt.Errorf("Refresh Token 重放吊销会话失败: %w", err))
 		}
 		return nil, apperr.ErrRefreshReused
 	}
-	if sess.ExpireAt.Time.Before(timex.Now()) {
+	if sess.ExpireAt.Before(timex.Now()) {
 		return nil, apperr.ErrRefreshInvalid
 	}
 	if err := s.ensureTenantActiveByID(ctx, sess.TenantID); err != nil {
@@ -258,15 +212,8 @@ func (s *Service) Refresh(ctx context.Context, req RefreshRequest, device, ip st
 	}
 
 	// 取账号,签发新对(issueLogin 内部吊销旧会话含本次)。
-	var acc sqlcgen.Account
-	if err := s.repo.inTenantID(ctx, sess.TenantID, func(q *sqlcgen.Queries) error {
-		a, e := q.GetAccountByID(ctx, sess.AccountID)
-		if e != nil {
-			return apperr.ErrRefreshInvalid
-		}
-		acc = a
-		return nil
-	}); err != nil {
+	acc, err := s.repo.loadAccountByIDForAuth(ctx, sess.TenantID, sess.AccountID)
+	if err != nil {
 		return nil, err
 	}
 	if err := loginableStatus(acc.Status); err != nil {
@@ -284,18 +231,18 @@ func (s *Service) Logout(ctx context.Context, tenantID, accountID, sessionID int
 	if tenantID == 0 {
 		return s.LogoutPlatform(ctx, accountID, sessionID)
 	}
-	if err := s.repo.inTenantID(ctx, tenantID, func(q *sqlcgen.Queries) error {
-		if err := q.RevokeAuthSession(ctx, sessionID); err != nil {
-			return err
-		}
-		roles, err := q.ListAccountRoles(ctx, accountID)
-		if err != nil {
-			return err
-		}
-		return s.writeAccountAuditInTx(ctx, q, tenantID, accountID, audit.ActorRoleFromAccount(contracts.AccountInfo{
-			Roles: roleCodesOf(roles),
-		}), AuditActionAuthLogout, AuditTargetAuthSession, sessionID, nil)
-	}); err != nil {
+	acc, err := s.repo.loadAccountByIDForAuth(ctx, tenantID, accountID)
+	if err != nil {
+		return apperr.ErrAuthSessionStoreFailed.WithCause(err)
+	}
+	entry, err := buildAccountAuditEntry(ctx, tenantID, accountID, audit.ActorRoleFromAccount(contracts.AccountInfo{
+		BaseIdentity: acc.BaseIdentity,
+		Roles:        acc.Roles,
+	}), AuditActionAuthLogout, AuditTargetAuthSession, sessionID, nil)
+	if err != nil {
+		return err
+	}
+	if err := s.repo.revokeAuthSessionWithAudit(ctx, tenantID, sessionID, buildAuditLogCreate(s.idgen.Generate(), entry)); err != nil {
 		return apperr.ErrAuthSessionStoreFailed.WithCause(err)
 	}
 	return nil
@@ -303,7 +250,7 @@ func (s *Service) Logout(ctx context.Context, tenantID, accountID, sessionID int
 
 // refreshPlatform 轮转平台管理员 Refresh Token;未命中返回 handled=false 交给租户会话路径。
 func (s *Service) refreshPlatform(ctx context.Context, refreshHash, device, ip string) (*TokenPair, bool, error) {
-	sess, found, err := s.findPlatformSessionByTokenHash(ctx, refreshHash)
+	sess, found, err := s.repo.findPlatformSessionByTokenHash(ctx, refreshHash)
 	if err != nil {
 		return nil, true, err
 	}
@@ -311,26 +258,17 @@ func (s *Service) refreshPlatform(ctx context.Context, refreshHash, device, ip s
 		return nil, false, nil
 	}
 	if sess.Status == SessionRevoked {
-		if err := s.repo.inApp(ctx, func(q *sqlcgen.Queries) error {
-			return q.RevokeAllPlatformAdminSessions(ctx, sess.PlatformAdminID)
-		}); err != nil {
+		if err := s.repo.revokeAllPlatformAdminSessions(ctx, sess.PlatformAdminID); err != nil {
 			return nil, true, apperr.ErrAuthReplayRevokeFailed.WithCause(fmt.Errorf("平台 Refresh Token 重放吊销会话失败: %w", err))
 		}
 		return nil, true, apperr.ErrRefreshReused
 	}
-	if sess.ExpireAt.Time.Before(timex.Now()) {
+	if sess.ExpireAt.Before(timex.Now()) {
 		return nil, true, apperr.ErrRefreshInvalid
 	}
 
-	var admin sqlcgen.PlatformAdmin
-	if err := s.repo.inApp(ctx, func(q *sqlcgen.Queries) error {
-		row, e := q.GetPlatformAdminByID(ctx, sess.PlatformAdminID)
-		if e != nil {
-			return apperr.ErrRefreshInvalid
-		}
-		admin = row
-		return nil
-	}); err != nil {
+	admin, err := s.repo.getPlatformAdminByID(ctx, sess.PlatformAdminID)
+	if err != nil {
 		return nil, true, toAppErr(err)
 	}
 	if admin.Status != TenantActive {
@@ -345,9 +283,7 @@ func (s *Service) refreshPlatform(ctx context.Context, refreshHash, device, ip s
 
 // LogoutPlatform 吊销平台管理员当前会话。
 func (s *Service) LogoutPlatform(ctx context.Context, platformAdminID, sessionID int64) error {
-	if err := s.repo.inApp(ctx, func(q *sqlcgen.Queries) error {
-		return q.RevokePlatformAuthSession(ctx, sessionID)
-	}); err != nil {
+	if err := s.repo.revokePlatformSession(ctx, sessionID); err != nil {
 		return apperr.ErrPlatformAuthSessionFailed.WithCause(err)
 	}
 	return s.writePlatformAudit(ctx, platformAdminID, AuditActionAuthLogout, AuditTargetAuthSession, sessionID, nil)
@@ -362,7 +298,7 @@ func (s *Service) ResetPassword(ctx context.Context, req ResetPasswordRequest) e
 		return apperr.ErrPhoneInvalid
 	}
 	ph := s.phoneHash(req.Phone)
-	accts, err := s.findAccountsByPhone(ctx, ph)
+	accts, err := s.repo.findLoginCandidatesByPhone(ctx, ph)
 	if err != nil {
 		return err
 	}
@@ -381,35 +317,21 @@ func (s *Service) ResetPassword(ctx context.Context, req ResetPasswordRequest) e
 	if err != nil {
 		return apperr.ErrAccountCredentialFailed.WithCause(err)
 	}
-	if err := s.repo.inTenantID(ctx, target.TenantID, func(q *sqlcgen.Queries) error {
-		acc, e := q.GetAccountByID(ctx, target.AccountID)
-		if e != nil {
-			return apperr.ErrAccountNotFound
-		}
-		if e := q.UpdateAccountPassword(ctx, sqlcgen.UpdateAccountPasswordParams{
-			ID: target.AccountID, PasswordHash: pgText(hash), MustChangePwd: false,
-		}); e != nil {
-			return e
-		}
-		if e := q.ResetAccountPwdFailed(ctx, target.AccountID); e != nil {
-			return e
-		}
-		// 找回密码后吊销全部会话(强制重新登录),并在同一事务内记录账号安全变更审计。
-		if e := q.RevokeAllAccountSessions(ctx, target.AccountID); e != nil {
-			return e
-		}
-		roles, e := q.ListAccountRoles(ctx, target.AccountID)
-		if e != nil {
-			return e
-		}
-		return s.writeAccountAuditInTx(ctx, q, target.TenantID, target.AccountID, audit.ActorRoleFromAccount(contracts.AccountInfo{
-			BaseIdentity: acc.BaseIdentity,
-			Roles:        roleCodesOf(roles),
-		}), AuditActionAccountResetPwd, AuditTargetAccount, target.AccountID, map[string]any{
-			"self_service":     true,
-			"sessions_revoked": true,
-		})
-	}); err != nil {
+	acc, err := s.repo.loadAccountByIDForAuth(ctx, target.TenantID, target.AccountID)
+	if err != nil {
+		return toAppErrWith(err, apperr.ErrAccountMutationFailed)
+	}
+	entry, err := buildAccountAuditEntry(ctx, target.TenantID, target.AccountID, audit.ActorRoleFromAccount(contracts.AccountInfo{
+		BaseIdentity: acc.BaseIdentity,
+		Roles:        acc.Roles,
+	}), AuditActionAccountResetPwd, AuditTargetAccount, target.AccountID, map[string]any{
+		"self_service":     true,
+		"sessions_revoked": true,
+	})
+	if err != nil {
+		return err
+	}
+	if err := s.repo.resetPasswordWithAudit(ctx, target, hash, buildAuditLogCreate(s.idgen.Generate(), entry)); err != nil {
 		return toAppErrWith(err, apperr.ErrAccountMutationFailed)
 	}
 	return nil
@@ -418,143 +340,54 @@ func (s *Service) ResetPassword(ctx context.Context, req ResetPasswordRequest) e
 // ---- 内部辅助 ----
 
 // selectResetPasswordTarget 选择找回密码目标账号;一号多校必须由用户选择学校。
-func selectResetPasswordTarget(accts []sqlcgen.FindAccountsByPhoneAllTenantsRow, reqTenantID string) (sqlcgen.FindAccountsByPhoneAllTenantsRow, error) {
+func selectResetPasswordTarget(accts []LoginTenantCandidate, reqTenantID string) (LoginTenantCandidate, error) {
 	if len(accts) == 1 {
 		return accts[0], nil
 	}
 	if reqTenantID == "" {
 		// 无登录态的找回流程不能替用户猜学校,否则一号多校手机号会误改其中一个学校账号。
-		return sqlcgen.FindAccountsByPhoneAllTenantsRow{}, apperr.ErrResetPasswordTenantAmbiguous
+		return LoginTenantCandidate{}, apperr.ErrResetPasswordTenantAmbiguous
 	}
 	tid, ok := ids.Parse(reqTenantID)
 	if !ok {
-		return sqlcgen.FindAccountsByPhoneAllTenantsRow{}, apperr.ErrResetPasswordTenantInvalid
+		return LoginTenantCandidate{}, apperr.ErrResetPasswordTenantInvalid
 	}
 	for _, acct := range accts {
 		if acct.TenantID == tid {
 			return acct, nil
 		}
 	}
-	return sqlcgen.FindAccountsByPhoneAllTenantsRow{}, apperr.ErrResetPasswordTenantInvalid
+	return LoginTenantCandidate{}, apperr.ErrResetPasswordTenantInvalid
 }
 
 // resetSmsVerificationTenantID 返回找回短信校验使用的租户范围。
-func resetSmsVerificationTenantID(sqlcgen.FindAccountsByPhoneAllTenantsRow) int64 {
+func resetSmsVerificationTenantID(LoginTenantCandidate) int64 {
 	return 0
-}
-
-// findAccountsByPhone 跨租户定位手机号账号;无特权连接则报错(部署须配)。
-func (s *Service) findAccountsByPhone(ctx context.Context, phoneHash string) ([]sqlcgen.FindAccountsByPhoneAllTenantsRow, error) {
-	if !s.repo.hasPrivileged() {
-		return nil, apperr.ErrIdentityPrivilegedRequired.WithCause(fmt.Errorf("未配置特权连接,无法执行跨租户登录定位"))
-	}
-	var rows []sqlcgen.FindAccountsByPhoneAllTenantsRow
-	if err := s.repo.inPrivileged(ctx, func(q *sqlcgen.Queries) error {
-		r, e := q.FindAccountsByPhoneAllTenants(ctx, phoneHash)
-		if e != nil {
-			return e
-		}
-		rows = r
-		return nil
-	}); err != nil {
-		return nil, apperr.ErrAuthLookupUnavailable.WithCause(err)
-	}
-	return rows, nil
-}
-
-// findSessionByTokenHash 跨租户定位会话(特权连接)。
-func (s *Service) findSessionByTokenHash(ctx context.Context, tokenHash string) (sqlcgen.FindSessionByTokenHashRow, bool, error) {
-	if !s.repo.hasPrivileged() {
-		return sqlcgen.FindSessionByTokenHashRow{}, false, apperr.ErrIdentityPrivilegedRequired.WithCause(fmt.Errorf("未配置特权连接,无法刷新令牌"))
-	}
-	var row sqlcgen.FindSessionByTokenHashRow
-	found := true
-	if err := s.repo.inPrivileged(ctx, func(q *sqlcgen.Queries) error {
-		r, e := q.FindSessionByTokenHash(ctx, tokenHash)
-		if e != nil {
-			if db.IsNoRows(e) {
-				found = false
-				return nil
-			}
-			return e
-		}
-		row = r
-		return nil
-	}); err != nil {
-		return sqlcgen.FindSessionByTokenHashRow{}, false, apperr.ErrAuthSessionQueryFailed.WithCause(err)
-	}
-	return row, found, nil
-}
-
-// findPlatformSessionByTokenHash 定位平台管理员 Refresh 会话。
-func (s *Service) findPlatformSessionByTokenHash(ctx context.Context, tokenHash string) (sqlcgen.FindPlatformSessionByTokenHashRow, bool, error) {
-	var row sqlcgen.FindPlatformSessionByTokenHashRow
-	found := true
-	if err := s.repo.inApp(ctx, func(q *sqlcgen.Queries) error {
-		r, e := q.FindPlatformSessionByTokenHash(ctx, tokenHash)
-		if e != nil {
-			if db.IsNoRows(e) {
-				found = false
-				return nil
-			}
-			return e
-		}
-		row = r
-		return nil
-	}); err != nil {
-		return sqlcgen.FindPlatformSessionByTokenHashRow{}, false, apperr.ErrAuthSessionQueryFailed.WithCause(err)
-	}
-	return row, found, nil
-}
-
-// loadAccountByPhone 在指定租户内按 phone_hash 取账号。
-func (s *Service) loadAccountByPhone(ctx context.Context, tenantID int64, phoneHash string) (sqlcgen.Account, error) {
-	var acc sqlcgen.Account
-	if err := s.repo.inTenantID(ctx, tenantID, func(q *sqlcgen.Queries) error {
-		a, e := q.GetAccountByPhoneHash(ctx, phoneHash)
-		if e != nil {
-			return apperr.ErrWrongCredentials
-		}
-		acc = a
-		return nil
-	}); err != nil {
-		return sqlcgen.Account{}, err
-	}
-	return acc, nil
 }
 
 // tenantIDByCode 按短码取租户 ID,校验状态。
 func (s *Service) tenantIDByCode(ctx context.Context, code string) (int64, error) {
-	var tid int64
-	if err := s.repo.inApp(ctx, func(q *sqlcgen.Queries) error {
-		t, e := q.GetTenantByCode(ctx, code)
-		if e != nil {
-			return apperr.ErrTenantNotFound
-		}
-		if err := ensureTenantLoginAllowed(t.Status); err != nil {
-			return err
-		}
-		tid = t.ID
-		return nil
-	}); err != nil {
+	t, err := s.repo.getTenantByCode(ctx, code)
+	if err != nil {
 		return 0, err
 	}
-	return tid, nil
+	if err := ensureTenantLoginAllowed(t.Status); err != nil {
+		return 0, err
+	}
+	return t.ID, nil
 }
 
 // ensureTenantActiveByID 校验租户仍允许认证与刷新。
 func (s *Service) ensureTenantActiveByID(ctx context.Context, tenantID int64) error {
-	return s.repo.inApp(ctx, func(q *sqlcgen.Queries) error {
-		t, err := q.GetTenantByID(ctx, tenantID)
-		if err != nil {
-			return apperr.ErrTenantNotFound
-		}
-		return ensureTenantLoginAllowed(t.Status)
-	})
+	t, err := s.repo.getTenantByIDForLogin(ctx, tenantID)
+	if err != nil {
+		return err
+	}
+	return ensureTenantLoginAllowed(t.Status)
 }
 
 // ensureSelectedTenantLoginAllowed 校验手机号定位出的租户仍允许登录。
-func ensureSelectedTenantLoginAllowed(row sqlcgen.FindAccountsByPhoneAllTenantsRow) error {
+func ensureSelectedTenantLoginAllowed(row LoginTenantCandidate) error {
 	return ensureTenantLoginAllowed(row.TenantStatus)
 }
 
@@ -566,48 +399,28 @@ func ensureTenantLoginAllowed(status int16) error {
 	return nil
 }
 
-// loadRoleCodes 取账号角色编码列表。
-func (s *Service) loadRoleCodes(ctx context.Context, tenantID, accountID int64) ([]string, error) {
-	var nums []int16
-	if err := s.repo.inTenantID(ctx, tenantID, func(q *sqlcgen.Queries) error {
-		rs, e := q.ListAccountRoles(ctx, accountID)
-		if e != nil {
-			return e
-		}
-		nums = rs
-		return nil
-	}); err != nil {
-		return nil, apperr.ErrAccountQueryFailed.WithCause(err)
-	}
-	codes := make([]string, 0, len(nums))
-	for _, r := range nums {
-		codes = append(codes, contracts.RoleCode(r))
-	}
-	return codes, nil
-}
-
 // resolveTenant 根据请求选定的 tenant_id 从候选账号中定位目标。
-func resolveTenant(accts []sqlcgen.FindAccountsByPhoneAllTenantsRow, reqTenantID string) (sqlcgen.FindAccountsByPhoneAllTenantsRow, bool) {
+func resolveTenant(accts []LoginTenantCandidate, reqTenantID string) (LoginTenantCandidate, bool) {
 	if len(accts) == 1 {
 		return accts[0], true
 	}
 	if reqTenantID == "" {
-		return sqlcgen.FindAccountsByPhoneAllTenantsRow{}, false
+		return LoginTenantCandidate{}, false
 	}
 	tid, ok := ids.Parse(reqTenantID)
 	if !ok {
-		return sqlcgen.FindAccountsByPhoneAllTenantsRow{}, false
+		return LoginTenantCandidate{}, false
 	}
 	for _, a := range accts {
 		if a.TenantID == tid {
 			return a, true
 		}
 	}
-	return sqlcgen.FindAccountsByPhoneAllTenantsRow{}, false
+	return LoginTenantCandidate{}, false
 }
 
 // briefs 把候选账号转为租户选择列表。
-func briefs(accts []sqlcgen.FindAccountsByPhoneAllTenantsRow) []TenantBrief {
+func briefs(accts []LoginTenantCandidate) []TenantBrief {
 	out := make([]TenantBrief, 0, len(accts))
 	for _, a := range accts {
 		out = append(out, TenantBrief{

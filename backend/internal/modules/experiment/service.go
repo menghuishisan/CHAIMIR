@@ -5,12 +5,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"chaimir/internal/contracts"
 	"chaimir/internal/platform/audit"
 	"chaimir/internal/platform/db"
 	"chaimir/internal/platform/eventbus"
 	"chaimir/internal/platform/ids"
+	"chaimir/internal/platform/storage"
 	"chaimir/internal/platform/tenant"
 	"chaimir/internal/platform/timex"
 	"chaimir/pkg/apperr"
@@ -98,6 +100,7 @@ func (s *Service) ValidateExperiment(ctx context.Context, experimentID int64) (V
 	issues := validateExperimentComponentsDetailed(experiment.Components)
 	for _, cp := range experiment.Components.Checkpoints {
 		if s.content == nil {
+			issues = append(issues, ValidationIssue{Level: "error", Message: "检查点题目版本校验服务不可用"})
 			continue
 		}
 		_, err := s.content.GetContentFace(ctx, id.TenantID, contracts.ContentItemRef{ItemCode: cp.ItemCode, ItemVersion: cp.ItemVersion})
@@ -272,7 +275,7 @@ func (s *Service) RecycleInstance(ctx context.Context, instanceID int64) error {
 		return nil
 	}
 	sourceRef := instance.SourceRef
-	if err := s.recycleEngines(ctx, id.TenantID, sourceRef, "manual"); err != nil {
+	if err := s.recycleEnginesForInstance(ctx, id.TenantID, instance, "manual"); err != nil {
 		return err
 	}
 	if _, err := s.store.UpdateInstanceStatus(ctx, instanceID, InstanceStatusRecycled); err != nil {
@@ -300,6 +303,9 @@ func (s *Service) JudgeCheckpoint(ctx context.Context, instanceID int64, checkpo
 	if !ok {
 		return CheckpointResultDTO{}, apperr.ErrCheckpointResultNotFound
 	}
+	if s.judge == nil {
+		return CheckpointResultDTO{}, apperr.ErrCheckpointJudgeUnavailable
+	}
 	task, err := s.judge.SubmitJudgeTask(ctx, contracts.JudgeSubmitRequest{
 		TenantID: id.TenantID, JudgerCode: cp.JudgerCode, ItemCode: cp.ItemCode, ItemVersion: cp.ItemVersion,
 		SubmitterID: id.AccountID, SourceRef: instance.SourceRef, SandboxMode: "reuse",
@@ -314,6 +320,44 @@ func (s *Service) JudgeCheckpoint(ctx context.Context, instanceID int64, checkpo
 	})
 }
 
+// HandleJudgeCompleted 处理 M3 判题完成事件并回写检查点结果。
+func (s *Service) HandleJudgeCompleted(ctx context.Context, event contracts.JudgeCompletedEvent) error {
+	pending, err := s.store.PendingCheckpointByJudgeTask(ctx, event.TenantID, event.TaskID)
+	if err != nil {
+		return err
+	}
+	if pending.SourceRef != event.SourceRef {
+		return apperr.ErrExperimentEventUnmatched.WithCause(fmt.Errorf("judge completed source_ref mismatch: pending=%s event=%s", pending.SourceRef, event.SourceRef))
+	}
+	_, err = s.store.UpsertCheckpointResult(ctx, CheckpointResultDTO{
+		ID: ids.Format(s.nextID()), TenantID: event.TenantID, InstanceID: pending.InstanceID, CheckpointID: pending.CheckpointID,
+		JudgeTaskRef: ids.Format(event.TaskID), Passed: event.Score > 0, Score: float64(event.Score),
+	})
+	return err
+}
+
+// HandleJudgeFailed 处理 M3 判题失败事件并保留 0 分检查点结果。
+func (s *Service) HandleJudgeFailed(ctx context.Context, event contracts.JudgeFailedEvent) error {
+	pending, err := s.store.PendingCheckpointByJudgeTask(ctx, event.TenantID, event.TaskID)
+	if err != nil {
+		return err
+	}
+	if pending.SourceRef != event.SourceRef {
+		return apperr.ErrExperimentEventUnmatched.WithCause(fmt.Errorf("judge failed source_ref mismatch: pending=%s event=%s", pending.SourceRef, event.SourceRef))
+	}
+	_, err = s.store.UpsertCheckpointResult(ctx, CheckpointResultDTO{
+		ID: ids.Format(s.nextID()), TenantID: event.TenantID, InstanceID: pending.InstanceID, CheckpointID: pending.CheckpointID,
+		JudgeTaskRef: ids.Format(event.TaskID), Passed: false, Score: 0, DetailRef: "judge_failed",
+	})
+	return err
+}
+
+// HandleSandboxRecycled 处理 M2 沙箱回收事件并标记相关实例为环境已释放。
+func (s *Service) HandleSandboxRecycled(ctx context.Context, event contracts.SandboxRecycledEvent) error {
+	_, err := s.store.MarkInstancesReleasedBySandbox(ctx, event.TenantID, event.SandboxID)
+	return err
+}
+
 // SubmitReport 保存学生实验报告对象引用。
 func (s *Service) SubmitReport(ctx context.Context, instanceID int64, req ReportRequest) (ReportDTO, error) {
 	id, ok := tenantFromContext(ctx)
@@ -325,6 +369,9 @@ func (s *Service) SubmitReport(ctx context.Context, instanceID int64, req Report
 	}
 	instance, err := s.GetInstance(ctx, instanceID)
 	if err != nil {
+		return ReportDTO{}, err
+	}
+	if err := validateReportContentRef(id, instance, req.ContentRef); err != nil {
 		return ReportDTO{}, err
 	}
 	if instance.Status == InstanceStatusCompleted || instance.Status == InstanceStatusRecycled {
@@ -444,6 +491,9 @@ func (s *Service) authorizeStartInstance(ctx context.Context, experiment Experim
 func (s *Service) createEngineResources(ctx context.Context, id tenant.Identity, sourceRef string, components ExperimentComponents) ([]SandboxRef, []SimSessionRef, error) {
 	sandboxes := make([]SandboxRef, 0, len(components.Envs))
 	for _, env := range components.Envs {
+		if s.sandbox == nil {
+			return sandboxes, nil, apperr.ErrExperimentEngineUnavailable
+		}
 		info, err := s.sandbox.CreateSandbox(ctx, contracts.SandboxCreateRequest{
 			TenantID: id.TenantID, RuntimeCode: env.RuntimeCode, ToolCodes: env.ToolCodes, InitCodeRef: env.InitCodeRef,
 			InitScriptRef: env.InitScriptRef, OwnerAccountID: id.AccountID, SourceRef: sourceRef, KeepAlive: env.KeepAlive,
@@ -456,6 +506,9 @@ func (s *Service) createEngineResources(ctx context.Context, id tenant.Identity,
 	}
 	sims := make([]SimSessionRef, 0, len(components.Sims))
 	for _, sim := range components.Sims {
+		if s.sim == nil {
+			return sandboxes, sims, apperr.ErrExperimentEngineUnavailable
+		}
 		info, err := s.sim.CreateSimSession(ctx, contracts.SimCreateSessionRequest{
 			TenantID: id.TenantID, PackageCode: sim.PackageCode, Version: sim.Version, Seed: sim.Seed,
 			InitParams: sim.Params, OwnerAccountID: id.AccountID, SourceRef: sourceRef,
@@ -472,6 +525,9 @@ func (s *Service) createEngineResources(ctx context.Context, id tenant.Identity,
 func (s *Service) failInstanceWithCompensation(ctx context.Context, instanceID, tenantID int64, sourceRef string, cause error) error {
 	recycleErr := s.recycleEngines(ctx, tenantID, sourceRef, "create-failed")
 	_, statusErr := s.store.UpdateInstanceStatus(ctx, instanceID, InstanceStatusError)
+	if ae, ok := apperr.As(cause); ok && ae.Code == apperr.ErrExperimentEngineUnavailable.Code {
+		return apperr.ErrExperimentEngineUnavailable.WithCause(errors.Join(cause, recycleErr, statusErr))
+	}
 	return apperr.ErrExperimentEngineFailed.WithCause(errors.Join(cause, recycleErr, statusErr))
 }
 
@@ -505,6 +561,17 @@ func (s *Service) recycleEngines(ctx context.Context, tenantID int64, sourceRef,
 		errs = append(errs, s.sim.RecycleSimBySourceRef(ctx, tenantID, sourceRef, reason))
 	}
 	return errors.Join(errs...)
+}
+
+// recycleEnginesForInstance 按实例中已持久化的资源引用校验契约后回收,避免缺引擎依赖时误报成功。
+func (s *Service) recycleEnginesForInstance(ctx context.Context, tenantID int64, instance ExperimentInstanceDTO, reason string) error {
+	if len(instance.Sandboxes) > 0 && s.sandbox == nil {
+		return apperr.ErrExperimentEngineUnavailable
+	}
+	if len(instance.Sims) > 0 && s.sim == nil {
+		return apperr.ErrExperimentEngineUnavailable
+	}
+	return s.recycleEngines(ctx, tenantID, instance.SourceRef, reason)
 }
 
 // ensureInstanceAccess 校验单人实例归属或小组成员访问权限。
@@ -581,7 +648,7 @@ func (s *Service) ensureGroupManager(ctx context.Context) (tenant.Identity, bool
 // publishScored 发布实验得分事件给后续成绩或聚合流程消费。
 func (s *Service) publishScored(ctx context.Context, tenantID int64, instance ExperimentInstanceDTO) error {
 	if instance.Score == nil {
-		return nil
+		return apperr.ErrExperimentScoreInvalid
 	}
 	if s.bus == nil {
 		return apperr.ErrExperimentEventFailed
@@ -593,6 +660,29 @@ func (s *Service) publishScored(ctx context.Context, tenantID int64, instance Ex
 		TenantID: tenantID, InstanceID: instanceID, ExperimentID: experimentID, StudentID: ownerID, Score: *instance.Score, ScoredAt: timex.Now(),
 	}); err != nil {
 		return apperr.ErrExperimentEventFailed.WithCause(err)
+	}
+	return nil
+}
+
+// validateReportContentRef 校验报告对象 key 绑定当前租户、实例和学生,拒绝客户端任意 key 越权。
+func validateReportContentRef(id tenant.Identity, instance ExperimentInstanceDTO, contentRef string) error {
+	instanceID, ok := ids.Parse(instance.ID)
+	if !ok {
+		return apperr.ErrExperimentInstanceInvalid
+	}
+	if id.AccountID <= 0 {
+		return apperr.ErrExperimentInstanceInvalid
+	}
+	parts := strings.Split(contentRef, "/")
+	if len(parts) != 6 || parts[5] == "" || strings.Contains(parts[5], "\\") {
+		return apperr.ErrExperimentReportInvalid
+	}
+	expectedPrefix, err := storage.ObjectKey(id.TenantID, "experiment", "report", ids.Format(instanceID), ids.Format(id.AccountID), parts[5])
+	if err != nil {
+		return apperr.ErrExperimentReportInvalid.WithCause(err)
+	}
+	if contentRef != expectedPrefix {
+		return apperr.ErrExperimentReportInvalid
 	}
 	return nil
 }

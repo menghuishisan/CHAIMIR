@@ -276,6 +276,30 @@ func TestNotifyRepoUsesPlatformNoRows(t *testing.T) {
 	}
 }
 
+// TestNotifyRepoBatchCreateKeepsSingleTenantTransaction 守护批量站内信写入必须保持单事务原子语义。
+func TestNotifyRepoBatchCreateKeepsSingleTenantTransaction(t *testing.T) {
+	data, err := os.ReadFile("repo.go")
+	if err != nil {
+		t.Fatalf("read repo: %v", err)
+	}
+	text := string(data)
+	start := strings.Index(text, "func (r *repo) CreateNotifications")
+	if start < 0 {
+		t.Fatalf("notify repo must expose CreateNotifications")
+	}
+	end := strings.Index(text[start:], "\n// ListInbox")
+	if end < 0 {
+		t.Fatalf("CreateNotifications must stay before ListInbox with clear file responsibility")
+	}
+	body := text[start : start+end]
+	if strings.Count(body, "r.inTenant(ctx, tenantID") != 1 {
+		t.Fatalf("CreateNotifications must use one tenant transaction for the whole batch")
+	}
+	if strings.Contains(body, "CreateNotification(ctx") && !strings.Contains(body, "for _, row := range rows") {
+		t.Fatalf("CreateNotifications must write the supplied batch, not a single row API path")
+	}
+}
+
 // newNotifyRouteEngine 构造带 M10 路由的测试 Gin 引擎。
 func newNotifyRouteEngine(roles []string) (*gin.Engine, *auth.Manager, *fakeNotifyAPIService) {
 	gin.SetMode(gin.TestMode)

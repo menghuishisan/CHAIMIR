@@ -6,14 +6,10 @@ import (
 	"context"
 	"strings"
 
-	"chaimir/internal/modules/identity/internal/sqlcgen"
 	"chaimir/internal/platform/audit"
-	"chaimir/internal/platform/db"
 	"chaimir/internal/platform/ids"
 	"chaimir/pkg/apperr"
 	"chaimir/pkg/crypto"
-
-	"github.com/jackc/pgx/v5/pgtype"
 )
 
 // BootstrapPrivateSchoolRequest 描述私有化单校部署首次启动所需的权威输入。
@@ -69,26 +65,15 @@ func (s *Service) BootstrapPrivateSchool(ctx context.Context, req BootstrapPriva
 	accountID := s.idgen.Generate()
 	created := false
 
-	if err := s.repo.inAppTenantID(ctx, req.TenantID, func(q *sqlcgen.Queries) error {
-		// 第一步确保全局租户存在;已有租户必须与配置一致,防止初始化串到错误学校。
-		tenantCreated, err := s.ensureBootstrapTenant(ctx, q, req)
-		if err != nil {
-			return err
-		}
-		// 第二步创建或复用教师账号,并保证学校管理员角色完整。
-		adminID, adminCreated, err := s.ensureBootstrapSchoolAdmin(ctx, q, req, accountID, phoneEnc, phoneHash, passwordHash)
-		if err != nil {
-			return err
-		}
-		accountID = adminID
-		created = tenantCreated || adminCreated
-		// 第三步把初始化纳入统一审计;审计失败必须回滚,不能留下无留痕的管理员创建。
+	accountID, created, err = s.repo.bootstrapPrivateSchool(ctx, req, accountID, phoneEnc, phoneHash, passwordHash, s.idgen.Generate, func(adminID int64, created bool) (AuditLogCreate, error) {
+		// 初始化审计必须参与同一事务,避免留下无留痕的管理员创建。
 		entry, err := buildBootstrapAuditEntry(ctx, req.TenantID, adminID, created)
 		if err != nil {
-			return err
+			return AuditLogCreate{}, err
 		}
-		return q.CreateAuditLog(ctx, buildAuditLogParams(s.idgen.Generate(), entry))
-	}); err != nil {
+		return buildAuditLogCreate(s.idgen.Generate(), entry), nil
+	})
+	if err != nil {
 		return nil, toAppErr(err)
 	}
 	return &BootstrapPrivateSchoolResult{
@@ -109,32 +94,8 @@ func (s *Service) BootstrapPlatformAdmin(ctx context.Context, req BootstrapPlatf
 		return nil, apperr.ErrAccountCredentialFailed.WithCause(err)
 	}
 	adminID := s.idgen.Generate()
-	created := false
-	if err := s.repo.inApp(ctx, func(q *sqlcgen.Queries) error {
-		existing, err := q.GetPlatformAdminByUsername(ctx, req.Username)
-		if err == nil {
-			if existing.Status != 1 {
-				return apperr.ErrBootstrapConflict
-			}
-			adminID = existing.ID
-			return nil
-		}
-		if !db.IsNoRows(err) {
-			return err
-		}
-		row, err := q.CreatePlatformAdmin(ctx, sqlcgen.CreatePlatformAdminParams{
-			ID: adminID, Username: req.Username, PasswordHash: passwordHash, Name: req.Name, Status: 1,
-		})
-		if err != nil {
-			if isUniqueViolation(err) {
-				return apperr.ErrBootstrapConflict
-			}
-			return err
-		}
-		adminID = row.ID
-		created = true
-		return nil
-	}); err != nil {
+	adminID, created, err := s.repo.bootstrapPlatformAdmin(ctx, req, adminID, passwordHash)
+	if err != nil {
 		return nil, toAppErr(err)
 	}
 	return &BootstrapPlatformAdminResult{AdminID: ids.Format(adminID), Created: created}, nil
@@ -174,77 +135,6 @@ func validateBootstrapPlatformAdminRequest(req BootstrapPlatformAdminRequest) er
 		return apperr.ErrWeakPassword
 	}
 	return nil
-}
-
-// ensureBootstrapTenant 创建私有化租户,或校验已有租户与当前配置完全一致。
-// 初始化是部署期高权限动作,遇到不一致必须失败,不能猜测是否应改写已有学校资料。
-func (s *Service) ensureBootstrapTenant(ctx context.Context, q *sqlcgen.Queries, req BootstrapPrivateSchoolRequest) (bool, error) {
-	existing, err := q.GetTenantByID(ctx, req.TenantID)
-	if err == nil {
-		if existing.Code != req.Code || existing.Name != req.Name || existing.Type != req.Type || existing.DeployMode != DeployModeSchool {
-			return false, apperr.ErrBootstrapConflict
-		}
-		return false, nil
-	}
-	if !db.IsNoRows(err) {
-		return false, err
-	}
-	if _, err := q.CreateTenant(ctx, sqlcgen.CreateTenantParams{
-		ID: req.TenantID, Code: req.Code, Name: req.Name, Type: req.Type,
-		Status: TenantActive, DeployMode: DeployModeSchool,
-		ExpireAt: pgtype.Timestamptz{}, AuthMode: AuthModeLocal, EnableActivationCode: false,
-	}); err != nil {
-		if isUniqueViolation(err) {
-			return false, apperr.ErrTenantCodeExists
-		}
-		return false, err
-	}
-	return true, nil
-}
-
-// ensureBootstrapSchoolAdmin 创建首个学校管理员账号,或复用同手机号教师账号并补齐管理员角色。
-// 首个管理员允许暂缺 account_profile,因为真实组织架构必须由管理员登录后维护。
-func (s *Service) ensureBootstrapSchoolAdmin(ctx context.Context, q *sqlcgen.Queries, req BootstrapPrivateSchoolRequest, accountID int64, phoneEnc []byte, phoneHash, passwordHash string) (int64, bool, error) {
-	account, err := q.GetAccountByPhoneHash(ctx, phoneHash)
-	if err == nil {
-		if account.TenantID != req.TenantID || account.BaseIdentity != BaseIdentityTeacher {
-			return 0, false, apperr.ErrBootstrapConflict
-		}
-		if err := s.ensureBootstrapRole(ctx, q, req.TenantID, account.ID, RoleTeacher); err != nil {
-			return 0, false, err
-		}
-		if err := s.ensureBootstrapRole(ctx, q, req.TenantID, account.ID, RoleSchoolAdmin); err != nil {
-			return 0, false, err
-		}
-		return account.ID, false, nil
-	}
-	if !db.IsNoRows(err) {
-		return 0, false, err
-	}
-	if _, err := q.CreateAccount(ctx, sqlcgen.CreateAccountParams{
-		ID: accountID, TenantID: req.TenantID, PhoneEnc: phoneEnc, PhoneHash: phoneHash,
-		PasswordHash: pgtype.Text{String: passwordHash, Valid: true},
-		Name:         req.AdminName, BaseIdentity: BaseIdentityTeacher, Status: AccountActive, MustChangePwd: true,
-	}); err != nil {
-		if isUniqueViolation(err) {
-			return 0, false, apperr.ErrPhoneAlreadyExists
-		}
-		return 0, false, err
-	}
-	if err := s.ensureBootstrapRole(ctx, q, req.TenantID, accountID, RoleTeacher); err != nil {
-		return 0, false, err
-	}
-	if err := s.ensureBootstrapRole(ctx, q, req.TenantID, accountID, RoleSchoolAdmin); err != nil {
-		return 0, false, err
-	}
-	return accountID, true, nil
-}
-
-// ensureBootstrapRole 通过 account_role 的唯一约束实现幂等补角色。
-func (s *Service) ensureBootstrapRole(ctx context.Context, q *sqlcgen.Queries, tenantID, accountID int64, role int16) error {
-	return q.AddAccountRole(ctx, sqlcgen.AddAccountRoleParams{
-		ID: s.idgen.Generate(), TenantID: tenantID, AccountID: accountID, Role: role,
-	})
 }
 
 // buildBootstrapAuditEntry 构造初始化审计条目。

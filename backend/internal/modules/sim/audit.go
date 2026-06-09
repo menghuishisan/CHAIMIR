@@ -16,6 +16,8 @@ const (
 
 	auditActionPackageSubmit  = "sim.package.submit"
 	auditActionPackageUpdate  = "sim.package.update"
+	auditActionPackageArchive = "sim.package.archive"
+	auditActionPackagePublish = "sim.package.publish"
 	auditActionReviewApprove  = "sim.review.approve"
 	auditActionReviewReject   = "sim.review.reject"
 	auditActionSessionCreate  = "sim.session.create"

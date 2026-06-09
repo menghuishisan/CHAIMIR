@@ -1,4 +1,4 @@
-// 个人组织档案视图测试。
+// 个人组织档案投影测试。
 package identity
 
 import (
@@ -9,28 +9,24 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-// TestApplyProfileToMeViewAllowsMissingInitialAdminProfile 确认首个管理员可暂缺组织档案。
-func TestApplyProfileToMeViewAllowsMissingInitialAdminProfile(t *testing.T) {
-	view := &MeView{ID: "1", Name: "管理员"}
+// TestAccountMutationSnapshotAllowsMissingInitialAdminProfile 确认首个管理员可暂缺组织档案。
+func TestAccountMutationSnapshotAllowsMissingInitialAdminProfile(t *testing.T) {
+	snapshot := accountMutationSnapshot(sqlcgen.Account{ID: 1, Name: "管理员"}, nil, sqlcgen.AccountProfile{}, false)
 
-	applyProfileToMeView(view, sqlcgen.AccountProfile{}, false)
-
-	if view.No != "" || view.OrgID != "" || view.Title != "" {
-		t.Fatalf("expected empty profile fields, got %#v", view)
+	if snapshot.No != "" || snapshot.OrgID != 0 || snapshot.Title != "" {
+		t.Fatalf("expected empty profile fields, got %#v", snapshot)
 	}
 }
 
-// TestApplyProfileToMeViewFillsExistingProfile 确认已有档案正常返回只读学籍信息。
-func TestApplyProfileToMeViewFillsExistingProfile(t *testing.T) {
-	view := &MeView{ID: "1", Name: "教师"}
-
-	applyProfileToMeView(view, sqlcgen.AccountProfile{
+// TestAccountMutationSnapshotFillsExistingProfile 确认已有档案正常进入个人中心投影。
+func TestAccountMutationSnapshotFillsExistingProfile(t *testing.T) {
+	snapshot := accountMutationSnapshot(sqlcgen.Account{ID: 1, Name: "教师"}, nil, sqlcgen.AccountProfile{
 		No:    "T001",
 		OrgID: 99,
 		Title: pgtype.Text{String: "教授", Valid: true},
 	}, true)
 
-	if view.No != "T001" || view.OrgID != "99" || view.Title != "教授" {
-		t.Fatalf("unexpected profile fields: %#v", view)
+	if snapshot.No != "T001" || snapshot.OrgID != 99 || snapshot.Title != "教授" {
+		t.Fatalf("unexpected profile fields: %#v", snapshot)
 	}
 }

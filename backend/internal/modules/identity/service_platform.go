@@ -6,16 +6,12 @@ import (
 	"context"
 	"time"
 
-	"chaimir/internal/modules/identity/internal/sqlcgen"
-	"chaimir/internal/platform/db"
 	"chaimir/internal/platform/ids"
 	"chaimir/internal/platform/jsonx"
 	"chaimir/internal/platform/secretmap"
 	"chaimir/internal/platform/timex"
 	"chaimir/pkg/apperr"
 	"chaimir/pkg/crypto"
-
-	"github.com/jackc/pgx/v5/pgtype"
 )
 
 // CreateApplication 访客提交入驻申请(公开,状态=申请中)。
@@ -27,13 +23,7 @@ func (s *Service) CreateApplication(ctx context.Context, req CreateApplicationRe
 		return "", apperr.ErrPhoneInvalid
 	}
 	id := s.idgen.Generate()
-	if err := s.repo.inApp(ctx, func(q *sqlcgen.Queries) error {
-		_, e := q.CreateTenantApplication(ctx, sqlcgen.CreateTenantApplicationParams{
-			ID: id, SchoolName: req.SchoolName, SchoolType: req.SchoolType,
-			ContactName: req.ContactName, ContactPhone: req.ContactPhone, ContactEmail: req.ContactEmail,
-		})
-		return e
-	}); err != nil {
+	if err := s.repo.createTenantApplication(ctx, id, req); err != nil {
 		return "", apperr.ErrTenantApplicationStoreFailed.WithCause(err)
 	}
 	return ids.Format(id), nil
@@ -44,30 +34,13 @@ func (s *Service) ListApplications(ctx context.Context, status int16, page, size
 	if err := validateApplicationStatus(status); err != nil {
 		return nil, 0, err
 	}
-	var out []map[string]any
-	var total int64
-	if err := s.repo.inApp(ctx, func(q *sqlcgen.Queries) error {
-		cnt, e := q.CountTenantApplications(ctx, pgInt2(status, status != 0))
-		if e != nil {
-			return e
-		}
-		total = cnt
-		rows, e := q.ListTenantApplications(ctx, sqlcgen.ListTenantApplicationsParams{
-			Status: pgInt2(status, status != 0), Limit: int32(size), Offset: int32((page - 1) * size),
-		})
-		if e != nil {
-			return e
-		}
-		for _, r := range rows {
-			out = append(out, map[string]any{
-				"id": ids.Format(r.ID), "school_name": r.SchoolName, "school_type": r.SchoolType,
-				"contact_name": r.ContactName, "contact_phone": r.ContactPhone, "contact_email": r.ContactEmail,
-				"status": r.Status, "reject_reason": textVal(r.RejectReason), "created_at": timex.FromTimestamptz(r.CreatedAt),
-			})
-		}
-		return nil
-	}); err != nil {
+	rows, total, err := s.repo.listTenantApplications(ctx, status, page, size)
+	if err != nil {
 		return nil, 0, apperr.ErrTenantQueryFailed.WithCause(err)
+	}
+	out := make([]map[string]any, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, applicationToMap(row))
 	}
 	return out, total, nil
 }
@@ -89,58 +62,11 @@ func (s *Service) ApproveApplication(ctx context.Context, appID int64, reviewerI
 	}
 	ph := s.phoneHash(adminPhone)
 
-	var activationCode string
-	if err := s.repo.inAppTenantID(ctx, tenantID, func(q *sqlcgen.Queries) error {
-		app, e := q.GetTenantApplicationByID(ctx, appID)
-		if e != nil {
-			return apperr.ErrApplicationNotFound
-		}
-		if app.Status != ApplicationPending {
-			return apperr.ErrApplicationHandled
-		}
-		// 建租户(SaaS 模式)。
-		if _, e := q.CreateTenant(ctx, sqlcgen.CreateTenantParams{
-			ID: tenantID, Code: tenantCode, Name: app.SchoolName, Type: app.SchoolType,
-			Status: TenantActive, DeployMode: DeployModeSaaS,
-			ExpireAt: pgtype.Timestamptz{}, AuthMode: AuthModeLocal, EnableActivationCode: true,
-		}); e != nil {
-			if isUniqueViolation(e) {
-				return apperr.ErrTenantCodeExists
-			}
-			return e
-		}
-		// 回填申请为通过。
-		if _, e := q.ApproveTenantApplication(ctx, sqlcgen.ApproveTenantApplicationParams{
-			ID: appID, ReviewedBy: pgInt8(reviewerID, true), TenantID: pgInt8(tenantID, true),
-		}); e != nil {
-			return e
-		}
-		// 同一事务内已注入新租户 RLS,继续创建首个学校管理员,避免半成品租户。
-		if _, e := q.CreateAccount(ctx, sqlcgen.CreateAccountParams{
-			ID: adminID, TenantID: tenantID, PhoneEnc: phoneEnc, PhoneHash: ph,
-			PasswordHash: pgtype.Text{}, Name: adminName, BaseIdentity: BaseIdentityTeacher,
-			Status: AccountPending, MustChangePwd: false,
-		}); e != nil {
-			return e
-		}
-		// 加教师角色 + 学校管理员角色。
-		if e := q.AddAccountRole(ctx, sqlcgen.AddAccountRoleParams{
-			ID: s.idgen.Generate(), TenantID: tenantID, AccountID: adminID, Role: RoleTeacher,
-		}); e != nil {
-			return e
-		}
-		if e := q.AddAccountRole(ctx, sqlcgen.AddAccountRoleParams{
-			ID: s.idgen.Generate(), TenantID: tenantID, AccountID: adminID, Role: RoleSchoolAdmin,
-		}); e != nil {
-			return e
-		}
-		code, e := s.CreateActivationCode(ctx, q, tenantID, adminID, reviewerID)
-		if e != nil {
-			return e
-		}
-		activationCode = code
-		return nil
-	}); err != nil {
+	activationCode, err := s.genActivationCode()
+	if err != nil {
+		return nil, apperr.ErrActivationCodeIssueFailed.WithCause(err)
+	}
+	if err := s.repo.approveApplication(ctx, appID, reviewerID, tenantID, adminID, tenantCode, adminName, phoneEnc, ph, s.activationCodeHash(activationCode), timex.Now().Add(s.activationCodeTTL), s.idgen.Generate); err != nil {
 		return nil, toAppErr(err)
 	}
 	if err := s.writePlatformAudit(ctx, reviewerID, AuditActionTenantApprove, AuditTargetApplication, appID, map[string]any{
@@ -161,18 +87,7 @@ func (s *Service) ApproveApplication(ctx context.Context, appID int64, reviewerI
 
 // RejectApplication 驳回申请。
 func (s *Service) RejectApplication(ctx context.Context, appID, reviewerID int64, reason string) error {
-	if err := s.repo.inApp(ctx, func(q *sqlcgen.Queries) error {
-		r, e := q.RejectTenantApplication(ctx, sqlcgen.RejectTenantApplicationParams{
-			ID: appID, ReviewedBy: pgInt8(reviewerID, true), RejectReason: pgText(reason),
-		})
-		if e != nil {
-			return apperr.ErrTenantMutationFailed.WithCause(e)
-		}
-		if r.ID == 0 {
-			return apperr.ErrApplicationHandled
-		}
-		return nil
-	}); err != nil {
+	if err := s.repo.rejectApplication(ctx, appID, reviewerID, reason); err != nil {
 		return err
 	}
 	return s.writePlatformAudit(ctx, reviewerID, AuditActionTenantReject, AuditTargetApplication, appID, map[string]any{
@@ -185,44 +100,24 @@ func (s *Service) ListTenants(ctx context.Context, status int16, page, size int)
 	if err := validateOptionalTenantStatus(status); err != nil {
 		return nil, 0, err
 	}
-	var out []map[string]any
-	var total int64
-	if err := s.repo.inApp(ctx, func(q *sqlcgen.Queries) error {
-		cnt, e := q.CountTenants(ctx, pgInt2(status, status != 0))
-		if e != nil {
-			return e
-		}
-		total = cnt
-		rows, e := q.ListTenants(ctx, sqlcgen.ListTenantsParams{
-			Status: pgInt2(status, status != 0), Limit: int32(size), Offset: int32((page - 1) * size),
-		})
-		if e != nil {
-			return e
-		}
-		for _, r := range rows {
-			out = append(out, tenantToMap(r))
-		}
-		return nil
-	}); err != nil {
+	rows, total, err := s.repo.listTenants(ctx, status, page, size)
+	if err != nil {
 		return nil, 0, apperr.ErrTenantQueryFailed.WithCause(err)
+	}
+	out := make([]map[string]any, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, tenantToMap(row))
 	}
 	return out, total, nil
 }
 
 // GetTenant 平台取租户详情。
 func (s *Service) GetTenant(ctx context.Context, id int64) (map[string]any, error) {
-	var m map[string]any
-	if err := s.repo.inApp(ctx, func(q *sqlcgen.Queries) error {
-		r, e := q.GetTenantByID(ctx, id)
-		if e != nil {
-			return apperr.ErrTenantNotFound
-		}
-		m = tenantToMap(r)
-		return nil
-	}); err != nil {
+	row, err := s.repo.getTenant(ctx, id)
+	if err != nil {
 		return nil, toAppErr(err)
 	}
-	return m, nil
+	return tenantToMap(row), nil
 }
 
 // UpdateTenant 平台改租户状态/到期。
@@ -230,25 +125,15 @@ func (s *Service) UpdateTenant(ctx context.Context, id int64, req UpdateTenantRe
 	if err := validateTenantStatus(req.Status); err != nil {
 		return err
 	}
-	var expire pgtype.Timestamptz
+	var expire *time.Time
 	if req.ExpireAt != "" {
 		t, err := time.Parse(time.RFC3339, req.ExpireAt)
 		if err != nil {
 			return apperr.ErrTenantExpireAtInvalid
 		}
-		expire = timex.RequiredTimestamptz(t)
+		expire = &t
 	}
-	if err := s.repo.inApp(ctx, func(q *sqlcgen.Queries) error {
-		if _, e := q.GetTenantByID(ctx, id); e != nil {
-			return apperr.ErrTenantNotFound
-		}
-		if _, e := q.UpdateTenantStatus(ctx, sqlcgen.UpdateTenantStatusParams{
-			ID: id, Status: req.Status, ExpireAt: expire,
-		}); e != nil {
-			return apperr.ErrTenantMutationFailed.WithCause(e)
-		}
-		return nil
-	}); err != nil {
+	if err := s.repo.updateTenantStatus(ctx, id, req.Status, expire); err != nil {
 		return err
 	}
 	current, ok := CurrentIdentity(ctx)
@@ -275,18 +160,7 @@ func (s *Service) UpdateTenantConfig(ctx context.Context, tenantID int64, req Te
 	if err != nil {
 		return err
 	}
-	if err := s.repo.inApp(ctx, func(q *sqlcgen.Queries) error {
-		if _, e := q.GetTenantByID(ctx, tenantID); e != nil {
-			return apperr.ErrTenantNotFound
-		}
-		if _, e := q.UpdateTenantConfig(ctx, sqlcgen.UpdateTenantConfigParams{
-			ID: tenantID, LogoUrl: pgText(req.LogoURL), DisplayName: pgText(req.DisplayName),
-			FeatureFlags: flags, AuthMode: req.AuthMode, EnableActivationCode: req.EnableActivationCode,
-		}); e != nil {
-			return apperr.ErrTenantMutationFailed.WithCause(e)
-		}
-		return nil
-	}); err != nil {
+	if err := s.repo.updateTenantConfig(ctx, tenantID, req, flags); err != nil {
 		return err
 	}
 	return s.writeAudit(ctx, RoleSchoolAdmin, AuditActionTenantConfig, AuditTargetTenant, tenantID, map[string]any{
@@ -298,32 +172,17 @@ func (s *Service) UpdateTenantConfig(ctx context.Context, tenantID int64, req Te
 
 // GetSsoConfig 读取本校启用的 SSO/LDAP 配置。
 func (s *Service) GetSsoConfig(ctx context.Context, tenantID int64) (*SsoConfigView, error) {
-	var view *SsoConfigView
-	if err := s.repo.inTenantID(ctx, tenantID, func(q *sqlcgen.Queries) error {
-		row, e := q.GetSsoConfig(ctx, tenantID)
-		if e != nil {
-			if db.IsNoRows(e) {
-				view = &SsoConfigView{Config: map[string]any{}, Enabled: false}
-				return nil
-			}
-			return e
-		}
-		cfg, e := jsonx.ObjectMapStrict(row.Config)
-		if e != nil {
-			return e
-		}
-		view = &SsoConfigView{
-			ID: ids.Format(row.ID), Type: row.Type, Config: maskSsoConfig(cfg),
-			MatchField: row.MatchField, Enabled: row.Enabled,
-		}
-		return nil
-	}); err != nil {
+	row, found, err := s.repo.getSsoConfigForView(ctx, tenantID)
+	if err != nil {
 		return nil, toAppErr(err)
 	}
-	return view, nil
+	if !found {
+		return &SsoConfigView{Config: map[string]any{}, Enabled: false}, nil
+	}
+	return ssoConfigViewFromSnapshot(row)
 }
 
-// UpsertSsoConfig 保存本校 SSO/LDAP 配置。
+// UpsertSsoConfig 保存本校 SSO/CAS/LDAP 配置,敏感字段加密后才进入 JSONB。
 func (s *Service) UpsertSsoConfig(ctx context.Context, tenantID int64, req SsoConfigRequest) (*SsoConfigView, error) {
 	if req.Type != SsoTypeCAS && req.Type != SsoTypeLDAP {
 		return nil, apperr.ErrSsoTypeInvalid
@@ -331,9 +190,11 @@ func (s *Service) UpsertSsoConfig(ctx context.Context, tenantID int64, req SsoCo
 	if req.MatchField != 1 && req.MatchField != 2 {
 		return nil, apperr.ErrSsoMatchFieldInvalid
 	}
+	// 先按类型校验配置完整性和外部地址安全边界,防止保存不可用或可 SSRF 的 SSO 配置。
 	if err := validateSsoConfigForStorage(req.Type, req.Config); err != nil {
 		return nil, err
 	}
+	// 再加密 bind_password/client_secret 等敏感字段,持久化层只接收受保护配置。
 	protected, err := protectSsoConfig(s.cipher, req.Config)
 	if err != nil {
 		return nil, apperr.ErrSsoConfigProtectFailed.WithCause(err)
@@ -342,46 +203,56 @@ func (s *Service) UpsertSsoConfig(ctx context.Context, tenantID int64, req SsoCo
 	if err != nil {
 		return nil, err
 	}
-	var view SsoConfigView
-	if err := s.repo.inTenantID(ctx, tenantID, func(q *sqlcgen.Queries) error {
-		row, e := q.UpsertSsoConfig(ctx, sqlcgen.UpsertSsoConfigParams{
-			ID: s.idgen.Generate(), TenantID: tenantID, Type: req.Type,
-			Config: cfgBytes, MatchField: req.MatchField, Enabled: req.Enabled,
-		})
-		if e != nil {
-			return e
-		}
-		cfg, e := jsonx.ObjectMapStrict(row.Config)
-		if e != nil {
-			return e
-		}
-		view = SsoConfigView{
-			ID: ids.Format(row.ID), Type: row.Type, Config: maskSsoConfig(cfg),
-			MatchField: row.MatchField, Enabled: row.Enabled,
-		}
-		return s.writeAuditInTx(ctx, q, RoleSchoolAdmin, AuditActionTenantSSO, AuditTargetSSOConfig, row.ID, map[string]any{
+	row, err := s.repo.upsertSsoConfigWithAudit(ctx, tenantID, s.idgen.Generate(), req, cfgBytes, func(rowID int64) (AuditLogCreate, error) {
+		entry, err := buildAuditEntry(ctx, RoleSchoolAdmin, AuditActionTenantSSO, AuditTargetSSOConfig, rowID, map[string]any{
 			"type":        req.Type,
 			"match_field": req.MatchField,
 			"enabled":     req.Enabled,
 		})
-	}); err != nil {
+		if err != nil {
+			return AuditLogCreate{}, err
+		}
+		return buildAuditLogCreate(s.idgen.Generate(), entry), nil
+	})
+	if err != nil {
 		return nil, toAppErrWith(err, apperr.ErrSsoConfigReadFailed)
 	}
-	return &view, nil
+	return ssoConfigViewFromSnapshot(row)
+}
+
+// applicationToMap 把入驻申请投影转对外 map。
+func applicationToMap(r TenantApplicationSnapshot) map[string]any {
+	return map[string]any{
+		"id": ids.Format(r.ID), "school_name": r.SchoolName, "school_type": r.SchoolType,
+		"contact_name": r.ContactName, "contact_phone": r.ContactPhone, "contact_email": r.ContactEmail,
+		"status": r.Status, "reject_reason": r.RejectReason, "created_at": r.CreatedAt,
+	}
 }
 
 // tenantToMap 把租户行转对外 map。
-func tenantToMap(r sqlcgen.Tenant) map[string]any {
+func tenantToMap(r TenantSnapshot) map[string]any {
 	m := map[string]any{
 		"id": ids.Format(r.ID), "code": r.Code, "name": r.Name, "type": r.Type,
 		"status": r.Status, "deploy_mode": r.DeployMode,
-		"logo_url": textVal(r.LogoUrl), "display_name": textVal(r.DisplayName),
+		"logo_url": r.LogoURL, "display_name": r.DisplayName,
 		"auth_mode": r.AuthMode, "enable_activation_code": r.EnableActivationCode,
 	}
-	if r.ExpireAt.Valid {
-		m["expire_at"] = r.ExpireAt.Time
+	if r.HasExpireAt {
+		m["expire_at"] = r.ExpireAt
 	}
 	return m
+}
+
+// ssoConfigViewFromSnapshot 把 SSO 配置投影转换为脱敏响应视图。
+func ssoConfigViewFromSnapshot(row SsoConfigSnapshot) (*SsoConfigView, error) {
+	cfg, err := jsonx.ObjectMapStrict(row.Config)
+	if err != nil {
+		return nil, err
+	}
+	return &SsoConfigView{
+		ID: ids.Format(row.ID), Type: row.Type, Config: maskSsoConfig(cfg),
+		MatchField: row.MatchField, Enabled: row.Enabled,
+	}, nil
 }
 
 // protectSsoConfig 加密 SSO/LDAP 配置中的敏感字段。

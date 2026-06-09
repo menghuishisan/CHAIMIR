@@ -1,0 +1,42 @@
+# 本文件定义 RPC 网关 Envoy 基线配置,运行期由 M2 按环境注入上游集群。
+static_resources:
+  listeners:
+    - name: rpc_listener
+      address:
+        socket_address:
+          address: 0.0.0.0
+          port_value: 8080
+      filter_chains:
+        - filters:
+            - name: envoy.filters.network.http_connection_manager
+              typed_config:
+                "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+                stat_prefix: chaimir_rpc
+                route_config:
+                  name: rpc_route
+                  virtual_hosts:
+                    - name: rpc
+                      domains: ["*"]
+                      routes:
+                        - match:
+                            prefix: "/"
+                          route:
+                            cluster: runtime_rpc
+                http_filters:
+                  - name: envoy.filters.http.router
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
+  clusters:
+    - name: runtime_rpc
+      connect_timeout: 1s
+      type: STRICT_DNS
+      lb_policy: ROUND_ROBIN
+      load_assignment:
+        cluster_name: runtime_rpc
+        endpoints:
+          - lb_endpoints:
+              - endpoint:
+                  address:
+                    socket_address:
+                      address: ${CHAIMIR_RPC_UPSTREAM_HOST}
+                      port_value: ${CHAIMIR_RPC_UPSTREAM_PORT}

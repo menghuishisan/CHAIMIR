@@ -8,8 +8,7 @@ import (
 
 // TestValidateImportRowRejectsUnknownTargetType 确认导入目标类型必须显式合法。
 func TestValidateImportRowRejectsUnknownTargetType(t *testing.T) {
-	var svc Service
-	msg := svc.validateImportRow(nil, nil, 99, ImportRowInput{
+	msg := validateImportRowBasic(99, ImportRowInput{
 		Phone: "13800138000",
 		Name:  "张三",
 		No:    "S001",
@@ -22,10 +21,9 @@ func TestValidateImportRowRejectsUnknownTargetType(t *testing.T) {
 
 // TestValidateImportRowRejectsDuplicatePhoneInFile 确认导入预览阶段拦截文件内重复手机号。
 func TestValidateImportRowRejectsDuplicatePhoneInFile(t *testing.T) {
-	var svc Service
 	seen := map[string]bool{"phone:13800138000": true}
 
-	msg := svc.validateImportRow(nil, nil, ImportTargetStudent, ImportRowInput{
+	msg := validateImportRowBasic(ImportTargetStudent, ImportRowInput{
 		Phone: "13800138000",
 		Name:  "李四",
 		No:    "S002",

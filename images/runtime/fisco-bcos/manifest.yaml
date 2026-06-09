@@ -1,0 +1,89 @@
+﻿# 本文件声明 runtime/fisco-bcos 镜像的职责、端口、安全、资源和供应链约束。
+schema_version: 1
+category: runtime
+name: fisco-bcos
+image: runtime/fisco-bcos
+labels:
+  app.kubernetes.io/name: fisco-bcos
+  app.kubernetes.io/component: runtime
+  app.kubernetes.io/part-of: chaimir
+  chaimir.io/category: runtime
+  chaimir.io/image: runtime/fisco-bcos
+  chaimir.io/data-driven: "true"
+  chaimir.io/student-access: "true"
+  chaimir.io/sensitivity: student-runtime
+  chaimir.io/scope: sandbox
+  chaimir.io/source: thin-wrapper
+description: FISCO BCOS 联盟链教学运行时镜像。
+source:
+  type: thin-wrapper
+upstream:
+  image: fiscoorg/fiscobcos:v3.11.0
+  reuse_policy: thin-wrapper
+data_driven: true
+capabilities:
+  - chain-runtime
+  - fisco-node
+  - contract-dev
+runtime:
+  eco: fisco
+  adapter_level: 2
+  default_tool_codes:
+    - terminal
+    - code-server
+ports:
+  - name: p2p
+    container_port: 20200
+    protocol: TCP
+    expose: internal
+    purpose: FISCO BCOS P2P
+  - name: rpc
+    container_port: 8545
+    protocol: TCP
+    expose: proxy
+    purpose: FISCO BCOS RPC
+local_dev:
+  host_mappings:
+    - host: 127.0.0.1
+      env: CHAIMIR_DEV_FISCO_RPC_PORT
+      default: 18550
+      container_port: 8545
+security:
+  run_as_non_root: true
+  read_only_root_filesystem: true
+  allow_privilege_escalation: false
+  privileged: false
+  host_network: false
+  automount_service_account_token: false
+  drop_capabilities:
+    - ALL
+  network_policy: deny-all
+student_access:
+  enabled: true
+  shell: restricted
+  allowed_mounts:
+    - workspace
+    - public-assets
+    - runtime-state
+resources:
+  cpu_request: 500m
+  cpu_limit: "2"
+  memory_request: 1Gi
+  memory_limit: 3Gi
+  ephemeral_storage_limit: 4Gi
+build:
+  context: images/runtime/fisco-bcos
+  dockerfile: Dockerfile
+selftest:
+  commands:
+    - name: fisco-version
+      command:
+        - sh
+        - -lc
+        - "CHAIMIR_SELFTEST=1 /usr/local/bin/chaimir-fisco-entrypoint"
+supply_chain:
+  sbom: true
+  trivy_required: true
+  cosign_required: true
+  pull_by_digest_in_production: true
+

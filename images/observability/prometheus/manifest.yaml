@@ -1,0 +1,89 @@
+# 本文件声明 observability/prometheus 上游固定镜像的来源、配置、端口、数据卷和生产门禁。
+schema_version: 1
+category: observability
+name: prometheus
+image: observability/prometheus
+labels:
+  app.kubernetes.io/name: prometheus
+  app.kubernetes.io/component: observability
+  app.kubernetes.io/part-of: chaimir
+  chaimir.io/category: observability
+  chaimir.io/image: observability/prometheus
+  chaimir.io/data-driven: "false"
+  chaimir.io/student-access: "false"
+  chaimir.io/sensitivity: observability
+  chaimir.io/scope: observability
+  chaimir.io/source: upstream-pinned
+description: Prometheus 指标采集上游固定镜像。
+source:
+  type: upstream-pinned
+upstream:
+  registry: quay.io
+  image: prometheus/prometheus
+  version: "v3.5.0"
+  digest_required: true
+  digest_lock_ref: images/locks/observability/prometheus.lock.yaml
+  license: Apache-2.0
+private_delivery:
+  offline_bundle: true
+  import_project: observability
+data_driven: false
+capabilities:
+  - metrics
+  - alerting-source
+env_keys:
+  config:
+    - MONITORING_PANELS_JSON
+  secret: []
+secrets_required: []
+ports:
+  - name: http
+    container_port: 9090
+    protocol: TCP
+    expose: internal
+    purpose: Prometheus UI/API, operator only
+local_dev:
+  host_mappings: []
+security:
+  run_as_non_root: true
+  read_only_root_filesystem: false
+  allow_privilege_escalation: false
+  privileged: false
+  host_network: false
+  automount_service_account_token: false
+  drop_capabilities:
+    - ALL
+  network_policy: deny-all
+security_exceptions:
+  - field: read_only_root_filesystem
+    reason: Prometheus 需要写 TSDB 数据卷。
+    writable_mounts:
+      - runtime-state
+student_access:
+  enabled: false
+data_volumes:
+  - name: data
+    mount_path: /prometheus
+    backup_required: true
+backup:
+  required: true
+  mode: retention-and-volume
+network:
+  expose: internal
+  default_deny: true
+resources:
+  cpu_request: 250m
+  cpu_limit: "1"
+  memory_request: 512Mi
+  memory_limit: 2Gi
+  ephemeral_storage_limit: 1Gi
+selftest:
+  upstream_healthcheck:
+    type: http
+    path: /-/ready
+    port: 9090
+supply_chain:
+  sbom: true
+  trivy_required: true
+  cosign_required: true
+  pull_by_digest_in_production: true

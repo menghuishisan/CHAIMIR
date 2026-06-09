@@ -6,7 +6,6 @@ import (
 	"regexp"
 	"strings"
 
-	"chaimir/internal/modules/sim/internal/sqlcgen"
 	"chaimir/internal/platform/auth"
 	"chaimir/internal/platform/ids"
 	"chaimir/internal/platform/jsonx"
@@ -18,7 +17,6 @@ var (
 	semverRe      = regexp.MustCompile(`^[0-9]+\.[0-9]+\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?$`)
 	packageCodeRe = regexp.MustCompile(`^(builtin|teacher_[0-9]+|org_[0-9]+)__[a-z0-9][a-z0-9-]{1,80}$`)
 	hashRe        = regexp.MustCompile(`^[a-fA-F0-9]{64}$`)
-	sourceRefRe   = regexp.MustCompile(`^[a-z]+:[0-9]{4}:[a-z][a-z0-9-]*:[0-9A-Za-z_-]+$`)
 	shareCodeRe   = regexp.MustCompile(`^[A-Za-z0-9_-]{16,48}$`)
 )
 
@@ -80,12 +78,12 @@ func validatePackageNamespace(req SubmitPackageRequest) error {
 }
 
 // validatePackageAuthorAccess 校验包维护权限,教师/组织作者只能维护自己命名空间下的包。
-func validatePackageAuthorAccess(id tenant.Identity, pkg sqlcgen.SimPackage) error {
+func validatePackageAuthorAccess(id tenant.Identity, pkg packageAuthorScope) error {
 	if id.IsPlatform {
 		return nil
 	}
 	if pkg.AuthorType == AuthorTypeTeacher || pkg.AuthorType == AuthorTypeOrg {
-		if pkg.AuthorID.Valid && pkg.AuthorID.Int64 == id.AccountID {
+		if pkg.AuthorID == id.AccountID {
 			return nil
 		}
 	}
@@ -130,7 +128,7 @@ func validateUpdatePackageRequest(req UpdatePackageRequest, compute int16) error
 // validateCreateSessionRequest 校验创建会话参数,租户和 owner 由服务层补齐。
 func validateCreateSessionRequest(req CreateSessionRequest) error {
 	if strings.TrimSpace(req.PackageCode) == "" || strings.TrimSpace(req.Version) == "" ||
-		req.Seed == 0 || !sourceRefRe.MatchString(strings.TrimSpace(req.SourceRef)) {
+		req.Seed == 0 || !auth.ValidSourceRef(req.SourceRef) {
 		return apperr.ErrSimSessionInvalid
 	}
 	if _, ok := ids.Parse(req.OwnerAccountID); !ok {
@@ -185,11 +183,7 @@ func authorizeSessionOwner(id tenant.Identity, ownerID int64) error {
 
 // validateSimSourceRefAccess 校验服务签名绑定的 source_ref 与会话归属一致。
 func validateSimSourceRefAccess(ctx context.Context, sourceRef string) error {
-	signedSourceRef, ok := auth.ServiceSourceRefFromContext(ctx)
-	if !ok {
-		return nil
-	}
-	if signedSourceRef != sourceRef {
+	if !auth.ServiceSourceRefAuthorized(ctx, sourceRef) {
 		return apperr.ErrSimAccessDenied
 	}
 	return nil
@@ -221,4 +215,73 @@ func sameAction(existing ActionDTO, req ReportActionRequest) bool {
 		return false
 	}
 	return jsonx.Equal(existing.Payload, req.Payload)
+}
+
+// buildPreviewReport 生成审核预检报告;具体 Worker/CSP 动态预览由前端与平台审核流程承接。
+func buildPreviewReport(req SubmitPackageRequest) map[string]any {
+	return map[string]any{
+		"metadata_validation": "passed",
+		"review_required":     true,
+		"bundle_hash":         strings.ToLower(req.BundleHash),
+		"compute":             req.Compute,
+	}
+}
+
+// mergeValidationReport 合并受控预览的动态结果,并保护上传扫描生成的权威字段。
+func mergeValidationReport(current, incoming map[string]any) (map[string]any, error) {
+	if current == nil || incoming == nil {
+		return nil, apperr.ErrSimPackageValidationFail
+	}
+	merged := make(map[string]any, len(current)+len(incoming))
+	for key, value := range current {
+		merged[key] = value
+	}
+	for key, value := range incoming {
+		name := strings.TrimSpace(key)
+		if name == "" || protectedValidationReportKeys[name] || !dynamicValidationReportKeys[name] {
+			return nil, apperr.ErrSimPackageValidationFail
+		}
+		if !validDynamicValidationReportValue(name, value) {
+			return nil, apperr.ErrSimPackageValidationFail
+		}
+		merged[name] = value
+	}
+	return merged, nil
+}
+
+var protectedValidationReportKeys = map[string]bool{
+	"metadata_validation": true,
+	"review_required":     true,
+	"bundle_hash":         true,
+	"compute":             true,
+	"static_scan":         true,
+	"file":                true,
+	"file_count":          true,
+}
+
+var dynamicValidationReportKeys = map[string]bool{
+	"determinism_check":  true,
+	"determinism_detail": true,
+	"worker_preview":     true,
+	"worker_detail":      true,
+	"checked_at":         true,
+}
+
+// validDynamicValidationReportValue 校验动态审核结果字段,避免任意 JSON 被塞进审核报告。
+func validDynamicValidationReportValue(name string, value any) bool {
+	switch name {
+	case "determinism_check", "worker_preview":
+		v, ok := value.(string)
+		return ok && (v == "passed" || v == "failed")
+	default:
+		return value != nil
+	}
+}
+
+// previewReportPassed 判断审核报告是否满足上架前置条件。
+func previewReportPassed(report map[string]any) bool {
+	return report["metadata_validation"] == "passed" &&
+		report["static_scan"] == "passed" &&
+		report["determinism_check"] == "passed" &&
+		report["worker_preview"] == "passed"
 }

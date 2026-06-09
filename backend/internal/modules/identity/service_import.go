@@ -6,7 +6,6 @@ import (
 	"context"
 	"time"
 
-	"chaimir/internal/modules/identity/internal/sqlcgen"
 	"chaimir/internal/platform/ids"
 	"chaimir/internal/platform/jsonx"
 	"chaimir/internal/platform/timex"
@@ -21,21 +20,15 @@ func (s *Service) PreviewImport(ctx context.Context, req ImportRequest) (*Import
 	result := &ImportPreviewResult{Total: len(req.Rows)}
 	seen := map[string]bool{} // 文件内手机号与学号/工号去重检查。
 
-	// 在租户上下文内逐行校验(需查组织存在性、库内唯一性)。
-	if err := s.repo.inTenant(ctx, func(q *sqlcgen.Queries) error {
-		for i, row := range req.Rows {
-			line := i + 1
-			if msg := s.validateImportRow(ctx, q, req.TargetType, row, seen); msg != "" {
-				result.Invalid++
-				result.Rows = append(result.Rows, ImportPreviewRow{Line: line, Error: msg})
-			} else {
-				result.Valid++
-				result.Rows = append(result.Rows, ImportPreviewRow{Line: line})
-			}
+	for i, row := range req.Rows {
+		line := i + 1
+		if msg := s.validateImportRow(ctx, req.TargetType, row, seen); msg != "" {
+			result.Invalid++
+			result.Rows = append(result.Rows, ImportPreviewRow{Line: line, Error: msg})
+			continue
 		}
-		return nil
-	}); err != nil {
-		return nil, apperr.ErrImportPreviewReadFailed.WithCause(err)
+		result.Valid++
+		result.Rows = append(result.Rows, ImportPreviewRow{Line: line})
 	}
 	return result, nil
 }
@@ -58,20 +51,13 @@ func (s *Service) CreateImportPreview(ctx context.Context, operatorID int64, req
 		return nil, toAppErr(err)
 	}
 
-	if err := s.repo.inTenant(ctx, func(q *sqlcgen.Queries) error {
-		_, e := q.CreateImportPreview(ctx, sqlcgen.CreateImportPreviewParams{
-			ID: previewID, TenantID: tenantID, OperatorID: operatorID, TargetType: req.TargetType,
-			FileName: req.FileName, Rows: rowsJSON, PreviewResult: resultJSON,
-			ExpireAt: timex.RequiredTimestamptz(timex.Now().Add(s.importPreviewTTL)),
-		})
-		return e
-	}); err != nil {
+	if err := s.repo.createImportPreview(ctx, previewID, tenantID, operatorID, req, rowsJSON, resultJSON, timex.Now().Add(s.importPreviewTTL)); err != nil {
 		return nil, apperr.ErrImportPreviewStoreFailed.WithCause(err)
 	}
 	return result, nil
 }
 
-// CommitImportPreview 导入提交:读取服务端预览结果,仅写入仍然校验通过的行。
+// CommitImportPreview 提交服务端持久化的导入预览,逐行复验后只写入仍然合法的账号。
 func (s *Service) CommitImportPreview(ctx context.Context, operatorID int64, req ImportCommitRequest) (*ImportCommitResult, error) {
 	previewID, ok := ids.Parse(req.PreviewID)
 	if !ok {
@@ -89,80 +75,74 @@ func (s *Service) CommitImportPreview(ctx context.Context, operatorID int64, req
 	var activationCodes []ActivationCodeIssued
 	var initPasswords []InitialPasswordIssued
 	var total, success, failed int
+	var createRows []ImportAccountCreate
 
-	if err := s.repo.inTenant(ctx, func(q *sqlcgen.Queries) error {
-		row, e := q.GetPendingImportPreview(ctx, sqlcgen.GetPendingImportPreviewParams{ID: previewID, OperatorID: operatorID})
-		if e != nil {
-			return apperr.ErrImportPreviewNotFound
+	// 重新读取服务端预览,防止客户端提交阶段篡改导入行或绕过过期校验。
+	preview, err := s.repo.getPendingImportPreviewForUpdate(ctx, previewID, operatorID)
+	if err != nil {
+		return nil, toAppErrWith(err, apperr.ErrImportPreviewReadFailed)
+	}
+	rows, err := unmarshalImportRows(preview.Rows)
+	if err != nil {
+		return nil, toAppErr(err)
+	}
+	if err := ensureImportRowsLimit(rows, s.importMaxRows); err != nil {
+		return nil, err
+	}
+	total = len(rows)
+	seen := map[string]bool{}
+	// 提交前逐行复验并生成持久化输入,账号写入仍由 repo 统一放进一个事务。
+	for i, importRow := range rows {
+		line := i + 1
+		if msg := s.validateImportRow(ctx, preview.TargetType, importRow, seen); msg != "" {
+			failed++
+			errDetails = append(errDetails, rowErr{Line: line, Error: msg})
+			continue
 		}
-		rows, e := unmarshalImportRows(row.Rows)
-		if e != nil {
-			return e
+		createRow, issued, err := s.buildImportAccountCreate(ctx, tenantID, operatorID, preview.TargetType, importRow, enableActivationCode)
+		if err != nil {
+			failed++
+			errDetails = append(errDetails, rowErr{Line: line, Error: "写入失败"})
+			continue
 		}
-		if err := ensureImportRowsLimit(rows, s.importMaxRows); err != nil {
-			return err
+		createRows = append(createRows, createRow)
+		if issued.ActivationCode != "" {
+			activationCodes = append(activationCodes, issued)
 		}
-		total = len(rows)
-		seen := map[string]bool{}
-		for i, importRow := range rows {
-			line := i + 1
-			if msg := s.validateImportRow(ctx, q, row.TargetType, importRow, seen); msg != "" {
-				failed++
-				errDetails = append(errDetails, rowErr{Line: line, Error: msg})
-				continue
-			}
-			issued, e := s.insertImportRow(ctx, q, tenantID, operatorID, row.TargetType, importRow, enableActivationCode)
-			if e != nil {
-				failed++
-				errDetails = append(errDetails, rowErr{Line: line, Error: "写入失败"})
-				continue
-			}
-			if issued.ActivationCode != "" {
-				activationCodes = append(activationCodes, issued)
-			}
-			if issued.InitPassword != "" {
-				initPasswords = append(initPasswords, InitialPasswordIssued{
-					AccountID:    issued.AccountID,
-					InitPassword: issued.InitPassword,
-				})
-			}
-			success++
+		if issued.InitPassword != "" {
+			initPasswords = append(initPasswords, InitialPasswordIssued{
+				AccountID:    issued.AccountID,
+				InitPassword: issued.InitPassword,
+			})
 		}
-		detailJSON, e := marshalImportRowErrors(errDetails)
-		if e != nil {
-			return e
-		}
-		if _, e := q.CreateImportBatch(ctx, sqlcgen.CreateImportBatchParams{
-			ID: batchID, TenantID: tenantID, OperatorID: operatorID, TargetType: row.TargetType,
-			FileName: row.FileName, Total: int32(total), Success: int32(success), Failed: int32(failed),
-			ErrorDetail: detailJSON, Status: ImportDone,
-		}); e != nil {
-			return e
-		}
-		if e := s.writeAuditInTx(ctx, q, RoleSchoolAdmin, AuditActionAccountImport, AuditTargetImportBatch, batchID, map[string]any{
-			"target_type":            row.TargetType,
-			"total":                  total,
-			"success":                success,
-			"failed":                 failed,
-			"enable_activation_code": enableActivationCode,
-			"preview_id":             ids.Format(previewID),
-		}); e != nil {
-			return e
-		}
-		if e := q.MarkImportPreviewSubmitted(ctx, sqlcgen.MarkImportPreviewSubmittedParams{ID: previewID, OperatorID: operatorID}); e != nil {
-			return e
-		}
-		result = ImportCommitResult{
-			BatchID: ids.Format(batchID), Total: total, Success: success, Failed: failed,
-			ActivationCodes: activationCodes,
-			InitPasswords:   initPasswords,
-		}
-		return nil
-	}); err != nil {
+		success++
+	}
+	detailJSON, err := marshalImportRowErrors(errDetails)
+	if err != nil {
+		return nil, toAppErr(err)
+	}
+	entry, err := buildAuditEntry(ctx, RoleSchoolAdmin, AuditActionAccountImport, AuditTargetImportBatch, batchID, map[string]any{
+		"target_type":            preview.TargetType,
+		"total":                  total,
+		"success":                success,
+		"failed":                 failed,
+		"enable_activation_code": enableActivationCode,
+		"preview_id":             ids.Format(previewID),
+	})
+	if err != nil {
+		return nil, err
+	}
+	// 落库批次摘要和审计后再标记预览已提交,保证刷新页面也能追溯提交结果。
+	if err := s.repo.commitImportPreviewWithAudit(ctx, previewID, operatorID, batchID, tenantID, preview, createRows, detailJSON, total, success, failed, buildAuditLogCreate(s.idgen.Generate(), entry), s.idgen.Generate); err != nil {
 		if ae, ok := apperr.As(err); ok {
 			return nil, ae
 		}
 		return nil, apperr.ErrImportPreviewReadFailed.WithCause(err)
+	}
+	result = ImportCommitResult{
+		BatchID: ids.Format(batchID), Total: total, Success: success, Failed: failed,
+		ActivationCodes: activationCodes,
+		InitPasswords:   initPasswords,
 	}
 	return &result, nil
 }
@@ -222,43 +202,31 @@ func unmarshalImportPreviewResult(data []byte) (*ImportPreviewResult, error) {
 
 // ListImportBatches 查询导入批次历史。
 func (s *Service) ListImportBatches(ctx context.Context, page, size int) ([]ImportBatchView, int64, error) {
-	var views []ImportBatchView
-	var total int64
-	if err := s.repo.inTenant(ctx, func(q *sqlcgen.Queries) error {
-		cnt, e := q.CountImportBatches(ctx)
-		if e != nil {
-			return e
-		}
-		total = cnt
-		rows, e := q.ListImportBatches(ctx, sqlcgen.ListImportBatchesParams{
-			Limit:  int32(size),
-			Offset: int32((page - 1) * size),
-		})
-		if e != nil {
-			return e
-		}
-		for _, row := range rows {
-			views = append(views, ImportBatchView{
-				ID:         ids.Format(row.ID),
-				OperatorID: ids.Format(row.OperatorID),
-				TargetType: row.TargetType,
-				FileName:   row.FileName,
-				Total:      row.Total,
-				Success:    row.Success,
-				Failed:     row.Failed,
-				Status:     row.Status,
-				CreatedAt:  timex.FromTimestamptz(row.CreatedAt).Format(time.RFC3339),
-			})
-		}
-		return nil
-	}); err != nil {
+	rows, total, err := s.repo.listImportBatches(ctx, page, size)
+	if err != nil {
 		return nil, 0, apperr.ErrImportBatchQueryFailed.WithCause(err)
+	}
+	views := make([]ImportBatchView, 0, len(rows))
+	for _, row := range rows {
+		views = append(views, ImportBatchView{
+			ID: ids.Format(row.ID), OperatorID: ids.Format(row.OperatorID), TargetType: row.TargetType,
+			FileName: row.FileName, Total: row.Total, Success: row.Success, Failed: row.Failed,
+			Status: row.Status, CreatedAt: row.CreatedAt.Format(time.RFC3339),
+		})
 	}
 	return views, total, nil
 }
 
-// validateImportRow 校验单行;返回错误文案(空串=通过)。
-func (s *Service) validateImportRow(ctx context.Context, q *sqlcgen.Queries, targetType int16, row ImportRowInput, seen map[string]bool) string {
+// validateImportRow 校验单行基础格式和数据库约束;返回错误文案(空串=通过)。
+func (s *Service) validateImportRow(ctx context.Context, targetType int16, row ImportRowInput, seen map[string]bool) string {
+	if msg := validateImportRowBasic(targetType, row, seen); msg != "" {
+		return msg
+	}
+	return s.repo.validateImportRowInStore(ctx, targetType, row)
+}
+
+// validateImportRowBasic 校验导入行的纯格式约束,不访问数据库。
+func validateImportRowBasic(targetType int16, row ImportRowInput, seen map[string]bool) string {
 	if targetType != ImportTargetTeacher && targetType != ImportTargetStudent {
 		return "导入类型不正确"
 	}
@@ -283,25 +251,13 @@ func (s *Service) validateImportRow(ctx context.Context, q *sqlcgen.Queries, tar
 	if !ok {
 		return "组织 ID 非法"
 	}
-	// 组织存在性(学生→班级,教师→院系)。
-	if targetType == ImportTargetStudent {
-		if _, e := q.GetClassByID(ctx, orgID); e != nil {
-			return "班级不存在"
-		}
-	} else {
-		if _, e := q.GetDepartmentByID(ctx, orgID); e != nil {
-			return "院系不存在"
-		}
-	}
-	// 库内学工号唯一。
-	if _, e := q.GetAccountProfileByNo(ctx, row.No); e == nil {
-		return "学工号已存在"
-	}
+	_ = orgID
 	return ""
 }
 
-// insertImportRow 写入单个导入账号,并返回一次性开通凭据。
-func (s *Service) insertImportRow(ctx context.Context, q *sqlcgen.Queries, tenantID, operatorID int64, targetType int16, row ImportRowInput, enableActivationCode bool) (ActivationCodeIssued, error) {
+// buildImportAccountCreate 构造单个导入账号的持久化输入和一次性开通结果。
+func (s *Service) buildImportAccountCreate(ctx context.Context, tenantID, operatorID int64, targetType int16, row ImportRowInput, enableActivationCode bool) (ImportAccountCreate, ActivationCodeIssued, error) {
+	// 第一步按导入目标确定基础身份和角色,避免调用方自行映射角色码。
 	baseIdentity := BaseIdentityStudent
 	baseRole := RoleStudent
 	if targetType == ImportTargetTeacher {
@@ -312,45 +268,37 @@ func (s *Service) insertImportRow(ctx context.Context, q *sqlcgen.Queries, tenan
 	accountID := s.idgen.Generate()
 	initPlain, err := s.genTempPassword()
 	if err != nil {
-		return ActivationCodeIssued{}, apperr.ErrAccountCredentialFailed.WithCause(err)
+		return ImportAccountCreate{}, ActivationCodeIssued{}, apperr.ErrAccountCredentialFailed.WithCause(err)
 	}
 
+	// 第二步生成开通凭据并加密手机号,账号主表不保存明文敏感信息。
 	credential, err := buildAccountOpeningCredential(enableActivationCode, initPlain)
 	if err != nil {
-		return ActivationCodeIssued{}, err
+		return ImportAccountCreate{}, ActivationCodeIssued{}, err
 	}
 	phoneEnc, err := s.encryptPhone(row.Phone)
 	if err != nil {
-		return ActivationCodeIssued{}, err
+		return ImportAccountCreate{}, ActivationCodeIssued{}, err
 	}
-	if _, err := q.CreateAccount(ctx, sqlcgen.CreateAccountParams{
-		ID: accountID, TenantID: tenantID, PhoneEnc: phoneEnc, PhoneHash: s.phoneHash(row.Phone),
+	create := ImportAccountCreate{
+		AccountID: accountID, PhoneEnc: phoneEnc, PhoneHash: s.phoneHash(row.Phone),
 		PasswordHash: credential.PasswordHash, Name: row.Name, BaseIdentity: baseIdentity,
-		Status: AccountPending, MustChangePwd: credential.MustChangePassword,
-	}); err != nil {
-		return ActivationCodeIssued{}, err
+		MustChangePwd: credential.MustChangePassword, No: row.No, OrgID: orgID,
+		EnrollmentYear: row.EnrollmentYear, Title: row.Title, Role: baseRole,
 	}
-	if _, err := q.CreateAccountProfile(ctx, sqlcgen.CreateAccountProfileParams{
-		AccountID: accountID, TenantID: tenantID, No: row.No, OrgID: orgID,
-		EnrollmentYear: pgInt2(row.EnrollmentYear, targetType == ImportTargetStudent),
-		Title:          pgText(row.Title),
-	}); err != nil {
-		return ActivationCodeIssued{}, err
-	}
-	if err := q.AddAccountRole(ctx, sqlcgen.AddAccountRoleParams{
-		ID: s.idgen.Generate(), TenantID: tenantID, AccountID: accountID, Role: baseRole,
-	}); err != nil {
-		return ActivationCodeIssued{}, err
-	}
+	// 第三步按配置返回激活码或临时密码,调用方只负责聚合导入结果。
 	issued := ActivationCodeIssued{AccountID: ids.Format(accountID)}
 	if credential.NeedsActivationCode {
-		code, err := s.CreateActivationCode(ctx, q, tenantID, accountID, operatorID)
+		code, err := s.genActivationCode()
 		if err != nil {
-			return ActivationCodeIssued{}, err
+			return ImportAccountCreate{}, ActivationCodeIssued{}, apperr.ErrActivationCodeIssueFailed.WithCause(err)
 		}
+		create.HasActivation = true
+		create.ActivationHash = s.activationCodeHash(code)
+		create.ActivationAt = timex.Now().Add(s.activationCodeTTL)
 		issued.ActivationCode = code
-		return issued, nil
+		return create, issued, nil
 	}
 	issued.InitPassword = credential.InitPassword
-	return issued, nil
+	return create, issued, nil
 }

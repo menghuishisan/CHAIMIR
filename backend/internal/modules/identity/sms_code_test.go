@@ -6,7 +6,6 @@ import (
 	"errors"
 	"testing"
 
-	"chaimir/internal/modules/identity/internal/sqlcgen"
 	"chaimir/internal/platform/tenant"
 	"chaimir/pkg/apperr"
 )
@@ -48,7 +47,7 @@ func TestSmsTenantIDForRebindRequiresAuthenticatedTenant(t *testing.T) {
 
 // TestResetPasswordTargetRequiresSingleTenant 确认无学校上下文的找回密码不能在一号多校手机号上误选学校。
 func TestResetPasswordTargetRequiresSingleTenant(t *testing.T) {
-	_, err := selectResetPasswordTarget([]sqlcgen.FindAccountsByPhoneAllTenantsRow{
+	_, err := selectResetPasswordTarget([]LoginTenantCandidate{
 		{TenantID: 1001, AccountID: 2001},
 		{TenantID: 1002, AccountID: 2002},
 	}, "")
@@ -59,7 +58,7 @@ func TestResetPasswordTargetRequiresSingleTenant(t *testing.T) {
 
 // TestResetPasswordTargetUsesRequestedTenant 确认一号多校找回密码可按用户选择的学校定位账号。
 func TestResetPasswordTargetUsesRequestedTenant(t *testing.T) {
-	target, err := selectResetPasswordTarget([]sqlcgen.FindAccountsByPhoneAllTenantsRow{
+	target, err := selectResetPasswordTarget([]LoginTenantCandidate{
 		{TenantID: 1001, AccountID: 2001},
 		{TenantID: 1002, AccountID: 2002},
 	}, "1002")
@@ -73,7 +72,7 @@ func TestResetPasswordTargetUsesRequestedTenant(t *testing.T) {
 
 // TestResetPasswordSmsVerificationUsesGlobalScope 确认找回验证码按 tenant_id=NULL 的全局路径校验。
 func TestResetPasswordSmsVerificationUsesGlobalScope(t *testing.T) {
-	target, err := selectResetPasswordTarget([]sqlcgen.FindAccountsByPhoneAllTenantsRow{
+	target, err := selectResetPasswordTarget([]LoginTenantCandidate{
 		{TenantID: 1001, AccountID: 2001},
 	}, "")
 	if err != nil {
@@ -86,9 +85,9 @@ func TestResetPasswordSmsVerificationUsesGlobalScope(t *testing.T) {
 
 // TestLoginSmsTenantSelectionRequiresTenantForMultipleAccounts 确认一号多校短信验证码不会误写入第一个租户。
 func TestLoginSmsTenantSelectionRequiresTenantForMultipleAccounts(t *testing.T) {
-	_, err := selectLoginSmsTenantID([]sqlcgen.FindAccountsByPhoneAllTenantsRow{
-		{TenantID: 1001, AccountID: 2001},
-		{TenantID: 1002, AccountID: 2002},
+	_, err := selectLoginSmsTenantID([]AccountTenantCandidate{
+		{TenantID: 1001},
+		{TenantID: 1002},
 	}, "")
 	if err != apperr.ErrSmsTenantRequired {
 		t.Fatalf("expected ErrSmsTenantRequired for multi-tenant sms send, got %v", err)
@@ -97,9 +96,9 @@ func TestLoginSmsTenantSelectionRequiresTenantForMultipleAccounts(t *testing.T) 
 
 // TestLoginSmsTenantSelectionUsesRequestedTenant 确认登录短信验证码写入用户选择的学校租户。
 func TestLoginSmsTenantSelectionUsesRequestedTenant(t *testing.T) {
-	tenantID, err := selectLoginSmsTenantID([]sqlcgen.FindAccountsByPhoneAllTenantsRow{
-		{TenantID: 1001, AccountID: 2001},
-		{TenantID: 1002, AccountID: 2002},
+	tenantID, err := selectLoginSmsTenantID([]AccountTenantCandidate{
+		{TenantID: 1001},
+		{TenantID: 1002},
 	}, "1002")
 	if err != nil {
 		t.Fatalf("select login sms tenant: %v", err)

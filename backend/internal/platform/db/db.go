@@ -16,6 +16,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"strings"
 
 	"chaimir/internal/platform/config"
 	"chaimir/internal/platform/tenant"
@@ -144,6 +145,18 @@ func (d *DB) WithAppTx(ctx context.Context, fn TxFunc) error {
 func (d *DB) WithPrivilegedTx(ctx context.Context, fn TxFunc) error {
 	if d.priv == nil {
 		return fmt.Errorf("未配置特权连接(PG_PRIV_USER),无法执行跨租户查询")
+	}
+	return runTx(ctx, d.priv, fn)
+}
+
+// WithPrivilegedModuleTx 仅限模块后台维护任务扫描本模块自有 RLS 表。
+// 调用方必须在模块 repo 内收敛 SQL,不得读取/写入其他模块表或承载普通业务请求。
+func (d *DB) WithPrivilegedModuleTx(ctx context.Context, module string, fn TxFunc) error {
+	if strings.TrimSpace(module) == "" {
+		return fmt.Errorf("模块维护特权事务缺少模块名")
+	}
+	if d.priv == nil {
+		return fmt.Errorf("未配置特权连接(PG_PRIV_USER),无法执行模块维护任务")
 	}
 	return runTx(ctx, d.priv, fn)
 }

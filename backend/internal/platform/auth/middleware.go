@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"log/slog"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -35,10 +36,17 @@ const (
 
 type serviceSourceRefKey struct{}
 
+var serviceSourceRefRe = regexp.MustCompile(`^[a-z]+:[0-9]{4}:[a-z][a-z0-9-]*:[0-9A-Za-z_-]+$`)
+
 // RoleChecker 是 API 角色守卫需要的最小身份契约,由 identity 模块实现提供。
 type RoleChecker interface {
 	// HasRole 判断账号是否具备指定服务端角色。
 	HasRole(ctx context.Context, accountID int64, role string) (bool, error)
+}
+
+// ValidSourceRef 校验服务来源标识是否符合全局四段规范,不解析来源模块的业务语义。
+func ValidSourceRef(sourceRef string) bool {
+	return serviceSourceRefRe.MatchString(strings.TrimSpace(sourceRef))
 }
 
 // ServiceSourceRefFromContext 读取服务间鉴权签名绑定的来源标识。
@@ -50,6 +58,12 @@ func ServiceSourceRefFromContext(ctx context.Context) (string, bool) {
 // WithServiceSourceRef 把已验证的来源标识注入上下文,供模块内 contracts 直连和 HTTP 服务鉴权共用。
 func WithServiceSourceRef(ctx context.Context, sourceRef string) context.Context {
 	return context.WithValue(ctx, serviceSourceRefKey{}, sourceRef)
+}
+
+// ServiceSourceRefAuthorized 校验当前服务签名绑定的来源是否允许访问目标来源;普通用户上下文不受该服务签名规则限制。
+func ServiceSourceRefAuthorized(ctx context.Context, sourceRef string) bool {
+	signedSourceRef, ok := ServiceSourceRefFromContext(ctx)
+	return !ok || signedSourceRef == strings.TrimSpace(sourceRef)
 }
 
 // Middleware 校验 Authorization: Bearer <access>,失败即 11001;

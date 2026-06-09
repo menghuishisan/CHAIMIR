@@ -23,6 +23,7 @@ type fakeExperimentStore struct {
 	instanceStatus    int16
 	checkpointResults []ScorePart
 	reportScore       *float64
+	scoreWriteDrops   bool
 	pendingJudge      PendingCheckpoint
 	lastCheckpoint    CheckpointResultDTO
 	releasedSandboxID int64
@@ -91,7 +92,11 @@ func (s *fakeExperimentStore) UpdateInstanceStatus(_ context.Context, id int64, 
 // UpdateInstanceScore 更新测试实例总分。
 func (s *fakeExperimentStore) UpdateInstanceScore(_ context.Context, id int64, score float64) (ExperimentInstanceDTO, error) {
 	s.instance.ID = ids.Format(id)
-	s.instance.Score = &score
+	if s.scoreWriteDrops {
+		s.instance.Score = nil
+	} else {
+		s.instance.Score = &score
+	}
 	s.instance.Status = InstanceStatusCompleted
 	return s.instance, nil
 }
@@ -252,6 +257,7 @@ func (s *fakeSimService) RecycleSimBySourceRef(context.Context, int64, string, s
 // fakeEventBus 是测试用事件总线。
 type fakeEventBus struct {
 	published []publishedEvent
+	subErr    error
 }
 
 // publishedEvent 是测试事件记录。
@@ -268,7 +274,56 @@ func (b *fakeEventBus) Publish(_ context.Context, subject string, payload any) e
 
 // Subscribe 返回测试订阅。
 func (b *fakeEventBus) Subscribe(string, string, eventbus.Handler) (eventbus.Subscription, error) {
+	if b.subErr != nil {
+		return nil, b.subErr
+	}
 	return fakeSubscription{}, nil
+}
+
+// fakeContentReadService 是测试用 M5 内容读取 contract。
+type fakeContentReadService struct {
+	err error
+}
+
+// GetContentFace 返回测试题面或注入错误。
+func (s *fakeContentReadService) GetContentFace(context.Context, int64, contracts.ContentItemRef) (contracts.ContentItemSnapshot, error) {
+	if s.err != nil {
+		return contracts.ContentItemSnapshot{}, s.err
+	}
+	return contracts.ContentItemSnapshot{ItemCode: "p1", ItemVersion: "1.0.0"}, nil
+}
+
+// GetContentFull 返回测试全量内容。
+func (s *fakeContentReadService) GetContentFull(context.Context, int64, contracts.ContentItemRef) (contracts.ContentItemSnapshot, error) {
+	return contracts.ContentItemSnapshot{}, nil
+}
+
+// BatchGetContentFace 返回空题面列表。
+func (s *fakeContentReadService) BatchGetContentFace(context.Context, int64, []contracts.ContentItemRef) ([]contracts.ContentItemSnapshot, error) {
+	return []contracts.ContentItemSnapshot{}, nil
+}
+
+// IncrementContentUsage 记录测试内容引用。
+func (s *fakeContentReadService) IncrementContentUsage(context.Context, int64, contracts.ContentItemRef) error {
+	return nil
+}
+
+// fakeJudgeService 是测试用 M3 判题 contract。
+type fakeJudgeService struct{}
+
+// SubmitJudgeTask 返回测试判题任务。
+func (s *fakeJudgeService) SubmitJudgeTask(_ context.Context, req contracts.JudgeSubmitRequest) (contracts.JudgeTaskInfo, error) {
+	return contracts.JudgeTaskInfo{TaskID: 3001, TenantID: req.TenantID, SourceRef: req.SourceRef}, nil
+}
+
+// GetJudgeTask 返回测试判题任务。
+func (s *fakeJudgeService) GetJudgeTask(context.Context, int64) (contracts.JudgeTaskInfo, error) {
+	return contracts.JudgeTaskInfo{}, nil
+}
+
+// Rejudge 返回测试重判任务。
+func (s *fakeJudgeService) Rejudge(context.Context, int64) (contracts.JudgeTaskInfo, error) {
+	return contracts.JudgeTaskInfo{}, nil
 }
 
 // Close 关闭测试事件总线。

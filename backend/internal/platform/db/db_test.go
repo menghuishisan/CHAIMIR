@@ -3,6 +3,8 @@ package db
 
 import (
 	"fmt"
+	"os"
+	"strings"
 	"testing"
 
 	"chaimir/internal/platform/config"
@@ -17,6 +19,19 @@ func TestIsNoRowsRecognizesWrappedPGXError(t *testing.T) {
 	}
 	if !IsNoRows(fmt.Errorf("load course: %w", pgx.ErrNoRows)) {
 		t.Fatalf("expected wrapped pgx.ErrNoRows to be recognized")
+	}
+}
+
+// TestPrivilegedModuleTxDocumentsMaintenanceOnlyBoundary 确认特权事务只作为模块自有表维护任务的受控入口。
+func TestPrivilegedModuleTxDocumentsMaintenanceOnlyBoundary(t *testing.T) {
+	src, err := os.ReadFile("db.go")
+	if err != nil {
+		t.Fatalf("read db.go: %v", err)
+	}
+	body := string(src)
+	if !strings.Contains(body, "WithPrivilegedModuleTx") ||
+		!strings.Contains(body, "仅限模块后台维护任务扫描本模块自有 RLS 表") {
+		t.Fatalf("db must expose and document a narrow privileged module maintenance transaction")
 	}
 }
 

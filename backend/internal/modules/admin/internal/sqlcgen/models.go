@@ -554,6 +554,19 @@ type ImportPreview struct {
 	SubmittedAt   pgtype.Timestamptz `json:"submitted_at"`
 }
 
+type JudgeEventOutbox struct {
+	ID         int64              `json:"id"`
+	TenantID   int64              `json:"tenant_id"`
+	TaskID     int64              `json:"task_id"`
+	Subject    string             `json:"subject"`
+	Payload    []byte             `json:"payload"`
+	Status     int16              `json:"status"`
+	RetryCount int32              `json:"retry_count"`
+	LastError  pgtype.Text        `json:"last_error"`
+	CreatedAt  pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt  pgtype.Timestamptz `json:"updated_at"`
+}
+
 type JudgeResult struct {
 	TaskID          int64              `json:"task_id"`
 	TenantID        int64              `json:"tenant_id"`

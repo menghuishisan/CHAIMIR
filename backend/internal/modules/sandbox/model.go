@@ -32,6 +32,108 @@ type RuntimeImageDefinition struct {
 	GenesisBaked bool
 }
 
+// RuntimeConfigSnapshot 是运行时管理、自检与沙箱编排使用的平台级运行时投影。
+type RuntimeConfigSnapshot struct {
+	ID             int64
+	Code           string
+	Name           string
+	Eco            string
+	AdapterLevel   int16
+	AdapterSpec    []byte
+	CapabilityImpl string
+	PluginRef      string
+	SelftestStatus int16
+	SelftestDetail []byte
+	Status         int16
+}
+
+// RuntimeImageSnapshot 是运行时镜像登记、预拉取和编排门禁使用的投影。
+type RuntimeImageSnapshot struct {
+	ID            int64
+	RuntimeID     int64
+	ImageURL      string
+	Version       string
+	Prepulled     bool
+	PrepullStatus int16
+	PrepullDetail []byte
+	PrepulledAt   time.Time
+	GenesisBaked  bool
+	IsDefault     bool
+}
+
+// ToolConfigSnapshot 是工具定义的控制面投影。
+type ToolConfigSnapshot struct {
+	ID           int64
+	Code         string
+	Name         string
+	Kind         int16
+	ImageURL     string
+	Port         int32
+	EcoTags      string
+	ResourceSpec []byte
+	Status       int16
+}
+
+// SandboxToolAccessSnapshot 是沙箱已挂载工具的访问端点投影。
+type SandboxToolAccessSnapshot struct {
+	ID             int64
+	TenantID       int64
+	SandboxID      int64
+	ToolID         int64
+	AccessEndpoint string
+	Status         int16
+	ToolCode       string
+	ToolName       string
+	ToolKind       int16
+}
+
+// TenantQuotaSnapshot 是租户沙箱配额投影。
+type TenantQuotaSnapshot struct {
+	TenantID                int64
+	MaxConcurrentSandbox    int32
+	MaxCPU                  int32
+	MaxMemoryMB             int32
+	IdleTimeoutMin          int32
+	MaxLifetimeMin          int32
+	MaxKeepaliveMin         int32
+	MaxSnapshotRetentionMin int32
+}
+
+// ActiveSandboxResourceSnapshot 是活跃沙箱资源统计查询的领域投影。
+type ActiveSandboxResourceSnapshot struct {
+	SandboxID          int64
+	RuntimeAdapterSpec []byte
+	Tool               *ToolConfigSnapshot
+}
+
+// SandboxCreateRecord 是创建控制面沙箱记录所需的持久化输入。
+type SandboxCreateRecord struct {
+	ID               int64
+	TenantID         int64
+	RuntimeID        int64
+	ImageID          int64
+	Namespace        string
+	SourceRef        string
+	OwnerAccountID   int64
+	KeepAlive        bool
+	SnapshotEnabled  bool
+	CodeStorageKey   string
+	InitScriptRef    string
+	KeepAliveUntil   time.Time
+	SnapshotExpireAt time.Time
+	ExpireAt         time.Time
+}
+
+// SandboxToolCreateRecord 是创建沙箱工具挂载记录所需的持久化输入。
+type SandboxToolCreateRecord struct {
+	ID             int64
+	TenantID       int64
+	SandboxID      int64
+	ToolID         int64
+	AccessEndpoint string
+	Status         int16
+}
+
 // SandboxCreateSpec 是 service 传给编排器的沙箱创建规格。
 type SandboxCreateSpec struct {
 	SandboxID                int64
@@ -204,4 +306,30 @@ type SandboxRuntimeBinding struct {
 	Container    string
 	ServiceName  string
 	PortByName   map[string]int32
+}
+
+// SandboxLifecycleSnapshot 是沙箱生命周期、交互鉴权与回收闭环使用的领域投影。
+type SandboxLifecycleSnapshot struct {
+	ID                int64
+	TenantID          int64
+	RuntimeID         int64
+	ImageID           int64
+	Namespace         string
+	SourceRef         string
+	OwnerAccountID    int64
+	Phase             int16
+	Status            int16
+	KeepAlive         bool
+	SnapshotEnabled   bool
+	CodeStorageKey    string
+	CodeHash          string
+	InitScriptRef     string
+	SnapshotRef       string
+	SnapshotCreatedAt time.Time
+	SnapshotExpireAt  time.Time
+	KeepAliveUntil    time.Time
+	LastActiveAt      time.Time
+	ExpireAt          time.Time
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
 }

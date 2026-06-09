@@ -1,0 +1,84 @@
+﻿# 本文件声明 runtime/evm-besu 镜像的职责、端口、安全、资源和供应链约束。
+schema_version: 1
+category: runtime
+name: evm-besu
+image: runtime/evm-besu
+labels:
+  app.kubernetes.io/name: evm-besu
+  app.kubernetes.io/component: runtime
+  app.kubernetes.io/part-of: chaimir
+  chaimir.io/category: runtime
+  chaimir.io/image: runtime/evm-besu
+  chaimir.io/data-driven: "true"
+  chaimir.io/student-access: "true"
+  chaimir.io/sensitivity: student-runtime
+  chaimir.io/scope: sandbox
+  chaimir.io/source: thin-wrapper
+description: Hyperledger Besu 企业 EVM 教学运行时镜像。
+source:
+  type: thin-wrapper
+upstream:
+  image: hyperledger/besu:24.12.2
+  reuse_policy: thin-wrapper
+data_driven: true
+capabilities:
+  - chain-runtime
+  - evm-json-rpc
+  - enterprise-evm
+runtime:
+  eco: evm
+  adapter_level: 2
+  default_tool_codes:
+    - terminal
+    - code-server
+    - blockscout
+ports:
+  - name: rpc
+    container_port: 8545
+    protocol: TCP
+    expose: proxy
+    purpose: Besu JSON-RPC
+local_dev:
+  host_mappings:
+    - host: 127.0.0.1
+      env: CHAIMIR_DEV_BESU_RPC_PORT
+      default: 18548
+      container_port: 8545
+security:
+  run_as_non_root: true
+  read_only_root_filesystem: true
+  allow_privilege_escalation: false
+  privileged: false
+  host_network: false
+  automount_service_account_token: false
+  drop_capabilities:
+    - ALL
+  network_policy: deny-all
+student_access:
+  enabled: true
+  shell: restricted
+  allowed_mounts:
+    - workspace
+    - public-assets
+    - runtime-state
+resources:
+  cpu_request: 500m
+  cpu_limit: "2"
+  memory_request: 1Gi
+  memory_limit: 3Gi
+  ephemeral_storage_limit: 4Gi
+build:
+  context: images/runtime/evm-besu
+  dockerfile: Dockerfile
+selftest:
+  commands:
+    - name: besu-version
+      command:
+        - besu
+        - --version
+supply_chain:
+  sbom: true
+  trivy_required: true
+  cosign_required: true
+  pull_by_digest_in_production: true
+

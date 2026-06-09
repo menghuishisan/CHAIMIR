@@ -170,6 +170,7 @@ func (a *API) listImportBatches(c *gin.Context) {
 
 // importPreview 导入预览:上传 CSV/XLSX,服务端解析并持久化预览状态。
 func (a *API) importPreview(c *gin.Context) {
+	// 第一步确认操作者身份和导入目标,避免匿名上传或跨目标解析。
 	id, ok := currentID(c)
 	if !ok {
 		response.Fail(c, apperr.ErrUnauthorized)
@@ -185,6 +186,7 @@ func (a *API) importPreview(c *gin.Context) {
 		response.Fail(c, apperr.ErrImportUploadMissing)
 		return
 	}
+	// 第二步在读取前后都校验大小,防止客户端声明和真实内容不一致。
 	if err := ensureImportUploadSize(fileHeader.Size, a.uploadCfg.ImportMaxBytes); err != nil {
 		response.Fail(c, err)
 		return
@@ -204,6 +206,7 @@ func (a *API) importPreview(c *gin.Context) {
 		response.Fail(c, apperr.ErrImportFormat.WithCause(closeErr))
 		return
 	}
+	// 第三步按文件名、MIME 与内容联合判定类型,再交给成熟解析器读取结构化行。
 	if err := ensureImportUploadSize(int64(len(content)), a.uploadCfg.ImportMaxBytes); err != nil {
 		response.Fail(c, err)
 		return
@@ -217,6 +220,7 @@ func (a *API) importPreview(c *gin.Context) {
 		response.Fail(c, err)
 		return
 	}
+	// 第四步把预览行持久化到服务端,导入向导刷新后仍以服务端状态为准。
 	res, err := a.svc.CreateImportPreview(c.Request.Context(), id.AccountID, ImportRequest{
 		TargetType: targetType,
 		FileName:   fileHeader.Filename,

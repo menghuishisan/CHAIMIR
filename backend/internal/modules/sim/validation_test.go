@@ -7,12 +7,9 @@ import (
 	"strings"
 	"testing"
 
-	"chaimir/internal/modules/sim/internal/sqlcgen"
 	"chaimir/internal/platform/auth"
 	"chaimir/internal/platform/tenant"
 	"chaimir/pkg/apperr"
-
-	"github.com/jackc/pgx/v5/pgtype"
 )
 
 // TestValidatePackageRequestRequiresStableNamespaceAndSemver 确认仿真包提交必须具备命名空间和 semver。
@@ -162,21 +159,28 @@ func TestReplayInTenantValidatesSignedSourceRef(t *testing.T) {
 	}
 	body := string(data)
 	start := strings.Index(body, "func (s *Service) replayInTenant(")
-	end := strings.Index(body, "// buildPreviewReport")
+	end := strings.Index(body, "// loadBackendSession")
 	if start < 0 || end < start {
 		t.Fatalf("replayInTenant function block not found")
 	}
 	block := body[start:end]
-	if !strings.Contains(block, "validateSimSourceRefAccess(ctx, row.SourceRef)") {
-		t.Fatalf("replayInTenant must validate signed source_ref before returning replay data")
+	if !strings.Contains(block, "repo.replayInTenant") {
+		t.Fatalf("replayInTenant service must delegate signed source_ref checked loading to repo")
+	}
+	repoData, err := os.ReadFile("repo.go")
+	if err != nil {
+		t.Fatalf("read repo.go: %v", err)
+	}
+	if !strings.Contains(string(repoData), "validateSimSourceRefAccess(ctx, row.SourceRef)") {
+		t.Fatalf("repo replay loading must validate signed source_ref before returning replay data")
 	}
 }
 
 // TestValidatePackageAuthorAccessRejectsOtherTeacher 确认教师只能维护自己的扩展包。
 func TestValidatePackageAuthorAccessRejectsOtherTeacher(t *testing.T) {
-	pkg := sqlcgen.SimPackage{
+	pkg := packageAuthorScope{
 		AuthorType: AuthorTypeTeacher,
-		AuthorID:   pgtype.Int8{Int64: 2001, Valid: true},
+		AuthorID:   2001,
 	}
 	if err := validatePackageAuthorAccess(tenant.Identity{TenantID: 10, AccountID: 2001}, pkg); err != nil {
 		t.Fatalf("author should update own package: %v", err)
@@ -261,8 +265,15 @@ func TestUpdatePackageCreatesFreshPendingReview(t *testing.T) {
 		t.Fatalf("UpdatePackage function block not found")
 	}
 	block := body[start:end]
-	if !strings.Contains(block, "CreateSimPackageReview") {
-		t.Fatalf("UpdatePackage must create a fresh pending review after updating draft/rejected package")
+	if !strings.Contains(block, "updatePackageDraftWithReview") {
+		t.Fatalf("UpdatePackage must delegate draft update and fresh review creation to repo")
+	}
+	repoData, err := os.ReadFile("repo.go")
+	if err != nil {
+		t.Fatalf("read repo.go: %v", err)
+	}
+	if !strings.Contains(string(repoData), "CreateSimPackageReview") {
+		t.Fatalf("repo update must create a fresh pending review after updating draft/rejected package")
 	}
 }
 
@@ -306,9 +317,9 @@ func TestUpdatePackageRouteScansUploadedBundle(t *testing.T) {
 			t.Fatalf("API helper must not perform bundle scan/storage directly, found %s", forbidden)
 		}
 	}
-	serviceData, err := os.ReadFile("bundle.go")
+	serviceData, err := os.ReadFile("service_bundle.go")
 	if err != nil {
-		t.Fatalf("read bundle.go: %v", err)
+		t.Fatalf("read service_bundle.go: %v", err)
 	}
 	serviceBody := string(serviceData)
 	storeStart := strings.Index(serviceBody, "func (s *Service) StoreUploadedBundle(")

@@ -4,6 +4,7 @@ package notify
 import (
 	"chaimir/internal/modules/notify/internal/sqlcgen"
 	"chaimir/internal/platform/ids"
+	"chaimir/internal/platform/pgtypex"
 	"chaimir/internal/platform/timex"
 )
 
@@ -26,7 +27,7 @@ func notificationDTOFromRow(row sqlcgen.Notification) NotificationDTO {
 		Type:      row.Type,
 		Title:     row.Title,
 		Content:   row.Content,
-		Link:      textValue(row.Link),
+		Link:      pgtypex.TextValue(row.Link),
 		IsRead:    row.IsRead,
 		ReadAt:    timex.PtrFromTimestamptz(row.ReadAt),
 		CreatedAt: timex.FromTimestamptz(row.CreatedAt),
@@ -60,7 +61,7 @@ func preferenceDTOsFromRows(rows []sqlcgen.ListPreferencesRow) []PreferenceDTO {
 func announcementDTOFromRow(row sqlcgen.SystemAnnouncement) AnnouncementDTO {
 	return AnnouncementDTO{
 		ID:          ids.Format(row.ID),
-		TenantID:    optionalID(row.TenantID),
+		TenantID:    pgtypex.IDString(row.TenantID),
 		Title:       row.Title,
 		Content:     row.Content,
 		Scope:       row.Scope,
@@ -75,7 +76,7 @@ func announcementDTOFromRow(row sqlcgen.SystemAnnouncement) AnnouncementDTO {
 func announcementDTOFromListRow(row sqlcgen.ListAnnouncementsRow) AnnouncementDTO {
 	dto := AnnouncementDTO{
 		ID:          ids.Format(row.ID),
-		TenantID:    optionalID(row.TenantID),
+		TenantID:    pgtypex.IDString(row.TenantID),
 		Title:       row.Title,
 		Content:     row.Content,
 		Scope:       row.Scope,

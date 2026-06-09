@@ -15,6 +15,7 @@ import (
 	"chaimir/internal/platform/config"
 	"chaimir/internal/platform/eventbus"
 	"chaimir/internal/platform/ids"
+	"chaimir/internal/platform/pgtypex"
 	"chaimir/internal/platform/tenant"
 	"chaimir/pkg/apperr"
 )
@@ -616,7 +617,7 @@ func TestTeacherOrAdminActionsRejectStudent(t *testing.T) {
 
 // TestPgNumericRejectsInvalidFloat 确认成绩数值转换失败必须显式返回错误,不能静默写入零值。
 func TestPgNumericRejectsInvalidFloat(t *testing.T) {
-	if _, err := pgNumeric(math.Inf(1)); err == nil {
+	if _, err := pgtypex.NumericScale(math.Inf(1), 3); err == nil {
 		t.Fatalf("expected invalid numeric error")
 	}
 }

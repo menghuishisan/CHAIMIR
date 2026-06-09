@@ -1,0 +1,89 @@
+﻿# 本文件声明 runtime/cosmos 镜像的职责、端口、安全、资源和供应链约束。
+schema_version: 1
+category: runtime
+name: cosmos
+image: runtime/cosmos
+labels:
+  app.kubernetes.io/name: cosmos
+  app.kubernetes.io/component: runtime
+  app.kubernetes.io/part-of: chaimir
+  chaimir.io/category: runtime
+  chaimir.io/image: runtime/cosmos
+  chaimir.io/data-driven: "true"
+  chaimir.io/student-access: "true"
+  chaimir.io/sensitivity: student-runtime
+  chaimir.io/scope: sandbox
+  chaimir.io/source: thin-wrapper
+description: Cosmos SDK/Tendermint 单链教学运行时镜像。
+source:
+  type: thin-wrapper
+upstream:
+  image: ghcr.io/cosmos/gaia:v18.1.0
+  reuse_policy: thin-wrapper
+data_driven: true
+capabilities:
+  - chain-runtime
+  - cosmos-sdk-chain
+  - tendermint-dev
+runtime:
+  eco: cosmos
+  adapter_level: 2
+  default_tool_codes:
+    - terminal
+    - code-server
+ports:
+  - name: rpc
+    container_port: 26657
+    protocol: TCP
+    expose: proxy
+    purpose: Tendermint RPC
+  - name: rest
+    container_port: 1317
+    protocol: TCP
+    expose: proxy
+    purpose: Cosmos REST API
+local_dev:
+  host_mappings:
+    - host: 127.0.0.1
+      env: CHAIMIR_DEV_COSMOS_RPC_PORT
+      default: 26657
+      container_port: 26657
+security:
+  run_as_non_root: true
+  read_only_root_filesystem: true
+  allow_privilege_escalation: false
+  privileged: false
+  host_network: false
+  automount_service_account_token: false
+  drop_capabilities:
+    - ALL
+  network_policy: deny-all
+student_access:
+  enabled: true
+  shell: restricted
+  allowed_mounts:
+    - workspace
+    - public-assets
+    - runtime-state
+resources:
+  cpu_request: 500m
+  cpu_limit: "2"
+  memory_request: 1Gi
+  memory_limit: 4Gi
+  ephemeral_storage_limit: 8Gi
+build:
+  context: images/runtime/cosmos
+  dockerfile: Dockerfile
+selftest:
+  commands:
+    - name: gaia-version
+      command:
+        - sh
+        - -lc
+        - "CHAIMIR_SELFTEST=1 /usr/local/bin/chaimir-cosmos-entrypoint"
+supply_chain:
+  sbom: true
+  trivy_required: true
+  cosign_required: true
+  pull_by_digest_in_production: true
+

@@ -992,7 +992,7 @@ PAGES['p-judgers'] = () => head('判题器管理','引擎', `<button class="btn 
   <table class="table card" style="overflow:hidden">
     <thead><tr><th>判题器</th><th>类型</th><th>需起链</th><th>执行器镜像</th><th>状态</th></tr></thead>
     <tbody>
-    ${[['测试用例判题','testcase','是','judger/testcase-evm:v1.0','可用'],['链上状态断言','onchain-assert','是','judger/onchain-assert:v1.1','可用'],['Flag判题','flag','部分','judger/flag:v1.0','可用'],['静态安全扫描','static-scan','否','judger/static-scan:v1.0','可用'],['仿真检查点','sim-checkpoint','否','(依赖M4)','可用'],['人工评分','manual','否','—','可用']]
+    ${[['测试用例判题','testcase','是','judger/testcase-evm:v1.0','可用'],['链上状态断言','onchain-assert','是','M3后端策略','可用'],['Flag判题','flag','部分','M3后端策略','可用'],['静态安全扫描','static-scan','否','judger/static-scan:v1.0','可用'],['仿真检查点','sim-checkpoint','否','(依赖M4)','可用'],['人工评分','manual','否','—','可用']]
       .map(j=>`<tr><td class="fw-600">${j[0]}</td><td class="mono text-xs">${j[1]}</td><td>${j[2]}</td><td class="mono text-xs">${j[3]}</td>
         <td><span class="badge badge-green">${j[4]}</span></td></tr>`).join('')}
     </tbody>

@@ -22,8 +22,7 @@ func TestValidCNPhoneRejectsInvalidPrefix(t *testing.T) {
 
 // TestValidateImportRowRejectsInvalidPhonePrefix 确认导入校验不会只按长度判断手机号。
 func TestValidateImportRowRejectsInvalidPhonePrefix(t *testing.T) {
-	var svc Service
-	msg := svc.validateImportRow(nil, nil, ImportTargetStudent, ImportRowInput{
+	msg := validateImportRowBasic(ImportTargetStudent, ImportRowInput{
 		Phone: "12800138000",
 		Name:  "张三",
 		No:    "S001",

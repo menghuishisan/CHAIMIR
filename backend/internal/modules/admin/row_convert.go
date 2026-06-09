@@ -7,6 +7,7 @@ import (
 	"chaimir/internal/modules/admin/internal/sqlcgen"
 	"chaimir/internal/platform/ids"
 	"chaimir/internal/platform/jsonx"
+	"chaimir/internal/platform/pgtypex"
 	"chaimir/internal/platform/timex"
 )
 
@@ -19,7 +20,7 @@ func statisticDTOFromRow(row sqlcgen.PlatformStatistic) StatisticDTO {
 	return StatisticDTO{
 		ID:        ids.Format(row.ID),
 		Scope:     row.Scope,
-		TenantID:  optionalID(row.TenantID),
+		TenantID:  pgtypex.IDString(row.TenantID),
 		StatDate:  statDate,
 		Metrics:   jsonx.ObjectMap(row.Metrics),
 		CreatedAt: timex.FromTimestamptz(row.CreatedAt),
@@ -31,7 +32,7 @@ func configDTOFromRow(row sqlcgen.SystemConfig) ConfigDTO {
 	return ConfigDTO{
 		ID:        ids.Format(row.ID),
 		Scope:     row.Scope,
-		TenantID:  optionalID(row.TenantID),
+		TenantID:  pgtypex.IDString(row.TenantID),
 		Key:       row.Key,
 		Value:     jsonx.ObjectMap(row.Value),
 		Version:   row.Version,
@@ -54,7 +55,7 @@ func configChangeDTOFromRow(row sqlcgen.ConfigChangeLog) ConfigChangeLogDTO {
 	return ConfigChangeLogDTO{
 		ID:         ids.Format(row.ID),
 		ConfigID:   ids.Format(row.ConfigID),
-		TenantID:   optionalID(row.TenantID),
+		TenantID:   pgtypex.IDString(row.TenantID),
 		OldValue:   jsonx.ObjectMap(row.OldValue),
 		NewValue:   jsonx.ObjectMap(row.NewValue),
 		OperatorID: ids.Format(row.OperatorID),
@@ -76,7 +77,7 @@ func alertRuleDTOFromRow(row sqlcgen.AlertRule) AlertRuleDTO {
 	return AlertRuleDTO{
 		ID:        ids.Format(row.ID),
 		Scope:     row.Scope,
-		TenantID:  optionalID(row.TenantID),
+		TenantID:  pgtypex.IDString(row.TenantID),
 		Name:      row.Name,
 		Metric:    row.Metric,
 		Condition: jsonx.ObjectMap(row.Condition),
@@ -101,11 +102,11 @@ func alertEventDTOFromRow(row sqlcgen.AlertEvent) AlertEventDTO {
 	return AlertEventDTO{
 		ID:          ids.Format(row.ID),
 		RuleID:      ids.Format(row.RuleID),
-		TenantID:    optionalID(row.TenantID),
+		TenantID:    pgtypex.IDString(row.TenantID),
 		Level:       row.Level,
 		Message:     row.Message,
 		Status:      row.Status,
-		HandlerID:   optionalID(row.HandlerID),
+		HandlerID:   pgtypex.IDString(row.HandlerID),
 		TriggeredAt: timex.FromTimestamptz(row.TriggeredAt),
 		HandledAt:   timex.FromTimestamptz(row.HandledAt),
 	}

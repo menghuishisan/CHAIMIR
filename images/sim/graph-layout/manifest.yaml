@@ -1,0 +1,77 @@
+﻿# 本文件声明 sim/graph-layout 镜像的职责、端口、安全、资源和供应链约束。
+schema_version: 1
+category: sim
+name: graph-layout
+image: sim/graph-layout
+labels:
+  app.kubernetes.io/name: graph-layout
+  app.kubernetes.io/component: sim
+  app.kubernetes.io/part-of: chaimir
+  chaimir.io/category: sim
+  chaimir.io/image: sim/graph-layout
+  chaimir.io/data-driven: "true"
+  chaimir.io/student-access: "false"
+  chaimir.io/sensitivity: backend-compute
+  chaimir.io/scope: sim
+  chaimir.io/source: platform-built
+description: 后端图布局重计算仿真镜像。
+source:
+  type: platform-built
+upstream:
+  image: python:3.13-alpine
+  reuse_policy: self-developed-sim
+data_driven: true
+capabilities:
+  - simulation-backend
+  - graph-layout-computation
+sim:
+  compute: backend
+  backend_adapter: graph-layout-stdio
+  protocol: stdio-json
+  determinism:
+    required: true
+    validation_runs: 2
+  scale_limit:
+    max_nodes: 10000
+    max_edges: 50000
+ports: []
+local_dev:
+  host_mappings: []
+security:
+  run_as_non_root: true
+  read_only_root_filesystem: true
+  allow_privilege_escalation: false
+  privileged: false
+  host_network: false
+  automount_service_account_token: false
+  drop_capabilities:
+    - ALL
+  network_policy: deny-all
+student_access:
+  enabled: false
+resources:
+  cpu_request: 100m
+  cpu_limit: "1"
+  memory_request: 128Mi
+  memory_limit: 512Mi
+  ephemeral_storage_limit: 256Mi
+  timeout_seconds: 10
+  max_input_bytes: 1048576
+build:
+  context: images/sim/graph-layout
+  dockerfile: Dockerfile
+selftest:
+  commands:
+    - name: syntax
+      command:
+        - python
+        - -m
+        - py_compile
+        - /sim/graph_layout.py
+supply_chain:
+  sbom: true
+  trivy_required: true
+  cosign_required: true
+  pull_by_digest_in_production: true
+
+

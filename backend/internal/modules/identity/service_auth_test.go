@@ -3,10 +3,6 @@ package identity
 
 import (
 	"testing"
-
-	"chaimir/internal/modules/identity/internal/sqlcgen"
-
-	"github.com/jackc/pgx/v5/pgtype"
 )
 
 // TestVerifiedPasswordWithMustChangeStillIssuesTokens 确认首登改密账号校验密码后仍获得受限会话。
@@ -18,16 +14,18 @@ func TestVerifiedPasswordWithMustChangeStillIssuesTokens(t *testing.T) {
 
 // TestInitialPasswordPendingAccountCanEnterFirstPasswordChange 确认初始密码开通账号可先登录进入首登改密流程。
 func TestInitialPasswordPendingAccountCanEnterFirstPasswordChange(t *testing.T) {
-	acc := sqlcgen.Account{
+	acc := LoginAccountSnapshot{
 		Status:        AccountPending,
 		MustChangePwd: true,
-		PasswordHash:  pgtype.Text{String: "hash", Valid: true},
+		PasswordHash:  "hash",
+		HasPassword:   true,
 	}
 	if err := passwordLoginableStatus(acc); err != nil {
 		t.Fatalf("pending account with initial password should enter first password change: %v", err)
 	}
 
-	acc.PasswordHash = pgtype.Text{}
+	acc.PasswordHash = ""
+	acc.HasPassword = false
 	if err := passwordLoginableStatus(acc); err == nil {
 		t.Fatalf("pending account without initial password must not use password login")
 	}

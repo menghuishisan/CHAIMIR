@@ -3,7 +3,6 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"log/slog"
 
@@ -34,7 +33,7 @@ func assembleJudge(d *moduleDeps) error {
 	api := judge.NewAPI(svc, d.infra.auth, d.infra.identity)
 	api.Register(d.infra.server.apiV1())
 	d.infra.judge = svc
-	go svc.StartWorker(context.Background())
+	go svc.StartWorker(d.ctx)
 	slog.Info("模块装配", slog.String("module", "judge"), slog.String("layer", "1-engine"))
 	return nil
 }

@@ -151,6 +151,7 @@ func authenticateLDAP(ctx context.Context, cfg map[string]any, username, passwor
 	if strings.TrimSpace(username) == "" || strings.TrimSpace(password) == "" {
 		return nil, fmt.Errorf("LDAP 用户名或密码为空")
 	}
+	// 第一步解析并建立受控 TLS 连接,避免把未校验配置直接用于外部认证。
 	parsed, err := parseLDAPConfig(cfg)
 	if err != nil {
 		return nil, err
@@ -165,6 +166,7 @@ func authenticateLDAP(ctx context.Context, cfg map[string]any, username, passwor
 		}
 	}()
 
+	// 第二步用服务账号搜索唯一用户 DN,不允许模糊匹配结果继续认证。
 	if err := conn.Bind(parsed.BindDN, parsed.BindPassword); err != nil {
 		return nil, err
 	}
@@ -192,6 +194,7 @@ func authenticateLDAP(ctx context.Context, cfg map[string]any, username, passwor
 	if strings.TrimSpace(matchValue) == "" {
 		return nil, fmt.Errorf("LDAP 用户缺少匹配属性")
 	}
+	// 第三步再用用户密码绑定,只有目录服务确认密码后才返回本地匹配属性。
 	if err := conn.Bind(userDN, password); err != nil {
 		return nil, err
 	}

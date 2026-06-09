@@ -487,7 +487,7 @@ func (s *Service) HandleTeachingGradeUpdated(ctx context.Context, event contract
 	return err
 }
 
-// ScanWarnings 扫描并生成指定学期的学业预警。
+// ScanWarnings 扫描并生成指定学期的学业预警,人工入口要求校管角色,后台入口要求服务间身份。
 func (s *Service) ScanWarnings(ctx context.Context, req WarningScanRequest) ([]WarningDTO, error) {
 	id, err := currentTenant(ctx)
 	if err != nil {
@@ -502,15 +502,18 @@ func (s *Service) ScanWarnings(ctx context.Context, req WarningScanRequest) ([]W
 	if !ok {
 		return nil, apperr.ErrGradeWarningInvalid
 	}
+	// 先读取当前租户默认等级配置,预警阈值以 M11 配置为单一口径。
 	level, err := s.store.DefaultLevelConfig(ctx, id.TenantID)
 	if err != nil {
 		return nil, err
 	}
+	// 再读取已聚合的学期 GPA,不直接跨写 M6 单课程成绩。
 	aggregates, err := s.store.ListSemesterGrades(ctx, id.TenantID, semesterID)
 	if err != nil {
 		return nil, err
 	}
 	var out []WarningDTO
+	// 最后逐学生生成低 GPA 与挂科预警,创建通知由 createWarning 统一经 M10 contract 完成。
 	for _, agg := range aggregates {
 		studentID := ids.ParseOrZero(agg.StudentID)
 		if level.WarningRules.MinGPA > 0 && agg.GPA < level.WarningRules.MinGPA {
@@ -758,7 +761,7 @@ func (s *Service) recomputeStudent(ctx context.Context, tenantID, courseID, stud
 	})
 }
 
-// approvedCourseSets 返回本学期与累计 GPA 可计入的课程集合,申诉受理中的临时解锁课程允许重算后再重锁。
+// approvedCourseSets 返回本学期与累计 GPA 可计入的课程集合,申诉受理中已解锁课程允许重算后再重锁。
 func (s *Service) approvedCourseSets(ctx context.Context, tenantID, studentID, semesterID int64) (map[int64]struct{}, map[int64]struct{}, error) {
 	semesterCourses := make(map[int64]struct{})
 	cumulativeCourses := make(map[int64]struct{})

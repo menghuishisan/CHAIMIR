@@ -3,9 +3,11 @@ package contest
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"chaimir/internal/contracts"
+	"chaimir/internal/platform/eventbus"
 	"chaimir/internal/platform/ids"
 	"chaimir/internal/platform/tenant"
 )
@@ -18,20 +20,23 @@ func (g fixedIDGen) Generate() int64 { return int64(g) }
 
 // fakeContestStore 是服务测试使用的最小内存仓储。
 type fakeContestStore struct {
-	contest             ContestDTO
-	pendingSubmission   pendingSolveSubmission
-	updatedSubmission   SolveSubmissionDTO
-	rankDelta           float64
-	rankInitialized     bool
-	entryA              BattleEntryDTO
-	entryB              BattleEntryDTO
-	eloA                float64
-	eloB                float64
-	ranks               []LadderRankDTO
-	snapshotCreated     bool
-	vulnSource          VulnSourceDTO
-	sourceSynced        bool
-	createdVulnProblems []VulnProblemImportRequest
+	contest              ContestDTO
+	problems             []ContestProblemDTO
+	pendingSubmission    pendingSolveSubmission
+	updatedSubmission    SolveSubmissionDTO
+	rankDelta            float64
+	rankInitialized      bool
+	entryA               BattleEntryDTO
+	entryB               BattleEntryDTO
+	eloA                 float64
+	eloB                 float64
+	ranks                []LadderRankDTO
+	snapshotCreated      bool
+	vulnSource           VulnSourceDTO
+	sourceSynced         bool
+	createdVulnProblems  []VulnProblemImportRequest
+	lastSubmissionSource string
+	lastJudgeTaskRef     string
 }
 
 // contestDTO 构造测试竞赛。
@@ -76,9 +81,9 @@ func (s *fakeContestStore) CreateProblem(context.Context, tenant.Identity, int64
 	return ContestProblemDTO{}, nil
 }
 
-// ListProblems 返回空题目列表。
+// ListProblems 返回测试题目列表。
 func (s *fakeContestStore) ListProblems(context.Context, int64) ([]ContestProblemDTO, error) {
-	return nil, nil
+	return s.problems, nil
 }
 
 // GetProblem 返回测试题目。
@@ -114,8 +119,10 @@ func (s *fakeContestStore) LockTeam(context.Context, int64) (TeamDTO, error) {
 }
 
 // CreateSolveSubmission 返回提交记录。
-func (s *fakeContestStore) CreateSolveSubmission(context.Context, tenant.Identity, int64, int64, int64, int64, SolveSubmitRequest, string, string) (SolveSubmissionDTO, error) {
-	return SolveSubmissionDTO{}, nil
+func (s *fakeContestStore) CreateSolveSubmission(_ context.Context, _ tenant.Identity, submissionID, contestID, problemID, teamID int64, req SolveSubmitRequest, sourceRef, judgeTaskRef string) (SolveSubmissionDTO, error) {
+	s.lastSubmissionSource = sourceRef
+	s.lastJudgeTaskRef = judgeTaskRef
+	return SolveSubmissionDTO{ID: ids.Format(submissionID), ContestID: ids.Format(contestID), ProblemID: ids.Format(problemID), TeamID: ids.Format(teamID), SourceRef: sourceRef, JudgeTaskRef: judgeTaskRef, SandboxRef: req.SandboxRef}, nil
 }
 
 // GetSolveSubmission 返回提交记录。
@@ -332,3 +339,62 @@ func (s *fakeSandboxService) ChainReset(context.Context, int64) error {
 func (s *fakeSandboxService) Stats(context.Context, int64) (contracts.SandboxStats, error) {
 	return contracts.SandboxStats{}, nil
 }
+
+// fakeJudgeService 返回测试判题任务。
+type fakeJudgeService struct{}
+
+// SubmitJudgeTask 返回稳定的判题任务摘要。
+func (s *fakeJudgeService) SubmitJudgeTask(_ context.Context, req contracts.JudgeSubmitRequest) (contracts.JudgeTaskInfo, error) {
+	return contracts.JudgeTaskInfo{TaskID: 3001, TenantID: req.TenantID, SourceRef: req.SourceRef}, nil
+}
+
+// fakeContentReadService 是测试用 M5 内容读取 contract。
+type fakeContentReadService struct{}
+
+// GetContentFace 返回测试题面。
+func (s *fakeContentReadService) GetContentFace(context.Context, int64, contracts.ContentItemRef) (contracts.ContentItemSnapshot, error) {
+	return contracts.ContentItemSnapshot{Body: map[string]any{"title": "problem"}}, nil
+}
+
+// GetContentFull 返回测试全量内容。
+func (s *fakeContentReadService) GetContentFull(context.Context, int64, contracts.ContentItemRef) (contracts.ContentItemSnapshot, error) {
+	return contracts.ContentItemSnapshot{}, nil
+}
+
+// BatchGetContentFace 返回空题面列表。
+func (s *fakeContentReadService) BatchGetContentFace(context.Context, int64, []contracts.ContentItemRef) ([]contracts.ContentItemSnapshot, error) {
+	return []contracts.ContentItemSnapshot{}, nil
+}
+
+// IncrementContentUsage 记录测试题目引用。
+func (s *fakeContentReadService) IncrementContentUsage(context.Context, int64, contracts.ContentItemRef) error {
+	return nil
+}
+
+// fakeEventBus 是测试用事件总线。
+type fakeEventBus struct {
+	subErr error
+}
+
+// Publish 不记录测试事件。
+func (b *fakeEventBus) Publish(context.Context, string, any) error { return nil }
+
+// Subscribe 返回测试订阅或注入错误。
+func (b *fakeEventBus) Subscribe(string, string, eventbus.Handler) (eventbus.Subscription, error) {
+	if b.subErr != nil {
+		return nil, b.subErr
+	}
+	return fakeSubscription{}, nil
+}
+
+// Close 关闭测试事件总线。
+func (b *fakeEventBus) Close() {}
+
+// fakeSubscription 是测试订阅句柄。
+type fakeSubscription struct{}
+
+// Unsubscribe 取消测试订阅。
+func (fakeSubscription) Unsubscribe() error { return nil }
+
+// errContestSubscribe 是测试订阅失败原因。
+var errContestSubscribe = errors.New("subscribe failed")

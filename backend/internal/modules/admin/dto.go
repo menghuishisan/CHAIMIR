@@ -138,7 +138,7 @@ type BackupRecordDTO struct {
 // BackupTriggerRequest 是 M9 记录备份触发请求的参数。
 type BackupTriggerRequest struct {
 	Type       int16  `json:"type"`
-	StorageRef string `json:"storage_ref"`
+	StorageRef string `json:"-"`
 }
 
 // ApplicationApproveRequest 是平台管理员通过入驻申请的请求。

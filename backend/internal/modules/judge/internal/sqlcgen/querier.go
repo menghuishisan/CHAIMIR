@@ -10,12 +10,14 @@ import (
 
 type Querier interface {
 	CancelQueuedJudgeTask(ctx context.Context, id int64) (JudgeTask, error)
+	CreateJudgeEventOutbox(ctx context.Context, arg CreateJudgeEventOutboxParams) (JudgeEventOutbox, error)
 	CreateJudgeResult(ctx context.Context, arg CreateJudgeResultParams) (JudgeResult, error)
 	CreateJudgeTask(ctx context.Context, arg CreateJudgeTaskParams) (JudgeTask, error)
 	// M3 judge sqlc 查询源。
 	// 约定:租户表依赖 RLS 透明过滤;平台级 judger 通过 app 事务访问。
 	CreateJudger(ctx context.Context, arg CreateJudgerParams) (Judger, error)
 	CreateSubmissionFingerprint(ctx context.Context, arg CreateSubmissionFingerprintParams) (SubmissionFingerprint, error)
+	FailJudgeEventOutbox(ctx context.Context, arg FailJudgeEventOutboxParams) (JudgeEventOutbox, error)
 	FailJudgeTask(ctx context.Context, id int64) (JudgeTask, error)
 	GetJudgeTaskByID(ctx context.Context, id int64) (JudgeTask, error)
 	GetJudgeTaskBySourceRef(ctx context.Context, arg GetJudgeTaskBySourceRefParams) (JudgeTask, error)
@@ -26,7 +28,10 @@ type Querier interface {
 	ListFingerprintsByProblem(ctx context.Context, arg ListFingerprintsByProblemParams) ([]SubmissionFingerprint, error)
 	ListJudgers(ctx context.Context, arg ListJudgersParams) ([]Judger, error)
 	ListManualPendingTasks(ctx context.Context, arg ListManualPendingTasksParams) ([]JudgeTask, error)
+	ListPendingJudgeEventOutbox(ctx context.Context, limit int32) ([]JudgeEventOutbox, error)
+	ListPendingJudgeEventOutboxTenants(ctx context.Context, limit int32) ([]int64, error)
 	ListTasksBySourceRef(ctx context.Context, arg ListTasksBySourceRefParams) ([]JudgeTask, error)
+	MarkJudgeEventOutboxPublished(ctx context.Context, id int64) (JudgeEventOutbox, error)
 	MarkJudgeTaskJudging(ctx context.Context, id int64) (JudgeTask, error)
 	MarkJudgeTaskRejudge(ctx context.Context, id int64) (JudgeTask, error)
 	RetryJudgeTask(ctx context.Context, id int64) (JudgeTask, error)

@@ -26,6 +26,7 @@ type Service struct {
 	courseGradesMaxRows       int
 	judgeOutboxBatchSize      int
 	judgeOutboxPollIntervalMs int
+	gradeExportBatchSize      int
 }
 
 // NewService 构造 M6 服务。
@@ -41,6 +42,7 @@ func NewService(database *db.DB, idgen *snowflake.Node, auditor audit.Writer, id
 		courseGradesMaxRows:       cfg.CourseGradesMaxRows,
 		judgeOutboxBatchSize:      cfg.JudgeOutboxBatchSize,
 		judgeOutboxPollIntervalMs: cfg.JudgeOutboxPollIntervalMs,
+		gradeExportBatchSize:      cfg.GradeExportBatchSize,
 	}
 }
 

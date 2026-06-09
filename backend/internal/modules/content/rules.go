@@ -44,6 +44,20 @@ func validateCreateItemRequest(req CreateItemRequest) error {
 	return nil
 }
 
+// validateSystemImportRequest 校验内部系统建题来源,避免服务请求体伪装成教师手动创建。
+func validateSystemImportRequest(req CreateItemRequest) error {
+	if err := validateCreateItemRequest(req); err != nil {
+		return err
+	}
+	if req.AuthorType != AuthorTypeSystem && req.AuthorType != AuthorTypeExternal {
+		return apperr.ErrContentInvalid
+	}
+	if len(req.SystemImportNote) == 0 {
+		return apperr.ErrContentInvalid
+	}
+	return nil
+}
+
 // canManageContent 判断当前服务端身份是否允许管理某内容。
 func canManageContent(isPlatform bool, account contracts.AccountInfo, authorID int64) bool {
 	if isPlatform {
@@ -177,35 +191,19 @@ func judgeSpecFromItem(item ItemDTO) (contracts.ContentJudgeSpec, error) {
 	}
 	return contracts.ContentJudgeSpec{
 		ItemCode: item.Code, ItemVersion: item.Version, JudgerCode: judgerCode,
-		MaxScore: int32(numberValue(raw["max_score"])), SuiteRef: suiteRef,
-		Expectation: mapValue(raw["expectation"]), VersionHash: item.BodyHash,
+		MaxScore: int32(jsonx.IntFromAny(raw["max_score"])), SuiteRef: suiteRef,
+		Expectation: jsonx.ObjectFromAny(raw["expectation"]), VersionHash: item.BodyHash,
 	}, nil
-}
-
-// numberValue 把 JSON 数字转换为 int。
-func numberValue(v any) int {
-	switch n := v.(type) {
-	case float64:
-		return int(n)
-	case int:
-		return n
-	case int32:
-		return int(n)
-	case int64:
-		return int(n)
-	default:
-		return 0
-	}
 }
 
 // normalizeRandomCriteria 把组卷条件规范化为 SQL 可直接使用的数组条件。
 func normalizeRandomCriteria(criteria map[string]any) randomCriteria {
 	out := randomCriteria{
-		Count:           numberValue(criteria["count"]),
-		Type:            int16(numberValue(criteria["type"])),
+		Count:           jsonx.IntFromAny(criteria["count"]),
+		Type:            int16(jsonx.IntFromAny(criteria["type"])),
 		Difficulties:    int16List(criteria["difficulty"]),
 		KnowledgePoints: stringList(criteria["knowledge_points"]),
-		Score:           int32(numberValue(criteria["score"])),
+		Score:           int32(jsonx.IntFromAny(criteria["score"])),
 	}
 	return out
 }
@@ -216,7 +214,7 @@ func int16List(v any) []int16 {
 	case []any:
 		out := make([]int16, 0, len(x))
 		for _, item := range x {
-			if n := int16(numberValue(item)); n > 0 {
+			if n := int16(jsonx.IntFromAny(item)); n > 0 {
 				out = append(out, n)
 			}
 		}
@@ -232,7 +230,7 @@ func int16List(v any) []int16 {
 		}
 		return out
 	default:
-		if n := int16(numberValue(v)); n > 0 {
+		if n := int16(jsonx.IntFromAny(v)); n > 0 {
 			return []int16{n}
 		}
 		return nil
@@ -313,14 +311,6 @@ func createItemAuditDetail(req CreateItemRequest) map[string]any {
 		detail["system_import_note"] = jsonx.CloneObject(req.SystemImportNote)
 	}
 	return detail
-}
-
-// mapValue 把 JSON 值转换为对象。
-func mapValue(v any) map[string]any {
-	if m, ok := v.(map[string]any); ok {
-		return m
-	}
-	return map[string]any{}
 }
 
 // newVersionFrom 递增补丁版本号,用于未显式传版本时创建新版本草稿。

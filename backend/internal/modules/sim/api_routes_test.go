@@ -170,6 +170,32 @@ func TestSimAPIReturnsModuleSpecificValidationCodes(t *testing.T) {
 	}
 }
 
+// TestSimPackageLifecycleAdminRoutesExist 确认文档要求的下架与重新上架生命周期入口存在。
+func TestSimPackageLifecycleAdminRoutesExist(t *testing.T) {
+	engine, authMgr := newSimRouteEngine([]string{"teacher"})
+	platformToken, err := authMgr.IssueAccess(0, 9001, 9001, true)
+	if err != nil {
+		t.Fatalf("issue platform token: %v", err)
+	}
+
+	for _, tc := range []struct {
+		name string
+		path string
+	}{
+		{name: "archive", path: "/api/v1/sim/packages/9001/archive"},
+		{name: "republish", path: "/api/v1/sim/packages/9001/republish"},
+	} {
+		req := httptest.NewRequest(http.MethodPost, tc.path, strings.NewReader(`{}`))
+		req.Header.Set("Authorization", "Bearer "+platformToken)
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		engine.ServeHTTP(rec, req)
+		if rec.Code == http.StatusNotFound || rec.Body.String() == "404 page not found" {
+			t.Fatalf("%s lifecycle route must be registered", tc.name)
+		}
+	}
+}
+
 func newSimRouteEngine(roles []string) (*gin.Engine, *auth.Manager) {
 	gin.SetMode(gin.TestMode)
 	engine := gin.New()

@@ -4,16 +4,16 @@
 -- name: CreateJudger :one
 INSERT INTO judger (id, code, name, type, executor_ref, runtime_required, default_timeout_sec, resource_spec, selftest_status, selftest_detail, status)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-RETURNING *;
+RETURNING id, code, name, type, executor_ref, runtime_required, default_timeout_sec, resource_spec, selftest_status, selftest_detail, status, created_at, updated_at;
 
 -- name: GetJudgerByID :one
-SELECT * FROM judger WHERE id = $1;
+SELECT id, code, name, type, executor_ref, runtime_required, default_timeout_sec, resource_spec, selftest_status, selftest_detail, status, created_at, updated_at FROM judger WHERE id = $1;
 
 -- name: GetJudgerByCode :one
-SELECT * FROM judger WHERE code = $1;
+SELECT id, code, name, type, executor_ref, runtime_required, default_timeout_sec, resource_spec, selftest_status, selftest_detail, status, created_at, updated_at FROM judger WHERE code = $1;
 
 -- name: ListJudgers :many
-SELECT * FROM judger
+SELECT id, code, name, type, executor_ref, runtime_required, default_timeout_sec, resource_spec, selftest_status, selftest_detail, status, created_at, updated_at FROM judger
 WHERE (sqlc.narg('status')::SMALLINT IS NULL OR status = sqlc.narg('status'))
 ORDER BY created_at DESC
 LIMIT $1 OFFSET $2;
@@ -28,7 +28,7 @@ SET name = $2,
     resource_spec = $7,
     status = $8
 WHERE id = $1
-RETURNING *;
+RETURNING id, code, name, type, executor_ref, runtime_required, default_timeout_sec, resource_spec, selftest_status, selftest_detail, status, created_at, updated_at;
 
 -- name: UpdateJudgerSelftest :one
 UPDATE judger
@@ -36,7 +36,7 @@ SET selftest_status = $2,
     selftest_detail = $3,
     status = $4
 WHERE id = $1
-RETURNING *;
+RETURNING id, code, name, type, executor_ref, runtime_required, default_timeout_sec, resource_spec, selftest_status, selftest_detail, status, created_at, updated_at;
 
 -- name: CreateJudgeTask :one
 INSERT INTO judge_task (
@@ -45,19 +45,19 @@ INSERT INTO judge_task (
     priority, status, max_retries
 )
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
-RETURNING *;
+RETURNING id, tenant_id, judger_id, source_ref, submitter_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, created_at, updated_at;
 
 -- name: GetJudgeTaskByID :one
-SELECT * FROM judge_task WHERE id = $1;
+SELECT id, tenant_id, judger_id, source_ref, submitter_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, created_at, updated_at FROM judge_task WHERE id = $1;
 
 -- name: GetJudgeTaskBySourceRef :one
-SELECT * FROM judge_task
+SELECT id, tenant_id, judger_id, source_ref, submitter_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, created_at, updated_at FROM judge_task
 WHERE tenant_id = @tenant_id
   AND source_ref = @source_ref;
 
 -- name: GetJudgeTaskWithResult :one
 SELECT
-    jt.*,
+    jt.id, jt.tenant_id, jt.judger_id, jt.source_ref, jt.submitter_id, jt.problem_ref, jt.code_storage_key, jt.code_hash, jt.input_snapshot, jt.sandbox_mode, jt.target_sandbox_ref, jt.priority, jt.status, jt.retry_count, jt.max_retries, jt.created_at, jt.updated_at,
     jr.passed AS result_passed,
     jr.score AS result_score,
     jr.max_score AS result_max_score,
@@ -73,13 +73,13 @@ WHERE jt.id = $1;
 UPDATE judge_task
 SET status = 2
 WHERE id = $1 AND status = 1
-RETURNING *;
+RETURNING id, tenant_id, judger_id, source_ref, submitter_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, created_at, updated_at;
 
 -- name: UpdateJudgeTaskStatus :one
 UPDATE judge_task
 SET status = $2
 WHERE id = $1
-RETURNING *;
+RETURNING id, tenant_id, judger_id, source_ref, submitter_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, created_at, updated_at;
 
 -- name: MarkJudgeTaskRejudge :one
 UPDATE judge_task
@@ -88,27 +88,27 @@ SET status = 1,
     input_snapshot = jsonb_set(input_snapshot, '{rejudge}', 'true'::jsonb, true)
 WHERE id = $1
   AND status IN (3, 7)
-RETURNING *;
+RETURNING id, tenant_id, judger_id, source_ref, submitter_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, created_at, updated_at;
 
 -- name: RetryJudgeTask :one
 UPDATE judge_task
 SET status = 1,
     retry_count = retry_count + 1
 WHERE id = $1 AND retry_count < max_retries
-RETURNING *;
+RETURNING id, tenant_id, judger_id, source_ref, submitter_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, created_at, updated_at;
 
 -- name: FailJudgeTask :one
 UPDATE judge_task
 SET status = 7,
     retry_count = retry_count + 1
 WHERE id = $1
-RETURNING *;
+RETURNING id, tenant_id, judger_id, source_ref, submitter_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, created_at, updated_at;
 
 -- name: CancelQueuedJudgeTask :one
 UPDATE judge_task
 SET status = 6
 WHERE id = $1 AND status = 1
-RETURNING *;
+RETURNING id, tenant_id, judger_id, source_ref, submitter_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, created_at, updated_at;
 
 -- name: CreateJudgeResult :one
 INSERT INTO judge_result (task_id, tenant_id, passed, score, max_score, details, judge_sandbox_ref, is_rejudge)
@@ -121,34 +121,69 @@ SET passed = EXCLUDED.passed,
     judge_sandbox_ref = EXCLUDED.judge_sandbox_ref,
     judged_at = now(),
     is_rejudge = EXCLUDED.is_rejudge
-RETURNING *;
+RETURNING task_id, tenant_id, passed, score, max_score, details, judge_sandbox_ref, judged_at, is_rejudge;
+
+-- name: CreateJudgeEventOutbox :one
+INSERT INTO judge_event_outbox (id, tenant_id, task_id, subject, payload, status)
+VALUES ($1, $2, $3, $4, $5, $6)
+ON CONFLICT (tenant_id, task_id, subject) DO UPDATE
+SET payload = EXCLUDED.payload,
+    status = EXCLUDED.status,
+    last_error = NULL
+RETURNING id, tenant_id, task_id, subject, payload, status, retry_count, last_error, created_at, updated_at;
+
+-- name: ListPendingJudgeEventOutboxTenants :many
+SELECT DISTINCT tenant_id FROM judge_event_outbox
+WHERE status IN (1, 3)
+ORDER BY tenant_id
+LIMIT $1;
+
+-- name: ListPendingJudgeEventOutbox :many
+SELECT id, tenant_id, task_id, subject, payload, status, retry_count, last_error, created_at, updated_at FROM judge_event_outbox
+WHERE status IN (1, 3)
+ORDER BY created_at ASC
+LIMIT $1;
+
+-- name: MarkJudgeEventOutboxPublished :one
+UPDATE judge_event_outbox
+SET status = 2,
+    last_error = NULL
+WHERE id = $1
+RETURNING id, tenant_id, task_id, subject, payload, status, retry_count, last_error, created_at, updated_at;
+
+-- name: FailJudgeEventOutbox :one
+UPDATE judge_event_outbox
+SET status = 3,
+    retry_count = retry_count + 1,
+    last_error = $2
+WHERE id = $1
+RETURNING id, tenant_id, task_id, subject, payload, status, retry_count, last_error, created_at, updated_at;
 
 -- name: CreateSubmissionFingerprint :one
 INSERT INTO submission_fingerprint (id, tenant_id, source_ref, problem_ref, submitter_id, code_hash, sim_vector)
 VALUES ($1, $2, $3, $4, $5, $6, $7)
-RETURNING *;
+RETURNING id, tenant_id, source_ref, problem_ref, submitter_id, code_hash, sim_vector, created_at;
 
 -- name: ListExactFingerprints :many
-SELECT * FROM submission_fingerprint
+SELECT id, tenant_id, source_ref, problem_ref, submitter_id, code_hash, sim_vector, created_at FROM submission_fingerprint
 WHERE problem_ref = $1 AND code_hash = $2
 ORDER BY created_at DESC
 LIMIT $3 OFFSET $4;
 
 -- name: ListFingerprintsByProblem :many
-SELECT * FROM submission_fingerprint
+SELECT id, tenant_id, source_ref, problem_ref, submitter_id, code_hash, sim_vector, created_at FROM submission_fingerprint
 WHERE problem_ref = $1
 ORDER BY created_at DESC
 LIMIT $2 OFFSET $3;
 
 -- name: ListTasksBySourceRef :many
-SELECT * FROM judge_task
+SELECT id, tenant_id, judger_id, source_ref, submitter_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, created_at, updated_at FROM judge_task
 WHERE source_ref = $1
 ORDER BY created_at DESC
 LIMIT $2 OFFSET $3;
 
 -- name: ListManualPendingTasks :many
-SELECT jt.*
-FROM judge_task jt
+SELECT jt.id, jt.tenant_id, jt.judger_id, jt.source_ref, jt.submitter_id, jt.problem_ref, jt.code_storage_key, jt.code_hash, jt.input_snapshot, jt.sandbox_mode, jt.target_sandbox_ref, jt.priority, jt.status, jt.retry_count, jt.max_retries, jt.created_at, jt.updated_at FROM judge_task jt
 JOIN judger j ON j.id = jt.judger_id
 WHERE jt.source_ref = $1 AND jt.status = 2 AND j.type = 6
 ORDER BY jt.created_at ASC

@@ -28,6 +28,7 @@ func assembleAdmin(d *moduleDeps) error {
 		d.infra.audit,
 		cipher,
 		d.cfg.Deploy,
+		d.cfg.MinIO,
 		d.cfg.Monitoring,
 		d.infra.identityAdmin,
 		d.infra.sandbox,

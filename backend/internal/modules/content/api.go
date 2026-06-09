@@ -24,7 +24,7 @@ type API struct {
 	identity contracts.IdentityService
 }
 
-// NewAPI 构造 M5 API。
+// NewAPI 构造 M5 HTTP 处理器,集中注入内容服务、鉴权管理器和身份只读契约。
 func NewAPI(svc *Service, authMgr *auth.Manager, identity contracts.IdentityService) *API {
 	return &API{svc: svc, authMgr: authMgr, identity: identity}
 }
@@ -86,7 +86,7 @@ func (a *API) requireTeacher() gin.HandlerFunc {
 	return auth.RequirePlatformOrAnyRole(a.identity, contracts.RoleTeacher, contracts.RoleSchoolAdmin)
 }
 
-// listItems 查询内容列表。
+// listItems 绑定内容检索过滤条件,返回教师可管理的题目/模板分页列表。
 func (a *API) listItems(c *gin.Context) {
 	items, total, err := a.svc.ListItems(c.Request.Context(), ListItemsRequest{
 		Type: httpx.Int16(c.Query("type")), CategoryID: c.Query("category"), Difficulty: httpx.Int16(c.Query("difficulty")),
@@ -101,7 +101,7 @@ func (a *API) listItems(c *gin.Context) {
 	response.OKPage(c, items, total, page, size)
 }
 
-// createItem 创建内容草稿。
+// createItem 绑定题目/模板创建请求,由服务层生成草稿并隔离答案字段。
 func (a *API) createItem(c *gin.Context) {
 	var req CreateItemRequest
 	if !httpx.BindJSONWithError(c, &req, apperr.ErrContentRequestInvalid) {
@@ -121,10 +121,7 @@ func (a *API) systemImport(c *gin.Context) {
 	if !httpx.BindJSONWithError(c, &req, apperr.ErrContentRequestInvalid) {
 		return
 	}
-	if req.AuthorType == 0 {
-		req.AuthorType = AuthorTypeSystem
-	}
-	out, err := a.svc.CreateItem(c.Request.Context(), req)
+	out, err := a.svc.SystemImportItem(c.Request.Context(), req)
 	if err != nil {
 		response.Fail(c, err)
 		return
@@ -132,7 +129,7 @@ func (a *API) systemImport(c *gin.Context) {
 	response.OK(c, out)
 }
 
-// getFace 读取题面视角内容。
+// getFace 读取学生可见的题面视角内容,避免经公开接口泄露答案和判题配置。
 func (a *API) getFace(c *gin.Context) {
 	out, err := a.svc.GetFace(c.Request.Context(), contentItemCode(c), c.Param("version"))
 	if err != nil {
@@ -142,7 +139,7 @@ func (a *API) getFace(c *gin.Context) {
 	response.OK(c, out)
 }
 
-// getFull 读取全量内容。
+// getFull 在教师/管理员或服务签名授权下读取全量内容,用于编辑和引擎内部取用。
 func (a *API) getFull(c *gin.Context) {
 	if _, ok := auth.ServiceSourceRefFromContext(c.Request.Context()); ok {
 		a.getFullInternal(c)
@@ -175,7 +172,7 @@ func (a *API) getFullInternal(c *gin.Context) {
 	response.OK(c, out)
 }
 
-// updateDraft 更新草稿。
+// updateDraft 更新未发布草稿内容,路径 ID 和请求体都在 HTTP 边界校验。
 func (a *API) updateDraft(c *gin.Context) {
 	id, ok := contentPathID(c, apperr.ErrContentIDInvalid)
 	if !ok {
@@ -193,17 +190,17 @@ func (a *API) updateDraft(c *gin.Context) {
 	response.OK(c, out)
 }
 
-// publish 发布内容。
+// publish 将草稿发布为可复用版本,状态机校验由服务层统一执行。
 func (a *API) publish(c *gin.Context) {
 	a.itemStatusAction(c, a.svc.Publish)
 }
 
-// deprecate 弃用内容。
+// deprecate 将内容版本标记为弃用,保留历史引用但阻止继续选用。
 func (a *API) deprecate(c *gin.Context) {
 	a.itemStatusAction(c, a.svc.Deprecate)
 }
 
-// deleteDraft 删除草稿。
+// deleteDraft 删除未发布草稿,只返回删除确认且不暴露底层存储细节。
 func (a *API) deleteDraft(c *gin.Context) {
 	id, ok := contentPathID(c, apperr.ErrContentIDInvalid)
 	if !ok {
@@ -216,7 +213,7 @@ func (a *API) deleteDraft(c *gin.Context) {
 	response.OK(c, map[string]any{"deleted": true})
 }
 
-// listVersions 查询版本列表。
+// listVersions 查询同一内容编码下的版本历史,供教师选择克隆或发版来源。
 func (a *API) listVersions(c *gin.Context) {
 	out, err := a.svc.ListVersions(c.Request.Context(), contentItemCode(c))
 	if err != nil {
@@ -226,7 +223,7 @@ func (a *API) listVersions(c *gin.Context) {
 	response.OK(c, out)
 }
 
-// newVersion 创建新版本草稿。
+// newVersion 基于已有版本创建新草稿,版本号规划和来源校验交给服务层。
 func (a *API) newVersion(c *gin.Context) {
 	var req NewVersionRequest
 	if !httpx.BindJSONWithError(c, &req, apperr.ErrContentVersionRequestInvalid) {
@@ -240,7 +237,7 @@ func (a *API) newVersion(c *gin.Context) {
 	response.OK(c, out)
 }
 
-// clone 克隆内容。
+// clone 将指定版本复制为新内容编码,用于跨课程或跨租户授权复用。
 func (a *API) clone(c *gin.Context) {
 	var req CloneRequest
 	if !httpx.BindJSONWithError(c, &req, apperr.ErrContentCloneRequestInvalid) {
@@ -254,17 +251,17 @@ func (a *API) clone(c *gin.Context) {
 	response.OK(c, out)
 }
 
-// share 共享内容。
+// share 将内容加入共享库,服务层负责校验发布状态和可共享范围。
 func (a *API) share(c *gin.Context) {
 	a.itemStatusAction(c, a.svc.Share)
 }
 
-// unshare 取消共享。
+// unshare 取消共享库可见性,不删除原内容和已有引用。
 func (a *API) unshare(c *gin.Context) {
 	a.itemStatusAction(c, a.svc.Unshare)
 }
 
-// listShared 查询共享库。
+// listShared 查询可复用共享内容,按类型和关键词过滤后返回给教师选用。
 func (a *API) listShared(c *gin.Context) {
 	out, err := a.svc.ListShared(c.Request.Context(), httpx.Int16(c.Query("type")), c.Query("keyword"), httpx.Int(c.Query("page")), httpx.Int(c.Query("size")))
 	if err != nil {
@@ -274,7 +271,7 @@ func (a *API) listShared(c *gin.Context) {
 	response.OK(c, out)
 }
 
-// createCategory 创建分类。
+// createCategory 创建内容分类节点,父级合法性和环检测由服务层完成。
 func (a *API) createCategory(c *gin.Context) {
 	var req CategoryRequest
 	if !httpx.BindJSONWithError(c, &req, apperr.ErrContentCategoryInvalid) {
@@ -288,7 +285,7 @@ func (a *API) createCategory(c *gin.Context) {
 	response.OK(c, out)
 }
 
-// listCategories 查询分类。
+// listCategories 返回当前租户分类树,供题库管理和筛选控件使用。
 func (a *API) listCategories(c *gin.Context) {
 	out, err := a.svc.ListCategories(c.Request.Context())
 	if err != nil {
@@ -298,7 +295,7 @@ func (a *API) listCategories(c *gin.Context) {
 	response.OK(c, out)
 }
 
-// updateCategory 更新分类。
+// updateCategory 更新分类名称或父级,在服务层防止自引用和循环父链。
 func (a *API) updateCategory(c *gin.Context) {
 	id, ok := contentPathID(c, apperr.ErrContentCategoryInvalid)
 	if !ok {
@@ -316,7 +313,7 @@ func (a *API) updateCategory(c *gin.Context) {
 	response.OK(c, out)
 }
 
-// deleteCategory 删除分类。
+// deleteCategory 删除空分类节点,保留服务层对已引用分类的保护。
 func (a *API) deleteCategory(c *gin.Context) {
 	id, ok := contentPathID(c, apperr.ErrContentCategoryInvalid)
 	if !ok {
@@ -329,7 +326,7 @@ func (a *API) deleteCategory(c *gin.Context) {
 	response.OK(c, map[string]any{"deleted": true})
 }
 
-// createPaper 创建试卷。
+// createPaper 创建固定或随机组卷配置,题目抽取和分值规则由服务层校验。
 func (a *API) createPaper(c *gin.Context) {
 	var req PaperRequest
 	if !httpx.BindJSONWithError(c, &req, apperr.ErrPaperRequestInvalid) {
@@ -367,7 +364,7 @@ func (a *API) getPaper(c *gin.Context) {
 	response.OK(c, out)
 }
 
-// regeneratePaper 重新抽题。
+// regeneratePaper 对随机组卷重新抽题,保持试卷 ID 不变并刷新题目明细。
 func (a *API) regeneratePaper(c *gin.Context) {
 	id, ok := contentPathID(c, apperr.ErrPaperIDInvalid)
 	if !ok {
@@ -391,14 +388,10 @@ func (a *API) batchGetFace(c *gin.Context) {
 	if !httpx.BindJSONWithError(c, &req, apperr.ErrContentRequestInvalid) {
 		return
 	}
-	out := make([]ItemDTO, 0, len(req.Items))
-	for _, ref := range req.Items {
-		item, err := a.svc.GetFace(c.Request.Context(), ref.Code, ref.Version)
-		if err != nil {
-			response.Fail(c, err)
-			return
-		}
-		out = append(out, item)
+	out, err := a.svc.BatchGetFace(c.Request.Context(), req.Items)
+	if err != nil {
+		response.Fail(c, err)
+		return
 	}
 	response.OK(c, out)
 }

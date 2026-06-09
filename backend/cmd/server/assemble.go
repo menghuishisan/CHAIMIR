@@ -2,10 +2,16 @@
 // 依据 docs/总-工程目录设计.md §2.0:每模块一装配文件,main.go 仅按依赖层次顺序调用。
 package main
 
-import "chaimir/internal/platform/config"
+import (
+	"context"
+	"fmt"
+
+	"chaimir/internal/platform/config"
+)
 
 // moduleDeps 是各模块装配时可取用的共享依赖。
 type moduleDeps struct {
+	ctx   context.Context
 	cfg   *config.Config
 	infra *infra
 }
@@ -13,6 +19,9 @@ type moduleDeps struct {
 // assembleModules 按分层顺序装配 11 个模块。
 // 反向通信(低层通知高层)走 eventbus 事件,不在此形成反向调用。
 func assembleModules(d *moduleDeps) error {
+	if d.ctx == nil {
+		return fmt.Errorf("模块装配失败: 缺少进程 context,后台任务无法受控停止")
+	}
 	// 第0层 地基。
 	if err := assembleIdentity(d); err != nil {
 		return err

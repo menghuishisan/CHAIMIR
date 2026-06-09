@@ -125,14 +125,15 @@ func (s *Service) AddContestProblem(ctx context.Context, contestID int64, req Co
 	if contest.Status != ContestStatusDraft {
 		return ContestProblemDTO{}, apperr.ErrContestState
 	}
-	if s.content != nil {
-		ref := contracts.ContentItemRef{ItemCode: req.ItemCode, ItemVersion: req.ItemVersion}
-		if _, err := s.content.GetContentFace(ctx, id.TenantID, ref); err != nil {
-			return ContestProblemDTO{}, apperr.ErrContestProblem.WithCause(err)
-		}
-		if err := s.content.IncrementContentUsage(ctx, id.TenantID, ref); err != nil {
-			return ContestProblemDTO{}, apperr.ErrContestProblem.WithCause(err)
-		}
+	if s.content == nil {
+		return ContestProblemDTO{}, apperr.ErrContestContentUnavailable
+	}
+	ref := contracts.ContentItemRef{ItemCode: req.ItemCode, ItemVersion: req.ItemVersion}
+	if _, err := s.content.GetContentFace(ctx, id.TenantID, ref); err != nil {
+		return ContestProblemDTO{}, apperr.ErrContestProblem.WithCause(err)
+	}
+	if err := s.content.IncrementContentUsage(ctx, id.TenantID, ref); err != nil {
+		return ContestProblemDTO{}, apperr.ErrContestProblem.WithCause(err)
 	}
 	return s.store.CreateProblem(ctx, id, s.nextID(), contestID, req)
 }
@@ -169,10 +170,11 @@ func (s *Service) ArchiveContest(ctx context.Context, contestID int64) (ResultSn
 		return ResultSnapshotDTO{}, err
 	}
 	sourceRef := sourceRefForContest(contestID)
-	if s.sandbox != nil {
-		if err := s.sandbox.RecycleBySourceRef(ctx, id.TenantID, sourceRef, "contest-archive"); err != nil {
-			return ResultSnapshotDTO{}, apperr.ErrContestState.WithCause(err)
-		}
+	if s.sandbox == nil {
+		return ResultSnapshotDTO{}, apperr.ErrContestSandboxUnavailable
+	}
+	if err := s.sandbox.RecycleBySourceRef(ctx, id.TenantID, sourceRef, "contest-archive"); err != nil {
+		return ResultSnapshotDTO{}, apperr.ErrContestState.WithCause(err)
 	}
 	ranks, err := s.store.ListRanks(ctx, contestID, 1, 100)
 	if err != nil {
@@ -279,7 +281,7 @@ func (s *Service) ListProblems(ctx context.Context, contestID int64) ([]ContestP
 	}
 	for i := range problems {
 		if s.content == nil {
-			continue
+			return nil, apperr.ErrContestContentUnavailable
 		}
 		face, err := s.content.GetContentFace(ctx, id.TenantID, contracts.ContentItemRef{ItemCode: problems[i].ItemCode, ItemVersion: problems[i].ItemVersion})
 		if err != nil {
@@ -297,7 +299,7 @@ func (s *Service) StartProblemEnv(ctx context.Context, contestID, problemID int6
 		return ProblemEnvDTO{}, apperr.ErrUnauthorized
 	}
 	if s.sandbox == nil {
-		return ProblemEnvDTO{}, apperr.ErrContestState
+		return ProblemEnvDTO{}, apperr.ErrContestSandboxUnavailable
 	}
 	contest, err := s.store.GetContest(ctx, contestID)
 	if err != nil {
@@ -360,6 +362,9 @@ func (s *Service) SubmitSolve(ctx context.Context, contestID, problemID int64, r
 	}
 	submissionID := s.nextID()
 	sourceRef := sourceRefForSolveSubmission(submissionID)
+	if s.judge == nil {
+		return SolveSubmissionDTO{}, apperr.ErrContestJudgeUnavailable
+	}
 	task, err := s.judge.SubmitJudgeTask(ctx, contracts.JudgeSubmitRequest{
 		TenantID: id.TenantID, JudgerCode: req.JudgerCode, ItemCode: problem.ItemCode, ItemVersion: problem.ItemVersion,
 		CodeStorageKey: req.CodeStorageKey, CodeHash: req.CodeHash, SubmitterID: id.AccountID, SourceRef: sourceRef,
@@ -381,6 +386,30 @@ func (s *Service) GetSubmission(ctx context.Context, submissionID int64) (SolveS
 		return SolveSubmissionDTO{}, err
 	}
 	return submission, nil
+}
+
+// HandleJudgeCompleted 处理 M3 判题完成事件。
+func (s *Service) HandleJudgeCompleted(ctx context.Context, event contracts.JudgeCompletedEvent) error {
+	pending, err := s.store.PendingSubmissionByJudgeTask(ctx, event.TenantID, event.TaskID)
+	if err != nil {
+		return err
+	}
+	if pending.SourceRef != event.SourceRef {
+		return apperr.ErrContestEventUnmatched.WithCause(fmt.Errorf("judge completed source_ref mismatch: pending=%s event=%s", pending.SourceRef, event.SourceRef))
+	}
+	return s.applySolveJudgement(ctx, pending, event.Score > 0, int32(event.Score))
+}
+
+// HandleJudgeFailed 处理 M3 判题失败事件,保留 0 分结果。
+func (s *Service) HandleJudgeFailed(ctx context.Context, event contracts.JudgeFailedEvent) error {
+	pending, err := s.store.PendingSubmissionByJudgeTask(ctx, event.TenantID, event.TaskID)
+	if err != nil {
+		return err
+	}
+	if pending.SourceRef != event.SourceRef {
+		return apperr.ErrContestEventUnmatched.WithCause(fmt.Errorf("judge failed source_ref mismatch: pending=%s event=%s", pending.SourceRef, event.SourceRef))
+	}
+	return s.applySolveJudgement(ctx, pending, false, 0)
 }
 
 // ApplySolveJudgement 处理 M3 判题完成事件并更新提交和排行榜。

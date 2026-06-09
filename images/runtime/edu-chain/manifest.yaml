@@ -1,0 +1,85 @@
+﻿# 本文件声明 runtime/edu-chain 镜像的职责、端口、安全、资源和供应链约束。
+schema_version: 1
+category: runtime
+name: edu-chain
+image: runtime/edu-chain
+labels:
+  app.kubernetes.io/name: edu-chain
+  app.kubernetes.io/component: runtime
+  app.kubernetes.io/part-of: chaimir
+  chaimir.io/category: runtime
+  chaimir.io/image: runtime/edu-chain
+  chaimir.io/data-driven: "true"
+  chaimir.io/student-access: "true"
+  chaimir.io/sensitivity: student-runtime
+  chaimir.io/scope: sandbox
+  chaimir.io/source: platform-built
+description: 平台自研教学链运行时镜像。
+source:
+  type: platform-built
+upstream:
+  image: python:3.13-alpine
+  reuse_policy: self-developed-runtime
+data_driven: true
+capabilities:
+  - chain-runtime
+  - teaching-consensus
+  - protocol-visualization
+runtime:
+  eco: edu
+  adapter_level: 2
+  default_tool_codes:
+    - terminal
+    - code-server
+ports:
+  - name: http
+    container_port: 8080
+    protocol: TCP
+    expose: proxy
+    purpose: Edu chain teaching API
+local_dev:
+  host_mappings:
+    - host: 127.0.0.1
+      env: CHAIMIR_DEV_EDU_CHAIN_PORT
+      default: 18083
+      container_port: 8080
+security:
+  run_as_non_root: true
+  read_only_root_filesystem: true
+  allow_privilege_escalation: false
+  privileged: false
+  host_network: false
+  automount_service_account_token: false
+  drop_capabilities:
+    - ALL
+  network_policy: deny-all
+student_access:
+  enabled: true
+  shell: restricted
+  allowed_mounts:
+    - workspace
+    - public-assets
+    - runtime-state
+resources:
+  cpu_request: 100m
+  cpu_limit: 500m
+  memory_request: 128Mi
+  memory_limit: 512Mi
+  ephemeral_storage_limit: 1Gi
+build:
+  context: images/runtime/edu-chain
+  dockerfile: Dockerfile
+selftest:
+  commands:
+    - name: syntax
+      command:
+        - python
+        - -m
+        - py_compile
+        - /app/edu_chain.py
+supply_chain:
+  sbom: true
+  trivy_required: true
+  cosign_required: true
+  pull_by_digest_in_production: true
+

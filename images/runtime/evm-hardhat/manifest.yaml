@@ -1,0 +1,87 @@
+﻿# 本文件声明 runtime/evm-hardhat 镜像的职责、端口、安全、资源和供应链约束。
+schema_version: 1
+category: runtime
+name: evm-hardhat
+image: runtime/evm-hardhat
+labels:
+  app.kubernetes.io/name: evm-hardhat
+  app.kubernetes.io/component: runtime
+  app.kubernetes.io/part-of: chaimir
+  chaimir.io/category: runtime
+  chaimir.io/image: runtime/evm-hardhat
+  chaimir.io/data-driven: "true"
+  chaimir.io/student-access: "true"
+  chaimir.io/sensitivity: student-runtime
+  chaimir.io/scope: sandbox
+  chaimir.io/source: thin-wrapper
+description: Hardhat EVM 教学运行时镜像。
+source:
+  type: thin-wrapper
+upstream:
+  image: node:20-bookworm-slim
+  reuse_policy: toolchain-wrapper
+data_driven: true
+capabilities:
+  - chain-runtime
+  - evm-json-rpc
+  - solidity-dev
+  - fork-capable
+runtime:
+  eco: evm
+  adapter_level: 2
+  default_tool_codes:
+    - terminal
+    - code-server
+    - remix
+ports:
+  - name: rpc
+    container_port: 8545
+    protocol: TCP
+    expose: proxy
+    purpose: EVM JSON-RPC
+local_dev:
+  host_mappings:
+    - host: 127.0.0.1
+      env: CHAIMIR_DEV_EVM_HARDHAT_RPC_PORT
+      default: 18547
+      container_port: 8545
+security:
+  run_as_non_root: true
+  read_only_root_filesystem: true
+  allow_privilege_escalation: false
+  privileged: false
+  host_network: false
+  automount_service_account_token: false
+  drop_capabilities:
+    - ALL
+  network_policy: deny-all
+student_access:
+  enabled: true
+  shell: restricted
+  allowed_mounts:
+    - workspace
+    - public-assets
+    - runtime-state
+resources:
+  cpu_request: 250m
+  cpu_limit: "2"
+  memory_request: 512Mi
+  memory_limit: 2Gi
+  ephemeral_storage_limit: 4Gi
+build:
+  context: images/runtime/evm-hardhat
+  dockerfile: Dockerfile
+selftest:
+  commands:
+    - name: hardhat-and-anvil
+      command:
+        - sh
+        - -lc
+        - "hardhat --version && anvil --version"
+supply_chain:
+  sbom: true
+  trivy_required: true
+  cosign_required: true
+  pull_by_digest_in_production: true
+
+

@@ -195,6 +195,6 @@ type TranscriptDTO struct {
 	StudentID   string    `json:"student_id"`
 	Scope       int16     `json:"scope"`
 	SemesterID  string    `json:"semester_id,omitempty"`
-	PDFRef      string    `json:"pdf_ref"`
+	PDFRef      string    `json:"-"`
 	GeneratedAt time.Time `json:"generated_at"`
 }

@@ -160,6 +160,185 @@ func TestFinishInstanceRequiresConfiguredEventBus(t *testing.T) {
 	}
 }
 
+// TestValidateExperimentRequiresContentServiceForCheckpointVersion 确认发布前校验不能在缺少 M5 契约时跳过题目版本检查。
+func TestValidateExperimentRequiresContentServiceForCheckpointVersion(t *testing.T) {
+	store := &fakeExperimentStore{
+		experiment: ExperimentDTO{
+			ID: "7001", Status: ExperimentStatusDraft, AuthorID: "200", CollabMode: CollabModeSingle,
+			Components: ExperimentComponents{
+				Envs:        []EnvComponent{{RuntimeCode: "evm-hardhat", ToolCodes: []string{"terminal"}}},
+				Checkpoints: []CheckpointComponent{{ID: "cp1", JudgerCode: "testcase", ItemCode: "p1", ItemVersion: "1.0.0", Score: 100}},
+			},
+		},
+	}
+	svc := newExperimentTestService(store)
+	svc.content = nil
+
+	result, err := svc.ValidateExperiment(testTenantContext(), 7001)
+	if err != nil {
+		t.Fatalf("validate should return structured issues instead of hard failure: %v", err)
+	}
+	if result.OK {
+		t.Fatalf("checkpoint validation without M5 content service must not pass")
+	}
+	if !validationIssuesContain(result.Issues, "题目版本校验服务不可用") {
+		t.Fatalf("missing content service issue not reported: %#v", result.Issues)
+	}
+}
+
+// TestStartInstanceRequiresSandboxContractForEnvComponent 确认需要沙箱组件时缺 M2 契约会显式失败而不是 panic 或假成功。
+func TestStartInstanceRequiresSandboxContractForEnvComponent(t *testing.T) {
+	store := &fakeExperimentStore{
+		experiment: ExperimentDTO{
+			ID: "7001", Status: ExperimentStatusPublished, CollabMode: CollabModeSingle,
+			Components: ExperimentComponents{Envs: []EnvComponent{{RuntimeCode: "evm-hardhat", ToolCodes: []string{"terminal"}}}},
+		},
+	}
+	svc := newExperimentTestService(store)
+	svc.sandbox = nil
+
+	_, err := svc.StartInstance(testTenantContext(), 7001, StartInstanceRequest{})
+	if err == nil {
+		t.Fatalf("missing sandbox contract must fail")
+	}
+	if ae, ok := apperr.As(err); !ok || ae.Code != apperr.ErrExperimentEngineUnavailable.Code {
+		t.Fatalf("expected engine unavailable error, got %v", err)
+	}
+	if store.instanceStatus != InstanceStatusError {
+		t.Fatalf("failed engine startup should mark instance error, got %d", store.instanceStatus)
+	}
+}
+
+// TestStartInstanceRequiresSimContractForSimComponent 确认需要仿真组件时缺 M4 契约会显式失败。
+func TestStartInstanceRequiresSimContractForSimComponent(t *testing.T) {
+	store := &fakeExperimentStore{
+		experiment: ExperimentDTO{
+			ID: "7001", Status: ExperimentStatusPublished, CollabMode: CollabModeSingle,
+			Components: ExperimentComponents{Sims: []SimComponent{{PackageCode: "builtin__pow-mining", Version: "1.0.0"}}},
+		},
+	}
+	svc := newExperimentTestService(store)
+	svc.sim = nil
+
+	_, err := svc.StartInstance(testTenantContext(), 7001, StartInstanceRequest{})
+	if err == nil {
+		t.Fatalf("missing sim contract must fail")
+	}
+	if ae, ok := apperr.As(err); !ok || ae.Code != apperr.ErrExperimentEngineUnavailable.Code {
+		t.Fatalf("expected engine unavailable error, got %v", err)
+	}
+}
+
+// TestRecycleInstanceRequiresEngineContractsForPersistedRefs 确认已有资源引用时缺引擎契约不能被当作回收成功。
+func TestRecycleInstanceRequiresEngineContractsForPersistedRefs(t *testing.T) {
+	store := &fakeExperimentStore{
+		instance: ExperimentInstanceDTO{
+			ID: "8001", TenantID: "100", ExperimentID: "7001", OwnerAccountID: "200", SourceRef: "exp:2026:instance:8001", Status: InstanceStatusRunning,
+			Sandboxes: []SandboxRef{{ID: 9001, Ref: "9001"}},
+		},
+	}
+	svc := newExperimentTestService(store)
+	svc.sandbox = nil
+
+	err := svc.RecycleInstance(testTenantContext(), 8001)
+	if err == nil {
+		t.Fatalf("recycling persisted sandbox refs without sandbox contract must fail")
+	}
+	if ae, ok := apperr.As(err); !ok || ae.Code != apperr.ErrExperimentEngineUnavailable.Code {
+		t.Fatalf("expected engine unavailable error, got %v", err)
+	}
+}
+
+// TestJudgeCheckpointRequiresJudgeContract 确认检查点判分缺 M3 契约会显式失败而不是 panic。
+func TestJudgeCheckpointRequiresJudgeContract(t *testing.T) {
+	store := &fakeExperimentStore{
+		experiment: ExperimentDTO{
+			ID: "7001", Components: ExperimentComponents{
+				Checkpoints: []CheckpointComponent{{ID: "cp1", JudgerCode: "testcase", ItemCode: "p1", ItemVersion: "1.0.0", Score: 100}},
+			},
+		},
+		instance: ExperimentInstanceDTO{ID: "8001", TenantID: "100", ExperimentID: "7001", OwnerAccountID: "200", SourceRef: "exp:2026:instance:8001", Status: InstanceStatusRunning},
+	}
+	svc := newExperimentTestService(store)
+	svc.judge = nil
+
+	_, err := svc.JudgeCheckpoint(testTenantContext(), 8001, "cp1")
+	if err == nil {
+		t.Fatalf("missing judge contract must fail")
+	}
+	if ae, ok := apperr.As(err); !ok || ae.Code != apperr.ErrCheckpointJudgeUnavailable.Code {
+		t.Fatalf("expected judge unavailable error, got %v", err)
+	}
+}
+
+// TestFinishInstanceFailsWhenPersistedScoreMissing 确认得分写入后若没有可发布分数,事件链路不能静默跳过。
+func TestFinishInstanceFailsWhenPersistedScoreMissing(t *testing.T) {
+	store := &fakeExperimentStore{
+		instance:          ExperimentInstanceDTO{ID: "8001", TenantID: "100", ExperimentID: "7001", OwnerAccountID: "200", Status: InstanceStatusRunning},
+		checkpointResults: []ScorePart{{Score: 40}},
+		scoreWriteDrops:   true,
+	}
+	svc := newExperimentTestService(store)
+	svc.bus = &fakeEventBus{}
+
+	_, err := svc.FinishInstance(testTenantContext(), 8001)
+	if err == nil {
+		t.Fatalf("finish must fail when persisted score is unavailable for event publishing")
+	}
+	if ae, ok := apperr.As(err); !ok || ae.Code != apperr.ErrExperimentScoreInvalid.Code {
+		t.Fatalf("expected score invalid error, got %v", err)
+	}
+}
+
+// TestSubmitReportRejectsUnscopedObjectKey 确认报告引用必须是服务端签发的本租户本人实例报告对象 key。
+func TestSubmitReportRejectsUnscopedObjectKey(t *testing.T) {
+	store := &fakeExperimentStore{
+		instance: ExperimentInstanceDTO{ID: "8001", TenantID: "100", ExperimentID: "7001", OwnerAccountID: "200", Status: InstanceStatusRunning},
+	}
+	svc := newExperimentTestService(store)
+
+	for _, ref := range []string{"../escape.pdf", "100/grade/transcript/1.pdf", "100/experiment/report/8002/200/report.pdf", "100/experiment/report/8001/201/report.pdf"} {
+		if _, err := svc.SubmitReport(testTenantContext(), 8001, ReportRequest{ContentRef: ref}); err == nil {
+			t.Fatalf("unsafe or cross-scope report ref %q must be rejected", ref)
+		}
+	}
+	valid := "100/experiment/report/8001/200/report.pdf"
+	if _, err := svc.SubmitReport(testTenantContext(), 8001, ReportRequest{ContentRef: valid}); err != nil {
+		t.Fatalf("valid scoped report ref rejected: %v", err)
+	}
+}
+
+// TestSubscribeEventsUsesDedicatedSubscribeErrorCode 确认订阅链路与发布链路使用不同错误码便于定位。
+func TestSubscribeEventsUsesDedicatedSubscribeErrorCode(t *testing.T) {
+	svc := newExperimentTestService(&fakeExperimentStore{})
+	svc.bus = &fakeEventBus{subErr: errors.New("subscribe failed")}
+
+	err := svc.SubscribeEvents()
+	if err == nil {
+		t.Fatalf("subscribe failure must be returned")
+	}
+	if ae, ok := apperr.As(err); !ok || ae.Code != apperr.ErrExperimentEventSubscribeFailed.Code {
+		t.Fatalf("expected subscribe error code, got %v", err)
+	}
+}
+
+// TestHandleJudgeCompletedUsesUnmatchedEventCode 确认判题事件 source_ref 不匹配时返回专用事件未匹配错误码并保留原因。
+func TestHandleJudgeCompletedUsesUnmatchedEventCode(t *testing.T) {
+	store := &fakeExperimentStore{pendingJudge: PendingCheckpoint{TenantID: 100, InstanceID: 8001, CheckpointID: "cp1", SourceRef: "exp:2026:instance:8001"}}
+	svc := &Service{store: store, idgen: fixedIDGen(9001)}
+
+	err := svc.HandleJudgeCompleted(context.Background(), contracts.JudgeCompletedEvent{TenantID: 100, TaskID: 3001, SourceRef: "exp:2026:instance:9999", Score: 40})
+	if err == nil {
+		t.Fatalf("source_ref mismatch must fail")
+	}
+	if ae, ok := apperr.As(err); !ok || ae.Code != apperr.ErrExperimentEventUnmatched.Code {
+		t.Fatalf("expected unmatched event error, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "source_ref") {
+		t.Fatalf("event mismatch error must keep cause context, got %v", err)
+	}
+}
+
 // TestHandleJudgeCompletedUpsertsCheckpointResult 确认 M3 判题完成事件按 judge_task_ref 回写检查点结果。
 func TestHandleJudgeCompletedUpsertsCheckpointResult(t *testing.T) {
 	store := &fakeExperimentStore{pendingJudge: PendingCheckpoint{TenantID: 100, InstanceID: 8001, CheckpointID: "cp1"}}
@@ -214,9 +393,9 @@ func TestInstanceLifecycleUsesPersistedSourceRef(t *testing.T) {
 
 // TestJudgeEventsBindSourceRef 确认 M3 判题事件必须与实例 source_ref 绑定,不能只凭 task_id 回写。
 func TestJudgeEventsBindSourceRef(t *testing.T) {
-	serviceSrc, err := os.ReadFile("events.go")
+	serviceSrc, err := os.ReadFile("service.go")
 	if err != nil {
-		t.Fatalf("read events: %v", err)
+		t.Fatalf("read service: %v", err)
 	}
 	for _, name := range []string{"HandleJudgeCompleted", "HandleJudgeFailed"} {
 		block := functionSource(string(serviceSrc), name)
@@ -310,6 +489,16 @@ func functionSource(src, name string) string {
 
 // ptrFloat 返回 float64 指针,用于测试可选报告分。
 func ptrFloat(v float64) *float64 { return &v }
+
+// validationIssuesContain 判断校验问题是否包含指定文案片段。
+func validationIssuesContain(issues []ValidationIssue, fragment string) bool {
+	for _, issue := range issues {
+		if strings.Contains(issue.Message, fragment) {
+			return true
+		}
+	}
+	return false
+}
 
 // testTenantContext 构造带租户身份的服务测试上下文。
 func testTenantContext() context.Context {

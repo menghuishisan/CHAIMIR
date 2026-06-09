@@ -1,0 +1,76 @@
+﻿# 本文件声明 judger/testcase-evm 镜像的职责、端口、安全、资源和供应链约束。
+schema_version: 1
+category: judger
+name: testcase-evm
+image: judger/testcase-evm
+labels:
+  app.kubernetes.io/name: testcase-evm
+  app.kubernetes.io/component: judger
+  app.kubernetes.io/part-of: chaimir
+  chaimir.io/category: judger
+  chaimir.io/image: judger/testcase-evm
+  chaimir.io/data-driven: "true"
+  chaimir.io/student-access: "false"
+  chaimir.io/sensitivity: judge-private
+  chaimir.io/scope: judge
+  chaimir.io/source: platform-built
+description: EVM Hardhat/Foundry 测试用例判题镜像。
+source:
+  type: platform-built
+upstream:
+  image: node:20-bookworm-slim
+  reuse_policy: self-developed-judger
+data_driven: true
+capabilities:
+  - judger
+  - evm-testcase-runner
+judger:
+  type: testcase
+  modes:
+    - hardhat
+    - foundry
+  output_contract:
+    required_fields:
+      - passed
+      - score
+      - max_score
+      - details
+  leaks_expected_values: false
+ports: []
+local_dev:
+  host_mappings: []
+security:
+  run_as_non_root: true
+  read_only_root_filesystem: true
+  allow_privilege_escalation: false
+  privileged: false
+  host_network: false
+  automount_service_account_token: false
+  drop_capabilities:
+    - ALL
+  network_policy: deny-all
+student_access:
+  enabled: false
+resources:
+  cpu_request: 500m
+  cpu_limit: "2"
+  memory_request: 1Gi
+  memory_limit: 4Gi
+  ephemeral_storage_limit: 4Gi
+  timeout_seconds: 120
+build:
+  context: images/judger/testcase-evm
+  dockerfile: Dockerfile
+selftest:
+  commands:
+    - name: tool-versions
+      command:
+        - sh
+        - -lc
+        - "hardhat --version && forge --version"
+supply_chain:
+  sbom: true
+  trivy_required: true
+  cosign_required: true
+  pull_by_digest_in_production: true
+

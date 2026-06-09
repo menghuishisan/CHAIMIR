@@ -9,6 +9,7 @@ import (
 	"chaimir/internal/platform/ids"
 	"chaimir/internal/platform/jsonx"
 	"chaimir/internal/platform/pagex"
+	"chaimir/internal/platform/pgtypex"
 	"chaimir/internal/platform/tenant"
 	"chaimir/internal/platform/timex"
 	"chaimir/pkg/apperr"
@@ -95,11 +96,11 @@ func (r *repo) ListContests(ctx context.Context, status int16, page, size int) (
 	var total int64
 	if err := r.inTenant(ctx, func(q *sqlcgen.Queries) error {
 		var err error
-		rows, err = q.ListContests(ctx, sqlcgen.ListContestsParams{Status: pgInt2(status), OffsetCount: int32((page - 1) * size), LimitCount: int32(size)})
+		rows, err = q.ListContests(ctx, sqlcgen.ListContestsParams{Status: pgtypex.Int2(status), OffsetCount: int32((page - 1) * size), LimitCount: int32(size)})
 		if err != nil {
 			return err
 		}
-		total, err = q.CountContests(ctx, pgInt2(status))
+		total, err = q.CountContests(ctx, pgtypex.Int2(status))
 		return err
 	}); err != nil {
 		return nil, 0, apperr.ErrContestQueryFailed.WithCause(err)
@@ -122,7 +123,7 @@ func (r *repo) CreateContest(ctx context.Context, id tenant.Identity, contestID 
 		var createErr error
 		row, createErr = q.CreateContest(ctx, sqlcgen.CreateContestParams{
 			ID: contestID, TenantID: id.TenantID, OrganizerID: id.AccountID, Name: req.Name, Mode: req.Mode,
-			MatchMode: pgInt2(req.MatchMode), TeamMode: req.TeamMode, SignupStart: timex.Timestamptz(req.SignupStart),
+			MatchMode: pgtypex.Int2(req.MatchMode), TeamMode: req.TeamMode, SignupStart: timex.Timestamptz(req.SignupStart),
 			SignupEnd: timex.Timestamptz(req.SignupEnd), StartAt: timex.Timestamptz(req.StartAt), EndAt: timex.Timestamptz(req.EndAt),
 			FreezeMinutes: req.FreezeMinutes, Rules: rules, Status: ContestStatusDraft,
 		})
@@ -156,7 +157,7 @@ func (r *repo) UpdateContest(ctx context.Context, contestID int64, req ContestRe
 	if err := r.inTenant(ctx, func(q *sqlcgen.Queries) error {
 		var updateErr error
 		row, updateErr = q.UpdateContest(ctx, sqlcgen.UpdateContestParams{
-			ID: contestID, Name: req.Name, Mode: req.Mode, MatchMode: pgInt2(req.MatchMode), TeamMode: req.TeamMode,
+			ID: contestID, Name: req.Name, Mode: req.Mode, MatchMode: pgtypex.Int2(req.MatchMode), TeamMode: req.TeamMode,
 			SignupStart: timex.Timestamptz(req.SignupStart), SignupEnd: timex.Timestamptz(req.SignupEnd), StartAt: timex.Timestamptz(req.StartAt),
 			EndAt: timex.Timestamptz(req.EndAt), FreezeMinutes: req.FreezeMinutes, Rules: rules,
 		})
@@ -191,7 +192,7 @@ func (r *repo) CreateProblem(ctx context.Context, id tenant.Identity, problemID,
 		var createErr error
 		row, createErr = q.CreateContestProblem(ctx, sqlcgen.CreateContestProblemParams{
 			ID: problemID, TenantID: id.TenantID, ContestID: contestID, ItemCode: req.ItemCode, ItemVersion: req.ItemVersion,
-			Score: req.Score, DynamicScore: dynamicScore, BattleRule: pgInt2(req.BattleRule), Seq: req.Seq,
+			Score: req.Score, DynamicScore: dynamicScore, BattleRule: pgtypex.Int2(req.BattleRule), Seq: req.Seq,
 		})
 		return createErr
 	}); err != nil {
@@ -243,7 +244,7 @@ func (r *repo) CreateTeam(ctx context.Context, id tenant.Identity, teamID, conte
 	var row sqlcgen.Team
 	if err := r.inTenant(ctx, func(q *sqlcgen.Queries) error {
 		var err error
-		row, err = q.CreateTeam(ctx, sqlcgen.CreateTeamParams{ID: teamID, TenantID: id.TenantID, ContestID: contestID, Name: name, InviteCode: pgText(invite), Status: TeamStatusBuilding})
+		row, err = q.CreateTeam(ctx, sqlcgen.CreateTeamParams{ID: teamID, TenantID: id.TenantID, ContestID: contestID, Name: name, InviteCode: pgtypex.Text(invite), Status: TeamStatusBuilding})
 		return err
 	}); err != nil {
 		return TeamDTO{}, apperr.ErrContestTeamInvalid.WithCause(err)
@@ -324,7 +325,7 @@ func (r *repo) CreateSolveSubmission(ctx context.Context, id tenant.Identity, su
 		var createErr error
 		row, createErr = q.CreateSolveSubmission(ctx, sqlcgen.CreateSolveSubmissionParams{
 			ID: submissionID, TenantID: id.TenantID, ContestID: contestID, ProblemID: problemID, TeamID: teamID,
-			SubmitterID: id.AccountID, ContentRef: content, SourceRef: sourceRef, JudgeTaskRef: pgText(judgeTaskRef), SandboxRef: pgText(req.SandboxRef),
+			SubmitterID: id.AccountID, ContentRef: content, SourceRef: sourceRef, JudgeTaskRef: pgtypex.Text(judgeTaskRef), SandboxRef: pgtypex.Text(req.SandboxRef),
 		})
 		return createErr
 	}); err != nil {
@@ -351,7 +352,7 @@ func (r *repo) PendingSubmissionByJudgeTask(ctx context.Context, tenantID, taskI
 	var row sqlcgen.GetSolveSubmissionByJudgeTaskRow
 	if err := r.inTenantID(ctx, tenantID, func(q *sqlcgen.Queries) error {
 		var err error
-		row, err = q.GetSolveSubmissionByJudgeTask(ctx, pgText(ids.Format(taskID)))
+		row, err = q.GetSolveSubmissionByJudgeTask(ctx, pgtypex.Text(ids.Format(taskID)))
 		return err
 	}); err != nil {
 		return pendingSolveSubmission{}, notFoundOrInternal(err, apperr.ErrContestSubmissionNotFound)
@@ -458,7 +459,7 @@ func (r *repo) ListBattleMatches(ctx context.Context, contestID, teamID int64, p
 			rows, err = q.ListBattleMatchesByTeam(ctx, sqlcgen.ListBattleMatchesByTeamParams{ContestID: contestID, TeamID: teamID, OffsetCount: int32((page - 1) * size), LimitCount: int32(size)})
 			return err
 		}
-		rows, err = q.ListBattleMatches(ctx, sqlcgen.ListBattleMatchesParams{ContestID: contestID, EntryID: pgInt8(0), OffsetCount: int32((page - 1) * size), LimitCount: int32(size)})
+		rows, err = q.ListBattleMatches(ctx, sqlcgen.ListBattleMatchesParams{ContestID: contestID, EntryID: pgtypex.Int8(0), OffsetCount: int32((page - 1) * size), LimitCount: int32(size)})
 		return err
 	}); err != nil {
 		return nil, apperr.ErrContestBattleInvalid.WithCause(err)
@@ -472,7 +473,7 @@ func (r *repo) ListBattleMatches(ctx context.Context, contestID, teamID int64, p
 
 // UpsertRank 新增或更新排行榜分数。
 func (r *repo) UpsertRank(ctx context.Context, tenantID, rankID, contestID, teamID int64, score float64, solvedCount int32) (LadderRankDTO, error) {
-	numeric, err := pgNumeric(score)
+	numeric, err := pgtypex.Numeric(score)
 	if err != nil {
 		return LadderRankDTO{}, apperr.ErrContestInvalid.WithCause(err)
 	}
@@ -595,7 +596,7 @@ func (r *repo) CreateCheatRecord(ctx context.Context, id tenant.Identity, record
 	var row sqlcgen.CheatRecord
 	if err := r.inTenant(ctx, func(q *sqlcgen.Queries) error {
 		var createErr error
-		row, createErr = q.CreateCheatRecord(ctx, sqlcgen.CreateCheatRecordParams{ID: recordID, TenantID: id.TenantID, ContestID: contestID, TeamID: teamID, Type: req.Type, Evidence: evidence, Action: req.Action, OperatorID: pgInt8(id.AccountID)})
+		row, createErr = q.CreateCheatRecord(ctx, sqlcgen.CreateCheatRecordParams{ID: recordID, TenantID: id.TenantID, ContestID: contestID, TeamID: teamID, Type: req.Type, Evidence: evidence, Action: req.Action, OperatorID: pgtypex.Int8(id.AccountID)})
 		return createErr
 	}); err != nil {
 		return CheatRecordDTO{}, apperr.ErrContestInvalid.WithCause(err)
@@ -630,7 +631,7 @@ func (r *repo) CreateVulnSource(ctx context.Context, id tenant.Identity, sourceI
 	var row sqlcgen.VulnSource
 	if err := r.inTenant(ctx, func(q *sqlcgen.Queries) error {
 		var createErr error
-		row, createErr = q.CreateVulnSource(ctx, sqlcgen.CreateVulnSourceParams{ID: sourceID, TenantID: pgInt8(id.TenantID), Type: req.Type, Name: req.Name, Config: config, DefaultLevel: req.DefaultLevel, Enabled: req.Enabled})
+		row, createErr = q.CreateVulnSource(ctx, sqlcgen.CreateVulnSourceParams{ID: sourceID, TenantID: pgtypex.Int8(id.TenantID), Type: req.Type, Name: req.Name, Config: config, DefaultLevel: req.DefaultLevel, Enabled: req.Enabled})
 		return createErr
 	}); err != nil {
 		return VulnSourceDTO{}, apperr.ErrContestVulnSourceInvalid.WithCause(err)
@@ -692,7 +693,7 @@ func (r *repo) CreateVulnProblem(ctx context.Context, id tenant.Identity, proble
 	if err := r.inTenant(ctx, func(q *sqlcgen.Queries) error {
 		var createErr error
 		row, createErr = q.CreateVulnProblem(ctx, sqlcgen.CreateVulnProblemParams{
-			ID: problemID, TenantID: id.TenantID, SourceID: pgInt8(ids.ParseOrZero(req.SourceID)), ExternalRef: pgText(req.ExternalRef),
+			ID: problemID, TenantID: id.TenantID, SourceID: pgtypex.Int8(ids.ParseOrZero(req.SourceID)), ExternalRef: pgtypex.Text(req.ExternalRef),
 			Title: req.Title, Level: req.Level, RuntimeMode: req.RuntimeMode, DraftBody: body, PrevalidateStatus: VulnPrevalidatePending,
 			PrevalidateDetail: []byte("{}"), Status: VulnProblemDraft,
 		})
@@ -738,7 +739,7 @@ func (r *repo) FinalizeVulnProblem(ctx context.Context, problemID int64, code, v
 	var row sqlcgen.VulnProblem
 	if err := r.inTenant(ctx, func(q *sqlcgen.Queries) error {
 		var updateErr error
-		row, updateErr = q.FinalizeVulnProblem(ctx, sqlcgen.FinalizeVulnProblemParams{ID: problemID, Status: VulnProblemFinalized, ContentItemCode: pgText(code), ContentItemVersion: pgText(version)})
+		row, updateErr = q.FinalizeVulnProblem(ctx, sqlcgen.FinalizeVulnProblemParams{ID: problemID, Status: VulnProblemFinalized, ContentItemCode: pgtypex.Text(code), ContentItemVersion: pgtypex.Text(version)})
 		return updateErr
 	}); err != nil {
 		return VulnProblemDTO{}, notFoundOrInternal(err, apperr.ErrContestVulnProblemInvalid)
@@ -751,7 +752,7 @@ func (r *repo) Stats(ctx context.Context, tenantID int64) (StatsDTO, error) {
 	var out StatsDTO
 	if err := r.inTenantID(ctx, tenantID, func(q *sqlcgen.Queries) error {
 		var err error
-		out.ContestCount, err = q.CountContests(ctx, pgInt2(0))
+		out.ContestCount, err = q.CountContests(ctx, pgtypex.Int2(0))
 		if err != nil {
 			return err
 		}

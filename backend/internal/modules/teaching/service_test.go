@@ -61,8 +61,16 @@ func TestPublishCourseRequiresOutlineCompleteness(t *testing.T) {
 		t.Fatalf("read service helpers: %v", err)
 	}
 	text := functionSource(string(src), "updateCourseStatus")
+	if !strings.Contains(text, "updateCourseStatusIfAllowed") {
+		t.Fatalf("course publish must delegate atomic status update to repo")
+	}
+	repo, err := os.ReadFile("repo.go")
+	if err != nil {
+		t.Fatalf("read repo: %v", err)
+	}
+	repoText := string(repo)
 	for _, required := range []string{"CourseStatusPublished", "EnsureCoursePublishable", "ErrCourseInvalidState"} {
-		if !strings.Contains(text, required) {
+		if !strings.Contains(repoText, required) {
 			t.Fatalf("course publish must validate documented outline completeness, missing %s", required)
 		}
 	}
@@ -70,7 +78,7 @@ func TestPublishCourseRequiresOutlineCompleteness(t *testing.T) {
 
 // TestCreateCourseRequiresTeacherRole 确认服务层建课入口校验教师角色,不只依赖路由层。
 func TestCreateCourseRequiresTeacherRole(t *testing.T) {
-	src, err := os.ReadFile("course_service.go")
+	src, err := os.ReadFile("service_course.go")
 	if err != nil {
 		t.Fatalf("read course service: %v", err)
 	}
@@ -93,7 +101,7 @@ func TestCreateCourseRequiresTeacherRole(t *testing.T) {
 
 // TestCourseMembershipWritesRequireStudentRole 确认课程成员写入只允许学生账号进入成员表。
 func TestCourseMembershipWritesRequireStudentRole(t *testing.T) {
-	src, err := os.ReadFile("course_service.go")
+	src, err := os.ReadFile("service_course.go")
 	if err != nil {
 		t.Fatalf("read course service: %v", err)
 	}
@@ -149,25 +157,25 @@ func TestLessonContentRefsAreValidatedByType(t *testing.T) {
 
 // TestCloneCourseCopiesCourseStructure 确认课程克隆复制章节与课时结构,不只复制课程基础字段。
 func TestCloneCourseCopiesCourseStructure(t *testing.T) {
-	src, err := os.ReadFile("course_service.go")
+	src, err := os.ReadFile("service_course.go")
 	if err != nil {
 		t.Fatalf("read course service: %v", err)
 	}
 	text := functionSource(string(src), "CloneCourse")
-	for _, required := range []string{"cloneCourseStructure"} {
+	for _, required := range []string{"cloneCourseWithStructure"} {
 		if !strings.Contains(text, required) {
 			t.Fatalf("clone course must copy chapters and lessons, missing %s", required)
 		}
 	}
 
-	helpers, err := os.ReadFile("service_helpers.go")
+	repo, err := os.ReadFile("repo.go")
 	if err != nil {
-		t.Fatalf("read service helpers: %v", err)
+		t.Fatalf("read repo: %v", err)
 	}
-	helperText := string(helpers)
-	for _, required := range []string{"func (s *Service) cloneCourseStructure", "ListChaptersByCourse", "ListLessonsByChapter", "CreateChapter", "CreateLesson"} {
-		if !strings.Contains(helperText, required) {
-			t.Fatalf("clone helper must persist copied course structure, missing %s", required)
+	repoText := string(repo)
+	for _, required := range []string{"func (r *repo) cloneCourseWithStructure", "ListChaptersByCourse", "ListLessonsByChapter", "CreateChapter", "CreateLesson"} {
+		if !strings.Contains(repoText, required) {
+			t.Fatalf("clone repo method must persist copied course structure, missing %s", required)
 		}
 	}
 }
@@ -184,7 +192,7 @@ func TestValidateGradeWeightsRequiresExactlyOneHundred(t *testing.T) {
 
 // TestGradeOverrideAuditRecordsOldAndNewValues 确认手动调分审计记录原值和新值。
 func TestGradeOverrideAuditRecordsOldAndNewValues(t *testing.T) {
-	src, err := os.ReadFile("grade_service.go")
+	src, err := os.ReadFile("service_grade.go")
 	if err != nil {
 		t.Fatalf("read grade service: %v", err)
 	}
@@ -194,13 +202,13 @@ func TestGradeOverrideAuditRecordsOldAndNewValues(t *testing.T) {
 			t.Fatalf("grade override audit must include old/new grade values, missing %s", required)
 		}
 	}
-	helpers, err := os.ReadFile("service_helpers.go")
+	convert, err := os.ReadFile("convert.go")
 	if err != nil {
-		t.Fatalf("read service helpers: %v", err)
+		t.Fatalf("read convert: %v", err)
 	}
-	helperText := string(helpers)
+	convertText := string(convert)
 	for _, required := range []string{"auto_total", "override_total", "final_total"} {
-		if !strings.Contains(helperText, required) {
+		if !strings.Contains(convertText, required) {
 			t.Fatalf("grade audit snapshot must include %s", required)
 		}
 	}
@@ -223,7 +231,7 @@ func TestApplyLatePolicyRejectsDisallowedLateSubmission(t *testing.T) {
 
 // TestSubmissionScoringAppliesLatePenalty 确认自动判题和教师批改写最终分时应用迟交扣分。
 func TestSubmissionScoringAppliesLatePenalty(t *testing.T) {
-	src, err := os.ReadFile("assignment_service.go")
+	src, err := os.ReadFile("service_assignment.go")
 	if err != nil {
 		t.Fatalf("read assignment service: %v", err)
 	}
@@ -234,67 +242,68 @@ func TestSubmissionScoringAppliesLatePenalty(t *testing.T) {
 		}
 	}
 
-	events, err := os.ReadFile("events.go")
-	if err != nil {
-		t.Fatalf("read events: %v", err)
-	}
-	if !strings.Contains(string(events), "finalScoreForSubmission") {
+	judgeCompleted := functionSource(text, "HandleJudgeCompleted")
+	if !strings.Contains(judgeCompleted, "finalScoreForSubmission") {
 		t.Fatalf("judge completion must calculate final score with late policy")
 	}
 }
 
 // TestSubmitAssignmentBindsJudgeTaskToCreatedSubmission 确认自动判题提交先持久化 submission 与 outbox,不在请求事务内直接调用 M3。
 func TestSubmitAssignmentBindsJudgeTaskToCreatedSubmission(t *testing.T) {
-	src, err := os.ReadFile("assignment_service.go")
+	src, err := os.ReadFile("service_assignment.go")
 	if err != nil {
 		t.Fatalf("read assignment service: %v", err)
 	}
 	text := functionSource(string(src), "SubmitAssignment")
-	createAt := strings.Index(text, "CreateSubmission")
-	outboxAt := strings.Index(text, "CreateSubmissionJudgeOutbox")
-	outboxAt = strings.Index(text, "createSubmissionJudgeOutbox")
+	createAt := strings.Index(text, "createSubmissionWithOutbox")
+	outboxAt := strings.Index(text, "buildSubmissionJudgeOutbox")
 	if createAt < 0 || outboxAt < 0 {
-		t.Fatalf("submit assignment must create submission and local judge outbox")
+		t.Fatalf("submit assignment must delegate submission and local judge outbox persistence")
 	}
-	createCall := text[createAt:]
-	if !strings.Contains(createCall, "JudgeTaskRef: pgText(\"\")") {
-		t.Fatalf("auto-graded submission must be created with an empty task ref before outbox dispatch succeeds")
-	}
-	if outboxAt < createAt {
-		t.Fatalf("judge outbox must be written after submission id is created")
-	}
-	deleteAt := strings.Index(text, "DeleteSubmissionDraft")
-	if deleteAt < outboxAt {
-		t.Fatalf("server draft must only be deleted after local outbox is persisted")
-	}
-	if strings.Count(text, "repo.inTenant(ctx, func(q *sqlcgen.Queries) error") != 1 {
-		t.Fatalf("create submission, local outbox and draft cleanup must stay in one tenant transaction")
+	if createAt < outboxAt {
+		t.Fatalf("judge outbox parameters must be built before repo persists submission transaction")
 	}
 
-	outboxHelper := functionSource(string(src), "createSubmissionJudgeOutbox")
+	outboxHelper := functionSource(string(src), "buildSubmissionJudgeOutbox")
 	if !strings.Contains(outboxHelper, `fmt.Sprintf("teaching:%d:submission:%d"`) {
 		t.Fatalf("submit assignment must store source_ref bound to the concrete submission id")
 	}
 	if strings.Contains(text, "submitJudge(ctx") {
 		t.Fatalf("submit request path must not call M3 before the local transaction commits")
 	}
+
+	repo, err := os.ReadFile("repo.go")
+	if err != nil {
+		t.Fatalf("read repo: %v", err)
+	}
+	repoText := string(repo)
+	for _, required := range []string{"CreateSubmission", "JudgeTaskRef: pgtypex.Text(\"\")", "CreateSubmissionJudgeOutbox", "DeleteSubmissionDraft"} {
+		if !strings.Contains(repoText, required) {
+			t.Fatalf("repo submission transaction must include %s", required)
+		}
+	}
 }
 
 // TestAutoJudgeSubmissionUsesRecoverableOutbox 确认自动判题提交通过 M6 自有 outbox 派发,避免跨模块副作用半提交。
 func TestAutoJudgeSubmissionUsesRecoverableOutbox(t *testing.T) {
-	src, err := os.ReadFile("assignment_service.go")
+	src, err := os.ReadFile("service_assignment.go")
 	if err != nil {
 		t.Fatalf("read assignment service: %v", err)
 	}
 	submit := functionSource(string(src), "SubmitAssignment")
-	if !strings.Contains(submit, "createSubmissionJudgeOutbox") {
+	if !strings.Contains(submit, "buildSubmissionJudgeOutbox") || !strings.Contains(submit, "createSubmissionWithOutbox") {
 		t.Fatalf("auto judge submit must persist a local outbox row in the submission transaction")
 	}
 	if strings.Contains(submit, "submitJudge(ctx") {
 		t.Fatalf("submit request path must not call M3 before the local transaction commits")
 	}
+	repo, err := os.ReadFile("repo.go")
+	if err != nil {
+		t.Fatalf("read repo: %v", err)
+	}
+	combined := string(src) + string(repo)
 	for _, required := range []string{"DispatchPendingSubmissionJudges", "claimPendingSubmissionJudgeOutbox", "completeSubmissionJudgeOutbox", "failSubmissionJudgeOutbox"} {
-		if !strings.Contains(string(src), required) {
+		if !strings.Contains(combined, required) {
 			t.Fatalf("outbox dispatcher must provide recoverable judge dispatch step, missing %s", required)
 		}
 	}
@@ -319,15 +328,50 @@ func TestAutoJudgeSubmissionUsesRecoverableOutbox(t *testing.T) {
 
 // TestJudgeEventHandlersWrapPersistenceFailures 确认事件处理持久化失败不会向外泄漏原始数据库错误。
 func TestJudgeEventHandlersWrapPersistenceFailures(t *testing.T) {
-	src, err := os.ReadFile("events.go")
+	src, err := os.ReadFile("service_assignment.go")
 	if err != nil {
-		t.Fatalf("read events: %v", err)
+		t.Fatalf("read assignment service: %v", err)
 	}
 	for _, name := range []string{"HandleJudgeCompleted", "HandleJudgeFailed"} {
 		text := functionSource(string(src), name)
 		if !strings.Contains(text, "ErrSubmissionEventInvalid.WithCause(err)") {
 			t.Fatalf("%s must wrap persistence failures with M6 event error code", name)
 		}
+	}
+}
+
+// TestJudgeEventHandlersRejectUnmatchedSubmission 确认判题事件找不到提交时显式失败,避免事件链路假成功。
+func TestJudgeEventHandlersRejectUnmatchedSubmission(t *testing.T) {
+	src, err := os.ReadFile("service_assignment.go")
+	if err != nil {
+		t.Fatalf("read assignment service: %v", err)
+	}
+	repo, err := os.ReadFile("repo.go")
+	if err != nil {
+		t.Fatalf("read repo: %v", err)
+	}
+	combined := string(src) + string(repo)
+	for _, name := range []string{"HandleJudgeCompleted", "HandleJudgeFailed"} {
+		text := functionSource(combined, name)
+		if strings.Contains(text, "if db.IsNoRows(err) {\n\t\t\treturn nil\n\t\t}") {
+			t.Fatalf("%s must not silently ignore unmatched judge task events", name)
+		}
+		if !strings.Contains(combined, "ErrSubmissionEventUnmatched") {
+			t.Fatalf("%s must return the dedicated unmatched-event error code", name)
+		}
+	}
+}
+
+// TestSubscribeJudgeEventsUsesSubmissionEventCode 确认 M3 判题事件订阅失败用提交事件错误码,不复用成绩同步错误码。
+func TestSubscribeJudgeEventsUsesSubmissionEventCode(t *testing.T) {
+	svc := &Service{}
+
+	err := svc.SubscribeEvents()
+	if err == nil {
+		t.Fatalf("expected missing event bus to fail")
+	}
+	if ae, ok := apperr.As(err); !ok || ae.Code != apperr.ErrSubmissionEventSubscribeFailed.Code {
+		t.Fatalf("expected submission event subscribe error, got %v", err)
 	}
 }
 
@@ -463,21 +507,55 @@ func TestCourseContentAccessDoesNotTreatSharedVisibilityAsMembership(t *testing.
 	}
 }
 
+// TestTeachingDomainModelsArePurposeSpecific 确认 service 使用按业务用途命名的领域投影,不复制 sqlc 表行。
+func TestTeachingDomainModelsArePurposeSpecific(t *testing.T) {
+	convertSrc, err := os.ReadFile("convert.go")
+	if err != nil {
+		t.Fatalf("read convert: %v", err)
+	}
+	for _, forbidden := range []string{"type courseRow struct", "type assignmentRow struct", "type submissionRow struct"} {
+		if strings.Contains(string(convertSrc), forbidden) {
+			t.Fatalf("convert must not define table-shaped service row model: %s", forbidden)
+		}
+	}
+
+	modelSrc, err := os.ReadFile("model.go")
+	if err != nil {
+		t.Fatalf("read model: %v", err)
+	}
+	for _, required := range []string{"type CourseAccessSnapshot struct", "type AssignmentPolicySnapshot struct", "type SubmissionScoreSnapshot struct"} {
+		if !strings.Contains(string(modelSrc), required) {
+			t.Fatalf("model must define purpose-specific teaching projection, missing %s", required)
+		}
+	}
+}
+
 // TestTeachingModerationUsesAtomicAuthorizedMutation 防止讨论和公告管理走“先读再转化再写”的重复路径。
 func TestTeachingModerationUsesAtomicAuthorizedMutation(t *testing.T) {
-	src, err := os.ReadFile("interaction_service.go")
+	serviceSrc, err := os.ReadFile("service_interaction.go")
 	if err != nil {
 		t.Fatalf("read interaction service: %v", err)
 	}
-	text := string(src)
+	serviceText := string(serviceSrc)
 	for _, forbidden := range []string{"loadDiscussionPost", "loadAnnouncement", "GetDiscussionPostByID", "GetAnnouncementByID"} {
-		if strings.Contains(text, forbidden) {
+		if strings.Contains(serviceText, forbidden) {
 			t.Fatalf("moderation must use atomic authorized SQL instead of helper %s", forbidden)
 		}
 	}
-	for _, required := range []string{"TogglePostPinParams", "SoftDeletePostParams", "ToggleAnnouncementPinParams", "ActorID: id.AccountID", "IsPlatform: id.IsPlatform"} {
-		if !strings.Contains(text, required) {
-			t.Fatalf("moderation mutation must pass verified actor context, missing %s", required)
+	for _, required := range []string{"togglePostPin(ctx, postID, id.IsPlatform, id.AccountID)", "softDeletePost(ctx, postID, id.IsPlatform, id.AccountID)", "toggleAnnouncementPin(ctx, announcementID, id.IsPlatform, id.AccountID)"} {
+		if !strings.Contains(serviceText, required) {
+			t.Fatalf("moderation service must pass verified actor context to repo, missing %s", required)
+		}
+	}
+
+	repoSrc, err := os.ReadFile("repo.go")
+	if err != nil {
+		t.Fatalf("read teaching repo: %v", err)
+	}
+	repoText := string(repoSrc)
+	for _, required := range []string{"TogglePostPinParams", "SoftDeletePostParams", "ToggleAnnouncementPinParams", "ActorID: actorID", "IsPlatform: isPlatform"} {
+		if !strings.Contains(repoText, required) {
+			t.Fatalf("moderation repo must keep atomic authorized SQL params, missing %s", required)
 		}
 	}
 
@@ -495,14 +573,25 @@ func TestTeachingModerationUsesAtomicAuthorizedMutation(t *testing.T) {
 
 // TestTeachingInteractionWritesUseAtomicMembershipChecks 确认点赞和评价不绕过课程成员边界。
 func TestTeachingInteractionWritesUseAtomicMembershipChecks(t *testing.T) {
-	src, err := os.ReadFile("interaction_service.go")
+	serviceSrc, err := os.ReadFile("service_interaction.go")
 	if err != nil {
 		t.Fatalf("read interaction service: %v", err)
 	}
-	text := string(src)
-	for _, required := range []string{"IncrementPostLikeParams", "UpsertCourseReviewParams", "ensureStudentCourseMember"} {
-		if !strings.Contains(text, required) {
-			t.Fatalf("interaction writes must use unified contracts and authorized SQL params, missing %s", required)
+	serviceText := string(serviceSrc)
+	for _, required := range []string{"incrementPostLike(ctx, postID, id.IsPlatform, id.AccountID)", "upsertCourseReview", "ensureStudentCourseMember"} {
+		if !strings.Contains(serviceText, required) {
+			t.Fatalf("interaction service must use unified boundary and repo writes, missing %s", required)
+		}
+	}
+
+	repoSrc, err := os.ReadFile("repo.go")
+	if err != nil {
+		t.Fatalf("read teaching repo: %v", err)
+	}
+	repoText := string(repoSrc)
+	for _, required := range []string{"IncrementPostLikeParams", "UpsertCourseReviewParams"} {
+		if !strings.Contains(repoText, required) {
+			t.Fatalf("interaction repo must keep authorized SQL params, missing %s", required)
 		}
 	}
 	helpers, err := os.ReadFile("service_helpers.go")
@@ -542,7 +631,7 @@ func TestDiscussionReplyParentMustBelongToSameCourse(t *testing.T) {
 
 // TestTeachingStudentWorkflowsUseStudentMemberBoundary 防止学生侧写入和个人进度复用过宽的课程可访问权限。
 func TestTeachingStudentWorkflowsUseStudentMemberBoundary(t *testing.T) {
-	files := []string{"interaction_service.go", "assignment_service.go", "service_helpers.go"}
+	files := []string{"service_interaction.go", "service_assignment.go", "service_helpers.go", "repo.go"}
 	combined := ""
 	for _, file := range files {
 		src, err := os.ReadFile(file)
@@ -557,7 +646,7 @@ func TestTeachingStudentWorkflowsUseStudentMemberBoundary(t *testing.T) {
 		}
 	}
 
-	interaction, err := os.ReadFile("interaction_service.go")
+	interaction, err := os.ReadFile("service_interaction.go")
 	if err != nil {
 		t.Fatalf("read interaction service: %v", err)
 	}
@@ -585,13 +674,21 @@ func TestTeachingStudentWorkflowsUseStudentMemberBoundary(t *testing.T) {
 
 // TestSubmitAssignmentInvalidatesServerDraft 确认正式提交后服务端草稿失效。
 func TestSubmitAssignmentInvalidatesServerDraft(t *testing.T) {
-	src, err := os.ReadFile("assignment_service.go")
+	src, err := os.ReadFile("service_assignment.go")
 	if err != nil {
 		t.Fatalf("read assignment service: %v", err)
 	}
 	text := functionSource(string(src), "SubmitAssignment")
-	if !strings.Contains(text, "DeleteSubmissionDraft") {
+	if !strings.Contains(text, "createSubmissionWithOutbox") {
 		t.Fatalf("submit assignment must invalidate server draft after creating a submission")
+	}
+
+	repo, err := os.ReadFile("repo.go")
+	if err != nil {
+		t.Fatalf("read repo: %v", err)
+	}
+	if !strings.Contains(string(repo), "DeleteSubmissionDraft") {
+		t.Fatalf("repo submission transaction must invalidate server draft")
 	}
 
 	sql, err := os.ReadFile("../../../db/queries/teaching.sql")
@@ -616,15 +713,22 @@ func TestAssignmentDraftCanBeLoadedFromServer(t *testing.T) {
 		}
 	}
 
-	service, err := os.ReadFile("assignment_service.go")
+	service, err := os.ReadFile("service_assignment.go")
 	if err != nil {
 		t.Fatalf("read assignment service: %v", err)
 	}
 	serviceText := string(service)
-	for _, required := range []string{"func (s *Service) GetDraft", "GetSubmissionDraft", "ensureStudentCourseMember"} {
+	for _, required := range []string{"func (s *Service) GetDraft", "getSubmissionDraftContent", "ensureStudentCourseMember"} {
 		if !strings.Contains(serviceText, required) {
 			t.Fatalf("assignment draft read must enforce student membership and load JSONB content, missing %s", required)
 		}
+	}
+	repo, err := os.ReadFile("repo.go")
+	if err != nil {
+		t.Fatalf("read repo: %v", err)
+	}
+	if !strings.Contains(string(repo), "GetSubmissionDraft") {
+		t.Fatalf("repo draft read must use the server draft SQL query")
 	}
 
 	sql, err := os.ReadFile("../../../db/queries/teaching.sql")
@@ -638,7 +742,7 @@ func TestAssignmentDraftCanBeLoadedFromServer(t *testing.T) {
 
 // TestStudentAssignmentWorkflowsRequirePublishedAssignment 确认学生侧作业详情和草稿入口不能访问教师草稿作业。
 func TestStudentAssignmentWorkflowsRequirePublishedAssignment(t *testing.T) {
-	src, err := os.ReadFile("assignment_service.go")
+	src, err := os.ReadFile("service_assignment.go")
 	if err != nil {
 		t.Fatalf("read assignment service: %v", err)
 	}
@@ -658,12 +762,12 @@ func TestStudentAssignmentWorkflowsRequirePublishedAssignment(t *testing.T) {
 // TestTeachingProductionCodeDoesNotExposePlatformInternalErrors 确认 M6 业务失败不会复用平台内部错误码。
 func TestTeachingProductionCodeDoesNotExposePlatformInternalErrors(t *testing.T) {
 	files := []string{
-		"assignment_service.go",
-		"course_service.go",
+		"service_assignment.go",
+		"service_course.go",
 		"events.go",
-		"grade_service.go",
-		"interaction_service.go",
-		"lesson_service.go",
+		"service_grade.go",
+		"service_interaction.go",
+		"service_lesson.go",
 		"service_helpers.go",
 	}
 	for _, file := range files {

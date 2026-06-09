@@ -12,6 +12,7 @@ import (
 	"chaimir/internal/contracts"
 	"chaimir/internal/platform/audit"
 	"chaimir/internal/platform/tenant"
+	"chaimir/pkg/apperr"
 )
 
 // TestContestStatusTransitionsFollowLifecycle 确认竞赛状态机符合文档生命周期。
@@ -159,9 +160,9 @@ func TestContestSourceRefsUseDocumentedShapeAndSubmissionScope(t *testing.T) {
 
 // TestJudgeEventsBindSourceRef 确认 M3 判题事件必须与提交 source_ref 绑定,不能只凭 task_id 回写。
 func TestJudgeEventsBindSourceRef(t *testing.T) {
-	src, err := os.ReadFile("events.go")
+	src, err := os.ReadFile("service.go")
 	if err != nil {
-		t.Fatalf("read events: %v", err)
+		t.Fatalf("read service: %v", err)
 	}
 	for _, name := range []string{"HandleJudgeCompleted", "HandleJudgeFailed"} {
 		block := functionSource(string(src), name)
@@ -213,6 +214,132 @@ func TestStartProblemEnvUsesContestTeamBoundary(t *testing.T) {
 	}
 	if strings.Index(startEnv, "ensureTeamMemberAccess") > strings.Index(startEnv, "CreateSandbox") {
 		t.Fatalf("StartProblemEnv must verify team access before creating sandbox side effects")
+	}
+}
+
+// TestAddContestProblemRequiresContentContract 确认题目编排必须经 M5 契约校验锁定版本,缺契约不能写入引用。
+func TestAddContestProblemRequiresContentContract(t *testing.T) {
+	store := &fakeContestStore{contest: contestDTO(ContestStatusDraft)}
+	svc := &Service{store: store, idgen: fixedIDGen(8301), identity: &contestAuditIdentity{account: contracts.AccountInfo{AccountID: 200, TenantID: 100, BaseIdentity: 2, Roles: []string{"teacher"}}}}
+
+	_, err := svc.AddContestProblem(testTenantContext(), 8101, ContestProblemRequest{ItemCode: "p1", ItemVersion: "1.0.0", Score: 40, Seq: 1})
+	if err == nil {
+		t.Fatalf("missing content contract must fail before creating contest problem")
+	}
+	if ae, ok := apperr.As(err); !ok || ae.Code != apperr.ErrContestContentUnavailable.Code {
+		t.Fatalf("expected contest content unavailable error, got %v", err)
+	}
+}
+
+// TestListProblemsRequiresContentContract 确认题面列表必须由 M5 题面接口提供过滤内容,缺契约不能返回无题面数据。
+func TestListProblemsRequiresContentContract(t *testing.T) {
+	store := &fakeContestStore{problems: []ContestProblemDTO{{ID: "8301", ContestID: "8101", ItemCode: "p1", ItemVersion: "1.0.0", Score: 40}}}
+	svc := &Service{store: store, content: nil}
+
+	_, err := svc.ListProblems(testTenantContext(), 8101)
+	if err == nil {
+		t.Fatalf("missing content contract must fail")
+	}
+	if ae, ok := apperr.As(err); !ok || ae.Code != apperr.ErrContestContentUnavailable.Code {
+		t.Fatalf("expected contest content unavailable error, got %v", err)
+	}
+}
+
+// TestArchiveContestRequiresSandboxContract 确认归档需要 M2 回收契约,缺契约不能生成快照并假装资源已释放。
+func TestArchiveContestRequiresSandboxContract(t *testing.T) {
+	store := &fakeContestStore{contest: contestDTO(ContestStatusEnded), ranks: []LadderRankDTO{{TeamID: "8201", Score: 100, Rank: 1}}}
+	svc := &Service{
+		store:    store,
+		idgen:    fixedIDGen(8601),
+		sandbox:  nil,
+		auditor:  &noopContestAuditWriter{},
+		identity: &contestAuditIdentity{account: contracts.AccountInfo{AccountID: 200, TenantID: 100, BaseIdentity: 2, Roles: []string{"teacher"}}},
+	}
+
+	_, err := svc.ArchiveContest(testTenantContext(), 8101)
+	if err == nil {
+		t.Fatalf("archive without sandbox recycle contract must fail")
+	}
+	if ae, ok := apperr.As(err); !ok || ae.Code != apperr.ErrContestSandboxUnavailable.Code {
+		t.Fatalf("expected contest sandbox unavailable error, got %v", err)
+	}
+	if store.snapshotCreated {
+		t.Fatalf("archive must not create final snapshot before resource recycle succeeds")
+	}
+}
+
+// TestStartProblemEnvRequiresSandboxContract 确认实操环境创建缺 M2 契约返回专用错误码。
+func TestStartProblemEnvRequiresSandboxContract(t *testing.T) {
+	store := &fakeContestStore{contest: contestDTO(ContestStatusRunning)}
+	svc := &Service{store: store, sandbox: nil}
+
+	_, err := svc.StartProblemEnv(testTenantContext(), 8101, 8301, StartProblemEnvRequest{RuntimeCode: "evm-hardhat"})
+	if err == nil {
+		t.Fatalf("missing sandbox contract must fail")
+	}
+	if ae, ok := apperr.As(err); !ok || ae.Code != apperr.ErrContestSandboxUnavailable.Code {
+		t.Fatalf("expected contest sandbox unavailable error, got %v", err)
+	}
+}
+
+// TestSubmitSolveRequiresJudgeContract 确认解题提交缺 M3 契约返回专用错误码而不是 panic。
+func TestSubmitSolveRequiresJudgeContract(t *testing.T) {
+	store := &fakeContestStore{contest: contestDTO(ContestStatusRunning)}
+	svc := &Service{store: store, idgen: fixedIDGen(8701), judge: nil}
+
+	_, err := svc.SubmitSolve(testTenantContext(), 8101, 8301, SolveSubmitRequest{TeamID: "8201", JudgerCode: "testcase"})
+	if err == nil {
+		t.Fatalf("missing judge contract must fail")
+	}
+	if ae, ok := apperr.As(err); !ok || ae.Code != apperr.ErrContestJudgeUnavailable.Code {
+		t.Fatalf("expected contest judge unavailable error, got %v", err)
+	}
+}
+
+// TestSubmitSolvePersistsJudgeSourceRef 确认提交入库的 source_ref 与 M3 判题任务 source_ref 一致,事件回写可精确绑定。
+func TestSubmitSolvePersistsJudgeSourceRef(t *testing.T) {
+	store := &fakeContestStore{contest: contestDTO(ContestStatusRunning)}
+	svc := &Service{store: store, idgen: fixedIDGen(8701), judge: &fakeJudgeService{}}
+
+	submission, err := svc.SubmitSolve(testTenantContext(), 8101, 8301, SolveSubmitRequest{TeamID: "8201", JudgerCode: "testcase"})
+	if err != nil {
+		t.Fatalf("submit solve rejected: %v", err)
+	}
+	if submission.SourceRef == "" || submission.SourceRef != store.lastSubmissionSource {
+		t.Fatalf("submission source_ref must be persisted, got dto=%q store=%q", submission.SourceRef, store.lastSubmissionSource)
+	}
+	if store.lastJudgeTaskRef != "3001" {
+		t.Fatalf("judge task ref not persisted: %q", store.lastJudgeTaskRef)
+	}
+}
+
+// TestSubscribeEventsUsesDedicatedSubscribeErrorCode 确认订阅链路与判题结果同步链路使用不同错误码。
+func TestSubscribeEventsUsesDedicatedSubscribeErrorCode(t *testing.T) {
+	svc := &Service{store: &fakeContestStore{}, bus: &fakeEventBus{subErr: errContestSubscribe}}
+
+	err := svc.SubscribeEvents()
+	if err == nil {
+		t.Fatalf("subscribe failure must be returned")
+	}
+	if ae, ok := apperr.As(err); !ok || ae.Code != apperr.ErrContestEventSubscribeFailed.Code {
+		t.Fatalf("expected contest event subscribe error, got %v", err)
+	}
+}
+
+// TestHandleJudgeCompletedUsesUnmatchedEventCode 确认判题事件 source_ref 不匹配时返回专用错误码并保留原因。
+func TestHandleJudgeCompletedUsesUnmatchedEventCode(t *testing.T) {
+	store := &fakeContestStore{pendingSubmission: pendingSolveSubmission{TenantID: 100, ID: 8701, ContestID: 8101, TeamID: 8201, SourceRef: "contest:2026:submission:8701", MaxScore: 40}}
+	svc := &Service{store: store}
+
+	err := svc.HandleJudgeCompleted(context.Background(), contracts.JudgeCompletedEvent{TenantID: 100, TaskID: 3001, SourceRef: "contest:2026:submission:9999", Score: 40})
+	if err == nil {
+		t.Fatalf("source_ref mismatch must fail")
+	}
+	if ae, ok := apperr.As(err); !ok || ae.Code != apperr.ErrContestEventUnmatched.Code {
+		t.Fatalf("expected contest event unmatched error, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "source_ref") {
+		t.Fatalf("event mismatch must keep source_ref cause context, got %v", err)
 	}
 }
 

@@ -284,7 +284,7 @@ func (a *API) progressWS(c *gin.Context) {
 	if !ok {
 		return
 	}
-	if err := a.svc.ServeProgressWS(c.Writer, c.Request, id); err != nil {
+	if err := a.serveProgressWS(c.Writer, c.Request, id); err != nil {
 		response.Fail(c, err)
 	}
 }
@@ -295,7 +295,7 @@ func (a *API) terminalWS(c *gin.Context) {
 	if !ok {
 		return
 	}
-	if err := a.svc.ServeTerminalWS(c.Writer, c.Request, id, c.Query("container")); err != nil {
+	if err := a.serveTerminalWS(c.Writer, c.Request, id, c.Query("container")); err != nil {
 		response.Fail(c, err)
 	}
 }

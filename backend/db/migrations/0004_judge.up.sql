@@ -57,6 +57,21 @@ CREATE TABLE judge_result (
 );
 CREATE INDEX idx_judge_result_tenant_time ON judge_result (tenant_id, judged_at DESC);
 
+CREATE TABLE judge_event_outbox (
+    id          BIGINT       PRIMARY KEY,
+    tenant_id   BIGINT       NOT NULL,
+    task_id     BIGINT       NOT NULL REFERENCES judge_task(id),
+    subject     VARCHAR(128) NOT NULL,
+    payload     JSONB        NOT NULL DEFAULT '{}'::jsonb,
+    status      SMALLINT     NOT NULL DEFAULT 1,
+    retry_count INT          NOT NULL DEFAULT 0,
+    last_error  VARCHAR(255) NULL,
+    created_at  TIMESTAMPTZ  NOT NULL DEFAULT now(),
+    updated_at  TIMESTAMPTZ  NOT NULL DEFAULT now()
+);
+CREATE INDEX idx_judge_event_outbox_pending ON judge_event_outbox (tenant_id, status, created_at);
+CREATE UNIQUE INDEX uk_judge_event_outbox_task_subject ON judge_event_outbox (tenant_id, task_id, subject);
+
 CREATE TABLE submission_fingerprint (
     id           BIGINT      PRIMARY KEY,
     tenant_id    BIGINT      NOT NULL,
@@ -74,12 +89,14 @@ CREATE TRIGGER trg_judger_updated BEFORE UPDATE ON judger
     FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 CREATE TRIGGER trg_judge_task_updated BEFORE UPDATE ON judge_task
     FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+CREATE TRIGGER trg_judge_event_outbox_updated BEFORE UPDATE ON judge_event_outbox
+    FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 
 DO $$
 DECLARE
     t TEXT;
     tenant_tables TEXT[] := ARRAY[
-        'judge_task','judge_result','submission_fingerprint'
+        'judge_task','judge_result','judge_event_outbox','submission_fingerprint'
     ];
 BEGIN
     FOREACH t IN ARRAY tenant_tables LOOP

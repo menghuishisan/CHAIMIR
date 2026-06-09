@@ -7,11 +7,7 @@ import (
 	"strings"
 
 	"chaimir/internal/contracts"
-	"chaimir/internal/modules/teaching/internal/sqlcgen"
-	"chaimir/internal/platform/db"
-	"chaimir/internal/platform/ids"
 	"chaimir/internal/platform/pagex"
-	"chaimir/internal/platform/timex"
 	"chaimir/pkg/apperr"
 	"chaimir/pkg/crypto"
 )
@@ -28,21 +24,8 @@ func (s *Service) updateCourseStatus(ctx context.Context, courseID int64, status
 	if err := validateCourseTransition(current.Status, status); err != nil {
 		return CourseDTO{}, err
 	}
-	var row sqlcgen.Course
-	if err := s.repo.inTenant(ctx, func(q *sqlcgen.Queries) error {
-		var updateErr error
-		if status == CourseStatusPublished {
-			publishable, err := q.EnsureCoursePublishable(ctx, courseID)
-			if err != nil {
-				return err
-			}
-			if !publishable {
-				return apperr.ErrCourseInvalidState
-			}
-		}
-		row, updateErr = q.UpdateCourseStatus(ctx, sqlcgen.UpdateCourseStatusParams{ID: courseID, Status: status})
-		return updateErr
-	}); err != nil {
+	row, err := s.repo.updateCourseStatusIfAllowed(ctx, courseID, status)
+	if err != nil {
 		if ae, ok := apperr.As(err); ok {
 			return CourseDTO{}, ae
 		}
@@ -52,7 +35,7 @@ func (s *Service) updateCourseStatus(ctx context.Context, courseID int64, status
 	if err := s.writeAudit(ctx, id.TenantID, auditActionCourseStatus, auditTargetCourse, courseID, map[string]any{"status": status}); err != nil {
 		return CourseDTO{}, err
 	}
-	return courseDTOFromRow(row), nil
+	return row, nil
 }
 
 // updateCourseVisibility 执行课程共享状态变更。
@@ -60,137 +43,69 @@ func (s *Service) updateCourseVisibility(ctx context.Context, courseID int64, vi
 	if err := s.ensureTeacherOfCourse(ctx, courseID); err != nil {
 		return CourseDTO{}, err
 	}
-	var row sqlcgen.Course
-	if err := s.repo.inTenant(ctx, func(q *sqlcgen.Queries) error {
-		var err error
-		row, err = q.UpdateCourseVisibility(ctx, sqlcgen.UpdateCourseVisibilityParams{ID: courseID, Visibility: visibility})
-		return err
-	}); err != nil {
+	row, err := s.repo.updateCourseVisibility(ctx, courseID, visibility)
+	if err != nil {
 		return CourseDTO{}, apperr.ErrCourseInvalid.WithCause(err)
 	}
-	return courseDTOFromRow(row), nil
+	return row, nil
 }
 
-// cloneCourseStructure 复制课程章节与课时结构,不复制成员、提交、进度或成绩。
-func (s *Service) cloneCourseStructure(ctx context.Context, q *sqlcgen.Queries, tenantID, sourceCourseID, targetCourseID int64) error {
-	chapters, err := q.ListChaptersByCourse(ctx, sourceCourseID)
+// loadCourse 读取课程访问投影并转换未命中错误。
+func (s *Service) loadCourse(ctx context.Context, courseID int64) (CourseAccessSnapshot, error) {
+	row, err := s.repo.getCourse(ctx, courseID)
 	if err != nil {
-		return err
-	}
-	for _, chapter := range chapters {
-		newChapter, err := q.CreateChapter(ctx, sqlcgen.CreateChapterParams{
-			ID: s.idgen.Generate(), TenantID: tenantID, CourseID: targetCourseID, Title: chapter.Title, Sort: chapter.Sort,
-		})
-		if err != nil {
-			return err
-		}
-		lessons, err := q.ListLessonsByChapter(ctx, chapter.ID)
-		if err != nil {
-			return err
-		}
-		for _, lesson := range lessons {
-			if _, err := q.CreateLesson(ctx, sqlcgen.CreateLessonParams{
-				ID: s.idgen.Generate(), TenantID: tenantID, ChapterID: newChapter.ID, Title: lesson.Title,
-				ContentType: lesson.ContentType, ContentRef: lesson.ContentRef, Sort: lesson.Sort,
-			}); err != nil {
-				return err
-			}
-		}
-	}
-	return nil
-}
-
-// loadCourse 读取课程并转换未命中错误。
-func (s *Service) loadCourse(ctx context.Context, courseID int64) (sqlcgen.Course, error) {
-	var row sqlcgen.Course
-	if err := s.repo.inTenant(ctx, func(q *sqlcgen.Queries) error {
-		var err error
-		row, err = q.GetCourseByID(ctx, courseID)
-		if db.IsNoRows(err) {
-			return apperr.ErrCourseNotFound
-		}
-		return err
-	}); err != nil {
 		if ae, ok := apperr.As(err); ok {
-			return sqlcgen.Course{}, ae
+			return CourseAccessSnapshot{}, ae
 		}
-		return sqlcgen.Course{}, apperr.ErrCourseQueryFailed.WithCause(err)
+		return CourseAccessSnapshot{}, apperr.ErrCourseQueryFailed.WithCause(err)
 	}
 	return row, nil
 }
 
-// loadChapter 读取章节。
-func (s *Service) loadChapter(ctx context.Context, chapterID int64) (sqlcgen.Chapter, error) {
-	var row sqlcgen.Chapter
-	if err := s.repo.inTenant(ctx, func(q *sqlcgen.Queries) error {
-		var err error
-		row, err = q.GetChapterByID(ctx, chapterID)
-		if db.IsNoRows(err) {
-			return apperr.ErrCourseNotFound
-		}
-		return err
-	}); err != nil {
+// loadChapter 读取章节位置投影。
+func (s *Service) loadChapter(ctx context.Context, chapterID int64) (ChapterLocation, error) {
+	row, err := s.repo.getChapter(ctx, chapterID)
+	if err != nil {
 		if ae, ok := apperr.As(err); ok {
-			return sqlcgen.Chapter{}, ae
+			return ChapterLocation{}, ae
 		}
-		return sqlcgen.Chapter{}, apperr.ErrCourseQueryFailed.WithCause(err)
+		return ChapterLocation{}, apperr.ErrCourseQueryFailed.WithCause(err)
 	}
 	return row, nil
 }
 
-// loadLesson 读取课时。
-func (s *Service) loadLesson(ctx context.Context, lessonID int64) (sqlcgen.Lesson, error) {
-	var row sqlcgen.Lesson
-	if err := s.repo.inTenant(ctx, func(q *sqlcgen.Queries) error {
-		var err error
-		row, err = q.GetLessonByID(ctx, lessonID)
-		if db.IsNoRows(err) {
-			return apperr.ErrCourseNotFound
-		}
-		return err
-	}); err != nil {
+// loadLesson 读取课时内容投影。
+func (s *Service) loadLesson(ctx context.Context, lessonID int64) (LessonContentSnapshot, error) {
+	row, err := s.repo.getLesson(ctx, lessonID)
+	if err != nil {
 		if ae, ok := apperr.As(err); ok {
-			return sqlcgen.Lesson{}, ae
+			return LessonContentSnapshot{}, ae
 		}
-		return sqlcgen.Lesson{}, apperr.ErrCourseQueryFailed.WithCause(err)
+		return LessonContentSnapshot{}, apperr.ErrCourseQueryFailed.WithCause(err)
 	}
 	return row, nil
 }
 
-// loadAssignment 读取作业。
-func (s *Service) loadAssignment(ctx context.Context, assignmentID int64) (sqlcgen.Assignment, error) {
-	var row sqlcgen.Assignment
-	if err := s.repo.inTenant(ctx, func(q *sqlcgen.Queries) error {
-		var err error
-		row, err = q.GetAssignmentByID(ctx, assignmentID)
-		if db.IsNoRows(err) {
-			return apperr.ErrAssignmentNotFound
-		}
-		return err
-	}); err != nil {
+// loadAssignment 读取作业策略投影。
+func (s *Service) loadAssignment(ctx context.Context, assignmentID int64) (AssignmentPolicySnapshot, error) {
+	row, err := s.repo.getAssignment(ctx, assignmentID)
+	if err != nil {
 		if ae, ok := apperr.As(err); ok {
-			return sqlcgen.Assignment{}, ae
+			return AssignmentPolicySnapshot{}, ae
 		}
-		return sqlcgen.Assignment{}, apperr.ErrAssignmentQueryFailed.WithCause(err)
+		return AssignmentPolicySnapshot{}, apperr.ErrAssignmentQueryFailed.WithCause(err)
 	}
 	return row, nil
 }
 
-// loadSubmission 读取提交记录。
-func (s *Service) loadSubmission(ctx context.Context, submissionID int64) (sqlcgen.Submission, error) {
-	var row sqlcgen.Submission
-	if err := s.repo.inTenant(ctx, func(q *sqlcgen.Queries) error {
-		var err error
-		row, err = q.GetSubmissionByID(ctx, submissionID)
-		if db.IsNoRows(err) {
-			return apperr.ErrSubmissionNotFound
-		}
-		return err
-	}); err != nil {
+// loadSubmission 读取提交评分投影。
+func (s *Service) loadSubmission(ctx context.Context, submissionID int64) (SubmissionScoreSnapshot, error) {
+	row, err := s.repo.getSubmission(ctx, submissionID)
+	if err != nil {
 		if ae, ok := apperr.As(err); ok {
-			return sqlcgen.Submission{}, ae
+			return SubmissionScoreSnapshot{}, ae
 		}
-		return sqlcgen.Submission{}, apperr.ErrSubmissionQueryFailed.WithCause(err)
+		return SubmissionScoreSnapshot{}, apperr.ErrSubmissionQueryFailed.WithCause(err)
 	}
 	return row, nil
 }
@@ -261,13 +176,7 @@ func (s *Service) ensureStudentCourseMember(ctx context.Context, courseID int64,
 	if err != nil {
 		return 0, 0, err
 	}
-	if err := s.repo.inTenant(ctx, func(q *sqlcgen.Queries) error {
-		_, memberErr := q.GetCourseMember(ctx, sqlcgen.GetCourseMemberParams{CourseID: courseID, StudentID: accountID})
-		if db.IsNoRows(memberErr) {
-			return forbidden
-		}
-		return memberErr
-	}); err != nil {
+	if err := s.repo.ensureCourseMember(ctx, courseID, accountID, forbidden); err != nil {
 		if ae, ok := apperr.As(err); ok {
 			return 0, 0, ae
 		}
@@ -304,22 +213,14 @@ func (s *Service) ensureCourseAccessible(ctx context.Context, courseID int64) er
 	if canAccessCourseContent(id.IsPlatform, course.TeacherID, id.AccountID, course.Visibility, false) {
 		return nil
 	}
-	if err := s.repo.inTenant(ctx, func(q *sqlcgen.Queries) error {
-		_, memberErr := q.GetCourseMember(ctx, sqlcgen.GetCourseMemberParams{CourseID: courseID, StudentID: id.AccountID})
-		if memberErr == nil && canAccessCourseContent(id.IsPlatform, course.TeacherID, id.AccountID, course.Visibility, true) {
-			return nil
-		}
-		if db.IsNoRows(memberErr) {
-			return apperr.ErrCourseForbidden
-		}
-		return memberErr
-	}); err != nil {
-		if ae, ok := apperr.As(err); ok {
-			return ae
-		}
+	member, err := s.repo.isCourseMember(ctx, courseID, id.AccountID)
+	if err != nil {
 		return apperr.ErrCourseForbidden.WithCause(err)
 	}
-	return nil
+	if canAccessCourseContent(id.IsPlatform, course.TeacherID, id.AccountID, course.Visibility, member) {
+		return nil
+	}
+	return apperr.ErrCourseForbidden
 }
 
 // canAccessCourseContent 判断是否可访问课程学习内容;共享课程库只用于浏览/克隆,不授予学习内容访问权。
@@ -344,162 +245,35 @@ func validateCourseRequest(req CourseRequest) error {
 // listGradesInTenant 查询课程成绩并转换 DTO。
 func (s *Service) listGradesInTenant(ctx context.Context, courseID int64, page, size int) ([]CourseGradeDTO, error) {
 	page, size = pagex.Normalize(page, size)
-	var rows []sqlcgen.CourseGrade
-	if err := s.repo.inTenant(ctx, func(q *sqlcgen.Queries) error {
-		found, err := q.ListCourseGrades(ctx, sqlcgen.ListCourseGradesParams{CourseID: courseID, LimitCount: int32(size), OffsetCount: int32((page - 1) * size)})
-		rows = found
-		return err
-	}); err != nil {
+	rows, err := s.repo.listCourseGradesPage(ctx, courseID, size, (page-1)*size)
+	if err != nil {
 		return nil, apperr.ErrGradeQueryFailed.WithCause(err)
 	}
-	out := make([]CourseGradeDTO, 0, len(rows))
-	for _, row := range rows {
-		out = append(out, gradeDTOFromRow(row))
-	}
-	return out, nil
+	return rows, nil
 }
 
-// upsertOverrideGrade 写入覆盖成绩,保留已有 auto_total。
-func (s *Service) upsertOverrideGrade(ctx context.Context, tenantID, courseID, studentID int64, score float64) (sqlcgen.CourseGrade, error) {
-	override, err := pgNumeric(score)
+// upsertOverrideGrade 写入覆盖成绩,保留已有 auto_total 并返回审计投影。
+func (s *Service) upsertOverrideGrade(ctx context.Context, tenantID, courseID, studentID int64, score float64) (CourseGradeSnapshot, error) {
+	row, err := s.repo.upsertOverrideCourseGrade(ctx, tenantID, s.idgen.Generate(), courseID, studentID, score)
 	if err != nil {
-		return sqlcgen.CourseGrade{}, apperr.ErrGradeInvalid.WithCause(err)
-	}
-	var row sqlcgen.CourseGrade
-	if err := s.repo.inTenantID(ctx, tenantID, func(q *sqlcgen.Queries) error {
-		current, err := q.GetCourseGrade(ctx, sqlcgen.GetCourseGradeParams{CourseID: courseID, StudentID: studentID})
-		autoTotal := override
-		if err == nil {
-			autoTotal = current.AutoTotal
-		} else if !db.IsNoRows(err) {
-			return err
-		}
-		row, err = q.UpsertCourseGrade(ctx, sqlcgen.UpsertCourseGradeParams{ID: s.idgen.Generate(), TenantID: tenantID, CourseID: courseID, StudentID: studentID, AutoTotal: autoTotal, OverrideTotal: override, IsOverridden: true})
-		return err
-	}); err != nil {
-		return sqlcgen.CourseGrade{}, apperr.ErrGradeInvalid.WithCause(err)
+		return CourseGradeSnapshot{}, apperr.ErrGradeInvalid.WithCause(err)
 	}
 	return row, nil
 }
 
 // getCourseGradeSnapshot 读取调分前成绩快照,没有成绩时返回空快照用于审计。
 func (s *Service) getCourseGradeSnapshot(ctx context.Context, tenantID, courseID, studentID int64) (map[string]any, error) {
-	var snapshot map[string]any
-	if err := s.repo.inTenantID(ctx, tenantID, func(q *sqlcgen.Queries) error {
-		row, err := q.GetCourseGrade(ctx, sqlcgen.GetCourseGradeParams{CourseID: courseID, StudentID: studentID})
-		if db.IsNoRows(err) {
-			snapshot = map[string]any{}
-			return nil
-		}
-		if err != nil {
-			return err
-		}
-		snapshot = gradeAuditSnapshot(row)
-		return nil
-	}); err != nil {
+	row, found, err := s.repo.getCourseGradeOptional(ctx, tenantID, courseID, studentID)
+	if err != nil {
 		return nil, apperr.ErrGradeQueryFailed.WithCause(err)
 	}
-	return snapshot, nil
-}
-
-// gradeAuditSnapshot 转换成绩行供审计记录 old/new 值。
-func gradeAuditSnapshot(row sqlcgen.CourseGrade) map[string]any {
-	dto := gradeDTOFromRow(row)
-	return map[string]any{
-		"auto_total":     dto.AutoTotal,
-		"override_total": dto.OverrideTotal,
-		"final_total":    dto.FinalTotal,
-		"is_overridden":  dto.IsOverridden,
+	if !found {
+		return map[string]any{}, nil
 	}
-}
-
-// memberDTOFromRow 转换课程成员行。
-func memberDTOFromRow(row sqlcgen.CourseMember) MemberDTO {
-	return MemberDTO{ID: ids.Format(row.ID), CourseID: ids.Format(row.CourseID), StudentID: ids.Format(row.StudentID), JoinMode: row.JoinMode, JoinedAt: timex.FromTimestamptz(row.JoinedAt)}
-}
-
-// memberDTOsFromRows 批量转换课程成员。
-func memberDTOsFromRows(rows []sqlcgen.CourseMember) []MemberDTO {
-	out := make([]MemberDTO, 0, len(rows))
-	for _, row := range rows {
-		out = append(out, memberDTOFromRow(row))
-	}
-	return out
-}
-
-// lessonDTOsFromRows 批量转换课时。
-func lessonDTOsFromRows(rows []sqlcgen.Lesson) []LessonDTO {
-	out := make([]LessonDTO, 0, len(rows))
-	for _, row := range rows {
-		out = append(out, lessonDTOFromRow(row))
-	}
-	return out
-}
-
-// submissionDTOsFromRows 批量转换提交。
-func submissionDTOsFromRows(rows []sqlcgen.Submission) []SubmissionDTO {
-	out := make([]SubmissionDTO, 0, len(rows))
-	for _, row := range rows {
-		out = append(out, submissionDTOFromRow(row))
-	}
-	return out
-}
-
-// postDTOFromRow 转换讨论帖行。
-func postDTOFromRow(row sqlcgen.DiscussionPost) PostDTO {
-	return PostDTO{ID: ids.Format(row.ID), CourseID: ids.Format(row.CourseID), ParentID: optionalID(row.ParentID), AuthorID: ids.Format(row.AuthorID), Content: row.Content, IsPinned: row.IsPinned, LikeCount: row.LikeCount, CreatedAt: timex.FromTimestamptz(row.CreatedAt)}
-}
-
-// postDTOsFromRows 批量转换讨论帖。
-func postDTOsFromRows(rows []sqlcgen.DiscussionPost) []PostDTO {
-	out := make([]PostDTO, 0, len(rows))
-	for _, row := range rows {
-		out = append(out, postDTOFromRow(row))
-	}
-	return out
-}
-
-// announcementDTOFromRow 转换公告行。
-func announcementDTOFromRow(row sqlcgen.Announcement) AnnouncementDTO {
-	return AnnouncementDTO{ID: ids.Format(row.ID), CourseID: ids.Format(row.CourseID), Title: row.Title, Content: row.Content, IsPinned: row.IsPinned, CreatedAt: timex.FromTimestamptz(row.CreatedAt)}
-}
-
-// announcementDTOsFromRows 批量转换公告。
-func announcementDTOsFromRows(rows []sqlcgen.Announcement) []AnnouncementDTO {
-	out := make([]AnnouncementDTO, 0, len(rows))
-	for _, row := range rows {
-		out = append(out, announcementDTOFromRow(row))
-	}
-	return out
-}
-
-// hasAutoGrading 判断作业是否包含自动判题项目。
-func hasAutoGrading(items []sqlcgen.AssignmentItem) bool {
-	for _, item := range items {
-		if item.GradingMode == GradingModeAuto {
-			return true
-		}
-	}
-	return false
-}
-
-// firstAutoItem 返回第一个自动判题项目。
-func firstAutoItem(items []sqlcgen.AssignmentItem) sqlcgen.AssignmentItem {
-	for _, item := range items {
-		if item.GradingMode == GradingModeAuto {
-			return item
-		}
-	}
-	return sqlcgen.AssignmentItem{}
+	return gradeAuditSnapshot(row), nil
 }
 
 // newInviteCode 生成不可预测的课程邀请码,避免加入凭证可由时间种子推测。
 func (s *Service) newInviteCode() (string, error) {
 	return crypto.RandomToken(8)
-}
-
-// mustOptionalID 解析可选 ID。
-func mustOptionalID(v string) int64 {
-	id, _ := ids.Parse(v)
-	return id
 }

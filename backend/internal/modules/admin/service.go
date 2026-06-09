@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"strings"
 	"time"
 
@@ -14,6 +15,7 @@ import (
 	"chaimir/internal/platform/db"
 	"chaimir/internal/platform/ids"
 	"chaimir/internal/platform/pagex"
+	"chaimir/internal/platform/storage"
 	"chaimir/internal/platform/tenant"
 	"chaimir/pkg/apperr"
 	"chaimir/pkg/crypto"
@@ -46,6 +48,7 @@ type Service struct {
 	auditor    audit.Writer
 	cipher     *crypto.Cipher
 	deploy     config.DeployConfig
+	minio      config.MinIOConfig
 	monitoring config.MonitoringConfig
 	identity   contracts.IdentityAdminService
 	sandbox    contracts.SandboxService
@@ -56,9 +59,9 @@ type Service struct {
 }
 
 // NewService 构造 M9 服务并注入下层只读 contracts。
-func NewService(database *db.DB, idgen *snowflake.Node, auditor audit.Writer, cipher *crypto.Cipher, deploy config.DeployConfig, monitoring config.MonitoringConfig, identity contracts.IdentityAdminService, sandbox contracts.SandboxService, teaching contracts.TeachingService, experiment contracts.ExperimentService, contest contracts.ContestService, notify contracts.NotifyService) *Service {
+func NewService(database *db.DB, idgen *snowflake.Node, auditor audit.Writer, cipher *crypto.Cipher, deploy config.DeployConfig, minio config.MinIOConfig, monitoring config.MonitoringConfig, identity contracts.IdentityAdminService, sandbox contracts.SandboxService, teaching contracts.TeachingService, experiment contracts.ExperimentService, contest contracts.ContestService, notify contracts.NotifyService) *Service {
 	return &Service{
-		store: newRepo(database), idgen: idgen, auditor: auditor, cipher: cipher, deploy: deploy, monitoring: monitoring,
+		store: newRepo(database), idgen: idgen, auditor: auditor, cipher: cipher, deploy: deploy, minio: minio, monitoring: monitoring,
 		identity: identity, sandbox: sandbox, teaching: teaching, experiment: experiment, contest: contest, notify: notify,
 	}
 }
@@ -109,7 +112,7 @@ func (s *Service) platformDashboard(ctx context.Context) (DashboardDTO, error) {
 
 // SchoolDashboard 聚合当前学校看板。
 func (s *Service) SchoolDashboard(ctx context.Context) (DashboardDTO, error) {
-	id, err := requireSchoolAdmin(ctx)
+	id, err := s.requireSchoolAdmin(ctx)
 	if err != nil {
 		return DashboardDTO{}, err
 	}
@@ -227,13 +230,19 @@ func (s *Service) PlatformStatistics(ctx context.Context, from, to time.Time) ([
 	if _, err := requirePlatform(ctx, s.deploy); err != nil {
 		return nil, err
 	}
+	if err := validateStatisticsRange(from, to); err != nil {
+		return nil, err
+	}
 	return s.store.ListStatistics(ctx, ScopeGlobal, 0, from, to)
 }
 
 // SchoolStatistics 查询当前学校周期统计快照。
 func (s *Service) SchoolStatistics(ctx context.Context, from, to time.Time) ([]StatisticDTO, error) {
-	id, err := requireSchoolAdmin(ctx)
+	id, err := s.requireSchoolAdmin(ctx)
 	if err != nil {
+		return nil, err
+	}
+	if err := validateStatisticsRange(from, to); err != nil {
 		return nil, err
 	}
 	return s.store.ListStatistics(ctx, ScopeTenant, id.TenantID, from, to)
@@ -532,7 +541,13 @@ func (s *Service) TriggerBackup(ctx context.Context, req BackupTriggerRequest) (
 	if req.Type != BackupTypeFull && req.Type != BackupTypeIncremental {
 		return BackupRecordDTO{}, apperr.ErrAdminBackupInvalid
 	}
-	out, err := s.store.CreateBackupRecord(ctx, s.nextID(), req)
+	recordID := s.nextID()
+	backupRef, err := s.backupObjectRef(recordID)
+	if err != nil {
+		return BackupRecordDTO{}, err
+	}
+	req.StorageRef = backupRef
+	out, err := s.store.CreateBackupRecord(ctx, recordID, req)
 	if err != nil {
 		return BackupRecordDTO{}, err
 	}
@@ -544,6 +559,13 @@ func (s *Service) resolveScope(ctx context.Context, requested int16) (tenant.Ide
 	id, err := currentAdmin(ctx, s.deploy)
 	if err != nil {
 		return tenant.Identity{}, 0, err
+	}
+	if !id.IsPlatform {
+		verified, err := s.requireSchoolAdmin(ctx)
+		if err != nil {
+			return tenant.Identity{}, 0, err
+		}
+		id = verified
 	}
 	if requested == 0 {
 		if id.IsPlatform {
@@ -633,13 +655,23 @@ func requirePlatform(ctx context.Context, deploy config.DeployConfig) (tenant.Id
 	return id, nil
 }
 
-// requireSchoolAdmin 要求租户内学校管理员上下文;角色由 API 层通过 M1 校验。
-func requireSchoolAdmin(ctx context.Context) (tenant.Identity, error) {
+// requireSchoolAdmin 要求租户内学校管理员上下文,并通过 M1 角色契约做 service 层授权确认。
+func (s *Service) requireSchoolAdmin(ctx context.Context) (tenant.Identity, error) {
 	id, ok := tenant.FromContext(ctx)
 	if !ok {
 		return tenant.Identity{}, apperr.ErrUnauthorized
 	}
 	if id.IsPlatform || id.TenantID <= 0 {
+		return tenant.Identity{}, apperr.ErrForbidden
+	}
+	if s.identity == nil {
+		return tenant.Identity{}, apperr.ErrAdminIdentityUnavailable
+	}
+	has, err := s.identity.HasRole(ctx, id.AccountID, contracts.RoleSchoolAdmin)
+	if err != nil {
+		return tenant.Identity{}, apperr.ErrForbidden.WithCause(err)
+	}
+	if !has {
 		return tenant.Identity{}, apperr.ErrForbidden
 	}
 	return id, nil
@@ -660,6 +692,26 @@ func validateAlertRule(name, metric string, level int16) error {
 		return apperr.ErrAdminAlertInvalid
 	}
 	return nil
+}
+
+// validateStatisticsRange 要求调用方显式给出统计日期范围,避免查询边界隐藏成当前日期。
+func validateStatisticsRange(from, to time.Time) error {
+	if from.IsZero() || to.IsZero() || to.Before(from) {
+		return apperr.ErrAdminStatisticsQueryInvalid
+	}
+	return nil
+}
+
+// backupObjectRef 生成后端受控的备份对象引用,不接受客户端传入存储位置。
+func (s *Service) backupObjectRef(recordID int64) (string, error) {
+	if strings.TrimSpace(s.minio.BucketBackup) == "" {
+		return "", apperr.ErrAdminBackupInvalid
+	}
+	key, err := storage.ObjectKey(0, "admin", "backup", ids.Format(recordID)+".dump")
+	if err != nil {
+		return "", apperr.ErrAdminBackupInvalid.WithCause(err)
+	}
+	return "minio://" + s.minio.BucketBackup + "/" + key, nil
 }
 
 // auditTenantID 根据 scope 返回审计租户范围。
@@ -704,9 +756,18 @@ func parseMonitoringPanels(raw string) ([]MonitoringPanelDTO, error) {
 		return nil, apperr.ErrAdminMonitoringInvalid.WithCause(err)
 	}
 	for _, panel := range out {
-		if strings.TrimSpace(panel.Key) == "" || strings.TrimSpace(panel.URL) == "" {
+		if strings.TrimSpace(panel.Key) == "" || strings.TrimSpace(panel.Name) == "" || !validMonitoringPanelURL(panel.URL) {
 			return nil, apperr.ErrAdminMonitoringInvalid
 		}
 	}
 	return out, nil
+}
+
+// validMonitoringPanelURL 校验外接监控嵌入地址,避免把凭据、查询串或非 HTTPS 地址下发给前端。
+func validMonitoringPanelURL(raw string) bool {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil {
+		return false
+	}
+	return u.Scheme == "https" && u.Host != "" && u.User == nil && u.RawQuery == "" && u.Fragment == ""
 }

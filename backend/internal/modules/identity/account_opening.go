@@ -2,6 +2,7 @@
 package identity
 
 import (
+	"chaimir/internal/platform/pgtypex"
 	"chaimir/pkg/crypto"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -25,7 +26,7 @@ func buildAccountOpeningCredential(enableActivationCode bool, initPassword strin
 		return accountOpeningCredential{}, err
 	}
 	return accountOpeningCredential{
-		PasswordHash:       pgText(hash),
+		PasswordHash:       pgtypex.Text(hash),
 		MustChangePassword: true,
 		InitPassword:       initPassword,
 	}, nil

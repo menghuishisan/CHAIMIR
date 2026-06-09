@@ -3,16 +3,16 @@
 -- name: CreateCourse :one
 INSERT INTO course (id, tenant_id, teacher_id, name, description, type, difficulty, cover_url, semester, credits, schedule, invite_code, status, visibility)
 VALUES (@id, @tenant_id, @teacher_id, @name, @description, @type, @difficulty, @cover_url, @semester, @credits, @schedule, @invite_code, @status, @visibility)
-RETURNING *;
+RETURNING id, tenant_id, teacher_id, name, description, type, difficulty, cover_url, semester, credits, schedule, invite_code, status, visibility, deleted_at, created_at, updated_at;
 
 -- name: GetCourseByID :one
-SELECT * FROM course WHERE id = @id AND deleted_at IS NULL;
+SELECT id, tenant_id, teacher_id, name, description, type, difficulty, cover_url, semester, credits, schedule, invite_code, status, visibility, deleted_at, created_at, updated_at FROM course WHERE id = @id AND deleted_at IS NULL;
 
 -- name: GetCourseByInviteCode :one
-SELECT * FROM course WHERE invite_code = @invite_code AND status IN (2, 3) AND deleted_at IS NULL;
+SELECT id, tenant_id, teacher_id, name, description, type, difficulty, cover_url, semester, credits, schedule, invite_code, status, visibility, deleted_at, created_at, updated_at FROM course WHERE invite_code = @invite_code AND status IN (2, 3) AND deleted_at IS NULL;
 
 -- name: ListTeacherCourses :many
-SELECT * FROM course
+SELECT id, tenant_id, teacher_id, name, description, type, difficulty, cover_url, semester, credits, schedule, invite_code, status, visibility, deleted_at, created_at, updated_at FROM course
 WHERE deleted_at IS NULL
   AND teacher_id = @teacher_id
   AND (sqlc.narg('status')::smallint IS NULL OR status = sqlc.narg('status'))
@@ -20,7 +20,7 @@ ORDER BY created_at DESC
 LIMIT @limit_count OFFSET @offset_count;
 
 -- name: ListStudentCourses :many
-SELECT c.* FROM course c
+SELECT c.id, c.tenant_id, c.teacher_id, c.name, c.description, c.type, c.difficulty, c.cover_url, c.semester, c.credits, c.schedule, c.invite_code, c.status, c.visibility, c.deleted_at, c.created_at, c.updated_at FROM course c
 JOIN course_member m ON m.course_id = c.id AND m.tenant_id = c.tenant_id
 WHERE c.deleted_at IS NULL
   AND m.student_id = @student_id
@@ -39,12 +39,12 @@ UPDATE course SET
   credits = @credits,
   schedule = @schedule
 WHERE id = @id AND deleted_at IS NULL
-RETURNING *;
+RETURNING id, tenant_id, teacher_id, name, description, type, difficulty, cover_url, semester, credits, schedule, invite_code, status, visibility, deleted_at, created_at, updated_at;
 
 -- name: UpdateCourseStatus :one
 UPDATE course SET status = @status
 WHERE id = @id AND deleted_at IS NULL
-RETURNING *;
+RETURNING id, tenant_id, teacher_id, name, description, type, difficulty, cover_url, semester, credits, schedule, invite_code, status, visibility, deleted_at, created_at, updated_at;
 
 -- name: EnsureCoursePublishable :one
 SELECT (
@@ -68,76 +68,76 @@ SELECT (
 -- name: UpdateCourseVisibility :one
 UPDATE course SET visibility = @visibility
 WHERE id = @id AND deleted_at IS NULL
-RETURNING *;
+RETURNING id, tenant_id, teacher_id, name, description, type, difficulty, cover_url, semester, credits, schedule, invite_code, status, visibility, deleted_at, created_at, updated_at;
 
 -- name: UpdateCourseInviteCode :one
 UPDATE course SET invite_code = @invite_code
 WHERE id = @id AND deleted_at IS NULL
-RETURNING *;
+RETURNING id, tenant_id, teacher_id, name, description, type, difficulty, cover_url, semester, credits, schedule, invite_code, status, visibility, deleted_at, created_at, updated_at;
 
 -- name: SoftDeleteCourse :one
 UPDATE course SET deleted_at = now()
 WHERE id = @id AND deleted_at IS NULL
-RETURNING *;
+RETURNING id, tenant_id, teacher_id, name, description, type, difficulty, cover_url, semester, credits, schedule, invite_code, status, visibility, deleted_at, created_at, updated_at;
 
 -- name: CreateChapter :one
 INSERT INTO chapter (id, tenant_id, course_id, title, sort)
 VALUES (@id, @tenant_id, @course_id, @title, @sort)
-RETURNING *;
+RETURNING id, tenant_id, course_id, title, sort, deleted_at, created_at, updated_at;
 
 -- name: ListChaptersByCourse :many
-SELECT * FROM chapter WHERE course_id = @course_id AND deleted_at IS NULL ORDER BY sort ASC, id ASC;
+SELECT id, tenant_id, course_id, title, sort, deleted_at, created_at, updated_at FROM chapter WHERE course_id = @course_id AND deleted_at IS NULL ORDER BY sort ASC, id ASC;
 
 -- name: GetChapterByID :one
-SELECT * FROM chapter WHERE id = @id AND deleted_at IS NULL;
+SELECT id, tenant_id, course_id, title, sort, deleted_at, created_at, updated_at FROM chapter WHERE id = @id AND deleted_at IS NULL;
 
 -- name: UpdateChapter :one
 UPDATE chapter SET title = @title, sort = @sort
 WHERE id = @id AND deleted_at IS NULL
-RETURNING *;
+RETURNING id, tenant_id, course_id, title, sort, deleted_at, created_at, updated_at;
 
 -- name: SoftDeleteChapter :one
 UPDATE chapter SET deleted_at = now()
 WHERE id = @id AND deleted_at IS NULL
-RETURNING *;
+RETURNING id, tenant_id, course_id, title, sort, deleted_at, created_at, updated_at;
 
 -- name: CreateLesson :one
 INSERT INTO lesson (id, tenant_id, chapter_id, title, content_type, content_ref, sort)
 VALUES (@id, @tenant_id, @chapter_id, @title, @content_type, @content_ref, @sort)
-RETURNING *;
+RETURNING id, tenant_id, chapter_id, title, content_type, content_ref, sort, deleted_at, created_at, updated_at;
 
 -- name: ListLessonsByChapter :many
-SELECT * FROM lesson WHERE chapter_id = @chapter_id AND deleted_at IS NULL ORDER BY sort ASC, id ASC;
+SELECT id, tenant_id, chapter_id, title, content_type, content_ref, sort, deleted_at, created_at, updated_at FROM lesson WHERE chapter_id = @chapter_id AND deleted_at IS NULL ORDER BY sort ASC, id ASC;
 
 -- name: GetLessonByID :one
-SELECT * FROM lesson WHERE id = @id AND deleted_at IS NULL;
+SELECT id, tenant_id, chapter_id, title, content_type, content_ref, sort, deleted_at, created_at, updated_at FROM lesson WHERE id = @id AND deleted_at IS NULL;
 
 -- name: UpdateLesson :one
 UPDATE lesson SET title = @title, content_type = @content_type, content_ref = @content_ref, sort = @sort
 WHERE id = @id AND deleted_at IS NULL
-RETURNING *;
+RETURNING id, tenant_id, chapter_id, title, content_type, content_ref, sort, deleted_at, created_at, updated_at;
 
 -- name: UpdateLessonContent :one
 UPDATE lesson SET content_type = @content_type, content_ref = @content_ref
 WHERE id = @id AND deleted_at IS NULL
-RETURNING *;
+RETURNING id, tenant_id, chapter_id, title, content_type, content_ref, sort, deleted_at, created_at, updated_at;
 
 -- name: SoftDeleteLesson :one
 UPDATE lesson SET deleted_at = now()
 WHERE id = @id AND deleted_at IS NULL
-RETURNING *;
+RETURNING id, tenant_id, chapter_id, title, content_type, content_ref, sort, deleted_at, created_at, updated_at;
 
 -- name: AddCourseMember :one
 INSERT INTO course_member (id, tenant_id, course_id, student_id, join_mode)
 VALUES (@id, @tenant_id, @course_id, @student_id, @join_mode)
 ON CONFLICT (tenant_id, course_id, student_id) DO UPDATE SET join_mode = EXCLUDED.join_mode
-RETURNING *;
+RETURNING id, tenant_id, course_id, student_id, joined_at, join_mode;
 
 -- name: ListCourseMembers :many
-SELECT * FROM course_member WHERE course_id = @course_id ORDER BY joined_at DESC LIMIT @limit_count OFFSET @offset_count;
+SELECT id, tenant_id, course_id, student_id, joined_at, join_mode FROM course_member WHERE course_id = @course_id ORDER BY joined_at DESC LIMIT @limit_count OFFSET @offset_count;
 
 -- name: GetCourseMember :one
-SELECT * FROM course_member WHERE course_id = @course_id AND student_id = @student_id;
+SELECT id, tenant_id, course_id, student_id, joined_at, join_mode FROM course_member WHERE course_id = @course_id AND student_id = @student_id;
 
 -- name: RemoveCourseMember :exec
 DELETE FROM course_member WHERE course_id = @course_id AND student_id = @student_id;
@@ -145,13 +145,13 @@ DELETE FROM course_member WHERE course_id = @course_id AND student_id = @student
 -- name: CreateAssignment :one
 INSERT INTO assignment (id, tenant_id, course_id, title, chapter_id, due_at, max_attempts, late_policy, late_penalty, status)
 VALUES (@id, @tenant_id, @course_id, @title, @chapter_id, @due_at, @max_attempts, @late_policy, @late_penalty, @status)
-RETURNING *;
+RETURNING id, tenant_id, course_id, title, chapter_id, due_at, max_attempts, late_policy, late_penalty, status, deleted_at, created_at, updated_at;
 
 -- name: GetAssignmentByID :one
-SELECT * FROM assignment WHERE id = @id AND deleted_at IS NULL;
+SELECT id, tenant_id, course_id, title, chapter_id, due_at, max_attempts, late_policy, late_penalty, status, deleted_at, created_at, updated_at FROM assignment WHERE id = @id AND deleted_at IS NULL;
 
 -- name: ListAssignmentsByCourse :many
-SELECT * FROM assignment WHERE course_id = @course_id AND deleted_at IS NULL ORDER BY due_at ASC, id ASC;
+SELECT id, tenant_id, course_id, title, chapter_id, due_at, max_attempts, late_policy, late_penalty, status, deleted_at, created_at, updated_at FROM assignment WHERE course_id = @course_id AND deleted_at IS NULL ORDER BY due_at ASC, id ASC;
 
 -- name: UpdateAssignment :one
 UPDATE assignment SET
@@ -162,12 +162,12 @@ UPDATE assignment SET
   late_policy = @late_policy,
   late_penalty = @late_penalty
 WHERE id = @id AND deleted_at IS NULL
-RETURNING *;
+RETURNING id, tenant_id, course_id, title, chapter_id, due_at, max_attempts, late_policy, late_penalty, status, deleted_at, created_at, updated_at;
 
 -- name: UpdateAssignmentStatus :one
 UPDATE assignment SET status = @status
 WHERE id = @id AND deleted_at IS NULL
-RETURNING *;
+RETURNING id, tenant_id, course_id, title, chapter_id, due_at, max_attempts, late_policy, late_penalty, status, deleted_at, created_at, updated_at;
 
 -- name: DeleteAssignmentItems :exec
 DELETE FROM assignment_item WHERE assignment_id = @assignment_id;
@@ -175,10 +175,10 @@ DELETE FROM assignment_item WHERE assignment_id = @assignment_id;
 -- name: CreateAssignmentItem :one
 INSERT INTO assignment_item (id, tenant_id, assignment_id, item_code, item_version, score, seq, grading_mode, judger_code)
 VALUES (@id, @tenant_id, @assignment_id, @item_code, @item_version, @score, @seq, @grading_mode, @judger_code)
-RETURNING *;
+RETURNING id, tenant_id, assignment_id, item_code, item_version, score, seq, grading_mode, judger_code, created_at;
 
 -- name: ListAssignmentItems :many
-SELECT * FROM assignment_item WHERE assignment_id = @assignment_id ORDER BY seq ASC, id ASC;
+SELECT id, tenant_id, assignment_id, item_code, item_version, score, seq, grading_mode, judger_code, created_at FROM assignment_item WHERE assignment_id = @assignment_id ORDER BY seq ASC, id ASC;
 
 -- name: CountSubmissionsByStudent :one
 SELECT count(*)::bigint FROM submission WHERE assignment_id = @assignment_id AND student_id = @student_id;
@@ -195,21 +195,21 @@ WHERE EXISTS (
     AND c.deleted_at IS NULL
     AND m.student_id = @student_id
 )
-RETURNING *;
+RETURNING id, tenant_id, assignment_id, student_id, attempt_no, content_ref, judge_task_ref, auto_score, manual_score, final_score, comment, is_late, status, submitted_at;
 
 -- name: GetSubmissionByID :one
-SELECT * FROM submission WHERE id = @id;
+SELECT id, tenant_id, assignment_id, student_id, attempt_no, content_ref, judge_task_ref, auto_score, manual_score, final_score, comment, is_late, status, submitted_at FROM submission WHERE id = @id;
 
 -- name: ListSubmissionsByAssignment :many
-SELECT * FROM submission WHERE assignment_id = @assignment_id ORDER BY submitted_at DESC LIMIT @limit_count OFFSET @offset_count;
+SELECT id, tenant_id, assignment_id, student_id, attempt_no, content_ref, judge_task_ref, auto_score, manual_score, final_score, comment, is_late, status, submitted_at FROM submission WHERE assignment_id = @assignment_id ORDER BY submitted_at DESC LIMIT @limit_count OFFSET @offset_count;
 
 -- name: GetSubmissionByJudgeTaskRef :one
-SELECT * FROM submission WHERE judge_task_ref = @judge_task_ref;
+SELECT id, tenant_id, assignment_id, student_id, attempt_no, content_ref, judge_task_ref, auto_score, manual_score, final_score, comment, is_late, status, submitted_at FROM submission WHERE judge_task_ref = @judge_task_ref;
 
 -- name: UpdateSubmissionJudgeTaskRef :one
 UPDATE submission SET judge_task_ref = @judge_task_ref
 WHERE id = @id
-RETURNING *;
+RETURNING id, tenant_id, assignment_id, student_id, attempt_no, content_ref, judge_task_ref, auto_score, manual_score, final_score, comment, is_late, status, submitted_at;
 
 -- name: CreateSubmissionJudgeOutbox :one
 INSERT INTO submission_judge_outbox (
@@ -220,10 +220,10 @@ VALUES (
   @id, @tenant_id, @submission_id, @assignment_id, @student_id, @item_code, @item_version,
   @judger_code, @code_storage_key, @code_hash, @extra_input, @source_ref, @status
 )
-RETURNING *;
+RETURNING id, tenant_id, submission_id, assignment_id, student_id, item_code, item_version, judger_code, code_storage_key, code_hash, extra_input, source_ref, status, retry_count, last_error, created_at, updated_at;
 
 -- name: ListPendingSubmissionJudgeOutbox :many
-SELECT * FROM submission_judge_outbox
+SELECT id, tenant_id, submission_id, assignment_id, student_id, item_code, item_version, judger_code, code_storage_key, code_hash, extra_input, source_ref, status, retry_count, last_error, created_at, updated_at FROM submission_judge_outbox
 WHERE status = @status
 ORDER BY created_at ASC
 LIMIT @limit_count;
@@ -239,29 +239,29 @@ UPDATE submission_judge_outbox
 SET status = @running_status, retry_count = retry_count + 1, last_error = NULL
 WHERE id = @id
   AND status = @pending_status
-RETURNING *;
+RETURNING id, tenant_id, submission_id, assignment_id, student_id, item_code, item_version, judger_code, code_storage_key, code_hash, extra_input, source_ref, status, retry_count, last_error, created_at, updated_at;
 
 -- name: CompleteSubmissionJudgeOutbox :one
 UPDATE submission_judge_outbox
 SET status = @done_status, last_error = NULL
 WHERE id = @id
-RETURNING *;
+RETURNING id, tenant_id, submission_id, assignment_id, student_id, item_code, item_version, judger_code, code_storage_key, code_hash, extra_input, source_ref, status, retry_count, last_error, created_at, updated_at;
 
 -- name: FailSubmissionJudgeOutbox :one
 UPDATE submission_judge_outbox
 SET status = @pending_status, last_error = @last_error
 WHERE id = @id
-RETURNING *;
+RETURNING id, tenant_id, submission_id, assignment_id, student_id, item_code, item_version, judger_code, code_storage_key, code_hash, extra_input, source_ref, status, retry_count, last_error, created_at, updated_at;
 
 -- name: UpdateSubmissionAutoScore :one
 UPDATE submission SET auto_score = @auto_score, final_score = @final_score, status = @status
 WHERE id = @id
-RETURNING *;
+RETURNING id, tenant_id, assignment_id, student_id, attempt_no, content_ref, judge_task_ref, auto_score, manual_score, final_score, comment, is_late, status, submitted_at;
 
 -- name: UpdateSubmissionManualScore :one
 UPDATE submission SET manual_score = @manual_score, final_score = @final_score, comment = @comment, status = @status
 WHERE id = @id
-RETURNING *;
+RETURNING id, tenant_id, assignment_id, student_id, attempt_no, content_ref, judge_task_ref, auto_score, manual_score, final_score, comment, is_late, status, submitted_at;
 
 -- name: UpsertSubmissionDraft :one
 INSERT INTO submission_draft (id, tenant_id, assignment_id, student_id, content)
@@ -276,10 +276,10 @@ WHERE EXISTS (
     AND m.student_id = @student_id
 )
 ON CONFLICT (tenant_id, assignment_id, student_id) DO UPDATE SET content = EXCLUDED.content, updated_at = now()
-RETURNING *;
+RETURNING id, tenant_id, assignment_id, student_id, content, updated_at;
 
 -- name: GetSubmissionDraft :one
-SELECT * FROM submission_draft
+SELECT id, tenant_id, assignment_id, student_id, content, updated_at FROM submission_draft
 WHERE assignment_id = @assignment_id
   AND student_id = @student_id;
 
@@ -303,20 +303,20 @@ WHERE EXISTS (
     AND m.student_id = @student_id
 )
 ON CONFLICT (tenant_id, lesson_id, student_id) DO UPDATE SET status = EXCLUDED.status, video_pos = EXCLUDED.video_pos, duration_sec = lesson_progress.duration_sec + EXCLUDED.duration_sec, updated_at = now()
-RETURNING *;
+RETURNING id, tenant_id, lesson_id, student_id, status, video_pos, duration_sec, updated_at;
 
 -- name: GetLessonProgress :one
-SELECT * FROM lesson_progress WHERE lesson_id = @lesson_id AND student_id = @student_id;
+SELECT id, tenant_id, lesson_id, student_id, status, video_pos, duration_sec, updated_at FROM lesson_progress WHERE lesson_id = @lesson_id AND student_id = @student_id;
 
 -- name: ListLessonProgressByCourse :many
-SELECT p.* FROM lesson_progress p
+SELECT p.id, p.tenant_id, p.lesson_id, p.student_id, p.status, p.video_pos, p.duration_sec, p.updated_at FROM lesson_progress p
 JOIN lesson l ON l.id = p.lesson_id
 JOIN chapter c ON c.id = l.chapter_id
 WHERE c.course_id = @course_id
 ORDER BY p.updated_at DESC;
 
 -- name: ListLessonProgressByCourseAndStudent :many
-SELECT p.* FROM lesson_progress p
+SELECT p.id, p.tenant_id, p.lesson_id, p.student_id, p.status, p.video_pos, p.duration_sec, p.updated_at FROM lesson_progress p
 JOIN lesson l ON l.id = p.lesson_id
 JOIN chapter c ON c.id = l.chapter_id
 WHERE c.course_id = @course_id
@@ -333,10 +333,10 @@ WHERE sqlc.narg('parent_id')::bigint IS NULL
        AND parent.course_id = @course_id
        AND parent.deleted_at IS NULL
    )
-RETURNING *;
+RETURNING id, tenant_id, course_id, parent_id, author_id, content, is_pinned, like_count, deleted_at, created_at, updated_at;
 
 -- name: ListDiscussionPosts :many
-SELECT * FROM discussion_post
+SELECT id, tenant_id, course_id, parent_id, author_id, content, is_pinned, like_count, deleted_at, created_at, updated_at FROM discussion_post
 WHERE course_id = @course_id AND deleted_at IS NULL
 ORDER BY is_pinned DESC, created_at DESC
 LIMIT @limit_count OFFSET @offset_count;
@@ -359,7 +359,7 @@ WHERE p.id = @id
         AND m.student_id = @actor_id
     )
   )
-RETURNING p.*;
+RETURNING p.id, p.tenant_id, p.course_id, p.parent_id, p.author_id, p.content, p.is_pinned, p.like_count, p.deleted_at, p.created_at, p.updated_at;
 
 -- name: TogglePostPin :one
 UPDATE discussion_post p
@@ -370,7 +370,7 @@ WHERE p.id = @id
   AND c.id = p.course_id
   AND c.deleted_at IS NULL
   AND (@is_platform::boolean OR c.teacher_id = @actor_id)
-RETURNING p.*;
+RETURNING p.id, p.tenant_id, p.course_id, p.parent_id, p.author_id, p.content, p.is_pinned, p.like_count, p.deleted_at, p.created_at, p.updated_at;
 
 -- name: SoftDeletePost :one
 UPDATE discussion_post p
@@ -381,15 +381,15 @@ WHERE p.id = @id
   AND c.id = p.course_id
   AND c.deleted_at IS NULL
   AND (@is_platform::boolean OR c.teacher_id = @actor_id)
-RETURNING p.*;
+RETURNING p.id, p.tenant_id, p.course_id, p.parent_id, p.author_id, p.content, p.is_pinned, p.like_count, p.deleted_at, p.created_at, p.updated_at;
 
 -- name: CreateAnnouncement :one
 INSERT INTO announcement (id, tenant_id, course_id, title, content)
 VALUES (@id, @tenant_id, @course_id, @title, @content)
-RETURNING *;
+RETURNING id, tenant_id, course_id, title, content, is_pinned, deleted_at, created_at, updated_at;
 
 -- name: ListAnnouncements :many
-SELECT * FROM announcement
+SELECT id, tenant_id, course_id, title, content, is_pinned, deleted_at, created_at, updated_at FROM announcement
 WHERE course_id = @course_id AND deleted_at IS NULL
 ORDER BY is_pinned DESC, created_at DESC
 LIMIT @limit_count OFFSET @offset_count;
@@ -403,7 +403,7 @@ WHERE a.id = @id
   AND c.id = a.course_id
   AND c.deleted_at IS NULL
   AND (@is_platform::boolean OR c.teacher_id = @actor_id)
-RETURNING a.*;
+RETURNING a.id, a.tenant_id, a.course_id, a.title, a.content, a.is_pinned, a.deleted_at, a.created_at, a.updated_at;
 
 -- name: UpsertCourseReview :one
 INSERT INTO course_review (id, tenant_id, course_id, student_id, rating, comment)
@@ -416,7 +416,7 @@ WHERE EXISTS (
     AND m.student_id = @student_id
 )
 ON CONFLICT (tenant_id, course_id, student_id) DO UPDATE SET rating = EXCLUDED.rating, comment = EXCLUDED.comment
-RETURNING *;
+RETURNING id, tenant_id, course_id, student_id, rating, comment, created_at;
 
 -- name: DeleteGradeWeightsByCourse :exec
 DELETE FROM grade_weight WHERE course_id = @course_id;
@@ -424,10 +424,10 @@ DELETE FROM grade_weight WHERE course_id = @course_id;
 -- name: CreateGradeWeight :one
 INSERT INTO grade_weight (id, tenant_id, course_id, source_type, source_ref, weight)
 VALUES (@id, @tenant_id, @course_id, @source_type, @source_ref, @weight)
-RETURNING *;
+RETURNING id, tenant_id, course_id, source_type, source_ref, weight;
 
 -- name: ListGradeWeightsByCourse :many
-SELECT * FROM grade_weight WHERE course_id = @course_id ORDER BY source_type ASC, source_ref ASC;
+SELECT id, tenant_id, course_id, source_type, source_ref, weight FROM grade_weight WHERE course_id = @course_id ORDER BY source_type ASC, source_ref ASC;
 
 -- name: ListLatestAssignmentScoresForCourse :many
 SELECT DISTINCT ON (s.assignment_id, s.student_id)
@@ -445,10 +445,10 @@ ON CONFLICT (tenant_id, course_id, student_id) DO UPDATE SET
   override_total = EXCLUDED.override_total,
   is_overridden = EXCLUDED.is_overridden,
   updated_at = now()
-RETURNING *;
+RETURNING id, tenant_id, course_id, student_id, auto_total, override_total, is_overridden, updated_at;
 
 -- name: ListCourseGrades :many
-SELECT * FROM course_grade WHERE course_id = @course_id ORDER BY student_id ASC LIMIT @limit_count OFFSET @offset_count;
+SELECT id, tenant_id, course_id, student_id, auto_total, override_total, is_overridden, updated_at FROM course_grade WHERE course_id = @course_id ORDER BY student_id ASC LIMIT @limit_count OFFSET @offset_count;
 
 -- name: ListStudentCourseGrades :many
 SELECT
@@ -467,7 +467,7 @@ WHERE cg.student_id = @student_id
 ORDER BY c.semester ASC, cg.course_id ASC;
 
 -- name: GetCourseGrade :one
-SELECT * FROM course_grade WHERE course_id = @course_id AND student_id = @student_id;
+SELECT id, tenant_id, course_id, student_id, auto_total, override_total, is_overridden, updated_at FROM course_grade WHERE course_id = @course_id AND student_id = @student_id;
 
 -- name: CountCourses :one
 SELECT count(*)::bigint FROM course WHERE deleted_at IS NULL;

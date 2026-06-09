@@ -54,6 +54,8 @@ func (a *API) Register(rg *gin.RouterGroup) {
 		platformG.GET("/reviews", a.listReviews)
 		platformG.POST("/reviews/:id/approve", a.approveReview)
 		platformG.POST("/reviews/:id/reject", a.rejectReview)
+		platformG.POST("/packages/:pkg/archive", a.archivePackage)
+		platformG.POST("/packages/:pkg/republish", a.republishPackage)
 
 		g.POST("/sessions/:id/actions", a.reportAction)
 		g.GET("/sessions/:id/replay", a.getReplay)
@@ -113,13 +115,14 @@ func (a *API) getBundle(c *gin.Context) {
 	response.OK(c, out)
 }
 
-// submitPackage 提交仿真包进入审核。
+// submitPackage 读取 multipart 仿真包并提交审核,包内容必须走后端扫描与对象存储路径。
 func (a *API) submitPackage(c *gin.Context) {
 	id, ok := tenant.FromContext(c.Request.Context())
 	if !ok {
 		response.Fail(c, apperr.ErrUnauthorized)
 		return
 	}
+	// 第一步解析表单中的 JSON 配置,上传包体还未读取,失败不会产生对象存储副作用。
 	scaleLimit, err := jsonForm(c.PostForm("scale_limit"))
 	if err != nil {
 		response.Fail(c, err)
@@ -136,6 +139,7 @@ func (a *API) submitPackage(c *gin.Context) {
 		BackendAdapter: c.PostForm("backend_adapter"), AuthorID: c.PostForm("author_id"),
 		ScaleLimit: scaleLimit, BackendConfig: backendConfig,
 	}
+	// 第二步补齐教师作者默认值,但仍交由校验函数确认命名空间和作者身份一致。
 	if req.AuthorID == "" {
 		req.AuthorID = ids.Format(id.AccountID)
 	}
@@ -148,6 +152,7 @@ func (a *API) submitPackage(c *gin.Context) {
 		response.Fail(c, err)
 		return
 	}
+	// 先校验元数据再读取上传包,避免无效请求提前污染对象存储。
 	bundle, err := a.readAndStoreBundle(c, id.TenantID, req.Code, req.Version)
 	if err != nil {
 		response.Fail(c, err)
@@ -155,6 +160,7 @@ func (a *API) submitPackage(c *gin.Context) {
 	}
 	req.BundleHash = bundle.Hash
 	req.BundleKey = bundle.Key
+	// 第三步把扫描报告和对象引用交给服务层提交审核,API 层不直接写包版本表。
 	row, err := a.svc.SubmitUploadedPackage(c.Request.Context(), req, bundle.ScanReport)
 	if err != nil {
 		response.Fail(c, err)
@@ -258,7 +264,7 @@ func (a *API) previewPackage(c *gin.Context) {
 	response.OK(c, out)
 }
 
-// updatePackage 更新草稿或退回仿真包。
+// updatePackage 更新草稿或退回仿真包,新 bundle 同样必须重新扫描后才能替换。
 func (a *API) updatePackage(c *gin.Context) {
 	id, ok := tenant.FromContext(c.Request.Context())
 	if !ok {
@@ -269,6 +275,7 @@ func (a *API) updatePackage(c *gin.Context) {
 	if !ok {
 		return
 	}
+	// 先读取服务端包元数据,code/version/author 不接受客户端在更新时重传覆盖。
 	target, err := a.svc.GetPackagePreview(c.Request.Context(), packageID)
 	if err != nil {
 		response.Fail(c, err)
@@ -307,6 +314,7 @@ func (a *API) updatePackage(c *gin.Context) {
 		response.Fail(c, err)
 		return
 	}
+	// 再读取并保存新包体,服务层只接收扫描后的 bundle_key/hash。
 	bundle, err := a.readAndStoreBundle(c, id.TenantID, code, version)
 	if err != nil {
 		response.Fail(c, err)
@@ -361,6 +369,34 @@ func (a *API) rejectReview(c *gin.Context) {
 		return
 	}
 	row, err := a.svc.RejectReview(c.Request.Context(), reviewID, req.Comment)
+	if err != nil {
+		response.Fail(c, err)
+		return
+	}
+	response.OK(c, row)
+}
+
+// archivePackage 下架已发布仿真包。
+func (a *API) archivePackage(c *gin.Context) {
+	packageID, ok := simRouteID(c, "pkg", apperr.ErrSimPackageInvalid)
+	if !ok {
+		return
+	}
+	row, err := a.svc.ArchivePackage(c.Request.Context(), packageID)
+	if err != nil {
+		response.Fail(c, err)
+		return
+	}
+	response.OK(c, row)
+}
+
+// republishPackage 重新上架已下架仿真包。
+func (a *API) republishPackage(c *gin.Context) {
+	packageID, ok := simRouteID(c, "pkg", apperr.ErrSimPackageInvalid)
+	if !ok {
+		return
+	}
+	row, err := a.svc.RepublishPackage(c.Request.Context(), packageID)
 	if err != nil {
 		response.Fail(c, err)
 		return
@@ -425,7 +461,7 @@ func (a *API) streamSession(c *gin.Context) {
 	if !ok {
 		return
 	}
-	if err := a.svc.ServeBackendStreamWS(c.Writer, c.Request, sessionID); err != nil {
+	if err := a.serveBackendStreamWS(c.Writer, c.Request, sessionID); err != nil {
 		response.Fail(c, err)
 	}
 }

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"chaimir/internal/contracts"
+	"chaimir/internal/platform/jsonx"
 	"chaimir/pkg/apperr"
 )
 
@@ -62,19 +63,19 @@ func validateCourseTransition(from, to int16) error {
 func validateLessonContentRef(contentType int16, ref map[string]any) error {
 	switch contentType {
 	case LessonContentVideo, LessonContentAttachment:
-		if strings.TrimSpace(stringValue(ref["storage_key"])) == "" {
+		if strings.TrimSpace(jsonx.StringFromAny(ref["storage_key"])) == "" {
 			return apperr.ErrCourseInvalid
 		}
 	case LessonContentMarkdown:
-		if strings.TrimSpace(stringValue(ref["markdown"])) == "" {
+		if strings.TrimSpace(jsonx.StringFromAny(ref["markdown"])) == "" {
 			return apperr.ErrCourseInvalid
 		}
 	case LessonContentExperiment:
-		if strings.TrimSpace(stringValue(ref["experiment_id"])) == "" {
+		if strings.TrimSpace(jsonx.StringFromAny(ref["experiment_id"])) == "" {
 			return apperr.ErrCourseInvalid
 		}
 	case LessonContentSimulation:
-		if strings.TrimSpace(stringValue(ref["package_code"])) == "" || strings.TrimSpace(stringValue(ref["version"])) == "" {
+		if strings.TrimSpace(jsonx.StringFromAny(ref["package_code"])) == "" || strings.TrimSpace(jsonx.StringFromAny(ref["version"])) == "" {
 			return apperr.ErrCourseInvalid
 		}
 	default:
@@ -124,9 +125,9 @@ func applyLatePolicy(dueAt, submittedAt time.Time, policy int16, penalty map[str
 	case LatePolicyNoPenalty:
 		return LateResult{IsLate: true, FinalScore: score}, nil
 	case LatePolicyDeduct:
-		rate := numberValue(penalty["deduct_percent"])
+		rate := jsonx.Float64FromAny(penalty["deduct_percent"])
 		if rate <= 0 {
-			rate = numberValue(penalty["percent"])
+			rate = jsonx.Float64FromAny(penalty["percent"])
 		}
 		if rate < 0 || rate > 100 {
 			return LateResult{}, apperr.ErrAssignmentInvalid
@@ -163,29 +164,4 @@ func validateScore(score float64) error {
 		return apperr.ErrGradeInvalid
 	}
 	return nil
-}
-
-// numberValue 从 JSON 数字字段中提取 float64。
-func numberValue(v any) float64 {
-	switch x := v.(type) {
-	case float64:
-		return x
-	case float32:
-		return float64(x)
-	case int:
-		return float64(x)
-	case int32:
-		return float64(x)
-	case int64:
-		return float64(x)
-	}
-	return 0
-}
-
-// stringValue 从 JSON 字段中提取字符串。
-func stringValue(v any) string {
-	if s, ok := v.(string); ok {
-		return s
-	}
-	return ""
 }

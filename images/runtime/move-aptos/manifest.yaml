@@ -1,0 +1,83 @@
+﻿# 本文件声明 runtime/move-aptos 镜像的职责、端口、安全、资源和供应链约束。
+schema_version: 1
+category: runtime
+name: move-aptos
+image: runtime/move-aptos
+labels:
+  app.kubernetes.io/name: move-aptos
+  app.kubernetes.io/component: runtime
+  app.kubernetes.io/part-of: chaimir
+  chaimir.io/category: runtime
+  chaimir.io/image: runtime/move-aptos
+  chaimir.io/data-driven: "true"
+  chaimir.io/student-access: "true"
+  chaimir.io/sensitivity: student-runtime
+  chaimir.io/scope: sandbox
+  chaimir.io/source: thin-wrapper
+description: Aptos Move 本地网教学运行时镜像。
+source:
+  type: thin-wrapper
+upstream:
+  image: aptoslabs/tools:aptos-node-v1.27.3
+  reuse_policy: thin-wrapper
+data_driven: true
+capabilities:
+  - chain-runtime
+  - aptos-localnet
+  - move-dev
+runtime:
+  eco: aptos
+  adapter_level: 2
+  default_tool_codes:
+    - terminal
+    - code-server
+ports:
+  - name: rest
+    container_port: 8080
+    protocol: TCP
+    expose: proxy
+    purpose: Aptos REST API
+local_dev:
+  host_mappings:
+    - host: 127.0.0.1
+      env: CHAIMIR_DEV_APTOS_REST_PORT
+      default: 18010
+      container_port: 8080
+security:
+  run_as_non_root: true
+  read_only_root_filesystem: true
+  allow_privilege_escalation: false
+  privileged: false
+  host_network: false
+  automount_service_account_token: false
+  drop_capabilities:
+    - ALL
+  network_policy: deny-all
+student_access:
+  enabled: true
+  shell: restricted
+  allowed_mounts:
+    - workspace
+    - public-assets
+    - runtime-state
+resources:
+  cpu_request: 500m
+  cpu_limit: "2"
+  memory_request: 1Gi
+  memory_limit: 4Gi
+  ephemeral_storage_limit: 8Gi
+build:
+  context: images/runtime/move-aptos
+  dockerfile: Dockerfile
+selftest:
+  commands:
+    - name: aptos-version
+      command:
+        - aptos
+        - --version
+supply_chain:
+  sbom: true
+  trivy_required: true
+  cosign_required: true
+  pull_by_digest_in_production: true
+

@@ -22,7 +22,7 @@ type API struct {
 	identity contracts.IdentityService
 }
 
-// NewAPI 构造 M6 API。
+// NewAPI 构造 M6 HTTP 处理器,注入教学服务、鉴权管理器和身份只读契约。
 func NewAPI(svc *Service, authMgr *auth.Manager, identity contracts.IdentityService) *API {
 	return &API{svc: svc, authMgr: authMgr, identity: identity}
 }
@@ -90,13 +90,13 @@ func (a *API) Register(rg *gin.RouterGroup) {
 	}
 }
 
-// listCourses 查询我的课程。
+// listCourses 按当前账号角色查询课程列表,支持教师和学生两种视角。
 func (a *API) listCourses(c *gin.Context) {
 	out, err := a.svc.ListCourses(c.Request.Context(), c.Query("role"), httpx.Int16(c.Query("status")), httpx.Int(c.Query("page")), httpx.Int(c.Query("size")))
 	httpx.Write(c, out, err)
 }
 
-// createCourse 创建课程。
+// createCourse 绑定课程创建请求,由服务层写入草稿并生成邀请码等服务端字段。
 func (a *API) createCourse(c *gin.Context) {
 	var req CourseRequest
 	if httpx.BindJSONWithError(c, &req, apperr.ErrCourseInvalid) {
@@ -105,7 +105,7 @@ func (a *API) createCourse(c *gin.Context) {
 	}
 }
 
-// updateCourse 更新课程。
+// updateCourse 更新课程基础信息,路径课程 ID 和请求体在 HTTP 边界分别校验。
 func (a *API) updateCourse(c *gin.Context) {
 	id, ok := httpx.PathID(c, "id")
 	if !ok {
@@ -118,22 +118,22 @@ func (a *API) updateCourse(c *gin.Context) {
 	}
 }
 
-// publishCourse 发布课程。
+// publishCourse 触发课程发布状态流转,具体可发布条件由服务层校验。
 func (a *API) publishCourse(c *gin.Context) { a.courseAction(c, a.svc.PublishCourse) }
 
-// endCourse 结束课程。
+// endCourse 触发课程结束状态流转,防止 handler 层复制状态机规则。
 func (a *API) endCourse(c *gin.Context) { a.courseAction(c, a.svc.EndCourse) }
 
-// archiveCourse 归档课程。
+// archiveCourse 触发课程归档状态流转,统一复用课程状态动作入口。
 func (a *API) archiveCourse(c *gin.Context) { a.courseAction(c, a.svc.ArchiveCourse) }
 
-// cloneCourse 克隆课程。
+// cloneCourse 克隆课程结构和可复用内容引用,不在 HTTP 层复制课程组装逻辑。
 func (a *API) cloneCourse(c *gin.Context) { a.courseAction(c, a.svc.CloneCourse) }
 
-// shareCourse 共享课程。
+// shareCourse 将课程加入共享范围,共享规则和审计由服务层处理。
 func (a *API) shareCourse(c *gin.Context) { a.courseAction(c, a.svc.ShareCourse) }
 
-// refreshInviteCode 刷新邀请码。
+// refreshInviteCode 重新生成课程邀请码,旧码失效逻辑集中在服务层。
 func (a *API) refreshInviteCode(c *gin.Context) { a.courseAction(c, a.svc.RefreshInviteCode) }
 
 // joinCourse 按邀请码加入课程。
@@ -145,7 +145,7 @@ func (a *API) joinCourse(c *gin.Context) {
 	}
 }
 
-// listMembers 查询课程成员。
+// listMembers 查询课程成员分页列表,用于教师管理选课学生。
 func (a *API) listMembers(c *gin.Context) {
 	id, ok := httpx.PathID(c, "id")
 	if !ok {
@@ -155,7 +155,7 @@ func (a *API) listMembers(c *gin.Context) {
 	httpx.Write(c, out, err)
 }
 
-// addMembers 批量添加成员。
+// addMembers 绑定批量成员请求,由服务层校验课程教师权限和学生身份。
 func (a *API) addMembers(c *gin.Context) {
 	id, ok := httpx.PathID(c, "id")
 	if !ok {
@@ -168,7 +168,7 @@ func (a *API) addMembers(c *gin.Context) {
 	}
 }
 
-// removeMember 移除课程成员。
+// removeMember 移除课程成员关系,路径中的课程和学生 ID 都必须有效。
 func (a *API) removeMember(c *gin.Context) {
 	id, ok := httpx.PathID(c, "id")
 	if !ok {
@@ -182,7 +182,7 @@ func (a *API) removeMember(c *gin.Context) {
 	httpx.Write(c, map[string]any{"removed": true}, err)
 }
 
-// listChapters 查询章节。
+// listChapters 查询课程章节列表,只负责路径绑定和响应写回。
 func (a *API) listChapters(c *gin.Context) {
 	id, ok := httpx.PathID(c, "id")
 	if ok {
@@ -191,7 +191,7 @@ func (a *API) listChapters(c *gin.Context) {
 	}
 }
 
-// createChapter 创建章节。
+// createChapter 在指定课程下创建章节,排序和教师权限由服务层控制。
 func (a *API) createChapter(c *gin.Context) {
 	id, ok := httpx.PathID(c, "id")
 	if !ok {
@@ -204,7 +204,7 @@ func (a *API) createChapter(c *gin.Context) {
 	}
 }
 
-// updateChapter 更新章节。
+// updateChapter 更新章节标题或顺序,同时校验章节归属课程。
 func (a *API) updateChapter(c *gin.Context) {
 	id, ok := httpx.PathID(c, "id")
 	if !ok {
@@ -221,7 +221,7 @@ func (a *API) updateChapter(c *gin.Context) {
 	}
 }
 
-// deleteChapter 删除章节。
+// deleteChapter 软删章节,由服务层保护包含课时的章节不被误删。
 func (a *API) deleteChapter(c *gin.Context) {
 	id, ok := httpx.PathID(c, "id")
 	if !ok {
@@ -234,7 +234,7 @@ func (a *API) deleteChapter(c *gin.Context) {
 	httpx.Write(c, map[string]any{"deleted": true}, a.svc.DeleteChapter(c.Request.Context(), id, cid))
 }
 
-// listLessons 查询课时。
+// listLessons 查询章节课时列表,供课程目录和编辑页复用。
 func (a *API) listLessons(c *gin.Context) {
 	id, ok := httpx.PathID(c, "id")
 	if ok {
@@ -243,7 +243,7 @@ func (a *API) listLessons(c *gin.Context) {
 	}
 }
 
-// createLesson 创建课时。
+// createLesson 在章节下创建课时,内容引用后续通过专门接口绑定。
 func (a *API) createLesson(c *gin.Context) {
 	id, ok := httpx.PathID(c, "id")
 	if !ok {
@@ -256,7 +256,7 @@ func (a *API) createLesson(c *gin.Context) {
 	}
 }
 
-// updateLesson 更新课时。
+// updateLesson 更新课时基础信息,章节归属和教师权限由服务层校验。
 func (a *API) updateLesson(c *gin.Context) {
 	id, ok := httpx.PathID(c, "id")
 	if !ok {
@@ -273,7 +273,7 @@ func (a *API) updateLesson(c *gin.Context) {
 	}
 }
 
-// deleteLesson 删除课时。
+// deleteLesson 软删课时,保持学习进度等历史数据可追溯。
 func (a *API) deleteLesson(c *gin.Context) {
 	id, ok := httpx.PathID(c, "id")
 	if !ok {
@@ -286,7 +286,7 @@ func (a *API) deleteLesson(c *gin.Context) {
 	httpx.Write(c, map[string]any{"deleted": true}, a.svc.DeleteLesson(c.Request.Context(), id, lid))
 }
 
-// setLessonContent 设置课时内容。
+// setLessonContent 绑定课时内容引用,按内容类型校验必要字段后交给服务层保存。
 func (a *API) setLessonContent(c *gin.Context) {
 	id, ok := httpx.PathID(c, "id")
 	if !ok {
@@ -317,7 +317,7 @@ func (a *API) getLesson(c *gin.Context) {
 	}
 }
 
-// upsertProgress 上报进度。
+// upsertProgress 上报或更新学生学习进度,服务端记录是跨设备权威状态。
 func (a *API) upsertProgress(c *gin.Context) {
 	id, ok := httpx.PathID(c, "id")
 	if !ok {
@@ -330,7 +330,7 @@ func (a *API) upsertProgress(c *gin.Context) {
 	}
 }
 
-// createAssignment 创建作业。
+// createAssignment 创建作业草稿并锁定内容版本引用,避免发布后题目漂移。
 func (a *API) createAssignment(c *gin.Context) {
 	id, ok := httpx.PathID(c, "id")
 	if !ok {
@@ -343,7 +343,7 @@ func (a *API) createAssignment(c *gin.Context) {
 	}
 }
 
-// updateAssignment 更新作业。
+// updateAssignment 更新作业草稿配置,只允许服务层认可的状态修改。
 func (a *API) updateAssignment(c *gin.Context) {
 	id, ok := httpx.PathID(c, "id")
 	if !ok {
@@ -356,7 +356,7 @@ func (a *API) updateAssignment(c *gin.Context) {
 	}
 }
 
-// publishAssignment 发布作业。
+// publishAssignment 发布作业并开启学生提交入口,状态机仍由服务层控制。
 func (a *API) publishAssignment(c *gin.Context) {
 	id, ok := httpx.PathID(c, "id")
 	if ok {
@@ -396,7 +396,7 @@ func (a *API) getDraft(c *gin.Context) {
 	}
 }
 
-// submitAssignment 提交作业。
+// submitAssignment 提交学生作业内容,包含迟交策略和自动判题出队逻辑。
 func (a *API) submitAssignment(c *gin.Context) {
 	id, ok := httpx.PathID(c, "id")
 	if !ok {
@@ -418,7 +418,7 @@ func (a *API) listSubmissions(c *gin.Context) {
 	}
 }
 
-// gradeSubmission 批改提交。
+// gradeSubmission 绑定教师批改请求,由服务层写入手动分和最终分。
 func (a *API) gradeSubmission(c *gin.Context) {
 	id, ok := httpx.PathID(c, "id")
 	if !ok {
@@ -440,7 +440,7 @@ func (a *API) getSubmission(c *gin.Context) {
 	}
 }
 
-// listPosts 查询讨论帖。
+// listPosts 查询课程讨论帖分页列表,用于课堂互动区展示。
 func (a *API) listPosts(c *gin.Context) {
 	id, ok := httpx.PathID(c, "id")
 	if ok {
@@ -449,7 +449,7 @@ func (a *API) listPosts(c *gin.Context) {
 	}
 }
 
-// createPost 创建讨论帖。
+// createPost 创建课程讨论帖,作者身份来自服务端会话而非客户端参数。
 func (a *API) createPost(c *gin.Context) {
 	id, ok := httpx.PathID(c, "id")
 	if !ok {
@@ -519,7 +519,7 @@ func (a *API) pinAnnouncement(c *gin.Context) {
 	}
 }
 
-// reviewCourse 评价课程。
+// reviewCourse 提交课程评价,服务层负责防止越权和重复评价。
 func (a *API) reviewCourse(c *gin.Context) {
 	id, ok := httpx.PathID(c, "id")
 	if !ok {

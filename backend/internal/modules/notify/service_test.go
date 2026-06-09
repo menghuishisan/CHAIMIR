@@ -21,7 +21,7 @@ func TestSendRendersTemplateAndSkipsDisabledPreference(t *testing.T) {
 	}
 	unread := &fakeUnreadCounter{}
 	broadcaster := &fakeBroadcaster{}
-	svc := &Service{store: store, idgen: fixedIDGen(9001), unread: unread, broadcaster: broadcaster}
+	svc := &Service{store: store, idgen: fixedIDGen(9001), unread: unread, rateLimiter: allowSendRate(), broadcaster: broadcaster}
 
 	err := svc.Send(testTenantContext(), contracts.NotifySendRequest{
 		TenantID: 10,
@@ -59,7 +59,7 @@ func TestSendForceTemplateIgnoresDisabledPreference(t *testing.T) {
 		template:    TemplateDTO{Type: "grade.review", TitleTemplate: "成绩审核结果", ContentTemplate: "{{result}}", Force: true},
 		preferences: map[int64]bool{1002: false},
 	}
-	svc := &Service{store: store, idgen: fixedIDGen(9002), unread: &fakeUnreadCounter{}, broadcaster: &fakeBroadcaster{}}
+	svc := &Service{store: store, idgen: fixedIDGen(9002), unread: &fakeUnreadCounter{}, rateLimiter: allowSendRate(), broadcaster: &fakeBroadcaster{}}
 
 	err := svc.Send(testTenantContext(), contracts.NotifySendRequest{
 		TenantID: 10, Type: "grade.review", Receivers: []int64{1002}, Params: map[string]string{"result": "已通过"},
@@ -81,6 +81,7 @@ func TestSendKeepsNotificationWhenUnreadCounterFails(t *testing.T) {
 		store:       store,
 		idgen:       fixedIDGen(9005),
 		unread:      &fakeUnreadCounter{incrementErr: errors.New("redis down")},
+		rateLimiter: allowSendRate(),
 		broadcaster: &fakeBroadcaster{},
 	}
 
@@ -95,7 +96,7 @@ func TestSendKeepsNotificationWhenUnreadCounterFails(t *testing.T) {
 	}
 }
 
-// TestSendKeepsNotificationWhenRealtimePushFails 确认实时红点失败时仍保留已投递站内信,由站内信承担兜底。
+// TestSendKeepsNotificationWhenRealtimePushFails 确认实时红点失败时仍保留已投递站内信,由站内信承担权威记录。
 func TestSendKeepsNotificationWhenRealtimePushFails(t *testing.T) {
 	store := &fakeNotifyStore{
 		template: TemplateDTO{Type: "grade.review", TitleTemplate: "成绩审核结果", ContentTemplate: "{{result}}", Force: true},
@@ -104,6 +105,7 @@ func TestSendKeepsNotificationWhenRealtimePushFails(t *testing.T) {
 		store:       store,
 		idgen:       fixedIDGen(9006),
 		unread:      &fakeUnreadCounter{},
+		rateLimiter: allowSendRate(),
 		broadcaster: &fakeBroadcaster{broadcastErr: errors.New("ws down")},
 	}
 
@@ -115,6 +117,61 @@ func TestSendKeepsNotificationWhenRealtimePushFails(t *testing.T) {
 	}
 	if len(store.created) != 1 || store.created[0].ReceiverID != 1002 {
 		t.Fatalf("notification row must still be created, got %#v", store.created)
+	}
+}
+
+// TestSendDoesNotLeavePartialNotificationsWhenReceiverWriteFails 确认同一次发送的站内信写入具备原子语义,避免调用方重试产生重复或半投递。
+func TestSendDoesNotLeavePartialNotificationsWhenReceiverWriteFails(t *testing.T) {
+	store := &fakeNotifyStore{
+		template:  TemplateDTO{Type: "system.maintenance", TitleTemplate: "维护通知", ContentTemplate: "{{window}}", Force: true},
+		createErr: errors.New("database down"),
+	}
+	svc := &Service{store: store, idgen: fixedIDGen(9007), unread: &fakeUnreadCounter{}, rateLimiter: allowSendRate(), broadcaster: &fakeBroadcaster{}}
+
+	err := svc.Send(testTenantContext(), contracts.NotifySendRequest{
+		TenantID: 10,
+		Type:     "system.maintenance",
+		Receivers: []int64{
+			1001,
+			1002,
+		},
+		Params: map[string]string{"window": "今晚维护"},
+	})
+	if err == nil {
+		t.Fatalf("expected send failure")
+	}
+	if len(store.created) != 0 {
+		t.Fatalf("send failure must not leave partial notifications, got %#v", store.created)
+	}
+}
+
+// TestSendRejectsWhenRateLimited 确认统一发送入口执行配置化限频,超限时不写站内信。
+func TestSendRejectsWhenRateLimited(t *testing.T) {
+	store := &fakeNotifyStore{
+		template: TemplateDTO{Type: "system.maintenance", TitleTemplate: "维护通知", ContentTemplate: "{{window}}", Force: true},
+	}
+	svc := &Service{
+		store:       store,
+		idgen:       fixedIDGen(9008),
+		unread:      &fakeUnreadCounter{},
+		rateLimiter: &fakeSendRateLimiter{allowed: false},
+		broadcaster: &fakeBroadcaster{},
+	}
+
+	err := svc.Send(testTenantContext(), contracts.NotifySendRequest{
+		TenantID:  10,
+		Type:      "system.maintenance",
+		Receivers: []int64{1001},
+		Params:    map[string]string{"window": "今晚维护"},
+	})
+	if err == nil {
+		t.Fatalf("expected rate limit error")
+	}
+	if ae, ok := apperr.As(err); !ok || ae.Code != apperr.ErrNotifyRateLimited.Code {
+		t.Fatalf("expected notify rate limit code, got %v", err)
+	}
+	if len(store.created) != 0 {
+		t.Fatalf("rate limited send must not create notification rows: %#v", store.created)
 	}
 }
 
@@ -189,6 +246,25 @@ func TestMarkAllNotificationsReadKeepsSuccessWhenCacheResetFails(t *testing.T) {
 	}
 }
 
+// TestMarkAllNotificationsReadRefreshesUnreadDotToZero 确认批量已读后会按权威状态刷新并推送 0 未读红点。
+func TestMarkAllNotificationsReadRefreshesUnreadDotToZero(t *testing.T) {
+	store := &fakeNotifyStore{unreadCount: 0}
+	unread := &fakeUnreadCounter{}
+	broadcaster := &fakeBroadcaster{}
+	svc := &Service{store: store, unread: unread, broadcaster: broadcaster}
+
+	err := svc.MarkAllNotificationsRead(testTenantContext())
+	if err != nil {
+		t.Fatalf("MarkAllNotificationsRead returned error: %v", err)
+	}
+	if store.countUnreadCalls != 1 || unread.setCount != 0 || unread.setCalls != 1 {
+		t.Fatalf("expected unread cache to be refreshed to zero, calls=%d set=%d setCalls=%d", store.countUnreadCalls, unread.setCount, unread.setCalls)
+	}
+	if broadcaster.lastTopic != "tenant:10:notify:501" {
+		t.Fatalf("expected zero red dot push, got %s", broadcaster.lastTopic)
+	}
+}
+
 // TestMarkNotificationReadRefreshesUnreadDot 确认单条已读后按站内信权威状态刷新缓存并推送红点。
 func TestMarkNotificationReadRefreshesUnreadDot(t *testing.T) {
 	store := &fakeNotifyStore{unreadCount: 2}
@@ -256,9 +332,21 @@ func TestUnreadKeyIncludesTenantScope(t *testing.T) {
 	}
 }
 
+// TestNotifySendRateKeyIncludesTenantAndType 确认发送限频键按租户和通知类型隔离。
+func TestNotifySendRateKeyIncludesTenantAndType(t *testing.T) {
+	if got := notifySendRateKey(10, " Grade:Review "); got != "tenant:10:notify:send:grade_review" {
+		t.Fatalf("unexpected notify send rate key: %s", got)
+	}
+}
+
 // testTenantContext 构造 M10 服务测试租户上下文。
 func testTenantContext() context.Context {
 	return tenant.WithContext(context.Background(), tenant.Identity{TenantID: 10, AccountID: 501})
+}
+
+// allowSendRate 构造允许通过的发送限频器,让非限频测试聚焦自身行为。
+func allowSendRate() sendRateLimiter {
+	return &fakeSendRateLimiter{allowed: true}
 }
 
 type fixedIDGen int64
@@ -270,6 +358,7 @@ type fakeNotifyStore struct {
 	template           TemplateDTO
 	announcement       AnnouncementDTO
 	preferences        map[int64]bool
+	createErr          error
 	unreadCount        int64
 	countUnreadCalls   int
 	created            []NotificationCreate
@@ -294,13 +383,16 @@ func (f *fakeNotifyStore) GetPreference(_ context.Context, _ int64, accountID in
 	return enabled, ok, nil
 }
 
-func (f *fakeNotifyStore) CreateNotification(_ context.Context, row NotificationCreate) error {
-	f.created = append(f.created, row)
-	return nil
-}
-
 func (f *fakeNotifyStore) ListInbox(context.Context, int64, int64, InboxQuery) ([]NotificationDTO, int64, error) {
 	return nil, 0, nil
+}
+
+func (f *fakeNotifyStore) CreateNotifications(_ context.Context, _ int64, rows []NotificationCreate) error {
+	if f.createErr != nil {
+		return f.createErr
+	}
+	f.created = append(f.created, rows...)
+	return nil
 }
 
 func (f *fakeNotifyStore) CountUnreadNotifications(context.Context, int64, int64) (int64, error) {
@@ -362,6 +454,22 @@ type fakeUnreadCounter struct {
 	setCalls          int
 	setErr            error
 	resetErr          error
+}
+
+type fakeSendRateLimiter struct {
+	allowed  bool
+	tenantID int64
+	typ      string
+	err      error
+}
+
+func (f *fakeSendRateLimiter) Allow(_ context.Context, tenantID int64, typ string) (bool, error) {
+	f.tenantID = tenantID
+	f.typ = typ
+	if f.err != nil {
+		return false, f.err
+	}
+	return f.allowed, nil
 }
 
 func (f *fakeUnreadCounter) Increment(_ context.Context, tenantID, accountID int64) (int64, error) {

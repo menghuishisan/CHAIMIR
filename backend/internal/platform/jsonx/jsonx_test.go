@@ -77,3 +77,36 @@ func TestDecodeStrictReturnsDecodeError(t *testing.T) {
 		t.Fatalf("expected strict decode error")
 	}
 }
+
+// TestScalarReadersNormalizeJSONValues 确认各模块读取 JSON 标量时复用同一套宽松边界规则。
+func TestScalarReadersNormalizeJSONValues(t *testing.T) {
+	if got := StringFromAny(float64(12.5)); got != "12.5" {
+		t.Fatalf("StringFromAny(float64) = %q, want 12.5", got)
+	}
+	if got := IntFromAny("42"); got != 42 {
+		t.Fatalf("IntFromAny(string) = %d, want 42", got)
+	}
+	if got := Float64FromAny(int32(7)); got != 7 {
+		t.Fatalf("Float64FromAny(int32) = %v, want 7", got)
+	}
+	if got := Int32FromAny("bad", 9); got != 9 {
+		t.Fatalf("Int32FromAny(invalid) = %d, want default 9", got)
+	}
+}
+
+// TestObjectAndPathReadersNormalizeJSONMaps 确认对象、数组、点路径和字符串映射读取逻辑不散落在业务模块。
+func TestObjectAndPathReadersNormalizeJSONMaps(t *testing.T) {
+	root := map[string]any{"a": map[string]any{"b": float64(3)}, "headers": map[string]any{"X-Test": 1}}
+	if got := StringFromPath(root, "a.b"); got != "3" {
+		t.Fatalf("StringFromPath() = %q, want 3", got)
+	}
+	if got := ObjectFromAny(root["a"]); got["b"] != float64(3) {
+		t.Fatalf("ObjectFromAny() = %#v", got)
+	}
+	if got := StringMapFromAny(root["headers"]); got["X-Test"] != "1" {
+		t.Fatalf("StringMapFromAny() = %#v", got)
+	}
+	if got := SliceFromAny([]any{"x"}); len(got) != 1 || got[0] != "x" {
+		t.Fatalf("SliceFromAny() = %#v", got)
+	}
+}

@@ -23,7 +23,7 @@ type API struct {
 	identity contracts.IdentityService
 }
 
-// NewAPI 构造 M8 API。
+// NewAPI 构造 M8 HTTP 处理器,注入竞赛服务、鉴权管理器和身份只读契约。
 func NewAPI(svc *Service, authMgr *auth.Manager, identity contracts.IdentityService) *API {
 	return &API{svc: svc, authMgr: authMgr, identity: identity}
 }
@@ -76,7 +76,7 @@ func (a *API) requireTeacher() gin.HandlerFunc {
 	return auth.RequirePlatformOrAnyRole(a.identity, contracts.RoleTeacher, contracts.RoleSchoolAdmin)
 }
 
-// listContests 查询竞赛列表。
+// listContests 按状态分页查询竞赛列表,登录账号的可见性由服务层过滤。
 func (a *API) listContests(c *gin.Context) {
 	items, total, err := a.svc.ListContests(c.Request.Context(), httpx.Int16(c.Query("status")), httpx.Int(c.Query("page")), httpx.Int(c.Query("size")))
 	if err != nil {
@@ -87,7 +87,7 @@ func (a *API) listContests(c *gin.Context) {
 	response.OKPage(c, items, total, page, size)
 }
 
-// createContest 创建竞赛草稿。
+// createContest 绑定竞赛创建请求,由服务层生成草稿并记录组织者身份。
 func (a *API) createContest(c *gin.Context) {
 	var req ContestRequest
 	if httpx.BindJSONWithError(c, &req, apperr.ErrContestInvalid) {
@@ -96,7 +96,7 @@ func (a *API) createContest(c *gin.Context) {
 	}
 }
 
-// updateContest 更新竞赛草稿。
+// updateContest 更新竞赛草稿配置,状态机和组织者权限由服务层校验。
 func (a *API) updateContest(c *gin.Context) {
 	id, ok := httpx.PathID(c, "id")
 	if !ok {
@@ -109,7 +109,7 @@ func (a *API) updateContest(c *gin.Context) {
 	}
 }
 
-// addProblem 新增竞赛题目引用。
+// addProblem 为竞赛追加题目引用,只保存 M5 内容编码和版本而不复制题库数据。
 func (a *API) addProblem(c *gin.Context) {
 	id, ok := httpx.PathID(c, "id")
 	if !ok {
@@ -122,13 +122,13 @@ func (a *API) addProblem(c *gin.Context) {
 	}
 }
 
-// publishContest 发布竞赛。
+// publishContest 发布竞赛并开放报名或参赛入口,发布前置条件由服务层检查。
 func (a *API) publishContest(c *gin.Context) { a.contestAction(c, a.svc.PublishContest) }
 
-// startContest 开始竞赛。
+// startContest 触发竞赛开始状态流转,避免 handler 层复制赛程状态机。
 func (a *API) startContest(c *gin.Context) { a.contestAction(c, a.svc.StartContest) }
 
-// endContest 结束竞赛。
+// endContest 触发竞赛结束状态流转,服务层负责结算和事件副作用。
 func (a *API) endContest(c *gin.Context) { a.contestAction(c, a.svc.EndContest) }
 
 // archiveContest 归档竞赛并生成成绩快照。
@@ -140,7 +140,7 @@ func (a *API) archiveContest(c *gin.Context) {
 	}
 }
 
-// signup 报名并创建队伍。
+// signup 处理报名请求并创建或加入队伍,成员身份来自服务端会话。
 func (a *API) signup(c *gin.Context) {
 	id, ok := httpx.PathID(c, "id")
 	if !ok {
@@ -153,7 +153,7 @@ func (a *API) signup(c *gin.Context) {
 	}
 }
 
-// joinTeam 加入队伍。
+// joinTeam 使用邀请码加入已有队伍,服务层校验赛制、租户和队伍状态。
 func (a *API) joinTeam(c *gin.Context) {
 	id, ok := httpx.PathID(c, "id")
 	if !ok {
@@ -175,7 +175,7 @@ func (a *API) getTeam(c *gin.Context) {
 	}
 }
 
-// lockTeam 锁定队伍。
+// lockTeam 锁定队伍名单,防止开赛前后成员继续变更。
 func (a *API) lockTeam(c *gin.Context) {
 	id, ok := httpx.PathID(c, "id")
 	if ok {
@@ -184,7 +184,7 @@ func (a *API) lockTeam(c *gin.Context) {
 	}
 }
 
-// listProblems 查询题面列表。
+// listProblems 查询竞赛题面列表,只返回参赛视角允许看到的字段。
 func (a *API) listProblems(c *gin.Context) {
 	id, ok := httpx.PathID(c, "id")
 	if ok {
@@ -193,7 +193,7 @@ func (a *API) listProblems(c *gin.Context) {
 	}
 }
 
-// startProblemEnv 创建实操题环境。
+// startProblemEnv 为实操题创建沙箱环境,通过服务层调用 M2 契约而不直接编排。
 func (a *API) startProblemEnv(c *gin.Context) {
 	contestID, ok := httpx.PathID(c, "id")
 	if !ok {
@@ -210,7 +210,7 @@ func (a *API) startProblemEnv(c *gin.Context) {
 	}
 }
 
-// submitSolve 提交解题判题。
+// submitSolve 提交解题答案或代码引用,服务层负责创建 M3 判题任务。
 func (a *API) submitSolve(c *gin.Context) {
 	contestID, ok := httpx.PathID(c, "id")
 	if !ok {
@@ -236,7 +236,7 @@ func (a *API) getSubmission(c *gin.Context) {
 	}
 }
 
-// submitBattleEntry 提交参战物。
+// submitBattleEntry 提交对抗赛参战物引用,不在竞赛模块复制制品内容。
 func (a *API) submitBattleEntry(c *gin.Context) {
 	id, ok := httpx.PathID(c, "id")
 	if !ok {
@@ -249,7 +249,7 @@ func (a *API) submitBattleEntry(c *gin.Context) {
 	}
 }
 
-// listBattleEntries 查询参战物历史。
+// listBattleEntries 查询队伍参战物历史,用于教师审核和学生回看版本。
 func (a *API) listBattleEntries(c *gin.Context) {
 	id, ok := httpx.PathID(c, "id")
 	if ok {
@@ -276,7 +276,7 @@ func (a *API) getReplay(c *gin.Context) {
 	}
 }
 
-// listLadder 查询排行榜。
+// listLadder 查询排行榜分页数据,排名计算和快照持久化留在服务层。
 func (a *API) listLadder(c *gin.Context) {
 	id, ok := httpx.PathID(c, "id")
 	if ok {
@@ -309,7 +309,7 @@ func (a *API) cheatSuspects(c *gin.Context) {
 	}
 }
 
-// createCheatRecord 写入作弊判定。
+// createCheatRecord 写入教师确认后的作弊处理记录,同时保留审计证据。
 func (a *API) createCheatRecord(c *gin.Context) {
 	id, ok := httpx.PathID(c, "id")
 	if !ok {
@@ -322,13 +322,13 @@ func (a *API) createCheatRecord(c *gin.Context) {
 	}
 }
 
-// listVulnSources 查询漏洞源。
+// listVulnSources 查询教师维护的漏洞源配置,敏感字段在 DTO 转换时隔离。
 func (a *API) listVulnSources(c *gin.Context) {
 	out, err := a.svc.ListVulnSources(c.Request.Context(), httpx.Int(c.Query("page")), httpx.Int(c.Query("size")))
 	httpx.Write(c, out, err)
 }
 
-// createVulnSource 创建漏洞源。
+// createVulnSource 创建漏洞源配置,外部端点和映射规则由服务层安全校验。
 func (a *API) createVulnSource(c *gin.Context) {
 	var req VulnSourceRequest
 	if httpx.BindJSONWithError(c, &req, apperr.ErrContestVulnSourceInvalid) {
@@ -337,7 +337,7 @@ func (a *API) createVulnSource(c *gin.Context) {
 	}
 }
 
-// syncVulnSource 触发漏洞源同步。
+// syncVulnSource 手动触发漏洞源拉取,外部请求必须走受限 HTTP 客户端。
 func (a *API) syncVulnSource(c *gin.Context) {
 	id, ok := httpx.PathID(c, "id")
 	if ok {
@@ -346,7 +346,7 @@ func (a *API) syncVulnSource(c *gin.Context) {
 	}
 }
 
-// importVulnProblem 导入漏洞案例草稿。
+// importVulnProblem 导入单个漏洞案例草稿,只生成 M8 草稿不直接发布到题库。
 func (a *API) importVulnProblem(c *gin.Context) {
 	var req VulnProblemImportRequest
 	if httpx.BindJSONWithError(c, &req, apperr.ErrContestVulnProblemInvalid) {

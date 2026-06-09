@@ -76,13 +76,13 @@ func TestStructuredColumnConversionsUseJSONX(t *testing.T) {
 		filepath.Join("contest", "convert.go"),
 		filepath.Join("experiment", "convert.go"),
 		filepath.Join("content", "rules.go"),
-		filepath.Join("identity", "contract_impl.go"),
+		filepath.Join("identity", "service_contract.go"),
 		filepath.Join("identity", "service_import.go"),
 		filepath.Join("identity", "service_org.go"),
 		filepath.Join("identity", "service_platform.go"),
 		filepath.Join("judge", "spec.go"),
-		filepath.Join("judge", "judgers.go"),
-		filepath.Join("sandbox", "runtime_admin.go"),
+		filepath.Join("judge", "service_judgers.go"),
+		filepath.Join("sandbox", "service_runtime_admin.go"),
 		filepath.Join("sandbox", "spec.go"),
 		filepath.Join("sim", "validation.go"),
 	} {
@@ -151,7 +151,7 @@ func TestEventBusDependenciesDoNotSilentlyBypassMissingBus(t *testing.T) {
 		filepath.Join("grade", "events.go"),
 		filepath.Join("notify", "events.go"),
 		filepath.Join("teaching", "events.go"),
-		filepath.Join("teaching", "grade_service.go"),
+		filepath.Join("teaching", "service_grade.go"),
 	} {
 		data, err := os.ReadFile(path)
 		if err != nil {
@@ -246,7 +246,7 @@ func TestPersistedTimeFilesUseTimex(t *testing.T) {
 		filepath.Join("identity", "service_import.go"),
 		filepath.Join("identity", "service_sms.go"),
 		filepath.Join("sandbox", "k8s_orchestrator.go"),
-		filepath.Join("sandbox", "runtime_admin.go"),
+		filepath.Join("sandbox", "service_runtime_admin.go"),
 	} {
 		data, err := os.ReadFile(path)
 		if err != nil {
@@ -339,7 +339,7 @@ func TestModulesUsePlatformIDText(t *testing.T) {
 			return err
 		}
 		content := string(data)
-		for _, sig := range []string{"func fmtID(", "func parseID(", "func parseIDOrZero(", "func judgeParseID("} {
+		for _, sig := range []string{"func fmtID(", "func parseID(", "func parseIDOrZero(", "func judgeParseID(", "func mustOptionalID(", "func mustID("} {
 			if strings.Contains(content, sig) {
 				t.Errorf("%s keeps module-local ID text helper %s; use platform/ids", path, sig)
 			}
@@ -403,8 +403,8 @@ func TestModulesUsePlatformSecretMap(t *testing.T) {
 // TestModulesUsePlatformStorageRefs 防止模块重复解析 minio://bucket/key 对象引用。
 func TestModulesUsePlatformStorageRefs(t *testing.T) {
 	for _, path := range []string{
-		filepath.Join("judge", "worker.go"),
-		filepath.Join("sandbox", "files.go"),
+		filepath.Join("judge", "service_worker.go"),
+		filepath.Join("sandbox", "service_files.go"),
 	} {
 		data, err := os.ReadFile(path)
 		if err != nil {
@@ -413,6 +413,26 @@ func TestModulesUsePlatformStorageRefs(t *testing.T) {
 		content := string(data)
 		if strings.Contains(content, "func parseJudgeObjectRef(") || strings.Contains(content, "func parseObjectRef(") {
 			t.Errorf("%s keeps module-local object ref parser; use platform/storage.ParseObjectRef", path)
+		}
+	}
+}
+
+// TestModulesUsePlatformSourceRefValidation 防止 M2/M3/M4 各自维护 source_ref 格式规则。
+func TestModulesUsePlatformSourceRefValidation(t *testing.T) {
+	for _, path := range []string{
+		filepath.Join("judge", "spec.go"),
+		filepath.Join("judge", "service.go"),
+		filepath.Join("sandbox", "service.go"),
+		filepath.Join("sim", "validation.go"),
+		filepath.Join("sim", "service.go"),
+	} {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("read %s: %v", path, err)
+		}
+		content := string(data)
+		if strings.Contains(content, "func validateSourceRef(") || strings.Contains(content, "sourceRefRe") {
+			t.Errorf("%s keeps module-local source_ref validation; use platform/auth.ValidSourceRef", path)
 		}
 	}
 }
@@ -477,6 +497,7 @@ func TestModuleBusinessFilesDoNotUseHTTPLayer(t *testing.T) {
 		for _, forbidden := range []string{
 			`"github.com/gin-gonic/gin"`,
 			"gin.Context",
+			"http.ResponseWriter",
 			"response.",
 			"httpx.Write",
 			"httpx.BindJSON",
@@ -637,6 +658,216 @@ func TestModuleEventsUseEventbusDecode(t *testing.T) {
 	}
 }
 
+// TestModuleEventsDoNotUsePersistenceInfrastructure 防止事件文件越过 service/repo 直接执行持久化写入。
+func TestModuleEventsDoNotUsePersistenceInfrastructure(t *testing.T) {
+	err := filepath.WalkDir(".", func(path string, d os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if d.IsDir() {
+			if d.Name() == "sqlcgen" {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !strings.HasSuffix(path, "events.go") {
+			return nil
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		content := string(data)
+		for _, forbidden := range []string{
+			`"chaimir/internal/platform/db"`,
+			"/internal/sqlcgen",
+			"sqlcgen.",
+			".repo.in",
+			".store.in",
+			"s.store.",
+			"q.Create",
+			"q.Update",
+			"q.Delete",
+		} {
+			if strings.Contains(content, forbidden) {
+				t.Errorf("%s mixes event handling and persistence responsibility via %s", path, forbidden)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walk module events: %v", err)
+	}
+}
+
+// TestModuleServicesDoNotUseSQLCGenDirectly 防止 service/worker/helper 绕过 repo 承担数据访问或事务职责。
+func TestModuleServicesDoNotUseSQLCGenDirectly(t *testing.T) {
+	err := filepath.WalkDir(".", func(path string, d os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if d.IsDir() {
+			if d.Name() == "sqlcgen" {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+			return nil
+		}
+		name := filepath.Base(path)
+		if isDataAccessBoundaryFile(name) {
+			return nil
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		content := string(data)
+		for _, forbidden := range []string{
+			"/internal/sqlcgen",
+			"sqlcgen.Queries",
+			"sqlcgen.New(",
+		} {
+			if strings.Contains(content, forbidden) {
+				t.Errorf("%s mixes service/business responsibility with sqlc data access via %s", path, forbidden)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walk modules: %v", err)
+	}
+}
+
+// TestReposDoNotExposeSQLCRows 防止 repo 对 service 暴露 sqlc 生成类型。
+func TestReposDoNotExposeSQLCRows(t *testing.T) {
+	err := filepath.WalkDir(".", func(path string, d os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if d.IsDir() {
+			if d.Name() == "sqlcgen" {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		name := filepath.Base(path)
+		if !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") || !isDataAccessBoundaryFile(name) {
+			return nil
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		for i, line := range strings.Split(string(data), "\n") {
+			trimmed := strings.TrimSpace(line)
+			if strings.HasPrefix(trimmed, "func (r *repo)") &&
+				(strings.Contains(trimmed, ") sqlcgen.") ||
+					strings.Contains(trimmed, ") []sqlcgen.") ||
+					strings.Contains(trimmed, ") (sqlcgen.") ||
+					strings.Contains(trimmed, ") ([]sqlcgen.") ||
+					strings.Contains(trimmed, ", sqlcgen.") ||
+					strings.Contains(trimmed, ", []sqlcgen.")) {
+				t.Errorf("%s:%d exposes sqlcgen type in repo method signature; map it before returning to service", path, i+1)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walk modules: %v", err)
+	}
+}
+
+// TestModelFilesDoNotAliasDTOOrContractTypes 防止 model 用类型别名制造同字段伪领域模型。
+func TestModelFilesDoNotAliasDTOOrContractTypes(t *testing.T) {
+	err := filepath.WalkDir(".", func(path string, d os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if d.IsDir() {
+			if d.Name() == "sqlcgen" {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if filepath.Base(path) != "model.go" {
+			return nil
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		for i, line := range strings.Split(string(data), "\n") {
+			trimmed := strings.TrimSpace(line)
+			if isModelAliasToBoundaryType(trimmed) {
+				t.Errorf("%s:%d aliases DTO/contracts in model; use the existing unified type or define a real internal snapshot", path, i+1)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walk module models: %v", err)
+	}
+}
+
+// isModelAliasToBoundaryType 判断 model 类型声明是否只是边界类型的别名或同名重定义。
+func isModelAliasToBoundaryType(line string) bool {
+	if !strings.HasPrefix(line, "type ") {
+		return false
+	}
+	fields := strings.Fields(line)
+	if len(fields) < 3 {
+		return false
+	}
+	target := fields[2]
+	if target == "=" && len(fields) >= 4 {
+		target = fields[3]
+	}
+	return strings.HasSuffix(target, "DTO") || strings.HasPrefix(target, "contracts.")
+}
+
+// TestServiceLayerFileNamesUsePrefix 防止服务层拆分文件使用后缀命名导致职责扫描漏检。
+func TestServiceLayerFileNamesUsePrefix(t *testing.T) {
+	err := filepath.WalkDir(".", func(path string, d os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if d.IsDir() {
+			if d.Name() == "sqlcgen" {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		name := filepath.Base(path)
+		if !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
+			return nil
+		}
+		if strings.HasSuffix(name, "_service.go") {
+			t.Errorf("%s uses service suffix naming; use service_<domain>.go so service scans include it", path)
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("read %s: %v", path, err)
+		}
+		if strings.Contains(string(data), "func (s *Service)") && !isServiceLayerFileName(name) {
+			t.Errorf("%s contains Service methods but is not named service_<domain>.go", path)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walk modules: %v", err)
+	}
+}
+
+// isServiceLayerFileName 判断文件名是否属于服务层统一命名或明确边界例外。
+func isServiceLayerFileName(name string) bool {
+	if name == "service.go" || strings.HasPrefix(name, "service_") {
+		return true
+	}
+	return name == "audit.go" || name == "events.go"
+}
+
 // TestProductionCodeHasNoTodoOrPlaceholderMarkers 防止生产代码留下 TODO、占位或测试替身语义。
 func TestProductionCodeHasNoTodoOrPlaceholderMarkers(t *testing.T) {
 	forbidden := []string{"TODO", "FIXME", "placeholder", "stub", "mock", "fake", "简化", "占位"}
@@ -746,6 +977,9 @@ func TestBackendProductionFilesHaveHeaderComments(t *testing.T) {
 			if !isCommentLine(trimmed) {
 				t.Errorf("%s:%d production file lacks a header responsibility comment", path, i+1)
 			}
+			if !hasChinese(trimmed) {
+				t.Errorf("%s:%d production file header comment must be written in Chinese", path, i+1)
+			}
 			return nil
 		}
 		return nil
@@ -787,6 +1021,10 @@ func TestBackendProductionFunctionsHaveComments(t *testing.T) {
 			}
 			if j < 0 || !isCommentLine(lines[j]) {
 				t.Errorf("%s:%d production function lacks a responsibility comment", path, i+1)
+				continue
+			}
+			if !hasChinese(lines[j]) {
+				t.Errorf("%s:%d production function comment must be written in Chinese", path, i+1)
 			}
 		}
 		return nil
@@ -808,6 +1046,16 @@ func isCommentLine(line string) bool {
 	return strings.HasPrefix(trimmed, "//") || strings.HasPrefix(trimmed, "/*")
 }
 
+// hasChinese 判断注释中是否包含中文字符。
+func hasChinese(line string) bool {
+	for _, r := range line {
+		if r >= '\u4e00' && r <= '\u9fff' {
+			return true
+		}
+	}
+	return false
+}
+
 // isBusinessLayerFile 判断模块内文件是否属于非 HTTP 边界层。
 func isBusinessLayerFile(name string) bool {
 	return name == "repo.go" ||
@@ -817,6 +1065,15 @@ func isBusinessLayerFile(name string) bool {
 		name == "convert.go" ||
 		name == "rules.go" ||
 		strings.Contains(name, "service")
+}
+
+// isDataAccessBoundaryFile 判断允许触碰 sqlcgen 的模块数据边界文件。
+func isDataAccessBoundaryFile(name string) bool {
+	return name == "repo.go" ||
+		name == "row_convert.go" ||
+		name == "audit.go" ||
+		strings.HasPrefix(name, "repo_") ||
+		strings.HasSuffix(name, "_repo.go")
 }
 
 // TestContentUsesContractRoleConstants 防止内容模块把角色码硬编码在权限判断中。

@@ -32,6 +32,11 @@ const (
 	// SandboxModeFresh 和 SandboxModeReuse 定义 M3 使用 M2 沙箱的方式。
 	SandboxModeFresh int16 = 1
 	SandboxModeReuse int16 = 2
+
+	// JudgeEventOutboxPending 至 JudgeEventOutboxFailed 定义 M3 终态事件 outbox 状态。
+	JudgeEventOutboxPending   int16 = 1
+	JudgeEventOutboxPublished int16 = 2
+	JudgeEventOutboxFailed    int16 = 3
 )
 
 const (

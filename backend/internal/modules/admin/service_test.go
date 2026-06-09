@@ -11,6 +11,7 @@ import (
 
 	"chaimir/internal/contracts"
 	"chaimir/internal/platform/audit"
+	"chaimir/internal/platform/config"
 	"chaimir/internal/platform/ids"
 	"chaimir/internal/platform/tenant"
 	"chaimir/pkg/apperr"
@@ -201,6 +202,42 @@ func TestCreateAlertRuleUsesResolvedTenantScope(t *testing.T) {
 	}
 }
 
+// TestSchoolAdminServicesVerifyRoleThroughIdentity 确认 M9 学校管理服务方法不只信任租户上下文,还会经 M1 校验学校管理员角色。
+func TestSchoolAdminServicesVerifyRoleThroughIdentity(t *testing.T) {
+	svc := newTestService(&fakeAdminStore{})
+	svc.identity = &fakeIdentityAdmin{hasRole: false}
+	ctx := tenant.WithContext(context.Background(), tenant.Identity{TenantID: 1001, AccountID: 2001})
+
+	cases := []struct {
+		name string
+		run  func() error
+	}{
+		{name: "school dashboard", run: func() error {
+			_, err := svc.SchoolDashboard(ctx)
+			return err
+		}},
+		{name: "school statistics", run: func() error {
+			_, err := svc.SchoolStatistics(ctx, time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC), time.Date(2026, 6, 8, 0, 0, 0, 0, time.UTC))
+			return err
+		}},
+		{name: "tenant config", run: func() error {
+			_, err := svc.ListConfigs(ctx, ScopeTenant)
+			return err
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := tc.run()
+			if err == nil {
+				t.Fatalf("expected non school admin to be rejected")
+			}
+			if ae, ok := apperr.As(err); !ok || ae.Code != apperr.ErrForbidden.Code {
+				t.Fatalf("expected forbidden error, got %v", err)
+			}
+		})
+	}
+}
+
 // TestMonitoringPanelsRequiresPlatformInService 确认监控入口在服务层也要求平台管理员,不能只依赖 HTTP 路由中间件。
 func TestMonitoringPanelsRequiresPlatformInService(t *testing.T) {
 	svc := newTestService(&fakeAdminStore{})
@@ -213,6 +250,51 @@ func TestMonitoringPanelsRequiresPlatformInService(t *testing.T) {
 	}
 	if ae, ok := apperr.As(err); !ok || ae.Code != apperr.ErrForbidden.Code {
 		t.Fatalf("expected forbidden error, got %v", err)
+	}
+}
+
+// TestMonitoringPanelsRejectsUnsafeURLs 确认外接监控入口只接受可嵌入的 HTTPS URL,避免把内网地址或携带凭据的地址返回给前端。
+func TestMonitoringPanelsRejectsUnsafeURLs(t *testing.T) {
+	_, err := parseMonitoringPanels(`[{"key":"grafana","name":"Grafana","url":"http://127.0.0.1:3000/d/admin?token=secret","scope":1}]`)
+	if err == nil {
+		t.Fatalf("expected unsafe monitoring panel URL to be rejected")
+	}
+	if ae, ok := apperr.As(err); !ok || ae.Code != apperr.ErrAdminMonitoringInvalid.Code {
+		t.Fatalf("expected admin monitoring invalid error, got %v", err)
+	}
+}
+
+// TestStatisticsRequireExplicitDateRange 确认统计查询必须由调用方显式给出日期范围,避免 repo 层用当前日期形成隐藏默认。
+func TestStatisticsRequireExplicitDateRange(t *testing.T) {
+	svc := newTestService(&fakeAdminStore{})
+	svc.deploy.PlatformEnabled = true
+	ctx := tenant.WithContext(context.Background(), tenant.Identity{IsPlatform: true, AccountID: 9001})
+
+	_, err := svc.PlatformStatistics(ctx, time.Time{}, time.Time{})
+	if err == nil {
+		t.Fatalf("expected empty statistics range to fail")
+	}
+	if ae, ok := apperr.As(err); !ok || ae.Code != apperr.ErrAdminStatisticsQueryInvalid.Code {
+		t.Fatalf("expected statistics query invalid error, got %v", err)
+	}
+}
+
+// TestTriggerBackupBuildsStorageRefServerSide 确认备份记录的对象引用由后端按备份桶和统一 key 规则生成,不接受客户端传入直链或任意 key。
+func TestTriggerBackupBuildsStorageRefServerSide(t *testing.T) {
+	store := &fakeAdminStore{}
+	svc := newTestService(store)
+	svc.deploy.PlatformEnabled = true
+	ctx := tenant.WithContext(context.Background(), tenant.Identity{IsPlatform: true, AccountID: 9001})
+
+	out, err := svc.TriggerBackup(ctx, BackupTriggerRequest{Type: BackupTypeFull, StorageRef: "https://storage.example/backups/root.dump?token=secret"})
+	if err != nil {
+		t.Fatalf("TriggerBackup returned error: %v", err)
+	}
+	if !strings.HasPrefix(out.StorageRef, "minio://") || strings.Contains(out.StorageRef, "token=") {
+		t.Fatalf("expected server-generated backup object ref, got %q", out.StorageRef)
+	}
+	if store.createdBackup.StorageRef != out.StorageRef {
+		t.Fatalf("expected persisted backup ref to match response, stored=%q out=%q", store.createdBackup.StorageRef, out.StorageRef)
 	}
 }
 
@@ -287,9 +369,11 @@ func newTestService(store adminStore) *Service {
 		store:   store,
 		idgen:   fixedIDGen(9901),
 		auditor: &noopAdminAuditWriter{},
+		minio:   config.MinIOConfig{BucketBackup: "chaimir-backup"},
 		notify:  &fakeAdminNotify{},
 		identity: &fakeIdentityAdmin{
-			stats: contracts.IdentityStats{TenantCount: 1, AccountCount: 50, TeacherCount: 8, StudentCount: 42, PendingApplicationCount: 4},
+			stats:   contracts.IdentityStats{TenantCount: 1, AccountCount: 50, TeacherCount: 8, StudentCount: 42, PendingApplicationCount: 4},
+			hasRole: true,
 		},
 		sandbox:    &fakeSandbox{stats: contracts.SandboxStats{TenantID: 1001, ActiveSandboxCount: 3, MaxConcurrentSandbox: 20}},
 		teaching:   &fakeTeaching{stats: contracts.TeachingStats{TenantID: 1001, CourseCount: 5, ActiveCourseCount: 4, LearningDurationSec: 3600}},
@@ -308,11 +392,12 @@ type noopAdminAuditWriter struct{}
 func (w *noopAdminAuditWriter) Write(context.Context, audit.Entry) error { return nil }
 
 type fakeAdminStore struct {
-	config      ConfigDTO
-	history     ConfigChangeLogDTO
-	event       AlertEventDTO
-	createdRule AlertRuleDTO
-	writeCount  int
+	config        ConfigDTO
+	history       ConfigChangeLogDTO
+	event         AlertEventDTO
+	createdRule   AlertRuleDTO
+	createdBackup BackupRecordDTO
+	writeCount    int
 }
 
 func (f *fakeAdminStore) ListStatistics(context.Context, int16, int64, time.Time, time.Time) ([]StatisticDTO, error) {
@@ -369,14 +454,17 @@ func (f *fakeAdminStore) RevertAlertEvent(context.Context, int64, int64) error {
 func (f *fakeAdminStore) ListBackups(context.Context, int, int) ([]BackupRecordDTO, int64, error) {
 	return nil, 0, nil
 }
-func (f *fakeAdminStore) CreateBackupRecord(context.Context, int64, BackupTriggerRequest) (BackupRecordDTO, error) {
+func (f *fakeAdminStore) CreateBackupRecord(_ context.Context, _ int64, req BackupTriggerRequest) (BackupRecordDTO, error) {
 	f.writeCount++
-	return BackupRecordDTO{}, nil
+	f.createdBackup = BackupRecordDTO{ID: "9901", Type: req.Type, StorageRef: req.StorageRef}
+	return f.createdBackup, nil
 }
 
 type fakeIdentityAdmin struct {
-	stats   contracts.IdentityStats
-	tenants []contracts.TenantSummary
+	stats      contracts.IdentityStats
+	tenants    []contracts.TenantSummary
+	hasRole    bool
+	hasRoleErr error
 }
 
 func (f *fakeIdentityAdmin) Stats(context.Context, int64) (contracts.IdentityStats, error) {
@@ -396,6 +484,9 @@ func (f *fakeIdentityAdmin) AdminRejectApplication(context.Context, int64, int64
 }
 func (f *fakeIdentityAdmin) ListAuditRecords(context.Context, contracts.AuditQuery, int, int) ([]contracts.AuditRecord, int64, error) {
 	return nil, 0, nil
+}
+func (f *fakeIdentityAdmin) HasRole(context.Context, int64, string) (bool, error) {
+	return f.hasRole, f.hasRoleErr
 }
 
 type fakeIdentityReader struct{ roles []string }

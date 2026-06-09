@@ -6,6 +6,7 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -134,6 +135,17 @@ func TestInternalServiceCanRecomputeStudent(t *testing.T) {
 	}
 	if svc.recomputedStudentID != 501 {
 		t.Fatalf("recompute request was not passed to service, got %d", svc.recomputedStudentID)
+	}
+}
+
+// TestTranscriptResponsesDoNotExposeObjectStorageRef 确认成绩单生成响应不暴露服务端对象存储 key。
+func TestTranscriptResponsesDoNotExposeObjectStorageRef(t *testing.T) {
+	body, err := json.Marshal(TranscriptDTO{ID: "9001", StudentID: "5001", Scope: TranscriptScopeAll, PDFRef: "1001/transcript/record/9001.pdf"})
+	if err != nil {
+		t.Fatalf("marshal transcript dto: %v", err)
+	}
+	if strings.Contains(string(body), "pdf_ref") || strings.Contains(string(body), "1001/transcript/record/9001.pdf") {
+		t.Fatalf("transcript response must not expose object storage ref: %s", string(body))
 	}
 }
 

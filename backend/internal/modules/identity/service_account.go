@@ -7,9 +7,7 @@ import (
 	"time"
 
 	"chaimir/internal/contracts"
-	"chaimir/internal/modules/identity/internal/sqlcgen"
 	"chaimir/internal/platform/audit"
-	"chaimir/internal/platform/db"
 	"chaimir/internal/platform/ids"
 	"chaimir/internal/platform/timex"
 	"chaimir/pkg/apperr"
@@ -63,72 +61,27 @@ func (s *Service) CreateAccount(ctx context.Context, req CreateAccountRequest) (
 	}
 	var activationCode string
 
-	if err := s.repo.inTenant(ctx, func(q *sqlcgen.Queries) error {
-		// 校验组织存在(学生→班级,教师→院系)。
-		if req.BaseIdentity == BaseIdentityStudent {
-			if _, e := q.GetClassByID(ctx, orgID); e != nil {
-				return apperr.ErrClassNotFound
-			}
-		} else {
-			if _, e := q.GetDepartmentByID(ctx, orgID); e != nil {
-				return apperr.ErrDepartmentNotFound
-			}
+	// 激活码明文只在 service 内生成并返回一次,repo 只接收哈希和过期时间。
+	activationCodeHash := ""
+	var activationExpireAt time.Time
+	if credential.NeedsActivationCode {
+		code, err := s.genActivationCode()
+		if err != nil {
+			return nil, apperr.ErrActivationCodeIssueFailed.WithCause(err)
 		}
-		// 建账号(待激活)。
-		if _, e := q.CreateAccount(ctx, sqlcgen.CreateAccountParams{
-			ID:            accountID,
-			TenantID:      tenantID,
-			PhoneEnc:      phoneEnc,
-			PhoneHash:     ph,
-			PasswordHash:  credential.PasswordHash,
-			Name:          req.Name,
-			BaseIdentity:  req.BaseIdentity,
-			Status:        AccountPending,
-			MustChangePwd: credential.MustChangePassword,
-		}); e != nil {
-			if isUniqueViolation(e) {
-				return apperr.ErrPhoneAlreadyExists
-			}
-			return e
-		}
-		// 建扩展信息(学号/工号 + 组织归属)。
-		if _, e := q.CreateAccountProfile(ctx, sqlcgen.CreateAccountProfileParams{
-			AccountID:      accountID,
-			TenantID:       tenantID,
-			No:             req.No,
-			OrgID:          orgID,
-			EnrollmentYear: pgInt2(req.EnrollmentYear, req.BaseIdentity == BaseIdentityStudent),
-			Title:          pgText(req.Title),
-		}); e != nil {
-			if isUniqueViolation(e) {
-				return apperr.ErrAccountNoAlreadyExists
-			}
-			return e
-		}
-		// 基础角色随 base_identity 维护一致(account_role 为鉴权权威源)。
-		baseRole := RoleStudent
-		if req.BaseIdentity == BaseIdentityTeacher {
-			baseRole = RoleTeacher
-		}
-		if e := q.AddAccountRole(ctx, sqlcgen.AddAccountRoleParams{
-			ID: s.idgen.Generate(), TenantID: tenantID, AccountID: accountID, Role: baseRole,
-		}); e != nil {
-			return e
-		}
-		if credential.NeedsActivationCode {
-			code, e := s.CreateActivationCode(ctx, q, tenantID, accountID, actorID)
-			if e != nil {
-				return e
-			}
-			activationCode = code
-		}
-		// 审计只记录账号开通方式与组织归属,不记录手机号明文、临时密码或激活码。
-		return s.writeAuditInTx(ctx, q, RoleSchoolAdmin, AuditActionAccountCreate, AuditTargetAccount, accountID, map[string]any{
-			"base_identity":          req.BaseIdentity,
-			"org_id":                 ids.Format(orgID),
-			"enable_activation_code": enableActivationCode,
-		})
-	}); err != nil {
+		activationCode = code
+		activationCodeHash = s.activationCodeHash(code)
+		activationExpireAt = timex.Now().Add(s.activationCodeTTL)
+	}
+	auditEntry, err := buildAuditEntry(ctx, RoleSchoolAdmin, AuditActionAccountCreate, AuditTargetAccount, accountID, map[string]any{
+		"base_identity":          req.BaseIdentity,
+		"org_id":                 ids.Format(orgID),
+		"enable_activation_code": enableActivationCode,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if err := s.repo.createAccountWithAudit(ctx, tenantID, accountID, orgID, req, phoneEnc, ph, credential, activationCodeHash, activationExpireAt, actorID, s.idgen.Generate, buildAuditLogCreate(s.idgen.Generate(), auditEntry)); err != nil {
 		if ae, ok := apperr.As(err); ok {
 			return nil, ae
 		}
@@ -146,37 +99,33 @@ func (s *Service) CreateAccount(ctx context.Context, req CreateAccountRequest) (
 
 // UpdateAccount 更新账号可变字段(姓名;不含学号/工号/身份)。
 func (s *Service) UpdateAccount(ctx context.Context, accountID int64, req UpdateAccountRequest) error {
-	return s.mustTenant(ctx, func(q *sqlcgen.Queries) error {
-		if _, e := q.GetAccountByID(ctx, accountID); e != nil {
-			return apperr.ErrAccountNotFound
-		}
-		if _, e := q.UpdateAccountName(ctx, sqlcgen.UpdateAccountNameParams{ID: accountID, Name: req.Name}); e != nil {
-			return e
-		}
-		return s.writeAuditInTx(ctx, q, RoleSchoolAdmin, AuditActionAccountUpdate, AuditTargetAccount, accountID, map[string]any{
-			"fields": []string{"name"},
-		})
+	entry, err := buildAuditEntry(ctx, RoleSchoolAdmin, AuditActionAccountUpdate, AuditTargetAccount, accountID, map[string]any{
+		"fields": []string{"name"},
 	})
+	if err != nil {
+		return err
+	}
+	return accountMutationErr(s.repo.updateAccountNameWithAudit(ctx, accountID, req.Name, buildAuditLogCreate(s.idgen.Generate(), entry)), apperr.ErrAccountMutationFailed)
 }
 
 // SetAccountStatus 状态机迁移(停用/启用/归档/恢复/注销)。校验合法迁移。
 func (s *Service) SetAccountStatus(ctx context.Context, accountID int64, target int16) error {
-	return s.repo.inTenant(ctx, func(q *sqlcgen.Queries) error {
-		acc, e := q.GetAccountByID(ctx, accountID)
-		if e != nil {
-			return apperr.ErrAccountNotFound
-		}
-		if !canTransit(acc.Status, target) {
-			return apperr.ErrAccountStatusTransitionInvalid
-		}
-		if _, e = q.UpdateAccountStatus(ctx, sqlcgen.UpdateAccountStatusParams{ID: accountID, Status: target}); e != nil {
-			return e
-		}
-		return s.writeAuditInTx(ctx, q, RoleSchoolAdmin, AuditActionAccountStatus, AuditTargetAccount, accountID, map[string]any{
-			"from_status": acc.Status,
-			"to_status":   target,
-		})
+	tenantID := tenantFromCtx(ctx)
+	acc, err := s.repo.loadAccountForMutation(ctx, tenantID, accountID)
+	if err != nil {
+		return accountMutationErr(err, apperr.ErrAccountMutationFailed)
+	}
+	if !canTransit(acc.Status, target) {
+		return apperr.ErrAccountStatusTransitionInvalid
+	}
+	entry, err := buildAuditEntry(ctx, RoleSchoolAdmin, AuditActionAccountStatus, AuditTargetAccount, accountID, map[string]any{
+		"from_status": acc.Status,
+		"to_status":   target,
 	})
+	if err != nil {
+		return err
+	}
+	return accountMutationErr(s.repo.updateAccountStatusWithAudit(ctx, accountID, tenantID, target, buildAuditLogCreate(s.idgen.Generate(), entry)), apperr.ErrAccountMutationFailed)
 }
 
 // BatchSetAccountStatus 批量迁移账号状态,逐账号返回结果并保留状态机校验。
@@ -214,21 +163,20 @@ func (s *Service) BatchArchiveAccounts(ctx context.Context, req BatchArchiveAcco
 	if req.EnrollmentYear <= 0 {
 		return nil, apperr.ErrBatchAccountArchiveInvalid
 	}
-	var archived []int64
-	if err := s.repo.inTenant(ctx, func(q *sqlcgen.Queries) error {
-		rows, err := q.ArchiveStudentAccountsByEnrollmentYear(ctx, pgInt2(req.EnrollmentYear, true))
-		if err != nil {
-			return err
-		}
-		archived = rows
-		return s.writeAuditInTx(ctx, q, RoleSchoolAdmin, AuditActionAccountStatus, AuditTargetAccount, 0, map[string]any{
+	archived, err := s.repo.archiveStudentAccountsByEnrollmentYearWithAudit(ctx, req.EnrollmentYear, func(rows []int64) (AuditLogCreate, error) {
+		entry, err := buildAuditEntry(ctx, RoleSchoolAdmin, AuditActionAccountStatus, AuditTargetAccount, 0, map[string]any{
 			"enrollment_year": req.EnrollmentYear,
 			"base_identity":   BaseIdentityStudent,
 			"from_status":     AccountActive,
 			"to_status":       AccountArchived,
 			"archived_count":  len(rows),
 		})
-	}); err != nil {
+		if err != nil {
+			return AuditLogCreate{}, err
+		}
+		return buildAuditLogCreate(s.idgen.Generate(), entry), nil
+	})
+	if err != nil {
 		return nil, toAppErr(err)
 	}
 
@@ -241,15 +189,12 @@ func (s *Service) BatchArchiveAccounts(ctx context.Context, req BatchArchiveAcco
 
 // ForceLogout 吊销某账号全部会话(管理员踢人)。
 func (s *Service) ForceLogout(ctx context.Context, accountID int64) error {
-	return s.mustTenant(ctx, func(q *sqlcgen.Queries) error {
-		if _, e := q.GetAccountByID(ctx, accountID); e != nil {
-			return apperr.ErrAccountNotFound
-		}
-		if err := q.RevokeAllAccountSessions(ctx, accountID); err != nil {
-			return err
-		}
-		return s.writeAuditInTx(ctx, q, RoleSchoolAdmin, AuditActionAccountForceLogout, AuditTargetAccount, accountID, nil)
-	})
+	tenantID := tenantFromCtx(ctx)
+	entry, err := buildAuditEntry(ctx, RoleSchoolAdmin, AuditActionAccountForceLogout, AuditTargetAccount, accountID, nil)
+	if err != nil {
+		return err
+	}
+	return accountMutationErr(s.repo.forceLogoutWithAudit(ctx, tenantID, accountID, buildAuditLogCreate(s.idgen.Generate(), entry)), apperr.ErrAccountMutationFailed)
 }
 
 // ResetAccountPassword 管理员重置他人密码:生成临时密码 + 首登改密,返回临时密码。
@@ -262,64 +207,35 @@ func (s *Service) ResetAccountPassword(ctx context.Context, accountID int64) (st
 	if err != nil {
 		return "", apperr.ErrAccountCredentialFailed.WithCause(err)
 	}
-	if err := s.repo.inTenant(ctx, func(q *sqlcgen.Queries) error {
-		if _, e := q.GetAccountByID(ctx, accountID); e != nil {
-			return apperr.ErrAccountNotFound
-		}
-		if e := q.UpdateAccountPassword(ctx, sqlcgen.UpdateAccountPasswordParams{
-			ID: accountID, PasswordHash: pgText(hash), MustChangePwd: true,
-		}); e != nil {
-			return e
-		}
-		if e := q.ResetAccountPwdFailed(ctx, accountID); e != nil {
-			return e
-		}
-		if e := q.RevokeAllAccountSessions(ctx, accountID); e != nil {
-			return e
-		}
-		return s.writeAuditInTx(ctx, q, RoleSchoolAdmin, AuditActionAccountResetPwd, AuditTargetAccount, accountID, map[string]any{
-			"must_change_pwd":  true,
-			"sessions_revoked": true,
-		})
-	}); err != nil {
-		if ae, ok := apperr.As(err); ok {
-			return "", ae
-		}
-		return "", apperr.ErrAccountMutationFailed.WithCause(err)
+	entry, err := buildAuditEntry(ctx, RoleSchoolAdmin, AuditActionAccountResetPwd, AuditTargetAccount, accountID, map[string]any{
+		"must_change_pwd":  true,
+		"sessions_revoked": true,
+	})
+	if err != nil {
+		return "", err
+	}
+	if err := s.repo.resetAccountPasswordWithAudit(ctx, tenantFromCtx(ctx), accountID, hash, buildAuditLogCreate(s.idgen.Generate(), entry)); err != nil {
+		return "", accountMutationErr(err, apperr.ErrAccountMutationFailed)
 	}
 	return temp, nil
 }
 
 // GrantAdmin 授予学校管理员(仅教师账号可被授予)。
 func (s *Service) GrantAdmin(ctx context.Context, accountID int64) error {
-	return s.repo.inTenant(ctx, func(q *sqlcgen.Queries) error {
-		acc, e := q.GetAccountByID(ctx, accountID)
-		if e != nil {
-			return apperr.ErrAccountNotFound
-		}
-		if acc.BaseIdentity != BaseIdentityTeacher {
-			return apperr.ErrGrantAdminNonTeacher // 学生不可授予管理员。
-		}
-		if e := q.AddAccountRole(ctx, sqlcgen.AddAccountRoleParams{
-			ID: s.idgen.Generate(), TenantID: acc.TenantID, AccountID: accountID, Role: RoleSchoolAdmin,
-		}); e != nil {
-			return e
-		}
-		return s.writeAuditInTx(ctx, q, RoleSchoolAdmin, AuditActionAccountGrantAdmin, AuditTargetAccount, accountID, nil)
-	})
+	entry, err := buildAuditEntry(ctx, RoleSchoolAdmin, AuditActionAccountGrantAdmin, AuditTargetAccount, accountID, nil)
+	if err != nil {
+		return err
+	}
+	return accountMutationErr(s.repo.grantAdminWithAudit(ctx, accountID, s.idgen.Generate(), buildAuditLogCreate(s.idgen.Generate(), entry)), apperr.ErrAccountMutationFailed)
 }
 
 // RevokeAdmin 撤销学校管理员角色(保留教师身份)。
 func (s *Service) RevokeAdmin(ctx context.Context, accountID int64) error {
-	return s.mustTenant(ctx, func(q *sqlcgen.Queries) error {
-		if _, e := q.GetAccountByID(ctx, accountID); e != nil {
-			return apperr.ErrAccountNotFound
-		}
-		if err := q.RemoveAccountRole(ctx, sqlcgen.RemoveAccountRoleParams{AccountID: accountID, Role: RoleSchoolAdmin}); err != nil {
-			return err
-		}
-		return s.writeAuditInTx(ctx, q, RoleSchoolAdmin, AuditActionAccountRevokeAdmin, AuditTargetAccount, accountID, nil)
-	})
+	entry, err := buildAuditEntry(ctx, RoleSchoolAdmin, AuditActionAccountRevokeAdmin, AuditTargetAccount, accountID, nil)
+	if err != nil {
+		return err
+	}
+	return accountMutationErr(s.repo.revokeAdminWithAudit(ctx, tenantFromCtx(ctx), accountID, buildAuditLogCreate(s.idgen.Generate(), entry)), apperr.ErrAccountMutationFailed)
 }
 
 // ChangeMyPassword 本人改密(校验旧密码或首登改密)。
@@ -331,50 +247,35 @@ func (s *Service) ChangeMyPassword(ctx context.Context, accountID int64, req Cha
 	if err != nil {
 		return apperr.ErrAccountCredentialFailed.WithCause(err)
 	}
-	if err := s.repo.inTenant(ctx, func(q *sqlcgen.Queries) error {
-		acc, e := q.GetAccountByID(ctx, accountID)
-		if e != nil {
-			return apperr.ErrAccountNotFound
-		}
-		// 非首登改密场景须校验旧密码。
-		if !acc.MustChangePwd {
-			if !acc.PasswordHash.Valid {
-				return apperr.ErrOldPasswordWrong
-			}
-			ok, ve := crypto.VerifyPassword(req.OldPassword, acc.PasswordHash.String)
-			if ve != nil {
-				return apperr.ErrAccountCredentialFailed.WithCause(ve)
-			}
-			if !ok {
-				return apperr.ErrOldPasswordWrong
-			}
-		}
-		if e := q.UpdateAccountPassword(ctx, sqlcgen.UpdateAccountPasswordParams{
-			ID: accountID, PasswordHash: pgText(hash), MustChangePwd: false,
-		}); e != nil {
-			return e
-		}
-		// 首登改密的账号:激活转正常。
-		if acc.Status == AccountPending {
-			if e := q.SetAccountActivated(ctx, accountID); e != nil {
-				return e
-			}
-		}
-		roles, e := q.ListAccountRoles(ctx, accountID)
-		if e != nil {
-			return e
-		}
-		return s.writeAuditInTx(ctx, q, audit.ActorRoleFromAccount(contracts.AccountInfo{
-			BaseIdentity: acc.BaseIdentity,
-			Roles:        roleCodesOf(roles),
-		}), AuditActionAccountUpdate, AuditTargetAccount, accountID, map[string]any{
-			"fields":          []string{"password"},
-			"activated_after": acc.Status == AccountPending,
-		})
-	}); err != nil {
+	tenantID := tenantFromCtx(ctx)
+	acc, err := s.repo.loadAccountForMutation(ctx, tenantID, accountID)
+	if err != nil {
 		return toAppErrWith(err, apperr.ErrAccountMutationFailed)
 	}
-	return nil
+	// 非首登改密场景必须校验旧密码,首登改密只校验新密码强度并完成激活。
+	if !acc.MustChangePwd {
+		if !acc.HasPassword {
+			return apperr.ErrOldPasswordWrong
+		}
+		ok, verifyErr := crypto.VerifyPassword(req.OldPassword, acc.PasswordHash)
+		if verifyErr != nil {
+			return apperr.ErrAccountCredentialFailed.WithCause(verifyErr)
+		}
+		if !ok {
+			return apperr.ErrOldPasswordWrong
+		}
+	}
+	entry, err := buildAuditEntry(ctx, audit.ActorRoleFromAccount(contracts.AccountInfo{
+		BaseIdentity: acc.BaseIdentity,
+		Roles:        acc.Roles,
+	}), AuditActionAccountUpdate, AuditTargetAccount, accountID, map[string]any{
+		"fields":          []string{"password"},
+		"activated_after": acc.Status == AccountPending,
+	})
+	if err != nil {
+		return err
+	}
+	return toAppErrWith(s.repo.changeAccountPasswordWithAudit(ctx, tenantID, accountID, hash, acc.Status == AccountPending, buildAuditLogCreate(s.idgen.Generate(), entry)), apperr.ErrAccountMutationFailed)
 }
 
 // ChangeMyPhone 本人换绑手机(校验验证码)。
@@ -390,120 +291,73 @@ func (s *Service) ChangeMyPhone(ctx context.Context, tenantID, accountID int64, 
 	if err != nil {
 		return apperr.ErrAccountCredentialFailed.WithCause(err)
 	}
-	if err := s.repo.inTenantID(ctx, tenantID, func(q *sqlcgen.Queries) error {
-		acc, e := q.GetAccountByID(ctx, accountID)
-		if e != nil {
-			return apperr.ErrAccountNotFound
-		}
-		if e := q.UpdateAccountPhone(ctx, sqlcgen.UpdateAccountPhoneParams{ID: accountID, PhoneEnc: enc, PhoneHash: newHash}); isUniqueViolation(e) {
-			return apperr.ErrPhoneAlreadyExists
-		} else if e != nil {
-			return e
-		}
-		roles, e := q.ListAccountRoles(ctx, accountID)
-		if e != nil {
-			return e
-		}
-		return s.writeAuditInTx(ctx, q, audit.ActorRoleFromAccount(contracts.AccountInfo{
-			BaseIdentity: acc.BaseIdentity,
-			Roles:        roleCodesOf(roles),
-		}), AuditActionAccountUpdate, AuditTargetAccount, accountID, map[string]any{
-			"fields": []string{"phone"},
-		})
-	}); err != nil {
+	acc, err := s.repo.loadAccountForMutation(ctx, tenantID, accountID)
+	if err != nil {
 		return toAppErrWith(err, apperr.ErrAccountMutationFailed)
 	}
-	return nil
+	entry, err := buildAuditEntry(ctx, audit.ActorRoleFromAccount(contracts.AccountInfo{
+		BaseIdentity: acc.BaseIdentity,
+		Roles:        acc.Roles,
+	}), AuditActionAccountUpdate, AuditTargetAccount, accountID, map[string]any{
+		"fields": []string{"phone"},
+	})
+	if err != nil {
+		return err
+	}
+	return toAppErrWith(s.repo.changeAccountPhoneWithAudit(ctx, tenantID, accountID, enc, newHash, buildAuditLogCreate(s.idgen.Generate(), entry)), apperr.ErrAccountMutationFailed)
 }
 
 // GetMe 个人中心信息(含学籍只读字段)。
 func (s *Service) GetMe(ctx context.Context, accountID int64) (*MeView, error) {
-	var view MeView
-	if err := s.repo.inTenant(ctx, func(q *sqlcgen.Queries) error {
-		acc, e := q.GetAccountByID(ctx, accountID)
-		if e != nil {
-			return apperr.ErrAccountNotFound
-		}
-		prof, e := q.GetAccountProfile(ctx, accountID)
-		hasProfile := true
-		if e != nil && db.IsNoRows(e) {
-			hasProfile = false
-		} else if e != nil {
-			return e
-		}
-		roles, e := q.ListAccountRoles(ctx, accountID)
-		if e != nil {
-			return e
-		}
-		phone, e := s.decryptPhone(acc.PhoneEnc)
-		if e != nil {
-			return apperr.ErrAccountCredentialFailed.WithCause(e)
-		}
-		view = MeView{
-			ID: ids.Format(acc.ID), Name: acc.Name, Phone: maskPhone(phone),
-			BaseIdentity: acc.BaseIdentity, Roles: roleCodesOf(roles),
-		}
-		applyProfileToMeView(&view, prof, hasProfile)
-		return nil
-	}); err != nil {
+	acc, err := s.repo.loadAccountForMutation(ctx, tenantFromCtx(ctx), accountID)
+	if err != nil {
 		if ae, ok := apperr.As(err); ok {
 			return nil, ae
 		}
 		return nil, apperr.ErrAccountQueryFailed.WithCause(err)
+	}
+	phone, err := s.decryptPhone(acc.PhoneEnc)
+	if err != nil {
+		return nil, apperr.ErrAccountCredentialFailed.WithCause(err)
+	}
+	view := MeView{
+		ID: ids.Format(acc.ID), Name: acc.Name, Phone: maskPhone(phone),
+		BaseIdentity: acc.BaseIdentity, Roles: acc.Roles,
+		No: acc.No, Title: acc.Title,
+	}
+	if acc.OrgID != 0 {
+		view.OrgID = ids.Format(acc.OrgID)
 	}
 	return &view, nil
 }
 
 // ListMySessions 查询当前账号有效会话。
 func (s *Service) ListMySessions(ctx context.Context, accountID int64) ([]SessionView, error) {
-	var views []SessionView
-	if err := s.repo.inTenant(ctx, func(q *sqlcgen.Queries) error {
-		rows, e := q.ListActiveSessions(ctx, accountID)
-		if e != nil {
-			return e
-		}
-		for _, row := range rows {
-			views = append(views, SessionView{
-				ID:         ids.Format(row.ID),
-				DeviceInfo: textVal(row.DeviceInfo),
-				IP:         textVal(row.Ip),
-				ExpireAt:   timex.FromTimestamptz(row.ExpireAt).Format(time.RFC3339),
-				CreatedAt:  timex.FromTimestamptz(row.CreatedAt).Format(time.RFC3339),
-			})
-		}
-		return nil
-	}); err != nil {
+	rows, err := s.repo.listActiveSessions(ctx, tenantFromCtx(ctx), accountID)
+	if err != nil {
 		return nil, apperr.ErrAuthSessionQueryFailed.WithCause(err)
+	}
+	views := make([]SessionView, 0, len(rows))
+	for _, row := range rows {
+		views = append(views, SessionView{
+			ID: ids.Format(row.ID), DeviceInfo: row.DeviceInfo, IP: row.IP,
+			ExpireAt: row.ExpireAt.Format(time.RFC3339), CreatedAt: row.CreatedAt.Format(time.RFC3339),
+		})
 	}
 	return views, nil
 }
 
-// applyProfileToMeView 把可选组织档案合入个人中心视图;首个学校管理员允许暂缺档案。
-func applyProfileToMeView(view *MeView, prof sqlcgen.AccountProfile, exists bool) {
-	if !exists {
-		return
-	}
-	view.No = prof.No
-	view.OrgID = ids.Format(prof.OrgID)
-	view.Title = textVal(prof.Title)
-}
-
 // ---- 内部辅助 ----
 
-// mustTenant 在租户事务内执行,错误统一转应用错误。
-func (s *Service) mustTenant(ctx context.Context, fn func(q *sqlcgen.Queries) error) error {
-	return s.mustTenantWith(ctx, fn, apperr.ErrAccountMutationFailed)
-}
-
-// mustTenantWith 在租户事务内执行,未知底层错误按调用场景转为专属错误码。
-func (s *Service) mustTenantWith(ctx context.Context, fn func(q *sqlcgen.Queries) error, code *apperr.Error) error {
-	if err := s.repo.inTenant(ctx, fn); err != nil {
-		if ae, ok := apperr.As(err); ok {
-			return ae
-		}
-		return code.WithCause(err)
+// accountMutationErr 保留 repo 返回的业务错误,其余底层错误转为账号场景错误。
+func accountMutationErr(err error, code *apperr.Error) error {
+	if err == nil {
+		return nil
 	}
-	return nil
+	if ae, ok := apperr.As(err); ok {
+		return ae
+	}
+	return code.WithCause(err)
 }
 
 // canTransit 账号状态机合法迁移(docs/01 §5)。

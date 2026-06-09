@@ -4,7 +4,6 @@ package identity
 import (
 	"testing"
 
-	"chaimir/internal/modules/identity/internal/sqlcgen"
 	"chaimir/pkg/apperr"
 )
 
@@ -25,7 +24,7 @@ func TestEnsureTenantLoginAllowedAcceptsActiveTenant(t *testing.T) {
 
 // TestSelectedTenantRequiresActiveStatus 确认手机号多租户选择结果携带并校验租户状态。
 func TestSelectedTenantRequiresActiveStatus(t *testing.T) {
-	selected := sqlcgen.FindAccountsByPhoneAllTenantsRow{
+	selected := LoginTenantCandidate{
 		AccountID:    1001,
 		TenantID:     2001,
 		TenantStatus: TenantDisabled,

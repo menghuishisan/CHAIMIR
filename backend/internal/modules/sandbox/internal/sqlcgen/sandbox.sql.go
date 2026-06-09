@@ -663,6 +663,132 @@ func (q *Queries) ListActiveSandboxResourceSpecs(ctx context.Context) ([]ListAct
 	return items, nil
 }
 
+const listDueSandboxRecycles = `-- name: ListDueSandboxRecycles :many
+WITH due AS (
+    SELECT s.id
+    FROM sandbox s
+    JOIN tenant_quota q ON q.tenant_id = s.tenant_id
+    WHERE s.status IN (1,2,3,4,5)
+      AND (
+        s.status = 5
+        OR s.expire_at <= now()
+        OR (s.keep_alive_until IS NOT NULL AND s.keep_alive_until <= now())
+        OR (s.status IN (1,2) AND s.last_active_at <= now() - ($2::INT * interval '1 second'))
+        OR (s.status = 4 AND s.keep_alive = false AND s.last_active_at <= now() - (q.idle_timeout_min * interval '1 minute'))
+      )
+    ORDER BY s.updated_at
+    LIMIT $1
+    FOR UPDATE SKIP LOCKED
+)
+UPDATE sandbox s
+SET status = 5
+FROM due
+WHERE s.id = due.id
+RETURNING s.id, s.tenant_id, s.runtime_id, s.image_id, s.namespace, s.source_ref, s.owner_account_id, s.phase, s.status, s.keep_alive, s.snapshot_enabled, s.code_storage_key, s.code_hash, s.init_script_ref, s.snapshot_ref, s.snapshot_created_at, s.snapshot_expire_at, s.keep_alive_until, s.last_active_at, s.expire_at, s.created_at, s.updated_at
+`
+
+type ListDueSandboxRecyclesParams struct {
+	Limit                   int32 `json:"limit"`
+	ReadyIdleTimeoutSeconds int32 `json:"ready_idle_timeout_seconds"`
+}
+
+func (q *Queries) ListDueSandboxRecycles(ctx context.Context, arg ListDueSandboxRecyclesParams) ([]Sandbox, error) {
+	rows, err := q.db.Query(ctx, listDueSandboxRecycles, arg.Limit, arg.ReadyIdleTimeoutSeconds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Sandbox{}
+	for rows.Next() {
+		var i Sandbox
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.RuntimeID,
+			&i.ImageID,
+			&i.Namespace,
+			&i.SourceRef,
+			&i.OwnerAccountID,
+			&i.Phase,
+			&i.Status,
+			&i.KeepAlive,
+			&i.SnapshotEnabled,
+			&i.CodeStorageKey,
+			&i.CodeHash,
+			&i.InitScriptRef,
+			&i.SnapshotRef,
+			&i.SnapshotCreatedAt,
+			&i.SnapshotExpireAt,
+			&i.KeepAliveUntil,
+			&i.LastActiveAt,
+			&i.ExpireAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listExpiredSandboxSnapshots = `-- name: ListExpiredSandboxSnapshots :many
+SELECT id, tenant_id, runtime_id, image_id, namespace, source_ref, owner_account_id, phase, status, keep_alive, snapshot_enabled, code_storage_key, code_hash, init_script_ref, snapshot_ref, snapshot_created_at, snapshot_expire_at, keep_alive_until, last_active_at, expire_at, created_at, updated_at FROM sandbox
+WHERE status = 6
+  AND snapshot_enabled = true
+  AND snapshot_ref IS NOT NULL
+  AND snapshot_expire_at <= now()
+ORDER BY snapshot_expire_at
+LIMIT $1
+FOR UPDATE SKIP LOCKED
+`
+
+func (q *Queries) ListExpiredSandboxSnapshots(ctx context.Context, limit int32) ([]Sandbox, error) {
+	rows, err := q.db.Query(ctx, listExpiredSandboxSnapshots, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Sandbox{}
+	for rows.Next() {
+		var i Sandbox
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.RuntimeID,
+			&i.ImageID,
+			&i.Namespace,
+			&i.SourceRef,
+			&i.OwnerAccountID,
+			&i.Phase,
+			&i.Status,
+			&i.KeepAlive,
+			&i.SnapshotEnabled,
+			&i.CodeStorageKey,
+			&i.CodeHash,
+			&i.InitScriptRef,
+			&i.SnapshotRef,
+			&i.SnapshotCreatedAt,
+			&i.SnapshotExpireAt,
+			&i.KeepAliveUntil,
+			&i.LastActiveAt,
+			&i.ExpireAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listRuntimes = `-- name: ListRuntimes :many
 SELECT id, code, name, eco, adapter_level, adapter_spec, capability_impl, plugin_ref, selftest_status, selftest_detail, status, created_at, updated_at FROM runtime
 WHERE ($3::SMALLINT IS NULL OR status = $3)

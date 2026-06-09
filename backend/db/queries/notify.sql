@@ -1,20 +1,20 @@
 -- M10 notify sqlc 查询:仅访问通知模块自有表。
 
 -- name: GetNotificationTemplate :one
-SELECT * FROM notification_template
+SELECT id, type, title_tpl, content_tpl, channels, force FROM notification_template
 WHERE type = @type;
 
 -- name: GetNotificationPreference :one
-SELECT * FROM notification_preference
+SELECT id, tenant_id, account_id, type, enabled FROM notification_preference
 WHERE account_id = @account_id AND type = @type;
 
 -- name: CreateNotification :one
 INSERT INTO notification (id, tenant_id, receiver_id, type, title, content, link)
 VALUES (@id, @tenant_id, @receiver_id, @type, @title, @content, @link)
-RETURNING *;
+RETURNING id, tenant_id, receiver_id, type, title, content, link, is_read, read_at, created_at, deleted_at;
 
 -- name: ListInbox :many
-SELECT * FROM notification
+SELECT id, tenant_id, receiver_id, type, title, content, link, is_read, read_at, created_at, deleted_at FROM notification
 WHERE receiver_id = @receiver_id
   AND deleted_at IS NULL
   AND (sqlc.narg('type')::varchar IS NULL OR type = sqlc.narg('type'))
@@ -33,7 +33,7 @@ WHERE receiver_id = @receiver_id
 UPDATE notification
 SET is_read = true, read_at = COALESCE(read_at, now())
 WHERE id = @id AND receiver_id = @receiver_id AND deleted_at IS NULL
-RETURNING *;
+RETURNING id, tenant_id, receiver_id, type, title, content, link, is_read, read_at, created_at, deleted_at;
 
 -- name: MarkAllNotificationsRead :exec
 UPDATE notification
@@ -44,7 +44,7 @@ WHERE receiver_id = @receiver_id AND deleted_at IS NULL AND is_read = false;
 UPDATE notification
 SET deleted_at = now()
 WHERE id = @id AND receiver_id = @receiver_id AND deleted_at IS NULL
-RETURNING *;
+RETURNING id, tenant_id, receiver_id, type, title, content, link, is_read, read_at, created_at, deleted_at;
 
 -- name: ListPreferences :many
 SELECT
@@ -61,12 +61,12 @@ INSERT INTO notification_preference (id, tenant_id, account_id, type, enabled)
 VALUES (@id, @tenant_id, @account_id, @type, @enabled)
 ON CONFLICT (tenant_id, account_id, type) DO UPDATE
 SET enabled = EXCLUDED.enabled
-RETURNING *;
+RETURNING id, tenant_id, account_id, type, enabled;
 
 -- name: CreateSystemAnnouncement :one
 INSERT INTO system_announcement (id, tenant_id, title, content, scope, target_roles, publisher_id, expire_at)
 VALUES (@id, @tenant_id, @title, @content, @scope, @target_roles, @publisher_id, @expire_at)
-RETURNING *;
+RETURNING id, tenant_id, title, content, scope, target_roles, publisher_id, published_at, expire_at;
 
 -- name: ListAnnouncements :many
 SELECT
@@ -92,7 +92,7 @@ WHERE (a.expire_at IS NULL OR a.expire_at > now())
 ORDER BY a.published_at DESC;
 
 -- name: GetAnnouncement :one
-SELECT * FROM system_announcement
+SELECT id, tenant_id, title, content, scope, target_roles, publisher_id, published_at, expire_at FROM system_announcement
 WHERE id = @id
   AND (expire_at IS NULL OR expire_at > now())
   AND (tenant_id IS NULL OR tenant_id = @tenant_id);
@@ -102,4 +102,4 @@ INSERT INTO announcement_read (id, tenant_id, announcement_id, account_id)
 VALUES (@id, @tenant_id, @announcement_id, @account_id)
 ON CONFLICT (tenant_id, announcement_id, account_id) DO UPDATE
 SET read_at = announcement_read.read_at
-RETURNING *;
+RETURNING id, tenant_id, announcement_id, account_id, read_at;

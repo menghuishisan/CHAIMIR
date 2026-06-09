@@ -2,15 +2,12 @@
 package judge
 
 import (
-	"archive/tar"
 	"bytes"
-	"compress/gzip"
-	"errors"
-	"io"
 	"math"
 	"regexp"
 	"strings"
 
+	"chaimir/internal/platform/upload"
 	"chaimir/pkg/apperr"
 )
 
@@ -33,44 +30,27 @@ func cosineSimilarity(a, b map[string]float64) float64 {
 }
 
 // fingerprintVectorFromArchive 从提交归档或源码字节提取归一化 token 频率向量。
-func fingerprintVectorFromArchive(raw []byte) (map[string]float64, error) {
+func fingerprintVectorFromArchive(raw []byte, limits upload.ArchiveLimits) (map[string]float64, error) {
 	// 第一步优先按 tar.gz 归档解析,符合 M2/M3 代码对象的默认保存格式。
-	reader, err := gzip.NewReader(bytes.NewReader(raw))
-	if err == nil {
-		vector, tarErr := fingerprintVectorFromTar(reader)
-		if closeErr := reader.Close(); closeErr != nil {
-			return nil, apperr.ErrFingerprintInvalid.WithCause(errors.Join(tarErr, closeErr))
+	if bytes.HasPrefix(raw, []byte{0x1f, 0x8b}) {
+		files, err := upload.ReadTarGzFiles(raw, limits)
+		if err != nil {
+			return nil, apperr.ErrFingerprintInvalid.WithCause(err)
 		}
-		return vector, tarErr
+		return fingerprintVectorFromFiles(files), nil
 	}
 	// 第二步非归档内容按单文件源码处理,便于内部调用方上传单文件提交。
 	return fingerprintVectorFromText(string(raw)), nil
 }
 
-// fingerprintVectorFromTar 遍历归档内源码文件并聚合 token 向量。
-func fingerprintVectorFromTar(reader io.Reader) (map[string]float64, error) {
-	tr := tar.NewReader(reader)
+// fingerprintVectorFromFiles 聚合归档内普通文件内容并提取 token 向量。
+func fingerprintVectorFromFiles(files map[string][]byte) map[string]float64 {
 	var builder strings.Builder
-	for {
-		header, err := tr.Next()
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			return nil, apperr.ErrFingerprintInvalid.WithCause(err)
-		}
-		// 只处理普通文件,目录和特殊文件不参与相似度特征。
-		if header.Typeflag != tar.TypeReg {
-			continue
-		}
-		data, err := io.ReadAll(tr)
-		if err != nil {
-			return nil, apperr.ErrFingerprintInvalid.WithCause(err)
-		}
+	for _, data := range files {
 		builder.Write(data)
 		builder.WriteByte('\n')
 	}
-	return fingerprintVectorFromText(builder.String()), nil
+	return fingerprintVectorFromText(builder.String())
 }
 
 // fingerprintVectorFromText 从源码文本提取小写 token 并做 L2 归一化。

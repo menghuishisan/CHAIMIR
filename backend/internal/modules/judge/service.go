@@ -3,18 +3,16 @@ package judge
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"log/slog"
-	"net/http"
 	"strings"
 	"time"
 
 	"chaimir/internal/contracts"
-	"chaimir/internal/modules/judge/internal/sqlcgen"
 	"chaimir/internal/platform/audit"
+	"chaimir/internal/platform/auth"
 	"chaimir/internal/platform/config"
 	"chaimir/internal/platform/db"
 	"chaimir/internal/platform/eventbus"
@@ -28,7 +26,6 @@ import (
 	"chaimir/pkg/logging"
 	"chaimir/pkg/snowflake"
 
-	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -46,6 +43,24 @@ type Service struct {
 	auditor         audit.Writer
 	identity        contracts.IdentityService
 	waitSandboxPoll func(context.Context, int) error
+}
+
+// judgeTaskResultView 是 M3 HTTP 输出使用的判题结果视图,不扩散到跨模块 contracts。
+type judgeTaskResultView struct {
+	TaskID          int64
+	Passed          bool
+	Score           int32
+	MaxScore        int32
+	Details         any
+	JudgedAt        any
+	IsRejudge       bool
+	JudgeSandboxRef string
+}
+
+// judgeTaskView 是 M3 HTTP 查询结果视图,比跨模块摘要多包含判题结果详情。
+type judgeTaskView struct {
+	contracts.JudgeTaskInfo
+	Result *judgeTaskResultView
 }
 
 // NewService 构造 M3 服务。
@@ -81,14 +96,9 @@ func NewService(
 
 // ListJudgers 查询判题器配置列表。
 func (s *Service) ListJudgers(ctx context.Context) ([]map[string]any, error) {
-	var rows []sqlcgen.Judger
-	// 判题器是平台级配置,查询使用 app 事务绕过租户 RLS。
-	if err := s.repo.inApp(ctx, func(q *sqlcgen.Queries) error {
-		found, err := q.ListJudgers(ctx, sqlcgen.ListJudgersParams{Limit: 100, Offset: 0})
-		rows = found
-		return err
-	}); err != nil {
-		return nil, apperr.ErrJudgerPersistence.WithCause(err)
+	rows, err := s.repo.listJudgers(ctx, 100, 0)
+	if err != nil {
+		return nil, err
 	}
 	// 对外输出统一转换为 API DTO map,避免泄露 sqlc 内部类型。
 	out := make([]map[string]any, 0, len(rows))
@@ -116,19 +126,9 @@ func (s *Service) CreateJudger(ctx context.Context, req CreateJudgerRequest) (ma
 	if status == 0 {
 		status = JudgerStatusOnboarding
 	}
-	var row sqlcgen.Judger
-	// 判题器定义属于平台级配置,创建时使用 app 事务而不是租户事务。
-	if err := s.repo.inApp(ctx, func(q *sqlcgen.Queries) error {
-		var e error
-		row, e = q.CreateJudger(ctx, sqlcgen.CreateJudgerParams{
-			ID: s.idgen.Generate(), Code: req.Code, Name: req.Name, Type: req.Type,
-			ExecutorRef: req.ExecutorRef, RuntimeRequired: req.RuntimeRequired,
-			DefaultTimeoutSec: req.DefaultTimeoutSec, ResourceSpec: spec,
-			SelftestStatus: JudgerSelftestPending, SelftestDetail: []byte("{}"), Status: status,
-		})
-		return e
-	}); err != nil {
-		return nil, apperr.ErrJudgerPersistence.WithCause(err)
+	row, err := s.repo.createJudger(ctx, req, s.idgen.Generate(), spec, status)
+	if err != nil {
+		return nil, err
 	}
 	if err := s.writeAudit(ctx, 0, auditActionJudgerCreate, auditTargetJudger, row.ID, map[string]any{"code": row.Code}); err != nil {
 		return nil, err
@@ -150,24 +150,9 @@ func (s *Service) UpdateJudger(ctx context.Context, judgerID int64, req UpdateJu
 	if _, err := parseJudgerResourceSpecForType(spec, req.Type); err != nil {
 		return nil, err
 	}
-	var row sqlcgen.Judger
-	// 平台级配置更新使用 app 事务,未命中时转换为 M3 业务错误码。
-	if err := s.repo.inApp(ctx, func(q *sqlcgen.Queries) error {
-		var e error
-		row, e = q.UpdateJudger(ctx, sqlcgen.UpdateJudgerParams{
-			ID: judgerID, Name: req.Name, Type: req.Type, ExecutorRef: req.ExecutorRef,
-			RuntimeRequired: req.RuntimeRequired, DefaultTimeoutSec: req.DefaultTimeoutSec,
-			ResourceSpec: spec, Status: req.Status,
-		})
-		if db.IsNoRows(e) {
-			return apperr.ErrJudgerNotFound
-		}
-		return e
-	}); err != nil {
-		if ae, ok := apperr.As(err); ok {
-			return nil, ae
-		}
-		return nil, apperr.ErrJudgerPersistence.WithCause(err)
+	row, err := s.repo.updateJudger(ctx, judgerID, req, spec)
+	if err != nil {
+		return nil, err
 	}
 	if err := s.writeAudit(ctx, 0, auditActionJudgerUpdate, auditTargetJudger, row.ID, map[string]any{"id": ids.Format(row.ID)}); err != nil {
 		return nil, err
@@ -178,19 +163,9 @@ func (s *Service) UpdateJudger(ctx context.Context, judgerID int64, req UpdateJu
 // RunJudgerSelftest 执行判题器自检并更新接入状态。
 func (s *Service) RunJudgerSelftest(ctx context.Context, judgerID int64) (map[string]any, error) {
 	// 第一步读取平台级判题器定义,不存在时返回 M3 业务错误码。
-	var row sqlcgen.Judger
-	if err := s.repo.inApp(ctx, func(q *sqlcgen.Queries) error {
-		var e error
-		row, e = q.GetJudgerByID(ctx, judgerID)
-		if db.IsNoRows(e) {
-			return apperr.ErrJudgerNotFound
-		}
-		return e
-	}); err != nil {
-		if ae, ok := apperr.As(err); ok {
-			return nil, ae
-		}
-		return nil, apperr.ErrJudgerPersistence.WithCause(err)
+	row, err := s.repo.getJudgerByID(ctx, judgerID)
+	if err != nil {
+		return nil, err
 	}
 	// 第二步执行真实自检,人工/仿真类只校验配置,运行类会申请 M2 judge 沙箱并执行命令。
 	detail, passed := s.executeJudgerSelftest(ctx, row)
@@ -205,14 +180,9 @@ func (s *Service) RunJudgerSelftest(ctx context.Context, judgerID int64) (map[st
 	if err != nil {
 		return nil, err
 	}
-	if err := s.repo.inApp(ctx, func(q *sqlcgen.Queries) error {
-		var e error
-		row, e = q.UpdateJudgerSelftest(ctx, sqlcgen.UpdateJudgerSelftestParams{
-			ID: judgerID, SelftestStatus: selftestStatus, SelftestDetail: payload, Status: status,
-		})
-		return e
-	}); err != nil {
-		return nil, apperr.ErrJudgerPersistence.WithCause(err)
+	row, err = s.repo.updateJudgerSelftest(ctx, judgerID, selftestStatus, payload, status)
+	if err != nil {
+		return nil, err
 	}
 	if err := s.writeAudit(ctx, 0, auditActionJudgerSelftest, auditTargetJudger, row.ID, map[string]any{"passed": passed}); err != nil {
 		return nil, err
@@ -224,7 +194,7 @@ func (s *Service) RunJudgerSelftest(ctx context.Context, judgerID int64) (map[st
 }
 
 // executeJudgerSelftest 执行判题器接入检查,返回可保存的结构化详情。
-func (s *Service) executeJudgerSelftest(ctx context.Context, row sqlcgen.Judger) (map[string]any, bool) {
+func (s *Service) executeJudgerSelftest(ctx context.Context, row JudgerSnapshot) (map[string]any, bool) {
 	// 人工评分、Flag 和仿真检查点不在 M3 内启动判题沙箱,配置能解析即可通过接入检查。
 	if row.Type == JudgerTypeManual || row.Type == JudgerTypeFlag || row.Type == JudgerTypeSimCheckpoint {
 		return map[string]any{"mode": "config", "passed": true}, true
@@ -321,8 +291,8 @@ func (s *Service) SubmitJudgeTask(ctx context.Context, req contracts.JudgeSubmit
 	}
 	if existing, err := s.existingTaskBySourceRef(ctx, req.TenantID, req.SourceRef); err == nil {
 		return taskInfoFromTask(existing), nil
-	} else if err != nil && !db.IsNoRows(err) {
-		return contracts.JudgeTaskInfo{}, apperr.ErrJudgeTaskPersistence.WithCause(err)
+	} else if ae, ok := apperr.As(err); !ok || ae.Code != apperr.ErrJudgeTaskNotFound.Code {
+		return contracts.JudgeTaskInfo{}, err
 	}
 	// 第二步执行提交限频,防止同账号同题反复占用评测资源。
 	if err := s.checkSubmitRate(ctx, req); err != nil {
@@ -352,32 +322,31 @@ func (s *Service) SubmitJudgeTask(ctx context.Context, req contracts.JudgeSubmit
 		return contracts.JudgeTaskInfo{}, err
 	}
 	taskID := s.idgen.Generate()
-	var row sqlcgen.JudgeTask
 	taskStatus := JudgeTaskQueued
 	if judger.Type == JudgerTypeManual {
 		taskStatus = JudgeTaskJudging
 	}
 	// 第七步在租户事务内创建任务和查重指纹,保证 RLS 与数据归属一致。
-	if err := s.repo.inTenantID(ctx, req.TenantID, func(q *sqlcgen.Queries) error {
-		var e error
-		row, e = q.CreateJudgeTask(ctx, sqlcgen.CreateJudgeTaskParams{
-			ID: taskID, TenantID: req.TenantID, JudgerID: judger.ID, SourceRef: req.SourceRef,
-			SubmitterID: req.SubmitterID, ProblemRef: problemRef, CodeStorageKey: req.CodeStorageKey,
-			CodeHash: req.CodeHash, InputSnapshot: snapshot, SandboxMode: normalizedSandboxMode(req.SandboxMode),
-			TargetSandboxRef: pgText(req.TargetSandboxRef), Priority: normalizePriority(req.Priority),
-			Status: taskStatus, MaxRetries: maxRetries,
-		})
-		if e != nil {
-			return e
-		}
-		_, e = q.CreateSubmissionFingerprint(ctx, sqlcgen.CreateSubmissionFingerprintParams{
-			ID: s.idgen.Generate(), TenantID: req.TenantID, SourceRef: req.SourceRef,
-			ProblemRef: problemRef, SubmitterID: req.SubmitterID, CodeHash: req.CodeHash,
-			SimVector: simVector,
-		})
-		return e
-	}); err != nil {
-		return contracts.JudgeTaskInfo{}, apperr.ErrJudgeTaskQueuedFail.WithCause(err)
+	row, err := s.repo.createTaskWithFingerprint(ctx, JudgeTaskCreate{
+		TaskID:           taskID,
+		FingerprintID:    s.idgen.Generate(),
+		TenantID:         req.TenantID,
+		JudgerID:         judger.ID,
+		SourceRef:        req.SourceRef,
+		SubmitterID:      req.SubmitterID,
+		ProblemRef:       problemRef,
+		CodeStorageKey:   req.CodeStorageKey,
+		CodeHash:         req.CodeHash,
+		InputSnapshot:    snapshot,
+		SandboxMode:      normalizedSandboxMode(req.SandboxMode),
+		TargetSandboxRef: req.TargetSandboxRef,
+		Priority:         normalizePriority(req.Priority),
+		Status:           taskStatus,
+		MaxRetries:       maxRetries,
+		SimVector:        simVector,
+	})
+	if err != nil {
+		return contracts.JudgeTaskInfo{}, err
 	}
 	if err := s.writeAudit(ctx, req.TenantID, auditActionTaskSubmit, auditTargetTask, row.ID, map[string]any{
 		"source_ref":  row.SourceRef,
@@ -393,7 +362,7 @@ func (s *Service) SubmitJudgeTask(ctx context.Context, req contracts.JudgeSubmit
 		s.publishProgress(row.ID, JudgeTaskJudging, "等待人工评分")
 		return taskInfoFromTask(row), nil
 	}
-	// 第七步提交 Redis 队列;入队失败返回明确错误码,不静默吞掉中间态。
+	// 第八步提交 Redis 队列;入队失败返回明确错误码,不静默吞掉中间态。
 	if err := s.enqueueTask(ctx, row); err != nil {
 		return contracts.JudgeTaskInfo{}, apperr.ErrJudgeTaskQueuedFail.WithCause(err)
 	}
@@ -401,50 +370,36 @@ func (s *Service) SubmitJudgeTask(ctx context.Context, req contracts.JudgeSubmit
 }
 
 // existingTaskBySourceRef 按上游资源引用查询已创建任务,支撑调用方 outbox 幂等重试。
-func (s *Service) existingTaskBySourceRef(ctx context.Context, tenantID int64, sourceRef string) (sqlcgen.JudgeTask, error) {
-	var row sqlcgen.JudgeTask
-	err := s.repo.inTenantID(ctx, tenantID, func(q *sqlcgen.Queries) error {
-		var e error
-		row, e = q.GetJudgeTaskBySourceRef(ctx, sqlcgen.GetJudgeTaskBySourceRefParams{TenantID: tenantID, SourceRef: sourceRef})
-		return e
-	})
-	return row, err
+func (s *Service) existingTaskBySourceRef(ctx context.Context, tenantID int64, sourceRef string) (JudgeTaskSnapshot, error) {
+	return s.repo.getTaskBySourceRef(ctx, tenantID, sourceRef)
 }
 
 // markTaskErrorAfterSubmitAuditFailure 防止审计失败的任务继续进入判题队列。
-func (s *Service) markTaskErrorAfterSubmitAuditFailure(ctx context.Context, row sqlcgen.JudgeTask) error {
-	return s.repo.inTenantID(ctx, row.TenantID, func(q *sqlcgen.Queries) error {
-		_, err := q.UpdateJudgeTaskStatus(ctx, sqlcgen.UpdateJudgeTaskStatusParams{ID: row.ID, Status: JudgeTaskError})
-		if err != nil {
-			return apperr.ErrJudgeTaskPersistence.WithCause(err)
-		}
-		return nil
-	})
+func (s *Service) markTaskErrorAfterSubmitAuditFailure(ctx context.Context, row JudgeTaskSnapshot) error {
+	if err := s.repo.markTaskStatus(ctx, row.TenantID, row.ID, JudgeTaskError); err != nil {
+		return apperr.ErrJudgeTaskPersistence.WithCause(err)
+	}
+	return nil
 }
 
 // GetJudgeTask 查询判题任务摘要。
 func (s *Service) GetJudgeTask(ctx context.Context, taskID int64) (contracts.JudgeTaskInfo, error) {
+	view, err := s.getJudgeTaskView(ctx, taskID)
+	if err != nil {
+		return contracts.JudgeTaskInfo{}, err
+	}
+	return view.JudgeTaskInfo, nil
+}
+
+// getJudgeTaskView 查询 M3 HTTP 需要的任务摘要与结果详情。
+func (s *Service) getJudgeTaskView(ctx context.Context, taskID int64) (judgeTaskView, error) {
 	// 查询必须依赖鉴权中间件注入的租户身份,禁止从请求参数决定租户。
 	id, ok := tenantFromContext(ctx)
 	if !ok {
-		return contracts.JudgeTaskInfo{}, apperr.ErrUnauthorized
+		return judgeTaskView{}, apperr.ErrUnauthorized
 	}
-	var row sqlcgen.GetJudgeTaskWithResultRow
 	// 任务与结果在同一租户事务内读取,避免跨租户数据泄露。
-	if err := s.repo.inTenantID(ctx, id.TenantID, func(q *sqlcgen.Queries) error {
-		var e error
-		row, e = q.GetJudgeTaskWithResult(ctx, taskID)
-		if db.IsNoRows(e) {
-			return apperr.ErrJudgeTaskNotFound
-		}
-		return e
-	}); err != nil {
-		if ae, ok := apperr.As(err); ok {
-			return contracts.JudgeTaskInfo{}, ae
-		}
-		return contracts.JudgeTaskInfo{}, apperr.ErrJudgeTaskPersistence.WithCause(err)
-	}
-	return taskInfoFromJoined(row), nil
+	return s.repo.getTaskView(ctx, id.TenantID, taskID)
 }
 
 // Rejudge 按原输入快照重新入队。
@@ -454,27 +409,17 @@ func (s *Service) Rejudge(ctx context.Context, taskID int64) (contracts.JudgeTas
 	if !ok {
 		return contracts.JudgeTaskInfo{}, apperr.ErrUnauthorized
 	}
-	var row sqlcgen.JudgeTask
 	// 先把任务恢复为 queued,未命中时返回 M3 任务不存在错误。
-	if err := s.repo.inTenantID(ctx, id.TenantID, func(q *sqlcgen.Queries) error {
-		var e error
-		row, e = q.MarkJudgeTaskRejudge(ctx, taskID)
-		if db.IsNoRows(e) {
-			return apperr.ErrJudgeTaskNotFound
-		}
-		return e
-	}); err != nil {
-		if ae, ok := apperr.As(err); ok {
-			return contracts.JudgeTaskInfo{}, ae
-		}
-		return contracts.JudgeTaskInfo{}, apperr.ErrJudgeTaskPersistence.WithCause(err)
-	}
-	// 状态更新成功后重新写入队列,由 worker 消费原输入快照。
-	if err := s.enqueueTask(ctx, row); err != nil {
-		return contracts.JudgeTaskInfo{}, apperr.ErrJudgeTaskQueuedFail.WithCause(err)
+	row, err := s.repo.markTaskRejudge(ctx, id.TenantID, taskID)
+	if err != nil {
+		return contracts.JudgeTaskInfo{}, err
 	}
 	if err := s.writeAudit(ctx, id.TenantID, auditActionTaskRejudge, auditTargetTask, row.ID, map[string]any{"source_ref": row.SourceRef}); err != nil {
 		return contracts.JudgeTaskInfo{}, err
+	}
+	// 审计成功后再重新写入队列,避免审计失败时后台 worker 已开始执行重判。
+	if err := s.enqueueTask(ctx, row); err != nil {
+		return contracts.JudgeTaskInfo{}, apperr.ErrJudgeTaskQueuedFail.WithCause(err)
 	}
 	return taskInfoFromTask(row), nil
 }
@@ -486,20 +431,10 @@ func (s *Service) CancelTask(ctx context.Context, taskID int64) (contracts.Judge
 	if !ok {
 		return contracts.JudgeTaskInfo{}, apperr.ErrUnauthorized
 	}
-	var row sqlcgen.JudgeTask
 	// 第二步只取消 queued 状态任务,已经执行的任务必须由 worker 进入终态。
-	if err := s.repo.inTenantID(ctx, id.TenantID, func(q *sqlcgen.Queries) error {
-		var e error
-		row, e = q.CancelQueuedJudgeTask(ctx, taskID)
-		if db.IsNoRows(e) {
-			return apperr.ErrJudgeTaskInvalidState
-		}
-		return e
-	}); err != nil {
-		if ae, ok := apperr.As(err); ok {
-			return contracts.JudgeTaskInfo{}, ae
-		}
-		return contracts.JudgeTaskInfo{}, apperr.ErrJudgeTaskPersistence.WithCause(err)
+	row, err := s.repo.cancelQueuedTask(ctx, id.TenantID, taskID)
+	if err != nil {
+		return contracts.JudgeTaskInfo{}, err
 	}
 	if err := s.writeAudit(ctx, id.TenantID, auditActionTaskCancel, auditTargetTask, row.ID, map[string]any{"source_ref": row.SourceRef}); err != nil {
 		return contracts.JudgeTaskInfo{}, err
@@ -510,21 +445,17 @@ func (s *Service) CancelTask(ctx context.Context, taskID int64) (contracts.Judge
 // RejudgeBatch 按来源标识批量重判。
 func (s *Service) RejudgeBatch(ctx context.Context, sourceRef string) ([]map[string]any, error) {
 	// 第一步校验来源标识,批量操作只能绑定一个明确上游资源。
-	if err := validateSourceRef(sourceRef); err != nil {
-		return nil, err
+	if !auth.ValidSourceRef(sourceRef) {
+		return nil, apperr.ErrJudgeTaskInvalid
 	}
 	id, ok := tenantFromContext(ctx)
 	if !ok {
 		return nil, apperr.ErrUnauthorized
 	}
-	var rows []sqlcgen.JudgeTask
 	// 第二步读取同来源历史任务,避免跨来源误触发重判。
-	if err := s.repo.inTenantID(ctx, id.TenantID, func(q *sqlcgen.Queries) error {
-		found, err := q.ListTasksBySourceRef(ctx, sqlcgen.ListTasksBySourceRefParams{SourceRef: sourceRef, Limit: 500, Offset: 0})
-		rows = found
-		return err
-	}); err != nil {
-		return nil, apperr.ErrJudgeTaskPersistence.WithCause(err)
+	rows, err := s.repo.listTasksBySourceRef(ctx, id.TenantID, sourceRef, 500, 0)
+	if err != nil {
+		return nil, err
 	}
 	out := make([]map[string]any, 0, len(rows))
 	// 第三步逐条恢复 queued 并入队,任何一条失败都显式返回,避免部分失败被吞掉。
@@ -544,31 +475,24 @@ func (s *Service) ListTasks(ctx context.Context, sourceRef string, pendingManual
 	if !ok {
 		return nil, apperr.ErrUnauthorized
 	}
-	var rows []sqlcgen.JudgeTask
 	// 待人工评分列表只返回 J6 且处于 judging 的任务,供教师录入结果。
 	if pendingManual {
-		if err := validateSourceRef(sourceRef); err != nil {
-			return nil, err
+		if !auth.ValidSourceRef(sourceRef) {
+			return nil, apperr.ErrJudgeTaskInvalid
 		}
-		if err := s.repo.inTenantID(ctx, id.TenantID, func(q *sqlcgen.Queries) error {
-			found, err := q.ListManualPendingTasks(ctx, sqlcgen.ListManualPendingTasksParams{SourceRef: sourceRef, Limit: 100, Offset: 0})
-			rows = found
-			return err
-		}); err != nil {
-			return nil, apperr.ErrJudgeTaskPersistence.WithCause(err)
+		rows, err := s.repo.listManualPendingTasks(ctx, id.TenantID, sourceRef, 100, 0)
+		if err != nil {
+			return nil, err
 		}
 		return tasksToMaps(rows), nil
 	}
 	// 普通列表必须带来源标识,避免开放无边界全租户扫描。
-	if err := validateSourceRef(sourceRef); err != nil {
-		return nil, err
+	if !auth.ValidSourceRef(sourceRef) {
+		return nil, apperr.ErrJudgeTaskInvalid
 	}
-	if err := s.repo.inTenantID(ctx, id.TenantID, func(q *sqlcgen.Queries) error {
-		found, err := q.ListTasksBySourceRef(ctx, sqlcgen.ListTasksBySourceRefParams{SourceRef: sourceRef, Limit: 100, Offset: 0})
-		rows = found
-		return err
-	}); err != nil {
-		return nil, apperr.ErrJudgeTaskPersistence.WithCause(err)
+	rows, err := s.repo.listTasksBySourceRef(ctx, id.TenantID, sourceRef, 100, 0)
+	if err != nil {
+		return nil, err
 	}
 	return tasksToMaps(rows), nil
 }
@@ -579,7 +503,7 @@ func (s *Service) ManualScore(ctx context.Context, taskID int64, req ManualScore
 	if req.MaxScore <= 0 || req.Score < 0 || req.Score > req.MaxScore {
 		return contracts.JudgeTaskInfo{}, apperr.ErrJudgeManualScoreInvalid
 	}
-	// 第二步确认终态事件通道可用,避免人工评分成功但上层聚合收不到 judge.completed。
+	// 第二步确认终态事件通道可用,避免人工评分写入 outbox 后无法派发给上层聚合。
 	if err := s.requireEventBus(); err != nil {
 		return contracts.JudgeTaskInfo{}, err
 	}
@@ -598,51 +522,39 @@ func (s *Service) ManualScore(ctx context.Context, taskID int64, req ManualScore
 	if err != nil {
 		return contracts.JudgeTaskInfo{}, err
 	}
-	var task sqlcgen.JudgeTask
-	// 第四步在同一租户事务内读取任务、写入结果、更新状态。
-	if err := s.repo.inTenantID(ctx, id.TenantID, func(q *sqlcgen.Queries) error {
-		current, e := q.GetJudgeTaskByID(ctx, taskID)
-		if db.IsNoRows(e) {
-			return apperr.ErrJudgeTaskNotFound
-		}
-		if e != nil {
-			return e
-		}
-		task = current
-		judger, e := q.GetJudgerByID(ctx, current.JudgerID)
-		if db.IsNoRows(e) {
-			return apperr.ErrJudgerNotFound
-		}
-		if e != nil {
-			return e
-		}
-		if judger.Type != JudgerTypeManual {
-			return apperr.ErrJudgeTaskInvalidState
-		}
-		if _, e = q.CreateJudgeResult(ctx, sqlcgen.CreateJudgeResultParams{
-			TaskID: taskID, TenantID: id.TenantID, Passed: req.Score >= req.MaxScore,
-			Score: req.Score, MaxScore: req.MaxScore, Details: detail, JudgeSandboxRef: pgtype.Text{},
-			IsRejudge: false,
-		}); e != nil {
-			return e
-		}
-		_, e = q.UpdateJudgeTaskStatus(ctx, sqlcgen.UpdateJudgeTaskStatusParams{ID: taskID, Status: JudgeTaskDone})
-		return e
-	}); err != nil {
-		if ae, ok := apperr.As(err); ok {
-			return contracts.JudgeTaskInfo{}, ae
-		}
-		return contracts.JudgeTaskInfo{}, apperr.ErrJudgeTaskPersistence.WithCause(err)
+	// 第五步先读取任务和判题器类型,确认 J6 后再写审计与终态结果。
+	task, judgerType, err := s.repo.getTaskAndJudgerType(ctx, id.TenantID, taskID)
+	if err != nil {
+		return contracts.JudgeTaskInfo{}, err
+	}
+	if judgerType != JudgerTypeManual {
+		return contracts.JudgeTaskInfo{}, apperr.ErrJudgeTaskInvalidState
 	}
 	if err := s.writeAudit(ctx, id.TenantID, auditActionManualScore, auditTargetResult, taskID, map[string]any{"score": req.Score, "max_score": req.MaxScore}); err != nil {
 		return contracts.JudgeTaskInfo{}, err
 	}
-	if err := s.publishJudgeCompleted(ctx, contracts.JudgeCompletedEvent{
+	// 第六步在同一租户事务内写入人工结果、推进状态并创建终态事件 outbox。
+	outbox, err := s.newJudgeEventOutbox(contracts.SubjectJudgeCompleted, contracts.JudgeCompletedEvent{
 		TenantID: id.TenantID, TaskID: task.ID, SourceRef: task.SourceRef, Status: JudgeTaskDone, Score: int(req.Score),
-	}); err != nil {
+	})
+	if err != nil {
 		return contracts.JudgeTaskInfo{}, err
 	}
-	// 第五步以任务摘要为基础补齐人工评分字段后返回。
+	if err := s.repo.completeTaskResult(ctx, JudgeResultCreate{
+		TaskID:    taskID,
+		TenantID:  id.TenantID,
+		Passed:    req.Score >= req.MaxScore,
+		Score:     req.Score,
+		MaxScore:  req.MaxScore,
+		Details:   detail,
+		IsRejudge: false,
+	}, outbox); err != nil {
+		return contracts.JudgeTaskInfo{}, apperr.ErrJudgeTaskPersistence.WithCause(err)
+	}
+	if err := s.PublishPendingJudgeEvents(ctx); err != nil {
+		logging.ErrorContext(ctx, "judge manual score event dispatch deferred", err.Error(), slog.Int64("task_id", task.ID))
+	}
+	// 第七步以任务摘要为基础补齐人工评分字段后返回。
 	info := taskInfoFromTask(task)
 	info.Status = JudgeTaskDone
 	info.Score = req.Score
@@ -656,16 +568,10 @@ func (s *Service) ExactFingerprints(ctx context.Context, problemRef, codeHash st
 	if strings.TrimSpace(problemRef) == "" || strings.TrimSpace(codeHash) == "" {
 		return nil, apperr.ErrFingerprintInvalid
 	}
-	var rows []sqlcgen.SubmissionFingerprint
 	// 指纹是租户数据,查询通过租户事务受 RLS 约束。
-	if err := s.repo.inTenant(ctx, func(q *sqlcgen.Queries) error {
-		found, err := q.ListExactFingerprints(ctx, sqlcgen.ListExactFingerprintsParams{
-			ProblemRef: problemRef, CodeHash: codeHash, Limit: 100, Offset: 0,
-		})
-		rows = found
-		return err
-	}); err != nil {
-		return nil, apperr.ErrJudgeTaskPersistence.WithCause(err)
+	rows, err := s.repo.listExactFingerprints(ctx, problemRef, codeHash, 100, 0)
+	if err != nil {
+		return nil, err
 	}
 	// 输出前转换 ID 与时间字段,保持 API 表达稳定。
 	out := make([]map[string]any, 0, len(rows))
@@ -673,31 +579,6 @@ func (s *Service) ExactFingerprints(ctx context.Context, problemRef, codeHash st
 		out = append(out, fingerprintToMap(row))
 	}
 	return out, nil
-}
-
-// ServeProgressWS 建立判题进度 WebSocket 并订阅指定任务 topic。
-func (s *Service) ServeProgressWS(w http.ResponseWriter, r *http.Request, taskID int64) error {
-	if s.hub == nil {
-		return apperr.ErrJudgeConfigUnavailable
-	}
-	// 建连时只订阅 M3 任务 topic,历史进度由任务查询接口补齐。
-	return s.hub.Serve(w, r, func(c *ws.Conn) error {
-		s.hub.Subscribe(c, judgeProgressTopic(taskID))
-		return nil
-	})
-}
-
-// publishProgress 向任务进度 topic 推送状态变化。
-func (s *Service) publishProgress(taskID int64, status int16, message string) {
-	if s.hub == nil {
-		return
-	}
-	payload, err := json.Marshal(map[string]any{"task_id": ids.Format(taskID), "status": status, "message": message})
-	if err != nil {
-		logging.ErrorContext(context.Background(), "judge progress marshal failed", err.Error(), slog.Int64("task_id", taskID))
-		return
-	}
-	s.hub.Broadcast(judgeProgressTopic(taskID), payload)
 }
 
 // Similarity 计算提交向量与同题历史指纹的相似度。
@@ -718,18 +599,15 @@ func (s *Service) Similarity(ctx context.Context, req FingerprintSimilarityReque
 	// 第三步设置阈值,未显式指定时使用文档默认相似度阈值。
 	threshold := req.Threshold
 	if threshold <= 0 {
-		threshold = 0.8
+		threshold = s.cfg.SimilarityDefaultThreshold
 	}
-	var rows []sqlcgen.SubmissionFingerprint
+	if threshold <= 0 || threshold >= 1 {
+		return nil, apperr.ErrFingerprintInvalid
+	}
 	// 第四步只读取同题历史指纹,避免跨题向量参与比较。
-	if err := s.repo.inTenant(ctx, func(q *sqlcgen.Queries) error {
-		found, err := q.ListFingerprintsByProblem(ctx, sqlcgen.ListFingerprintsByProblemParams{
-			ProblemRef: req.ProblemRef, Limit: 500, Offset: 0,
-		})
-		rows = found
-		return err
-	}); err != nil {
-		return nil, apperr.ErrSimilarityFailed.WithCause(err)
+	rows, err := s.repo.listFingerprintsByProblem(ctx, req.ProblemRef, 500, 0)
+	if err != nil {
+		return nil, err
 	}
 	out := []map[string]any{}
 	// 第五步逐条解码并计算余弦相似度,只返回达到阈值的命中项。
@@ -748,36 +626,26 @@ func (s *Service) Similarity(ctx context.Context, req FingerprintSimilarityReque
 }
 
 // loadAvailableJudger 读取并校验判题器可用状态。
-func (s *Service) loadAvailableJudger(ctx context.Context, code string) (sqlcgen.Judger, error) {
-	var row sqlcgen.Judger
+func (s *Service) loadAvailableJudger(ctx context.Context, code string) (JudgerSnapshot, error) {
 	// 判题器按平台配置读取,编码不存在时返回 M3 专用错误码。
-	if err := s.repo.inApp(ctx, func(q *sqlcgen.Queries) error {
-		var e error
-		row, e = q.GetJudgerByCode(ctx, code)
-		if db.IsNoRows(e) {
-			return apperr.ErrJudgerNotFound
-		}
-		return e
-	}); err != nil {
-		if ae, ok := apperr.As(err); ok {
-			return sqlcgen.Judger{}, ae
-		}
-		return sqlcgen.Judger{}, apperr.ErrJudgerPersistence.WithCause(err)
+	row, err := s.repo.getJudgerByCode(ctx, code)
+	if err != nil {
+		return JudgerSnapshot{}, err
 	}
 	// 仅自检通过且处于 available 的判题器可以承接任务。
 	if row.Status != JudgerStatusAvailable || row.SelftestStatus != JudgerSelftestPassed {
-		return sqlcgen.Judger{}, apperr.ErrJudgerUnavailable
+		return JudgerSnapshot{}, apperr.ErrJudgerUnavailable
 	}
 	return row, nil
 }
 
 // buildInputSnapshot 组装可复现输入快照,题目判题配置只经 M5 contracts 获取。
-func (s *Service) buildInputSnapshot(ctx context.Context, req contracts.JudgeSubmitRequest, judger sqlcgen.Judger) ([]byte, string, error) {
+func (s *Service) buildInputSnapshot(ctx context.Context, req contracts.JudgeSubmitRequest, judger JudgerSnapshot) ([]byte, string, error) {
 	// 第一步固定提交侧元数据,后续 worker 只依赖快照复现判题输入。
 	problemRef := req.ItemCode + ":" + req.ItemVersion
 	snapshot := map[string]any{
 		"judger_code":      judger.Code,
-		"judger_version":   judger.UpdatedAt.Time.UTC().Format(time.RFC3339Nano),
+		"judger_version":   judger.UpdatedAtText,
 		"executor_ref":     judger.ExecutorRef,
 		"code_hash":        req.CodeHash,
 		"code_storage_key": req.CodeStorageKey,
@@ -840,7 +708,7 @@ func (s *Service) buildSubmissionVector(ctx context.Context, codeStorageKey stri
 		return nil, apperr.ErrJudgeTaskQueuedFail.WithCause(err)
 	}
 	// 第三步提取 token 向量并保存为 JSONB,供后续相似度查询复用。
-	vector, err := fingerprintVectorFromArchive(data)
+	vector, err := fingerprintVectorFromArchive(data, judgeArchiveLimits(s.cfg))
 	if err != nil {
 		return nil, err
 	}
@@ -852,12 +720,12 @@ func (s *Service) buildSubmissionVector(ctx context.Context, codeStorageKey stri
 }
 
 // enqueueTask 把任务 ID 写入 Redis 有序集合;score 越小越先消费。
-func (s *Service) enqueueTask(ctx context.Context, row sqlcgen.JudgeTask) error {
+func (s *Service) enqueueTask(ctx context.Context, row JudgeTaskSnapshot) error {
 	if s.redis == nil {
 		return apperr.ErrJudgeTaskQueuedFail
 	}
 	// 分数由优先级和创建时间组成,保证高优先级任务先出队且同级按时间排序。
-	score := float64(100-int(row.Priority))*1_000_000_000 + float64(row.CreatedAt.Time.UnixNano()/1_000_000)
+	score := float64(100-int(row.Priority))*1_000_000_000 + float64(row.CreatedAtUnixMs)
 	return s.redis.Raw().ZAdd(ctx, "judge:queue", redisZ(row.ID, score)).Err()
 }
 
@@ -898,64 +766,6 @@ func decodeVector(raw []byte) map[string]float64 {
 	return jsonx.Decode(raw, map[string]float64{})
 }
 
-// judgerToMap 把判题器数据库行转换为 API 输出结构。
-func judgerToMap(row sqlcgen.Judger) map[string]any {
-	return map[string]any{
-		"id":                  ids.Format(row.ID),
-		"code":                row.Code,
-		"name":                row.Name,
-		"type":                row.Type,
-		"executor_ref":        row.ExecutorRef,
-		"runtime_required":    row.RuntimeRequired,
-		"default_timeout_sec": row.DefaultTimeoutSec,
-		"resource_spec":       jsonx.ObjectMap(row.ResourceSpec),
-		"selftest_status":     row.SelftestStatus,
-		"selftest_detail":     jsonx.ObjectMap(row.SelftestDetail),
-		"status":              row.Status,
-	}
-}
-
-// fingerprintToMap 把提交指纹数据库行转换为 API 输出结构。
-func fingerprintToMap(row sqlcgen.SubmissionFingerprint) map[string]any {
-	return map[string]any{
-		"id":           ids.Format(row.ID),
-		"source_ref":   row.SourceRef,
-		"problem_ref":  row.ProblemRef,
-		"submitter_id": ids.Format(row.SubmitterID),
-		"code_hash":    row.CodeHash,
-		"created_at":   timex.FromTimestamptz(row.CreatedAt),
-	}
-}
-
-// taskInfoFromTask 从任务表行构造 contracts 层任务摘要。
-func taskInfoFromTask(row sqlcgen.JudgeTask) contracts.JudgeTaskInfo {
-	return contracts.JudgeTaskInfo{TaskID: row.ID, TenantID: row.TenantID, SourceRef: row.SourceRef, SubmitterID: row.SubmitterID, Status: row.Status}
-}
-
-// taskInfoFromJoined 从任务与结果联查行构造 contracts 层任务摘要。
-func taskInfoFromJoined(row sqlcgen.GetJudgeTaskWithResultRow) contracts.JudgeTaskInfo {
-	info := contracts.JudgeTaskInfo{TaskID: row.ID, TenantID: row.TenantID, SourceRef: row.SourceRef, SubmitterID: row.SubmitterID, Status: row.Status}
-	if row.ResultScore.Valid {
-		info.Score = row.ResultScore.Int32
-	}
-	if row.ResultPassed.Valid {
-		info.Passed = row.ResultPassed.Bool
-	}
-	return info
-}
-
-// taskInfoToMap 转换 contracts DTO 为 HTTP 与服务输出结构。
-func taskInfoToMap(info contracts.JudgeTaskInfo) map[string]any {
-	return map[string]any{
-		"task_id":    ids.Format(info.TaskID),
-		"tenant_id":  ids.Format(info.TenantID),
-		"source_ref": info.SourceRef,
-		"status":     info.Status,
-		"score":      info.Score,
-		"passed":     info.Passed,
-	}
-}
-
 // normalizePriority 规范化任务优先级,未传值时使用普通优先级。
 func normalizePriority(priority int16) int16 {
 	if priority <= 0 {
@@ -964,26 +774,7 @@ func normalizePriority(priority int16) int16 {
 	return priority
 }
 
-// pgText 把可选字符串转换为 pgtype.Text。
-func pgText(v string) pgtype.Text {
-	return pgtype.Text{String: v, Valid: strings.TrimSpace(v) != ""}
-}
-
 // redisZ 构造 Redis 有序集合成员。
 func redisZ(taskID int64, score float64) redis.Z {
 	return redis.Z{Score: score, Member: ids.Format(taskID)}
-}
-
-// tasksToMaps 把任务列表转换为 API 输出结构。
-func tasksToMaps(rows []sqlcgen.JudgeTask) []map[string]any {
-	out := make([]map[string]any, 0, len(rows))
-	for _, row := range rows {
-		out = append(out, taskInfoToMap(taskInfoFromTask(row)))
-	}
-	return out
-}
-
-// judgeProgressTopic 生成判题进度 WebSocket topic。
-func judgeProgressTopic(taskID int64) string {
-	return "judge:task:" + ids.Format(taskID) + ":progress"
 }

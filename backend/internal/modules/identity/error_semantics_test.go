@@ -31,9 +31,9 @@ func TestIdentityPagedEndpointsUseDatabaseTotals(t *testing.T) {
 		path     string
 		required string
 	}{
-		{path: "service_import.go", required: "CountImportBatches"},
-		{path: "service_platform.go", required: "CountTenantApplications"},
-		{path: "contract_impl.go", required: "CountAuditLogs"},
+		{path: "repo_import.go", required: "CountImportBatches"},
+		{path: "repo_platform.go", required: "CountTenantApplications"},
+		{path: "repo_contract.go", required: "CountAuditLogs"},
 	} {
 		src, err := os.ReadFile(tt.path)
 		if err != nil {
@@ -54,13 +54,31 @@ func TestIdentityPagedEndpointsUseDatabaseTotals(t *testing.T) {
 
 // TestIdentityAccountMutationsCheckTargetExists 防止账号写操作对不存在账号静默成功并写审计。
 func TestIdentityAccountMutationsCheckTargetExists(t *testing.T) {
-	src, err := os.ReadFile("service_account.go")
+	serviceSrc, err := os.ReadFile("service_account.go")
 	if err != nil {
 		t.Fatalf("read service_account.go: %v", err)
 	}
-	text := string(src)
-	for _, name := range []string{"UpdateAccount", "ForceLogout", "RevokeAdmin"} {
-		body := functionBody(t, text, name)
+	serviceText := string(serviceSrc)
+	for _, tt := range []struct {
+		serviceName string
+		repoCall    string
+	}{
+		{serviceName: "UpdateAccount", repoCall: "updateAccountNameWithAudit"},
+		{serviceName: "ForceLogout", repoCall: "forceLogoutWithAudit"},
+		{serviceName: "RevokeAdmin", repoCall: "revokeAdminWithAudit"},
+	} {
+		body := functionBody(t, serviceText, tt.serviceName)
+		if !strings.Contains(body, tt.repoCall) {
+			t.Fatalf("%s must delegate account persistence to identity repo", tt.serviceName)
+		}
+	}
+	repoSrc, err := os.ReadFile("repo_account.go")
+	if err != nil {
+		t.Fatalf("read repo_account.go: %v", err)
+	}
+	repoText := string(repoSrc)
+	for _, name := range []string{"updateAccountNameWithAudit", "forceLogoutWithAudit", "revokeAdminWithAudit"} {
+		body := methodBody(t, repoText, "repo", name)
 		if !strings.Contains(body, "GetAccountByID") || !strings.Contains(body, "ErrAccountNotFound") {
 			t.Fatalf("%s must check target account existence and return ErrAccountNotFound", name)
 		}
@@ -97,13 +115,12 @@ func TestIdentityAmbiguousResetUsesDedicatedCode(t *testing.T) {
 
 // TestIdentityGlobalSmsVerificationRequiresPrivilegedConnection 防止找回验证码校验缺少特权连接前置检查。
 func TestIdentityGlobalSmsVerificationRequiresPrivilegedConnection(t *testing.T) {
-	src, err := os.ReadFile("service_sms.go")
+	src, err := os.ReadFile("repo_sms.go")
 	if err != nil {
-		t.Fatalf("read service_sms.go: %v", err)
+		t.Fatalf("read repo_sms.go: %v", err)
 	}
-	body := functionBody(t, string(src), "verifySmsCode")
-	if !strings.Contains(body, "!s.repo.hasPrivileged()") {
-		t.Fatalf("verifySmsCode must check privileged connection before NULL-tenant verification")
+	if !strings.Contains(string(src), "!r.hasPrivileged()") {
+		t.Fatalf("smsScopedExec must check privileged connection before NULL-tenant verification")
 	}
 }
 
@@ -170,22 +187,41 @@ func TestIdentityNoSharedGenericCodesRemain(t *testing.T) {
 
 // TestIdentityOrgMutationsCheckTargetExists 防止组织更新/删除对不存在对象静默成功并写审计。
 func TestIdentityOrgMutationsCheckTargetExists(t *testing.T) {
-	src, err := os.ReadFile("service_org.go")
+	serviceSrc, err := os.ReadFile("service_org.go")
 	if err != nil {
 		t.Fatalf("read service_org.go: %v", err)
 	}
-	text := string(src)
+	serviceText := string(serviceSrc)
+	for _, tt := range []struct {
+		name     string
+		repoCall string
+	}{
+		{name: "UpdateDepartment", repoCall: "updateDepartmentWithAudit"},
+		{name: "DeleteDepartment", repoCall: "deleteDepartmentWithAudit"},
+		{name: "DeleteMajor", repoCall: "deleteMajorWithAudit"},
+		{name: "DeleteClass", repoCall: "deleteClassWithAudit"},
+	} {
+		body := functionBody(t, serviceText, tt.name)
+		if !strings.Contains(body, tt.repoCall) {
+			t.Fatalf("%s must delegate organization persistence to identity repo", tt.name)
+		}
+	}
+	repoSrc, err := os.ReadFile("repo_org.go")
+	if err != nil {
+		t.Fatalf("read repo_org.go: %v", err)
+	}
+	repoText := string(repoSrc)
 	for _, tt := range []struct {
 		name     string
 		getter   string
 		notFound string
 	}{
-		{name: "UpdateDepartment", getter: "GetDepartmentByID", notFound: "ErrDepartmentNotFound"},
-		{name: "DeleteDepartment", getter: "GetDepartmentByID", notFound: "ErrDepartmentNotFound"},
-		{name: "DeleteMajor", getter: "GetMajorByID", notFound: "ErrMajorNotFound"},
-		{name: "DeleteClass", getter: "GetClassByID", notFound: "ErrClassNotFound"},
+		{name: "updateDepartmentWithAudit", getter: "GetDepartmentByID", notFound: "ErrDepartmentNotFound"},
+		{name: "deleteDepartmentWithAudit", getter: "GetDepartmentByID", notFound: "ErrDepartmentNotFound"},
+		{name: "deleteMajorWithAudit", getter: "GetMajorByID", notFound: "ErrMajorNotFound"},
+		{name: "deleteClassWithAudit", getter: "GetClassByID", notFound: "ErrClassNotFound"},
 	} {
-		body := functionBody(t, text, tt.name)
+		body := methodBody(t, repoText, "repo", tt.name)
 		if !strings.Contains(body, tt.getter) || !strings.Contains(body, tt.notFound) {
 			t.Fatalf("%s must check %s and return %s before mutating", tt.name, tt.getter, tt.notFound)
 		}
@@ -194,12 +230,23 @@ func TestIdentityOrgMutationsCheckTargetExists(t *testing.T) {
 
 // TestIdentityApproveApplicationUsesSingleTransaction 防止入驻审核拆成平台与租户两段提交。
 func TestIdentityApproveApplicationUsesSingleTransaction(t *testing.T) {
-	src, err := os.ReadFile("service_platform.go")
+	serviceSrc, err := os.ReadFile("service_platform.go")
 	if err != nil {
 		t.Fatalf("read service_platform.go: %v", err)
 	}
-	body := functionBody(t, string(src), "ApproveApplication")
-	if strings.Contains(body, "s.repo.inApp(ctx") && strings.Contains(body, "s.repo.inTenantID(ctx") {
+	serviceBody := functionBody(t, string(serviceSrc), "ApproveApplication")
+	if strings.Contains(serviceBody, "s.repo.inApp(ctx") || strings.Contains(serviceBody, "s.repo.inTenantID(ctx") {
+		t.Fatalf("ApproveApplication service must not own transaction details")
+	}
+	if !strings.Contains(serviceBody, "s.repo.approveApplication") {
+		t.Fatalf("ApproveApplication service must delegate atomic persistence to identity repo")
+	}
+	repoSrc, err := os.ReadFile("repo_platform.go")
+	if err != nil {
+		t.Fatalf("read repo_platform.go: %v", err)
+	}
+	body := methodBody(t, string(repoSrc), "repo", "approveApplication")
+	if strings.Contains(body, "r.inApp(ctx") && strings.Contains(body, "r.inTenantID(ctx") {
 		t.Fatalf("ApproveApplication must not split tenant creation and first admin creation into two transactions")
 	}
 	if !strings.Contains(body, "inAppTenantID") {
@@ -209,13 +256,24 @@ func TestIdentityApproveApplicationUsesSingleTransaction(t *testing.T) {
 
 // TestIdentityTenantMutationsCheckTargetExists 防止租户更新/配置修改未命中时返回内部错误。
 func TestIdentityTenantMutationsCheckTargetExists(t *testing.T) {
-	src, err := os.ReadFile("service_platform.go")
+	serviceSrc, err := os.ReadFile("service_platform.go")
 	if err != nil {
 		t.Fatalf("read service_platform.go: %v", err)
 	}
-	text := string(src)
+	serviceText := string(serviceSrc)
 	for _, name := range []string{"UpdateTenant", "UpdateTenantConfig"} {
-		body := functionBody(t, text, name)
+		body := functionBody(t, serviceText, name)
+		if !strings.Contains(body, "s.repo.updateTenant") {
+			t.Fatalf("%s must delegate tenant persistence to identity repo", name)
+		}
+	}
+	repoSrc, err := os.ReadFile("repo_platform.go")
+	if err != nil {
+		t.Fatalf("read repo_platform.go: %v", err)
+	}
+	repoText := string(repoSrc)
+	for _, name := range []string{"updateTenantStatus", "updateTenantConfig"} {
+		body := methodBody(t, repoText, "repo", name)
 		if !strings.Contains(body, "GetTenantByID") || !strings.Contains(body, "ErrTenantNotFound") {
 			t.Fatalf("%s must check tenant exists and return ErrTenantNotFound", name)
 		}
@@ -333,25 +391,34 @@ func TestIdentityRoleCodesUseContracts(t *testing.T) {
 
 // TestIdentityPlatformLoginUsesPlatformScopedToken 防止平台管理员登录复用租户账号会话。
 func TestIdentityPlatformLoginUsesPlatformScopedToken(t *testing.T) {
-	src, err := os.ReadFile("service_platform_login.go")
+	serviceSrc, err := os.ReadFile("service_platform_login.go")
 	if err != nil {
 		t.Fatalf("read service_platform_login.go: %v", err)
 	}
-	text := string(src)
+	repoSrc, err := os.ReadFile("repo_platform_auth.go")
+	if err != nil {
+		t.Fatalf("read repo_platform_auth.go: %v", err)
+	}
+	serviceText := string(serviceSrc)
 	for _, required := range []string{
 		"LoginPlatform",
 		"IssueAccess(0, admin.ID, sessionID, true)",
-		"CreatePlatformAuthSession",
 		"buildPlatformAuditEntry",
-		"CreateAuditLog",
+		"createPlatformLoginSession",
 		"AuditActionAuthLogin",
 	} {
-		if !strings.Contains(text, required) {
+		if !strings.Contains(serviceText, required) {
 			t.Fatalf("platform login must use platform-scoped token/session, missing %s", required)
 		}
 	}
-	if strings.Contains(text, "CreateAuthSession") {
+	if strings.Contains(serviceText, "CreateAuthSession") {
 		t.Fatalf("platform login must not write tenant auth_session")
+	}
+	repoText := string(repoSrc)
+	for _, required := range []string{"CreatePlatformAuthSession", "CreateAuditLog"} {
+		if !strings.Contains(repoText, required) {
+			t.Fatalf("platform login repo must persist platform session and audit, missing %s", required)
+		}
 	}
 }
 
@@ -367,15 +434,25 @@ func TestIdentityPlatformTokensHaveRefreshAndLogoutPaths(t *testing.T) {
 		required []string
 	}{
 		{name: "Refresh", required: []string{"refreshPlatform(ctx"}},
-		{name: "refreshPlatform", required: []string{"findPlatformSessionByTokenHash", "RevokeAllPlatformAdminSessions", "issuePlatformLogin"}},
+		{name: "refreshPlatform", required: []string{"findPlatformSessionByTokenHash", "revokeAllPlatformAdminSessions", "issuePlatformLogin"}},
 		{name: "Logout", required: []string{"LogoutPlatform"}},
-		{name: "LogoutPlatform", required: []string{"RevokePlatformAuthSession"}},
+		{name: "LogoutPlatform", required: []string{"revokePlatformSession"}},
 	} {
 		body := functionBody(t, authText, tt.name)
 		for _, required := range tt.required {
 			if !strings.Contains(body, required) {
 				t.Fatalf("%s must handle platform session lifecycle, missing %s", tt.name, required)
 			}
+		}
+	}
+	repoSrc, err := os.ReadFile("repo_platform_auth.go")
+	if err != nil {
+		t.Fatalf("read repo_platform_auth.go: %v", err)
+	}
+	repoText := string(repoSrc)
+	for _, required := range []string{"RevokeAllPlatformAdminSessions", "RevokePlatformAuthSession"} {
+		if !strings.Contains(repoText, required) {
+			t.Fatalf("platform auth repo must handle platform session lifecycle, missing %s", required)
 		}
 	}
 }

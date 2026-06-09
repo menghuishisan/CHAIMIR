@@ -9,11 +9,11 @@ import (
 	"chaimir/internal/platform/ids"
 	"chaimir/internal/platform/jsonx"
 	"chaimir/internal/platform/pagex"
+	"chaimir/internal/platform/pgtypex"
 	"chaimir/internal/platform/tenant"
 	"chaimir/pkg/apperr"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgtype"
 )
 
 // experimentStore 是服务层依赖的数据访问接口,便于服务逻辑测试。
@@ -76,13 +76,13 @@ func (r *repo) ListExperiments(ctx context.Context, courseID int64, status int16
 	if err := r.inTenant(ctx, func(q *sqlcgen.Queries) error {
 		var err error
 		rows, err = q.ListExperiments(ctx, sqlcgen.ListExperimentsParams{
-			CourseID: pgInt8Filter(courseID), Status: pgInt2Filter(status),
+			CourseID: pgtypex.Int8(courseID), Status: pgtypex.Int2(status),
 			OffsetCount: int32((page - 1) * size), LimitCount: int32(size),
 		})
 		if err != nil {
 			return err
 		}
-		total, err = q.CountExperiments(ctx, pgInt8Filter(courseID))
+		total, err = q.CountExperiments(ctx, pgtypex.Int8(courseID))
 		return err
 	}); err != nil {
 		return nil, 0, apperr.ErrExperimentQueryFailed.WithCause(err)
@@ -104,8 +104,8 @@ func (r *repo) CreateExperiment(ctx context.Context, id tenant.Identity, experim
 	if err := r.inTenant(ctx, func(q *sqlcgen.Queries) error {
 		var createErr error
 		row, createErr = q.CreateExperiment(ctx, sqlcgen.CreateExperimentParams{
-			ID: experimentID, TenantID: id.TenantID, CourseID: pgInt8FromString(req.CourseID), AuthorID: id.AccountID,
-			TemplateRef: pgText(req.TemplateRef), TemplateVersion: pgText(req.TemplateVersion), Name: req.Name,
+			ID: experimentID, TenantID: id.TenantID, CourseID: pgtypex.Int8(ids.ParseOrZero(req.CourseID)), AuthorID: id.AccountID,
+			TemplateRef: pgtypex.Text(req.TemplateRef), TemplateVersion: pgtypex.Text(req.TemplateVersion), Name: req.Name,
 			Description: req.Description, Components: components, CollabMode: normalizedCollabMode(req.CollabMode),
 			GroupConfig: groupConfig, RequireReport: req.RequireReport, WizardStep: normalizedWizardStep(req.WizardStep),
 			Status: ExperimentStatusDraft,
@@ -140,8 +140,8 @@ func (r *repo) UpdateExperiment(ctx context.Context, id int64, req ExperimentReq
 	if err := r.inTenant(ctx, func(q *sqlcgen.Queries) error {
 		var updateErr error
 		row, updateErr = q.UpdateExperiment(ctx, sqlcgen.UpdateExperimentParams{
-			ID: id, CourseID: pgInt8FromString(req.CourseID), TemplateRef: pgText(req.TemplateRef),
-			TemplateVersion: pgText(req.TemplateVersion), Name: req.Name, Description: req.Description,
+			ID: id, CourseID: pgtypex.Int8(ids.ParseOrZero(req.CourseID)), TemplateRef: pgtypex.Text(req.TemplateRef),
+			TemplateVersion: pgtypex.Text(req.TemplateVersion), Name: req.Name, Description: req.Description,
 			Components: components, CollabMode: normalizedCollabMode(req.CollabMode), GroupConfig: groupConfig,
 			RequireReport: req.RequireReport, WizardStep: normalizedWizardStep(req.WizardStep),
 		})
@@ -176,7 +176,7 @@ func (r *repo) CreateInstance(ctx context.Context, id tenant.Identity, instanceI
 		var createErr error
 		row, createErr = q.CreateExperimentInstance(ctx, sqlcgen.CreateExperimentInstanceParams{
 			ID: instanceID, TenantID: id.TenantID, ExperimentID: experimentID, OwnerAccountID: id.AccountID,
-			GroupID: pgInt8(groupID), SourceRef: sourceRef, SandboxRefs: sandboxRefs, SimSessionRefs: simRefs, Status: InstanceStatusCreating,
+			GroupID: pgtypex.Int8(groupID), SourceRef: sourceRef, SandboxRefs: sandboxRefs, SimSessionRefs: simRefs, Status: InstanceStatusCreating,
 		})
 		return createErr
 	}); err != nil {
@@ -234,7 +234,7 @@ func (r *repo) UpdateInstanceStatus(ctx context.Context, id int64, status int16)
 
 // UpdateInstanceScore 写入实例最终得分并置为完成态。
 func (r *repo) UpdateInstanceScore(ctx context.Context, id int64, score float64) (ExperimentInstanceDTO, error) {
-	numeric, err := pgNumeric(score)
+	numeric, err := pgtypex.Numeric(score)
 	if err != nil {
 		return ExperimentInstanceDTO{}, apperr.ErrExperimentScoreInvalid.WithCause(err)
 	}
@@ -274,7 +274,7 @@ func (r *repo) MarkInstancesReleasedBySandbox(ctx context.Context, tenantID, san
 
 // UpsertCheckpointResult 新增或更新检查点结果。
 func (r *repo) UpsertCheckpointResult(ctx context.Context, result CheckpointResultDTO) (CheckpointResultDTO, error) {
-	score, err := pgNumeric(result.Score)
+	score, err := pgtypex.Numeric(result.Score)
 	if err != nil {
 		return CheckpointResultDTO{}, apperr.ErrCheckpointResultInvalid.WithCause(err)
 	}
@@ -283,7 +283,7 @@ func (r *repo) UpsertCheckpointResult(ctx context.Context, result CheckpointResu
 		var upsertErr error
 		row, upsertErr = q.UpsertCheckpointResult(ctx, sqlcgen.UpsertCheckpointResultParams{
 			ID: ids.ParseOrZero(result.ID), TenantID: result.TenantID, InstanceID: result.InstanceID, CheckpointID: result.CheckpointID,
-			JudgeTaskRef: pgText(result.JudgeTaskRef), Passed: result.Passed, Score: score, DetailRef: pgText(result.DetailRef),
+			JudgeTaskRef: pgtypex.Text(result.JudgeTaskRef), Passed: result.Passed, Score: score, DetailRef: pgtypex.Text(result.DetailRef),
 		})
 		return upsertErr
 	}); err != nil {
@@ -297,7 +297,7 @@ func (r *repo) PendingCheckpointByJudgeTask(ctx context.Context, tenantID, taskI
 	var row sqlcgen.GetCheckpointResultByJudgeTaskRow
 	if err := r.inTenantID(ctx, tenantID, func(q *sqlcgen.Queries) error {
 		var err error
-		row, err = q.GetCheckpointResultByJudgeTask(ctx, pgText(ids.Format(taskID)))
+		row, err = q.GetCheckpointResultByJudgeTask(ctx, pgtypex.Text(ids.Format(taskID)))
 		return err
 	}); err != nil {
 		return PendingCheckpoint{}, notFoundOrInternal(err, apperr.ErrCheckpointResultNotFound)
@@ -317,7 +317,7 @@ func (r *repo) ListCheckpointScores(ctx context.Context, instanceID int64) ([]Sc
 	}
 	out := make([]ScorePart, 0, len(rows))
 	for _, row := range rows {
-		out = append(out, ScorePart{Score: numericValue(row.Score)})
+		out = append(out, ScorePart{Score: pgtypex.NumericValue(row.Score)})
 	}
 	return out, nil
 }
@@ -334,7 +334,7 @@ func (r *repo) LatestReportScore(ctx context.Context, instanceID int64) (*float6
 	}
 	for _, row := range rows {
 		if row.Status == ReportStatusGraded {
-			return numericPtr(row.ManualScore), nil
+			return pgtypex.NumericPtrValue(row.ManualScore), nil
 		}
 	}
 	return nil, nil
@@ -373,7 +373,7 @@ func (r *repo) ListReports(ctx context.Context, experimentID int64, page, size i
 
 // GradeReportAuthorized 按实验作者/学校管理员/平台上下文原子批改实验报告。
 func (r *repo) GradeReportAuthorized(ctx context.Context, id tenant.Identity, isSchoolAdmin bool, reportID int64, score float64, comment string) (ReportDTO, error) {
-	numeric, err := pgNumeric(score)
+	numeric, err := pgtypex.Numeric(score)
 	if err != nil {
 		return ReportDTO{}, apperr.ErrExperimentReportInvalid.WithCause(err)
 	}
@@ -382,7 +382,7 @@ func (r *repo) GradeReportAuthorized(ctx context.Context, id tenant.Identity, is
 		var updateErr error
 		row, updateErr = q.GradeExperimentReportAuthorized(ctx, sqlcgen.GradeExperimentReportAuthorizedParams{
 			ID: reportID, IsPlatform: id.IsPlatform, IsSchoolAdmin: isSchoolAdmin, ActorID: id.AccountID,
-			ManualScore: numeric, Comment: pgText(comment), Status: ReportStatusGraded,
+			ManualScore: numeric, Comment: pgtypex.Text(comment), Status: ReportStatusGraded,
 		})
 		return updateErr
 	}); err != nil {
@@ -467,11 +467,11 @@ func (r *repo) Stats(ctx context.Context, tenantID, courseID int64) (StatsDTO, e
 	var out StatsDTO
 	if err := r.inTenantID(ctx, tenantID, func(q *sqlcgen.Queries) error {
 		var err error
-		out.ExperimentCount, err = q.CountExperiments(ctx, pgInt8Filter(courseID))
+		out.ExperimentCount, err = q.CountExperiments(ctx, pgtypex.Int8(courseID))
 		if err != nil {
 			return err
 		}
-		out.ActiveInstanceCount, err = q.CountActiveInstances(ctx, pgInt8Filter(courseID))
+		out.ActiveInstanceCount, err = q.CountActiveInstances(ctx, pgtypex.Int8(courseID))
 		return err
 	}); err != nil {
 		return StatsDTO{}, apperr.ErrExperimentQueryFailed.WithCause(err)
@@ -523,12 +523,6 @@ func normalizedWizardStep(v int16) int16 {
 		return 1
 	}
 	return v
-}
-
-// pgInt8FromString 把字符串 ID 转为可空 int8。
-func pgInt8FromString(v string) pgtype.Int8 {
-	id, _ := ids.Parse(v)
-	return pgInt8(id)
 }
 
 // notFoundOrInternal 把 pgx 未命中转换为模块错误码。

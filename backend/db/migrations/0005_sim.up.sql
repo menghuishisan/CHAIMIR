@@ -105,7 +105,7 @@ DO $$
 DECLARE
     t TEXT;
     tenant_tables TEXT[] := ARRAY[
-        'sim_session','sim_action_log','sim_checkpoint','sim_share'
+        'sim_session','sim_action_log','sim_checkpoint'
     ];
 BEGIN
     FOREACH t IN ARRAY tenant_tables LOOP

@@ -11,6 +11,7 @@ var (
 	ErrSimBundleReadFail         = New("41006", "仿真场景资源暂时无法加载")
 	ErrSimBundleTooLarge         = New("41007", "仿真场景资源过大,请精简后重新上传")
 	ErrSimPackageQueryFailed     = New("41008", "仿真场景列表暂时无法加载,请稍后重试")
+	ErrSimPackageUpdateFailed    = New("41009", "仿真场景暂时无法更新,请稍后重试")
 
 	ErrSimSessionNotFound     = New("42001", "仿真会话不存在或已结束")
 	ErrSimSessionInvalid      = New("42002", "仿真启动参数不完整,请检查后重试")
@@ -24,8 +25,11 @@ var (
 	ErrSimShareCodeGenerate   = New("42010", "分享码暂时无法生成,请稍后重试")
 	ErrSimReplayReadFailed    = New("42011", "回放数据暂时无法加载,请稍后重试")
 	ErrSimAuditFailed         = New("42012", "操作记录暂时无法保存,请稍后重试")
+	ErrSimShareCreateFailed   = New("42013", "分享码暂时无法保存,请稍后重试")
+	ErrSimShareReadFailed     = New("42014", "分享内容暂时无法加载,请稍后重试")
 
 	ErrSimReviewNotFound     = New("43001", "审核记录不存在或已处理")
 	ErrSimReviewInvalidState = New("43002", "当前审核状态不支持该操作")
 	ErrSimReviewQueryFailed  = New("43003", "审核列表暂时无法加载,请稍后重试")
+	ErrSimReviewUpdateFailed = New("43004", "审核记录暂时无法更新,请稍后重试")
 )

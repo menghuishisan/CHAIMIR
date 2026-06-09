@@ -132,13 +132,13 @@ func (a *API) requireTeacherOrAdmin() gin.HandlerFunc {
 	return auth.RequireTenantAnyRole(a.identity, contracts.RoleTeacher, contracts.RoleSchoolAdmin)
 }
 
-// listLevelConfigs 查询等级配置。
+// listLevelConfigs 查询当前租户等级映射配置,供 GPA 聚合和成绩展示复用。
 func (a *API) listLevelConfigs(c *gin.Context) {
 	out, err := a.svc.ListLevelConfigs(c.Request.Context())
 	httpx.Write(c, out, err)
 }
 
-// createLevelConfig 创建等级配置。
+// createLevelConfig 创建等级映射配置,请求体校验后交由服务层维护默认规则。
 func (a *API) createLevelConfig(c *gin.Context) {
 	var req LevelConfigRequest
 	if httpx.BindJSONWithError(c, &req, apperr.ErrGradeConfigInvalid) {
@@ -147,7 +147,7 @@ func (a *API) createLevelConfig(c *gin.Context) {
 	}
 }
 
-// updateLevelConfig 更新等级配置。
+// updateLevelConfig 更新等级映射配置,路径 ID 和版本内容在服务层统一校验。
 func (a *API) updateLevelConfig(c *gin.Context) {
 	id, ok := httpx.PathID(c, "id")
 	if !ok {
@@ -160,13 +160,13 @@ func (a *API) updateLevelConfig(c *gin.Context) {
 	}
 }
 
-// listSemesters 查询学期列表。
+// listSemesters 查询学期列表,作为成绩聚合和预警扫描的时间范围来源。
 func (a *API) listSemesters(c *gin.Context) {
 	out, err := a.svc.ListSemesters(c.Request.Context())
 	httpx.Write(c, out, err)
 }
 
-// createSemester 创建学期。
+// createSemester 创建学期边界,服务层负责校验日期区间和当前学期唯一性。
 func (a *API) createSemester(c *gin.Context) {
 	var req SemesterRequest
 	if httpx.BindJSONWithError(c, &req, apperr.ErrGradeSemesterInvalid) {
@@ -190,7 +190,7 @@ func (a *API) updateWarningRules(c *gin.Context) {
 	}
 }
 
-// submitReview 提交课程成绩审核。
+// submitReview 提交课程成绩审核申请,M11 只记录审核流程不重算单课程成绩。
 func (a *API) submitReview(c *gin.Context) {
 	var req ReviewCreateRequest
 	if httpx.BindJSONWithError(c, &req, apperr.ErrGradeReviewInvalid) {
@@ -199,7 +199,7 @@ func (a *API) submitReview(c *gin.Context) {
 	}
 }
 
-// listReviews 查询成绩审核列表。
+// listReviews 分页查询成绩审核列表,按状态过滤供教师和管理员处理。
 func (a *API) listReviews(c *gin.Context) {
 	page, size := pagex.Normalize(httpx.Int(c.Query("page")), httpx.Int(c.Query("size")))
 	items, total, err := a.svc.ListReviews(c.Request.Context(), int16(httpx.Int(c.Query("status"))), page, size)
@@ -215,17 +215,17 @@ func (a *API) courseLockStatus(c *gin.Context) {
 	}
 }
 
-// approveReview 审核通过并锁定。
+// approveReview 审核通过课程成绩并锁定,防止后续单课程成绩被无审计修改。
 func (a *API) approveReview(c *gin.Context) {
 	a.reviewDecision(c, a.svc.ApproveReview)
 }
 
-// rejectReview 驳回审核。
+// rejectReview 驳回课程成绩审核,驳回原因通过统一请求体进入服务层。
 func (a *API) rejectReview(c *gin.Context) {
 	a.reviewDecision(c, a.svc.RejectReview)
 }
 
-// unlockReview 解锁审核。
+// unlockReview 解锁已审核成绩,仅受控角色可触发并写入审计。
 func (a *API) unlockReview(c *gin.Context) {
 	a.reviewDecision(c, a.svc.UnlockReview)
 }
@@ -243,7 +243,7 @@ func (a *API) reviewDecision(c *gin.Context, fn func(context.Context, int64, Rev
 	}
 }
 
-// studentGrades 查询学生成绩。
+// studentGrades 查询学生跨课程成绩明细,只读 M6 提供的单课程成绩结果。
 func (a *API) studentGrades(c *gin.Context) {
 	id, ok := httpx.PathID(c, "id")
 	if ok {
@@ -252,7 +252,7 @@ func (a *API) studentGrades(c *gin.Context) {
 	}
 }
 
-// studentGPA 查询学生 GPA。
+// studentGPA 查询学生 GPA 聚合结果,不在 HTTP 层重复成绩计算规则。
 func (a *API) studentGPA(c *gin.Context) {
 	id, ok := httpx.PathID(c, "id")
 	if ok {
@@ -261,7 +261,7 @@ func (a *API) studentGPA(c *gin.Context) {
 	}
 }
 
-// recomputeStudent 重算学生 GPA。
+// recomputeStudent 触发学生 GPA 重算,由服务层从 M6 只读成绩并写入 M11 聚合表。
 func (a *API) recomputeStudent(c *gin.Context) {
 	id, ok := httpx.PathID(c, "id")
 	if !ok {
@@ -274,7 +274,7 @@ func (a *API) recomputeStudent(c *gin.Context) {
 	}
 }
 
-// createAppeal 创建申诉。
+// createAppeal 创建成绩申诉,学生身份和课程归属由服务端校验。
 func (a *API) createAppeal(c *gin.Context) {
 	var req AppealCreateRequest
 	if httpx.BindJSONWithError(c, &req, apperr.ErrGradeAppealInvalid) {
@@ -283,12 +283,12 @@ func (a *API) createAppeal(c *gin.Context) {
 	}
 }
 
-// acceptAppeal 受理申诉。
+// acceptAppeal 受理成绩申诉,处理意见经统一请求体进入服务层。
 func (a *API) acceptAppeal(c *gin.Context) {
 	a.appealDecision(c, a.svc.AcceptAppeal)
 }
 
-// rejectAppeal 驳回申诉。
+// rejectAppeal 驳回成绩申诉,保留处理人和处理时间用于追溯。
 func (a *API) rejectAppeal(c *gin.Context) {
 	a.appealDecision(c, a.svc.RejectAppeal)
 }
@@ -313,7 +313,7 @@ func (a *API) appealDecision(c *gin.Context, fn func(context.Context, int64, App
 	}
 }
 
-// scanWarnings 执行学业预警扫描。
+// scanWarnings 执行学业预警扫描,按服务层规则生成或更新预警记录。
 func (a *API) scanWarnings(c *gin.Context) {
 	var req WarningScanRequest
 	if httpx.BindJSONWithError(c, &req, apperr.ErrGradeWarningInvalid) {
@@ -322,14 +322,14 @@ func (a *API) scanWarnings(c *gin.Context) {
 	}
 }
 
-// listWarnings 查询学业预警。
+// listWarnings 按学生、学期和状态筛选预警列表,返回分页结果。
 func (a *API) listWarnings(c *gin.Context) {
 	page, size := pagex.Normalize(httpx.Int(c.Query("page")), httpx.Int(c.Query("size")))
 	items, total, err := a.svc.ListWarnings(c.Request.Context(), ids.ParseOrZero(c.Query("student_id")), ids.ParseOrZero(c.Query("semester_id")), int16(httpx.Int(c.Query("status"))), page, size)
 	httpx.WritePage(c, items, total, page, size, err)
 }
 
-// acknowledgeWarning 标记预警已知悉。
+// acknowledgeWarning 标记预警已知悉,由服务层校验当前账号可处理该预警。
 func (a *API) acknowledgeWarning(c *gin.Context) {
 	id, ok := httpx.PathID(c, "id")
 	if ok {
@@ -338,7 +338,7 @@ func (a *API) acknowledgeWarning(c *gin.Context) {
 	}
 }
 
-// generateTranscript 生成成绩单。
+// generateTranscript 生成正式成绩单记录,PDF 内容和验证码由服务端产生。
 func (a *API) generateTranscript(c *gin.Context) {
 	var req TranscriptRequest
 	if httpx.BindJSONWithError(c, &req, apperr.ErrGradeTranscriptInvalid) {
@@ -347,7 +347,7 @@ func (a *API) generateTranscript(c *gin.Context) {
 	}
 }
 
-// getTranscript 下载成绩单 PDF。
+// getTranscript 下载成绩单 PDF,以流式响应返回并显式记录关闭错误。
 func (a *API) getTranscript(c *gin.Context) {
 	id, ok := httpx.PathID(c, "id")
 	if ok {
@@ -366,7 +366,7 @@ func (a *API) getTranscript(c *gin.Context) {
 	}
 }
 
-// batchGenerateTranscripts 批量生成成绩单。
+// batchGenerateTranscripts 批量生成成绩单任务,避免客户端逐个拼接生成逻辑。
 func (a *API) batchGenerateTranscripts(c *gin.Context) {
 	var req TranscriptBatchRequest
 	if httpx.BindJSONWithError(c, &req, apperr.ErrGradeTranscriptInvalid) {

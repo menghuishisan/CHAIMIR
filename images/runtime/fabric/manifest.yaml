@@ -1,0 +1,76 @@
+﻿# 本文件声明 runtime/fabric 镜像的职责、端口、安全、资源和供应链约束。
+schema_version: 1
+category: runtime
+name: fabric
+image: runtime/fabric
+labels:
+  app.kubernetes.io/name: fabric
+  app.kubernetes.io/component: runtime
+  app.kubernetes.io/part-of: chaimir
+  chaimir.io/category: runtime
+  chaimir.io/image: runtime/fabric
+  chaimir.io/data-driven: "true"
+  chaimir.io/student-access: "true"
+  chaimir.io/sensitivity: student-runtime
+  chaimir.io/scope: sandbox
+  chaimir.io/source: thin-wrapper
+description: Hyperledger Fabric 工具运行时镜像。
+source:
+  type: thin-wrapper
+upstream:
+  image: hyperledger/fabric-tools:2.5
+  reuse_policy: thin-wrapper
+data_driven: true
+capabilities:
+  - chain-runtime
+  - fabric-peer-orderer-ca
+  - chaincode-dev
+runtime:
+  eco: fabric
+  adapter_level: 2
+  default_tool_codes:
+    - terminal
+    - code-server
+    - fabric-explorer
+ports: []
+local_dev:
+  host_mappings: []
+security:
+  run_as_non_root: true
+  read_only_root_filesystem: true
+  allow_privilege_escalation: false
+  privileged: false
+  host_network: false
+  automount_service_account_token: false
+  drop_capabilities:
+    - ALL
+  network_policy: deny-all
+student_access:
+  enabled: true
+  shell: restricted
+  allowed_mounts:
+    - workspace
+    - public-assets
+    - runtime-state
+resources:
+  cpu_request: 250m
+  cpu_limit: "2"
+  memory_request: 512Mi
+  memory_limit: 2Gi
+  ephemeral_storage_limit: 4Gi
+build:
+  context: images/runtime/fabric
+  dockerfile: Dockerfile
+selftest:
+  commands:
+    - name: fabric-peer-version
+      command:
+        - peer
+        - version
+supply_chain:
+  sbom: true
+  trivy_required: true
+  cosign_required: true
+  pull_by_digest_in_production: true
+
+

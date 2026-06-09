@@ -47,13 +47,14 @@ func NewK8sOrchestrator(client *platformk8s.Client, cfg config.SandboxConfig) Or
 	return &k8sOrchestrator{client: client, cfg: cfg}
 }
 
-// PrepullImage 创建或更新镜像预拉取 DaemonSet,并以 DaemonSet 状态作为成功判定。
+// PrepullImage 创建或更新镜像预拉取 DaemonSet,并以节点就绪和失败事件共同作为成功判定。
 func (o *k8sOrchestrator) PrepullImage(ctx context.Context, spec ImagePrepullSpec) (ImagePrepullStatus, error) {
 	if err := validateK8sSandboxConfig(o.cfg); err != nil {
 		return ImagePrepullStatus{}, err
 	}
 	cs := o.client.Clientset()
 	namespace := prepullNamespaceName(o.cfg)
+	// 第一步确保预拉取 Namespace 存在,预拉取资源与学生沙箱命名空间隔离。
 	if _, err := cs.CoreV1().Namespaces().Get(ctx, namespace, metav1.GetOptions{}); apierrors.IsNotFound(err) {
 		if _, createErr := cs.CoreV1().Namespaces().Create(ctx, prepullNamespaceManifest(o.cfg), metav1.CreateOptions{}); createErr != nil {
 			return ImagePrepullStatus{}, fmt.Errorf("创建镜像预拉取 Namespace 失败: %w", createErr)
@@ -62,6 +63,7 @@ func (o *k8sOrchestrator) PrepullImage(ctx context.Context, spec ImagePrepullSpe
 		return ImagePrepullStatus{}, fmt.Errorf("查询镜像预拉取 Namespace 失败: %w", err)
 	}
 
+	// 第二步创建或刷新 DaemonSet,同一镜像版本重复触发时也会重新汇总节点状态。
 	ds := prepullDaemonSetManifest(spec, o.cfg)
 	current, err := cs.AppsV1().DaemonSets(namespace).Get(ctx, ds.Name, metav1.GetOptions{})
 	if apierrors.IsNotFound(err) {
@@ -78,6 +80,7 @@ func (o *k8sOrchestrator) PrepullImage(ctx context.Context, spec ImagePrepullSpe
 		}
 	}
 
+	// 第三步轮询 DaemonSet 状态并同步检查 K8s 事件,避免 ImagePullBackOff 被误判为成功。
 	status := ImagePrepullStatus{DaemonSet: ds.Name}
 	if err := wait.PollUntilContextTimeout(ctx, time.Duration(o.cfg.PrepullPollIntervalSeconds)*time.Second, time.Duration(o.cfg.PrepullTimeoutSeconds)*time.Second, true, func(ctx context.Context) (bool, error) {
 		latest, err := cs.AppsV1().DaemonSets(namespace).Get(ctx, ds.Name, metav1.GetOptions{})

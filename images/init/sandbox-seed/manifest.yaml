@@ -1,0 +1,64 @@
+﻿# 本文件声明 init/sandbox-seed 镜像的职责、端口、安全、资源和供应链约束。
+schema_version: 1
+category: init
+name: sandbox-seed
+image: init/sandbox-seed
+labels:
+  app.kubernetes.io/name: sandbox-seed
+  app.kubernetes.io/component: init
+  app.kubernetes.io/part-of: chaimir
+  chaimir.io/category: init
+  chaimir.io/image: init/sandbox-seed
+  chaimir.io/data-driven: "false"
+  chaimir.io/student-access: "false"
+  chaimir.io/sensitivity: init-private
+  chaimir.io/scope: sandbox
+  chaimir.io/source: platform-built
+description: 沙箱工作区初始化镜像。
+source:
+  type: platform-built
+upstream:
+  image: alpine:3.20
+  reuse_policy: self-developed-init
+data_driven: false
+capabilities:
+  - init-container
+  - sandbox-seed-injection
+ports: []
+local_dev:
+  host_mappings: []
+security:
+  run_as_non_root: true
+  read_only_root_filesystem: true
+  allow_privilege_escalation: false
+  privileged: false
+  host_network: false
+  automount_service_account_token: false
+  drop_capabilities:
+    - ALL
+  network_policy: deny-all
+student_access:
+  enabled: false
+resources:
+  cpu_request: 50m
+  cpu_limit: 250m
+  memory_request: 64Mi
+  memory_limit: 256Mi
+  ephemeral_storage_limit: 256Mi
+build:
+  context: images/init/sandbox-seed
+  dockerfile: Dockerfile
+selftest:
+  commands:
+    - name: shell-syntax
+      command:
+        - sh
+        - -n
+        - /usr/local/bin/chaimir-sandbox-seed
+supply_chain:
+  sbom: true
+  trivy_required: true
+  cosign_required: true
+  pull_by_digest_in_production: true
+
+

@@ -1,17 +1,13 @@
-// M5 转换工具:在 sqlc 行、HTTP DTO 与 contracts DTO 之间做稳定转换。
+// M5 转换层:处理领域 DTO、contracts DTO 与 HTTP 输出结构之间的纯转换。
 package content
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
-	"strings"
-
 	"chaimir/internal/contracts"
-	"chaimir/internal/modules/content/internal/sqlcgen"
 	"chaimir/internal/platform/ids"
 	"chaimir/internal/platform/jsonx"
-	"chaimir/internal/platform/timex"
-
+	"chaimir/internal/platform/pgtypex"
+	"crypto/sha256"
+	"encoding/hex"
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
@@ -37,22 +33,6 @@ type itemRow struct {
 	SensitiveFields []string
 }
 
-// contentRowFromOwn 把本租户内容联查行转成通用结构。
-func contentRowFromOwn(row sqlcgen.GetContentByCodeVersionRow) itemRow {
-	return itemRow{ID: row.ID, TenantID: row.TenantID, Code: row.Code, Version: row.Version, Type: row.Type, Title: row.Title,
-		CategoryID: row.CategoryID, Difficulty: row.Difficulty, Tags: row.Tags, KnowledgePoints: row.KnowledgePoints,
-		AuthorID: row.AuthorID, AuthorType: row.AuthorType, Visibility: row.Visibility, Status: row.Status,
-		UsageCount: row.UsageCount, BodyHash: row.BodyHash, Body: row.Body, SensitiveFields: row.SensitiveFields}
-}
-
-// contentRowFromShared 把共享库联查行转成通用结构。
-func contentRowFromShared(row sqlcgen.GetSharedContentByCodeVersionRow) itemRow {
-	return itemRow{ID: row.ID, TenantID: row.TenantID, Code: row.Code, Version: row.Version, Type: row.Type, Title: row.Title,
-		CategoryID: row.CategoryID, Difficulty: row.Difficulty, Tags: row.Tags, KnowledgePoints: row.KnowledgePoints,
-		AuthorID: row.AuthorID, AuthorType: row.AuthorType, Visibility: row.Visibility, Status: row.Status,
-		UsageCount: row.UsageCount, BodyHash: row.BodyHash, Body: row.Body, SensitiveFields: row.SensitiveFields}
-}
-
 // itemDTOFromRow 转换完整内容行,face=true 时剥离敏感字段。
 func itemDTOFromRow(row itemRow, face bool) (ItemDTO, error) {
 	if err := validateBodyHash(row.Body, row.BodyHash); err != nil {
@@ -65,53 +45,15 @@ func itemDTOFromRow(row itemRow, face bool) (ItemDTO, error) {
 		fields = nil
 	}
 	dto := ItemDTO{ID: ids.Format(row.ID), TenantID: ids.Format(row.TenantID), Code: row.Code, Version: row.Version, Type: row.Type,
-		Title: row.Title, CategoryID: fmtOptionalID(row.CategoryID), Difficulty: row.Difficulty, Tags: row.Tags,
+		Title: row.Title, CategoryID: pgtypex.IDString(row.CategoryID), Difficulty: row.Difficulty, Tags: row.Tags,
 		KnowledgePoints: row.KnowledgePoints, AuthorID: ids.Format(row.AuthorID), AuthorType: row.AuthorType,
 		Visibility: row.Visibility, Status: row.Status, UsageCount: row.UsageCount, BodyHash: row.BodyHash,
 		Body: body, SensitiveFields: fields}
 	return dto, nil
 }
 
-// itemDTOFromShell 转换内容外壳摘要,不携带内容体。
-func itemDTOFromShell(row sqlcgen.ContentItem) ItemDTO {
-	return ItemDTO{ID: ids.Format(row.ID), TenantID: ids.Format(row.TenantID), Code: row.Code, Version: row.Version, Type: row.Type,
-		Title: row.Title, CategoryID: fmtOptionalID(row.CategoryID), Difficulty: row.Difficulty, Tags: row.Tags,
-		KnowledgePoints: row.KnowledgePoints, AuthorID: ids.Format(row.AuthorID), AuthorType: row.AuthorType,
-		Visibility: row.Visibility, Status: row.Status, UsageCount: row.UsageCount, BodyHash: row.BodyHash,
-		CreatedAt: timex.FromTimestamptz(row.CreatedAt), UpdatedAt: timex.FromTimestamptz(row.UpdatedAt)}
-}
-
-// itemsDTOFromShell 批量转换内容外壳摘要。
-func itemsDTOFromShell(rows []sqlcgen.ContentItem) []ItemDTO {
-	out := make([]ItemDTO, 0, len(rows))
-	for _, row := range rows {
-		out = append(out, itemDTOFromShell(row))
-	}
-	return out
-}
-
-// categoryDTOFromRow 转换分类行。
-func categoryDTOFromRow(row sqlcgen.ContentCategory) CategoryDTO {
-	return CategoryDTO{ID: ids.Format(row.ID), ParentID: fmtOptionalID(row.ParentID), Name: row.Name, Sort: row.Sort, CreatedAt: timex.FromTimestamptz(row.CreatedAt)}
-}
-
-// categoriesDTOFromRows 批量转换分类行。
-func categoriesDTOFromRows(rows []sqlcgen.ContentCategory) []CategoryDTO {
-	out := make([]CategoryDTO, 0, len(rows))
-	for _, row := range rows {
-		out = append(out, categoryDTOFromRow(row))
-	}
-	return out
-}
-
-// paperDTOFromRow 转换试卷行。
-func paperDTOFromRow(row sqlcgen.Paper, items []PaperItemDTO) PaperDTO {
-	return PaperDTO{ID: ids.Format(row.ID), Name: row.Name, AuthorID: ids.Format(row.AuthorID), GenMode: row.GenMode,
-		GenCriteria: jsonx.ObjectMap(row.GenCriteria), Items: items, CreatedAt: timex.FromTimestamptz(row.CreatedAt)}
-}
-
-// paperItemDTOFromRow 转换试卷题目行。
-func paperItemDTOFromRow(row sqlcgen.PaperItem, item ItemDTO) PaperItemDTO {
+// paperItemDTOFromRepoRow 转换 repo 试卷题目最小行。
+func paperItemDTOFromRepoRow(row paperItemRow, item ItemDTO) PaperItemDTO {
 	return PaperItemDTO{ID: ids.Format(row.ID), Code: row.ItemCode, Version: row.ItemVersion, Score: row.Score, Seq: row.Seq, Item: item}
 }
 
@@ -122,32 +64,26 @@ func contractSnapshotFromItem(dto ItemDTO) contracts.ContentItemSnapshot {
 		VersionHash: dto.BodyHash, Status: dto.Status}
 }
 
+// contractSnapshotsFromItems 批量转换内容 DTO 为跨模块内容快照。
+func contractSnapshotsFromItems(items []ItemDTO) []contracts.ContentItemSnapshot {
+	out := make([]contracts.ContentItemSnapshot, 0, len(items))
+	for _, item := range items {
+		out = append(out, contractSnapshotFromItem(item))
+	}
+	return out
+}
+
+// contractRefsToItemRefs 把跨模块内容引用转换为 M5 内部批量请求引用。
+func contractRefsToItemRefs(refs []contracts.ContentItemRef) []ItemRef {
+	out := make([]ItemRef, 0, len(refs))
+	for _, ref := range refs {
+		out = append(out, ItemRef{Code: ref.ItemCode, Version: ref.ItemVersion})
+	}
+	return out
+}
+
 // bodyHash 计算内容体哈希,用于版本完整性校验。
 func bodyHash(body []byte) string {
 	sum := sha256.Sum256(body)
 	return hex.EncodeToString(sum[:])
-}
-
-// fmtOptionalID 转换可空雪花 ID。
-func fmtOptionalID(id pgtype.Int8) string {
-	if !id.Valid {
-		return ""
-	}
-	return ids.Format(id.Int64)
-}
-
-// pgInt8 把可选 int64 转为 pgtype.Int8。
-func pgInt8(v int64) pgtype.Int8 {
-	return pgtype.Int8{Int64: v, Valid: v > 0}
-}
-
-// pgInt2 把可选 int16 转为 pgtype.Int2。
-func pgInt2(v int16) pgtype.Int2 {
-	return pgtype.Int2{Int16: v, Valid: v > 0}
-}
-
-// pgText 把可选字符串转换为 pgtype.Text。
-func pgText(v string) pgtype.Text {
-	v = strings.TrimSpace(v)
-	return pgtype.Text{String: v, Valid: v != ""}
 }

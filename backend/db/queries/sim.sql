@@ -7,16 +7,16 @@ INSERT INTO sim_package (
     backend_adapter, backend_config, author_type, author_id, status
 )
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
-RETURNING *;
+RETURNING id, code, version, name, category, compute, scale_limit, bundle_key, bundle_hash, backend_adapter, backend_config, author_type, author_id, status, created_at, updated_at;
 
 -- name: GetSimPackageByID :one
-SELECT * FROM sim_package WHERE id = $1;
+SELECT id, code, version, name, category, compute, scale_limit, bundle_key, bundle_hash, backend_adapter, backend_config, author_type, author_id, status, created_at, updated_at FROM sim_package WHERE id = $1;
 
 -- name: GetSimPackageByCodeVersion :one
-SELECT * FROM sim_package WHERE code = $1 AND version = $2;
+SELECT id, code, version, name, category, compute, scale_limit, bundle_key, bundle_hash, backend_adapter, backend_config, author_type, author_id, status, created_at, updated_at FROM sim_package WHERE code = $1 AND version = $2;
 
 -- name: ListSimPackages :many
-SELECT * FROM sim_package
+SELECT id, code, version, name, category, compute, scale_limit, bundle_key, bundle_hash, backend_adapter, backend_config, author_type, author_id, status, created_at, updated_at FROM sim_package
 WHERE (sqlc.narg('category')::VARCHAR IS NULL OR category = sqlc.narg('category'))
   AND (sqlc.narg('keyword')::VARCHAR IS NULL OR code ILIKE '%' || sqlc.narg('keyword') || '%' OR name ILIKE '%' || sqlc.narg('keyword') || '%')
   AND (sqlc.narg('status')::SMALLINT IS NULL OR status = sqlc.narg('status'))
@@ -24,7 +24,7 @@ ORDER BY created_at DESC
 LIMIT $1 OFFSET $2;
 
 -- name: ListSimPackageVersions :many
-SELECT * FROM sim_package
+SELECT id, code, version, name, category, compute, scale_limit, bundle_key, bundle_hash, backend_adapter, backend_config, author_type, author_id, status, created_at, updated_at FROM sim_package
 WHERE code = $1 AND status = 3
 ORDER BY created_at DESC;
 
@@ -39,30 +39,36 @@ SET name = $2,
     backend_config = $8,
     status = 2
 WHERE id = $1 AND status IN (1, 5)
-RETURNING *;
+RETURNING id, code, version, name, category, compute, scale_limit, bundle_key, bundle_hash, backend_adapter, backend_config, author_type, author_id, status, created_at, updated_at;
 
 -- name: UpdateSimPackageStatus :one
 UPDATE sim_package
 SET status = $2
 WHERE id = $1
-RETURNING *;
+RETURNING id, code, version, name, category, compute, scale_limit, bundle_key, bundle_hash, backend_adapter, backend_config, author_type, author_id, status, created_at, updated_at;
+
+-- name: TransitionSimPackageStatus :one
+UPDATE sim_package
+SET status = $3
+WHERE id = $1 AND status = $2
+RETURNING id, code, version, name, category, compute, scale_limit, bundle_key, bundle_hash, backend_adapter, backend_config, author_type, author_id, status, created_at, updated_at;
 
 -- name: CreateSimPackageReview :one
 INSERT INTO sim_package_review (id, package_id, submitter_id, preview_report, result)
 VALUES ($1, $2, $3, $4, 1)
-RETURNING *;
+RETURNING id, package_id, submitter_id, preview_report, reviewer_id, result, comment, created_at, updated_at;
 
 -- name: ListSimReviews :many
-SELECT * FROM sim_package_review
+SELECT id, package_id, submitter_id, preview_report, reviewer_id, result, comment, created_at, updated_at FROM sim_package_review
 WHERE (sqlc.narg('result')::SMALLINT IS NULL OR result = sqlc.narg('result'))
 ORDER BY created_at ASC
 LIMIT $1 OFFSET $2;
 
 -- name: GetSimReviewByID :one
-SELECT * FROM sim_package_review WHERE id = $1;
+SELECT id, package_id, submitter_id, preview_report, reviewer_id, result, comment, created_at, updated_at FROM sim_package_review WHERE id = $1;
 
 -- name: GetPendingSimReviewByPackageID :one
-SELECT * FROM sim_package_review
+SELECT id, package_id, submitter_id, preview_report, reviewer_id, result, comment, created_at, updated_at FROM sim_package_review
 WHERE package_id = $1 AND result = 1
 ORDER BY created_at DESC
 LIMIT 1;
@@ -73,7 +79,7 @@ SET result = $2,
     reviewer_id = $3,
     comment = $4
 WHERE id = $1 AND result = 1
-RETURNING *;
+RETURNING id, package_id, submitter_id, preview_report, reviewer_id, result, comment, created_at, updated_at;
 
 -- name: UpdateSimReviewPreviewReport :one
 UPDATE sim_package_review
@@ -84,19 +90,19 @@ WHERE id = (
     ORDER BY r.created_at DESC
     LIMIT 1
 )
-RETURNING *;
+RETURNING id, package_id, submitter_id, preview_report, reviewer_id, result, comment, created_at, updated_at;
 
 -- name: CreateSimSession :one
 INSERT INTO sim_session (id, tenant_id, package_id, source_ref, owner_account_id, seed, init_params, compute, status)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 2)
-RETURNING *;
+RETURNING id, tenant_id, package_id, source_ref, owner_account_id, seed, init_params, compute, status, created_at, updated_at;
 
 -- name: GetSimSessionByID :one
-SELECT * FROM sim_session WHERE id = $1;
+SELECT id, tenant_id, package_id, source_ref, owner_account_id, seed, init_params, compute, status, created_at, updated_at FROM sim_session WHERE id = $1;
 
 -- name: GetSimSessionWithPackage :one
 SELECT
-    ss.*,
+    ss.id, ss.tenant_id, ss.package_id, ss.source_ref, ss.owner_account_id, ss.seed, ss.init_params, ss.compute, ss.status, ss.created_at, ss.updated_at,
     sp.code AS package_code,
     sp.version AS package_version,
     sp.bundle_key AS package_bundle_key,
@@ -111,31 +117,31 @@ WHERE ss.id = $1;
 UPDATE sim_session
 SET status = 5
 WHERE id = $1
-RETURNING *;
+RETURNING id, tenant_id, package_id, source_ref, owner_account_id, seed, init_params, compute, status, created_at, updated_at;
 
 -- name: ArchiveSimSessionsBySourceRef :many
 UPDATE sim_session
 SET status = 5
 WHERE source_ref = $1 AND status <> 5
-RETURNING *;
+RETURNING id, tenant_id, package_id, source_ref, owner_account_id, seed, init_params, compute, status, created_at, updated_at;
 
 -- name: GetLastSimAction :one
-SELECT * FROM sim_action_log
+SELECT id, tenant_id, session_id, seq, at_tick, event_type, payload, created_at FROM sim_action_log
 WHERE session_id = $1
 ORDER BY seq DESC
 LIMIT 1;
 
 -- name: GetSimActionBySeq :one
-SELECT * FROM sim_action_log
+SELECT id, tenant_id, session_id, seq, at_tick, event_type, payload, created_at FROM sim_action_log
 WHERE session_id = $1 AND seq = $2;
 
 -- name: CreateSimAction :one
 INSERT INTO sim_action_log (id, tenant_id, session_id, seq, at_tick, event_type, payload)
 VALUES ($1, $2, $3, $4, $5, $6, $7)
-RETURNING *;
+RETURNING id, tenant_id, session_id, seq, at_tick, event_type, payload, created_at;
 
 -- name: ListSimActions :many
-SELECT * FROM sim_action_log
+SELECT id, tenant_id, session_id, seq, at_tick, event_type, payload, created_at FROM sim_action_log
 WHERE session_id = $1
 ORDER BY seq ASC;
 
@@ -146,13 +152,13 @@ ON CONFLICT (tenant_id, session_id, checkpoint_id) DO UPDATE
 SET answer = EXCLUDED.answer,
     achieved = EXCLUDED.achieved,
     created_at = now()
-RETURNING *;
+RETURNING id, tenant_id, session_id, checkpoint_id, answer, achieved, created_at;
 
 -- name: CreateSimShare :one
 INSERT INTO sim_share (id, tenant_id, session_id, code, created_by, status, expire_at)
 VALUES ($1, $2, $3, $4, $5, 1, $6)
-RETURNING *;
+RETURNING id, tenant_id, session_id, code, created_by, status, expire_at, created_at, updated_at;
 
 -- name: GetSimShareByCode :one
-SELECT * FROM sim_share
+SELECT id, tenant_id, session_id, code, created_by, status, expire_at, created_at, updated_at FROM sim_share
 WHERE code = $1 AND status = 1 AND (expire_at IS NULL OR expire_at > now());

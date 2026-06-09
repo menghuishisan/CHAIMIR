@@ -1,0 +1,83 @@
+﻿# 本文件声明 runtime/substrate 镜像的职责、端口、安全、资源和供应链约束。
+schema_version: 1
+category: runtime
+name: substrate
+image: runtime/substrate
+labels:
+  app.kubernetes.io/name: substrate
+  app.kubernetes.io/component: runtime
+  app.kubernetes.io/part-of: chaimir
+  chaimir.io/category: runtime
+  chaimir.io/image: runtime/substrate
+  chaimir.io/data-driven: "true"
+  chaimir.io/student-access: "true"
+  chaimir.io/sensitivity: student-runtime
+  chaimir.io/scope: sandbox
+  chaimir.io/source: thin-wrapper
+description: Substrate/Polkadot 开发链教学运行时镜像。
+source:
+  type: thin-wrapper
+upstream:
+  image: parity/substrate:v3.0.0
+  reuse_policy: thin-wrapper
+data_driven: true
+capabilities:
+  - chain-runtime
+  - substrate-dev-chain
+  - polkadot-sdk-dev
+runtime:
+  eco: substrate
+  adapter_level: 2
+  default_tool_codes:
+    - terminal
+    - code-server
+ports:
+  - name: rpc
+    container_port: 9944
+    protocol: TCP
+    expose: proxy
+    purpose: Substrate WebSocket RPC
+local_dev:
+  host_mappings:
+    - host: 127.0.0.1
+      env: CHAIMIR_DEV_SUBSTRATE_RPC_PORT
+      default: 19944
+      container_port: 9944
+security:
+  run_as_non_root: true
+  read_only_root_filesystem: true
+  allow_privilege_escalation: false
+  privileged: false
+  host_network: false
+  automount_service_account_token: false
+  drop_capabilities:
+    - ALL
+  network_policy: deny-all
+student_access:
+  enabled: true
+  shell: restricted
+  allowed_mounts:
+    - workspace
+    - public-assets
+    - runtime-state
+resources:
+  cpu_request: 500m
+  cpu_limit: "2"
+  memory_request: 1Gi
+  memory_limit: 4Gi
+  ephemeral_storage_limit: 8Gi
+build:
+  context: images/runtime/substrate
+  dockerfile: Dockerfile
+selftest:
+  commands:
+    - name: substrate-version
+      command:
+        - substrate
+        - --version
+supply_chain:
+  sbom: true
+  trivy_required: true
+  cosign_required: true
+  pull_by_digest_in_production: true
+

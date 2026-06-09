@@ -24,7 +24,7 @@ import (
 type notifyStore interface {
 	GetTemplate(context.Context, string) (TemplateDTO, error)
 	GetPreference(context.Context, int64, int64, string) (bool, bool, error)
-	CreateNotification(context.Context, NotificationCreate) error
+	CreateNotifications(context.Context, int64, []NotificationCreate) error
 	ListInbox(context.Context, int64, int64, InboxQuery) ([]NotificationDTO, int64, error)
 	CountUnreadNotifications(context.Context, int64, int64) (int64, error)
 	MarkNotificationRead(context.Context, int64, int64) error
@@ -46,6 +46,11 @@ type unreadCounter interface {
 	Reset(context.Context, int64, int64) error
 }
 
+// sendRateLimiter 抽象通知发送限频,用于拦截事件风暴和异常内部调用。
+type sendRateLimiter interface {
+	Allow(context.Context, int64, string) (bool, error)
+}
+
 // realtimeBroadcaster 抽象 WebSocket 广播能力,便于测试断言 topic 与载荷。
 type realtimeBroadcaster interface {
 	Broadcast(topic string, payload map[string]any) error
@@ -56,6 +61,7 @@ type Service struct {
 	store             notifyStore
 	idgen             snowflake.Generator
 	unread            unreadCounter
+	rateLimiter       sendRateLimiter
 	broadcaster       realtimeBroadcaster
 	eventRetryMax     int
 	eventRetryDelayMs int
@@ -68,6 +74,7 @@ func NewService(database *db.DB, idgen *snowflake.Node, redisClient *redis.Clien
 		store:             newRepo(database, idgen),
 		idgen:             idgen,
 		unread:            newRedisUnreadCounter(redisClient, time.Duration(cfg.UnreadTTLHours)*time.Hour),
+		rateLimiter:       newRedisSendRateLimiter(redisClient, time.Duration(cfg.SendRateWindowSeconds)*time.Second, cfg.SendRateMax),
 		broadcaster:       newHubBroadcaster(hub),
 		eventRetryMax:     normalizeRetryMax(cfg.EventRetryMax),
 		eventRetryDelayMs: cfg.EventRetryDelayMs,
@@ -77,13 +84,19 @@ func NewService(database *db.DB, idgen *snowflake.Node, redisClient *redis.Clien
 
 // Send 渲染模板并发送站内信,再向在线客户端推送个人未读红点。
 func (s *Service) Send(ctx context.Context, req contracts.NotifySendRequest) error {
+	// 第一步先做请求边界和发送限频,防止事件风暴放大成批量站内信写入。
 	if err := validateSendRequest(req); err != nil {
+		return err
+	}
+	if err := s.enforceSendRate(ctx, req.TenantID, req.Type); err != nil {
 		return err
 	}
 	tpl, err := s.store.GetTemplate(ctx, req.Type)
 	if err != nil {
 		return err
 	}
+	rows := make([]NotificationCreate, 0, len(req.Receivers))
+	// 第二步按接收人偏好过滤并渲染模板,强制模板仍可绕过用户关闭项。
 	for _, receiverID := range req.Receivers {
 		enabled, found, err := s.store.GetPreference(ctx, req.TenantID, receiverID, req.Type)
 		if err != nil {
@@ -101,16 +114,38 @@ func (s *Service) Send(ctx context.Context, req contracts.NotifySendRequest) err
 			Content:    renderTemplate(tpl.ContentTemplate, req.Params),
 			Link:       strings.TrimSpace(req.Link),
 		}
-		if err := s.store.CreateNotification(ctx, row); err != nil {
-			return apperr.ErrNotifySendFailed.WithCause(err)
-		}
-		if err := s.pushUnread(ctx, req.TenantID, receiverID); err != nil {
+		rows = append(rows, row)
+	}
+	if len(rows) == 0 {
+		return nil
+	}
+	// 第三步批量落库后再推送红点,Redis/WS 失败只影响实时性不影响权威通知记录。
+	if err := s.store.CreateNotifications(ctx, req.TenantID, rows); err != nil {
+		return apperr.ErrNotifySendFailed.WithCause(err)
+	}
+	for _, row := range rows {
+		if err := s.pushUnread(ctx, req.TenantID, row.ReceiverID); err != nil {
 			logging.ErrorContext(ctx, "通知红点推送失败", err.Error(),
 				slog.Int64("tenant_id", req.TenantID),
-				slog.Int64("receiver_id", receiverID),
+				slog.Int64("receiver_id", row.ReceiverID),
 				slog.String("type", req.Type),
 			)
 		}
+	}
+	return nil
+}
+
+// enforceSendRate 在渲染和写库前执行发送限频,避免事件风暴放大为批量站内信。
+func (s *Service) enforceSendRate(ctx context.Context, tenantID int64, typ string) error {
+	if s.rateLimiter == nil {
+		return apperr.ErrNotifySendFailed
+	}
+	allowed, err := s.rateLimiter.Allow(ctx, tenantID, typ)
+	if err != nil {
+		return apperr.ErrNotifySendFailed.WithCause(err)
+	}
+	if !allowed {
+		return apperr.ErrNotifyRateLimited
 	}
 	return nil
 }
@@ -193,14 +228,7 @@ func (s *Service) MarkAllNotificationsRead(ctx context.Context) error {
 	if err := s.store.MarkAllNotificationsRead(ctx, id.AccountID); err != nil {
 		return err
 	}
-	if s.unread != nil {
-		if err := s.unread.Reset(ctx, id.TenantID, id.AccountID); err != nil {
-			logging.ErrorContext(ctx, "通知未读计数清理失败", err.Error(),
-				slog.Int64("tenant_id", id.TenantID),
-				slog.Int64("account_id", id.AccountID),
-			)
-		}
-	}
+	s.refreshUnreadDot(ctx, id.TenantID, id.AccountID)
 	return nil
 }
 

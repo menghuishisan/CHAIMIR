@@ -2,6 +2,7 @@
 package main
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -12,6 +13,7 @@ import (
 func TestAssembleSandboxRequiresK8sClient(t *testing.T) {
 	server := newHTTPServer(config.ServerConfig{Addr: "127.0.0.1", Port: 0, AppEnv: "test"}, nil)
 	err := assembleSandbox(&moduleDeps{
+		ctx: context.Background(),
 		cfg: &config.Config{},
 		infra: &infra{
 			server: server,

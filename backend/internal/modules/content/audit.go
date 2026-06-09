@@ -3,6 +3,8 @@ package content
 
 import (
 	"context"
+	"errors"
+	"fmt"
 
 	"chaimir/internal/platform/audit"
 	"chaimir/pkg/apperr"
@@ -29,15 +31,18 @@ const (
 // writeAudit 写关键操作审计;缺少审计 writer 时显式失败,避免绕过 audit_log。
 func (s *Service) writeAudit(ctx context.Context, tenantID int64, action, targetType string, targetID int64, detail map[string]any) error {
 	if s.auditor == nil {
-		return apperr.ErrInternal
+		return apperr.ErrContentAuditFailed.WithCause(errors.New("content audit writer is not configured"))
 	}
 	actorID, actorRole, err := audit.ResolveActor(ctx, s.identity)
 	if err != nil {
-		return err
+		return apperr.ErrContentAuditFailed.WithCause(err)
 	}
 	entry, err := audit.BuildEntry(ctx, tenantID, actorID, actorRole, action, targetType, targetID, detail)
 	if err != nil {
-		return err
+		return apperr.ErrContentAuditFailed.WithCause(err)
 	}
-	return s.auditor.Write(ctx, entry)
+	if err := s.auditor.Write(ctx, entry); err != nil {
+		return apperr.ErrContentAuditFailed.WithCause(fmt.Errorf("write content audit action %s target %s:%d: %w", action, targetType, targetID, err))
+	}
+	return nil
 }

@@ -1,0 +1,108 @@
+# 本文件声明 middleware/minio 上游固定镜像的来源、配置、端口、数据卷和生产门禁。
+schema_version: 1
+category: middleware
+name: minio
+image: middleware/minio
+labels:
+  app.kubernetes.io/name: minio
+  app.kubernetes.io/component: middleware
+  app.kubernetes.io/part-of: chaimir
+  chaimir.io/category: middleware
+  chaimir.io/image: middleware/minio
+  chaimir.io/data-driven: "false"
+  chaimir.io/student-access: "false"
+  chaimir.io/sensitivity: stateful-middleware
+  chaimir.io/scope: middleware
+  chaimir.io/source: upstream-pinned
+description: MinIO 对象存储上游固定镜像。
+source:
+  type: upstream-pinned
+upstream:
+  registry: docker.io
+  image: minio/minio
+  version: "RELEASE.2026-05-13T20-11-39Z"
+  digest_required: true
+  digest_lock_ref: images/locks/middleware/minio.lock.yaml
+  license: AGPL-3.0
+private_delivery:
+  offline_bundle: true
+  import_project: middleware
+data_driven: false
+capabilities:
+  - object-storage
+  - artifact-store
+  - backup-store
+env_keys:
+  config:
+    - MINIO_ENDPOINT
+    - MINIO_REGION
+    - MINIO_BUCKET_CODE
+    - MINIO_BUCKET_ATTACHMENT
+    - MINIO_BUCKET_REPORT
+    - MINIO_BUCKET_BACKUP
+  secret:
+    - MINIO_ACCESS_KEY
+    - MINIO_SECRET_KEY
+secrets_required:
+  - env: MINIO_ACCESS_KEY
+    source: deploy/config/chaimir.env
+    runtime_value: secret-or-kms
+  - env: MINIO_SECRET_KEY
+    source: deploy/config/chaimir.env
+    runtime_value: secret-or-kms
+ports:
+  - name: api
+    container_port: 9000
+    protocol: TCP
+    expose: internal
+    purpose: S3 API
+  - name: console
+    container_port: 9001
+    protocol: TCP
+    expose: internal
+    purpose: MinIO console, only for operators through authenticated access
+local_dev:
+  host_mappings: []
+security:
+  run_as_non_root: true
+  read_only_root_filesystem: false
+  allow_privilege_escalation: false
+  privileged: false
+  host_network: false
+  automount_service_account_token: false
+  drop_capabilities:
+    - ALL
+  network_policy: deny-all
+security_exceptions:
+  - field: read_only_root_filesystem
+    reason: MinIO 需要写对象数据、元数据和临时状态;只允许写入对象存储数据卷。
+    writable_mounts:
+      - runtime-state
+student_access:
+  enabled: false
+data_volumes:
+  - name: data
+    mount_path: /data
+    backup_required: true
+backup:
+  required: true
+  mode: bucket-replication-and-volume
+network:
+  expose: internal
+  default_deny: true
+resources:
+  cpu_request: 100m
+  cpu_limit: 500m
+  memory_request: 128Mi
+  memory_limit: 512Mi
+  ephemeral_storage_limit: 1Gi
+selftest:
+  upstream_healthcheck:
+    type: http
+    path: /minio/health/ready
+    port: 9000
+supply_chain:
+  sbom: true
+  trivy_required: true
+  cosign_required: true
+  pull_by_digest_in_production: true

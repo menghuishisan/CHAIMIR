@@ -21,13 +21,13 @@ resources:
   - admission/image-signature-policy.yaml
   - cronjobs/cronjobs.yaml
 
-# 非密配置:由 config component 从「唯一」env 源 ../config/chaimir.env 生成
+# 环境变量键:由 config component 从「唯一」env 源 ../config/chaimir.env 生成
 #   chaimir-config(chaimir-system)+ chaimir-data-config(chaimir-data)。
 # overlay 用 configMapGenerator behavior: merge 覆盖差异键(DEPLOY_MODE 等)。
 components:
   - ../config
 
-# 密钥(Secret chaimir-secret / chaimir-data-secret)不放 base —— 因密钥处理按形态不同:
+# 密钥真实值(Secret chaimir-secret / chaimir-data-secret)不放 base —— 因密钥处理按形态不同:
 #   local-dev / prod-school:overlay 用 secretGenerator 从 gitignored secret.env 生成;
 #   staging / prod-saas:overlay 引用 ../config/external-secret component,由 External Secrets/KMS 同步。
 # base 资源以字面名引用;overlay 有 secretGenerator 时 kustomize 自动改写为带哈希名。

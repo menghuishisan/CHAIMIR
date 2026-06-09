@@ -43,6 +43,50 @@ func (q *Queries) CancelQueuedJudgeTask(ctx context.Context, id int64) (JudgeTas
 	return i, err
 }
 
+const createJudgeEventOutbox = `-- name: CreateJudgeEventOutbox :one
+INSERT INTO judge_event_outbox (id, tenant_id, task_id, subject, payload, status)
+VALUES ($1, $2, $3, $4, $5, $6)
+ON CONFLICT (tenant_id, task_id, subject) DO UPDATE
+SET payload = EXCLUDED.payload,
+    status = EXCLUDED.status,
+    last_error = NULL
+RETURNING id, tenant_id, task_id, subject, payload, status, retry_count, last_error, created_at, updated_at
+`
+
+type CreateJudgeEventOutboxParams struct {
+	ID       int64  `json:"id"`
+	TenantID int64  `json:"tenant_id"`
+	TaskID   int64  `json:"task_id"`
+	Subject  string `json:"subject"`
+	Payload  []byte `json:"payload"`
+	Status   int16  `json:"status"`
+}
+
+func (q *Queries) CreateJudgeEventOutbox(ctx context.Context, arg CreateJudgeEventOutboxParams) (JudgeEventOutbox, error) {
+	row := q.db.QueryRow(ctx, createJudgeEventOutbox,
+		arg.ID,
+		arg.TenantID,
+		arg.TaskID,
+		arg.Subject,
+		arg.Payload,
+		arg.Status,
+	)
+	var i JudgeEventOutbox
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.TaskID,
+		&i.Subject,
+		&i.Payload,
+		&i.Status,
+		&i.RetryCount,
+		&i.LastError,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const createJudgeResult = `-- name: CreateJudgeResult :one
 INSERT INTO judge_result (task_id, tenant_id, passed, score, max_score, details, judge_sandbox_ref, is_rejudge)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
@@ -253,6 +297,38 @@ func (q *Queries) CreateSubmissionFingerprint(ctx context.Context, arg CreateSub
 		&i.CodeHash,
 		&i.SimVector,
 		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const failJudgeEventOutbox = `-- name: FailJudgeEventOutbox :one
+UPDATE judge_event_outbox
+SET status = 3,
+    retry_count = retry_count + 1,
+    last_error = $2
+WHERE id = $1
+RETURNING id, tenant_id, task_id, subject, payload, status, retry_count, last_error, created_at, updated_at
+`
+
+type FailJudgeEventOutboxParams struct {
+	ID        int64       `json:"id"`
+	LastError pgtype.Text `json:"last_error"`
+}
+
+func (q *Queries) FailJudgeEventOutbox(ctx context.Context, arg FailJudgeEventOutboxParams) (JudgeEventOutbox, error) {
+	row := q.db.QueryRow(ctx, failJudgeEventOutbox, arg.ID, arg.LastError)
+	var i JudgeEventOutbox
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.TaskID,
+		&i.Subject,
+		&i.Payload,
+		&i.Status,
+		&i.RetryCount,
+		&i.LastError,
+		&i.CreatedAt,
+		&i.UpdatedAt,
 	)
 	return i, err
 }
@@ -617,8 +693,7 @@ func (q *Queries) ListJudgers(ctx context.Context, arg ListJudgersParams) ([]Jud
 }
 
 const listManualPendingTasks = `-- name: ListManualPendingTasks :many
-SELECT jt.id, jt.tenant_id, jt.judger_id, jt.source_ref, jt.submitter_id, jt.problem_ref, jt.code_storage_key, jt.code_hash, jt.input_snapshot, jt.sandbox_mode, jt.target_sandbox_ref, jt.priority, jt.status, jt.retry_count, jt.max_retries, jt.created_at, jt.updated_at
-FROM judge_task jt
+SELECT jt.id, jt.tenant_id, jt.judger_id, jt.source_ref, jt.submitter_id, jt.problem_ref, jt.code_storage_key, jt.code_hash, jt.input_snapshot, jt.sandbox_mode, jt.target_sandbox_ref, jt.priority, jt.status, jt.retry_count, jt.max_retries, jt.created_at, jt.updated_at FROM judge_task jt
 JOIN judger j ON j.id = jt.judger_id
 WHERE jt.source_ref = $1 AND jt.status = 2 AND j.type = 6
 ORDER BY jt.created_at ASC
@@ -662,6 +737,71 @@ func (q *Queries) ListManualPendingTasks(ctx context.Context, arg ListManualPend
 			return nil, err
 		}
 		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listPendingJudgeEventOutbox = `-- name: ListPendingJudgeEventOutbox :many
+SELECT id, tenant_id, task_id, subject, payload, status, retry_count, last_error, created_at, updated_at FROM judge_event_outbox
+WHERE status IN (1, 3)
+ORDER BY created_at ASC
+LIMIT $1
+`
+
+func (q *Queries) ListPendingJudgeEventOutbox(ctx context.Context, limit int32) ([]JudgeEventOutbox, error) {
+	rows, err := q.db.Query(ctx, listPendingJudgeEventOutbox, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []JudgeEventOutbox{}
+	for rows.Next() {
+		var i JudgeEventOutbox
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.TaskID,
+			&i.Subject,
+			&i.Payload,
+			&i.Status,
+			&i.RetryCount,
+			&i.LastError,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listPendingJudgeEventOutboxTenants = `-- name: ListPendingJudgeEventOutboxTenants :many
+SELECT DISTINCT tenant_id FROM judge_event_outbox
+WHERE status IN (1, 3)
+ORDER BY tenant_id
+LIMIT $1
+`
+
+func (q *Queries) ListPendingJudgeEventOutboxTenants(ctx context.Context, limit int32) ([]int64, error) {
+	rows, err := q.db.Query(ctx, listPendingJudgeEventOutboxTenants, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []int64{}
+	for rows.Next() {
+		var tenant_id int64
+		if err := rows.Scan(&tenant_id); err != nil {
+			return nil, err
+		}
+		items = append(items, tenant_id)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -718,6 +858,32 @@ func (q *Queries) ListTasksBySourceRef(ctx context.Context, arg ListTasksBySourc
 		return nil, err
 	}
 	return items, nil
+}
+
+const markJudgeEventOutboxPublished = `-- name: MarkJudgeEventOutboxPublished :one
+UPDATE judge_event_outbox
+SET status = 2,
+    last_error = NULL
+WHERE id = $1
+RETURNING id, tenant_id, task_id, subject, payload, status, retry_count, last_error, created_at, updated_at
+`
+
+func (q *Queries) MarkJudgeEventOutboxPublished(ctx context.Context, id int64) (JudgeEventOutbox, error) {
+	row := q.db.QueryRow(ctx, markJudgeEventOutboxPublished, id)
+	var i JudgeEventOutbox
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.TaskID,
+		&i.Subject,
+		&i.Payload,
+		&i.Status,
+		&i.RetryCount,
+		&i.LastError,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
 }
 
 const markJudgeTaskJudging = `-- name: MarkJudgeTaskJudging :one

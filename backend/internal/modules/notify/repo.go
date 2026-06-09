@@ -7,6 +7,7 @@ import (
 	"chaimir/internal/modules/notify/internal/sqlcgen"
 	"chaimir/internal/platform/db"
 	"chaimir/internal/platform/pagex"
+	"chaimir/internal/platform/pgtypex"
 	"chaimir/internal/platform/timex"
 	"chaimir/pkg/apperr"
 	"chaimir/pkg/snowflake"
@@ -75,14 +76,21 @@ func (r *repo) GetPreference(ctx context.Context, tenantID, accountID int64, typ
 	return row.Enabled, true, nil
 }
 
-// CreateNotification 写入一条渲染后的站内信。
-func (r *repo) CreateNotification(ctx context.Context, row NotificationCreate) error {
-	err := r.inTenant(ctx, row.TenantID, func(q *sqlcgen.Queries) error {
-		_, e := q.CreateNotification(ctx, sqlcgen.CreateNotificationParams{
-			ID: row.ID, TenantID: row.TenantID, ReceiverID: row.ReceiverID, Type: row.Type,
-			Title: row.Title, Content: row.Content, Link: pgText(row.Link),
-		})
-		return e
+// CreateNotifications 在单个租户事务内批量写入站内信,避免一次发送留下部分投递结果。
+func (r *repo) CreateNotifications(ctx context.Context, tenantID int64, rows []NotificationCreate) error {
+	err := r.inTenant(ctx, tenantID, func(q *sqlcgen.Queries) error {
+		for _, row := range rows {
+			if row.TenantID != tenantID {
+				return apperr.ErrNotifyInvalid
+			}
+			if _, e := q.CreateNotification(ctx, sqlcgen.CreateNotificationParams{
+				ID: row.ID, TenantID: row.TenantID, ReceiverID: row.ReceiverID, Type: row.Type,
+				Title: row.Title, Content: row.Content, Link: pgtypex.Text(row.Link),
+			}); e != nil {
+				return e
+			}
+		}
+		return nil
 	})
 	if err != nil {
 		return apperr.ErrNotifySendFailed.WithCause(err)
@@ -97,12 +105,12 @@ func (r *repo) ListInbox(ctx context.Context, tenantID, accountID int64, query I
 	var total int64
 	err := r.inTenant(ctx, tenantID, func(q *sqlcgen.Queries) error {
 		var e error
-		total, e = q.CountInbox(ctx, sqlcgen.CountInboxParams{ReceiverID: accountID, Type: pgText(query.Type), IsRead: pgBool(query.IsRead)})
+		total, e = q.CountInbox(ctx, sqlcgen.CountInboxParams{ReceiverID: accountID, Type: pgtypex.Text(query.Type), IsRead: pgtypex.BoolPtr(query.IsRead)})
 		if e != nil {
 			return e
 		}
 		rows, e = q.ListInbox(ctx, sqlcgen.ListInboxParams{
-			ReceiverID: accountID, Type: pgText(query.Type), IsRead: pgBool(query.IsRead),
+			ReceiverID: accountID, Type: pgtypex.Text(query.Type), IsRead: pgtypex.BoolPtr(query.IsRead),
 			OffsetCount: int32((page - 1) * size), LimitCount: int32(size),
 		})
 		return e
@@ -121,8 +129,8 @@ func (r *repo) CountUnreadNotifications(ctx context.Context, tenantID, accountID
 		var e error
 		total, e = q.CountInbox(ctx, sqlcgen.CountInboxParams{
 			ReceiverID: accountID,
-			Type:       pgText(""),
-			IsRead:     pgBool(&isRead),
+			Type:       pgtypex.Text(""),
+			IsRead:     pgtypex.BoolPtr(&isRead),
 		})
 		return e
 	})
@@ -209,7 +217,7 @@ func (r *repo) CreateAnnouncement(ctx context.Context, id, publisherID int64, re
 	var row sqlcgen.SystemAnnouncement
 	err = r.execAnnouncementScope(ctx, tenantID, func(q *sqlcgen.Queries) error {
 		found, e := q.CreateSystemAnnouncement(ctx, sqlcgen.CreateSystemAnnouncementParams{
-			ID: id, TenantID: pgInt8(tenantID), Title: req.Title, Content: req.Content, Scope: req.Scope,
+			ID: id, TenantID: pgtypex.Int8(tenantID), Title: req.Title, Content: req.Content, Scope: req.Scope,
 			TargetRoles: req.TargetRoles, PublisherID: publisherID, ExpireAt: timex.Timestamptz(expireAt),
 		})
 		row = found
@@ -238,7 +246,7 @@ func (r *repo) ListAnnouncements(ctx context.Context, tenantID, accountID int64,
 func (r *repo) GetAnnouncement(ctx context.Context, tenantID, announcementID int64) (AnnouncementDTO, error) {
 	var row sqlcgen.SystemAnnouncement
 	if err := r.inTenant(ctx, tenantID, func(q *sqlcgen.Queries) error {
-		found, e := q.GetAnnouncement(ctx, sqlcgen.GetAnnouncementParams{ID: announcementID, TenantID: pgInt8(tenantID)})
+		found, e := q.GetAnnouncement(ctx, sqlcgen.GetAnnouncementParams{ID: announcementID, TenantID: pgtypex.Int8(tenantID)})
 		row = found
 		return e
 	}); err != nil {

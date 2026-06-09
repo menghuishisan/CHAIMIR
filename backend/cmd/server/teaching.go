@@ -3,7 +3,6 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"log/slog"
 
@@ -27,7 +26,7 @@ func assembleTeaching(d *moduleDeps) error {
 	if err := svc.SubscribeEvents(); err != nil {
 		return fmt.Errorf("装配 teaching 失败: 订阅判题事件失败: %w", err)
 	}
-	go svc.StartJudgeOutboxWorker(context.Background())
+	go svc.StartJudgeOutboxWorker(d.ctx)
 	d.infra.teaching = svc
 	slog.Info("模块装配", slog.String("module", "teaching"), slog.String("layer", "2-business"))
 	return nil

@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"chaimir/internal/contracts"
+	"chaimir/internal/platform/auth"
 	"chaimir/internal/platform/config"
 )
 
@@ -40,10 +41,10 @@ func TestGetSandboxUsesOwnerCheckedLoader(t *testing.T) {
 
 // TestValidateSourceRefRequiresDocumentedShape 确认来源标识符合 <来源>:<年份>:<资源类型>:<id>。
 func TestValidateSourceRefRequiresDocumentedShape(t *testing.T) {
-	if err := validateSourceRef("exp:2026:instance:55"); err != nil {
-		t.Fatalf("valid source_ref rejected: %v", err)
+	if !auth.ValidSourceRef("exp:2026:instance:55") {
+		t.Fatalf("valid source_ref rejected")
 	}
-	if err := validateSourceRef("exp:55"); err == nil {
+	if auth.ValidSourceRef("exp:55") {
 		t.Fatalf("invalid source_ref should be rejected")
 	}
 }
@@ -108,9 +109,9 @@ func TestSafeSandboxInitArchiveAppliesConfiguredLimits(t *testing.T) {
 
 // TestToolProxyTargetRequiresSandboxWebTool 防止用户通过工具代理访问 runtime 暴露的非工具端口。
 func TestToolProxyTargetRequiresSandboxWebTool(t *testing.T) {
-	data, err := os.ReadFile("interaction.go")
+	data, err := os.ReadFile("service_interaction.go")
 	if err != nil {
-		t.Fatalf("read interaction.go: %v", err)
+		t.Fatalf("read service_interaction.go: %v", err)
 	}
 	body := string(data)
 	start := strings.Index(body, "func (s *Service) ToolProxyTarget(")
@@ -119,7 +120,7 @@ func TestToolProxyTargetRequiresSandboxWebTool(t *testing.T) {
 		t.Fatalf("ToolProxyTarget function block not found")
 	}
 	block := body[start:end]
-	if !strings.Contains(block, "GetSandboxToolForProxy") || !strings.Contains(block, "ToolKindWebEmbed") {
+	if !strings.Contains(block, "repo.getSandboxToolForProxy") || !strings.Contains(block, "ToolKindWebEmbed") {
 		t.Fatalf("ToolProxyTarget must verify the requested code is a mounted web tool before proxying")
 	}
 }
@@ -245,8 +246,15 @@ func TestCreateSandboxSupportsPinnedRuntimeImageVersion(t *testing.T) {
 		t.Fatalf("CreateSandbox function block not found")
 	}
 	block := body[start:end]
-	if !strings.Contains(block, "GetRuntimeImageByVersion") {
-		t.Fatalf("CreateSandbox must resolve req.RuntimeImageVersion instead of always using current default image")
+	if !strings.Contains(block, "repo.getRuntimeSelectionByCode") || !strings.Contains(block, "req.RuntimeImageVersion") {
+		t.Fatalf("CreateSandbox must delegate pinned runtime image version resolution instead of always using current default image")
+	}
+	repoSrc, err := os.ReadFile("repo.go")
+	if err != nil {
+		t.Fatalf("read repo.go: %v", err)
+	}
+	if !strings.Contains(string(repoSrc), "GetRuntimeImageByVersion") {
+		t.Fatalf("repo runtime selection must resolve req.RuntimeImageVersion")
 	}
 
 	contractSrc, err := os.ReadFile("../../contracts/engine.go")
@@ -321,9 +329,9 @@ func TestStageOneFailureTriggersK8sRecycle(t *testing.T) {
 
 // TestResumeUsesSandboxRecordedImage 确认恢复沙箱使用实例记录的 image_id,而不是运行时当前默认镜像。
 func TestResumeUsesSandboxRecordedImage(t *testing.T) {
-	data, err := os.ReadFile("interaction.go")
+	data, err := os.ReadFile("service_interaction.go")
 	if err != nil {
-		t.Fatalf("read interaction.go: %v", err)
+		t.Fatalf("read service_interaction.go: %v", err)
 	}
 	body := string(data)
 	start := strings.Index(body, "func (s *Service) loadSandboxDependencies(")
@@ -334,16 +342,23 @@ func TestResumeUsesSandboxRecordedImage(t *testing.T) {
 	if strings.Contains(block, "GetDefaultRuntimeImage(ctx, row.RuntimeID)") {
 		t.Fatalf("resume/dependency loading must not switch to the current default image")
 	}
-	if !strings.Contains(block, "GetRuntimeImage(ctx, sqlcgen.GetRuntimeImageParams{ID: row.ImageID, RuntimeID: row.RuntimeID})") {
+	if !strings.Contains(block, "repo.getSandboxDependencies(ctx, row)") {
 		t.Fatalf("resume/dependency loading must use sandbox.image_id")
+	}
+	repoSrc, err := os.ReadFile("repo.go")
+	if err != nil {
+		t.Fatalf("read repo.go: %v", err)
+	}
+	if !strings.Contains(string(repoSrc), "GetRuntimeImage(ctx, sqlcgen.GetRuntimeImageParams{ID: row.ImageID, RuntimeID: row.RuntimeID})") {
+		t.Fatalf("repo sandbox dependency loading must use sandbox.image_id")
 	}
 }
 
 // TestPauseAndResumeWriteAudit 确认暂停/恢复关键操作写入 M1 audit_log,不能只写 sandbox_event 或进度状态。
 func TestPauseAndResumeWriteAudit(t *testing.T) {
-	interactionSrc, err := os.ReadFile("interaction.go")
+	interactionSrc, err := os.ReadFile("service_interaction.go")
 	if err != nil {
-		t.Fatalf("read interaction.go: %v", err)
+		t.Fatalf("read service_interaction.go: %v", err)
 	}
 	interactionBody := string(interactionSrc)
 	for _, tc := range []struct {
@@ -389,9 +404,9 @@ func TestPauseAndResumeWriteAudit(t *testing.T) {
 
 // TestInteractivePathsCheckSandboxLifecycleState 确认终端、文件、工具和链能力在绑定 K8s 前校验生命周期状态。
 func TestInteractivePathsCheckSandboxLifecycleState(t *testing.T) {
-	filesSrc, err := os.ReadFile("files.go")
+	filesSrc, err := os.ReadFile("service_files.go")
 	if err != nil {
-		t.Fatalf("read files.go: %v", err)
+		t.Fatalf("read service_files.go: %v", err)
 	}
 	filesBody := string(filesSrc)
 	start := strings.Index(filesBody, "func (s *Service) runtimeBindingForSandbox(")
@@ -399,7 +414,7 @@ func TestInteractivePathsCheckSandboxLifecycleState(t *testing.T) {
 	if start < 0 || end < start {
 		t.Fatalf("runtimeBindingForSandbox function block not found")
 	}
-	if !strings.Contains(filesBody[start:end], "ensureSandboxInteractive(current.Status)") {
+	if !strings.Contains(filesBody[start:end], "ensureSandboxInteractive(row.Status)") {
 		t.Fatalf("runtimeBindingForSandbox must validate sandbox lifecycle state before K8s binding")
 	}
 
@@ -489,9 +504,9 @@ func TestRuntimeAndToolAdminValidateSpecsBeforePersistence(t *testing.T) {
 		t.Fatalf("CreateTool web-embed images must use the unified image security gate")
 	}
 
-	adminSrc, err := os.ReadFile("runtime_admin.go")
+	adminSrc, err := os.ReadFile("service_runtime_admin.go")
 	if err != nil {
-		t.Fatalf("read runtime_admin.go: %v", err)
+		t.Fatalf("read service_runtime_admin.go: %v", err)
 	}
 	adminBody := string(adminSrc)
 	updateStart := strings.Index(adminBody, "func (s *Service) UpdateRuntime(")
@@ -506,9 +521,9 @@ func TestRuntimeAndToolAdminValidateSpecsBeforePersistence(t *testing.T) {
 
 // TestUpdateRuntimeDoesNotPreserveStaleOptionalCapability 确认更新运行时按请求重写可选能力字段,不会继承旧 L2/L3 配置。
 func TestUpdateRuntimeDoesNotPreserveStaleOptionalCapability(t *testing.T) {
-	adminSrc, err := os.ReadFile("runtime_admin.go")
+	adminSrc, err := os.ReadFile("service_runtime_admin.go")
 	if err != nil {
-		t.Fatalf("read runtime_admin.go: %v", err)
+		t.Fatalf("read service_runtime_admin.go: %v", err)
 	}
 	adminBody := string(adminSrc)
 	updateStart := strings.Index(adminBody, "func (s *Service) UpdateRuntime(")
@@ -520,9 +535,17 @@ func TestUpdateRuntimeDoesNotPreserveStaleOptionalCapability(t *testing.T) {
 	if strings.Contains(block, "current.CapabilityImpl.String") || strings.Contains(block, "current.PluginRef.String") {
 		t.Fatalf("UpdateRuntime must not preserve stale capability_impl/plugin_ref when request omits them")
 	}
-	if !strings.Contains(block, "CapabilityImpl: pgText(req.CapabilityImpl)") ||
-		!strings.Contains(block, "PluginRef:      pgText(req.PluginRef)") {
-		t.Fatalf("UpdateRuntime must persist optional capability fields from the request")
+	if !strings.Contains(block, "repo.updateRuntime(ctx, runtimeID, req, spec)") {
+		t.Fatalf("UpdateRuntime must delegate persistence of optional capability fields to repo")
+	}
+	repoSrc, err := os.ReadFile("repo.go")
+	if err != nil {
+		t.Fatalf("read repo.go: %v", err)
+	}
+	repoBody := string(repoSrc)
+	if !strings.Contains(repoBody, "CapabilityImpl: pgtypex.Text(req.CapabilityImpl)") ||
+		!strings.Contains(repoBody, "PluginRef:      pgtypex.Text(req.PluginRef)") {
+		t.Fatalf("repo.updateRuntime must persist optional capability fields from the request")
 	}
 }
 
@@ -619,6 +642,28 @@ func TestRuntimeImageCreateCannotTrustRequestPrepulled(t *testing.T) {
 	}
 	if !strings.Contains(block, "validateImageSecurityGate(") {
 		t.Fatalf("CreateRuntimeImage must use the unified image security gate")
+	}
+}
+
+// TestRuntimeSelftestRecycleUsesBoundedContext 确认接入即测清理有配置超时,不是无界根 context。
+func TestRuntimeSelftestRecycleUsesBoundedContext(t *testing.T) {
+	data, err := os.ReadFile("service_selftest.go")
+	if err != nil {
+		t.Fatalf("read service_selftest.go: %v", err)
+	}
+	body := string(data)
+	start := strings.Index(body, "defer func()")
+	end := strings.Index(body, "if err := s.orchestrator.WaitReady")
+	if start < 0 || end < start {
+		t.Fatalf("selftest cleanup block not found")
+	}
+	block := body[start:end]
+	if strings.Contains(block, "Recycle(context.Background()") {
+		t.Fatalf("runtime selftest cleanup must not use unbounded context.Background()")
+	}
+	if !strings.Contains(block, "context.WithTimeout(") ||
+		!strings.Contains(block, "s.cfg.SelftestRecycleTimeoutSeconds") {
+		t.Fatalf("runtime selftest cleanup must use configured timeout context")
 	}
 }
 
@@ -737,7 +782,7 @@ func TestDestroySandboxChecksSignedSourceRefBeforeRecycle(t *testing.T) {
 	}
 	block := body[start:end]
 	validateIdx := strings.Index(block, "authorizeSandboxRowAccess(ctx, id, current)")
-	recycleIdx := strings.Index(block, "q.RecycleSandbox(ctx, sandboxID)")
+	recycleIdx := strings.Index(block, "repo.recycleSandbox(ctx, id.TenantID, sandboxID)")
 	if validateIdx < 0 || recycleIdx < 0 || validateIdx > recycleIdx {
 		t.Fatalf("DestroySandbox must validate signed source_ref before locking sandbox as recycling")
 	}
@@ -745,22 +790,41 @@ func TestDestroySandboxChecksSignedSourceRefBeforeRecycle(t *testing.T) {
 
 // TestSandboxRecycleSchedulerUsesUnifiedRunnerAndExistingFinalizer 确认 M2 自动回收不新增第二套回收状态机。
 func TestSandboxRecycleSchedulerUsesUnifiedRunnerAndExistingFinalizer(t *testing.T) {
-	serviceSrc, err := os.ReadFile("service.go")
+	serviceSrc, err := os.ReadFile("service_scheduler.go")
 	if err != nil {
-		t.Fatalf("read service.go: %v", err)
+		t.Fatalf("read service_scheduler.go: %v", err)
 	}
 	serviceBody := string(serviceSrc)
 	for _, required := range []string{
 		"StartRecycleScheduler",
 		"RecycleDueSandboxesOnce",
 		"background.Run",
-		"ListDueSandboxRecycles",
-		"ListExpiredSandboxSnapshots",
+		"repo.listDueSandboxRecycles",
+		"repo.listExpiredSandboxSnapshots",
 		"finalizeSandboxRecycle(ctx, row.TenantID, row, reason)",
 	} {
 		if !strings.Contains(serviceBody, required) {
 			t.Fatalf("sandbox recycle scheduler missing %s", required)
 		}
+	}
+	if strings.Contains(serviceBody, "ErrSandboxRecycleFail") {
+		t.Fatalf("scheduler must use dedicated error codes instead of collapsing failures into ErrSandboxRecycleFail")
+	}
+	for _, required := range []string{
+		"ErrSandboxSchedulerConfigInvalid",
+		"ErrSandboxRecycleFinalizeFail",
+		"ErrSandboxSnapshotCleanupFail",
+	} {
+		if !strings.Contains(serviceBody, required) {
+			t.Fatalf("sandbox recycle scheduler missing dedicated error %s", required)
+		}
+	}
+	repoSrc, err := os.ReadFile("repo.go")
+	if err != nil {
+		t.Fatalf("read repo.go: %v", err)
+	}
+	if !strings.Contains(string(repoSrc), "ErrSandboxRecycleScanFail") {
+		t.Fatalf("sandbox recycle repo scan must wrap failures with ErrSandboxRecycleScanFail")
 	}
 
 	querySrc, err := os.ReadFile("../../../db/queries/sandbox.sql")

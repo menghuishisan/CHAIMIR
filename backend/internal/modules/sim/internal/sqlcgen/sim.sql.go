@@ -781,6 +781,43 @@ func (q *Queries) ListSimReviews(ctx context.Context, arg ListSimReviewsParams) 
 	return items, nil
 }
 
+const transitionSimPackageStatus = `-- name: TransitionSimPackageStatus :one
+UPDATE sim_package
+SET status = $3
+WHERE id = $1 AND status = $2
+RETURNING id, code, version, name, category, compute, scale_limit, bundle_key, bundle_hash, backend_adapter, backend_config, author_type, author_id, status, created_at, updated_at
+`
+
+type TransitionSimPackageStatusParams struct {
+	ID       int64 `json:"id"`
+	Status   int16 `json:"status"`
+	Status_2 int16 `json:"status_2"`
+}
+
+func (q *Queries) TransitionSimPackageStatus(ctx context.Context, arg TransitionSimPackageStatusParams) (SimPackage, error) {
+	row := q.db.QueryRow(ctx, transitionSimPackageStatus, arg.ID, arg.Status, arg.Status_2)
+	var i SimPackage
+	err := row.Scan(
+		&i.ID,
+		&i.Code,
+		&i.Version,
+		&i.Name,
+		&i.Category,
+		&i.Compute,
+		&i.ScaleLimit,
+		&i.BundleKey,
+		&i.BundleHash,
+		&i.BackendAdapter,
+		&i.BackendConfig,
+		&i.AuthorType,
+		&i.AuthorID,
+		&i.Status,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const updateSimPackageDraft = `-- name: UpdateSimPackageDraft :one
 UPDATE sim_package
 SET name = $2,

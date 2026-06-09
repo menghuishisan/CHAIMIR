@@ -3,10 +3,8 @@ package identity
 
 import (
 	"context"
-	"fmt"
 
 	"chaimir/internal/contracts"
-	"chaimir/internal/modules/identity/internal/sqlcgen"
 	"chaimir/internal/platform/ids"
 	"chaimir/internal/platform/timex"
 	"chaimir/pkg/apperr"
@@ -18,15 +16,8 @@ func (s *Service) LoginPlatform(ctx context.Context, req PlatformLoginRequest, d
 	if !s.cfg.PlatformEnabled {
 		return nil, apperr.ErrForbidden
 	}
-	var admin sqlcgen.PlatformAdmin
-	if err := s.repo.inApp(ctx, func(q *sqlcgen.Queries) error {
-		row, e := q.GetPlatformAdminByUsername(ctx, req.Username)
-		if e != nil {
-			return apperr.ErrWrongCredentials
-		}
-		admin = row
-		return nil
-	}); err != nil {
+	admin, err := s.repo.getPlatformAdminByUsername(ctx, req.Username)
+	if err != nil {
 		return nil, toAppErr(err)
 	}
 	if admin.Status != TenantActive {
@@ -42,9 +33,10 @@ func (s *Service) LoginPlatform(ctx context.Context, req PlatformLoginRequest, d
 	return s.issuePlatformLogin(ctx, admin, device, ip)
 }
 
-// issuePlatformLogin 创建平台级会话并签发 plat=true 的 Access Token。
-func (s *Service) issuePlatformLogin(ctx context.Context, admin sqlcgen.PlatformAdmin, device, ip string) (*LoginResult, error) {
+// issuePlatformLogin 创建平台级会话并签发 plat=true 的 Access Token,平台会话独立于学校租户 RLS。
+func (s *Service) issuePlatformLogin(ctx context.Context, admin PlatformAdminSnapshot, device, ip string) (*LoginResult, error) {
 	sessionID := s.idgen.Generate()
+	// 先生成并哈希 refresh token,数据库只保存 HMAC 摘要。
 	refreshPlain, err := crypto.RandomToken(48)
 	if err != nil {
 		return nil, apperr.ErrAuthTokenIssueFailed.WithCause(err)
@@ -55,6 +47,7 @@ func (s *Service) issuePlatformLogin(ctx context.Context, admin sqlcgen.Platform
 		return nil, apperr.ErrAuthTokenIssueFailed.WithCause(err)
 	}
 
+	// 再构造平台审计记录,审计与会话写入同一特权事务避免登录无留痕。
 	entry, err := buildPlatformAuditEntry(ctx, admin.ID, AuditActionAuthLogin, AuditTargetAuthSession, sessionID, map[string]any{
 		"device_recorded": device != "",
 		"ip_recorded":     ip != "",
@@ -62,25 +55,7 @@ func (s *Service) issuePlatformLogin(ctx context.Context, admin sqlcgen.Platform
 	if err != nil {
 		return nil, err
 	}
-	if !s.repo.hasPrivileged() {
-		return nil, apperr.ErrIdentityPrivilegedRequired.WithCause(fmt.Errorf("平台登录审计写入需要特权连接"))
-	}
-	if err := s.repo.inPrivileged(ctx, func(q *sqlcgen.Queries) error {
-		if e := q.RevokeAllPlatformAdminSessions(ctx, admin.ID); e != nil {
-			return e
-		}
-		if _, e := q.CreatePlatformAuthSession(ctx, sqlcgen.CreatePlatformAuthSessionParams{
-			ID:               sessionID,
-			PlatformAdminID:  admin.ID,
-			RefreshTokenHash: refreshHash,
-			DeviceInfo:       pgText(device),
-			Ip:               pgText(ip),
-			ExpireAt:         timex.RequiredTimestamptz(timex.Now().Add(s.refreshTTL)),
-		}); e != nil {
-			return e
-		}
-		return q.CreateAuditLog(ctx, buildAuditLogParams(s.idgen.Generate(), entry))
-	}); err != nil {
+	if err := s.repo.createPlatformLoginSession(ctx, admin.ID, sessionID, refreshHash, device, ip, timex.Now().Add(s.refreshTTL), buildAuditLogCreate(s.idgen.Generate(), entry)); err != nil {
 		return nil, apperr.ErrPlatformAuthSessionFailed.WithCause(err)
 	}
 

@@ -4,6 +4,7 @@ package notify
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"chaimir/internal/platform/redis"
@@ -17,9 +18,20 @@ type redisUnreadCounter struct {
 	ttl   time.Duration
 }
 
+type redisSendRateLimiter struct {
+	redis  *redis.Client
+	window time.Duration
+	max    int
+}
+
 // newRedisUnreadCounter 构造 Redis 未读计数器。
 func newRedisUnreadCounter(client *redis.Client, ttl time.Duration) unreadCounter {
 	return &redisUnreadCounter{redis: client, ttl: ttl}
+}
+
+// newRedisSendRateLimiter 构造按租户和通知类型隔离的发送限频器。
+func newRedisSendRateLimiter(client *redis.Client, window time.Duration, max int) sendRateLimiter {
+	return &redisSendRateLimiter{redis: client, window: window, max: max}
 }
 
 // Increment 递增指定租户账号未读数并维持清理窗口。
@@ -64,4 +76,23 @@ func (c *redisUnreadCounter) Reset(ctx context.Context, tenantID int64, accountI
 // unreadKey 生成租户隔离的未读计数缓存键。
 func unreadKey(tenantID, accountID int64) string {
 	return fmt.Sprintf("tenant:%d:unread:%d", tenantID, accountID)
+}
+
+// Allow 在配置窗口内累计同租户同类型发送次数,超过上限时拒绝写库。
+func (l *redisSendRateLimiter) Allow(ctx context.Context, tenantID int64, typ string) (bool, error) {
+	if l.redis == nil || l.window <= 0 || l.max <= 0 {
+		return false, apperr.ErrNotifySendFailed
+	}
+	count, err := l.redis.IncrWithTTL(ctx, notifySendRateKey(tenantID, typ), l.window)
+	if err != nil {
+		return false, err
+	}
+	return count <= int64(l.max), nil
+}
+
+// notifySendRateKey 生成 M10 发送限频 Redis 键,通知类型先规范化再拼入键空间。
+func notifySendRateKey(tenantID int64, typ string) string {
+	normalized := strings.ToLower(strings.TrimSpace(typ))
+	normalized = strings.ReplaceAll(normalized, ":", "_")
+	return fmt.Sprintf("tenant:%d:notify:send:%s", tenantID, normalized)
 }

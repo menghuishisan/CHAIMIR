@@ -98,6 +98,49 @@ func TestServiceMiddlewareInjectsSourceRef(t *testing.T) {
 	}
 }
 
+// TestValidSourceRefRequiresDocumentedShape 确认服务来源标识统一遵循四段全称规范。
+func TestValidSourceRefRequiresDocumentedShape(t *testing.T) {
+	valid := []string{
+		"exp:2026:instance:55",
+		"contest:2026:submission:abc_123",
+		"teaching:2026:submission:9-8",
+	}
+	for _, ref := range valid {
+		if !ValidSourceRef(ref) {
+			t.Fatalf("valid source_ref rejected: %s", ref)
+		}
+	}
+
+	invalid := []string{
+		"",
+		"contest:2026:55",
+		"exp:26:instance:55",
+		"Exp:2026:instance:55",
+		"exp:2026:1instance:55",
+		"exp:2026:instance:55/66",
+	}
+	for _, ref := range invalid {
+		if ValidSourceRef(ref) {
+			t.Fatalf("invalid source_ref accepted: %s", ref)
+		}
+	}
+}
+
+// TestServiceSourceRefAuthorizedOnlyRestrictsSignedServiceContext 确认内部服务签名上下文才触发 source_ref 归属限制。
+func TestServiceSourceRefAuthorizedOnlyRestrictsSignedServiceContext(t *testing.T) {
+	ctx := context.Background()
+	if !ServiceSourceRefAuthorized(ctx, "exp:2026:instance:55") {
+		t.Fatalf("ordinary user context should not be restricted by source_ref")
+	}
+	signed := WithServiceSourceRef(ctx, "exp:2026:instance:55")
+	if !ServiceSourceRefAuthorized(signed, "exp:2026:instance:55") {
+		t.Fatalf("matching signed source_ref should pass")
+	}
+	if ServiceSourceRefAuthorized(signed, "contest:2026:contest:55") {
+		t.Fatalf("mismatched signed source_ref should be rejected")
+	}
+}
+
 // serviceAuthTestConfig 显式给出服务签名测试所需的鉴权配置。
 func serviceAuthTestConfig() config.AuthConfig {
 	return config.AuthConfig{

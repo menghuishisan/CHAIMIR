@@ -10,7 +10,6 @@ import (
 	"math/big"
 	"time"
 
-	"chaimir/internal/modules/identity/internal/sqlcgen"
 	"chaimir/internal/platform/ids"
 	"chaimir/internal/platform/tenant"
 	"chaimir/internal/platform/timex"
@@ -58,7 +57,7 @@ func (s *Service) SendSms(ctx context.Context, req SendSmsRequest) error {
 		return err
 	}
 	if !hasTenant && req.Scene == SmsSceneLogin {
-		accts, e := s.findAccountsByPhone(ctx, ph)
+		accts, e := s.repo.findAccountTenantCandidatesByPhone(ctx, ph)
 		if e != nil {
 			return e
 		}
@@ -69,28 +68,7 @@ func (s *Service) SendSms(ctx context.Context, req SendSmsRequest) error {
 	}
 
 	// 验证码记录写入(找回场景 tenant_id 可空 → 用特权连接写,避免 RLS 拦截)。
-	smsRow := sqlcgen.CreateSmsCodeParams{
-		ID:        s.idgen.Generate(),
-		TenantID:  pgInt8(tenantID, tenantID != 0),
-		PhoneHash: ph,
-		CodeHash:  codeHash,
-		Scene:     req.Scene,
-		ExpireAt:  timex.RequiredTimestamptz(timex.Now().Add(s.smsCodeTTL)),
-	}
-	writeFn := func(q *sqlcgen.Queries) error {
-		_, e := q.CreateSmsCode(ctx, smsRow)
-		return e
-	}
-	if tenantID != 0 {
-		err = s.repo.inTenantID(ctx, tenantID, writeFn)
-	} else {
-		// 无租户(找回未定位到):走特权连接写入(tenant_id 为空,RLS 不适用此行)。
-		if !s.repo.hasPrivileged() {
-			return apperr.ErrIdentityPrivilegedRequired.WithCause(fmt.Errorf("找回验证码需特权连接写入"))
-		}
-		err = s.repo.inPrivileged(ctx, writeFn)
-	}
-	if err != nil {
+	if err := s.repo.createSmsCode(ctx, tenantID, s.idgen.Generate(), ph, codeHash, req.Scene, timex.Now().Add(s.smsCodeTTL)); err != nil {
 		return apperr.ErrSmsCodeStoreFailed.WithCause(err)
 	}
 
@@ -104,53 +82,41 @@ func (s *Service) SendSms(ctx context.Context, req SendSmsRequest) error {
 // verifySmsCode 校验验证码:取最新未用且未过期的码,错误尝试超限即失效,比对成功后标记已用。
 func (s *Service) verifySmsCode(ctx context.Context, tenantID int64, phoneHash string, scene int16, code string) error {
 	codeHash := crypto.HMACHash(s.hmacKey, code)
-	exec := func(q *sqlcgen.Queries) error {
-		row, e := q.GetLatestSmsCode(ctx, sqlcgen.GetLatestSmsCodeParams{PhoneHash: phoneHash, Scene: scene})
-		if e != nil {
-			return apperr.ErrSmsCodeInvalid
-		}
-		if row.CodeHash != codeHash {
-			attempts, err := s.recordSmsVerificationFailure(ctx, row)
-			if err != nil {
-				return err
-			}
-			if smsVerificationAttemptsExceeded(attempts, s.smsVerifyMaxAttempts) {
-				if err := q.MarkSmsCodeUsed(ctx, row.ID); err != nil {
-					return err
-				}
-				return apperr.ErrSmsCodeAttemptsExceeded
-			}
-			return apperr.ErrSmsCodeInvalid
-		}
-		return q.MarkSmsCodeUsed(ctx, row.ID)
-	}
-	var err error
-	if tenantID != 0 {
-		err = s.repo.inTenantID(ctx, tenantID, exec)
-	} else {
-		if !s.repo.hasPrivileged() {
-			return apperr.ErrIdentityPrivilegedRequired.WithCause(fmt.Errorf("找回验证码需特权连接校验"))
-		}
-		err = s.repo.inPrivileged(ctx, exec)
-	}
+	row, err := s.repo.getLatestSmsCode(ctx, tenantID, phoneHash, scene)
 	if err != nil {
 		if ae, ok := apperr.As(err); ok {
 			return ae
 		}
 		return apperr.ErrSmsVerifyStoreFailed.WithCause(err)
 	}
+	if row.CodeHash != codeHash {
+		attempts, err := s.recordSmsVerificationFailure(ctx, row)
+		if err != nil {
+			return err
+		}
+		if smsVerificationAttemptsExceeded(attempts, s.smsVerifyMaxAttempts) {
+			if err := s.repo.markSmsCodeUsed(ctx, tenantID, row.ID); err != nil {
+				return apperr.ErrSmsVerifyStoreFailed.WithCause(err)
+			}
+			return apperr.ErrSmsCodeAttemptsExceeded
+		}
+		return apperr.ErrSmsCodeInvalid
+	}
+	if err := s.repo.markSmsCodeUsed(ctx, tenantID, row.ID); err != nil {
+		return apperr.ErrSmsVerifyStoreFailed.WithCause(err)
+	}
 	return nil
 }
 
 // recordSmsVerificationFailure 记录单个验证码的校验失败次数,计数窗口不超过验证码剩余有效期。
-func (s *Service) recordSmsVerificationFailure(ctx context.Context, row sqlcgen.SmsCode) (int64, error) {
+func (s *Service) recordSmsVerificationFailure(ctx context.Context, row SmsCodeSnapshot) (int64, error) {
 	if s.smsVerifyMaxAttempts <= 0 {
 		return 0, nil
 	}
 	if s.redis == nil {
 		return 0, apperr.ErrSmsVerifyStoreFailed.WithCause(fmt.Errorf("验证码校验尝试计数需要 Redis"))
 	}
-	ttl := timex.FromTimestamptz(row.ExpireAt).Sub(timex.Now())
+	ttl := row.ExpireAt.Sub(timex.Now())
 	if ttl <= 0 {
 		ttl = time.Minute
 	}
@@ -188,7 +154,7 @@ func smsTenantIDFromContext(ctx context.Context, scene int16) (int64, bool, erro
 }
 
 // selectLoginSmsTenantID 根据手机号候选账号和用户选择决定验证码写入租户。
-func selectLoginSmsTenantID(accts []sqlcgen.FindAccountsByPhoneAllTenantsRow, reqTenantID string) (int64, error) {
+func selectLoginSmsTenantID(accts []AccountTenantCandidate, reqTenantID string) (int64, error) {
 	if len(accts) == 0 {
 		return 0, nil
 	}

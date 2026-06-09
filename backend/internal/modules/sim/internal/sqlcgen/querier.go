@@ -32,6 +32,7 @@ type Querier interface {
 	ListSimPackageVersions(ctx context.Context, code string) ([]SimPackage, error)
 	ListSimPackages(ctx context.Context, arg ListSimPackagesParams) ([]SimPackage, error)
 	ListSimReviews(ctx context.Context, arg ListSimReviewsParams) ([]SimPackageReview, error)
+	TransitionSimPackageStatus(ctx context.Context, arg TransitionSimPackageStatusParams) (SimPackage, error)
 	UpdateSimPackageDraft(ctx context.Context, arg UpdateSimPackageDraftParams) (SimPackage, error)
 	UpdateSimPackageStatus(ctx context.Context, arg UpdateSimPackageStatusParams) (SimPackage, error)
 	UpdateSimReviewPreviewReport(ctx context.Context, arg UpdateSimReviewPreviewReportParams) (SimPackageReview, error)

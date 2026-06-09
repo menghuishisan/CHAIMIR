@@ -199,15 +199,15 @@ func (a *API) getTask(c *gin.Context) {
 	if !ok {
 		return
 	}
-	info, err := a.svc.GetJudgeTask(c.Request.Context(), taskID)
+	view, err := a.svc.getJudgeTaskView(c.Request.Context(), taskID)
 	if err != nil {
 		response.Fail(c, err)
 		return
 	}
-	if !a.authorizeTaskReader(c, info) {
+	if !a.authorizeTaskReader(c, view.JudgeTaskInfo) {
 		return
 	}
-	response.OK(c, taskInfoToMap(info))
+	response.OK(c, taskViewToMap(view))
 }
 
 // progressWS 建立判题进度 WebSocket。
@@ -224,7 +224,7 @@ func (a *API) progressWS(c *gin.Context) {
 	if !a.authorizeTaskReader(c, info) {
 		return
 	}
-	if err := a.svc.ServeProgressWS(c.Writer, c.Request, taskID); err != nil {
+	if err := a.serveProgressWS(c.Writer, c.Request, taskID); err != nil {
 		response.Fail(c, err)
 	}
 }

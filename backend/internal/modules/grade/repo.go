@@ -10,10 +10,10 @@ import (
 	"chaimir/internal/platform/ids"
 	"chaimir/internal/platform/jsonx"
 	"chaimir/internal/platform/pagex"
+	"chaimir/internal/platform/pgtypex"
 	"chaimir/pkg/apperr"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgtype"
 )
 
 // repo 是 M11 模块数据库访问封装。
@@ -127,7 +127,7 @@ func (r *repo) CreateSemester(ctx context.Context, tenantID, id int64, req Semes
 	var row sqlcgen.Semester
 	if err := r.inTenant(ctx, tenantID, func(q *sqlcgen.Queries) error {
 		var e error
-		row, e = q.CreateSemester(ctx, sqlcgen.CreateSemesterParams{ID: id, TenantID: tenantID, Name: req.Name, StartDate: pgDate(start), EndDate: pgDate(end), IsCurrent: req.IsCurrent})
+		row, e = q.CreateSemester(ctx, sqlcgen.CreateSemesterParams{ID: id, TenantID: tenantID, Name: req.Name, StartDate: pgtypex.Date(start), EndDate: pgtypex.Date(end), IsCurrent: req.IsCurrent})
 		return e
 	}); err != nil {
 		return SemesterDTO{}, apperr.ErrGradeSemesterInvalid.WithCause(err)
@@ -137,15 +137,15 @@ func (r *repo) CreateSemester(ctx context.Context, tenantID, id int64, req Semes
 
 // UpsertSemesterGrade 写入或更新学生学期 GPA。
 func (r *repo) UpsertSemesterGrade(ctx context.Context, tenantID int64, req SemesterGradeUpsert) (SemesterGradeDTO, error) {
-	totalCredits, err := pgNumeric(req.TotalCredits)
+	totalCredits, err := pgtypex.NumericScale(req.TotalCredits, 3)
 	if err != nil {
 		return SemesterGradeDTO{}, apperr.ErrGradeAggregateFailed.WithCause(err)
 	}
-	gpa, err := pgNumeric(req.GPA)
+	gpa, err := pgtypex.NumericScale(req.GPA, 3)
 	if err != nil {
 		return SemesterGradeDTO{}, apperr.ErrGradeAggregateFailed.WithCause(err)
 	}
-	cumulativeGPA, err := pgNumeric(req.CumulativeGPA)
+	cumulativeGPA, err := pgtypex.NumericScale(req.CumulativeGPA, 3)
 	if err != nil {
 		return SemesterGradeDTO{}, apperr.ErrGradeAggregateFailed.WithCause(err)
 	}
@@ -247,11 +247,11 @@ func (r *repo) ListReviews(ctx context.Context, tenantID int64, status int16, pa
 	var total int64
 	if err := r.inTenant(ctx, tenantID, func(q *sqlcgen.Queries) error {
 		var e error
-		total, e = q.CountGradeReviews(ctx, pgInt2(status))
+		total, e = q.CountGradeReviews(ctx, pgtypex.Int2(status))
 		if e != nil {
 			return e
 		}
-		rows, e = q.ListGradeReviews(ctx, sqlcgen.ListGradeReviewsParams{Status: pgInt2(status), LimitCount: int32(size), OffsetCount: int32((page - 1) * size)})
+		rows, e = q.ListGradeReviews(ctx, sqlcgen.ListGradeReviewsParams{Status: pgtypex.Int2(status), LimitCount: int32(size), OffsetCount: int32((page - 1) * size)})
 		return e
 	}); err != nil {
 		return nil, 0, apperr.ErrGradeReviewState.WithCause(err)
@@ -268,7 +268,7 @@ func (r *repo) ApproveReview(ctx context.Context, tenantID, reviewerID, reviewID
 	var row sqlcgen.GradeReview
 	if err := r.inTenant(ctx, tenantID, func(q *sqlcgen.Queries) error {
 		var e error
-		row, e = q.ApproveGradeReview(ctx, sqlcgen.ApproveGradeReviewParams{ID: reviewID, ReviewerID: pgInt8(reviewerID), SemesterID: pgInt8(semesterID), Comment: pgText(comment)})
+		row, e = q.ApproveGradeReview(ctx, sqlcgen.ApproveGradeReviewParams{ID: reviewID, ReviewerID: pgtypex.Int8(reviewerID), SemesterID: pgtypex.Int8(semesterID), Comment: pgtypex.Text(comment)})
 		return e
 	}); err != nil {
 		return ReviewDTO{}, apperr.ErrGradeReviewState.WithCause(err)
@@ -281,7 +281,7 @@ func (r *repo) RejectReview(ctx context.Context, tenantID, reviewerID, reviewID 
 	var row sqlcgen.GradeReview
 	if err := r.inTenant(ctx, tenantID, func(q *sqlcgen.Queries) error {
 		var e error
-		row, e = q.RejectGradeReview(ctx, sqlcgen.RejectGradeReviewParams{ID: reviewID, ReviewerID: pgInt8(reviewerID), Comment: pgText(comment)})
+		row, e = q.RejectGradeReview(ctx, sqlcgen.RejectGradeReviewParams{ID: reviewID, ReviewerID: pgtypex.Int8(reviewerID), Comment: pgtypex.Text(comment)})
 		return e
 	}); err != nil {
 		return ReviewDTO{}, apperr.ErrGradeReviewState.WithCause(err)
@@ -294,7 +294,7 @@ func (r *repo) UnlockReview(ctx context.Context, tenantID, reviewerID, reviewID 
 	var row sqlcgen.GradeReview
 	if err := r.inTenant(ctx, tenantID, func(q *sqlcgen.Queries) error {
 		var e error
-		row, e = q.UnlockGradeReview(ctx, sqlcgen.UnlockGradeReviewParams{ID: reviewID, ReviewerID: pgInt8(reviewerID), Comment: pgText(comment)})
+		row, e = q.UnlockGradeReview(ctx, sqlcgen.UnlockGradeReviewParams{ID: reviewID, ReviewerID: pgtypex.Int8(reviewerID), Comment: pgtypex.Text(comment)})
 		return e
 	}); err != nil {
 		return ReviewDTO{}, apperr.ErrGradeReviewState.WithCause(err)
@@ -368,11 +368,11 @@ func (r *repo) ListAppeals(ctx context.Context, tenantID int64, status int16, pa
 	var total int64
 	if err := r.inTenant(ctx, tenantID, func(q *sqlcgen.Queries) error {
 		var e error
-		total, e = q.CountGradeAppeals(ctx, pgInt2(status))
+		total, e = q.CountGradeAppeals(ctx, pgtypex.Int2(status))
 		if e != nil {
 			return e
 		}
-		rows, e = q.ListGradeAppeals(ctx, sqlcgen.ListGradeAppealsParams{Status: pgInt2(status), LimitCount: int32(size), OffsetCount: int32((page - 1) * size)})
+		rows, e = q.ListGradeAppeals(ctx, sqlcgen.ListGradeAppealsParams{Status: pgtypex.Int2(status), LimitCount: int32(size), OffsetCount: int32((page - 1) * size)})
 		return e
 	}); err != nil {
 		return nil, 0, apperr.ErrGradeAppealInvalid.WithCause(err)
@@ -389,7 +389,7 @@ func (r *repo) UpdateAppealStatus(ctx context.Context, tenantID, appealID, handl
 	var row sqlcgen.GradeAppeal
 	if err := r.inTenant(ctx, tenantID, func(q *sqlcgen.Queries) error {
 		var e error
-		row, e = q.UpdateGradeAppealStatus(ctx, sqlcgen.UpdateGradeAppealStatusParams{ID: appealID, HandlerID: pgInt8(handlerID), Status: status, ResultComment: pgText(comment)})
+		row, e = q.UpdateGradeAppealStatus(ctx, sqlcgen.UpdateGradeAppealStatusParams{ID: appealID, HandlerID: pgtypex.Int8(handlerID), Status: status, ResultComment: pgtypex.Text(comment)})
 		return e
 	}); err != nil {
 		return AppealDTO{}, apperr.ErrGradeAppealState.WithCause(err)
@@ -431,7 +431,7 @@ func (r *repo) ListWarnings(ctx context.Context, tenantID, studentID, semesterID
 	var total int64
 	if err := r.inTenant(ctx, tenantID, func(q *sqlcgen.Queries) error {
 		var e error
-		params := sqlcgen.CountAcademicWarningsParams{StudentID: pgInt8(studentID), SemesterID: pgInt8(semesterID), Status: pgInt2(status)}
+		params := sqlcgen.CountAcademicWarningsParams{StudentID: pgtypex.Int8(studentID), SemesterID: pgtypex.Int8(semesterID), Status: pgtypex.Int2(status)}
 		total, e = q.CountAcademicWarnings(ctx, params)
 		if e != nil {
 			return e
@@ -470,7 +470,7 @@ func (r *repo) CreateTranscript(ctx context.Context, tenantID, id int64, req Tra
 	var row sqlcgen.TranscriptRecord
 	if err := r.inTenant(ctx, tenantID, func(q *sqlcgen.Queries) error {
 		var e error
-		row, e = q.CreateTranscriptRecord(ctx, sqlcgen.CreateTranscriptRecordParams{ID: id, TenantID: tenantID, StudentID: studentID, Scope: req.Scope, SemesterID: pgInt8(ids.ParseOrZero(req.SemesterID)), PdfRef: pdfRef})
+		row, e = q.CreateTranscriptRecord(ctx, sqlcgen.CreateTranscriptRecordParams{ID: id, TenantID: tenantID, StudentID: studentID, Scope: req.Scope, SemesterID: pgtypex.Int8(ids.ParseOrZero(req.SemesterID)), PdfRef: pdfRef})
 		return e
 	}); err != nil {
 		return TranscriptDTO{}, apperr.ErrGradeTranscriptFailed.WithCause(err)
@@ -518,11 +518,6 @@ func parseSemesterDates(req SemesterRequest) (time.Time, time.Time, error) {
 		return time.Time{}, time.Time{}, apperr.ErrGradeSemesterInvalid
 	}
 	return start, end, nil
-}
-
-// pgDate 构造 date 参数。
-func pgDate(v time.Time) pgtype.Date {
-	return pgtype.Date{Time: v.UTC(), Valid: !v.IsZero()}
 }
 
 // mapNotFound 把未命中映射为业务不存在错误。

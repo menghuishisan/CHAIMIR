@@ -2,11 +2,13 @@
 package content
 
 import (
+	"context"
 	"errors"
 	"testing"
 
 	"chaimir/internal/contracts"
 	"chaimir/internal/platform/jsonx"
+	"chaimir/internal/platform/tenant"
 	"chaimir/pkg/apperr"
 )
 
@@ -279,6 +281,43 @@ func TestCreateAuditDetailIncludesSystemImportNote(t *testing.T) {
 	}
 	if note["source"] != "m8-vuln" || note["precheck"] != true {
 		t.Fatalf("unexpected system import note: %#v", note)
+	}
+}
+
+// TestValidateSystemImportRequestRejectsTeacherAuthor 确认内部系统建题不能由请求体伪装成教师来源。
+func TestValidateSystemImportRequestRejectsTeacherAuthor(t *testing.T) {
+	req := CreateItemRequest{
+		Code: "vuln-1", Version: "1.0.0", Type: ContentTypeContestProblem, Title: "漏洞题",
+		Difficulty: DifficultyAdvanced, AuthorID: "2001", AuthorType: AuthorTypeTeacher,
+		Visibility: VisibilityPrivate, Body: map[string]any{"statement": "题面"},
+		SystemImportNote: map[string]any{"source": "m8-vuln", "precheck": true},
+	}
+	if err := validateSystemImportRequest(req); err == nil {
+		t.Fatalf("system import must reject teacher author_type from request body")
+	}
+	req.AuthorType = AuthorTypeSystem
+	if err := validateSystemImportRequest(req); err != nil {
+		t.Fatalf("system author_type should be accepted: %v", err)
+	}
+	req.AuthorType = AuthorTypeExternal
+	if err := validateSystemImportRequest(req); err != nil {
+		t.Fatalf("external author_type should be accepted: %v", err)
+	}
+}
+
+// TestSystemImportContentRejectsTenantMismatch 确认内部系统导入不能用请求租户覆盖服务端鉴权租户。
+func TestSystemImportContentRejectsTenantMismatch(t *testing.T) {
+	svc := &Service{}
+	ctx := tenant.WithContext(context.Background(), tenant.Identity{TenantID: 1001, AccountID: 2001})
+
+	_, err := svc.SystemImportContent(ctx, contracts.ContentSystemImportRequest{TenantID: 2002})
+
+	ae, ok := apperr.As(err)
+	if !ok {
+		t.Fatalf("expected app error, got %T %v", err, err)
+	}
+	if ae.Code != apperr.ErrContentTenantInvalid.Code {
+		t.Fatalf("expected tenant mismatch code %s, got %s", apperr.ErrContentTenantInvalid.Code, ae.Code)
 	}
 }
 

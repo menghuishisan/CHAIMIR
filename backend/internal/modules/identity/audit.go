@@ -6,9 +6,11 @@ package identity
 
 import (
 	"context"
+	"fmt"
 
 	"chaimir/internal/modules/identity/internal/sqlcgen"
 	"chaimir/internal/platform/audit"
+	"chaimir/internal/platform/pgtypex"
 	"chaimir/internal/platform/tenant"
 	"chaimir/pkg/apperr"
 )
@@ -102,6 +104,20 @@ func (s *Service) writePlatformAudit(ctx context.Context, actorID int64, action,
 	return nil
 }
 
+// Write 写审计日志,实现 platform/audit.Writer 供其他模块统一落 identity.audit_log。
+func (s *Service) Write(ctx context.Context, e audit.Entry) error {
+	params := buildAuditLogParams(s.idgen.Generate(), e)
+	exec := func(q *sqlcgen.Queries) error { return q.CreateAuditLog(ctx, params) }
+	if !auditEntryIsPlatformScoped(e) {
+		return s.repo.inTenantID(ctx, e.TenantID, exec)
+	}
+	// 平台级审计 tenant_id 为 NULL,普通 app 连接会受 audit_log RLS 限制;必须使用特权连接。
+	if !s.repo.hasPrivileged() {
+		return fmt.Errorf("平台级审计写入需要特权连接")
+	}
+	return s.repo.inPrivileged(ctx, exec)
+}
+
 // writeAuditInTx 在当前 M1 业务事务内追加审计记录。
 func (s *Service) writeAuditInTx(ctx context.Context, q *sqlcgen.Queries, actorRole int16, action, targetType string, targetID int64, detail map[string]any) error {
 	entry, err := buildAuditEntry(ctx, actorRole, action, targetType, targetID, detail)
@@ -127,16 +143,37 @@ func (s *Service) writeAccountAuditInTx(ctx context.Context, q *sqlcgen.Queries,
 // buildAuditLogParams 把平台审计 Entry 转为 sqlc 入参。
 func buildAuditLogParams(id int64, e audit.Entry) sqlcgen.CreateAuditLogParams {
 	// 字段映射集中在一处,确保 M1 自己写审计与跨模块 audit.Writer 写审计完全一致。
-	return sqlcgen.CreateAuditLogParams{
+	return auditLogParamsFromCreate(buildAuditLogCreate(id, e))
+}
+
+// buildAuditLogCreate 把平台审计 Entry 转为 repo 可写入的内部投影。
+func buildAuditLogCreate(id int64, e audit.Entry) AuditLogCreate {
+	return AuditLogCreate{
 		ID:         id,
-		TenantID:   pgInt8(e.TenantID, e.TenantID != 0),
+		TenantID:   e.TenantID,
 		ActorID:    e.ActorID,
 		ActorRole:  e.ActorRole,
 		Action:     e.Action,
 		TargetType: e.TargetType,
-		TargetID:   pgInt8(e.TargetID, e.TargetID != 0),
+		TargetID:   e.TargetID,
 		Detail:     detailJSON(e.Detail),
-		Ip:         pgText(e.IP),
-		TraceID:    pgText(e.TraceID),
+		IP:         e.IP,
+		TraceID:    e.TraceID,
+	}
+}
+
+// auditLogParamsFromCreate 把内部审计投影转换为 sqlc 写入参数。
+func auditLogParamsFromCreate(row AuditLogCreate) sqlcgen.CreateAuditLogParams {
+	return sqlcgen.CreateAuditLogParams{
+		ID:         row.ID,
+		TenantID:   pgtypex.Int8When(row.TenantID, row.TenantID != 0),
+		ActorID:    row.ActorID,
+		ActorRole:  row.ActorRole,
+		Action:     row.Action,
+		TargetType: row.TargetType,
+		TargetID:   pgtypex.Int8When(row.TargetID, row.TargetID != 0),
+		Detail:     row.Detail,
+		Ip:         pgtypex.Text(row.IP),
+		TraceID:    pgtypex.Text(row.TraceID),
 	}
 }

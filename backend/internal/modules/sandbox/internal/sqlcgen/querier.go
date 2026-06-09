@@ -35,6 +35,8 @@ type Querier interface {
 	GetTenantQuota(ctx context.Context, tenantID int64) (TenantQuotum, error)
 	GetToolByCode(ctx context.Context, code string) (Tool, error)
 	ListActiveSandboxResourceSpecs(ctx context.Context) ([]ListActiveSandboxResourceSpecsRow, error)
+	ListDueSandboxRecycles(ctx context.Context, arg ListDueSandboxRecyclesParams) ([]Sandbox, error)
+	ListExpiredSandboxSnapshots(ctx context.Context, limit int32) ([]Sandbox, error)
 	ListRuntimes(ctx context.Context, arg ListRuntimesParams) ([]Runtime, error)
 	ListSandboxEvents(ctx context.Context, arg ListSandboxEventsParams) ([]SandboxEvent, error)
 	ListSandboxTools(ctx context.Context, sandboxID int64) ([]ListSandboxToolsRow, error)

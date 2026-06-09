@@ -169,9 +169,11 @@ type ContestConfig struct {
 
 // NotifyConfig 定义通知事件消费的重试边界,由事件入口统一使用。
 type NotifyConfig struct {
-	EventRetryMax     int
-	EventRetryDelayMs int
-	UnreadTTLHours    int
+	EventRetryMax         int
+	EventRetryDelayMs     int
+	UnreadTTLHours        int
+	SendRateWindowSeconds int
+	SendRateMax           int
 }
 
 // TeachingConfig 定义 M6 对外/跨模块读取边界。
@@ -179,6 +181,7 @@ type TeachingConfig struct {
 	CourseGradesMaxRows       int
 	JudgeOutboxBatchSize      int
 	JudgeOutboxPollIntervalMs int
+	GradeExportBatchSize      int
 }
 
 // GradeConfig 定义 M11 审核、申诉和成绩单流程的运行边界。
@@ -189,40 +192,41 @@ type GradeConfig struct {
 
 // SandboxConfig K8s 沙箱编排。
 type SandboxConfig struct {
-	KubeconfigPath               string
-	NSPrefixStudent              string
-	NSPrefixJudge                string
-	NSPrefixBattle               string
-	PrepullNamespace             string
-	ImageRegistry                string
-	ImageAttestations            []SandboxImageAttestation
-	DefaultCPU                   string
-	DefaultMemory                string
-	DefaultReqCPU                string
-	DefaultReqMemory             string
-	MaxCPU                       string
-	MaxMemory                    string
-	MaxPods                      string
-	WorkspaceStorage             string
-	PrepullTimeoutSeconds        int
-	ReadyTimeoutSeconds          int
-	PrepullPollIntervalSeconds   int
-	ReadyPollIntervalSeconds     int
-	PrepullRequestCPU            string
-	PrepullRequestMemory         string
-	PrepullLimitCPU              string
-	PrepullLimitMemory           string
-	ChainRPCTimeoutSeconds       int
-	InitArchiveMaxFiles          int
-	InitArchiveMaxUnpackedBytes  int64
-	ProbeDefaultPeriodSeconds    int32
-	ProbeDefaultFailureThreshold int32
-	RecyclePollIntervalSeconds   int
-	RecycleBatchSize             int
-	ReadyIdleTimeoutSeconds      int
-	ControlNamespace             string
-	ControlPodLabelKey           string
-	ControlPodLabelValue         string
+	KubeconfigPath                string
+	NSPrefixStudent               string
+	NSPrefixJudge                 string
+	NSPrefixBattle                string
+	PrepullNamespace              string
+	ImageRegistry                 string
+	ImageAttestations             []SandboxImageAttestation
+	DefaultCPU                    string
+	DefaultMemory                 string
+	DefaultReqCPU                 string
+	DefaultReqMemory              string
+	MaxCPU                        string
+	MaxMemory                     string
+	MaxPods                       string
+	WorkspaceStorage              string
+	PrepullTimeoutSeconds         int
+	ReadyTimeoutSeconds           int
+	PrepullPollIntervalSeconds    int
+	ReadyPollIntervalSeconds      int
+	PrepullRequestCPU             string
+	PrepullRequestMemory          string
+	PrepullLimitCPU               string
+	PrepullLimitMemory            string
+	ChainRPCTimeoutSeconds        int
+	InitArchiveMaxFiles           int
+	InitArchiveMaxUnpackedBytes   int64
+	ProbeDefaultPeriodSeconds     int32
+	ProbeDefaultFailureThreshold  int32
+	RecyclePollIntervalSeconds    int
+	RecycleBatchSize              int
+	ReadyIdleTimeoutSeconds       int
+	SelftestRecycleTimeoutSeconds int
+	ControlNamespace              string
+	ControlPodLabelKey            string
+	ControlPodLabelValue          string
 }
 
 // SandboxImageAttestation 是 CI/Harbor 产出的受控镜像安全证明。
@@ -235,13 +239,16 @@ type SandboxImageAttestation struct {
 
 // JudgeConfig M3 判题队列与限频配置。
 type JudgeConfig struct {
-	QueuePollIntervalMs        int
-	WorkerBatchSize            int
-	SubmitRateLimitSec         int
-	DefaultMaxRetries          int
-	SandboxReadyPollIntervalMs int
-	ResultDetailsMaxBytes      int
-	InputInjectTimeoutSeconds  int
+	QueuePollIntervalMs          int
+	WorkerBatchSize              int
+	SubmitRateLimitSec           int
+	DefaultMaxRetries            int
+	SandboxReadyPollIntervalMs   int
+	ResultDetailsMaxBytes        int
+	InputInjectTimeoutSeconds    int
+	InputArchiveMaxFiles         int
+	InputArchiveMaxUnpackedBytes int64
+	SimilarityDefaultThreshold   float64
 }
 
 // MonitoringConfig 是 M9 外接监控面板嵌入配置。
@@ -279,6 +286,14 @@ func Load() (*Config, error) {
 		n, err := strconv.ParseInt(strings.TrimSpace(v), 10, 64)
 		if err != nil {
 			errs = append(errs, fmt.Sprintf("环境变量 %s 需为 int64,实际=%q", key, v))
+		}
+		return n
+	}
+	reqFloat64 := func(key string) float64 {
+		v := os.Getenv(key)
+		n, err := strconv.ParseFloat(strings.TrimSpace(v), 64)
+		if err != nil {
+			errs = append(errs, fmt.Sprintf("环境变量 %s 需为 float64,实际=%q", key, v))
 		}
 		return n
 	}
@@ -413,64 +428,71 @@ func Load() (*Config, error) {
 		VulnSourceTimeoutSeconds:   reqInt("CONTEST_VULN_SOURCE_TIMEOUT_SECONDS"),
 	}
 	c.Notify = NotifyConfig{
-		EventRetryMax:     reqInt("NOTIFY_EVENT_RETRY_MAX"),
-		EventRetryDelayMs: reqInt("NOTIFY_EVENT_RETRY_DELAY_MS"),
-		UnreadTTLHours:    reqInt("NOTIFY_UNREAD_TTL_HOURS"),
+		EventRetryMax:         reqInt("NOTIFY_EVENT_RETRY_MAX"),
+		EventRetryDelayMs:     reqInt("NOTIFY_EVENT_RETRY_DELAY_MS"),
+		UnreadTTLHours:        reqInt("NOTIFY_UNREAD_TTL_HOURS"),
+		SendRateWindowSeconds: reqInt("NOTIFY_SEND_RATE_WINDOW_SECONDS"),
+		SendRateMax:           reqInt("NOTIFY_SEND_RATE_MAX"),
 	}
 	c.Teaching = TeachingConfig{
 		CourseGradesMaxRows:       reqInt("TEACHING_COURSE_GRADES_MAX_ROWS"),
 		JudgeOutboxBatchSize:      reqInt("TEACHING_JUDGE_OUTBOX_BATCH_SIZE"),
 		JudgeOutboxPollIntervalMs: reqInt("TEACHING_JUDGE_OUTBOX_POLL_INTERVAL_MS"),
+		GradeExportBatchSize:      reqInt("TEACHING_GRADE_EXPORT_BATCH_SIZE"),
 	}
 	c.Grade = GradeConfig{
 		AppealWindowDays:     reqInt("GRADE_APPEAL_WINDOW_DAYS"),
 		TranscriptSigningKey: c.Auth.HMACKey,
 	}
 	c.Sandbox = SandboxConfig{
-		KubeconfigPath:               os.Getenv("KUBECONFIG_PATH"),
-		NSPrefixStudent:              req("SANDBOX_NS_PREFIX_STUDENT"),
-		NSPrefixJudge:                req("SANDBOX_NS_PREFIX_JUDGE"),
-		NSPrefixBattle:               req("SANDBOX_NS_PREFIX_BATTLE"),
-		PrepullNamespace:             req("SANDBOX_PREPULL_NAMESPACE"),
-		ImageRegistry:                req("IMAGE_REGISTRY"),
-		ImageAttestations:            readSandboxImageAttestations("SANDBOX_IMAGE_ATTESTATIONS_JSON", &errs),
-		DefaultCPU:                   req("SANDBOX_DEFAULT_CPU"),
-		DefaultMemory:                req("SANDBOX_DEFAULT_MEMORY"),
-		DefaultReqCPU:                req("SANDBOX_DEFAULT_REQUEST_CPU"),
-		DefaultReqMemory:             req("SANDBOX_DEFAULT_REQUEST_MEMORY"),
-		MaxCPU:                       req("SANDBOX_MAX_CPU"),
-		MaxMemory:                    req("SANDBOX_MAX_MEMORY"),
-		MaxPods:                      req("SANDBOX_MAX_PODS"),
-		WorkspaceStorage:             req("SANDBOX_WORKSPACE_STORAGE"),
-		PrepullTimeoutSeconds:        reqInt("SANDBOX_PREPULL_TIMEOUT_SECONDS"),
-		ReadyTimeoutSeconds:          reqInt("SANDBOX_READY_TIMEOUT_SECONDS"),
-		PrepullPollIntervalSeconds:   reqInt("SANDBOX_PREPULL_POLL_INTERVAL_SECONDS"),
-		ReadyPollIntervalSeconds:     reqInt("SANDBOX_READY_POLL_INTERVAL_SECONDS"),
-		PrepullRequestCPU:            req("SANDBOX_PREPULL_REQUEST_CPU"),
-		PrepullRequestMemory:         req("SANDBOX_PREPULL_REQUEST_MEMORY"),
-		PrepullLimitCPU:              req("SANDBOX_PREPULL_LIMIT_CPU"),
-		PrepullLimitMemory:           req("SANDBOX_PREPULL_LIMIT_MEMORY"),
-		ChainRPCTimeoutSeconds:       reqInt("SANDBOX_CHAIN_RPC_TIMEOUT_SECONDS"),
-		InitArchiveMaxFiles:          reqInt("SANDBOX_INIT_ARCHIVE_MAX_FILES"),
-		InitArchiveMaxUnpackedBytes:  reqInt64("SANDBOX_INIT_ARCHIVE_MAX_UNPACKED_BYTES"),
-		ProbeDefaultPeriodSeconds:    int32(reqInt("SANDBOX_PROBE_DEFAULT_PERIOD_SECONDS")),
-		ProbeDefaultFailureThreshold: int32(reqInt("SANDBOX_PROBE_DEFAULT_FAILURE_THRESHOLD")),
-		RecyclePollIntervalSeconds:   reqInt("SANDBOX_RECYCLE_POLL_INTERVAL_SECONDS"),
-		RecycleBatchSize:             reqInt("SANDBOX_RECYCLE_BATCH_SIZE"),
-		ReadyIdleTimeoutSeconds:      reqInt("SANDBOX_READY_IDLE_TIMEOUT_SECONDS"),
-		ControlNamespace:             req("SANDBOX_CONTROL_NAMESPACE"),
-		ControlPodLabelKey:           req("SANDBOX_CONTROL_POD_LABEL_KEY"),
-		ControlPodLabelValue:         req("SANDBOX_CONTROL_POD_LABEL_VALUE"),
+		KubeconfigPath:                os.Getenv("KUBECONFIG_PATH"),
+		NSPrefixStudent:               req("SANDBOX_NS_PREFIX_STUDENT"),
+		NSPrefixJudge:                 req("SANDBOX_NS_PREFIX_JUDGE"),
+		NSPrefixBattle:                req("SANDBOX_NS_PREFIX_BATTLE"),
+		PrepullNamespace:              req("SANDBOX_PREPULL_NAMESPACE"),
+		ImageRegistry:                 req("IMAGE_REGISTRY"),
+		ImageAttestations:             readSandboxImageAttestations("SANDBOX_IMAGE_ATTESTATIONS_JSON", &errs),
+		DefaultCPU:                    req("SANDBOX_DEFAULT_CPU"),
+		DefaultMemory:                 req("SANDBOX_DEFAULT_MEMORY"),
+		DefaultReqCPU:                 req("SANDBOX_DEFAULT_REQUEST_CPU"),
+		DefaultReqMemory:              req("SANDBOX_DEFAULT_REQUEST_MEMORY"),
+		MaxCPU:                        req("SANDBOX_MAX_CPU"),
+		MaxMemory:                     req("SANDBOX_MAX_MEMORY"),
+		MaxPods:                       req("SANDBOX_MAX_PODS"),
+		WorkspaceStorage:              req("SANDBOX_WORKSPACE_STORAGE"),
+		PrepullTimeoutSeconds:         reqInt("SANDBOX_PREPULL_TIMEOUT_SECONDS"),
+		ReadyTimeoutSeconds:           reqInt("SANDBOX_READY_TIMEOUT_SECONDS"),
+		PrepullPollIntervalSeconds:    reqInt("SANDBOX_PREPULL_POLL_INTERVAL_SECONDS"),
+		ReadyPollIntervalSeconds:      reqInt("SANDBOX_READY_POLL_INTERVAL_SECONDS"),
+		PrepullRequestCPU:             req("SANDBOX_PREPULL_REQUEST_CPU"),
+		PrepullRequestMemory:          req("SANDBOX_PREPULL_REQUEST_MEMORY"),
+		PrepullLimitCPU:               req("SANDBOX_PREPULL_LIMIT_CPU"),
+		PrepullLimitMemory:            req("SANDBOX_PREPULL_LIMIT_MEMORY"),
+		ChainRPCTimeoutSeconds:        reqInt("SANDBOX_CHAIN_RPC_TIMEOUT_SECONDS"),
+		InitArchiveMaxFiles:           reqInt("SANDBOX_INIT_ARCHIVE_MAX_FILES"),
+		InitArchiveMaxUnpackedBytes:   reqInt64("SANDBOX_INIT_ARCHIVE_MAX_UNPACKED_BYTES"),
+		ProbeDefaultPeriodSeconds:     int32(reqInt("SANDBOX_PROBE_DEFAULT_PERIOD_SECONDS")),
+		ProbeDefaultFailureThreshold:  int32(reqInt("SANDBOX_PROBE_DEFAULT_FAILURE_THRESHOLD")),
+		RecyclePollIntervalSeconds:    reqInt("SANDBOX_RECYCLE_POLL_INTERVAL_SECONDS"),
+		RecycleBatchSize:              reqInt("SANDBOX_RECYCLE_BATCH_SIZE"),
+		ReadyIdleTimeoutSeconds:       reqInt("SANDBOX_READY_IDLE_TIMEOUT_SECONDS"),
+		SelftestRecycleTimeoutSeconds: reqInt("SANDBOX_SELFTEST_RECYCLE_TIMEOUT_SECONDS"),
+		ControlNamespace:              req("SANDBOX_CONTROL_NAMESPACE"),
+		ControlPodLabelKey:            req("SANDBOX_CONTROL_POD_LABEL_KEY"),
+		ControlPodLabelValue:          req("SANDBOX_CONTROL_POD_LABEL_VALUE"),
 	}
 	errs = append(errs, validateSandboxQuantities(c.Sandbox)...)
 	c.Judge = JudgeConfig{
-		QueuePollIntervalMs:        reqInt("JUDGE_QUEUE_POLL_INTERVAL_MS"),
-		WorkerBatchSize:            reqInt("JUDGE_WORKER_BATCH_SIZE"),
-		SubmitRateLimitSec:         reqInt("JUDGE_SUBMIT_RATE_LIMIT_SECONDS"),
-		DefaultMaxRetries:          reqInt("JUDGE_DEFAULT_MAX_RETRIES"),
-		SandboxReadyPollIntervalMs: reqInt("JUDGE_SANDBOX_READY_POLL_INTERVAL_MS"),
-		ResultDetailsMaxBytes:      reqInt("JUDGE_RESULT_DETAILS_MAX_BYTES"),
-		InputInjectTimeoutSeconds:  reqInt("JUDGE_INPUT_INJECT_TIMEOUT_SECONDS"),
+		QueuePollIntervalMs:          reqInt("JUDGE_QUEUE_POLL_INTERVAL_MS"),
+		WorkerBatchSize:              reqInt("JUDGE_WORKER_BATCH_SIZE"),
+		SubmitRateLimitSec:           reqInt("JUDGE_SUBMIT_RATE_LIMIT_SECONDS"),
+		DefaultMaxRetries:            reqInt("JUDGE_DEFAULT_MAX_RETRIES"),
+		SandboxReadyPollIntervalMs:   reqInt("JUDGE_SANDBOX_READY_POLL_INTERVAL_MS"),
+		ResultDetailsMaxBytes:        reqInt("JUDGE_RESULT_DETAILS_MAX_BYTES"),
+		InputInjectTimeoutSeconds:    reqInt("JUDGE_INPUT_INJECT_TIMEOUT_SECONDS"),
+		InputArchiveMaxFiles:         reqInt("JUDGE_INPUT_ARCHIVE_MAX_FILES"),
+		InputArchiveMaxUnpackedBytes: reqInt64("JUDGE_INPUT_ARCHIVE_MAX_UNPACKED_BYTES"),
+		SimilarityDefaultThreshold:   reqFloat64("JUDGE_SIMILARITY_DEFAULT_THRESHOLD"),
 	}
 	c.Monitoring = MonitoringConfig{
 		PanelsJSON: req("MONITORING_PANELS_JSON"),
@@ -503,11 +525,47 @@ func Load() (*Config, error) {
 	if c.Contest.VulnSourceTimeoutSeconds < 1 || c.Contest.VulnSourceTimeoutSeconds > 60 {
 		errs = append(errs, "CONTEST_VULN_SOURCE_TIMEOUT_SECONDS 必须在 1 到 60 秒之间")
 	}
+	if c.Notify.EventRetryMax <= 0 {
+		errs = append(errs, "NOTIFY_EVENT_RETRY_MAX 必须大于 0")
+	}
+	if c.Notify.EventRetryDelayMs <= 0 {
+		errs = append(errs, "NOTIFY_EVENT_RETRY_DELAY_MS 必须大于 0")
+	}
+	if c.Notify.UnreadTTLHours <= 0 {
+		errs = append(errs, "NOTIFY_UNREAD_TTL_HOURS 必须大于 0")
+	}
+	if c.Notify.SendRateWindowSeconds <= 0 {
+		errs = append(errs, "NOTIFY_SEND_RATE_WINDOW_SECONDS 必须大于 0")
+	}
+	if c.Notify.SendRateMax <= 0 {
+		errs = append(errs, "NOTIFY_SEND_RATE_MAX 必须大于 0")
+	}
+	if c.Teaching.CourseGradesMaxRows <= 0 {
+		errs = append(errs, "TEACHING_COURSE_GRADES_MAX_ROWS 必须大于 0")
+	}
+	if c.Teaching.JudgeOutboxBatchSize <= 0 {
+		errs = append(errs, "TEACHING_JUDGE_OUTBOX_BATCH_SIZE 必须大于 0")
+	}
+	if c.Teaching.JudgeOutboxPollIntervalMs <= 0 {
+		errs = append(errs, "TEACHING_JUDGE_OUTBOX_POLL_INTERVAL_MS 必须大于 0")
+	}
+	if c.Teaching.GradeExportBatchSize <= 0 {
+		errs = append(errs, "TEACHING_GRADE_EXPORT_BATCH_SIZE 必须大于 0")
+	}
 	if c.Judge.ResultDetailsMaxBytes <= 0 {
 		errs = append(errs, "JUDGE_RESULT_DETAILS_MAX_BYTES 必须大于 0")
 	}
 	if c.Judge.InputInjectTimeoutSeconds <= 0 {
 		errs = append(errs, "JUDGE_INPUT_INJECT_TIMEOUT_SECONDS 必须大于 0")
+	}
+	if c.Judge.InputArchiveMaxFiles <= 0 {
+		errs = append(errs, "JUDGE_INPUT_ARCHIVE_MAX_FILES 必须大于 0")
+	}
+	if c.Judge.InputArchiveMaxUnpackedBytes <= 0 {
+		errs = append(errs, "JUDGE_INPUT_ARCHIVE_MAX_UNPACKED_BYTES 必须大于 0")
+	}
+	if c.Judge.SimilarityDefaultThreshold <= 0 || c.Judge.SimilarityDefaultThreshold >= 1 {
+		errs = append(errs, "JUDGE_SIMILARITY_DEFAULT_THRESHOLD 必须大于 0 且小于 1")
 	}
 	if c.Sandbox.InitArchiveMaxFiles <= 0 {
 		errs = append(errs, "SANDBOX_INIT_ARCHIVE_MAX_FILES 必须大于 0")
@@ -529,6 +587,9 @@ func Load() (*Config, error) {
 	}
 	if c.Sandbox.ReadyIdleTimeoutSeconds <= 0 {
 		errs = append(errs, "SANDBOX_READY_IDLE_TIMEOUT_SECONDS 必须大于 0")
+	}
+	if c.Sandbox.SelftestRecycleTimeoutSeconds <= 0 {
+		errs = append(errs, "SANDBOX_SELFTEST_RECYCLE_TIMEOUT_SECONDS 必须大于 0")
 	}
 	if len(c.Identity.SSOAllowedServiceOrigins) == 0 {
 		errs = append(errs, "IDENTITY_SSO_ALLOWED_SERVICE_ORIGINS 至少配置一个平台 CAS 回调 origin")

@@ -46,24 +46,24 @@ func TestFileWriteEncodingRejectsUnknownValue(t *testing.T) {
 
 // TestProgressWSAuthorizesBeforeUpgrade 确认 progress WS 在升级连接前完成沙箱归属校验。
 func TestProgressWSAuthorizesBeforeUpgrade(t *testing.T) {
-	src, err := os.ReadFile("websocket.go")
+	src, err := os.ReadFile("api_websocket.go")
 	if err != nil {
-		t.Fatalf("read websocket.go: %v", err)
+		t.Fatalf("read api_websocket.go: %v", err)
 	}
 	text := string(src)
-	progressIdx := strings.Index(text, "progress, err := s.GetSandboxProgress")
-	serveIdx := strings.Index(text, "s.hub.Serve")
+	progressIdx := strings.Index(text, "progress, err := a.svc.GetSandboxProgress")
+	serveIdx := strings.Index(text, "a.svc.hub.Serve")
 	if progressIdx < 0 || serveIdx < 0 {
-		t.Fatalf("ServeProgressWS structure not found")
+		t.Fatalf("serveProgressWS structure not found")
 	}
 	if progressIdx > serveIdx {
-		t.Fatalf("ServeProgressWS must authorize and load current progress before WebSocket upgrade")
+		t.Fatalf("serveProgressWS must authorize and load current progress before WebSocket upgrade")
 	}
 }
 
 // TestSandboxProductionCodeDoesNotUseGenericInternalError 防止 M2 业务错误退回平台通用 11500。
 func TestSandboxProductionCodeDoesNotUseGenericInternalError(t *testing.T) {
-	files := []string{"audit.go", "files.go", "websocket.go"}
+	files := []string{"audit.go", "service_files.go", "service_websocket.go", "api_websocket.go"}
 	for _, file := range files {
 		src, err := os.ReadFile(file)
 		if err != nil {

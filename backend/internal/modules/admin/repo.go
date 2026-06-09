@@ -10,11 +10,10 @@ import (
 	"chaimir/internal/platform/ids"
 	"chaimir/internal/platform/jsonx"
 	"chaimir/internal/platform/pagex"
-	"chaimir/internal/platform/timex"
+	"chaimir/internal/platform/pgtypex"
 	"chaimir/pkg/apperr"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgtype"
 )
 
 // repo 是 M9 模块数据库访问封装。
@@ -48,7 +47,7 @@ func (r *repo) ListStatistics(ctx context.Context, scope int16, tenantID int64, 
 	err := r.execByScope(ctx, tenantID, func(q *sqlcgen.Queries) error {
 		var e error
 		rows, e = q.ListStatistics(ctx, sqlcgen.ListStatisticsParams{
-			Scope: scope, TenantID: pgInt8(tenantID), FromDate: pgDate(from), ToDate: pgDate(to),
+			Scope: scope, TenantID: pgtypex.Int8(tenantID), FromDate: pgtypex.Date(from), ToDate: pgtypex.Date(to),
 		})
 		return e
 	})
@@ -67,7 +66,7 @@ func (r *repo) ListConfigs(ctx context.Context, scope int16, tenantID int64) ([]
 	var rows []sqlcgen.SystemConfig
 	err := r.execByScope(ctx, tenantID, func(q *sqlcgen.Queries) error {
 		var e error
-		rows, e = q.ListConfigs(ctx, sqlcgen.ListConfigsParams{Scope: scope, TenantID: pgInt8(tenantID)})
+		rows, e = q.ListConfigs(ctx, sqlcgen.ListConfigsParams{Scope: scope, TenantID: pgtypex.Int8(tenantID)})
 		return e
 	})
 	if err != nil {
@@ -81,7 +80,7 @@ func (r *repo) GetConfig(ctx context.Context, scope int16, tenantID int64, key s
 	var row sqlcgen.SystemConfig
 	err := r.execByScope(ctx, tenantID, func(q *sqlcgen.Queries) error {
 		var e error
-		row, e = q.GetConfigByKey(ctx, sqlcgen.GetConfigByKeyParams{Scope: scope, TenantID: pgInt8(tenantID), Key: key})
+		row, e = q.GetConfigByKey(ctx, sqlcgen.GetConfigByKeyParams{Scope: scope, TenantID: pgtypex.Int8(tenantID), Key: key})
 		return e
 	})
 	if err != nil {
@@ -114,7 +113,7 @@ func (r *repo) UpdateConfig(ctx context.Context, configID, changeLogID, operator
 		}
 		row = updated
 		_, e = q.CreateConfigChangeLog(ctx, sqlcgen.CreateConfigChangeLogParams{
-			ID: changeLogID, ConfigID: configID, TenantID: pgInt8(tenantID),
+			ID: changeLogID, ConfigID: configID, TenantID: pgtypex.Int8(tenantID),
 			OldValue: oldValue, NewValue: newValue, OperatorID: operatorID,
 		})
 		return e
@@ -171,11 +170,11 @@ func (r *repo) ListAlertRules(ctx context.Context, scope int16, tenantID int64, 
 	var total int64
 	err := r.execByScope(ctx, tenantID, func(q *sqlcgen.Queries) error {
 		var e error
-		total, e = q.CountAlertRules(ctx, sqlcgen.CountAlertRulesParams{Scope: scope, TenantID: pgInt8(tenantID)})
+		total, e = q.CountAlertRules(ctx, sqlcgen.CountAlertRulesParams{Scope: scope, TenantID: pgtypex.Int8(tenantID)})
 		if e != nil {
 			return e
 		}
-		rows, e = q.ListAlertRules(ctx, sqlcgen.ListAlertRulesParams{Scope: scope, TenantID: pgInt8(tenantID), OffsetCount: int32((page - 1) * size), LimitCount: int32(size)})
+		rows, e = q.ListAlertRules(ctx, sqlcgen.ListAlertRulesParams{Scope: scope, TenantID: pgtypex.Int8(tenantID), OffsetCount: int32((page - 1) * size), LimitCount: int32(size)})
 		return e
 	})
 	if err != nil {
@@ -194,7 +193,7 @@ func (r *repo) CreateAlertRule(ctx context.Context, ruleID, tenantID int64, req 
 	err = r.execByScope(ctx, tenantID, func(q *sqlcgen.Queries) error {
 		var e error
 		row, e = q.CreateAlertRule(ctx, sqlcgen.CreateAlertRuleParams{
-			ID: ruleID, Scope: req.Scope, TenantID: pgInt8(tenantID), Name: req.Name, Metric: req.Metric,
+			ID: ruleID, Scope: req.Scope, TenantID: pgtypex.Int8(tenantID), Name: req.Name, Metric: req.Metric,
 			Condition: condition, Level: req.Level, Enabled: req.Enabled,
 		})
 		return e
@@ -214,7 +213,7 @@ func (r *repo) UpdateAlertRule(ctx context.Context, tenantID, ruleID int64, req 
 	var row sqlcgen.AlertRule
 	err = r.inApp(ctx, func(q *sqlcgen.Queries) error {
 		var e error
-		row, e = q.UpdateAlertRule(ctx, sqlcgen.UpdateAlertRuleParams{ID: ruleID, TenantID: pgInt8(tenantID), Name: req.Name, Metric: req.Metric, Condition: condition, Level: req.Level, Enabled: req.Enabled})
+		row, e = q.UpdateAlertRule(ctx, sqlcgen.UpdateAlertRuleParams{ID: ruleID, TenantID: pgtypex.Int8(tenantID), Name: req.Name, Metric: req.Metric, Condition: condition, Level: req.Level, Enabled: req.Enabled})
 		return e
 	})
 	if err != nil {
@@ -230,11 +229,11 @@ func (r *repo) ListAlertEvents(ctx context.Context, tenantID int64, status int16
 	var total int64
 	err := r.inApp(ctx, func(q *sqlcgen.Queries) error {
 		var e error
-		total, e = q.CountAlertEvents(ctx, sqlcgen.CountAlertEventsParams{Status: pgInt2(status), TenantID: pgInt8(tenantID)})
+		total, e = q.CountAlertEvents(ctx, sqlcgen.CountAlertEventsParams{Status: pgtypex.Int2(status), TenantID: pgtypex.Int8(tenantID)})
 		if e != nil {
 			return e
 		}
-		rows, e = q.ListAlertEvents(ctx, sqlcgen.ListAlertEventsParams{Status: pgInt2(status), TenantID: pgInt8(tenantID), OffsetCount: int32((page - 1) * size), LimitCount: int32(size)})
+		rows, e = q.ListAlertEvents(ctx, sqlcgen.ListAlertEventsParams{Status: pgtypex.Int2(status), TenantID: pgtypex.Int8(tenantID), OffsetCount: int32((page - 1) * size), LimitCount: int32(size)})
 		return e
 	})
 	if err != nil {
@@ -248,7 +247,7 @@ func (r *repo) GetAlertEvent(ctx context.Context, tenantID, eventID int64) (Aler
 	var row sqlcgen.AlertEvent
 	if err := r.inApp(ctx, func(q *sqlcgen.Queries) error {
 		var e error
-		row, e = q.GetAlertEventByID(ctx, sqlcgen.GetAlertEventByIDParams{ID: eventID, TenantID: pgInt8(tenantID)})
+		row, e = q.GetAlertEventByID(ctx, sqlcgen.GetAlertEventByIDParams{ID: eventID, TenantID: pgtypex.Int8(tenantID)})
 		return e
 	}); err != nil {
 		return AlertEventDTO{}, apperr.ErrAdminAlertNotFound.WithCause(err)
@@ -261,7 +260,7 @@ func (r *repo) HandleAlertEvent(ctx context.Context, tenantID, eventID, handlerI
 	var row sqlcgen.AlertEvent
 	if err := r.inApp(ctx, func(q *sqlcgen.Queries) error {
 		var e error
-		row, e = q.HandleAlertEvent(ctx, sqlcgen.HandleAlertEventParams{ID: eventID, TenantID: pgInt8(tenantID), HandlerID: pgInt8(handlerID), Status: status})
+		row, e = q.HandleAlertEvent(ctx, sqlcgen.HandleAlertEventParams{ID: eventID, TenantID: pgtypex.Int8(tenantID), HandlerID: pgtypex.Int8(handlerID), Status: status})
 		return e
 	}); err != nil {
 		return AlertEventDTO{}, apperr.ErrAdminAlertState.WithCause(err)
@@ -272,7 +271,7 @@ func (r *repo) HandleAlertEvent(ctx context.Context, tenantID, eventID, handlerI
 // RevertAlertEvent 回滚刚处理的告警事件状态,避免通知失败时留下半成功状态。
 func (r *repo) RevertAlertEvent(ctx context.Context, tenantID, eventID int64) error {
 	if err := r.inApp(ctx, func(q *sqlcgen.Queries) error {
-		_, e := q.RevertAlertEvent(ctx, sqlcgen.RevertAlertEventParams{ID: eventID, TenantID: pgInt8(tenantID)})
+		_, e := q.RevertAlertEvent(ctx, sqlcgen.RevertAlertEventParams{ID: eventID, TenantID: pgtypex.Int8(tenantID)})
 		return e
 	}); err != nil {
 		return apperr.ErrAdminAlertNotifyFailed.WithCause(err)
@@ -319,12 +318,4 @@ func (r *repo) execByScope(ctx context.Context, tenantID int64, fn queryFunc) er
 		return r.inTenant(ctx, tenantID, fn)
 	}
 	return r.inApp(ctx, fn)
-}
-
-// pgDate 构造 date 参数,空值用当前日期避免无界查询。
-func pgDate(v time.Time) pgtype.Date {
-	if v.IsZero() {
-		v = timex.Now()
-	}
-	return pgtype.Date{Time: v.UTC(), Valid: true}
 }

@@ -6,6 +6,8 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
+	"os"
+	"strings"
 	"testing"
 
 	"chaimir/internal/contracts"
@@ -128,10 +130,11 @@ func TestSimCheckpointRequiresExactStructuredMatch(t *testing.T) {
 	}
 }
 
-// TestSimCheckpointDetailsIncludeExpectedAndActual 确认 J5 失败结果包含可解释的 expected/actual。
-func TestSimCheckpointDetailsIncludeExpectedAndActual(t *testing.T) {
+// TestSimCheckpointDetailsRedactExpectedAnswer 确认 J5 失败结果只返回期望摘要,不泄露标准检查点。
+func TestSimCheckpointDetailsRedactExpectedAnswer(t *testing.T) {
 	result, err := judgeSimCheckpoint(map[string]any{
-		"checkpoint": map[string]any{"step": "deploy", "ok": true},
+		"checkpoint_label": "部署流程应完成",
+		"checkpoint":       map[string]any{"private_answer": "teacher-only", "ok": true},
 	}, map[string]any{"checkpoint": map[string]any{"step": "deploy", "ok": false}}, 5)
 	if err != nil {
 		t.Fatalf("valid checkpoint rejected: %v", err)
@@ -143,8 +146,11 @@ func TestSimCheckpointDetailsIncludeExpectedAndActual(t *testing.T) {
 	if !ok || len(details) != 1 {
 		t.Fatalf("unexpected details: %#v", result.Details)
 	}
-	if details[0]["expected"] == nil || details[0]["actual"] == nil {
-		t.Fatalf("J5 details must include expected and actual, got %#v", details[0])
+	if details[0]["expected"] != nil {
+		t.Fatalf("J5 details must not expose full expected checkpoint, got %#v", details[0])
+	}
+	if details[0]["expected_label"] != "部署流程应完成" || details[0]["actual"] == nil {
+		t.Fatalf("J5 details must include expected_label and actual, got %#v", details[0])
 	}
 }
 
@@ -172,8 +178,8 @@ func TestOnchainAssertionsRequireConfiguredAssertions(t *testing.T) {
 	}
 }
 
-// TestOnchainAssertionDetailsIncludeExpectedAndActual 确认 J2 失败详情含 expected/actual 但不暴露完整答案。
-func TestOnchainAssertionDetailsIncludeExpectedAndActual(t *testing.T) {
+// TestOnchainAssertionDetailsRedactExpectedAnswer 确认 J2 失败详情只返回期望摘要,不暴露完整断言答案。
+func TestOnchainAssertionDetailsRedactExpectedAnswer(t *testing.T) {
 	svc := &Service{sandbox: &fakeChainSandbox{queryResult: map[string]any{"balance": "50"}}}
 
 	result, err := svc.judgeOnchainAssertions(context.Background(), 9001, map[string]any{
@@ -181,7 +187,7 @@ func TestOnchainAssertionDetailsIncludeExpectedAndActual(t *testing.T) {
 			map[string]any{"name": "state", "action": "query", "target": "account:alice"},
 		},
 		"assertions": []any{
-			map[string]any{"source": "state", "target": "balance", "op": "eq", "expected": "100"},
+			map[string]any{"source": "state", "target": "balance", "op": "eq", "label": "余额应达到目标区间", "expected": map[string]any{"private_answer": "100"}},
 		},
 	}, 10)
 	if err != nil {
@@ -194,8 +200,22 @@ func TestOnchainAssertionDetailsIncludeExpectedAndActual(t *testing.T) {
 	if !ok || len(details) != 1 {
 		t.Fatalf("unexpected details: %#v", result.Details)
 	}
-	if details[0]["expected"] != "100" || details[0]["actual"] != "50" {
-		t.Fatalf("details must include expected and actual, got %#v", details[0])
+	if details[0]["expected"] != nil {
+		t.Fatalf("J2 details must not expose full expected assertion, got %#v", details[0])
+	}
+	if details[0]["expected_label"] != "余额应达到目标区间" || details[0]["actual"] != "50" {
+		t.Fatalf("details must include expected_label and actual, got %#v", details[0])
+	}
+}
+
+// TestJudgerDetailsNeverUseExpectedKey 确认生产结果详情不重新使用会泄露答案的 expected 字段。
+func TestJudgerDetailsNeverUseExpectedKey(t *testing.T) {
+	data, err := os.ReadFile("service_judgers.go")
+	if err != nil {
+		t.Fatalf("read service_judgers.go: %v", err)
+	}
+	if strings.Contains(string(data), `"expected":`) {
+		t.Fatalf("judger result details must use expected_label instead of expected")
 	}
 }
 

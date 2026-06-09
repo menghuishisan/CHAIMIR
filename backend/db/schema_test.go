@@ -13,6 +13,7 @@ var (
 	createTablePattern = regexp.MustCompile(`(?is)CREATE TABLE\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*\((.*?)\);`)
 	tenantArrayPattern = regexp.MustCompile(`(?is)tenant_tables\s+TEXT\[\]\s*:=\s*ARRAY\[(.*?)\]`)
 	quotedNamePattern  = regexp.MustCompile(`'([a-zA-Z_][a-zA-Z0-9_]*)'`)
+	selectStarPattern  = regexp.MustCompile(`(?i)\bSELECT\s+\*`)
 )
 
 // TestTenantTablesAreCoveredByRLSLoops 确认所有含 tenant_id 的租户表都进入本迁移 RLS 列表。
@@ -31,6 +32,20 @@ func TestTenantTablesAreCoveredByRLSLoops(t *testing.T) {
 			if _, ok := rlsTables[table.name]; !ok {
 				t.Errorf("%s creates tenant table %s but does not include it in tenant_tables RLS loop", path, table.name)
 			}
+		}
+	}
+}
+
+// TestQueriesUseExplicitColumns 防止新增字段或敏感字段被 SELECT * 默认带出。
+func TestQueriesUseExplicitColumns(t *testing.T) {
+	files, err := filepath.Glob(filepath.Join("queries", "*.sql"))
+	if err != nil {
+		t.Fatalf("list query files: %v", err)
+	}
+	for _, path := range files {
+		text := readMigration(t, path)
+		if loc := selectStarPattern.FindStringIndex(text); loc != nil {
+			t.Fatalf("%s must use explicit columns instead of SELECT * near: %q", path, text[loc[0]:min(len(text), loc[1]+80)])
 		}
 	}
 }
@@ -76,6 +91,8 @@ func rlsLoopTables(text string) map[string]struct{} {
 func platformScopedTenantColumn(table string) bool {
 	switch table {
 	case "tenant_application":
+		return true
+	case "sim_share":
 		return true
 	default:
 		return false

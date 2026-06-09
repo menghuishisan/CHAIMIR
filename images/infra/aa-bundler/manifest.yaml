@@ -1,0 +1,76 @@
+﻿# 本文件声明 infra/aa-bundler 镜像的职责、端口、安全、资源和供应链约束。
+schema_version: 1
+category: infra
+name: aa-bundler
+image: infra/aa-bundler
+labels:
+  app.kubernetes.io/name: aa-bundler
+  app.kubernetes.io/component: infra
+  app.kubernetes.io/part-of: chaimir
+  chaimir.io/category: infra
+  chaimir.io/image: infra/aa-bundler
+  chaimir.io/data-driven: "true"
+  chaimir.io/student-access: "false"
+  chaimir.io/sensitivity: sandbox-infra
+  chaimir.io/scope: sandbox
+  chaimir.io/source: thin-wrapper
+description: ERC-4337 账户抽象 bundler 教学镜像。
+source:
+  type: thin-wrapper
+upstream:
+  image: ghcr.io/stackup-wallet/stackup-bundler:v0.6.25
+  reuse_policy: thin-wrapper
+data_driven: true
+capabilities:
+  - erc4337-bundler
+infra:
+  eco_tags:
+    - evm
+  roles:
+    - account-abstraction
+    - bundler
+ports:
+  - name: http
+    container_port: 4337
+    protocol: TCP
+    expose: internal
+    purpose: ERC-4337 bundler RPC
+local_dev:
+  host_mappings:
+    - host: 127.0.0.1
+      env: CHAIMIR_DEV_AA_BUNDLER_PORT
+      default: 18089
+      container_port: 4337
+security:
+  run_as_non_root: true
+  read_only_root_filesystem: true
+  allow_privilege_escalation: false
+  privileged: false
+  host_network: false
+  automount_service_account_token: false
+  drop_capabilities:
+    - ALL
+  network_policy: deny-all
+student_access:
+  enabled: false
+resources:
+  cpu_request: 50m
+  cpu_limit: 250m
+  memory_request: 64Mi
+  memory_limit: 256Mi
+  ephemeral_storage_limit: 512Mi
+build:
+  context: images/infra/aa-bundler
+  dockerfile: Dockerfile
+selftest:
+  commands:
+    - name: bundler-help
+      command:
+        - stackup-bundler
+        - --help
+supply_chain:
+  sbom: true
+  trivy_required: true
+  cosign_required: true
+  pull_by_digest_in_production: true
+

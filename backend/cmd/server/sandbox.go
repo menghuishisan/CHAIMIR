@@ -37,6 +37,7 @@ func assembleSandbox(d *moduleDeps) error {
 	api := sandbox.NewAPI(svc, d.infra.auth)
 	api.Register(d.infra.server.apiV1())
 	d.infra.sandbox = svc
+	go svc.StartRecycleScheduler(d.ctx)
 	slog.Info("模块装配", slog.String("module", "sandbox"), slog.String("layer", "1-engine"))
 	return nil
 }

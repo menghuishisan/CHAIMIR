@@ -109,6 +109,8 @@ type AuditRecord struct {
 
 // IdentityAdminService 是 M1 对 M9 暴露的平台/审计/统计管理契约。
 type IdentityAdminService interface {
+	// HasRole 判断账号是否具备某角色,供 M9 service 层做管理操作二次授权。
+	HasRole(ctx context.Context, accountID int64, role string) (bool, error)
 	// Stats 读取平台级或租户级身份统计。
 	Stats(ctx context.Context, tenantID int64) (IdentityStats, error)
 	// AdminListTenants 列出租户摘要。

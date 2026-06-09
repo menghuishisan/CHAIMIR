@@ -60,7 +60,7 @@ func run() error {
 
 	// 第三步:基础设施就绪后再按分层顺序装配模块,防止 nil 依赖进入生产服务。
 	// 按分层顺序装配各模块(地基→引擎→业务→聚合)。
-	if err := assembleModules(&moduleDeps{cfg: cfg, infra: app}); err != nil {
+	if err := assembleModules(&moduleDeps{ctx: ctx, cfg: cfg, infra: app}); err != nil {
 		return err
 	}
 
@@ -169,8 +169,8 @@ func initInfra(ctx context.Context, cfg *config.Config) (*infra, error) {
 	a.auth = auth.NewManager(cfg.Auth)
 	a.hub = ws.NewHub(ws.NewOriginPolicy(cfg.Server.WSAllowedOrigins))
 
-	// 第四步:初始化沙箱编排强依赖;学生代码执行能力不能在运行期降级。
-	// K8s 客户端(M2 沙箱编排)。M2 已进入生产实现阶段,不可静默降级为无沙箱能力。
+	// 第四步:初始化沙箱编排强依赖;学生代码执行能力不能在运行期切换为无沙箱路径。
+	// K8s 客户端(M2 沙箱编排)。M2 已进入生产实现阶段,启动失败必须直接暴露。
 	if a.k8s, err = k8s.New(cfg.Sandbox); err != nil {
 		return nil, err
 	}

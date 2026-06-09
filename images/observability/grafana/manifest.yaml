@@ -1,0 +1,89 @@
+# 本文件声明 observability/grafana 上游固定镜像的来源、配置、端口、数据卷和生产门禁。
+schema_version: 1
+category: observability
+name: grafana
+image: observability/grafana
+labels:
+  app.kubernetes.io/name: grafana
+  app.kubernetes.io/component: observability
+  app.kubernetes.io/part-of: chaimir
+  chaimir.io/category: observability
+  chaimir.io/image: observability/grafana
+  chaimir.io/data-driven: "false"
+  chaimir.io/student-access: "false"
+  chaimir.io/sensitivity: observability
+  chaimir.io/scope: observability
+  chaimir.io/source: upstream-pinned
+description: Grafana 监控看板上游固定镜像。
+source:
+  type: upstream-pinned
+upstream:
+  registry: docker.io
+  image: grafana/grafana
+  version: "12.1.0"
+  digest_required: true
+  digest_lock_ref: images/locks/observability/grafana.lock.yaml
+  license: AGPL-3.0
+private_delivery:
+  offline_bundle: true
+  import_project: observability
+data_driven: false
+capabilities:
+  - dashboards
+  - monitoring-embed
+env_keys:
+  config:
+    - MONITORING_PANELS_JSON
+  secret: []
+secrets_required: []
+ports:
+  - name: http
+    container_port: 3000
+    protocol: TCP
+    expose: gateway
+    purpose: Grafana UI through authenticated ingress
+local_dev:
+  host_mappings: []
+security:
+  run_as_non_root: true
+  read_only_root_filesystem: false
+  allow_privilege_escalation: false
+  privileged: false
+  host_network: false
+  automount_service_account_token: false
+  drop_capabilities:
+    - ALL
+  network_policy: deny-all
+security_exceptions:
+  - field: read_only_root_filesystem
+    reason: Grafana 需要写插件、会话和 SQLite/缓存数据卷。
+    writable_mounts:
+      - runtime-state
+student_access:
+  enabled: false
+data_volumes:
+  - name: data
+    mount_path: /var/lib/grafana
+    backup_required: true
+backup:
+  required: true
+  mode: dashboard-export-and-volume
+network:
+  expose: internal
+  default_deny: true
+resources:
+  cpu_request: 100m
+  cpu_limit: 500m
+  memory_request: 256Mi
+  memory_limit: 1Gi
+  ephemeral_storage_limit: 1Gi
+selftest:
+  upstream_healthcheck:
+    type: http
+    path: /api/health
+    port: 3000
+supply_chain:
+  sbom: true
+  trivy_required: true
+  cosign_required: true
+  pull_by_digest_in_production: true

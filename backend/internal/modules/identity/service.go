@@ -19,8 +19,6 @@ import (
 	"chaimir/pkg/apperr"
 	"chaimir/pkg/crypto"
 	"chaimir/pkg/snowflake"
-
-	"github.com/jackc/pgx/v5/pgtype"
 )
 
 // Service 是 M1 的业务服务,聚合依赖。
@@ -169,21 +167,6 @@ func (s *Service) genTempPassword() (string, error) {
 		return "", err
 	}
 	return "Cm" + raw + "9", nil // 前缀字母 + 随机主体 + 数字,满足强度。
-}
-
-// pgText 将空字符串映射为 SQL NULL,用于可选文本字段。
-func pgText(s string) pgtype.Text {
-	return pgtype.Text{String: s, Valid: s != ""}
-}
-
-// pgInt2 构造可选 smallint 字段,valid 由业务校验结果决定。
-func pgInt2(v int16, valid bool) pgtype.Int2 {
-	return pgtype.Int2{Int16: v, Valid: valid}
-}
-
-// pgInt8 构造可选 bigint 字段,用于外键或创建人等可空 ID。
-func pgInt8(v int64, valid bool) pgtype.Int8 {
-	return pgtype.Int8{Int64: v, Valid: valid}
 }
 
 // loginableStatus 校验账号状态是否可登录(仅"正常")。

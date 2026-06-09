@@ -1,0 +1,83 @@
+﻿# 本文件声明 runtime/bitcoin 镜像的职责、端口、安全、资源和供应链约束。
+schema_version: 1
+category: runtime
+name: bitcoin
+image: runtime/bitcoin
+labels:
+  app.kubernetes.io/name: bitcoin
+  app.kubernetes.io/component: runtime
+  app.kubernetes.io/part-of: chaimir
+  chaimir.io/category: runtime
+  chaimir.io/image: runtime/bitcoin
+  chaimir.io/data-driven: "true"
+  chaimir.io/student-access: "true"
+  chaimir.io/sensitivity: student-runtime
+  chaimir.io/scope: sandbox
+  chaimir.io/source: thin-wrapper
+description: Bitcoin regtest 教学运行时镜像。
+source:
+  type: thin-wrapper
+upstream:
+  image: ruimarinho/bitcoin-core:26
+  reuse_policy: thin-wrapper
+data_driven: true
+capabilities:
+  - chain-runtime
+  - bitcoin-regtest
+  - utxo-dev
+runtime:
+  eco: bitcoin
+  adapter_level: 2
+  default_tool_codes:
+    - terminal
+    - code-server
+ports:
+  - name: rpc
+    container_port: 18443
+    protocol: TCP
+    expose: proxy
+    purpose: Bitcoin regtest RPC
+local_dev:
+  host_mappings:
+    - host: 127.0.0.1
+      env: CHAIMIR_DEV_BITCOIN_RPC_PORT
+      default: 18443
+      container_port: 18443
+security:
+  run_as_non_root: true
+  read_only_root_filesystem: true
+  allow_privilege_escalation: false
+  privileged: false
+  host_network: false
+  automount_service_account_token: false
+  drop_capabilities:
+    - ALL
+  network_policy: deny-all
+student_access:
+  enabled: true
+  shell: restricted
+  allowed_mounts:
+    - workspace
+    - public-assets
+    - runtime-state
+resources:
+  cpu_request: 250m
+  cpu_limit: "1"
+  memory_request: 512Mi
+  memory_limit: 2Gi
+  ephemeral_storage_limit: 8Gi
+build:
+  context: images/runtime/bitcoin
+  dockerfile: Dockerfile
+selftest:
+  commands:
+    - name: bitcoin-version
+      command:
+        - bitcoind
+        - --version
+supply_chain:
+  sbom: true
+  trivy_required: true
+  cosign_required: true
+  pull_by_digest_in_production: true
+

@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"chaimir/internal/contracts"
+	"chaimir/internal/platform/auth"
 	"chaimir/internal/platform/jsonx"
 	"chaimir/pkg/apperr"
 )
@@ -96,8 +97,8 @@ func validateSubmitRequest(req contracts.JudgeSubmitRequest) error {
 		return apperr.ErrJudgeTaskInvalid
 	}
 	// 第二步校验来源格式,但不在 M3 内解析上游业务语义。
-	if err := validateSourceRef(req.SourceRef); err != nil {
-		return err
+	if !auth.ValidSourceRef(req.SourceRef) {
+		return apperr.ErrJudgeTaskInvalid
 	}
 	// 第三步规范化沙箱模式,未知模式直接拒绝。
 	mode := normalizedSandboxMode(req.SandboxMode)
@@ -121,18 +122,4 @@ func normalizedSandboxMode(mode string) int16 {
 	default:
 		return 0
 	}
-}
-
-// validateSourceRef 校验来源标识格式,但不解析业务语义。
-func validateSourceRef(ref string) error {
-	parts := strings.Split(ref, ":")
-	if len(parts) != 4 {
-		return apperr.ErrJudgeTaskInvalid
-	}
-	for _, part := range parts {
-		if strings.TrimSpace(part) == "" {
-			return apperr.ErrJudgeTaskInvalid
-		}
-	}
-	return nil
 }
