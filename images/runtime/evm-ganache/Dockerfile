@@ -5,20 +5,19 @@ LABEL org.opencontainers.image.title="runtime/evm-ganache"
 LABEL org.opencontainers.image.description="Chaimir Ganache lightweight EVM runtime"
 
 ARG GANACHE_VERSION=7.9.2
+ENV HOME=/workspace
 
 COPY package.json package-lock.json /opt/chaimir/evm-ganache/
-RUN groupadd --system chaimir \
-    && useradd --system --gid chaimir --home-dir /workspace --create-home chaimir \
-    && cd /opt/chaimir/evm-ganache \
+RUN cd /opt/chaimir/evm-ganache \
     && npm ci --omit=dev --ignore-scripts --no-audit --no-fund \
     && ln -s /opt/chaimir/evm-ganache/node_modules/.bin/ganache /usr/local/bin/ganache \
-    && mkdir -p /runtime-state \
-    && chown -R chaimir:chaimir /workspace /runtime-state
+    && mkdir -p /workspace /runtime-state \
+    && chown -R 1000:1000 /workspace /runtime-state
 
 COPY entrypoint.sh /usr/local/bin/chaimir-ganache-entrypoint
 RUN chmod +x /usr/local/bin/chaimir-ganache-entrypoint
 
-USER chaimir
+USER 1000:1000
 WORKDIR /workspace
 EXPOSE 8545
 ENTRYPOINT ["/usr/local/bin/chaimir-ganache-entrypoint"]

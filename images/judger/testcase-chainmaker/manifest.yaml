@@ -64,8 +64,13 @@ selftest:
   commands:
     - name: chainmaker-version
       command:
-        - chainmaker
+        - /chainmaker-go/bin/chainmaker
         - version
+    - name: runner-syntax
+      command:
+        - sh
+        - -n
+        - /usr/local/bin/run-chainmaker-tests
 supply_chain:
   sbom: true
   trivy_required: true

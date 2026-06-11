@@ -18,7 +18,7 @@ description: Solidity/SWC/gas 静态扫描判题镜像。
 source:
   type: platform-built
 upstream:
-  image: trailofbits/eth-security-toolbox:2024.12.0
+  image: trailofbits/eth-security-toolbox:nightly-20260608
   reuse_policy: self-developed-judger
 data_driven: true
 capabilities:

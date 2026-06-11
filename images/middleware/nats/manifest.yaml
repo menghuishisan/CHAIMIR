@@ -19,8 +19,9 @@ source:
   type: upstream-pinned
 upstream:
   registry: docker.io
-  image: nats
+  image: library/nats
   version: "2.11-alpine"
+  digest: sha256:e4bf19f15fd3218814a4e3c9e0064e1334bd8aa20d5984b9f1a0afd084f8cc00
   digest_required: true
   license: Apache-2.0
 private_delivery:

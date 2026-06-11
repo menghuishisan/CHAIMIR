@@ -1,4 +1,4 @@
-﻿# 本文件声明 runtime/edu-chain 镜像的职责、端口、安全、资源和供应链约束。
+# 本文件声明 runtime/edu-chain 镜像的职责、端口、安全、资源和供应链约束。
 schema_version: 1
 category: runtime
 name: edu-chain
@@ -10,7 +10,7 @@ labels:
   chaimir.io/category: runtime
   chaimir.io/image: runtime/edu-chain
   chaimir.io/data-driven: "true"
-  chaimir.io/student-access: "true"
+  chaimir.io/student-access: "false"
   chaimir.io/sensitivity: student-runtime
   chaimir.io/scope: sandbox
   chaimir.io/source: platform-built
@@ -35,7 +35,6 @@ runtime:
   eco: edu
   adapter_level: 2
   default_tool_codes:
-    - terminal
     - code-server
 ports:
   - name: http
@@ -60,12 +59,9 @@ security:
     - ALL
   network_policy: deny-all
 student_access:
-  enabled: true
-  shell: restricted
-  allowed_mounts:
-    - workspace
-    - public-assets
-    - runtime-state
+  enabled: false
+  shell: none
+  allowed_mounts: []
 resources:
   cpu_request: 100m
   cpu_limit: 500m

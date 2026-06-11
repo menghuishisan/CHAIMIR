@@ -1,0 +1,11 @@
+# csi-snapshotter 组件安装 Kubernetes 官方 CSI VolumeSnapshot CRD 与 snapshot-controller。
+# 该组件不安装具体 CSI 存储驱动;生产必须由集群提供支持快照的 StorageClass 与 VolumeSnapshotClass。
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - volumesnapshotclasses-crd.yaml
+  - volumesnapshotcontents-crd.yaml
+  - volumesnapshots-crd.yaml
+  - snapshot-controller-rbac.yaml
+  - snapshot-controller-deployment.yaml

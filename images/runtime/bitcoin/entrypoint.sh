@@ -2,9 +2,12 @@
 # 本脚本启动 Bitcoin regtest 节点。
 set -eu
 
+DATA_DIR="${CHAIMIR_BITCOIN_DATA_DIR:-/runtime-state/bitcoin}"
+mkdir -p "${DATA_DIR}"
+
 exec bitcoind \
   -regtest=1 \
-  -datadir=/runtime-state/bitcoin \
+  -datadir="${DATA_DIR}" \
   -server=1 \
   -rpcbind=0.0.0.0 \
   -rpcallowip=0.0.0.0/0 \

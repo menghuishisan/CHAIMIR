@@ -25,6 +25,27 @@ func getCSV(key string) []string {
 	return out
 }
 
+// getKeyValueMap 读取 key=value 逗号分隔配置,用于 Kubernetes selector 这类小型结构化环境变量。
+func getKeyValueMap(key string, errs *[]string) map[string]string {
+	raw := strings.TrimSpace(os.Getenv(key))
+	if raw == "" {
+		return nil
+	}
+	items := getCSV(key)
+	out := make(map[string]string, len(items))
+	for _, item := range items {
+		k, v, ok := strings.Cut(item, "=")
+		k = strings.TrimSpace(k)
+		v = strings.TrimSpace(v)
+		if !ok || k == "" || v == "" {
+			*errs = append(*errs, fmt.Sprintf("环境变量 %s 需为 key=value 逗号分隔格式,非法项=%q", key, item))
+			continue
+		}
+		out[k] = v
+	}
+	return out
+}
+
 // LoadDotEnv 在本地开发时加载 .env;已有环境变量优先,避免覆盖外部注入。
 func LoadDotEnv(path string) (err error) {
 	f, err := os.Open(path)

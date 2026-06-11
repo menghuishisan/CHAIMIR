@@ -7,10 +7,12 @@ LABEL org.opencontainers.image.description="Chaimir Chainlink oracle node image"
 USER root
 
 # 创建平台运行目录,节点密钥和数据库凭据只允许运行期注入。
-RUN mkdir -p /chainlink /workspace \
-    && chown -R chainlink:chainlink /chainlink /workspace
+RUN groupadd --gid 1000 chaimir \
+    && useradd --uid 1000 --gid 1000 --home-dir /workspace --create-home --shell /usr/sbin/nologin chaimir \
+    && mkdir -p /chainlink /workspace \
+    && chown -R 1000:1000 /chainlink /workspace
 
-USER chainlink
+USER 1000:1000
 WORKDIR /workspace
 EXPOSE 6688
 ENTRYPOINT ["chainlink"]

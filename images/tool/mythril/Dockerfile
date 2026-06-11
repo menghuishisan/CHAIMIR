@@ -5,10 +5,10 @@ LABEL org.opencontainers.image.title="tool/mythril"
 LABEL org.opencontainers.image.description="Chaimir Mythril symbolic execution tool image"
 
 USER root
-RUN addgroup -S chaimir \
-    && adduser -S -G chaimir -h /workspace chaimir \
-    && chown -R chaimir:chaimir /workspace
+RUN addgroup -S -g 1000 chaimir \
+    && adduser -S -u 1000 -G chaimir -h /workspace chaimir \
+    && chown -R 1000:1000 /workspace
 
-USER chaimir
+USER 1000:1000
 WORKDIR /workspace
 ENTRYPOINT ["myth"]

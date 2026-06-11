@@ -18,7 +18,7 @@ description: Remix Solidity Web IDE 镜像。
 source:
   type: thin-wrapper
 upstream:
-  image: remixproject/remix-ide:2.0.0
+  image: remixproject/remix-ide:remix_live
   reuse_policy: thin-wrapper
 data_driven: true
 capabilities:
@@ -29,6 +29,9 @@ tool:
   eco_tags:
     - evm
   mount_workspace: true
+  ephemeral_mounts:
+    - name: remix-tmp
+      mount_path: /tmp
 ports:
   - name: http
     container_port: 8080
@@ -43,7 +46,7 @@ local_dev:
       container_port: 8080
 security:
   run_as_non_root: true
-  read_only_root_filesystem: false
+  read_only_root_filesystem: true
   allow_privilege_escalation: false
   privileged: false
   host_network: false
@@ -52,10 +55,10 @@ security:
     - ALL
   network_policy: deny-all
 security_exceptions:
-  - field: read_only_root_filesystem
-    reason: Remix 静态服务上游镜像需要写 Web 服务临时文件;仅允许写入工具缓存卷。
+  - field: writable_mounts
+    reason: Remix 静态服务若需要临时文件,只能写入平台声明的工具临时卷;根文件系统保持只读。
     writable_mounts:
-      - tool-cache
+      - /tmp
 student_access:
   enabled: true
   shell: restricted

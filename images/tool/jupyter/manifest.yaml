@@ -40,6 +40,17 @@ tool:
     - bitcoin
     - edu
   mount_workspace: true
+  ephemeral_mounts:
+    - name: jupyter-local
+      mount_path: /home/jovyan/.local
+    - name: jupyter-cache
+      mount_path: /home/jovyan/.cache
+    - name: jupyter-config
+      mount_path: /home/jovyan/.jupyter
+    - name: jupyter-ipython
+      mount_path: /home/jovyan/.ipython
+    - name: jupyter-tmp
+      mount_path: /tmp
 auth:
   delegated_to_platform: true
   reason: Notebook 内置 token/password 关闭,外部入口必须经平台代理按租户和环境鉴权。
@@ -57,7 +68,7 @@ local_dev:
       container_port: 8888
 security:
   run_as_non_root: true
-  read_only_root_filesystem: false
+  read_only_root_filesystem: true
   allow_privilege_escalation: false
   privileged: false
   host_network: false
@@ -66,11 +77,15 @@ security:
     - ALL
   network_policy: deny-all
 security_exceptions:
-  - field: read_only_root_filesystem
-    reason: Jupyter 需要写 notebook checkpoint、内核连接文件和运行缓存;仅允许写入 workspace 与工具缓存卷。
+  - field: writable_mounts
+    reason: Jupyter 需要写内核连接文件和运行缓存;根文件系统保持只读,仅挂载平台声明的工具临时卷。
     writable_mounts:
       - workspace
-      - tool-cache
+      - /home/jovyan/.local
+      - /home/jovyan/.cache
+      - /home/jovyan/.jupyter
+      - /home/jovyan/.ipython
+      - /tmp
 student_access:
   enabled: true
   shell: restricted

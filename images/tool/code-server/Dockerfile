@@ -6,9 +6,9 @@ LABEL org.opencontainers.image.description="Chaimir code-server web IDE image"
 
 USER root
 RUN mkdir -p /workspace \
-    && chown -R coder:coder /workspace
+    && chown -R 1000:1000 /workspace
 
-USER coder
+USER 1000:1000
 WORKDIR /workspace
 EXPOSE 8080
 

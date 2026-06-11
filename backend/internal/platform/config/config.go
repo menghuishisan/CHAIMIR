@@ -211,6 +211,8 @@ type SandboxConfig struct {
 	NSPrefixJudge                 string
 	NSPrefixBattle                string
 	PrepullNamespace              string
+	SandboxNodeSelector           map[string]string
+	SandboxNodeTolerations        []SandboxToleration
 	ImageRegistry                 string
 	ImageAttestations             []SandboxImageAttestation
 	CollectorAllowedPrefixes      []string
@@ -222,7 +224,10 @@ type SandboxConfig struct {
 	MaxMemory                     string
 	MaxPods                       string
 	WorkspaceStorage              string
+	StorageClassName              string
+	VolumeSnapshotClassName       string
 	PrepullTimeoutSeconds         int
+	PrepullHoldSeconds            int
 	ReadyTimeoutSeconds           int
 	PrepullPollIntervalSeconds    int
 	ReadyPollIntervalSeconds      int
@@ -231,8 +236,10 @@ type SandboxConfig struct {
 	PrepullLimitCPU               string
 	PrepullLimitMemory            string
 	ChainRPCTimeoutSeconds        int
+	InitArchiveMaxBytes           int64
 	InitArchiveMaxFiles           int
 	InitArchiveMaxUnpackedBytes   int64
+	FileSaveDebounceMs            int
 	ProbeDefaultPeriodSeconds     int32
 	ProbeDefaultFailureThreshold  int32
 	RecyclePollIntervalSeconds    int
@@ -242,6 +249,15 @@ type SandboxConfig struct {
 	ControlNamespace              string
 	ControlPodLabelKey            string
 	ControlPodLabelValue          string
+}
+
+// SandboxToleration 描述沙箱工作负载允许调度到带污点节点的最小配置。
+type SandboxToleration struct {
+	Key               string `json:"key"`
+	Operator          string `json:"operator"`
+	Value             string `json:"value"`
+	Effect            string `json:"effect"`
+	TolerationSeconds *int64 `json:"toleration_seconds"`
 }
 
 // SandboxImageAttestation 描述一条受控镜像的签名与扫描证明。
@@ -480,6 +496,8 @@ func Load() (*Config, error) {
 		NSPrefixJudge:                 req("SANDBOX_NS_PREFIX_JUDGE"),
 		NSPrefixBattle:                req("SANDBOX_NS_PREFIX_BATTLE"),
 		PrepullNamespace:              req("SANDBOX_PREPULL_NAMESPACE"),
+		SandboxNodeSelector:           getKeyValueMap("SANDBOX_NODE_SELECTOR", &errs),
+		SandboxNodeTolerations:        readSandboxTolerations("SANDBOX_NODE_TOLERATIONS_JSON", &errs),
 		ImageRegistry:                 req("IMAGE_REGISTRY"),
 		ImageAttestations:             readSandboxImageAttestations("SANDBOX_IMAGE_ATTESTATIONS_JSON", &errs),
 		CollectorAllowedPrefixes:      getCSV("CHAIMIR_COLLECTOR_ALLOWED_PREFIXES"),
@@ -491,7 +509,10 @@ func Load() (*Config, error) {
 		MaxMemory:                     req("SANDBOX_MAX_MEMORY"),
 		MaxPods:                       req("SANDBOX_MAX_PODS"),
 		WorkspaceStorage:              req("SANDBOX_WORKSPACE_STORAGE"),
+		StorageClassName:              os.Getenv("SANDBOX_STORAGE_CLASS_NAME"),
+		VolumeSnapshotClassName:       os.Getenv("SANDBOX_VOLUME_SNAPSHOT_CLASS_NAME"),
 		PrepullTimeoutSeconds:         reqInt("SANDBOX_PREPULL_TIMEOUT_SECONDS"),
+		PrepullHoldSeconds:            reqInt("SANDBOX_PREPULL_HOLD_SECONDS"),
 		ReadyTimeoutSeconds:           reqInt("SANDBOX_READY_TIMEOUT_SECONDS"),
 		PrepullPollIntervalSeconds:    reqInt("SANDBOX_PREPULL_POLL_INTERVAL_SECONDS"),
 		ReadyPollIntervalSeconds:      reqInt("SANDBOX_READY_POLL_INTERVAL_SECONDS"),
@@ -500,8 +521,10 @@ func Load() (*Config, error) {
 		PrepullLimitCPU:               req("SANDBOX_PREPULL_LIMIT_CPU"),
 		PrepullLimitMemory:            req("SANDBOX_PREPULL_LIMIT_MEMORY"),
 		ChainRPCTimeoutSeconds:        reqInt("SANDBOX_CHAIN_RPC_TIMEOUT_SECONDS"),
+		InitArchiveMaxBytes:           reqInt64("SANDBOX_INIT_ARCHIVE_MAX_BYTES"),
 		InitArchiveMaxFiles:           reqInt("SANDBOX_INIT_ARCHIVE_MAX_FILES"),
 		InitArchiveMaxUnpackedBytes:   reqInt64("SANDBOX_INIT_ARCHIVE_MAX_UNPACKED_BYTES"),
+		FileSaveDebounceMs:            reqInt("SANDBOX_FILE_SAVE_DEBOUNCE_MS"),
 		ProbeDefaultPeriodSeconds:     int32(reqInt("SANDBOX_PROBE_DEFAULT_PERIOD_SECONDS")),
 		ProbeDefaultFailureThreshold:  int32(reqInt("SANDBOX_PROBE_DEFAULT_FAILURE_THRESHOLD")),
 		RecyclePollIntervalSeconds:    reqInt("SANDBOX_RECYCLE_POLL_INTERVAL_SECONDS"),
@@ -647,6 +670,9 @@ func Load() (*Config, error) {
 	if c.Sandbox.PrepullTimeoutSeconds <= 0 {
 		errs = append(errs, "SANDBOX_PREPULL_TIMEOUT_SECONDS 必须大于 0")
 	}
+	if c.Sandbox.PrepullHoldSeconds <= 0 {
+		errs = append(errs, "SANDBOX_PREPULL_HOLD_SECONDS 必须大于 0")
+	}
 	if c.Sandbox.ReadyTimeoutSeconds <= 0 {
 		errs = append(errs, "SANDBOX_READY_TIMEOUT_SECONDS 必须大于 0")
 	}
@@ -659,11 +685,17 @@ func Load() (*Config, error) {
 	if c.Sandbox.ChainRPCTimeoutSeconds <= 0 {
 		errs = append(errs, "SANDBOX_CHAIN_RPC_TIMEOUT_SECONDS 必须大于 0")
 	}
+	if c.Sandbox.InitArchiveMaxBytes <= 0 {
+		errs = append(errs, "SANDBOX_INIT_ARCHIVE_MAX_BYTES 必须大于 0")
+	}
 	if c.Sandbox.InitArchiveMaxFiles <= 0 {
 		errs = append(errs, "SANDBOX_INIT_ARCHIVE_MAX_FILES 必须大于 0")
 	}
 	if c.Sandbox.InitArchiveMaxUnpackedBytes <= 0 {
 		errs = append(errs, "SANDBOX_INIT_ARCHIVE_MAX_UNPACKED_BYTES 必须大于 0")
+	}
+	if c.Sandbox.FileSaveDebounceMs <= 0 {
+		errs = append(errs, "SANDBOX_FILE_SAVE_DEBOUNCE_MS 必须大于 0")
 	}
 	if c.Sandbox.ProbeDefaultPeriodSeconds <= 0 {
 		errs = append(errs, "SANDBOX_PROBE_DEFAULT_PERIOD_SECONDS 必须大于 0")
@@ -682,6 +714,17 @@ func Load() (*Config, error) {
 	}
 	if c.Sandbox.SelftestRecycleTimeoutSeconds <= 0 {
 		errs = append(errs, "SANDBOX_SELFTEST_RECYCLE_TIMEOUT_SECONDS 必须大于 0")
+	}
+	if strings.TrimSpace(c.Sandbox.VolumeSnapshotClassName) != "" && strings.TrimSpace(c.Sandbox.StorageClassName) == "" {
+		errs = append(errs, "SANDBOX_VOLUME_SNAPSHOT_CLASS_NAME 已配置时必须同时配置 SANDBOX_STORAGE_CLASS_NAME")
+	}
+	for i, toleration := range c.Sandbox.SandboxNodeTolerations {
+		if strings.TrimSpace(toleration.Operator) != "" && toleration.Operator != "Exists" && toleration.Operator != "Equal" {
+			errs = append(errs, fmt.Sprintf("SANDBOX_NODE_TOLERATIONS_JSON 第 %d 项 operator 只能为 Exists 或 Equal", i))
+		}
+		if strings.TrimSpace(toleration.Effect) != "" && toleration.Effect != "NoSchedule" && toleration.Effect != "PreferNoSchedule" && toleration.Effect != "NoExecute" {
+			errs = append(errs, fmt.Sprintf("SANDBOX_NODE_TOLERATIONS_JSON 第 %d 项 effect 非法", i))
+		}
 	}
 	for _, prefix := range c.Sandbox.CollectorAllowedPrefixes {
 		if !strings.HasPrefix(prefix, "http://") && !strings.HasPrefix(prefix, "https://") {
@@ -728,6 +771,20 @@ func readSandboxImageAttestations(key string, errs *[]string) []SandboxImageAtte
 		if strings.TrimSpace(item.ImageURL) == "" || strings.TrimSpace(item.Digest) == "" || strings.TrimSpace(item.TrivyStatus) == "" {
 			*errs = append(*errs, fmt.Sprintf("环境变量 %s 第 %d 项镜像证明不完整", key, i))
 		}
+	}
+	return out
+}
+
+// readSandboxTolerations 解析沙箱节点容忍配置;空值表示不声明特殊调度约束。
+func readSandboxTolerations(key string, errs *[]string) []SandboxToleration {
+	raw := strings.TrimSpace(os.Getenv(key))
+	if raw == "" {
+		return nil
+	}
+	var out []SandboxToleration
+	if err := json.Unmarshal([]byte(raw), &out); err != nil {
+		*errs = append(*errs, fmt.Sprintf("环境变量 %s 需为 Kubernetes toleration JSON 数组: %v", key, err))
+		return nil
 	}
 	return out
 }

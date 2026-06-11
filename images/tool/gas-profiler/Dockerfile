@@ -4,12 +4,12 @@ FROM python:3.13-alpine
 LABEL org.opencontainers.image.title="tool/gas-profiler"
 LABEL org.opencontainers.image.description="Chaimir gas profiler command line tool"
 
-RUN addgroup -S chaimir \
-    && adduser -S -G chaimir -h /workspace chaimir
+RUN addgroup -S -g 1000 chaimir \
+    && adduser -S -u 1000 -G chaimir -h /workspace chaimir
 
 WORKDIR /workspace
 COPY gas_profiler.py /usr/local/bin/gas-profiler
 RUN chmod +x /usr/local/bin/gas-profiler
 
-USER chaimir
+USER 1000:1000
 ENTRYPOINT ["gas-profiler"]

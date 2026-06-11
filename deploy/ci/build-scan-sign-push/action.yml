@@ -34,6 +34,14 @@ inputs:
     description: Cosign 私钥口令(经 secrets 注入)
     required: true
 
+outputs:
+  digest:
+    description: 推送到 Harbor 后解析出的不可变镜像 digest
+    value: ${{ steps.digest.outputs.digest }}
+  digest_ref:
+    description: 生产部署与离线拉取使用的 image@digest 引用
+    value: ${{ steps.digest.outputs.digest_ref }}
+
 runs:
   using: composite
   steps:
@@ -64,11 +72,24 @@ runs:
       shell: bash
       run: docker push "${{ inputs.image }}:${{ inputs.tag }}"
 
+    - name: 解析推送后的不可变 digest
+      id: digest
+      shell: bash
+      run: |
+        digest=$(docker buildx imagetools inspect "${{ inputs.image }}:${{ inputs.tag }}" --format '{{.Manifest.Digest}}')
+        if [ -z "$digest" ] || [ "$digest" = "<no value>" ]; then
+          echo "无法解析镜像 digest: ${{ inputs.image }}:${{ inputs.tag }}" >&2
+          exit 1
+        fi
+        echo "digest=$digest" >> "$GITHUB_OUTPUT"
+        echo "digest_ref=${{ inputs.image }}@$digest" >> "$GITHUB_OUTPUT"
+
     - name: Cosign 签名(未签名不得部署)
       shell: bash
       env:
         COSIGN_PASSWORD: ${{ inputs.cosign-password }}
       run: |
-        echo "${{ inputs.cosign-key }}" > /tmp/cosign.key
-        cosign sign --yes --key /tmp/cosign.key "${{ inputs.image }}:${{ inputs.tag }}"
-        rm -f /tmp/cosign.key
+        key_file=$(mktemp)
+        trap 'rm -f "$key_file"' EXIT
+        echo "${{ inputs.cosign-key }}" > "$key_file"
+        cosign sign --yes --key "$key_file" "${{ steps.digest.outputs.digest_ref }}"

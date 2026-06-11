@@ -18,7 +18,7 @@ description: ERC-4337 账户抽象 bundler 教学镜像。
 source:
   type: thin-wrapper
 upstream:
-  image: ghcr.io/stackup-wallet/stackup-bundler:v0.6.25
+  image: stackupwallet/stackup-bundler:v0.6.47
   reuse_policy: thin-wrapper
 env_keys:
   config:

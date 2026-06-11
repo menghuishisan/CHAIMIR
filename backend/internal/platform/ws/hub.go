@@ -2,9 +2,11 @@
 package ws
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -107,6 +109,16 @@ func (c *Conn) SendJSON(v any) error {
 	}
 	c.send <- data
 	return nil
+}
+
+// Reader 返回 WebSocket 文本/二进制消息的连续读取流,供终端等交互场景透传输入。
+func (c *Conn) Reader() io.Reader {
+	return &connReader{conn: c}
+}
+
+// Writer 返回写入 WebSocket 二进制消息的流式 writer,供终端等交互场景透传输出。
+func (c *Conn) Writer() io.Writer {
+	return connWriter{conn: c}
 }
 
 // BindSession 把连接绑定到单端互斥主体,若旧连接仍在线则主动关闭旧连接。
@@ -310,6 +322,45 @@ func (c *Conn) closeWithControl(code int, reason string) error {
 	writeErr := c.writeControl(websocket.CloseMessage, message)
 	closeErr := c.socket.Close()
 	return errors.Join(writeErr, closeErr)
+}
+
+type connReader struct {
+	conn *Conn
+	buf  *bytes.Reader
+}
+
+// Read 从下一条 WebSocket 消息读取字节,消息边界由底层连接维护。
+func (r *connReader) Read(p []byte) (int, error) {
+	for {
+		if r.buf != nil && r.buf.Len() > 0 {
+			return r.buf.Read(p)
+		}
+		messageType, data, err := r.conn.socket.ReadMessage()
+		if err != nil {
+			return 0, err
+		}
+		if messageType == websocket.TextMessage || messageType == websocket.BinaryMessage {
+			if len(data) == 0 {
+				continue
+			}
+			r.buf = bytes.NewReader(data)
+		}
+	}
+}
+
+type connWriter struct {
+	conn *Conn
+}
+
+// Write 把字节作为一条 WebSocket 消息加入统一发送队列。
+func (w connWriter) Write(p []byte) (int, error) {
+	data := append([]byte(nil), p...)
+	select {
+	case w.conn.send <- data:
+		return len(p), nil
+	case <-w.conn.done:
+		return 0, io.ErrClosedPipe
+	}
 }
 
 // normalizeHubOptions 统一补默认超时,避免平台层各处出现不一致的连接回收口径。

@@ -5,10 +5,15 @@ LABEL org.opencontainers.image.title="tool/jupyter"
 LABEL org.opencontainers.image.description="Chaimir Jupyter notebook tool image"
 
 USER root
-RUN mkdir -p /workspace \
-    && chown -R jovyan:users /workspace
+RUN groupadd --gid 1000 chaimir \
+    && usermod --gid 1000 jovyan \
+    && mkdir -p /workspace \
+    && chown -R 1000:1000 /workspace /home/jovyan
 
-USER jovyan
+USER 1000:1000
 WORKDIR /workspace
 EXPOSE 8888
-CMD ["start-notebook.py", "--NotebookApp.token=", "--NotebookApp.password=", "--ServerApp.allow_origin=*", "--ServerApp.ip=0.0.0.0"]
+
+# 直接启动 Jupyter Server,避免上游 start.sh 在日志中回显 token/password 参数名。
+ENTRYPOINT ["jupyter"]
+CMD ["lab", "--IdentityProvider.token=", "--PasswordIdentityProvider.hashed_password=", "--ServerApp.allow_origin=*", "--ServerApp.ip=0.0.0.0", "--ServerApp.root_dir=/workspace", "--ServerApp.allow_remote_access=True", "--no-browser"]

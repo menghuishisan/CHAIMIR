@@ -77,6 +77,17 @@ make dev-up      # 建 kind 集群 → 装 ingress-nginx → 起中间件 → ap
 make dev-down    # 销毁 kind 集群
 ```
 
+`make dev-up` 会安装官方 metrics-server。生产/标准集群使用 `make metrics-up` 保持 kubelet TLS 校验;
+kind、Docker Desktop 等本地集群如 kubelet 证书不完整,使用 `make metrics-up-local`,仅本地追加
+`--kubelet-insecure-tls`,不得用于生产。
+
+M2 快照能力分为两层:通用 `VolumeSnapshot` CRD/snapshot-controller 与具体 CSI 存储驱动。
+本仓库提供 `make snapshot-up` 安装官方 CSI snapshotter 集群组件,并提供 `make snapshot-check`
+检查 CRD、`VolumeSnapshotClass` 与 `StorageClass` 是否存在。真正能创建快照还必须由集群安装
+支持快照的 CSI 驱动,并在 `SANDBOX_STORAGE_CLASS_NAME`、`SANDBOX_VOLUME_SNAPSHOT_CLASS_NAME`
+中填写真实类名。`rancher.io/local-path`、普通 Docker volume 或演示用 hostpath CSI 不作为生产
+快照方案。
+
 `make dev-up` 首次会自动生成随机 dev 密钥到 `overlays/local-dev/secret.env`。
 
 将 `chaimir.local` 指向 `127.0.0.1`(hosts)后,前端经 `http://chaimir.local` 访问。
@@ -118,6 +129,9 @@ GitHub Actions(`.github/workflows/`)+ 可复用配置(`deploy/ci/`):
 `prod-saas` 集群必须安装并配置:
 
 - External Secrets Operator:同步 `config/external-secret/` 定义的 `chaimir-secret`。
+- metrics-server:暴露 `metrics.k8s.io`,供 M2 沙箱资源用量读取真实 CPU/内存指标。
+- CSI snapshotter:提供 `VolumeSnapshot` CRD 与 snapshot-controller;生产还必须接入支持快照的 CSI
+  存储驱动并创建 `VolumeSnapshotClass`。
 - Sigstore policy-controller:执行平台镜像 Cosign 签名门禁。
 - Prometheus Adapter:暴露 `chaimir_nats_queue_backlog{queue="judge|matchmaking"}` external metric,
   供 worker HPA 按队列积压伸缩。

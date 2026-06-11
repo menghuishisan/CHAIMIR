@@ -6,16 +6,15 @@ LABEL org.opencontainers.image.description="Chaimir Hyperledger Besu enterprise 
 
 USER root
 
-# 创建运行目录并交给非 root 用户,链状态由 runtime-state 卷承载。
-RUN groupadd --system chaimir \
-    && useradd --system --gid chaimir --home-dir /workspace --create-home chaimir \
-    && mkdir -p /runtime-state/besu \
-    && chown -R chaimir:chaimir /workspace /runtime-state
+# 复用上游 besu:1000:1000,链状态只写入 runtime-state 卷。
+RUN mkdir -p /workspace /runtime-state/besu \
+    && chown -R 1000:1000 /workspace /runtime-state
 
 COPY entrypoint.sh /usr/local/bin/chaimir-besu-entrypoint
 RUN chmod +x /usr/local/bin/chaimir-besu-entrypoint
 
-USER chaimir
+ENV HOME=/workspace
+USER 1000:1000
 WORKDIR /workspace
 EXPOSE 8545
 ENTRYPOINT ["/usr/local/bin/chaimir-besu-entrypoint"]

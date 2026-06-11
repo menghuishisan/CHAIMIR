@@ -8,6 +8,6 @@ USER root
 RUN mkdir -p /workspace \
     && chown -R 1000:1000 /workspace
 
-USER 1000
+USER 1000:1000
 WORKDIR /workspace
 EXPOSE 4000

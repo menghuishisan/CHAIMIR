@@ -8,9 +8,9 @@ USER root
 
 # 集群配置和密钥由运行期注入,镜像只准备非 root 运行目录。
 RUN mkdir -p /data/ipfs-cluster /workspace \
-    && chown -R ipfs:ipfs /data/ipfs-cluster /workspace
+    && chown -R 1000:1000 /data/ipfs-cluster /workspace
 
-USER ipfs
+USER 1000:1000
 WORKDIR /workspace
 EXPOSE 9094 9096
 CMD ["daemon"]

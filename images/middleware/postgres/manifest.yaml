@@ -19,8 +19,9 @@ source:
   type: upstream-pinned
 upstream:
   registry: docker.io
-  image: postgres
+  image: library/postgres
   version: "16-alpine"
+  digest: sha256:16bc17c64a573ef34162af9298258d1aec548232985b33ed7b1eac33ba35c229
   digest_required: true
   license: PostgreSQL
 private_delivery:

@@ -66,6 +66,14 @@ rules:
   - apiGroups: [""]
     resources: ["resourcequotas", "limitranges"]
     verbs: ["create", "delete", "get", "list", "watch"]
+  # 实时资源用量读取,仅用于 M2 状态查询,不得用 requests/limits 伪装实时指标。
+  - apiGroups: ["metrics.k8s.io"]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch"]
+  # CSI VolumeSnapshot 管理,用于教师显式开启的高成本实验保活/恢复。
+  - apiGroups: ["snapshot.storage.k8s.io"]
+    resources: ["volumesnapshots"]
+    verbs: ["create", "delete", "get", "list", "watch"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding

@@ -56,38 +56,69 @@ type SandboxCreateRequest struct {
 
 // SandboxToolAccess 是沙箱内某个工具的可访问接入信息。
 type SandboxToolAccess struct {
-	ToolCode string
-	Kind     int16
-	Endpoint string
-	Status   int16
+	ToolCode string `json:"tool_code"`
+	Kind     int16  `json:"kind"`
+	Endpoint string `json:"endpoint"`
+	Status   int16  `json:"status"`
+}
+
+// SandboxResourceUsage 是单个沙箱实时用量和已申请资源摘要,用于状态查询和配额可视化。
+type SandboxResourceUsage struct {
+	CPUUsageMilli    int64 `json:"cpu_usage_milli"`
+	MemoryUsageMiB   int64 `json:"memory_usage_mib"`
+	CPURequestMilli  int64 `json:"cpu_request_milli"`
+	CPULimitMilli    int64 `json:"cpu_limit_milli"`
+	MemoryRequestMiB int64 `json:"memory_request_mib"`
+	MemoryLimitMiB   int64 `json:"memory_limit_mib"`
+	StorageBytes     int64 `json:"storage_bytes"`
 }
 
 // SandboxInfo 是跨模块传递的沙箱摘要,不暴露 K8s 内部对象细节。
 type SandboxInfo struct {
-	SandboxID           int64
-	TenantID            int64
-	Namespace           string
-	SourceRef           string
-	OwnerAccountID      int64
-	RuntimeCode         string
-	RuntimeImageVersion string
-	Phase               int16
-	Status              int16
-	ToolAccess          []SandboxToolAccess
+	SandboxID           int64                `json:"sandbox_id"`
+	TenantID            int64                `json:"tenant_id"`
+	Namespace           string               `json:"namespace"`
+	SourceRef           string               `json:"source_ref"`
+	OwnerAccountID      int64                `json:"owner_account_id"`
+	RuntimeCode         string               `json:"runtime_code"`
+	RuntimeImageVersion string               `json:"runtime_image_version"`
+	Phase               int16                `json:"phase"`
+	Status              int16                `json:"status"`
+	ToolAccess          []SandboxToolAccess  `json:"tool_access"`
+	ResourceUsage       SandboxResourceUsage `json:"resource_usage"`
 }
 
 // SandboxFileWriteRequest 是内部服务写入沙箱工作区文件的请求。
 type SandboxFileWriteRequest struct {
 	TenantID      int64
 	SandboxID     int64
+	SourceRef     string
 	RelativePath  string
 	ContentBase64 string
+}
+
+// SandboxPrivateArchiveInjectRequest 是内部判题服务注入隐藏套件归档的请求。
+type SandboxPrivateArchiveInjectRequest struct {
+	TenantID      int64
+	SandboxID     int64
+	SourceRef     string
+	Domain        string
+	ArchiveName   string
+	ContentBase64 string
+}
+
+// SandboxSaveRequest 是内部服务请求立即保存工作区的来源绑定请求。
+type SandboxSaveRequest struct {
+	TenantID  int64
+	SandboxID int64
+	SourceRef string
 }
 
 // SandboxExecRequest 是受控执行沙箱命令的内部请求。
 type SandboxExecRequest struct {
 	TenantID   int64
 	SandboxID  int64
+	SourceRef  string
 	Command    []string
 	Stdin      []byte
 	TimeoutSec int32
@@ -95,8 +126,8 @@ type SandboxExecRequest struct {
 
 // SandboxExecResult 是沙箱命令执行结果,仅保留调用方判定所需输出。
 type SandboxExecResult struct {
-	Stdout []byte
-	Stderr []byte
+	Stdout []byte `json:"stdout"`
+	Stderr []byte `json:"stderr"`
 }
 
 // SandboxRecycleRequest 是按来源级联回收沙箱的内部请求。
@@ -106,10 +137,18 @@ type SandboxRecycleRequest struct {
 	Reason    string
 }
 
+// SandboxControlRequest 是暂停、恢复和销毁单个沙箱的内部控制请求。
+type SandboxControlRequest struct {
+	TenantID  int64
+	SandboxID int64
+	SourceRef string
+}
+
 // SandboxChainDeployRequest 是统一链部署能力的内部请求。
 type SandboxChainDeployRequest struct {
 	TenantID  int64
 	SandboxID int64
+	SourceRef string
 	Payload   map[string]any
 }
 
@@ -117,6 +156,7 @@ type SandboxChainDeployRequest struct {
 type SandboxChainTxRequest struct {
 	TenantID  int64
 	SandboxID int64
+	SourceRef string
 	Payload   map[string]any
 }
 
@@ -124,20 +164,28 @@ type SandboxChainTxRequest struct {
 type SandboxChainQueryRequest struct {
 	TenantID  int64
 	SandboxID int64
+	SourceRef string
 	Target    string
+}
+
+// SandboxChainResetRequest 是统一链重置能力的内部请求。
+type SandboxChainResetRequest struct {
+	TenantID  int64
+	SandboxID int64
+	SourceRef string
 }
 
 // SandboxQuotaStats 是 M2 提供给 M9 学校看板的资源统计摘要。
 type SandboxQuotaStats struct {
-	TenantID                int64
-	ActiveSandboxCount      int64
-	MaxConcurrentSandbox    int32
-	MaxCPU                  int32
-	MaxMemoryMB             int32
-	IdleTimeoutMin          int32
-	MaxLifetimeMin          int32
-	MaxKeepaliveMin         int32
-	MaxSnapshotRetentionMin int32
+	TenantID                int64 `json:"tenant_id"`
+	ActiveSandboxCount      int64 `json:"active_sandbox_count"`
+	MaxConcurrentSandbox    int32 `json:"max_concurrent_sandbox"`
+	MaxCPU                  int32 `json:"max_cpu"`
+	MaxMemoryMB             int32 `json:"max_memory_mb"`
+	IdleTimeoutMin          int32 `json:"idle_timeout_min"`
+	MaxLifetimeMin          int32 `json:"max_lifetime_min"`
+	MaxKeepaliveMin         int32 `json:"max_keepalive_min"`
+	MaxSnapshotRetentionMin int32 `json:"max_snapshot_retention_min"`
 }
 
 // SandboxService 是 M2 沙箱引擎对 M3/M7/M8/M9 暴露的标准能力契约。
@@ -147,17 +195,19 @@ type SandboxService interface {
 	// GetSandbox 查询单个沙箱当前状态与工具接入信息。
 	GetSandbox(ctx context.Context, tenantID, sandboxID int64) (SandboxInfo, error)
 	// PauseSandbox 暂停单个沙箱,供实验实例进入已暂停状态时调用。
-	PauseSandbox(ctx context.Context, tenantID, sandboxID int64) error
+	PauseSandbox(ctx context.Context, req SandboxControlRequest) error
 	// ResumeSandbox 恢复单个沙箱,供实验实例从已暂停状态继续运行。
-	ResumeSandbox(ctx context.Context, tenantID, sandboxID int64) error
+	ResumeSandbox(ctx context.Context, req SandboxControlRequest) error
 	// DestroySandbox 主动销毁单个沙箱,供显式关闭实例或补偿清理使用。
-	DestroySandbox(ctx context.Context, tenantID, sandboxID int64) error
+	DestroySandbox(ctx context.Context, req SandboxControlRequest) error
 	// RecycleBySourceRef 按来源标识级联回收沙箱,用于实验/竞赛结束收尾。
 	RecycleBySourceRef(ctx context.Context, req SandboxRecycleRequest) error
-	// PutSandboxFile 把提交代码、脚本或判题输入写入沙箱工作区。
+	// PutSandboxFile 把提交代码或公开脚本写入沙箱工作区,不得用于隐藏测试或答案。
 	PutSandboxFile(ctx context.Context, req SandboxFileWriteRequest) error
+	// PutSandboxPrivateArchive 把隐藏测试、答案或评分脚本安全解包到私有判题域。
+	PutSandboxPrivateArchive(ctx context.Context, req SandboxPrivateArchiveInjectRequest) error
 	// SaveSandboxFiles 立即持久化当前工作区,返回保存后的代码引用与哈希。
-	SaveSandboxFiles(ctx context.Context, tenantID, sandboxID int64) (string, string, error)
+	SaveSandboxFiles(ctx context.Context, req SandboxSaveRequest) (string, string, error)
 	// ExecSandboxCommand 在沙箱内执行受限命令,供判题 worker 运行套件。
 	ExecSandboxCommand(ctx context.Context, req SandboxExecRequest) (SandboxExecResult, error)
 	// ChainDeploy 调用统一链部署能力。
@@ -167,7 +217,7 @@ type SandboxService interface {
 	// ChainQuery 调用统一链查询能力。
 	ChainQuery(ctx context.Context, req SandboxChainQueryRequest) (map[string]any, error)
 	// ChainReset 调用统一链重置能力。
-	ChainReset(ctx context.Context, tenantID, sandboxID int64) error
+	ChainReset(ctx context.Context, req SandboxChainResetRequest) error
 	// Stats 返回租户级沙箱资源统计,供 M9 学校看板聚合。
 	Stats(ctx context.Context, tenantID int64) (SandboxQuotaStats, error)
 }

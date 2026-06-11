@@ -32,7 +32,7 @@ jobs:
         run: |
           # 输出 {dir, image} 矩阵:dir 为镜像目录,image 由目录相对路径映射为 Harbor project/name。
           # 例:images/runtimes/evm-hardhat → runtime/evm-hardhat。
-          dirs=$(find images -name Dockerfile -printf '%h\n' | sort -u)
+          dirs=$(find images -name Dockerfile -printf '%h\n' | sort -u | grep -v '^images/service/' || true)
           json='[]'
           for d in $dirs; do
             rel=${d#images/}
@@ -56,8 +56,12 @@ jobs:
         run: |
           # 镜像逻辑名取自 manifest.yaml(数据驱动:平台代码不改,加镜像即接入)。
           name=$(yq '.image' "${{ matrix.dir }}/manifest.yaml")
+          safe=${name//\//-}
+          echo "logical=$name" >> "$GITHUB_OUTPUT"
+          echo "safe=$safe" >> "$GITHUB_OUTPUT"
           echo "image=${{ secrets.HARBOR_REGISTRY }}/$name" >> "$GITHUB_OUTPUT"
       - name: 构建+扫描+签名+推送
+        id: build
         uses: ./deploy/ci/build-scan-sign-push
         with:
           image: ${{ steps.meta.outputs.image }}
@@ -69,3 +73,12 @@ jobs:
           registry-password: ${{ secrets.HARBOR_PASSWORD }}
           cosign-key: ${{ secrets.COSIGN_KEY }}
           cosign-password: ${{ secrets.COSIGN_PASSWORD }}
+      - name: 写入构建产物 digest 锁片段
+        run: |
+          mkdir -p image-digest-artifacts
+          printf '%s %s\n' "${{ steps.meta.outputs.logical }}" "${{ steps.build.outputs.digest }}" > "image-digest-artifacts/${{ steps.meta.outputs.safe }}.lock"
+      - name: 上传构建产物 digest 锁片段
+        uses: actions/upload-artifact@v4
+        with:
+          name: image-digest-${{ steps.meta.outputs.safe }}
+          path: image-digest-artifacts/${{ steps.meta.outputs.safe }}.lock

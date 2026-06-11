@@ -6,13 +6,14 @@ LABEL org.opencontainers.image.description="Chaimir bridge relayer toolchain ima
 
 WORKDIR /opt/chaimir/bridge-relayer
 COPY package.json package-lock.json /opt/chaimir/bridge-relayer/
-RUN useradd --system --create-home --home-dir /workspace chaimir \
-    && npm ci --omit=dev --ignore-scripts --no-audit --no-fund \
-    && chown -R chaimir:chaimir /workspace
+RUN npm ci --omit=dev --ignore-scripts --no-audit --no-fund \
+    && mkdir -p /workspace \
+    && chown -R 1000:1000 /workspace /opt/chaimir/bridge-relayer
 
 COPY entrypoint.sh /usr/local/bin/chaimir-bridge-relayer-entrypoint
 RUN chmod +x /usr/local/bin/chaimir-bridge-relayer-entrypoint
 
-USER chaimir
+ENV HOME=/workspace
+USER 1000:1000
 WORKDIR /workspace
 ENTRYPOINT ["/usr/local/bin/chaimir-bridge-relayer-entrypoint"]

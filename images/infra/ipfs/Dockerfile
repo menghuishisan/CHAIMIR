@@ -8,9 +8,9 @@ USER root
 
 # IPFS 数据目录由 runtime-state 卷承载,镜像内不写入业务数据。
 RUN mkdir -p /data/ipfs /workspace \
-    && chown -R ipfs:ipfs /data/ipfs /workspace
+    && chown -R 1000:1000 /data/ipfs /workspace
 
-USER ipfs
+USER 1000:1000
 WORKDIR /workspace
 EXPOSE 5001 8080
 CMD ["daemon", "--migrate=true"]

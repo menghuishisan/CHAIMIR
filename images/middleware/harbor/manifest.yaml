@@ -26,22 +26,31 @@ upstream:
   components:
     - image: goharbor/nginx-photon
       version: v2.12.0
+      digest: sha256:ad01e87fe72d7e9fcf381291b49f1f32fef817b7fde0d0259199aeadc6d6bb6e
     - image: goharbor/harbor-core
       version: v2.12.0
+      digest: sha256:0d5499810373c66674bf7f83310bff2224fbae73bba731a807ecadb3b9aa0c2b
     - image: goharbor/harbor-jobservice
       version: v2.12.0
+      digest: sha256:3c7a378dd9569ae5dc5f474c5b046e965178107bb2c35d92cb88bfb885c46816
     - image: goharbor/harbor-portal
       version: v2.12.0
+      digest: sha256:cad22911ef583abed3cff92a7e29f88c01f1cfee6421fd264a5f3ab43ec6f7b4
     - image: goharbor/harbor-registryctl
       version: v2.12.0
+      digest: sha256:18c83c13168cf77a87ff7451e1996142644bd3608206f11eb12055032d980e7e
     - image: goharbor/registry-photon
       version: v2.12.0
+      digest: sha256:2639fa93ae300c02633a495804583845dc0558738d48371480c6b20d381eaa0d
     - image: goharbor/harbor-db
       version: v2.12.0
+      digest: sha256:64c10c451c3bae1fdbb804f73faab8c5430ec4ebd117ddbe9e0f46d2120305dc
     - image: goharbor/redis-photon
       version: v2.12.0
+      digest: sha256:d1a229a99af5cd007d167fcf0a2acc383fa060f868ceedfccb977d5d2e7ed9cc
     - image: goharbor/trivy-adapter-photon
       version: v2.12.0
+      digest: sha256:0266317effc5fa674363b2c6d37360b453bfeb09c08c83203ab085e2dec63685
   license: Apache-2.0
 private_delivery:
   offline_bundle: true

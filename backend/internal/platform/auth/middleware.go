@@ -36,7 +36,7 @@ const (
 
 type serviceSourceRefKey struct{}
 
-var serviceSourceRefRe = regexp.MustCompile(`^[a-z]+:[0-9]{4}:[a-z][a-z0-9-]*:[0-9A-Za-z_-]+$`)
+var serviceSourceRefRe = regexp.MustCompile(`^[a-z]+:[0-9]{4}:[a-z][a-z0-9_-]*:[0-9A-Za-z_-]+$`)
 
 // RoleChecker 是平台通用角色守卫所需的最小身份只读契约。
 type RoleChecker interface {

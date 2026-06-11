@@ -11,15 +11,22 @@ if [ -f foundry.toml ]; then
   forge test >"${RESULT_STDOUT}" 2>&1
   status=$?
   set -e
-  exec python /usr/local/bin/normalize-result --mode exit-code --exit-code "${status}" --source foundry --stdout "${RESULT_STDOUT}"
+  exec python3 /usr/local/bin/normalize-result --mode exit-code --exit-code "${status}" --source foundry --stdout "${RESULT_STDOUT}"
 fi
 
 if [ -f hardhat.config.js ] || [ -f hardhat.config.ts ]; then
+  if [ -L node_modules ]; then
+    rm -f node_modules
+  fi
+  mkdir -p node_modules/.bin
+  rm -rf node_modules/hardhat node_modules/.bin/hardhat
+  ln -s /opt/chaimir/testcase-evm/node_modules/hardhat node_modules/hardhat
+  ln -s /opt/chaimir/testcase-evm/node_modules/.bin/hardhat node_modules/.bin/hardhat
   set +e
-  npx hardhat test >"${RESULT_STDOUT}" 2>&1
+  ./node_modules/.bin/hardhat test >"${RESULT_STDOUT}" 2>&1
   status=$?
   set -e
-  exec python /usr/local/bin/normalize-result --mode exit-code --exit-code "${status}" --source hardhat --stdout "${RESULT_STDOUT}"
+  exec python3 /usr/local/bin/normalize-result --mode exit-code --exit-code "${status}" --source hardhat --stdout "${RESULT_STDOUT}"
 fi
 
 echo "未发现 Foundry 或 Hardhat 测试项目" >&2

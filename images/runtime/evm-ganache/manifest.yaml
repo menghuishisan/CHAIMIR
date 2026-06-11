@@ -1,4 +1,4 @@
-﻿# 本文件声明 runtime/evm-ganache 镜像的职责、端口、安全、资源和供应链约束。
+# 本文件声明 runtime/evm-ganache 镜像的职责、端口、安全、资源和供应链约束。
 schema_version: 1
 category: runtime
 name: evm-ganache
@@ -10,7 +10,7 @@ labels:
   chaimir.io/category: runtime
   chaimir.io/image: runtime/evm-ganache
   chaimir.io/data-driven: "true"
-  chaimir.io/student-access: "true"
+  chaimir.io/student-access: "false"
   chaimir.io/sensitivity: student-runtime
   chaimir.io/scope: sandbox
   chaimir.io/source: thin-wrapper
@@ -29,7 +29,6 @@ runtime:
   eco: evm
   adapter_level: 2
   default_tool_codes:
-    - terminal
     - code-server
     - remix
 ports:
@@ -55,12 +54,9 @@ security:
     - ALL
   network_policy: deny-all
 student_access:
-  enabled: true
-  shell: restricted
-  allowed_mounts:
-    - workspace
-    - public-assets
-    - runtime-state
+  enabled: false
+  shell: none
+  allowed_mounts: []
 resources:
   cpu_request: 250m
   cpu_limit: "1"

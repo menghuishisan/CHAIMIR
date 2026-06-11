@@ -7,14 +7,14 @@ LABEL org.opencontainers.image.description="Chaimir Hyperledger Fabric runtime t
 USER root
 
 # 创建平台工作区用户;Fabric 官方工具仍由镜像提供,不在这里自研。
-RUN groupadd --system chaimir \
-    && useradd --system --gid chaimir --home-dir /workspace --create-home chaimir \
+RUN groupadd --gid 1000 chaimir \
+    && useradd --uid 1000 --gid 1000 --home-dir /workspace --create-home --shell /usr/sbin/nologin chaimir \
     && mkdir -p /runtime-state \
-    && chown -R chaimir:chaimir /workspace /runtime-state
+    && chown -R 1000:1000 /workspace /runtime-state
 
 COPY entrypoint.sh /usr/local/bin/chaimir-fabric-entrypoint
 RUN chmod +x /usr/local/bin/chaimir-fabric-entrypoint
 
-USER chaimir
+USER 1000:1000
 WORKDIR /workspace
 ENTRYPOINT ["/usr/local/bin/chaimir-fabric-entrypoint"]

@@ -6,16 +6,16 @@ LABEL org.opencontainers.image.description="Chaimir Solana test validator runtim
 
 USER root
 
-# 创建非 root 用户和链状态目录,测试链账本写入 runtime-state。
-RUN groupadd --system chaimir \
-    && useradd --system --gid chaimir --home-dir /workspace --create-home chaimir \
+# 创建固定 UID/GID 的沙箱用户,测试链账本只写入 runtime-state。
+RUN groupadd --gid 1000 chaimir \
+    && useradd --uid 1000 --gid 1000 --home-dir /workspace --create-home --shell /usr/sbin/nologin chaimir \
     && mkdir -p /runtime-state/solana \
-    && chown -R chaimir:chaimir /workspace /runtime-state
+    && chown -R 1000:1000 /workspace /runtime-state
 
 COPY entrypoint.sh /usr/local/bin/chaimir-solana-entrypoint
 RUN chmod +x /usr/local/bin/chaimir-solana-entrypoint
 
-USER chaimir
+USER 1000:1000
 WORKDIR /workspace
 EXPOSE 8899
 ENTRYPOINT ["/usr/local/bin/chaimir-solana-entrypoint"]

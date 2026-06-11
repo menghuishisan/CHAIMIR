@@ -59,9 +59,10 @@ selftest:
   commands:
     - name: wormhole-sdk
       command:
+        - /usr/local/bin/chaimir-bridge-relayer-entrypoint
         - node
         - -e
-        - import('@certusone/wormhole-sdk').then(() => process.exit(0))
+        - "import('@wormhole-foundation/sdk').then(() => process.exit(0))"
     - name: entrypoint-syntax
       command:
         - sh

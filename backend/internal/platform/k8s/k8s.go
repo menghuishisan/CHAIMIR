@@ -15,12 +15,14 @@ import (
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/tools/remotecommand"
+	metricsclientset "k8s.io/metrics/pkg/client/clientset/versioned"
 )
 
 // Client 封装 K8s 客户端集与沙箱配置。
 type Client struct {
 	clientset     *kubernetes.Clientset
 	dynamicClient dynamic.Interface
+	metricsClient *metricsclientset.Clientset
 	restConfig    *rest.Config
 	imageRegistry string
 }
@@ -39,7 +41,11 @@ func New(cfg config.SandboxConfig) (*Client, error) {
 	if err != nil {
 		return nil, fmt.Errorf("创建 K8s dynamic 客户端失败: %w", err)
 	}
-	return &Client{clientset: cs, dynamicClient: dyn, restConfig: restCfg, imageRegistry: cfg.ImageRegistry}, nil
+	metricsClient, err := metricsclientset.NewForConfig(restCfg)
+	if err != nil {
+		return nil, fmt.Errorf("创建 K8s metrics 客户端失败: %w", err)
+	}
+	return &Client{clientset: cs, dynamicClient: dyn, metricsClient: metricsClient, restConfig: restCfg, imageRegistry: cfg.ImageRegistry}, nil
 }
 
 // buildRestConfig 根据部署形态选择 in-cluster 配置或本地 kubeconfig。
@@ -64,6 +70,9 @@ func (c *Client) Clientset() *kubernetes.Clientset { return c.clientset }
 // Dynamic 暴露 dynamic client,供模块操作已安装的标准 CRD。
 func (c *Client) Dynamic() dynamic.Interface { return c.dynamicClient }
 
+// Metrics 暴露 Kubernetes metrics client,供模块读取 metrics-server 统一资源用量。
+func (c *Client) Metrics() *metricsclientset.Clientset { return c.metricsClient }
+
 // ImageRegistry 返回配置中的镜像仓库前缀,供上层拼运行时/工具镜像。
 func (c *Client) ImageRegistry() string { return c.imageRegistry }
 
@@ -77,6 +86,18 @@ func (c *Client) Healthz(ctx context.Context) error {
 
 // Exec 在目标容器中执行命令并透传输入输出流,供 M2 终端/文件/初始化脚本复用。
 func (c *Client) Exec(
+	ctx context.Context,
+	namespace, podName, container string,
+	command []string,
+	stdin io.Reader,
+	stdout, stderr io.Writer,
+	tty bool,
+) error {
+	return c.ExecStream(ctx, namespace, podName, container, command, stdin, stdout, stderr, tty)
+}
+
+// ExecStream 在目标容器中执行命令并透传流,供交互式终端和非交互命令统一复用。
+func (c *Client) ExecStream(
 	ctx context.Context,
 	namespace, podName, container string,
 	command []string,

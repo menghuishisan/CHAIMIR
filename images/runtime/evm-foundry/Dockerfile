@@ -6,16 +6,15 @@ LABEL org.opencontainers.image.description="Chaimir Foundry and Anvil EVM runtim
 
 USER root
 
-# 创建非 root 用户和工作区,运行时由平台挂载 workspace/runtime-state。
-RUN addgroup -S chaimir \
-    && adduser -S -G chaimir -h /workspace chaimir \
-    && mkdir -p /workspace /runtime-state \
-    && chown -R chaimir:chaimir /workspace /runtime-state
+# 复用上游 foundry:1000:1000,缓存写入 runtime-state 而不是学生 workspace。
+RUN mkdir -p /workspace /runtime-state/foundry-home \
+    && chown -R 1000:1000 /workspace /runtime-state
 
 COPY entrypoint.sh /usr/local/bin/chaimir-foundry-entrypoint
 RUN chmod +x /usr/local/bin/chaimir-foundry-entrypoint
 
-USER chaimir
+ENV HOME=/runtime-state/foundry-home
+USER 1000:1000
 WORKDIR /workspace
 EXPOSE 8545
 ENTRYPOINT ["/usr/local/bin/chaimir-foundry-entrypoint"]

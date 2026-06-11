@@ -4,9 +4,11 @@ package upload
 import (
 	"archive/tar"
 	"archive/zip"
+	"bytes"
 	"fmt"
 	"io"
 	"io/fs"
+	"strings"
 )
 
 // ArchiveLimits 描述归档校验时允许的文件数和展开总大小上限。
@@ -14,6 +16,18 @@ type ArchiveLimits struct {
 	MaxFiles         int
 	MaxUnpackedBytes int64
 }
+
+// ArchiveFormat 表示平台归档安全原语支持的文件格式。
+type ArchiveFormat int
+
+const (
+	// ArchiveFormatUnknown 表示无法识别或不允许的归档格式。
+	ArchiveFormatUnknown ArchiveFormat = iota
+	// ArchiveFormatZIP 表示 ZIP 归档。
+	ArchiveFormatZIP
+	// ArchiveFormatTAR 表示 TAR 归档。
+	ArchiveFormatTAR
+)
 
 // ZIPEntryNames 校验 ZIP 成员路径、数量、大小和类型,返回规范化后的成员名列表。
 func ZIPEntryNames(r *zip.Reader, limits ArchiveLimits) ([]string, error) {
@@ -73,6 +87,132 @@ func TAREntryNames(r *tar.Reader, limits ArchiveLimits) ([]string, error) {
 	})
 }
 
+// SafeArchiveTar 校验 ZIP/TAR 归档并重打为只含普通文件的安全 TAR。
+func SafeArchiveTar(name string, data []byte, limits ArchiveLimits) ([]byte, error) {
+	format, err := DetectArchiveFormat(name, data)
+	if err != nil {
+		return nil, err
+	}
+	switch format {
+	case ArchiveFormatZIP:
+		zr, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
+		if err != nil {
+			return nil, err
+		}
+		if _, err := ZIPEntryNames(zr, limits); err != nil {
+			return nil, err
+		}
+		return zipToSafeTar(zr, limits)
+	case ArchiveFormatTAR:
+		if _, err := TAREntryNames(tar.NewReader(bytes.NewReader(data)), limits); err != nil {
+			return nil, err
+		}
+		return tarToSafeTar(tar.NewReader(bytes.NewReader(data)), limits)
+	default:
+		return nil, fmt.Errorf("归档格式不支持")
+	}
+}
+
+// DetectArchiveFormat 根据文件名和魔数识别 ZIP/TAR 归档。
+func DetectArchiveFormat(name string, data []byte) (ArchiveFormat, error) {
+	lower := strings.ToLower(strings.TrimSpace(name))
+	if strings.HasSuffix(lower, ".zip") || bytes.HasPrefix(data, []byte("PK\x03\x04")) {
+		return ArchiveFormatZIP, nil
+	}
+	if strings.HasSuffix(lower, ".tar") || looksLikeTar(data) {
+		return ArchiveFormatTAR, nil
+	}
+	return ArchiveFormatUnknown, fmt.Errorf("归档格式不支持")
+}
+
+// zipToSafeTar 把 ZIP 重打为最小普通文件 TAR,统一解包前的安全形态。
+func zipToSafeTar(zr *zip.Reader, limits ArchiveLimits) ([]byte, error) {
+	var out bytes.Buffer
+	tw := tar.NewWriter(&out)
+	seen := map[string]struct{}{}
+	for _, file := range zr.File {
+		name, ok := SafeArchiveEntryName(file.Name, seen)
+		if !ok || file.FileInfo().IsDir() {
+			continue
+		}
+		seen[name] = struct{}{}
+		if err := tw.WriteHeader(&tar.Header{Name: name, Mode: 0600, Size: int64(file.UncompressedSize64), Typeflag: tar.TypeReg}); err != nil {
+			return nil, err
+		}
+		rc, err := file.Open()
+		if err != nil {
+			return nil, err
+		}
+		if err := copyExactArchiveEntry(tw, rc, int64(file.UncompressedSize64), limits.MaxUnpackedBytes); err != nil {
+			rc.Close()
+			return nil, err
+		}
+		if err := rc.Close(); err != nil {
+			return nil, err
+		}
+	}
+	if err := tw.Close(); err != nil {
+		return nil, err
+	}
+	return out.Bytes(), nil
+}
+
+// tarToSafeTar 把 TAR 重打为最小普通文件 TAR,剥离 owner、链接和特殊模式。
+func tarToSafeTar(tr *tar.Reader, limits ArchiveLimits) ([]byte, error) {
+	var out bytes.Buffer
+	tw := tar.NewWriter(&out)
+	seen := map[string]struct{}{}
+	for {
+		header, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return nil, err
+		}
+		if header.Typeflag == tar.TypeDir {
+			continue
+		}
+		if header.Typeflag != tar.TypeReg && header.Typeflag != tar.TypeRegA {
+			return nil, fmt.Errorf("TAR 归档包含不受支持的成员类型: %s", header.Name)
+		}
+		name, ok := SafeArchiveEntryName(header.Name, seen)
+		if !ok {
+			return nil, fmt.Errorf("TAR 归档成员路径非法: %s", header.Name)
+		}
+		seen[name] = struct{}{}
+		if err := tw.WriteHeader(&tar.Header{Name: name, Mode: 0600, Size: header.Size, Typeflag: tar.TypeReg}); err != nil {
+			return nil, err
+		}
+		if err := copyExactArchiveEntry(tw, tr, header.Size, limits.MaxUnpackedBytes); err != nil {
+			return nil, err
+		}
+	}
+	if err := tw.Close(); err != nil {
+		return nil, err
+	}
+	return out.Bytes(), nil
+}
+
+// copyExactArchiveEntry 按归档头声明大小精确复制内容,防止重打包阶段绕过展开大小限制。
+func copyExactArchiveEntry(dst io.Writer, src io.Reader, declaredSize, maxBytes int64) error {
+	if declaredSize < 0 || maxBytes <= 0 || declaredSize > maxBytes {
+		return fmt.Errorf("归档成员大小超出上限")
+	}
+	if _, err := io.CopyN(dst, src, declaredSize); err != nil {
+		return fmt.Errorf("归档成员内容长度不足: %w", err)
+	}
+	var extra [1]byte
+	n, err := src.Read(extra[:])
+	if n > 0 || err == nil {
+		return fmt.Errorf("归档成员内容超过声明大小")
+	}
+	if err != io.EOF {
+		return fmt.Errorf("读取归档成员内容失败: %w", err)
+	}
+	return nil
+}
+
 // walkEntries 复用统一配额和重复路径校验,保证不同归档格式只有一套安全口径。
 func walkEntries(hintCount int, limits ArchiveLimits, iter func(func(name string, size int64) error) error) ([]string, error) {
 	if limits.MaxFiles <= 0 {
@@ -118,4 +258,9 @@ func max(a, b int) int {
 		return a
 	}
 	return b
+}
+
+// looksLikeTar 通过 ustar 标记识别 TAR 归档,避免把任意二进制当成归档。
+func looksLikeTar(data []byte) bool {
+	return len(data) > 265 && string(data[257:262]) == "ustar"
 }

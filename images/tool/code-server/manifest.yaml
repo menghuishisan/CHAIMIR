@@ -40,6 +40,11 @@ tool:
     - bitcoin
     - edu
   mount_workspace: true
+  ephemeral_mounts:
+    - name: code-server-config
+      mount_path: /home/coder/.config
+    - name: code-server-data
+      mount_path: /home/coder/.local/share/code-server
 auth:
   delegated_to_platform: true
   reason: Web IDE 内置认证关闭,外部入口必须经平台代理按租户和环境鉴权。
@@ -57,7 +62,7 @@ local_dev:
       container_port: 8080
 security:
   run_as_non_root: true
-  read_only_root_filesystem: false
+  read_only_root_filesystem: true
   allow_privilege_escalation: false
   privileged: false
   host_network: false
@@ -66,11 +71,12 @@ security:
     - ALL
   network_policy: deny-all
 security_exceptions:
-  - field: read_only_root_filesystem
-    reason: code-server 需要写扩展、用户设置和临时缓存;仅允许写入 workspace 与平台声明的工具缓存卷。
+  - field: writable_mounts
+    reason: code-server 需要写用户配置和运行数据;根文件系统保持只读,仅挂载平台声明的工具临时卷。
     writable_mounts:
       - workspace
-      - tool-cache
+      - /home/coder/.config
+      - /home/coder/.local/share/code-server
 student_access:
   enabled: true
   shell: restricted

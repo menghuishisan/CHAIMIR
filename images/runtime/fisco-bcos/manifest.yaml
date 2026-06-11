@@ -1,4 +1,4 @@
-﻿# 本文件声明 runtime/fisco-bcos 镜像的职责、端口、安全、资源和供应链约束。
+# 本文件声明 runtime/fisco-bcos 镜像的职责、端口、安全、资源和供应链约束。
 schema_version: 1
 category: runtime
 name: fisco-bcos
@@ -10,7 +10,7 @@ labels:
   chaimir.io/category: runtime
   chaimir.io/image: runtime/fisco-bcos
   chaimir.io/data-driven: "true"
-  chaimir.io/student-access: "true"
+  chaimir.io/student-access: "false"
   chaimir.io/sensitivity: student-runtime
   chaimir.io/scope: sandbox
   chaimir.io/source: thin-wrapper
@@ -18,7 +18,7 @@ description: FISCO BCOS 联盟链教学运行时镜像。
 source:
   type: thin-wrapper
 upstream:
-  image: fiscoorg/fiscobcos:v3.11.0
+  image: fiscoorg/fiscobcos:v3.12.1
   reuse_policy: thin-wrapper
 data_driven: true
 capabilities:
@@ -29,7 +29,6 @@ runtime:
   eco: fisco
   adapter_level: 2
   default_tool_codes:
-    - terminal
     - code-server
 ports:
   - name: p2p
@@ -59,12 +58,9 @@ security:
     - ALL
   network_policy: deny-all
 student_access:
-  enabled: true
-  shell: restricted
-  allowed_mounts:
-    - workspace
-    - public-assets
-    - runtime-state
+  enabled: false
+  shell: none
+  allowed_mounts: []
 resources:
   cpu_request: 500m
   cpu_limit: "2"

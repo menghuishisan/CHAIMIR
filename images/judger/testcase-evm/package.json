@@ -1,5 +1,6 @@
 {
+  "type": "module",
   "dependencies": {
-    "hardhat": "2.22.19"
+    "hardhat": "3.9.0"
   }
 }

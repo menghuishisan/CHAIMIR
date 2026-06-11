@@ -75,7 +75,7 @@ selftest:
     - name: chainlink-version
       command:
         - chainlink
-        - version
+        - --version
 supply_chain:
   sbom: true
   trivy_required: true

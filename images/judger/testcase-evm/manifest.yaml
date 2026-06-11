@@ -18,7 +18,11 @@ description: EVM Hardhat/Foundry 测试用例判题镜像。
 source:
   type: platform-built
 upstream:
-  image: ghcr.io/foundry-rs/foundry:v1.0.0
+  components:
+    - image: ghcr.io/foundry-rs/foundry:v1.0.0
+      role: foundry-toolchain
+    - image: node:20-bookworm-slim
+      role: node-runtime
   reuse_policy: self-developed-judger
 data_driven: true
 capabilities:

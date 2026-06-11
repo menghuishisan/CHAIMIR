@@ -21,6 +21,7 @@ upstream:
   registry: registry.k8s.io
   image: ingress-nginx/controller
   version: "v1.13.0"
+  digest: sha256:dc75a7baec7a3b827a5d7ab0acd10ab507904c7dad692365b3e3b596eca1afd2
   digest_required: true
   license: Apache-2.0
 private_delivery:

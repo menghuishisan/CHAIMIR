@@ -452,9 +452,10 @@ class ImageContractsTest(unittest.TestCase):
         missing = sorted(registered - templated)
         self.assertEqual([], missing)
 
-    def test_dockerfiles_end_with_explicit_non_root_user(self) -> None:
-        """Dockerfile 最终运行用户必须显式声明为非 root。"""
+    def test_dockerfiles_end_with_required_runtime_user(self) -> None:
+        """沙箱消费镜像必须固定 1000:1000,其他构建镜像至少显式非 root。"""
         errors: list[str] = []
+        sandbox_consumed_categories = {"runtime", "tool", "judger", "infra"}
         for category, name, image_dir in self.required_image_dirs():
             manifest = self.load_manifest(image_dir / "manifest.yaml")
             if manifest.get("source", {}).get("type") == "upstream-pinned":
@@ -464,6 +465,8 @@ class ImageContractsTest(unittest.TestCase):
                 errors.append(f"{category}/{name}: Dockerfile 缺少 USER")
                 continue
             last_user = user_lines[-1].split(None, 1)[1]
+            if category in sandbox_consumed_categories and last_user != "1000:1000":
+                errors.append(f"{category}/{name}: Dockerfile 最终 USER={last_user!r}, 必须为 1000:1000")
             if last_user in {"root", "0", "0:0"}:
                 errors.append(f"{category}/{name}: Dockerfile 最终 USER 是 root")
         self.assertEqual([], errors)

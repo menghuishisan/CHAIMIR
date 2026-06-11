@@ -6,11 +6,11 @@ LABEL org.opencontainers.image.description="Chaimir The Graph indexing node imag
 
 USER root
 
-# graph-node 运行用户由上游镜像提供,这里只声明工作目录权限。
+# graph-node 在沙箱内按平台固定 UID/GID 运行,避免保留 root group。
 RUN mkdir -p /workspace \
     && chown -R 1000:1000 /workspace
 
-USER 1000
+USER 1000:1000
 WORKDIR /workspace
 EXPOSE 8000 8020 8030 8040
 CMD ["graph-node"]

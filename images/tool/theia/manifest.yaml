@@ -18,7 +18,7 @@ description: Theia 轻量 Web IDE 镜像。
 source:
   type: thin-wrapper
 upstream:
-  image: theiaide/theia:1.54.0
+  image: ghcr.io/eclipse-theia/theia-blueprint/theia-ide:1.54.0
   reuse_policy: thin-wrapper
 data_driven: true
 capabilities:
@@ -40,6 +40,15 @@ tool:
     - bitcoin
     - edu
   mount_workspace: true
+  ephemeral_mounts:
+    - name: theia-ide
+      mount_path: /home/theia/.theia-ide
+    - name: theia-config
+      mount_path: /home/theia/.theia
+    - name: theia-cache
+      mount_path: /home/theia/.cache
+    - name: theia-tmp
+      mount_path: /tmp
 ports:
   - name: http
     container_port: 3000
@@ -54,7 +63,7 @@ local_dev:
       container_port: 3000
 security:
   run_as_non_root: true
-  read_only_root_filesystem: false
+  read_only_root_filesystem: true
   allow_privilege_escalation: false
   privileged: false
   host_network: false
@@ -63,11 +72,14 @@ security:
     - ALL
   network_policy: deny-all
 security_exceptions:
-  - field: read_only_root_filesystem
-    reason: Theia 需要写插件、设置和临时缓存;仅允许写入 workspace 与工具缓存卷。
+  - field: writable_mounts
+    reason: Theia 需要写插件、设置和临时上传缓存;根文件系统保持只读,仅挂载平台声明的工具临时卷。
     writable_mounts:
       - workspace
-      - tool-cache
+      - /home/theia/.theia-ide
+      - /home/theia/.theia
+      - /home/theia/.cache
+      - /tmp
 student_access:
   enabled: true
   shell: restricted
