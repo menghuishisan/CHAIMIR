@@ -90,6 +90,48 @@ type Class struct {
 	DeletedAt      pgtype.Timestamptz `json:"deleted_at"`
 }
 
+type ContentBody struct {
+	ItemID          int64              `json:"item_id"`
+	TenantID        int64              `json:"tenant_id"`
+	Body            []byte             `json:"body"`
+	SensitiveFields []string           `json:"sensitive_fields"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+}
+
+type ContentCategory struct {
+	ID        int64              `json:"id"`
+	TenantID  int64              `json:"tenant_id"`
+	ParentID  pgtype.Int8        `json:"parent_id"`
+	Name      string             `json:"name"`
+	Sort      int32              `json:"sort"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
+	DeletedAt pgtype.Timestamptz `json:"deleted_at"`
+}
+
+type ContentItem struct {
+	ID              int64              `json:"id"`
+	TenantID        int64              `json:"tenant_id"`
+	Code            string             `json:"code"`
+	Version         string             `json:"version"`
+	Type            int16              `json:"type"`
+	Title           string             `json:"title"`
+	CategoryID      pgtype.Int8        `json:"category_id"`
+	Difficulty      int16              `json:"difficulty"`
+	Tags            []string           `json:"tags"`
+	KnowledgePoints []string           `json:"knowledge_points"`
+	AuthorID        int64              `json:"author_id"`
+	AuthorType      int16              `json:"author_type"`
+	Visibility      int16              `json:"visibility"`
+	Status          int16              `json:"status"`
+	UsageCount      int32              `json:"usage_count"`
+	VersionHash     string             `json:"version_hash"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+	DeletedAt       pgtype.Timestamptz `json:"deleted_at"`
+}
+
 type Department struct {
 	ID        int64              `json:"id"`
 	TenantID  int64              `json:"tenant_id"`
@@ -126,12 +168,96 @@ type ImportPreview struct {
 	CreatedAt     pgtype.Timestamptz `json:"created_at"`
 }
 
+type JudgeEventOutbox struct {
+	ID         int64              `json:"id"`
+	TenantID   int64              `json:"tenant_id"`
+	TaskID     int64              `json:"task_id"`
+	Subject    string             `json:"subject"`
+	Payload    []byte             `json:"payload"`
+	Status     int16              `json:"status"`
+	RetryCount int32              `json:"retry_count"`
+	LastError  pgtype.Text        `json:"last_error"`
+	CreatedAt  pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt  pgtype.Timestamptz `json:"updated_at"`
+}
+
+type JudgeResult struct {
+	TaskID          int64              `json:"task_id"`
+	TenantID        int64              `json:"tenant_id"`
+	Passed          bool               `json:"passed"`
+	Score           int32              `json:"score"`
+	MaxScore        int32              `json:"max_score"`
+	Details         []byte             `json:"details"`
+	JudgeSandboxRef string             `json:"judge_sandbox_ref"`
+	JudgedAt        pgtype.Timestamptz `json:"judged_at"`
+	IsRejudge       bool               `json:"is_rejudge"`
+}
+
+type JudgeTask struct {
+	ID               int64              `json:"id"`
+	TenantID         int64              `json:"tenant_id"`
+	JudgerID         int64              `json:"judger_id"`
+	SourceRef        string             `json:"source_ref"`
+	SubmitterID      int64              `json:"submitter_id"`
+	ProblemRef       string             `json:"problem_ref"`
+	CodeStorageKey   string             `json:"code_storage_key"`
+	CodeHash         string             `json:"code_hash"`
+	InputSnapshot    []byte             `json:"input_snapshot"`
+	SandboxMode      int16              `json:"sandbox_mode"`
+	TargetSandboxRef pgtype.Text        `json:"target_sandbox_ref"`
+	Priority         int16              `json:"priority"`
+	Status           int16              `json:"status"`
+	RetryCount       int32              `json:"retry_count"`
+	MaxRetries       int32              `json:"max_retries"`
+	LastError        pgtype.Text        `json:"last_error"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
+}
+
+type Judger struct {
+	ID                int64              `json:"id"`
+	Code              string             `json:"code"`
+	Name              string             `json:"name"`
+	Type              int16              `json:"type"`
+	ExecutorRef       string             `json:"executor_ref"`
+	RuntimeRequired   bool               `json:"runtime_required"`
+	DefaultTimeoutSec int32              `json:"default_timeout_sec"`
+	ResourceSpec      []byte             `json:"resource_spec"`
+	SelftestStatus    int16              `json:"selftest_status"`
+	Status            int16              `json:"status"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
+}
+
 type Major struct {
 	ID           int64              `json:"id"`
 	TenantID     int64              `json:"tenant_id"`
 	DepartmentID int64              `json:"department_id"`
 	Name         string             `json:"name"`
 	DeletedAt    pgtype.Timestamptz `json:"deleted_at"`
+}
+
+type Paper struct {
+	ID          int64              `json:"id"`
+	TenantID    int64              `json:"tenant_id"`
+	Name        string             `json:"name"`
+	AuthorID    int64              `json:"author_id"`
+	GenMode     int16              `json:"gen_mode"`
+	GenCriteria []byte             `json:"gen_criteria"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+	DeletedAt   pgtype.Timestamptz `json:"deleted_at"`
+}
+
+type PaperItem struct {
+	ID          int64              `json:"id"`
+	TenantID    int64              `json:"tenant_id"`
+	PaperID     int64              `json:"paper_id"`
+	ItemCode    string             `json:"item_code"`
+	ItemVersion string             `json:"item_version"`
+	Score       int32              `json:"score"`
+	Seq         int32              `json:"seq"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
 
 type PlatformAdmin struct {
@@ -231,6 +357,84 @@ type SandboxTool struct {
 	Status         int16  `json:"status"`
 }
 
+type SimActionLog struct {
+	ID        int64              `json:"id"`
+	TenantID  int64              `json:"tenant_id"`
+	SessionID int64              `json:"session_id"`
+	Seq       int32              `json:"seq"`
+	AtTick    int32              `json:"at_tick"`
+	EventType string             `json:"event_type"`
+	Payload   []byte             `json:"payload"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+}
+
+type SimCheckpoint struct {
+	ID           int64              `json:"id"`
+	TenantID     int64              `json:"tenant_id"`
+	SessionID    int64              `json:"session_id"`
+	CheckpointID string             `json:"checkpoint_id"`
+	Answer       []byte             `json:"answer"`
+	Achieved     bool               `json:"achieved"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+}
+
+type SimPackage struct {
+	ID             int64              `json:"id"`
+	Code           string             `json:"code"`
+	Version        string             `json:"version"`
+	Name           string             `json:"name"`
+	Category       string             `json:"category"`
+	Compute        int16              `json:"compute"`
+	ScaleLimit     []byte             `json:"scale_limit"`
+	BundleKey      string             `json:"bundle_key"`
+	BundleHash     string             `json:"bundle_hash"`
+	BackendAdapter pgtype.Text        `json:"backend_adapter"`
+	BackendConfig  []byte             `json:"backend_config"`
+	AuthorType     int16              `json:"author_type"`
+	AuthorID       pgtype.Int8        `json:"author_id"`
+	Status         int16              `json:"status"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+}
+
+type SimPackageReview struct {
+	ID            int64              `json:"id"`
+	PackageID     int64              `json:"package_id"`
+	SubmitterID   int64              `json:"submitter_id"`
+	PreviewReport []byte             `json:"preview_report"`
+	ReviewerID    pgtype.Int8        `json:"reviewer_id"`
+	Result        int16              `json:"result"`
+	Comment       pgtype.Text        `json:"comment"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
+}
+
+type SimSession struct {
+	ID             int64              `json:"id"`
+	TenantID       int64              `json:"tenant_id"`
+	PackageID      int64              `json:"package_id"`
+	SourceRef      string             `json:"source_ref"`
+	OwnerAccountID int64              `json:"owner_account_id"`
+	Seed           int64              `json:"seed"`
+	InitParams     []byte             `json:"init_params"`
+	Compute        int16              `json:"compute"`
+	Status         int16              `json:"status"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+}
+
+type SimShare struct {
+	ID        int64              `json:"id"`
+	TenantID  int64              `json:"tenant_id"`
+	SessionID int64              `json:"session_id"`
+	Code      string             `json:"code"`
+	CreatedBy int64              `json:"created_by"`
+	Status    int16              `json:"status"`
+	ExpireAt  pgtype.Timestamptz `json:"expire_at"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
+}
+
 type SmsCode struct {
 	ID             int64              `json:"id"`
 	TenantID       int64              `json:"tenant_id"`
@@ -252,6 +456,17 @@ type SsoConfig struct {
 	Enabled    bool               `json:"enabled"`
 	CreatedAt  pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt  pgtype.Timestamptz `json:"updated_at"`
+}
+
+type SubmissionFingerprint struct {
+	ID          int64              `json:"id"`
+	TenantID    int64              `json:"tenant_id"`
+	SourceRef   string             `json:"source_ref"`
+	ProblemRef  string             `json:"problem_ref"`
+	SubmitterID int64              `json:"submitter_id"`
+	CodeHash    string             `json:"code_hash"`
+	SimVector   []byte             `json:"sim_vector"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
 
 type Tenant struct {

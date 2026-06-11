@@ -4,6 +4,11 @@ package contracts
 import "context"
 
 const (
+	// SandboxPrivateDomainJudge 表示 M3 注入隐藏测试与评分脚本的私有卷域名称。
+	SandboxPrivateDomainJudge = "judge-private"
+)
+
+const (
 	// SandboxPhaseAllocating 表示沙箱处于资源分配阶段。
 	SandboxPhaseAllocating int16 = 1
 	// SandboxPhaseReady 表示环境就绪,前端已可进入。

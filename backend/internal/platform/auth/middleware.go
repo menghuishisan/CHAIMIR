@@ -112,6 +112,28 @@ func (m *Manager) PlatformOrServiceMiddleware() gin.HandlerFunc {
 	}
 }
 
+// ServiceOrTenantAnyRoleMiddleware 允许内部服务签名或指定租户角色访问同一路由,用于同一 API 同时服务业务回调和教师操作。
+func (m *Manager) ServiceOrTenantAnyRoleMiddleware(identity RoleChecker, roles ...string) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if hasServiceAuthHeaders(c) {
+			if !m.injectServiceIdentity(c) {
+				return
+			}
+			c.Next()
+			return
+		}
+		claims, ok := m.accessClaims(c)
+		if !ok {
+			return
+		}
+		injectAccessIdentity(c, claims)
+		if !AuthorizeTenantAnyRole(c, identity, roles...) {
+			return
+		}
+		c.Next()
+	}
+}
+
 // RequirePlatformIdentity 要求当前请求来自平台管理员身份。
 func RequirePlatformIdentity() gin.HandlerFunc {
 	return func(c *gin.Context) {
