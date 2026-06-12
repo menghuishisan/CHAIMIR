@@ -2,143 +2,143 @@ version: "2"
 sql:
   - engine: "postgresql"
     schema:
-      - "migrations"
+      - "db/migrations"
     queries:
-      - "queries/identity.sql"
+      - "db/queries/identity.sql"
     gen:
       go:
         package: "sqlcgen"
-        out: "../internal/modules/identity/internal/sqlcgen"
+        out: "internal/modules/identity/internal/sqlcgen"
         sql_package: "pgx/v5"
         emit_json_tags: true
         emit_interface: true
         emit_empty_slices: true
   - engine: "postgresql"
     schema:
-      - "migrations"
+      - "db/migrations"
     queries:
-      - "queries/sandbox.sql"
+      - "db/queries/sandbox.sql"
     gen:
       go:
         package: "sqlcgen"
-        out: "../internal/modules/sandbox/internal/sqlcgen"
+        out: "internal/modules/sandbox/internal/sqlcgen"
         sql_package: "pgx/v5"
         emit_json_tags: true
         emit_interface: true
         emit_empty_slices: true
   - engine: "postgresql"
     schema:
-      - "migrations"
+      - "db/migrations"
     queries:
-      - "queries/judge.sql"
+      - "db/queries/judge.sql"
     gen:
       go:
         package: "sqlcgen"
-        out: "../internal/modules/judge/internal/sqlcgen"
+        out: "internal/modules/judge/internal/sqlcgen"
         sql_package: "pgx/v5"
         emit_json_tags: true
         emit_interface: true
         emit_empty_slices: true
   - engine: "postgresql"
     schema:
-      - "migrations"
+      - "db/migrations"
     queries:
-      - "queries/sim.sql"
+      - "db/queries/sim.sql"
     gen:
       go:
         package: "sqlcgen"
-        out: "../internal/modules/sim/internal/sqlcgen"
+        out: "internal/modules/sim/internal/sqlcgen"
         sql_package: "pgx/v5"
         emit_json_tags: true
         emit_interface: true
         emit_empty_slices: true
   - engine: "postgresql"
     schema:
-      - "migrations"
+      - "db/migrations"
     queries:
-      - "queries/content.sql"
+      - "db/queries/content.sql"
     gen:
       go:
         package: "sqlcgen"
-        out: "../internal/modules/content/internal/sqlcgen"
+        out: "internal/modules/content/internal/sqlcgen"
         sql_package: "pgx/v5"
         emit_json_tags: true
         emit_interface: true
         emit_empty_slices: true
   - engine: "postgresql"
     schema:
-      - "migrations"
+      - "db/migrations"
     queries:
-      - "queries/teaching.sql"
+      - "db/queries/teaching.sql"
     gen:
       go:
         package: "sqlcgen"
-        out: "../internal/modules/teaching/internal/sqlcgen"
+        out: "internal/modules/teaching/internal/sqlcgen"
         sql_package: "pgx/v5"
         emit_json_tags: true
         emit_interface: true
         emit_empty_slices: true
   - engine: "postgresql"
     schema:
-      - "migrations"
+      - "db/migrations"
     queries:
-      - "queries/experiment.sql"
+      - "db/queries/experiment.sql"
     gen:
       go:
         package: "sqlcgen"
-        out: "../internal/modules/experiment/internal/sqlcgen"
+        out: "internal/modules/experiment/internal/sqlcgen"
         sql_package: "pgx/v5"
         emit_json_tags: true
         emit_interface: true
         emit_empty_slices: true
   - engine: "postgresql"
     schema:
-      - "migrations"
+      - "db/migrations"
     queries:
-      - "queries/contest.sql"
+      - "db/queries/contest.sql"
     gen:
       go:
         package: "sqlcgen"
-        out: "../internal/modules/contest/internal/sqlcgen"
+        out: "internal/modules/contest/internal/sqlcgen"
         sql_package: "pgx/v5"
         emit_json_tags: true
         emit_interface: true
         emit_empty_slices: true
   - engine: "postgresql"
     schema:
-      - "migrations"
+      - "db/migrations"
     queries:
-      - "queries/admin.sql"
+      - "db/queries/admin.sql"
     gen:
       go:
         package: "sqlcgen"
-        out: "../internal/modules/admin/internal/sqlcgen"
+        out: "internal/modules/admin/internal/sqlcgen"
         sql_package: "pgx/v5"
         emit_json_tags: true
         emit_interface: true
         emit_empty_slices: true
   - engine: "postgresql"
     schema:
-      - "migrations"
+      - "db/migrations"
     queries:
-      - "queries/notify.sql"
+      - "db/queries/notify.sql"
     gen:
       go:
         package: "sqlcgen"
-        out: "../internal/modules/notify/internal/sqlcgen"
+        out: "internal/modules/notify/internal/sqlcgen"
         sql_package: "pgx/v5"
         emit_json_tags: true
         emit_interface: true
         emit_empty_slices: true
   - engine: "postgresql"
     schema:
-      - "migrations"
+      - "db/migrations"
     queries:
-      - "queries/grade.sql"
+      - "db/queries/grade.sql"
     gen:
       go:
         package: "sqlcgen"
-        out: "../internal/modules/grade/internal/sqlcgen"
+        out: "internal/modules/grade/internal/sqlcgen"
         sql_package: "pgx/v5"
         emit_json_tags: true
         emit_interface: true

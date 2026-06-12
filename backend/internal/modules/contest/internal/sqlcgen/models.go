@@ -8,6 +8,17 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+type AcademicWarning struct {
+	ID         int64              `json:"id"`
+	TenantID   int64              `json:"tenant_id"`
+	StudentID  int64              `json:"student_id"`
+	SemesterID int64              `json:"semester_id"`
+	Type       int16              `json:"type"`
+	Detail     []byte             `json:"detail"`
+	Status     int16              `json:"status"`
+	CreatedAt  pgtype.Timestamptz `json:"created_at"`
+}
+
 type Account struct {
 	ID             int64              `json:"id"`
 	TenantID       int64              `json:"tenant_id"`
@@ -54,6 +65,31 @@ type ActivationCode struct {
 	CreatedAt pgtype.Timestamptz `json:"created_at"`
 }
 
+type AlertEvent struct {
+	ID          int64              `json:"id"`
+	RuleID      int64              `json:"rule_id"`
+	TenantID    pgtype.Int8        `json:"tenant_id"`
+	Level       int16              `json:"level"`
+	Message     string             `json:"message"`
+	Status      int16              `json:"status"`
+	HandlerID   pgtype.Int8        `json:"handler_id"`
+	TriggeredAt pgtype.Timestamptz `json:"triggered_at"`
+	HandledAt   pgtype.Timestamptz `json:"handled_at"`
+}
+
+type AlertRule struct {
+	ID        int64              `json:"id"`
+	Scope     int16              `json:"scope"`
+	TenantID  pgtype.Int8        `json:"tenant_id"`
+	Name      string             `json:"name"`
+	Metric    string             `json:"metric"`
+	Condition []byte             `json:"condition"`
+	Level     int16              `json:"level"`
+	Enabled   bool               `json:"enabled"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
+}
+
 type Announcement struct {
 	ID        int64              `json:"id"`
 	TenantID  int64              `json:"tenant_id"`
@@ -63,6 +99,14 @@ type Announcement struct {
 	IsPinned  bool               `json:"is_pinned"`
 	CreatedAt pgtype.Timestamptz `json:"created_at"`
 	DeletedAt pgtype.Timestamptz `json:"deleted_at"`
+}
+
+type AnnouncementRead struct {
+	ID             int64              `json:"id"`
+	TenantID       int64              `json:"tenant_id"`
+	AnnouncementID int64              `json:"announcement_id"`
+	AccountID      int64              `json:"account_id"`
+	ReadAt         pgtype.Timestamptz `json:"read_at"`
 }
 
 type Assignment struct {
@@ -118,6 +162,16 @@ type AuthSession struct {
 	Status           int16              `json:"status"`
 	ExpireAt         pgtype.Timestamptz `json:"expire_at"`
 	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+}
+
+type BackupRecord struct {
+	ID         int64              `json:"id"`
+	Type       int16              `json:"type"`
+	StorageRef string             `json:"storage_ref"`
+	SizeBytes  int64              `json:"size_bytes"`
+	Status     int16              `json:"status"`
+	StartedAt  pgtype.Timestamptz `json:"started_at"`
+	FinishedAt pgtype.Timestamptz `json:"finished_at"`
 }
 
 type BattleEntry struct {
@@ -194,6 +248,16 @@ type Class struct {
 	EnrollmentYear int16              `json:"enrollment_year"`
 	Status         int16              `json:"status"`
 	DeletedAt      pgtype.Timestamptz `json:"deleted_at"`
+}
+
+type ConfigChangeLog struct {
+	ID         int64              `json:"id"`
+	ConfigID   int64              `json:"config_id"`
+	TenantID   pgtype.Int8        `json:"tenant_id"`
+	OldValue   []byte             `json:"old_value"`
+	NewValue   []byte             `json:"new_value"`
+	OperatorID int64              `json:"operator_id"`
+	CreatedAt  pgtype.Timestamptz `json:"created_at"`
 }
 
 type ContentBody struct {
@@ -406,6 +470,44 @@ type ExperimentReport struct {
 	SubmittedAt pgtype.Timestamptz `json:"submitted_at"`
 }
 
+type GradeAppeal struct {
+	ID            int64              `json:"id"`
+	TenantID      int64              `json:"tenant_id"`
+	StudentID     int64              `json:"student_id"`
+	CourseID      int64              `json:"course_id"`
+	Reason        string             `json:"reason"`
+	Status        int16              `json:"status"`
+	HandlerID     pgtype.Int8        `json:"handler_id"`
+	ResultComment pgtype.Text        `json:"result_comment"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	HandledAt     pgtype.Timestamptz `json:"handled_at"`
+}
+
+type GradeLevelConfig struct {
+	ID           int64              `json:"id"`
+	TenantID     int64              `json:"tenant_id"`
+	Name         string             `json:"name"`
+	Mapping      []byte             `json:"mapping"`
+	WarningRules []byte             `json:"warning_rules"`
+	IsDefault    bool               `json:"is_default"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
+}
+
+type GradeReview struct {
+	ID          int64              `json:"id"`
+	TenantID    int64              `json:"tenant_id"`
+	CourseID    int64              `json:"course_id"`
+	SemesterID  pgtype.Int8        `json:"semester_id"`
+	SubmitterID int64              `json:"submitter_id"`
+	ReviewerID  pgtype.Int8        `json:"reviewer_id"`
+	Status      int16              `json:"status"`
+	IsLocked    bool               `json:"is_locked"`
+	Comment     pgtype.Text        `json:"comment"`
+	SubmittedAt pgtype.Timestamptz `json:"submitted_at"`
+	ReviewedAt  pgtype.Timestamptz `json:"reviewed_at"`
+}
+
 type GradeWeight struct {
 	ID         int64              `json:"id"`
 	TenantID   int64              `json:"tenant_id"`
@@ -559,6 +661,39 @@ type Major struct {
 	DeletedAt    pgtype.Timestamptz `json:"deleted_at"`
 }
 
+type Notification struct {
+	ID         int64              `json:"id"`
+	TenantID   int64              `json:"tenant_id"`
+	ReceiverID int64              `json:"receiver_id"`
+	Type       string             `json:"type"`
+	Title      string             `json:"title"`
+	Content    string             `json:"content"`
+	Link       pgtype.Text        `json:"link"`
+	IsRead     bool               `json:"is_read"`
+	ReadAt     pgtype.Timestamptz `json:"read_at"`
+	CreatedAt  pgtype.Timestamptz `json:"created_at"`
+	DeletedAt  pgtype.Timestamptz `json:"deleted_at"`
+}
+
+type NotificationPreference struct {
+	ID        int64  `json:"id"`
+	TenantID  int64  `json:"tenant_id"`
+	AccountID int64  `json:"account_id"`
+	Type      string `json:"type"`
+	Enabled   bool   `json:"enabled"`
+}
+
+type NotificationTemplate struct {
+	ID         int64              `json:"id"`
+	Type       string             `json:"type"`
+	TitleTpl   string             `json:"title_tpl"`
+	ContentTpl string             `json:"content_tpl"`
+	Channels   []string           `json:"channels"`
+	Force      bool               `json:"force"`
+	CreatedAt  pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt  pgtype.Timestamptz `json:"updated_at"`
+}
+
 type Paper struct {
 	ID          int64              `json:"id"`
 	TenantID    int64              `json:"tenant_id"`
@@ -601,6 +736,15 @@ type PlatformAuthSession struct {
 	Status           int16              `json:"status"`
 	ExpireAt         pgtype.Timestamptz `json:"expire_at"`
 	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+}
+
+type PlatformStatistic struct {
+	ID        int64              `json:"id"`
+	Scope     int16              `json:"scope"`
+	TenantID  pgtype.Int8        `json:"tenant_id"`
+	StatDate  pgtype.Date        `json:"stat_date"`
+	Metrics   []byte             `json:"metrics"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
 }
 
 type Runtime struct {
@@ -677,6 +821,15 @@ type SandboxTool struct {
 	ToolID         int64  `json:"tool_id"`
 	AccessEndpoint string `json:"access_endpoint"`
 	Status         int16  `json:"status"`
+}
+
+type Semester struct {
+	ID        int64       `json:"id"`
+	TenantID  int64       `json:"tenant_id"`
+	Name      string      `json:"name"`
+	StartDate pgtype.Date `json:"start_date"`
+	EndDate   pgtype.Date `json:"end_date"`
+	IsCurrent bool        `json:"is_current"`
 }
 
 type SimActionLog struct {
@@ -796,6 +949,17 @@ type SsoConfig struct {
 	UpdatedAt  pgtype.Timestamptz `json:"updated_at"`
 }
 
+type StudentSemesterGrade struct {
+	ID            int64              `json:"id"`
+	TenantID      int64              `json:"tenant_id"`
+	StudentID     int64              `json:"student_id"`
+	SemesterID    int64              `json:"semester_id"`
+	TotalCredits  pgtype.Numeric     `json:"total_credits"`
+	Gpa           pgtype.Numeric     `json:"gpa"`
+	CumulativeGpa pgtype.Numeric     `json:"cumulative_gpa"`
+	ComputedAt    pgtype.Timestamptz `json:"computed_at"`
+}
+
 type Submission struct {
 	ID           int64              `json:"id"`
 	TenantID     int64              `json:"tenant_id"`
@@ -851,6 +1015,29 @@ type SubmissionJudgeOutbox struct {
 	LastError      pgtype.Text        `json:"last_error"`
 	CreatedAt      pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+}
+
+type SystemAnnouncement struct {
+	ID          int64              `json:"id"`
+	TenantID    pgtype.Int8        `json:"tenant_id"`
+	Title       string             `json:"title"`
+	Content     string             `json:"content"`
+	Scope       int16              `json:"scope"`
+	TargetRoles []int16            `json:"target_roles"`
+	PublisherID int64              `json:"publisher_id"`
+	PublishedAt pgtype.Timestamptz `json:"published_at"`
+	ExpireAt    pgtype.Timestamptz `json:"expire_at"`
+}
+
+type SystemConfig struct {
+	ID        int64              `json:"id"`
+	Scope     int16              `json:"scope"`
+	TenantID  pgtype.Int8        `json:"tenant_id"`
+	Key       string             `json:"key"`
+	Value     []byte             `json:"value"`
+	Version   int32              `json:"version"`
+	UpdatedBy int64              `json:"updated_by"`
+	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
 }
 
 type Team struct {
@@ -929,6 +1116,16 @@ type Tool struct {
 	Status       int16              `json:"status"`
 	CreatedAt    pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
+}
+
+type TranscriptRecord struct {
+	ID          int64              `json:"id"`
+	TenantID    int64              `json:"tenant_id"`
+	StudentID   int64              `json:"student_id"`
+	Scope       int16              `json:"scope"`
+	SemesterID  pgtype.Int8        `json:"semester_id"`
+	PdfRef      string             `json:"pdf_ref"`
+	GeneratedAt pgtype.Timestamptz `json:"generated_at"`
 }
 
 type VulnProblem struct {
