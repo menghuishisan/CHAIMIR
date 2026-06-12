@@ -65,3 +65,42 @@ sql:
         emit_json_tags: true
         emit_interface: true
         emit_empty_slices: true
+  - engine: "postgresql"
+    schema:
+      - "migrations"
+    queries:
+      - "queries/teaching.sql"
+    gen:
+      go:
+        package: "sqlcgen"
+        out: "../internal/modules/teaching/internal/sqlcgen"
+        sql_package: "pgx/v5"
+        emit_json_tags: true
+        emit_interface: true
+        emit_empty_slices: true
+  - engine: "postgresql"
+    schema:
+      - "migrations"
+    queries:
+      - "queries/experiment.sql"
+    gen:
+      go:
+        package: "sqlcgen"
+        out: "../internal/modules/experiment/internal/sqlcgen"
+        sql_package: "pgx/v5"
+        emit_json_tags: true
+        emit_interface: true
+        emit_empty_slices: true
+  - engine: "postgresql"
+    schema:
+      - "migrations"
+    queries:
+      - "queries/contest.sql"
+    gen:
+      go:
+        package: "sqlcgen"
+        out: "../internal/modules/contest/internal/sqlcgen"
+        sql_package: "pgx/v5"
+        emit_json_tags: true
+        emit_interface: true
+        emit_empty_slices: true

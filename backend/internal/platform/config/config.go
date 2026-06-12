@@ -29,6 +29,7 @@ type Config struct {
 	Contest    ContestConfig
 	Notify     NotifyConfig
 	Teaching   TeachingConfig
+	Experiment ExperimentConfig
 	Grade      GradeConfig
 	Sandbox    SandboxConfig
 	Judge      JudgeConfig
@@ -177,8 +178,12 @@ type TransferConfig struct {
 
 // ContestConfig 描述竞赛外部源访问边界。
 type ContestConfig struct {
-	VulnSourceMaxResponseBytes int64
-	VulnSourceTimeoutSeconds   int
+	VulnSourceMaxResponseBytes    int64
+	VulnSourceTimeoutSeconds      int
+	MatchmakerPollIntervalSeconds int
+	MatchmakerBatchSize           int
+	SubmitRateLimitSeconds        int
+	FailedCooldownSeconds         int
 }
 
 // NotifyConfig 描述通知事件消费和限频边界。
@@ -196,6 +201,14 @@ type TeachingConfig struct {
 	JudgeOutboxBatchSize      int
 	JudgeOutboxPollIntervalMs int
 	GradeExportBatchSize      int
+}
+
+// ExperimentConfig 描述实验实例生命周期与报告批改的后台边界。
+type ExperimentConfig struct {
+	RecyclePollIntervalSeconds int
+	RecycleBatchSize           int
+	InstanceIdleTimeoutSeconds int
+	PausedTimeoutSeconds       int
 }
 
 // GradeConfig 描述成绩中心申诉和成绩单签名边界。
@@ -470,8 +483,12 @@ func Load() (*Config, error) {
 		TaskDownloadTTLSeconds: reqInt("TRANSFER_TASK_DOWNLOAD_TTL_SECONDS"),
 	}
 	c.Contest = ContestConfig{
-		VulnSourceMaxResponseBytes: reqInt64("CONTEST_VULN_SOURCE_MAX_RESPONSE_BYTES"),
-		VulnSourceTimeoutSeconds:   reqInt("CONTEST_VULN_SOURCE_TIMEOUT_SECONDS"),
+		VulnSourceMaxResponseBytes:    reqInt64("CONTEST_VULN_SOURCE_MAX_RESPONSE_BYTES"),
+		VulnSourceTimeoutSeconds:      reqInt("CONTEST_VULN_SOURCE_TIMEOUT_SECONDS"),
+		MatchmakerPollIntervalSeconds: reqInt("CONTEST_MATCHMAKER_POLL_INTERVAL_SECONDS"),
+		MatchmakerBatchSize:           reqInt("CONTEST_MATCHMAKER_BATCH_SIZE"),
+		SubmitRateLimitSeconds:        reqInt("CONTEST_SUBMIT_RATE_LIMIT_SECONDS"),
+		FailedCooldownSeconds:         reqInt("CONTEST_FAILED_COOLDOWN_SECONDS"),
 	}
 	c.Notify = NotifyConfig{
 		EventRetryMax:         reqInt("NOTIFY_EVENT_RETRY_MAX"),
@@ -485,6 +502,12 @@ func Load() (*Config, error) {
 		JudgeOutboxBatchSize:      reqInt("TEACHING_JUDGE_OUTBOX_BATCH_SIZE"),
 		JudgeOutboxPollIntervalMs: reqInt("TEACHING_JUDGE_OUTBOX_POLL_INTERVAL_MS"),
 		GradeExportBatchSize:      reqInt("TEACHING_GRADE_EXPORT_BATCH_SIZE"),
+	}
+	c.Experiment = ExperimentConfig{
+		RecyclePollIntervalSeconds: reqInt("EXPERIMENT_RECYCLE_POLL_INTERVAL_SECONDS"),
+		RecycleBatchSize:           reqInt("EXPERIMENT_RECYCLE_BATCH_SIZE"),
+		InstanceIdleTimeoutSeconds: reqInt("EXPERIMENT_INSTANCE_IDLE_TIMEOUT_SECONDS"),
+		PausedTimeoutSeconds:       reqInt("EXPERIMENT_PAUSED_TIMEOUT_SECONDS"),
 	}
 	c.Grade = GradeConfig{
 		AppealWindowDays:     reqInt("GRADE_APPEAL_WINDOW_DAYS"),
@@ -610,6 +633,18 @@ func Load() (*Config, error) {
 	if c.Contest.VulnSourceTimeoutSeconds < 1 || c.Contest.VulnSourceTimeoutSeconds > 60 {
 		errs = append(errs, "CONTEST_VULN_SOURCE_TIMEOUT_SECONDS 必须在 1 到 60 秒之间")
 	}
+	if c.Contest.MatchmakerPollIntervalSeconds <= 0 {
+		errs = append(errs, "CONTEST_MATCHMAKER_POLL_INTERVAL_SECONDS 必须大于 0")
+	}
+	if c.Contest.MatchmakerBatchSize <= 0 {
+		errs = append(errs, "CONTEST_MATCHMAKER_BATCH_SIZE 必须大于 0")
+	}
+	if c.Contest.SubmitRateLimitSeconds <= 0 {
+		errs = append(errs, "CONTEST_SUBMIT_RATE_LIMIT_SECONDS 必须大于 0")
+	}
+	if c.Contest.FailedCooldownSeconds <= 0 {
+		errs = append(errs, "CONTEST_FAILED_COOLDOWN_SECONDS 必须大于 0")
+	}
 	if c.Notify.EventRetryMax <= 0 {
 		errs = append(errs, "NOTIFY_EVENT_RETRY_MAX 必须大于 0")
 	}
@@ -636,6 +671,18 @@ func Load() (*Config, error) {
 	}
 	if c.Teaching.GradeExportBatchSize <= 0 {
 		errs = append(errs, "TEACHING_GRADE_EXPORT_BATCH_SIZE 必须大于 0")
+	}
+	if c.Experiment.RecyclePollIntervalSeconds <= 0 {
+		errs = append(errs, "EXPERIMENT_RECYCLE_POLL_INTERVAL_SECONDS 必须大于 0")
+	}
+	if c.Experiment.RecycleBatchSize <= 0 {
+		errs = append(errs, "EXPERIMENT_RECYCLE_BATCH_SIZE 必须大于 0")
+	}
+	if c.Experiment.InstanceIdleTimeoutSeconds <= 0 {
+		errs = append(errs, "EXPERIMENT_INSTANCE_IDLE_TIMEOUT_SECONDS 必须大于 0")
+	}
+	if c.Experiment.PausedTimeoutSeconds <= 0 {
+		errs = append(errs, "EXPERIMENT_PAUSED_TIMEOUT_SECONDS 必须大于 0")
 	}
 	if c.Judge.QueuePollIntervalMs <= 0 {
 		errs = append(errs, "JUDGE_QUEUE_POLL_INTERVAL_MS 必须大于 0")

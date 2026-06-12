@@ -1,0 +1,459 @@
+// teaching service_assignment 文件实现作业、提交、草稿和自动判题派发业务。
+package teaching
+
+import (
+	"context"
+	"fmt"
+	"time"
+
+	"chaimir/internal/contracts"
+	"chaimir/internal/platform/audit"
+	"chaimir/pkg/apperr"
+)
+
+// CreateAssignment 创建作业草稿并锁定 M5 题目版本。
+func (s *Service) CreateAssignment(ctx context.Context, courseID int64, req AssignmentRequest) (AssignmentDetailDTO, error) {
+	id, err := currentIdentity(ctx)
+	if err != nil {
+		return AssignmentDetailDTO{}, err
+	}
+	req, due, err := validateAssignmentRequest(req)
+	if err != nil {
+		return AssignmentDetailDTO{}, err
+	}
+	assignment := Assignment{ID: s.ids.Generate(), TenantID: id.TenantID, CourseID: courseID, Title: req.Title, ChapterID: req.ChapterID, DueAt: due, MaxAttempts: req.MaxAttempts, LatePolicy: req.LatePolicy, LatePenalty: req.LatePenalty, Status: AssignmentStatusDraft}
+	items := make([]AssignmentItem, 0, len(req.Items))
+	for _, item := range req.Items {
+		items = append(items, AssignmentItem{ID: s.ids.Generate(), TenantID: id.TenantID, AssignmentID: assignment.ID, ItemCode: item.ItemCode, ItemVersion: item.ItemVersion, Score: item.Score, Seq: item.Seq, GradingMode: item.GradingMode, JudgerCode: item.JudgerCode})
+	}
+	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
+		course, err := tx.GetCourse(ctx, id.TenantID, courseID)
+		if err != nil {
+			return err
+		}
+		if err := ensureTeacherOwned(course, id.AccountID); err != nil {
+			return err
+		}
+		for _, item := range items {
+			if _, err := s.content.GetContentFace(ctx, id.TenantID, contracts.ContentItemRef{ItemCode: item.ItemCode, ItemVersion: item.ItemVersion}); err != nil {
+				return apperr.ErrTeachingAssignmentInvalid.WithCause(err)
+			}
+			if err := s.content.IncrementUsage(ctx, id.TenantID, contracts.ContentItemRef{ItemCode: item.ItemCode, ItemVersion: item.ItemVersion}); err != nil {
+				return apperr.ErrTeachingAssignmentInvalid.WithCause(err)
+			}
+		}
+		assignment, err = tx.CreateAssignment(ctx, assignment)
+		if err != nil {
+			return err
+		}
+		items, err = tx.ReplaceAssignmentItems(ctx, id.TenantID, assignment.ID, items)
+		return err
+	}); err != nil {
+		return AssignmentDetailDTO{}, mapAssignmentError(err)
+	}
+	if err := s.writeAudit(ctx, id.TenantID, id.AccountID, audit.ActorRoleTeacher, "teaching.assignment.create", auditTargetAssignment, assignment.ID, map[string]any{"course_id": courseID}); err != nil {
+		return AssignmentDetailDTO{}, err
+	}
+	return assignmentDetailDTO(AssignmentDetail{Assignment: assignment, Items: assignmentItemFaces(items)}), nil
+}
+
+// UpdateAssignment 更新草稿作业。
+func (s *Service) UpdateAssignment(ctx context.Context, assignmentID int64, req AssignmentRequest) (AssignmentDetailDTO, error) {
+	id, err := currentIdentity(ctx)
+	if err != nil {
+		return AssignmentDetailDTO{}, err
+	}
+	req, due, err := validateAssignmentRequest(req)
+	if err != nil {
+		return AssignmentDetailDTO{}, err
+	}
+	var assignment Assignment
+	var items []AssignmentItem
+	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
+		current, err := tx.GetAssignment(ctx, id.TenantID, assignmentID)
+		if err != nil {
+			return err
+		}
+		course, err := tx.GetCourse(ctx, id.TenantID, current.CourseID)
+		if err != nil {
+			return err
+		}
+		if err := ensureTeacherOwned(course, id.AccountID); err != nil {
+			return err
+		}
+		current.Title, current.ChapterID, current.DueAt, current.MaxAttempts, current.LatePolicy, current.LatePenalty = req.Title, req.ChapterID, due, req.MaxAttempts, req.LatePolicy, req.LatePenalty
+		assignment, err = tx.UpdateAssignment(ctx, current)
+		if err != nil {
+			return err
+		}
+		next := make([]AssignmentItem, 0, len(req.Items))
+		for _, item := range req.Items {
+			next = append(next, AssignmentItem{ID: s.ids.Generate(), TenantID: id.TenantID, AssignmentID: assignmentID, ItemCode: item.ItemCode, ItemVersion: item.ItemVersion, Score: item.Score, Seq: item.Seq, GradingMode: item.GradingMode, JudgerCode: item.JudgerCode})
+		}
+		items, err = tx.ReplaceAssignmentItems(ctx, id.TenantID, assignmentID, next)
+		return err
+	}); err != nil {
+		return AssignmentDetailDTO{}, mapAssignmentError(err)
+	}
+	return assignmentDetailDTO(AssignmentDetail{Assignment: assignment, Items: assignmentItemFaces(items)}), nil
+}
+
+// PublishAssignment 发布作业。
+func (s *Service) PublishAssignment(ctx context.Context, assignmentID int64) (AssignmentDTO, error) {
+	id, err := currentIdentity(ctx)
+	if err != nil {
+		return AssignmentDTO{}, err
+	}
+	var assignment Assignment
+	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
+		current, err := tx.GetAssignment(ctx, id.TenantID, assignmentID)
+		if err != nil {
+			return err
+		}
+		course, err := tx.GetCourse(ctx, id.TenantID, current.CourseID)
+		if err != nil {
+			return err
+		}
+		if err := ensureTeacherOwned(course, id.AccountID); err != nil {
+			return err
+		}
+		items, err := tx.ListAssignmentItems(ctx, id.TenantID, assignmentID)
+		if err != nil {
+			return err
+		}
+		if len(items) == 0 {
+			return apperr.ErrTeachingAssignmentStateInvalid
+		}
+		assignment, err = tx.PublishAssignment(ctx, id.TenantID, assignmentID)
+		return err
+	}); err != nil {
+		return AssignmentDTO{}, mapAssignmentError(err)
+	}
+	return assignmentDTO(assignment), nil
+}
+
+// GetAssignmentForStudent 读取作业详情并从 M5 展开题面。
+func (s *Service) GetAssignmentForStudent(ctx context.Context, assignmentID int64) (AssignmentDetailDTO, error) {
+	id, err := currentIdentity(ctx)
+	if err != nil {
+		return AssignmentDetailDTO{}, err
+	}
+	var assignment Assignment
+	var items []AssignmentItem
+	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
+		var err error
+		assignment, err = tx.GetAssignment(ctx, id.TenantID, assignmentID)
+		if err != nil {
+			return err
+		}
+		if err := s.ensureCourseReadable(ctx, tx, id.TenantID, assignment.CourseID, id.AccountID); err != nil {
+			return err
+		}
+		items, err = tx.ListAssignmentItems(ctx, id.TenantID, assignmentID)
+		return err
+	}); err != nil {
+		return AssignmentDetailDTO{}, mapAssignmentError(err)
+	}
+	detail := AssignmentDetail{Assignment: assignment, Items: make([]AssignmentItemFace, 0, len(items))}
+	for _, item := range items {
+		face, err := s.content.GetContentFace(ctx, id.TenantID, contracts.ContentItemRef{ItemCode: item.ItemCode, ItemVersion: item.ItemVersion})
+		if err != nil {
+			return AssignmentDetailDTO{}, apperr.ErrTeachingAssignmentInvalid.WithCause(err)
+		}
+		detail.Items = append(detail.Items, AssignmentItemFace{AssignmentItem: item, Title: face.Title, Type: face.Type, Difficulty: face.Difficulty, Body: face.Body})
+	}
+	return assignmentDetailDTO(detail), nil
+}
+
+// SaveDraft 保存服务端权威作答草稿。
+func (s *Service) SaveDraft(ctx context.Context, assignmentID int64, req DraftRequest) (map[string]any, error) {
+	id, err := currentIdentity(ctx)
+	if err != nil {
+		return nil, err
+	}
+	req, err = validateDraftRequest(req)
+	if err != nil {
+		return nil, err
+	}
+	var draft SubmissionDraft
+	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
+		assignment, err := tx.GetAssignment(ctx, id.TenantID, assignmentID)
+		if err != nil {
+			return err
+		}
+		if err := s.ensureCourseReadable(ctx, tx, id.TenantID, assignment.CourseID, id.AccountID); err != nil {
+			return err
+		}
+		draft, err = tx.UpsertDraft(ctx, SubmissionDraft{ID: s.ids.Generate(), TenantID: id.TenantID, AssignmentID: assignmentID, StudentID: id.AccountID, Content: req.Content})
+		return err
+	}); err != nil {
+		return nil, mapAssignmentError(err)
+	}
+	return map[string]any{"updated_at": formatTime(draft.UpdatedAt)}, nil
+}
+
+// SubmitAssignment 创建正式提交并写入自动判题 outbox。
+func (s *Service) SubmitAssignment(ctx context.Context, assignmentID int64, req SubmitAssignmentRequest) (SubmissionDTO, error) {
+	id, err := currentIdentity(ctx)
+	if err != nil {
+		return SubmissionDTO{}, err
+	}
+	req, err = validateSubmissionRequest(req)
+	if err != nil {
+		return SubmissionDTO{}, err
+	}
+	var sub Submission
+	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
+		assignment, err := tx.GetAssignment(ctx, id.TenantID, assignmentID)
+		if err != nil {
+			return err
+		}
+		if assignment.Status != AssignmentStatusPublished {
+			return apperr.ErrTeachingAssignmentStateInvalid
+		}
+		if err := s.ensureCourseReadable(ctx, tx, id.TenantID, assignment.CourseID, id.AccountID); err != nil {
+			return err
+		}
+		attempts, err := tx.CountStudentAttempts(ctx, id.TenantID, assignmentID, id.AccountID)
+		if err != nil {
+			return err
+		}
+		if attempts >= int64(assignment.MaxAttempts) {
+			return apperr.ErrTeachingSubmissionLimitExceeded
+		}
+		isLate, err := applyLatePolicy(assignment, time.Now().UTC())
+		if err != nil {
+			return err
+		}
+		items, err := tx.ListAssignmentItems(ctx, id.TenantID, assignmentID)
+		if err != nil {
+			return err
+		}
+		status := SubmissionStatusPending
+		final := int32(0)
+		hasAuto := false
+		for _, item := range items {
+			if item.GradingMode == GradingModeAuto {
+				hasAuto = true
+				status = SubmissionStatusSubmitted
+				break
+			}
+		}
+		sub, err = tx.CreateSubmission(ctx, Submission{ID: s.ids.Generate(), TenantID: id.TenantID, AssignmentID: assignmentID, StudentID: id.AccountID, AttemptNo: int32(attempts + 1), ContentRef: req.ContentRef, FinalScore: final, IsLate: isLate, Status: status})
+		if err != nil {
+			return err
+		}
+		for _, item := range items {
+			if item.GradingMode != GradingModeAuto {
+				continue
+			}
+			codeKey, _ := req.ContentRef["code_storage_key"].(string)
+			codeHash, _ := req.ContentRef["code_hash"].(string)
+			if codeKey == "" || codeHash == "" {
+				return apperr.ErrTeachingSubmissionInvalid
+			}
+			if _, err := tx.CreateJudgeOutbox(ctx, JudgeOutbox{ID: s.ids.Generate(), TenantID: id.TenantID, SubmissionID: sub.ID, AssignmentID: assignmentID, StudentID: id.AccountID, ItemCode: item.ItemCode, ItemVersion: item.ItemVersion, JudgerCode: item.JudgerCode, CodeStorageKey: codeKey, CodeHash: codeHash, ExtraInput: map[string]any{"assignment_item_id": item.ID}, SourceRef: sourceRefForSubmissionItem(sub.ID, item.ID)}); err != nil {
+				return err
+			}
+		}
+		if !hasAuto {
+			sub.Status = SubmissionStatusPending
+		}
+		if err := tx.DeleteDraft(ctx, id.TenantID, assignmentID, id.AccountID); err != nil && !isNoRows(err) {
+			return err
+		}
+		return nil
+	}); err != nil {
+		return SubmissionDTO{}, err
+	}
+	if err := s.writeAudit(ctx, id.TenantID, id.AccountID, audit.ActorRoleStudent, "teaching.assignment.submit", auditTargetSubmission, sub.ID, map[string]any{"assignment_id": assignmentID}); err != nil {
+		return SubmissionDTO{}, err
+	}
+	return submissionDTO(sub), nil
+}
+
+// GradeSubmission 教师批改主观题或报告提交。
+func (s *Service) GradeSubmission(ctx context.Context, submissionID int64, req GradeSubmissionRequest) (SubmissionDTO, error) {
+	id, err := currentIdentity(ctx)
+	if err != nil {
+		return SubmissionDTO{}, err
+	}
+	req, err = validateGradeRequest(req)
+	if err != nil {
+		return SubmissionDTO{}, err
+	}
+	var sub Submission
+	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
+		current, err := tx.GetSubmission(ctx, id.TenantID, submissionID)
+		if err != nil {
+			return err
+		}
+		assignment, err := tx.GetAssignment(ctx, id.TenantID, current.AssignmentID)
+		if err != nil {
+			return err
+		}
+		course, err := tx.GetCourse(ctx, id.TenantID, assignment.CourseID)
+		if err != nil {
+			return err
+		}
+		if err := ensureTeacherOwned(course, id.AccountID); err != nil {
+			return err
+		}
+		final, err := applyLatePenalty(assignment, req.Score, current.IsLate)
+		if err != nil {
+			return err
+		}
+		sub, err = tx.UpdateSubmissionManualGrade(ctx, id.TenantID, submissionID, req.Score, final, req.Comment)
+		return err
+	}); err != nil {
+		return SubmissionDTO{}, mapAssignmentError(err)
+	}
+	return submissionDTO(sub), nil
+}
+
+// ListSubmissions 查询作业提交情况。
+func (s *Service) ListSubmissions(ctx context.Context, assignmentID int64, page, size int) ([]SubmissionDTO, int64, int, int, error) {
+	id, err := currentIdentity(ctx)
+	if err != nil {
+		return nil, 0, 0, 0, err
+	}
+	normalizePage(&page, &size)
+	var subs []Submission
+	var total int64
+	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
+		assignment, err := tx.GetAssignment(ctx, id.TenantID, assignmentID)
+		if err != nil {
+			return err
+		}
+		course, err := tx.GetCourse(ctx, id.TenantID, assignment.CourseID)
+		if err != nil {
+			return err
+		}
+		if err := ensureTeacherOwned(course, id.AccountID); err != nil {
+			return err
+		}
+		subs, total, err = tx.ListSubmissionsByAssignment(ctx, id.TenantID, assignmentID, page, size)
+		return err
+	}); err != nil {
+		return nil, 0, 0, 0, mapAssignmentError(err)
+	}
+	out := make([]SubmissionDTO, 0, len(subs))
+	for _, sub := range subs {
+		out = append(out, submissionDTO(sub))
+	}
+	return out, total, page, size, nil
+}
+
+// GetSubmissionForUser 读取提交反馈。
+func (s *Service) GetSubmissionForUser(ctx context.Context, submissionID int64) (SubmissionDTO, error) {
+	id, err := currentIdentity(ctx)
+	if err != nil {
+		return SubmissionDTO{}, err
+	}
+	var sub Submission
+	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
+		var err error
+		sub, err = tx.GetSubmission(ctx, id.TenantID, submissionID)
+		if err != nil {
+			return err
+		}
+		if sub.StudentID != id.AccountID {
+			assignment, err := tx.GetAssignment(ctx, id.TenantID, sub.AssignmentID)
+			if err != nil {
+				return err
+			}
+			course, err := tx.GetCourse(ctx, id.TenantID, assignment.CourseID)
+			if err != nil {
+				return err
+			}
+			if err := ensureTeacherOwned(course, id.AccountID); err != nil {
+				return apperr.ErrTeachingCourseForbidden
+			}
+		}
+		return nil
+	}); err != nil {
+		return SubmissionDTO{}, mapAssignmentError(err)
+	}
+	return submissionDTO(sub), nil
+}
+
+// RunJudgeOutboxOnce 派发一轮 M6 本地自动判题 outbox。
+func (s *Service) RunJudgeOutboxOnce(ctx context.Context, tenantID int64) error {
+	if s.judge == nil {
+		return apperr.ErrTeachingJudgeOutboxInvalid.WithMessage("自动判题服务暂不可用")
+	}
+	var outboxes []JudgeOutbox
+	claim := s.store.TenantTx
+	if tenantID <= 0 {
+		claim = func(ctx context.Context, _ int64, fn func(context.Context, TxStore) error) error {
+			return s.store.PrivilegedTx(ctx, fn)
+		}
+	}
+	if err := claim(ctx, tenantID, func(ctx context.Context, tx TxStore) error {
+		var err error
+		if tenantID > 0 {
+			outboxes, err = tx.ClaimJudgeOutbox(ctx, tenantID, int32(s.cfg.JudgeOutboxBatchSize))
+			return err
+		}
+		outboxes, err = tx.ClaimJudgeOutboxAcrossTenants(ctx, int32(s.cfg.JudgeOutboxBatchSize))
+		return err
+	}); err != nil {
+		return apperr.ErrTeachingJudgeOutboxInvalid.WithCause(err)
+	}
+	for _, item := range outboxes {
+		info, err := s.judge.SubmitJudgeTask(ctx, contracts.JudgeSubmitRequest{TenantID: item.TenantID, JudgerCode: item.JudgerCode, ItemCode: item.ItemCode, ItemVersion: item.ItemVersion, CodeStorageKey: item.CodeStorageKey, CodeHash: item.CodeHash, SubmitterID: item.StudentID, SourceRef: item.SourceRef, SandboxMode: contracts.JudgeSandboxModeFresh, ExtraInput: item.ExtraInput, Priority: 5})
+		if err != nil {
+			if retryErr := s.store.TenantTx(ctx, item.TenantID, func(ctx context.Context, tx TxStore) error {
+				_, retryErr := tx.RetryJudgeOutbox(ctx, item.TenantID, item.ID, err.Error())
+				return retryErr
+			}); retryErr != nil {
+				return apperr.ErrTeachingJudgeOutboxInvalid.WithCause(retryErr)
+			}
+			continue
+		}
+		if err := s.store.TenantTx(ctx, item.TenantID, func(ctx context.Context, tx TxStore) error {
+			if _, err := tx.UpdateSubmissionJudgeRef(ctx, item.TenantID, item.SubmissionID, fmt.Sprint(info.TaskID)); err != nil {
+				return err
+			}
+			_, err := tx.CompleteJudgeOutbox(ctx, item.TenantID, item.ID)
+			return err
+		}); err != nil {
+			return apperr.ErrTeachingJudgeOutboxInvalid.WithCause(err)
+		}
+	}
+	return nil
+}
+
+// HandleJudgeCompleted 处理 M3 判题完成事件。
+func (s *Service) HandleJudgeCompleted(ctx context.Context, event contracts.JudgeCompletedEvent) error {
+	var sub Submission
+	if err := s.store.TenantTx(ctx, event.TenantID, func(ctx context.Context, tx TxStore) error {
+		current, err := tx.GetSubmissionBySourceRef(ctx, event.TenantID, event.SourceRef)
+		if err != nil {
+			return err
+		}
+		assignment, err := tx.GetAssignment(ctx, event.TenantID, current.AssignmentID)
+		if err != nil {
+			return err
+		}
+		final, err := applyLatePenalty(assignment, event.Score, current.IsLate)
+		if err != nil {
+			return err
+		}
+		sub, err = tx.UpdateSubmissionAutoScoreBySourceRef(ctx, event.TenantID, event.SourceRef, event.Score, final)
+		return err
+	}); err != nil {
+		return apperr.ErrTeachingSubmissionInvalid.WithCause(err)
+	}
+	return s.publishGradeUpdated(ctx, event.TenantID, sub.AssignmentID, sub.StudentID)
+}
+
+// HandleJudgeFailed 处理 M3 判题失败事件。
+func (s *Service) HandleJudgeFailed(ctx context.Context, event contracts.JudgeFailedEvent) error {
+	return apperr.ErrTeachingSubmissionInvalid.WithMessage("判题暂时失败,请稍后重试")
+}
+
+// sourceRefForSubmissionItem 构造 M6 提交题目来源标识。
+func sourceRefForSubmissionItem(submissionID, assignmentItemID int64) string {
+	return fmt.Sprintf("teaching:%d:submission:%d:item:%d", time.Now().UTC().Year(), submissionID, assignmentItemID)
+}

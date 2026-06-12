@@ -54,6 +54,46 @@ type ActivationCode struct {
 	CreatedAt pgtype.Timestamptz `json:"created_at"`
 }
 
+type Announcement struct {
+	ID        int64              `json:"id"`
+	TenantID  int64              `json:"tenant_id"`
+	CourseID  int64              `json:"course_id"`
+	Title     string             `json:"title"`
+	Content   string             `json:"content"`
+	IsPinned  bool               `json:"is_pinned"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+	DeletedAt pgtype.Timestamptz `json:"deleted_at"`
+}
+
+type Assignment struct {
+	ID          int64              `json:"id"`
+	TenantID    int64              `json:"tenant_id"`
+	CourseID    int64              `json:"course_id"`
+	Title       string             `json:"title"`
+	ChapterID   pgtype.Int8        `json:"chapter_id"`
+	DueAt       pgtype.Timestamptz `json:"due_at"`
+	MaxAttempts int32              `json:"max_attempts"`
+	LatePolicy  int16              `json:"late_policy"`
+	LatePenalty []byte             `json:"late_penalty"`
+	Status      int16              `json:"status"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+	DeletedAt   pgtype.Timestamptz `json:"deleted_at"`
+}
+
+type AssignmentItem struct {
+	ID           int64              `json:"id"`
+	TenantID     int64              `json:"tenant_id"`
+	AssignmentID int64              `json:"assignment_id"`
+	ItemCode     string             `json:"item_code"`
+	ItemVersion  string             `json:"item_version"`
+	Score        int32              `json:"score"`
+	Seq          int32              `json:"seq"`
+	GradingMode  int16              `json:"grading_mode"`
+	JudgerCode   pgtype.Text        `json:"judger_code"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+}
+
 type AuditLog struct {
 	ID         int64              `json:"id"`
 	TenantID   pgtype.Int8        `json:"tenant_id"`
@@ -78,6 +118,72 @@ type AuthSession struct {
 	Status           int16              `json:"status"`
 	ExpireAt         pgtype.Timestamptz `json:"expire_at"`
 	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+}
+
+type BattleEntry struct {
+	ID          int64              `json:"id"`
+	TenantID    int64              `json:"tenant_id"`
+	ContestID   int64              `json:"contest_id"`
+	ProblemID   int64              `json:"problem_id"`
+	TeamID      int64              `json:"team_id"`
+	Role        int16              `json:"role"`
+	ArtifactRef string             `json:"artifact_ref"`
+	VersionNo   int32              `json:"version_no"`
+	IsActive    bool               `json:"is_active"`
+	SubmittedAt pgtype.Timestamptz `json:"submitted_at"`
+}
+
+type BattleMatch struct {
+	ID           int64              `json:"id"`
+	TenantID     int64              `json:"tenant_id"`
+	ContestID    int64              `json:"contest_id"`
+	ProblemID    int64              `json:"problem_id"`
+	EntryAID     int64              `json:"entry_a_id"`
+	EntryBID     int64              `json:"entry_b_id"`
+	SourceRef    string             `json:"source_ref"`
+	SandboxRef   pgtype.Text        `json:"sandbox_ref"`
+	JudgeTaskRef pgtype.Text        `json:"judge_task_ref"`
+	Result       pgtype.Int2        `json:"result"`
+	ScoreDelta   []byte             `json:"score_delta"`
+	ReplayRef    pgtype.Text        `json:"replay_ref"`
+	Status       int16              `json:"status"`
+	MatchedAt    pgtype.Timestamptz `json:"matched_at"`
+	FinishedAt   pgtype.Timestamptz `json:"finished_at"`
+}
+
+type Chapter struct {
+	ID        int64              `json:"id"`
+	TenantID  int64              `json:"tenant_id"`
+	CourseID  int64              `json:"course_id"`
+	Title     string             `json:"title"`
+	Sort      int32              `json:"sort"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
+	DeletedAt pgtype.Timestamptz `json:"deleted_at"`
+}
+
+type CheatRecord struct {
+	ID         int64              `json:"id"`
+	TenantID   int64              `json:"tenant_id"`
+	ContestID  int64              `json:"contest_id"`
+	TeamID     int64              `json:"team_id"`
+	Type       int16              `json:"type"`
+	Evidence   []byte             `json:"evidence"`
+	Action     int16              `json:"action"`
+	OperatorID pgtype.Int8        `json:"operator_id"`
+	CreatedAt  pgtype.Timestamptz `json:"created_at"`
+}
+
+type CheckpointResult struct {
+	ID           int64              `json:"id"`
+	TenantID     int64              `json:"tenant_id"`
+	InstanceID   int64              `json:"instance_id"`
+	CheckpointID string             `json:"checkpoint_id"`
+	JudgeTaskRef pgtype.Text        `json:"judge_task_ref"`
+	Passed       bool               `json:"passed"`
+	Score        pgtype.Numeric     `json:"score"`
+	DetailRef    pgtype.Text        `json:"detail_ref"`
+	JudgedAt     pgtype.Timestamptz `json:"judged_at"`
 }
 
 type Class struct {
@@ -132,12 +238,192 @@ type ContentItem struct {
 	DeletedAt       pgtype.Timestamptz `json:"deleted_at"`
 }
 
+type Contest struct {
+	ID            int64              `json:"id"`
+	TenantID      int64              `json:"tenant_id"`
+	OrganizerID   int64              `json:"organizer_id"`
+	Name          string             `json:"name"`
+	Mode          int16              `json:"mode"`
+	MatchMode     pgtype.Int2        `json:"match_mode"`
+	TeamMode      int16              `json:"team_mode"`
+	SignupStart   pgtype.Timestamptz `json:"signup_start"`
+	SignupEnd     pgtype.Timestamptz `json:"signup_end"`
+	StartAt       pgtype.Timestamptz `json:"start_at"`
+	EndAt         pgtype.Timestamptz `json:"end_at"`
+	FreezeMinutes int32              `json:"freeze_minutes"`
+	Rules         []byte             `json:"rules"`
+	Status        int16              `json:"status"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
+	DeletedAt     pgtype.Timestamptz `json:"deleted_at"`
+}
+
+type ContestProblem struct {
+	ID           int64       `json:"id"`
+	TenantID     int64       `json:"tenant_id"`
+	ContestID    int64       `json:"contest_id"`
+	ItemCode     string      `json:"item_code"`
+	ItemVersion  string      `json:"item_version"`
+	Score        int32       `json:"score"`
+	DynamicScore []byte      `json:"dynamic_score"`
+	BattleRule   pgtype.Int2 `json:"battle_rule"`
+	Seq          int32       `json:"seq"`
+}
+
+type ContestResultSnapshot struct {
+	ID           int64              `json:"id"`
+	TenantID     int64              `json:"tenant_id"`
+	ContestID    int64              `json:"contest_id"`
+	FinalRanking []byte             `json:"final_ranking"`
+	GeneratedAt  pgtype.Timestamptz `json:"generated_at"`
+}
+
+type Course struct {
+	ID          int64              `json:"id"`
+	TenantID    int64              `json:"tenant_id"`
+	TeacherID   int64              `json:"teacher_id"`
+	Name        string             `json:"name"`
+	Description string             `json:"description"`
+	Type        int16              `json:"type"`
+	Difficulty  int16              `json:"difficulty"`
+	CoverUrl    pgtype.Text        `json:"cover_url"`
+	Semester    string             `json:"semester"`
+	Credits     pgtype.Numeric     `json:"credits"`
+	Schedule    []byte             `json:"schedule"`
+	InviteCode  string             `json:"invite_code"`
+	Status      int16              `json:"status"`
+	Visibility  int16              `json:"visibility"`
+	DeletedAt   pgtype.Timestamptz `json:"deleted_at"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
+
+type CourseGrade struct {
+	ID            int64              `json:"id"`
+	TenantID      int64              `json:"tenant_id"`
+	CourseID      int64              `json:"course_id"`
+	StudentID     int64              `json:"student_id"`
+	AutoTotal     pgtype.Numeric     `json:"auto_total"`
+	OverrideTotal pgtype.Numeric     `json:"override_total"`
+	IsOverridden  bool               `json:"is_overridden"`
+	IsLocked      bool               `json:"is_locked"`
+	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
+}
+
+type CourseMember struct {
+	ID        int64              `json:"id"`
+	TenantID  int64              `json:"tenant_id"`
+	CourseID  int64              `json:"course_id"`
+	StudentID int64              `json:"student_id"`
+	JoinedAt  pgtype.Timestamptz `json:"joined_at"`
+	JoinMode  int16              `json:"join_mode"`
+}
+
+type CourseReview struct {
+	ID        int64              `json:"id"`
+	TenantID  int64              `json:"tenant_id"`
+	CourseID  int64              `json:"course_id"`
+	StudentID int64              `json:"student_id"`
+	Rating    int16              `json:"rating"`
+	Comment   pgtype.Text        `json:"comment"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+}
+
 type Department struct {
 	ID        int64              `json:"id"`
 	TenantID  int64              `json:"tenant_id"`
 	Name      string             `json:"name"`
 	Code      pgtype.Text        `json:"code"`
 	DeletedAt pgtype.Timestamptz `json:"deleted_at"`
+}
+
+type DiscussionPost struct {
+	ID        int64              `json:"id"`
+	TenantID  int64              `json:"tenant_id"`
+	CourseID  int64              `json:"course_id"`
+	ParentID  pgtype.Int8        `json:"parent_id"`
+	AuthorID  int64              `json:"author_id"`
+	Content   string             `json:"content"`
+	IsPinned  bool               `json:"is_pinned"`
+	LikeCount int32              `json:"like_count"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+	DeletedAt pgtype.Timestamptz `json:"deleted_at"`
+}
+
+type Experiment struct {
+	ID              int64              `json:"id"`
+	TenantID        int64              `json:"tenant_id"`
+	CourseID        pgtype.Int8        `json:"course_id"`
+	AuthorID        int64              `json:"author_id"`
+	TemplateRef     pgtype.Text        `json:"template_ref"`
+	TemplateVersion pgtype.Text        `json:"template_version"`
+	Name            string             `json:"name"`
+	Description     string             `json:"description"`
+	Components      []byte             `json:"components"`
+	CollabMode      int16              `json:"collab_mode"`
+	GroupConfig     []byte             `json:"group_config"`
+	RequireReport   bool               `json:"require_report"`
+	WizardStep      int16              `json:"wizard_step"`
+	Status          int16              `json:"status"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+	DeletedAt       pgtype.Timestamptz `json:"deleted_at"`
+}
+
+type ExperimentGroup struct {
+	ID           int64              `json:"id"`
+	TenantID     int64              `json:"tenant_id"`
+	ExperimentID int64              `json:"experiment_id"`
+	Name         string             `json:"name"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+}
+
+type ExperimentInstance struct {
+	ID             int64              `json:"id"`
+	TenantID       int64              `json:"tenant_id"`
+	ExperimentID   int64              `json:"experiment_id"`
+	OwnerAccountID int64              `json:"owner_account_id"`
+	GroupID        pgtype.Int8        `json:"group_id"`
+	SourceRef      string             `json:"source_ref"`
+	SandboxRefs    []byte             `json:"sandbox_refs"`
+	SimSessionRefs []byte             `json:"sim_session_refs"`
+	Status         int16              `json:"status"`
+	Score          pgtype.Numeric     `json:"score"`
+	StartedAt      pgtype.Timestamptz `json:"started_at"`
+	FinishedAt     pgtype.Timestamptz `json:"finished_at"`
+	LastActiveAt   pgtype.Timestamptz `json:"last_active_at"`
+}
+
+type ExperimentReport struct {
+	ID          int64              `json:"id"`
+	TenantID    int64              `json:"tenant_id"`
+	InstanceID  int64              `json:"instance_id"`
+	StudentID   int64              `json:"student_id"`
+	ContentRef  string             `json:"content_ref"`
+	ManualScore pgtype.Numeric     `json:"manual_score"`
+	Comment     pgtype.Text        `json:"comment"`
+	Status      int16              `json:"status"`
+	SubmittedAt pgtype.Timestamptz `json:"submitted_at"`
+}
+
+type GradeWeight struct {
+	ID         int64              `json:"id"`
+	TenantID   int64              `json:"tenant_id"`
+	CourseID   int64              `json:"course_id"`
+	SourceType int16              `json:"source_type"`
+	SourceRef  string             `json:"source_ref"`
+	Weight     pgtype.Numeric     `json:"weight"`
+	CreatedAt  pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt  pgtype.Timestamptz `json:"updated_at"`
+}
+
+type GroupMember struct {
+	ID        int64              `json:"id"`
+	TenantID  int64              `json:"tenant_id"`
+	GroupID   int64              `json:"group_id"`
+	StudentID int64              `json:"student_id"`
+	Role      string             `json:"role"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
 }
 
 type ImportBatch struct {
@@ -227,6 +513,42 @@ type Judger struct {
 	Status            int16              `json:"status"`
 	CreatedAt         pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
+}
+
+type LadderRank struct {
+	ID          int64              `json:"id"`
+	TenantID    int64              `json:"tenant_id"`
+	ContestID   int64              `json:"contest_id"`
+	TeamID      int64              `json:"team_id"`
+	Score       pgtype.Numeric     `json:"score"`
+	SolvedCount int32              `json:"solved_count"`
+	LastSolveAt pgtype.Timestamptz `json:"last_solve_at"`
+	Rank        int32              `json:"rank"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
+
+type Lesson struct {
+	ID          int64              `json:"id"`
+	TenantID    int64              `json:"tenant_id"`
+	ChapterID   int64              `json:"chapter_id"`
+	Title       string             `json:"title"`
+	ContentType int16              `json:"content_type"`
+	ContentRef  []byte             `json:"content_ref"`
+	Sort        int32              `json:"sort"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+	DeletedAt   pgtype.Timestamptz `json:"deleted_at"`
+}
+
+type LessonProgress struct {
+	ID          int64              `json:"id"`
+	TenantID    int64              `json:"tenant_id"`
+	LessonID    int64              `json:"lesson_id"`
+	StudentID   int64              `json:"student_id"`
+	Status      int16              `json:"status"`
+	VideoPos    pgtype.Int4        `json:"video_pos"`
+	DurationSec int32              `json:"duration_sec"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
 }
 
 type Major struct {
@@ -447,6 +769,22 @@ type SmsCode struct {
 	CreatedAt      pgtype.Timestamptz `json:"created_at"`
 }
 
+type SolveSubmission struct {
+	ID           int64              `json:"id"`
+	TenantID     int64              `json:"tenant_id"`
+	ContestID    int64              `json:"contest_id"`
+	ProblemID    int64              `json:"problem_id"`
+	TeamID       int64              `json:"team_id"`
+	SubmitterID  int64              `json:"submitter_id"`
+	ContentRef   []byte             `json:"content_ref"`
+	SourceRef    string             `json:"source_ref"`
+	JudgeTaskRef pgtype.Text        `json:"judge_task_ref"`
+	Passed       bool               `json:"passed"`
+	Score        int32              `json:"score"`
+	SandboxRef   pgtype.Text        `json:"sandbox_ref"`
+	SubmittedAt  pgtype.Timestamptz `json:"submitted_at"`
+}
+
 type SsoConfig struct {
 	ID         int64              `json:"id"`
 	TenantID   int64              `json:"tenant_id"`
@@ -458,6 +796,32 @@ type SsoConfig struct {
 	UpdatedAt  pgtype.Timestamptz `json:"updated_at"`
 }
 
+type Submission struct {
+	ID           int64              `json:"id"`
+	TenantID     int64              `json:"tenant_id"`
+	AssignmentID int64              `json:"assignment_id"`
+	StudentID    int64              `json:"student_id"`
+	AttemptNo    int32              `json:"attempt_no"`
+	ContentRef   []byte             `json:"content_ref"`
+	JudgeTaskRef pgtype.Text        `json:"judge_task_ref"`
+	AutoScore    pgtype.Int4        `json:"auto_score"`
+	ManualScore  pgtype.Int4        `json:"manual_score"`
+	FinalScore   pgtype.Int4        `json:"final_score"`
+	Comment      pgtype.Text        `json:"comment"`
+	IsLate       bool               `json:"is_late"`
+	Status       int16              `json:"status"`
+	SubmittedAt  pgtype.Timestamptz `json:"submitted_at"`
+}
+
+type SubmissionDraft struct {
+	ID           int64              `json:"id"`
+	TenantID     int64              `json:"tenant_id"`
+	AssignmentID int64              `json:"assignment_id"`
+	StudentID    int64              `json:"student_id"`
+	Content      []byte             `json:"content"`
+	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
+}
+
 type SubmissionFingerprint struct {
 	ID          int64              `json:"id"`
 	TenantID    int64              `json:"tenant_id"`
@@ -467,6 +831,46 @@ type SubmissionFingerprint struct {
 	CodeHash    string             `json:"code_hash"`
 	SimVector   []byte             `json:"sim_vector"`
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+}
+
+type SubmissionJudgeOutbox struct {
+	ID             int64              `json:"id"`
+	TenantID       int64              `json:"tenant_id"`
+	SubmissionID   int64              `json:"submission_id"`
+	AssignmentID   int64              `json:"assignment_id"`
+	StudentID      int64              `json:"student_id"`
+	ItemCode       string             `json:"item_code"`
+	ItemVersion    string             `json:"item_version"`
+	JudgerCode     string             `json:"judger_code"`
+	CodeStorageKey string             `json:"code_storage_key"`
+	CodeHash       string             `json:"code_hash"`
+	ExtraInput     []byte             `json:"extra_input"`
+	SourceRef      string             `json:"source_ref"`
+	Status         int16              `json:"status"`
+	RetryCount     int32              `json:"retry_count"`
+	LastError      pgtype.Text        `json:"last_error"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+}
+
+type Team struct {
+	ID         int64              `json:"id"`
+	TenantID   int64              `json:"tenant_id"`
+	ContestID  int64              `json:"contest_id"`
+	Name       string             `json:"name"`
+	InviteCode pgtype.Text        `json:"invite_code"`
+	Status     int16              `json:"status"`
+	CreatedAt  pgtype.Timestamptz `json:"created_at"`
+}
+
+type TeamMember struct {
+	ID             int64              `json:"id"`
+	TenantID       int64              `json:"tenant_id"`
+	TeamID         int64              `json:"team_id"`
+	AccountID      int64              `json:"account_id"`
+	MemberTenantID int64              `json:"member_tenant_id"`
+	IsLeader       bool               `json:"is_leader"`
+	JoinedAt       pgtype.Timestamptz `json:"joined_at"`
 }
 
 type Tenant struct {
@@ -523,6 +927,37 @@ type Tool struct {
 	EcoTags      string             `json:"eco_tags"`
 	ResourceSpec []byte             `json:"resource_spec"`
 	Status       int16              `json:"status"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
+}
+
+type VulnProblem struct {
+	ID                 int64              `json:"id"`
+	TenantID           int64              `json:"tenant_id"`
+	SourceID           pgtype.Int8        `json:"source_id"`
+	ExternalRef        pgtype.Text        `json:"external_ref"`
+	Title              string             `json:"title"`
+	Level              int16              `json:"level"`
+	RuntimeMode        int16              `json:"runtime_mode"`
+	DraftBody          []byte             `json:"draft_body"`
+	PrevalidateStatus  int16              `json:"prevalidate_status"`
+	PrevalidateDetail  []byte             `json:"prevalidate_detail"`
+	ContentItemCode    pgtype.Text        `json:"content_item_code"`
+	ContentItemVersion pgtype.Text        `json:"content_item_version"`
+	Status             int16              `json:"status"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
+}
+
+type VulnSource struct {
+	ID           int64              `json:"id"`
+	TenantID     pgtype.Int8        `json:"tenant_id"`
+	Type         int16              `json:"type"`
+	Name         string             `json:"name"`
+	Config       []byte             `json:"config"`
+	DefaultLevel int16              `json:"default_level"`
+	Enabled      bool               `json:"enabled"`
+	LastSyncAt   pgtype.Timestamptz `json:"last_sync_at"`
 	CreatedAt    pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
 }
