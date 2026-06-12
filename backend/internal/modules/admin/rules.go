@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/url"
 	"strings"
+	"time"
 
 	"chaimir/pkg/apperr"
 )
@@ -48,6 +49,21 @@ func validateScopeTenant(scope int16, tenantID int64) error {
 		}
 	default:
 		return apperr.ErrAdminConfigInvalid
+	}
+	return nil
+}
+
+// validateDateRange 校验统计查询必须使用闭区间自然日范围。
+func validateDateRange(fromDate, toDate string) error {
+	fromDate = strings.TrimSpace(fromDate)
+	toDate = strings.TrimSpace(toDate)
+	if fromDate == "" || toDate == "" {
+		return apperr.ErrAdminStatisticsInvalid
+	}
+	from, fromErr := time.Parse("2006-01-02", fromDate)
+	to, toErr := time.Parse("2006-01-02", toDate)
+	if fromErr != nil || toErr != nil || to.Before(from) {
+		return apperr.ErrAdminStatisticsInvalid
 	}
 	return nil
 }

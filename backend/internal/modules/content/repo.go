@@ -134,12 +134,12 @@ func (s *txStore) GetItemWithBodyByRef(ctx context.Context, tenantID int64, code
 
 // ListItems 查询内容分页。
 func (s *txStore) ListItems(ctx context.Context, tenantID int64, filter ItemListFilter) ([]Item, int64, error) {
-	params := sqlcgen.ListContentItemsParams{TenantID: tenantID, Column2: filter.Type, Column3: filter.CategoryID, Column4: filter.Difficulty, Column5: filter.Tag, Column6: filter.KnowledgePoint, Column7: filter.Keyword, Column8: filter.Visibility, Column9: filter.Status, Column10: filter.AuthorID, Limit: int32(filter.Size), Offset: int32((filter.Page - 1) * filter.Size)}
+	params := sqlcgen.ListContentItemsParams{TenantID: tenantID, Column2: filter.Type, Column3: filter.CategoryID, Column4: filter.Difficulty, Column5: filter.Tag, Column6: filter.KnowledgePoint, Column7: filter.Keyword, Column8: filter.Visibility, Column9: filter.Status, Column10: filter.AuthorID, Column11: filter.OnlyShared, Limit: int32(filter.Size), Offset: int32((filter.Page - 1) * filter.Size)}
 	rows, err := s.q.ListContentItems(ctx, params)
 	if err != nil {
 		return nil, 0, err
 	}
-	total, err := s.q.CountContentItems(ctx, sqlcgen.CountContentItemsParams{TenantID: tenantID, Column2: filter.Type, Column3: filter.CategoryID, Column4: filter.Difficulty, Column5: filter.Tag, Column6: filter.KnowledgePoint, Column7: filter.Keyword, Column8: filter.Visibility, Column9: filter.Status, Column10: filter.AuthorID})
+	total, err := s.q.CountContentItems(ctx, sqlcgen.CountContentItemsParams{TenantID: tenantID, Column2: filter.Type, Column3: filter.CategoryID, Column4: filter.Difficulty, Column5: filter.Tag, Column6: filter.KnowledgePoint, Column7: filter.Keyword, Column8: filter.Visibility, Column9: filter.Status, Column10: filter.AuthorID, Column11: filter.OnlyShared})
 	if err != nil {
 		return nil, 0, err
 	}

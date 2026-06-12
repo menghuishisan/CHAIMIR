@@ -3,11 +3,14 @@ package admin
 
 import (
 	"net/http"
+	"strings"
+	"time"
 
 	"chaimir/internal/contracts"
 	"chaimir/internal/platform/auth"
 	"chaimir/internal/platform/httpx"
 	"chaimir/pkg/apperr"
+	"chaimir/pkg/response"
 
 	"github.com/gin-gonic/gin"
 )
@@ -23,10 +26,12 @@ func RegisterRoutes(r gin.IRouter, svc *Service, authn *auth.Manager, roles auth
 	school := g.Group("/school", auth.RequireTenantAnyRole(roles, contracts.RoleSchoolAdmin))
 	mixed := g.Group("", auth.RequirePlatformOrAnyRole(roles, contracts.RoleSchoolAdmin))
 	platform.GET("/dashboard", api.platformDashboard)
+	platform.GET("/statistics", api.platformStatistics)
 	platform.GET("/tenants", api.listTenants)
 	platform.GET("/applications", api.listApplications)
 	platform.GET("/monitoring/panels", api.monitoringPanels)
 	school.GET("/dashboard", api.schoolDashboard)
+	school.GET("/statistics", api.schoolStatistics)
 	mixed.GET("/audit", api.queryAudit)
 	mixed.GET("/audit/export", api.exportAudit)
 	mixed.GET("/configs", api.listConfigs)
@@ -39,7 +44,7 @@ func RegisterRoutes(r gin.IRouter, svc *Service, authn *auth.Manager, roles auth
 	mixed.GET("/alert-events", api.listAlertEvents)
 	mixed.POST("/alert-events/:id/handle", api.handleAlertEvent)
 	platform.GET("/backups", api.listBackups)
-	platform.POST("/backups", api.triggerBackup)
+	platform.POST("/backups/trigger", api.triggerBackup)
 	return nil
 }
 
@@ -54,6 +59,18 @@ func (a adminAPI) platformDashboard(c *gin.Context) {
 // schoolDashboard 返回学校看板。
 func (a adminAPI) schoolDashboard(c *gin.Context) {
 	out, err := a.svc.SchoolDashboard(c.Request.Context())
+	httpx.Write(c, out, err)
+}
+
+// platformStatistics 返回平台运营趋势统计。
+func (a adminAPI) platformStatistics(c *gin.Context) {
+	out, err := a.svc.PlatformStatistics(c.Request.Context(), c.Query("from"), c.Query("to"))
+	httpx.Write(c, out, err)
+}
+
+// schoolStatistics 返回学校运营趋势统计。
+func (a adminAPI) schoolStatistics(c *gin.Context) {
+	out, err := a.svc.SchoolStatistics(c.Request.Context(), c.Query("from"), c.Query("to"))
 	httpx.Write(c, out, err)
 }
 
@@ -79,13 +96,21 @@ func (a adminAPI) queryAudit(c *gin.Context) {
 	if !ok {
 		return
 	}
-	result, err := a.svc.QueryAudit(c.Request.Context(), contracts.AuditQuery{Action: c.Query("action"), TargetType: c.Query("target_type"), Page: int32(page), Size: int32(size)})
+	query, ok := auditQuery(c, page, size)
+	if !ok {
+		return
+	}
+	result, err := a.svc.QueryAudit(c.Request.Context(), query)
 	httpx.Write(c, result, err)
 }
 
 // exportAudit 导出审计 CSV。
 func (a adminAPI) exportAudit(c *gin.Context) {
-	data, err := a.svc.ExportAuditCSV(c.Request.Context(), contracts.AuditQuery{})
+	query, ok := auditQuery(c, 1, 1000)
+	if !ok {
+		return
+	}
+	data, err := a.svc.ExportAuditCSV(c.Request.Context(), query)
 	if err != nil {
 		httpx.Write(c, gin.H{}, err)
 		return
@@ -229,4 +254,39 @@ func page(c *gin.Context) (int, int, bool) {
 		return 0, 0, false
 	}
 	return int(p), int(s), true
+}
+
+// auditQuery 解析审计中心文档定义的过滤条件。
+func auditQuery(c *gin.Context, page, size int) (contracts.AuditQuery, bool) {
+	actorID, ok := httpx.QueryInt(c, "actor_id", httpx.QueryIntRule{Min: 0})
+	if !ok {
+		return contracts.AuditQuery{}, false
+	}
+	from, ok := queryRFC3339(c, "from")
+	if !ok {
+		return contracts.AuditQuery{}, false
+	}
+	to, ok := queryRFC3339(c, "to")
+	if !ok {
+		return contracts.AuditQuery{}, false
+	}
+	if !from.IsZero() && !to.IsZero() && to.Before(from) {
+		response.Fail(c, apperr.ErrAdminAuditQueryInvalid)
+		return contracts.AuditQuery{}, false
+	}
+	return contracts.AuditQuery{ActorID: actorID, Action: strings.TrimSpace(c.Query("action")), TargetType: strings.TrimSpace(c.Query("target_type")), From: from, To: to, Page: int32(page), Size: int32(size)}, true
+}
+
+// queryRFC3339 解析可选 RFC3339 时间查询参数。
+func queryRFC3339(c *gin.Context, key string) (time.Time, bool) {
+	raw := strings.TrimSpace(c.Query(key))
+	if raw == "" {
+		return time.Time{}, true
+	}
+	value, err := time.Parse(time.RFC3339, raw)
+	if err != nil {
+		response.Fail(c, apperr.ErrAdminAuditQueryInvalid)
+		return time.Time{}, false
+	}
+	return value, true
 }

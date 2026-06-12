@@ -15,6 +15,8 @@ type Course struct {
 	Semester    string
 	Credits     float64
 	Schedule    map[string]any
+	StartAt     time.Time
+	EndAt       time.Time
 	InviteCode  string
 	Status      int16
 	Visibility  int16
@@ -112,23 +114,26 @@ type Submission struct {
 }
 
 type JudgeOutbox struct {
-	ID             int64
-	TenantID       int64
-	SubmissionID   int64
-	AssignmentID   int64
-	StudentID      int64
-	ItemCode       string
-	ItemVersion    string
-	JudgerCode     string
-	CodeStorageKey string
-	CodeHash       string
-	ExtraInput     map[string]any
-	SourceRef      string
-	Status         int16
-	RetryCount     int32
-	LastError      string
-	CreatedAt      time.Time
-	UpdatedAt      time.Time
+	ID               int64
+	TenantID         int64
+	SubmissionID     int64
+	AssignmentItemID int64
+	AssignmentID     int64
+	StudentID        int64
+	ItemCode         string
+	ItemVersion      string
+	JudgerCode       string
+	CodeStorageKey   string
+	CodeHash         string
+	ExtraInput       map[string]any
+	SourceRef        string
+	Status           int16
+	RetryCount       int32
+	LastError        string
+	Score            int32
+	CompletedAt      time.Time
+	CreatedAt        time.Time
+	UpdatedAt        time.Time
 }
 
 type SubmissionDraft struct {
@@ -198,6 +203,7 @@ type CourseGrade struct {
 	ID            int64
 	TenantID      int64
 	CourseID      int64
+	Semester      string
 	StudentID     int64
 	AutoTotal     float64
 	OverrideTotal float64

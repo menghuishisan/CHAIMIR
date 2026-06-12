@@ -85,7 +85,14 @@ SET status = $2, handler_id = $3, handled_at = now()
 WHERE id = $1 AND status = 1
 RETURNING id, rule_id, tenant_id, level, message, status, handler_id, triggered_at, handled_at;
 
--- name: UpsertPlatformStatistics :one
+-- name: UpsertGlobalPlatformStatistics :one
+INSERT INTO platform_statistics (id, scope, tenant_id, stat_date, metrics, created_at)
+VALUES ($1, 1, NULL, $2, $3, now())
+ON CONFLICT (scope, stat_date) WHERE tenant_id IS NULL
+DO UPDATE SET metrics = EXCLUDED.metrics, created_at = now()
+RETURNING id, scope, tenant_id, stat_date, metrics, created_at;
+
+-- name: UpsertTenantPlatformStatistics :one
 INSERT INTO platform_statistics (id, scope, tenant_id, stat_date, metrics, created_at)
 VALUES ($1, $2, $3, $4, $5, now())
 ON CONFLICT (scope, tenant_id, stat_date) WHERE tenant_id IS NOT NULL

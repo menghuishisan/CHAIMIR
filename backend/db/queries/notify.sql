@@ -50,6 +50,11 @@ SET deleted_at = now()
 WHERE id = $1 AND receiver_id = $2 AND deleted_at IS NULL
 RETURNING id, tenant_id, receiver_id, type, title, content, link, is_read, read_at, created_at, deleted_at;
 
+-- name: DeleteExpiredNotifications :exec
+UPDATE notification
+SET deleted_at = now()
+WHERE deleted_at IS NULL AND created_at < $1;
+
 -- name: ListPreferences :many
 SELECT id, tenant_id, account_id, type, enabled
 FROM notification_preference
@@ -80,8 +85,19 @@ FROM system_announcement a
 LEFT JOIN announcement_read r ON r.announcement_id = a.id AND r.tenant_id = $1 AND r.account_id = $2
 WHERE (a.tenant_id IS NULL OR a.tenant_id = $1)
   AND (a.expire_at IS NULL OR a.expire_at > now())
+  AND (a.scope <> 3 OR a.target_roles && sqlc.arg(role_numbers)::smallint[])
 ORDER BY a.published_at DESC
-LIMIT $3 OFFSET $4;
+LIMIT sqlc.arg(page_limit)::int OFFSET sqlc.arg(page_offset)::int;
+
+-- name: GetVisibleAnnouncement :one
+SELECT a.id, a.tenant_id, a.title, a.content, a.scope, a.target_roles, a.publisher_id, a.published_at, a.expire_at,
+       (r.id IS NOT NULL)::boolean AS is_read
+FROM system_announcement a
+LEFT JOIN announcement_read r ON r.announcement_id = a.id AND r.tenant_id = $1 AND r.account_id = $2
+WHERE a.id = $3
+  AND (a.tenant_id IS NULL OR a.tenant_id = $1)
+  AND (a.expire_at IS NULL OR a.expire_at > now())
+  AND (a.scope <> 3 OR a.target_roles && sqlc.arg(role_numbers)::smallint[]);
 
 -- name: MarkAnnouncementRead :one
 INSERT INTO announcement_read (id, tenant_id, announcement_id, account_id, read_at)

@@ -101,6 +101,7 @@ func (a teachingAPI) registerStudentRoutes(g gin.IRouter) {
 	g.POST("/courses/join", a.joinCourse)
 	g.POST("/lessons/:id/progress", a.reportProgress)
 	g.GET("/courses/:id/my-progress", a.myProgress)
+	g.GET("/assignments/:id/draft", a.getDraft)
 	g.POST("/assignments/:id/draft", a.saveDraft)
 	g.POST("/assignments/:id/submit", a.submitAssignment)
 	g.POST("/courses/:id/review", a.reviewCourse)
@@ -437,6 +438,16 @@ func (a teachingAPI) saveDraft(c *gin.Context) {
 		return
 	}
 	out, err := a.svc.SaveDraft(c.Request.Context(), id, req)
+	httpx.Write(c, out, err)
+}
+
+// getDraft 读取服务端权威作答草稿。
+func (a teachingAPI) getDraft(c *gin.Context) {
+	id, ok := httpx.PathID(c, "id")
+	if !ok {
+		return
+	}
+	out, err := a.svc.GetDraft(c.Request.Context(), id)
 	httpx.Write(c, out, err)
 }
 

@@ -70,6 +70,11 @@ func RegisterTeachingModule(ctx context.Context, deps TeachingModuleDeps) (*teac
 		return nil, err
 	}
 	go background.Run(ctx, task)
+	statusTask, err := teachingCourseStatusTask(deps.Config, svc)
+	if err != nil {
+		return nil, err
+	}
+	go background.Run(ctx, statusTask)
 	return svc, nil
 }
 
@@ -86,6 +91,23 @@ func teachingJudgeOutboxTask(cfg config.TeachingConfig, svc *teaching.Service) (
 		Interval: time.Duration(cfg.JudgeOutboxPollIntervalMs) * time.Millisecond,
 		Run: func(ctx context.Context) error {
 			return svc.RunJudgeOutboxOnce(ctx, 0)
+		},
+	}, nil
+}
+
+// teachingCourseStatusTask 把课程生命周期自动推进接入统一后台任务运行器。
+func teachingCourseStatusTask(cfg config.TeachingConfig, svc *teaching.Service) (background.Task, error) {
+	if svc == nil {
+		return background.Task{}, fmt.Errorf("teaching course status worker 缺少 service")
+	}
+	if cfg.CourseStatusPollIntervalSeconds <= 0 {
+		return background.Task{}, fmt.Errorf("TEACHING_COURSE_STATUS_POLL_INTERVAL_SECONDS 必须大于 0")
+	}
+	return background.Task{
+		Name:     "teaching.course_status",
+		Interval: time.Duration(cfg.CourseStatusPollIntervalSeconds) * time.Second,
+		Run: func(ctx context.Context) error {
+			return svc.AdvanceCourseStatusesOnce(ctx, time.Now().UTC())
 		},
 	}, nil
 }

@@ -6,6 +6,8 @@ package sqlcgen
 
 import (
 	"context"
+
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 type Querier interface {
@@ -54,8 +56,11 @@ type Querier interface {
 	ListChapters(ctx context.Context, arg ListChaptersParams) ([]Chapter, error)
 	ListCourseGrades(ctx context.Context, arg ListCourseGradesParams) ([]ListCourseGradesRow, error)
 	ListCourseMembers(ctx context.Context, arg ListCourseMembersParams) ([]CourseMember, error)
+	ListCoursesDueToEnd(ctx context.Context, endAt pgtype.Timestamptz) ([]ListCoursesDueToEndRow, error)
+	ListCoursesDueToRun(ctx context.Context, startAt pgtype.Timestamptz) ([]ListCoursesDueToRunRow, error)
 	ListDiscussionPosts(ctx context.Context, arg ListDiscussionPostsParams) ([]DiscussionPost, error)
 	ListGradeWeights(ctx context.Context, arg ListGradeWeightsParams) ([]ListGradeWeightsRow, error)
+	ListJudgeOutboxBySubmission(ctx context.Context, arg ListJudgeOutboxBySubmissionParams) ([]SubmissionJudgeOutbox, error)
 	ListLessonsByChapter(ctx context.Context, arg ListLessonsByChapterParams) ([]Lesson, error)
 	ListLessonsByCourse(ctx context.Context, arg ListLessonsByCourseParams) ([]Lesson, error)
 	ListProgressByCourse(ctx context.Context, arg ListProgressByCourseParams) ([]LessonProgress, error)
@@ -64,6 +69,8 @@ type Querier interface {
 	ListStudentProgressByCourse(ctx context.Context, arg ListStudentProgressByCourseParams) ([]LessonProgress, error)
 	ListSubmissionsByAssignment(ctx context.Context, arg ListSubmissionsByAssignmentParams) ([]Submission, error)
 	ListTeacherCourses(ctx context.Context, arg ListTeacherCoursesParams) ([]ListTeacherCoursesRow, error)
+	MarkJudgeOutboxFailedResult(ctx context.Context, arg MarkJudgeOutboxFailedResultParams) (SubmissionJudgeOutbox, error)
+	MarkJudgeOutboxResult(ctx context.Context, arg MarkJudgeOutboxResultParams) (SubmissionJudgeOutbox, error)
 	OverrideCourseGrade(ctx context.Context, arg OverrideCourseGradeParams) (OverrideCourseGradeRow, error)
 	PinAnnouncement(ctx context.Context, arg PinAnnouncementParams) (Announcement, error)
 	PinDiscussionPost(ctx context.Context, arg PinDiscussionPostParams) (DiscussionPost, error)
@@ -83,7 +90,7 @@ type Querier interface {
 	UpdateChapter(ctx context.Context, arg UpdateChapterParams) (Chapter, error)
 	UpdateCourse(ctx context.Context, arg UpdateCourseParams) (UpdateCourseRow, error)
 	UpdateLesson(ctx context.Context, arg UpdateLessonParams) (Lesson, error)
-	UpdateSubmissionAutoScoreBySourceRef(ctx context.Context, arg UpdateSubmissionAutoScoreBySourceRefParams) (Submission, error)
+	UpdateSubmissionAutoScore(ctx context.Context, arg UpdateSubmissionAutoScoreParams) (Submission, error)
 	UpdateSubmissionJudgeRef(ctx context.Context, arg UpdateSubmissionJudgeRefParams) (Submission, error)
 	UpdateSubmissionManualGrade(ctx context.Context, arg UpdateSubmissionManualGradeParams) (Submission, error)
 	UpsertCourseGrade(ctx context.Context, arg UpsertCourseGradeParams) (UpsertCourseGradeRow, error)

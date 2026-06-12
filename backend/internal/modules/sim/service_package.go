@@ -89,7 +89,14 @@ func (s *Service) SubmitPackage(ctx context.Context, tenantID, accountID int64, 
 	if err != nil {
 		return nil, err
 	}
-	scale, backend := mustDecodeObject(req.ScaleLimit), mustDecodeObject(req.BackendConfig)
+	scale, err := decodeObject(req.ScaleLimit)
+	if err != nil {
+		return nil, err
+	}
+	backend, err := decodeObject(req.BackendConfig)
+	if err != nil {
+		return nil, err
+	}
 	pkg := Package{ID: packageID, Code: req.Code, Version: req.Version, Name: req.Name, Category: req.Category, Compute: compute, ScaleLimit: scale, BundleKey: bundleRef, BundleHash: bundleHash, BackendAdapter: req.BackendAdapter, BackendConfig: backend, AuthorType: req.AuthorType, AuthorID: accountID, Status: PackageStatusReviewing}
 	var created Package
 	var review Review
@@ -133,7 +140,15 @@ func (s *Service) UpdatePackage(ctx context.Context, tenantID, accountID, packag
 	if err != nil {
 		return nil, err
 	}
-	pkg := Package{ID: packageID, Name: req.Name, Category: req.Category, Compute: compute, ScaleLimit: mustDecodeObject(req.ScaleLimit), BundleKey: bundleRef, BundleHash: bundleHash, BackendAdapter: req.BackendAdapter, BackendConfig: mustDecodeObject(req.BackendConfig), Status: PackageStatusReviewing}
+	scale, err := decodeObject(req.ScaleLimit)
+	if err != nil {
+		return nil, err
+	}
+	backend, err := decodeObject(req.BackendConfig)
+	if err != nil {
+		return nil, err
+	}
+	pkg := Package{ID: packageID, Name: req.Name, Category: req.Category, Compute: compute, ScaleLimit: scale, BundleKey: bundleRef, BundleHash: bundleHash, BackendAdapter: req.BackendAdapter, BackendConfig: backend, Status: PackageStatusReviewing}
 	var updated Package
 	var review Review
 	if err := s.store.PlatformTx(ctx, func(ctx context.Context, tx TxStore) error {
@@ -346,9 +361,11 @@ func (s *Service) loadPackage(ctx context.Context, code, version string) (Packag
 	return pkg, nil
 }
 
-// mustDecodeObject 在进入数据库前把已通过 rules 校验的 JSON 对象转换为 map。
-func mustDecodeObject(raw json.RawMessage) map[string]any {
+// decodeObject 在进入数据库前把已通过 rules 校验的 JSON 对象转换为 map。
+func decodeObject(raw json.RawMessage) (map[string]any, error) {
 	out := map[string]any{}
-	_ = json.Unmarshal(raw, &out)
-	return out
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return nil, apperr.ErrSimPackageInvalid.WithCause(err)
+	}
+	return out, nil
 }

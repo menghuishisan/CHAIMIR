@@ -1,25 +1,25 @@
 -- name: CreateCourse :one
-INSERT INTO course (id, tenant_id, teacher_id, name, description, type, difficulty, cover_url, semester, credits, schedule, invite_code, status, visibility, created_at, updated_at, deleted_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::text::numeric, $11, $12, $13, $14, now(), now(), NULL)
-RETURNING id, tenant_id, teacher_id, name, description, type, difficulty, cover_url, semester, credits::float8 AS credits, schedule, invite_code, status, visibility, created_at, updated_at, deleted_at;
+INSERT INTO course (id, tenant_id, teacher_id, name, description, type, difficulty, cover_url, semester, credits, schedule, start_at, end_at, invite_code, status, visibility, created_at, updated_at, deleted_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::text::numeric, $11, $12, $13, $14, $15, $16, now(), now(), NULL)
+RETURNING id, tenant_id, teacher_id, name, description, type, difficulty, cover_url, semester, credits::float8 AS credits, schedule, start_at, end_at, invite_code, status, visibility, created_at, updated_at, deleted_at;
 
 -- name: GetCourseByID :one
-SELECT id, tenant_id, teacher_id, name, description, type, difficulty, cover_url, semester, credits::float8 AS credits, schedule, invite_code, status, visibility, created_at, updated_at, deleted_at
+SELECT id, tenant_id, teacher_id, name, description, type, difficulty, cover_url, semester, credits::float8 AS credits, schedule, start_at, end_at, invite_code, status, visibility, created_at, updated_at, deleted_at
 FROM course
 WHERE tenant_id = $1 AND id = $2 AND deleted_at IS NULL;
 
 -- name: GetCloneableCourseByID :one
-SELECT id, tenant_id, teacher_id, name, description, type, difficulty, cover_url, semester, credits::float8 AS credits, schedule, invite_code, status, visibility, created_at, updated_at, deleted_at
+SELECT id, tenant_id, teacher_id, name, description, type, difficulty, cover_url, semester, credits::float8 AS credits, schedule, start_at, end_at, invite_code, status, visibility, created_at, updated_at, deleted_at
 FROM course
 WHERE id = $1 AND deleted_at IS NULL AND (tenant_id = $2 OR visibility = 2);
 
 -- name: GetCourseByInviteCode :one
-SELECT id, tenant_id, teacher_id, name, description, type, difficulty, cover_url, semester, credits::float8 AS credits, schedule, invite_code, status, visibility, created_at, updated_at, deleted_at
+SELECT id, tenant_id, teacher_id, name, description, type, difficulty, cover_url, semester, credits::float8 AS credits, schedule, start_at, end_at, invite_code, status, visibility, created_at, updated_at, deleted_at
 FROM course
 WHERE invite_code = $1 AND deleted_at IS NULL;
 
 -- name: ListTeacherCourses :many
-SELECT id, tenant_id, teacher_id, name, description, type, difficulty, cover_url, semester, credits::float8 AS credits, schedule, invite_code, status, visibility, created_at, updated_at, deleted_at
+SELECT id, tenant_id, teacher_id, name, description, type, difficulty, cover_url, semester, credits::float8 AS credits, schedule, start_at, end_at, invite_code, status, visibility, created_at, updated_at, deleted_at
 FROM course
 WHERE tenant_id = $1 AND teacher_id = $2 AND deleted_at IS NULL AND ($3::smallint = 0 OR status = $3)
 ORDER BY updated_at DESC, id DESC
@@ -31,7 +31,7 @@ FROM course
 WHERE tenant_id = $1 AND teacher_id = $2 AND deleted_at IS NULL AND ($3::smallint = 0 OR status = $3);
 
 -- name: ListStudentCourses :many
-SELECT c.id, c.tenant_id, c.teacher_id, c.name, c.description, c.type, c.difficulty, c.cover_url, c.semester, c.credits::float8 AS credits, c.schedule, c.invite_code, c.status, c.visibility, c.created_at, c.updated_at, c.deleted_at
+SELECT c.id, c.tenant_id, c.teacher_id, c.name, c.description, c.type, c.difficulty, c.cover_url, c.semester, c.credits::float8 AS credits, c.schedule, c.start_at, c.end_at, c.invite_code, c.status, c.visibility, c.created_at, c.updated_at, c.deleted_at
 FROM course c
 JOIN course_member m ON m.tenant_id = c.tenant_id AND m.course_id = c.id
 WHERE c.tenant_id = $1 AND m.student_id = $2 AND c.deleted_at IS NULL AND ($3::smallint = 0 OR c.status = $3)
@@ -54,27 +54,29 @@ SET name = $3,
     semester = $8,
     credits = $9::text::numeric,
     schedule = $10,
+    start_at = $11,
+    end_at = $12,
     updated_at = now()
 WHERE tenant_id = $1 AND id = $2 AND deleted_at IS NULL
-RETURNING id, tenant_id, teacher_id, name, description, type, difficulty, cover_url, semester, credits::float8 AS credits, schedule, invite_code, status, visibility, created_at, updated_at, deleted_at;
+RETURNING id, tenant_id, teacher_id, name, description, type, difficulty, cover_url, semester, credits::float8 AS credits, schedule, start_at, end_at, invite_code, status, visibility, created_at, updated_at, deleted_at;
 
 -- name: SetCourseStatus :one
 UPDATE course
 SET status = $3, updated_at = now()
 WHERE tenant_id = $1 AND id = $2 AND deleted_at IS NULL
-RETURNING id, tenant_id, teacher_id, name, description, type, difficulty, cover_url, semester, credits::float8 AS credits, schedule, invite_code, status, visibility, created_at, updated_at, deleted_at;
+RETURNING id, tenant_id, teacher_id, name, description, type, difficulty, cover_url, semester, credits::float8 AS credits, schedule, start_at, end_at, invite_code, status, visibility, created_at, updated_at, deleted_at;
 
 -- name: SetCourseVisibility :one
 UPDATE course
 SET visibility = $3, updated_at = now()
 WHERE tenant_id = $1 AND id = $2 AND deleted_at IS NULL
-RETURNING id, tenant_id, teacher_id, name, description, type, difficulty, cover_url, semester, credits::float8 AS credits, schedule, invite_code, status, visibility, created_at, updated_at, deleted_at;
+RETURNING id, tenant_id, teacher_id, name, description, type, difficulty, cover_url, semester, credits::float8 AS credits, schedule, start_at, end_at, invite_code, status, visibility, created_at, updated_at, deleted_at;
 
 -- name: RefreshCourseInviteCode :one
 UPDATE course
 SET invite_code = $3, updated_at = now()
 WHERE tenant_id = $1 AND id = $2 AND deleted_at IS NULL
-RETURNING id, tenant_id, teacher_id, name, description, type, difficulty, cover_url, semester, credits::float8 AS credits, schedule, invite_code, status, visibility, created_at, updated_at, deleted_at;
+RETURNING id, tenant_id, teacher_id, name, description, type, difficulty, cover_url, semester, credits::float8 AS credits, schedule, start_at, end_at, invite_code, status, visibility, created_at, updated_at, deleted_at;
 
 -- name: CountCourseLessons :one
 SELECT COUNT(*)::bigint
@@ -82,11 +84,23 @@ FROM lesson l
 JOIN chapter c ON c.tenant_id = l.tenant_id AND c.id = l.chapter_id
 WHERE c.tenant_id = $1 AND c.course_id = $2 AND c.deleted_at IS NULL AND l.deleted_at IS NULL;
 
+-- name: ListCoursesDueToRun :many
+SELECT id, tenant_id, teacher_id, name, description, type, difficulty, cover_url, semester, credits::float8 AS credits, schedule, start_at, end_at, invite_code, status, visibility, created_at, updated_at, deleted_at
+FROM course
+WHERE deleted_at IS NULL AND status = 2 AND start_at <= $1
+ORDER BY start_at ASC, id ASC;
+
+-- name: ListCoursesDueToEnd :many
+SELECT id, tenant_id, teacher_id, name, description, type, difficulty, cover_url, semester, credits::float8 AS credits, schedule, start_at, end_at, invite_code, status, visibility, created_at, updated_at, deleted_at
+FROM course
+WHERE deleted_at IS NULL AND status IN (2, 3) AND end_at <= $1
+ORDER BY end_at ASC, id ASC;
+
 -- name: SoftDeleteCourse :one
 UPDATE course
 SET deleted_at = now(), updated_at = now()
 WHERE tenant_id = $1 AND id = $2 AND status = 1 AND deleted_at IS NULL
-RETURNING id, tenant_id, teacher_id, name, description, type, difficulty, cover_url, semester, credits::float8 AS credits, schedule, invite_code, status, visibility, created_at, updated_at, deleted_at;
+RETURNING id, tenant_id, teacher_id, name, description, type, difficulty, cover_url, semester, credits::float8 AS credits, schedule, start_at, end_at, invite_code, status, visibility, created_at, updated_at, deleted_at;
 
 -- name: CreateChapter :one
 INSERT INTO chapter (id, tenant_id, course_id, title, sort, created_at, updated_at, deleted_at)
@@ -251,6 +265,12 @@ FROM submission s
 JOIN submission_judge_outbox o ON o.tenant_id = s.tenant_id AND o.submission_id = s.id
 WHERE o.tenant_id = $1 AND o.source_ref = $2;
 
+-- name: ListJudgeOutboxBySubmission :many
+SELECT id, tenant_id, submission_id, assignment_item_id, assignment_id, student_id, item_code, item_version, judger_code, code_storage_key, code_hash, extra_input, source_ref, status, retry_count, last_error, score, completed_at, created_at, updated_at
+FROM submission_judge_outbox
+WHERE tenant_id = $1 AND submission_id = $2
+ORDER BY id ASC;
+
 -- name: ListSubmissionsByAssignment :many
 SELECT id, tenant_id, assignment_id, student_id, attempt_no, content_ref, judge_task_ref, auto_score, manual_score, final_score, comment, is_late, status, submitted_at
 FROM submission
@@ -273,18 +293,16 @@ SET judge_task_ref = $3
 WHERE tenant_id = $1 AND id = $2
 RETURNING id, tenant_id, assignment_id, student_id, attempt_no, content_ref, judge_task_ref, auto_score, manual_score, final_score, comment, is_late, status, submitted_at;
 
--- name: UpdateSubmissionAutoScoreBySourceRef :one
+-- name: UpdateSubmissionAutoScore :one
 UPDATE submission
 SET auto_score = $3, final_score = $4, status = 3
-WHERE submission.tenant_id = $1 AND submission.id = (
-    SELECT o.submission_id FROM submission_judge_outbox o WHERE o.tenant_id = $1 AND o.source_ref = $2
-)
+WHERE tenant_id = $1 AND id = $2
 RETURNING id, tenant_id, assignment_id, student_id, attempt_no, content_ref, judge_task_ref, auto_score, manual_score, final_score, comment, is_late, status, submitted_at;
 
 -- name: CreateJudgeOutbox :one
-INSERT INTO submission_judge_outbox (id, tenant_id, submission_id, assignment_id, student_id, item_code, item_version, judger_code, code_storage_key, code_hash, extra_input, source_ref, status, retry_count, last_error, created_at, updated_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 1, 0, NULL, now(), now())
-RETURNING id, tenant_id, submission_id, assignment_id, student_id, item_code, item_version, judger_code, code_storage_key, code_hash, extra_input, source_ref, status, retry_count, last_error, created_at, updated_at;
+INSERT INTO submission_judge_outbox (id, tenant_id, submission_id, assignment_item_id, assignment_id, student_id, item_code, item_version, judger_code, code_storage_key, code_hash, extra_input, source_ref, status, retry_count, last_error, score, completed_at, created_at, updated_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, 1, 0, NULL, NULL, NULL, now(), now())
+RETURNING id, tenant_id, submission_id, assignment_item_id, assignment_id, student_id, item_code, item_version, judger_code, code_storage_key, code_hash, extra_input, source_ref, status, retry_count, last_error, score, completed_at, created_at, updated_at;
 
 -- name: ClaimJudgeOutbox :many
 UPDATE submission_judge_outbox
@@ -296,7 +314,7 @@ WHERE id IN (
     LIMIT $2
     FOR UPDATE SKIP LOCKED
 )
-RETURNING id, tenant_id, submission_id, assignment_id, student_id, item_code, item_version, judger_code, code_storage_key, code_hash, extra_input, source_ref, status, retry_count, last_error, created_at, updated_at;
+RETURNING id, tenant_id, submission_id, assignment_item_id, assignment_id, student_id, item_code, item_version, judger_code, code_storage_key, code_hash, extra_input, source_ref, status, retry_count, last_error, score, completed_at, created_at, updated_at;
 
 -- name: ClaimJudgeOutboxAcrossTenants :many
 UPDATE submission_judge_outbox
@@ -308,19 +326,31 @@ WHERE id IN (
     LIMIT $1
     FOR UPDATE SKIP LOCKED
 )
-RETURNING id, tenant_id, submission_id, assignment_id, student_id, item_code, item_version, judger_code, code_storage_key, code_hash, extra_input, source_ref, status, retry_count, last_error, created_at, updated_at;
+RETURNING id, tenant_id, submission_id, assignment_item_id, assignment_id, student_id, item_code, item_version, judger_code, code_storage_key, code_hash, extra_input, source_ref, status, retry_count, last_error, score, completed_at, created_at, updated_at;
 
 -- name: CompleteJudgeOutbox :one
 UPDATE submission_judge_outbox
 SET status = 3, last_error = NULL, updated_at = now()
 WHERE tenant_id = $1 AND id = $2
-RETURNING id, tenant_id, submission_id, assignment_id, student_id, item_code, item_version, judger_code, code_storage_key, code_hash, extra_input, source_ref, status, retry_count, last_error, created_at, updated_at;
+RETURNING id, tenant_id, submission_id, assignment_item_id, assignment_id, student_id, item_code, item_version, judger_code, code_storage_key, code_hash, extra_input, source_ref, status, retry_count, last_error, score, completed_at, created_at, updated_at;
 
 -- name: RetryJudgeOutbox :one
 UPDATE submission_judge_outbox
 SET status = 1, retry_count = retry_count + 1, last_error = $3, updated_at = now()
 WHERE tenant_id = $1 AND id = $2
-RETURNING id, tenant_id, submission_id, assignment_id, student_id, item_code, item_version, judger_code, code_storage_key, code_hash, extra_input, source_ref, status, retry_count, last_error, created_at, updated_at;
+RETURNING id, tenant_id, submission_id, assignment_item_id, assignment_id, student_id, item_code, item_version, judger_code, code_storage_key, code_hash, extra_input, source_ref, status, retry_count, last_error, score, completed_at, created_at, updated_at;
+
+-- name: MarkJudgeOutboxResult :one
+UPDATE submission_judge_outbox
+SET score = $3, last_error = NULL, completed_at = $4, updated_at = now()
+WHERE tenant_id = $1 AND source_ref = $2
+RETURNING id, tenant_id, submission_id, assignment_item_id, assignment_id, student_id, item_code, item_version, judger_code, code_storage_key, code_hash, extra_input, source_ref, status, retry_count, last_error, score, completed_at, created_at, updated_at;
+
+-- name: MarkJudgeOutboxFailedResult :one
+UPDATE submission_judge_outbox
+SET last_error = $3, completed_at = $4, updated_at = now()
+WHERE tenant_id = $1 AND source_ref = $2
+RETURNING id, tenant_id, submission_id, assignment_item_id, assignment_id, student_id, item_code, item_version, judger_code, code_storage_key, code_hash, extra_input, source_ref, status, retry_count, last_error, score, completed_at, created_at, updated_at;
 
 -- name: UpsertSubmissionDraft :one
 INSERT INTO submission_draft (id, tenant_id, assignment_id, student_id, content, updated_at)
@@ -452,7 +482,7 @@ FROM course_grade
 WHERE tenant_id = $1 AND course_id = $2 AND student_id = $3;
 
 -- name: ListCourseGrades :many
-SELECT g.id, g.tenant_id, g.course_id, g.student_id, g.auto_total::float8 AS auto_total, COALESCE(g.override_total::float8, 0)::float8 AS override_total, g.is_overridden, g.is_locked, g.updated_at, c.credits::float8 AS credits
+SELECT g.id, g.tenant_id, g.course_id, c.semester, g.student_id, g.auto_total::float8 AS auto_total, COALESCE(g.override_total::float8, 0)::float8 AS override_total, g.is_overridden, g.is_locked, g.updated_at, c.credits::float8 AS credits
 FROM course_grade g
 JOIN course c ON c.tenant_id = g.tenant_id AND c.id = g.course_id
 WHERE g.tenant_id = $1 AND g.course_id = $2
@@ -460,7 +490,7 @@ ORDER BY g.student_id ASC
 LIMIT $3 OFFSET $4;
 
 -- name: ListStudentGrades :many
-SELECT g.id, g.tenant_id, g.course_id, g.student_id, g.auto_total::float8 AS auto_total, COALESCE(g.override_total::float8, 0)::float8 AS override_total, g.is_overridden, g.is_locked, g.updated_at, c.credits::float8 AS credits
+SELECT g.id, g.tenant_id, g.course_id, c.semester, g.student_id, g.auto_total::float8 AS auto_total, COALESCE(g.override_total::float8, 0)::float8 AS override_total, g.is_overridden, g.is_locked, g.updated_at, c.credits::float8 AS credits
 FROM course_grade g
 JOIN course c ON c.tenant_id = g.tenant_id AND c.id = g.course_id
 WHERE g.tenant_id = $1 AND g.student_id = $2

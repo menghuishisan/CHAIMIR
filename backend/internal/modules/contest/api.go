@@ -52,7 +52,6 @@ func (a contestAPI) registerTeacherRoutes(g gin.IRouter) {
 	g.POST("/contests/:id/freeze", a.freezeContest)
 	g.POST("/contests/:id/end", a.endContest)
 	g.POST("/contests/:id/archive", a.archiveContest)
-	g.GET("/contests/:id/snapshot", a.getSnapshot)
 	g.GET("/contests/:id/result-snapshot", a.getSnapshot)
 	g.POST("/contests/:id/cheat-records", a.createCheatRecord)
 	g.GET("/contests/:id/cheat-records", a.listCheatRecords)
@@ -70,7 +69,6 @@ func (a contestAPI) registerTeacherRoutes(g gin.IRouter) {
 // registerStudentRoutes 注册学生参赛接口。
 func (a contestAPI) registerStudentRoutes(g gin.IRouter) {
 	g.POST("/contests/:id/signup", a.signup)
-	g.POST("/contests/:id/join", a.joinTeam)
 	g.POST("/teams/:id/join", a.joinTeamByTeamID)
 	g.POST("/teams/:id/lock", a.lockTeam)
 	g.POST("/contests/:id/problems/:problem_id/env", a.createEnv)
@@ -79,13 +77,8 @@ func (a contestAPI) registerStudentRoutes(g gin.IRouter) {
 	g.POST("/contests/:id/battle/entry", a.submitBattleEntry)
 	g.GET("/contests/:id/battle/entries", a.listBattleEntries)
 	g.GET("/contests/:id/battle/matches", a.listBattleMatches)
-	g.POST("/contests/:id/battle-entries", a.submitBattleEntry)
-	g.GET("/contests/:id/battle-entries", a.listBattleEntries)
-	g.GET("/contests/:id/battle-matches", a.listBattleMatches)
 	g.GET("/matches/:id/replay", a.getBattleReplay)
-	g.GET("/battle-matches/:id/replay", a.getBattleReplay)
 	g.GET("/my/contest-records", a.myRecords)
-	g.GET("/my-records", a.myRecords)
 }
 
 // registerSharedRoutes 注册师生共享读取接口。

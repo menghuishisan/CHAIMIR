@@ -310,6 +310,11 @@ SELECT id, tenant_id, account_id, refresh_token_hash, device_info, ip, status, e
 FROM auth_session
 WHERE refresh_token_hash = $1;
 
+-- name: GetAuthSessionByID :one
+SELECT id, tenant_id, account_id, refresh_token_hash, device_info, ip, status, expire_at, created_at
+FROM auth_session
+WHERE tenant_id = $1 AND id = $2;
+
 -- name: ListAuthSessionsByAccount :many
 SELECT id, tenant_id, account_id, refresh_token_hash, device_info, ip, status, expire_at, created_at
 FROM auth_session
@@ -333,6 +338,11 @@ RETURNING id, platform_admin_id, refresh_token_hash, device_info, ip, status, ex
 SELECT id, platform_admin_id, refresh_token_hash, device_info, ip, status, expire_at, created_at
 FROM platform_auth_session
 WHERE refresh_token_hash = $1;
+
+-- name: GetPlatformAuthSessionByID :one
+SELECT id, platform_admin_id, refresh_token_hash, device_info, ip, status, expire_at, created_at
+FROM platform_auth_session
+WHERE id = $1;
 
 -- name: RevokePlatformAuthSessionByID :exec
 UPDATE platform_auth_session SET status = 2

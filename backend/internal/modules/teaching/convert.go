@@ -10,7 +10,7 @@ import (
 
 // courseDTO 将课程领域模型转换为 HTTP 响应结构。
 func courseDTO(c Course) CourseDTO {
-	return CourseDTO{ID: c.ID, TenantID: c.TenantID, TeacherID: c.TeacherID, Name: c.Name, Description: c.Description, Type: c.Type, Difficulty: c.Difficulty, CoverURL: c.CoverURL, Semester: c.Semester, Credits: c.Credits, Schedule: cloneMap(c.Schedule), InviteCode: c.InviteCode, Status: c.Status, Visibility: c.Visibility, CreatedAt: formatTime(c.CreatedAt), UpdatedAt: formatTime(c.UpdatedAt)}
+	return CourseDTO{ID: c.ID, TenantID: c.TenantID, TeacherID: c.TeacherID, Name: c.Name, Description: c.Description, Type: c.Type, Difficulty: c.Difficulty, CoverURL: c.CoverURL, Semester: c.Semester, Credits: c.Credits, Schedule: cloneMap(c.Schedule), StartAt: formatTime(c.StartAt), EndAt: formatTime(c.EndAt), InviteCode: c.InviteCode, Status: c.Status, Visibility: c.Visibility, CreatedAt: formatTime(c.CreatedAt), UpdatedAt: formatTime(c.UpdatedAt)}
 }
 
 // chapterDTO 将章节领域模型转换为 HTTP 响应结构。
@@ -61,6 +61,11 @@ func submissionDTO(s Submission) SubmissionDTO {
 	return SubmissionDTO{ID: s.ID, AssignmentID: s.AssignmentID, StudentID: s.StudentID, AttemptNo: s.AttemptNo, ContentRef: cloneMap(s.ContentRef), JudgeTaskRef: s.JudgeTaskRef, AutoScore: s.AutoScore, ManualScore: s.ManualScore, FinalScore: s.FinalScore, Comment: s.Comment, IsLate: s.IsLate, Status: s.Status, SubmittedAt: formatTime(s.SubmittedAt)}
 }
 
+// draftDTO 将服务端权威作答草稿转换为 HTTP 响应结构。
+func draftDTO(d SubmissionDraft) DraftDTO {
+	return DraftDTO{AssignmentID: d.AssignmentID, StudentID: d.StudentID, Content: cloneMap(d.Content), UpdatedAt: formatTime(d.UpdatedAt), Exists: true}
+}
+
 // progressDTO 将学习进度转换为 HTTP 响应结构。
 func progressDTO(p LessonProgress) ProgressDTO {
 	return ProgressDTO{LessonID: p.LessonID, StudentID: p.StudentID, Status: p.Status, VideoPos: p.VideoPos, DurationSec: p.DurationSec, UpdatedAt: formatTime(p.UpdatedAt)}
@@ -98,7 +103,7 @@ func contractGrade(g CourseGrade) contracts.TeachingCourseGrade {
 		v := g.OverrideTotal
 		override = &v
 	}
-	return contracts.TeachingCourseGrade{TenantID: g.TenantID, CourseID: g.CourseID, StudentID: g.StudentID, AutoTotal: g.AutoTotal, OverrideTotal: override, FinalTotal: finalTotal(g), IsOverridden: g.IsOverridden, Credits: g.Credits}
+	return contracts.TeachingCourseGrade{TenantID: g.TenantID, CourseID: g.CourseID, Semester: g.Semester, StudentID: g.StudentID, AutoTotal: g.AutoTotal, OverrideTotal: override, FinalTotal: finalTotal(g), IsOverridden: g.IsOverridden, Credits: g.Credits}
 }
 
 // finalTotal 按 M6 规则选择手动覆盖成绩或自动成绩作为最终分。

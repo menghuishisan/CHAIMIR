@@ -354,6 +354,8 @@ type Course struct {
 	Semester    string             `json:"semester"`
 	Credits     pgtype.Numeric     `json:"credits"`
 	Schedule    []byte             `json:"schedule"`
+	StartAt     pgtype.Timestamptz `json:"start_at"`
+	EndAt       pgtype.Timestamptz `json:"end_at"`
 	InviteCode  string             `json:"invite_code"`
 	Status      int16              `json:"status"`
 	Visibility  int16              `json:"visibility"`
@@ -998,23 +1000,26 @@ type SubmissionFingerprint struct {
 }
 
 type SubmissionJudgeOutbox struct {
-	ID             int64              `json:"id"`
-	TenantID       int64              `json:"tenant_id"`
-	SubmissionID   int64              `json:"submission_id"`
-	AssignmentID   int64              `json:"assignment_id"`
-	StudentID      int64              `json:"student_id"`
-	ItemCode       string             `json:"item_code"`
-	ItemVersion    string             `json:"item_version"`
-	JudgerCode     string             `json:"judger_code"`
-	CodeStorageKey string             `json:"code_storage_key"`
-	CodeHash       string             `json:"code_hash"`
-	ExtraInput     []byte             `json:"extra_input"`
-	SourceRef      string             `json:"source_ref"`
-	Status         int16              `json:"status"`
-	RetryCount     int32              `json:"retry_count"`
-	LastError      pgtype.Text        `json:"last_error"`
-	CreatedAt      pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+	ID               int64              `json:"id"`
+	TenantID         int64              `json:"tenant_id"`
+	SubmissionID     int64              `json:"submission_id"`
+	AssignmentItemID int64              `json:"assignment_item_id"`
+	AssignmentID     int64              `json:"assignment_id"`
+	StudentID        int64              `json:"student_id"`
+	ItemCode         string             `json:"item_code"`
+	ItemVersion      string             `json:"item_version"`
+	JudgerCode       string             `json:"judger_code"`
+	CodeStorageKey   string             `json:"code_storage_key"`
+	CodeHash         string             `json:"code_hash"`
+	ExtraInput       []byte             `json:"extra_input"`
+	SourceRef        string             `json:"source_ref"`
+	Status           int16              `json:"status"`
+	RetryCount       int32              `json:"retry_count"`
+	LastError        pgtype.Text        `json:"last_error"`
+	Score            pgtype.Int4        `json:"score"`
+	CompletedAt      pgtype.Timestamptz `json:"completed_at"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
 }
 
 type SystemAnnouncement struct {

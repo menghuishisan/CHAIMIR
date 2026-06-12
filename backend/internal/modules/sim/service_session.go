@@ -80,7 +80,11 @@ func (s *Service) ReportAction(ctx context.Context, tenantID, accountID, session
 		}
 		existing, err := tx.GetActionBySeq(ctx, tenantID, sessionID, req.Seq)
 		if err == nil {
-			if actionEqual(existing, req) {
+			same, err := actionEqual(existing, req)
+			if err != nil {
+				return err
+			}
+			if same {
 				out = existing
 				return nil
 			}
@@ -134,12 +138,18 @@ func (s *Service) GetReplayForUser(ctx context.Context, tenantID, accountID, ses
 
 // DestroySession 回收单个仿真会话。
 func (s *Service) DestroySession(ctx context.Context, tenantID, sessionID int64) error {
-	return s.store.TenantTx(ctx, tenantID, func(ctx context.Context, tx TxStore) error {
-		if _, err := tx.ArchiveSession(ctx, tenantID, sessionID); err != nil {
+	var archived Session
+	if err := s.store.TenantTx(ctx, tenantID, func(ctx context.Context, tx TxStore) error {
+		var err error
+		archived, err = tx.ArchiveSession(ctx, tenantID, sessionID)
+		if err != nil {
 			return apperr.ErrSimSessionNotFound.WithCause(err)
 		}
 		return nil
-	})
+	}); err != nil {
+		return err
+	}
+	return s.releaseBackendSessions(ctx, tenantID, []Session{archived})
 }
 
 // RecycleBySourceRef 按来源标识归档仿真会话并释放后端计算资源。
@@ -147,22 +157,23 @@ func (s *Service) RecycleBySourceRef(ctx context.Context, req contracts.SimRecyc
 	if req.TenantID <= 0 || !auth.ValidSourceRef(req.SourceRef) || !auth.ServiceSourceRefAuthorized(ctx, req.SourceRef) {
 		return apperr.ErrSimSessionInvalid
 	}
-	return s.store.TenantTx(ctx, req.TenantID, func(ctx context.Context, tx TxStore) error {
-		_, err := tx.ArchiveSessionsBySourceRef(ctx, req.TenantID, req.SourceRef)
+	var archived []Session
+	if err := s.store.TenantTx(ctx, req.TenantID, func(ctx context.Context, tx TxStore) error {
+		var err error
+		archived, err = tx.ArchiveSessionsBySourceRef(ctx, req.TenantID, req.SourceRef)
 		if err != nil {
 			return apperr.ErrSimSessionStateInvalid.WithCause(err)
 		}
 		return nil
-	})
+	}); err != nil {
+		return err
+	}
+	return s.releaseBackendSessions(ctx, req.TenantID, archived)
 }
 
 // ReportCheckpoint 保存仿真检查点结果快照,供 M3 后续判分读取。
 func (s *Service) ReportCheckpoint(ctx context.Context, req contracts.SimCheckpointRequest) error {
-	raw, err := json.Marshal(req.Answer)
-	if err != nil {
-		return apperr.ErrSimCheckpointInvalid.WithCause(err)
-	}
-	return s.reportCheckpointRaw(ctx, req.TenantID, req.SessionID, req.CheckpointID, raw, req.Achieved)
+	return s.reportCheckpointRaw(ctx, req.TenantID, req.SessionID, req.CheckpointID, req.Answer, req.Achieved)
 }
 
 // ReportCheckpointFromHTTP 保存 HTTP 内部接口上报的检查点。
@@ -266,4 +277,44 @@ func (s *Service) reportCheckpointRaw(ctx context.Context, tenantID, sessionID i
 		}
 		return nil
 	})
+}
+
+// releaseBackendSessions 释放已归档 compute=backend 会话的 M4 自有适配器资源。
+func (s *Service) releaseBackendSessions(ctx context.Context, tenantID int64, sessions []Session) error {
+	for _, archived := range sessions {
+		if archived.Compute != ComputeBackend {
+			continue
+		}
+		session, err := s.loadBackendReleaseSession(ctx, tenantID, archived.ID)
+		if err != nil {
+			return err
+		}
+		adapter := s.backends[strings.TrimSpace(session.BackendAdapter)]
+		if adapter == nil {
+			return apperr.ErrSimBackendComputeUnavailable
+		}
+		if err := adapter.Release(ctx, session); err != nil {
+			return apperr.ErrSimBackendComputeUnavailable.WithCause(err)
+		}
+	}
+	return nil
+}
+
+// loadBackendReleaseSession 读取后端适配器释放资源所需的会话与包配置。
+func (s *Service) loadBackendReleaseSession(ctx context.Context, tenantID, sessionID int64) (SessionWithPackage, error) {
+	var session SessionWithPackage
+	if err := s.store.TenantTx(ctx, tenantID, func(ctx context.Context, tx TxStore) error {
+		var err error
+		session, err = tx.GetSessionWithPackage(ctx, tenantID, sessionID)
+		if err != nil {
+			return apperr.ErrSimSessionNotFound.WithCause(err)
+		}
+		return nil
+	}); err != nil {
+		return SessionWithPackage{}, err
+	}
+	if strings.TrimSpace(session.BackendAdapter) == "" {
+		return SessionWithPackage{}, apperr.ErrSimBackendComputeUnavailable
+	}
+	return session, nil
 }

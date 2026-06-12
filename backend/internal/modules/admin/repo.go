@@ -42,6 +42,7 @@ type TxStore interface {
 	ListAlertEvents(context.Context, int16, int64, int, int) ([]AlertEventDTO, error)
 	HandleAlertEvent(context.Context, int64, int16, int64) (AlertEventDTO, error)
 	ListPlatformStatistics(context.Context, int16, int64, string, string) ([]StatisticsDTO, error)
+	UpsertPlatformStatistics(context.Context, int64, int16, int64, string, map[string]any) (StatisticsDTO, error)
 	CreateBackupRecord(context.Context, int64, int16, string, int64, int16) (BackupRecordDTO, error)
 	ListBackupRecords(context.Context, int, int) ([]BackupRecordDTO, error)
 }

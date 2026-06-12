@@ -4,6 +4,7 @@ package teaching
 import (
 	"context"
 	"strconv"
+	"time"
 
 	"chaimir/internal/modules/teaching/internal/sqlcgen"
 )
@@ -19,7 +20,7 @@ func (s *txStore) CreateCourse(ctx context.Context, course Course) (Course, erro
 	if err != nil {
 		return Course{}, err
 	}
-	row, err := s.q.CreateCourse(ctx, sqlcgen.CreateCourseParams{ID: course.ID, TenantID: course.TenantID, TeacherID: course.TeacherID, Name: course.Name, Description: course.Description, Type: course.Type, Difficulty: course.Difficulty, CoverUrl: textParam(course.CoverURL), Semester: course.Semester, Column10: formatNumber(course.Credits), Schedule: schedule, InviteCode: course.InviteCode, Status: course.Status, Visibility: course.Visibility})
+	row, err := s.q.CreateCourse(ctx, sqlcgen.CreateCourseParams{ID: course.ID, TenantID: course.TenantID, TeacherID: course.TeacherID, Name: course.Name, Description: course.Description, Type: course.Type, Difficulty: course.Difficulty, CoverUrl: textParam(course.CoverURL), Semester: course.Semester, Column10: formatNumber(course.Credits), Schedule: schedule, StartAt: timestamptzParam(course.StartAt), EndAt: timestamptzParam(course.EndAt), InviteCode: course.InviteCode, Status: course.Status, Visibility: course.Visibility})
 	if err != nil {
 		return Course{}, err
 	}
@@ -101,7 +102,7 @@ func (s *txStore) UpdateCourse(ctx context.Context, course Course) (Course, erro
 	if err != nil {
 		return Course{}, err
 	}
-	row, err := s.q.UpdateCourse(ctx, sqlcgen.UpdateCourseParams{TenantID: course.TenantID, ID: course.ID, Name: course.Name, Description: course.Description, Type: course.Type, Difficulty: course.Difficulty, CoverUrl: textParam(course.CoverURL), Semester: course.Semester, Column9: formatNumber(course.Credits), Schedule: schedule})
+	row, err := s.q.UpdateCourse(ctx, sqlcgen.UpdateCourseParams{TenantID: course.TenantID, ID: course.ID, Name: course.Name, Description: course.Description, Type: course.Type, Difficulty: course.Difficulty, CoverUrl: textParam(course.CoverURL), Semester: course.Semester, Column9: formatNumber(course.Credits), Schedule: schedule, StartAt: timestamptzParam(course.StartAt), EndAt: timestamptzParam(course.EndAt)})
 	if err != nil {
 		return Course{}, err
 	}
@@ -138,6 +139,40 @@ func (s *txStore) RefreshCourseInviteCode(ctx context.Context, tenantID, id int6
 // CountCourseLessons 统计课程课时数量。
 func (s *txStore) CountCourseLessons(ctx context.Context, tenantID, courseID int64) (int64, error) {
 	return s.q.CountCourseLessons(ctx, sqlcgen.CountCourseLessonsParams{TenantID: tenantID, CourseID: courseID})
+}
+
+// ListCoursesDueToRun 查询已到开始时间但尚未进入进行中的课程。
+func (s *txStore) ListCoursesDueToRun(ctx context.Context, now time.Time) ([]Course, error) {
+	rows, err := s.q.ListCoursesDueToRun(ctx, timestamptzParam(now))
+	if err != nil {
+		return nil, err
+	}
+	out := make([]Course, 0, len(rows))
+	for _, row := range rows {
+		course, err := courseFromFields(row.ID, row.TenantID, row.TeacherID, row.Name, row.Description, row.Type, row.Difficulty, row.CoverUrl, row.Semester, row.Credits, row.Schedule, row.StartAt, row.EndAt, row.InviteCode, row.Status, row.Visibility, row.CreatedAt, row.UpdatedAt)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, course)
+	}
+	return out, nil
+}
+
+// ListCoursesDueToEnd 查询已到结束时间但尚未结束的课程。
+func (s *txStore) ListCoursesDueToEnd(ctx context.Context, now time.Time) ([]Course, error) {
+	rows, err := s.q.ListCoursesDueToEnd(ctx, timestamptzParam(now))
+	if err != nil {
+		return nil, err
+	}
+	out := make([]Course, 0, len(rows))
+	for _, row := range rows {
+		course, err := courseFromFields(row.ID, row.TenantID, row.TeacherID, row.Name, row.Description, row.Type, row.Difficulty, row.CoverUrl, row.Semester, row.Credits, row.Schedule, row.StartAt, row.EndAt, row.InviteCode, row.Status, row.Visibility, row.CreatedAt, row.UpdatedAt)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, course)
+	}
+	return out, nil
 }
 
 // CreateChapter 创建章节。

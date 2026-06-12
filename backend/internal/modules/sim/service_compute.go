@@ -1,4 +1,4 @@
-// sim compute 文件实现 compute=backend WebSocket 接入和 M4 自有适配器注册表调度。
+// sim service_compute 文件实现 compute=backend WebSocket 接入和 M4 自有适配器注册表调度。
 package sim
 
 import (

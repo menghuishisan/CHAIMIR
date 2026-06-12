@@ -26,7 +26,8 @@ type Querier interface {
 	ListSystemConfigs(ctx context.Context, arg ListSystemConfigsParams) ([]SystemConfig, error)
 	UpdateAlertRule(ctx context.Context, arg UpdateAlertRuleParams) (AlertRule, error)
 	UpdateSystemConfig(ctx context.Context, arg UpdateSystemConfigParams) (SystemConfig, error)
-	UpsertPlatformStatistics(ctx context.Context, arg UpsertPlatformStatisticsParams) (PlatformStatistic, error)
+	UpsertGlobalPlatformStatistics(ctx context.Context, arg UpsertGlobalPlatformStatisticsParams) (PlatformStatistic, error)
+	UpsertTenantPlatformStatistics(ctx context.Context, arg UpsertTenantPlatformStatisticsParams) (PlatformStatistic, error)
 }
 
 var _ Querier = (*Queries)(nil)

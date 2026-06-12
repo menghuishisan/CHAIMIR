@@ -425,6 +425,33 @@ func (q *Queries) GetLatestApprovedReviewByCourse(ctx context.Context, courseID 
 	return i, err
 }
 
+const getLatestReviewByCourse = `-- name: GetLatestReviewByCourse :one
+SELECT id, tenant_id, course_id, semester_id, submitter_id, reviewer_id, status, is_locked, comment, submitted_at, reviewed_at
+FROM grade_review
+WHERE course_id = $1
+ORDER BY reviewed_at DESC NULLS LAST, submitted_at DESC
+LIMIT 1
+`
+
+func (q *Queries) GetLatestReviewByCourse(ctx context.Context, courseID int64) (GradeReview, error) {
+	row := q.db.QueryRow(ctx, getLatestReviewByCourse, courseID)
+	var i GradeReview
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.CourseID,
+		&i.SemesterID,
+		&i.SubmitterID,
+		&i.ReviewerID,
+		&i.Status,
+		&i.IsLocked,
+		&i.Comment,
+		&i.SubmittedAt,
+		&i.ReviewedAt,
+	)
+	return i, err
+}
+
 const getTranscriptRecord = `-- name: GetTranscriptRecord :one
 SELECT id, tenant_id, student_id, scope, semester_id, pdf_ref, generated_at
 FROM transcript_record
@@ -623,6 +650,42 @@ func (q *Queries) ListGradeReviews(ctx context.Context, arg ListGradeReviewsPara
 	return items, nil
 }
 
+const listKnownStudentSemesterGrades = `-- name: ListKnownStudentSemesterGrades :many
+SELECT id, tenant_id, student_id, semester_id, total_credits, gpa, cumulative_gpa, computed_at
+FROM student_semester_grade
+WHERE ($1::bigint = 0 OR student_id = $1::bigint)
+ORDER BY student_id ASC, semester_id ASC
+`
+
+func (q *Queries) ListKnownStudentSemesterGrades(ctx context.Context, studentID int64) ([]StudentSemesterGrade, error) {
+	rows, err := q.db.Query(ctx, listKnownStudentSemesterGrades, studentID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []StudentSemesterGrade{}
+	for rows.Next() {
+		var i StudentSemesterGrade
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.StudentID,
+			&i.SemesterID,
+			&i.TotalCredits,
+			&i.Gpa,
+			&i.CumulativeGpa,
+			&i.ComputedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listLevelConfigs = `-- name: ListLevelConfigs :many
 SELECT id, tenant_id, name, mapping, warning_rules, is_default, created_at, updated_at
 FROM grade_level_config
@@ -784,6 +847,38 @@ type RejectGradeReviewParams struct {
 
 func (q *Queries) RejectGradeReview(ctx context.Context, arg RejectGradeReviewParams) (GradeReview, error) {
 	row := q.db.QueryRow(ctx, rejectGradeReview, arg.ID, arg.ReviewerID, arg.Comment)
+	var i GradeReview
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.CourseID,
+		&i.SemesterID,
+		&i.SubmitterID,
+		&i.ReviewerID,
+		&i.Status,
+		&i.IsLocked,
+		&i.Comment,
+		&i.SubmittedAt,
+		&i.ReviewedAt,
+	)
+	return i, err
+}
+
+const relockGradeReview = `-- name: RelockGradeReview :one
+UPDATE grade_review
+SET status = 2, is_locked = true, reviewer_id = $2, comment = $3, reviewed_at = now()
+WHERE id = $1 AND status = 1
+RETURNING id, tenant_id, course_id, semester_id, submitter_id, reviewer_id, status, is_locked, comment, submitted_at, reviewed_at
+`
+
+type RelockGradeReviewParams struct {
+	ID         int64       `json:"id"`
+	ReviewerID pgtype.Int8 `json:"reviewer_id"`
+	Comment    pgtype.Text `json:"comment"`
+}
+
+func (q *Queries) RelockGradeReview(ctx context.Context, arg RelockGradeReviewParams) (GradeReview, error) {
+	row := q.db.QueryRow(ctx, relockGradeReview, arg.ID, arg.ReviewerID, arg.Comment)
 	var i GradeReview
 	err := row.Scan(
 		&i.ID,

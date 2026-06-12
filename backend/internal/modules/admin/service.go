@@ -11,9 +11,11 @@ import (
 	"chaimir/internal/contracts"
 	"chaimir/internal/platform/audit"
 	"chaimir/internal/platform/config"
+	"chaimir/internal/platform/secretmap"
 	"chaimir/internal/platform/tenant"
 	"chaimir/internal/platform/timex"
 	"chaimir/pkg/apperr"
+	pkgcrypto "chaimir/pkg/crypto"
 	"chaimir/pkg/snowflake"
 )
 
@@ -32,6 +34,7 @@ type Service struct {
 	contest    contracts.ContestReadService
 	notify     contracts.NotifyService
 	monitoring config.MonitoringConfig
+	secretCipher *pkgcrypto.Cipher
 }
 
 // ServiceDeps 是 M9 服务装配依赖。
@@ -49,6 +52,7 @@ type ServiceDeps struct {
 	Contest    contracts.ContestReadService
 	Notify     contracts.NotifyService
 	Monitoring config.MonitoringConfig
+	Cipher     *pkgcrypto.Cipher
 }
 
 // NewService 构造 M9 服务。
@@ -56,7 +60,7 @@ func NewService(deps ServiceDeps) (*Service, error) {
 	if deps.Store == nil || deps.IDs == nil || deps.Audit == nil || deps.Roles == nil || deps.Identity == nil || deps.Stats == nil || deps.AuditRead == nil {
 		return nil, fmt.Errorf("admin service 依赖不完整")
 	}
-	return &Service{store: deps.Store, ids: deps.IDs, audit: deps.Audit, roles: deps.Roles, identity: deps.Identity, stats: deps.Stats, auditRead: deps.AuditRead, teaching: deps.Teaching, sandbox: deps.Sandbox, experiment: deps.Experiment, contest: deps.Contest, notify: deps.Notify, monitoring: deps.Monitoring}, nil
+	return &Service{store: deps.Store, ids: deps.IDs, audit: deps.Audit, roles: deps.Roles, identity: deps.Identity, stats: deps.Stats, auditRead: deps.AuditRead, teaching: deps.Teaching, sandbox: deps.Sandbox, experiment: deps.Experiment, contest: deps.Contest, notify: deps.Notify, monitoring: deps.Monitoring, secretCipher: deps.Cipher}, nil
 }
 
 // PlatformDashboard 聚合平台级看板。
@@ -117,6 +121,62 @@ func (s *Service) SchoolDashboard(ctx context.Context) (DashboardDTO, error) {
 	return out, nil
 }
 
+// PlatformStatistics 读取平台级周期统计快照。
+func (s *Service) PlatformStatistics(ctx context.Context, fromDate, toDate string) ([]StatisticsDTO, error) {
+	if _, err := requirePlatform(ctx); err != nil {
+		return nil, err
+	}
+	if err := validateDateRange(fromDate, toDate); err != nil {
+		return nil, err
+	}
+	return runAdminRead(ctx, s.store, 0, func(ctx context.Context, tx TxStore) ([]StatisticsDTO, error) {
+		rows, err := tx.ListPlatformStatistics(ctx, ScopeGlobal, 0, fromDate, toDate)
+		if err != nil {
+			return nil, apperr.ErrAdminStatisticsInvalid.WithCause(err)
+		}
+		return rows, nil
+	})
+}
+
+// SchoolStatistics 读取当前学校的周期统计快照。
+func (s *Service) SchoolStatistics(ctx context.Context, fromDate, toDate string) ([]StatisticsDTO, error) {
+	id, err := s.requireTenantAdmin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if err := validateDateRange(fromDate, toDate); err != nil {
+		return nil, err
+	}
+	return runAdminRead(ctx, s.store, id.TenantID, func(ctx context.Context, tx TxStore) ([]StatisticsDTO, error) {
+		rows, err := tx.ListPlatformStatistics(ctx, ScopeTenant, id.TenantID, fromDate, toDate)
+		if err != nil {
+			return nil, apperr.ErrAdminStatisticsInvalid.WithCause(err)
+		}
+		return rows, nil
+	})
+}
+
+// RunStatisticsSnapshotOnce 生成当天平台与租户统计快照。
+func (s *Service) RunStatisticsSnapshotOnce(ctx context.Context) error {
+	statDate := timex.Now().Format("2006-01-02")
+	if err := s.snapshotGlobalStats(ctx, statDate); err != nil {
+		return err
+	}
+	tenants, err := s.identity.ListTenants(ctx)
+	if err != nil {
+		return apperr.ErrAdminStatisticsInvalid.WithCause(err)
+	}
+	for _, item := range tenants {
+		if item.TenantID <= 0 {
+			continue
+		}
+		if err := s.snapshotTenantStats(ctx, item.TenantID, statDate); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // ListTenants 读取租户列表。
 func (s *Service) ListTenants(ctx context.Context) ([]contracts.TenantSummary, error) {
 	if _, err := requirePlatform(ctx); err != nil {
@@ -151,6 +211,10 @@ func (s *Service) QueryAudit(ctx context.Context, query contracts.AuditQuery) (c
 
 // ExportAuditCSV 导出审计日志 CSV。
 func (s *Service) ExportAuditCSV(ctx context.Context, query contracts.AuditQuery) ([]byte, error) {
+	id, err := s.currentAdminIdentity(ctx)
+	if err != nil {
+		return nil, err
+	}
 	query.Page = 1
 	query.Size = 1000
 	result, err := s.QueryAudit(ctx, query)
@@ -171,6 +235,9 @@ func (s *Service) ExportAuditCSV(ctx context.Context, query contracts.AuditQuery
 	if err := w.Error(); err != nil {
 		return nil, apperr.ErrAdminAuditExportFailed.WithCause(err)
 	}
+	if err := s.writeAudit(ctx, id, "admin.audit.export", "audit_log", 0, map[string]any{"size": result.Size, "total": result.Total}); err != nil {
+		return nil, apperr.ErrAdminAuditWriteFailed.WithCause(err)
+	}
 	return []byte(b.String()), nil
 }
 
@@ -186,7 +253,11 @@ func (s *Service) ListConfigs(ctx context.Context, scope int16) ([]ConfigDTO, er
 		tenantID = id.TenantID
 	}
 	return runAdminRead(ctx, s.store, tenantID, func(ctx context.Context, tx TxStore) ([]ConfigDTO, error) {
-		return tx.ListSystemConfigs(ctx, scope, tenantID)
+		rows, err := tx.ListSystemConfigs(ctx, scope, tenantID)
+		if err != nil {
+			return nil, err
+		}
+		return maskConfigs(rows), nil
 	})
 }
 
@@ -204,6 +275,11 @@ func (s *Service) UpdateConfig(ctx context.Context, key string, req ConfigUpdate
 		req.Scope = ScopeTenant
 		req.TenantID = id.TenantID
 	}
+	protected, err := secretmap.Protect(s.secretCipher, req.Value, "系统配置")
+	if err != nil {
+		return ConfigDTO{}, apperr.ErrAdminConfigInvalid.WithCause(err)
+	}
+	req.Value = protected
 	if err := validateScopeTenant(req.Scope, req.TenantID); err != nil {
 		return ConfigDTO{}, err
 	}
@@ -234,6 +310,7 @@ func (s *Service) UpdateConfig(ctx context.Context, key string, req ConfigUpdate
 	if err := s.writeAudit(ctx, id, "admin.config.update", "system_config", out.ID, map[string]any{"key": key}); err != nil {
 		return ConfigDTO{}, apperr.ErrAdminAuditWriteFailed.WithCause(err)
 	}
+	out.Value = secretmap.Mask(out.Value)
 	return out, nil
 }
 
@@ -252,7 +329,11 @@ func (s *Service) ListConfigHistory(ctx context.Context, scope int16, tenantID i
 		if err != nil {
 			return nil, apperr.ErrAdminConfigNotFound.WithCause(err)
 		}
-		return tx.ListConfigChangeLogs(ctx, cfg.ID, page, size)
+		rows, err := tx.ListConfigChangeLogs(ctx, cfg.ID, page, size)
+		if err != nil {
+			return nil, err
+		}
+		return maskConfigLogs(rows), nil
 	})
 }
 
@@ -296,6 +377,7 @@ func (s *Service) RollbackConfig(ctx context.Context, key string, req ConfigUpda
 	if err := s.writeAudit(ctx, id, "admin.config.rollback", "system_config", out.ID, map[string]any{"key": key, "change_log_id": req.ChangeLogID}); err != nil {
 		return ConfigDTO{}, apperr.ErrAdminAuditWriteFailed.WithCause(err)
 	}
+	out.Value = secretmap.Mask(out.Value)
 	return out, nil
 }
 
@@ -398,6 +480,28 @@ func (s *Service) HandleAlertEvent(ctx context.Context, eventID int64, req Alert
 	if err != nil {
 		return AlertEventDTO{}, apperr.ErrAdminAlertNotFound.WithCause(err)
 	}
+	if s.notify != nil {
+		topicTenantID := id.TenantID
+		if out.TenantID > 0 {
+			topicTenantID = out.TenantID
+		}
+		if err := s.notify.Push(ctx, contracts.NotifyPushRequest{
+			TenantID: topicTenantID,
+			Topic:    fmt.Sprintf("admin:%d:alerts", topicTenantID),
+			Payload: map[string]any{
+				"event_id":   out.ID,
+				"rule_id":    out.RuleID,
+				"level":      out.Level,
+				"status":     out.Status,
+				"handler_id": out.HandlerID,
+			},
+		}); err != nil {
+			return AlertEventDTO{}, apperr.ErrAdminAlertInvalid.WithCause(err)
+		}
+	}
+	if err := s.writeAudit(ctx, id, "admin.alert.handle", "alert_event", out.ID, map[string]any{"status": out.Status}); err != nil {
+		return AlertEventDTO{}, apperr.ErrAdminAuditWriteFailed.WithCause(err)
+	}
 	return out, nil
 }
 
@@ -432,7 +536,7 @@ func (s *Service) TriggerBackup(ctx context.Context, req BackupTriggerRequest) (
 	err = s.store.PlatformTx(ctx, func(ctx context.Context, tx TxStore) error {
 		var err error
 		ref := fmt.Sprintf("backup://manual/%d", s.ids.Generate())
-		out, err = tx.CreateBackupRecord(ctx, s.ids.Generate(), req.Type, ref, 0, 2)
+		out, err = tx.CreateBackupRecord(ctx, s.ids.Generate(), req.Type, ref, 0, BackupStatusRunning)
 		return err
 	})
 	if err != nil {
@@ -531,4 +635,111 @@ func (s *Service) writeAudit(ctx context.Context, id tenant.Identity, action, ta
 		return err
 	}
 	return s.audit.Write(ctx, entry)
+}
+
+// snapshotGlobalStats 聚合平台级只读指标并写入 M9 自有统计快照。
+func (s *Service) snapshotGlobalStats(ctx context.Context, statDate string) error {
+	stats, err := s.stats.PlatformStats(ctx)
+	if err != nil {
+		return apperr.ErrAdminStatisticsInvalid.WithCause(err)
+	}
+	metrics := map[string]any{
+		"tenant_count":         stats.TenantCount,
+		"account_count":        stats.AccountCount,
+		"teacher_count":        stats.TeacherCount,
+		"student_count":        stats.StudentCount,
+		"active_account_count": stats.ActiveAccountCount,
+		"pending_apply_count":  stats.PendingApplyCount,
+	}
+	return s.upsertStatistics(ctx, 0, ScopeGlobal, 0, statDate, metrics)
+}
+
+// snapshotTenantStats 聚合单租户只读指标并写入 M9 自有统计快照。
+func (s *Service) snapshotTenantStats(ctx context.Context, tenantID int64, statDate string) error {
+	stats, err := s.stats.TenantStats(ctx, tenantID)
+	if err != nil {
+		return apperr.ErrAdminStatisticsInvalid.WithCause(err)
+	}
+	metrics := map[string]any{
+		"account_count":        stats.AccountCount,
+		"teacher_count":        stats.TeacherCount,
+		"student_count":        stats.StudentCount,
+		"active_account_count": stats.ActiveAccountCount,
+	}
+	if s.teaching != nil {
+		t, err := s.teaching.Stats(ctx, tenantID)
+		if err != nil {
+			return apperr.ErrAdminStatisticsInvalid.WithCause(err)
+		}
+		metrics["course_count"] = t.CourseCount
+		metrics["active_course_count"] = t.ActiveCourseCount
+		metrics["learning_duration_sec"] = t.LearningDurationSec
+	}
+	if s.experiment != nil {
+		e, err := s.experiment.Stats(ctx, contracts.ExperimentStatsQuery{TenantID: tenantID})
+		if err != nil {
+			return apperr.ErrAdminStatisticsInvalid.WithCause(err)
+		}
+		metrics["experiment_count"] = e.ExperimentCount
+		metrics["active_instance_count"] = e.ActiveInstanceCount
+	}
+	if s.contest != nil {
+		c, err := s.contest.Stats(ctx, tenantID)
+		if err != nil {
+			return apperr.ErrAdminStatisticsInvalid.WithCause(err)
+		}
+		metrics["contest_count"] = c.ContestCount
+		metrics["active_contest_count"] = c.ActiveContestCount
+		metrics["participant_count"] = c.ParticipantCount
+	}
+	if s.sandbox != nil {
+		q, err := s.sandbox.Stats(ctx, tenantID)
+		if err != nil {
+			return apperr.ErrAdminStatisticsInvalid.WithCause(err)
+		}
+		metrics["active_sandbox_count"] = q.ActiveSandboxCount
+		metrics["max_concurrent_sandbox"] = q.MaxConcurrentSandbox
+		metrics["max_cpu"] = q.MaxCPU
+		metrics["max_memory_mb"] = q.MaxMemoryMB
+	}
+	return s.upsertStatistics(ctx, tenantID, ScopeTenant, tenantID, statDate, metrics)
+}
+
+// upsertStatistics 在正确的 RLS 边界内写入 M9 自有统计快照。
+func (s *Service) upsertStatistics(ctx context.Context, txTenantID int64, scope int16, tenantID int64, statDate string, metrics map[string]any) error {
+	run := func(ctx context.Context, tx TxStore) error {
+		_, err := tx.UpsertPlatformStatistics(ctx, s.ids.Generate(), scope, tenantID, statDate, metrics)
+		return err
+	}
+	var err error
+	if txTenantID > 0 {
+		err = s.store.TenantTx(ctx, txTenantID, run)
+	} else {
+		err = s.store.PlatformTx(ctx, run)
+	}
+	if err != nil {
+		return apperr.ErrAdminStatisticsInvalid.WithCause(err)
+	}
+	return nil
+}
+
+// maskConfigs 返回配置列表前隐藏敏感字段。
+func maskConfigs(rows []ConfigDTO) []ConfigDTO {
+	out := make([]ConfigDTO, 0, len(rows))
+	for _, row := range rows {
+		row.Value = secretmap.Mask(row.Value)
+		out = append(out, row)
+	}
+	return out
+}
+
+// maskConfigLogs 返回配置历史前隐藏敏感字段。
+func maskConfigLogs(rows []ConfigChangeLogDTO) []ConfigChangeLogDTO {
+	out := make([]ConfigChangeLogDTO, 0, len(rows))
+	for _, row := range rows {
+		row.OldValue = secretmap.Mask(row.OldValue)
+		row.NewValue = secretmap.Mask(row.NewValue)
+		out = append(out, row)
+	}
+	return out
 }

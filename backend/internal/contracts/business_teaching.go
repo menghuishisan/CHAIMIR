@@ -7,6 +7,7 @@ import "context"
 type TeachingCourseGrade struct {
 	TenantID      int64
 	CourseID      int64
+	Semester      string
 	StudentID     int64
 	AutoTotal     float64
 	OverrideTotal *float64

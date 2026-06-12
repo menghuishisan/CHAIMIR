@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"chaimir/internal/modules/teaching/internal/sqlcgen"
 	"chaimir/internal/platform/db"
@@ -33,6 +34,8 @@ type TxStore interface {
 	SetCourseVisibility(context.Context, int64, int64, int16) (Course, error)
 	RefreshCourseInviteCode(context.Context, int64, int64, string) (Course, error)
 	CountCourseLessons(context.Context, int64, int64) (int64, error)
+	ListCoursesDueToRun(context.Context, time.Time) ([]Course, error)
+	ListCoursesDueToEnd(context.Context, time.Time) ([]Course, error)
 	CreateChapter(context.Context, Chapter) (Chapter, error)
 	GetChapter(context.Context, int64, int64) (Chapter, error)
 	ListChapters(context.Context, int64, int64) ([]Chapter, error)
@@ -61,15 +64,18 @@ type TxStore interface {
 	CreateSubmission(context.Context, Submission) (Submission, error)
 	GetSubmission(context.Context, int64, int64) (Submission, error)
 	GetSubmissionBySourceRef(context.Context, int64, string) (Submission, error)
+	ListJudgeOutboxBySubmission(context.Context, int64, int64) ([]JudgeOutbox, error)
 	ListSubmissionsByAssignment(context.Context, int64, int64, int, int) ([]Submission, int64, error)
 	UpdateSubmissionManualGrade(context.Context, int64, int64, int32, int32, string) (Submission, error)
 	UpdateSubmissionJudgeRef(context.Context, int64, int64, string) (Submission, error)
-	UpdateSubmissionAutoScoreBySourceRef(context.Context, int64, string, int32, int32) (Submission, error)
+	UpdateSubmissionAutoScore(context.Context, int64, int64, int32, int32) (Submission, error)
 	CreateJudgeOutbox(context.Context, JudgeOutbox) (JudgeOutbox, error)
 	ClaimJudgeOutbox(context.Context, int64, int32) ([]JudgeOutbox, error)
 	ClaimJudgeOutboxAcrossTenants(context.Context, int32) ([]JudgeOutbox, error)
 	CompleteJudgeOutbox(context.Context, int64, int64) (JudgeOutbox, error)
 	RetryJudgeOutbox(context.Context, int64, int64, string) (JudgeOutbox, error)
+	MarkJudgeOutboxResult(context.Context, int64, string, int32, time.Time) (JudgeOutbox, error)
+	MarkJudgeOutboxFailedResult(context.Context, int64, string, string, time.Time) (JudgeOutbox, error)
 	UpsertDraft(context.Context, SubmissionDraft) (SubmissionDraft, error)
 	GetDraft(context.Context, int64, int64, int64) (SubmissionDraft, error)
 	DeleteDraft(context.Context, int64, int64, int64) error

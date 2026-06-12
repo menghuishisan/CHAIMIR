@@ -34,6 +34,17 @@ func (s *Service) CreateCheatRecord(ctx context.Context, contestID int64, req Ch
 			return validateCheatTeamError()
 		}
 		item, err = tx.CreateCheatRecord(ctx, item)
+		if err != nil {
+			return err
+		}
+		if item.Action == CheatActionPenalty {
+			if err := s.applyCheatPenalty(ctx, tx, id.TenantID, contestID, item.TeamID, float64FromMap(item.Evidence, "penalty_score", 0)); err != nil {
+				return err
+			}
+		}
+		if item.Action == CheatActionDisqualify {
+			return tx.RefreshContestRanks(ctx, id.TenantID, contestID)
+		}
 		return err
 	}); err != nil {
 		return CheatRecordDTO{}, err
@@ -105,4 +116,28 @@ func (s *Service) ListCheatSuspects(ctx context.Context, contestID, problemID in
 // validateCheatTeamError 保持违规上下文校验错误码统一。
 func validateCheatTeamError() error {
 	return apperr.ErrContestCheatInvalid
+}
+
+// applyCheatPenalty 将人工确认的扣分处罚写入排行榜投影。
+func (s *Service) applyCheatPenalty(ctx context.Context, tx TxStore, tenantID, contestID, teamID int64, penalty float64) error {
+	if penalty <= 0 {
+		return apperr.ErrContestCheatInvalid
+	}
+	rank, err := tx.GetLadderByTeam(ctx, tenantID, contestID, teamID)
+	if err != nil {
+		if isNoRows(err) {
+			rank = LadderRank{ID: s.ids.Generate(), TenantID: tenantID, ContestID: contestID, TeamID: teamID}
+		} else {
+			return err
+		}
+	}
+	rank.ID = s.ids.Generate()
+	rank.Score -= penalty
+	if rank.Score < 0 {
+		rank.Score = 0
+	}
+	if _, err := tx.UpsertLadder(ctx, rank); err != nil {
+		return err
+	}
+	return tx.RefreshContestRanks(ctx, tenantID, contestID)
 }

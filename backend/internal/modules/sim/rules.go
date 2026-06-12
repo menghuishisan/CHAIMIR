@@ -63,6 +63,16 @@ func packageStatusFromQuery(value string) int16 {
 	}
 }
 
+// userPackageListStatus 校验用户侧包列表只能查询已上架状态。
+func userPackageListStatus(value string) (int16, error) {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "", "published":
+		return PackageStatusPublished, nil
+	default:
+		return 0, apperr.ErrQueryParamInvalid
+	}
+}
+
 // reviewResultFromQuery 解析审核列表状态过滤条件。
 func reviewResultFromQuery(value string) int16 {
 	switch strings.ToLower(strings.TrimSpace(value)) {
@@ -188,13 +198,19 @@ func validateApprovalReport(report ValidationReport) error {
 }
 
 // actionEqual 判断重复 seq 的内容是否完全相同,用于幂等上报。
-func actionEqual(existing Action, req ReportActionRequest) bool {
+func actionEqual(existing Action, req ReportActionRequest) (bool, error) {
 	if existing.Seq != req.Seq || existing.AtTick != req.AtTick || existing.EventType != strings.TrimSpace(req.EventType) {
-		return false
+		return false, nil
 	}
-	existingRaw, _ := json.Marshal(existing.Payload)
-	reqRaw, _ := json.Marshal(req.Payload)
-	return string(existingRaw) == string(reqRaw)
+	existingRaw, err := json.Marshal(existing.Payload)
+	if err != nil {
+		return false, apperr.ErrSimActionSeqInvalid.WithCause(err)
+	}
+	reqRaw, err := json.Marshal(req.Payload)
+	if err != nil {
+		return false, apperr.ErrSimActionSeqInvalid.WithCause(err)
+	}
+	return string(existingRaw) == string(reqRaw), nil
 }
 
 // shareUsable 判断分享码是否仍可公开读取。

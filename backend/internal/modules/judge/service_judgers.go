@@ -1,4 +1,4 @@
-// judge judgers 文件实现内置后端判题策略和快照脱敏规则。
+// judge service_judgers 文件实现内置后端判题策略和快照脱敏规则。
 package judge
 
 import (
@@ -13,6 +13,7 @@ import (
 
 	"chaimir/internal/contracts"
 	"chaimir/pkg/apperr"
+	"chaimir/pkg/chainassert"
 )
 
 // executeJudgerStrategy 执行不需要容器命令的后端内置判题策略。
@@ -52,16 +53,16 @@ func (s *Service) judgeOnchainAssertions(ctx context.Context, task JudgeTask, sa
 		if err != nil {
 			return JudgeExecutionResult{}, apperr.ErrJudgeWorkerFailed.WithCause(err)
 		}
-		ok := checkAssertionValue(assertion, actual)
-		if !ok {
+		result := chainassert.Check(chainassert.FromMap(assertion), actual)
+		if !result.Passed {
 			passed = false
 		}
 		details = append(details, JudgeResultDetail{
-			Case:          stringValue(assertion["label"]),
-			Passed:        ok,
-			ExpectedLabel: stringValue(assertion["expected_label"]),
-			Actual:        shortJSON(actual),
-			Hint:          stringValue(assertion["hint"]),
+			Case:          result.Case,
+			Passed:        result.Passed,
+			ExpectedLabel: result.ExpectedLabel,
+			Actual:        result.Actual,
+			Hint:          result.Hint,
 		})
 	}
 	score := int32(0)
@@ -218,29 +219,6 @@ func containsSensitiveExpectationMaterial(v any) bool {
 		}
 	}
 	return false
-}
-
-// checkAssertionValue 执行基础断言操作。
-func checkAssertionValue(assertion map[string]any, actual map[string]any) bool {
-	target := stringValue(assertion["field"])
-	if target == "" {
-		target = stringValue(assertion["target"])
-	}
-	actualValue := actual[target]
-	expected := assertion["value"]
-	switch stringValue(assertion["op"]) {
-	case "eq", "":
-		return reflect.DeepEqual(actualValue, expected)
-	case "ne":
-		return !reflect.DeepEqual(actualValue, expected)
-	case "contains":
-		return strings.Contains(fmt.Sprint(actualValue), fmt.Sprint(expected))
-	case "exists":
-		_, ok := actual[target]
-		return ok
-	default:
-		return false
-	}
 }
 
 // mapAny 读取 map[string]any。

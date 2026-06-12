@@ -167,6 +167,15 @@ func (s *Service) ResumeInstance(ctx context.Context, instanceID int64) (Instanc
 			}
 			sandboxes, sims, err := s.createEngineResources(ctx, exp, inst)
 			if err != nil {
+				if recycleErr := s.compensateRecycle(ctx, inst, "resume_failed"); recycleErr != nil {
+					return recycleErr
+				}
+				if statusErr := s.store.TenantTx(ctx, inst.TenantID, func(ctx context.Context, tx TxStore) error {
+					_, statusErr := tx.SetInstanceStatus(ctx, inst.TenantID, inst.ID, InstanceStatusError)
+					return statusErr
+				}); statusErr != nil {
+					return statusErr
+				}
 				return err
 			}
 			return s.store.TenantTx(ctx, inst.TenantID, func(ctx context.Context, tx TxStore) error {
@@ -277,6 +286,12 @@ func (s *Service) RunRecycleOnce(ctx context.Context) error {
 	}
 	for _, item := range items {
 		if err := s.recycleEngines(ctx, item, "lifecycle_recycle"); err != nil {
+			return err
+		}
+		if err := s.store.TenantTx(ctx, item.TenantID, func(ctx context.Context, tx TxStore) error {
+			_, err := tx.SetInstanceStatus(ctx, item.TenantID, item.ID, InstanceStatusRecycled)
+			return err
+		}); err != nil {
 			return err
 		}
 	}

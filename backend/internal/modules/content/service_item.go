@@ -342,10 +342,31 @@ func (s *Service) setItemVisibility(ctx context.Context, itemID int64, visibilit
 
 // ListShared 查询跨租户共享库,只返回已发布共享内容摘要。
 func (s *Service) ListShared(ctx context.Context, filter ItemListFilter) ([]ItemDTO, int64, int, int, error) {
+	id, err := currentIdentity(ctx)
+	if err != nil {
+		return nil, 0, 0, 0, err
+	}
 	filter.Visibility = VisibilityShared
 	filter.Status = StatusPublished
+	filter.OnlyShared = true
 	filter.PublishedShared = true
-	return s.ListItems(ctx, filter)
+	normalizePage(&filter.Page, &filter.Size)
+	var items []Item
+	var total int64
+	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
+		var err error
+		items, total, err = tx.ListItems(ctx, id.TenantID, filter)
+		return err
+	}); err != nil {
+		return nil, 0, 0, 0, apperr.ErrContentQueryInvalid.WithCause(err)
+	}
+	out := make([]ItemDTO, 0, len(items))
+	for _, item := range items {
+		if item.Visibility == VisibilityShared && item.Status == StatusPublished {
+			out = append(out, itemDTO(item))
+		}
+	}
+	return out, total, filter.Page, filter.Size, nil
 }
 
 // GetContentFace 实现跨模块题面读取契约。
@@ -365,6 +386,9 @@ func (s *Service) GetContentFull(ctx context.Context, tenantID int64, ref contra
 	item, err := s.getItemWithBody(ctx, tenantID, ref.ItemCode, ref.ItemVersion)
 	if err != nil {
 		return contracts.ContentItemSnapshot{}, err
+	}
+	if item.TenantID != tenantID {
+		return contracts.ContentItemSnapshot{}, apperr.ErrContentFullAccessDenied
 	}
 	if item.Status != StatusPublished && item.Status != StatusDeprecated {
 		return contracts.ContentItemSnapshot{}, apperr.ErrContentVersionNotPublished

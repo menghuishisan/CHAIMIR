@@ -51,10 +51,12 @@ type TxStore interface {
 	RevokeAccountSessions(ctx context.Context, tenantID, accountID int64) error
 	CreateAuthSession(ctx context.Context, input CreateSessionInput) (AuthSession, error)
 	GetAuthSessionByRefreshHash(ctx context.Context, hash string) (AuthSession, error)
+	GetAuthSessionByID(ctx context.Context, tenantID, sessionID int64) (AuthSession, error)
 	ListAuthSessionsByAccount(ctx context.Context, tenantID, accountID int64) ([]AuthSession, error)
 	RevokeAuthSession(ctx context.Context, tenantID, sessionID int64) error
 	CreatePlatformAuthSession(ctx context.Context, input CreatePlatformSessionInput) (PlatformAuthSession, error)
 	GetPlatformAuthSessionByRefreshHash(ctx context.Context, hash string) (PlatformAuthSession, error)
+	GetPlatformAuthSessionByID(ctx context.Context, sessionID int64) (PlatformAuthSession, error)
 	RevokePlatformSessions(ctx context.Context, platformAdminID int64) error
 	RevokePlatformAuthSession(ctx context.Context, sessionID int64) error
 	CreateSMSCode(ctx context.Context, input CreateSMSCodeInput) (SMSCode, error)

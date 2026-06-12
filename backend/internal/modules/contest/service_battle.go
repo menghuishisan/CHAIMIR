@@ -58,7 +58,7 @@ func (s *Service) SubmitBattleEntry(ctx context.Context, contestID int64, req Ba
 		if err != nil {
 			return err
 		}
-		opponents, err = tx.ListActiveBattleOpponents(ctx, id.TenantID, contestID, req.ProblemID, entry.ID, team.ID, s.cfg.MatchmakerBatchSize)
+		opponents, err = tx.ListActiveBattleOpponents(ctx, id.TenantID, contestID, req.ProblemID, entry.ID, team.ID, contest.MatchMode, s.cfg.MatchmakerBatchSize)
 		if err != nil {
 			return err
 		}

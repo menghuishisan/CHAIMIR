@@ -84,13 +84,17 @@ func (a simAPI) registerPlatformRoutes(g gin.IRouter) {
 	g.POST("/packages/:key/republish", a.republishPackage)
 }
 
-// listPackages 查询已上架包列表,平台状态查询由 status 参数显式控制。
+// listPackages 查询用户可见的已上架包列表。
 func (a simAPI) listPackages(c *gin.Context) {
 	page, size, ok := pageQuery(c)
 	if !ok {
 		return
 	}
-	status := PackageStatusPublished
+	status, err := userPackageListStatus(c.Query("status"))
+	if err != nil {
+		response.Fail(c, err)
+		return
+	}
 	items, total, p, s, err := a.svc.ListPackages(c.Request.Context(), status, c.Query("category"), c.Query("keyword"), page, size)
 	httpx.WritePage(c, items, total, p, s, err)
 }

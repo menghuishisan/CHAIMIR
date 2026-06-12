@@ -3,7 +3,9 @@ package redis
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"strconv"
 	"time"
 
 	"chaimir/internal/platform/config"
@@ -77,4 +79,45 @@ func (c *Client) IncrWithTTL(ctx context.Context, key string, ttl time.Duration)
 		}
 	}
 	return n, nil
+}
+
+// GetInt64 读取整数缓存值,并显式区分缓存缺失与 Redis 错误。
+func (c *Client) GetInt64(ctx context.Context, key string) (int64, bool, error) {
+	if c == nil || c.rdb == nil {
+		return 0, false, fmt.Errorf("Redis 客户端未初始化")
+	}
+	raw, err := c.rdb.Get(ctx, key).Result()
+	if errors.Is(err, goredis.Nil) {
+		return 0, false, nil
+	}
+	if err != nil {
+		return 0, false, fmt.Errorf("Redis Get 失败: %w", err)
+	}
+	value, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil {
+		return 0, false, fmt.Errorf("Redis 缓存值不是 int64: %w", err)
+	}
+	return value, true, nil
+}
+
+// SetInt64 写入整数缓存值并设置过期时间。
+func (c *Client) SetInt64(ctx context.Context, key string, value int64, ttl time.Duration) error {
+	if c == nil || c.rdb == nil {
+		return fmt.Errorf("Redis 客户端未初始化")
+	}
+	if err := c.rdb.Set(ctx, key, strconv.FormatInt(value, 10), ttl).Err(); err != nil {
+		return fmt.Errorf("Redis Set 失败: %w", err)
+	}
+	return nil
+}
+
+// Delete 删除缓存键,用于权威状态变更后主动失效。
+func (c *Client) Delete(ctx context.Context, key string) error {
+	if c == nil || c.rdb == nil {
+		return fmt.Errorf("Redis 客户端未初始化")
+	}
+	if err := c.rdb.Del(ctx, key).Err(); err != nil {
+		return fmt.Errorf("Redis Del 失败: %w", err)
+	}
+	return nil
 }

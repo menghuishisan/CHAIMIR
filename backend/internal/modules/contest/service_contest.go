@@ -181,16 +181,21 @@ func (s *Service) ArchiveContest(ctx context.Context, contestID int64) (ResultSn
 		return ResultSnapshot{}, err
 	}
 	var contest Contest
-	var snapshot ResultSnapshot
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
 		var err error
 		contest, err = s.loadContestForManage(ctx, tx, id.TenantID, id.AccountID, contestID)
 		if err != nil {
 			return err
 		}
-		if err := validateContestTransition(contest.Status, ContestStatusArchived); err != nil {
-			return err
-		}
+		return validateContestTransition(contest.Status, ContestStatusArchived)
+	}); err != nil {
+		return ResultSnapshot{}, err
+	}
+	if err := s.sandbox.RecycleBySourceRef(ctx, contracts.SandboxRecycleRequest{TenantID: id.TenantID, SourceRef: contestSourceRef(contest.ID, contest.CreatedAt), Reason: "contest_archive"}); err != nil {
+		return ResultSnapshot{}, apperr.ErrContestSandboxUnavailable.WithCause(err)
+	}
+	var snapshot ResultSnapshot
+	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
 		ranks, _, err := tx.ListLadder(ctx, id.TenantID, contestID, 1, 1000)
 		if err != nil {
 			return err
@@ -207,9 +212,6 @@ func (s *Service) ArchiveContest(ctx context.Context, contestID int64) (ResultSn
 		return err
 	}); err != nil {
 		return ResultSnapshot{}, err
-	}
-	if err := s.sandbox.RecycleBySourceRef(ctx, contracts.SandboxRecycleRequest{TenantID: id.TenantID, SourceRef: contestSourceRef(contest.ID, contest.CreatedAt), Reason: "contest_archive"}); err != nil {
-		return ResultSnapshot{}, apperr.ErrContestSandboxUnavailable.WithCause(err)
 	}
 	if err := s.writeAudit(ctx, id.TenantID, id.AccountID, audit.ActorRoleTeacher, "contest.archive", auditTargetContest, contestID, map[string]any{"snapshot_id": snapshot.ID}); err != nil {
 		return ResultSnapshot{}, err
@@ -237,6 +239,9 @@ func (s *Service) RunAutoArchiveOnce(ctx context.Context) error {
 
 // archiveContestSystem 执行后台归档,复用人工归档的快照与回收规则。
 func (s *Service) archiveContestSystem(ctx context.Context, item Contest) (ResultSnapshot, error) {
+	if err := s.sandbox.RecycleBySourceRef(ctx, contracts.SandboxRecycleRequest{TenantID: item.TenantID, SourceRef: contestSourceRef(item.ID, item.CreatedAt), Reason: "contest_auto_archive"}); err != nil {
+		return ResultSnapshot{}, apperr.ErrContestSandboxUnavailable.WithCause(err)
+	}
 	var snapshot ResultSnapshot
 	if err := s.store.TenantTx(ctx, item.TenantID, func(ctx context.Context, tx TxStore) error {
 		ranks, _, err := tx.ListLadder(ctx, item.TenantID, item.ID, 1, 1000)
@@ -255,9 +260,6 @@ func (s *Service) archiveContestSystem(ctx context.Context, item Contest) (Resul
 		return err
 	}); err != nil {
 		return ResultSnapshot{}, err
-	}
-	if err := s.sandbox.RecycleBySourceRef(ctx, contracts.SandboxRecycleRequest{TenantID: item.TenantID, SourceRef: contestSourceRef(item.ID, item.CreatedAt), Reason: "contest_auto_archive"}); err != nil {
-		return ResultSnapshot{}, apperr.ErrContestSandboxUnavailable.WithCause(err)
 	}
 	if err := s.writeAudit(ctx, item.TenantID, 0, audit.ActorRoleSystem, "contest.archive.auto", auditTargetContest, item.ID, map[string]any{"snapshot_id": snapshot.ID}); err != nil {
 		return ResultSnapshot{}, err

@@ -52,11 +52,11 @@ func (s *Service) CreateCourse(ctx context.Context, req CourseRequest) (CourseDT
 	if err != nil {
 		return CourseDTO{}, err
 	}
-	req, err = validateCourseRequest(req)
+	req, startAt, endAt, err := validateCourseRequest(req)
 	if err != nil {
 		return CourseDTO{}, err
 	}
-	course := Course{ID: s.ids.Generate(), TenantID: id.TenantID, TeacherID: id.AccountID, Name: req.Name, Description: req.Description, Type: req.Type, Difficulty: req.Difficulty, CoverURL: req.CoverURL, Semester: req.Semester, Credits: req.Credits, Schedule: req.Schedule, InviteCode: newInviteCode(), Status: CourseStatusDraft, Visibility: CourseVisibilityPrivate}
+	course := Course{ID: s.ids.Generate(), TenantID: id.TenantID, TeacherID: id.AccountID, Name: req.Name, Description: req.Description, Type: req.Type, Difficulty: req.Difficulty, CoverURL: req.CoverURL, Semester: req.Semester, Credits: req.Credits, Schedule: req.Schedule, StartAt: startAt, EndAt: endAt, InviteCode: newInviteCode(), Status: CourseStatusDraft, Visibility: CourseVisibilityPrivate}
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
 		course, err = tx.CreateCourse(ctx, course)
 		return err
@@ -75,7 +75,7 @@ func (s *Service) UpdateCourse(ctx context.Context, courseID int64, req CourseRe
 	if err != nil {
 		return CourseDTO{}, err
 	}
-	req, err = validateCourseRequest(req)
+	req, startAt, endAt, err := validateCourseRequest(req)
 	if err != nil {
 		return CourseDTO{}, err
 	}
@@ -88,7 +88,7 @@ func (s *Service) UpdateCourse(ctx context.Context, courseID int64, req CourseRe
 		if err := ensureTeacherOwned(current, id.AccountID); err != nil {
 			return err
 		}
-		current.Name, current.Description, current.Type, current.Difficulty, current.CoverURL, current.Semester, current.Credits, current.Schedule = req.Name, req.Description, req.Type, req.Difficulty, req.CoverURL, req.Semester, req.Credits, req.Schedule
+		current.Name, current.Description, current.Type, current.Difficulty, current.CoverURL, current.Semester, current.Credits, current.Schedule, current.StartAt, current.EndAt = req.Name, req.Description, req.Type, req.Difficulty, req.CoverURL, req.Semester, req.Credits, req.Schedule, startAt, endAt
 		course, err = tx.UpdateCourse(ctx, current)
 		return err
 	}); err != nil {
@@ -196,6 +196,34 @@ func (s *Service) RefreshInviteCode(ctx context.Context, courseID int64) (Course
 	return courseDTO(course), nil
 }
 
+// AdvanceCourseStatusesOnce 按课程起止时间推进 published/running/ended 状态。
+func (s *Service) AdvanceCourseStatusesOnce(ctx context.Context, now time.Time) error {
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
+	return s.store.PrivilegedTx(ctx, func(ctx context.Context, tx TxStore) error {
+		dueToEnd, err := tx.ListCoursesDueToEnd(ctx, now)
+		if err != nil {
+			return err
+		}
+		for _, course := range dueToEnd {
+			if _, err := tx.SetCourseStatus(ctx, course.TenantID, course.ID, CourseStatusEnded); err != nil {
+				return err
+			}
+		}
+		dueToRun, err := tx.ListCoursesDueToRun(ctx, now)
+		if err != nil {
+			return err
+		}
+		for _, course := range dueToRun {
+			if _, err := tx.SetCourseStatus(ctx, course.TenantID, course.ID, CourseStatusRunning); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
 // setCourseStatus 校验负责人后更新课程状态。
 func (s *Service) setCourseStatus(ctx context.Context, courseID int64, status int16, action string) (CourseDTO, error) {
 	id, err := currentIdentity(ctx)
@@ -260,6 +288,8 @@ func (s *Service) cloneCourseGraph(ctx context.Context, tx TxStore, source Cours
 		Semester:    source.Semester,
 		Credits:     source.Credits,
 		Schedule:    cloneMap(source.Schedule),
+		StartAt:     source.StartAt,
+		EndAt:       source.EndAt,
 		InviteCode:  newInviteCode(),
 		Status:      CourseStatusDraft,
 		Visibility:  CourseVisibilityPrivate,

@@ -57,7 +57,7 @@ type TxStore interface {
 	CreateBattleEntry(context.Context, BattleEntry) (BattleEntry, error)
 	GetBattleEntry(context.Context, int64, int64) (BattleEntry, error)
 	ListBattleEntriesForTeam(context.Context, int64, int64, int64) ([]BattleEntry, error)
-	ListActiveBattleOpponents(context.Context, int64, int64, int64, int64, int64, int) ([]BattleEntry, error)
+	ListActiveBattleOpponents(context.Context, int64, int64, int64, int64, int64, int16, int) ([]BattleEntry, error)
 	CreateBattleMatch(context.Context, BattleMatch) (BattleMatch, error)
 	ClaimPendingBattleMatches(context.Context, int) ([]BattleMatch, error)
 	StartBattleMatch(context.Context, int64, int64, string, string) (BattleMatch, error)
@@ -469,8 +469,8 @@ func (tx *txStore) ListBattleEntriesForTeam(ctx context.Context, tenantID, conte
 }
 
 // ListActiveBattleOpponents 查询可撮合的活跃对手。
-func (tx *txStore) ListActiveBattleOpponents(ctx context.Context, tenantID, contestID, problemID, excludeEntryID, excludeTeamID int64, limit int) ([]BattleEntry, error) {
-	rows, err := tx.q.ListActiveBattleOpponents(ctx, sqlcgen.ListActiveBattleOpponentsParams{TenantID: tenantID, ContestID: contestID, ProblemID: problemID, ID: excludeEntryID, TeamID: excludeTeamID, Limit: int32(limit)})
+func (tx *txStore) ListActiveBattleOpponents(ctx context.Context, tenantID, contestID, problemID, excludeEntryID, excludeTeamID int64, matchMode int16, limit int) ([]BattleEntry, error) {
+	rows, err := tx.q.ListActiveBattleOpponents(ctx, sqlcgen.ListActiveBattleOpponentsParams{TenantID: tenantID, ContestID: contestID, ProblemID: problemID, ID: excludeEntryID, TeamID: excludeTeamID, Column6: matchMode, Limit: int32(limit)})
 	if err != nil {
 		return nil, apperr.ErrContestBattleEntryInvalid.WithCause(err)
 	}

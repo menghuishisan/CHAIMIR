@@ -13,6 +13,8 @@ type CourseDTO struct {
 	Semester    string         `json:"semester"`
 	Credits     float64        `json:"credits"`
 	Schedule    map[string]any `json:"schedule"`
+	StartAt     string         `json:"start_at"`
+	EndAt       string         `json:"end_at"`
 	InviteCode  string         `json:"invite_code,omitempty"`
 	Status      int16          `json:"status"`
 	Visibility  int16          `json:"visibility"`
@@ -29,6 +31,8 @@ type CourseRequest struct {
 	Semester    string         `json:"semester"`
 	Credits     float64        `json:"credits"`
 	Schedule    map[string]any `json:"schedule"`
+	StartAt     string         `json:"start_at"`
+	EndAt       string         `json:"end_at"`
 }
 
 type CloneCourseRequest struct {
@@ -144,6 +148,14 @@ type AssignmentDetailDTO struct {
 
 type DraftRequest struct {
 	Content map[string]any `json:"content"`
+}
+
+type DraftDTO struct {
+	AssignmentID int64          `json:"assignment_id"`
+	StudentID    int64          `json:"student_id"`
+	Content      map[string]any `json:"content"`
+	UpdatedAt    string         `json:"updated_at"`
+	Exists       bool           `json:"exists"`
 }
 
 type SubmitAssignmentRequest struct {

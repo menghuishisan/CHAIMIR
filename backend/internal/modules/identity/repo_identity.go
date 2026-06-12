@@ -499,6 +499,15 @@ func (t *txStore) GetAuthSessionByRefreshHash(ctx context.Context, hash string) 
 	return authSessionFromRow(row), nil
 }
 
+// GetAuthSessionByID 按服务端会话 ID 读取租户 Refresh 会话。
+func (t *txStore) GetAuthSessionByID(ctx context.Context, tenantID, sessionID int64) (AuthSession, error) {
+	row, err := t.q.GetAuthSessionByID(ctx, sqlcgen.GetAuthSessionByIDParams{TenantID: tenantID, ID: sessionID})
+	if err != nil {
+		return AuthSession{}, err
+	}
+	return authSessionFromRow(row), nil
+}
+
 // ListAuthSessionsByAccount 读取当前账号全部 Refresh 会话供个人中心展示。
 func (t *txStore) ListAuthSessionsByAccount(ctx context.Context, tenantID, accountID int64) ([]AuthSession, error) {
 	rows, err := t.q.ListAuthSessionsByAccount(ctx, sqlcgen.ListAuthSessionsByAccountParams{TenantID: tenantID, AccountID: accountID})
@@ -541,6 +550,15 @@ func (t *txStore) GetPlatformAuthSessionByRefreshHash(ctx context.Context, hash 
 		return PlatformAuthSession{}, err
 	}
 	return PlatformAuthSession{ID: row.ID, PlatformAdminID: row.PlatformAdminID, RefreshTokenHash: row.RefreshTokenHash, Status: row.Status, ExpireAt: timex.FromTimestamptz(row.ExpireAt)}, nil
+}
+
+// GetPlatformAuthSessionByID 按服务端会话 ID 读取平台管理员 Refresh 会话。
+func (t *txStore) GetPlatformAuthSessionByID(ctx context.Context, sessionID int64) (PlatformAuthSession, error) {
+	row, err := t.q.GetPlatformAuthSessionByID(ctx, sessionID)
+	if err != nil {
+		return PlatformAuthSession{}, err
+	}
+	return PlatformAuthSession{ID: row.ID, PlatformAdminID: row.PlatformAdminID, RefreshTokenHash: row.RefreshTokenHash, DeviceInfo: pgtypex.TextValue(row.DeviceInfo), IP: pgtypex.TextValue(row.Ip), Status: row.Status, ExpireAt: timex.FromTimestamptz(row.ExpireAt), CreatedAt: timex.FromTimestamptz(row.CreatedAt)}, nil
 }
 
 // RevokePlatformSessions 吊销平台管理员全部有效会话。

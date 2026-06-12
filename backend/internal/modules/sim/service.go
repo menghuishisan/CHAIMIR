@@ -42,6 +42,8 @@ type fileService interface {
 type BackendAdapter interface {
 	// Serve 在已鉴权的 WebSocket 上执行后端计算协议。
 	Serve(ctx context.Context, session SessionWithPackage, conn *ws.Conn) error
+	// Release 回收指定后端计算会话占用的适配器资源。
+	Release(ctx context.Context, session SessionWithPackage) error
 }
 
 // BackendRegistry 保存 compute=backend 可用适配器。

@@ -66,6 +66,7 @@ func NewService(deps ServiceDeps) (*Service, error) {
 		return nil, fmt.Errorf("identity service 缺少短信发送器")
 	}
 	s.auditWriter = &AuditWriter{store: deps.Store, ids: deps.IDs}
+	deps.Auth.SetSessionValidator(s)
 	return s, nil
 }
 

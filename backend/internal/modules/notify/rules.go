@@ -4,8 +4,10 @@ package notify
 import (
 	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 
+	"chaimir/internal/contracts"
 	"chaimir/pkg/apperr"
 )
 
@@ -20,6 +22,31 @@ func AuthorizeTopic(tenantID, accountID int64, topic string) error {
 	if want := fmt.Sprintf("notify:%d", accountID); strings.HasPrefix(topic, "notify:") {
 		if topic != want {
 			return apperr.ErrNotifyTopicForbidden
+		}
+		return nil
+	}
+	if want := fmt.Sprintf("alert:%d", tenantID); strings.HasPrefix(topic, "alert:") {
+		if topic != want {
+			return apperr.ErrNotifyTopicForbidden
+		}
+		return nil
+	}
+	if businessTopicPattern.MatchString(topic) {
+		return nil
+	}
+	return apperr.ErrNotifySubscribeInvalid
+}
+
+// ValidatePushTopic 校验内部推送 topic 语法和 M10 可独立判断的租户边界。
+func ValidatePushTopic(tenantID int64, topic string) error {
+	topic = strings.TrimSpace(topic)
+	if tenantID <= 0 || topic == "" {
+		return apperr.ErrNotifySubscribeInvalid
+	}
+	if raw, ok := strings.CutPrefix(topic, "notify:"); ok {
+		accountID, err := strconv.ParseInt(raw, 10, 64)
+		if err != nil || accountID <= 0 {
+			return apperr.ErrNotifySubscribeInvalid
 		}
 		return nil
 	}
@@ -59,6 +86,35 @@ func validateSendRequest(req SendRequest) (SendRequest, error) {
 	}
 	req.Receivers = out
 	return req, nil
+}
+
+// validateAnnouncementRequest 校验公告发布请求和平台/租户边界。
+func validateAnnouncementRequest(req AnnouncementRequest, isPlatform bool) error {
+	if strings.TrimSpace(req.Title) == "" || strings.TrimSpace(req.Content) == "" {
+		return apperr.ErrNotifyAnnouncementInvalid
+	}
+	switch req.Scope {
+	case AnnouncementScopePlatform:
+		if !isPlatform {
+			return apperr.ErrForbidden
+		}
+	case AnnouncementScopeTenant:
+		if len(req.TargetRoles) != 0 {
+			return apperr.ErrNotifyAnnouncementInvalid
+		}
+	case AnnouncementScopeRoles:
+		if len(req.TargetRoles) == 0 {
+			return apperr.ErrNotifyAnnouncementInvalid
+		}
+		for _, role := range req.TargetRoles {
+			if contracts.RoleCode(role) == "unknown" {
+				return apperr.ErrNotifyAnnouncementInvalid
+			}
+		}
+	default:
+		return apperr.ErrNotifyAnnouncementInvalid
+	}
+	return nil
 }
 
 // renderTemplate 用参数替换 {{key}} 模板变量。

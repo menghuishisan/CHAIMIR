@@ -90,6 +90,7 @@ func (s *Service) GetGroup(ctx context.Context, groupID int64) (GroupDTO, error)
 		return GroupDTO{}, err
 	}
 	var group ExperimentGroup
+	var shared *ExperimentInstance
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
 		group, err = tx.GetGroup(ctx, id.TenantID, groupID)
 		if err != nil {
@@ -99,17 +100,24 @@ func (s *Service) GetGroup(ctx context.Context, groupID int64) (GroupDTO, error)
 		if err != nil {
 			return err
 		}
-		if exp.AuthorID == id.AccountID || s.isSchoolAdmin(ctx, id.AccountID) {
+		if exp.AuthorID != id.AccountID && !s.isSchoolAdmin(ctx, id.AccountID) {
+			if _, err := tx.GetGroupMember(ctx, id.TenantID, groupID, id.AccountID); err != nil {
+				return err
+			}
+		}
+		inst, err := tx.GetActiveGroupInstance(ctx, id.TenantID, group.ExperimentID, groupID)
+		if err == nil {
+			shared = &inst
 			return nil
 		}
-		if _, err := tx.GetGroupMember(ctx, id.TenantID, groupID, id.AccountID); err != nil {
-			return err
+		if isNoRows(err) {
+			return nil
 		}
-		return nil
+		return err
 	}); err != nil {
 		return GroupDTO{}, err
 	}
-	return groupDTOFromModel(group), nil
+	return groupDTOWithSharedInstance(group, shared), nil
 }
 
 // roleAllowed 校验角色必须来自实验定义的角色集合。

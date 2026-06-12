@@ -2,6 +2,7 @@
 package auth
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"time"
@@ -32,6 +33,19 @@ type Claims struct {
 	jwt.RegisteredClaims
 }
 
+// SessionIdentity 是 access token 中用于服务端会话二次校验的最小身份快照。
+type SessionIdentity struct {
+	TenantID   int64
+	AccountID  int64
+	SessionID  int64
+	IsPlatform bool
+}
+
+// SessionValidator 校验 JWT 所指向的服务端会话仍处于有效状态。
+type SessionValidator interface {
+	ValidateAccessSession(ctx context.Context, id SessionIdentity) error
+}
+
 // Manager 负责 JWT 签发校验和服务签名时间窗口配置。
 type Manager struct {
 	signingKey     []byte
@@ -39,6 +53,7 @@ type Manager struct {
 	accessTTL      time.Duration
 	issuer         string
 	serviceMaxSkew time.Duration
+	sessions       SessionValidator
 }
 
 // NewManager 根据统一鉴权配置构造鉴权管理器。
@@ -50,6 +65,11 @@ func NewManager(cfg config.AuthConfig) *Manager {
 		issuer:         cfg.JWTIssuer,
 		serviceMaxSkew: time.Duration(cfg.ServiceAuthMaxSkewSeconds) * time.Second,
 	}
+}
+
+// SetSessionValidator 注入服务端会话校验器,由 identity 模块实现具体表校验。
+func (m *Manager) SetSessionValidator(validator SessionValidator) {
+	m.sessions = validator
 }
 
 // IssueAccess 签发 access token。

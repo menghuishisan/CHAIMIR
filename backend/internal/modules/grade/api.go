@@ -22,27 +22,36 @@ func RegisterRoutes(r gin.IRouter, svc *Service, authn *auth.Manager, roles auth
 		return apperr.ErrInternal.WithMessage("grade routes 依赖不完整")
 	}
 	api := gradeAPI{svc: svc}
-	g := r.Group("/api/v1/grade", authn.Middleware())
+	g := r.Group("/api/v1/grade-center", authn.Middleware())
 	all := g.Group("", auth.RequireTenantAnyRole(roles, contracts.RoleStudent, contracts.RoleTeacher, contracts.RoleSchoolAdmin))
+	student := g.Group("", auth.RequireTenantAnyRole(roles, contracts.RoleStudent))
+	studentAdmin := g.Group("", auth.RequireTenantAnyRole(roles, contracts.RoleStudent, contracts.RoleSchoolAdmin))
 	teacher := g.Group("", auth.RequireTenantAnyRole(roles, contracts.RoleTeacher, contracts.RoleSchoolAdmin))
+	admin := g.Group("", auth.RequireTenantAnyRole(roles, contracts.RoleSchoolAdmin))
 	all.GET("/level-configs", api.listLevelConfigs)
-	teacher.POST("/level-configs", api.createLevelConfig)
-	teacher.PUT("/level-configs/:id", api.updateLevelConfig)
+	admin.POST("/level-configs", api.createLevelConfig)
+	admin.PUT("/level-configs/:id", api.updateLevelConfig)
 	all.GET("/semesters", api.listSemesters)
-	teacher.POST("/semesters", api.createSemester)
+	admin.POST("/semesters", api.createSemester)
 	teacher.POST("/reviews", api.submitReview)
-	teacher.GET("/reviews", api.listReviews)
-	teacher.POST("/reviews/:id/approve", api.approveReview)
-	teacher.POST("/reviews/:id/reject", api.rejectReview)
-	teacher.POST("/reviews/:id/unlock", api.unlockReview)
-	all.GET("/students/:id/summary", api.studentSummary)
-	all.POST("/appeals", api.createAppeal)
+	admin.GET("/reviews", api.listReviews)
+	admin.POST("/reviews/:id/approve", api.approveReview)
+	admin.POST("/reviews/:id/reject", api.rejectReview)
+	admin.POST("/reviews/:id/unlock", api.unlockReview)
+	all.GET("/students/:id/grades", api.studentGrades)
+	all.GET("/students/:id/gpa", api.studentGPA)
+	admin.POST("/students/:id/recompute", api.recomputeStudentGrade)
+	student.POST("/appeals", api.createAppeal)
 	teacher.GET("/appeals", api.listAppeals)
 	teacher.POST("/appeals/:id/accept", api.acceptAppeal)
 	teacher.POST("/appeals/:id/reject", api.rejectAppeal)
-	all.GET("/warnings", api.listWarnings)
-	all.POST("/warnings/:id/ack", api.ackWarning)
+	admin.GET("/warning-rules", api.getWarningRules)
+	admin.PUT("/warning-rules", api.updateWarningRules)
+	studentAdmin.GET("/warnings", api.listWarnings)
+	student.POST("/warnings/:id/ack", api.ackWarning)
+	admin.POST("/warnings/scan", api.scanWarnings)
 	all.POST("/transcripts", api.generateTranscript)
+	admin.POST("/transcripts/batch", api.generateTranscriptBatch)
 	all.GET("/transcripts/:id", api.downloadTranscript)
 	return nil
 }
@@ -126,12 +135,38 @@ func (a gradeAPI) reviewDecision(c *gin.Context, fn func(context.Context, int64,
 	httpx.Write(c, out6, err)
 }
 
-func (a gradeAPI) studentSummary(c *gin.Context) {
+func (a gradeAPI) studentGrades(c *gin.Context) {
+	id, ok := httpx.PathID(c, "id")
+	if !ok {
+		return
+	}
+	semesterID, ok := httpx.QueryInt(c, "semester", httpx.QueryIntRule{Default: 0, Min: 0})
+	if !ok {
+		return
+	}
+	out, err := a.svc.StudentGrades(c.Request.Context(), id, semesterID)
+	httpx.Write(c, out, err)
+}
+
+func (a gradeAPI) studentGPA(c *gin.Context) {
 	id, ok := httpx.PathID(c, "id")
 	if ok {
-		out7, err := a.svc.StudentSummary(c.Request.Context(), id)
-		httpx.Write(c, out7, err)
+		out, err := a.svc.StudentGPA(c.Request.Context(), id)
+		httpx.Write(c, out, err)
 	}
+}
+
+func (a gradeAPI) recomputeStudentGrade(c *gin.Context) {
+	id, ok := httpx.PathID(c, "id")
+	if !ok {
+		return
+	}
+	var req RecomputeRequest
+	if !httpx.BindJSONWithError(c, &req, apperr.ErrGradeAggregationFailed) {
+		return
+	}
+	out, err := a.svc.RecomputeStudentGrade(c.Request.Context(), id, req)
+	httpx.Write(c, out, err)
 }
 
 func (a gradeAPI) createAppeal(c *gin.Context) {
@@ -169,6 +204,20 @@ func (a gradeAPI) appealDecision(c *gin.Context, fn func(context.Context, int64,
 	httpx.Write(c, out10, err)
 }
 
+func (a gradeAPI) getWarningRules(c *gin.Context) {
+	out, err := a.svc.GetWarningRules(c.Request.Context())
+	httpx.Write(c, out, err)
+}
+
+func (a gradeAPI) updateWarningRules(c *gin.Context) {
+	var req WarningRules
+	if !httpx.BindJSONWithError(c, &req, apperr.ErrGradeConfigInvalid) {
+		return
+	}
+	out, err := a.svc.UpdateWarningRules(c.Request.Context(), req)
+	httpx.Write(c, out, err)
+}
+
 func (a gradeAPI) listWarnings(c *gin.Context) {
 	page, size, ok := gradePage(c)
 	if !ok {
@@ -187,6 +236,15 @@ func (a gradeAPI) ackWarning(c *gin.Context) {
 	}
 }
 
+func (a gradeAPI) scanWarnings(c *gin.Context) {
+	var req WarningScanRequest
+	if !httpx.BindJSONWithError(c, &req, apperr.ErrGradeWarningInvalid) {
+		return
+	}
+	out, err := a.svc.ScanWarnings(c.Request.Context(), req)
+	httpx.Write(c, out, err)
+}
+
 func (a gradeAPI) generateTranscript(c *gin.Context) {
 	var req TranscriptRequest
 	if !httpx.BindJSONWithError(c, &req, apperr.ErrGradeTranscriptFailed) {
@@ -194,6 +252,15 @@ func (a gradeAPI) generateTranscript(c *gin.Context) {
 	}
 	out13, err := a.svc.GenerateTranscript(c.Request.Context(), req)
 	httpx.Write(c, out13, err)
+}
+
+func (a gradeAPI) generateTranscriptBatch(c *gin.Context) {
+	var req TranscriptBatchRequest
+	if !httpx.BindJSONWithError(c, &req, apperr.ErrGradeTranscriptFailed) {
+		return
+	}
+	out, err := a.svc.GenerateTranscriptBatch(c.Request.Context(), req)
+	httpx.Write(c, out, err)
 }
 
 func (a gradeAPI) downloadTranscript(c *gin.Context) {

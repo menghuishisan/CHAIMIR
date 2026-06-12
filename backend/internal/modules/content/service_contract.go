@@ -116,7 +116,10 @@ func int32FromAny(value any) int32 {
 	case float64:
 		return int32(v)
 	case json.Number:
-		n, _ := v.Int64()
+		n, err := v.Int64()
+		if err != nil {
+			return 0
+		}
 		return int32(n)
 	default:
 		return 0

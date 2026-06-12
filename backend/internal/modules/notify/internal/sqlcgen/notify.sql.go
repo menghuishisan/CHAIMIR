@@ -99,6 +99,17 @@ type CreateNotificationsParams struct {
 	CreatedAt  pgtype.Timestamptz `json:"created_at"`
 }
 
+const deleteExpiredNotifications = `-- name: DeleteExpiredNotifications :exec
+UPDATE notification
+SET deleted_at = now()
+WHERE deleted_at IS NULL AND created_at < $1
+`
+
+func (q *Queries) DeleteExpiredNotifications(ctx context.Context, createdAt pgtype.Timestamptz) error {
+	_, err := q.db.Exec(ctx, deleteExpiredNotifications, createdAt)
+	return err
+}
+
 const deleteNotification = `-- name: DeleteNotification :one
 UPDATE notification
 SET deleted_at = now()
@@ -152,6 +163,60 @@ func (q *Queries) GetNotificationTemplate(ctx context.Context, type_ string) (No
 	return i, err
 }
 
+const getVisibleAnnouncement = `-- name: GetVisibleAnnouncement :one
+SELECT a.id, a.tenant_id, a.title, a.content, a.scope, a.target_roles, a.publisher_id, a.published_at, a.expire_at,
+       (r.id IS NOT NULL)::boolean AS is_read
+FROM system_announcement a
+LEFT JOIN announcement_read r ON r.announcement_id = a.id AND r.tenant_id = $1 AND r.account_id = $2
+WHERE a.id = $3
+  AND (a.tenant_id IS NULL OR a.tenant_id = $1)
+  AND (a.expire_at IS NULL OR a.expire_at > now())
+  AND (a.scope <> 3 OR a.target_roles && $4::smallint[])
+`
+
+type GetVisibleAnnouncementParams struct {
+	TenantID    int64   `json:"tenant_id"`
+	AccountID   int64   `json:"account_id"`
+	ID          int64   `json:"id"`
+	RoleNumbers []int16 `json:"role_numbers"`
+}
+
+type GetVisibleAnnouncementRow struct {
+	ID          int64              `json:"id"`
+	TenantID    pgtype.Int8        `json:"tenant_id"`
+	Title       string             `json:"title"`
+	Content     string             `json:"content"`
+	Scope       int16              `json:"scope"`
+	TargetRoles []int16            `json:"target_roles"`
+	PublisherID int64              `json:"publisher_id"`
+	PublishedAt pgtype.Timestamptz `json:"published_at"`
+	ExpireAt    pgtype.Timestamptz `json:"expire_at"`
+	IsRead      bool               `json:"is_read"`
+}
+
+func (q *Queries) GetVisibleAnnouncement(ctx context.Context, arg GetVisibleAnnouncementParams) (GetVisibleAnnouncementRow, error) {
+	row := q.db.QueryRow(ctx, getVisibleAnnouncement,
+		arg.TenantID,
+		arg.AccountID,
+		arg.ID,
+		arg.RoleNumbers,
+	)
+	var i GetVisibleAnnouncementRow
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.Title,
+		&i.Content,
+		&i.Scope,
+		&i.TargetRoles,
+		&i.PublisherID,
+		&i.PublishedAt,
+		&i.ExpireAt,
+		&i.IsRead,
+	)
+	return i, err
+}
+
 const listAnnouncements = `-- name: ListAnnouncements :many
 SELECT a.id, a.tenant_id, a.title, a.content, a.scope, a.target_roles, a.publisher_id, a.published_at, a.expire_at,
        (r.id IS NOT NULL)::boolean AS is_read
@@ -159,15 +224,17 @@ FROM system_announcement a
 LEFT JOIN announcement_read r ON r.announcement_id = a.id AND r.tenant_id = $1 AND r.account_id = $2
 WHERE (a.tenant_id IS NULL OR a.tenant_id = $1)
   AND (a.expire_at IS NULL OR a.expire_at > now())
+  AND (a.scope <> 3 OR a.target_roles && $3::smallint[])
 ORDER BY a.published_at DESC
-LIMIT $3 OFFSET $4
+LIMIT $5::int OFFSET $4::int
 `
 
 type ListAnnouncementsParams struct {
-	TenantID  int64 `json:"tenant_id"`
-	AccountID int64 `json:"account_id"`
-	Limit     int32 `json:"limit"`
-	Offset    int32 `json:"offset"`
+	TenantID    int64   `json:"tenant_id"`
+	AccountID   int64   `json:"account_id"`
+	RoleNumbers []int16 `json:"role_numbers"`
+	PageOffset  int32   `json:"page_offset"`
+	PageLimit   int32   `json:"page_limit"`
 }
 
 type ListAnnouncementsRow struct {
@@ -187,8 +254,9 @@ func (q *Queries) ListAnnouncements(ctx context.Context, arg ListAnnouncementsPa
 	rows, err := q.db.Query(ctx, listAnnouncements,
 		arg.TenantID,
 		arg.AccountID,
-		arg.Limit,
-		arg.Offset,
+		arg.RoleNumbers,
+		arg.PageOffset,
+		arg.PageLimit,
 	)
 	if err != nil {
 		return nil, err

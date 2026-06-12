@@ -53,6 +53,13 @@ WHERE course_id = $1 AND status = 2
 ORDER BY reviewed_at DESC
 LIMIT 1;
 
+-- name: GetLatestReviewByCourse :one
+SELECT id, tenant_id, course_id, semester_id, submitter_id, reviewer_id, status, is_locked, comment, submitted_at, reviewed_at
+FROM grade_review
+WHERE course_id = $1
+ORDER BY reviewed_at DESC NULLS LAST, submitted_at DESC
+LIMIT 1;
+
 -- name: ListAcceptedAppealsByCourseStudent :many
 SELECT id, tenant_id, student_id, course_id, reason, status, handler_id, result_comment, created_at, handled_at
 FROM grade_appeal
@@ -84,6 +91,12 @@ SET status = 1, is_locked = false, reviewer_id = $2, comment = $3, reviewed_at =
 WHERE id = $1 AND status = 2
 RETURNING id, tenant_id, course_id, semester_id, submitter_id, reviewer_id, status, is_locked, comment, submitted_at, reviewed_at;
 
+-- name: RelockGradeReview :one
+UPDATE grade_review
+SET status = 2, is_locked = true, reviewer_id = $2, comment = $3, reviewed_at = now()
+WHERE id = $1 AND status = 1
+RETURNING id, tenant_id, course_id, semester_id, submitter_id, reviewer_id, status, is_locked, comment, submitted_at, reviewed_at;
+
 -- name: UpsertStudentSemesterGrade :one
 INSERT INTO student_semester_grade (id, tenant_id, student_id, semester_id, total_credits, gpa, cumulative_gpa, computed_at)
 VALUES ($1, $2, $3, $4, $5, $6, $7, now())
@@ -96,6 +109,12 @@ SELECT id, tenant_id, student_id, semester_id, total_credits, gpa, cumulative_gp
 FROM student_semester_grade
 WHERE student_id = $1
 ORDER BY computed_at DESC;
+
+-- name: ListKnownStudentSemesterGrades :many
+SELECT id, tenant_id, student_id, semester_id, total_credits, gpa, cumulative_gpa, computed_at
+FROM student_semester_grade
+WHERE (sqlc.arg(student_id)::bigint = 0 OR student_id = sqlc.arg(student_id)::bigint)
+ORDER BY student_id ASC, semester_id ASC;
 
 -- name: CreateGradeAppeal :one
 INSERT INTO grade_appeal (id, tenant_id, student_id, course_id, reason, status, created_at)

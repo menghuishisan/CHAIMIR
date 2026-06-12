@@ -6,6 +6,8 @@ package sqlcgen
 
 import (
 	"context"
+
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 type Querier interface {
@@ -13,8 +15,10 @@ type Querier interface {
 	CountUnreadNotifications(ctx context.Context, receiverID int64) (int64, error)
 	CreateAnnouncement(ctx context.Context, arg CreateAnnouncementParams) (SystemAnnouncement, error)
 	CreateNotifications(ctx context.Context, arg []CreateNotificationsParams) (int64, error)
+	DeleteExpiredNotifications(ctx context.Context, createdAt pgtype.Timestamptz) error
 	DeleteNotification(ctx context.Context, arg DeleteNotificationParams) (Notification, error)
 	GetNotificationTemplate(ctx context.Context, type_ string) (NotificationTemplate, error)
+	GetVisibleAnnouncement(ctx context.Context, arg GetVisibleAnnouncementParams) (GetVisibleAnnouncementRow, error)
 	ListAnnouncements(ctx context.Context, arg ListAnnouncementsParams) ([]ListAnnouncementsRow, error)
 	ListNotificationTemplates(ctx context.Context) ([]NotificationTemplate, error)
 	ListNotifications(ctx context.Context, arg ListNotificationsParams) ([]Notification, error)

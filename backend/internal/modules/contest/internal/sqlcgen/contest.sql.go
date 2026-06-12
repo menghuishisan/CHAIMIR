@@ -230,8 +230,15 @@ func (q *Queries) CountContests(ctx context.Context, arg CountContestsParams) (i
 
 const countLadder = `-- name: CountLadder :one
 SELECT COUNT(*)::bigint
-FROM ladder_rank
-WHERE tenant_id = $1 AND contest_id = $2
+FROM ladder_rank lr
+WHERE lr.tenant_id = $1 AND lr.contest_id = $2
+  AND NOT EXISTS (
+      SELECT 1 FROM cheat_record cr
+      WHERE cr.tenant_id = lr.tenant_id
+        AND cr.contest_id = lr.contest_id
+        AND cr.team_id = lr.team_id
+        AND cr.action = 3
+  )
 `
 
 type CountLadderParams struct {
@@ -1240,11 +1247,21 @@ func (q *Queries) GetVulnSource(ctx context.Context, arg GetVulnSourceParams) (V
 }
 
 const listActiveBattleOpponents = `-- name: ListActiveBattleOpponents :many
-SELECT id, tenant_id, contest_id, problem_id, team_id, role, artifact_ref, version_no, is_active, submitted_at
-FROM battle_entry
-WHERE tenant_id = $1 AND contest_id = $2 AND problem_id = $3 AND is_active = true AND id <> $4 AND team_id <> $5
-ORDER BY submitted_at ASC, id ASC
-LIMIT $6
+WITH current_rank AS (
+    SELECT COALESCE(score, 1000) AS score
+    FROM ladder_rank
+    WHERE tenant_id = $1 AND contest_id = $2 AND team_id = $5
+    LIMIT 1
+)
+SELECT be.id, be.tenant_id, be.contest_id, be.problem_id, be.team_id, be.role, be.artifact_ref, be.version_no, be.is_active, be.submitted_at
+FROM battle_entry be
+LEFT JOIN ladder_rank lr ON lr.tenant_id = be.tenant_id AND lr.contest_id = be.contest_id AND lr.team_id = be.team_id
+WHERE be.tenant_id = $1 AND be.contest_id = $2 AND be.problem_id = $3 AND be.is_active = true AND be.id <> $4 AND be.team_id <> $5
+ORDER BY
+    CASE WHEN $6::smallint = 2 THEN ABS(COALESCE(lr.score, 1000) - COALESCE((SELECT score FROM current_rank), 1000)) ELSE 0 END ASC,
+    be.submitted_at ASC,
+    be.id ASC
+LIMIT $7
 `
 
 type ListActiveBattleOpponentsParams struct {
@@ -1253,6 +1270,7 @@ type ListActiveBattleOpponentsParams struct {
 	ProblemID int64 `json:"problem_id"`
 	ID        int64 `json:"id"`
 	TeamID    int64 `json:"team_id"`
+	Column6   int16 `json:"column_6"`
 	Limit     int32 `json:"limit"`
 }
 
@@ -1263,6 +1281,7 @@ func (q *Queries) ListActiveBattleOpponents(ctx context.Context, arg ListActiveB
 		arg.ProblemID,
 		arg.ID,
 		arg.TeamID,
+		arg.Column6,
 		arg.Limit,
 	)
 	if err != nil {
@@ -1549,10 +1568,17 @@ func (q *Queries) ListContests(ctx context.Context, arg ListContestsParams) ([]C
 }
 
 const listLadder = `-- name: ListLadder :many
-SELECT id, tenant_id, contest_id, team_id, score::float8 AS score, solved_count, last_solve_at, rank, updated_at
-FROM ladder_rank
-WHERE tenant_id = $1 AND contest_id = $2
-ORDER BY rank ASC, score DESC, solved_count DESC, last_solve_at ASC NULLS LAST, team_id ASC
+SELECT lr.id, lr.tenant_id, lr.contest_id, lr.team_id, lr.score::float8 AS score, lr.solved_count, lr.last_solve_at, lr.rank, lr.updated_at
+FROM ladder_rank lr
+WHERE lr.tenant_id = $1 AND lr.contest_id = $2
+  AND NOT EXISTS (
+      SELECT 1 FROM cheat_record cr
+      WHERE cr.tenant_id = lr.tenant_id
+        AND cr.contest_id = lr.contest_id
+        AND cr.team_id = lr.team_id
+        AND cr.action = 3
+  )
+ORDER BY lr.rank ASC, lr.score DESC, lr.solved_count DESC, lr.last_solve_at ASC NULLS LAST, lr.team_id ASC
 LIMIT $3 OFFSET $4
 `
 
@@ -1617,6 +1643,13 @@ JOIN team t ON t.tenant_id = tm.tenant_id AND t.id = tm.team_id
 JOIN contest c ON c.tenant_id = t.tenant_id AND c.id = t.contest_id
 LEFT JOIN ladder_rank l ON l.tenant_id = t.tenant_id AND l.contest_id = t.contest_id AND l.team_id = t.id
 WHERE tm.tenant_id = $1 AND tm.member_tenant_id = $1 AND tm.account_id = $2 AND c.deleted_at IS NULL
+  AND NOT EXISTS (
+      SELECT 1 FROM cheat_record cr
+      WHERE cr.tenant_id = t.tenant_id
+        AND cr.contest_id = t.contest_id
+        AND cr.team_id = t.id
+        AND cr.action = 3
+  )
 ORDER BY c.end_at DESC, c.id DESC
 `
 

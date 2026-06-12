@@ -1054,6 +1054,34 @@ func (q *Queries) GetActivationCodeByHashPrivileged(ctx context.Context, codeHas
 	return i, err
 }
 
+const getAuthSessionByID = `-- name: GetAuthSessionByID :one
+SELECT id, tenant_id, account_id, refresh_token_hash, device_info, ip, status, expire_at, created_at
+FROM auth_session
+WHERE tenant_id = $1 AND id = $2
+`
+
+type GetAuthSessionByIDParams struct {
+	TenantID int64 `json:"tenant_id"`
+	ID       int64 `json:"id"`
+}
+
+func (q *Queries) GetAuthSessionByID(ctx context.Context, arg GetAuthSessionByIDParams) (AuthSession, error) {
+	row := q.db.QueryRow(ctx, getAuthSessionByID, arg.TenantID, arg.ID)
+	var i AuthSession
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.AccountID,
+		&i.RefreshTokenHash,
+		&i.DeviceInfo,
+		&i.Ip,
+		&i.Status,
+		&i.ExpireAt,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const getAuthSessionByRefreshHashPrivileged = `-- name: GetAuthSessionByRefreshHashPrivileged :one
 SELECT id, tenant_id, account_id, refresh_token_hash, device_info, ip, status, expire_at, created_at
 FROM auth_session
@@ -1155,6 +1183,28 @@ func (q *Queries) GetPlatformAdminByUsername(ctx context.Context, username strin
 		&i.Status,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getPlatformAuthSessionByID = `-- name: GetPlatformAuthSessionByID :one
+SELECT id, platform_admin_id, refresh_token_hash, device_info, ip, status, expire_at, created_at
+FROM platform_auth_session
+WHERE id = $1
+`
+
+func (q *Queries) GetPlatformAuthSessionByID(ctx context.Context, id int64) (PlatformAuthSession, error) {
+	row := q.db.QueryRow(ctx, getPlatformAuthSessionByID, id)
+	var i PlatformAuthSession
+	err := row.Scan(
+		&i.ID,
+		&i.PlatformAdminID,
+		&i.RefreshTokenHash,
+		&i.DeviceInfo,
+		&i.Ip,
+		&i.Status,
+		&i.ExpireAt,
+		&i.CreatedAt,
 	)
 	return i, err
 }

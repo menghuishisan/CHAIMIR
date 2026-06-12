@@ -161,7 +161,28 @@ func validateCheatRequest(req CheatRecordRequest) (CheatRecordRequest, error) {
 	if req.Evidence == nil {
 		req.Evidence = map[string]any{}
 	}
+	if req.Action == CheatActionPenalty && float64FromMap(req.Evidence, "penalty_score", 0) <= 0 {
+		return CheatRecordRequest{}, apperr.ErrContestCheatInvalid
+	}
 	return req, nil
+}
+
+// float64FromMap 从结构化 evidence 读取数值。
+func float64FromMap(m map[string]any, key string, defaultValue float64) float64 {
+	switch v := m[key].(type) {
+	case float64:
+		return v
+	case float32:
+		return float64(v)
+	case int:
+		return float64(v)
+	case int32:
+		return float64(v)
+	case int64:
+		return float64(v)
+	default:
+		return defaultValue
+	}
 }
 
 // validateVulnProblemInput 校验漏洞题草稿输入。
@@ -171,9 +192,29 @@ func validateVulnProblemInput(req ImportVulnProblemRequest) (ImportVulnProblemRe
 	if req.Title == "" || len(req.Title) > 255 || (req.Level != VulnLevelA && req.Level != VulnLevelB && req.Level != VulnLevelC) || (req.RuntimeMode != VulnRuntimeIsolated && req.RuntimeMode != VulnRuntimeForked) {
 		return ImportVulnProblemRequest{}, apperr.ErrContestVulnProblemInvalid
 	}
-	if req.DraftBody == nil {
-		req.DraftBody = map[string]any{}
+	if len(req.DraftBody) == 0 {
+		return ImportVulnProblemRequest{}, apperr.ErrContestVulnProblemInvalid
 	}
+	return req, nil
+}
+
+// validatePrevalidateRequest 校验漏洞预验证运行时参数。
+func validatePrevalidateRequest(req PrevalidateRequest) (PrevalidateRequest, error) {
+	req.RuntimeCode = strings.TrimSpace(req.RuntimeCode)
+	req.RuntimeImageVersion = strings.TrimSpace(req.RuntimeImageVersion)
+	req.InitCodeRef = strings.TrimSpace(req.InitCodeRef)
+	req.InitScriptRef = strings.TrimSpace(req.InitScriptRef)
+	if req.RuntimeCode == "" || req.RuntimeImageVersion == "" {
+		return PrevalidateRequest{}, apperr.ErrContestVulnProblemInvalid
+	}
+	outTools := make([]string, 0, len(req.ToolCodes))
+	for _, code := range req.ToolCodes {
+		code = strings.TrimSpace(code)
+		if code != "" {
+			outTools = append(outTools, code)
+		}
+	}
+	req.ToolCodes = outTools
 	return req, nil
 }
 

@@ -192,6 +192,36 @@ func (s *Service) SaveDraft(ctx context.Context, assignmentID int64, req DraftRe
 	return map[string]any{"updated_at": formatTime(draft.UpdatedAt)}, nil
 }
 
+// GetDraft 读取服务端权威作答草稿,不存在时显式返回 exists=false。
+func (s *Service) GetDraft(ctx context.Context, assignmentID int64) (DraftDTO, error) {
+	id, err := currentIdentity(ctx)
+	if err != nil {
+		return DraftDTO{}, err
+	}
+	var draft SubmissionDraft
+	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
+		assignment, err := tx.GetAssignment(ctx, id.TenantID, assignmentID)
+		if err != nil {
+			return err
+		}
+		if err := s.ensureCourseReadable(ctx, tx, id.TenantID, assignment.CourseID, id.AccountID); err != nil {
+			return err
+		}
+		draft, err = tx.GetDraft(ctx, id.TenantID, assignmentID, id.AccountID)
+		if isNoRows(err) {
+			draft = SubmissionDraft{TenantID: id.TenantID, AssignmentID: assignmentID, StudentID: id.AccountID, Content: map[string]any{}}
+			return nil
+		}
+		return err
+	}); err != nil {
+		return DraftDTO{}, mapAssignmentError(err)
+	}
+	if draft.ID == 0 {
+		return DraftDTO{AssignmentID: assignmentID, StudentID: id.AccountID, Content: map[string]any{}, Exists: false}, nil
+	}
+	return draftDTO(draft), nil
+}
+
 // SubmitAssignment 创建正式提交并写入自动判题 outbox。
 func (s *Service) SubmitAssignment(ctx context.Context, assignmentID int64, req SubmitAssignmentRequest) (SubmissionDTO, error) {
 	id, err := currentIdentity(ctx)
@@ -252,7 +282,7 @@ func (s *Service) SubmitAssignment(ctx context.Context, assignmentID int64, req 
 			if codeKey == "" || codeHash == "" {
 				return apperr.ErrTeachingSubmissionInvalid
 			}
-			if _, err := tx.CreateJudgeOutbox(ctx, JudgeOutbox{ID: s.ids.Generate(), TenantID: id.TenantID, SubmissionID: sub.ID, AssignmentID: assignmentID, StudentID: id.AccountID, ItemCode: item.ItemCode, ItemVersion: item.ItemVersion, JudgerCode: item.JudgerCode, CodeStorageKey: codeKey, CodeHash: codeHash, ExtraInput: map[string]any{"assignment_item_id": item.ID}, SourceRef: sourceRefForSubmissionItem(sub.ID, item.ID)}); err != nil {
+			if _, err := tx.CreateJudgeOutbox(ctx, JudgeOutbox{ID: s.ids.Generate(), TenantID: id.TenantID, SubmissionID: sub.ID, AssignmentItemID: item.ID, AssignmentID: assignmentID, StudentID: id.AccountID, ItemCode: item.ItemCode, ItemVersion: item.ItemVersion, JudgerCode: item.JudgerCode, CodeStorageKey: codeKey, CodeHash: codeHash, ExtraInput: map[string]any{"assignment_item_id": item.ID}, SourceRef: sourceRefForSubmissionItem(sub.ID, item.ID)}); err != nil {
 				return err
 			}
 		}
@@ -427,30 +457,68 @@ func (s *Service) RunJudgeOutboxOnce(ctx context.Context, tenantID int64) error 
 // HandleJudgeCompleted 处理 M3 判题完成事件。
 func (s *Service) HandleJudgeCompleted(ctx context.Context, event contracts.JudgeCompletedEvent) error {
 	var sub Submission
+	var ready bool
 	if err := s.store.TenantTx(ctx, event.TenantID, func(ctx context.Context, tx TxStore) error {
 		current, err := tx.GetSubmissionBySourceRef(ctx, event.TenantID, event.SourceRef)
 		if err != nil {
 			return err
 		}
+		if _, err := tx.MarkJudgeOutboxResult(ctx, event.TenantID, event.SourceRef, event.Score, event.FinishedAt); err != nil {
+			return err
+		}
+		outboxes, err := tx.ListJudgeOutboxBySubmission(ctx, event.TenantID, current.ID)
+		if err != nil {
+			return err
+		}
+		total, allDone := aggregateCompletedAutoScore(outboxes)
+		if !allDone {
+			sub = current
+			return nil
+		}
 		assignment, err := tx.GetAssignment(ctx, event.TenantID, current.AssignmentID)
 		if err != nil {
 			return err
 		}
-		final, err := applyLatePenalty(assignment, event.Score, current.IsLate)
+		final, err := applyLatePenalty(assignment, total, current.IsLate)
 		if err != nil {
 			return err
 		}
-		sub, err = tx.UpdateSubmissionAutoScoreBySourceRef(ctx, event.TenantID, event.SourceRef, event.Score, final)
+		sub, err = tx.UpdateSubmissionAutoScore(ctx, event.TenantID, current.ID, total, final)
+		ready = true
 		return err
 	}); err != nil {
 		return apperr.ErrTeachingSubmissionInvalid.WithCause(err)
+	}
+	if !ready {
+		return nil
 	}
 	return s.publishGradeUpdated(ctx, event.TenantID, sub.AssignmentID, sub.StudentID)
 }
 
 // HandleJudgeFailed 处理 M3 判题失败事件。
 func (s *Service) HandleJudgeFailed(ctx context.Context, event contracts.JudgeFailedEvent) error {
-	return apperr.ErrTeachingSubmissionInvalid.WithMessage("判题暂时失败,请稍后重试")
+	return s.store.TenantTx(ctx, event.TenantID, func(ctx context.Context, tx TxStore) error {
+		_, err := tx.MarkJudgeOutboxFailedResult(ctx, event.TenantID, event.SourceRef, event.Reason, event.FailedAt)
+		if err != nil {
+			return apperr.ErrTeachingSubmissionInvalid.WithCause(err)
+		}
+		return nil
+	})
+}
+
+// aggregateCompletedAutoScore 汇总一次提交内所有自动题得分,存在未完成题则不结算提交。
+func aggregateCompletedAutoScore(outboxes []JudgeOutbox) (int32, bool) {
+	if len(outboxes) == 0 {
+		return 0, false
+	}
+	var total int32
+	for _, outbox := range outboxes {
+		if outbox.CompletedAt.IsZero() || outbox.LastError != "" {
+			return 0, false
+		}
+		total += outbox.Score
+	}
+	return total, true
 }
 
 // sourceRefForSubmissionItem 构造 M6 提交题目来源标识。

@@ -326,13 +326,21 @@ func (s *Service) PrepullRuntimeImage(ctx context.Context, runtimeID, imageID in
 		if err != nil {
 			return apperr.ErrSandboxRuntimeImageNotFound.WithCause(err)
 		}
-		_, err = tx.UpdateRuntimeImagePrepull(ctx, runtimeID, imageID, false, ImagePrepullRunning, []byte(`{"stage":"starting"}`), time.Time{})
-		return err
+		return nil
 	}); err != nil {
 		return PrepullResponse{}, err
 	}
 	if image.Status != RuntimeImageStatusAvailable {
 		return PrepullResponse{}, apperr.ErrSandboxRuntimeUnavailable
+	}
+	if !imageAttested(s.cfg, image.ImageURL, digestFromImageURL(image.ImageURL)) {
+		return PrepullResponse{}, apperr.ErrSandboxImageAttestationInvalid
+	}
+	if err := s.store.PlatformTx(ctx, func(ctx context.Context, tx TxStore) error {
+		_, err := tx.UpdateRuntimeImagePrepull(ctx, runtimeID, imageID, false, ImagePrepullRunning, []byte(`{"stage":"starting"}`), time.Time{})
+		return err
+	}); err != nil {
+		return PrepullResponse{}, err
 	}
 	result, err := s.orchestrator.PrepullImage(ctx, image)
 	status := ImagePrepullSucceeded

@@ -23,3 +23,12 @@ const (
 	// BackupTypeIncremental 表示增量备份。
 	BackupTypeIncremental int16 = 2
 )
+
+const (
+	// BackupStatusRunning 表示备份任务已记录并等待运维/CronJob 执行。
+	BackupStatusRunning int16 = 1
+	// BackupStatusSucceeded 表示备份任务成功。
+	BackupStatusSucceeded int16 = 2
+	// BackupStatusFailed 表示备份任务失败。
+	BackupStatusFailed int16 = 3
+)

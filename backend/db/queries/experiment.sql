@@ -138,7 +138,7 @@ RETURNING id, tenant_id, experiment_id, owner_account_id, group_id, source_ref, 
 
 -- name: ClaimRecyclableInstancesAcrossTenants :many
 UPDATE experiment_instance
-SET status = 5, last_active_at = now()
+SET last_active_at = now()
 WHERE id IN (
     SELECT id FROM experiment_instance
     WHERE status IN (2, 3, 4, 6)

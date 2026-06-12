@@ -20,6 +20,8 @@ const (
 	CodeSandboxImageDisableFailed = "21008"
 	// CodeSandboxSelftestRecycleConfigInvalid 表示运行时自检清理配置非法。
 	CodeSandboxSelftestRecycleConfigInvalid = "21009"
+	// CodeSandboxImageAttestationInvalid 表示运行时镜像未通过当前签名与扫描证明门禁。
+	CodeSandboxImageAttestationInvalid = "21010"
 )
 
 const (
@@ -142,6 +144,8 @@ var (
 	ErrSandboxImageDisableFailed = New(CodeSandboxImageDisableFailed, "运行环境镜像停用失败,请稍后重试")
 	// ErrSandboxSelftestRecycleConfigInvalid 表示自检清理配置不正确。
 	ErrSandboxSelftestRecycleConfigInvalid = New(CodeSandboxSelftestRecycleConfigInvalid, "运行环境自检配置不正确")
+	// ErrSandboxImageAttestationInvalid 表示运行环境镜像未通过安全校验。
+	ErrSandboxImageAttestationInvalid = New(CodeSandboxImageAttestationInvalid, "运行环境镜像未通过安全校验,请更换后重试")
 )
 
 var (

@@ -13,18 +13,25 @@ import (
 )
 
 // validateCourseRequest 校验课程创建和编辑输入。
-func validateCourseRequest(req CourseRequest) (CourseRequest, error) {
+func validateCourseRequest(req CourseRequest) (CourseRequest, time.Time, time.Time, error) {
 	req.Name = strings.TrimSpace(req.Name)
 	req.Description = strings.TrimSpace(req.Description)
 	req.CoverURL = strings.TrimSpace(req.CoverURL)
 	req.Semester = strings.TrimSpace(req.Semester)
+	req.StartAt = strings.TrimSpace(req.StartAt)
+	req.EndAt = strings.TrimSpace(req.EndAt)
+	startAt, startErr := time.Parse(time.RFC3339, req.StartAt)
+	endAt, endErr := time.Parse(time.RFC3339, req.EndAt)
 	if req.Name == "" || req.Semester == "" || !validCourseType(req.Type) || !validDifficulty(req.Difficulty) || req.Credits < 0 || req.Credits > 99 {
-		return CourseRequest{}, apperr.ErrTeachingCourseInvalid
+		return CourseRequest{}, time.Time{}, time.Time{}, apperr.ErrTeachingCourseInvalid
+	}
+	if startErr != nil || endErr != nil || !endAt.After(startAt) {
+		return CourseRequest{}, time.Time{}, time.Time{}, apperr.ErrTeachingCourseInvalid
 	}
 	if req.Schedule == nil {
 		req.Schedule = map[string]any{}
 	}
-	return req, nil
+	return req, startAt, endAt, nil
 }
 
 // validateChapterRequest 校验章节输入。

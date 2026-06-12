@@ -1,4 +1,4 @@
-// admin row_convert 文件负责 M9 sqlc 行到模块 DTO 的转换。
+// admin repo_convert 文件负责 M9 repo 查询写入与 sqlc 行到模块 DTO 的转换。
 package admin
 
 import (
@@ -185,9 +185,32 @@ func (t *txStore) ListPlatformStatistics(ctx context.Context, scope int16, tenan
 	return out, nil
 }
 
+// UpsertPlatformStatistics 写入或更新运营统计快照。
+func (t *txStore) UpsertPlatformStatistics(ctx context.Context, id int64, scope int16, tenantID int64, statDate string, metrics map[string]any) (StatisticsDTO, error) {
+	date, _ := time.Parse("2006-01-02", statDate)
+	data, err := jsonx.ObjectBytes(metrics, apperr.ErrAdminStatisticsInvalid)
+	if err != nil {
+		return StatisticsDTO{}, err
+	}
+	var row sqlcgen.PlatformStatistic
+	if scope == ScopeGlobal {
+		row, err = t.q.UpsertGlobalPlatformStatistics(ctx, sqlcgen.UpsertGlobalPlatformStatisticsParams{ID: id, StatDate: pgtypex.Date(date), Metrics: data})
+	} else {
+		row, err = t.q.UpsertTenantPlatformStatistics(ctx, sqlcgen.UpsertTenantPlatformStatisticsParams{ID: id, Scope: scope, TenantID: pgtypex.Int8When(tenantID, tenantID > 0), StatDate: pgtypex.Date(date), Metrics: data})
+	}
+	if err != nil {
+		return StatisticsDTO{}, err
+	}
+	return StatisticsDTO{Scope: row.Scope, TenantID: pgtypex.Int8Value(row.TenantID), Date: pgtypex.DateValue(row.StatDate).Format("2006-01-02"), Metrics: jsonx.ObjectMap(row.Metrics)}, nil
+}
+
 // CreateBackupRecord 创建备份记录。
 func (t *txStore) CreateBackupRecord(ctx context.Context, id int64, typ int16, ref string, sizeBytes int64, status int16) (BackupRecordDTO, error) {
-	row, err := t.q.CreateBackupRecord(ctx, sqlcgen.CreateBackupRecordParams{ID: id, Type: typ, StorageRef: ref, SizeBytes: sizeBytes, Status: status, FinishedAt: pgtype.Timestamptz{Time: time.Now().UTC(), Valid: true}})
+	finishedAt := pgtype.Timestamptz{}
+	if status == BackupStatusSucceeded || status == BackupStatusFailed {
+		finishedAt = pgtype.Timestamptz{Time: time.Now().UTC(), Valid: true}
+	}
+	row, err := t.q.CreateBackupRecord(ctx, sqlcgen.CreateBackupRecordParams{ID: id, Type: typ, StorageRef: ref, SizeBytes: sizeBytes, Status: status, FinishedAt: finishedAt})
 	if err != nil {
 		return BackupRecordDTO{}, err
 	}

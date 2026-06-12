@@ -61,7 +61,7 @@ WHERE i.tenant_id = $1 AND i.id = $2 AND i.deleted_at IS NULL;
 SELECT id, tenant_id, code, version, type, title, category_id, difficulty, tags, knowledge_points, author_id, author_type, visibility, status, usage_count, version_hash, created_at, updated_at, deleted_at
 FROM content_item
 WHERE deleted_at IS NULL
-  AND (tenant_id = $1 OR visibility = 3)
+  AND (tenant_id = $1 OR ($11::boolean AND visibility = 3))
   AND ($2::smallint = 0 OR type = $2)
   AND ($3::bigint = 0 OR category_id = $3)
   AND ($4::smallint = 0 OR difficulty = $4)
@@ -72,13 +72,13 @@ WHERE deleted_at IS NULL
   AND ($9::smallint = 0 OR status = $9)
   AND ($10::bigint = 0 OR author_id = $10)
 ORDER BY updated_at DESC, id DESC
-LIMIT $11 OFFSET $12;
+LIMIT $12 OFFSET $13;
 
 -- name: CountContentItems :one
 SELECT COUNT(*)::bigint
 FROM content_item
 WHERE deleted_at IS NULL
-  AND (tenant_id = $1 OR visibility = 3)
+  AND (tenant_id = $1 OR ($11::boolean AND visibility = 3))
   AND ($2::smallint = 0 OR type = $2)
   AND ($3::bigint = 0 OR category_id = $3)
   AND ($4::smallint = 0 OR difficulty = $4)

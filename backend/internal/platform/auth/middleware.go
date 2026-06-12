@@ -6,6 +6,7 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"log/slog"
 	"regexp"
 	"strconv"
@@ -73,6 +74,24 @@ func (m *Manager) Middleware() gin.HandlerFunc {
 		if !ok {
 			return
 		}
+		if !m.validateAccessSession(c, claims) {
+			return
+		}
+		injectAccessIdentity(c, claims)
+		c.Next()
+	}
+}
+
+// WebSocketMiddleware 校验 WebSocket 文档约定的 query token 并注入租户身份上下文。
+func (m *Manager) WebSocketMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		claims, ok := m.queryAccessClaims(c, "token")
+		if !ok {
+			return
+		}
+		if !m.validateAccessSession(c, claims) {
+			return
+		}
 		injectAccessIdentity(c, claims)
 		c.Next()
 	}
@@ -107,6 +126,9 @@ func (m *Manager) PlatformOrServiceMiddleware() gin.HandlerFunc {
 			c.Abort()
 			return
 		}
+		if !m.validateAccessSession(c, claims) {
+			return
+		}
 		injectAccessIdentity(c, claims)
 		c.Next()
 	}
@@ -124,6 +146,9 @@ func (m *Manager) ServiceOrTenantAnyRoleMiddleware(identity RoleChecker, roles .
 		}
 		claims, ok := m.accessClaims(c)
 		if !ok {
+			return
+		}
+		if !m.validateAccessSession(c, claims) {
 			return
 		}
 		injectAccessIdentity(c, claims)
@@ -254,6 +279,48 @@ func (m *Manager) accessClaims(c *gin.Context) (*Claims, bool) {
 		return nil, false
 	}
 	return claims, true
+}
+
+// queryAccessClaims 提取并校验查询参数中的 access token,用于浏览器 WebSocket 连接。
+func (m *Manager) queryAccessClaims(c *gin.Context, key string) (*Claims, bool) {
+	token := strings.TrimSpace(c.Query(key))
+	if token == "" {
+		response.Fail(c, apperr.ErrUnauthorized)
+		c.Abort()
+		return nil, false
+	}
+	claims, err := m.VerifyAccess(token)
+	if err != nil {
+		response.Fail(c, apperr.ErrUnauthorized.WithCause(err))
+		c.Abort()
+		return nil, false
+	}
+	return claims, true
+}
+
+// validateAccessSession 通过业务模块注入的校验器确认 JWT 对应服务端会话仍有效。
+func (m *Manager) validateAccessSession(c *gin.Context, claims *Claims) bool {
+	if m.sessions == nil {
+		response.Fail(c, apperr.ErrUnauthorized)
+		c.Abort()
+		return false
+	}
+	err := m.sessions.ValidateAccessSession(c.Request.Context(), SessionIdentity{
+		TenantID:   claims.TenantID,
+		AccountID:  claims.AccountID,
+		SessionID:  claims.SessionID,
+		IsPlatform: claims.IsPlatform,
+	})
+	if err == nil {
+		return true
+	}
+	if errors.Is(err, apperr.ErrIdentitySessionInvalid) {
+		response.Fail(c, apperr.ErrIdentitySessionInvalid)
+	} else {
+		response.Fail(c, apperr.ErrUnauthorized.WithCause(err))
+	}
+	c.Abort()
+	return false
 }
 
 // injectAccessIdentity 将已验证 JWT 身份写入上下文和结构化日志字段。

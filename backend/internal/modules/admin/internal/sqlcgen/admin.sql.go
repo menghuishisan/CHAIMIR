@@ -664,7 +664,35 @@ func (q *Queries) UpdateSystemConfig(ctx context.Context, arg UpdateSystemConfig
 	return i, err
 }
 
-const upsertPlatformStatistics = `-- name: UpsertPlatformStatistics :one
+const upsertGlobalPlatformStatistics = `-- name: UpsertGlobalPlatformStatistics :one
+INSERT INTO platform_statistics (id, scope, tenant_id, stat_date, metrics, created_at)
+VALUES ($1, 1, NULL, $2, $3, now())
+ON CONFLICT (scope, stat_date) WHERE tenant_id IS NULL
+DO UPDATE SET metrics = EXCLUDED.metrics, created_at = now()
+RETURNING id, scope, tenant_id, stat_date, metrics, created_at
+`
+
+type UpsertGlobalPlatformStatisticsParams struct {
+	ID       int64       `json:"id"`
+	StatDate pgtype.Date `json:"stat_date"`
+	Metrics  []byte      `json:"metrics"`
+}
+
+func (q *Queries) UpsertGlobalPlatformStatistics(ctx context.Context, arg UpsertGlobalPlatformStatisticsParams) (PlatformStatistic, error) {
+	row := q.db.QueryRow(ctx, upsertGlobalPlatformStatistics, arg.ID, arg.StatDate, arg.Metrics)
+	var i PlatformStatistic
+	err := row.Scan(
+		&i.ID,
+		&i.Scope,
+		&i.TenantID,
+		&i.StatDate,
+		&i.Metrics,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const upsertTenantPlatformStatistics = `-- name: UpsertTenantPlatformStatistics :one
 INSERT INTO platform_statistics (id, scope, tenant_id, stat_date, metrics, created_at)
 VALUES ($1, $2, $3, $4, $5, now())
 ON CONFLICT (scope, tenant_id, stat_date) WHERE tenant_id IS NOT NULL
@@ -672,7 +700,7 @@ DO UPDATE SET metrics = EXCLUDED.metrics, created_at = now()
 RETURNING id, scope, tenant_id, stat_date, metrics, created_at
 `
 
-type UpsertPlatformStatisticsParams struct {
+type UpsertTenantPlatformStatisticsParams struct {
 	ID       int64       `json:"id"`
 	Scope    int16       `json:"scope"`
 	TenantID pgtype.Int8 `json:"tenant_id"`
@@ -680,8 +708,8 @@ type UpsertPlatformStatisticsParams struct {
 	Metrics  []byte      `json:"metrics"`
 }
 
-func (q *Queries) UpsertPlatformStatistics(ctx context.Context, arg UpsertPlatformStatisticsParams) (PlatformStatistic, error) {
-	row := q.db.QueryRow(ctx, upsertPlatformStatistics,
+func (q *Queries) UpsertTenantPlatformStatistics(ctx context.Context, arg UpsertTenantPlatformStatisticsParams) (PlatformStatistic, error) {
+	row := q.db.QueryRow(ctx, upsertTenantPlatformStatistics,
 		arg.ID,
 		arg.Scope,
 		arg.TenantID,

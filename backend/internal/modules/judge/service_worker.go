@@ -1,4 +1,4 @@
-// judge worker 文件实现 M3 队列消费、沙箱判题执行和终态事件 outbox 发布。
+// judge service_worker 文件实现 M3 队列消费、沙箱判题执行和终态事件 outbox 发布。
 package judge
 
 import (
@@ -372,11 +372,11 @@ func (s *Service) publishPendingOutbox(ctx context.Context) error {
 	for _, item := range items {
 		var payload any
 		if err := json.Unmarshal(item.Payload, &payload); err != nil {
-			_ = s.markOutboxFailed(ctx, item, err)
+			s.recordOutboxPublishFailure(ctx, item, err)
 			return apperr.ErrJudgeEventPublishFailed.WithCause(err)
 		}
 		if err := s.bus.Publish(ctx, item.Subject, payload); err != nil {
-			_ = s.markOutboxFailed(ctx, item, err)
+			s.recordOutboxPublishFailure(ctx, item, err)
 			return apperr.ErrJudgeEventPublishFailed.WithCause(err)
 		}
 		if err := s.markOutboxPublished(ctx, item); err != nil {
@@ -384,6 +384,13 @@ func (s *Service) publishPendingOutbox(ctx context.Context) error {
 		}
 	}
 	return nil
+}
+
+// recordOutboxPublishFailure 记录发布失败状态,失败标记本身也必须进入结构化日志。
+func (s *Service) recordOutboxPublishFailure(ctx context.Context, item JudgeEventOutbox, cause error) {
+	if err := s.markOutboxFailed(ctx, item, cause); err != nil {
+		logging.ErrorContext(ctx, "judge outbox failure mark failed", err.Error(), slog.Int64("tenant_id", item.TenantID), slog.Int64("task_id", item.TaskID), slog.Int64("outbox_id", item.ID), slog.String("subject", item.Subject))
+	}
 }
 
 // isJudgeTimeout 判断错误链是否表示判题超时。

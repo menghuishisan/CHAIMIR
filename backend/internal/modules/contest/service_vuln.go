@@ -5,9 +5,11 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -15,6 +17,7 @@ import (
 	"chaimir/internal/platform/audit"
 	"chaimir/internal/platform/secretmap"
 	"chaimir/pkg/apperr"
+	"chaimir/pkg/chainassert"
 )
 
 // UpsertVulnSource 创建或更新本租户漏洞源。
@@ -172,28 +175,34 @@ func (s *Service) ListVulnProblems(ctx context.Context, sourceID int64, status i
 	return out, nil
 }
 
-// SetVulnPrevalidate 保存漏洞题正反向预验证结果。
+// SetVulnPrevalidate 运行漏洞题正反向预验证并保存结果。
 func (s *Service) SetVulnPrevalidate(ctx context.Context, problemID int64, req PrevalidateRequest) (VulnProblemDTO, error) {
 	id, err := currentIdentity(ctx)
 	if err != nil {
 		return VulnProblemDTO{}, err
 	}
-	status := VulnPrevalidateFailed
-	if req.Passed {
-		status = VulnPrevalidatePassed
+	req, err = validatePrevalidateRequest(req)
+	if err != nil {
+		return VulnProblemDTO{}, err
 	}
-	if req.Detail == nil {
-		req.Detail = map[string]any{}
-	}
-	var item VulnProblem
+	var current VulnProblem
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
 		var err error
-		item, err = tx.SetVulnProblemPrevalidate(ctx, id.TenantID, problemID, status, req.Detail)
+		current, err = tx.GetVulnProblem(ctx, id.TenantID, problemID)
 		return err
 	}); err != nil {
 		return VulnProblemDTO{}, err
 	}
-	return vulnProblemDTOFromModel(item), s.writeAudit(ctx, id.TenantID, id.AccountID, audit.ActorRoleTeacher, "contest.vuln_problem.prevalidate", auditTargetVulnProblem, item.ID, map[string]any{"passed": req.Passed})
+	status, detail := s.runVulnPrevalidation(ctx, id.TenantID, id.AccountID, current, req)
+	var item VulnProblem
+	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
+		var err error
+		item, err = tx.SetVulnProblemPrevalidate(ctx, id.TenantID, problemID, status, detail)
+		return err
+	}); err != nil {
+		return VulnProblemDTO{}, err
+	}
+	return vulnProblemDTOFromModel(item), s.writeAudit(ctx, id.TenantID, id.AccountID, audit.ActorRoleTeacher, "contest.vuln_problem.prevalidate", auditTargetVulnProblem, item.ID, map[string]any{"status": status})
 }
 
 // FinalizeVulnProblem 把预验证通过的漏洞题固化到 M5 内容中心。
@@ -242,7 +251,7 @@ func (s *Service) fetchVulnCases(ctx context.Context, source VulnSource) ([]Vuln
 	timeout := sourceTimeoutSeconds(cfg, s.cfg.VulnSourceTimeoutSeconds)
 	var body io.Reader
 	if method == http.MethodPost {
-		raw, err := json.Marshal(cfg["request_body"])
+		raw, err := json.Marshal(cfg["body"])
 		if err != nil {
 			return nil, apperr.ErrContestVulnSourceInvalid.WithCause(err)
 		}
@@ -255,6 +264,11 @@ func (s *Service) fetchVulnCases(ctx context.Context, source VulnSource) ([]Vuln
 	req.Header.Set("Accept", "application/json")
 	if method == http.MethodPost {
 		req.Header.Set("Content-Type", "application/json")
+	}
+	for key, value := range stringMapFromAny(cfg["headers"]) {
+		if key != "" && value != "" {
+			req.Header.Set(key, value)
+		}
 	}
 	client := &http.Client{Timeout: time.Duration(timeout) * time.Second}
 	resp, err := client.Do(req)
@@ -278,15 +292,152 @@ func (s *Service) fetchVulnCases(ctx context.Context, source VulnSource) ([]Vuln
 		return nil, apperr.ErrContestVulnSourceFetchFailed.WithCause(err)
 	}
 	nodes := selectCases(payload, stringFromMap(cfg, "cases_path"))
+	mapping := stringMapFromAny(cfg["mapping"])
 	out := make([]VulnProblem, 0, len(nodes))
 	for _, node := range nodes {
-		item, err := vulnProblemFromExternal(node, source.DefaultLevel)
+		item, err := vulnProblemFromExternal(node, mapping, source.DefaultLevel)
 		if err != nil {
 			return nil, err
 		}
 		out = append(out, item)
 	}
 	return out, nil
+}
+
+// runVulnPrevalidation 在隔离沙箱中执行正向 PoC 与反向不误判验证。
+func (s *Service) runVulnPrevalidation(ctx context.Context, tenantID, accountID int64, problem VulnProblem, req PrevalidateRequest) (int16, map[string]any) {
+	detail := map[string]any{"positive": map[string]any{}, "negative": map[string]any{}}
+	positive, err := s.runVulnValidationCase(ctx, tenantID, accountID, problem, req, "positive", true)
+	detail["positive"] = positive
+	if err != nil {
+		detail["error"] = safeDetailError(err)
+		return VulnPrevalidateFailed, detail
+	}
+	negative, err := s.runVulnValidationCase(ctx, tenantID, accountID, problem, req, "negative", false)
+	detail["negative"] = negative
+	if err != nil {
+		detail["error"] = safeDetailError(err)
+		return VulnPrevalidateFailed, detail
+	}
+	if !boolFromMap(positive, "passed") || !boolFromMap(negative, "passed") {
+		return VulnPrevalidateFailed, detail
+	}
+	return VulnPrevalidatePassed, detail
+}
+
+// runVulnValidationCase 执行一条正向或反向预验证用例。
+func (s *Service) runVulnValidationCase(ctx context.Context, tenantID, accountID int64, problem VulnProblem, req PrevalidateRequest, phase string, positive bool) (map[string]any, error) {
+	sourceRef := fmt.Sprintf("contest:%04d:vuln-prevalidate:%d:%s", now().Year(), problem.ID, phase)
+	info, err := s.sandbox.CreateSandbox(ctx, contracts.SandboxCreateRequest{TenantID: tenantID, RuntimeCode: req.RuntimeCode, RuntimeImageVersion: req.RuntimeImageVersion, ToolCodes: req.ToolCodes, InitCodeRef: req.InitCodeRef, InitScriptRef: req.InitScriptRef, OwnerAccountID: accountID, SourceRef: sourceRef, KeepAlive: false, SnapshotEnabled: true})
+	if err != nil {
+		return nil, apperr.ErrContestSandboxUnavailable.WithCause(err)
+	}
+	defer func() {
+		_ = s.sandbox.RecycleBySourceRef(ctx, contracts.SandboxRecycleRequest{TenantID: tenantID, SourceRef: sourceRef, Reason: "vuln_prevalidate"})
+	}()
+	for _, step := range validationSteps(problem.DraftBody, "init_steps") {
+		if err := s.runVulnChainStep(ctx, tenantID, info.SandboxID, sourceRef, step); err != nil {
+			return nil, err
+		}
+	}
+	if positive {
+		for _, step := range validationSteps(problem.DraftBody, "positive_steps") {
+			if err := s.runVulnChainStep(ctx, tenantID, info.SandboxID, sourceRef, step); err != nil {
+				return nil, err
+			}
+		}
+	}
+	results, err := s.checkVulnAssertions(ctx, tenantID, info.SandboxID, sourceRef, validationSteps(problem.DraftBody, "assertions"), positive)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{"passed": allAssertionResults(results), "assertions": results}, nil
+}
+
+// runVulnChainStep 调用 M2 链能力执行预验证步骤。
+func (s *Service) runVulnChainStep(ctx context.Context, tenantID, sandboxID int64, sourceRef string, step map[string]any) error {
+	switch strings.ToLower(stringFromAny(step["op"])) {
+	case "deploy":
+		_, err := s.sandbox.ChainDeploy(ctx, contracts.SandboxChainDeployRequest{TenantID: tenantID, SandboxID: sandboxID, SourceRef: sourceRef, Payload: mapAny(step["payload"])})
+		return err
+	case "tx":
+		_, err := s.sandbox.ChainSendTx(ctx, contracts.SandboxChainTxRequest{TenantID: tenantID, SandboxID: sandboxID, SourceRef: sourceRef, Payload: mapAny(step["payload"])})
+		return err
+	case "reset":
+		return s.sandbox.ChainReset(ctx, contracts.SandboxChainResetRequest{TenantID: tenantID, SandboxID: sandboxID, SourceRef: sourceRef})
+	case "query", "":
+		return nil
+	default:
+		return apperr.ErrContestVulnProblemInvalid
+	}
+}
+
+// checkVulnAssertions 检查正向应通过、反向应全部不通过的断言集合。
+func (s *Service) checkVulnAssertions(ctx context.Context, tenantID, sandboxID int64, sourceRef string, assertions []map[string]any, positive bool) ([]map[string]any, error) {
+	if len(assertions) == 0 {
+		return nil, apperr.ErrContestVulnProblemInvalid
+	}
+	out := make([]map[string]any, 0, len(assertions))
+	for _, raw := range assertions {
+		assertion := chainassert.FromMap(raw)
+		actual, err := s.sandbox.ChainQuery(ctx, contracts.SandboxChainQueryRequest{TenantID: tenantID, SandboxID: sandboxID, SourceRef: sourceRef, Target: assertion.Target})
+		if err != nil {
+			return nil, apperr.ErrContestSandboxUnavailable.WithCause(err)
+		}
+		result := chainassert.Check(assertion, actual)
+		passed := result.Passed
+		if !positive {
+			passed = !result.Passed
+		}
+		out = append(out, map[string]any{"case": result.Case, "passed": passed, "expected_label": result.ExpectedLabel, "actual": result.Actual, "hint": result.Hint})
+	}
+	return out, nil
+}
+
+// validationSteps 从漏洞草稿读取链步骤或断言数组。
+func validationSteps(body map[string]any, key string) []map[string]any {
+	raw, ok := body[key].([]any)
+	if !ok {
+		return nil
+	}
+	out := make([]map[string]any, 0, len(raw))
+	for _, item := range raw {
+		if m := mapAny(item); len(m) > 0 {
+			out = append(out, m)
+		}
+	}
+	return out
+}
+
+// allAssertionResults 判断断言结果是否全部通过。
+func allAssertionResults(items []map[string]any) bool {
+	if len(items) == 0 {
+		return false
+	}
+	for _, item := range items {
+		if !boolFromMap(item, "passed") {
+			return false
+		}
+	}
+	return true
+}
+
+// boolFromMap 从 map 中读取布尔字段。
+func boolFromMap(m map[string]any, key string) bool {
+	v, _ := m[key].(bool)
+	return v
+}
+
+// safeDetailError 返回可写入预验证详情的脱敏错误摘要。
+func safeDetailError(err error) string {
+	if err == nil {
+		return ""
+	}
+	msg := err.Error()
+	if len(msg) > 256 {
+		return msg[:256]
+	}
+	return msg
 }
 
 // vulnSourceFromRequest 归一化漏洞源请求。
@@ -318,6 +469,12 @@ func validateVulnSourceConfig(cfg map[string]any, defaultTimeout int) error {
 	timeout := sourceTimeoutSeconds(cfg, defaultTimeout)
 	if timeout < 1 || timeout > 60 {
 		return apperr.ErrContestVulnSourceInvalid
+	}
+	mapping := stringMapFromAny(cfg["mapping"])
+	for _, key := range []string{"external_ref", "title", "draft_body"} {
+		if strings.TrimSpace(mapping[key]) == "" {
+			return apperr.ErrContestVulnSourceInvalid
+		}
 	}
 	return nil
 }
@@ -364,13 +521,135 @@ func selectCases(payload any, path string) []map[string]any {
 }
 
 // vulnProblemFromExternal 将外部漏洞案例映射为平台草稿。
-func vulnProblemFromExternal(item map[string]any, defaultLevel int16) (VulnProblem, error) {
-	req := ImportVulnProblemRequest{ExternalRef: stringFromMap(item, "external_ref"), Title: stringFromMap(item, "title"), Level: int16FromAny(item["level"], defaultLevel), RuntimeMode: int16FromAny(item["runtime_mode"], VulnRuntimeIsolated), DraftBody: item}
+func vulnProblemFromExternal(item map[string]any, mapping map[string]string, defaultLevel int16) (VulnProblem, error) {
+	body, _ := valueAtPath(item, mapping["draft_body"]).(map[string]any)
+	req := ImportVulnProblemRequest{
+		ExternalRef: stringValueAtPath(item, mapping["external_ref"]),
+		Title:       stringValueAtPath(item, mapping["title"]),
+		Level:       vulnLevelFromAny(valueAtPath(item, mapping["level"]), defaultLevel),
+		RuntimeMode: vulnRuntimeFromAny(valueAtPath(item, mapping["runtime_mode"]), VulnRuntimeIsolated),
+		DraftBody:   body,
+	}
 	req, err := validateVulnProblemInput(req)
 	if err != nil {
 		return VulnProblem{}, err
 	}
 	return VulnProblem{ExternalRef: req.ExternalRef, Title: req.Title, Level: req.Level, RuntimeMode: req.RuntimeMode, DraftBody: req.DraftBody}, nil
+}
+
+// stringMapFromAny 将 JSON map 转为字符串映射,非法项按配置错误处理前保留为空。
+func stringMapFromAny(v any) map[string]string {
+	out := map[string]string{}
+	raw, ok := v.(map[string]any)
+	if !ok {
+		return out
+	}
+	for key, value := range raw {
+		if s, ok := value.(string); ok {
+			out[strings.TrimSpace(key)] = strings.TrimSpace(s)
+		}
+	}
+	return out
+}
+
+// valueAtPath 按点路径读取外部 JSON 字段。
+func valueAtPath(item map[string]any, path string) any {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return nil
+	}
+	var current any = item
+	for _, part := range strings.Split(path, ".") {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		obj, ok := current.(map[string]any)
+		if !ok {
+			return nil
+		}
+		current = obj[part]
+	}
+	return current
+}
+
+// stringValueAtPath 按点路径读取字符串字段。
+func stringValueAtPath(item map[string]any, path string) string {
+	if v, ok := valueAtPath(item, path).(string); ok {
+		return strings.TrimSpace(v)
+	}
+	return ""
+}
+
+// mapAny 读取 JSON 对象。
+func mapAny(v any) map[string]any {
+	if out, ok := v.(map[string]any); ok {
+		return out
+	}
+	return nil
+}
+
+// stringFromAny 读取字符串值。
+func stringFromAny(v any) string {
+	if v == nil {
+		return ""
+	}
+	switch x := v.(type) {
+	case string:
+		return strings.TrimSpace(x)
+	default:
+		return strings.TrimSpace(fmt.Sprint(x))
+	}
+}
+
+// vulnLevelFromAny 解析 A/B/C 或 1/2/3 分级。
+func vulnLevelFromAny(v any, defaultValue int16) int16 {
+	switch x := v.(type) {
+	case string:
+		text := strings.ToUpper(strings.TrimSpace(x))
+		if n, err := strconv.ParseInt(text, 10, 16); err == nil {
+			return int16(n)
+		}
+		switch text {
+		case "A":
+			return VulnLevelA
+		case "B":
+			return VulnLevelB
+		case "C":
+			return VulnLevelC
+		}
+	case float64:
+		return int16(x)
+	case int:
+		return int16(x)
+	case int16:
+		return x
+	}
+	return defaultValue
+}
+
+// vulnRuntimeFromAny 解析 isolated/forked 或 1/2 运行时。
+func vulnRuntimeFromAny(v any, defaultValue int16) int16 {
+	switch x := v.(type) {
+	case string:
+		text := strings.ToLower(strings.TrimSpace(x))
+		if n, err := strconv.ParseInt(text, 10, 16); err == nil {
+			return int16(n)
+		}
+		switch text {
+		case "isolated":
+			return VulnRuntimeIsolated
+		case "forked":
+			return VulnRuntimeForked
+		}
+	case float64:
+		return int16(x)
+	case int:
+		return int16(x)
+	case int16:
+		return x
+	}
+	return defaultValue
 }
 
 // stringFromMap 安全读取 JSON map 中的字符串字段。

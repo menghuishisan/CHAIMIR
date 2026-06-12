@@ -13,7 +13,7 @@ import (
 
 const claimRecyclableInstancesAcrossTenants = `-- name: ClaimRecyclableInstancesAcrossTenants :many
 UPDATE experiment_instance
-SET status = 5, last_active_at = now()
+SET last_active_at = now()
 WHERE id IN (
     SELECT id FROM experiment_instance
     WHERE status IN (2, 3, 4, 6)

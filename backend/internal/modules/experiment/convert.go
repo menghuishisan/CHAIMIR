@@ -28,6 +28,16 @@ func groupDTOFromModel(item ExperimentGroup) GroupDTO {
 	return out
 }
 
+// groupDTOWithSharedInstance 转换小组详情并附带当前共享实例。
+func groupDTOWithSharedInstance(group ExperimentGroup, inst *ExperimentInstance) GroupDTO {
+	out := groupDTOFromModel(group)
+	if inst != nil {
+		dto := instanceDTOFromModel(*inst, nil)
+		out.SharedInstance = &dto
+	}
+	return out
+}
+
 // reportDTOFromModel 转换报告为 HTTP 输出。
 func reportDTOFromModel(item ExperimentReport) ReportDTO {
 	return ReportDTO{ID: item.ID, InstanceID: item.InstanceID, StudentID: item.StudentID, ContentRef: item.ContentRef, ManualScore: item.ManualScore, Comment: item.Comment, Status: item.Status, SubmittedAt: item.SubmittedAt}

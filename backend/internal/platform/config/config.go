@@ -31,6 +31,7 @@ type Config struct {
 	Teaching   TeachingConfig
 	Experiment ExperimentConfig
 	Grade      GradeConfig
+	Admin      AdminConfig
 	Sandbox    SandboxConfig
 	Judge      JudgeConfig
 	Monitoring MonitoringConfig
@@ -188,19 +189,22 @@ type ContestConfig struct {
 
 // NotifyConfig 描述通知事件消费和限频边界。
 type NotifyConfig struct {
-	EventRetryMax         int
-	EventRetryDelayMs     int
-	UnreadTTLHours        int
-	SendRateWindowSeconds int
-	SendRateMax           int
+	EventRetryMax          int
+	EventRetryDelayMs      int
+	UnreadTTLHours         int
+	SendRateWindowSeconds  int
+	SendRateMax            int
+	RetentionDays          int
+	CleanupIntervalSeconds int
 }
 
 // TeachingConfig 描述教学跨模块读取与后台任务批量边界。
 type TeachingConfig struct {
-	CourseGradesMaxRows       int
-	JudgeOutboxBatchSize      int
-	JudgeOutboxPollIntervalMs int
-	GradeExportBatchSize      int
+	CourseGradesMaxRows             int
+	CourseStatusPollIntervalSeconds int
+	JudgeOutboxBatchSize            int
+	JudgeOutboxPollIntervalMs       int
+	GradeExportBatchSize            int
 }
 
 // ExperimentConfig 描述实验实例生命周期与报告批改的后台边界。
@@ -215,6 +219,11 @@ type ExperimentConfig struct {
 type GradeConfig struct {
 	AppealWindowDays     int
 	TranscriptSigningKey string
+}
+
+// AdminConfig 描述管理后台统计快照后台任务边界。
+type AdminConfig struct {
+	StatisticsSnapshotIntervalSeconds int
 }
 
 // SandboxConfig 描述 K8s 沙箱编排与镜像证明边界。
@@ -491,17 +500,20 @@ func Load() (*Config, error) {
 		FailedCooldownSeconds:         reqInt("CONTEST_FAILED_COOLDOWN_SECONDS"),
 	}
 	c.Notify = NotifyConfig{
-		EventRetryMax:         reqInt("NOTIFY_EVENT_RETRY_MAX"),
-		EventRetryDelayMs:     reqInt("NOTIFY_EVENT_RETRY_DELAY_MS"),
-		UnreadTTLHours:        reqInt("NOTIFY_UNREAD_TTL_HOURS"),
-		SendRateWindowSeconds: reqInt("NOTIFY_SEND_RATE_WINDOW_SECONDS"),
-		SendRateMax:           reqInt("NOTIFY_SEND_RATE_MAX"),
+		EventRetryMax:          reqInt("NOTIFY_EVENT_RETRY_MAX"),
+		EventRetryDelayMs:      reqInt("NOTIFY_EVENT_RETRY_DELAY_MS"),
+		UnreadTTLHours:         reqInt("NOTIFY_UNREAD_TTL_HOURS"),
+		SendRateWindowSeconds:  reqInt("NOTIFY_SEND_RATE_WINDOW_SECONDS"),
+		SendRateMax:            reqInt("NOTIFY_SEND_RATE_MAX"),
+		RetentionDays:          reqInt("NOTIFY_RETENTION_DAYS"),
+		CleanupIntervalSeconds: reqInt("NOTIFY_CLEANUP_INTERVAL_SECONDS"),
 	}
 	c.Teaching = TeachingConfig{
-		CourseGradesMaxRows:       reqInt("TEACHING_COURSE_GRADES_MAX_ROWS"),
-		JudgeOutboxBatchSize:      reqInt("TEACHING_JUDGE_OUTBOX_BATCH_SIZE"),
-		JudgeOutboxPollIntervalMs: reqInt("TEACHING_JUDGE_OUTBOX_POLL_INTERVAL_MS"),
-		GradeExportBatchSize:      reqInt("TEACHING_GRADE_EXPORT_BATCH_SIZE"),
+		CourseGradesMaxRows:             reqInt("TEACHING_COURSE_GRADES_MAX_ROWS"),
+		CourseStatusPollIntervalSeconds: reqInt("TEACHING_COURSE_STATUS_POLL_INTERVAL_SECONDS"),
+		JudgeOutboxBatchSize:            reqInt("TEACHING_JUDGE_OUTBOX_BATCH_SIZE"),
+		JudgeOutboxPollIntervalMs:       reqInt("TEACHING_JUDGE_OUTBOX_POLL_INTERVAL_MS"),
+		GradeExportBatchSize:            reqInt("TEACHING_GRADE_EXPORT_BATCH_SIZE"),
 	}
 	c.Experiment = ExperimentConfig{
 		RecyclePollIntervalSeconds: reqInt("EXPERIMENT_RECYCLE_POLL_INTERVAL_SECONDS"),
@@ -512,6 +524,9 @@ func Load() (*Config, error) {
 	c.Grade = GradeConfig{
 		AppealWindowDays:     reqInt("GRADE_APPEAL_WINDOW_DAYS"),
 		TranscriptSigningKey: req("GRADE_TRANSCRIPT_SIGNING_KEY"),
+	}
+	c.Admin = AdminConfig{
+		StatisticsSnapshotIntervalSeconds: reqInt("ADMIN_STATISTICS_SNAPSHOT_INTERVAL_SECONDS"),
 	}
 	c.Sandbox = SandboxConfig{
 		KubeconfigPath:                os.Getenv("KUBECONFIG_PATH"),
@@ -660,8 +675,17 @@ func Load() (*Config, error) {
 	if c.Notify.SendRateMax <= 0 {
 		errs = append(errs, "NOTIFY_SEND_RATE_MAX 必须大于 0")
 	}
+	if c.Notify.RetentionDays <= 0 {
+		errs = append(errs, "NOTIFY_RETENTION_DAYS 必须大于 0")
+	}
+	if c.Notify.CleanupIntervalSeconds <= 0 {
+		errs = append(errs, "NOTIFY_CLEANUP_INTERVAL_SECONDS 必须大于 0")
+	}
 	if c.Teaching.CourseGradesMaxRows <= 0 {
 		errs = append(errs, "TEACHING_COURSE_GRADES_MAX_ROWS 必须大于 0")
+	}
+	if c.Teaching.CourseStatusPollIntervalSeconds <= 0 {
+		errs = append(errs, "TEACHING_COURSE_STATUS_POLL_INTERVAL_SECONDS 必须大于 0")
 	}
 	if c.Teaching.JudgeOutboxBatchSize <= 0 {
 		errs = append(errs, "TEACHING_JUDGE_OUTBOX_BATCH_SIZE 必须大于 0")
@@ -713,6 +737,9 @@ func Load() (*Config, error) {
 	}
 	if c.Judge.SimilarityDefaultThreshold <= 0 || c.Judge.SimilarityDefaultThreshold >= 1 {
 		errs = append(errs, "JUDGE_SIMILARITY_DEFAULT_THRESHOLD 必须大于 0 且小于 1")
+	}
+	if c.Admin.StatisticsSnapshotIntervalSeconds <= 0 {
+		errs = append(errs, "ADMIN_STATISTICS_SNAPSHOT_INTERVAL_SECONDS 必须大于 0")
 	}
 	if c.Sandbox.PrepullTimeoutSeconds <= 0 {
 		errs = append(errs, "SANDBOX_PREPULL_TIMEOUT_SECONDS 必须大于 0")

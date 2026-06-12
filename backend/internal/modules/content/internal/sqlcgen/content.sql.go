@@ -15,7 +15,7 @@ const countContentItems = `-- name: CountContentItems :one
 SELECT COUNT(*)::bigint
 FROM content_item
 WHERE deleted_at IS NULL
-  AND (tenant_id = $1 OR visibility = 3)
+  AND (tenant_id = $1 OR ($11::boolean AND visibility = 3))
   AND ($2::smallint = 0 OR type = $2)
   AND ($3::bigint = 0 OR category_id = $3)
   AND ($4::smallint = 0 OR difficulty = $4)
@@ -38,6 +38,7 @@ type CountContentItemsParams struct {
 	Column8  int16  `json:"column_8"`
 	Column9  int16  `json:"column_9"`
 	Column10 int64  `json:"column_10"`
+	Column11 bool   `json:"column_11"`
 }
 
 func (q *Queries) CountContentItems(ctx context.Context, arg CountContentItemsParams) (int64, error) {
@@ -52,6 +53,7 @@ func (q *Queries) CountContentItems(ctx context.Context, arg CountContentItemsPa
 		arg.Column8,
 		arg.Column9,
 		arg.Column10,
+		arg.Column11,
 	)
 	var column_1 int64
 	err := row.Scan(&column_1)
@@ -686,7 +688,7 @@ const listContentItems = `-- name: ListContentItems :many
 SELECT id, tenant_id, code, version, type, title, category_id, difficulty, tags, knowledge_points, author_id, author_type, visibility, status, usage_count, version_hash, created_at, updated_at, deleted_at
 FROM content_item
 WHERE deleted_at IS NULL
-  AND (tenant_id = $1 OR visibility = 3)
+  AND (tenant_id = $1 OR ($11::boolean AND visibility = 3))
   AND ($2::smallint = 0 OR type = $2)
   AND ($3::bigint = 0 OR category_id = $3)
   AND ($4::smallint = 0 OR difficulty = $4)
@@ -697,7 +699,7 @@ WHERE deleted_at IS NULL
   AND ($9::smallint = 0 OR status = $9)
   AND ($10::bigint = 0 OR author_id = $10)
 ORDER BY updated_at DESC, id DESC
-LIMIT $11 OFFSET $12
+LIMIT $12 OFFSET $13
 `
 
 type ListContentItemsParams struct {
@@ -711,6 +713,7 @@ type ListContentItemsParams struct {
 	Column8  int16  `json:"column_8"`
 	Column9  int16  `json:"column_9"`
 	Column10 int64  `json:"column_10"`
+	Column11 bool   `json:"column_11"`
 	Limit    int32  `json:"limit"`
 	Offset   int32  `json:"offset"`
 }
@@ -727,6 +730,7 @@ func (q *Queries) ListContentItems(ctx context.Context, arg ListContentItemsPara
 		arg.Column8,
 		arg.Column9,
 		arg.Column10,
+		arg.Column11,
 		arg.Limit,
 		arg.Offset,
 	)

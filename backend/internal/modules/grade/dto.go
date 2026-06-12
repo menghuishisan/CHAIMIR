@@ -48,6 +48,30 @@ type TranscriptRequest struct {
 	SemesterID int64 `json:"semester_id,string,omitempty"`
 }
 
+// TranscriptBatchRequest 是批量成绩单生成请求。
+type TranscriptBatchRequest struct {
+	StudentIDs []int64 `json:"student_ids"`
+	Scope      int16   `json:"scope"`
+	SemesterID int64   `json:"semester_id,string,omitempty"`
+}
+
+// RecomputeRequest 是学生 GPA 重算请求。
+type RecomputeRequest struct {
+	SemesterID int64 `json:"semester_id,string"`
+}
+
+// WarningScanRequest 是学业预警扫描请求。
+type WarningScanRequest struct {
+	StudentID  int64 `json:"student_id,string,omitempty"`
+	SemesterID int64 `json:"semester_id,string,omitempty"`
+}
+
+// WarningScanResultDTO 表示一次学业预警扫描结果。
+type WarningScanResultDTO struct {
+	Scanned int `json:"scanned"`
+	Created int `json:"created"`
+}
+
 // LevelConfigDTO 表示等级映射配置响应。
 type LevelConfigDTO struct {
 	ID           int64        `json:"id,string"`

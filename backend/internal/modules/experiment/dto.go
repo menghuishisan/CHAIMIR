@@ -136,11 +136,12 @@ type UpsertGroupMemberRequest struct {
 
 // GroupDTO 是协作小组输出。
 type GroupDTO struct {
-	ID           int64            `json:"id,string"`
-	ExperimentID int64            `json:"experiment_id,string"`
-	Name         string           `json:"name"`
-	Members      []GroupMemberDTO `json:"members"`
-	CreatedAt    time.Time        `json:"created_at"`
+	ID             int64            `json:"id,string"`
+	ExperimentID   int64            `json:"experiment_id,string"`
+	Name           string           `json:"name"`
+	Members        []GroupMemberDTO `json:"members"`
+	SharedInstance *InstanceDTO     `json:"shared_instance,omitempty"`
+	CreatedAt      time.Time        `json:"created_at"`
 }
 
 // GroupMemberDTO 是协作小组成员输出。

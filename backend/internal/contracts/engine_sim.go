@@ -1,7 +1,10 @@
 // contracts 定义第 1 层仿真引擎对外暴露的会话、回放与检查点契约。
 package contracts
 
-import "context"
+import (
+	"context"
+	"encoding/json"
+)
 
 // SimCreateSessionRequest 是业务模块创建仿真会话时提交的稳定请求。
 type SimCreateSessionRequest struct {
@@ -47,7 +50,7 @@ type SimCheckpointRequest struct {
 	TenantID     int64
 	SessionID    int64
 	CheckpointID string
-	Answer       string
+	Answer       json.RawMessage
 	Achieved     bool
 }
 

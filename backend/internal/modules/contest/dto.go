@@ -237,10 +237,13 @@ type ImportVulnProblemRequest struct {
 	DraftBody   map[string]any `json:"draft_body"`
 }
 
-// PrevalidateRequest 是漏洞题预验证结果写入请求。
+// PrevalidateRequest 是漏洞题预验证执行请求,实际结果由后端运行正反向验证生成。
 type PrevalidateRequest struct {
-	Passed bool           `json:"passed"`
-	Detail map[string]any `json:"detail"`
+	RuntimeCode         string   `json:"runtime_code"`
+	RuntimeImageVersion string   `json:"runtime_image_version"`
+	ToolCodes           []string `json:"tool_codes"`
+	InitCodeRef         string   `json:"init_code_ref"`
+	InitScriptRef       string   `json:"init_script_ref"`
 }
 
 // VulnProblemDTO 是漏洞题草稿输出。

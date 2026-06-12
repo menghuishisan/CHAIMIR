@@ -1,4 +1,4 @@
-// notify row_convert 文件负责 M10 sqlc 行到模块模型和 DTO 的转换。
+// notify repo_convert 文件负责 M10 repo 查询写入与 sqlc 行到模块模型、DTO 的转换。
 package notify
 
 import (
@@ -122,6 +122,11 @@ func (t *txStore) DeleteNotification(ctx context.Context, id, accountID int64) (
 	return notificationDTO(row), nil
 }
 
+// DeleteExpiredNotifications 软删除超过保留期的站内信。
+func (t *txStore) DeleteExpiredNotifications(ctx context.Context, before time.Time) error {
+	return t.q.DeleteExpiredNotifications(ctx, timex.RequiredTimestamptz(before))
+}
+
 // ListPreferences 查询通知偏好。
 func (t *txStore) ListPreferences(ctx context.Context, accountID int64) ([]PreferenceDTO, error) {
 	rows, err := t.q.ListPreferences(ctx, accountID)
@@ -163,8 +168,8 @@ func (t *txStore) CreateAnnouncement(ctx context.Context, id, tenantID, publishe
 }
 
 // ListAnnouncements 查询系统公告。
-func (t *txStore) ListAnnouncements(ctx context.Context, tenantID, accountID int64, page, size int) ([]AnnouncementDTO, error) {
-	rows, err := t.q.ListAnnouncements(ctx, sqlcgen.ListAnnouncementsParams{TenantID: tenantID, AccountID: accountID, Limit: int32(size), Offset: int32((page - 1) * size)})
+func (t *txStore) ListAnnouncements(ctx context.Context, tenantID, accountID int64, roleNumbers []int16, page, size int) ([]AnnouncementDTO, error) {
+	rows, err := t.q.ListAnnouncements(ctx, sqlcgen.ListAnnouncementsParams{TenantID: tenantID, AccountID: accountID, RoleNumbers: roleNumbers, PageLimit: int32(size), PageOffset: int32((page - 1) * size)})
 	if err != nil {
 		return nil, err
 	}
@@ -173,6 +178,15 @@ func (t *txStore) ListAnnouncements(ctx context.Context, tenantID, accountID int
 		out = append(out, announcementRowDTO(row))
 	}
 	return out, nil
+}
+
+// GetVisibleAnnouncement 查询当前用户可见公告。
+func (t *txStore) GetVisibleAnnouncement(ctx context.Context, tenantID, accountID int64, roleNumbers []int16, announcementID int64) (AnnouncementDTO, error) {
+	row, err := t.q.GetVisibleAnnouncement(ctx, sqlcgen.GetVisibleAnnouncementParams{TenantID: tenantID, AccountID: accountID, ID: announcementID, RoleNumbers: roleNumbers})
+	if err != nil {
+		return AnnouncementDTO{}, err
+	}
+	return announcementVisibleRowDTO(row), nil
 }
 
 // MarkAnnouncementRead 标记公告已读。
@@ -198,6 +212,11 @@ func announcementDTO(row sqlcgen.SystemAnnouncement, isRead bool) AnnouncementDT
 
 // announcementRowDTO 转换公告列表行。
 func announcementRowDTO(row sqlcgen.ListAnnouncementsRow) AnnouncementDTO {
+	return AnnouncementDTO{ID: row.ID, TenantID: pgtypex.Int8Value(row.TenantID), Title: row.Title, Content: row.Content, Scope: row.Scope, TargetRoles: row.TargetRoles, PublisherID: row.PublisherID, PublishedAt: timex.FromTimestamptz(row.PublishedAt), ExpireAt: timex.PtrFromTimestamptz(row.ExpireAt), IsRead: row.IsRead}
+}
+
+// announcementVisibleRowDTO 转换可见公告查询行。
+func announcementVisibleRowDTO(row sqlcgen.GetVisibleAnnouncementRow) AnnouncementDTO {
 	return AnnouncementDTO{ID: row.ID, TenantID: pgtypex.Int8Value(row.TenantID), Title: row.Title, Content: row.Content, Scope: row.Scope, TargetRoles: row.TargetRoles, PublisherID: row.PublisherID, PublishedAt: timex.FromTimestamptz(row.PublishedAt), ExpireAt: timex.PtrFromTimestamptz(row.ExpireAt), IsRead: row.IsRead}
 }
 

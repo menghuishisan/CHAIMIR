@@ -214,11 +214,11 @@ func (s *Service) CreateSandbox(ctx context.Context, req contracts.SandboxCreate
 	}); err != nil {
 		return contracts.SandboxInfo{}, err
 	}
-	s.startAsync(ctx, plan)
-	s.broadcastProgress(input.TenantID, plan.Sandbox.ID, SandboxPhaseAllocating, SandboxStatusCreating, response.TraceFromContext(ctx))
 	if err := s.writeAudit(ctx, input.TenantID, input.OwnerAccountID, 5, "sandbox.create", "sandbox", plan.Sandbox.ID, map[string]any{"source_ref": input.SourceRef}); err != nil {
 		return contracts.SandboxInfo{}, err
 	}
+	s.startAsync(ctx, plan)
+	s.broadcastProgress(input.TenantID, plan.Sandbox.ID, SandboxPhaseAllocating, SandboxStatusCreating, response.TraceFromContext(ctx))
 	return s.info(ctx, plan.Sandbox.TenantID, plan.Sandbox.ID)
 }
 

@@ -3,6 +3,7 @@ package teaching
 
 import (
 	"context"
+	"time"
 
 	"chaimir/internal/modules/teaching/internal/sqlcgen"
 )
@@ -138,6 +139,23 @@ func (s *txStore) GetSubmissionBySourceRef(ctx context.Context, tenantID int64, 
 	return submissionFromRow(row)
 }
 
+// ListJudgeOutboxBySubmission 查询同一次提交的所有自动判题派发记录。
+func (s *txStore) ListJudgeOutboxBySubmission(ctx context.Context, tenantID, submissionID int64) ([]JudgeOutbox, error) {
+	rows, err := s.q.ListJudgeOutboxBySubmission(ctx, sqlcgen.ListJudgeOutboxBySubmissionParams{TenantID: tenantID, SubmissionID: submissionID})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]JudgeOutbox, 0, len(rows))
+	for _, row := range rows {
+		item, err := outboxFromRow(row)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, item)
+	}
+	return out, nil
+}
+
 // ListSubmissionsByAssignment 查询作业提交分页。
 func (s *txStore) ListSubmissionsByAssignment(ctx context.Context, tenantID, assignmentID int64, page, size int) ([]Submission, int64, error) {
 	rows, err := s.q.ListSubmissionsByAssignment(ctx, sqlcgen.ListSubmissionsByAssignmentParams{TenantID: tenantID, AssignmentID: assignmentID, Limit: int32(size), Offset: int32((page - 1) * size)})
@@ -177,9 +195,9 @@ func (s *txStore) UpdateSubmissionJudgeRef(ctx context.Context, tenantID, id int
 	return submissionFromRow(row)
 }
 
-// UpdateSubmissionAutoScoreBySourceRef 按判题事件回写自动分和迟交处理后的最终分。
-func (s *txStore) UpdateSubmissionAutoScoreBySourceRef(ctx context.Context, tenantID int64, sourceRef string, score, final int32) (Submission, error) {
-	row, err := s.q.UpdateSubmissionAutoScoreBySourceRef(ctx, sqlcgen.UpdateSubmissionAutoScoreBySourceRefParams{TenantID: tenantID, SourceRef: sourceRef, AutoScore: int32Param(score), FinalScore: int32Param(final)})
+// UpdateSubmissionAutoScore 按提交聚合自动分和迟交处理后的最终分。
+func (s *txStore) UpdateSubmissionAutoScore(ctx context.Context, tenantID, submissionID int64, score, final int32) (Submission, error) {
+	row, err := s.q.UpdateSubmissionAutoScore(ctx, sqlcgen.UpdateSubmissionAutoScoreParams{TenantID: tenantID, ID: submissionID, AutoScore: int32Param(score), FinalScore: int32Param(final)})
 	if err != nil {
 		return Submission{}, err
 	}
@@ -192,7 +210,7 @@ func (s *txStore) CreateJudgeOutbox(ctx context.Context, outbox JudgeOutbox) (Ju
 	if err != nil {
 		return JudgeOutbox{}, err
 	}
-	row, err := s.q.CreateJudgeOutbox(ctx, sqlcgen.CreateJudgeOutboxParams{ID: outbox.ID, TenantID: outbox.TenantID, SubmissionID: outbox.SubmissionID, AssignmentID: outbox.AssignmentID, StudentID: outbox.StudentID, ItemCode: outbox.ItemCode, ItemVersion: outbox.ItemVersion, JudgerCode: outbox.JudgerCode, CodeStorageKey: outbox.CodeStorageKey, CodeHash: outbox.CodeHash, ExtraInput: extra, SourceRef: outbox.SourceRef})
+	row, err := s.q.CreateJudgeOutbox(ctx, sqlcgen.CreateJudgeOutboxParams{ID: outbox.ID, TenantID: outbox.TenantID, SubmissionID: outbox.SubmissionID, AssignmentItemID: outbox.AssignmentItemID, AssignmentID: outbox.AssignmentID, StudentID: outbox.StudentID, ItemCode: outbox.ItemCode, ItemVersion: outbox.ItemVersion, JudgerCode: outbox.JudgerCode, CodeStorageKey: outbox.CodeStorageKey, CodeHash: outbox.CodeHash, ExtraInput: extra, SourceRef: outbox.SourceRef})
 	if err != nil {
 		return JudgeOutbox{}, err
 	}
@@ -245,6 +263,24 @@ func (s *txStore) CompleteJudgeOutbox(ctx context.Context, tenantID, id int64) (
 // RetryJudgeOutbox 回退判题 outbox 到待派发。
 func (s *txStore) RetryJudgeOutbox(ctx context.Context, tenantID, id int64, lastError string) (JudgeOutbox, error) {
 	row, err := s.q.RetryJudgeOutbox(ctx, sqlcgen.RetryJudgeOutboxParams{TenantID: tenantID, ID: id, LastError: textParam(lastError)})
+	if err != nil {
+		return JudgeOutbox{}, err
+	}
+	return outboxFromRow(row)
+}
+
+// MarkJudgeOutboxResult 回写单题判题结果。
+func (s *txStore) MarkJudgeOutboxResult(ctx context.Context, tenantID int64, sourceRef string, score int32, completedAt time.Time) (JudgeOutbox, error) {
+	row, err := s.q.MarkJudgeOutboxResult(ctx, sqlcgen.MarkJudgeOutboxResultParams{TenantID: tenantID, SourceRef: sourceRef, Score: int32Param(score), CompletedAt: timestamptzParam(completedAt)})
+	if err != nil {
+		return JudgeOutbox{}, err
+	}
+	return outboxFromRow(row)
+}
+
+// MarkJudgeOutboxFailedResult 记录 M3 判题终态失败原因。
+func (s *txStore) MarkJudgeOutboxFailedResult(ctx context.Context, tenantID int64, sourceRef, reason string, failedAt time.Time) (JudgeOutbox, error) {
+	row, err := s.q.MarkJudgeOutboxFailedResult(ctx, sqlcgen.MarkJudgeOutboxFailedResultParams{TenantID: tenantID, SourceRef: sourceRef, LastError: textParam(reason), CompletedAt: timestamptzParam(failedAt)})
 	if err != nil {
 		return JudgeOutbox{}, err
 	}

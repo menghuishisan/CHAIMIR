@@ -1,4 +1,4 @@
-// grade row_convert 文件负责 M11 sqlc 行到模块 DTO 的转换。
+// grade repo_convert 文件负责 M11 repo 查询写入与 sqlc 行到模块 DTO 的转换。
 package grade
 
 import (
@@ -149,6 +149,15 @@ func (t *txStore) GetLatestApprovedReviewByCourse(ctx context.Context, courseID 
 	return reviewDTO(row), nil
 }
 
+// GetLatestReviewByCourse 查询课程最近一次成绩审核。
+func (t *txStore) GetLatestReviewByCourse(ctx context.Context, courseID int64) (ReviewDTO, error) {
+	row, err := t.q.GetLatestReviewByCourse(ctx, courseID)
+	if err != nil {
+		return ReviewDTO{}, err
+	}
+	return reviewDTO(row), nil
+}
+
 // ApproveGradeReview 通过成绩审核。
 func (t *txStore) ApproveGradeReview(ctx context.Context, id, reviewerID, semesterID int64, comment string) (ReviewDTO, error) {
 	row, err := t.q.ApproveGradeReview(ctx, sqlcgen.ApproveGradeReviewParams{ID: id, ReviewerID: pgtypex.Int8(reviewerID), SemesterID: pgtypex.Int8(semesterID), Comment: pgtypex.Text(comment)})
@@ -170,6 +179,15 @@ func (t *txStore) RejectGradeReview(ctx context.Context, id, reviewerID int64, c
 // UnlockGradeReview 解锁成绩审核。
 func (t *txStore) UnlockGradeReview(ctx context.Context, id, reviewerID int64, comment string) (ReviewDTO, error) {
 	row, err := t.q.UnlockGradeReview(ctx, sqlcgen.UnlockGradeReviewParams{ID: id, ReviewerID: pgtypex.Int8(reviewerID), Comment: pgtypex.Text(comment)})
+	if err != nil {
+		return ReviewDTO{}, err
+	}
+	return reviewDTO(row), nil
+}
+
+// RelockGradeReview 重新锁定申诉改分后的审核状态。
+func (t *txStore) RelockGradeReview(ctx context.Context, id, reviewerID int64, comment string) (ReviewDTO, error) {
+	row, err := t.q.RelockGradeReview(ctx, sqlcgen.RelockGradeReviewParams{ID: id, ReviewerID: pgtypex.Int8(reviewerID), Comment: pgtypex.Text(comment)})
 	if err != nil {
 		return ReviewDTO{}, err
 	}
@@ -200,6 +218,19 @@ func (t *txStore) UpsertStudentSemesterGrade(ctx context.Context, id, tenantID, 
 // ListStudentSemesterGrades 查询学生学期 GPA。
 func (t *txStore) ListStudentSemesterGrades(ctx context.Context, studentID int64) ([]GradeSummaryDTO, error) {
 	rows, err := t.q.ListStudentSemesterGrades(ctx, studentID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]GradeSummaryDTO, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, semesterGradeSummary(row))
+	}
+	return out, nil
+}
+
+// ListKnownStudentSemesterGrades 查询已有 GPA 聚合记录,供预警周期扫描确定范围。
+func (t *txStore) ListKnownStudentSemesterGrades(ctx context.Context, studentID int64) ([]GradeSummaryDTO, error) {
+	rows, err := t.q.ListKnownStudentSemesterGrades(ctx, studentID)
 	if err != nil {
 		return nil, err
 	}
