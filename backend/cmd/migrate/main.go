@@ -104,12 +104,15 @@ func grantApplicationRole(ctx context.Context, pg config.PostgresConfig) error {
 	if strings.TrimSpace(pg.User) != appRoleName {
 		return fmt.Errorf("PG_USER 必须为固定应用角色 %s,实际=%s", appRoleName, pg.User)
 	}
+	if pg.GrantTimeoutSeconds <= 0 {
+		return fmt.Errorf("PG_GRANT_TIMEOUT_SECONDS 必须大于 0")
+	}
 	sqlDB, err := sql.Open("pgx", postgresURL(pg, privilegedUser(pg), privilegedPassword(pg)))
 	if err != nil {
 		return fmt.Errorf("打开授权数据库连接失败: %w", err)
 	}
 	defer sqlDB.Close()
-	grantCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	grantCtx, cancel := context.WithTimeout(ctx, time.Duration(pg.GrantTimeoutSeconds)*time.Second)
 	defer cancel()
 	if _, err := sqlDB.ExecContext(grantCtx, "SELECT 1"); err != nil {
 		return fmt.Errorf("授权数据库连通性检查失败: %w", err)

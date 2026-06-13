@@ -63,7 +63,7 @@ func run() error {
 	server := &http.Server{
 		Addr:              fmt.Sprintf("%s:%d", cfg.Server.Addr, cfg.Server.Port),
 		Handler:           router,
-		ReadHeaderTimeout: 10 * time.Second,
+		ReadHeaderTimeout: time.Duration(cfg.Server.ReadHeaderTimeoutSeconds) * time.Second,
 	}
 	errCh := make(chan error, 1)
 	go func() {
@@ -144,7 +144,18 @@ func newInfrastructure(ctx context.Context, cfg *config.Config) (*infrastructure
 		database.Close()
 		return nil, err
 	}
-	hub := ws.NewHub(ws.NewOriginPolicy(cfg.Server.WSAllowedOrigins), ws.HubOptions{})
+	hub, err := ws.NewHub(ws.NewOriginPolicy(cfg.Server.WSAllowedOrigins), ws.HubOptions{
+		ReadTimeout:  time.Duration(cfg.Server.WSReadTimeoutSeconds) * time.Second,
+		WriteTimeout: time.Duration(cfg.Server.WSWriteTimeoutSeconds) * time.Second,
+		PingInterval: time.Duration(cfg.Server.WSPingIntervalSeconds) * time.Second,
+		ReadLimit:    cfg.Server.WSReadLimitBytes,
+	})
+	if err != nil {
+		bus.Close()
+		redisClient.Close()
+		database.Close()
+		return nil, err
+	}
 	return &infrastructure{
 		database: database,
 		redis:    redisClient,

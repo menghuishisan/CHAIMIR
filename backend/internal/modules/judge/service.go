@@ -457,7 +457,7 @@ func (s *Service) readObjectRef(ctx context.Context, objectRef string) (string, 
 	defer rc.Close()
 	limit := s.cfg.InputArchiveMaxUnpackedBytes
 	if limit <= 0 {
-		limit = 64 << 20
+		return "", nil, apperr.ErrJudgeInputArchiveInvalid
 	}
 	data, err := io.ReadAll(io.LimitReader(rc, limit+1))
 	if err != nil {

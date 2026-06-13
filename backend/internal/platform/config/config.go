@@ -47,29 +47,35 @@ type DeployConfig struct {
 
 // ServerConfig 描述 HTTP、WebSocket 与日志运行边界。
 type ServerConfig struct {
-	Addr                   string
-	Port                   int
-	WSPath                 string
-	WSAllowedOrigins       []string
-	LogLevel               string
-	LogFormat              string
-	AppEnv                 string
-	HealthTimeoutSeconds   int
-	ShutdownTimeoutSeconds int
+	Addr                     string
+	Port                     int
+	WSPath                   string
+	WSAllowedOrigins         []string
+	LogLevel                 string
+	LogFormat                string
+	AppEnv                   string
+	HealthTimeoutSeconds     int
+	ShutdownTimeoutSeconds   int
+	ReadHeaderTimeoutSeconds int
+	WSReadTimeoutSeconds     int
+	WSWriteTimeoutSeconds    int
+	WSPingIntervalSeconds    int
+	WSReadLimitBytes         int64
 }
 
 // PostgresConfig 描述 PostgreSQL 连接池和可选特权连接。
 type PostgresConfig struct {
-	Host         string
-	Port         int
-	Database     string
-	User         string
-	Password     string
-	SSLMode      string
-	MaxConns     int
-	MinConns     int
-	PrivUser     string
-	PrivPassword string
+	Host                string
+	Port                int
+	Database            string
+	User                string
+	Password            string
+	SSLMode             string
+	MaxConns            int
+	MinConns            int
+	PrivUser            string
+	PrivPassword        string
+	GrantTimeoutSeconds int
 }
 
 // RedisConfig 描述 Redis 连接和探测超时。
@@ -135,6 +141,7 @@ type BootstrapConfig struct {
 type IdentityConfig struct {
 	ActivationCodeTTLHours   int
 	SSONetworkTimeoutSeconds int
+	SSOCASResponseMaxBytes   int64
 	SSOAllowedServiceOrigins []string
 	PasswordMaxFailedCount   int
 	PasswordLockMinutes      int
@@ -298,6 +305,7 @@ type JudgeConfig struct {
 	SubmitRateLimitSec           int
 	DefaultMaxRetries            int
 	SandboxReadyPollIntervalMs   int
+	SandboxReadyGraceSeconds     int
 	ResultDetailsMaxBytes        int
 	InputInjectTimeoutSeconds    int
 	InputArchiveMaxFiles         int
@@ -383,27 +391,33 @@ func Load() (*Config, error) {
 		SchoolTenantID:  optInt64("SCHOOL_TENANT_ID"),
 	}
 	c.Server = ServerConfig{
-		Addr:                   req("HTTP_ADDR"),
-		Port:                   reqInt("HTTP_PORT"),
-		WSPath:                 req("WS_PATH"),
-		WSAllowedOrigins:       getCSV("WS_ALLOWED_ORIGINS"),
-		LogLevel:               req("LOG_LEVEL"),
-		LogFormat:              req("LOG_FORMAT"),
-		AppEnv:                 req("APP_ENV"),
-		HealthTimeoutSeconds:   reqInt("HEALTH_CHECK_TIMEOUT_SECONDS"),
-		ShutdownTimeoutSeconds: reqInt("HTTP_SHUTDOWN_TIMEOUT_SECONDS"),
+		Addr:                     req("HTTP_ADDR"),
+		Port:                     reqInt("HTTP_PORT"),
+		WSPath:                   req("WS_PATH"),
+		WSAllowedOrigins:         getCSV("WS_ALLOWED_ORIGINS"),
+		LogLevel:                 req("LOG_LEVEL"),
+		LogFormat:                req("LOG_FORMAT"),
+		AppEnv:                   req("APP_ENV"),
+		HealthTimeoutSeconds:     reqInt("HEALTH_CHECK_TIMEOUT_SECONDS"),
+		ShutdownTimeoutSeconds:   reqInt("HTTP_SHUTDOWN_TIMEOUT_SECONDS"),
+		ReadHeaderTimeoutSeconds: reqInt("HTTP_READ_HEADER_TIMEOUT_SECONDS"),
+		WSReadTimeoutSeconds:     reqInt("WS_READ_TIMEOUT_SECONDS"),
+		WSWriteTimeoutSeconds:    reqInt("WS_WRITE_TIMEOUT_SECONDS"),
+		WSPingIntervalSeconds:    reqInt("WS_PING_INTERVAL_SECONDS"),
+		WSReadLimitBytes:         reqInt64("WS_READ_LIMIT_BYTES"),
 	}
 	c.Postgres = PostgresConfig{
-		Host:         req("PG_HOST"),
-		Port:         reqInt("PG_PORT"),
-		Database:     req("PG_DATABASE"),
-		User:         req("PG_USER"),
-		Password:     req("PG_PASSWORD"),
-		SSLMode:      req("PG_SSLMODE"),
-		MaxConns:     reqInt("PG_MAX_CONNS"),
-		MinConns:     reqInt("PG_MIN_CONNS"),
-		PrivUser:     os.Getenv("PG_PRIV_USER"),
-		PrivPassword: os.Getenv("PG_PRIV_PASSWORD"),
+		Host:                req("PG_HOST"),
+		Port:                reqInt("PG_PORT"),
+		Database:            req("PG_DATABASE"),
+		User:                req("PG_USER"),
+		Password:            req("PG_PASSWORD"),
+		SSLMode:             req("PG_SSLMODE"),
+		MaxConns:            reqInt("PG_MAX_CONNS"),
+		MinConns:            reqInt("PG_MIN_CONNS"),
+		PrivUser:            os.Getenv("PG_PRIV_USER"),
+		PrivPassword:        os.Getenv("PG_PRIV_PASSWORD"),
+		GrantTimeoutSeconds: reqInt("PG_GRANT_TIMEOUT_SECONDS"),
 	}
 	c.Redis = RedisConfig{
 		Host:               req("REDIS_HOST"),
@@ -457,6 +471,7 @@ func Load() (*Config, error) {
 	c.Identity = IdentityConfig{
 		ActivationCodeTTLHours:   reqInt("IDENTITY_ACTIVATION_CODE_TTL_HOURS"),
 		SSONetworkTimeoutSeconds: reqInt("IDENTITY_SSO_NETWORK_TIMEOUT_SECONDS"),
+		SSOCASResponseMaxBytes:   reqInt64("IDENTITY_SSO_CAS_RESPONSE_MAX_BYTES"),
 		SSOAllowedServiceOrigins: getCSV("IDENTITY_SSO_ALLOWED_SERVICE_ORIGINS"),
 		PasswordMaxFailedCount:   reqInt("IDENTITY_PASSWORD_MAX_FAILED_COUNT"),
 		PasswordLockMinutes:      reqInt("IDENTITY_PASSWORD_LOCK_MINUTES"),
@@ -582,6 +597,7 @@ func Load() (*Config, error) {
 		SubmitRateLimitSec:           reqInt("JUDGE_SUBMIT_RATE_LIMIT_SECONDS"),
 		DefaultMaxRetries:            reqInt("JUDGE_DEFAULT_MAX_RETRIES"),
 		SandboxReadyPollIntervalMs:   reqInt("JUDGE_SANDBOX_READY_POLL_INTERVAL_MS"),
+		SandboxReadyGraceSeconds:     reqInt("JUDGE_SANDBOX_READY_GRACE_SECONDS"),
 		ResultDetailsMaxBytes:        reqInt("JUDGE_RESULT_DETAILS_MAX_BYTES"),
 		InputInjectTimeoutSeconds:    reqInt("JUDGE_INPUT_INJECT_TIMEOUT_SECONDS"),
 		InputArchiveMaxFiles:         reqInt("JUDGE_INPUT_ARCHIVE_MAX_FILES"),
@@ -608,8 +624,26 @@ func Load() (*Config, error) {
 	if c.Server.ShutdownTimeoutSeconds <= 0 {
 		errs = append(errs, "HTTP_SHUTDOWN_TIMEOUT_SECONDS 必须大于 0")
 	}
+	if c.Server.ReadHeaderTimeoutSeconds <= 0 {
+		errs = append(errs, "HTTP_READ_HEADER_TIMEOUT_SECONDS 必须大于 0")
+	}
+	if c.Server.WSReadTimeoutSeconds <= 0 {
+		errs = append(errs, "WS_READ_TIMEOUT_SECONDS 必须大于 0")
+	}
+	if c.Server.WSWriteTimeoutSeconds <= 0 {
+		errs = append(errs, "WS_WRITE_TIMEOUT_SECONDS 必须大于 0")
+	}
+	if c.Server.WSPingIntervalSeconds <= 0 {
+		errs = append(errs, "WS_PING_INTERVAL_SECONDS 必须大于 0")
+	}
+	if c.Server.WSReadLimitBytes <= 0 {
+		errs = append(errs, "WS_READ_LIMIT_BYTES 必须大于 0")
+	}
 	if c.Redis.PingTimeoutSeconds <= 0 {
 		errs = append(errs, "REDIS_PING_TIMEOUT_SECONDS 必须大于 0")
+	}
+	if c.Postgres.GrantTimeoutSeconds <= 0 {
+		errs = append(errs, "PG_GRANT_TIMEOUT_SECONDS 必须大于 0")
 	}
 	if c.NATS.ReconnectWaitSeconds <= 0 {
 		errs = append(errs, "NATS_RECONNECT_WAIT_SECONDS 必须大于 0")
@@ -728,6 +762,9 @@ func Load() (*Config, error) {
 	if c.Judge.SandboxReadyPollIntervalMs <= 0 {
 		errs = append(errs, "JUDGE_SANDBOX_READY_POLL_INTERVAL_MS 必须大于 0")
 	}
+	if c.Judge.SandboxReadyGraceSeconds <= 0 {
+		errs = append(errs, "JUDGE_SANDBOX_READY_GRACE_SECONDS 必须大于 0")
+	}
 	if c.Judge.ResultDetailsMaxBytes <= 0 {
 		errs = append(errs, "JUDGE_RESULT_DETAILS_MAX_BYTES 必须大于 0")
 	}
@@ -812,6 +849,9 @@ func Load() (*Config, error) {
 	}
 	if len(c.Identity.SSOAllowedServiceOrigins) == 0 {
 		errs = append(errs, "IDENTITY_SSO_ALLOWED_SERVICE_ORIGINS 至少配置一个平台 CAS 回调 origin")
+	}
+	if c.Identity.SSOCASResponseMaxBytes <= 0 {
+		errs = append(errs, "IDENTITY_SSO_CAS_RESPONSE_MAX_BYTES 必须大于 0")
 	}
 	for _, origin := range c.Identity.SSOAllowedServiceOrigins {
 		if !validOrigin(origin) {

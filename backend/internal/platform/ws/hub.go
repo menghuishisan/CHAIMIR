@@ -46,6 +46,7 @@ type HubOptions struct {
 	ReadTimeout  time.Duration
 	WriteTimeout time.Duration
 	PingInterval time.Duration
+	ReadLimit    int64
 }
 
 // OriginPolicy 是统一的 WebSocket Origin 白名单策略。
@@ -81,14 +82,16 @@ func (p OriginPolicy) Check(r *http.Request) bool {
 }
 
 // NewHub 创建带统一 Origin 策略和连接生命周期约束的 Hub。
-func NewHub(policy OriginPolicy, options HubOptions) *Hub {
-	options = normalizeHubOptions(options)
+func NewHub(policy OriginPolicy, options HubOptions) (*Hub, error) {
+	if err := validateHubOptions(options); err != nil {
+		return nil, err
+	}
 	return &Hub{
 		topics:       make(map[string]map[*Conn]struct{}),
 		sessions:     make(map[SessionKey]*Conn),
 		originPolicy: policy,
 		options:      options,
-	}
+	}, nil
 }
 
 // SendChan 暴露只写发送通道,便于业务层在订阅成功后补发快照。
@@ -258,7 +261,7 @@ func (c *Conn) writeLoop() {
 // readLoop 持续读取直到客户端断开;当前固定订阅场景不解析消息体。
 func (c *Conn) readLoop() error {
 	// 统一设置读超时与 pong 续期,确保死连接能被及时回收而不是无限悬挂。
-	c.socket.SetReadLimit(1 << 20)
+	c.socket.SetReadLimit(c.hub.options.ReadLimit)
 	if err := c.socket.SetReadDeadline(time.Now().Add(c.hub.options.ReadTimeout)); err != nil {
 		return err
 	}
@@ -373,18 +376,21 @@ func (w connWriter) Write(p []byte) (int, error) {
 	}
 }
 
-// normalizeHubOptions 统一补默认超时,避免平台层各处出现不一致的连接回收口径。
-func normalizeHubOptions(options HubOptions) HubOptions {
+// validateHubOptions 校验组合根注入的连接生命周期阈值,避免基础层用硬编码默认值兜底。
+func validateHubOptions(options HubOptions) error {
 	if options.ReadTimeout <= 0 {
-		options.ReadTimeout = 60 * time.Second
+		return fmt.Errorf("WebSocket 读超时必须大于 0")
 	}
 	if options.WriteTimeout <= 0 {
-		options.WriteTimeout = 10 * time.Second
+		return fmt.Errorf("WebSocket 写超时必须大于 0")
 	}
 	if options.PingInterval <= 0 {
-		options.PingInterval = 25 * time.Second
+		return fmt.Errorf("WebSocket ping 间隔必须大于 0")
 	}
-	return options
+	if options.ReadLimit <= 0 {
+		return fmt.Errorf("WebSocket 单消息读取上限必须大于 0")
+	}
+	return nil
 }
 
 // normalizeOrigin 解析 Origin 为 scheme://host,并区分缺失与格式非法。

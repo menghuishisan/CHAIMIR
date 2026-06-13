@@ -155,9 +155,9 @@ func (s *Service) resolveSandbox(ctx context.Context, task JudgeTask) (int64, bo
 
 // waitSandboxReady 轮询 M2 沙箱状态直到运行时可执行或超时。
 func (s *Service) waitSandboxReady(ctx context.Context, task JudgeTask, sandboxID int64) error {
-	timeout := time.Duration(task.InputSnapshot.TimeoutSec+sandboxReadyGraceSeconds) * time.Second
+	timeout := time.Duration(task.InputSnapshot.TimeoutSec+int32(s.cfg.SandboxReadyGraceSeconds)) * time.Second
 	if timeout <= 0 {
-		timeout = 60 * time.Second
+		return apperr.ErrJudgeTimeout
 	}
 	deadline := timex.Now().Add(timeout)
 	interval := time.Duration(s.cfg.SandboxReadyPollIntervalMs) * time.Millisecond
@@ -499,7 +499,7 @@ func (s *Service) executeJudgerSelftest(ctx context.Context, j Judger) error {
 // decodeCommandResult 解析判题器 stdout JSON 并限制可见详情大小。
 func decodeCommandResult(stdout []byte, maxBytes int) (JudgeExecutionResult, error) {
 	if maxBytes <= 0 {
-		maxBytes = 64 << 10
+		return JudgeExecutionResult{}, apperr.ErrJudgeWorkerFailed
 	}
 	if len(stdout) == 0 || len(stdout) > maxBytes {
 		return JudgeExecutionResult{}, apperr.ErrJudgeWorkerFailed
@@ -574,5 +574,3 @@ func int32FromAny(v any) int32 {
 	}
 	return int32(n)
 }
-
-const sandboxReadyGraceSeconds int32 = 30

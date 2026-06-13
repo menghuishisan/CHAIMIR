@@ -17,6 +17,13 @@ type ArchiveLimits struct {
 	MaxUnpackedBytes int64
 }
 
+// ArchiveFile 表示已通过路径、类型和配额校验的普通归档成员。
+type ArchiveFile struct {
+	Name   string
+	Size   int64
+	Reader io.Reader
+}
+
 // ArchiveFormat 表示平台归档安全原语支持的文件格式。
 type ArchiveFormat int
 
@@ -113,6 +120,36 @@ func SafeArchiveTar(name string, data []byte, limits ArchiveLimits) ([]byte, err
 	}
 }
 
+// WalkArchiveFiles 校验 ZIP/TAR 后按普通文件逐个回调,供模块复用统一归档安全边界。
+func WalkArchiveFiles(name string, data []byte, limits ArchiveLimits, visit func(ArchiveFile) error) error {
+	if visit == nil {
+		return fmt.Errorf("归档文件访问回调不能为空")
+	}
+	format, err := DetectArchiveFormat(name, data)
+	if err != nil {
+		return err
+	}
+	switch format {
+	case ArchiveFormatZIP:
+		zr, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
+		if err != nil {
+			return err
+		}
+		names, err := ZIPEntryNames(zr, limits)
+		if err != nil {
+			return err
+		}
+		return walkSafeZIPFiles(zr, names, visit)
+	case ArchiveFormatTAR:
+		if _, err := TAREntryNames(tar.NewReader(bytes.NewReader(data)), limits); err != nil {
+			return err
+		}
+		return walkSafeTARFiles(tar.NewReader(bytes.NewReader(data)), visit)
+	default:
+		return fmt.Errorf("归档格式不支持")
+	}
+}
+
 // DetectArchiveFormat 根据文件名和魔数识别 ZIP/TAR 归档。
 func DetectArchiveFormat(name string, data []byte) (ArchiveFormat, error) {
 	lower := strings.ToLower(strings.TrimSpace(name))
@@ -123,6 +160,24 @@ func DetectArchiveFormat(name string, data []byte) (ArchiveFormat, error) {
 		return ArchiveFormatTAR, nil
 	}
 	return ArchiveFormatUnknown, fmt.Errorf("归档格式不支持")
+}
+
+// ReadArchiveFileContent 读取已校验归档成员内容并执行单成员上限,供模块扫描逻辑复用。
+func ReadArchiveFileContent(file ArchiveFile, maxBytes int64) ([]byte, error) {
+	if maxBytes <= 0 {
+		return nil, fmt.Errorf("归档展开大小上限必须大于 0")
+	}
+	if file.Reader == nil {
+		return nil, fmt.Errorf("归档成员读取器为空")
+	}
+	out, err := io.ReadAll(io.LimitReader(file.Reader, maxBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(out)) > maxBytes {
+		return nil, fmt.Errorf("归档成员大小超出上限")
+	}
+	return out, nil
 }
 
 // zipToSafeTar 把 ZIP 重打为最小普通文件 TAR,统一解包前的安全形态。
@@ -155,6 +210,62 @@ func zipToSafeTar(zr *zip.Reader, limits ArchiveLimits) ([]byte, error) {
 		return nil, err
 	}
 	return out.Bytes(), nil
+}
+
+// walkSafeZIPFiles 在 ZIP 已通过安全校验后遍历普通文件内容。
+func walkSafeZIPFiles(zr *zip.Reader, safeNames []string, visit func(ArchiveFile) error) error {
+	allowed := make(map[string]struct{}, len(safeNames))
+	for _, name := range safeNames {
+		allowed[name] = struct{}{}
+	}
+	seen := map[string]struct{}{}
+	for _, file := range zr.File {
+		name, ok := SafeArchiveEntryName(file.Name, seen)
+		if !ok || file.FileInfo().IsDir() {
+			continue
+		}
+		if _, ok := allowed[name]; !ok {
+			continue
+		}
+		seen[name] = struct{}{}
+		rc, err := file.Open()
+		if err != nil {
+			return err
+		}
+		err = visit(ArchiveFile{Name: name, Size: int64(file.UncompressedSize64), Reader: io.LimitReader(rc, int64(file.UncompressedSize64)+1)})
+		if closeErr := rc.Close(); closeErr != nil && err == nil {
+			err = closeErr
+		}
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// walkSafeTARFiles 在 TAR 已通过安全校验后遍历普通文件内容。
+func walkSafeTARFiles(tr *tar.Reader, visit func(ArchiveFile) error) error {
+	seen := map[string]struct{}{}
+	for {
+		header, err := tr.Next()
+		if err == io.EOF {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if header.Typeflag == tar.TypeDir {
+			continue
+		}
+		name, ok := SafeArchiveEntryName(header.Name, seen)
+		if !ok {
+			return fmt.Errorf("TAR 归档成员路径非法: %s", header.Name)
+		}
+		seen[name] = struct{}{}
+		if err := visit(ArchiveFile{Name: name, Size: header.Size, Reader: io.LimitReader(tr, header.Size+1)}); err != nil {
+			return err
+		}
+	}
 }
 
 // tarToSafeTar 把 TAR 重打为最小普通文件 TAR,剥离 owner、链接和特殊模式。

@@ -382,9 +382,15 @@ func (s *Service) validateCASTicket(ctx context.Context, cfg SSOConfig, ticket, 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return "", apperr.ErrIdentitySSOTicketInvalid
 	}
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if s.cfg.SSOCASResponseMaxBytes <= 0 {
+		return "", apperr.ErrIdentitySSOResponseInvalid
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, s.cfg.SSOCASResponseMaxBytes+1))
 	if err != nil {
 		return "", apperr.ErrIdentitySSOResponseInvalid.WithCause(err)
+	}
+	if int64(len(body)) > s.cfg.SSOCASResponseMaxBytes {
+		return "", apperr.ErrIdentitySSOResponseInvalid
 	}
 	var parsed casServiceResponse
 	if err := xml.Unmarshal(body, &parsed); err != nil {
