@@ -55,21 +55,35 @@ func (c deliveryConfig) deadLetterSubject(subject string) string {
 
 // handleMessage 统一执行消费重试、结构化日志与死信投递。
 func (b *natsBus) handleMessage(ctx context.Context, subject, queue string, data []byte, handler Handler) {
+	eventCtx, metaErr := eventContext(ctx, data)
+	if metaErr != nil {
+		logging.ErrorContext(eventCtx, "事件载荷上下文校验失败", metaErr.Error(),
+			slog.String("subject", subject),
+			slog.String("queue", queue),
+		)
+		if err := b.publishDeadLetter(eventCtx, subject, queue, data, metaErr); err != nil {
+			logging.ErrorContext(eventCtx, "事件死信投递失败", err.Error(),
+				slog.String("subject", subject),
+				slog.String("queue", queue),
+			)
+		}
+		return
+	}
 	// 第一步:按统一策略重试消费,避免短暂故障直接丢事件。
-	lastErr := b.retryHandle(ctx, data, handler)
+	lastErr := b.retryHandle(eventCtx, data, handler)
 	if lastErr == nil {
 		return
 	}
 
-	logging.ErrorContext(ctx, "事件处理失败", lastErr.Error(),
+	logging.ErrorContext(eventCtx, "事件处理失败", lastErr.Error(),
 		slog.String("subject", subject),
 		slog.String("queue", queue),
 		slog.Int("attempt_count", max(b.cfg.retryMax, 1)),
 	)
 
 	// 第二步:重试耗尽后写入死信,为后续补偿和人工排查保留原始事件。
-	if err := b.publishDeadLetter(ctx, subject, queue, data, lastErr); err != nil {
-		logging.ErrorContext(ctx, "事件死信投递失败", err.Error(),
+	if err := b.publishDeadLetter(eventCtx, subject, queue, data, lastErr); err != nil {
+		logging.ErrorContext(eventCtx, "事件死信投递失败", err.Error(),
 			slog.String("subject", subject),
 			slog.String("queue", queue),
 		)

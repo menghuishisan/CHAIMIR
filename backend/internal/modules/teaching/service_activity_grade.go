@@ -16,6 +16,7 @@ import (
 	"chaimir/internal/platform/transfer"
 	"chaimir/internal/platform/upload"
 	"chaimir/pkg/apperr"
+	"chaimir/pkg/response"
 
 	"github.com/xuri/excelize/v2"
 )
@@ -726,7 +727,7 @@ func (s *Service) publishGradeUpdated(ctx context.Context, tenantID, assignmentI
 
 // publishTeachingGradeUpdated 发布 M6 成绩变更事件。
 func (s *Service) publishTeachingGradeUpdated(ctx context.Context, tenantID, courseID, studentID int64) error {
-	return s.bus.Publish(ctx, contracts.SubjectTeachingGradeUpdated, contracts.TeachingGradeUpdatedEvent{TenantID: tenantID, CourseID: courseID, StudentID: studentID, UpdatedAt: timeNowUTC()})
+	return s.bus.Publish(ctx, contracts.SubjectTeachingGradeUpdated, contracts.TeachingGradeUpdatedEvent{TenantID: tenantID, TraceID: response.TraceFromContext(ctx), CourseID: courseID, StudentID: studentID, UpdatedAt: timeNowUTC()})
 }
 
 // timeNowUTC 便于事件时间统一走 UTC。

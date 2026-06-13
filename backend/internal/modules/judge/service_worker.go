@@ -280,7 +280,7 @@ func (s *Service) completeTask(ctx context.Context, task JudgeTask, result Judge
 		if err != nil {
 			return apperr.ErrJudgeTaskPersistFailed.WithCause(err)
 		}
-		payload := contracts.JudgeCompletedEvent{TenantID: task.TenantID, TaskID: task.ID, SourceRef: task.SourceRef, Status: contracts.JudgeTaskStatusDone, Score: saved.Score, Passed: saved.Passed, FinishedAt: saved.JudgedAt}
+		payload := contracts.JudgeCompletedEvent{TenantID: task.TenantID, TraceID: task.InputSnapshot.TraceID, TaskID: task.ID, SourceRef: task.SourceRef, Status: contracts.JudgeTaskStatusDone, Score: saved.Score, Passed: saved.Passed, FinishedAt: saved.JudgedAt}
 		if _, err := tx.CreateOutbox(ctx, s.ids.Generate(), task.TenantID, task.ID, contracts.SubjectJudgeCompleted, payload); err != nil {
 			return apperr.ErrJudgeTaskPersistFailed.WithCause(err)
 		}
@@ -324,7 +324,7 @@ func (s *Service) retryOrFail(ctx context.Context, task JudgeTask, cause error) 
 		if err != nil {
 			return apperr.ErrJudgeTaskPersistFailed.WithCause(err)
 		}
-		payload := contracts.JudgeFailedEvent{TenantID: task.TenantID, TaskID: task.ID, SourceRef: task.SourceRef, Reason: reason, FailedAt: timex.Now()}
+		payload := contracts.JudgeFailedEvent{TenantID: task.TenantID, TraceID: task.InputSnapshot.TraceID, TaskID: task.ID, SourceRef: task.SourceRef, Reason: reason, FailedAt: timex.Now()}
 		if _, err := tx.CreateOutbox(ctx, s.ids.Generate(), task.TenantID, task.ID, contracts.SubjectJudgeFailed, payload); err != nil {
 			return apperr.ErrJudgeTaskPersistFailed.WithCause(err)
 		}

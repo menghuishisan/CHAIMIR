@@ -4,6 +4,7 @@ package judge
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"chaimir/internal/modules/judge/internal/sqlcgen"
 	"chaimir/internal/platform/db"
@@ -339,6 +340,16 @@ func (s *txStore) CreateOutbox(ctx context.Context, id int64, tenantID, taskID i
 	raw, err := jsonx.AnyBytes(payload, apperr.ErrJudgeEventPublishFailed)
 	if err != nil {
 		return JudgeEventOutbox{}, err
+	}
+	var meta struct {
+		TenantID int64  `json:"tenant_id"`
+		TraceID  string `json:"trace_id"`
+	}
+	if err := jsonx.DecodeStrict(raw, &meta); err != nil {
+		return JudgeEventOutbox{}, apperr.ErrJudgeEventPublishFailed.WithCause(err)
+	}
+	if meta.TenantID != tenantID || strings.TrimSpace(meta.TraceID) == "" {
+		return JudgeEventOutbox{}, apperr.ErrJudgeEventPublishFailed.WithCause(fmt.Errorf("判题终态事件缺少真实 tenant_id 或 trace_id"))
 	}
 	row, err := s.q.CreateJudgeOutbox(ctx, sqlcgen.CreateJudgeOutboxParams{ID: id, TenantID: tenantID, TaskID: taskID, Subject: subject, Payload: raw})
 	if err != nil {

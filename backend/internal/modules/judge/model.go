@@ -78,6 +78,7 @@ type JudgeTaskInfo struct {
 type JudgeInputSnapshot struct {
 	ItemCode            string         `json:"item_code"`
 	ItemVersion         string         `json:"item_version"`
+	TraceID             string         `json:"trace_id"`
 	JudgerCode          string         `json:"judger_code"`
 	JudgerType          int16          `json:"judger_type"`
 	JudgerVersion       string         `json:"judger_version"`

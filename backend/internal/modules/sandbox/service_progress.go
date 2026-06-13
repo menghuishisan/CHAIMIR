@@ -26,13 +26,13 @@ func (s *Service) ProgressSubscription(ctx context.Context, tenantID, accountID,
 }
 
 // broadcastProgress 向已订阅前端广播沙箱进度,广播失败不影响主状态机但必须由 Hub 统一丢弃慢连接。
-func (s *Service) broadcastProgress(tenantID, sandboxID int64, phase, status int16, traceID string) {
+func (s *Service) broadcastProgress(ctx context.Context, tenantID, sandboxID int64, phase, status int16, traceID string) {
 	if s.wsHub == nil {
 		return
 	}
 	data, err := jsonx.AnyBytes(progressFromState(phase, status, traceID), apperr.ErrInternal)
 	if err != nil {
-		logging.ErrorContext(context.Background(), "sandbox progress marshal failed", err.Error(), slog.Int64("tenant_id", tenantID), slog.Int64("sandbox_id", sandboxID))
+		logging.ErrorContext(ctx, "sandbox progress marshal failed", err.Error(), slog.Int64("tenant_id", tenantID), slog.Int64("sandbox_id", sandboxID))
 		return
 	}
 	s.wsHub.Broadcast(progressTopic(tenantID, sandboxID), data)

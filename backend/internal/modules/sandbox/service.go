@@ -218,7 +218,7 @@ func (s *Service) CreateSandbox(ctx context.Context, req contracts.SandboxCreate
 		return contracts.SandboxInfo{}, err
 	}
 	s.startAsync(ctx, plan)
-	s.broadcastProgress(input.TenantID, plan.Sandbox.ID, SandboxPhaseAllocating, SandboxStatusCreating, response.TraceFromContext(ctx))
+	s.broadcastProgress(ctx, input.TenantID, plan.Sandbox.ID, SandboxPhaseAllocating, SandboxStatusCreating, response.TraceFromContext(ctx))
 	return s.info(ctx, plan.Sandbox.TenantID, plan.Sandbox.ID)
 }
 
@@ -456,7 +456,7 @@ func (s *Service) restoreSnapshotSandbox(ctx context.Context, sb Sandbox) error 
 	}); err != nil {
 		return err
 	}
-	s.broadcastProgress(sb.TenantID, sb.ID, SandboxPhaseReady, SandboxStatusRunning, response.TraceFromContext(ctx))
+	s.broadcastProgress(ctx, sb.TenantID, sb.ID, SandboxPhaseReady, SandboxStatusRunning, response.TraceFromContext(ctx))
 	return s.writeAudit(ctx, sb.TenantID, sb.OwnerAccountID, 5, "sandbox.resume.snapshot", "sandbox", sb.ID, nil)
 }
 
@@ -710,7 +710,7 @@ func (s *Service) transition(ctx context.Context, tenantID, sandboxID int64, pha
 	}); err != nil {
 		return err
 	}
-	s.broadcastProgress(tenantID, sandboxID, phase, status, response.TraceFromContext(ctx))
+	s.broadcastProgress(ctx, tenantID, sandboxID, phase, status, response.TraceFromContext(ctx))
 	return s.writeAudit(ctx, tenantID, actorID, 5, action, "sandbox", sandboxID, nil)
 }
 
@@ -748,9 +748,9 @@ func (s *Service) startSandbox(ctx context.Context, plan CreateSandboxPlan) {
 		logging.ErrorContext(ctx, "sandbox phase update failed", err.Error(), slog.Int64("tenant_id", plan.Sandbox.TenantID), slog.Int64("sandbox_id", plan.Sandbox.ID))
 		return
 	}
-	s.broadcastProgress(plan.Sandbox.TenantID, plan.Sandbox.ID, SandboxPhaseReady, SandboxStatusRunning, response.TraceFromContext(ctx))
+	s.broadcastProgress(ctx, plan.Sandbox.TenantID, plan.Sandbox.ID, SandboxPhaseReady, SandboxStatusRunning, response.TraceFromContext(ctx))
 	if sandboxNeedsInitialization(plan) {
-		s.broadcastProgress(plan.Sandbox.TenantID, plan.Sandbox.ID, SandboxPhaseInitializing, SandboxStatusRunning, response.TraceFromContext(ctx))
+		s.broadcastProgress(ctx, plan.Sandbox.TenantID, plan.Sandbox.ID, SandboxPhaseInitializing, SandboxStatusRunning, response.TraceFromContext(ctx))
 		if err := s.store.TenantTx(ctx, plan.Sandbox.TenantID, func(ctx context.Context, tx TxStore) error {
 			if _, err := tx.UpdateSandboxPhaseStatus(ctx, plan.Sandbox.TenantID, plan.Sandbox.ID, SandboxPhaseInitializing, SandboxStatusRunning); err != nil {
 				return err
@@ -793,7 +793,7 @@ func (s *Service) startSandbox(ctx context.Context, plan CreateSandboxPlan) {
 			logging.ErrorContext(ctx, "sandbox init phase update failed", err.Error(), slog.Int64("tenant_id", plan.Sandbox.TenantID), slog.Int64("sandbox_id", plan.Sandbox.ID))
 			return
 		}
-		s.broadcastProgress(plan.Sandbox.TenantID, plan.Sandbox.ID, SandboxPhaseFullyReady, SandboxStatusRunning, response.TraceFromContext(ctx))
+		s.broadcastProgress(ctx, plan.Sandbox.TenantID, plan.Sandbox.ID, SandboxPhaseFullyReady, SandboxStatusRunning, response.TraceFromContext(ctx))
 	}
 }
 
@@ -827,7 +827,7 @@ func (s *Service) markStartFailed(ctx context.Context, sb Sandbox, cause error) 
 	}); err != nil {
 		logging.ErrorContext(ctx, "sandbox start failure mark failed", err.Error(), slog.Int64("tenant_id", sb.TenantID), slog.Int64("sandbox_id", sb.ID))
 	}
-	s.broadcastProgress(sb.TenantID, sb.ID, sb.Phase, SandboxStatusFailed, response.TraceFromContext(ctx))
+	s.broadcastProgress(ctx, sb.TenantID, sb.ID, sb.Phase, SandboxStatusFailed, response.TraceFromContext(ctx))
 	logging.ErrorContext(ctx, "sandbox start failed", cause.Error(), slog.Int64("tenant_id", sb.TenantID), slog.Int64("sandbox_id", sb.ID))
 }
 
@@ -845,7 +845,7 @@ func (s *Service) markInitFailed(ctx context.Context, sb Sandbox, cause error) {
 	}); err != nil {
 		logging.ErrorContext(ctx, "sandbox init failure mark failed", err.Error(), slog.Int64("tenant_id", sb.TenantID), slog.Int64("sandbox_id", sb.ID))
 	}
-	s.broadcastProgress(sb.TenantID, sb.ID, SandboxPhaseInitializing, SandboxStatusRunning, response.TraceFromContext(ctx))
+	s.broadcastProgress(ctx, sb.TenantID, sb.ID, SandboxPhaseInitializing, SandboxStatusRunning, response.TraceFromContext(ctx))
 	logging.ErrorContext(ctx, "sandbox init failed", cause.Error(), slog.Int64("tenant_id", sb.TenantID), slog.Int64("sandbox_id", sb.ID))
 }
 

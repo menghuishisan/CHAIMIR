@@ -17,6 +17,7 @@ import (
 	"chaimir/internal/platform/tenant"
 	"chaimir/internal/platform/timex"
 	"chaimir/pkg/apperr"
+	"chaimir/pkg/response"
 	"chaimir/pkg/snowflake"
 )
 
@@ -866,7 +867,7 @@ func (s *Service) publishLock(ctx context.Context, review ReviewDTO, locked bool
 	if review.CourseID <= 0 {
 		return apperr.ErrGradeReviewInvalid
 	}
-	err := s.bus.Publish(ctx, contracts.SubjectGradeReviewLockChanged, contracts.GradeReviewLockChangedEvent{TenantID: review.TenantID, ReviewID: review.ID, CourseID: review.CourseID, Locked: locked, Reason: reason, ChangedAt: timex.Now()})
+	err := s.bus.Publish(ctx, contracts.SubjectGradeReviewLockChanged, contracts.GradeReviewLockChangedEvent{TenantID: review.TenantID, TraceID: response.TraceFromContext(ctx), ReviewID: review.ID, CourseID: review.CourseID, Locked: locked, Reason: reason, ChangedAt: timex.Now()})
 	if err != nil {
 		return apperr.ErrGradeReviewStateInvalid.WithCause(err)
 	}

@@ -4,6 +4,7 @@ package notify
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -102,7 +103,7 @@ func (s *Service) Send(ctx context.Context, req contracts.NotifySendRequest) err
 	}
 	for _, receiverID := range delivered {
 		if err := s.refreshUnread(ctx, input.TenantID, receiverID); err != nil {
-			logging.ErrorContext(ctx, "刷新通知未读数失败", err.Error())
+			logging.ErrorContext(ctx, "刷新通知未读数失败", err.Error(), slog.Int64("tenant_id", input.TenantID), slog.Int64("receiver_id", receiverID))
 		}
 	}
 	return nil

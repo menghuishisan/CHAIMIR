@@ -3,6 +3,7 @@ package response
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -71,9 +72,23 @@ func TraceMiddleware() gin.HandlerFunc {
 		}
 		c.Set(ginTraceKey, traceID)
 		ctx := WithTrace(c.Request.Context(), traceID)
-		ctx = logging.WithAttrs(ctx, loggingTraceAttr(traceID))
+		ctx = logging.WithAttrs(ctx, loggingTraceAttr(traceID), requestMethodAttr(c.Request.Method), requestPathAttr(c.FullPath(), c.Request.URL.Path))
 		c.Request = c.Request.WithContext(ctx)
 		c.Header(TraceHeader, traceID)
+		c.Next()
+	}
+}
+
+// RecoveryMiddleware 将 panic 收敛到统一错误信封,避免默认 recovery 泄露非规范响应形态。
+func RecoveryMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		defer func() {
+			if v := recover(); v != nil {
+				responseErr := apperr.ErrPanicRecovered.WithCause(fmt.Errorf("panic: %v", v))
+				Fail(c, responseErr)
+				c.Abort()
+			}
+		}()
 		c.Next()
 	}
 }
@@ -126,6 +141,20 @@ func isSafeTraceID(traceID string) bool {
 // loggingTraceAttr 生成 trace_id 日志字段。
 func loggingTraceAttr(traceID string) slog.Attr {
 	return slog.String("trace_id", traceID)
+}
+
+// requestMethodAttr 生成请求方法日志字段。
+func requestMethodAttr(method string) slog.Attr {
+	return slog.String("method", method)
+}
+
+// requestPathAttr 生成请求路径日志字段,优先使用 Gin 路由模板避免记录敏感路径片段。
+func requestPathAttr(routePath, rawPath string) slog.Attr {
+	path := strings.TrimSpace(routePath)
+	if path == "" {
+		path = rawPath
+	}
+	return slog.String("path", path)
 }
 
 // errorCodeAttr 生成错误码日志字段。

@@ -119,12 +119,13 @@ func (s *Service) recycleOne(ctx context.Context, sb Sandbox, reason string) err
 	}); err != nil {
 		return err
 	}
-	s.broadcastProgress(sb.TenantID, sb.ID, sb.Phase, SandboxStatusDestroyed, response.TraceFromContext(ctx))
+	s.broadcastProgress(ctx, sb.TenantID, sb.ID, sb.Phase, SandboxStatusDestroyed, response.TraceFromContext(ctx))
 	if err := s.writeAudit(ctx, sb.TenantID, sb.OwnerAccountID, 5, "sandbox.recycle", "sandbox", sb.ID, map[string]any{"reason": reason, "source_ref": sb.SourceRef}); err != nil {
 		return err
 	}
 	return s.bus.Publish(ctx, contracts.SubjectSandboxRecycled, contracts.SandboxRecycledEvent{
 		TenantID:   sb.TenantID,
+		TraceID:    response.TraceFromContext(ctx),
 		SandboxID:  sb.ID,
 		SourceRef:  sb.SourceRef,
 		Reason:     reason,
@@ -187,5 +188,5 @@ func (s *Service) markRecycleFailed(ctx context.Context, sb Sandbox, cause error
 	}); err != nil {
 		logging.ErrorContext(ctx, "sandbox recycle failure mark failed", err.Error(), slog.Int64("tenant_id", sb.TenantID), slog.Int64("sandbox_id", sb.ID))
 	}
-	s.broadcastProgress(sb.TenantID, sb.ID, sb.Phase, SandboxStatusRecycling, response.TraceFromContext(ctx))
+	s.broadcastProgress(ctx, sb.TenantID, sb.ID, sb.Phase, SandboxStatusRecycling, response.TraceFromContext(ctx))
 }

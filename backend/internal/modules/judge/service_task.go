@@ -3,6 +3,7 @@ package judge
 
 import (
 	"context"
+	"fmt"
 	"strings"
 
 	"chaimir/internal/contracts"
@@ -10,6 +11,7 @@ import (
 	"chaimir/internal/platform/pagex"
 	"chaimir/internal/platform/ws"
 	"chaimir/pkg/apperr"
+	"chaimir/pkg/response"
 )
 
 // ListTasks 按租户分页查询判题任务,供教师和学校管理员查看队列与人工评分项。
@@ -168,7 +170,11 @@ func (s *Service) ManualScore(ctx context.Context, tenantID, taskID, scorerID in
 		if err != nil {
 			return apperr.ErrJudgeTaskPersistFailed.WithCause(err)
 		}
-		payload := contracts.JudgeCompletedEvent{TenantID: tenantID, TaskID: task.ID, SourceRef: task.SourceRef, Status: contracts.JudgeTaskStatusDone, Score: saved.Score, Passed: saved.Passed, FinishedAt: saved.JudgedAt}
+		traceID := response.TraceFromContext(ctx)
+		if strings.TrimSpace(traceID) == "" {
+			return apperr.ErrJudgeTaskStateInvalid.WithCause(fmt.Errorf("人工评分缺少 trace_id"))
+		}
+		payload := contracts.JudgeCompletedEvent{TenantID: tenantID, TraceID: traceID, TaskID: task.ID, SourceRef: task.SourceRef, Status: contracts.JudgeTaskStatusDone, Score: saved.Score, Passed: saved.Passed, FinishedAt: saved.JudgedAt}
 		if _, err := tx.CreateOutbox(ctx, s.ids.Generate(), tenantID, task.ID, contracts.SubjectJudgeCompleted, payload); err != nil {
 			return apperr.ErrJudgeTaskPersistFailed.WithCause(err)
 		}

@@ -10,6 +10,7 @@ import (
 	"chaimir/internal/platform/audit"
 	"chaimir/internal/platform/timex"
 	"chaimir/pkg/apperr"
+	"chaimir/pkg/response"
 )
 
 // CreateInstance 发起实验实例并并发编排 M2 沙箱与 M4 仿真资源。
@@ -477,7 +478,7 @@ func (s *Service) publishScored(ctx context.Context, inst ExperimentInstance) er
 	if s.bus == nil {
 		return apperr.ErrExperimentEventFailed
 	}
-	event := contracts.ExperimentScoredEvent{TenantID: inst.TenantID, ExperimentID: inst.ExperimentID, InstanceID: inst.ID, StudentID: inst.OwnerAccountID, Score: inst.Score, ScoredAt: timex.Now()}
+	event := contracts.ExperimentScoredEvent{TenantID: inst.TenantID, TraceID: response.TraceFromContext(ctx), ExperimentID: inst.ExperimentID, InstanceID: inst.ID, StudentID: inst.OwnerAccountID, Score: inst.Score, ScoredAt: timex.Now()}
 	if err := s.bus.Publish(ctx, contracts.SubjectExperimentScored, event); err != nil {
 		return apperr.ErrExperimentEventFailed.WithCause(err)
 	}

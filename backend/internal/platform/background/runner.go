@@ -8,6 +8,9 @@ import (
 	"time"
 
 	"chaimir/pkg/logging"
+	"chaimir/pkg/response"
+
+	"github.com/google/uuid"
 )
 
 // Task 描述一个可按固定间隔运行的后台任务。
@@ -38,16 +41,24 @@ func Run(ctx context.Context, task Task) {
 
 // runOnce 包装单轮执行的错误与 panic 边界,统一后台任务的失败处理方式。
 func runOnce(ctx context.Context, task Task) {
+	traceID := uuid.NewString()
+	ctx = response.WithTrace(ctx, traceID)
+	ctx = logging.WithAttrs(ctx,
+		slog.String("trace_id", traceID),
+		slog.Int64("tenant_id", 0),
+		slog.String("task", task.Name),
+		slog.String("operation_scope", "system_background"),
+	)
 	defer func() {
 		if v := recover(); v != nil {
-			logging.ErrorContext(ctx, "background task panic", fmt.Sprint(v), slog.String("task", task.Name))
+			logging.ErrorContext(ctx, "background task panic", fmt.Sprint(v))
 		}
 	}()
 	if task.Run == nil {
-		logging.ErrorContext(ctx, "background task missing runner", "nil runner", slog.String("task", task.Name))
+		logging.ErrorContext(ctx, "background task missing runner", "nil runner")
 		return
 	}
 	if err := task.Run(ctx); err != nil {
-		logging.ErrorContext(ctx, "background task failed", err.Error(), slog.String("task", task.Name))
+		logging.ErrorContext(ctx, "background task failed", err.Error())
 	}
 }

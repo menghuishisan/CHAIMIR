@@ -454,7 +454,7 @@ func (s *Service) refreshPlatformSession(ctx context.Context, old PlatformAuthSe
 		if revokeErr := s.store.PlatformTx(ctx, func(ctx context.Context, tx TxStore) error {
 			return tx.RevokePlatformSessions(ctx, old.PlatformAdminID)
 		}); revokeErr != nil {
-			logging.ErrorContext(ctx, "吊销过期平台会话失败", revokeErr.Error(), slog.Int64("platform_admin_id", old.PlatformAdminID))
+			logging.ErrorContext(ctx, "吊销过期平台会话失败", revokeErr.Error(), slog.Int64("tenant_id", 0), slog.String("operation_scope", "platform_session"), slog.Int64("platform_admin_id", old.PlatformAdminID))
 		}
 		return LoginResponse{}, apperr.ErrIdentitySessionInvalid
 	}

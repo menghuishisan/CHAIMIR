@@ -23,6 +23,7 @@ const (
 // JudgeCompletedEvent 是判题完成事件载荷。
 type JudgeCompletedEvent struct {
 	TenantID   int64     `json:"tenant_id"`
+	TraceID    string    `json:"trace_id"`
 	TaskID     int64     `json:"task_id"`
 	SourceRef  string    `json:"source_ref"`
 	Status     int16     `json:"status"`
@@ -34,6 +35,7 @@ type JudgeCompletedEvent struct {
 // JudgeFailedEvent 是判题失败终态事件载荷。
 type JudgeFailedEvent struct {
 	TenantID  int64     `json:"tenant_id"`
+	TraceID   string    `json:"trace_id"`
 	TaskID    int64     `json:"task_id"`
 	SourceRef string    `json:"source_ref"`
 	Reason    string    `json:"reason"`
@@ -43,6 +45,7 @@ type JudgeFailedEvent struct {
 // SandboxRecycledEvent 是沙箱完成回收后的事件载荷。
 type SandboxRecycledEvent struct {
 	TenantID   int64     `json:"tenant_id"`
+	TraceID    string    `json:"trace_id"`
 	SandboxID  int64     `json:"sandbox_id"`
 	SourceRef  string    `json:"source_ref"`
 	Reason     string    `json:"reason"`
@@ -52,6 +55,7 @@ type SandboxRecycledEvent struct {
 // ExperimentScoredEvent 是实验实例得分落定后的事件载荷。
 type ExperimentScoredEvent struct {
 	TenantID     int64     `json:"tenant_id"`
+	TraceID      string    `json:"trace_id"`
 	ExperimentID int64     `json:"experiment_id"`
 	InstanceID   int64     `json:"instance_id"`
 	StudentID    int64     `json:"student_id"`
@@ -62,6 +66,7 @@ type ExperimentScoredEvent struct {
 // TeachingGradeUpdatedEvent 是单课程成绩调整后的事件载荷。
 type TeachingGradeUpdatedEvent struct {
 	TenantID  int64     `json:"tenant_id"`
+	TraceID   string    `json:"trace_id"`
 	CourseID  int64     `json:"course_id"`
 	StudentID int64     `json:"student_id"`
 	UpdatedAt time.Time `json:"updated_at"`
@@ -70,6 +75,7 @@ type TeachingGradeUpdatedEvent struct {
 // GradeReviewLockChangedEvent 是 M11 驱动 M6 同步单课程写保护投影时使用的事件载荷。
 type GradeReviewLockChangedEvent struct {
 	TenantID  int64     `json:"tenant_id"`
+	TraceID   string    `json:"trace_id"`
 	ReviewID  int64     `json:"review_id"`
 	CourseID  int64     `json:"course_id"`
 	Locked    bool      `json:"locked"`
@@ -80,6 +86,7 @@ type GradeReviewLockChangedEvent struct {
 // IdentitySessionRevokedEvent 是 M1 吊销会话后供 M10 关闭旧连接的事件载荷。
 type IdentitySessionRevokedEvent struct {
 	TenantID   int64     `json:"tenant_id"`
+	TraceID    string    `json:"trace_id"`
 	AccountID  int64     `json:"account_id"`
 	Scope      string    `json:"scope"`
 	Reason     string    `json:"reason"`

@@ -224,7 +224,7 @@ func (s *Service) RunRuntimeSelftest(ctx context.Context, runtimeID int64) (Runt
 	cleanupCtx, cleanupCancel := context.WithTimeout(cleanupBase, time.Duration(s.cfg.SelftestRecycleTimeoutSeconds)*time.Second)
 	defer cleanupCancel()
 	if cleanupErr := s.orchestrator.DestroySandboxResources(cleanupCtx, sb); cleanupErr != nil {
-		logging.ErrorContext(ctx, "sandbox selftest cleanup failed", cleanupErr.Error(), slog.Int64("runtime_id", runtimeID), slog.String("namespace", sb.Namespace))
+		logging.ErrorContext(ctx, "sandbox selftest cleanup failed", cleanupErr.Error(), slog.Int64("tenant_id", 0), slog.Int64("runtime_id", runtimeID), slog.Int64("sandbox_id", sb.ID), slog.String("namespace", sb.Namespace))
 	}
 	status := RuntimeSelftestPassed
 	runtimeStatus := RuntimeStatusAvailable
@@ -235,7 +235,7 @@ func (s *Service) RunRuntimeSelftest(ctx context.Context, runtimeID int64) (Runt
 	if err != nil {
 		status = RuntimeSelftestFailed
 		runtimeStatus = RuntimeStatusOnboarding
-		logging.ErrorContext(ctx, "sandbox runtime selftest failed", err.Error(), slog.Int64("runtime_id", runtimeID), slog.String("namespace", sb.Namespace))
+		logging.ErrorContext(ctx, "sandbox runtime selftest failed", err.Error(), slog.Int64("tenant_id", 0), slog.Int64("runtime_id", runtimeID), slog.Int64("sandbox_id", sb.ID), slog.String("namespace", sb.Namespace))
 		detail, encodeErr = jsonBytes(map[string]any{"result": "failed", "stage": "selftest", "trace_id": traceIDFromLogContext(ctx)})
 		if encodeErr != nil {
 			return RuntimeSelftestResponse{}, apperr.ErrSandboxSelftestFailed.WithCause(encodeErr)
@@ -361,7 +361,7 @@ func (s *Service) PrepullRuntimeImage(ctx context.Context, runtimeID, imageID in
 		status = ImagePrepullFailed
 		prepulled = false
 		at = time.Time{}
-		logging.ErrorContext(ctx, "sandbox image prepull failed", err.Error(), slog.Int64("runtime_id", runtimeID), slog.Int64("image_id", imageID), slog.String("daemonset", result.DaemonSet))
+		logging.ErrorContext(ctx, "sandbox image prepull failed", err.Error(), slog.Int64("tenant_id", 0), slog.Int64("runtime_id", runtimeID), slog.Int64("image_id", imageID), slog.String("daemonset", result.DaemonSet))
 		detail, encodeErr := jsonBytes(map[string]any{"stage": "failed", "daemonset": result.DaemonSet, "desired_nodes": result.DesiredNodes, "ready_nodes": result.ReadyNodes})
 		if encodeErr != nil {
 			return PrepullResponse{}, apperr.ErrSandboxImagePrepullFailed.WithCause(encodeErr)

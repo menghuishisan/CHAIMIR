@@ -20,6 +20,7 @@ import (
 	"chaimir/internal/platform/ws"
 	"chaimir/pkg/apperr"
 	"chaimir/pkg/logging"
+	"chaimir/pkg/response"
 	"chaimir/pkg/snowflake"
 )
 
@@ -226,6 +227,11 @@ func (s *Service) SubmitJudgeTask(ctx context.Context, req contracts.JudgeSubmit
 	if err != nil {
 		return contracts.JudgeTaskInfo{}, err
 	}
+	traceID := response.TraceFromContext(ctx)
+	if strings.TrimSpace(traceID) == "" {
+		return contracts.JudgeTaskInfo{}, apperr.ErrJudgeSubmitInvalid.WithCause(fmt.Errorf("判题提交缺少 trace_id"))
+	}
+	snapshot.TraceID = traceID
 	task := JudgeTask{
 		ID:               s.ids.Generate(),
 		TenantID:         req.TenantID,

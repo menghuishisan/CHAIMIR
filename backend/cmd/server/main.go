@@ -189,7 +189,7 @@ func (i *infrastructure) close() {
 // newRouter 创建 HTTP 路由器、统一 trace 中间件和健康探针。
 func newRouter(cfg *config.Config, infra *infrastructure) *gin.Engine {
 	r := gin.New()
-	r.Use(gin.Recovery(), response.TraceMiddleware())
+	r.Use(response.TraceMiddleware(), response.RecoveryMiddleware())
 	r.GET("/healthz", func(c *gin.Context) {
 		response.OK(c, map[string]string{"status": "ok"})
 	})
