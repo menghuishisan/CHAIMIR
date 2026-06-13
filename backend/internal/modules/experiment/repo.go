@@ -8,6 +8,8 @@ import (
 
 	"chaimir/internal/modules/experiment/internal/sqlcgen"
 	"chaimir/internal/platform/db"
+	"chaimir/internal/platform/pgtypex"
+	"chaimir/internal/platform/timex"
 	"chaimir/pkg/apperr"
 
 	"github.com/jackc/pgx/v5"
@@ -94,7 +96,7 @@ func (tx *txStore) CreateExperiment(ctx context.Context, item Experiment) (Exper
 	if err != nil {
 		return Experiment{}, err
 	}
-	row, err := tx.q.CreateExperiment(ctx, sqlcgen.CreateExperimentParams{ID: item.ID, TenantID: item.TenantID, CourseID: pgInt8(item.CourseID), AuthorID: item.AuthorID, TemplateRef: pgText(item.TemplateRef), TemplateVersion: pgText(item.TemplateVersion), Name: item.Name, Description: item.Description, Components: components, CollabMode: item.CollabMode, GroupConfig: groupConfig, RequireReport: item.RequireReport, WizardStep: item.WizardStep})
+	row, err := tx.q.CreateExperiment(ctx, sqlcgen.CreateExperimentParams{ID: item.ID, TenantID: item.TenantID, CourseID: pgtypex.Int8(item.CourseID), AuthorID: item.AuthorID, TemplateRef: pgtypex.Text(item.TemplateRef), TemplateVersion: pgtypex.Text(item.TemplateVersion), Name: item.Name, Description: item.Description, Components: components, CollabMode: item.CollabMode, GroupConfig: groupConfig, RequireReport: item.RequireReport, WizardStep: item.WizardStep})
 	if err != nil {
 		return Experiment{}, apperr.ErrExperimentInvalid.WithCause(err)
 	}
@@ -141,7 +143,7 @@ func (tx *txStore) UpdateExperiment(ctx context.Context, item Experiment) (Exper
 	if err != nil {
 		return Experiment{}, err
 	}
-	row, err := tx.q.UpdateExperiment(ctx, sqlcgen.UpdateExperimentParams{TenantID: item.TenantID, ID: item.ID, CourseID: pgInt8(item.CourseID), TemplateRef: pgText(item.TemplateRef), TemplateVersion: pgText(item.TemplateVersion), Name: item.Name, Description: item.Description, Components: components, CollabMode: item.CollabMode, GroupConfig: groupConfig, RequireReport: item.RequireReport, WizardStep: item.WizardStep})
+	row, err := tx.q.UpdateExperiment(ctx, sqlcgen.UpdateExperimentParams{TenantID: item.TenantID, ID: item.ID, CourseID: pgtypex.Int8(item.CourseID), TemplateRef: pgtypex.Text(item.TemplateRef), TemplateVersion: pgtypex.Text(item.TemplateVersion), Name: item.Name, Description: item.Description, Components: components, CollabMode: item.CollabMode, GroupConfig: groupConfig, RequireReport: item.RequireReport, WizardStep: item.WizardStep})
 	if err != nil {
 		return Experiment{}, apperr.ErrExperimentStateInvalid.WithCause(err)
 	}
@@ -212,7 +214,7 @@ func (tx *txStore) UpsertGroupMember(ctx context.Context, item GroupMember) (Gro
 
 // GetActiveGroupInstance 查询小组当前共享实例。
 func (tx *txStore) GetActiveGroupInstance(ctx context.Context, tenantID, experimentID, groupID int64) (ExperimentInstance, error) {
-	row, err := tx.q.GetActiveGroupInstance(ctx, sqlcgen.GetActiveGroupInstanceParams{TenantID: tenantID, ExperimentID: experimentID, GroupID: pgInt8(groupID)})
+	row, err := tx.q.GetActiveGroupInstance(ctx, sqlcgen.GetActiveGroupInstanceParams{TenantID: tenantID, ExperimentID: experimentID, GroupID: pgtypex.Int8(groupID)})
 	if err != nil {
 		return ExperimentInstance{}, err
 	}
@@ -221,7 +223,7 @@ func (tx *txStore) GetActiveGroupInstance(ctx context.Context, tenantID, experim
 
 // CreateInstance 创建实验实例控制记录。
 func (tx *txStore) CreateInstance(ctx context.Context, item ExperimentInstance) (ExperimentInstance, error) {
-	row, err := tx.q.CreateExperimentInstance(ctx, sqlcgen.CreateExperimentInstanceParams{ID: item.ID, TenantID: item.TenantID, ExperimentID: item.ExperimentID, OwnerAccountID: item.OwnerAccountID, GroupID: pgInt8(item.GroupID), SourceRef: item.SourceRef})
+	row, err := tx.q.CreateExperimentInstance(ctx, sqlcgen.CreateExperimentInstanceParams{ID: item.ID, TenantID: item.TenantID, ExperimentID: item.ExperimentID, OwnerAccountID: item.OwnerAccountID, GroupID: pgtypex.Int8(item.GroupID), SourceRef: item.SourceRef})
 	if err != nil {
 		return ExperimentInstance{}, apperr.ErrExperimentInstanceInvalid.WithCause(err)
 	}
@@ -318,7 +320,7 @@ func (tx *txStore) ClaimRecyclableInstances(ctx context.Context, pausedTimeoutSe
 
 // UpsertCheckpoint 新增或更新检查点结果。
 func (tx *txStore) UpsertCheckpoint(ctx context.Context, item CheckpointResult) (CheckpointResult, error) {
-	row, err := tx.q.UpsertCheckpointResult(ctx, sqlcgen.UpsertCheckpointResultParams{ID: item.ID, TenantID: item.TenantID, InstanceID: item.InstanceID, CheckpointID: item.CheckpointID, JudgeTaskRef: pgText(item.JudgeTaskRef), Passed: item.Passed, Column7: fmt.Sprintf("%.2f", item.Score), DetailRef: pgText(item.DetailRef)})
+	row, err := tx.q.UpsertCheckpointResult(ctx, sqlcgen.UpsertCheckpointResultParams{ID: item.ID, TenantID: item.TenantID, InstanceID: item.InstanceID, CheckpointID: item.CheckpointID, JudgeTaskRef: pgtypex.Text(item.JudgeTaskRef), Passed: item.Passed, Column7: fmt.Sprintf("%.2f", item.Score), DetailRef: pgtypex.Text(item.DetailRef)})
 	if err != nil {
 		return CheckpointResult{}, apperr.ErrExperimentCheckpointInvalid.WithCause(err)
 	}
@@ -327,7 +329,7 @@ func (tx *txStore) UpsertCheckpoint(ctx context.Context, item CheckpointResult) 
 
 // GetCheckpointByJudgeTask 按 M3 判题任务引用查找检查点结果。
 func (tx *txStore) GetCheckpointByJudgeTask(ctx context.Context, tenantID int64, judgeTaskRef string) (CheckpointResult, error) {
-	row, err := tx.q.GetCheckpointResultByJudgeTask(ctx, sqlcgen.GetCheckpointResultByJudgeTaskParams{TenantID: tenantID, JudgeTaskRef: pgText(judgeTaskRef)})
+	row, err := tx.q.GetCheckpointResultByJudgeTask(ctx, sqlcgen.GetCheckpointResultByJudgeTaskParams{TenantID: tenantID, JudgeTaskRef: pgtypex.Text(judgeTaskRef)})
 	if err != nil {
 		return CheckpointResult{}, apperr.ErrExperimentCheckpointInvalid.WithCause(err)
 	}
@@ -358,7 +360,7 @@ func (tx *txStore) UpsertReport(ctx context.Context, item ExperimentReport) (Exp
 
 // GradeReport 保存教师报告批改分和评语。
 func (tx *txStore) GradeReport(ctx context.Context, tenantID, id int64, score float64, comment string) (ExperimentReport, error) {
-	row, err := tx.q.GradeExperimentReport(ctx, sqlcgen.GradeExperimentReportParams{TenantID: tenantID, ID: id, Column3: fmt.Sprintf("%.2f", score), Comment: pgText(comment)})
+	row, err := tx.q.GradeExperimentReport(ctx, sqlcgen.GradeExperimentReportParams{TenantID: tenantID, ID: id, Column3: fmt.Sprintf("%.2f", score), Comment: pgtypex.Text(comment)})
 	if err != nil {
 		return ExperimentReport{}, apperr.ErrExperimentReportNotFound.WithCause(err)
 	}
@@ -371,7 +373,7 @@ func (tx *txStore) GetReport(ctx context.Context, tenantID, id int64) (Experimen
 	if err != nil {
 		return ExperimentReport{}, apperr.ErrExperimentReportNotFound.WithCause(err)
 	}
-	return ExperimentReport{ID: row.ID, TenantID: row.TenantID, InstanceID: row.InstanceID, StudentID: row.StudentID, ContentRef: row.ContentRef, ManualScore: row.ManualScore, Comment: textFromPG(row.Comment), Status: row.Status, SubmittedAt: timeFromPG(row.SubmittedAt)}, nil
+	return ExperimentReport{ID: row.ID, TenantID: row.TenantID, InstanceID: row.InstanceID, StudentID: row.StudentID, ContentRef: row.ContentRef, ManualScore: row.ManualScore, Comment: pgtypex.TextValue(row.Comment), Status: row.Status, SubmittedAt: timex.FromTimestamptz(row.SubmittedAt)}, nil
 }
 
 // GetReportByInstanceStudent 读取当前学生在指定实例下提交的报告。
@@ -380,7 +382,7 @@ func (tx *txStore) GetReportByInstanceStudent(ctx context.Context, tenantID, ins
 	if err != nil {
 		return ExperimentReport{}, apperr.ErrExperimentReportNotFound.WithCause(err)
 	}
-	return ExperimentReport{ID: row.ID, TenantID: row.TenantID, InstanceID: row.InstanceID, StudentID: row.StudentID, ContentRef: row.ContentRef, ManualScore: row.ManualScore, Comment: textFromPG(row.Comment), Status: row.Status, SubmittedAt: timeFromPG(row.SubmittedAt)}, nil
+	return ExperimentReport{ID: row.ID, TenantID: row.TenantID, InstanceID: row.InstanceID, StudentID: row.StudentID, ContentRef: row.ContentRef, ManualScore: row.ManualScore, Comment: pgtypex.TextValue(row.Comment), Status: row.Status, SubmittedAt: timex.FromTimestamptz(row.SubmittedAt)}, nil
 }
 
 // ListReports 查询实验报告分页。

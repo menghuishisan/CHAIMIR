@@ -6,6 +6,8 @@ import (
 
 	"chaimir/internal/contracts"
 	"chaimir/internal/platform/ids"
+	"chaimir/internal/platform/jsonx"
+	"chaimir/pkg/apperr"
 )
 
 // contractSubmitFromDTO 把内部 HTTP 请求转换为跨模块判题契约。
@@ -100,8 +102,11 @@ func taskInfoToMap(info JudgeTaskInfo) map[string]any {
 }
 
 // judgerToMap 转换判题器定义为 API 输出。
-func judgerToMap(j Judger) map[string]any {
-	spec, _ := json.Marshal(j.ResourceSpec)
+func judgerToMap(j Judger) (map[string]any, error) {
+	spec, err := jsonx.AnyBytes(j.ResourceSpec, apperr.ErrJudgerConfigInvalid)
+	if err != nil {
+		return nil, err
+	}
 	return map[string]any{
 		"id":                  j.ID,
 		"code":                j.Code,
@@ -113,7 +118,7 @@ func judgerToMap(j Judger) map[string]any {
 		"resource_spec":       json.RawMessage(spec),
 		"selftest_status":     j.SelftestStatus,
 		"status":              j.Status,
-	}
+	}, nil
 }
 
 // fingerprintToMatch 转换查重命中为跨模块契约。

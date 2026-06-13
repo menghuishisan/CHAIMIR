@@ -1,4 +1,4 @@
-// judge fingerprint 文件实现提交代码特征提取与相似度计算,输入来自对象存储而不是前端。
+// judge service_fingerprint 文件实现提交代码特征提取与相似度计算,输入来自对象存储而不是前端。
 package judge
 
 import (

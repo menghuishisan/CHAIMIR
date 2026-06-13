@@ -4,11 +4,12 @@ package content
 import (
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"sort"
 	"time"
 
 	"chaimir/internal/contracts"
+	"chaimir/internal/platform/jsonx"
+	"chaimir/pkg/apperr"
 )
 
 // itemDTO 转换内容外壳为 HTTP DTO。
@@ -103,7 +104,7 @@ func versionHash(item Item, body map[string]any, sensitive []string) (string, er
 		"body":             body,
 		"sensitive_fields": normalizedStrings(sensitive),
 	}
-	raw, err := json.Marshal(payload)
+	raw, err := jsonx.AnyBytes(payload, apperr.ErrInternal)
 	if err != nil {
 		return "", err
 	}
@@ -116,16 +117,16 @@ func cloneMap(in map[string]any) map[string]any {
 	if in == nil {
 		return map[string]any{}
 	}
-	raw, err := json.Marshal(in)
+	raw, err := jsonx.AnyBytes(in, apperr.ErrInternal)
 	if err != nil {
-		out := make(map[string]any, len(in))
+		shallow := make(map[string]any, len(in))
 		for k, v := range in {
-			out[k] = v
+			shallow[k] = v
 		}
-		return out
+		return shallow
 	}
-	out := map[string]any{}
-	if err := json.Unmarshal(raw, &out); err != nil {
+	out, err := jsonx.ObjectMapStrict(raw)
+	if err != nil {
 		return map[string]any{}
 	}
 	return out

@@ -6,6 +6,7 @@ import (
 
 	"chaimir/internal/contracts"
 	"chaimir/internal/platform/audit"
+	"chaimir/internal/platform/pagex"
 	"chaimir/pkg/apperr"
 )
 
@@ -15,7 +16,7 @@ func (s *Service) ListPapers(ctx context.Context, page, size int) ([]PaperDTO, i
 	if err != nil {
 		return nil, 0, 0, 0, err
 	}
-	normalizePage(&page, &size)
+	page, size = pagex.Normalize(page, size)
 	var papers []Paper
 	var total int64
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {

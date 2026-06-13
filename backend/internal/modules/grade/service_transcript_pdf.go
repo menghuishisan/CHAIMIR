@@ -1,10 +1,12 @@
-// grade transcript_pdf 文件负责把成绩摘要渲染为可下载 PDF 字节。
+// grade service_transcript_pdf 文件负责把成绩摘要渲染为可下载 PDF 字节。
 package grade
 
 import (
 	"bytes"
 	"fmt"
 	"strings"
+
+	pkgcrypto "chaimir/pkg/crypto"
 
 	"github.com/go-pdf/fpdf"
 )
@@ -44,11 +46,18 @@ func renderTranscriptPDF(summary GradeSummaryDTO, signingKey string) ([]byte, er
 	return buf.Bytes(), nil
 }
 
-// verificationText 生成不暴露密钥的成绩单校验摘要。
+// verificationText 生成不暴露密钥的成绩单 HMAC 校验码。
 func verificationText(summary GradeSummaryDTO, signingKey string) string {
-	seed := fmt.Sprintf("%d:%.3f:%.1f:%s", summary.StudentID, summary.GPA, summary.TotalCredits, signingKey)
-	if len(seed) <= 24 {
-		return strings.ToUpper(seed)
+	var seed strings.Builder
+	_, _ = fmt.Fprintf(&seed, "student=%d;semester=%d;gpa=%.3f;cumulative=%.3f;credits=%.1f;",
+		summary.StudentID, summary.SemesterID, summary.GPA, summary.CumulativeGPA, summary.TotalCredits)
+	for _, row := range summary.CourseGrades {
+		_, _ = fmt.Fprintf(&seed, "course=%d,student=%d,total=%.2f,credits=%.1f;",
+			row.CourseID, row.StudentID, row.FinalTotal, row.Credits)
 	}
-	return strings.ToUpper(seed[:24])
+	code, err := pkgcrypto.HMACSHA256Hex([]byte(signingKey), seed.String())
+	if err != nil {
+		return ""
+	}
+	return strings.ToUpper(code)
 }

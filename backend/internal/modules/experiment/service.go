@@ -7,7 +7,6 @@ import (
 
 	"chaimir/internal/contracts"
 	"chaimir/internal/platform/audit"
-	"chaimir/internal/platform/auth"
 	"chaimir/internal/platform/config"
 	"chaimir/internal/platform/eventbus"
 	"chaimir/internal/platform/storage"
@@ -27,7 +26,7 @@ type Service struct {
 	ids     snowflake.Generator
 	cfg     config.ExperimentConfig
 	audit   audit.Writer
-	roles   auth.RoleChecker
+	roles   contracts.IdentityService
 	content contracts.ContentReadService
 	sandbox contracts.SandboxService
 	judge   contracts.JudgeService
@@ -42,7 +41,7 @@ type ServiceDeps struct {
 	IDs     snowflake.Generator
 	Config  config.ExperimentConfig
 	Audit   audit.Writer
-	Roles   auth.RoleChecker
+	Roles   contracts.IdentityService
 	Content contracts.ContentReadService
 	Sandbox contracts.SandboxService
 	Judge   contracts.JudgeService
@@ -67,6 +66,15 @@ func NewService(deps ServiceDeps) (*Service, error) {
 	}
 	if deps.Content == nil {
 		return nil, fmt.Errorf("experiment service 缺少 content 契约")
+	}
+	if deps.Sandbox == nil {
+		return nil, fmt.Errorf("experiment service 缺少 sandbox 契约")
+	}
+	if deps.Judge == nil {
+		return nil, fmt.Errorf("experiment service 缺少 judge 契约")
+	}
+	if deps.Sim == nil {
+		return nil, fmt.Errorf("experiment service 缺少 sim 契约")
 	}
 	if deps.Bus == nil {
 		return nil, fmt.Errorf("experiment service 缺少事件总线")

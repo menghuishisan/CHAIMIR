@@ -3,7 +3,6 @@ package judge
 
 import (
 	"context"
-	"encoding/json"
 
 	"chaimir/internal/platform/audit"
 	"chaimir/pkg/apperr"
@@ -14,7 +13,7 @@ func (s *Service) writeAudit(ctx context.Context, tenantID, actorID int64, actor
 	if s.audit == nil {
 		return apperr.ErrJudgeAuditFailed
 	}
-	raw, err := json.Marshal(detail)
+	detailText, err := audit.DetailString(detail)
 	if err != nil {
 		return apperr.ErrJudgeAuditFailed.WithCause(err)
 	}
@@ -26,7 +25,7 @@ func (s *Service) writeAudit(ctx context.Context, tenantID, actorID int64, actor
 		Action:     action,
 		TargetType: targetType,
 		TargetID:   targetID,
-		Detail:     string(raw),
+		Detail:     detailText,
 		IP:         req.IP,
 		TraceID:    req.TraceID,
 	}); err != nil {

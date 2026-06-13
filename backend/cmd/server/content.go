@@ -4,6 +4,7 @@ package main
 import (
 	"fmt"
 
+	"chaimir/internal/contracts"
 	"chaimir/internal/modules/content"
 	"chaimir/internal/platform/audit"
 	"chaimir/internal/platform/auth"
@@ -20,7 +21,7 @@ type ContentModuleDeps struct {
 	IDs      snowflake.Generator
 	Audit    audit.Writer
 	Auth     *auth.Manager
-	Roles    auth.RoleChecker
+	Roles    contracts.IdentityService
 }
 
 // RegisterContentModule 构造题库 store/service 并注册 HTTP 路由。

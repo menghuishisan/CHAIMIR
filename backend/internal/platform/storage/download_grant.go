@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"chaimir/internal/platform/timex"
 	pkgcrypto "chaimir/pkg/crypto"
 )
 
@@ -50,7 +51,7 @@ func BuildDownloadGrant(_ context.Context, req DownloadGrantRequest) (DownloadGr
 	if strings.TrimSpace(req.Module) == "" || strings.TrimSpace(req.ResourceType) == "" || strings.TrimSpace(req.ResourceID) == "" {
 		return DownloadGrant{}, fmt.Errorf("下载授权缺少资源边界")
 	}
-	if req.ExpiresAt.IsZero() || !req.ExpiresAt.After(time.Now().UTC()) {
+	if req.ExpiresAt.IsZero() || !req.ExpiresAt.After(timex.Now()) {
 		return DownloadGrant{}, fmt.Errorf("下载授权过期时间非法")
 	}
 
@@ -84,7 +85,7 @@ func SignDownloadGrantToken(grant DownloadGrant, signingKey string) (string, err
 	if strings.TrimSpace(signingKey) == "" {
 		return "", fmt.Errorf("下载授权签名密钥不能为空")
 	}
-	if err := validateDownloadGrant(grant, time.Now().UTC()); err != nil {
+	if err := validateDownloadGrant(grant, timex.Now()); err != nil {
 		return "", err
 	}
 
@@ -109,7 +110,7 @@ func SignDownloadGrantToken(grant DownloadGrant, signingKey string) (string, err
 
 // VerifyDownloadGrantToken 校验下载授权令牌签名、内容和有效期,拒绝过期或被篡改的对象下载请求。
 func VerifyDownloadGrantToken(token string, signingKey string) (DownloadGrant, error) {
-	return verifyDownloadGrantTokenAt(token, signingKey, time.Now().UTC())
+	return verifyDownloadGrantTokenAt(token, signingKey, timex.Now())
 }
 
 // verifyDownloadGrantTokenAt 在给定时间点评估下载授权令牌,供测试稳定验证过期边界。
@@ -137,7 +138,7 @@ func verifyDownloadGrantTokenAt(token string, signingKey string, now time.Time) 
 	if err != nil {
 		return DownloadGrant{}, fmt.Errorf("校验下载授权签名失败: %w", err)
 	}
-	if !pkgcrypto.EqualHMAC(expectedSignature, envelope.Signature) {
+	if !pkgcrypto.EqualHexHMAC(expectedSignature, envelope.Signature) {
 		return DownloadGrant{}, fmt.Errorf("下载授权签名无效")
 	}
 

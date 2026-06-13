@@ -4,10 +4,10 @@ package sandbox
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"time"
 
+	"chaimir/internal/platform/jsonx"
 	"chaimir/pkg/apperr"
 )
 
@@ -43,9 +43,9 @@ func (c execChainCapability) runJSON(ctx context.Context, sb Sandbox, runtime Ru
 	if c.orchestrator == nil || !safeCommand(spec.Command) {
 		return nil, apperr.ErrSandboxCapabilityUnavailable
 	}
-	stdin, err := json.Marshal(payload)
+	stdin, err := jsonx.AnyBytes(payload, apperr.ErrSandboxContractRequestInvalid)
 	if err != nil {
-		return nil, apperr.ErrSandboxContractRequestInvalid.WithCause(err)
+		return nil, err
 	}
 	runCtx, cancel := context.WithTimeout(ctx, c.commandTimeout(spec))
 	defer cancel()
@@ -57,7 +57,7 @@ func (c execChainCapability) runJSON(ctx context.Context, sb Sandbox, runtime Ru
 		return map[string]any{}, nil
 	}
 	var out map[string]any
-	if err := json.Unmarshal(stdout, &out); err != nil {
+	if err := jsonx.DecodeStrict(stdout, &out); err != nil {
 		return nil, fmt.Errorf("链能力输出不是 JSON 对象: %w", err)
 	}
 	return out, nil

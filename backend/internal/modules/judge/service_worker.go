@@ -4,7 +4,6 @@ package judge
 import (
 	"context"
 	"encoding/base64"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -14,6 +13,7 @@ import (
 	"time"
 
 	"chaimir/internal/contracts"
+	"chaimir/internal/platform/jsonx"
 	"chaimir/internal/platform/timex"
 	"chaimir/internal/platform/upload"
 	"chaimir/pkg/apperr"
@@ -371,7 +371,7 @@ func (s *Service) publishPendingOutbox(ctx context.Context) error {
 	}
 	for _, item := range items {
 		var payload any
-		if err := json.Unmarshal(item.Payload, &payload); err != nil {
+		if err := jsonx.DecodeStrict(item.Payload, &payload); err != nil {
 			s.recordOutboxPublishFailure(ctx, item, err)
 			return apperr.ErrJudgeEventPublishFailed.WithCause(err)
 		}
@@ -404,9 +404,9 @@ func isJudgeTimeout(err error) bool {
 	return false
 }
 
-// resultDetailsJSONBytes 统计结果详情 JSON 大小,复用 encoding/json 而不是手写估算。
+// resultDetailsJSONBytes 统计结果详情 JSON 大小,复用平台 JSON 边界而不是手写估算。
 func resultDetailsJSONBytes(details []JudgeResultDetail) (int, error) {
-	raw, err := json.Marshal(details)
+	raw, err := jsonx.AnyBytes(details, apperr.ErrInternal)
 	if err != nil {
 		return 0, err
 	}
@@ -455,7 +455,7 @@ func (s *Service) executeJudgerSelftest(ctx context.Context, j Judger) error {
 	}
 	expectation, _ := j.ResourceSpec.Selftest["expectation"].(map[string]any)
 	extra, _ := j.ResourceSpec.Selftest["extra_input"].(map[string]any)
-	snapshot, err := snapshotExpectationForJudger(j.Type, expectation, extra)
+	snapshot, err := s.snapshotExpectationForJudger(j.Type, expectation, extra)
 	if err != nil {
 		return err
 	}
@@ -505,7 +505,7 @@ func decodeCommandResult(stdout []byte, maxBytes int) (JudgeExecutionResult, err
 		return JudgeExecutionResult{}, apperr.ErrJudgeWorkerFailed
 	}
 	var out JudgeExecutionResult
-	if err := json.Unmarshal(stdout, &out); err != nil {
+	if err := jsonx.DecodeStrict(stdout, &out); err != nil {
 		return JudgeExecutionResult{}, apperr.ErrJudgeWorkerFailed.WithCause(err)
 	}
 	return out, nil
@@ -563,20 +563,7 @@ func judgeSandboxRef(id int64) string {
 
 // int64FromAny 从自检 JSON 配置读取 int64。
 func int64FromAny(v any) int64 {
-	switch x := v.(type) {
-	case int64:
-		return x
-	case int:
-		return int64(x)
-	case float64:
-		return int64(x)
-	case json.Number:
-		n, _ := x.Int64()
-		return n
-	default:
-		n, _ := strconv.ParseInt(strings.TrimSpace(fmt.Sprint(x)), 10, 64)
-		return n
-	}
+	return jsonx.Int64FromAny(v, 0)
 }
 
 // int32FromAny 从自检 JSON 配置读取 int32。

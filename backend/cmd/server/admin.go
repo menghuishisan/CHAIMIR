@@ -14,6 +14,9 @@ import (
 	"chaimir/internal/platform/background"
 	"chaimir/internal/platform/config"
 	"chaimir/internal/platform/db"
+	"chaimir/internal/platform/storage"
+	"chaimir/internal/platform/transfer"
+	"chaimir/internal/platform/upload"
 	"chaimir/pkg/crypto"
 	"chaimir/pkg/snowflake"
 
@@ -36,9 +39,13 @@ type AdminModuleDeps struct {
 	Notify     contracts.NotifyService
 	Monitoring config.MonitoringConfig
 	Config     config.AdminConfig
+	Upload     config.UploadConfig
+	MinIO      config.MinIOConfig
 	AuthConfig config.AuthConfig
+	Transfer   *transfer.Service
+	Storage    *storage.Storage
 	Auth       *auth.Manager
-	Roles      auth.RoleChecker
+	Roles      contracts.IdentityService
 }
 
 // RegisterAdminModule 构造管理后台 store/service 并注册 HTTP 路由。
@@ -52,6 +59,12 @@ func RegisterAdminModule(ctx context.Context, deps AdminModuleDeps) (*admin.Serv
 	if deps.Database == nil {
 		return nil, fmt.Errorf("admin module 缺少 database")
 	}
+	if deps.Transfer == nil {
+		return nil, fmt.Errorf("admin module 缺少 transfer service")
+	}
+	if deps.Storage == nil {
+		return nil, fmt.Errorf("admin module 缺少统一对象存储")
+	}
 	key, err := base64.StdEncoding.DecodeString(deps.AuthConfig.EncryptionKey)
 	if err != nil {
 		return nil, fmt.Errorf("admin module 解析 APP_ENCRYPTION_KEY 失败: %w", err)
@@ -60,8 +73,34 @@ func RegisterAdminModule(ctx context.Context, deps AdminModuleDeps) (*admin.Serv
 	if err != nil {
 		return nil, err
 	}
+	scanner, err := upload.NewScannerFromConfig(deps.Upload)
+	if err != nil {
+		return nil, err
+	}
 	store := admin.NewStore(deps.Database)
-	svc, err := admin.NewService(admin.ServiceDeps{Store: store, IDs: deps.IDs, Audit: deps.Audit, Roles: deps.Roles, Identity: deps.Identity, Stats: deps.Stats, AuditRead: deps.AuditRead, Teaching: deps.Teaching, Sandbox: deps.Sandbox, Experiment: deps.Experiment, Contest: deps.Contest, Notify: deps.Notify, Monitoring: deps.Monitoring, Cipher: cipher})
+	svc, err := admin.NewService(admin.ServiceDeps{
+		Store:      store,
+		IDs:        deps.IDs,
+		Audit:      deps.Audit,
+		Roles:      deps.Roles,
+		Identity:   deps.Identity,
+		Stats:      deps.Stats,
+		AuditRead:  deps.AuditRead,
+		Teaching:   deps.Teaching,
+		Sandbox:    deps.Sandbox,
+		Experiment: deps.Experiment,
+		Contest:    deps.Contest,
+		Notify:     deps.Notify,
+		Monitoring: deps.Monitoring,
+		Cipher:     cipher,
+		Transfers:  deps.Transfer,
+		Storage:    deps.Storage,
+		FileService: storage.Service{
+			Scanner:          scanner,
+			SigningKey:       deps.AuthConfig.HMACKey,
+			DownloadGrantTTL: time.Duration(deps.MinIO.DownloadGrantTTLSeconds) * time.Second,
+		},
+	})
 	if err != nil {
 		return nil, err
 	}

@@ -3,6 +3,7 @@ package main
 
 import (
 	"fmt"
+	"time"
 
 	"chaimir/internal/contracts"
 	"chaimir/internal/modules/grade"
@@ -12,6 +13,7 @@ import (
 	"chaimir/internal/platform/db"
 	"chaimir/internal/platform/eventbus"
 	"chaimir/internal/platform/storage"
+	"chaimir/internal/platform/upload"
 	"chaimir/pkg/snowflake"
 
 	"github.com/gin-gonic/gin"
@@ -19,17 +21,20 @@ import (
 
 // GradeModuleDeps 汇总组合根装配 M11 需要的基础设施和跨模块契约。
 type GradeModuleDeps struct {
-	Router   gin.IRouter
-	Database *db.DB
-	IDs      snowflake.Generator
-	Audit    audit.Writer
-	Teaching contracts.TeachingReadService
-	Notify   contracts.NotifyService
-	EventBus eventbus.Bus
-	Storage  *storage.Storage
-	Config   config.GradeConfig
-	Auth     *auth.Manager
-	Roles    auth.RoleChecker
+	Router     gin.IRouter
+	Database   *db.DB
+	IDs        snowflake.Generator
+	Audit      audit.Writer
+	Teaching   contracts.TeachingReadService
+	Notify     contracts.NotifyService
+	EventBus   eventbus.Bus
+	Storage    *storage.Storage
+	Upload     config.UploadConfig
+	MinIO      config.MinIOConfig
+	AuthConfig config.AuthConfig
+	Config     config.GradeConfig
+	Auth       *auth.Manager
+	Roles      contracts.IdentityService
 }
 
 // RegisterGradeModule 构造成绩中心 store/service,注册路由和事件订阅。
@@ -40,8 +45,27 @@ func RegisterGradeModule(deps GradeModuleDeps) (*grade.Service, error) {
 	if deps.Database == nil {
 		return nil, fmt.Errorf("grade module 缺少 database")
 	}
+	scanner, err := upload.NewScannerFromConfig(deps.Upload)
+	if err != nil {
+		return nil, err
+	}
 	store := grade.NewStore(deps.Database)
-	svc, err := grade.NewService(grade.ServiceDeps{Store: store, IDs: deps.IDs, Audit: deps.Audit, Roles: deps.Roles, Teaching: deps.Teaching, Notify: deps.Notify, Bus: deps.EventBus, Storage: deps.Storage, Config: deps.Config})
+	svc, err := grade.NewService(grade.ServiceDeps{
+		Store:    store,
+		IDs:      deps.IDs,
+		Audit:    deps.Audit,
+		Roles:    deps.Roles,
+		Teaching: deps.Teaching,
+		Notify:   deps.Notify,
+		Bus:      deps.EventBus,
+		Storage:  deps.Storage,
+		FileService: storage.Service{
+			Scanner:          scanner,
+			SigningKey:       deps.AuthConfig.HMACKey,
+			DownloadGrantTTL: time.Duration(deps.MinIO.DownloadGrantTTLSeconds) * time.Second,
+		},
+		Config: deps.Config,
+	})
 	if err != nil {
 		return nil, err
 	}

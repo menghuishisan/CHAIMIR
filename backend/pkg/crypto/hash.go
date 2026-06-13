@@ -78,6 +78,19 @@ func EqualHMAC(a string, b string) bool {
 	return hmac.Equal([]byte(a), []byte(b))
 }
 
+// EqualHexHMAC 解码十六进制 HMAC 后做常量时间比较,用于服务间签名等外部输入。
+func EqualHexHMAC(a string, b string) bool {
+	left, err := hex.DecodeString(a)
+	if err != nil {
+		return false
+	}
+	right, err := hex.DecodeString(b)
+	if err != nil {
+		return false
+	}
+	return len(left) == len(right) && hmac.Equal(left, right)
+}
+
 // EqualBytes 对两段字节做常量时间比较。
 func EqualBytes(a []byte, b []byte) bool {
 	return hmac.Equal(a, b)

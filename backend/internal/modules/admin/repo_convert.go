@@ -8,6 +8,7 @@ import (
 	"chaimir/internal/modules/admin/internal/sqlcgen"
 	"chaimir/internal/platform/jsonx"
 	"chaimir/internal/platform/pgtypex"
+	"chaimir/internal/platform/timex"
 	"chaimir/pkg/apperr"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -208,7 +209,7 @@ func (t *txStore) UpsertPlatformStatistics(ctx context.Context, id int64, scope 
 func (t *txStore) CreateBackupRecord(ctx context.Context, id int64, typ int16, ref string, sizeBytes int64, status int16) (BackupRecordDTO, error) {
 	finishedAt := pgtype.Timestamptz{}
 	if status == BackupStatusSucceeded || status == BackupStatusFailed {
-		finishedAt = pgtype.Timestamptz{Time: time.Now().UTC(), Valid: true}
+		finishedAt = timex.RequiredTimestamptz(timex.Now())
 	}
 	row, err := t.q.CreateBackupRecord(ctx, sqlcgen.CreateBackupRecordParams{ID: id, Type: typ, StorageRef: ref, SizeBytes: sizeBytes, Status: status, FinishedAt: finishedAt})
 	if err != nil {

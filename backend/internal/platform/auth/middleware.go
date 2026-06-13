@@ -3,9 +3,6 @@ package auth
 
 import (
 	"context"
-	"crypto/hmac"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"log/slog"
 	"regexp"
@@ -13,9 +10,11 @@ import (
 	"strings"
 	"time"
 
+	"chaimir/internal/contracts"
 	"chaimir/internal/platform/tenant"
 	"chaimir/internal/platform/timex"
 	"chaimir/pkg/apperr"
+	pkgcrypto "chaimir/pkg/crypto"
 	"chaimir/pkg/logging"
 	"chaimir/pkg/response"
 
@@ -38,12 +37,6 @@ const (
 type serviceSourceRefKey struct{}
 
 var serviceSourceRefRe = regexp.MustCompile(`^[a-z]+:[0-9]{4}:[a-z][a-z0-9_-]*:[0-9A-Za-z_-]+$`)
-
-// RoleChecker 是平台通用角色守卫所需的最小身份只读契约。
-type RoleChecker interface {
-	// HasRole 判断账号是否具备指定角色。
-	HasRole(ctx context.Context, accountID int64, role string) (bool, error)
-}
 
 // ValidSourceRef 校验 source_ref 是否符合全局四段规范。
 func ValidSourceRef(sourceRef string) bool {
@@ -135,7 +128,7 @@ func (m *Manager) PlatformOrServiceMiddleware() gin.HandlerFunc {
 }
 
 // ServiceOrTenantAnyRoleMiddleware 允许内部服务签名或指定租户角色访问同一路由,用于同一 API 同时服务业务回调和教师操作。
-func (m *Manager) ServiceOrTenantAnyRoleMiddleware(identity RoleChecker, roles ...string) gin.HandlerFunc {
+func (m *Manager) ServiceOrTenantAnyRoleMiddleware(identity contracts.IdentityService, roles ...string) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if hasServiceAuthHeaders(c) {
 			if !m.injectServiceIdentity(c) {
@@ -178,7 +171,7 @@ func RequirePlatformIdentity() gin.HandlerFunc {
 }
 
 // RequirePlatformOrAnyRole 要求平台身份或租户账号具备任一指定角色。
-func RequirePlatformOrAnyRole(identity RoleChecker, roles ...string) gin.HandlerFunc {
+func RequirePlatformOrAnyRole(identity contracts.IdentityService, roles ...string) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if !AuthorizePlatformOrAnyRole(c, identity, roles...) {
 			return
@@ -188,7 +181,7 @@ func RequirePlatformOrAnyRole(identity RoleChecker, roles ...string) gin.Handler
 }
 
 // RequireTenantAnyRole 要求租户账号具备任一指定角色,平台身份不会被视为租户角色。
-func RequireTenantAnyRole(identity RoleChecker, roles ...string) gin.HandlerFunc {
+func RequireTenantAnyRole(identity contracts.IdentityService, roles ...string) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if !AuthorizeTenantAnyRole(c, identity, roles...) {
 			return
@@ -198,7 +191,7 @@ func RequireTenantAnyRole(identity RoleChecker, roles ...string) gin.HandlerFunc
 }
 
 // AuthorizePlatformOrAnyRole 执行平台或任一租户角色校验,并在失败时写统一响应。
-func AuthorizePlatformOrAnyRole(c *gin.Context, identity RoleChecker, roles ...string) bool {
+func AuthorizePlatformOrAnyRole(c *gin.Context, identity contracts.IdentityService, roles ...string) bool {
 	id, ok := tenant.FromContext(c.Request.Context())
 	if !ok {
 		response.Fail(c, apperr.ErrUnauthorized)
@@ -230,7 +223,7 @@ func AuthorizePlatformOrAnyRole(c *gin.Context, identity RoleChecker, roles ...s
 }
 
 // AuthorizeTenantAnyRole 执行租户角色校验,并拒绝平台身份绕过租户范围。
-func AuthorizeTenantAnyRole(c *gin.Context, identity RoleChecker, roles ...string) bool {
+func AuthorizeTenantAnyRole(c *gin.Context, identity contracts.IdentityService, roles ...string) bool {
 	id, ok := tenant.FromContext(c.Request.Context())
 	if !ok {
 		response.Fail(c, apperr.ErrUnauthorized)
@@ -371,7 +364,7 @@ func (m *Manager) injectServiceIdentity(c *gin.Context) bool {
 		return false
 	}
 	expected := m.serviceSignature(c.Request.Method, c.Request.URL.EscapedPath(), tenantIDRaw, sourceRef, timestamp, traceID)
-	if !constantTimeHexEqual(signature, expected) {
+	if !pkgcrypto.EqualHexHMAC(signature, expected) {
 		response.Fail(c, apperr.ErrServiceUnauthorized)
 		c.Abort()
 		return false
@@ -407,20 +400,9 @@ func hasServiceAuthHeaders(c *gin.Context) bool {
 
 // serviceSignature 计算固定字段顺序的内部服务签名。
 func (m *Manager) serviceSignature(method, path, tenantID, sourceRef, timestamp, traceID string) string {
-	mac := hmac.New(sha256.New, m.hmacKey)
-	mac.Write([]byte(strings.ToUpper(method) + "\n" + path + "\n" + tenantID + "\n" + sourceRef + "\n" + timestamp + "\n" + traceID))
-	return hex.EncodeToString(mac.Sum(nil))
-}
-
-// constantTimeHexEqual 比较十六进制 HMAC,避免泄露差异位置。
-func constantTimeHexEqual(actual, expected string) bool {
-	actualBytes, err := hex.DecodeString(actual)
+	signature, err := pkgcrypto.HMACSHA256Hex(m.hmacKey, strings.ToUpper(method)+"\n"+path+"\n"+tenantID+"\n"+sourceRef+"\n"+timestamp+"\n"+traceID)
 	if err != nil {
-		return false
+		return ""
 	}
-	expectedBytes, err := hex.DecodeString(expected)
-	if err != nil {
-		return false
-	}
-	return len(actualBytes) == len(expectedBytes) && hmac.Equal(actualBytes, expectedBytes)
+	return signature
 }

@@ -34,6 +34,26 @@ const (
 	CodeUnhandledFailure = "11501"
 	// CodePanicRecovered 表示 panic 恢复后的统一错误码。
 	CodePanicRecovered = "11502"
+	// CodeHTTPRouterMissing 表示 HTTP 路由装配缺少 router。
+	CodeHTTPRouterMissing = "11503"
+	// CodeHTTPServiceMissing 表示 HTTP 路由装配缺少 service。
+	CodeHTTPServiceMissing = "11504"
+	// CodeHTTPAuthMissing 表示 HTTP 路由装配缺少鉴权管理器。
+	CodeHTTPAuthMissing = "11505"
+	// CodeEventBusMissing 表示事件订阅装配缺少事件总线。
+	CodeEventBusMissing = "11506"
+	// CodeEventServiceMissing 表示事件订阅装配缺少业务服务。
+	CodeEventServiceMissing = "11507"
+	// CodeAuditWriterMissing 表示审计装配缺少统一审计写入器。
+	CodeAuditWriterMissing = "11508"
+	// CodeTransferTaskInvalid 表示统一导入导出任务参数或状态非法。
+	CodeTransferTaskInvalid = "11601"
+	// CodeTransferTaskNotFound 表示统一导入导出任务不存在。
+	CodeTransferTaskNotFound = "11602"
+	// CodeTransferTaskForbidden 表示当前账号不可访问该导入导出任务。
+	CodeTransferTaskForbidden = "11603"
+	// CodeTransferTaskNotDownloadable 表示任务尚未产生可下载产物。
+	CodeTransferTaskNotDownloadable = "11604"
 )
 
 const (
@@ -74,4 +94,24 @@ var (
 	ErrUnhandledFailure = New(CodeUnhandledFailure, "服务暂时无法处理请求,请稍后重试")
 	// ErrPanicRecovered 表示 panic 恢复后的统一错误码。
 	ErrPanicRecovered = New(CodePanicRecovered, "服务暂时无法处理请求,请稍后重试")
+	// ErrHTTPRouterMissing 表示 HTTP 路由装配缺少 router。
+	ErrHTTPRouterMissing = New(CodeHTTPRouterMissing, "服务暂时不可用,请稍后重试")
+	// ErrHTTPServiceMissing 表示 HTTP 路由装配缺少 service。
+	ErrHTTPServiceMissing = New(CodeHTTPServiceMissing, "服务暂时不可用,请稍后重试")
+	// ErrHTTPAuthMissing 表示 HTTP 路由装配缺少鉴权管理器。
+	ErrHTTPAuthMissing = New(CodeHTTPAuthMissing, "服务暂时不可用,请稍后重试")
+	// ErrEventBusMissing 表示事件订阅装配缺少事件总线。
+	ErrEventBusMissing = New(CodeEventBusMissing, "服务暂时不可用,请稍后重试")
+	// ErrEventServiceMissing 表示事件订阅装配缺少业务服务。
+	ErrEventServiceMissing = New(CodeEventServiceMissing, "服务暂时不可用,请稍后重试")
+	// ErrAuditWriterMissing 表示审计装配缺少统一审计写入器。
+	ErrAuditWriterMissing = New(CodeAuditWriterMissing, "服务暂时不可用,请稍后重试")
+	// ErrTransferTaskInvalid 表示统一导入导出任务信息不正确。
+	ErrTransferTaskInvalid = New(CodeTransferTaskInvalid, "导入导出任务信息不正确")
+	// ErrTransferTaskNotFound 表示统一导入导出任务不存在。
+	ErrTransferTaskNotFound = New(CodeTransferTaskNotFound, "导入导出任务不存在或已被清理")
+	// ErrTransferTaskForbidden 表示当前账号不可访问该导入导出任务。
+	ErrTransferTaskForbidden = New(CodeTransferTaskForbidden, "无法访问该导入导出任务")
+	// ErrTransferTaskNotDownloadable 表示任务尚未产生可下载产物。
+	ErrTransferTaskNotDownloadable = New(CodeTransferTaskNotDownloadable, "文件尚未准备完成,请稍后再试")
 )

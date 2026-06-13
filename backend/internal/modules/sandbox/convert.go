@@ -2,10 +2,11 @@
 package sandbox
 
 import (
-	"encoding/json"
 	"strings"
 
 	"chaimir/internal/contracts"
+	"chaimir/internal/platform/jsonx"
+	"chaimir/pkg/apperr"
 )
 
 // sandboxInfoFromModel 把内部沙箱快照转换为跨模块摘要。
@@ -76,9 +77,5 @@ func createInputFromContract(req contracts.SandboxCreateRequest) CreateSandboxIn
 
 // jsonBytes 在入库前把已校验结构转换为 JSON 字节,失败时显式返回错误链。
 func jsonBytes(v any) ([]byte, error) {
-	data, err := json.Marshal(v)
-	if err != nil {
-		return nil, err
-	}
-	return data, nil
+	return jsonx.AnyBytes(v, apperr.ErrInternal)
 }

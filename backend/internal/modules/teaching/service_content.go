@@ -5,6 +5,7 @@ import (
 	"context"
 	"strings"
 
+	"chaimir/internal/platform/pagex"
 	"chaimir/pkg/apperr"
 )
 
@@ -373,7 +374,7 @@ func (s *Service) ListCourseMembers(ctx context.Context, courseID int64, page, s
 	if err != nil {
 		return nil, 0, 0, 0, err
 	}
-	normalizePage(&page, &size)
+	page, size = pagex.Normalize(page, size)
 	var members []CourseMember
 	var total int64
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {

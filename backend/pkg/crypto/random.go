@@ -27,7 +27,7 @@ func RandomToken(length int) (string, error) {
 	return RandomTokenFromReader(rand.Reader, length)
 }
 
-// RandomTokenFromReader 从指定读取器生成固定长度凭证,便于测试随机源错误。
+// RandomTokenFromReader 从指定读取器生成固定长度凭证,供需要外部熵源的安全流程复用。
 func RandomTokenFromReader(reader io.Reader, length int) (string, error) {
 	if length <= 0 {
 		return "", errors.New("随机凭证长度必须大于 0")

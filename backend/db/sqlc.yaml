@@ -13,6 +13,7 @@ sql:
         emit_json_tags: true
         emit_interface: true
         emit_empty_slices: true
+        omit_unused_structs: true
   - engine: "postgresql"
     schema:
       - "migrations"
@@ -26,6 +27,7 @@ sql:
         emit_json_tags: true
         emit_interface: true
         emit_empty_slices: true
+        omit_unused_structs: true
   - engine: "postgresql"
     schema:
       - "migrations"
@@ -39,6 +41,7 @@ sql:
         emit_json_tags: true
         emit_interface: true
         emit_empty_slices: true
+        omit_unused_structs: true
   - engine: "postgresql"
     schema:
       - "migrations"
@@ -52,6 +55,7 @@ sql:
         emit_json_tags: true
         emit_interface: true
         emit_empty_slices: true
+        omit_unused_structs: true
   - engine: "postgresql"
     schema:
       - "migrations"
@@ -65,6 +69,7 @@ sql:
         emit_json_tags: true
         emit_interface: true
         emit_empty_slices: true
+        omit_unused_structs: true
   - engine: "postgresql"
     schema:
       - "migrations"
@@ -78,6 +83,7 @@ sql:
         emit_json_tags: true
         emit_interface: true
         emit_empty_slices: true
+        omit_unused_structs: true
   - engine: "postgresql"
     schema:
       - "migrations"
@@ -91,6 +97,7 @@ sql:
         emit_json_tags: true
         emit_interface: true
         emit_empty_slices: true
+        omit_unused_structs: true
   - engine: "postgresql"
     schema:
       - "migrations"
@@ -104,6 +111,7 @@ sql:
         emit_json_tags: true
         emit_interface: true
         emit_empty_slices: true
+        omit_unused_structs: true
   - engine: "postgresql"
     schema:
       - "migrations"
@@ -117,6 +125,7 @@ sql:
         emit_json_tags: true
         emit_interface: true
         emit_empty_slices: true
+        omit_unused_structs: true
   - engine: "postgresql"
     schema:
       - "migrations"
@@ -130,6 +139,7 @@ sql:
         emit_json_tags: true
         emit_interface: true
         emit_empty_slices: true
+        omit_unused_structs: true
   - engine: "postgresql"
     schema:
       - "migrations"
@@ -143,3 +153,18 @@ sql:
         emit_json_tags: true
         emit_interface: true
         emit_empty_slices: true
+        omit_unused_structs: true
+  - engine: "postgresql"
+    schema:
+      - "migrations/0012_transfer.up.sql"
+    queries:
+      - "queries/transfer.sql"
+    gen:
+      go:
+        package: "sqlcgen"
+        out: "../internal/platform/transfer/internal/sqlcgen"
+        sql_package: "pgx/v5"
+        emit_json_tags: true
+        emit_interface: true
+        emit_empty_slices: true
+        omit_unused_structs: true

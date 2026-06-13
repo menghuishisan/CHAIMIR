@@ -1,4 +1,4 @@
-// sandbox k8s_orchestrator 文件负责把 M2 编排计划转换为受限 Kubernetes 资源。
+// sandbox service_k8s_orchestrator 文件负责把 M2 编排计划转换为受限 Kubernetes 资源。
 package sandbox
 
 import (
@@ -16,6 +16,7 @@ import (
 	"chaimir/internal/contracts"
 	"chaimir/internal/platform/config"
 	platformk8s "chaimir/internal/platform/k8s"
+	"chaimir/pkg/logging"
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -333,7 +334,7 @@ func (o *K8sOrchestrator) PrepullImage(ctx context.Context, image RuntimeImage) 
 			return result, fmt.Errorf("查询预拉取 Pod 状态失败: %w", err)
 		}
 		if err := imagePullFailureFromPods(pods.Items); err != nil {
-			detail, encodeErr := jsonBytes(map[string]any{"error": err.Error(), "daemonset": ds.Name})
+			detail, encodeErr := jsonBytes(map[string]any{"error": logging.SanitizeError(err.Error()), "daemonset": ds.Name})
 			if encodeErr != nil {
 				return result, fmt.Errorf("编码预拉取失败详情失败: %w", encodeErr)
 			}

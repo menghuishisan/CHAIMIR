@@ -3,9 +3,6 @@ package teaching
 
 import (
 	"context"
-	"encoding/base64"
-	"fmt"
-	"net/http"
 
 	"chaimir/internal/contracts"
 	"chaimir/internal/platform/auth"
@@ -16,15 +13,15 @@ import (
 )
 
 // RegisterRoutes 注册教学模块 HTTP API。
-func RegisterRoutes(r gin.IRouter, svc *Service, authn *auth.Manager, roles auth.RoleChecker) error {
+func RegisterRoutes(r gin.IRouter, svc *Service, authn *auth.Manager, roles contracts.IdentityService) error {
 	if r == nil {
-		return apperr.ErrInternal.WithMessage("teaching routes 缺少 HTTP router")
+		return apperr.ErrHTTPRouterMissing
 	}
 	if svc == nil {
-		return apperr.ErrInternal.WithMessage("teaching routes 缺少 service")
+		return apperr.ErrHTTPServiceMissing
 	}
 	if authn == nil {
-		return apperr.ErrInternal.WithMessage("teaching routes 缺少 auth manager")
+		return apperr.ErrHTTPAuthMissing
 	}
 	api := teachingAPI{svc: svc}
 	g := r.Group("/api/v1/teaching")
@@ -704,24 +701,14 @@ func (a teachingAPI) overrideGrade(c *gin.Context) {
 	httpx.Write(c, out, err)
 }
 
-// exportGrades 输出课程成绩 Excel 文件。
+// exportGrades 创建课程成绩导出任务。
 func (a teachingAPI) exportGrades(c *gin.Context) {
 	id, ok := httpx.PathID(c, "id")
 	if !ok {
 		return
 	}
 	out, err := a.svc.ExportGrades(c.Request.Context(), id)
-	if err != nil {
-		httpx.Write(c, gin.H{}, err)
-		return
-	}
-	data, err := base64.StdEncoding.DecodeString(out.DataBase64)
-	if err != nil {
-		httpx.Write(c, gin.H{}, apperr.ErrTeachingGradeExportFailed.WithCause(err))
-		return
-	}
-	c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=%q", out.FileName))
-	c.Data(http.StatusOK, out.ContentType, data)
+	httpx.Write(c, out, err)
 }
 
 // internalStats 读取租户级教学统计。

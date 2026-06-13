@@ -219,6 +219,7 @@ type ExperimentConfig struct {
 type GradeConfig struct {
 	AppealWindowDays     int
 	TranscriptSigningKey string
+	TranscriptMaxBytes   int64
 }
 
 // AdminConfig 描述管理后台统计快照后台任务边界。
@@ -524,6 +525,7 @@ func Load() (*Config, error) {
 	c.Grade = GradeConfig{
 		AppealWindowDays:     reqInt("GRADE_APPEAL_WINDOW_DAYS"),
 		TranscriptSigningKey: req("GRADE_TRANSCRIPT_SIGNING_KEY"),
+		TranscriptMaxBytes:   reqInt64("GRADE_TRANSCRIPT_MAX_BYTES"),
 	}
 	c.Admin = AdminConfig{
 		StatisticsSnapshotIntervalSeconds: reqInt("ADMIN_STATISTICS_SNAPSHOT_INTERVAL_SECONDS"),
@@ -707,6 +709,9 @@ func Load() (*Config, error) {
 	}
 	if c.Experiment.PausedTimeoutSeconds <= 0 {
 		errs = append(errs, "EXPERIMENT_PAUSED_TIMEOUT_SECONDS 必须大于 0")
+	}
+	if c.Grade.TranscriptMaxBytes <= 0 {
+		errs = append(errs, "GRADE_TRANSCRIPT_MAX_BYTES 必须大于 0")
 	}
 	if c.Judge.QueuePollIntervalMs <= 0 {
 		errs = append(errs, "JUDGE_QUEUE_POLL_INTERVAL_MS 必须大于 0")

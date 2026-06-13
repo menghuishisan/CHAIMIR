@@ -39,6 +39,8 @@ const (
 	CodeTeachingJudgeOutboxInvalid = "62007"
 	// CodeTeachingDraftInvalid 表示作答草稿非法。
 	CodeTeachingDraftInvalid = "62008"
+	// CodeTeachingJudgeServiceUnavailable 表示自动判题服务未装配或暂不可用。
+	CodeTeachingJudgeServiceUnavailable = "62009"
 )
 
 const (
@@ -95,6 +97,8 @@ var (
 	ErrTeachingJudgeOutboxInvalid = New(CodeTeachingJudgeOutboxInvalid, "自动判题暂时无法派发,请稍后重试")
 	// ErrTeachingDraftInvalid 表示草稿内容不正确。
 	ErrTeachingDraftInvalid = New(CodeTeachingDraftInvalid, "草稿内容不正确")
+	// ErrTeachingJudgeServiceUnavailable 表示自动判题服务未装配或暂不可用。
+	ErrTeachingJudgeServiceUnavailable = New(CodeTeachingJudgeServiceUnavailable, "自动判题服务暂不可用")
 )
 
 var (

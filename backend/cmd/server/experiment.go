@@ -34,7 +34,7 @@ type ExperimentModuleDeps struct {
 	EventBus eventbus.Bus
 	Storage  *storage.Storage
 	Auth     *auth.Manager
-	Roles    auth.RoleChecker
+	Roles    contracts.IdentityService
 }
 
 // RegisterExperimentModule 构造实验 store/service,注册路由、事件和生命周期后台任务。

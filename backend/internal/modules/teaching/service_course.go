@@ -3,15 +3,18 @@ package teaching
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/base32"
 	"strings"
 	"time"
 
 	"chaimir/internal/contracts"
 	"chaimir/internal/platform/audit"
+	"chaimir/internal/platform/pagex"
+	"chaimir/internal/platform/timex"
 	"chaimir/pkg/apperr"
+	pkgcrypto "chaimir/pkg/crypto"
 )
+
+const inviteCodeLength = 10
 
 // ListCourses 查询教师或学生课程列表。
 func (s *Service) ListCourses(ctx context.Context, filter CourseListFilter) ([]CourseDTO, int64, int, int, error) {
@@ -19,7 +22,7 @@ func (s *Service) ListCourses(ctx context.Context, filter CourseListFilter) ([]C
 	if err != nil {
 		return nil, 0, 0, 0, err
 	}
-	normalizePage(&filter.Page, &filter.Size)
+	filter.Page, filter.Size = pagex.Normalize(filter.Page, filter.Size)
 	role := strings.TrimSpace(filter.Role)
 	if role == "" {
 		role = "student"
@@ -56,7 +59,11 @@ func (s *Service) CreateCourse(ctx context.Context, req CourseRequest) (CourseDT
 	if err != nil {
 		return CourseDTO{}, err
 	}
-	course := Course{ID: s.ids.Generate(), TenantID: id.TenantID, TeacherID: id.AccountID, Name: req.Name, Description: req.Description, Type: req.Type, Difficulty: req.Difficulty, CoverURL: req.CoverURL, Semester: req.Semester, Credits: req.Credits, Schedule: req.Schedule, StartAt: startAt, EndAt: endAt, InviteCode: newInviteCode(), Status: CourseStatusDraft, Visibility: CourseVisibilityPrivate}
+	inviteCode, err := newInviteCode()
+	if err != nil {
+		return CourseDTO{}, err
+	}
+	course := Course{ID: s.ids.Generate(), TenantID: id.TenantID, TeacherID: id.AccountID, Name: req.Name, Description: req.Description, Type: req.Type, Difficulty: req.Difficulty, CoverURL: req.CoverURL, Semester: req.Semester, Credits: req.Credits, Schedule: req.Schedule, StartAt: startAt, EndAt: endAt, InviteCode: inviteCode, Status: CourseStatusDraft, Visibility: CourseVisibilityPrivate}
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
 		course, err = tx.CreateCourse(ctx, course)
 		return err
@@ -188,7 +195,11 @@ func (s *Service) RefreshInviteCode(ctx context.Context, courseID int64) (Course
 		if err := ensureTeacherOwned(current, id.AccountID); err != nil {
 			return err
 		}
-		course, err = tx.RefreshCourseInviteCode(ctx, id.TenantID, courseID, newInviteCode())
+		inviteCode, err := newInviteCode()
+		if err != nil {
+			return err
+		}
+		course, err = tx.RefreshCourseInviteCode(ctx, id.TenantID, courseID, inviteCode)
 		return err
 	}); err != nil {
 		return CourseDTO{}, mapCourseError(err)
@@ -199,7 +210,7 @@ func (s *Service) RefreshInviteCode(ctx context.Context, courseID int64) (Course
 // AdvanceCourseStatusesOnce 按课程起止时间推进 published/running/ended 状态。
 func (s *Service) AdvanceCourseStatusesOnce(ctx context.Context, now time.Time) error {
 	if now.IsZero() {
-		now = time.Now().UTC()
+		now = timex.Now()
 	}
 	return s.store.PrivilegedTx(ctx, func(ctx context.Context, tx TxStore) error {
 		dueToEnd, err := tx.ListCoursesDueToEnd(ctx, now)
@@ -276,6 +287,10 @@ func (s *Service) cloneCourseGraph(ctx context.Context, tx TxStore, source Cours
 	if name == "" {
 		name = source.Name + " 副本"
 	}
+	inviteCode, err := newInviteCode()
+	if err != nil {
+		return Course{}, err
+	}
 	cloned := Course{
 		ID:          s.ids.Generate(),
 		TenantID:    targetTenantID,
@@ -290,7 +305,7 @@ func (s *Service) cloneCourseGraph(ctx context.Context, tx TxStore, source Cours
 		Schedule:    cloneMap(source.Schedule),
 		StartAt:     source.StartAt,
 		EndAt:       source.EndAt,
-		InviteCode:  newInviteCode(),
+		InviteCode:  inviteCode,
 		Status:      CourseStatusDraft,
 		Visibility:  CourseVisibilityPrivate,
 	}
@@ -370,11 +385,11 @@ func (s *Service) cloneAssignments(ctx context.Context, tx TxStore, source Cours
 	return nil
 }
 
-// newInviteCode 生成短邀请码。
-func newInviteCode() string {
-	var buf [8]byte
-	if _, err := rand.Read(buf[:]); err != nil {
-		return strings.ToUpper(base32.StdEncoding.WithPadding(base32.NoPadding).EncodeToString([]byte(time.Now().UTC().Format("150405.000000"))))[:10]
+// newInviteCode 生成短邀请码,随机源失败必须显式返回错误而不是退化为可预测码。
+func newInviteCode() (string, error) {
+	code, err := pkgcrypto.RandomToken(inviteCodeLength)
+	if err != nil {
+		return "", apperr.ErrTeachingCourseInvalid.WithCause(err)
 	}
-	return strings.ToUpper(base32.StdEncoding.WithPadding(base32.NoPadding).EncodeToString(buf[:]))[:10]
+	return code, nil
 }

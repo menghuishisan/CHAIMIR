@@ -3,6 +3,7 @@ package transfer
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -53,7 +54,7 @@ type Artifact struct {
 
 // Task 表示统一导入导出中心在服务端持久化和流转的任务快照。
 type Task struct {
-	TaskID           string
+	TaskID           int64
 	TenantID         int64
 	AccountID        int64
 	Channel          Channel
@@ -79,7 +80,7 @@ type Manager struct {
 
 // NewTaskRequest 描述创建统一导入导出任务所需的通用字段。
 type NewTaskRequest struct {
-	TaskID      string
+	TaskID      int64
 	TenantID    int64
 	AccountID   int64
 	Channel     Channel
@@ -99,10 +100,10 @@ func (m Manager) NewTask(req NewTaskRequest) (Task, error) {
 	if err := m.validateConfig(); err != nil {
 		return Task{}, err
 	}
-	if strings.TrimSpace(req.TaskID) == "" {
+	if req.TaskID <= 0 {
 		return Task{}, fmt.Errorf("导入导出任务缺少 task_id")
 	}
-	if req.TenantID <= 0 || req.AccountID <= 0 {
+	if req.TenantID < 0 || req.AccountID <= 0 {
 		return Task{}, fmt.Errorf("导入导出任务缺少租户或账号边界")
 	}
 	if err := validateChannel(req.Channel); err != nil {
@@ -113,7 +114,7 @@ func (m Manager) NewTask(req NewTaskRequest) (Task, error) {
 	}
 	now := timex.Now()
 	return Task{
-		TaskID:       strings.TrimSpace(req.TaskID),
+		TaskID:       req.TaskID,
 		TenantID:     req.TenantID,
 		AccountID:    req.AccountID,
 		Channel:      req.Channel,
@@ -209,7 +210,7 @@ func (m Manager) BuildDownloadGrant(task Task, now time.Time) (string, storage.D
 		ObjectRef:    task.Artifact.ObjectRef,
 		Module:       "transfer",
 		ResourceType: string(task.Channel),
-		ResourceID:   task.TaskID,
+		ResourceID:   strconv.FormatInt(task.TaskID, 10),
 		ExpiresAt:    now.Add(m.Config.DownloadGrantTTL),
 	})
 }

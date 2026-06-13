@@ -9,6 +9,7 @@ import (
 
 	"chaimir/internal/contracts"
 	"chaimir/internal/platform/audit"
+	"chaimir/internal/platform/timex"
 	"chaimir/pkg/apperr"
 )
 
@@ -62,7 +63,7 @@ func (s *Service) SubmitSolve(ctx context.Context, contestID, problemID int64, r
 	var problem ContestProblem
 	var team Team
 	submissionID := s.ids.Generate()
-	sourceRef := submissionSourceRef(submissionID, now())
+	sourceRef := submissionSourceRef(submissionID, timex.Now())
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
 		var err error
 		contest, err = tx.GetContest(ctx, id.TenantID, contestID)

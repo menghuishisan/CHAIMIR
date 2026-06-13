@@ -20,10 +20,21 @@ import (
 	"chaimir/pkg/snowflake"
 )
 
+const (
+	gradeModuleName             = "grade"
+	gradeTranscriptResourceType = "transcript"
+	transcriptPDFContentType    = "application/pdf"
+)
+
 type objectStorage interface {
 	Put(ctx context.Context, bucket, key string, r io.Reader, size int64, contentType string) error
 	Get(ctx context.Context, bucket, key string) (io.ReadCloser, error)
 	BucketReport() string
+}
+
+type fileService interface {
+	PlanUpload(req storage.PlanUploadRequest) (storage.UploadPlan, error)
+	IssueDownloadGrant(req storage.IssueDownloadGrantRequest) (string, storage.DownloadGrant, error)
 }
 
 // Service 承载 M11 成绩中心业务编排。
@@ -36,26 +47,28 @@ type Service struct {
 	notify   contracts.NotifyService
 	bus      eventbus.Bus
 	storage  objectStorage
+	files    fileService
 	cfg      config.GradeConfig
 }
 
 // ServiceDeps 是 M11 服务装配依赖。
 type ServiceDeps struct {
-	Store    Store
-	IDs      snowflake.Generator
-	Audit    audit.Writer
-	Roles    roleReader
-	Teaching contracts.TeachingReadService
-	Notify   contracts.NotifyService
-	Bus      eventbus.Bus
-	Storage  *storage.Storage
-	Objects  objectStorage
-	Config   config.GradeConfig
+	Store       Store
+	IDs         snowflake.Generator
+	Audit       audit.Writer
+	Roles       roleReader
+	Teaching    contracts.TeachingReadService
+	Notify      contracts.NotifyService
+	Bus         eventbus.Bus
+	Storage     *storage.Storage
+	Objects     objectStorage
+	FileService fileService
+	Config      config.GradeConfig
 }
 
 // NewService 构造 M11 服务。
 func NewService(deps ServiceDeps) (*Service, error) {
-	if deps.Store == nil || deps.IDs == nil || deps.Audit == nil || deps.Roles == nil || deps.Teaching == nil || deps.Bus == nil {
+	if deps.Store == nil || deps.IDs == nil || deps.Audit == nil || deps.Roles == nil || deps.Teaching == nil || deps.Notify == nil || deps.Bus == nil {
 		return nil, fmt.Errorf("grade service 依赖不完整")
 	}
 	objects := deps.Objects
@@ -65,10 +78,13 @@ func NewService(deps ServiceDeps) (*Service, error) {
 	if objects == nil {
 		return nil, fmt.Errorf("grade service 对象存储依赖不完整")
 	}
-	if deps.Config.AppealWindowDays <= 0 || strings.TrimSpace(deps.Config.TranscriptSigningKey) == "" {
+	if deps.FileService == nil {
+		return nil, fmt.Errorf("grade service 统一文件服务依赖不完整")
+	}
+	if deps.Config.AppealWindowDays <= 0 || strings.TrimSpace(deps.Config.TranscriptSigningKey) == "" || deps.Config.TranscriptMaxBytes <= 0 {
 		return nil, fmt.Errorf("grade service 配置不完整")
 	}
-	return &Service{store: deps.Store, ids: deps.IDs, audit: deps.Audit, roles: deps.Roles, teaching: deps.Teaching, notify: deps.Notify, bus: deps.Bus, storage: objects, cfg: deps.Config}, nil
+	return &Service{store: deps.Store, ids: deps.IDs, audit: deps.Audit, roles: deps.Roles, teaching: deps.Teaching, notify: deps.Notify, bus: deps.Bus, storage: objects, files: deps.FileService, cfg: deps.Config}, nil
 }
 
 // CreateLevelConfig 创建等级映射配置。
@@ -543,19 +559,32 @@ func (s *Service) GenerateTranscript(ctx context.Context, req TranscriptRequest)
 	if err != nil {
 		return TranscriptDTO{}, apperr.ErrGradeTranscriptFailed.WithCause(err)
 	}
-	key, err := storage.ObjectKey(id.TenantID, "grade", "transcript", fmt.Sprintf("%d.pdf", s.ids.Generate()))
+	fileName := fmt.Sprintf("%d.pdf", s.ids.Generate())
+	plan, err := s.files.PlanUpload(storage.PlanUploadRequest{
+		TenantID:        id.TenantID,
+		AccountID:       id.AccountID,
+		Module:          gradeModuleName,
+		ResourceType:    gradeTranscriptResourceType,
+		ResourceID:      fmt.Sprintf("%d", summary.StudentID),
+		FileName:        fileName,
+		ContentType:     transcriptPDFContentType,
+		Size:            int64(len(pdf)),
+		MaxBytes:        s.cfg.TranscriptMaxBytes,
+		ExpectedBucket:  s.storage.BucketReport(),
+		AllowedFileName: true,
+		Content:         pdf,
+	})
 	if err != nil {
 		return TranscriptDTO{}, apperr.ErrGradeTranscriptFailed.WithCause(err)
 	}
-	if err := s.storage.Put(ctx, s.storage.BucketReport(), key, bytes.NewReader(pdf), int64(len(pdf)), "application/pdf"); err != nil {
+	if err := s.storage.Put(ctx, plan.Bucket, plan.Key, bytes.NewReader(pdf), int64(len(pdf)), transcriptPDFContentType); err != nil {
 		return TranscriptDTO{}, apperr.ErrGradeTranscriptFailed.WithCause(err)
 	}
 	req.StudentID = summary.StudentID
-	ref := "minio://" + s.storage.BucketReport() + "/" + key
 	var out TranscriptDTO
 	err = s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
 		var err error
-		out, err = tx.CreateTranscriptRecord(ctx, s.ids.Generate(), id.TenantID, req, ref)
+		out, err = tx.CreateTranscriptRecord(ctx, s.ids.Generate(), id.TenantID, req, plan.ObjectRef)
 		return err
 	})
 	return out, mapGradeTranscriptErr(err)
@@ -591,11 +620,11 @@ func (s *Service) GenerateTranscriptBatch(ctx context.Context, req TranscriptBat
 	return out, nil
 }
 
-// DownloadTranscript 打开成绩单对象流。
-func (s *Service) DownloadTranscript(ctx context.Context, transcriptID int64) (TranscriptDTO, io.ReadCloser, error) {
+// DownloadTranscript 为成绩单对象签发短时下载授权。
+func (s *Service) DownloadTranscript(ctx context.Context, transcriptID int64) (TranscriptDownloadGrantDTO, error) {
 	id, err := requireTenantUser(ctx)
 	if err != nil {
-		return TranscriptDTO{}, nil, err
+		return TranscriptDownloadGrantDTO{}, err
 	}
 	var record TranscriptDTO
 	err = s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
@@ -604,26 +633,30 @@ func (s *Service) DownloadTranscript(ctx context.Context, transcriptID int64) (T
 		return err
 	})
 	if err != nil {
-		return TranscriptDTO{}, nil, apperr.ErrGradeTranscriptFailed.WithCause(err)
+		return TranscriptDownloadGrantDTO{}, apperr.ErrGradeTranscriptFailed.WithCause(err)
 	}
 	if record.StudentID != id.AccountID {
 		allowed, err := s.isSchoolAdmin(ctx, id.AccountID)
 		if err != nil {
-			return TranscriptDTO{}, nil, err
+			return TranscriptDownloadGrantDTO{}, err
 		}
 		if !allowed {
-			return TranscriptDTO{}, nil, apperr.ErrGradeForbidden
+			return TranscriptDownloadGrantDTO{}, apperr.ErrGradeForbidden
 		}
 	}
-	obj, err := storage.ParseObjectRef(record.PDFRef)
+	token, grant, err := s.files.IssueDownloadGrant(storage.IssueDownloadGrantRequest{
+		TenantID:     id.TenantID,
+		AccountID:    id.AccountID,
+		ObjectRef:    record.PDFRef,
+		Module:       gradeModuleName,
+		ResourceType: gradeTranscriptResourceType,
+		ResourceID:   fmt.Sprintf("%d", record.StudentID),
+		ExpiresAt:    time.Time{},
+	})
 	if err != nil {
-		return TranscriptDTO{}, nil, apperr.ErrGradeTranscriptFailed.WithCause(err)
+		return TranscriptDownloadGrantDTO{}, apperr.ErrGradeTranscriptFailed.WithCause(err)
 	}
-	reader, err := s.storage.Get(ctx, obj.Bucket, obj.Key)
-	if err != nil {
-		return TranscriptDTO{}, nil, apperr.ErrGradeTranscriptFailed.WithCause(err)
-	}
-	return record, reader, nil
+	return TranscriptDownloadGrantDTO{Token: token, Grant: grant, Transcript: record, ExpiresAt: grant.ExpiresAt.Format(time.RFC3339)}, nil
 }
 
 // HandleGradeUpdated 处理 M6 单课程成绩更新事件。
@@ -786,7 +819,7 @@ func (s *Service) createWarnings(ctx context.Context, tx TxStore, tenantID, stud
 		}
 		created++
 	}
-	if s.notify != nil && (failCount > 0 || (rules.MinGPA > 0 && gpa < rules.MinGPA)) {
+	if failCount > 0 || (rules.MinGPA > 0 && gpa < rules.MinGPA) {
 		if err := s.notify.Send(ctx, contracts.NotifySendRequest{TenantID: tenantID, Type: "grade.warning", Receivers: []int64{studentID}, Params: map[string]string{"gpa": fmt.Sprintf("%.3f", gpa)}}); err != nil {
 			return 0, err
 		}

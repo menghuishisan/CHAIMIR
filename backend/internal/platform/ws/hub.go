@@ -129,8 +129,7 @@ func (c *Conn) BindSession(session SessionKey) error {
 	if session.TenantID <= 0 || session.AccountID <= 0 {
 		return fmt.Errorf("WebSocket 会话主体非法")
 	}
-	c.hub.bindSession(c, session)
-	return nil
+	return c.hub.bindSession(c, session)
 }
 
 // Serve 建立固定订阅型连接,由业务回调完成鉴权和初始订阅。
@@ -157,11 +156,11 @@ func (h *Hub) Serve(w http.ResponseWriter, r *http.Request, subscribe func(c *Co
 	// 第二步:写循环负责服务端推送;读循环只用于感知客户端断开并触发清理。
 	go conn.writeLoop()
 	go conn.pingLoop()
-	conn.readLoop()
+	readErr := conn.readLoop()
 	close(conn.done)
 	h.Unsubscribe(conn)
 	close(conn.send)
-	return socket.Close()
+	return errors.Join(readErr, socket.Close())
 }
 
 // ServeInteractive 建立由业务层主动处理读循环的交互式连接。
@@ -257,23 +256,31 @@ func (c *Conn) writeLoop() {
 }
 
 // readLoop 持续读取直到客户端断开;当前固定订阅场景不解析消息体。
-func (c *Conn) readLoop() {
+func (c *Conn) readLoop() error {
 	// 统一设置读超时与 pong 续期,确保死连接能被及时回收而不是无限悬挂。
 	c.socket.SetReadLimit(1 << 20)
-	_ = c.socket.SetReadDeadline(time.Now().Add(c.hub.options.ReadTimeout))
+	if err := c.socket.SetReadDeadline(time.Now().Add(c.hub.options.ReadTimeout)); err != nil {
+		return err
+	}
 	c.socket.SetPongHandler(func(appData string) error {
-		_ = c.socket.SetReadDeadline(time.Now().Add(c.hub.options.ReadTimeout))
-		return nil
+		return c.socket.SetReadDeadline(time.Now().Add(c.hub.options.ReadTimeout))
 	})
 	c.socket.SetPingHandler(func(appData string) error {
-		_ = c.socket.SetReadDeadline(time.Now().Add(c.hub.options.ReadTimeout))
+		if err := c.socket.SetReadDeadline(time.Now().Add(c.hub.options.ReadTimeout)); err != nil {
+			return err
+		}
 		return c.writeControl(websocket.PongMessage, []byte(appData))
 	})
 	for {
 		if _, _, err := c.socket.ReadMessage(); err != nil {
-			return
+			if websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway) {
+				return nil
+			}
+			return err
 		}
-		_ = c.socket.SetReadDeadline(time.Now().Add(c.hub.options.ReadTimeout))
+		if err := c.socket.SetReadDeadline(time.Now().Add(c.hub.options.ReadTimeout)); err != nil {
+			return err
+		}
 	}
 }
 
@@ -299,7 +306,7 @@ func (h *Hub) upgrader() websocket.Upgrader {
 }
 
 // bindSession 建立主体到连接的唯一索引,并在同主体重连时主动淘汰旧连接。
-func (h *Hub) bindSession(conn *Conn, session SessionKey) {
+func (h *Hub) bindSession(conn *Conn, session SessionKey) error {
 	h.mu.Lock()
 	previous := h.sessions[session]
 	h.sessions[session] = conn
@@ -307,8 +314,11 @@ func (h *Hub) bindSession(conn *Conn, session SessionKey) {
 	h.mu.Unlock()
 
 	if previous != nil && previous != conn {
-		_ = previous.closeWithControl(websocket.ClosePolicyViolation, "session_replaced")
+		if err := previous.closeWithControl(websocket.ClosePolicyViolation, "session_replaced"); err != nil {
+			return err
+		}
 	}
+	return nil
 }
 
 // writeControl 在统一写超时保护下发送控制帧。

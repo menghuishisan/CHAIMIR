@@ -15,10 +15,10 @@ const contestEventQueue = "contest-workers"
 // SubscribeEvents 注册竞赛模块需要消费的跨模块事件。
 func SubscribeEvents(bus eventbus.Bus, svc *Service) ([]eventbus.Subscription, error) {
 	if bus == nil {
-		return nil, apperr.ErrContestEventSubscribeFailed.WithMessage("contest events 缺少事件总线")
+		return nil, apperr.ErrEventBusMissing
 	}
 	if svc == nil {
-		return nil, apperr.ErrContestEventSubscribeFailed.WithMessage("contest events 缺少 service")
+		return nil, apperr.ErrEventServiceMissing
 	}
 	subs := make([]eventbus.Subscription, 0, 2)
 	sub, err := bus.Subscribe(contracts.SubjectJudgeCompleted, contestEventQueue, handleJudgeCompletedEvent(svc))

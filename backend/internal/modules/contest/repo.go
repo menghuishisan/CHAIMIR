@@ -8,6 +8,8 @@ import (
 
 	"chaimir/internal/modules/contest/internal/sqlcgen"
 	"chaimir/internal/platform/db"
+	"chaimir/internal/platform/pgtypex"
+	"chaimir/internal/platform/timex"
 	"chaimir/pkg/apperr"
 
 	"github.com/jackc/pgx/v5"
@@ -119,7 +121,7 @@ func (tx *txStore) CreateContest(ctx context.Context, item Contest) (Contest, er
 	if err != nil {
 		return Contest{}, err
 	}
-	row, err := tx.q.CreateContest(ctx, sqlcgen.CreateContestParams{ID: item.ID, TenantID: item.TenantID, OrganizerID: item.OrganizerID, Name: item.Name, Mode: item.Mode, MatchMode: pgInt2(item.MatchMode), TeamMode: item.TeamMode, SignupStart: pgTime(item.SignupStart), SignupEnd: pgTime(item.SignupEnd), StartAt: pgTime(item.StartAt), EndAt: pgTime(item.EndAt), FreezeMinutes: item.FreezeMinutes, Rules: rules})
+	row, err := tx.q.CreateContest(ctx, sqlcgen.CreateContestParams{ID: item.ID, TenantID: item.TenantID, OrganizerID: item.OrganizerID, Name: item.Name, Mode: item.Mode, MatchMode: pgtypex.Int2(item.MatchMode), TeamMode: item.TeamMode, SignupStart: timex.Timestamptz(item.SignupStart), SignupEnd: timex.Timestamptz(item.SignupEnd), StartAt: timex.Timestamptz(item.StartAt), EndAt: timex.Timestamptz(item.EndAt), FreezeMinutes: item.FreezeMinutes, Rules: rules})
 	if err != nil {
 		return Contest{}, apperr.ErrContestInvalid.WithCause(err)
 	}
@@ -162,7 +164,7 @@ func (tx *txStore) UpdateContest(ctx context.Context, item Contest) (Contest, er
 	if err != nil {
 		return Contest{}, err
 	}
-	row, err := tx.q.UpdateContest(ctx, sqlcgen.UpdateContestParams{TenantID: item.TenantID, ID: item.ID, Name: item.Name, Mode: item.Mode, MatchMode: pgInt2(item.MatchMode), TeamMode: item.TeamMode, SignupStart: pgTime(item.SignupStart), SignupEnd: pgTime(item.SignupEnd), StartAt: pgTime(item.StartAt), EndAt: pgTime(item.EndAt), FreezeMinutes: item.FreezeMinutes, Rules: rules})
+	row, err := tx.q.UpdateContest(ctx, sqlcgen.UpdateContestParams{TenantID: item.TenantID, ID: item.ID, Name: item.Name, Mode: item.Mode, MatchMode: pgtypex.Int2(item.MatchMode), TeamMode: item.TeamMode, SignupStart: timex.Timestamptz(item.SignupStart), SignupEnd: timex.Timestamptz(item.SignupEnd), StartAt: timex.Timestamptz(item.StartAt), EndAt: timex.Timestamptz(item.EndAt), FreezeMinutes: item.FreezeMinutes, Rules: rules})
 	if err != nil {
 		return Contest{}, apperr.ErrContestStateInvalid.WithCause(err)
 	}
@@ -184,7 +186,7 @@ func (tx *txStore) UpsertContestProblem(ctx context.Context, item ContestProblem
 	if err != nil {
 		return ContestProblem{}, err
 	}
-	row, err := tx.q.UpsertContestProblem(ctx, sqlcgen.UpsertContestProblemParams{ID: item.ID, TenantID: item.TenantID, ContestID: item.ContestID, ItemCode: item.ItemCode, ItemVersion: item.ItemVersion, Score: item.Score, DynamicScore: dynamic, BattleRule: pgInt2(item.BattleRule), Seq: item.Seq})
+	row, err := tx.q.UpsertContestProblem(ctx, sqlcgen.UpsertContestProblemParams{ID: item.ID, TenantID: item.TenantID, ContestID: item.ContestID, ItemCode: item.ItemCode, ItemVersion: item.ItemVersion, Score: item.Score, DynamicScore: dynamic, BattleRule: pgtypex.Int2(item.BattleRule), Seq: item.Seq})
 	if err != nil {
 		return ContestProblem{}, apperr.ErrContestProblemInvalid.WithCause(err)
 	}
@@ -219,7 +221,7 @@ func (tx *txStore) ListContestProblems(ctx context.Context, tenantID, contestID 
 
 // CreateTeam 创建参赛队伍。
 func (tx *txStore) CreateTeam(ctx context.Context, item Team) (Team, error) {
-	row, err := tx.q.CreateTeam(ctx, sqlcgen.CreateTeamParams{ID: item.ID, TenantID: item.TenantID, ContestID: item.ContestID, Name: item.Name, InviteCode: pgText(item.InviteCode)})
+	row, err := tx.q.CreateTeam(ctx, sqlcgen.CreateTeamParams{ID: item.ID, TenantID: item.TenantID, ContestID: item.ContestID, Name: item.Name, InviteCode: pgtypex.Text(item.InviteCode)})
 	if err != nil {
 		return Team{}, apperr.ErrContestTeamInvalid.WithCause(err)
 	}
@@ -241,7 +243,7 @@ func (tx *txStore) GetTeam(ctx context.Context, tenantID, id int64) (Team, error
 
 // GetTeamByInviteCode 按邀请码读取队伍。
 func (tx *txStore) GetTeamByInviteCode(ctx context.Context, tenantID int64, inviteCode string) (Team, error) {
-	row, err := tx.q.GetTeamByInviteCode(ctx, sqlcgen.GetTeamByInviteCodeParams{TenantID: tenantID, InviteCode: pgText(inviteCode)})
+	row, err := tx.q.GetTeamByInviteCode(ctx, sqlcgen.GetTeamByInviteCodeParams{TenantID: tenantID, InviteCode: pgtypex.Text(inviteCode)})
 	if err != nil {
 		return Team{}, apperr.ErrContestTeamNotFound.WithCause(err)
 	}
@@ -307,7 +309,7 @@ func (tx *txStore) CreateSolveSubmission(ctx context.Context, item SolveSubmissi
 	if err != nil {
 		return SolveSubmission{}, err
 	}
-	row, err := tx.q.CreateSolveSubmission(ctx, sqlcgen.CreateSolveSubmissionParams{ID: item.ID, TenantID: item.TenantID, ContestID: item.ContestID, ProblemID: item.ProblemID, TeamID: item.TeamID, SubmitterID: item.SubmitterID, ContentRef: content, SourceRef: item.SourceRef, JudgeTaskRef: pgText(item.JudgeTaskRef), SandboxRef: pgText(item.SandboxRef)})
+	row, err := tx.q.CreateSolveSubmission(ctx, sqlcgen.CreateSolveSubmissionParams{ID: item.ID, TenantID: item.TenantID, ContestID: item.ContestID, ProblemID: item.ProblemID, TeamID: item.TeamID, SubmitterID: item.SubmitterID, ContentRef: content, SourceRef: item.SourceRef, JudgeTaskRef: pgtypex.Text(item.JudgeTaskRef), SandboxRef: pgtypex.Text(item.SandboxRef)})
 	if err != nil {
 		return SolveSubmission{}, apperr.ErrContestSubmissionInvalid.WithCause(err)
 	}
@@ -325,7 +327,7 @@ func (tx *txStore) GetSolveSubmission(ctx context.Context, tenantID, id int64) (
 
 // GetSolveSubmissionByJudgeTask 按判题任务读取解题提交。
 func (tx *txStore) GetSolveSubmissionByJudgeTask(ctx context.Context, tenantID int64, judgeTaskRef string) (SolveSubmission, error) {
-	row, err := tx.q.GetSolveSubmissionByJudgeTask(ctx, sqlcgen.GetSolveSubmissionByJudgeTaskParams{TenantID: tenantID, JudgeTaskRef: pgText(judgeTaskRef)})
+	row, err := tx.q.GetSolveSubmissionByJudgeTask(ctx, sqlcgen.GetSolveSubmissionByJudgeTaskParams{TenantID: tenantID, JudgeTaskRef: pgtypex.Text(judgeTaskRef)})
 	if err != nil {
 		return SolveSubmission{}, err
 	}
@@ -374,12 +376,12 @@ func (tx *txStore) SumTeamSolvedScore(ctx context.Context, tenantID, contestID, 
 	if err != nil {
 		return LadderRank{}, apperr.ErrContestSubmissionInvalid.WithCause(err)
 	}
-	return LadderRank{TenantID: tenantID, ContestID: contestID, TeamID: teamID, Score: row.Score, SolvedCount: row.SolvedCount, LastSolveAt: timeFromPG(row.LastSolveAt)}, nil
+	return LadderRank{TenantID: tenantID, ContestID: contestID, TeamID: teamID, Score: row.Score, SolvedCount: row.SolvedCount, LastSolveAt: timex.FromTimestamptz(row.LastSolveAt)}, nil
 }
 
 // UpsertLadder 新增或更新排行榜投影。
 func (tx *txStore) UpsertLadder(ctx context.Context, item LadderRank) (LadderRank, error) {
-	row, err := tx.q.CreateOrUpdateLadderRank(ctx, sqlcgen.CreateOrUpdateLadderRankParams{ID: item.ID, TenantID: item.TenantID, ContestID: item.ContestID, TeamID: item.TeamID, Column5: fmt.Sprintf("%.4f", item.Score), SolvedCount: item.SolvedCount, LastSolveAt: pgTime(item.LastSolveAt)})
+	row, err := tx.q.CreateOrUpdateLadderRank(ctx, sqlcgen.CreateOrUpdateLadderRankParams{ID: item.ID, TenantID: item.TenantID, ContestID: item.ContestID, TeamID: item.TeamID, Column5: fmt.Sprintf("%.4f", item.Score), SolvedCount: item.SolvedCount, LastSolveAt: timex.Timestamptz(item.LastSolveAt)})
 	if err != nil {
 		return LadderRank{}, apperr.ErrContestSubmissionInvalid.WithCause(err)
 	}
@@ -509,7 +511,7 @@ func (tx *txStore) ClaimPendingBattleMatches(ctx context.Context, limit int) ([]
 
 // StartBattleMatch 保存对局沙箱和判题任务引用。
 func (tx *txStore) StartBattleMatch(ctx context.Context, tenantID, id int64, sandboxRef, judgeTaskRef string) (BattleMatch, error) {
-	row, err := tx.q.StartBattleMatch(ctx, sqlcgen.StartBattleMatchParams{TenantID: tenantID, ID: id, SandboxRef: pgText(sandboxRef), JudgeTaskRef: pgText(judgeTaskRef)})
+	row, err := tx.q.StartBattleMatch(ctx, sqlcgen.StartBattleMatchParams{TenantID: tenantID, ID: id, SandboxRef: pgtypex.Text(sandboxRef), JudgeTaskRef: pgtypex.Text(judgeTaskRef)})
 	if err != nil {
 		return BattleMatch{}, apperr.ErrContestBattleMatchFailed.WithCause(err)
 	}
@@ -527,7 +529,7 @@ func (tx *txStore) GetBattleMatch(ctx context.Context, tenantID, id int64) (Batt
 
 // GetBattleMatchByJudgeTask 按判题任务读取对局。
 func (tx *txStore) GetBattleMatchByJudgeTask(ctx context.Context, tenantID int64, judgeTaskRef string) (BattleMatch, error) {
-	row, err := tx.q.GetBattleMatchByJudgeTask(ctx, sqlcgen.GetBattleMatchByJudgeTaskParams{TenantID: tenantID, JudgeTaskRef: pgText(judgeTaskRef)})
+	row, err := tx.q.GetBattleMatchByJudgeTask(ctx, sqlcgen.GetBattleMatchByJudgeTaskParams{TenantID: tenantID, JudgeTaskRef: pgtypex.Text(judgeTaskRef)})
 	if err != nil {
 		return BattleMatch{}, err
 	}
@@ -557,7 +559,7 @@ func (tx *txStore) FinishBattleMatch(ctx context.Context, item BattleMatch) (Bat
 	if err != nil {
 		return BattleMatch{}, err
 	}
-	row, err := tx.q.FinishBattleMatch(ctx, sqlcgen.FinishBattleMatchParams{TenantID: item.TenantID, ID: item.ID, SandboxRef: pgText(item.SandboxRef), JudgeTaskRef: pgText(item.JudgeTaskRef), Result: pgInt2(item.Result), ScoreDelta: delta, ReplayRef: pgText(item.ReplayRef)})
+	row, err := tx.q.FinishBattleMatch(ctx, sqlcgen.FinishBattleMatchParams{TenantID: item.TenantID, ID: item.ID, SandboxRef: pgtypex.Text(item.SandboxRef), JudgeTaskRef: pgtypex.Text(item.JudgeTaskRef), Result: pgtypex.Int2(item.Result), ScoreDelta: delta, ReplayRef: pgtypex.Text(item.ReplayRef)})
 	if err != nil {
 		return BattleMatch{}, apperr.ErrContestBattleMatchFailed.WithCause(err)
 	}
@@ -601,7 +603,7 @@ func (tx *txStore) CreateCheatRecord(ctx context.Context, item CheatRecord) (Che
 	if err != nil {
 		return CheatRecord{}, err
 	}
-	row, err := tx.q.CreateCheatRecord(ctx, sqlcgen.CreateCheatRecordParams{ID: item.ID, TenantID: item.TenantID, ContestID: item.ContestID, TeamID: item.TeamID, Type: item.Type, Evidence: evidence, Action: item.Action, OperatorID: pgInt8(item.OperatorID)})
+	row, err := tx.q.CreateCheatRecord(ctx, sqlcgen.CreateCheatRecordParams{ID: item.ID, TenantID: item.TenantID, ContestID: item.ContestID, TeamID: item.TeamID, Type: item.Type, Evidence: evidence, Action: item.Action, OperatorID: pgtypex.Int8(item.OperatorID)})
 	if err != nil {
 		return CheatRecord{}, apperr.ErrContestCheatInvalid.WithCause(err)
 	}
@@ -631,7 +633,7 @@ func (tx *txStore) UpsertVulnSource(ctx context.Context, item VulnSource) (VulnS
 	if err != nil {
 		return VulnSource{}, err
 	}
-	row, err := tx.q.UpsertVulnSource(ctx, sqlcgen.UpsertVulnSourceParams{ID: item.ID, TenantID: pgInt8(item.TenantID), Type: item.Type, Name: item.Name, Config: cfg, DefaultLevel: item.DefaultLevel, Enabled: item.Enabled})
+	row, err := tx.q.UpsertVulnSource(ctx, sqlcgen.UpsertVulnSourceParams{ID: item.ID, TenantID: pgtypex.Int8(item.TenantID), Type: item.Type, Name: item.Name, Config: cfg, DefaultLevel: item.DefaultLevel, Enabled: item.Enabled})
 	if err != nil {
 		return VulnSource{}, apperr.ErrContestVulnSourceInvalid.WithCause(err)
 	}
@@ -640,7 +642,7 @@ func (tx *txStore) UpsertVulnSource(ctx context.Context, item VulnSource) (VulnS
 
 // ListVulnSources 查询平台源和本租户源。
 func (tx *txStore) ListVulnSources(ctx context.Context, tenantID int64) ([]VulnSource, error) {
-	rows, err := tx.q.ListVulnSources(ctx, pgInt8(tenantID))
+	rows, err := tx.q.ListVulnSources(ctx, pgtypex.Int8(tenantID))
 	if err != nil {
 		return nil, apperr.ErrContestVulnSourceInvalid.WithCause(err)
 	}
@@ -657,7 +659,7 @@ func (tx *txStore) ListVulnSources(ctx context.Context, tenantID int64) ([]VulnS
 
 // GetVulnSource 读取漏洞源。
 func (tx *txStore) GetVulnSource(ctx context.Context, tenantID, id int64) (VulnSource, error) {
-	row, err := tx.q.GetVulnSource(ctx, sqlcgen.GetVulnSourceParams{TenantID: pgInt8(tenantID), ID: id})
+	row, err := tx.q.GetVulnSource(ctx, sqlcgen.GetVulnSourceParams{TenantID: pgtypex.Int8(tenantID), ID: id})
 	if err != nil {
 		return VulnSource{}, apperr.ErrContestVulnSourceInvalid.WithCause(err)
 	}
@@ -666,7 +668,7 @@ func (tx *txStore) GetVulnSource(ctx context.Context, tenantID, id int64) (VulnS
 
 // MarkVulnSourceSynced 更新时间同步标记。
 func (tx *txStore) MarkVulnSourceSynced(ctx context.Context, tenantID, id int64) (VulnSource, error) {
-	row, err := tx.q.MarkVulnSourceSynced(ctx, sqlcgen.MarkVulnSourceSyncedParams{TenantID: pgInt8(tenantID), ID: id})
+	row, err := tx.q.MarkVulnSourceSynced(ctx, sqlcgen.MarkVulnSourceSyncedParams{TenantID: pgtypex.Int8(tenantID), ID: id})
 	if err != nil {
 		return VulnSource{}, apperr.ErrContestVulnSourceFetchFailed.WithCause(err)
 	}
@@ -679,7 +681,7 @@ func (tx *txStore) UpsertVulnProblem(ctx context.Context, item VulnProblem) (Vul
 	if err != nil {
 		return VulnProblem{}, err
 	}
-	row, err := tx.q.UpsertVulnProblem(ctx, sqlcgen.UpsertVulnProblemParams{ID: item.ID, TenantID: item.TenantID, SourceID: pgInt8(item.SourceID), ExternalRef: pgText(item.ExternalRef), Title: item.Title, Level: item.Level, RuntimeMode: item.RuntimeMode, DraftBody: body})
+	row, err := tx.q.UpsertVulnProblem(ctx, sqlcgen.UpsertVulnProblemParams{ID: item.ID, TenantID: item.TenantID, SourceID: pgtypex.Int8(item.SourceID), ExternalRef: pgtypex.Text(item.ExternalRef), Title: item.Title, Level: item.Level, RuntimeMode: item.RuntimeMode, DraftBody: body})
 	if err != nil {
 		return VulnProblem{}, apperr.ErrContestVulnProblemInvalid.WithCause(err)
 	}
@@ -727,7 +729,7 @@ func (tx *txStore) SetVulnProblemPrevalidate(ctx context.Context, tenantID, id i
 
 // FinalizeVulnProblem 保存漏洞题固化后的 M5 内容引用。
 func (tx *txStore) FinalizeVulnProblem(ctx context.Context, tenantID, id int64, code, version string) (VulnProblem, error) {
-	row, err := tx.q.FinalizeVulnProblem(ctx, sqlcgen.FinalizeVulnProblemParams{TenantID: tenantID, ID: id, ContentItemCode: pgText(code), ContentItemVersion: pgText(version)})
+	row, err := tx.q.FinalizeVulnProblem(ctx, sqlcgen.FinalizeVulnProblemParams{TenantID: tenantID, ID: id, ContentItemCode: pgtypex.Text(code), ContentItemVersion: pgtypex.Text(version)})
 	if err != nil {
 		return VulnProblem{}, apperr.ErrContestVulnFinalizeFailed.WithCause(err)
 	}

@@ -6,16 +6,16 @@ import (
 	"strings"
 
 	"chaimir/internal/modules/sandbox/internal/sqlcgen"
+	"chaimir/internal/platform/jsonx"
+	"chaimir/internal/platform/pgtypex"
 	"chaimir/internal/platform/timex"
-
-	"github.com/jackc/pgx/v5/pgtype"
 )
 
 // runtimeFromRow 把 sqlc runtime 行转换为内部 Runtime 模型。
 func runtimeFromRow(row sqlcgen.Runtime) (Runtime, error) {
 	var spec AdapterSpec
 	if len(row.AdapterSpec) > 0 {
-		if err := json.Unmarshal(row.AdapterSpec, &spec); err != nil {
+		if err := jsonx.DecodeStrict(row.AdapterSpec, &spec); err != nil {
 			return Runtime{}, err
 		}
 	}
@@ -26,8 +26,8 @@ func runtimeFromRow(row sqlcgen.Runtime) (Runtime, error) {
 		Eco:            row.Eco,
 		AdapterLevel:   row.AdapterLevel,
 		AdapterSpec:    spec,
-		CapabilityImpl: textValue(row.CapabilityImpl),
-		PluginRef:      textValue(row.PluginRef),
+		CapabilityImpl: pgtypex.TextValue(row.CapabilityImpl),
+		PluginRef:      pgtypex.TextValue(row.PluginRef),
 		SelftestStatus: row.SelftestStatus,
 		SelftestDetail: json.RawMessage(row.SelftestDetail),
 		Status:         row.Status,
@@ -55,7 +55,7 @@ func runtimeImageFromRow(row sqlcgen.RuntimeImage) RuntimeImage {
 func toolFromRow(row sqlcgen.Tool) (Tool, error) {
 	var spec ToolResourceSpec
 	if len(row.ResourceSpec) > 0 {
-		if err := json.Unmarshal(row.ResourceSpec, &spec); err != nil {
+		if err := jsonx.DecodeStrict(row.ResourceSpec, &spec); err != nil {
 			return Tool{}, err
 		}
 	}
@@ -64,8 +64,8 @@ func toolFromRow(row sqlcgen.Tool) (Tool, error) {
 		Code:         row.Code,
 		Name:         row.Name,
 		Kind:         row.Kind,
-		ImageURL:     textValue(row.ImageUrl),
-		Port:         int32Value(row.Port),
+		ImageURL:     pgtypex.TextValue(row.ImageUrl),
+		Port:         pgtypex.Int4Value(row.Port),
 		EcoTags:      splitCSV(row.EcoTags),
 		ResourceSpec: spec,
 		Status:       row.Status,
@@ -87,10 +87,10 @@ func sandboxFromRow(row sqlcgen.Sandbox) Sandbox {
 		KeepAlive:         row.KeepAlive,
 		SnapshotEnabled:   row.SnapshotEnabled,
 		CodeStorageKey:    row.CodeStorageKey,
-		CodeHash:          textValue(row.CodeHash),
-		InitCodeRef:       textValue(row.InitCodeRef),
-		InitScriptRef:     textValue(row.InitScriptRef),
-		SnapshotRef:       textValue(row.SnapshotRef),
+		CodeHash:          pgtypex.TextValue(row.CodeHash),
+		InitCodeRef:       pgtypex.TextValue(row.InitCodeRef),
+		InitScriptRef:     pgtypex.TextValue(row.InitScriptRef),
+		SnapshotRef:       pgtypex.TextValue(row.SnapshotRef),
 		SnapshotDomains:   stringArrayFromJSON(row.SnapshotDomains),
 		SnapshotCreatedAt: timex.FromTimestamptz(row.SnapshotCreatedAt),
 		SnapshotExpireAt:  timex.FromTimestamptz(row.SnapshotExpireAt),
@@ -144,32 +144,12 @@ func sandboxToolFromStatusRow(row sqlcgen.SandboxTool, tool Tool) SandboxTool {
 	}
 }
 
-// textValue 从 pgtype.Text 提取字符串,无效时返回空字符串。
-func textValue(v pgtype.Text) string {
-	if !v.Valid {
-		return ""
-	}
-	return v.String
-}
-
-// int32Value 从 pgtype.Int4 提取 int32,无效时返回 0。
-func int32Value(v pgtype.Int4) int32 {
-	if !v.Valid {
-		return 0
-	}
-	return v.Int32
-}
-
 // stringArrayFromJSON 从 JSONB 字符串数组提取快照卷域,解析失败时返回空列表交由上层恢复校验拒绝。
 func stringArrayFromJSON(raw []byte) []string {
 	if len(raw) == 0 {
 		return []string{}
 	}
-	var out []string
-	if err := json.Unmarshal(raw, &out); err != nil {
-		return []string{}
-	}
-	return out
+	return jsonx.Decode(raw, []string{})
 }
 
 // splitCSV 把工具生态标签拆成去空格列表。

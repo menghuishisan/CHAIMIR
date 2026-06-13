@@ -2,6 +2,7 @@
 package jsonx
 
 import (
+	"bytes"
 	"encoding/json"
 	"reflect"
 	"strconv"
@@ -9,6 +10,17 @@ import (
 
 	"chaimir/pkg/apperr"
 )
+
+// EncodeLineBytes 将结构化输入编码为一行 JSON,用于受控命令 stdin。
+func EncodeLineBytes(v any) ([]byte, error) {
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(true)
+	if err := enc.Encode(v); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
+}
 
 // ObjectBytes 将 JSON 对象序列化为数据库字节;nil 对象统一按空对象保存。
 func ObjectBytes(v map[string]any, marshalErr *apperr.Error) ([]byte, error) {
@@ -76,6 +88,21 @@ func DecodeStrict(data []byte, out any) error {
 		return nil
 	}
 	return json.Unmarshal(data, out)
+}
+
+// DecodeStrictKnownFields 解析 JSON 到指定目标,并拒绝结构体中未声明的字段。
+func DecodeStrictKnownFields(data []byte, out any) error {
+	if len(data) == 0 {
+		return nil
+	}
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.DisallowUnknownFields()
+	return dec.Decode(out)
+}
+
+// Valid 判断输入是否为合法 JSON,用于只需要结构合法性、不需要落地解析的边界校验。
+func Valid(data []byte) bool {
+	return json.Valid(data)
 }
 
 // CloneObject 对 JSON 对象做深拷贝;不可序列化时返回空对象。
@@ -169,6 +196,35 @@ func Int32FromAny(v any, defaultValue int32) int32 {
 	}
 }
 
+// Int64FromAny 把 JSON 数字或数字字符串转换为 int64,无效值返回默认值。
+func Int64FromAny(v any, defaultValue int64) int64 {
+	if v == nil {
+		return defaultValue
+	}
+	switch val := v.(type) {
+	case int64:
+		return val
+	case int:
+		return int64(val)
+	case int16:
+		return int64(val)
+	case int32:
+		return int64(val)
+	case float64:
+		return int64(val)
+	case float32:
+		return int64(val)
+	case string:
+		n, err := strconv.ParseInt(strings.TrimSpace(val), 10, 64)
+		if err != nil {
+			return defaultValue
+		}
+		return n
+	default:
+		return defaultValue
+	}
+}
+
 // Float64FromAny 把 JSON 数字或数字字符串转换为 float64,无效值返回 0。
 func Float64FromAny(v any) float64 {
 	switch val := v.(type) {
@@ -192,6 +248,32 @@ func Float64FromAny(v any) float64 {
 		return n
 	default:
 		return 0
+	}
+}
+
+// Float64FromAnyOK 把 JSON 数字或数字字符串转换为 float64,并返回是否成功。
+func Float64FromAnyOK(v any) (float64, bool) {
+	switch val := v.(type) {
+	case float64:
+		return val, true
+	case float32:
+		return float64(val), true
+	case int:
+		return float64(val), true
+	case int16:
+		return float64(val), true
+	case int32:
+		return float64(val), true
+	case int64:
+		return float64(val), true
+	case json.Number:
+		parsed, err := val.Float64()
+		return parsed, err == nil
+	case string:
+		n, err := strconv.ParseFloat(strings.TrimSpace(val), 64)
+		return n, err == nil
+	default:
+		return 0, false
 	}
 }
 

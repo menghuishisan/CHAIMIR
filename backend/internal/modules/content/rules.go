@@ -137,16 +137,3 @@ func validDifficulty(value int16) bool {
 func validVisibility(value int16) bool {
 	return value == VisibilityPrivate || value == VisibilityTenant || value == VisibilityShared
 }
-
-// normalizePage 将分页限制在平台统一的常用范围内。
-func normalizePage(page, size *int) {
-	if *page <= 0 {
-		*page = 1
-	}
-	if *size <= 0 {
-		*size = 20
-	}
-	if *size > 100 {
-		*size = 100
-	}
-}

@@ -2,6 +2,8 @@
 package httpx
 
 import (
+	"fmt"
+	"net/http"
 	"strconv"
 	"strings"
 
@@ -48,6 +50,12 @@ func WritePage(c *gin.Context, list any, total int64, page, size int, err error)
 	response.OKPage(c, list, total, page, size)
 }
 
+// WriteAttachment 统一输出小型附件内容,避免各模块手写不安全的 Content-Disposition。
+func WriteAttachment(c *gin.Context, fileName, contentType string, data []byte) {
+	c.Header("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, safeAttachmentName(fileName)))
+	c.Data(http.StatusOK, contentType, data)
+}
+
 // PathID 统一解析 URL 路径 ID,非法 ID 立即写响应并阻断 handler 后续逻辑。
 func PathID(c *gin.Context, name string) (int64, bool) {
 	id, ok := ids.Parse(c.Param(name))
@@ -85,6 +93,19 @@ func QueryInt(c *gin.Context, key string, rule QueryIntRule) (int64, bool) {
 	return value, true
 }
 
+// Page 统一解析 page/size 查询参数,默认 page=1、size=20、size 最大 100。
+func Page(c *gin.Context) (int, int, bool) {
+	page, ok := QueryInt(c, "page", QueryIntRule{Default: 1, Min: 1})
+	if !ok {
+		return 0, 0, false
+	}
+	size, ok := QueryInt(c, "size", QueryIntRule{Default: 20, Min: 1, Max: 100, HasMax: true})
+	if !ok {
+		return 0, 0, false
+	}
+	return int(page), int(size), true
+}
+
 // Int 为 handler 层可选数字字段提供零值解析,必填语义应由 rules/service 校验。
 func Int(v string) int {
 	n, err := strconv.Atoi(strings.TrimSpace(v))
@@ -97,4 +118,27 @@ func Int(v string) int {
 // Int16 复用 Int 的可选字段语义,用于枚举查询参数等 handler 轻量解析场景。
 func Int16(v string) int16 {
 	return int16(Int(v))
+}
+
+// safeAttachmentName 把响应头文件名限制为单段可见字符,防止头注入和路径片段进入下载名。
+func safeAttachmentName(fileName string) string {
+	name := strings.TrimSpace(fileName)
+	name = strings.ReplaceAll(name, "\\", "/")
+	if idx := strings.LastIndex(name, "/"); idx >= 0 {
+		name = name[idx+1:]
+	}
+	var b strings.Builder
+	for _, r := range name {
+		switch {
+		case r == '"' || r == '\\' || r == '\r' || r == '\n':
+			b.WriteByte('_')
+		case r >= 32 && r < 127:
+			b.WriteRune(r)
+		}
+	}
+	out := strings.TrimSpace(b.String())
+	if out == "" || out == "." || out == ".." {
+		return "download"
+	}
+	return out
 }

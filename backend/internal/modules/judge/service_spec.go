@@ -1,12 +1,12 @@
-// judge spec 文件解析并校验判题器 resource_spec 与提交契约。
+// judge service_spec 文件解析并校验判题器 resource_spec 与提交契约。
 package judge
 
 import (
-	"encoding/json"
 	"strings"
 
 	"chaimir/internal/contracts"
 	"chaimir/internal/platform/auth"
+	"chaimir/internal/platform/jsonx"
 	"chaimir/pkg/apperr"
 )
 
@@ -25,10 +25,10 @@ type JudgerResourceSpec struct {
 }
 
 // parseJudgerResourceSpec 解析并校验平台级判题器资源声明。
-func parseJudgerResourceSpec(raw json.RawMessage, typ int16, runtimeRequired bool) (JudgerResourceSpec, error) {
+func parseJudgerResourceSpec(raw []byte, typ int16, runtimeRequired bool) (JudgerResourceSpec, error) {
 	spec := JudgerResourceSpec{}
 	if len(raw) > 0 {
-		if err := json.Unmarshal(raw, &spec); err != nil {
+		if err := jsonx.DecodeStrict(raw, &spec); err != nil {
 			return JudgerResourceSpec{}, apperr.ErrJudgerConfigInvalid.WithCause(err)
 		}
 	}

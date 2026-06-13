@@ -3,15 +3,16 @@ package judge
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"time"
 
 	"chaimir/internal/modules/judge/internal/sqlcgen"
 	"chaimir/internal/platform/db"
+	"chaimir/internal/platform/jsonx"
+	"chaimir/internal/platform/pgtypex"
+	"chaimir/internal/platform/timex"
+	"chaimir/pkg/apperr"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgtype"
 )
 
 // Store 定义 service 所需的 judge 持久化能力,不暴露 sqlc 行类型。
@@ -131,7 +132,7 @@ func (s *txStore) ListJudgers(ctx context.Context) ([]Judger, error) {
 
 // UpsertJudger 新建或更新判题器定义。
 func (s *txStore) UpsertJudger(ctx context.Context, id int64, req CreateJudgerRequest, spec JudgerResourceSpec, selftestStatus int16) (Judger, error) {
-	raw, err := json.Marshal(spec)
+	raw, err := jsonx.AnyBytes(spec, apperr.ErrJudgerConfigInvalid)
 	if err != nil {
 		return Judger{}, err
 	}
@@ -164,7 +165,7 @@ func (s *txStore) UpdateJudgerSelftest(ctx context.Context, id int64, selftestSt
 
 // CreateJudgeTask 创建判题任务。
 func (s *txStore) CreateJudgeTask(ctx context.Context, task JudgeTask) (JudgeTask, error) {
-	raw, err := json.Marshal(task.InputSnapshot)
+	raw, err := jsonx.AnyBytes(task.InputSnapshot, apperr.ErrJudgeSubmitInvalid)
 	if err != nil {
 		return JudgeTask{}, err
 	}
@@ -179,7 +180,7 @@ func (s *txStore) CreateJudgeTask(ctx context.Context, task JudgeTask) (JudgeTas
 		CodeHash:         task.CodeHash,
 		InputSnapshot:    raw,
 		SandboxMode:      task.SandboxMode,
-		TargetSandboxRef: textParam(task.TargetSandboxRef),
+		TargetSandboxRef: pgtypex.Text(task.TargetSandboxRef),
 		Priority:         task.Priority,
 		Status:           task.Status,
 		MaxRetries:       task.MaxRetries,
@@ -242,7 +243,7 @@ func (s *txStore) CancelQueuedJudgeTask(ctx context.Context, tenantID, taskID in
 
 // ResetJudgeTaskForRejudge 重置任务进入重判队列。
 func (s *txStore) ResetJudgeTaskForRejudge(ctx context.Context, tenantID, taskID int64, snapshot JudgeInputSnapshot) (JudgeTask, error) {
-	raw, err := json.Marshal(snapshot)
+	raw, err := jsonx.AnyBytes(snapshot, apperr.ErrJudgeSubmitInvalid)
 	if err != nil {
 		return JudgeTask{}, err
 	}
@@ -273,7 +274,7 @@ func (s *txStore) CompleteJudgeTask(ctx context.Context, tenantID, taskID int64)
 
 // MarkJudgeTaskTimeout 标记任务进入超时中间态。
 func (s *txStore) MarkJudgeTaskTimeout(ctx context.Context, tenantID, taskID int64, reason string) (JudgeTask, error) {
-	row, err := s.q.MarkJudgeTaskTimeout(ctx, sqlcgen.MarkJudgeTaskTimeoutParams{TenantID: tenantID, ID: taskID, LastError: textParam(reason)})
+	row, err := s.q.MarkJudgeTaskTimeout(ctx, sqlcgen.MarkJudgeTaskTimeoutParams{TenantID: tenantID, ID: taskID, LastError: pgtypex.Text(reason)})
 	if err != nil {
 		return JudgeTask{}, err
 	}
@@ -282,7 +283,7 @@ func (s *txStore) MarkJudgeTaskTimeout(ctx context.Context, tenantID, taskID int
 
 // MarkJudgeTaskError 标记任务进入系统错误中间态。
 func (s *txStore) MarkJudgeTaskError(ctx context.Context, tenantID, taskID int64, reason string) (JudgeTask, error) {
-	row, err := s.q.MarkJudgeTaskError(ctx, sqlcgen.MarkJudgeTaskErrorParams{TenantID: tenantID, ID: taskID, LastError: textParam(reason)})
+	row, err := s.q.MarkJudgeTaskError(ctx, sqlcgen.MarkJudgeTaskErrorParams{TenantID: tenantID, ID: taskID, LastError: pgtypex.Text(reason)})
 	if err != nil {
 		return JudgeTask{}, err
 	}
@@ -291,7 +292,7 @@ func (s *txStore) MarkJudgeTaskError(ctx context.Context, tenantID, taskID int64
 
 // RetryJudgeTask 标记任务重试入队。
 func (s *txStore) RetryJudgeTask(ctx context.Context, tenantID, taskID int64, reason string) (JudgeTask, error) {
-	row, err := s.q.RetryJudgeTask(ctx, sqlcgen.RetryJudgeTaskParams{TenantID: tenantID, ID: taskID, LastError: textParam(reason)})
+	row, err := s.q.RetryJudgeTask(ctx, sqlcgen.RetryJudgeTaskParams{TenantID: tenantID, ID: taskID, LastError: pgtypex.Text(reason)})
 	if err != nil {
 		return JudgeTask{}, err
 	}
@@ -300,7 +301,7 @@ func (s *txStore) RetryJudgeTask(ctx context.Context, tenantID, taskID int64, re
 
 // FailJudgeTask 标记任务失败终态。
 func (s *txStore) FailJudgeTask(ctx context.Context, tenantID, taskID int64, reason string) (JudgeTask, error) {
-	row, err := s.q.FailJudgeTask(ctx, sqlcgen.FailJudgeTaskParams{TenantID: tenantID, ID: taskID, LastError: textParam(reason)})
+	row, err := s.q.FailJudgeTask(ctx, sqlcgen.FailJudgeTaskParams{TenantID: tenantID, ID: taskID, LastError: pgtypex.Text(reason)})
 	if err != nil {
 		return JudgeTask{}, err
 	}
@@ -309,7 +310,7 @@ func (s *txStore) FailJudgeTask(ctx context.Context, tenantID, taskID int64, rea
 
 // UpsertJudgeResult 保存判题结果。
 func (s *txStore) UpsertJudgeResult(ctx context.Context, result JudgeResult) (JudgeResult, error) {
-	raw, err := json.Marshal(result.Details)
+	raw, err := jsonx.AnyBytes(result.Details, apperr.ErrJudgeTaskPersistFailed)
 	if err != nil {
 		return JudgeResult{}, err
 	}
@@ -330,12 +331,12 @@ func (s *txStore) UpsertJudgeResult(ctx context.Context, result JudgeResult) (Ju
 	if err != nil {
 		return JudgeResult{}, err
 	}
-	return JudgeResult{TaskID: row.TaskID, TenantID: row.TenantID, Passed: row.Passed, Score: row.Score, MaxScore: row.MaxScore, Details: details, JudgeSandboxRef: row.JudgeSandboxRef, JudgedAt: timeFromPg(row.JudgedAt), IsRejudge: row.IsRejudge}, nil
+	return JudgeResult{TaskID: row.TaskID, TenantID: row.TenantID, Passed: row.Passed, Score: row.Score, MaxScore: row.MaxScore, Details: details, JudgeSandboxRef: row.JudgeSandboxRef, JudgedAt: timex.FromTimestamptz(row.JudgedAt), IsRejudge: row.IsRejudge}, nil
 }
 
 // CreateOutbox 写入终态事件 outbox。
 func (s *txStore) CreateOutbox(ctx context.Context, id int64, tenantID, taskID int64, subject string, payload any) (JudgeEventOutbox, error) {
-	raw, err := json.Marshal(payload)
+	raw, err := jsonx.AnyBytes(payload, apperr.ErrJudgeEventPublishFailed)
 	if err != nil {
 		return JudgeEventOutbox{}, err
 	}
@@ -370,7 +371,7 @@ func (s *txStore) MarkOutboxPublished(ctx context.Context, tenantID, id int64) (
 
 // MarkOutboxFailed 标记 outbox 发布失败。
 func (s *txStore) MarkOutboxFailed(ctx context.Context, tenantID, id int64, reason string) (JudgeEventOutbox, error) {
-	row, err := s.q.MarkJudgeOutboxFailed(ctx, sqlcgen.MarkJudgeOutboxFailedParams{TenantID: tenantID, ID: id, LastError: textParam(reason)})
+	row, err := s.q.MarkJudgeOutboxFailed(ctx, sqlcgen.MarkJudgeOutboxFailedParams{TenantID: tenantID, ID: id, LastError: pgtypex.Text(reason)})
 	if err != nil {
 		return JudgeEventOutbox{}, err
 	}
@@ -379,7 +380,7 @@ func (s *txStore) MarkOutboxFailed(ctx context.Context, tenantID, id int64, reas
 
 // CreateFingerprint 保存提交特征。
 func (s *txStore) CreateFingerprint(ctx context.Context, fp SubmissionFingerprint) (SubmissionFingerprint, error) {
-	raw, err := json.Marshal(fp.SimVector)
+	raw, err := jsonx.AnyBytes(fp.SimVector, apperr.ErrFingerprintRequestInvalid)
 	if err != nil {
 		return SubmissionFingerprint{}, err
 	}
@@ -432,25 +433,4 @@ func fingerprintsFromRows(rows []sqlcgen.SubmissionFingerprint) ([]SubmissionFin
 		out = append(out, item)
 	}
 	return out, nil
-}
-
-// textParam 构造可空 text 参数。
-func textParam(value string) pgtype.Text {
-	return pgtype.Text{String: value, Valid: value != ""}
-}
-
-// textValue 读取 pgtype.Text。
-func textValue(value pgtype.Text) string {
-	if !value.Valid {
-		return ""
-	}
-	return value.String
-}
-
-// timeFromPg 读取 pgtype 时间。
-func timeFromPg(value pgtype.Timestamptz) time.Time {
-	if value.Valid {
-		return value.Time
-	}
-	return time.Time{}
 }

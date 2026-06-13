@@ -21,6 +21,17 @@ func (t *txStore) GetPlatformAdminByUsername(ctx context.Context, username strin
 	return platformAdminFromRow(row), nil
 }
 
+// CreatePlatformAdminIfNotExists 幂等创建 SaaS 首个平台管理员,已存在时不覆盖密码。
+func (t *txStore) CreatePlatformAdminIfNotExists(ctx context.Context, input CreatePlatformAdminInput) error {
+	return t.q.CreatePlatformAdminIfNotExists(ctx, sqlcgen.CreatePlatformAdminIfNotExistsParams{
+		ID:           input.ID,
+		Username:     input.Username,
+		PasswordHash: input.PasswordHash,
+		Name:         input.Name,
+		Status:       input.Status,
+	})
+}
+
 // GetTenantByCode 按学校短码读取租户。
 func (t *txStore) GetTenantByCode(ctx context.Context, code string) (Tenant, error) {
 	row, err := t.q.GetTenantByCode(ctx, code)

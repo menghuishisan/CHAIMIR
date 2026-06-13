@@ -3,6 +3,11 @@ SELECT id, username, password_hash, name, status, created_at, updated_at
 FROM platform_admin
 WHERE username = $1;
 
+-- name: CreatePlatformAdminIfNotExists :exec
+INSERT INTO platform_admin (id, username, password_hash, name, status, created_at, updated_at)
+VALUES ($1, $2, $3, $4, $5, now(), now())
+ON CONFLICT (username) DO NOTHING;
+
 -- name: GetTenantByCode :one
 SELECT id, code, name, type, status, deploy_mode, expire_at, logo_url, display_name, feature_flags, auth_mode, enable_activation_code, created_at, updated_at
 FROM tenant

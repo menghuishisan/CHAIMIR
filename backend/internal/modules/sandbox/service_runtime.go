@@ -3,12 +3,12 @@ package sandbox
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"log/slog"
 	"strings"
 	"time"
 
+	"chaimir/internal/platform/jsonx"
 	"chaimir/internal/platform/timex"
 	"chaimir/pkg/apperr"
 	"chaimir/pkg/logging"
@@ -350,7 +350,7 @@ func (s *Service) PrepullRuntimeImage(ctx context.Context, runtimeID, imageID in
 		status = ImagePrepullFailed
 		prepulled = false
 		at = time.Time{}
-		detail, encodeErr := jsonBytes(map[string]any{"error": err.Error(), "daemonset": result.DaemonSet})
+		detail, encodeErr := jsonBytes(map[string]any{"error": logging.SanitizeError(err.Error()), "daemonset": result.DaemonSet})
 		if encodeErr != nil {
 			return PrepullResponse{}, apperr.ErrSandboxImagePrepullFailed.WithCause(encodeErr)
 		}
@@ -393,7 +393,7 @@ func (s *Service) GetRuntimeImagePrepull(ctx context.Context, runtimeID, imageID
 		ReadyNodes   int32  `json:"ready_nodes"`
 		DaemonSet    string `json:"daemonset"`
 	}
-	if err := json.Unmarshal(image.PrepullDetail, &detail); err != nil {
+	if err := jsonx.DecodeStrict(image.PrepullDetail, &detail); err != nil {
 		return PrepullResponse{}, apperr.ErrSandboxImagePrepullFailed.WithCause(err)
 	}
 	resp.DesiredNodes = detail.DesiredNodes

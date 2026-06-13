@@ -5,11 +5,12 @@ import (
 	"context"
 
 	"chaimir/internal/modules/teaching/internal/sqlcgen"
+	"chaimir/internal/platform/pgtypex"
 )
 
 // UpsertProgress 写入或累计学习进度。
 func (s *txStore) UpsertProgress(ctx context.Context, progress LessonProgress) (LessonProgress, error) {
-	row, err := s.q.UpsertLessonProgress(ctx, sqlcgen.UpsertLessonProgressParams{ID: progress.ID, TenantID: progress.TenantID, LessonID: progress.LessonID, StudentID: progress.StudentID, Status: progress.Status, VideoPos: int32Param(progress.VideoPos), DurationSec: progress.DurationSec})
+	row, err := s.q.UpsertLessonProgress(ctx, sqlcgen.UpsertLessonProgressParams{ID: progress.ID, TenantID: progress.TenantID, LessonID: progress.LessonID, StudentID: progress.StudentID, Status: progress.Status, VideoPos: pgtypex.Int4(progress.VideoPos), DurationSec: progress.DurationSec})
 	if err != nil {
 		return LessonProgress{}, err
 	}
@@ -53,7 +54,7 @@ func (s *txStore) ListStudentProgressByCourse(ctx context.Context, tenantID, cou
 
 // CreatePost 创建讨论帖或回复。
 func (s *txStore) CreatePost(ctx context.Context, post DiscussionPost) (DiscussionPost, error) {
-	row, err := s.q.CreateDiscussionPost(ctx, sqlcgen.CreateDiscussionPostParams{ID: post.ID, TenantID: post.TenantID, CourseID: post.CourseID, ParentID: int64Param(post.ParentID), AuthorID: post.AuthorID, Content: post.Content})
+	row, err := s.q.CreateDiscussionPost(ctx, sqlcgen.CreateDiscussionPostParams{ID: post.ID, TenantID: post.TenantID, CourseID: post.CourseID, ParentID: pgtypex.Int8(post.ParentID), AuthorID: post.AuthorID, Content: post.Content})
 	if err != nil {
 		return DiscussionPost{}, err
 	}
@@ -142,7 +143,7 @@ func (s *txStore) PinAnnouncement(ctx context.Context, tenantID, id int64, pinne
 
 // UpsertReview 创建或更新课程评价。
 func (s *txStore) UpsertReview(ctx context.Context, review CourseReview) (CourseReview, error) {
-	row, err := s.q.UpsertCourseReview(ctx, sqlcgen.UpsertCourseReviewParams{ID: review.ID, TenantID: review.TenantID, CourseID: review.CourseID, StudentID: review.StudentID, Rating: review.Rating, Comment: textParam(review.Comment)})
+	row, err := s.q.UpsertCourseReview(ctx, sqlcgen.UpsertCourseReviewParams{ID: review.ID, TenantID: review.TenantID, CourseID: review.CourseID, StudentID: review.StudentID, Rating: review.Rating, Comment: pgtypex.Text(review.Comment)})
 	if err != nil {
 		return CourseReview{}, err
 	}

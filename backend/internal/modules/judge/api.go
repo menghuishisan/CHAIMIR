@@ -16,7 +16,7 @@ import (
 )
 
 // RegisterRoutes 注册评测引擎 HTTP 与 WebSocket API。
-func RegisterRoutes(r gin.IRouter, svc *Service, authn *auth.Manager, roles auth.RoleChecker) error {
+func RegisterRoutes(r gin.IRouter, svc *Service, authn *auth.Manager, roles contracts.IdentityService) error {
 	if r == nil {
 		return fmt.Errorf("judge routes 缺少 HTTP router")
 	}

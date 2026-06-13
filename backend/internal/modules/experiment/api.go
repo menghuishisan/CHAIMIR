@@ -13,15 +13,15 @@ import (
 )
 
 // RegisterRoutes 注册实验模块 HTTP API。
-func RegisterRoutes(r gin.IRouter, svc *Service, authn *auth.Manager, roles auth.RoleChecker) error {
+func RegisterRoutes(r gin.IRouter, svc *Service, authn *auth.Manager, roles contracts.IdentityService) error {
 	if r == nil {
-		return apperr.ErrInternal.WithMessage("experiment routes 缺少 HTTP router")
+		return apperr.ErrHTTPRouterMissing
 	}
 	if svc == nil {
-		return apperr.ErrInternal.WithMessage("experiment routes 缺少 service")
+		return apperr.ErrHTTPServiceMissing
 	}
 	if authn == nil {
-		return apperr.ErrInternal.WithMessage("experiment routes 缺少 auth manager")
+		return apperr.ErrHTTPAuthMissing
 	}
 	api := experimentAPI{svc: svc}
 	g := r.Group("/api/v1/experiment")

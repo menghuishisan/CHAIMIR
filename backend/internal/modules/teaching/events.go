@@ -15,10 +15,10 @@ const teachingEventQueue = "teaching-workers"
 // SubscribeEvents 注册教学模块需要消费的跨模块事件。
 func SubscribeEvents(bus eventbus.Bus, svc *Service) ([]eventbus.Subscription, error) {
 	if bus == nil {
-		return nil, apperr.ErrInternal.WithMessage("teaching events 缺少事件总线")
+		return nil, apperr.ErrEventBusMissing
 	}
 	if svc == nil {
-		return nil, apperr.ErrInternal.WithMessage("teaching events 缺少 service")
+		return nil, apperr.ErrEventServiceMissing
 	}
 	subs := make([]eventbus.Subscription, 0, 3)
 	if err := subscribeTeachingEvent(bus, &subs, contracts.SubjectJudgeCompleted, handleJudgeCompletedEvent(svc)); err != nil {

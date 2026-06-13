@@ -6,6 +6,8 @@ import (
 	"time"
 
 	"chaimir/internal/modules/teaching/internal/sqlcgen"
+	"chaimir/internal/platform/pgtypex"
+	"chaimir/internal/platform/timex"
 )
 
 // CreateAssignment 创建作业草稿。
@@ -14,7 +16,7 @@ func (s *txStore) CreateAssignment(ctx context.Context, assignment Assignment) (
 	if err != nil {
 		return Assignment{}, err
 	}
-	row, err := s.q.CreateAssignment(ctx, sqlcgen.CreateAssignmentParams{ID: assignment.ID, TenantID: assignment.TenantID, CourseID: assignment.CourseID, Title: assignment.Title, ChapterID: int64Param(assignment.ChapterID), DueAt: timestamptzParam(assignment.DueAt), MaxAttempts: assignment.MaxAttempts, LatePolicy: assignment.LatePolicy, LatePenalty: penalty, Status: assignment.Status})
+	row, err := s.q.CreateAssignment(ctx, sqlcgen.CreateAssignmentParams{ID: assignment.ID, TenantID: assignment.TenantID, CourseID: assignment.CourseID, Title: assignment.Title, ChapterID: pgtypex.Int8(assignment.ChapterID), DueAt: timex.Timestamptz(assignment.DueAt), MaxAttempts: assignment.MaxAttempts, LatePolicy: assignment.LatePolicy, LatePenalty: penalty, Status: assignment.Status})
 	if err != nil {
 		return Assignment{}, err
 	}
@@ -53,7 +55,7 @@ func (s *txStore) UpdateAssignment(ctx context.Context, assignment Assignment) (
 	if err != nil {
 		return Assignment{}, err
 	}
-	row, err := s.q.UpdateAssignment(ctx, sqlcgen.UpdateAssignmentParams{TenantID: assignment.TenantID, ID: assignment.ID, Title: assignment.Title, ChapterID: int64Param(assignment.ChapterID), DueAt: timestamptzParam(assignment.DueAt), MaxAttempts: assignment.MaxAttempts, LatePolicy: assignment.LatePolicy, LatePenalty: penalty})
+	row, err := s.q.UpdateAssignment(ctx, sqlcgen.UpdateAssignmentParams{TenantID: assignment.TenantID, ID: assignment.ID, Title: assignment.Title, ChapterID: pgtypex.Int8(assignment.ChapterID), DueAt: timex.Timestamptz(assignment.DueAt), MaxAttempts: assignment.MaxAttempts, LatePolicy: assignment.LatePolicy, LatePenalty: penalty})
 	if err != nil {
 		return Assignment{}, err
 	}
@@ -76,7 +78,7 @@ func (s *txStore) ReplaceAssignmentItems(ctx context.Context, tenantID, assignme
 	}
 	out := make([]AssignmentItem, 0, len(items))
 	for _, item := range items {
-		row, err := s.q.CreateAssignmentItem(ctx, sqlcgen.CreateAssignmentItemParams{ID: item.ID, TenantID: tenantID, AssignmentID: assignmentID, ItemCode: item.ItemCode, ItemVersion: item.ItemVersion, Score: item.Score, Seq: item.Seq, GradingMode: item.GradingMode, JudgerCode: textParam(item.JudgerCode)})
+		row, err := s.q.CreateAssignmentItem(ctx, sqlcgen.CreateAssignmentItemParams{ID: item.ID, TenantID: tenantID, AssignmentID: assignmentID, ItemCode: item.ItemCode, ItemVersion: item.ItemVersion, Score: item.Score, Seq: item.Seq, GradingMode: item.GradingMode, JudgerCode: pgtypex.Text(item.JudgerCode)})
 		if err != nil {
 			return nil, err
 		}
@@ -114,7 +116,7 @@ func (s *txStore) CreateSubmission(ctx context.Context, sub Submission) (Submiss
 	if err != nil {
 		return Submission{}, err
 	}
-	row, err := s.q.CreateSubmission(ctx, sqlcgen.CreateSubmissionParams{ID: sub.ID, TenantID: sub.TenantID, AssignmentID: sub.AssignmentID, StudentID: sub.StudentID, AttemptNo: sub.AttemptNo, ContentRef: content, FinalScore: int32Param(sub.FinalScore), IsLate: sub.IsLate, Status: sub.Status})
+	row, err := s.q.CreateSubmission(ctx, sqlcgen.CreateSubmissionParams{ID: sub.ID, TenantID: sub.TenantID, AssignmentID: sub.AssignmentID, StudentID: sub.StudentID, AttemptNo: sub.AttemptNo, ContentRef: content, FinalScore: pgtypex.Int4(sub.FinalScore), IsLate: sub.IsLate, Status: sub.Status})
 	if err != nil {
 		return Submission{}, err
 	}
@@ -179,7 +181,7 @@ func (s *txStore) ListSubmissionsByAssignment(ctx context.Context, tenantID, ass
 
 // UpdateSubmissionManualGrade 更新教师批改分。
 func (s *txStore) UpdateSubmissionManualGrade(ctx context.Context, tenantID, id int64, manual, final int32, comment string) (Submission, error) {
-	row, err := s.q.UpdateSubmissionManualGrade(ctx, sqlcgen.UpdateSubmissionManualGradeParams{TenantID: tenantID, ID: id, ManualScore: int32Param(manual), FinalScore: int32Param(final), Comment: textParam(comment)})
+	row, err := s.q.UpdateSubmissionManualGrade(ctx, sqlcgen.UpdateSubmissionManualGradeParams{TenantID: tenantID, ID: id, ManualScore: pgtypex.Int4(manual), FinalScore: pgtypex.Int4(final), Comment: pgtypex.Text(comment)})
 	if err != nil {
 		return Submission{}, err
 	}
@@ -188,7 +190,7 @@ func (s *txStore) UpdateSubmissionManualGrade(ctx context.Context, tenantID, id 
 
 // UpdateSubmissionJudgeRef 写回 M3 判题任务引用。
 func (s *txStore) UpdateSubmissionJudgeRef(ctx context.Context, tenantID, id int64, taskRef string) (Submission, error) {
-	row, err := s.q.UpdateSubmissionJudgeRef(ctx, sqlcgen.UpdateSubmissionJudgeRefParams{TenantID: tenantID, ID: id, JudgeTaskRef: textParam(taskRef)})
+	row, err := s.q.UpdateSubmissionJudgeRef(ctx, sqlcgen.UpdateSubmissionJudgeRefParams{TenantID: tenantID, ID: id, JudgeTaskRef: pgtypex.Text(taskRef)})
 	if err != nil {
 		return Submission{}, err
 	}
@@ -197,7 +199,7 @@ func (s *txStore) UpdateSubmissionJudgeRef(ctx context.Context, tenantID, id int
 
 // UpdateSubmissionAutoScore 按提交聚合自动分和迟交处理后的最终分。
 func (s *txStore) UpdateSubmissionAutoScore(ctx context.Context, tenantID, submissionID int64, score, final int32) (Submission, error) {
-	row, err := s.q.UpdateSubmissionAutoScore(ctx, sqlcgen.UpdateSubmissionAutoScoreParams{TenantID: tenantID, ID: submissionID, AutoScore: int32Param(score), FinalScore: int32Param(final)})
+	row, err := s.q.UpdateSubmissionAutoScore(ctx, sqlcgen.UpdateSubmissionAutoScoreParams{TenantID: tenantID, ID: submissionID, AutoScore: pgtypex.Int4(score), FinalScore: pgtypex.Int4(final)})
 	if err != nil {
 		return Submission{}, err
 	}
@@ -262,7 +264,7 @@ func (s *txStore) CompleteJudgeOutbox(ctx context.Context, tenantID, id int64) (
 
 // RetryJudgeOutbox 回退判题 outbox 到待派发。
 func (s *txStore) RetryJudgeOutbox(ctx context.Context, tenantID, id int64, lastError string) (JudgeOutbox, error) {
-	row, err := s.q.RetryJudgeOutbox(ctx, sqlcgen.RetryJudgeOutboxParams{TenantID: tenantID, ID: id, LastError: textParam(lastError)})
+	row, err := s.q.RetryJudgeOutbox(ctx, sqlcgen.RetryJudgeOutboxParams{TenantID: tenantID, ID: id, LastError: pgtypex.Text(lastError)})
 	if err != nil {
 		return JudgeOutbox{}, err
 	}
@@ -271,7 +273,7 @@ func (s *txStore) RetryJudgeOutbox(ctx context.Context, tenantID, id int64, last
 
 // MarkJudgeOutboxResult 回写单题判题结果。
 func (s *txStore) MarkJudgeOutboxResult(ctx context.Context, tenantID int64, sourceRef string, score int32, completedAt time.Time) (JudgeOutbox, error) {
-	row, err := s.q.MarkJudgeOutboxResult(ctx, sqlcgen.MarkJudgeOutboxResultParams{TenantID: tenantID, SourceRef: sourceRef, Score: int32Param(score), CompletedAt: timestamptzParam(completedAt)})
+	row, err := s.q.MarkJudgeOutboxResult(ctx, sqlcgen.MarkJudgeOutboxResultParams{TenantID: tenantID, SourceRef: sourceRef, Score: pgtypex.Int4(score), CompletedAt: timex.Timestamptz(completedAt)})
 	if err != nil {
 		return JudgeOutbox{}, err
 	}
@@ -280,7 +282,7 @@ func (s *txStore) MarkJudgeOutboxResult(ctx context.Context, tenantID int64, sou
 
 // MarkJudgeOutboxFailedResult 记录 M3 判题终态失败原因。
 func (s *txStore) MarkJudgeOutboxFailedResult(ctx context.Context, tenantID int64, sourceRef, reason string, failedAt time.Time) (JudgeOutbox, error) {
-	row, err := s.q.MarkJudgeOutboxFailedResult(ctx, sqlcgen.MarkJudgeOutboxFailedResultParams{TenantID: tenantID, SourceRef: sourceRef, LastError: textParam(reason), CompletedAt: timestamptzParam(failedAt)})
+	row, err := s.q.MarkJudgeOutboxFailedResult(ctx, sqlcgen.MarkJudgeOutboxFailedResultParams{TenantID: tenantID, SourceRef: sourceRef, LastError: pgtypex.Text(reason), CompletedAt: timex.Timestamptz(failedAt)})
 	if err != nil {
 		return JudgeOutbox{}, err
 	}

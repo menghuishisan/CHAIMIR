@@ -3,17 +3,14 @@ package judge
 
 import (
 	"context"
-	"crypto/hmac"
-	"crypto/sha256"
-	"encoding/hex"
-	"encoding/json"
-	"fmt"
 	"reflect"
 	"strings"
 
 	"chaimir/internal/contracts"
+	"chaimir/internal/platform/jsonx"
 	"chaimir/pkg/apperr"
 	"chaimir/pkg/chainassert"
+	pkgcrypto "chaimir/pkg/crypto"
 )
 
 // executeJudgerStrategy 执行不需要容器命令的后端内置判题策略。
@@ -90,7 +87,7 @@ func (s *Service) runChainStep(ctx context.Context, task JudgeTask, sandboxID in
 	}
 }
 
-// judgeFlag 仅用快照中的 hash 比对提交值或链上查询值,不保存明文 flag 或 HMAC secret。
+// judgeFlag 仅用快照中的 HMAC 摘要比对提交值或链上查询值,不保存明文 flag 或 HMAC secret。
 func (s *Service) judgeFlag(ctx context.Context, task JudgeTask, sandboxID int64) (JudgeExecutionResult, error) {
 	hash := stringValue(task.InputSnapshot.Expectation["flag_hash"])
 	inputKey := stringValue(task.InputSnapshot.Expectation["flag_input_key"])
@@ -108,8 +105,11 @@ func (s *Service) judgeFlag(ctx context.Context, task JudgeTask, sandboxID int64
 			submitted = shortJSON(actual)
 		}
 	}
-	sum := sha256.Sum256([]byte(strings.TrimSpace(submitted)))
-	passed := hex.EncodeToString(sum[:]) == hash
+	submittedHash, err := pkgcrypto.HMACSHA256Hex(s.hmacKey, strings.TrimSpace(submitted))
+	if err != nil {
+		return JudgeExecutionResult{}, apperr.ErrJudgerConfigInvalid.WithCause(err)
+	}
+	passed := pkgcrypto.EqualHexHMAC(submittedHash, hash)
 	score := int32(0)
 	if passed {
 		score = task.InputSnapshot.MaxScore
@@ -140,7 +140,7 @@ func judgeSimCheckpoint(task JudgeTask) (JudgeExecutionResult, error) {
 }
 
 // snapshotExpectationForJudger 生成可复现但不泄露答案的快照期望。
-func snapshotExpectationForJudger(typ int16, expectation map[string]any, extra map[string]any) (map[string]any, error) {
+func (s *Service) snapshotExpectationForJudger(typ int16, expectation map[string]any, extra map[string]any) (map[string]any, error) {
 	out := map[string]any{}
 	for k, v := range expectation {
 		out[k] = v
@@ -150,8 +150,7 @@ func snapshotExpectationForJudger(typ int16, expectation map[string]any, extra m
 		hash := stringValue(out["flag_hash"])
 		if hash == "" {
 			if value := stringValue(out["flag_value"]); value != "" {
-				sum := sha256.Sum256([]byte(value))
-				hash = hex.EncodeToString(sum[:])
+				return nil, apperr.ErrJudgerConfigInvalid
 			}
 		}
 		if hash == "" {
@@ -161,11 +160,14 @@ func snapshotExpectationForJudger(typ int16, expectation map[string]any, extra m
 				seed = stringValue(out["flag_seed"])
 			}
 			if secret != "" && seed != "" {
-				mac := hmac.New(sha256.New, []byte(secret))
-				mac.Write([]byte(seed))
-				expected := hex.EncodeToString(mac.Sum(nil))
-				sum := sha256.Sum256([]byte(expected))
-				hash = hex.EncodeToString(sum[:])
+				expectedFlag, err := pkgcrypto.HMACSHA256Hex([]byte(secret), seed)
+				if err != nil {
+					return nil, apperr.ErrJudgerConfigInvalid.WithCause(err)
+				}
+				hash, err = pkgcrypto.HMACSHA256Hex(s.hmacKey, expectedFlag)
+				if err != nil {
+					return nil, apperr.ErrJudgerConfigInvalid.WithCause(err)
+				}
 			}
 		}
 		if !isSHA256Hex(hash) {
@@ -223,36 +225,22 @@ func containsSensitiveExpectationMaterial(v any) bool {
 
 // mapAny 读取 map[string]any。
 func mapAny(v any) map[string]any {
-	if out, ok := v.(map[string]any); ok {
-		return out
-	}
-	return map[string]any{}
+	return jsonx.ObjectFromAny(v)
 }
 
 // sliceValue 读取 []any。
 func sliceValue(v any) []any {
-	if out, ok := v.([]any); ok {
-		return out
-	}
-	return nil
+	return jsonx.SliceFromAny(v)
 }
 
 // stringValue 读取字符串值。
 func stringValue(v any) string {
-	if v == nil {
-		return ""
-	}
-	switch x := v.(type) {
-	case string:
-		return strings.TrimSpace(x)
-	default:
-		return strings.TrimSpace(fmt.Sprint(x))
-	}
+	return strings.TrimSpace(jsonx.StringFromAny(v))
 }
 
 // shortJSON 返回脱敏短文本,避免把完整结构回传给前端。
 func shortJSON(v any) string {
-	raw, err := json.Marshal(v)
+	raw, err := jsonx.AnyBytes(v, apperr.ErrInternal)
 	if err != nil {
 		return ""
 	}

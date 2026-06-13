@@ -1,4 +1,4 @@
-// sim bundle 文件负责仿真包上传、归档安全校验和危险调用静态扫描。
+// sim service_bundle 文件负责仿真包上传、归档安全校验和危险调用静态扫描。
 package sim
 
 import (

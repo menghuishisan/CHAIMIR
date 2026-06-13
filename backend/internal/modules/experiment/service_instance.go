@@ -5,7 +5,6 @@ import (
 	"context"
 	"fmt"
 	"sync"
-	"time"
 
 	"chaimir/internal/contracts"
 	"chaimir/internal/platform/audit"
@@ -219,7 +218,7 @@ func (s *Service) FinishInstance(ctx context.Context, instanceID int64) (Instanc
 		}
 		if exp.RequireReport {
 			if _, err := tx.GetReportByInstanceStudent(ctx, id.TenantID, instanceID, id.AccountID); err != nil {
-				return apperr.ErrExperimentReportNotFound.WithCause(err).WithMessage("请先提交实验报告")
+				return apperr.ErrExperimentReportRequired.WithCause(err)
 			}
 		}
 		score, err := tx.SumScores(ctx, id.TenantID, instanceID)
@@ -478,7 +477,7 @@ func (s *Service) publishScored(ctx context.Context, inst ExperimentInstance) er
 	if s.bus == nil {
 		return apperr.ErrExperimentEventFailed
 	}
-	event := contracts.ExperimentScoredEvent{TenantID: inst.TenantID, ExperimentID: inst.ExperimentID, InstanceID: inst.ID, StudentID: inst.OwnerAccountID, Score: inst.Score, ScoredAt: time.Now().UTC()}
+	event := contracts.ExperimentScoredEvent{TenantID: inst.TenantID, ExperimentID: inst.ExperimentID, InstanceID: inst.ID, StudentID: inst.OwnerAccountID, Score: inst.Score, ScoredAt: timex.Now()}
 	if err := s.bus.Publish(ctx, contracts.SubjectExperimentScored, event); err != nil {
 		return apperr.ErrExperimentEventFailed.WithCause(err)
 	}

@@ -3,12 +3,12 @@ package sim
 
 import (
 	"context"
-	"encoding/json"
 	"strings"
 	"time"
 
 	"chaimir/internal/contracts"
 	"chaimir/internal/platform/auth"
+	"chaimir/internal/platform/timex"
 	"chaimir/pkg/apperr"
 )
 
@@ -183,7 +183,7 @@ func (s *Service) ReportCheckpointFromHTTP(ctx context.Context, tenantID, sessio
 
 // ShareSession 为用户会话创建公开分享码。
 func (s *Service) ShareSession(ctx context.Context, tenantID, accountID, sessionID int64, expireAt time.Time) (map[string]any, error) {
-	if !expireAt.IsZero() && !expireAt.After(time.Now().UTC()) {
+	if !expireAt.IsZero() && !expireAt.After(timex.Now()) {
 		return nil, apperr.ErrSimShareCodeInvalid
 	}
 	var share Share
@@ -231,7 +231,7 @@ func (s *Service) GetSharedReplay(ctx context.Context, code string) (map[string]
 	}); err != nil {
 		return nil, err
 	}
-	if !shareUsable(share, time.Now().UTC()) {
+	if !shareUsable(share, timex.Now()) {
 		return nil, apperr.ErrSimShareCodeInvalid
 	}
 	session, actions, err := s.loadReplay(ctx, share.TenantID, share.SessionID)
@@ -263,7 +263,7 @@ func (s *Service) loadReplay(ctx context.Context, tenantID, sessionID int64) (Se
 }
 
 // reportCheckpointRaw 在租户事务内保存检查点,不保存正确答案或判分规则。
-func (s *Service) reportCheckpointRaw(ctx context.Context, tenantID, sessionID int64, checkpointID string, answer json.RawMessage, achieved bool) error {
+func (s *Service) reportCheckpointRaw(ctx context.Context, tenantID, sessionID int64, checkpointID string, answer []byte, achieved bool) error {
 	if err := validateCheckpoint(sessionID, checkpointID, answer); err != nil {
 		return err
 	}

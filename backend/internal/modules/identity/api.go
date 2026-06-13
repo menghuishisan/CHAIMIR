@@ -3,17 +3,18 @@ package identity
 
 import (
 	"chaimir/internal/platform/auth"
+	"chaimir/pkg/apperr"
 
 	"github.com/gin-gonic/gin"
 )
 
 // RegisterRoutes 注册 identity 模块 HTTP API。
-func RegisterRoutes(r gin.IRouter, svc *Service, authn *auth.Manager) {
+func RegisterRoutes(r gin.IRouter, svc *Service, authn *auth.Manager) error {
 	if svc == nil {
-		panic("identity routes require initialized service")
+		return apperr.ErrIdentityRouteDependencyMissing
 	}
 	if authn == nil {
-		panic("identity routes require initialized auth manager")
+		return apperr.ErrIdentityRouteDependencyMissing
 	}
 	api := r.Group("/api/v1")
 	registerAuthRoutes(api, svc, authn)
@@ -26,4 +27,5 @@ func RegisterRoutes(r gin.IRouter, svc *Service, authn *auth.Manager) {
 	registerAccountRoutes(api, svc, authn)
 	registerMeRoutes(api, svc, authn)
 	registerAuditRoutes(api, svc, authn)
+	return nil
 }

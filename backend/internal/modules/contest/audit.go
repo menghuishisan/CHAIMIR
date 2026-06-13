@@ -3,7 +3,6 @@ package contest
 
 import (
 	"context"
-	"encoding/json"
 
 	"chaimir/internal/platform/audit"
 	"chaimir/pkg/apperr"
@@ -32,12 +31,12 @@ const (
 // writeAudit 写入 M8 关键操作审计,详细上下文以 JSON 存入统一审计表。
 func (s *Service) writeAudit(ctx context.Context, tenantID, actorID int64, actorRole int16, action, targetType string, targetID int64, detail map[string]any) error {
 	if s.audit == nil {
-		return apperr.ErrInternal.WithMessage("contest audit 缺少审计写入器")
+		return apperr.ErrAuditWriterMissing
 	}
 	if detail == nil {
 		detail = map[string]any{}
 	}
-	raw, err := json.Marshal(detail)
+	detailText, err := audit.DetailString(detail)
 	if err != nil {
 		return apperr.ErrInternal.WithCause(err)
 	}
@@ -46,5 +45,5 @@ func (s *Service) writeAudit(ctx context.Context, tenantID, actorID int64, actor
 	if traceID == "" {
 		traceID = response.TraceFromContext(ctx)
 	}
-	return s.audit.Write(ctx, audit.Entry{TenantID: tenantID, ActorID: actorID, ActorRole: actorRole, Action: action, TargetType: targetType, TargetID: targetID, Detail: string(raw), IP: req.IP, TraceID: traceID})
+	return s.audit.Write(ctx, audit.Entry{TenantID: tenantID, ActorID: actorID, ActorRole: actorRole, Action: action, TargetType: targetType, TargetID: targetID, Detail: detailText, IP: req.IP, TraceID: traceID})
 }

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"chaimir/internal/contracts"
 	"chaimir/internal/modules/notify"
 	"chaimir/internal/platform/auth"
 	"chaimir/internal/platform/background"
@@ -29,7 +30,7 @@ type NotifyModuleDeps struct {
 	Config   config.NotifyConfig
 	EventBus eventbus.Bus
 	Auth     *auth.Manager
-	Roles    auth.RoleChecker
+	Roles    contracts.IdentityService
 }
 
 // RegisterNotifyModule 构造通知 store/service,注册路由和事件订阅。

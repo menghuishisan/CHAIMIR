@@ -26,6 +26,7 @@ type Querier interface {
 	CreateImportBatch(ctx context.Context, arg CreateImportBatchParams) (ImportBatch, error)
 	CreateImportPreview(ctx context.Context, arg CreateImportPreviewParams) (ImportPreview, error)
 	CreateMajor(ctx context.Context, arg CreateMajorParams) (Major, error)
+	CreatePlatformAdminIfNotExists(ctx context.Context, arg CreatePlatformAdminIfNotExistsParams) error
 	CreatePlatformAuthSession(ctx context.Context, arg CreatePlatformAuthSessionParams) (PlatformAuthSession, error)
 	CreateSMSCode(ctx context.Context, arg CreateSMSCodeParams) (SmsCode, error)
 	CreateTenant(ctx context.Context, arg CreateTenantParams) (Tenant, error)

@@ -3,10 +3,11 @@ package sandbox
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log/slog"
 
+	"chaimir/internal/platform/jsonx"
+	"chaimir/pkg/apperr"
 	"chaimir/pkg/logging"
 )
 
@@ -29,7 +30,7 @@ func (s *Service) broadcastProgress(tenantID, sandboxID int64, phase, status int
 	if s.wsHub == nil {
 		return
 	}
-	data, err := json.Marshal(progressFromState(phase, status, traceID))
+	data, err := jsonx.AnyBytes(progressFromState(phase, status, traceID), apperr.ErrInternal)
 	if err != nil {
 		logging.ErrorContext(context.Background(), "sandbox progress marshal failed", err.Error(), slog.Int64("tenant_id", tenantID), slog.Int64("sandbox_id", sandboxID))
 		return

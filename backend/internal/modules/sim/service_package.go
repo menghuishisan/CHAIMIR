@@ -3,10 +3,10 @@ package sim
 
 import (
 	"context"
-	"encoding/json"
 	"io"
 	"strings"
 
+	"chaimir/internal/platform/jsonx"
 	"chaimir/internal/platform/storage"
 	"chaimir/pkg/apperr"
 )
@@ -362,9 +362,9 @@ func (s *Service) loadPackage(ctx context.Context, code, version string) (Packag
 }
 
 // decodeObject 在进入数据库前把已通过 rules 校验的 JSON 对象转换为 map。
-func decodeObject(raw json.RawMessage) (map[string]any, error) {
+func decodeObject(raw []byte) (map[string]any, error) {
 	out := map[string]any{}
-	if err := json.Unmarshal(raw, &out); err != nil {
+	if err := jsonx.DecodeStrict(raw, &out); err != nil {
 		return nil, apperr.ErrSimPackageInvalid.WithCause(err)
 	}
 	return out, nil

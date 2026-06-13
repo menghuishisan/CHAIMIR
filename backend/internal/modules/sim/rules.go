@@ -3,13 +3,13 @@ package sim
 
 import (
 	"encoding/hex"
-	"encoding/json"
 	"regexp"
 	"strconv"
 	"strings"
 	"time"
 
 	"chaimir/internal/platform/auth"
+	"chaimir/internal/platform/jsonx"
 	"chaimir/pkg/apperr"
 )
 
@@ -88,7 +88,7 @@ func reviewResultFromQuery(value string) int16 {
 }
 
 // normalizePackageRequest 修剪字段并给空 JSON 字段补默认对象。
-func normalizePackageRequest(req SubmitPackageRequest, fallbackAuthorType int16) (SubmitPackageRequest, int16, error) {
+func normalizePackageRequest(req SubmitPackageRequest, defaultAuthorType int16) (SubmitPackageRequest, int16, error) {
 	req.Code = strings.TrimSpace(req.Code)
 	req.Version = strings.TrimSpace(req.Version)
 	req.Name = strings.TrimSpace(req.Name)
@@ -99,13 +99,13 @@ func normalizePackageRequest(req SubmitPackageRequest, fallbackAuthorType int16)
 		return req, 0, err
 	}
 	if len(req.ScaleLimit) == 0 {
-		req.ScaleLimit = json.RawMessage(`{}`)
+		req.ScaleLimit = []byte(`{}`)
 	}
 	if len(req.BackendConfig) == 0 {
-		req.BackendConfig = json.RawMessage(`{}`)
+		req.BackendConfig = []byte(`{}`)
 	}
 	if req.AuthorType == 0 {
-		req.AuthorType = fallbackAuthorType
+		req.AuthorType = defaultAuthorType
 	}
 	return req, compute, nil
 }
@@ -166,8 +166,8 @@ func validateAction(req ReportActionRequest) error {
 }
 
 // validateCheckpoint 校验检查点上报内容。
-func validateCheckpoint(sessionID int64, checkpointID string, answer json.RawMessage) error {
-	if sessionID <= 0 || !checkpointIDPattern.MatchString(strings.TrimSpace(checkpointID)) || len(answer) == 0 || !json.Valid(answer) {
+func validateCheckpoint(sessionID int64, checkpointID string, answer []byte) error {
+	if sessionID <= 0 || !checkpointIDPattern.MatchString(strings.TrimSpace(checkpointID)) || len(answer) == 0 || !jsonx.Valid(answer) {
 		return apperr.ErrSimCheckpointInvalid
 	}
 	return nil
@@ -202,15 +202,7 @@ func actionEqual(existing Action, req ReportActionRequest) (bool, error) {
 	if existing.Seq != req.Seq || existing.AtTick != req.AtTick || existing.EventType != strings.TrimSpace(req.EventType) {
 		return false, nil
 	}
-	existingRaw, err := json.Marshal(existing.Payload)
-	if err != nil {
-		return false, apperr.ErrSimActionSeqInvalid.WithCause(err)
-	}
-	reqRaw, err := json.Marshal(req.Payload)
-	if err != nil {
-		return false, apperr.ErrSimActionSeqInvalid.WithCause(err)
-	}
-	return string(existingRaw) == string(reqRaw), nil
+	return jsonx.Equal(existing.Payload, req.Payload), nil
 }
 
 // shareUsable 判断分享码是否仍可公开读取。
@@ -222,9 +214,9 @@ func shareUsable(share Share, now time.Time) bool {
 }
 
 // jsonObject 校验字段是 JSON 对象,避免数组或标量破坏 SDK 契约。
-func jsonObject(raw json.RawMessage) bool {
+func jsonObject(raw []byte) bool {
 	var value map[string]any
-	return len(raw) > 0 && json.Unmarshal(raw, &value) == nil
+	return len(raw) > 0 && jsonx.DecodeStrict(raw, &value) == nil
 }
 
 // isSHA256Hex 校验内容哈希格式。

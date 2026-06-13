@@ -19,6 +19,15 @@ type CreateTenantInput struct {
 	EnableActivationCode bool
 }
 
+// CreatePlatformAdminInput 描述 SaaS 首个平台管理员初始化字段。
+type CreatePlatformAdminInput struct {
+	ID           int64
+	Username     string
+	PasswordHash string
+	Name         string
+	Status       int16
+}
+
 // UpdateTenantConfigInput 描述租户内联配置更新字段。
 type UpdateTenantConfigInput struct {
 	TenantID             int64

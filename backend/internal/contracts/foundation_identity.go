@@ -8,60 +8,60 @@ import (
 
 // AccountInfo 是跨模块传递的账号摘要,仅保留鉴权、审计和聚合需要的最小字段。
 type AccountInfo struct {
-	AccountID    int64
-	TenantID     int64
-	Name         string
-	PhoneMasked  string
-	No           string
-	BaseIdentity int16
-	Roles        []string
-	Status       int16
+	AccountID    int64    `json:"account_id"`
+	TenantID     int64    `json:"tenant_id"`
+	Name         string   `json:"name"`
+	PhoneMasked  string   `json:"phone_masked"`
+	No           string   `json:"no"`
+	BaseIdentity int16    `json:"base_identity"`
+	Roles        []string `json:"roles"`
+	Status       int16    `json:"status"`
 }
 
 // TenantSummary 是聚合层读取租户信息时使用的稳定摘要。
 type TenantSummary struct {
-	TenantID   int64
-	Code       string
-	Name       string
-	Type       int16
-	Status     int16
-	DeployMode int16
-	ExpireAt   *time.Time
-	CreatedAt  time.Time
-	UpdatedAt  time.Time
+	TenantID   int64      `json:"tenant_id"`
+	Code       string     `json:"code"`
+	Name       string     `json:"name"`
+	Type       int16      `json:"type"`
+	Status     int16      `json:"status"`
+	DeployMode int16      `json:"deploy_mode"`
+	ExpireAt   *time.Time `json:"expire_at"`
+	CreatedAt  time.Time  `json:"created_at"`
+	UpdatedAt  time.Time  `json:"updated_at"`
 }
 
 // TenantApplicationSummary 是平台审核入口使用的入驻申请摘要。
 type TenantApplicationSummary struct {
-	ApplicationID int64
-	SchoolName    string
-	SchoolType    int16
-	ContactName   string
-	ContactPhone  string
-	ContactEmail  string
-	Status        int16
-	SubmittedAt   time.Time
-	ReviewedAt    *time.Time
+	ApplicationID int64      `json:"application_id"`
+	SchoolName    string     `json:"school_name"`
+	SchoolType    int16      `json:"school_type"`
+	ContactName   string     `json:"contact_name"`
+	ContactPhone  string     `json:"contact_phone"`
+	ContactEmail  string     `json:"contact_email"`
+	Status        int16      `json:"status"`
+	SubmittedAt   time.Time  `json:"submitted_at"`
+	ReviewedAt    *time.Time `json:"reviewed_at"`
 }
 
 // TenantApplicationQuery 是平台审核入口读取申请列表时使用的过滤条件。
 type TenantApplicationQuery struct {
-	Status int16
+	Status int16 `json:"status"`
 }
 
 // AuditLogEntry 是统一审计查询中心读取的共享审计记录视图。
 type AuditLogEntry struct {
-	ID         int64
-	TenantID   int64
-	ActorID    int64
-	ActorRole  int16
-	Action     string
-	TargetType string
-	TargetID   int64
-	Detail     string
-	IP         string
-	TraceID    string
-	CreatedAt  time.Time
+	ID         int64     `json:"id"`
+	TenantID   int64     `json:"tenant_id"`
+	ActorID    int64     `json:"actor_id"`
+	ActorRole  int16     `json:"actor_role"`
+	Action     string    `json:"action"`
+	TargetType string    `json:"target_type"`
+	TargetID   int64     `json:"target_id"`
+	Detail     string    `json:"detail"`
+	IP         string    `json:"ip"`
+	TraceID    string    `json:"trace_id"`
+	CreatedAt  time.Time `json:"created_at"`
 }
 
 // IdentityService 是 identity 模块对外提供的最小只读身份契约。
@@ -86,17 +86,17 @@ type IdentityTenantReadService interface {
 
 // IdentityStats 是 M1 提供给 M9 看板的只读统计摘要。
 type IdentityStats struct {
-	TenantID             int64
-	TenantCount          int64
-	AccountCount         int64
-	TeacherCount         int64
-	StudentCount         int64
-	SchoolAdminCount     int64
-	PlatformAdminCount   int64
-	ActiveAccountCount   int64
-	ActiveTenantCount    int64
-	PendingApplyCount    int64
-	DisabledAccountCount int64
+	TenantID             int64 `json:"tenant_id"`
+	TenantCount          int64 `json:"tenant_count"`
+	AccountCount         int64 `json:"account_count"`
+	TeacherCount         int64 `json:"teacher_count"`
+	StudentCount         int64 `json:"student_count"`
+	SchoolAdminCount     int64 `json:"school_admin_count"`
+	PlatformAdminCount   int64 `json:"platform_admin_count"`
+	ActiveAccountCount   int64 `json:"active_account_count"`
+	ActiveTenantCount    int64 `json:"active_tenant_count"`
+	PendingApplyCount    int64 `json:"pending_apply_count"`
+	DisabledAccountCount int64 `json:"disabled_account_count"`
 }
 
 // IdentityStatsService 是 M1 对 M9 看板开放的统计只读契约。
@@ -109,23 +109,23 @@ type IdentityStatsService interface {
 
 // AuditQuery 是统一审计查询中心使用的只读过滤条件。
 type AuditQuery struct {
-	TenantID        int64
-	ActorID         int64
-	Action          string
-	TargetType      string
-	From            time.Time
-	To              time.Time
-	Page            int32
-	Size            int32
-	IncludePlatform bool
+	TenantID        int64     `json:"tenant_id"`
+	ActorID         int64     `json:"actor_id"`
+	Action          string    `json:"action"`
+	TargetType      string    `json:"target_type"`
+	From            time.Time `json:"from"`
+	To              time.Time `json:"to"`
+	Page            int32     `json:"page"`
+	Size            int32     `json:"size"`
+	IncludePlatform bool      `json:"include_platform"`
 }
 
 // AuditQueryResult 是审计查询中心统一返回的分页结果。
 type AuditQueryResult struct {
-	List  []AuditLogEntry
-	Total int64
-	Page  int32
-	Size  int32
+	List  []AuditLogEntry `json:"list"`
+	Total int64           `json:"total"`
+	Page  int32           `json:"page"`
+	Size  int32           `json:"size"`
 }
 
 // IdentityAuditReadService 是 M1 对 M9 审计中心开放的审计只读契约。

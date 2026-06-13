@@ -315,6 +315,35 @@ func (s *Service) BootstrapSchoolTenant(ctx context.Context, cfg config.Bootstra
 	return ToTenantDTO(created), nil
 }
 
+// BootstrapPlatformAdmin 为 SaaS 初始化首个平台管理员,已存在同名账号时保持原密码不变。
+func (s *Service) BootstrapPlatformAdmin(ctx context.Context, cfg config.BootstrapConfig) error {
+	if !s.deploy.PlatformEnabled {
+		return apperr.ErrIdentityPlatformLayerDisabled
+	}
+	username := strings.TrimSpace(cfg.PlatformAdminUser)
+	name := strings.TrimSpace(cfg.PlatformAdminName)
+	if username == "" || name == "" {
+		return apperr.ErrIdentityBootstrapInvalid
+	}
+	if err := ValidatePassword(cfg.PlatformAdminPassword); err != nil {
+		return err
+	}
+	passwordHash, err := crypto.HashPassword(cfg.PlatformAdminPassword)
+	if err != nil {
+		return apperr.ErrInternal.WithCause(err)
+	}
+	return s.store.PlatformTx(ctx, func(ctx context.Context, tx TxStore) error {
+		// SaaS bootstrap 只在账号不存在时写入,避免重复运行迁移覆盖生产管理员口令。
+		return tx.CreatePlatformAdminIfNotExists(ctx, CreatePlatformAdminInput{
+			ID:           s.ids.Generate(),
+			Username:     username,
+			PasswordHash: passwordHash,
+			Name:         name,
+			Status:       TenantStatusActive,
+		})
+	})
+}
+
 // createBootstrapAdmin 创建首个学校管理员,允许缺失组织档案但不臆造默认院系。
 func (s *Service) createBootstrapAdmin(ctx context.Context, tenantID int64, req CreateAccountRequest) (AccountDTO, string, error) {
 	phoneEnc, err := s.encryptPhone(req.Phone)

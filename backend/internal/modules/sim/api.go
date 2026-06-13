@@ -2,7 +2,6 @@
 package sim
 
 import (
-	"encoding/json"
 	"io"
 	"net/http"
 	"strings"
@@ -10,6 +9,7 @@ import (
 	"chaimir/internal/contracts"
 	"chaimir/internal/platform/auth"
 	"chaimir/internal/platform/httpx"
+	"chaimir/internal/platform/jsonx"
 	"chaimir/internal/platform/tenant"
 	"chaimir/internal/platform/ws"
 	"chaimir/pkg/apperr"
@@ -19,15 +19,15 @@ import (
 )
 
 // RegisterRoutes 注册仿真引擎 HTTP 与 WebSocket API。
-func RegisterRoutes(r gin.IRouter, svc *Service, authn *auth.Manager, roles auth.RoleChecker) error {
+func RegisterRoutes(r gin.IRouter, svc *Service, authn *auth.Manager, roles contracts.IdentityService) error {
 	if r == nil {
-		return apperr.ErrInternal.WithMessage("sim routes 缺少 HTTP router")
+		return apperr.ErrHTTPRouterMissing
 	}
 	if svc == nil {
-		return apperr.ErrInternal.WithMessage("sim routes 缺少 service")
+		return apperr.ErrHTTPServiceMissing
 	}
 	if authn == nil {
-		return apperr.ErrInternal.WithMessage("sim routes 缺少 auth manager")
+		return apperr.ErrHTTPAuthMissing
 	}
 	api := simAPI{svc: svc}
 	g := r.Group("/api/v1/sim")
@@ -401,15 +401,7 @@ func bindPackageMultipart(c *gin.Context) (SubmitPackageRequest, BundleInput, bo
 
 // pageQuery 统一解析分页参数。
 func pageQuery(c *gin.Context) (int, int, bool) {
-	page, ok := httpx.QueryInt(c, "page", httpx.QueryIntRule{Default: 1, Min: 1})
-	if !ok {
-		return 0, 0, false
-	}
-	size, ok := httpx.QueryInt(c, "size", httpx.QueryIntRule{Default: 20, Min: 1, Max: 100, HasMax: true})
-	if !ok {
-		return 0, 0, false
-	}
-	return int(page), int(size), true
+	return httpx.Page(c)
 }
 
 // currentTenantIdentity 从服务端鉴权上下文读取租户身份。
@@ -452,7 +444,5 @@ func defaultJSON(raw string) string {
 
 // jsonUnmarshal 包装 JSON 解码,避免 api 文件直接散落 encoding/json 依赖。
 func jsonUnmarshal(raw []byte, dst any) error {
-	dec := json.NewDecoder(strings.NewReader(string(raw)))
-	dec.DisallowUnknownFields()
-	return dec.Decode(dst)
+	return jsonx.DecodeStrictKnownFields(raw, dst)
 }

@@ -4,10 +4,11 @@ package teaching
 import (
 	"context"
 	"fmt"
-	"time"
 
 	"chaimir/internal/contracts"
 	"chaimir/internal/platform/audit"
+	"chaimir/internal/platform/pagex"
+	"chaimir/internal/platform/timex"
 	"chaimir/pkg/apperr"
 )
 
@@ -251,7 +252,7 @@ func (s *Service) SubmitAssignment(ctx context.Context, assignmentID int64, req 
 		if attempts >= int64(assignment.MaxAttempts) {
 			return apperr.ErrTeachingSubmissionLimitExceeded
 		}
-		isLate, err := applyLatePolicy(assignment, time.Now().UTC())
+		isLate, err := applyLatePolicy(assignment, timex.Now())
 		if err != nil {
 			return err
 		}
@@ -347,7 +348,7 @@ func (s *Service) ListSubmissions(ctx context.Context, assignmentID int64, page,
 	if err != nil {
 		return nil, 0, 0, 0, err
 	}
-	normalizePage(&page, &size)
+	page, size = pagex.Normalize(page, size)
 	var subs []Submission
 	var total int64
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
@@ -410,7 +411,7 @@ func (s *Service) GetSubmissionForUser(ctx context.Context, submissionID int64) 
 // RunJudgeOutboxOnce 派发一轮 M6 本地自动判题 outbox。
 func (s *Service) RunJudgeOutboxOnce(ctx context.Context, tenantID int64) error {
 	if s.judge == nil {
-		return apperr.ErrTeachingJudgeOutboxInvalid.WithMessage("自动判题服务暂不可用")
+		return apperr.ErrTeachingJudgeServiceUnavailable
 	}
 	var outboxes []JudgeOutbox
 	claim := s.store.TenantTx
@@ -523,5 +524,5 @@ func aggregateCompletedAutoScore(outboxes []JudgeOutbox) (int32, bool) {
 
 // sourceRefForSubmissionItem 构造 M6 提交题目来源标识。
 func sourceRefForSubmissionItem(submissionID, assignmentItemID int64) string {
-	return fmt.Sprintf("teaching:%d:submission:%d:item:%d", time.Now().UTC().Year(), submissionID, assignmentItemID)
+	return fmt.Sprintf("teaching:%d:submission:%d:item:%d", timex.Now().Year(), submissionID, assignmentItemID)
 }

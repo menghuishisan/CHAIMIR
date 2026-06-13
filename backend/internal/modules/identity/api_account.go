@@ -3,7 +3,6 @@ package identity
 
 import (
 	"io"
-	"net/http"
 	"strings"
 
 	"chaimir/internal/contracts"
@@ -286,8 +285,7 @@ func (a accountAPI) importTemplate(c *gin.Context) {
 		response.Fail(c, err)
 		return
 	}
-	c.Header("Content-Disposition", `attachment; filename="`+tpl.FileName+`"`)
-	c.Data(http.StatusOK, tpl.ContentType, tpl.Content)
+	httpx.WriteAttachment(c, tpl.FileName, tpl.ContentType, tpl.Content)
 }
 
 // importCommit 绑定账号导入提交请求。

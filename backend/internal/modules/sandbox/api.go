@@ -20,7 +20,7 @@ import (
 )
 
 // RegisterRoutes 注册 sandbox 模块 HTTP 与 WebSocket API。
-func RegisterRoutes(r gin.IRouter, svc *Service, authn *auth.Manager, roles auth.RoleChecker) error {
+func RegisterRoutes(r gin.IRouter, svc *Service, authn *auth.Manager, roles contracts.IdentityService) error {
 	if r == nil {
 		return fmt.Errorf("sandbox routes 缺少 HTTP router")
 	}
@@ -104,7 +104,7 @@ func (a sandboxAPI) registerUserRoutes(g gin.IRouter) {
 }
 
 // registerQuotaRoutes 注册配额查询和调整接口。
-func (a sandboxAPI) registerQuotaRoutes(g gin.IRouter, authn *auth.Manager, roles auth.RoleChecker) {
+func (a sandboxAPI) registerQuotaRoutes(g gin.IRouter, authn *auth.Manager, roles contracts.IdentityService) {
 	g.GET("/quota", authn.Middleware(), auth.RequireTenantAnyRole(roles, contracts.RoleSchoolAdmin), a.quotaStats)
 	g.PATCH("/quota", authn.Middleware(), auth.RequirePlatformOrAnyRole(roles, contracts.RoleSchoolAdmin), a.upsertQuota)
 }

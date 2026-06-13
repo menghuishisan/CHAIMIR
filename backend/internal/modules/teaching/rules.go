@@ -2,13 +2,13 @@
 package teaching
 
 import (
-	"encoding/json"
 	"fmt"
 	"html"
 	"math"
 	"strings"
 	"time"
 
+	"chaimir/internal/platform/jsonx"
 	"chaimir/pkg/apperr"
 )
 
@@ -301,11 +301,8 @@ func numericRuleValue(rule map[string]any, key string) (float64, bool) {
 		return float64(typed), true
 	case int64:
 		return float64(typed), true
-	case json.Number:
-		parsed, err := typed.Float64()
-		return parsed, err == nil
 	default:
-		return 0, false
+		return jsonx.Float64FromAnyOK(typed)
 	}
 }
 
@@ -337,19 +334,6 @@ func validGradingMode(value int16) bool {
 // validGradeSource 校验成绩来源类型。
 func validGradeSource(value int16) bool {
 	return value >= GradeSourceAssignment && value <= GradeSourceExam
-}
-
-// normalizePage 将分页限制在平台统一范围。
-func normalizePage(page, size *int) {
-	if *page <= 0 {
-		*page = 1
-	}
-	if *size <= 0 {
-		*size = 20
-	}
-	if *size > 100 {
-		*size = 100
-	}
 }
 
 // sanitizeUserText 清理用户可见文本中的 HTML 控制字符,防止存储型脚本进入响应。

@@ -8,6 +8,7 @@ import (
 
 	"chaimir/internal/modules/content/internal/sqlcgen"
 	"chaimir/internal/platform/db"
+	"chaimir/internal/platform/pgtypex"
 
 	"github.com/jackc/pgx/v5"
 )
@@ -77,7 +78,7 @@ func (s *txStore) CreateItem(ctx context.Context, item ItemWithBody) (ItemWithBo
 	if err != nil {
 		return ItemWithBody{}, err
 	}
-	row, err := s.q.CreateContentItem(ctx, sqlcgen.CreateContentItemParams{ID: item.ID, TenantID: item.TenantID, Code: item.Code, Version: item.Version, Type: item.Type, Title: item.Title, CategoryID: int64Param(item.CategoryID), Difficulty: item.Difficulty, Tags: item.Tags, KnowledgePoints: item.KnowledgePoints, AuthorID: item.AuthorID, AuthorType: item.AuthorType, Visibility: item.Visibility, Status: item.Status, VersionHash: item.VersionHash})
+	row, err := s.q.CreateContentItem(ctx, sqlcgen.CreateContentItemParams{ID: item.ID, TenantID: item.TenantID, Code: item.Code, Version: item.Version, Type: item.Type, Title: item.Title, CategoryID: pgtypex.Int8(item.CategoryID), Difficulty: item.Difficulty, Tags: item.Tags, KnowledgePoints: item.KnowledgePoints, AuthorID: item.AuthorID, AuthorType: item.AuthorType, Visibility: item.Visibility, Status: item.Status, VersionHash: item.VersionHash})
 	if err != nil {
 		return ItemWithBody{}, err
 	}
@@ -95,7 +96,7 @@ func (s *txStore) UpdateDraftItem(ctx context.Context, item ItemWithBody) (ItemW
 	if err != nil {
 		return ItemWithBody{}, err
 	}
-	row, err := s.q.UpdateDraftContentItem(ctx, sqlcgen.UpdateDraftContentItemParams{TenantID: item.TenantID, ID: item.ID, Title: item.Title, CategoryID: int64Param(item.CategoryID), Difficulty: item.Difficulty, Tags: item.Tags, KnowledgePoints: item.KnowledgePoints, Visibility: item.Visibility, VersionHash: item.VersionHash})
+	row, err := s.q.UpdateDraftContentItem(ctx, sqlcgen.UpdateDraftContentItemParams{TenantID: item.TenantID, ID: item.ID, Title: item.Title, CategoryID: pgtypex.Int8(item.CategoryID), Difficulty: item.Difficulty, Tags: item.Tags, KnowledgePoints: item.KnowledgePoints, Visibility: item.Visibility, VersionHash: item.VersionHash})
 	if err != nil {
 		return ItemWithBody{}, err
 	}
@@ -214,7 +215,7 @@ func (s *txStore) IncrementUsage(ctx context.Context, tenantID int64, code, vers
 
 // CreateCategory 创建分类。
 func (s *txStore) CreateCategory(ctx context.Context, category Category) (Category, error) {
-	row, err := s.q.CreateContentCategory(ctx, sqlcgen.CreateContentCategoryParams{ID: category.ID, TenantID: category.TenantID, ParentID: int64Param(category.ParentID), Name: category.Name, Sort: category.Sort})
+	row, err := s.q.CreateContentCategory(ctx, sqlcgen.CreateContentCategoryParams{ID: category.ID, TenantID: category.TenantID, ParentID: pgtypex.Int8(category.ParentID), Name: category.Name, Sort: category.Sort})
 	if err != nil {
 		return Category{}, err
 	}
@@ -223,7 +224,7 @@ func (s *txStore) CreateCategory(ctx context.Context, category Category) (Catego
 
 // UpdateCategory 更新分类。
 func (s *txStore) UpdateCategory(ctx context.Context, category Category) (Category, error) {
-	row, err := s.q.UpdateContentCategory(ctx, sqlcgen.UpdateContentCategoryParams{TenantID: category.TenantID, ID: category.ID, ParentID: int64Param(category.ParentID), Name: category.Name, Sort: category.Sort})
+	row, err := s.q.UpdateContentCategory(ctx, sqlcgen.UpdateContentCategoryParams{TenantID: category.TenantID, ID: category.ID, ParentID: pgtypex.Int8(category.ParentID), Name: category.Name, Sort: category.Sort})
 	if err != nil {
 		return Category{}, err
 	}

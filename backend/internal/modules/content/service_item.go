@@ -7,6 +7,7 @@ import (
 
 	"chaimir/internal/contracts"
 	"chaimir/internal/platform/audit"
+	"chaimir/internal/platform/pagex"
 	"chaimir/pkg/apperr"
 )
 
@@ -16,7 +17,7 @@ func (s *Service) ListItems(ctx context.Context, filter ItemListFilter) ([]ItemD
 	if err != nil {
 		return nil, 0, 0, 0, err
 	}
-	normalizePage(&filter.Page, &filter.Size)
+	filter.Page, filter.Size = pagex.Normalize(filter.Page, filter.Size)
 	var items []Item
 	var total int64
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
@@ -350,7 +351,7 @@ func (s *Service) ListShared(ctx context.Context, filter ItemListFilter) ([]Item
 	filter.Status = StatusPublished
 	filter.OnlyShared = true
 	filter.PublishedShared = true
-	normalizePage(&filter.Page, &filter.Size)
+	filter.Page, filter.Size = pagex.Normalize(filter.Page, filter.Size)
 	var items []Item
 	var total int64
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {

@@ -2,10 +2,11 @@
 package teaching
 
 import (
-	"encoding/json"
 	"time"
 
 	"chaimir/internal/contracts"
+	"chaimir/internal/platform/jsonx"
+	"chaimir/internal/platform/transfer"
 )
 
 // courseDTO 将课程领域模型转换为 HTTP 响应结构。
@@ -96,6 +97,12 @@ func gradeDTO(g CourseGrade) GradeDTO {
 	return GradeDTO{CourseID: g.CourseID, StudentID: g.StudentID, AutoTotal: g.AutoTotal, OverrideTotal: g.OverrideTotal, FinalTotal: finalTotal(g), IsOverridden: g.IsOverridden, IsLocked: g.IsLocked, Credits: g.Credits, UpdatedAt: formatTime(g.UpdatedAt)}
 }
 
+// exportTaskDTO 将统一导入导出中心任务快照转换为课程成绩导出响应。
+func exportTaskDTO(task transfer.Task) ExportTaskDTO {
+	dto := transfer.TaskToDTO(task)
+	return ExportTaskDTO{TaskID: dto.TaskID, Channel: dto.Channel, Subject: dto.Subject, Status: dto.Status, FileName: dto.FileName, ContentType: dto.ContentType, ArtifactFileName: dto.ArtifactFileName, ArtifactContentType: dto.ArtifactContentType, ArtifactSize: dto.ArtifactSize}
+}
+
 // contractGrade 将 M6 单课程成绩转换为 M11 只读聚合契约对象。
 func contractGrade(g CourseGrade) contracts.TeachingCourseGrade {
 	override := (*float64)(nil)
@@ -119,19 +126,7 @@ func cloneMap(in map[string]any) map[string]any {
 	if in == nil {
 		return map[string]any{}
 	}
-	raw, err := json.Marshal(in)
-	if err != nil {
-		out := make(map[string]any, len(in))
-		for k, v := range in {
-			out[k] = v
-		}
-		return out
-	}
-	out := map[string]any{}
-	if err := json.Unmarshal(raw, &out); err != nil {
-		return map[string]any{}
-	}
-	return out
+	return jsonx.CloneObject(in)
 }
 
 // formatTime 输出统一的 UTC RFC3339 时间字符串。

@@ -3,11 +3,11 @@ package content
 
 import (
 	"context"
-	"encoding/json"
 
 	"chaimir/internal/contracts"
 	"chaimir/internal/platform/audit"
 	"chaimir/internal/platform/auth"
+	"chaimir/internal/platform/jsonx"
 	"chaimir/pkg/apperr"
 )
 
@@ -106,22 +106,5 @@ func stringFromAny(value any) string {
 
 // int32FromAny 从 JSON 动态值读取整数。
 func int32FromAny(value any) int32 {
-	switch v := value.(type) {
-	case int:
-		return int32(v)
-	case int32:
-		return v
-	case int64:
-		return int32(v)
-	case float64:
-		return int32(v)
-	case json.Number:
-		n, err := v.Int64()
-		if err != nil {
-			return 0
-		}
-		return int32(n)
-	default:
-		return 0
-	}
+	return jsonx.Int32FromAny(value, 0)
 }

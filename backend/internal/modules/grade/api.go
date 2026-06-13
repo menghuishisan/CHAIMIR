@@ -3,23 +3,19 @@ package grade
 
 import (
 	"context"
-	"fmt"
-	"io"
-	"net/http"
 
 	"chaimir/internal/contracts"
 	"chaimir/internal/platform/auth"
 	"chaimir/internal/platform/httpx"
 	"chaimir/pkg/apperr"
-	"chaimir/pkg/logging"
 
 	"github.com/gin-gonic/gin"
 )
 
 // RegisterRoutes 注册成绩中心 HTTP API。
-func RegisterRoutes(r gin.IRouter, svc *Service, authn *auth.Manager, roles auth.RoleChecker) error {
+func RegisterRoutes(r gin.IRouter, svc *Service, authn *auth.Manager, roles contracts.IdentityService) error {
 	if r == nil || svc == nil || authn == nil {
-		return apperr.ErrInternal.WithMessage("grade routes 依赖不完整")
+		return apperr.ErrHTTPServiceMissing
 	}
 	api := gradeAPI{svc: svc}
 	g := r.Group("/api/v1/grade-center", authn.Middleware())
@@ -268,22 +264,8 @@ func (a gradeAPI) downloadTranscript(c *gin.Context) {
 	if !ok {
 		return
 	}
-	record, reader, err := a.svc.DownloadTranscript(c.Request.Context(), id)
-	if err != nil {
-		httpx.Write(c, gin.H{}, err)
-		return
-	}
-	c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=\"transcript-%d.pdf\"", record.ID))
-	c.Status(http.StatusOK)
-	c.Header("Content-Type", "application/pdf")
-	if _, copyErr := io.Copy(c.Writer, reader); copyErr != nil {
-		if reportErr := c.Error(apperr.ErrGradeTranscriptFailed.WithCause(copyErr)); reportErr != nil {
-			logging.ErrorContext(c.Request.Context(), "记录成绩单下载错误失败", reportErr.Error())
-		}
-	}
-	if closeErr := reader.Close(); closeErr != nil {
-		logging.ErrorContext(c.Request.Context(), "关闭成绩单下载流失败", closeErr.Error())
-	}
+	out, err := a.svc.DownloadTranscript(c.Request.Context(), id)
+	httpx.Write(c, out, err)
 }
 
 func gradePage(c *gin.Context) (int, int, bool) {

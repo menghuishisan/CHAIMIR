@@ -22,6 +22,7 @@ type Store interface {
 // TxStore 定义单个事务内可调用的 identity 数据访问能力。
 type TxStore interface {
 	GetPlatformAdminByUsername(ctx context.Context, username string) (PlatformAdmin, error)
+	CreatePlatformAdminIfNotExists(ctx context.Context, input CreatePlatformAdminInput) error
 	GetTenantByCode(ctx context.Context, code string) (Tenant, error)
 	GetTenantByID(ctx context.Context, id int64) (Tenant, error)
 	ListTenants(ctx context.Context) ([]Tenant, error)

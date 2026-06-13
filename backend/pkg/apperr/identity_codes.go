@@ -89,6 +89,8 @@ const (
 	CodeIdentityPlatformLayerDisabled = "13019"
 	// CodeIdentityBootstrapInvalid 表示私有化初始化参数不完整或不合法。
 	CodeIdentityBootstrapInvalid = "13020"
+	// CodeIdentityRouteDependencyMissing 表示身份模块 HTTP 路由装配缺少必要依赖。
+	CodeIdentityRouteDependencyMissing = "13021"
 )
 
 const (
@@ -200,6 +202,8 @@ var (
 	ErrIdentityPlatformLayerDisabled = New(CodeIdentityPlatformLayerDisabled, "当前部署未启用平台管理入口")
 	// ErrIdentityBootstrapInvalid 表示私有化初始化参数不正确。
 	ErrIdentityBootstrapInvalid = New(CodeIdentityBootstrapInvalid, "初始化学校信息不完整,请检查配置")
+	// ErrIdentityRouteDependencyMissing 表示身份模块 HTTP 路由装配缺少必要依赖。
+	ErrIdentityRouteDependencyMissing = New(CodeIdentityRouteDependencyMissing, "服务暂时不可用,请稍后重试")
 )
 
 var (

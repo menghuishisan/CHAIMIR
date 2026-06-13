@@ -626,6 +626,31 @@ func (q *Queries) CreateMajor(ctx context.Context, arg CreateMajorParams) (Major
 	return i, err
 }
 
+const createPlatformAdminIfNotExists = `-- name: CreatePlatformAdminIfNotExists :exec
+INSERT INTO platform_admin (id, username, password_hash, name, status, created_at, updated_at)
+VALUES ($1, $2, $3, $4, $5, now(), now())
+ON CONFLICT (username) DO NOTHING
+`
+
+type CreatePlatformAdminIfNotExistsParams struct {
+	ID           int64  `json:"id"`
+	Username     string `json:"username"`
+	PasswordHash string `json:"password_hash"`
+	Name         string `json:"name"`
+	Status       int16  `json:"status"`
+}
+
+func (q *Queries) CreatePlatformAdminIfNotExists(ctx context.Context, arg CreatePlatformAdminIfNotExistsParams) error {
+	_, err := q.db.Exec(ctx, createPlatformAdminIfNotExists,
+		arg.ID,
+		arg.Username,
+		arg.PasswordHash,
+		arg.Name,
+		arg.Status,
+	)
+	return err
+}
+
 const createPlatformAuthSession = `-- name: CreatePlatformAuthSession :one
 INSERT INTO platform_auth_session (id, platform_admin_id, refresh_token_hash, device_info, ip, status, expire_at, created_at)
 VALUES ($1, $2, $3, $4, $5, $6, $7, now())

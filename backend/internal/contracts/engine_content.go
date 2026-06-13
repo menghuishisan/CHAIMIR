@@ -5,34 +5,34 @@ import "context"
 
 // ContentItemRef 是业务模块锁定内容版本时使用的稳定引用。
 type ContentItemRef struct {
-	ItemCode    string
-	ItemVersion string
+	ItemCode    string `json:"item_code"`
+	ItemVersion string `json:"item_version"`
 }
 
 // ContentItemSnapshot 是 M5 对外输出的题面或全量内容快照。
 type ContentItemSnapshot struct {
-	ItemCode        string
-	ItemVersion     string
-	Type            int16
-	Title           string
-	Difficulty      int16
-	Visibility      int16
-	Tags            []string
-	KnowledgePoints []string
-	Body            map[string]any
-	VersionHash     string
-	Status          int16
+	ItemCode        string         `json:"item_code"`
+	ItemVersion     string         `json:"item_version"`
+	Type            int16          `json:"type"`
+	Title           string         `json:"title"`
+	Difficulty      int16          `json:"difficulty"`
+	Visibility      int16          `json:"visibility"`
+	Tags            []string       `json:"tags"`
+	KnowledgePoints []string       `json:"knowledge_points"`
+	Body            map[string]any `json:"body"`
+	VersionHash     string         `json:"version_hash"`
+	Status          int16          `json:"status"`
 }
 
 // ContentJudgeSpec 是 M5 提供给 M3 的黑盒判题配置快照。
 type ContentJudgeSpec struct {
-	ItemCode    string
-	ItemVersion string
-	JudgerCode  string
-	MaxScore    int32
-	SuiteRef    string
-	Expectation map[string]any
-	VersionHash string
+	ItemCode    string         `json:"item_code"`
+	ItemVersion string         `json:"item_version"`
+	JudgerCode  string         `json:"judger_code"`
+	MaxScore    int32          `json:"max_score"`
+	SuiteRef    string         `json:"suite_ref"`
+	Expectation map[string]any `json:"expectation"`
+	VersionHash string         `json:"version_hash"`
 }
 
 // ContentSystemImportRequest 是系统或外部源固化内容时的内部请求。

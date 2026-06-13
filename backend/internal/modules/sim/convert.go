@@ -2,9 +2,8 @@
 package sim
 
 import (
-	"encoding/json"
-
 	"chaimir/internal/contracts"
+	"chaimir/internal/platform/jsonx"
 )
 
 // packageToMap 转换仿真包为 API 输出。
@@ -92,8 +91,8 @@ func reportFromRequest(req ValidationReportRequest) ValidationReport {
 
 // rawReportMap 把动态报告请求解码为 key 集合,用于阻止覆盖后端静态字段。
 func rawReportMap(raw []byte) (map[string]any, error) {
-	out := map[string]any{}
-	if err := json.Unmarshal(raw, &out); err != nil {
+	out, err := jsonx.ObjectMapStrict(raw)
+	if err != nil {
 		return nil, err
 	}
 	return out, nil

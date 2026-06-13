@@ -37,7 +37,7 @@ type ContestModuleDeps struct {
 	Audit         audit.Writer
 	EventBus      eventbus.Bus
 	Auth          *auth.Manager
-	Roles         auth.RoleChecker
+	Roles         contracts.IdentityService
 }
 
 // RegisterContestModule 构造竞赛 store/service,注册路由、事件和撮合后台任务。

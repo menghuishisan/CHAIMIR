@@ -39,7 +39,7 @@ func NewClamAVScanner(network, address string, timeout time.Duration) (*ClamAVSc
 }
 
 // Scan 按 clamd INSTREAM 协议发送文件内容,并把扫描结果归一为平台统一 Verdict。
-func (s *ClamAVScanner) Scan(req ScanRequest) (ScanResult, error) {
+func (s *ClamAVScanner) Scan(req ScanRequest) (result ScanResult, err error) {
 	if s == nil {
 		return ScanResult{}, fmt.Errorf("ClamAV 扫描器未初始化")
 	}
@@ -51,7 +51,11 @@ func (s *ClamAVScanner) Scan(req ScanRequest) (ScanResult, error) {
 	if err != nil {
 		return ScanResult{}, fmt.Errorf("连接 ClamAV 失败: %w", err)
 	}
-	defer func() { _ = conn.Close() }()
+	defer func() {
+		if closeErr := conn.Close(); closeErr != nil && err == nil {
+			err = fmt.Errorf("关闭 ClamAV 连接失败: %w", closeErr)
+		}
+	}()
 	if err := conn.SetDeadline(time.Now().Add(effectiveTimeout(req.Timeout, s.timeout))); err != nil {
 		return ScanResult{}, fmt.Errorf("设置 ClamAV 超时失败: %w", err)
 	}

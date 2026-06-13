@@ -284,8 +284,14 @@ type GradeDTO struct {
 	UpdatedAt     string  `json:"updated_at"`
 }
 
-type ExportFileDTO struct {
-	FileName    string `json:"file_name"`
-	ContentType string `json:"content_type"`
-	DataBase64  string `json:"data_base64"`
+type ExportTaskDTO struct {
+	TaskID              string `json:"task_id"`
+	Channel             string `json:"channel"`
+	Subject             string `json:"subject"`
+	Status              string `json:"status"`
+	FileName            string `json:"file_name"`
+	ContentType         string `json:"content_type"`
+	ArtifactFileName    string `json:"artifact_file_name,omitempty"`
+	ArtifactContentType string `json:"artifact_content_type,omitempty"`
+	ArtifactSize        int64  `json:"artifact_size,omitempty"`
 }

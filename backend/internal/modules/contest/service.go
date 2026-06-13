@@ -7,7 +7,6 @@ import (
 
 	"chaimir/internal/contracts"
 	"chaimir/internal/platform/audit"
-	"chaimir/internal/platform/auth"
 	"chaimir/internal/platform/config"
 	"chaimir/internal/platform/eventbus"
 	"chaimir/internal/platform/tenant"
@@ -22,7 +21,7 @@ type Service struct {
 	ids           snowflake.Generator
 	cfg           config.ContestConfig
 	audit         audit.Writer
-	roles         auth.RoleChecker
+	roles         contracts.IdentityService
 	content       contracts.ContentReadService
 	contentImport contracts.ContentImportService
 	sandbox       contracts.SandboxService
@@ -39,7 +38,7 @@ type ServiceDeps struct {
 	IDs           snowflake.Generator
 	Config        config.ContestConfig
 	Audit         audit.Writer
-	Roles         auth.RoleChecker
+	Roles         contracts.IdentityService
 	Content       contracts.ContentReadService
 	ContentImport contracts.ContentImportService
 	Sandbox       contracts.SandboxService

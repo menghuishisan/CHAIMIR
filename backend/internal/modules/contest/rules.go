@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"chaimir/internal/platform/auth"
-	"chaimir/internal/platform/timex"
 	"chaimir/pkg/apperr"
 )
 
@@ -221,9 +220,4 @@ func validatePrevalidateRequest(req PrevalidateRequest) (PrevalidateRequest, err
 // stableContestCode 为漏洞题固化生成稳定内容 code。
 func stableContestCode(problem VulnProblem) string {
 	return fmt.Sprintf("VULN-%d", problem.ID)
-}
-
-// now 返回统一时间来源,便于测试替换 timex。
-func now() time.Time {
-	return timex.Now()
 }

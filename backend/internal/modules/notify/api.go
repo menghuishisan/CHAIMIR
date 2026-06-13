@@ -12,9 +12,9 @@ import (
 )
 
 // RegisterRoutes 注册通知模块 HTTP API。
-func RegisterRoutes(r gin.IRouter, svc *Service, authn *auth.Manager, roles auth.RoleChecker) error {
+func RegisterRoutes(r gin.IRouter, svc *Service, authn *auth.Manager, roles contracts.IdentityService) error {
 	if r == nil || svc == nil || authn == nil {
-		return apperr.ErrInternal.WithMessage("notify routes 依赖不完整")
+		return apperr.ErrHTTPServiceMissing
 	}
 	api := notifyAPI{svc: svc}
 	g := r.Group("/api/v1/notify")

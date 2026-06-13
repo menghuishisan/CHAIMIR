@@ -3,13 +3,15 @@ package contest
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/base32"
 	"strings"
 
 	"chaimir/internal/platform/audit"
+	"chaimir/internal/platform/timex"
 	"chaimir/pkg/apperr"
+	pkgcrypto "chaimir/pkg/crypto"
 )
+
+const inviteCodeLength = 13
 
 // Signup 创建当前学生在竞赛中的队伍,个人赛和团队赛都以 team 建模。
 func (s *Service) Signup(ctx context.Context, contestID int64, req SignupRequest) (TeamDTO, error) {
@@ -25,7 +27,7 @@ func (s *Service) Signup(ctx context.Context, contestID int64, req SignupRequest
 		if err != nil {
 			return err
 		}
-		if err := validateSignupWindow(contest, now()); err != nil {
+		if err := validateSignupWindow(contest, timex.Now()); err != nil {
 			return err
 		}
 		if existing, err := tx.GetTeamForAccount(ctx, id.TenantID, contestID, id.TenantID, id.AccountID); err == nil {
@@ -86,7 +88,7 @@ func (s *Service) JoinTeam(ctx context.Context, contestID int64, req JoinTeamReq
 		if contest.TeamMode != TeamModeGroup {
 			return apperr.ErrContestTeamInvalid
 		}
-		if err := validateSignupWindow(contest, now()); err != nil {
+		if err := validateSignupWindow(contest, timex.Now()); err != nil {
 			return err
 		}
 		if ids, err := tx.AccountTeamIDs(ctx, id.TenantID, contestID, id.TenantID, id.AccountID); err != nil {
@@ -136,7 +138,7 @@ func (s *Service) JoinTeamByID(ctx context.Context, teamID int64, req JoinTeamRe
 		if contest.TeamMode != TeamModeGroup || team.InviteCode != code || team.Status != TeamStatusBuilding {
 			return apperr.ErrContestTeamInvalid
 		}
-		if err := validateSignupWindow(contest, now()); err != nil {
+		if err := validateSignupWindow(contest, timex.Now()); err != nil {
 			return err
 		}
 		if ids, err := tx.AccountTeamIDs(ctx, id.TenantID, contest.ID, id.TenantID, id.AccountID); err != nil {
@@ -236,9 +238,9 @@ func isTeamLeader(memberTenantID, accountID int64, team Team) bool {
 
 // newInviteCode 生成团队赛邀请码,避免依赖可预测 ID。
 func newInviteCode() (string, error) {
-	raw := make([]byte, 8)
-	if _, err := rand.Read(raw); err != nil {
+	code, err := pkgcrypto.RandomToken(inviteCodeLength)
+	if err != nil {
 		return "", apperr.ErrContestTeamInvalid.WithCause(err)
 	}
-	return strings.TrimRight(base32.StdEncoding.WithPadding(base32.NoPadding).EncodeToString(raw), "="), nil
+	return code, nil
 }

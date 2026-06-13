@@ -7,6 +7,8 @@ import (
 	"time"
 
 	"chaimir/internal/modules/teaching/internal/sqlcgen"
+	"chaimir/internal/platform/pgtypex"
+	"chaimir/internal/platform/timex"
 )
 
 // formatNumber 把浮点配置写入 numeric 字段时转为十进制字符串,避免二进制浮点格式污染 SQL。
@@ -20,7 +22,7 @@ func (s *txStore) CreateCourse(ctx context.Context, course Course) (Course, erro
 	if err != nil {
 		return Course{}, err
 	}
-	row, err := s.q.CreateCourse(ctx, sqlcgen.CreateCourseParams{ID: course.ID, TenantID: course.TenantID, TeacherID: course.TeacherID, Name: course.Name, Description: course.Description, Type: course.Type, Difficulty: course.Difficulty, CoverUrl: textParam(course.CoverURL), Semester: course.Semester, Column10: formatNumber(course.Credits), Schedule: schedule, StartAt: timestamptzParam(course.StartAt), EndAt: timestamptzParam(course.EndAt), InviteCode: course.InviteCode, Status: course.Status, Visibility: course.Visibility})
+	row, err := s.q.CreateCourse(ctx, sqlcgen.CreateCourseParams{ID: course.ID, TenantID: course.TenantID, TeacherID: course.TeacherID, Name: course.Name, Description: course.Description, Type: course.Type, Difficulty: course.Difficulty, CoverUrl: pgtypex.Text(course.CoverURL), Semester: course.Semester, Column10: formatNumber(course.Credits), Schedule: schedule, StartAt: timex.Timestamptz(course.StartAt), EndAt: timex.Timestamptz(course.EndAt), InviteCode: course.InviteCode, Status: course.Status, Visibility: course.Visibility})
 	if err != nil {
 		return Course{}, err
 	}
@@ -102,7 +104,7 @@ func (s *txStore) UpdateCourse(ctx context.Context, course Course) (Course, erro
 	if err != nil {
 		return Course{}, err
 	}
-	row, err := s.q.UpdateCourse(ctx, sqlcgen.UpdateCourseParams{TenantID: course.TenantID, ID: course.ID, Name: course.Name, Description: course.Description, Type: course.Type, Difficulty: course.Difficulty, CoverUrl: textParam(course.CoverURL), Semester: course.Semester, Column9: formatNumber(course.Credits), Schedule: schedule, StartAt: timestamptzParam(course.StartAt), EndAt: timestamptzParam(course.EndAt)})
+	row, err := s.q.UpdateCourse(ctx, sqlcgen.UpdateCourseParams{TenantID: course.TenantID, ID: course.ID, Name: course.Name, Description: course.Description, Type: course.Type, Difficulty: course.Difficulty, CoverUrl: pgtypex.Text(course.CoverURL), Semester: course.Semester, Column9: formatNumber(course.Credits), Schedule: schedule, StartAt: timex.Timestamptz(course.StartAt), EndAt: timex.Timestamptz(course.EndAt)})
 	if err != nil {
 		return Course{}, err
 	}
@@ -143,7 +145,7 @@ func (s *txStore) CountCourseLessons(ctx context.Context, tenantID, courseID int
 
 // ListCoursesDueToRun 查询已到开始时间但尚未进入进行中的课程。
 func (s *txStore) ListCoursesDueToRun(ctx context.Context, now time.Time) ([]Course, error) {
-	rows, err := s.q.ListCoursesDueToRun(ctx, timestamptzParam(now))
+	rows, err := s.q.ListCoursesDueToRun(ctx, timex.Timestamptz(now))
 	if err != nil {
 		return nil, err
 	}
@@ -160,7 +162,7 @@ func (s *txStore) ListCoursesDueToRun(ctx context.Context, now time.Time) ([]Cou
 
 // ListCoursesDueToEnd 查询已到结束时间但尚未结束的课程。
 func (s *txStore) ListCoursesDueToEnd(ctx context.Context, now time.Time) ([]Course, error) {
-	rows, err := s.q.ListCoursesDueToEnd(ctx, timestamptzParam(now))
+	rows, err := s.q.ListCoursesDueToEnd(ctx, timex.Timestamptz(now))
 	if err != nil {
 		return nil, err
 	}

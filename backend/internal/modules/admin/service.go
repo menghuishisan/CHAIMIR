@@ -2,9 +2,11 @@
 package admin
 
 import (
+	"bytes"
 	"context"
 	"encoding/csv"
 	"fmt"
+	"io"
 	"strings"
 	"time"
 
@@ -12,8 +14,10 @@ import (
 	"chaimir/internal/platform/audit"
 	"chaimir/internal/platform/config"
 	"chaimir/internal/platform/secretmap"
+	"chaimir/internal/platform/storage"
 	"chaimir/internal/platform/tenant"
 	"chaimir/internal/platform/timex"
+	"chaimir/internal/platform/transfer"
 	"chaimir/pkg/apperr"
 	pkgcrypto "chaimir/pkg/crypto"
 	"chaimir/pkg/snowflake"
@@ -21,46 +25,77 @@ import (
 
 // Service 承载 M9 管理后台业务编排。
 type Service struct {
-	store      Store
-	ids        snowflake.Generator
-	audit      audit.Writer
-	roles      roleReader
-	identity   contracts.IdentityTenantReadService
-	stats      contracts.IdentityStatsService
-	auditRead  contracts.IdentityAuditReadService
-	teaching   contracts.TeachingReadService
-	sandbox    contracts.SandboxService
-	experiment contracts.ExperimentReadService
-	contest    contracts.ContestReadService
-	notify     contracts.NotifyService
-	monitoring config.MonitoringConfig
+	store        Store
+	ids          snowflake.Generator
+	audit        audit.Writer
+	roles        roleReader
+	identity     contracts.IdentityTenantReadService
+	stats        contracts.IdentityStatsService
+	auditRead    contracts.IdentityAuditReadService
+	teaching     contracts.TeachingReadService
+	sandbox      contracts.SandboxService
+	experiment   contracts.ExperimentReadService
+	contest      contracts.ContestReadService
+	notify       contracts.NotifyService
+	monitoring   config.MonitoringConfig
 	secretCipher *pkgcrypto.Cipher
+	transfers    transferService
+	storage      objectStorage
+	files        fileService
+}
+
+// objectStorage 描述 M9 导出产物写入统一对象存储所需能力。
+type objectStorage interface {
+	Put(ctx context.Context, bucket, key string, r io.Reader, size int64, contentType string) error
+	BucketReport() string
+}
+
+// fileService 描述 M9 复用统一文件服务规划对象路径所需能力。
+type fileService interface {
+	PlanUpload(req storage.PlanUploadRequest) (storage.UploadPlan, error)
+}
+
+// transferService 描述 M9 调用统一导入导出中心所需能力。
+type transferService interface {
+	CreateTask(context.Context, transfer.NewTaskRequest) (transfer.Task, error)
+	CompleteTask(context.Context, int64, int64, transfer.CompleteTaskRequest) (transfer.Task, error)
 }
 
 // ServiceDeps 是 M9 服务装配依赖。
 type ServiceDeps struct {
-	Store      Store
-	IDs        snowflake.Generator
-	Audit      audit.Writer
-	Roles      roleReader
-	Identity   contracts.IdentityTenantReadService
-	Stats      contracts.IdentityStatsService
-	AuditRead  contracts.IdentityAuditReadService
-	Teaching   contracts.TeachingReadService
-	Sandbox    contracts.SandboxService
-	Experiment contracts.ExperimentReadService
-	Contest    contracts.ContestReadService
-	Notify     contracts.NotifyService
-	Monitoring config.MonitoringConfig
-	Cipher     *pkgcrypto.Cipher
+	Store       Store
+	IDs         snowflake.Generator
+	Audit       audit.Writer
+	Roles       roleReader
+	Identity    contracts.IdentityTenantReadService
+	Stats       contracts.IdentityStatsService
+	AuditRead   contracts.IdentityAuditReadService
+	Teaching    contracts.TeachingReadService
+	Sandbox     contracts.SandboxService
+	Experiment  contracts.ExperimentReadService
+	Contest     contracts.ContestReadService
+	Notify      contracts.NotifyService
+	Monitoring  config.MonitoringConfig
+	Cipher      *pkgcrypto.Cipher
+	Transfers   transferService
+	Storage     *storage.Storage
+	Objects     objectStorage
+	FileService fileService
 }
 
 // NewService 构造 M9 服务。
 func NewService(deps ServiceDeps) (*Service, error) {
-	if deps.Store == nil || deps.IDs == nil || deps.Audit == nil || deps.Roles == nil || deps.Identity == nil || deps.Stats == nil || deps.AuditRead == nil {
+	if deps.Store == nil || deps.IDs == nil || deps.Audit == nil || deps.Roles == nil || deps.Identity == nil || deps.Stats == nil || deps.AuditRead == nil || deps.Teaching == nil || deps.Sandbox == nil || deps.Experiment == nil || deps.Contest == nil || deps.Notify == nil {
 		return nil, fmt.Errorf("admin service 依赖不完整")
 	}
-	return &Service{store: deps.Store, ids: deps.IDs, audit: deps.Audit, roles: deps.Roles, identity: deps.Identity, stats: deps.Stats, auditRead: deps.AuditRead, teaching: deps.Teaching, sandbox: deps.Sandbox, experiment: deps.Experiment, contest: deps.Contest, notify: deps.Notify, monitoring: deps.Monitoring, secretCipher: deps.Cipher}, nil
+	objects := deps.Objects
+	if objects == nil {
+		objects = deps.Storage
+	}
+	if deps.Transfers == nil || objects == nil || deps.FileService == nil {
+		return nil, fmt.Errorf("admin service 缺少统一导入导出或文件服务依赖")
+	}
+	return &Service{store: deps.Store, ids: deps.IDs, audit: deps.Audit, roles: deps.Roles, identity: deps.Identity, stats: deps.Stats, auditRead: deps.AuditRead, teaching: deps.Teaching, sandbox: deps.Sandbox, experiment: deps.Experiment, contest: deps.Contest, notify: deps.Notify, monitoring: deps.Monitoring, secretCipher: deps.Cipher, transfers: deps.Transfers, storage: objects, files: deps.FileService}, nil
 }
 
 // PlatformDashboard 聚合平台级看板。
@@ -86,38 +121,30 @@ func (s *Service) SchoolDashboard(ctx context.Context) (DashboardDTO, error) {
 		return DashboardDTO{}, apperr.ErrAdminDashboardInvalid.WithCause(err)
 	}
 	out := DashboardDTO{Scope: ScopeTenant, TenantID: id.TenantID, AccountCount: stats.AccountCount, TeacherCount: stats.TeacherCount, StudentCount: stats.StudentCount, ActiveAccountCount: stats.ActiveAccountCount, GeneratedAt: timex.Now()}
-	if s.teaching != nil {
-		t, err := s.teaching.Stats(ctx, id.TenantID)
-		if err != nil {
-			return DashboardDTO{}, apperr.ErrAdminDashboardInvalid.WithCause(err)
-		}
-		out.CourseCount = t.CourseCount
-		out.ActiveCourseCount = t.ActiveCourseCount
+	t, err := s.teaching.Stats(ctx, id.TenantID)
+	if err != nil {
+		return DashboardDTO{}, apperr.ErrAdminDashboardInvalid.WithCause(err)
 	}
-	if s.experiment != nil {
-		e, err := s.experiment.Stats(ctx, contracts.ExperimentStatsQuery{TenantID: id.TenantID})
-		if err != nil {
-			return DashboardDTO{}, apperr.ErrAdminDashboardInvalid.WithCause(err)
-		}
-		out.ExperimentCount = e.ExperimentCount
-		out.ActiveInstanceCount = e.ActiveInstanceCount
+	out.CourseCount = t.CourseCount
+	out.ActiveCourseCount = t.ActiveCourseCount
+	e, err := s.experiment.Stats(ctx, contracts.ExperimentStatsQuery{TenantID: id.TenantID})
+	if err != nil {
+		return DashboardDTO{}, apperr.ErrAdminDashboardInvalid.WithCause(err)
 	}
-	if s.contest != nil {
-		c, err := s.contest.Stats(ctx, id.TenantID)
-		if err != nil {
-			return DashboardDTO{}, apperr.ErrAdminDashboardInvalid.WithCause(err)
-		}
-		out.ContestCount = c.ContestCount
-		out.ActiveContestCount = c.ActiveContestCount
+	out.ExperimentCount = e.ExperimentCount
+	out.ActiveInstanceCount = e.ActiveInstanceCount
+	c, err := s.contest.Stats(ctx, id.TenantID)
+	if err != nil {
+		return DashboardDTO{}, apperr.ErrAdminDashboardInvalid.WithCause(err)
 	}
-	if s.sandbox != nil {
-		q, err := s.sandbox.Stats(ctx, id.TenantID)
-		if err != nil {
-			return DashboardDTO{}, apperr.ErrAdminDashboardInvalid.WithCause(err)
-		}
-		out.ActiveSandboxCount = q.ActiveSandboxCount
-		out.ResourceQuotaSnapshot = map[string]any{"max_concurrent_sandbox": q.MaxConcurrentSandbox, "max_cpu": q.MaxCPU, "max_memory_mb": q.MaxMemoryMB}
+	out.ContestCount = c.ContestCount
+	out.ActiveContestCount = c.ActiveContestCount
+	q, err := s.sandbox.Stats(ctx, id.TenantID)
+	if err != nil {
+		return DashboardDTO{}, apperr.ErrAdminDashboardInvalid.WithCause(err)
 	}
+	out.ActiveSandboxCount = q.ActiveSandboxCount
+	out.ResourceQuotaSnapshot = map[string]any{"max_concurrent_sandbox": q.MaxConcurrentSandbox, "max_cpu": q.MaxCPU, "max_memory_mb": q.MaxMemoryMB}
 	return out, nil
 }
 
@@ -209,18 +236,67 @@ func (s *Service) QueryAudit(ctx context.Context, query contracts.AuditQuery) (c
 	return result, nil
 }
 
-// ExportAuditCSV 导出审计日志 CSV。
-func (s *Service) ExportAuditCSV(ctx context.Context, query contracts.AuditQuery) ([]byte, error) {
+const auditExportSubject = "admin.audit_export"
+
+// ExportAuditCSV 导出审计日志 CSV 并登记到统一导入导出中心。
+func (s *Service) ExportAuditCSV(ctx context.Context, query contracts.AuditQuery) (ExportTaskDTO, error) {
 	id, err := s.currentAdminIdentity(ctx)
 	if err != nil {
-		return nil, err
+		return ExportTaskDTO{}, err
 	}
 	query.Page = 1
 	query.Size = 1000
 	result, err := s.QueryAudit(ctx, query)
 	if err != nil {
-		return nil, err
+		return ExportTaskDTO{}, err
 	}
+	fileName := "audit.csv"
+	task, err := s.transfers.CreateTask(ctx, transfer.NewTaskRequest{
+		TenantID:    id.TenantID,
+		AccountID:   id.AccountID,
+		Channel:     transfer.ChannelExport,
+		Subject:     auditExportSubject,
+		FileName:    fileName,
+		ContentType: "text/csv; charset=utf-8",
+	})
+	if err != nil {
+		return ExportTaskDTO{}, apperr.ErrAdminAuditExportFailed.WithCause(err)
+	}
+	data, err := auditCSVBytes(result)
+	if err != nil {
+		return ExportTaskDTO{}, err
+	}
+	plan, err := s.files.PlanUpload(storage.PlanUploadRequest{
+		TenantID:        id.TenantID,
+		AccountID:       id.AccountID,
+		Module:          "transfer",
+		ResourceType:    string(transfer.ChannelExport),
+		ResourceID:      fmt.Sprint(task.TaskID),
+		FileName:        fileName,
+		ContentType:     "text/csv; charset=utf-8",
+		Size:            int64(len(data)),
+		ExpectedBucket:  s.storage.BucketReport(),
+		AllowedFileName: true,
+		Content:         data,
+	})
+	if err != nil {
+		return ExportTaskDTO{}, apperr.ErrAdminAuditExportFailed.WithCause(err)
+	}
+	if err := s.storage.Put(ctx, plan.Bucket, plan.Key, bytes.NewReader(data), int64(len(data)), "text/csv; charset=utf-8"); err != nil {
+		return ExportTaskDTO{}, apperr.ErrAdminAuditExportFailed.WithCause(err)
+	}
+	completed, err := s.transfers.CompleteTask(ctx, id.TenantID, task.TaskID, transfer.CompleteTaskRequest{ObjectRef: plan.ObjectRef, Size: int64(len(data))})
+	if err != nil {
+		return ExportTaskDTO{}, apperr.ErrAdminAuditExportFailed.WithCause(err)
+	}
+	if err := s.writeAudit(ctx, id, "admin.audit.export", "audit_log", 0, map[string]any{"size": result.Size, "total": result.Total, "transfer_task_id": task.TaskID}); err != nil {
+		return ExportTaskDTO{}, apperr.ErrAdminAuditWriteFailed.WithCause(err)
+	}
+	return exportTaskDTO(completed), nil
+}
+
+// auditCSVBytes 将审计查询结果编码为 CSV 文件内容。
+func auditCSVBytes(result contracts.AuditQueryResult) ([]byte, error) {
 	var b strings.Builder
 	w := csv.NewWriter(&b)
 	if err := w.Write([]string{"id", "tenant_id", "actor_id", "action", "target_type", "target_id", "trace_id", "created_at"}); err != nil {
@@ -234,9 +310,6 @@ func (s *Service) ExportAuditCSV(ctx context.Context, query contracts.AuditQuery
 	w.Flush()
 	if err := w.Error(); err != nil {
 		return nil, apperr.ErrAdminAuditExportFailed.WithCause(err)
-	}
-	if err := s.writeAudit(ctx, id, "admin.audit.export", "audit_log", 0, map[string]any{"size": result.Size, "total": result.Total}); err != nil {
-		return nil, apperr.ErrAdminAuditWriteFailed.WithCause(err)
 	}
 	return []byte(b.String()), nil
 }
@@ -480,24 +553,22 @@ func (s *Service) HandleAlertEvent(ctx context.Context, eventID int64, req Alert
 	if err != nil {
 		return AlertEventDTO{}, apperr.ErrAdminAlertNotFound.WithCause(err)
 	}
-	if s.notify != nil {
-		topicTenantID := id.TenantID
-		if out.TenantID > 0 {
-			topicTenantID = out.TenantID
-		}
-		if err := s.notify.Push(ctx, contracts.NotifyPushRequest{
-			TenantID: topicTenantID,
-			Topic:    fmt.Sprintf("admin:%d:alerts", topicTenantID),
-			Payload: map[string]any{
-				"event_id":   out.ID,
-				"rule_id":    out.RuleID,
-				"level":      out.Level,
-				"status":     out.Status,
-				"handler_id": out.HandlerID,
-			},
-		}); err != nil {
-			return AlertEventDTO{}, apperr.ErrAdminAlertInvalid.WithCause(err)
-		}
+	topicTenantID := id.TenantID
+	if out.TenantID > 0 {
+		topicTenantID = out.TenantID
+	}
+	if err := s.notify.Push(ctx, contracts.NotifyPushRequest{
+		TenantID: topicTenantID,
+		Topic:    fmt.Sprintf("admin:%d:alerts", topicTenantID),
+		Payload: map[string]any{
+			"event_id":   out.ID,
+			"rule_id":    out.RuleID,
+			"level":      out.Level,
+			"status":     out.Status,
+			"handler_id": out.HandlerID,
+		},
+	}); err != nil {
+		return AlertEventDTO{}, apperr.ErrAdminAlertInvalid.WithCause(err)
 	}
 	if err := s.writeAudit(ctx, id, "admin.alert.handle", "alert_event", out.ID, map[string]any{"status": out.Status}); err != nil {
 		return AlertEventDTO{}, apperr.ErrAdminAuditWriteFailed.WithCause(err)
@@ -666,42 +737,34 @@ func (s *Service) snapshotTenantStats(ctx context.Context, tenantID int64, statD
 		"student_count":        stats.StudentCount,
 		"active_account_count": stats.ActiveAccountCount,
 	}
-	if s.teaching != nil {
-		t, err := s.teaching.Stats(ctx, tenantID)
-		if err != nil {
-			return apperr.ErrAdminStatisticsInvalid.WithCause(err)
-		}
-		metrics["course_count"] = t.CourseCount
-		metrics["active_course_count"] = t.ActiveCourseCount
-		metrics["learning_duration_sec"] = t.LearningDurationSec
+	t, err := s.teaching.Stats(ctx, tenantID)
+	if err != nil {
+		return apperr.ErrAdminStatisticsInvalid.WithCause(err)
 	}
-	if s.experiment != nil {
-		e, err := s.experiment.Stats(ctx, contracts.ExperimentStatsQuery{TenantID: tenantID})
-		if err != nil {
-			return apperr.ErrAdminStatisticsInvalid.WithCause(err)
-		}
-		metrics["experiment_count"] = e.ExperimentCount
-		metrics["active_instance_count"] = e.ActiveInstanceCount
+	metrics["course_count"] = t.CourseCount
+	metrics["active_course_count"] = t.ActiveCourseCount
+	metrics["learning_duration_sec"] = t.LearningDurationSec
+	e, err := s.experiment.Stats(ctx, contracts.ExperimentStatsQuery{TenantID: tenantID})
+	if err != nil {
+		return apperr.ErrAdminStatisticsInvalid.WithCause(err)
 	}
-	if s.contest != nil {
-		c, err := s.contest.Stats(ctx, tenantID)
-		if err != nil {
-			return apperr.ErrAdminStatisticsInvalid.WithCause(err)
-		}
-		metrics["contest_count"] = c.ContestCount
-		metrics["active_contest_count"] = c.ActiveContestCount
-		metrics["participant_count"] = c.ParticipantCount
+	metrics["experiment_count"] = e.ExperimentCount
+	metrics["active_instance_count"] = e.ActiveInstanceCount
+	c, err := s.contest.Stats(ctx, tenantID)
+	if err != nil {
+		return apperr.ErrAdminStatisticsInvalid.WithCause(err)
 	}
-	if s.sandbox != nil {
-		q, err := s.sandbox.Stats(ctx, tenantID)
-		if err != nil {
-			return apperr.ErrAdminStatisticsInvalid.WithCause(err)
-		}
-		metrics["active_sandbox_count"] = q.ActiveSandboxCount
-		metrics["max_concurrent_sandbox"] = q.MaxConcurrentSandbox
-		metrics["max_cpu"] = q.MaxCPU
-		metrics["max_memory_mb"] = q.MaxMemoryMB
+	metrics["contest_count"] = c.ContestCount
+	metrics["active_contest_count"] = c.ActiveContestCount
+	metrics["participant_count"] = c.ParticipantCount
+	q, err := s.sandbox.Stats(ctx, tenantID)
+	if err != nil {
+		return apperr.ErrAdminStatisticsInvalid.WithCause(err)
 	}
+	metrics["active_sandbox_count"] = q.ActiveSandboxCount
+	metrics["max_concurrent_sandbox"] = q.MaxConcurrentSandbox
+	metrics["max_cpu"] = q.MaxCPU
+	metrics["max_memory_mb"] = q.MaxMemoryMB
 	return s.upsertStatistics(ctx, tenantID, ScopeTenant, tenantID, statDate, metrics)
 }
 

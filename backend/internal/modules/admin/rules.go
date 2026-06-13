@@ -2,11 +2,11 @@
 package admin
 
 import (
-	"encoding/json"
 	"net/url"
 	"strings"
 	"time"
 
+	"chaimir/internal/platform/jsonx"
 	"chaimir/pkg/apperr"
 )
 
@@ -17,7 +17,7 @@ func ParseMonitoringPanels(raw string) ([]MonitoringPanel, error) {
 		return nil, apperr.ErrAdminMonitoringInvalid
 	}
 	var panels []MonitoringPanel
-	if err := json.Unmarshal([]byte(raw), &panels); err != nil {
+	if err := jsonx.DecodeStrict([]byte(raw), &panels); err != nil {
 		return nil, apperr.ErrAdminMonitoringInvalid.WithCause(err)
 	}
 	for i := range panels {

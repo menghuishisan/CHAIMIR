@@ -8,10 +8,10 @@ import (
 
 	"chaimir/internal/modules/sandbox/internal/sqlcgen"
 	"chaimir/internal/platform/db"
+	"chaimir/internal/platform/pgtypex"
 	"chaimir/internal/platform/timex"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgtype"
 )
 
 // Store 定义 service 所需的 sandbox 持久化能力,不暴露 sqlc 行类型。
@@ -173,8 +173,8 @@ func (s *txStore) UpsertRuntime(ctx context.Context, id int64, req RuntimeReques
 		Eco:            req.Eco,
 		AdapterLevel:   req.AdapterLevel,
 		AdapterSpec:    rawSpec,
-		CapabilityImpl: textParam(req.CapabilityImpl),
-		PluginRef:      textParam(req.PluginRef),
+		CapabilityImpl: pgtypex.Text(req.CapabilityImpl),
+		PluginRef:      pgtypex.Text(req.PluginRef),
 		SelftestStatus: RuntimeSelftestPending,
 		SelftestDetail: []byte(`{}`),
 		Status:         req.Status,
@@ -326,8 +326,8 @@ func (s *txStore) UpsertTool(ctx context.Context, id int64, req ToolRequest, spe
 		Code:         req.Code,
 		Name:         req.Name,
 		Kind:         req.Kind,
-		ImageUrl:     textParam(req.ImageURL),
-		Port:         int4Param(req.Port),
+		ImageUrl:     pgtypex.Text(req.ImageURL),
+		Port:         pgtypex.Int4When(req.Port, req.Port > 0),
 		EcoTags:      stringsJoin(req.EcoTags),
 		ResourceSpec: rawSpec,
 		Status:       req.Status,
@@ -385,10 +385,10 @@ func (s *txStore) CreateSandbox(ctx context.Context, input CreateSandboxInput) (
 		KeepAlive:         input.KeepAlive,
 		SnapshotEnabled:   input.SnapshotEnabled,
 		CodeStorageKey:    input.CodeStorageKey,
-		CodeHash:          textParam(input.CodeHash),
-		InitCodeRef:       textParam(input.InitCodeRef),
-		InitScriptRef:     textParam(input.InitScriptRef),
-		SnapshotRef:       textParam(input.SnapshotRef),
+		CodeHash:          pgtypex.Text(input.CodeHash),
+		InitCodeRef:       pgtypex.Text(input.InitCodeRef),
+		InitScriptRef:     pgtypex.Text(input.InitScriptRef),
+		SnapshotRef:       pgtypex.Text(input.SnapshotRef),
 		SnapshotDomains:   jsonStringArray(input.SnapshotDomains),
 		SnapshotCreatedAt: timex.Timestamptz(input.SnapshotCreatedAt),
 		SnapshotExpireAt:  timex.Timestamptz(input.SnapshotExpireAt),
@@ -460,7 +460,7 @@ func (s *txStore) MarkSandboxActive(ctx context.Context, tenantID, sandboxID int
 
 // UpdateSandboxCode 更新沙箱代码对象引用和哈希。
 func (s *txStore) UpdateSandboxCode(ctx context.Context, tenantID, sandboxID int64, key, hash string) (Sandbox, error) {
-	row, err := s.q.UpdateSandboxCode(ctx, sqlcgen.UpdateSandboxCodeParams{TenantID: tenantID, ID: sandboxID, CodeStorageKey: key, CodeHash: textParam(hash)})
+	row, err := s.q.UpdateSandboxCode(ctx, sqlcgen.UpdateSandboxCodeParams{TenantID: tenantID, ID: sandboxID, CodeStorageKey: key, CodeHash: pgtypex.Text(hash)})
 	if err != nil {
 		return Sandbox{}, err
 	}
@@ -472,7 +472,7 @@ func (s *txStore) UpdateSandboxSnapshot(ctx context.Context, tenantID, sandboxID
 	row, err := s.q.UpdateSandboxSnapshot(ctx, sqlcgen.UpdateSandboxSnapshotParams{
 		TenantID:          tenantID,
 		ID:                sandboxID,
-		SnapshotRef:       textParam(ref),
+		SnapshotRef:       pgtypex.Text(ref),
 		SnapshotDomains:   jsonStringArray(domains),
 		SnapshotCreatedAt: timex.Timestamptz(createdAt),
 		SnapshotExpireAt:  timex.Timestamptz(expireAt),
@@ -551,16 +551,6 @@ func sandboxRows(rows []sqlcgen.Sandbox) []Sandbox {
 		out = append(out, sandboxFromRow(row))
 	}
 	return out
-}
-
-// textParam 构造可空 text 参数。
-func textParam(value string) pgtype.Text {
-	return pgtype.Text{String: value, Valid: value != ""}
-}
-
-// int4Param 构造可空 int4 参数。
-func int4Param(value int32) pgtype.Int4 {
-	return pgtype.Int4{Int32: value, Valid: value > 0}
 }
 
 // jsonStringArray 把字符串数组编码为 JSONB 参数,空数组保持可审计的显式空列表。

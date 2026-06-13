@@ -3,13 +3,13 @@ package notify
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
 
 	"chaimir/internal/contracts"
 	"chaimir/internal/platform/config"
+	"chaimir/internal/platform/jsonx"
 	"chaimir/internal/platform/tenant"
 	"chaimir/internal/platform/timex"
 	"chaimir/internal/platform/ws"
@@ -116,7 +116,7 @@ func (s *Service) Push(ctx context.Context, req contracts.NotifyPushRequest) err
 	if err := ValidatePushTopic(req.TenantID, req.Topic); err != nil {
 		return err
 	}
-	data, err := json.Marshal(map[string]any{"topic": req.Topic, "payload": req.Payload})
+	data, err := jsonx.AnyBytes(map[string]any{"topic": req.Topic, "payload": req.Payload}, apperr.ErrNotifyPushFailed)
 	if err != nil {
 		return apperr.ErrNotifyPushFailed.WithCause(err)
 	}
@@ -390,7 +390,7 @@ func (s *Service) refreshUnread(ctx context.Context, tenantID, accountID int64) 
 	if err != nil {
 		return err
 	}
-	data, err := json.Marshal(map[string]any{"type": "unread", "unread": unread})
+	data, err := jsonx.AnyBytes(map[string]any{"type": "unread", "unread": unread}, apperr.ErrNotifyInboxQueryInvalid)
 	if err != nil {
 		return err
 	}

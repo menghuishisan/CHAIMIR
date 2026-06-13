@@ -4,12 +4,17 @@ package teaching
 import (
 	"bytes"
 	"context"
-	"encoding/base64"
+	"fmt"
 	"strconv"
 	"time"
 
 	"chaimir/internal/contracts"
 	"chaimir/internal/platform/audit"
+	"chaimir/internal/platform/pagex"
+	"chaimir/internal/platform/storage"
+	"chaimir/internal/platform/timex"
+	"chaimir/internal/platform/transfer"
+	"chaimir/internal/platform/upload"
 	"chaimir/pkg/apperr"
 
 	"github.com/xuri/excelize/v2"
@@ -142,7 +147,7 @@ func (s *Service) ListPosts(ctx context.Context, courseID int64, page, size int)
 	if err != nil {
 		return nil, 0, 0, err
 	}
-	normalizePage(&page, &size)
+	page, size = pagex.Normalize(page, size)
 	var posts []DiscussionPost
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
 		if err := s.ensureCourseReadable(ctx, tx, id.TenantID, courseID, id.AccountID); err != nil {
@@ -526,11 +531,13 @@ func (s *Service) OverrideGrade(ctx context.Context, courseID, studentID int64, 
 	return gradeDTO(grade), nil
 }
 
-// ExportGrades 导出课程成绩 Excel。
-func (s *Service) ExportGrades(ctx context.Context, courseID int64) (ExportFileDTO, error) {
+const gradeExportSubject = "teaching.course_grade_export"
+
+// ExportGrades 导出课程成绩 Excel,并把产物登记到统一导入导出中心。
+func (s *Service) ExportGrades(ctx context.Context, courseID int64) (ExportTaskDTO, error) {
 	id, err := currentIdentity(ctx)
 	if err != nil {
-		return ExportFileDTO{}, err
+		return ExportTaskDTO{}, err
 	}
 	var grades []CourseGrade
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
@@ -544,21 +551,33 @@ func (s *Service) ExportGrades(ctx context.Context, courseID int64) (ExportFileD
 		grades, err = s.listCourseGradesForExport(ctx, tx, id.TenantID, courseID)
 		return err
 	}); err != nil {
-		return ExportFileDTO{}, mapGradeError(err)
+		return ExportTaskDTO{}, mapGradeError(err)
+	}
+	fileName := fmt.Sprintf("course-%d-grades.xlsx", courseID)
+	task, err := s.transfers.CreateTask(ctx, transfer.NewTaskRequest{
+		TenantID:    id.TenantID,
+		AccountID:   id.AccountID,
+		Channel:     transfer.ChannelExport,
+		Subject:     gradeExportSubject,
+		FileName:    fileName,
+		ContentType: upload.XLSXContentType,
+	})
+	if err != nil {
+		return ExportTaskDTO{}, apperr.ErrTeachingGradeExportFailed.WithCause(err)
 	}
 	f := excelize.NewFile()
 	defer f.Close()
 	sheet := "成绩"
 	index, err := f.NewSheet(sheet)
 	if err != nil {
-		return ExportFileDTO{}, apperr.ErrTeachingGradeExportFailed.WithCause(err)
+		return ExportTaskDTO{}, apperr.ErrTeachingGradeExportFailed.WithCause(err)
 	}
 	f.SetActiveSheet(index)
 	headers := []string{"course_id", "student_id", "auto_total", "override_total", "final_total", "is_overridden", "is_locked"}
 	for i, header := range headers {
 		cell, _ := excelize.CoordinatesToCellName(i+1, 1)
 		if err := f.SetCellValue(sheet, cell, header); err != nil {
-			return ExportFileDTO{}, apperr.ErrTeachingGradeExportFailed.WithCause(err)
+			return ExportTaskDTO{}, apperr.ErrTeachingGradeExportFailed.WithCause(err)
 		}
 	}
 	for r, grade := range grades {
@@ -569,15 +588,42 @@ func (s *Service) ExportGrades(ctx context.Context, courseID int64) (ExportFileD
 		for c, value := range values {
 			cell, _ := excelize.CoordinatesToCellName(c+1, r+2)
 			if err := f.SetCellValue(sheet, cell, value); err != nil {
-				return ExportFileDTO{}, apperr.ErrTeachingGradeExportFailed.WithCause(err)
+				return ExportTaskDTO{}, apperr.ErrTeachingGradeExportFailed.WithCause(err)
 			}
 		}
 	}
 	var buf bytes.Buffer
 	if err := f.Write(&buf); err != nil {
-		return ExportFileDTO{}, apperr.ErrTeachingGradeExportFailed.WithCause(err)
+		return ExportTaskDTO{}, apperr.ErrTeachingGradeExportFailed.WithCause(err)
 	}
-	return ExportFileDTO{FileName: "course-grades.xlsx", ContentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", DataBase64: base64.StdEncoding.EncodeToString(buf.Bytes())}, nil
+	data := buf.Bytes()
+	plan, err := s.files.PlanUpload(storage.PlanUploadRequest{
+		TenantID:        id.TenantID,
+		AccountID:       id.AccountID,
+		Module:          "transfer",
+		ResourceType:    string(transfer.ChannelExport),
+		ResourceID:      strconv.FormatInt(task.TaskID, 10),
+		FileName:        fileName,
+		ContentType:     upload.XLSXContentType,
+		Size:            int64(len(data)),
+		ExpectedBucket:  s.storage.BucketReport(),
+		AllowedFileName: true,
+		Content:         data,
+		KindValidator: func(fileName, contentType string, content []byte) bool {
+			return upload.CSVOrXLSXKind(fileName, contentType, content) == upload.KindXLSX
+		},
+	})
+	if err != nil {
+		return ExportTaskDTO{}, apperr.ErrTeachingGradeExportFailed.WithCause(err)
+	}
+	if err := s.storage.Put(ctx, plan.Bucket, plan.Key, bytes.NewReader(data), int64(len(data)), upload.XLSXContentType); err != nil {
+		return ExportTaskDTO{}, apperr.ErrTeachingGradeExportFailed.WithCause(err)
+	}
+	completed, err := s.transfers.CompleteTask(ctx, id.TenantID, task.TaskID, transfer.CompleteTaskRequest{ObjectRef: plan.ObjectRef, Size: int64(len(data))})
+	if err != nil {
+		return ExportTaskDTO{}, apperr.ErrTeachingGradeExportFailed.WithCause(err)
+	}
+	return exportTaskDTO(completed), nil
 }
 
 // ListCourseGrades 实现 M6 对 M11 的只读成绩契约。
@@ -685,5 +731,5 @@ func (s *Service) publishTeachingGradeUpdated(ctx context.Context, tenantID, cou
 
 // timeNowUTC 便于事件时间统一走 UTC。
 func timeNowUTC() time.Time {
-	return time.Now().UTC()
+	return timex.Now()
 }

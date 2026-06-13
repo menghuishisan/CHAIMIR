@@ -4,20 +4,22 @@ package contest
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"strconv"
 	"strings"
 	"time"
 
 	"chaimir/internal/contracts"
 	"chaimir/internal/platform/audit"
+	"chaimir/internal/platform/jsonx"
+	"chaimir/internal/platform/netx"
 	"chaimir/internal/platform/secretmap"
+	"chaimir/internal/platform/timex"
 	"chaimir/pkg/apperr"
 	"chaimir/pkg/chainassert"
+	"chaimir/pkg/logging"
 )
 
 // UpsertVulnSource 创建或更新本租户漏洞源。
@@ -251,9 +253,9 @@ func (s *Service) fetchVulnCases(ctx context.Context, source VulnSource) ([]Vuln
 	timeout := sourceTimeoutSeconds(cfg, s.cfg.VulnSourceTimeoutSeconds)
 	var body io.Reader
 	if method == http.MethodPost {
-		raw, err := json.Marshal(cfg["body"])
+		raw, err := jsonx.AnyBytes(cfg["body"], apperr.ErrContestVulnSourceInvalid)
 		if err != nil {
-			return nil, apperr.ErrContestVulnSourceInvalid.WithCause(err)
+			return nil, err
 		}
 		body = bytes.NewReader(raw)
 	}
@@ -270,7 +272,7 @@ func (s *Service) fetchVulnCases(ctx context.Context, source VulnSource) ([]Vuln
 			req.Header.Set(key, value)
 		}
 	}
-	client := &http.Client{Timeout: time.Duration(timeout) * time.Second}
+	client := netx.NewPublicHTTPClient(time.Duration(timeout) * time.Second)
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, apperr.ErrContestVulnSourceFetchFailed.WithCause(err)
@@ -288,7 +290,7 @@ func (s *Service) fetchVulnCases(ctx context.Context, source VulnSource) ([]Vuln
 		return nil, apperr.ErrContestVulnSourceFetchFailed
 	}
 	var payload any
-	if err := json.Unmarshal(raw, &payload); err != nil {
+	if err := jsonx.DecodeStrict(raw, &payload); err != nil {
 		return nil, apperr.ErrContestVulnSourceFetchFailed.WithCause(err)
 	}
 	nodes := selectCases(payload, stringFromMap(cfg, "cases_path"))
@@ -326,14 +328,20 @@ func (s *Service) runVulnPrevalidation(ctx context.Context, tenantID, accountID 
 }
 
 // runVulnValidationCase 执行一条正向或反向预验证用例。
-func (s *Service) runVulnValidationCase(ctx context.Context, tenantID, accountID int64, problem VulnProblem, req PrevalidateRequest, phase string, positive bool) (map[string]any, error) {
-	sourceRef := fmt.Sprintf("contest:%04d:vuln-prevalidate:%d:%s", now().Year(), problem.ID, phase)
+func (s *Service) runVulnValidationCase(ctx context.Context, tenantID, accountID int64, problem VulnProblem, req PrevalidateRequest, phase string, positive bool) (result map[string]any, retErr error) {
+	sourceRef := fmt.Sprintf("contest:%04d:vuln-prevalidate:%d:%s", timex.Now().Year(), problem.ID, phase)
 	info, err := s.sandbox.CreateSandbox(ctx, contracts.SandboxCreateRequest{TenantID: tenantID, RuntimeCode: req.RuntimeCode, RuntimeImageVersion: req.RuntimeImageVersion, ToolCodes: req.ToolCodes, InitCodeRef: req.InitCodeRef, InitScriptRef: req.InitScriptRef, OwnerAccountID: accountID, SourceRef: sourceRef, KeepAlive: false, SnapshotEnabled: true})
 	if err != nil {
 		return nil, apperr.ErrContestSandboxUnavailable.WithCause(err)
 	}
 	defer func() {
-		_ = s.sandbox.RecycleBySourceRef(ctx, contracts.SandboxRecycleRequest{TenantID: tenantID, SourceRef: sourceRef, Reason: "vuln_prevalidate"})
+		if recycleErr := s.sandbox.RecycleBySourceRef(ctx, contracts.SandboxRecycleRequest{TenantID: tenantID, SourceRef: sourceRef, Reason: "vuln_prevalidate"}); recycleErr != nil {
+			if retErr != nil {
+				retErr = apperr.ErrContestSandboxUnavailable.WithCause(fmt.Errorf("漏洞预验证失败: %w; 回收沙箱失败: %v", retErr, recycleErr))
+				return
+			}
+			retErr = apperr.ErrContestSandboxUnavailable.WithCause(recycleErr)
+		}
 	}()
 	for _, step := range validationSteps(problem.DraftBody, "init_steps") {
 		if err := s.runVulnChainStep(ctx, tenantID, info.SandboxID, sourceRef, step); err != nil {
@@ -433,7 +441,7 @@ func safeDetailError(err error) string {
 	if err == nil {
 		return ""
 	}
-	msg := err.Error()
+	msg := logging.SanitizeError(err.Error())
 	if len(msg) > 256 {
 		return msg[:256]
 	}
@@ -455,8 +463,7 @@ func vulnSourceFromRequest(req VulnSourceRequest, tenantID, generatedID int64) (
 // validateVulnSourceConfig 校验 HTTP 源配置边界。
 func validateVulnSourceConfig(cfg map[string]any, defaultTimeout int) error {
 	endpoint := stringFromMap(cfg, "endpoint")
-	u, err := url.Parse(endpoint)
-	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+	if _, err := netx.ValidatePublicHTTPURL(endpoint); err != nil {
 		return apperr.ErrContestVulnSourceInvalid
 	}
 	method := strings.ToUpper(stringFromMap(cfg, "method"))
@@ -494,15 +501,8 @@ func sourceTimeoutSeconds(cfg map[string]any, defaultTimeout int) int {
 // selectCases 从 JSON 载荷中选择案例数组。
 func selectCases(payload any, path string) []map[string]any {
 	current := payload
-	for _, part := range strings.Split(strings.TrimSpace(path), ".") {
-		if part == "" {
-			continue
-		}
-		obj, ok := current.(map[string]any)
-		if !ok {
-			return nil
-		}
-		current = obj[part]
+	if root, ok := payload.(map[string]any); ok && strings.TrimSpace(path) != "" {
+		current = jsonx.ValueFromPath(root, path)
 	}
 	switch v := current.(type) {
 	case []any:
@@ -522,12 +522,12 @@ func selectCases(payload any, path string) []map[string]any {
 
 // vulnProblemFromExternal 将外部漏洞案例映射为平台草稿。
 func vulnProblemFromExternal(item map[string]any, mapping map[string]string, defaultLevel int16) (VulnProblem, error) {
-	body, _ := valueAtPath(item, mapping["draft_body"]).(map[string]any)
+	body := jsonx.ObjectFromAny(jsonx.ValueFromPath(item, mapping["draft_body"]))
 	req := ImportVulnProblemRequest{
-		ExternalRef: stringValueAtPath(item, mapping["external_ref"]),
-		Title:       stringValueAtPath(item, mapping["title"]),
-		Level:       vulnLevelFromAny(valueAtPath(item, mapping["level"]), defaultLevel),
-		RuntimeMode: vulnRuntimeFromAny(valueAtPath(item, mapping["runtime_mode"]), VulnRuntimeIsolated),
+		ExternalRef: strings.TrimSpace(jsonx.StringFromPath(item, mapping["external_ref"])),
+		Title:       strings.TrimSpace(jsonx.StringFromPath(item, mapping["title"])),
+		Level:       vulnLevelFromAny(jsonx.ValueFromPath(item, mapping["level"]), defaultLevel),
+		RuntimeMode: vulnRuntimeFromAny(jsonx.ValueFromPath(item, mapping["runtime_mode"]), VulnRuntimeIsolated),
 		DraftBody:   body,
 	}
 	req, err := validateVulnProblemInput(req)
@@ -539,67 +539,17 @@ func vulnProblemFromExternal(item map[string]any, mapping map[string]string, def
 
 // stringMapFromAny 将 JSON map 转为字符串映射,非法项按配置错误处理前保留为空。
 func stringMapFromAny(v any) map[string]string {
-	out := map[string]string{}
-	raw, ok := v.(map[string]any)
-	if !ok {
-		return out
-	}
-	for key, value := range raw {
-		if s, ok := value.(string); ok {
-			out[strings.TrimSpace(key)] = strings.TrimSpace(s)
-		}
-	}
-	return out
-}
-
-// valueAtPath 按点路径读取外部 JSON 字段。
-func valueAtPath(item map[string]any, path string) any {
-	path = strings.TrimSpace(path)
-	if path == "" {
-		return nil
-	}
-	var current any = item
-	for _, part := range strings.Split(path, ".") {
-		part = strings.TrimSpace(part)
-		if part == "" {
-			continue
-		}
-		obj, ok := current.(map[string]any)
-		if !ok {
-			return nil
-		}
-		current = obj[part]
-	}
-	return current
-}
-
-// stringValueAtPath 按点路径读取字符串字段。
-func stringValueAtPath(item map[string]any, path string) string {
-	if v, ok := valueAtPath(item, path).(string); ok {
-		return strings.TrimSpace(v)
-	}
-	return ""
+	return jsonx.StringMapFromAny(v)
 }
 
 // mapAny 读取 JSON 对象。
 func mapAny(v any) map[string]any {
-	if out, ok := v.(map[string]any); ok {
-		return out
-	}
-	return nil
+	return jsonx.ObjectFromAny(v)
 }
 
 // stringFromAny 读取字符串值。
 func stringFromAny(v any) string {
-	if v == nil {
-		return ""
-	}
-	switch x := v.(type) {
-	case string:
-		return strings.TrimSpace(x)
-	default:
-		return strings.TrimSpace(fmt.Sprint(x))
-	}
+	return strings.TrimSpace(jsonx.StringFromAny(v))
 }
 
 // vulnLevelFromAny 解析 A/B/C 或 1/2/3 分级。

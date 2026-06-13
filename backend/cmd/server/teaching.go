@@ -14,6 +14,10 @@ import (
 	"chaimir/internal/platform/config"
 	"chaimir/internal/platform/db"
 	"chaimir/internal/platform/eventbus"
+	"chaimir/internal/platform/storage"
+	"chaimir/internal/platform/timex"
+	"chaimir/internal/platform/transfer"
+	"chaimir/internal/platform/upload"
 	"chaimir/pkg/snowflake"
 
 	"github.com/gin-gonic/gin"
@@ -25,13 +29,17 @@ type TeachingModuleDeps struct {
 	Database *db.DB
 	IDs      snowflake.Generator
 	Config   config.TeachingConfig
+	Upload   config.UploadConfig
+	MinIO    config.MinIOConfig
+	AuthCfg  config.AuthConfig
 	Content  contracts.ContentReadService
 	Judge    contracts.JudgeService
-	Notify   contracts.NotifyService
+	Transfer *transfer.Service
+	Storage  *storage.Storage
 	Audit    audit.Writer
 	EventBus eventbus.Bus
 	Auth     *auth.Manager
-	Roles    auth.RoleChecker
+	Roles    contracts.IdentityService
 }
 
 // RegisterTeachingModule 构造教学 store/service,注册路由、事件和 outbox worker。
@@ -45,16 +53,32 @@ func RegisterTeachingModule(ctx context.Context, deps TeachingModuleDeps) (*teac
 	if deps.Database == nil {
 		return nil, fmt.Errorf("teaching module 缺少 database")
 	}
+	if deps.Transfer == nil {
+		return nil, fmt.Errorf("teaching module 缺少 transfer service")
+	}
+	if deps.Storage == nil {
+		return nil, fmt.Errorf("teaching module 缺少统一对象存储")
+	}
+	scanner, err := upload.NewScannerFromConfig(deps.Upload)
+	if err != nil {
+		return nil, err
+	}
 	store := teaching.NewStore(deps.Database)
 	svc, err := teaching.NewService(teaching.ServiceDeps{
-		Store:   store,
-		IDs:     deps.IDs,
-		Audit:   deps.Audit,
-		Content: deps.Content,
-		Judge:   deps.Judge,
-		Notify:  deps.Notify,
-		Bus:     deps.EventBus,
-		Config:  deps.Config,
+		Store:     store,
+		IDs:       deps.IDs,
+		Audit:     deps.Audit,
+		Content:   deps.Content,
+		Judge:     deps.Judge,
+		Bus:       deps.EventBus,
+		Transfers: deps.Transfer,
+		Storage:   deps.Storage,
+		FileService: storage.Service{
+			Scanner:          scanner,
+			SigningKey:       deps.AuthCfg.HMACKey,
+			DownloadGrantTTL: time.Duration(deps.MinIO.DownloadGrantTTLSeconds) * time.Second,
+		},
+		Config: deps.Config,
 	})
 	if err != nil {
 		return nil, err
@@ -107,7 +131,7 @@ func teachingCourseStatusTask(cfg config.TeachingConfig, svc *teaching.Service) 
 		Name:     "teaching.course_status",
 		Interval: time.Duration(cfg.CourseStatusPollIntervalSeconds) * time.Second,
 		Run: func(ctx context.Context) error {
-			return svc.AdvanceCourseStatusesOnce(ctx, time.Now().UTC())
+			return svc.AdvanceCourseStatusesOnce(ctx, timex.Now())
 		},
 	}, nil
 }

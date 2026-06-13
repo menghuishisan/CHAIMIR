@@ -27,6 +27,7 @@ type JudgeModuleDeps struct {
 	Database *db.DB
 	IDs      snowflake.Generator
 	Config   config.JudgeConfig
+	AuthCfg  config.AuthConfig
 	Storage  *storage.Storage
 	Sandbox  contracts.SandboxService
 	Content  contracts.ContentJudgeReadService
@@ -34,7 +35,7 @@ type JudgeModuleDeps struct {
 	EventBus eventbus.Bus
 	WSHub    *ws.Hub
 	Auth     *auth.Manager
-	Roles    auth.RoleChecker
+	Roles    contracts.IdentityService
 }
 
 // RegisterJudgeModule 构造评测 store/service,注册路由并启动队列 worker。
@@ -53,6 +54,7 @@ func RegisterJudgeModule(ctx context.Context, deps JudgeModuleDeps) (*judge.Serv
 		Store:    store,
 		IDs:      deps.IDs,
 		Config:   deps.Config,
+		Auth:     deps.AuthCfg,
 		Storage:  deps.Storage,
 		Sandbox:  deps.Sandbox,
 		Content:  deps.Content,

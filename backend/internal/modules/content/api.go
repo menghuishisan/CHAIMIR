@@ -13,15 +13,15 @@ import (
 )
 
 // RegisterRoutes 注册题库与模板中心 HTTP API。
-func RegisterRoutes(r gin.IRouter, svc *Service, authn *auth.Manager, roles auth.RoleChecker) error {
+func RegisterRoutes(r gin.IRouter, svc *Service, authn *auth.Manager, roles contracts.IdentityService) error {
 	if r == nil {
-		return apperr.ErrInternal.WithMessage("content routes 缺少 HTTP router")
+		return apperr.ErrHTTPRouterMissing
 	}
 	if svc == nil {
-		return apperr.ErrInternal.WithMessage("content routes 缺少 service")
+		return apperr.ErrHTTPServiceMissing
 	}
 	if authn == nil {
-		return apperr.ErrInternal.WithMessage("content routes 缺少 auth manager")
+		return apperr.ErrHTTPAuthMissing
 	}
 	api := contentAPI{svc: svc, roles: roles}
 	g := r.Group("/api/v1/content")
@@ -33,7 +33,7 @@ func RegisterRoutes(r gin.IRouter, svc *Service, authn *auth.Manager, roles auth
 
 type contentAPI struct {
 	svc   *Service
-	roles auth.RoleChecker
+	roles contracts.IdentityService
 }
 
 // registerTeacherRoutes 注册教师/学校管理员题库管理接口。
@@ -360,15 +360,7 @@ func itemListFilterFromQuery(c *gin.Context) (ItemListFilter, bool) {
 
 // pageQuery 统一解析分页参数。
 func pageQuery(c *gin.Context) (int, int, bool) {
-	page, ok := httpx.QueryInt(c, "page", httpx.QueryIntRule{Default: 1, Min: 1})
-	if !ok {
-		return 0, 0, false
-	}
-	size, ok := httpx.QueryInt(c, "size", httpx.QueryIntRule{Default: 20, Min: 1, Max: 100, HasMax: true})
-	if !ok {
-		return 0, 0, false
-	}
-	return int(page), int(size), true
+	return httpx.Page(c)
 }
 
 // currentHTTPIdentity 从上下文读取租户账号身份。

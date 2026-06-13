@@ -2,7 +2,6 @@
 package sandbox
 
 import (
-	"encoding/json"
 	"fmt"
 	"path"
 	"path/filepath"
@@ -11,6 +10,7 @@ import (
 
 	"chaimir/internal/platform/auth"
 	"chaimir/internal/platform/config"
+	"chaimir/internal/platform/jsonx"
 	"chaimir/pkg/apperr"
 
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -59,7 +59,7 @@ func validateRuntimeRequest(req RuntimeRequest, cfg config.SandboxConfig) (Adapt
 		return AdapterSpec{}, apperr.ErrSandboxRuntimeConfigInvalid
 	}
 	var spec AdapterSpec
-	if err := json.Unmarshal(req.AdapterSpec, &spec); err != nil {
+	if err := jsonx.DecodeStrict(req.AdapterSpec, &spec); err != nil {
 		return AdapterSpec{}, apperr.ErrSandboxRuntimeConfigInvalid.WithCause(err)
 	}
 	if err := normalizeAndValidateAdapterSpec(&spec, cfg); err != nil {
@@ -84,7 +84,7 @@ func validateToolRequest(req ToolRequest, cfg config.SandboxConfig) (ToolResourc
 	}
 	var spec ToolResourceSpec
 	if len(req.ResourceSpec) > 0 {
-		if err := json.Unmarshal(req.ResourceSpec, &spec); err != nil {
+		if err := jsonx.DecodeStrict(req.ResourceSpec, &spec); err != nil {
 			return ToolResourceSpec{}, apperr.ErrSandboxToolCreateInvalid.WithCause(err)
 		}
 	}

@@ -5,6 +5,9 @@ import (
 	"encoding/json"
 
 	"chaimir/internal/modules/judge/internal/sqlcgen"
+	"chaimir/internal/platform/jsonx"
+	"chaimir/internal/platform/pgtypex"
+	"chaimir/internal/platform/timex"
 )
 
 // judgerFromRow 转换平台级判题器定义。
@@ -24,8 +27,8 @@ func judgerFromRow(row sqlcgen.Judger) (Judger, error) {
 		ResourceSpec:      spec,
 		SelftestStatus:    row.SelftestStatus,
 		Status:            row.Status,
-		CreatedAt:         timeFromPg(row.CreatedAt),
-		UpdatedAt:         timeFromPg(row.UpdatedAt),
+		CreatedAt:         timex.FromTimestamptz(row.CreatedAt),
+		UpdatedAt:         timex.FromTimestamptz(row.UpdatedAt),
 	}, nil
 }
 
@@ -46,14 +49,14 @@ func taskFromRow(row sqlcgen.JudgeTask) (JudgeTask, error) {
 		CodeHash:         row.CodeHash,
 		InputSnapshot:    snapshot,
 		SandboxMode:      row.SandboxMode,
-		TargetSandboxRef: textValue(row.TargetSandboxRef),
+		TargetSandboxRef: pgtypex.TextValue(row.TargetSandboxRef),
 		Priority:         row.Priority,
 		Status:           row.Status,
 		RetryCount:       row.RetryCount,
 		MaxRetries:       row.MaxRetries,
-		LastError:        textValue(row.LastError),
-		CreatedAt:        timeFromPg(row.CreatedAt),
-		UpdatedAt:        timeFromPg(row.UpdatedAt),
+		LastError:        pgtypex.TextValue(row.LastError),
+		CreatedAt:        timex.FromTimestamptz(row.CreatedAt),
+		UpdatedAt:        timex.FromTimestamptz(row.UpdatedAt),
 	}, nil
 }
 
@@ -95,8 +98,8 @@ func taskInfoFromJoined(row sqlcgen.GetJudgeTaskWithResultRow) (JudgeTaskInfo, e
 			Score:           row.Score.Int32,
 			MaxScore:        row.MaxScore.Int32,
 			Details:         details,
-			JudgeSandboxRef: textValue(row.JudgeSandboxRef),
-			JudgedAt:        timeFromPg(row.JudgedAt),
+			JudgeSandboxRef: pgtypex.TextValue(row.JudgeSandboxRef),
+			JudgedAt:        timex.FromTimestamptz(row.JudgedAt),
 			IsRejudge:       row.IsRejudge.Bool,
 		}
 	}
@@ -120,7 +123,7 @@ func taskInfosFromRows(rows []sqlcgen.ListJudgeTasksRow) ([]JudgeTaskInfo, error
 func fingerprintFromRow(row sqlcgen.SubmissionFingerprint) (SubmissionFingerprint, error) {
 	vector := map[string]float64{}
 	if len(row.SimVector) > 0 {
-		if err := json.Unmarshal(row.SimVector, &vector); err != nil {
+		if err := jsonx.DecodeStrict(row.SimVector, &vector); err != nil {
 			return SubmissionFingerprint{}, err
 		}
 	}
@@ -132,7 +135,7 @@ func fingerprintFromRow(row sqlcgen.SubmissionFingerprint) (SubmissionFingerprin
 		SubmitterID: row.SubmitterID,
 		CodeHash:    row.CodeHash,
 		SimVector:   vector,
-		CreatedAt:   timeFromPg(row.CreatedAt),
+		CreatedAt:   timex.FromTimestamptz(row.CreatedAt),
 	}, nil
 }
 
@@ -146,9 +149,9 @@ func outboxFromRow(row sqlcgen.JudgeEventOutbox) JudgeEventOutbox {
 		Payload:    row.Payload,
 		Status:     row.Status,
 		RetryCount: row.RetryCount,
-		LastError:  textValue(row.LastError),
-		CreatedAt:  timeFromPg(row.CreatedAt),
-		UpdatedAt:  timeFromPg(row.UpdatedAt),
+		LastError:  pgtypex.TextValue(row.LastError),
+		CreatedAt:  timex.FromTimestamptz(row.CreatedAt),
+		UpdatedAt:  timex.FromTimestamptz(row.UpdatedAt),
 	}
 }
 
@@ -163,7 +166,7 @@ func decodeSnapshot(raw []byte) (JudgeInputSnapshot, error) {
 	if len(raw) == 0 {
 		return out, nil
 	}
-	if err := json.Unmarshal(raw, &out); err != nil {
+	if err := jsonx.DecodeStrict(raw, &out); err != nil {
 		return JudgeInputSnapshot{}, err
 	}
 	return out, nil
@@ -175,7 +178,7 @@ func decodeDetails(raw []byte) ([]JudgeResultDetail, error) {
 		return nil, nil
 	}
 	var out []JudgeResultDetail
-	if err := json.Unmarshal(raw, &out); err != nil {
+	if err := jsonx.DecodeStrict(raw, &out); err != nil {
 		return nil, err
 	}
 	return out, nil

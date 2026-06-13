@@ -2,9 +2,7 @@
 package judge
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"strings"
@@ -15,6 +13,7 @@ import (
 	"chaimir/internal/platform/config"
 	"chaimir/internal/platform/eventbus"
 	"chaimir/internal/platform/ids"
+	"chaimir/internal/platform/jsonx"
 	"chaimir/internal/platform/storage"
 	"chaimir/internal/platform/upload"
 	"chaimir/internal/platform/ws"
@@ -34,6 +33,7 @@ type Service struct {
 	store   Store
 	ids     snowflake.Generator
 	cfg     config.JudgeConfig
+	hmacKey []byte
 	minio   objectStorage
 	sandbox contracts.SandboxService
 	content contracts.ContentJudgeReadService
@@ -47,6 +47,7 @@ type ServiceDeps struct {
 	Store    Store
 	IDs      snowflake.Generator
 	Config   config.JudgeConfig
+	Auth     config.AuthConfig
 	Storage  *storage.Storage
 	Sandbox  contracts.SandboxService
 	Content  contracts.ContentJudgeReadService
@@ -66,6 +67,9 @@ func NewService(deps ServiceDeps) (*Service, error) {
 	if deps.Storage == nil {
 		return nil, fmt.Errorf("judge service 缺少统一对象存储")
 	}
+	if strings.TrimSpace(deps.Auth.HMACKey) == "" {
+		return nil, fmt.Errorf("judge service 缺少 HMAC 密钥")
+	}
 	if deps.Sandbox == nil {
 		return nil, fmt.Errorf("judge service 缺少 sandbox 契约")
 	}
@@ -82,6 +86,7 @@ func NewService(deps ServiceDeps) (*Service, error) {
 		store:   deps.Store,
 		ids:     deps.IDs,
 		cfg:     deps.Config,
+		hmacKey: []byte(deps.Auth.HMACKey),
 		minio:   deps.Storage,
 		sandbox: deps.Sandbox,
 		content: deps.Content,
@@ -103,7 +108,11 @@ func (s *Service) ListJudgers(ctx context.Context) ([]map[string]any, error) {
 	}
 	out := make([]map[string]any, 0, len(items))
 	for _, item := range items {
-		out = append(out, judgerToMap(item))
+		mapped, err := judgerToMap(item)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, mapped)
 	}
 	return out, nil
 }
@@ -125,7 +134,7 @@ func (s *Service) CreateJudger(ctx context.Context, req CreateJudgerRequest) (ma
 	}); err != nil {
 		return nil, err
 	}
-	return judgerToMap(out), nil
+	return judgerToMap(out)
 }
 
 // UpdateJudger 更新判题器配置。
@@ -153,7 +162,7 @@ func (s *Service) UpdateJudger(ctx context.Context, id int64, req UpdateJudgerRe
 	}); err != nil {
 		return nil, err
 	}
-	return judgerToMap(out), nil
+	return judgerToMap(out)
 }
 
 // RunJudgerSelftest 执行判题器样例自检,自检必须真实经过对应执行路径。
@@ -186,9 +195,13 @@ func (s *Service) RunJudgerSelftest(ctx context.Context, id int64) (map[string]a
 		return nil, err
 	}
 	if status == JudgerSelftestFailed {
-		return judgerToMap(j), apperr.ErrJudgerSelftestFailed
+		out, err := judgerToMap(j)
+		if err != nil {
+			return nil, err
+		}
+		return out, apperr.ErrJudgerSelftestFailed
 	}
-	return judgerToMap(j), nil
+	return judgerToMap(j)
 }
 
 // SubmitJudgeTask 创建判题任务、输入快照和提交指纹。
@@ -394,7 +407,7 @@ func (s *Service) buildInputSnapshot(j Judger, spec contracts.ContentJudgeSpec, 
 	if spec.JudgerCode != "" && spec.JudgerCode != j.Code {
 		return JudgeInputSnapshot{}, apperr.ErrJudgeSpecUnavailable
 	}
-	expectation, err := snapshotExpectationForJudger(j.Type, spec.Expectation, extra)
+	expectation, err := s.snapshotExpectationForJudger(j.Type, spec.Expectation, extra)
 	if err != nil {
 		return JudgeInputSnapshot{}, err
 	}
@@ -497,7 +510,7 @@ func (s *Service) publishProgress(tenantID, taskID int64, status int16, stage, m
 	if s.wsHub == nil {
 		return
 	}
-	raw, err := json.Marshal(ProgressMessage{TaskID: taskID, Status: status, Stage: stage, Message: message})
+	raw, err := jsonx.AnyBytes(ProgressMessage{TaskID: taskID, Status: status, Stage: stage, Message: message}, apperr.ErrInternal)
 	if err != nil {
 		return
 	}
@@ -541,11 +554,5 @@ func safeFailureReason(err error) string {
 
 // encodeJSONBytes 序列化结构化输入。
 func encodeJSONBytes(v any) ([]byte, error) {
-	var buf bytes.Buffer
-	enc := json.NewEncoder(&buf)
-	enc.SetEscapeHTML(true)
-	if err := enc.Encode(v); err != nil {
-		return nil, err
-	}
-	return buf.Bytes(), nil
+	return jsonx.EncodeLineBytes(v)
 }

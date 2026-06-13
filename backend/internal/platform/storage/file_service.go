@@ -102,6 +102,11 @@ func (s Service) PlanUpload(req PlanUploadRequest) (UploadPlan, error) {
 	if err != nil {
 		return UploadPlan{}, err
 	}
+	bucket := strings.TrimSpace(req.ExpectedBucket)
+	objectRef, err := ObjectRefString(bucket, key)
+	if err != nil {
+		return UploadPlan{}, err
+	}
 	expiresAt, err := s.defaultDownloadExpiry()
 	if err != nil {
 		return UploadPlan{}, err
@@ -114,9 +119,9 @@ func (s Service) PlanUpload(req PlanUploadRequest) (UploadPlan, error) {
 		ResourceID:        req.ResourceID,
 		FileName:          fileName,
 		ContentType:       strings.TrimSpace(req.ContentType),
-		Bucket:            strings.TrimSpace(req.ExpectedBucket),
+		Bucket:            bucket,
 		Key:               key,
-		ObjectRef:         "minio://" + strings.TrimSpace(req.ExpectedBucket) + "/" + key,
+		ObjectRef:         objectRef,
 		Size:              req.Size,
 		DownloadExpiresAt: expiresAt,
 	}, nil

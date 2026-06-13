@@ -7,7 +7,6 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"log/slog"
 	"path"
@@ -15,6 +14,8 @@ import (
 	"time"
 
 	"chaimir/internal/contracts"
+	"chaimir/internal/platform/jsonx"
+	"chaimir/internal/platform/storage"
 	"chaimir/internal/platform/upload"
 	"chaimir/pkg/apperr"
 	"chaimir/pkg/logging"
@@ -166,7 +167,7 @@ func (s *Service) ListSandboxFiles(ctx context.Context, tenantID, sandboxID int6
 		return FileListResponse{}, apperr.ErrSandboxFileNotFound.WithCause(fmt.Errorf("%w: %s", err, string(stderr)))
 	}
 	var entries []FileEntryResponse
-	if err := json.Unmarshal(stdout, &entries); err != nil {
+	if err := jsonx.DecodeStrict(stdout, &entries); err != nil {
 		return FileListResponse{}, apperr.ErrSandboxFileNotFound.WithCause(err)
 	}
 	for _, entry := range entries {
@@ -233,7 +234,11 @@ func (s *Service) saveSandboxFiles(ctx context.Context, tenantID, sandboxID int6
 	}); err != nil {
 		return "", "", err
 	}
-	return "minio://" + s.minio.BucketCode() + "/" + sb.CodeStorageKey, hash, nil
+	ref, err := storage.ObjectRefString(s.minio.BucketCode(), sb.CodeStorageKey)
+	if err != nil {
+		return "", "", apperr.ErrSandboxFilePersistFailed.WithCause(err)
+	}
+	return ref, hash, nil
 }
 
 // SaveSandboxFilesForOwner 校验操作者归属后立即持久化工作区。

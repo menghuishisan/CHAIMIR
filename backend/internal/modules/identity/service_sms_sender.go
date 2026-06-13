@@ -1,4 +1,4 @@
-// identity 短信发送文件封装短信网关调用,验证码明文只存在于发送路径且不写日志。
+// identity service_sms_sender 文件封装短信网关调用,验证码明文只存在于发送路径且不写日志。
 package identity
 
 import (
@@ -11,6 +11,7 @@ import (
 
 	"chaimir/internal/platform/config"
 	"chaimir/internal/platform/jsonx"
+	"chaimir/internal/platform/netx"
 	"chaimir/pkg/apperr"
 )
 
@@ -30,7 +31,7 @@ type HTTPSMSSender struct {
 func NewSMSSender(cfg config.SMSConfig) SMSSender {
 	return &HTTPSMSSender{
 		cfg:    cfg,
-		client: &http.Client{Timeout: time.Duration(cfg.TimeoutSeconds) * time.Second},
+		client: netx.NewPublicHTTPClient(time.Duration(cfg.TimeoutSeconds) * time.Second),
 	}
 }
 
@@ -51,6 +52,10 @@ func (s *HTTPSMSSender) sendHTTP(ctx context.Context, phone string, scene int16,
 	if strings.TrimSpace(s.cfg.Endpoint) == "" || strings.TrimSpace(s.cfg.Token) == "" {
 		return fmt.Errorf("短信 HTTP 网关配置不完整")
 	}
+	endpoint, err := netx.ValidatePublicHTTPURL(s.cfg.Endpoint)
+	if err != nil {
+		return fmt.Errorf("短信 HTTP 网关地址不安全: %w", err)
+	}
 	template := s.template(scene)
 	if template == "" {
 		return fmt.Errorf("短信模板配置不完整")
@@ -63,7 +68,7 @@ func (s *HTTPSMSSender) sendHTTP(ctx context.Context, phone string, scene int16,
 	if err != nil {
 		return fmt.Errorf("序列化短信请求失败: %w", err)
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, s.cfg.Endpoint, bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
 	if err != nil {
 		return fmt.Errorf("创建短信请求失败: %w", err)
 	}

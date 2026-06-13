@@ -3,7 +3,6 @@ package identity
 
 import (
 	"io"
-	"net/http"
 
 	"chaimir/internal/contracts"
 	"chaimir/internal/platform/auth"
@@ -280,8 +279,7 @@ func (a orgAPI) importOrgTemplate(c *gin.Context) {
 		response.Fail(c, err)
 		return
 	}
-	c.Header("Content-Disposition", `attachment; filename="`+tpl.FileName+`"`)
-	c.Data(http.StatusOK, tpl.ContentType, tpl.Content)
+	httpx.WriteAttachment(c, tpl.FileName, tpl.ContentType, tpl.Content)
 }
 
 // archiveClasses 绑定按入学年份归档班级请求。

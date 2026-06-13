@@ -1,6 +1,8 @@
 // grade dto 文件定义 M11 HTTP 请求结构。
 package grade
 
+import "chaimir/internal/platform/storage"
+
 // LevelConfigRequest 是等级映射配置请求。
 type LevelConfigRequest struct {
 	Name         string       `json:"name"`
@@ -144,4 +146,12 @@ type TranscriptDTO struct {
 	SemesterID  int64  `json:"semester_id,omitempty,string"`
 	PDFRef      string `json:"-"`
 	GeneratedAt string `json:"generated_at"`
+}
+
+// TranscriptDownloadGrantDTO 表示成绩单短时下载授权响应。
+type TranscriptDownloadGrantDTO struct {
+	Token      string                `json:"token"`
+	Grant      storage.DownloadGrant `json:"grant"`
+	Transcript TranscriptDTO         `json:"transcript"`
+	ExpiresAt  string                `json:"expires_at"`
 }

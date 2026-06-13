@@ -3,12 +3,15 @@ package sim
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 
 	"chaimir/internal/modules/sim/internal/sqlcgen"
 	"chaimir/internal/platform/db"
+	"chaimir/internal/platform/jsonx"
+	"chaimir/internal/platform/pgtypex"
+	"chaimir/internal/platform/timex"
+	"chaimir/pkg/apperr"
 
 	"github.com/jackc/pgx/v5"
 )
@@ -134,7 +137,7 @@ func (s *txStore) CreatePackage(ctx context.Context, pkg Package) (Package, erro
 	if err != nil {
 		return Package{}, err
 	}
-	row, err := s.q.CreateSimPackage(ctx, sqlcgen.CreateSimPackageParams{ID: pkg.ID, Code: pkg.Code, Version: pkg.Version, Name: pkg.Name, Category: pkg.Category, Compute: pkg.Compute, ScaleLimit: scale, BundleKey: pkg.BundleKey, BundleHash: pkg.BundleHash, BackendAdapter: textParam(pkg.BackendAdapter), BackendConfig: backend, AuthorType: pkg.AuthorType, AuthorID: int64Param(pkg.AuthorID), Status: pkg.Status})
+	row, err := s.q.CreateSimPackage(ctx, sqlcgen.CreateSimPackageParams{ID: pkg.ID, Code: pkg.Code, Version: pkg.Version, Name: pkg.Name, Category: pkg.Category, Compute: pkg.Compute, ScaleLimit: scale, BundleKey: pkg.BundleKey, BundleHash: pkg.BundleHash, BackendAdapter: pgtypex.Text(pkg.BackendAdapter), BackendConfig: backend, AuthorType: pkg.AuthorType, AuthorID: pgtypex.Int8(pkg.AuthorID), Status: pkg.Status})
 	if err != nil {
 		return Package{}, err
 	}
@@ -147,7 +150,7 @@ func (s *txStore) UpdatePackageDraft(ctx context.Context, pkg Package) (Package,
 	if err != nil {
 		return Package{}, err
 	}
-	row, err := s.q.UpdateSimPackageDraft(ctx, sqlcgen.UpdateSimPackageDraftParams{ID: pkg.ID, Name: pkg.Name, Category: pkg.Category, Compute: pkg.Compute, ScaleLimit: scale, BundleKey: pkg.BundleKey, BundleHash: pkg.BundleHash, BackendAdapter: textParam(pkg.BackendAdapter), BackendConfig: backend, Status: pkg.Status})
+	row, err := s.q.UpdateSimPackageDraft(ctx, sqlcgen.UpdateSimPackageDraftParams{ID: pkg.ID, Name: pkg.Name, Category: pkg.Category, Compute: pkg.Compute, ScaleLimit: scale, BundleKey: pkg.BundleKey, BundleHash: pkg.BundleHash, BackendAdapter: pgtypex.Text(pkg.BackendAdapter), BackendConfig: backend, Status: pkg.Status})
 	if err != nil {
 		return Package{}, err
 	}
@@ -165,7 +168,7 @@ func (s *txStore) UpdatePackageStatus(ctx context.Context, id int64, status int1
 
 // CreateReview 创建待审记录。
 func (s *txStore) CreateReview(ctx context.Context, id, packageID, submitterID int64, report ValidationReport) (Review, error) {
-	raw, err := json.Marshal(report)
+	raw, err := jsonx.AnyBytes(report, apperr.ErrSimPackageValidationFailed)
 	if err != nil {
 		return Review{}, err
 	}
@@ -217,7 +220,7 @@ func (s *txStore) ListReviews(ctx context.Context, result int16, limit, offset i
 
 // MergeValidationReport 合并动态预览报告。
 func (s *txStore) MergeValidationReport(ctx context.Context, packageID int64, report ValidationReport) (Review, error) {
-	raw, err := json.Marshal(report)
+	raw, err := jsonx.AnyBytes(report, apperr.ErrSimPackageValidationFailed)
 	if err != nil {
 		return Review{}, err
 	}
@@ -230,7 +233,7 @@ func (s *txStore) MergeValidationReport(ctx context.Context, packageID int64, re
 
 // CompleteReview 完成审核记录。
 func (s *txStore) CompleteReview(ctx context.Context, id int64, result int16, reviewerID int64, comment string) (Review, error) {
-	row, err := s.q.CompleteSimReview(ctx, sqlcgen.CompleteSimReviewParams{ID: id, Result: result, ReviewerID: int64Param(reviewerID), Comment: textParam(comment)})
+	row, err := s.q.CompleteSimReview(ctx, sqlcgen.CompleteSimReviewParams{ID: id, Result: result, ReviewerID: pgtypex.Int8(reviewerID), Comment: pgtypex.Text(comment)})
 	if err != nil {
 		return Review{}, err
 	}
@@ -239,7 +242,7 @@ func (s *txStore) CompleteReview(ctx context.Context, id int64, result int16, re
 
 // CreateSession 新建仿真会话。
 func (s *txStore) CreateSession(ctx context.Context, session Session) (Session, error) {
-	raw, err := json.Marshal(session.InitParams)
+	raw, err := jsonx.AnyBytes(session.InitParams, apperr.ErrSimSessionInvalid)
 	if err != nil {
 		return Session{}, err
 	}
@@ -314,7 +317,7 @@ func (s *txStore) GetActionBySeq(ctx context.Context, tenantID, sessionID int64,
 
 // CreateAction 创建操作序列项。
 func (s *txStore) CreateAction(ctx context.Context, action Action) (Action, error) {
-	raw, err := json.Marshal(action.Payload)
+	raw, err := jsonx.AnyBytes(action.Payload, apperr.ErrSimActionSeqInvalid)
 	if err != nil {
 		return Action{}, err
 	}
@@ -348,12 +351,12 @@ func (s *txStore) UpsertCheckpoint(ctx context.Context, cp Checkpoint) (Checkpoi
 	if err != nil {
 		return Checkpoint{}, err
 	}
-	return Checkpoint{ID: row.ID, TenantID: row.TenantID, SessionID: row.SessionID, CheckpointID: row.CheckpointID, Answer: row.Answer, Achieved: row.Achieved, CreatedAt: timeFromPg(row.CreatedAt)}, nil
+	return Checkpoint{ID: row.ID, TenantID: row.TenantID, SessionID: row.SessionID, CheckpointID: row.CheckpointID, Answer: row.Answer, Achieved: row.Achieved, CreatedAt: timex.FromTimestamptz(row.CreatedAt)}, nil
 }
 
 // CreateShare 创建分享码索引。
 func (s *txStore) CreateShare(ctx context.Context, share Share) (Share, error) {
-	row, err := s.q.CreateSimShare(ctx, sqlcgen.CreateSimShareParams{ID: share.ID, TenantID: share.TenantID, SessionID: share.SessionID, Code: share.Code, CreatedBy: share.CreatedBy, ExpireAt: timeParam(share.ExpireAt)})
+	row, err := s.q.CreateSimShare(ctx, sqlcgen.CreateSimShareParams{ID: share.ID, TenantID: share.TenantID, SessionID: share.SessionID, Code: share.Code, CreatedBy: share.CreatedBy, ExpireAt: timex.Timestamptz(share.ExpireAt)})
 	if err != nil {
 		return Share{}, err
 	}
@@ -384,11 +387,11 @@ func packagesFromRows(rows []sqlcgen.SimPackage) ([]Package, error) {
 
 // packageJSON 序列化包 JSONB 字段。
 func packageJSON(pkg Package) ([]byte, []byte, error) {
-	scale, err := json.Marshal(pkg.ScaleLimit)
+	scale, err := jsonx.AnyBytes(pkg.ScaleLimit, apperr.ErrSimPackageInvalid)
 	if err != nil {
 		return nil, nil, err
 	}
-	backend, err := json.Marshal(pkg.BackendConfig)
+	backend, err := jsonx.AnyBytes(pkg.BackendConfig, apperr.ErrSimPackageInvalid)
 	if err != nil {
 		return nil, nil, err
 	}

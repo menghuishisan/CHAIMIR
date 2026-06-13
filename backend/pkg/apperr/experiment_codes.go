@@ -48,6 +48,8 @@ const (
 	CodeExperimentGroupMemberDenied = "73003"
 	// CodeExperimentRoleInvalid 表示协作角色不在实验角色定义中。
 	CodeExperimentRoleInvalid = "73004"
+	// CodeExperimentGroupFull 表示协作小组人数已达到上限。
+	CodeExperimentGroupFull = "73005"
 )
 
 const (
@@ -63,6 +65,8 @@ const (
 	CodeExperimentScoreInvalid = "74005"
 	// CodeExperimentProgressUnavailable 表示实例进度订阅信息无法生成。
 	CodeExperimentProgressUnavailable = "74006"
+	// CodeExperimentReportRequired 表示实验要求先提交报告才能完成。
+	CodeExperimentReportRequired = "74007"
 )
 
 var (
@@ -106,6 +110,8 @@ var (
 	ErrExperimentGroupMemberDenied = New(CodeExperimentGroupMemberDenied, "你不是该实验小组成员")
 	// ErrExperimentRoleInvalid 表示角色不符合实验设置。
 	ErrExperimentRoleInvalid = New(CodeExperimentRoleInvalid, "实验角色设置不正确")
+	// ErrExperimentGroupFull 表示协作小组人数已达到上限。
+	ErrExperimentGroupFull = New(CodeExperimentGroupFull, "实验小组人数已达到上限")
 	// ErrExperimentCheckpointInvalid 表示检查点请求非法。
 	ErrExperimentCheckpointInvalid = New(CodeExperimentCheckpointInvalid, "检查点信息不正确")
 	// ErrExperimentJudgeUnavailable 表示判分暂不可用。
@@ -118,4 +124,6 @@ var (
 	ErrExperimentScoreInvalid = New(CodeExperimentScoreInvalid, "实验得分信息不正确")
 	// ErrExperimentProgressUnavailable 表示进度订阅信息不可用。
 	ErrExperimentProgressUnavailable = New(CodeExperimentProgressUnavailable, "实验进度暂时无法订阅")
+	// ErrExperimentReportRequired 表示实验要求先提交报告才能完成。
+	ErrExperimentReportRequired = New(CodeExperimentReportRequired, "请先提交实验报告")
 )

@@ -2,12 +2,10 @@
 package sim
 
 import (
-	"encoding/json"
-	"time"
-
 	"chaimir/internal/modules/sim/internal/sqlcgen"
-
-	"github.com/jackc/pgx/v5/pgtype"
+	"chaimir/internal/platform/jsonx"
+	"chaimir/internal/platform/pgtypex"
+	"chaimir/internal/platform/timex"
 )
 
 // packageFromRow 转换平台级仿真包行。
@@ -30,13 +28,13 @@ func packageFromRow(row sqlcgen.SimPackage) (Package, error) {
 		ScaleLimit:     scale,
 		BundleKey:      row.BundleKey,
 		BundleHash:     row.BundleHash,
-		BackendAdapter: textValue(row.BackendAdapter),
+		BackendAdapter: pgtypex.TextValue(row.BackendAdapter),
 		BackendConfig:  backendConfig,
 		AuthorType:     row.AuthorType,
-		AuthorID:       int64Value(row.AuthorID),
+		AuthorID:       pgtypex.Int8Value(row.AuthorID),
 		Status:         row.Status,
-		CreatedAt:      timeFromPg(row.CreatedAt),
-		UpdatedAt:      timeFromPg(row.UpdatedAt),
+		CreatedAt:      timex.FromTimestamptz(row.CreatedAt),
+		UpdatedAt:      timex.FromTimestamptz(row.UpdatedAt),
 	}, nil
 }
 
@@ -51,11 +49,11 @@ func reviewFromRow(row sqlcgen.SimPackageReview) (Review, error) {
 		PackageID:     row.PackageID,
 		SubmitterID:   row.SubmitterID,
 		PreviewReport: report,
-		ReviewerID:    int64Value(row.ReviewerID),
+		ReviewerID:    pgtypex.Int8Value(row.ReviewerID),
 		Result:        row.Result,
-		Comment:       textValue(row.Comment),
-		CreatedAt:     timeFromPg(row.CreatedAt),
-		UpdatedAt:     timeFromPg(row.UpdatedAt),
+		Comment:       pgtypex.TextValue(row.Comment),
+		CreatedAt:     timex.FromTimestamptz(row.CreatedAt),
+		UpdatedAt:     timex.FromTimestamptz(row.UpdatedAt),
 	}, nil
 }
 
@@ -94,8 +92,8 @@ func sessionFromRow(row sqlcgen.SimSession) (Session, error) {
 		InitParams:     params,
 		Compute:        row.Compute,
 		Status:         row.Status,
-		CreatedAt:      timeFromPg(row.CreatedAt),
-		UpdatedAt:      timeFromPg(row.UpdatedAt),
+		CreatedAt:      timex.FromTimestamptz(row.CreatedAt),
+		UpdatedAt:      timex.FromTimestamptz(row.UpdatedAt),
 	}, nil
 }
 
@@ -109,7 +107,7 @@ func sessionWithPackageFromRow(row sqlcgen.GetSimSessionWithPackageRow) (Session
 	if err != nil {
 		return SessionWithPackage{}, err
 	}
-	return SessionWithPackage{Session: session, PackageCode: row.Code, PackageVersion: row.Version, PackageName: row.Name, Category: row.Category, BundleKey: row.BundleKey, BundleHash: row.BundleHash, BackendAdapter: textValue(row.BackendAdapter), BackendConfig: backendConfig, PackageStatus: row.PackageStatus}, nil
+	return SessionWithPackage{Session: session, PackageCode: row.Code, PackageVersion: row.Version, PackageName: row.Name, Category: row.Category, BundleKey: row.BundleKey, BundleHash: row.BundleHash, BackendAdapter: pgtypex.TextValue(row.BackendAdapter), BackendConfig: backendConfig, PackageStatus: row.PackageStatus}, nil
 }
 
 // actionFromRow 转换操作序列行。
@@ -118,12 +116,12 @@ func actionFromRow(row sqlcgen.SimActionLog) (Action, error) {
 	if err != nil {
 		return Action{}, err
 	}
-	return Action{ID: row.ID, TenantID: row.TenantID, SessionID: row.SessionID, Seq: row.Seq, AtTick: row.AtTick, EventType: row.EventType, Payload: payload, CreatedAt: timeFromPg(row.CreatedAt)}, nil
+	return Action{ID: row.ID, TenantID: row.TenantID, SessionID: row.SessionID, Seq: row.Seq, AtTick: row.AtTick, EventType: row.EventType, Payload: payload, CreatedAt: timex.FromTimestamptz(row.CreatedAt)}, nil
 }
 
 // shareFromRow 转换分享码索引。
 func shareFromRow(row sqlcgen.SimShare) Share {
-	return Share{ID: row.ID, TenantID: row.TenantID, SessionID: row.SessionID, Code: row.Code, CreatedBy: row.CreatedBy, Status: row.Status, ExpireAt: timeFromPg(row.ExpireAt), CreatedAt: timeFromPg(row.CreatedAt), UpdatedAt: timeFromPg(row.UpdatedAt)}
+	return Share{ID: row.ID, TenantID: row.TenantID, SessionID: row.SessionID, Code: row.Code, CreatedBy: row.CreatedBy, Status: row.Status, ExpireAt: timex.FromTimestamptz(row.ExpireAt), CreatedAt: timex.FromTimestamptz(row.CreatedAt), UpdatedAt: timex.FromTimestamptz(row.UpdatedAt)}
 }
 
 // decodeMap 解码 JSONB 对象为空 map。
@@ -131,11 +129,7 @@ func decodeMap(raw []byte) (map[string]any, error) {
 	if len(raw) == 0 {
 		return map[string]any{}, nil
 	}
-	out := map[string]any{}
-	if err := json.Unmarshal(raw, &out); err != nil {
-		return nil, err
-	}
-	return out, nil
+	return jsonx.ObjectMapStrict(raw)
 }
 
 // reportFromJSON 解码审核报告。
@@ -144,47 +138,8 @@ func reportFromJSON(raw []byte) (ValidationReport, error) {
 	if len(raw) == 0 {
 		return out, nil
 	}
-	if err := json.Unmarshal(raw, &out); err != nil {
+	if err := jsonx.DecodeStrict(raw, &out); err != nil {
 		return ValidationReport{}, err
 	}
 	return out, nil
-}
-
-// textParam 构造可空 text 参数。
-func textParam(value string) pgtype.Text {
-	return pgtype.Text{String: value, Valid: value != ""}
-}
-
-// int64Param 构造可空 int8 参数。
-func int64Param(value int64) pgtype.Int8 {
-	return pgtype.Int8{Int64: value, Valid: value > 0}
-}
-
-// timeParam 构造可空 timestamptz 参数。
-func timeParam(value time.Time) pgtype.Timestamptz {
-	return pgtype.Timestamptz{Time: value.UTC(), Valid: !value.IsZero()}
-}
-
-// textValue 读取可空 text。
-func textValue(value pgtype.Text) string {
-	if value.Valid {
-		return value.String
-	}
-	return ""
-}
-
-// int64Value 读取可空 int8。
-func int64Value(value pgtype.Int8) int64 {
-	if value.Valid {
-		return value.Int64
-	}
-	return 0
-}
-
-// timeFromPg 读取 pgtype 时间。
-func timeFromPg(value pgtype.Timestamptz) time.Time {
-	if value.Valid {
-		return value.Time.UTC()
-	}
-	return time.Time{}
 }

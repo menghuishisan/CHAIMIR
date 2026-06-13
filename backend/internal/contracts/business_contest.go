@@ -5,20 +5,20 @@ import "context"
 
 // ContestStats 是 M8 输出给 M9 的竞赛统计摘要。
 type ContestStats struct {
-	TenantID           int64
-	ContestCount       int64
-	ActiveContestCount int64
-	ParticipantCount   int64
+	TenantID           int64 `json:"tenant_id"`
+	ContestCount       int64 `json:"contest_count"`
+	ActiveContestCount int64 `json:"active_contest_count"`
+	ParticipantCount   int64 `json:"participant_count"`
 }
 
 // ContestAchievement 是 M8 输出给 M11 展示的竞赛成就摘要。
 type ContestAchievement struct {
-	TenantID  int64
-	StudentID int64
-	ContestID int64
-	TeamID    int64
-	Score     float64
-	Rank      int32
+	TenantID  int64   `json:"tenant_id"`
+	StudentID int64   `json:"student_id"`
+	ContestID int64   `json:"contest_id"`
+	TeamID    int64   `json:"team_id"`
+	Score     float64 `json:"score"`
+	Rank      int32   `json:"rank"`
 }
 
 // ContestReadService 是 M8 对聚合层开放的只读竞赛契约。

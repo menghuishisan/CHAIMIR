@@ -9,6 +9,7 @@ import (
 
 	"chaimir/internal/contracts"
 	"chaimir/internal/platform/audit"
+	"chaimir/internal/platform/timex"
 	"chaimir/pkg/apperr"
 )
 
@@ -67,7 +68,7 @@ func (s *Service) SubmitBattleEntry(ctx context.Context, contestID int64, req Ba
 				continue
 			}
 			matchID := s.ids.Generate()
-			if _, err := tx.CreateBattleMatch(ctx, BattleMatch{ID: matchID, TenantID: id.TenantID, ContestID: contestID, ProblemID: req.ProblemID, EntryAID: entry.ID, EntryBID: opponent.ID, SourceRef: battleSourceRef(matchID, now())}); err != nil {
+			if _, err := tx.CreateBattleMatch(ctx, BattleMatch{ID: matchID, TenantID: id.TenantID, ContestID: contestID, ProblemID: req.ProblemID, EntryAID: entry.ID, EntryBID: opponent.ID, SourceRef: battleSourceRef(matchID, timex.Now())}); err != nil {
 				return err
 			}
 		}
@@ -215,7 +216,9 @@ func (s *Service) executeBattleMatch(ctx context.Context, match BattleMatch) err
 	}
 	spec, err := battleRuntimeSpecFromProblem(problem)
 	if err != nil {
-		_ = s.markBattleFailed(ctx, match)
+		if failErr := s.markBattleFailed(ctx, match); failErr != nil {
+			return apperr.ErrContestBattleMatchFailed.WithCause(fmt.Errorf("对局配置无效: %w; 标记对局失败也失败: %v", err, failErr))
+		}
 		return err
 	}
 	info, err := s.sandbox.CreateSandbox(ctx, contracts.SandboxCreateRequest{TenantID: match.TenantID, RuntimeCode: spec.RuntimeCode, RuntimeImageVersion: spec.RuntimeImageVersion, ToolCodes: spec.ToolCodes, OwnerAccountID: ownerID, SourceRef: match.SourceRef, KeepAlive: false, SnapshotEnabled: true})
@@ -341,7 +344,7 @@ func (s *Service) applyBattleRankDelta(ctx context.Context, tx TxStore, tenantID
 	}
 	rank.ID = s.ids.Generate()
 	rank.Score += delta
-	rank.LastSolveAt = now()
+	rank.LastSolveAt = timex.Now()
 	_, err = tx.UpsertLadder(ctx, rank)
 	return err
 }

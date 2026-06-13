@@ -54,15 +54,3 @@ func RoleNumber(role string) (int16, bool) {
 		return 0, false
 	}
 }
-
-// HasAnyRole 判断账号角色列表是否命中任一允许角色。
-func HasAnyRole(actual []string, allowed ...string) bool {
-	for _, role := range actual {
-		for _, want := range allowed {
-			if role == want {
-				return true
-			}
-		}
-	}
-	return false
-}

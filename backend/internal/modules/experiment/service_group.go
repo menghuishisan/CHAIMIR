@@ -70,7 +70,7 @@ func (s *Service) UpsertGroupMember(ctx context.Context, groupID int64, req Upse
 			return err
 		}
 		if exp.GroupConfig.Size > 0 && !memberAlreadyExists(members, req.StudentID) && len(members) >= exp.GroupConfig.Size {
-			return apperr.ErrExperimentGroupInvalid.WithMessage("实验小组人数已达到上限")
+			return apperr.ErrExperimentGroupFull
 		}
 		if _, err := tx.UpsertGroupMember(ctx, GroupMember{ID: s.ids.Generate(), TenantID: id.TenantID, GroupID: groupID, StudentID: req.StudentID, Role: req.Role}); err != nil {
 			return err

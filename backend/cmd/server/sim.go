@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"chaimir/internal/contracts"
 	"chaimir/internal/modules/sim"
 	"chaimir/internal/platform/audit"
 	"chaimir/internal/platform/auth"
@@ -30,7 +31,7 @@ type SimModuleDeps struct {
 	Audit           audit.Writer
 	WSHub           *ws.Hub
 	Auth            *auth.Manager
-	Roles           auth.RoleChecker
+	Roles           contracts.IdentityService
 	BackendAdapters sim.BackendRegistry
 }
 

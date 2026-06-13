@@ -2,7 +2,6 @@
 package admin
 
 import (
-	"net/http"
 	"strings"
 	"time"
 
@@ -16,9 +15,9 @@ import (
 )
 
 // RegisterRoutes 注册管理后台 HTTP API。
-func RegisterRoutes(r gin.IRouter, svc *Service, authn *auth.Manager, roles auth.RoleChecker) error {
+func RegisterRoutes(r gin.IRouter, svc *Service, authn *auth.Manager, roles contracts.IdentityService) error {
 	if r == nil || svc == nil || authn == nil {
-		return apperr.ErrInternal.WithMessage("admin routes 依赖不完整")
+		return apperr.ErrHTTPServiceMissing
 	}
 	api := adminAPI{svc: svc}
 	g := r.Group("/api/v1/admin", authn.Middleware())
@@ -110,13 +109,8 @@ func (a adminAPI) exportAudit(c *gin.Context) {
 	if !ok {
 		return
 	}
-	data, err := a.svc.ExportAuditCSV(c.Request.Context(), query)
-	if err != nil {
-		httpx.Write(c, gin.H{}, err)
-		return
-	}
-	c.Header("Content-Disposition", "attachment; filename=\"audit.csv\"")
-	c.Data(http.StatusOK, "text/csv; charset=utf-8", data)
+	out, err := a.svc.ExportAuditCSV(c.Request.Context(), query)
+	httpx.Write(c, out, err)
 }
 
 // listConfigs 查询配置。
@@ -245,15 +239,7 @@ func (a adminAPI) triggerBackup(c *gin.Context) {
 
 // page 解析分页参数。
 func page(c *gin.Context) (int, int, bool) {
-	p, ok := httpx.QueryInt(c, "page", httpx.QueryIntRule{Default: 1, Min: 1})
-	if !ok {
-		return 0, 0, false
-	}
-	s, ok := httpx.QueryInt(c, "size", httpx.QueryIntRule{Default: 20, Min: 1, Max: 100, HasMax: true})
-	if !ok {
-		return 0, 0, false
-	}
-	return int(p), int(s), true
+	return httpx.Page(c)
 }
 
 // auditQuery 解析审计中心文档定义的过滤条件。

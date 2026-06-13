@@ -1,4 +1,4 @@
-// content sensitive 文件实现题面敏感字段剥离,确保答案和判题配置不下发。
+// content convert_sensitive 文件实现题面敏感字段剥离,确保答案和判题配置不下发。
 package content
 
 import "strings"

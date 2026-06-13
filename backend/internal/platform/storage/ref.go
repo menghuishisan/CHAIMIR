@@ -9,6 +9,14 @@ type ObjectRef struct {
 	Key    string
 }
 
+// ObjectRefString 构造 minio://bucket/key 引用,与解析校验共用同一安全规则。
+func ObjectRefString(bucket, key string) (string, error) {
+	if !safeObjectRefBucket(bucket) || !safeObjectRefKey(key) {
+		return "", ErrObjectRefInvalid
+	}
+	return "minio://" + bucket + "/" + key, nil
+}
+
 // ParseObjectRef 解析 minio://bucket/key 引用,并拒绝会混淆 bucket/key 边界的非法片段。
 func ParseObjectRef(raw string) (ObjectRef, error) {
 	if !strings.HasPrefix(raw, "minio://") {

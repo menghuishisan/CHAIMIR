@@ -18,10 +18,6 @@ const (
 	SubjectGradeReviewLockChanged = "grade.review.lock_changed"
 	// SubjectIdentitySessionRevoked 表示账号会话被吊销,由 M1 发布供 M10 踢线联动。
 	SubjectIdentitySessionRevoked = "identity.session.revoked"
-	// SubjectNotifySend 表示异步通知发送事件,由业务模块发布供 M10 消费,载荷直接使用 NotifySendRequest。
-	SubjectNotifySend = "notify.send"
-	// SubjectNotifyPush 表示异步实时推送事件,由业务模块发布供 M10 消费,载荷直接使用 NotifyPushRequest。
-	SubjectNotifyPush = "notify.push"
 )
 
 // JudgeCompletedEvent 是判题完成事件载荷。

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"chaimir/internal/contracts"
 	"chaimir/internal/modules/sandbox"
 	"chaimir/internal/platform/audit"
 	"chaimir/internal/platform/auth"
@@ -33,7 +34,7 @@ type SandboxModuleDeps struct {
 	EventBus     eventbus.Bus
 	WSHub        *ws.Hub
 	Auth         *auth.Manager
-	Roles        auth.RoleChecker
+	Roles        contracts.IdentityService
 	Capabilities map[string]sandbox.ChainCapability
 }
 
