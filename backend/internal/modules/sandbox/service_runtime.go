@@ -29,7 +29,7 @@ func (s *Service) RegisterRuntime(ctx context.Context, req RuntimeRequest) (Runt
 		var err error
 		runtime, err = tx.UpsertRuntime(ctx, s.ids.Generate(), req, spec)
 		if err != nil {
-			return apperr.ErrSandboxRuntimeConfigInvalid.WithCause(err)
+			return apperr.ErrSandboxRuntimePersistFailed.WithCause(err)
 		}
 		return nil
 	}); err != nil {
@@ -73,7 +73,7 @@ func (s *Service) UpdateRuntime(ctx context.Context, runtimeID int64, req Runtim
 		var err error
 		runtime, err = tx.UpsertRuntime(ctx, runtimeID, req, spec)
 		if err != nil {
-			return apperr.ErrSandboxRuntimeConfigInvalid.WithCause(err)
+			return apperr.ErrSandboxRuntimePersistFailed.WithCause(err)
 		}
 		return nil
 	}); err != nil {
@@ -235,7 +235,8 @@ func (s *Service) RunRuntimeSelftest(ctx context.Context, runtimeID int64) (Runt
 	if err != nil {
 		status = RuntimeSelftestFailed
 		runtimeStatus = RuntimeStatusOnboarding
-		detail, encodeErr = jsonBytes(map[string]any{"result": "failed", "error": logging.SanitizeError(err.Error()), "namespace": sb.Namespace})
+		logging.ErrorContext(ctx, "sandbox runtime selftest failed", err.Error(), slog.Int64("runtime_id", runtimeID), slog.String("namespace", sb.Namespace))
+		detail, encodeErr = jsonBytes(map[string]any{"result": "failed", "stage": "selftest", "trace_id": traceIDFromLogContext(ctx)})
 		if encodeErr != nil {
 			return RuntimeSelftestResponse{}, apperr.ErrSandboxSelftestFailed.WithCause(encodeErr)
 		}
@@ -261,6 +262,16 @@ func (s *Service) RunRuntimeSelftest(ctx context.Context, runtimeID int64) (Runt
 	return resp, nil
 }
 
+// traceIDFromLogContext 从统一日志上下文读取 trace_id,用于持久状态只暴露报障编号。
+func traceIDFromLogContext(ctx context.Context) string {
+	for _, attr := range logging.AttrsFromContext(ctx) {
+		if attr.Key == "trace_id" {
+			return attr.Value.String()
+		}
+	}
+	return ""
+}
+
 // runRuntimeCapabilitySelftest 用标准 L2 能力执行 reset/deploy/query/reset 自检闭环。
 func (s *Service) runRuntimeCapabilitySelftest(ctx context.Context, sb Sandbox, runtime Runtime) error {
 	if runtime.AdapterLevel < 2 && strings.TrimSpace(runtime.CapabilityImpl) == "" && strings.TrimSpace(runtime.PluginRef) == "" {
@@ -275,7 +286,7 @@ func (s *Service) runRuntimeCapabilitySelftest(ctx context.Context, sb Sandbox, 
 	}
 	payload, ok := runtime.AdapterSpec.Selftest["deploy_payload"].(map[string]any)
 	if !ok || len(payload) == 0 {
-		return apperr.ErrSandboxRuntimeConfigInvalid
+		return apperr.ErrSandboxSelftestSpecInvalid
 	}
 	if _, err := cap.Deploy(ctx, sb, runtime, payload); err != nil {
 		return err
@@ -287,7 +298,7 @@ func (s *Service) runRuntimeCapabilitySelftest(ctx context.Context, sb Sandbox, 
 	}
 	target, ok := runtime.AdapterSpec.Selftest["query_target"].(string)
 	if !ok || strings.TrimSpace(target) == "" {
-		return apperr.ErrSandboxRuntimeConfigInvalid
+		return apperr.ErrSandboxSelftestSpecInvalid
 	}
 	if _, err := cap.Query(ctx, sb, runtime, strings.TrimSpace(target)); err != nil {
 		return err
@@ -350,7 +361,8 @@ func (s *Service) PrepullRuntimeImage(ctx context.Context, runtimeID, imageID in
 		status = ImagePrepullFailed
 		prepulled = false
 		at = time.Time{}
-		detail, encodeErr := jsonBytes(map[string]any{"error": logging.SanitizeError(err.Error()), "daemonset": result.DaemonSet})
+		logging.ErrorContext(ctx, "sandbox image prepull failed", err.Error(), slog.Int64("runtime_id", runtimeID), slog.Int64("image_id", imageID), slog.String("daemonset", result.DaemonSet))
+		detail, encodeErr := jsonBytes(map[string]any{"stage": "failed", "daemonset": result.DaemonSet, "desired_nodes": result.DesiredNodes, "ready_nodes": result.ReadyNodes})
 		if encodeErr != nil {
 			return PrepullResponse{}, apperr.ErrSandboxImagePrepullFailed.WithCause(encodeErr)
 		}

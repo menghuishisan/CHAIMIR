@@ -10,6 +10,7 @@ import (
 	"chaimir/internal/platform/pagex"
 	"chaimir/internal/platform/timex"
 	"chaimir/pkg/apperr"
+	"chaimir/pkg/response"
 )
 
 // CreateAssignment 创建作业草稿并锁定 M5 题目版本。
@@ -435,7 +436,7 @@ func (s *Service) RunJudgeOutboxOnce(ctx context.Context, tenantID int64) error 
 		info, err := s.judge.SubmitJudgeTask(ctx, contracts.JudgeSubmitRequest{TenantID: item.TenantID, JudgerCode: item.JudgerCode, ItemCode: item.ItemCode, ItemVersion: item.ItemVersion, CodeStorageKey: item.CodeStorageKey, CodeHash: item.CodeHash, SubmitterID: item.StudentID, SourceRef: item.SourceRef, SandboxMode: contracts.JudgeSandboxModeFresh, ExtraInput: item.ExtraInput, Priority: 5})
 		if err != nil {
 			if retryErr := s.store.TenantTx(ctx, item.TenantID, func(ctx context.Context, tx TxStore) error {
-				_, retryErr := tx.RetryJudgeOutbox(ctx, item.TenantID, item.ID, err.Error())
+				_, retryErr := tx.RetryJudgeOutbox(ctx, item.TenantID, item.ID, safeStoredError(ctx, err))
 				return retryErr
 			}); retryErr != nil {
 				return apperr.ErrTeachingJudgeOutboxInvalid.WithCause(retryErr)
@@ -453,6 +454,15 @@ func (s *Service) RunJudgeOutboxOnce(ctx context.Context, tenantID int64) error 
 		}
 	}
 	return nil
+}
+
+// safeStoredError 只持久化错误码、用户向文案和 trace_id,详细原因保留在日志链路中。
+func safeStoredError(ctx context.Context, err error) string {
+	ae := apperr.AsAppError(err)
+	if ae == nil {
+		return ""
+	}
+	return fmt.Sprintf("code=%s message=%s trace_id=%s", ae.UserCode(), ae.UserMessage(), response.TraceFromContext(ctx))
 }
 
 // HandleJudgeCompleted 处理 M3 判题完成事件。

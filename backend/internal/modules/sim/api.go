@@ -86,7 +86,7 @@ func (a simAPI) registerPlatformRoutes(g gin.IRouter) {
 
 // listPackages 查询用户可见的已上架包列表。
 func (a simAPI) listPackages(c *gin.Context) {
-	page, size, ok := pageQuery(c)
+	page, size, ok := httpx.Page(c)
 	if !ok {
 		return
 	}
@@ -181,7 +181,7 @@ func (a simAPI) validationReport(c *gin.Context) {
 
 // listReviews 查询审核记录。
 func (a simAPI) listReviews(c *gin.Context) {
-	page, size, ok := pageQuery(c)
+	page, size, ok := httpx.Page(c)
 	if !ok {
 		return
 	}
@@ -397,11 +397,6 @@ func bindPackageMultipart(c *gin.Context) (SubmitPackageRequest, BundleInput, bo
 	}
 	req := SubmitPackageRequest{Code: c.PostForm("code"), Version: c.PostForm("version"), Name: c.PostForm("name"), Category: c.PostForm("category"), Compute: c.PostForm("compute"), BackendAdapter: c.PostForm("backend_adapter"), ScaleLimit: []byte(defaultJSON(c.PostForm("scale_limit"))), BackendConfig: []byte(defaultJSON(c.PostForm("backend_config"))), AuthorType: int16(httpx.Int(c.PostForm("author_type")))}
 	return req, BundleInput{FileName: header.Filename, ContentType: header.Header.Get("Content-Type"), Data: data}, true
-}
-
-// pageQuery 统一解析分页参数。
-func pageQuery(c *gin.Context) (int, int, bool) {
-	return httpx.Page(c)
 }
 
 // currentTenantIdentity 从服务端鉴权上下文读取租户身份。

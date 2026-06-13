@@ -18,15 +18,23 @@ func New(code string, userMessage string) *Error {
 	return &Error{Code: code, Message: userMessage}
 }
 
-// Error 返回用户向错误文案,避免把内部技术细节暴露给前端。
+// Error 只返回稳定错误码和用户向文案,避免 err.Error 被响应或业务状态误用时泄露内部原因。
 func (e *Error) Error() string {
+	if e == nil {
+		return ""
+	}
+	return fmt.Sprintf("[%s] %s", e.Code, e.Message)
+}
+
+// LogString 返回包含底层原因链的排障字符串,只能用于结构化日志和运维可见链路。
+func (e *Error) LogString() string {
 	if e == nil {
 		return ""
 	}
 	if e.cause != nil {
 		return fmt.Sprintf("[%s] %s: %v", e.Code, e.Message, e.cause)
 	}
-	return fmt.Sprintf("[%s] %s", e.Code, e.Message)
+	return e.Error()
 }
 
 // UserCode 返回稳定错误码,供前端按码做跳转、重试或提示策略。

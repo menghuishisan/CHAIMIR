@@ -40,7 +40,7 @@ func RegisterRoutes(r gin.IRouter, svc *Service, authn *auth.Manager, roles cont
 type notifyAPI struct{ svc *Service }
 
 func (a notifyAPI) inbox(c *gin.Context) {
-	page, size, ok := notifyPage(c)
+	page, size, ok := httpx.Page(c)
 	if !ok {
 		return
 	}
@@ -102,7 +102,7 @@ func (a notifyAPI) createAnnouncement(c *gin.Context) {
 }
 
 func (a notifyAPI) listAnnouncements(c *gin.Context) {
-	page, size, ok := notifyPage(c)
+	page, size, ok := httpx.Page(c)
 	if ok {
 		out5, err := a.svc.ListAnnouncements(c.Request.Context(), page, size)
 		httpx.Write(c, out5, err)
@@ -139,16 +139,4 @@ func (a notifyAPI) websocket(c *gin.Context) {
 	if err != nil {
 		httpx.Write(c, gin.H{}, apperr.ErrNotifyChannelUnavailable.WithCause(err))
 	}
-}
-
-func notifyPage(c *gin.Context) (int, int, bool) {
-	p, ok := httpx.QueryInt(c, "page", httpx.QueryIntRule{Default: 1, Min: 1})
-	if !ok {
-		return 0, 0, false
-	}
-	s, ok := httpx.QueryInt(c, "size", httpx.QueryIntRule{Default: 20, Min: 1, Max: 100, HasMax: true})
-	if !ok {
-		return 0, 0, false
-	}
-	return int(p), int(s), true
 }

@@ -58,6 +58,12 @@ func VerifyPassword(password, encoded string) (bool, error) {
 	return EqualBytes(got, want), nil
 }
 
+// SHA256Hex 计算普通内容摘要的十六进制 SHA-256,用于版本、归档等非密钥完整性场景。
+func SHA256Hex(data []byte) string {
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:])
+}
+
 // HMACSHA256Hex 计算十六进制 HMAC-SHA256。
 func HMACSHA256Hex(key []byte, message string) (string, error) {
 	if len(key) == 0 {

@@ -1,4 +1,4 @@
-﻿// transfer api 文件负责注册统一导入导出中心 HTTP 路由和访问边界。
+// transfer api 文件负责注册统一导入导出中心 HTTP 路由和访问边界。
 package transfer
 
 import (
@@ -35,15 +35,11 @@ func (a transferAPI) listTasks(c *gin.Context) {
 	if !ok {
 		return
 	}
-	page, ok := httpx.QueryInt(c, "page", httpx.QueryIntRule{Default: 1, Min: 1})
+	page, size, ok := httpx.Page(c)
 	if !ok {
 		return
 	}
-	size, ok := httpx.QueryInt(c, "size", httpx.QueryIntRule{Default: 20, Min: 1, Max: 100, HasMax: true})
-	if !ok {
-		return
-	}
-	tasks, p, s, err := a.svc.ListTasks(c.Request.Context(), TaskListQuery{TenantID: id.TenantID, AccountID: id.AccountID, Channel: Channel(c.Query("channel")), Status: Status(c.Query("status")), Page: int(page), Size: int(size)})
+	tasks, p, s, err := a.svc.ListTasks(c.Request.Context(), TaskListQuery{TenantID: id.TenantID, AccountID: id.AccountID, Channel: Channel(c.Query("channel")), Status: Status(c.Query("status")), Page: page, Size: size})
 	httpx.Write(c, gin.H{"items": TasksToDTO(tasks), "page": p, "size": s}, err)
 }
 

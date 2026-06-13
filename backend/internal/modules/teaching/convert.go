@@ -98,9 +98,8 @@ func gradeDTO(g CourseGrade) GradeDTO {
 }
 
 // exportTaskDTO 将统一导入导出中心任务快照转换为课程成绩导出响应。
-func exportTaskDTO(task transfer.Task) ExportTaskDTO {
-	dto := transfer.TaskToDTO(task)
-	return ExportTaskDTO{TaskID: dto.TaskID, Channel: dto.Channel, Subject: dto.Subject, Status: dto.Status, FileName: dto.FileName, ContentType: dto.ContentType, ArtifactFileName: dto.ArtifactFileName, ArtifactContentType: dto.ArtifactContentType, ArtifactSize: dto.ArtifactSize}
+func exportTaskDTO(task transfer.Task) transfer.TaskDTO {
+	return transfer.TaskToDTO(task)
 }
 
 // contractGrade 将 M6 单课程成绩转换为 M11 只读聚合契约对象。

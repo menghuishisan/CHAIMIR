@@ -19,13 +19,13 @@ import (
 func (s *Service) applyInitAssetsIfNeeded(ctx context.Context, sb Sandbox, runtime Runtime) error {
 	for _, asset := range runtime.AdapterSpec.InitAssets {
 		if strings.TrimSpace(asset.SourceRef) == "" {
-			return apperr.ErrSandboxInitFailed
+			return apperr.ErrSandboxInitAssetConfigInvalid
 		}
 		phase := strings.TrimSpace(asset.ApplyPhase)
 		if phase != "" &&
 			!strings.EqualFold(phase, InitAssetApplyPhaseInit) &&
 			!strings.EqualFold(phase, InitAssetApplyPhasePersonalization) {
-			return apperr.ErrSandboxInitFailed
+			return apperr.ErrSandboxInitAssetConfigInvalid
 		}
 		if err := s.restoreArchiveToWorkspace(ctx, sb, runtime, asset.SourceRef); err != nil {
 			return err
@@ -43,30 +43,30 @@ func (s *Service) restoreInitCodeIfNeeded(ctx context.Context, sb Sandbox, runti
 func (s *Service) restoreArchiveToWorkspace(ctx context.Context, sb Sandbox, runtime Runtime, objectRef string) error {
 	ref, err := storage.ParseObjectRef(objectRef)
 	if err != nil {
-		return apperr.ErrSandboxInitFailed.WithCause(err)
+		return apperr.ErrSandboxInitObjectRefInvalid.WithCause(err)
 	}
 	if err := validateInitObjectRef(sb.TenantID, ref, s.minio.BucketCode(), s.minio.BucketAttach()); err != nil {
 		return err
 	}
 	reader, err := s.minio.Get(ctx, ref.Bucket, ref.Key)
 	if err != nil {
-		return apperr.ErrSandboxInitFailed.WithCause(err)
+		return apperr.ErrSandboxInitObjectReadFailed.WithCause(err)
 	}
 	defer reader.Close()
 	data, err := io.ReadAll(io.LimitReader(reader, s.cfg.InitArchiveMaxBytes+1))
 	if err != nil {
-		return apperr.ErrSandboxInitFailed.WithCause(err)
+		return apperr.ErrSandboxInitObjectReadFailed.WithCause(err)
 	}
 	if int64(len(data)) > s.cfg.InitArchiveMaxBytes {
-		return apperr.ErrSandboxInitFailed
+		return apperr.ErrSandboxInitArchiveTooLarge
 	}
 	tarball, err := upload.SafeArchiveTar(ref.Key, data, upload.ArchiveLimits{MaxFiles: s.cfg.InitArchiveMaxFiles, MaxUnpackedBytes: s.cfg.InitArchiveMaxUnpackedBytes})
 	if err != nil {
-		return apperr.ErrSandboxInitFailed.WithCause(err)
+		return apperr.ErrSandboxInitArchiveInvalid.WithCause(err)
 	}
 	command := workspaceCommand(runtime.AdapterSpec.WorkspaceOps.UnpackTar, runtime.AdapterSpec.WorkspaceDir, runtime.AdapterSpec.WorkspaceDir, "")
 	if _, stderr, err := s.orchestrator.Exec(ctx, sb.Namespace, runtimeExecTarget(runtime), command, tarball, false); err != nil {
-		return apperr.ErrSandboxInitFailed.WithCause(fmt.Errorf("%w: %s", err, string(stderr)))
+		return apperr.ErrSandboxInitExecFailed.WithCause(fmt.Errorf("%w: %s", err, string(stderr)))
 	}
 	return nil
 }
@@ -75,32 +75,32 @@ func (s *Service) restoreArchiveToWorkspace(ctx context.Context, sb Sandbox, run
 func (s *Service) runInitScriptIfNeeded(ctx context.Context, sb Sandbox, runtime Runtime, initScriptRef string) error {
 	ref, err := storage.ParseObjectRef(initScriptRef)
 	if err != nil {
-		return apperr.ErrSandboxInitFailed.WithCause(err)
+		return apperr.ErrSandboxInitObjectRefInvalid.WithCause(err)
 	}
 	if err := validateInitObjectRef(sb.TenantID, ref, s.minio.BucketCode(), s.minio.BucketAttach()); err != nil {
 		return err
 	}
 	reader, err := s.minio.Get(ctx, ref.Bucket, ref.Key)
 	if err != nil {
-		return apperr.ErrSandboxInitFailed.WithCause(err)
+		return apperr.ErrSandboxInitObjectReadFailed.WithCause(err)
 	}
 	defer reader.Close()
 	data, err := io.ReadAll(io.LimitReader(reader, s.cfg.InitArchiveMaxBytes+1))
 	if err != nil {
-		return apperr.ErrSandboxInitFailed.WithCause(err)
+		return apperr.ErrSandboxInitObjectReadFailed.WithCause(err)
 	}
 	if int64(len(data)) > s.cfg.InitArchiveMaxBytes {
-		return apperr.ErrSandboxInitFailed
+		return apperr.ErrSandboxInitArchiveTooLarge
 	}
 	scriptPath := path.Join(runtime.AdapterSpec.WorkspaceDir, ".chaimir-init-script")
 	writeCommand := workspaceCommand(runtime.AdapterSpec.WorkspaceOps.WriteFile, runtime.AdapterSpec.WorkspaceDir, scriptPath, "")
 	if _, stderr, err := s.orchestrator.Exec(ctx, sb.Namespace, runtimeExecTarget(runtime), writeCommand, data, false); err != nil {
-		return apperr.ErrSandboxInitFailed.WithCause(fmt.Errorf("%w: %s", err, string(stderr)))
+		return apperr.ErrSandboxInitExecFailed.WithCause(fmt.Errorf("%w: %s", err, string(stderr)))
 	}
 	runCommand := workspaceCommand(runtime.AdapterSpec.WorkspaceOps.RunScript, runtime.AdapterSpec.WorkspaceDir, runtime.AdapterSpec.WorkspaceDir, scriptPath)
 	stdin := []byte(base64.StdEncoding.EncodeToString(data))
 	if _, stderr, err := s.orchestrator.Exec(ctx, sb.Namespace, runtimeExecTarget(runtime), runCommand, stdin, false); err != nil {
-		return apperr.ErrSandboxInitFailed.WithCause(fmt.Errorf("%w: %s", err, string(stderr)))
+		return apperr.ErrSandboxInitExecFailed.WithCause(fmt.Errorf("%w: %s", err, string(stderr)))
 	}
 	return s.store.TenantTx(ctx, sb.TenantID, func(ctx context.Context, tx TxStore) error {
 		detail, err := jsonBytes(map[string]any{"script_ref": initScriptRef})
@@ -114,14 +114,14 @@ func (s *Service) runInitScriptIfNeeded(ctx context.Context, sb Sandbox, runtime
 // validateInitObjectRef 校验初始化对象只来自当前租户的代码或附件桶,防止内部调用误传跨租户对象。
 func validateInitObjectRef(tenantID int64, ref storage.ObjectRef, codeBucket, attachBucket string) error {
 	if tenantID <= 0 {
-		return apperr.ErrSandboxInitFailed
+		return apperr.ErrSandboxInitObjectRefInvalid
 	}
 	if ref.Bucket != codeBucket && ref.Bucket != attachBucket {
-		return apperr.ErrSandboxInitFailed
+		return apperr.ErrSandboxInitObjectRefInvalid
 	}
 	prefix := strconv.FormatInt(tenantID, 10) + "/"
 	if !strings.HasPrefix(ref.Key, prefix) {
-		return apperr.ErrSandboxInitFailed
+		return apperr.ErrSandboxInitObjectRefInvalid
 	}
 	return nil
 }

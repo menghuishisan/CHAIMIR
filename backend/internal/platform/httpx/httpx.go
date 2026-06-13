@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"chaimir/internal/platform/ids"
+	"chaimir/internal/platform/pagex"
 	"chaimir/pkg/apperr"
 	"chaimir/pkg/response"
 
@@ -93,17 +94,18 @@ func QueryInt(c *gin.Context, key string, rule QueryIntRule) (int64, bool) {
 	return value, true
 }
 
-// Page 统一解析 page/size 查询参数,默认 page=1、size=20、size 最大 100。
+// Page 统一解析 page/size 查询参数,具体默认值和上限由 pagex 单一维护。
 func Page(c *gin.Context) (int, int, bool) {
-	page, ok := QueryInt(c, "page", QueryIntRule{Default: 1, Min: 1})
+	page, ok := QueryInt(c, "page", QueryIntRule{Default: 0, Min: 0})
 	if !ok {
 		return 0, 0, false
 	}
-	size, ok := QueryInt(c, "size", QueryIntRule{Default: 20, Min: 1, Max: 100, HasMax: true})
+	size, ok := QueryInt(c, "size", QueryIntRule{Default: 0, Min: 0})
 	if !ok {
 		return 0, 0, false
 	}
-	return int(page), int(size), true
+	p, s := pagex.Normalize(int(page), int(size))
+	return p, s, true
 }
 
 // Int 为 handler 层可选数字字段提供零值解析,必填语义应由 rules/service 校验。

@@ -5,8 +5,6 @@ import (
 	"archive/tar"
 	"archive/zip"
 	"bytes"
-	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
 	"io"
 	"path/filepath"
@@ -15,6 +13,7 @@ import (
 
 	"chaimir/internal/platform/upload"
 	"chaimir/pkg/apperr"
+	"chaimir/pkg/crypto"
 )
 
 // BundleInput 是 API 边界读取 multipart 后交给 service 的仿真包正文。
@@ -47,8 +46,7 @@ func analyzeBundle(input BundleInput, limits upload.ArchiveLimits) (string, Stat
 		return "", StaticScanReport{}, apperr.ErrSimBundleUnreadable
 	}
 	if len(input.Data) > 0 {
-		sum := sha256.Sum256(input.Data)
-		hash := hex.EncodeToString(sum[:])
+		hash := crypto.SHA256Hex(input.Data)
 		findings, err := scanBundleEntries(input.FileName, input.Data, limits)
 		if err != nil {
 			return "", StaticScanReport{}, apperr.ErrSimBundleUnreadable.WithCause(err)

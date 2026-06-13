@@ -8,9 +8,7 @@ import (
 	"chaimir/internal/contracts"
 	"chaimir/internal/platform/auth"
 	"chaimir/internal/platform/httpx"
-	"chaimir/internal/platform/pagex"
 	"chaimir/pkg/apperr"
-	"chaimir/pkg/response"
 
 	"github.com/gin-gonic/gin"
 )
@@ -58,10 +56,10 @@ func (a accountAPI) listAccounts(c *gin.Context) {
 	}
 	out, err := a.svc.ListAccountsByAdmin(c.Request.Context(), query)
 	if err != nil {
-		response.Fail(c, err)
+		httpx.Write(c, gin.H{}, err)
 		return
 	}
-	response.OK(c, out)
+	httpx.Write(c, out, nil)
 }
 
 // createAccount 绑定单个账号创建请求。
@@ -72,10 +70,10 @@ func (a accountAPI) createAccount(c *gin.Context) {
 	}
 	dto, activation, err := a.svc.CreateAccountByAdmin(c.Request.Context(), req)
 	if err != nil {
-		response.Fail(c, err)
+		httpx.Write(c, gin.H{}, err)
 		return
 	}
-	response.OK(c, gin.H{"account": dto, "activation_code": activation})
+	httpx.Write(c, gin.H{"account": dto, "activation_code": activation}, nil)
 }
 
 // updateAccount 绑定账号可编辑字段更新请求。
@@ -90,10 +88,10 @@ func (a accountAPI) updateAccount(c *gin.Context) {
 	}
 	out, err := a.svc.UpdateAccountByAdmin(c.Request.Context(), id, req)
 	if err != nil {
-		response.Fail(c, err)
+		httpx.Write(c, gin.H{}, err)
 		return
 	}
-	response.OK(c, out)
+	httpx.Write(c, out, nil)
 }
 
 // disableAccount 停用账号并吊销会话。
@@ -128,10 +126,10 @@ func (a accountAPI) updateStatus(c *gin.Context, status int16) {
 		return
 	}
 	if err := a.svc.UpdateAccountStatusByAdmin(c.Request.Context(), id, status); err != nil {
-		response.Fail(c, err)
+		httpx.Write(c, gin.H{}, err)
 		return
 	}
-	response.OK(c, gin.H{})
+	httpx.Write(c, gin.H{}, nil)
 }
 
 // forceLogout 强制吊销指定账号所有会话。
@@ -141,10 +139,10 @@ func (a accountAPI) forceLogout(c *gin.Context) {
 		return
 	}
 	if err := a.svc.ForceLogoutAccountByAdmin(c.Request.Context(), id); err != nil {
-		response.Fail(c, err)
+		httpx.Write(c, gin.H{}, err)
 		return
 	}
-	response.OK(c, gin.H{})
+	httpx.Write(c, gin.H{}, nil)
 }
 
 // resetPassword 绑定管理员重置密码请求。
@@ -158,10 +156,10 @@ func (a accountAPI) resetPassword(c *gin.Context) {
 		return
 	}
 	if err := a.svc.ResetAccountPasswordByAdmin(c.Request.Context(), id, req); err != nil {
-		response.Fail(c, err)
+		httpx.Write(c, gin.H{}, err)
 		return
 	}
-	response.OK(c, gin.H{})
+	httpx.Write(c, gin.H{}, nil)
 }
 
 // grantAdmin 授予教师学校管理员角色。
@@ -171,10 +169,10 @@ func (a accountAPI) grantAdmin(c *gin.Context) {
 		return
 	}
 	if err := a.svc.GrantSchoolAdmin(c.Request.Context(), id); err != nil {
-		response.Fail(c, err)
+		httpx.Write(c, gin.H{}, err)
 		return
 	}
-	response.OK(c, gin.H{})
+	httpx.Write(c, gin.H{}, nil)
 }
 
 // revokeAdmin 撤销学校管理员角色。
@@ -184,10 +182,10 @@ func (a accountAPI) revokeAdmin(c *gin.Context) {
 		return
 	}
 	if err := a.svc.RevokeSchoolAdmin(c.Request.Context(), id); err != nil {
-		response.Fail(c, err)
+		httpx.Write(c, gin.H{}, err)
 		return
 	}
-	response.OK(c, gin.H{})
+	httpx.Write(c, gin.H{}, nil)
 }
 
 // batchDisable 批量停用账号。
@@ -202,10 +200,10 @@ func (a accountAPI) batchArchive(c *gin.Context) {
 		return
 	}
 	if err := a.svc.ArchiveClassesByAdmin(c.Request.Context(), req); err != nil {
-		response.Fail(c, err)
+		httpx.Write(c, gin.H{}, err)
 		return
 	}
-	response.OK(c, gin.H{})
+	httpx.Write(c, gin.H{}, nil)
 }
 
 // batchRestore 批量恢复账号。
@@ -220,42 +218,42 @@ func (a accountAPI) batchStatus(c *gin.Context, status int16) {
 		return
 	}
 	if err := a.svc.BatchUpdateAccountStatusByAdmin(c.Request.Context(), req, status); err != nil {
-		response.Fail(c, err)
+		httpx.Write(c, gin.H{}, err)
 		return
 	}
-	response.OK(c, gin.H{})
+	httpx.Write(c, gin.H{}, nil)
 }
 
 // importPreview 绑定账号导入预览请求。
 func (a accountAPI) importPreview(c *gin.Context) {
 	targetType, ok := parseImportTarget(c.PostForm("type"))
 	if !ok {
-		response.Fail(c, apperr.ErrIdentityImportTypeInvalid)
+		httpx.Write(c, gin.H{}, apperr.ErrIdentityImportTypeInvalid)
 		return
 	}
 	fileHeader, err := c.FormFile("file")
 	if err != nil {
-		response.Fail(c, apperr.ErrIdentityImportContentInvalid.WithCause(err))
+		httpx.Write(c, gin.H{}, apperr.ErrIdentityImportContentInvalid.WithCause(err))
 		return
 	}
 	if maxBytes := a.svc.importMaxBytes(); maxBytes > 0 && fileHeader.Size > maxBytes {
-		response.Fail(c, apperr.ErrIdentityImportFileTooLarge)
+		httpx.Write(c, gin.H{}, apperr.ErrIdentityImportFileTooLarge)
 		return
 	}
 	// API 层只做上传边界检查和读取,文件类型与逐行校验交给 service 统一处理。
 	file, err := fileHeader.Open()
 	if err != nil {
-		response.Fail(c, apperr.ErrIdentityImportContentInvalid.WithCause(err))
+		httpx.Write(c, gin.H{}, apperr.ErrIdentityImportContentInvalid.WithCause(err))
 		return
 	}
 	content, readErr := io.ReadAll(file)
 	closeErr := file.Close()
 	if readErr != nil {
-		response.Fail(c, apperr.ErrIdentityImportContentInvalid.WithCause(readErr))
+		httpx.Write(c, gin.H{}, apperr.ErrIdentityImportContentInvalid.WithCause(readErr))
 		return
 	}
 	if closeErr != nil {
-		response.Fail(c, apperr.ErrInternal.WithCause(closeErr))
+		httpx.Write(c, gin.H{}, apperr.ErrInternal.WithCause(closeErr))
 		return
 	}
 	// 组装最小预览请求,避免 API 层理解导入业务状态机。
@@ -267,22 +265,22 @@ func (a accountAPI) importPreview(c *gin.Context) {
 	}
 	out, err := a.svc.PreviewAccountImport(c.Request.Context(), req)
 	if err != nil {
-		response.Fail(c, err)
+		httpx.Write(c, gin.H{}, err)
 		return
 	}
-	response.OK(c, out)
+	httpx.Write(c, out, nil)
 }
 
 // importTemplate 绑定模板类型和格式查询参数并返回下载文件。
 func (a accountAPI) importTemplate(c *gin.Context) {
 	targetType, ok := parseImportTarget(c.Query("type"))
 	if !ok {
-		response.Fail(c, apperr.ErrIdentityImportTypeInvalid)
+		httpx.Write(c, gin.H{}, apperr.ErrIdentityImportTypeInvalid)
 		return
 	}
 	tpl, err := a.svc.ImportTemplate(targetType, c.Query("format"))
 	if err != nil {
-		response.Fail(c, err)
+		httpx.Write(c, gin.H{}, err)
 		return
 	}
 	httpx.WriteAttachment(c, tpl.FileName, tpl.ContentType, tpl.Content)
@@ -296,20 +294,20 @@ func (a accountAPI) importCommit(c *gin.Context) {
 	}
 	out, err := a.svc.CommitAccountImport(c.Request.Context(), req)
 	if err != nil {
-		response.Fail(c, err)
+		httpx.Write(c, gin.H{}, err)
 		return
 	}
-	response.OK(c, out)
+	httpx.Write(c, out, nil)
 }
 
 // importBatches 读取账号导入批次历史。
 func (a accountAPI) importBatches(c *gin.Context) {
 	out, err := a.svc.ListImportBatchesByAdmin(c.Request.Context())
 	if err != nil {
-		response.Fail(c, err)
+		httpx.Write(c, gin.H{}, err)
 		return
 	}
-	response.OK(c, out)
+	httpx.Write(c, out, nil)
 }
 
 // bindAccountQuery 解析账号列表过滤和分页查询参数。
@@ -330,17 +328,12 @@ func bindAccountQuery(c *gin.Context) (AccountQuery, bool) {
 		return AccountQuery{}, false
 	}
 	query.ClassID = classID
-	page, ok := httpx.QueryInt(c, "page", httpx.QueryIntRule{BitSize: 32, Default: 1, Min: 1})
+	page, size, ok := httpx.Page(c)
 	if !ok {
 		return AccountQuery{}, false
 	}
-	size, ok := httpx.QueryInt(c, "size", httpx.QueryIntRule{BitSize: 32, Default: 20, Min: 1})
-	if !ok {
-		return AccountQuery{}, false
-	}
-	normalizedPage, normalizedSize := pagex.Normalize(int(page), int(size))
-	query.Page = int32(normalizedPage)
-	query.Size = int32(normalizedSize)
+	query.Page = int32(page)
+	query.Size = int32(size)
 	query.Keyword = c.Query("keyword")
 	return query, true
 }

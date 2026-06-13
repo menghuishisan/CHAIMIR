@@ -88,7 +88,7 @@ func (a experimentAPI) listExperiments(c *gin.Context) {
 	if !ok {
 		return
 	}
-	page, size, ok := experimentPage(c)
+	page, size, ok := httpx.Page(c)
 	if !ok {
 		return
 	}
@@ -252,7 +252,7 @@ func (a experimentAPI) listReports(c *gin.Context) {
 	if !ok {
 		return
 	}
-	page, size, ok := experimentPage(c)
+	page, size, ok := httpx.Page(c)
 	if !ok {
 		return
 	}
@@ -338,17 +338,4 @@ func (a experimentAPI) internalStats(c *gin.Context) {
 	}
 	out, err := a.svc.Stats(c.Request.Context(), contracts.ExperimentStatsQuery{TenantID: tenantID, CourseID: courseID})
 	httpx.Write(c, out, err)
-}
-
-// experimentPage 统一解析实验模块分页参数。
-func experimentPage(c *gin.Context) (int, int, bool) {
-	page, ok := httpx.QueryInt(c, "page", httpx.QueryIntRule{Default: 1, Min: 1})
-	if !ok {
-		return 0, 0, false
-	}
-	size, ok := httpx.QueryInt(c, "size", httpx.QueryIntRule{Default: 20, Min: 1, Max: 100, HasMax: true})
-	if !ok {
-		return 0, 0, false
-	}
-	return int(page), int(size), true
 }

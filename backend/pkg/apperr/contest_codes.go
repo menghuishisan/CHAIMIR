@@ -70,6 +70,16 @@ const (
 	CodeContestVulnPrevalidateFailed = "85005"
 	// CodeContestVulnFinalizeFailed 表示漏洞题固化失败。
 	CodeContestVulnFinalizeFailed = "85006"
+	// CodeContestVulnSourceBadStatus 表示漏洞源返回非成功状态。
+	CodeContestVulnSourceBadStatus = "85007"
+	// CodeContestVulnSourceReadFailed 表示漏洞源响应读取失败。
+	CodeContestVulnSourceReadFailed = "85008"
+	// CodeContestVulnSourceTooLarge 表示漏洞源响应超过配置上限。
+	CodeContestVulnSourceTooLarge = "85009"
+	// CodeContestVulnSourceJSONInvalid 表示漏洞源响应不是合法 JSON。
+	CodeContestVulnSourceJSONInvalid = "85010"
+	// CodeContestVulnSourceSyncMarkFailed 表示漏洞源同步状态保存失败。
+	CodeContestVulnSourceSyncMarkFailed = "85011"
 )
 
 var (
@@ -129,4 +139,14 @@ var (
 	ErrContestVulnPrevalidateFailed = New(CodeContestVulnPrevalidateFailed, "漏洞题预验证未通过")
 	// ErrContestVulnFinalizeFailed 表示固化失败。
 	ErrContestVulnFinalizeFailed = New(CodeContestVulnFinalizeFailed, "漏洞题暂时无法固化入库")
+	// ErrContestVulnSourceBadStatus 表示漏洞源返回异常状态。
+	ErrContestVulnSourceBadStatus = New(CodeContestVulnSourceBadStatus, "漏洞源暂时无法同步,请稍后重试")
+	// ErrContestVulnSourceReadFailed 表示漏洞源响应读取失败。
+	ErrContestVulnSourceReadFailed = New(CodeContestVulnSourceReadFailed, "漏洞源暂时无法读取,请稍后重试")
+	// ErrContestVulnSourceTooLarge 表示漏洞源响应超过上限。
+	ErrContestVulnSourceTooLarge = New(CodeContestVulnSourceTooLarge, "漏洞源返回内容过大,请调整后重试")
+	// ErrContestVulnSourceJSONInvalid 表示漏洞源响应格式不正确。
+	ErrContestVulnSourceJSONInvalid = New(CodeContestVulnSourceJSONInvalid, "漏洞源返回格式不正确,请检查后重试")
+	// ErrContestVulnSourceSyncMarkFailed 表示同步状态暂时无法保存。
+	ErrContestVulnSourceSyncMarkFailed = New(CodeContestVulnSourceSyncMarkFailed, "漏洞源同步状态暂时无法保存,请稍后重试")
 )

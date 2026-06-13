@@ -279,19 +279,19 @@ func (s *Service) fetchVulnCases(ctx context.Context, source VulnSource) ([]Vuln
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, apperr.ErrContestVulnSourceFetchFailed
+		return nil, apperr.ErrContestVulnSourceBadStatus
 	}
 	limited := io.LimitReader(resp.Body, s.cfg.VulnSourceMaxResponseBytes+1)
 	raw, err := io.ReadAll(limited)
 	if err != nil {
-		return nil, apperr.ErrContestVulnSourceFetchFailed.WithCause(err)
+		return nil, apperr.ErrContestVulnSourceReadFailed.WithCause(err)
 	}
 	if int64(len(raw)) > s.cfg.VulnSourceMaxResponseBytes {
-		return nil, apperr.ErrContestVulnSourceFetchFailed
+		return nil, apperr.ErrContestVulnSourceTooLarge
 	}
 	var payload any
 	if err := jsonx.DecodeStrict(raw, &payload); err != nil {
-		return nil, apperr.ErrContestVulnSourceFetchFailed.WithCause(err)
+		return nil, apperr.ErrContestVulnSourceJSONInvalid.WithCause(err)
 	}
 	nodes := selectCases(payload, stringFromMap(cfg, "cases_path"))
 	mapping := stringMapFromAny(cfg["mapping"])

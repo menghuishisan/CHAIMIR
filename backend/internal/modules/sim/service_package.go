@@ -7,15 +7,14 @@ import (
 	"strings"
 
 	"chaimir/internal/platform/jsonx"
+	"chaimir/internal/platform/pagex"
 	"chaimir/internal/platform/storage"
 	"chaimir/pkg/apperr"
 )
 
 // ListPackages 返回仿真包分页列表。
 func (s *Service) ListPackages(ctx context.Context, status int16, category, keyword string, page, size int) ([]map[string]any, int64, int, int, error) {
-	if page < 1 || size < 1 || size > 100 {
-		return nil, 0, page, size, apperr.ErrQueryParamInvalid
-	}
+	page, size = pagex.Normalize(page, size)
 	var items []Package
 	var total int64
 	if err := s.store.PlatformTx(ctx, func(ctx context.Context, tx TxStore) error {
@@ -227,9 +226,7 @@ func (s *Service) SubmitValidationReport(ctx context.Context, packageID int64, r
 
 // ListReviews 返回审核分页列表。
 func (s *Service) ListReviews(ctx context.Context, result int16, page, size int) ([]map[string]any, int64, int, int, error) {
-	if page < 1 || size < 1 || size > 100 {
-		return nil, 0, page, size, apperr.ErrQueryParamInvalid
-	}
+	page, size = pagex.Normalize(page, size)
 	var items []ReviewInfo
 	var total int64
 	if err := s.store.PlatformTx(ctx, func(ctx context.Context, tx TxStore) error {

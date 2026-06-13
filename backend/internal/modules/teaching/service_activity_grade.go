@@ -534,10 +534,10 @@ func (s *Service) OverrideGrade(ctx context.Context, courseID, studentID int64, 
 const gradeExportSubject = "teaching.course_grade_export"
 
 // ExportGrades 导出课程成绩 Excel,并把产物登记到统一导入导出中心。
-func (s *Service) ExportGrades(ctx context.Context, courseID int64) (ExportTaskDTO, error) {
+func (s *Service) ExportGrades(ctx context.Context, courseID int64) (transfer.TaskDTO, error) {
 	id, err := currentIdentity(ctx)
 	if err != nil {
-		return ExportTaskDTO{}, err
+		return transfer.TaskDTO{}, err
 	}
 	var grades []CourseGrade
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
@@ -551,7 +551,7 @@ func (s *Service) ExportGrades(ctx context.Context, courseID int64) (ExportTaskD
 		grades, err = s.listCourseGradesForExport(ctx, tx, id.TenantID, courseID)
 		return err
 	}); err != nil {
-		return ExportTaskDTO{}, mapGradeError(err)
+		return transfer.TaskDTO{}, mapGradeError(err)
 	}
 	fileName := fmt.Sprintf("course-%d-grades.xlsx", courseID)
 	task, err := s.transfers.CreateTask(ctx, transfer.NewTaskRequest{
@@ -563,21 +563,21 @@ func (s *Service) ExportGrades(ctx context.Context, courseID int64) (ExportTaskD
 		ContentType: upload.XLSXContentType,
 	})
 	if err != nil {
-		return ExportTaskDTO{}, apperr.ErrTeachingGradeExportFailed.WithCause(err)
+		return transfer.TaskDTO{}, apperr.ErrTeachingGradeExportFailed.WithCause(err)
 	}
 	f := excelize.NewFile()
 	defer f.Close()
 	sheet := "成绩"
 	index, err := f.NewSheet(sheet)
 	if err != nil {
-		return ExportTaskDTO{}, apperr.ErrTeachingGradeExportFailed.WithCause(err)
+		return transfer.TaskDTO{}, apperr.ErrTeachingGradeExportFailed.WithCause(err)
 	}
 	f.SetActiveSheet(index)
 	headers := []string{"course_id", "student_id", "auto_total", "override_total", "final_total", "is_overridden", "is_locked"}
 	for i, header := range headers {
 		cell, _ := excelize.CoordinatesToCellName(i+1, 1)
 		if err := f.SetCellValue(sheet, cell, header); err != nil {
-			return ExportTaskDTO{}, apperr.ErrTeachingGradeExportFailed.WithCause(err)
+			return transfer.TaskDTO{}, apperr.ErrTeachingGradeExportFailed.WithCause(err)
 		}
 	}
 	for r, grade := range grades {
@@ -588,13 +588,13 @@ func (s *Service) ExportGrades(ctx context.Context, courseID int64) (ExportTaskD
 		for c, value := range values {
 			cell, _ := excelize.CoordinatesToCellName(c+1, r+2)
 			if err := f.SetCellValue(sheet, cell, value); err != nil {
-				return ExportTaskDTO{}, apperr.ErrTeachingGradeExportFailed.WithCause(err)
+				return transfer.TaskDTO{}, apperr.ErrTeachingGradeExportFailed.WithCause(err)
 			}
 		}
 	}
 	var buf bytes.Buffer
 	if err := f.Write(&buf); err != nil {
-		return ExportTaskDTO{}, apperr.ErrTeachingGradeExportFailed.WithCause(err)
+		return transfer.TaskDTO{}, apperr.ErrTeachingGradeExportFailed.WithCause(err)
 	}
 	data := buf.Bytes()
 	plan, err := s.files.PlanUpload(storage.PlanUploadRequest{
@@ -614,14 +614,14 @@ func (s *Service) ExportGrades(ctx context.Context, courseID int64) (ExportTaskD
 		},
 	})
 	if err != nil {
-		return ExportTaskDTO{}, apperr.ErrTeachingGradeExportFailed.WithCause(err)
+		return transfer.TaskDTO{}, apperr.ErrTeachingGradeExportFailed.WithCause(err)
 	}
 	if err := s.storage.Put(ctx, plan.Bucket, plan.Key, bytes.NewReader(data), int64(len(data)), upload.XLSXContentType); err != nil {
-		return ExportTaskDTO{}, apperr.ErrTeachingGradeExportFailed.WithCause(err)
+		return transfer.TaskDTO{}, apperr.ErrTeachingGradeExportFailed.WithCause(err)
 	}
 	completed, err := s.transfers.CompleteTask(ctx, id.TenantID, task.TaskID, transfer.CompleteTaskRequest{ObjectRef: plan.ObjectRef, Size: int64(len(data))})
 	if err != nil {
-		return ExportTaskDTO{}, apperr.ErrTeachingGradeExportFailed.WithCause(err)
+		return transfer.TaskDTO{}, apperr.ErrTeachingGradeExportFailed.WithCause(err)
 	}
 	return exportTaskDTO(completed), nil
 }

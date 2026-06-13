@@ -101,7 +101,7 @@ func (a contestAPI) listContests(c *gin.Context) {
 	if !ok {
 		return
 	}
-	page, size, ok := contestPage(c)
+	page, size, ok := httpx.Page(c)
 	if !ok {
 		return
 	}
@@ -329,7 +329,7 @@ func (a contestAPI) listBattleMatches(c *gin.Context) {
 	if !ok {
 		return
 	}
-	page, size, ok := contestPage(c)
+	page, size, ok := httpx.Page(c)
 	if !ok {
 		return
 	}
@@ -353,7 +353,7 @@ func (a contestAPI) listLadder(c *gin.Context) {
 	if !ok {
 		return
 	}
-	page, size, ok := contestPage(c)
+	page, size, ok := httpx.Page(c)
 	if !ok {
 		return
 	}
@@ -387,7 +387,7 @@ func (a contestAPI) listCheatRecords(c *gin.Context) {
 	if !ok {
 		return
 	}
-	page, size, ok := contestPage(c)
+	page, size, ok := httpx.Page(c)
 	if !ok {
 		return
 	}
@@ -454,7 +454,7 @@ func (a contestAPI) listVulnProblems(c *gin.Context) {
 	if !ok {
 		return
 	}
-	page, size, ok := contestPage(c)
+	page, size, ok := httpx.Page(c)
 	if !ok {
 		return
 	}
@@ -531,17 +531,4 @@ func contestProblemPath(c *gin.Context) (int64, int64, bool) {
 		return 0, 0, false
 	}
 	return contestID, problemID, true
-}
-
-// contestPage 统一解析竞赛模块分页参数。
-func contestPage(c *gin.Context) (int, int, bool) {
-	page, ok := httpx.QueryInt(c, "page", httpx.QueryIntRule{Default: 1, Min: 1})
-	if !ok {
-		return 0, 0, false
-	}
-	size, ok := httpx.QueryInt(c, "size", httpx.QueryIntRule{Default: 20, Min: 1, Max: 100, HasMax: true})
-	if !ok {
-		return 0, 0, false
-	}
-	return int(page), int(size), true
 }

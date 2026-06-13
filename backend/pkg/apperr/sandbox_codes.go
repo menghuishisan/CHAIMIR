@@ -6,8 +6,6 @@ const (
 	CodeSandboxRuntimeNotFound = "21001"
 	// CodeSandboxRuntimeUnavailable 表示运行时未通过自检、停用或暂不可调度。
 	CodeSandboxRuntimeUnavailable = "21002"
-	// CodeSandboxRuntimeConfigInvalid 表示运行时或适配器配置非法。
-	CodeSandboxRuntimeConfigInvalid = "21003"
 	// CodeSandboxRuntimeImageNotFound 表示运行时镜像不存在。
 	CodeSandboxRuntimeImageNotFound = "21004"
 	// CodeSandboxSelftestFailed 表示运行时接入即测失败。
@@ -22,6 +20,34 @@ const (
 	CodeSandboxSelftestRecycleConfigInvalid = "21009"
 	// CodeSandboxImageAttestationInvalid 表示运行时镜像未通过当前签名与扫描证明门禁。
 	CodeSandboxImageAttestationInvalid = "21010"
+	// CodeSandboxAdapterSpecInvalid 表示运行时适配器清单结构或必填字段非法。
+	CodeSandboxAdapterSpecInvalid = "21011"
+	// CodeSandboxPodTopologyInvalid 表示运行时 Pod 拓扑声明非法。
+	CodeSandboxPodTopologyInvalid = "21012"
+	// CodeSandboxNetworkPolicyInvalid 表示运行时网络互通规则非法。
+	CodeSandboxNetworkPolicyInvalid = "21013"
+	// CodeSandboxVolumeDomainInvalid 表示运行时卷安全域声明非法。
+	CodeSandboxVolumeDomainInvalid = "21014"
+	// CodeSandboxPrivateDomainInvalid 表示隐藏判题私有域声明或注入目标非法。
+	CodeSandboxPrivateDomainInvalid = "21015"
+	// CodeSandboxSidecarImageInvalid 表示协同容器镜像未命中受控证明清单。
+	CodeSandboxSidecarImageInvalid = "21016"
+	// CodeSandboxWorkspaceOpsInvalid 表示运行时工作区受控命令声明非法。
+	CodeSandboxWorkspaceOpsInvalid = "21017"
+	// CodeSandboxCapabilityCommandInvalid 表示运行时链能力命令声明非法。
+	CodeSandboxCapabilityCommandInvalid = "21018"
+	// CodeSandboxContainerSpecInvalid 表示运行时容器声明非法。
+	CodeSandboxContainerSpecInvalid = "21019"
+	// CodeSandboxProbeSpecInvalid 表示运行时容器探针声明非法。
+	CodeSandboxProbeSpecInvalid = "21020"
+	// CodeSandboxRuntimeEnvInvalid 表示运行时容器环境变量声明非法。
+	CodeSandboxRuntimeEnvInvalid = "21021"
+	// CodeSandboxRuntimeSecretEnvInvalid 表示运行时声明式环境变量包含疑似密钥。
+	CodeSandboxRuntimeSecretEnvInvalid = "21022"
+	// CodeSandboxSelftestSpecInvalid 表示运行时自检数据声明非法。
+	CodeSandboxSelftestSpecInvalid = "21023"
+	// CodeSandboxRuntimePersistFailed 表示运行时配置保存失败。
+	CodeSandboxRuntimePersistFailed = "21024"
 )
 
 const (
@@ -91,6 +117,26 @@ const (
 	CodeSandboxImageDisableParamInvalid = "22032"
 	// CodeSandboxPrivateArchiveInvalid 表示私有判题归档注入请求非法。
 	CodeSandboxPrivateArchiveInvalid = "22033"
+	// CodeSandboxInitAssetConfigInvalid 表示初始化资产声明非法。
+	CodeSandboxInitAssetConfigInvalid = "22034"
+	// CodeSandboxInitObjectRefInvalid 表示初始化对象引用非法。
+	CodeSandboxInitObjectRefInvalid = "22035"
+	// CodeSandboxInitObjectReadFailed 表示初始化对象读取失败。
+	CodeSandboxInitObjectReadFailed = "22036"
+	// CodeSandboxInitArchiveTooLarge 表示初始化归档超过大小上限。
+	CodeSandboxInitArchiveTooLarge = "22037"
+	// CodeSandboxInitArchiveInvalid 表示初始化归档安全校验失败。
+	CodeSandboxInitArchiveInvalid = "22038"
+	// CodeSandboxInitExecFailed 表示初始化归档或脚本写入执行失败。
+	CodeSandboxInitExecFailed = "22039"
+	// CodeSandboxFileReadFailed 表示工作区文件读取命令失败。
+	CodeSandboxFileReadFailed = "22040"
+	// CodeSandboxFileListFailed 表示工作区目录列表命令失败。
+	CodeSandboxFileListFailed = "22041"
+	// CodeSandboxFileListDecodeFailed 表示工作区目录列表输出无法解析。
+	CodeSandboxFileListDecodeFailed = "22042"
+	// CodeSandboxFileEntryInvalid 表示工作区目录列表条目非法。
+	CodeSandboxFileEntryInvalid = "22043"
 )
 
 const (
@@ -130,8 +176,6 @@ var (
 	ErrSandboxRuntimeNotFound = New(CodeSandboxRuntimeNotFound, "运行环境不存在")
 	// ErrSandboxRuntimeUnavailable 表示运行环境暂不可用。
 	ErrSandboxRuntimeUnavailable = New(CodeSandboxRuntimeUnavailable, "运行环境暂不可用")
-	// ErrSandboxRuntimeConfigInvalid 表示运行环境配置不正确。
-	ErrSandboxRuntimeConfigInvalid = New(CodeSandboxRuntimeConfigInvalid, "运行环境配置不正确")
 	// ErrSandboxRuntimeImageNotFound 表示运行环境镜像不存在。
 	ErrSandboxRuntimeImageNotFound = New(CodeSandboxRuntimeImageNotFound, "运行环境镜像不存在")
 	// ErrSandboxSelftestFailed 表示运行环境自检未通过。
@@ -146,6 +190,34 @@ var (
 	ErrSandboxSelftestRecycleConfigInvalid = New(CodeSandboxSelftestRecycleConfigInvalid, "运行环境自检配置不正确")
 	// ErrSandboxImageAttestationInvalid 表示运行环境镜像未通过安全校验。
 	ErrSandboxImageAttestationInvalid = New(CodeSandboxImageAttestationInvalid, "运行环境镜像未通过安全校验,请更换后重试")
+	// ErrSandboxAdapterSpecInvalid 表示运行环境适配器配置不正确。
+	ErrSandboxAdapterSpecInvalid = New(CodeSandboxAdapterSpecInvalid, "运行环境适配器配置不正确")
+	// ErrSandboxPodTopologyInvalid 表示运行环境拓扑配置不正确。
+	ErrSandboxPodTopologyInvalid = New(CodeSandboxPodTopologyInvalid, "运行环境拓扑配置不正确")
+	// ErrSandboxNetworkPolicyInvalid 表示运行环境网络规则不正确。
+	ErrSandboxNetworkPolicyInvalid = New(CodeSandboxNetworkPolicyInvalid, "运行环境网络规则不正确")
+	// ErrSandboxVolumeDomainInvalid 表示运行环境存储域配置不正确。
+	ErrSandboxVolumeDomainInvalid = New(CodeSandboxVolumeDomainInvalid, "运行环境存储域配置不正确")
+	// ErrSandboxPrivateDomainInvalid 表示判题私有域配置不正确。
+	ErrSandboxPrivateDomainInvalid = New(CodeSandboxPrivateDomainInvalid, "判题私有域配置不正确")
+	// ErrSandboxSidecarImageInvalid 表示协同容器镜像未通过安全校验。
+	ErrSandboxSidecarImageInvalid = New(CodeSandboxSidecarImageInvalid, "协同容器镜像未通过安全校验,请更换后重试")
+	// ErrSandboxWorkspaceOpsInvalid 表示运行环境工作区命令配置不正确。
+	ErrSandboxWorkspaceOpsInvalid = New(CodeSandboxWorkspaceOpsInvalid, "运行环境工作区命令配置不正确")
+	// ErrSandboxCapabilityCommandInvalid 表示运行环境链能力命令配置不正确。
+	ErrSandboxCapabilityCommandInvalid = New(CodeSandboxCapabilityCommandInvalid, "运行环境链能力命令配置不正确")
+	// ErrSandboxContainerSpecInvalid 表示运行环境容器配置不正确。
+	ErrSandboxContainerSpecInvalid = New(CodeSandboxContainerSpecInvalid, "运行环境容器配置不正确")
+	// ErrSandboxProbeSpecInvalid 表示运行环境健康检查配置不正确。
+	ErrSandboxProbeSpecInvalid = New(CodeSandboxProbeSpecInvalid, "运行环境健康检查配置不正确")
+	// ErrSandboxRuntimeEnvInvalid 表示运行环境环境变量配置不正确。
+	ErrSandboxRuntimeEnvInvalid = New(CodeSandboxRuntimeEnvInvalid, "运行环境环境变量配置不正确")
+	// ErrSandboxRuntimeSecretEnvInvalid 表示运行环境密钥配置方式不正确。
+	ErrSandboxRuntimeSecretEnvInvalid = New(CodeSandboxRuntimeSecretEnvInvalid, "运行环境密钥配置方式不正确")
+	// ErrSandboxSelftestSpecInvalid 表示运行环境自检配置不正确。
+	ErrSandboxSelftestSpecInvalid = New(CodeSandboxSelftestSpecInvalid, "运行环境自检配置不正确")
+	// ErrSandboxRuntimePersistFailed 表示运行环境配置保存失败。
+	ErrSandboxRuntimePersistFailed = New(CodeSandboxRuntimePersistFailed, "运行环境配置暂时无法保存,请稍后重试")
 )
 
 var (
@@ -215,6 +287,26 @@ var (
 	ErrSandboxImageDisableParamInvalid = New(CodeSandboxImageDisableParamInvalid, "运行环境镜像停用参数不正确,请检查后重试")
 	// ErrSandboxPrivateArchiveInvalid 表示判题私有输入准备失败。
 	ErrSandboxPrivateArchiveInvalid = New(CodeSandboxPrivateArchiveInvalid, "判题输入准备失败,请稍后重试")
+	// ErrSandboxInitAssetConfigInvalid 表示初始化资产配置不正确。
+	ErrSandboxInitAssetConfigInvalid = New(CodeSandboxInitAssetConfigInvalid, "实验环境初始化资源配置不正确")
+	// ErrSandboxInitObjectRefInvalid 表示初始化对象引用不正确。
+	ErrSandboxInitObjectRefInvalid = New(CodeSandboxInitObjectRefInvalid, "实验环境初始化资源引用不正确")
+	// ErrSandboxInitObjectReadFailed 表示初始化对象读取失败。
+	ErrSandboxInitObjectReadFailed = New(CodeSandboxInitObjectReadFailed, "实验环境初始化资源暂时无法读取,请稍后重试")
+	// ErrSandboxInitArchiveTooLarge 表示初始化归档超过上限。
+	ErrSandboxInitArchiveTooLarge = New(CodeSandboxInitArchiveTooLarge, "实验环境初始化资源过大,请调整后重试")
+	// ErrSandboxInitArchiveInvalid 表示初始化归档不安全或格式不支持。
+	ErrSandboxInitArchiveInvalid = New(CodeSandboxInitArchiveInvalid, "实验环境初始化资源格式不正确")
+	// ErrSandboxInitExecFailed 表示初始化执行失败。
+	ErrSandboxInitExecFailed = New(CodeSandboxInitExecFailed, "实验环境初始化执行失败,请稍后重试")
+	// ErrSandboxFileReadFailed 表示工作区文件读取失败。
+	ErrSandboxFileReadFailed = New(CodeSandboxFileReadFailed, "文件暂时无法读取,请稍后重试")
+	// ErrSandboxFileListFailed 表示工作区目录列表失败。
+	ErrSandboxFileListFailed = New(CodeSandboxFileListFailed, "目录暂时无法读取,请稍后重试")
+	// ErrSandboxFileListDecodeFailed 表示工作区目录输出解析失败。
+	ErrSandboxFileListDecodeFailed = New(CodeSandboxFileListDecodeFailed, "目录信息暂时无法解析,请稍后重试")
+	// ErrSandboxFileEntryInvalid 表示工作区目录条目非法。
+	ErrSandboxFileEntryInvalid = New(CodeSandboxFileEntryInvalid, "目录信息不正确,请稍后重试")
 )
 
 var (

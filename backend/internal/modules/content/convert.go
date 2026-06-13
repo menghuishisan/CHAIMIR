@@ -2,14 +2,13 @@
 package content
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"sort"
 	"time"
 
 	"chaimir/internal/contracts"
 	"chaimir/internal/platform/jsonx"
 	"chaimir/pkg/apperr"
+	"chaimir/pkg/crypto"
 )
 
 // itemDTO 转换内容外壳为 HTTP DTO。
@@ -108,8 +107,7 @@ func versionHash(item Item, body map[string]any, sensitive []string) (string, er
 	if err != nil {
 		return "", err
 	}
-	sum := sha256.Sum256(raw)
-	return hex.EncodeToString(sum[:]), nil
+	return crypto.SHA256Hex(raw), nil
 }
 
 // cloneMap 深拷贝 JSON 对象,避免调用方修改 service 内部快照。

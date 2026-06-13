@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -272,7 +273,7 @@ func (s *Service) SubmitJudgeTask(ctx context.Context, req contracts.JudgeSubmit
 	}); err != nil {
 		return contracts.JudgeTaskInfo{}, err
 	}
-	s.publishProgress(task.TenantID, task.ID, task.Status, ProgressStageQueued, "判题任务已提交")
+	s.publishProgress(ctx, task.TenantID, task.ID, task.Status, ProgressStageQueued, "判题任务已提交")
 	if err := s.writeAudit(ctx, task.TenantID, task.SubmitterID, 5, "judge.submit", "judge_task", task.ID, map[string]any{"source_ref": task.SourceRef, "problem_ref": task.ProblemRef}); err != nil {
 		return contracts.JudgeTaskInfo{}, err
 	}
@@ -506,12 +507,13 @@ func (s *Service) getTaskInfo(ctx context.Context, tenantID, taskID int64) (Judg
 }
 
 // publishProgress 向任务进度 topic 广播用户向状态。
-func (s *Service) publishProgress(tenantID, taskID int64, status int16, stage, message string) {
+func (s *Service) publishProgress(ctx context.Context, tenantID, taskID int64, status int16, stage, message string) {
 	if s.wsHub == nil {
 		return
 	}
 	raw, err := jsonx.AnyBytes(ProgressMessage{TaskID: taskID, Status: status, Stage: stage, Message: message}, apperr.ErrInternal)
 	if err != nil {
+		logging.ErrorContext(ctx, "judge progress serialization failed", err.Error(), slog.Int64("tenant_id", tenantID), slog.Int64("task_id", taskID), slog.String("stage", stage))
 		return
 	}
 	s.wsHub.Broadcast(judgeProgressTopic(tenantID, taskID), raw)

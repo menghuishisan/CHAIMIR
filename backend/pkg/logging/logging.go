@@ -7,6 +7,8 @@ import (
 	"os"
 	"regexp"
 	"strings"
+
+	"chaimir/pkg/privacy"
 )
 
 type attrsCtxKey struct{}
@@ -97,10 +99,11 @@ func SanitizeError(raw string) string {
 
 // maskPhoneNumber 按文档要求把手机号掩码为 138****1234 形态。
 func maskPhoneNumber(phone string) string {
-	if len(phone) != 11 {
+	masked := privacy.MaskPhone(phone)
+	if masked == "" {
 		return phone
 	}
-	return phone[:3] + "****" + phone[7:]
+	return masked
 }
 
 // redactAttr 在 handler 输出前按字段名兜底脱敏,避免结构化字段绕过字符串规则。

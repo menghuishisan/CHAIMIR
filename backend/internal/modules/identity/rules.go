@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"chaimir/pkg/apperr"
+	"chaimir/pkg/privacy"
 )
 
 var (
@@ -24,11 +25,7 @@ func ValidatePhone(phone string) error {
 
 // MaskPhone 按安全规范对手机号做用户向掩码展示。
 func MaskPhone(phone string) string {
-	phone = strings.TrimSpace(phone)
-	if len(phone) != 11 {
-		return ""
-	}
-	return phone[:3] + "****" + phone[7:]
+	return privacy.MaskPhone(phone)
 }
 
 // ValidatePassword 校验本地密码强度,避免弱口令进入哈希流程。

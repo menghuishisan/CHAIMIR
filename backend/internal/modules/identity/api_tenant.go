@@ -5,7 +5,6 @@ import (
 	"chaimir/internal/contracts"
 	"chaimir/internal/platform/auth"
 	"chaimir/internal/platform/httpx"
-	"chaimir/pkg/response"
 
 	"github.com/gin-gonic/gin"
 )
@@ -29,10 +28,10 @@ func registerTenantRoutes(r gin.IRouter, svc *Service, authn *auth.Manager) {
 func (a tenantAPI) getConfig(c *gin.Context) {
 	out, err := a.svc.GetTenantConfig(c.Request.Context())
 	if err != nil {
-		response.Fail(c, err)
+		httpx.Write(c, gin.H{}, err)
 		return
 	}
-	response.OK(c, out)
+	httpx.Write(c, out, nil)
 }
 
 // updateConfig 绑定租户配置更新请求并委托 service 校验和落库。
@@ -43,20 +42,20 @@ func (a tenantAPI) updateConfig(c *gin.Context) {
 	}
 	out, err := a.svc.UpdateTenantConfigByAdmin(c.Request.Context(), req)
 	if err != nil {
-		response.Fail(c, err)
+		httpx.Write(c, gin.H{}, err)
 		return
 	}
-	response.OK(c, out)
+	httpx.Write(c, out, nil)
 }
 
 // listSSO 读取当前租户统一认证配置列表,响应前由 service/convert 脱敏。
 func (a tenantAPI) listSSO(c *gin.Context) {
 	out, err := a.svc.ListSSOConfigsByAdmin(c.Request.Context())
 	if err != nil {
-		response.Fail(c, err)
+		httpx.Write(c, gin.H{}, err)
 		return
 	}
-	response.OK(c, out)
+	httpx.Write(c, out, nil)
 }
 
 // upsertSSO 绑定 CAS/LDAP 配置更新请求,敏感字段加密由 service 执行。
@@ -67,8 +66,8 @@ func (a tenantAPI) upsertSSO(c *gin.Context) {
 	}
 	out, err := a.svc.UpsertSSOConfig(c.Request.Context(), req)
 	if err != nil {
-		response.Fail(c, err)
+		httpx.Write(c, gin.H{}, err)
 		return
 	}
-	response.OK(c, out)
+	httpx.Write(c, out, nil)
 }

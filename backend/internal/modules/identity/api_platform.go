@@ -4,7 +4,6 @@ package identity
 import (
 	"chaimir/internal/platform/auth"
 	"chaimir/internal/platform/httpx"
-	"chaimir/pkg/response"
 
 	"github.com/gin-gonic/gin"
 )
@@ -35,10 +34,10 @@ func (a platformAPI) createApplication(c *gin.Context) {
 	}
 	out, err := a.svc.CreateApplication(c.Request.Context(), req)
 	if err != nil {
-		response.Fail(c, err)
+		httpx.Write(c, gin.H{}, err)
 		return
 	}
-	response.OK(c, out)
+	httpx.Write(c, out, nil)
 }
 
 // listApplications 读取平台入驻申请列表,状态过滤仅在 service/repo 中使用。
@@ -49,10 +48,10 @@ func (a platformAPI) listApplications(c *gin.Context) {
 	}
 	out, err := a.svc.ListApplicationsByPlatform(c.Request.Context(), int16(status))
 	if err != nil {
-		response.Fail(c, err)
+		httpx.Write(c, gin.H{}, err)
 		return
 	}
-	response.OK(c, out)
+	httpx.Write(c, out, nil)
 }
 
 // approveApplication 绑定平台审核通过请求,创建租户和首个学校管理员由 service 原子编排。
@@ -67,10 +66,10 @@ func (a platformAPI) approveApplication(c *gin.Context) {
 	}
 	tenant, activation, err := a.svc.ApproveApplication(c.Request.Context(), id, req)
 	if err != nil {
-		response.Fail(c, err)
+		httpx.Write(c, gin.H{}, err)
 		return
 	}
-	response.OK(c, gin.H{"tenant": tenant, "activation_code": activation})
+	httpx.Write(c, gin.H{"tenant": tenant, "activation_code": activation}, nil)
 }
 
 // rejectApplication 绑定平台驳回申请请求,驳回原因仅作为业务字段传给 service。
@@ -84,20 +83,20 @@ func (a platformAPI) rejectApplication(c *gin.Context) {
 		return
 	}
 	if err := a.svc.RejectApplication(c.Request.Context(), id, req.Reason); err != nil {
-		response.Fail(c, err)
+		httpx.Write(c, gin.H{}, err)
 		return
 	}
-	response.OK(c, gin.H{})
+	httpx.Write(c, gin.H{}, nil)
 }
 
 // listTenants 读取平台租户列表,API 层不直接访问 repo。
 func (a platformAPI) listTenants(c *gin.Context) {
 	out, err := a.svc.ListTenantsByPlatform(c.Request.Context())
 	if err != nil {
-		response.Fail(c, err)
+		httpx.Write(c, gin.H{}, err)
 		return
 	}
-	response.OK(c, out)
+	httpx.Write(c, out, nil)
 }
 
 // getTenant 读取单个租户详情,路径 ID 解析失败时返回统一用户向错误。
@@ -108,10 +107,10 @@ func (a platformAPI) getTenant(c *gin.Context) {
 	}
 	out, err := a.svc.GetTenantByPlatform(c.Request.Context(), id)
 	if err != nil {
-		response.Fail(c, err)
+		httpx.Write(c, gin.H{}, err)
 		return
 	}
-	response.OK(c, out)
+	httpx.Write(c, out, nil)
 }
 
 // updateTenant 绑定平台租户状态更新请求,状态机校验由 service 执行。
@@ -126,8 +125,8 @@ func (a platformAPI) updateTenant(c *gin.Context) {
 	}
 	out, err := a.svc.UpdateTenantStatusByPlatform(c.Request.Context(), id, req)
 	if err != nil {
-		response.Fail(c, err)
+		httpx.Write(c, gin.H{}, err)
 		return
 	}
-	response.OK(c, out)
+	httpx.Write(c, out, nil)
 }

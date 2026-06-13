@@ -8,9 +8,7 @@ import (
 	"chaimir/internal/contracts"
 	"chaimir/internal/platform/auth"
 	"chaimir/internal/platform/httpx"
-	"chaimir/internal/platform/pagex"
 	"chaimir/pkg/apperr"
-	"chaimir/pkg/response"
 
 	"github.com/gin-gonic/gin"
 )
@@ -34,10 +32,10 @@ func (a auditAPI) queryAudit(c *gin.Context) {
 	}
 	out, err := a.svc.QueryAuditLogsForCurrent(c.Request.Context(), req)
 	if err != nil {
-		response.Fail(c, err)
+		httpx.Write(c, gin.H{}, err)
 		return
 	}
-	response.OK(c, out)
+	httpx.Write(c, out, nil)
 }
 
 // bindAuditQuery 解析审计查询参数,时间参数使用 RFC3339 避免时区歧义。
@@ -53,17 +51,12 @@ func bindAuditQuery(c *gin.Context) (AuditQueryRequest, bool) {
 		return AuditQueryRequest{}, false
 	}
 	req.ActorID = actorID
-	page, ok := httpx.QueryInt(c, "page", httpx.QueryIntRule{BitSize: 32, Default: 1, Min: 1})
+	page, size, ok := httpx.Page(c)
 	if !ok {
 		return AuditQueryRequest{}, false
 	}
-	size, ok := httpx.QueryInt(c, "size", httpx.QueryIntRule{BitSize: 32, Default: 20, Min: 1})
-	if !ok {
-		return AuditQueryRequest{}, false
-	}
-	normalizedPage, normalizedSize := pagex.Normalize(int(page), int(size))
-	req.Page = int32(normalizedPage)
-	req.Size = int32(normalizedSize)
+	req.Page = int32(page)
+	req.Size = int32(size)
 	if req.From, ok = queryTime(c, "from"); !ok {
 		return AuditQueryRequest{}, false
 	}
@@ -83,7 +76,7 @@ func queryTime(c *gin.Context, key string) (time.Time, bool) {
 	}
 	value, err := time.Parse(time.RFC3339, raw)
 	if err != nil {
-		response.Fail(c, apperr.ErrQueryParamInvalid)
+		httpx.Write(c, gin.H{}, apperr.ErrQueryParamInvalid)
 		return time.Time{}, false
 	}
 	return value, true

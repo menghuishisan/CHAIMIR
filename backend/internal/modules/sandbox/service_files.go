@@ -4,9 +4,7 @@ package sandbox
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
 	"encoding/base64"
-	"encoding/hex"
 	"fmt"
 	"log/slog"
 	"path"
@@ -18,6 +16,7 @@ import (
 	"chaimir/internal/platform/storage"
 	"chaimir/internal/platform/upload"
 	"chaimir/pkg/apperr"
+	"chaimir/pkg/crypto"
 	"chaimir/pkg/logging"
 )
 
@@ -84,7 +83,7 @@ func (s *Service) PutSandboxPrivateArchive(ctx context.Context, req contracts.Sa
 	}
 	domain, ok := volumeDomainByName(runtime.AdapterSpec, req.Domain)
 	if !ok || domain.StudentAccess != VolumeAccessNone || domain.SnapshotScope != VolumeSnapshotNever {
-		return apperr.ErrSandboxRuntimeConfigInvalid
+		return apperr.ErrSandboxPrivateDomainInvalid
 	}
 	command := workspaceCommand(runtime.AdapterSpec.WorkspaceOps.UnpackTar, domain.MountPath, domain.MountPath, "")
 	if _, stderr, err := s.orchestrator.Exec(ctx, sb.Namespace, runtimeExecTarget(runtime), command, tarball, false); err != nil {
@@ -131,13 +130,12 @@ func (s *Service) ReadSandboxFile(ctx context.Context, tenantID, sandboxID int64
 	command := workspaceCommand(runtime.AdapterSpec.WorkspaceOps.ReadFile, runtime.AdapterSpec.WorkspaceDir, target, "")
 	stdout, stderr, err := s.orchestrator.Exec(ctx, sb.Namespace, runtimeExecTarget(runtime), command, nil, false)
 	if err != nil {
-		return FileReadResponse{}, apperr.ErrSandboxFileNotFound.WithCause(fmt.Errorf("%w: %s", err, string(stderr)))
+		return FileReadResponse{}, apperr.ErrSandboxFileReadFailed.WithCause(fmt.Errorf("%w: %s", err, string(stderr)))
 	}
-	sum := sha256.Sum256(stdout)
 	return FileReadResponse{
 		RelativePath:  relative,
 		ContentBase64: base64.StdEncoding.EncodeToString(stdout),
-		ContentSHA256: hex.EncodeToString(sum[:]),
+		ContentSHA256: crypto.SHA256Hex(stdout),
 		ContentSize:   int64(len(stdout)),
 	}, nil
 }
@@ -164,18 +162,18 @@ func (s *Service) ListSandboxFiles(ctx context.Context, tenantID, sandboxID int6
 	command := workspaceCommand(runtime.AdapterSpec.WorkspaceOps.ListFiles, runtime.AdapterSpec.WorkspaceDir, target, "")
 	stdout, stderr, err := s.orchestrator.Exec(ctx, sb.Namespace, runtimeExecTarget(runtime), command, nil, false)
 	if err != nil {
-		return FileListResponse{}, apperr.ErrSandboxFileNotFound.WithCause(fmt.Errorf("%w: %s", err, string(stderr)))
+		return FileListResponse{}, apperr.ErrSandboxFileListFailed.WithCause(fmt.Errorf("%w: %s", err, string(stderr)))
 	}
 	var entries []FileEntryResponse
 	if err := jsonx.DecodeStrict(stdout, &entries); err != nil {
-		return FileListResponse{}, apperr.ErrSandboxFileNotFound.WithCause(err)
+		return FileListResponse{}, apperr.ErrSandboxFileListDecodeFailed.WithCause(err)
 	}
 	for _, entry := range entries {
 		if strings.TrimSpace(entry.Name) == "" || entry.Size < 0 {
-			return FileListResponse{}, apperr.ErrSandboxFileNotFound
+			return FileListResponse{}, apperr.ErrSandboxFileEntryInvalid
 		}
 		if _, err := validateWorkspacePath(entry.RelativePath); err != nil {
-			return FileListResponse{}, apperr.ErrSandboxFileNotFound.WithCause(err)
+			return FileListResponse{}, apperr.ErrSandboxFileEntryInvalid.WithCause(err)
 		}
 	}
 	return FileListResponse{RelativePath: relative, Entries: entries}, nil
@@ -217,8 +215,7 @@ func (s *Service) saveSandboxFiles(ctx context.Context, tenantID, sandboxID int6
 	if err != nil {
 		return "", "", apperr.ErrSandboxFilePersistFailed.WithCause(fmt.Errorf("%w: %s", err, string(stderr)))
 	}
-	sum := sha256.Sum256(stdout)
-	hash := hex.EncodeToString(sum[:])
+	hash := crypto.SHA256Hex(stdout)
 	if err := s.minio.Put(ctx, s.minio.BucketCode(), sb.CodeStorageKey, bytes.NewReader(stdout), int64(len(stdout)), "application/x-tar"); err != nil {
 		return "", "", apperr.ErrSandboxFilePersistFailed.WithCause(err)
 	}

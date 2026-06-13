@@ -670,7 +670,7 @@ func (tx *txStore) GetVulnSource(ctx context.Context, tenantID, id int64) (VulnS
 func (tx *txStore) MarkVulnSourceSynced(ctx context.Context, tenantID, id int64) (VulnSource, error) {
 	row, err := tx.q.MarkVulnSourceSynced(ctx, sqlcgen.MarkVulnSourceSyncedParams{TenantID: pgtypex.Int8(tenantID), ID: id})
 	if err != nil {
-		return VulnSource{}, apperr.ErrContestVulnSourceFetchFailed.WithCause(err)
+		return VulnSource{}, apperr.ErrContestVulnSourceSyncMarkFailed.WithCause(err)
 	}
 	return vulnSourceFromRow(row)
 }

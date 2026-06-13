@@ -105,7 +105,7 @@ func (a gradeAPI) submitReview(c *gin.Context) {
 }
 
 func (a gradeAPI) listReviews(c *gin.Context) {
-	page, size, ok := gradePage(c)
+	page, size, ok := httpx.Page(c)
 	if !ok {
 		return
 	}
@@ -175,7 +175,7 @@ func (a gradeAPI) createAppeal(c *gin.Context) {
 }
 
 func (a gradeAPI) listAppeals(c *gin.Context) {
-	page, size, ok := gradePage(c)
+	page, size, ok := httpx.Page(c)
 	if !ok {
 		return
 	}
@@ -215,7 +215,7 @@ func (a gradeAPI) updateWarningRules(c *gin.Context) {
 }
 
 func (a gradeAPI) listWarnings(c *gin.Context) {
-	page, size, ok := gradePage(c)
+	page, size, ok := httpx.Page(c)
 	if !ok {
 		return
 	}
@@ -266,16 +266,4 @@ func (a gradeAPI) downloadTranscript(c *gin.Context) {
 	}
 	out, err := a.svc.DownloadTranscript(c.Request.Context(), id)
 	httpx.Write(c, out, err)
-}
-
-func gradePage(c *gin.Context) (int, int, bool) {
-	p, ok := httpx.QueryInt(c, "page", httpx.QueryIntRule{Default: 1, Min: 1})
-	if !ok {
-		return 0, 0, false
-	}
-	s, ok := httpx.QueryInt(c, "size", httpx.QueryIntRule{Default: 20, Min: 1, Max: 100, HasMax: true})
-	if !ok {
-		return 0, 0, false
-	}
-	return int(p), int(s), true
 }

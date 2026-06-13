@@ -59,7 +59,7 @@ func (s *Service) RunWorkerOnce(ctx context.Context) error {
 
 // processTask 执行单个判题任务,失败时按任务重试策略回队列或落失败终态。
 func (s *Service) processTask(ctx context.Context, task JudgeTask) error {
-	s.publishProgress(task.TenantID, task.ID, JudgeTaskStatusJudging, ProgressStageJudging, "判题任务正在执行")
+	s.publishProgress(ctx, task.TenantID, task.ID, JudgeTaskStatusJudging, ProgressStageJudging, "判题任务正在执行")
 	result, err := s.executeTask(ctx, task)
 	if err != nil {
 		return s.retryOrFail(ctx, task, err)
@@ -288,7 +288,7 @@ func (s *Service) completeTask(ctx context.Context, task JudgeTask, result Judge
 	}); err != nil {
 		return err
 	}
-	s.publishProgress(task.TenantID, task.ID, completed.Status, ProgressStageDone, "判题任务已完成")
+	s.publishProgress(ctx, task.TenantID, task.ID, completed.Status, ProgressStageDone, "判题任务已完成")
 	return nil
 }
 
@@ -314,7 +314,7 @@ func (s *Service) retryOrFail(ctx context.Context, task JudgeTask, cause error) 
 		}); err != nil {
 			return err
 		}
-		s.publishProgress(task.TenantID, task.ID, retry.Status, ProgressStageQueued, "判题任务将自动重试")
+		s.publishProgress(ctx, task.TenantID, task.ID, retry.Status, ProgressStageQueued, "判题任务将自动重试")
 		return nil
 	}
 	var failed JudgeTask
@@ -332,7 +332,7 @@ func (s *Service) retryOrFail(ctx context.Context, task JudgeTask, cause error) 
 	}); err != nil {
 		return err
 	}
-	s.publishProgress(task.TenantID, task.ID, failed.Status, ProgressStageFailed, "判题任务执行失败")
+	s.publishProgress(ctx, task.TenantID, task.ID, failed.Status, ProgressStageFailed, "判题任务执行失败")
 	return nil
 }
 

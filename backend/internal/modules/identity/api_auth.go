@@ -5,7 +5,6 @@ import (
 	"chaimir/internal/platform/auth"
 	"chaimir/internal/platform/httpx"
 	"chaimir/pkg/apperr"
-	"chaimir/pkg/response"
 
 	"github.com/gin-gonic/gin"
 )
@@ -42,10 +41,10 @@ func (a authAPI) loginPlatform(c *gin.Context) {
 	}
 	out, err := a.svc.LoginPlatform(c.Request.Context(), req, c.GetHeader("User-Agent"), c.ClientIP())
 	if err != nil {
-		response.Fail(c, err)
+		httpx.Write(c, gin.H{}, err)
 		return
 	}
-	response.OK(c, out)
+	httpx.Write(c, out, nil)
 }
 
 // loginPhone 绑定手机号密码登录请求,一号多校时由 service 返回租户选择结果。
@@ -56,10 +55,10 @@ func (a authAPI) loginPhone(c *gin.Context) {
 	}
 	out, err := a.svc.LoginPhone(c.Request.Context(), req, c.GetHeader("User-Agent"), c.ClientIP())
 	if err != nil {
-		response.Fail(c, err)
+		httpx.Write(c, gin.H{}, err)
 		return
 	}
-	response.OK(c, out)
+	httpx.Write(c, out, nil)
 }
 
 // loginNo 绑定学校短码加学号工号的备用登录请求。
@@ -70,10 +69,10 @@ func (a authAPI) loginNo(c *gin.Context) {
 	}
 	out, err := a.svc.LoginNo(c.Request.Context(), req, c.GetHeader("User-Agent"), c.ClientIP())
 	if err != nil {
-		response.Fail(c, err)
+		httpx.Write(c, gin.H{}, err)
 		return
 	}
-	response.OK(c, out)
+	httpx.Write(c, out, nil)
 }
 
 // loginSMS 绑定短信验证码登录请求,验证码校验和会话签发均由 service 完成。
@@ -84,10 +83,10 @@ func (a authAPI) loginSMS(c *gin.Context) {
 	}
 	out, err := a.svc.LoginSMS(c.Request.Context(), req, c.GetHeader("User-Agent"), c.ClientIP())
 	if err != nil {
-		response.Fail(c, err)
+		httpx.Write(c, gin.H{}, err)
 		return
 	}
-	response.OK(c, out)
+	httpx.Write(c, out, nil)
 }
 
 // sendSMS 绑定发送验证码请求,API 层只读取参数不执行限频逻辑。
@@ -97,10 +96,10 @@ func (a authAPI) sendSMS(c *gin.Context) {
 		return
 	}
 	if err := a.svc.SendSMS(c.Request.Context(), req); err != nil {
-		response.Fail(c, err)
+		httpx.Write(c, gin.H{}, err)
 		return
 	}
-	response.OK(c, gin.H{})
+	httpx.Write(c, gin.H{}, nil)
 }
 
 // refreshToken 绑定 Refresh Token 轮转请求。
@@ -111,10 +110,10 @@ func (a authAPI) refreshToken(c *gin.Context) {
 	}
 	out, err := a.svc.RefreshToken(c.Request.Context(), req, c.GetHeader("User-Agent"), c.ClientIP())
 	if err != nil {
-		response.Fail(c, err)
+		httpx.Write(c, gin.H{}, err)
 		return
 	}
-	response.OK(c, out)
+	httpx.Write(c, out, nil)
 }
 
 // resetPassword 绑定找回密码请求,短信校验和密码更新由 service 原子处理。
@@ -124,10 +123,10 @@ func (a authAPI) resetPassword(c *gin.Context) {
 		return
 	}
 	if err := a.svc.ResetPassword(c.Request.Context(), req); err != nil {
-		response.Fail(c, err)
+		httpx.Write(c, gin.H{}, err)
 		return
 	}
-	response.OK(c, gin.H{})
+	httpx.Write(c, gin.H{}, nil)
 }
 
 // activate 绑定激活码开通请求,激活码明文只进入 service 校验不落库。
@@ -138,10 +137,10 @@ func (a authAPI) activate(c *gin.Context) {
 	}
 	out, err := a.svc.Activate(c.Request.Context(), req)
 	if err != nil {
-		response.Fail(c, err)
+		httpx.Write(c, gin.H{}, err)
 		return
 	}
-	response.OK(c, out)
+	httpx.Write(c, out, nil)
 }
 
 // logout 吊销当前 JWT 对应的服务端会话。
@@ -149,34 +148,34 @@ func (a authAPI) logout(c *gin.Context) {
 	sessionID, _ := c.Get("session_id")
 	id, ok := sessionID.(int64)
 	if !ok {
-		response.Fail(c, apperr.ErrIdentitySessionContextMissing)
+		httpx.Write(c, gin.H{}, apperr.ErrIdentitySessionContextMissing)
 		return
 	}
 	if err := a.svc.Logout(c.Request.Context(), id); err != nil {
-		response.Fail(c, err)
+		httpx.Write(c, gin.H{}, err)
 		return
 	}
-	response.OK(c, gin.H{})
+	httpx.Write(c, gin.H{}, nil)
 }
 
 // casLoginURL 生成 CAS 登录跳转地址,回调 origin 白名单校验由 service 执行。
 func (a authAPI) casLoginURL(c *gin.Context) {
 	out, err := a.svc.CASLoginURL(c.Request.Context(), c.Param("tenant_code"), c.Query("service"))
 	if err != nil {
-		response.Fail(c, err)
+		httpx.Write(c, gin.H{}, err)
 		return
 	}
-	response.OK(c, gin.H{"redirect_url": out})
+	httpx.Write(c, gin.H{"redirect_url": out}, nil)
 }
 
 // casCallback 绑定 CAS 回调参数并委托 service 完成验票与名单匹配。
 func (a authAPI) casCallback(c *gin.Context) {
 	out, err := a.svc.CASCallback(c.Request.Context(), c.Param("tenant_code"), c.Query("ticket"), c.Query("service"), c.GetHeader("User-Agent"), c.ClientIP())
 	if err != nil {
-		response.Fail(c, err)
+		httpx.Write(c, gin.H{}, err)
 		return
 	}
-	response.OK(c, out)
+	httpx.Write(c, out, nil)
 }
 
 // ldapLogin 绑定 LDAP 登录请求,实际目录绑定与名单匹配由 service 完成。
@@ -187,8 +186,8 @@ func (a authAPI) ldapLogin(c *gin.Context) {
 	}
 	out, err := a.svc.LDAPLogin(c.Request.Context(), c.Param("tenant_code"), req, c.GetHeader("User-Agent"), c.ClientIP())
 	if err != nil {
-		response.Fail(c, err)
+		httpx.Write(c, gin.H{}, err)
 		return
 	}
-	response.OK(c, out)
+	httpx.Write(c, out, nil)
 }

@@ -4,7 +4,6 @@ package admin
 import "chaimir/internal/platform/transfer"
 
 // exportTaskDTO 将统一导入导出中心任务快照转换为管理后台导出响应。
-func exportTaskDTO(task transfer.Task) ExportTaskDTO {
-	dto := transfer.TaskToDTO(task)
-	return ExportTaskDTO{TaskID: dto.TaskID, Channel: dto.Channel, Subject: dto.Subject, Status: dto.Status, FileName: dto.FileName, ContentType: dto.ContentType, ArtifactFileName: dto.ArtifactFileName, ArtifactContentType: dto.ArtifactContentType, ArtifactSize: dto.ArtifactSize}
+func exportTaskDTO(task transfer.Task) transfer.TaskDTO {
+	return transfer.TaskToDTO(task)
 }

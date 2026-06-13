@@ -4,7 +4,6 @@ package identity
 import (
 	"chaimir/internal/platform/auth"
 	"chaimir/internal/platform/httpx"
-	"chaimir/pkg/response"
 
 	"github.com/gin-gonic/gin"
 )
@@ -33,10 +32,10 @@ func (a meAPI) register(g gin.IRouter) {
 func (a meAPI) getMe(c *gin.Context) {
 	out, err := a.svc.GetMe(c.Request.Context())
 	if err != nil {
-		response.Fail(c, err)
+		httpx.Write(c, gin.H{}, err)
 		return
 	}
-	response.OK(c, out)
+	httpx.Write(c, out, nil)
 }
 
 // changePassword 绑定改密请求并委托 service 校验旧密码。
@@ -46,10 +45,10 @@ func (a meAPI) changePassword(c *gin.Context) {
 		return
 	}
 	if err := a.svc.ChangeMyPassword(c.Request.Context(), req); err != nil {
-		response.Fail(c, err)
+		httpx.Write(c, gin.H{}, err)
 		return
 	}
-	response.OK(c, gin.H{})
+	httpx.Write(c, gin.H{}, nil)
 }
 
 // changePhone 绑定换绑手机号请求并委托 service 校验短信验证码。
@@ -59,18 +58,18 @@ func (a meAPI) changePhone(c *gin.Context) {
 		return
 	}
 	if err := a.svc.ChangeMyPhone(c.Request.Context(), req); err != nil {
-		response.Fail(c, err)
+		httpx.Write(c, gin.H{}, err)
 		return
 	}
-	response.OK(c, gin.H{})
+	httpx.Write(c, gin.H{}, nil)
 }
 
 // sessions 返回当前账号服务端会话列表。
 func (a meAPI) sessions(c *gin.Context) {
 	out, err := a.svc.ListMySessions(c.Request.Context())
 	if err != nil {
-		response.Fail(c, err)
+		httpx.Write(c, gin.H{}, err)
 		return
 	}
-	response.OK(c, out)
+	httpx.Write(c, out, nil)
 }

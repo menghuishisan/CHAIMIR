@@ -287,7 +287,7 @@ func (a contentAPI) deleteCategory(c *gin.Context) {
 
 // listPapers 查询试卷分页。
 func (a contentAPI) listPapers(c *gin.Context) {
-	page, size, ok := pageQuery(c)
+	page, size, ok := httpx.Page(c)
 	if !ok {
 		return
 	}
@@ -327,7 +327,7 @@ func (a contentAPI) regeneratePaper(c *gin.Context) {
 
 // itemListFilterFromQuery 解析内容检索分页和过滤条件。
 func itemListFilterFromQuery(c *gin.Context) (ItemListFilter, bool) {
-	page, size, ok := pageQuery(c)
+	page, size, ok := httpx.Page(c)
 	if !ok {
 		return ItemListFilter{}, false
 	}
@@ -356,11 +356,6 @@ func itemListFilterFromQuery(c *gin.Context) (ItemListFilter, bool) {
 		return ItemListFilter{}, false
 	}
 	return ItemListFilter{Type: int16(typeValue), CategoryID: category, Difficulty: int16(difficulty), Tag: c.Query("tag"), KnowledgePoint: c.Query("kp"), Keyword: c.Query("keyword"), Visibility: int16(visibility), Status: int16(status), AuthorID: authorID, Page: page, Size: size}, true
-}
-
-// pageQuery 统一解析分页参数。
-func pageQuery(c *gin.Context) (int, int, bool) {
-	return httpx.Page(c)
 }
 
 // currentHTTPIdentity 从上下文读取租户账号身份。

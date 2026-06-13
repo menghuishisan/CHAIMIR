@@ -91,7 +91,7 @@ func (a adminAPI) listApplications(c *gin.Context) {
 
 // queryAudit 查询审计。
 func (a adminAPI) queryAudit(c *gin.Context) {
-	page, size, ok := page(c)
+	page, size, ok := httpx.Page(c)
 	if !ok {
 		return
 	}
@@ -135,7 +135,7 @@ func (a adminAPI) updateConfig(c *gin.Context) {
 
 // configHistory 查询配置历史。
 func (a adminAPI) configHistory(c *gin.Context) {
-	page, size, ok := page(c)
+	page, size, ok := httpx.Page(c)
 	if !ok {
 		return
 	}
@@ -188,7 +188,7 @@ func (a adminAPI) updateAlertRule(c *gin.Context) {
 
 // listAlertEvents 查询告警事件。
 func (a adminAPI) listAlertEvents(c *gin.Context) {
-	page, size, ok := page(c)
+	page, size, ok := httpx.Page(c)
 	if !ok {
 		return
 	}
@@ -219,7 +219,7 @@ func (a adminAPI) monitoringPanels(c *gin.Context) {
 
 // listBackups 查询备份记录。
 func (a adminAPI) listBackups(c *gin.Context) {
-	page, size, ok := page(c)
+	page, size, ok := httpx.Page(c)
 	if !ok {
 		return
 	}
@@ -235,11 +235,6 @@ func (a adminAPI) triggerBackup(c *gin.Context) {
 	}
 	out12, err := a.svc.TriggerBackup(c.Request.Context(), req)
 	httpx.Write(c, out12, err)
-}
-
-// page 解析分页参数。
-func page(c *gin.Context) (int, int, bool) {
-	return httpx.Page(c)
 }
 
 // auditQuery 解析审计中心文档定义的过滤条件。

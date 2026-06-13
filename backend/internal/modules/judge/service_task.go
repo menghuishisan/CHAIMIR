@@ -57,7 +57,7 @@ func (s *Service) CancelTask(ctx context.Context, tenantID, taskID int64) error 
 	}); err != nil {
 		return err
 	}
-	s.publishProgress(tenantID, task.ID, task.Status, ProgressStageFailed, "判题任务已取消")
+	s.publishProgress(ctx, tenantID, task.ID, task.Status, ProgressStageFailed, "判题任务已取消")
 	return s.writeAudit(ctx, tenantID, task.SubmitterID, 5, "judge.cancel", "judge_task", task.ID, map[string]any{"source_ref": task.SourceRef})
 }
 
@@ -82,7 +82,7 @@ func (s *Service) RejudgeTask(ctx context.Context, tenantID, taskID int64) (Judg
 	}); err != nil {
 		return JudgeTaskInfo{}, err
 	}
-	s.publishProgress(tenantID, task.ID, task.Status, ProgressStageQueued, "判题任务已进入重判队列")
+	s.publishProgress(ctx, tenantID, task.ID, task.Status, ProgressStageQueued, "判题任务已进入重判队列")
 	if err := s.writeAudit(ctx, tenantID, task.SubmitterID, 5, "judge.rejudge", "judge_task", task.ID, map[string]any{"source_ref": task.SourceRef}); err != nil {
 		return JudgeTaskInfo{}, err
 	}
@@ -118,7 +118,7 @@ func (s *Service) RejudgeBatch(ctx context.Context, tenantID int64, sourceRef st
 		return err
 	}
 	for _, task := range changed {
-		s.publishProgress(tenantID, task.ID, task.Status, ProgressStageQueued, "判题任务已进入重判队列")
+		s.publishProgress(ctx, tenantID, task.ID, task.Status, ProgressStageQueued, "判题任务已进入重判队列")
 	}
 	if len(changed) == 0 {
 		return apperr.ErrJudgeTaskStateInvalid
@@ -177,7 +177,7 @@ func (s *Service) ManualScore(ctx context.Context, tenantID, taskID, scorerID in
 	}); err != nil {
 		return nil, err
 	}
-	s.publishProgress(tenantID, taskID, JudgeTaskStatusDone, ProgressStageDone, "判题任务已完成")
+	s.publishProgress(ctx, tenantID, taskID, JudgeTaskStatusDone, ProgressStageDone, "判题任务已完成")
 	if err := s.publishPendingOutbox(ctx); err != nil {
 		return nil, err
 	}

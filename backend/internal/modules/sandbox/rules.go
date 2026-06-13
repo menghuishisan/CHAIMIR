@@ -56,11 +56,11 @@ func validateRuntimeRequest(req RuntimeRequest, cfg config.SandboxConfig) (Adapt
 		return AdapterSpec{}, apperr.ErrSandboxRuntimeCreateInvalid
 	}
 	if req.AdapterLevel < 1 || req.AdapterLevel > 3 || len(req.AdapterSpec) == 0 {
-		return AdapterSpec{}, apperr.ErrSandboxRuntimeConfigInvalid
+		return AdapterSpec{}, apperr.ErrSandboxAdapterSpecInvalid
 	}
 	var spec AdapterSpec
 	if err := jsonx.DecodeStrict(req.AdapterSpec, &spec); err != nil {
-		return AdapterSpec{}, apperr.ErrSandboxRuntimeConfigInvalid.WithCause(err)
+		return AdapterSpec{}, apperr.ErrSandboxAdapterSpecInvalid.WithCause(err)
 	}
 	if err := normalizeAndValidateAdapterSpec(&spec, cfg); err != nil {
 		return AdapterSpec{}, err
@@ -69,7 +69,7 @@ func validateRuntimeRequest(req RuntimeRequest, cfg config.SandboxConfig) (Adapt
 		strings.TrimSpace(req.CapabilityImpl) == "" &&
 		strings.TrimSpace(req.PluginRef) == "" &&
 		!hasCapabilityCommands(spec.CapabilityCommands) {
-		return AdapterSpec{}, apperr.ErrSandboxRuntimeConfigInvalid
+		return AdapterSpec{}, apperr.ErrSandboxCapabilityUnavailable
 	}
 	return spec, nil
 }
@@ -230,7 +230,7 @@ func validateWorkspaceListPath(relativePath string) (string, error) {
 // normalizeAndValidateAdapterSpec 为探针补配置默认值并校验容器、端口、环境变量安全边界。
 func normalizeAndValidateAdapterSpec(spec *AdapterSpec, cfg config.SandboxConfig) error {
 	if spec == nil || strings.TrimSpace(spec.WorkspaceDir) == "" || !strings.HasPrefix(spec.WorkspaceDir, "/") {
-		return apperr.ErrSandboxRuntimeConfigInvalid
+		return apperr.ErrSandboxAdapterSpecInvalid
 	}
 	if err := normalizeAndValidateVolumeDomains(spec); err != nil {
 		return err
@@ -256,7 +256,7 @@ func normalizeAndValidateAdapterSpec(spec *AdapterSpec, cfg config.SandboxConfig
 	ports := map[string]struct{}{}
 	for _, port := range spec.RuntimeContainer.Ports {
 		if _, exists := ports[port.Name]; exists {
-			return apperr.ErrSandboxRuntimeConfigInvalid
+			return apperr.ErrSandboxContainerSpecInvalid
 		}
 		ports[port.Name] = struct{}{}
 	}
@@ -269,7 +269,7 @@ func normalizeAndValidateAdapterSpec(spec *AdapterSpec, cfg config.SandboxConfig
 		}
 		for _, port := range spec.InfraSidecars[i].Ports {
 			if _, exists := ports[port.Name]; exists {
-				return apperr.ErrSandboxRuntimeConfigInvalid
+				return apperr.ErrSandboxContainerSpecInvalid
 			}
 			ports[port.Name] = struct{}{}
 		}
@@ -288,10 +288,10 @@ func validatePodTopology(spec *AdapterSpec, cfg config.SandboxConfig) error {
 		pod := &spec.Pods[i]
 		pod.Name = strings.TrimSpace(pod.Name)
 		if !mountNamePattern.MatchString(pod.Name) || len(pod.Containers) == 0 {
-			return apperr.ErrSandboxRuntimeConfigInvalid
+			return apperr.ErrSandboxPodTopologyInvalid
 		}
 		if _, exists := seenPods[pod.Name]; exists {
-			return apperr.ErrSandboxRuntimeConfigInvalid
+			return apperr.ErrSandboxPodTopologyInvalid
 		}
 		seenPods[pod.Name] = struct{}{}
 		containerNames := map[string]struct{}{}
@@ -304,29 +304,29 @@ func validatePodTopology(spec *AdapterSpec, cfg config.SandboxConfig) error {
 			if container.Name == spec.RuntimeContainer.Name {
 				runtimeContainerSeen = true
 				if strings.TrimSpace(container.Image) != "" {
-					return apperr.ErrSandboxRuntimeConfigInvalid
+					return apperr.ErrSandboxPodTopologyInvalid
 				}
 				if hasVolumeDomain(*spec, VolumeDomainJudgePrivate) && studentAccessibleContainer(*container) {
-					return apperr.ErrSandboxRuntimeConfigInvalid
+					return apperr.ErrSandboxPrivateDomainInvalid
 				}
 			}
 			if container.Name != spec.RuntimeContainer.Name && !imageAttested(cfg, container.Image, digestFromImageURL(container.Image)) {
-				return apperr.ErrSandboxRuntimeConfigInvalid
+				return apperr.ErrSandboxSidecarImageInvalid
 			}
 			if _, exists := containerNames[container.Name]; exists {
-				return apperr.ErrSandboxRuntimeConfigInvalid
+				return apperr.ErrSandboxPodTopologyInvalid
 			}
 			containerNames[container.Name] = struct{}{}
 			for _, port := range container.Ports {
 				if _, exists := ports[port.ContainerPort]; exists {
-					return apperr.ErrSandboxRuntimeConfigInvalid
+					return apperr.ErrSandboxPodTopologyInvalid
 				}
 				ports[port.ContainerPort] = struct{}{}
 			}
 		}
 	}
 	if !runtimeContainerSeen {
-		return apperr.ErrSandboxRuntimeConfigInvalid
+		return apperr.ErrSandboxPodTopologyInvalid
 	}
 	return nil
 }
@@ -345,18 +345,18 @@ func validateNetworkRules(spec *AdapterSpec) error {
 		rule.FromPod = strings.TrimSpace(rule.FromPod)
 		rule.ToPod = strings.TrimSpace(rule.ToPod)
 		if !mountNamePattern.MatchString(rule.Name) || rule.FromPod == "" || rule.ToPod == "" || len(rule.Ports) == 0 {
-			return apperr.ErrSandboxRuntimeConfigInvalid
+			return apperr.ErrSandboxNetworkPolicyInvalid
 		}
 		if _, exists := seenRules[rule.Name]; exists {
-			return apperr.ErrSandboxRuntimeConfigInvalid
+			return apperr.ErrSandboxNetworkPolicyInvalid
 		}
 		seenRules[rule.Name] = struct{}{}
 		if _, ok := podPorts[rule.FromPod]; !ok {
-			return apperr.ErrSandboxRuntimeConfigInvalid
+			return apperr.ErrSandboxNetworkPolicyInvalid
 		}
 		targetPorts, ok := podPorts[rule.ToPod]
 		if !ok {
-			return apperr.ErrSandboxRuntimeConfigInvalid
+			return apperr.ErrSandboxNetworkPolicyInvalid
 		}
 		// 每条规则只放行目标 Pod 已公开的端口,禁止用空端口表达宽泛互通。
 		seenPorts := map[int32]struct{}{}
@@ -366,18 +366,18 @@ func validateNetworkRules(spec *AdapterSpec) error {
 			if ref.Name != "" {
 				resolved, ok := targetPorts[ref.Name]
 				if !ok {
-					return apperr.ErrSandboxRuntimeConfigInvalid
+					return apperr.ErrSandboxNetworkPolicyInvalid
 				}
 				ref.Port = resolved
 			}
 			if ref.Port <= 0 {
-				return apperr.ErrSandboxRuntimeConfigInvalid
+				return apperr.ErrSandboxNetworkPolicyInvalid
 			}
 			if !networkPortDeclared(targetPorts, ref.Port) {
-				return apperr.ErrSandboxRuntimeConfigInvalid
+				return apperr.ErrSandboxNetworkPolicyInvalid
 			}
 			if _, ok := seenPorts[ref.Port]; ok {
-				return apperr.ErrSandboxRuntimeConfigInvalid
+				return apperr.ErrSandboxNetworkPolicyInvalid
 			}
 			seenPorts[ref.Port] = struct{}{}
 		}
@@ -486,7 +486,7 @@ func validatePrivateArchiveExecutionTarget(spec *AdapterSpec) error {
 		return nil
 	}
 	if studentAccessibleContainer(spec.RuntimeContainer) {
-		return apperr.ErrSandboxRuntimeConfigInvalid
+		return apperr.ErrSandboxPrivateDomainInvalid
 	}
 	return nil
 }
@@ -519,35 +519,35 @@ func normalizeAndValidateVolumeDomains(spec *AdapterSpec) error {
 		domain.Persistence = strings.TrimSpace(domain.Persistence)
 		domain.SnapshotScope = strings.TrimSpace(domain.SnapshotScope)
 		if domain.Name == "" || !strings.HasPrefix(domain.MountPath, "/") || domain.MountPath == "/" {
-			return apperr.ErrSandboxRuntimeConfigInvalid
+			return apperr.ErrSandboxVolumeDomainInvalid
 		}
 		if _, ok := seen[domain.Name]; ok {
-			return apperr.ErrSandboxRuntimeConfigInvalid
+			return apperr.ErrSandboxVolumeDomainInvalid
 		}
 		if !validVolumeAccess(domain.StudentAccess) || !validVolumePersistence(domain.Persistence) || !validVolumeSnapshotScope(domain.SnapshotScope) {
-			return apperr.ErrSandboxRuntimeConfigInvalid
+			return apperr.ErrSandboxVolumeDomainInvalid
 		}
 		if domain.Name == VolumeDomainWorkspace {
 			workspaceSeen = true
 			if domain.MountPath != path.Clean(spec.WorkspaceDir) || domain.StudentAccess != VolumeAccessReadWrite || domain.Persistence != VolumePersistenceMinioCode {
-				return apperr.ErrSandboxRuntimeConfigInvalid
+				return apperr.ErrSandboxVolumeDomainInvalid
 			}
 		}
 		if domain.Name == VolumeDomainRuntimeState && domain.StudentAccess != VolumeAccessNone {
-			return apperr.ErrSandboxRuntimeConfigInvalid
+			return apperr.ErrSandboxVolumeDomainInvalid
 		}
 		if domain.Name == VolumeDomainJudgePrivate && (domain.StudentAccess != VolumeAccessNone || domain.SnapshotScope != VolumeSnapshotNever) {
-			return apperr.ErrSandboxRuntimeConfigInvalid
+			return apperr.ErrSandboxPrivateDomainInvalid
 		}
 		for _, existing := range seen {
 			if volumePathOverlaps(domain.MountPath, existing.MountPath) {
-				return apperr.ErrSandboxRuntimeConfigInvalid
+				return apperr.ErrSandboxVolumeDomainInvalid
 			}
 		}
 		seen[domain.Name] = *domain
 	}
 	if !workspaceSeen {
-		return apperr.ErrSandboxRuntimeConfigInvalid
+		return apperr.ErrSandboxVolumeDomainInvalid
 	}
 	return nil
 }
@@ -582,7 +582,7 @@ func validateInfraSidecarImage(spec ContainerSpec, cfg config.SandboxConfig) err
 	}
 	digest := digestFromImageURL(imageURL)
 	if imageURL == "" || digest == "" || !imageAttested(cfg, imageURL, digest) {
-		return apperr.ErrSandboxRuntimeConfigInvalid
+		return apperr.ErrSandboxSidecarImageInvalid
 	}
 	return nil
 }
@@ -610,7 +610,7 @@ func validateWorkspaceOps(ops WorkspaceOps) error {
 	}
 	for _, command := range required {
 		if !safeCommand(command) {
-			return apperr.ErrSandboxRuntimeConfigInvalid
+			return apperr.ErrSandboxWorkspaceOpsInvalid
 		}
 	}
 	return nil
@@ -629,10 +629,10 @@ func validateCapabilityCommands(spec *AdapterSpec, cfg config.SandboxConfig) err
 	}
 	for _, command := range commands {
 		if !safeCommand(command.Command) {
-			return apperr.ErrSandboxRuntimeConfigInvalid
+			return apperr.ErrSandboxCapabilityCommandInvalid
 		}
 		if command.TimeoutSeconds < 0 {
-			return apperr.ErrSandboxRuntimeConfigInvalid
+			return apperr.ErrSandboxCapabilityCommandInvalid
 		}
 		if command.TimeoutSeconds == 0 {
 			command.TimeoutSeconds = int32(cfg.ChainRPCTimeoutSeconds)
@@ -665,7 +665,7 @@ func safeCommand(command []string) bool {
 // validateContainerSpec 校验单个容器声明不会绕过安全上下文或硬编码无效探针。
 func validateContainerSpec(spec *ContainerSpec, cfg config.SandboxConfig) error {
 	if strings.TrimSpace(spec.Name) == "" || len(spec.Ports) == 0 {
-		return apperr.ErrSandboxRuntimeConfigInvalid
+		return apperr.ErrSandboxContainerSpecInvalid
 	}
 	if err := validateLiteralEnv(spec.Env); err != nil {
 		return err
@@ -674,7 +674,7 @@ func validateContainerSpec(spec *ContainerSpec, cfg config.SandboxConfig) error 
 	normalizeProbe(&spec.LivenessProbe, cfg)
 	for _, probe := range []ProbeSpec{spec.ReadinessProbe, spec.LivenessProbe} {
 		if probe.Type != "" && probe.Type != "tcp" && probe.Type != "http" && probe.Type != "exec" {
-			return apperr.ErrSandboxRuntimeConfigInvalid
+			return apperr.ErrSandboxProbeSpecInvalid
 		}
 	}
 	return nil
@@ -695,11 +695,11 @@ func validateLiteralEnv(env []EnvVarSpec) error {
 	for _, item := range env {
 		name := strings.TrimSpace(item.Name)
 		if !envNamePattern.MatchString(name) {
-			return apperr.ErrSandboxRuntimeConfigInvalid
+			return apperr.ErrSandboxRuntimeEnvInvalid
 		}
 		upper := strings.ToUpper(name)
 		if strings.Contains(upper, "SECRET") || strings.Contains(upper, "TOKEN") || strings.Contains(upper, "PASSWORD") || strings.Contains(upper, "PRIVATE_KEY") {
-			return apperr.ErrSandboxRuntimeConfigInvalid
+			return apperr.ErrSandboxRuntimeSecretEnvInvalid
 		}
 	}
 	return nil

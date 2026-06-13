@@ -95,7 +95,7 @@ func Fail(c *gin.Context, err error) {
 	if !ok {
 		ae = apperr.ErrUnhandledFailure.WithCause(err)
 	}
-	logging.ErrorContext(c.Request.Context(), "request failed", ae.Error(), errorCodeAttr(ae.Code))
+	logging.ErrorContext(c.Request.Context(), "request failed", ae.LogString(), errorCodeAttr(ae.Code))
 	c.JSON(http.StatusOK, Envelope{Code: ae.Code, Message: ae.Message, TraceID: traceID})
 }
 

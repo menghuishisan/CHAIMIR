@@ -105,7 +105,7 @@ func (s *Service) PlatformDashboard(ctx context.Context) (DashboardDTO, error) {
 	}
 	stats, err := s.stats.PlatformStats(ctx)
 	if err != nil {
-		return DashboardDTO{}, apperr.ErrAdminDashboardInvalid.WithCause(err)
+		return DashboardDTO{}, apperr.ErrAdminDashboardIdentityFailed.WithCause(err)
 	}
 	return DashboardDTO{Scope: ScopeGlobal, TenantCount: stats.TenantCount, AccountCount: stats.AccountCount, TeacherCount: stats.TeacherCount, StudentCount: stats.StudentCount, ActiveAccountCount: stats.ActiveAccountCount, PendingApplyCount: stats.PendingApplyCount, GeneratedAt: timex.Now()}, nil
 }
@@ -118,30 +118,30 @@ func (s *Service) SchoolDashboard(ctx context.Context) (DashboardDTO, error) {
 	}
 	stats, err := s.stats.TenantStats(ctx, id.TenantID)
 	if err != nil {
-		return DashboardDTO{}, apperr.ErrAdminDashboardInvalid.WithCause(err)
+		return DashboardDTO{}, apperr.ErrAdminDashboardIdentityFailed.WithCause(err)
 	}
 	out := DashboardDTO{Scope: ScopeTenant, TenantID: id.TenantID, AccountCount: stats.AccountCount, TeacherCount: stats.TeacherCount, StudentCount: stats.StudentCount, ActiveAccountCount: stats.ActiveAccountCount, GeneratedAt: timex.Now()}
 	t, err := s.teaching.Stats(ctx, id.TenantID)
 	if err != nil {
-		return DashboardDTO{}, apperr.ErrAdminDashboardInvalid.WithCause(err)
+		return DashboardDTO{}, apperr.ErrAdminDashboardTeachingFailed.WithCause(err)
 	}
 	out.CourseCount = t.CourseCount
 	out.ActiveCourseCount = t.ActiveCourseCount
 	e, err := s.experiment.Stats(ctx, contracts.ExperimentStatsQuery{TenantID: id.TenantID})
 	if err != nil {
-		return DashboardDTO{}, apperr.ErrAdminDashboardInvalid.WithCause(err)
+		return DashboardDTO{}, apperr.ErrAdminDashboardExperimentFailed.WithCause(err)
 	}
 	out.ExperimentCount = e.ExperimentCount
 	out.ActiveInstanceCount = e.ActiveInstanceCount
 	c, err := s.contest.Stats(ctx, id.TenantID)
 	if err != nil {
-		return DashboardDTO{}, apperr.ErrAdminDashboardInvalid.WithCause(err)
+		return DashboardDTO{}, apperr.ErrAdminDashboardContestFailed.WithCause(err)
 	}
 	out.ContestCount = c.ContestCount
 	out.ActiveContestCount = c.ActiveContestCount
 	q, err := s.sandbox.Stats(ctx, id.TenantID)
 	if err != nil {
-		return DashboardDTO{}, apperr.ErrAdminDashboardInvalid.WithCause(err)
+		return DashboardDTO{}, apperr.ErrAdminDashboardSandboxFailed.WithCause(err)
 	}
 	out.ActiveSandboxCount = q.ActiveSandboxCount
 	out.ResourceQuotaSnapshot = map[string]any{"max_concurrent_sandbox": q.MaxConcurrentSandbox, "max_cpu": q.MaxCPU, "max_memory_mb": q.MaxMemoryMB}
@@ -239,16 +239,16 @@ func (s *Service) QueryAudit(ctx context.Context, query contracts.AuditQuery) (c
 const auditExportSubject = "admin.audit_export"
 
 // ExportAuditCSV 导出审计日志 CSV 并登记到统一导入导出中心。
-func (s *Service) ExportAuditCSV(ctx context.Context, query contracts.AuditQuery) (ExportTaskDTO, error) {
+func (s *Service) ExportAuditCSV(ctx context.Context, query contracts.AuditQuery) (transfer.TaskDTO, error) {
 	id, err := s.currentAdminIdentity(ctx)
 	if err != nil {
-		return ExportTaskDTO{}, err
+		return transfer.TaskDTO{}, err
 	}
 	query.Page = 1
 	query.Size = 1000
 	result, err := s.QueryAudit(ctx, query)
 	if err != nil {
-		return ExportTaskDTO{}, err
+		return transfer.TaskDTO{}, err
 	}
 	fileName := "audit.csv"
 	task, err := s.transfers.CreateTask(ctx, transfer.NewTaskRequest{
@@ -260,11 +260,11 @@ func (s *Service) ExportAuditCSV(ctx context.Context, query contracts.AuditQuery
 		ContentType: "text/csv; charset=utf-8",
 	})
 	if err != nil {
-		return ExportTaskDTO{}, apperr.ErrAdminAuditExportFailed.WithCause(err)
+		return transfer.TaskDTO{}, apperr.ErrAdminAuditExportTaskCreateFailed.WithCause(err)
 	}
 	data, err := auditCSVBytes(result)
 	if err != nil {
-		return ExportTaskDTO{}, err
+		return transfer.TaskDTO{}, apperr.ErrAdminAuditExportCSVFailed.WithCause(err)
 	}
 	plan, err := s.files.PlanUpload(storage.PlanUploadRequest{
 		TenantID:        id.TenantID,
@@ -280,17 +280,17 @@ func (s *Service) ExportAuditCSV(ctx context.Context, query contracts.AuditQuery
 		Content:         data,
 	})
 	if err != nil {
-		return ExportTaskDTO{}, apperr.ErrAdminAuditExportFailed.WithCause(err)
+		return transfer.TaskDTO{}, apperr.ErrAdminAuditExportUploadPlanFailed.WithCause(err)
 	}
 	if err := s.storage.Put(ctx, plan.Bucket, plan.Key, bytes.NewReader(data), int64(len(data)), "text/csv; charset=utf-8"); err != nil {
-		return ExportTaskDTO{}, apperr.ErrAdminAuditExportFailed.WithCause(err)
+		return transfer.TaskDTO{}, apperr.ErrAdminAuditExportObjectWriteFailed.WithCause(err)
 	}
 	completed, err := s.transfers.CompleteTask(ctx, id.TenantID, task.TaskID, transfer.CompleteTaskRequest{ObjectRef: plan.ObjectRef, Size: int64(len(data))})
 	if err != nil {
-		return ExportTaskDTO{}, apperr.ErrAdminAuditExportFailed.WithCause(err)
+		return transfer.TaskDTO{}, apperr.ErrAdminAuditExportTaskCompleteFailed.WithCause(err)
 	}
 	if err := s.writeAudit(ctx, id, "admin.audit.export", "audit_log", 0, map[string]any{"size": result.Size, "total": result.Total, "transfer_task_id": task.TaskID}); err != nil {
-		return ExportTaskDTO{}, apperr.ErrAdminAuditWriteFailed.WithCause(err)
+		return transfer.TaskDTO{}, apperr.ErrAdminAuditWriteFailed.WithCause(err)
 	}
 	return exportTaskDTO(completed), nil
 }
@@ -300,16 +300,16 @@ func auditCSVBytes(result contracts.AuditQueryResult) ([]byte, error) {
 	var b strings.Builder
 	w := csv.NewWriter(&b)
 	if err := w.Write([]string{"id", "tenant_id", "actor_id", "action", "target_type", "target_id", "trace_id", "created_at"}); err != nil {
-		return nil, apperr.ErrAdminAuditExportFailed.WithCause(err)
+		return nil, fmt.Errorf("写入 CSV 表头失败: %w", err)
 	}
 	for _, row := range result.List {
 		if err := w.Write([]string{fmt.Sprint(row.ID), fmt.Sprint(row.TenantID), fmt.Sprint(row.ActorID), row.Action, row.TargetType, fmt.Sprint(row.TargetID), row.TraceID, row.CreatedAt.Format(time.RFC3339)}); err != nil {
-			return nil, apperr.ErrAdminAuditExportFailed.WithCause(err)
+			return nil, fmt.Errorf("写入 CSV 行失败: %w", err)
 		}
 	}
 	w.Flush()
 	if err := w.Error(); err != nil {
-		return nil, apperr.ErrAdminAuditExportFailed.WithCause(err)
+		return nil, fmt.Errorf("刷新 CSV 内容失败: %w", err)
 	}
 	return []byte(b.String()), nil
 }

@@ -116,7 +116,7 @@ func (a teachingAPI) listCourses(c *gin.Context) {
 	if !ok {
 		return
 	}
-	page, size, ok := teachingPage(c)
+	page, size, ok := httpx.Page(c)
 	if !ok {
 		return
 	}
@@ -331,7 +331,7 @@ func (a teachingAPI) listMembers(c *gin.Context) {
 	if !ok {
 		return
 	}
-	page, size, ok := teachingPage(c)
+	page, size, ok := httpx.Page(c)
 	if !ok {
 		return
 	}
@@ -468,7 +468,7 @@ func (a teachingAPI) listSubmissions(c *gin.Context) {
 	if !ok {
 		return
 	}
-	page, size, ok := teachingPage(c)
+	page, size, ok := httpx.Page(c)
 	if !ok {
 		return
 	}
@@ -554,7 +554,7 @@ func (a teachingAPI) listPosts(c *gin.Context) {
 	if !ok {
 		return
 	}
-	page, size, ok := teachingPage(c)
+	page, size, ok := httpx.Page(c)
 	if !ok {
 		return
 	}
@@ -733,17 +733,4 @@ func (a teachingAPI) internalCourseGrades(c *gin.Context) {
 	}
 	out, err := a.svc.ListCourseGrades(c.Request.Context(), tenantID, courseID)
 	httpx.Write(c, out, err)
-}
-
-// teachingPage 统一解析教学模块分页参数。
-func teachingPage(c *gin.Context) (int, int, bool) {
-	page, ok := httpx.QueryInt(c, "page", httpx.QueryIntRule{Default: 1, Min: 1})
-	if !ok {
-		return 0, 0, false
-	}
-	size, ok := httpx.QueryInt(c, "size", httpx.QueryIntRule{Default: 20, Min: 1, Max: 100, HasMax: true})
-	if !ok {
-		return 0, 0, false
-	}
-	return int(page), int(size), true
 }
