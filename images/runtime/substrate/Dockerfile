@@ -7,8 +7,9 @@ LABEL org.opencontainers.image.description="Chaimir Substrate development chain 
 USER root
 
 # 创建非 root 用户和链状态目录。
-RUN groupadd --gid 1000 chaimir \
-    && useradd --uid 1000 --gid 1000 --home-dir /workspace --create-home --shell /usr/sbin/nologin chaimir \
+RUN if ! getent group 1000 >/dev/null; then groupadd --gid 1000 chaimir; fi \
+    && if ! id -u 1000 >/dev/null 2>&1; then useradd --uid 1000 --gid 1000 --home-dir /workspace --create-home --shell /usr/sbin/nologin chaimir; fi \
+    && mkdir -p /workspace \
     && mkdir -p /runtime-state/substrate \
     && chown -R 1000:1000 /workspace /runtime-state
 

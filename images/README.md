@@ -38,4 +38,4 @@ CI 的 images 流水线在推送 Harbor 后解析真实 digest,上传 `image-dig
 powershell -NoProfile -ExecutionPolicy Bypass -File images/pull-images.ps1 -Scope all -Registry harbor.chaimir.local
 ```
 
-脚本默认每个镜像最多尝试 3 次。单次 `docker pull` 失败后,会先执行 `docker image rm <ref>` 清理失败引用,再进入下一次重试;全部重试失败后返回非 0。生产不应启用 `-NoCleanupFailedPull`,该开关仅用于诊断 Docker 本地状态。
+脚本默认每个镜像最多尝试 3 次。单次 `docker pull` 失败后,若本地原本没有该 digest 引用,会执行 `docker image rm <ref>` 清理失败残留后重试;若本地已存在该 digest,则保留本地可用镜像,避免瞬时 registry 错误破坏已预热结果。当前镜像全部重试失败后立即停止并返回非 0,不得继续拉取后续镜像。生产不应启用 `-NoCleanupFailedPull`,该开关仅用于诊断 Docker 本地状态。

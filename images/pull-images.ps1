@@ -210,6 +210,7 @@ function Invoke-DockerPullWithRetry {
     param([object]$Item)
     for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
         Write-Host "Pulling [$attempt/$MaxAttempts] $($Item.Ref)"
+        $hadImageBeforePull = Test-LocalImageRef -Ref $Item.Ref
         $previousErrorActionPreference = $ErrorActionPreference
         $ErrorActionPreference = "Continue"
         try {
@@ -229,7 +230,7 @@ function Invoke-DockerPullWithRetry {
             Write-Warning $line
         }
         Write-Warning "镜像拉取失败: $($Item.Ref), attempt=$attempt, exit=$pullExitCode"
-        if (-not $NoCleanupFailedPull) {
+        if (-not $NoCleanupFailedPull -and -not $hadImageBeforePull) {
             $previousErrorActionPreference = $ErrorActionPreference
             $ErrorActionPreference = "Continue"
             try {
@@ -241,12 +242,26 @@ function Invoke-DockerPullWithRetry {
             if ($cleanupExitCode -ne 0) {
                 Write-Warning "清理失败镜像引用未完成: $($Item.Ref), exit=$cleanupExitCode"
             }
+        } elseif ($hadImageBeforePull) {
+            Write-Warning "保留本地已有 digest 镜像: $($Item.Ref)"
         }
         if ($attempt -lt $MaxAttempts -and $RetryDelaySeconds -gt 0) {
             Start-Sleep -Seconds $RetryDelaySeconds
         }
     }
     return $false
+}
+
+function Test-LocalImageRef {
+    param([string]$Ref)
+    $previousErrorActionPreference = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try {
+        & docker image inspect $Ref 1>$null 2>$null
+        return ($LASTEXITCODE -eq 0)
+    } finally {
+        $ErrorActionPreference = $previousErrorActionPreference
+    }
 }
 
 $rootPath = (Resolve-Path -LiteralPath $Root).Path
@@ -284,9 +299,7 @@ $failures = New-Object System.Collections.Generic.List[string]
 foreach ($item in $items) {
     if (-not (Invoke-DockerPullWithRetry -Item $item)) {
         $failures.Add("$($item.Ref) ($($item.Manifest))")
-        if ($FailFast) {
-            break
-        }
+        break
     }
 }
 
