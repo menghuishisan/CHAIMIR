@@ -1,3 +1,4 @@
+DROP POLICY IF EXISTS teaching_grade_event_outbox_tenant_rls ON teaching_grade_event_outbox;
 DROP POLICY IF EXISTS course_grade_tenant_rls ON course_grade;
 DROP POLICY IF EXISTS grade_weight_tenant_rls ON grade_weight;
 DROP POLICY IF EXISTS course_review_tenant_rls ON course_review;
@@ -17,6 +18,7 @@ DROP POLICY IF EXISTS course_update_tenant_rls ON course;
 DROP POLICY IF EXISTS course_insert_tenant_rls ON course;
 DROP POLICY IF EXISTS course_select_tenant_or_shared_rls ON course;
 
+DROP TABLE IF EXISTS teaching_grade_event_outbox;
 DROP TABLE IF EXISTS course_grade;
 DROP TABLE IF EXISTS grade_weight;
 DROP TABLE IF EXISTS course_review;

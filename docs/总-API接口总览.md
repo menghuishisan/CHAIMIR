@@ -111,7 +111,7 @@
 
 ### M7 实验 `/api/v1/experiment`
 - `/experiments/*`:配置/校验/发布。
-- `/experiments/{id}/instances`、`/instances/{id}`:实例创建(编排 M2/M4)/工作台/控制;`WS /instances/{id}/progress`。
+- `/experiments/{id}/instances`、`/instances/{id}`:实例创建(编排 M2/M4)/工作台/控制;`/instances/{id}/stages/{stage}/activate` 是阶段资源创建唯一写入口;`WS /instances/{id}/progress`。
 - `/instances/{id}/checkpoints/{cp}/judge`:检查点判分(调 M3)。
 - `/instances/{id}/report`、`/reports/{id}/grade`:报告。
 - `/groups/*`:多人协作。

@@ -1,0 +1,106 @@
+/* ===== 间距令牌 (Spacing Tokens) ===== */
+
+:root {
+  /* === 间距（4/8节奏） === */
+
+  --space-0: 0;
+  --space-1: 0.25rem;   /* 4px */
+  --space-2: 0.5rem;    /* 8px */
+  --space-3: 0.75rem;   /* 12px */
+  --space-4: 1rem;      /* 16px */
+  --space-5: 1.25rem;   /* 20px */
+  --space-6: 1.5rem;    /* 24px */
+  --space-7: 1.75rem;   /* 28px */
+  --space-8: 2rem;      /* 32px */
+  --space-9: 2.25rem;   /* 36px */
+  --space-10: 2.5rem;   /* 40px */
+  --space-12: 3rem;     /* 48px */
+  --space-14: 3.5rem;   /* 56px */
+  --space-16: 4rem;     /* 64px */
+  --space-20: 5rem;     /* 80px */
+  --space-24: 6rem;     /* 96px */
+
+  /* === 圆角 === */
+
+  --radius-xs: 0.375rem;  /* 6px */
+  --radius-sm: 0.5rem;    /* 8px */
+  --radius: 0.75rem;      /* 12px - 默认 */
+  --radius-lg: 1rem;      /* 16px */
+  --radius-xl: 1.25rem;   /* 20px */
+  --radius-full: 999px;   /* 完全圆角 */
+
+  /* === 阴影（柔和分层） ===
+   *
+   * 四档阴影对应四种海拔：
+   * - xs: 卡片静置
+   * - base: 卡片浮起
+   * - md: 下拉/悬浮卡/Popover
+   * - lg: 模态/抽屉/Toast
+   *
+   * 使用低透明度多层叠加，杜绝硬黑影。
+   * 海拔与阴影一一对应，禁止随机阴影值。
+   */
+
+  --shadow-xs: 0 1px 2px rgba(15, 23, 42, 0.05);
+
+  --shadow: 0 1px 2px rgba(15, 23, 42, 0.04),
+            0 2px 8px rgba(15, 23, 42, 0.05);
+
+  --shadow-md: 0 4px 14px rgba(15, 23, 42, 0.08),
+               0 2px 6px rgba(15, 23, 42, 0.04);
+
+  --shadow-lg: 0 12px 32px rgba(15, 23, 42, 0.12),
+               0 4px 12px rgba(15, 23, 42, 0.06);
+
+  /* === 过渡时长 === */
+
+  --t-fast: 0.12s;   /* 快速：按压反馈 */
+  --t: 0.18s;        /* 常规：大多数交互 */
+  --t-slow: 0.3s;    /* 慢速：页面进入/复杂动画 */
+
+  /* === 缓动曲线（签名缓动） ===
+   *
+   * 全局共用统一缓动，所有动效同一节奏感。
+   */
+
+  --ease: cubic-bezier(0.22, 0.61, 0.36, 1);      /* 标准缓动 */
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);      /* 入场缓动 */
+  --ease-in: cubic-bezier(0.4, 0, 0.6, 1);        /* 出场缓动 */
+
+  /* === z-index 层级 ===
+   *
+   * 统一阶梯，禁止组件里写裸数字 z-index。
+   * 新层级需求先在此新增一阶。
+   */
+
+  --z-base: 1;        /* 基础层 */
+  --z-sticky: 50;     /* 粘性定位（表头等） */
+  --z-dropdown: 60;   /* 下拉菜单/Popover */
+  --z-drawer: 80;     /* 侧边抽屉 */
+  --z-immersive: 100; /* 沉浸式工作台 */
+  --z-modal: 120;     /* 模态对话框 */
+  --z-toast: 200;     /* Toast 通知 */
+
+  /* === 布局尺寸 === */
+
+  --topnav-h: 3.5rem;           /* 56px - 顶栏高度 */
+  --sidebar-w: 15.5rem;         /* 248px - 侧栏宽度（展开） */
+  --sidebar-w-collapsed: 4rem;  /* 64px - 侧栏宽度（折叠） */
+  --content-max: 75rem;         /* 1200px - 内容区最大宽度 */
+
+  /* === 卡片内边距 === */
+
+  --card-pad: var(--space-5);       /* 20px - 卡片内边距 */
+  --card-header-pad: var(--space-4) var(--space-5); /* 15px 20px - 卡头 */
+}
+
+/* ===== 响应式间距 =====
+ *
+ * 在大屏幕上适当增加间距，提升视觉呼吸感。
+ */
+
+@media (min-width: 1536px) {
+  :root {
+    --content-max: 80rem; /* 1280px */
+  }
+}

@@ -1,0 +1,34 @@
+{
+  "name": "@chaimir/ui",
+  "version": "0.1.0",
+  "description": "Chaimir 设计系统：令牌 + 组件库",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./tokens": "./src/tokens/index.ts",
+    "./components/*": "./src/components/*/index.tsx",
+    "./styles": "./src/tokens/global.css"
+  },
+  "scripts": {
+    "dev": "tsc --watch --noEmit",
+    "build": "tsc --noEmit",
+    "lint": "eslint src --ext .ts,.tsx",
+    "type-check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "lucide-react": "^0.460.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "clsx": "^2.1.1"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.3",
+    "@types/react-dom": "^18.3.0",
+    "typescript": "^5.4.5"
+  },
+  "peerDependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  }
+}

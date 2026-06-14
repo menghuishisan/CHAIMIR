@@ -13,6 +13,7 @@ import (
 	"chaimir/internal/platform/jsonx"
 	"chaimir/internal/platform/netx"
 	"chaimir/pkg/apperr"
+	"chaimir/pkg/logging"
 )
 
 // SMSSender 是短信发送能力契约,便于 service 只依赖明确边界。
@@ -78,7 +79,7 @@ func (s *HTTPSMSSender) sendHTTP(ctx context.Context, phone string, scene int16,
 	if err != nil {
 		return fmt.Errorf("调用短信网关失败: %w", err)
 	}
-	defer resp.Body.Close()
+	defer logging.CloseContext(ctx, "关闭短信网关响应失败", resp.Body)
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return fmt.Errorf("短信网关返回异常状态: %d", resp.StatusCode)
 	}

@@ -1,0 +1,97 @@
+/* Pagination 组件样式 */
+
+.chaimir-pagination {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  font-size: var(--text-sm);
+}
+
+.chaimir-pagination__total {
+  color: var(--color-text-sub);
+}
+
+.chaimir-pagination__list {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.chaimir-pagination__btn,
+.chaimir-pagination__item {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 2rem;
+  height: 2rem;
+  padding: 0 var(--space-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-xs);
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-size: var(--text-sm);
+  cursor: pointer;
+  transition: all var(--t-fast) var(--ease);
+}
+
+.chaimir-pagination__btn:hover:not(:disabled),
+.chaimir-pagination__item:hover {
+  border-color: var(--color-primary);
+  color: var(--color-primary-text);
+}
+
+.chaimir-pagination__btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.chaimir-pagination__item--active {
+  border-color: var(--color-primary);
+  background: var(--color-primary);
+  color: var(--color-primary-fg);
+  font-weight: var(--font-semibold);
+}
+
+.chaimir-pagination__ellipsis {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 2rem;
+  height: 2rem;
+  color: var(--color-text-faint);
+  letter-spacing: 0.2em;
+}
+
+.chaimir-pagination__jumper {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--color-text-sub);
+}
+
+.chaimir-pagination__input {
+  width: 3.5rem;
+  height: 2rem;
+  padding: 0 var(--space-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-xs);
+  text-align: center;
+  font-size: var(--text-sm);
+  transition: border-color var(--t) var(--ease);
+}
+
+.chaimir-pagination__input:focus {
+  outline: none;
+  border-color: var(--color-primary);
+}
+
+/* 隐藏数字输入的上下箭头 */
+.chaimir-pagination__input::-webkit-inner-spin-button,
+.chaimir-pagination__input::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+.chaimir-pagination__input[type='number'] {
+  -moz-appearance: textfield;
+}

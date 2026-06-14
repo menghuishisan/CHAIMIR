@@ -1,0 +1,109 @@
+/* Switch 组件样式 */
+
+.chaimir-switch-wrapper {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  cursor: pointer;
+  user-select: none;
+}
+
+.chaimir-switch-wrapper--disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+/* 隐藏原生 checkbox */
+.chaimir-switch__input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border-width: 0;
+}
+
+/* === 开关轨道 === */
+
+.chaimir-switch {
+  position: relative;
+  display: inline-block;
+  border-radius: var(--radius-full);
+  background: var(--color-border-strong);
+  transition: all var(--t) var(--ease);
+  flex-shrink: 0;
+}
+
+.chaimir-switch--sm {
+  width: 2.25rem; /* 36px */
+  height: 1.25rem; /* 20px */
+}
+
+.chaimir-switch--md {
+  width: 2.75rem; /* 44px */
+  height: 1.5rem; /* 24px */
+}
+
+/* === 滑块 === */
+
+.chaimir-switch__thumb {
+  position: absolute;
+  top: 0.125rem; /* 2px */
+  left: 0.125rem;
+  background: #ffffff;
+  border-radius: var(--radius-full);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+  transition: all var(--t) var(--ease);
+}
+
+.chaimir-switch--sm .chaimir-switch__thumb {
+  width: 1rem; /* 16px */
+  height: 1rem;
+}
+
+.chaimir-switch--md .chaimir-switch__thumb {
+  width: 1.25rem; /* 20px */
+  height: 1.25rem;
+}
+
+/* === 状态 === */
+
+/* Hover */
+.chaimir-switch-wrapper:hover:not(.chaimir-switch-wrapper--disabled) .chaimir-switch {
+  background: var(--color-border-strong);
+}
+
+/* Focus */
+.chaimir-switch__input:focus-visible + .chaimir-switch {
+  outline: 2px solid var(--color-focus-ring);
+  outline-offset: 2px;
+}
+
+/* Checked */
+.chaimir-switch--checked {
+  background: var(--color-primary);
+}
+
+.chaimir-switch--sm.chaimir-switch--checked .chaimir-switch__thumb {
+  left: 1.125rem; /* 18px */
+}
+
+.chaimir-switch--md.chaimir-switch--checked .chaimir-switch__thumb {
+  left: 1.375rem; /* 22px */
+}
+
+/* Error */
+.chaimir-switch--error {
+  background: var(--color-danger-border);
+}
+
+/* === 标签 === */
+
+.chaimir-switch__label {
+  font-size: var(--text-base);
+  color: var(--color-text);
+  line-height: var(--leading-normal);
+}

@@ -101,6 +101,24 @@ CREATE TABLE IF NOT EXISTS sandbox_event (
     FOREIGN KEY (tenant_id, sandbox_id) REFERENCES sandbox(tenant_id, id) ON DELETE CASCADE
 );
 
+CREATE TABLE IF NOT EXISTS sandbox_recycle_outbox (
+    id BIGINT PRIMARY KEY,
+    tenant_id BIGINT NOT NULL,
+    sandbox_id BIGINT NOT NULL,
+    source_ref VARCHAR(128) NOT NULL,
+    owner_account_id BIGINT NOT NULL,
+    reason VARCHAR(64) NOT NULL,
+    trace_id VARCHAR(128) NOT NULL,
+    recycled_at TIMESTAMPTZ NOT NULL,
+    status SMALLINT NOT NULL DEFAULT 1,
+    retry_count INT NOT NULL DEFAULT 0 CHECK (retry_count >= 0),
+    last_error VARCHAR(255),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT chk_sandbox_recycle_outbox_status CHECK (status IN (1,2,3,4)),
+    FOREIGN KEY (tenant_id, sandbox_id) REFERENCES sandbox(tenant_id, id) ON DELETE CASCADE
+);
+
 CREATE TABLE IF NOT EXISTS tenant_quota (
     tenant_id BIGINT PRIMARY KEY REFERENCES tenant(id),
     max_concurrent_sandbox INT NOT NULL CHECK (max_concurrent_sandbox > 0),
@@ -122,13 +140,16 @@ CREATE INDEX IF NOT EXISTS idx_sandbox_last_active ON sandbox(last_active_at);
 CREATE INDEX IF NOT EXISTS idx_sandbox_source_ref ON sandbox(tenant_id, source_ref);
 CREATE INDEX IF NOT EXISTS idx_sandbox_snapshot_expire ON sandbox(snapshot_expire_at);
 CREATE INDEX IF NOT EXISTS idx_sandbox_event_tenant_sandbox_created ON sandbox_event(tenant_id, sandbox_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_sandbox_recycle_outbox_status ON sandbox_recycle_outbox(status, created_at ASC);
 
 ALTER TABLE sandbox ENABLE ROW LEVEL SECURITY;
 ALTER TABLE sandbox_tool ENABLE ROW LEVEL SECURITY;
 ALTER TABLE sandbox_event ENABLE ROW LEVEL SECURITY;
+ALTER TABLE sandbox_recycle_outbox ENABLE ROW LEVEL SECURITY;
 ALTER TABLE tenant_quota ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY sandbox_tenant_rls ON sandbox USING (tenant_id = current_setting('app.tenant_id')::BIGINT);
 CREATE POLICY sandbox_tool_tenant_rls ON sandbox_tool USING (tenant_id = current_setting('app.tenant_id')::BIGINT);
 CREATE POLICY sandbox_event_tenant_rls ON sandbox_event USING (tenant_id = current_setting('app.tenant_id')::BIGINT);
+CREATE POLICY sandbox_recycle_outbox_tenant_rls ON sandbox_recycle_outbox USING (tenant_id = current_setting('app.tenant_id')::BIGINT);
 CREATE POLICY tenant_quota_tenant_rls ON tenant_quota USING (tenant_id = current_setting('app.tenant_id')::BIGINT);

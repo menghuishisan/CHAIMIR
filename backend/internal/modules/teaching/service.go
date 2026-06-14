@@ -90,7 +90,7 @@ func NewService(deps ServiceDeps) (*Service, error) {
 	if deps.Transfers == nil || objects == nil || deps.FileService == nil {
 		return nil, fmt.Errorf("teaching service 缺少统一导入导出或文件服务依赖")
 	}
-	if deps.Config.CourseGradesMaxRows <= 0 || deps.Config.JudgeOutboxBatchSize <= 0 || deps.Config.GradeExportBatchSize <= 0 {
+	if deps.Config.CourseGradesMaxRows <= 0 || deps.Config.JudgeOutboxBatchSize <= 0 || deps.Config.GradeEventOutboxBatchSize <= 0 || deps.Config.GradeEventOutboxStaleMs <= 0 || deps.Config.GradeExportBatchSize <= 0 {
 		return nil, fmt.Errorf("teaching service 配置不完整")
 	}
 	return &Service{store: deps.Store, ids: deps.IDs, audit: deps.Audit, content: deps.Content, judge: deps.Judge, bus: deps.Bus, transfers: deps.Transfers, storage: objects, files: deps.FileService, cfg: deps.Config}, nil

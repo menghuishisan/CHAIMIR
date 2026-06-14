@@ -277,7 +277,7 @@ func (s *Service) fetchVulnCases(ctx context.Context, source VulnSource) ([]Vuln
 	if err != nil {
 		return nil, apperr.ErrContestVulnSourceFetchFailed.WithCause(err)
 	}
-	defer resp.Body.Close()
+	defer logging.CloseContext(ctx, "关闭漏洞源响应失败", resp.Body)
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return nil, apperr.ErrContestVulnSourceBadStatus
 	}

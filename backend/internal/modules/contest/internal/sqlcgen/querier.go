@@ -47,6 +47,7 @@ type Querier interface {
 	GetVulnProblem(ctx context.Context, arg GetVulnProblemParams) (VulnProblem, error)
 	GetVulnSource(ctx context.Context, arg GetVulnSourceParams) (VulnSource, error)
 	ListActiveBattleOpponents(ctx context.Context, arg ListActiveBattleOpponentsParams) ([]BattleEntry, error)
+	ListActiveBattleSourceRefsForArchive(ctx context.Context, arg ListActiveBattleSourceRefsForArchiveParams) ([]string, error)
 	ListBattleEntriesForTeam(ctx context.Context, arg ListBattleEntriesForTeamParams) ([]BattleEntry, error)
 	ListBattleMatchesForTeam(ctx context.Context, arg ListBattleMatchesForTeamParams) ([]BattleMatch, error)
 	ListCheatRecords(ctx context.Context, arg ListCheatRecordsParams) ([]CheatRecord, error)

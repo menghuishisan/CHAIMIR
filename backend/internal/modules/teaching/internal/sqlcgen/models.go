@@ -163,3 +163,17 @@ type SubmissionJudgeOutbox struct {
 	CreatedAt        pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
 }
+
+type TeachingGradeEventOutbox struct {
+	ID             int64              `json:"id"`
+	TenantID       int64              `json:"tenant_id"`
+	CourseID       int64              `json:"course_id"`
+	StudentID      int64              `json:"student_id"`
+	TraceID        string             `json:"trace_id"`
+	EventUpdatedAt pgtype.Timestamptz `json:"event_updated_at"`
+	Status         int16              `json:"status"`
+	RetryCount     int32              `json:"retry_count"`
+	LastError      pgtype.Text        `json:"last_error"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+}

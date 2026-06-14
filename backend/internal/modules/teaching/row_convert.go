@@ -190,6 +190,11 @@ func gradeFromUpsertRow(row sqlcgen.UpsertCourseGradeRow) CourseGrade {
 	return CourseGrade{ID: row.ID, TenantID: row.TenantID, CourseID: row.CourseID, StudentID: row.StudentID, AutoTotal: row.AutoTotal, OverrideTotal: row.OverrideTotal, IsOverridden: row.IsOverridden, IsLocked: row.IsLocked, UpdatedAt: timex.FromTimestamptz(row.UpdatedAt)}
 }
 
+// teachingGradeEventOutbox 转换成绩变更事件 outbox 行。
+func teachingGradeEventOutbox(row sqlcgen.TeachingGradeEventOutbox) TeachingGradeEventOutbox {
+	return TeachingGradeEventOutbox{ID: row.ID, TenantID: row.TenantID, CourseID: row.CourseID, StudentID: row.StudentID, TraceID: row.TraceID, EventUpdatedAt: timex.FromTimestamptz(row.EventUpdatedAt), Status: row.Status, RetryCount: row.RetryCount, LastError: pgtypex.TextValue(row.LastError), CreatedAt: timex.FromTimestamptz(row.CreatedAt), UpdatedAt: timex.FromTimestamptz(row.UpdatedAt)}
+}
+
 // encodeMap 将 JSON 对象编码为 JSONB 参数。
 func encodeMap(value map[string]any) ([]byte, error) {
 	if value == nil {

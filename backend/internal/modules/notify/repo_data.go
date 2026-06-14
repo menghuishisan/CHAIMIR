@@ -1,4 +1,4 @@
-// notify repo_convert 文件负责 M10 repo 查询写入与 sqlc 行到模块模型、DTO 的转换。
+// notify repo_data 文件负责 M10 repo 查询写入与 sqlc 行到模块模型、DTO 的转换。
 package notify
 
 import (

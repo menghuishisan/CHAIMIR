@@ -11,7 +11,7 @@ import (
 	"chaimir/pkg/apperr"
 )
 
-var businessTopicPattern = regexp.MustCompile(`^(contest|sandbox|sim|exp|experiment|course):[1-9][0-9]*:[a-z][a-z0-9_-]*$`)
+var businessTopicPattern = regexp.MustCompile(`^tenant:([1-9][0-9]*):(contest|sandbox|sim|exp|experiment|course):[1-9][0-9]*:[a-z][a-z0-9_-]*$`)
 
 // AuthorizeTopic 校验实时 topic 语法和 M10 可独立判断的租户/个人边界。
 func AuthorizeTopic(tenantID, accountID int64, topic string) error {
@@ -31,7 +31,7 @@ func AuthorizeTopic(tenantID, accountID int64, topic string) error {
 		}
 		return nil
 	}
-	if businessTopicPattern.MatchString(topic) {
+	if businessTopicTenantID(topic) == tenantID {
 		return nil
 	}
 	return apperr.ErrNotifySubscribeInvalid
@@ -56,10 +56,23 @@ func ValidatePushTopic(tenantID int64, topic string) error {
 		}
 		return nil
 	}
-	if businessTopicPattern.MatchString(topic) {
+	if businessTopicTenantID(topic) == tenantID {
 		return nil
 	}
 	return apperr.ErrNotifySubscribeInvalid
+}
+
+// businessTopicTenantID 解析统一业务实时 topic 中的租户前缀,不命中时返回 0。
+func businessTopicTenantID(topic string) int64 {
+	matches := businessTopicPattern.FindStringSubmatch(strings.TrimSpace(topic))
+	if len(matches) != 3 {
+		return 0
+	}
+	tenantID, err := strconv.ParseInt(matches[1], 10, 64)
+	if err != nil {
+		return 0
+	}
+	return tenantID
 }
 
 // validateSendRequest 校验内部通知发送请求。

@@ -258,12 +258,18 @@ func (s *Service) SubmitJudgeTask(ctx context.Context, req contracts.JudgeSubmit
 	if err != nil {
 		return contracts.JudgeTaskInfo{}, err
 	}
+	createdNew := false
 	if err := s.store.TenantTx(ctx, task.TenantID, func(ctx context.Context, tx TxStore) error {
+		requestedID := task.ID
 		created, err := tx.CreateJudgeTask(ctx, task)
 		if err != nil {
 			return apperr.ErrJudgeTaskEnqueueFailed.WithCause(err)
 		}
 		task = created
+		createdNew = task.ID == requestedID
+		if !createdNew {
+			return nil
+		}
 		if _, err := tx.CreateFingerprint(ctx, SubmissionFingerprint{
 			ID:          s.ids.Generate(),
 			TenantID:    task.TenantID,
@@ -278,6 +284,9 @@ func (s *Service) SubmitJudgeTask(ctx context.Context, req contracts.JudgeSubmit
 		return nil
 	}); err != nil {
 		return contracts.JudgeTaskInfo{}, err
+	}
+	if !createdNew {
+		return contractTaskInfoFromModel(JudgeTaskInfo{Task: task, Existing: true}), nil
 	}
 	s.publishProgress(ctx, task.TenantID, task.ID, task.Status, ProgressStageQueued, "判题任务已提交")
 	if err := s.writeAudit(ctx, task.TenantID, task.SubmitterID, 5, "judge.submit", "judge_task", task.ID, map[string]any{"source_ref": task.SourceRef, "problem_ref": task.ProblemRef}); err != nil {
@@ -460,7 +469,7 @@ func (s *Service) readObjectRef(ctx context.Context, objectRef string) (string, 
 	if err != nil {
 		return "", nil, err
 	}
-	defer rc.Close()
+	defer logging.CloseContext(ctx, "关闭判题输入对象失败", rc)
 	limit := s.cfg.InputArchiveMaxUnpackedBytes
 	if limit <= 0 {
 		return "", nil, apperr.ErrJudgeInputArchiveInvalid

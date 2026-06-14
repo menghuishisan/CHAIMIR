@@ -112,6 +112,11 @@ func contractGrade(g CourseGrade) contracts.TeachingCourseGrade {
 	return contracts.TeachingCourseGrade{TenantID: g.TenantID, CourseID: g.CourseID, Semester: g.Semester, StudentID: g.StudentID, AutoTotal: g.AutoTotal, OverrideTotal: override, FinalTotal: finalTotal(g), IsOverridden: g.IsOverridden, Credits: g.Credits}
 }
 
+// contractCourse 将 M6 课程转换为 M11 所需的只读归属摘要。
+func contractCourse(c Course) contracts.TeachingCourseInfo {
+	return contracts.TeachingCourseInfo{TenantID: c.TenantID, CourseID: c.ID, TeacherID: c.TeacherID, Semester: c.Semester, Credits: c.Credits, Status: c.Status}
+}
+
 // finalTotal 按 M6 规则选择手动覆盖成绩或自动成绩作为最终分。
 func finalTotal(g CourseGrade) float64 {
 	if g.IsOverridden {

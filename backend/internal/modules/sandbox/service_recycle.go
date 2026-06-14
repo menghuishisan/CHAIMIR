@@ -115,7 +115,14 @@ func (s *Service) recycleOne(ctx context.Context, sb Sandbox, reason string) err
 		if err != nil {
 			return apperr.ErrSandboxStatePersistFailed.WithCause(err)
 		}
-		return tx.CreateSandboxEvent(ctx, s.ids.Generate(), sb.TenantID, sb.ID, EventTypeRecycle, detail)
+		if err := tx.CreateSandboxEvent(ctx, s.ids.Generate(), sb.TenantID, sb.ID, EventTypeRecycle, detail); err != nil {
+			return err
+		}
+		_, err = tx.CreateSandboxRecycleOutbox(ctx, s.ids.Generate(), sb, reason, response.TraceFromContext(ctx), timex.Now())
+		if err != nil {
+			return apperr.ErrSandboxRecycleEventPublishFailed.WithCause(err)
+		}
+		return nil
 	}); err != nil {
 		return err
 	}
@@ -123,14 +130,73 @@ func (s *Service) recycleOne(ctx context.Context, sb Sandbox, reason string) err
 	if err := s.writeAudit(ctx, sb.TenantID, sb.OwnerAccountID, 5, "sandbox.recycle", "sandbox", sb.ID, map[string]any{"reason": reason, "source_ref": sb.SourceRef}); err != nil {
 		return err
 	}
-	return s.bus.Publish(ctx, contracts.SubjectSandboxRecycled, contracts.SandboxRecycledEvent{
-		TenantID:   sb.TenantID,
-		TraceID:    response.TraceFromContext(ctx),
-		SandboxID:  sb.ID,
-		SourceRef:  sb.SourceRef,
-		Reason:     reason,
-		RecycledAt: timex.Now(),
+	s.drainSandboxRecycleOutboxBestEffort(ctx)
+	return nil
+}
+
+// RunSandboxRecycleOutboxOnce 领取并发布沙箱回收事件,供后台任务和事务后补偿调用。
+func (s *Service) RunSandboxRecycleOutboxOnce(ctx context.Context) error {
+	limit := int32(s.cfg.RecycleOutboxBatchSize)
+	if limit <= 0 || s.cfg.RecycleOutboxStaleMs <= 0 {
+		return apperr.ErrSandboxRecycleEventPublishFailed
+	}
+	staleBefore := timex.Now().Add(-time.Duration(s.cfg.RecycleOutboxStaleMs) * time.Millisecond)
+	var items []SandboxRecycleOutbox
+	if err := s.store.PrivilegedTx(ctx, func(ctx context.Context, tx TxStore) error {
+		var err error
+		items, err = tx.ClaimPendingSandboxRecycleOutbox(ctx, limit, staleBefore)
+		if err != nil {
+			return apperr.ErrSandboxRecycleEventPublishFailed.WithCause(err)
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+	for _, item := range items {
+		if err := s.publishSandboxRecycleOutboxItem(ctx, item); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// publishSandboxRecycleOutboxItem 发布单条回收事件并按结果回写 outbox 状态。
+func (s *Service) publishSandboxRecycleOutboxItem(ctx context.Context, item SandboxRecycleOutbox) error {
+	eventCtx := response.WithTrace(ctx, item.TraceID)
+	payload := contracts.SandboxRecycledEvent{TenantID: item.TenantID, TraceID: item.TraceID, SandboxID: item.SandboxID, SourceRef: item.SourceRef, Reason: item.Reason, RecycledAt: item.RecycledAt}
+	if err := s.bus.Publish(eventCtx, contracts.SubjectSandboxRecycled, payload); err != nil {
+		s.recordSandboxRecycleOutboxFailure(eventCtx, item, err)
+		return apperr.ErrSandboxRecycleEventPublishFailed.WithCause(err)
+	}
+	return s.markSandboxRecycleOutboxPublished(eventCtx, item)
+}
+
+// markSandboxRecycleOutboxPublished 用特权事务标记回收事件投递成功。
+func (s *Service) markSandboxRecycleOutboxPublished(ctx context.Context, item SandboxRecycleOutbox) error {
+	return s.store.PrivilegedTx(ctx, func(ctx context.Context, tx TxStore) error {
+		_, err := tx.MarkSandboxRecycleOutboxPublished(ctx, item.TenantID, item.ID)
+		if err != nil {
+			return apperr.ErrSandboxRecycleEventPublishFailed.WithCause(err)
+		}
+		return nil
 	})
+}
+
+// recordSandboxRecycleOutboxFailure 记录回收事件发布失败并等待后台重试。
+func (s *Service) recordSandboxRecycleOutboxFailure(ctx context.Context, item SandboxRecycleOutbox, cause error) {
+	if err := s.store.PrivilegedTx(ctx, func(ctx context.Context, tx TxStore) error {
+		_, err := tx.MarkSandboxRecycleOutboxFailed(ctx, item.TenantID, item.ID, logging.SanitizeError(cause.Error()))
+		return err
+	}); err != nil {
+		logging.ErrorContext(ctx, "sandbox recycle outbox failure mark failed", err.Error(), slog.Int64("tenant_id", item.TenantID), slog.Int64("sandbox_id", item.SandboxID), slog.Int64("outbox_id", item.ID))
+	}
+}
+
+// drainSandboxRecycleOutboxBestEffort 在请求提交后尽快投递,失败只记录日志并交给后台任务补偿。
+func (s *Service) drainSandboxRecycleOutboxBestEffort(ctx context.Context) {
+	if err := s.RunSandboxRecycleOutboxOnce(ctx); err != nil {
+		logging.ErrorContext(ctx, "sandbox recycle outbox drain failed", err.Error())
+	}
 }
 
 // shouldPersistBeforeRecycle 判断回收前是否必须保存工作区代码。

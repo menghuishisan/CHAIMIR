@@ -6,7 +6,9 @@ import (
 	"chaimir/internal/platform/auth"
 	"chaimir/internal/platform/httpx"
 	"chaimir/internal/platform/tenant"
+	"chaimir/internal/platform/upload"
 	"chaimir/pkg/apperr"
+	"chaimir/pkg/logging"
 	"chaimir/pkg/response"
 
 	"github.com/gin-gonic/gin"
@@ -50,6 +52,8 @@ func (a contentAPI) registerTeacherRoutes(g gin.IRouter) {
 	g.POST("/items/:item/:version/clone", a.cloneItem)
 	g.POST("/items/:item/share", a.shareItem)
 	g.POST("/items/:item/unshare", a.unshareItem)
+	g.POST("/attachments", a.uploadAttachment)
+	g.POST("/attachments/download-grant", a.attachmentDownloadGrant)
 	g.GET("/shared", a.listShared)
 	g.GET("/categories", a.listCategories)
 	g.POST("/categories", a.createCategory)
@@ -194,6 +198,47 @@ func (a contentAPI) unshareItem(c *gin.Context) {
 		return
 	}
 	out, err := a.svc.UnshareItem(c.Request.Context(), id)
+	httpx.Write(c, out, err)
+}
+
+// uploadAttachment 通过统一文件服务上传题库附件并返回受控对象引用。
+func (a contentAPI) uploadAttachment(c *gin.Context) {
+	file, err := c.FormFile("file")
+	if err != nil {
+		response.Fail(c, apperr.ErrContentAttachmentInvalid)
+		return
+	}
+	maxBytes := a.svc.contentAttachmentMaxBytes
+	if file.Size > maxBytes {
+		response.Fail(c, apperr.ErrContentAttachmentInvalid)
+		return
+	}
+	opened, err := file.Open()
+	if err != nil {
+		response.Fail(c, apperr.ErrContentAttachmentInvalid.WithCause(err))
+		return
+	}
+	defer logging.CloseContext(c.Request.Context(), "关闭题库附件上传文件失败", opened)
+	data, result, err := upload.ReadBounded(opened, maxBytes)
+	if err != nil {
+		response.Fail(c, apperr.ErrContentAttachmentInvalid.WithCause(err))
+		return
+	}
+	if result != upload.SizeOK {
+		response.Fail(c, apperr.ErrContentAttachmentInvalid)
+		return
+	}
+	out, err := a.svc.UploadAttachment(c.Request.Context(), UploadAttachmentRequest{ResourceID: c.PostForm("resource_id"), FileName: file.Filename, ContentType: file.Header.Get("Content-Type"), Content: data})
+	httpx.Write(c, out, err)
+}
+
+// attachmentDownloadGrant 为已保存在正文中的 M5 附件对象引用签发短时下载授权。
+func (a contentAPI) attachmentDownloadGrant(c *gin.Context) {
+	var req AttachmentDownloadGrantRequest
+	if !httpx.BindJSONWithError(c, &req, apperr.ErrContentAttachmentInvalid) {
+		return
+	}
+	out, err := a.svc.IssueAttachmentDownloadGrant(c.Request.Context(), req.ResourceID, req.ObjectRef)
 	httpx.Write(c, out, err)
 }
 

@@ -36,6 +36,22 @@ type ExperimentGroup struct {
 	CreatedAt    pgtype.Timestamptz `json:"created_at"`
 }
 
+type ExperimentScoreOutbox struct {
+	ID           int64              `json:"id"`
+	TenantID     int64              `json:"tenant_id"`
+	ExperimentID int64              `json:"experiment_id"`
+	InstanceID   int64              `json:"instance_id"`
+	StudentID    int64              `json:"student_id"`
+	Score        pgtype.Numeric     `json:"score"`
+	TraceID      string             `json:"trace_id"`
+	ScoredAt     pgtype.Timestamptz `json:"scored_at"`
+	Status       int16              `json:"status"`
+	RetryCount   int32              `json:"retry_count"`
+	LastError    pgtype.Text        `json:"last_error"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
+}
+
 type GroupMember struct {
 	ID        int64              `json:"id"`
 	TenantID  int64              `json:"tenant_id"`

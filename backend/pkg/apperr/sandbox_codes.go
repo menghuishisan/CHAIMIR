@@ -137,6 +137,8 @@ const (
 	CodeSandboxFileListDecodeFailed = "22042"
 	// CodeSandboxFileEntryInvalid 表示工作区目录列表条目非法。
 	CodeSandboxFileEntryInvalid = "22043"
+	// CodeSandboxRecycleEventPublishFailed 表示沙箱回收事件发布失败。
+	CodeSandboxRecycleEventPublishFailed = "22044"
 )
 
 const (
@@ -307,6 +309,8 @@ var (
 	ErrSandboxFileListDecodeFailed = New(CodeSandboxFileListDecodeFailed, "目录信息暂时无法解析,请稍后重试")
 	// ErrSandboxFileEntryInvalid 表示工作区目录条目非法。
 	ErrSandboxFileEntryInvalid = New(CodeSandboxFileEntryInvalid, "目录信息不正确,请稍后重试")
+	// ErrSandboxRecycleEventPublishFailed 表示回收事件暂时无法同步。
+	ErrSandboxRecycleEventPublishFailed = New(CodeSandboxRecycleEventPublishFailed, "实验环境释放状态暂时无法同步,请稍后重试")
 )
 
 var (

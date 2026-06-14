@@ -59,13 +59,14 @@ type TxStore interface {
 	CreateBattleEntry(context.Context, BattleEntry) (BattleEntry, error)
 	GetBattleEntry(context.Context, int64, int64) (BattleEntry, error)
 	ListBattleEntriesForTeam(context.Context, int64, int64, int64) ([]BattleEntry, error)
-	ListActiveBattleOpponents(context.Context, int64, int64, int64, int64, int64, int16, int) ([]BattleEntry, error)
+	ListActiveBattleOpponents(context.Context, int64, int64, int64, int64, int64, int16, int, float64) ([]BattleEntry, error)
 	CreateBattleMatch(context.Context, BattleMatch) (BattleMatch, error)
 	ClaimPendingBattleMatches(context.Context, int) ([]BattleMatch, error)
 	StartBattleMatch(context.Context, int64, int64, string, string) (BattleMatch, error)
 	GetBattleMatch(context.Context, int64, int64) (BattleMatch, error)
 	GetBattleMatchByJudgeTask(context.Context, int64, string) (BattleMatch, error)
 	ListBattleMatchesForTeam(context.Context, int64, int64, int64, int, int) ([]BattleMatch, error)
+	ListActiveBattleSourceRefsForArchive(context.Context, int64, int64) ([]string, error)
 	FinishBattleMatch(context.Context, BattleMatch) (BattleMatch, error)
 	FailBattleMatch(context.Context, int64, int64) (BattleMatch, error)
 	CreateResultSnapshot(context.Context, ResultSnapshot) (ResultSnapshot, error)
@@ -441,7 +442,7 @@ func (tx *txStore) NextBattleVersion(ctx context.Context, tenantID, contestID, p
 
 // CreateBattleEntry 创建参战物。
 func (tx *txStore) CreateBattleEntry(ctx context.Context, item BattleEntry) (BattleEntry, error) {
-	row, err := tx.q.CreateBattleEntry(ctx, sqlcgen.CreateBattleEntryParams{ID: item.ID, TenantID: item.TenantID, ContestID: item.ContestID, ProblemID: item.ProblemID, TeamID: item.TeamID, Role: item.Role, ArtifactRef: item.ArtifactRef, VersionNo: item.VersionNo})
+	row, err := tx.q.CreateBattleEntry(ctx, sqlcgen.CreateBattleEntryParams{ID: item.ID, TenantID: item.TenantID, ContestID: item.ContestID, ProblemID: item.ProblemID, TeamID: item.TeamID, Role: item.Role, ArtifactRef: item.ArtifactRef, ArtifactHash: item.ArtifactHash, VersionNo: item.VersionNo})
 	if err != nil {
 		return BattleEntry{}, apperr.ErrContestBattleEntryInvalid.WithCause(err)
 	}
@@ -471,8 +472,12 @@ func (tx *txStore) ListBattleEntriesForTeam(ctx context.Context, tenantID, conte
 }
 
 // ListActiveBattleOpponents 查询可撮合的活跃对手。
-func (tx *txStore) ListActiveBattleOpponents(ctx context.Context, tenantID, contestID, problemID, excludeEntryID, excludeTeamID int64, matchMode int16, limit int) ([]BattleEntry, error) {
-	rows, err := tx.q.ListActiveBattleOpponents(ctx, sqlcgen.ListActiveBattleOpponentsParams{TenantID: tenantID, ContestID: contestID, ProblemID: problemID, ID: excludeEntryID, TeamID: excludeTeamID, Column6: matchMode, Limit: int32(limit)})
+func (tx *txStore) ListActiveBattleOpponents(ctx context.Context, tenantID, contestID, problemID, excludeEntryID, excludeTeamID int64, matchMode int16, limit int, initialScore float64) ([]BattleEntry, error) {
+	initialScoreValue, err := pgtypex.NumericScale(initialScore, 2)
+	if err != nil {
+		return nil, apperr.ErrContestBattleEntryInvalid.WithCause(err)
+	}
+	rows, err := tx.q.ListActiveBattleOpponents(ctx, sqlcgen.ListActiveBattleOpponentsParams{TenantID: tenantID, ContestID: contestID, ProblemID: problemID, ID: excludeEntryID, TeamID: excludeTeamID, Column6: matchMode, Limit: int32(limit), Column8: initialScoreValue})
 	if err != nil {
 		return nil, apperr.ErrContestBattleEntryInvalid.WithCause(err)
 	}
@@ -551,6 +556,15 @@ func (tx *txStore) ListBattleMatchesForTeam(ctx context.Context, tenantID, conte
 		out = append(out, item)
 	}
 	return out, nil
+}
+
+// ListActiveBattleSourceRefsForArchive 查询归档时仍需回收的对抗对局沙箱来源。
+func (tx *txStore) ListActiveBattleSourceRefsForArchive(ctx context.Context, tenantID, contestID int64) ([]string, error) {
+	refs, err := tx.q.ListActiveBattleSourceRefsForArchive(ctx, sqlcgen.ListActiveBattleSourceRefsForArchiveParams{TenantID: tenantID, ContestID: contestID})
+	if err != nil {
+		return nil, apperr.ErrContestBattleMatchFailed.WithCause(err)
+	}
+	return refs, nil
 }
 
 // FinishBattleMatch 保存对局终态结果。

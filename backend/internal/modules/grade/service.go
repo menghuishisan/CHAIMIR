@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -17,6 +18,7 @@ import (
 	"chaimir/internal/platform/tenant"
 	"chaimir/internal/platform/timex"
 	"chaimir/pkg/apperr"
+	"chaimir/pkg/logging"
 	"chaimir/pkg/response"
 	"chaimir/pkg/snowflake"
 )
@@ -82,7 +84,7 @@ func NewService(deps ServiceDeps) (*Service, error) {
 	if deps.FileService == nil {
 		return nil, fmt.Errorf("grade service 统一文件服务依赖不完整")
 	}
-	if deps.Config.AppealWindowDays <= 0 || strings.TrimSpace(deps.Config.TranscriptSigningKey) == "" || deps.Config.TranscriptMaxBytes <= 0 {
+	if deps.Config.AppealWindowDays <= 0 || strings.TrimSpace(deps.Config.TranscriptSigningKey) == "" || deps.Config.TranscriptMaxBytes <= 0 || deps.Config.LockOutboxBatchSize <= 0 || deps.Config.LockOutboxStaleMs <= 0 {
 		return nil, fmt.Errorf("grade service 配置不完整")
 	}
 	return &Service{store: deps.Store, ids: deps.IDs, audit: deps.Audit, roles: deps.Roles, teaching: deps.Teaching, notify: deps.Notify, bus: deps.Bus, storage: objects, files: deps.FileService, cfg: deps.Config}, nil
@@ -220,13 +222,27 @@ func (s *Service) SubmitReview(ctx context.Context, req ReviewRequest) (ReviewDT
 	if req.CourseID <= 0 {
 		return ReviewDTO{}, apperr.ErrGradeReviewInvalid
 	}
+	actorRole, err := s.gradeActorRole(ctx, id.AccountID)
+	if err != nil {
+		return ReviewDTO{}, err
+	}
+	course, err := s.validateReviewCourse(ctx, id, req.CourseID, req.SemesterID)
+	if err != nil {
+		return ReviewDTO{}, err
+	}
 	var out ReviewDTO
 	err = s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
 		var err error
 		out, err = tx.CreateGradeReview(ctx, s.ids.Generate(), id.TenantID, id.AccountID, req)
 		return err
 	})
-	return out, mapGradeReviewErr(err)
+	if err != nil {
+		return ReviewDTO{}, mapGradeReviewErr(err)
+	}
+	if err := s.writeAudit(ctx, id.TenantID, id.AccountID, actorRole, "grade.review.submit", auditTargetGradeReview, out.ID, map[string]any{"course_id": course.CourseID, "semester": course.Semester}); err != nil {
+		return ReviewDTO{}, err
+	}
+	return out, nil
 }
 
 // ListReviews 查询成绩审核列表。
@@ -253,19 +269,29 @@ func (s *Service) ApproveReview(ctx context.Context, reviewID int64, req ReviewD
 	if req.SemesterID <= 0 {
 		return ReviewDTO{}, apperr.ErrGradeReviewInvalid
 	}
+	if _, err := s.getSemester(ctx, id.TenantID, req.SemesterID); err != nil {
+		return ReviewDTO{}, err
+	}
 	var out ReviewDTO
 	err = s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
 		var err error
 		out, err = tx.ApproveGradeReview(ctx, reviewID, id.AccountID, req.SemesterID, req.Comment)
-		return err
+		if err != nil {
+			return err
+		}
+		return s.enqueueLockOutbox(ctx, tx, out, true, "review_approved")
 	})
 	if err != nil {
 		return ReviewDTO{}, mapGradeReviewErr(err)
 	}
-	if err := s.publishLock(ctx, out, true, "review_approved"); err != nil {
+	if err := s.validateReviewCourseMatchesSemester(ctx, id.TenantID, out.CourseID, out.SemesterID); err != nil {
 		return ReviewDTO{}, err
 	}
+	s.drainLockOutboxBestEffort(ctx)
 	if err := s.recomputeCourse(ctx, id.TenantID, out.CourseID, out.SemesterID); err != nil {
+		return ReviewDTO{}, err
+	}
+	if err := s.writeAudit(ctx, id.TenantID, id.AccountID, audit.ActorRoleSchoolAdmin, "grade.review.approve", auditTargetGradeReview, out.ID, map[string]any{"course_id": out.CourseID, "semester_id": out.SemesterID}); err != nil {
 		return ReviewDTO{}, err
 	}
 	return out, nil
@@ -283,7 +309,16 @@ func (s *Service) RejectReview(ctx context.Context, reviewID int64, req ReviewDe
 		out, err = tx.RejectGradeReview(ctx, reviewID, id.AccountID, req.Comment)
 		return err
 	})
-	return out, mapGradeReviewErr(err)
+	if err != nil {
+		return ReviewDTO{}, mapGradeReviewErr(err)
+	}
+	if _, err := s.teaching.GetCourse(ctx, id.TenantID, out.CourseID); err != nil {
+		return ReviewDTO{}, apperr.ErrGradeReviewInvalid.WithCause(err)
+	}
+	if err := s.writeAudit(ctx, id.TenantID, id.AccountID, audit.ActorRoleSchoolAdmin, "grade.review.reject", auditTargetGradeReview, out.ID, map[string]any{"course_id": out.CourseID}); err != nil {
+		return ReviewDTO{}, err
+	}
+	return out, nil
 }
 
 // UnlockReview 解锁课程成绩,供审核重开或申诉受理后由 M6 改分。
@@ -296,12 +331,22 @@ func (s *Service) UnlockReview(ctx context.Context, reviewID int64, req ReviewDe
 	err = s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
 		var err error
 		out, err = tx.UnlockGradeReview(ctx, reviewID, id.AccountID, req.Comment)
-		return err
+		if err != nil {
+			return err
+		}
+		return s.enqueueLockOutbox(ctx, tx, out, false, "review_unlocked")
 	})
 	if err != nil {
 		return ReviewDTO{}, mapGradeReviewErr(err)
 	}
-	return out, s.publishLock(ctx, out, false, "review_unlocked")
+	if _, err := s.teaching.GetCourse(ctx, id.TenantID, out.CourseID); err != nil {
+		return ReviewDTO{}, apperr.ErrGradeReviewInvalid.WithCause(err)
+	}
+	s.drainLockOutboxBestEffort(ctx)
+	if err := s.writeAudit(ctx, id.TenantID, id.AccountID, audit.ActorRoleSchoolAdmin, "grade.review.unlock", auditTargetGradeReview, out.ID, map[string]any{"course_id": out.CourseID}); err != nil {
+		return ReviewDTO{}, err
+	}
+	return out, nil
 }
 
 // StudentSummary 查询学生 GPA 汇总。
@@ -411,6 +456,9 @@ func (s *Service) CreateAppeal(ctx context.Context, req AppealRequest) (AppealDT
 	if req.CourseID <= 0 || strings.TrimSpace(req.Reason) == "" {
 		return AppealDTO{}, apperr.ErrGradeAppealInvalid
 	}
+	if err := s.validateAppealCourse(ctx, id.TenantID, req.CourseID, id.AccountID); err != nil {
+		return AppealDTO{}, err
+	}
 	var out AppealDTO
 	err = s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
 		review, err := tx.GetLatestApprovedReviewByCourse(ctx, req.CourseID)
@@ -427,7 +475,13 @@ func (s *Service) CreateAppeal(ctx context.Context, req AppealRequest) (AppealDT
 		out, err = tx.CreateGradeAppeal(ctx, s.ids.Generate(), id.TenantID, id.AccountID, req)
 		return err
 	})
-	return out, mapGradeAppealErr(err)
+	if err != nil {
+		return AppealDTO{}, mapGradeAppealErr(err)
+	}
+	if err := s.writeAudit(ctx, id.TenantID, id.AccountID, audit.ActorRoleStudent, "grade.appeal.create", auditTargetAppeal, out.ID, map[string]any{"course_id": req.CourseID}); err != nil {
+		return AppealDTO{}, err
+	}
+	return out, nil
 }
 
 // ListAppeals 查询申诉列表。
@@ -513,6 +567,11 @@ func (s *Service) ScanWarnings(ctx context.Context, req WarningScanRequest) (War
 	if req.StudentID < 0 || req.SemesterID < 0 {
 		return WarningScanResultDTO{}, apperr.ErrGradeWarningInvalid
 	}
+	if req.SemesterID > 0 {
+		if _, err := s.getSemester(ctx, id.TenantID, req.SemesterID); err != nil {
+			return WarningScanResultDTO{}, err
+		}
+	}
 	var targets []GradeSummaryDTO
 	err = s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
 		var err error
@@ -552,7 +611,10 @@ func (s *Service) GenerateTranscript(ctx context.Context, req TranscriptRequest)
 	if req.Scope != TranscriptScopeSemester && req.Scope != TranscriptScopeFull {
 		return TranscriptDTO{}, apperr.ErrGradeTranscriptFailed
 	}
-	summary, err := s.StudentSummary(ctx, req.StudentID)
+	if req.Scope == TranscriptScopeSemester && req.SemesterID <= 0 {
+		return TranscriptDTO{}, apperr.ErrGradeTranscriptFailed
+	}
+	summary, err := s.transcriptSummary(ctx, req.StudentID, req.Scope, req.SemesterID)
 	if err != nil {
 		return TranscriptDTO{}, err
 	}
@@ -588,7 +650,13 @@ func (s *Service) GenerateTranscript(ctx context.Context, req TranscriptRequest)
 		out, err = tx.CreateTranscriptRecord(ctx, s.ids.Generate(), id.TenantID, req, plan.ObjectRef)
 		return err
 	})
-	return out, mapGradeTranscriptErr(err)
+	if err != nil {
+		return TranscriptDTO{}, mapGradeTranscriptErr(err)
+	}
+	if err := s.writeAudit(ctx, id.TenantID, id.AccountID, s.transcriptActorRole(ctx, id.AccountID, summary.StudentID), "grade.transcript.generate", auditTargetTranscript, out.ID, map[string]any{"student_id": summary.StudentID, "scope": req.Scope, "semester_id": req.SemesterID}); err != nil {
+		return TranscriptDTO{}, err
+	}
+	return out, nil
 }
 
 // GenerateTranscriptBatch 为多个学生生成成绩单,每份成绩单复用单份记录与对象存储流程。
@@ -657,6 +725,9 @@ func (s *Service) DownloadTranscript(ctx context.Context, transcriptID int64) (T
 	if err != nil {
 		return TranscriptDownloadGrantDTO{}, apperr.ErrGradeTranscriptFailed.WithCause(err)
 	}
+	if err := s.writeAudit(ctx, id.TenantID, id.AccountID, s.transcriptActorRole(ctx, id.AccountID, record.StudentID), "grade.transcript.download", auditTargetTranscript, record.ID, map[string]any{"student_id": record.StudentID}); err != nil {
+		return TranscriptDownloadGrantDTO{}, err
+	}
 	return TranscriptDownloadGrantDTO{Token: token, Grant: grant, Transcript: record, ExpiresAt: grant.ExpiresAt.Format(time.RFC3339)}, nil
 }
 
@@ -700,17 +771,36 @@ func (s *Service) HandleGradeUpdated(ctx context.Context, evt contracts.Teaching
 	if err := s.store.TenantTx(ctx, evt.TenantID, func(ctx context.Context, tx TxStore) error {
 		var err error
 		relocked, err = tx.RelockGradeReview(ctx, review.ID, review.ReviewerID, "成绩已更新并完成复核")
-		return err
+		if err != nil {
+			return err
+		}
+		return s.enqueueLockOutbox(ctx, tx, relocked, true, "grade_updated")
 	}); err != nil {
 		return apperr.ErrGradeReviewStateInvalid.WithCause(err)
 	}
-	return s.publishLock(ctx, relocked, true, "grade_updated")
+	s.drainLockOutboxBestEffort(ctx)
+	return nil
 }
 
 // decideAppeal 按目标状态处理申诉并在受理时发布解锁事件。
 func (s *Service) decideAppeal(ctx context.Context, appealID int64, status int16, comment string) (AppealDTO, error) {
 	id, err := s.requireTeacherAdmin(ctx)
 	if err != nil {
+		return AppealDTO{}, err
+	}
+	actorRole, err := s.gradeActorRole(ctx, id.AccountID)
+	if err != nil {
+		return AppealDTO{}, err
+	}
+	var existing AppealDTO
+	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
+		var err error
+		existing, err = tx.GetGradeAppeal(ctx, appealID)
+		return err
+	}); err != nil {
+		return AppealDTO{}, mapGradeAppealErr(err)
+	}
+	if err := s.ensureAppealHandlerCanAccessCourse(ctx, id, actorRole, existing.CourseID); err != nil {
 		return AppealDTO{}, err
 	}
 	var out AppealDTO
@@ -722,6 +812,10 @@ func (s *Service) decideAppeal(ctx context.Context, appealID int64, status int16
 	if err != nil {
 		return AppealDTO{}, mapGradeAppealErr(err)
 	}
+	action := "grade.appeal.reject"
+	if status == AppealStatusAccepted {
+		action = "grade.appeal.accept"
+	}
 	if status == AppealStatusAccepted {
 		var review ReviewDTO
 		err = s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
@@ -731,11 +825,21 @@ func (s *Service) decideAppeal(ctx context.Context, appealID int64, status int16
 				return err
 			}
 			review, err = tx.UnlockGradeReview(ctx, review.ID, id.AccountID, comment)
-			return err
+			if err != nil {
+				return err
+			}
+			return s.enqueueLockOutbox(ctx, tx, review, false, "appeal_accepted")
 		})
 		if err == nil {
-			return out, s.publishLock(ctx, review, false, "appeal_accepted")
+			s.drainLockOutboxBestEffort(ctx)
+			if err := s.writeAudit(ctx, id.TenantID, id.AccountID, actorRole, action, auditTargetAppeal, out.ID, map[string]any{"course_id": out.CourseID}); err != nil {
+				return AppealDTO{}, err
+			}
+			return out, nil
 		}
+	}
+	if err := s.writeAudit(ctx, id.TenantID, id.AccountID, actorRole, action, auditTargetAppeal, out.ID, map[string]any{"course_id": out.CourseID}); err != nil {
+		return AppealDTO{}, err
 	}
 	return out, nil
 }
@@ -862,16 +966,82 @@ func (s *Service) getSemester(ctx context.Context, tenantID, semesterID int64) (
 	return SemesterDTO{}, apperr.ErrGradeConfigInvalid
 }
 
-// publishLock 发布成绩审核锁定状态变更事件给 M6。
-func (s *Service) publishLock(ctx context.Context, review ReviewDTO, locked bool, reason string) error {
-	if review.CourseID <= 0 {
-		return apperr.ErrGradeReviewInvalid
+// enqueueLockOutbox 在状态变更同一事务内保存 M6 锁定投影事件。
+func (s *Service) enqueueLockOutbox(ctx context.Context, tx TxStore, review ReviewDTO, locked bool, reason string) error {
+	traceID := strings.TrimSpace(response.TraceFromContext(ctx))
+	if review.TenantID <= 0 || review.ID <= 0 || review.CourseID <= 0 || traceID == "" || strings.TrimSpace(reason) == "" {
+		return apperr.ErrGradeEventPublishFailed
 	}
-	err := s.bus.Publish(ctx, contracts.SubjectGradeReviewLockChanged, contracts.GradeReviewLockChangedEvent{TenantID: review.TenantID, TraceID: response.TraceFromContext(ctx), ReviewID: review.ID, CourseID: review.CourseID, Locked: locked, Reason: reason, ChangedAt: timex.Now()})
+	_, err := tx.CreateGradeLockOutbox(ctx, s.ids.Generate(), review, locked, reason, traceID)
 	if err != nil {
-		return apperr.ErrGradeReviewStateInvalid.WithCause(err)
+		return apperr.ErrGradeEventPublishFailed.WithCause(err)
 	}
 	return nil
+}
+
+// RunLockOutboxOnce 领取并发布 M11 成绩锁事件,供后台任务和事务后补偿调用。
+func (s *Service) RunLockOutboxOnce(ctx context.Context) error {
+	limit := int32(s.cfg.LockOutboxBatchSize)
+	if limit <= 0 {
+		return apperr.ErrGradeEventPublishFailed
+	}
+	staleBefore := timex.Now().Add(-time.Duration(s.cfg.LockOutboxStaleMs) * time.Millisecond)
+	var items []GradeLockOutbox
+	if err := s.store.PrivilegedTx(ctx, func(ctx context.Context, tx TxStore) error {
+		var err error
+		items, err = tx.ClaimPendingGradeLockOutbox(ctx, limit, staleBefore)
+		if err != nil {
+			return apperr.ErrGradeEventPublishFailed.WithCause(err)
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+	for _, item := range items {
+		if err := s.publishLockOutboxItem(ctx, item); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// publishLockOutboxItem 发布单条锁定事件并按结果回写 outbox 状态。
+func (s *Service) publishLockOutboxItem(ctx context.Context, item GradeLockOutbox) error {
+	eventCtx := response.WithTrace(ctx, item.TraceID)
+	payload := contracts.GradeReviewLockChangedEvent{TenantID: item.TenantID, TraceID: item.TraceID, ReviewID: item.ReviewID, CourseID: item.CourseID, Locked: item.Locked, Reason: item.Reason, ChangedAt: timex.Now()}
+	if err := s.bus.Publish(eventCtx, contracts.SubjectGradeReviewLockChanged, payload); err != nil {
+		s.recordLockOutboxFailure(eventCtx, item, err)
+		return apperr.ErrGradeEventPublishFailed.WithCause(err)
+	}
+	return s.markLockOutboxPublished(eventCtx, item)
+}
+
+// markLockOutboxPublished 用特权事务标记锁定事件投递成功。
+func (s *Service) markLockOutboxPublished(ctx context.Context, item GradeLockOutbox) error {
+	return s.store.PrivilegedTx(ctx, func(ctx context.Context, tx TxStore) error {
+		_, err := tx.MarkGradeLockOutboxPublished(ctx, item.TenantID, item.ID)
+		if err != nil {
+			return apperr.ErrGradeEventPublishFailed.WithCause(err)
+		}
+		return nil
+	})
+}
+
+// recordLockOutboxFailure 记录锁定事件投递失败并保留脱敏原因供后台重试。
+func (s *Service) recordLockOutboxFailure(ctx context.Context, item GradeLockOutbox, cause error) {
+	if err := s.store.PrivilegedTx(ctx, func(ctx context.Context, tx TxStore) error {
+		_, err := tx.MarkGradeLockOutboxFailed(ctx, item.TenantID, item.ID, logging.SanitizeError(cause.Error()))
+		return err
+	}); err != nil {
+		logging.ErrorContext(ctx, "grade lock outbox failure mark failed", err.Error(), slog.Int64("tenant_id", item.TenantID), slog.Int64("review_id", item.ReviewID), slog.Int64("outbox_id", item.ID))
+	}
+}
+
+// drainLockOutboxBestEffort 在请求提交后尽快投递,失败只记录日志并交给后台任务补偿。
+func (s *Service) drainLockOutboxBestEffort(ctx context.Context) {
+	if err := s.RunLockOutboxOnce(ctx); err != nil {
+		logging.ErrorContext(ctx, "grade lock outbox drain failed", err.Error())
+	}
 }
 
 // canReadStudent 判断账号是否具备查看其他学生成绩的角色。
@@ -886,6 +1056,114 @@ func (s *Service) canReadStudent(ctx context.Context, accountID int64) (bool, er
 		}
 	}
 	return false, nil
+}
+
+// gradeActorRole 按成绩中心角色优先级解析审计角色。
+func (s *Service) gradeActorRole(ctx context.Context, accountID int64) (int16, error) {
+	if has, err := s.roles.HasRole(ctx, accountID, contracts.RoleSchoolAdmin); err != nil {
+		return 0, apperr.ErrGradeForbidden.WithCause(err)
+	} else if has {
+		return audit.ActorRoleSchoolAdmin, nil
+	}
+	if has, err := s.roles.HasRole(ctx, accountID, contracts.RoleTeacher); err != nil {
+		return 0, apperr.ErrGradeForbidden.WithCause(err)
+	} else if has {
+		return audit.ActorRoleTeacher, nil
+	}
+	if has, err := s.roles.HasRole(ctx, accountID, contracts.RoleStudent); err != nil {
+		return 0, apperr.ErrGradeForbidden.WithCause(err)
+	} else if has {
+		return audit.ActorRoleStudent, nil
+	}
+	return 0, apperr.ErrGradeForbidden
+}
+
+// transcriptActorRole 返回成绩单审计角色,管理员代生成和学生本人生成分开记录。
+func (s *Service) transcriptActorRole(ctx context.Context, actorID, studentID int64) int16 {
+	if actorID == studentID {
+		return audit.ActorRoleStudent
+	}
+	return audit.ActorRoleSchoolAdmin
+}
+
+// validateReviewCourse 校验审核提交的课程存在、学期匹配且教师只能提交本人课程。
+func (s *Service) validateReviewCourse(ctx context.Context, id tenant.Identity, courseID, semesterID int64) (contracts.TeachingCourseInfo, error) {
+	course, err := s.teaching.GetCourse(ctx, id.TenantID, courseID)
+	if err != nil {
+		return contracts.TeachingCourseInfo{}, apperr.ErrGradeReviewInvalid.WithCause(err)
+	}
+	if course.TenantID != id.TenantID || course.CourseID != courseID {
+		return contracts.TeachingCourseInfo{}, apperr.ErrGradeReviewInvalid
+	}
+	hasAdmin, err := s.isSchoolAdmin(ctx, id.AccountID)
+	if err != nil {
+		return contracts.TeachingCourseInfo{}, err
+	}
+	if !hasAdmin && course.TeacherID != id.AccountID {
+		return contracts.TeachingCourseInfo{}, apperr.ErrGradeForbidden
+	}
+	if semesterID > 0 {
+		if err := s.courseMatchesSemester(ctx, id.TenantID, course, semesterID); err != nil {
+			return contracts.TeachingCourseInfo{}, err
+		}
+	}
+	return course, nil
+}
+
+// validateReviewCourseMatchesSemester 校验审核通过时选择的 M11 学期与 M6 课程学期一致。
+func (s *Service) validateReviewCourseMatchesSemester(ctx context.Context, tenantID, courseID, semesterID int64) error {
+	course, err := s.teaching.GetCourse(ctx, tenantID, courseID)
+	if err != nil {
+		return apperr.ErrGradeReviewInvalid.WithCause(err)
+	}
+	return s.courseMatchesSemester(ctx, tenantID, course, semesterID)
+}
+
+// courseMatchesSemester 防止把课程成绩审核到错误学期。
+func (s *Service) courseMatchesSemester(ctx context.Context, tenantID int64, course contracts.TeachingCourseInfo, semesterID int64) error {
+	semester, err := s.getSemester(ctx, tenantID, semesterID)
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(course.Semester) != "" && course.Semester != semester.Name {
+		return apperr.ErrGradeReviewInvalid
+	}
+	return nil
+}
+
+// validateAppealCourse 校验学生只能对自己所在课程且已有成绩的课程发起申诉。
+func (s *Service) validateAppealCourse(ctx context.Context, tenantID, courseID, studentID int64) error {
+	member, err := s.teaching.IsCourseMember(ctx, tenantID, courseID, studentID)
+	if err != nil {
+		return apperr.ErrGradeAppealInvalid.WithCause(err)
+	}
+	if !member {
+		return apperr.ErrGradeForbidden
+	}
+	if _, err := s.teaching.GetCourseGrade(ctx, tenantID, courseID, studentID); err != nil {
+		return apperr.ErrGradeAppealInvalid.WithCause(err)
+	}
+	return nil
+}
+
+// ensureAppealHandlerCanAccessCourse 限制教师只能处理本人课程的申诉,管理员可处理全校。
+func (s *Service) ensureAppealHandlerCanAccessCourse(ctx context.Context, id tenant.Identity, actorRole int16, courseID int64) error {
+	course, err := s.teaching.GetCourse(ctx, id.TenantID, courseID)
+	if err != nil {
+		return apperr.ErrGradeAppealInvalid.WithCause(err)
+	}
+	if actorRole == audit.ActorRoleTeacher && course.TeacherID != id.AccountID {
+		return apperr.ErrGradeForbidden
+	}
+	return nil
+}
+
+// transcriptSummary 根据成绩单范围读取正确的 M6 成绩明细,避免学期成绩单混入全量课程。
+func (s *Service) transcriptSummary(ctx context.Context, studentID int64, scope int16, semesterID int64) (GradeSummaryDTO, error) {
+	if scope == TranscriptScopeSemester {
+		return s.StudentGrades(ctx, studentID, semesterID)
+	}
+	return s.StudentSummary(ctx, studentID)
 }
 
 // requireStudent 校验当前账号具备学生角色。

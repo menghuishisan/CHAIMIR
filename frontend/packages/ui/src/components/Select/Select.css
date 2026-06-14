@@ -1,0 +1,148 @@
+/* Select 组件样式 */
+
+.chaimir-select {
+  position: relative;
+  display: inline-block;
+}
+
+.chaimir-select--full {
+  width: 100%;
+}
+
+/* === 触发器 === */
+
+.chaimir-select__trigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-family: var(--font-sans);
+  cursor: pointer;
+  transition: all var(--t) var(--ease);
+  text-align: left;
+}
+
+/* === 尺寸 === */
+
+.chaimir-select--sm .chaimir-select__trigger {
+  height: 2rem; /* 32px */
+  padding: 0 var(--space-3);
+  font-size: var(--text-sm);
+}
+
+.chaimir-select--md .chaimir-select__trigger {
+  height: 2.5rem; /* 40px */
+  padding: 0 var(--space-4);
+  font-size: var(--text-base);
+}
+
+.chaimir-select--lg .chaimir-select__trigger {
+  height: 3rem; /* 48px */
+  padding: 0 var(--space-5);
+  font-size: var(--text-md);
+}
+
+/* === 状态 === */
+
+.chaimir-select__trigger:hover:not(:disabled) {
+  border-color: var(--color-border-strong);
+}
+
+.chaimir-select--open .chaimir-select__trigger {
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 3px var(--color-primary-soft);
+}
+
+.chaimir-select--error .chaimir-select__trigger {
+  border-color: var(--color-danger-border);
+}
+
+.chaimir-select--disabled .chaimir-select__trigger {
+  background: var(--color-surface);
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+/* === 值显示 === */
+
+.chaimir-select__value {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chaimir-select__icon {
+  flex-shrink: 0;
+  margin-left: var(--space-2);
+  color: var(--color-text-sub);
+  transition: transform var(--t) var(--ease);
+}
+
+.chaimir-select__icon--open {
+  transform: rotate(180deg);
+}
+
+/* === 下拉菜单 === */
+
+.chaimir-select__dropdown {
+  position: absolute;
+  top: calc(100% + var(--space-1));
+  left: 0;
+  right: 0;
+  z-index: var(--z-dropdown);
+  max-height: 16rem; /* 256px */
+  overflow-y: auto;
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-md);
+  animation: chaimir-select-dropdown-in 0.15s var(--ease-out);
+}
+
+@keyframes chaimir-select-dropdown-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* === 选项 === */
+
+.chaimir-select__option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-2) var(--space-4);
+  font-size: var(--text-base);
+  color: var(--color-text);
+  cursor: pointer;
+  transition: background var(--t-fast) var(--ease);
+}
+
+.chaimir-select__option:hover:not(.chaimir-select__option--disabled) {
+  background: var(--color-surface-hover);
+}
+
+.chaimir-select__option--selected {
+  color: var(--color-primary-text);
+  background: var(--color-primary-soft);
+}
+
+.chaimir-select__option--disabled {
+  color: var(--color-text-faint);
+  cursor: not-allowed;
+}
+
+.chaimir-select__check {
+  flex-shrink: 0;
+  color: var(--color-primary);
+}

@@ -11,6 +11,59 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const claimPendingSandboxRecycleOutbox = `-- name: ClaimPendingSandboxRecycleOutbox :many
+UPDATE sandbox_recycle_outbox
+SET status = 4, retry_count = retry_count + 1, updated_at = now()
+WHERE id IN (
+    SELECT id
+    FROM sandbox_recycle_outbox
+    WHERE status IN (1, 3) OR (status = 4 AND updated_at <= $1::timestamptz)
+    ORDER BY created_at ASC, id ASC
+    LIMIT $2
+    FOR UPDATE SKIP LOCKED
+)
+RETURNING id, tenant_id, sandbox_id, source_ref, owner_account_id, reason, trace_id, recycled_at, status, retry_count, last_error, created_at, updated_at
+`
+
+type ClaimPendingSandboxRecycleOutboxParams struct {
+	StaleBefore pgtype.Timestamptz `json:"stale_before"`
+	PageLimit   int32              `json:"page_limit"`
+}
+
+func (q *Queries) ClaimPendingSandboxRecycleOutbox(ctx context.Context, arg ClaimPendingSandboxRecycleOutboxParams) ([]SandboxRecycleOutbox, error) {
+	rows, err := q.db.Query(ctx, claimPendingSandboxRecycleOutbox, arg.StaleBefore, arg.PageLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []SandboxRecycleOutbox{}
+	for rows.Next() {
+		var i SandboxRecycleOutbox
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.SandboxID,
+			&i.SourceRef,
+			&i.OwnerAccountID,
+			&i.Reason,
+			&i.TraceID,
+			&i.RecycledAt,
+			&i.Status,
+			&i.RetryCount,
+			&i.LastError,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const countActiveSandboxes = `-- name: CountActiveSandboxes :one
 SELECT COUNT(*)::bigint
 FROM sandbox
@@ -188,6 +241,53 @@ func (q *Queries) CreateSandboxEvent(ctx context.Context, arg CreateSandboxEvent
 		&i.EventType,
 		&i.Detail,
 		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const createSandboxRecycleOutbox = `-- name: CreateSandboxRecycleOutbox :one
+INSERT INTO sandbox_recycle_outbox (id, tenant_id, sandbox_id, source_ref, owner_account_id, reason, trace_id, recycled_at, status, retry_count, last_error, created_at, updated_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 1, 0, NULL, now(), now())
+RETURNING id, tenant_id, sandbox_id, source_ref, owner_account_id, reason, trace_id, recycled_at, status, retry_count, last_error, created_at, updated_at
+`
+
+type CreateSandboxRecycleOutboxParams struct {
+	ID             int64              `json:"id"`
+	TenantID       int64              `json:"tenant_id"`
+	SandboxID      int64              `json:"sandbox_id"`
+	SourceRef      string             `json:"source_ref"`
+	OwnerAccountID int64              `json:"owner_account_id"`
+	Reason         string             `json:"reason"`
+	TraceID        string             `json:"trace_id"`
+	RecycledAt     pgtype.Timestamptz `json:"recycled_at"`
+}
+
+func (q *Queries) CreateSandboxRecycleOutbox(ctx context.Context, arg CreateSandboxRecycleOutboxParams) (SandboxRecycleOutbox, error) {
+	row := q.db.QueryRow(ctx, createSandboxRecycleOutbox,
+		arg.ID,
+		arg.TenantID,
+		arg.SandboxID,
+		arg.SourceRef,
+		arg.OwnerAccountID,
+		arg.Reason,
+		arg.TraceID,
+		arg.RecycledAt,
+	)
+	var i SandboxRecycleOutbox
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.SandboxID,
+		&i.SourceRef,
+		&i.OwnerAccountID,
+		&i.Reason,
+		&i.TraceID,
+		&i.RecycledAt,
+		&i.Status,
+		&i.RetryCount,
+		&i.LastError,
+		&i.CreatedAt,
+		&i.UpdatedAt,
 	)
 	return i, err
 }
@@ -898,6 +998,73 @@ func (q *Queries) MarkSandboxActive(ctx context.Context, arg MarkSandboxActivePa
 		&i.KeepAliveUntil,
 		&i.LastActiveAt,
 		&i.ExpireAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const markSandboxRecycleOutboxFailed = `-- name: MarkSandboxRecycleOutboxFailed :one
+UPDATE sandbox_recycle_outbox
+SET status = 3, last_error = $3, updated_at = now()
+WHERE tenant_id = $1 AND id = $2
+RETURNING id, tenant_id, sandbox_id, source_ref, owner_account_id, reason, trace_id, recycled_at, status, retry_count, last_error, created_at, updated_at
+`
+
+type MarkSandboxRecycleOutboxFailedParams struct {
+	TenantID  int64       `json:"tenant_id"`
+	ID        int64       `json:"id"`
+	LastError pgtype.Text `json:"last_error"`
+}
+
+func (q *Queries) MarkSandboxRecycleOutboxFailed(ctx context.Context, arg MarkSandboxRecycleOutboxFailedParams) (SandboxRecycleOutbox, error) {
+	row := q.db.QueryRow(ctx, markSandboxRecycleOutboxFailed, arg.TenantID, arg.ID, arg.LastError)
+	var i SandboxRecycleOutbox
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.SandboxID,
+		&i.SourceRef,
+		&i.OwnerAccountID,
+		&i.Reason,
+		&i.TraceID,
+		&i.RecycledAt,
+		&i.Status,
+		&i.RetryCount,
+		&i.LastError,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const markSandboxRecycleOutboxPublished = `-- name: MarkSandboxRecycleOutboxPublished :one
+UPDATE sandbox_recycle_outbox
+SET status = 2, last_error = NULL, updated_at = now()
+WHERE tenant_id = $1 AND id = $2
+RETURNING id, tenant_id, sandbox_id, source_ref, owner_account_id, reason, trace_id, recycled_at, status, retry_count, last_error, created_at, updated_at
+`
+
+type MarkSandboxRecycleOutboxPublishedParams struct {
+	TenantID int64 `json:"tenant_id"`
+	ID       int64 `json:"id"`
+}
+
+func (q *Queries) MarkSandboxRecycleOutboxPublished(ctx context.Context, arg MarkSandboxRecycleOutboxPublishedParams) (SandboxRecycleOutbox, error) {
+	row := q.db.QueryRow(ctx, markSandboxRecycleOutboxPublished, arg.TenantID, arg.ID)
+	var i SandboxRecycleOutbox
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.SandboxID,
+		&i.SourceRef,
+		&i.OwnerAccountID,
+		&i.Reason,
+		&i.TraceID,
+		&i.RecycledAt,
+		&i.Status,
+		&i.RetryCount,
+		&i.LastError,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)

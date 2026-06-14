@@ -13,6 +13,7 @@ import (
 type Querier interface {
 	ClaimJudgeOutbox(ctx context.Context, arg ClaimJudgeOutboxParams) ([]SubmissionJudgeOutbox, error)
 	ClaimJudgeOutboxAcrossTenants(ctx context.Context, limit int32) ([]SubmissionJudgeOutbox, error)
+	ClaimPendingTeachingGradeEventOutbox(ctx context.Context, arg ClaimPendingTeachingGradeEventOutboxParams) ([]TeachingGradeEventOutbox, error)
 	CompleteJudgeOutbox(ctx context.Context, arg CompleteJudgeOutboxParams) (SubmissionJudgeOutbox, error)
 	CountAssignmentSubmissions(ctx context.Context, arg CountAssignmentSubmissionsParams) (int64, error)
 	CountCourseLessons(ctx context.Context, arg CountCourseLessonsParams) (int64, error)
@@ -32,6 +33,7 @@ type Querier interface {
 	CreateJudgeOutbox(ctx context.Context, arg CreateJudgeOutboxParams) (SubmissionJudgeOutbox, error)
 	CreateLesson(ctx context.Context, arg CreateLessonParams) (Lesson, error)
 	CreateSubmission(ctx context.Context, arg CreateSubmissionParams) (Submission, error)
+	CreateTeachingGradeEventOutbox(ctx context.Context, arg CreateTeachingGradeEventOutboxParams) (TeachingGradeEventOutbox, error)
 	DeleteAssignmentItems(ctx context.Context, arg DeleteAssignmentItemsParams) error
 	DeleteCourseMember(ctx context.Context, arg DeleteCourseMemberParams) error
 	DeleteGradeWeights(ctx context.Context, arg DeleteGradeWeightsParams) error
@@ -71,6 +73,8 @@ type Querier interface {
 	ListTeacherCourses(ctx context.Context, arg ListTeacherCoursesParams) ([]ListTeacherCoursesRow, error)
 	MarkJudgeOutboxFailedResult(ctx context.Context, arg MarkJudgeOutboxFailedResultParams) (SubmissionJudgeOutbox, error)
 	MarkJudgeOutboxResult(ctx context.Context, arg MarkJudgeOutboxResultParams) (SubmissionJudgeOutbox, error)
+	MarkTeachingGradeEventOutboxFailed(ctx context.Context, arg MarkTeachingGradeEventOutboxFailedParams) (TeachingGradeEventOutbox, error)
+	MarkTeachingGradeEventOutboxPublished(ctx context.Context, arg MarkTeachingGradeEventOutboxPublishedParams) (TeachingGradeEventOutbox, error)
 	OverrideCourseGrade(ctx context.Context, arg OverrideCourseGradeParams) (OverrideCourseGradeRow, error)
 	PinAnnouncement(ctx context.Context, arg PinAnnouncementParams) (Announcement, error)
 	PinDiscussionPost(ctx context.Context, arg PinDiscussionPostParams) (DiscussionPost, error)

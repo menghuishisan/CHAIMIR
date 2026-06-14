@@ -28,6 +28,9 @@ func (s *Service) CreateSession(ctx context.Context, req contracts.SimCreateSess
 	if pkg.Status != PackageStatusPublished {
 		return contracts.SimSessionInfo{}, apperr.ErrSimPackageUnavailable
 	}
+	if err := validateBackendAdapterAvailable(pkg.Compute, pkg.BackendAdapter, s.backends); err != nil {
+		return contracts.SimSessionInfo{}, err
+	}
 	if req.InitParams == nil {
 		req.InitParams = map[string]any{}
 	}
@@ -290,8 +293,8 @@ func (s *Service) releaseBackendSessions(ctx context.Context, tenantID int64, se
 			return err
 		}
 		adapter := s.backends[strings.TrimSpace(session.BackendAdapter)]
-		if adapter == nil {
-			return apperr.ErrSimBackendComputeUnavailable
+		if err := validateBackendAdapterAvailable(session.Compute, session.BackendAdapter, s.backends); err != nil {
+			return err
 		}
 		if err := adapter.Release(ctx, session); err != nil {
 			return apperr.ErrSimBackendComputeUnavailable.WithCause(err)

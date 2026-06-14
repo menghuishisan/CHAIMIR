@@ -79,6 +79,11 @@ func RegisterSandboxModule(ctx context.Context, deps SandboxModuleDeps) (*sandbo
 		return nil, err
 	}
 	go background.Run(ctx, task)
+	outboxTask, err := sandboxRecycleOutboxTask(deps.Config, svc)
+	if err != nil {
+		return nil, err
+	}
+	go background.Run(ctx, outboxTask)
 	return svc, nil
 }
 
@@ -94,5 +99,20 @@ func sandboxRecycleTask(cfg config.SandboxConfig, svc *sandbox.Service) (backgro
 		Name:     "sandbox.recycle",
 		Interval: time.Duration(cfg.RecyclePollIntervalSeconds) * time.Second,
 		Run:      svc.RunRecycleOnce,
+	}, nil
+}
+
+// sandboxRecycleOutboxTask 把 M2 回收事件 outbox 接入统一后台任务运行器。
+func sandboxRecycleOutboxTask(cfg config.SandboxConfig, svc *sandbox.Service) (background.Task, error) {
+	if svc == nil {
+		return background.Task{}, fmt.Errorf("sandbox recycle outbox task 缺少 service")
+	}
+	if cfg.RecycleOutboxPollMs <= 0 {
+		return background.Task{}, fmt.Errorf("SANDBOX_RECYCLE_OUTBOX_POLL_INTERVAL_MS 必须大于 0")
+	}
+	return background.Task{
+		Name:     "sandbox.recycle_outbox",
+		Interval: time.Duration(cfg.RecycleOutboxPollMs) * time.Millisecond,
+		Run:      svc.RunSandboxRecycleOutboxOnce,
 	}, nil
 }

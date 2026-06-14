@@ -11,6 +11,16 @@ import (
 	"chaimir/pkg/apperr"
 )
 
+// RawMessage 返回输入 JSON 字节的隔离副本,供模块边界安全传递原始 JSON。
+func RawMessage(data []byte) json.RawMessage {
+	if len(data) == 0 {
+		return nil
+	}
+	out := make([]byte, len(data))
+	copy(out, data)
+	return json.RawMessage(out)
+}
+
 // EncodeLineBytes 将结构化输入编码为一行 JSON,用于受控命令 stdin。
 func EncodeLineBytes(v any) ([]byte, error) {
 	var buf bytes.Buffer

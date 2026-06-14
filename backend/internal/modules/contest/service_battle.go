@@ -4,6 +4,7 @@ package contest
 import (
 	"context"
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 
@@ -55,11 +56,11 @@ func (s *Service) SubmitBattleEntry(ctx context.Context, contestID int64, req Ba
 		if err := tx.DeactivateBattleEntries(ctx, id.TenantID, contestID, req.ProblemID, team.ID, req.Role); err != nil {
 			return err
 		}
-		entry, err = tx.CreateBattleEntry(ctx, BattleEntry{ID: s.ids.Generate(), TenantID: id.TenantID, ContestID: contestID, ProblemID: req.ProblemID, TeamID: team.ID, Role: req.Role, ArtifactRef: req.ArtifactRef, VersionNo: version})
+		entry, err = tx.CreateBattleEntry(ctx, BattleEntry{ID: s.ids.Generate(), TenantID: id.TenantID, ContestID: contestID, ProblemID: req.ProblemID, TeamID: team.ID, Role: req.Role, ArtifactRef: req.ArtifactRef, ArtifactHash: req.CodeHash, VersionNo: version})
 		if err != nil {
 			return err
 		}
-		opponents, err = tx.ListActiveBattleOpponents(ctx, id.TenantID, contestID, req.ProblemID, entry.ID, team.ID, contest.MatchMode, s.cfg.MatchmakerBatchSize)
+		opponents, err = tx.ListActiveBattleOpponents(ctx, id.TenantID, contestID, req.ProblemID, entry.ID, team.ID, contest.MatchMode, s.cfg.MatchmakerBatchSize, s.cfg.BattleELOInitialScore)
 		if err != nil {
 			return err
 		}
@@ -228,7 +229,7 @@ func (s *Service) executeBattleMatch(ctx context.Context, match BattleMatch) err
 		}
 		return apperr.ErrContestSandboxUnavailable.WithCause(err)
 	}
-	task, err := s.judge.SubmitJudgeTask(ctx, contracts.JudgeSubmitRequest{TenantID: match.TenantID, JudgerCode: spec.JudgerCode, ItemCode: problem.ItemCode, ItemVersion: problem.ItemVersion, CodeStorageKey: entryA.ArtifactRef, SubmitterID: ownerID, SourceRef: match.SourceRef, SandboxMode: contracts.JudgeSandboxModeReuse, TargetSandboxRef: strconv.FormatInt(info.SandboxID, 10), ExtraInput: map[string]any{"entry_a": entryA.ArtifactRef, "entry_b": entryB.ArtifactRef, "role_a": entryA.Role, "role_b": entryB.Role}, Priority: 9})
+	task, err := s.judge.SubmitJudgeTask(ctx, contracts.JudgeSubmitRequest{TenantID: match.TenantID, JudgerCode: spec.JudgerCode, ItemCode: problem.ItemCode, ItemVersion: problem.ItemVersion, CodeStorageKey: entryA.ArtifactRef, CodeHash: entryA.ArtifactHash, SubmitterID: ownerID, SourceRef: match.SourceRef, SandboxMode: contracts.JudgeSandboxModeReuse, TargetSandboxRef: strconv.FormatInt(info.SandboxID, 10), ExtraInput: map[string]any{"entry_a": entryA.ArtifactRef, "entry_b": entryB.ArtifactRef, "role_a": entryA.Role, "role_b": entryB.Role}, Priority: 9})
 	if err != nil {
 		if recycleErr := s.sandbox.RecycleBySourceRef(ctx, contracts.SandboxRecycleRequest{TenantID: match.TenantID, SourceRef: match.SourceRef, Reason: "battle_judge_submit_failed"}); recycleErr != nil {
 			return apperr.ErrContestBattleMatchFailed.WithCause(fmt.Errorf("提交对局判题失败: %w; 回收沙箱失败: %v", err, recycleErr))
@@ -277,9 +278,28 @@ func (s *Service) HandleBattleJudgeCompleted(ctx context.Context, event contract
 			return err
 		}
 		result := battleResultFromTask(task.Result)
-		deltaA, deltaB := battleScoreDelta(result)
+		ratingA, err := s.battleRatingForTeam(ctx, tx, event.TenantID, current.ContestID, a.TeamID)
+		if err != nil {
+			return err
+		}
+		ratingB, err := s.battleRatingForTeam(ctx, tx, event.TenantID, current.ContestID, b.TeamID)
+		if err != nil {
+			return err
+		}
+		deltaA, deltaB := battleScoreDelta(result, ratingA, ratingB, s.cfg.BattleELOKFactor)
 		current.Result = result
-		current.ScoreDelta = map[string]any{"team_a": a.TeamID, "team_b": b.TeamID, "delta_a": deltaA, "delta_b": deltaB}
+		current.ScoreDelta = map[string]any{
+			"team_a":          a.TeamID,
+			"team_b":          b.TeamID,
+			"rating_a_before": ratingA,
+			"rating_b_before": ratingB,
+			"rating_a_after":  ratingA + deltaA,
+			"rating_b_after":  ratingB + deltaB,
+			"delta_a":         deltaA,
+			"delta_b":         deltaB,
+			"k_factor":        s.cfg.BattleELOKFactor,
+			"result":          result,
+		}
 		current.ReplayRef = task.Result.SnapshotRef
 		match, err = tx.FinishBattleMatch(ctx, current)
 		if err != nil {
@@ -337,7 +357,7 @@ func (s *Service) applyBattleRankDelta(ctx context.Context, tx TxStore, tenantID
 	rank, err := tx.GetLadderByTeam(ctx, tenantID, contestID, teamID)
 	if err != nil {
 		if isNoRows(err) {
-			rank = LadderRank{ID: s.ids.Generate(), TenantID: tenantID, ContestID: contestID, TeamID: teamID, Score: 1000, SolvedCount: 0}
+			rank = LadderRank{ID: s.ids.Generate(), TenantID: tenantID, ContestID: contestID, TeamID: teamID, Score: s.cfg.BattleELOInitialScore, SolvedCount: 0}
 		} else {
 			return err
 		}
@@ -347,6 +367,18 @@ func (s *Service) applyBattleRankDelta(ctx context.Context, tx TxStore, tenantID
 	rank.LastSolveAt = timex.Now()
 	_, err = tx.UpsertLadder(ctx, rank)
 	return err
+}
+
+// battleRatingForTeam 读取队伍当前 ELO,首次参战时使用统一配置的初始分。
+func (s *Service) battleRatingForTeam(ctx context.Context, tx TxStore, tenantID, contestID, teamID int64) (float64, error) {
+	rank, err := tx.GetLadderByTeam(ctx, tenantID, contestID, teamID)
+	if err != nil {
+		if isNoRows(err) {
+			return s.cfg.BattleELOInitialScore, nil
+		}
+		return 0, err
+	}
+	return rank.Score, nil
 }
 
 // markBattleFailed 标记对局失败,用于启动阶段补偿。
@@ -430,14 +462,16 @@ func battleResultFromTask(result contracts.JudgeTaskResult) int16 {
 	return BattleResultBWin
 }
 
-// battleScoreDelta 计算对抗赛 ELO 简化增量。
-func battleScoreDelta(result int16) (float64, float64) {
+// battleScoreDelta 按标准 ELO 公式计算双方积分增量。
+func battleScoreDelta(result int16, ratingA, ratingB, kFactor float64) (float64, float64) {
+	expectedA := 1 / (1 + math.Pow(10, (ratingB-ratingA)/400))
+	actualA := 0.5
 	switch result {
 	case BattleResultAWin:
-		return 16, -16
+		actualA = 1
 	case BattleResultBWin:
-		return -16, 16
-	default:
-		return 0, 0
+		actualA = 0
 	}
+	deltaA := kFactor * (actualA - expectedA)
+	return deltaA, -deltaA
 }

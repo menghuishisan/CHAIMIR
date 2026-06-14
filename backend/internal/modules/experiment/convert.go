@@ -9,11 +9,14 @@ func experimentDTOFromModel(item Experiment) ExperimentDTO {
 }
 
 // instanceDTOFromModel 转换实验实例为工作台输出。
-func instanceDTOFromModel(item ExperimentInstance, checkpoints []CheckpointResult) InstanceDTO {
+func instanceDTOFromModel(item ExperimentInstance, checkpoints []CheckpointResult, stages ...[]StageDTO) InstanceDTO {
 	out := InstanceDTO{ID: item.ID, ExperimentID: item.ExperimentID, OwnerAccountID: item.OwnerAccountID, GroupID: item.GroupID, SourceRef: item.SourceRef, Sandboxes: item.SandboxRefs, Sims: item.SimSessionRefs, Status: item.Status, Score: item.Score, StartedAt: item.StartedAt, FinishedAt: item.FinishedAt, LastActiveAt: item.LastActiveAt}
 	out.Checkpoints = make([]CheckpointDTO, 0, len(checkpoints))
 	for _, cp := range checkpoints {
-		out.Checkpoints = append(out.Checkpoints, CheckpointDTO{ID: cp.CheckpointID, JudgeTaskRef: cp.JudgeTaskRef, Passed: cp.Passed, Score: cp.Score, DetailRef: cp.DetailRef})
+		out.Checkpoints = append(out.Checkpoints, CheckpointDTO{ID: cp.CheckpointID, JudgeTaskRef: cp.JudgeTaskRef, Passed: cp.Passed, Score: cp.Score, DetailRef: cp.DetailRef, BindingOutput: cp.BindingOutput})
+	}
+	if len(stages) > 0 {
+		out.Stages = stages[0]
 	}
 	return out
 }

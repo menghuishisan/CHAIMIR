@@ -53,7 +53,7 @@ func submissionFromRow(row sqlcgen.SolveSubmission) (SolveSubmission, error) {
 
 // battleEntryFromRow 转换参战物行。
 func battleEntryFromRow(row sqlcgen.BattleEntry) BattleEntry {
-	return BattleEntry{ID: row.ID, TenantID: row.TenantID, ContestID: row.ContestID, ProblemID: row.ProblemID, TeamID: row.TeamID, Role: row.Role, ArtifactRef: row.ArtifactRef, VersionNo: row.VersionNo, IsActive: row.IsActive, SubmittedAt: timex.FromTimestamptz(row.SubmittedAt)}
+	return BattleEntry{ID: row.ID, TenantID: row.TenantID, ContestID: row.ContestID, ProblemID: row.ProblemID, TeamID: row.TeamID, Role: row.Role, ArtifactRef: row.ArtifactRef, ArtifactHash: row.ArtifactHash, VersionNo: row.VersionNo, IsActive: row.IsActive, SubmittedAt: timex.FromTimestamptz(row.SubmittedAt)}
 }
 
 // battleMatchFromRow 转换对局行。

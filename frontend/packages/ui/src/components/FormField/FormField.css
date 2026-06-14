@@ -1,0 +1,58 @@
+/* FormField 组件样式
+ *
+ * 符合前端设计规范 §4.3 表单精度：
+ * - label 下距 7px
+ * - 错误态就近红字 + 图标
+ */
+
+.chaimir-form-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2); /* 8px */
+}
+
+/* === 标签 === */
+
+.chaimir-form-field__label {
+  display: block;
+  font-size: var(--text-sm);
+  font-weight: var(--font-medium);
+  color: var(--color-text-strong);
+  margin-bottom: calc(var(--space-2) - var(--space-1)); /* 7px */
+}
+
+.chaimir-form-field__required {
+  color: var(--color-danger);
+  margin-left: var(--space-1);
+}
+
+/* === 控件容器 === */
+
+.chaimir-form-field__control {
+  display: flex;
+  flex-direction: column;
+}
+
+/* === 错误信息 === */
+
+.chaimir-form-field__error {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-size: var(--text-sm);
+  color: var(--color-danger);
+  margin-top: calc(-1 * var(--space-1)); /* 就近显示 */
+}
+
+.chaimir-form-field__error::before {
+  content: '⚠';
+  font-size: var(--text-base);
+}
+
+/* === 帮助文本 === */
+
+.chaimir-form-field__helper {
+  font-size: var(--text-sm);
+  color: var(--color-text-sub);
+  margin-top: calc(-1 * var(--space-1));
+}

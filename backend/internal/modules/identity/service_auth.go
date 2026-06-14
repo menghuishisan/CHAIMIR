@@ -363,7 +363,7 @@ func (s *Service) finishPasswordLogin(ctx context.Context, tenantID, accountID i
 	ok, err := crypto.VerifyPassword(password, account.PasswordHash)
 	if err != nil || !ok {
 		if recordErr := s.recordPasswordFailure(ctx, account); recordErr != nil {
-			logging.ErrorContext(ctx, "记录密码失败次数失败", recordErr.Error(), slog.Int64("tenant_id", account.TenantID), slog.Int64("account_id", account.ID))
+			return LoginResponse{}, apperr.ErrInternal.WithCause(recordErr)
 		}
 		return LoginResponse{}, apperr.ErrIdentityInvalidCredentials
 	}
@@ -425,12 +425,21 @@ func (s *Service) issueTenantLogin(ctx context.Context, account Account, device,
 
 // refreshTenantSession 轮转租户 Refresh 会话并签发新 Token。
 func (s *Service) refreshTenantSession(ctx context.Context, old AuthSession, device, ip string) (LoginResponse, error) {
-	if old.Status != SessionStatusActive || timex.Now().After(old.ExpireAt) {
-		if revokeErr := s.revokeAllTenantSessions(ctx, old.TenantID, old.AccountID); revokeErr != nil {
-			logging.ErrorContext(ctx, "吊销过期租户会话失败", revokeErr.Error(), slog.Int64("tenant_id", old.TenantID), slog.Int64("account_id", old.AccountID))
+	now := timex.Now()
+	if old.Status != SessionStatusActive {
+		if err := s.handleTenantRefreshReplay(ctx, old, "revoked"); err != nil {
+			return LoginResponse{}, apperr.ErrInternal.WithCause(err)
 		}
 		return LoginResponse{}, apperr.ErrIdentitySessionInvalid
 	}
+	if now.After(old.ExpireAt) {
+		if err := s.handleTenantRefreshReplay(ctx, old, "expired"); err != nil {
+			return LoginResponse{}, apperr.ErrInternal.WithCause(err)
+		}
+		return LoginResponse{}, apperr.ErrIdentitySessionInvalid
+	}
+	var refresh string
+	var session AuthSession
 	var account Account
 	if err := s.store.TenantTx(ctx, old.TenantID, func(ctx context.Context, tx TxStore) error {
 		if err := tx.RevokeAuthSession(ctx, old.TenantID, old.ID); err != nil {
@@ -441,20 +450,53 @@ func (s *Service) refreshTenantSession(ctx context.Context, old AuthSession, dev
 			return err
 		}
 		account = a
+		if err := EnsureAccountCanLogin(account, now); err != nil {
+			return err
+		}
+		token, err := crypto.RandomToken(48)
+		if err != nil {
+			return err
+		}
+		hash, err := s.hashSecret(token)
+		if err != nil {
+			return err
+		}
+		row, err := tx.CreateAuthSession(ctx, CreateSessionInput{
+			ID:               s.ids.Generate(),
+			TenantID:         old.TenantID,
+			AccountID:        old.AccountID,
+			RefreshTokenHash: hash,
+			DeviceInfo:       device,
+			IP:               ip,
+			ExpireAt:         s.refreshExpireAt(),
+		})
+		if err != nil {
+			return err
+		}
+		refresh = token
+		session = row
 		return nil
 	}); err != nil {
-		return LoginResponse{}, apperr.ErrIdentitySessionInvalid.WithCause(err)
+		return LoginResponse{}, err
 	}
-	return s.issueTenantLogin(ctx, account, device, ip)
+	access, err := s.auth.IssueAccess(account.TenantID, account.ID, session.ID, false)
+	if err != nil {
+		return LoginResponse{}, apperr.ErrInternal.WithCause(err)
+	}
+	return LoginResponse{AccessToken: access, RefreshToken: refresh, MustChangePwd: account.MustChangePwd}, nil
 }
 
 // refreshPlatformSession 轮转平台管理员 Refresh 会话并签发新 Token。
 func (s *Service) refreshPlatformSession(ctx context.Context, old PlatformAuthSession, device, ip string) (LoginResponse, error) {
-	if old.Status != SessionStatusActive || timex.Now().After(old.ExpireAt) {
-		if revokeErr := s.store.PlatformTx(ctx, func(ctx context.Context, tx TxStore) error {
-			return tx.RevokePlatformSessions(ctx, old.PlatformAdminID)
-		}); revokeErr != nil {
-			logging.ErrorContext(ctx, "吊销过期平台会话失败", revokeErr.Error(), slog.Int64("tenant_id", 0), slog.String("operation_scope", "platform_session"), slog.Int64("platform_admin_id", old.PlatformAdminID))
+	if old.Status != SessionStatusActive {
+		if err := s.handlePlatformRefreshReplay(ctx, old, "revoked"); err != nil {
+			return LoginResponse{}, apperr.ErrInternal.WithCause(err)
+		}
+		return LoginResponse{}, apperr.ErrIdentitySessionInvalid
+	}
+	if timex.Now().After(old.ExpireAt) {
+		if err := s.handlePlatformRefreshReplay(ctx, old, "expired"); err != nil {
+			return LoginResponse{}, apperr.ErrInternal.WithCause(err)
 		}
 		return LoginResponse{}, apperr.ErrIdentitySessionInvalid
 	}
@@ -487,6 +529,32 @@ func (s *Service) refreshPlatformSession(ctx context.Context, old PlatformAuthSe
 		return LoginResponse{}, apperr.ErrInternal.WithCause(err)
 	}
 	return LoginResponse{AccessToken: access, RefreshToken: refresh}, nil
+}
+
+// handleTenantRefreshReplay 处理租户 Refresh 重放或过期命中,吊销账号会话并写入统一审计表。
+func (s *Service) handleTenantRefreshReplay(ctx context.Context, old AuthSession, reason string) error {
+	if err := s.revokeAllTenantSessions(ctx, old.TenantID, old.AccountID); err != nil {
+		return err
+	}
+	entry, err := audit.BuildEntry(ctx, old.TenantID, old.AccountID, audit.ActorRoleSystem, "auth.refresh.replay", "identity.auth_session", old.ID, map[string]any{"reason": reason})
+	if err != nil {
+		return fmt.Errorf("构造 Refresh 重放审计失败: %w", err)
+	}
+	return s.auditWriter.Write(ctx, entry)
+}
+
+// handlePlatformRefreshReplay 处理平台 Refresh 重放或过期命中,吊销平台账号会话并写入统一审计表。
+func (s *Service) handlePlatformRefreshReplay(ctx context.Context, old PlatformAuthSession, reason string) error {
+	if err := s.store.PlatformTx(ctx, func(ctx context.Context, tx TxStore) error {
+		return tx.RevokePlatformSessions(ctx, old.PlatformAdminID)
+	}); err != nil {
+		return err
+	}
+	entry, err := audit.BuildEntry(ctx, 0, old.PlatformAdminID, audit.ActorRolePlatformAdmin, "auth.refresh.replay", "identity.platform_auth_session", old.ID, map[string]any{"reason": reason})
+	if err != nil {
+		return fmt.Errorf("构造平台 Refresh 重放审计失败: %w", err)
+	}
+	return s.auditWriter.Write(ctx, entry)
 }
 
 // recordPasswordFailure 记录失败次数并在达到阈值时锁定账号。

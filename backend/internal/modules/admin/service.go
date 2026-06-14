@@ -492,6 +492,9 @@ func (s *Service) CreateAlertRule(ctx context.Context, req AlertRuleRequest) (Al
 	if err != nil {
 		return AlertRuleDTO{}, apperr.ErrAdminAlertInvalid.WithCause(err)
 	}
+	if err := s.writeAudit(ctx, id, "admin.alert_rule.create", "alert_rule", out.ID, map[string]any{"scope": out.Scope, "tenant_id": out.TenantID, "metric": out.Metric, "level": out.Level}); err != nil {
+		return AlertRuleDTO{}, apperr.ErrAdminAuditWriteFailed.WithCause(err)
+	}
 	return out, nil
 }
 
@@ -516,6 +519,9 @@ func (s *Service) UpdateAlertRule(ctx context.Context, ruleID int64, req AlertRu
 	})
 	if err != nil {
 		return AlertRuleDTO{}, apperr.ErrAdminAlertNotFound.WithCause(err)
+	}
+	if err := s.writeAudit(ctx, id, "admin.alert_rule.update", "alert_rule", out.ID, map[string]any{"scope": out.Scope, "tenant_id": out.TenantID, "metric": out.Metric, "level": out.Level}); err != nil {
+		return AlertRuleDTO{}, apperr.ErrAdminAuditWriteFailed.WithCause(err)
 	}
 	return out, nil
 }
@@ -559,7 +565,7 @@ func (s *Service) HandleAlertEvent(ctx context.Context, eventID int64, req Alert
 	}
 	if err := s.notify.Push(ctx, contracts.NotifyPushRequest{
 		TenantID: topicTenantID,
-		Topic:    fmt.Sprintf("admin:%d:alerts", topicTenantID),
+		Topic:    fmt.Sprintf("alert:%d", topicTenantID),
 		Payload: map[string]any{
 			"event_id":   out.ID,
 			"rule_id":    out.RuleID,
@@ -694,6 +700,7 @@ func validateAlertRule(req AlertRuleRequest) error {
 	return nil
 }
 
+// writeAudit 将 M9 管理操作写入 identity 共享审计表。
 func (s *Service) writeAudit(ctx context.Context, id tenant.Identity, action, targetType string, targetID int64, detail map[string]any) error {
 	role := int16(2)
 	tenantID := id.TenantID

@@ -54,6 +54,10 @@ type TxStore interface {
 	ListSandboxTools(ctx context.Context, tenantID, sandboxID int64) ([]SandboxTool, error)
 	UpdateSandboxToolStatus(ctx context.Context, tenantID, sandboxID int64, tool Tool, endpoint string, status int16) (SandboxTool, error)
 	CreateSandboxEvent(ctx context.Context, id, tenantID, sandboxID int64, typ string, detail []byte) error
+	CreateSandboxRecycleOutbox(context.Context, int64, Sandbox, string, string, time.Time) (SandboxRecycleOutbox, error)
+	ClaimPendingSandboxRecycleOutbox(context.Context, int32, time.Time) ([]SandboxRecycleOutbox, error)
+	MarkSandboxRecycleOutboxPublished(context.Context, int64, int64) (SandboxRecycleOutbox, error)
+	MarkSandboxRecycleOutboxFailed(context.Context, int64, int64, string) (SandboxRecycleOutbox, error)
 	StatsByTenant(ctx context.Context, tenantID int64) (TenantQuota, int64, error)
 }
 
@@ -524,6 +528,46 @@ func (s *txStore) UpdateSandboxToolStatus(ctx context.Context, tenantID, sandbox
 func (s *txStore) CreateSandboxEvent(ctx context.Context, id, tenantID, sandboxID int64, typ string, detail []byte) error {
 	_, err := s.q.CreateSandboxEvent(ctx, sqlcgen.CreateSandboxEventParams{ID: id, TenantID: tenantID, SandboxID: sandboxID, EventType: typ, Detail: detail})
 	return err
+}
+
+// CreateSandboxRecycleOutbox 在回收终态事务内保存回收事件。
+func (s *txStore) CreateSandboxRecycleOutbox(ctx context.Context, id int64, sb Sandbox, reason, traceID string, recycledAt time.Time) (SandboxRecycleOutbox, error) {
+	row, err := s.q.CreateSandboxRecycleOutbox(ctx, sqlcgen.CreateSandboxRecycleOutboxParams{ID: id, TenantID: sb.TenantID, SandboxID: sb.ID, SourceRef: sb.SourceRef, OwnerAccountID: sb.OwnerAccountID, Reason: reason, TraceID: traceID, RecycledAt: timex.RequiredTimestamptz(recycledAt)})
+	if err != nil {
+		return SandboxRecycleOutbox{}, err
+	}
+	return sandboxRecycleOutbox(row), nil
+}
+
+// ClaimPendingSandboxRecycleOutbox 跨租户领取待发布或失败待重试的回收事件。
+func (s *txStore) ClaimPendingSandboxRecycleOutbox(ctx context.Context, limit int32, staleBefore time.Time) ([]SandboxRecycleOutbox, error) {
+	rows, err := s.q.ClaimPendingSandboxRecycleOutbox(ctx, sqlcgen.ClaimPendingSandboxRecycleOutboxParams{StaleBefore: timex.RequiredTimestamptz(staleBefore), PageLimit: limit})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]SandboxRecycleOutbox, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, sandboxRecycleOutbox(row))
+	}
+	return out, nil
+}
+
+// MarkSandboxRecycleOutboxPublished 标记回收事件发布成功。
+func (s *txStore) MarkSandboxRecycleOutboxPublished(ctx context.Context, tenantID, id int64) (SandboxRecycleOutbox, error) {
+	row, err := s.q.MarkSandboxRecycleOutboxPublished(ctx, sqlcgen.MarkSandboxRecycleOutboxPublishedParams{TenantID: tenantID, ID: id})
+	if err != nil {
+		return SandboxRecycleOutbox{}, err
+	}
+	return sandboxRecycleOutbox(row), nil
+}
+
+// MarkSandboxRecycleOutboxFailed 标记回收事件发布失败并保留脱敏原因。
+func (s *txStore) MarkSandboxRecycleOutboxFailed(ctx context.Context, tenantID, id int64, reason string) (SandboxRecycleOutbox, error) {
+	row, err := s.q.MarkSandboxRecycleOutboxFailed(ctx, sqlcgen.MarkSandboxRecycleOutboxFailedParams{TenantID: tenantID, ID: id, LastError: pgtypex.Text(reason)})
+	if err != nil {
+		return SandboxRecycleOutbox{}, err
+	}
+	return sandboxRecycleOutbox(row), nil
 }
 
 // StatsByTenant 查询租户配额和活跃数量。

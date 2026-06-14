@@ -85,6 +85,7 @@ type BattleEntry struct {
 	TeamID      int64
 	Role        int16
 	ArtifactRef string
+	ArtifactHash string
 	VersionNo   int32
 	IsActive    bool
 	SubmittedAt time.Time

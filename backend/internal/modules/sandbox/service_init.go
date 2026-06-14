@@ -13,6 +13,7 @@ import (
 	"chaimir/internal/platform/storage"
 	"chaimir/internal/platform/upload"
 	"chaimir/pkg/apperr"
+	"chaimir/pkg/logging"
 )
 
 // applyInitAssetsIfNeeded 在个性化阶段注入运行时声明的已审核初始化资产。
@@ -52,7 +53,7 @@ func (s *Service) restoreArchiveToWorkspace(ctx context.Context, sb Sandbox, run
 	if err != nil {
 		return apperr.ErrSandboxInitObjectReadFailed.WithCause(err)
 	}
-	defer reader.Close()
+	defer logging.CloseContext(ctx, "关闭沙箱初始化归档读取器失败", reader)
 	data, err := io.ReadAll(io.LimitReader(reader, s.cfg.InitArchiveMaxBytes+1))
 	if err != nil {
 		return apperr.ErrSandboxInitObjectReadFailed.WithCause(err)
@@ -84,7 +85,7 @@ func (s *Service) runInitScriptIfNeeded(ctx context.Context, sb Sandbox, runtime
 	if err != nil {
 		return apperr.ErrSandboxInitObjectReadFailed.WithCause(err)
 	}
-	defer reader.Close()
+	defer logging.CloseContext(ctx, "关闭沙箱初始化脚本读取器失败", reader)
 	data, err := io.ReadAll(io.LimitReader(reader, s.cfg.InitArchiveMaxBytes+1))
 	if err != nil {
 		return apperr.ErrSandboxInitObjectReadFailed.WithCause(err)

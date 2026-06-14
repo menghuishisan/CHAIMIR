@@ -1,4 +1,4 @@
-// grade repo_convert 文件负责 M11 repo 查询写入与 sqlc 行到模块 DTO 的转换。
+// grade repo_data 文件负责 M11 repo 查询写入与 sqlc 行到模块 DTO 的转换。
 package grade
 
 import (
@@ -194,6 +194,46 @@ func (t *txStore) RelockGradeReview(ctx context.Context, id, reviewerID int64, c
 	return reviewDTO(row), nil
 }
 
+// CreateGradeLockOutbox 在审核状态事务内写入锁定事件 outbox。
+func (t *txStore) CreateGradeLockOutbox(ctx context.Context, id int64, review ReviewDTO, locked bool, reason, traceID string) (GradeLockOutbox, error) {
+	row, err := t.q.CreateGradeLockOutbox(ctx, sqlcgen.CreateGradeLockOutboxParams{ID: id, TenantID: review.TenantID, ReviewID: review.ID, CourseID: review.CourseID, Locked: locked, Reason: reason, TraceID: traceID})
+	if err != nil {
+		return GradeLockOutbox{}, err
+	}
+	return gradeLockOutbox(row), nil
+}
+
+// ClaimPendingGradeLockOutbox 跨租户领取待发布、失败待重试或卡住超时的锁定事件。
+func (t *txStore) ClaimPendingGradeLockOutbox(ctx context.Context, limit int32, staleBefore time.Time) ([]GradeLockOutbox, error) {
+	rows, err := t.q.ClaimPendingGradeLockOutbox(ctx, sqlcgen.ClaimPendingGradeLockOutboxParams{StaleBefore: timex.Timestamptz(staleBefore), PageLimit: limit})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]GradeLockOutbox, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, gradeLockOutbox(row))
+	}
+	return out, nil
+}
+
+// MarkGradeLockOutboxPublished 标记锁定事件发布成功。
+func (t *txStore) MarkGradeLockOutboxPublished(ctx context.Context, tenantID, id int64) (GradeLockOutbox, error) {
+	row, err := t.q.MarkGradeLockOutboxPublished(ctx, sqlcgen.MarkGradeLockOutboxPublishedParams{TenantID: tenantID, ID: id})
+	if err != nil {
+		return GradeLockOutbox{}, err
+	}
+	return gradeLockOutbox(row), nil
+}
+
+// MarkGradeLockOutboxFailed 标记锁定事件发布失败并保留脱敏原因。
+func (t *txStore) MarkGradeLockOutboxFailed(ctx context.Context, tenantID, id int64, reason string) (GradeLockOutbox, error) {
+	row, err := t.q.MarkGradeLockOutboxFailed(ctx, sqlcgen.MarkGradeLockOutboxFailedParams{TenantID: tenantID, ID: id, LastError: pgtypex.Text(reason)})
+	if err != nil {
+		return GradeLockOutbox{}, err
+	}
+	return gradeLockOutbox(row), nil
+}
+
 // UpsertStudentSemesterGrade 保存学生学期 GPA。
 func (t *txStore) UpsertStudentSemesterGrade(ctx context.Context, id, tenantID, studentID, semesterID int64, credits, gpa, cumulative float64) (GradeSummaryDTO, error) {
 	creditValue, err := pgtypex.NumericScale(credits, 1)
@@ -373,6 +413,11 @@ func semesterDTO(row sqlcgen.Semester) SemesterDTO {
 // reviewDTO 转换审核行。
 func reviewDTO(row sqlcgen.GradeReview) ReviewDTO {
 	return ReviewDTO{ID: row.ID, TenantID: row.TenantID, CourseID: row.CourseID, SemesterID: pgtypex.Int8Value(row.SemesterID), SubmitterID: row.SubmitterID, ReviewerID: pgtypex.Int8Value(row.ReviewerID), Status: row.Status, IsLocked: row.IsLocked, Comment: pgtypex.TextValue(row.Comment), SubmittedAt: formatTime(row.SubmittedAt), ReviewedAt: formatOptionalTime(row.ReviewedAt)}
+}
+
+// gradeLockOutbox 转换成绩锁事件 outbox 行。
+func gradeLockOutbox(row sqlcgen.GradeLockOutbox) GradeLockOutbox {
+	return GradeLockOutbox{ID: row.ID, TenantID: row.TenantID, ReviewID: row.ReviewID, CourseID: row.CourseID, Locked: row.Locked, Reason: row.Reason, TraceID: row.TraceID, Status: row.Status, RetryCount: row.RetryCount, LastError: pgtypex.TextValue(row.LastError), CreatedAt: formatTime(row.CreatedAt), UpdatedAt: formatTime(row.UpdatedAt)}
 }
 
 // semesterGradeSummary 转换学期成绩聚合行。

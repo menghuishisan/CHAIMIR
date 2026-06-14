@@ -28,6 +28,7 @@ type ComponentConfig struct {
 	Envs        []EnvComponent        `json:"envs"`
 	Sims        []SimComponent        `json:"sims"`
 	Checkpoints []CheckpointComponent `json:"checkpoints"`
+	Stages      []StageConfig         `json:"stages"`
 }
 
 // EnvComponent 描述 M2 运行时和工具入口配置。
@@ -66,6 +67,39 @@ type CheckpointComponent struct {
 	ExtraInput  map[string]any `json:"extra_input"`
 }
 
+// StageConfig 描述实验阶段、解锁规则和后续仿真参数注入规则。
+type StageConfig struct {
+	Stage           int32            `json:"stage"`
+	Title           string           `json:"title"`
+	Description     string           `json:"description"`
+	Components      StageComponents  `json:"components"`
+	UnlockCondition *UnlockCondition `json:"unlock_condition"`
+	ParamBindings   []ParamBinding   `json:"param_bindings"`
+}
+
+// StageComponents 保存某阶段要激活的 M2/M4 组件 ID。
+type StageComponents struct {
+	Envs []string `json:"envs"`
+	Sims []string `json:"sims"`
+}
+
+// UnlockCondition 描述阶段是否依赖检查点或手动激活。
+type UnlockCondition struct {
+	Type         string  `json:"type"`
+	CheckpointID string  `json:"checkpoint_id"`
+	MinScore     float64 `json:"min_score"`
+}
+
+// ParamBinding 描述从检查点输出或常量注入到后续仿真 init_params 的规则。
+type ParamBinding struct {
+	TargetComponent string `json:"target_component"`
+	TargetParam     string `json:"target_param"`
+	SourceType      string `json:"source_type"`
+	SourceRef       string `json:"source_ref"`
+	SourcePath      string `json:"source_path"`
+	ConstantValue   any    `json:"constant_value"`
+}
+
 // GroupConfig 描述小组大小和角色定义。
 type GroupConfig struct {
 	Size  int      `json:"size"`
@@ -92,6 +126,7 @@ type ExperimentInstance struct {
 // SandboxRef 保存 M7 对 M2 沙箱资源的稳定引用和工具接入摘要。
 type SandboxRef struct {
 	ComponentID string            `json:"component_id"`
+	Stage       int32             `json:"stage"`
 	SandboxID   int64             `json:"sandbox_id"`
 	RuntimeCode string            `json:"runtime_code"`
 	Tools       []SandboxToolDTO  `json:"tools"`
@@ -101,6 +136,7 @@ type SandboxRef struct {
 // SimSessionRef 保存 M7 对 M4 仿真会话的稳定引用。
 type SimSessionRef struct {
 	ComponentID string `json:"component_id"`
+	Stage       int32  `json:"stage"`
 	SessionID   int64  `json:"session_id"`
 	PackageCode string `json:"package_code"`
 	Version     string `json:"version"`
@@ -129,15 +165,16 @@ type GroupMember struct {
 
 // CheckpointResult 是一次实例检查点判分结果。
 type CheckpointResult struct {
-	ID           int64
-	TenantID     int64
-	InstanceID   int64
-	CheckpointID string
-	JudgeTaskRef string
-	Passed       bool
-	Score        float64
-	DetailRef    string
-	JudgedAt     time.Time
+	ID            int64
+	TenantID      int64
+	InstanceID    int64
+	CheckpointID  string
+	JudgeTaskRef  string
+	Passed        bool
+	Score         float64
+	DetailRef     string
+	BindingOutput map[string]any
+	JudgedAt      time.Time
 }
 
 // ExperimentReport 是学生提交的实验报告及教师批改结果。
@@ -157,4 +194,21 @@ type ExperimentReport struct {
 type ExperimentStatsSnapshot struct {
 	ExperimentCount     int64
 	ActiveInstanceCount int64
+}
+
+// ExperimentScoreOutbox 是实验得分事件的生产者 outbox 记录。
+type ExperimentScoreOutbox struct {
+	ID           int64
+	TenantID     int64
+	ExperimentID int64
+	InstanceID   int64
+	StudentID    int64
+	Score        float64
+	TraceID      string
+	ScoredAt     time.Time
+	Status       int16
+	RetryCount   int32
+	LastError    string
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
 }

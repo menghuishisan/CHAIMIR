@@ -71,12 +71,34 @@ func RegisterExperimentModule(ctx context.Context, deps ExperimentModuleDeps) (*
 	if _, err := experiment.SubscribeEvents(deps.EventBus, svc); err != nil {
 		return nil, err
 	}
+	scoreTask, err := experimentScoreOutboxTask(deps.Config, svc)
+	if err != nil {
+		return nil, err
+	}
+	go background.Run(ctx, scoreTask)
 	task, err := experimentRecycleTask(deps.Config, svc)
 	if err != nil {
 		return nil, err
 	}
 	go background.Run(ctx, task)
 	return svc, nil
+}
+
+// experimentScoreOutboxTask 把 M7 得分事件 outbox 接入统一后台任务运行器。
+func experimentScoreOutboxTask(cfg config.ExperimentConfig, svc *experiment.Service) (background.Task, error) {
+	if svc == nil {
+		return background.Task{}, fmt.Errorf("experiment score outbox worker 缺少 service")
+	}
+	if cfg.ScoreOutboxPollMs <= 0 {
+		return background.Task{}, fmt.Errorf("EXPERIMENT_SCORE_OUTBOX_POLL_INTERVAL_MS 必须大于 0")
+	}
+	return background.Task{
+		Name:     "experiment.score_outbox",
+		Interval: time.Duration(cfg.ScoreOutboxPollMs) * time.Millisecond,
+		Run: func(ctx context.Context) error {
+			return svc.RunExperimentScoreOutboxOnce(ctx)
+		},
+	}, nil
 }
 
 // experimentRecycleTask 把 M7 实例生命周期回收接入统一后台任务运行器。

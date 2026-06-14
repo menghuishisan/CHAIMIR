@@ -2,6 +2,7 @@
 package upload
 
 import (
+	"io"
 	"path"
 	"path/filepath"
 	"strings"
@@ -43,6 +44,22 @@ func CheckSize(size, maxBytes int64) SizeResult {
 		return SizeTooLarge
 	}
 	return SizeOK
+}
+
+// ReadBounded 最多读取 maxBytes+1 字节,让调用方能判定超限而不会无界占用内存。
+func ReadBounded(r io.Reader, maxBytes int64) ([]byte, SizeResult, error) {
+	if r == nil {
+		return nil, SizeEmpty, nil
+	}
+	limit := maxBytes
+	if limit > 0 {
+		limit++
+	}
+	data, err := io.ReadAll(io.LimitReader(r, limit))
+	if err != nil {
+		return nil, SizeOK, err
+	}
+	return data, CheckSize(int64(len(data)), maxBytes), nil
 }
 
 // CSVOrXLSXKind 校验 CSV/XLSX 的扩展名、声明 MIME 与内容签名是否一致。

@@ -25,6 +25,9 @@ func (s *Service) CreateApplication(ctx context.Context, req CreateApplicationRe
 	if err := ValidatePhone(req.ContactPhone); err != nil {
 		return TenantApplication{}, err
 	}
+	if err := ValidateEmail(req.ContactEmail); err != nil {
+		return TenantApplication{}, err
+	}
 	var app TenantApplication
 	if err := s.store.PlatformTx(ctx, func(ctx context.Context, tx TxStore) error {
 		row, err := tx.CreateTenantApplication(ctx, req, s.ids.Generate())

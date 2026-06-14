@@ -13,6 +13,7 @@ import (
 var (
 	phoneRe      = regexp.MustCompile(`^1[3-9]\d{9}$`)
 	tenantCodeRe = regexp.MustCompile(`^[a-z][a-z0-9-]{1,30}[a-z0-9]$`)
+	emailRe      = regexp.MustCompile(`^[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}$`)
 )
 
 // ValidatePhone 校验国内高校场景使用的中国大陆手机号。
@@ -52,6 +53,27 @@ func ValidatePassword(password string) error {
 func ValidateTenantCode(code string) error {
 	if !tenantCodeRe.MatchString(strings.TrimSpace(code)) {
 		return apperr.ErrIdentityInvalidTenantCode
+	}
+	return nil
+}
+
+// ValidateEmail 校验平台入驻联系人邮箱,避免审核和通知链路写入不可用地址。
+func ValidateEmail(email string) error {
+	if !emailRe.MatchString(strings.TrimSpace(email)) {
+		return apperr.ErrIdentityApplicationInvalid
+	}
+	return nil
+}
+
+// ValidateAccountStatusTransition 校验账号状态机,注销是终态,归档才允许恢复。
+func ValidateAccountStatusTransition(fromStatus, toStatus int16) error {
+	switch toStatus {
+	case AccountStatusActive, AccountStatusDisabled, AccountStatusArchived, AccountStatusCancelled:
+	default:
+		return apperr.ErrIdentityAccountUpdateInvalid
+	}
+	if fromStatus == AccountStatusCancelled && toStatus != AccountStatusCancelled {
+		return apperr.ErrIdentityAccountUpdateInvalid
 	}
 	return nil
 }

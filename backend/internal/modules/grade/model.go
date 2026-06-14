@@ -34,3 +34,19 @@ type GradeSummaryDTO struct {
 	CourseGrades  []CourseGradeInput `json:"course_grades"`
 	ComputedAt    time.Time          `json:"computed_at"`
 }
+
+// GradeLockOutbox 是成绩锁定事件的生产者 outbox 记录。
+type GradeLockOutbox struct {
+	ID         int64
+	TenantID   int64
+	ReviewID   int64
+	CourseID   int64
+	Locked     bool
+	Reason     string
+	TraceID    string
+	Status     int16
+	RetryCount int32
+	LastError  string
+	CreatedAt  string
+	UpdatedAt  string
+}

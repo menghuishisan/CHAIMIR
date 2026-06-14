@@ -39,6 +39,7 @@ func RegisterRoutes(r gin.IRouter, svc *Service, authn *auth.Manager, roles cont
 
 type notifyAPI struct{ svc *Service }
 
+// inbox 查询当前用户站内信分页。
 func (a notifyAPI) inbox(c *gin.Context) {
 	page, size, ok := httpx.Page(c)
 	if !ok {
@@ -53,11 +54,13 @@ func (a notifyAPI) inbox(c *gin.Context) {
 	httpx.WritePage(c, items, total, page, size, err)
 }
 
+// unread 查询当前用户未读通知数。
 func (a notifyAPI) unread(c *gin.Context) {
 	out, err := a.svc.Unread(c.Request.Context())
 	httpx.Write(c, out, err)
 }
 
+// markRead 标记单条通知已读。
 func (a notifyAPI) markRead(c *gin.Context) {
 	id, ok := httpx.PathID(c, "id")
 	if ok {
@@ -66,10 +69,12 @@ func (a notifyAPI) markRead(c *gin.Context) {
 	}
 }
 
+// markAllRead 标记当前用户全部通知已读。
 func (a notifyAPI) markAllRead(c *gin.Context) {
 	httpx.Write(c, gin.H{}, a.svc.MarkAllRead(c.Request.Context()))
 }
 
+// deleteNotification 删除当前用户的一条通知。
 func (a notifyAPI) deleteNotification(c *gin.Context) {
 	id, ok := httpx.PathID(c, "id")
 	if ok {
@@ -78,11 +83,13 @@ func (a notifyAPI) deleteNotification(c *gin.Context) {
 	}
 }
 
+// listPreferences 查询当前用户通知偏好。
 func (a notifyAPI) listPreferences(c *gin.Context) {
 	out, err := a.svc.ListPreferences(c.Request.Context())
 	httpx.Write(c, out, err)
 }
 
+// upsertPreference 绑定通知偏好更新请求。
 func (a notifyAPI) upsertPreference(c *gin.Context) {
 	var req PreferenceRequest
 	if !httpx.BindJSONWithError(c, &req, apperr.ErrNotifyRequestInvalid) {
@@ -92,6 +99,7 @@ func (a notifyAPI) upsertPreference(c *gin.Context) {
 	httpx.Write(c, out3, err)
 }
 
+// createAnnouncement 绑定系统公告创建请求。
 func (a notifyAPI) createAnnouncement(c *gin.Context) {
 	var req AnnouncementRequest
 	if !httpx.BindJSONWithError(c, &req, apperr.ErrNotifyAnnouncementInvalid) {
@@ -101,6 +109,7 @@ func (a notifyAPI) createAnnouncement(c *gin.Context) {
 	httpx.Write(c, out4, err)
 }
 
+// listAnnouncements 查询当前用户可见公告。
 func (a notifyAPI) listAnnouncements(c *gin.Context) {
 	page, size, ok := httpx.Page(c)
 	if ok {
@@ -109,6 +118,7 @@ func (a notifyAPI) listAnnouncements(c *gin.Context) {
 	}
 }
 
+// markAnnouncementRead 标记公告已读。
 func (a notifyAPI) markAnnouncementRead(c *gin.Context) {
 	id, ok := httpx.PathID(c, "id")
 	if ok {
@@ -116,6 +126,7 @@ func (a notifyAPI) markAnnouncementRead(c *gin.Context) {
 	}
 }
 
+// send 绑定内部服务通知发送请求。
 func (a notifyAPI) send(c *gin.Context) {
 	var req SendRequest
 	if !httpx.BindJSONWithError(c, &req, apperr.ErrNotifyRequestInvalid) {
@@ -124,6 +135,7 @@ func (a notifyAPI) send(c *gin.Context) {
 	httpx.Write(c, gin.H{}, a.svc.Send(c.Request.Context(), contracts.NotifySendRequest{TenantID: req.TenantID, Type: req.Type, Receivers: req.Receivers, Params: req.Params, Link: req.Link}))
 }
 
+// push 绑定内部服务实时推送请求。
 func (a notifyAPI) push(c *gin.Context) {
 	var req PushRequest
 	if !httpx.BindJSONWithError(c, &req, apperr.ErrNotifySubscribeInvalid) {
@@ -132,6 +144,7 @@ func (a notifyAPI) push(c *gin.Context) {
 	httpx.Write(c, gin.H{}, a.svc.Push(c.Request.Context(), contracts.NotifyPushRequest{TenantID: req.TenantID, Topic: req.Topic, Payload: req.Payload}))
 }
 
+// websocket 建立通知订阅 WebSocket。
 func (a notifyAPI) websocket(c *gin.Context) {
 	err := a.svc.hub.ServeInteractive(c.Writer, c.Request, func(conn *ws.Conn) error {
 		return a.svc.HandleSubscribe(c.Request.Context(), conn)

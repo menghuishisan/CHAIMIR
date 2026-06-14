@@ -60,14 +60,15 @@ type InstanceDTO struct {
 	OwnerAccountID int64           `json:"owner_account_id,string"`
 	GroupID        int64           `json:"group_id,string,omitempty"`
 	SourceRef      string          `json:"source_ref"`
-	Sandboxes      []SandboxRef     `json:"sandboxes"`
-	Sims           []SimSessionRef  `json:"sims"`
+	Sandboxes      []SandboxRef    `json:"sandboxes"`
+	Sims           []SimSessionRef `json:"sims"`
 	Status         int16           `json:"status"`
 	Score          float64         `json:"score"`
 	StartedAt      time.Time       `json:"started_at"`
 	FinishedAt     time.Time       `json:"finished_at,omitempty"`
 	LastActiveAt   time.Time       `json:"last_active_at"`
 	Checkpoints    []CheckpointDTO `json:"checkpoints,omitempty"`
+	Stages         []StageDTO      `json:"stages,omitempty"`
 }
 
 // SandboxToolDTO 是工作台展示的沙箱工具入口。
@@ -80,11 +81,22 @@ type SandboxToolDTO struct {
 
 // CheckpointDTO 是工作台展示的检查点状态。
 type CheckpointDTO struct {
-	ID           string  `json:"id"`
-	JudgeTaskRef string  `json:"judge_task_ref,omitempty"`
-	Passed       bool    `json:"passed"`
-	Score        float64 `json:"score"`
-	DetailRef    string  `json:"detail_ref,omitempty"`
+	ID            string         `json:"id"`
+	JudgeTaskRef  string         `json:"judge_task_ref,omitempty"`
+	Passed        bool           `json:"passed"`
+	Score         float64        `json:"score"`
+	DetailRef     string         `json:"detail_ref,omitempty"`
+	BindingOutput map[string]any `json:"binding_output,omitempty"`
+}
+
+// StageDTO 是工作台展示阶段解锁、激活和完成状态的输出。
+type StageDTO struct {
+	Stage           int32            `json:"stage"`
+	Title           string           `json:"title"`
+	Description     string           `json:"description,omitempty"`
+	Status          string           `json:"status"`
+	Components      StageComponents  `json:"components"`
+	UnlockCondition *UnlockCondition `json:"unlock_condition,omitempty"`
 }
 
 // ProgressDTO 返回给前端的 M10 topic 订阅元信息。
@@ -98,6 +110,7 @@ type JudgeCheckpointRequest struct {
 	CodeStorageKey string         `json:"code_storage_key"`
 	CodeHash       string         `json:"code_hash"`
 	ExtraInput     map[string]any `json:"extra_input"`
+	BindingOutput  map[string]any `json:"binding_output"`
 }
 
 // SubmitReportRequest 是提交实验报告的请求。

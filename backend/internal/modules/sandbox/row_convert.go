@@ -2,7 +2,6 @@
 package sandbox
 
 import (
-	"encoding/json"
 	"strings"
 
 	"chaimir/internal/modules/sandbox/internal/sqlcgen"
@@ -29,7 +28,7 @@ func runtimeFromRow(row sqlcgen.Runtime) (Runtime, error) {
 		CapabilityImpl: pgtypex.TextValue(row.CapabilityImpl),
 		PluginRef:      pgtypex.TextValue(row.PluginRef),
 		SelftestStatus: row.SelftestStatus,
-		SelftestDetail: json.RawMessage(row.SelftestDetail),
+		SelftestDetail: jsonx.RawMessage(row.SelftestDetail),
 		Status:         row.Status,
 	}, nil
 }
@@ -44,7 +43,7 @@ func runtimeImageFromRow(row sqlcgen.RuntimeImage) RuntimeImage {
 		Status:        row.Status,
 		Prepulled:     row.Prepulled,
 		PrepullStatus: row.PrepullStatus,
-		PrepullDetail: json.RawMessage(row.PrepullDetail),
+		PrepullDetail: jsonx.RawMessage(row.PrepullDetail),
 		PrepulledAt:   timex.FromTimestamptz(row.PrepulledAt),
 		GenesisBaked:  row.GenesisBaked,
 		IsDefault:     row.IsDefault,
@@ -114,6 +113,11 @@ func quotaFromRow(row sqlcgen.TenantQuotum) TenantQuota {
 		MaxKeepaliveMin:         row.MaxKeepaliveMin,
 		MaxSnapshotRetentionMin: row.MaxSnapshotRetentionMin,
 	}
+}
+
+// sandboxRecycleOutbox 把 sqlc 回收 outbox 行转换为内部模型。
+func sandboxRecycleOutbox(row sqlcgen.SandboxRecycleOutbox) SandboxRecycleOutbox {
+	return SandboxRecycleOutbox{ID: row.ID, TenantID: row.TenantID, SandboxID: row.SandboxID, SourceRef: row.SourceRef, OwnerAccountID: row.OwnerAccountID, Reason: row.Reason, TraceID: row.TraceID, RecycledAt: timex.FromTimestamptz(row.RecycledAt), Status: row.Status, RetryCount: row.RetryCount, LastError: pgtypex.TextValue(row.LastError), CreatedAt: timex.FromTimestamptz(row.CreatedAt), UpdatedAt: timex.FromTimestamptz(row.UpdatedAt)}
 }
 
 // sandboxToolFromRow 把沙箱工具联查行转换为内部 SandboxTool 模型。

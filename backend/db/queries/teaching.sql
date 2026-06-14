@@ -507,6 +507,36 @@ UPDATE course_grade
 SET is_locked = $3, updated_at = now()
 WHERE tenant_id = $1 AND course_id = $2;
 
+-- name: CreateTeachingGradeEventOutbox :one
+INSERT INTO teaching_grade_event_outbox (id, tenant_id, course_id, student_id, trace_id, event_updated_at, status, retry_count, last_error, created_at, updated_at)
+VALUES ($1, $2, $3, $4, $5, $6, 1, 0, NULL, now(), now())
+RETURNING id, tenant_id, course_id, student_id, trace_id, event_updated_at, status, retry_count, last_error, created_at, updated_at;
+
+-- name: ClaimPendingTeachingGradeEventOutbox :many
+UPDATE teaching_grade_event_outbox
+SET status = 4, retry_count = retry_count + 1, updated_at = now()
+WHERE id IN (
+    SELECT id
+    FROM teaching_grade_event_outbox
+    WHERE status IN (1, 3) OR (status = 4 AND updated_at <= @stale_before::timestamptz)
+    ORDER BY created_at ASC, id ASC
+    LIMIT @page_limit
+    FOR UPDATE SKIP LOCKED
+)
+RETURNING id, tenant_id, course_id, student_id, trace_id, event_updated_at, status, retry_count, last_error, created_at, updated_at;
+
+-- name: MarkTeachingGradeEventOutboxPublished :one
+UPDATE teaching_grade_event_outbox
+SET status = 2, last_error = NULL, updated_at = now()
+WHERE tenant_id = $1 AND id = $2
+RETURNING id, tenant_id, course_id, student_id, trace_id, event_updated_at, status, retry_count, last_error, created_at, updated_at;
+
+-- name: MarkTeachingGradeEventOutboxFailed :one
+UPDATE teaching_grade_event_outbox
+SET status = 3, last_error = $3, updated_at = now()
+WHERE tenant_id = $1 AND id = $2
+RETURNING id, tenant_id, course_id, student_id, trace_id, event_updated_at, status, retry_count, last_error, created_at, updated_at;
+
 -- name: TeachingStats :one
 SELECT
     COUNT(*)::bigint AS course_count,

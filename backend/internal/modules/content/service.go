@@ -4,26 +4,49 @@ package content
 import (
 	"context"
 	"fmt"
+	"io"
 
 	"chaimir/internal/contracts"
 	"chaimir/internal/platform/audit"
+	"chaimir/internal/platform/storage"
 	"chaimir/internal/platform/tenant"
 	"chaimir/pkg/apperr"
 	"chaimir/pkg/snowflake"
 )
 
+const (
+	contentModuleName             = "content"
+	contentAttachmentResourceType = "attachment"
+)
+
+type objectStorage interface {
+	Put(ctx context.Context, bucket, key string, r io.Reader, size int64, contentType string) error
+	BucketAttach() string
+}
+
+type fileService interface {
+	PlanUpload(req storage.PlanUploadRequest) (storage.UploadPlan, error)
+	IssueDownloadGrant(req storage.IssueDownloadGrantRequest) (string, storage.DownloadGrant, error)
+}
+
 // Service 承载 content 模块业务编排,依赖 repo 接口和平台横切能力。
 type Service struct {
-	store Store
-	ids   snowflake.Generator
-	audit audit.Writer
+	store                     Store
+	ids                       snowflake.Generator
+	audit                     audit.Writer
+	storage                   objectStorage
+	files                     fileService
+	contentAttachmentMaxBytes int64
 }
 
 // ServiceDeps 是 content service 的装配依赖集合。
 type ServiceDeps struct {
-	Store Store
-	IDs   snowflake.Generator
-	Audit audit.Writer
+	Store                     Store
+	IDs                       snowflake.Generator
+	Audit                     audit.Writer
+	Storage                   *storage.Storage
+	FileService               fileService
+	ContentAttachmentMaxBytes int64
 }
 
 // NewService 构造 content 服务,不接收数据库连接,由装配层传入 Store。
@@ -37,7 +60,16 @@ func NewService(deps ServiceDeps) (*Service, error) {
 	if deps.Audit == nil {
 		return nil, fmt.Errorf("content service 缺少审计写入器")
 	}
-	return &Service{store: deps.Store, ids: deps.IDs, audit: deps.Audit}, nil
+	if deps.Storage == nil {
+		return nil, fmt.Errorf("content service 缺少统一对象存储")
+	}
+	if deps.FileService == nil {
+		return nil, fmt.Errorf("content service 缺少统一文件服务")
+	}
+	if deps.ContentAttachmentMaxBytes <= 0 {
+		return nil, fmt.Errorf("content service 缺少附件大小配置")
+	}
+	return &Service{store: deps.Store, ids: deps.IDs, audit: deps.Audit, storage: deps.Storage, files: deps.FileService, contentAttachmentMaxBytes: deps.ContentAttachmentMaxBytes}, nil
 }
 
 // currentIdentity 读取租户账号身份。

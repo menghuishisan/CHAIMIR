@@ -213,6 +213,21 @@ type CourseGrade struct {
 	UpdatedAt     time.Time
 }
 
+// TeachingGradeEventOutbox 是成绩变更事件的生产者 outbox 记录。
+type TeachingGradeEventOutbox struct {
+	ID             int64
+	TenantID       int64
+	CourseID       int64
+	StudentID      int64
+	TraceID        string
+	EventUpdatedAt time.Time
+	Status         int16
+	RetryCount     int32
+	LastError      string
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
+}
+
 type CourseListFilter struct {
 	Role   string
 	Status int16

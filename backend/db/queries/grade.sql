@@ -97,6 +97,36 @@ SET status = 2, is_locked = true, reviewer_id = $2, comment = $3, reviewed_at = 
 WHERE id = $1 AND status = 1
 RETURNING id, tenant_id, course_id, semester_id, submitter_id, reviewer_id, status, is_locked, comment, submitted_at, reviewed_at;
 
+-- name: CreateGradeLockOutbox :one
+INSERT INTO grade_lock_outbox (id, tenant_id, review_id, course_id, locked, reason, trace_id, status, retry_count, last_error, created_at, updated_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, 1, 0, NULL, now(), now())
+RETURNING id, tenant_id, review_id, course_id, locked, reason, trace_id, status, retry_count, last_error, created_at, updated_at;
+
+-- name: ClaimPendingGradeLockOutbox :many
+UPDATE grade_lock_outbox
+SET status = 4, retry_count = retry_count + 1, updated_at = now()
+WHERE id IN (
+    SELECT id
+    FROM grade_lock_outbox
+    WHERE status IN (1, 3) OR (status = 4 AND updated_at <= @stale_before::timestamptz)
+    ORDER BY created_at ASC, id ASC
+    LIMIT @page_limit
+    FOR UPDATE SKIP LOCKED
+)
+RETURNING id, tenant_id, review_id, course_id, locked, reason, trace_id, status, retry_count, last_error, created_at, updated_at;
+
+-- name: MarkGradeLockOutboxPublished :one
+UPDATE grade_lock_outbox
+SET status = 2, last_error = NULL, updated_at = now()
+WHERE tenant_id = $1 AND id = $2
+RETURNING id, tenant_id, review_id, course_id, locked, reason, trace_id, status, retry_count, last_error, created_at, updated_at;
+
+-- name: MarkGradeLockOutboxFailed :one
+UPDATE grade_lock_outbox
+SET status = 3, last_error = $3, updated_at = now()
+WHERE tenant_id = $1 AND id = $2
+RETURNING id, tenant_id, review_id, course_id, locked, reason, trace_id, status, retry_count, last_error, created_at, updated_at;
+
 -- name: UpsertStudentSemesterGrade :one
 INSERT INTO student_semester_grade (id, tenant_id, student_id, semester_id, total_credits, gpa, cumulative_gpa, computed_at)
 VALUES ($1, $2, $3, $4, $5, $6, $7, now())

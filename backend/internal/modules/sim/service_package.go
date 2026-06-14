@@ -83,6 +83,9 @@ func (s *Service) SubmitPackage(ctx context.Context, tenantID, accountID int64, 
 	if err := validatePackageRequest(req, compute, accountID); err != nil {
 		return nil, err
 	}
+	if err := validateBackendAdapterAvailable(compute, req.BackendAdapter, s.backends); err != nil {
+		return nil, err
+	}
 	packageID := s.ids.Generate()
 	bundleRef, bundleHash, report, err := s.storeBundle(ctx, tenantID, accountID, packageID, input)
 	if err != nil {
@@ -133,6 +136,9 @@ func (s *Service) UpdatePackage(ctx context.Context, tenantID, accountID, packag
 		return nil, err
 	}
 	if err := validatePackageRequest(req, compute, accountID); err != nil {
+		return nil, err
+	}
+	if err := validateBackendAdapterAvailable(compute, req.BackendAdapter, s.backends); err != nil {
 		return nil, err
 	}
 	bundleRef, bundleHash, report, err := s.storeBundle(ctx, tenantID, accountID, packageID, input)
@@ -254,6 +260,13 @@ func (s *Service) ApproveReview(ctx context.Context, reviewerID, reviewID int64)
 			return apperr.ErrSimReviewNotFound.WithCause(err)
 		}
 		if err := validateApprovalReport(review.PreviewReport); err != nil {
+			return err
+		}
+		pkg, err = tx.GetPackageByID(ctx, review.PackageID)
+		if err != nil {
+			return apperr.ErrSimPackageNotFound.WithCause(err)
+		}
+		if err := validateBackendAdapterAvailable(pkg.Compute, pkg.BackendAdapter, s.backends); err != nil {
 			return err
 		}
 		review, err = tx.CompleteReview(ctx, reviewID, ReviewApproved, reviewerID, "")

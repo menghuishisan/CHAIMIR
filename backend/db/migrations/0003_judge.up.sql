@@ -33,6 +33,7 @@ CREATE TABLE IF NOT EXISTS judge_task (
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     UNIQUE (tenant_id, id),
+    UNIQUE (tenant_id, source_ref),
     FOREIGN KEY (tenant_id, submitter_id) REFERENCES account(tenant_id, id)
 );
 
@@ -77,7 +78,6 @@ CREATE TABLE IF NOT EXISTS submission_fingerprint (
 
 CREATE INDEX IF NOT EXISTS idx_judger_status ON judger(status, selftest_status);
 CREATE INDEX IF NOT EXISTS idx_judge_task_queue ON judge_task(tenant_id, status, priority DESC, created_at ASC);
-CREATE INDEX IF NOT EXISTS idx_judge_task_source_ref ON judge_task(tenant_id, source_ref);
 CREATE INDEX IF NOT EXISTS idx_judge_task_submitter ON judge_task(tenant_id, submitter_id);
 CREATE INDEX IF NOT EXISTS idx_judge_event_outbox_status ON judge_event_outbox(status, created_at ASC);
 CREATE INDEX IF NOT EXISTS idx_submission_fingerprint_exact ON submission_fingerprint(tenant_id, problem_ref, code_hash);

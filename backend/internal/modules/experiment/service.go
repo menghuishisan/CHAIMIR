@@ -82,7 +82,7 @@ func NewService(deps ServiceDeps) (*Service, error) {
 	if deps.Storage == nil {
 		return nil, fmt.Errorf("experiment service 缺少统一对象存储")
 	}
-	if deps.Config.RecyclePollIntervalSeconds <= 0 || deps.Config.RecycleBatchSize <= 0 || deps.Config.InstanceIdleTimeoutSeconds <= 0 || deps.Config.PausedTimeoutSeconds <= 0 {
+	if deps.Config.RecyclePollIntervalSeconds <= 0 || deps.Config.RecycleBatchSize <= 0 || deps.Config.InstanceIdleTimeoutSeconds <= 0 || deps.Config.PausedTimeoutSeconds <= 0 || deps.Config.ScoreOutboxBatchSize <= 0 || deps.Config.ScoreOutboxStaleMs <= 0 {
 		return nil, fmt.Errorf("experiment service 配置不完整")
 	}
 	return &Service{store: deps.Store, ids: deps.IDs, cfg: deps.Config, audit: deps.Audit, roles: deps.Roles, content: deps.Content, sandbox: deps.Sandbox, judge: deps.Judge, sim: deps.Sim, bus: deps.Bus, storage: deps.Storage}, nil

@@ -3,6 +3,8 @@ package contest
 
 import (
 	"context"
+	"strings"
+	"time"
 
 	"chaimir/internal/contracts"
 	"chaimir/internal/platform/audit"
@@ -174,7 +176,7 @@ func (s *Service) FreezeContest(ctx context.Context, contestID int64) (ContestDT
 	return s.transitionContest(ctx, contestID, ContestStatusFrozen, "contest.freeze", false)
 }
 
-// ArchiveContest 生成最终榜单快照,归档竞赛并回收竞赛级沙箱资源。
+// ArchiveContest 生成最终榜单快照,归档竞赛并回收竞赛关联沙箱资源。
 func (s *Service) ArchiveContest(ctx context.Context, contestID int64) (ResultSnapshot, error) {
 	id, err := currentIdentity(ctx)
 	if err != nil {
@@ -191,7 +193,7 @@ func (s *Service) ArchiveContest(ctx context.Context, contestID int64) (ResultSn
 	}); err != nil {
 		return ResultSnapshot{}, err
 	}
-	if err := s.sandbox.RecycleBySourceRef(ctx, contracts.SandboxRecycleRequest{TenantID: id.TenantID, SourceRef: contestSourceRef(contest.ID, contest.CreatedAt), Reason: "contest_archive"}); err != nil {
+	if err := s.recycleContestSandboxes(ctx, id.TenantID, contest.ID, contest.CreatedAt, "contest_archive"); err != nil {
 		return ResultSnapshot{}, apperr.ErrContestSandboxUnavailable.WithCause(err)
 	}
 	var snapshot ResultSnapshot
@@ -239,7 +241,7 @@ func (s *Service) RunAutoArchiveOnce(ctx context.Context) error {
 
 // archiveContestSystem 执行后台归档,复用人工归档的快照与回收规则。
 func (s *Service) archiveContestSystem(ctx context.Context, item Contest) (ResultSnapshot, error) {
-	if err := s.sandbox.RecycleBySourceRef(ctx, contracts.SandboxRecycleRequest{TenantID: item.TenantID, SourceRef: contestSourceRef(item.ID, item.CreatedAt), Reason: "contest_auto_archive"}); err != nil {
+	if err := s.recycleContestSandboxes(ctx, item.TenantID, item.ID, item.CreatedAt, "contest_auto_archive"); err != nil {
 		return ResultSnapshot{}, apperr.ErrContestSandboxUnavailable.WithCause(err)
 	}
 	var snapshot ResultSnapshot
@@ -265,6 +267,39 @@ func (s *Service) archiveContestSystem(ctx context.Context, item Contest) (Resul
 		return ResultSnapshot{}, err
 	}
 	return snapshot, nil
+}
+
+// recycleContestSandboxes 回收竞赛级解题环境和未终态对抗对局环境。
+func (s *Service) recycleContestSandboxes(ctx context.Context, tenantID, contestID int64, contestCreatedAt time.Time, reason string) error {
+	var battleRefs []string
+	if err := s.store.TenantTx(ctx, tenantID, func(ctx context.Context, tx TxStore) error {
+		var err error
+		battleRefs, err = tx.ListActiveBattleSourceRefsForArchive(ctx, tenantID, contestID)
+		return err
+	}); err != nil {
+		return err
+	}
+	for _, sourceRef := range contestArchiveSourceRefs(contestID, contestCreatedAt, battleRefs) {
+		if err := s.sandbox.RecycleBySourceRef(ctx, contracts.SandboxRecycleRequest{TenantID: tenantID, SourceRef: sourceRef, Reason: reason}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// contestArchiveSourceRefs 汇总归档需要回收的来源引用,保持竞赛级来源优先便于审计。
+func contestArchiveSourceRefs(contestID int64, contestCreatedAt time.Time, battleRefs []string) []string {
+	refs := []string{contestSourceRef(contestID, contestCreatedAt)}
+	seen := map[string]bool{refs[0]: true}
+	for _, sourceRef := range battleRefs {
+		sourceRef = strings.TrimSpace(sourceRef)
+		if sourceRef == "" || seen[sourceRef] {
+			continue
+		}
+		seen[sourceRef] = true
+		refs = append(refs, sourceRef)
+	}
+	return refs
 }
 
 // GetSnapshot 读取归档最终榜单快照。

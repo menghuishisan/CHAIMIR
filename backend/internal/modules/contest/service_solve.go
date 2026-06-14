@@ -56,7 +56,8 @@ func (s *Service) SubmitSolve(ctx context.Context, contestID, problemID int64, r
 	if err != nil {
 		return SubmissionDTO{}, err
 	}
-	if req.ContentRef == nil || req.CodeStorageKey == "" || req.CodeHash == "" {
+	req.CodeHash = strings.TrimSpace(req.CodeHash)
+	if req.ContentRef == nil || req.CodeStorageKey == "" || !isSHA256Hex(req.CodeHash) {
 		return SubmissionDTO{}, apperr.ErrContestSubmissionInvalid
 	}
 	var contest Contest
@@ -299,7 +300,7 @@ func (s *Service) pushLeaderboard(ctx context.Context, tenantID, contestID int64
 		return nil
 	}
 	payload := map[string]any{"contest_id": contestID, "items": ranks}
-	if err := s.notify.Push(ctx, contracts.NotifyPushRequest{TenantID: tenantID, Topic: fmt.Sprintf("contest:%d:leaderboard", contestID), Payload: payload}); err != nil {
+	if err := s.notify.Push(ctx, contracts.NotifyPushRequest{TenantID: tenantID, Topic: fmt.Sprintf("tenant:%d:contest:%d:leaderboard", tenantID, contestID), Payload: payload}); err != nil {
 		return apperr.ErrContestNotifyFailed.WithCause(err)
 	}
 	return nil

@@ -225,34 +225,34 @@ FROM battle_entry
 WHERE tenant_id = $1 AND contest_id = $2 AND problem_id = $3 AND team_id = $4 AND role = $5;
 
 -- name: CreateBattleEntry :one
-INSERT INTO battle_entry (id, tenant_id, contest_id, problem_id, team_id, role, artifact_ref, version_no, is_active, submitted_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, true, now())
-RETURNING id, tenant_id, contest_id, problem_id, team_id, role, artifact_ref, version_no, is_active, submitted_at;
+INSERT INTO battle_entry (id, tenant_id, contest_id, problem_id, team_id, role, artifact_ref, artifact_hash, version_no, is_active, submitted_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, true, now())
+RETURNING id, tenant_id, contest_id, problem_id, team_id, role, artifact_ref, artifact_hash, version_no, is_active, submitted_at;
 
 -- name: ListBattleEntriesForTeam :many
-SELECT id, tenant_id, contest_id, problem_id, team_id, role, artifact_ref, version_no, is_active, submitted_at
+SELECT id, tenant_id, contest_id, problem_id, team_id, role, artifact_ref, artifact_hash, version_no, is_active, submitted_at
 FROM battle_entry
 WHERE tenant_id = $1 AND contest_id = $2 AND team_id = $3
 ORDER BY submitted_at DESC, id DESC;
 
 -- name: GetBattleEntry :one
-SELECT id, tenant_id, contest_id, problem_id, team_id, role, artifact_ref, version_no, is_active, submitted_at
+SELECT id, tenant_id, contest_id, problem_id, team_id, role, artifact_ref, artifact_hash, version_no, is_active, submitted_at
 FROM battle_entry
 WHERE tenant_id = $1 AND id = $2;
 
 -- name: ListActiveBattleOpponents :many
 WITH current_rank AS (
-    SELECT COALESCE(score, 1000) AS score
+    SELECT COALESCE(score, $8::numeric) AS score
     FROM ladder_rank
     WHERE tenant_id = $1 AND contest_id = $2 AND team_id = $5
     LIMIT 1
 )
-SELECT be.id, be.tenant_id, be.contest_id, be.problem_id, be.team_id, be.role, be.artifact_ref, be.version_no, be.is_active, be.submitted_at
+SELECT be.id, be.tenant_id, be.contest_id, be.problem_id, be.team_id, be.role, be.artifact_ref, be.artifact_hash, be.version_no, be.is_active, be.submitted_at
 FROM battle_entry be
 LEFT JOIN ladder_rank lr ON lr.tenant_id = be.tenant_id AND lr.contest_id = be.contest_id AND lr.team_id = be.team_id
 WHERE be.tenant_id = $1 AND be.contest_id = $2 AND be.problem_id = $3 AND be.is_active = true AND be.id <> $4 AND be.team_id <> $5
 ORDER BY
-    CASE WHEN $6::smallint = 2 THEN ABS(COALESCE(lr.score, 1000) - COALESCE((SELECT score FROM current_rank), 1000)) ELSE 0 END ASC,
+    CASE WHEN $6::smallint = 2 THEN ABS(COALESCE(lr.score, $8::numeric) - COALESCE((SELECT score FROM current_rank), $8::numeric)) ELSE 0 END ASC,
     be.submitted_at ASC,
     be.id ASC
 LIMIT $7;
@@ -300,6 +300,15 @@ JOIN battle_entry b ON b.tenant_id = m.tenant_id AND b.id = m.entry_b_id
 WHERE m.tenant_id = $1 AND m.contest_id = $2 AND (a.team_id = $3 OR b.team_id = $3)
 ORDER BY m.matched_at DESC, m.id DESC
 LIMIT $4 OFFSET $5;
+
+-- name: ListActiveBattleSourceRefsForArchive :many
+SELECT DISTINCT source_ref
+FROM battle_match
+WHERE tenant_id = $1
+  AND contest_id = $2
+  AND source_ref <> ''
+  AND status IN (1, 2)
+ORDER BY source_ref ASC;
 
 -- name: FinishBattleMatch :one
 UPDATE battle_match

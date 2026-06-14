@@ -167,6 +167,7 @@ type SMSConfig struct {
 // UploadConfig 描述统一上传边界。
 type UploadConfig struct {
 	ImportMaxBytes            int64
+	ContentAttachmentMaxBytes int64
 	SimBundleMaxBytes         int64
 	SimBundleMaxFiles         int
 	SimBundleMaxUnpackedBytes int64
@@ -192,6 +193,8 @@ type ContestConfig struct {
 	MatchmakerBatchSize           int
 	SubmitRateLimitSeconds        int
 	FailedCooldownSeconds         int
+	BattleELOInitialScore         float64
+	BattleELOKFactor              float64
 }
 
 // NotifyConfig 描述通知事件消费和限频边界。
@@ -211,6 +214,9 @@ type TeachingConfig struct {
 	CourseStatusPollIntervalSeconds int
 	JudgeOutboxBatchSize            int
 	JudgeOutboxPollIntervalMs       int
+	GradeEventOutboxBatchSize       int
+	GradeEventOutboxPollMs          int
+	GradeEventOutboxStaleMs         int
 	GradeExportBatchSize            int
 }
 
@@ -220,6 +226,9 @@ type ExperimentConfig struct {
 	RecycleBatchSize           int
 	InstanceIdleTimeoutSeconds int
 	PausedTimeoutSeconds       int
+	ScoreOutboxBatchSize       int
+	ScoreOutboxPollMs          int
+	ScoreOutboxStaleMs         int
 }
 
 // GradeConfig 描述成绩中心申诉和成绩单签名边界。
@@ -227,6 +236,9 @@ type GradeConfig struct {
 	AppealWindowDays     int
 	TranscriptSigningKey string
 	TranscriptMaxBytes   int64
+	LockOutboxBatchSize  int
+	LockOutboxPollMs     int
+	LockOutboxStaleMs    int
 }
 
 // AdminConfig 描述管理后台统计快照后台任务边界。
@@ -274,6 +286,9 @@ type SandboxConfig struct {
 	ProbeDefaultFailureThreshold  int32
 	RecyclePollIntervalSeconds    int
 	RecycleBatchSize              int
+	RecycleOutboxBatchSize        int
+	RecycleOutboxPollMs           int
+	RecycleOutboxStaleMs          int
 	ReadyIdleTimeoutSeconds       int
 	SelftestRecycleTimeoutSeconds int
 	ControlNamespace              string
@@ -493,6 +508,7 @@ func Load() (*Config, error) {
 	}
 	c.Upload = UploadConfig{
 		ImportMaxBytes:            reqInt64("UPLOAD_IMPORT_MAX_BYTES"),
+		ContentAttachmentMaxBytes: reqInt64("UPLOAD_CONTENT_ATTACHMENT_MAX_BYTES"),
 		SimBundleMaxBytes:         reqInt64("UPLOAD_SIM_BUNDLE_MAX_BYTES"),
 		SimBundleMaxFiles:         reqInt("UPLOAD_SIM_BUNDLE_MAX_FILES"),
 		SimBundleMaxUnpackedBytes: reqInt64("UPLOAD_SIM_BUNDLE_MAX_UNPACKED_BYTES"),
@@ -514,6 +530,8 @@ func Load() (*Config, error) {
 		MatchmakerBatchSize:           reqInt("CONTEST_MATCHMAKER_BATCH_SIZE"),
 		SubmitRateLimitSeconds:        reqInt("CONTEST_SUBMIT_RATE_LIMIT_SECONDS"),
 		FailedCooldownSeconds:         reqInt("CONTEST_FAILED_COOLDOWN_SECONDS"),
+		BattleELOInitialScore:         reqFloat64("CONTEST_BATTLE_ELO_INITIAL_SCORE"),
+		BattleELOKFactor:              reqFloat64("CONTEST_BATTLE_ELO_K_FACTOR"),
 	}
 	c.Notify = NotifyConfig{
 		EventRetryMax:          reqInt("NOTIFY_EVENT_RETRY_MAX"),
@@ -529,6 +547,9 @@ func Load() (*Config, error) {
 		CourseStatusPollIntervalSeconds: reqInt("TEACHING_COURSE_STATUS_POLL_INTERVAL_SECONDS"),
 		JudgeOutboxBatchSize:            reqInt("TEACHING_JUDGE_OUTBOX_BATCH_SIZE"),
 		JudgeOutboxPollIntervalMs:       reqInt("TEACHING_JUDGE_OUTBOX_POLL_INTERVAL_MS"),
+		GradeEventOutboxBatchSize:       reqInt("TEACHING_GRADE_EVENT_OUTBOX_BATCH_SIZE"),
+		GradeEventOutboxPollMs:          reqInt("TEACHING_GRADE_EVENT_OUTBOX_POLL_INTERVAL_MS"),
+		GradeEventOutboxStaleMs:         reqInt("TEACHING_GRADE_EVENT_OUTBOX_STALE_INTERVAL_MS"),
 		GradeExportBatchSize:            reqInt("TEACHING_GRADE_EXPORT_BATCH_SIZE"),
 	}
 	c.Experiment = ExperimentConfig{
@@ -536,11 +557,17 @@ func Load() (*Config, error) {
 		RecycleBatchSize:           reqInt("EXPERIMENT_RECYCLE_BATCH_SIZE"),
 		InstanceIdleTimeoutSeconds: reqInt("EXPERIMENT_INSTANCE_IDLE_TIMEOUT_SECONDS"),
 		PausedTimeoutSeconds:       reqInt("EXPERIMENT_PAUSED_TIMEOUT_SECONDS"),
+		ScoreOutboxBatchSize:       reqInt("EXPERIMENT_SCORE_OUTBOX_BATCH_SIZE"),
+		ScoreOutboxPollMs:          reqInt("EXPERIMENT_SCORE_OUTBOX_POLL_INTERVAL_MS"),
+		ScoreOutboxStaleMs:         reqInt("EXPERIMENT_SCORE_OUTBOX_STALE_INTERVAL_MS"),
 	}
 	c.Grade = GradeConfig{
 		AppealWindowDays:     reqInt("GRADE_APPEAL_WINDOW_DAYS"),
 		TranscriptSigningKey: req("GRADE_TRANSCRIPT_SIGNING_KEY"),
 		TranscriptMaxBytes:   reqInt64("GRADE_TRANSCRIPT_MAX_BYTES"),
+		LockOutboxBatchSize:  reqInt("GRADE_LOCK_OUTBOX_BATCH_SIZE"),
+		LockOutboxPollMs:     reqInt("GRADE_LOCK_OUTBOX_POLL_INTERVAL_MS"),
+		LockOutboxStaleMs:    reqInt("GRADE_LOCK_OUTBOX_STALE_INTERVAL_MS"),
 	}
 	c.Admin = AdminConfig{
 		StatisticsSnapshotIntervalSeconds: reqInt("ADMIN_STATISTICS_SNAPSHOT_INTERVAL_SECONDS"),
@@ -584,6 +611,9 @@ func Load() (*Config, error) {
 		ProbeDefaultFailureThreshold:  int32(reqInt("SANDBOX_PROBE_DEFAULT_FAILURE_THRESHOLD")),
 		RecyclePollIntervalSeconds:    reqInt("SANDBOX_RECYCLE_POLL_INTERVAL_SECONDS"),
 		RecycleBatchSize:              reqInt("SANDBOX_RECYCLE_BATCH_SIZE"),
+		RecycleOutboxBatchSize:        reqInt("SANDBOX_RECYCLE_OUTBOX_BATCH_SIZE"),
+		RecycleOutboxPollMs:           reqInt("SANDBOX_RECYCLE_OUTBOX_POLL_INTERVAL_MS"),
+		RecycleOutboxStaleMs:          reqInt("SANDBOX_RECYCLE_OUTBOX_STALE_INTERVAL_MS"),
 		ReadyIdleTimeoutSeconds:       reqInt("SANDBOX_READY_IDLE_TIMEOUT_SECONDS"),
 		SelftestRecycleTimeoutSeconds: reqInt("SANDBOX_SELFTEST_RECYCLE_TIMEOUT_SECONDS"),
 		ControlNamespace:              req("SANDBOX_CONTROL_NAMESPACE"),
@@ -669,6 +699,9 @@ func Load() (*Config, error) {
 	if c.Upload.VirusScanMaxBytes <= 0 {
 		errs = append(errs, "UPLOAD_VIRUS_SCAN_MAX_BYTES 必须大于 0")
 	}
+	if c.Upload.ContentAttachmentMaxBytes <= 0 {
+		errs = append(errs, "UPLOAD_CONTENT_ATTACHMENT_MAX_BYTES 必须大于 0")
+	}
 	if c.Upload.VirusScanRequired && strings.TrimSpace(c.Upload.VirusScanAddress) == "" {
 		errs = append(errs, "UPLOAD_VIRUS_SCAN_REQUIRED=true 时必须设置 UPLOAD_VIRUS_SCAN_ADDRESS")
 	}
@@ -695,6 +728,12 @@ func Load() (*Config, error) {
 	}
 	if c.Contest.FailedCooldownSeconds <= 0 {
 		errs = append(errs, "CONTEST_FAILED_COOLDOWN_SECONDS 必须大于 0")
+	}
+	if c.Contest.BattleELOInitialScore <= 0 {
+		errs = append(errs, "CONTEST_BATTLE_ELO_INITIAL_SCORE 必须大于 0")
+	}
+	if c.Contest.BattleELOKFactor <= 0 {
+		errs = append(errs, "CONTEST_BATTLE_ELO_K_FACTOR 必须大于 0")
 	}
 	if c.Notify.EventRetryMax <= 0 {
 		errs = append(errs, "NOTIFY_EVENT_RETRY_MAX 必须大于 0")
@@ -729,6 +768,15 @@ func Load() (*Config, error) {
 	if c.Teaching.JudgeOutboxPollIntervalMs <= 0 {
 		errs = append(errs, "TEACHING_JUDGE_OUTBOX_POLL_INTERVAL_MS 必须大于 0")
 	}
+	if c.Teaching.GradeEventOutboxBatchSize <= 0 {
+		errs = append(errs, "TEACHING_GRADE_EVENT_OUTBOX_BATCH_SIZE 必须大于 0")
+	}
+	if c.Teaching.GradeEventOutboxPollMs <= 0 {
+		errs = append(errs, "TEACHING_GRADE_EVENT_OUTBOX_POLL_INTERVAL_MS 必须大于 0")
+	}
+	if c.Teaching.GradeEventOutboxStaleMs <= 0 {
+		errs = append(errs, "TEACHING_GRADE_EVENT_OUTBOX_STALE_INTERVAL_MS 必须大于 0")
+	}
 	if c.Teaching.GradeExportBatchSize <= 0 {
 		errs = append(errs, "TEACHING_GRADE_EXPORT_BATCH_SIZE 必须大于 0")
 	}
@@ -744,8 +792,26 @@ func Load() (*Config, error) {
 	if c.Experiment.PausedTimeoutSeconds <= 0 {
 		errs = append(errs, "EXPERIMENT_PAUSED_TIMEOUT_SECONDS 必须大于 0")
 	}
+	if c.Experiment.ScoreOutboxBatchSize <= 0 {
+		errs = append(errs, "EXPERIMENT_SCORE_OUTBOX_BATCH_SIZE 必须大于 0")
+	}
+	if c.Experiment.ScoreOutboxPollMs <= 0 {
+		errs = append(errs, "EXPERIMENT_SCORE_OUTBOX_POLL_INTERVAL_MS 必须大于 0")
+	}
+	if c.Experiment.ScoreOutboxStaleMs <= 0 {
+		errs = append(errs, "EXPERIMENT_SCORE_OUTBOX_STALE_INTERVAL_MS 必须大于 0")
+	}
 	if c.Grade.TranscriptMaxBytes <= 0 {
 		errs = append(errs, "GRADE_TRANSCRIPT_MAX_BYTES 必须大于 0")
+	}
+	if c.Grade.LockOutboxBatchSize <= 0 {
+		errs = append(errs, "GRADE_LOCK_OUTBOX_BATCH_SIZE 必须大于 0")
+	}
+	if c.Grade.LockOutboxPollMs <= 0 {
+		errs = append(errs, "GRADE_LOCK_OUTBOX_POLL_INTERVAL_MS 必须大于 0")
+	}
+	if c.Grade.LockOutboxStaleMs <= 0 {
+		errs = append(errs, "GRADE_LOCK_OUTBOX_STALE_INTERVAL_MS 必须大于 0")
 	}
 	if c.Judge.QueuePollIntervalMs <= 0 {
 		errs = append(errs, "JUDGE_QUEUE_POLL_INTERVAL_MS 必须大于 0")
@@ -824,6 +890,15 @@ func Load() (*Config, error) {
 	}
 	if c.Sandbox.RecycleBatchSize <= 0 {
 		errs = append(errs, "SANDBOX_RECYCLE_BATCH_SIZE 必须大于 0")
+	}
+	if c.Sandbox.RecycleOutboxBatchSize <= 0 {
+		errs = append(errs, "SANDBOX_RECYCLE_OUTBOX_BATCH_SIZE 必须大于 0")
+	}
+	if c.Sandbox.RecycleOutboxPollMs <= 0 {
+		errs = append(errs, "SANDBOX_RECYCLE_OUTBOX_POLL_INTERVAL_MS 必须大于 0")
+	}
+	if c.Sandbox.RecycleOutboxStaleMs <= 0 {
+		errs = append(errs, "SANDBOX_RECYCLE_OUTBOX_STALE_INTERVAL_MS 必须大于 0")
 	}
 	if c.Sandbox.ReadyIdleTimeoutSeconds <= 0 {
 		errs = append(errs, "SANDBOX_READY_IDLE_TIMEOUT_SECONDS 必须大于 0")

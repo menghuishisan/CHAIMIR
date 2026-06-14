@@ -69,6 +69,12 @@ type CloneItemRequest struct {
 	NewVersion string `json:"new_version"`
 }
 
+// AttachmentDownloadGrantRequest 是附件短时下载授权请求。
+type AttachmentDownloadGrantRequest struct {
+	ResourceID string `json:"resource_id"`
+	ObjectRef  string `json:"object_ref"`
+}
+
 // BatchItemsRequest 是内部批量题面读取请求。
 type BatchItemsRequest struct {
 	Items []ItemRefDTO `json:"items"`

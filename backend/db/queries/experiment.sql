@@ -93,6 +93,12 @@ SELECT id, tenant_id, experiment_id, owner_account_id, group_id, source_ref, san
 FROM experiment_instance
 WHERE tenant_id = $1 AND id = $2;
 
+-- name: GetExperimentInstanceForUpdate :one
+SELECT id, tenant_id, experiment_id, owner_account_id, group_id, source_ref, sandbox_refs, sim_session_refs, status, COALESCE(score::float8, 0)::float8 AS score, started_at, finished_at, last_active_at
+FROM experiment_instance
+WHERE tenant_id = $1 AND id = $2
+FOR UPDATE;
+
 -- name: GetExperimentInstanceBySourceRef :one
 SELECT id, tenant_id, experiment_id, owner_account_id, group_id, source_ref, sandbox_refs, sim_session_refs, status, COALESCE(score::float8, 0)::float8 AS score, started_at, finished_at, last_active_at
 FROM experiment_instance
@@ -153,28 +159,29 @@ WHERE id IN (
 RETURNING id, tenant_id, experiment_id, owner_account_id, group_id, source_ref, sandbox_refs, sim_session_refs, status, COALESCE(score::float8, 0)::float8 AS score, started_at, finished_at, last_active_at;
 
 -- name: UpsertCheckpointResult :one
-INSERT INTO checkpoint_result (id, tenant_id, instance_id, checkpoint_id, judge_task_ref, passed, score, detail_ref, judged_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7::text::numeric, $8, now())
+INSERT INTO checkpoint_result (id, tenant_id, instance_id, checkpoint_id, judge_task_ref, passed, score, detail_ref, binding_output, judged_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7::text::numeric, $8, $9, now())
 ON CONFLICT (tenant_id, instance_id, checkpoint_id) DO UPDATE
 SET judge_task_ref = EXCLUDED.judge_task_ref,
     passed = EXCLUDED.passed,
     score = EXCLUDED.score,
     detail_ref = EXCLUDED.detail_ref,
+    binding_output = CASE WHEN EXCLUDED.binding_output = '{}'::jsonb THEN checkpoint_result.binding_output ELSE EXCLUDED.binding_output END,
     judged_at = now()
-RETURNING id, tenant_id, instance_id, checkpoint_id, judge_task_ref, passed, score::float8 AS score, detail_ref, judged_at;
+RETURNING id, tenant_id, instance_id, checkpoint_id, judge_task_ref, passed, score::float8 AS score, detail_ref, binding_output, judged_at;
 
 -- name: GetCheckpointResult :one
-SELECT id, tenant_id, instance_id, checkpoint_id, judge_task_ref, passed, score::float8 AS score, detail_ref, judged_at
+SELECT id, tenant_id, instance_id, checkpoint_id, judge_task_ref, passed, score::float8 AS score, detail_ref, binding_output, judged_at
 FROM checkpoint_result
 WHERE tenant_id = $1 AND instance_id = $2 AND checkpoint_id = $3;
 
 -- name: GetCheckpointResultByJudgeTask :one
-SELECT id, tenant_id, instance_id, checkpoint_id, judge_task_ref, passed, score::float8 AS score, detail_ref, judged_at
+SELECT id, tenant_id, instance_id, checkpoint_id, judge_task_ref, passed, score::float8 AS score, detail_ref, binding_output, judged_at
 FROM checkpoint_result
 WHERE tenant_id = $1 AND judge_task_ref = $2;
 
 -- name: ListCheckpointResults :many
-SELECT id, tenant_id, instance_id, checkpoint_id, judge_task_ref, passed, score::float8 AS score, detail_ref, judged_at
+SELECT id, tenant_id, instance_id, checkpoint_id, judge_task_ref, passed, score::float8 AS score, detail_ref, binding_output, judged_at
 FROM checkpoint_result
 WHERE tenant_id = $1 AND instance_id = $2
 ORDER BY checkpoint_id ASC;
@@ -236,3 +243,33 @@ SELECT
     COALESCE((SELECT COUNT(*)::bigint FROM experiment_instance i JOIN experiment e ON e.tenant_id = i.tenant_id AND e.id = i.experiment_id WHERE i.tenant_id = $1 AND ($2::bigint = 0 OR e.course_id = $2) AND i.status IN (1, 2, 3, 7)), 0)::bigint AS active_instance_count
 FROM experiment e
 WHERE e.tenant_id = $1 AND e.deleted_at IS NULL AND ($2::bigint = 0 OR e.course_id = $2);
+
+-- name: CreateExperimentScoreOutbox :one
+INSERT INTO experiment_score_outbox (id, tenant_id, experiment_id, instance_id, student_id, score, trace_id, scored_at, status, retry_count, last_error, created_at, updated_at)
+VALUES ($1, $2, $3, $4, $5, $6::text::numeric, $7, $8, 1, 0, NULL, now(), now())
+RETURNING id, tenant_id, experiment_id, instance_id, student_id, score, trace_id, scored_at, status, retry_count, last_error, created_at, updated_at;
+
+-- name: ClaimPendingExperimentScoreOutbox :many
+UPDATE experiment_score_outbox
+SET status = 4, retry_count = retry_count + 1, updated_at = now()
+WHERE id IN (
+    SELECT id
+    FROM experiment_score_outbox
+    WHERE status IN (1, 3) OR (status = 4 AND updated_at <= @stale_before::timestamptz)
+    ORDER BY created_at ASC, id ASC
+    LIMIT @page_limit
+    FOR UPDATE SKIP LOCKED
+)
+RETURNING id, tenant_id, experiment_id, instance_id, student_id, score, trace_id, scored_at, status, retry_count, last_error, created_at, updated_at;
+
+-- name: MarkExperimentScoreOutboxPublished :one
+UPDATE experiment_score_outbox
+SET status = 2, last_error = NULL, updated_at = now()
+WHERE tenant_id = $1 AND id = $2
+RETURNING id, tenant_id, experiment_id, instance_id, student_id, score, trace_id, scored_at, status, retry_count, last_error, created_at, updated_at;
+
+-- name: MarkExperimentScoreOutboxFailed :one
+UPDATE experiment_score_outbox
+SET status = 3, last_error = $3, updated_at = now()
+WHERE tenant_id = $1 AND id = $2
+RETURNING id, tenant_id, experiment_id, instance_id, student_id, score, trace_id, scored_at, status, retry_count, last_error, created_at, updated_at;

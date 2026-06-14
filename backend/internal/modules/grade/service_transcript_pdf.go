@@ -38,7 +38,11 @@ func renderTranscriptPDF(summary GradeSummaryDTO, signingKey string) ([]byte, er
 	}
 	pdf.Ln(6)
 	pdf.SetFont("Helvetica", "", 8)
-	pdf.MultiCell(190, 5, "Verification: "+verificationText(summary, signingKey), "", "", false)
+	verification, err := verificationText(summary, signingKey)
+	if err != nil {
+		return nil, err
+	}
+	pdf.MultiCell(190, 5, "Verification: "+verification, "", "", false)
 	var buf bytes.Buffer
 	if err := pdf.Output(&buf); err != nil {
 		return nil, err
@@ -47,17 +51,17 @@ func renderTranscriptPDF(summary GradeSummaryDTO, signingKey string) ([]byte, er
 }
 
 // verificationText 生成不暴露密钥的成绩单 HMAC 校验码。
-func verificationText(summary GradeSummaryDTO, signingKey string) string {
+func verificationText(summary GradeSummaryDTO, signingKey string) (string, error) {
 	var seed strings.Builder
-	_, _ = fmt.Fprintf(&seed, "student=%d;semester=%d;gpa=%.3f;cumulative=%.3f;credits=%.1f;",
-		summary.StudentID, summary.SemesterID, summary.GPA, summary.CumulativeGPA, summary.TotalCredits)
+	seed.WriteString(fmt.Sprintf("student=%d;semester=%d;gpa=%.3f;cumulative=%.3f;credits=%.1f;",
+		summary.StudentID, summary.SemesterID, summary.GPA, summary.CumulativeGPA, summary.TotalCredits))
 	for _, row := range summary.CourseGrades {
-		_, _ = fmt.Fprintf(&seed, "course=%d,student=%d,total=%.2f,credits=%.1f;",
-			row.CourseID, row.StudentID, row.FinalTotal, row.Credits)
+		seed.WriteString(fmt.Sprintf("course=%d,student=%d,total=%.2f,credits=%.1f;",
+			row.CourseID, row.StudentID, row.FinalTotal, row.Credits))
 	}
 	code, err := pkgcrypto.HMACSHA256Hex([]byte(signingKey), seed.String())
 	if err != nil {
-		return ""
+		return "", err
 	}
-	return strings.ToUpper(code)
+	return strings.ToUpper(code), nil
 }

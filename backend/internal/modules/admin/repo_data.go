@@ -1,4 +1,4 @@
-// admin repo_convert 文件负责 M9 repo 查询写入与 sqlc 行到模块 DTO 的转换。
+// admin repo_data 文件负责 M9 repo 查询写入与 sqlc 行到模块 DTO 的转换。
 package admin
 
 import (
@@ -173,8 +173,14 @@ func (t *txStore) HandleAlertEvent(ctx context.Context, id int64, status int16, 
 
 // ListPlatformStatistics 查询运营统计时间序列。
 func (t *txStore) ListPlatformStatistics(ctx context.Context, scope int16, tenantID int64, fromDate, toDate string) ([]StatisticsDTO, error) {
-	from, _ := time.Parse("2006-01-02", fromDate)
-	to, _ := time.Parse("2006-01-02", toDate)
+	from, err := time.Parse("2006-01-02", fromDate)
+	if err != nil {
+		return nil, apperr.ErrAdminStatisticsInvalid.WithCause(err)
+	}
+	to, err := time.Parse("2006-01-02", toDate)
+	if err != nil {
+		return nil, apperr.ErrAdminStatisticsInvalid.WithCause(err)
+	}
 	rows, err := t.q.ListPlatformStatistics(ctx, sqlcgen.ListPlatformStatisticsParams{Scope: scope, TenantID: pgtypex.Int8When(tenantID, tenantID > 0), FromDate: pgtypex.Date(from), ToDate: pgtypex.Date(to)})
 	if err != nil {
 		return nil, err
@@ -188,7 +194,10 @@ func (t *txStore) ListPlatformStatistics(ctx context.Context, scope int16, tenan
 
 // UpsertPlatformStatistics 写入或更新运营统计快照。
 func (t *txStore) UpsertPlatformStatistics(ctx context.Context, id int64, scope int16, tenantID int64, statDate string, metrics map[string]any) (StatisticsDTO, error) {
-	date, _ := time.Parse("2006-01-02", statDate)
+	date, err := time.Parse("2006-01-02", statDate)
+	if err != nil {
+		return StatisticsDTO{}, apperr.ErrAdminStatisticsInvalid.WithCause(err)
+	}
 	data, err := jsonx.ObjectBytes(metrics, apperr.ErrAdminStatisticsInvalid)
 	if err != nil {
 		return StatisticsDTO{}, err

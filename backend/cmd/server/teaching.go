@@ -94,6 +94,11 @@ func RegisterTeachingModule(ctx context.Context, deps TeachingModuleDeps) (*teac
 		return nil, err
 	}
 	go background.Run(ctx, task)
+	gradeEventTask, err := teachingGradeEventOutboxTask(deps.Config, svc)
+	if err != nil {
+		return nil, err
+	}
+	go background.Run(ctx, gradeEventTask)
 	statusTask, err := teachingCourseStatusTask(deps.Config, svc)
 	if err != nil {
 		return nil, err
@@ -115,6 +120,23 @@ func teachingJudgeOutboxTask(cfg config.TeachingConfig, svc *teaching.Service) (
 		Interval: time.Duration(cfg.JudgeOutboxPollIntervalMs) * time.Millisecond,
 		Run: func(ctx context.Context) error {
 			return svc.RunJudgeOutboxOnce(ctx, 0)
+		},
+	}, nil
+}
+
+// teachingGradeEventOutboxTask 把 M6 成绩变更事件 outbox 接入统一后台任务运行器。
+func teachingGradeEventOutboxTask(cfg config.TeachingConfig, svc *teaching.Service) (background.Task, error) {
+	if svc == nil {
+		return background.Task{}, fmt.Errorf("teaching grade event outbox worker 缺少 service")
+	}
+	if cfg.GradeEventOutboxPollMs <= 0 {
+		return background.Task{}, fmt.Errorf("TEACHING_GRADE_EVENT_OUTBOX_POLL_INTERVAL_MS 必须大于 0")
+	}
+	return background.Task{
+		Name:     "teaching.grade_event_outbox",
+		Interval: time.Duration(cfg.GradeEventOutboxPollMs) * time.Millisecond,
+		Run: func(ctx context.Context) error {
+			return svc.RunTeachingGradeEventOutboxOnce(ctx)
 		},
 	}, nil
 }

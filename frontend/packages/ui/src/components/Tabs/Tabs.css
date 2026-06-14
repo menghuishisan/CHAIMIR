@@ -1,0 +1,49 @@
+/* Tabs 组件样式 */
+
+.chaimir-tabs {
+  display: flex;
+  flex-direction: column;
+}
+
+.chaimir-tabs__nav {
+  position: relative;
+  display: flex;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.chaimir-tabs__tab {
+  position: relative;
+  padding: var(--space-3) var(--space-4);
+  font-size: var(--text-base);
+  font-weight: var(--font-medium);
+  color: var(--color-text-sub);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  transition: color var(--t) var(--ease);
+  white-space: nowrap;
+}
+
+.chaimir-tabs__tab:hover:not(.chaimir-tabs__tab--disabled) {
+  color: var(--color-text);
+}
+
+.chaimir-tabs__tab--active {
+  color: var(--color-primary-text);
+  font-weight: var(--font-semibold);
+}
+
+.chaimir-tabs__tab--disabled {
+  color: var(--color-text-faint);
+  cursor: not-allowed;
+}
+
+/* 滑入下划线（需要 JS 计算位置） */
+.chaimir-tabs__indicator {
+  position: absolute;
+  bottom: -1px;
+  left: 0;
+  height: 2px;
+  background: var(--color-primary);
+  transition: all 0.25s var(--ease);
+}

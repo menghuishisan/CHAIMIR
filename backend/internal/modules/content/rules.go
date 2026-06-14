@@ -8,6 +8,8 @@ import (
 	"chaimir/pkg/apperr"
 )
 
+const contentBodyMaxInlineStringBytes = 16 * 1024
+
 var (
 	contentCodeRe = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_-]{2,95}$`)
 	semverRe      = regexp.MustCompile(`^v?[0-9]+(\.[0-9]+){1,2}(-[0-9A-Za-z.-]+)?$`)
@@ -24,6 +26,9 @@ func validateCreateRequest(req CreateItemRequest) (CreateItemRequest, error) {
 	if !validCode(req.Code) || !validVersion(req.Version) || !validType(req.Type) || req.Title == "" || !validDifficulty(req.Difficulty) || !validVisibility(req.Visibility) || req.Body == nil {
 		return CreateItemRequest{}, apperr.ErrContentInvalid
 	}
+	if err := validateContentBodyRefs(req.Body); err != nil {
+		return CreateItemRequest{}, err
+	}
 	return req, nil
 }
 
@@ -35,6 +40,9 @@ func validateUpdateRequest(req UpdateItemRequest) (UpdateItemRequest, error) {
 	req.SensitiveFields = normalizedStrings(append(req.SensitiveFields, defaultSensitivePaths...))
 	if req.Title == "" || !validDifficulty(req.Difficulty) || !validVisibility(req.Visibility) || req.Body == nil {
 		return UpdateItemRequest{}, apperr.ErrContentInvalid
+	}
+	if err := validateContentBodyRefs(req.Body); err != nil {
+		return UpdateItemRequest{}, err
 	}
 	return req, nil
 }
@@ -136,4 +144,42 @@ func validDifficulty(value int16) bool {
 // validVisibility 校验可见性。
 func validVisibility(value int16) bool {
 	return value == VisibilityPrivate || value == VisibilityTenant || value == VisibilityShared
+}
+
+// validateContentBodyRefs 拒绝正文内联大文件、data URL 和外部直链,附件必须走统一文件服务对象引用。
+func validateContentBodyRefs(body map[string]any) error {
+	return walkContentBody(body)
+}
+
+// walkContentBody 递归检查 JSON 正文中的字符串字段是否越过文件服务边界。
+func walkContentBody(value any) error {
+	switch v := value.(type) {
+	case map[string]any:
+		for _, child := range v {
+			if err := walkContentBody(child); err != nil {
+				return err
+			}
+		}
+	case []any:
+		for _, child := range v {
+			if err := walkContentBody(child); err != nil {
+				return err
+			}
+		}
+	case string:
+		if unsafeInlineBodyString(v) {
+			return apperr.ErrContentBodyInvalid
+		}
+	}
+	return nil
+}
+
+// unsafeInlineBodyString 判断字符串是否疑似把附件或外部资源直接塞进正文。
+func unsafeInlineBodyString(value string) bool {
+	trimmed := strings.TrimSpace(value)
+	lower := strings.ToLower(trimmed)
+	if strings.HasPrefix(lower, "data:") || strings.HasPrefix(lower, "http://") || strings.HasPrefix(lower, "https://") {
+		return true
+	}
+	return len([]byte(trimmed)) > contentBodyMaxInlineStringBytes
 }

@@ -273,20 +273,21 @@ func (q *Queries) CountProblemSolvedTeams(ctx context.Context, arg CountProblemS
 }
 
 const createBattleEntry = `-- name: CreateBattleEntry :one
-INSERT INTO battle_entry (id, tenant_id, contest_id, problem_id, team_id, role, artifact_ref, version_no, is_active, submitted_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, true, now())
-RETURNING id, tenant_id, contest_id, problem_id, team_id, role, artifact_ref, version_no, is_active, submitted_at
+INSERT INTO battle_entry (id, tenant_id, contest_id, problem_id, team_id, role, artifact_ref, artifact_hash, version_no, is_active, submitted_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, true, now())
+RETURNING id, tenant_id, contest_id, problem_id, team_id, role, artifact_ref, artifact_hash, version_no, is_active, submitted_at
 `
 
 type CreateBattleEntryParams struct {
-	ID          int64  `json:"id"`
-	TenantID    int64  `json:"tenant_id"`
-	ContestID   int64  `json:"contest_id"`
-	ProblemID   int64  `json:"problem_id"`
-	TeamID      int64  `json:"team_id"`
-	Role        int16  `json:"role"`
-	ArtifactRef string `json:"artifact_ref"`
-	VersionNo   int32  `json:"version_no"`
+	ID           int64  `json:"id"`
+	TenantID     int64  `json:"tenant_id"`
+	ContestID    int64  `json:"contest_id"`
+	ProblemID    int64  `json:"problem_id"`
+	TeamID       int64  `json:"team_id"`
+	Role         int16  `json:"role"`
+	ArtifactRef  string `json:"artifact_ref"`
+	ArtifactHash string `json:"artifact_hash"`
+	VersionNo    int32  `json:"version_no"`
 }
 
 func (q *Queries) CreateBattleEntry(ctx context.Context, arg CreateBattleEntryParams) (BattleEntry, error) {
@@ -298,6 +299,7 @@ func (q *Queries) CreateBattleEntry(ctx context.Context, arg CreateBattleEntryPa
 		arg.TeamID,
 		arg.Role,
 		arg.ArtifactRef,
+		arg.ArtifactHash,
 		arg.VersionNo,
 	)
 	var i BattleEntry
@@ -309,6 +311,7 @@ func (q *Queries) CreateBattleEntry(ctx context.Context, arg CreateBattleEntryPa
 		&i.TeamID,
 		&i.Role,
 		&i.ArtifactRef,
+		&i.ArtifactHash,
 		&i.VersionNo,
 		&i.IsActive,
 		&i.SubmittedAt,
@@ -806,7 +809,7 @@ func (q *Queries) FinishBattleMatch(ctx context.Context, arg FinishBattleMatchPa
 }
 
 const getBattleEntry = `-- name: GetBattleEntry :one
-SELECT id, tenant_id, contest_id, problem_id, team_id, role, artifact_ref, version_no, is_active, submitted_at
+SELECT id, tenant_id, contest_id, problem_id, team_id, role, artifact_ref, artifact_hash, version_no, is_active, submitted_at
 FROM battle_entry
 WHERE tenant_id = $1 AND id = $2
 `
@@ -827,6 +830,7 @@ func (q *Queries) GetBattleEntry(ctx context.Context, arg GetBattleEntryParams) 
 		&i.TeamID,
 		&i.Role,
 		&i.ArtifactRef,
+		&i.ArtifactHash,
 		&i.VersionNo,
 		&i.IsActive,
 		&i.SubmittedAt,
@@ -1248,30 +1252,31 @@ func (q *Queries) GetVulnSource(ctx context.Context, arg GetVulnSourceParams) (V
 
 const listActiveBattleOpponents = `-- name: ListActiveBattleOpponents :many
 WITH current_rank AS (
-    SELECT COALESCE(score, 1000) AS score
+    SELECT COALESCE(score, $8::numeric) AS score
     FROM ladder_rank
     WHERE tenant_id = $1 AND contest_id = $2 AND team_id = $5
     LIMIT 1
 )
-SELECT be.id, be.tenant_id, be.contest_id, be.problem_id, be.team_id, be.role, be.artifact_ref, be.version_no, be.is_active, be.submitted_at
+SELECT be.id, be.tenant_id, be.contest_id, be.problem_id, be.team_id, be.role, be.artifact_ref, be.artifact_hash, be.version_no, be.is_active, be.submitted_at
 FROM battle_entry be
 LEFT JOIN ladder_rank lr ON lr.tenant_id = be.tenant_id AND lr.contest_id = be.contest_id AND lr.team_id = be.team_id
 WHERE be.tenant_id = $1 AND be.contest_id = $2 AND be.problem_id = $3 AND be.is_active = true AND be.id <> $4 AND be.team_id <> $5
 ORDER BY
-    CASE WHEN $6::smallint = 2 THEN ABS(COALESCE(lr.score, 1000) - COALESCE((SELECT score FROM current_rank), 1000)) ELSE 0 END ASC,
+    CASE WHEN $6::smallint = 2 THEN ABS(COALESCE(lr.score, $8::numeric) - COALESCE((SELECT score FROM current_rank), $8::numeric)) ELSE 0 END ASC,
     be.submitted_at ASC,
     be.id ASC
 LIMIT $7
 `
 
 type ListActiveBattleOpponentsParams struct {
-	TenantID  int64 `json:"tenant_id"`
-	ContestID int64 `json:"contest_id"`
-	ProblemID int64 `json:"problem_id"`
-	ID        int64 `json:"id"`
-	TeamID    int64 `json:"team_id"`
-	Column6   int16 `json:"column_6"`
-	Limit     int32 `json:"limit"`
+	TenantID  int64          `json:"tenant_id"`
+	ContestID int64          `json:"contest_id"`
+	ProblemID int64          `json:"problem_id"`
+	ID        int64          `json:"id"`
+	TeamID    int64          `json:"team_id"`
+	Column6   int16          `json:"column_6"`
+	Limit     int32          `json:"limit"`
+	Column8   pgtype.Numeric `json:"column_8"`
 }
 
 func (q *Queries) ListActiveBattleOpponents(ctx context.Context, arg ListActiveBattleOpponentsParams) ([]BattleEntry, error) {
@@ -1283,6 +1288,7 @@ func (q *Queries) ListActiveBattleOpponents(ctx context.Context, arg ListActiveB
 		arg.TeamID,
 		arg.Column6,
 		arg.Limit,
+		arg.Column8,
 	)
 	if err != nil {
 		return nil, err
@@ -1299,6 +1305,7 @@ func (q *Queries) ListActiveBattleOpponents(ctx context.Context, arg ListActiveB
 			&i.TeamID,
 			&i.Role,
 			&i.ArtifactRef,
+			&i.ArtifactHash,
 			&i.VersionNo,
 			&i.IsActive,
 			&i.SubmittedAt,
@@ -1313,8 +1320,43 @@ func (q *Queries) ListActiveBattleOpponents(ctx context.Context, arg ListActiveB
 	return items, nil
 }
 
+const listActiveBattleSourceRefsForArchive = `-- name: ListActiveBattleSourceRefsForArchive :many
+SELECT DISTINCT source_ref
+FROM battle_match
+WHERE tenant_id = $1
+  AND contest_id = $2
+  AND source_ref <> ''
+  AND status IN (1, 2)
+ORDER BY source_ref ASC
+`
+
+type ListActiveBattleSourceRefsForArchiveParams struct {
+	TenantID  int64 `json:"tenant_id"`
+	ContestID int64 `json:"contest_id"`
+}
+
+func (q *Queries) ListActiveBattleSourceRefsForArchive(ctx context.Context, arg ListActiveBattleSourceRefsForArchiveParams) ([]string, error) {
+	rows, err := q.db.Query(ctx, listActiveBattleSourceRefsForArchive, arg.TenantID, arg.ContestID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []string{}
+	for rows.Next() {
+		var source_ref string
+		if err := rows.Scan(&source_ref); err != nil {
+			return nil, err
+		}
+		items = append(items, source_ref)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listBattleEntriesForTeam = `-- name: ListBattleEntriesForTeam :many
-SELECT id, tenant_id, contest_id, problem_id, team_id, role, artifact_ref, version_no, is_active, submitted_at
+SELECT id, tenant_id, contest_id, problem_id, team_id, role, artifact_ref, artifact_hash, version_no, is_active, submitted_at
 FROM battle_entry
 WHERE tenant_id = $1 AND contest_id = $2 AND team_id = $3
 ORDER BY submitted_at DESC, id DESC
@@ -1343,6 +1385,7 @@ func (q *Queries) ListBattleEntriesForTeam(ctx context.Context, arg ListBattleEn
 			&i.TeamID,
 			&i.Role,
 			&i.ArtifactRef,
+			&i.ArtifactHash,
 			&i.VersionNo,
 			&i.IsActive,
 			&i.SubmittedAt,

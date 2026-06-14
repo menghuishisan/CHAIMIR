@@ -20,6 +20,10 @@ const (
 	CodeGradeTranscriptFailed = "B0008"
 	// CodeGradeForbidden 表示无权访问成绩中心资源。
 	CodeGradeForbidden = "B0009"
+	// CodeGradeEventPublishFailed 表示成绩锁定事件暂时无法同步。
+	CodeGradeEventPublishFailed = "B0010"
+	// CodeGradeAuditFailed 表示成绩中心审计记录写入失败。
+	CodeGradeAuditFailed = "B0011"
 )
 
 var (
@@ -41,4 +45,8 @@ var (
 	ErrGradeTranscriptFailed = New(CodeGradeTranscriptFailed, "成绩单暂时无法生成或下载,请稍后重试")
 	// ErrGradeForbidden 表示无法访问成绩资源。
 	ErrGradeForbidden = New(CodeGradeForbidden, "无法访问该成绩信息")
+	// ErrGradeEventPublishFailed 表示成绩锁定状态暂时无法同步。
+	ErrGradeEventPublishFailed = New(CodeGradeEventPublishFailed, "成绩锁定状态暂时无法同步,请稍后重试")
+	// ErrGradeAuditFailed 表示成绩中心关键操作暂时无法完成。
+	ErrGradeAuditFailed = New(CodeGradeAuditFailed, "成绩操作暂时无法完成,请稍后重试")
 )

@@ -43,6 +43,21 @@ type GradeLevelConfig struct {
 	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
 }
 
+type GradeLockOutbox struct {
+	ID         int64              `json:"id"`
+	TenantID   int64              `json:"tenant_id"`
+	ReviewID   int64              `json:"review_id"`
+	CourseID   int64              `json:"course_id"`
+	Locked     bool               `json:"locked"`
+	Reason     string             `json:"reason"`
+	TraceID    string             `json:"trace_id"`
+	Status     int16              `json:"status"`
+	RetryCount int32              `json:"retry_count"`
+	LastError  pgtype.Text        `json:"last_error"`
+	CreatedAt  pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt  pgtype.Timestamptz `json:"updated_at"`
+}
+
 type GradeReview struct {
 	ID          int64              `json:"id"`
 	TenantID    int64              `json:"tenant_id"`

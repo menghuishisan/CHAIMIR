@@ -9,10 +9,12 @@ import (
 )
 
 type Querier interface {
+	ClaimPendingSandboxRecycleOutbox(ctx context.Context, arg ClaimPendingSandboxRecycleOutboxParams) ([]SandboxRecycleOutbox, error)
 	CountActiveSandboxes(ctx context.Context, tenantID int64) (int64, error)
 	CreateRuntimeImage(ctx context.Context, arg CreateRuntimeImageParams) (RuntimeImage, error)
 	CreateSandbox(ctx context.Context, arg CreateSandboxParams) (Sandbox, error)
 	CreateSandboxEvent(ctx context.Context, arg CreateSandboxEventParams) (SandboxEvent, error)
+	CreateSandboxRecycleOutbox(ctx context.Context, arg CreateSandboxRecycleOutboxParams) (SandboxRecycleOutbox, error)
 	CreateSandboxTool(ctx context.Context, arg CreateSandboxToolParams) (SandboxTool, error)
 	DisableRuntimeImage(ctx context.Context, arg DisableRuntimeImageParams) (RuntimeImage, error)
 	GetDefaultRuntimeImage(ctx context.Context, runtimeID int64) (RuntimeImage, error)
@@ -32,6 +34,8 @@ type Querier interface {
 	ListTools(ctx context.Context) ([]Tool, error)
 	MarkOtherRuntimeImagesNotDefault(ctx context.Context, arg MarkOtherRuntimeImagesNotDefaultParams) error
 	MarkSandboxActive(ctx context.Context, arg MarkSandboxActiveParams) (Sandbox, error)
+	MarkSandboxRecycleOutboxFailed(ctx context.Context, arg MarkSandboxRecycleOutboxFailedParams) (SandboxRecycleOutbox, error)
+	MarkSandboxRecycleOutboxPublished(ctx context.Context, arg MarkSandboxRecycleOutboxPublishedParams) (SandboxRecycleOutbox, error)
 	StatsByTenant(ctx context.Context, tenantID int64) (StatsByTenantRow, error)
 	UpdateRuntimeImagePrepull(ctx context.Context, arg UpdateRuntimeImagePrepullParams) (RuntimeImage, error)
 	UpdateRuntimeSelftest(ctx context.Context, arg UpdateRuntimeSelftestParams) (Runtime, error)

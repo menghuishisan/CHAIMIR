@@ -5,7 +5,9 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"log/slog"
 	"strconv"
+	"strings"
 	"time"
 
 	"chaimir/internal/contracts"
@@ -16,6 +18,7 @@ import (
 	"chaimir/internal/platform/transfer"
 	"chaimir/internal/platform/upload"
 	"chaimir/pkg/apperr"
+	"chaimir/pkg/logging"
 	"chaimir/pkg/response"
 
 	"github.com/xuri/excelize/v2"
@@ -452,6 +455,9 @@ func (s *Service) ComputeCourseGrades(ctx context.Context, courseID int64) ([]Gr
 			if err != nil {
 				return err
 			}
+			if err := s.enqueueTeachingGradeEventOutbox(ctx, tx, grade.TenantID, grade.CourseID, grade.StudentID); err != nil {
+				return err
+			}
 			grade.Credits = course.Credits
 			grades = append(grades, grade)
 		}
@@ -462,10 +468,8 @@ func (s *Service) ComputeCourseGrades(ctx context.Context, courseID int64) ([]Gr
 	out := make([]GradeDTO, 0, len(grades))
 	for _, grade := range grades {
 		out = append(out, gradeDTO(grade))
-		if err := s.publishTeachingGradeUpdated(ctx, grade.TenantID, grade.CourseID, grade.StudentID); err != nil {
-			return nil, apperr.ErrTeachingGradeInvalid.WithCause(err)
-		}
 	}
+	s.drainTeachingGradeEventOutboxBestEffort(ctx)
 	return out, nil
 }
 
@@ -519,16 +523,17 @@ func (s *Service) OverrideGrade(ctx context.Context, courseID, studentID int64, 
 		if err == nil {
 			grade.Credits = course.Credits
 		}
-		return err
+		if err != nil {
+			return err
+		}
+		return s.enqueueTeachingGradeEventOutbox(ctx, tx, id.TenantID, courseID, studentID)
 	}); err != nil {
 		return GradeDTO{}, mapGradeError(err)
 	}
 	if err := s.writeAudit(ctx, id.TenantID, id.AccountID, audit.ActorRoleTeacher, "teaching.grade.override", auditTargetGrade, grade.ID, map[string]any{"course_id": courseID, "student_id": studentID, "total": req.Total}); err != nil {
 		return GradeDTO{}, err
 	}
-	if err := s.publishTeachingGradeUpdated(ctx, id.TenantID, courseID, studentID); err != nil {
-		return GradeDTO{}, apperr.ErrTeachingGradeInvalid.WithCause(err)
-	}
+	s.drainTeachingGradeEventOutboxBestEffort(ctx)
 	return gradeDTO(grade), nil
 }
 
@@ -567,7 +572,7 @@ func (s *Service) ExportGrades(ctx context.Context, courseID int64) (transfer.Ta
 		return transfer.TaskDTO{}, apperr.ErrTeachingGradeExportFailed.WithCause(err)
 	}
 	f := excelize.NewFile()
-	defer f.Close()
+	defer logging.CloseContext(ctx, "关闭课程成绩导出工作簿失败", f)
 	sheet := "成绩"
 	index, err := f.NewSheet(sheet)
 	if err != nil {
@@ -625,6 +630,46 @@ func (s *Service) ExportGrades(ctx context.Context, courseID int64) (transfer.Ta
 		return transfer.TaskDTO{}, apperr.ErrTeachingGradeExportFailed.WithCause(err)
 	}
 	return exportTaskDTO(completed), nil
+}
+
+// GetCourse 实现 M6 对 M11 的课程归属只读契约。
+func (s *Service) GetCourse(ctx context.Context, tenantID, courseID int64) (contracts.TeachingCourseInfo, error) {
+	var course Course
+	if err := s.store.TenantTx(ctx, tenantID, func(ctx context.Context, tx TxStore) error {
+		var err error
+		course, err = tx.GetCourse(ctx, tenantID, courseID)
+		return err
+	}); err != nil {
+		return contracts.TeachingCourseInfo{}, mapCourseError(err)
+	}
+	return contractCourse(course), nil
+}
+
+// GetCourseGrade 实现 M6 对 M11 的学生单课程成绩只读契约。
+func (s *Service) GetCourseGrade(ctx context.Context, tenantID, courseID, studentID int64) (contracts.TeachingCourseGrade, error) {
+	var grade CourseGrade
+	if err := s.store.TenantTx(ctx, tenantID, func(ctx context.Context, tx TxStore) error {
+		var err error
+		grade, err = tx.GetCourseGrade(ctx, tenantID, courseID, studentID)
+		return err
+	}); err != nil {
+		return contracts.TeachingCourseGrade{}, mapGradeError(err)
+	}
+	return contractGrade(grade), nil
+}
+
+// IsCourseMember 实现 M6 对 M11 的课程成员只读契约。
+func (s *Service) IsCourseMember(ctx context.Context, tenantID, courseID, studentID int64) (bool, error) {
+	if err := s.store.TenantTx(ctx, tenantID, func(ctx context.Context, tx TxStore) error {
+		_, err := tx.GetCourseMember(ctx, tenantID, courseID, studentID)
+		return err
+	}); err != nil {
+		if isNoRows(err) {
+			return false, nil
+		}
+		return false, mapCourseError(err)
+	}
+	return true, nil
 }
 
 // ListCourseGrades 实现 M6 对 M11 的只读成绩契约。
@@ -709,7 +754,7 @@ func (s *Service) listCourseGradesForExport(ctx context.Context, tx TxStore, ten
 	}
 }
 
-// publishGradeUpdated 在作业提交回写后发布成绩更新事件。
+// publishGradeUpdated 在作业提交回写后持久化成绩更新事件。
 func (s *Service) publishGradeUpdated(ctx context.Context, tenantID, assignmentID, studentID int64) error {
 	var courseID int64
 	if err := s.store.TenantTx(ctx, tenantID, func(ctx context.Context, tx TxStore) error {
@@ -718,16 +763,90 @@ func (s *Service) publishGradeUpdated(ctx context.Context, tenantID, assignmentI
 			return err
 		}
 		courseID = assignment.CourseID
-		return nil
+		return s.enqueueTeachingGradeEventOutbox(ctx, tx, tenantID, courseID, studentID)
 	}); err != nil {
 		return mapAssignmentError(err)
 	}
-	return s.publishTeachingGradeUpdated(ctx, tenantID, courseID, studentID)
+	s.drainTeachingGradeEventOutboxBestEffort(ctx)
+	_ = courseID
+	return nil
 }
 
-// publishTeachingGradeUpdated 发布 M6 成绩变更事件。
-func (s *Service) publishTeachingGradeUpdated(ctx context.Context, tenantID, courseID, studentID int64) error {
-	return s.bus.Publish(ctx, contracts.SubjectTeachingGradeUpdated, contracts.TeachingGradeUpdatedEvent{TenantID: tenantID, TraceID: response.TraceFromContext(ctx), CourseID: courseID, StudentID: studentID, UpdatedAt: timeNowUTC()})
+// enqueueTeachingGradeEventOutbox 在成绩写入同一事务内保存 M11 消费的成绩事件。
+func (s *Service) enqueueTeachingGradeEventOutbox(ctx context.Context, tx TxStore, tenantID, courseID, studentID int64) error {
+	traceID := strings.TrimSpace(response.TraceFromContext(ctx))
+	if tenantID <= 0 || courseID <= 0 || studentID <= 0 || traceID == "" {
+		return apperr.ErrTeachingGradeEventPublishFailed
+	}
+	if _, err := tx.CreateTeachingGradeEventOutbox(ctx, s.ids.Generate(), tenantID, courseID, studentID, traceID, timeNowUTC()); err != nil {
+		return apperr.ErrTeachingGradeEventPublishFailed.WithCause(err)
+	}
+	return nil
+}
+
+// RunTeachingGradeEventOutboxOnce 领取并发布 M6 成绩变更事件。
+func (s *Service) RunTeachingGradeEventOutboxOnce(ctx context.Context) error {
+	limit := int32(s.cfg.GradeEventOutboxBatchSize)
+	if limit <= 0 {
+		return apperr.ErrTeachingGradeEventPublishFailed
+	}
+	staleBefore := timex.Now().Add(-time.Duration(s.cfg.GradeEventOutboxStaleMs) * time.Millisecond)
+	var items []TeachingGradeEventOutbox
+	if err := s.store.PrivilegedTx(ctx, func(ctx context.Context, tx TxStore) error {
+		var err error
+		items, err = tx.ClaimPendingTeachingGradeEventOutbox(ctx, limit, staleBefore)
+		if err != nil {
+			return apperr.ErrTeachingGradeEventPublishFailed.WithCause(err)
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+	for _, item := range items {
+		if err := s.publishGradeEventOutboxItem(ctx, item); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// publishGradeEventOutboxItem 发布单条成绩事件并按结果回写 outbox 状态。
+func (s *Service) publishGradeEventOutboxItem(ctx context.Context, item TeachingGradeEventOutbox) error {
+	eventCtx := response.WithTrace(ctx, item.TraceID)
+	payload := contracts.TeachingGradeUpdatedEvent{TenantID: item.TenantID, TraceID: item.TraceID, CourseID: item.CourseID, StudentID: item.StudentID, UpdatedAt: item.EventUpdatedAt}
+	if err := s.bus.Publish(eventCtx, contracts.SubjectTeachingGradeUpdated, payload); err != nil {
+		s.recordTeachingGradeEventOutboxFailure(eventCtx, item, err)
+		return apperr.ErrTeachingGradeEventPublishFailed.WithCause(err)
+	}
+	return s.markTeachingGradeEventOutboxPublished(eventCtx, item)
+}
+
+// markTeachingGradeEventOutboxPublished 标记成绩事件发布成功。
+func (s *Service) markTeachingGradeEventOutboxPublished(ctx context.Context, item TeachingGradeEventOutbox) error {
+	return s.store.PrivilegedTx(ctx, func(ctx context.Context, tx TxStore) error {
+		_, err := tx.MarkTeachingGradeEventOutboxPublished(ctx, item.TenantID, item.ID)
+		if err != nil {
+			return apperr.ErrTeachingGradeEventPublishFailed.WithCause(err)
+		}
+		return nil
+	})
+}
+
+// recordTeachingGradeEventOutboxFailure 记录成绩事件发布失败并等待后台重试。
+func (s *Service) recordTeachingGradeEventOutboxFailure(ctx context.Context, item TeachingGradeEventOutbox, cause error) {
+	if err := s.store.PrivilegedTx(ctx, func(ctx context.Context, tx TxStore) error {
+		_, err := tx.MarkTeachingGradeEventOutboxFailed(ctx, item.TenantID, item.ID, logging.SanitizeError(cause.Error()))
+		return err
+	}); err != nil {
+		logging.ErrorContext(ctx, "teaching grade event outbox failure mark failed", err.Error(), slog.Int64("tenant_id", item.TenantID), slog.Int64("course_id", item.CourseID), slog.Int64("student_id", item.StudentID), slog.Int64("outbox_id", item.ID))
+	}
+}
+
+// drainTeachingGradeEventOutboxBestEffort 在请求提交后尽快投递,失败交给后台任务补偿。
+func (s *Service) drainTeachingGradeEventOutboxBestEffort(ctx context.Context) {
+	if err := s.RunTeachingGradeEventOutboxOnce(ctx); err != nil {
+		logging.ErrorContext(ctx, "teaching grade event outbox drain failed", err.Error())
+	}
 }
 
 // timeNowUTC 便于事件时间统一走 UTC。

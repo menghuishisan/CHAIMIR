@@ -1,0 +1,179 @@
+/* Toast 组件样式
+ *
+ * 符合前端设计规范：
+ * - z-index: --z-toast (200)
+ * - 阴影：--shadow-lg
+ * - 入场动画：从右侧滑入 + 淡入
+ */
+
+.chaimir-toast-container {
+  position: fixed;
+  z-index: var(--z-toast);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  max-width: 24rem; /* 384px */
+  padding: var(--space-4);
+  pointer-events: none;
+}
+
+/* === 位置 === */
+
+.chaimir-toast-container--top-right {
+  top: 0;
+  right: 0;
+}
+
+.chaimir-toast-container--top-center {
+  top: 0;
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.chaimir-toast-container--bottom-right {
+  bottom: 0;
+  right: 0;
+}
+
+.chaimir-toast-container--bottom-center {
+  bottom: 0;
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+/* === Toast === */
+
+.chaimir-toast {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  background: var(--color-bg);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  border: 1px solid var(--color-border);
+  pointer-events: auto;
+  /* 入场动画：从右侧滑入 + 淡入 */
+  animation: chaimir-toast-in 0.3s var(--ease-out);
+}
+
+@keyframes chaimir-toast-in {
+  from {
+    opacity: 0;
+    transform: translateX(100%);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+/* === 变体 === */
+
+.chaimir-toast--success {
+  border-color: var(--color-success-border);
+}
+
+.chaimir-toast--success .chaimir-toast__icon {
+  color: var(--color-success);
+}
+
+.chaimir-toast--error {
+  border-color: var(--color-danger-border);
+}
+
+.chaimir-toast--error .chaimir-toast__icon {
+  color: var(--color-danger);
+}
+
+.chaimir-toast--warning {
+  border-color: var(--color-warning-border);
+}
+
+.chaimir-toast--warning .chaimir-toast__icon {
+  color: var(--color-warning);
+}
+
+.chaimir-toast--info {
+  border-color: var(--color-info-border);
+}
+
+.chaimir-toast--info .chaimir-toast__icon {
+  color: var(--color-info);
+}
+
+/* === 子元素 === */
+
+.chaimir-toast__icon {
+  flex-shrink: 0;
+  margin-top: 0.125rem;
+}
+
+.chaimir-toast__content {
+  flex: 1;
+  min-width: 0;
+}
+
+.chaimir-toast__title {
+  font-size: var(--text-base);
+  font-weight: var(--font-semibold);
+  color: var(--color-text-strong);
+  margin-bottom: var(--space-1);
+}
+
+.chaimir-toast__description {
+  font-size: var(--text-sm);
+  color: var(--color-text-sub);
+  line-height: var(--leading-relaxed);
+}
+
+.chaimir-toast__trace {
+  font-size: var(--text-xs);
+  color: var(--color-text-faint);
+  margin-top: var(--space-2);
+}
+
+.chaimir-toast__trace code {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  background: var(--color-surface);
+  padding: 0.125rem var(--space-1);
+  border-radius: var(--radius-xs);
+}
+
+.chaimir-toast__close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 1.5rem;
+  height: 1.5rem;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--color-text-sub);
+  border-radius: var(--radius-xs);
+  cursor: pointer;
+  transition: all var(--t-fast) var(--ease);
+}
+
+.chaimir-toast__close:hover {
+  background: var(--color-surface-hover);
+  color: var(--color-text);
+}
+
+/* === 响应式 === */
+
+@media (max-width: 640px) {
+  .chaimir-toast-container {
+    max-width: 100%;
+    left: 0;
+    right: 0;
+    padding: var(--space-3);
+  }
+
+  .chaimir-toast-container--top-center,
+  .chaimir-toast-container--bottom-center {
+    transform: none;
+  }
+}

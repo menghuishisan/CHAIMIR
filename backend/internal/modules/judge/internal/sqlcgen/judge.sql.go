@@ -154,6 +154,8 @@ INSERT INTO judge_task (
     created_at, updated_at
 )
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, 0, $14, NULL, now(), now())
+ON CONFLICT (tenant_id, source_ref) DO UPDATE
+SET source_ref = EXCLUDED.source_ref
 RETURNING id, tenant_id, judger_id, source_ref, submitter_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, last_error, created_at, updated_at
 `
 

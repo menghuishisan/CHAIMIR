@@ -18,8 +18,11 @@ deploy/**/*.local.yaml
 /backend/bin/
 /backend/vendor/
 /backend/.gocache/
+.gocache/
+.testcache/
 *.test
 *.out
+*.prof
 coverage.*
 # 后端测试文件只保留本地验证，不上传公共仓库。
 backend/**/*_test.go
@@ -29,10 +32,28 @@ backend/**/*_test.go
 
 # ---- Node/前端(目录4 frontend)----
 node_modules/
+**/node_modules/
 dist/
+**/dist/
+build/
+**/build/
 .turbo/
+**/.turbo/
 .vite/
+**/.vite/
+.cache/
+**/.cache/
+coverage/
+**/coverage/
 *.tsbuildinfo
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+.pnpm-store/
+.yarn/
+.pnp
+.pnp.*
 
 # ---- 镜像构建产物(目录3 images)----
 *.tar

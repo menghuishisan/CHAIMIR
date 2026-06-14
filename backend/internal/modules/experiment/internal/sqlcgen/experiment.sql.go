@@ -11,6 +11,59 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const claimPendingExperimentScoreOutbox = `-- name: ClaimPendingExperimentScoreOutbox :many
+UPDATE experiment_score_outbox
+SET status = 4, retry_count = retry_count + 1, updated_at = now()
+WHERE id IN (
+    SELECT id
+    FROM experiment_score_outbox
+    WHERE status IN (1, 3) OR (status = 4 AND updated_at <= $1::timestamptz)
+    ORDER BY created_at ASC, id ASC
+    LIMIT $2
+    FOR UPDATE SKIP LOCKED
+)
+RETURNING id, tenant_id, experiment_id, instance_id, student_id, score, trace_id, scored_at, status, retry_count, last_error, created_at, updated_at
+`
+
+type ClaimPendingExperimentScoreOutboxParams struct {
+	StaleBefore pgtype.Timestamptz `json:"stale_before"`
+	PageLimit   int32              `json:"page_limit"`
+}
+
+func (q *Queries) ClaimPendingExperimentScoreOutbox(ctx context.Context, arg ClaimPendingExperimentScoreOutboxParams) ([]ExperimentScoreOutbox, error) {
+	rows, err := q.db.Query(ctx, claimPendingExperimentScoreOutbox, arg.StaleBefore, arg.PageLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ExperimentScoreOutbox{}
+	for rows.Next() {
+		var i ExperimentScoreOutbox
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.ExperimentID,
+			&i.InstanceID,
+			&i.StudentID,
+			&i.Score,
+			&i.TraceID,
+			&i.ScoredAt,
+			&i.Status,
+			&i.RetryCount,
+			&i.LastError,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const claimRecyclableInstancesAcrossTenants = `-- name: ClaimRecyclableInstancesAcrossTenants :many
 UPDATE experiment_instance
 SET last_active_at = now()
@@ -277,6 +330,53 @@ func (q *Queries) CreateExperimentInstance(ctx context.Context, arg CreateExperi
 	return i, err
 }
 
+const createExperimentScoreOutbox = `-- name: CreateExperimentScoreOutbox :one
+INSERT INTO experiment_score_outbox (id, tenant_id, experiment_id, instance_id, student_id, score, trace_id, scored_at, status, retry_count, last_error, created_at, updated_at)
+VALUES ($1, $2, $3, $4, $5, $6::text::numeric, $7, $8, 1, 0, NULL, now(), now())
+RETURNING id, tenant_id, experiment_id, instance_id, student_id, score, trace_id, scored_at, status, retry_count, last_error, created_at, updated_at
+`
+
+type CreateExperimentScoreOutboxParams struct {
+	ID           int64              `json:"id"`
+	TenantID     int64              `json:"tenant_id"`
+	ExperimentID int64              `json:"experiment_id"`
+	InstanceID   int64              `json:"instance_id"`
+	StudentID    int64              `json:"student_id"`
+	Column6      string             `json:"column_6"`
+	TraceID      string             `json:"trace_id"`
+	ScoredAt     pgtype.Timestamptz `json:"scored_at"`
+}
+
+func (q *Queries) CreateExperimentScoreOutbox(ctx context.Context, arg CreateExperimentScoreOutboxParams) (ExperimentScoreOutbox, error) {
+	row := q.db.QueryRow(ctx, createExperimentScoreOutbox,
+		arg.ID,
+		arg.TenantID,
+		arg.ExperimentID,
+		arg.InstanceID,
+		arg.StudentID,
+		arg.Column6,
+		arg.TraceID,
+		arg.ScoredAt,
+	)
+	var i ExperimentScoreOutbox
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.ExperimentID,
+		&i.InstanceID,
+		&i.StudentID,
+		&i.Score,
+		&i.TraceID,
+		&i.ScoredAt,
+		&i.Status,
+		&i.RetryCount,
+		&i.LastError,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const experimentStats = `-- name: ExperimentStats :one
 SELECT
     COUNT(*)::bigint AS experiment_count,
@@ -407,7 +507,7 @@ func (q *Queries) GetActiveGroupInstance(ctx context.Context, arg GetActiveGroup
 }
 
 const getCheckpointResult = `-- name: GetCheckpointResult :one
-SELECT id, tenant_id, instance_id, checkpoint_id, judge_task_ref, passed, score::float8 AS score, detail_ref, judged_at
+SELECT id, tenant_id, instance_id, checkpoint_id, judge_task_ref, passed, score::float8 AS score, detail_ref, binding_output, judged_at
 FROM checkpoint_result
 WHERE tenant_id = $1 AND instance_id = $2 AND checkpoint_id = $3
 `
@@ -419,15 +519,16 @@ type GetCheckpointResultParams struct {
 }
 
 type GetCheckpointResultRow struct {
-	ID           int64              `json:"id"`
-	TenantID     int64              `json:"tenant_id"`
-	InstanceID   int64              `json:"instance_id"`
-	CheckpointID string             `json:"checkpoint_id"`
-	JudgeTaskRef pgtype.Text        `json:"judge_task_ref"`
-	Passed       bool               `json:"passed"`
-	Score        float64            `json:"score"`
-	DetailRef    pgtype.Text        `json:"detail_ref"`
-	JudgedAt     pgtype.Timestamptz `json:"judged_at"`
+	ID            int64              `json:"id"`
+	TenantID      int64              `json:"tenant_id"`
+	InstanceID    int64              `json:"instance_id"`
+	CheckpointID  string             `json:"checkpoint_id"`
+	JudgeTaskRef  pgtype.Text        `json:"judge_task_ref"`
+	Passed        bool               `json:"passed"`
+	Score         float64            `json:"score"`
+	DetailRef     pgtype.Text        `json:"detail_ref"`
+	BindingOutput []byte             `json:"binding_output"`
+	JudgedAt      pgtype.Timestamptz `json:"judged_at"`
 }
 
 func (q *Queries) GetCheckpointResult(ctx context.Context, arg GetCheckpointResultParams) (GetCheckpointResultRow, error) {
@@ -442,13 +543,14 @@ func (q *Queries) GetCheckpointResult(ctx context.Context, arg GetCheckpointResu
 		&i.Passed,
 		&i.Score,
 		&i.DetailRef,
+		&i.BindingOutput,
 		&i.JudgedAt,
 	)
 	return i, err
 }
 
 const getCheckpointResultByJudgeTask = `-- name: GetCheckpointResultByJudgeTask :one
-SELECT id, tenant_id, instance_id, checkpoint_id, judge_task_ref, passed, score::float8 AS score, detail_ref, judged_at
+SELECT id, tenant_id, instance_id, checkpoint_id, judge_task_ref, passed, score::float8 AS score, detail_ref, binding_output, judged_at
 FROM checkpoint_result
 WHERE tenant_id = $1 AND judge_task_ref = $2
 `
@@ -459,15 +561,16 @@ type GetCheckpointResultByJudgeTaskParams struct {
 }
 
 type GetCheckpointResultByJudgeTaskRow struct {
-	ID           int64              `json:"id"`
-	TenantID     int64              `json:"tenant_id"`
-	InstanceID   int64              `json:"instance_id"`
-	CheckpointID string             `json:"checkpoint_id"`
-	JudgeTaskRef pgtype.Text        `json:"judge_task_ref"`
-	Passed       bool               `json:"passed"`
-	Score        float64            `json:"score"`
-	DetailRef    pgtype.Text        `json:"detail_ref"`
-	JudgedAt     pgtype.Timestamptz `json:"judged_at"`
+	ID            int64              `json:"id"`
+	TenantID      int64              `json:"tenant_id"`
+	InstanceID    int64              `json:"instance_id"`
+	CheckpointID  string             `json:"checkpoint_id"`
+	JudgeTaskRef  pgtype.Text        `json:"judge_task_ref"`
+	Passed        bool               `json:"passed"`
+	Score         float64            `json:"score"`
+	DetailRef     pgtype.Text        `json:"detail_ref"`
+	BindingOutput []byte             `json:"binding_output"`
+	JudgedAt      pgtype.Timestamptz `json:"judged_at"`
 }
 
 func (q *Queries) GetCheckpointResultByJudgeTask(ctx context.Context, arg GetCheckpointResultByJudgeTaskParams) (GetCheckpointResultByJudgeTaskRow, error) {
@@ -482,6 +585,7 @@ func (q *Queries) GetCheckpointResultByJudgeTask(ctx context.Context, arg GetChe
 		&i.Passed,
 		&i.Score,
 		&i.DetailRef,
+		&i.BindingOutput,
 		&i.JudgedAt,
 	)
 	return i, err
@@ -625,6 +729,55 @@ type GetExperimentInstanceBySourceRefRow struct {
 func (q *Queries) GetExperimentInstanceBySourceRef(ctx context.Context, arg GetExperimentInstanceBySourceRefParams) (GetExperimentInstanceBySourceRefRow, error) {
 	row := q.db.QueryRow(ctx, getExperimentInstanceBySourceRef, arg.TenantID, arg.SourceRef)
 	var i GetExperimentInstanceBySourceRefRow
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.ExperimentID,
+		&i.OwnerAccountID,
+		&i.GroupID,
+		&i.SourceRef,
+		&i.SandboxRefs,
+		&i.SimSessionRefs,
+		&i.Status,
+		&i.Score,
+		&i.StartedAt,
+		&i.FinishedAt,
+		&i.LastActiveAt,
+	)
+	return i, err
+}
+
+const getExperimentInstanceForUpdate = `-- name: GetExperimentInstanceForUpdate :one
+SELECT id, tenant_id, experiment_id, owner_account_id, group_id, source_ref, sandbox_refs, sim_session_refs, status, COALESCE(score::float8, 0)::float8 AS score, started_at, finished_at, last_active_at
+FROM experiment_instance
+WHERE tenant_id = $1 AND id = $2
+FOR UPDATE
+`
+
+type GetExperimentInstanceForUpdateParams struct {
+	TenantID int64 `json:"tenant_id"`
+	ID       int64 `json:"id"`
+}
+
+type GetExperimentInstanceForUpdateRow struct {
+	ID             int64              `json:"id"`
+	TenantID       int64              `json:"tenant_id"`
+	ExperimentID   int64              `json:"experiment_id"`
+	OwnerAccountID int64              `json:"owner_account_id"`
+	GroupID        pgtype.Int8        `json:"group_id"`
+	SourceRef      string             `json:"source_ref"`
+	SandboxRefs    []byte             `json:"sandbox_refs"`
+	SimSessionRefs []byte             `json:"sim_session_refs"`
+	Status         int16              `json:"status"`
+	Score          float64            `json:"score"`
+	StartedAt      pgtype.Timestamptz `json:"started_at"`
+	FinishedAt     pgtype.Timestamptz `json:"finished_at"`
+	LastActiveAt   pgtype.Timestamptz `json:"last_active_at"`
+}
+
+func (q *Queries) GetExperimentInstanceForUpdate(ctx context.Context, arg GetExperimentInstanceForUpdateParams) (GetExperimentInstanceForUpdateRow, error) {
+	row := q.db.QueryRow(ctx, getExperimentInstanceForUpdate, arg.TenantID, arg.ID)
+	var i GetExperimentInstanceForUpdateRow
 	err := row.Scan(
 		&i.ID,
 		&i.TenantID,
@@ -801,7 +954,7 @@ func (q *Queries) GradeExperimentReport(ctx context.Context, arg GradeExperiment
 }
 
 const listCheckpointResults = `-- name: ListCheckpointResults :many
-SELECT id, tenant_id, instance_id, checkpoint_id, judge_task_ref, passed, score::float8 AS score, detail_ref, judged_at
+SELECT id, tenant_id, instance_id, checkpoint_id, judge_task_ref, passed, score::float8 AS score, detail_ref, binding_output, judged_at
 FROM checkpoint_result
 WHERE tenant_id = $1 AND instance_id = $2
 ORDER BY checkpoint_id ASC
@@ -813,15 +966,16 @@ type ListCheckpointResultsParams struct {
 }
 
 type ListCheckpointResultsRow struct {
-	ID           int64              `json:"id"`
-	TenantID     int64              `json:"tenant_id"`
-	InstanceID   int64              `json:"instance_id"`
-	CheckpointID string             `json:"checkpoint_id"`
-	JudgeTaskRef pgtype.Text        `json:"judge_task_ref"`
-	Passed       bool               `json:"passed"`
-	Score        float64            `json:"score"`
-	DetailRef    pgtype.Text        `json:"detail_ref"`
-	JudgedAt     pgtype.Timestamptz `json:"judged_at"`
+	ID            int64              `json:"id"`
+	TenantID      int64              `json:"tenant_id"`
+	InstanceID    int64              `json:"instance_id"`
+	CheckpointID  string             `json:"checkpoint_id"`
+	JudgeTaskRef  pgtype.Text        `json:"judge_task_ref"`
+	Passed        bool               `json:"passed"`
+	Score         float64            `json:"score"`
+	DetailRef     pgtype.Text        `json:"detail_ref"`
+	BindingOutput []byte             `json:"binding_output"`
+	JudgedAt      pgtype.Timestamptz `json:"judged_at"`
 }
 
 func (q *Queries) ListCheckpointResults(ctx context.Context, arg ListCheckpointResultsParams) ([]ListCheckpointResultsRow, error) {
@@ -842,6 +996,7 @@ func (q *Queries) ListCheckpointResults(ctx context.Context, arg ListCheckpointR
 			&i.Passed,
 			&i.Score,
 			&i.DetailRef,
+			&i.BindingOutput,
 			&i.JudgedAt,
 		); err != nil {
 			return nil, err
@@ -1017,6 +1172,73 @@ func (q *Queries) ListGroupMembers(ctx context.Context, arg ListGroupMembersPara
 		return nil, err
 	}
 	return items, nil
+}
+
+const markExperimentScoreOutboxFailed = `-- name: MarkExperimentScoreOutboxFailed :one
+UPDATE experiment_score_outbox
+SET status = 3, last_error = $3, updated_at = now()
+WHERE tenant_id = $1 AND id = $2
+RETURNING id, tenant_id, experiment_id, instance_id, student_id, score, trace_id, scored_at, status, retry_count, last_error, created_at, updated_at
+`
+
+type MarkExperimentScoreOutboxFailedParams struct {
+	TenantID  int64       `json:"tenant_id"`
+	ID        int64       `json:"id"`
+	LastError pgtype.Text `json:"last_error"`
+}
+
+func (q *Queries) MarkExperimentScoreOutboxFailed(ctx context.Context, arg MarkExperimentScoreOutboxFailedParams) (ExperimentScoreOutbox, error) {
+	row := q.db.QueryRow(ctx, markExperimentScoreOutboxFailed, arg.TenantID, arg.ID, arg.LastError)
+	var i ExperimentScoreOutbox
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.ExperimentID,
+		&i.InstanceID,
+		&i.StudentID,
+		&i.Score,
+		&i.TraceID,
+		&i.ScoredAt,
+		&i.Status,
+		&i.RetryCount,
+		&i.LastError,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const markExperimentScoreOutboxPublished = `-- name: MarkExperimentScoreOutboxPublished :one
+UPDATE experiment_score_outbox
+SET status = 2, last_error = NULL, updated_at = now()
+WHERE tenant_id = $1 AND id = $2
+RETURNING id, tenant_id, experiment_id, instance_id, student_id, score, trace_id, scored_at, status, retry_count, last_error, created_at, updated_at
+`
+
+type MarkExperimentScoreOutboxPublishedParams struct {
+	TenantID int64 `json:"tenant_id"`
+	ID       int64 `json:"id"`
+}
+
+func (q *Queries) MarkExperimentScoreOutboxPublished(ctx context.Context, arg MarkExperimentScoreOutboxPublishedParams) (ExperimentScoreOutbox, error) {
+	row := q.db.QueryRow(ctx, markExperimentScoreOutboxPublished, arg.TenantID, arg.ID)
+	var i ExperimentScoreOutbox
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.ExperimentID,
+		&i.InstanceID,
+		&i.StudentID,
+		&i.Score,
+		&i.TraceID,
+		&i.ScoredAt,
+		&i.Status,
+		&i.RetryCount,
+		&i.LastError,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
 }
 
 const setExperimentStatus = `-- name: SetExperimentStatus :one
@@ -1376,38 +1598,41 @@ func (q *Queries) UpdateInstanceResources(ctx context.Context, arg UpdateInstanc
 }
 
 const upsertCheckpointResult = `-- name: UpsertCheckpointResult :one
-INSERT INTO checkpoint_result (id, tenant_id, instance_id, checkpoint_id, judge_task_ref, passed, score, detail_ref, judged_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7::text::numeric, $8, now())
+INSERT INTO checkpoint_result (id, tenant_id, instance_id, checkpoint_id, judge_task_ref, passed, score, detail_ref, binding_output, judged_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7::text::numeric, $8, $9, now())
 ON CONFLICT (tenant_id, instance_id, checkpoint_id) DO UPDATE
 SET judge_task_ref = EXCLUDED.judge_task_ref,
     passed = EXCLUDED.passed,
     score = EXCLUDED.score,
     detail_ref = EXCLUDED.detail_ref,
+    binding_output = CASE WHEN EXCLUDED.binding_output = '{}'::jsonb THEN checkpoint_result.binding_output ELSE EXCLUDED.binding_output END,
     judged_at = now()
-RETURNING id, tenant_id, instance_id, checkpoint_id, judge_task_ref, passed, score::float8 AS score, detail_ref, judged_at
+RETURNING id, tenant_id, instance_id, checkpoint_id, judge_task_ref, passed, score::float8 AS score, detail_ref, binding_output, judged_at
 `
 
 type UpsertCheckpointResultParams struct {
-	ID           int64       `json:"id"`
-	TenantID     int64       `json:"tenant_id"`
-	InstanceID   int64       `json:"instance_id"`
-	CheckpointID string      `json:"checkpoint_id"`
-	JudgeTaskRef pgtype.Text `json:"judge_task_ref"`
-	Passed       bool        `json:"passed"`
-	Column7      string      `json:"column_7"`
-	DetailRef    pgtype.Text `json:"detail_ref"`
+	ID            int64       `json:"id"`
+	TenantID      int64       `json:"tenant_id"`
+	InstanceID    int64       `json:"instance_id"`
+	CheckpointID  string      `json:"checkpoint_id"`
+	JudgeTaskRef  pgtype.Text `json:"judge_task_ref"`
+	Passed        bool        `json:"passed"`
+	Column7       string      `json:"column_7"`
+	DetailRef     pgtype.Text `json:"detail_ref"`
+	BindingOutput []byte      `json:"binding_output"`
 }
 
 type UpsertCheckpointResultRow struct {
-	ID           int64              `json:"id"`
-	TenantID     int64              `json:"tenant_id"`
-	InstanceID   int64              `json:"instance_id"`
-	CheckpointID string             `json:"checkpoint_id"`
-	JudgeTaskRef pgtype.Text        `json:"judge_task_ref"`
-	Passed       bool               `json:"passed"`
-	Score        float64            `json:"score"`
-	DetailRef    pgtype.Text        `json:"detail_ref"`
-	JudgedAt     pgtype.Timestamptz `json:"judged_at"`
+	ID            int64              `json:"id"`
+	TenantID      int64              `json:"tenant_id"`
+	InstanceID    int64              `json:"instance_id"`
+	CheckpointID  string             `json:"checkpoint_id"`
+	JudgeTaskRef  pgtype.Text        `json:"judge_task_ref"`
+	Passed        bool               `json:"passed"`
+	Score         float64            `json:"score"`
+	DetailRef     pgtype.Text        `json:"detail_ref"`
+	BindingOutput []byte             `json:"binding_output"`
+	JudgedAt      pgtype.Timestamptz `json:"judged_at"`
 }
 
 func (q *Queries) UpsertCheckpointResult(ctx context.Context, arg UpsertCheckpointResultParams) (UpsertCheckpointResultRow, error) {
@@ -1420,6 +1645,7 @@ func (q *Queries) UpsertCheckpointResult(ctx context.Context, arg UpsertCheckpoi
 		arg.Passed,
 		arg.Column7,
 		arg.DetailRef,
+		arg.BindingOutput,
 	)
 	var i UpsertCheckpointResultRow
 	err := row.Scan(
@@ -1431,6 +1657,7 @@ func (q *Queries) UpsertCheckpointResult(ctx context.Context, arg UpsertCheckpoi
 		&i.Passed,
 		&i.Score,
 		&i.DetailRef,
+		&i.BindingOutput,
 		&i.JudgedAt,
 	)
 	return i, err

@@ -2,11 +2,10 @@
 package identity
 
 import (
-	"io"
-
 	"chaimir/internal/contracts"
 	"chaimir/internal/platform/auth"
 	"chaimir/internal/platform/httpx"
+	"chaimir/internal/platform/upload"
 	"chaimir/pkg/apperr"
 
 	"github.com/gin-gonic/gin"
@@ -234,10 +233,18 @@ func (a orgAPI) importOrgPreview(c *gin.Context) {
 		httpx.Write(c, gin.H{}, apperr.ErrIdentityImportContentInvalid.WithCause(err))
 		return
 	}
-	content, readErr := io.ReadAll(file)
+	content, sizeResult, readErr := upload.ReadBounded(file, a.svc.importMaxBytes())
 	closeErr := file.Close()
 	if readErr != nil {
 		httpx.Write(c, gin.H{}, apperr.ErrIdentityImportContentInvalid.WithCause(readErr))
+		return
+	}
+	if sizeResult == upload.SizeTooLarge {
+		httpx.Write(c, gin.H{}, apperr.ErrIdentityImportFileTooLarge)
+		return
+	}
+	if sizeResult == upload.SizeEmpty {
+		httpx.Write(c, gin.H{}, apperr.ErrIdentityImportContentInvalid)
 		return
 	}
 	if closeErr != nil {

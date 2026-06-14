@@ -67,6 +67,7 @@ func (a experimentAPI) registerSharedRoutes(g gin.IRouter) {
 	g.GET("/instances/:id/progress", a.getProgress)
 	g.POST("/instances/:id/pause", a.pauseInstance)
 	g.POST("/instances/:id/resume", a.resumeInstance)
+	g.POST("/instances/:id/stages/:stage/activate", a.activateStage)
 	g.POST("/instances/:id/finish", a.finishInstance)
 	g.DELETE("/instances/:id", a.recycleInstance)
 	g.GET("/groups/:id", a.getGroup)
@@ -192,6 +193,17 @@ func (a experimentAPI) pauseInstance(c *gin.Context) {
 // resumeInstance 恢复实例。
 func (a experimentAPI) resumeInstance(c *gin.Context) {
 	a.writeInstanceAction(c, a.svc.ResumeInstance)
+}
+
+// activateStage 激活已解锁的实验阶段。
+func (a experimentAPI) activateStage(c *gin.Context) {
+	id, ok := httpx.PathID(c, "id")
+	if !ok {
+		return
+	}
+	stage := int32(httpx.Int(c.Param("stage")))
+	out, err := a.svc.ActivateStage(c.Request.Context(), id, stage)
+	httpx.Write(c, out, err)
 }
 
 // finishInstance 完成实例并汇总得分。

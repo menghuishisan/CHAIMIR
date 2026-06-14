@@ -75,6 +75,22 @@ type SandboxEvent struct {
 	CreatedAt pgtype.Timestamptz `json:"created_at"`
 }
 
+type SandboxRecycleOutbox struct {
+	ID             int64              `json:"id"`
+	TenantID       int64              `json:"tenant_id"`
+	SandboxID      int64              `json:"sandbox_id"`
+	SourceRef      string             `json:"source_ref"`
+	OwnerAccountID int64              `json:"owner_account_id"`
+	Reason         string             `json:"reason"`
+	TraceID        string             `json:"trace_id"`
+	RecycledAt     pgtype.Timestamptz `json:"recycled_at"`
+	Status         int16              `json:"status"`
+	RetryCount     int32              `json:"retry_count"`
+	LastError      pgtype.Text        `json:"last_error"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+}
+
 type SandboxTool struct {
 	ID             int64  `json:"id"`
 	TenantID       int64  `json:"tenant_id"`

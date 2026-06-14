@@ -222,6 +222,36 @@ INSERT INTO sandbox_event (id, tenant_id, sandbox_id, event_type, detail, create
 VALUES ($1, $2, $3, $4, $5, now())
 RETURNING id, tenant_id, sandbox_id, event_type, detail, created_at;
 
+-- name: CreateSandboxRecycleOutbox :one
+INSERT INTO sandbox_recycle_outbox (id, tenant_id, sandbox_id, source_ref, owner_account_id, reason, trace_id, recycled_at, status, retry_count, last_error, created_at, updated_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 1, 0, NULL, now(), now())
+RETURNING id, tenant_id, sandbox_id, source_ref, owner_account_id, reason, trace_id, recycled_at, status, retry_count, last_error, created_at, updated_at;
+
+-- name: ClaimPendingSandboxRecycleOutbox :many
+UPDATE sandbox_recycle_outbox
+SET status = 4, retry_count = retry_count + 1, updated_at = now()
+WHERE id IN (
+    SELECT id
+    FROM sandbox_recycle_outbox
+    WHERE status IN (1, 3) OR (status = 4 AND updated_at <= @stale_before::timestamptz)
+    ORDER BY created_at ASC, id ASC
+    LIMIT @page_limit
+    FOR UPDATE SKIP LOCKED
+)
+RETURNING id, tenant_id, sandbox_id, source_ref, owner_account_id, reason, trace_id, recycled_at, status, retry_count, last_error, created_at, updated_at;
+
+-- name: MarkSandboxRecycleOutboxPublished :one
+UPDATE sandbox_recycle_outbox
+SET status = 2, last_error = NULL, updated_at = now()
+WHERE tenant_id = $1 AND id = $2
+RETURNING id, tenant_id, sandbox_id, source_ref, owner_account_id, reason, trace_id, recycled_at, status, retry_count, last_error, created_at, updated_at;
+
+-- name: MarkSandboxRecycleOutboxFailed :one
+UPDATE sandbox_recycle_outbox
+SET status = 3, last_error = $3, updated_at = now()
+WHERE tenant_id = $1 AND id = $2
+RETURNING id, tenant_id, sandbox_id, source_ref, owner_account_id, reason, trace_id, recycled_at, status, retry_count, last_error, created_at, updated_at;
+
 -- name: StatsByTenant :one
 SELECT
   COUNT(*) FILTER (WHERE s.status IN (1, 2, 3, 4))::bigint AS active_sandbox_count,

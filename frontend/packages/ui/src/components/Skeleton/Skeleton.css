@@ -1,0 +1,68 @@
+/* Skeleton 组件样式
+ *
+ * 符合前端设计规范 §5.1：占位预留空间防 CLS
+ */
+
+.chaimir-skeleton {
+  background: var(--color-surface);
+  border-radius: var(--radius-xs);
+  display: block;
+}
+
+/* === 变体 === */
+
+.chaimir-skeleton--text {
+  height: 0.875rem; /* 14px - 单行文字 */
+  margin-bottom: var(--space-2);
+}
+
+.chaimir-skeleton--title {
+  height: 1.5rem; /* 24px - 标题 */
+  margin-bottom: var(--space-3);
+}
+
+.chaimir-skeleton--block {
+  height: 6rem; /* 96px - 块级内容 */
+}
+
+.chaimir-skeleton--circle {
+  border-radius: var(--radius-full);
+  aspect-ratio: 1;
+}
+
+/* === Shimmer 动画 === */
+
+.chaimir-skeleton--animate {
+  position: relative;
+  overflow: hidden;
+}
+
+.chaimir-skeleton--animate::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(255, 255, 255, 0.3) 50%,
+    transparent 100%
+  );
+  animation: chaimir-skeleton-shimmer 1.5s ease-in-out infinite;
+}
+
+@keyframes chaimir-skeleton-shimmer {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+/* === Reduced Motion === */
+
+@media (prefers-reduced-motion: reduce) {
+  .chaimir-skeleton--animate::after {
+    animation: none;
+  }
+}

@@ -9,16 +9,17 @@ import (
 )
 
 type BattleEntry struct {
-	ID          int64              `json:"id"`
-	TenantID    int64              `json:"tenant_id"`
-	ContestID   int64              `json:"contest_id"`
-	ProblemID   int64              `json:"problem_id"`
-	TeamID      int64              `json:"team_id"`
-	Role        int16              `json:"role"`
-	ArtifactRef string             `json:"artifact_ref"`
-	VersionNo   int32              `json:"version_no"`
-	IsActive    bool               `json:"is_active"`
-	SubmittedAt pgtype.Timestamptz `json:"submitted_at"`
+	ID           int64              `json:"id"`
+	TenantID     int64              `json:"tenant_id"`
+	ContestID    int64              `json:"contest_id"`
+	ProblemID    int64              `json:"problem_id"`
+	TeamID       int64              `json:"team_id"`
+	Role         int16              `json:"role"`
+	ArtifactRef  string             `json:"artifact_ref"`
+	ArtifactHash string             `json:"artifact_hash"`
+	VersionNo    int32              `json:"version_no"`
+	IsActive     bool               `json:"is_active"`
+	SubmittedAt  pgtype.Timestamptz `json:"submitted_at"`
 }
 
 type BattleMatch struct {

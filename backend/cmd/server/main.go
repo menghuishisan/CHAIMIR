@@ -231,7 +231,7 @@ func assembleModules(ctx context.Context, router gin.IRouter, cfg *config.Config
 	if err != nil {
 		return err
 	}
-	contentSvc, err := RegisterContentModule(ContentModuleDeps{Router: router, Database: infra.database, IDs: infra.ids, Audit: auditWriter, Auth: infra.auth, Roles: identitySvc})
+	contentSvc, err := RegisterContentModule(ContentModuleDeps{Router: router, Database: infra.database, IDs: infra.ids, Upload: cfg.Upload, MinIO: cfg.MinIO, AuthCfg: cfg.Auth, Storage: infra.storage, Audit: auditWriter, Auth: infra.auth, Roles: identitySvc})
 	if err != nil {
 		return err
 	}
@@ -279,7 +279,7 @@ func assembleModules(ctx context.Context, router gin.IRouter, cfg *config.Config
 	if _, err := RegisterAdminModule(ctx, AdminModuleDeps{Router: router, Database: infra.database, IDs: infra.ids, Audit: auditWriter, Identity: identitySvc, Stats: identitySvc, AuditRead: identitySvc, Teaching: teachingSvc, Sandbox: sandboxSvc, Experiment: experimentSvc, Contest: contestSvc, Notify: notifySvc, Monitoring: cfg.Monitoring, Config: cfg.Admin, Upload: cfg.Upload, MinIO: cfg.MinIO, AuthConfig: cfg.Auth, Transfer: transferSvc, Storage: infra.storage, Auth: infra.auth, Roles: identitySvc}); err != nil {
 		return err
 	}
-	if _, err := RegisterGradeModule(GradeModuleDeps{Router: router, Database: infra.database, IDs: infra.ids, Audit: auditWriter, Teaching: teachingSvc, Notify: notifySvc, EventBus: infra.bus, Storage: infra.storage, Upload: cfg.Upload, MinIO: cfg.MinIO, AuthConfig: cfg.Auth, Config: cfg.Grade, Auth: infra.auth, Roles: identitySvc}); err != nil {
+	if _, err := RegisterGradeModule(ctx, GradeModuleDeps{Router: router, Database: infra.database, IDs: infra.ids, Audit: auditWriter, Teaching: teachingSvc, Notify: notifySvc, EventBus: infra.bus, Storage: infra.storage, Upload: cfg.Upload, MinIO: cfg.MinIO, AuthConfig: cfg.Auth, Config: cfg.Grade, Auth: infra.auth, Roles: identitySvc}); err != nil {
 		return err
 	}
 	return nil

@@ -1,0 +1,92 @@
+/* Radio 组件样式 */
+
+.chaimir-radio-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.chaimir-radio {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  cursor: pointer;
+  user-select: none;
+}
+
+.chaimir-radio--disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+/* 隐藏原生 radio */
+.chaimir-radio__input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border-width: 0;
+}
+
+/* 自定义圆圈 */
+.chaimir-radio__circle {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.125rem; /* 18px */
+  height: 1.125rem;
+  border: 2px solid var(--color-border-strong);
+  border-radius: var(--radius-full);
+  background: var(--color-bg);
+  transition: all var(--t-fast) var(--ease);
+  flex-shrink: 0;
+}
+
+.chaimir-radio__dot {
+  width: 0.5rem; /* 8px */
+  height: 0.5rem;
+  border-radius: var(--radius-full);
+  background: var(--color-primary);
+  transform: scale(0);
+  transition: transform var(--t-fast) var(--ease);
+}
+
+/* === 状态 === */
+
+/* Hover */
+.chaimir-radio:hover:not(.chaimir-radio--disabled) .chaimir-radio__circle {
+  border-color: var(--color-primary);
+}
+
+/* Focus */
+.chaimir-radio__input:focus-visible + .chaimir-radio__circle {
+  outline: 2px solid var(--color-focus-ring);
+  outline-offset: 2px;
+}
+
+/* Checked */
+.chaimir-radio__circle--checked {
+  border-color: var(--color-primary);
+}
+
+.chaimir-radio__circle--checked .chaimir-radio__dot {
+  transform: scale(1);
+}
+
+/* Error */
+.chaimir-radio__circle--error {
+  border-color: var(--color-danger-border);
+}
+
+/* === 标签 === */
+
+.chaimir-radio__label {
+  font-size: var(--text-base);
+  color: var(--color-text);
+  line-height: var(--leading-normal);
+}

@@ -1,0 +1,206 @@
+/* ===== 全局样式 (Global Styles) =====
+ *
+ * 这是应用的全局样式入口，导入所有令牌并设置基础重置。
+ * 应用只需在入口处 import '@chaimir/ui/styles' 即可应用完整设计系统。
+ */
+
+/* 导入所有令牌 */
+@import './colors.css';
+@import './typography.css';
+@import './spacing.css';
+@import './breakpoints.css';
+
+/* ===== 全局重置 ===== */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html {
+  font-family: var(--font-sans);
+  font-size: 16px;
+  line-height: var(--leading-normal);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+body {
+  background: var(--color-bg);
+  color: var(--color-text);
+  min-height: 100vh;
+}
+
+/* ===== FE-2: 无障碍 - 焦点可见 =====
+ *
+ * 全局焦点环：2px 主色 + 2px offset
+ * 仅键盘聚焦时显示，鼠标点击不显示
+ */
+
+:focus-visible {
+  outline: 2px solid var(--color-focus-ring);
+  outline-offset: 2px;
+  border-radius: var(--radius-xs);
+}
+
+:focus:not(:focus-visible) {
+  outline: none;
+}
+
+/* ===== FE-2: 无障碍 - reduced-motion =====
+ *
+ * 尊重用户的动画偏好设置，关闭动画后无信息丢失、无布局错乱
+ */
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* ===== 无障碍：跳过链接 =====
+ *
+ * 键盘/读屏用户可快速跳到主内容
+ */
+
+.skip-link {
+  position: absolute;
+  top: -40px;
+  left: 0;
+  background: var(--color-primary);
+  color: var(--color-primary-fg);
+  padding: var(--space-2) var(--space-4);
+  z-index: var(--z-toast);
+  text-decoration: none;
+  border-radius: var(--radius-sm);
+  font-weight: var(--font-semibold);
+}
+
+.skip-link:focus {
+  top: var(--space-2);
+}
+
+/* ===== 无障碍：仅读屏可见 =====
+ *
+ * 为读屏用户提供额外上下文，视觉上隐藏
+ */
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border-width: 0;
+}
+
+/* ===== 滚动条样式 =====
+ *
+ * 细化滚动条，精致不抢视觉
+ */
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--color-surface);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--color-border-strong);
+  border-radius: var(--radius-full);
+  border: 2px solid var(--color-surface);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-text-sub);
+}
+
+/* ===== 选中文本样式 ===== */
+
+::selection {
+  background: var(--color-primary-soft);
+  color: var(--color-text);
+}
+
+/* ===== 基础元素样式 ===== */
+
+a {
+  color: var(--color-primary-text);
+  text-decoration: none;
+  transition: color var(--t) var(--ease);
+}
+
+a:hover {
+  color: var(--color-primary-hover);
+}
+
+button {
+  font-family: inherit;
+  cursor: pointer;
+}
+
+button:disabled {
+  cursor: not-allowed;
+}
+
+img,
+svg {
+  display: block;
+  max-width: 100%;
+}
+
+code,
+kbd,
+samp,
+pre {
+  font-family: var(--font-mono);
+}
+
+hr {
+  border: none;
+  border-top: 1px solid var(--color-border);
+  margin: var(--space-6) 0;
+}
+
+/* ===== 工具类：等宽数字 ===== */
+
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
+
+/* ===== 工具类：截断文本 ===== */
+
+.truncate {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.line-clamp-2 {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+}
+
+.line-clamp-3 {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
+}

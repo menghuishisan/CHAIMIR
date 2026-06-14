@@ -94,6 +94,7 @@ CREATE TABLE IF NOT EXISTS battle_entry (
     team_id BIGINT NOT NULL,
     role SMALLINT NOT NULL CHECK (role IN (0, 1, 2)),
     artifact_ref VARCHAR(255) NOT NULL,
+    artifact_hash VARCHAR(64) NOT NULL,
     version_no INT NOT NULL CHECK (version_no > 0),
     is_active BOOLEAN NOT NULL DEFAULT true,
     submitted_at TIMESTAMPTZ NOT NULL DEFAULT now(),

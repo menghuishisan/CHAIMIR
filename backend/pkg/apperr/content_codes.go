@@ -24,6 +24,8 @@ const (
 	CodeContentQueryInvalid = "51010"
 	// CodeContentFullAccessDenied 表示 full 接口身份不满足教师作者或内部服务要求。
 	CodeContentFullAccessDenied = "51011"
+	// CodeContentAttachmentInvalid 表示附件上传或下载授权请求不正确。
+	CodeContentAttachmentInvalid = "51012"
 )
 
 const (
@@ -84,6 +86,8 @@ var (
 	ErrContentQueryInvalid = New(CodeContentQueryInvalid, "查询条件不正确")
 	// ErrContentFullAccessDenied 表示 full 接口无权访问。
 	ErrContentFullAccessDenied = New(CodeContentFullAccessDenied, "无法查看该内容的完整信息")
+	// ErrContentAttachmentInvalid 表示附件暂时不可用。
+	ErrContentAttachmentInvalid = New(CodeContentAttachmentInvalid, "附件暂时不可用,请检查后重试")
 )
 
 var (

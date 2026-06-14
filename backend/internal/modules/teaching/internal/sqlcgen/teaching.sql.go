@@ -124,6 +124,57 @@ func (q *Queries) ClaimJudgeOutboxAcrossTenants(ctx context.Context, limit int32
 	return items, nil
 }
 
+const claimPendingTeachingGradeEventOutbox = `-- name: ClaimPendingTeachingGradeEventOutbox :many
+UPDATE teaching_grade_event_outbox
+SET status = 4, retry_count = retry_count + 1, updated_at = now()
+WHERE id IN (
+    SELECT id
+    FROM teaching_grade_event_outbox
+    WHERE status IN (1, 3) OR (status = 4 AND updated_at <= $1::timestamptz)
+    ORDER BY created_at ASC, id ASC
+    LIMIT $2
+    FOR UPDATE SKIP LOCKED
+)
+RETURNING id, tenant_id, course_id, student_id, trace_id, event_updated_at, status, retry_count, last_error, created_at, updated_at
+`
+
+type ClaimPendingTeachingGradeEventOutboxParams struct {
+	StaleBefore pgtype.Timestamptz `json:"stale_before"`
+	PageLimit   int32              `json:"page_limit"`
+}
+
+func (q *Queries) ClaimPendingTeachingGradeEventOutbox(ctx context.Context, arg ClaimPendingTeachingGradeEventOutboxParams) ([]TeachingGradeEventOutbox, error) {
+	rows, err := q.db.Query(ctx, claimPendingTeachingGradeEventOutbox, arg.StaleBefore, arg.PageLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []TeachingGradeEventOutbox{}
+	for rows.Next() {
+		var i TeachingGradeEventOutbox
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.CourseID,
+			&i.StudentID,
+			&i.TraceID,
+			&i.EventUpdatedAt,
+			&i.Status,
+			&i.RetryCount,
+			&i.LastError,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const completeJudgeOutbox = `-- name: CompleteJudgeOutbox :one
 UPDATE submission_judge_outbox
 SET status = 3, last_error = NULL, updated_at = now()
@@ -825,6 +876,47 @@ func (q *Queries) CreateSubmission(ctx context.Context, arg CreateSubmissionPara
 		&i.IsLate,
 		&i.Status,
 		&i.SubmittedAt,
+	)
+	return i, err
+}
+
+const createTeachingGradeEventOutbox = `-- name: CreateTeachingGradeEventOutbox :one
+INSERT INTO teaching_grade_event_outbox (id, tenant_id, course_id, student_id, trace_id, event_updated_at, status, retry_count, last_error, created_at, updated_at)
+VALUES ($1, $2, $3, $4, $5, $6, 1, 0, NULL, now(), now())
+RETURNING id, tenant_id, course_id, student_id, trace_id, event_updated_at, status, retry_count, last_error, created_at, updated_at
+`
+
+type CreateTeachingGradeEventOutboxParams struct {
+	ID             int64              `json:"id"`
+	TenantID       int64              `json:"tenant_id"`
+	CourseID       int64              `json:"course_id"`
+	StudentID      int64              `json:"student_id"`
+	TraceID        string             `json:"trace_id"`
+	EventUpdatedAt pgtype.Timestamptz `json:"event_updated_at"`
+}
+
+func (q *Queries) CreateTeachingGradeEventOutbox(ctx context.Context, arg CreateTeachingGradeEventOutboxParams) (TeachingGradeEventOutbox, error) {
+	row := q.db.QueryRow(ctx, createTeachingGradeEventOutbox,
+		arg.ID,
+		arg.TenantID,
+		arg.CourseID,
+		arg.StudentID,
+		arg.TraceID,
+		arg.EventUpdatedAt,
+	)
+	var i TeachingGradeEventOutbox
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.CourseID,
+		&i.StudentID,
+		&i.TraceID,
+		&i.EventUpdatedAt,
+		&i.Status,
+		&i.RetryCount,
+		&i.LastError,
+		&i.CreatedAt,
+		&i.UpdatedAt,
 	)
 	return i, err
 }
@@ -2519,6 +2611,69 @@ func (q *Queries) MarkJudgeOutboxResult(ctx context.Context, arg MarkJudgeOutbox
 		&i.LastError,
 		&i.Score,
 		&i.CompletedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const markTeachingGradeEventOutboxFailed = `-- name: MarkTeachingGradeEventOutboxFailed :one
+UPDATE teaching_grade_event_outbox
+SET status = 3, last_error = $3, updated_at = now()
+WHERE tenant_id = $1 AND id = $2
+RETURNING id, tenant_id, course_id, student_id, trace_id, event_updated_at, status, retry_count, last_error, created_at, updated_at
+`
+
+type MarkTeachingGradeEventOutboxFailedParams struct {
+	TenantID  int64       `json:"tenant_id"`
+	ID        int64       `json:"id"`
+	LastError pgtype.Text `json:"last_error"`
+}
+
+func (q *Queries) MarkTeachingGradeEventOutboxFailed(ctx context.Context, arg MarkTeachingGradeEventOutboxFailedParams) (TeachingGradeEventOutbox, error) {
+	row := q.db.QueryRow(ctx, markTeachingGradeEventOutboxFailed, arg.TenantID, arg.ID, arg.LastError)
+	var i TeachingGradeEventOutbox
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.CourseID,
+		&i.StudentID,
+		&i.TraceID,
+		&i.EventUpdatedAt,
+		&i.Status,
+		&i.RetryCount,
+		&i.LastError,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const markTeachingGradeEventOutboxPublished = `-- name: MarkTeachingGradeEventOutboxPublished :one
+UPDATE teaching_grade_event_outbox
+SET status = 2, last_error = NULL, updated_at = now()
+WHERE tenant_id = $1 AND id = $2
+RETURNING id, tenant_id, course_id, student_id, trace_id, event_updated_at, status, retry_count, last_error, created_at, updated_at
+`
+
+type MarkTeachingGradeEventOutboxPublishedParams struct {
+	TenantID int64 `json:"tenant_id"`
+	ID       int64 `json:"id"`
+}
+
+func (q *Queries) MarkTeachingGradeEventOutboxPublished(ctx context.Context, arg MarkTeachingGradeEventOutboxPublishedParams) (TeachingGradeEventOutbox, error) {
+	row := q.db.QueryRow(ctx, markTeachingGradeEventOutboxPublished, arg.TenantID, arg.ID)
+	var i TeachingGradeEventOutbox
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.CourseID,
+		&i.StudentID,
+		&i.TraceID,
+		&i.EventUpdatedAt,
+		&i.Status,
+		&i.RetryCount,
+		&i.LastError,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)

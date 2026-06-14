@@ -1,0 +1,144 @@
+/* Input 组件样式
+ *
+ * 符合前端设计规范 §4.3 表单精度：
+ * - hover 边框加深
+ * - focus 主色边框 + 3px 青电浅环
+ * - 错误态红边 + 红字
+ */
+
+.chaimir-input-wrapper {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  width: auto;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg);
+  transition: all var(--t) var(--ease);
+}
+
+.chaimir-input-wrapper--full {
+  width: 100%;
+}
+
+/* === 尺寸 === */
+
+.chaimir-input-wrapper--sm {
+  height: 2rem; /* 32px */
+}
+
+.chaimir-input-wrapper--sm .chaimir-input {
+  padding: 0 var(--space-3);
+  font-size: var(--text-sm);
+}
+
+.chaimir-input-wrapper--md {
+  height: 2.5rem; /* 40px */
+}
+
+.chaimir-input-wrapper--md .chaimir-input {
+  padding: 0 var(--space-4);
+  font-size: var(--text-base);
+}
+
+.chaimir-input-wrapper--lg {
+  height: 3rem; /* 48px */
+}
+
+.chaimir-input-wrapper--lg .chaimir-input {
+  padding: 0 var(--space-5);
+  font-size: var(--text-md);
+}
+
+/* === 输入框 === */
+
+.chaimir-input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: var(--color-text);
+  font-family: var(--font-sans);
+}
+
+.chaimir-input::placeholder {
+  color: var(--color-text-faint);
+}
+
+/* === 状态 === */
+
+/* Hover */
+.chaimir-input-wrapper:hover:not(.chaimir-input-wrapper--disabled) {
+  border-color: var(--color-border-strong);
+}
+
+/* Focus - 主色边框 + 3px 青电浅环 */
+.chaimir-input-wrapper:has(.chaimir-input:focus) {
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 3px var(--color-primary-soft);
+}
+
+/* Error - 红边 */
+.chaimir-input-wrapper--error {
+  border-color: var(--color-danger-border);
+}
+
+.chaimir-input-wrapper--error:has(.chaimir-input:focus) {
+  box-shadow: 0 0 0 3px var(--color-danger-bg);
+}
+
+/* Disabled */
+.chaimir-input-wrapper--disabled {
+  background: var(--color-surface);
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.chaimir-input:disabled {
+  cursor: not-allowed;
+}
+
+/* === 图标 === */
+
+.chaimir-input__icon {
+  display: inline-flex;
+  align-items: center;
+  color: var(--color-text-sub);
+  flex-shrink: 0;
+}
+
+.chaimir-input__icon--left {
+  margin-left: var(--space-3);
+  margin-right: calc(-1 * var(--space-2));
+}
+
+.chaimir-input__icon--right {
+  margin-right: var(--space-3);
+  margin-left: calc(-1 * var(--space-2));
+}
+
+/* 有图标时调整输入框内边距 */
+.chaimir-input-wrapper--sm:has(.chaimir-input__icon--left) .chaimir-input {
+  padding-left: var(--space-8);
+}
+
+.chaimir-input-wrapper--sm:has(.chaimir-input__icon--right) .chaimir-input {
+  padding-right: var(--space-8);
+}
+
+.chaimir-input-wrapper--md:has(.chaimir-input__icon--left) .chaimir-input {
+  padding-left: var(--space-10);
+}
+
+.chaimir-input-wrapper--md:has(.chaimir-input__icon--right) .chaimir-input {
+  padding-right: var(--space-10);
+}
+
+.chaimir-input-wrapper--lg:has(.chaimir-input__icon--left) .chaimir-input {
+  padding-left: var(--space-12);
+}
+
+.chaimir-input-wrapper--lg:has(.chaimir-input__icon--right) .chaimir-input {
+  padding-right: var(--space-12);
+}

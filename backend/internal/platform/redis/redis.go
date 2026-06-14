@@ -81,6 +81,18 @@ func (c *Client) IncrWithTTL(ctx context.Context, key string, ttl time.Duration)
 	return n, nil
 }
 
+// Decr 自减计数,用于外部动作失败后回滚已占用的限额窗口。
+func (c *Client) Decr(ctx context.Context, key string) (int64, error) {
+	if c == nil || c.rdb == nil {
+		return 0, fmt.Errorf("Redis 客户端未初始化")
+	}
+	n, err := c.rdb.Decr(ctx, key).Result()
+	if err != nil {
+		return 0, fmt.Errorf("Redis Decr 失败: %w", err)
+	}
+	return n, nil
+}
+
 // GetInt64 读取整数缓存值,并显式区分缓存缺失与 Redis 错误。
 func (c *Client) GetInt64(ctx context.Context, key string) (int64, bool, error) {
 	if c == nil || c.rdb == nil {

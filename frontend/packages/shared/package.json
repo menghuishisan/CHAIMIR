@@ -1,0 +1,23 @@
+{
+  "name": "@chaimir/shared",
+  "version": "0.1.0",
+  "description": "Chaimir 共享工具函数和 Hooks",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "scripts": {
+    "dev": "tsc --watch --noEmit",
+    "build": "tsc --noEmit",
+    "lint": "eslint src --ext .ts,.tsx",
+    "type-check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "react": "^18.3.1"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.3",
+    "typescript": "^5.4.5"
+  },
+  "peerDependencies": {
+    "react": "^18.3.1"
+  }
+}

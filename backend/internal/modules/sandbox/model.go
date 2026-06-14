@@ -101,6 +101,23 @@ type TenantQuota struct {
 	MaxSnapshotRetentionMin int32
 }
 
+// SandboxRecycleOutbox 是沙箱回收事件的生产者 outbox 记录。
+type SandboxRecycleOutbox struct {
+	ID             int64
+	TenantID       int64
+	SandboxID      int64
+	SourceRef      string
+	OwnerAccountID int64
+	Reason         string
+	TraceID        string
+	RecycledAt     time.Time
+	Status         int16
+	RetryCount     int32
+	LastError      string
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
+}
+
 // CreateSandboxInputModel 是 service 传入规则层的本模块创建校验模型。
 type CreateSandboxInputModel struct {
 	TenantID                 int64

@@ -3,9 +3,11 @@ package teaching
 
 import (
 	"context"
+	"time"
 
 	"chaimir/internal/modules/teaching/internal/sqlcgen"
 	"chaimir/internal/platform/pgtypex"
+	"chaimir/internal/platform/timex"
 )
 
 // UpsertProgress 写入或累计学习进度。
@@ -235,6 +237,46 @@ func (s *txStore) OverrideCourseGrade(ctx context.Context, tenantID, courseID, s
 // SetCourseGradesLock 同步课程成绩写保护投影。
 func (s *txStore) SetCourseGradesLock(ctx context.Context, tenantID, courseID int64, locked bool) error {
 	return s.q.SetCourseGradesLock(ctx, sqlcgen.SetCourseGradesLockParams{TenantID: tenantID, CourseID: courseID, IsLocked: locked})
+}
+
+// CreateTeachingGradeEventOutbox 在成绩写入事务内保存成绩变更事件。
+func (s *txStore) CreateTeachingGradeEventOutbox(ctx context.Context, id, tenantID, courseID, studentID int64, traceID string, updatedAt time.Time) (TeachingGradeEventOutbox, error) {
+	row, err := s.q.CreateTeachingGradeEventOutbox(ctx, sqlcgen.CreateTeachingGradeEventOutboxParams{ID: id, TenantID: tenantID, CourseID: courseID, StudentID: studentID, TraceID: traceID, EventUpdatedAt: timex.RequiredTimestamptz(updatedAt)})
+	if err != nil {
+		return TeachingGradeEventOutbox{}, err
+	}
+	return teachingGradeEventOutbox(row), nil
+}
+
+// ClaimPendingTeachingGradeEventOutbox 跨租户领取待发布或失败待重试的成绩事件。
+func (s *txStore) ClaimPendingTeachingGradeEventOutbox(ctx context.Context, limit int32, staleBefore time.Time) ([]TeachingGradeEventOutbox, error) {
+	rows, err := s.q.ClaimPendingTeachingGradeEventOutbox(ctx, sqlcgen.ClaimPendingTeachingGradeEventOutboxParams{StaleBefore: timex.RequiredTimestamptz(staleBefore), PageLimit: limit})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]TeachingGradeEventOutbox, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, teachingGradeEventOutbox(row))
+	}
+	return out, nil
+}
+
+// MarkTeachingGradeEventOutboxPublished 标记成绩事件发布成功。
+func (s *txStore) MarkTeachingGradeEventOutboxPublished(ctx context.Context, tenantID, id int64) (TeachingGradeEventOutbox, error) {
+	row, err := s.q.MarkTeachingGradeEventOutboxPublished(ctx, sqlcgen.MarkTeachingGradeEventOutboxPublishedParams{TenantID: tenantID, ID: id})
+	if err != nil {
+		return TeachingGradeEventOutbox{}, err
+	}
+	return teachingGradeEventOutbox(row), nil
+}
+
+// MarkTeachingGradeEventOutboxFailed 标记成绩事件发布失败并保留脱敏原因。
+func (s *txStore) MarkTeachingGradeEventOutboxFailed(ctx context.Context, tenantID, id int64, reason string) (TeachingGradeEventOutbox, error) {
+	row, err := s.q.MarkTeachingGradeEventOutboxFailed(ctx, sqlcgen.MarkTeachingGradeEventOutboxFailedParams{TenantID: tenantID, ID: id, LastError: pgtypex.Text(reason)})
+	if err != nil {
+		return TeachingGradeEventOutbox{}, err
+	}
+	return teachingGradeEventOutbox(row), nil
 }
 
 // Stats 查询教学统计摘要。

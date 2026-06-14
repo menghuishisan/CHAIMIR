@@ -2,8 +2,6 @@
 package judge
 
 import (
-	"encoding/json"
-
 	"chaimir/internal/modules/judge/internal/sqlcgen"
 	"chaimir/internal/platform/jsonx"
 	"chaimir/internal/platform/pgtypex"
@@ -157,7 +155,7 @@ func outboxFromRow(row sqlcgen.JudgeEventOutbox) JudgeEventOutbox {
 
 // decodeResourceSpec 解码数据库中的判题器资源配置。
 func decodeResourceSpec(raw []byte, typ int16, runtimeRequired bool) (JudgerResourceSpec, error) {
-	return parseJudgerResourceSpec(json.RawMessage(raw), typ, runtimeRequired)
+	return parseJudgerResourceSpec(jsonx.RawMessage(raw), typ, runtimeRequired)
 }
 
 // decodeSnapshot 解码任务输入快照。

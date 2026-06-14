@@ -8,7 +8,7 @@ CREATE TABLE IF NOT EXISTS experiment (
     template_version VARCHAR(32),
     name VARCHAR(255) NOT NULL,
     description TEXT NOT NULL DEFAULT '',
-    components JSONB NOT NULL DEFAULT '{"envs":[],"sims":[],"checkpoints":[]}'::jsonb,
+    components JSONB NOT NULL DEFAULT '{"envs":[],"sims":[],"checkpoints":[],"stages":[]}'::jsonb,
     collab_mode SMALLINT NOT NULL CHECK (collab_mode IN (1, 2)),
     group_config JSONB,
     require_report BOOLEAN NOT NULL DEFAULT false,
@@ -74,6 +74,7 @@ CREATE TABLE IF NOT EXISTS checkpoint_result (
     passed BOOLEAN NOT NULL DEFAULT false,
     score NUMERIC(5,2) NOT NULL DEFAULT 0 CHECK (score >= 0),
     detail_ref VARCHAR(128),
+    binding_output JSONB NOT NULL DEFAULT '{}'::jsonb,
     judged_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     UNIQUE (tenant_id, id),
     UNIQUE (tenant_id, instance_id, checkpoint_id),
@@ -96,6 +97,24 @@ CREATE TABLE IF NOT EXISTS experiment_report (
     FOREIGN KEY (tenant_id, student_id) REFERENCES account(tenant_id, id)
 );
 
+CREATE TABLE IF NOT EXISTS experiment_score_outbox (
+    id BIGINT PRIMARY KEY,
+    tenant_id BIGINT NOT NULL,
+    experiment_id BIGINT NOT NULL,
+    instance_id BIGINT NOT NULL,
+    student_id BIGINT NOT NULL,
+    score NUMERIC(5,2) NOT NULL,
+    trace_id VARCHAR(128) NOT NULL,
+    scored_at TIMESTAMPTZ NOT NULL,
+    status SMALLINT NOT NULL DEFAULT 1,
+    retry_count INT NOT NULL DEFAULT 0 CHECK (retry_count >= 0),
+    last_error VARCHAR(255),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT chk_experiment_score_outbox_status CHECK (status IN (1,2,3,4)),
+    FOREIGN KEY (tenant_id, instance_id) REFERENCES experiment_instance(tenant_id, id)
+);
+
 CREATE INDEX IF NOT EXISTS idx_experiment_course_status ON experiment(tenant_id, course_id, status) WHERE deleted_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_experiment_author ON experiment(tenant_id, author_id) WHERE deleted_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_experiment_instance_owner ON experiment_instance(tenant_id, experiment_id, owner_account_id);
@@ -105,6 +124,7 @@ CREATE INDEX IF NOT EXISTS idx_group_member_student ON group_member(tenant_id, s
 CREATE INDEX IF NOT EXISTS idx_checkpoint_result_instance ON checkpoint_result(tenant_id, instance_id);
 CREATE INDEX IF NOT EXISTS idx_checkpoint_result_judge ON checkpoint_result(tenant_id, judge_task_ref);
 CREATE INDEX IF NOT EXISTS idx_experiment_report_instance_student ON experiment_report(tenant_id, instance_id, student_id);
+CREATE INDEX IF NOT EXISTS idx_experiment_score_outbox_status ON experiment_score_outbox(status, created_at ASC);
 
 ALTER TABLE experiment ENABLE ROW LEVEL SECURITY;
 ALTER TABLE experiment_instance ENABLE ROW LEVEL SECURITY;
@@ -112,6 +132,7 @@ ALTER TABLE experiment_group ENABLE ROW LEVEL SECURITY;
 ALTER TABLE group_member ENABLE ROW LEVEL SECURITY;
 ALTER TABLE checkpoint_result ENABLE ROW LEVEL SECURITY;
 ALTER TABLE experiment_report ENABLE ROW LEVEL SECURITY;
+ALTER TABLE experiment_score_outbox ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY experiment_tenant_rls ON experiment USING (tenant_id = current_setting('app.tenant_id')::BIGINT);
 CREATE POLICY experiment_instance_tenant_rls ON experiment_instance USING (tenant_id = current_setting('app.tenant_id')::BIGINT);
@@ -119,3 +140,4 @@ CREATE POLICY experiment_group_tenant_rls ON experiment_group USING (tenant_id =
 CREATE POLICY group_member_tenant_rls ON group_member USING (tenant_id = current_setting('app.tenant_id')::BIGINT);
 CREATE POLICY checkpoint_result_tenant_rls ON checkpoint_result USING (tenant_id = current_setting('app.tenant_id')::BIGINT);
 CREATE POLICY experiment_report_tenant_rls ON experiment_report USING (tenant_id = current_setting('app.tenant_id')::BIGINT);
+CREATE POLICY experiment_score_outbox_tenant_rls ON experiment_score_outbox USING (tenant_id = current_setting('app.tenant_id')::BIGINT);

@@ -2,7 +2,6 @@
 package sim
 
 import (
-	"io"
 	"net/http"
 	"strings"
 
@@ -11,8 +10,10 @@ import (
 	"chaimir/internal/platform/httpx"
 	"chaimir/internal/platform/jsonx"
 	"chaimir/internal/platform/tenant"
+	"chaimir/internal/platform/upload"
 	"chaimir/internal/platform/ws"
 	"chaimir/pkg/apperr"
+	"chaimir/pkg/logging"
 	"chaimir/pkg/response"
 
 	"github.com/gin-gonic/gin"
@@ -112,7 +113,7 @@ func (a simAPI) getBundle(c *gin.Context) {
 		response.Fail(c, err)
 		return
 	}
-	defer rc.Close()
+	defer logging.CloseContext(c.Request.Context(), "关闭仿真包读取流失败", rc)
 	c.Header("X-Bundle-SHA256", hash)
 	c.DataFromReader(http.StatusOK, -1, "application/octet-stream", rc, nil)
 }
@@ -123,7 +124,7 @@ func (a simAPI) submitPackage(c *gin.Context) {
 	if !ok {
 		return
 	}
-	req, bundle, ok := bindPackageMultipart(c)
+	req, bundle, ok := a.bindPackageMultipart(c)
 	if !ok {
 		return
 	}
@@ -141,7 +142,7 @@ func (a simAPI) updatePackage(c *gin.Context) {
 	if !ok {
 		return
 	}
-	req, bundle, ok := bindPackageMultipart(c)
+	req, bundle, ok := a.bindPackageMultipart(c)
 	if !ok {
 		return
 	}
@@ -383,16 +384,20 @@ func (a simAPI) streamSession(c *gin.Context) {
 }
 
 // bindPackageMultipart 读取仿真包 multipart 元数据和 bundle 文件。
-func bindPackageMultipart(c *gin.Context) (SubmitPackageRequest, BundleInput, bool) {
+func (a simAPI) bindPackageMultipart(c *gin.Context) (SubmitPackageRequest, BundleInput, bool) {
 	file, header, err := c.Request.FormFile("bundle")
 	if err != nil {
 		response.Fail(c, apperr.ErrSimBundleUnreadable.WithCause(err))
 		return SubmitPackageRequest{}, BundleInput{}, false
 	}
-	defer file.Close()
-	data, err := io.ReadAll(file)
+	defer logging.CloseContext(c.Request.Context(), "关闭仿真包上传文件失败", file)
+	data, result, err := upload.ReadBounded(file, a.svc.upload.SimBundleMaxBytes)
 	if err != nil {
 		response.Fail(c, apperr.ErrSimBundleUnreadable.WithCause(err))
+		return SubmitPackageRequest{}, BundleInput{}, false
+	}
+	if result != upload.SizeOK {
+		response.Fail(c, apperr.ErrSimBundleUnreadable)
 		return SubmitPackageRequest{}, BundleInput{}, false
 	}
 	req := SubmitPackageRequest{Code: c.PostForm("code"), Version: c.PostForm("version"), Name: c.PostForm("name"), Category: c.PostForm("category"), Compute: c.PostForm("compute"), BackendAdapter: c.PostForm("backend_adapter"), ScaleLimit: []byte(defaultJSON(c.PostForm("scale_limit"))), BackendConfig: []byte(defaultJSON(c.PostForm("backend_config"))), AuthorType: int16(httpx.Int(c.PostForm("author_type")))}

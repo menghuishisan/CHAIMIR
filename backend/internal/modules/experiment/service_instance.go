@@ -4,12 +4,15 @@ package experiment
 import (
 	"context"
 	"fmt"
-	"sync"
+	"log/slog"
+	"strings"
+	"time"
 
 	"chaimir/internal/contracts"
 	"chaimir/internal/platform/audit"
 	"chaimir/internal/platform/timex"
 	"chaimir/pkg/apperr"
+	"chaimir/pkg/logging"
 	"chaimir/pkg/response"
 )
 
@@ -80,7 +83,7 @@ func (s *Service) CreateInstance(ctx context.Context, experimentID int64, req Cr
 	if err := s.writeAudit(ctx, id.TenantID, id.AccountID, audit.ActorRoleStudent, "experiment.instance.create", auditTargetInstance, inst.ID, map[string]any{"experiment_id": experimentID, "source_ref": inst.SourceRef}); err != nil {
 		return InstanceDTO{}, err
 	}
-	return instanceDTOFromModel(inst, checkpointDefaults(exp, nil)), nil
+	return instanceDTOFromModel(inst, checkpointDefaults(exp, nil), stageDTOs(exp, inst, nil)), nil
 }
 
 // GetInstance 读取实验工作台,包含引擎入口和检查点状态。
@@ -120,7 +123,7 @@ func (s *Service) GetInstance(ctx context.Context, instanceID int64) (InstanceDT
 	}); err != nil {
 		return InstanceDTO{}, err
 	}
-	return instanceDTOFromModel(inst, checkpointDefaults(exp, checkpoints)), nil
+	return instanceDTOFromModel(inst, checkpointDefaults(exp, checkpoints), stageDTOs(exp, inst, checkpoints)), nil
 }
 
 // GetProgress 返回统一 M10 进度 topic 元信息。
@@ -227,13 +230,14 @@ func (s *Service) FinishInstance(ctx context.Context, instanceID int64) (Instanc
 			return err
 		}
 		inst, err = tx.FinishInstance(ctx, id.TenantID, instanceID, score)
-		return err
+		if err != nil {
+			return err
+		}
+		return s.enqueueExperimentScoreOutbox(ctx, tx, inst)
 	}); err != nil {
 		return InstanceDTO{}, err
 	}
-	if err := s.publishScored(ctx, inst); err != nil {
-		return InstanceDTO{}, err
-	}
+	s.drainExperimentScoreOutboxBestEffort(ctx)
 	if err := s.recycleEngines(ctx, inst, "finished"); err != nil {
 		return InstanceDTO{}, err
 	}
@@ -331,61 +335,7 @@ func (s *Service) controlInstance(ctx context.Context, instanceID int64, next in
 
 // createEngineResources 并发创建实验定义中的沙箱和仿真组件。
 func (s *Service) createEngineResources(ctx context.Context, exp Experiment, inst ExperimentInstance) ([]SandboxRef, []SimSessionRef, error) {
-	var mu sync.Mutex
-	var wg sync.WaitGroup
-	var firstErr error
-	sandboxes := []SandboxRef{}
-	sims := []SimSessionRef{}
-	setErr := func(err error) {
-		if err == nil {
-			return
-		}
-		mu.Lock()
-		defer mu.Unlock()
-		if firstErr == nil {
-			firstErr = err
-		}
-	}
-	for idx, env := range exp.Components.Envs {
-		componentID := componentID(env.ID, "env", idx)
-		wg.Add(1)
-		go func(env EnvComponent, componentID string) {
-			defer wg.Done()
-			if s.sandbox == nil {
-				setErr(apperr.ErrExperimentSandboxUnavailable)
-				return
-			}
-			info, err := s.sandbox.CreateSandbox(ctx, contracts.SandboxCreateRequest{TenantID: inst.TenantID, RuntimeCode: env.RuntimeCode, RuntimeImageVersion: env.RuntimeImageVersion, ToolCodes: env.Tools, InitCodeRef: env.InitCodeRef, InitScriptRef: env.InitScriptRef, OwnerAccountID: inst.OwnerAccountID, SourceRef: inst.SourceRef, KeepAlive: env.KeepAlive, SnapshotEnabled: env.SnapshotEnabled, KeepAliveMinutes: env.KeepAliveMinutes, SnapshotRetentionMinutes: env.SnapshotRetentionMinutes})
-			if err != nil {
-				setErr(apperr.ErrExperimentSandboxUnavailable.WithCause(err))
-				return
-			}
-			mu.Lock()
-			sandboxes = append(sandboxes, sandboxRefFromContract(componentID, info))
-			mu.Unlock()
-		}(env, componentID)
-	}
-	for idx, sim := range exp.Components.Sims {
-		componentID := componentID(sim.ID, "sim", idx)
-		wg.Add(1)
-		go func(sim SimComponent, componentID string) {
-			defer wg.Done()
-			if s.sim == nil {
-				setErr(apperr.ErrExperimentSimUnavailable)
-				return
-			}
-			info, err := s.sim.CreateSession(ctx, contracts.SimCreateSessionRequest{TenantID: inst.TenantID, PackageCode: sim.PackageCode, Version: sim.Version, Seed: sim.Seed, InitParams: sim.Params, OwnerAccountID: inst.OwnerAccountID, SourceRef: inst.SourceRef})
-			if err != nil {
-				setErr(apperr.ErrExperimentSimUnavailable.WithCause(err))
-				return
-			}
-			mu.Lock()
-			sims = append(sims, simRefFromContract(componentID, info))
-			mu.Unlock()
-		}(sim, componentID)
-	}
-	wg.Wait()
-	return sandboxes, sims, firstErr
+	return s.createInitialEngineResources(ctx, exp, inst)
 }
 
 // recycleEngines 按实例 source_ref 回收 M2/M4 资源,契约缺失时显式失败。
@@ -473,14 +423,79 @@ func checkpointDefaults(exp Experiment, existing []CheckpointResult) []Checkpoin
 	return out
 }
 
-// publishScored 发布实验得分事件,供 M6/M11/M9 等上层流程按事件消费。
-func (s *Service) publishScored(ctx context.Context, inst ExperimentInstance) error {
-	if s.bus == nil {
+// enqueueExperimentScoreOutbox 在实例得分写入同一事务内保存实验得分事件。
+func (s *Service) enqueueExperimentScoreOutbox(ctx context.Context, tx TxStore, inst ExperimentInstance) error {
+	traceID := strings.TrimSpace(response.TraceFromContext(ctx))
+	if inst.TenantID <= 0 || inst.ExperimentID <= 0 || inst.ID <= 0 || inst.OwnerAccountID <= 0 || traceID == "" {
 		return apperr.ErrExperimentEventFailed
 	}
-	event := contracts.ExperimentScoredEvent{TenantID: inst.TenantID, TraceID: response.TraceFromContext(ctx), ExperimentID: inst.ExperimentID, InstanceID: inst.ID, StudentID: inst.OwnerAccountID, Score: inst.Score, ScoredAt: timex.Now()}
-	if err := s.bus.Publish(ctx, contracts.SubjectExperimentScored, event); err != nil {
+	if _, err := tx.CreateExperimentScoreOutbox(ctx, s.ids.Generate(), inst, traceID, timex.Now()); err != nil {
 		return apperr.ErrExperimentEventFailed.WithCause(err)
 	}
 	return nil
+}
+
+// RunExperimentScoreOutboxOnce 领取并发布 M7 实验得分事件。
+func (s *Service) RunExperimentScoreOutboxOnce(ctx context.Context) error {
+	limit := int32(s.cfg.ScoreOutboxBatchSize)
+	if limit <= 0 {
+		return apperr.ErrExperimentEventFailed
+	}
+	staleBefore := timex.Now().Add(-time.Duration(s.cfg.ScoreOutboxStaleMs) * time.Millisecond)
+	var items []ExperimentScoreOutbox
+	if err := s.store.PrivilegedTx(ctx, func(ctx context.Context, tx TxStore) error {
+		var err error
+		items, err = tx.ClaimPendingExperimentScoreOutbox(ctx, limit, staleBefore)
+		if err != nil {
+			return apperr.ErrExperimentEventFailed.WithCause(err)
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+	for _, item := range items {
+		if err := s.publishScoreOutboxItem(ctx, item); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// publishScoreOutboxItem 发布单条得分事件并按结果回写 outbox 状态。
+func (s *Service) publishScoreOutboxItem(ctx context.Context, item ExperimentScoreOutbox) error {
+	eventCtx := response.WithTrace(ctx, item.TraceID)
+	payload := contracts.ExperimentScoredEvent{TenantID: item.TenantID, TraceID: item.TraceID, ExperimentID: item.ExperimentID, InstanceID: item.InstanceID, StudentID: item.StudentID, Score: item.Score, ScoredAt: item.ScoredAt}
+	if err := s.bus.Publish(eventCtx, contracts.SubjectExperimentScored, payload); err != nil {
+		s.recordExperimentScoreOutboxFailure(eventCtx, item, err)
+		return apperr.ErrExperimentEventFailed.WithCause(err)
+	}
+	return s.markExperimentScoreOutboxPublished(eventCtx, item)
+}
+
+// markExperimentScoreOutboxPublished 标记实验得分事件发布成功。
+func (s *Service) markExperimentScoreOutboxPublished(ctx context.Context, item ExperimentScoreOutbox) error {
+	return s.store.PrivilegedTx(ctx, func(ctx context.Context, tx TxStore) error {
+		_, err := tx.MarkExperimentScoreOutboxPublished(ctx, item.TenantID, item.ID)
+		if err != nil {
+			return apperr.ErrExperimentEventFailed.WithCause(err)
+		}
+		return nil
+	})
+}
+
+// recordExperimentScoreOutboxFailure 记录得分事件发布失败并等待后台重试。
+func (s *Service) recordExperimentScoreOutboxFailure(ctx context.Context, item ExperimentScoreOutbox, cause error) {
+	if err := s.store.PrivilegedTx(ctx, func(ctx context.Context, tx TxStore) error {
+		_, err := tx.MarkExperimentScoreOutboxFailed(ctx, item.TenantID, item.ID, logging.SanitizeError(cause.Error()))
+		return err
+	}); err != nil {
+		logging.ErrorContext(ctx, "experiment score outbox failure mark failed", err.Error(), slog.Int64("tenant_id", item.TenantID), slog.Int64("instance_id", item.InstanceID), slog.Int64("outbox_id", item.ID))
+	}
+}
+
+// drainExperimentScoreOutboxBestEffort 在请求提交后尽快投递,失败交给后台任务补偿。
+func (s *Service) drainExperimentScoreOutboxBestEffort(ctx context.Context) {
+	if err := s.RunExperimentScoreOutboxOnce(ctx); err != nil {
+		logging.ErrorContext(ctx, "experiment score outbox drain failed", err.Error())
+	}
 }

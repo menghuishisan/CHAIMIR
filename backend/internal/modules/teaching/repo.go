@@ -101,6 +101,10 @@ type TxStore interface {
 	ListStudentGrades(context.Context, int64, int64) ([]CourseGrade, error)
 	OverrideCourseGrade(context.Context, int64, int64, int64, float64) (CourseGrade, error)
 	SetCourseGradesLock(context.Context, int64, int64, bool) error
+	CreateTeachingGradeEventOutbox(context.Context, int64, int64, int64, int64, string, time.Time) (TeachingGradeEventOutbox, error)
+	ClaimPendingTeachingGradeEventOutbox(context.Context, int32, time.Time) ([]TeachingGradeEventOutbox, error)
+	MarkTeachingGradeEventOutboxPublished(context.Context, int64, int64) (TeachingGradeEventOutbox, error)
+	MarkTeachingGradeEventOutboxFailed(context.Context, int64, int64, string) (TeachingGradeEventOutbox, error)
 	Stats(context.Context, int64) (contractsStats, error)
 }
 

@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"chaimir/internal/modules/experiment/internal/sqlcgen"
 	"chaimir/internal/platform/db"
@@ -38,6 +39,7 @@ type TxStore interface {
 	GetActiveGroupInstance(context.Context, int64, int64, int64) (ExperimentInstance, error)
 	CreateInstance(context.Context, ExperimentInstance) (ExperimentInstance, error)
 	GetInstance(context.Context, int64, int64) (ExperimentInstance, error)
+	GetInstanceForUpdate(context.Context, int64, int64) (ExperimentInstance, error)
 	GetInstanceBySourceRef(context.Context, int64, string) (ExperimentInstance, error)
 	UpdateInstanceResources(context.Context, int64, int64, []SandboxRef, []SimSessionRef, int16) (ExperimentInstance, error)
 	SetInstanceStatus(context.Context, int64, int64, int16) (ExperimentInstance, error)
@@ -55,6 +57,10 @@ type TxStore interface {
 	ListReports(context.Context, int64, int64, int, int) ([]ExperimentReport, int64, error)
 	SumScores(context.Context, int64, int64) (float64, error)
 	Stats(context.Context, int64, int64) (ExperimentStatsSnapshot, error)
+	CreateExperimentScoreOutbox(context.Context, int64, ExperimentInstance, string, time.Time) (ExperimentScoreOutbox, error)
+	ClaimPendingExperimentScoreOutbox(context.Context, int32, time.Time) ([]ExperimentScoreOutbox, error)
+	MarkExperimentScoreOutboxPublished(context.Context, int64, int64) (ExperimentScoreOutbox, error)
+	MarkExperimentScoreOutboxFailed(context.Context, int64, int64, string) (ExperimentScoreOutbox, error)
 }
 
 type store struct{ database *db.DB }
@@ -239,6 +245,15 @@ func (tx *txStore) GetInstance(ctx context.Context, tenantID, id int64) (Experim
 	return instanceFromGetRow(row)
 }
 
+// GetInstanceForUpdate 锁定实例行,用于显式阶段激活的幂等资源追加。
+func (tx *txStore) GetInstanceForUpdate(ctx context.Context, tenantID, id int64) (ExperimentInstance, error) {
+	row, err := tx.q.GetExperimentInstanceForUpdate(ctx, sqlcgen.GetExperimentInstanceForUpdateParams{TenantID: tenantID, ID: id})
+	if err != nil {
+		return ExperimentInstance{}, apperr.ErrExperimentInstanceNotFound.WithCause(err)
+	}
+	return instanceFromForUpdateRow(row)
+}
+
 // GetInstanceBySourceRef 按 source_ref 读取实验实例。
 func (tx *txStore) GetInstanceBySourceRef(ctx context.Context, tenantID int64, sourceRef string) (ExperimentInstance, error) {
 	row, err := tx.q.GetExperimentInstanceBySourceRef(ctx, sqlcgen.GetExperimentInstanceBySourceRefParams{TenantID: tenantID, SourceRef: sourceRef})
@@ -320,7 +335,14 @@ func (tx *txStore) ClaimRecyclableInstances(ctx context.Context, pausedTimeoutSe
 
 // UpsertCheckpoint 新增或更新检查点结果。
 func (tx *txStore) UpsertCheckpoint(ctx context.Context, item CheckpointResult) (CheckpointResult, error) {
-	row, err := tx.q.UpsertCheckpointResult(ctx, sqlcgen.UpsertCheckpointResultParams{ID: item.ID, TenantID: item.TenantID, InstanceID: item.InstanceID, CheckpointID: item.CheckpointID, JudgeTaskRef: pgtypex.Text(item.JudgeTaskRef), Passed: item.Passed, Column7: fmt.Sprintf("%.2f", item.Score), DetailRef: pgtypex.Text(item.DetailRef)})
+	if item.BindingOutput == nil {
+		item.BindingOutput = map[string]any{}
+	}
+	bindingOutput, err := encodeJSON(item.BindingOutput, apperr.ErrExperimentCheckpointInvalid)
+	if err != nil {
+		return CheckpointResult{}, err
+	}
+	row, err := tx.q.UpsertCheckpointResult(ctx, sqlcgen.UpsertCheckpointResultParams{ID: item.ID, TenantID: item.TenantID, InstanceID: item.InstanceID, CheckpointID: item.CheckpointID, JudgeTaskRef: pgtypex.Text(item.JudgeTaskRef), Passed: item.Passed, Column7: fmt.Sprintf("%.2f", item.Score), DetailRef: pgtypex.Text(item.DetailRef), BindingOutput: bindingOutput})
 	if err != nil {
 		return CheckpointResult{}, apperr.ErrExperimentCheckpointInvalid.WithCause(err)
 	}
@@ -422,4 +444,44 @@ func (tx *txStore) Stats(ctx context.Context, tenantID, courseID int64) (Experim
 		return ExperimentStatsSnapshot{}, apperr.ErrExperimentInvalid.WithCause(err)
 	}
 	return ExperimentStatsSnapshot{ExperimentCount: row.ExperimentCount, ActiveInstanceCount: row.ActiveInstanceCount}, nil
+}
+
+// CreateExperimentScoreOutbox 在实例得分变更事务内保存得分事件。
+func (tx *txStore) CreateExperimentScoreOutbox(ctx context.Context, id int64, inst ExperimentInstance, traceID string, scoredAt time.Time) (ExperimentScoreOutbox, error) {
+	row, err := tx.q.CreateExperimentScoreOutbox(ctx, sqlcgen.CreateExperimentScoreOutboxParams{ID: id, TenantID: inst.TenantID, ExperimentID: inst.ExperimentID, InstanceID: inst.ID, StudentID: inst.OwnerAccountID, Column6: fmt.Sprintf("%.2f", inst.Score), TraceID: traceID, ScoredAt: timex.RequiredTimestamptz(scoredAt)})
+	if err != nil {
+		return ExperimentScoreOutbox{}, apperr.ErrExperimentEventFailed.WithCause(err)
+	}
+	return experimentScoreOutbox(row), nil
+}
+
+// ClaimPendingExperimentScoreOutbox 跨租户领取待发布、失败待重试或卡住超时的得分事件。
+func (tx *txStore) ClaimPendingExperimentScoreOutbox(ctx context.Context, limit int32, staleBefore time.Time) ([]ExperimentScoreOutbox, error) {
+	rows, err := tx.q.ClaimPendingExperimentScoreOutbox(ctx, sqlcgen.ClaimPendingExperimentScoreOutboxParams{StaleBefore: timex.RequiredTimestamptz(staleBefore), PageLimit: limit})
+	if err != nil {
+		return nil, apperr.ErrExperimentEventFailed.WithCause(err)
+	}
+	out := make([]ExperimentScoreOutbox, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, experimentScoreOutbox(row))
+	}
+	return out, nil
+}
+
+// MarkExperimentScoreOutboxPublished 标记得分事件投递成功。
+func (tx *txStore) MarkExperimentScoreOutboxPublished(ctx context.Context, tenantID, id int64) (ExperimentScoreOutbox, error) {
+	row, err := tx.q.MarkExperimentScoreOutboxPublished(ctx, sqlcgen.MarkExperimentScoreOutboxPublishedParams{TenantID: tenantID, ID: id})
+	if err != nil {
+		return ExperimentScoreOutbox{}, apperr.ErrExperimentEventFailed.WithCause(err)
+	}
+	return experimentScoreOutbox(row), nil
+}
+
+// MarkExperimentScoreOutboxFailed 标记得分事件投递失败并保留脱敏原因。
+func (tx *txStore) MarkExperimentScoreOutboxFailed(ctx context.Context, tenantID, id int64, reason string) (ExperimentScoreOutbox, error) {
+	row, err := tx.q.MarkExperimentScoreOutboxFailed(ctx, sqlcgen.MarkExperimentScoreOutboxFailedParams{TenantID: tenantID, ID: id, LastError: pgtypex.Text(reason)})
+	if err != nil {
+		return ExperimentScoreOutbox{}, apperr.ErrExperimentEventFailed.WithCause(err)
+	}
+	return experimentScoreOutbox(row), nil
 }

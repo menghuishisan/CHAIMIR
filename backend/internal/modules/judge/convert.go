@@ -2,8 +2,6 @@
 package judge
 
 import (
-	"encoding/json"
-
 	"chaimir/internal/contracts"
 	"chaimir/internal/platform/ids"
 	"chaimir/internal/platform/jsonx"
@@ -88,6 +86,7 @@ func taskInfoToMap(info JudgeTaskInfo) map[string]any {
 		"source_ref":   info.Task.SourceRef,
 		"submitter_id": info.Task.SubmitterID,
 		"status":       statusText(info.Task.Status),
+		"existing":     info.Existing,
 	}
 	if info.Result != nil {
 		out["result"] = map[string]any{
@@ -115,7 +114,7 @@ func judgerToMap(j Judger) (map[string]any, error) {
 		"executor_ref":        j.ExecutorRef,
 		"runtime_required":    j.RuntimeRequired,
 		"default_timeout_sec": j.DefaultTimeoutSec,
-		"resource_spec":       json.RawMessage(spec),
+		"resource_spec":       jsonx.RawMessage(spec),
 		"selftest_status":     j.SelftestStatus,
 		"status":              j.Status,
 	}, nil

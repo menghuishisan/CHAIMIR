@@ -70,8 +70,9 @@ type JudgeResult struct {
 
 // JudgeTaskInfo 是 service/API 对外返回的任务摘要。
 type JudgeTaskInfo struct {
-	Task   JudgeTask
-	Result *JudgeResult
+	Task     JudgeTask
+	Result   *JudgeResult
+	Existing bool
 }
 
 // JudgeInputSnapshot 固定一次判题所需的题目版本、执行器和脱敏期望。

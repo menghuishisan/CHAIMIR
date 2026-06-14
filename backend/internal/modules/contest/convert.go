@@ -33,7 +33,7 @@ func submissionDTOFromModel(item SolveSubmission) SubmissionDTO {
 
 // battleEntryDTOFromModel 转换对抗参战物为 HTTP 输出。
 func battleEntryDTOFromModel(item BattleEntry) BattleEntryDTO {
-	return BattleEntryDTO{ID: item.ID, ContestID: item.ContestID, ProblemID: item.ProblemID, TeamID: item.TeamID, Role: item.Role, ArtifactRef: item.ArtifactRef, VersionNo: item.VersionNo, IsActive: item.IsActive, SubmittedAt: item.SubmittedAt}
+	return BattleEntryDTO{ID: item.ID, ContestID: item.ContestID, ProblemID: item.ProblemID, TeamID: item.TeamID, Role: item.Role, ArtifactRef: item.ArtifactRef, CodeHash: item.ArtifactHash, VersionNo: item.VersionNo, IsActive: item.IsActive, SubmittedAt: item.SubmittedAt}
 }
 
 // battleMatchDTOFromModel 转换对局为 HTTP 输出。

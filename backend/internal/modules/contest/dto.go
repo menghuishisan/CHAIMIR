@@ -135,6 +135,7 @@ type BattleEntryRequest struct {
 	ProblemID   int64  `json:"problem_id"`
 	Role        int16  `json:"role"`
 	ArtifactRef string `json:"artifact_ref"`
+	CodeHash    string `json:"code_hash"`
 }
 
 // BattleEntryDTO 是参战物输出。
@@ -145,6 +146,7 @@ type BattleEntryDTO struct {
 	TeamID      int64     `json:"team_id,string"`
 	Role        int16     `json:"role"`
 	ArtifactRef string    `json:"artifact_ref"`
+	CodeHash    string    `json:"code_hash"`
 	VersionNo   int32     `json:"version_no"`
 	IsActive    bool      `json:"is_active"`
 	SubmittedAt time.Time `json:"submitted_at"`

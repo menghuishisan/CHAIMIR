@@ -13,6 +13,10 @@ import (
 
 type attrsCtxKey struct{}
 
+type errorCloser interface {
+	Close() error
+}
+
 // Setup 按配置初始化全局 slog logger(json/text + level)。
 func Setup(level, format string) {
 	var lvl slog.Level
@@ -63,6 +67,16 @@ func ErrorContext(ctx context.Context, msg string, err string, attrs ...slog.Att
 	all := AttrsFromContext(ctx, attrs...)
 	all = append(all, slog.String("error", SanitizeError(err)))
 	slog.Default().LogAttrs(ctx, slog.LevelError, msg, all...)
+}
+
+// CloseContext 关闭带错误返回的资源并记录失败,避免 defer Close() 静默吞掉生产诊断信号。
+func CloseContext(ctx context.Context, msg string, closer errorCloser, attrs ...slog.Attr) {
+	if closer == nil {
+		return
+	}
+	if err := closer.Close(); err != nil {
+		ErrorContext(ctx, msg, err.Error(), attrs...)
+	}
 }
 
 type secretPattern struct {

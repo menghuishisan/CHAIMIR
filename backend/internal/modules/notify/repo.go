@@ -19,6 +19,8 @@ type Store interface {
 	PlatformTx(ctx context.Context, fn func(context.Context, TxStore) error) error
 	// TenantTx 在租户 RLS 事务中执行通知表访问。
 	TenantTx(ctx context.Context, tenantID int64, fn func(context.Context, TxStore) error) error
+	// PrivilegedTx 在受控后台任务中跨租户清理 M10 自有表。
+	PrivilegedTx(ctx context.Context, fn func(context.Context, TxStore) error) error
 }
 
 // TxStore 定义通知模块单事务数据访问能力。
@@ -63,6 +65,16 @@ func (s *store) TenantTx(ctx context.Context, tenantID int64, fn func(context.Co
 		return fmt.Errorf("notify store 未初始化")
 	}
 	return s.database.WithTenantTxID(ctx, tenantID, func(ctx context.Context, tx pgx.Tx) error {
+		return fn(ctx, &txStore{q: sqlcgen.New(tx)})
+	})
+}
+
+// PrivilegedTx 在 M10 模块自有表内执行后台跨租户清理,不得用于普通业务路径。
+func (s *store) PrivilegedTx(ctx context.Context, fn func(context.Context, TxStore) error) error {
+	if s == nil || s.database == nil {
+		return fmt.Errorf("notify store 未初始化")
+	}
+	return s.database.WithPrivilegedModuleTx(ctx, "notify", func(ctx context.Context, tx pgx.Tx) error {
 		return fn(ctx, &txStore{q: sqlcgen.New(tx)})
 	})
 }

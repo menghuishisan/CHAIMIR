@@ -18,6 +18,7 @@ import (
 	"chaimir/internal/platform/netx"
 	"chaimir/internal/platform/timex"
 	"chaimir/pkg/apperr"
+	"chaimir/pkg/logging"
 	ldap "github.com/go-ldap/ldap/v3"
 )
 
@@ -239,7 +240,7 @@ func (s *Service) validateLDAPCredentials(ctx context.Context, cfg SSOConfig, us
 	if err != nil {
 		return "", apperr.ErrIdentityInvalidCredentials.WithCause(err)
 	}
-	defer conn.Close()
+	defer logging.CloseContext(ctx, "关闭 LDAP 连接失败", conn)
 	// 先使用学校配置的服务账号绑定,只用于目录查询,不代表本系统登录成功。
 	if err := conn.Bind(data.BindDN, bindPassword); err != nil {
 		return "", apperr.ErrIdentityInvalidCredentials.WithCause(err)
@@ -378,7 +379,7 @@ func (s *Service) validateCASTicket(ctx context.Context, cfg SSOConfig, ticket, 
 	if err != nil {
 		return "", apperr.ErrIdentitySSOTicketInvalid.WithCause(err)
 	}
-	defer resp.Body.Close()
+	defer logging.CloseContext(ctx, "关闭 CAS 校验响应失败", resp.Body)
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return "", apperr.ErrIdentitySSOTicketInvalid
 	}

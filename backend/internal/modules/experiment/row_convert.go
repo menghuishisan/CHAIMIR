@@ -34,6 +34,11 @@ func instanceFromGetRow(row sqlcgen.GetExperimentInstanceRow) (ExperimentInstanc
 	return instanceFromFields(row.ID, row.TenantID, row.ExperimentID, row.OwnerAccountID, row.GroupID, row.SourceRef, row.SandboxRefs, row.SimSessionRefs, row.Status, row.Score, row.StartedAt, row.FinishedAt, row.LastActiveAt)
 }
 
+// instanceFromForUpdateRow 转换锁定读取实例返回行。
+func instanceFromForUpdateRow(row sqlcgen.GetExperimentInstanceForUpdateRow) (ExperimentInstance, error) {
+	return instanceFromFields(row.ID, row.TenantID, row.ExperimentID, row.OwnerAccountID, row.GroupID, row.SourceRef, row.SandboxRefs, row.SimSessionRefs, row.Status, row.Score, row.StartedAt, row.FinishedAt, row.LastActiveAt)
+}
+
 // instanceFromSourceRefRow 转换按 source_ref 查询实例返回行。
 func instanceFromSourceRefRow(row sqlcgen.GetExperimentInstanceBySourceRefRow) (ExperimentInstance, error) {
 	return instanceFromFields(row.ID, row.TenantID, row.ExperimentID, row.OwnerAccountID, row.GroupID, row.SourceRef, row.SandboxRefs, row.SimSessionRefs, row.Status, row.Score, row.StartedAt, row.FinishedAt, row.LastActiveAt)
@@ -89,17 +94,17 @@ func groupMemberFromRow(row sqlcgen.GroupMember) GroupMember {
 
 // checkpointFromRow 转换检查点结果行。
 func checkpointFromRow(row sqlcgen.ListCheckpointResultsRow) CheckpointResult {
-	return CheckpointResult{ID: row.ID, TenantID: row.TenantID, InstanceID: row.InstanceID, CheckpointID: row.CheckpointID, JudgeTaskRef: pgtypex.TextValue(row.JudgeTaskRef), Passed: row.Passed, Score: row.Score, DetailRef: pgtypex.TextValue(row.DetailRef), JudgedAt: timex.FromTimestamptz(row.JudgedAt)}
+	return CheckpointResult{ID: row.ID, TenantID: row.TenantID, InstanceID: row.InstanceID, CheckpointID: row.CheckpointID, JudgeTaskRef: pgtypex.TextValue(row.JudgeTaskRef), Passed: row.Passed, Score: row.Score, DetailRef: pgtypex.TextValue(row.DetailRef), BindingOutput: decodeOptionalMap(row.BindingOutput), JudgedAt: timex.FromTimestamptz(row.JudgedAt)}
 }
 
 // checkpointFromUpsertRow 转换检查点 upsert 返回行。
 func checkpointFromUpsertRow(row sqlcgen.UpsertCheckpointResultRow) CheckpointResult {
-	return CheckpointResult{ID: row.ID, TenantID: row.TenantID, InstanceID: row.InstanceID, CheckpointID: row.CheckpointID, JudgeTaskRef: pgtypex.TextValue(row.JudgeTaskRef), Passed: row.Passed, Score: row.Score, DetailRef: pgtypex.TextValue(row.DetailRef), JudgedAt: timex.FromTimestamptz(row.JudgedAt)}
+	return CheckpointResult{ID: row.ID, TenantID: row.TenantID, InstanceID: row.InstanceID, CheckpointID: row.CheckpointID, JudgeTaskRef: pgtypex.TextValue(row.JudgeTaskRef), Passed: row.Passed, Score: row.Score, DetailRef: pgtypex.TextValue(row.DetailRef), BindingOutput: decodeOptionalMap(row.BindingOutput), JudgedAt: timex.FromTimestamptz(row.JudgedAt)}
 }
 
 // checkpointFromJudgeTaskRow 转换按判题任务查询返回行。
 func checkpointFromJudgeTaskRow(row sqlcgen.GetCheckpointResultByJudgeTaskRow) CheckpointResult {
-	return CheckpointResult{ID: row.ID, TenantID: row.TenantID, InstanceID: row.InstanceID, CheckpointID: row.CheckpointID, JudgeTaskRef: pgtypex.TextValue(row.JudgeTaskRef), Passed: row.Passed, Score: row.Score, DetailRef: pgtypex.TextValue(row.DetailRef), JudgedAt: timex.FromTimestamptz(row.JudgedAt)}
+	return CheckpointResult{ID: row.ID, TenantID: row.TenantID, InstanceID: row.InstanceID, CheckpointID: row.CheckpointID, JudgeTaskRef: pgtypex.TextValue(row.JudgeTaskRef), Passed: row.Passed, Score: row.Score, DetailRef: pgtypex.TextValue(row.DetailRef), BindingOutput: decodeOptionalMap(row.BindingOutput), JudgedAt: timex.FromTimestamptz(row.JudgedAt)}
 }
 
 // reportFromUpsertRow 转换报告提交返回行。
@@ -117,10 +122,15 @@ func reportFromListRow(row sqlcgen.ListExperimentReportsRow) ExperimentReport {
 	return ExperimentReport{ID: row.ID, TenantID: row.TenantID, InstanceID: row.InstanceID, StudentID: row.StudentID, ContentRef: row.ContentRef, ManualScore: row.ManualScore, Comment: pgtypex.TextValue(row.Comment), Status: row.Status, SubmittedAt: timex.FromTimestamptz(row.SubmittedAt)}
 }
 
+// experimentScoreOutbox 转换实验得分事件 outbox 行。
+func experimentScoreOutbox(row sqlcgen.ExperimentScoreOutbox) ExperimentScoreOutbox {
+	return ExperimentScoreOutbox{ID: row.ID, TenantID: row.TenantID, ExperimentID: row.ExperimentID, InstanceID: row.InstanceID, StudentID: row.StudentID, Score: pgtypex.NumericValue(row.Score), TraceID: row.TraceID, ScoredAt: timex.FromTimestamptz(row.ScoredAt), Status: row.Status, RetryCount: row.RetryCount, LastError: pgtypex.TextValue(row.LastError), CreatedAt: timex.FromTimestamptz(row.CreatedAt), UpdatedAt: timex.FromTimestamptz(row.UpdatedAt)}
+}
+
 // decodeComponentConfig 解析组件 JSON,空值按空组件处理。
 func decodeComponentConfig(raw []byte) (ComponentConfig, error) {
 	if len(raw) == 0 {
-		return ComponentConfig{Envs: []EnvComponent{}, Sims: []SimComponent{}, Checkpoints: []CheckpointComponent{}}, nil
+		return ComponentConfig{Envs: []EnvComponent{}, Sims: []SimComponent{}, Checkpoints: []CheckpointComponent{}, Stages: []StageConfig{}}, nil
 	}
 	var out ComponentConfig
 	if err := jsonx.DecodeStrict(raw, &out); err != nil {
@@ -134,6 +144,9 @@ func decodeComponentConfig(raw []byte) (ComponentConfig, error) {
 	}
 	if out.Checkpoints == nil {
 		out.Checkpoints = []CheckpointComponent{}
+	}
+	if out.Stages == nil {
+		out.Stages = []StageConfig{}
 	}
 	return out, nil
 }
@@ -181,4 +194,16 @@ func encodeJSON(v any, invalid *apperr.Error) ([]byte, error) {
 		return nil, err
 	}
 	return raw, nil
+}
+
+// decodeOptionalMap 解析可选 JSON 对象,用于检查点参数绑定输出。
+func decodeOptionalMap(raw []byte) map[string]any {
+	out := map[string]any{}
+	if len(raw) == 0 {
+		return out
+	}
+	if err := jsonx.DecodeStrict(raw, &out); err != nil {
+		return map[string]any{}
+	}
+	return out
 }

@@ -367,7 +367,7 @@ func (s *Service) CloseSession(ctx context.Context, tenantID, accountID int64) e
 // RunCleanupOnce 执行一次站内信过期清理任务。
 func (s *Service) RunCleanupOnce(ctx context.Context) error {
 	cutoff := timex.Now().Add(-time.Duration(s.cfg.RetentionDays) * 24 * time.Hour)
-	return s.store.PlatformTx(ctx, func(ctx context.Context, tx TxStore) error {
+	return s.store.PrivilegedTx(ctx, func(ctx context.Context, tx TxStore) error {
 		return tx.DeleteExpiredNotifications(ctx, cutoff)
 	})
 }

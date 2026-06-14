@@ -3,9 +3,12 @@ package experiment
 
 import (
 	"context"
+	"path"
+	"strconv"
 	"strings"
 
 	"chaimir/internal/platform/audit"
+	"chaimir/internal/platform/storage"
 	"chaimir/pkg/apperr"
 )
 
@@ -36,6 +39,26 @@ func (s *Service) SubmitReport(ctx context.Context, instanceID int64, req Submit
 		return ReportDTO{}, err
 	}
 	return reportDTOFromModel(report), s.writeAudit(ctx, id.TenantID, id.AccountID, audit.ActorRoleStudent, "experiment.report.submit", auditTargetReport, report.ID, map[string]any{"instance_id": instanceID})
+}
+
+// validateReportObjectRef 校验报告对象引用必须绑定租户、实例和学生路径。
+func validateReportObjectRef(bucket string, tenantID, instanceID, studentID int64, raw string) error {
+	ref, err := storage.ParseObjectRef(strings.TrimSpace(raw))
+	if err != nil {
+		return apperr.ErrExperimentReportInvalid.WithCause(err)
+	}
+	if ref.Bucket != bucket {
+		return apperr.ErrExperimentReportInvalid
+	}
+	prefix, err := storage.ObjectKey(tenantID, "experiment", "report", strconv.FormatInt(instanceID, 10), strconv.FormatInt(studentID, 10))
+	if err != nil {
+		return apperr.ErrExperimentReportInvalid.WithCause(err)
+	}
+	clean := path.Clean(ref.Key)
+	if clean != ref.Key || !strings.HasPrefix(ref.Key, prefix+"/") {
+		return apperr.ErrExperimentReportInvalid
+	}
+	return nil
 }
 
 // ListReports 查询某实验下的报告列表。
@@ -107,15 +130,16 @@ func (s *Service) GradeReport(ctx context.Context, reportID int64, req GradeRepo
 			return err
 		}
 		inst, err = tx.UpdateInstanceScore(ctx, id.TenantID, inst.ID, score)
+		if err != nil {
+			return err
+		}
 		shouldPublish = true
-		return err
+		return s.enqueueExperimentScoreOutbox(ctx, tx, inst)
 	}); err != nil {
 		return ReportDTO{}, err
 	}
 	if shouldPublish {
-		if err := s.publishScored(ctx, inst); err != nil {
-			return ReportDTO{}, err
-		}
+		s.drainExperimentScoreOutboxBestEffort(ctx)
 	}
 	return reportDTOFromModel(report), s.writeAudit(ctx, id.TenantID, id.AccountID, audit.ActorRoleTeacher, "experiment.report.grade", auditTargetReport, report.ID, map[string]any{"manual_score": req.ManualScore})
 }

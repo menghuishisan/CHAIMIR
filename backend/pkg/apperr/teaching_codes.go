@@ -57,6 +57,8 @@ const (
 	CodeTeachingGradeLocked = "64003"
 	// CodeTeachingGradeExportFailed 表示成绩导出失败。
 	CodeTeachingGradeExportFailed = "64004"
+	// CodeTeachingGradeEventPublishFailed 表示成绩变更事件发布失败。
+	CodeTeachingGradeEventPublishFailed = "64005"
 )
 
 var (
@@ -115,4 +117,6 @@ var (
 	ErrTeachingGradeLocked = New(CodeTeachingGradeLocked, "成绩已锁定,暂不能修改")
 	// ErrTeachingGradeExportFailed 表示成绩导出失败。
 	ErrTeachingGradeExportFailed = New(CodeTeachingGradeExportFailed, "成绩导出失败,请稍后重试")
+	// ErrTeachingGradeEventPublishFailed 表示成绩变更事件暂时无法同步。
+	ErrTeachingGradeEventPublishFailed = New(CodeTeachingGradeEventPublishFailed, "成绩变更暂时无法同步,请稍后重试")
 )

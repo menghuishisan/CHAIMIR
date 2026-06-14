@@ -3,7 +3,6 @@ package identity
 
 import (
 	"context"
-	"log/slog"
 	"strings"
 
 	"chaimir/internal/contracts"
@@ -12,7 +11,6 @@ import (
 	"chaimir/internal/platform/tenant"
 	"chaimir/pkg/apperr"
 	"chaimir/pkg/crypto"
-	"chaimir/pkg/logging"
 )
 
 // ListAccountsByAdmin 分页读取租户账号列表并做手机号脱敏。
@@ -136,8 +134,8 @@ func (s *Service) CreateAccountByAdmin(ctx context.Context, req CreateAccountReq
 	}); err != nil {
 		return AccountDTO{}, "", apperr.AsAppError(err)
 	}
-	if auditErr := s.auditAccount(ctx, id, "account.create", account.ID); auditErr != nil {
-		logging.ErrorContext(ctx, "写入账号创建审计失败", auditErr.Error(), slog.Int64("tenant_id", id.TenantID), slog.Int64("account_id", account.ID))
+	if err := s.auditAccount(ctx, id, "account.create", account.ID); err != nil {
+		return AccountDTO{}, "", apperr.ErrInternal.WithCause(err)
 	}
 	return ToAccountDTO(account, req.Phone), activationPlain, nil
 }
@@ -174,8 +172,8 @@ func (s *Service) UpdateAccountByAdmin(ctx context.Context, accountID int64, req
 	if err != nil {
 		return AccountDTO{}, apperr.ErrInternal.WithCause(err)
 	}
-	if auditErr := s.auditAccount(ctx, id, "account.update", accountID); auditErr != nil {
-		logging.ErrorContext(ctx, "写入账号更新审计失败", auditErr.Error(), slog.Int64("tenant_id", id.TenantID), slog.Int64("account_id", accountID))
+	if err := s.auditAccount(ctx, id, "account.update", accountID); err != nil {
+		return AccountDTO{}, apperr.ErrInternal.WithCause(err)
 	}
 	return ToAccountDTO(account, phonePlain), nil
 }
@@ -247,7 +245,14 @@ func (s *Service) UpdateAccountStatusByAdmin(ctx context.Context, accountID int6
 	}
 	deleted := status == AccountStatusCancelled
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
-		_, err := tx.UpdateAccountStatus(ctx, accountID, id.TenantID, status, deleted)
+		current, err := tx.GetAccount(ctx, accountID)
+		if err != nil {
+			return err
+		}
+		if err := ValidateAccountStatusTransition(current.Status, status); err != nil {
+			return err
+		}
+		_, err = tx.UpdateAccountStatus(ctx, accountID, id.TenantID, status, deleted)
 		if err != nil {
 			return err
 		}
