@@ -3,10 +3,13 @@ package experiment
 
 import (
 	"context"
+	"strconv"
+	"strings"
 
 	"chaimir/internal/contracts"
 	"chaimir/internal/platform/auth"
 	"chaimir/internal/platform/httpx"
+	"chaimir/internal/platform/response"
 	"chaimir/pkg/apperr"
 
 	"github.com/gin-gonic/gin"
@@ -201,7 +204,10 @@ func (a experimentAPI) activateStage(c *gin.Context) {
 	if !ok {
 		return
 	}
-	stage := int32(httpx.Int(c.Param("stage")))
+	stage, ok := parseStageParam(c)
+	if !ok {
+		return
+	}
 	out, err := a.svc.ActivateStage(c.Request.Context(), id, stage)
 	httpx.Write(c, out, err)
 }
@@ -350,4 +356,14 @@ func (a experimentAPI) internalStats(c *gin.Context) {
 	}
 	out, err := a.svc.Stats(c.Request.Context(), contracts.ExperimentStatsQuery{TenantID: tenantID, CourseID: courseID})
 	httpx.Write(c, out, err)
+}
+
+// parseStageParam 显式解析阶段路径参数,避免非法输入被静默转换成第 0 阶段。
+func parseStageParam(c *gin.Context) (int32, bool) {
+	stage, err := strconv.ParseInt(strings.TrimSpace(c.Param("stage")), 10, 32)
+	if err != nil || stage <= 0 {
+		response.Fail(c, apperr.ErrPathIDInvalid)
+		return 0, false
+	}
+	return int32(stage), true
 }

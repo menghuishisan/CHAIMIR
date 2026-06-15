@@ -38,6 +38,14 @@ type TenantQuota struct {
 
 // New 创建 MinIO 客户端并执行启动期连通性检查。
 func New(ctx context.Context, cfg config.MinIOConfig) (*Storage, error) {
+	for _, bucket := range []string{cfg.BucketCode, cfg.BucketAttach, cfg.BucketReport, cfg.BucketBackup} {
+		if !safeObjectRefBucket(bucket) {
+			return nil, fmt.Errorf("对象存储桶名非法: %s", bucket)
+		}
+	}
+	if cfg.PingTimeoutSeconds <= 0 {
+		return nil, fmt.Errorf("MINIO_PING_TIMEOUT_SECONDS 必须大于 0")
+	}
 	client, err := minio.New(cfg.Endpoint, &minio.Options{
 		Creds:  credentials.NewStaticV4(cfg.AccessKey, cfg.SecretKey, ""),
 		Secure: cfg.UseSSL,
@@ -62,7 +70,13 @@ func New(ctx context.Context, cfg config.MinIOConfig) (*Storage, error) {
 
 // EnsureBuckets 幂等确保平台所需桶存在。
 func (s *Storage) EnsureBuckets(ctx context.Context) error {
+	if s == nil || s.client == nil {
+		return fmt.Errorf("对象存储客户端未初始化")
+	}
 	for _, bucket := range []string{s.bucketCode, s.bucketAttach, s.bucketReport, s.bucketBackup} {
+		if !safeObjectRefBucket(bucket) {
+			return ErrObjectRefInvalid
+		}
 		exists, err := s.client.BucketExists(ctx, bucket)
 		if err != nil {
 			return fmt.Errorf("检查桶 %s 失败: %w", bucket, err)
@@ -97,7 +111,7 @@ func (q TenantQuota) AllowUpload(fileCount, totalBytes int64) error {
 func ObjectKey(tenantID int64, module, resourceType string, parts ...string) (string, error) {
 	segs := append([]string{strconv.FormatInt(tenantID, 10), module, resourceType}, parts...)
 	for _, seg := range segs {
-		if strings.TrimSpace(seg) == "" || seg == "." || seg == ".." || strings.Contains(seg, "/") || strings.Contains(seg, "\\") {
+		if seg != strings.TrimSpace(seg) || seg == "" || seg == "." || seg == ".." || strings.Contains(seg, "/") || strings.Contains(seg, "\\") {
 			return "", fmt.Errorf("对象 key 段不安全: %q", seg)
 		}
 	}
@@ -106,6 +120,15 @@ func ObjectKey(tenantID int64, module, resourceType string, parts ...string) (st
 
 // Put 上传对象到指定 bucket/key。
 func (s *Storage) Put(ctx context.Context, bucket, key string, r io.Reader, size int64, contentType string) error {
+	if s == nil || s.client == nil {
+		return fmt.Errorf("对象存储客户端未初始化")
+	}
+	if r == nil || size <= 0 {
+		return fmt.Errorf("上传对象内容不能为空")
+	}
+	if !safeObjectRefBucket(bucket) || !safeObjectRefKey(key) {
+		return ErrObjectRefInvalid
+	}
 	if _, err := s.client.PutObject(ctx, bucket, key, r, size, minio.PutObjectOptions{ContentType: contentType}); err != nil {
 		return fmt.Errorf("上传对象 %s/%s 失败: %w", bucket, key, err)
 	}
@@ -114,6 +137,12 @@ func (s *Storage) Put(ctx context.Context, bucket, key string, r io.Reader, size
 
 // Get 打开对象读取流。
 func (s *Storage) Get(ctx context.Context, bucket, key string) (io.ReadCloser, error) {
+	if s == nil || s.client == nil {
+		return nil, fmt.Errorf("对象存储客户端未初始化")
+	}
+	if !safeObjectRefBucket(bucket) || !safeObjectRefKey(key) {
+		return nil, ErrObjectRefInvalid
+	}
 	obj, err := s.client.GetObject(ctx, bucket, key, minio.GetObjectOptions{})
 	if err != nil {
 		return nil, fmt.Errorf("下载对象 %s/%s 失败: %w", bucket, key, err)

@@ -15,12 +15,12 @@ import (
 	"chaimir/internal/platform/eventbus"
 	"chaimir/internal/platform/ids"
 	"chaimir/internal/platform/jsonx"
+	"chaimir/internal/platform/response"
 	"chaimir/internal/platform/storage"
 	"chaimir/internal/platform/upload"
 	"chaimir/internal/platform/ws"
 	"chaimir/pkg/apperr"
 	"chaimir/pkg/logging"
-	"chaimir/pkg/response"
 	"chaimir/pkg/snowflake"
 )
 
@@ -289,7 +289,7 @@ func (s *Service) SubmitJudgeTask(ctx context.Context, req contracts.JudgeSubmit
 		return contractTaskInfoFromModel(JudgeTaskInfo{Task: task, Existing: true}), nil
 	}
 	s.publishProgress(ctx, task.TenantID, task.ID, task.Status, ProgressStageQueued, "判题任务已提交")
-	if err := s.writeAudit(ctx, task.TenantID, task.SubmitterID, 5, "judge.submit", "judge_task", task.ID, map[string]any{"source_ref": task.SourceRef, "problem_ref": task.ProblemRef}); err != nil {
+	if err := s.writeAudit(ctx, task.TenantID, task.SubmitterID, audit.ActorRoleSystem, "judge.submit", "judge_task", task.ID, map[string]any{"source_ref": task.SourceRef, "problem_ref": task.ProblemRef}); err != nil {
 		return contracts.JudgeTaskInfo{}, err
 	}
 	return contractTaskInfoFromModel(JudgeTaskInfo{Task: task}), nil

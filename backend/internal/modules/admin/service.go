@@ -52,7 +52,7 @@ type objectStorage interface {
 
 // fileService 描述 M9 复用统一文件服务规划对象路径所需能力。
 type fileService interface {
-	PlanUpload(req storage.PlanUploadRequest) (storage.UploadPlan, error)
+	PlanUpload(ctx context.Context, req storage.PlanUploadRequest) (storage.UploadPlan, error)
 }
 
 // transferService 描述 M9 调用统一导入导出中心所需能力。
@@ -266,7 +266,7 @@ func (s *Service) ExportAuditCSV(ctx context.Context, query contracts.AuditQuery
 	if err != nil {
 		return transfer.TaskDTO{}, apperr.ErrAdminAuditExportCSVFailed.WithCause(err)
 	}
-	plan, err := s.files.PlanUpload(storage.PlanUploadRequest{
+	plan, err := s.files.PlanUpload(ctx, storage.PlanUploadRequest{
 		TenantID:        id.TenantID,
 		AccountID:       id.AccountID,
 		Module:          "transfer",

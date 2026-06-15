@@ -5,8 +5,8 @@ import (
 	"context"
 
 	"chaimir/internal/platform/audit"
+	"chaimir/internal/platform/response"
 	"chaimir/pkg/apperr"
-	"chaimir/pkg/response"
 )
 
 const (

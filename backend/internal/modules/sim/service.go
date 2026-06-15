@@ -34,7 +34,7 @@ type objectStorage interface {
 
 // fileService 描述 M4 复用统一文件服务所需能力。
 type fileService interface {
-	PlanUpload(req storage.PlanUploadRequest) (storage.UploadPlan, error)
+	PlanUpload(ctx context.Context, req storage.PlanUploadRequest) (storage.UploadPlan, error)
 	IssueDownloadGrant(req storage.IssueDownloadGrantRequest) (string, storage.DownloadGrant, error)
 }
 
@@ -107,7 +107,7 @@ func (s *Service) storeBundle(ctx context.Context, tenantID, accountID, packageI
 	if staticScan.Status != validationPassed {
 		return "", bundleHash, report, apperr.ErrSimPackageValidationFailed
 	}
-	plan, err := s.files.PlanUpload(storage.PlanUploadRequest{
+	plan, err := s.files.PlanUpload(ctx, storage.PlanUploadRequest{
 		TenantID:        tenantID,
 		AccountID:       accountID,
 		Module:          simModuleName,

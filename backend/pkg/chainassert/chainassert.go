@@ -6,6 +6,13 @@ import (
 	"fmt"
 	"reflect"
 	"strings"
+
+	"chaimir/pkg/privacy"
+)
+
+const (
+	shortJSONRuneLimit = 256
+	redactedValue      = "[已脱敏]"
 )
 
 // Assertion 是链上状态断言配置。
@@ -64,15 +71,40 @@ func Check(assertion Assertion, actual map[string]any) Result {
 
 // ShortJSON 返回脱敏短文本,避免把完整状态或期望结构传到前端。
 func ShortJSON(v any) string {
-	raw, err := json.Marshal(v)
+	raw, err := json.Marshal(redactSensitiveValues(v))
 	if err != nil {
 		return ""
 	}
 	text := string(raw)
-	if len(text) > 256 {
-		return text[:256]
+	runes := []rune(text)
+	if len(runes) > shortJSONRuneLimit {
+		return string(runes[:shortJSONRuneLimit])
 	}
 	return text
+}
+
+// redactSensitiveValues 在链上断言摘要序列化前按字段名递归脱敏,避免截断文本仍泄露密钥或 flag。
+func redactSensitiveValues(v any) any {
+	switch x := v.(type) {
+	case map[string]any:
+		out := make(map[string]any, len(x))
+		for key, value := range x {
+			if privacy.IsResultSensitiveKey(key) {
+				out[key] = redactedValue
+				continue
+			}
+			out[key] = redactSensitiveValues(value)
+		}
+		return out
+	case []any:
+		out := make([]any, len(x))
+		for i, value := range x {
+			out[i] = redactSensitiveValues(value)
+		}
+		return out
+	default:
+		return v
+	}
 }
 
 // stringValue 读取字符串值。

@@ -3,7 +3,6 @@ package main
 
 import (
 	"fmt"
-	"time"
 
 	"chaimir/internal/contracts"
 	"chaimir/internal/modules/content"
@@ -12,7 +11,6 @@ import (
 	"chaimir/internal/platform/config"
 	"chaimir/internal/platform/db"
 	"chaimir/internal/platform/storage"
-	"chaimir/internal/platform/upload"
 	"chaimir/pkg/snowflake"
 
 	"github.com/gin-gonic/gin"
@@ -43,21 +41,17 @@ func RegisterContentModule(deps ContentModuleDeps) (*content.Service, error) {
 	if deps.Storage == nil {
 		return nil, fmt.Errorf("content module 缺少统一对象存储")
 	}
-	scanner, err := upload.NewScannerFromConfig(deps.Upload)
+	fileService, err := storage.NewServiceFromConfig(deps.AuthCfg, deps.MinIO, deps.Upload)
 	if err != nil {
 		return nil, err
 	}
 	store := content.NewStore(deps.Database)
 	svc, err := content.NewService(content.ServiceDeps{
-		Store:   store,
-		IDs:     deps.IDs,
-		Audit:   deps.Audit,
-		Storage: deps.Storage,
-		FileService: storage.Service{
-			Scanner:          scanner,
-			SigningKey:       deps.AuthCfg.HMACKey,
-			DownloadGrantTTL: time.Duration(deps.MinIO.DownloadGrantTTLSeconds) * time.Second,
-		},
+		Store:                     store,
+		IDs:                       deps.IDs,
+		Audit:                     deps.Audit,
+		Storage:                   deps.Storage,
+		FileService:               fileService,
 		ContentAttachmentMaxBytes: deps.Upload.ContentAttachmentMaxBytes,
 	})
 	if err != nil {

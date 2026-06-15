@@ -16,7 +16,6 @@ import (
 	"chaimir/internal/platform/db"
 	"chaimir/internal/platform/storage"
 	"chaimir/internal/platform/transfer"
-	"chaimir/internal/platform/upload"
 	"chaimir/pkg/crypto"
 	"chaimir/pkg/snowflake"
 
@@ -73,33 +72,29 @@ func RegisterAdminModule(ctx context.Context, deps AdminModuleDeps) (*admin.Serv
 	if err != nil {
 		return nil, err
 	}
-	scanner, err := upload.NewScannerFromConfig(deps.Upload)
+	fileService, err := storage.NewServiceFromConfig(deps.AuthConfig, deps.MinIO, deps.Upload)
 	if err != nil {
 		return nil, err
 	}
 	store := admin.NewStore(deps.Database)
 	svc, err := admin.NewService(admin.ServiceDeps{
-		Store:      store,
-		IDs:        deps.IDs,
-		Audit:      deps.Audit,
-		Roles:      deps.Roles,
-		Identity:   deps.Identity,
-		Stats:      deps.Stats,
-		AuditRead:  deps.AuditRead,
-		Teaching:   deps.Teaching,
-		Sandbox:    deps.Sandbox,
-		Experiment: deps.Experiment,
-		Contest:    deps.Contest,
-		Notify:     deps.Notify,
-		Monitoring: deps.Monitoring,
-		Cipher:     cipher,
-		Transfers:  deps.Transfer,
-		Storage:    deps.Storage,
-		FileService: storage.Service{
-			Scanner:          scanner,
-			SigningKey:       deps.AuthConfig.HMACKey,
-			DownloadGrantTTL: time.Duration(deps.MinIO.DownloadGrantTTLSeconds) * time.Second,
-		},
+		Store:       store,
+		IDs:         deps.IDs,
+		Audit:       deps.Audit,
+		Roles:       deps.Roles,
+		Identity:    deps.Identity,
+		Stats:       deps.Stats,
+		AuditRead:   deps.AuditRead,
+		Teaching:    deps.Teaching,
+		Sandbox:     deps.Sandbox,
+		Experiment:  deps.Experiment,
+		Contest:     deps.Contest,
+		Notify:      deps.Notify,
+		Monitoring:  deps.Monitoring,
+		Cipher:      cipher,
+		Transfers:   deps.Transfer,
+		Storage:     deps.Storage,
+		FileService: fileService,
 	})
 	if err != nil {
 		return nil, err

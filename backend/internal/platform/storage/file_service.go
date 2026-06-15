@@ -8,15 +8,17 @@ import (
 	"strings"
 	"time"
 
+	"chaimir/internal/platform/config"
 	"chaimir/internal/platform/timex"
 	"chaimir/internal/platform/upload"
 )
 
 // Service 收敛统一文件服务的上传规划和下载授权能力,避免模块各自拼装第二套链路。
 type Service struct {
-	Scanner          upload.Scanner
-	SigningKey       string
-	DownloadGrantTTL time.Duration
+	Scanner           upload.Scanner
+	SigningKey        string
+	DownloadGrantTTL  time.Duration
+	VirusScanMaxBytes int64
 }
 
 // PlanUploadRequest 描述统一文件服务生成对象引用前需要确认的资源边界和安全校验参数。
@@ -64,8 +66,34 @@ type IssueDownloadGrantRequest struct {
 	ExpiresAt    time.Time
 }
 
+// NewServiceFromConfig 根据统一配置构造文件服务,收敛下载授权和上传安全扫描装配。
+func NewServiceFromConfig(authCfg config.AuthConfig, minioCfg config.MinIOConfig, uploadCfg config.UploadConfig) (Service, error) {
+	scanner, err := upload.NewScannerFromConfig(uploadCfg)
+	if err != nil {
+		return Service{}, err
+	}
+	if strings.TrimSpace(authCfg.HMACKey) == "" {
+		return Service{}, fmt.Errorf("统一文件服务签名密钥不能为空")
+	}
+	if minioCfg.DownloadGrantTTLSeconds <= 0 {
+		return Service{}, fmt.Errorf("统一文件服务下载授权 TTL 必须大于 0")
+	}
+	if uploadCfg.VirusScanMaxBytes <= 0 {
+		return Service{}, fmt.Errorf("统一文件服务病毒扫描大小上限必须大于 0")
+	}
+	return Service{
+		Scanner:           scanner,
+		SigningKey:        authCfg.HMACKey,
+		DownloadGrantTTL:  time.Duration(minioCfg.DownloadGrantTTLSeconds) * time.Second,
+		VirusScanMaxBytes: uploadCfg.VirusScanMaxBytes,
+	}, nil
+}
+
 // PlanUpload 在统一入口完成大小、文件名、类型和病毒扫描校验,并生成租户作用域对象引用。
-func (s Service) PlanUpload(req PlanUploadRequest) (UploadPlan, error) {
+func (s Service) PlanUpload(ctx context.Context, req PlanUploadRequest) (UploadPlan, error) {
+	if ctx == nil {
+		return UploadPlan{}, fmt.Errorf("上传规划上下文不能为空")
+	}
 	if req.TenantID <= 0 {
 		return UploadPlan{}, fmt.Errorf("上传规划缺少 tenant_id")
 	}
@@ -91,7 +119,13 @@ func (s Service) PlanUpload(req PlanUploadRequest) (UploadPlan, error) {
 	if req.KindValidator != nil && !req.KindValidator(fileName, req.ContentType, req.Content) {
 		return UploadPlan{}, fmt.Errorf("上传文件类型不符合统一校验规则")
 	}
-	if err := upload.VerifyScan(s.Scanner, req.ScanPolicy, upload.ScanRequest{
+	if req.ScanPolicy.Required && s.VirusScanMaxBytes <= 0 {
+		return UploadPlan{}, fmt.Errorf("上传安全策略要求病毒扫描,但未配置扫描大小上限")
+	}
+	if req.ScanPolicy.Required && int64(len(req.Content)) > s.VirusScanMaxBytes {
+		return UploadPlan{}, fmt.Errorf("上传文件超出病毒扫描大小限制")
+	}
+	if err := upload.VerifyScan(ctx, s.Scanner, req.ScanPolicy, upload.ScanRequest{
 		FileName: fileName,
 		Content:  req.Content,
 	}); err != nil {
@@ -137,7 +171,7 @@ func (s Service) IssueDownloadGrant(req IssueDownloadGrantRequest) (string, Down
 			return "", DownloadGrant{}, err
 		}
 	}
-	grant, err := BuildDownloadGrant(context.Background(), DownloadGrantRequest{
+	grant, err := BuildDownloadGrant(DownloadGrantRequest{
 		TenantID:     req.TenantID,
 		AccountID:    req.AccountID,
 		ObjectRef:    req.ObjectRef,

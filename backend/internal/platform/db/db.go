@@ -60,7 +60,7 @@ func (d *DB) Close() {
 
 // Ping 检查 app 池连通性。
 func (d *DB) Ping(ctx context.Context) error {
-	if d.app == nil {
+	if d == nil || d.app == nil {
 		return fmt.Errorf("app 连接池未初始化")
 	}
 	return d.app.Ping(ctx)
@@ -68,21 +68,33 @@ func (d *DB) Ping(ctx context.Context) error {
 
 // HasPrivileged 判断是否配置了特权连接池。
 func (d *DB) HasPrivileged() bool {
+	if d == nil {
+		return false
+	}
 	return d.priv != nil
 }
 
 // AppPool 暴露 app 池给需要直接构造 sqlc 查询对象的 repo 装配层使用。
 func (d *DB) AppPool() *pgxpool.Pool {
+	if d == nil {
+		return nil
+	}
 	return d.app
 }
 
 // PrivilegedPool 暴露特权池给受控装配层使用;未配置时返回 nil。
 func (d *DB) PrivilegedPool() *pgxpool.Pool {
+	if d == nil {
+		return nil
+	}
 	return d.priv
 }
 
 // WithTenantTx 从上下文读取租户身份并注入 RLS 会话变量后执行事务。
 func (d *DB) WithTenantTx(ctx context.Context, fn TxFunc) error {
+	if d == nil {
+		return fmt.Errorf("数据库未初始化")
+	}
 	id, ok := tenant.FromContext(ctx)
 	if !ok {
 		return fmt.Errorf("数据访问缺少租户上下文(未鉴权或未注入 tenant)")
@@ -92,6 +104,9 @@ func (d *DB) WithTenantTx(ctx context.Context, fn TxFunc) error {
 
 // WithTenantTxID 用显式租户 ID 注入 RLS 会话变量后执行事务。
 func (d *DB) WithTenantTxID(ctx context.Context, tenantID int64, fn TxFunc) error {
+	if d == nil {
+		return fmt.Errorf("数据库未初始化")
+	}
 	if tenantID <= 0 {
 		return fmt.Errorf("tenant_id 必须大于 0")
 	}
@@ -105,11 +120,17 @@ func (d *DB) WithTenantTxID(ctx context.Context, tenantID int64, fn TxFunc) erro
 
 // WithAppTx 在应用连接池中开启普通事务,用于访问无需 RLS 的平台级表。
 func (d *DB) WithAppTx(ctx context.Context, fn TxFunc) error {
+	if d == nil {
+		return fmt.Errorf("数据库未初始化")
+	}
 	return runTx(ctx, d.app, fn)
 }
 
 // WithPrivilegedTx 在特权连接池中开启事务,仅用于受控平台路径或预认证定位。
 func (d *DB) WithPrivilegedTx(ctx context.Context, fn TxFunc) error {
+	if d == nil {
+		return fmt.Errorf("数据库未初始化")
+	}
 	if d.priv == nil {
 		return fmt.Errorf("未配置特权连接(PG_PRIV_USER),无法执行跨租户查询")
 	}
@@ -118,6 +139,9 @@ func (d *DB) WithPrivilegedTx(ctx context.Context, fn TxFunc) error {
 
 // WithPrivilegedModuleTx 仅限模块后台维护任务扫描本模块自有 RLS 表。
 func (d *DB) WithPrivilegedModuleTx(ctx context.Context, module string, fn TxFunc) error {
+	if d == nil {
+		return fmt.Errorf("数据库未初始化")
+	}
 	if strings.TrimSpace(module) == "" {
 		return fmt.Errorf("模块维护特权事务缺少模块名")
 	}
@@ -172,6 +196,9 @@ func runTx(ctx context.Context, pool *pgxpool.Pool, fn TxFunc) error {
 	if pool == nil {
 		return fmt.Errorf("数据库连接池未初始化")
 	}
+	if fn == nil {
+		return fmt.Errorf("事务函数不能为空")
+	}
 	tx, err := pool.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("开启事务失败: %w", err)
@@ -179,13 +206,13 @@ func runTx(ctx context.Context, pool *pgxpool.Pool, fn TxFunc) error {
 
 	if err := fn(ctx, tx); err != nil {
 		if rollbackErr := tx.Rollback(ctx); rollbackErr != nil {
-			return fmt.Errorf("事务执行失败: %w; 回滚失败: %v", err, rollbackErr)
+			return fmt.Errorf("事务执行失败: %w", errors.Join(err, fmt.Errorf("回滚失败: %w", rollbackErr)))
 		}
 		return err
 	}
 	if err := tx.Commit(ctx); err != nil {
 		if rollbackErr := tx.Rollback(ctx); rollbackErr != nil {
-			return fmt.Errorf("提交事务失败: %w; 回滚失败: %v", err, rollbackErr)
+			return fmt.Errorf("提交事务失败: %w", errors.Join(err, fmt.Errorf("回滚失败: %w", rollbackErr)))
 		}
 		return fmt.Errorf("提交事务失败: %w", err)
 	}

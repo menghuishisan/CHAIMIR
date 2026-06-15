@@ -19,9 +19,3 @@ func Parse(v string) (int64, bool) {
 	}
 	return id, true
 }
-
-// ParseOrZero 解析可选 ID,非法或空值按未传入处理为 0。
-func ParseOrZero(v string) int64 {
-	id, _ := Parse(v)
-	return id
-}

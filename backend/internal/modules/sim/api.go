@@ -3,18 +3,19 @@ package sim
 
 import (
 	"net/http"
+	"strconv"
 	"strings"
 
 	"chaimir/internal/contracts"
 	"chaimir/internal/platform/auth"
 	"chaimir/internal/platform/httpx"
 	"chaimir/internal/platform/jsonx"
+	"chaimir/internal/platform/response"
 	"chaimir/internal/platform/tenant"
 	"chaimir/internal/platform/upload"
 	"chaimir/internal/platform/ws"
 	"chaimir/pkg/apperr"
 	"chaimir/pkg/logging"
-	"chaimir/pkg/response"
 
 	"github.com/gin-gonic/gin"
 )
@@ -400,7 +401,11 @@ func (a simAPI) bindPackageMultipart(c *gin.Context) (SubmitPackageRequest, Bund
 		response.Fail(c, apperr.ErrSimBundleUnreadable)
 		return SubmitPackageRequest{}, BundleInput{}, false
 	}
-	req := SubmitPackageRequest{Code: c.PostForm("code"), Version: c.PostForm("version"), Name: c.PostForm("name"), Category: c.PostForm("category"), Compute: c.PostForm("compute"), BackendAdapter: c.PostForm("backend_adapter"), ScaleLimit: []byte(defaultJSON(c.PostForm("scale_limit"))), BackendConfig: []byte(defaultJSON(c.PostForm("backend_config"))), AuthorType: int16(httpx.Int(c.PostForm("author_type")))}
+	authorType, ok := optionalInt16Form(c, "author_type")
+	if !ok {
+		return SubmitPackageRequest{}, BundleInput{}, false
+	}
+	req := SubmitPackageRequest{Code: c.PostForm("code"), Version: c.PostForm("version"), Name: c.PostForm("name"), Category: c.PostForm("category"), Compute: c.PostForm("compute"), BackendAdapter: c.PostForm("backend_adapter"), ScaleLimit: []byte(defaultJSON(c.PostForm("scale_limit"))), BackendConfig: []byte(defaultJSON(c.PostForm("backend_config"))), AuthorType: authorType}
 	return req, BundleInput{FileName: header.Filename, ContentType: header.Header.Get("Content-Type"), Data: data}, true
 }
 
@@ -440,6 +445,20 @@ func defaultJSON(raw string) string {
 		return "{}"
 	}
 	return raw
+}
+
+// optionalInt16Form 解析可选 int16 表单字段,非法值必须显式返回用户向错误。
+func optionalInt16Form(c *gin.Context, key string) (int16, bool) {
+	raw := strings.TrimSpace(c.PostForm(key))
+	if raw == "" {
+		return 0, true
+	}
+	value, err := strconv.ParseInt(raw, 10, 16)
+	if err != nil {
+		response.Fail(c, apperr.ErrSimPackageInvalid.WithCause(err))
+		return 0, false
+	}
+	return int16(value), true
 }
 
 // jsonUnmarshal 包装 JSON 解码,避免 api 文件直接散落 encoding/json 依赖。

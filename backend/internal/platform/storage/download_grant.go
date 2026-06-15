@@ -2,7 +2,6 @@
 package storage
 
 import (
-	"context"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -40,8 +39,10 @@ type downloadGrantTokenEnvelope struct {
 	Signature string `json:"signature"`
 }
 
+const maxDownloadGrantTokenLength = 8192
+
 // BuildDownloadGrant 校验对象引用和租户前缀后生成下载授权,避免业务模块直接暴露存储直链。
-func BuildDownloadGrant(_ context.Context, req DownloadGrantRequest) (DownloadGrant, error) {
+func BuildDownloadGrant(req DownloadGrantRequest) (DownloadGrant, error) {
 	if req.TenantID <= 0 {
 		return DownloadGrant{}, fmt.Errorf("下载授权缺少 tenant_id")
 	}
@@ -120,6 +121,9 @@ func verifyDownloadGrantTokenAt(token string, signingKey string, now time.Time) 
 	}
 	if strings.TrimSpace(token) == "" {
 		return DownloadGrant{}, fmt.Errorf("下载授权令牌不能为空")
+	}
+	if len(token) > maxDownloadGrantTokenLength {
+		return DownloadGrant{}, fmt.Errorf("下载授权令牌超出长度限制")
 	}
 
 	rawEnvelope, err := base64.RawURLEncoding.DecodeString(token)

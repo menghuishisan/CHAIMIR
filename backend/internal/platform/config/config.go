@@ -849,6 +849,9 @@ func Load() (*Config, error) {
 	if c.Admin.StatisticsSnapshotIntervalSeconds <= 0 {
 		errs = append(errs, "ADMIN_STATISTICS_SNAPSHOT_INTERVAL_SECONDS 必须大于 0")
 	}
+	if c.Snowflake.NodeID < 0 || c.Snowflake.NodeID > 1023 {
+		errs = append(errs, "SNOWFLAKE_NODE_ID 必须在 0 到 1023 之间,且同一部署内每个后端副本必须唯一")
+	}
 	if c.Sandbox.PrepullTimeoutSeconds <= 0 {
 		errs = append(errs, "SANDBOX_PREPULL_TIMEOUT_SECONDS 必须大于 0")
 	}
@@ -927,6 +930,27 @@ func Load() (*Config, error) {
 	}
 	if c.Identity.SSOCASResponseMaxBytes <= 0 {
 		errs = append(errs, "IDENTITY_SSO_CAS_RESPONSE_MAX_BYTES 必须大于 0")
+	}
+	if c.SMS.TimeoutSeconds <= 0 {
+		errs = append(errs, "SMS_TIMEOUT_SECONDS 必须大于 0")
+	}
+	switch strings.ToLower(strings.TrimSpace(c.SMS.Provider)) {
+	case "http":
+		if strings.TrimSpace(c.SMS.Endpoint) == "" || strings.TrimSpace(c.SMS.Token) == "" {
+			errs = append(errs, "SMS_PROVIDER=http 时必须设置 SMS_HTTP_ENDPOINT 和 SMS_HTTP_TOKEN")
+		}
+		if strings.TrimSpace(c.SMS.LoginTemplate) == "" || strings.TrimSpace(c.SMS.ResetTemplate) == "" || strings.TrimSpace(c.SMS.ChangeTemplate) == "" {
+			errs = append(errs, "SMS_PROVIDER=http 时必须配置全部短信模板")
+		}
+		if u, err := url.Parse(strings.TrimSpace(c.SMS.Endpoint)); err != nil || u.Scheme == "" || u.Host == "" || u.User != nil || (u.Scheme != "http" && u.Scheme != "https") {
+			errs = append(errs, "SMS_HTTP_ENDPOINT 必须是不含凭据的 HTTP(S) URL")
+		}
+	case "log":
+		if strings.EqualFold(strings.TrimSpace(c.Server.AppEnv), "prod") || strings.EqualFold(strings.TrimSpace(c.Server.AppEnv), "production") {
+			errs = append(errs, "生产环境不能使用 SMS_PROVIDER=log")
+		}
+	default:
+		errs = append(errs, "SMS_PROVIDER 只能为 http 或 log")
 	}
 	for _, origin := range c.Identity.SSOAllowedServiceOrigins {
 		if !validOrigin(origin) {

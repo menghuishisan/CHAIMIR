@@ -272,7 +272,10 @@ func (s *Service) fetchVulnCases(ctx context.Context, source VulnSource) ([]Vuln
 			req.Header.Set(key, value)
 		}
 	}
-	client := netx.NewPublicHTTPClient(time.Duration(timeout) * time.Second)
+	client, err := netx.NewPublicHTTPClient(time.Duration(timeout) * time.Second)
+	if err != nil {
+		return nil, apperr.ErrContestVulnSourceInvalid.WithCause(err)
+	}
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, apperr.ErrContestVulnSourceFetchFailed.WithCause(err)

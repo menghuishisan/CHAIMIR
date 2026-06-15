@@ -15,7 +15,6 @@ import (
 	"chaimir/internal/platform/db"
 	"chaimir/internal/platform/eventbus"
 	"chaimir/internal/platform/storage"
-	"chaimir/internal/platform/upload"
 	"chaimir/pkg/snowflake"
 
 	"github.com/gin-gonic/gin"
@@ -50,26 +49,22 @@ func RegisterGradeModule(ctx context.Context, deps GradeModuleDeps) (*grade.Serv
 	if deps.Database == nil {
 		return nil, fmt.Errorf("grade module 缺少 database")
 	}
-	scanner, err := upload.NewScannerFromConfig(deps.Upload)
+	fileService, err := storage.NewServiceFromConfig(deps.AuthConfig, deps.MinIO, deps.Upload)
 	if err != nil {
 		return nil, err
 	}
 	store := grade.NewStore(deps.Database)
 	svc, err := grade.NewService(grade.ServiceDeps{
-		Store:    store,
-		IDs:      deps.IDs,
-		Audit:    deps.Audit,
-		Roles:    deps.Roles,
-		Teaching: deps.Teaching,
-		Notify:   deps.Notify,
-		Bus:      deps.EventBus,
-		Storage:  deps.Storage,
-		FileService: storage.Service{
-			Scanner:          scanner,
-			SigningKey:       deps.AuthConfig.HMACKey,
-			DownloadGrantTTL: time.Duration(deps.MinIO.DownloadGrantTTLSeconds) * time.Second,
-		},
-		Config: deps.Config,
+		Store:       store,
+		IDs:         deps.IDs,
+		Audit:       deps.Audit,
+		Roles:       deps.Roles,
+		Teaching:    deps.Teaching,
+		Notify:      deps.Notify,
+		Bus:         deps.EventBus,
+		Storage:     deps.Storage,
+		FileService: fileService,
+		Config:      deps.Config,
 	})
 	if err != nil {
 		return nil, err

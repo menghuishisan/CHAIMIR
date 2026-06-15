@@ -14,12 +14,12 @@ import (
 	"chaimir/internal/platform/audit"
 	"chaimir/internal/platform/config"
 	"chaimir/internal/platform/eventbus"
+	"chaimir/internal/platform/response"
 	"chaimir/internal/platform/storage"
 	"chaimir/internal/platform/timex"
 	"chaimir/internal/platform/ws"
 	"chaimir/pkg/apperr"
 	"chaimir/pkg/logging"
-	"chaimir/pkg/response"
 	"chaimir/pkg/snowflake"
 )
 
@@ -214,7 +214,7 @@ func (s *Service) CreateSandbox(ctx context.Context, req contracts.SandboxCreate
 	}); err != nil {
 		return contracts.SandboxInfo{}, err
 	}
-	if err := s.writeAudit(ctx, input.TenantID, input.OwnerAccountID, 5, "sandbox.create", "sandbox", plan.Sandbox.ID, map[string]any{"source_ref": input.SourceRef}); err != nil {
+	if err := s.writeAudit(ctx, input.TenantID, input.OwnerAccountID, audit.ActorRoleSystem, "sandbox.create", "sandbox", plan.Sandbox.ID, map[string]any{"source_ref": input.SourceRef}); err != nil {
 		return contracts.SandboxInfo{}, err
 	}
 	s.startAsync(ctx, plan)
@@ -457,7 +457,7 @@ func (s *Service) restoreSnapshotSandbox(ctx context.Context, sb Sandbox) error 
 		return err
 	}
 	s.broadcastProgress(ctx, sb.TenantID, sb.ID, SandboxPhaseReady, SandboxStatusRunning, response.TraceFromContext(ctx))
-	return s.writeAudit(ctx, sb.TenantID, sb.OwnerAccountID, 5, "sandbox.resume.snapshot", "sandbox", sb.ID, nil)
+	return s.writeAudit(ctx, sb.TenantID, sb.OwnerAccountID, audit.ActorRoleSystem, "sandbox.resume.snapshot", "sandbox", sb.ID, nil)
 }
 
 // planForExistingSandbox 重新加载沙箱恢复或暂停恢复所需的运行时、镜像和工具定义。
@@ -711,7 +711,7 @@ func (s *Service) transition(ctx context.Context, tenantID, sandboxID int64, pha
 		return err
 	}
 	s.broadcastProgress(ctx, tenantID, sandboxID, phase, status, response.TraceFromContext(ctx))
-	return s.writeAudit(ctx, tenantID, actorID, 5, action, "sandbox", sandboxID, nil)
+	return s.writeAudit(ctx, tenantID, actorID, audit.ActorRoleSystem, action, "sandbox", sandboxID, nil)
 }
 
 // startAsync 提交异步启动任务,请求返回后继续推进 K8s 创建和阶段变化。

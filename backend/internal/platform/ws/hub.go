@@ -110,7 +110,9 @@ func (c *Conn) SendJSON(v any) error {
 	if err != nil {
 		return err
 	}
-	c.send <- data
+	if !c.enqueue(data) {
+		return io.ErrClosedPipe
+	}
 	return nil
 }
 
@@ -137,6 +139,12 @@ func (c *Conn) BindSession(session SessionKey) error {
 
 // Serve 建立固定订阅型连接,由业务回调完成鉴权和初始订阅。
 func (h *Hub) Serve(w http.ResponseWriter, r *http.Request, subscribe func(c *Conn) error) error {
+	if h == nil {
+		return fmt.Errorf("WebSocket Hub 未初始化")
+	}
+	if subscribe == nil {
+		return fmt.Errorf("WebSocket 订阅回调不能为空")
+	}
 	upgrader := h.upgrader()
 	socket, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
@@ -168,6 +176,12 @@ func (h *Hub) Serve(w http.ResponseWriter, r *http.Request, subscribe func(c *Co
 
 // ServeInteractive 建立由业务层主动处理读循环的交互式连接。
 func (h *Hub) ServeInteractive(w http.ResponseWriter, r *http.Request, handle func(c *Conn) error) error {
+	if h == nil {
+		return fmt.Errorf("WebSocket Hub 未初始化")
+	}
+	if handle == nil {
+		return fmt.Errorf("WebSocket 处理回调不能为空")
+	}
 	upgrader := h.upgrader()
 	socket, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
@@ -193,7 +207,17 @@ func (h *Hub) ServeInteractive(w http.ResponseWriter, r *http.Request, handle fu
 }
 
 // Subscribe 把连接加入指定 topic,并维护反向索引供断连时清理。
-func (h *Hub) Subscribe(c *Conn, topic string) {
+func (h *Hub) Subscribe(c *Conn, topic string) error {
+	if h == nil {
+		return fmt.Errorf("WebSocket Hub 未初始化")
+	}
+	if c == nil {
+		return fmt.Errorf("WebSocket 连接为空")
+	}
+	topic = strings.TrimSpace(topic)
+	if topic == "" {
+		return fmt.Errorf("WebSocket topic 不能为空")
+	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	if h.topics[topic] == nil {
@@ -201,10 +225,14 @@ func (h *Hub) Subscribe(c *Conn, topic string) {
 	}
 	h.topics[topic][c] = struct{}{}
 	c.topics[topic] = struct{}{}
+	return nil
 }
 
 // Unsubscribe 把连接从所有 topic 中移除。
 func (h *Hub) Unsubscribe(c *Conn) {
+	if h == nil || c == nil {
+		return
+	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	for topic := range c.topics {
@@ -223,15 +251,23 @@ func (h *Hub) Unsubscribe(c *Conn) {
 }
 
 // Broadcast 向指定 topic 的所有连接广播;发送缓冲满时跳过以避免阻塞整个 Hub。
-func (h *Hub) Broadcast(topic string, payload []byte) {
+func (h *Hub) Broadcast(topic string, payload []byte) int {
+	if h == nil {
+		return 0
+	}
+	topic = strings.TrimSpace(topic)
+	if topic == "" {
+		return 0
+	}
 	h.mu.RLock()
 	defer h.mu.RUnlock()
+	delivered := 0
 	for c := range h.topics[topic] {
-		select {
-		case c.send <- payload:
-		default:
+		if c.enqueue(payload) {
+			delivered++
 		}
 	}
+	return delivered
 }
 
 // CloseSession 主动关闭指定主体的在线连接,供上层在单端登录踢线等场景复用。
@@ -368,11 +404,29 @@ type connWriter struct {
 // Write 把字节作为一条 WebSocket 消息加入统一发送队列。
 func (w connWriter) Write(p []byte) (int, error) {
 	data := append([]byte(nil), p...)
-	select {
-	case w.conn.send <- data:
-		return len(p), nil
-	case <-w.conn.done:
+	if !w.conn.enqueue(data) {
 		return 0, io.ErrClosedPipe
+	}
+	return len(p), nil
+}
+
+// enqueue 非阻塞写入发送队列,连接关闭或缓冲满时返回 false,避免业务广播阻塞或 panic。
+func (c *Conn) enqueue(data []byte) (ok bool) {
+	if c == nil {
+		return false
+	}
+	defer func() {
+		if recover() != nil {
+			ok = false
+		}
+	}()
+	select {
+	case c.send <- data:
+		return true
+	case <-c.done:
+		return false
+	default:
+		return false
 	}
 }
 

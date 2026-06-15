@@ -7,10 +7,11 @@ import (
 	"time"
 
 	"chaimir/internal/contracts"
+	"chaimir/internal/platform/audit"
+	"chaimir/internal/platform/response"
 	"chaimir/internal/platform/timex"
 	"chaimir/pkg/apperr"
 	"chaimir/pkg/logging"
-	"chaimir/pkg/response"
 )
 
 // RunRecycleOnce 执行一轮回收扫描,供后台调度器和测试复用。
@@ -127,7 +128,7 @@ func (s *Service) recycleOne(ctx context.Context, sb Sandbox, reason string) err
 		return err
 	}
 	s.broadcastProgress(ctx, sb.TenantID, sb.ID, sb.Phase, SandboxStatusDestroyed, response.TraceFromContext(ctx))
-	if err := s.writeAudit(ctx, sb.TenantID, sb.OwnerAccountID, 5, "sandbox.recycle", "sandbox", sb.ID, map[string]any{"reason": reason, "source_ref": sb.SourceRef}); err != nil {
+	if err := s.writeAudit(ctx, sb.TenantID, sb.OwnerAccountID, audit.ActorRoleSystem, "sandbox.recycle", "sandbox", sb.ID, map[string]any{"reason": reason, "source_ref": sb.SourceRef}); err != nil {
 		return err
 	}
 	s.drainSandboxRecycleOutboxBestEffort(ctx)

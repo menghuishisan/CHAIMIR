@@ -25,7 +25,7 @@ type objectStorage interface {
 }
 
 type fileService interface {
-	PlanUpload(req storage.PlanUploadRequest) (storage.UploadPlan, error)
+	PlanUpload(ctx context.Context, req storage.PlanUploadRequest) (storage.UploadPlan, error)
 	IssueDownloadGrant(req storage.IssueDownloadGrantRequest) (string, storage.DownloadGrant, error)
 }
 

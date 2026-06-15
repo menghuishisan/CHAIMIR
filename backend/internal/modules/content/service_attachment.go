@@ -43,7 +43,7 @@ func (s *Service) UploadAttachment(ctx context.Context, req UploadAttachmentRequ
 	if resourceID == "" {
 		resourceID = "draft"
 	}
-	plan, err := s.files.PlanUpload(storage.PlanUploadRequest{
+	plan, err := s.files.PlanUpload(ctx, storage.PlanUploadRequest{
 		TenantID:        id.TenantID,
 		AccountID:       id.AccountID,
 		Module:          contentModuleName,

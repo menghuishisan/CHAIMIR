@@ -6,6 +6,7 @@ import (
 	"io"
 	"strings"
 
+	"chaimir/internal/platform/audit"
 	"chaimir/internal/platform/jsonx"
 	"chaimir/internal/platform/pagex"
 	"chaimir/internal/platform/storage"
@@ -121,7 +122,7 @@ func (s *Service) SubmitPackage(ctx context.Context, tenantID, accountID int64, 
 	}); err != nil {
 		return nil, err
 	}
-	if err := s.writeAudit(ctx, tenantID, accountID, 3, "sim.package.submit", "sim_package", created.ID, map[string]any{"code": created.Code, "version": created.Version}); err != nil {
+	if err := s.writeAudit(ctx, tenantID, accountID, audit.ActorRoleTeacher, "sim.package.submit", "sim_package", created.ID, map[string]any{"code": created.Code, "version": created.Version}); err != nil {
 		return nil, err
 	}
 	out := packageToMap(created)
@@ -176,7 +177,7 @@ func (s *Service) UpdatePackage(ctx context.Context, tenantID, accountID, packag
 	}); err != nil {
 		return nil, err
 	}
-	if err := s.writeAudit(ctx, tenantID, accountID, 3, "sim.package.update", "sim_package", updated.ID, map[string]any{"code": updated.Code, "version": updated.Version}); err != nil {
+	if err := s.writeAudit(ctx, tenantID, accountID, audit.ActorRoleTeacher, "sim.package.update", "sim_package", updated.ID, map[string]any{"code": updated.Code, "version": updated.Version}); err != nil {
 		return nil, err
 	}
 	out := packageToMap(updated)

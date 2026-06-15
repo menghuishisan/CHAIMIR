@@ -7,11 +7,12 @@ import (
 	"strings"
 
 	"chaimir/internal/contracts"
+	"chaimir/internal/platform/audit"
 	"chaimir/internal/platform/auth"
 	"chaimir/internal/platform/pagex"
+	"chaimir/internal/platform/response"
 	"chaimir/internal/platform/ws"
 	"chaimir/pkg/apperr"
-	"chaimir/pkg/response"
 )
 
 // ListTasks 按租户分页查询判题任务,供教师和学校管理员查看队列与人工评分项。
@@ -60,7 +61,7 @@ func (s *Service) CancelTask(ctx context.Context, tenantID, taskID int64) error 
 		return err
 	}
 	s.publishProgress(ctx, tenantID, task.ID, task.Status, ProgressStageFailed, "判题任务已取消")
-	return s.writeAudit(ctx, tenantID, task.SubmitterID, 5, "judge.cancel", "judge_task", task.ID, map[string]any{"source_ref": task.SourceRef})
+	return s.writeAudit(ctx, tenantID, task.SubmitterID, audit.ActorRoleSystem, "judge.cancel", "judge_task", task.ID, map[string]any{"source_ref": task.SourceRef})
 }
 
 // RejudgeTask 按原输入快照重置任务,只允许已完成或失败终态进入重判。
@@ -85,7 +86,7 @@ func (s *Service) RejudgeTask(ctx context.Context, tenantID, taskID int64) (Judg
 		return JudgeTaskInfo{}, err
 	}
 	s.publishProgress(ctx, tenantID, task.ID, task.Status, ProgressStageQueued, "判题任务已进入重判队列")
-	if err := s.writeAudit(ctx, tenantID, task.SubmitterID, 5, "judge.rejudge", "judge_task", task.ID, map[string]any{"source_ref": task.SourceRef}); err != nil {
+	if err := s.writeAudit(ctx, tenantID, task.SubmitterID, audit.ActorRoleSystem, "judge.rejudge", "judge_task", task.ID, map[string]any{"source_ref": task.SourceRef}); err != nil {
 		return JudgeTaskInfo{}, err
 	}
 	return s.getTaskInfo(ctx, tenantID, task.ID)
@@ -125,7 +126,7 @@ func (s *Service) RejudgeBatch(ctx context.Context, tenantID int64, sourceRef st
 	if len(changed) == 0 {
 		return apperr.ErrJudgeTaskStateInvalid
 	}
-	return s.writeAudit(ctx, tenantID, 0, 5, "judge.rejudge_batch", "judge_source", 0, map[string]any{"source_ref": sourceRef, "count": len(changed)})
+	return s.writeAudit(ctx, tenantID, 0, audit.ActorRoleSystem, "judge.rejudge_batch", "judge_source", 0, map[string]any{"source_ref": sourceRef, "count": len(changed)})
 }
 
 // ManualScore 保存人工评分结果并在同一事务写入终态 outbox。
@@ -187,7 +188,7 @@ func (s *Service) ManualScore(ctx context.Context, tenantID, taskID, scorerID in
 	if err := s.publishPendingOutbox(ctx); err != nil {
 		return nil, err
 	}
-	if err := s.writeAudit(ctx, tenantID, scorerID, 3, "judge.manual_score", "judge_task", taskID, map[string]any{"score": req.Score, "max_score": req.MaxScore}); err != nil {
+	if err := s.writeAudit(ctx, tenantID, scorerID, audit.ActorRoleTeacher, "judge.manual_score", "judge_task", taskID, map[string]any{"score": req.Score, "max_score": req.MaxScore}); err != nil {
 		return nil, err
 	}
 	return taskInfoToMap(info), nil
@@ -246,6 +247,8 @@ func (s *Service) bindProgressConn(ctx context.Context, conn *ws.Conn, tenantID,
 	if err := conn.BindSession(ws.SessionKey{TenantID: tenantID, AccountID: accountID}); err != nil {
 		return apperr.ErrJudgeTaskStateInvalid.WithCause(err)
 	}
-	s.wsHub.Subscribe(conn, topic)
+	if err := s.wsHub.Subscribe(conn, topic); err != nil {
+		return apperr.ErrJudgeTaskStateInvalid.WithCause(err)
+	}
 	return conn.SendJSON(initial)
 }

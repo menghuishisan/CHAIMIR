@@ -3,8 +3,11 @@ package audit
 
 import (
 	"context"
+	"fmt"
+	"strings"
 
 	"chaimir/internal/contracts"
+	"chaimir/internal/platform/response"
 	"chaimir/internal/platform/tenant"
 	"chaimir/pkg/apperr"
 )
@@ -70,11 +73,19 @@ func ActorRoleFromAccount(account contracts.AccountInfo) int16 {
 
 // BuildEntry 构造统一审计条目,补齐 detail、ip 和 trace_id 等横切字段。
 func BuildEntry(ctx context.Context, tenantID, actorID int64, actorRole int16, action, targetType string, targetID int64, detail map[string]any) (Entry, error) {
+	action = strings.TrimSpace(action)
+	targetType = strings.TrimSpace(targetType)
+	if action == "" || targetType == "" {
+		return Entry{}, fmt.Errorf("审计条目缺少 action 或 target_type")
+	}
 	detailText, err := DetailString(detail)
 	if err != nil {
 		return Entry{}, err
 	}
 	req := RequestContextFrom(ctx)
+	if strings.TrimSpace(req.TraceID) == "" {
+		req.TraceID = response.TraceFromContext(ctx)
+	}
 	return Entry{
 		TenantID:   tenantID,
 		ActorID:    actorID,

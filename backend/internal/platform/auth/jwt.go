@@ -13,14 +13,12 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 )
 
-// TokenType 区分 access 与 refresh。
+// TokenType 区分当前由 JWT 管理器签发的 token 类型。
 type TokenType string
 
 const (
 	// AccessToken 表示短期 JWT access token。
 	AccessToken TokenType = "access"
-	// RefreshToken 预留给需要 JWT 形态时的 token 类型声明;当前刷新令牌是随机串,不由本包签发。
-	RefreshToken TokenType = "refresh"
 )
 
 // Claims 是 access token 的受控载荷。

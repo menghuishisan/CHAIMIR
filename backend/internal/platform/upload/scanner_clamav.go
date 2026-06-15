@@ -39,15 +39,18 @@ func NewClamAVScanner(network, address string, timeout time.Duration) (*ClamAVSc
 }
 
 // Scan 按 clamd INSTREAM 协议发送文件内容,并把扫描结果归一为平台统一 Verdict。
-func (s *ClamAVScanner) Scan(req ScanRequest) (result ScanResult, err error) {
+func (s *ClamAVScanner) Scan(ctx context.Context, req ScanRequest) (result ScanResult, err error) {
 	if s == nil {
 		return ScanResult{}, fmt.Errorf("ClamAV 扫描器未初始化")
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), effectiveTimeout(req.Timeout, s.timeout))
+	if ctx == nil {
+		return ScanResult{}, fmt.Errorf("ClamAV 扫描上下文不能为空")
+	}
+	scanCtx, cancel := context.WithTimeout(ctx, effectiveTimeout(req.Timeout, s.timeout))
 	defer cancel()
 
 	dialer := &net.Dialer{}
-	conn, err := dialer.DialContext(ctx, s.network, s.address)
+	conn, err := dialer.DialContext(scanCtx, s.network, s.address)
 	if err != nil {
 		return ScanResult{}, fmt.Errorf("连接 ClamAV 失败: %w", err)
 	}
@@ -103,6 +106,9 @@ func parseClamAVResponse(raw string) (ScanResult, error) {
 		return ScanResult{Verdict: VerdictClean}, nil
 	case strings.Contains(line, "FOUND"):
 		signature := strings.TrimSpace(strings.TrimSuffix(strings.SplitN(line, "FOUND", 2)[0], ":"))
+		if idx := strings.LastIndex(signature, ":"); idx >= 0 {
+			signature = strings.TrimSpace(signature[idx+1:])
+		}
 		return ScanResult{Verdict: VerdictInfected, Signature: signature}, nil
 	case strings.Contains(line, "ERROR"):
 		return ScanResult{}, fmt.Errorf("ClamAV 扫描失败: %s", line)

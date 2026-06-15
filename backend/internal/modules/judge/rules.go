@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"chaimir/pkg/apperr"
+	"chaimir/pkg/privacy"
 )
 
 var (
@@ -49,13 +50,7 @@ func validateResultDetails(details []JudgeResultDetail) error {
 
 // containsSensitiveMaterial 以保守关键词防止答案、flag、私钥等进入学生可见结果。
 func containsSensitiveMaterial(value string) bool {
-	lower := strings.ToLower(value)
-	for _, key := range []string{"private_key", "secret", "flag{", "-----begin", "answer_source", "suite_source"} {
-		if strings.Contains(lower, key) {
-			return true
-		}
-	}
-	return false
+	return privacy.ContainsResultSensitiveText(value)
 }
 
 // statusText 返回 API 用户向状态字符串。

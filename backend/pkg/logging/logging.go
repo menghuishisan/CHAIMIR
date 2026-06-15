@@ -122,12 +122,9 @@ func maskPhoneNumber(phone string) string {
 
 // redactAttr 在 handler 输出前按字段名兜底脱敏,避免结构化字段绕过字符串规则。
 func redactAttr(_ []string, attr slog.Attr) slog.Attr {
-	key := strings.ToLower(attr.Key)
-	for _, marker := range []string{"password", "secret", "token", "key", "credential"} {
-		if strings.Contains(key, marker) && attr.Value.Kind() == slog.KindString {
-			attr.Value = slog.StringValue(SanitizeError(attr.Value.String()))
-			return attr
-		}
+	if privacy.IsCredentialKey(attr.Key) && attr.Value.Kind() == slog.KindString {
+		attr.Value = slog.StringValue(SanitizeError(attr.Value.String()))
+		return attr
 	}
 	return attr
 }

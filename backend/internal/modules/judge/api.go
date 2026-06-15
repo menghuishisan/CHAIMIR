@@ -7,10 +7,10 @@ import (
 	"chaimir/internal/contracts"
 	"chaimir/internal/platform/auth"
 	"chaimir/internal/platform/httpx"
+	"chaimir/internal/platform/response"
 	"chaimir/internal/platform/tenant"
 	"chaimir/internal/platform/ws"
 	"chaimir/pkg/apperr"
-	"chaimir/pkg/response"
 
 	"github.com/gin-gonic/gin"
 )

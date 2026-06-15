@@ -14,12 +14,12 @@ import (
 	"chaimir/internal/platform/audit"
 	"chaimir/internal/platform/config"
 	"chaimir/internal/platform/eventbus"
+	"chaimir/internal/platform/response"
 	"chaimir/internal/platform/storage"
 	"chaimir/internal/platform/tenant"
 	"chaimir/internal/platform/timex"
 	"chaimir/pkg/apperr"
 	"chaimir/pkg/logging"
-	"chaimir/pkg/response"
 	"chaimir/pkg/snowflake"
 )
 
@@ -36,7 +36,7 @@ type objectStorage interface {
 }
 
 type fileService interface {
-	PlanUpload(req storage.PlanUploadRequest) (storage.UploadPlan, error)
+	PlanUpload(ctx context.Context, req storage.PlanUploadRequest) (storage.UploadPlan, error)
 	IssueDownloadGrant(req storage.IssueDownloadGrantRequest) (string, storage.DownloadGrant, error)
 }
 
@@ -623,7 +623,7 @@ func (s *Service) GenerateTranscript(ctx context.Context, req TranscriptRequest)
 		return TranscriptDTO{}, apperr.ErrGradeTranscriptFailed.WithCause(err)
 	}
 	fileName := fmt.Sprintf("%d.pdf", s.ids.Generate())
-	plan, err := s.files.PlanUpload(storage.PlanUploadRequest{
+	plan, err := s.files.PlanUpload(ctx, storage.PlanUploadRequest{
 		TenantID:        id.TenantID,
 		AccountID:       id.AccountID,
 		Module:          gradeModuleName,

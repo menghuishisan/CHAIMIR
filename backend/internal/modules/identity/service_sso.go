@@ -374,7 +374,10 @@ func (s *Service) validateCASTicket(ctx context.Context, cfg SSOConfig, ticket, 
 	if err != nil {
 		return "", apperr.ErrIdentitySSOInsecureConfig.WithCause(err)
 	}
-	client := netx.NewPublicHTTPClient(time.Duration(s.cfg.SSONetworkTimeoutSeconds) * time.Second)
+	client, err := netx.NewPublicHTTPClient(time.Duration(s.cfg.SSONetworkTimeoutSeconds) * time.Second)
+	if err != nil {
+		return "", apperr.ErrIdentitySSOInsecureConfig.WithCause(err)
+	}
 	resp, err := client.Do(req)
 	if err != nil {
 		return "", apperr.ErrIdentitySSOTicketInvalid.WithCause(err)

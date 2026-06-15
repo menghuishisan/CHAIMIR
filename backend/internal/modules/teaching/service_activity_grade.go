@@ -13,13 +13,13 @@ import (
 	"chaimir/internal/contracts"
 	"chaimir/internal/platform/audit"
 	"chaimir/internal/platform/pagex"
+	"chaimir/internal/platform/response"
 	"chaimir/internal/platform/storage"
 	"chaimir/internal/platform/timex"
 	"chaimir/internal/platform/transfer"
 	"chaimir/internal/platform/upload"
 	"chaimir/pkg/apperr"
 	"chaimir/pkg/logging"
-	"chaimir/pkg/response"
 
 	"github.com/xuri/excelize/v2"
 )
@@ -603,7 +603,7 @@ func (s *Service) ExportGrades(ctx context.Context, courseID int64) (transfer.Ta
 		return transfer.TaskDTO{}, apperr.ErrTeachingGradeExportFailed.WithCause(err)
 	}
 	data := buf.Bytes()
-	plan, err := s.files.PlanUpload(storage.PlanUploadRequest{
+	plan, err := s.files.PlanUpload(ctx, storage.PlanUploadRequest{
 		TenantID:        id.TenantID,
 		AccountID:       id.AccountID,
 		Module:          "transfer",

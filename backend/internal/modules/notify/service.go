@@ -338,7 +338,9 @@ func (s *Service) HandleSubscribe(ctx context.Context, conn *ws.Conn) error {
 	if err := conn.BindSession(ws.SessionKey{TenantID: id.TenantID, AccountID: id.AccountID}); err != nil {
 		return apperr.ErrNotifyChannelUnavailable.WithCause(err)
 	}
-	s.hub.Subscribe(conn, fmt.Sprintf("notify:%d", id.AccountID))
+	if err := s.hub.Subscribe(conn, fmt.Sprintf("notify:%d", id.AccountID)); err != nil {
+		return apperr.ErrNotifyChannelUnavailable.WithCause(err)
+	}
 	for {
 		var msg SubscribeMessage
 		if err := conn.ReadJSON(&msg); err != nil {
@@ -351,7 +353,9 @@ func (s *Service) HandleSubscribe(ctx context.Context, conn *ws.Conn) error {
 			if err := AuthorizeTopic(id.TenantID, id.AccountID, topic); err != nil {
 				return err
 			}
-			s.hub.Subscribe(conn, strings.TrimSpace(topic))
+			if err := s.hub.Subscribe(conn, strings.TrimSpace(topic)); err != nil {
+				return apperr.ErrNotifyChannelUnavailable.WithCause(err)
+			}
 		}
 		if err := conn.SendJSON(map[string]any{"type": "subscribed", "topics": msg.Topics}); err != nil {
 			return apperr.ErrNotifyChannelUnavailable.WithCause(err)

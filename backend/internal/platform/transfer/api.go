@@ -55,7 +55,11 @@ func (a transferAPI) getTask(c *gin.Context) {
 	}
 	task, err := a.svc.GetTask(c.Request.Context(), id.TenantID, taskID)
 	if err == nil {
-		err = EnsureTaskOwner(c.Request.Context(), task, id.TenantID, id.AccountID, a.isSchoolAdmin(c, id.AccountID))
+		var tenantAdmin bool
+		tenantAdmin, err = a.isSchoolAdmin(c, id.AccountID)
+		if err == nil {
+			err = EnsureTaskOwner(task, id.TenantID, id.AccountID, tenantAdmin)
+		}
 	}
 	httpx.Write(c, TaskToDTO(task), err)
 }
@@ -70,7 +74,12 @@ func (a transferAPI) downloadGrant(c *gin.Context) {
 	if !ok {
 		return
 	}
-	out, err := a.svc.BuildDownloadGrant(c.Request.Context(), id.TenantID, taskID, id.AccountID, a.isSchoolAdmin(c, id.AccountID))
+	tenantAdmin, err := a.isSchoolAdmin(c, id.AccountID)
+	if err != nil {
+		httpx.Write(c, gin.H{}, err)
+		return
+	}
+	out, err := a.svc.BuildDownloadGrant(c.Request.Context(), id.TenantID, taskID, id.AccountID, tenantAdmin)
 	httpx.Write(c, out, err)
 }
 
@@ -84,11 +93,14 @@ func currentTenantIdentity(c *gin.Context) (tenant.Identity, bool) {
 	return id, true
 }
 
-// isSchoolAdmin 判断当前账号是否可读取同租户内其他账号任务。
-func (a transferAPI) isSchoolAdmin(c *gin.Context, accountID int64) bool {
+// isSchoolAdmin 判断当前账号是否可读取同租户内其他账号任务,角色查询失败必须显式返回。
+func (a transferAPI) isSchoolAdmin(c *gin.Context, accountID int64) (bool, error) {
 	if a.roles == nil {
-		return false
+		return false, nil
 	}
 	ok, err := a.roles.HasRole(c.Request.Context(), accountID, contracts.RoleSchoolAdmin)
-	return err == nil && ok
+	if err != nil {
+		return false, apperr.ErrTransferTaskForbidden.WithCause(err)
+	}
+	return ok, nil
 }

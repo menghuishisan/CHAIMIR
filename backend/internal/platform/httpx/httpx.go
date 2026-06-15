@@ -9,8 +9,8 @@ import (
 
 	"chaimir/internal/platform/ids"
 	"chaimir/internal/platform/pagex"
+	"chaimir/internal/platform/response"
 	"chaimir/pkg/apperr"
-	"chaimir/pkg/response"
 
 	"github.com/gin-gonic/gin"
 )
@@ -24,9 +24,13 @@ func BindJSON(c *gin.Context, dst any) bool {
 	return true
 }
 
-// BindJSONWithError 允许模块在同一绑定流程中替换错误码,但仍复用统一响应信封。
+// BindJSONWithError 在统一绑定流程中使用调用方指定的稳定错误模板。
 func BindJSONWithError(c *gin.Context, dst any, bindErr *apperr.Error) bool {
 	if err := c.ShouldBindJSON(dst); err != nil {
+		if bindErr == nil {
+			response.Fail(c, apperr.ErrRequestBodyInvalid.WithCause(err))
+			return false
+		}
 		response.Fail(c, bindErr.WithCause(err))
 		return false
 	}
@@ -42,7 +46,7 @@ func Write(c *gin.Context, data any, err error) {
 	response.OK(c, data)
 }
 
-// WritePage 把分页 service 返回值转换成统一响应,分页结构由 pkg/response 单一维护。
+// WritePage 把分页 service 返回值转换成统一响应,分页结构由 internal/platform/response 单一维护。
 func WritePage(c *gin.Context, list any, total int64, page, size int, err error) {
 	if err != nil {
 		response.Fail(c, err)
@@ -54,6 +58,7 @@ func WritePage(c *gin.Context, list any, total int64, page, size int, err error)
 // WriteAttachment 统一输出小型附件内容,避免各模块手写不安全的 Content-Disposition。
 func WriteAttachment(c *gin.Context, fileName, contentType string, data []byte) {
 	c.Header("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, safeAttachmentName(fileName)))
+	c.Header("X-Content-Type-Options", "nosniff")
 	c.Data(http.StatusOK, contentType, data)
 }
 
@@ -106,20 +111,6 @@ func Page(c *gin.Context) (int, int, bool) {
 	}
 	p, s := pagex.Normalize(int(page), int(size))
 	return p, s, true
-}
-
-// Int 为 handler 层可选数字字段提供零值解析,必填语义应由 rules/service 校验。
-func Int(v string) int {
-	n, err := strconv.Atoi(strings.TrimSpace(v))
-	if err != nil {
-		return 0
-	}
-	return n
-}
-
-// Int16 复用 Int 的可选字段语义,用于枚举查询参数等 handler 轻量解析场景。
-func Int16(v string) int16 {
-	return int16(Int(v))
 }
 
 // safeAttachmentName 把响应头文件名限制为单段可见字符,防止头注入和路径片段进入下载名。

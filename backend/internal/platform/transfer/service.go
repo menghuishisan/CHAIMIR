@@ -15,11 +15,6 @@ import (
 	"chaimir/pkg/snowflake"
 )
 
-const (
-	defaultListPage = 1
-	defaultListSize = 20
-)
-
 // Service 是统一导入导出中心对模块和 HTTP 层暴露的生产服务。
 type Service struct {
 	store   Store
@@ -114,7 +109,7 @@ func (s *Service) GetTask(ctx context.Context, tenantID, taskID int64) (Task, er
 
 // ListTasks 查询当前账号的导入导出任务。
 func (s *Service) ListTasks(ctx context.Context, query TaskListQuery) ([]Task, int, int, error) {
-	if query.TenantID < 0 || query.AccountID <= 0 {
+	if query.TenantID <= 0 || query.AccountID <= 0 {
 		return nil, 0, 0, apperr.ErrTransferTaskInvalid
 	}
 	if query.Channel != "" {
@@ -126,9 +121,6 @@ func (s *Service) ListTasks(ctx context.Context, query TaskListQuery) ([]Task, i
 		return nil, 0, 0, apperr.ErrTransferTaskInvalid
 	}
 	page, size := pagex.Normalize(query.Page, query.Size)
-	if query.Page == 0 {
-		page, size = pagex.Normalize(defaultListPage, defaultListSize)
-	}
 	items, err := s.store.ListTasks(ctx, ListTasksQuery{
 		TenantID:  query.TenantID,
 		AccountID: query.AccountID,
@@ -175,7 +167,7 @@ func (s *Service) BuildDownloadGrant(ctx context.Context, tenantID, taskID, acco
 	if err != nil {
 		return DownloadGrantDTO{}, err
 	}
-	if err := EnsureTaskOwner(ctx, task, tenantID, accountID, tenantAdmin); err != nil {
+	if err := EnsureTaskOwner(task, tenantID, accountID, tenantAdmin); err != nil {
 		return DownloadGrantDTO{}, err
 	}
 	if task.Status != StatusSucceeded || strings.TrimSpace(task.Artifact.ObjectRef) == "" {
@@ -189,7 +181,7 @@ func (s *Service) BuildDownloadGrant(ctx context.Context, tenantID, taskID, acco
 }
 
 // EnsureTaskOwner 校验任务访问者必须在同租户内,且只能读本人任务或由租户管理员读取。
-func EnsureTaskOwner(_ context.Context, task Task, tenantID, accountID int64, tenantAdmin bool) error {
+func EnsureTaskOwner(task Task, tenantID, accountID int64, tenantAdmin bool) error {
 	if task.TenantID != tenantID {
 		return apperr.ErrTransferTaskForbidden
 	}

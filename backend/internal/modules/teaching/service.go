@@ -39,7 +39,7 @@ type objectStorage interface {
 
 // fileService 描述 M6 复用统一文件服务规划对象路径所需能力。
 type fileService interface {
-	PlanUpload(req storage.PlanUploadRequest) (storage.UploadPlan, error)
+	PlanUpload(ctx context.Context, req storage.PlanUploadRequest) (storage.UploadPlan, error)
 }
 
 // transferService 描述 M6 调用统一导入导出中心所需能力。

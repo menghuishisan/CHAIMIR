@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"chaimir/pkg/crypto"
+	"chaimir/pkg/privacy"
 )
 
 // MaskedValue 是响应中展示已配置敏感值的统一用户向文案。
@@ -18,7 +19,7 @@ func Protect(cipher *crypto.Cipher, value map[string]any, label string) (map[str
 	}
 	out := make(map[string]any, len(value))
 	for key, raw := range value {
-		if IsSensitiveKey(key) {
+		if privacy.IsCredentialKey(key) {
 			text, ok := raw.(string)
 			if !ok || strings.TrimSpace(text) == "" {
 				out[key] = raw
@@ -34,15 +35,11 @@ func Protect(cipher *crypto.Cipher, value map[string]any, label string) (map[str
 			out[key] = map[string]any{"encrypted": true, "value": encrypted}
 			continue
 		}
-		if nested, ok := raw.(map[string]any); ok {
-			protected, err := Protect(cipher, nested, label)
-			if err != nil {
-				return nil, err
-			}
-			out[key] = protected
-			continue
+		protected, err := protectValue(cipher, raw, label)
+		if err != nil {
+			return nil, err
 		}
-		out[key] = raw
+		out[key] = protected
 	}
 	return out, nil
 }
@@ -54,15 +51,11 @@ func Mask(value map[string]any) map[string]any {
 	}
 	out := make(map[string]any, len(value))
 	for key, raw := range value {
-		if IsSensitiveKey(key) {
+		if privacy.IsCredentialKey(key) {
 			out[key] = MaskedValue
 			continue
 		}
-		if nested, ok := raw.(map[string]any); ok {
-			out[key] = Mask(nested)
-			continue
-		}
-		out[key] = raw
+		out[key] = maskValue(raw)
 	}
 	return out
 }
@@ -74,45 +67,81 @@ func Reveal(cipher *crypto.Cipher, value map[string]any, label string) (map[stri
 	}
 	out := make(map[string]any, len(value))
 	for key, raw := range value {
-		if nested, ok := raw.(map[string]any); ok {
-			if encrypted, ok := nested["encrypted"].(bool); ok && encrypted {
-				ciphertext, ok := nested["value"].(string)
-				if !ok || strings.TrimSpace(ciphertext) == "" {
-					return nil, fmt.Errorf("%s %s 缺少密文", label, key)
-				}
-				if cipher == nil {
-					return nil, fmt.Errorf("%s %s 缺少解密器", label, key)
-				}
-				plain, err := cipher.DecryptString(ciphertext)
-				if err != nil {
-					return nil, err
-				}
-				out[key] = plain
-				continue
-			}
-			revealed, err := Reveal(cipher, nested, label)
-			if err != nil {
-				return nil, err
-			}
-			out[key] = revealed
-			continue
+		revealed, err := revealValue(cipher, raw, label, key)
+		if err != nil {
+			return nil, err
 		}
-		out[key] = raw
+		out[key] = revealed
 	}
 	return out, nil
 }
 
-// IsSensitiveKey 判断配置键名是否携带凭据语义。
-func IsSensitiveKey(key string) bool {
-	normalized := strings.ToLower(key)
-	return strings.Contains(normalized, "password") ||
-		strings.Contains(normalized, "private_key") ||
-		strings.Contains(normalized, "access_key") ||
-		strings.Contains(normalized, "signing_key") ||
-		strings.Contains(normalized, "session_secret") ||
-		strings.Contains(normalized, "secret") ||
-		strings.Contains(normalized, "token") ||
-		strings.Contains(normalized, "credential") ||
-		strings.Contains(normalized, "authorization") ||
-		strings.Contains(normalized, "api_key")
+// protectValue 递归处理任意 JSON 值,让数组中的配置对象也复用同一敏感字段加密口径。
+func protectValue(cipher *crypto.Cipher, raw any, label string) (any, error) {
+	switch v := raw.(type) {
+	case map[string]any:
+		return Protect(cipher, v, label)
+	case []any:
+		out := make([]any, 0, len(v))
+		for _, item := range v {
+			protected, err := protectValue(cipher, item, label)
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, protected)
+		}
+		return out, nil
+	default:
+		return raw, nil
+	}
+}
+
+// maskValue 递归脱敏任意 JSON 值,确保响应体中数组里的凭据字段也不会泄露。
+func maskValue(raw any) any {
+	switch v := raw.(type) {
+	case map[string]any:
+		return Mask(v)
+	case []any:
+		out := make([]any, 0, len(v))
+		for _, item := range v {
+			out = append(out, maskValue(item))
+		}
+		return out
+	default:
+		return raw
+	}
+}
+
+// revealValue 递归还原任意 JSON 值,仅在服务端内部适配器需要明文时使用。
+func revealValue(cipher *crypto.Cipher, raw any, label, key string) (any, error) {
+	switch v := raw.(type) {
+	case map[string]any:
+		if encrypted, ok := v["encrypted"].(bool); ok && encrypted {
+			ciphertext, ok := v["value"].(string)
+			if !ok || strings.TrimSpace(ciphertext) == "" {
+				return nil, fmt.Errorf("%s %s 缺少密文", label, key)
+			}
+			if cipher == nil {
+				return nil, fmt.Errorf("%s %s 缺少解密器", label, key)
+			}
+			plain, err := cipher.DecryptString(ciphertext)
+			if err != nil {
+				return nil, err
+			}
+			return plain, nil
+		}
+		return Reveal(cipher, v, label)
+	case []any:
+		out := make([]any, 0, len(v))
+		for _, item := range v {
+			revealed, err := revealValue(cipher, item, label, key)
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, revealed)
+		}
+		return out, nil
+	default:
+		return raw, nil
+	}
 }

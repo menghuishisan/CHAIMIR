@@ -18,8 +18,19 @@ type Client struct {
 	rdb *goredis.Client
 }
 
+var incrWithTTLScript = goredis.NewScript(`
+local n = redis.call("INCR", KEYS[1])
+if n == 1 then
+	redis.call("PEXPIRE", KEYS[1], ARGV[1])
+end
+return n
+`)
+
 // New 创建 Redis 客户端并用配置化超时 Ping,缓存依赖不可用时启动失败。
 func New(ctx context.Context, cfg config.RedisConfig) (*Client, error) {
+	if cfg.PingTimeoutSeconds <= 0 {
+		return nil, fmt.Errorf("REDIS_PING_TIMEOUT_SECONDS 必须大于 0")
+	}
 	rdb := goredis.NewClient(&goredis.Options{
 		Addr:     fmt.Sprintf("%s:%d", cfg.Host, cfg.Port),
 		Password: cfg.Password,
@@ -32,9 +43,6 @@ func New(ctx context.Context, cfg config.RedisConfig) (*Client, error) {
 	}
 	return &Client{rdb: rdb}, nil
 }
-
-// Raw 暴露底层 go-redis 客户端,用于模块实现队列、限频等 Redis 原语。
-func (c *Client) Raw() *goredis.Client { return c.rdb }
 
 // Ping 供 HTTP 就绪探针复用同一 Redis 连接检查。
 func (c *Client) Ping(ctx context.Context) error {
@@ -57,6 +65,9 @@ func (c *Client) SetNX(ctx context.Context, key string, ttl time.Duration) (bool
 	if c == nil || c.rdb == nil {
 		return false, fmt.Errorf("Redis 客户端未初始化")
 	}
+	if key == "" || ttl <= 0 {
+		return false, fmt.Errorf("Redis SetNX 参数非法")
+	}
 	ok, err := c.rdb.SetNX(ctx, key, 1, ttl).Result()
 	if err != nil {
 		return false, fmt.Errorf("Redis SetNX 失败: %w", err)
@@ -64,19 +75,17 @@ func (c *Client) SetNX(ctx context.Context, key string, ttl time.Duration) (bool
 	return ok, nil
 }
 
-// IncrWithTTL 自增计数并在首次设置过期窗口;返回当前计数。
+// IncrWithTTL 原子自增计数并在首次设置过期窗口;返回当前计数。
 func (c *Client) IncrWithTTL(ctx context.Context, key string, ttl time.Duration) (int64, error) {
 	if c == nil || c.rdb == nil {
 		return 0, fmt.Errorf("Redis 客户端未初始化")
 	}
-	n, err := c.rdb.Incr(ctx, key).Result()
-	if err != nil {
-		return 0, fmt.Errorf("Redis Incr 失败: %w", err)
+	if key == "" || ttl <= 0 {
+		return 0, fmt.Errorf("Redis IncrWithTTL 参数非法")
 	}
-	if n == 1 {
-		if err := c.rdb.Expire(ctx, key, ttl).Err(); err != nil {
-			return n, fmt.Errorf("Redis Expire 失败: %w", err)
-		}
+	n, err := incrWithTTLScript.Run(ctx, c.rdb, []string{key}, ttl.Milliseconds()).Int64()
+	if err != nil {
+		return 0, fmt.Errorf("Redis IncrWithTTL 失败: %w", err)
 	}
 	return n, nil
 }
@@ -85,6 +94,9 @@ func (c *Client) IncrWithTTL(ctx context.Context, key string, ttl time.Duration)
 func (c *Client) Decr(ctx context.Context, key string) (int64, error) {
 	if c == nil || c.rdb == nil {
 		return 0, fmt.Errorf("Redis 客户端未初始化")
+	}
+	if key == "" {
+		return 0, fmt.Errorf("Redis Decr 参数非法")
 	}
 	n, err := c.rdb.Decr(ctx, key).Result()
 	if err != nil {
@@ -97,6 +109,9 @@ func (c *Client) Decr(ctx context.Context, key string) (int64, error) {
 func (c *Client) GetInt64(ctx context.Context, key string) (int64, bool, error) {
 	if c == nil || c.rdb == nil {
 		return 0, false, fmt.Errorf("Redis 客户端未初始化")
+	}
+	if key == "" {
+		return 0, false, fmt.Errorf("Redis Get 参数非法")
 	}
 	raw, err := c.rdb.Get(ctx, key).Result()
 	if errors.Is(err, goredis.Nil) {
@@ -117,6 +132,9 @@ func (c *Client) SetInt64(ctx context.Context, key string, value int64, ttl time
 	if c == nil || c.rdb == nil {
 		return fmt.Errorf("Redis 客户端未初始化")
 	}
+	if key == "" || ttl <= 0 {
+		return fmt.Errorf("Redis Set 参数非法")
+	}
 	if err := c.rdb.Set(ctx, key, strconv.FormatInt(value, 10), ttl).Err(); err != nil {
 		return fmt.Errorf("Redis Set 失败: %w", err)
 	}
@@ -127,6 +145,9 @@ func (c *Client) SetInt64(ctx context.Context, key string, value int64, ttl time
 func (c *Client) Delete(ctx context.Context, key string) error {
 	if c == nil || c.rdb == nil {
 		return fmt.Errorf("Redis 客户端未初始化")
+	}
+	if key == "" {
+		return fmt.Errorf("Redis Del 参数非法")
 	}
 	if err := c.rdb.Del(ctx, key).Err(); err != nil {
 		return fmt.Errorf("Redis Del 失败: %w", err)

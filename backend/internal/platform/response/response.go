@@ -22,7 +22,7 @@ const ginTraceKey = "trace_id"
 // TraceHeader 是回传/透传 trace_id 的 HTTP 头。
 const TraceHeader = "X-Trace-Id"
 
-// Body 是后端统一 JSON 响应体。
+// Envelope 是后端统一 JSON 响应体。
 type Envelope struct {
 	Code    string `json:"code"`
 	Message string `json:"message"`
@@ -37,8 +37,6 @@ type Page struct {
 	Page  int   `json:"page"`
 	Size  int   `json:"size"`
 }
-
-const codeOK = "0"
 
 // WithTrace 把 trace_id 写入 context。
 func WithTrace(ctx context.Context, traceID string) context.Context {
@@ -95,7 +93,7 @@ func RecoveryMiddleware() gin.HandlerFunc {
 
 // OK 写出统一成功信封。
 func OK(c *gin.Context, data any) {
-	c.JSON(http.StatusOK, Envelope{Code: codeOK, Message: "ok", Data: data, TraceID: TraceFromGin(c)})
+	c.JSON(http.StatusOK, Envelope{Code: apperr.CodeOK, Message: apperr.MessageOK, Data: data, TraceID: TraceFromGin(c)})
 }
 
 // OKPage 写出统一分页信封。
@@ -106,21 +104,15 @@ func OKPage(c *gin.Context, list any, total int64, page, size int) {
 // Fail 写出错误响应,并按错误分层规则记录内部原因。
 func Fail(c *gin.Context, err error) {
 	traceID := TraceFromGin(c)
+	if traceID == "" {
+		traceID = TraceFromContext(c.Request.Context())
+	}
 	ae, ok := apperr.As(err)
 	if !ok {
 		ae = apperr.ErrUnhandledFailure.WithCause(err)
 	}
 	logging.ErrorContext(c.Request.Context(), "request failed", ae.LogString(), errorCodeAttr(ae.Code))
 	c.JSON(http.StatusOK, Envelope{Code: ae.Code, Message: ae.Message, TraceID: traceID})
-}
-
-// Error 保留为纯数据转换辅助,用于不直接依赖 Gin 的边界测试和轻量场景。
-func Error(err error, traceID string) Envelope {
-	ae := apperr.AsAppError(err)
-	if ae == nil {
-		ae = apperr.ErrInternal
-	}
-	return Envelope{Code: ae.UserCode(), Message: ae.UserMessage(), TraceID: traceID}
 }
 
 // isSafeTraceID 限制上游 trace_id 为短可见标识,避免日志污染。

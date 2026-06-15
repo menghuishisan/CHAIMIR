@@ -69,14 +69,6 @@ func (e *Error) WithCause(cause error) *Error {
 	return &Error{Code: e.Code, Message: e.Message, cause: cause}
 }
 
-// WithMessage 基于错误模板替换用户向文案,用于同码下更具体的友好提示。
-func (e *Error) WithMessage(message string) *Error {
-	if e == nil {
-		return New(CodeInternal, message)
-	}
-	return &Error{Code: e.Code, Message: message, cause: e.cause}
-}
-
 // AsAppError 将任意错误归一为应用错误,未知错误统一收敛成内部错误。
 func AsAppError(err error) *Error {
 	if err == nil {

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"chaimir/internal/contracts"
+	"chaimir/internal/platform/audit"
 	"chaimir/internal/platform/auth"
 	"chaimir/internal/platform/timex"
 	"chaimir/pkg/apperr"
@@ -45,7 +46,7 @@ func (s *Service) CreateSession(ctx context.Context, req contracts.SimCreateSess
 	}); err != nil {
 		return contracts.SimSessionInfo{}, err
 	}
-	if err := s.writeAudit(ctx, req.TenantID, req.OwnerAccountID, 5, "sim.session.create", "sim_session", session.ID, map[string]any{"source_ref": session.SourceRef, "package": pkg.Code + ":" + pkg.Version}); err != nil {
+	if err := s.writeAudit(ctx, req.TenantID, req.OwnerAccountID, audit.ActorRoleSystem, "sim.session.create", "sim_session", session.ID, map[string]any{"source_ref": session.SourceRef, "package": pkg.Code + ":" + pkg.Version}); err != nil {
 		return contracts.SimSessionInfo{}, err
 	}
 	return sessionToContract(session, pkg), nil

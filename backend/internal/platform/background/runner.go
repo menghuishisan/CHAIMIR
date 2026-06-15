@@ -7,8 +7,8 @@ import (
 	"log/slog"
 	"time"
 
+	"chaimir/internal/platform/response"
 	"chaimir/pkg/logging"
-	"chaimir/pkg/response"
 
 	"github.com/google/uuid"
 )
@@ -24,7 +24,8 @@ type Task struct {
 func Run(ctx context.Context, task Task) {
 	interval := task.Interval
 	if interval <= 0 {
-		interval = time.Second
+		logging.ErrorContext(ctx, "background task invalid interval", "interval must be greater than zero", slog.String("task", task.Name))
+		return
 	}
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()

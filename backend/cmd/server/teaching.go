@@ -17,7 +17,6 @@ import (
 	"chaimir/internal/platform/storage"
 	"chaimir/internal/platform/timex"
 	"chaimir/internal/platform/transfer"
-	"chaimir/internal/platform/upload"
 	"chaimir/pkg/snowflake"
 
 	"github.com/gin-gonic/gin"
@@ -59,26 +58,22 @@ func RegisterTeachingModule(ctx context.Context, deps TeachingModuleDeps) (*teac
 	if deps.Storage == nil {
 		return nil, fmt.Errorf("teaching module 缺少统一对象存储")
 	}
-	scanner, err := upload.NewScannerFromConfig(deps.Upload)
+	fileService, err := storage.NewServiceFromConfig(deps.AuthCfg, deps.MinIO, deps.Upload)
 	if err != nil {
 		return nil, err
 	}
 	store := teaching.NewStore(deps.Database)
 	svc, err := teaching.NewService(teaching.ServiceDeps{
-		Store:     store,
-		IDs:       deps.IDs,
-		Audit:     deps.Audit,
-		Content:   deps.Content,
-		Judge:     deps.Judge,
-		Bus:       deps.EventBus,
-		Transfers: deps.Transfer,
-		Storage:   deps.Storage,
-		FileService: storage.Service{
-			Scanner:          scanner,
-			SigningKey:       deps.AuthCfg.HMACKey,
-			DownloadGrantTTL: time.Duration(deps.MinIO.DownloadGrantTTLSeconds) * time.Second,
-		},
-		Config: deps.Config,
+		Store:       store,
+		IDs:         deps.IDs,
+		Audit:       deps.Audit,
+		Content:     deps.Content,
+		Judge:       deps.Judge,
+		Bus:         deps.EventBus,
+		Transfers:   deps.Transfer,
+		Storage:     deps.Storage,
+		FileService: fileService,
+		Config:      deps.Config,
 	})
 	if err != nil {
 		return nil, err

@@ -8,9 +8,9 @@ import (
 	"chaimir/internal/contracts"
 	"chaimir/internal/platform/audit"
 	"chaimir/internal/platform/pagex"
+	"chaimir/internal/platform/response"
 	"chaimir/internal/platform/timex"
 	"chaimir/pkg/apperr"
-	"chaimir/pkg/response"
 )
 
 // CreateAssignment 创建作业草稿并锁定 M5 题目版本。

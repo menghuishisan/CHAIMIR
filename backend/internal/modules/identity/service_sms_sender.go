@@ -28,12 +28,13 @@ type HTTPSMSSender struct {
 	client *http.Client
 }
 
-// NewSMSSender 根据统一配置创建短信发送器。
-func NewSMSSender(cfg config.SMSConfig) SMSSender {
-	return &HTTPSMSSender{
-		cfg:    cfg,
-		client: netx.NewPublicHTTPClient(time.Duration(cfg.TimeoutSeconds) * time.Second),
+// NewSMSSender 根据统一配置创建短信发送器,启动期显式校验 HTTP 出站客户端边界。
+func NewSMSSender(cfg config.SMSConfig) (SMSSender, error) {
+	client, err := netx.NewPublicHTTPClient(time.Duration(cfg.TimeoutSeconds) * time.Second)
+	if err != nil {
+		return nil, fmt.Errorf("创建短信 HTTP 客户端失败: %w", err)
 	}
+	return &HTTPSMSSender{cfg: cfg, client: client}, nil
 }
 
 // Send 按配置发送验证码;log provider 仅允许开发环境显式使用,生产应配置 HTTP 网关。

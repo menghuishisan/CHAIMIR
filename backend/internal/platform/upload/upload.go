@@ -51,10 +51,11 @@ func ReadBounded(r io.Reader, maxBytes int64) ([]byte, SizeResult, error) {
 	if r == nil {
 		return nil, SizeEmpty, nil
 	}
-	limit := maxBytes
-	if limit > 0 {
-		limit++
+	if maxBytes <= 0 {
+		return nil, SizeTooLarge, nil
 	}
+	limit := maxBytes
+	limit++
 	data, err := io.ReadAll(io.LimitReader(r, limit))
 	if err != nil {
 		return nil, SizeOK, err

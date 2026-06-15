@@ -36,6 +36,10 @@ func RegisterIdentityModule(deps IdentityModuleDeps) (*identity.Service, error) 
 		return nil, fmt.Errorf("identity module 缺少 auth manager")
 	}
 	store := identity.NewStore(deps.Database)
+	smsSender, err := identity.NewSMSSender(deps.Config.SMS)
+	if err != nil {
+		return nil, err
+	}
 	svc, err := identity.NewService(identity.ServiceDeps{
 		Store:          store,
 		Auth:           deps.Auth,
@@ -45,7 +49,7 @@ func RegisterIdentityModule(deps IdentityModuleDeps) (*identity.Service, error) 
 		IdentityConfig: deps.Config.Identity,
 		UploadConfig:   deps.Config.Upload,
 		DeployConfig:   deps.Config.Deploy,
-		SMSSender:      identity.NewSMSSender(deps.Config.SMS),
+		SMSSender:      smsSender,
 	})
 	if err != nil {
 		return nil, err

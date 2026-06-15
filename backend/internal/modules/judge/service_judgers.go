@@ -102,7 +102,7 @@ func (s *Service) judgeFlag(ctx context.Context, task JudgeTask, sandboxID int64
 		}
 		submitted = stringValue(actual[stringValue(task.InputSnapshot.Expectation["flag_chain_field"])])
 		if submitted == "" {
-			submitted = shortJSON(actual)
+			submitted = chainassert.ShortJSON(actual)
 		}
 	}
 	submittedHash, err := pkgcrypto.HMACSHA256Hex(s.hmacKey, strings.TrimSpace(submitted))
@@ -135,7 +135,7 @@ func judgeSimCheckpoint(task JudgeTask) (JudgeExecutionResult, error) {
 		Passed:   passed,
 		Score:    score,
 		MaxScore: task.InputSnapshot.MaxScore,
-		Details:  []JudgeResultDetail{{Case: "仿真检查点", Passed: passed, ExpectedLabel: stringValue(task.InputSnapshot.Expectation["expected_label"]), Actual: shortJSON(actual)}},
+		Details:  []JudgeResultDetail{{Case: "仿真检查点", Passed: passed, ExpectedLabel: stringValue(task.InputSnapshot.Expectation["expected_label"]), Actual: chainassert.ShortJSON(actual)}},
 	}, nil
 }
 
@@ -214,7 +214,7 @@ func (s *Service) snapshotExpectationForJudger(typ int16, expectation map[string
 
 // containsSensitiveExpectationMaterial 保守拒绝命令型判题期望中携带敏感明文。
 func containsSensitiveExpectationMaterial(v any) bool {
-	raw := strings.ToLower(shortJSON(v))
+	raw := strings.ToLower(chainassert.ShortJSON(v))
 	for _, key := range []string{"flag_value", "flag_hmac_secret", "private_key", "answer_source", "suite_source"} {
 		if strings.Contains(raw, key) {
 			return true
@@ -236,19 +236,6 @@ func sliceValue(v any) []any {
 // stringValue 读取字符串值。
 func stringValue(v any) string {
 	return strings.TrimSpace(jsonx.StringFromAny(v))
-}
-
-// shortJSON 返回脱敏短文本,避免把完整结构回传给前端。
-func shortJSON(v any) string {
-	raw, err := jsonx.AnyBytes(v, apperr.ErrInternal)
-	if err != nil {
-		return ""
-	}
-	text := string(raw)
-	if len(text) > 256 {
-		return text[:256]
-	}
-	return text
 }
 
 // flagActualText 返回用户向 flag 判题实际状态。

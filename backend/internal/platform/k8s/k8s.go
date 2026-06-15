@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"strings"
 
 	"chaimir/internal/platform/config"
 
@@ -78,6 +79,9 @@ func (c *Client) ImageRegistry() string { return c.imageRegistry }
 
 // Healthz 探测 API Server 连通。
 func (c *Client) Healthz(ctx context.Context) error {
+	if c == nil || c.clientset == nil {
+		return fmt.Errorf("K8s 客户端未初始化")
+	}
 	if _, err := c.clientset.Discovery().ServerVersion(); err != nil {
 		return fmt.Errorf("K8s API 连通性检查失败: %w", err)
 	}
@@ -105,6 +109,9 @@ func (c *Client) ExecStream(
 	stdout, stderr io.Writer,
 	tty bool,
 ) error {
+	if err := c.validateExecTarget(namespace, podName, container, command); err != nil {
+		return err
+	}
 	req := c.clientset.CoreV1().RESTClient().Post().
 		Resource("pods").
 		Name(podName).
@@ -130,6 +137,20 @@ func (c *Client) ExecStream(
 		Tty:    tty,
 	}); err != nil {
 		return fmt.Errorf("执行 Kubernetes exec 失败: %w", err)
+	}
+	return nil
+}
+
+// validateExecTarget 在发起 SPDY 会话前校验必填目标,避免空参数延迟成难排查的 Kubernetes 错误。
+func (c *Client) validateExecTarget(namespace, podName, container string, command []string) error {
+	if c == nil || c.clientset == nil || c.restConfig == nil {
+		return fmt.Errorf("K8s 客户端未初始化")
+	}
+	if strings.TrimSpace(namespace) == "" || strings.TrimSpace(podName) == "" || strings.TrimSpace(container) == "" {
+		return fmt.Errorf("Kubernetes exec 目标不完整")
+	}
+	if len(command) == 0 || strings.TrimSpace(command[0]) == "" {
+		return fmt.Errorf("Kubernetes exec 命令不能为空")
 	}
 	return nil
 }

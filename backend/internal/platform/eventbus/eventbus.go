@@ -7,12 +7,13 @@ import (
 	"fmt"
 	"log/slog"
 	"strconv"
+	"strings"
 	"time"
 
 	"chaimir/internal/platform/config"
+	"chaimir/internal/platform/response"
 	"chaimir/pkg/apperr"
 	"chaimir/pkg/logging"
-	"chaimir/pkg/response"
 
 	"github.com/google/uuid"
 	"github.com/nats-io/nats.go"
@@ -69,6 +70,13 @@ func New(cfg config.NATSConfig) (Bus, error) {
 
 // Publish 序列化并发布事件,同时等待 flush 确认,避免只停留在客户端缓冲。
 func (b *natsBus) Publish(ctx context.Context, subject string, payload any) error {
+	if b == nil || b.conn == nil {
+		return fmt.Errorf("事件总线未初始化")
+	}
+	subject = strings.TrimSpace(subject)
+	if subject == "" {
+		return fmt.Errorf("事件主题不能为空")
+	}
 	data, err := marshalEventPayload(ctx, payload)
 	if err != nil {
 		return fmt.Errorf("事件序列化失败: %w", err)
@@ -84,6 +92,17 @@ func (b *natsBus) Publish(ctx context.Context, subject string, payload any) erro
 
 // Subscribe 注册订阅,并把处理失败统一写入结构化日志。
 func (b *natsBus) Subscribe(subject, queue string, handler Handler) (Subscription, error) {
+	if b == nil || b.conn == nil {
+		return nil, fmt.Errorf("事件总线未初始化")
+	}
+	subject = strings.TrimSpace(subject)
+	queue = strings.TrimSpace(queue)
+	if subject == "" {
+		return nil, fmt.Errorf("事件主题不能为空")
+	}
+	if handler == nil {
+		return nil, fmt.Errorf("事件处理器不能为空")
+	}
 	cb := func(msg *nats.Msg) {
 		b.handleMessage(context.Background(), subject, queue, msg.Data, handler)
 	}
@@ -104,6 +123,9 @@ func (b *natsBus) Subscribe(subject, queue string, handler Handler) (Subscriptio
 
 // Close 关闭底层 NATS 连接。
 func (b *natsBus) Close() {
+	if b == nil || b.conn == nil {
+		return
+	}
 	b.conn.Close()
 }
 

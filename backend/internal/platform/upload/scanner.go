@@ -2,6 +2,7 @@
 package upload
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"time"
@@ -40,7 +41,7 @@ type ScanPolicy struct {
 // Scanner 是统一病毒扫描能力契约,由具体适配器实现。
 type Scanner interface {
 	// Scan 执行文件扫描并返回规范化结果。
-	Scan(req ScanRequest) (ScanResult, error)
+	Scan(ctx context.Context, req ScanRequest) (ScanResult, error)
 }
 
 // NewScannerFromConfig 根据统一配置构造病毒扫描器,确保全平台上传链路使用同一装配口径。
@@ -52,14 +53,17 @@ func NewScannerFromConfig(cfg config.UploadConfig) (Scanner, error) {
 }
 
 // VerifyScan 在统一策略下执行病毒扫描,确保强制扫描场景不会静默放过风险文件。
-func VerifyScan(scanner Scanner, policy ScanPolicy, req ScanRequest) error {
+func VerifyScan(ctx context.Context, scanner Scanner, policy ScanPolicy, req ScanRequest) error {
 	if !policy.Required {
 		return nil
+	}
+	if ctx == nil {
+		return fmt.Errorf("上传扫描上下文不能为空")
 	}
 	if scanner == nil {
 		return fmt.Errorf("上传安全策略要求病毒扫描,但未配置扫描器")
 	}
-	result, err := scanner.Scan(req)
+	result, err := scanner.Scan(ctx, req)
 	if err != nil {
 		return fmt.Errorf("文件病毒扫描失败: %w", err)
 	}

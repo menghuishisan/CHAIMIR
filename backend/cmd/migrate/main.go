@@ -170,6 +170,10 @@ func seed(ctx context.Context, cfg *config.Config) error {
 		return err
 	}
 	authManager := auth.NewManager(cfg.Auth)
+	smsSender, err := identity.NewSMSSender(cfg.SMS)
+	if err != nil {
+		return err
+	}
 	identitySvc, err := identity.NewService(identity.ServiceDeps{
 		Store:          identity.NewStore(database),
 		Auth:           authManager,
@@ -179,7 +183,7 @@ func seed(ctx context.Context, cfg *config.Config) error {
 		IdentityConfig: cfg.Identity,
 		UploadConfig:   cfg.Upload,
 		DeployConfig:   cfg.Deploy,
-		SMSSender:      identity.NewSMSSender(cfg.SMS),
+		SMSSender:      smsSender,
 	})
 	if err != nil {
 		return err

@@ -28,6 +28,7 @@ func validatePublicURL(raw, label string, schemes map[string]struct{}) (string, 
 	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
 		return "", fmt.Errorf("外部%s端点 URL 格式非法", label)
 	}
+	parsed.Scheme = strings.ToLower(parsed.Scheme)
 	if _, ok := schemes[parsed.Scheme]; !ok {
 		return "", fmt.Errorf("外部%s端点协议不允许", label)
 	}
@@ -75,9 +76,12 @@ func isMetadataAddr(addr netip.Addr) bool {
 	return addr == metadata
 }
 
-// NewPublicHTTPClient 创建带公网出站限制的 HTTP client,用于用户/租户可配置的外部端点。
-func NewPublicHTTPClient(timeout time.Duration) *http.Client {
-	return &http.Client{Timeout: timeout, Transport: PublicHTTPTransport(nil)}
+// NewPublicHTTPClient 创建带公网出站限制和显式超时的 HTTP client,用于用户/租户可配置的外部端点。
+func NewPublicHTTPClient(timeout time.Duration) (*http.Client, error) {
+	if timeout <= 0 {
+		return nil, fmt.Errorf("公网 HTTP client 超时必须大于 0")
+	}
+	return &http.Client{Timeout: timeout, Transport: PublicHTTPTransport(nil)}, nil
 }
 
 // PublicHTTPTransport 返回带出站地址防护的 HTTP Transport,防止 DNS 解析后落到内网地址。
@@ -110,6 +114,7 @@ func PublicResolvedURL(ctx context.Context, raw, defaultPort string) (resolvedUR
 	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
 		return "", "", fmt.Errorf("外部端点 URL 格式非法")
 	}
+	parsed.Scheme = strings.ToLower(parsed.Scheme)
 	host := parsed.Hostname()
 	port := parsed.Port()
 	if port == "" {
@@ -132,6 +137,7 @@ func PrivateResolvedURL(ctx context.Context, raw, defaultPort string) (resolvedU
 	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
 		return "", "", fmt.Errorf("外部端点 URL 格式非法")
 	}
+	parsed.Scheme = strings.ToLower(parsed.Scheme)
 	if parsed.User != nil {
 		return "", "", fmt.Errorf("外部端点不允许携带凭据")
 	}
@@ -183,6 +189,7 @@ func validatePrivateCapableURL(raw, label string, schemes map[string]struct{}) (
 	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
 		return "", fmt.Errorf("外部%s端点 URL 格式非法", label)
 	}
+	parsed.Scheme = strings.ToLower(parsed.Scheme)
 	if _, ok := schemes[parsed.Scheme]; !ok {
 		return "", fmt.Errorf("外部%s端点协议不允许", label)
 	}

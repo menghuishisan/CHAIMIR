@@ -11,10 +11,10 @@ import (
 	"chaimir/internal/contracts"
 	"chaimir/internal/platform/auth"
 	"chaimir/internal/platform/httpx"
+	"chaimir/internal/platform/response"
 	"chaimir/internal/platform/tenant"
 	"chaimir/internal/platform/ws"
 	"chaimir/pkg/apperr"
-	"chaimir/pkg/response"
 
 	"github.com/gin-gonic/gin"
 )
@@ -401,7 +401,9 @@ func (a sandboxAPI) progress(c *gin.Context) {
 		if err := conn.BindSession(ws.SessionKey{TenantID: current.TenantID, AccountID: current.AccountID}); err != nil {
 			return apperr.ErrSandboxOwnershipInvalid.WithCause(err)
 		}
-		a.svc.wsHub.Subscribe(conn, topic)
+		if err := a.svc.wsHub.Subscribe(conn, topic); err != nil {
+			return apperr.ErrSandboxToolProxyUnavailable.WithCause(err)
+		}
 		return conn.SendJSON(initial)
 	}); err != nil {
 		response.Fail(c, apperr.ErrSandboxToolProxyUnavailable.WithCause(err))

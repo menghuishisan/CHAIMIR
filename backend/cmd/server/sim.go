@@ -3,7 +3,6 @@ package main
 
 import (
 	"fmt"
-	"time"
 
 	"chaimir/internal/contracts"
 	"chaimir/internal/modules/sim"
@@ -12,7 +11,6 @@ import (
 	"chaimir/internal/platform/config"
 	"chaimir/internal/platform/db"
 	"chaimir/internal/platform/storage"
-	"chaimir/internal/platform/upload"
 	"chaimir/internal/platform/ws"
 	"chaimir/pkg/snowflake"
 
@@ -46,21 +44,17 @@ func RegisterSimModule(deps SimModuleDeps) (*sim.Service, error) {
 	if deps.Storage == nil {
 		return nil, fmt.Errorf("sim module 缺少统一对象存储")
 	}
-	scanner, err := upload.NewScannerFromConfig(deps.Upload)
+	fileService, err := storage.NewServiceFromConfig(deps.AuthConfig, deps.MinIO, deps.Upload)
 	if err != nil {
 		return nil, err
 	}
 	store := sim.NewStore(deps.Database)
 	svc, err := sim.NewService(sim.ServiceDeps{
-		Store:   store,
-		IDs:     deps.IDs,
-		Upload:  deps.Upload,
-		Storage: deps.Storage,
-		FileService: storage.Service{
-			Scanner:          scanner,
-			SigningKey:       deps.AuthConfig.HMACKey,
-			DownloadGrantTTL: time.Duration(deps.MinIO.DownloadGrantTTLSeconds) * time.Second,
-		},
+		Store:           store,
+		IDs:             deps.IDs,
+		Upload:          deps.Upload,
+		Storage:         deps.Storage,
+		FileService:     fileService,
 		Audit:           deps.Audit,
 		WSHub:           deps.WSHub,
 		BackendAdapters: deps.BackendAdapters,

@@ -3,7 +3,6 @@ package crypto
 
 import (
 	"crypto/hmac"
-	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
@@ -23,8 +22,8 @@ const (
 
 // HashPassword 用 argon2id 生成密码哈希。
 func HashPassword(password string) (string, error) {
-	salt := make([]byte, argonSaltLen)
-	if _, err := rand.Read(salt); err != nil {
+	salt, err := RandomBytes(argonSaltLen)
+	if err != nil {
 		return "", fmt.Errorf("生成 salt 失败: %w", err)
 	}
 	hash := argon2.IDKey([]byte(password), salt, argonTime, argonMemory, argonThreads, argonKeyLen)

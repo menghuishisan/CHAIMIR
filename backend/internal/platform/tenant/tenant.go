@@ -23,5 +23,3 @@ func FromContext(ctx context.Context) (Identity, bool) {
 	id, ok := ctx.Value(ctxKey{}).(Identity)
 	return id, ok
 }
-
-// MustFromContext 读取租户身份;缺失时返回零值和 false 之外的显式 panic 并不适合服务端生产路径,因此不提供。
