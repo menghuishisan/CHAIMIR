@@ -77,7 +77,7 @@ func (s *Service) SubmitBattleEntry(ctx context.Context, contestID int64, req Ba
 	}); err != nil {
 		return BattleEntryDTO{}, err
 	}
-	if err := s.writeAudit(ctx, id.TenantID, id.AccountID, audit.ActorRoleStudent, "contest.battle.entry.submit", auditTargetBattleEntry, entry.ID, map[string]any{"contest_id": contestID, "problem_id": req.ProblemID}); err != nil {
+	if err := s.writeAudit(ctx, id.TenantID, id.AccountID, contracts.RoleNumStudent, "contest.battle.entry.submit", auditTargetBattleEntry, entry.ID, map[string]any{"contest_id": contestID, "problem_id": req.ProblemID}); err != nil {
 		return BattleEntryDTO{}, err
 	}
 	return battleEntryDTOFromModel(entry), nil

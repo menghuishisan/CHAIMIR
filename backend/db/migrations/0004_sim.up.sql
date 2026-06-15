@@ -97,7 +97,9 @@ CREATE INDEX IF NOT EXISTS idx_sim_share_session ON sim_share(tenant_id, session
 ALTER TABLE sim_session ENABLE ROW LEVEL SECURITY;
 ALTER TABLE sim_action_log ENABLE ROW LEVEL SECURITY;
 ALTER TABLE sim_checkpoint ENABLE ROW LEVEL SECURITY;
+ALTER TABLE sim_share ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY sim_session_tenant_rls ON sim_session USING (tenant_id = current_setting('app.tenant_id')::BIGINT);
 CREATE POLICY sim_action_log_tenant_rls ON sim_action_log USING (tenant_id = current_setting('app.tenant_id')::BIGINT);
 CREATE POLICY sim_checkpoint_tenant_rls ON sim_checkpoint USING (tenant_id = current_setting('app.tenant_id')::BIGINT);
+CREATE POLICY sim_share_tenant_rls ON sim_share USING (tenant_id = current_setting('app.tenant_id')::BIGINT);

@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"chaimir/internal/contracts"
 	"chaimir/internal/platform/audit"
 	"chaimir/internal/platform/tenant"
 	"chaimir/internal/platform/timex"
@@ -80,10 +81,10 @@ func (s *Service) LoginPlatform(ctx context.Context, req LoginPlatformRequest, d
 		return LoginResponse{}, apperr.ErrInternal.WithCause(err)
 	}
 	// 登录成功必须落审计,平台级审计 tenant_id 固定为 0。
-	if err := s.auditLogin(ctx, 0, admin.ID, audit.ActorRolePlatformAdmin); err != nil {
+	if err := s.auditLogin(ctx, 0, admin.ID, contracts.RoleNumPlatformAdmin); err != nil {
 		return LoginResponse{}, err
 	}
-	return LoginResponse{AccessToken: access, RefreshToken: refresh, Account: &AccountDTO{ID: admin.ID, Name: admin.Name, Roles: []int16{RolePlatformAdmin}, Status: admin.Status}}, nil
+	return LoginResponse{AccessToken: access, RefreshToken: refresh, Account: &AccountDTO{ID: admin.ID, Name: admin.Name, Roles: []int16{contracts.RoleNumPlatformAdmin}, Status: admin.Status}}, nil
 }
 
 // LoginPhone 用手机号密码登录,一号多校时返回租户选择列表。
@@ -253,7 +254,7 @@ func (s *Service) Logout(ctx context.Context, sessionID int64) error {
 		}); err != nil {
 			return apperr.ErrInternal.WithCause(err)
 		}
-		return s.auditLogout(ctx, 0, id.AccountID, audit.ActorRolePlatformAdmin)
+		return s.auditLogout(ctx, 0, id.AccountID, contracts.RoleNumPlatformAdmin)
 	}
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
 		return tx.RevokeAuthSession(ctx, id.TenantID, sessionID)
@@ -550,7 +551,7 @@ func (s *Service) handlePlatformRefreshReplay(ctx context.Context, old PlatformA
 	}); err != nil {
 		return err
 	}
-	entry, err := audit.BuildEntry(ctx, 0, old.PlatformAdminID, audit.ActorRolePlatformAdmin, "auth.refresh.replay", "identity.platform_auth_session", old.ID, map[string]any{"reason": reason})
+	entry, err := audit.BuildEntry(ctx, 0, old.PlatformAdminID, contracts.RoleNumPlatformAdmin, "auth.refresh.replay", "identity.platform_auth_session", old.ID, map[string]any{"reason": reason})
 	if err != nil {
 		return fmt.Errorf("构造平台 Refresh 重放审计失败: %w", err)
 	}

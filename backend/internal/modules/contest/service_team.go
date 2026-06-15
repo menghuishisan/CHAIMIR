@@ -5,7 +5,7 @@ import (
 	"context"
 	"strings"
 
-	"chaimir/internal/platform/audit"
+	"chaimir/internal/contracts"
 	"chaimir/internal/platform/timex"
 	"chaimir/pkg/apperr"
 	pkgcrypto "chaimir/pkg/crypto"
@@ -63,7 +63,7 @@ func (s *Service) Signup(ctx context.Context, contestID int64, req SignupRequest
 	}); err != nil {
 		return TeamDTO{}, err
 	}
-	if err := s.writeAudit(ctx, id.TenantID, id.AccountID, audit.ActorRoleStudent, "contest.signup", auditTargetContestTeam, team.ID, map[string]any{"contest_id": contestID}); err != nil {
+	if err := s.writeAudit(ctx, id.TenantID, id.AccountID, contracts.RoleNumStudent, "contest.signup", auditTargetContestTeam, team.ID, map[string]any{"contest_id": contestID}); err != nil {
 		return TeamDTO{}, err
 	}
 	return teamDTOFromModel(team), nil
@@ -111,7 +111,7 @@ func (s *Service) JoinTeam(ctx context.Context, contestID int64, req JoinTeamReq
 	}); err != nil {
 		return TeamDTO{}, err
 	}
-	return teamDTOFromModel(team), s.writeAudit(ctx, id.TenantID, id.AccountID, audit.ActorRoleStudent, "contest.team.join", auditTargetContestTeam, team.ID, map[string]any{"contest_id": contestID})
+	return teamDTOFromModel(team), s.writeAudit(ctx, id.TenantID, id.AccountID, contracts.RoleNumStudent, "contest.team.join", auditTargetContestTeam, team.ID, map[string]any{"contest_id": contestID})
 }
 
 // JoinTeamByID 通过队伍 ID 和邀请码加入团队赛队伍。
@@ -154,7 +154,7 @@ func (s *Service) JoinTeamByID(ctx context.Context, teamID int64, req JoinTeamRe
 	}); err != nil {
 		return TeamDTO{}, err
 	}
-	return teamDTOFromModel(team), s.writeAudit(ctx, id.TenantID, id.AccountID, audit.ActorRoleStudent, "contest.team.join", auditTargetContestTeam, team.ID, map[string]any{"contest_id": team.ContestID})
+	return teamDTOFromModel(team), s.writeAudit(ctx, id.TenantID, id.AccountID, contracts.RoleNumStudent, "contest.team.join", auditTargetContestTeam, team.ID, map[string]any{"contest_id": team.ContestID})
 }
 
 // GetTeam 读取当前账号可访问的队伍。
@@ -201,7 +201,7 @@ func (s *Service) LockTeam(ctx context.Context, teamID int64) (TeamDTO, error) {
 	}); err != nil {
 		return TeamDTO{}, err
 	}
-	return teamDTOFromModel(team), s.writeAudit(ctx, id.TenantID, id.AccountID, audit.ActorRoleStudent, "contest.team.lock", auditTargetContestTeam, team.ID, nil)
+	return teamDTOFromModel(team), s.writeAudit(ctx, id.TenantID, id.AccountID, contracts.RoleNumStudent, "contest.team.lock", auditTargetContestTeam, team.ID, nil)
 }
 
 // currentAccountTeam 读取当前账号在竞赛内的队伍并带成员列表。

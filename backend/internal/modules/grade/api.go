@@ -125,10 +125,10 @@ func (a gradeAPI) listReviews(c *gin.Context) {
 func (a gradeAPI) approveReview(c *gin.Context) { a.reviewDecision(c, a.svc.ApproveReview) }
 
 // rejectReview 绑定审核驳回操作。
-func (a gradeAPI) rejectReview(c *gin.Context)  { a.reviewDecision(c, a.svc.RejectReview) }
+func (a gradeAPI) rejectReview(c *gin.Context) { a.reviewDecision(c, a.svc.RejectReview) }
 
 // unlockReview 绑定审核解锁操作。
-func (a gradeAPI) unlockReview(c *gin.Context)  { a.reviewDecision(c, a.svc.UnlockReview) }
+func (a gradeAPI) unlockReview(c *gin.Context) { a.reviewDecision(c, a.svc.UnlockReview) }
 
 // reviewDecision 复用审核决策请求绑定和响应封装。
 func (a gradeAPI) reviewDecision(c *gin.Context, fn func(context.Context, int64, ReviewDecisionRequest) (ReviewDTO, error)) {

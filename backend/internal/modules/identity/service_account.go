@@ -216,7 +216,7 @@ func (s *Service) GrantSchoolAdmin(ctx context.Context, accountID int64) error {
 		if account.BaseIdentity != BaseIdentityTeacher {
 			return apperr.ErrIdentityTeacherAdminRequired
 		}
-		return tx.GrantRole(ctx, id.TenantID, accountID, RoleSchoolAdmin, s.ids.Generate())
+		return tx.GrantRole(ctx, id.TenantID, accountID, contracts.RoleNumSchoolAdmin, s.ids.Generate())
 	}); err != nil {
 		return apperr.AsAppError(err)
 	}
@@ -230,7 +230,7 @@ func (s *Service) RevokeSchoolAdmin(ctx context.Context, accountID int64) error 
 		return err
 	}
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
-		return tx.RevokeRole(ctx, id.TenantID, accountID, RoleSchoolAdmin)
+		return tx.RevokeRole(ctx, id.TenantID, accountID, contracts.RoleNumSchoolAdmin)
 	}); err != nil {
 		return apperr.ErrInternal.WithCause(err)
 	}
@@ -334,7 +334,7 @@ func requireTenantRole(ctx context.Context, s *Service, role string) (tenant.Ide
 
 // auditAccount 写账号管理类审计。
 func (s *Service) auditAccount(ctx context.Context, id tenant.Identity, action string, targetID int64) error {
-	entry, err := audit.BuildEntry(ctx, id.TenantID, id.AccountID, audit.ActorRoleSchoolAdmin, action, "identity.account", targetID, map[string]any{})
+	entry, err := audit.BuildEntry(ctx, id.TenantID, id.AccountID, contracts.RoleNumSchoolAdmin, action, "identity.account", targetID, map[string]any{})
 	if err != nil {
 		return err
 	}
@@ -343,7 +343,7 @@ func (s *Service) auditAccount(ctx context.Context, id tenant.Identity, action s
 
 // auditTenantOperation 写租户内敏感配置和组织操作审计。
 func (s *Service) auditTenantOperation(ctx context.Context, id tenant.Identity, action, targetType string, targetID int64, detail map[string]any) error {
-	entry, err := audit.BuildEntry(ctx, id.TenantID, id.AccountID, audit.ActorRoleSchoolAdmin, action, targetType, targetID, detail)
+	entry, err := audit.BuildEntry(ctx, id.TenantID, id.AccountID, contracts.RoleNumSchoolAdmin, action, targetType, targetID, detail)
 	if err != nil {
 		return err
 	}

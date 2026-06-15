@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	"chaimir/internal/contracts"
-	"chaimir/internal/platform/audit"
 	"chaimir/pkg/apperr"
 )
 
@@ -49,7 +48,7 @@ func (s *Service) CreateCheatRecord(ctx context.Context, contestID int64, req Ch
 	}); err != nil {
 		return CheatRecordDTO{}, err
 	}
-	if err := s.writeAudit(ctx, id.TenantID, id.AccountID, audit.ActorRoleTeacher, "contest.cheat.record", auditTargetCheatRecord, item.ID, map[string]any{"contest_id": contestID, "team_id": req.TeamID}); err != nil {
+	if err := s.writeAudit(ctx, id.TenantID, id.AccountID, contracts.RoleNumTeacher, "contest.cheat.record", auditTargetCheatRecord, item.ID, map[string]any{"contest_id": contestID, "team_id": req.TeamID}); err != nil {
 		return CheatRecordDTO{}, err
 	}
 	return cheatDTOFromModel(item), nil

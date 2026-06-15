@@ -6,7 +6,6 @@ import (
 	"fmt"
 
 	"chaimir/internal/contracts"
-	"chaimir/internal/platform/audit"
 	"chaimir/internal/platform/pagex"
 	"chaimir/internal/platform/response"
 	"chaimir/internal/platform/timex"
@@ -53,7 +52,7 @@ func (s *Service) CreateAssignment(ctx context.Context, courseID int64, req Assi
 	}); err != nil {
 		return AssignmentDetailDTO{}, mapAssignmentError(err)
 	}
-	if err := s.writeAudit(ctx, id.TenantID, id.AccountID, audit.ActorRoleTeacher, "teaching.assignment.create", auditTargetAssignment, assignment.ID, map[string]any{"course_id": courseID}); err != nil {
+	if err := s.writeAudit(ctx, id.TenantID, id.AccountID, contracts.RoleNumTeacher, "teaching.assignment.create", auditTargetAssignment, assignment.ID, map[string]any{"course_id": courseID}); err != nil {
 		return AssignmentDetailDTO{}, err
 	}
 	return assignmentDetailDTO(AssignmentDetail{Assignment: assignment, Items: assignmentItemFaces(items)}), nil
@@ -298,7 +297,7 @@ func (s *Service) SubmitAssignment(ctx context.Context, assignmentID int64, req 
 	}); err != nil {
 		return SubmissionDTO{}, err
 	}
-	if err := s.writeAudit(ctx, id.TenantID, id.AccountID, audit.ActorRoleStudent, "teaching.assignment.submit", auditTargetSubmission, sub.ID, map[string]any{"assignment_id": assignmentID}); err != nil {
+	if err := s.writeAudit(ctx, id.TenantID, id.AccountID, contracts.RoleNumStudent, "teaching.assignment.submit", auditTargetSubmission, sub.ID, map[string]any{"assignment_id": assignmentID}); err != nil {
 		return SubmissionDTO{}, err
 	}
 	return submissionDTO(sub), nil

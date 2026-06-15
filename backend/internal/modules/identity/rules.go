@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"chaimir/internal/contracts"
 	"chaimir/pkg/apperr"
 	"chaimir/pkg/privacy"
 )
@@ -114,9 +115,9 @@ func EnsureTenantCanLogin(tenant Tenant, now time.Time) error {
 func BaseRole(baseIdentity int16) (int16, error) {
 	switch baseIdentity {
 	case BaseIdentityTeacher:
-		return RoleTeacher, nil
+		return contracts.RoleNumTeacher, nil
 	case BaseIdentityStudent:
-		return RoleStudent, nil
+		return contracts.RoleNumStudent, nil
 	default:
 		return 0, apperr.ErrIdentityBaseRoleInvalid
 	}

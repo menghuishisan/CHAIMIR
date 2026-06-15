@@ -8,7 +8,6 @@ import (
 	"strings"
 
 	"chaimir/internal/contracts"
-	"chaimir/internal/platform/audit"
 	"chaimir/internal/platform/timex"
 	"chaimir/pkg/apperr"
 )
@@ -140,7 +139,7 @@ func (s *Service) SubmitSolve(ctx context.Context, contestID, problemID int64, r
 			return SubmissionDTO{}, err
 		}
 	}
-	if err := s.writeAudit(ctx, id.TenantID, id.AccountID, audit.ActorRoleStudent, "contest.submit", auditTargetSolveSubmission, item.ID, map[string]any{"contest_id": contestID, "problem_id": problemID}); err != nil {
+	if err := s.writeAudit(ctx, id.TenantID, id.AccountID, contracts.RoleNumStudent, "contest.submit", auditTargetSolveSubmission, item.ID, map[string]any{"contest_id": contestID, "problem_id": problemID}); err != nil {
 		return SubmissionDTO{}, err
 	}
 	return submissionDTOFromModel(item), nil

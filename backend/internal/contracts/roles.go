@@ -1,4 +1,4 @@
-// contracts 定义跨模块授权使用的稳定角色编码与匹配辅助。
+// contracts 定义跨模块身份角色的字符串编码、数据库枚举与双向映射。
 package contracts
 
 const (

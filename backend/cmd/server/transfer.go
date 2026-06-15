@@ -1,4 +1,4 @@
-﻿// server transfer 文件负责装配统一导入导出中心基础层路由和服务。
+// server transfer 文件负责装配统一导入导出中心基础层路由和服务。
 package main
 
 import (

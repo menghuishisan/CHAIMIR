@@ -37,22 +37,22 @@ type ContentJudgeSpec struct {
 
 // ContentSystemImportRequest 是系统或外部源固化内容时的内部请求。
 type ContentSystemImportRequest struct {
-	TenantID         int64
-	Code             string
-	Version          string
-	Type             int16
-	Title            string
-	CategoryID       int64
-	Difficulty       int16
-	Tags             []string
-	KnowledgePoints  []string
-	AuthorID         int64
-	AuthorType       int16
-	Visibility       int16
-	Body             map[string]any
-	SensitiveFields  []string
-	AutoPublish      bool
-	SystemImportNote map[string]any
+	TenantID         int64          `json:"tenant_id"`
+	Code             string         `json:"code"`
+	Version          string         `json:"version"`
+	Type             int16          `json:"type"`
+	Title            string         `json:"title"`
+	CategoryID       int64          `json:"category_id"`
+	Difficulty       int16          `json:"difficulty"`
+	Tags             []string       `json:"tags"`
+	KnowledgePoints  []string       `json:"knowledge_points"`
+	AuthorID         int64          `json:"author_id"`
+	AuthorType       int16          `json:"author_type"`
+	Visibility       int16          `json:"visibility"`
+	Body             map[string]any `json:"body"`
+	SensitiveFields  []string       `json:"sensitive_fields"`
+	AutoPublish      bool           `json:"auto_publish"`
+	SystemImportNote map[string]any `json:"system_import_note"`
 }
 
 // ContentReadService 是 M5 对 M2/M4/M6/M7/M8 暴露的内容读取与引用计数契约。

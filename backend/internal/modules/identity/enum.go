@@ -38,13 +38,6 @@ const (
 )
 
 const (
-	RolePlatformAdmin int16 = 1
-	RoleSchoolAdmin   int16 = 2
-	RoleTeacher       int16 = 3
-	RoleStudent       int16 = 4
-)
-
-const (
 	SessionStatusActive  int16 = 1
 	SessionStatusRevoked int16 = 2
 )

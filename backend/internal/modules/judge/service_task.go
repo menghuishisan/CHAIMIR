@@ -188,7 +188,7 @@ func (s *Service) ManualScore(ctx context.Context, tenantID, taskID, scorerID in
 	if err := s.publishPendingOutbox(ctx); err != nil {
 		return nil, err
 	}
-	if err := s.writeAudit(ctx, tenantID, scorerID, audit.ActorRoleTeacher, "judge.manual_score", "judge_task", taskID, map[string]any{"score": req.Score, "max_score": req.MaxScore}); err != nil {
+	if err := s.writeAudit(ctx, tenantID, scorerID, contracts.RoleNumTeacher, "judge.manual_score", "judge_task", taskID, map[string]any{"score": req.Score, "max_score": req.MaxScore}); err != nil {
 		return nil, err
 	}
 	return taskInfoToMap(info), nil

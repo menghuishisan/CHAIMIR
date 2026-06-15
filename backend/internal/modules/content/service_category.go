@@ -4,7 +4,7 @@ package content
 import (
 	"context"
 
-	"chaimir/internal/platform/audit"
+	"chaimir/internal/contracts"
 	"chaimir/pkg/apperr"
 )
 
@@ -53,7 +53,7 @@ func (s *Service) DeleteCategory(ctx context.Context, categoryID int64) error {
 	}); err != nil {
 		return apperr.ErrContentCategoryInvalid.WithCause(err)
 	}
-	return s.writeAudit(ctx, id.TenantID, id.AccountID, audit.ActorRoleTeacher, "content.category.delete", contentAuditTargetCategory, deleted.ID, map[string]any{"name": deleted.Name})
+	return s.writeAudit(ctx, id.TenantID, id.AccountID, contracts.RoleNumTeacher, "content.category.delete", contentAuditTargetCategory, deleted.ID, map[string]any{"name": deleted.Name})
 }
 
 // saveCategory 创建或更新分类。
@@ -86,7 +86,7 @@ func (s *Service) saveCategory(ctx context.Context, categoryID int64, req Catego
 	if create {
 		action = "content.category.create"
 	}
-	if err := s.writeAudit(ctx, id.TenantID, id.AccountID, audit.ActorRoleTeacher, action, contentAuditTargetCategory, saved.ID, map[string]any{"name": saved.Name}); err != nil {
+	if err := s.writeAudit(ctx, id.TenantID, id.AccountID, contracts.RoleNumTeacher, action, contentAuditTargetCategory, saved.ID, map[string]any{"name": saved.Name}); err != nil {
 		return CategoryDTO{}, err
 	}
 	return categoryDTO(saved), nil

@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"chaimir/internal/contracts"
-	"chaimir/internal/platform/audit"
 	"chaimir/internal/platform/pagex"
 	"chaimir/internal/platform/response"
 	"chaimir/internal/platform/storage"
@@ -530,7 +529,7 @@ func (s *Service) OverrideGrade(ctx context.Context, courseID, studentID int64, 
 	}); err != nil {
 		return GradeDTO{}, mapGradeError(err)
 	}
-	if err := s.writeAudit(ctx, id.TenantID, id.AccountID, audit.ActorRoleTeacher, "teaching.grade.override", auditTargetGrade, grade.ID, map[string]any{"course_id": courseID, "student_id": studentID, "total": req.Total}); err != nil {
+	if err := s.writeAudit(ctx, id.TenantID, id.AccountID, contracts.RoleNumTeacher, "teaching.grade.override", auditTargetGrade, grade.ID, map[string]any{"course_id": courseID, "student_id": studentID, "total": req.Total}); err != nil {
 		return GradeDTO{}, err
 	}
 	s.drainTeachingGradeEventOutboxBestEffort(ctx)

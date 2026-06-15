@@ -291,7 +291,7 @@ func (s *Service) ApproveReview(ctx context.Context, reviewID int64, req ReviewD
 	if err := s.recomputeCourse(ctx, id.TenantID, out.CourseID, out.SemesterID); err != nil {
 		return ReviewDTO{}, err
 	}
-	if err := s.writeAudit(ctx, id.TenantID, id.AccountID, audit.ActorRoleSchoolAdmin, "grade.review.approve", auditTargetGradeReview, out.ID, map[string]any{"course_id": out.CourseID, "semester_id": out.SemesterID}); err != nil {
+	if err := s.writeAudit(ctx, id.TenantID, id.AccountID, contracts.RoleNumSchoolAdmin, "grade.review.approve", auditTargetGradeReview, out.ID, map[string]any{"course_id": out.CourseID, "semester_id": out.SemesterID}); err != nil {
 		return ReviewDTO{}, err
 	}
 	return out, nil
@@ -315,7 +315,7 @@ func (s *Service) RejectReview(ctx context.Context, reviewID int64, req ReviewDe
 	if _, err := s.teaching.GetCourse(ctx, id.TenantID, out.CourseID); err != nil {
 		return ReviewDTO{}, apperr.ErrGradeReviewInvalid.WithCause(err)
 	}
-	if err := s.writeAudit(ctx, id.TenantID, id.AccountID, audit.ActorRoleSchoolAdmin, "grade.review.reject", auditTargetGradeReview, out.ID, map[string]any{"course_id": out.CourseID}); err != nil {
+	if err := s.writeAudit(ctx, id.TenantID, id.AccountID, contracts.RoleNumSchoolAdmin, "grade.review.reject", auditTargetGradeReview, out.ID, map[string]any{"course_id": out.CourseID}); err != nil {
 		return ReviewDTO{}, err
 	}
 	return out, nil
@@ -343,7 +343,7 @@ func (s *Service) UnlockReview(ctx context.Context, reviewID int64, req ReviewDe
 		return ReviewDTO{}, apperr.ErrGradeReviewInvalid.WithCause(err)
 	}
 	s.drainLockOutboxBestEffort(ctx)
-	if err := s.writeAudit(ctx, id.TenantID, id.AccountID, audit.ActorRoleSchoolAdmin, "grade.review.unlock", auditTargetGradeReview, out.ID, map[string]any{"course_id": out.CourseID}); err != nil {
+	if err := s.writeAudit(ctx, id.TenantID, id.AccountID, contracts.RoleNumSchoolAdmin, "grade.review.unlock", auditTargetGradeReview, out.ID, map[string]any{"course_id": out.CourseID}); err != nil {
 		return ReviewDTO{}, err
 	}
 	return out, nil
@@ -478,7 +478,7 @@ func (s *Service) CreateAppeal(ctx context.Context, req AppealRequest) (AppealDT
 	if err != nil {
 		return AppealDTO{}, mapGradeAppealErr(err)
 	}
-	if err := s.writeAudit(ctx, id.TenantID, id.AccountID, audit.ActorRoleStudent, "grade.appeal.create", auditTargetAppeal, out.ID, map[string]any{"course_id": req.CourseID}); err != nil {
+	if err := s.writeAudit(ctx, id.TenantID, id.AccountID, contracts.RoleNumStudent, "grade.appeal.create", auditTargetAppeal, out.ID, map[string]any{"course_id": req.CourseID}); err != nil {
 		return AppealDTO{}, err
 	}
 	return out, nil
@@ -1063,17 +1063,17 @@ func (s *Service) gradeActorRole(ctx context.Context, accountID int64) (int16, e
 	if has, err := s.roles.HasRole(ctx, accountID, contracts.RoleSchoolAdmin); err != nil {
 		return 0, apperr.ErrGradeForbidden.WithCause(err)
 	} else if has {
-		return audit.ActorRoleSchoolAdmin, nil
+		return contracts.RoleNumSchoolAdmin, nil
 	}
 	if has, err := s.roles.HasRole(ctx, accountID, contracts.RoleTeacher); err != nil {
 		return 0, apperr.ErrGradeForbidden.WithCause(err)
 	} else if has {
-		return audit.ActorRoleTeacher, nil
+		return contracts.RoleNumTeacher, nil
 	}
 	if has, err := s.roles.HasRole(ctx, accountID, contracts.RoleStudent); err != nil {
 		return 0, apperr.ErrGradeForbidden.WithCause(err)
 	} else if has {
-		return audit.ActorRoleStudent, nil
+		return contracts.RoleNumStudent, nil
 	}
 	return 0, apperr.ErrGradeForbidden
 }
@@ -1081,9 +1081,9 @@ func (s *Service) gradeActorRole(ctx context.Context, accountID int64) (int16, e
 // transcriptActorRole 返回成绩单审计角色,管理员代生成和学生本人生成分开记录。
 func (s *Service) transcriptActorRole(ctx context.Context, actorID, studentID int64) int16 {
 	if actorID == studentID {
-		return audit.ActorRoleStudent
+		return contracts.RoleNumStudent
 	}
-	return audit.ActorRoleSchoolAdmin
+	return contracts.RoleNumSchoolAdmin
 }
 
 // validateReviewCourse 校验审核提交的课程存在、学期匹配且教师只能提交本人课程。
@@ -1152,7 +1152,7 @@ func (s *Service) ensureAppealHandlerCanAccessCourse(ctx context.Context, id ten
 	if err != nil {
 		return apperr.ErrGradeAppealInvalid.WithCause(err)
 	}
-	if actorRole == audit.ActorRoleTeacher && course.TeacherID != id.AccountID {
+	if actorRole == contracts.RoleNumTeacher && course.TeacherID != id.AccountID {
 		return apperr.ErrGradeForbidden
 	}
 	return nil

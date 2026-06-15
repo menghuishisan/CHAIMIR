@@ -6,7 +6,6 @@ import (
 	"fmt"
 
 	"chaimir/internal/contracts"
-	"chaimir/internal/platform/audit"
 	"chaimir/pkg/apperr"
 )
 
@@ -50,7 +49,7 @@ func (s *Service) CreateExperiment(ctx context.Context, req ExperimentRequest) (
 	}); err != nil {
 		return ExperimentDTO{}, err
 	}
-	if err := s.writeAudit(ctx, id.TenantID, id.AccountID, audit.ActorRoleTeacher, "experiment.create", auditTargetExperiment, item.ID, map[string]any{"course_id": item.CourseID}); err != nil {
+	if err := s.writeAudit(ctx, id.TenantID, id.AccountID, contracts.RoleNumTeacher, "experiment.create", auditTargetExperiment, item.ID, map[string]any{"course_id": item.CourseID}); err != nil {
 		return ExperimentDTO{}, err
 	}
 	return experimentDTOFromModel(item), nil
@@ -90,7 +89,7 @@ func (s *Service) UpdateExperiment(ctx context.Context, experimentID int64, req 
 	}); err != nil {
 		return ExperimentDTO{}, err
 	}
-	return experimentDTOFromModel(item), s.writeAudit(ctx, id.TenantID, id.AccountID, audit.ActorRoleTeacher, "experiment.update", auditTargetExperiment, item.ID, map[string]any{"wizard_step": item.WizardStep})
+	return experimentDTOFromModel(item), s.writeAudit(ctx, id.TenantID, id.AccountID, contracts.RoleNumTeacher, "experiment.update", auditTargetExperiment, item.ID, map[string]any{"wizard_step": item.WizardStep})
 }
 
 // ValidateExperiment 执行发布前校验并返回所有阻断和提醒问题。
@@ -150,7 +149,7 @@ func (s *Service) PublishExperiment(ctx context.Context, experimentID int64) (Ex
 	}); err != nil {
 		return ExperimentDTO{}, err
 	}
-	if err := s.writeAudit(ctx, id.TenantID, id.AccountID, audit.ActorRoleTeacher, "experiment.publish", auditTargetExperiment, item.ID, map[string]any{"course_id": item.CourseID}); err != nil {
+	if err := s.writeAudit(ctx, id.TenantID, id.AccountID, contracts.RoleNumTeacher, "experiment.publish", auditTargetExperiment, item.ID, map[string]any{"course_id": item.CourseID}); err != nil {
 		return ExperimentDTO{}, err
 	}
 	return experimentDTOFromModel(item), nil
@@ -179,7 +178,7 @@ func (s *Service) UnpublishExperiment(ctx context.Context, experimentID int64) (
 	}); err != nil {
 		return ExperimentDTO{}, err
 	}
-	return experimentDTOFromModel(item), s.writeAudit(ctx, id.TenantID, id.AccountID, audit.ActorRoleTeacher, "experiment.unpublish", auditTargetExperiment, item.ID, nil)
+	return experimentDTOFromModel(item), s.writeAudit(ctx, id.TenantID, id.AccountID, contracts.RoleNumTeacher, "experiment.unpublish", auditTargetExperiment, item.ID, nil)
 }
 
 // validateExperimentComponents 校验模板、检查点内容和分值结构。

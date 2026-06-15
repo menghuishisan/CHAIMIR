@@ -19,6 +19,7 @@ import (
 // Store 定义 service 所需的 sim 持久化能力,不暴露 sqlc 行类型。
 type Store interface {
 	PlatformTx(ctx context.Context, fn func(context.Context, TxStore) error) error
+	PrivilegedTx(ctx context.Context, fn func(context.Context, TxStore) error) error
 	TenantTx(ctx context.Context, tenantID int64, fn func(context.Context, TxStore) error) error
 }
 
@@ -69,7 +70,7 @@ func NewStore(database *db.DB) Store {
 	return &store{database: database}
 }
 
-// PlatformTx 在应用连接中访问仿真包、审核和分享全局索引表。
+// PlatformTx 在应用连接中访问仿真包和审核表。
 func (s *store) PlatformTx(ctx context.Context, fn func(context.Context, TxStore) error) error {
 	if s == nil || s.database == nil {
 		return fmt.Errorf("sim store 未初始化")
@@ -79,7 +80,17 @@ func (s *store) PlatformTx(ctx context.Context, fn func(context.Context, TxStore
 	})
 }
 
-// TenantTx 在注入 RLS 租户变量后访问租户内会话、操作和检查点表。
+// PrivilegedTx 仅用于公开分享码预认证定位这类无租户上下文的 M4 自有表读取。
+func (s *store) PrivilegedTx(ctx context.Context, fn func(context.Context, TxStore) error) error {
+	if s == nil || s.database == nil {
+		return fmt.Errorf("sim store 未初始化")
+	}
+	return s.database.WithPrivilegedTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		return fn(ctx, &txStore{q: sqlcgen.New(tx)})
+	})
+}
+
+// TenantTx 在注入 RLS 租户变量后访问租户内会话、操作、检查点和分享表。
 func (s *store) TenantTx(ctx context.Context, tenantID int64, fn func(context.Context, TxStore) error) error {
 	if s == nil || s.database == nil {
 		return fmt.Errorf("sim store 未初始化")
@@ -363,7 +374,7 @@ func (s *txStore) CreateShare(ctx context.Context, share Share) (Share, error) {
 	return shareFromRow(row), nil
 }
 
-// GetShareByCode 查询全局分享码索引。
+// GetShareByCode 按公开分享码查询分享索引,仅允许在特权预解析或对应租户事务中调用。
 func (s *txStore) GetShareByCode(ctx context.Context, code string) (Share, error) {
 	row, err := s.q.GetSimShareByCode(ctx, code)
 	if err != nil {

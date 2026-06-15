@@ -288,7 +288,7 @@ func (s *Service) CommitAccountImport(ctx context.Context, req ImportCommitReque
 			return err
 		}
 		batch = b
-		entry, err := audit.BuildEntry(ctx, id.TenantID, id.AccountID, audit.ActorRoleSchoolAdmin, "account.import", "identity.import_batch", b.ID, map[string]any{"success": success, "failed": failed})
+		entry, err := audit.BuildEntry(ctx, id.TenantID, id.AccountID, contracts.RoleNumSchoolAdmin, "account.import", "identity.import_batch", b.ID, map[string]any{"success": success, "failed": failed})
 		if err != nil {
 			return err
 		}

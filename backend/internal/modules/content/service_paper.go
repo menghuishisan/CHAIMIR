@@ -5,7 +5,6 @@ import (
 	"context"
 
 	"chaimir/internal/contracts"
-	"chaimir/internal/platform/audit"
 	"chaimir/internal/platform/pagex"
 	"chaimir/pkg/apperr"
 )
@@ -59,7 +58,7 @@ func (s *Service) CreatePaper(ctx context.Context, req CreatePaperRequest) (Pape
 	}); err != nil {
 		return PaperDetailDTO{}, err
 	}
-	if err := s.writeAudit(ctx, id.TenantID, id.AccountID, audit.ActorRoleTeacher, "content.paper.create", contentAuditTargetPaper, detail.Paper.ID, map[string]any{"name": detail.Paper.Name, "gen_mode": detail.Paper.GenMode}); err != nil {
+	if err := s.writeAudit(ctx, id.TenantID, id.AccountID, contracts.RoleNumTeacher, "content.paper.create", contentAuditTargetPaper, detail.Paper.ID, map[string]any{"name": detail.Paper.Name, "gen_mode": detail.Paper.GenMode}); err != nil {
 		return PaperDetailDTO{}, err
 	}
 	return paperDetailDTO(detail), nil
@@ -114,7 +113,7 @@ func (s *Service) RegeneratePaper(ctx context.Context, paperID int64) (PaperDeta
 	}); err != nil {
 		return PaperDetailDTO{}, err
 	}
-	if err := s.writeAudit(ctx, id.TenantID, id.AccountID, audit.ActorRoleTeacher, "content.paper.regenerate", contentAuditTargetPaper, paperID, map[string]any{}); err != nil {
+	if err := s.writeAudit(ctx, id.TenantID, id.AccountID, contracts.RoleNumTeacher, "content.paper.regenerate", contentAuditTargetPaper, paperID, map[string]any{}); err != nil {
 		return PaperDetailDTO{}, err
 	}
 	return paperDetailDTO(detail), nil

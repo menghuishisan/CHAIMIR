@@ -45,18 +45,18 @@ const (
 
 // SandboxCreateRequest 是业务模块创建沙箱时提交的最小编排请求。
 type SandboxCreateRequest struct {
-	TenantID                 int64
-	RuntimeCode              string
-	RuntimeImageVersion      string
-	ToolCodes                []string
-	InitCodeRef              string
-	InitScriptRef            string
-	OwnerAccountID           int64
-	SourceRef                string
-	KeepAlive                bool
-	SnapshotEnabled          bool
-	KeepAliveMinutes         int32
-	SnapshotRetentionMinutes int32
+	TenantID                 int64    `json:"tenant_id"`
+	RuntimeCode              string   `json:"runtime_code"`
+	RuntimeImageVersion      string   `json:"runtime_image_version"`
+	ToolCodes                []string `json:"tool_codes"`
+	InitCodeRef              string   `json:"init_code_ref"`
+	InitScriptRef            string   `json:"init_script_ref"`
+	OwnerAccountID           int64    `json:"owner_account_id"`
+	SourceRef                string   `json:"source_ref"`
+	KeepAlive                bool     `json:"keep_alive"`
+	SnapshotEnabled          bool     `json:"snapshot_enabled"`
+	KeepAliveMinutes         int32    `json:"keep_alive_minutes"`
+	SnapshotRetentionMinutes int32    `json:"snapshot_retention_minutes"`
 }
 
 // SandboxToolAccess 是沙箱内某个工具的可访问接入信息。
@@ -95,38 +95,38 @@ type SandboxInfo struct {
 
 // SandboxFileWriteRequest 是内部服务写入沙箱工作区文件的请求。
 type SandboxFileWriteRequest struct {
-	TenantID      int64
-	SandboxID     int64
-	SourceRef     string
-	RelativePath  string
-	ContentBase64 string
+	TenantID      int64  `json:"tenant_id"`
+	SandboxID     int64  `json:"sandbox_id"`
+	SourceRef     string `json:"source_ref"`
+	RelativePath  string `json:"relative_path"`
+	ContentBase64 string `json:"content_base64"`
 }
 
 // SandboxPrivateArchiveInjectRequest 是内部判题服务注入隐藏套件归档的请求。
 type SandboxPrivateArchiveInjectRequest struct {
-	TenantID      int64
-	SandboxID     int64
-	SourceRef     string
-	Domain        string
-	ArchiveName   string
-	ContentBase64 string
+	TenantID      int64  `json:"tenant_id"`
+	SandboxID     int64  `json:"sandbox_id"`
+	SourceRef     string `json:"source_ref"`
+	Domain        string `json:"domain"`
+	ArchiveName   string `json:"archive_name"`
+	ContentBase64 string `json:"content_base64"`
 }
 
 // SandboxSaveRequest 是内部服务请求立即保存工作区的来源绑定请求。
 type SandboxSaveRequest struct {
-	TenantID  int64
-	SandboxID int64
-	SourceRef string
+	TenantID  int64  `json:"tenant_id"`
+	SandboxID int64  `json:"sandbox_id"`
+	SourceRef string `json:"source_ref"`
 }
 
 // SandboxExecRequest 是受控执行沙箱命令的内部请求。
 type SandboxExecRequest struct {
-	TenantID   int64
-	SandboxID  int64
-	SourceRef  string
-	Command    []string
-	Stdin      []byte
-	TimeoutSec int32
+	TenantID   int64    `json:"tenant_id"`
+	SandboxID  int64    `json:"sandbox_id"`
+	SourceRef  string   `json:"source_ref"`
+	Command    []string `json:"command"`
+	Stdin      []byte   `json:"stdin"`
+	TimeoutSec int32    `json:"timeout_sec"`
 }
 
 // SandboxExecResult 是沙箱命令执行结果,仅保留调用方判定所需输出。
@@ -137,47 +137,47 @@ type SandboxExecResult struct {
 
 // SandboxRecycleRequest 是按来源级联回收沙箱的内部请求。
 type SandboxRecycleRequest struct {
-	TenantID  int64
-	SourceRef string
-	Reason    string
+	TenantID  int64  `json:"tenant_id"`
+	SourceRef string `json:"source_ref"`
+	Reason    string `json:"reason"`
 }
 
 // SandboxControlRequest 是暂停、恢复和销毁单个沙箱的内部控制请求。
 type SandboxControlRequest struct {
-	TenantID  int64
-	SandboxID int64
-	SourceRef string
+	TenantID  int64  `json:"tenant_id"`
+	SandboxID int64  `json:"sandbox_id"`
+	SourceRef string `json:"source_ref"`
 }
 
 // SandboxChainDeployRequest 是统一链部署能力的内部请求。
 type SandboxChainDeployRequest struct {
-	TenantID  int64
-	SandboxID int64
-	SourceRef string
-	Payload   map[string]any
+	TenantID  int64          `json:"tenant_id"`
+	SandboxID int64          `json:"sandbox_id"`
+	SourceRef string         `json:"source_ref"`
+	Payload   map[string]any `json:"payload"`
 }
 
 // SandboxChainTxRequest 是统一链交易能力的内部请求。
 type SandboxChainTxRequest struct {
-	TenantID  int64
-	SandboxID int64
-	SourceRef string
-	Payload   map[string]any
+	TenantID  int64          `json:"tenant_id"`
+	SandboxID int64          `json:"sandbox_id"`
+	SourceRef string         `json:"source_ref"`
+	Payload   map[string]any `json:"payload"`
 }
 
 // SandboxChainQueryRequest 是统一链查询能力的内部请求。
 type SandboxChainQueryRequest struct {
-	TenantID  int64
-	SandboxID int64
-	SourceRef string
-	Target    string
+	TenantID  int64  `json:"tenant_id"`
+	SandboxID int64  `json:"sandbox_id"`
+	SourceRef string `json:"source_ref"`
+	Target    string `json:"target"`
 }
 
 // SandboxChainResetRequest 是统一链重置能力的内部请求。
 type SandboxChainResetRequest struct {
-	TenantID  int64
-	SandboxID int64
-	SourceRef string
+	TenantID  int64  `json:"tenant_id"`
+	SandboxID int64  `json:"sandbox_id"`
+	SourceRef string `json:"source_ref"`
 }
 
 // SandboxQuotaStats 是 M2 提供给 M9 学校看板的资源统计摘要。

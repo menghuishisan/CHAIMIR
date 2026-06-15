@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	"chaimir/internal/contracts"
-	"chaimir/internal/platform/audit"
 	"chaimir/internal/platform/pagex"
 	"chaimir/pkg/apperr"
 )
@@ -57,7 +56,7 @@ func (s *Service) CreateItem(ctx context.Context, req CreateItemRequest) (ItemSn
 	}); err != nil {
 		return ItemSnapshotDTO{}, apperr.ErrContentVersionConflict.WithCause(err)
 	}
-	if err := s.writeAudit(ctx, id.TenantID, id.AccountID, audit.ActorRoleTeacher, "content.create", contentAuditTargetItem, created.ID, map[string]any{"code": created.Code, "version": created.Version}); err != nil {
+	if err := s.writeAudit(ctx, id.TenantID, id.AccountID, contracts.RoleNumTeacher, "content.create", contentAuditTargetItem, created.ID, map[string]any{"code": created.Code, "version": created.Version}); err != nil {
 		return ItemSnapshotDTO{}, err
 	}
 	return itemSnapshotDTO(created, true), nil
@@ -134,7 +133,7 @@ func (s *Service) UpdateDraftItem(ctx context.Context, itemID int64, req UpdateI
 	}); err != nil {
 		return ItemSnapshotDTO{}, err
 	}
-	if err := s.writeAudit(ctx, id.TenantID, id.AccountID, audit.ActorRoleTeacher, "content.update", contentAuditTargetItem, updated.ID, map[string]any{"code": updated.Code, "version": updated.Version}); err != nil {
+	if err := s.writeAudit(ctx, id.TenantID, id.AccountID, contracts.RoleNumTeacher, "content.update", contentAuditTargetItem, updated.ID, map[string]any{"code": updated.Code, "version": updated.Version}); err != nil {
 		return ItemSnapshotDTO{}, err
 	}
 	return itemSnapshotDTO(updated, true), nil
@@ -189,7 +188,7 @@ func (s *Service) itemStatusTransition(ctx context.Context, itemID int64, action
 	}); err != nil {
 		return ItemDTO{}, err
 	}
-	if err := s.writeAudit(ctx, id.TenantID, id.AccountID, audit.ActorRoleTeacher, action, contentAuditTargetItem, out.ID, map[string]any{"code": out.Code, "version": out.Version}); err != nil {
+	if err := s.writeAudit(ctx, id.TenantID, id.AccountID, contracts.RoleNumTeacher, action, contentAuditTargetItem, out.ID, map[string]any{"code": out.Code, "version": out.Version}); err != nil {
 		return ItemDTO{}, err
 	}
 	return itemDTO(out), nil
@@ -252,7 +251,7 @@ func (s *Service) CreateNewVersion(ctx context.Context, code string, req NewVers
 	}); err != nil {
 		return ItemSnapshotDTO{}, apperr.ErrContentVersionConflict.WithCause(err)
 	}
-	if err := s.writeAudit(ctx, id.TenantID, id.AccountID, audit.ActorRoleTeacher, "content.new_version", contentAuditTargetItem, created.ID, map[string]any{"code": created.Code, "version": created.Version, "source_version": req.SourceVersion}); err != nil {
+	if err := s.writeAudit(ctx, id.TenantID, id.AccountID, contracts.RoleNumTeacher, "content.new_version", contentAuditTargetItem, created.ID, map[string]any{"code": created.Code, "version": created.Version, "source_version": req.SourceVersion}); err != nil {
 		return ItemSnapshotDTO{}, err
 	}
 	return itemSnapshotDTO(created, true), nil
@@ -299,7 +298,7 @@ func (s *Service) CloneItem(ctx context.Context, code, version string, req Clone
 	}); err != nil {
 		return ItemSnapshotDTO{}, apperr.ErrContentCloneInvalid.WithCause(err)
 	}
-	if err := s.writeAudit(ctx, id.TenantID, id.AccountID, audit.ActorRoleTeacher, "content.clone", contentAuditTargetItem, created.ID, map[string]any{"source_code": code, "source_version": version, "code": created.Code}); err != nil {
+	if err := s.writeAudit(ctx, id.TenantID, id.AccountID, contracts.RoleNumTeacher, "content.clone", contentAuditTargetItem, created.ID, map[string]any{"source_code": code, "source_version": version, "code": created.Code}); err != nil {
 		return ItemSnapshotDTO{}, err
 	}
 	return itemSnapshotDTO(created, true), nil
@@ -335,7 +334,7 @@ func (s *Service) setItemVisibility(ctx context.Context, itemID int64, visibilit
 	}); err != nil {
 		return ItemDTO{}, err
 	}
-	if err := s.writeAudit(ctx, id.TenantID, id.AccountID, audit.ActorRoleTeacher, action, contentAuditTargetItem, out.ID, map[string]any{"code": out.Code, "version": out.Version}); err != nil {
+	if err := s.writeAudit(ctx, id.TenantID, id.AccountID, contracts.RoleNumTeacher, action, contentAuditTargetItem, out.ID, map[string]any{"code": out.Code, "version": out.Version}); err != nil {
 		return ItemDTO{}, err
 	}
 	return itemDTO(out), nil

@@ -78,17 +78,17 @@ type SolveSubmission struct {
 
 // BattleEntry 是对抗赛参战物。
 type BattleEntry struct {
-	ID          int64
-	TenantID    int64
-	ContestID   int64
-	ProblemID   int64
-	TeamID      int64
-	Role        int16
-	ArtifactRef string
+	ID           int64
+	TenantID     int64
+	ContestID    int64
+	ProblemID    int64
+	TeamID       int64
+	Role         int16
+	ArtifactRef  string
 	ArtifactHash string
-	VersionNo   int32
-	IsActive    bool
-	SubmittedAt time.Time
+	VersionNo    int32
+	IsActive     bool
+	SubmittedAt  time.Time
 }
 
 // BattleMatch 是异步撮合产生的一场对局。

@@ -5,18 +5,18 @@ import "context"
 
 // NotifySendRequest 是模块发送站内信时提交给 M10 的统一请求。
 type NotifySendRequest struct {
-	TenantID  int64
-	Type      string
-	Receivers []int64
-	Params    map[string]string
-	Link      string
+	TenantID  int64             `json:"tenant_id"`
+	Type      string            `json:"type"`
+	Receivers []int64           `json:"receivers"`
+	Params    map[string]string `json:"params"`
+	Link      string            `json:"link"`
 }
 
 // NotifyPushRequest 是模块通过 M10 向业务主题推送实时消息的统一请求。
 type NotifyPushRequest struct {
-	TenantID int64
-	Topic    string
-	Payload  map[string]any
+	TenantID int64          `json:"tenant_id"`
+	Topic    string         `json:"topic"`
+	Payload  map[string]any `json:"payload"`
 }
 
 // NotifyService 是 M10 对全平台开放的通知与实时推送契约。

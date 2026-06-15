@@ -13,14 +13,6 @@ import (
 )
 
 const (
-	// ActorRolePlatformAdmin 表示平台管理员。
-	ActorRolePlatformAdmin = contracts.RoleNumPlatformAdmin
-	// ActorRoleSchoolAdmin 表示学校管理员。
-	ActorRoleSchoolAdmin = contracts.RoleNumSchoolAdmin
-	// ActorRoleTeacher 表示教师。
-	ActorRoleTeacher = contracts.RoleNumTeacher
-	// ActorRoleStudent 表示学生。
-	ActorRoleStudent = contracts.RoleNumStudent
 	// ActorRoleSystem 表示已通过服务签名的内部系统任务。
 	ActorRoleSystem int16 = 5
 )
@@ -41,7 +33,7 @@ func ResolveActor(ctx context.Context, identity IdentityReader) (int64, int16, e
 		return 0, ActorRoleSystem, nil
 	}
 	if id.IsPlatform {
-		return id.AccountID, ActorRolePlatformAdmin, nil
+		return id.AccountID, contracts.RoleNumPlatformAdmin, nil
 	}
 	if identity == nil {
 		return 0, 0, apperr.ErrAuditActorResolveFailed
@@ -57,18 +49,18 @@ func ResolveActor(ctx context.Context, identity IdentityReader) (int64, int16, e
 func ActorRoleFromAccount(account contracts.AccountInfo) int16 {
 	for _, code := range account.Roles {
 		if code == contracts.RoleSchoolAdmin {
-			return ActorRoleSchoolAdmin
+			return contracts.RoleNumSchoolAdmin
 		}
 	}
 	for _, code := range account.Roles {
 		if code == contracts.RoleTeacher {
-			return ActorRoleTeacher
+			return contracts.RoleNumTeacher
 		}
 	}
 	if account.BaseIdentity == 2 {
-		return ActorRoleTeacher
+		return contracts.RoleNumTeacher
 	}
-	return ActorRoleStudent
+	return contracts.RoleNumStudent
 }
 
 // BuildEntry 构造统一审计条目,补齐 detail、ip 和 trace_id 等横切字段。

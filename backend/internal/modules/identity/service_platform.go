@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"chaimir/internal/contracts"
 	"chaimir/internal/platform/audit"
 	"chaimir/internal/platform/config"
 	"chaimir/internal/platform/tenant"
@@ -289,8 +290,8 @@ func (s *Service) BootstrapSchoolTenant(ctx context.Context, cfg config.Bootstra
 			MustChangePwd: true,
 			ActivatedAt:   ptrTime(timex.Now()),
 			Roles: []RoleCreateInput{
-				{ID: s.ids.Generate(), Role: RoleTeacher},
-				{ID: s.ids.Generate(), Role: RoleSchoolAdmin},
+				{ID: s.ids.Generate(), Role: contracts.RoleNumTeacher},
+				{ID: s.ids.Generate(), Role: contracts.RoleNumSchoolAdmin},
 			},
 		}); err != nil {
 			return err
@@ -371,8 +372,8 @@ func (s *Service) createBootstrapAdmin(ctx context.Context, tenantID int64, req 
 			BaseIdentity: BaseIdentityTeacher,
 			Status:       AccountStatusPending,
 			Roles: []RoleCreateInput{
-				{ID: s.ids.Generate(), Role: RoleTeacher},
-				{ID: s.ids.Generate(), Role: RoleSchoolAdmin},
+				{ID: s.ids.Generate(), Role: contracts.RoleNumTeacher},
+				{ID: s.ids.Generate(), Role: contracts.RoleNumSchoolAdmin},
 			},
 		})
 		if err != nil {
@@ -436,7 +437,7 @@ func (s *Service) activationExpireAt() time.Time {
 
 // auditPlatformOperation 写入平台管理员敏感操作审计,平台级记录 tenant_id 为空。
 func (s *Service) auditPlatformOperation(ctx context.Context, actorID int64, action, targetType string, targetID int64, detail map[string]any) error {
-	entry, err := audit.BuildEntry(ctx, 0, actorID, audit.ActorRolePlatformAdmin, action, targetType, targetID, detail)
+	entry, err := audit.BuildEntry(ctx, 0, actorID, contracts.RoleNumPlatformAdmin, action, targetType, targetID, detail)
 	if err != nil {
 		return err
 	}

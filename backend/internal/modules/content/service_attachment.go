@@ -6,7 +6,7 @@ import (
 	"context"
 	"strings"
 
-	"chaimir/internal/platform/audit"
+	"chaimir/internal/contracts"
 	"chaimir/internal/platform/storage"
 	"chaimir/pkg/apperr"
 )
@@ -63,7 +63,7 @@ func (s *Service) UploadAttachment(ctx context.Context, req UploadAttachmentRequ
 	if err := s.storage.Put(ctx, plan.Bucket, plan.Key, bytes.NewReader(req.Content), plan.Size, plan.ContentType); err != nil {
 		return AttachmentUploadDTO{}, apperr.ErrContentAttachmentInvalid.WithCause(err)
 	}
-	if err := s.writeAudit(ctx, id.TenantID, id.AccountID, audit.ActorRoleTeacher, "content.attachment.upload", contentAuditTargetItem, 0, map[string]any{"resource_id": resourceID, "file_name": plan.FileName}); err != nil {
+	if err := s.writeAudit(ctx, id.TenantID, id.AccountID, contracts.RoleNumTeacher, "content.attachment.upload", contentAuditTargetItem, 0, map[string]any{"resource_id": resourceID, "file_name": plan.FileName}); err != nil {
 		return AttachmentUploadDTO{}, err
 	}
 	return AttachmentUploadDTO{ObjectRef: plan.ObjectRef, FileName: plan.FileName, Size: plan.Size}, nil
@@ -90,7 +90,7 @@ func (s *Service) IssueAttachmentDownloadGrant(ctx context.Context, resourceID, 
 	if err != nil {
 		return AttachmentDownloadGrantDTO{}, apperr.ErrContentAttachmentInvalid.WithCause(err)
 	}
-	if err := s.writeAudit(ctx, id.TenantID, id.AccountID, audit.ActorRoleTeacher, "content.attachment.download", contentAuditTargetItem, 0, map[string]any{"resource_id": resourceID}); err != nil {
+	if err := s.writeAudit(ctx, id.TenantID, id.AccountID, contracts.RoleNumTeacher, "content.attachment.download", contentAuditTargetItem, 0, map[string]any{"resource_id": resourceID}); err != nil {
 		return AttachmentDownloadGrantDTO{}, err
 	}
 	return AttachmentDownloadGrantDTO{Token: token, Grant: grant, ExpiresAt: grant.ExpiresAt.Format("2006-01-02T15:04:05Z07:00")}, nil

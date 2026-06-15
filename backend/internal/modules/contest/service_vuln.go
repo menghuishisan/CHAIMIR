@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"chaimir/internal/contracts"
-	"chaimir/internal/platform/audit"
 	"chaimir/internal/platform/jsonx"
 	"chaimir/internal/platform/netx"
 	"chaimir/internal/platform/secretmap"
@@ -47,7 +46,7 @@ func (s *Service) UpsertVulnSource(ctx context.Context, req VulnSourceRequest) (
 	}); err != nil {
 		return VulnSourceDTO{}, err
 	}
-	if err := s.writeAudit(ctx, id.TenantID, id.AccountID, audit.ActorRoleTeacher, "contest.vuln_source.upsert", auditTargetVulnSource, item.ID, nil); err != nil {
+	if err := s.writeAudit(ctx, id.TenantID, id.AccountID, contracts.RoleNumTeacher, "contest.vuln_source.upsert", auditTargetVulnSource, item.ID, nil); err != nil {
 		return VulnSourceDTO{}, err
 	}
 	return vulnSourceDTOFromModel(item), nil
@@ -124,7 +123,7 @@ func (s *Service) SyncVulnSource(ctx context.Context, sourceID int64) ([]VulnPro
 	for _, item := range problems {
 		out = append(out, vulnProblemDTOFromModel(item))
 	}
-	return out, s.writeAudit(ctx, id.TenantID, id.AccountID, audit.ActorRoleTeacher, "contest.vuln_source.sync", auditTargetVulnSource, source.ID, map[string]any{"count": len(out)})
+	return out, s.writeAudit(ctx, id.TenantID, id.AccountID, contracts.RoleNumTeacher, "contest.vuln_source.sync", auditTargetVulnSource, source.ID, map[string]any{"count": len(out)})
 }
 
 // ImportVulnProblem 手动导入一个漏洞案例草稿。
@@ -150,7 +149,7 @@ func (s *Service) ImportVulnProblem(ctx context.Context, req ImportVulnProblemRe
 	}); err != nil {
 		return VulnProblemDTO{}, err
 	}
-	if err := s.writeAudit(ctx, id.TenantID, id.AccountID, audit.ActorRoleTeacher, "contest.vuln_problem.import", auditTargetVulnProblem, item.ID, nil); err != nil {
+	if err := s.writeAudit(ctx, id.TenantID, id.AccountID, contracts.RoleNumTeacher, "contest.vuln_problem.import", auditTargetVulnProblem, item.ID, nil); err != nil {
 		return VulnProblemDTO{}, err
 	}
 	return vulnProblemDTOFromModel(item), nil
@@ -204,7 +203,7 @@ func (s *Service) SetVulnPrevalidate(ctx context.Context, problemID int64, req P
 	}); err != nil {
 		return VulnProblemDTO{}, err
 	}
-	return vulnProblemDTOFromModel(item), s.writeAudit(ctx, id.TenantID, id.AccountID, audit.ActorRoleTeacher, "contest.vuln_problem.prevalidate", auditTargetVulnProblem, item.ID, map[string]any{"status": status})
+	return vulnProblemDTOFromModel(item), s.writeAudit(ctx, id.TenantID, id.AccountID, contracts.RoleNumTeacher, "contest.vuln_problem.prevalidate", auditTargetVulnProblem, item.ID, map[string]any{"status": status})
 }
 
 // FinalizeVulnProblem 把预验证通过的漏洞题固化到 M5 内容中心。
@@ -235,7 +234,7 @@ func (s *Service) FinalizeVulnProblem(ctx context.Context, problemID int64) (Vul
 	}); err != nil {
 		return VulnProblemDTO{}, err
 	}
-	if err := s.writeAudit(ctx, id.TenantID, id.AccountID, audit.ActorRoleTeacher, "contest.vuln_problem.finalize", auditTargetVulnProblem, item.ID, map[string]any{"item_code": item.ContentItemCode, "item_version": item.ContentItemVersion}); err != nil {
+	if err := s.writeAudit(ctx, id.TenantID, id.AccountID, contracts.RoleNumTeacher, "contest.vuln_problem.finalize", auditTargetVulnProblem, item.ID, map[string]any{"item_code": item.ContentItemCode, "item_version": item.ContentItemVersion}); err != nil {
 		return VulnProblemDTO{}, err
 	}
 	return vulnProblemDTOFromModel(item), nil

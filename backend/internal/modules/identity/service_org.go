@@ -445,7 +445,7 @@ func (s *Service) CommitOrgImportByAdmin(ctx context.Context, req ImportCommitRe
 			return err
 		}
 		batch = created
-		entry, err := audit.BuildEntry(ctx, id.TenantID, id.AccountID, audit.ActorRoleSchoolAdmin, "org.import", "identity.import_batch", created.ID, map[string]any{"success": success, "failed": failed})
+		entry, err := audit.BuildEntry(ctx, id.TenantID, id.AccountID, contracts.RoleNumSchoolAdmin, "org.import", "identity.import_batch", created.ID, map[string]any{"success": success, "failed": failed})
 		if err != nil {
 			return err
 		}
@@ -505,7 +505,7 @@ func (s *Service) ArchiveClassesByAdmin(ctx context.Context, req ArchiveClassesR
 		if err := tx.RevokeStudentSessionsByEnrollmentYear(ctx, id.TenantID, req.EnrollmentYear); err != nil {
 			return err
 		}
-		entry, err := audit.BuildEntry(ctx, id.TenantID, id.AccountID, audit.ActorRoleSchoolAdmin, "org.class.archive", "identity.class", 0, map[string]any{"enrollment_year": req.EnrollmentYear})
+		entry, err := audit.BuildEntry(ctx, id.TenantID, id.AccountID, contracts.RoleNumSchoolAdmin, "org.class.archive", "identity.class", 0, map[string]any{"enrollment_year": req.EnrollmentYear})
 		if err != nil {
 			return err
 		}
@@ -727,7 +727,7 @@ func (s *Service) validateOrgImportParents(ctx context.Context, tx TxStore, tena
 
 // writeOrgAuditInTx 在组织架构事务内写审计,确保敏感变更与审计记录同成同败。
 func (s *Service) writeOrgAuditInTx(ctx context.Context, tx TxStore, id tenant.Identity, action, targetType string, targetID int64, detail map[string]any) error {
-	entry, err := audit.BuildEntry(ctx, id.TenantID, id.AccountID, audit.ActorRoleSchoolAdmin, action, targetType, targetID, detail)
+	entry, err := audit.BuildEntry(ctx, id.TenantID, id.AccountID, contracts.RoleNumSchoolAdmin, action, targetType, targetID, detail)
 	if err != nil {
 		return err
 	}

@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"chaimir/internal/contracts"
-	"chaimir/internal/platform/audit"
 	"chaimir/internal/platform/pagex"
 	"chaimir/internal/platform/timex"
 	"chaimir/pkg/apperr"
@@ -70,7 +69,7 @@ func (s *Service) CreateCourse(ctx context.Context, req CourseRequest) (CourseDT
 	}); err != nil {
 		return CourseDTO{}, mapCourseError(err)
 	}
-	if err := s.writeAudit(ctx, id.TenantID, id.AccountID, audit.ActorRoleTeacher, "teaching.course.create", auditTargetCourse, course.ID, map[string]any{"name": course.Name}); err != nil {
+	if err := s.writeAudit(ctx, id.TenantID, id.AccountID, contracts.RoleNumTeacher, "teaching.course.create", auditTargetCourse, course.ID, map[string]any{"name": course.Name}); err != nil {
 		return CourseDTO{}, err
 	}
 	return courseDTO(course), nil
@@ -136,7 +135,7 @@ func (s *Service) CloneCourse(ctx context.Context, courseID int64, req CloneCour
 	if err != nil {
 		return CourseDTO{}, mapCourseError(err)
 	}
-	if err := s.writeAudit(ctx, id.TenantID, id.AccountID, audit.ActorRoleTeacher, "teaching.course.clone", auditTargetCourse, cloned.ID, map[string]any{"source_course_id": courseID}); err != nil {
+	if err := s.writeAudit(ctx, id.TenantID, id.AccountID, contracts.RoleNumTeacher, "teaching.course.clone", auditTargetCourse, cloned.ID, map[string]any{"source_course_id": courseID}); err != nil {
 		return CourseDTO{}, err
 	}
 	return courseDTO(cloned), nil
@@ -273,7 +272,7 @@ func (s *Service) setCourseStatus(ctx context.Context, courseID int64, status in
 	}); err != nil {
 		return CourseDTO{}, mapCourseError(err)
 	}
-	if err := s.writeAudit(ctx, id.TenantID, id.AccountID, audit.ActorRoleTeacher, action, auditTargetCourse, course.ID, map[string]any{"status": status}); err != nil {
+	if err := s.writeAudit(ctx, id.TenantID, id.AccountID, contracts.RoleNumTeacher, action, auditTargetCourse, course.ID, map[string]any{"status": status}); err != nil {
 		return CourseDTO{}, err
 	}
 	return courseDTO(course), nil

@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"strings"
 
-	"chaimir/internal/platform/audit"
+	"chaimir/internal/contracts"
 	"chaimir/internal/platform/storage"
 	"chaimir/pkg/apperr"
 )
@@ -38,7 +38,7 @@ func (s *Service) SubmitReport(ctx context.Context, instanceID int64, req Submit
 	}); err != nil {
 		return ReportDTO{}, err
 	}
-	return reportDTOFromModel(report), s.writeAudit(ctx, id.TenantID, id.AccountID, audit.ActorRoleStudent, "experiment.report.submit", auditTargetReport, report.ID, map[string]any{"instance_id": instanceID})
+	return reportDTOFromModel(report), s.writeAudit(ctx, id.TenantID, id.AccountID, contracts.RoleNumStudent, "experiment.report.submit", auditTargetReport, report.ID, map[string]any{"instance_id": instanceID})
 }
 
 // validateReportObjectRef 校验报告对象引用必须绑定租户、实例和学生路径。
@@ -141,5 +141,5 @@ func (s *Service) GradeReport(ctx context.Context, reportID int64, req GradeRepo
 	if shouldPublish {
 		s.drainExperimentScoreOutboxBestEffort(ctx)
 	}
-	return reportDTOFromModel(report), s.writeAudit(ctx, id.TenantID, id.AccountID, audit.ActorRoleTeacher, "experiment.report.grade", auditTargetReport, report.ID, map[string]any{"manual_score": req.ManualScore})
+	return reportDTOFromModel(report), s.writeAudit(ctx, id.TenantID, id.AccountID, contracts.RoleNumTeacher, "experiment.report.grade", auditTargetReport, report.ID, map[string]any{"manual_score": req.ManualScore})
 }

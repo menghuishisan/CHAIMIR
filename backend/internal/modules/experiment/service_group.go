@@ -5,7 +5,7 @@ import (
 	"context"
 	"strings"
 
-	"chaimir/internal/platform/audit"
+	"chaimir/internal/contracts"
 	"chaimir/pkg/apperr"
 )
 
@@ -36,7 +36,7 @@ func (s *Service) CreateGroup(ctx context.Context, experimentID int64, req Creat
 	}); err != nil {
 		return GroupDTO{}, err
 	}
-	return groupDTOFromModel(group), s.writeAudit(ctx, id.TenantID, id.AccountID, audit.ActorRoleTeacher, "experiment.group.create", auditTargetGroup, group.ID, map[string]any{"experiment_id": experimentID})
+	return groupDTOFromModel(group), s.writeAudit(ctx, id.TenantID, id.AccountID, contracts.RoleNumTeacher, "experiment.group.create", auditTargetGroup, group.ID, map[string]any{"experiment_id": experimentID})
 }
 
 // UpsertGroupMember 添加或调整协作小组成员角色。
@@ -80,7 +80,7 @@ func (s *Service) UpsertGroupMember(ctx context.Context, groupID int64, req Upse
 	}); err != nil {
 		return GroupDTO{}, err
 	}
-	return groupDTOFromModel(group), s.writeAudit(ctx, id.TenantID, id.AccountID, audit.ActorRoleTeacher, "experiment.group.member.upsert", auditTargetGroup, groupID, map[string]any{"student_id": req.StudentID, "role": req.Role})
+	return groupDTOFromModel(group), s.writeAudit(ctx, id.TenantID, id.AccountID, contracts.RoleNumTeacher, "experiment.group.member.upsert", auditTargetGroup, groupID, map[string]any{"student_id": req.StudentID, "role": req.Role})
 }
 
 // GetGroup 读取协作小组成员和角色。

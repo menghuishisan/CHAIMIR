@@ -225,7 +225,7 @@ func (s *Service) GetSharedReplay(ctx context.Context, code string) (map[string]
 		return nil, apperr.ErrSimShareCodeInvalid
 	}
 	var share Share
-	if err := s.store.PlatformTx(ctx, func(ctx context.Context, tx TxStore) error {
+	if err := s.store.PrivilegedTx(ctx, func(ctx context.Context, tx TxStore) error {
 		var err error
 		share, err = tx.GetShareByCode(ctx, strings.TrimSpace(code))
 		if err != nil {

@@ -25,64 +25,64 @@ const (
 
 // JudgeSubmitRequest 是业务模块提交判题任务时使用的稳定契约。
 type JudgeSubmitRequest struct {
-	TenantID         int64
-	JudgerCode       string
-	ItemCode         string
-	ItemVersion      string
-	CodeStorageKey   string
-	CodeHash         string
-	SubmitterID      int64
-	SourceRef        string
-	SandboxMode      string
-	TargetSandboxRef string
-	ExtraInput       map[string]any
-	Priority         int16
+	TenantID         int64          `json:"tenant_id"`
+	JudgerCode       string         `json:"judger_code"`
+	ItemCode         string         `json:"item_code"`
+	ItemVersion      string         `json:"item_version"`
+	CodeStorageKey   string         `json:"code_storage_key"`
+	CodeHash         string         `json:"code_hash"`
+	SubmitterID      int64          `json:"submitter_id"`
+	SourceRef        string         `json:"source_ref"`
+	SandboxMode      string         `json:"sandbox_mode"`
+	TargetSandboxRef string         `json:"target_sandbox_ref"`
+	ExtraInput       map[string]any `json:"extra_input"`
+	Priority         int16          `json:"priority"`
 }
 
 // JudgeResultDetail 是评测结果中的单条可解释详情。
 type JudgeResultDetail struct {
-	Case          string
-	Passed        bool
-	ExpectedLabel string
-	Actual        string
-	Hint          string
+	Case          string `json:"case"`
+	Passed        bool   `json:"passed"`
+	ExpectedLabel string `json:"expected_label"`
+	Actual        string `json:"actual"`
+	Hint          string `json:"hint"`
 }
 
 // JudgeTaskResult 是跨模块回写业务结果所需的判题结果快照。
 type JudgeTaskResult struct {
-	Passed      bool
-	Score       int32
-	MaxScore    int32
-	Details     []JudgeResultDetail
-	SnapshotRef string
+	Passed      bool                `json:"passed"`
+	Score       int32               `json:"score"`
+	MaxScore    int32               `json:"max_score"`
+	Details     []JudgeResultDetail `json:"details"`
+	SnapshotRef string              `json:"snapshot_ref"`
 }
 
 // JudgeTaskInfo 是评测引擎向调用方暴露的任务摘要。
 type JudgeTaskInfo struct {
-	TaskID      int64
-	TenantID    int64
-	SourceRef   string
-	SubmitterID int64
-	Status      int16
-	Result      JudgeTaskResult
+	TaskID      int64           `json:"task_id"`
+	TenantID    int64           `json:"tenant_id"`
+	SourceRef   string          `json:"source_ref"`
+	SubmitterID int64           `json:"submitter_id"`
+	Status      int16           `json:"status"`
+	Result      JudgeTaskResult `json:"result"`
 }
 
 // FingerprintSimilarityRequest 是查重服务的相似度比对请求。
 type FingerprintSimilarityRequest struct {
-	TenantID         int64
-	ProblemRef       string
-	CodeStorageKey   string
-	CodeHash         string
-	ExcludeSourceRef string
-	Threshold        float64
+	TenantID         int64   `json:"tenant_id"`
+	ProblemRef       string  `json:"problem_ref"`
+	CodeStorageKey   string  `json:"code_storage_key"`
+	CodeHash         string  `json:"code_hash"`
+	ExcludeSourceRef string  `json:"exclude_source_ref"`
+	Threshold        float64 `json:"threshold"`
 }
 
 // FingerprintMatch 是查重返回的一条相似提交命中。
 type FingerprintMatch struct {
-	SourceRef   string
-	SubmitterID int64
-	Score       float64
-	CodeHash    string
+	SourceRef   string  `json:"source_ref"`
+	SubmitterID int64   `json:"submitter_id"`
+	Score       float64 `json:"score"`
+	CodeHash    string  `json:"code_hash"`
 }
 
 // JudgeService 是 M3 评测引擎对 M6/M7/M8 暴露的标准判题契约。

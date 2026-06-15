@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"chaimir/internal/contracts"
-	"chaimir/internal/platform/audit"
 	"chaimir/internal/platform/response"
 	"chaimir/internal/platform/timex"
 	"chaimir/pkg/apperr"
@@ -80,7 +79,7 @@ func (s *Service) CreateInstance(ctx context.Context, experimentID int64, req Cr
 	if createErr != nil {
 		return InstanceDTO{}, createErr
 	}
-	if err := s.writeAudit(ctx, id.TenantID, id.AccountID, audit.ActorRoleStudent, "experiment.instance.create", auditTargetInstance, inst.ID, map[string]any{"experiment_id": experimentID, "source_ref": inst.SourceRef}); err != nil {
+	if err := s.writeAudit(ctx, id.TenantID, id.AccountID, contracts.RoleNumStudent, "experiment.instance.create", auditTargetInstance, inst.ID, map[string]any{"experiment_id": experimentID, "source_ref": inst.SourceRef}); err != nil {
 		return InstanceDTO{}, err
 	}
 	return instanceDTOFromModel(inst, checkpointDefaults(exp, nil), stageDTOs(exp, inst, nil)), nil
@@ -241,7 +240,7 @@ func (s *Service) FinishInstance(ctx context.Context, instanceID int64) (Instanc
 	if err := s.recycleEngines(ctx, inst, "finished"); err != nil {
 		return InstanceDTO{}, err
 	}
-	return instanceDTOFromModel(inst, nil), s.writeAudit(ctx, id.TenantID, id.AccountID, audit.ActorRoleStudent, "experiment.instance.finish", auditTargetInstance, inst.ID, map[string]any{"score": inst.Score})
+	return instanceDTOFromModel(inst, nil), s.writeAudit(ctx, id.TenantID, id.AccountID, contracts.RoleNumStudent, "experiment.instance.finish", auditTargetInstance, inst.ID, map[string]any{"score": inst.Score})
 }
 
 // RecycleInstance 手动释放实验实例的引擎资源并保留结果。
@@ -275,7 +274,7 @@ func (s *Service) RecycleInstance(ctx context.Context, instanceID int64) error {
 	}); err != nil {
 		return err
 	}
-	return s.writeAudit(ctx, id.TenantID, id.AccountID, audit.ActorRoleStudent, "experiment.instance.recycle", auditTargetInstance, inst.ID, nil)
+	return s.writeAudit(ctx, id.TenantID, id.AccountID, contracts.RoleNumStudent, "experiment.instance.recycle", auditTargetInstance, inst.ID, nil)
 }
 
 // RunRecycleOnce 执行一次 M7 后台回收扫描,供统一 background runner 调用。

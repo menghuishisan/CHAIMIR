@@ -51,7 +51,7 @@ func (s *Service) CreateContest(ctx context.Context, req ContestRequest) (Contes
 	}); err != nil {
 		return ContestDTO{}, err
 	}
-	if err := s.writeAudit(ctx, id.TenantID, id.AccountID, audit.ActorRoleTeacher, "contest.create", auditTargetContest, item.ID, nil); err != nil {
+	if err := s.writeAudit(ctx, id.TenantID, id.AccountID, contracts.RoleNumTeacher, "contest.create", auditTargetContest, item.ID, nil); err != nil {
 		return ContestDTO{}, err
 	}
 	return contestDTOFromModel(item), nil
@@ -88,7 +88,7 @@ func (s *Service) UpdateContest(ctx context.Context, contestID int64, req Contes
 	}); err != nil {
 		return ContestDTO{}, err
 	}
-	return contestDTOFromModel(item), s.writeAudit(ctx, id.TenantID, id.AccountID, audit.ActorRoleTeacher, "contest.update", auditTargetContest, item.ID, nil)
+	return contestDTOFromModel(item), s.writeAudit(ctx, id.TenantID, id.AccountID, contracts.RoleNumTeacher, "contest.update", auditTargetContest, item.ID, nil)
 }
 
 // AddProblem 添加或更新竞赛题目引用,并校验 M5 题面可读取。
@@ -120,7 +120,7 @@ func (s *Service) AddProblem(ctx context.Context, contestID int64, req ProblemRe
 	}); err != nil {
 		return ProblemDTO{}, err
 	}
-	if err := s.writeAudit(ctx, id.TenantID, id.AccountID, audit.ActorRoleTeacher, "contest.problem.upsert", auditTargetContest, contestID, map[string]any{"problem_id": item.ID}); err != nil {
+	if err := s.writeAudit(ctx, id.TenantID, id.AccountID, contracts.RoleNumTeacher, "contest.problem.upsert", auditTargetContest, contestID, map[string]any{"problem_id": item.ID}); err != nil {
 		return ProblemDTO{}, err
 	}
 	return problemDTOFromModel(item), nil
@@ -215,7 +215,7 @@ func (s *Service) ArchiveContest(ctx context.Context, contestID int64) (ResultSn
 	}); err != nil {
 		return ResultSnapshot{}, err
 	}
-	if err := s.writeAudit(ctx, id.TenantID, id.AccountID, audit.ActorRoleTeacher, "contest.archive", auditTargetContest, contestID, map[string]any{"snapshot_id": snapshot.ID}); err != nil {
+	if err := s.writeAudit(ctx, id.TenantID, id.AccountID, contracts.RoleNumTeacher, "contest.archive", auditTargetContest, contestID, map[string]any{"snapshot_id": snapshot.ID}); err != nil {
 		return ResultSnapshot{}, err
 	}
 	return snapshot, nil
@@ -364,7 +364,7 @@ func (s *Service) transitionContest(ctx context.Context, contestID int64, next i
 	}); err != nil {
 		return ContestDTO{}, err
 	}
-	return contestDTOFromModel(item), s.writeAudit(ctx, id.TenantID, id.AccountID, audit.ActorRoleTeacher, action, auditTargetContest, item.ID, nil)
+	return contestDTOFromModel(item), s.writeAudit(ctx, id.TenantID, id.AccountID, contracts.RoleNumTeacher, action, auditTargetContest, item.ID, nil)
 }
 
 // incrementProblemUsage 在发布时登记 M5 内容引用,用于删除保护和复用统计。
