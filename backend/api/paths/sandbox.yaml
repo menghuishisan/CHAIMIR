@@ -1,0 +1,327 @@
+# 本文件按模块维护 sandbox 路径项。
+/api/v1/sandbox/runtimes:
+  get:
+    tags: [sandbox]
+    summary: 运行时列表
+    operationId: sandboxListRuntimes
+    x-chaimir-audience: platform-admin
+    security: [{ bearerAuth: [] }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+  post:
+    tags: [sandbox]
+    summary: 注册运行时
+    operationId: sandboxRegisterRuntime
+    x-chaimir-audience: platform-admin
+    security: [{ bearerAuth: [] }]
+    requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/sandbox/runtimes/{id}:
+  patch:
+    tags: [sandbox]
+    summary: 更新运行时配置
+    operationId: sandboxUpdateRuntime
+    x-chaimir-audience: platform-admin
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/sandbox/runtimes/{id}/selftest:
+  post:
+    tags: [sandbox]
+    summary: 触发运行时接入自检
+    operationId: sandboxRunRuntimeSelftest
+    x-chaimir-audience: platform-admin
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+  get:
+    tags: [sandbox]
+    summary: 查询运行时自检结果
+    operationId: sandboxGetRuntimeSelftest
+    x-chaimir-audience: platform-admin
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/sandbox/runtimes/{id}/images:
+  get:
+    tags: [sandbox]
+    summary: 运行时镜像版本列表
+    operationId: sandboxListRuntimeImages
+    x-chaimir-audience: platform-admin
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+  post:
+    tags: [sandbox]
+    summary: 登记运行时镜像版本
+    operationId: sandboxRegisterRuntimeImage
+    x-chaimir-audience: platform-admin
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/sandbox/runtimes/{id}/images/{img}:
+  delete:
+    tags: [sandbox]
+    summary: 停用运行时镜像版本
+    operationId: sandboxDisableRuntimeImage
+    x-chaimir-audience: platform-admin
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }, { $ref: "#/components/parameters/ImagePath" }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/sandbox/runtimes/{id}/images/{img}/prepull:
+  post:
+    tags: [sandbox]
+    summary: 触发镜像全节点预拉取
+    operationId: sandboxPrepullRuntimeImage
+    x-chaimir-audience: platform-admin
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }, { $ref: "#/components/parameters/ImagePath" }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+  get:
+    tags: [sandbox]
+    summary: 查询镜像预拉取状态
+    operationId: sandboxGetRuntimeImagePrepull
+    x-chaimir-audience: platform-admin
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }, { $ref: "#/components/parameters/ImagePath" }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/sandbox/tools:
+  get:
+    tags: [sandbox]
+    summary: 工具列表
+    operationId: sandboxListTools
+    x-chaimir-audience: platform-admin
+    security: [{ bearerAuth: [] }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+  post:
+    tags: [sandbox]
+    summary: 注册工具定义
+    operationId: sandboxRegisterTool
+    x-chaimir-audience: platform-admin
+    security: [{ bearerAuth: [] }]
+    requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/sandbox/sandboxes:
+  post:
+    tags: [sandbox]
+    summary: 创建沙箱
+    operationId: sandboxCreateSandbox
+    x-chaimir-audience: internal
+    x-chaimir-internal: true
+    security: [{ serviceAuth: [] }]
+    requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/sandbox/sandboxes/recycle:
+  post:
+    tags: [sandbox]
+    summary: 按 source_ref 批量回收沙箱
+    operationId: sandboxRecycleBySourceRef
+    x-chaimir-audience: internal
+    x-chaimir-internal: true
+    security: [{ serviceAuth: [] }]
+    requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/sandbox/sandboxes/{id}:
+  get:
+    tags: [sandbox]
+    summary: 查询沙箱状态、资源用量和工具入口
+    operationId: sandboxGetSandbox
+    x-chaimir-audience: user
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+  delete:
+    tags: [sandbox]
+    summary: 主动销毁沙箱
+    operationId: sandboxDestroySandbox
+    x-chaimir-audience: internal
+    x-chaimir-internal: true
+    security: [{ serviceAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/sandbox/sandboxes/{id}/pause:
+  post:
+    tags: [sandbox]
+    summary: 暂停沙箱
+    operationId: sandboxPauseSandbox
+    x-chaimir-audience: internal
+    x-chaimir-internal: true
+    security: [{ serviceAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/sandbox/sandboxes/{id}/resume:
+  post:
+    tags: [sandbox]
+    summary: 恢复沙箱
+    operationId: sandboxResumeSandbox
+    x-chaimir-audience: internal
+    x-chaimir-internal: true
+    security: [{ serviceAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/sandbox/sandboxes/{id}/progress:
+  get:
+    tags: [sandbox]
+    summary: 沙箱启动进度 WebSocket
+    operationId: sandboxProgress
+    x-chaimir-audience: user
+    x-chaimir-websocket: true
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    responses: { "101": { description: WebSocket 升级成功 }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/sandbox/sandboxes/{id}/terminal:
+  get:
+    tags: [sandbox]
+    summary: 沙箱终端 WebSocket
+    operationId: sandboxTerminal
+    x-chaimir-audience: user
+    x-chaimir-websocket: true
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }, { name: container, in: query, schema: { type: string } }]
+    responses: { "101": { description: WebSocket 升级成功 }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/sandbox/sandboxes/{id}/files:
+  get:
+    tags: [sandbox]
+    summary: 列目录或读取文件
+    operationId: sandboxGetFiles
+    x-chaimir-audience: user
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }, { $ref: "#/components/parameters/FilePathQuery" }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+  put:
+    tags: [sandbox]
+    summary: 写入工作区文件
+    operationId: sandboxWriteFile
+    x-chaimir-audience: user
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }, { $ref: "#/components/parameters/FilePathQuery" }]
+    requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/sandbox/sandboxes/{id}/files/save:
+  post:
+    tags: [sandbox]
+    summary: 立即持久化工作区代码
+    operationId: sandboxSaveFiles
+    x-chaimir-audience: user
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/sandbox/sandboxes/{id}/chain/deploy:
+  post:
+    tags: [sandbox]
+    summary: 链上部署
+    operationId: sandboxChainDeploy
+    x-chaimir-audience: internal
+    x-chaimir-internal: true
+    security: [{ serviceAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/sandbox/sandboxes/{id}/chain/tx:
+  post:
+    tags: [sandbox]
+    summary: 链上交易
+    operationId: sandboxChainSendTx
+    x-chaimir-audience: internal
+    x-chaimir-internal: true
+    security: [{ serviceAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/sandbox/sandboxes/{id}/chain/query:
+  get:
+    tags: [sandbox]
+    summary: 链上查询
+    operationId: sandboxChainQuery
+    x-chaimir-audience: internal
+    x-chaimir-internal: true
+    security: [{ serviceAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }, { name: target, in: query, schema: { type: string } }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/sandbox/sandboxes/{id}/chain/reset:
+  post:
+    tags: [sandbox]
+    summary: 链恢复创世就绪态
+    operationId: sandboxChainReset
+    x-chaimir-audience: internal
+    x-chaimir-internal: true
+    security: [{ serviceAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/sandbox/sandboxes/{id}/tools/{tool_code}/{proxy_path}:
+  get:
+    tags: [sandbox]
+    summary: 沙箱 Web 工具代理
+    operationId: sandboxToolProxy
+    x-chaimir-audience: user
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }, { $ref: "#/components/parameters/ToolCodePath" }, { $ref: "#/components/parameters/ProxyPath" }]
+    responses: { "200": { description: 工具代理响应 }, default: { $ref: "#/components/responses/Error" } }
+  post:
+    tags: [sandbox]
+    summary: 沙箱 Web 工具代理提交
+    operationId: sandboxToolProxyPost
+    x-chaimir-audience: user
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }, { $ref: "#/components/parameters/ToolCodePath" }, { $ref: "#/components/parameters/ProxyPath" }]
+    requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
+    responses: { "200": { description: 工具代理响应 }, default: { $ref: "#/components/responses/Error" } }
+  put:
+    tags: [sandbox]
+    summary: 沙箱 Web 工具代理更新
+    operationId: sandboxToolProxyPut
+    x-chaimir-audience: user
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }, { $ref: "#/components/parameters/ToolCodePath" }, { $ref: "#/components/parameters/ProxyPath" }]
+    requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
+    responses: { "200": { description: 工具代理响应 }, default: { $ref: "#/components/responses/Error" } }
+  patch:
+    tags: [sandbox]
+    summary: 沙箱 Web 工具代理局部更新
+    operationId: sandboxToolProxyPatch
+    x-chaimir-audience: user
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }, { $ref: "#/components/parameters/ToolCodePath" }, { $ref: "#/components/parameters/ProxyPath" }]
+    requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
+    responses: { "200": { description: 工具代理响应 }, default: { $ref: "#/components/responses/Error" } }
+  delete:
+    tags: [sandbox]
+    summary: 沙箱 Web 工具代理删除
+    operationId: sandboxToolProxyDelete
+    x-chaimir-audience: user
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }, { $ref: "#/components/parameters/ToolCodePath" }, { $ref: "#/components/parameters/ProxyPath" }]
+    responses: { "200": { description: 工具代理响应 }, default: { $ref: "#/components/responses/Error" } }
+  head:
+    tags: [sandbox]
+    summary: 沙箱 Web 工具代理元信息
+    operationId: sandboxToolProxyHead
+    x-chaimir-audience: user
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }, { $ref: "#/components/parameters/ToolCodePath" }, { $ref: "#/components/parameters/ProxyPath" }]
+    responses: { "200": { description: 工具代理响应 }, default: { $ref: "#/components/responses/Error" } }
+  options:
+    tags: [sandbox]
+    summary: 沙箱 Web 工具代理预检
+    operationId: sandboxToolProxyOptions
+    x-chaimir-audience: user
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }, { $ref: "#/components/parameters/ToolCodePath" }, { $ref: "#/components/parameters/ProxyPath" }]
+    responses: { "200": { description: 工具代理响应 }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/sandbox/quota:
+  get:
+    tags: [sandbox]
+    summary: 查看本租户配额与当前用量
+    operationId: sandboxQuotaStats
+    x-chaimir-audience: school-or-platform-admin
+    security: [{ bearerAuth: [] }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+  patch:
+    tags: [sandbox]
+    summary: 调整配额
+    operationId: sandboxUpsertQuota
+    x-chaimir-audience: school-or-platform-admin
+    security: [{ bearerAuth: [] }]
+    requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }

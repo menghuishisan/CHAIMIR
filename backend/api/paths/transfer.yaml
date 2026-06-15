@@ -1,0 +1,51 @@
+# 本文件按模块维护 transfer 路径项。
+/api/v1/transfer/tasks:
+  get:
+    tags: [transfer]
+    summary: 查询当前账号可见的导入导出任务
+    operationId: transferListTasks
+    x-chaimir-audience: user
+    security:
+      - bearerAuth: []
+    parameters:
+      - name: channel
+        in: query
+        schema: { type: string }
+      - $ref: "#/components/parameters/StatusQuery"
+      - $ref: "#/components/parameters/PageQuery"
+      - $ref: "#/components/parameters/SizeQuery"
+    responses:
+      "200":
+        $ref: "#/components/responses/Standard"
+      default:
+        $ref: "#/components/responses/Error"
+/api/v1/transfer/tasks/{id}:
+  get:
+    tags: [transfer]
+    summary: 读取导入导出任务快照
+    operationId: transferGetTask
+    x-chaimir-audience: user
+    security:
+      - bearerAuth: []
+    parameters:
+      - $ref: "#/components/parameters/IDPath"
+    responses:
+      "200":
+        $ref: "#/components/responses/Standard"
+      default:
+        $ref: "#/components/responses/Error"
+/api/v1/transfer/tasks/{id}/download-grant:
+  post:
+    tags: [transfer]
+    summary: 签发导入导出产物短时下载授权
+    operationId: transferDownloadGrant
+    x-chaimir-audience: user
+    security:
+      - bearerAuth: []
+    parameters:
+      - $ref: "#/components/parameters/IDPath"
+    responses:
+      "200":
+        $ref: "#/components/responses/Standard"
+      default:
+        $ref: "#/components/responses/Error"

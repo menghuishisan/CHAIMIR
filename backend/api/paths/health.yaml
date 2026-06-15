@@ -1,0 +1,17 @@
+# 本文件按模块维护 health 路径项。
+/healthz:
+  get:
+    tags: [health]
+    summary: 服务存活检查
+    operationId: healthz
+    responses:
+      "200":
+        $ref: "#/components/responses/PlainOK"
+/readyz:
+  get:
+    tags: [health]
+    summary: 服务就绪检查
+    operationId: readyz
+    responses:
+      "200":
+        $ref: "#/components/responses/PlainOK"

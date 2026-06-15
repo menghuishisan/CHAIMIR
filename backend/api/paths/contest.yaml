@@ -1,0 +1,346 @@
+# 本文件按模块维护 contest 路径项。
+/api/v1/contest/contests:
+  get:
+    tags: [contest]
+    summary: 竞赛列表
+    operationId: contestListContests
+    x-chaimir-audience: teacher
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/StatusQuery" }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+  post:
+    tags: [contest]
+    summary: 创建竞赛
+    operationId: contestCreateContest
+    x-chaimir-audience: teacher
+    security: [{ bearerAuth: [] }]
+    requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/contest/contests/{id}:
+  patch:
+    tags: [contest]
+    summary: 编辑竞赛
+    operationId: contestUpdateContest
+    x-chaimir-audience: teacher
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/contest/contests/{id}/problems:
+  get:
+    tags: [contest]
+    summary: 竞赛题目列表
+    operationId: contestListProblems
+    x-chaimir-audience: user
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+  post:
+    tags: [contest]
+    summary: 编排竞赛题目
+    operationId: contestAddProblem
+    x-chaimir-audience: teacher
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/contest/contests/{id}/publish:
+  post:
+    tags: [contest]
+    summary: 发布竞赛
+    operationId: contestPublishContest
+    x-chaimir-audience: teacher
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/contest/contests/{id}/start:
+  post:
+    tags: [contest]
+    summary: 开始竞赛
+    operationId: contestStartContest
+    x-chaimir-audience: teacher
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/contest/contests/{id}/freeze:
+  post:
+    tags: [contest]
+    summary: 冻结竞赛榜单或赛程
+    operationId: contestFreezeContest
+    x-chaimir-audience: teacher
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/contest/contests/{id}/end:
+  post:
+    tags: [contest]
+    summary: 结束竞赛
+    operationId: contestEndContest
+    x-chaimir-audience: teacher
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/contest/contests/{id}/archive:
+  post:
+    tags: [contest]
+    summary: 归档竞赛
+    operationId: contestArchiveContest
+    x-chaimir-audience: teacher
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/contest/contests/{id}/signup:
+  post:
+    tags: [contest]
+    summary: 报名竞赛
+    operationId: contestSignup
+    x-chaimir-audience: student
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/contest/contests/{id}/result-snapshot:
+  get:
+    tags: [contest]
+    summary: 竞赛最终成绩快照
+    operationId: contestGetSnapshot
+    x-chaimir-audience: teacher
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/contest/contests/{id}/problems/{problem_id}/env:
+  post:
+    tags: [contest]
+    summary: 起实操题环境
+    operationId: contestCreateEnv
+    x-chaimir-audience: student
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }, { $ref: "#/components/parameters/ProblemIDPath" }]
+    requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/contest/contests/{id}/problems/{problem_id}/submit:
+  post:
+    tags: [contest]
+    summary: 提交竞赛解题答案
+    operationId: contestSubmitSolve
+    x-chaimir-audience: student
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }, { $ref: "#/components/parameters/ProblemIDPath" }]
+    requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/contest/contests/{id}/battle/entry:
+  post:
+    tags: [contest]
+    summary: 提交对抗赛参战物
+    operationId: contestSubmitBattleEntry
+    x-chaimir-audience: student
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/contest/contests/{id}/battle/entries:
+  get:
+    tags: [contest]
+    summary: 我的对抗赛参战历史
+    operationId: contestListBattleEntries
+    x-chaimir-audience: student
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/contest/contests/{id}/battle/matches:
+  get:
+    tags: [contest]
+    summary: 我的对抗赛对局列表
+    operationId: contestListBattleMatches
+    x-chaimir-audience: student
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }, { name: team_id, in: query, schema: { type: integer, format: int64 } }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/contest/contests/{id}/ladder:
+  get:
+    tags: [contest]
+    summary: 竞赛天梯排名
+    operationId: contestListLadder
+    x-chaimir-audience: user
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/contest/contests/{id}/cheat-suspects:
+  get:
+    tags: [contest]
+    summary: 可疑作弊提交列表
+    operationId: contestListCheatSuspects
+    x-chaimir-audience: teacher
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/contest/contests/{id}/cheat-records:
+  get:
+    tags: [contest]
+    summary: 作弊处理记录列表
+    operationId: contestListCheatRecords
+    x-chaimir-audience: teacher
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+  post:
+    tags: [contest]
+    summary: 判定并记录作弊处理
+    operationId: contestCreateCheatRecord
+    x-chaimir-audience: teacher
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/contest/teams/{id}:
+  get:
+    tags: [contest]
+    summary: 队伍信息
+    operationId: contestGetTeam
+    x-chaimir-audience: user
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/contest/teams/{id}/join:
+  post:
+    tags: [contest]
+    summary: 加入队伍
+    operationId: contestJoinTeamByTeamID
+    x-chaimir-audience: student
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/contest/teams/{id}/lock:
+  post:
+    tags: [contest]
+    summary: 锁定队伍
+    operationId: contestLockTeam
+    x-chaimir-audience: student
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/contest/submissions/{id}:
+  get:
+    tags: [contest]
+    summary: 查看竞赛提交结果
+    operationId: contestGetSubmission
+    x-chaimir-audience: student
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/contest/matches/{id}/replay:
+  get:
+    tags: [contest]
+    summary: 对局回放
+    operationId: contestGetBattleReplay
+    x-chaimir-audience: student
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/contest/my/contest-records:
+  get:
+    tags: [contest]
+    summary: 我的竞赛战绩档案
+    operationId: contestMyRecords
+    x-chaimir-audience: student
+    security: [{ bearerAuth: [] }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/contest/vuln-sources:
+  get:
+    tags: [contest]
+    summary: 漏洞源配置列表
+    operationId: contestListVulnSources
+    x-chaimir-audience: teacher
+    security: [{ bearerAuth: [] }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+  post:
+    tags: [contest]
+    summary: 创建或更新漏洞源配置
+    operationId: contestUpsertVulnSource
+    x-chaimir-audience: teacher
+    security: [{ bearerAuth: [] }]
+    requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/contest/vuln-sources/{id}/sync:
+  post:
+    tags: [contest]
+    summary: 同步拉取漏洞案例
+    operationId: contestSyncVulnSource
+    x-chaimir-audience: teacher
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/contest/vuln-sources/import:
+  post:
+    tags: [contest]
+    summary: 导入漏洞案例
+    operationId: contestImportVulnSourceProblem
+    x-chaimir-audience: teacher
+    security: [{ bearerAuth: [] }]
+    requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/contest/vuln-problems:
+  get:
+    tags: [contest]
+    summary: 漏洞题草稿列表
+    operationId: contestListVulnProblems
+    x-chaimir-audience: teacher
+    security: [{ bearerAuth: [] }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+  post:
+    tags: [contest]
+    summary: 导入漏洞题草稿
+    operationId: contestImportVulnProblem
+    x-chaimir-audience: teacher
+    security: [{ bearerAuth: [] }]
+    requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/contest/vuln-problems/{id}/prevalidate:
+  post:
+    tags: [contest]
+    summary: 预验证漏洞题
+    operationId: contestPrevalidateVulnProblem
+    x-chaimir-audience: teacher
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/contest/vuln-problems/{id}/finalize:
+  post:
+    tags: [contest]
+    summary: 固化漏洞题到题库
+    operationId: contestFinalizeVulnProblem
+    x-chaimir-audience: teacher
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/contest/internal/stats:
+  get:
+    tags: [contest]
+    summary: 竞赛只读统计
+    operationId: contestInternalStats
+    x-chaimir-audience: internal
+    x-chaimir-internal: true
+    security: [{ serviceAuth: [] }]
+    parameters: [{ name: tenant_id, in: query, schema: { type: integer, format: int64 } }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/contest/internal/students/{id}/achievements:
+  get:
+    tags: [contest]
+    summary: 内部读取学生竞赛成就
+    operationId: contestInternalAchievements
+    x-chaimir-audience: internal
+    x-chaimir-internal: true
+    security: [{ serviceAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/contest/internal/students/{id}/contest-achievements:
+  get:
+    tags: [contest]
+    summary: 内部读取学生竞赛成就兼容路径
+    operationId: contestInternalContestAchievements
+    x-chaimir-audience: internal
+    x-chaimir-internal: true
+    security: [{ serviceAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }

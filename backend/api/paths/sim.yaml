@@ -1,0 +1,201 @@
+# 本文件按模块维护 sim 路径项。
+/api/v1/sim/shared/{code}:
+  get:
+    tags: [sim]
+    summary: 读取公开分享剧本
+    operationId: simGetShared
+    x-chaimir-audience: public
+    parameters: [{ $ref: "#/components/parameters/CodePath" }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/sim/packages:
+  get:
+    tags: [sim]
+    summary: 仿真包列表
+    operationId: simListPackages
+    x-chaimir-audience: user
+    security: [{ bearerAuth: [] }]
+    parameters:
+      - { name: category, in: query, schema: { type: string } }
+      - { $ref: "#/components/parameters/KeywordQuery" }
+      - { $ref: "#/components/parameters/StatusQuery" }
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+  post:
+    tags: [sim]
+    summary: 提交仿真包
+    operationId: simSubmitPackage
+    x-chaimir-audience: teacher
+    security: [{ bearerAuth: [] }]
+    requestBody: { $ref: "#/components/requestBodies/MultipartBody" }
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/sim/packages/{key}:
+  patch:
+    tags: [sim]
+    summary: 更新仿真包草稿或新版本
+    operationId: simUpdatePackage
+    x-chaimir-audience: teacher
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/KeyPath" }]
+    requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/sim/packages/{key}/versions:
+  get:
+    tags: [sim]
+    summary: 仿真包版本列表
+    operationId: simListPackageVersions
+    x-chaimir-audience: user
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/KeyPath" }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/sim/packages/{key}/{version}/bundle:
+  get:
+    tags: [sim]
+    summary: 获取仿真包正文
+    operationId: simGetBundle
+    x-chaimir-audience: user
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/KeyPath" }, { $ref: "#/components/parameters/VersionPath" }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/sim/packages/{key}/preview:
+  get:
+    tags: [sim]
+    summary: 仿真包审核前预览
+    operationId: simPreviewPackage
+    x-chaimir-audience: teacher
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/KeyPath" }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/sim/packages/{key}/validation-report:
+  post:
+    tags: [sim]
+    summary: 回写仿真包受控验证报告
+    operationId: simValidationReport
+    x-chaimir-audience: platform-or-internal
+    security: [{ bearerAuth: [] }, { serviceAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/KeyPath" }]
+    requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/sim/packages/{key}/archive:
+  post:
+    tags: [sim]
+    summary: 下架仿真包
+    operationId: simArchivePackage
+    x-chaimir-audience: platform-admin
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/KeyPath" }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/sim/packages/{key}/republish:
+  post:
+    tags: [sim]
+    summary: 重新上架仿真包
+    operationId: simRepublishPackage
+    x-chaimir-audience: platform-admin
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/KeyPath" }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/sim/reviews:
+  get:
+    tags: [sim]
+    summary: 仿真包审核列表
+    operationId: simListReviews
+    x-chaimir-audience: platform-admin
+    security: [{ bearerAuth: [] }]
+    parameters: [{ name: result, in: query, schema: { type: string } }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/sim/reviews/{id}/approve:
+  post:
+    tags: [sim]
+    summary: 通过仿真包审核
+    operationId: simApproveReview
+    x-chaimir-audience: platform-admin
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/sim/reviews/{id}/reject:
+  post:
+    tags: [sim]
+    summary: 驳回仿真包审核
+    operationId: simRejectReview
+    x-chaimir-audience: platform-admin
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/sim/sessions:
+  post:
+    tags: [sim]
+    summary: 创建仿真会话
+    operationId: simCreateSession
+    x-chaimir-audience: internal
+    x-chaimir-internal: true
+    security: [{ serviceAuth: [] }]
+    requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/sim/sessions/recycle:
+  post:
+    tags: [sim]
+    summary: 按 source_ref 批量回收仿真会话
+    operationId: simRecycleSessions
+    x-chaimir-audience: internal
+    x-chaimir-internal: true
+    security: [{ serviceAuth: [] }]
+    requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/sim/sessions/{id}:
+  delete:
+    tags: [sim]
+    summary: 回收单个仿真会话
+    operationId: simDestroySession
+    x-chaimir-audience: internal
+    x-chaimir-internal: true
+    security: [{ serviceAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/sim/sessions/{id}/actions:
+  post:
+    tags: [sim]
+    summary: 上报仿真操作
+    operationId: simReportAction
+    x-chaimir-audience: user
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/sim/sessions/{id}/replay:
+  get:
+    tags: [sim]
+    summary: 读取仿真回放
+    operationId: simGetReplay
+    x-chaimir-audience: user
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/sim/sessions/{id}/share:
+  post:
+    tags: [sim]
+    summary: 生成仿真分享码
+    operationId: simShareSession
+    x-chaimir-audience: user
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/sim/sessions/{id}/stream:
+  get:
+    tags: [sim]
+    summary: 后端计算仿真流 WebSocket
+    operationId: simStreamSession
+    x-chaimir-audience: user
+    x-chaimir-websocket: true
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    responses: { "101": { description: WebSocket 升级成功 }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/sim/sessions/{id}/checkpoints:
+  post:
+    tags: [sim]
+    summary: 上报仿真检查点
+    operationId: simReportCheckpoint
+    x-chaimir-audience: internal
+    x-chaimir-internal: true
+    security: [{ serviceAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }

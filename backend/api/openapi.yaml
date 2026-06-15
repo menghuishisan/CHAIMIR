@@ -1,0 +1,819 @@
+﻿openapi: 3.0.3
+info:
+  title: Chaimir 后端 API 契约
+  version: 0.1.0
+  description: |
+    Chaimir 区块链教学、实验、竞赛平台后端 API 契约。
+    本文件是 `backend/api` 的接口描述层,不承载运行时业务实现。
+    路径来源于 `docs/总-API接口总览.md`、各模块接口设计文档和后端模块 `api*.go` 已注册路由。
+servers:
+  - url: https://{host}
+    variables:
+      host:
+        default: api.chaimir.example.com
+tags:
+  - name: health
+    description: 服务健康探针
+  - name: identity
+    description: M1 身份与租户
+  - name: transfer
+    description: 基础横切统一导入导出中心
+  - name: sandbox
+    description: M2 沙箱引擎
+  - name: judge
+    description: M3 评测引擎
+  - name: sim
+    description: M4 仿真可视化引擎
+  - name: content
+    description: M5 题库与模板中心
+  - name: teaching
+    description: M6 教学
+  - name: experiment
+    description: M7 实验
+  - name: contest
+    description: M8 竞赛
+  - name: admin
+    description: M9 管理后台
+  - name: notify
+    description: M10 通知与实时推送
+  - name: grade
+    description: M11 成绩中心
+paths:
+  /healthz:
+    $ref: './paths/health.yaml#/healthz'
+  /readyz:
+    $ref: './paths/health.yaml#/readyz'
+  /api/v1/auth/login/platform:
+    $ref: './paths/identity.yaml#/api/v1/auth/login/platform'
+  /api/v1/auth/login/phone:
+    $ref: './paths/identity.yaml#/api/v1/auth/login/phone'
+  /api/v1/auth/login/no:
+    $ref: './paths/identity.yaml#/api/v1/auth/login/no'
+  /api/v1/auth/login/sms:
+    $ref: './paths/identity.yaml#/api/v1/auth/login/sms'
+  /api/v1/auth/sms/send:
+    $ref: './paths/identity.yaml#/api/v1/auth/sms/send'
+  /api/v1/auth/refresh:
+    $ref: './paths/identity.yaml#/api/v1/auth/refresh'
+  /api/v1/auth/password/reset:
+    $ref: './paths/identity.yaml#/api/v1/auth/password/reset'
+  /api/v1/auth/activate:
+    $ref: './paths/identity.yaml#/api/v1/auth/activate'
+  /api/v1/auth/logout:
+    $ref: './paths/identity.yaml#/api/v1/auth/logout'
+  /api/v1/auth/sso/{tenant_code}/login:
+    $ref: './paths/identity.yaml#/api/v1/auth/sso/{tenant_code}/login'
+  /api/v1/auth/sso/{tenant_code}/callback:
+    $ref: './paths/identity.yaml#/api/v1/auth/sso/{tenant_code}/callback'
+  /api/v1/auth/sso/{tenant_code}/ldap:
+    $ref: './paths/identity.yaml#/api/v1/auth/sso/{tenant_code}/ldap'
+  /api/v1/platform/applications:
+    $ref: './paths/identity.yaml#/api/v1/platform/applications'
+  /api/v1/platform/applications/{id}/approve:
+    $ref: './paths/identity.yaml#/api/v1/platform/applications/{id}/approve'
+  /api/v1/platform/applications/{id}/reject:
+    $ref: './paths/identity.yaml#/api/v1/platform/applications/{id}/reject'
+  /api/v1/platform/tenants:
+    $ref: './paths/identity.yaml#/api/v1/platform/tenants'
+  /api/v1/platform/tenants/{id}:
+    $ref: './paths/identity.yaml#/api/v1/platform/tenants/{id}'
+  /api/v1/tenant/config:
+    $ref: './paths/identity.yaml#/api/v1/tenant/config'
+  /api/v1/tenant/sso:
+    $ref: './paths/identity.yaml#/api/v1/tenant/sso'
+  /api/v1/org/departments:
+    $ref: './paths/identity.yaml#/api/v1/org/departments'
+  /api/v1/org/departments/{id}:
+    $ref: './paths/identity.yaml#/api/v1/org/departments/{id}'
+  /api/v1/org/majors:
+    $ref: './paths/identity.yaml#/api/v1/org/majors'
+  /api/v1/org/majors/{id}:
+    $ref: './paths/identity.yaml#/api/v1/org/majors/{id}'
+  /api/v1/org/classes:
+    $ref: './paths/identity.yaml#/api/v1/org/classes'
+  /api/v1/org/classes/{id}:
+    $ref: './paths/identity.yaml#/api/v1/org/classes/{id}'
+  /api/v1/org/import/preview:
+    $ref: './paths/identity.yaml#/api/v1/org/import/preview'
+  /api/v1/org/import/commit:
+    $ref: './paths/identity.yaml#/api/v1/org/import/commit'
+  /api/v1/org/import/template:
+    $ref: './paths/identity.yaml#/api/v1/org/import/template'
+  /api/v1/org/classes/archive:
+    $ref: './paths/identity.yaml#/api/v1/org/classes/archive'
+  /api/v1/org/classes/promote:
+    $ref: './paths/identity.yaml#/api/v1/org/classes/promote'
+  /api/v1/accounts:
+    $ref: './paths/identity.yaml#/api/v1/accounts'
+  /api/v1/accounts/{id}:
+    $ref: './paths/identity.yaml#/api/v1/accounts/{id}'
+  /api/v1/accounts/{id}/disable:
+    $ref: './paths/identity.yaml#/api/v1/accounts/{id}/disable'
+  /api/v1/accounts/{id}/enable:
+    $ref: './paths/identity.yaml#/api/v1/accounts/{id}/enable'
+  /api/v1/accounts/{id}/archive:
+    $ref: './paths/identity.yaml#/api/v1/accounts/{id}/archive'
+  /api/v1/accounts/{id}/restore:
+    $ref: './paths/identity.yaml#/api/v1/accounts/{id}/restore'
+  /api/v1/accounts/{id}/cancel:
+    $ref: './paths/identity.yaml#/api/v1/accounts/{id}/cancel'
+  /api/v1/accounts/{id}/force-logout:
+    $ref: './paths/identity.yaml#/api/v1/accounts/{id}/force-logout'
+  /api/v1/accounts/{id}/reset-password:
+    $ref: './paths/identity.yaml#/api/v1/accounts/{id}/reset-password'
+  /api/v1/accounts/{id}/grant-admin:
+    $ref: './paths/identity.yaml#/api/v1/accounts/{id}/grant-admin'
+  /api/v1/accounts/{id}/revoke-admin:
+    $ref: './paths/identity.yaml#/api/v1/accounts/{id}/revoke-admin'
+  /api/v1/accounts/batch/disable:
+    $ref: './paths/identity.yaml#/api/v1/accounts/batch/disable'
+  /api/v1/accounts/batch/archive:
+    $ref: './paths/identity.yaml#/api/v1/accounts/batch/archive'
+  /api/v1/accounts/batch/restore:
+    $ref: './paths/identity.yaml#/api/v1/accounts/batch/restore'
+  /api/v1/accounts/import/preview:
+    $ref: './paths/identity.yaml#/api/v1/accounts/import/preview'
+  /api/v1/accounts/import/commit:
+    $ref: './paths/identity.yaml#/api/v1/accounts/import/commit'
+  /api/v1/accounts/import/template:
+    $ref: './paths/identity.yaml#/api/v1/accounts/import/template'
+  /api/v1/accounts/import/batches:
+    $ref: './paths/identity.yaml#/api/v1/accounts/import/batches'
+  /api/v1/me:
+    $ref: './paths/identity.yaml#/api/v1/me'
+  /api/v1/me/password:
+    $ref: './paths/identity.yaml#/api/v1/me/password'
+  /api/v1/me/phone:
+    $ref: './paths/identity.yaml#/api/v1/me/phone'
+  /api/v1/me/sessions:
+    $ref: './paths/identity.yaml#/api/v1/me/sessions'
+  /api/v1/audit:
+    $ref: './paths/identity.yaml#/api/v1/audit'
+  /api/v1/transfer/tasks:
+    $ref: './paths/transfer.yaml#/api/v1/transfer/tasks'
+  /api/v1/transfer/tasks/{id}:
+    $ref: './paths/transfer.yaml#/api/v1/transfer/tasks/{id}'
+  /api/v1/transfer/tasks/{id}/download-grant:
+    $ref: './paths/transfer.yaml#/api/v1/transfer/tasks/{id}/download-grant'
+  /api/v1/sandbox/runtimes:
+    $ref: './paths/sandbox.yaml#/api/v1/sandbox/runtimes'
+  /api/v1/sandbox/runtimes/{id}:
+    $ref: './paths/sandbox.yaml#/api/v1/sandbox/runtimes/{id}'
+  /api/v1/sandbox/runtimes/{id}/selftest:
+    $ref: './paths/sandbox.yaml#/api/v1/sandbox/runtimes/{id}/selftest'
+  /api/v1/sandbox/runtimes/{id}/images:
+    $ref: './paths/sandbox.yaml#/api/v1/sandbox/runtimes/{id}/images'
+  /api/v1/sandbox/runtimes/{id}/images/{img}:
+    $ref: './paths/sandbox.yaml#/api/v1/sandbox/runtimes/{id}/images/{img}'
+  /api/v1/sandbox/runtimes/{id}/images/{img}/prepull:
+    $ref: './paths/sandbox.yaml#/api/v1/sandbox/runtimes/{id}/images/{img}/prepull'
+  /api/v1/sandbox/tools:
+    $ref: './paths/sandbox.yaml#/api/v1/sandbox/tools'
+  /api/v1/sandbox/sandboxes:
+    $ref: './paths/sandbox.yaml#/api/v1/sandbox/sandboxes'
+  /api/v1/sandbox/sandboxes/recycle:
+    $ref: './paths/sandbox.yaml#/api/v1/sandbox/sandboxes/recycle'
+  /api/v1/sandbox/sandboxes/{id}:
+    $ref: './paths/sandbox.yaml#/api/v1/sandbox/sandboxes/{id}'
+  /api/v1/sandbox/sandboxes/{id}/pause:
+    $ref: './paths/sandbox.yaml#/api/v1/sandbox/sandboxes/{id}/pause'
+  /api/v1/sandbox/sandboxes/{id}/resume:
+    $ref: './paths/sandbox.yaml#/api/v1/sandbox/sandboxes/{id}/resume'
+  /api/v1/sandbox/sandboxes/{id}/progress:
+    $ref: './paths/sandbox.yaml#/api/v1/sandbox/sandboxes/{id}/progress'
+  /api/v1/sandbox/sandboxes/{id}/terminal:
+    $ref: './paths/sandbox.yaml#/api/v1/sandbox/sandboxes/{id}/terminal'
+  /api/v1/sandbox/sandboxes/{id}/files:
+    $ref: './paths/sandbox.yaml#/api/v1/sandbox/sandboxes/{id}/files'
+  /api/v1/sandbox/sandboxes/{id}/files/save:
+    $ref: './paths/sandbox.yaml#/api/v1/sandbox/sandboxes/{id}/files/save'
+  /api/v1/sandbox/sandboxes/{id}/chain/deploy:
+    $ref: './paths/sandbox.yaml#/api/v1/sandbox/sandboxes/{id}/chain/deploy'
+  /api/v1/sandbox/sandboxes/{id}/chain/tx:
+    $ref: './paths/sandbox.yaml#/api/v1/sandbox/sandboxes/{id}/chain/tx'
+  /api/v1/sandbox/sandboxes/{id}/chain/query:
+    $ref: './paths/sandbox.yaml#/api/v1/sandbox/sandboxes/{id}/chain/query'
+  /api/v1/sandbox/sandboxes/{id}/chain/reset:
+    $ref: './paths/sandbox.yaml#/api/v1/sandbox/sandboxes/{id}/chain/reset'
+  /api/v1/sandbox/sandboxes/{id}/tools/{tool_code}/{proxy_path}:
+    $ref: './paths/sandbox.yaml#/api/v1/sandbox/sandboxes/{id}/tools/{tool_code}/{proxy_path}'
+  /api/v1/sandbox/quota:
+    $ref: './paths/sandbox.yaml#/api/v1/sandbox/quota'
+  /api/v1/judge/judgers:
+    $ref: './paths/judge.yaml#/api/v1/judge/judgers'
+  /api/v1/judge/judgers/{id}:
+    $ref: './paths/judge.yaml#/api/v1/judge/judgers/{id}'
+  /api/v1/judge/judgers/{id}/selftest:
+    $ref: './paths/judge.yaml#/api/v1/judge/judgers/{id}/selftest'
+  /api/v1/judge/tasks:
+    $ref: './paths/judge.yaml#/api/v1/judge/tasks'
+  /api/v1/judge/tasks/{id}:
+    $ref: './paths/judge.yaml#/api/v1/judge/tasks/{id}'
+  /api/v1/judge/tasks/{id}/progress:
+    $ref: './paths/judge.yaml#/api/v1/judge/tasks/{id}/progress'
+  /api/v1/judge/tasks/{id}/rejudge:
+    $ref: './paths/judge.yaml#/api/v1/judge/tasks/{id}/rejudge'
+  /api/v1/judge/tasks/{id}/manual-score:
+    $ref: './paths/judge.yaml#/api/v1/judge/tasks/{id}/manual-score'
+  /api/v1/judge/rejudge/batch:
+    $ref: './paths/judge.yaml#/api/v1/judge/rejudge/batch'
+  /api/v1/judge/fingerprints/exact:
+    $ref: './paths/judge.yaml#/api/v1/judge/fingerprints/exact'
+  /api/v1/judge/fingerprints/similarity:
+    $ref: './paths/judge.yaml#/api/v1/judge/fingerprints/similarity'
+  /api/v1/sim/shared/{code}:
+    $ref: './paths/sim.yaml#/api/v1/sim/shared/{code}'
+  /api/v1/sim/packages:
+    $ref: './paths/sim.yaml#/api/v1/sim/packages'
+  /api/v1/sim/packages/{key}:
+    $ref: './paths/sim.yaml#/api/v1/sim/packages/{key}'
+  /api/v1/sim/packages/{key}/versions:
+    $ref: './paths/sim.yaml#/api/v1/sim/packages/{key}/versions'
+  /api/v1/sim/packages/{key}/{version}/bundle:
+    $ref: './paths/sim.yaml#/api/v1/sim/packages/{key}/{version}/bundle'
+  /api/v1/sim/packages/{key}/preview:
+    $ref: './paths/sim.yaml#/api/v1/sim/packages/{key}/preview'
+  /api/v1/sim/packages/{key}/validation-report:
+    $ref: './paths/sim.yaml#/api/v1/sim/packages/{key}/validation-report'
+  /api/v1/sim/packages/{key}/archive:
+    $ref: './paths/sim.yaml#/api/v1/sim/packages/{key}/archive'
+  /api/v1/sim/packages/{key}/republish:
+    $ref: './paths/sim.yaml#/api/v1/sim/packages/{key}/republish'
+  /api/v1/sim/reviews:
+    $ref: './paths/sim.yaml#/api/v1/sim/reviews'
+  /api/v1/sim/reviews/{id}/approve:
+    $ref: './paths/sim.yaml#/api/v1/sim/reviews/{id}/approve'
+  /api/v1/sim/reviews/{id}/reject:
+    $ref: './paths/sim.yaml#/api/v1/sim/reviews/{id}/reject'
+  /api/v1/sim/sessions:
+    $ref: './paths/sim.yaml#/api/v1/sim/sessions'
+  /api/v1/sim/sessions/recycle:
+    $ref: './paths/sim.yaml#/api/v1/sim/sessions/recycle'
+  /api/v1/sim/sessions/{id}:
+    $ref: './paths/sim.yaml#/api/v1/sim/sessions/{id}'
+  /api/v1/sim/sessions/{id}/actions:
+    $ref: './paths/sim.yaml#/api/v1/sim/sessions/{id}/actions'
+  /api/v1/sim/sessions/{id}/replay:
+    $ref: './paths/sim.yaml#/api/v1/sim/sessions/{id}/replay'
+  /api/v1/sim/sessions/{id}/share:
+    $ref: './paths/sim.yaml#/api/v1/sim/sessions/{id}/share'
+  /api/v1/sim/sessions/{id}/stream:
+    $ref: './paths/sim.yaml#/api/v1/sim/sessions/{id}/stream'
+  /api/v1/sim/sessions/{id}/checkpoints:
+    $ref: './paths/sim.yaml#/api/v1/sim/sessions/{id}/checkpoints'
+  /api/v1/content/items:
+    $ref: './paths/content.yaml#/api/v1/content/items'
+  /api/v1/content/items/system-import:
+    $ref: './paths/content.yaml#/api/v1/content/items/system-import'
+  /api/v1/content/items/batch:
+    $ref: './paths/content.yaml#/api/v1/content/items/batch'
+  /api/v1/content/items/{item}:
+    $ref: './paths/content.yaml#/api/v1/content/items/{item}'
+  /api/v1/content/items/{item}/publish:
+    $ref: './paths/content.yaml#/api/v1/content/items/{item}/publish'
+  /api/v1/content/items/{item}/deprecate:
+    $ref: './paths/content.yaml#/api/v1/content/items/{item}/deprecate'
+  /api/v1/content/items/{item}/versions:
+    $ref: './paths/content.yaml#/api/v1/content/items/{item}/versions'
+  /api/v1/content/items/{item}/new-version:
+    $ref: './paths/content.yaml#/api/v1/content/items/{item}/new-version'
+  /api/v1/content/items/{item}/share:
+    $ref: './paths/content.yaml#/api/v1/content/items/{item}/share'
+  /api/v1/content/items/{item}/unshare:
+    $ref: './paths/content.yaml#/api/v1/content/items/{item}/unshare'
+  /api/v1/content/items/{item}/{version}:
+    $ref: './paths/content.yaml#/api/v1/content/items/{item}/{version}'
+  /api/v1/content/items/{item}/{version}/full:
+    $ref: './paths/content.yaml#/api/v1/content/items/{item}/{version}/full'
+  /api/v1/content/items/{item}/{version}/clone:
+    $ref: './paths/content.yaml#/api/v1/content/items/{item}/{version}/clone'
+  /api/v1/content/items/{item}/{version}/usage:
+    $ref: './paths/content.yaml#/api/v1/content/items/{item}/{version}/usage'
+  /api/v1/content/attachments:
+    $ref: './paths/content.yaml#/api/v1/content/attachments'
+  /api/v1/content/attachments/download-grant:
+    $ref: './paths/content.yaml#/api/v1/content/attachments/download-grant'
+  /api/v1/content/shared:
+    $ref: './paths/content.yaml#/api/v1/content/shared'
+  /api/v1/content/categories:
+    $ref: './paths/content.yaml#/api/v1/content/categories'
+  /api/v1/content/categories/{id}:
+    $ref: './paths/content.yaml#/api/v1/content/categories/{id}'
+  /api/v1/content/papers:
+    $ref: './paths/content.yaml#/api/v1/content/papers'
+  /api/v1/content/papers/{id}:
+    $ref: './paths/content.yaml#/api/v1/content/papers/{id}'
+  /api/v1/content/papers/{id}/regenerate:
+    $ref: './paths/content.yaml#/api/v1/content/papers/{id}/regenerate'
+  /api/v1/teaching/courses:
+    $ref: './paths/teaching.yaml#/api/v1/teaching/courses'
+  /api/v1/teaching/courses/join:
+    $ref: './paths/teaching.yaml#/api/v1/teaching/courses/join'
+  /api/v1/teaching/courses/{id}:
+    $ref: './paths/teaching.yaml#/api/v1/teaching/courses/{id}'
+  /api/v1/teaching/courses/{id}/publish:
+    $ref: './paths/teaching.yaml#/api/v1/teaching/courses/{id}/publish'
+  /api/v1/teaching/courses/{id}/end:
+    $ref: './paths/teaching.yaml#/api/v1/teaching/courses/{id}/end'
+  /api/v1/teaching/courses/{id}/archive:
+    $ref: './paths/teaching.yaml#/api/v1/teaching/courses/{id}/archive'
+  /api/v1/teaching/courses/{id}/clone:
+    $ref: './paths/teaching.yaml#/api/v1/teaching/courses/{id}/clone'
+  /api/v1/teaching/courses/{id}/share:
+    $ref: './paths/teaching.yaml#/api/v1/teaching/courses/{id}/share'
+  /api/v1/teaching/courses/{id}/invite-code/refresh:
+    $ref: './paths/teaching.yaml#/api/v1/teaching/courses/{id}/invite-code/refresh'
+  /api/v1/teaching/courses/{id}/chapters:
+    $ref: './paths/teaching.yaml#/api/v1/teaching/courses/{id}/chapters'
+  /api/v1/teaching/courses/{id}/chapters/{cid}:
+    $ref: './paths/teaching.yaml#/api/v1/teaching/courses/{id}/chapters/{cid}'
+  /api/v1/teaching/chapters/{id}/lessons:
+    $ref: './paths/teaching.yaml#/api/v1/teaching/chapters/{id}/lessons'
+  /api/v1/teaching/chapters/{id}/lessons/{lid}:
+    $ref: './paths/teaching.yaml#/api/v1/teaching/chapters/{id}/lessons/{lid}'
+  /api/v1/teaching/lessons/{id}:
+    $ref: './paths/teaching.yaml#/api/v1/teaching/lessons/{id}'
+  /api/v1/teaching/lessons/{id}/content:
+    $ref: './paths/teaching.yaml#/api/v1/teaching/lessons/{id}/content'
+  /api/v1/teaching/lessons/{id}/progress:
+    $ref: './paths/teaching.yaml#/api/v1/teaching/lessons/{id}/progress'
+  /api/v1/teaching/courses/{id}/members:
+    $ref: './paths/teaching.yaml#/api/v1/teaching/courses/{id}/members'
+  /api/v1/teaching/courses/{id}/members/batch:
+    $ref: './paths/teaching.yaml#/api/v1/teaching/courses/{id}/members/batch'
+  /api/v1/teaching/courses/{id}/members/{sid}:
+    $ref: './paths/teaching.yaml#/api/v1/teaching/courses/{id}/members/{sid}'
+  /api/v1/teaching/courses/{id}/outline:
+    $ref: './paths/teaching.yaml#/api/v1/teaching/courses/{id}/outline'
+  /api/v1/teaching/courses/{id}/my-progress:
+    $ref: './paths/teaching.yaml#/api/v1/teaching/courses/{id}/my-progress'
+  /api/v1/teaching/courses/{id}/progress-stats:
+    $ref: './paths/teaching.yaml#/api/v1/teaching/courses/{id}/progress-stats'
+  /api/v1/teaching/courses/{id}/assignments:
+    $ref: './paths/teaching.yaml#/api/v1/teaching/courses/{id}/assignments'
+  /api/v1/teaching/assignments/{id}:
+    $ref: './paths/teaching.yaml#/api/v1/teaching/assignments/{id}'
+  /api/v1/teaching/assignments/{id}/publish:
+    $ref: './paths/teaching.yaml#/api/v1/teaching/assignments/{id}/publish'
+  /api/v1/teaching/assignments/{id}/submissions:
+    $ref: './paths/teaching.yaml#/api/v1/teaching/assignments/{id}/submissions'
+  /api/v1/teaching/assignments/{id}/draft:
+    $ref: './paths/teaching.yaml#/api/v1/teaching/assignments/{id}/draft'
+  /api/v1/teaching/assignments/{id}/submit:
+    $ref: './paths/teaching.yaml#/api/v1/teaching/assignments/{id}/submit'
+  /api/v1/teaching/submissions/{id}:
+    $ref: './paths/teaching.yaml#/api/v1/teaching/submissions/{id}'
+  /api/v1/teaching/submissions/{id}/grade:
+    $ref: './paths/teaching.yaml#/api/v1/teaching/submissions/{id}/grade'
+  /api/v1/teaching/courses/{id}/posts:
+    $ref: './paths/teaching.yaml#/api/v1/teaching/courses/{id}/posts'
+  /api/v1/teaching/posts/{id}/like:
+    $ref: './paths/teaching.yaml#/api/v1/teaching/posts/{id}/like'
+  /api/v1/teaching/posts/{id}/pin:
+    $ref: './paths/teaching.yaml#/api/v1/teaching/posts/{id}/pin'
+  /api/v1/teaching/posts/{id}:
+    $ref: './paths/teaching.yaml#/api/v1/teaching/posts/{id}'
+  /api/v1/teaching/courses/{id}/announcements:
+    $ref: './paths/teaching.yaml#/api/v1/teaching/courses/{id}/announcements'
+  /api/v1/teaching/announcements/{id}/pin:
+    $ref: './paths/teaching.yaml#/api/v1/teaching/announcements/{id}/pin'
+  /api/v1/teaching/courses/{id}/review:
+    $ref: './paths/teaching.yaml#/api/v1/teaching/courses/{id}/review'
+  /api/v1/teaching/courses/{id}/grade-weights:
+    $ref: './paths/teaching.yaml#/api/v1/teaching/courses/{id}/grade-weights'
+  /api/v1/teaching/courses/{id}/grades:
+    $ref: './paths/teaching.yaml#/api/v1/teaching/courses/{id}/grades'
+  /api/v1/teaching/courses/{id}/grades/compute:
+    $ref: './paths/teaching.yaml#/api/v1/teaching/courses/{id}/grades/compute'
+  /api/v1/teaching/courses/{id}/grades/{sid}:
+    $ref: './paths/teaching.yaml#/api/v1/teaching/courses/{id}/grades/{sid}'
+  /api/v1/teaching/courses/{id}/grades/export:
+    $ref: './paths/teaching.yaml#/api/v1/teaching/courses/{id}/grades/export'
+  /api/v1/teaching/internal/stats:
+    $ref: './paths/teaching.yaml#/api/v1/teaching/internal/stats'
+  /api/v1/teaching/internal/courses/{id}/grades:
+    $ref: './paths/teaching.yaml#/api/v1/teaching/internal/courses/{id}/grades'
+  /api/v1/experiment/experiments:
+    $ref: './paths/experiment.yaml#/api/v1/experiment/experiments'
+  /api/v1/experiment/experiments/{id}:
+    $ref: './paths/experiment.yaml#/api/v1/experiment/experiments/{id}'
+  /api/v1/experiment/experiments/{id}/validate:
+    $ref: './paths/experiment.yaml#/api/v1/experiment/experiments/{id}/validate'
+  /api/v1/experiment/experiments/{id}/publish:
+    $ref: './paths/experiment.yaml#/api/v1/experiment/experiments/{id}/publish'
+  /api/v1/experiment/experiments/{id}/unpublish:
+    $ref: './paths/experiment.yaml#/api/v1/experiment/experiments/{id}/unpublish'
+  /api/v1/experiment/experiments/{id}/instances:
+    $ref: './paths/experiment.yaml#/api/v1/experiment/experiments/{id}/instances'
+  /api/v1/experiment/instances/{id}:
+    $ref: './paths/experiment.yaml#/api/v1/experiment/instances/{id}'
+  /api/v1/experiment/instances/{id}/progress:
+    $ref: './paths/experiment.yaml#/api/v1/experiment/instances/{id}/progress'
+  /api/v1/experiment/instances/{id}/pause:
+    $ref: './paths/experiment.yaml#/api/v1/experiment/instances/{id}/pause'
+  /api/v1/experiment/instances/{id}/resume:
+    $ref: './paths/experiment.yaml#/api/v1/experiment/instances/{id}/resume'
+  /api/v1/experiment/instances/{id}/stages/{stage}/activate:
+    $ref: './paths/experiment.yaml#/api/v1/experiment/instances/{id}/stages/{stage}/activate'
+  /api/v1/experiment/instances/{id}/finish:
+    $ref: './paths/experiment.yaml#/api/v1/experiment/instances/{id}/finish'
+  /api/v1/experiment/instances/{id}/checkpoints/{cp}/judge:
+    $ref: './paths/experiment.yaml#/api/v1/experiment/instances/{id}/checkpoints/{cp}/judge'
+  /api/v1/experiment/instances/{id}/report:
+    $ref: './paths/experiment.yaml#/api/v1/experiment/instances/{id}/report'
+  /api/v1/experiment/experiments/{id}/reports:
+    $ref: './paths/experiment.yaml#/api/v1/experiment/experiments/{id}/reports'
+  /api/v1/experiment/reports/{id}/grade:
+    $ref: './paths/experiment.yaml#/api/v1/experiment/reports/{id}/grade'
+  /api/v1/experiment/experiments/{id}/groups:
+    $ref: './paths/experiment.yaml#/api/v1/experiment/experiments/{id}/groups'
+  /api/v1/experiment/groups/{id}:
+    $ref: './paths/experiment.yaml#/api/v1/experiment/groups/{id}'
+  /api/v1/experiment/groups/{id}/members:
+    $ref: './paths/experiment.yaml#/api/v1/experiment/groups/{id}/members'
+  /api/v1/experiment/internal/instances/{id}/score:
+    $ref: './paths/experiment.yaml#/api/v1/experiment/internal/instances/{id}/score'
+  /api/v1/experiment/internal/stats:
+    $ref: './paths/experiment.yaml#/api/v1/experiment/internal/stats'
+  /api/v1/contest/contests:
+    $ref: './paths/contest.yaml#/api/v1/contest/contests'
+  /api/v1/contest/contests/{id}:
+    $ref: './paths/contest.yaml#/api/v1/contest/contests/{id}'
+  /api/v1/contest/contests/{id}/problems:
+    $ref: './paths/contest.yaml#/api/v1/contest/contests/{id}/problems'
+  /api/v1/contest/contests/{id}/publish:
+    $ref: './paths/contest.yaml#/api/v1/contest/contests/{id}/publish'
+  /api/v1/contest/contests/{id}/start:
+    $ref: './paths/contest.yaml#/api/v1/contest/contests/{id}/start'
+  /api/v1/contest/contests/{id}/freeze:
+    $ref: './paths/contest.yaml#/api/v1/contest/contests/{id}/freeze'
+  /api/v1/contest/contests/{id}/end:
+    $ref: './paths/contest.yaml#/api/v1/contest/contests/{id}/end'
+  /api/v1/contest/contests/{id}/archive:
+    $ref: './paths/contest.yaml#/api/v1/contest/contests/{id}/archive'
+  /api/v1/contest/contests/{id}/signup:
+    $ref: './paths/contest.yaml#/api/v1/contest/contests/{id}/signup'
+  /api/v1/contest/contests/{id}/result-snapshot:
+    $ref: './paths/contest.yaml#/api/v1/contest/contests/{id}/result-snapshot'
+  /api/v1/contest/contests/{id}/problems/{problem_id}/env:
+    $ref: './paths/contest.yaml#/api/v1/contest/contests/{id}/problems/{problem_id}/env'
+  /api/v1/contest/contests/{id}/problems/{problem_id}/submit:
+    $ref: './paths/contest.yaml#/api/v1/contest/contests/{id}/problems/{problem_id}/submit'
+  /api/v1/contest/contests/{id}/battle/entry:
+    $ref: './paths/contest.yaml#/api/v1/contest/contests/{id}/battle/entry'
+  /api/v1/contest/contests/{id}/battle/entries:
+    $ref: './paths/contest.yaml#/api/v1/contest/contests/{id}/battle/entries'
+  /api/v1/contest/contests/{id}/battle/matches:
+    $ref: './paths/contest.yaml#/api/v1/contest/contests/{id}/battle/matches'
+  /api/v1/contest/contests/{id}/ladder:
+    $ref: './paths/contest.yaml#/api/v1/contest/contests/{id}/ladder'
+  /api/v1/contest/contests/{id}/cheat-suspects:
+    $ref: './paths/contest.yaml#/api/v1/contest/contests/{id}/cheat-suspects'
+  /api/v1/contest/contests/{id}/cheat-records:
+    $ref: './paths/contest.yaml#/api/v1/contest/contests/{id}/cheat-records'
+  /api/v1/contest/teams/{id}:
+    $ref: './paths/contest.yaml#/api/v1/contest/teams/{id}'
+  /api/v1/contest/teams/{id}/join:
+    $ref: './paths/contest.yaml#/api/v1/contest/teams/{id}/join'
+  /api/v1/contest/teams/{id}/lock:
+    $ref: './paths/contest.yaml#/api/v1/contest/teams/{id}/lock'
+  /api/v1/contest/submissions/{id}:
+    $ref: './paths/contest.yaml#/api/v1/contest/submissions/{id}'
+  /api/v1/contest/matches/{id}/replay:
+    $ref: './paths/contest.yaml#/api/v1/contest/matches/{id}/replay'
+  /api/v1/contest/my/contest-records:
+    $ref: './paths/contest.yaml#/api/v1/contest/my/contest-records'
+  /api/v1/contest/vuln-sources:
+    $ref: './paths/contest.yaml#/api/v1/contest/vuln-sources'
+  /api/v1/contest/vuln-sources/{id}/sync:
+    $ref: './paths/contest.yaml#/api/v1/contest/vuln-sources/{id}/sync'
+  /api/v1/contest/vuln-sources/import:
+    $ref: './paths/contest.yaml#/api/v1/contest/vuln-sources/import'
+  /api/v1/contest/vuln-problems:
+    $ref: './paths/contest.yaml#/api/v1/contest/vuln-problems'
+  /api/v1/contest/vuln-problems/{id}/prevalidate:
+    $ref: './paths/contest.yaml#/api/v1/contest/vuln-problems/{id}/prevalidate'
+  /api/v1/contest/vuln-problems/{id}/finalize:
+    $ref: './paths/contest.yaml#/api/v1/contest/vuln-problems/{id}/finalize'
+  /api/v1/contest/internal/stats:
+    $ref: './paths/contest.yaml#/api/v1/contest/internal/stats'
+  /api/v1/contest/internal/students/{id}/achievements:
+    $ref: './paths/contest.yaml#/api/v1/contest/internal/students/{id}/achievements'
+  /api/v1/contest/internal/students/{id}/contest-achievements:
+    $ref: './paths/contest.yaml#/api/v1/contest/internal/students/{id}/contest-achievements'
+  /api/v1/admin/platform/dashboard:
+    $ref: './paths/admin.yaml#/api/v1/admin/platform/dashboard'
+  /api/v1/admin/platform/statistics:
+    $ref: './paths/admin.yaml#/api/v1/admin/platform/statistics'
+  /api/v1/admin/platform/tenants:
+    $ref: './paths/admin.yaml#/api/v1/admin/platform/tenants'
+  /api/v1/admin/platform/applications:
+    $ref: './paths/admin.yaml#/api/v1/admin/platform/applications'
+  /api/v1/admin/platform/monitoring/panels:
+    $ref: './paths/admin.yaml#/api/v1/admin/platform/monitoring/panels'
+  /api/v1/admin/platform/backups:
+    $ref: './paths/admin.yaml#/api/v1/admin/platform/backups'
+  /api/v1/admin/platform/backups/trigger:
+    $ref: './paths/admin.yaml#/api/v1/admin/platform/backups/trigger'
+  /api/v1/admin/school/dashboard:
+    $ref: './paths/admin.yaml#/api/v1/admin/school/dashboard'
+  /api/v1/admin/school/statistics:
+    $ref: './paths/admin.yaml#/api/v1/admin/school/statistics'
+  /api/v1/admin/audit:
+    $ref: './paths/admin.yaml#/api/v1/admin/audit'
+  /api/v1/admin/audit/export:
+    $ref: './paths/admin.yaml#/api/v1/admin/audit/export'
+  /api/v1/admin/configs:
+    $ref: './paths/admin.yaml#/api/v1/admin/configs'
+  /api/v1/admin/configs/{key}:
+    $ref: './paths/admin.yaml#/api/v1/admin/configs/{key}'
+  /api/v1/admin/configs/{key}/history:
+    $ref: './paths/admin.yaml#/api/v1/admin/configs/{key}/history'
+  /api/v1/admin/configs/{key}/rollback:
+    $ref: './paths/admin.yaml#/api/v1/admin/configs/{key}/rollback'
+  /api/v1/admin/alert-rules:
+    $ref: './paths/admin.yaml#/api/v1/admin/alert-rules'
+  /api/v1/admin/alert-rules/{id}:
+    $ref: './paths/admin.yaml#/api/v1/admin/alert-rules/{id}'
+  /api/v1/admin/alert-events:
+    $ref: './paths/admin.yaml#/api/v1/admin/alert-events'
+  /api/v1/admin/alert-events/{id}/handle:
+    $ref: './paths/admin.yaml#/api/v1/admin/alert-events/{id}/handle'
+  /api/v1/notify/inbox:
+    $ref: './paths/notify.yaml#/api/v1/notify/inbox'
+  /api/v1/notify/inbox/unread-count:
+    $ref: './paths/notify.yaml#/api/v1/notify/inbox/unread-count'
+  /api/v1/notify/inbox/{id}/read:
+    $ref: './paths/notify.yaml#/api/v1/notify/inbox/{id}/read'
+  /api/v1/notify/inbox/read-all:
+    $ref: './paths/notify.yaml#/api/v1/notify/inbox/read-all'
+  /api/v1/notify/inbox/{id}:
+    $ref: './paths/notify.yaml#/api/v1/notify/inbox/{id}'
+  /api/v1/notify/preferences:
+    $ref: './paths/notify.yaml#/api/v1/notify/preferences'
+  /api/v1/notify/announcements:
+    $ref: './paths/notify.yaml#/api/v1/notify/announcements'
+  /api/v1/notify/announcements/{id}/read:
+    $ref: './paths/notify.yaml#/api/v1/notify/announcements/{id}/read'
+  /api/v1/notify/ws:
+    $ref: './paths/notify.yaml#/api/v1/notify/ws'
+  /api/v1/notify/send:
+    $ref: './paths/notify.yaml#/api/v1/notify/send'
+  /api/v1/notify/push:
+    $ref: './paths/notify.yaml#/api/v1/notify/push'
+  /api/v1/grade-center/level-configs:
+    $ref: './paths/grade.yaml#/api/v1/grade-center/level-configs'
+  /api/v1/grade-center/level-configs/{id}:
+    $ref: './paths/grade.yaml#/api/v1/grade-center/level-configs/{id}'
+  /api/v1/grade-center/semesters:
+    $ref: './paths/grade.yaml#/api/v1/grade-center/semesters'
+  /api/v1/grade-center/reviews:
+    $ref: './paths/grade.yaml#/api/v1/grade-center/reviews'
+  /api/v1/grade-center/reviews/{id}/approve:
+    $ref: './paths/grade.yaml#/api/v1/grade-center/reviews/{id}/approve'
+  /api/v1/grade-center/reviews/{id}/reject:
+    $ref: './paths/grade.yaml#/api/v1/grade-center/reviews/{id}/reject'
+  /api/v1/grade-center/reviews/{id}/unlock:
+    $ref: './paths/grade.yaml#/api/v1/grade-center/reviews/{id}/unlock'
+  /api/v1/grade-center/students/{id}/grades:
+    $ref: './paths/grade.yaml#/api/v1/grade-center/students/{id}/grades'
+  /api/v1/grade-center/students/{id}/gpa:
+    $ref: './paths/grade.yaml#/api/v1/grade-center/students/{id}/gpa'
+  /api/v1/grade-center/students/{id}/recompute:
+    $ref: './paths/grade.yaml#/api/v1/grade-center/students/{id}/recompute'
+  /api/v1/grade-center/appeals:
+    $ref: './paths/grade.yaml#/api/v1/grade-center/appeals'
+  /api/v1/grade-center/appeals/{id}/accept:
+    $ref: './paths/grade.yaml#/api/v1/grade-center/appeals/{id}/accept'
+  /api/v1/grade-center/appeals/{id}/reject:
+    $ref: './paths/grade.yaml#/api/v1/grade-center/appeals/{id}/reject'
+  /api/v1/grade-center/warning-rules:
+    $ref: './paths/grade.yaml#/api/v1/grade-center/warning-rules'
+  /api/v1/grade-center/warnings:
+    $ref: './paths/grade.yaml#/api/v1/grade-center/warnings'
+  /api/v1/grade-center/warnings/{id}/ack:
+    $ref: './paths/grade.yaml#/api/v1/grade-center/warnings/{id}/ack'
+  /api/v1/grade-center/warnings/scan:
+    $ref: './paths/grade.yaml#/api/v1/grade-center/warnings/scan'
+  /api/v1/grade-center/transcripts:
+    $ref: './paths/grade.yaml#/api/v1/grade-center/transcripts'
+  /api/v1/grade-center/transcripts/{id}:
+    $ref: './paths/grade.yaml#/api/v1/grade-center/transcripts/{id}'
+  /api/v1/grade-center/transcripts/batch:
+    $ref: './paths/grade.yaml#/api/v1/grade-center/transcripts/batch'
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: M1 JWT Access Token。
+    serviceAuth:
+      type: apiKey
+      in: header
+      name: X-Service-Signature
+      description: 内部服务 HMAC-SHA256 签名,签名输入绑定 method、path、tenant_id、source_ref、timestamp 与 trace_id。
+  parameters:
+    IDPath:
+      name: id
+      in: path
+      required: true
+      schema: { type: integer, format: int64 }
+    CIDPath:
+      name: cid
+      in: path
+      required: true
+      schema: { type: integer, format: int64 }
+    LIDPath:
+      name: lid
+      in: path
+      required: true
+      schema: { type: integer, format: int64 }
+    SIDPath:
+      name: sid
+      in: path
+      required: true
+      schema: { type: integer, format: int64 }
+    CPPath:
+      name: cp
+      in: path
+      required: true
+      schema: { type: string }
+    StagePath:
+      name: stage
+      in: path
+      required: true
+      schema: { type: string }
+    ProblemIDPath:
+      name: problem_id
+      in: path
+      required: true
+      schema: { type: integer, format: int64 }
+    ItemPath:
+      name: item
+      in: path
+      required: true
+      schema: { type: string }
+    CodePath:
+      name: code
+      in: path
+      required: true
+      schema: { type: string }
+    KeyPath:
+      name: key
+      in: path
+      required: true
+      schema: { type: string }
+    VersionPath:
+      name: version
+      in: path
+      required: true
+      schema: { type: string }
+    ImagePath:
+      name: img
+      in: path
+      required: true
+      schema: { type: string }
+    ToolCodePath:
+      name: tool_code
+      in: path
+      required: true
+      schema: { type: string }
+    ProxyPath:
+      name: proxy_path
+      in: path
+      required: true
+      schema: { type: string }
+      description: Gin 通配代理路径,对应 `*proxy_path`。
+    TenantCodePath:
+      name: tenant_code
+      in: path
+      required: true
+      schema: { type: string }
+    TenantCodeHeader:
+      name: X-Tenant-Code
+      in: header
+      required: false
+      schema: { type: string }
+    PageQuery:
+      name: page
+      in: query
+      required: false
+      schema: { type: integer, default: 1, minimum: 1 }
+    SizeQuery:
+      name: size
+      in: query
+      required: false
+      schema: { type: integer, default: 20, minimum: 1, maximum: 100 }
+    StatusQuery:
+      name: status
+      in: query
+      required: false
+      schema: { type: string }
+    KeywordQuery:
+      name: keyword
+      in: query
+      required: false
+      schema: { type: string }
+    FromQuery:
+      name: from
+      in: query
+      required: false
+      schema: { type: string, format: date-time }
+    ToQuery:
+      name: to
+      in: query
+      required: false
+      schema: { type: string, format: date-time }
+    FormatQuery:
+      name: format
+      in: query
+      required: false
+      schema:
+        type: string
+        enum: [xlsx, csv]
+    FilePathQuery:
+      name: path
+      in: query
+      required: false
+      schema: { type: string }
+  requestBodies:
+    ObjectBody:
+      required: false
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ObjectPayload"
+    MultipartBody:
+      required: true
+      content:
+        multipart/form-data:
+          schema:
+            type: object
+            additionalProperties: true
+  responses:
+    Standard:
+      description: 统一成功响应。
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/StandardResponse"
+    Error:
+      description: 统一错误响应。技术原因只进入日志,不进入响应体。
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    Binary:
+      description: 文件下载响应。
+      content:
+        application/octet-stream:
+          schema:
+            type: string
+            format: binary
+    PlainOK:
+      description: 探针成功。
+      content:
+        text/plain:
+          schema:
+            type: string
+  schemas:
+    ObjectPayload:
+      type: object
+      additionalProperties: true
+      description: 文档未细化字段时使用的通用 JSON 对象;具体字段以对应模块接口设计和 DTO 为准。
+    StandardResponse:
+      type: object
+      required: [code, message, data]
+      properties:
+        code:
+          type: integer
+          example: 0
+        message:
+          type: string
+          example: ok
+        data:
+          nullable: true
+          oneOf:
+            - type: object
+              additionalProperties: true
+            - type: array
+              items: {}
+            - type: string
+            - type: number
+            - type: boolean
+    ErrorResponse:
+      type: object
+      required: [code, message, trace_id]
+      properties:
+        code:
+          oneOf:
+            - type: integer
+            - type: string
+          description: 业务错误码,按 `docs/总-API接口总览.md` 分段。
+        message:
+          type: string
+          description: 用户向友好文案,不得包含堆栈、SQL、内部字段、连接串或第三方原始错误。
+        trace_id:
+          type: string
+          description: 报障定位编号。

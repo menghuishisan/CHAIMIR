@@ -1,0 +1,221 @@
+# 本文件按模块维护 grade 路径项。
+/api/v1/grade-center/level-configs:
+  get:
+    tags: [grade]
+    summary: 等级映射配置列表
+    operationId: gradeListLevelConfigs
+    x-chaimir-audience: user
+    security: [{ bearerAuth: [] }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+  post:
+    tags: [grade]
+    summary: 创建等级映射配置
+    operationId: gradeCreateLevelConfig
+    x-chaimir-audience: school-admin
+    security: [{ bearerAuth: [] }]
+    requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/grade-center/level-configs/{id}:
+  put:
+    tags: [grade]
+    summary: 更新等级映射配置
+    operationId: gradeUpdateLevelConfig
+    x-chaimir-audience: school-admin
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/grade-center/semesters:
+  get:
+    tags: [grade]
+    summary: 学期列表
+    operationId: gradeListSemesters
+    x-chaimir-audience: user
+    security: [{ bearerAuth: [] }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+  post:
+    tags: [grade]
+    summary: 创建学期
+    operationId: gradeCreateSemester
+    x-chaimir-audience: school-admin
+    security: [{ bearerAuth: [] }]
+    requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/grade-center/reviews:
+  get:
+    tags: [grade]
+    summary: 成绩审核列表
+    operationId: gradeListReviews
+    x-chaimir-audience: school-admin
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/StatusQuery" }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+  post:
+    tags: [grade]
+    summary: 提交课程成绩审核
+    operationId: gradeSubmitReview
+    x-chaimir-audience: teacher
+    security: [{ bearerAuth: [] }]
+    requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/grade-center/reviews/{id}/approve:
+  post:
+    tags: [grade]
+    summary: 通过成绩审核
+    operationId: gradeApproveReview
+    x-chaimir-audience: school-admin
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/grade-center/reviews/{id}/reject:
+  post:
+    tags: [grade]
+    summary: 驳回成绩审核
+    operationId: gradeRejectReview
+    x-chaimir-audience: school-admin
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/grade-center/reviews/{id}/unlock:
+  post:
+    tags: [grade]
+    summary: 解锁成绩审核状态
+    operationId: gradeUnlockReview
+    x-chaimir-audience: school-admin
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/grade-center/students/{id}/grades:
+  get:
+    tags: [grade]
+    summary: 学生学期成绩
+    operationId: gradeStudentGrades
+    x-chaimir-audience: user
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }, { name: semester, in: query, schema: { type: string } }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/grade-center/students/{id}/gpa:
+  get:
+    tags: [grade]
+    summary: 学生 GPA
+    operationId: gradeStudentGPA
+    x-chaimir-audience: user
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/grade-center/students/{id}/recompute:
+  post:
+    tags: [grade]
+    summary: 重算学生 GPA
+    operationId: gradeRecomputeStudentGrade
+    x-chaimir-audience: school-admin
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/grade-center/appeals:
+  get:
+    tags: [grade]
+    summary: 成绩申诉列表
+    operationId: gradeListAppeals
+    x-chaimir-audience: teacher
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/StatusQuery" }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+  post:
+    tags: [grade]
+    summary: 提交成绩申诉
+    operationId: gradeCreateAppeal
+    x-chaimir-audience: student
+    security: [{ bearerAuth: [] }]
+    requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/grade-center/appeals/{id}/accept:
+  post:
+    tags: [grade]
+    summary: 受理成绩申诉
+    operationId: gradeAcceptAppeal
+    x-chaimir-audience: teacher
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/grade-center/appeals/{id}/reject:
+  post:
+    tags: [grade]
+    summary: 驳回成绩申诉
+    operationId: gradeRejectAppeal
+    x-chaimir-audience: teacher
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/grade-center/warning-rules:
+  get:
+    tags: [grade]
+    summary: 学业预警规则
+    operationId: gradeGetWarningRules
+    x-chaimir-audience: school-admin
+    security: [{ bearerAuth: [] }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+  put:
+    tags: [grade]
+    summary: 更新学业预警规则
+    operationId: gradeUpdateWarningRules
+    x-chaimir-audience: school-admin
+    security: [{ bearerAuth: [] }]
+    requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/grade-center/warnings:
+  get:
+    tags: [grade]
+    summary: 学业预警列表
+    operationId: gradeListWarnings
+    x-chaimir-audience: student-or-school-admin
+    security: [{ bearerAuth: [] }]
+    parameters: [{ name: student_id, in: query, schema: { type: integer, format: int64 } }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/grade-center/warnings/{id}/ack:
+  post:
+    tags: [grade]
+    summary: 学生确认学业预警
+    operationId: gradeAckWarning
+    x-chaimir-audience: student
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/grade-center/warnings/scan:
+  post:
+    tags: [grade]
+    summary: 扫描生成学业预警
+    operationId: gradeScanWarnings
+    x-chaimir-audience: school-admin
+    security: [{ bearerAuth: [] }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/grade-center/transcripts:
+  post:
+    tags: [grade]
+    summary: 生成成绩单 PDF
+    operationId: gradeGenerateTranscript
+    x-chaimir-audience: user
+    security: [{ bearerAuth: [] }]
+    requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/grade-center/transcripts/{id}:
+  get:
+    tags: [grade]
+    summary: 获取成绩单短时下载授权
+    operationId: gradeDownloadTranscript
+    x-chaimir-audience: user
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/grade-center/transcripts/batch:
+  post:
+    tags: [grade]
+    summary: 批量生成成绩单 PDF
+    operationId: gradeGenerateTranscriptBatch
+    x-chaimir-audience: school-admin
+    security: [{ bearerAuth: [] }]
+    requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }

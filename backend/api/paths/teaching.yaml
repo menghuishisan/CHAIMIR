@@ -1,0 +1,503 @@
+# 本文件按模块维护 teaching 路径项。
+/api/v1/teaching/courses:
+  get:
+    tags: [teaching]
+    summary: 我的课程列表
+    operationId: teachingListCourses
+    x-chaimir-audience: user
+    security: [{ bearerAuth: [] }]
+    parameters:
+      - { name: role, in: query, schema: { type: string } }
+      - { $ref: "#/components/parameters/StatusQuery" }
+      - { $ref: "#/components/parameters/PageQuery" }
+      - { $ref: "#/components/parameters/SizeQuery" }
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+  post:
+    tags: [teaching]
+    summary: 创建课程
+    operationId: teachingCreateCourse
+    x-chaimir-audience: teacher
+    security: [{ bearerAuth: [] }]
+    requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/teaching/courses/join:
+  post:
+    tags: [teaching]
+    summary: 学生使用邀请码加入课程
+    operationId: teachingJoinCourse
+    x-chaimir-audience: student
+    security: [{ bearerAuth: [] }]
+    requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/teaching/courses/{id}:
+  patch:
+    tags: [teaching]
+    summary: 编辑课程
+    operationId: teachingUpdateCourse
+    x-chaimir-audience: teacher
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/teaching/courses/{id}/publish:
+  post:
+    tags: [teaching]
+    summary: 发布课程
+    operationId: teachingPublishCourse
+    x-chaimir-audience: teacher
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/teaching/courses/{id}/end:
+  post:
+    tags: [teaching]
+    summary: 结束课程
+    operationId: teachingEndCourse
+    x-chaimir-audience: teacher
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/teaching/courses/{id}/archive:
+  post:
+    tags: [teaching]
+    summary: 归档课程
+    operationId: teachingArchiveCourse
+    x-chaimir-audience: teacher
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/teaching/courses/{id}/clone:
+  post:
+    tags: [teaching]
+    summary: 克隆课程
+    operationId: teachingCloneCourse
+    x-chaimir-audience: teacher
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/teaching/courses/{id}/share:
+  post:
+    tags: [teaching]
+    summary: 共享课程到课程库
+    operationId: teachingShareCourse
+    x-chaimir-audience: teacher
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/teaching/courses/{id}/invite-code/refresh:
+  post:
+    tags: [teaching]
+    summary: 刷新课程邀请码
+    operationId: teachingRefreshInviteCode
+    x-chaimir-audience: teacher
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/teaching/courses/{id}/chapters:
+  get:
+    tags: [teaching]
+    summary: 课程章节列表
+    operationId: teachingListChapters
+    x-chaimir-audience: user
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+  post:
+    tags: [teaching]
+    summary: 创建课程章节
+    operationId: teachingCreateChapter
+    x-chaimir-audience: teacher
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/teaching/courses/{id}/chapters/{cid}:
+  patch:
+    tags: [teaching]
+    summary: 更新课程章节
+    operationId: teachingUpdateChapter
+    x-chaimir-audience: teacher
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }, { $ref: "#/components/parameters/CIDPath" }]
+    requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+  delete:
+    tags: [teaching]
+    summary: 删除课程章节
+    operationId: teachingDeleteChapter
+    x-chaimir-audience: teacher
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }, { $ref: "#/components/parameters/CIDPath" }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/teaching/chapters/{id}/lessons:
+  get:
+    tags: [teaching]
+    summary: 章节课时列表
+    operationId: teachingListLessons
+    x-chaimir-audience: user
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+  post:
+    tags: [teaching]
+    summary: 创建课时
+    operationId: teachingCreateLesson
+    x-chaimir-audience: teacher
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/teaching/chapters/{id}/lessons/{lid}:
+  patch:
+    tags: [teaching]
+    summary: 更新课时
+    operationId: teachingUpdateLesson
+    x-chaimir-audience: teacher
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }, { $ref: "#/components/parameters/LIDPath" }]
+    requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+  delete:
+    tags: [teaching]
+    summary: 删除课时
+    operationId: teachingDeleteLesson
+    x-chaimir-audience: teacher
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }, { $ref: "#/components/parameters/LIDPath" }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/teaching/lessons/{id}:
+  get:
+    tags: [teaching]
+    summary: 课时内容
+    operationId: teachingGetLesson
+    x-chaimir-audience: user
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/teaching/lessons/{id}/content:
+  post:
+    tags: [teaching]
+    summary: 设置课时内容
+    operationId: teachingSetLessonContent
+    x-chaimir-audience: teacher
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/teaching/lessons/{id}/progress:
+  post:
+    tags: [teaching]
+    summary: 上报课时学习进度
+    operationId: teachingReportProgress
+    x-chaimir-audience: student
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/teaching/courses/{id}/members:
+  get:
+    tags: [teaching]
+    summary: 课程成员列表
+    operationId: teachingListMembers
+    x-chaimir-audience: teacher
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/teaching/courses/{id}/members/batch:
+  post:
+    tags: [teaching]
+    summary: 按班级批量添加课程成员
+    operationId: teachingAddMembers
+    x-chaimir-audience: teacher
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/teaching/courses/{id}/members/{sid}:
+  delete:
+    tags: [teaching]
+    summary: 移除课程成员
+    operationId: teachingRemoveMember
+    x-chaimir-audience: teacher
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }, { $ref: "#/components/parameters/SIDPath" }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/teaching/courses/{id}/outline:
+  get:
+    tags: [teaching]
+    summary: 课程章节课时目录
+    operationId: teachingGetOutline
+    x-chaimir-audience: user
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/teaching/courses/{id}/my-progress:
+  get:
+    tags: [teaching]
+    summary: 本人课程进度概览
+    operationId: teachingMyProgress
+    x-chaimir-audience: student
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/teaching/courses/{id}/progress-stats:
+  get:
+    tags: [teaching]
+    summary: 班级完成率和学习时长聚合
+    operationId: teachingProgressStats
+    x-chaimir-audience: teacher
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+
+/api/v1/teaching/courses/{id}/assignments:
+  post:
+    tags: [teaching]
+    summary: 创建课程作业
+    operationId: teachingCreateAssignment
+    x-chaimir-audience: teacher
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/teaching/assignments/{id}:
+  get:
+    tags: [teaching]
+    summary: 作业详情
+    operationId: teachingGetAssignment
+    x-chaimir-audience: user
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+  patch:
+    tags: [teaching]
+    summary: 编辑作业
+    operationId: teachingUpdateAssignment
+    x-chaimir-audience: teacher
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/teaching/assignments/{id}/publish:
+  post:
+    tags: [teaching]
+    summary: 发布作业
+    operationId: teachingPublishAssignment
+    x-chaimir-audience: teacher
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/teaching/assignments/{id}/submissions:
+  get:
+    tags: [teaching]
+    summary: 作业提交列表
+    operationId: teachingListSubmissions
+    x-chaimir-audience: teacher
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/teaching/assignments/{id}/draft:
+  get:
+    tags: [teaching]
+    summary: 读取作业服务端草稿
+    operationId: teachingGetDraft
+    x-chaimir-audience: student
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+  post:
+    tags: [teaching]
+    summary: 保存作业服务端草稿
+    operationId: teachingSaveDraft
+    x-chaimir-audience: student
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/teaching/assignments/{id}/submit:
+  post:
+    tags: [teaching]
+    summary: 提交作业
+    operationId: teachingSubmitAssignment
+    x-chaimir-audience: student
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/teaching/submissions/{id}:
+  get:
+    tags: [teaching]
+    summary: 查看提交反馈
+    operationId: teachingGetSubmission
+    x-chaimir-audience: user
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/teaching/submissions/{id}/grade:
+  post:
+    tags: [teaching]
+    summary: 批改提交
+    operationId: teachingGradeSubmission
+    x-chaimir-audience: teacher
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/teaching/courses/{id}/posts:
+  get:
+    tags: [teaching]
+    summary: 课程讨论列表
+    operationId: teachingListPosts
+    x-chaimir-audience: user
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+  post:
+    tags: [teaching]
+    summary: 发布讨论帖或回复
+    operationId: teachingCreatePost
+    x-chaimir-audience: user
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/teaching/posts/{id}/like:
+  post:
+    tags: [teaching]
+    summary: 点赞讨论帖
+    operationId: teachingLikePost
+    x-chaimir-audience: user
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/teaching/posts/{id}/pin:
+  post:
+    tags: [teaching]
+    summary: 置顶讨论帖
+    operationId: teachingPinPost
+    x-chaimir-audience: teacher
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/teaching/posts/{id}:
+  delete:
+    tags: [teaching]
+    summary: 删除讨论帖或回复
+    operationId: teachingDeletePost
+    x-chaimir-audience: teacher
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/teaching/courses/{id}/announcements:
+  get:
+    tags: [teaching]
+    summary: 课程公告列表
+    operationId: teachingListAnnouncements
+    x-chaimir-audience: user
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+  post:
+    tags: [teaching]
+    summary: 发布课程公告
+    operationId: teachingCreateAnnouncement
+    x-chaimir-audience: teacher
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/teaching/announcements/{id}/pin:
+  post:
+    tags: [teaching]
+    summary: 置顶课程公告
+    operationId: teachingPinAnnouncement
+    x-chaimir-audience: teacher
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/teaching/courses/{id}/review:
+  post:
+    tags: [teaching]
+    summary: 课程评价
+    operationId: teachingReviewCourse
+    x-chaimir-audience: student
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/teaching/courses/{id}/grade-weights:
+  get:
+    tags: [teaching]
+    summary: 成绩权重配置
+    operationId: teachingListGradeWeights
+    x-chaimir-audience: user
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+  put:
+    tags: [teaching]
+    summary: 设置成绩权重配置
+    operationId: teachingSetGradeWeights
+    x-chaimir-audience: teacher
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/teaching/courses/{id}/grades:
+  get:
+    tags: [teaching]
+    summary: 成绩汇总
+    operationId: teachingListGrades
+    x-chaimir-audience: teacher-or-internal
+    security: [{ bearerAuth: [] }, { serviceAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/teaching/courses/{id}/grades/compute:
+  post:
+    tags: [teaching]
+    summary: 按权重计算全班成绩
+    operationId: teachingComputeGrades
+    x-chaimir-audience: teacher
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/teaching/courses/{id}/grades/{sid}:
+  patch:
+    tags: [teaching]
+    summary: 手动调整单课程成绩
+    operationId: teachingOverrideGrade
+    x-chaimir-audience: teacher
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }, { $ref: "#/components/parameters/SIDPath" }]
+    requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/teaching/courses/{id}/grades/export:
+  get:
+    tags: [teaching]
+    summary: 创建成绩导出任务
+    operationId: teachingExportGrades
+    x-chaimir-audience: teacher
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/teaching/internal/stats:
+  get:
+    tags: [teaching]
+    summary: 教学只读统计
+    operationId: teachingInternalStats
+    x-chaimir-audience: internal
+    x-chaimir-internal: true
+    security: [{ serviceAuth: [] }]
+    parameters:
+      - { name: tenant_id, in: query, schema: { type: integer, format: int64 } }
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/teaching/internal/courses/{id}/grades:
+  get:
+    tags: [teaching]
+    summary: 内部读取课程成绩
+    operationId: teachingInternalCourseGrades
+    x-chaimir-audience: internal
+    x-chaimir-internal: true
+    security: [{ serviceAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }

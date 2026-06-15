@@ -1,0 +1,137 @@
+# 本文件按模块维护 judge 路径项。
+/api/v1/judge/judgers:
+  get:
+    tags: [judge]
+    summary: 判题器列表
+    operationId: judgeListJudgers
+    x-chaimir-audience: platform-admin
+    security: [{ bearerAuth: [] }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+  post:
+    tags: [judge]
+    summary: 注册判题器
+    operationId: judgeCreateJudger
+    x-chaimir-audience: platform-admin
+    security: [{ bearerAuth: [] }]
+    requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/judge/judgers/{id}:
+  patch:
+    tags: [judge]
+    summary: 更新判题器配置
+    operationId: judgeUpdateJudger
+    x-chaimir-audience: platform-admin
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/judge/judgers/{id}/selftest:
+  post:
+    tags: [judge]
+    summary: 样例提交自检
+    operationId: judgeRunJudgerSelftest
+    x-chaimir-audience: platform-admin
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/judge/tasks:
+  get:
+    tags: [judge]
+    summary: 判题任务列表
+    operationId: judgeListTasks
+    x-chaimir-audience: teacher
+    security: [{ bearerAuth: [] }]
+    parameters:
+      - { name: source_ref, in: query, schema: { type: string } }
+      - { name: pending_manual, in: query, schema: { type: boolean } }
+      - { $ref: "#/components/parameters/PageQuery" }
+      - { $ref: "#/components/parameters/SizeQuery" }
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+  post:
+    tags: [judge]
+    summary: 提交判题任务
+    operationId: judgeSubmitTask
+    x-chaimir-audience: internal
+    x-chaimir-internal: true
+    security: [{ serviceAuth: [] }]
+    requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/judge/tasks/{id}:
+  get:
+    tags: [judge]
+    summary: 查询判题任务
+    operationId: judgeGetTask
+    x-chaimir-audience: teacher
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+  delete:
+    tags: [judge]
+    summary: 取消排队中的判题任务
+    operationId: judgeCancelTask
+    x-chaimir-audience: internal
+    x-chaimir-internal: true
+    security: [{ serviceAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/judge/tasks/{id}/progress:
+  get:
+    tags: [judge]
+    summary: 判题进度 WebSocket
+    operationId: judgeTaskProgress
+    x-chaimir-audience: teacher
+    x-chaimir-websocket: true
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    responses: { "101": { description: WebSocket 升级成功 }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/judge/tasks/{id}/rejudge:
+  post:
+    tags: [judge]
+    summary: 按输入快照原样重判
+    operationId: judgeRejudgeTask
+    x-chaimir-audience: teacher-or-internal
+    security: [{ bearerAuth: [] }, { serviceAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/judge/tasks/{id}/manual-score:
+  post:
+    tags: [judge]
+    summary: 录入人工评分
+    operationId: judgeManualScore
+    x-chaimir-audience: teacher
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/judge/rejudge/batch:
+  post:
+    tags: [judge]
+    summary: 按 source_ref 批量重判
+    operationId: judgeRejudgeBatch
+    x-chaimir-audience: internal
+    x-chaimir-internal: true
+    security: [{ serviceAuth: [] }]
+    requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/judge/fingerprints/exact:
+  get:
+    tags: [judge]
+    summary: 精确哈希查重
+    operationId: judgeExactFingerprints
+    x-chaimir-audience: internal
+    x-chaimir-internal: true
+    security: [{ serviceAuth: [] }]
+    parameters:
+      - { name: problem_ref, in: query, schema: { type: string } }
+      - { name: code_hash, in: query, schema: { type: string } }
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/judge/fingerprints/similarity:
+  post:
+    tags: [judge]
+    summary: 相似度查重
+    operationId: judgeSimilarity
+    x-chaimir-audience: internal
+    x-chaimir-internal: true
+    security: [{ serviceAuth: [] }]
+    requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }

@@ -1,0 +1,219 @@
+# 本文件按模块维护 experiment 路径项。
+/api/v1/experiment/experiments:
+  get:
+    tags: [experiment]
+    summary: 实验列表
+    operationId: experimentListExperiments
+    x-chaimir-audience: teacher
+    security: [{ bearerAuth: [] }]
+    parameters:
+      - { name: course_id, in: query, schema: { type: integer, format: int64 } }
+      - { $ref: "#/components/parameters/StatusQuery" }
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+  post:
+    tags: [experiment]
+    summary: 创建实验
+    operationId: experimentCreateExperiment
+    x-chaimir-audience: teacher
+    security: [{ bearerAuth: [] }]
+    requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/experiment/experiments/{id}:
+  patch:
+    tags: [experiment]
+    summary: 编辑实验组件编排
+    operationId: experimentUpdateExperiment
+    x-chaimir-audience: teacher
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/experiment/experiments/{id}/validate:
+  post:
+    tags: [experiment]
+    summary: 发布前校验实验依赖
+    operationId: experimentValidateExperiment
+    x-chaimir-audience: teacher
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/experiment/experiments/{id}/publish:
+  post:
+    tags: [experiment]
+    summary: 发布实验
+    operationId: experimentPublishExperiment
+    x-chaimir-audience: teacher
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/experiment/experiments/{id}/unpublish:
+  post:
+    tags: [experiment]
+    summary: 下架实验
+    operationId: experimentUnpublishExperiment
+    x-chaimir-audience: teacher
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/experiment/experiments/{id}/instances:
+  post:
+    tags: [experiment]
+    summary: 发起实验实例
+    operationId: experimentCreateInstance
+    x-chaimir-audience: student
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/experiment/instances/{id}:
+  get:
+    tags: [experiment]
+    summary: 实验实例工作台
+    operationId: experimentGetInstance
+    x-chaimir-audience: user
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+  delete:
+    tags: [experiment]
+    summary: 回收实验实例
+    operationId: experimentRecycleInstance
+    x-chaimir-audience: user
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/experiment/instances/{id}/progress:
+  get:
+    tags: [experiment]
+    summary: 实例进度订阅元信息
+    operationId: experimentGetProgress
+    x-chaimir-audience: user
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/experiment/instances/{id}/pause:
+  post:
+    tags: [experiment]
+    summary: 暂停实验实例
+    operationId: experimentPauseInstance
+    x-chaimir-audience: user
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/experiment/instances/{id}/resume:
+  post:
+    tags: [experiment]
+    summary: 恢复实验实例
+    operationId: experimentResumeInstance
+    x-chaimir-audience: user
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/experiment/instances/{id}/stages/{stage}/activate:
+  post:
+    tags: [experiment]
+    summary: 激活实验阶段资源
+    operationId: experimentActivateStage
+    x-chaimir-audience: user
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }, { $ref: "#/components/parameters/StagePath" }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/experiment/instances/{id}/finish:
+  post:
+    tags: [experiment]
+    summary: 完成实验实例
+    operationId: experimentFinishInstance
+    x-chaimir-audience: user
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/experiment/instances/{id}/checkpoints/{cp}/judge:
+  post:
+    tags: [experiment]
+    summary: 检查点判分
+    operationId: experimentJudgeCheckpoint
+    x-chaimir-audience: student
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }, { $ref: "#/components/parameters/CPPath" }]
+    requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/experiment/instances/{id}/report:
+  post:
+    tags: [experiment]
+    summary: 提交实验报告
+    operationId: experimentSubmitReport
+    x-chaimir-audience: student
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/experiment/experiments/{id}/reports:
+  get:
+    tags: [experiment]
+    summary: 实验报告列表
+    operationId: experimentListReports
+    x-chaimir-audience: teacher
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/experiment/reports/{id}/grade:
+  post:
+    tags: [experiment]
+    summary: 批改实验报告
+    operationId: experimentGradeReport
+    x-chaimir-audience: teacher
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/experiment/experiments/{id}/groups:
+  post:
+    tags: [experiment]
+    summary: 创建实验分组
+    operationId: experimentCreateGroup
+    x-chaimir-audience: teacher
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/experiment/groups/{id}:
+  get:
+    tags: [experiment]
+    summary: 实验小组信息
+    operationId: experimentGetGroup
+    x-chaimir-audience: user
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/experiment/groups/{id}/members:
+  post:
+    tags: [experiment]
+    summary: 加入或调整实验小组成员
+    operationId: experimentUpsertGroupMember
+    x-chaimir-audience: user
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/experiment/internal/instances/{id}/score:
+  get:
+    tags: [experiment]
+    summary: 内部读取实验得分
+    operationId: experimentInternalScore
+    x-chaimir-audience: internal
+    x-chaimir-internal: true
+    security: [{ serviceAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/experiment/internal/stats:
+  get:
+    tags: [experiment]
+    summary: 实验只读统计
+    operationId: experimentInternalStats
+    x-chaimir-audience: internal
+    x-chaimir-internal: true
+    security: [{ serviceAuth: [] }]
+    parameters:
+      - { name: tenant_id, in: query, schema: { type: integer, format: int64 } }
+      - { name: course_id, in: query, schema: { type: integer, format: int64 } }
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }

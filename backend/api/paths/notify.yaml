@@ -1,0 +1,117 @@
+# 本文件按模块维护 notify 路径项。
+/api/v1/notify/inbox:
+  get:
+    tags: [notify]
+    summary: 站内信收件箱
+    operationId: notifyInbox
+    x-chaimir-audience: user
+    security: [{ bearerAuth: [] }]
+    parameters:
+      - { name: is_read, in: query, schema: { type: boolean } }
+      - { name: type, in: query, schema: { type: string } }
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/notify/inbox/unread-count:
+  get:
+    tags: [notify]
+    summary: 未读通知数
+    operationId: notifyUnread
+    x-chaimir-audience: user
+    security: [{ bearerAuth: [] }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/notify/inbox/{id}/read:
+  post:
+    tags: [notify]
+    summary: 标记站内信已读
+    operationId: notifyMarkRead
+    x-chaimir-audience: user
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/notify/inbox/read-all:
+  post:
+    tags: [notify]
+    summary: 全部站内信已读
+    operationId: notifyMarkAllRead
+    x-chaimir-audience: user
+    security: [{ bearerAuth: [] }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/notify/inbox/{id}:
+  delete:
+    tags: [notify]
+    summary: 删除站内信
+    operationId: notifyDeleteNotification
+    x-chaimir-audience: user
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/notify/preferences:
+  get:
+    tags: [notify]
+    summary: 通知接收偏好
+    operationId: notifyListPreferences
+    x-chaimir-audience: user
+    security: [{ bearerAuth: [] }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+  put:
+    tags: [notify]
+    summary: 保存通知接收偏好
+    operationId: notifyUpsertPreference
+    x-chaimir-audience: user
+    security: [{ bearerAuth: [] }]
+    requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/notify/announcements:
+  get:
+    tags: [notify]
+    summary: 系统公告列表
+    operationId: notifyListAnnouncements
+    x-chaimir-audience: user
+    security: [{ bearerAuth: [] }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+  post:
+    tags: [notify]
+    summary: 发布系统公告
+    operationId: notifyCreateAnnouncement
+    x-chaimir-audience: admin
+    security: [{ bearerAuth: [] }]
+    requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/notify/announcements/{id}/read:
+  post:
+    tags: [notify]
+    summary: 标记公告已读
+    operationId: notifyMarkAnnouncementRead
+    x-chaimir-audience: user
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/notify/ws:
+  get:
+    tags: [notify]
+    summary: 统一实时通道 WebSocket
+    operationId: notifyWebSocket
+    x-chaimir-audience: user
+    x-chaimir-websocket: true
+    security: [{ bearerAuth: [] }]
+    parameters: [{ name: token, in: query, schema: { type: string } }]
+    responses: { "101": { description: WebSocket 升级成功 }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/notify/send:
+  post:
+    tags: [notify]
+    summary: 统一通知发送
+    operationId: notifySend
+    x-chaimir-audience: internal
+    x-chaimir-internal: true
+    security: [{ serviceAuth: [] }]
+    requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/notify/push:
+  post:
+    tags: [notify]
+    summary: 推送实时消息到 topic
+    operationId: notifyPush
+    x-chaimir-audience: internal
+    x-chaimir-internal: true
+    security: [{ serviceAuth: [] }]
+    requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }

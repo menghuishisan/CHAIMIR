@@ -1,0 +1,974 @@
+# 本文件按模块维护 identity 路径项。
+/api/v1/auth/login/platform:
+  post:
+    tags: [identity]
+    summary: 平台管理员登录
+    operationId: identityLoginPlatform
+    x-chaimir-audience: public
+    requestBody:
+      $ref: "#/components/requestBodies/ObjectBody"
+    responses:
+      "200":
+        $ref: "#/components/responses/Standard"
+      default:
+        $ref: "#/components/responses/Error"
+/api/v1/auth/login/phone:
+  post:
+    tags: [identity]
+    summary: 手机号密码登录
+    operationId: identityLoginPhone
+    x-chaimir-audience: public
+    parameters:
+      - $ref: "#/components/parameters/TenantCodeHeader"
+    requestBody:
+      $ref: "#/components/requestBodies/ObjectBody"
+    responses:
+      "200":
+        $ref: "#/components/responses/Standard"
+      default:
+        $ref: "#/components/responses/Error"
+/api/v1/auth/login/no:
+  post:
+    tags: [identity]
+    summary: 学号或工号登录
+    operationId: identityLoginNo
+    x-chaimir-audience: public
+    requestBody:
+      $ref: "#/components/requestBodies/ObjectBody"
+    responses:
+      "200":
+        $ref: "#/components/responses/Standard"
+      default:
+        $ref: "#/components/responses/Error"
+/api/v1/auth/login/sms:
+  post:
+    tags: [identity]
+    summary: 短信验证码登录
+    operationId: identityLoginSMS
+    x-chaimir-audience: public
+    requestBody:
+      $ref: "#/components/requestBodies/ObjectBody"
+    responses:
+      "200":
+        $ref: "#/components/responses/Standard"
+      default:
+        $ref: "#/components/responses/Error"
+/api/v1/auth/sms/send:
+  post:
+    tags: [identity]
+    summary: 发送短信验证码
+    operationId: identitySendSMS
+    x-chaimir-audience: public
+    requestBody:
+      $ref: "#/components/requestBodies/ObjectBody"
+    responses:
+      "200":
+        $ref: "#/components/responses/Standard"
+      default:
+        $ref: "#/components/responses/Error"
+/api/v1/auth/refresh:
+  post:
+    tags: [identity]
+    summary: 刷新 Token
+    operationId: identityRefreshToken
+    x-chaimir-audience: public
+    requestBody:
+      $ref: "#/components/requestBodies/ObjectBody"
+    responses:
+      "200":
+        $ref: "#/components/responses/Standard"
+      default:
+        $ref: "#/components/responses/Error"
+/api/v1/auth/password/reset:
+  post:
+    tags: [identity]
+    summary: 找回并重置密码
+    operationId: identityResetPassword
+    x-chaimir-audience: public
+    requestBody:
+      $ref: "#/components/requestBodies/ObjectBody"
+    responses:
+      "200":
+        $ref: "#/components/responses/Standard"
+      default:
+        $ref: "#/components/responses/Error"
+/api/v1/auth/activate:
+  post:
+    tags: [identity]
+    summary: 激活码开通账号
+    operationId: identityActivate
+    x-chaimir-audience: public
+    requestBody:
+      $ref: "#/components/requestBodies/ObjectBody"
+    responses:
+      "200":
+        $ref: "#/components/responses/Standard"
+      default:
+        $ref: "#/components/responses/Error"
+/api/v1/auth/logout:
+  post:
+    tags: [identity]
+    summary: 登出当前会话
+    operationId: identityLogout
+    x-chaimir-audience: user
+    security:
+      - bearerAuth: []
+    responses:
+      "200":
+        $ref: "#/components/responses/Standard"
+      default:
+        $ref: "#/components/responses/Error"
+/api/v1/auth/sso/{tenant_code}/login:
+  get:
+    tags: [identity]
+    summary: 获取 CAS 登录地址
+    operationId: identityCASLoginURL
+    x-chaimir-audience: public
+    parameters:
+      - $ref: "#/components/parameters/TenantCodePath"
+    responses:
+      "200":
+        $ref: "#/components/responses/Standard"
+      default:
+        $ref: "#/components/responses/Error"
+/api/v1/auth/sso/{tenant_code}/callback:
+  get:
+    tags: [identity]
+    summary: CAS 登录回调
+    operationId: identityCASCallback
+    x-chaimir-audience: public
+    parameters:
+      - $ref: "#/components/parameters/TenantCodePath"
+      - name: ticket
+        in: query
+        schema: { type: string }
+      - name: service
+        in: query
+        schema: { type: string }
+    responses:
+      "200":
+        $ref: "#/components/responses/Standard"
+      default:
+        $ref: "#/components/responses/Error"
+/api/v1/auth/sso/{tenant_code}/ldap:
+  post:
+    tags: [identity]
+    summary: LDAP 账号密码登录
+    operationId: identityLDAPLogin
+    x-chaimir-audience: public
+    parameters:
+      - $ref: "#/components/parameters/TenantCodePath"
+    requestBody:
+      $ref: "#/components/requestBodies/ObjectBody"
+    responses:
+      "200":
+        $ref: "#/components/responses/Standard"
+      default:
+        $ref: "#/components/responses/Error"
+
+/api/v1/platform/applications:
+  get:
+    tags: [identity]
+    summary: 学校入驻申请列表
+    operationId: identityListApplications
+    x-chaimir-audience: platform-admin
+    security:
+      - bearerAuth: []
+    parameters:
+      - $ref: "#/components/parameters/StatusQuery"
+      - $ref: "#/components/parameters/PageQuery"
+      - $ref: "#/components/parameters/SizeQuery"
+    responses:
+      "200":
+        $ref: "#/components/responses/Standard"
+      default:
+        $ref: "#/components/responses/Error"
+  post:
+    tags: [identity]
+    summary: 提交学校入驻申请
+    operationId: identityCreateApplication
+    x-chaimir-audience: public
+    requestBody:
+      $ref: "#/components/requestBodies/ObjectBody"
+    responses:
+      "200":
+        $ref: "#/components/responses/Standard"
+      default:
+        $ref: "#/components/responses/Error"
+/api/v1/platform/applications/{id}/approve:
+  post:
+    tags: [identity]
+    summary: 审核通过入驻申请
+    operationId: identityApproveApplication
+    x-chaimir-audience: platform-admin
+    security:
+      - bearerAuth: []
+    parameters:
+      - $ref: "#/components/parameters/IDPath"
+    responses:
+      "200":
+        $ref: "#/components/responses/Standard"
+      default:
+        $ref: "#/components/responses/Error"
+/api/v1/platform/applications/{id}/reject:
+  post:
+    tags: [identity]
+    summary: 驳回入驻申请
+    operationId: identityRejectApplication
+    x-chaimir-audience: platform-admin
+    security:
+      - bearerAuth: []
+    parameters:
+      - $ref: "#/components/parameters/IDPath"
+    requestBody:
+      $ref: "#/components/requestBodies/ObjectBody"
+    responses:
+      "200":
+        $ref: "#/components/responses/Standard"
+      default:
+        $ref: "#/components/responses/Error"
+/api/v1/platform/tenants:
+  get:
+    tags: [identity]
+    summary: 租户列表
+    operationId: identityListTenants
+    x-chaimir-audience: platform-admin
+    security:
+      - bearerAuth: []
+    parameters:
+      - $ref: "#/components/parameters/PageQuery"
+      - $ref: "#/components/parameters/SizeQuery"
+    responses:
+      "200":
+        $ref: "#/components/responses/Standard"
+      default:
+        $ref: "#/components/responses/Error"
+/api/v1/platform/tenants/{id}:
+  get:
+    tags: [identity]
+    summary: 租户详情
+    operationId: identityGetTenant
+    x-chaimir-audience: platform-admin
+    security:
+      - bearerAuth: []
+    parameters:
+      - $ref: "#/components/parameters/IDPath"
+    responses:
+      "200":
+        $ref: "#/components/responses/Standard"
+      default:
+        $ref: "#/components/responses/Error"
+  patch:
+    tags: [identity]
+    summary: 更新租户状态或到期信息
+    operationId: identityUpdateTenant
+    x-chaimir-audience: platform-admin
+    security:
+      - bearerAuth: []
+    parameters:
+      - $ref: "#/components/parameters/IDPath"
+    requestBody:
+      $ref: "#/components/requestBodies/ObjectBody"
+    responses:
+      "200":
+        $ref: "#/components/responses/Standard"
+      default:
+        $ref: "#/components/responses/Error"
+
+/api/v1/tenant/config:
+  get:
+    tags: [identity]
+    summary: 获取租户配置
+    operationId: identityGetTenantConfig
+    x-chaimir-audience: school-admin
+    security:
+      - bearerAuth: []
+    responses:
+      "200":
+        $ref: "#/components/responses/Standard"
+      default:
+        $ref: "#/components/responses/Error"
+  patch:
+    tags: [identity]
+    summary: 更新租户配置
+    operationId: identityUpdateTenantConfig
+    x-chaimir-audience: school-admin
+    security:
+      - bearerAuth: []
+    requestBody:
+      $ref: "#/components/requestBodies/ObjectBody"
+    responses:
+      "200":
+        $ref: "#/components/responses/Standard"
+      default:
+        $ref: "#/components/responses/Error"
+/api/v1/tenant/sso:
+  get:
+    tags: [identity]
+    summary: 查询租户 SSO 配置
+    operationId: identityListSSO
+    x-chaimir-audience: school-admin
+    security:
+      - bearerAuth: []
+    responses:
+      "200":
+        $ref: "#/components/responses/Standard"
+      default:
+        $ref: "#/components/responses/Error"
+  put:
+    tags: [identity]
+    summary: 保存租户 SSO 配置
+    operationId: identityUpsertSSO
+    x-chaimir-audience: school-admin
+    security:
+      - bearerAuth: []
+    requestBody:
+      $ref: "#/components/requestBodies/ObjectBody"
+    responses:
+      "200":
+        $ref: "#/components/responses/Standard"
+      default:
+        $ref: "#/components/responses/Error"
+
+/api/v1/org/departments:
+  get:
+    tags: [identity]
+    summary: 院系列表
+    operationId: identityListDepartments
+    x-chaimir-audience: school-admin
+    security:
+      - bearerAuth: []
+    responses:
+      "200":
+        $ref: "#/components/responses/Standard"
+      default:
+        $ref: "#/components/responses/Error"
+  post:
+    tags: [identity]
+    summary: 创建院系
+    operationId: identityCreateDepartment
+    x-chaimir-audience: school-admin
+    security:
+      - bearerAuth: []
+    requestBody:
+      $ref: "#/components/requestBodies/ObjectBody"
+    responses:
+      "200":
+        $ref: "#/components/responses/Standard"
+      default:
+        $ref: "#/components/responses/Error"
+/api/v1/org/departments/{id}:
+  patch:
+    tags: [identity]
+    summary: 更新院系
+    operationId: identityUpdateDepartment
+    x-chaimir-audience: school-admin
+    security:
+      - bearerAuth: []
+    parameters:
+      - $ref: "#/components/parameters/IDPath"
+    requestBody:
+      $ref: "#/components/requestBodies/ObjectBody"
+    responses:
+      "200":
+        $ref: "#/components/responses/Standard"
+      default:
+        $ref: "#/components/responses/Error"
+  delete:
+    tags: [identity]
+    summary: 删除院系
+    operationId: identityDeleteDepartment
+    x-chaimir-audience: school-admin
+    security:
+      - bearerAuth: []
+    parameters:
+      - $ref: "#/components/parameters/IDPath"
+    responses:
+      "200":
+        $ref: "#/components/responses/Standard"
+      default:
+        $ref: "#/components/responses/Error"
+/api/v1/org/majors:
+  get:
+    tags: [identity]
+    summary: 专业列表
+    operationId: identityListMajors
+    x-chaimir-audience: school-admin
+    security:
+      - bearerAuth: []
+    parameters:
+      - name: department_id
+        in: query
+        schema: { type: integer, format: int64 }
+    responses:
+      "200":
+        $ref: "#/components/responses/Standard"
+      default:
+        $ref: "#/components/responses/Error"
+  post:
+    tags: [identity]
+    summary: 创建专业
+    operationId: identityCreateMajor
+    x-chaimir-audience: school-admin
+    security:
+      - bearerAuth: []
+    requestBody:
+      $ref: "#/components/requestBodies/ObjectBody"
+    responses:
+      "200":
+        $ref: "#/components/responses/Standard"
+      default:
+        $ref: "#/components/responses/Error"
+/api/v1/org/majors/{id}:
+  patch:
+    tags: [identity]
+    summary: 更新专业
+    operationId: identityUpdateMajor
+    x-chaimir-audience: school-admin
+    security:
+      - bearerAuth: []
+    parameters:
+      - $ref: "#/components/parameters/IDPath"
+    requestBody:
+      $ref: "#/components/requestBodies/ObjectBody"
+    responses:
+      "200":
+        $ref: "#/components/responses/Standard"
+      default:
+        $ref: "#/components/responses/Error"
+  delete:
+    tags: [identity]
+    summary: 删除专业
+    operationId: identityDeleteMajor
+    x-chaimir-audience: school-admin
+    security:
+      - bearerAuth: []
+    parameters:
+      - $ref: "#/components/parameters/IDPath"
+    responses:
+      "200":
+        $ref: "#/components/responses/Standard"
+      default:
+        $ref: "#/components/responses/Error"
+/api/v1/org/classes:
+  get:
+    tags: [identity]
+    summary: 班级列表
+    operationId: identityListClasses
+    x-chaimir-audience: school-admin
+    security:
+      - bearerAuth: []
+    parameters:
+      - name: major_id
+        in: query
+        schema: { type: integer, format: int64 }
+    responses:
+      "200":
+        $ref: "#/components/responses/Standard"
+      default:
+        $ref: "#/components/responses/Error"
+  post:
+    tags: [identity]
+    summary: 创建班级
+    operationId: identityCreateClass
+    x-chaimir-audience: school-admin
+    security:
+      - bearerAuth: []
+    requestBody:
+      $ref: "#/components/requestBodies/ObjectBody"
+    responses:
+      "200":
+        $ref: "#/components/responses/Standard"
+      default:
+        $ref: "#/components/responses/Error"
+/api/v1/org/classes/{id}:
+  patch:
+    tags: [identity]
+    summary: 更新班级
+    operationId: identityUpdateClass
+    x-chaimir-audience: school-admin
+    security:
+      - bearerAuth: []
+    parameters:
+      - $ref: "#/components/parameters/IDPath"
+    requestBody:
+      $ref: "#/components/requestBodies/ObjectBody"
+    responses:
+      "200":
+        $ref: "#/components/responses/Standard"
+      default:
+        $ref: "#/components/responses/Error"
+  delete:
+    tags: [identity]
+    summary: 删除班级
+    operationId: identityDeleteClass
+    x-chaimir-audience: school-admin
+    security:
+      - bearerAuth: []
+    parameters:
+      - $ref: "#/components/parameters/IDPath"
+    responses:
+      "200":
+        $ref: "#/components/responses/Standard"
+      default:
+        $ref: "#/components/responses/Error"
+/api/v1/org/import/preview:
+  post:
+    tags: [identity]
+    summary: 上传组织结构导入文件并生成服务端预览
+    operationId: identityPreviewOrgImport
+    x-chaimir-audience: school-admin
+    security:
+      - bearerAuth: []
+    requestBody:
+      $ref: "#/components/requestBodies/MultipartBody"
+    responses:
+      "200":
+        $ref: "#/components/responses/Standard"
+      default:
+        $ref: "#/components/responses/Error"
+/api/v1/org/import/commit:
+  post:
+    tags: [identity]
+    summary: 确认提交组织结构导入
+    operationId: identityCommitOrgImport
+    x-chaimir-audience: school-admin
+    security:
+      - bearerAuth: []
+    requestBody:
+      $ref: "#/components/requestBodies/ObjectBody"
+    responses:
+      "200":
+        $ref: "#/components/responses/Standard"
+      default:
+        $ref: "#/components/responses/Error"
+/api/v1/org/import/template:
+  get:
+    tags: [identity]
+    summary: 下载组织结构导入模板
+    operationId: identityOrgImportTemplate
+    x-chaimir-audience: school-admin
+    security:
+      - bearerAuth: []
+    parameters:
+      - $ref: "#/components/parameters/FormatQuery"
+    responses:
+      "200":
+        $ref: "#/components/responses/Binary"
+      default:
+        $ref: "#/components/responses/Error"
+/api/v1/org/classes/archive:
+  post:
+    tags: [identity]
+    summary: 按学年归档班级
+    operationId: identityArchiveClasses
+    x-chaimir-audience: school-admin
+    security:
+      - bearerAuth: []
+    requestBody:
+      $ref: "#/components/requestBodies/ObjectBody"
+    responses:
+      "200":
+        $ref: "#/components/responses/Standard"
+      default:
+        $ref: "#/components/responses/Error"
+/api/v1/org/classes/promote:
+  post:
+    tags: [identity]
+    summary: 班级批量升级
+    operationId: identityPromoteClasses
+    x-chaimir-audience: school-admin
+    security:
+      - bearerAuth: []
+    requestBody:
+      $ref: "#/components/requestBodies/ObjectBody"
+    responses:
+      "200":
+        $ref: "#/components/responses/Standard"
+      default:
+        $ref: "#/components/responses/Error"
+
+/api/v1/accounts:
+  get:
+    tags: [identity]
+    summary: 账号列表
+    operationId: identityListAccounts
+    x-chaimir-audience: school-admin
+    security:
+      - bearerAuth: []
+    parameters:
+      - name: role
+        in: query
+        schema: { type: string }
+      - name: class_id
+        in: query
+        schema: { type: integer, format: int64 }
+      - $ref: "#/components/parameters/StatusQuery"
+      - $ref: "#/components/parameters/KeywordQuery"
+      - $ref: "#/components/parameters/PageQuery"
+      - $ref: "#/components/parameters/SizeQuery"
+    responses:
+      "200":
+        $ref: "#/components/responses/Standard"
+      default:
+        $ref: "#/components/responses/Error"
+  post:
+    tags: [identity]
+    summary: 新增账号
+    operationId: identityCreateAccount
+    x-chaimir-audience: school-admin
+    security:
+      - bearerAuth: []
+    requestBody:
+      $ref: "#/components/requestBodies/ObjectBody"
+    responses:
+      "200":
+        $ref: "#/components/responses/Standard"
+      default:
+        $ref: "#/components/responses/Error"
+/api/v1/accounts/{id}:
+  patch:
+    tags: [identity]
+    summary: 编辑账号
+    operationId: identityUpdateAccount
+    x-chaimir-audience: school-admin
+    security:
+      - bearerAuth: []
+    parameters:
+      - $ref: "#/components/parameters/IDPath"
+    requestBody:
+      $ref: "#/components/requestBodies/ObjectBody"
+    responses:
+      "200":
+        $ref: "#/components/responses/Standard"
+      default:
+        $ref: "#/components/responses/Error"
+/api/v1/accounts/{id}/disable:
+  post:
+    tags: [identity]
+    summary: 停用账号
+    operationId: identityDisableAccount
+    x-chaimir-audience: school-admin
+    security:
+      - bearerAuth: []
+    parameters:
+      - $ref: "#/components/parameters/IDPath"
+    responses:
+      "200":
+        $ref: "#/components/responses/Standard"
+      default:
+        $ref: "#/components/responses/Error"
+/api/v1/accounts/{id}/enable:
+  post:
+    tags: [identity]
+    summary: 启用账号
+    operationId: identityEnableAccount
+    x-chaimir-audience: school-admin
+    security:
+      - bearerAuth: []
+    parameters:
+      - $ref: "#/components/parameters/IDPath"
+    responses:
+      "200":
+        $ref: "#/components/responses/Standard"
+      default:
+        $ref: "#/components/responses/Error"
+/api/v1/accounts/{id}/archive:
+  post:
+    tags: [identity]
+    summary: 归档账号
+    operationId: identityArchiveAccount
+    x-chaimir-audience: school-admin
+    security:
+      - bearerAuth: []
+    parameters:
+      - $ref: "#/components/parameters/IDPath"
+    responses:
+      "200":
+        $ref: "#/components/responses/Standard"
+      default:
+        $ref: "#/components/responses/Error"
+/api/v1/accounts/{id}/restore:
+  post:
+    tags: [identity]
+    summary: 恢复归档账号
+    operationId: identityRestoreAccount
+    x-chaimir-audience: school-admin
+    security:
+      - bearerAuth: []
+    parameters:
+      - $ref: "#/components/parameters/IDPath"
+    responses:
+      "200":
+        $ref: "#/components/responses/Standard"
+      default:
+        $ref: "#/components/responses/Error"
+/api/v1/accounts/{id}/cancel:
+  post:
+    tags: [identity]
+    summary: 注销账号
+    operationId: identityCancelAccount
+    x-chaimir-audience: school-admin
+    security:
+      - bearerAuth: []
+    parameters:
+      - $ref: "#/components/parameters/IDPath"
+    responses:
+      "200":
+        $ref: "#/components/responses/Standard"
+      default:
+        $ref: "#/components/responses/Error"
+/api/v1/accounts/{id}/force-logout:
+  post:
+    tags: [identity]
+    summary: 强制账号下线
+    operationId: identityForceLogoutAccount
+    x-chaimir-audience: school-admin
+    security:
+      - bearerAuth: []
+    parameters:
+      - $ref: "#/components/parameters/IDPath"
+    responses:
+      "200":
+        $ref: "#/components/responses/Standard"
+      default:
+        $ref: "#/components/responses/Error"
+/api/v1/accounts/{id}/reset-password:
+  post:
+    tags: [identity]
+    summary: 管理员重置账号密码
+    operationId: identityResetAccountPassword
+    x-chaimir-audience: school-admin
+    security:
+      - bearerAuth: []
+    parameters:
+      - $ref: "#/components/parameters/IDPath"
+    requestBody:
+      $ref: "#/components/requestBodies/ObjectBody"
+    responses:
+      "200":
+        $ref: "#/components/responses/Standard"
+      default:
+        $ref: "#/components/responses/Error"
+/api/v1/accounts/{id}/grant-admin:
+  post:
+    tags: [identity]
+    summary: 授予学校管理员权限
+    operationId: identityGrantAdmin
+    x-chaimir-audience: school-admin
+    security:
+      - bearerAuth: []
+    parameters:
+      - $ref: "#/components/parameters/IDPath"
+    responses:
+      "200":
+        $ref: "#/components/responses/Standard"
+      default:
+        $ref: "#/components/responses/Error"
+/api/v1/accounts/{id}/revoke-admin:
+  post:
+    tags: [identity]
+    summary: 撤销学校管理员权限
+    operationId: identityRevokeAdmin
+    x-chaimir-audience: school-admin
+    security:
+      - bearerAuth: []
+    parameters:
+      - $ref: "#/components/parameters/IDPath"
+    responses:
+      "200":
+        $ref: "#/components/responses/Standard"
+      default:
+        $ref: "#/components/responses/Error"
+/api/v1/accounts/batch/disable:
+  post:
+    tags: [identity]
+    summary: 批量停用账号
+    operationId: identityBatchDisableAccounts
+    x-chaimir-audience: school-admin
+    security:
+      - bearerAuth: []
+    requestBody:
+      $ref: "#/components/requestBodies/ObjectBody"
+    responses:
+      "200":
+        $ref: "#/components/responses/Standard"
+      default:
+        $ref: "#/components/responses/Error"
+/api/v1/accounts/batch/archive:
+  post:
+    tags: [identity]
+    summary: 批量归档账号
+    operationId: identityBatchArchiveAccounts
+    x-chaimir-audience: school-admin
+    security:
+      - bearerAuth: []
+    requestBody:
+      $ref: "#/components/requestBodies/ObjectBody"
+    responses:
+      "200":
+        $ref: "#/components/responses/Standard"
+      default:
+        $ref: "#/components/responses/Error"
+/api/v1/accounts/batch/restore:
+  post:
+    tags: [identity]
+    summary: 批量恢复归档账号
+    operationId: identityBatchRestoreAccounts
+    x-chaimir-audience: school-admin
+    security:
+      - bearerAuth: []
+    requestBody:
+      $ref: "#/components/requestBodies/ObjectBody"
+    responses:
+      "200":
+        $ref: "#/components/responses/Standard"
+      default:
+        $ref: "#/components/responses/Error"
+/api/v1/accounts/import/preview:
+  post:
+    tags: [identity]
+    summary: 上传账号导入文件并生成服务端预览
+    operationId: identityPreviewAccountImport
+    x-chaimir-audience: school-admin
+    security:
+      - bearerAuth: []
+    requestBody:
+      $ref: "#/components/requestBodies/MultipartBody"
+    responses:
+      "200":
+        $ref: "#/components/responses/Standard"
+      default:
+        $ref: "#/components/responses/Error"
+/api/v1/accounts/import/commit:
+  post:
+    tags: [identity]
+    summary: 确认提交账号导入
+    operationId: identityCommitAccountImport
+    x-chaimir-audience: school-admin
+    security:
+      - bearerAuth: []
+    requestBody:
+      $ref: "#/components/requestBodies/ObjectBody"
+    responses:
+      "200":
+        $ref: "#/components/responses/Standard"
+      default:
+        $ref: "#/components/responses/Error"
+/api/v1/accounts/import/template:
+  get:
+    tags: [identity]
+    summary: 下载账号导入模板
+    operationId: identityAccountImportTemplate
+    x-chaimir-audience: school-admin
+    security:
+      - bearerAuth: []
+    parameters:
+      - name: type
+        in: query
+        schema:
+          type: string
+          enum: [student, teacher]
+      - $ref: "#/components/parameters/FormatQuery"
+    responses:
+      "200":
+        $ref: "#/components/responses/Binary"
+      default:
+        $ref: "#/components/responses/Error"
+/api/v1/accounts/import/batches:
+  get:
+    tags: [identity]
+    summary: 账号导入批次历史
+    operationId: identityAccountImportBatches
+    x-chaimir-audience: school-admin
+    security:
+      - bearerAuth: []
+    parameters:
+      - $ref: "#/components/parameters/PageQuery"
+      - $ref: "#/components/parameters/SizeQuery"
+    responses:
+      "200":
+        $ref: "#/components/responses/Standard"
+      default:
+        $ref: "#/components/responses/Error"
+
+/api/v1/me:
+  get:
+    tags: [identity]
+    summary: 当前账号信息
+    operationId: identityGetMe
+    x-chaimir-audience: user
+    security:
+      - bearerAuth: []
+    responses:
+      "200":
+        $ref: "#/components/responses/Standard"
+      default:
+        $ref: "#/components/responses/Error"
+/api/v1/me/password:
+  post:
+    tags: [identity]
+    summary: 修改当前账号密码
+    operationId: identityChangePassword
+    x-chaimir-audience: user
+    security:
+      - bearerAuth: []
+    requestBody:
+      $ref: "#/components/requestBodies/ObjectBody"
+    responses:
+      "200":
+        $ref: "#/components/responses/Standard"
+      default:
+        $ref: "#/components/responses/Error"
+/api/v1/me/phone:
+  post:
+    tags: [identity]
+    summary: 换绑手机号
+    operationId: identityChangePhone
+    x-chaimir-audience: user
+    security:
+      - bearerAuth: []
+    requestBody:
+      $ref: "#/components/requestBodies/ObjectBody"
+    responses:
+      "200":
+        $ref: "#/components/responses/Standard"
+      default:
+        $ref: "#/components/responses/Error"
+/api/v1/me/sessions:
+  get:
+    tags: [identity]
+    summary: 当前会话列表
+    operationId: identitySessions
+    x-chaimir-audience: user
+    security:
+      - bearerAuth: []
+    responses:
+      "200":
+        $ref: "#/components/responses/Standard"
+      default:
+        $ref: "#/components/responses/Error"
+/api/v1/audit:
+  get:
+    tags: [identity]
+    summary: 审计日志查询
+    operationId: identityQueryAudit
+    x-chaimir-audience: platform-or-school-admin
+    security:
+      - bearerAuth: []
+    parameters:
+      - name: actor_id
+        in: query
+        schema: { type: integer, format: int64 }
+      - name: action
+        in: query
+        schema: { type: string }
+      - $ref: "#/components/parameters/FromQuery"
+      - $ref: "#/components/parameters/ToQuery"
+      - $ref: "#/components/parameters/PageQuery"
+      - $ref: "#/components/parameters/SizeQuery"
+    responses:
+      "200":
+        $ref: "#/components/responses/Standard"
+      default:
+        $ref: "#/components/responses/Error"

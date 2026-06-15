@@ -1,0 +1,181 @@
+# 本文件按模块维护 admin 路径项。
+/api/v1/admin/platform/dashboard:
+  get:
+    tags: [admin]
+    summary: 平台全局看板
+    operationId: adminPlatformDashboard
+    x-chaimir-audience: platform-admin
+    security: [{ bearerAuth: [] }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/admin/platform/statistics:
+  get:
+    tags: [admin]
+    summary: 平台趋势统计
+    operationId: adminPlatformStatistics
+    x-chaimir-audience: platform-admin
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/FromQuery" }, { $ref: "#/components/parameters/ToQuery" }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/admin/platform/tenants:
+  get:
+    tags: [admin]
+    summary: 平台租户聚合列表
+    operationId: adminListTenants
+    x-chaimir-audience: platform-admin
+    security: [{ bearerAuth: [] }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/admin/platform/applications:
+  get:
+    tags: [admin]
+    summary: 学校入驻申请聚合列表
+    operationId: adminListApplications
+    x-chaimir-audience: platform-admin
+    security: [{ bearerAuth: [] }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/admin/platform/monitoring/panels:
+  get:
+    tags: [admin]
+    summary: 外接监控面板入口
+    operationId: adminMonitoringPanels
+    x-chaimir-audience: platform-admin
+    security: [{ bearerAuth: [] }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/admin/platform/backups:
+  get:
+    tags: [admin]
+    summary: 备份记录列表
+    operationId: adminListBackups
+    x-chaimir-audience: platform-admin
+    security: [{ bearerAuth: [] }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/admin/platform/backups/trigger:
+  post:
+    tags: [admin]
+    summary: 触发备份记录
+    operationId: adminTriggerBackup
+    x-chaimir-audience: platform-admin
+    security: [{ bearerAuth: [] }]
+    requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/admin/school/dashboard:
+  get:
+    tags: [admin]
+    summary: 本校看板
+    operationId: adminSchoolDashboard
+    x-chaimir-audience: school-admin
+    security: [{ bearerAuth: [] }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/admin/school/statistics:
+  get:
+    tags: [admin]
+    summary: 本校运营趋势
+    operationId: adminSchoolStatistics
+    x-chaimir-audience: school-admin
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/FromQuery" }, { $ref: "#/components/parameters/ToQuery" }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/admin/audit:
+  get:
+    tags: [admin]
+    summary: 跨模块审计聚合查询
+    operationId: adminQueryAudit
+    x-chaimir-audience: platform-or-school-admin
+    security: [{ bearerAuth: [] }]
+    parameters:
+      - { name: actor_id, in: query, schema: { type: integer, format: int64 } }
+      - { name: action, in: query, schema: { type: string } }
+      - { name: target_type, in: query, schema: { type: string } }
+      - { $ref: "#/components/parameters/FromQuery" }
+      - { $ref: "#/components/parameters/ToQuery" }
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/admin/audit/export:
+  get:
+    tags: [admin]
+    summary: 创建审计 CSV 导出任务
+    operationId: adminExportAudit
+    x-chaimir-audience: platform-or-school-admin
+    security: [{ bearerAuth: [] }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/admin/configs:
+  get:
+    tags: [admin]
+    summary: 配置列表
+    operationId: adminListConfigs
+    x-chaimir-audience: platform-or-school-admin
+    security: [{ bearerAuth: [] }]
+    parameters: [{ name: scope, in: query, schema: { type: string } }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/admin/configs/{key}:
+  put:
+    tags: [admin]
+    summary: 更新配置
+    operationId: adminUpdateConfig
+    x-chaimir-audience: platform-or-school-admin
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/KeyPath" }]
+    requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/admin/configs/{key}/history:
+  get:
+    tags: [admin]
+    summary: 配置变更历史
+    operationId: adminConfigHistory
+    x-chaimir-audience: platform-or-school-admin
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/KeyPath" }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/admin/configs/{key}/rollback:
+  post:
+    tags: [admin]
+    summary: 回滚配置
+    operationId: adminRollbackConfig
+    x-chaimir-audience: platform-or-school-admin
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/KeyPath" }]
+    requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/admin/alert-rules:
+  get:
+    tags: [admin]
+    summary: 告警规则列表
+    operationId: adminListAlertRules
+    x-chaimir-audience: platform-or-school-admin
+    security: [{ bearerAuth: [] }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+  post:
+    tags: [admin]
+    summary: 创建告警规则
+    operationId: adminCreateAlertRule
+    x-chaimir-audience: platform-or-school-admin
+    security: [{ bearerAuth: [] }]
+    requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/admin/alert-rules/{id}:
+  patch:
+    tags: [admin]
+    summary: 更新告警规则
+    operationId: adminUpdateAlertRule
+    x-chaimir-audience: platform-or-school-admin
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/admin/alert-events:
+  get:
+    tags: [admin]
+    summary: 告警事件列表
+    operationId: adminListAlertEvents
+    x-chaimir-audience: platform-or-school-admin
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/StatusQuery" }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/admin/alert-events/{id}/handle:
+  post:
+    tags: [admin]
+    summary: 处理或忽略告警事件
+    operationId: adminHandleAlertEvent
+    x-chaimir-audience: platform-or-school-admin
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }

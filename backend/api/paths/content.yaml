@@ -1,0 +1,258 @@
+# 本文件按模块维护 content 路径项。
+/api/v1/content/items:
+  get:
+    tags: [content]
+    summary: 内容检索
+    operationId: contentListItems
+    x-chaimir-audience: teacher
+    security: [{ bearerAuth: [] }]
+    parameters:
+      - { name: type, in: query, schema: { type: string } }
+      - { name: category, in: query, schema: { type: string } }
+      - { name: difficulty, in: query, schema: { type: string } }
+      - { name: tag, in: query, schema: { type: string } }
+      - { name: kp, in: query, schema: { type: string } }
+      - { $ref: "#/components/parameters/KeywordQuery" }
+      - { name: visibility, in: query, schema: { type: string } }
+      - { name: author, in: query, schema: { type: string } }
+      - { $ref: "#/components/parameters/PageQuery" }
+      - { $ref: "#/components/parameters/SizeQuery" }
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+  post:
+    tags: [content]
+    summary: 创建内容草稿
+    operationId: contentCreateItem
+    x-chaimir-audience: teacher
+    security: [{ bearerAuth: [] }]
+    requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/content/items/system-import:
+  post:
+    tags: [content]
+    summary: 系统或外部源自动建题入口
+    operationId: contentSystemImport
+    x-chaimir-audience: internal
+    x-chaimir-internal: true
+    security: [{ serviceAuth: [] }]
+    requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/content/items/batch:
+  post:
+    tags: [content]
+    summary: 批量取内容
+    operationId: contentBatchItems
+    x-chaimir-audience: internal
+    x-chaimir-internal: true
+    security: [{ serviceAuth: [] }]
+    requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/content/items/{item}:
+  patch:
+    tags: [content]
+    summary: 编辑内容草稿
+    operationId: contentUpdateItem
+    x-chaimir-audience: teacher
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/ItemPath" }]
+    requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+  delete:
+    tags: [content]
+    summary: 软删内容
+    operationId: contentDeleteItem
+    x-chaimir-audience: teacher
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/ItemPath" }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/content/items/{item}/publish:
+  post:
+    tags: [content]
+    summary: 发布内容版本
+    operationId: contentPublishItem
+    x-chaimir-audience: teacher
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/ItemPath" }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/content/items/{item}/deprecate:
+  post:
+    tags: [content]
+    summary: 弃用内容版本
+    operationId: contentDeprecateItem
+    x-chaimir-audience: teacher
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/ItemPath" }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/content/items/{item}/versions:
+  get:
+    tags: [content]
+    summary: 内容版本列表
+    operationId: contentListVersions
+    x-chaimir-audience: teacher
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/ItemPath" }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/content/items/{item}/new-version:
+  post:
+    tags: [content]
+    summary: 基于现有版本创建新版本草稿
+    operationId: contentNewVersion
+    x-chaimir-audience: teacher
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/ItemPath" }]
+    requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/content/items/{item}/share:
+  post:
+    tags: [content]
+    summary: 设为共享库内容
+    operationId: contentShareItem
+    x-chaimir-audience: teacher
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/ItemPath" }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/content/items/{item}/unshare:
+  post:
+    tags: [content]
+    summary: 取消共享库内容
+    operationId: contentUnshareItem
+    x-chaimir-audience: teacher
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/ItemPath" }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/content/items/{item}/{version}:
+  get:
+    tags: [content]
+    summary: 获取内容题面
+    operationId: contentGetFace
+    x-chaimir-audience: teacher
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/ItemPath" }, { $ref: "#/components/parameters/VersionPath" }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/content/items/{item}/{version}/full:
+  get:
+    tags: [content]
+    summary: 获取内容全量配置
+    operationId: contentGetFull
+    x-chaimir-audience: teacher-or-internal
+    security: [{ bearerAuth: [] }, { serviceAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/ItemPath" }, { $ref: "#/components/parameters/VersionPath" }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/content/items/{item}/{version}/clone:
+  post:
+    tags: [content]
+    summary: 克隆内容为独立草稿
+    operationId: contentCloneItem
+    x-chaimir-audience: teacher
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/ItemPath" }, { $ref: "#/components/parameters/VersionPath" }]
+    requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/content/items/{item}/{version}/usage:
+  post:
+    tags: [content]
+    summary: 上报内容引用计数
+    operationId: contentIncrementUsage
+    x-chaimir-audience: internal
+    x-chaimir-internal: true
+    security: [{ serviceAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/ItemPath" }, { $ref: "#/components/parameters/VersionPath" }]
+    requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/content/attachments:
+  post:
+    tags: [content]
+    summary: 上传题库附件
+    operationId: contentUploadAttachment
+    x-chaimir-audience: teacher
+    security: [{ bearerAuth: [] }]
+    requestBody: { $ref: "#/components/requestBodies/MultipartBody" }
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/content/attachments/download-grant:
+  post:
+    tags: [content]
+    summary: 签发题库附件下载授权
+    operationId: contentAttachmentDownloadGrant
+    x-chaimir-audience: teacher
+    security: [{ bearerAuth: [] }]
+    requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/content/shared:
+  get:
+    tags: [content]
+    summary: 浏览跨校共享库
+    operationId: contentListShared
+    x-chaimir-audience: teacher
+    security: [{ bearerAuth: [] }]
+    parameters:
+      - { name: type, in: query, schema: { type: string } }
+      - { $ref: "#/components/parameters/KeywordQuery" }
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/content/categories:
+  get:
+    tags: [content]
+    summary: 分类列表
+    operationId: contentListCategories
+    x-chaimir-audience: teacher
+    security: [{ bearerAuth: [] }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+  post:
+    tags: [content]
+    summary: 创建分类
+    operationId: contentCreateCategory
+    x-chaimir-audience: teacher
+    security: [{ bearerAuth: [] }]
+    requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/content/categories/{id}:
+  patch:
+    tags: [content]
+    summary: 更新分类
+    operationId: contentUpdateCategory
+    x-chaimir-audience: teacher
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+  delete:
+    tags: [content]
+    summary: 删除分类
+    operationId: contentDeleteCategory
+    x-chaimir-audience: teacher
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/content/papers:
+  get:
+    tags: [content]
+    summary: 试卷列表
+    operationId: contentListPapers
+    x-chaimir-audience: teacher
+    security: [{ bearerAuth: [] }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+  post:
+    tags: [content]
+    summary: 创建试卷
+    operationId: contentCreatePaper
+    x-chaimir-audience: teacher
+    security: [{ bearerAuth: [] }]
+    requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/content/papers/{id}:
+  get:
+    tags: [content]
+    summary: 试卷详情
+    operationId: contentGetPaper
+    x-chaimir-audience: teacher
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/content/papers/{id}/regenerate:
+  post:
+    tags: [content]
+    summary: 按条件重新抽题
+    operationId: contentRegeneratePaper
+    x-chaimir-audience: teacher
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
