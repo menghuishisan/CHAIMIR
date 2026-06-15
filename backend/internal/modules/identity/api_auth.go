@@ -4,7 +4,6 @@ package identity
 import (
 	"chaimir/internal/platform/auth"
 	"chaimir/internal/platform/httpx"
-	"chaimir/pkg/apperr"
 
 	"github.com/gin-gonic/gin"
 )
@@ -95,6 +94,9 @@ func (a authAPI) sendSMS(c *gin.Context) {
 	if !httpx.BindJSON(c, &req) {
 		return
 	}
+	if req.Scene == SMSSceneChangePhone && !a.authn.AuthenticateAccess(c) {
+		return
+	}
 	if err := a.svc.SendSMS(c.Request.Context(), req); err != nil {
 		httpx.Write(c, gin.H{}, err)
 		return
@@ -145,10 +147,8 @@ func (a authAPI) activate(c *gin.Context) {
 
 // logout 吊销当前 JWT 对应的服务端会话。
 func (a authAPI) logout(c *gin.Context) {
-	sessionID, _ := c.Get("session_id")
-	id, ok := sessionID.(int64)
+	id, ok := currentSessionID(c)
 	if !ok {
-		httpx.Write(c, gin.H{}, apperr.ErrIdentitySessionContextMissing)
 		return
 	}
 	if err := a.svc.Logout(c.Request.Context(), id); err != nil {

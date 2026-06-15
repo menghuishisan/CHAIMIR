@@ -3,10 +3,20 @@ SELECT id, username, password_hash, name, status, created_at, updated_at
 FROM platform_admin
 WHERE username = $1;
 
+-- name: GetPlatformAdminByID :one
+SELECT id, username, password_hash, name, status, created_at, updated_at
+FROM platform_admin
+WHERE id = $1;
+
 -- name: CreatePlatformAdminIfNotExists :exec
 INSERT INTO platform_admin (id, username, password_hash, name, status, created_at, updated_at)
 VALUES ($1, $2, $3, $4, $5, now(), now())
 ON CONFLICT (username) DO NOTHING;
+
+-- name: UpdatePlatformAdminPassword :exec
+UPDATE platform_admin
+SET password_hash = $2, updated_at = now()
+WHERE id = $1 AND status = 1;
 
 -- name: GetTenantByCode :one
 SELECT id, code, name, type, status, deploy_mode, expire_at, logo_url, display_name, feature_flags, auth_mode, enable_activation_code, created_at, updated_at
@@ -286,6 +296,12 @@ SET password_hash = $3, must_change_pwd = $4, status = $5, activated_at = $6, pw
 WHERE id = $1 AND tenant_id = $2
 RETURNING id, tenant_id, phone_enc, phone_hash, password_hash, name, base_identity, status, must_change_pwd, pwd_failed_count, locked_until, activated_at, deleted_at, created_at, updated_at;
 
+-- name: ActivateSSOAccount :one
+UPDATE account
+SET status = 2, activated_at = COALESCE(activated_at, now()), updated_at = now()
+WHERE id = $1 AND tenant_id = $2 AND status = 1 AND deleted_at IS NULL
+RETURNING id, tenant_id, phone_enc, phone_hash, password_hash, name, base_identity, status, must_change_pwd, pwd_failed_count, locked_until, activated_at, deleted_at, created_at, updated_at;
+
 -- name: UpdateAccountPhone :exec
 UPDATE account
 SET phone_enc = $3, phone_hash = $4, updated_at = now()
@@ -348,6 +364,12 @@ WHERE refresh_token_hash = $1;
 SELECT id, platform_admin_id, refresh_token_hash, device_info, ip, status, expire_at, created_at
 FROM platform_auth_session
 WHERE id = $1;
+
+-- name: ListPlatformAuthSessionsByAdmin :many
+SELECT id, platform_admin_id, refresh_token_hash, device_info, ip, status, expire_at, created_at
+FROM platform_auth_session
+WHERE platform_admin_id = $1
+ORDER BY created_at DESC, id DESC;
 
 -- name: RevokePlatformAuthSessionByID :exec
 UPDATE platform_auth_session SET status = 2

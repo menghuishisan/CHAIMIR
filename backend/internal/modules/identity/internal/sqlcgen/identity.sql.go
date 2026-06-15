@@ -11,6 +11,41 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const activateSSOAccount = `-- name: ActivateSSOAccount :one
+UPDATE account
+SET status = 2, activated_at = COALESCE(activated_at, now()), updated_at = now()
+WHERE id = $1 AND tenant_id = $2 AND status = 1 AND deleted_at IS NULL
+RETURNING id, tenant_id, phone_enc, phone_hash, password_hash, name, base_identity, status, must_change_pwd, pwd_failed_count, locked_until, activated_at, deleted_at, created_at, updated_at
+`
+
+type ActivateSSOAccountParams struct {
+	ID       int64 `json:"id"`
+	TenantID int64 `json:"tenant_id"`
+}
+
+func (q *Queries) ActivateSSOAccount(ctx context.Context, arg ActivateSSOAccountParams) (Account, error) {
+	row := q.db.QueryRow(ctx, activateSSOAccount, arg.ID, arg.TenantID)
+	var i Account
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.PhoneEnc,
+		&i.PhoneHash,
+		&i.PasswordHash,
+		&i.Name,
+		&i.BaseIdentity,
+		&i.Status,
+		&i.MustChangePwd,
+		&i.PwdFailedCount,
+		&i.LockedUntil,
+		&i.ActivatedAt,
+		&i.DeletedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const approveTenantApplication = `-- name: ApproveTenantApplication :one
 UPDATE tenant_application
 SET status = $2, reviewed_by = $3, tenant_id = $4, updated_at = now()
@@ -1191,6 +1226,27 @@ func (q *Queries) GetLatestSMSCode(ctx context.Context, arg GetLatestSMSCodePara
 	return i, err
 }
 
+const getPlatformAdminByID = `-- name: GetPlatformAdminByID :one
+SELECT id, username, password_hash, name, status, created_at, updated_at
+FROM platform_admin
+WHERE id = $1
+`
+
+func (q *Queries) GetPlatformAdminByID(ctx context.Context, id int64) (PlatformAdmin, error) {
+	row := q.db.QueryRow(ctx, getPlatformAdminByID, id)
+	var i PlatformAdmin
+	err := row.Scan(
+		&i.ID,
+		&i.Username,
+		&i.PasswordHash,
+		&i.Name,
+		&i.Status,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const getPlatformAdminByUsername = `-- name: GetPlatformAdminByUsername :one
 SELECT id, username, password_hash, name, status, created_at, updated_at
 FROM platform_admin
@@ -1720,6 +1776,42 @@ func (q *Queries) ListMajors(ctx context.Context, dollar_1 int64) ([]Major, erro
 			&i.DepartmentID,
 			&i.Name,
 			&i.DeletedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listPlatformAuthSessionsByAdmin = `-- name: ListPlatformAuthSessionsByAdmin :many
+SELECT id, platform_admin_id, refresh_token_hash, device_info, ip, status, expire_at, created_at
+FROM platform_auth_session
+WHERE platform_admin_id = $1
+ORDER BY created_at DESC, id DESC
+`
+
+func (q *Queries) ListPlatformAuthSessionsByAdmin(ctx context.Context, platformAdminID int64) ([]PlatformAuthSession, error) {
+	rows, err := q.db.Query(ctx, listPlatformAuthSessionsByAdmin, platformAdminID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []PlatformAuthSession{}
+	for rows.Next() {
+		var i PlatformAuthSession
+		if err := rows.Scan(
+			&i.ID,
+			&i.PlatformAdminID,
+			&i.RefreshTokenHash,
+			&i.DeviceInfo,
+			&i.Ip,
+			&i.Status,
+			&i.ExpireAt,
+			&i.CreatedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -2516,6 +2608,22 @@ func (q *Queries) UpdateMajor(ctx context.Context, arg UpdateMajorParams) (Major
 		&i.DeletedAt,
 	)
 	return i, err
+}
+
+const updatePlatformAdminPassword = `-- name: UpdatePlatformAdminPassword :exec
+UPDATE platform_admin
+SET password_hash = $2, updated_at = now()
+WHERE id = $1 AND status = 1
+`
+
+type UpdatePlatformAdminPasswordParams struct {
+	ID           int64  `json:"id"`
+	PasswordHash string `json:"password_hash"`
+}
+
+func (q *Queries) UpdatePlatformAdminPassword(ctx context.Context, arg UpdatePlatformAdminPasswordParams) error {
+	_, err := q.db.Exec(ctx, updatePlatformAdminPassword, arg.ID, arg.PasswordHash)
+	return err
 }
 
 const updateTenantConfig = `-- name: UpdateTenantConfig :one

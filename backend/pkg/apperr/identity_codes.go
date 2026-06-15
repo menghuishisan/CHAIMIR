@@ -18,6 +18,12 @@ const (
 	CodeIdentityActivationInvalid = "12007"
 	// CodeIdentitySMSNeedsTenant 表示短信场景需要先明确租户。
 	CodeIdentitySMSNeedsTenant = "12008"
+	// CodeIdentityResetPasswordTenantInvalid 表示找回密码时学校选择不正确。
+	CodeIdentityResetPasswordTenantInvalid = "12023"
+	// CodeIdentityPlatformOldPasswordInvalid 表示平台管理员旧密码校验失败。
+	CodeIdentityPlatformOldPasswordInvalid = "12024"
+	// CodeIdentitySMSSceneInvalid 表示短信验证码场景不受支持。
+	CodeIdentitySMSSceneInvalid = "12025"
 	// CodeIdentitySMSTooFrequent 表示短信发送触发同号短时限频。
 	CodeIdentitySMSTooFrequent = "12009"
 	// CodeIdentitySMSDailyLimited 表示短信发送触发每日上限。
@@ -46,6 +52,8 @@ const (
 	CodeIdentityPhoneAlreadyUsed = "12021"
 	// CodeIdentityActivationDisabled 表示租户未启用激活码开通方式。
 	CodeIdentityActivationDisabled = "12022"
+	// CodeIdentityMustChangePassword 表示账号必须先完成首登改密。
+	CodeIdentityMustChangePassword = "12026"
 )
 
 const (
@@ -131,6 +139,12 @@ var (
 	ErrIdentityActivationInvalid = New(CodeIdentityActivationInvalid, "激活码无效或已过期")
 	// ErrIdentitySMSNeedsTenant 表示短信发送需要先选择学校。
 	ErrIdentitySMSNeedsTenant = New(CodeIdentitySMSNeedsTenant, "请选择学校后再获取验证码")
+	// ErrIdentityResetPasswordTenantInvalid 表示找回密码时学校选择不正确。
+	ErrIdentityResetPasswordTenantInvalid = New(CodeIdentityResetPasswordTenantInvalid, "请选择正确的学校后再重置密码")
+	// ErrIdentityPlatformOldPasswordInvalid 表示平台管理员旧密码不正确。
+	ErrIdentityPlatformOldPasswordInvalid = New(CodeIdentityPlatformOldPasswordInvalid, "原密码不正确,请检查后重试")
+	// ErrIdentitySMSSceneInvalid 表示短信验证码场景不受支持。
+	ErrIdentitySMSSceneInvalid = New(CodeIdentitySMSSceneInvalid, "验证码类型不正确,请重新操作")
 	// ErrIdentitySMSTooFrequent 表示短信发送过于频繁。
 	ErrIdentitySMSTooFrequent = New(CodeIdentitySMSTooFrequent, "验证码发送过于频繁,请稍后再试")
 	// ErrIdentitySMSDailyLimited 表示短信发送达到每日上限。
@@ -159,6 +173,8 @@ var (
 	ErrIdentityPhoneAlreadyUsed = New(CodeIdentityPhoneAlreadyUsed, "该手机号已被使用,请更换后重试")
 	// ErrIdentityActivationDisabled 表示学校未启用激活码开通。
 	ErrIdentityActivationDisabled = New(CodeIdentityActivationDisabled, "学校未启用激活码开通,请填写初始密码")
+	// ErrIdentityMustChangePassword 表示必须先完成首登改密。
+	ErrIdentityMustChangePassword = New(CodeIdentityMustChangePassword, "请先修改初始密码后继续使用")
 )
 
 var (

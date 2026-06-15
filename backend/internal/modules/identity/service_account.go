@@ -192,6 +192,13 @@ func (s *Service) ResetAccountPasswordByAdmin(ctx context.Context, accountID int
 		return apperr.ErrInternal.WithCause(err)
 	}
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
+		account, err := tx.GetAccount(ctx, accountID)
+		if err != nil {
+			return err
+		}
+		if account.Status != AccountStatusActive {
+			return apperr.ErrIdentityAccountDisabled
+		}
 		if _, err := tx.UpdateAccountPassword(ctx, accountID, id.TenantID, hash, req.MustChange, AccountStatusActive); err != nil {
 			return err
 		}
@@ -261,7 +268,7 @@ func (s *Service) UpdateAccountStatusByAdmin(ctx context.Context, accountID int6
 		}
 		return nil
 	}); err != nil {
-		return apperr.ErrInternal.WithCause(err)
+		return apperr.AsAppError(err)
 	}
 	return s.auditAccount(ctx, id, "account.status.update", accountID)
 }

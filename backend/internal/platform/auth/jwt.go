@@ -37,6 +37,8 @@ type SessionIdentity struct {
 	AccountID  int64
 	SessionID  int64
 	IsPlatform bool
+	Method     string
+	Path       string
 }
 
 // SessionValidator 校验 JWT 所指向的服务端会话仍处于有效状态。

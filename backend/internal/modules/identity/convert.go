@@ -4,6 +4,7 @@ package identity
 import (
 	"chaimir/internal/contracts"
 	"chaimir/internal/platform/jsonx"
+	"chaimir/internal/platform/secretmap"
 	"chaimir/pkg/apperr"
 )
 
@@ -57,6 +58,18 @@ func ToSessionDTO(session AuthSession) SessionDTO {
 	}
 }
 
+// ToPlatformSessionDTO 把平台管理员会话转换为个人中心响应,不暴露 Refresh 哈希。
+func ToPlatformSessionDTO(session PlatformAuthSession) SessionDTO {
+	return SessionDTO{
+		ID:         session.ID,
+		DeviceInfo: session.DeviceInfo,
+		IP:         session.IP,
+		Status:     session.Status,
+		ExpireAt:   session.ExpireAt.Format("2006-01-02T15:04:05Z07:00"),
+		CreatedAt:  session.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
+	}
+}
+
 // ToAuditLogDTO 把审计契约视图转换为 HTTP 响应 DTO。
 func ToAuditLogDTO(row contracts.AuditLogEntry) AuditLogDTO {
 	return AuditLogDTO{
@@ -92,20 +105,17 @@ func ToContractAccount(a Account, phonePlain string) contracts.AccountInfo {
 	}
 }
 
-// ToSSOConfigDTO 把 SSO 配置转换为 HTTP DTO,返回前脱敏 LDAP 绑定密码。
+// ToSSOConfigDTO 把 SSO 配置转换为 HTTP DTO,返回前复用基础层递归脱敏凭据字段。
 func ToSSOConfigDTO(cfg SSOConfig) (SSOConfigDTO, error) {
 	data, err := jsonx.ObjectMapStrict(cfg.Config)
 	if err != nil {
 		return SSOConfigDTO{}, apperr.ErrIdentitySSOConfigInvalid.WithCause(err)
 	}
-	if _, ok := data["bind_password"]; ok {
-		data["bind_password"] = "******"
-	}
 	return SSOConfigDTO{
 		ID:         cfg.ID,
 		TenantID:   cfg.TenantID,
 		Type:       cfg.Type,
-		Config:     data,
+		Config:     secretmap.Mask(data),
 		MatchField: cfg.MatchField,
 		Enabled:    cfg.Enabled,
 	}, nil

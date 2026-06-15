@@ -9,6 +9,7 @@ import (
 )
 
 type Querier interface {
+	ActivateSSOAccount(ctx context.Context, arg ActivateSSOAccountParams) (Account, error)
 	ApproveTenantApplication(ctx context.Context, arg ApproveTenantApplicationParams) (TenantApplication, error)
 	ArchiveClassesByEnrollmentYear(ctx context.Context, arg ArchiveClassesByEnrollmentYearParams) error
 	ArchiveStudentAccountsByEnrollmentYear(ctx context.Context, arg ArchiveStudentAccountsByEnrollmentYearParams) error
@@ -41,6 +42,7 @@ type Querier interface {
 	GetAuthSessionByRefreshHashPrivileged(ctx context.Context, refreshTokenHash string) (AuthSession, error)
 	GetImportPreview(ctx context.Context, arg GetImportPreviewParams) (ImportPreview, error)
 	GetLatestSMSCode(ctx context.Context, arg GetLatestSMSCodeParams) (SmsCode, error)
+	GetPlatformAdminByID(ctx context.Context, id int64) (PlatformAdmin, error)
 	GetPlatformAdminByUsername(ctx context.Context, username string) (PlatformAdmin, error)
 	GetPlatformAuthSessionByID(ctx context.Context, id int64) (PlatformAuthSession, error)
 	GetPlatformAuthSessionByRefreshHash(ctx context.Context, refreshTokenHash string) (PlatformAuthSession, error)
@@ -56,6 +58,7 @@ type Querier interface {
 	ListDepartments(ctx context.Context) ([]Department, error)
 	ListImportBatches(ctx context.Context, tenantID int64) ([]ImportBatch, error)
 	ListMajors(ctx context.Context, dollar_1 int64) ([]Major, error)
+	ListPlatformAuthSessionsByAdmin(ctx context.Context, platformAdminID int64) ([]PlatformAuthSession, error)
 	ListSSOConfigs(ctx context.Context, tenantID int64) ([]SsoConfig, error)
 	ListTenantApplications(ctx context.Context, dollar_1 int16) ([]TenantApplication, error)
 	ListTenants(ctx context.Context) ([]Tenant, error)
@@ -84,6 +87,7 @@ type Querier interface {
 	UpdateClass(ctx context.Context, arg UpdateClassParams) (Class, error)
 	UpdateDepartment(ctx context.Context, arg UpdateDepartmentParams) (Department, error)
 	UpdateMajor(ctx context.Context, arg UpdateMajorParams) (Major, error)
+	UpdatePlatformAdminPassword(ctx context.Context, arg UpdatePlatformAdminPasswordParams) error
 	UpdateTenantConfig(ctx context.Context, arg UpdateTenantConfigParams) (Tenant, error)
 	UpdateTenantStatus(ctx context.Context, arg UpdateTenantStatusParams) (Tenant, error)
 	UpsertSSOConfig(ctx context.Context, arg UpsertSSOConfigParams) (SsoConfig, error)

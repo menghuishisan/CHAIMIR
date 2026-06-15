@@ -66,14 +66,20 @@ func ValidateEmail(email string) error {
 	return nil
 }
 
-// ValidateAccountStatusTransition 校验账号状态机,注销是终态,归档才允许恢复。
+// ValidateAccountStatusTransition 校验管理员可触发的账号状态机,开通只能由激活、首登改密或 SSO 首登完成。
 func ValidateAccountStatusTransition(fromStatus, toStatus int16) error {
 	switch toStatus {
 	case AccountStatusActive, AccountStatusDisabled, AccountStatusArchived, AccountStatusCancelled:
 	default:
 		return apperr.ErrIdentityAccountUpdateInvalid
 	}
+	if fromStatus == AccountStatusPending {
+		return apperr.ErrIdentityAccountUpdateInvalid
+	}
 	if fromStatus == AccountStatusCancelled && toStatus != AccountStatusCancelled {
+		return apperr.ErrIdentityAccountUpdateInvalid
+	}
+	if fromStatus == AccountStatusDisabled && toStatus == AccountStatusArchived {
 		return apperr.ErrIdentityAccountUpdateInvalid
 	}
 	return nil

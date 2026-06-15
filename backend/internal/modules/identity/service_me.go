@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 
+	"chaimir/internal/contracts"
 	"chaimir/internal/platform/audit"
 	"chaimir/internal/platform/tenant"
 	"chaimir/internal/platform/timex"
@@ -16,9 +17,12 @@ import (
 
 // GetMe 读取当前登录账号信息,手机号只返回脱敏展示。
 func (s *Service) GetMe(ctx context.Context) (MeResponse, error) {
-	id, err := requireTenantSession(ctx)
-	if err != nil {
-		return MeResponse{}, err
+	id, ok := tenant.FromContext(ctx)
+	if !ok {
+		return MeResponse{}, apperr.ErrUnauthorized
+	}
+	if id.IsPlatform {
+		return s.getPlatformMe(ctx, id.AccountID)
 	}
 	var account Account
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
@@ -38,11 +42,17 @@ func (s *Service) GetMe(ctx context.Context) (MeResponse, error) {
 	return MeResponse{Account: ToAccountDTO(account, phone)}, nil
 }
 
-// ChangeMyPassword 校验旧密码后更新为新密码,并吊销 Refresh 会话降低泄露风险。
+// ChangeMyPassword 校验旧密码后更新为新密码,并吊销全部 Refresh 会话降低泄露风险。
 func (s *Service) ChangeMyPassword(ctx context.Context, req ChangePasswordRequest) error {
-	id, err := requireTenantSession(ctx)
-	if err != nil {
-		return err
+	id, ok := tenant.FromContext(ctx)
+	if !ok {
+		return apperr.ErrUnauthorized
+	}
+	if id.IsPlatform {
+		return s.changePlatformPassword(ctx, id.AccountID, req)
+	}
+	if id.TenantID <= 0 || id.AccountID <= 0 {
+		return apperr.ErrForbidden
 	}
 	if err := ValidatePassword(req.NewPassword); err != nil {
 		return err
@@ -72,7 +82,7 @@ func (s *Service) ChangeMyPassword(ctx context.Context, req ChangePasswordReques
 		if err != nil {
 			return err
 		}
-		// 密码变更后吊销全部 Refresh 会话,防止旧设备继续无感刷新。
+		// 密码变更后吊销全部 Refresh 会话,要求所有设备重新登录。
 		if err := tx.RevokeAccountSessions(ctx, id.TenantID, id.AccountID); err != nil {
 			return err
 		}
@@ -125,9 +135,15 @@ func (s *Service) ChangeMyPhone(ctx context.Context, req ChangePhoneRequest) err
 
 // ListMySessions 读取当前账号的服务端 Refresh 会话,不返回任何令牌明文或哈希。
 func (s *Service) ListMySessions(ctx context.Context) ([]SessionDTO, error) {
-	id, err := requireTenantSession(ctx)
-	if err != nil {
-		return nil, err
+	id, ok := tenant.FromContext(ctx)
+	if !ok {
+		return nil, apperr.ErrUnauthorized
+	}
+	if id.IsPlatform {
+		return s.listPlatformSessions(ctx, id.AccountID)
+	}
+	if id.TenantID <= 0 || id.AccountID <= 0 {
+		return nil, apperr.ErrForbidden
 	}
 	var sessions []AuthSession
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
@@ -143,6 +159,87 @@ func (s *Service) ListMySessions(ctx context.Context) ([]SessionDTO, error) {
 	out := make([]SessionDTO, 0, len(sessions))
 	for _, session := range sessions {
 		out = append(out, ToSessionDTO(session))
+	}
+	return out, nil
+}
+
+// getPlatformMe 返回平台管理员个人信息,平台账号不属于任何租户。
+func (s *Service) getPlatformMe(ctx context.Context, accountID int64) (MeResponse, error) {
+	if accountID <= 0 {
+		return MeResponse{}, apperr.ErrForbidden
+	}
+	var admin PlatformAdmin
+	if err := s.store.PlatformTx(ctx, func(ctx context.Context, tx TxStore) error {
+		row, err := tx.GetPlatformAdminByID(ctx, accountID)
+		if err != nil {
+			return err
+		}
+		admin = row
+		return nil
+	}); err != nil {
+		return MeResponse{}, apperr.ErrIdentitySessionInvalid.WithCause(err)
+	}
+	return MeResponse{Account: AccountDTO{ID: admin.ID, Name: admin.Name, Roles: []int16{contracts.RoleNumPlatformAdmin}, Status: admin.Status}}, nil
+}
+
+// changePlatformPassword 校验平台管理员旧密码并吊销其全部 Refresh 会话。
+func (s *Service) changePlatformPassword(ctx context.Context, accountID int64, req ChangePasswordRequest) error {
+	if accountID <= 0 {
+		return apperr.ErrForbidden
+	}
+	if err := ValidatePassword(req.NewPassword); err != nil {
+		return err
+	}
+	passwordHash, err := crypto.HashPassword(req.NewPassword)
+	if err != nil {
+		return apperr.ErrInternal.WithCause(err)
+	}
+	var admin PlatformAdmin
+	if err := s.store.PlatformTx(ctx, func(ctx context.Context, tx TxStore) error {
+		row, err := tx.GetPlatformAdminByID(ctx, accountID)
+		if err != nil {
+			return err
+		}
+		ok, err := crypto.VerifyPassword(req.OldPassword, row.PasswordHash)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return apperr.ErrIdentityPlatformOldPasswordInvalid
+		}
+		if err := tx.UpdatePlatformAdminPassword(ctx, accountID, passwordHash); err != nil {
+			return err
+		}
+		if err := tx.RevokePlatformSessions(ctx, accountID); err != nil {
+			return err
+		}
+		admin = row
+		return nil
+	}); err != nil {
+		return apperr.AsAppError(err)
+	}
+	return s.auditPlatformOperation(ctx, admin.ID, "platform_admin.password.change", "identity.platform_admin", admin.ID, map[string]any{})
+}
+
+// listPlatformSessions 返回平台管理员服务端会话列表,不暴露 Refresh 哈希。
+func (s *Service) listPlatformSessions(ctx context.Context, accountID int64) ([]SessionDTO, error) {
+	if accountID <= 0 {
+		return nil, apperr.ErrForbidden
+	}
+	var sessions []PlatformAuthSession
+	if err := s.store.PlatformTx(ctx, func(ctx context.Context, tx TxStore) error {
+		rows, err := tx.ListPlatformAuthSessionsByAdmin(ctx, accountID)
+		if err != nil {
+			return err
+		}
+		sessions = rows
+		return nil
+	}); err != nil {
+		return nil, apperr.ErrInternal.WithCause(err)
+	}
+	out := make([]SessionDTO, 0, len(sessions))
+	for _, session := range sessions {
+		out = append(out, ToPlatformSessionDTO(session))
 	}
 	return out, nil
 }

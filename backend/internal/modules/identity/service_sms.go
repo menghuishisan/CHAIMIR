@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"chaimir/internal/platform/tenant"
 	"chaimir/internal/platform/timex"
 	"chaimir/pkg/apperr"
 	"chaimir/pkg/crypto"
@@ -19,19 +20,23 @@ func (s *Service) SendSMS(ctx context.Context, req SendSMSRequest) error {
 	if err := ValidatePhone(req.Phone); err != nil {
 		return err
 	}
-	if req.TenantID <= 0 {
-		return apperr.ErrIdentitySMSNeedsTenant
+	if req.Scene != SMSSceneLogin && req.Scene != SMSSceneReset && req.Scene != SMSSceneChangePhone {
+		return apperr.ErrIdentitySMSSceneInvalid
 	}
 	if s.redis == nil {
 		return apperr.ErrInternal.WithCause(fmt.Errorf("短信限频依赖 Redis 未初始化"))
 	}
 	phone := strings.TrimSpace(req.Phone)
+	tenantID, err := s.resolveSMSSendTenant(ctx, phone, req.Scene, req.TenantID)
+	if err != nil {
+		return err
+	}
 	phoneHash, err := s.phoneHash(phone)
 	if err != nil {
 		return apperr.ErrInternal.WithCause(err)
 	}
 	// 先写短间隔限频键,避免短信网关慢响应时同一号码被并发刷爆。
-	resendKey := fmt.Sprintf("identity:sms:resend:%d:%s:%d", req.TenantID, phoneHash, req.Scene)
+	resendKey := fmt.Sprintf("identity:sms:resend:%d:%s:%d", tenantID, phoneHash, req.Scene)
 	ok, err := s.redis.SetNX(ctx, resendKey, time.Duration(s.cfg.SMSResendSeconds)*time.Second)
 	if err != nil {
 		return apperr.ErrInternal.WithCause(err)
@@ -40,7 +45,7 @@ func (s *Service) SendSMS(ctx context.Context, req SendSMSRequest) error {
 		return apperr.ErrIdentitySMSTooFrequent
 	}
 	// 每日上限按手机号哈希统计,日志和 Redis key 都不暴露手机号明文。
-	dayKey := fmt.Sprintf("identity:sms:day:%d:%s:%s", req.TenantID, phoneHash, timex.Now().Format("20060102"))
+	dayKey := fmt.Sprintf("identity:sms:day:%d:%s:%s", tenantID, phoneHash, timex.Now().Format("20060102"))
 	count, err := s.redis.IncrWithTTL(ctx, dayKey, 24*time.Hour)
 	if err != nil {
 		return apperr.ErrInternal.WithCause(err)
@@ -56,10 +61,10 @@ func (s *Service) SendSMS(ctx context.Context, req SendSMSRequest) error {
 	if err != nil {
 		return apperr.ErrInternal.WithCause(err)
 	}
-	if err := s.store.TenantTx(ctx, req.TenantID, func(ctx context.Context, tx TxStore) error {
+	if err := s.store.TenantTx(ctx, tenantID, func(ctx context.Context, tx TxStore) error {
 		_, err := tx.CreateSMSCode(ctx, CreateSMSCodeInput{
 			ID:        s.ids.Generate(),
-			TenantID:  req.TenantID,
+			TenantID:  tenantID,
 			PhoneHash: phoneHash,
 			CodeHash:  codeHash,
 			Scene:     req.Scene,
@@ -71,7 +76,7 @@ func (s *Service) SendSMS(ctx context.Context, req SendSMSRequest) error {
 	}
 	// 先持久化哈希再发送明文验证码,避免用户收到数据库中不存在的验证码。
 	if err := s.sms.Send(ctx, phone, req.Scene, code); err != nil {
-		s.rollbackSMSRateLimit(ctx, resendKey, dayKey, req.TenantID)
+		s.rollbackSMSRateLimit(ctx, resendKey, dayKey, tenantID)
 		return apperr.ErrInternal.WithCause(err)
 	}
 	return nil
@@ -117,4 +122,96 @@ func (s *Service) verifySMSCode(ctx context.Context, tenantID int64, phone strin
 		}
 		return tx.MarkSMSCodeUsed(ctx, tenantID, row.ID)
 	})
+}
+
+// resolveSMSSendTenant 按验证码场景定位验证码所属租户。
+func (s *Service) resolveSMSSendTenant(ctx context.Context, phone string, scene int16, requestedTenantID int64) (int64, error) {
+	switch scene {
+	case SMSSceneLogin:
+		tenantID, err := s.resolveSMSCredentialTenant(ctx, phone, requestedTenantID, apperr.ErrIdentitySMSNeedsTenant, apperr.ErrIdentitySMSNeedsTenant)
+		if err != nil {
+			return 0, err
+		}
+		if err := s.ensureTenantAcceptsCredentials(ctx, tenantID); err != nil {
+			return 0, err
+		}
+		return tenantID, nil
+	case SMSSceneReset:
+		tenantID, err := s.resolveSMSCredentialTenant(ctx, phone, requestedTenantID, apperr.ErrIdentityResetPasswordTenantInvalid, apperr.ErrIdentityResetPasswordTenantInvalid)
+		if err != nil {
+			return 0, err
+		}
+		if err := s.ensureTenantAcceptsCredentials(ctx, tenantID); err != nil {
+			return 0, err
+		}
+		return tenantID, nil
+	case SMSSceneChangePhone:
+		id, ok := tenant.FromContext(ctx)
+		if !ok {
+			return 0, apperr.ErrUnauthorized
+		}
+		if id.IsPlatform || id.TenantID <= 0 || id.AccountID <= 0 {
+			return 0, apperr.ErrForbidden
+		}
+		if requestedTenantID > 0 && requestedTenantID != id.TenantID {
+			return 0, apperr.ErrForbidden
+		}
+		if err := s.ensureTenantAcceptsCredentials(ctx, id.TenantID); err != nil {
+			return 0, err
+		}
+		return id.TenantID, nil
+	default:
+		return 0, apperr.ErrIdentitySMSSceneInvalid
+	}
+}
+
+// ensureTenantAcceptsCredentials 统一校验短信和登录凭证所在租户仍允许认证操作。
+func (s *Service) ensureTenantAcceptsCredentials(ctx context.Context, tenantID int64) error {
+	if tenantID <= 0 {
+		return apperr.ErrIdentitySMSNeedsTenant
+	}
+	if err := s.store.TenantTx(ctx, tenantID, func(ctx context.Context, tx TxStore) error {
+		tenantSnapshot, err := tx.GetTenantByID(ctx, tenantID)
+		if err != nil {
+			return err
+		}
+		return EnsureTenantCanLogin(tenantSnapshot, timex.Now())
+	}); err != nil {
+		return apperr.AsAppError(err)
+	}
+	return nil
+}
+
+// resolveSMSCredentialTenant 根据手机号和可选 tenant_id 定位短信凭证归属租户。
+func (s *Service) resolveSMSCredentialTenant(ctx context.Context, phone string, requestedTenantID int64, multiTenantErr *apperr.Error, mismatchErr *apperr.Error) (int64, error) {
+	phoneHash, err := s.phoneHash(strings.TrimSpace(phone))
+	if err != nil {
+		return 0, apperr.ErrInternal.WithCause(err)
+	}
+	var candidates []LoginCandidate
+	if err := s.store.PrivilegedTx(ctx, func(ctx context.Context, tx TxStore) error {
+		rows, err := tx.ListAccountsByPhoneHash(ctx, phoneHash)
+		if err != nil {
+			return err
+		}
+		candidates = rows
+		return nil
+	}); err != nil {
+		return 0, apperr.ErrIdentityInvalidCredentials.WithCause(err)
+	}
+	if len(candidates) == 0 {
+		return 0, apperr.ErrIdentityInvalidCredentials
+	}
+	if requestedTenantID > 0 {
+		for _, candidate := range candidates {
+			if candidate.TenantID == requestedTenantID {
+				return requestedTenantID, nil
+			}
+		}
+		return 0, mismatchErr
+	}
+	if len(candidates) == 1 {
+		return candidates[0].TenantID, nil
+	}
+	return 0, multiTenantErr
 }

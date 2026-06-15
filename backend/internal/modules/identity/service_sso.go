@@ -4,8 +4,8 @@ package identity
 import (
 	"context"
 	"crypto/tls"
-	"encoding/base64"
 	"encoding/xml"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -16,10 +16,12 @@ import (
 	"chaimir/internal/contracts"
 	"chaimir/internal/platform/jsonx"
 	"chaimir/internal/platform/netx"
+	"chaimir/internal/platform/secretmap"
 	"chaimir/internal/platform/timex"
 	"chaimir/pkg/apperr"
 	"chaimir/pkg/logging"
 	ldap "github.com/go-ldap/ldap/v3"
+	"github.com/jackc/pgx/v5"
 )
 
 // casServiceResponse 描述 CAS serviceValidate 成功响应中身份模块需要的字段。
@@ -43,17 +45,21 @@ func (s *Service) UpsertSSOConfig(ctx context.Context, req SSOConfigRequest) (SS
 	if err := s.validateSSOConfig(req); err != nil {
 		return SSOConfig{}, err
 	}
-	// 配置入库前先处理敏感字段,避免 LDAP 绑定密码以明文进入 JSON 配置。
-	configData, err := s.secureSSOConfig(req)
-	if err != nil {
-		return SSOConfig{}, err
-	}
-	raw, err := jsonx.ObjectBytes(configData, apperr.ErrIdentitySSOConfigInvalid)
-	if err != nil {
-		return SSOConfig{}, err
-	}
 	var out SSOConfig
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
+		old, err := tx.GetSSOConfig(ctx, id.TenantID, req.Type)
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return err
+		}
+		// 配置入库前先处理敏感字段,脱敏占位表示沿用旧密文而不是写入展示文案。
+		configData, err := s.secureSSOConfig(req, old)
+		if err != nil {
+			return err
+		}
+		raw, err := jsonx.ObjectBytes(configData, apperr.ErrIdentitySSOConfigInvalid)
+		if err != nil {
+			return err
+		}
 		row, err := tx.UpsertSSOConfig(ctx, UpsertSSOInput{ID: s.ids.Generate(), TenantID: id.TenantID, Type: req.Type, Config: raw, MatchField: req.MatchField, Enabled: req.Enabled})
 		if err != nil {
 			return err
@@ -61,6 +67,9 @@ func (s *Service) UpsertSSOConfig(ctx context.Context, req SSOConfigRequest) (SS
 		out = row
 		return nil
 	}); err != nil {
+		if _, ok := apperr.As(err); ok {
+			return SSOConfig{}, err
+		}
 		return SSOConfig{}, apperr.ErrInternal.WithCause(err)
 	}
 	if err := s.auditTenantOperation(ctx, id, "tenant.sso.update", "identity.sso_config", out.ID, map[string]any{"type": req.Type, "enabled": req.Enabled}); err != nil {
@@ -114,24 +123,7 @@ func (s *Service) CASCallback(ctx context.Context, tenantCode, ticket, serviceUR
 	if err != nil {
 		return LoginResponse{}, err
 	}
-	var tenantSnapshot Tenant
-	if err := s.store.TenantTx(ctx, tenantID, func(ctx context.Context, tx TxStore) error {
-		t, err := tx.GetTenantByID(ctx, tenantID)
-		if err != nil {
-			return err
-		}
-		tenantSnapshot = t
-		return nil
-	}); err != nil {
-		return LoginResponse{}, apperr.ErrInternal.WithCause(err)
-	}
-	if err := EnsureTenantCanLogin(tenantSnapshot, timex.Now()); err != nil {
-		return LoginResponse{}, err
-	}
-	if err := EnsureAccountCanLogin(account, timex.Now()); err != nil {
-		return LoginResponse{}, err
-	}
-	return s.issueTenantLogin(ctx, account, device, ip)
+	return s.finishSSOLogin(ctx, tenantID, account, device, ip)
 }
 
 // LDAPLogin 使用学校 LDAPS 配置完成目录绑定,再按已导入名单签发租户 token。
@@ -155,24 +147,7 @@ func (s *Service) LDAPLogin(ctx context.Context, tenantCode string, req LDAPLogi
 	if err != nil {
 		return LoginResponse{}, err
 	}
-	var tenantSnapshot Tenant
-	if err := s.store.TenantTx(ctx, tenantID, func(ctx context.Context, tx TxStore) error {
-		t, err := tx.GetTenantByID(ctx, tenantID)
-		if err != nil {
-			return err
-		}
-		tenantSnapshot = t
-		return nil
-	}); err != nil {
-		return LoginResponse{}, apperr.ErrInternal.WithCause(err)
-	}
-	if err := EnsureTenantCanLogin(tenantSnapshot, timex.Now()); err != nil {
-		return LoginResponse{}, err
-	}
-	if err := EnsureAccountCanLogin(account, timex.Now()); err != nil {
-		return LoginResponse{}, err
-	}
-	return s.issueTenantLogin(ctx, account, device, ip)
+	return s.finishSSOLogin(ctx, tenantID, account, device, ip)
 }
 
 // validateSSOConfig 校验 SSO 配置的协议安全要求。
@@ -195,14 +170,20 @@ func (s *Service) validateSSOConfig(req SSOConfigRequest) error {
 		if _, err := netx.ValidatePublicLDAPSURL(raw); err != nil {
 			return apperr.ErrIdentityLDAPServerInsecure
 		}
+		required := []string{"bind_dn", "bind_password", "base_dn", "user_filter", "match_attribute"}
+		for _, key := range required {
+			if stringField(req.Config, key) == "" {
+				return apperr.ErrIdentitySSOConfigInvalid
+			}
+		}
 	default:
 		return apperr.ErrIdentitySSOTypeInvalid
 	}
 	return nil
 }
 
-// secureSSOConfig 在配置入库前加密 LDAP 绑定密码,避免敏感字段明文落库。
-func (s *Service) secureSSOConfig(req SSOConfigRequest) (map[string]any, error) {
+// secureSSOConfig 在配置入库前复用基础层加密凭据字段,避免敏感配置明文落库。
+func (s *Service) secureSSOConfig(req SSOConfigRequest, old SSOConfig) (map[string]any, error) {
 	out := make(map[string]any, len(req.Config))
 	for key, value := range req.Config {
 		out[key] = value
@@ -214,21 +195,27 @@ func (s *Service) secureSSOConfig(req SSOConfigRequest) (map[string]any, error) 
 	if password == "" {
 		return nil, apperr.ErrIdentitySSOConfigInvalid
 	}
-	ciphertext, err := s.cipher.Encrypt([]byte(password))
+	if password == secretmap.MaskedValue {
+		oldData, err := jsonx.ObjectMapStrict(old.Config)
+		if err != nil {
+			return nil, apperr.ErrIdentitySSOConfigInvalid.WithCause(err)
+		}
+		oldPassword, ok := oldData["bind_password"]
+		if !ok {
+			return nil, apperr.ErrIdentitySSOConfigInvalid
+		}
+		out["bind_password"] = oldPassword
+	}
+	protected, err := secretmap.Protect(s.cipher, out, "identity sso config")
 	if err != nil {
 		return nil, apperr.ErrIdentitySSOSecretInvalid.WithCause(err)
 	}
-	out["bind_password"] = "enc:" + base64.StdEncoding.EncodeToString(ciphertext)
-	return out, nil
+	return protected, nil
 }
 
 // validateLDAPCredentials 通过 LDAPS 目录验证用户密码并读取名单匹配字段。
 func (s *Service) validateLDAPCredentials(ctx context.Context, cfg SSOConfig, username, password string) (string, error) {
-	data, err := ldapConfigFromJSON(cfg.Config)
-	if err != nil {
-		return "", err
-	}
-	bindPassword, err := s.decryptLDAPBindPassword(data.BindPassword)
+	data, err := s.ldapConfigFromJSON(cfg.Config)
 	if err != nil {
 		return "", err
 	}
@@ -242,7 +229,7 @@ func (s *Service) validateLDAPCredentials(ctx context.Context, cfg SSOConfig, us
 	}
 	defer logging.CloseContext(ctx, "关闭 LDAP 连接失败", conn)
 	// 先使用学校配置的服务账号绑定,只用于目录查询,不代表本系统登录成功。
-	if err := conn.Bind(data.BindDN, bindPassword); err != nil {
+	if err := conn.Bind(data.BindDN, data.BindPassword); err != nil {
 		return "", apperr.ErrIdentityInvalidCredentials.WithCause(err)
 	}
 	// 用户名进入 LDAP filter 前必须转义,避免目录查询注入。
@@ -278,23 +265,6 @@ func (s *Service) validateLDAPCredentials(ctx context.Context, cfg SSOConfig, us
 	return matchValue, nil
 }
 
-// decryptLDAPBindPassword 解密 LDAP 绑定密码,拒绝历史或错误格式的明文配置。
-func (s *Service) decryptLDAPBindPassword(value string) (string, error) {
-	raw, ok := strings.CutPrefix(strings.TrimSpace(value), "enc:")
-	if !ok || raw == "" {
-		return "", apperr.ErrIdentitySSOSecretInvalid
-	}
-	ciphertext, err := base64.StdEncoding.DecodeString(raw)
-	if err != nil {
-		return "", apperr.ErrIdentitySSOSecretInvalid.WithCause(err)
-	}
-	plain, err := s.cipher.Decrypt(ciphertext)
-	if err != nil {
-		return "", apperr.ErrIdentitySSOSecretInvalid.WithCause(err)
-	}
-	return string(plain), nil
-}
-
 // ldapConfig 描述租户 LDAP 配置 JSON 中服务端使用的字段。
 type ldapConfig struct {
 	URL            string
@@ -305,19 +275,23 @@ type ldapConfig struct {
 	MatchAttribute string
 }
 
-// ldapConfigFromJSON 解析并校验 LDAP 配置字段,避免缺字段时发起不确定外部请求。
-func ldapConfigFromJSON(raw []byte) (ldapConfig, error) {
+// ldapConfigFromJSON 解析、还原并校验 LDAP 配置字段,避免缺字段时发起不确定外部请求。
+func (s *Service) ldapConfigFromJSON(raw []byte) (ldapConfig, error) {
 	data, err := jsonx.ObjectMapStrict(raw)
 	if err != nil {
 		return ldapConfig{}, apperr.ErrIdentitySSOConfigInvalid.WithCause(err)
 	}
+	revealed, err := secretmap.Reveal(s.cipher, data, "identity sso config")
+	if err != nil {
+		return ldapConfig{}, apperr.ErrIdentitySSOSecretInvalid.WithCause(err)
+	}
 	cfg := ldapConfig{
-		URL:            stringField(data, "url"),
-		BindDN:         stringField(data, "bind_dn"),
-		BindPassword:   stringField(data, "bind_password"),
-		BaseDN:         stringField(data, "base_dn"),
-		UserFilter:     stringField(data, "user_filter"),
-		MatchAttribute: stringField(data, "match_attribute"),
+		URL:            stringField(revealed, "url"),
+		BindDN:         stringField(revealed, "bind_dn"),
+		BindPassword:   stringField(revealed, "bind_password"),
+		BaseDN:         stringField(revealed, "base_dn"),
+		UserFilter:     stringField(revealed, "user_filter"),
+		MatchAttribute: stringField(revealed, "match_attribute"),
 	}
 	if cfg.URL == "" || cfg.BindDN == "" || cfg.BindPassword == "" || cfg.BaseDN == "" || cfg.UserFilter == "" || cfg.MatchAttribute == "" {
 		return ldapConfig{}, apperr.ErrIdentitySSOConfigInvalid
@@ -469,6 +443,36 @@ func (s *Service) matchSSOAccount(ctx context.Context, tenantID int64, matchFiel
 		return Account{}, apperr.ErrIdentitySSOAccountNotMatched.WithCause(fmt.Errorf("match sso account: %w", err))
 	}
 	return account, nil
+}
+
+// finishSSOLogin 校验租户和名单账号状态,并把 SSO 首登的待激活账号推进为正常账号。
+func (s *Service) finishSSOLogin(ctx context.Context, tenantID int64, account Account, device, ip string) (LoginResponse, error) {
+	var tenantSnapshot Tenant
+	if err := s.store.TenantTx(ctx, tenantID, func(ctx context.Context, tx TxStore) error {
+		t, err := tx.GetTenantByID(ctx, tenantID)
+		if err != nil {
+			return err
+		}
+		if account.Status == AccountStatusPending {
+			// SSO 首登只证明已导入名单账号完成外部认证,不创建账号或补组织档案。
+			activated, err := tx.ActivateSSOAccount(ctx, account.ID, tenantID)
+			if err != nil {
+				return err
+			}
+			account = activated
+		}
+		tenantSnapshot = t
+		return nil
+	}); err != nil {
+		return LoginResponse{}, apperr.ErrInternal.WithCause(err)
+	}
+	if err := EnsureTenantCanLogin(tenantSnapshot, timex.Now()); err != nil {
+		return LoginResponse{}, err
+	}
+	if err := EnsureAccountCanLogin(account, timex.Now()); err != nil {
+		return LoginResponse{}, err
+	}
+	return s.issueTenantLogin(ctx, account, device, ip)
 }
 
 // serviceOriginAllowed 校验 CAS service 回调 origin 是否在部署白名单内。

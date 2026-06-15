@@ -22,7 +22,9 @@ type Store interface {
 // TxStore 定义单个事务内可调用的 identity 数据访问能力。
 type TxStore interface {
 	GetPlatformAdminByUsername(ctx context.Context, username string) (PlatformAdmin, error)
+	GetPlatformAdminByID(ctx context.Context, id int64) (PlatformAdmin, error)
 	CreatePlatformAdminIfNotExists(ctx context.Context, input CreatePlatformAdminInput) error
+	UpdatePlatformAdminPassword(ctx context.Context, adminID int64, passwordHash string) error
 	GetTenantByCode(ctx context.Context, code string) (Tenant, error)
 	GetTenantByID(ctx context.Context, id int64) (Tenant, error)
 	ListTenants(ctx context.Context) ([]Tenant, error)
@@ -44,6 +46,7 @@ type TxStore interface {
 	UpdateAccountEditable(ctx context.Context, tenantID, accountID int64, req UpdateAccountRequest) (Account, error)
 	UpdateAccountStatus(ctx context.Context, accountID, tenantID int64, status int16, deleted bool) (Account, error)
 	UpdateAccountPassword(ctx context.Context, accountID, tenantID int64, passwordHash string, mustChange bool, status int16) (Account, error)
+	ActivateSSOAccount(ctx context.Context, accountID, tenantID int64) (Account, error)
 	UpdateAccountPhone(ctx context.Context, tenantID, accountID int64, phoneEnc []byte, phoneHash string) (Account, error)
 	RecordPasswordFailure(ctx context.Context, accountID, tenantID int64, count int16, lockedUntil *time.Time) error
 	ClearPasswordFailure(ctx context.Context, accountID, tenantID int64) error
@@ -58,6 +61,7 @@ type TxStore interface {
 	CreatePlatformAuthSession(ctx context.Context, input CreatePlatformSessionInput) (PlatformAuthSession, error)
 	GetPlatformAuthSessionByRefreshHash(ctx context.Context, hash string) (PlatformAuthSession, error)
 	GetPlatformAuthSessionByID(ctx context.Context, sessionID int64) (PlatformAuthSession, error)
+	ListPlatformAuthSessionsByAdmin(ctx context.Context, platformAdminID int64) ([]PlatformAuthSession, error)
 	RevokePlatformSessions(ctx context.Context, platformAdminID int64) error
 	RevokePlatformAuthSession(ctx context.Context, sessionID int64) error
 	CreateSMSCode(ctx context.Context, input CreateSMSCodeInput) (SMSCode, error)

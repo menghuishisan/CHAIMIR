@@ -21,6 +21,15 @@ func (t *txStore) GetPlatformAdminByUsername(ctx context.Context, username strin
 	return platformAdminFromRow(row), nil
 }
 
+// GetPlatformAdminByID 按 ID 读取平台管理员账号。
+func (t *txStore) GetPlatformAdminByID(ctx context.Context, id int64) (PlatformAdmin, error) {
+	row, err := t.q.GetPlatformAdminByID(ctx, id)
+	if err != nil {
+		return PlatformAdmin{}, err
+	}
+	return platformAdminFromRow(row), nil
+}
+
 // CreatePlatformAdminIfNotExists 幂等创建 SaaS 首个平台管理员,已存在时不覆盖密码。
 func (t *txStore) CreatePlatformAdminIfNotExists(ctx context.Context, input CreatePlatformAdminInput) error {
 	return t.q.CreatePlatformAdminIfNotExists(ctx, sqlcgen.CreatePlatformAdminIfNotExistsParams{
@@ -30,6 +39,11 @@ func (t *txStore) CreatePlatformAdminIfNotExists(ctx context.Context, input Crea
 		Name:         input.Name,
 		Status:       input.Status,
 	})
+}
+
+// UpdatePlatformAdminPassword 更新平台管理员密码哈希。
+func (t *txStore) UpdatePlatformAdminPassword(ctx context.Context, adminID int64, passwordHash string) error {
+	return t.q.UpdatePlatformAdminPassword(ctx, sqlcgen.UpdatePlatformAdminPasswordParams{ID: adminID, PasswordHash: passwordHash})
 }
 
 // GetTenantByCode 按学校短码读取租户。
@@ -444,6 +458,14 @@ func (t *txStore) UpdateAccountPassword(ctx context.Context, accountID, tenantID
 	return Account{ID: row.ID, TenantID: row.TenantID, Name: row.Name, BaseIdentity: row.BaseIdentity, Status: row.Status}, nil
 }
 
+// ActivateSSOAccount 把 SSO 首登命中的待激活账号推进为正常状态。
+func (t *txStore) ActivateSSOAccount(ctx context.Context, accountID, tenantID int64) (Account, error) {
+	if _, err := t.q.ActivateSSOAccount(ctx, sqlcgen.ActivateSSOAccountParams{ID: accountID, TenantID: tenantID}); err != nil {
+		return Account{}, err
+	}
+	return t.GetAccount(ctx, accountID)
+}
+
 // UpdateAccountPhone 更新账号手机号密文和查询哈希。
 func (t *txStore) UpdateAccountPhone(ctx context.Context, tenantID, accountID int64, phoneEnc []byte, phoneHash string) (Account, error) {
 	if err := t.q.UpdateAccountPhone(ctx, sqlcgen.UpdateAccountPhoneParams{ID: accountID, TenantID: tenantID, PhoneEnc: phoneEnc, PhoneHash: phoneHash}); err != nil {
@@ -570,6 +592,19 @@ func (t *txStore) GetPlatformAuthSessionByID(ctx context.Context, sessionID int6
 		return PlatformAuthSession{}, err
 	}
 	return PlatformAuthSession{ID: row.ID, PlatformAdminID: row.PlatformAdminID, RefreshTokenHash: row.RefreshTokenHash, DeviceInfo: pgtypex.TextValue(row.DeviceInfo), IP: pgtypex.TextValue(row.Ip), Status: row.Status, ExpireAt: timex.FromTimestamptz(row.ExpireAt), CreatedAt: timex.FromTimestamptz(row.CreatedAt)}, nil
+}
+
+// ListPlatformAuthSessionsByAdmin 读取平台管理员全部服务端 Refresh 会话。
+func (t *txStore) ListPlatformAuthSessionsByAdmin(ctx context.Context, platformAdminID int64) ([]PlatformAuthSession, error) {
+	rows, err := t.q.ListPlatformAuthSessionsByAdmin(ctx, platformAdminID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]PlatformAuthSession, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, PlatformAuthSession{ID: row.ID, PlatformAdminID: row.PlatformAdminID, RefreshTokenHash: row.RefreshTokenHash, DeviceInfo: pgtypex.TextValue(row.DeviceInfo), IP: pgtypex.TextValue(row.Ip), Status: row.Status, ExpireAt: timex.FromTimestamptz(row.ExpireAt), CreatedAt: timex.FromTimestamptz(row.CreatedAt)})
+	}
+	return out, nil
 }
 
 // RevokePlatformSessions 吊销平台管理员全部有效会话。

@@ -3,7 +3,6 @@ package auth
 
 import (
 	"context"
-	"errors"
 	"log/slog"
 	"regexp"
 	"strconv"
@@ -63,16 +62,24 @@ func ServiceSourceRefAuthorized(ctx context.Context, sourceRef string) bool {
 // Middleware 校验 Bearer access token 并注入租户身份上下文。
 func (m *Manager) Middleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		claims, ok := m.accessClaims(c)
-		if !ok {
+		if !m.AuthenticateAccess(c) {
 			return
 		}
-		if !m.validateAccessSession(c, claims) {
-			return
-		}
-		injectAccessIdentity(c, claims)
 		c.Next()
 	}
+}
+
+// AuthenticateAccess 校验当前 HTTP 请求的 Bearer access token 并注入服务端身份上下文。
+func (m *Manager) AuthenticateAccess(c *gin.Context) bool {
+	claims, ok := m.accessClaims(c)
+	if !ok {
+		return false
+	}
+	if !m.validateAccessSession(c, claims) {
+		return false
+	}
+	injectAccessIdentity(c, claims)
+	return true
 }
 
 // WebSocketMiddleware 校验 WebSocket 文档约定的 query token 并注入租户身份上下文。
@@ -298,17 +305,23 @@ func (m *Manager) validateAccessSession(c *gin.Context, claims *Claims) bool {
 		c.Abort()
 		return false
 	}
+	path := c.FullPath()
+	if strings.TrimSpace(path) == "" {
+		path = c.Request.URL.Path
+	}
 	err := m.sessions.ValidateAccessSession(c.Request.Context(), SessionIdentity{
 		TenantID:   claims.TenantID,
 		AccountID:  claims.AccountID,
 		SessionID:  claims.SessionID,
 		IsPlatform: claims.IsPlatform,
+		Method:     c.Request.Method,
+		Path:       path,
 	})
 	if err == nil {
 		return true
 	}
-	if errors.Is(err, apperr.ErrIdentitySessionInvalid) {
-		response.Fail(c, apperr.ErrIdentitySessionInvalid)
+	if appErr, ok := apperr.As(err); ok {
+		response.Fail(c, appErr)
 	} else {
 		response.Fail(c, apperr.ErrUnauthorized.WithCause(err))
 	}

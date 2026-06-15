@@ -4,6 +4,7 @@ package identity
 import (
 	"context"
 	"errors"
+	"net/http"
 
 	"chaimir/internal/platform/auth"
 	"chaimir/internal/platform/timex"
@@ -26,12 +27,24 @@ func (s *Service) validateTenantAccessSession(ctx context.Context, id auth.Sessi
 		return apperr.ErrIdentitySessionInvalid
 	}
 	var session AuthSession
+	var account Account
+	var tenant Tenant
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
 		row, err := tx.GetAuthSessionByID(ctx, id.TenantID, id.SessionID)
 		if err != nil {
 			return err
 		}
+		accountRow, err := tx.GetAccount(ctx, id.AccountID)
+		if err != nil {
+			return err
+		}
+		tenantRow, err := tx.GetTenantByID(ctx, id.TenantID)
+		if err != nil {
+			return err
+		}
 		session = row
+		account = accountRow
+		tenant = tenantRow
 		return nil
 	}); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -45,6 +58,15 @@ func (s *Service) validateTenantAccessSession(ctx context.Context, id auth.Sessi
 	if session.Status != SessionStatusActive || !timex.Now().Before(session.ExpireAt) {
 		return apperr.ErrIdentitySessionInvalid
 	}
+	if err := EnsureTenantCanLogin(tenant, timex.Now()); err != nil {
+		return err
+	}
+	if err := EnsureAccountCanLogin(account, timex.Now()); err != nil {
+		return err
+	}
+	if account.MustChangePwd && !passwordChangeAllowed(id) {
+		return apperr.ErrIdentityMustChangePassword
+	}
 	return nil
 }
 
@@ -54,12 +76,18 @@ func (s *Service) validatePlatformAccessSession(ctx context.Context, id auth.Ses
 		return apperr.ErrIdentitySessionInvalid
 	}
 	var session PlatformAuthSession
+	var admin PlatformAdmin
 	if err := s.store.PlatformTx(ctx, func(ctx context.Context, tx TxStore) error {
 		row, err := tx.GetPlatformAuthSessionByID(ctx, id.SessionID)
 		if err != nil {
 			return err
 		}
+		adminRow, err := tx.GetPlatformAdminByID(ctx, id.AccountID)
+		if err != nil {
+			return err
+		}
 		session = row
+		admin = adminRow
 		return nil
 	}); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -70,8 +98,23 @@ func (s *Service) validatePlatformAccessSession(ctx context.Context, id auth.Ses
 	if session.PlatformAdminID != id.AccountID {
 		return apperr.ErrIdentitySessionInvalid
 	}
+	if admin.Status != TenantStatusActive {
+		return apperr.ErrIdentitySessionInvalid
+	}
 	if session.Status != SessionStatusActive || !timex.Now().Before(session.ExpireAt) {
 		return apperr.ErrIdentitySessionInvalid
 	}
 	return nil
+}
+
+// passwordChangeAllowed 只放行首登改密所需的最小 HTTP 入口,避免初始密码账号访问其它业务。
+func passwordChangeAllowed(id auth.SessionIdentity) bool {
+	switch {
+	case id.Method == http.MethodPost && id.Path == "/api/v1/me/password":
+		return true
+	case id.Method == http.MethodPost && id.Path == "/api/v1/auth/logout":
+		return true
+	default:
+		return false
+	}
 }

@@ -4,6 +4,7 @@ package identity
 import (
 	"chaimir/internal/platform/auth"
 	"chaimir/internal/platform/httpx"
+	"chaimir/pkg/apperr"
 
 	"github.com/gin-gonic/gin"
 )
@@ -72,4 +73,15 @@ func (a meAPI) sessions(c *gin.Context) {
 		return
 	}
 	httpx.Write(c, out, nil)
+}
+
+// currentSessionID 读取鉴权中间件写入的服务端会话 ID。
+func currentSessionID(c *gin.Context) (int64, bool) {
+	sessionID, ok := c.Get("session_id")
+	id, ok := sessionID.(int64)
+	if !ok || id <= 0 {
+		httpx.Write(c, gin.H{}, apperr.ErrIdentitySessionContextMissing)
+		return 0, false
+	}
+	return id, true
 }
