@@ -42,14 +42,17 @@ func (s *Service) GetMe(ctx context.Context) (MeResponse, error) {
 	return MeResponse{Account: ToAccountDTO(account, phone)}, nil
 }
 
-// ChangeMyPassword 校验旧密码后更新为新密码,并吊销全部 Refresh 会话降低泄露风险。
-func (s *Service) ChangeMyPassword(ctx context.Context, req ChangePasswordRequest) error {
+// ChangeMyPassword 校验旧密码后更新为新密码,保留当前会话并吊销其他设备会话。
+func (s *Service) ChangeMyPassword(ctx context.Context, currentSessionID int64, req ChangePasswordRequest) error {
 	id, ok := tenant.FromContext(ctx)
 	if !ok {
 		return apperr.ErrUnauthorized
 	}
+	if currentSessionID <= 0 {
+		return apperr.ErrIdentitySessionContextMissing
+	}
 	if id.IsPlatform {
-		return s.changePlatformPassword(ctx, id.AccountID, req)
+		return s.changePlatformPassword(ctx, id.AccountID, currentSessionID, req)
 	}
 	if id.TenantID <= 0 || id.AccountID <= 0 {
 		return apperr.ErrForbidden
@@ -82,8 +85,8 @@ func (s *Service) ChangeMyPassword(ctx context.Context, req ChangePasswordReques
 		if err != nil {
 			return err
 		}
-		// 密码变更后吊销全部 Refresh 会话,要求所有设备重新登录。
-		if err := tx.RevokeAccountSessions(ctx, id.TenantID, id.AccountID); err != nil {
+		// 密码变更后保留当前已校验会话,吊销其他设备降低凭据泄露面且不打断首登改密。
+		if err := tx.RevokeOtherAccountSessions(ctx, id.TenantID, id.AccountID, currentSessionID); err != nil {
 			return err
 		}
 		account = row
@@ -182,8 +185,8 @@ func (s *Service) getPlatformMe(ctx context.Context, accountID int64) (MeRespons
 	return MeResponse{Account: AccountDTO{ID: admin.ID, Name: admin.Name, Roles: []int16{contracts.RoleNumPlatformAdmin}, Status: admin.Status}}, nil
 }
 
-// changePlatformPassword 校验平台管理员旧密码并吊销其全部 Refresh 会话。
-func (s *Service) changePlatformPassword(ctx context.Context, accountID int64, req ChangePasswordRequest) error {
+// changePlatformPassword 校验平台管理员旧密码并保留当前会话、吊销其他会话。
+func (s *Service) changePlatformPassword(ctx context.Context, accountID, currentSessionID int64, req ChangePasswordRequest) error {
 	if accountID <= 0 {
 		return apperr.ErrForbidden
 	}
@@ -210,7 +213,7 @@ func (s *Service) changePlatformPassword(ctx context.Context, accountID int64, r
 		if err := tx.UpdatePlatformAdminPassword(ctx, accountID, passwordHash); err != nil {
 			return err
 		}
-		if err := tx.RevokePlatformSessions(ctx, accountID); err != nil {
+		if err := tx.RevokeOtherPlatformSessions(ctx, accountID, currentSessionID); err != nil {
 			return err
 		}
 		admin = row

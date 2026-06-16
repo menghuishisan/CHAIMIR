@@ -32,6 +32,10 @@ const (
 	SandboxStatusDestroyed int16 = 5
 	// SandboxStatusFailed 表示沙箱启动或运行失败。
 	SandboxStatusFailed int16 = 6
+	// SandboxStatusReady 表示沙箱环境已就绪但尚未发生学生操作。
+	SandboxStatusReady int16 = 7
+	// SandboxStatusIdle 表示沙箱已运行但超过空闲计时阈值,等待回收或恢复操作。
+	SandboxStatusIdle int16 = 8
 )
 
 const (

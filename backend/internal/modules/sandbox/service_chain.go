@@ -18,6 +18,9 @@ func (s *Service) ChainDeploy(ctx context.Context, req contracts.SandboxChainDep
 	if err != nil {
 		return nil, err
 	}
+	if err := s.markSandboxExecutionActive(ctx, sb); err != nil {
+		return nil, err
+	}
 	out, err := cap.Deploy(ctx, sb, runtime, req.Payload)
 	if err != nil {
 		return nil, apperr.ErrSandboxChainFailed.WithCause(err)
@@ -32,6 +35,9 @@ func (s *Service) ChainSendTx(ctx context.Context, req contracts.SandboxChainTxR
 	}
 	sb, runtime, cap, err := s.chainCapability(ctx, req.TenantID, req.SandboxID, req.SourceRef)
 	if err != nil {
+		return nil, err
+	}
+	if err := s.markSandboxExecutionActive(ctx, sb); err != nil {
 		return nil, err
 	}
 	out, err := cap.SendTx(ctx, sb, runtime, req.Payload)
@@ -50,6 +56,9 @@ func (s *Service) ChainQuery(ctx context.Context, req contracts.SandboxChainQuer
 	if err != nil {
 		return nil, err
 	}
+	if err := s.markSandboxExecutionActive(ctx, sb); err != nil {
+		return nil, err
+	}
 	out, err := cap.Query(ctx, sb, runtime, req.Target)
 	if err != nil {
 		return nil, apperr.ErrSandboxChainFailed.WithCause(err)
@@ -64,6 +73,9 @@ func (s *Service) ChainReset(ctx context.Context, req contracts.SandboxChainRese
 	}
 	sb, runtime, cap, err := s.chainCapability(ctx, req.TenantID, req.SandboxID, req.SourceRef)
 	if err != nil {
+		return err
+	}
+	if err := s.markSandboxExecutionActive(ctx, sb); err != nil {
 		return err
 	}
 	if err := cap.Reset(ctx, sb, runtime); err != nil {
@@ -81,11 +93,27 @@ func (s *Service) chainCapability(ctx context.Context, tenantID, sandboxID int64
 	if sb.SourceRef != strings.TrimSpace(sourceRef) {
 		return Sandbox{}, Runtime{}, nil, apperr.ErrSandboxOwnershipInvalid
 	}
+	if !sandboxExecAllowed(sb) {
+		return Sandbox{}, Runtime{}, nil, apperr.ErrSandboxStateInvalid
+	}
 	cap, err := s.resolveCapability(runtime)
 	if err != nil {
 		return Sandbox{}, Runtime{}, nil, err
 	}
 	return sb, runtime, cap, nil
+}
+
+// markSandboxExecutionActive 记录链能力调用活跃度,并把 ready/idle 沙箱切回 running。
+func (s *Service) markSandboxExecutionActive(ctx context.Context, sb Sandbox) error {
+	if !sandboxExecAllowed(sb) {
+		return apperr.ErrSandboxStateInvalid
+	}
+	return s.store.TenantTx(ctx, sb.TenantID, func(ctx context.Context, tx TxStore) error {
+		if _, err := tx.MarkSandboxActive(ctx, sb.TenantID, sb.ID); err != nil {
+			return apperr.ErrSandboxStatePersistFailed.WithCause(err)
+		}
+		return nil
+	})
 }
 
 // resolveCapability 只从服务端注册表解析 L2/L3 能力,禁止按 plugin_ref 动态加载任意代码。

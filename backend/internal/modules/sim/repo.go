@@ -14,6 +14,7 @@ import (
 	"chaimir/pkg/apperr"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 // Store 定义 service 所需的 sim 持久化能力,不暴露 sqlc 行类型。
@@ -25,7 +26,13 @@ type Store interface {
 
 // isNoRows 统一识别未命中错误,让 service 不直接依赖 pgx/db 实现细节。
 func isNoRows(err error) bool {
-	return errors.Is(err, pgx.ErrNoRows)
+	return db.IsNoRows(err)
+}
+
+// isUniqueViolation 识别 PostgreSQL 唯一约束冲突,用于分享码随机碰撞的窄重试。
+func isUniqueViolation(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == "23505"
 }
 
 // TxStore 定义单个事务内可调用的 sim 数据访问能力。
@@ -46,7 +53,7 @@ type TxStore interface {
 	CreateSession(ctx context.Context, session Session) (Session, error)
 	GetSession(ctx context.Context, tenantID, sessionID int64) (Session, error)
 	GetSessionWithPackage(ctx context.Context, tenantID, sessionID int64) (SessionWithPackage, error)
-	ArchiveSession(ctx context.Context, tenantID, sessionID int64) (Session, error)
+	UpdateSessionStatus(ctx context.Context, tenantID, sessionID int64, status int16) (Session, error)
 	ArchiveSessionsBySourceRef(ctx context.Context, tenantID int64, sourceRef string) ([]Session, error)
 	GetLastAction(ctx context.Context, tenantID, sessionID int64) (Action, error)
 	GetActionBySeq(ctx context.Context, tenantID, sessionID int64, seq int32) (Action, error)
@@ -257,7 +264,7 @@ func (s *txStore) CreateSession(ctx context.Context, session Session) (Session, 
 	if err != nil {
 		return Session{}, err
 	}
-	row, err := s.q.CreateSimSession(ctx, sqlcgen.CreateSimSessionParams{ID: session.ID, TenantID: session.TenantID, PackageID: session.PackageID, SourceRef: session.SourceRef, OwnerAccountID: session.OwnerAccountID, Seed: session.Seed, InitParams: raw, Compute: session.Compute})
+	row, err := s.q.CreateSimSession(ctx, sqlcgen.CreateSimSessionParams{ID: session.ID, TenantID: session.TenantID, PackageID: session.PackageID, SourceRef: session.SourceRef, OwnerAccountID: session.OwnerAccountID, Seed: session.Seed, InitParams: raw, Compute: session.Compute, Status: session.Status})
 	if err != nil {
 		return Session{}, err
 	}
@@ -282,9 +289,9 @@ func (s *txStore) GetSessionWithPackage(ctx context.Context, tenantID, sessionID
 	return sessionWithPackageFromRow(row)
 }
 
-// ArchiveSession 归档单个会话。
-func (s *txStore) ArchiveSession(ctx context.Context, tenantID, sessionID int64) (Session, error) {
-	row, err := s.q.ArchiveSimSession(ctx, sqlcgen.ArchiveSimSessionParams{TenantID: tenantID, ID: sessionID})
+// UpdateSessionStatus 更新仿真会话状态。
+func (s *txStore) UpdateSessionStatus(ctx context.Context, tenantID, sessionID int64, status int16) (Session, error) {
+	row, err := s.q.UpdateSimSessionStatus(ctx, sqlcgen.UpdateSimSessionStatusParams{TenantID: tenantID, ID: sessionID, Status: status})
 	if err != nil {
 		return Session{}, err
 	}

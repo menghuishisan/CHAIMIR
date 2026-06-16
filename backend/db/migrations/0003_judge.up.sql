@@ -18,6 +18,9 @@ CREATE TABLE IF NOT EXISTS judge_task (
     tenant_id BIGINT NOT NULL REFERENCES tenant(id),
     judger_id BIGINT NOT NULL REFERENCES judger(id),
     source_ref VARCHAR(128) NOT NULL,
+    source_owner_id BIGINT NOT NULL DEFAULT 0,
+    source_course_id BIGINT NOT NULL DEFAULT 0,
+    source_scope VARCHAR(32) NOT NULL DEFAULT 'unknown',
     submitter_id BIGINT NOT NULL,
     problem_ref VARCHAR(128) NOT NULL,
     code_storage_key VARCHAR(255) NOT NULL,
@@ -38,8 +41,10 @@ CREATE TABLE IF NOT EXISTS judge_task (
 );
 
 CREATE TABLE IF NOT EXISTS judge_result (
-    task_id BIGINT PRIMARY KEY,
+    id BIGINT PRIMARY KEY,
+    task_id BIGINT NOT NULL,
     tenant_id BIGINT NOT NULL REFERENCES tenant(id),
+    version INT NOT NULL CHECK (version > 0),
     passed BOOLEAN NOT NULL,
     score INT NOT NULL CHECK (score >= 0),
     max_score INT NOT NULL CHECK (max_score >= 0),
@@ -47,6 +52,7 @@ CREATE TABLE IF NOT EXISTS judge_result (
     judge_sandbox_ref VARCHAR(128) NOT NULL,
     judged_at TIMESTAMPTZ NOT NULL,
     is_rejudge BOOLEAN NOT NULL DEFAULT false,
+    UNIQUE (tenant_id, task_id, version),
     FOREIGN KEY (tenant_id, task_id) REFERENCES judge_task(tenant_id, id) ON DELETE CASCADE
 );
 
@@ -58,6 +64,7 @@ CREATE TABLE IF NOT EXISTS judge_event_outbox (
     payload JSONB NOT NULL,
     status SMALLINT NOT NULL CHECK (status IN (1, 2, 3)),
     retry_count INT NOT NULL DEFAULT 0 CHECK (retry_count >= 0),
+    next_attempt_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     last_error VARCHAR(255),
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -79,7 +86,9 @@ CREATE TABLE IF NOT EXISTS submission_fingerprint (
 CREATE INDEX IF NOT EXISTS idx_judger_status ON judger(status, selftest_status);
 CREATE INDEX IF NOT EXISTS idx_judge_task_queue ON judge_task(tenant_id, status, priority DESC, created_at ASC);
 CREATE INDEX IF NOT EXISTS idx_judge_task_submitter ON judge_task(tenant_id, submitter_id);
-CREATE INDEX IF NOT EXISTS idx_judge_event_outbox_status ON judge_event_outbox(status, created_at ASC);
+CREATE INDEX IF NOT EXISTS idx_judge_task_owner ON judge_task(tenant_id, source_owner_id, source_ref);
+CREATE INDEX IF NOT EXISTS idx_judge_result_latest ON judge_result(tenant_id, task_id, version DESC);
+CREATE INDEX IF NOT EXISTS idx_judge_event_outbox_status ON judge_event_outbox(status, next_attempt_at ASC, created_at ASC);
 CREATE INDEX IF NOT EXISTS idx_submission_fingerprint_exact ON submission_fingerprint(tenant_id, problem_ref, code_hash);
 CREATE INDEX IF NOT EXISTS idx_submission_fingerprint_source ON submission_fingerprint(tenant_id, source_ref);
 

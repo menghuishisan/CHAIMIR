@@ -56,6 +56,7 @@ func RegisterSimModule(deps SimModuleDeps) (*sim.Service, error) {
 		Storage:         deps.Storage,
 		FileService:     fileService,
 		Audit:           deps.Audit,
+		Identity:        deps.Roles,
 		WSHub:           deps.WSHub,
 		BackendAdapters: deps.BackendAdapters,
 	})

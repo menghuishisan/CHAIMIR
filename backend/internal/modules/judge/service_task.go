@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	"chaimir/internal/contracts"
-	"chaimir/internal/platform/audit"
 	"chaimir/internal/platform/auth"
 	"chaimir/internal/platform/pagex"
 	"chaimir/internal/platform/response"
@@ -16,8 +15,8 @@ import (
 )
 
 // ListTasks 按租户分页查询判题任务,供教师和学校管理员查看队列与人工评分项。
-func (s *Service) ListTasks(ctx context.Context, tenantID int64, sourceRef string, pendingManual bool, page, size int) ([]map[string]any, int64, int, int, error) {
-	if tenantID <= 0 {
+func (s *Service) ListTasks(ctx context.Context, tenantID, accountID int64, sourceRef string, pendingManual bool, page, size int) ([]map[string]any, int64, int, int, error) {
+	if tenantID <= 0 || accountID <= 0 {
 		return nil, 0, 0, 0, apperr.ErrJudgeSubmitInvalid
 	}
 	page, size = pagex.Normalize(page, size)
@@ -29,7 +28,7 @@ func (s *Service) ListTasks(ctx context.Context, tenantID int64, sourceRef strin
 	)
 	if err := s.store.TenantTx(ctx, tenantID, func(ctx context.Context, tx TxStore) error {
 		var err error
-		items, total, err = tx.ListJudgeTasks(ctx, tenantID, strings.TrimSpace(sourceRef), pendingManual, limit, offset)
+		items, total, err = tx.ListJudgeTasks(ctx, tenantID, strings.TrimSpace(sourceRef), pendingManual, accountID, limit, offset)
 		if err != nil {
 			return apperr.ErrJudgeTaskNotFound.WithCause(err)
 		}
@@ -61,11 +60,23 @@ func (s *Service) CancelTask(ctx context.Context, tenantID, taskID int64) error 
 		return err
 	}
 	s.publishProgress(ctx, tenantID, task.ID, task.Status, ProgressStageFailed, "判题任务已取消")
-	return s.writeAudit(ctx, tenantID, task.SubmitterID, audit.ActorRoleSystem, "judge.cancel", "judge_task", task.ID, map[string]any{"source_ref": task.SourceRef})
+	return s.writeSystemAudit(ctx, tenantID, "judge.cancel", "judge_task", task.ID, map[string]any{"source_ref": task.SourceRef, "submitter_id": task.SubmitterID})
 }
 
 // RejudgeTask 按原输入快照重置任务,只允许已完成或失败终态进入重判。
 func (s *Service) RejudgeTask(ctx context.Context, tenantID, taskID int64) (JudgeTaskInfo, error) {
+	info, err := s.rejudgeTask(ctx, tenantID, taskID)
+	if err != nil {
+		return JudgeTaskInfo{}, err
+	}
+	if err := s.writeSystemAudit(ctx, tenantID, "judge.rejudge", "judge_task", info.Task.ID, map[string]any{"source_ref": info.Task.SourceRef, "submitter_id": info.Task.SubmitterID}); err != nil {
+		return JudgeTaskInfo{}, err
+	}
+	return info, nil
+}
+
+// rejudgeTask 执行重判状态重置并返回最新任务快照,审计由调用场景决定。
+func (s *Service) rejudgeTask(ctx context.Context, tenantID, taskID int64) (JudgeTaskInfo, error) {
 	if tenantID <= 0 || taskID <= 0 {
 		return JudgeTaskInfo{}, apperr.ErrJudgeSubmitInvalid
 	}
@@ -86,10 +97,22 @@ func (s *Service) RejudgeTask(ctx context.Context, tenantID, taskID int64) (Judg
 		return JudgeTaskInfo{}, err
 	}
 	s.publishProgress(ctx, tenantID, task.ID, task.Status, ProgressStageQueued, "判题任务已进入重判队列")
-	if err := s.writeAudit(ctx, tenantID, task.SubmitterID, audit.ActorRoleSystem, "judge.rejudge", "judge_task", task.ID, map[string]any{"source_ref": task.SourceRef}); err != nil {
+	return s.getTaskInfo(ctx, tenantID, task.ID)
+}
+
+// RejudgeTaskForUser 校验教师来源归属后触发单条重判。
+func (s *Service) RejudgeTaskForUser(ctx context.Context, tenantID, accountID, taskID int64) (JudgeTaskInfo, error) {
+	if err := s.ensureUserCanAccessTask(ctx, tenantID, accountID, taskID); err != nil {
 		return JudgeTaskInfo{}, err
 	}
-	return s.getTaskInfo(ctx, tenantID, task.ID)
+	info, err := s.rejudgeTask(ctx, tenantID, taskID)
+	if err != nil {
+		return JudgeTaskInfo{}, err
+	}
+	if err := s.writeAuditFromContext(ctx, tenantID, "judge.rejudge.user", "judge_task", taskID, map[string]any{"source_ref": info.Task.SourceRef}); err != nil {
+		return JudgeTaskInfo{}, err
+	}
+	return info, nil
 }
 
 // RejudgeBatch 按来源标识批量重判已完成或失败任务。
@@ -126,7 +149,7 @@ func (s *Service) RejudgeBatch(ctx context.Context, tenantID int64, sourceRef st
 	if len(changed) == 0 {
 		return apperr.ErrJudgeTaskStateInvalid
 	}
-	return s.writeAudit(ctx, tenantID, 0, audit.ActorRoleSystem, "judge.rejudge_batch", "judge_source", 0, map[string]any{"source_ref": sourceRef, "count": len(changed)})
+	return s.writeSystemAudit(ctx, tenantID, "judge.rejudge_batch", "judge_source", 0, map[string]any{"source_ref": sourceRef, "count": len(changed)})
 }
 
 // ManualScore 保存人工评分结果并在同一事务写入终态 outbox。
@@ -143,10 +166,14 @@ func (s *Service) ManualScore(ctx context.Context, tenantID, taskID, scorerID in
 		if err != nil {
 			return apperr.ErrJudgeTaskNotFound.WithCause(err)
 		}
+		if err := ensureAccountCanAccessTask(task, scorerID); err != nil {
+			return err
+		}
 		if task.Status != JudgeTaskStatusJudging || task.InputSnapshot.JudgerType != JudgerTypeManual {
 			return apperr.ErrJudgeTaskStateInvalid
 		}
 		result := JudgeResult{
+			ID:       s.ids.Generate(),
 			TaskID:   task.ID,
 			TenantID: task.TenantID,
 			Passed:   req.Passed,
@@ -188,7 +215,7 @@ func (s *Service) ManualScore(ctx context.Context, tenantID, taskID, scorerID in
 	if err := s.publishPendingOutbox(ctx); err != nil {
 		return nil, err
 	}
-	if err := s.writeAudit(ctx, tenantID, scorerID, contracts.RoleNumTeacher, "judge.manual_score", "judge_task", taskID, map[string]any{"score": req.Score, "max_score": req.MaxScore}); err != nil {
+	if err := s.writeAuditFromContext(ctx, tenantID, "judge.manual_score", "judge_task", taskID, map[string]any{"score": req.Score, "max_score": req.MaxScore, "scorer_id": scorerID}); err != nil {
 		return nil, err
 	}
 	return taskInfoToMap(info), nil
@@ -203,7 +230,48 @@ func (s *Service) ProgressSubscription(ctx context.Context, tenantID, accountID,
 	if err != nil {
 		return "", ProgressMessage{}, err
 	}
+	if err := ensureAccountCanAccessTask(info.Task, accountID); err != nil {
+		return "", ProgressMessage{}, err
+	}
 	return judgeProgressTopic(tenantID, taskID), ProgressMessage{TaskID: taskID, Status: info.Task.Status, Stage: progressStage(info.Task.Status), Message: progressMessage(info.Task.Status)}, nil
+}
+
+// GetTaskInfoForUser 校验用户态来源归属后返回任务与结果。
+func (s *Service) GetTaskInfoForUser(ctx context.Context, tenantID, accountID, taskID int64) (JudgeTaskInfo, error) {
+	info, err := s.getTaskInfo(ctx, tenantID, taskID)
+	if err != nil {
+		return JudgeTaskInfo{}, err
+	}
+	if err := ensureAccountCanAccessTask(info.Task, accountID); err != nil {
+		return JudgeTaskInfo{}, err
+	}
+	return info, nil
+}
+
+// ensureUserCanAccessTask 读取任务并执行用户态来源归属校验。
+func (s *Service) ensureUserCanAccessTask(ctx context.Context, tenantID, accountID, taskID int64) error {
+	info, err := s.getTaskInfo(ctx, tenantID, taskID)
+	if err != nil {
+		return err
+	}
+	return ensureAccountCanAccessTask(info.Task, accountID)
+}
+
+// ensureAccountCanAccessTask 防止普通教师按租户横向访问非本人来源任务。
+func ensureAccountCanAccessTask(task JudgeTask, accountID int64) error {
+	if accountID <= 0 {
+		return apperr.ErrJudgeTaskForbidden
+	}
+	if task.SourceOwnerID > 0 {
+		if task.SourceOwnerID == accountID || task.SubmitterID == accountID {
+			return nil
+		}
+		return apperr.ErrJudgeTaskForbidden
+	}
+	if task.SubmitterID == accountID && task.SourceScope != "" && task.SourceScope != "unknown" {
+		return nil
+	}
+	return apperr.ErrJudgeTaskForbidden
 }
 
 // progressStage 将任务状态映射为用户向进度阶段。

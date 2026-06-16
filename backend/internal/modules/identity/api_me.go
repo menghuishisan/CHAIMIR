@@ -45,7 +45,11 @@ func (a meAPI) changePassword(c *gin.Context) {
 	if !httpx.BindJSON(c, &req) {
 		return
 	}
-	if err := a.svc.ChangeMyPassword(c.Request.Context(), req); err != nil {
+	sessionID, ok := currentSessionID(c)
+	if !ok {
+		return
+	}
+	if err := a.svc.ChangeMyPassword(c.Request.Context(), sessionID, req); err != nil {
 		httpx.Write(c, gin.H{}, err)
 		return
 	}

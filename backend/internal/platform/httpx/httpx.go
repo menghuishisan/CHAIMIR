@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 
+	"chaimir/internal/platform/audit"
 	"chaimir/internal/platform/ids"
 	"chaimir/internal/platform/pagex"
 	"chaimir/internal/platform/response"
@@ -14,6 +15,18 @@ import (
 
 	"github.com/gin-gonic/gin"
 )
+
+// AuditContextMiddleware 把请求 IP 和 trace_id 注入 context,供业务成功后统一构造审计条目。
+func AuditContextMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		ctx := audit.WithRequestContext(c.Request.Context(), audit.RequestContext{
+			IP:      c.ClientIP(),
+			TraceID: response.TraceFromGin(c),
+		})
+		c.Request = c.Request.WithContext(ctx)
+		c.Next()
+	}
+}
 
 // BindJSON 是 handler 层统一请求绑定入口,失败时只返回用户向 bad request 文案。
 func BindJSON(c *gin.Context, dst any) bool {

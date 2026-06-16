@@ -455,7 +455,7 @@ func (a sandboxAPI) toolProxy(c *gin.Context) {
 		response.Fail(c, err)
 		return
 	}
-	a.svc.ObserveToolAccess(c.Request.Context(), sb, tool)
+	a.svc.ObserveToolAccess(c.Request.Context(), sb)
 	target := toolProxyURL(sb, tool)
 	proxy := httputil.NewSingleHostReverseProxy(target)
 	proxy.ErrorHandler = func(w http.ResponseWriter, _ *http.Request, err error) {
@@ -473,7 +473,7 @@ func (a sandboxAPI) toolProxy(c *gin.Context) {
 		sanitizeToolProxyHeaders(pr.Out.Header)
 	}
 	proxy.ServeHTTP(c.Writer, c.Request)
-	a.svc.ObserveToolAccess(c.Request.Context(), sb, tool)
+	a.svc.ObserveToolAccess(c.Request.Context(), sb)
 }
 
 // chainDeploy 绑定链部署请求。
@@ -633,6 +633,10 @@ func sanitizeToolProxyHeaders(header http.Header) {
 		"Proxy-Authorization",
 		"X-Api-Key",
 		"X-CSRF-Token",
+		"X-Forwarded-For",
+		"X-Forwarded-Host",
+		"X-Forwarded-Proto",
+		"X-Real-IP",
 		auth.ServiceNameHeader,
 		auth.ServiceTenantHeader,
 		auth.ServiceSourceRefHeader,

@@ -36,7 +36,7 @@ type TxStore interface {
 	GetJudgeTaskInfo(ctx context.Context, tenantID, taskID int64) (JudgeTaskInfo, error)
 	ListJudgeTasksBySourceRef(ctx context.Context, tenantID int64, sourceRef string) ([]JudgeTask, error)
 	ListRecentJudgeTasksBySubmitterProblem(ctx context.Context, tenantID, submitterID int64, problemRef string, windowSeconds int32) ([]JudgeTask, error)
-	ListJudgeTasks(ctx context.Context, tenantID int64, sourceRef string, pendingManual bool, limit, offset int32) ([]JudgeTaskInfo, int64, error)
+	ListJudgeTasks(ctx context.Context, tenantID int64, sourceRef string, pendingManual bool, sourceOwnerID int64, limit, offset int32) ([]JudgeTaskInfo, int64, error)
 	CancelQueuedJudgeTask(ctx context.Context, tenantID, taskID int64) (JudgeTask, error)
 	ResetJudgeTaskForRejudge(ctx context.Context, tenantID, taskID int64, snapshot JudgeInputSnapshot) (JudgeTask, error)
 	DequeueJudgeTasks(ctx context.Context, limit int32) ([]JudgeTask, error)
@@ -177,6 +177,9 @@ func (s *txStore) CreateJudgeTask(ctx context.Context, task JudgeTask) (JudgeTas
 		TenantID:         task.TenantID,
 		JudgerID:         task.JudgerID,
 		SourceRef:        task.SourceRef,
+		SourceOwnerID:    task.SourceOwnerID,
+		SourceCourseID:   task.SourceCourseID,
+		SourceScope:      task.SourceScope,
 		SubmitterID:      task.SubmitterID,
 		ProblemRef:       task.ProblemRef,
 		CodeStorageKey:   task.CodeStorageKey,
@@ -240,12 +243,12 @@ func (s *txStore) ListRecentJudgeTasksBySubmitterProblem(ctx context.Context, te
 }
 
 // ListJudgeTasks 查询任务分页列表。
-func (s *txStore) ListJudgeTasks(ctx context.Context, tenantID int64, sourceRef string, pendingManual bool, limit, offset int32) ([]JudgeTaskInfo, int64, error) {
-	rows, err := s.q.ListJudgeTasks(ctx, sqlcgen.ListJudgeTasksParams{TenantID: tenantID, Column2: sourceRef, Column3: pendingManual, Limit: limit, Offset: offset})
+func (s *txStore) ListJudgeTasks(ctx context.Context, tenantID int64, sourceRef string, pendingManual bool, sourceOwnerID int64, limit, offset int32) ([]JudgeTaskInfo, int64, error) {
+	rows, err := s.q.ListJudgeTasks(ctx, sqlcgen.ListJudgeTasksParams{TenantID: tenantID, Column2: sourceRef, Column3: pendingManual, Column4: sourceOwnerID, Limit: limit, Offset: offset})
 	if err != nil {
 		return nil, 0, err
 	}
-	total, err := s.q.CountJudgeTasks(ctx, sqlcgen.CountJudgeTasksParams{TenantID: tenantID, Column2: sourceRef, Column3: pendingManual})
+	total, err := s.q.CountJudgeTasks(ctx, sqlcgen.CountJudgeTasksParams{TenantID: tenantID, Column2: sourceRef, Column3: pendingManual, Column4: sourceOwnerID})
 	if err != nil {
 		return nil, 0, err
 	}
@@ -336,6 +339,7 @@ func (s *txStore) UpsertJudgeResult(ctx context.Context, result JudgeResult) (Ju
 		return JudgeResult{}, err
 	}
 	row, err := s.q.UpsertJudgeResult(ctx, sqlcgen.UpsertJudgeResultParams{
+		ID:              result.ID,
 		TaskID:          result.TaskID,
 		TenantID:        result.TenantID,
 		Passed:          result.Passed,
@@ -352,7 +356,7 @@ func (s *txStore) UpsertJudgeResult(ctx context.Context, result JudgeResult) (Ju
 	if err != nil {
 		return JudgeResult{}, err
 	}
-	return JudgeResult{TaskID: row.TaskID, TenantID: row.TenantID, Passed: row.Passed, Score: row.Score, MaxScore: row.MaxScore, Details: details, JudgeSandboxRef: row.JudgeSandboxRef, JudgedAt: timex.FromTimestamptz(row.JudgedAt), IsRejudge: row.IsRejudge}, nil
+	return JudgeResult{ID: row.ID, TaskID: row.TaskID, TenantID: row.TenantID, Version: row.Version, Passed: row.Passed, Score: row.Score, MaxScore: row.MaxScore, Details: details, JudgeSandboxRef: row.JudgeSandboxRef, JudgedAt: timex.FromTimestamptz(row.JudgedAt), IsRejudge: row.IsRejudge}, nil
 }
 
 // CreateOutbox 写入终态事件 outbox。

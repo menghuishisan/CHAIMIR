@@ -199,6 +199,15 @@ ON CONFLICT (tenant_id, account_id, role) DO NOTHING;
 DELETE FROM account_role
 WHERE tenant_id = $1 AND account_id = $2 AND role = $3;
 
+-- name: CountActiveRoleAccounts :one
+SELECT COUNT(DISTINCT a.id)
+FROM account a
+JOIN account_role ar ON ar.tenant_id = a.tenant_id AND ar.account_id = a.id
+WHERE a.tenant_id = $1
+  AND ar.role = $2
+  AND a.status = 2
+  AND a.deleted_at IS NULL;
+
 -- name: CreateAccountProfile :exec
 INSERT INTO account_profile (account_id, tenant_id, no, org_id, enrollment_year, title)
 VALUES ($1, $2, $3, $4, $5, $6);
@@ -321,6 +330,10 @@ WHERE id = $1 AND tenant_id = $2;
 UPDATE auth_session SET status = 2
 WHERE tenant_id = $1 AND account_id = $2 AND status = 1;
 
+-- name: RevokeOtherAccountSessions :exec
+UPDATE auth_session SET status = 2
+WHERE tenant_id = $1 AND account_id = $2 AND id <> $3 AND status = 1;
+
 -- name: CreateAuthSession :one
 INSERT INTO auth_session (id, tenant_id, account_id, refresh_token_hash, device_info, ip, status, expire_at, created_at)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, now())
@@ -342,13 +355,17 @@ FROM auth_session
 WHERE tenant_id = $1 AND account_id = $2
 ORDER BY created_at DESC, id DESC;
 
--- name: RevokeAuthSessionByID :exec
+-- name: RevokeAuthSessionByID :execrows
 UPDATE auth_session SET status = 2
-WHERE tenant_id = $1 AND id = $2;
+WHERE tenant_id = $1 AND id = $2 AND status = 1;
 
 -- name: RevokePlatformSessions :exec
 UPDATE platform_auth_session SET status = 2
 WHERE platform_admin_id = $1 AND status = 1;
+
+-- name: RevokeOtherPlatformSessions :exec
+UPDATE platform_auth_session SET status = 2
+WHERE platform_admin_id = $1 AND id <> $2 AND status = 1;
 
 -- name: CreatePlatformAuthSession :one
 INSERT INTO platform_auth_session (id, platform_admin_id, refresh_token_hash, device_info, ip, status, expire_at, created_at)
@@ -371,9 +388,9 @@ FROM platform_auth_session
 WHERE platform_admin_id = $1
 ORDER BY created_at DESC, id DESC;
 
--- name: RevokePlatformAuthSessionByID :exec
+-- name: RevokePlatformAuthSessionByID :execrows
 UPDATE platform_auth_session SET status = 2
-WHERE id = $1;
+WHERE id = $1 AND status = 1;
 
 -- name: CreateSMSCode :one
 INSERT INTO sms_code (id, tenant_id, phone_hash, code_hash, scene, expire_at, used, created_at)
@@ -460,7 +477,7 @@ RETURNING id, tenant_id, actor_id, actor_role, action, target_type, target_id, d
 -- name: QueryAuditLogs :many
 SELECT id, tenant_id, actor_id, actor_role, action, target_type, target_id, detail, ip, trace_id, created_at, COUNT(*) OVER() AS total_count
 FROM audit_log
-WHERE ($1::bigint = 0 OR tenant_id = $1)
+WHERE (($1::bigint = -1 AND tenant_id IS NULL) OR ($1::bigint <> -1 AND ($1::bigint = 0 OR tenant_id = $1)))
   AND ($2::bigint = 0 OR actor_id = $2)
   AND ($3::text = '' OR action = $3)
   AND ($4::text = '' OR target_type = $4)

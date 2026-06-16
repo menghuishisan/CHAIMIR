@@ -4,6 +4,7 @@ package identity
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"time"
 
 	"chaimir/internal/modules/identity/internal/sqlcgen"
@@ -21,6 +22,7 @@ type Store interface {
 
 // TxStore 定义单个事务内可调用的 identity 数据访问能力。
 type TxStore interface {
+	UseTenant(ctx context.Context, tenantID int64) error
 	GetPlatformAdminByUsername(ctx context.Context, username string) (PlatformAdmin, error)
 	GetPlatformAdminByID(ctx context.Context, id int64) (PlatformAdmin, error)
 	CreatePlatformAdminIfNotExists(ctx context.Context, input CreatePlatformAdminInput) error
@@ -52,7 +54,9 @@ type TxStore interface {
 	ClearPasswordFailure(ctx context.Context, accountID, tenantID int64) error
 	GrantRole(ctx context.Context, tenantID, accountID int64, role int16, roleID int64) error
 	RevokeRole(ctx context.Context, tenantID, accountID int64, role int16) error
+	CountActiveRoleAccounts(ctx context.Context, tenantID int64, role int16) (int64, error)
 	RevokeAccountSessions(ctx context.Context, tenantID, accountID int64) error
+	RevokeOtherAccountSessions(ctx context.Context, tenantID, accountID, keepSessionID int64) error
 	CreateAuthSession(ctx context.Context, input CreateSessionInput) (AuthSession, error)
 	GetAuthSessionByRefreshHash(ctx context.Context, hash string) (AuthSession, error)
 	GetAuthSessionByID(ctx context.Context, tenantID, sessionID int64) (AuthSession, error)
@@ -63,6 +67,7 @@ type TxStore interface {
 	GetPlatformAuthSessionByID(ctx context.Context, sessionID int64) (PlatformAuthSession, error)
 	ListPlatformAuthSessionsByAdmin(ctx context.Context, platformAdminID int64) ([]PlatformAuthSession, error)
 	RevokePlatformSessions(ctx context.Context, platformAdminID int64) error
+	RevokeOtherPlatformSessions(ctx context.Context, platformAdminID, keepSessionID int64) error
 	RevokePlatformAuthSession(ctx context.Context, sessionID int64) error
 	CreateSMSCode(ctx context.Context, input CreateSMSCodeInput) (SMSCode, error)
 	GetLatestSMSCode(ctx context.Context, tenantID int64, phoneHash string, scene int16) (SMSCode, error)
@@ -111,12 +116,27 @@ type store struct {
 
 // txStore 封装单事务 sqlc 查询对象。
 type txStore struct {
-	q *sqlcgen.Queries
+	q  *sqlcgen.Queries
+	tx pgx.Tx
 }
 
 // NewStore 创建 identity 模块持久化入口,仅装配层应调用。
 func NewStore(database *db.DB) Store {
 	return &store{database: database}
+}
+
+// UseTenant 在当前事务中注入 RLS 租户变量,用于平台审核创建租户后的同事务首管账号写入。
+func (t *txStore) UseTenant(ctx context.Context, tenantID int64) error {
+	if t == nil || t.tx == nil {
+		return fmt.Errorf("identity tx store 未初始化")
+	}
+	if tenantID <= 0 {
+		return fmt.Errorf("tenant_id 必须大于 0")
+	}
+	if _, err := t.tx.Exec(ctx, "SELECT set_config('app.tenant_id', $1, true)", strconv.FormatInt(tenantID, 10)); err != nil {
+		return fmt.Errorf("注入 app.tenant_id 失败: %w", err)
+	}
+	return nil
 }
 
 // PlatformTx 在应用连接中访问平台级表和平台管理员路径。
@@ -125,7 +145,7 @@ func (s *store) PlatformTx(ctx context.Context, fn func(context.Context, TxStore
 		return fmt.Errorf("identity store 未初始化")
 	}
 	return s.database.WithAppTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-		return fn(ctx, &txStore{q: sqlcgen.New(tx)})
+		return fn(ctx, &txStore{q: sqlcgen.New(tx), tx: tx})
 	})
 }
 
@@ -135,7 +155,7 @@ func (s *store) TenantTx(ctx context.Context, tenantID int64, fn func(context.Co
 		return fmt.Errorf("identity store 未初始化")
 	}
 	return s.database.WithTenantTxID(ctx, tenantID, func(ctx context.Context, tx pgx.Tx) error {
-		return fn(ctx, &txStore{q: sqlcgen.New(tx)})
+		return fn(ctx, &txStore{q: sqlcgen.New(tx), tx: tx})
 	})
 }
 
@@ -145,6 +165,6 @@ func (s *store) PrivilegedTx(ctx context.Context, fn func(context.Context, TxSto
 		return fmt.Errorf("identity store 未初始化")
 	}
 	return s.database.WithPrivilegedModuleTx(ctx, "identity", func(ctx context.Context, tx pgx.Tx) error {
-		return fn(ctx, &txStore{q: sqlcgen.New(tx)})
+		return fn(ctx, &txStore{q: sqlcgen.New(tx), tx: tx})
 	})
 }

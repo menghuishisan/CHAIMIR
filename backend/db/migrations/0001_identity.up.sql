@@ -57,8 +57,7 @@ CREATE TABLE IF NOT EXISTS department (
     name VARCHAR(128) NOT NULL,
     code VARCHAR(32),
     deleted_at TIMESTAMPTZ,
-    UNIQUE (tenant_id, id),
-    UNIQUE (tenant_id, name)
+    UNIQUE (tenant_id, id)
 );
 
 CREATE TABLE IF NOT EXISTS major (
@@ -68,8 +67,7 @@ CREATE TABLE IF NOT EXISTS major (
     name VARCHAR(128) NOT NULL,
     deleted_at TIMESTAMPTZ,
     UNIQUE (tenant_id, id),
-    FOREIGN KEY (tenant_id, department_id) REFERENCES department(tenant_id, id),
-    UNIQUE (tenant_id, department_id, name)
+    FOREIGN KEY (tenant_id, department_id) REFERENCES department(tenant_id, id)
 );
 
 CREATE TABLE IF NOT EXISTS class (
@@ -81,8 +79,7 @@ CREATE TABLE IF NOT EXISTS class (
     status SMALLINT NOT NULL,
     deleted_at TIMESTAMPTZ,
     UNIQUE (tenant_id, id),
-    FOREIGN KEY (tenant_id, major_id) REFERENCES major(tenant_id, id),
-    UNIQUE (tenant_id, major_id, name)
+    FOREIGN KEY (tenant_id, major_id) REFERENCES major(tenant_id, id)
 );
 
 CREATE TABLE IF NOT EXISTS account (
@@ -101,8 +98,7 @@ CREATE TABLE IF NOT EXISTS account (
     deleted_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    UNIQUE (tenant_id, id),
-    UNIQUE (tenant_id, phone_hash)
+    UNIQUE (tenant_id, id)
 );
 
 CREATE TABLE IF NOT EXISTS account_role (
@@ -222,8 +218,12 @@ CREATE TABLE IF NOT EXISTS audit_log (
 CREATE INDEX IF NOT EXISTS idx_auth_session_account_status ON auth_session(account_id, status);
 CREATE INDEX IF NOT EXISTS idx_auth_session_tenant_account_status ON auth_session(tenant_id, account_id, status);
 CREATE INDEX IF NOT EXISTS idx_auth_session_refresh ON auth_session(refresh_token_hash);
+CREATE UNIQUE INDEX IF NOT EXISTS uk_department_tenant_name_active ON department(tenant_id, name) WHERE deleted_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_major_tenant_department ON major(tenant_id, department_id);
+CREATE UNIQUE INDEX IF NOT EXISTS uk_major_tenant_department_name_active ON major(tenant_id, department_id, name) WHERE deleted_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_class_tenant_major ON class(tenant_id, major_id);
+CREATE UNIQUE INDEX IF NOT EXISTS uk_class_tenant_major_name_active ON class(tenant_id, major_id, name) WHERE deleted_at IS NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS uk_account_tenant_phone_active ON account(tenant_id, phone_hash) WHERE deleted_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_account_role_tenant_account ON account_role(tenant_id, account_id);
 CREATE INDEX IF NOT EXISTS idx_account_profile_tenant_account ON account_profile(tenant_id, account_id);
 CREATE INDEX IF NOT EXISTS idx_activation_code_tenant_account ON activation_code(tenant_id, account_id);

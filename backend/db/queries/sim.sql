@@ -115,7 +115,7 @@ RETURNING id, package_id, submitter_id, preview_report, reviewer_id, result, com
 
 -- name: CreateSimSession :one
 INSERT INTO sim_session (id, tenant_id, package_id, source_ref, owner_account_id, seed, init_params, compute, status, created_at, updated_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 2, now(), now())
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, now(), now())
 RETURNING id, tenant_id, package_id, source_ref, owner_account_id, seed, init_params, compute, status, created_at, updated_at;
 
 -- name: GetSimSession :one
@@ -130,16 +130,24 @@ FROM sim_session s
 JOIN sim_package p ON p.id = s.package_id
 WHERE s.tenant_id = $1 AND s.id = $2;
 
+-- name: UpdateSimSessionStatus :one
+UPDATE sim_session
+SET status = $3, updated_at = now()
+WHERE tenant_id = $1 AND id = $2
+  AND status IN (1, 2, 3, 4)
+  AND $3 IN (2, 3, 4, 5, 6)
+RETURNING id, tenant_id, package_id, source_ref, owner_account_id, seed, init_params, compute, status, created_at, updated_at;
+
 -- name: ArchiveSimSession :one
 UPDATE sim_session
 SET status = 5, updated_at = now()
-WHERE tenant_id = $1 AND id = $2 AND status <> 5
+WHERE tenant_id = $1 AND id = $2 AND status IN (1, 2, 3, 4)
 RETURNING id, tenant_id, package_id, source_ref, owner_account_id, seed, init_params, compute, status, created_at, updated_at;
 
 -- name: ArchiveSimSessionsBySourceRef :many
 UPDATE sim_session
 SET status = 5, updated_at = now()
-WHERE tenant_id = $1 AND source_ref = $2 AND status <> 5
+WHERE tenant_id = $1 AND source_ref = $2 AND status IN (1, 2, 3, 4)
 RETURNING id, tenant_id, package_id, source_ref, owner_account_id, seed, init_params, compute, status, created_at, updated_at;
 
 -- name: GetLastSimAction :one

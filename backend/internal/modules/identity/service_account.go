@@ -236,10 +236,27 @@ func (s *Service) RevokeSchoolAdmin(ctx context.Context, accountID int64) error 
 	if err != nil {
 		return err
 	}
+	if accountID == id.AccountID {
+		return apperr.ErrIdentitySchoolAdminSelfRevoke
+	}
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
+		account, err := tx.GetAccount(ctx, accountID)
+		if err != nil {
+			return err
+		}
+		if !hasRoleNumber(account.Roles, contracts.RoleNumSchoolAdmin) {
+			return apperr.ErrForbidden
+		}
+		count, err := tx.CountActiveRoleAccounts(ctx, id.TenantID, contracts.RoleNumSchoolAdmin)
+		if err != nil {
+			return err
+		}
+		if account.Status == AccountStatusActive && count <= 1 {
+			return apperr.ErrIdentitySchoolAdminLastRevoke
+		}
 		return tx.RevokeRole(ctx, id.TenantID, accountID, contracts.RoleNumSchoolAdmin)
 	}); err != nil {
-		return apperr.ErrInternal.WithCause(err)
+		return apperr.AsAppError(err)
 	}
 	return s.auditAccount(ctx, id, "account.admin.revoke", accountID)
 }
@@ -341,6 +358,16 @@ func requireTenantRole(ctx context.Context, s *Service, role string) (tenant.Ide
 		return tenant.Identity{}, apperr.ErrForbidden
 	}
 	return id, nil
+}
+
+// hasRoleNumber 判断账号角色快照是否包含目标数字角色,用于状态变更前的服务端约束。
+func hasRoleNumber(roles []int16, want int16) bool {
+	for _, role := range roles {
+		if role == want {
+			return true
+		}
+	}
+	return false
 }
 
 // auditAccount 写账号管理类审计。

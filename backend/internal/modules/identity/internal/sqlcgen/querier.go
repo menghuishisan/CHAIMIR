@@ -16,6 +16,7 @@ type Querier interface {
 	BatchGetAccounts(ctx context.Context, dollar_1 []int64) ([]BatchGetAccountsRow, error)
 	ClassExists(ctx context.Context, arg ClassExistsParams) (bool, error)
 	ClearPasswordFailure(ctx context.Context, arg ClearPasswordFailureParams) error
+	CountActiveRoleAccounts(ctx context.Context, arg CountActiveRoleAccountsParams) (int64, error)
 	CreateAccount(ctx context.Context, arg CreateAccountParams) (Account, error)
 	CreateAccountProfile(ctx context.Context, arg CreateAccountProfileParams) error
 	CreateAccountRole(ctx context.Context, arg CreateAccountRoleParams) error
@@ -71,8 +72,10 @@ type Querier interface {
 	RecordPasswordFailure(ctx context.Context, arg RecordPasswordFailureParams) (Account, error)
 	RejectTenantApplication(ctx context.Context, arg RejectTenantApplicationParams) (TenantApplication, error)
 	RevokeAccountSessions(ctx context.Context, arg RevokeAccountSessionsParams) error
-	RevokeAuthSessionByID(ctx context.Context, arg RevokeAuthSessionByIDParams) error
-	RevokePlatformAuthSessionByID(ctx context.Context, id int64) error
+	RevokeAuthSessionByID(ctx context.Context, arg RevokeAuthSessionByIDParams) (int64, error)
+	RevokeOtherAccountSessions(ctx context.Context, arg RevokeOtherAccountSessionsParams) error
+	RevokeOtherPlatformSessions(ctx context.Context, arg RevokeOtherPlatformSessionsParams) error
+	RevokePlatformAuthSessionByID(ctx context.Context, id int64) (int64, error)
 	RevokePlatformSessions(ctx context.Context, platformAdminID int64) error
 	RevokeStudentSessionsByEnrollmentYear(ctx context.Context, arg RevokeStudentSessionsByEnrollmentYearParams) error
 	SoftDeleteClass(ctx context.Context, arg SoftDeleteClassParams) error

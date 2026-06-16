@@ -39,12 +39,14 @@ type TxStore interface {
 	ListTools(ctx context.Context) ([]Tool, error)
 	UpsertTool(ctx context.Context, id int64, req ToolRequest, spec ToolResourceSpec) (Tool, error)
 	GetTenantQuota(ctx context.Context, tenantID int64) (TenantQuota, error)
+	GetTenantQuotaForUpdate(ctx context.Context, tenantID int64) (TenantQuota, error)
 	UpsertTenantQuota(ctx context.Context, quota TenantQuota) (TenantQuota, error)
 	CountActiveSandboxes(ctx context.Context, tenantID int64) (int64, error)
 	CreateSandbox(ctx context.Context, input CreateSandboxInput) (Sandbox, error)
 	GetSandbox(ctx context.Context, tenantID, sandboxID int64) (Sandbox, error)
 	ListSandboxesBySourceRef(ctx context.Context, tenantID int64, sourceRef string) ([]Sandbox, error)
 	ListRecycleCandidates(ctx context.Context, readyDeadline time.Time, limit int32) ([]Sandbox, error)
+	MarkIdleSandboxes(ctx context.Context) ([]Sandbox, error)
 	ListSnapshotCleanupCandidates(ctx context.Context, limit int32) ([]Sandbox, error)
 	UpdateSandboxPhaseStatus(ctx context.Context, tenantID, sandboxID int64, phase, status int16) (Sandbox, error)
 	MarkSandboxActive(ctx context.Context, tenantID, sandboxID int64) (Sandbox, error)
@@ -351,6 +353,15 @@ func (s *txStore) GetTenantQuota(ctx context.Context, tenantID int64) (TenantQuo
 	return quotaFromRow(row), nil
 }
 
+// GetTenantQuotaForUpdate 查询租户资源配额并加锁,防止创建并发竞态。
+func (s *txStore) GetTenantQuotaForUpdate(ctx context.Context, tenantID int64) (TenantQuota, error) {
+	row, err := s.q.GetTenantQuotaForUpdate(ctx, tenantID)
+	if err != nil {
+		return TenantQuota{}, err
+	}
+	return quotaFromRow(row), nil
+}
+
 // UpsertTenantQuota 新建或更新租户资源配额。
 func (s *txStore) UpsertTenantQuota(ctx context.Context, quota TenantQuota) (TenantQuota, error) {
 	row, err := s.q.UpsertTenantQuota(ctx, sqlcgen.UpsertTenantQuotaParams{
@@ -429,6 +440,15 @@ func (s *txStore) ListRecycleCandidates(ctx context.Context, readyDeadline time.
 		LastActiveAt: timex.RequiredTimestamptz(readyDeadline),
 		Limit:        limit,
 	})
+	if err != nil {
+		return nil, err
+	}
+	return sandboxRows(rows), nil
+}
+
+// MarkIdleSandboxes 将超时的运行中沙箱标记为空闲。
+func (s *txStore) MarkIdleSandboxes(ctx context.Context) ([]Sandbox, error) {
+	rows, err := s.q.MarkIdleSandboxes(ctx)
 	if err != nil {
 		return nil, err
 	}

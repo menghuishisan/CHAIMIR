@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"chaimir/internal/contracts"
-	"chaimir/internal/platform/audit"
 	"chaimir/internal/platform/auth"
 	"chaimir/internal/platform/timex"
 	"chaimir/pkg/apperr"
@@ -15,6 +14,7 @@ import (
 
 // CreateSession 创建仿真会话并锁定仿真包版本。
 func (s *Service) CreateSession(ctx context.Context, req contracts.SimCreateSessionRequest) (contracts.SimSessionInfo, error) {
+	req.SourceRef = strings.TrimSpace(req.SourceRef)
 	create := CreateSessionRequest{PackageCode: req.PackageCode, Version: req.Version, Seed: req.Seed, InitParams: req.InitParams, OwnerAccountID: req.OwnerAccountID, SourceRef: req.SourceRef}
 	if err := validateCreateSession(create, req.TenantID); err != nil {
 		return contracts.SimSessionInfo{}, err
@@ -35,18 +35,22 @@ func (s *Service) CreateSession(ctx context.Context, req contracts.SimCreateSess
 	if req.InitParams == nil {
 		req.InitParams = map[string]any{}
 	}
-	session := Session{ID: s.ids.Generate(), TenantID: req.TenantID, PackageID: pkg.ID, SourceRef: strings.TrimSpace(req.SourceRef), OwnerAccountID: req.OwnerAccountID, Seed: req.Seed, InitParams: req.InitParams, Compute: pkg.Compute, Status: SessionRunning}
+	session := Session{ID: s.ids.Generate(), TenantID: req.TenantID, PackageID: pkg.ID, SourceRef: req.SourceRef, OwnerAccountID: req.OwnerAccountID, Seed: req.Seed, InitParams: req.InitParams, Compute: pkg.Compute, Status: SessionCreating}
 	if err := s.store.TenantTx(ctx, req.TenantID, func(ctx context.Context, tx TxStore) error {
 		var err error
 		session, err = tx.CreateSession(ctx, session)
 		if err != nil {
 			return apperr.ErrSimSessionInvalid.WithCause(err)
 		}
+		session, err = tx.UpdateSessionStatus(ctx, req.TenantID, session.ID, SessionRunning)
+		if err != nil {
+			return apperr.ErrSimSessionStateInvalid.WithCause(err)
+		}
 		return nil
 	}); err != nil {
 		return contracts.SimSessionInfo{}, err
 	}
-	if err := s.writeAudit(ctx, req.TenantID, req.OwnerAccountID, audit.ActorRoleSystem, "sim.session.create", "sim_session", session.ID, map[string]any{"source_ref": session.SourceRef, "package": pkg.Code + ":" + pkg.Version}); err != nil {
+	if err := s.writeSystemAudit(ctx, req.TenantID, "sim.session.create", "sim_session", session.ID, map[string]any{"source_ref": session.SourceRef, "owner_account_id": req.OwnerAccountID, "package": pkg.Code + ":" + pkg.Version}); err != nil {
 		return contracts.SimSessionInfo{}, err
 	}
 	return sessionToContract(session, pkg), nil
@@ -79,7 +83,7 @@ func (s *Service) ReportAction(ctx context.Context, tenantID, accountID, session
 		if session.OwnerAccountID != accountID {
 			return apperr.ErrForbidden
 		}
-		if session.Status == SessionArchived || session.Status == SessionFailed {
+		if !canMutateSession(session.Status) {
 			return apperr.ErrSimSessionStateInvalid
 		}
 		existing, err := tx.GetActionBySeq(ctx, tenantID, sessionID, req.Seq)
@@ -144,20 +148,33 @@ func (s *Service) GetReplayForUser(ctx context.Context, tenantID, accountID, ses
 func (s *Service) DestroySession(ctx context.Context, tenantID, sessionID int64) error {
 	var archived Session
 	if err := s.store.TenantTx(ctx, tenantID, func(ctx context.Context, tx TxStore) error {
-		var err error
-		archived, err = tx.ArchiveSession(ctx, tenantID, sessionID)
+		session, err := tx.GetSession(ctx, tenantID, sessionID)
 		if err != nil {
 			return apperr.ErrSimSessionNotFound.WithCause(err)
+		}
+		if !auth.ServiceSourceRefAuthorized(ctx, session.SourceRef) {
+			return apperr.ErrServiceUnauthorized
+		}
+		if !canArchiveSession(session.Status) {
+			return apperr.ErrSimSessionStateInvalid
+		}
+		archived, err = tx.UpdateSessionStatus(ctx, tenantID, sessionID, SessionArchived)
+		if err != nil {
+			return apperr.ErrSimSessionStateInvalid.WithCause(err)
 		}
 		return nil
 	}); err != nil {
 		return err
 	}
-	return s.releaseBackendSessions(ctx, tenantID, []Session{archived})
+	if err := s.releaseBackendSessions(ctx, tenantID, []Session{archived}); err != nil {
+		return err
+	}
+	return s.writeSystemAudit(ctx, tenantID, "sim.session.archive", "sim_session", archived.ID, map[string]any{"source_ref": archived.SourceRef})
 }
 
 // RecycleBySourceRef 按来源标识归档仿真会话并释放后端计算资源。
 func (s *Service) RecycleBySourceRef(ctx context.Context, req contracts.SimRecycleRequest) error {
+	req.SourceRef = strings.TrimSpace(req.SourceRef)
 	if req.TenantID <= 0 || !auth.ValidSourceRef(req.SourceRef) || !auth.ServiceSourceRefAuthorized(ctx, req.SourceRef) {
 		return apperr.ErrSimSessionInvalid
 	}
@@ -172,7 +189,15 @@ func (s *Service) RecycleBySourceRef(ctx context.Context, req contracts.SimRecyc
 	}); err != nil {
 		return err
 	}
-	return s.releaseBackendSessions(ctx, req.TenantID, archived)
+	if err := s.releaseBackendSessions(ctx, req.TenantID, archived); err != nil {
+		return err
+	}
+	for _, session := range archived {
+		if err := s.writeSystemAudit(ctx, req.TenantID, "sim.session.archive", "sim_session", session.ID, map[string]any{"source_ref": session.SourceRef, "reason": strings.TrimSpace(req.Reason)}); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // ReportCheckpoint 保存仿真检查点结果快照,供 M3 后续判分读取。
@@ -199,9 +224,10 @@ func (s *Service) ShareSession(ctx context.Context, tenantID, accountID, session
 		if session.OwnerAccountID != accountID {
 			return apperr.ErrForbidden
 		}
-		if session.Status == SessionFailed {
+		if session.Status == SessionFailed || session.Status == SessionArchived {
 			return apperr.ErrSimSessionStateInvalid
 		}
+		var lastErr error
 		for attempt := 0; attempt < 5; attempt++ {
 			code, err := newShareCode()
 			if err != nil {
@@ -211,8 +237,12 @@ func (s *Service) ShareSession(ctx context.Context, tenantID, accountID, session
 			if err == nil {
 				return nil
 			}
+			if !isUniqueViolation(err) {
+				return apperr.ErrSimShareCodeInvalid.WithCause(err)
+			}
+			lastErr = err
 		}
-		return apperr.ErrSimShareCodeInvalid
+		return apperr.ErrSimShareCodeInvalid.WithCause(lastErr)
 	}); err != nil {
 		return nil, err
 	}
@@ -238,8 +268,28 @@ func (s *Service) GetSharedReplay(ctx context.Context, code string) (map[string]
 	if !shareUsable(share, timex.Now()) {
 		return nil, apperr.ErrSimShareCodeInvalid
 	}
-	session, actions, err := s.loadReplay(ctx, share.TenantID, share.SessionID)
-	if err != nil {
+	var (
+		session SessionWithPackage
+		actions []Action
+	)
+	if err := s.store.TenantTx(ctx, share.TenantID, func(ctx context.Context, tx TxStore) error {
+		tenantShare, err := tx.GetShareByCode(ctx, strings.TrimSpace(code))
+		if err != nil {
+			return apperr.ErrSimShareCodeInvalid.WithCause(err)
+		}
+		if tenantShare.ID != share.ID || tenantShare.SessionID != share.SessionID || !shareUsable(tenantShare, timex.Now()) {
+			return apperr.ErrSimShareCodeInvalid
+		}
+		session, err = tx.GetSessionWithPackage(ctx, share.TenantID, share.SessionID)
+		if err != nil {
+			return apperr.ErrSimSessionNotFound.WithCause(err)
+		}
+		actions, err = tx.ListActions(ctx, share.TenantID, share.SessionID)
+		if err != nil {
+			return apperr.ErrSimSessionStateInvalid.WithCause(err)
+		}
+		return nil
+	}); err != nil {
 		return nil, err
 	}
 	return replayToMap(session, actions), nil
@@ -272,10 +322,17 @@ func (s *Service) reportCheckpointRaw(ctx context.Context, tenantID, sessionID i
 		return err
 	}
 	return s.store.TenantTx(ctx, tenantID, func(ctx context.Context, tx TxStore) error {
-		if _, err := tx.GetSession(ctx, tenantID, sessionID); err != nil {
+		session, err := tx.GetSession(ctx, tenantID, sessionID)
+		if err != nil {
 			return apperr.ErrSimSessionNotFound.WithCause(err)
 		}
-		_, err := tx.UpsertCheckpoint(ctx, Checkpoint{ID: s.ids.Generate(), TenantID: tenantID, SessionID: sessionID, CheckpointID: strings.TrimSpace(checkpointID), Answer: answer, Achieved: achieved})
+		if !auth.ServiceSourceRefAuthorized(ctx, session.SourceRef) {
+			return apperr.ErrServiceUnauthorized
+		}
+		if !canMutateSession(session.Status) {
+			return apperr.ErrSimSessionStateInvalid
+		}
+		_, err = tx.UpsertCheckpoint(ctx, Checkpoint{ID: s.ids.Generate(), TenantID: tenantID, SessionID: sessionID, CheckpointID: strings.TrimSpace(checkpointID), Answer: answer, Achieved: achieved})
 		if err != nil {
 			return apperr.ErrSimCheckpointInvalid.WithCause(err)
 		}

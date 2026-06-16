@@ -231,6 +231,28 @@ func (q *Queries) ClearPasswordFailure(ctx context.Context, arg ClearPasswordFai
 	return err
 }
 
+const countActiveRoleAccounts = `-- name: CountActiveRoleAccounts :one
+SELECT COUNT(DISTINCT a.id)
+FROM account a
+JOIN account_role ar ON ar.tenant_id = a.tenant_id AND ar.account_id = a.id
+WHERE a.tenant_id = $1
+  AND ar.role = $2
+  AND a.status = 2
+  AND a.deleted_at IS NULL
+`
+
+type CountActiveRoleAccountsParams struct {
+	TenantID int64 `json:"tenant_id"`
+	Role     int16 `json:"role"`
+}
+
+func (q *Queries) CountActiveRoleAccounts(ctx context.Context, arg CountActiveRoleAccountsParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countActiveRoleAccounts, arg.TenantID, arg.Role)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const createAccount = `-- name: CreateAccount :one
 INSERT INTO account (id, tenant_id, phone_enc, phone_hash, password_hash, name, base_identity, status, must_change_pwd, activated_at, created_at, updated_at)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, now(), now())
@@ -2050,7 +2072,7 @@ func (q *Queries) PromoteClasses(ctx context.Context, tenantID int64) error {
 const queryAuditLogs = `-- name: QueryAuditLogs :many
 SELECT id, tenant_id, actor_id, actor_role, action, target_type, target_id, detail, ip, trace_id, created_at, COUNT(*) OVER() AS total_count
 FROM audit_log
-WHERE ($1::bigint = 0 OR tenant_id = $1)
+WHERE (($1::bigint = -1 AND tenant_id IS NULL) OR ($1::bigint <> -1 AND ($1::bigint = 0 OR tenant_id = $1)))
   AND ($2::bigint = 0 OR actor_id = $2)
   AND ($3::text = '' OR action = $3)
   AND ($4::text = '' OR target_type = $4)
@@ -2224,9 +2246,9 @@ func (q *Queries) RevokeAccountSessions(ctx context.Context, arg RevokeAccountSe
 	return err
 }
 
-const revokeAuthSessionByID = `-- name: RevokeAuthSessionByID :exec
+const revokeAuthSessionByID = `-- name: RevokeAuthSessionByID :execrows
 UPDATE auth_session SET status = 2
-WHERE tenant_id = $1 AND id = $2
+WHERE tenant_id = $1 AND id = $2 AND status = 1
 `
 
 type RevokeAuthSessionByIDParams struct {
@@ -2234,19 +2256,56 @@ type RevokeAuthSessionByIDParams struct {
 	ID       int64 `json:"id"`
 }
 
-func (q *Queries) RevokeAuthSessionByID(ctx context.Context, arg RevokeAuthSessionByIDParams) error {
-	_, err := q.db.Exec(ctx, revokeAuthSessionByID, arg.TenantID, arg.ID)
+func (q *Queries) RevokeAuthSessionByID(ctx context.Context, arg RevokeAuthSessionByIDParams) (int64, error) {
+	result, err := q.db.Exec(ctx, revokeAuthSessionByID, arg.TenantID, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const revokeOtherAccountSessions = `-- name: RevokeOtherAccountSessions :exec
+UPDATE auth_session SET status = 2
+WHERE tenant_id = $1 AND account_id = $2 AND id <> $3 AND status = 1
+`
+
+type RevokeOtherAccountSessionsParams struct {
+	TenantID  int64 `json:"tenant_id"`
+	AccountID int64 `json:"account_id"`
+	ID        int64 `json:"id"`
+}
+
+func (q *Queries) RevokeOtherAccountSessions(ctx context.Context, arg RevokeOtherAccountSessionsParams) error {
+	_, err := q.db.Exec(ctx, revokeOtherAccountSessions, arg.TenantID, arg.AccountID, arg.ID)
 	return err
 }
 
-const revokePlatformAuthSessionByID = `-- name: RevokePlatformAuthSessionByID :exec
+const revokeOtherPlatformSessions = `-- name: RevokeOtherPlatformSessions :exec
 UPDATE platform_auth_session SET status = 2
-WHERE id = $1
+WHERE platform_admin_id = $1 AND id <> $2 AND status = 1
 `
 
-func (q *Queries) RevokePlatformAuthSessionByID(ctx context.Context, id int64) error {
-	_, err := q.db.Exec(ctx, revokePlatformAuthSessionByID, id)
+type RevokeOtherPlatformSessionsParams struct {
+	PlatformAdminID int64 `json:"platform_admin_id"`
+	ID              int64 `json:"id"`
+}
+
+func (q *Queries) RevokeOtherPlatformSessions(ctx context.Context, arg RevokeOtherPlatformSessionsParams) error {
+	_, err := q.db.Exec(ctx, revokeOtherPlatformSessions, arg.PlatformAdminID, arg.ID)
 	return err
+}
+
+const revokePlatformAuthSessionByID = `-- name: RevokePlatformAuthSessionByID :execrows
+UPDATE platform_auth_session SET status = 2
+WHERE id = $1 AND status = 1
+`
+
+func (q *Queries) RevokePlatformAuthSessionByID(ctx context.Context, id int64) (int64, error) {
+	result, err := q.db.Exec(ctx, revokePlatformAuthSessionByID, id)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const revokePlatformSessions = `-- name: RevokePlatformSessions :exec

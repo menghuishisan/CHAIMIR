@@ -3,7 +3,7 @@ package judge
 
 import (
 	"context"
-	"errors"
+	"encoding/base64"
 	"fmt"
 	"io"
 	"log/slog"
@@ -13,19 +13,27 @@ import (
 	"chaimir/internal/contracts"
 	"chaimir/internal/platform/audit"
 	"chaimir/internal/platform/config"
+	"chaimir/internal/platform/db"
 	"chaimir/internal/platform/eventbus"
 	"chaimir/internal/platform/ids"
 	"chaimir/internal/platform/jsonx"
 	"chaimir/internal/platform/response"
 	"chaimir/internal/platform/storage"
+	"chaimir/internal/platform/timex"
 	"chaimir/internal/platform/upload"
 	"chaimir/internal/platform/ws"
 	"chaimir/pkg/apperr"
+	pkgcrypto "chaimir/pkg/crypto"
 	"chaimir/pkg/logging"
 	"chaimir/pkg/snowflake"
-
-	"github.com/jackc/pgx/v5"
 )
+
+// SourceOwnership 是 M3 持久化的来源归属快照,用于教师侧访问控制。
+type SourceOwnership struct {
+	OwnerID  int64
+	CourseID int64
+	Scope    string
+}
 
 // objectStorage 描述 M3 读取提交代码和判题套件所需的对象存储能力。
 type objectStorage interface {
@@ -35,16 +43,17 @@ type objectStorage interface {
 
 // Service 承载 judge 模块业务编排,依赖 repo 接口和平台横切能力。
 type Service struct {
-	store   Store
-	ids     snowflake.Generator
-	cfg     config.JudgeConfig
-	hmacKey []byte
-	minio   objectStorage
-	sandbox contracts.SandboxService
-	content contracts.ContentJudgeReadService
-	audit   audit.Writer
-	bus     eventbus.Bus
-	wsHub   *ws.Hub
+	store    Store
+	ids      snowflake.Generator
+	cfg      config.JudgeConfig
+	hmacKey  []byte
+	minio    objectStorage
+	sandbox  contracts.SandboxService
+	content  contracts.ContentJudgeReadService
+	audit    audit.Writer
+	identity contracts.IdentityService
+	bus      eventbus.Bus
+	wsHub    *ws.Hub
 }
 
 // ServiceDeps 是 judge service 的装配依赖集合。
@@ -57,6 +66,7 @@ type ServiceDeps struct {
 	Sandbox  contracts.SandboxService
 	Content  contracts.ContentJudgeReadService
 	Audit    audit.Writer
+	Identity contracts.IdentityService
 	EventBus eventbus.Bus
 	WSHub    *ws.Hub
 }
@@ -84,20 +94,24 @@ func NewService(deps ServiceDeps) (*Service, error) {
 	if deps.Audit == nil {
 		return nil, fmt.Errorf("judge service 缺少审计写入器")
 	}
+	if deps.Identity == nil {
+		return nil, fmt.Errorf("judge service 缺少身份读取契约")
+	}
 	if deps.EventBus == nil {
 		return nil, fmt.Errorf("judge service 缺少事件总线")
 	}
 	return &Service{
-		store:   deps.Store,
-		ids:     deps.IDs,
-		cfg:     deps.Config,
-		hmacKey: []byte(deps.Auth.HMACKey),
-		minio:   deps.Storage,
-		sandbox: deps.Sandbox,
-		content: deps.Content,
-		audit:   deps.Audit,
-		bus:     deps.EventBus,
-		wsHub:   deps.WSHub,
+		store:    deps.Store,
+		ids:      deps.IDs,
+		cfg:      deps.Config,
+		hmacKey:  []byte(deps.Auth.HMACKey),
+		minio:    deps.Storage,
+		sandbox:  deps.Sandbox,
+		content:  deps.Content,
+		audit:    deps.Audit,
+		identity: deps.Identity,
+		bus:      deps.EventBus,
+		wsHub:    deps.WSHub,
 	}, nil
 }
 
@@ -139,6 +153,9 @@ func (s *Service) CreateJudger(ctx context.Context, req CreateJudgerRequest) (ma
 	}); err != nil {
 		return nil, err
 	}
+	if err := s.writeAuditFromContext(ctx, 0, "judge.judger.upsert", "judger", out.ID, map[string]any{"code": out.Code}); err != nil {
+		return nil, err
+	}
 	return judgerToMap(out)
 }
 
@@ -165,6 +182,9 @@ func (s *Service) UpdateJudger(ctx context.Context, id int64, req UpdateJudgerRe
 		}
 		return nil
 	}); err != nil {
+		return nil, err
+	}
+	if err := s.writeAuditFromContext(ctx, 0, "judge.judger.update", "judger", out.ID, map[string]any{"code": out.Code}); err != nil {
 		return nil, err
 	}
 	return judgerToMap(out)
@@ -197,6 +217,9 @@ func (s *Service) RunJudgerSelftest(ctx context.Context, id int64) (map[string]a
 		}
 		return nil
 	}); err != nil {
+		return nil, err
+	}
+	if err := s.writeAuditFromContext(ctx, 0, "judge.judger.selftest", "judger", id, map[string]any{"selftest_status": status, "status": judgerStatus}); err != nil {
 		return nil, err
 	}
 	if status == JudgerSelftestFailed {
@@ -240,15 +263,32 @@ func (s *Service) SubmitJudgeTask(ctx context.Context, req contracts.JudgeSubmit
 		return contracts.JudgeTaskInfo{}, apperr.ErrJudgeSubmitInvalid.WithCause(fmt.Errorf("判题提交缺少 trace_id"))
 	}
 	snapshot.TraceID = traceID
+	codeName, codeData, err := s.readObjectRef(ctx, req.CodeStorageKey)
+	if err != nil {
+		return contracts.JudgeTaskInfo{}, apperr.ErrJudgeInputArchiveInvalid.WithCause(err)
+	}
+	codeHash := pkgcrypto.SHA256Hex(codeData)
+	if !strings.EqualFold(strings.TrimSpace(req.CodeHash), codeHash) {
+		return contracts.JudgeTaskInfo{}, apperr.ErrJudgeSubmitInvalid.WithCause(fmt.Errorf("提交代码哈希与对象内容不一致"))
+	}
+	limits := upload.ArchiveLimits{MaxFiles: s.cfg.InputArchiveMaxFiles, MaxUnpackedBytes: s.cfg.InputArchiveMaxUnpackedBytes}
+	sanitizedCode, err := upload.SafeArchiveTar(codeName, codeData, limits)
+	if err != nil {
+		return contracts.JudgeTaskInfo{}, apperr.ErrJudgeInputArchiveInvalid.WithCause(err)
+	}
+	ownership := sourceOwnershipFromRequest(req)
 	task := JudgeTask{
 		ID:               s.ids.Generate(),
 		TenantID:         req.TenantID,
 		JudgerID:         j.ID,
 		SourceRef:        req.SourceRef,
+		SourceOwnerID:    ownership.OwnerID,
+		SourceCourseID:   ownership.CourseID,
+		SourceScope:      ownership.Scope,
 		SubmitterID:      req.SubmitterID,
 		ProblemRef:       req.ItemCode + ":" + req.ItemVersion,
 		CodeStorageKey:   req.CodeStorageKey,
-		CodeHash:         strings.TrimSpace(req.CodeHash),
+		CodeHash:         codeHash,
 		InputSnapshot:    snapshot,
 		SandboxMode:      mode,
 		TargetSandboxRef: strings.TrimSpace(req.TargetSandboxRef),
@@ -262,10 +302,12 @@ func (s *Service) SubmitJudgeTask(ctx context.Context, req contracts.JudgeSubmit
 	if err := s.checkSubmitRate(ctx, task); err != nil {
 		return contracts.JudgeTaskInfo{}, err
 	}
-	vector, err := s.buildSubmissionVector(ctx, task.CodeStorageKey)
+	vector, err := fingerprintVectorFromArchive(codeName, codeData, limits)
 	if err != nil {
-		return contracts.JudgeTaskInfo{}, err
+		return contracts.JudgeTaskInfo{}, apperr.ErrFingerprintSimilarityFailed.WithCause(err)
 	}
+	task.InputSnapshot.SanitizedCodeArchiveName = codeName
+	task.InputSnapshot.SanitizedCodeArchiveBase64 = sanitizedArchiveBase64(sanitizedCode)
 	createdNew := false
 	if err := s.store.TenantTx(ctx, task.TenantID, func(ctx context.Context, tx TxStore) error {
 		requestedID := task.ID
@@ -297,7 +339,7 @@ func (s *Service) SubmitJudgeTask(ctx context.Context, req contracts.JudgeSubmit
 		return contractTaskInfoFromModel(JudgeTaskInfo{Task: task, Existing: true}), nil
 	}
 	s.publishProgress(ctx, task.TenantID, task.ID, task.Status, ProgressStageQueued, "判题任务已提交")
-	if err := s.writeAudit(ctx, task.TenantID, task.SubmitterID, audit.ActorRoleSystem, "judge.submit", "judge_task", task.ID, map[string]any{"source_ref": task.SourceRef, "problem_ref": task.ProblemRef}); err != nil {
+	if err := s.writeSystemAudit(ctx, task.TenantID, "judge.submit", "judge_task", task.ID, map[string]any{"source_ref": task.SourceRef, "problem_ref": task.ProblemRef, "submitter_id": task.SubmitterID}); err != nil {
 		return contracts.JudgeTaskInfo{}, err
 	}
 	return contractTaskInfoFromModel(JudgeTaskInfo{Task: task}), nil
@@ -314,7 +356,7 @@ func (s *Service) findExistingTaskBySourceRef(ctx context.Context, tenantID int6
 	if err == nil {
 		return existing, true, nil
 	}
-	if errors.Is(err, pgx.ErrNoRows) {
+	if db.IsNoRows(err) {
 		return JudgeTask{}, false, nil
 	}
 	return JudgeTask{}, false, apperr.ErrJudgeTaskEnqueueFailed.WithCause(err)
@@ -484,6 +526,46 @@ func (s *Service) buildSubmissionVector(ctx context.Context, objectRef string) (
 	return fingerprintVectorFromArchive(name, data, upload.ArchiveLimits{MaxFiles: s.cfg.InputArchiveMaxFiles, MaxUnpackedBytes: s.cfg.InputArchiveMaxUnpackedBytes})
 }
 
+// sanitizedArchiveBase64 持久化 M3 后端校验重包后的提交归档,供 fresh judge 注入。
+func sanitizedArchiveBase64(data []byte) string {
+	if len(data) == 0 {
+		return ""
+	}
+	return base64.StdEncoding.EncodeToString(data)
+}
+
+// sourceOwnershipFromRequest 从现有跨模块扩展输入中提取来源归属证明。
+func sourceOwnershipFromRequest(req contracts.JudgeSubmitRequest) SourceOwnership {
+	ownerID := jsonx.Int64FromAny(req.ExtraInput["source_owner_id"], 0)
+	if ownerID <= 0 {
+		ownerID = jsonx.Int64FromAny(req.ExtraInput["owner_account_id"], 0)
+	}
+	courseID := jsonx.Int64FromAny(req.ExtraInput["source_course_id"], 0)
+	if courseID <= 0 {
+		courseID = jsonx.Int64FromAny(req.ExtraInput["course_id"], 0)
+	}
+	scope := strings.TrimSpace(stringValue(req.ExtraInput["source_scope"]))
+	if scope == "" {
+		scope = sourceScopeFromRef(req.SourceRef)
+	}
+	if scope == "" {
+		scope = "unknown"
+	}
+	if ownerID <= 0 {
+		ownerID = req.SubmitterID
+	}
+	return SourceOwnership{OwnerID: ownerID, CourseID: courseID, Scope: scope}
+}
+
+// sourceScopeFromRef 只解析来源类型,不在 M3 内解释业务模块私有 ID 语义。
+func sourceScopeFromRef(sourceRef string) string {
+	parts := strings.Split(strings.TrimSpace(sourceRef), ":")
+	if len(parts) == 0 || strings.TrimSpace(parts[0]) == "" {
+		return ""
+	}
+	return strings.TrimSpace(parts[0])
+}
+
 // readObjectRef 读取 minio://bucket/key 对象,限制在统一对象存储接口内。
 func (s *Service) readObjectRef(ctx context.Context, objectRef string) (string, []byte, error) {
 	ref, err := storage.ParseObjectRef(objectRef)
@@ -499,11 +581,11 @@ func (s *Service) readObjectRef(ctx context.Context, objectRef string) (string, 
 	if limit <= 0 {
 		return "", nil, apperr.ErrJudgeInputArchiveInvalid
 	}
-	data, err := io.ReadAll(io.LimitReader(rc, limit+1))
+	data, sizeResult, err := upload.ReadBounded(rc, limit)
 	if err != nil {
 		return "", nil, err
 	}
-	if int64(len(data)) > limit {
+	if sizeResult != upload.SizeOK {
 		return "", nil, apperr.ErrJudgeInputArchiveInvalid
 	}
 	return ref.Key, data, nil
@@ -523,7 +605,7 @@ func (s *Service) checkSubmitRate(ctx context.Context, task JudgeTask) error {
 		return apperr.ErrJudgeTaskEnqueueFailed.WithCause(err)
 	}
 	for _, item := range recent {
-		if item.SourceRef != task.SourceRef && time.Since(item.CreatedAt) < time.Duration(s.cfg.SubmitRateLimitSec)*time.Second {
+		if item.SourceRef != task.SourceRef && timex.Now().Sub(item.CreatedAt) < time.Duration(s.cfg.SubmitRateLimitSec)*time.Second {
 			return apperr.ErrJudgeSubmitRateLimited
 		}
 	}

@@ -111,7 +111,7 @@ func normalizePackageRequest(req SubmitPackageRequest, defaultAuthorType int16) 
 }
 
 // validatePackageRequest 校验仿真包元数据和命名空间边界。
-func validatePackageRequest(req SubmitPackageRequest, compute int16, authorID int64) error {
+func validatePackageRequest(req SubmitPackageRequest, compute int16, authorID int64, requiredAuthorType int16) error {
 	if !simCodePattern.MatchString(req.Code) || !semverPattern.MatchString(req.Version) || strings.TrimSpace(req.Name) == "" || !categoryPattern.MatchString(req.Category) {
 		return apperr.ErrSimPackageInvalid
 	}
@@ -125,6 +125,12 @@ func validatePackageRequest(req SubmitPackageRequest, compute int16, authorID in
 		return apperr.ErrSimPackageInvalid
 	}
 	if compute == ComputeFrontend && strings.TrimSpace(req.BackendAdapter) != "" {
+		return apperr.ErrSimPackageInvalid
+	}
+	if compute == ComputeFrontend && !jsonObjectEmpty(req.BackendConfig) {
+		return apperr.ErrSimPackageInvalid
+	}
+	if req.AuthorType != requiredAuthorType {
 		return apperr.ErrSimPackageInvalid
 	}
 	switch req.AuthorType {
@@ -186,12 +192,12 @@ func validateDynamicReport(raw map[string]any) error {
 	return nil
 }
 
-// validateApprovalReport 校验审核通过所需的四项安全门禁。
-func validateApprovalReport(report ValidationReport) error {
+// validateApprovalReport 校验审核通过所需的后端静态和受控预览门禁。
+func validateApprovalReport(report ValidationReport, pkg Package) error {
 	if report.MetadataValidation.Status != validationPassed || report.StaticScan.Status != validationPassed || report.DeterminismCheck.Status != validationPassed || report.WorkerPreview.Status != validationPassed {
 		return apperr.ErrSimPackageValidationFailed
 	}
-	if !isSHA256Hex(report.BundleHash) {
+	if !isSHA256Hex(report.BundleHash) || report.BundleHash != pkg.BundleHash {
 		return apperr.ErrSimPackageValidationFailed
 	}
 	return nil
@@ -213,10 +219,36 @@ func shareUsable(share Share, now time.Time) bool {
 	return share.ExpireAt.IsZero() || now.Before(share.ExpireAt)
 }
 
+// canMutateSession 限制用户和内部服务只能修改活跃会话。
+func canMutateSession(status int16) bool {
+	switch status {
+	case SessionCreating, SessionRunning, SessionIdle:
+		return true
+	default:
+		return false
+	}
+}
+
+// canArchiveSession 落地会话归档状态机,终态不能重复迁移。
+func canArchiveSession(status int16) bool {
+	switch status {
+	case SessionCreating, SessionRunning, SessionIdle, SessionCompleted:
+		return true
+	default:
+		return false
+	}
+}
+
 // jsonObject 校验字段是 JSON 对象,避免数组或标量破坏 SDK 契约。
 func jsonObject(raw []byte) bool {
 	var value map[string]any
 	return len(raw) > 0 && jsonx.DecodeStrict(raw, &value) == nil
+}
+
+// jsonObjectEmpty 校验字段是空 JSON 对象。
+func jsonObjectEmpty(raw []byte) bool {
+	var value map[string]any
+	return len(raw) > 0 && jsonx.DecodeStrict(raw, &value) == nil && len(value) == 0
 }
 
 // isSHA256Hex 校验内容哈希格式。

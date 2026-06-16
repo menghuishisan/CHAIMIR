@@ -28,6 +28,9 @@ type JudgeTask struct {
 	TenantID         int64
 	JudgerID         int64
 	SourceRef        string
+	SourceOwnerID    int64
+	SourceCourseID   int64
+	SourceScope      string
 	SubmitterID      int64
 	ProblemRef       string
 	CodeStorageKey   string
@@ -55,10 +58,12 @@ type JudgeResultDetail struct {
 	Hint          string `json:"hint,omitempty"`
 }
 
-// JudgeResult 是任务的一对一判题结果。
+// JudgeResult 是一次任务判题结果的版本化记录。
 type JudgeResult struct {
+	ID              int64
 	TaskID          int64
 	TenantID        int64
+	Version         int32
 	Passed          bool
 	Score           int32
 	MaxScore        int32
@@ -77,27 +82,29 @@ type JudgeTaskInfo struct {
 
 // JudgeInputSnapshot 固定一次判题所需的题目版本、执行器和脱敏期望。
 type JudgeInputSnapshot struct {
-	ItemCode            string         `json:"item_code"`
-	ItemVersion         string         `json:"item_version"`
-	TraceID             string         `json:"trace_id"`
-	JudgerCode          string         `json:"judger_code"`
-	JudgerType          int16          `json:"judger_type"`
-	JudgerVersion       string         `json:"judger_version"`
-	SuiteRef            string         `json:"suite_ref,omitempty"`
-	SuiteArchiveName    string         `json:"suite_archive_name,omitempty"`
-	VersionHash         string         `json:"version_hash"`
-	RuntimeCode         string         `json:"runtime_code,omitempty"`
-	RuntimeImageVersion string         `json:"runtime_image_version,omitempty"`
-	GenesisRef          string         `json:"genesis_ref,omitempty"`
-	ToolCodes           []string       `json:"tool_codes,omitempty"`
-	InitScriptRef       string         `json:"init_script_ref,omitempty"`
-	Command             []string       `json:"command,omitempty"`
-	TimeoutSec          int32          `json:"timeout_sec"`
-	MaxRetries          int32          `json:"max_retries"`
-	MaxScore            int32          `json:"max_score"`
-	Expectation         map[string]any `json:"expectation,omitempty"`
-	ExtraInput          map[string]any `json:"extra_input,omitempty"`
-	Rejudge             bool           `json:"rejudge,omitempty"`
+	ItemCode                   string         `json:"item_code"`
+	ItemVersion                string         `json:"item_version"`
+	TraceID                    string         `json:"trace_id"`
+	JudgerCode                 string         `json:"judger_code"`
+	JudgerType                 int16          `json:"judger_type"`
+	JudgerVersion              string         `json:"judger_version"`
+	SuiteRef                   string         `json:"suite_ref,omitempty"`
+	SuiteArchiveName           string         `json:"suite_archive_name,omitempty"`
+	VersionHash                string         `json:"version_hash"`
+	RuntimeCode                string         `json:"runtime_code,omitempty"`
+	RuntimeImageVersion        string         `json:"runtime_image_version,omitempty"`
+	GenesisRef                 string         `json:"genesis_ref,omitempty"`
+	ToolCodes                  []string       `json:"tool_codes,omitempty"`
+	InitScriptRef              string         `json:"init_script_ref,omitempty"`
+	Command                    []string       `json:"command,omitempty"`
+	TimeoutSec                 int32          `json:"timeout_sec"`
+	MaxRetries                 int32          `json:"max_retries"`
+	MaxScore                   int32          `json:"max_score"`
+	Expectation                map[string]any `json:"expectation,omitempty"`
+	ExtraInput                 map[string]any `json:"extra_input,omitempty"`
+	Rejudge                    bool           `json:"rejudge,omitempty"`
+	SanitizedCodeArchiveName   string         `json:"sanitized_code_archive_name,omitempty"`
+	SanitizedCodeArchiveBase64 string         `json:"sanitized_code_archive_base64,omitempty"`
 }
 
 // SubmissionFingerprint 是 M3 生成的代码查重特征。
@@ -114,16 +121,17 @@ type SubmissionFingerprint struct {
 
 // JudgeEventOutbox 是待可靠发布的终态事件。
 type JudgeEventOutbox struct {
-	ID         int64
-	TenantID   int64
-	TaskID     int64
-	Subject    string
-	Payload    json.RawMessage
-	Status     int16
-	RetryCount int32
-	LastError  string
-	CreatedAt  time.Time
-	UpdatedAt  time.Time
+	ID            int64
+	TenantID      int64
+	TaskID        int64
+	Subject       string
+	Payload       json.RawMessage
+	Status        int16
+	RetryCount    int32
+	NextAttemptAt time.Time
+	LastError     string
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
 }
 
 // ProgressMessage 描述 WebSocket 推送给调用方的用户向进度。

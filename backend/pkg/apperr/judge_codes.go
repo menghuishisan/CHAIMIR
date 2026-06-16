@@ -41,6 +41,8 @@ const (
 	CodeJudgeAuditFailed = "32012"
 	// CodeJudgeInputArchiveInvalid 表示判题输入归档路径、类型或展开规模非法。
 	CodeJudgeInputArchiveInvalid = "32013"
+	// CodeJudgeTaskForbidden 表示判题任务来源归属校验失败。
+	CodeJudgeTaskForbidden = "32014"
 )
 
 const (
@@ -92,6 +94,8 @@ var (
 	ErrJudgeAuditFailed = New(CodeJudgeAuditFailed, "操作记录保存失败,请稍后重试")
 	// ErrJudgeInputArchiveInvalid 表示判题输入文件不正确。
 	ErrJudgeInputArchiveInvalid = New(CodeJudgeInputArchiveInvalid, "判题输入文件不正确")
+	// ErrJudgeTaskForbidden 表示当前账号不能访问该判题任务。
+	ErrJudgeTaskForbidden = New(CodeJudgeTaskForbidden, "无法访问该判题任务")
 )
 
 var (

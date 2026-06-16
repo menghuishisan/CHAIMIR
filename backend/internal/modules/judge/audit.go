@@ -13,23 +13,26 @@ func (s *Service) writeAudit(ctx context.Context, tenantID, actorID int64, actor
 	if s.audit == nil {
 		return apperr.ErrJudgeAuditFailed
 	}
-	detailText, err := audit.DetailString(detail)
+	entry, err := audit.BuildEntry(ctx, tenantID, actorID, actorRole, action, targetType, targetID, detail)
 	if err != nil {
 		return apperr.ErrJudgeAuditFailed.WithCause(err)
 	}
-	req := audit.RequestContextFrom(ctx)
-	if err := s.audit.Write(ctx, audit.Entry{
-		TenantID:   tenantID,
-		ActorID:    actorID,
-		ActorRole:  actorRole,
-		Action:     action,
-		TargetType: targetType,
-		TargetID:   targetID,
-		Detail:     detailText,
-		IP:         req.IP,
-		TraceID:    req.TraceID,
-	}); err != nil {
+	if err := s.audit.Write(ctx, entry); err != nil {
 		return apperr.ErrJudgeAuditFailed.WithCause(err)
 	}
 	return nil
+}
+
+// writeAuditFromContext 使用统一审计 actor 解析能力记录平台或租户用户操作。
+func (s *Service) writeAuditFromContext(ctx context.Context, tenantID int64, action, targetType string, targetID int64, detail map[string]any) error {
+	actorID, actorRole, err := audit.ResolveActor(ctx, s.identity)
+	if err != nil {
+		return apperr.ErrJudgeAuditFailed.WithCause(err)
+	}
+	return s.writeAudit(ctx, tenantID, actorID, actorRole, action, targetType, targetID, detail)
+}
+
+// writeSystemAudit 记录内部服务和 worker 触发的系统动作,不依赖 HTTP 用户上下文。
+func (s *Service) writeSystemAudit(ctx context.Context, tenantID int64, action, targetType string, targetID int64, detail map[string]any) error {
+	return s.writeAudit(ctx, tenantID, 0, audit.ActorRoleSystem, action, targetType, targetID, detail)
 }

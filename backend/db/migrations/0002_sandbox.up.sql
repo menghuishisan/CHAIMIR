@@ -59,7 +59,7 @@ CREATE TABLE IF NOT EXISTS sandbox (
     source_ref VARCHAR(128) NOT NULL,
     owner_account_id BIGINT NOT NULL,
     phase SMALLINT NOT NULL CHECK (phase IN (1, 2, 3, 4)),
-    status SMALLINT NOT NULL CHECK (status IN (1, 2, 3, 4, 5, 6)),
+    status SMALLINT NOT NULL CHECK (status IN (1, 2, 3, 4, 5, 6, 7, 8)),
     keep_alive BOOLEAN NOT NULL DEFAULT false,
     snapshot_enabled BOOLEAN NOT NULL DEFAULT false,
     code_storage_key VARCHAR(255) NOT NULL,

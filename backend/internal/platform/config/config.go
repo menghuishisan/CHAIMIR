@@ -166,16 +166,17 @@ type SMSConfig struct {
 
 // UploadConfig 描述统一上传边界。
 type UploadConfig struct {
-	ImportMaxBytes            int64
-	ContentAttachmentMaxBytes int64
-	SimBundleMaxBytes         int64
-	SimBundleMaxFiles         int
-	SimBundleMaxUnpackedBytes int64
-	VirusScanRequired         bool
-	VirusScanNetwork          string
-	VirusScanAddress          string
-	VirusScanTimeoutSeconds   int
-	VirusScanMaxBytes         int64
+	ImportMaxBytes              int64
+	ContentAttachmentMaxBytes   int64
+	SimBundleMaxBytes           int64
+	SimBundleMaxFiles           int
+	SimBundleMaxUnpackedBytes   int64
+	SimValidationReportMaxBytes int64
+	VirusScanRequired           bool
+	VirusScanNetwork            string
+	VirusScanAddress            string
+	VirusScanTimeoutSeconds     int
+	VirusScanMaxBytes           int64
 }
 
 // TransferConfig 描述统一导入导出中心的任务重试与下载中心边界。
@@ -278,6 +279,7 @@ type SandboxConfig struct {
 	PrepullLimitCPU               string
 	PrepullLimitMemory            string
 	ChainRPCTimeoutSeconds        int
+	ExecTimeoutSeconds            int
 	InitArchiveMaxBytes           int64
 	InitArchiveMaxFiles           int
 	InitArchiveMaxUnpackedBytes   int64
@@ -507,16 +509,17 @@ func Load() (*Config, error) {
 		TimeoutSeconds: reqInt("SMS_TIMEOUT_SECONDS"),
 	}
 	c.Upload = UploadConfig{
-		ImportMaxBytes:            reqInt64("UPLOAD_IMPORT_MAX_BYTES"),
-		ContentAttachmentMaxBytes: reqInt64("UPLOAD_CONTENT_ATTACHMENT_MAX_BYTES"),
-		SimBundleMaxBytes:         reqInt64("UPLOAD_SIM_BUNDLE_MAX_BYTES"),
-		SimBundleMaxFiles:         reqInt("UPLOAD_SIM_BUNDLE_MAX_FILES"),
-		SimBundleMaxUnpackedBytes: reqInt64("UPLOAD_SIM_BUNDLE_MAX_UNPACKED_BYTES"),
-		VirusScanRequired:         reqBool("UPLOAD_VIRUS_SCAN_REQUIRED"),
-		VirusScanNetwork:          os.Getenv("UPLOAD_VIRUS_SCAN_NETWORK"),
-		VirusScanAddress:          os.Getenv("UPLOAD_VIRUS_SCAN_ADDRESS"),
-		VirusScanTimeoutSeconds:   reqInt("UPLOAD_VIRUS_SCAN_TIMEOUT_SECONDS"),
-		VirusScanMaxBytes:         reqInt64("UPLOAD_VIRUS_SCAN_MAX_BYTES"),
+		ImportMaxBytes:              reqInt64("UPLOAD_IMPORT_MAX_BYTES"),
+		ContentAttachmentMaxBytes:   reqInt64("UPLOAD_CONTENT_ATTACHMENT_MAX_BYTES"),
+		SimBundleMaxBytes:           reqInt64("UPLOAD_SIM_BUNDLE_MAX_BYTES"),
+		SimBundleMaxFiles:           reqInt("UPLOAD_SIM_BUNDLE_MAX_FILES"),
+		SimBundleMaxUnpackedBytes:   reqInt64("UPLOAD_SIM_BUNDLE_MAX_UNPACKED_BYTES"),
+		SimValidationReportMaxBytes: reqInt64("UPLOAD_SIM_VALIDATION_REPORT_MAX_BYTES"),
+		VirusScanRequired:           reqBool("UPLOAD_VIRUS_SCAN_REQUIRED"),
+		VirusScanNetwork:            os.Getenv("UPLOAD_VIRUS_SCAN_NETWORK"),
+		VirusScanAddress:            os.Getenv("UPLOAD_VIRUS_SCAN_ADDRESS"),
+		VirusScanTimeoutSeconds:     reqInt("UPLOAD_VIRUS_SCAN_TIMEOUT_SECONDS"),
+		VirusScanMaxBytes:           reqInt64("UPLOAD_VIRUS_SCAN_MAX_BYTES"),
 	}
 	c.Transfer = TransferConfig{
 		TaskMaxAttempts:        reqInt("TRANSFER_TASK_MAX_ATTEMPTS"),
@@ -603,6 +606,7 @@ func Load() (*Config, error) {
 		PrepullLimitCPU:               req("SANDBOX_PREPULL_LIMIT_CPU"),
 		PrepullLimitMemory:            req("SANDBOX_PREPULL_LIMIT_MEMORY"),
 		ChainRPCTimeoutSeconds:        reqInt("SANDBOX_CHAIN_RPC_TIMEOUT_SECONDS"),
+		ExecTimeoutSeconds:            reqInt("SANDBOX_EXEC_TIMEOUT_SECONDS"),
 		InitArchiveMaxBytes:           reqInt64("SANDBOX_INIT_ARCHIVE_MAX_BYTES"),
 		InitArchiveMaxFiles:           reqInt("SANDBOX_INIT_ARCHIVE_MAX_FILES"),
 		InitArchiveMaxUnpackedBytes:   reqInt64("SANDBOX_INIT_ARCHIVE_MAX_UNPACKED_BYTES"),
@@ -701,6 +705,18 @@ func Load() (*Config, error) {
 	}
 	if c.Upload.ContentAttachmentMaxBytes <= 0 {
 		errs = append(errs, "UPLOAD_CONTENT_ATTACHMENT_MAX_BYTES 必须大于 0")
+	}
+	if c.Upload.SimBundleMaxBytes <= 0 {
+		errs = append(errs, "UPLOAD_SIM_BUNDLE_MAX_BYTES 必须大于 0")
+	}
+	if c.Upload.SimBundleMaxFiles <= 0 {
+		errs = append(errs, "UPLOAD_SIM_BUNDLE_MAX_FILES 必须大于 0")
+	}
+	if c.Upload.SimBundleMaxUnpackedBytes <= 0 {
+		errs = append(errs, "UPLOAD_SIM_BUNDLE_MAX_UNPACKED_BYTES 必须大于 0")
+	}
+	if c.Upload.SimValidationReportMaxBytes <= 0 {
+		errs = append(errs, "UPLOAD_SIM_VALIDATION_REPORT_MAX_BYTES 必须大于 0")
 	}
 	if c.Upload.VirusScanRequired && strings.TrimSpace(c.Upload.VirusScanAddress) == "" {
 		errs = append(errs, "UPLOAD_VIRUS_SCAN_REQUIRED=true 时必须设置 UPLOAD_VIRUS_SCAN_ADDRESS")
@@ -869,6 +885,9 @@ func Load() (*Config, error) {
 	}
 	if c.Sandbox.ChainRPCTimeoutSeconds <= 0 {
 		errs = append(errs, "SANDBOX_CHAIN_RPC_TIMEOUT_SECONDS 必须大于 0")
+	}
+	if c.Sandbox.ExecTimeoutSeconds <= 0 {
+		errs = append(errs, "SANDBOX_EXEC_TIMEOUT_SECONDS 必须大于 0")
 	}
 	if c.Sandbox.InitArchiveMaxBytes <= 0 {
 		errs = append(errs, "SANDBOX_INIT_ARCHIVE_MAX_BYTES 必须大于 0")

@@ -37,11 +37,11 @@ func fingerprintVectorFromArchive(name string, data []byte, limits upload.Archiv
 
 // addTextTokens 把源码文本归一化为 token 计数。
 func addTextTokens(vector map[string]float64, r io.Reader, maxBytes int64) error {
-	data, err := io.ReadAll(io.LimitReader(r, maxBytes+1))
+	data, sizeResult, err := upload.ReadBounded(r, maxBytes)
 	if err != nil {
 		return apperr.ErrFingerprintSimilarityFailed.WithCause(err)
 	}
-	if int64(len(data)) > maxBytes {
+	if sizeResult != upload.SizeOK {
 		return apperr.ErrJudgeInputArchiveInvalid
 	}
 	tokens := tokenPattern.FindAllString(string(data), -1)

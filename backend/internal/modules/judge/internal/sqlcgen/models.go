@@ -9,21 +9,24 @@ import (
 )
 
 type JudgeEventOutbox struct {
-	ID         int64              `json:"id"`
-	TenantID   int64              `json:"tenant_id"`
-	TaskID     int64              `json:"task_id"`
-	Subject    string             `json:"subject"`
-	Payload    []byte             `json:"payload"`
-	Status     int16              `json:"status"`
-	RetryCount int32              `json:"retry_count"`
-	LastError  pgtype.Text        `json:"last_error"`
-	CreatedAt  pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt  pgtype.Timestamptz `json:"updated_at"`
+	ID            int64              `json:"id"`
+	TenantID      int64              `json:"tenant_id"`
+	TaskID        int64              `json:"task_id"`
+	Subject       string             `json:"subject"`
+	Payload       []byte             `json:"payload"`
+	Status        int16              `json:"status"`
+	RetryCount    int32              `json:"retry_count"`
+	NextAttemptAt pgtype.Timestamptz `json:"next_attempt_at"`
+	LastError     pgtype.Text        `json:"last_error"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
 }
 
 type JudgeResult struct {
+	ID              int64              `json:"id"`
 	TaskID          int64              `json:"task_id"`
 	TenantID        int64              `json:"tenant_id"`
+	Version         int32              `json:"version"`
 	Passed          bool               `json:"passed"`
 	Score           int32              `json:"score"`
 	MaxScore        int32              `json:"max_score"`
@@ -38,6 +41,9 @@ type JudgeTask struct {
 	TenantID         int64              `json:"tenant_id"`
 	JudgerID         int64              `json:"judger_id"`
 	SourceRef        string             `json:"source_ref"`
+	SourceOwnerID    int64              `json:"source_owner_id"`
+	SourceCourseID   int64              `json:"source_course_id"`
+	SourceScope      string             `json:"source_scope"`
 	SubmitterID      int64              `json:"submitter_id"`
 	ProblemRef       string             `json:"problem_ref"`
 	CodeStorageKey   string             `json:"code_storage_key"`

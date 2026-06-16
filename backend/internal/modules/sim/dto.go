@@ -4,6 +4,8 @@ package sim
 import (
 	"encoding/json"
 	"time"
+
+	"chaimir/internal/platform/storage"
 )
 
 // SubmitPackageRequest 是教师或第三方提交仿真包时的元数据。
@@ -68,4 +70,12 @@ type RecycleRequest struct {
 // CreateShareRequest 是用户创建分享码时提交的可选过期时间。
 type CreateShareRequest struct {
 	ExpireAt time.Time `json:"expire_at"`
+}
+
+// BundleDownloadGrantDTO 是仿真包短时下载授权响应。
+type BundleDownloadGrantDTO struct {
+	Token      string                `json:"token"`
+	Grant      storage.DownloadGrant `json:"grant"`
+	BundleHash string                `json:"bundle_hash"`
+	ExpiresAt  string                `json:"expires_at"`
 }

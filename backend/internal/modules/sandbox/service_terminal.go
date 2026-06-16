@@ -24,6 +24,9 @@ func (s *Service) TerminalTargetForOwner(ctx context.Context, tenantID, accountI
 	if err != nil {
 		return TerminalTarget{}, err
 	}
+	if err := s.markSandboxExecutionActive(ctx, sb); err != nil {
+		return TerminalTarget{}, err
+	}
 	targetContainer := strings.TrimSpace(container)
 	if targetContainer == "" {
 		targetContainer = defaultTerminalContainer(runtime)
@@ -47,9 +50,6 @@ func (s *Service) AttachTerminal(ctx context.Context, target TerminalTarget, std
 
 // ToolProxyTargetForOwner 校验用户归属并解析 Web 工具代理目标。
 func (s *Service) ToolProxyTargetForOwner(ctx context.Context, tenantID, accountID, sandboxID int64, toolCode string) (Sandbox, SandboxTool, error) {
-	if _, err := s.sandboxForOwner(ctx, tenantID, accountID, sandboxID); err != nil {
-		return Sandbox{}, SandboxTool{}, err
-	}
 	var sb Sandbox
 	var tools []SandboxTool
 	if err := s.store.TenantTx(ctx, tenantID, func(ctx context.Context, tx TxStore) error {
@@ -57,6 +57,9 @@ func (s *Service) ToolProxyTargetForOwner(ctx context.Context, tenantID, account
 		sb, err = tx.GetSandbox(ctx, tenantID, sandboxID)
 		if err != nil {
 			return apperr.ErrSandboxNotFound.WithCause(err)
+		}
+		if sb.OwnerAccountID != accountID {
+			return apperr.ErrSandboxOwnershipInvalid
 		}
 		tools, err = tx.ListSandboxTools(ctx, tenantID, sandboxID)
 		if err != nil {
@@ -68,6 +71,9 @@ func (s *Service) ToolProxyTargetForOwner(ctx context.Context, tenantID, account
 	}
 	for _, tool := range tools {
 		if tool.Kind == SandboxToolKindWebEmbed && tool.Status == SandboxToolStatusReady && strings.EqualFold(tool.ToolCode, strings.TrimSpace(toolCode)) {
+			if err := s.markSandboxExecutionActive(ctx, sb); err != nil {
+				return Sandbox{}, SandboxTool{}, err
+			}
 			return sb, tool, nil
 		}
 	}

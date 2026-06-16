@@ -54,6 +54,10 @@ const (
 	CodeIdentityActivationDisabled = "12022"
 	// CodeIdentityMustChangePassword 表示账号必须先完成首登改密。
 	CodeIdentityMustChangePassword = "12026"
+	// CodeIdentitySchoolAdminSelfRevoke 表示学校管理员不能撤销自己的管理员权限。
+	CodeIdentitySchoolAdminSelfRevoke = "12027"
+	// CodeIdentitySchoolAdminLastRevoke 表示租户至少需要保留一名学校管理员。
+	CodeIdentitySchoolAdminLastRevoke = "12028"
 )
 
 const (
@@ -175,6 +179,10 @@ var (
 	ErrIdentityActivationDisabled = New(CodeIdentityActivationDisabled, "学校未启用激活码开通,请填写初始密码")
 	// ErrIdentityMustChangePassword 表示必须先完成首登改密。
 	ErrIdentityMustChangePassword = New(CodeIdentityMustChangePassword, "请先修改初始密码后继续使用")
+	// ErrIdentitySchoolAdminSelfRevoke 表示不能撤销当前登录管理员自己的权限。
+	ErrIdentitySchoolAdminSelfRevoke = New(CodeIdentitySchoolAdminSelfRevoke, "不能撤销当前登录管理员的学校管理员权限")
+	// ErrIdentitySchoolAdminLastRevoke 表示不能撤销租户最后一名学校管理员。
+	ErrIdentitySchoolAdminLastRevoke = New(CodeIdentitySchoolAdminLastRevoke, "至少需要保留一名学校管理员")
 )
 
 var (

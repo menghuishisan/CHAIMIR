@@ -15,6 +15,11 @@ CREATE TABLE IF NOT EXISTS sim_package (
     status SMALLINT NOT NULL CHECK (status IN (1, 2, 3, 4, 5)),
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CHECK ((author_type = 1 AND substring(code FROM 1 FOR 9) = 'builtin__' AND author_id IS NULL)
+        OR (author_type = 2 AND author_id IS NOT NULL AND substring(code FROM 1 FOR length('teacher_' || author_id::TEXT || '__')) = ('teacher_' || author_id::TEXT || '__'))
+        OR (author_type = 3 AND code ~ '^org_[a-z0-9_]+__')),
+    CHECK ((compute = 1 AND backend_adapter IS NULL AND backend_config = '{}'::jsonb)
+        OR (compute = 2 AND backend_adapter IS NOT NULL)),
     UNIQUE (code, version)
 );
 
@@ -43,6 +48,7 @@ CREATE TABLE IF NOT EXISTS sim_session (
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     UNIQUE (tenant_id, id),
+    CHECK (source_ref ~ '^[a-z]+:[0-9]{4}:[a-z][a-z0-9_-]*:[0-9A-Za-z_-]+$'),
     FOREIGN KEY (tenant_id, owner_account_id) REFERENCES account(tenant_id, id)
 );
 

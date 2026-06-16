@@ -2,8 +2,6 @@
 package sim
 
 import (
-	"net/http"
-	"strconv"
 	"strings"
 
 	"chaimir/internal/contracts"
@@ -37,7 +35,7 @@ func RegisterRoutes(r gin.IRouter, svc *Service, authn *auth.Manager, roles cont
 	api.registerUserRoutes(g.Group("", authn.Middleware(), auth.RequireTenantAnyRole(roles, contracts.RoleStudent, contracts.RoleTeacher, contracts.RoleSchoolAdmin)))
 	api.registerTeacherRoutes(g.Group("", authn.Middleware(), auth.RequireTenantAnyRole(roles, contracts.RoleTeacher, contracts.RoleSchoolAdmin)))
 	api.registerInternalRoutes(g.Group("", authn.ServiceMiddleware()))
-	g.POST("/packages/:key/validation-report", authn.PlatformOrServiceMiddleware(), api.validationReport)
+	g.POST("/packages/:key/validation-report", authn.ServiceMiddleware(), api.validationReport)
 	api.registerPlatformRoutes(g.Group("", authn.Middleware(), auth.RequirePlatformIdentity()))
 	return nil
 }
@@ -107,16 +105,14 @@ func (a simAPI) listPackageVersions(c *gin.Context) {
 	httpx.Write(c, out, err)
 }
 
-// getBundle 流式返回已上架仿真包正文。
+// getBundle 为已上架仿真包签发短时下载授权。
 func (a simAPI) getBundle(c *gin.Context) {
-	rc, hash, err := a.svc.ReadPublishedBundle(c.Request.Context(), c.Param("key"), c.Param("version"))
-	if err != nil {
-		response.Fail(c, err)
+	current, ok := currentTenantIdentity(c)
+	if !ok {
 		return
 	}
-	defer logging.CloseContext(c.Request.Context(), "关闭仿真包读取流失败", rc)
-	c.Header("X-Bundle-SHA256", hash)
-	c.DataFromReader(http.StatusOK, -1, "application/octet-stream", rc, nil)
+	out, err := a.svc.IssueBundleDownloadGrant(c.Request.Context(), current.AccountID, c.Param("key"), c.Param("version"))
+	httpx.Write(c, out, err)
 }
 
 // submitPackage 绑定 multipart 仿真包上传。
@@ -153,11 +149,15 @@ func (a simAPI) updatePackage(c *gin.Context) {
 
 // previewPackage 返回包预览所需审核报告。
 func (a simAPI) previewPackage(c *gin.Context) {
+	current, ok := currentTenantIdentity(c)
+	if !ok {
+		return
+	}
 	packageID, ok := httpx.PathID(c, "key")
 	if !ok {
 		return
 	}
-	out, err := a.svc.PackagePreview(c.Request.Context(), packageID)
+	out, err := a.svc.PackagePreview(c.Request.Context(), current.AccountID, packageID)
 	httpx.Write(c, out, err)
 }
 
@@ -167,9 +167,13 @@ func (a simAPI) validationReport(c *gin.Context) {
 	if !ok {
 		return
 	}
-	raw, err := c.GetRawData()
+	raw, result, err := upload.ReadBounded(c.Request.Body, a.svc.upload.SimValidationReportMaxBytes)
 	if err != nil {
 		response.Fail(c, apperr.ErrSimPackageValidationFailed.WithCause(err))
+		return
+	}
+	if result != upload.SizeOK {
+		response.Fail(c, apperr.ErrSimPackageValidationFailed)
 		return
 	}
 	var req ValidationReportRequest
@@ -401,11 +405,7 @@ func (a simAPI) bindPackageMultipart(c *gin.Context) (SubmitPackageRequest, Bund
 		response.Fail(c, apperr.ErrSimBundleUnreadable)
 		return SubmitPackageRequest{}, BundleInput{}, false
 	}
-	authorType, ok := optionalInt16Form(c, "author_type")
-	if !ok {
-		return SubmitPackageRequest{}, BundleInput{}, false
-	}
-	req := SubmitPackageRequest{Code: c.PostForm("code"), Version: c.PostForm("version"), Name: c.PostForm("name"), Category: c.PostForm("category"), Compute: c.PostForm("compute"), BackendAdapter: c.PostForm("backend_adapter"), ScaleLimit: []byte(defaultJSON(c.PostForm("scale_limit"))), BackendConfig: []byte(defaultJSON(c.PostForm("backend_config"))), AuthorType: authorType}
+	req := SubmitPackageRequest{Code: c.PostForm("code"), Version: c.PostForm("version"), Name: c.PostForm("name"), Category: c.PostForm("category"), Compute: c.PostForm("compute"), BackendAdapter: c.PostForm("backend_adapter"), ScaleLimit: []byte(defaultJSON(c.PostForm("scale_limit"))), BackendConfig: []byte(defaultJSON(c.PostForm("backend_config"))), AuthorType: AuthorTeacher}
 	return req, BundleInput{FileName: header.Filename, ContentType: header.Header.Get("Content-Type"), Data: data}, true
 }
 
@@ -445,20 +445,6 @@ func defaultJSON(raw string) string {
 		return "{}"
 	}
 	return raw
-}
-
-// optionalInt16Form 解析可选 int16 表单字段,非法值必须显式返回用户向错误。
-func optionalInt16Form(c *gin.Context, key string) (int16, bool) {
-	raw := strings.TrimSpace(c.PostForm(key))
-	if raw == "" {
-		return 0, true
-	}
-	value, err := strconv.ParseInt(raw, 10, 16)
-	if err != nil {
-		response.Fail(c, apperr.ErrSimPackageInvalid.WithCause(err))
-		return 0, false
-	}
-	return int16(value), true
 }
 
 // jsonUnmarshal 包装 JSON 解码,避免 api 文件直接散落 encoding/json 依赖。

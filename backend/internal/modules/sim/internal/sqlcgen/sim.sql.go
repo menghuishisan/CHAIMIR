@@ -14,7 +14,7 @@ import (
 const archiveSimSession = `-- name: ArchiveSimSession :one
 UPDATE sim_session
 SET status = 5, updated_at = now()
-WHERE tenant_id = $1 AND id = $2 AND status <> 5
+WHERE tenant_id = $1 AND id = $2 AND status IN (1, 2, 3, 4)
 RETURNING id, tenant_id, package_id, source_ref, owner_account_id, seed, init_params, compute, status, created_at, updated_at
 `
 
@@ -45,7 +45,7 @@ func (q *Queries) ArchiveSimSession(ctx context.Context, arg ArchiveSimSessionPa
 const archiveSimSessionsBySourceRef = `-- name: ArchiveSimSessionsBySourceRef :many
 UPDATE sim_session
 SET status = 5, updated_at = now()
-WHERE tenant_id = $1 AND source_ref = $2 AND status <> 5
+WHERE tenant_id = $1 AND source_ref = $2 AND status IN (1, 2, 3, 4)
 RETURNING id, tenant_id, package_id, source_ref, owner_account_id, seed, init_params, compute, status, created_at, updated_at
 `
 
@@ -302,7 +302,7 @@ func (q *Queries) CreateSimPackageReview(ctx context.Context, arg CreateSimPacka
 
 const createSimSession = `-- name: CreateSimSession :one
 INSERT INTO sim_session (id, tenant_id, package_id, source_ref, owner_account_id, seed, init_params, compute, status, created_at, updated_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 2, now(), now())
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, now(), now())
 RETURNING id, tenant_id, package_id, source_ref, owner_account_id, seed, init_params, compute, status, created_at, updated_at
 `
 
@@ -315,6 +315,7 @@ type CreateSimSessionParams struct {
 	Seed           int64  `json:"seed"`
 	InitParams     []byte `json:"init_params"`
 	Compute        int16  `json:"compute"`
+	Status         int16  `json:"status"`
 }
 
 func (q *Queries) CreateSimSession(ctx context.Context, arg CreateSimSessionParams) (SimSession, error) {
@@ -327,6 +328,7 @@ func (q *Queries) CreateSimSession(ctx context.Context, arg CreateSimSessionPara
 		arg.Seed,
 		arg.InitParams,
 		arg.Compute,
+		arg.Status,
 	)
 	var i SimSession
 	err := row.Scan(
@@ -1016,6 +1018,40 @@ func (q *Queries) UpdateSimPackageStatus(ctx context.Context, arg UpdateSimPacka
 		&i.BackendConfig,
 		&i.AuthorType,
 		&i.AuthorID,
+		&i.Status,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const updateSimSessionStatus = `-- name: UpdateSimSessionStatus :one
+UPDATE sim_session
+SET status = $3, updated_at = now()
+WHERE tenant_id = $1 AND id = $2
+  AND status IN (1, 2, 3, 4)
+  AND $3 IN (2, 3, 4, 5, 6)
+RETURNING id, tenant_id, package_id, source_ref, owner_account_id, seed, init_params, compute, status, created_at, updated_at
+`
+
+type UpdateSimSessionStatusParams struct {
+	TenantID int64 `json:"tenant_id"`
+	ID       int64 `json:"id"`
+	Status   int16 `json:"status"`
+}
+
+func (q *Queries) UpdateSimSessionStatus(ctx context.Context, arg UpdateSimSessionStatusParams) (SimSession, error) {
+	row := q.db.QueryRow(ctx, updateSimSessionStatus, arg.TenantID, arg.ID, arg.Status)
+	var i SimSession
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.PackageID,
+		&i.SourceRef,
+		&i.OwnerAccountID,
+		&i.Seed,
+		&i.InitParams,
+		&i.Compute,
 		&i.Status,
 		&i.CreatedAt,
 		&i.UpdatedAt,

@@ -61,6 +61,7 @@ func RegisterSandboxModule(ctx context.Context, deps SandboxModuleDeps) (*sandbo
 		Storage:      deps.Storage,
 		Orchestrator: orchestrator,
 		Audit:        deps.Audit,
+		Identity:     deps.Roles,
 		EventBus:     deps.EventBus,
 		WSHub:        deps.WSHub,
 		Capabilities: deps.Capabilities,

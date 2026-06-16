@@ -6,6 +6,8 @@ import (
 	"chaimir/internal/platform/jsonx"
 	"chaimir/internal/platform/pgtypex"
 	"chaimir/internal/platform/timex"
+
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 // judgerFromRow 转换平台级判题器定义。
@@ -41,6 +43,9 @@ func taskFromRow(row sqlcgen.JudgeTask) (JudgeTask, error) {
 		TenantID:         row.TenantID,
 		JudgerID:         row.JudgerID,
 		SourceRef:        row.SourceRef,
+		SourceOwnerID:    row.SourceOwnerID,
+		SourceCourseID:   row.SourceCourseID,
+		SourceScope:      row.SourceScope,
 		SubmitterID:      row.SubmitterID,
 		ProblemRef:       row.ProblemRef,
 		CodeStorageKey:   row.CodeStorageKey,
@@ -65,6 +70,9 @@ func taskInfoFromJoined(row sqlcgen.GetJudgeTaskWithResultRow) (JudgeTaskInfo, e
 		TenantID:         row.TenantID,
 		JudgerID:         row.JudgerID,
 		SourceRef:        row.SourceRef,
+		SourceOwnerID:    row.SourceOwnerID,
+		SourceCourseID:   row.SourceCourseID,
+		SourceScope:      row.SourceScope,
 		SubmitterID:      row.SubmitterID,
 		ProblemRef:       row.ProblemRef,
 		CodeStorageKey:   row.CodeStorageKey,
@@ -84,21 +92,23 @@ func taskInfoFromJoined(row sqlcgen.GetJudgeTaskWithResultRow) (JudgeTaskInfo, e
 		return JudgeTaskInfo{}, err
 	}
 	info := JudgeTaskInfo{Task: task}
-	if row.Passed.Valid {
+	if row.ResultID > 0 {
 		details, err := decodeDetails(row.Details)
 		if err != nil {
 			return JudgeTaskInfo{}, err
 		}
 		info.Result = &JudgeResult{
+			ID:              row.ResultID,
 			TaskID:          row.ID,
 			TenantID:        row.TenantID,
-			Passed:          row.Passed.Bool,
-			Score:           row.Score.Int32,
-			MaxScore:        row.MaxScore.Int32,
+			Version:         row.ResultVersion,
+			Passed:          row.Passed,
+			Score:           row.Score,
+			MaxScore:        row.MaxScore,
 			Details:         details,
-			JudgeSandboxRef: pgtypex.TextValue(row.JudgeSandboxRef),
+			JudgeSandboxRef: row.JudgeSandboxRef,
 			JudgedAt:        timex.FromTimestamptz(row.JudgedAt),
-			IsRejudge:       row.IsRejudge.Bool,
+			IsRejudge:       row.IsRejudge,
 		}
 	}
 	return info, nil
@@ -137,19 +147,25 @@ func fingerprintFromRow(row sqlcgen.SubmissionFingerprint) (SubmissionFingerprin
 	}, nil
 }
 
-// outboxFromRow 转换终态事件 outbox。
+// outboxFromRow 转换 sqlc outbox 模型,避免 service 直接依赖生成类型。
 func outboxFromRow(row sqlcgen.JudgeEventOutbox) JudgeEventOutbox {
+	return outboxFromFields(row.ID, row.TenantID, row.TaskID, row.Subject, row.Payload, row.Status, row.RetryCount, row.NextAttemptAt, row.LastError, row.CreatedAt, row.UpdatedAt)
+}
+
+// outboxFromFields 汇总 outbox 行字段,避免业务层依赖 sqlc 临时类型。
+func outboxFromFields(id, tenantID, taskID int64, subject string, payload []byte, status int16, retryCount int32, nextAttemptAt pgtype.Timestamptz, lastError pgtype.Text, createdAt, updatedAt pgtype.Timestamptz) JudgeEventOutbox {
 	return JudgeEventOutbox{
-		ID:         row.ID,
-		TenantID:   row.TenantID,
-		TaskID:     row.TaskID,
-		Subject:    row.Subject,
-		Payload:    row.Payload,
-		Status:     row.Status,
-		RetryCount: row.RetryCount,
-		LastError:  pgtypex.TextValue(row.LastError),
-		CreatedAt:  timex.FromTimestamptz(row.CreatedAt),
-		UpdatedAt:  timex.FromTimestamptz(row.UpdatedAt),
+		ID:            id,
+		TenantID:      tenantID,
+		TaskID:        taskID,
+		Subject:       subject,
+		Payload:       payload,
+		Status:        status,
+		RetryCount:    retryCount,
+		NextAttemptAt: timex.FromTimestamptz(nextAttemptAt),
+		LastError:     pgtypex.TextValue(lastError),
+		CreatedAt:     timex.FromTimestamptz(createdAt),
+		UpdatedAt:     timex.FromTimestamptz(updatedAt),
 	}
 }
 

@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
-	"io"
 	"path"
 	"strconv"
 	"strings"
@@ -54,11 +53,11 @@ func (s *Service) restoreArchiveToWorkspace(ctx context.Context, sb Sandbox, run
 		return apperr.ErrSandboxInitObjectReadFailed.WithCause(err)
 	}
 	defer logging.CloseContext(ctx, "关闭沙箱初始化归档读取器失败", reader)
-	data, err := io.ReadAll(io.LimitReader(reader, s.cfg.InitArchiveMaxBytes+1))
+	data, sizeResult, err := upload.ReadBounded(reader, s.cfg.InitArchiveMaxBytes)
 	if err != nil {
 		return apperr.ErrSandboxInitObjectReadFailed.WithCause(err)
 	}
-	if int64(len(data)) > s.cfg.InitArchiveMaxBytes {
+	if sizeResult == upload.SizeEmpty || sizeResult == upload.SizeTooLarge {
 		return apperr.ErrSandboxInitArchiveTooLarge
 	}
 	tarball, err := upload.SafeArchiveTar(ref.Key, data, upload.ArchiveLimits{MaxFiles: s.cfg.InitArchiveMaxFiles, MaxUnpackedBytes: s.cfg.InitArchiveMaxUnpackedBytes})
@@ -86,11 +85,11 @@ func (s *Service) runInitScriptIfNeeded(ctx context.Context, sb Sandbox, runtime
 		return apperr.ErrSandboxInitObjectReadFailed.WithCause(err)
 	}
 	defer logging.CloseContext(ctx, "关闭沙箱初始化脚本读取器失败", reader)
-	data, err := io.ReadAll(io.LimitReader(reader, s.cfg.InitArchiveMaxBytes+1))
+	data, sizeResult, err := upload.ReadBounded(reader, s.cfg.InitArchiveMaxBytes)
 	if err != nil {
 		return apperr.ErrSandboxInitObjectReadFailed.WithCause(err)
 	}
-	if int64(len(data)) > s.cfg.InitArchiveMaxBytes {
+	if sizeResult == upload.SizeEmpty || sizeResult == upload.SizeTooLarge {
 		return apperr.ErrSandboxInitArchiveTooLarge
 	}
 	scriptPath := path.Join(runtime.AdapterSpec.WorkspaceDir, ".chaimir-init-script")

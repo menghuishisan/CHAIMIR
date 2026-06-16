@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"chaimir/internal/contracts"
-	"chaimir/internal/platform/audit"
 	"chaimir/internal/platform/response"
 	"chaimir/internal/platform/timex"
 	"chaimir/pkg/apperr"
@@ -22,6 +21,9 @@ func (s *Service) RunRecycleOnce(ctx context.Context) error {
 	readyDeadline := timex.Now().Add(-time.Duration(s.cfg.ReadyIdleTimeoutSeconds) * time.Second)
 	var candidates []Sandbox
 	if err := s.store.PrivilegedTx(ctx, func(ctx context.Context, tx TxStore) error {
+		if _, err := tx.MarkIdleSandboxes(ctx); err != nil {
+			return apperr.ErrSandboxRecycleScanFailed.WithCause(err)
+		}
 		var err error
 		candidates, err = tx.ListRecycleCandidates(ctx, readyDeadline, int32(s.cfg.RecycleBatchSize))
 		if err != nil {
@@ -128,7 +130,7 @@ func (s *Service) recycleOne(ctx context.Context, sb Sandbox, reason string) err
 		return err
 	}
 	s.broadcastProgress(ctx, sb.TenantID, sb.ID, sb.Phase, SandboxStatusDestroyed, response.TraceFromContext(ctx))
-	if err := s.writeAudit(ctx, sb.TenantID, sb.OwnerAccountID, audit.ActorRoleSystem, "sandbox.recycle", "sandbox", sb.ID, map[string]any{"reason": reason, "source_ref": sb.SourceRef}); err != nil {
+	if err := s.writeSystemAudit(ctx, sb.TenantID, "sandbox.recycle", "sandbox", sb.ID, map[string]any{"reason": reason, "source_ref": sb.SourceRef}); err != nil {
 		return err
 	}
 	s.drainSandboxRecycleOutboxBestEffort(ctx)

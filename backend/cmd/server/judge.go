@@ -59,6 +59,7 @@ func RegisterJudgeModule(ctx context.Context, deps JudgeModuleDeps) (*judge.Serv
 		Sandbox:  deps.Sandbox,
 		Content:  deps.Content,
 		Audit:    deps.Audit,
+		Identity: deps.Roles,
 		EventBus: deps.EventBus,
 		WSHub:    deps.WSHub,
 	})

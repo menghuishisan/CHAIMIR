@@ -37,15 +37,15 @@ func (s *Service) PutSandboxFile(ctx context.Context, req contracts.SandboxFileW
 	if err != nil {
 		return err
 	}
+	if err := s.markSandboxExecutionActive(ctx, sb); err != nil {
+		return err
+	}
 	target := path.Join(runtime.AdapterSpec.WorkspaceDir, relative)
 	command := workspaceCommand(runtime.AdapterSpec.WorkspaceOps.WriteFile, runtime.AdapterSpec.WorkspaceDir, target, "")
 	if _, stderr, err := s.orchestrator.Exec(ctx, sb.Namespace, runtimeExecTarget(runtime), command, content, false); err != nil {
 		return apperr.ErrSandboxFileInvalid.WithCause(fmt.Errorf("%w: %s", err, string(stderr)))
 	}
 	if err := s.store.TenantTx(ctx, req.TenantID, func(ctx context.Context, tx TxStore) error {
-		if _, err := tx.MarkSandboxActive(ctx, req.TenantID, req.SandboxID); err != nil {
-			return apperr.ErrSandboxStatePersistFailed.WithCause(err)
-		}
 		detail, err := jsonBytes(map[string]any{"path": relative, "mode": "write"})
 		if err != nil {
 			return apperr.ErrSandboxStatePersistFailed.WithCause(err)
@@ -79,6 +79,9 @@ func (s *Service) PutSandboxPrivateArchive(ctx context.Context, req contracts.Sa
 	}
 	sb, runtime, err := s.sandboxRuntimeForSource(ctx, req.TenantID, req.SandboxID, req.SourceRef)
 	if err != nil {
+		return err
+	}
+	if err := s.markSandboxExecutionActive(ctx, sb); err != nil {
 		return err
 	}
 	domain, ok := volumeDomainByName(runtime.AdapterSpec, req.Domain)
@@ -126,6 +129,9 @@ func (s *Service) ReadSandboxFile(ctx context.Context, tenantID, sandboxID int64
 	if err != nil {
 		return FileReadResponse{}, err
 	}
+	if err := s.markSandboxExecutionActive(ctx, sb); err != nil {
+		return FileReadResponse{}, err
+	}
 	target := path.Join(runtime.AdapterSpec.WorkspaceDir, relative)
 	command := workspaceCommand(runtime.AdapterSpec.WorkspaceOps.ReadFile, runtime.AdapterSpec.WorkspaceDir, target, "")
 	stdout, stderr, err := s.orchestrator.Exec(ctx, sb.Namespace, runtimeExecTarget(runtime), command, nil, false)
@@ -156,6 +162,9 @@ func (s *Service) ListSandboxFiles(ctx context.Context, tenantID, sandboxID int6
 	}
 	sb, runtime, err := s.sandboxRuntime(ctx, tenantID, sandboxID)
 	if err != nil {
+		return FileListResponse{}, err
+	}
+	if err := s.markSandboxExecutionActive(ctx, sb); err != nil {
 		return FileListResponse{}, err
 	}
 	target := path.Join(runtime.AdapterSpec.WorkspaceDir, relative)
@@ -197,7 +206,11 @@ func (s *Service) SaveSandboxFiles(ctx context.Context, req contracts.SandboxSav
 
 // saveSandboxFilesForSource 在跨模块调用场景校验 source_ref 与沙箱归属一致。
 func (s *Service) saveSandboxFilesForSource(ctx context.Context, tenantID, sandboxID int64, sourceRef string) (string, string, error) {
-	if _, _, err := s.sandboxRuntimeForSource(ctx, tenantID, sandboxID, sourceRef); err != nil {
+	sb, _, err := s.sandboxRuntimeForSource(ctx, tenantID, sandboxID, sourceRef)
+	if err != nil {
+		return "", "", err
+	}
+	if err := s.markSandboxExecutionActive(ctx, sb); err != nil {
 		return "", "", err
 	}
 	return s.saveSandboxFiles(ctx, tenantID, sandboxID)
@@ -240,7 +253,11 @@ func (s *Service) saveSandboxFiles(ctx context.Context, tenantID, sandboxID int6
 
 // SaveSandboxFilesForOwner 校验操作者归属后立即持久化工作区。
 func (s *Service) SaveSandboxFilesForOwner(ctx context.Context, tenantID, accountID, sandboxID int64) (FileSaveResponse, error) {
-	if _, err := s.sandboxForOwner(ctx, tenantID, accountID, sandboxID); err != nil {
+	sb, _, err := s.sandboxRuntimeForOwner(ctx, tenantID, accountID, sandboxID)
+	if err != nil {
+		return FileSaveResponse{}, err
+	}
+	if err := s.markSandboxExecutionActive(ctx, sb); err != nil {
 		return FileSaveResponse{}, err
 	}
 	key, hash, err := s.saveSandboxFiles(ctx, tenantID, sandboxID)
@@ -252,7 +269,7 @@ func (s *Service) SaveSandboxFilesForOwner(ctx context.Context, tenantID, accoun
 
 // ExecSandboxCommand 在沙箱内执行受限命令,供判题 worker 运行套件。
 func (s *Service) ExecSandboxCommand(ctx context.Context, req contracts.SandboxExecRequest) (contracts.SandboxExecResult, error) {
-	if req.TenantID <= 0 || req.SandboxID <= 0 || len(req.Command) == 0 || !validSourceRef(req.SourceRef) {
+	if req.TenantID <= 0 || req.SandboxID <= 0 || !safeCommand(req.Command) || !validSourceRef(req.SourceRef) {
 		return contracts.SandboxExecResult{}, apperr.ErrSandboxContractRequestInvalid
 	}
 	sb, runtime, err := s.sandboxRuntimeForSource(ctx, req.TenantID, req.SandboxID, req.SourceRef)
@@ -261,13 +278,21 @@ func (s *Service) ExecSandboxCommand(ctx context.Context, req contracts.SandboxE
 	}
 	execCtx := ctx
 	cancel := func() {}
-	if req.TimeoutSec > 0 {
-		execCtx, cancel = context.WithTimeout(ctx, timeDurationSeconds(req.TimeoutSec))
+	timeoutSec := req.TimeoutSec
+	if timeoutSec <= 0 {
+		timeoutSec = int32(s.cfg.ExecTimeoutSeconds)
 	}
+	if timeoutSec <= 0 {
+		return contracts.SandboxExecResult{}, apperr.ErrSandboxContractRequestInvalid
+	}
+	execCtx, cancel = context.WithTimeout(ctx, timeDurationSeconds(timeoutSec))
 	defer cancel()
+	if err := s.markSandboxExecutionActive(ctx, sb); err != nil {
+		return contracts.SandboxExecResult{}, err
+	}
 	stdout, stderr, err := s.orchestrator.Exec(execCtx, sb.Namespace, runtimeExecTarget(runtime), req.Command, req.Stdin, false)
 	if err != nil {
-		return contracts.SandboxExecResult{}, apperr.ErrSandboxExecFailed.WithCause(err)
+		return contracts.SandboxExecResult{}, apperr.ErrSandboxExecFailed.WithCause(fmt.Errorf("%w: %s", err, string(stderr)))
 	}
 	if err := s.store.TenantTx(ctx, req.TenantID, func(ctx context.Context, tx TxStore) error {
 		detail, err := jsonBytes(map[string]any{"command": req.Command[0]})
@@ -281,18 +306,9 @@ func (s *Service) ExecSandboxCommand(ctx context.Context, req contracts.SandboxE
 	return contracts.SandboxExecResult{Stdout: stdout, Stderr: stderr}, nil
 }
 
-// ObserveToolAccess 记录工具访问活跃度并安排工作区防抖保存,覆盖经平台代理的 IDE/浏览器写入路径。
-func (s *Service) ObserveToolAccess(ctx context.Context, sb Sandbox, tool SandboxTool) {
+// ObserveToolAccess 安排工作区防抖保存,覆盖经平台代理的 IDE/浏览器写入路径。
+func (s *Service) ObserveToolAccess(ctx context.Context, sb Sandbox) {
 	if sb.TenantID <= 0 || sb.ID <= 0 {
-		return
-	}
-	if err := s.store.TenantTx(ctx, sb.TenantID, func(ctx context.Context, tx TxStore) error {
-		if _, err := tx.MarkSandboxActive(ctx, sb.TenantID, sb.ID); err != nil {
-			return apperr.ErrSandboxStatePersistFailed.WithCause(err)
-		}
-		return nil
-	}); err != nil {
-		logging.ErrorContext(ctx, "sandbox tool access activity mark failed", err.Error(), slog.Int64("tenant_id", sb.TenantID), slog.Int64("sandbox_id", sb.ID), slog.String("tool_code", tool.ToolCode))
 		return
 	}
 	s.scheduleDebouncedSave(ctx, sb.TenantID, sb.ID)
@@ -373,6 +389,11 @@ func (s *Service) sandboxRuntimeForSource(ctx context.Context, tenantID, sandbox
 // timeDurationSeconds 把正整数秒转换为 duration。
 func timeDurationSeconds(sec int32) time.Duration {
 	return time.Duration(sec) * time.Second
+}
+
+// sandboxExecAllowed 限定内部命令只能在仍有计算资源且环境可执行时运行。
+func sandboxExecAllowed(sb Sandbox) bool {
+	return sb.Status == SandboxStatusReady || sb.Status == SandboxStatusRunning || sb.Status == SandboxStatusIdle
 }
 
 // volumeDomainByName 查找运行时声明的卷安全域,用于内部私有资产注入等受控路径。

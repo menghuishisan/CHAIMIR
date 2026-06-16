@@ -149,7 +149,7 @@ func (a judgeAPI) rejudgeTask(c *gin.Context) {
 			return
 		}
 		if current.TenantID > 0 && current.AccountID > 0 {
-			out, err := a.svc.RejudgeTask(c.Request.Context(), current.TenantID, id)
+			out, err := a.svc.RejudgeTaskForUser(c.Request.Context(), current.TenantID, current.AccountID, id)
 			httpx.Write(c, taskInfoToMap(out), err)
 			return
 		}
@@ -208,7 +208,7 @@ func (a judgeAPI) listTasks(c *gin.Context) {
 	if !ok {
 		return
 	}
-	items, total, p, s, err := a.svc.ListTasks(c.Request.Context(), current.TenantID, c.Query("source_ref"), c.Query("pending_manual") == "true", int(page), int(size))
+	items, total, p, s, err := a.svc.ListTasks(c.Request.Context(), current.TenantID, current.AccountID, c.Query("source_ref"), c.Query("pending_manual") == "true", int(page), int(size))
 	httpx.WritePage(c, items, total, p, s, err)
 }
 
@@ -222,7 +222,7 @@ func (a judgeAPI) getTask(c *gin.Context) {
 	if !ok {
 		return
 	}
-	out, err := a.svc.getTaskInfo(c.Request.Context(), current.TenantID, id)
+	out, err := a.svc.GetTaskInfoForUser(c.Request.Context(), current.TenantID, current.AccountID, id)
 	httpx.Write(c, taskInfoToMap(out), err)
 }
 

@@ -61,7 +61,7 @@ func (s *Service) ApproveApplication(ctx context.Context, appID int64, req Revie
 	var created Tenant
 	var activation string
 	if err := s.store.PlatformTx(ctx, func(ctx context.Context, tx TxStore) error {
-		// 平台审核先锁定申请并创建租户,避免申请状态和租户主表出现不一致。
+		// 平台审核在同一事务内创建租户、更新申请、注入新租户 RLS 并开通首个管理员。
 		app, err := tx.GetTenantApplication(ctx, appID)
 		if err != nil {
 			return err
@@ -84,27 +84,34 @@ func (s *Service) ApproveApplication(ctx context.Context, appID int64, req Revie
 		if _, err := tx.ApproveTenantApplication(ctx, appID, id.AccountID, tenantID); err != nil {
 			return err
 		}
+		if err := tx.UseTenant(ctx, tenantID); err != nil {
+			return err
+		}
+		_, code, err := s.createBootstrapAdminInTx(ctx, tx, tenantID, req.AdminName, req.AdminPhone)
+		if err != nil {
+			return err
+		}
+		// 首管账号创建失败会回滚租户和申请状态,激活码明文只在审核结果中返回一次。
+		activation = code
 		created = t
-		return nil
+		entry, err := audit.BuildEntry(ctx, 0, id.AccountID, contracts.RoleNumPlatformAdmin, "tenant.application.approve", "identity.tenant_application", appID, map[string]any{"tenant_id": created.ID})
+		if err != nil {
+			return err
+		}
+		return tx.WriteAudit(ctx, WriteAuditInput{
+			ID:         s.ids.Generate(),
+			TenantID:   entry.TenantID,
+			ActorID:    entry.ActorID,
+			ActorRole:  entry.ActorRole,
+			Action:     entry.Action,
+			TargetType: entry.TargetType,
+			TargetID:   entry.TargetID,
+			Detail:     []byte(entry.Detail),
+			IP:         entry.IP,
+			TraceID:    entry.TraceID,
+		})
 	}); err != nil {
 		return TenantDTO{}, "", apperr.ErrInternal.WithCause(err)
-	}
-	// 首个学校管理员允许暂无组织档案,但仍必须通过 M1 账号能力生成激活码。
-	adminReq := CreateAccountRequest{
-		Phone:         req.AdminPhone,
-		Name:          req.AdminName,
-		BaseIdentity:  BaseIdentityTeacher,
-		UseActivation: true,
-	}
-	adminCtx := tenant.WithContext(ctx, tenant.Identity{TenantID: created.ID, AccountID: id.AccountID, IsSystem: true})
-	_, code, err := s.createBootstrapAdmin(adminCtx, created.ID, adminReq)
-	if err != nil {
-		return TenantDTO{}, "", err
-	}
-	activation = code
-	// 审核通过是平台级敏感操作,审计落在平台范围并关联原申请。
-	if err := s.auditPlatformOperation(ctx, id.AccountID, "tenant.application.approve", "identity.tenant_application", appID, map[string]any{"tenant_id": created.ID}); err != nil {
-		return TenantDTO{}, "", err
 	}
 	return ToTenantDTO(created), activation, nil
 }
@@ -350,54 +357,72 @@ func (s *Service) BootstrapPlatformAdmin(ctx context.Context, cfg config.Bootstr
 
 // createBootstrapAdmin 创建首个学校管理员,允许缺失组织档案但不臆造默认院系。
 func (s *Service) createBootstrapAdmin(ctx context.Context, tenantID int64, req CreateAccountRequest) (AccountDTO, string, error) {
-	phoneEnc, err := s.encryptPhone(req.Phone)
+	account, activation, err := s.createBootstrapAdminWithTx(ctx, tenantID, req.Name, req.Phone)
 	if err != nil {
-		return AccountDTO{}, "", apperr.ErrInternal.WithCause(err)
+		return AccountDTO{}, "", err
 	}
-	phoneHash, err := s.phoneHash(req.Phone)
-	if err != nil {
-		return AccountDTO{}, "", apperr.ErrInternal.WithCause(err)
-	}
-	accountID := s.ids.Generate()
-	var activation string
+	return ToAccountDTO(account, req.Phone), activation, nil
+}
+
+// createBootstrapAdminWithTx 在独立租户事务内创建首个学校管理员。
+func (s *Service) createBootstrapAdminWithTx(ctx context.Context, tenantID int64, name, phone string) (Account, string, error) {
 	var account Account
+	var activation string
 	if err := s.store.TenantTx(ctx, tenantID, func(ctx context.Context, tx TxStore) error {
-		// Bootstrap 管理员只建账号和教师/学校管理员角色,不臆造默认院系或虚假档案。
-		row, err := tx.CreateAccount(ctx, CreateAccountInput{
-			ID:           accountID,
-			TenantID:     tenantID,
-			PhoneEnc:     phoneEnc,
-			PhoneHash:    phoneHash,
-			Name:         strings.TrimSpace(req.Name),
-			BaseIdentity: BaseIdentityTeacher,
-			Status:       AccountStatusPending,
-			Roles: []RoleCreateInput{
-				{ID: s.ids.Generate(), Role: contracts.RoleNumTeacher},
-				{ID: s.ids.Generate(), Role: contracts.RoleNumSchoolAdmin},
-			},
-		})
+		row, code, err := s.createBootstrapAdminInTx(ctx, tx, tenantID, name, phone)
 		if err != nil {
-			return err
-		}
-		// 激活码明文只返回一次,落库只保存 HMAC 哈希。
-		code, err := crypto.RandomToken(16)
-		if err != nil {
-			return err
-		}
-		hash, err := s.hashSecret(code)
-		if err != nil {
-			return err
-		}
-		if _, err := tx.CreateActivationCode(ctx, CreateActivationInput{ID: s.ids.Generate(), TenantID: tenantID, AccountID: accountID, CodeHash: hash, ExpireAt: s.activationExpireAt(), CreatedBy: 0}); err != nil {
 			return err
 		}
 		account = row
 		activation = code
 		return nil
 	}); err != nil {
-		return AccountDTO{}, "", apperr.ErrInternal.WithCause(err)
+		return Account{}, "", apperr.ErrInternal.WithCause(err)
 	}
-	return ToAccountDTO(account, req.Phone), activation, nil
+	return account, activation, nil
+}
+
+// createBootstrapAdminInTx 创建首个学校管理员账号、教师/学校管理员角色和一次性激活码。
+func (s *Service) createBootstrapAdminInTx(ctx context.Context, tx TxStore, tenantID int64, name, phone string) (Account, string, error) {
+	phoneEnc, err := s.encryptPhone(phone)
+	if err != nil {
+		return Account{}, "", err
+	}
+	phoneHash, err := s.phoneHash(phone)
+	if err != nil {
+		return Account{}, "", err
+	}
+	accountID := s.ids.Generate()
+	// Bootstrap 管理员只建账号和教师/学校管理员角色,不臆造默认院系或虚假档案。
+	account, err := tx.CreateAccount(ctx, CreateAccountInput{
+		ID:           accountID,
+		TenantID:     tenantID,
+		PhoneEnc:     phoneEnc,
+		PhoneHash:    phoneHash,
+		Name:         strings.TrimSpace(name),
+		BaseIdentity: BaseIdentityTeacher,
+		Status:       AccountStatusPending,
+		Roles: []RoleCreateInput{
+			{ID: s.ids.Generate(), Role: contracts.RoleNumTeacher},
+			{ID: s.ids.Generate(), Role: contracts.RoleNumSchoolAdmin},
+		},
+	})
+	if err != nil {
+		return Account{}, "", err
+	}
+	// 激活码明文只返回一次,落库只保存 HMAC 哈希。
+	code, err := crypto.RandomToken(16)
+	if err != nil {
+		return Account{}, "", err
+	}
+	hash, err := s.hashSecret(code)
+	if err != nil {
+		return Account{}, "", err
+	}
+	if _, err := tx.CreateActivationCode(ctx, CreateActivationInput{ID: s.ids.Generate(), TenantID: tenantID, AccountID: accountID, CodeHash: hash, ExpireAt: s.activationExpireAt(), CreatedBy: 0}); err != nil {
+		return Account{}, "", err
+	}
+	return account, code, nil
 }
 
 // ensurePlatformLayerEnabled 校验 SaaS 平台层是否启用,私有化部署所有平台能力都必须关闭。

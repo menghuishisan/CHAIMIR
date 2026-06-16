@@ -15,7 +15,7 @@ const cancelQueuedJudgeTask = `-- name: CancelQueuedJudgeTask :one
 UPDATE judge_task
 SET status = 7, updated_at = now()
 WHERE tenant_id = $1 AND id = $2 AND status = 1
-RETURNING id, tenant_id, judger_id, source_ref, submitter_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, last_error, created_at, updated_at
+RETURNING id, tenant_id, judger_id, source_ref, source_owner_id, source_course_id, source_scope, submitter_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, last_error, created_at, updated_at
 `
 
 type CancelQueuedJudgeTaskParams struct {
@@ -31,6 +31,9 @@ func (q *Queries) CancelQueuedJudgeTask(ctx context.Context, arg CancelQueuedJud
 		&i.TenantID,
 		&i.JudgerID,
 		&i.SourceRef,
+		&i.SourceOwnerID,
+		&i.SourceCourseID,
+		&i.SourceScope,
 		&i.SubmitterID,
 		&i.ProblemRef,
 		&i.CodeStorageKey,
@@ -53,7 +56,7 @@ const completeJudgeTask = `-- name: CompleteJudgeTask :one
 UPDATE judge_task
 SET status = 3, last_error = NULL, updated_at = now()
 WHERE tenant_id = $1 AND id = $2
-RETURNING id, tenant_id, judger_id, source_ref, submitter_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, last_error, created_at, updated_at
+RETURNING id, tenant_id, judger_id, source_ref, source_owner_id, source_course_id, source_scope, submitter_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, last_error, created_at, updated_at
 `
 
 type CompleteJudgeTaskParams struct {
@@ -69,6 +72,9 @@ func (q *Queries) CompleteJudgeTask(ctx context.Context, arg CompleteJudgeTaskPa
 		&i.TenantID,
 		&i.JudgerID,
 		&i.SourceRef,
+		&i.SourceOwnerID,
+		&i.SourceCourseID,
+		&i.SourceScope,
 		&i.SubmitterID,
 		&i.ProblemRef,
 		&i.CodeStorageKey,
@@ -91,19 +97,26 @@ const countJudgeTasks = `-- name: CountJudgeTasks :one
 SELECT COUNT(*)::bigint
 FROM judge_task
 JOIN judger ON judger.id = judge_task.judger_id
-WHERE tenant_id = $1
-  AND ($2::text = '' OR source_ref = $2)
-  AND ($3::boolean = false OR (status = 2 AND judger.type = 6))
+WHERE judge_task.tenant_id = $1
+  AND ($2::text = '' OR judge_task.source_ref = $2)
+  AND ($3::boolean = false OR (judge_task.status = 2 AND judger.type = 6))
+  AND ($4::bigint = 0 OR judge_task.source_owner_id = $4 OR judge_task.submitter_id = $4)
 `
 
 type CountJudgeTasksParams struct {
 	TenantID int64  `json:"tenant_id"`
 	Column2  string `json:"column_2"`
 	Column3  bool   `json:"column_3"`
+	Column4  int64  `json:"column_4"`
 }
 
 func (q *Queries) CountJudgeTasks(ctx context.Context, arg CountJudgeTasksParams) (int64, error) {
-	row := q.db.QueryRow(ctx, countJudgeTasks, arg.TenantID, arg.Column2, arg.Column3)
+	row := q.db.QueryRow(ctx, countJudgeTasks,
+		arg.TenantID,
+		arg.Column2,
+		arg.Column3,
+		arg.Column4,
+	)
 	var column_1 int64
 	err := row.Scan(&column_1)
 	return column_1, err
@@ -112,7 +125,7 @@ func (q *Queries) CountJudgeTasks(ctx context.Context, arg CountJudgeTasksParams
 const createJudgeOutbox = `-- name: CreateJudgeOutbox :one
 INSERT INTO judge_event_outbox (id, tenant_id, task_id, subject, payload, status, retry_count, last_error, created_at, updated_at)
 VALUES ($1, $2, $3, $4, $5, 1, 0, NULL, now(), now())
-RETURNING id, tenant_id, task_id, subject, payload, status, retry_count, last_error, created_at, updated_at
+RETURNING id, tenant_id, task_id, subject, payload, status, retry_count, next_attempt_at, last_error, created_at, updated_at
 `
 
 type CreateJudgeOutboxParams struct {
@@ -140,6 +153,7 @@ func (q *Queries) CreateJudgeOutbox(ctx context.Context, arg CreateJudgeOutboxPa
 		&i.Payload,
 		&i.Status,
 		&i.RetryCount,
+		&i.NextAttemptAt,
 		&i.LastError,
 		&i.CreatedAt,
 		&i.UpdatedAt,
@@ -149,14 +163,15 @@ func (q *Queries) CreateJudgeOutbox(ctx context.Context, arg CreateJudgeOutboxPa
 
 const createJudgeTask = `-- name: CreateJudgeTask :one
 INSERT INTO judge_task (
-    id, tenant_id, judger_id, source_ref, submitter_id, problem_ref, code_storage_key, code_hash,
+    id, tenant_id, judger_id, source_ref, source_owner_id, source_course_id, source_scope,
+    submitter_id, problem_ref, code_storage_key, code_hash,
     input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, last_error,
     created_at, updated_at
 )
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, 0, $14, NULL, now(), now())
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, 0, $17, NULL, now(), now())
 ON CONFLICT (tenant_id, source_ref) DO UPDATE
 SET source_ref = EXCLUDED.source_ref
-RETURNING id, tenant_id, judger_id, source_ref, submitter_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, last_error, created_at, updated_at
+RETURNING id, tenant_id, judger_id, source_ref, source_owner_id, source_course_id, source_scope, submitter_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, last_error, created_at, updated_at
 `
 
 type CreateJudgeTaskParams struct {
@@ -164,6 +179,9 @@ type CreateJudgeTaskParams struct {
 	TenantID         int64       `json:"tenant_id"`
 	JudgerID         int64       `json:"judger_id"`
 	SourceRef        string      `json:"source_ref"`
+	SourceOwnerID    int64       `json:"source_owner_id"`
+	SourceCourseID   int64       `json:"source_course_id"`
+	SourceScope      string      `json:"source_scope"`
 	SubmitterID      int64       `json:"submitter_id"`
 	ProblemRef       string      `json:"problem_ref"`
 	CodeStorageKey   string      `json:"code_storage_key"`
@@ -182,6 +200,9 @@ func (q *Queries) CreateJudgeTask(ctx context.Context, arg CreateJudgeTaskParams
 		arg.TenantID,
 		arg.JudgerID,
 		arg.SourceRef,
+		arg.SourceOwnerID,
+		arg.SourceCourseID,
+		arg.SourceScope,
 		arg.SubmitterID,
 		arg.ProblemRef,
 		arg.CodeStorageKey,
@@ -199,6 +220,9 @@ func (q *Queries) CreateJudgeTask(ctx context.Context, arg CreateJudgeTaskParams
 		&i.TenantID,
 		&i.JudgerID,
 		&i.SourceRef,
+		&i.SourceOwnerID,
+		&i.SourceCourseID,
+		&i.SourceScope,
 		&i.SubmitterID,
 		&i.ProblemRef,
 		&i.CodeStorageKey,
@@ -268,7 +292,7 @@ WHERE t.id IN (
     LIMIT $1
     FOR UPDATE SKIP LOCKED
 )
-RETURNING id, tenant_id, judger_id, source_ref, submitter_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, last_error, created_at, updated_at
+RETURNING id, tenant_id, judger_id, source_ref, source_owner_id, source_course_id, source_scope, submitter_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, last_error, created_at, updated_at
 `
 
 func (q *Queries) DequeueJudgeTasks(ctx context.Context, limit int32) ([]JudgeTask, error) {
@@ -285,6 +309,9 @@ func (q *Queries) DequeueJudgeTasks(ctx context.Context, limit int32) ([]JudgeTa
 			&i.TenantID,
 			&i.JudgerID,
 			&i.SourceRef,
+			&i.SourceOwnerID,
+			&i.SourceCourseID,
+			&i.SourceScope,
 			&i.SubmitterID,
 			&i.ProblemRef,
 			&i.CodeStorageKey,
@@ -314,7 +341,7 @@ const failJudgeTask = `-- name: FailJudgeTask :one
 UPDATE judge_task
 SET status = 5, last_error = $3, updated_at = now()
 WHERE tenant_id = $1 AND id = $2
-RETURNING id, tenant_id, judger_id, source_ref, submitter_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, last_error, created_at, updated_at
+RETURNING id, tenant_id, judger_id, source_ref, source_owner_id, source_course_id, source_scope, submitter_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, last_error, created_at, updated_at
 `
 
 type FailJudgeTaskParams struct {
@@ -331,6 +358,9 @@ func (q *Queries) FailJudgeTask(ctx context.Context, arg FailJudgeTaskParams) (J
 		&i.TenantID,
 		&i.JudgerID,
 		&i.SourceRef,
+		&i.SourceOwnerID,
+		&i.SourceCourseID,
+		&i.SourceScope,
 		&i.SubmitterID,
 		&i.ProblemRef,
 		&i.CodeStorageKey,
@@ -392,7 +422,7 @@ func (q *Queries) FindExactFingerprints(ctx context.Context, arg FindExactFinger
 }
 
 const getJudgeTask = `-- name: GetJudgeTask :one
-SELECT id, tenant_id, judger_id, source_ref, submitter_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, last_error, created_at, updated_at
+SELECT id, tenant_id, judger_id, source_ref, source_owner_id, source_course_id, source_scope, submitter_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, last_error, created_at, updated_at
 FROM judge_task
 WHERE tenant_id = $1 AND id = $2
 `
@@ -410,6 +440,9 @@ func (q *Queries) GetJudgeTask(ctx context.Context, arg GetJudgeTaskParams) (Jud
 		&i.TenantID,
 		&i.JudgerID,
 		&i.SourceRef,
+		&i.SourceOwnerID,
+		&i.SourceCourseID,
+		&i.SourceScope,
 		&i.SubmitterID,
 		&i.ProblemRef,
 		&i.CodeStorageKey,
@@ -429,7 +462,7 @@ func (q *Queries) GetJudgeTask(ctx context.Context, arg GetJudgeTaskParams) (Jud
 }
 
 const getJudgeTaskBySourceRef = `-- name: GetJudgeTaskBySourceRef :one
-SELECT id, tenant_id, judger_id, source_ref, submitter_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, last_error, created_at, updated_at
+SELECT id, tenant_id, judger_id, source_ref, source_owner_id, source_course_id, source_scope, submitter_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, last_error, created_at, updated_at
 FROM judge_task
 WHERE tenant_id = $1 AND source_ref = $2
 `
@@ -447,6 +480,9 @@ func (q *Queries) GetJudgeTaskBySourceRef(ctx context.Context, arg GetJudgeTaskB
 		&i.TenantID,
 		&i.JudgerID,
 		&i.SourceRef,
+		&i.SourceOwnerID,
+		&i.SourceCourseID,
+		&i.SourceScope,
 		&i.SubmitterID,
 		&i.ProblemRef,
 		&i.CodeStorageKey,
@@ -467,11 +503,26 @@ func (q *Queries) GetJudgeTaskBySourceRef(ctx context.Context, arg GetJudgeTaskB
 
 const getJudgeTaskWithResult = `-- name: GetJudgeTaskWithResult :one
 SELECT
-    t.id, t.tenant_id, t.judger_id, t.source_ref, t.submitter_id, t.problem_ref, t.code_storage_key, t.code_hash,
+    t.id, t.tenant_id, t.judger_id, t.source_ref, t.source_owner_id, t.source_course_id, t.source_scope,
+    t.submitter_id, t.problem_ref, t.code_storage_key, t.code_hash,
     t.input_snapshot, t.sandbox_mode, t.target_sandbox_ref, t.priority, t.status, t.retry_count, t.max_retries, t.last_error, t.created_at, t.updated_at,
-    r.passed, r.score, r.max_score, r.details, r.judge_sandbox_ref, r.judged_at, r.is_rejudge
+    COALESCE(r.id, 0)::bigint AS result_id,
+    COALESCE(r.version, 0)::int AS result_version,
+    COALESCE(r.passed, false)::boolean AS passed,
+    COALESCE(r.score, 0)::int AS score,
+    COALESCE(r.max_score, 0)::int AS max_score,
+    COALESCE(r.details, '[]'::jsonb) AS details,
+    COALESCE(r.judge_sandbox_ref, '')::varchar AS judge_sandbox_ref,
+    r.judged_at,
+    COALESCE(r.is_rejudge, false)::boolean AS is_rejudge
 FROM judge_task t
-LEFT JOIN judge_result r ON r.tenant_id = t.tenant_id AND r.task_id = t.id
+LEFT JOIN LATERAL (
+    SELECT id, version, passed, score, max_score, details, judge_sandbox_ref, judged_at, is_rejudge
+    FROM judge_result
+    WHERE tenant_id = t.tenant_id AND task_id = t.id
+    ORDER BY version DESC
+    LIMIT 1
+) r ON true
 WHERE t.tenant_id = $1 AND t.id = $2
 `
 
@@ -485,6 +536,9 @@ type GetJudgeTaskWithResultRow struct {
 	TenantID         int64              `json:"tenant_id"`
 	JudgerID         int64              `json:"judger_id"`
 	SourceRef        string             `json:"source_ref"`
+	SourceOwnerID    int64              `json:"source_owner_id"`
+	SourceCourseID   int64              `json:"source_course_id"`
+	SourceScope      string             `json:"source_scope"`
 	SubmitterID      int64              `json:"submitter_id"`
 	ProblemRef       string             `json:"problem_ref"`
 	CodeStorageKey   string             `json:"code_storage_key"`
@@ -499,13 +553,15 @@ type GetJudgeTaskWithResultRow struct {
 	LastError        pgtype.Text        `json:"last_error"`
 	CreatedAt        pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
-	Passed           pgtype.Bool        `json:"passed"`
-	Score            pgtype.Int4        `json:"score"`
-	MaxScore         pgtype.Int4        `json:"max_score"`
+	ResultID         int64              `json:"result_id"`
+	ResultVersion    int32              `json:"result_version"`
+	Passed           bool               `json:"passed"`
+	Score            int32              `json:"score"`
+	MaxScore         int32              `json:"max_score"`
 	Details          []byte             `json:"details"`
-	JudgeSandboxRef  pgtype.Text        `json:"judge_sandbox_ref"`
+	JudgeSandboxRef  string             `json:"judge_sandbox_ref"`
 	JudgedAt         pgtype.Timestamptz `json:"judged_at"`
-	IsRejudge        pgtype.Bool        `json:"is_rejudge"`
+	IsRejudge        bool               `json:"is_rejudge"`
 }
 
 func (q *Queries) GetJudgeTaskWithResult(ctx context.Context, arg GetJudgeTaskWithResultParams) (GetJudgeTaskWithResultRow, error) {
@@ -516,6 +572,9 @@ func (q *Queries) GetJudgeTaskWithResult(ctx context.Context, arg GetJudgeTaskWi
 		&i.TenantID,
 		&i.JudgerID,
 		&i.SourceRef,
+		&i.SourceOwnerID,
+		&i.SourceCourseID,
+		&i.SourceScope,
 		&i.SubmitterID,
 		&i.ProblemRef,
 		&i.CodeStorageKey,
@@ -530,6 +589,8 @@ func (q *Queries) GetJudgeTaskWithResult(ctx context.Context, arg GetJudgeTaskWi
 		&i.LastError,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.ResultID,
+		&i.ResultVersion,
 		&i.Passed,
 		&i.Score,
 		&i.MaxScore,
@@ -637,23 +698,40 @@ func (q *Queries) ListFingerprintsForProblem(ctx context.Context, arg ListFinger
 
 const listJudgeTasks = `-- name: ListJudgeTasks :many
 SELECT
-    t.id, t.tenant_id, t.judger_id, t.source_ref, t.submitter_id, t.problem_ref, t.code_storage_key, t.code_hash,
+    t.id, t.tenant_id, t.judger_id, t.source_ref, t.source_owner_id, t.source_course_id, t.source_scope,
+    t.submitter_id, t.problem_ref, t.code_storage_key, t.code_hash,
     t.input_snapshot, t.sandbox_mode, t.target_sandbox_ref, t.priority, t.status, t.retry_count, t.max_retries, t.last_error, t.created_at, t.updated_at,
-    r.passed, r.score, r.max_score, r.details, r.judge_sandbox_ref, r.judged_at, r.is_rejudge
+    COALESCE(r.id, 0)::bigint AS result_id,
+    COALESCE(r.version, 0)::int AS result_version,
+    COALESCE(r.passed, false)::boolean AS passed,
+    COALESCE(r.score, 0)::int AS score,
+    COALESCE(r.max_score, 0)::int AS max_score,
+    COALESCE(r.details, '[]'::jsonb) AS details,
+    COALESCE(r.judge_sandbox_ref, '')::varchar AS judge_sandbox_ref,
+    r.judged_at,
+    COALESCE(r.is_rejudge, false)::boolean AS is_rejudge
 FROM judge_task t
-LEFT JOIN judge_result r ON r.tenant_id = t.tenant_id AND r.task_id = t.id
+LEFT JOIN LATERAL (
+    SELECT id, version, passed, score, max_score, details, judge_sandbox_ref, judged_at, is_rejudge
+    FROM judge_result
+    WHERE tenant_id = t.tenant_id AND task_id = t.id
+    ORDER BY version DESC
+    LIMIT 1
+) r ON true
 JOIN judger j ON j.id = t.judger_id
 WHERE t.tenant_id = $1
   AND ($2::text = '' OR t.source_ref = $2)
   AND ($3::boolean = false OR (t.status = 2 AND j.type = 6))
+  AND ($4::bigint = 0 OR t.source_owner_id = $4 OR t.submitter_id = $4)
 ORDER BY t.created_at DESC, t.id DESC
-LIMIT $4 OFFSET $5
+LIMIT $5 OFFSET $6
 `
 
 type ListJudgeTasksParams struct {
 	TenantID int64  `json:"tenant_id"`
 	Column2  string `json:"column_2"`
 	Column3  bool   `json:"column_3"`
+	Column4  int64  `json:"column_4"`
 	Limit    int32  `json:"limit"`
 	Offset   int32  `json:"offset"`
 }
@@ -663,6 +741,9 @@ type ListJudgeTasksRow struct {
 	TenantID         int64              `json:"tenant_id"`
 	JudgerID         int64              `json:"judger_id"`
 	SourceRef        string             `json:"source_ref"`
+	SourceOwnerID    int64              `json:"source_owner_id"`
+	SourceCourseID   int64              `json:"source_course_id"`
+	SourceScope      string             `json:"source_scope"`
 	SubmitterID      int64              `json:"submitter_id"`
 	ProblemRef       string             `json:"problem_ref"`
 	CodeStorageKey   string             `json:"code_storage_key"`
@@ -677,13 +758,15 @@ type ListJudgeTasksRow struct {
 	LastError        pgtype.Text        `json:"last_error"`
 	CreatedAt        pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
-	Passed           pgtype.Bool        `json:"passed"`
-	Score            pgtype.Int4        `json:"score"`
-	MaxScore         pgtype.Int4        `json:"max_score"`
+	ResultID         int64              `json:"result_id"`
+	ResultVersion    int32              `json:"result_version"`
+	Passed           bool               `json:"passed"`
+	Score            int32              `json:"score"`
+	MaxScore         int32              `json:"max_score"`
 	Details          []byte             `json:"details"`
-	JudgeSandboxRef  pgtype.Text        `json:"judge_sandbox_ref"`
+	JudgeSandboxRef  string             `json:"judge_sandbox_ref"`
 	JudgedAt         pgtype.Timestamptz `json:"judged_at"`
-	IsRejudge        pgtype.Bool        `json:"is_rejudge"`
+	IsRejudge        bool               `json:"is_rejudge"`
 }
 
 func (q *Queries) ListJudgeTasks(ctx context.Context, arg ListJudgeTasksParams) ([]ListJudgeTasksRow, error) {
@@ -691,6 +774,7 @@ func (q *Queries) ListJudgeTasks(ctx context.Context, arg ListJudgeTasksParams) 
 		arg.TenantID,
 		arg.Column2,
 		arg.Column3,
+		arg.Column4,
 		arg.Limit,
 		arg.Offset,
 	)
@@ -706,6 +790,9 @@ func (q *Queries) ListJudgeTasks(ctx context.Context, arg ListJudgeTasksParams) 
 			&i.TenantID,
 			&i.JudgerID,
 			&i.SourceRef,
+			&i.SourceOwnerID,
+			&i.SourceCourseID,
+			&i.SourceScope,
 			&i.SubmitterID,
 			&i.ProblemRef,
 			&i.CodeStorageKey,
@@ -720,6 +807,8 @@ func (q *Queries) ListJudgeTasks(ctx context.Context, arg ListJudgeTasksParams) 
 			&i.LastError,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.ResultID,
+			&i.ResultVersion,
 			&i.Passed,
 			&i.Score,
 			&i.MaxScore,
@@ -739,7 +828,7 @@ func (q *Queries) ListJudgeTasks(ctx context.Context, arg ListJudgeTasksParams) 
 }
 
 const listJudgeTasksBySourceRef = `-- name: ListJudgeTasksBySourceRef :many
-SELECT id, tenant_id, judger_id, source_ref, submitter_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, last_error, created_at, updated_at
+SELECT id, tenant_id, judger_id, source_ref, source_owner_id, source_course_id, source_scope, submitter_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, last_error, created_at, updated_at
 FROM judge_task
 WHERE tenant_id = $1 AND source_ref = $2
 ORDER BY created_at DESC, id DESC
@@ -764,6 +853,9 @@ func (q *Queries) ListJudgeTasksBySourceRef(ctx context.Context, arg ListJudgeTa
 			&i.TenantID,
 			&i.JudgerID,
 			&i.SourceRef,
+			&i.SourceOwnerID,
+			&i.SourceCourseID,
+			&i.SourceScope,
 			&i.SubmitterID,
 			&i.ProblemRef,
 			&i.CodeStorageKey,
@@ -829,10 +921,10 @@ func (q *Queries) ListJudgers(ctx context.Context) ([]Judger, error) {
 }
 
 const listPendingJudgeOutbox = `-- name: ListPendingJudgeOutbox :many
-SELECT id, tenant_id, task_id, subject, payload, status, retry_count, last_error, created_at, updated_at
+SELECT id, tenant_id, task_id, subject, payload, status, retry_count, next_attempt_at, last_error, created_at, updated_at
 FROM judge_event_outbox
-WHERE status IN (1, 3)
-ORDER BY created_at ASC, id ASC
+WHERE status IN (1, 3) AND next_attempt_at <= now()
+ORDER BY next_attempt_at ASC, created_at ASC, id ASC
 LIMIT $1
 `
 
@@ -853,6 +945,7 @@ func (q *Queries) ListPendingJudgeOutbox(ctx context.Context, limit int32) ([]Ju
 			&i.Payload,
 			&i.Status,
 			&i.RetryCount,
+			&i.NextAttemptAt,
 			&i.LastError,
 			&i.CreatedAt,
 			&i.UpdatedAt,
@@ -868,7 +961,7 @@ func (q *Queries) ListPendingJudgeOutbox(ctx context.Context, limit int32) ([]Ju
 }
 
 const listRecentJudgeTasksBySubmitterProblem = `-- name: ListRecentJudgeTasksBySubmitterProblem :many
-SELECT id, tenant_id, judger_id, source_ref, submitter_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, last_error, created_at, updated_at
+SELECT id, tenant_id, judger_id, source_ref, source_owner_id, source_course_id, source_scope, submitter_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, last_error, created_at, updated_at
 FROM judge_task
 WHERE tenant_id = $1 AND submitter_id = $2 AND problem_ref = $3 AND created_at >= now() - make_interval(secs => $4::int)
 ORDER BY created_at DESC, id DESC
@@ -900,6 +993,9 @@ func (q *Queries) ListRecentJudgeTasksBySubmitterProblem(ctx context.Context, ar
 			&i.TenantID,
 			&i.JudgerID,
 			&i.SourceRef,
+			&i.SourceOwnerID,
+			&i.SourceCourseID,
+			&i.SourceScope,
 			&i.SubmitterID,
 			&i.ProblemRef,
 			&i.CodeStorageKey,
@@ -927,9 +1023,13 @@ func (q *Queries) ListRecentJudgeTasksBySubmitterProblem(ctx context.Context, ar
 
 const markJudgeOutboxFailed = `-- name: MarkJudgeOutboxFailed :one
 UPDATE judge_event_outbox
-SET status = 3, retry_count = retry_count + 1, last_error = $3, updated_at = now()
+SET status = 3,
+    retry_count = retry_count + 1,
+    next_attempt_at = now() + (LEAST(300, power(2, LEAST(retry_count + 1, 8))::int) || ' seconds')::interval,
+    last_error = $3,
+    updated_at = now()
 WHERE tenant_id = $1 AND id = $2
-RETURNING id, tenant_id, task_id, subject, payload, status, retry_count, last_error, created_at, updated_at
+RETURNING id, tenant_id, task_id, subject, payload, status, retry_count, next_attempt_at, last_error, created_at, updated_at
 `
 
 type MarkJudgeOutboxFailedParams struct {
@@ -949,6 +1049,7 @@ func (q *Queries) MarkJudgeOutboxFailed(ctx context.Context, arg MarkJudgeOutbox
 		&i.Payload,
 		&i.Status,
 		&i.RetryCount,
+		&i.NextAttemptAt,
 		&i.LastError,
 		&i.CreatedAt,
 		&i.UpdatedAt,
@@ -960,7 +1061,7 @@ const markJudgeOutboxPublished = `-- name: MarkJudgeOutboxPublished :one
 UPDATE judge_event_outbox
 SET status = 2, updated_at = now()
 WHERE tenant_id = $1 AND id = $2
-RETURNING id, tenant_id, task_id, subject, payload, status, retry_count, last_error, created_at, updated_at
+RETURNING id, tenant_id, task_id, subject, payload, status, retry_count, next_attempt_at, last_error, created_at, updated_at
 `
 
 type MarkJudgeOutboxPublishedParams struct {
@@ -979,6 +1080,7 @@ func (q *Queries) MarkJudgeOutboxPublished(ctx context.Context, arg MarkJudgeOut
 		&i.Payload,
 		&i.Status,
 		&i.RetryCount,
+		&i.NextAttemptAt,
 		&i.LastError,
 		&i.CreatedAt,
 		&i.UpdatedAt,
@@ -990,7 +1092,7 @@ const markJudgeTaskError = `-- name: MarkJudgeTaskError :one
 UPDATE judge_task
 SET status = 6, last_error = $3, updated_at = now()
 WHERE tenant_id = $1 AND id = $2
-RETURNING id, tenant_id, judger_id, source_ref, submitter_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, last_error, created_at, updated_at
+RETURNING id, tenant_id, judger_id, source_ref, source_owner_id, source_course_id, source_scope, submitter_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, last_error, created_at, updated_at
 `
 
 type MarkJudgeTaskErrorParams struct {
@@ -1007,6 +1109,9 @@ func (q *Queries) MarkJudgeTaskError(ctx context.Context, arg MarkJudgeTaskError
 		&i.TenantID,
 		&i.JudgerID,
 		&i.SourceRef,
+		&i.SourceOwnerID,
+		&i.SourceCourseID,
+		&i.SourceScope,
 		&i.SubmitterID,
 		&i.ProblemRef,
 		&i.CodeStorageKey,
@@ -1029,7 +1134,7 @@ const markJudgeTaskTimeout = `-- name: MarkJudgeTaskTimeout :one
 UPDATE judge_task
 SET status = 4, last_error = $3, updated_at = now()
 WHERE tenant_id = $1 AND id = $2
-RETURNING id, tenant_id, judger_id, source_ref, submitter_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, last_error, created_at, updated_at
+RETURNING id, tenant_id, judger_id, source_ref, source_owner_id, source_course_id, source_scope, submitter_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, last_error, created_at, updated_at
 `
 
 type MarkJudgeTaskTimeoutParams struct {
@@ -1046,6 +1151,9 @@ func (q *Queries) MarkJudgeTaskTimeout(ctx context.Context, arg MarkJudgeTaskTim
 		&i.TenantID,
 		&i.JudgerID,
 		&i.SourceRef,
+		&i.SourceOwnerID,
+		&i.SourceCourseID,
+		&i.SourceScope,
 		&i.SubmitterID,
 		&i.ProblemRef,
 		&i.CodeStorageKey,
@@ -1072,7 +1180,7 @@ SET status = 1,
     last_error = NULL,
     updated_at = now()
 WHERE tenant_id = $1 AND id = $2 AND status IN (3, 5)
-RETURNING id, tenant_id, judger_id, source_ref, submitter_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, last_error, created_at, updated_at
+RETURNING id, tenant_id, judger_id, source_ref, source_owner_id, source_course_id, source_scope, submitter_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, last_error, created_at, updated_at
 `
 
 type ResetJudgeTaskForRejudgeParams struct {
@@ -1089,6 +1197,9 @@ func (q *Queries) ResetJudgeTaskForRejudge(ctx context.Context, arg ResetJudgeTa
 		&i.TenantID,
 		&i.JudgerID,
 		&i.SourceRef,
+		&i.SourceOwnerID,
+		&i.SourceCourseID,
+		&i.SourceScope,
 		&i.SubmitterID,
 		&i.ProblemRef,
 		&i.CodeStorageKey,
@@ -1111,7 +1222,7 @@ const retryJudgeTask = `-- name: RetryJudgeTask :one
 UPDATE judge_task
 SET status = 1, retry_count = retry_count + 1, last_error = $3, updated_at = now()
 WHERE tenant_id = $1 AND id = $2
-RETURNING id, tenant_id, judger_id, source_ref, submitter_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, last_error, created_at, updated_at
+RETURNING id, tenant_id, judger_id, source_ref, source_owner_id, source_course_id, source_scope, submitter_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, last_error, created_at, updated_at
 `
 
 type RetryJudgeTaskParams struct {
@@ -1128,6 +1239,9 @@ func (q *Queries) RetryJudgeTask(ctx context.Context, arg RetryJudgeTaskParams) 
 		&i.TenantID,
 		&i.JudgerID,
 		&i.SourceRef,
+		&i.SourceOwnerID,
+		&i.SourceCourseID,
+		&i.SourceScope,
 		&i.SubmitterID,
 		&i.ProblemRef,
 		&i.CodeStorageKey,
@@ -1180,20 +1294,17 @@ func (q *Queries) UpdateJudgerSelftest(ctx context.Context, arg UpdateJudgerSelf
 }
 
 const upsertJudgeResult = `-- name: UpsertJudgeResult :one
-INSERT INTO judge_result (task_id, tenant_id, passed, score, max_score, details, judge_sandbox_ref, judged_at, is_rejudge)
-VALUES ($1, $2, $3, $4, $5, $6, $7, now(), $8)
-ON CONFLICT (task_id) DO UPDATE
-SET passed = EXCLUDED.passed,
-    score = EXCLUDED.score,
-    max_score = EXCLUDED.max_score,
-    details = EXCLUDED.details,
-    judge_sandbox_ref = EXCLUDED.judge_sandbox_ref,
-    judged_at = now(),
-    is_rejudge = EXCLUDED.is_rejudge
-RETURNING task_id, tenant_id, passed, score, max_score, details, judge_sandbox_ref, judged_at, is_rejudge
+INSERT INTO judge_result (id, task_id, tenant_id, version, passed, score, max_score, details, judge_sandbox_ref, judged_at, is_rejudge)
+VALUES (
+    $1, $2, $3,
+    COALESCE((SELECT max(version) + 1 FROM judge_result WHERE tenant_id = $3 AND task_id = $2), 1),
+    $4, $5, $6, $7, $8, now(), $9
+)
+RETURNING id, task_id, tenant_id, version, passed, score, max_score, details, judge_sandbox_ref, judged_at, is_rejudge
 `
 
 type UpsertJudgeResultParams struct {
+	ID              int64  `json:"id"`
 	TaskID          int64  `json:"task_id"`
 	TenantID        int64  `json:"tenant_id"`
 	Passed          bool   `json:"passed"`
@@ -1206,6 +1317,7 @@ type UpsertJudgeResultParams struct {
 
 func (q *Queries) UpsertJudgeResult(ctx context.Context, arg UpsertJudgeResultParams) (JudgeResult, error) {
 	row := q.db.QueryRow(ctx, upsertJudgeResult,
+		arg.ID,
 		arg.TaskID,
 		arg.TenantID,
 		arg.Passed,
@@ -1217,8 +1329,10 @@ func (q *Queries) UpsertJudgeResult(ctx context.Context, arg UpsertJudgeResultPa
 	)
 	var i JudgeResult
 	err := row.Scan(
+		&i.ID,
 		&i.TaskID,
 		&i.TenantID,
+		&i.Version,
 		&i.Passed,
 		&i.Score,
 		&i.MaxScore,

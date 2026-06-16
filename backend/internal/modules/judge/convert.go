@@ -2,6 +2,8 @@
 package judge
 
 import (
+	"strings"
+
 	"chaimir/internal/contracts"
 	"chaimir/internal/platform/ids"
 	"chaimir/internal/platform/jsonx"
@@ -19,11 +21,29 @@ func contractSubmitFromDTO(tenantID int64, req SubmitTaskRequest) contracts.Judg
 		CodeHash:         req.CodeHash,
 		SubmitterID:      req.SubmitterID,
 		SourceRef:        req.SourceRef,
+		ExtraInput:       mergeSourceMetadata(req.ExtraInput, req.SourceOwnerID, req.SourceCourseID, req.SourceScope),
 		SandboxMode:      req.SandboxMode,
 		TargetSandboxRef: req.TargetSandboxRef,
-		ExtraInput:       req.ExtraInput,
 		Priority:         req.Priority,
 	}
+}
+
+// mergeSourceMetadata 把内部 HTTP 的来源权限证明收敛进现有跨模块 ExtraInput。
+func mergeSourceMetadata(extra map[string]any, ownerID, courseID int64, scope string) map[string]any {
+	out := map[string]any{}
+	for key, value := range extra {
+		out[key] = value
+	}
+	if ownerID > 0 {
+		out["source_owner_id"] = ownerID
+	}
+	if courseID > 0 {
+		out["source_course_id"] = courseID
+	}
+	if strings.TrimSpace(scope) != "" {
+		out["source_scope"] = strings.TrimSpace(scope)
+	}
+	return out
 }
 
 // contractTaskInfoFromModel 把 M3 任务摘要转换为跨模块返回契约。
@@ -93,6 +113,8 @@ func taskInfoToMap(info JudgeTaskInfo) map[string]any {
 			"passed":       info.Result.Passed,
 			"score":        info.Result.Score,
 			"max_score":    info.Result.MaxScore,
+			"version":      info.Result.Version,
+			"is_rejudge":   info.Result.IsRejudge,
 			"details":      info.Result.Details,
 			"snapshot_ref": snapshotRef(info.Task.ID),
 		}

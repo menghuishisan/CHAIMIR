@@ -35,6 +35,7 @@ type Querier interface {
 	MergeSimValidationReport(ctx context.Context, arg MergeSimValidationReportParams) (SimPackageReview, error)
 	UpdateSimPackageDraft(ctx context.Context, arg UpdateSimPackageDraftParams) (SimPackage, error)
 	UpdateSimPackageStatus(ctx context.Context, arg UpdateSimPackageStatusParams) (SimPackage, error)
+	UpdateSimSessionStatus(ctx context.Context, arg UpdateSimSessionStatusParams) (SimSession, error)
 	UpsertSimCheckpoint(ctx context.Context, arg UpsertSimCheckpointParams) (SimCheckpoint, error)
 }
 

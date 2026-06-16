@@ -13,11 +13,11 @@ import (
 
 const claimPendingSandboxRecycleOutbox = `-- name: ClaimPendingSandboxRecycleOutbox :many
 UPDATE sandbox_recycle_outbox
-SET status = 4, retry_count = retry_count + 1, updated_at = now()
+SET status = 2, retry_count = retry_count + 1, updated_at = now()
 WHERE id IN (
     SELECT id
     FROM sandbox_recycle_outbox
-    WHERE status IN (1, 3) OR (status = 4 AND updated_at <= $1::timestamptz)
+    WHERE status IN (1, 4) OR (status = 2 AND updated_at <= $1::timestamptz)
     ORDER BY created_at ASC, id ASC
     LIMIT $2
     FOR UPDATE SKIP LOCKED
@@ -67,7 +67,7 @@ func (q *Queries) ClaimPendingSandboxRecycleOutbox(ctx context.Context, arg Clai
 const countActiveSandboxes = `-- name: CountActiveSandboxes :one
 SELECT COUNT(*)::bigint
 FROM sandbox
-WHERE tenant_id = $1 AND status IN (1, 2, 3, 4)
+WHERE tenant_id = $1 AND status IN (1, 2, 3, 4, 7, 8)
 `
 
 func (q *Queries) CountActiveSandboxes(ctx context.Context, tenantID int64) (int64, error) {
@@ -574,6 +574,30 @@ func (q *Queries) GetTenantQuota(ctx context.Context, tenantID int64) (TenantQuo
 	return i, err
 }
 
+const getTenantQuotaForUpdate = `-- name: GetTenantQuotaForUpdate :one
+SELECT tenant_id, max_concurrent_sandbox, max_cpu, max_memory_mb, idle_timeout_min, max_lifetime_min, max_keepalive_min, max_snapshot_retention_min, updated_at
+FROM tenant_quota
+WHERE tenant_id = $1
+FOR UPDATE
+`
+
+func (q *Queries) GetTenantQuotaForUpdate(ctx context.Context, tenantID int64) (TenantQuotum, error) {
+	row := q.db.QueryRow(ctx, getTenantQuotaForUpdate, tenantID)
+	var i TenantQuotum
+	err := row.Scan(
+		&i.TenantID,
+		&i.MaxConcurrentSandbox,
+		&i.MaxCpu,
+		&i.MaxMemoryMb,
+		&i.IdleTimeoutMin,
+		&i.MaxLifetimeMin,
+		&i.MaxKeepaliveMin,
+		&i.MaxSnapshotRetentionMin,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const getToolByCode = `-- name: GetToolByCode :one
 SELECT id, code, name, kind, image_url, port, eco_tags, resource_spec, status, created_at, updated_at
 FROM tool
@@ -605,9 +629,10 @@ FROM sandbox s
 JOIN tenant_quota tq ON tq.tenant_id = s.tenant_id
 WHERE s.status IN (4, 6)
    OR (s.status = 1 AND s.last_active_at <= $1)
-   OR (s.status IN (2, 3) AND s.keep_alive = false AND s.last_active_at <= now() - make_interval(mins => tq.idle_timeout_min))
-   OR (s.status IN (1, 2, 3) AND s.expire_at <= now())
-   OR (s.status IN (1, 2, 3) AND s.keep_alive_until IS NOT NULL AND s.keep_alive_until <= now())
+   OR (s.status = 7 AND s.last_active_at <= $1)
+   OR (s.status = 8 AND s.keep_alive = false)
+   OR (s.status IN (1, 2, 3, 7, 8) AND s.expire_at <= now())
+   OR (s.status IN (1, 2, 3, 7, 8) AND s.keep_alive_until IS NOT NULL AND s.keep_alive_until <= now())
 ORDER BY s.updated_at ASC, s.id ASC
 LIMIT $2
 `
@@ -944,6 +969,62 @@ func (q *Queries) ListTools(ctx context.Context) ([]Tool, error) {
 	return items, nil
 }
 
+const markIdleSandboxes = `-- name: MarkIdleSandboxes :many
+UPDATE sandbox s
+SET status = 8, updated_at = now()
+FROM tenant_quota tq
+WHERE tq.tenant_id = s.tenant_id
+  AND s.status = 2
+  AND s.keep_alive = false
+  AND s.last_active_at <= now() - make_interval(mins => tq.idle_timeout_min)
+RETURNING s.id, s.tenant_id, s.runtime_id, s.image_id, s.namespace, s.source_ref, s.owner_account_id, s.phase, s.status, s.keep_alive, s.snapshot_enabled, s.code_storage_key, s.code_hash, s.init_code_ref, s.init_script_ref, s.snapshot_ref, s.snapshot_domains, s.snapshot_created_at, s.snapshot_expire_at, s.keep_alive_until, s.last_active_at, s.expire_at, s.created_at, s.updated_at
+`
+
+func (q *Queries) MarkIdleSandboxes(ctx context.Context) ([]Sandbox, error) {
+	rows, err := q.db.Query(ctx, markIdleSandboxes)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Sandbox{}
+	for rows.Next() {
+		var i Sandbox
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.RuntimeID,
+			&i.ImageID,
+			&i.Namespace,
+			&i.SourceRef,
+			&i.OwnerAccountID,
+			&i.Phase,
+			&i.Status,
+			&i.KeepAlive,
+			&i.SnapshotEnabled,
+			&i.CodeStorageKey,
+			&i.CodeHash,
+			&i.InitCodeRef,
+			&i.InitScriptRef,
+			&i.SnapshotRef,
+			&i.SnapshotDomains,
+			&i.SnapshotCreatedAt,
+			&i.SnapshotExpireAt,
+			&i.KeepAliveUntil,
+			&i.LastActiveAt,
+			&i.ExpireAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const markOtherRuntimeImagesNotDefault = `-- name: MarkOtherRuntimeImagesNotDefault :exec
 UPDATE runtime_image
 SET is_default = false
@@ -962,8 +1043,11 @@ func (q *Queries) MarkOtherRuntimeImagesNotDefault(ctx context.Context, arg Mark
 
 const markSandboxActive = `-- name: MarkSandboxActive :one
 UPDATE sandbox
-SET last_active_at = now(), updated_at = now()
+SET last_active_at = now(),
+    status = CASE WHEN status IN (7, 8) THEN 2 ELSE status END,
+    updated_at = now()
 WHERE tenant_id = $1 AND id = $2
+  AND status IN (2, 7, 8)
 RETURNING id, tenant_id, runtime_id, image_id, namespace, source_ref, owner_account_id, phase, status, keep_alive, snapshot_enabled, code_storage_key, code_hash, init_code_ref, init_script_ref, snapshot_ref, snapshot_domains, snapshot_created_at, snapshot_expire_at, keep_alive_until, last_active_at, expire_at, created_at, updated_at
 `
 
@@ -1006,7 +1090,7 @@ func (q *Queries) MarkSandboxActive(ctx context.Context, arg MarkSandboxActivePa
 
 const markSandboxRecycleOutboxFailed = `-- name: MarkSandboxRecycleOutboxFailed :one
 UPDATE sandbox_recycle_outbox
-SET status = 3, last_error = $3, updated_at = now()
+SET status = 4, last_error = $3, updated_at = now()
 WHERE tenant_id = $1 AND id = $2
 RETURNING id, tenant_id, sandbox_id, source_ref, owner_account_id, reason, trace_id, recycled_at, status, retry_count, last_error, created_at, updated_at
 `
@@ -1040,7 +1124,7 @@ func (q *Queries) MarkSandboxRecycleOutboxFailed(ctx context.Context, arg MarkSa
 
 const markSandboxRecycleOutboxPublished = `-- name: MarkSandboxRecycleOutboxPublished :one
 UPDATE sandbox_recycle_outbox
-SET status = 2, last_error = NULL, updated_at = now()
+SET status = 3, last_error = NULL, updated_at = now()
 WHERE tenant_id = $1 AND id = $2
 RETURNING id, tenant_id, sandbox_id, source_ref, owner_account_id, reason, trace_id, recycled_at, status, retry_count, last_error, created_at, updated_at
 `
@@ -1073,7 +1157,7 @@ func (q *Queries) MarkSandboxRecycleOutboxPublished(ctx context.Context, arg Mar
 
 const statsByTenant = `-- name: StatsByTenant :one
 SELECT
-  COUNT(*) FILTER (WHERE s.status IN (1, 2, 3, 4))::bigint AS active_sandbox_count,
+  COUNT(*) FILTER (WHERE s.status IN (1, 2, 3, 4, 7, 8))::bigint AS active_sandbox_count,
   tq.max_concurrent_sandbox,
   tq.max_cpu,
   tq.max_memory_mb,

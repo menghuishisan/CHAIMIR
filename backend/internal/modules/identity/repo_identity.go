@@ -501,9 +501,19 @@ func (t *txStore) RevokeRole(ctx context.Context, tenantID, accountID int64, rol
 	return t.q.DeleteAccountRole(ctx, sqlcgen.DeleteAccountRoleParams{TenantID: tenantID, AccountID: accountID, Role: role})
 }
 
+// CountActiveRoleAccounts 统计租户内具备指定角色且账号正常的账号数。
+func (t *txStore) CountActiveRoleAccounts(ctx context.Context, tenantID int64, role int16) (int64, error) {
+	return t.q.CountActiveRoleAccounts(ctx, sqlcgen.CountActiveRoleAccountsParams{TenantID: tenantID, Role: role})
+}
+
 // RevokeAccountSessions 吊销租户账号的全部有效会话。
 func (t *txStore) RevokeAccountSessions(ctx context.Context, tenantID, accountID int64) error {
 	return t.q.RevokeAccountSessions(ctx, sqlcgen.RevokeAccountSessionsParams{TenantID: tenantID, AccountID: accountID})
+}
+
+// RevokeOtherAccountSessions 吊销租户账号除当前会话外的全部有效会话。
+func (t *txStore) RevokeOtherAccountSessions(ctx context.Context, tenantID, accountID, keepSessionID int64) error {
+	return t.q.RevokeOtherAccountSessions(ctx, sqlcgen.RevokeOtherAccountSessionsParams{TenantID: tenantID, AccountID: accountID, ID: keepSessionID})
 }
 
 // CreateAuthSession 创建租户 Refresh 会话。
@@ -557,7 +567,14 @@ func (t *txStore) ListAuthSessionsByAccount(ctx context.Context, tenantID, accou
 
 // RevokeAuthSession 吊销单个租户 Refresh 会话。
 func (t *txStore) RevokeAuthSession(ctx context.Context, tenantID, sessionID int64) error {
-	return t.q.RevokeAuthSessionByID(ctx, sqlcgen.RevokeAuthSessionByIDParams{TenantID: tenantID, ID: sessionID})
+	affected, err := t.q.RevokeAuthSessionByID(ctx, sqlcgen.RevokeAuthSessionByIDParams{TenantID: tenantID, ID: sessionID})
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return apperr.ErrIdentitySessionInvalid
+	}
+	return nil
 }
 
 // CreatePlatformAuthSession 创建平台管理员 Refresh 会话。
@@ -613,9 +630,21 @@ func (t *txStore) RevokePlatformSessions(ctx context.Context, platformAdminID in
 	return t.q.RevokePlatformSessions(ctx, platformAdminID)
 }
 
+// RevokeOtherPlatformSessions 吊销平台管理员除当前会话外的全部有效会话。
+func (t *txStore) RevokeOtherPlatformSessions(ctx context.Context, platformAdminID, keepSessionID int64) error {
+	return t.q.RevokeOtherPlatformSessions(ctx, sqlcgen.RevokeOtherPlatformSessionsParams{PlatformAdminID: platformAdminID, ID: keepSessionID})
+}
+
 // RevokePlatformAuthSession 吊销单个平台管理员会话。
 func (t *txStore) RevokePlatformAuthSession(ctx context.Context, sessionID int64) error {
-	return t.q.RevokePlatformAuthSessionByID(ctx, sessionID)
+	affected, err := t.q.RevokePlatformAuthSessionByID(ctx, sessionID)
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return apperr.ErrIdentitySessionInvalid
+	}
+	return nil
 }
 
 // CreateSMSCode 写入短信验证码哈希。

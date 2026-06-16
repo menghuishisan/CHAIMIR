@@ -24,6 +24,7 @@ type Querier interface {
 	GetRuntimeImageByVersion(ctx context.Context, arg GetRuntimeImageByVersionParams) (RuntimeImage, error)
 	GetSandbox(ctx context.Context, arg GetSandboxParams) (Sandbox, error)
 	GetTenantQuota(ctx context.Context, tenantID int64) (TenantQuotum, error)
+	GetTenantQuotaForUpdate(ctx context.Context, tenantID int64) (TenantQuotum, error)
 	GetToolByCode(ctx context.Context, code string) (Tool, error)
 	ListRecycleCandidates(ctx context.Context, arg ListRecycleCandidatesParams) ([]Sandbox, error)
 	ListRuntimeImages(ctx context.Context, runtimeID int64) ([]RuntimeImage, error)
@@ -32,6 +33,7 @@ type Querier interface {
 	ListSandboxesBySourceRef(ctx context.Context, arg ListSandboxesBySourceRefParams) ([]Sandbox, error)
 	ListSnapshotCleanupCandidates(ctx context.Context, limit int32) ([]Sandbox, error)
 	ListTools(ctx context.Context) ([]Tool, error)
+	MarkIdleSandboxes(ctx context.Context) ([]Sandbox, error)
 	MarkOtherRuntimeImagesNotDefault(ctx context.Context, arg MarkOtherRuntimeImagesNotDefaultParams) error
 	MarkSandboxActive(ctx context.Context, arg MarkSandboxActiveParams) (Sandbox, error)
 	MarkSandboxRecycleOutboxFailed(ctx context.Context, arg MarkSandboxRecycleOutboxFailedParams) (SandboxRecycleOutbox, error)

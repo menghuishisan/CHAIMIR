@@ -8,7 +8,6 @@ import (
 	"strings"
 	"time"
 
-	"chaimir/internal/platform/audit"
 	"chaimir/internal/platform/jsonx"
 	"chaimir/internal/platform/timex"
 	"chaimir/pkg/apperr"
@@ -36,7 +35,7 @@ func (s *Service) RegisterRuntime(ctx context.Context, req RuntimeRequest) (Runt
 	}); err != nil {
 		return Runtime{}, err
 	}
-	return runtime, s.writeAudit(ctx, 0, 0, audit.ActorRoleSystem, "sandbox.runtime.upsert", "runtime", runtime.ID, map[string]any{"code": runtime.Code})
+	return runtime, s.writeAuditFromContext(ctx, 0, "sandbox.runtime.upsert", "runtime", runtime.ID, map[string]any{"code": runtime.Code})
 }
 
 // UpdateRuntime 按路径 ID 更新运行时,防止请求体 code 误更新或新建其他运行时。
@@ -80,7 +79,7 @@ func (s *Service) UpdateRuntime(ctx context.Context, runtimeID int64, req Runtim
 	}); err != nil {
 		return Runtime{}, err
 	}
-	return runtime, s.writeAudit(ctx, 0, 0, audit.ActorRoleSystem, "sandbox.runtime.update", "runtime", runtimeID, map[string]any{"code": runtime.Code})
+	return runtime, s.writeAuditFromContext(ctx, 0, "sandbox.runtime.update", "runtime", runtimeID, map[string]any{"code": runtime.Code})
 }
 
 // ListRuntimes 查询平台已登记运行时列表。
@@ -115,7 +114,7 @@ func (s *Service) RegisterRuntimeImage(ctx context.Context, runtimeID int64, req
 	}); err != nil {
 		return RuntimeImage{}, err
 	}
-	return image, s.writeAudit(ctx, 0, 0, audit.ActorRoleSystem, "sandbox.image.register", "runtime_image", image.ID, map[string]any{"image_url": image.ImageURL})
+	return image, s.writeAuditFromContext(ctx, 0, "sandbox.image.register", "runtime_image", image.ID, map[string]any{"image_url": image.ImageURL})
 }
 
 // DisableRuntimeImage 停用运行时镜像并删除预拉取 DaemonSet,避免停用镜像继续留在节点预拉取闭环。
@@ -152,7 +151,7 @@ func (s *Service) DisableRuntimeImage(ctx context.Context, runtimeID, imageID in
 	}); err != nil {
 		return RuntimeImage{}, err
 	}
-	return disabled, s.writeAudit(ctx, 0, 0, audit.ActorRoleSystem, "sandbox.image.disable", "runtime_image", imageID, map[string]any{"runtime_id": runtimeID})
+	return disabled, s.writeAuditFromContext(ctx, 0, "sandbox.image.disable", "runtime_image", imageID, map[string]any{"runtime_id": runtimeID})
 }
 
 // ListRuntimeImages 查询指定运行时的镜像版本列表。
@@ -253,7 +252,7 @@ func (s *Service) RunRuntimeSelftest(ctx context.Context, runtimeID int64) (Runt
 	}); updateErr != nil {
 		return RuntimeSelftestResponse{}, updateErr
 	}
-	if auditErr := s.writeAudit(ctx, 0, 0, audit.ActorRoleSystem, "sandbox.runtime.selftest", "runtime", runtimeID, map[string]any{"status": status}); auditErr != nil {
+	if auditErr := s.writeAuditFromContext(ctx, 0, "sandbox.runtime.selftest", "runtime", runtimeID, map[string]any{"status": status}); auditErr != nil {
 		return RuntimeSelftestResponse{}, auditErr
 	}
 	resp := RuntimeSelftestResponse{RuntimeID: runtimeID, SelftestStatus: updated.SelftestStatus, RuntimeStatus: updated.Status, Detail: updated.SelftestDetail}
@@ -438,7 +437,7 @@ func (s *Service) RegisterTool(ctx context.Context, req ToolRequest) (Tool, erro
 	}); err != nil {
 		return Tool{}, err
 	}
-	return tool, s.writeAudit(ctx, 0, 0, audit.ActorRoleSystem, "sandbox.tool.upsert", "tool", tool.ID, map[string]any{"code": tool.Code})
+	return tool, s.writeAuditFromContext(ctx, 0, "sandbox.tool.upsert", "tool", tool.ID, map[string]any{"code": tool.Code})
 }
 
 // ListTools 查询平台已登记工具列表。
@@ -473,7 +472,7 @@ func (s *Service) UpsertQuota(ctx context.Context, quota TenantQuota) (TenantQuo
 	}); err != nil {
 		return TenantQuota{}, err
 	}
-	return out, s.writeAudit(ctx, quota.TenantID, 0, audit.ActorRoleSystem, "sandbox.quota.upsert", "tenant_quota", quota.TenantID, nil)
+	return out, s.writeAuditFromContext(ctx, quota.TenantID, "sandbox.quota.upsert", "tenant_quota", quota.TenantID, nil)
 }
 
 // applyBuiltinCapabilityDefault 为声明式 L2 命令运行时补齐内置能力实现键,避免 capability_impl 与清单重复配置。

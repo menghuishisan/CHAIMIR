@@ -7,7 +7,9 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"time"
 
+	"chaimir/internal/contracts"
 	"chaimir/internal/platform/audit"
 	"chaimir/internal/platform/config"
 	"chaimir/internal/platform/ids"
@@ -25,10 +27,9 @@ const (
 	shareCodeLength       = 18
 )
 
-// objectStorage 描述 M4 读取和写入仿真包 bundle 所需的对象存储能力。
+// objectStorage 描述 M4 写入仿真包 bundle 所需的对象存储能力。
 type objectStorage interface {
 	Put(ctx context.Context, bucket, key string, r io.Reader, size int64, contentType string) error
-	Get(ctx context.Context, bucket, key string) (io.ReadCloser, error)
 	BucketCode() string
 }
 
@@ -57,6 +58,7 @@ type Service struct {
 	storage  objectStorage
 	files    fileService
 	audit    audit.Writer
+	identity contracts.IdentityService
 	wsHub    *ws.Hub
 	backends BackendRegistry
 }
@@ -69,6 +71,7 @@ type ServiceDeps struct {
 	Storage         *storage.Storage
 	FileService     storage.Service
 	Audit           audit.Writer
+	Identity        contracts.IdentityService
 	WSHub           *ws.Hub
 	BackendAdapters BackendRegistry
 }
@@ -90,13 +93,63 @@ func NewService(deps ServiceDeps) (*Service, error) {
 	if deps.Audit == nil {
 		return nil, fmt.Errorf("sim service 缺少审计写入器")
 	}
+	if deps.Identity == nil {
+		return nil, fmt.Errorf("sim service 缺少身份读取契约")
+	}
 	if deps.BackendAdapters == nil {
 		deps.BackendAdapters = BackendRegistry{}
 	}
-	return &Service{store: deps.Store, ids: deps.IDs, upload: deps.Upload, storage: deps.Storage, files: deps.FileService, audit: deps.Audit, wsHub: deps.WSHub, backends: deps.BackendAdapters}, nil
+	return &Service{store: deps.Store, ids: deps.IDs, upload: deps.Upload, storage: deps.Storage, files: deps.FileService, audit: deps.Audit, identity: deps.Identity, wsHub: deps.WSHub, backends: deps.BackendAdapters}, nil
 }
 
-// storeBundle 通过统一文件服务规划对象路径、执行扫描并写入对象存储。
+// IssueBundleDownloadGrant 为已上架仿真包签发短时下载授权,让对象下载走统一文件服务边界。
+func (s *Service) IssueBundleDownloadGrant(ctx context.Context, accountID int64, code, version string) (BundleDownloadGrantDTO, error) {
+	if accountID <= 0 {
+		return BundleDownloadGrantDTO{}, apperr.ErrUnauthorized
+	}
+	pkg, err := s.loadPackage(ctx, code, version)
+	if err != nil {
+		return BundleDownloadGrantDTO{}, err
+	}
+	if pkg.Status != PackageStatusPublished {
+		return BundleDownloadGrantDTO{}, apperr.ErrSimPackageUnavailable
+	}
+	ref, err := storage.ParseObjectRef(pkg.BundleKey)
+	if err != nil {
+		return BundleDownloadGrantDTO{}, apperr.ErrSimBundleUnreadable.WithCause(err)
+	}
+	ownerTenantID, err := tenantIDFromBundleKey(ref.Key)
+	if err != nil {
+		return BundleDownloadGrantDTO{}, err
+	}
+	token, grant, err := s.files.IssueDownloadGrant(storage.IssueDownloadGrantRequest{
+		TenantID:     ownerTenantID,
+		AccountID:    accountID,
+		ObjectRef:    pkg.BundleKey,
+		Module:       simModuleName,
+		ResourceType: simBundleResourceType,
+		ResourceID:   ids.Format(pkg.ID),
+	})
+	if err != nil {
+		return BundleDownloadGrantDTO{}, apperr.ErrSimBundleUnreadable.WithCause(err)
+	}
+	return BundleDownloadGrantDTO{Token: token, Grant: grant, BundleHash: pkg.BundleHash, ExpiresAt: grant.ExpiresAt.Format(time.RFC3339)}, nil
+}
+
+// tenantIDFromBundleKey 从统一对象 key 的首段解析上传租户,用于全局包的下载授权边界。
+func tenantIDFromBundleKey(key string) (int64, error) {
+	parts := strings.Split(strings.TrimSpace(key), "/")
+	if len(parts) < 4 || parts[1] != simModuleName || parts[2] != simBundleResourceType {
+		return 0, apperr.ErrSimBundleUnreadable
+	}
+	tenantID, ok := ids.Parse(parts[0])
+	if !ok {
+		return 0, apperr.ErrSimBundleUnreadable
+	}
+	return tenantID, nil
+}
+
+// storeBundle 通过统一文件服务执行扫描并规划对象引用。
 func (s *Service) storeBundle(ctx context.Context, tenantID, accountID, packageID int64, input BundleInput) (string, string, ValidationReport, error) {
 	limits := upload.ArchiveLimits{MaxFiles: s.upload.SimBundleMaxFiles, MaxUnpackedBytes: s.upload.SimBundleMaxUnpackedBytes}
 	bundleHash, staticScan, err := analyzeBundle(input, limits)
@@ -107,6 +160,15 @@ func (s *Service) storeBundle(ctx context.Context, tenantID, accountID, packageI
 	if staticScan.Status != validationPassed {
 		return "", bundleHash, report, apperr.ErrSimPackageValidationFailed
 	}
+	plan, err := s.planBundleObject(ctx, tenantID, accountID, packageID, input)
+	if err != nil {
+		return "", bundleHash, report, err
+	}
+	return plan.ObjectRef, bundleHash, report, nil
+}
+
+// planBundleObject 规划 bundle 对象引用,调用方在数据库侧前置校验后再执行实际上传。
+func (s *Service) planBundleObject(ctx context.Context, tenantID, accountID, packageID int64, input BundleInput) (storage.UploadPlan, error) {
 	plan, err := s.files.PlanUpload(ctx, storage.PlanUploadRequest{
 		TenantID:        tenantID,
 		AccountID:       accountID,
@@ -124,12 +186,26 @@ func (s *Service) storeBundle(ctx context.Context, tenantID, accountID, packageI
 		ScanPolicy:      upload.ScanPolicy{Required: s.upload.VirusScanRequired},
 	})
 	if err != nil {
-		return "", bundleHash, report, apperr.ErrSimBundleUnreadable.WithCause(err)
+		return storage.UploadPlan{}, apperr.ErrSimBundleUnreadable.WithCause(err)
 	}
+	return plan, nil
+}
+
+// uploadBundleObject 写入已规划的 bundle 对象。
+func (s *Service) uploadBundleObject(ctx context.Context, plan storage.UploadPlan, input BundleInput) error {
 	if err := s.storage.Put(ctx, plan.Bucket, plan.Key, bytes.NewReader(input.Data), int64(len(input.Data)), input.ContentType); err != nil {
-		return "", bundleHash, report, apperr.ErrSimBundleUnreadable.WithCause(err)
+		return apperr.ErrSimBundleUnreadable.WithCause(err)
 	}
-	return plan.ObjectRef, bundleHash, report, nil
+	return nil
+}
+
+// uploadPlannedBundle 解析统一对象引用并写入已被数据库接受的 bundle。
+func (s *Service) uploadPlannedBundle(ctx context.Context, objectRef string, input BundleInput) error {
+	ref, err := storage.ParseObjectRef(objectRef)
+	if err != nil {
+		return apperr.ErrSimBundleUnreadable.WithCause(err)
+	}
+	return s.uploadBundleObject(ctx, storage.UploadPlan{Bucket: ref.Bucket, Key: ref.Key}, input)
 }
 
 // simBundleKind 校验仿真包只能是 ZIP/TAR 归档。

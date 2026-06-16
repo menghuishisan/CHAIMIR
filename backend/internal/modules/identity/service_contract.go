@@ -6,6 +6,7 @@ import (
 
 	"chaimir/internal/contracts"
 	"chaimir/internal/platform/pagex"
+	"chaimir/internal/platform/tenant"
 	"chaimir/pkg/apperr"
 )
 
@@ -17,9 +18,15 @@ func (s *Service) GetAccount(ctx context.Context, accountID int64) (contracts.Ac
 		if err != nil {
 			return err
 		}
+		if err := ensureAccountVisibleInContext(ctx, row.TenantID); err != nil {
+			return err
+		}
 		account = row
 		return nil
 	}); err != nil {
+		if appErr, ok := apperr.As(err); ok {
+			return contracts.AccountInfo{}, appErr
+		}
 		return contracts.AccountInfo{}, apperr.ErrNotFound.WithCause(err)
 	}
 	phone, err := s.decryptPhone(account.PhoneEnc)
@@ -37,9 +44,17 @@ func (s *Service) BatchGetAccounts(ctx context.Context, accountIDs []int64) ([]c
 		if err != nil {
 			return err
 		}
+		for _, row := range rows {
+			if err := ensureAccountVisibleInContext(ctx, row.TenantID); err != nil {
+				return err
+			}
+		}
 		accounts = rows
 		return nil
 	}); err != nil {
+		if appErr, ok := apperr.As(err); ok {
+			return nil, appErr
+		}
 		return nil, apperr.ErrInternal.WithCause(err)
 	}
 	out := make([]contracts.AccountInfo, 0, len(accounts))
@@ -168,7 +183,7 @@ func (s *Service) QueryAuditLogs(ctx context.Context, query contracts.AuditQuery
 	var rows []AuditLogRow
 	var total int64
 	if err := s.store.PrivilegedTx(ctx, func(ctx context.Context, tx TxStore) error {
-		list, n, err := tx.QueryAuditLogs(ctx, AuditQueryInput{TenantID: query.TenantID, ActorID: query.ActorID, Action: query.Action, TargetType: query.TargetType, From: query.From, To: query.To, Page: query.Page, Size: query.Size})
+		list, n, err := tx.QueryAuditLogs(ctx, AuditQueryInput{TenantID: auditTenantFilter(query), ActorID: query.ActorID, Action: query.Action, TargetType: query.TargetType, From: query.From, To: query.To, Page: query.Page, Size: query.Size})
 		if err != nil {
 			return err
 		}
@@ -182,4 +197,24 @@ func (s *Service) QueryAuditLogs(ctx context.Context, query contracts.AuditQuery
 		out = append(out, contracts.AuditLogEntry{ID: row.ID, TenantID: row.TenantID, ActorID: row.ActorID, ActorRole: row.ActorRole, Action: row.Action, TargetType: row.TargetType, TargetID: row.TargetID, Detail: row.Detail, IP: row.IP, TraceID: row.TraceID, CreatedAt: row.CreatedAt})
 	}
 	return contracts.AuditQueryResult{List: out, Total: total, Page: query.Page, Size: query.Size}, nil
+}
+
+// ensureAccountVisibleInContext 用调用方上下文收敛账号摘要读取范围,避免跨租户 ID 枚举。
+func ensureAccountVisibleInContext(ctx context.Context, accountTenantID int64) error {
+	id, ok := tenant.FromContext(ctx)
+	if !ok || id.IsPlatform {
+		return nil
+	}
+	if id.TenantID <= 0 || id.TenantID != accountTenantID {
+		return apperr.ErrCrossTenant
+	}
+	return nil
+}
+
+// auditTenantFilter 把平台级审计范围转换为 repo 层哨兵值,零值仍保留聚合层全租户查询语义。
+func auditTenantFilter(query contracts.AuditQuery) int64 {
+	if query.IncludePlatform {
+		return -1
+	}
+	return query.TenantID
 }

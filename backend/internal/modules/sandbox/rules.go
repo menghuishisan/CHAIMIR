@@ -171,11 +171,24 @@ func validateStateTransition(from, to int16) error {
 	}
 	allowed := map[int16]map[int16]struct{}{
 		SandboxStatusCreating: {
+			SandboxStatusReady:     {},
+			SandboxStatusRecycling: {},
+			SandboxStatusFailed:    {},
+		},
+		SandboxStatusReady: {
 			SandboxStatusRunning:   {},
+			SandboxStatusPaused:    {},
 			SandboxStatusRecycling: {},
 			SandboxStatusFailed:    {},
 		},
 		SandboxStatusRunning: {
+			SandboxStatusIdle:      {},
+			SandboxStatusPaused:    {},
+			SandboxStatusRecycling: {},
+			SandboxStatusFailed:    {},
+		},
+		SandboxStatusIdle: {
+			SandboxStatusRunning:   {},
 			SandboxStatusPaused:    {},
 			SandboxStatusRecycling: {},
 			SandboxStatusFailed:    {},

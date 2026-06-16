@@ -25,6 +25,10 @@ func (s *Service) QueryAuditLogsForCurrent(ctx context.Context, req AuditQueryRe
 		Page:       req.Page,
 		Size:       req.Size,
 	}
+	if id.IsPlatform {
+		query.IncludePlatform = true
+		query.TenantID = 0
+	}
 	if !id.IsPlatform {
 		if id.TenantID <= 0 || id.AccountID <= 0 {
 			return AuditListResponse{}, apperr.ErrForbidden
