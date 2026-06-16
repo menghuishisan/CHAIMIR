@@ -72,33 +72,63 @@ func (s *Service) executeTask(ctx context.Context, task JudgeTask) (JudgeExecuti
 	if task.InputSnapshot.JudgerType == JudgerTypeManual {
 		return JudgeExecutionResult{}, apperr.ErrJudgeTaskStateInvalid
 	}
+	executionTask, err := s.taskWithExecutionExpectation(ctx, task)
+	if err != nil {
+		return JudgeExecutionResult{}, err
+	}
 	if !needsSandbox(task) {
-		result, handled, err := s.executeJudgerStrategy(ctx, task, 0)
+		result, handled, err := s.executeJudgerStrategy(ctx, executionTask, 0)
 		if handled && err != nil {
 			return JudgeExecutionResult{}, err
 		}
 		if handled {
-			return normalizeExecutionResult(result, task.InputSnapshot.MaxScore, s.cfg.ResultDetailsMaxBytes)
+			return normalizeExecutionResult(result, executionTask.InputSnapshot.MaxScore, s.cfg.ResultDetailsMaxBytes)
 		}
 	}
-	sandboxID, fresh, err := s.resolveSandbox(ctx, task)
+	sandboxID, fresh, err := s.resolveSandbox(ctx, executionTask)
 	if err != nil {
 		return JudgeExecutionResult{}, err
 	}
 	if fresh {
-		defer s.destroyJudgeSandbox(ctx, task, sandboxID)
+		defer s.destroyJudgeSandbox(ctx, executionTask, sandboxID)
 	}
-	if result, handled, err := s.executeJudgerStrategy(ctx, task, sandboxID); handled {
+	if result, handled, err := s.executeJudgerStrategy(ctx, executionTask, sandboxID); handled {
 		if err != nil {
 			return JudgeExecutionResult{}, err
 		}
 		result.JudgeSandboxRef = judgeSandboxRef(sandboxID)
-		return normalizeExecutionResult(result, task.InputSnapshot.MaxScore, s.cfg.ResultDetailsMaxBytes)
+		return normalizeExecutionResult(result, executionTask.InputSnapshot.MaxScore, s.cfg.ResultDetailsMaxBytes)
 	}
-	if task.InputSnapshot.JudgerType != JudgerTypeTestcase && task.InputSnapshot.JudgerType != JudgerTypeStaticScan {
+	if executionTask.InputSnapshot.JudgerType != JudgerTypeTestcase && executionTask.InputSnapshot.JudgerType != JudgerTypeStaticScan {
 		return JudgeExecutionResult{}, apperr.ErrJudgerConfigInvalid
 	}
-	return s.runJudgeCommand(ctx, task, sandboxID)
+	return s.runJudgeCommand(ctx, executionTask, sandboxID)
+}
+
+// taskWithExecutionExpectation 为 J2/J5 执行期装载 M5 全量配置,但不改变已持久化的 input_snapshot。
+func (s *Service) taskWithExecutionExpectation(ctx context.Context, task JudgeTask) (JudgeTask, error) {
+	if task.InputSnapshot.JudgerType != JudgerTypeOnchainAssert && task.InputSnapshot.JudgerType != JudgerTypeSimCheckpoint {
+		return task, nil
+	}
+	if s.content == nil {
+		return JudgeTask{}, apperr.ErrJudgeSpecUnavailable
+	}
+	spec, err := s.content.GetJudgeSpec(ctx, task.TenantID, task.InputSnapshot.ItemCode, task.InputSnapshot.ItemVersion)
+	if err != nil {
+		return JudgeTask{}, apperr.ErrJudgeSpecUnavailable.WithCause(err)
+	}
+	if strings.TrimSpace(spec.VersionHash) != "" && strings.TrimSpace(spec.VersionHash) != strings.TrimSpace(task.InputSnapshot.VersionHash) {
+		return JudgeTask{}, apperr.ErrJudgeSpecUnavailable
+	}
+	if spec.JudgerCode != "" && spec.JudgerCode != task.InputSnapshot.JudgerCode {
+		return JudgeTask{}, apperr.ErrJudgeSpecUnavailable
+	}
+	expectation, err := s.executionExpectationForJudger(task.InputSnapshot.JudgerType, spec, task.InputSnapshot.Expectation)
+	if err != nil {
+		return JudgeTask{}, err
+	}
+	task.InputSnapshot.Expectation = expectation
+	return task, nil
 }
 
 // needsSandbox 判断判题是否需要 M2 沙箱执行或链能力。
@@ -124,7 +154,7 @@ func (s *Service) resolveSandbox(ctx context.Context, task JudgeTask) (int64, bo
 		if err != nil {
 			return 0, false, apperr.ErrJudgeWorkerFailed.WithCause(err)
 		}
-		if info.SourceRef != task.SourceRef || info.Status == contracts.SandboxStatusDestroyed || info.Status == contracts.SandboxStatusFailed {
+		if info.TenantID != task.TenantID || info.Status == contracts.SandboxStatusDestroyed || info.Status == contracts.SandboxStatusFailed {
 			return 0, false, apperr.ErrJudgeTaskStateInvalid
 		}
 		return id, false, nil

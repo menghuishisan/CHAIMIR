@@ -50,6 +50,11 @@ SELECT id, tenant_id, judger_id, source_ref, submitter_id, problem_ref, code_sto
 FROM judge_task
 WHERE tenant_id = $1 AND id = $2;
 
+-- name: GetJudgeTaskBySourceRef :one
+SELECT id, tenant_id, judger_id, source_ref, submitter_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, last_error, created_at, updated_at
+FROM judge_task
+WHERE tenant_id = $1 AND source_ref = $2;
+
 -- name: GetJudgeTaskWithResult :one
 SELECT
     t.id, t.tenant_id, t.judger_id, t.source_ref, t.submitter_id, t.problem_ref, t.code_storage_key, t.code_hash,
@@ -63,6 +68,12 @@ WHERE t.tenant_id = $1 AND t.id = $2;
 SELECT id, tenant_id, judger_id, source_ref, submitter_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, last_error, created_at, updated_at
 FROM judge_task
 WHERE tenant_id = $1 AND source_ref = $2
+ORDER BY created_at DESC, id DESC;
+
+-- name: ListRecentJudgeTasksBySubmitterProblem :many
+SELECT id, tenant_id, judger_id, source_ref, submitter_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, last_error, created_at, updated_at
+FROM judge_task
+WHERE tenant_id = $1 AND submitter_id = $2 AND problem_ref = $3 AND created_at >= now() - make_interval(secs => $4::int)
 ORDER BY created_at DESC, id DESC;
 
 -- name: ListJudgeTasks :many

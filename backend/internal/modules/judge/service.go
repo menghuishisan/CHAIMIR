@@ -3,6 +3,7 @@ package judge
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -22,6 +23,8 @@ import (
 	"chaimir/pkg/apperr"
 	"chaimir/pkg/logging"
 	"chaimir/pkg/snowflake"
+
+	"github.com/jackc/pgx/v5"
 )
 
 // objectStorage 描述 M3 读取提交代码和判题套件所需的对象存储能力。
@@ -211,6 +214,11 @@ func (s *Service) SubmitJudgeTask(ctx context.Context, req contracts.JudgeSubmit
 	if err := validateSubmitRequest(req); err != nil {
 		return contracts.JudgeTaskInfo{}, err
 	}
+	if existing, ok, err := s.findExistingTaskBySourceRef(ctx, req.TenantID, req.SourceRef); err != nil {
+		return contracts.JudgeTaskInfo{}, err
+	} else if ok {
+		return contractTaskInfoFromModel(JudgeTaskInfo{Task: existing, Existing: true}), nil
+	}
 	j, err := s.loadAvailableJudger(ctx, req.JudgerCode)
 	if err != nil {
 		return contracts.JudgeTaskInfo{}, err
@@ -293,6 +301,23 @@ func (s *Service) SubmitJudgeTask(ctx context.Context, req contracts.JudgeSubmit
 		return contracts.JudgeTaskInfo{}, err
 	}
 	return contractTaskInfoFromModel(JudgeTaskInfo{Task: task}), nil
+}
+
+// findExistingTaskBySourceRef 在读取对象存储和构建指纹前完成提交幂等短路。
+func (s *Service) findExistingTaskBySourceRef(ctx context.Context, tenantID int64, sourceRef string) (JudgeTask, bool, error) {
+	var existing JudgeTask
+	err := s.store.TenantTx(ctx, tenantID, func(ctx context.Context, tx TxStore) error {
+		var err error
+		existing, err = tx.GetJudgeTaskBySourceRef(ctx, tenantID, sourceRef)
+		return err
+	})
+	if err == nil {
+		return existing, true, nil
+	}
+	if errors.Is(err, pgx.ErrNoRows) {
+		return JudgeTask{}, false, nil
+	}
+	return JudgeTask{}, false, apperr.ErrJudgeTaskEnqueueFailed.WithCause(err)
 }
 
 // GetJudgeTask 读取任务状态与结果摘要。
@@ -492,13 +517,13 @@ func (s *Service) checkSubmitRate(ctx context.Context, task JudgeTask) error {
 	var recent []JudgeTask
 	if err := s.store.TenantTx(ctx, task.TenantID, func(ctx context.Context, tx TxStore) error {
 		var err error
-		recent, err = tx.ListJudgeTasksBySourceRef(ctx, task.TenantID, task.SourceRef)
+		recent, err = tx.ListRecentJudgeTasksBySubmitterProblem(ctx, task.TenantID, task.SubmitterID, task.ProblemRef, int32(s.cfg.SubmitRateLimitSec))
 		return err
 	}); err != nil {
 		return apperr.ErrJudgeTaskEnqueueFailed.WithCause(err)
 	}
 	for _, item := range recent {
-		if item.SubmitterID == task.SubmitterID && item.ProblemRef == task.ProblemRef && time.Since(item.CreatedAt) < time.Duration(s.cfg.SubmitRateLimitSec)*time.Second {
+		if item.SourceRef != task.SourceRef && time.Since(item.CreatedAt) < time.Duration(s.cfg.SubmitRateLimitSec)*time.Second {
 			return apperr.ErrJudgeSubmitRateLimited
 		}
 	}

@@ -75,8 +75,8 @@ type TxStore interface {
 	GetSSOConfig(ctx context.Context, tenantID int64, typ int16) (SSOConfig, error)
 	ListSSOConfigs(ctx context.Context, tenantID int64) ([]SSOConfig, error)
 	CreateImportPreview(ctx context.Context, input CreateImportPreviewInput) (ImportPreview, error)
-	GetImportPreview(ctx context.Context, tenantID, id int64) (ImportPreview, error)
-	MarkImportPreviewSubmitted(ctx context.Context, tenantID, id int64) error
+	GetImportPreview(ctx context.Context, tenantID, operatorID, id int64) (ImportPreview, error)
+	MarkImportPreviewSubmitted(ctx context.Context, tenantID, operatorID, id int64) error
 	CreateImportBatch(ctx context.Context, input CreateImportBatchInput) (ImportBatch, error)
 	ListImportBatches(ctx context.Context, tenantID int64) ([]ImportBatch, error)
 	WriteAudit(ctx context.Context, input WriteAuditInput) error

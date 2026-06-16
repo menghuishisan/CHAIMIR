@@ -273,8 +273,21 @@ type ImportCommitRequest struct {
 }
 
 type AccountImportCommitResponse struct {
-	Batch           ImportBatch               `json:"batch"`
+	Batch           ImportBatchDTO            `json:"batch"`
 	ActivationCodes []ImportActivationCodeDTO `json:"activation_codes,omitempty"`
+}
+
+type ImportBatchDTO struct {
+	ID         int64  `json:"id,string"`
+	TenantID   int64  `json:"tenant_id,string"`
+	OperatorID int64  `json:"operator_id,string"`
+	TargetType int16  `json:"target_type"`
+	FileName   string `json:"file_name"`
+	Total      int32  `json:"total"`
+	Success    int32  `json:"success"`
+	Failed     int32  `json:"failed"`
+	Status     int16  `json:"status"`
+	CreatedAt  string `json:"created_at"`
 }
 
 type ImportActivationCodeDTO struct {

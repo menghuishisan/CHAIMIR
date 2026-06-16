@@ -435,11 +435,11 @@ RETURNING id, tenant_id, operator_id, target_type, file_name, rows, preview_resu
 -- name: GetImportPreview :one
 SELECT id, tenant_id, operator_id, target_type, file_name, rows, preview_result, status, expire_at, submitted_at, created_at
 FROM import_preview
-WHERE id = $1 AND tenant_id = $2;
+WHERE id = $1 AND tenant_id = $2 AND operator_id = $3;
 
--- name: MarkImportPreviewSubmitted :exec
+-- name: MarkImportPreviewSubmitted :execrows
 UPDATE import_preview SET status = 2, submitted_at = now()
-WHERE id = $1 AND tenant_id = $2 AND status = 1;
+WHERE id = $1 AND tenant_id = $2 AND operator_id = $3 AND status = 1;
 
 -- name: CreateImportBatch :one
 INSERT INTO import_batch (id, tenant_id, operator_id, target_type, file_name, total, success, failed, error_detail, status, created_at)

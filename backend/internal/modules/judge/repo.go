@@ -32,8 +32,10 @@ type TxStore interface {
 	UpdateJudgerSelftest(ctx context.Context, id int64, selftestStatus, status int16) (Judger, error)
 	CreateJudgeTask(ctx context.Context, task JudgeTask) (JudgeTask, error)
 	GetJudgeTask(ctx context.Context, tenantID, taskID int64) (JudgeTask, error)
+	GetJudgeTaskBySourceRef(ctx context.Context, tenantID int64, sourceRef string) (JudgeTask, error)
 	GetJudgeTaskInfo(ctx context.Context, tenantID, taskID int64) (JudgeTaskInfo, error)
 	ListJudgeTasksBySourceRef(ctx context.Context, tenantID int64, sourceRef string) ([]JudgeTask, error)
+	ListRecentJudgeTasksBySubmitterProblem(ctx context.Context, tenantID, submitterID int64, problemRef string, windowSeconds int32) ([]JudgeTask, error)
 	ListJudgeTasks(ctx context.Context, tenantID int64, sourceRef string, pendingManual bool, limit, offset int32) ([]JudgeTaskInfo, int64, error)
 	CancelQueuedJudgeTask(ctx context.Context, tenantID, taskID int64) (JudgeTask, error)
 	ResetJudgeTaskForRejudge(ctx context.Context, tenantID, taskID int64, snapshot JudgeInputSnapshot) (JudgeTask, error)
@@ -201,6 +203,15 @@ func (s *txStore) GetJudgeTask(ctx context.Context, tenantID, taskID int64) (Jud
 	return taskFromRow(row)
 }
 
+// GetJudgeTaskBySourceRef 按幂等来源读取已存在任务。
+func (s *txStore) GetJudgeTaskBySourceRef(ctx context.Context, tenantID int64, sourceRef string) (JudgeTask, error) {
+	row, err := s.q.GetJudgeTaskBySourceRef(ctx, sqlcgen.GetJudgeTaskBySourceRefParams{TenantID: tenantID, SourceRef: sourceRef})
+	if err != nil {
+		return JudgeTask{}, err
+	}
+	return taskFromRow(row)
+}
+
 // GetJudgeTaskInfo 查询任务及其结果。
 func (s *txStore) GetJudgeTaskInfo(ctx context.Context, tenantID, taskID int64) (JudgeTaskInfo, error) {
 	row, err := s.q.GetJudgeTaskWithResult(ctx, sqlcgen.GetJudgeTaskWithResultParams{TenantID: tenantID, ID: taskID})
@@ -213,6 +224,15 @@ func (s *txStore) GetJudgeTaskInfo(ctx context.Context, tenantID, taskID int64) 
 // ListJudgeTasksBySourceRef 查询来源下所有任务。
 func (s *txStore) ListJudgeTasksBySourceRef(ctx context.Context, tenantID int64, sourceRef string) ([]JudgeTask, error) {
 	rows, err := s.q.ListJudgeTasksBySourceRef(ctx, sqlcgen.ListJudgeTasksBySourceRefParams{TenantID: tenantID, SourceRef: sourceRef})
+	if err != nil {
+		return nil, err
+	}
+	return tasksFromRows(rows)
+}
+
+// ListRecentJudgeTasksBySubmitterProblem 查询同账号同题限频窗口内的提交任务。
+func (s *txStore) ListRecentJudgeTasksBySubmitterProblem(ctx context.Context, tenantID, submitterID int64, problemRef string, windowSeconds int32) ([]JudgeTask, error) {
+	rows, err := s.q.ListRecentJudgeTasksBySubmitterProblem(ctx, sqlcgen.ListRecentJudgeTasksBySubmitterProblemParams{TenantID: tenantID, SubmitterID: submitterID, ProblemRef: problemRef, Column4: windowSeconds})
 	if err != nil {
 		return nil, err
 	}

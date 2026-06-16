@@ -204,7 +204,7 @@ func (s *Service) ResetAccountPasswordByAdmin(ctx context.Context, accountID int
 		}
 		return tx.RevokeAccountSessions(ctx, id.TenantID, accountID)
 	}); err != nil {
-		return apperr.ErrInternal.WithCause(err)
+		return apperr.AsAppError(err)
 	}
 	return s.auditAccount(ctx, id, "account.password.reset", accountID)
 }
@@ -304,7 +304,7 @@ func (s *Service) BatchUpdateAccountStatusByAdmin(ctx context.Context, req Batch
 }
 
 // ListImportBatchesByAdmin 读取账号导入批次历史。
-func (s *Service) ListImportBatchesByAdmin(ctx context.Context) ([]ImportBatch, error) {
+func (s *Service) ListImportBatchesByAdmin(ctx context.Context) ([]ImportBatchDTO, error) {
 	id, err := requireTenantRole(ctx, s, contracts.RoleSchoolAdmin)
 	if err != nil {
 		return nil, err
@@ -320,7 +320,11 @@ func (s *Service) ListImportBatchesByAdmin(ctx context.Context) ([]ImportBatch, 
 	}); err != nil {
 		return nil, apperr.ErrInternal.WithCause(err)
 	}
-	return rows, nil
+	out := make([]ImportBatchDTO, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, ToImportBatchDTO(row))
+	}
+	return out, nil
 }
 
 // requireTenantRole 校验当前租户账号具备指定角色。

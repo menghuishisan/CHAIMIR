@@ -7,6 +7,7 @@ import (
 	"encoding/csv"
 	"errors"
 	"fmt"
+	"log/slog"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -19,6 +20,7 @@ import (
 	"chaimir/internal/platform/upload"
 	"chaimir/pkg/apperr"
 	"chaimir/pkg/crypto"
+	"chaimir/pkg/logging"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/xuri/excelize/v2"
@@ -189,7 +191,7 @@ func (s *Service) CommitAccountImport(ctx context.Context, req ImportCommitReque
 	var batch ImportBatch
 	activationCodes := make([]ImportActivationCodeDTO, 0)
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
-		preview, err := tx.GetImportPreview(ctx, id.TenantID, req.PreviewID)
+		preview, err := tx.GetImportPreview(ctx, id.TenantID, id.AccountID, req.PreviewID)
 		if err != nil {
 			return err
 		}
@@ -245,6 +247,10 @@ func (s *Service) CommitAccountImport(ctx context.Context, req ImportCommitReque
 			})
 			if err != nil {
 				failed++
+				if idx := row.Line - 2; idx >= 0 && idx < len(rows) {
+					rows[idx].Error = "账号写入失败,请检查是否与现有账号冲突"
+				}
+				logging.ErrorContext(ctx, "账号导入行写入失败", err.Error(), slog.Int64("tenant_id", id.TenantID), slog.Int("line", row.Line))
 				continue
 			}
 			if strings.TrimSpace(row.InitialPassword) == "" {
@@ -265,7 +271,7 @@ func (s *Service) CommitAccountImport(ctx context.Context, req ImportCommitReque
 			success++
 		}
 		// 标记预览已提交后再写批次,防止同一个 preview_id 被重复消费。
-		if err := tx.MarkImportPreviewSubmitted(ctx, id.TenantID, req.PreviewID); err != nil {
+		if err := tx.MarkImportPreviewSubmitted(ctx, id.TenantID, id.AccountID, req.PreviewID); err != nil {
 			return err
 		}
 		errorDetail, err := jsonx.AnyBytes(rows, apperr.ErrInternal)
@@ -307,7 +313,7 @@ func (s *Service) CommitAccountImport(ctx context.Context, req ImportCommitReque
 	}); err != nil {
 		return AccountImportCommitResponse{}, apperr.AsAppError(err)
 	}
-	return AccountImportCommitResponse{Batch: batch, ActivationCodes: activationCodes}, nil
+	return AccountImportCommitResponse{Batch: ToImportBatchDTO(batch), ActivationCodes: activationCodes}, nil
 }
 
 // applyAccountImportOpeningRules 根据租户开通模式校验初始密码和激活码路径。

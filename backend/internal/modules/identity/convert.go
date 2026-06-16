@@ -135,3 +135,19 @@ func ToMajorDTO(major Major) MajorDTO {
 func ToClassDTO(class Class) ClassDTO {
 	return ClassDTO{ID: class.ID, TenantID: class.TenantID, MajorID: class.MajorID, Name: class.Name, EnrollmentYear: class.EnrollmentYear, Status: class.Status}
 }
+
+// ToImportBatchDTO 把导入批次领域快照转换为稳定 HTTP DTO,避免响应暴露 Go 内部字段名。
+func ToImportBatchDTO(batch ImportBatch) ImportBatchDTO {
+	return ImportBatchDTO{
+		ID:         batch.ID,
+		TenantID:   batch.TenantID,
+		OperatorID: batch.OperatorID,
+		TargetType: batch.TargetType,
+		FileName:   batch.FileName,
+		Total:      batch.Total,
+		Success:    batch.Success,
+		Failed:     batch.Failed,
+		Status:     batch.Status,
+		CreatedAt:  batch.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
+	}
+}

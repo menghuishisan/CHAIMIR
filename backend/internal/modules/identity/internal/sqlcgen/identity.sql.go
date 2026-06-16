@@ -1168,16 +1168,17 @@ func (q *Queries) GetAuthSessionByRefreshHashPrivileged(ctx context.Context, ref
 const getImportPreview = `-- name: GetImportPreview :one
 SELECT id, tenant_id, operator_id, target_type, file_name, rows, preview_result, status, expire_at, submitted_at, created_at
 FROM import_preview
-WHERE id = $1 AND tenant_id = $2
+WHERE id = $1 AND tenant_id = $2 AND operator_id = $3
 `
 
 type GetImportPreviewParams struct {
-	ID       int64 `json:"id"`
-	TenantID int64 `json:"tenant_id"`
+	ID         int64 `json:"id"`
+	TenantID   int64 `json:"tenant_id"`
+	OperatorID int64 `json:"operator_id"`
 }
 
 func (q *Queries) GetImportPreview(ctx context.Context, arg GetImportPreviewParams) (ImportPreview, error) {
-	row := q.db.QueryRow(ctx, getImportPreview, arg.ID, arg.TenantID)
+	row := q.db.QueryRow(ctx, getImportPreview, arg.ID, arg.TenantID, arg.OperatorID)
 	var i ImportPreview
 	err := row.Scan(
 		&i.ID,
@@ -1956,19 +1957,23 @@ func (q *Queries) MajorExists(ctx context.Context, arg MajorExistsParams) (bool,
 	return exists, err
 }
 
-const markImportPreviewSubmitted = `-- name: MarkImportPreviewSubmitted :exec
+const markImportPreviewSubmitted = `-- name: MarkImportPreviewSubmitted :execrows
 UPDATE import_preview SET status = 2, submitted_at = now()
-WHERE id = $1 AND tenant_id = $2 AND status = 1
+WHERE id = $1 AND tenant_id = $2 AND operator_id = $3 AND status = 1
 `
 
 type MarkImportPreviewSubmittedParams struct {
-	ID       int64 `json:"id"`
-	TenantID int64 `json:"tenant_id"`
+	ID         int64 `json:"id"`
+	TenantID   int64 `json:"tenant_id"`
+	OperatorID int64 `json:"operator_id"`
 }
 
-func (q *Queries) MarkImportPreviewSubmitted(ctx context.Context, arg MarkImportPreviewSubmittedParams) error {
-	_, err := q.db.Exec(ctx, markImportPreviewSubmitted, arg.ID, arg.TenantID)
-	return err
+func (q *Queries) MarkImportPreviewSubmitted(ctx context.Context, arg MarkImportPreviewSubmittedParams) (int64, error) {
+	result, err := q.db.Exec(ctx, markImportPreviewSubmitted, arg.ID, arg.TenantID, arg.OperatorID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const markSMSCodeUsed = `-- name: MarkSMSCodeUsed :exec

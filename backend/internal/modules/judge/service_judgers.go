@@ -4,6 +4,7 @@ package judge
 import (
 	"context"
 	"reflect"
+	"sort"
 	"strings"
 
 	"chaimir/internal/contracts"
@@ -11,6 +12,7 @@ import (
 	"chaimir/pkg/apperr"
 	"chaimir/pkg/chainassert"
 	pkgcrypto "chaimir/pkg/crypto"
+	"chaimir/pkg/privacy"
 )
 
 // executeJudgerStrategy 执行不需要容器命令的后端内置判题策略。
@@ -190,7 +192,7 @@ func (s *Service) snapshotExpectationForJudger(typ int16, expectation map[string
 		if !hasDeterministicExpectation(out) {
 			return nil, apperr.ErrJudgerConfigInvalid
 		}
-		return out, nil
+		return summarizeOnchainExpectation(out), nil
 	case JudgerTypeSimCheckpoint:
 		if _, ok := out["checkpoint"]; !ok {
 			return nil, apperr.ErrJudgerConfigInvalid
@@ -198,7 +200,7 @@ func (s *Service) snapshotExpectationForJudger(typ int16, expectation map[string
 		if !hasDeterministicExpectation(out) {
 			return nil, apperr.ErrJudgerConfigInvalid
 		}
-		return out, nil
+		return summarizeSimCheckpointExpectation(out), nil
 	default:
 		if containsSensitiveExpectationMaterial(out) {
 			return nil, apperr.ErrJudgerConfigInvalid
@@ -212,15 +214,128 @@ func (s *Service) snapshotExpectationForJudger(typ int16, expectation map[string
 	return out, nil
 }
 
+// executionExpectationForJudger 只在 worker 执行期恢复 J2/J5 所需的 M5 全量配置,不写回数据库快照。
+func (s *Service) executionExpectationForJudger(typ int16, spec contracts.ContentJudgeSpec, snapshot map[string]any) (map[string]any, error) {
+	switch typ {
+	case JudgerTypeOnchainAssert:
+		out := cloneExpectationMap(spec.Expectation)
+		if len(sliceValue(out["assertions"])) == 0 {
+			return nil, apperr.ErrJudgerConfigInvalid
+		}
+		if !hasDeterministicExpectation(out) {
+			return nil, apperr.ErrJudgerConfigInvalid
+		}
+		return out, nil
+	case JudgerTypeSimCheckpoint:
+		out := cloneExpectationMap(spec.Expectation)
+		if _, ok := out["checkpoint"]; !ok {
+			return nil, apperr.ErrJudgerConfigInvalid
+		}
+		if !hasDeterministicExpectation(out) {
+			return nil, apperr.ErrJudgerConfigInvalid
+		}
+		return out, nil
+	default:
+		return snapshot, nil
+	}
+}
+
+// summarizeOnchainExpectation 保留链上断言的审计摘要,剥离步骤 payload 和断言标准值。
+func summarizeOnchainExpectation(expectation map[string]any) map[string]any {
+	assertions := sliceValue(expectation["assertions"])
+	out := map[string]any{
+		"assertion_count": len(assertions),
+	}
+	if steps := sliceValue(expectation["chain_steps"]); len(steps) > 0 {
+		out["chain_step_count"] = len(steps)
+	}
+	labels := make([]string, 0, len(assertions))
+	targets := make([]string, 0, len(assertions))
+	operators := make([]string, 0, len(assertions))
+	for _, raw := range assertions {
+		assertion := mapAny(raw)
+		if label := firstNonEmptyString(assertion["expected_label"], assertion["label"], assertion["target"]); label != "" {
+			labels = append(labels, label)
+		}
+		if target := stringValue(assertion["target"]); target != "" {
+			targets = append(targets, target)
+		}
+		if op := stringValue(assertion["op"]); op != "" {
+			operators = append(operators, op)
+		}
+	}
+	if len(labels) > 0 {
+		out["expected_labels"] = labels
+	}
+	if targets = uniqueSortedStrings(targets); len(targets) > 0 {
+		out["targets"] = targets
+	}
+	if operators = uniqueSortedStrings(operators); len(operators) > 0 {
+		out["operators"] = operators
+	}
+	return out
+}
+
+// summarizeSimCheckpointExpectation 只保存检查点标签和形态摘要,不保存标准检查点结构。
+func summarizeSimCheckpointExpectation(expectation map[string]any) map[string]any {
+	out := map[string]any{}
+	if label := stringValue(expectation["expected_label"]); label != "" {
+		out["expected_label"] = label
+	}
+	checkpoint := expectation["checkpoint"]
+	switch typed := checkpoint.(type) {
+	case map[string]any:
+		out["checkpoint_kind"] = "object"
+		out["checkpoint_field_count"] = len(typed)
+	case []any:
+		out["checkpoint_kind"] = "array"
+		out["checkpoint_item_count"] = len(typed)
+	default:
+		out["checkpoint_kind"] = "scalar"
+	}
+	return out
+}
+
+// cloneExpectationMap 复制 M5 配置顶层 map,避免运行期修改污染契约返回值。
+func cloneExpectationMap(expectation map[string]any) map[string]any {
+	out := make(map[string]any, len(expectation))
+	for k, v := range expectation {
+		out[k] = v
+	}
+	return out
+}
+
+// firstNonEmptyString 选择第一个非空摘要文本。
+func firstNonEmptyString(values ...any) string {
+	for _, value := range values {
+		if text := stringValue(value); text != "" {
+			return text
+		}
+	}
+	return ""
+}
+
+// uniqueSortedStrings 返回去重后的稳定字符串集合,保证快照摘要可重复。
+func uniqueSortedStrings(values []string) []string {
+	set := map[string]struct{}{}
+	for _, value := range values {
+		if value == "" {
+			continue
+		}
+		set[value] = struct{}{}
+	}
+	out := make([]string, 0, len(set))
+	for value := range set {
+		out = append(out, value)
+	}
+	sort.Strings(out)
+	return out
+}
+
 // containsSensitiveExpectationMaterial 保守拒绝命令型判题期望中携带敏感明文。
 func containsSensitiveExpectationMaterial(v any) bool {
 	raw := strings.ToLower(chainassert.ShortJSON(v))
-	for _, key := range []string{"flag_value", "flag_hmac_secret", "private_key", "answer_source", "suite_source"} {
-		if strings.Contains(raw, key) {
-			return true
-		}
-	}
-	return false
+	return privacy.ContainsResultSensitiveText(raw)
 }
 
 // mapAny 读取 map[string]any。

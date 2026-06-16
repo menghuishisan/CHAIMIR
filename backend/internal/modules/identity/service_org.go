@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/csv"
 	"fmt"
+	"log/slog"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -18,6 +19,7 @@ import (
 	"chaimir/internal/platform/timex"
 	"chaimir/internal/platform/upload"
 	"chaimir/pkg/apperr"
+	"chaimir/pkg/logging"
 
 	"github.com/xuri/excelize/v2"
 )
@@ -167,7 +169,7 @@ func (s *Service) CreateMajorByAdmin(ctx context.Context, req MajorRequest) (Maj
 		row = item
 		return s.writeOrgAuditInTx(ctx, tx, id, "org.major.create", "identity.major", row.ID, map[string]any{"department_id": req.DepartmentID})
 	}); err != nil {
-		return MajorDTO{}, apperr.ErrInternal.WithCause(err)
+		return MajorDTO{}, apperr.AsAppError(err)
 	}
 	return ToMajorDTO(row), nil
 }
@@ -193,7 +195,7 @@ func (s *Service) UpdateMajorByAdmin(ctx context.Context, majorID int64, req Maj
 		row = item
 		return s.writeOrgAuditInTx(ctx, tx, id, "org.major.update", "identity.major", majorID, map[string]any{"department_id": req.DepartmentID})
 	}); err != nil {
-		return MajorDTO{}, apperr.ErrInternal.WithCause(err)
+		return MajorDTO{}, apperr.AsAppError(err)
 	}
 	return ToMajorDTO(row), nil
 }
@@ -260,7 +262,7 @@ func (s *Service) CreateClassByAdmin(ctx context.Context, req ClassRequest) (Cla
 		row = item
 		return s.writeOrgAuditInTx(ctx, tx, id, "org.class.create", "identity.class", row.ID, map[string]any{"major_id": req.MajorID, "enrollment_year": req.EnrollmentYear})
 	}); err != nil {
-		return ClassDTO{}, apperr.ErrInternal.WithCause(err)
+		return ClassDTO{}, apperr.AsAppError(err)
 	}
 	return ToClassDTO(row), nil
 }
@@ -286,7 +288,7 @@ func (s *Service) UpdateClassByAdmin(ctx context.Context, classID int64, req Cla
 		row = item
 		return s.writeOrgAuditInTx(ctx, tx, id, "org.class.update", "identity.class", classID, map[string]any{"major_id": req.MajorID, "enrollment_year": req.EnrollmentYear})
 	}); err != nil {
-		return ClassDTO{}, apperr.ErrInternal.WithCause(err)
+		return ClassDTO{}, apperr.AsAppError(err)
 	}
 	return ToClassDTO(row), nil
 }
@@ -390,14 +392,14 @@ func (s *Service) PreviewOrgImportByAdmin(ctx context.Context, req ImportPreview
 }
 
 // CommitOrgImportByAdmin 读取服务端预览并仅提交校验通过的组织结构行。
-func (s *Service) CommitOrgImportByAdmin(ctx context.Context, req ImportCommitRequest) (ImportBatch, error) {
+func (s *Service) CommitOrgImportByAdmin(ctx context.Context, req ImportCommitRequest) (ImportBatchDTO, error) {
 	id, err := requireTenantRole(ctx, s, contracts.RoleSchoolAdmin)
 	if err != nil {
-		return ImportBatch{}, err
+		return ImportBatchDTO{}, err
 	}
 	var batch ImportBatch
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
-		preview, err := tx.GetImportPreview(ctx, id.TenantID, req.PreviewID)
+		preview, err := tx.GetImportPreview(ctx, id.TenantID, id.AccountID, req.PreviewID)
 		if err != nil {
 			return err
 		}
@@ -417,12 +419,16 @@ func (s *Service) CommitOrgImportByAdmin(ctx context.Context, req ImportCommitRe
 			// 只提交预览阶段校验通过的行,数据库唯一约束仍作为并发导入的最后防线。
 			if err := s.createOrgImportRow(ctx, tx, id.TenantID, row); err != nil {
 				failed++
+				if idx := row.Line - 2; idx >= 0 && idx < len(rows) {
+					rows[idx].Error = "组织写入失败,请检查是否与现有组织冲突"
+				}
+				logging.ErrorContext(ctx, "组织导入行写入失败", err.Error(), slog.Int64("tenant_id", id.TenantID), slog.Int("line", row.Line), slog.String("kind", row.Kind))
 				continue
 			}
 			success++
 		}
 		// 提交状态和批次记录在同一事务内完成,保证导入中心历史与预览消费状态一致。
-		if err := tx.MarkImportPreviewSubmitted(ctx, id.TenantID, req.PreviewID); err != nil {
+		if err := tx.MarkImportPreviewSubmitted(ctx, id.TenantID, id.AccountID, req.PreviewID); err != nil {
 			return err
 		}
 		errorDetail, err := jsonx.AnyBytes(rows, apperr.ErrInternal)
@@ -462,9 +468,9 @@ func (s *Service) CommitOrgImportByAdmin(ctx context.Context, req ImportCommitRe
 			TraceID:    entry.TraceID,
 		})
 	}); err != nil {
-		return ImportBatch{}, apperr.AsAppError(err)
+		return ImportBatchDTO{}, apperr.AsAppError(err)
 	}
-	return batch, nil
+	return ToImportBatchDTO(batch), nil
 }
 
 // createOrgImportRow 按导入行类型创建组织结构记录。

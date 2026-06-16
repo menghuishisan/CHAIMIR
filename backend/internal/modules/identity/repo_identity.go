@@ -8,6 +8,7 @@ import (
 	"chaimir/internal/modules/identity/internal/sqlcgen"
 	"chaimir/internal/platform/pgtypex"
 	"chaimir/internal/platform/timex"
+	"chaimir/pkg/apperr"
 
 	"github.com/jackc/pgx/v5/pgtype"
 )
@@ -740,18 +741,25 @@ func (t *txStore) CreateImportPreview(ctx context.Context, input CreateImportPre
 	return ImportPreview{ID: row.ID, TenantID: row.TenantID, OperatorID: row.OperatorID, TargetType: row.TargetType, FileName: row.FileName, Rows: row.Rows, PreviewResult: row.PreviewResult, Status: row.Status, ExpireAt: timex.FromTimestamptz(row.ExpireAt)}, nil
 }
 
-// GetImportPreview 读取导入预览中间态。
-func (t *txStore) GetImportPreview(ctx context.Context, tenantID, id int64) (ImportPreview, error) {
-	row, err := t.q.GetImportPreview(ctx, sqlcgen.GetImportPreviewParams{ID: id, TenantID: tenantID})
+// GetImportPreview 按操作人读取导入预览中间态,防止同租户其他管理员提交不属于自己的预览。
+func (t *txStore) GetImportPreview(ctx context.Context, tenantID, operatorID, id int64) (ImportPreview, error) {
+	row, err := t.q.GetImportPreview(ctx, sqlcgen.GetImportPreviewParams{ID: id, TenantID: tenantID, OperatorID: operatorID})
 	if err != nil {
 		return ImportPreview{}, err
 	}
 	return ImportPreview{ID: row.ID, TenantID: row.TenantID, OperatorID: row.OperatorID, TargetType: row.TargetType, FileName: row.FileName, Rows: row.Rows, PreviewResult: row.PreviewResult, Status: row.Status, ExpireAt: timex.FromTimestamptz(row.ExpireAt)}, nil
 }
 
-// MarkImportPreviewSubmitted 标记导入预览已提交,防止重复提交。
-func (t *txStore) MarkImportPreviewSubmitted(ctx context.Context, tenantID, id int64) error {
-	return t.q.MarkImportPreviewSubmitted(ctx, sqlcgen.MarkImportPreviewSubmittedParams{ID: id, TenantID: tenantID})
+// MarkImportPreviewSubmitted 标记当前操作人的导入预览已提交,防止重复提交和横向消费。
+func (t *txStore) MarkImportPreviewSubmitted(ctx context.Context, tenantID, operatorID, id int64) error {
+	affected, err := t.q.MarkImportPreviewSubmitted(ctx, sqlcgen.MarkImportPreviewSubmittedParams{ID: id, TenantID: tenantID, OperatorID: operatorID})
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return apperr.ErrIdentityImportPreviewExpired
+	}
+	return nil
 }
 
 // CreateImportBatch 写入导入批次结果。

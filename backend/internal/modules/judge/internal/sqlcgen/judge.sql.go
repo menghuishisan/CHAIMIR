@@ -428,6 +428,43 @@ func (q *Queries) GetJudgeTask(ctx context.Context, arg GetJudgeTaskParams) (Jud
 	return i, err
 }
 
+const getJudgeTaskBySourceRef = `-- name: GetJudgeTaskBySourceRef :one
+SELECT id, tenant_id, judger_id, source_ref, submitter_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, last_error, created_at, updated_at
+FROM judge_task
+WHERE tenant_id = $1 AND source_ref = $2
+`
+
+type GetJudgeTaskBySourceRefParams struct {
+	TenantID  int64  `json:"tenant_id"`
+	SourceRef string `json:"source_ref"`
+}
+
+func (q *Queries) GetJudgeTaskBySourceRef(ctx context.Context, arg GetJudgeTaskBySourceRefParams) (JudgeTask, error) {
+	row := q.db.QueryRow(ctx, getJudgeTaskBySourceRef, arg.TenantID, arg.SourceRef)
+	var i JudgeTask
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.JudgerID,
+		&i.SourceRef,
+		&i.SubmitterID,
+		&i.ProblemRef,
+		&i.CodeStorageKey,
+		&i.CodeHash,
+		&i.InputSnapshot,
+		&i.SandboxMode,
+		&i.TargetSandboxRef,
+		&i.Priority,
+		&i.Status,
+		&i.RetryCount,
+		&i.MaxRetries,
+		&i.LastError,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const getJudgeTaskWithResult = `-- name: GetJudgeTaskWithResult :one
 SELECT
     t.id, t.tenant_id, t.judger_id, t.source_ref, t.submitter_id, t.problem_ref, t.code_storage_key, t.code_hash,
@@ -816,6 +853,64 @@ func (q *Queries) ListPendingJudgeOutbox(ctx context.Context, limit int32) ([]Ju
 			&i.Payload,
 			&i.Status,
 			&i.RetryCount,
+			&i.LastError,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listRecentJudgeTasksBySubmitterProblem = `-- name: ListRecentJudgeTasksBySubmitterProblem :many
+SELECT id, tenant_id, judger_id, source_ref, submitter_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, last_error, created_at, updated_at
+FROM judge_task
+WHERE tenant_id = $1 AND submitter_id = $2 AND problem_ref = $3 AND created_at >= now() - make_interval(secs => $4::int)
+ORDER BY created_at DESC, id DESC
+`
+
+type ListRecentJudgeTasksBySubmitterProblemParams struct {
+	TenantID    int64  `json:"tenant_id"`
+	SubmitterID int64  `json:"submitter_id"`
+	ProblemRef  string `json:"problem_ref"`
+	Column4     int32  `json:"column_4"`
+}
+
+func (q *Queries) ListRecentJudgeTasksBySubmitterProblem(ctx context.Context, arg ListRecentJudgeTasksBySubmitterProblemParams) ([]JudgeTask, error) {
+	rows, err := q.db.Query(ctx, listRecentJudgeTasksBySubmitterProblem,
+		arg.TenantID,
+		arg.SubmitterID,
+		arg.ProblemRef,
+		arg.Column4,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []JudgeTask{}
+	for rows.Next() {
+		var i JudgeTask
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.JudgerID,
+			&i.SourceRef,
+			&i.SubmitterID,
+			&i.ProblemRef,
+			&i.CodeStorageKey,
+			&i.CodeHash,
+			&i.InputSnapshot,
+			&i.SandboxMode,
+			&i.TargetSandboxRef,
+			&i.Priority,
+			&i.Status,
+			&i.RetryCount,
+			&i.MaxRetries,
 			&i.LastError,
 			&i.CreatedAt,
 			&i.UpdatedAt,
