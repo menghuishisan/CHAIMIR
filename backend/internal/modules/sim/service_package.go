@@ -73,7 +73,7 @@ func (s *Service) SubmitPackage(ctx context.Context, tenantID, accountID int64, 
 		return nil, err
 	}
 	packageID := s.ids.Generate()
-	bundleRef, bundleHash, report, err := s.storeBundle(ctx, tenantID, accountID, packageID, input)
+	bundleRef, bundleHash, report, interactionSchema, codeTrace, err := s.storeBundle(ctx, tenantID, accountID, packageID, input, req, compute)
 	if err != nil {
 		return nil, err
 	}
@@ -85,7 +85,7 @@ func (s *Service) SubmitPackage(ctx context.Context, tenantID, accountID int64, 
 	if err != nil {
 		return nil, err
 	}
-	pkg := Package{ID: packageID, Code: req.Code, Version: req.Version, Name: req.Name, Category: req.Category, Compute: compute, ScaleLimit: scale, BundleKey: bundleRef, BundleHash: bundleHash, BackendAdapter: req.BackendAdapter, BackendConfig: backend, AuthorType: AuthorTeacher, AuthorID: accountID, Status: PackageStatusReviewing}
+	pkg := Package{ID: packageID, Code: req.Code, Version: req.Version, Name: req.Name, Category: req.Category, Compute: compute, ScaleLimit: scale, BundleKey: bundleRef, BundleHash: bundleHash, BackendAdapter: req.BackendAdapter, BackendConfig: backend, InteractionSchema: interactionSchema, CodeTrace: codeTrace, AuthorType: AuthorTeacher, AuthorID: accountID, Status: PackageStatusReviewing}
 	var created Package
 	var review Review
 	if err := s.store.PlatformTx(ctx, func(ctx context.Context, tx TxStore) error {
@@ -122,7 +122,7 @@ func (s *Service) SubmitPackage(ctx context.Context, tenantID, accountID int64, 
 }
 
 // UpdatePackage 更新草稿或退回包的新 bundle,并重新进入审核中。
-func (s *Service) UpdatePackage(ctx context.Context, tenantID, accountID, packageID int64, req UpdatePackageRequest, input BundleInput) (map[string]any, error) {
+func (s *Service) UpdatePackage(ctx context.Context, tenantID, accountID, packageID int64, req SubmitPackageRequest, input BundleInput) (map[string]any, error) {
 	req, compute, err := normalizePackageRequest(req, AuthorTeacher)
 	if err != nil {
 		return nil, err
@@ -136,7 +136,7 @@ func (s *Service) UpdatePackage(ctx context.Context, tenantID, accountID, packag
 	if err := s.ensurePackageEditable(ctx, accountID, packageID, req.Code, req.Version); err != nil {
 		return nil, err
 	}
-	bundleRef, bundleHash, report, err := s.storeBundle(ctx, tenantID, accountID, packageID, input)
+	bundleRef, bundleHash, report, interactionSchema, codeTrace, err := s.storeBundle(ctx, tenantID, accountID, packageID, input, req, compute)
 	if err != nil {
 		return nil, err
 	}
@@ -148,7 +148,7 @@ func (s *Service) UpdatePackage(ctx context.Context, tenantID, accountID, packag
 	if err != nil {
 		return nil, err
 	}
-	pkg := Package{ID: packageID, Name: req.Name, Category: req.Category, Compute: compute, ScaleLimit: scale, BundleKey: bundleRef, BundleHash: bundleHash, BackendAdapter: req.BackendAdapter, BackendConfig: backend, Status: PackageStatusReviewing}
+	pkg := Package{ID: packageID, Name: req.Name, Category: req.Category, Compute: compute, ScaleLimit: scale, BundleKey: bundleRef, BundleHash: bundleHash, BackendAdapter: req.BackendAdapter, BackendConfig: backend, InteractionSchema: interactionSchema, CodeTrace: codeTrace, Status: PackageStatusReviewing}
 	var updated Package
 	var review Review
 	if err := s.store.PlatformTx(ctx, func(ctx context.Context, tx TxStore) error {
@@ -245,6 +245,9 @@ func (s *Service) SubmitValidationReport(ctx context.Context, packageID int64, r
 		return nil, apperr.ErrSimPackageValidationFailed.WithCause(err)
 	}
 	if err := validateDynamicReport(keys); err != nil {
+		return nil, err
+	}
+	if err := validateValidationReportRequest(req); err != nil {
 		return nil, err
 	}
 	report := reportFromRequest(req)

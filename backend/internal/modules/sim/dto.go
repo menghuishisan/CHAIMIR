@@ -4,8 +4,6 @@ package sim
 import (
 	"encoding/json"
 	"time"
-
-	"chaimir/internal/platform/storage"
 )
 
 // SubmitPackageRequest 是教师或第三方提交仿真包时的元数据。
@@ -20,9 +18,6 @@ type SubmitPackageRequest struct {
 	BackendConfig  json.RawMessage `json:"backend_config"`
 	AuthorType     int16           `json:"author_type"`
 }
-
-// UpdatePackageRequest 是更新草稿或退回包时提交的新元数据和 bundle。
-type UpdatePackageRequest = SubmitPackageRequest
 
 // ValidationReportRequest 是受控预览流程回写的动态校验结果。
 type ValidationReportRequest struct {
@@ -74,8 +69,7 @@ type CreateShareRequest struct {
 
 // BundleDownloadGrantDTO 是仿真包短时下载授权响应。
 type BundleDownloadGrantDTO struct {
-	Token      string                `json:"token"`
-	Grant      storage.DownloadGrant `json:"grant"`
-	BundleHash string                `json:"bundle_hash"`
-	ExpiresAt  string                `json:"expires_at"`
+	Token      string `json:"token"`
+	BundleHash string `json:"bundle_hash"`
+	ExpiresAt  string `json:"expires_at"`
 }

@@ -560,9 +560,10 @@ func (o *K8sOrchestrator) applyNetworkPolicies(ctx context.Context, cs kubernete
 	if _, err := cs.NetworkingV1().NetworkPolicies(plan.Sandbox.Namespace).Create(ctx, deny, metav1.CreateOptions{}); err != nil && !apierrors.IsAlreadyExists(err) {
 		return fmt.Errorf("创建 deny-all NetworkPolicy 失败: %w", err)
 	}
-	allow := o.allowControlPlanePolicy(plan)
-	if _, err := cs.NetworkingV1().NetworkPolicies(plan.Sandbox.Namespace).Create(ctx, allow, metav1.CreateOptions{}); err != nil && !apierrors.IsAlreadyExists(err) {
-		return fmt.Errorf("创建控制面 NetworkPolicy 失败: %w", err)
+	for _, policy := range o.allowControlPlanePolicies(plan) {
+		if _, err := cs.NetworkingV1().NetworkPolicies(plan.Sandbox.Namespace).Create(ctx, policy, metav1.CreateOptions{}); err != nil && !apierrors.IsAlreadyExists(err) {
+			return fmt.Errorf("创建控制面 NetworkPolicy 失败: %w", err)
+		}
 	}
 	for _, policy := range o.allowSandboxPodLinkPolicies(plan) {
 		if _, err := cs.NetworkingV1().NetworkPolicies(plan.Sandbox.Namespace).Create(ctx, policy, metav1.CreateOptions{}); err != nil && !apierrors.IsAlreadyExists(err) {
@@ -577,18 +578,30 @@ func (o *K8sOrchestrator) applyNetworkPolicies(ctx context.Context, cs kubernete
 	return nil
 }
 
-// allowControlPlanePolicy 只允许后端控制面访问本沙箱声明端口。
-func (o *K8sOrchestrator) allowControlPlanePolicy(plan CreateSandboxPlan) *netv1.NetworkPolicy {
-	ports := networkPolicyPortsForPodGroup(podGroupForPlan(plan))
+// allowControlPlanePolicies 只允许后端控制面按 Pod 角色访问运行时和工具各自声明的端口。
+func (o *K8sOrchestrator) allowControlPlanePolicies(plan CreateSandboxPlan) []*netv1.NetworkPolicy {
+	policies := []*netv1.NetworkPolicy{}
+	for _, pod := range podGroupForPlan(plan) {
+		ports := networkPolicyPortsForSinglePod(pod)
+		if len(ports) == 0 {
+			continue
+		}
+		policies = append(policies, o.controlPlaneIngressPolicy(plan.Sandbox, "sandbox-allow-control-plane-"+pod.Name, pod.Name, ports))
+	}
 	for _, tool := range plan.Tools {
 		if tool.Kind == SandboxToolKindWebEmbed && tool.Port > 0 {
-			ports = append(ports, networkPolicyPort(tool.Port))
+			policies = append(policies, o.controlPlaneIngressPolicy(plan.Sandbox, "sandbox-allow-control-plane-"+toolPodName(tool.Code), toolPodName(tool.Code), []netv1.NetworkPolicyPort{networkPolicyPort(tool.Port)}))
 		}
 	}
+	return policies
+}
+
+// controlPlaneIngressPolicy 构造控制面到单个 Pod 角色的最小入口策略。
+func (o *K8sOrchestrator) controlPlaneIngressPolicy(sb Sandbox, name, role string, ports []netv1.NetworkPolicyPort) *netv1.NetworkPolicy {
 	return &netv1.NetworkPolicy{
-		ObjectMeta: metav1.ObjectMeta{Name: "sandbox-allow-control-plane", Namespace: plan.Sandbox.Namespace},
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: sb.Namespace},
 		Spec: netv1.NetworkPolicySpec{
-			PodSelector: metav1.LabelSelector{},
+			PodSelector: metav1.LabelSelector{MatchLabels: sandboxPodRoleLabels(sb, role)},
 			PolicyTypes: []netv1.PolicyType{netv1.PolicyTypeIngress},
 			Ingress: []netv1.NetworkPolicyIngressRule{{
 				From: []netv1.NetworkPolicyPeer{{
@@ -970,11 +983,14 @@ func volumeForDomain(domain VolumeDomainSpec) corev1.Volume {
 	return volume
 }
 
-// volumeMountsForContainer 按容器学生可进入标记决定挂载域,防止终端绕过文件 API 读取运行态。
+// volumeMountsForContainer 按容器职责决定挂载域,防止终端或协同容器绕过文件 API 读取私有资产。
 func volumeMountsForContainer(adapter AdapterSpec, spec ContainerSpec) []corev1.VolumeMount {
 	mounts := make([]corev1.VolumeMount, 0, len(adapter.VolumeDomains))
 	for _, domain := range adapter.VolumeDomains {
 		if studentAccessibleContainer(spec) && domain.StudentAccess == VolumeAccessNone {
+			continue
+		}
+		if domain.Name == VolumeDomainJudgePrivate && spec.Name != adapter.RuntimeContainer.Name {
 			continue
 		}
 		mounts = append(mounts, volumeMountForDomain(domain))
@@ -1342,6 +1358,11 @@ func networkPolicyPortsForPodGroup(pods []PodSpec) []netv1.NetworkPolicyPort {
 		}
 	}
 	return ports
+}
+
+// networkPolicyPortsForSinglePod 复用 Pod 组端口汇总逻辑,用于控制面对单个运行时 Pod 的精确放行。
+func networkPolicyPortsForSinglePod(pod PodSpec) []netv1.NetworkPolicyPort {
+	return networkPolicyPortsForPodGroup([]PodSpec{pod})
 }
 
 // networkPolicyPortsForRefs 把 adapter 显式网络规则端口转换为 K8s NetworkPolicy 端口。

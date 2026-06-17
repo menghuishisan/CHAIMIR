@@ -18,23 +18,33 @@ func packageFromRow(row sqlcgen.SimPackage) (Package, error) {
 	if err != nil {
 		return Package{}, err
 	}
+	interactionSchema, err := decodeInteractionSchema(row.InteractionSchema)
+	if err != nil {
+		return Package{}, err
+	}
+	codeTrace, err := decodeCodeTraceAudit(row.CodeTrace)
+	if err != nil {
+		return Package{}, err
+	}
 	return Package{
-		ID:             row.ID,
-		Code:           row.Code,
-		Version:        row.Version,
-		Name:           row.Name,
-		Category:       row.Category,
-		Compute:        row.Compute,
-		ScaleLimit:     scale,
-		BundleKey:      row.BundleKey,
-		BundleHash:     row.BundleHash,
-		BackendAdapter: pgtypex.TextValue(row.BackendAdapter),
-		BackendConfig:  backendConfig,
-		AuthorType:     row.AuthorType,
-		AuthorID:       pgtypex.Int8Value(row.AuthorID),
-		Status:         row.Status,
-		CreatedAt:      timex.FromTimestamptz(row.CreatedAt),
-		UpdatedAt:      timex.FromTimestamptz(row.UpdatedAt),
+		ID:                row.ID,
+		Code:              row.Code,
+		Version:           row.Version,
+		Name:              row.Name,
+		Category:          row.Category,
+		Compute:           row.Compute,
+		ScaleLimit:        scale,
+		BundleKey:         row.BundleKey,
+		BundleHash:        row.BundleHash,
+		BackendAdapter:    pgtypex.TextValue(row.BackendAdapter),
+		BackendConfig:     backendConfig,
+		InteractionSchema: interactionSchema,
+		CodeTrace:         codeTrace,
+		AuthorType:        row.AuthorType,
+		AuthorID:          pgtypex.Int8Value(row.AuthorID),
+		Status:            row.Status,
+		CreatedAt:         timex.FromTimestamptz(row.CreatedAt),
+		UpdatedAt:         timex.FromTimestamptz(row.UpdatedAt),
 	}, nil
 }
 
@@ -107,7 +117,11 @@ func sessionWithPackageFromRow(row sqlcgen.GetSimSessionWithPackageRow) (Session
 	if err != nil {
 		return SessionWithPackage{}, err
 	}
-	return SessionWithPackage{Session: session, PackageCode: row.Code, PackageVersion: row.Version, PackageName: row.Name, Category: row.Category, BundleKey: row.BundleKey, BundleHash: row.BundleHash, BackendAdapter: pgtypex.TextValue(row.BackendAdapter), BackendConfig: backendConfig, PackageStatus: row.PackageStatus}, nil
+	interactionSchema, err := decodeInteractionSchema(row.InteractionSchema)
+	if err != nil {
+		return SessionWithPackage{}, err
+	}
+	return SessionWithPackage{Session: session, PackageCode: row.Code, PackageVersion: row.Version, PackageName: row.Name, Category: row.Category, BundleKey: row.BundleKey, BundleHash: row.BundleHash, BackendAdapter: pgtypex.TextValue(row.BackendAdapter), BackendConfig: backendConfig, InteractionSchema: interactionSchema, PackageStatus: row.PackageStatus}, nil
 }
 
 // actionFromRow 转换操作序列行。
@@ -140,6 +154,30 @@ func reportFromJSON(raw []byte) (ValidationReport, error) {
 	}
 	if err := jsonx.DecodeStrict(raw, &out); err != nil {
 		return ValidationReport{}, err
+	}
+	return out, nil
+}
+
+// decodeInteractionSchema 解码交互白名单,并恢复参数索引。
+func decodeInteractionSchema(raw []byte) (InteractionSchema, error) {
+	if len(raw) == 0 {
+		return normalizeInteractionSchema(InteractionSchema{}), nil
+	}
+	var out InteractionSchema
+	if err := jsonx.DecodeStrict(raw, &out); err != nil {
+		return InteractionSchema{}, err
+	}
+	return normalizeInteractionSchema(out), nil
+}
+
+// decodeCodeTraceAudit 解码代码追踪审核摘要。
+func decodeCodeTraceAudit(raw []byte) (CodeTraceAudit, error) {
+	if len(raw) == 0 {
+		return CodeTraceAudit{}, nil
+	}
+	var out CodeTraceAudit
+	if err := jsonx.DecodeStrict(raw, &out); err != nil {
+		return CodeTraceAudit{}, err
 	}
 	return out, nil
 }

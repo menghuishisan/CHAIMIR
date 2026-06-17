@@ -96,20 +96,30 @@ func (s *Service) judgeFlag(ctx context.Context, task JudgeTask, sandboxID int64
 	if hash == "" || inputKey == "" {
 		return JudgeExecutionResult{}, apperr.ErrJudgerConfigInvalid
 	}
-	submitted := stringValue(task.InputSnapshot.ExtraInput[inputKey])
+	submittedHash := stringValue(task.InputSnapshot.ExtraInput["submitted_flag_hash"])
 	if target := stringValue(task.InputSnapshot.Expectation["flag_chain_target"]); target != "" {
 		actual, err := s.sandbox.ChainQuery(ctx, contracts.SandboxChainQueryRequest{TenantID: task.TenantID, SandboxID: sandboxID, SourceRef: task.SourceRef, Target: target})
 		if err != nil {
 			return JudgeExecutionResult{}, apperr.ErrJudgeWorkerFailed.WithCause(err)
 		}
-		submitted = stringValue(actual[stringValue(task.InputSnapshot.Expectation["flag_chain_field"])])
-		if submitted == "" {
-			submitted = chainassert.ShortJSON(actual)
+		submittedHash = ""
+		submitted := stringValue(actual[stringValue(task.InputSnapshot.Expectation["flag_chain_field"])])
+		if submitted != "" {
+			var err error
+			submittedHash, err = pkgcrypto.HMACSHA256Hex(s.hmacKey, strings.TrimSpace(submitted))
+			if err != nil {
+				return JudgeExecutionResult{}, apperr.ErrJudgerConfigInvalid.WithCause(err)
+			}
+		}
+		if submittedHash == "" {
+			submittedHash, err = pkgcrypto.HMACSHA256Hex(s.hmacKey, chainassert.ShortJSON(actual))
+			if err != nil {
+				return JudgeExecutionResult{}, apperr.ErrJudgerConfigInvalid.WithCause(err)
+			}
 		}
 	}
-	submittedHash, err := pkgcrypto.HMACSHA256Hex(s.hmacKey, strings.TrimSpace(submitted))
-	if err != nil {
-		return JudgeExecutionResult{}, apperr.ErrJudgerConfigInvalid.WithCause(err)
+	if submittedHash == "" {
+		return JudgeExecutionResult{}, apperr.ErrJudgerConfigInvalid
 	}
 	passed := pkgcrypto.EqualHexHMAC(submittedHash, hash)
 	score := int32(0)
@@ -142,7 +152,7 @@ func judgeSimCheckpoint(task JudgeTask) (JudgeExecutionResult, error) {
 }
 
 // snapshotExpectationForJudger 生成可复现但不泄露答案的快照期望。
-func (s *Service) snapshotExpectationForJudger(typ int16, expectation map[string]any, extra map[string]any) (map[string]any, error) {
+func (s *Service) snapshotExpectationForJudger(typ int16, expectation map[string]any, _ map[string]any) (map[string]any, error) {
 	out := map[string]any{}
 	for k, v := range expectation {
 		out[k] = v
@@ -150,34 +160,12 @@ func (s *Service) snapshotExpectationForJudger(typ int16, expectation map[string
 	switch typ {
 	case JudgerTypeFlag:
 		hash := stringValue(out["flag_hash"])
-		if hash == "" {
-			if value := stringValue(out["flag_value"]); value != "" {
-				return nil, apperr.ErrJudgerConfigInvalid
-			}
-		}
-		if hash == "" {
-			secret := stringValue(out["flag_hmac_secret"])
-			seed := stringValue(extra["flag_seed"])
-			if seed == "" {
-				seed = stringValue(out["flag_seed"])
-			}
-			if secret != "" && seed != "" {
-				expectedFlag, err := pkgcrypto.HMACSHA256Hex([]byte(secret), seed)
-				if err != nil {
-					return nil, apperr.ErrJudgerConfigInvalid.WithCause(err)
-				}
-				hash, err = pkgcrypto.HMACSHA256Hex(s.hmacKey, expectedFlag)
-				if err != nil {
-					return nil, apperr.ErrJudgerConfigInvalid.WithCause(err)
-				}
-			}
-		}
 		if !isSHA256Hex(hash) {
 			return nil, apperr.ErrJudgerConfigInvalid
 		}
 		inputKey := stringValue(out["flag_input_key"])
 		if inputKey == "" {
-			inputKey = "flag"
+			return nil, apperr.ErrJudgerConfigInvalid
 		}
 		safe := map[string]any{"flag_hash": hash, "flag_input_key": inputKey}
 		if target := stringValue(out["flag_chain_target"]); target != "" {
@@ -210,7 +198,6 @@ func (s *Service) snapshotExpectationForJudger(typ int16, expectation map[string
 		}
 		return out, nil
 	}
-	_ = extra
 	return out, nil
 }
 

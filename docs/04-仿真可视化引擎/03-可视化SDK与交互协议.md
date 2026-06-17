@@ -8,6 +8,10 @@
 
 ## 1. 仿真包总览
 
+仿真包归档根目录必须包含 `sim-package.json`。若归档工具自动包了一层顶级目录,允许
+`<top-level>/sim-package.json`;其他位置的同名文件不作为协议入口。后端上传审核只读取这
+一个 manifest 生成交互白名单和审核摘要,运行时代码仍随 bundle 保存在对象存储。
+
 ```typescript
 interface SimPackage {
   meta: SimMeta;
@@ -16,6 +20,7 @@ interface SimPackage {
   interactions: InteractionDef[];            // 声明式交互
   render: (state) => ViewSpec;               // 用 SDK 描述画面
   narrative?: NarrativeStep[];               // 可选教学叙事
+  codeTrace?: CodeTraceDef;                  // 可选代码追踪配置
 }
 
 interface SimMeta {
@@ -32,6 +37,46 @@ interface SimMeta {
 - `reducer` 必须纯函数:`reducer(s,e,t)` 同输入必同输出,禁用 `Date.now()`/`Math.random()`(随机走种子 PRNG)。
 - `render` 只能用 SDK 能力,不得自行操作 DOM。
 - `interactions` 必须完整声明,运行时据此自动渲染控件。
+- `sim-package.json` 只描述 `meta`、`interactions`、`render.patterns`、`narrative` 与 `codeTrace`;
+  后端不执行其中任何函数,只校验封闭模式、交互事件和代码追踪摘要。
+
+### 1.1 `sim-package.json` 协议入口
+
+```json
+{
+  "meta": {
+    "code": "builtin__pow-mining",
+    "name": "PoW 挖矿与51%攻击",
+    "category": "consensus",
+    "version": "1.0.0",
+    "compute": "frontend",
+    "scale_limit": { "nodes": 50, "max_tick": 5000 }
+  },
+  "interactions": [
+    {
+      "id": "attack51",
+      "kind": "button",
+      "label": "发起51%攻击",
+      "emits": "launch-51",
+      "label_tag": "attack",
+      "params": [{ "name": "blocks", "type": "number", "default": 6 }]
+    }
+  ],
+  "render": {
+    "patterns": [
+      { "mode": "graph", "region": "main", "config": { "layout": "force" } },
+      { "mode": "chain", "region": "bottom" }
+    ]
+  }
+}
+```
+
+后端校验规则:
+- `meta` 必须与上传表单一致,防止 bundle 自描述与入库元数据分裂。
+- `interactions[].emits` 生成 `sim_package.interaction_schema`,运行时只接受 manifest 声明过的事件和参数。
+- `render.patterns` 必须是 1~3 个封闭模式,`mode` 只能取 `graph|chain|tree|matrix|pipeline|lane|chart`。
+- `codeTrace` 使用 camelCase,与前端 TypeScript 协议一致;数据库字段 `code_trace` 只存不含源码正文的审核摘要。
+- manifest JSON 拒绝未知字段和尾随内容,避免同一协议出现兼容别名或灰色扩展。
 
 ---
 

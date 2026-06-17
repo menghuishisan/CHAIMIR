@@ -3,6 +3,7 @@ package sim
 
 import (
 	"encoding/hex"
+	"encoding/json"
 	"regexp"
 	"strconv"
 	"strings"
@@ -11,6 +12,7 @@ import (
 	"chaimir/internal/platform/auth"
 	"chaimir/internal/platform/jsonx"
 	"chaimir/pkg/apperr"
+	"chaimir/pkg/privacy"
 )
 
 var (
@@ -19,8 +21,14 @@ var (
 	categoryPattern       = regexp.MustCompile(`^[a-z][a-z0-9_-]{1,31}$`)
 	eventTypePattern      = regexp.MustCompile(`^[a-z][a-z0-9_.:-]{0,63}$`)
 	checkpointIDPattern   = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.:-]{0,95}$`)
+	payloadKeyPattern     = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_.:-]{0,63}$`)
 	immutableReportKeys   = map[string]struct{}{"static_scan": {}, "bundle_hash": {}, "metadata_validation": {}}
 	dynamicReportKeyAllow = map[string]struct{}{"determinism_check": {}, "worker_preview": {}, "details": {}}
+)
+
+const (
+	maxActionPayloadBytes = 16384
+	maxPublicStringLength = 512
 )
 
 // computeFromString 将接口字符串转换为数据库枚举。
@@ -45,24 +53,6 @@ func computeText(value int16) string {
 	}
 }
 
-// packageStatusFromQuery 解析列表状态过滤条件。
-func packageStatusFromQuery(value string) int16 {
-	switch strings.ToLower(strings.TrimSpace(value)) {
-	case "draft":
-		return PackageStatusDraft
-	case "reviewing", "pending":
-		return PackageStatusReviewing
-	case "", "published":
-		return PackageStatusPublished
-	case "archived":
-		return PackageStatusArchived
-	case "rejected":
-		return PackageStatusRejected
-	default:
-		return 0
-	}
-}
-
 // userPackageListStatus 校验用户侧包列表只能查询已上架状态。
 func userPackageListStatus(value string) (int16, error) {
 	switch strings.ToLower(strings.TrimSpace(value)) {
@@ -73,17 +63,17 @@ func userPackageListStatus(value string) (int16, error) {
 	}
 }
 
-// reviewResultFromQuery 解析审核列表状态过滤条件。
-func reviewResultFromQuery(value string) int16 {
+// reviewResultFromQuery 解析审核列表状态过滤条件,非法枚举显式报错。
+func reviewResultFromQuery(value string) (int16, error) {
 	switch strings.ToLower(strings.TrimSpace(value)) {
 	case "", "pending":
-		return ReviewPending
+		return ReviewPending, nil
 	case "approved":
-		return ReviewApproved
+		return ReviewApproved, nil
 	case "rejected":
-		return ReviewRejected
+		return ReviewRejected, nil
 	default:
-		return 0
+		return 0, apperr.ErrQueryParamInvalid
 	}
 }
 
@@ -168,6 +158,13 @@ func validateAction(req ReportActionRequest) error {
 	if req.Seq <= 0 || req.AtTick < 0 || !eventTypePattern.MatchString(strings.TrimSpace(req.EventType)) {
 		return apperr.ErrSimActionSeqInvalid
 	}
+	if req.Payload == nil {
+		return nil
+	}
+	raw, err := json.Marshal(req.Payload)
+	if err != nil || len(raw) > maxActionPayloadBytes {
+		return apperr.ErrSimActionSeqInvalid
+	}
 	return nil
 }
 
@@ -192,6 +189,38 @@ func validateDynamicReport(raw map[string]any) error {
 	return nil
 }
 
+// validateValidationReportRequest 强制受控预览报告只能写入标准结构和值域。
+func validateValidationReportRequest(req ValidationReportRequest) error {
+	if err := validateValidationStatus(req.DeterminismCheck); err != nil {
+		return err
+	}
+	if err := validateValidationStatus(req.WorkerPreview); err != nil {
+		return err
+	}
+	if len(req.Details) > 32 {
+		return apperr.ErrSimPackageValidationFailed
+	}
+	for key, value := range req.Details {
+		if !payloadKeyPattern.MatchString(strings.TrimSpace(key)) || strings.TrimSpace(value) == "" || len(value) > 500 {
+			return apperr.ErrSimPackageValidationFailed
+		}
+	}
+	return nil
+}
+
+// validateValidationStatus 限定动态审核子项枚举和用户可见摘要长度。
+func validateValidationStatus(status ValidationStatus) error {
+	switch strings.TrimSpace(status.Status) {
+	case validationPassed, validationFailed:
+	default:
+		return apperr.ErrSimPackageValidationFailed
+	}
+	if len(strings.TrimSpace(status.Message)) > 500 {
+		return apperr.ErrSimPackageValidationFailed
+	}
+	return nil
+}
+
 // validateApprovalReport 校验审核通过所需的后端静态和受控预览门禁。
 func validateApprovalReport(report ValidationReport, pkg Package) error {
 	if report.MetadataValidation.Status != validationPassed || report.StaticScan.Status != validationPassed || report.DeterminismCheck.Status != validationPassed || report.WorkerPreview.Status != validationPassed {
@@ -209,6 +238,151 @@ func actionEqual(existing Action, req ReportActionRequest) (bool, error) {
 		return false, nil
 	}
 	return jsonx.Equal(existing.Payload, req.Payload), nil
+}
+
+// validateActionAgainstSchema 按包内交互白名单校验用户操作,拒绝未声明事件和多余字段。
+func validateActionAgainstSchema(schema InteractionSchema, req ReportActionRequest) error {
+	schema = normalizeInteractionSchema(schema)
+	event, ok := schema.Events[strings.TrimSpace(req.EventType)]
+	if !ok {
+		return apperr.ErrSimActionSeqInvalid
+	}
+	payload := req.Payload
+	if payload == nil {
+		payload = map[string]any{}
+	}
+	target, hasTarget := payload["target"]
+	if event.Target == "element" {
+		if !hasTarget || strings.TrimSpace(jsonx.StringFromAny(target)) == "" || len(jsonx.StringFromAny(target)) > 128 {
+			return apperr.ErrSimActionSeqInvalid
+		}
+	} else if hasTarget {
+		return apperr.ErrSimActionSeqInvalid
+	}
+	for key := range payload {
+		if key == "target" {
+			continue
+		}
+		if !payloadKeyPattern.MatchString(strings.TrimSpace(key)) {
+			return apperr.ErrSimActionSeqInvalid
+		}
+		param, ok := event.ParamIndex[key]
+		if !ok || !payloadValueMatchesParam(payload[key], param) {
+			return apperr.ErrSimActionSeqInvalid
+		}
+	}
+	for _, param := range event.Params {
+		if param.Required {
+			if _, ok := payload[param.Name]; !ok {
+				return apperr.ErrSimActionSeqInvalid
+			}
+		}
+	}
+	return nil
+}
+
+// payloadValueMatchesParam 校验字段值与 manifest FieldDef 一致。
+func payloadValueMatchesParam(value any, param InteractionParam) bool {
+	switch param.Type {
+	case "number", "range":
+		n, ok := jsonx.Float64FromAnyOK(value)
+		if !ok {
+			return false
+		}
+		if param.Min != nil && n < *param.Min {
+			return false
+		}
+		if param.Max != nil && n > *param.Max {
+			return false
+		}
+		return true
+	case "string":
+		text, ok := stringFromPayload(value)
+		return ok && len(text) <= maxPublicStringLength
+	case "boolean":
+		_, ok := value.(bool)
+		return ok
+	case "select":
+		text, ok := stringFromPayload(value)
+		if !ok {
+			return false
+		}
+		for _, option := range param.Options {
+			if text == option {
+				return true
+			}
+		}
+		return false
+	default:
+		return false
+	}
+}
+
+// stringFromPayload 读取交互参数中的非空字符串值。
+func stringFromPayload(value any) (string, bool) {
+	text, ok := value.(string)
+	if !ok {
+		return "", false
+	}
+	text = strings.TrimSpace(text)
+	return text, text != ""
+}
+
+// publicReplayMap 过滤公开分享剧本中的敏感字段,仅保留确定性复现所需公开参数。
+func publicReplayMap(in map[string]any) map[string]any {
+	return publicObject(in)
+}
+
+// publicObject 递归保留可公开复现的对象字段,过滤敏感或内部字段。
+func publicObject(in map[string]any) map[string]any {
+	out := map[string]any{}
+	for key, value := range in {
+		if !publicReplayKey(key) {
+			continue
+		}
+		if public, ok := publicValue(value); ok {
+			out[key] = public
+		}
+	}
+	return out
+}
+
+// publicValue 限制公开分享参数的 JSON 类型和长度,避免分享码泄露大对象或内部结构。
+func publicValue(value any) (any, bool) {
+	switch v := value.(type) {
+	case nil:
+		return nil, true
+	case bool, float64, int, int32, int64:
+		return v, true
+	case string:
+		if len(v) > maxPublicStringLength {
+			return "", false
+		}
+		return v, true
+	case map[string]any:
+		return publicObject(v), true
+	case []any:
+		if len(v) > 128 {
+			return nil, false
+		}
+		out := make([]any, 0, len(v))
+		for _, item := range v {
+			clean, ok := publicValue(item)
+			if !ok {
+				return nil, false
+			}
+			out = append(out, clean)
+		}
+		return out, true
+	default:
+		return nil, false
+	}
+}
+
+// publicReplayKey 统一复用 pkg/privacy 判断用户可见结果敏感字段。
+func publicReplayKey(key string) bool {
+	key = strings.ToLower(strings.TrimSpace(key))
+	return key != "" && !strings.HasPrefix(key, "_") && !privacy.IsResultSensitiveKey(key) && payloadKeyPattern.MatchString(key)
 }
 
 // shareUsable 判断分享码是否仍可公开读取。

@@ -13,6 +13,8 @@ const studentAccessLabel = "chaimir.io/student-access"
 
 // TerminalTarget 描述一次终端连接允许进入的沙箱命名空间和容器。
 type TerminalTarget struct {
+	TenantID  int64
+	SandboxID int64
 	Namespace string
 	Container string
 	Command   []string
@@ -37,13 +39,16 @@ func (s *Service) TerminalTargetForOwner(ctx context.Context, tenantID, accountI
 	if !runtimeContainerAllowed(runtime, targetContainer) {
 		return TerminalTarget{}, apperr.ErrSandboxOwnershipInvalid
 	}
-	return TerminalTarget{Namespace: sb.Namespace, Container: targetContainer, Command: runtime.AdapterSpec.WorkspaceOps.Terminal}, nil
+	return TerminalTarget{TenantID: sb.TenantID, SandboxID: sb.ID, Namespace: sb.Namespace, Container: targetContainer, Command: runtime.AdapterSpec.WorkspaceOps.Terminal}, nil
 }
 
 // AttachTerminal 把已鉴权输入输出流代理到 Kubernetes exec PTY。
 func (s *Service) AttachTerminal(ctx context.Context, target TerminalTarget, stdin io.Reader, stdout io.Writer) error {
-	if strings.TrimSpace(target.Namespace) == "" || strings.TrimSpace(target.Container) == "" || len(target.Command) == 0 {
+	if target.TenantID <= 0 || target.SandboxID <= 0 || strings.TrimSpace(target.Namespace) == "" || strings.TrimSpace(target.Container) == "" || len(target.Command) == 0 {
 		return apperr.ErrSandboxToolProxyUnavailable
+	}
+	if err := s.recordTerminalOpen(ctx, target); err != nil {
+		return err
 	}
 	return s.orchestrator.ExecStream(ctx, target.Namespace, target.Container, target.Command, stdin, stdout, stdout, true)
 }
@@ -106,6 +111,17 @@ func defaultTerminalContainer(runtime Runtime) string {
 		}
 	}
 	return ""
+}
+
+// recordTerminalOpen 写入终端打开技术事件,只记录容器目标,不保存终端输入内容。
+func (s *Service) recordTerminalOpen(ctx context.Context, target TerminalTarget) error {
+	return s.store.TenantTx(ctx, target.TenantID, func(ctx context.Context, tx TxStore) error {
+		detail, err := jsonBytes(map[string]any{"container": target.Container})
+		if err != nil {
+			return apperr.ErrSandboxStatePersistFailed.WithCause(err)
+		}
+		return tx.CreateSandboxEvent(ctx, s.ids.Generate(), target.TenantID, target.SandboxID, EventTypeExec, detail)
+	})
 }
 
 // runtimeExecTarget 返回平台内部执行 helper 的运行时主容器目标。

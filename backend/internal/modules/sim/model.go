@@ -8,22 +8,24 @@ import (
 
 // Package 是平台级仿真包版本定义。
 type Package struct {
-	ID             int64
-	Code           string
-	Version        string
-	Name           string
-	Category       string
-	Compute        int16
-	ScaleLimit     map[string]any
-	BundleKey      string
-	BundleHash     string
-	BackendAdapter string
-	BackendConfig  map[string]any
-	AuthorType     int16
-	AuthorID       int64
-	Status         int16
-	CreatedAt      time.Time
-	UpdatedAt      time.Time
+	ID                int64
+	Code              string
+	Version           string
+	Name              string
+	Category          string
+	Compute           int16
+	ScaleLimit        map[string]any
+	BundleKey         string
+	BundleHash        string
+	BackendAdapter    string
+	BackendConfig     map[string]any
+	InteractionSchema InteractionSchema
+	CodeTrace         CodeTraceAudit
+	AuthorType        int16
+	AuthorID          int64
+	Status            int16
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
 }
 
 // Review 是仿真包接入审核记录。
@@ -68,15 +70,16 @@ type Session struct {
 // SessionWithPackage 是回放、分享和后端计算需要的会话加包摘要。
 type SessionWithPackage struct {
 	Session
-	PackageCode    string
-	PackageVersion string
-	PackageName    string
-	Category       string
-	BundleKey      string
-	BundleHash     string
-	BackendAdapter string
-	BackendConfig  map[string]any
-	PackageStatus  int16
+	PackageCode       string
+	PackageVersion    string
+	PackageName       string
+	Category          string
+	BundleKey         string
+	BundleHash        string
+	BackendAdapter    string
+	BackendConfig     map[string]any
+	InteractionSchema InteractionSchema
+	PackageStatus     int16
 }
 
 // Action 是仿真会话的确定性操作序列项。
@@ -89,6 +92,40 @@ type Action struct {
 	EventType string
 	Payload   map[string]any
 	CreatedAt time.Time
+}
+
+// InteractionSchema 是后端从 sim-package.json 提取的交互白名单,用于操作上报校验。
+type InteractionSchema struct {
+	Events map[string]InteractionEventSchema `json:"events"`
+}
+
+// InteractionEventSchema 描述单类事件允许的目标策略和 payload 字段。
+type InteractionEventSchema struct {
+	InteractionID string                      `json:"interaction_id"`
+	Kind          string                      `json:"kind"`
+	Target        string                      `json:"target"`
+	Params        []InteractionParam          `json:"params"`
+	ParamIndex    map[string]InteractionParam `json:"-"`
+}
+
+// InteractionParam 描述交互参数字段,只保留后端校验所需的最小协议摘要。
+type InteractionParam struct {
+	Name     string   `json:"name"`
+	Type     string   `json:"type"`
+	Required bool     `json:"required"`
+	Min      *float64 `json:"min,omitempty"`
+	Max      *float64 `json:"max,omitempty"`
+	Options  []string `json:"options,omitempty"`
+}
+
+// CodeTraceAudit 保存代码追踪协议审核摘要,源码正文仍只存在 bundle 对象内。
+type CodeTraceAudit struct {
+	Enabled         bool     `json:"enabled"`
+	Language        string   `json:"language,omitempty"`
+	LineCount       int      `json:"line_count,omitempty"`
+	MappingCount    int      `json:"mapping_count,omitempty"`
+	VariableCount   int      `json:"variable_count,omitempty"`
+	ValidationNotes []string `json:"validation_notes,omitempty"`
 }
 
 // Checkpoint 是叙事设问或目标达成结果快照。

@@ -1,18 +1,18 @@
 -- name: GetSimPackageByCodeVersion :one
 SELECT id, code, version, name, category, compute, scale_limit, bundle_key, bundle_hash,
-       backend_adapter, backend_config, author_type, author_id, status, created_at, updated_at
+       backend_adapter, backend_config, interaction_schema, code_trace, author_type, author_id, status, created_at, updated_at
 FROM sim_package
 WHERE code = $1 AND version = $2;
 
 -- name: GetSimPackageByID :one
 SELECT id, code, version, name, category, compute, scale_limit, bundle_key, bundle_hash,
-       backend_adapter, backend_config, author_type, author_id, status, created_at, updated_at
+       backend_adapter, backend_config, interaction_schema, code_trace, author_type, author_id, status, created_at, updated_at
 FROM sim_package
 WHERE id = $1;
 
 -- name: ListSimPackages :many
 SELECT id, code, version, name, category, compute, scale_limit, bundle_key, bundle_hash,
-       backend_adapter, backend_config, author_type, author_id, status, created_at, updated_at
+       backend_adapter, backend_config, interaction_schema, code_trace, author_type, author_id, status, created_at, updated_at
 FROM sim_package
 WHERE ($1::smallint = 0 OR status = $1)
   AND ($2::text = '' OR category = $2)
@@ -29,7 +29,7 @@ WHERE ($1::smallint = 0 OR status = $1)
 
 -- name: ListSimPackageVersions :many
 SELECT id, code, version, name, category, compute, scale_limit, bundle_key, bundle_hash,
-       backend_adapter, backend_config, author_type, author_id, status, created_at, updated_at
+       backend_adapter, backend_config, interaction_schema, code_trace, author_type, author_id, status, created_at, updated_at
 FROM sim_package
 WHERE code = $1
 ORDER BY created_at DESC, id DESC;
@@ -37,11 +37,11 @@ ORDER BY created_at DESC, id DESC;
 -- name: CreateSimPackage :one
 INSERT INTO sim_package (
     id, code, version, name, category, compute, scale_limit, bundle_key, bundle_hash,
-    backend_adapter, backend_config, author_type, author_id, status, created_at, updated_at
+    backend_adapter, backend_config, interaction_schema, code_trace, author_type, author_id, status, created_at, updated_at
 )
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, now(), now())
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, now(), now())
 RETURNING id, code, version, name, category, compute, scale_limit, bundle_key, bundle_hash,
-          backend_adapter, backend_config, author_type, author_id, status, created_at, updated_at;
+          backend_adapter, backend_config, interaction_schema, code_trace, author_type, author_id, status, created_at, updated_at;
 
 -- name: UpdateSimPackageDraft :one
 UPDATE sim_package
@@ -53,18 +53,20 @@ SET name = $2,
     bundle_hash = $7,
     backend_adapter = $8,
     backend_config = $9,
-    status = $10,
+    interaction_schema = $10,
+    code_trace = $11,
+    status = $12,
     updated_at = now()
 WHERE id = $1 AND status IN (1, 5)
 RETURNING id, code, version, name, category, compute, scale_limit, bundle_key, bundle_hash,
-          backend_adapter, backend_config, author_type, author_id, status, created_at, updated_at;
+          backend_adapter, backend_config, interaction_schema, code_trace, author_type, author_id, status, created_at, updated_at;
 
 -- name: UpdateSimPackageStatus :one
 UPDATE sim_package
 SET status = $2, updated_at = now()
 WHERE id = $1
 RETURNING id, code, version, name, category, compute, scale_limit, bundle_key, bundle_hash,
-          backend_adapter, backend_config, author_type, author_id, status, created_at, updated_at;
+          backend_adapter, backend_config, interaction_schema, code_trace, author_type, author_id, status, created_at, updated_at;
 
 -- name: CreateSimPackageReview :one
 INSERT INTO sim_package_review (id, package_id, submitter_id, preview_report, reviewer_id, result, comment, created_at, updated_at)
@@ -125,7 +127,8 @@ WHERE tenant_id = $1 AND id = $2;
 
 -- name: GetSimSessionWithPackage :one
 SELECT s.id, s.tenant_id, s.package_id, s.source_ref, s.owner_account_id, s.seed, s.init_params, s.compute, s.status, s.created_at, s.updated_at,
-       p.code, p.version, p.name, p.category, p.bundle_key, p.bundle_hash, p.backend_adapter, p.backend_config, p.status AS package_status
+       p.code, p.version, p.name, p.category, p.bundle_key, p.bundle_hash, p.backend_adapter, p.backend_config,
+       p.interaction_schema, p.status AS package_status
 FROM sim_session s
 JOIN sim_package p ON p.id = s.package_id
 WHERE s.tenant_id = $1 AND s.id = $2;

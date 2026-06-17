@@ -269,7 +269,7 @@ func (s *Service) SaveSandboxFilesForOwner(ctx context.Context, tenantID, accoun
 
 // ExecSandboxCommand 在沙箱内执行受限命令,供判题 worker 运行套件。
 func (s *Service) ExecSandboxCommand(ctx context.Context, req contracts.SandboxExecRequest) (contracts.SandboxExecResult, error) {
-	if req.TenantID <= 0 || req.SandboxID <= 0 || !safeCommand(req.Command) || !validSourceRef(req.SourceRef) {
+	if req.TenantID <= 0 || req.SandboxID <= 0 || !safeNonShellCommand(req.Command) || !validSourceRef(req.SourceRef) {
 		return contracts.SandboxExecResult{}, apperr.ErrSandboxContractRequestInvalid
 	}
 	sb, runtime, err := s.sandboxRuntimeForSource(ctx, req.TenantID, req.SandboxID, req.SourceRef)

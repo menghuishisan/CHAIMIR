@@ -254,7 +254,7 @@ func (s *Service) injectPrivateSuite(ctx context.Context, task JudgeTask, sandbo
 
 // injectStudentCode 注入 M3 已校验并重打包的学生提交,避免信任原始对象引用。
 func (s *Service) injectStudentCode(ctx context.Context, task JudgeTask, sandboxID int64) error {
-	if strings.TrimSpace(task.InputSnapshot.SanitizedCodeArchiveBase64) == "" {
+	if strings.TrimSpace(task.InputSnapshot.SanitizedCodeArchiveRef) == "" {
 		return apperr.ErrJudgeInputArchiveInvalid
 	}
 	archiveName := strings.TrimSpace(task.InputSnapshot.SanitizedCodeArchiveName)
@@ -263,13 +263,17 @@ func (s *Service) injectStudentCode(ctx context.Context, task JudgeTask, sandbox
 	}
 	injectCtx, cancel := context.WithTimeout(ctx, time.Duration(s.cfg.InputInjectTimeoutSeconds)*time.Second)
 	defer cancel()
+	_, data, err := s.readObjectRef(injectCtx, task.InputSnapshot.SanitizedCodeArchiveRef)
+	if err != nil {
+		return apperr.ErrJudgeInputArchiveInvalid.WithCause(err)
+	}
 	return s.sandbox.PutSandboxPrivateArchive(injectCtx, contracts.SandboxPrivateArchiveInjectRequest{
 		TenantID:      task.TenantID,
 		SandboxID:     sandboxID,
 		SourceRef:     task.SourceRef,
 		Domain:        contracts.SandboxPrivateDomainJudge,
 		ArchiveName:   archiveName,
-		ContentBase64: task.InputSnapshot.SanitizedCodeArchiveBase64,
+		ContentBase64: base64.StdEncoding.EncodeToString(data),
 	})
 }
 
@@ -510,7 +514,7 @@ func (s *Service) executeJudgerSelftest(ctx context.Context, j Judger) error {
 	if len(j.ResourceSpec.Selftest) == 0 {
 		return apperr.ErrJudgerConfigInvalid
 	}
-	selftestArchive, err := selftestSubmissionArchiveBase64()
+	selftestArchive, err := selftestSubmissionArchive()
 	if err != nil {
 		return apperr.ErrJudgerConfigInvalid.WithCause(err)
 	}
@@ -526,19 +530,18 @@ func (s *Service) executeJudgerSelftest(ctx context.Context, j Judger) error {
 		SubmitterID: int64FromAny(j.ResourceSpec.Selftest["submitter_id"]),
 		SourceRef:   stringValue(j.ResourceSpec.Selftest["source_ref"]),
 		InputSnapshot: JudgeInputSnapshot{
-			JudgerType:                 j.Type,
-			RuntimeCode:                j.ResourceSpec.RuntimeCode,
-			RuntimeImageVersion:        j.ResourceSpec.RuntimeImageVersion,
-			GenesisRef:                 j.ResourceSpec.GenesisRef,
-			ToolCodes:                  append([]string(nil), j.ResourceSpec.ToolCodes...),
-			InitScriptRef:              j.ResourceSpec.InitScriptRef,
-			Command:                    append([]string(nil), j.ResourceSpec.Command...),
-			TimeoutSec:                 timeoutForSnapshot(j),
-			MaxScore:                   int32FromAny(j.ResourceSpec.Selftest["max_score"]),
-			Expectation:                snapshot,
-			ExtraInput:                 extra,
-			SanitizedCodeArchiveName:   "selftest-submission.tar",
-			SanitizedCodeArchiveBase64: selftestArchive,
+			JudgerType:               j.Type,
+			RuntimeCode:              j.ResourceSpec.RuntimeCode,
+			RuntimeImageVersion:      j.ResourceSpec.RuntimeImageVersion,
+			GenesisRef:               j.ResourceSpec.GenesisRef,
+			ToolCodes:                append([]string(nil), j.ResourceSpec.ToolCodes...),
+			InitScriptRef:            j.ResourceSpec.InitScriptRef,
+			Command:                  append([]string(nil), j.ResourceSpec.Command...),
+			TimeoutSec:               timeoutForSnapshot(j),
+			MaxScore:                 int32FromAny(j.ResourceSpec.Selftest["max_score"]),
+			Expectation:              snapshot,
+			ExtraInput:               extra,
+			SanitizedCodeArchiveName: "selftest-submission.tar",
 		},
 		SandboxMode: JudgeSandboxModeFresh,
 		MaxRetries:  0,
@@ -549,6 +552,11 @@ func (s *Service) executeJudgerSelftest(ctx context.Context, j Judger) error {
 	if task.InputSnapshot.MaxScore <= 0 {
 		task.InputSnapshot.MaxScore = 100
 	}
+	sanitized, err := s.storeSanitizedCodeArchive(ctx, task.TenantID, task.ID, selftestArchive)
+	if err != nil {
+		return err
+	}
+	task.InputSnapshot.SanitizedCodeArchiveRef = sanitized
 	result, err := s.executeTask(ctx, task)
 	if err != nil {
 		return err
@@ -559,22 +567,22 @@ func (s *Service) executeJudgerSelftest(ctx context.Context, j Judger) error {
 	return nil
 }
 
-// selftestSubmissionArchiveBase64 生成最小安全提交包,供判题器自检走完整 fresh 注入链路。
-func selftestSubmissionArchiveBase64() (string, error) {
+// selftestSubmissionArchive 生成最小安全提交包,供判题器自检走完整 fresh 注入链路。
+func selftestSubmissionArchive() ([]byte, error) {
 	const name = "main.txt"
 	const body = "judge selftest submission\n"
 	var buf bytes.Buffer
 	tw := tar.NewWriter(&buf)
 	if err := tw.WriteHeader(&tar.Header{Name: name, Mode: 0600, Size: int64(len(body)), Typeflag: tar.TypeReg}); err != nil {
-		return "", err
+		return nil, err
 	}
 	if _, err := tw.Write([]byte(body)); err != nil {
-		return "", err
+		return nil, err
 	}
 	if err := tw.Close(); err != nil {
-		return "", err
+		return nil, err
 	}
-	return base64.StdEncoding.EncodeToString(buf.Bytes()), nil
+	return buf.Bytes(), nil
 }
 
 // decodeCommandResult 解析判题器 stdout JSON 并限制可见详情大小。

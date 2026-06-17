@@ -42,9 +42,15 @@ type fileService interface {
 // BackendAdapter 是 M4 自有后端计算适配器,不得调用 M2 模块内部实现。
 type BackendAdapter interface {
 	// Serve 在已鉴权的 WebSocket 上执行后端计算协议。
-	Serve(ctx context.Context, session SessionWithPackage, conn *ws.Conn) error
+	Serve(ctx context.Context, session SessionWithPackage, conn BackendConn) error
 	// Release 回收指定后端计算会话占用的适配器资源。
 	Release(ctx context.Context, session SessionWithPackage) error
+}
+
+// BackendConn 是 compute=backend 适配器可使用的受控连接能力。
+type BackendConn interface {
+	ReadJSON(v any) error
+	SendJSON(v any) error
 }
 
 // BackendRegistry 保存 compute=backend 可用适配器。
@@ -133,7 +139,7 @@ func (s *Service) IssueBundleDownloadGrant(ctx context.Context, accountID int64,
 	if err != nil {
 		return BundleDownloadGrantDTO{}, apperr.ErrSimBundleUnreadable.WithCause(err)
 	}
-	return BundleDownloadGrantDTO{Token: token, Grant: grant, BundleHash: pkg.BundleHash, ExpiresAt: grant.ExpiresAt.Format(time.RFC3339)}, nil
+	return BundleDownloadGrantDTO{Token: token, BundleHash: pkg.BundleHash, ExpiresAt: grant.ExpiresAt.Format(time.RFC3339)}, nil
 }
 
 // tenantIDFromBundleKey 从统一对象 key 的首段解析上传租户,用于全局包的下载授权边界。
@@ -150,21 +156,24 @@ func tenantIDFromBundleKey(key string) (int64, error) {
 }
 
 // storeBundle 通过统一文件服务执行扫描并规划对象引用。
-func (s *Service) storeBundle(ctx context.Context, tenantID, accountID, packageID int64, input BundleInput) (string, string, ValidationReport, error) {
+func (s *Service) storeBundle(ctx context.Context, tenantID, accountID, packageID int64, input BundleInput, req SubmitPackageRequest, compute int16) (string, string, ValidationReport, InteractionSchema, CodeTraceAudit, error) {
 	limits := upload.ArchiveLimits{MaxFiles: s.upload.SimBundleMaxFiles, MaxUnpackedBytes: s.upload.SimBundleMaxUnpackedBytes}
-	bundleHash, staticScan, err := analyzeBundle(input, limits)
+	bundleHash, staticScan, manifest, err := analyzeBundle(input, limits)
 	if err != nil {
-		return "", "", ValidationReport{}, err
+		return "", "", ValidationReport{}, InteractionSchema{}, CodeTraceAudit{}, err
 	}
 	report := ValidationReport{BundleHash: bundleHash, MetadataValidation: ValidationStatus{Status: validationPassed}, StaticScan: staticScan}
 	if staticScan.Status != validationPassed {
-		return "", bundleHash, report, apperr.ErrSimPackageValidationFailed
+		return "", bundleHash, report, InteractionSchema{}, CodeTraceAudit{}, apperr.ErrSimPackageValidationFailed
+	}
+	if err := validateBundleManifestMatchesRequest(manifest, req, compute); err != nil {
+		return "", bundleHash, report, InteractionSchema{}, CodeTraceAudit{}, err
 	}
 	plan, err := s.planBundleObject(ctx, tenantID, accountID, packageID, input)
 	if err != nil {
-		return "", bundleHash, report, err
+		return "", bundleHash, report, InteractionSchema{}, CodeTraceAudit{}, err
 	}
-	return plan.ObjectRef, bundleHash, report, nil
+	return plan.ObjectRef, bundleHash, report, manifest.InteractionSchema, manifest.CodeTrace, nil
 }
 
 // planBundleObject 规划 bundle 对象引用,调用方在数据库侧前置校验后再执行实际上传。

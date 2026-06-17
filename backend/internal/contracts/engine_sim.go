@@ -49,9 +49,17 @@ type SimReplayInfo struct {
 type SimCheckpointRequest struct {
 	TenantID     int64           `json:"tenant_id"`
 	SessionID    int64           `json:"session_id"`
+	SourceRef    string          `json:"source_ref"`
 	CheckpointID string          `json:"checkpoint_id"`
 	Answer       json.RawMessage `json:"answer"`
 	Achieved     bool            `json:"achieved"`
+}
+
+// SimDestroySessionRequest 是业务模块按来源回收单个仿真会话的内部请求。
+type SimDestroySessionRequest struct {
+	TenantID  int64  `json:"tenant_id"`
+	SessionID int64  `json:"session_id"`
+	SourceRef string `json:"source_ref"`
 }
 
 // SimRecycleRequest 是按来源回收仿真会话的内部请求。
@@ -70,7 +78,7 @@ type SimService interface {
 	// ReportCheckpoint 保存仿真检查点结果快照,供 M3 后续判分读取。
 	ReportCheckpoint(ctx context.Context, req SimCheckpointRequest) error
 	// DestroySession 回收单个仿真会话,供来源模块显式关闭实例时释放资源。
-	DestroySession(ctx context.Context, tenantID, sessionID int64) error
+	DestroySession(ctx context.Context, req SimDestroySessionRequest) error
 	// RecycleBySourceRef 按来源标识归档仿真会话并释放后端计算资源。
 	RecycleBySourceRef(ctx context.Context, req SimRecycleRequest) error
 }

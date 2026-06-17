@@ -374,6 +374,9 @@ func (s *Service) PrepullRuntimeImage(ctx context.Context, runtimeID, imageID in
 	}); updateErr != nil {
 		return PrepullResponse{}, apperr.ErrSandboxImagePrepullFailed.WithCause(updateErr)
 	}
+	if auditErr := s.writeAuditFromContext(ctx, 0, "sandbox.image.prepull", "runtime_image", imageID, map[string]any{"runtime_id": runtimeID, "status": status}); auditErr != nil {
+		return PrepullResponse{}, auditErr
+	}
 	if err != nil {
 		return PrepullResponse{}, apperr.ErrSandboxImagePrepullFailed.WithCause(err)
 	}

@@ -18,7 +18,6 @@ func packageToMap(pkg Package) map[string]any {
 		"scale_limit":     pkg.ScaleLimit,
 		"bundle_hash":     pkg.BundleHash,
 		"backend_adapter": pkg.BackendAdapter,
-		"backend_config":  pkg.BackendConfig,
 		"author_type":     pkg.AuthorType,
 		"author_id":       pkg.AuthorID,
 		"status":          packageStatusText(pkg.Status),
@@ -77,6 +76,15 @@ func replayToMap(session SessionWithPackage, actions []Action) map[string]any {
 		items = append(items, actionToMap(action))
 	}
 	return map[string]any{"package_code": session.PackageCode, "version": session.PackageVersion, "seed": session.Seed, "init_params": session.InitParams, "actions": items}
+}
+
+// replayToMapPublic 转换公开分享剧本,过滤检查点答案、令牌和内部绑定字段。
+func replayToMapPublic(session SessionWithPackage, actions []Action) map[string]any {
+	items := make([]map[string]any, 0, len(actions))
+	for _, action := range actions {
+		items = append(items, map[string]any{"seq": action.Seq, "at_tick": action.AtTick, "event_type": action.EventType, "payload": publicReplayMap(action.Payload)})
+	}
+	return map[string]any{"package_code": session.PackageCode, "version": session.PackageVersion, "seed": session.Seed, "init_params": publicReplayMap(session.InitParams), "actions": items}
 }
 
 // actionToMap 转换操作为 API 输出。

@@ -2,6 +2,7 @@
 package judge
 
 import (
+	"path"
 	"strings"
 
 	"chaimir/internal/contracts"
@@ -41,7 +42,7 @@ func parseJudgerResourceSpec(raw []byte, typ int16, runtimeRequired bool) (Judge
 		}
 	}
 	if typ == JudgerTypeTestcase || typ == JudgerTypeStaticScan {
-		if !safeCommand(spec.Command) {
+		if !safeNonShellCommand(spec.Command) {
 			return JudgerResourceSpec{}, apperr.ErrJudgerConfigInvalid
 		}
 	}
@@ -81,6 +82,9 @@ func validateSubmitRequest(req contracts.JudgeSubmitRequest) error {
 		return err
 	}
 	if mode == JudgeSandboxModeReuse && strings.TrimSpace(req.TargetSandboxRef) == "" {
+		return apperr.ErrJudgeSubmitInvalid
+	}
+	if mode == JudgeSandboxModeFresh && strings.TrimSpace(req.TargetSandboxRef) != "" {
 		return apperr.ErrJudgeSubmitInvalid
 	}
 	return nil
@@ -126,6 +130,22 @@ func safeCommand(command []string) bool {
 		if strings.TrimSpace(item) == "" {
 			return false
 		}
+		if strings.ContainsAny(item, "\x00\r\n") {
+			return false
+		}
 	}
 	return true
+}
+
+// safeNonShellCommand 禁止判题器通过 shell 解释器执行字符串脚本,让命令边界保持 argv 级别。
+func safeNonShellCommand(command []string) bool {
+	if !safeCommand(command) {
+		return false
+	}
+	blocked := map[string]struct{}{
+		"sh": {}, "bash": {}, "dash": {}, "ash": {}, "zsh": {}, "ksh": {}, "csh": {},
+		"cmd": {}, "cmd.exe": {}, "powershell": {}, "powershell.exe": {}, "pwsh": {}, "pwsh.exe": {},
+	}
+	_, ok := blocked[strings.ToLower(path.Base(strings.TrimSpace(command[0])))]
+	return !ok
 }

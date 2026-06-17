@@ -40,7 +40,7 @@ func (c execChainCapability) Reset(ctx context.Context, sb Sandbox, runtime Runt
 
 // runJSON 统一执行 capability 命令,限制超时并把 stderr 仅作为内部错误链保存。
 func (c execChainCapability) runJSON(ctx context.Context, sb Sandbox, runtime Runtime, spec CapabilityCommandSpec, payload map[string]any) (map[string]any, error) {
-	if c.orchestrator == nil || !safeCommand(spec.Command) {
+	if c.orchestrator == nil || !safeNonShellCommand(spec.Command) {
 		return nil, apperr.ErrSandboxCapabilityUnavailable
 	}
 	stdin, err := jsonx.AnyBytes(payload, apperr.ErrSandboxContractRequestInvalid)

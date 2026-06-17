@@ -2,8 +2,8 @@
 package judge
 
 import (
+	"bytes"
 	"context"
-	"encoding/base64"
 	"fmt"
 	"io"
 	"log/slog"
@@ -38,6 +38,7 @@ type SourceOwnership struct {
 // objectStorage 描述 M3 读取提交代码和判题套件所需的对象存储能力。
 type objectStorage interface {
 	Get(ctx context.Context, bucket, key string) (io.ReadCloser, error)
+	Put(ctx context.Context, bucket, key string, r io.Reader, size int64, contentType string) error
 	BucketCode() string
 }
 
@@ -250,6 +251,9 @@ func (s *Service) SubmitJudgeTask(ctx context.Context, req contracts.JudgeSubmit
 	if j.Type == JudgerTypeManual {
 		mode = JudgeSandboxModeFresh
 	}
+	if err := validateJudgerSandboxMode(j.Type, mode, req.TargetSandboxRef); err != nil {
+		return contracts.JudgeTaskInfo{}, err
+	}
 	spec, err := s.content.GetJudgeSpec(ctx, req.TenantID, req.ItemCode, req.ItemVersion)
 	if err != nil {
 		return contracts.JudgeTaskInfo{}, apperr.ErrJudgeSpecUnavailable.WithCause(err)
@@ -277,6 +281,9 @@ func (s *Service) SubmitJudgeTask(ctx context.Context, req contracts.JudgeSubmit
 		return contracts.JudgeTaskInfo{}, apperr.ErrJudgeInputArchiveInvalid.WithCause(err)
 	}
 	ownership := sourceOwnershipFromRequest(req)
+	if err := validateSourceOwnership(ownership); err != nil {
+		return contracts.JudgeTaskInfo{}, err
+	}
 	task := JudgeTask{
 		ID:               s.ids.Generate(),
 		TenantID:         req.TenantID,
@@ -306,8 +313,12 @@ func (s *Service) SubmitJudgeTask(ctx context.Context, req contracts.JudgeSubmit
 	if err != nil {
 		return contracts.JudgeTaskInfo{}, apperr.ErrFingerprintSimilarityFailed.WithCause(err)
 	}
-	task.InputSnapshot.SanitizedCodeArchiveName = codeName
-	task.InputSnapshot.SanitizedCodeArchiveBase64 = sanitizedArchiveBase64(sanitizedCode)
+	archiveRef, err := s.storeSanitizedCodeArchive(ctx, task.TenantID, task.ID, sanitizedCode)
+	if err != nil {
+		return contracts.JudgeTaskInfo{}, err
+	}
+	task.InputSnapshot.SanitizedCodeArchiveName = "submission.tar"
+	task.InputSnapshot.SanitizedCodeArchiveRef = archiveRef
 	createdNew := false
 	if err := s.store.TenantTx(ctx, task.TenantID, func(ctx context.Context, tx TxStore) error {
 		requestedID := task.ID
@@ -494,6 +505,10 @@ func (s *Service) buildInputSnapshot(j Judger, spec contracts.ContentJudgeSpec, 
 	if err != nil {
 		return JudgeInputSnapshot{}, err
 	}
+	safeExtra, err := s.snapshotExtraInputForJudger(j.Type, expectation, extra)
+	if err != nil {
+		return JudgeInputSnapshot{}, err
+	}
 	return JudgeInputSnapshot{
 		ItemCode:            spec.ItemCode,
 		ItemVersion:         spec.ItemVersion,
@@ -513,8 +528,53 @@ func (s *Service) buildInputSnapshot(j Judger, spec contracts.ContentJudgeSpec, 
 		MaxRetries:          maxRetriesForJudger(j, s.cfg.DefaultMaxRetries),
 		MaxScore:            spec.MaxScore,
 		Expectation:         expectation,
-		ExtraInput:          extra,
+		ExtraInput:          safeExtra,
 	}, nil
+}
+
+// validateJudgerSandboxMode 约束 reuse 只能用于链上断言只读现场状态,其他判题必须使用 fresh judge 沙箱。
+func validateJudgerSandboxMode(typ int16, mode int16, targetRef string) error {
+	if mode == JudgeSandboxModeReuse {
+		if typ != JudgerTypeOnchainAssert || strings.TrimSpace(targetRef) == "" {
+			return apperr.ErrJudgeSubmitInvalid
+		}
+		return nil
+	}
+	if strings.TrimSpace(targetRef) != "" {
+		return apperr.ErrJudgeSubmitInvalid
+	}
+	return nil
+}
+
+// snapshotExtraInputForJudger 只持久化重判确需的调用方输入,避免把来源归属或一次性密钥等冗余数据写入快照。
+func (s *Service) snapshotExtraInputForJudger(typ int16, expectation map[string]any, extra map[string]any) (map[string]any, error) {
+	out := map[string]any{}
+	switch typ {
+	case JudgerTypeFlag:
+		if stringValue(expectation["flag_chain_target"]) != "" {
+			return out, nil
+		}
+		key := stringValue(expectation["flag_input_key"])
+		if key == "" {
+			return nil, apperr.ErrJudgerConfigInvalid
+		}
+		value := stringValue(extra[key])
+		if value == "" {
+			return nil, apperr.ErrJudgerConfigInvalid
+		}
+		submittedHash, err := pkgcrypto.HMACSHA256Hex(s.hmacKey, strings.TrimSpace(value))
+		if err != nil {
+			return nil, apperr.ErrJudgerConfigInvalid.WithCause(err)
+		}
+		out["submitted_flag_hash"] = submittedHash
+	case JudgerTypeSimCheckpoint:
+		checkpoint, ok := extra["checkpoint"]
+		if !ok {
+			return nil, apperr.ErrJudgerConfigInvalid
+		}
+		out["checkpoint"] = checkpoint
+	}
+	return out, nil
 }
 
 // buildSubmissionVector 读取对象存储提交包并计算查重特征。
@@ -526,35 +586,48 @@ func (s *Service) buildSubmissionVector(ctx context.Context, objectRef string) (
 	return fingerprintVectorFromArchive(name, data, upload.ArchiveLimits{MaxFiles: s.cfg.InputArchiveMaxFiles, MaxUnpackedBytes: s.cfg.InputArchiveMaxUnpackedBytes})
 }
 
-// sanitizedArchiveBase64 持久化 M3 后端校验重包后的提交归档,供 fresh judge 注入。
-func sanitizedArchiveBase64(data []byte) string {
-	if len(data) == 0 {
-		return ""
-	}
-	return base64.StdEncoding.EncodeToString(data)
-}
-
 // sourceOwnershipFromRequest 从现有跨模块扩展输入中提取来源归属证明。
 func sourceOwnershipFromRequest(req contracts.JudgeSubmitRequest) SourceOwnership {
 	ownerID := jsonx.Int64FromAny(req.ExtraInput["source_owner_id"], 0)
-	if ownerID <= 0 {
-		ownerID = jsonx.Int64FromAny(req.ExtraInput["owner_account_id"], 0)
-	}
 	courseID := jsonx.Int64FromAny(req.ExtraInput["source_course_id"], 0)
-	if courseID <= 0 {
-		courseID = jsonx.Int64FromAny(req.ExtraInput["course_id"], 0)
-	}
 	scope := strings.TrimSpace(stringValue(req.ExtraInput["source_scope"]))
 	if scope == "" {
 		scope = sourceScopeFromRef(req.SourceRef)
-	}
-	if scope == "" {
-		scope = "unknown"
 	}
 	if ownerID <= 0 {
 		ownerID = req.SubmitterID
 	}
 	return SourceOwnership{OwnerID: ownerID, CourseID: courseID, Scope: scope}
+}
+
+// storeSanitizedCodeArchive 将后端重打包后的提交归档写入对象存储,数据库快照只保存引用。
+func (s *Service) storeSanitizedCodeArchive(ctx context.Context, tenantID, taskID int64, data []byte) (string, error) {
+	if len(data) == 0 {
+		return "", apperr.ErrJudgeInputArchiveInvalid
+	}
+	key, err := storage.ObjectKey(tenantID, "judge", "input", ids.Format(taskID), "submission.tar")
+	if err != nil {
+		return "", apperr.ErrJudgeInputArchiveInvalid.WithCause(err)
+	}
+	if err := s.minio.Put(ctx, s.minio.BucketCode(), key, bytes.NewReader(data), int64(len(data)), "application/x-tar"); err != nil {
+		return "", apperr.ErrJudgeInputArchiveInvalid.WithCause(err)
+	}
+	ref, err := storage.ObjectRefString(s.minio.BucketCode(), key)
+	if err != nil {
+		return "", apperr.ErrJudgeInputArchiveInvalid.WithCause(err)
+	}
+	return ref, nil
+}
+
+// validateSourceOwnership 强制来源归属快照采用唯一字段口径,教学来源必须携带课程快照。
+func validateSourceOwnership(ownership SourceOwnership) error {
+	if ownership.OwnerID <= 0 || strings.TrimSpace(ownership.Scope) == "" {
+		return apperr.ErrJudgeTaskForbidden
+	}
+	if ownership.Scope == "teaching" && ownership.CourseID <= 0 {
+		return apperr.ErrJudgeTaskForbidden
+	}
+	return nil
 }
 
 // sourceScopeFromRef 只解析来源类型,不在 M3 内解释业务模块私有 ID 语义。

@@ -20,6 +20,8 @@ var (
 	codePattern      = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{1,62}[a-z0-9]$`)
 	envNamePattern   = regexp.MustCompile(`^[A-Z_][A-Z0-9_]{0,63}$`)
 	mountNamePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,62}$`)
+	portNamePattern  = regexp.MustCompile(`^[a-z][a-z0-9-]{0,14}$`)
+	shellCommands    = map[string]struct{}{"sh": {}, "bash": {}, "dash": {}, "ash": {}, "zsh": {}, "ksh": {}, "csh": {}, "cmd": {}, "cmd.exe": {}, "powershell": {}, "powershell.exe": {}, "pwsh": {}, "pwsh.exe": {}}
 )
 
 // validateCreateRequest 校验内部创建沙箱请求的租户、来源和资源开关。
@@ -82,6 +84,9 @@ func validateToolRequest(req ToolRequest, cfg config.SandboxConfig) (ToolResourc
 	if req.Kind < SandboxToolKindBuiltin || req.Kind > SandboxToolKindWebEmbed {
 		return ToolResourceSpec{}, apperr.ErrSandboxToolCreateInvalid
 	}
+	if req.Kind != SandboxToolKindWebEmbed && (strings.TrimSpace(req.ImageURL) != "" || req.Port > 0 || strings.TrimSpace(req.Digest) != "") {
+		return ToolResourceSpec{}, apperr.ErrSandboxToolCreateInvalid
+	}
 	var spec ToolResourceSpec
 	if len(req.ResourceSpec) > 0 {
 		if err := jsonx.DecodeStrict(req.ResourceSpec, &spec); err != nil {
@@ -92,12 +97,27 @@ func validateToolRequest(req ToolRequest, cfg config.SandboxConfig) (ToolResourc
 		if strings.TrimSpace(req.ImageURL) == "" || req.Port <= 0 || strings.TrimSpace(spec.ReadinessProbe.Type) == "" {
 			return ToolResourceSpec{}, apperr.ErrSandboxToolCreateInvalid
 		}
+		if spec.MountWorkspace == nil {
+			return ToolResourceSpec{}, apperr.ErrSandboxToolCreateInvalid
+		}
 		normalizeProbe(&spec.ReadinessProbe, cfg)
+		if len(spec.Command) > 0 && !safeNonShellCommand(spec.Command) {
+			return ToolResourceSpec{}, apperr.ErrSandboxToolCreateInvalid
+		}
+		if err := validateResourceSpec(spec.Resources); err != nil {
+			return ToolResourceSpec{}, apperr.ErrSandboxToolCreateInvalid.WithCause(err)
+		}
+		if err := validateProbeSpec(&spec.ReadinessProbe, map[string]struct{}{"http": {}}); err != nil {
+			return ToolResourceSpec{}, apperr.ErrSandboxToolCreateInvalid.WithCause(err)
+		}
 	}
 	if req.Kind == SandboxToolKindBuiltin {
 		if !validBuiltinEndpointTemplate(spec.BuiltinEndpoint) {
 			return ToolResourceSpec{}, apperr.ErrSandboxToolCreateInvalid
 		}
+	}
+	if req.Kind != SandboxToolKindWebEmbed && toolHasContainerSpec(spec) {
+		return ToolResourceSpec{}, apperr.ErrSandboxToolCreateInvalid
 	}
 	if err := validateLiteralEnv(spec.Env); err != nil {
 		return ToolResourceSpec{}, err
@@ -260,12 +280,6 @@ func normalizeAndValidateAdapterSpec(spec *AdapterSpec, cfg config.SandboxConfig
 	if err := validatePrivateArchiveExecutionTarget(spec); err != nil {
 		return err
 	}
-	if err := validatePodTopology(spec, cfg); err != nil {
-		return err
-	}
-	if err := validateNetworkRules(spec); err != nil {
-		return err
-	}
 	ports := map[string]struct{}{}
 	for _, port := range spec.RuntimeContainer.Ports {
 		if _, exists := ports[port.Name]; exists {
@@ -287,6 +301,31 @@ func normalizeAndValidateAdapterSpec(spec *AdapterSpec, cfg config.SandboxConfig
 			ports[port.Name] = struct{}{}
 		}
 	}
+	if err := validateRuntimeContainerNames(spec); err != nil {
+		return err
+	}
+	if err := validatePodTopology(spec, cfg); err != nil {
+		return err
+	}
+	if err := validateNetworkRules(spec); err != nil {
+		return err
+	}
+	return nil
+}
+
+// validateRuntimeContainerNames 保证运行时清单内所有容器名全局唯一,避免 Pod 引用表覆盖错误容器。
+func validateRuntimeContainerNames(spec *AdapterSpec) error {
+	seen := map[string]struct{}{}
+	containers := append([]ContainerSpec{spec.RuntimeContainer}, spec.InfraSidecars...)
+	for _, container := range containers {
+		if !mountNamePattern.MatchString(container.Name) {
+			return apperr.ErrSandboxContainerSpecInvalid
+		}
+		if _, exists := seen[container.Name]; exists {
+			return apperr.ErrSandboxContainerSpecInvalid
+		}
+		seen[container.Name] = struct{}{}
+	}
 	return nil
 }
 
@@ -295,6 +334,7 @@ func validatePodTopology(spec *AdapterSpec, cfg config.SandboxConfig) error {
 	if len(spec.Pods) == 0 {
 		return nil
 	}
+	containerDefs := declaredContainerMap(*spec)
 	seenPods := map[string]struct{}{}
 	runtimeContainerSeen := false
 	for i := range spec.Pods {
@@ -311,37 +351,62 @@ func validatePodTopology(spec *AdapterSpec, cfg config.SandboxConfig) error {
 		ports := map[int32]struct{}{}
 		for j := range pod.Containers {
 			container := &pod.Containers[j]
-			if err := validateContainerSpec(container, cfg); err != nil {
-				return err
+			container.Name = strings.TrimSpace(container.Name)
+			if !podContainerIsReferenceOnly(*container) {
+				return apperr.ErrSandboxPodTopologyInvalid
 			}
-			if container.Name == spec.RuntimeContainer.Name {
+			declared, ok := containerDefs[container.Name]
+			if !ok {
+				return apperr.ErrSandboxPodTopologyInvalid
+			}
+			if declared.Name == spec.RuntimeContainer.Name {
 				runtimeContainerSeen = true
-				if strings.TrimSpace(container.Image) != "" {
-					return apperr.ErrSandboxPodTopologyInvalid
-				}
-				if hasVolumeDomain(*spec, VolumeDomainJudgePrivate) && studentAccessibleContainer(*container) {
+				if hasVolumeDomain(*spec, VolumeDomainJudgePrivate) && studentAccessibleContainer(declared) {
 					return apperr.ErrSandboxPrivateDomainInvalid
 				}
 			}
-			if container.Name != spec.RuntimeContainer.Name && !imageAttested(cfg, container.Image, digestFromImageURL(container.Image)) {
-				return apperr.ErrSandboxSidecarImageInvalid
-			}
-			if _, exists := containerNames[container.Name]; exists {
+			if _, exists := containerNames[declared.Name]; exists {
 				return apperr.ErrSandboxPodTopologyInvalid
 			}
-			containerNames[container.Name] = struct{}{}
-			for _, port := range container.Ports {
+			containerNames[declared.Name] = struct{}{}
+			for _, port := range declared.Ports {
 				if _, exists := ports[port.ContainerPort]; exists {
 					return apperr.ErrSandboxPodTopologyInvalid
 				}
 				ports[port.ContainerPort] = struct{}{}
 			}
+			pod.Containers[j] = declared
 		}
 	}
 	if !runtimeContainerSeen {
 		return apperr.ErrSandboxPodTopologyInvalid
 	}
 	return nil
+}
+
+// declaredContainerMap 建立运行时主容器和 infra sidecar 的唯一声明表,显式 Pod 组只能引用这里的容器。
+func declaredContainerMap(spec AdapterSpec) map[string]ContainerSpec {
+	out := map[string]ContainerSpec{spec.RuntimeContainer.Name: spec.RuntimeContainer}
+	for _, container := range spec.InfraSidecars {
+		out[container.Name] = container
+	}
+	return out
+}
+
+// podContainerIsReferenceOnly 保证 pods[].containers 只是引用,避免同一容器在 adapter_spec 中出现两套声明。
+func podContainerIsReferenceOnly(spec ContainerSpec) bool {
+	return spec.Name != "" &&
+		strings.TrimSpace(spec.Image) == "" &&
+		len(spec.Command) == 0 &&
+		len(spec.Args) == 0 &&
+		len(spec.Env) == 0 &&
+		len(spec.Ports) == 0 &&
+		len(spec.Resources.Requests) == 0 &&
+		len(spec.Resources.Limits) == 0 &&
+		strings.TrimSpace(spec.ReadinessProbe.Type) == "" &&
+		strings.TrimSpace(spec.LivenessProbe.Type) == "" &&
+		strings.TrimSpace(spec.Workdir) == "" &&
+		len(spec.Labels) == 0
 }
 
 // validateNetworkRules 校验同沙箱 Pod 互通必须显式引用已声明的目标端口。
@@ -430,6 +495,19 @@ func validateToolNetworkRules(spec *ToolResourceSpec) error {
 		}
 	}
 	return nil
+}
+
+// toolHasContainerSpec 判断非 web 工具是否误带容器运行配置,终端和平台内置工具不创建 sidecar。
+func toolHasContainerSpec(spec ToolResourceSpec) bool {
+	return spec.MountWorkspace != nil ||
+		len(spec.Command) > 0 ||
+		len(spec.Args) > 0 ||
+		len(spec.Env) > 0 ||
+		len(spec.EphemeralMounts) > 0 ||
+		strings.TrimSpace(spec.Workdir) != "" ||
+		len(spec.Resources.Requests) > 0 ||
+		len(spec.Resources.Limits) > 0 ||
+		strings.TrimSpace(spec.ReadinessProbe.Type) != ""
 }
 
 // validateToolNetworkRulesForRuntime 校验工具网络规则只能访问运行时拓扑中已声明的目标端口。
@@ -611,20 +689,22 @@ func digestFromImageURL(imageURL string) string {
 
 // validateWorkspaceOps 校验运行时声明了文件、归档、脚本、自检和终端所需的受控命令。
 func validateWorkspaceOps(ops WorkspaceOps) error {
-	required := [][]string{
+	helperCommands := [][]string{
 		ops.ReadFile,
 		ops.WriteFile,
 		ops.ListFiles,
 		ops.PackTar,
 		ops.UnpackTar,
 		ops.RunScript,
-		ops.Terminal,
 		ops.Selftest,
 	}
-	for _, command := range required {
-		if !safeCommand(command) {
+	for _, command := range helperCommands {
+		if !safeNonShellCommand(command) {
 			return apperr.ErrSandboxWorkspaceOpsInvalid
 		}
+	}
+	if !safeCommand(ops.Terminal) {
+		return apperr.ErrSandboxWorkspaceOpsInvalid
 	}
 	return nil
 }
@@ -634,14 +714,14 @@ func validateCapabilityCommands(spec *AdapterSpec, cfg config.SandboxConfig) err
 	if !hasCapabilityCommands(spec.CapabilityCommands) {
 		return nil
 	}
-	commands := []CapabilityCommandSpec{
-		spec.CapabilityCommands.Deploy,
-		spec.CapabilityCommands.Tx,
-		spec.CapabilityCommands.Query,
-		spec.CapabilityCommands.Reset,
+	commands := []*CapabilityCommandSpec{
+		&spec.CapabilityCommands.Deploy,
+		&spec.CapabilityCommands.Tx,
+		&spec.CapabilityCommands.Query,
+		&spec.CapabilityCommands.Reset,
 	}
 	for _, command := range commands {
-		if !safeCommand(command.Command) {
+		if !safeNonShellCommand(command.Command) {
 			return apperr.ErrSandboxCapabilityCommandInvalid
 		}
 		if command.TimeoutSeconds < 0 {
@@ -662,7 +742,7 @@ func hasCapabilityCommands(commands CapabilityCommandSet) bool {
 		len(commands.Reset.Command) > 0
 }
 
-// safeCommand 校验声明式命令不为空、不经 shell 字符串拼接,避免注册期放入隐式脚本。
+// safeCommand 校验声明式命令为 argv 数组且不含控制字符,终端入口可在受限容器中启动 shell。
 func safeCommand(command []string) bool {
 	if len(command) == 0 {
 		return false
@@ -671,23 +751,121 @@ func safeCommand(command []string) bool {
 		if strings.TrimSpace(part) == "" {
 			return false
 		}
+		if strings.ContainsAny(part, "\x00\r\n") {
+			return false
+		}
 	}
 	return true
 }
 
+// safeNonShellCommand 禁止内部 helper、判题和链能力命令以 shell 解释器作为入口,避免字符串脚本成为注入面。
+func safeNonShellCommand(command []string) bool {
+	if !safeCommand(command) {
+		return false
+	}
+	executable := strings.ToLower(path.Base(strings.TrimSpace(command[0])))
+	_, blocked := shellCommands[executable]
+	return !blocked
+}
+
 // validateContainerSpec 校验单个容器声明不会绕过安全上下文或硬编码无效探针。
 func validateContainerSpec(spec *ContainerSpec, cfg config.SandboxConfig) error {
-	if strings.TrimSpace(spec.Name) == "" || len(spec.Ports) == 0 {
+	spec.Name = strings.TrimSpace(spec.Name)
+	if !mountNamePattern.MatchString(spec.Name) || len(spec.Ports) == 0 {
 		return apperr.ErrSandboxContainerSpecInvalid
 	}
 	if err := validateLiteralEnv(spec.Env); err != nil {
 		return err
 	}
+	if err := validateResourceSpec(spec.Resources); err != nil {
+		return err
+	}
+	if err := validatePortSpecs(spec.Ports); err != nil {
+		return err
+	}
 	normalizeProbe(&spec.ReadinessProbe, cfg)
 	normalizeProbe(&spec.LivenessProbe, cfg)
-	for _, probe := range []ProbeSpec{spec.ReadinessProbe, spec.LivenessProbe} {
-		if probe.Type != "" && probe.Type != "tcp" && probe.Type != "http" && probe.Type != "exec" {
+	portNames := declaredPortNames(spec.Ports)
+	for _, probe := range []*ProbeSpec{&spec.ReadinessProbe, &spec.LivenessProbe} {
+		if err := validateProbeSpec(probe, portNames); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// validatePortSpecs 校验容器端口声明可被探针、NetworkPolicy 和工具规则稳定引用。
+func validatePortSpecs(ports []PortSpec) error {
+	seen := map[string]struct{}{}
+	for i := range ports {
+		port := &ports[i]
+		port.Name = strings.TrimSpace(port.Name)
+		port.Protocol = strings.ToUpper(strings.TrimSpace(port.Protocol))
+		if port.Protocol == "" {
+			port.Protocol = "TCP"
+		}
+		if !portNamePattern.MatchString(port.Name) || port.ContainerPort <= 0 || port.ContainerPort > 65535 ||
+			port.ServicePort < 0 || port.ServicePort > 65535 || (port.Protocol != "TCP" && port.Protocol != "UDP") {
+			return apperr.ErrSandboxContainerSpecInvalid
+		}
+		if _, exists := seen[port.Name]; exists {
+			return apperr.ErrSandboxContainerSpecInvalid
+		}
+		seen[port.Name] = struct{}{}
+	}
+	return nil
+}
+
+// declaredPortNames 建立端口名索引,供探针和网络规则引用校验。
+func declaredPortNames(ports []PortSpec) map[string]struct{} {
+	out := map[string]struct{}{}
+	for _, port := range ports {
+		out[port.Name] = struct{}{}
+	}
+	return out
+}
+
+// validateProbeSpec 校验探针类型与目标,exec 探针也必须走 argv 且不能以 shell 字符串入口执行。
+func validateProbeSpec(probe *ProbeSpec, portNames map[string]struct{}) error {
+	if probe == nil || strings.TrimSpace(probe.Type) == "" {
+		return nil
+	}
+	probe.Type = strings.ToLower(strings.TrimSpace(probe.Type))
+	probe.Port = strings.TrimSpace(probe.Port)
+	probe.Path = strings.TrimSpace(probe.Path)
+	switch probe.Type {
+	case "tcp":
+		if _, ok := portNames[probe.Port]; !ok {
 			return apperr.ErrSandboxProbeSpecInvalid
+		}
+	case "http":
+		if _, ok := portNames[probe.Port]; !ok || !strings.HasPrefix(probe.Path, "/") {
+			return apperr.ErrSandboxProbeSpecInvalid
+		}
+	case "exec":
+		if !safeNonShellCommand(probe.Command) {
+			return apperr.ErrSandboxProbeSpecInvalid
+		}
+	default:
+		return apperr.ErrSandboxProbeSpecInvalid
+	}
+	return nil
+}
+
+// validateResourceSpec 校验显式资源配置必须同时声明 requests 与 limits,并能被 K8s quantity 解析。
+func validateResourceSpec(spec ResourceSpec) error {
+	if len(spec.Requests) == 0 && len(spec.Limits) == 0 {
+		return nil
+	}
+	for _, resources := range []map[string]string{spec.Requests, spec.Limits} {
+		if strings.TrimSpace(resources["cpu"]) == "" || strings.TrimSpace(resources["memory"]) == "" {
+			return apperr.ErrSandboxContainerSpecInvalid
+		}
+		if _, err := resource.ParseQuantity(resources["cpu"]); err != nil {
+			return apperr.ErrSandboxContainerSpecInvalid.WithCause(err)
+		}
+		if _, err := resource.ParseQuantity(resources["memory"]); err != nil {
+			return apperr.ErrSandboxContainerSpecInvalid.WithCause(err)
 		}
 	}
 	return nil

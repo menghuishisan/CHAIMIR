@@ -33,9 +33,13 @@ func (s *Service) RunRecycleOnce(ctx context.Context) error {
 	}); err != nil {
 		return err
 	}
+	var firstErr error
 	for _, candidate := range candidates {
 		if err := s.recycleOne(ctx, candidate, "scheduled"); err != nil {
-			return err
+			logging.ErrorContext(ctx, "sandbox scheduled recycle failed", err.Error(), slog.Int64("tenant_id", candidate.TenantID), slog.Int64("sandbox_id", candidate.ID))
+			if firstErr == nil {
+				firstErr = err
+			}
 		}
 	}
 	var snapshots []Sandbox
@@ -51,7 +55,12 @@ func (s *Service) RunRecycleOnce(ctx context.Context) error {
 	}
 	for _, snapshot := range snapshots {
 		if err := s.orchestrator.CleanupSnapshotResources(ctx, snapshot); err != nil {
-			return apperr.ErrSandboxSnapshotCleanupFailed.WithCause(err)
+			wrapped := apperr.ErrSandboxSnapshotCleanupFailed.WithCause(err)
+			logging.ErrorContext(ctx, "sandbox snapshot cleanup failed", err.Error(), slog.Int64("tenant_id", snapshot.TenantID), slog.Int64("sandbox_id", snapshot.ID), slog.String("namespace", snapshot.Namespace))
+			if firstErr == nil {
+				firstErr = wrapped
+			}
+			continue
 		}
 		if err := s.store.TenantTx(ctx, snapshot.TenantID, func(ctx context.Context, tx TxStore) error {
 			if _, err := tx.UpdateSandboxSnapshot(ctx, snapshot.TenantID, snapshot.ID, "", nil, time.Time{}, time.Time{}); err != nil {
@@ -59,10 +68,13 @@ func (s *Service) RunRecycleOnce(ctx context.Context) error {
 			}
 			return nil
 		}); err != nil {
-			return err
+			logging.ErrorContext(ctx, "sandbox snapshot cleanup state update failed", err.Error(), slog.Int64("tenant_id", snapshot.TenantID), slog.Int64("sandbox_id", snapshot.ID))
+			if firstErr == nil {
+				firstErr = err
+			}
 		}
 	}
-	return nil
+	return firstErr
 }
 
 // recycleOne 按保存代码、快照、删除资源、写终态、审计、发布事件的顺序回收单个沙箱。

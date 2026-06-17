@@ -82,29 +82,29 @@ type JudgeTaskInfo struct {
 
 // JudgeInputSnapshot 固定一次判题所需的题目版本、执行器和脱敏期望。
 type JudgeInputSnapshot struct {
-	ItemCode                   string         `json:"item_code"`
-	ItemVersion                string         `json:"item_version"`
-	TraceID                    string         `json:"trace_id"`
-	JudgerCode                 string         `json:"judger_code"`
-	JudgerType                 int16          `json:"judger_type"`
-	JudgerVersion              string         `json:"judger_version"`
-	SuiteRef                   string         `json:"suite_ref,omitempty"`
-	SuiteArchiveName           string         `json:"suite_archive_name,omitempty"`
-	VersionHash                string         `json:"version_hash"`
-	RuntimeCode                string         `json:"runtime_code,omitempty"`
-	RuntimeImageVersion        string         `json:"runtime_image_version,omitempty"`
-	GenesisRef                 string         `json:"genesis_ref,omitempty"`
-	ToolCodes                  []string       `json:"tool_codes,omitempty"`
-	InitScriptRef              string         `json:"init_script_ref,omitempty"`
-	Command                    []string       `json:"command,omitempty"`
-	TimeoutSec                 int32          `json:"timeout_sec"`
-	MaxRetries                 int32          `json:"max_retries"`
-	MaxScore                   int32          `json:"max_score"`
-	Expectation                map[string]any `json:"expectation,omitempty"`
-	ExtraInput                 map[string]any `json:"extra_input,omitempty"`
-	Rejudge                    bool           `json:"rejudge,omitempty"`
-	SanitizedCodeArchiveName   string         `json:"sanitized_code_archive_name,omitempty"`
-	SanitizedCodeArchiveBase64 string         `json:"sanitized_code_archive_base64,omitempty"`
+	ItemCode                 string         `json:"item_code"`
+	ItemVersion              string         `json:"item_version"`
+	TraceID                  string         `json:"trace_id"`
+	JudgerCode               string         `json:"judger_code"`
+	JudgerType               int16          `json:"judger_type"`
+	JudgerVersion            string         `json:"judger_version"`
+	SuiteRef                 string         `json:"suite_ref,omitempty"`
+	SuiteArchiveName         string         `json:"suite_archive_name,omitempty"`
+	VersionHash              string         `json:"version_hash"`
+	RuntimeCode              string         `json:"runtime_code,omitempty"`
+	RuntimeImageVersion      string         `json:"runtime_image_version,omitempty"`
+	GenesisRef               string         `json:"genesis_ref,omitempty"`
+	ToolCodes                []string       `json:"tool_codes,omitempty"`
+	InitScriptRef            string         `json:"init_script_ref,omitempty"`
+	Command                  []string       `json:"command,omitempty"`
+	TimeoutSec               int32          `json:"timeout_sec"`
+	MaxRetries               int32          `json:"max_retries"`
+	MaxScore                 int32          `json:"max_score"`
+	Expectation              map[string]any `json:"expectation,omitempty"`
+	ExtraInput               map[string]any `json:"extra_input,omitempty"`
+	Rejudge                  bool           `json:"rejudge,omitempty"`
+	SanitizedCodeArchiveName string         `json:"sanitized_code_archive_name,omitempty"`
+	SanitizedCodeArchiveRef  string         `json:"sanitized_code_archive_ref,omitempty"`
 }
 
 // SubmissionFingerprint 是 M3 生成的代码查重特征。

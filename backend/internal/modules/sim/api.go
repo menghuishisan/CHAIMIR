@@ -191,7 +191,12 @@ func (a simAPI) listReviews(c *gin.Context) {
 	if !ok {
 		return
 	}
-	items, total, p, s, err := a.svc.ListReviews(c.Request.Context(), reviewResultFromQuery(c.DefaultQuery("result", "pending")), page, size)
+	result, err := reviewResultFromQuery(c.DefaultQuery("result", "pending"))
+	if err != nil {
+		response.Fail(c, err)
+		return
+	}
+	items, total, p, s, err := a.svc.ListReviews(c.Request.Context(), result, page, size)
 	httpx.WritePage(c, items, total, p, s, err)
 }
 
@@ -306,7 +311,9 @@ func (a simAPI) destroySession(c *gin.Context) {
 	if !ok {
 		return
 	}
-	httpx.Write(c, gin.H{}, a.svc.DestroySession(c.Request.Context(), tenantID, id))
+	sourceRef, _ := auth.ServiceSourceRefFromContext(c.Request.Context())
+	err := a.svc.DestroySession(c.Request.Context(), contracts.SimDestroySessionRequest{TenantID: tenantID, SessionID: id, SourceRef: sourceRef})
+	httpx.Write(c, gin.H{}, err)
 }
 
 // recycleSessions 按来源批量归档内部会话。

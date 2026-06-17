@@ -155,7 +155,15 @@ func (s *txStore) CreatePackage(ctx context.Context, pkg Package) (Package, erro
 	if err != nil {
 		return Package{}, err
 	}
-	row, err := s.q.CreateSimPackage(ctx, sqlcgen.CreateSimPackageParams{ID: pkg.ID, Code: pkg.Code, Version: pkg.Version, Name: pkg.Name, Category: pkg.Category, Compute: pkg.Compute, ScaleLimit: scale, BundleKey: pkg.BundleKey, BundleHash: pkg.BundleHash, BackendAdapter: pgtypex.Text(pkg.BackendAdapter), BackendConfig: backend, AuthorType: pkg.AuthorType, AuthorID: pgtypex.Int8(pkg.AuthorID), Status: pkg.Status})
+	interactionSchema, err := jsonx.AnyBytes(pkg.InteractionSchema, apperr.ErrSimPackageInvalid)
+	if err != nil {
+		return Package{}, err
+	}
+	codeTrace, err := jsonx.AnyBytes(pkg.CodeTrace, apperr.ErrSimPackageInvalid)
+	if err != nil {
+		return Package{}, err
+	}
+	row, err := s.q.CreateSimPackage(ctx, sqlcgen.CreateSimPackageParams{ID: pkg.ID, Code: pkg.Code, Version: pkg.Version, Name: pkg.Name, Category: pkg.Category, Compute: pkg.Compute, ScaleLimit: scale, BundleKey: pkg.BundleKey, BundleHash: pkg.BundleHash, BackendAdapter: pgtypex.Text(pkg.BackendAdapter), BackendConfig: backend, InteractionSchema: interactionSchema, CodeTrace: codeTrace, AuthorType: pkg.AuthorType, AuthorID: pgtypex.Int8(pkg.AuthorID), Status: pkg.Status})
 	if err != nil {
 		return Package{}, err
 	}
@@ -168,7 +176,15 @@ func (s *txStore) UpdatePackageDraft(ctx context.Context, pkg Package) (Package,
 	if err != nil {
 		return Package{}, err
 	}
-	row, err := s.q.UpdateSimPackageDraft(ctx, sqlcgen.UpdateSimPackageDraftParams{ID: pkg.ID, Name: pkg.Name, Category: pkg.Category, Compute: pkg.Compute, ScaleLimit: scale, BundleKey: pkg.BundleKey, BundleHash: pkg.BundleHash, BackendAdapter: pgtypex.Text(pkg.BackendAdapter), BackendConfig: backend, Status: pkg.Status})
+	interactionSchema, err := jsonx.AnyBytes(pkg.InteractionSchema, apperr.ErrSimPackageInvalid)
+	if err != nil {
+		return Package{}, err
+	}
+	codeTrace, err := jsonx.AnyBytes(pkg.CodeTrace, apperr.ErrSimPackageInvalid)
+	if err != nil {
+		return Package{}, err
+	}
+	row, err := s.q.UpdateSimPackageDraft(ctx, sqlcgen.UpdateSimPackageDraftParams{ID: pkg.ID, Name: pkg.Name, Category: pkg.Category, Compute: pkg.Compute, ScaleLimit: scale, BundleKey: pkg.BundleKey, BundleHash: pkg.BundleHash, BackendAdapter: pgtypex.Text(pkg.BackendAdapter), BackendConfig: backend, InteractionSchema: interactionSchema, CodeTrace: codeTrace, Status: pkg.Status})
 	if err != nil {
 		return Package{}, err
 	}

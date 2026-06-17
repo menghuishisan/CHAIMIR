@@ -30,22 +30,24 @@ type SimCheckpoint struct {
 }
 
 type SimPackage struct {
-	ID             int64              `json:"id"`
-	Code           string             `json:"code"`
-	Version        string             `json:"version"`
-	Name           string             `json:"name"`
-	Category       string             `json:"category"`
-	Compute        int16              `json:"compute"`
-	ScaleLimit     []byte             `json:"scale_limit"`
-	BundleKey      string             `json:"bundle_key"`
-	BundleHash     string             `json:"bundle_hash"`
-	BackendAdapter pgtype.Text        `json:"backend_adapter"`
-	BackendConfig  []byte             `json:"backend_config"`
-	AuthorType     int16              `json:"author_type"`
-	AuthorID       pgtype.Int8        `json:"author_id"`
-	Status         int16              `json:"status"`
-	CreatedAt      pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+	ID                int64              `json:"id"`
+	Code              string             `json:"code"`
+	Version           string             `json:"version"`
+	Name              string             `json:"name"`
+	Category          string             `json:"category"`
+	Compute           int16              `json:"compute"`
+	ScaleLimit        []byte             `json:"scale_limit"`
+	BundleKey         string             `json:"bundle_key"`
+	BundleHash        string             `json:"bundle_hash"`
+	BackendAdapter    pgtype.Text        `json:"backend_adapter"`
+	BackendConfig     []byte             `json:"backend_config"`
+	InteractionSchema []byte             `json:"interaction_schema"`
+	CodeTrace         []byte             `json:"code_trace"`
+	AuthorType        int16              `json:"author_type"`
+	AuthorID          pgtype.Int8        `json:"author_id"`
+	Status            int16              `json:"status"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
 }
 
 type SimPackageReview struct {

@@ -477,7 +477,8 @@ func (s *Service) destroyCreatedStageResources(ctx context.Context, inst Experim
 		if s.sim == nil {
 			return apperr.ErrExperimentRecycleFailed
 		}
-		if err := s.sim.DestroySession(ctx, inst.TenantID, ref.SessionID); err != nil {
+		req := contracts.SimDestroySessionRequest{TenantID: inst.TenantID, SessionID: ref.SessionID, SourceRef: inst.SourceRef}
+		if err := s.sim.DestroySession(ctx, req); err != nil {
 			return apperr.ErrExperimentRecycleFailed.WithCause(err)
 		}
 	}

@@ -10,6 +10,8 @@ CREATE TABLE IF NOT EXISTS sim_package (
     bundle_hash VARCHAR(64) NOT NULL,
     backend_adapter VARCHAR(96),
     backend_config JSONB NOT NULL DEFAULT '{}'::jsonb,
+    interaction_schema JSONB NOT NULL DEFAULT '{"events":{}}'::jsonb,
+    code_trace JSONB NOT NULL DEFAULT '{}'::jsonb,
     author_type SMALLINT NOT NULL CHECK (author_type IN (1, 2, 3)),
     author_id BIGINT,
     status SMALLINT NOT NULL CHECK (status IN (1, 2, 3, 4, 5)),
@@ -105,7 +107,7 @@ ALTER TABLE sim_action_log ENABLE ROW LEVEL SECURITY;
 ALTER TABLE sim_checkpoint ENABLE ROW LEVEL SECURITY;
 ALTER TABLE sim_share ENABLE ROW LEVEL SECURITY;
 
-CREATE POLICY sim_session_tenant_rls ON sim_session USING (tenant_id = current_setting('app.tenant_id')::BIGINT);
-CREATE POLICY sim_action_log_tenant_rls ON sim_action_log USING (tenant_id = current_setting('app.tenant_id')::BIGINT);
-CREATE POLICY sim_checkpoint_tenant_rls ON sim_checkpoint USING (tenant_id = current_setting('app.tenant_id')::BIGINT);
-CREATE POLICY sim_share_tenant_rls ON sim_share USING (tenant_id = current_setting('app.tenant_id')::BIGINT);
+CREATE POLICY sim_session_tenant_rls ON sim_session USING (tenant_id = current_setting('app.tenant_id')::BIGINT) WITH CHECK (tenant_id = current_setting('app.tenant_id')::BIGINT);
+CREATE POLICY sim_action_log_tenant_rls ON sim_action_log USING (tenant_id = current_setting('app.tenant_id')::BIGINT) WITH CHECK (tenant_id = current_setting('app.tenant_id')::BIGINT);
+CREATE POLICY sim_checkpoint_tenant_rls ON sim_checkpoint USING (tenant_id = current_setting('app.tenant_id')::BIGINT) WITH CHECK (tenant_id = current_setting('app.tenant_id')::BIGINT);
+CREATE POLICY sim_share_tenant_rls ON sim_share USING (tenant_id = current_setting('app.tenant_id')::BIGINT) WITH CHECK (tenant_id = current_setting('app.tenant_id')::BIGINT);

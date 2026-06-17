@@ -202,28 +202,30 @@ func (q *Queries) CreateSimAction(ctx context.Context, arg CreateSimActionParams
 const createSimPackage = `-- name: CreateSimPackage :one
 INSERT INTO sim_package (
     id, code, version, name, category, compute, scale_limit, bundle_key, bundle_hash,
-    backend_adapter, backend_config, author_type, author_id, status, created_at, updated_at
+    backend_adapter, backend_config, interaction_schema, code_trace, author_type, author_id, status, created_at, updated_at
 )
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, now(), now())
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, now(), now())
 RETURNING id, code, version, name, category, compute, scale_limit, bundle_key, bundle_hash,
-          backend_adapter, backend_config, author_type, author_id, status, created_at, updated_at
+          backend_adapter, backend_config, interaction_schema, code_trace, author_type, author_id, status, created_at, updated_at
 `
 
 type CreateSimPackageParams struct {
-	ID             int64       `json:"id"`
-	Code           string      `json:"code"`
-	Version        string      `json:"version"`
-	Name           string      `json:"name"`
-	Category       string      `json:"category"`
-	Compute        int16       `json:"compute"`
-	ScaleLimit     []byte      `json:"scale_limit"`
-	BundleKey      string      `json:"bundle_key"`
-	BundleHash     string      `json:"bundle_hash"`
-	BackendAdapter pgtype.Text `json:"backend_adapter"`
-	BackendConfig  []byte      `json:"backend_config"`
-	AuthorType     int16       `json:"author_type"`
-	AuthorID       pgtype.Int8 `json:"author_id"`
-	Status         int16       `json:"status"`
+	ID                int64       `json:"id"`
+	Code              string      `json:"code"`
+	Version           string      `json:"version"`
+	Name              string      `json:"name"`
+	Category          string      `json:"category"`
+	Compute           int16       `json:"compute"`
+	ScaleLimit        []byte      `json:"scale_limit"`
+	BundleKey         string      `json:"bundle_key"`
+	BundleHash        string      `json:"bundle_hash"`
+	BackendAdapter    pgtype.Text `json:"backend_adapter"`
+	BackendConfig     []byte      `json:"backend_config"`
+	InteractionSchema []byte      `json:"interaction_schema"`
+	CodeTrace         []byte      `json:"code_trace"`
+	AuthorType        int16       `json:"author_type"`
+	AuthorID          pgtype.Int8 `json:"author_id"`
+	Status            int16       `json:"status"`
 }
 
 func (q *Queries) CreateSimPackage(ctx context.Context, arg CreateSimPackageParams) (SimPackage, error) {
@@ -239,6 +241,8 @@ func (q *Queries) CreateSimPackage(ctx context.Context, arg CreateSimPackagePara
 		arg.BundleHash,
 		arg.BackendAdapter,
 		arg.BackendConfig,
+		arg.InteractionSchema,
+		arg.CodeTrace,
 		arg.AuthorType,
 		arg.AuthorID,
 		arg.Status,
@@ -256,6 +260,8 @@ func (q *Queries) CreateSimPackage(ctx context.Context, arg CreateSimPackagePara
 		&i.BundleHash,
 		&i.BackendAdapter,
 		&i.BackendConfig,
+		&i.InteractionSchema,
+		&i.CodeTrace,
 		&i.AuthorType,
 		&i.AuthorID,
 		&i.Status,
@@ -470,7 +476,7 @@ func (q *Queries) GetSimActionBySeq(ctx context.Context, arg GetSimActionBySeqPa
 
 const getSimPackageByCodeVersion = `-- name: GetSimPackageByCodeVersion :one
 SELECT id, code, version, name, category, compute, scale_limit, bundle_key, bundle_hash,
-       backend_adapter, backend_config, author_type, author_id, status, created_at, updated_at
+       backend_adapter, backend_config, interaction_schema, code_trace, author_type, author_id, status, created_at, updated_at
 FROM sim_package
 WHERE code = $1 AND version = $2
 `
@@ -495,6 +501,8 @@ func (q *Queries) GetSimPackageByCodeVersion(ctx context.Context, arg GetSimPack
 		&i.BundleHash,
 		&i.BackendAdapter,
 		&i.BackendConfig,
+		&i.InteractionSchema,
+		&i.CodeTrace,
 		&i.AuthorType,
 		&i.AuthorID,
 		&i.Status,
@@ -506,7 +514,7 @@ func (q *Queries) GetSimPackageByCodeVersion(ctx context.Context, arg GetSimPack
 
 const getSimPackageByID = `-- name: GetSimPackageByID :one
 SELECT id, code, version, name, category, compute, scale_limit, bundle_key, bundle_hash,
-       backend_adapter, backend_config, author_type, author_id, status, created_at, updated_at
+       backend_adapter, backend_config, interaction_schema, code_trace, author_type, author_id, status, created_at, updated_at
 FROM sim_package
 WHERE id = $1
 `
@@ -526,6 +534,8 @@ func (q *Queries) GetSimPackageByID(ctx context.Context, id int64) (SimPackage, 
 		&i.BundleHash,
 		&i.BackendAdapter,
 		&i.BackendConfig,
+		&i.InteractionSchema,
+		&i.CodeTrace,
 		&i.AuthorType,
 		&i.AuthorID,
 		&i.Status,
@@ -590,7 +600,8 @@ func (q *Queries) GetSimSession(ctx context.Context, arg GetSimSessionParams) (S
 
 const getSimSessionWithPackage = `-- name: GetSimSessionWithPackage :one
 SELECT s.id, s.tenant_id, s.package_id, s.source_ref, s.owner_account_id, s.seed, s.init_params, s.compute, s.status, s.created_at, s.updated_at,
-       p.code, p.version, p.name, p.category, p.bundle_key, p.bundle_hash, p.backend_adapter, p.backend_config, p.status AS package_status
+       p.code, p.version, p.name, p.category, p.bundle_key, p.bundle_hash, p.backend_adapter, p.backend_config,
+       p.interaction_schema, p.status AS package_status
 FROM sim_session s
 JOIN sim_package p ON p.id = s.package_id
 WHERE s.tenant_id = $1 AND s.id = $2
@@ -602,26 +613,27 @@ type GetSimSessionWithPackageParams struct {
 }
 
 type GetSimSessionWithPackageRow struct {
-	ID             int64              `json:"id"`
-	TenantID       int64              `json:"tenant_id"`
-	PackageID      int64              `json:"package_id"`
-	SourceRef      string             `json:"source_ref"`
-	OwnerAccountID int64              `json:"owner_account_id"`
-	Seed           int64              `json:"seed"`
-	InitParams     []byte             `json:"init_params"`
-	Compute        int16              `json:"compute"`
-	Status         int16              `json:"status"`
-	CreatedAt      pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
-	Code           string             `json:"code"`
-	Version        string             `json:"version"`
-	Name           string             `json:"name"`
-	Category       string             `json:"category"`
-	BundleKey      string             `json:"bundle_key"`
-	BundleHash     string             `json:"bundle_hash"`
-	BackendAdapter pgtype.Text        `json:"backend_adapter"`
-	BackendConfig  []byte             `json:"backend_config"`
-	PackageStatus  int16              `json:"package_status"`
+	ID                int64              `json:"id"`
+	TenantID          int64              `json:"tenant_id"`
+	PackageID         int64              `json:"package_id"`
+	SourceRef         string             `json:"source_ref"`
+	OwnerAccountID    int64              `json:"owner_account_id"`
+	Seed              int64              `json:"seed"`
+	InitParams        []byte             `json:"init_params"`
+	Compute           int16              `json:"compute"`
+	Status            int16              `json:"status"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
+	Code              string             `json:"code"`
+	Version           string             `json:"version"`
+	Name              string             `json:"name"`
+	Category          string             `json:"category"`
+	BundleKey         string             `json:"bundle_key"`
+	BundleHash        string             `json:"bundle_hash"`
+	BackendAdapter    pgtype.Text        `json:"backend_adapter"`
+	BackendConfig     []byte             `json:"backend_config"`
+	InteractionSchema []byte             `json:"interaction_schema"`
+	PackageStatus     int16              `json:"package_status"`
 }
 
 func (q *Queries) GetSimSessionWithPackage(ctx context.Context, arg GetSimSessionWithPackageParams) (GetSimSessionWithPackageRow, error) {
@@ -647,6 +659,7 @@ func (q *Queries) GetSimSessionWithPackage(ctx context.Context, arg GetSimSessio
 		&i.BundleHash,
 		&i.BackendAdapter,
 		&i.BackendConfig,
+		&i.InteractionSchema,
 		&i.PackageStatus,
 	)
 	return i, err
@@ -718,7 +731,7 @@ func (q *Queries) ListSimActions(ctx context.Context, arg ListSimActionsParams) 
 
 const listSimPackageVersions = `-- name: ListSimPackageVersions :many
 SELECT id, code, version, name, category, compute, scale_limit, bundle_key, bundle_hash,
-       backend_adapter, backend_config, author_type, author_id, status, created_at, updated_at
+       backend_adapter, backend_config, interaction_schema, code_trace, author_type, author_id, status, created_at, updated_at
 FROM sim_package
 WHERE code = $1
 ORDER BY created_at DESC, id DESC
@@ -745,6 +758,8 @@ func (q *Queries) ListSimPackageVersions(ctx context.Context, code string) ([]Si
 			&i.BundleHash,
 			&i.BackendAdapter,
 			&i.BackendConfig,
+			&i.InteractionSchema,
+			&i.CodeTrace,
 			&i.AuthorType,
 			&i.AuthorID,
 			&i.Status,
@@ -763,7 +778,7 @@ func (q *Queries) ListSimPackageVersions(ctx context.Context, code string) ([]Si
 
 const listSimPackages = `-- name: ListSimPackages :many
 SELECT id, code, version, name, category, compute, scale_limit, bundle_key, bundle_hash,
-       backend_adapter, backend_config, author_type, author_id, status, created_at, updated_at
+       backend_adapter, backend_config, interaction_schema, code_trace, author_type, author_id, status, created_at, updated_at
 FROM sim_package
 WHERE ($1::smallint = 0 OR status = $1)
   AND ($2::text = '' OR category = $2)
@@ -807,6 +822,8 @@ func (q *Queries) ListSimPackages(ctx context.Context, arg ListSimPackagesParams
 			&i.BundleHash,
 			&i.BackendAdapter,
 			&i.BackendConfig,
+			&i.InteractionSchema,
+			&i.CodeTrace,
 			&i.AuthorType,
 			&i.AuthorID,
 			&i.Status,
@@ -933,24 +950,28 @@ SET name = $2,
     bundle_hash = $7,
     backend_adapter = $8,
     backend_config = $9,
-    status = $10,
+    interaction_schema = $10,
+    code_trace = $11,
+    status = $12,
     updated_at = now()
 WHERE id = $1 AND status IN (1, 5)
 RETURNING id, code, version, name, category, compute, scale_limit, bundle_key, bundle_hash,
-          backend_adapter, backend_config, author_type, author_id, status, created_at, updated_at
+          backend_adapter, backend_config, interaction_schema, code_trace, author_type, author_id, status, created_at, updated_at
 `
 
 type UpdateSimPackageDraftParams struct {
-	ID             int64       `json:"id"`
-	Name           string      `json:"name"`
-	Category       string      `json:"category"`
-	Compute        int16       `json:"compute"`
-	ScaleLimit     []byte      `json:"scale_limit"`
-	BundleKey      string      `json:"bundle_key"`
-	BundleHash     string      `json:"bundle_hash"`
-	BackendAdapter pgtype.Text `json:"backend_adapter"`
-	BackendConfig  []byte      `json:"backend_config"`
-	Status         int16       `json:"status"`
+	ID                int64       `json:"id"`
+	Name              string      `json:"name"`
+	Category          string      `json:"category"`
+	Compute           int16       `json:"compute"`
+	ScaleLimit        []byte      `json:"scale_limit"`
+	BundleKey         string      `json:"bundle_key"`
+	BundleHash        string      `json:"bundle_hash"`
+	BackendAdapter    pgtype.Text `json:"backend_adapter"`
+	BackendConfig     []byte      `json:"backend_config"`
+	InteractionSchema []byte      `json:"interaction_schema"`
+	CodeTrace         []byte      `json:"code_trace"`
+	Status            int16       `json:"status"`
 }
 
 func (q *Queries) UpdateSimPackageDraft(ctx context.Context, arg UpdateSimPackageDraftParams) (SimPackage, error) {
@@ -964,6 +985,8 @@ func (q *Queries) UpdateSimPackageDraft(ctx context.Context, arg UpdateSimPackag
 		arg.BundleHash,
 		arg.BackendAdapter,
 		arg.BackendConfig,
+		arg.InteractionSchema,
+		arg.CodeTrace,
 		arg.Status,
 	)
 	var i SimPackage
@@ -979,6 +1002,8 @@ func (q *Queries) UpdateSimPackageDraft(ctx context.Context, arg UpdateSimPackag
 		&i.BundleHash,
 		&i.BackendAdapter,
 		&i.BackendConfig,
+		&i.InteractionSchema,
+		&i.CodeTrace,
 		&i.AuthorType,
 		&i.AuthorID,
 		&i.Status,
@@ -993,7 +1018,7 @@ UPDATE sim_package
 SET status = $2, updated_at = now()
 WHERE id = $1
 RETURNING id, code, version, name, category, compute, scale_limit, bundle_key, bundle_hash,
-          backend_adapter, backend_config, author_type, author_id, status, created_at, updated_at
+          backend_adapter, backend_config, interaction_schema, code_trace, author_type, author_id, status, created_at, updated_at
 `
 
 type UpdateSimPackageStatusParams struct {
@@ -1016,6 +1041,8 @@ func (q *Queries) UpdateSimPackageStatus(ctx context.Context, arg UpdateSimPacka
 		&i.BundleHash,
 		&i.BackendAdapter,
 		&i.BackendConfig,
+		&i.InteractionSchema,
+		&i.CodeTrace,
 		&i.AuthorType,
 		&i.AuthorID,
 		&i.Status,
