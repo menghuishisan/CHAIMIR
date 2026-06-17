@@ -4,10 +4,10 @@ package contest
 import (
 	"context"
 	"fmt"
-	"strconv"
 	"strings"
 
 	"chaimir/internal/contracts"
+	"chaimir/internal/platform/ids"
 	"chaimir/internal/platform/timex"
 	"chaimir/pkg/apperr"
 )
@@ -102,11 +102,11 @@ func (s *Service) SubmitSolve(ctx context.Context, contestID, problemID int64, r
 	}); err != nil {
 		return SubmissionDTO{}, err
 	}
-	task, err := s.judge.SubmitJudgeTask(ctx, contracts.JudgeSubmitRequest{TenantID: id.TenantID, JudgerCode: "contest-solve", ItemCode: problem.ItemCode, ItemVersion: problem.ItemVersion, CodeStorageKey: req.CodeStorageKey, CodeHash: req.CodeHash, SubmitterID: id.AccountID, SourceRef: sourceRef, SandboxMode: sandboxModeForSolve(req), TargetSandboxRef: req.SandboxRef, ExtraInput: map[string]any{"contest_id": contestID, "problem_id": problemID, "content_ref": req.ContentRef}, Priority: 8})
+	task, err := s.judge.SubmitJudgeTask(ctx, contracts.JudgeSubmitRequest{TenantID: id.TenantID, JudgerCode: "contest-solve", ItemCode: problem.ItemCode, ItemVersion: problem.ItemVersion, CodeStorageKey: req.CodeStorageKey, CodeHash: req.CodeHash, SubmitterID: id.AccountID, SourceRef: sourceRef, SourceOwnerID: id.AccountID, SourceCourseID: 0, SourceScope: "contest", SandboxMode: sandboxModeForSolve(req), TargetSandboxRef: req.SandboxRef, ExtraInput: map[string]any{"contest_id": contestID, "problem_id": problemID, "content_ref": req.ContentRef}, Priority: 8})
 	if err != nil {
 		return SubmissionDTO{}, apperr.ErrContestJudgeUnavailable.WithCause(err)
 	}
-	item := SolveSubmission{ID: submissionID, TenantID: id.TenantID, ContestID: contest.ID, ProblemID: problem.ID, TeamID: team.ID, SubmitterID: id.AccountID, ContentRef: req.ContentRef, SourceRef: sourceRef, JudgeTaskRef: fmt.Sprintf("%d", task.TaskID), SandboxRef: req.SandboxRef}
+	item := SolveSubmission{ID: submissionID, TenantID: id.TenantID, ContestID: contest.ID, ProblemID: problem.ID, TeamID: team.ID, SubmitterID: id.AccountID, ContentRef: req.ContentRef, SourceRef: sourceRef, JudgeTaskRef: ids.Format(task.TaskID), SandboxRef: req.SandboxRef}
 	if task.Status == contracts.JudgeTaskStatusDone {
 		item.Passed = task.Result.Passed
 		item.Score = scaledContestScore(problem.Score, task.Result.Score, task.Result.MaxScore)
@@ -183,7 +183,7 @@ func (s *Service) HandleSolveJudgeCompleted(ctx context.Context, event contracts
 	}
 	var updated SolveSubmission
 	if err := s.store.TenantTx(ctx, event.TenantID, func(ctx context.Context, tx TxStore) error {
-		sub, err := tx.GetSolveSubmissionByJudgeTask(ctx, event.TenantID, strconv.FormatInt(event.TaskID, 10))
+		sub, err := tx.GetSolveSubmissionByJudgeTask(ctx, event.TenantID, ids.Format(event.TaskID))
 		if err != nil {
 			if isNoRows(err) {
 				return apperr.ErrContestSubmissionNotFound
@@ -227,7 +227,7 @@ func (s *Service) HandleSolveJudgeFailed(ctx context.Context, event contracts.Ju
 		return apperr.ErrContestEventPayloadInvalid
 	}
 	return s.store.TenantTx(ctx, event.TenantID, func(ctx context.Context, tx TxStore) error {
-		sub, err := tx.GetSolveSubmissionByJudgeTask(ctx, event.TenantID, strconv.FormatInt(event.TaskID, 10))
+		sub, err := tx.GetSolveSubmissionByJudgeTask(ctx, event.TenantID, ids.Format(event.TaskID))
 		if err != nil {
 			if isNoRows(err) {
 				return apperr.ErrContestSubmissionNotFound

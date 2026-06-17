@@ -21,6 +21,7 @@ type Store interface {
 	PlatformTx(ctx context.Context, fn func(context.Context, TxStore) error) error
 	TenantTx(ctx context.Context, tenantID int64, fn func(context.Context, TxStore) error) error
 	PrivilegedTx(ctx context.Context, fn func(context.Context, TxStore) error) error
+	IsNoRows(error) bool
 }
 
 // TxStore 定义单个事务内可调用的 judge 数据访问能力。
@@ -28,7 +29,7 @@ type TxStore interface {
 	GetJudgerByCode(ctx context.Context, code string) (Judger, error)
 	GetJudgerByID(ctx context.Context, id int64) (Judger, error)
 	ListJudgers(ctx context.Context) ([]Judger, error)
-	UpsertJudger(ctx context.Context, id int64, req CreateJudgerRequest, spec JudgerResourceSpec, selftestStatus int16) (Judger, error)
+	UpsertJudger(ctx context.Context, id int64, req JudgerRequest, spec JudgerResourceSpec, selftestStatus int16) (Judger, error)
 	UpdateJudgerSelftest(ctx context.Context, id int64, selftestStatus, status int16) (Judger, error)
 	CreateJudgeTask(ctx context.Context, task JudgeTask) (JudgeTask, error)
 	GetJudgeTask(ctx context.Context, tenantID, taskID int64) (JudgeTask, error)
@@ -66,6 +67,11 @@ type txStore struct {
 // NewStore 创建 judge 模块持久化入口,仅装配层应调用。
 func NewStore(database *db.DB) Store {
 	return &store{database: database}
+}
+
+// IsNoRows 判断底层查询是否未命中,由 repo 边界封装数据库错误细节。
+func (s *store) IsNoRows(err error) bool {
+	return db.IsNoRows(err)
 }
 
 // PlatformTx 在应用连接中访问 judger 等平台级表。
@@ -134,7 +140,7 @@ func (s *txStore) ListJudgers(ctx context.Context) ([]Judger, error) {
 }
 
 // UpsertJudger 新建或更新判题器定义。
-func (s *txStore) UpsertJudger(ctx context.Context, id int64, req CreateJudgerRequest, spec JudgerResourceSpec, selftestStatus int16) (Judger, error) {
+func (s *txStore) UpsertJudger(ctx context.Context, id int64, req JudgerRequest, spec JudgerResourceSpec, selftestStatus int16) (Judger, error) {
 	raw, err := jsonx.AnyBytes(spec, apperr.ErrJudgerConfigInvalid)
 	if err != nil {
 		return Judger{}, err
@@ -194,7 +200,7 @@ func (s *txStore) CreateJudgeTask(ctx context.Context, task JudgeTask) (JudgeTas
 	if err != nil {
 		return JudgeTask{}, err
 	}
-	return taskFromRow(row)
+	return taskFromCreateRow(row)
 }
 
 // GetJudgeTask 查询任务。

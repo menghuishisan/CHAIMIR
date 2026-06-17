@@ -29,7 +29,7 @@ func (s *Service) ServeBackendStream(ctx context.Context, conn *ws.Conn, tenantI
 		var err error
 		session, err = tx.GetSessionWithPackage(ctx, tenantID, sessionID)
 		if err != nil {
-			return apperr.ErrSimSessionNotFound.WithCause(err)
+			return lookupError(err, apperr.ErrSimSessionNotFound, apperr.ErrSimSessionQueryFailed)
 		}
 		return nil
 	}); err != nil {
@@ -68,7 +68,7 @@ func (c *backendValidatedConn) ReadJSON(v any) error {
 	if err := c.conn.ReadJSON(&event); err != nil {
 		return err
 	}
-	req := ReportActionRequest{Seq: c.nextSeq + 1, EventType: event.EventType, Payload: event.Payload}
+	req := ReportActionRequest{Seq: c.nextSeq + 1, AtTick: c.nextSeq + 1, EventType: event.EventType, Payload: event.Payload}
 	if err := validateAction(req); err != nil {
 		return err
 	}
@@ -100,6 +100,13 @@ func (c *backendValidatedConn) SendJSON(v any) error {
 func (c *backendValidatedConn) persist(event BackendEvent) (Action, error) {
 	var out Action
 	err := c.svc.store.TenantTx(c.ctx, c.tenantID, func(ctx context.Context, tx TxStore) error {
+		session, err := tx.GetSession(ctx, c.tenantID, c.session.ID)
+		if err != nil {
+			return lookupError(err, apperr.ErrSimSessionNotFound, apperr.ErrSimSessionQueryFailed)
+		}
+		if !canMutateSession(session.Status) {
+			return apperr.ErrSimSessionStateInvalid
+		}
 		last, err := tx.GetLastAction(ctx, c.tenantID, c.session.ID)
 		if err != nil && !isNoRows(err) {
 			return apperr.ErrSimActionSeqInvalid.WithCause(err)

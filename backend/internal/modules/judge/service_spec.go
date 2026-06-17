@@ -53,7 +53,7 @@ func parseJudgerResourceSpec(raw []byte, typ int16, runtimeRequired bool) (Judge
 }
 
 // validateJudgerRequest 校验判题器注册请求,并返回已解析的资源配置。
-func validateJudgerRequest(req CreateJudgerRequest) (JudgerResourceSpec, error) {
+func validateJudgerRequest(req JudgerRequest) (JudgerResourceSpec, error) {
 	if !codePattern.MatchString(strings.TrimSpace(req.Code)) || strings.TrimSpace(req.Name) == "" || strings.TrimSpace(req.ExecutorRef) == "" {
 		return JudgerResourceSpec{}, apperr.ErrJudgerConfigInvalid
 	}

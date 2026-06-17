@@ -2,29 +2,32 @@
 package sim
 
 import (
+	"fmt"
+
 	"chaimir/internal/modules/sim/internal/sqlcgen"
 	"chaimir/internal/platform/jsonx"
 	"chaimir/internal/platform/pgtypex"
 	"chaimir/internal/platform/timex"
+	"chaimir/pkg/apperr"
 )
 
 // packageFromRow 转换平台级仿真包行。
 func packageFromRow(row sqlcgen.SimPackage) (Package, error) {
 	scale, err := decodeMap(row.ScaleLimit)
 	if err != nil {
-		return Package{}, err
+		return Package{}, apperr.ErrSimPackageDataCorrupt.WithCause(fmt.Errorf("仿真包 %d 的 scale_limit 数据异常: %w", row.ID, err))
 	}
 	backendConfig, err := decodeMap(row.BackendConfig)
 	if err != nil {
-		return Package{}, err
+		return Package{}, apperr.ErrSimPackageDataCorrupt.WithCause(fmt.Errorf("仿真包 %d 的 backend_config 数据异常: %w", row.ID, err))
 	}
 	interactionSchema, err := decodeInteractionSchema(row.InteractionSchema)
 	if err != nil {
-		return Package{}, err
+		return Package{}, apperr.ErrSimPackageDataCorrupt.WithCause(fmt.Errorf("仿真包 %d 的 interaction_schema 数据异常: %w", row.ID, err))
 	}
 	codeTrace, err := decodeCodeTraceAudit(row.CodeTrace)
 	if err != nil {
-		return Package{}, err
+		return Package{}, apperr.ErrSimPackageDataCorrupt.WithCause(fmt.Errorf("仿真包 %d 的 code_trace 数据异常: %w", row.ID, err))
 	}
 	return Package{
 		ID:                row.ID,
@@ -52,7 +55,7 @@ func packageFromRow(row sqlcgen.SimPackage) (Package, error) {
 func reviewFromRow(row sqlcgen.SimPackageReview) (Review, error) {
 	report, err := reportFromJSON(row.PreviewReport)
 	if err != nil {
-		return Review{}, err
+		return Review{}, apperr.ErrSimReviewDataCorrupt.WithCause(fmt.Errorf("审核记录 %d 的预览报告数据异常: %w", row.ID, err))
 	}
 	return Review{
 		ID:            row.ID,
@@ -90,7 +93,7 @@ func reviewInfoFromRow(row sqlcgen.ListSimReviewsRow) (ReviewInfo, error) {
 func sessionFromRow(row sqlcgen.SimSession) (Session, error) {
 	params, err := decodeMap(row.InitParams)
 	if err != nil {
-		return Session{}, err
+		return Session{}, apperr.ErrSimSessionDataCorrupt.WithCause(fmt.Errorf("仿真会话 %d 的 init_params 数据异常: %w", row.ID, err))
 	}
 	return Session{
 		ID:             row.ID,
@@ -115,11 +118,11 @@ func sessionWithPackageFromRow(row sqlcgen.GetSimSessionWithPackageRow) (Session
 	}
 	backendConfig, err := decodeMap(row.BackendConfig)
 	if err != nil {
-		return SessionWithPackage{}, err
+		return SessionWithPackage{}, apperr.ErrSimPackageDataCorrupt.WithCause(fmt.Errorf("仿真包 %d 的 backend_config 数据异常: %w", row.PackageID, err))
 	}
 	interactionSchema, err := decodeInteractionSchema(row.InteractionSchema)
 	if err != nil {
-		return SessionWithPackage{}, err
+		return SessionWithPackage{}, apperr.ErrSimPackageDataCorrupt.WithCause(fmt.Errorf("仿真包 %d 的 interaction_schema 数据异常: %w", row.PackageID, err))
 	}
 	return SessionWithPackage{Session: session, PackageCode: row.Code, PackageVersion: row.Version, PackageName: row.Name, Category: row.Category, BundleKey: row.BundleKey, BundleHash: row.BundleHash, BackendAdapter: pgtypex.TextValue(row.BackendAdapter), BackendConfig: backendConfig, InteractionSchema: interactionSchema, PackageStatus: row.PackageStatus}, nil
 }
@@ -128,7 +131,7 @@ func sessionWithPackageFromRow(row sqlcgen.GetSimSessionWithPackageRow) (Session
 func actionFromRow(row sqlcgen.SimActionLog) (Action, error) {
 	payload, err := decodeMap(row.Payload)
 	if err != nil {
-		return Action{}, err
+		return Action{}, apperr.ErrSimSessionDataCorrupt.WithCause(fmt.Errorf("仿真会话 %d 的操作记录 %d payload 数据异常: %w", row.SessionID, row.Seq, err))
 	}
 	return Action{ID: row.ID, TenantID: row.TenantID, SessionID: row.SessionID, Seq: row.Seq, AtTick: row.AtTick, EventType: row.EventType, Payload: payload, CreatedAt: timex.FromTimestamptz(row.CreatedAt)}, nil
 }

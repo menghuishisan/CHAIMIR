@@ -169,6 +169,7 @@ type UploadConfig struct {
 	ImportMaxBytes              int64
 	ContentAttachmentMaxBytes   int64
 	SimBundleMaxBytes           int64
+	SimBundleMetadataMaxBytes   int64
 	SimBundleMaxFiles           int
 	SimBundleMaxUnpackedBytes   int64
 	SimValidationReportMaxBytes int64
@@ -512,6 +513,7 @@ func Load() (*Config, error) {
 		ImportMaxBytes:              reqInt64("UPLOAD_IMPORT_MAX_BYTES"),
 		ContentAttachmentMaxBytes:   reqInt64("UPLOAD_CONTENT_ATTACHMENT_MAX_BYTES"),
 		SimBundleMaxBytes:           reqInt64("UPLOAD_SIM_BUNDLE_MAX_BYTES"),
+		SimBundleMetadataMaxBytes:   reqInt64("UPLOAD_SIM_BUNDLE_METADATA_MAX_BYTES"),
 		SimBundleMaxFiles:           reqInt("UPLOAD_SIM_BUNDLE_MAX_FILES"),
 		SimBundleMaxUnpackedBytes:   reqInt64("UPLOAD_SIM_BUNDLE_MAX_UNPACKED_BYTES"),
 		SimValidationReportMaxBytes: reqInt64("UPLOAD_SIM_VALIDATION_REPORT_MAX_BYTES"),
@@ -708,6 +710,9 @@ func Load() (*Config, error) {
 	}
 	if c.Upload.SimBundleMaxBytes <= 0 {
 		errs = append(errs, "UPLOAD_SIM_BUNDLE_MAX_BYTES 必须大于 0")
+	}
+	if c.Upload.SimBundleMetadataMaxBytes <= 0 {
+		errs = append(errs, "UPLOAD_SIM_BUNDLE_METADATA_MAX_BYTES 必须大于 0")
 	}
 	if c.Upload.SimBundleMaxFiles <= 0 {
 		errs = append(errs, "UPLOAD_SIM_BUNDLE_MAX_FILES 必须大于 0")

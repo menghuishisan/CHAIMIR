@@ -9,7 +9,6 @@ import (
 )
 
 type Querier interface {
-	ArchiveSimSession(ctx context.Context, arg ArchiveSimSessionParams) (SimSession, error)
 	ArchiveSimSessionsBySourceRef(ctx context.Context, arg ArchiveSimSessionsBySourceRefParams) ([]SimSession, error)
 	CompleteSimReview(ctx context.Context, arg CompleteSimReviewParams) (SimPackageReview, error)
 	CountSimPackages(ctx context.Context, arg CountSimPackagesParams) (int64, error)

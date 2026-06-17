@@ -1,0 +1,191 @@
+// 本文件封装仿真 Worker 通信,主线程只接收纯数据快照,不执行仿真包代码。
+
+import type {
+  JsonObject,
+  RuntimeSnapshot,
+  SimEvent,
+  SimInitParams,
+  SimPackageDescriptor,
+} from '../types';
+
+type WorkerRequest =
+  | { type: 'init'; requestId: number; moduleUrl: string; initParams: SimInitParams; seed: number }
+  | { type: 'step'; requestId: number }
+  | { type: 'inject'; requestId: number; eventType: string; payload: JsonObject; target?: string }
+  | { type: 'back'; requestId: number }
+  | { type: 'reset'; requestId: number };
+
+type WorkerResponse =
+  | { type: 'ready'; requestId: number; descriptor: SimPackageDescriptor; snapshot: RuntimeSnapshot }
+  | { type: 'snapshot'; requestId: number; snapshot: RuntimeSnapshot; event?: SimEvent }
+  | { type: 'error'; requestId: number; message: string };
+
+export interface SimWorkerClientOptions {
+  moduleUrl: string;
+  initParams: SimInitParams;
+  seed: number;
+  commandTimeoutMs: number;
+  stepDurationMs?: number;
+  onReady?: (descriptor: SimPackageDescriptor, snapshot: RuntimeSnapshot) => void;
+  onSnapshot?: (snapshot: RuntimeSnapshot, event?: SimEvent) => void;
+  onError?: (message: string) => void;
+}
+
+interface PendingRequest {
+  resolve: (response: WorkerResponse) => void;
+  reject: (error: Error) => void;
+  timeoutId: ReturnType<typeof setTimeout>;
+}
+
+// SimWorkerClient 负责创建隔离 Worker、发送命令并维护自动播放计时器。
+export class SimWorkerClient {
+  private readonly worker: Worker;
+  private readonly options: SimWorkerClientOptions;
+  private readonly pending = new Map<number, PendingRequest>();
+  private requestId = 1;
+  private intervalId: ReturnType<typeof setInterval> | undefined;
+  private stepDurationMs: number;
+  private failed = false;
+
+  constructor(options: SimWorkerClientOptions) {
+    this.options = options;
+    this.stepDurationMs = options.stepDurationMs ?? 1200;
+    this.worker = new Worker(new URL('./sim.worker.ts', import.meta.url), { type: 'module' });
+    this.worker.onmessage = (event: MessageEvent<WorkerResponse>) => this.handleMessage(event.data);
+    this.worker.onerror = () => this.failAll('仿真运行环境异常,请刷新后重试');
+  }
+
+  // init 加载仿真包模块并生成初始快照。
+  async init(): Promise<void> {
+    await this.post({
+      type: 'init',
+      requestId: 0,
+      moduleUrl: this.options.moduleUrl,
+      initParams: this.options.initParams,
+      seed: this.options.seed,
+    });
+  }
+
+  // start 按当前步长自动发送 tick。
+  start(): void {
+    if (this.intervalId) {
+      return;
+    }
+    this.intervalId = setInterval(() => {
+      void this.step().catch(() => undefined);
+    }, this.stepDurationMs);
+  }
+
+  // pause 暂停自动 tick。
+  pause(): void {
+    if (this.intervalId) {
+      clearInterval(this.intervalId);
+      this.intervalId = undefined;
+    }
+  }
+
+  // setStepDuration 更新自动播放间隔。
+  setStepDuration(durationMs: number): void {
+    this.stepDurationMs = Math.max(250, Math.min(durationMs, 8000));
+    if (this.intervalId) {
+      this.pause();
+      this.start();
+    }
+  }
+
+  // step 推进一个 tick。
+  async step(): Promise<void> {
+    await this.post({ type: 'step', requestId: 0 });
+  }
+
+  // inject 注入用户交互事件。
+  async inject(eventType: string, payload: JsonObject = {}, target?: string): Promise<void> {
+    await this.post({ type: 'inject', requestId: 0, eventType, payload, target });
+  }
+
+  // back 回退最近一次事件。
+  async back(): Promise<void> {
+    await this.post({ type: 'back', requestId: 0 });
+  }
+
+  // reset 重置到初始状态。
+  async reset(): Promise<void> {
+    this.pause();
+    await this.post({ type: 'reset', requestId: 0 });
+  }
+
+  // destroy 终止 Worker。
+  destroy(): void {
+    this.pause();
+    for (const pending of this.pending.values()) {
+      clearTimeout(pending.timeoutId);
+    }
+    this.pending.clear();
+    this.worker.terminate();
+  }
+
+  private post(message: WorkerRequest): Promise<void> {
+    if (this.failed) {
+      return Promise.reject(new Error('仿真运行环境异常,请刷新后重试'));
+    }
+    const requestId = this.requestId++;
+    return new Promise((resolve, reject) => {
+      const timeoutId = setTimeout(() => {
+        this.pending.delete(requestId);
+        reject(this.failAll('仿真运行超时,请刷新后重试'));
+      }, this.options.commandTimeoutMs);
+      this.pending.set(requestId, {
+        timeoutId,
+        resolve: (response) => {
+          clearTimeout(timeoutId);
+          if (response.type === 'error') {
+            const error = new Error(response.message);
+            this.options.onError?.(response.message);
+            reject(error);
+            return;
+          }
+          resolve();
+        },
+        reject,
+      });
+      this.worker.postMessage({ ...message, requestId });
+    });
+  }
+
+  private handleMessage(response: WorkerResponse): void {
+    const pending = this.pending.get(response.requestId);
+    if (pending) {
+      this.pending.delete(response.requestId);
+      pending.resolve(response);
+      if (response.type === 'error') {
+        return;
+      }
+    }
+    if (response.type === 'ready') {
+      this.options.onReady?.(response.descriptor, response.snapshot);
+      return;
+    }
+    if (response.type === 'snapshot') {
+      this.options.onSnapshot?.(response.snapshot, response.event);
+      return;
+    }
+    if (response.type === 'error' && this.failed) {
+      return;
+    }
+    this.failAll(response.message);
+  }
+
+  private failAll(message: string): Error {
+    this.failed = true;
+    this.pause();
+    this.worker.terminate();
+    const error = new Error(message);
+    for (const [requestId, pending] of this.pending.entries()) {
+      clearTimeout(pending.timeoutId);
+      this.pending.delete(requestId);
+      pending.reject(error);
+    }
+    this.options.onError?.(message);
+    return error;
+  }
+}

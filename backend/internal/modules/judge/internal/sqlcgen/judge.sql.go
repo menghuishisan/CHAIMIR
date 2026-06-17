@@ -162,16 +162,24 @@ func (q *Queries) CreateJudgeOutbox(ctx context.Context, arg CreateJudgeOutboxPa
 }
 
 const createJudgeTask = `-- name: CreateJudgeTask :one
-INSERT INTO judge_task (
-    id, tenant_id, judger_id, source_ref, source_owner_id, source_course_id, source_scope,
-    submitter_id, problem_ref, code_storage_key, code_hash,
-    input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, last_error,
-    created_at, updated_at
+WITH inserted AS (
+    INSERT INTO judge_task (
+        id, tenant_id, judger_id, source_ref, source_owner_id, source_course_id, source_scope,
+        submitter_id, problem_ref, code_storage_key, code_hash,
+        input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, last_error,
+        created_at, updated_at
+    )
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, 0, $17, NULL, now(), now())
+    ON CONFLICT (tenant_id, source_ref) DO NOTHING
+    RETURNING id, tenant_id, judger_id, source_ref, source_owner_id, source_course_id, source_scope, submitter_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, last_error, created_at, updated_at
 )
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, 0, $17, NULL, now(), now())
-ON CONFLICT (tenant_id, source_ref) DO UPDATE
-SET source_ref = EXCLUDED.source_ref
-RETURNING id, tenant_id, judger_id, source_ref, source_owner_id, source_course_id, source_scope, submitter_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, last_error, created_at, updated_at
+SELECT id, tenant_id, judger_id, source_ref, source_owner_id, source_course_id, source_scope, submitter_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, last_error, created_at, updated_at
+FROM inserted
+UNION ALL
+SELECT id, tenant_id, judger_id, source_ref, source_owner_id, source_course_id, source_scope, submitter_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, last_error, created_at, updated_at
+FROM judge_task
+WHERE tenant_id = $2 AND source_ref = $4 AND NOT EXISTS (SELECT 1 FROM inserted)
+LIMIT 1
 `
 
 type CreateJudgeTaskParams struct {
@@ -194,7 +202,31 @@ type CreateJudgeTaskParams struct {
 	MaxRetries       int32       `json:"max_retries"`
 }
 
-func (q *Queries) CreateJudgeTask(ctx context.Context, arg CreateJudgeTaskParams) (JudgeTask, error) {
+type CreateJudgeTaskRow struct {
+	ID               int64              `json:"id"`
+	TenantID         int64              `json:"tenant_id"`
+	JudgerID         int64              `json:"judger_id"`
+	SourceRef        string             `json:"source_ref"`
+	SourceOwnerID    int64              `json:"source_owner_id"`
+	SourceCourseID   int64              `json:"source_course_id"`
+	SourceScope      string             `json:"source_scope"`
+	SubmitterID      int64              `json:"submitter_id"`
+	ProblemRef       string             `json:"problem_ref"`
+	CodeStorageKey   string             `json:"code_storage_key"`
+	CodeHash         string             `json:"code_hash"`
+	InputSnapshot    []byte             `json:"input_snapshot"`
+	SandboxMode      int16              `json:"sandbox_mode"`
+	TargetSandboxRef pgtype.Text        `json:"target_sandbox_ref"`
+	Priority         int16              `json:"priority"`
+	Status           int16              `json:"status"`
+	RetryCount       int32              `json:"retry_count"`
+	MaxRetries       int32              `json:"max_retries"`
+	LastError        pgtype.Text        `json:"last_error"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
+}
+
+func (q *Queries) CreateJudgeTask(ctx context.Context, arg CreateJudgeTaskParams) (CreateJudgeTaskRow, error) {
 	row := q.db.QueryRow(ctx, createJudgeTask,
 		arg.ID,
 		arg.TenantID,
@@ -214,7 +246,7 @@ func (q *Queries) CreateJudgeTask(ctx context.Context, arg CreateJudgeTaskParams
 		arg.Status,
 		arg.MaxRetries,
 	)
-	var i JudgeTask
+	var i CreateJudgeTaskRow
 	err := row.Scan(
 		&i.ID,
 		&i.TenantID,

@@ -365,6 +365,7 @@ func codeTraceAuditFromManifest(in *simCodeTraceManifest) (CodeTraceAudit, []str
 	return CodeTraceAudit{Enabled: true, Language: strings.TrimSpace(in.Language), LineCount: lineCount, MappingCount: len(in.LineMapping), VariableCount: len(in.VariableWatch)}, nil
 }
 
+// validInteractionKind 校验交互声明类型是否落在受控封闭集。
 func validInteractionKind(value string) bool {
 	switch value {
 	case "button", "slider", "hold", "select-element", "drag", "form":
@@ -374,6 +375,7 @@ func validInteractionKind(value string) bool {
 	}
 }
 
+// validFieldType 校验交互字段类型是否为后端可审核的封闭类型。
 func validFieldType(value string) bool {
 	switch value {
 	case "number", "string", "boolean", "select", "range":
@@ -383,6 +385,7 @@ func validFieldType(value string) bool {
 	}
 }
 
+// validCodeTraceLanguage 校验代码追踪协议语言是否在受控白名单内。
 func validCodeTraceLanguage(value string) bool {
 	switch strings.TrimSpace(value) {
 	case "solidity", "rust", "go", "javascript", "pseudocode":
@@ -392,6 +395,7 @@ func validCodeTraceLanguage(value string) bool {
 	}
 }
 
+// validHighlightStyle 校验代码追踪高亮样式是否是支持的有限集合。
 func validHighlightStyle(value string) bool {
 	switch strings.TrimSpace(value) {
 	case "", "normal", "success", "error":
@@ -401,6 +405,7 @@ func validHighlightStyle(value string) bool {
 	}
 }
 
+// validVariableFormat 校验变量提取格式是否是支持的有限集合。
 func validVariableFormat(value string) bool {
 	switch strings.TrimSpace(value) {
 	case "", "hex", "number", "string", "bool":

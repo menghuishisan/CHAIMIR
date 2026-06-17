@@ -7,6 +7,7 @@ import (
 	"math"
 
 	"chaimir/internal/contracts"
+	"chaimir/internal/platform/ids"
 	"chaimir/pkg/apperr"
 )
 
@@ -58,11 +59,11 @@ func (s *Service) JudgeCheckpoint(ctx context.Context, instanceID int64, checkpo
 	for key, value := range req.ExtraInput {
 		extra[key] = value
 	}
-	task, err := s.judge.SubmitJudgeTask(ctx, contracts.JudgeSubmitRequest{TenantID: inst.TenantID, JudgerCode: cp.JudgerCode, ItemCode: cp.ItemCode, ItemVersion: cp.ItemVersion, CodeStorageKey: codeKey, CodeHash: codeHash, SubmitterID: id.AccountID, SourceRef: inst.SourceRef, SandboxMode: sandboxModeForCheckpoint(cp), TargetSandboxRef: targetSandboxRef(cp, inst), ExtraInput: extra, Priority: 5})
+	task, err := s.judge.SubmitJudgeTask(ctx, contracts.JudgeSubmitRequest{TenantID: inst.TenantID, JudgerCode: cp.JudgerCode, ItemCode: cp.ItemCode, ItemVersion: cp.ItemVersion, CodeStorageKey: codeKey, CodeHash: codeHash, SubmitterID: id.AccountID, SourceRef: inst.SourceRef, SourceOwnerID: inst.OwnerAccountID, SourceCourseID: exp.CourseID, SourceScope: "exp", SandboxMode: sandboxModeForCheckpoint(cp), TargetSandboxRef: targetSandboxRef(cp, inst), ExtraInput: extra, Priority: 5})
 	if err != nil {
 		return CheckpointDTO{}, apperr.ErrExperimentJudgeUnavailable.WithCause(err)
 	}
-	result := CheckpointResult{ID: s.ids.Generate(), TenantID: inst.TenantID, InstanceID: inst.ID, CheckpointID: cp.ID, JudgeTaskRef: fmt.Sprintf("%d", task.TaskID), Passed: task.Result.Passed, Score: scaledCheckpointScore(cp.Score, task.Result.Score, task.Result.MaxScore), DetailRef: task.Result.SnapshotRef, BindingOutput: bindingOutput}
+	result := CheckpointResult{ID: s.ids.Generate(), TenantID: inst.TenantID, InstanceID: inst.ID, CheckpointID: cp.ID, JudgeTaskRef: ids.Format(task.TaskID), Passed: task.Result.Passed, Score: scaledCheckpointScore(cp.Score, task.Result.Score, task.Result.MaxScore), DetailRef: task.Result.SnapshotRef, BindingOutput: bindingOutput}
 	if err := s.store.TenantTx(ctx, inst.TenantID, func(ctx context.Context, tx TxStore) error {
 		var err error
 		result, err = tx.UpsertCheckpoint(ctx, result)
@@ -97,7 +98,7 @@ func (s *Service) HandleJudgeCompleted(ctx context.Context, event contracts.Judg
 	var exp Experiment
 	shouldPublish := false
 	if err := s.store.TenantTx(ctx, event.TenantID, func(ctx context.Context, tx TxStore) error {
-		result, err := tx.GetCheckpointByJudgeTask(ctx, event.TenantID, fmt.Sprintf("%d", event.TaskID))
+		result, err := tx.GetCheckpointByJudgeTask(ctx, event.TenantID, ids.Format(event.TaskID))
 		if err != nil {
 			return err
 		}
@@ -116,7 +117,7 @@ func (s *Service) HandleJudgeCompleted(ctx context.Context, event contracts.Judg
 		if !ok {
 			return apperr.ErrExperimentCheckpointInvalid
 		}
-		if _, err = tx.UpsertCheckpoint(ctx, CheckpointResult{ID: result.ID, TenantID: event.TenantID, InstanceID: result.InstanceID, CheckpointID: result.CheckpointID, JudgeTaskRef: fmt.Sprintf("%d", event.TaskID), Passed: task.Result.Passed, Score: scaledCheckpointScore(cp.Score, task.Result.Score, task.Result.MaxScore), DetailRef: task.Result.SnapshotRef, BindingOutput: result.BindingOutput}); err != nil {
+		if _, err = tx.UpsertCheckpoint(ctx, CheckpointResult{ID: result.ID, TenantID: event.TenantID, InstanceID: result.InstanceID, CheckpointID: result.CheckpointID, JudgeTaskRef: ids.Format(event.TaskID), Passed: task.Result.Passed, Score: scaledCheckpointScore(cp.Score, task.Result.Score, task.Result.MaxScore), DetailRef: task.Result.SnapshotRef, BindingOutput: result.BindingOutput}); err != nil {
 			return err
 		}
 		if inst.Status != InstanceStatusFinished {
@@ -149,7 +150,7 @@ func (s *Service) HandleJudgeFailed(ctx context.Context, event contracts.JudgeFa
 	var scored ExperimentInstance
 	shouldPublish := false
 	if err := s.store.TenantTx(ctx, event.TenantID, func(ctx context.Context, tx TxStore) error {
-		result, err := tx.GetCheckpointByJudgeTask(ctx, event.TenantID, fmt.Sprintf("%d", event.TaskID))
+		result, err := tx.GetCheckpointByJudgeTask(ctx, event.TenantID, ids.Format(event.TaskID))
 		if err != nil {
 			return err
 		}
@@ -160,7 +161,7 @@ func (s *Service) HandleJudgeFailed(ctx context.Context, event contracts.JudgeFa
 		if inst.SourceRef != event.SourceRef {
 			return apperr.ErrExperimentSourceRefInvalid
 		}
-		if _, err = tx.UpsertCheckpoint(ctx, CheckpointResult{ID: result.ID, TenantID: event.TenantID, InstanceID: result.InstanceID, CheckpointID: result.CheckpointID, JudgeTaskRef: fmt.Sprintf("%d", event.TaskID), Passed: false, Score: 0, DetailRef: "judge_failed"}); err != nil {
+		if _, err = tx.UpsertCheckpoint(ctx, CheckpointResult{ID: result.ID, TenantID: event.TenantID, InstanceID: result.InstanceID, CheckpointID: result.CheckpointID, JudgeTaskRef: ids.Format(event.TaskID), Passed: false, Score: 0, DetailRef: "judge_failed"}); err != nil {
 			return err
 		}
 		if inst.Status != InstanceStatusFinished {

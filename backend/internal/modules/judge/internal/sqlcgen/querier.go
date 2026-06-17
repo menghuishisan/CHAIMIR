@@ -13,7 +13,7 @@ type Querier interface {
 	CompleteJudgeTask(ctx context.Context, arg CompleteJudgeTaskParams) (JudgeTask, error)
 	CountJudgeTasks(ctx context.Context, arg CountJudgeTasksParams) (int64, error)
 	CreateJudgeOutbox(ctx context.Context, arg CreateJudgeOutboxParams) (JudgeEventOutbox, error)
-	CreateJudgeTask(ctx context.Context, arg CreateJudgeTaskParams) (JudgeTask, error)
+	CreateJudgeTask(ctx context.Context, arg CreateJudgeTaskParams) (CreateJudgeTaskRow, error)
 	CreateSubmissionFingerprint(ctx context.Context, arg CreateSubmissionFingerprintParams) (SubmissionFingerprint, error)
 	DequeueJudgeTasks(ctx context.Context, limit int32) ([]JudgeTask, error)
 	FailJudgeTask(ctx context.Context, arg FailJudgeTaskParams) (JudgeTask, error)

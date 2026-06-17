@@ -15,7 +15,11 @@ import (
 // CreateSession 创建仿真会话并锁定仿真包版本。
 func (s *Service) CreateSession(ctx context.Context, req contracts.SimCreateSessionRequest) (contracts.SimSessionInfo, error) {
 	req.SourceRef = strings.TrimSpace(req.SourceRef)
-	create := CreateSessionRequest{PackageCode: req.PackageCode, Version: req.Version, Seed: req.Seed, InitParams: req.InitParams, OwnerAccountID: req.OwnerAccountID, SourceRef: req.SourceRef}
+	initParams := req.InitParams
+	if initParams == nil {
+		initParams = map[string]any{}
+	}
+	create := CreateSessionRequest{PackageCode: req.PackageCode, Version: req.Version, Seed: req.Seed, InitParams: initParams, OwnerAccountID: req.OwnerAccountID, SourceRef: req.SourceRef}
 	if err := validateCreateSession(create, req.TenantID); err != nil {
 		return contracts.SimSessionInfo{}, err
 	}
@@ -32,11 +36,7 @@ func (s *Service) CreateSession(ctx context.Context, req contracts.SimCreateSess
 	if err := validateBackendAdapterAvailable(pkg.Compute, pkg.BackendAdapter, s.backends); err != nil {
 		return contracts.SimSessionInfo{}, err
 	}
-	if req.InitParams == nil {
-		req.InitParams = map[string]any{}
-	}
-	req.InitParams = publicReplayMap(req.InitParams)
-	session := Session{ID: s.ids.Generate(), TenantID: req.TenantID, PackageID: pkg.ID, SourceRef: req.SourceRef, OwnerAccountID: req.OwnerAccountID, Seed: req.Seed, InitParams: req.InitParams, Compute: pkg.Compute, Status: SessionCreating}
+	session := Session{ID: s.ids.Generate(), TenantID: req.TenantID, PackageID: pkg.ID, SourceRef: req.SourceRef, OwnerAccountID: req.OwnerAccountID, Seed: req.Seed, InitParams: initParams, Compute: pkg.Compute, Status: SessionCreating}
 	if err := s.store.TenantTx(ctx, req.TenantID, func(ctx context.Context, tx TxStore) error {
 		var err error
 		session, err = tx.CreateSession(ctx, session)
@@ -54,7 +54,7 @@ func (s *Service) CreateSession(ctx context.Context, req contracts.SimCreateSess
 	if err := s.writeSystemAudit(ctx, req.TenantID, "sim.session.create", "sim_session", session.ID, map[string]any{"source_ref": session.SourceRef, "owner_account_id": req.OwnerAccountID, "package": pkg.Code + ":" + pkg.Version}); err != nil {
 		return contracts.SimSessionInfo{}, err
 	}
-	return sessionToContract(session, pkg), nil
+	return sessionToContract(session, pkg)
 }
 
 // CreateSessionFromHTTP 转换内部 HTTP 请求为跨模块契约调用。
@@ -79,7 +79,7 @@ func (s *Service) ReportAction(ctx context.Context, tenantID, accountID, session
 	if err := s.store.TenantTx(ctx, tenantID, func(ctx context.Context, tx TxStore) error {
 		session, err := tx.GetSessionWithPackage(ctx, tenantID, sessionID)
 		if err != nil {
-			return apperr.ErrSimSessionNotFound.WithCause(err)
+			return lookupError(err, apperr.ErrSimSessionNotFound, apperr.ErrSimSessionQueryFailed)
 		}
 		if session.OwnerAccountID != accountID {
 			return apperr.ErrForbidden
@@ -145,20 +145,23 @@ func (s *Service) GetReplayForUser(ctx context.Context, tenantID, accountID, ses
 	if session.OwnerAccountID != accountID {
 		return nil, apperr.ErrForbidden
 	}
-	return replayToMapPublic(session, actions), nil
+	return replayToMap(session, actions), nil
 }
 
 // DestroySession 回收单个仿真会话,并强制来源标识与目标会话一致。
 func (s *Service) DestroySession(ctx context.Context, req contracts.SimDestroySessionRequest) error {
 	req.SourceRef = strings.TrimSpace(req.SourceRef)
-	if req.TenantID <= 0 || req.SessionID <= 0 || !auth.ValidSourceRef(req.SourceRef) || !auth.ServiceSourceRefAuthorized(ctx, req.SourceRef) {
+	if req.TenantID <= 0 || req.SessionID <= 0 || !auth.ValidSourceRef(req.SourceRef) {
 		return apperr.ErrSimSessionInvalid
+	}
+	if !auth.ServiceSourceRefAuthorized(ctx, req.SourceRef) {
+		return apperr.ErrServiceUnauthorized
 	}
 	var archived Session
 	if err := s.store.TenantTx(ctx, req.TenantID, func(ctx context.Context, tx TxStore) error {
 		session, err := tx.GetSession(ctx, req.TenantID, req.SessionID)
 		if err != nil {
-			return apperr.ErrSimSessionNotFound.WithCause(err)
+			return lookupError(err, apperr.ErrSimSessionNotFound, apperr.ErrSimSessionQueryFailed)
 		}
 		if session.SourceRef != req.SourceRef {
 			return apperr.ErrServiceUnauthorized
@@ -183,8 +186,11 @@ func (s *Service) DestroySession(ctx context.Context, req contracts.SimDestroySe
 // RecycleBySourceRef 按来源标识归档仿真会话并释放后端计算资源。
 func (s *Service) RecycleBySourceRef(ctx context.Context, req contracts.SimRecycleRequest) error {
 	req.SourceRef = strings.TrimSpace(req.SourceRef)
-	if req.TenantID <= 0 || !auth.ValidSourceRef(req.SourceRef) || !auth.ServiceSourceRefAuthorized(ctx, req.SourceRef) {
+	if req.TenantID <= 0 || !auth.ValidSourceRef(req.SourceRef) {
 		return apperr.ErrSimSessionInvalid
+	}
+	if !auth.ServiceSourceRefAuthorized(ctx, req.SourceRef) {
+		return apperr.ErrServiceUnauthorized
 	}
 	var archived []Session
 	if err := s.store.TenantTx(ctx, req.TenantID, func(ctx context.Context, tx TxStore) error {
@@ -214,13 +220,22 @@ func (s *Service) ReportCheckpoint(ctx context.Context, req contracts.SimCheckpo
 	if !auth.ValidSourceRef(sourceRef) {
 		return apperr.ErrSimCheckpointInvalid
 	}
+	if !auth.ServiceSourceRefAuthorized(ctx, sourceRef) {
+		return apperr.ErrServiceUnauthorized
+	}
 	return s.reportCheckpointRaw(ctx, req.TenantID, req.SessionID, sourceRef, req.CheckpointID, req.Answer, req.Achieved)
 }
 
 // ReportCheckpointFromHTTP 保存 HTTP 内部接口上报的检查点。
 func (s *Service) ReportCheckpointFromHTTP(ctx context.Context, tenantID, sessionID int64, req ReportCheckpointRequest) error {
-	sourceRef, _ := auth.ServiceSourceRefFromContext(ctx)
+	sourceRef, ok := auth.ServiceSourceRefFromContext(ctx)
+	if !ok {
+		return apperr.ErrServiceUnauthorized
+	}
 	if !auth.ValidSourceRef(sourceRef) {
+		return apperr.ErrSimCheckpointInvalid
+	}
+	if !auth.ServiceSourceRefAuthorized(ctx, sourceRef) {
 		return apperr.ErrServiceUnauthorized
 	}
 	return s.reportCheckpointRaw(ctx, tenantID, sessionID, sourceRef, req.CheckpointID, req.Answer, req.Achieved)
@@ -235,7 +250,7 @@ func (s *Service) ShareSession(ctx context.Context, tenantID, accountID, session
 	if err := s.store.TenantTx(ctx, tenantID, func(ctx context.Context, tx TxStore) error {
 		session, err := tx.GetSession(ctx, tenantID, sessionID)
 		if err != nil {
-			return apperr.ErrSimSessionNotFound.WithCause(err)
+			return lookupError(err, apperr.ErrSimSessionNotFound, apperr.ErrSimSessionQueryFailed)
 		}
 		if session.OwnerAccountID != accountID {
 			return apperr.ErrForbidden
@@ -275,7 +290,7 @@ func (s *Service) GetSharedReplay(ctx context.Context, code string) (map[string]
 		var err error
 		share, err = tx.GetShareByCode(ctx, strings.TrimSpace(code))
 		if err != nil {
-			return apperr.ErrSimShareCodeInvalid.WithCause(err)
+			return lookupError(err, apperr.ErrSimShareCodeInvalid, apperr.ErrSimShareQueryFailed)
 		}
 		return nil
 	}); err != nil {
@@ -291,24 +306,24 @@ func (s *Service) GetSharedReplay(ctx context.Context, code string) (map[string]
 	if err := s.store.TenantTx(ctx, share.TenantID, func(ctx context.Context, tx TxStore) error {
 		tenantShare, err := tx.GetShareByCode(ctx, strings.TrimSpace(code))
 		if err != nil {
-			return apperr.ErrSimShareCodeInvalid.WithCause(err)
+			return lookupError(err, apperr.ErrSimShareCodeInvalid, apperr.ErrSimShareQueryFailed)
 		}
 		if tenantShare.ID != share.ID || tenantShare.SessionID != share.SessionID || !shareUsable(tenantShare, timex.Now()) {
 			return apperr.ErrSimShareCodeInvalid
 		}
 		session, err = tx.GetSessionWithPackage(ctx, share.TenantID, share.SessionID)
 		if err != nil {
-			return apperr.ErrSimSessionNotFound.WithCause(err)
+			return lookupError(err, apperr.ErrSimSessionNotFound, apperr.ErrSimSessionQueryFailed)
 		}
 		actions, err = tx.ListActions(ctx, share.TenantID, share.SessionID)
 		if err != nil {
-			return apperr.ErrSimSessionStateInvalid.WithCause(err)
+			return lookupError(err, apperr.ErrSimSessionStateInvalid, apperr.ErrSimSessionQueryFailed)
 		}
 		return nil
 	}); err != nil {
 		return nil, err
 	}
-	return replayToMap(session, actions), nil
+	return replayToMapPublic(session, actions), nil
 }
 
 // loadReplay 读取会话和有序操作序列。
@@ -319,11 +334,11 @@ func (s *Service) loadReplay(ctx context.Context, tenantID, sessionID int64) (Se
 		var err error
 		session, err = tx.GetSessionWithPackage(ctx, tenantID, sessionID)
 		if err != nil {
-			return apperr.ErrSimSessionNotFound.WithCause(err)
+			return lookupError(err, apperr.ErrSimSessionNotFound, apperr.ErrSimSessionQueryFailed)
 		}
 		actions, err = tx.ListActions(ctx, tenantID, sessionID)
 		if err != nil {
-			return apperr.ErrSimSessionStateInvalid.WithCause(err)
+			return lookupError(err, apperr.ErrSimSessionStateInvalid, apperr.ErrSimSessionQueryFailed)
 		}
 		return nil
 	}); err != nil {
@@ -340,7 +355,7 @@ func (s *Service) reportCheckpointRaw(ctx context.Context, tenantID, sessionID i
 	return s.store.TenantTx(ctx, tenantID, func(ctx context.Context, tx TxStore) error {
 		session, err := tx.GetSession(ctx, tenantID, sessionID)
 		if err != nil {
-			return apperr.ErrSimSessionNotFound.WithCause(err)
+			return lookupError(err, apperr.ErrSimSessionNotFound, apperr.ErrSimSessionQueryFailed)
 		}
 		if strings.TrimSpace(sourceRef) != "" && session.SourceRef != strings.TrimSpace(sourceRef) {
 			return apperr.ErrServiceUnauthorized
@@ -353,7 +368,7 @@ func (s *Service) reportCheckpointRaw(ctx context.Context, tenantID, sessionID i
 		}
 		_, err = tx.UpsertCheckpoint(ctx, Checkpoint{ID: s.ids.Generate(), TenantID: tenantID, SessionID: sessionID, CheckpointID: strings.TrimSpace(checkpointID), Answer: answer, Achieved: achieved})
 		if err != nil {
-			return apperr.ErrSimCheckpointInvalid.WithCause(err)
+			return lookupError(err, apperr.ErrSimCheckpointInvalid, apperr.ErrSimSessionQueryFailed)
 		}
 		return nil
 	})
@@ -387,7 +402,7 @@ func (s *Service) loadBackendReleaseSession(ctx context.Context, tenantID, sessi
 		var err error
 		session, err = tx.GetSessionWithPackage(ctx, tenantID, sessionID)
 		if err != nil {
-			return apperr.ErrSimSessionNotFound.WithCause(err)
+			return lookupError(err, apperr.ErrSimSessionNotFound, apperr.ErrSimSessionQueryFailed)
 		}
 		return nil
 	}); err != nil {

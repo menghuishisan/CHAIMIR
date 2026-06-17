@@ -5,6 +5,9 @@ import { ApiClient } from '../client'
 import type {
   SimPackageMeta,
   SimPackageReview,
+  SimBundleDownloadGrant,
+  SimPackageSubmissionResult,
+  SimReviewDecision,
   SimActionLog,
   SimPackageSubmit,
   SimReplay,
@@ -45,7 +48,7 @@ export class SimApi {
   async submitPackage(
     data: SimPackageSubmit,
     onProgress?: (progress: number) => void
-  ): Promise<SimPackageMeta> {
+  ): Promise<SimPackageSubmissionResult> {
     return this.client.postFormData('/sim/packages', packageFormData(data), onProgress)
   }
 
@@ -56,15 +59,15 @@ export class SimApi {
     packageId: string,
     data: SimPackageSubmit,
     onProgress?: (progress: number) => void
-  ): Promise<SimPackageMeta> {
+  ): Promise<SimPackageSubmissionResult> {
     return this.client.patchFormData(`/sim/packages/${packageId}`, packageFormData(data), onProgress)
   }
 
   /**
-   * 下载仿真包 bundle
+   * 获取仿真包 bundle 短时下载授权
    */
-  async downloadBundle(code: string, version: string): Promise<Blob> {
-    return this.client.getBlob(`/sim/packages/${code}/${version}/bundle`)
+  async getBundleGrant(code: string, version: string): Promise<SimBundleDownloadGrant> {
+    return this.client.get(`/sim/packages/${code}/${version}/bundle`)
   }
 
   /**
@@ -100,14 +103,14 @@ export class SimApi {
   /**
    * 审核通过
    */
-  async approveReview(reviewId: string): Promise<SimPackageMeta> {
+  async approveReview(reviewId: string): Promise<SimReviewDecision> {
     return this.client.post(`/sim/reviews/${reviewId}/approve`)
   }
 
   /**
    * 审核退回
    */
-  async rejectReview(reviewId: string, comment: string): Promise<SimPackageReview> {
+  async rejectReview(reviewId: string, comment: string): Promise<SimReviewDecision> {
     return this.client.post(`/sim/reviews/${reviewId}/reject`, { comment })
   }
 
@@ -174,7 +177,6 @@ function packageFormData(data: SimPackageSubmit): FormData {
   formData.append('name', data.name)
   formData.append('category', data.category)
   formData.append('compute', data.compute)
-  formData.append('author_type', String(data.author_type))
   formData.append('scale_limit', JSON.stringify(data.scale_limit ?? {}))
   formData.append('backend_config', JSON.stringify(data.backend_config ?? {}))
   if (data.backend_adapter) {

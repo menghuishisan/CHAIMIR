@@ -2,16 +2,14 @@
 package judge
 
 import (
-	"strings"
-
 	"chaimir/internal/contracts"
 	"chaimir/internal/platform/ids"
 	"chaimir/internal/platform/jsonx"
 	"chaimir/pkg/apperr"
 )
 
-// contractSubmitFromDTO 把内部 HTTP 请求转换为跨模块判题契约。
-func contractSubmitFromDTO(tenantID int64, req SubmitTaskRequest) contracts.JudgeSubmitRequest {
+// contractSubmitFromDTO 把内部 HTTP 请求转换为跨模块判题契约,来源标识只取服务签名上下文。
+func contractSubmitFromDTO(tenantID int64, sourceRef string, req SubmitTaskRequest) contracts.JudgeSubmitRequest {
 	return contracts.JudgeSubmitRequest{
 		TenantID:         tenantID,
 		JudgerCode:       req.JudgerCode,
@@ -20,30 +18,15 @@ func contractSubmitFromDTO(tenantID int64, req SubmitTaskRequest) contracts.Judg
 		CodeStorageKey:   req.CodeStorageKey,
 		CodeHash:         req.CodeHash,
 		SubmitterID:      req.SubmitterID,
-		SourceRef:        req.SourceRef,
-		ExtraInput:       mergeSourceMetadata(req.ExtraInput, req.SourceOwnerID, req.SourceCourseID, req.SourceScope),
+		SourceRef:        sourceRef,
+		SourceOwnerID:    req.SourceOwnerID,
+		SourceCourseID:   req.SourceCourseID,
+		SourceScope:      req.SourceScope,
+		ExtraInput:       req.ExtraInput,
 		SandboxMode:      req.SandboxMode,
 		TargetSandboxRef: req.TargetSandboxRef,
 		Priority:         req.Priority,
 	}
-}
-
-// mergeSourceMetadata 把内部 HTTP 的来源权限证明收敛进现有跨模块 ExtraInput。
-func mergeSourceMetadata(extra map[string]any, ownerID, courseID int64, scope string) map[string]any {
-	out := map[string]any{}
-	for key, value := range extra {
-		out[key] = value
-	}
-	if ownerID > 0 {
-		out["source_owner_id"] = ownerID
-	}
-	if courseID > 0 {
-		out["source_course_id"] = courseID
-	}
-	if strings.TrimSpace(scope) != "" {
-		out["source_scope"] = strings.TrimSpace(scope)
-	}
-	return out
 }
 
 // contractTaskInfoFromModel 把 M3 任务摘要转换为跨模块返回契约。
@@ -101,10 +84,10 @@ func contractResult(result *JudgeResult) contracts.JudgeTaskResult {
 // taskInfoToMap 转成 API 响应 map,避免直接暴露内部字段。
 func taskInfoToMap(info JudgeTaskInfo) map[string]any {
 	out := map[string]any{
-		"task_id":      info.Task.ID,
-		"tenant_id":    info.Task.TenantID,
+		"task_id":      ids.Format(info.Task.ID),
+		"tenant_id":    ids.Format(info.Task.TenantID),
 		"source_ref":   info.Task.SourceRef,
-		"submitter_id": info.Task.SubmitterID,
+		"submitter_id": ids.Format(info.Task.SubmitterID),
 		"status":       statusText(info.Task.Status),
 		"existing":     info.Existing,
 	}
@@ -129,7 +112,7 @@ func judgerToMap(j Judger) (map[string]any, error) {
 		return nil, err
 	}
 	return map[string]any{
-		"id":                  j.ID,
+		"id":                  ids.Format(j.ID),
 		"code":                j.Code,
 		"name":                j.Name,
 		"type":                j.Type,

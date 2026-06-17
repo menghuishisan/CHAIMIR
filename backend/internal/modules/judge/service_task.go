@@ -233,7 +233,7 @@ func (s *Service) ProgressSubscription(ctx context.Context, tenantID, accountID,
 	if err := ensureAccountCanAccessTask(info.Task, accountID); err != nil {
 		return "", ProgressMessage{}, err
 	}
-	return judgeProgressTopic(tenantID, taskID), ProgressMessage{TaskID: taskID, Status: info.Task.Status, Stage: progressStage(info.Task.Status), Message: progressMessage(info.Task.Status)}, nil
+	return judgeProgressTopic(tenantID, taskID), ProgressMessage{TaskID: taskID, Status: statusText(info.Task.Status), Stage: progressStage(info.Task.Status), Message: progressMessage(info.Task.Status)}, nil
 }
 
 // GetTaskInfoForUser 校验用户态来源归属后返回任务与结果。
@@ -268,7 +268,7 @@ func ensureAccountCanAccessTask(task JudgeTask, accountID int64) error {
 		}
 		return apperr.ErrJudgeTaskForbidden
 	}
-	if task.SubmitterID == accountID && task.SourceScope != "" && task.SourceScope != "unknown" {
+	if task.SubmitterID == accountID && task.SourceScope != "" {
 		return nil
 	}
 	return apperr.ErrJudgeTaskForbidden

@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"chaimir/internal/contracts"
+	"chaimir/internal/platform/ids"
 	"chaimir/internal/platform/pagex"
 	"chaimir/internal/platform/response"
 	"chaimir/internal/platform/timex"
@@ -239,6 +240,10 @@ func (s *Service) SubmitAssignment(ctx context.Context, assignmentID int64, req 
 		if err != nil {
 			return err
 		}
+		course, err := tx.GetCourse(ctx, id.TenantID, assignment.CourseID)
+		if err != nil {
+			return err
+		}
 		if assignment.Status != AssignmentStatusPublished {
 			return apperr.ErrTeachingAssignmentStateInvalid
 		}
@@ -283,7 +288,7 @@ func (s *Service) SubmitAssignment(ctx context.Context, assignmentID int64, req 
 			if codeKey == "" || codeHash == "" {
 				return apperr.ErrTeachingSubmissionInvalid
 			}
-			if _, err := tx.CreateJudgeOutbox(ctx, JudgeOutbox{ID: s.ids.Generate(), TenantID: id.TenantID, SubmissionID: sub.ID, AssignmentItemID: item.ID, AssignmentID: assignmentID, StudentID: id.AccountID, ItemCode: item.ItemCode, ItemVersion: item.ItemVersion, JudgerCode: item.JudgerCode, CodeStorageKey: codeKey, CodeHash: codeHash, ExtraInput: map[string]any{"assignment_item_id": item.ID}, SourceRef: sourceRefForSubmissionItem(sub.ID, item.ID)}); err != nil {
+			if _, err := tx.CreateJudgeOutbox(ctx, JudgeOutbox{ID: s.ids.Generate(), TenantID: id.TenantID, SubmissionID: sub.ID, AssignmentItemID: item.ID, AssignmentID: assignmentID, SourceOwnerID: course.TeacherID, SourceCourseID: assignment.CourseID, SourceScope: "teaching", StudentID: id.AccountID, ItemCode: item.ItemCode, ItemVersion: item.ItemVersion, JudgerCode: item.JudgerCode, CodeStorageKey: codeKey, CodeHash: codeHash, ExtraInput: map[string]any{"assignment_item_id": item.ID}, SourceRef: sourceRefForSubmissionItem(sub.ID, item.ID)}); err != nil {
 				return err
 			}
 		}
@@ -432,7 +437,7 @@ func (s *Service) RunJudgeOutboxOnce(ctx context.Context, tenantID int64) error 
 		return apperr.ErrTeachingJudgeOutboxInvalid.WithCause(err)
 	}
 	for _, item := range outboxes {
-		info, err := s.judge.SubmitJudgeTask(ctx, contracts.JudgeSubmitRequest{TenantID: item.TenantID, JudgerCode: item.JudgerCode, ItemCode: item.ItemCode, ItemVersion: item.ItemVersion, CodeStorageKey: item.CodeStorageKey, CodeHash: item.CodeHash, SubmitterID: item.StudentID, SourceRef: item.SourceRef, SandboxMode: contracts.JudgeSandboxModeFresh, ExtraInput: item.ExtraInput, Priority: 5})
+		info, err := s.judge.SubmitJudgeTask(ctx, contracts.JudgeSubmitRequest{TenantID: item.TenantID, JudgerCode: item.JudgerCode, ItemCode: item.ItemCode, ItemVersion: item.ItemVersion, CodeStorageKey: item.CodeStorageKey, CodeHash: item.CodeHash, SubmitterID: item.StudentID, SourceRef: item.SourceRef, SourceOwnerID: item.SourceOwnerID, SourceCourseID: item.SourceCourseID, SourceScope: item.SourceScope, SandboxMode: contracts.JudgeSandboxModeFresh, ExtraInput: item.ExtraInput, Priority: 5})
 		if err != nil {
 			if retryErr := s.store.TenantTx(ctx, item.TenantID, func(ctx context.Context, tx TxStore) error {
 				_, retryErr := tx.RetryJudgeOutbox(ctx, item.TenantID, item.ID, safeStoredError(ctx, err))
@@ -443,7 +448,7 @@ func (s *Service) RunJudgeOutboxOnce(ctx context.Context, tenantID int64) error 
 			continue
 		}
 		if err := s.store.TenantTx(ctx, item.TenantID, func(ctx context.Context, tx TxStore) error {
-			if _, err := tx.UpdateSubmissionJudgeRef(ctx, item.TenantID, item.SubmissionID, fmt.Sprint(info.TaskID)); err != nil {
+			if _, err := tx.UpdateSubmissionJudgeRef(ctx, item.TenantID, item.SubmissionID, ids.Format(info.TaskID)); err != nil {
 				return err
 			}
 			_, err := tx.CompleteJudgeOutbox(ctx, item.TenantID, item.ID)

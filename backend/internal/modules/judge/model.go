@@ -137,7 +137,7 @@ type JudgeEventOutbox struct {
 // ProgressMessage 描述 WebSocket 推送给调用方的用户向进度。
 type ProgressMessage struct {
 	TaskID  int64  `json:"task_id"`
-	Status  int16  `json:"status"`
+	Status  string `json:"status"`
 	Stage   string `json:"stage"`
 	Message string `json:"message"`
 	TraceID string `json:"trace_id,omitempty"`

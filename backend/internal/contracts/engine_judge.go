@@ -33,6 +33,9 @@ type JudgeSubmitRequest struct {
 	CodeHash         string         `json:"code_hash"`
 	SubmitterID      int64          `json:"submitter_id"`
 	SourceRef        string         `json:"source_ref"`
+	SourceOwnerID    int64          `json:"source_owner_id"`
+	SourceCourseID   int64          `json:"source_course_id"`
+	SourceScope      string         `json:"source_scope"`
 	SandboxMode      string         `json:"sandbox_mode"`
 	TargetSandboxRef string         `json:"target_sandbox_ref"`
 	ExtraInput       map[string]any `json:"extra_input"`

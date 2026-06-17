@@ -16,7 +16,6 @@ type SubmitPackageRequest struct {
 	ScaleLimit     json.RawMessage `json:"scale_limit"`
 	BackendAdapter string          `json:"backend_adapter"`
 	BackendConfig  json.RawMessage `json:"backend_config"`
-	AuthorType     int16           `json:"author_type"`
 }
 
 // ValidationReportRequest 是受控预览流程回写的动态校验结果。

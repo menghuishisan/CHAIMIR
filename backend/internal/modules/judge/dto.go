@@ -3,8 +3,8 @@ package judge
 
 import "encoding/json"
 
-// CreateJudgerRequest 是平台管理员注册判题器的请求。
-type CreateJudgerRequest struct {
+// JudgerRequest 是平台管理员创建或更新判题器配置的请求。
+type JudgerRequest struct {
 	Code              string          `json:"code"`
 	Name              string          `json:"name"`
 	Type              int16           `json:"type"`
@@ -15,9 +15,6 @@ type CreateJudgerRequest struct {
 	Status            int16           `json:"status"`
 }
 
-// UpdateJudgerRequest 是平台管理员更新判题器配置的请求。
-type UpdateJudgerRequest = CreateJudgerRequest
-
 // SubmitTaskRequest 是内部服务提交判题任务的请求。
 type SubmitTaskRequest struct {
 	JudgerCode       string         `json:"judger_code"`
@@ -26,7 +23,6 @@ type SubmitTaskRequest struct {
 	CodeStorageKey   string         `json:"code_storage_key"`
 	CodeHash         string         `json:"code_hash"`
 	SubmitterID      int64          `json:"submitter_id"`
-	SourceRef        string         `json:"source_ref"`
 	SourceOwnerID    int64          `json:"source_owner_id"`
 	SourceCourseID   int64          `json:"source_course_id"`
 	SourceScope      string         `json:"source_scope"`

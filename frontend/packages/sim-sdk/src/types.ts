@@ -102,6 +102,8 @@ export interface InteractionDef {
   cooldownMs?: number;
 }
 
+export type InteractionDescriptor = Omit<InteractionDef, 'availableWhen'>;
+
 export interface FieldDef {
   name: string;
   label: string;
@@ -246,6 +248,8 @@ export interface NarrativeStep {
   defaultDurationMs: number;
 }
 
+export type NarrativeStepDescriptor = Omit<NarrativeStep, 'trigger'>;
+
 export interface QuestionCheckpoint {
   prompt: string;
   options: string[];
@@ -263,6 +267,29 @@ export interface CheckpointResult {
   achieved: boolean;
   answer: JsonValue;
   explanation: string;
+}
+
+export interface CheckpointDescriptor {
+  id: string;
+  label: string;
+}
+
+export interface SimPackageDescriptor {
+  meta: SimMeta;
+  interactions: InteractionDescriptor[];
+  narrative: NarrativeStepDescriptor[];
+  codeTrace?: CodeTraceDef;
+  checkpoints: CheckpointDescriptor[];
+}
+
+export interface RuntimeSnapshot {
+  state: SimState;
+  tick: number;
+  events: SimEvent[];
+  view: ViewSpec;
+  currentStep?: NarrativeStepDescriptor;
+  interactionAvailability: Record<string, boolean>;
+  checkpointResults: Record<string, CheckpointResult>;
 }
 
 export interface StageConfig {

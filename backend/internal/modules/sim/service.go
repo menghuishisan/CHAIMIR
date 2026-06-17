@@ -146,11 +146,11 @@ func (s *Service) IssueBundleDownloadGrant(ctx context.Context, accountID int64,
 func tenantIDFromBundleKey(key string) (int64, error) {
 	parts := strings.Split(strings.TrimSpace(key), "/")
 	if len(parts) < 4 || parts[1] != simModuleName || parts[2] != simBundleResourceType {
-		return 0, apperr.ErrSimBundleUnreadable
+		return 0, apperr.ErrSimBundleUnreadable.WithCause(fmt.Errorf("仿真包对象 key 结构异常: key=%q", key))
 	}
 	tenantID, ok := ids.Parse(parts[0])
 	if !ok {
-		return 0, apperr.ErrSimBundleUnreadable
+		return 0, apperr.ErrSimBundleUnreadable.WithCause(fmt.Errorf("仿真包对象 key 租户段异常: key=%q", key))
 	}
 	return tenantID, nil
 }
@@ -239,4 +239,24 @@ func trimMapStrings(in map[string]string) map[string]string {
 		}
 	}
 	return out
+}
+
+// lookupError 保留仓储层已经归类好的应用错误,无记录时走 not found,其他底层错误走查询失败。
+func lookupError(err error, notFound, queryFailed *apperr.Error) error {
+	if err == nil {
+		return nil
+	}
+	if ae, ok := apperr.As(err); ok {
+		return ae
+	}
+	if isNoRows(err) && notFound != nil {
+		return notFound.WithCause(err)
+	}
+	if queryFailed != nil {
+		return queryFailed.WithCause(err)
+	}
+	if notFound != nil {
+		return notFound.WithCause(err)
+	}
+	return apperr.ErrInternal.WithCause(err)
 }

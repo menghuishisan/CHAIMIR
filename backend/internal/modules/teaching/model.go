@@ -119,6 +119,9 @@ type JudgeOutbox struct {
 	SubmissionID     int64
 	AssignmentItemID int64
 	AssignmentID     int64
+	SourceOwnerID    int64
+	SourceCourseID   int64
+	SourceScope      string
 	StudentID        int64
 	ItemCode         string
 	ItemVersion      string

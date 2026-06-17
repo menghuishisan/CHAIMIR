@@ -1,20 +1,31 @@
-// 本文件实现仿真可视化沉浸式工作台,统一承载教学步骤、模式渲染、交互控制、时间调节、代码追踪与检查点状态。
+// 本文件实现仿真可视化沉浸式工作台,主线程只渲染 Worker 返回的纯数据快照。
 
-import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { AlertTriangle, CheckCircle2, Pause, Play, RotateCcw, SkipBack, StepForward } from 'lucide-react';
+import React, { useEffect, useRef, useState } from 'react';
+import { AlertTriangle, CheckCircle2, Pause, Play, RotateCcw, ShieldAlert, SkipBack, StepForward } from 'lucide-react';
 import { Button } from '@chaimir/ui';
-import type { FieldDef, InteractionDef, JsonObject, JsonValue, NarrativeStep, SimEvent, SimInitParams, SimPackage, SimState } from '../types';
-import { NarrativeController } from '../runtime/NarrativeController';
-import { SimEngine } from '../runtime/SimEngine';
+import type {
+  CodeTraceDef,
+  FieldDef,
+  InteractionDescriptor,
+  JsonObject,
+  JsonValue,
+  NarrativeStepDescriptor,
+  RuntimeSnapshot,
+  SimEvent,
+  SimInitParams,
+  SimPackageDescriptor,
+} from '../types';
+import { SimWorkerClient } from '../runtime/SimWorkerClient';
 import { PatternRenderer } from '../renderers/PatternRenderer';
 import './SimulationWorkbench.css';
 
-export interface SimulationWorkbenchProps<TState extends SimState = SimState> {
-  simPackage: SimPackage<TState>;
+export interface SimulationWorkbenchProps {
+  moduleUrl: string;
   initParams: SimInitParams;
   seed: number;
+  workerCommandTimeoutMs: number;
   onActionLog?: (event: SimEvent) => void;
-  onCheckpoint?: (checkpointId: string, result: unknown) => void;
+  onCheckpoint?: (checkpointId: string, result: RuntimeSnapshot['checkpointResults'][string]) => void;
 }
 
 const speedOptions = [
@@ -25,112 +36,159 @@ const speedOptions = [
 ];
 
 /**
- * 渲染完整仿真工作台,并把确定性引擎的状态变化同步到教学叙事、可视化舞台和右侧状态面板。
+ * 渲染完整仿真工作台,并通过 Worker 隔离执行仿真包的状态机、叙事触发与检查点判定。
  */
-export function SimulationWorkbench<TState extends SimState = SimState>({
-  simPackage,
+export function SimulationWorkbench({
+  moduleUrl,
   initParams,
   seed,
+  workerCommandTimeoutMs,
   onActionLog,
   onCheckpoint,
-}: SimulationWorkbenchProps<TState>): React.ReactElement {
-  const engineRef = useRef<SimEngine<TState> | null>(null);
-  const narrative = useMemo(() => new NarrativeController(simPackage), [simPackage]);
-  const [state, setState] = useState<TState>(() => simPackage.initState(initParams, seed));
-  const [tick, setTick] = useState(0);
+}: SimulationWorkbenchProps): React.ReactElement {
+  const clientRef = useRef<SimWorkerClient | null>(null);
+  const [descriptor, setDescriptor] = useState<SimPackageDescriptor | undefined>();
+  const [snapshot, setSnapshot] = useState<RuntimeSnapshot | undefined>();
+  const [runtimeMessage, setRuntimeMessage] = useState<string | undefined>();
   const [playing, setPlaying] = useState(false);
   const [speed, setSpeed] = useState(1);
-  const [stepDuration, setStepDuration] = useState(state.explanation.defaultDurationMs);
-  const [selectedElementId, setSelectedElementId] = useState<string | undefined>(state.selectedElementId);
+  const [stepDuration, setStepDuration] = useState<number | undefined>();
+  const [selectedElementId, setSelectedElementId] = useState<string | undefined>();
   const [selectedElementType, setSelectedElementType] = useState<string | undefined>();
-  const currentStep = narrative.currentStep(state);
-  const view = simPackage.render(state);
-  const activeElementId = state.selectedElementId ?? selectedElementId;
 
   useEffect(() => {
-    const engine = new SimEngine<TState>({
-      simPackage,
-      initParams,
-      seed,
-      stepDurationMs: stepDuration / speed,
-      onStateChange: (nextState, nextTick) => {
-        setState(nextState);
-        setTick(nextTick);
-      },
-      onEvent: (event) => onActionLog?.(event),
-    });
-    engineRef.current = engine;
-    setState(engine.snapshot().state);
-    setTick(0);
+    setDescriptor(undefined);
+    setSnapshot(undefined);
+    setRuntimeMessage(undefined);
     setPlaying(false);
+    setStepDuration(undefined);
     setSelectedElementId(undefined);
     setSelectedElementType(undefined);
-    return () => engine.destroy();
-  }, [simPackage, initParams, seed, onActionLog]);
+
+    const client = new SimWorkerClient({
+      moduleUrl,
+      initParams,
+      seed,
+      commandTimeoutMs: workerCommandTimeoutMs,
+      onReady: (nextDescriptor, nextSnapshot) => {
+        setDescriptor(nextDescriptor);
+        setSnapshot(nextSnapshot);
+        setStepDuration(nextSnapshot.state.explanation.defaultDurationMs);
+      },
+      onSnapshot: (nextSnapshot, event) => {
+        setSnapshot(nextSnapshot);
+        if (nextSnapshot.state.selectedElementId) {
+          setSelectedElementId(nextSnapshot.state.selectedElementId);
+        }
+        if (event) {
+          onActionLog?.(event);
+        }
+      },
+      onError: (message) => {
+        setRuntimeMessage(message);
+        setPlaying(false);
+      },
+    });
+    clientRef.current = client;
+    void client.init().catch((error: Error) => {
+      setRuntimeMessage(error.message);
+      setPlaying(false);
+    });
+    return () => {
+      client.destroy();
+      clientRef.current = null;
+    };
+  }, [moduleUrl, initParams, seed, workerCommandTimeoutMs, onActionLog]);
 
   useEffect(() => {
-    if (state.selectedElementId) {
-      setSelectedElementId(state.selectedElementId);
+    if (stepDuration === undefined) {
+      return;
     }
-  }, [state.selectedElementId]);
-
-  useEffect(() => {
-    engineRef.current?.setStepDuration(stepDuration / speed);
+    clientRef.current?.setStepDuration(stepDuration / speed);
   }, [stepDuration, speed]);
 
+  const activeElementId = snapshot?.state.selectedElementId ?? selectedElementId;
+  const currentStep = snapshot?.currentStep;
+
+  function handleRuntimeError(error: unknown): void {
+    setRuntimeMessage(error instanceof Error ? error.message : '仿真运行失败,请刷新后重试');
+    setPlaying(false);
+  }
+
   function togglePlay(): void {
-    if (!engineRef.current) return;
+    const client = clientRef.current;
+    if (!client || !snapshot) {
+      return;
+    }
     if (playing) {
-      engineRef.current.pause();
+      client.pause();
       setPlaying(false);
       return;
     }
-    engineRef.current.start();
+    client.start();
     setPlaying(true);
   }
 
   function stepForward(): void {
-    engineRef.current?.step();
+    void clientRef.current?.step().catch(handleRuntimeError);
   }
 
   function stepBack(): void {
-    engineRef.current?.back();
+    void clientRef.current?.back().catch(handleRuntimeError);
   }
 
   function reset(): void {
-    engineRef.current?.reset();
+    void clientRef.current?.reset().catch(handleRuntimeError);
     setPlaying(false);
+    setSelectedElementId(undefined);
+    setSelectedElementType(undefined);
   }
 
-  function submitCheckpoint(step: NarrativeStep): void {
-    if (!step.question) return;
-    const checkpoint = simPackage.checkpoints?.find((item) => item.id === step.question?.checkpointId);
-    if (!checkpoint) return;
-    const result = checkpoint.evaluate(state);
-    onCheckpoint?.(checkpoint.id, result);
+  function submitCheckpoint(step: NarrativeStepDescriptor): void {
+    const checkpointId = step.question?.checkpointId;
+    if (!checkpointId || !snapshot?.checkpointResults[checkpointId]) {
+      return;
+    }
+    onCheckpoint?.(checkpointId, snapshot.checkpointResults[checkpointId]);
+  }
+
+  if (!descriptor || !snapshot || stepDuration === undefined) {
+    return (
+      <main className="sim-workbench" aria-label="仿真工作台">
+        <header className="sim-workbench__bar">
+          <div>
+            <p className="sim-workbench__kicker">仿真可视化引擎</p>
+            <h1>仿真正在准备</h1>
+          </div>
+        </header>
+        <section className="sim-workbench__empty">
+          {runtimeMessage ? <p>{runtimeMessage}</p> : <p>正在加载仿真环境,请稍候</p>}
+        </section>
+      </main>
+    );
   }
 
   return (
-    <main className="sim-workbench" aria-label={`${simPackage.meta.name}仿真工作台`}>
+    <main className="sim-workbench" aria-label={`${descriptor.meta.name}仿真工作台`}>
       <header className="sim-workbench__bar">
         <div>
           <p className="sim-workbench__kicker">仿真可视化引擎</p>
-          <h1>{simPackage.meta.name}</h1>
+          <h1>{descriptor.meta.name}</h1>
         </div>
         <div className="sim-workbench__status">
-          <span>步进 {tick}</span>
-          <span>{state.phase}</span>
+          <span>步进 {snapshot.tick}</span>
+          <span>{snapshot.state.phase}</span>
         </div>
       </header>
 
       <section className="sim-workbench__layout">
         <aside className="sim-workbench__panel sim-workbench__panel--left">
-          <StepList steps={narrative.allSteps()} currentStep={currentStep} />
+          <StepList steps={descriptor.narrative} currentStep={currentStep} />
           <article className="sim-explain">
-            <h2>{state.explanation.title}</h2>
-            <p>{state.explanation.effect}</p>
+            <h2>{snapshot.state.explanation.title}</h2>
+            <p>{snapshot.state.explanation.effect}</p>
             <strong>为什么重要</strong>
-            <p>{state.explanation.reason}</p>
+            <p>{snapshot.state.explanation.reason}</p>
           </article>
           {currentStep?.question && (
             <article className="sim-question">
@@ -144,12 +202,13 @@ export function SimulationWorkbench<TState extends SimState = SimState>({
               </div>
             </article>
           )}
+          {runtimeMessage && <p className="sim-runtime-message">{runtimeMessage}</p>}
         </aside>
 
         <section className="sim-workbench__stage" aria-label="仿真可视化舞台">
-          <p className="sim-workbench__summary">{view.summary}</p>
+          <p className="sim-workbench__summary">{snapshot.view.summary}</p>
           <div className="sim-pattern-grid">
-            {view.patterns
+            {snapshot.view.patterns
               .filter((pattern) => pattern.region === 'main')
               .map((pattern) => (
                 <PatternRenderer
@@ -164,7 +223,7 @@ export function SimulationWorkbench<TState extends SimState = SimState>({
               ))}
           </div>
           <div className="sim-pattern-grid sim-pattern-grid--compact">
-            {view.patterns
+            {snapshot.view.patterns
               .filter((pattern) => pattern.region !== 'main')
               .map((pattern) => (
                 <PatternRenderer
@@ -182,19 +241,22 @@ export function SimulationWorkbench<TState extends SimState = SimState>({
 
         <aside className="sim-workbench__panel sim-workbench__panel--right">
           <InteractionPanel
-            interactions={simPackage.interactions}
+            interactions={descriptor.interactions}
+            availability={snapshot.interactionAvailability}
             selectedElementId={activeElementId}
             selectedElementType={selectedElementType}
-            state={state}
-            onEmit={(type, payload, target) => engineRef.current?.inject(type, payload, target)}
+            eventSeq={snapshot.events.length}
+            onEmit={(type, payload, target) => {
+              void clientRef.current?.inject(type, payload, target).catch(handleRuntimeError);
+            }}
           />
-          {simPackage.codeTrace && <CodeTracePanel simPackage={simPackage} state={state} />}
-          {simPackage.checkpoints?.length ? <CheckpointPanel simPackage={simPackage} state={state} /> : null}
+          {descriptor.codeTrace && <CodeTracePanel codeTrace={descriptor.codeTrace} snapshot={snapshot} />}
+          {descriptor.checkpoints.length ? <CheckpointPanel descriptor={descriptor} snapshot={snapshot} /> : null}
         </aside>
       </section>
 
       <footer className="sim-workbench__controls">
-        <Button variant="on-dark" size="sm" icon={<SkipBack size={16} />} onClick={stepBack} disabled={tick === 0 || playing}>
+        <Button variant="on-dark" size="sm" icon={<SkipBack size={16} />} onClick={stepBack} disabled={snapshot.tick === 0 || playing}>
           回退一步
         </Button>
         <Button variant="primary" size="sm" icon={playing ? <Pause size={16} /> : <Play size={16} />} onClick={togglePlay}>
@@ -238,7 +300,7 @@ export function SimulationWorkbench<TState extends SimState = SimState>({
 /**
  * 展示叙事步骤列表,帮助学生知道当前处于哪一个教学阶段。
  */
-function StepList({ steps, currentStep }: { steps: NarrativeStep[]; currentStep?: NarrativeStep }): React.ReactElement {
+function StepList({ steps, currentStep }: { steps: NarrativeStepDescriptor[]; currentStep?: NarrativeStepDescriptor }): React.ReactElement {
   return (
     <ol className="sim-step-list" aria-label="教学步骤">
       {steps.map((step) => (
@@ -256,22 +318,24 @@ function StepList({ steps, currentStep }: { steps: NarrativeStep[]; currentStep?
  */
 function InteractionPanel({
   interactions,
+  availability,
   selectedElementId,
   selectedElementType,
-  state,
+  eventSeq,
   onEmit,
 }: {
-  interactions: InteractionDef[];
+  interactions: InteractionDescriptor[];
+  availability: Record<string, boolean>;
   selectedElementId?: string;
   selectedElementType?: string;
-  state: SimState;
+  eventSeq: number;
   onEmit: (type: string, payload: JsonObject, target?: string) => void;
 }): React.ReactElement {
   const [values, setValues] = useState<Record<string, JsonObject>>({});
   const [lastEmittedAt, setLastEmittedAt] = useState<Record<string, number>>({});
-  const [, setCooldownVersion] = useState(0);
+  const [pendingAttackId, setPendingAttackId] = useState<string | undefined>();
 
-  function updateValue(interaction: InteractionDef, field: FieldDef, value: JsonValue): void {
+  function updateValue(interaction: InteractionDescriptor, field: FieldDef, value: JsonValue): void {
     setValues((current) => ({
       ...current,
       [interaction.id]: {
@@ -282,49 +346,41 @@ function InteractionPanel({
     }));
   }
 
-  function handleFieldChange(interaction: InteractionDef, field: FieldDef, value: JsonValue): void {
+  function handleFieldChange(interaction: InteractionDescriptor, field: FieldDef, value: JsonValue): void {
     updateValue(interaction, field, value);
     if (interaction.kind === 'slider' && field.type === 'range') {
       emitInteraction(interaction, { [field.name]: value });
     }
   }
 
-  function valueFor(interaction: InteractionDef, field: FieldDef): JsonValue {
+  function valueFor(interaction: InteractionDescriptor, field: FieldDef): JsonValue {
     return values[interaction.id]?.[field.name] ?? field.default;
   }
 
-  function emitInteraction(interaction: InteractionDef, extra: JsonObject = {}): void {
+  function emitInteraction(interaction: InteractionDescriptor, extra: JsonObject = {}): void {
     const bypassCooldown = extra.active === false || extra.phase === 'end';
     if (!canEmit(interaction, bypassCooldown)) {
       return;
     }
     const target = interaction.target === 'element' || interaction.kind === 'select-element' ? selectedElementId : undefined;
     const payload = { ...defaultPayload(interaction), ...(values[interaction.id] ?? {}), ...extra };
-    if (target) {
-      payload.target_id = target;
-    }
     if (interaction.labelTag === 'attack' && extra.confirmed !== true) {
-      const confirmed = window.confirm('该操作会改变当前仿真走势,确认继续吗?');
-      if (!confirmed) {
-        return;
-      }
-      payload.confirmed = true;
+      setPendingAttackId(interaction.id);
+      return;
     }
     onEmit(interaction.emits, payload, target);
-    setLastEmittedAt((current) => ({ ...current, [interaction.id]: Date.now() }));
-    if (interaction.cooldownMs && interaction.cooldownMs > 0) {
-      window.setTimeout(() => setCooldownVersion((version) => version + 1), interaction.cooldownMs);
-    }
+    setPendingAttackId(undefined);
+    setLastEmittedAt((current) => ({ ...current, [interaction.id]: eventSeq }));
   }
 
-  function canEmit(interaction: InteractionDef, bypassCooldown = false): boolean {
-    if (interaction.availableWhen && !interaction.availableWhen(state)) {
+  function canEmit(interaction: InteractionDescriptor, bypassCooldown = false): boolean {
+    if (availability[interaction.id] === false) {
       return false;
     }
     if ((interaction.target === 'element' || interaction.kind === 'select-element') && !selectedElementId) {
       return false;
     }
-    if (interaction.elementFilter && selectedElementType && interaction.elementFilter !== selectedElementType) {
+    if (interaction.elementFilter && interaction.elementFilter !== selectedElementType) {
       return false;
     }
     if (hasMissingRequiredField(interaction, values[interaction.id])) {
@@ -333,8 +389,9 @@ function InteractionPanel({
     if (bypassCooldown) {
       return true;
     }
+    const cooldownEvents = cooldownEventWindow(interaction.cooldownMs);
     const last = lastEmittedAt[interaction.id];
-    return !last || !interaction.cooldownMs || Date.now() - last >= interaction.cooldownMs;
+    return last === undefined || cooldownEvents === 0 || eventSeq - last >= cooldownEvents;
   }
 
   return (
@@ -342,9 +399,9 @@ function InteractionPanel({
       <h2>交互组件</h2>
       <div className="sim-interactions">
         {interactions.map((interaction) => {
-          const unavailable = interaction.availableWhen ? !interaction.availableWhen(state) : false;
+          const unavailable = availability[interaction.id] === false;
           const missingTarget = (interaction.target === 'element' || interaction.kind === 'select-element') && !selectedElementId;
-          const targetTypeMismatch = Boolean(interaction.elementFilter && selectedElementType && interaction.elementFilter !== selectedElementType);
+          const targetTypeMismatch = Boolean(interaction.elementFilter && interaction.elementFilter !== selectedElementType);
           const disabled = !canEmit(interaction);
           return (
             <article className={`sim-interaction-card is-${interaction.labelTag ?? 'normal'}`} key={interaction.id}>
@@ -360,6 +417,18 @@ function InteractionPanel({
               )}
               {unavailable && <p className="sim-interaction-hint">当前状态暂不可用</p>}
               {missingTarget && <p className="sim-interaction-hint">选择对象后即可操作</p>}
+              {pendingAttackId === interaction.id && (
+                <div className="sim-attack-confirm" role="group" aria-label="高影响操作确认">
+                  <ShieldAlert size={16} />
+                  <span>此操作会改变当前仿真走势。</span>
+                  <button type="button" onClick={() => emitInteraction(interaction, { confirmed: true })}>
+                    确认执行
+                  </button>
+                  <button type="button" onClick={() => setPendingAttackId(undefined)}>
+                    取消
+                  </button>
+                </div>
+              )}
               {renderInteractionFields(interaction, valueFor, handleFieldChange)}
               <InteractionCommand interaction={interaction} disabled={disabled} emitInteraction={emitInteraction} />
             </article>
@@ -371,9 +440,19 @@ function InteractionPanel({
 }
 
 /**
+ * 将声明式 cooldown_ms 转为事件窗口,避免运行时依赖真实时间影响确定性。
+ */
+function cooldownEventWindow(cooldownMs?: number): number {
+  if (!cooldownMs || cooldownMs <= 0) {
+    return 0;
+  }
+  return Math.max(1, Math.ceil(cooldownMs / 1000));
+}
+
+/**
  * 从交互字段声明中生成默认载荷,用于按钮类或未展开表单类交互的首个可执行动作。
  */
-function defaultPayload(interaction: InteractionDef): JsonObject {
+function defaultPayload(interaction: InteractionDescriptor): JsonObject {
   const payload: JsonObject = {};
   for (const field of interaction.params ?? []) {
     payload[field.name] = field.default;
@@ -384,7 +463,7 @@ function defaultPayload(interaction: InteractionDef): JsonObject {
 /**
  * 判断必填字段是否缺失,避免把不完整参数注入确定性 reducer。
  */
-function hasMissingRequiredField(interaction: InteractionDef, payload?: JsonObject): boolean {
+function hasMissingRequiredField(interaction: InteractionDescriptor, payload?: JsonObject): boolean {
   return Boolean(
     interaction.params?.some((field) => {
       if (!field.required) {
@@ -400,9 +479,9 @@ function hasMissingRequiredField(interaction: InteractionDef, payload?: JsonObje
  * 渲染交互字段,字段值只作为即将注入 reducer 的事件载荷。
  */
 function renderInteractionFields(
-  interaction: InteractionDef,
-  valueFor: (interaction: InteractionDef, field: FieldDef) => JsonValue,
-  updateValue: (interaction: InteractionDef, field: FieldDef, value: JsonValue) => void
+  interaction: InteractionDescriptor,
+  valueFor: (interaction: InteractionDescriptor, field: FieldDef) => JsonValue,
+  updateValue: (interaction: InteractionDescriptor, field: FieldDef, value: JsonValue) => void
 ): React.ReactElement | null {
   if (!interaction.params?.length) {
     return null;
@@ -424,13 +503,7 @@ function renderInteractionFields(
  */
 function renderFieldControl(field: FieldDef, value: JsonValue, onChange: (value: JsonValue) => void): React.ReactElement {
   if (field.type === 'boolean') {
-    return (
-      <input
-        checked={Boolean(value)}
-        onChange={(event) => onChange(event.currentTarget.checked)}
-        type="checkbox"
-      />
-    );
+    return <input checked={Boolean(value)} onChange={(event) => onChange(event.currentTarget.checked)} type="checkbox" />;
   }
   if (field.type === 'select') {
     return (
@@ -447,14 +520,7 @@ function renderFieldControl(field: FieldDef, value: JsonValue, onChange: (value:
     const numeric = typeof value === 'number' ? value : Number(field.default ?? 0);
     return (
       <span className="sim-range-control">
-        <input
-          max={field.max}
-          min={field.min}
-          onChange={(event) => onChange(Number(event.currentTarget.value))}
-          step={field.step ?? 1}
-          type="range"
-          value={numeric}
-        />
+        <input max={field.max} min={field.min} onChange={(event) => onChange(Number(event.currentTarget.value))} step={field.step ?? 1} type="range" value={numeric} />
         <strong>{numeric}</strong>
       </span>
     );
@@ -482,9 +548,9 @@ function InteractionCommand({
   disabled,
   emitInteraction,
 }: {
-  interaction: InteractionDef,
-  disabled: boolean,
-  emitInteraction: (interaction: InteractionDef, extra?: JsonObject) => void,
+  interaction: InteractionDescriptor;
+  disabled: boolean;
+  emitInteraction: (interaction: InteractionDescriptor, extra?: JsonObject) => void;
 }): React.ReactElement {
   const dragStartRef = useRef<{ x: number; y: number } | null>(null);
   const holdIntervalRef = useRef<number | null>(null);
@@ -579,19 +645,9 @@ function selectedOptionIndex(field: FieldDef, value: JsonValue): number {
 /**
  * 展示仿真状态到源码行与变量的映射,用于建立“现象到代码”的教学联系。
  */
-function CodeTracePanel<TState extends SimState>({
-  simPackage,
-  state,
-}: {
-  simPackage: SimPackage<TState>;
-  state: TState;
-}): React.ReactElement {
-  if (!simPackage.codeTrace) {
-    return <></>;
-  }
-  const codeTrace = simPackage.codeTrace;
+function CodeTracePanel({ codeTrace, snapshot }: { codeTrace: CodeTraceDef; snapshot: RuntimeSnapshot }): React.ReactElement {
   const lines = codeTrace.sourceCode.split('\n');
-  const trace = state._trace;
+  const trace = snapshot.state._trace;
   const active = new Set(trace?.triggeredLines ?? []);
   return (
     <section className="sim-side-section">
@@ -622,28 +678,21 @@ function CodeTracePanel<TState extends SimState>({
 }
 
 /**
- * 计算并展示当前状态下各检查点是否达成,供学生理解目标状态。
+ * 展示 Worker 计算出的检查点状态,主线程不执行检查点判定函数。
  */
-function CheckpointPanel<TState extends SimState>({
-  simPackage,
-  state,
-}: {
-  simPackage: SimPackage<TState>;
-  state: TState;
-}): React.ReactElement {
-  const checkpoints = simPackage.checkpoints ?? [];
+function CheckpointPanel({ descriptor, snapshot }: { descriptor: SimPackageDescriptor; snapshot: RuntimeSnapshot }): React.ReactElement {
   return (
     <section className="sim-side-section">
       <h2>检查点</h2>
       <div className="sim-checkpoints">
-        {checkpoints.map((checkpoint) => {
-          const result = checkpoint.evaluate(state);
+        {descriptor.checkpoints.map((checkpoint) => {
+          const result = snapshot.checkpointResults[checkpoint.id];
           return (
-            <article className={result.achieved ? 'is-achieved' : 'is-pending'} key={checkpoint.id}>
-              {result.achieved ? <CheckCircle2 size={16} /> : <AlertTriangle size={16} />}
+            <article className={result?.achieved ? 'is-achieved' : 'is-pending'} key={checkpoint.id}>
+              {result?.achieved ? <CheckCircle2 size={16} /> : <AlertTriangle size={16} />}
               <div>
                 <strong>{checkpoint.label}</strong>
-                <p>{result.explanation}</p>
+                <p>{result?.explanation ?? '等待仿真达到检查条件'}</p>
               </div>
             </article>
           );

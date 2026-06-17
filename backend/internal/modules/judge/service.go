@@ -13,7 +13,6 @@ import (
 	"chaimir/internal/contracts"
 	"chaimir/internal/platform/audit"
 	"chaimir/internal/platform/config"
-	"chaimir/internal/platform/db"
 	"chaimir/internal/platform/eventbus"
 	"chaimir/internal/platform/ids"
 	"chaimir/internal/platform/jsonx"
@@ -138,7 +137,7 @@ func (s *Service) ListJudgers(ctx context.Context) ([]map[string]any, error) {
 }
 
 // CreateJudger 注册或更新判题器定义。
-func (s *Service) CreateJudger(ctx context.Context, req CreateJudgerRequest) (map[string]any, error) {
+func (s *Service) CreateJudger(ctx context.Context, req JudgerRequest) (map[string]any, error) {
 	spec, err := validateJudgerRequest(req)
 	if err != nil {
 		return nil, err
@@ -161,7 +160,7 @@ func (s *Service) CreateJudger(ctx context.Context, req CreateJudgerRequest) (ma
 }
 
 // UpdateJudger 更新判题器配置。
-func (s *Service) UpdateJudger(ctx context.Context, id int64, req UpdateJudgerRequest) (map[string]any, error) {
+func (s *Service) UpdateJudger(ctx context.Context, id int64, req JudgerRequest) (map[string]any, error) {
 	if id <= 0 {
 		return nil, apperr.ErrPathIDInvalid
 	}
@@ -367,7 +366,7 @@ func (s *Service) findExistingTaskBySourceRef(ctx context.Context, tenantID int6
 	if err == nil {
 		return existing, true, nil
 	}
-	if db.IsNoRows(err) {
+	if s.store.IsNoRows(err) {
 		return JudgeTask{}, false, nil
 	}
 	return JudgeTask{}, false, apperr.ErrJudgeTaskEnqueueFailed.WithCause(err)
@@ -586,18 +585,13 @@ func (s *Service) buildSubmissionVector(ctx context.Context, objectRef string) (
 	return fingerprintVectorFromArchive(name, data, upload.ArchiveLimits{MaxFiles: s.cfg.InputArchiveMaxFiles, MaxUnpackedBytes: s.cfg.InputArchiveMaxUnpackedBytes})
 }
 
-// sourceOwnershipFromRequest 从现有跨模块扩展输入中提取来源归属证明。
+// sourceOwnershipFromRequest 从跨模块契约读取来源归属证明。
 func sourceOwnershipFromRequest(req contracts.JudgeSubmitRequest) SourceOwnership {
-	ownerID := jsonx.Int64FromAny(req.ExtraInput["source_owner_id"], 0)
-	courseID := jsonx.Int64FromAny(req.ExtraInput["source_course_id"], 0)
-	scope := strings.TrimSpace(stringValue(req.ExtraInput["source_scope"]))
-	if scope == "" {
-		scope = sourceScopeFromRef(req.SourceRef)
+	return SourceOwnership{
+		OwnerID:  req.SourceOwnerID,
+		CourseID: req.SourceCourseID,
+		Scope:    strings.TrimSpace(req.SourceScope),
 	}
-	if ownerID <= 0 {
-		ownerID = req.SubmitterID
-	}
-	return SourceOwnership{OwnerID: ownerID, CourseID: courseID, Scope: scope}
 }
 
 // storeSanitizedCodeArchive 将后端重打包后的提交归档写入对象存储,数据库快照只保存引用。
@@ -621,22 +615,19 @@ func (s *Service) storeSanitizedCodeArchive(ctx context.Context, tenantID, taskI
 
 // validateSourceOwnership 强制来源归属快照采用唯一字段口径,教学来源必须携带课程快照。
 func validateSourceOwnership(ownership SourceOwnership) error {
-	if ownership.OwnerID <= 0 || strings.TrimSpace(ownership.Scope) == "" {
+	scope := strings.TrimSpace(ownership.Scope)
+	if ownership.OwnerID <= 0 || scope == "" {
 		return apperr.ErrJudgeTaskForbidden
 	}
-	if ownership.Scope == "teaching" && ownership.CourseID <= 0 {
+	switch scope {
+	case "teaching", "exp", "contest":
+	default:
+		return apperr.ErrJudgeTaskForbidden
+	}
+	if scope == "teaching" && ownership.CourseID <= 0 {
 		return apperr.ErrJudgeTaskForbidden
 	}
 	return nil
-}
-
-// sourceScopeFromRef 只解析来源类型,不在 M3 内解释业务模块私有 ID 语义。
-func sourceScopeFromRef(sourceRef string) string {
-	parts := strings.Split(strings.TrimSpace(sourceRef), ":")
-	if len(parts) == 0 || strings.TrimSpace(parts[0]) == "" {
-		return ""
-	}
-	return strings.TrimSpace(parts[0])
 }
 
 // readObjectRef 读取 minio://bucket/key 对象,限制在统一对象存储接口内。
@@ -706,7 +697,7 @@ func (s *Service) publishProgress(ctx context.Context, tenantID, taskID int64, s
 	if s.wsHub == nil {
 		return
 	}
-	raw, err := jsonx.AnyBytes(ProgressMessage{TaskID: taskID, Status: status, Stage: stage, Message: message}, apperr.ErrInternal)
+	raw, err := jsonx.AnyBytes(ProgressMessage{TaskID: taskID, Status: statusText(status), Stage: stage, Message: message}, apperr.ErrInternal)
 	if err != nil {
 		logging.ErrorContext(ctx, "judge progress serialization failed", err.Error(), slog.Int64("tenant_id", tenantID), slog.Int64("task_id", taskID), slog.String("stage", stage))
 		return
@@ -720,7 +711,7 @@ func judgeProgressTopic(tenantID, taskID int64) string {
 }
 
 // normalizeJudgerRequest 修剪判题器请求字段。
-func normalizeJudgerRequest(req CreateJudgerRequest) CreateJudgerRequest {
+func normalizeJudgerRequest(req JudgerRequest) JudgerRequest {
 	req.Code = strings.TrimSpace(req.Code)
 	req.Name = strings.TrimSpace(req.Name)
 	req.ExecutorRef = strings.TrimSpace(req.ExecutorRef)

@@ -21,7 +21,7 @@ WHERE id IN (
     LIMIT $2
     FOR UPDATE SKIP LOCKED
 )
-RETURNING id, tenant_id, submission_id, assignment_item_id, assignment_id, student_id, item_code, item_version, judger_code, code_storage_key, code_hash, extra_input, source_ref, status, retry_count, last_error, score, completed_at, created_at, updated_at
+RETURNING id, tenant_id, submission_id, assignment_item_id, assignment_id, source_owner_id, source_course_id, source_scope, student_id, item_code, item_version, judger_code, code_storage_key, code_hash, extra_input, source_ref, status, retry_count, last_error, score, completed_at, created_at, updated_at
 `
 
 type ClaimJudgeOutboxParams struct {
@@ -44,6 +44,9 @@ func (q *Queries) ClaimJudgeOutbox(ctx context.Context, arg ClaimJudgeOutboxPara
 			&i.SubmissionID,
 			&i.AssignmentItemID,
 			&i.AssignmentID,
+			&i.SourceOwnerID,
+			&i.SourceCourseID,
+			&i.SourceScope,
 			&i.StudentID,
 			&i.ItemCode,
 			&i.ItemVersion,
@@ -80,7 +83,7 @@ WHERE id IN (
     LIMIT $1
     FOR UPDATE SKIP LOCKED
 )
-RETURNING id, tenant_id, submission_id, assignment_item_id, assignment_id, student_id, item_code, item_version, judger_code, code_storage_key, code_hash, extra_input, source_ref, status, retry_count, last_error, score, completed_at, created_at, updated_at
+RETURNING id, tenant_id, submission_id, assignment_item_id, assignment_id, source_owner_id, source_course_id, source_scope, student_id, item_code, item_version, judger_code, code_storage_key, code_hash, extra_input, source_ref, status, retry_count, last_error, score, completed_at, created_at, updated_at
 `
 
 func (q *Queries) ClaimJudgeOutboxAcrossTenants(ctx context.Context, limit int32) ([]SubmissionJudgeOutbox, error) {
@@ -98,6 +101,9 @@ func (q *Queries) ClaimJudgeOutboxAcrossTenants(ctx context.Context, limit int32
 			&i.SubmissionID,
 			&i.AssignmentItemID,
 			&i.AssignmentID,
+			&i.SourceOwnerID,
+			&i.SourceCourseID,
+			&i.SourceScope,
 			&i.StudentID,
 			&i.ItemCode,
 			&i.ItemVersion,
@@ -179,7 +185,7 @@ const completeJudgeOutbox = `-- name: CompleteJudgeOutbox :one
 UPDATE submission_judge_outbox
 SET status = 3, last_error = NULL, updated_at = now()
 WHERE tenant_id = $1 AND id = $2
-RETURNING id, tenant_id, submission_id, assignment_item_id, assignment_id, student_id, item_code, item_version, judger_code, code_storage_key, code_hash, extra_input, source_ref, status, retry_count, last_error, score, completed_at, created_at, updated_at
+RETURNING id, tenant_id, submission_id, assignment_item_id, assignment_id, source_owner_id, source_course_id, source_scope, student_id, item_code, item_version, judger_code, code_storage_key, code_hash, extra_input, source_ref, status, retry_count, last_error, score, completed_at, created_at, updated_at
 `
 
 type CompleteJudgeOutboxParams struct {
@@ -196,6 +202,9 @@ func (q *Queries) CompleteJudgeOutbox(ctx context.Context, arg CompleteJudgeOutb
 		&i.SubmissionID,
 		&i.AssignmentItemID,
 		&i.AssignmentID,
+		&i.SourceOwnerID,
+		&i.SourceCourseID,
+		&i.SourceScope,
 		&i.StudentID,
 		&i.ItemCode,
 		&i.ItemVersion,
@@ -725,9 +734,9 @@ func (q *Queries) CreateGradeWeight(ctx context.Context, arg CreateGradeWeightPa
 }
 
 const createJudgeOutbox = `-- name: CreateJudgeOutbox :one
-INSERT INTO submission_judge_outbox (id, tenant_id, submission_id, assignment_item_id, assignment_id, student_id, item_code, item_version, judger_code, code_storage_key, code_hash, extra_input, source_ref, status, retry_count, last_error, score, completed_at, created_at, updated_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, 1, 0, NULL, NULL, NULL, now(), now())
-RETURNING id, tenant_id, submission_id, assignment_item_id, assignment_id, student_id, item_code, item_version, judger_code, code_storage_key, code_hash, extra_input, source_ref, status, retry_count, last_error, score, completed_at, created_at, updated_at
+INSERT INTO submission_judge_outbox (id, tenant_id, submission_id, assignment_item_id, assignment_id, source_owner_id, source_course_id, source_scope, student_id, item_code, item_version, judger_code, code_storage_key, code_hash, extra_input, source_ref, status, retry_count, last_error, score, completed_at, created_at, updated_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, 1, 0, NULL, NULL, NULL, now(), now())
+RETURNING id, tenant_id, submission_id, assignment_item_id, assignment_id, source_owner_id, source_course_id, source_scope, student_id, item_code, item_version, judger_code, code_storage_key, code_hash, extra_input, source_ref, status, retry_count, last_error, score, completed_at, created_at, updated_at
 `
 
 type CreateJudgeOutboxParams struct {
@@ -736,6 +745,9 @@ type CreateJudgeOutboxParams struct {
 	SubmissionID     int64  `json:"submission_id"`
 	AssignmentItemID int64  `json:"assignment_item_id"`
 	AssignmentID     int64  `json:"assignment_id"`
+	SourceOwnerID    int64  `json:"source_owner_id"`
+	SourceCourseID   int64  `json:"source_course_id"`
+	SourceScope      string `json:"source_scope"`
 	StudentID        int64  `json:"student_id"`
 	ItemCode         string `json:"item_code"`
 	ItemVersion      string `json:"item_version"`
@@ -753,6 +765,9 @@ func (q *Queries) CreateJudgeOutbox(ctx context.Context, arg CreateJudgeOutboxPa
 		arg.SubmissionID,
 		arg.AssignmentItemID,
 		arg.AssignmentID,
+		arg.SourceOwnerID,
+		arg.SourceCourseID,
+		arg.SourceScope,
 		arg.StudentID,
 		arg.ItemCode,
 		arg.ItemVersion,
@@ -769,6 +784,9 @@ func (q *Queries) CreateJudgeOutbox(ctx context.Context, arg CreateJudgeOutboxPa
 		&i.SubmissionID,
 		&i.AssignmentItemID,
 		&i.AssignmentID,
+		&i.SourceOwnerID,
+		&i.SourceCourseID,
+		&i.SourceScope,
 		&i.StudentID,
 		&i.ItemCode,
 		&i.ItemVersion,
@@ -2016,7 +2034,7 @@ func (q *Queries) ListGradeWeights(ctx context.Context, arg ListGradeWeightsPara
 }
 
 const listJudgeOutboxBySubmission = `-- name: ListJudgeOutboxBySubmission :many
-SELECT id, tenant_id, submission_id, assignment_item_id, assignment_id, student_id, item_code, item_version, judger_code, code_storage_key, code_hash, extra_input, source_ref, status, retry_count, last_error, score, completed_at, created_at, updated_at
+SELECT id, tenant_id, submission_id, assignment_item_id, assignment_id, source_owner_id, source_course_id, source_scope, student_id, item_code, item_version, judger_code, code_storage_key, code_hash, extra_input, source_ref, status, retry_count, last_error, score, completed_at, created_at, updated_at
 FROM submission_judge_outbox
 WHERE tenant_id = $1 AND submission_id = $2
 ORDER BY id ASC
@@ -2042,6 +2060,9 @@ func (q *Queries) ListJudgeOutboxBySubmission(ctx context.Context, arg ListJudge
 			&i.SubmissionID,
 			&i.AssignmentItemID,
 			&i.AssignmentID,
+			&i.SourceOwnerID,
+			&i.SourceCourseID,
+			&i.SourceScope,
 			&i.StudentID,
 			&i.ItemCode,
 			&i.ItemVersion,
@@ -2527,7 +2548,7 @@ const markJudgeOutboxFailedResult = `-- name: MarkJudgeOutboxFailedResult :one
 UPDATE submission_judge_outbox
 SET last_error = $3, completed_at = $4, updated_at = now()
 WHERE tenant_id = $1 AND source_ref = $2
-RETURNING id, tenant_id, submission_id, assignment_item_id, assignment_id, student_id, item_code, item_version, judger_code, code_storage_key, code_hash, extra_input, source_ref, status, retry_count, last_error, score, completed_at, created_at, updated_at
+RETURNING id, tenant_id, submission_id, assignment_item_id, assignment_id, source_owner_id, source_course_id, source_scope, student_id, item_code, item_version, judger_code, code_storage_key, code_hash, extra_input, source_ref, status, retry_count, last_error, score, completed_at, created_at, updated_at
 `
 
 type MarkJudgeOutboxFailedResultParams struct {
@@ -2551,6 +2572,9 @@ func (q *Queries) MarkJudgeOutboxFailedResult(ctx context.Context, arg MarkJudge
 		&i.SubmissionID,
 		&i.AssignmentItemID,
 		&i.AssignmentID,
+		&i.SourceOwnerID,
+		&i.SourceCourseID,
+		&i.SourceScope,
 		&i.StudentID,
 		&i.ItemCode,
 		&i.ItemVersion,
@@ -2574,7 +2598,7 @@ const markJudgeOutboxResult = `-- name: MarkJudgeOutboxResult :one
 UPDATE submission_judge_outbox
 SET score = $3, last_error = NULL, completed_at = $4, updated_at = now()
 WHERE tenant_id = $1 AND source_ref = $2
-RETURNING id, tenant_id, submission_id, assignment_item_id, assignment_id, student_id, item_code, item_version, judger_code, code_storage_key, code_hash, extra_input, source_ref, status, retry_count, last_error, score, completed_at, created_at, updated_at
+RETURNING id, tenant_id, submission_id, assignment_item_id, assignment_id, source_owner_id, source_course_id, source_scope, student_id, item_code, item_version, judger_code, code_storage_key, code_hash, extra_input, source_ref, status, retry_count, last_error, score, completed_at, created_at, updated_at
 `
 
 type MarkJudgeOutboxResultParams struct {
@@ -2598,6 +2622,9 @@ func (q *Queries) MarkJudgeOutboxResult(ctx context.Context, arg MarkJudgeOutbox
 		&i.SubmissionID,
 		&i.AssignmentItemID,
 		&i.AssignmentID,
+		&i.SourceOwnerID,
+		&i.SourceCourseID,
+		&i.SourceScope,
 		&i.StudentID,
 		&i.ItemCode,
 		&i.ItemVersion,
@@ -2887,7 +2914,7 @@ const retryJudgeOutbox = `-- name: RetryJudgeOutbox :one
 UPDATE submission_judge_outbox
 SET status = 1, retry_count = retry_count + 1, last_error = $3, updated_at = now()
 WHERE tenant_id = $1 AND id = $2
-RETURNING id, tenant_id, submission_id, assignment_item_id, assignment_id, student_id, item_code, item_version, judger_code, code_storage_key, code_hash, extra_input, source_ref, status, retry_count, last_error, score, completed_at, created_at, updated_at
+RETURNING id, tenant_id, submission_id, assignment_item_id, assignment_id, source_owner_id, source_course_id, source_scope, student_id, item_code, item_version, judger_code, code_storage_key, code_hash, extra_input, source_ref, status, retry_count, last_error, score, completed_at, created_at, updated_at
 `
 
 type RetryJudgeOutboxParams struct {
@@ -2905,6 +2932,9 @@ func (q *Queries) RetryJudgeOutbox(ctx context.Context, arg RetryJudgeOutboxPara
 		&i.SubmissionID,
 		&i.AssignmentItemID,
 		&i.AssignmentID,
+		&i.SourceOwnerID,
+		&i.SourceCourseID,
+		&i.SourceScope,
 		&i.StudentID,
 		&i.ItemCode,
 		&i.ItemVersion,

@@ -2,17 +2,10 @@
 // 对应后端 M3 模块
 
 import { ApiClient } from '../client'
-import type { JudgeTask, SubmitJudgeRequest, PaginatedResponse } from '../types'
+import type { JudgeTask, JudgeManualScoreRequest, PaginatedResponse } from '../types'
 
 export class JudgeApi {
   constructor(private client: ApiClient) {}
-
-  /**
-   * 提交判题任务
-   */
-  async submitTask(data: SubmitJudgeRequest): Promise<JudgeTask> {
-    return this.client.post('/judge/tasks', data)
-  }
 
   /**
    * 获取判题任务详情
@@ -22,10 +15,21 @@ export class JudgeApi {
   }
 
   /**
+   * 获取判题进度 WebSocket URL
+   */
+  getProgressWsUrl(taskId: string): string {
+    const baseUrl = this.client['config'].baseURL || ''
+    const wsProtocol = baseUrl.startsWith('https') ? 'wss' : 'ws'
+    const wsBaseUrl = baseUrl.replace(/^https?/, wsProtocol)
+    return `${wsBaseUrl}/judge/tasks/${taskId}/progress`
+  }
+
+  /**
    * 获取判题任务列表
    */
   async getTasks(params?: {
-    status?: number
+    source_ref?: string
+    pending_manual?: boolean
     page?: number
     size?: number
   }): Promise<PaginatedResponse<JudgeTask>> {
@@ -33,9 +37,16 @@ export class JudgeApi {
   }
 
   /**
-   * 取消判题任务
+   * 按原始快照重判
    */
-  async cancelTask(taskId: string): Promise<void> {
-    return this.client.post(`/judge/tasks/${taskId}/cancel`)
+  async rejudgeTask(taskId: string): Promise<JudgeTask> {
+    return this.client.post(`/judge/tasks/${taskId}/rejudge`)
+  }
+
+  /**
+   * 提交人工评分结果
+   */
+  async manualScore(taskId: string, data: JudgeManualScoreRequest): Promise<JudgeTask> {
+    return this.client.post(`/judge/tasks/${taskId}/manual-score`, data)
   }
 }

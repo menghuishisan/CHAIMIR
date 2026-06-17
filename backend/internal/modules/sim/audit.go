@@ -11,14 +11,14 @@ import (
 // writeAudit 写入 M1 共享 audit_log,禁止 M4 自建审计表。
 func (s *Service) writeAudit(ctx context.Context, tenantID, actorID int64, actorRole int16, action, targetType string, targetID int64, detail map[string]any) error {
 	if s.audit == nil {
-		return apperr.ErrSimSessionStateInvalid
+		return apperr.ErrAuditWriterMissing
 	}
 	entry, err := audit.BuildEntry(ctx, tenantID, actorID, actorRole, action, targetType, targetID, detail)
 	if err != nil {
-		return apperr.ErrSimSessionStateInvalid.WithCause(err)
+		return apperr.ErrAuditActorResolveFailed.WithCause(err)
 	}
 	if err := s.audit.Write(ctx, entry); err != nil {
-		return apperr.ErrSimSessionStateInvalid.WithCause(err)
+		return apperr.ErrAuditWriteFailed.WithCause(err)
 	}
 	return nil
 }
@@ -27,7 +27,7 @@ func (s *Service) writeAudit(ctx context.Context, tenantID, actorID int64, actor
 func (s *Service) writeAuditFromContext(ctx context.Context, tenantID int64, action, targetType string, targetID int64, detail map[string]any) error {
 	actorID, actorRole, err := audit.ResolveActor(ctx, s.identity)
 	if err != nil {
-		return apperr.ErrSimSessionStateInvalid.WithCause(err)
+		return apperr.ErrAuditActorResolveFailed.WithCause(err)
 	}
 	return s.writeAudit(ctx, tenantID, actorID, actorRole, action, targetType, targetID, detail)
 }

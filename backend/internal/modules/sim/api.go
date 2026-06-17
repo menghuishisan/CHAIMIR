@@ -2,6 +2,9 @@
 package sim
 
 import (
+	"errors"
+	"io"
+	"mime/multipart"
 	"strings"
 
 	"chaimir/internal/contracts"
@@ -13,9 +16,21 @@ import (
 	"chaimir/internal/platform/upload"
 	"chaimir/internal/platform/ws"
 	"chaimir/pkg/apperr"
-	"chaimir/pkg/logging"
 
 	"github.com/gin-gonic/gin"
+)
+
+var (
+	simPackageMultipartValues = map[string]struct{}{
+		"code":            {},
+		"version":         {},
+		"name":            {},
+		"category":        {},
+		"compute":         {},
+		"backend_adapter": {},
+		"scale_limit":     {},
+		"backend_config":  {},
+	}
 )
 
 // RegisterRoutes 注册仿真引擎 HTTP 与 WebSocket API。
@@ -262,9 +277,12 @@ func (a simAPI) createSession(c *gin.Context) {
 	if !ok {
 		return
 	}
-	if sourceRef, ok := auth.ServiceSourceRefFromContext(c.Request.Context()); ok {
-		req.SourceRef = sourceRef
+	sourceRef, ok := auth.ServiceSourceRefFromContext(c.Request.Context())
+	if !ok {
+		response.Fail(c, apperr.ErrServiceUnauthorized)
+		return
 	}
+	req.SourceRef = sourceRef
 	out, err := a.svc.CreateSessionFromHTTP(c.Request.Context(), tenantID, req)
 	httpx.Write(c, out, err)
 }
@@ -311,7 +329,11 @@ func (a simAPI) destroySession(c *gin.Context) {
 	if !ok {
 		return
 	}
-	sourceRef, _ := auth.ServiceSourceRefFromContext(c.Request.Context())
+	sourceRef, ok := auth.ServiceSourceRefFromContext(c.Request.Context())
+	if !ok {
+		response.Fail(c, apperr.ErrServiceUnauthorized)
+		return
+	}
 	err := a.svc.DestroySession(c.Request.Context(), contracts.SimDestroySessionRequest{TenantID: tenantID, SessionID: id, SourceRef: sourceRef})
 	httpx.Write(c, gin.H{}, err)
 }
@@ -326,9 +348,12 @@ func (a simAPI) recycleSessions(c *gin.Context) {
 	if !ok {
 		return
 	}
-	if sourceRef, ok := auth.ServiceSourceRefFromContext(c.Request.Context()); ok {
-		req.SourceRef = sourceRef
+	sourceRef, ok := auth.ServiceSourceRefFromContext(c.Request.Context())
+	if !ok {
+		response.Fail(c, apperr.ErrServiceUnauthorized)
+		return
 	}
+	req.SourceRef = sourceRef
 	err := a.svc.RecycleBySourceRef(c.Request.Context(), contracts.SimRecycleRequest{TenantID: tenantID, SourceRef: req.SourceRef, Reason: req.Reason})
 	httpx.Write(c, gin.H{}, err)
 }
@@ -397,23 +422,97 @@ func (a simAPI) streamSession(c *gin.Context) {
 
 // bindPackageMultipart 读取仿真包 multipart 元数据和 bundle 文件。
 func (a simAPI) bindPackageMultipart(c *gin.Context) (SubmitPackageRequest, BundleInput, bool) {
-	file, header, err := c.Request.FormFile("bundle")
-	if err != nil {
-		response.Fail(c, apperr.ErrSimBundleUnreadable.WithCause(err))
+	req, header, data, ok := readPackageMultipart(c, a.svc.upload.SimBundleMetadataMaxBytes, a.svc.upload.SimBundleMaxBytes)
+	if !ok {
 		return SubmitPackageRequest{}, BundleInput{}, false
 	}
-	defer logging.CloseContext(c.Request.Context(), "关闭仿真包上传文件失败", file)
-	data, result, err := upload.ReadBounded(file, a.svc.upload.SimBundleMaxBytes)
-	if err != nil {
-		response.Fail(c, apperr.ErrSimBundleUnreadable.WithCause(err))
-		return SubmitPackageRequest{}, BundleInput{}, false
-	}
-	if result != upload.SizeOK {
-		response.Fail(c, apperr.ErrSimBundleUnreadable)
-		return SubmitPackageRequest{}, BundleInput{}, false
-	}
-	req := SubmitPackageRequest{Code: c.PostForm("code"), Version: c.PostForm("version"), Name: c.PostForm("name"), Category: c.PostForm("category"), Compute: c.PostForm("compute"), BackendAdapter: c.PostForm("backend_adapter"), ScaleLimit: []byte(defaultJSON(c.PostForm("scale_limit"))), BackendConfig: []byte(defaultJSON(c.PostForm("backend_config"))), AuthorType: AuthorTeacher}
 	return req, BundleInput{FileName: header.Filename, ContentType: header.Header.Get("Content-Type"), Data: data}, true
+}
+
+// readPackageMultipart 以 streaming 方式读取仿真包 multipart,拒绝未知字段和重复字段。
+func readPackageMultipart(c *gin.Context, metadataMaxBytes, bundleMaxBytes int64) (SubmitPackageRequest, *multipart.FileHeader, []byte, bool) {
+	if metadataMaxBytes <= 0 || bundleMaxBytes <= 0 {
+		response.Fail(c, apperr.ErrSimPackageInvalid)
+		return SubmitPackageRequest{}, nil, nil, false
+	}
+	reader, err := c.Request.MultipartReader()
+	if err != nil {
+		response.Fail(c, apperr.ErrSimPackageInvalid.WithCause(err))
+		return SubmitPackageRequest{}, nil, nil, false
+	}
+	fields := map[string]string{}
+	var header *multipart.FileHeader
+	var data []byte
+	var metadataUsed int64
+	for {
+		part, err := reader.NextPart()
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				break
+			}
+			response.Fail(c, apperr.ErrSimPackageInvalid.WithCause(err))
+			return SubmitPackageRequest{}, nil, nil, false
+		}
+		name := strings.TrimSpace(part.FormName())
+		if name == "" {
+			response.Fail(c, apperr.ErrSimPackageInvalid)
+			return SubmitPackageRequest{}, nil, nil, false
+		}
+		if part.FileName() != "" {
+			if name != "bundle" || header != nil {
+				response.Fail(c, apperr.ErrSimPackageInvalid)
+				return SubmitPackageRequest{}, nil, nil, false
+			}
+			content, result, err := upload.ReadBounded(part, bundleMaxBytes)
+			if err != nil {
+				response.Fail(c, apperr.ErrSimBundleUnreadable.WithCause(err))
+				return SubmitPackageRequest{}, nil, nil, false
+			}
+			if result != upload.SizeOK {
+				response.Fail(c, apperr.ErrSimBundleUnreadable)
+				return SubmitPackageRequest{}, nil, nil, false
+			}
+			data = content
+			header = &multipart.FileHeader{Filename: part.FileName(), Header: part.Header}
+			continue
+		}
+		if _, ok := simPackageMultipartValues[name]; !ok {
+			response.Fail(c, apperr.ErrSimPackageInvalid)
+			return SubmitPackageRequest{}, nil, nil, false
+		}
+		if _, exists := fields[name]; exists {
+			response.Fail(c, apperr.ErrSimPackageInvalid)
+			return SubmitPackageRequest{}, nil, nil, false
+		}
+		remaining := metadataMaxBytes - metadataUsed
+		if remaining <= 0 {
+			response.Fail(c, apperr.ErrSimPackageInvalid)
+			return SubmitPackageRequest{}, nil, nil, false
+		}
+		content, result, err := upload.ReadBounded(part, remaining)
+		if err != nil {
+			response.Fail(c, apperr.ErrSimPackageInvalid.WithCause(err))
+			return SubmitPackageRequest{}, nil, nil, false
+		}
+		if result != upload.SizeOK {
+			response.Fail(c, apperr.ErrSimPackageInvalid)
+			return SubmitPackageRequest{}, nil, nil, false
+		}
+		metadataUsed += int64(len(content))
+		fields[name] = string(content)
+	}
+	for _, required := range []string{"code", "version", "name", "category"} {
+		if _, ok := fields[required]; !ok {
+			response.Fail(c, apperr.ErrSimPackageInvalid)
+			return SubmitPackageRequest{}, nil, nil, false
+		}
+	}
+	if header == nil || len(data) == 0 {
+		response.Fail(c, apperr.ErrSimPackageInvalid)
+		return SubmitPackageRequest{}, nil, nil, false
+	}
+	req := SubmitPackageRequest{Code: fields["code"], Version: fields["version"], Name: fields["name"], Category: fields["category"], Compute: fields["compute"], BackendAdapter: fields["backend_adapter"], ScaleLimit: []byte(defaultJSON(fields["scale_limit"])), BackendConfig: []byte(defaultJSON(fields["backend_config"]))}
+	return req, header, data, true
 }
 
 // currentTenantIdentity 从服务端鉴权上下文读取租户身份。

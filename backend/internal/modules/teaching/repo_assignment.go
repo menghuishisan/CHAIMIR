@@ -212,7 +212,7 @@ func (s *txStore) CreateJudgeOutbox(ctx context.Context, outbox JudgeOutbox) (Ju
 	if err != nil {
 		return JudgeOutbox{}, err
 	}
-	row, err := s.q.CreateJudgeOutbox(ctx, sqlcgen.CreateJudgeOutboxParams{ID: outbox.ID, TenantID: outbox.TenantID, SubmissionID: outbox.SubmissionID, AssignmentItemID: outbox.AssignmentItemID, AssignmentID: outbox.AssignmentID, StudentID: outbox.StudentID, ItemCode: outbox.ItemCode, ItemVersion: outbox.ItemVersion, JudgerCode: outbox.JudgerCode, CodeStorageKey: outbox.CodeStorageKey, CodeHash: outbox.CodeHash, ExtraInput: extra, SourceRef: outbox.SourceRef})
+	row, err := s.q.CreateJudgeOutbox(ctx, sqlcgen.CreateJudgeOutboxParams{ID: outbox.ID, TenantID: outbox.TenantID, SubmissionID: outbox.SubmissionID, AssignmentItemID: outbox.AssignmentItemID, AssignmentID: outbox.AssignmentID, SourceOwnerID: outbox.SourceOwnerID, SourceCourseID: outbox.SourceCourseID, SourceScope: outbox.SourceScope, StudentID: outbox.StudentID, ItemCode: outbox.ItemCode, ItemVersion: outbox.ItemVersion, JudgerCode: outbox.JudgerCode, CodeStorageKey: outbox.CodeStorageKey, CodeHash: outbox.CodeHash, ExtraInput: extra, SourceRef: outbox.SourceRef})
 	if err != nil {
 		return JudgeOutbox{}, err
 	}

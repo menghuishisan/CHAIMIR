@@ -80,7 +80,7 @@ func NewStore(database *db.DB) Store {
 // PlatformTx 在应用连接中访问仿真包和审核表。
 func (s *store) PlatformTx(ctx context.Context, fn func(context.Context, TxStore) error) error {
 	if s == nil || s.database == nil {
-		return fmt.Errorf("sim store 未初始化")
+		return apperr.ErrInternal.WithCause(fmt.Errorf("sim store 未初始化"))
 	}
 	return s.database.WithAppTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		return fn(ctx, &txStore{q: sqlcgen.New(tx)})
@@ -90,7 +90,7 @@ func (s *store) PlatformTx(ctx context.Context, fn func(context.Context, TxStore
 // PrivilegedTx 仅用于公开分享码预认证定位这类无租户上下文的 M4 自有表读取。
 func (s *store) PrivilegedTx(ctx context.Context, fn func(context.Context, TxStore) error) error {
 	if s == nil || s.database == nil {
-		return fmt.Errorf("sim store 未初始化")
+		return apperr.ErrInternal.WithCause(fmt.Errorf("sim store 未初始化"))
 	}
 	return s.database.WithPrivilegedTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		return fn(ctx, &txStore{q: sqlcgen.New(tx)})
@@ -100,7 +100,7 @@ func (s *store) PrivilegedTx(ctx context.Context, fn func(context.Context, TxSto
 // TenantTx 在注入 RLS 租户变量后访问租户内会话、操作、检查点和分享表。
 func (s *store) TenantTx(ctx context.Context, tenantID int64, fn func(context.Context, TxStore) error) error {
 	if s == nil || s.database == nil {
-		return fmt.Errorf("sim store 未初始化")
+		return apperr.ErrInternal.WithCause(fmt.Errorf("sim store 未初始化"))
 	}
 	return s.database.WithTenantTxID(ctx, tenantID, func(ctx context.Context, tx pgx.Tx) error {
 		return fn(ctx, &txStore{q: sqlcgen.New(tx)})

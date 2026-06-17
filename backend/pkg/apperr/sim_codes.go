@@ -14,6 +14,10 @@ const (
 	CodeSimPackageValidationFailed = "41005"
 	// CodeSimBundleUnreadable 表示 bundle 读取、上传或对象存储访问失败。
 	CodeSimBundleUnreadable = "41006"
+	// CodeSimPackageDataCorrupt 表示仿真包持久化数据与平台枚举约束不一致。
+	CodeSimPackageDataCorrupt = "41007"
+	// CodeSimPackageQueryFailed 表示仿真包数据读取失败。
+	CodeSimPackageQueryFailed = "41008"
 )
 
 const (
@@ -31,6 +35,12 @@ const (
 	CodeSimCheckpointInvalid = "42006"
 	// CodeSimShareCodeInvalid 表示分享码不存在、撤销或过期。
 	CodeSimShareCodeInvalid = "42007"
+	// CodeSimSessionDataCorrupt 表示仿真会话或操作持久化数据异常。
+	CodeSimSessionDataCorrupt = "42008"
+	// CodeSimSessionQueryFailed 表示仿真会话数据读取失败。
+	CodeSimSessionQueryFailed = "42009"
+	// CodeSimShareQueryFailed 表示分享数据读取失败。
+	CodeSimShareQueryFailed = "42010"
 )
 
 const (
@@ -38,6 +48,10 @@ const (
 	CodeSimReviewNotFound = "43001"
 	// CodeSimReviewStateInvalid 表示审核记录状态不允许当前操作。
 	CodeSimReviewStateInvalid = "43002"
+	// CodeSimReviewDataCorrupt 表示审核记录持久化数据与平台枚举约束不一致。
+	CodeSimReviewDataCorrupt = "43003"
+	// CodeSimReviewQueryFailed 表示审核记录数据读取失败。
+	CodeSimReviewQueryFailed = "43004"
 )
 
 var (
@@ -53,6 +67,10 @@ var (
 	ErrSimPackageValidationFailed = New(CodeSimPackageValidationFailed, "仿真场景未通过安全校验")
 	// ErrSimBundleUnreadable 表示仿真场景资源暂时无法加载。
 	ErrSimBundleUnreadable = New(CodeSimBundleUnreadable, "仿真场景资源暂时无法加载")
+	// ErrSimPackageDataCorrupt 表示仿真场景数据异常。
+	ErrSimPackageDataCorrupt = New(CodeSimPackageDataCorrupt, "仿真场景数据异常,请联系管理员处理")
+	// ErrSimPackageQueryFailed 表示仿真场景数据读取失败。
+	ErrSimPackageQueryFailed = New(CodeSimPackageQueryFailed, "仿真场景暂时无法加载,请稍后重试")
 )
 
 var (
@@ -70,6 +88,12 @@ var (
 	ErrSimCheckpointInvalid = New(CodeSimCheckpointInvalid, "检查点结果不完整,请重新提交")
 	// ErrSimShareCodeInvalid 表示分享内容不存在或已失效。
 	ErrSimShareCodeInvalid = New(CodeSimShareCodeInvalid, "分享内容不存在或已失效")
+	// ErrSimSessionDataCorrupt 表示仿真会话数据异常。
+	ErrSimSessionDataCorrupt = New(CodeSimSessionDataCorrupt, "仿真会话数据异常,请联系管理员处理")
+	// ErrSimSessionQueryFailed 表示仿真会话数据读取失败。
+	ErrSimSessionQueryFailed = New(CodeSimSessionQueryFailed, "仿真会话暂时无法加载,请稍后重试")
+	// ErrSimShareQueryFailed 表示分享数据读取失败。
+	ErrSimShareQueryFailed = New(CodeSimShareQueryFailed, "分享内容暂时无法加载,请稍后重试")
 )
 
 var (
@@ -77,4 +101,8 @@ var (
 	ErrSimReviewNotFound = New(CodeSimReviewNotFound, "审核记录不存在或已处理")
 	// ErrSimReviewStateInvalid 表示当前审核状态不支持该操作。
 	ErrSimReviewStateInvalid = New(CodeSimReviewStateInvalid, "当前审核状态不支持该操作")
+	// ErrSimReviewDataCorrupt 表示审核数据异常。
+	ErrSimReviewDataCorrupt = New(CodeSimReviewDataCorrupt, "审核数据异常,请联系管理员处理")
+	// ErrSimReviewQueryFailed 表示审核数据读取失败。
+	ErrSimReviewQueryFailed = New(CodeSimReviewQueryFailed, "审核记录暂时无法加载,请稍后重试")
 )

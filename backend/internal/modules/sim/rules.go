@@ -4,6 +4,7 @@ package sim
 import (
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"regexp"
 	"strconv"
 	"strings"
@@ -44,12 +45,14 @@ func computeFromString(value string) (int16, error) {
 }
 
 // computeText 返回 API 对外稳定字符串。
-func computeText(value int16) string {
+func computeText(value int16) (string, error) {
 	switch value {
+	case ComputeFrontend:
+		return "frontend", nil
 	case ComputeBackend:
-		return "backend"
+		return "backend", nil
 	default:
-		return "frontend"
+		return "", apperr.ErrSimPackageDataCorrupt.WithCause(fmt.Errorf("仿真包计算模式异常: compute=%d", value))
 	}
 }
 
@@ -78,7 +81,7 @@ func reviewResultFromQuery(value string) (int16, error) {
 }
 
 // normalizePackageRequest 修剪字段并给空 JSON 字段补默认对象。
-func normalizePackageRequest(req SubmitPackageRequest, defaultAuthorType int16) (SubmitPackageRequest, int16, error) {
+func normalizePackageRequest(req SubmitPackageRequest) (SubmitPackageRequest, int16, error) {
 	req.Code = strings.TrimSpace(req.Code)
 	req.Version = strings.TrimSpace(req.Version)
 	req.Name = strings.TrimSpace(req.Name)
@@ -94,14 +97,11 @@ func normalizePackageRequest(req SubmitPackageRequest, defaultAuthorType int16) 
 	if len(req.BackendConfig) == 0 {
 		req.BackendConfig = []byte(`{}`)
 	}
-	if req.AuthorType == 0 {
-		req.AuthorType = defaultAuthorType
-	}
 	return req, compute, nil
 }
 
 // validatePackageRequest 校验仿真包元数据和命名空间边界。
-func validatePackageRequest(req SubmitPackageRequest, compute int16, authorID int64, requiredAuthorType int16) error {
+func validatePackageRequest(req SubmitPackageRequest, compute int16, authorID int64) error {
 	if !simCodePattern.MatchString(req.Code) || !semverPattern.MatchString(req.Version) || strings.TrimSpace(req.Name) == "" || !categoryPattern.MatchString(req.Category) {
 		return apperr.ErrSimPackageInvalid
 	}
@@ -120,23 +120,7 @@ func validatePackageRequest(req SubmitPackageRequest, compute int16, authorID in
 	if compute == ComputeFrontend && !jsonObjectEmpty(req.BackendConfig) {
 		return apperr.ErrSimPackageInvalid
 	}
-	if req.AuthorType != requiredAuthorType {
-		return apperr.ErrSimPackageInvalid
-	}
-	switch req.AuthorType {
-	case AuthorPlatformBuiltIn:
-		if !strings.HasPrefix(req.Code, "builtin__") {
-			return apperr.ErrSimPackageInvalid
-		}
-	case AuthorTeacher:
-		if authorID <= 0 || !strings.HasPrefix(req.Code, "teacher_"+strconv.FormatInt(authorID, 10)+"__") {
-			return apperr.ErrSimPackageInvalid
-		}
-	case AuthorThirdParty:
-		if !strings.HasPrefix(req.Code, "org_") || !strings.Contains(req.Code, "__") {
-			return apperr.ErrSimPackageInvalid
-		}
-	default:
+	if authorID <= 0 || !strings.HasPrefix(req.Code, "teacher_"+strconv.FormatInt(authorID, 10)+"__") {
 		return apperr.ErrSimPackageInvalid
 	}
 	return nil

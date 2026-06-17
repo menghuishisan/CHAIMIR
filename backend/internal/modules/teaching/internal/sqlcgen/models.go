@@ -147,6 +147,9 @@ type SubmissionJudgeOutbox struct {
 	SubmissionID     int64              `json:"submission_id"`
 	AssignmentItemID int64              `json:"assignment_item_id"`
 	AssignmentID     int64              `json:"assignment_id"`
+	SourceOwnerID    int64              `json:"source_owner_id"`
+	SourceCourseID   int64              `json:"source_course_id"`
+	SourceScope      string             `json:"source_scope"`
 	StudentID        int64              `json:"student_id"`
 	ItemCode         string             `json:"item_code"`
 	ItemVersion      string             `json:"item_version"`

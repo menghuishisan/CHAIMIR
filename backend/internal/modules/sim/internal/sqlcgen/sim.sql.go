@@ -11,37 +11,6 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-const archiveSimSession = `-- name: ArchiveSimSession :one
-UPDATE sim_session
-SET status = 5, updated_at = now()
-WHERE tenant_id = $1 AND id = $2 AND status IN (1, 2, 3, 4)
-RETURNING id, tenant_id, package_id, source_ref, owner_account_id, seed, init_params, compute, status, created_at, updated_at
-`
-
-type ArchiveSimSessionParams struct {
-	TenantID int64 `json:"tenant_id"`
-	ID       int64 `json:"id"`
-}
-
-func (q *Queries) ArchiveSimSession(ctx context.Context, arg ArchiveSimSessionParams) (SimSession, error) {
-	row := q.db.QueryRow(ctx, archiveSimSession, arg.TenantID, arg.ID)
-	var i SimSession
-	err := row.Scan(
-		&i.ID,
-		&i.TenantID,
-		&i.PackageID,
-		&i.SourceRef,
-		&i.OwnerAccountID,
-		&i.Seed,
-		&i.InitParams,
-		&i.Compute,
-		&i.Status,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-	)
-	return i, err
-}
-
 const archiveSimSessionsBySourceRef = `-- name: ArchiveSimSessionsBySourceRef :many
 UPDATE sim_session
 SET status = 5, updated_at = now()

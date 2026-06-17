@@ -418,26 +418,40 @@ export interface SandboxFileSaveResponse {
 // ===== M3 Judge 模块 =====
 
 export interface JudgeTask {
-  id: string
+  task_id: string
   tenant_id: string
+  source_ref: string
   submitter_id: string
-  item_code: string
-  item_version: string
-  judger_code: string
-  input: Record<string, any>
-  status: number
-  result?: string
-  score?: number
-  detail?: Record<string, any>
-  created_at: string
-  completed_at?: string
+  status: 'queued' | 'judging' | 'done' | 'timeout' | 'failed' | 'error' | 'cancelled'
+  existing?: boolean
+  result?: JudgeTaskResult
 }
 
-export interface SubmitJudgeRequest {
-  item_code: string
-  item_version: string
-  judger_code: string
-  input: Record<string, any>
+export interface JudgeTaskResult {
+  passed: boolean
+  score: number
+  max_score: number
+  version?: number
+  is_rejudge?: boolean
+  details: JudgeResultDetail[]
+  snapshot_ref: string
+}
+
+export interface JudgeResultDetail {
+  case?: string
+  source?: string
+  target?: string
+  passed: boolean
+  expected_label?: string
+  actual?: string
+  hint?: string
+}
+
+export interface JudgeManualScoreRequest {
+  score: number
+  max_score: number
+  passed: boolean
+  comment: string
 }
 
 // ===== M7 Experiment 模块 =====
@@ -978,14 +992,12 @@ export interface SimPackageMeta {
   version: string
   name: string
   category: string
-  compute: 'frontend' | 'backend' | 'unknown'
+  compute: 'frontend' | 'backend'
   scale_limit?: Record<string, any>
   bundle_hash?: string
   backend_adapter?: string
   backend_config?: Record<string, any>
-  author_type: number
-  author_id: string
-  status: 'draft' | 'reviewing' | 'published' | 'archived' | 'rejected' | 'unknown'
+  status: 'draft' | 'reviewing' | 'published' | 'archived' | 'rejected'
   created_at: string
   updated_at: string
 }
@@ -1000,7 +1012,21 @@ export interface SimPackageSubmit {
   scale_limit?: Record<string, any>
   backend_adapter?: string
   backend_config?: Record<string, any>
-  author_type: number
+}
+
+export interface SimBundleDownloadGrant {
+  token: string
+  bundle_hash: string
+  expires_at: string
+}
+
+export interface SimPackageSubmissionResult extends SimPackageMeta {
+  review: SimPackageReview
+}
+
+export interface SimReviewDecision {
+  package: SimPackageMeta
+  review: SimPackageReview
 }
 
 export interface SimValidationStatus {
@@ -1034,7 +1060,7 @@ export interface SimPackageReview {
   submitter_id: string
   preview_report: SimValidationReport
   reviewer_id?: string
-  result: 'pending' | 'approved' | 'rejected' | 'unknown'
+  result: 'pending' | 'approved' | 'rejected'
   comment?: string
   created_at: string
   updated_at?: string
@@ -1043,8 +1069,8 @@ export interface SimPackageReview {
     version: string
     name: string
     category: string
-    compute: 'frontend' | 'backend' | 'unknown'
-    status: 'draft' | 'reviewing' | 'published' | 'archived' | 'rejected' | 'unknown'
+    compute: 'frontend' | 'backend'
+    status: 'draft' | 'reviewing' | 'published' | 'archived' | 'rejected'
   }
 }
 

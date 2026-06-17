@@ -127,6 +127,9 @@ CREATE TABLE IF NOT EXISTS submission_judge_outbox (
     submission_id BIGINT NOT NULL,
     assignment_item_id BIGINT NOT NULL,
     assignment_id BIGINT NOT NULL,
+    source_owner_id BIGINT NOT NULL,
+    source_course_id BIGINT NOT NULL,
+    source_scope VARCHAR(32) NOT NULL CHECK (source_scope = 'teaching'),
     student_id BIGINT NOT NULL,
     item_code VARCHAR(96) NOT NULL,
     item_version VARCHAR(32) NOT NULL,
@@ -148,6 +151,8 @@ CREATE TABLE IF NOT EXISTS submission_judge_outbox (
     FOREIGN KEY (tenant_id, submission_id) REFERENCES submission(tenant_id, id),
     FOREIGN KEY (tenant_id, assignment_item_id) REFERENCES assignment_item(tenant_id, id),
     FOREIGN KEY (tenant_id, assignment_id) REFERENCES assignment(tenant_id, id),
+    FOREIGN KEY (tenant_id, source_owner_id) REFERENCES account(tenant_id, id),
+    FOREIGN KEY (tenant_id, source_course_id) REFERENCES course(tenant_id, id),
     FOREIGN KEY (tenant_id, student_id) REFERENCES account(tenant_id, id)
 );
 

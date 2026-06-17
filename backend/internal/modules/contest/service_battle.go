@@ -10,6 +10,7 @@ import (
 
 	"chaimir/internal/contracts"
 	"chaimir/internal/platform/audit"
+	"chaimir/internal/platform/ids"
 	"chaimir/internal/platform/timex"
 	"chaimir/pkg/apperr"
 )
@@ -229,7 +230,7 @@ func (s *Service) executeBattleMatch(ctx context.Context, match BattleMatch) err
 		}
 		return apperr.ErrContestSandboxUnavailable.WithCause(err)
 	}
-	task, err := s.judge.SubmitJudgeTask(ctx, contracts.JudgeSubmitRequest{TenantID: match.TenantID, JudgerCode: spec.JudgerCode, ItemCode: problem.ItemCode, ItemVersion: problem.ItemVersion, CodeStorageKey: entryA.ArtifactRef, CodeHash: entryA.ArtifactHash, SubmitterID: ownerID, SourceRef: match.SourceRef, SandboxMode: contracts.JudgeSandboxModeReuse, TargetSandboxRef: strconv.FormatInt(info.SandboxID, 10), ExtraInput: map[string]any{"entry_a": entryA.ArtifactRef, "entry_b": entryB.ArtifactRef, "role_a": entryA.Role, "role_b": entryB.Role}, Priority: 9})
+	task, err := s.judge.SubmitJudgeTask(ctx, contracts.JudgeSubmitRequest{TenantID: match.TenantID, JudgerCode: spec.JudgerCode, ItemCode: problem.ItemCode, ItemVersion: problem.ItemVersion, CodeStorageKey: entryA.ArtifactRef, CodeHash: entryA.ArtifactHash, SubmitterID: ownerID, SourceRef: match.SourceRef, SourceOwnerID: ownerID, SourceCourseID: 0, SourceScope: "contest", SandboxMode: contracts.JudgeSandboxModeReuse, TargetSandboxRef: strconv.FormatInt(info.SandboxID, 10), ExtraInput: map[string]any{"entry_a": entryA.ArtifactRef, "entry_b": entryB.ArtifactRef, "role_a": entryA.Role, "role_b": entryB.Role}, Priority: 9})
 	if err != nil {
 		if recycleErr := s.sandbox.RecycleBySourceRef(ctx, contracts.SandboxRecycleRequest{TenantID: match.TenantID, SourceRef: match.SourceRef, Reason: "battle_judge_submit_failed"}); recycleErr != nil {
 			return apperr.ErrContestBattleMatchFailed.WithCause(fmt.Errorf("提交对局判题失败: %w; 回收沙箱失败: %v", err, recycleErr))
@@ -240,7 +241,7 @@ func (s *Service) executeBattleMatch(ctx context.Context, match BattleMatch) err
 		return apperr.ErrContestJudgeUnavailable.WithCause(err)
 	}
 	return s.store.TenantTx(ctx, match.TenantID, func(ctx context.Context, tx TxStore) error {
-		_, err := tx.StartBattleMatch(ctx, match.TenantID, match.ID, strconv.FormatInt(info.SandboxID, 10), strconv.FormatInt(task.TaskID, 10))
+		_, err := tx.StartBattleMatch(ctx, match.TenantID, match.ID, ids.Format(info.SandboxID), ids.Format(task.TaskID))
 		return err
 	})
 }
@@ -259,7 +260,7 @@ func (s *Service) HandleBattleJudgeCompleted(ctx context.Context, event contract
 	}
 	var match BattleMatch
 	if err := s.store.TenantTx(ctx, event.TenantID, func(ctx context.Context, tx TxStore) error {
-		current, err := tx.GetBattleMatchByJudgeTask(ctx, event.TenantID, strconv.FormatInt(event.TaskID, 10))
+		current, err := tx.GetBattleMatchByJudgeTask(ctx, event.TenantID, ids.Format(event.TaskID))
 		if err != nil {
 			if isNoRows(err) {
 				return apperr.ErrContestBattleMatchNotFound
@@ -334,7 +335,7 @@ func (s *Service) HandleBattleJudgeFailed(ctx context.Context, event contracts.J
 	}
 	var match BattleMatch
 	if err := s.store.TenantTx(ctx, event.TenantID, func(ctx context.Context, tx TxStore) error {
-		current, err := tx.GetBattleMatchByJudgeTask(ctx, event.TenantID, strconv.FormatInt(event.TaskID, 10))
+		current, err := tx.GetBattleMatchByJudgeTask(ctx, event.TenantID, ids.Format(event.TaskID))
 		if err != nil {
 			if isNoRows(err) {
 				return apperr.ErrContestBattleMatchNotFound

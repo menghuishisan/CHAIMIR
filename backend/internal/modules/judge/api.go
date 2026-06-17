@@ -72,7 +72,7 @@ func (a judgeAPI) listJudgers(c *gin.Context) {
 
 // createJudger 绑定判题器注册请求。
 func (a judgeAPI) createJudger(c *gin.Context) {
-	var req CreateJudgerRequest
+	var req JudgerRequest
 	if !httpx.BindJSONWithError(c, &req, apperr.ErrJudgerConfigInvalid) {
 		return
 	}
@@ -86,7 +86,7 @@ func (a judgeAPI) updateJudger(c *gin.Context) {
 	if !ok {
 		return
 	}
-	var req UpdateJudgerRequest
+	var req JudgerRequest
 	if !httpx.BindJSONWithError(c, &req, apperr.ErrJudgerConfigInvalid) {
 		return
 	}
@@ -118,8 +118,7 @@ func (a judgeAPI) submitTask(c *gin.Context) {
 	if !ok {
 		return
 	}
-	req.SourceRef = sourceRef
-	out, err := a.svc.SubmitJudgeTask(c.Request.Context(), contractSubmitFromDTO(tenantID, req))
+	out, err := a.svc.SubmitJudgeTask(c.Request.Context(), contractSubmitFromDTO(tenantID, sourceRef, req))
 	httpx.Write(c, out, err)
 }
 

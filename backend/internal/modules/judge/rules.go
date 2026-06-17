@@ -71,6 +71,6 @@ func statusText(status int16) string {
 	case JudgeTaskStatusCancelled:
 		return "cancelled"
 	default:
-		return "unknown"
+		return "error"
 	}
 }

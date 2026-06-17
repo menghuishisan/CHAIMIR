@@ -631,10 +631,9 @@ func (s *Service) destroyJudgeSandbox(ctx context.Context, task JudgeTask, sandb
 	}
 }
 
-// parseSandboxRef 解析复用沙箱引用,支持纯 ID 与 sandbox:<id> 形式。
+// parseSandboxRef 解析复用沙箱引用,统一只接受十进制沙箱 ID。
 func parseSandboxRef(raw string) (int64, error) {
 	value := strings.TrimSpace(raw)
-	value = strings.TrimPrefix(value, "sandbox:")
 	id, err := strconv.ParseInt(value, 10, 64)
 	if err != nil || id <= 0 {
 		return 0, apperr.ErrJudgeSubmitInvalid

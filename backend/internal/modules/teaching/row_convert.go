@@ -123,7 +123,7 @@ func outboxFromRow(row sqlcgen.SubmissionJudgeOutbox) (JudgeOutbox, error) {
 	if err != nil {
 		return JudgeOutbox{}, err
 	}
-	return JudgeOutbox{ID: row.ID, TenantID: row.TenantID, SubmissionID: row.SubmissionID, AssignmentItemID: row.AssignmentItemID, AssignmentID: row.AssignmentID, StudentID: row.StudentID, ItemCode: row.ItemCode, ItemVersion: row.ItemVersion, JudgerCode: row.JudgerCode, CodeStorageKey: row.CodeStorageKey, CodeHash: row.CodeHash, ExtraInput: extra, SourceRef: row.SourceRef, Status: row.Status, RetryCount: row.RetryCount, LastError: pgtypex.TextValue(row.LastError), Score: pgtypex.Int4Value(row.Score), CompletedAt: timex.FromTimestamptz(row.CompletedAt), CreatedAt: timex.FromTimestamptz(row.CreatedAt), UpdatedAt: timex.FromTimestamptz(row.UpdatedAt)}, nil
+	return JudgeOutbox{ID: row.ID, TenantID: row.TenantID, SubmissionID: row.SubmissionID, AssignmentItemID: row.AssignmentItemID, AssignmentID: row.AssignmentID, SourceOwnerID: row.SourceOwnerID, SourceCourseID: row.SourceCourseID, SourceScope: row.SourceScope, StudentID: row.StudentID, ItemCode: row.ItemCode, ItemVersion: row.ItemVersion, JudgerCode: row.JudgerCode, CodeStorageKey: row.CodeStorageKey, CodeHash: row.CodeHash, ExtraInput: extra, SourceRef: row.SourceRef, Status: row.Status, RetryCount: row.RetryCount, LastError: pgtypex.TextValue(row.LastError), Score: pgtypex.Int4Value(row.Score), CompletedAt: timex.FromTimestamptz(row.CompletedAt), CreatedAt: timex.FromTimestamptz(row.CreatedAt), UpdatedAt: timex.FromTimestamptz(row.UpdatedAt)}, nil
 }
 
 // draftFromRow 转换作答草稿行并解析草稿 JSON。

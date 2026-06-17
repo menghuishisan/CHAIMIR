@@ -91,6 +91,25 @@
   line-height: var(--leading-normal);
 }
 
+.sim-workbench__empty {
+  display: grid;
+  place-items: center;
+  min-height: 0;
+  padding: var(--space-6);
+  color: var(--color-dark-text-sub);
+  text-align: center;
+}
+
+.sim-runtime-message {
+  margin: 0;
+  padding: var(--space-3);
+  border: 0.0625rem solid var(--color-danger);
+  border-radius: var(--radius-xs);
+  background: var(--color-dark-elevated);
+  color: var(--color-dark-text);
+  line-height: var(--leading-normal);
+}
+
 .sim-pattern-grid {
   display: grid;
   gap: var(--space-4);
@@ -197,6 +216,29 @@
 
 .sim-interaction-card.is-perturb {
   border-color: var(--color-secondary-accent);
+}
+
+.sim-attack-confirm {
+  display: grid;
+  grid-template-columns: auto 1fr auto auto;
+  gap: var(--space-2);
+  align-items: center;
+  padding: var(--space-2);
+  border: 0.0625rem solid var(--color-danger);
+  border-radius: var(--radius-xs);
+  background: var(--color-dark-elevated);
+  color: var(--color-dark-text);
+  font-size: var(--text-sm);
+}
+
+.sim-attack-confirm button {
+  min-height: 2rem;
+  padding: 0 var(--space-2);
+  border: 0.0625rem solid var(--color-dark-border);
+  border-radius: var(--radius-xs);
+  background: var(--color-dark-surface);
+  color: var(--color-dark-text);
+  cursor: pointer;
 }
 
 .sim-selected-target {
