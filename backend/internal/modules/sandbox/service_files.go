@@ -50,7 +50,10 @@ func (s *Service) PutSandboxFile(ctx context.Context, req contracts.SandboxFileW
 		if err != nil {
 			return apperr.ErrSandboxStatePersistFailed.WithCause(err)
 		}
-		return tx.CreateSandboxEvent(ctx, s.ids.Generate(), req.TenantID, req.SandboxID, EventTypeFileSave, detail)
+		if err := tx.CreateSandboxEvent(ctx, s.ids.Generate(), req.TenantID, req.SandboxID, EventTypeFileSave, detail); err != nil {
+			return apperr.ErrSandboxStatePersistFailed.WithCause(err)
+		}
+		return nil
 	}); err != nil {
 		return err
 	}
@@ -97,7 +100,10 @@ func (s *Service) PutSandboxPrivateArchive(ctx context.Context, req contracts.Sa
 		if err != nil {
 			return apperr.ErrSandboxStatePersistFailed.WithCause(err)
 		}
-		return tx.CreateSandboxEvent(ctx, s.ids.Generate(), req.TenantID, req.SandboxID, EventTypeFileSave, detail)
+		if err := tx.CreateSandboxEvent(ctx, s.ids.Generate(), req.TenantID, req.SandboxID, EventTypeFileSave, detail); err != nil {
+			return apperr.ErrSandboxStatePersistFailed.WithCause(err)
+		}
+		return nil
 	}); err != nil {
 		return err
 	}
@@ -240,7 +246,10 @@ func (s *Service) saveSandboxFiles(ctx context.Context, tenantID, sandboxID int6
 		if err != nil {
 			return apperr.ErrSandboxFilePersistFailed.WithCause(err)
 		}
-		return tx.CreateSandboxEvent(ctx, s.ids.Generate(), tenantID, sandboxID, EventTypeFileSave, detail)
+		if err := tx.CreateSandboxEvent(ctx, s.ids.Generate(), tenantID, sandboxID, EventTypeFileSave, detail); err != nil {
+			return apperr.ErrSandboxFilePersistFailed.WithCause(err)
+		}
+		return nil
 	}); err != nil {
 		return "", "", err
 	}
@@ -285,7 +294,7 @@ func (s *Service) ExecSandboxCommand(ctx context.Context, req contracts.SandboxE
 	if timeoutSec <= 0 {
 		return contracts.SandboxExecResult{}, apperr.ErrSandboxContractRequestInvalid
 	}
-	execCtx, cancel = context.WithTimeout(ctx, timeDurationSeconds(timeoutSec))
+	execCtx, cancel = context.WithTimeout(ctx, timeDurationSeconds(int(timeoutSec)))
 	defer cancel()
 	if err := s.markSandboxExecutionActive(ctx, sb); err != nil {
 		return contracts.SandboxExecResult{}, err
@@ -299,7 +308,10 @@ func (s *Service) ExecSandboxCommand(ctx context.Context, req contracts.SandboxE
 		if err != nil {
 			return apperr.ErrSandboxStatePersistFailed.WithCause(err)
 		}
-		return tx.CreateSandboxEvent(ctx, s.ids.Generate(), req.TenantID, req.SandboxID, EventTypeExec, detail)
+		if err := tx.CreateSandboxEvent(ctx, s.ids.Generate(), req.TenantID, req.SandboxID, EventTypeExec, detail); err != nil {
+			return apperr.ErrSandboxStatePersistFailed.WithCause(err)
+		}
+		return nil
 	}); err != nil {
 		return contracts.SandboxExecResult{}, apperr.ErrSandboxStatePersistFailed.WithCause(err)
 	}
@@ -387,7 +399,7 @@ func (s *Service) sandboxRuntimeForSource(ctx context.Context, tenantID, sandbox
 }
 
 // timeDurationSeconds 把正整数秒转换为 duration。
-func timeDurationSeconds(sec int32) time.Duration {
+func timeDurationSeconds(sec int) time.Duration {
 	return time.Duration(sec) * time.Second
 }
 
@@ -429,12 +441,19 @@ func (s *Service) scheduleDebouncedSave(ctx context.Context, tenantID, sandboxID
 	if timer := s.saveTimers[sandboxID]; timer != nil {
 		timer.Stop()
 	}
-	s.saveTimers[sandboxID] = time.AfterFunc(delay, func() {
+	var timer *time.Timer
+	timer = time.AfterFunc(delay, func() {
 		saveCtx := logging.WithAttrs(context.Background(), traceAttrs...)
+		s.saveMu.Lock()
+		if s.saveTimers[sandboxID] == timer {
+			delete(s.saveTimers, sandboxID)
+		}
+		s.saveMu.Unlock()
 		if _, _, err := s.saveSandboxFiles(saveCtx, tenantID, sandboxID); err != nil {
 			s.recordDebouncedSaveFailure(saveCtx, tenantID, sandboxID, err)
 		}
 	})
+	s.saveTimers[sandboxID] = timer
 	s.saveMu.Unlock()
 }
 
@@ -444,11 +463,14 @@ func (s *Service) recordDebouncedSaveFailure(ctx context.Context, tenantID, sand
 	if err := s.store.TenantTx(ctx, tenantID, func(ctx context.Context, tx TxStore) error {
 		detail, err := jsonBytes(map[string]any{"stage": "debounced_file_save", "error": logging.SanitizeError(cause.Error())})
 		if err != nil {
-			return err
+			return apperr.ErrSandboxStatePersistFailed.WithCause(err)
 		}
-		return tx.CreateSandboxEvent(ctx, s.ids.Generate(), tenantID, sandboxID, EventTypeError, detail)
+		if err := tx.CreateSandboxEvent(ctx, s.ids.Generate(), tenantID, sandboxID, EventTypeError, detail); err != nil {
+			return apperr.ErrSandboxStatePersistFailed.WithCause(err)
+		}
+		return nil
 	}); err != nil {
-		logging.ErrorContext(ctx, "sandbox debounced file save event failed", err.Error(), slog.Int64("tenant_id", tenantID), slog.Int64("sandbox_id", sandboxID))
+		logging.ErrorContext(ctx, "sandbox debounced file save event failed", apperr.AsAppError(err).LogString(), slog.Int64("tenant_id", tenantID), slog.Int64("sandbox_id", sandboxID))
 	}
 }
 

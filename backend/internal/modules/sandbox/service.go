@@ -221,11 +221,37 @@ func (s *Service) CreateSandbox(ctx context.Context, req contracts.SandboxCreate
 		return contracts.SandboxInfo{}, err
 	}
 	if err := s.writeSystemAudit(ctx, input.TenantID, "sandbox.create", "sandbox", plan.Sandbox.ID, map[string]any{"source_ref": input.SourceRef}); err != nil {
+		s.cleanupCreatedSandboxAfterAuditFailure(ctx, plan.Sandbox, err)
 		return contracts.SandboxInfo{}, err
 	}
 	s.startAsync(ctx, plan)
 	s.broadcastProgress(ctx, input.TenantID, plan.Sandbox.ID, SandboxPhaseAllocating, SandboxStatusCreating, response.TraceFromContext(ctx))
 	return s.info(ctx, plan.Sandbox.TenantID, plan.Sandbox.ID)
+}
+
+// cleanupCreatedSandboxAfterAuditFailure 避免审计失败后留下未启动的 creating 记录。
+func (s *Service) cleanupCreatedSandboxAfterAuditFailure(ctx context.Context, sb Sandbox, cause error) {
+	cleanupBase := logging.WithAttrs(context.Background(), logging.AttrsFromContext(ctx)...)
+	cleanupCtx, cancel := context.WithTimeout(cleanupBase, timeDurationSeconds(s.cfg.ReadyTimeoutSeconds))
+	defer cancel()
+	if err := s.orchestrator.DestroySandboxResources(cleanupCtx, sb); err != nil {
+		logging.ErrorContext(cleanupCtx, "sandbox create audit k8s cleanup failed", err.Error(), slog.Int64("tenant_id", sb.TenantID), slog.Int64("sandbox_id", sb.ID), slog.String("namespace", sb.Namespace))
+	}
+	if err := s.store.TenantTx(cleanupCtx, sb.TenantID, func(ctx context.Context, tx TxStore) error {
+		if _, err := tx.UpdateSandboxPhaseStatus(ctx, sb.TenantID, sb.ID, sb.Phase, SandboxStatusDestroyed); err != nil {
+			return apperr.ErrSandboxStatePersistFailed.WithCause(err)
+		}
+		detail, err := jsonBytes(map[string]any{"stage": "create_audit", "error": logging.SanitizeError(cause.Error())})
+		if err != nil {
+			return apperr.ErrSandboxStatePersistFailed.WithCause(err)
+		}
+		if err := tx.CreateSandboxEvent(ctx, s.ids.Generate(), sb.TenantID, sb.ID, EventTypeError, detail); err != nil {
+			return apperr.ErrSandboxStatePersistFailed.WithCause(err)
+		}
+		return nil
+	}); err != nil {
+		logging.ErrorContext(cleanupCtx, "sandbox create audit state cleanup failed", apperr.AsAppError(err).LogString(), slog.Int64("tenant_id", sb.TenantID), slog.Int64("sandbox_id", sb.ID), slog.String("audit_error", logging.SanitizeError(cause.Error())))
+	}
 }
 
 // GetSandbox 查询单个沙箱当前状态与工具接入信息。
@@ -279,7 +305,7 @@ func (s *Service) PauseSandbox(ctx context.Context, req contracts.SandboxControl
 		if retention <= 0 {
 			retention = time.Minute
 		}
-		snapshotCtx, cancel := context.WithTimeout(ctx, time.Duration(s.cfg.ReadyTimeoutSeconds)*time.Second)
+		snapshotCtx, cancel := context.WithTimeout(ctx, timeDurationSeconds(s.cfg.ReadyTimeoutSeconds))
 		plan, err := s.planForExistingSandbox(ctx, sb)
 		if err != nil {
 			cancel()
@@ -298,7 +324,10 @@ func (s *Service) PauseSandbox(ctx context.Context, req contracts.SandboxControl
 			if err != nil {
 				return apperr.ErrSandboxStatePersistFailed.WithCause(err)
 			}
-			return tx.CreateSandboxEvent(ctx, s.ids.Generate(), tenantID, sandboxID, EventTypePhaseChange, detail)
+			if err := tx.CreateSandboxEvent(ctx, s.ids.Generate(), tenantID, sandboxID, EventTypePhaseChange, detail); err != nil {
+				return apperr.ErrSandboxStatePersistFailed.WithCause(err)
+			}
+			return nil
 		}); err != nil {
 			return err
 		}
@@ -458,7 +487,10 @@ func (s *Service) restoreSnapshotSandbox(ctx context.Context, sb Sandbox) error 
 		if err != nil {
 			return apperr.ErrSandboxStatePersistFailed.WithCause(err)
 		}
-		return tx.CreateSandboxEvent(ctx, s.ids.Generate(), sb.TenantID, sb.ID, EventTypePhaseChange, detail)
+		if err := tx.CreateSandboxEvent(ctx, s.ids.Generate(), sb.TenantID, sb.ID, EventTypePhaseChange, detail); err != nil {
+			return apperr.ErrSandboxStatePersistFailed.WithCause(err)
+		}
+		return nil
 	}); err != nil {
 		return err
 	}
@@ -551,7 +583,7 @@ func (s *Service) Stats(ctx context.Context, tenantID int64) (contracts.SandboxQ
 	}, nil
 }
 
-// resolveTools 按显式工具或运行时默认工具解析工具定义并校验兼容性。
+// resolveTools 按显式工具或运行时默认工具解析工具定义并校验运行时适配性。
 func (s *Service) resolveTools(ctx context.Context, tx TxStore, runtime Runtime, codes []string) ([]Tool, error) {
 	if len(codes) == 0 {
 		codes = runtime.AdapterSpec.DefaultToolCodes
@@ -710,7 +742,10 @@ func (s *Service) transition(ctx context.Context, tenantID, sandboxID int64, pha
 		if err != nil {
 			return apperr.ErrSandboxStatePersistFailed.WithCause(err)
 		}
-		return tx.CreateSandboxEvent(ctx, s.ids.Generate(), tenantID, sandboxID, EventTypePhaseChange, detail)
+		if err := tx.CreateSandboxEvent(ctx, s.ids.Generate(), tenantID, sandboxID, EventTypePhaseChange, detail); err != nil {
+			return apperr.ErrSandboxStatePersistFailed.WithCause(err)
+		}
+		return nil
 	}); err != nil {
 		return err
 	}
@@ -726,7 +761,7 @@ func (s *Service) startAsync(ctx context.Context, plan CreateSandboxPlan) {
 
 // startSandbox 推进 K8s 编排,阶段失败时写 error 并保留可排查事件。
 func (s *Service) startSandbox(ctx context.Context, plan CreateSandboxPlan) {
-	ctx, cancel := context.WithTimeout(ctx, time.Duration(s.cfg.ReadyTimeoutSeconds)*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, timeDurationSeconds(s.cfg.ReadyTimeoutSeconds))
 	defer cancel()
 	if err := s.orchestrator.CreateSandboxResources(ctx, plan); err != nil {
 		s.cleanupAfterStartFailure(ctx, plan.Sandbox)
@@ -741,15 +776,18 @@ func (s *Service) startSandbox(ctx context.Context, plan CreateSandboxPlan) {
 	}
 	if err := s.store.TenantTx(ctx, plan.Sandbox.TenantID, func(ctx context.Context, tx TxStore) error {
 		if _, err := tx.UpdateSandboxPhaseStatus(ctx, plan.Sandbox.TenantID, plan.Sandbox.ID, SandboxPhaseReady, SandboxStatusReady); err != nil {
-			return err
+			return apperr.ErrSandboxStatePersistFailed.WithCause(err)
 		}
 		detail, err := jsonBytes(map[string]any{"phase": SandboxPhaseReady, "status": SandboxStatusReady})
 		if err != nil {
-			return err
+			return apperr.ErrSandboxStatePersistFailed.WithCause(err)
 		}
-		return tx.CreateSandboxEvent(ctx, s.ids.Generate(), plan.Sandbox.TenantID, plan.Sandbox.ID, EventTypePhaseChange, detail)
+		if err := tx.CreateSandboxEvent(ctx, s.ids.Generate(), plan.Sandbox.TenantID, plan.Sandbox.ID, EventTypePhaseChange, detail); err != nil {
+			return apperr.ErrSandboxStatePersistFailed.WithCause(err)
+		}
+		return nil
 	}); err != nil {
-		logging.ErrorContext(ctx, "sandbox phase update failed", err.Error(), slog.Int64("tenant_id", plan.Sandbox.TenantID), slog.Int64("sandbox_id", plan.Sandbox.ID))
+		logging.ErrorContext(ctx, "sandbox phase update failed", apperr.AsAppError(err).LogString(), slog.Int64("tenant_id", plan.Sandbox.TenantID), slog.Int64("sandbox_id", plan.Sandbox.ID))
 		return
 	}
 	s.broadcastProgress(ctx, plan.Sandbox.TenantID, plan.Sandbox.ID, SandboxPhaseReady, SandboxStatusReady, response.TraceFromContext(ctx))
@@ -757,15 +795,18 @@ func (s *Service) startSandbox(ctx context.Context, plan CreateSandboxPlan) {
 		s.broadcastProgress(ctx, plan.Sandbox.TenantID, plan.Sandbox.ID, SandboxPhaseInitializing, SandboxStatusRunning, response.TraceFromContext(ctx))
 		if err := s.store.TenantTx(ctx, plan.Sandbox.TenantID, func(ctx context.Context, tx TxStore) error {
 			if _, err := tx.UpdateSandboxPhaseStatus(ctx, plan.Sandbox.TenantID, plan.Sandbox.ID, SandboxPhaseInitializing, SandboxStatusRunning); err != nil {
-				return err
+				return apperr.ErrSandboxStatePersistFailed.WithCause(err)
 			}
 			detail, err := jsonBytes(map[string]any{"phase": SandboxPhaseInitializing})
 			if err != nil {
-				return err
+				return apperr.ErrSandboxStatePersistFailed.WithCause(err)
 			}
-			return tx.CreateSandboxEvent(ctx, s.ids.Generate(), plan.Sandbox.TenantID, plan.Sandbox.ID, EventTypePhaseChange, detail)
+			if err := tx.CreateSandboxEvent(ctx, s.ids.Generate(), plan.Sandbox.TenantID, plan.Sandbox.ID, EventTypePhaseChange, detail); err != nil {
+				return apperr.ErrSandboxStatePersistFailed.WithCause(err)
+			}
+			return nil
 		}); err != nil {
-			logging.ErrorContext(ctx, "sandbox init phase update failed", err.Error(), slog.Int64("tenant_id", plan.Sandbox.TenantID), slog.Int64("sandbox_id", plan.Sandbox.ID))
+			logging.ErrorContext(ctx, "sandbox init phase update failed", apperr.AsAppError(err).LogString(), slog.Int64("tenant_id", plan.Sandbox.TenantID), slog.Int64("sandbox_id", plan.Sandbox.ID))
 			return
 		}
 		if err := s.applyInitAssetsIfNeeded(ctx, plan.Sandbox, plan.Runtime); err != nil {
@@ -786,15 +827,18 @@ func (s *Service) startSandbox(ctx context.Context, plan CreateSandboxPlan) {
 		}
 		if err := s.store.TenantTx(ctx, plan.Sandbox.TenantID, func(ctx context.Context, tx TxStore) error {
 			if _, err := tx.UpdateSandboxPhaseStatus(ctx, plan.Sandbox.TenantID, plan.Sandbox.ID, SandboxPhaseFullyReady, SandboxStatusRunning); err != nil {
-				return err
+				return apperr.ErrSandboxStatePersistFailed.WithCause(err)
 			}
 			detail, err := jsonBytes(map[string]any{"phase": SandboxPhaseFullyReady})
 			if err != nil {
-				return err
+				return apperr.ErrSandboxStatePersistFailed.WithCause(err)
 			}
-			return tx.CreateSandboxEvent(ctx, s.ids.Generate(), plan.Sandbox.TenantID, plan.Sandbox.ID, EventTypePhaseChange, detail)
+			if err := tx.CreateSandboxEvent(ctx, s.ids.Generate(), plan.Sandbox.TenantID, plan.Sandbox.ID, EventTypePhaseChange, detail); err != nil {
+				return apperr.ErrSandboxStatePersistFailed.WithCause(err)
+			}
+			return nil
 		}); err != nil {
-			logging.ErrorContext(ctx, "sandbox init phase update failed", err.Error(), slog.Int64("tenant_id", plan.Sandbox.TenantID), slog.Int64("sandbox_id", plan.Sandbox.ID))
+			logging.ErrorContext(ctx, "sandbox init phase update failed", apperr.AsAppError(err).LogString(), slog.Int64("tenant_id", plan.Sandbox.TenantID), slog.Int64("sandbox_id", plan.Sandbox.ID))
 			return
 		}
 		s.broadcastProgress(ctx, plan.Sandbox.TenantID, plan.Sandbox.ID, SandboxPhaseFullyReady, SandboxStatusRunning, response.TraceFromContext(ctx))
@@ -809,7 +853,7 @@ func sandboxNeedsInitialization(plan CreateSandboxPlan) bool {
 // cleanupAfterStartFailure 在阶段一创建失败后用独立有界上下文清理可能已创建的 K8s 资源。
 func (s *Service) cleanupAfterStartFailure(ctx context.Context, sb Sandbox) {
 	cleanupBase := logging.WithAttrs(context.Background(), logging.AttrsFromContext(ctx)...)
-	cleanupCtx, cancel := context.WithTimeout(cleanupBase, time.Duration(s.cfg.ReadyTimeoutSeconds)*time.Second)
+	cleanupCtx, cancel := context.WithTimeout(cleanupBase, timeDurationSeconds(s.cfg.ReadyTimeoutSeconds))
 	defer cancel()
 	if err := s.orchestrator.DestroySandboxResources(cleanupCtx, sb); err != nil {
 		logging.ErrorContext(ctx, "sandbox start cleanup failed", err.Error(), slog.Int64("tenant_id", sb.TenantID), slog.Int64("sandbox_id", sb.ID), slog.String("namespace", sb.Namespace))
@@ -821,15 +865,18 @@ func (s *Service) markStartFailed(ctx context.Context, sb Sandbox, cause error) 
 	if err := s.store.TenantTx(ctx, sb.TenantID, func(ctx context.Context, tx TxStore) error {
 		_, err := tx.UpdateSandboxPhaseStatus(ctx, sb.TenantID, sb.ID, sb.Phase, SandboxStatusFailed)
 		if err != nil {
-			return err
+			return apperr.ErrSandboxStatePersistFailed.WithCause(err)
 		}
 		detail, err := jsonBytes(map[string]any{"stage": "start", "error": logging.SanitizeError(cause.Error())})
 		if err != nil {
-			return err
+			return apperr.ErrSandboxStatePersistFailed.WithCause(err)
 		}
-		return tx.CreateSandboxEvent(ctx, s.ids.Generate(), sb.TenantID, sb.ID, EventTypeError, detail)
+		if err := tx.CreateSandboxEvent(ctx, s.ids.Generate(), sb.TenantID, sb.ID, EventTypeError, detail); err != nil {
+			return apperr.ErrSandboxStatePersistFailed.WithCause(err)
+		}
+		return nil
 	}); err != nil {
-		logging.ErrorContext(ctx, "sandbox start failure mark failed", err.Error(), slog.Int64("tenant_id", sb.TenantID), slog.Int64("sandbox_id", sb.ID))
+		logging.ErrorContext(ctx, "sandbox start failure mark failed", apperr.AsAppError(err).LogString(), slog.Int64("tenant_id", sb.TenantID), slog.Int64("sandbox_id", sb.ID))
 	}
 	s.broadcastProgress(ctx, sb.TenantID, sb.ID, sb.Phase, SandboxStatusFailed, response.TraceFromContext(ctx))
 	logging.ErrorContext(ctx, "sandbox start failed", cause.Error(), slog.Int64("tenant_id", sb.TenantID), slog.Int64("sandbox_id", sb.ID))
@@ -839,15 +886,18 @@ func (s *Service) markStartFailed(ctx context.Context, sb Sandbox, cause error) 
 func (s *Service) markInitFailed(ctx context.Context, sb Sandbox, cause error) {
 	if err := s.store.TenantTx(ctx, sb.TenantID, func(ctx context.Context, tx TxStore) error {
 		if _, err := tx.UpdateSandboxPhaseStatus(ctx, sb.TenantID, sb.ID, SandboxPhaseInitializing, SandboxStatusRunning); err != nil {
-			return err
+			return apperr.ErrSandboxStatePersistFailed.WithCause(err)
 		}
 		detail, err := jsonBytes(map[string]any{"stage": "init", "error": logging.SanitizeError(cause.Error())})
 		if err != nil {
-			return err
+			return apperr.ErrSandboxStatePersistFailed.WithCause(err)
 		}
-		return tx.CreateSandboxEvent(ctx, s.ids.Generate(), sb.TenantID, sb.ID, EventTypeError, detail)
+		if err := tx.CreateSandboxEvent(ctx, s.ids.Generate(), sb.TenantID, sb.ID, EventTypeError, detail); err != nil {
+			return apperr.ErrSandboxStatePersistFailed.WithCause(err)
+		}
+		return nil
 	}); err != nil {
-		logging.ErrorContext(ctx, "sandbox init failure mark failed", err.Error(), slog.Int64("tenant_id", sb.TenantID), slog.Int64("sandbox_id", sb.ID))
+		logging.ErrorContext(ctx, "sandbox init failure mark failed", apperr.AsAppError(err).LogString(), slog.Int64("tenant_id", sb.TenantID), slog.Int64("sandbox_id", sb.ID))
 	}
 	s.broadcastProgress(ctx, sb.TenantID, sb.ID, SandboxPhaseInitializing, SandboxStatusRunning, response.TraceFromContext(ctx))
 	logging.ErrorContext(ctx, "sandbox init failed", cause.Error(), slog.Int64("tenant_id", sb.TenantID), slog.Int64("sandbox_id", sb.ID))
@@ -899,7 +949,7 @@ func (s *Service) waitToolReady(ctx context.Context, sb Sandbox, tool Tool) erro
 
 // persistToolStatus 写入单个工具状态和统一代理端点。
 func (s *Service) persistToolStatus(ctx context.Context, sb Sandbox, tool Tool, status int16) error {
-	endpoint := fmt.Sprintf("/api/v1/sandbox/sandboxes/%d/tools/%s/", sb.ID, tool.Code)
+	endpoint := toolEndpoint(sb.ID, tool)
 	if err := s.store.TenantTx(ctx, sb.TenantID, func(ctx context.Context, tx TxStore) error {
 		if _, err := tx.UpdateSandboxToolStatus(ctx, sb.TenantID, sb.ID, tool, endpoint, status); err != nil {
 			return apperr.ErrSandboxToolPersistFailed.WithCause(err)

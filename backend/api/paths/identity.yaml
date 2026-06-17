@@ -963,6 +963,9 @@
       - name: action
         in: query
         schema: { type: string }
+      - name: target_type
+        in: query
+        schema: { type: string }
       - $ref: "#/components/parameters/FromQuery"
       - $ref: "#/components/parameters/ToQuery"
       - $ref: "#/components/parameters/PageQuery"

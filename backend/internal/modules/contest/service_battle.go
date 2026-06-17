@@ -222,7 +222,7 @@ func (s *Service) executeBattleMatch(ctx context.Context, match BattleMatch) err
 		}
 		return err
 	}
-	info, err := s.sandbox.CreateSandbox(ctx, contracts.SandboxCreateRequest{TenantID: match.TenantID, RuntimeCode: spec.RuntimeCode, RuntimeImageVersion: spec.RuntimeImageVersion, ToolCodes: spec.ToolCodes, OwnerAccountID: ownerID, SourceRef: match.SourceRef, KeepAlive: false, SnapshotEnabled: true})
+	info, err := s.sandbox.CreateSandbox(ctx, contracts.SandboxCreateRequest{TenantID: match.TenantID, RuntimeCode: spec.RuntimeCode, RuntimeImageVersion: spec.RuntimeImageVersion, ToolCodes: spec.ToolCodes, OwnerAccountID: ownerID, SourceRef: match.SourceRef, KeepAlive: false, SnapshotEnabled: false})
 	if err != nil {
 		if failErr := s.markBattleFailed(ctx, match); failErr != nil {
 			return apperr.ErrContestBattleMatchFailed.WithCause(fmt.Errorf("创建对局沙箱失败: %w; 标记对局失败也失败: %v", err, failErr))
@@ -277,7 +277,10 @@ func (s *Service) HandleBattleJudgeCompleted(ctx context.Context, event contract
 		if err != nil {
 			return err
 		}
-		result := battleResultFromTask(task.Result)
+		result, err := battleResultFromTask(task.Result)
+		if err != nil {
+			return err
+		}
 		ratingA, err := s.battleRatingForTeam(ctx, tx, event.TenantID, current.ContestID, a.TeamID)
 		if err != nil {
 			return err
@@ -443,23 +446,20 @@ func teamLeaderID(ctx context.Context, tx TxStore, tenantID, teamID int64) (int6
 	return team.Members[0].AccountID, nil
 }
 
-// battleResultFromTask 从判题结果中提取胜负,没有显式结果时使用通过状态兜底判定。
-func battleResultFromTask(result contracts.JudgeTaskResult) int16 {
+// battleResultFromTask 从判题结果中提取显式胜负,缺少胜负字段时拒绝结算。
+func battleResultFromTask(result contracts.JudgeTaskResult) (int16, error) {
 	for _, detail := range result.Details {
 		value := strings.ToLower(strings.TrimSpace(detail.Actual))
 		switch value {
 		case "a_win", "a", "attack_win":
-			return BattleResultAWin
+			return BattleResultAWin, nil
 		case "b_win", "b", "defense_win":
-			return BattleResultBWin
+			return BattleResultBWin, nil
 		case "draw", "tie":
-			return BattleResultDraw
+			return BattleResultDraw, nil
 		}
 	}
-	if result.Passed {
-		return BattleResultAWin
-	}
-	return BattleResultBWin
+	return 0, apperr.ErrContestBattleMatchFailed
 }
 
 // battleScoreDelta 按标准 ELO 公式计算双方积分增量。

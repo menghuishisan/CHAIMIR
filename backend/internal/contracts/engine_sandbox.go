@@ -48,6 +48,10 @@ const (
 )
 
 // SandboxCreateRequest 是业务模块创建沙箱时提交的最小编排请求。
+// 调用方只能通过本契约使用 M2,不得 import sandbox 模块内部包。
+// keep_alive 与 snapshot_enabled 默认必须为 false;只有调用方业务明确要求保活或快照时才能开启。
+// 开启 keep_alive 必须同时提交正数 keep_alive_minutes;开启 snapshot_enabled 必须同时提交正数 snapshot_retention_minutes。
+// 未开启对应能力时分钟数字段必须为 0,不得用隐式默认值绕过 M2 配额校验。
 type SandboxCreateRequest struct {
 	TenantID                 int64    `json:"tenant_id"`
 	RuntimeCode              string   `json:"runtime_code"`

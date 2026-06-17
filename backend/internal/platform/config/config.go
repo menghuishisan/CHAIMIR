@@ -964,12 +964,8 @@ func Load() (*Config, error) {
 		if u, err := url.Parse(strings.TrimSpace(c.SMS.Endpoint)); err != nil || u.Scheme == "" || u.Host == "" || u.User != nil || (u.Scheme != "http" && u.Scheme != "https") {
 			errs = append(errs, "SMS_HTTP_ENDPOINT 必须是不含凭据的 HTTP(S) URL")
 		}
-	case "log":
-		if strings.EqualFold(strings.TrimSpace(c.Server.AppEnv), "prod") || strings.EqualFold(strings.TrimSpace(c.Server.AppEnv), "production") {
-			errs = append(errs, "生产环境不能使用 SMS_PROVIDER=log")
-		}
 	default:
-		errs = append(errs, "SMS_PROVIDER 只能为 http 或 log")
+		errs = append(errs, "SMS_PROVIDER 只能为 http")
 	}
 	for _, origin := range c.Identity.SSOAllowedServiceOrigins {
 		if !validOrigin(origin) {

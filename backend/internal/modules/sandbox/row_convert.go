@@ -72,7 +72,11 @@ func toolFromRow(row sqlcgen.Tool) (Tool, error) {
 }
 
 // sandboxFromRow 把 sqlc sandbox 行转换为内部 Sandbox 快照。
-func sandboxFromRow(row sqlcgen.Sandbox) Sandbox {
+func sandboxFromRow(row sqlcgen.Sandbox) (Sandbox, error) {
+	domains, err := stringArrayFromJSON(row.SnapshotDomains)
+	if err != nil {
+		return Sandbox{}, err
+	}
 	return Sandbox{
 		ID:                row.ID,
 		TenantID:          row.TenantID,
@@ -90,7 +94,7 @@ func sandboxFromRow(row sqlcgen.Sandbox) Sandbox {
 		InitCodeRef:       pgtypex.TextValue(row.InitCodeRef),
 		InitScriptRef:     pgtypex.TextValue(row.InitScriptRef),
 		SnapshotRef:       pgtypex.TextValue(row.SnapshotRef),
-		SnapshotDomains:   stringArrayFromJSON(row.SnapshotDomains),
+		SnapshotDomains:   domains,
 		SnapshotCreatedAt: timex.FromTimestamptz(row.SnapshotCreatedAt),
 		SnapshotExpireAt:  timex.FromTimestamptz(row.SnapshotExpireAt),
 		KeepAliveUntil:    timex.FromTimestamptz(row.KeepAliveUntil),
@@ -98,7 +102,7 @@ func sandboxFromRow(row sqlcgen.Sandbox) Sandbox {
 		ExpireAt:          timex.FromTimestamptz(row.ExpireAt),
 		CreatedAt:         timex.FromTimestamptz(row.CreatedAt),
 		UpdatedAt:         timex.FromTimestamptz(row.UpdatedAt),
-	}
+	}, nil
 }
 
 // quotaFromRow 把 sqlc tenant_quota 行转换为内部 TenantQuota 模型。
@@ -148,12 +152,16 @@ func sandboxToolFromStatusRow(row sqlcgen.SandboxTool, tool Tool) SandboxTool {
 	}
 }
 
-// stringArrayFromJSON 从 JSONB 字符串数组提取快照卷域,解析失败时返回空列表交由上层恢复校验拒绝。
-func stringArrayFromJSON(raw []byte) []string {
+// stringArrayFromJSON 从 JSONB 字符串数组提取快照卷域,解析失败时显式返回错误。
+func stringArrayFromJSON(raw []byte) ([]string, error) {
 	if len(raw) == 0 {
-		return []string{}
+		return []string{}, nil
 	}
-	return jsonx.Decode(raw, []string{})
+	var out []string
+	if err := jsonx.DecodeStrict(raw, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 // splitCSV 把工具生态标签拆成去空格列表。

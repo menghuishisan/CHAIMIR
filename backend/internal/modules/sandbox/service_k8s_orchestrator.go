@@ -868,9 +868,6 @@ func (o *K8sOrchestrator) containerFromRuntime(spec ContainerSpec, image string,
 	if image == "" {
 		image = spec.Image
 	}
-	if image == "" && spec.Labels != nil {
-		image = spec.Labels["image"]
-	}
 	return corev1.Container{
 		Name:            spec.Name,
 		Image:           image,

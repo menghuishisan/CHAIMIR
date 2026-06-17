@@ -60,6 +60,9 @@ func validateRuntimeRequest(req RuntimeRequest, cfg config.SandboxConfig) (Adapt
 	if req.AdapterLevel < 1 || req.AdapterLevel > 3 || len(req.AdapterSpec) == 0 {
 		return AdapterSpec{}, apperr.ErrSandboxAdapterSpecInvalid
 	}
+	if req.Status != 0 && req.Status != RuntimeStatusOnboarding && req.Status != RuntimeStatusDisabled {
+		return AdapterSpec{}, apperr.ErrSandboxRuntimeCreateInvalid
+	}
 	var spec AdapterSpec
 	if err := jsonx.DecodeStrict(req.AdapterSpec, &spec); err != nil {
 		return AdapterSpec{}, apperr.ErrSandboxAdapterSpecInvalid.WithCause(err)
@@ -82,6 +85,9 @@ func validateToolRequest(req ToolRequest, cfg config.SandboxConfig) (ToolResourc
 		return ToolResourceSpec{}, apperr.ErrSandboxToolCreateInvalid
 	}
 	if req.Kind < SandboxToolKindBuiltin || req.Kind > SandboxToolKindWebEmbed {
+		return ToolResourceSpec{}, apperr.ErrSandboxToolCreateInvalid
+	}
+	if req.Status != 0 && req.Status != ToolStatusAvailable && req.Status != ToolStatusDisabled {
 		return ToolResourceSpec{}, apperr.ErrSandboxToolCreateInvalid
 	}
 	if req.Kind != SandboxToolKindWebEmbed && (strings.TrimSpace(req.ImageURL) != "" || req.Port > 0 || strings.TrimSpace(req.Digest) != "") {
@@ -668,9 +674,6 @@ func volumePathOverlaps(left, right string) bool {
 // validateInfraSidecarImage 校验运行时协同容器镜像命中受控证明清单。
 func validateInfraSidecarImage(spec ContainerSpec, cfg config.SandboxConfig) error {
 	imageURL := strings.TrimSpace(spec.Image)
-	if imageURL == "" && spec.Labels != nil {
-		imageURL = strings.TrimSpace(spec.Labels["image"])
-	}
 	digest := digestFromImageURL(imageURL)
 	if imageURL == "" || digest == "" || !imageAttested(cfg, imageURL, digest) {
 		return apperr.ErrSandboxSidecarImageInvalid

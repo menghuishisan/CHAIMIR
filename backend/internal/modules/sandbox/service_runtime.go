@@ -211,7 +211,7 @@ func (s *Service) RunRuntimeSelftest(ctx context.Context, runtimeID int64) (Runt
 		Status:         SandboxStatusCreating,
 		OwnerAccountID: 0,
 	}
-	testCtx, cancel := context.WithTimeout(ctx, time.Duration(s.cfg.SelftestRecycleTimeoutSeconds)*time.Second)
+	testCtx, cancel := context.WithTimeout(ctx, timeDurationSeconds(s.cfg.SelftestRecycleTimeoutSeconds))
 	defer cancel()
 	err := s.orchestrator.CreateSandboxResources(testCtx, CreateSandboxPlan{Sandbox: sb, Runtime: runtime, Image: image})
 	if err == nil {
@@ -221,7 +221,7 @@ func (s *Service) RunRuntimeSelftest(ctx context.Context, runtimeID int64) (Runt
 		err = s.runRuntimeCapabilitySelftest(testCtx, sb, runtime)
 	}
 	cleanupBase := logging.WithAttrs(context.Background(), logging.AttrsFromContext(ctx)...)
-	cleanupCtx, cleanupCancel := context.WithTimeout(cleanupBase, time.Duration(s.cfg.SelftestRecycleTimeoutSeconds)*time.Second)
+	cleanupCtx, cleanupCancel := context.WithTimeout(cleanupBase, timeDurationSeconds(s.cfg.SelftestRecycleTimeoutSeconds))
 	defer cleanupCancel()
 	if cleanupErr := s.orchestrator.DestroySandboxResources(cleanupCtx, sb); cleanupErr != nil {
 		logging.ErrorContext(ctx, "sandbox selftest cleanup failed", cleanupErr.Error(), slog.Int64("tenant_id", 0), slog.Int64("runtime_id", runtimeID), slog.Int64("sandbox_id", sb.ID), slog.String("namespace", sb.Namespace))

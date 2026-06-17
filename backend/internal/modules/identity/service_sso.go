@@ -5,7 +5,6 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/xml"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -21,7 +20,6 @@ import (
 	"chaimir/pkg/apperr"
 	"chaimir/pkg/logging"
 	ldap "github.com/go-ldap/ldap/v3"
-	"github.com/jackc/pgx/v5"
 )
 
 // casServiceResponse 描述 CAS serviceValidate 成功响应中身份模块需要的字段。
@@ -47,12 +45,7 @@ func (s *Service) UpsertSSOConfig(ctx context.Context, req SSOConfigRequest) (SS
 	}
 	var out SSOConfig
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
-		old, err := tx.GetSSOConfig(ctx, id.TenantID, req.Type)
-		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-			return err
-		}
-		// 配置入库前先处理敏感字段,脱敏占位表示沿用旧密文而不是写入展示文案。
-		configData, err := s.secureSSOConfig(req, old)
+		configData, err := s.secureSSOConfig(req)
 		if err != nil {
 			return err
 		}
@@ -183,7 +176,7 @@ func (s *Service) validateSSOConfig(req SSOConfigRequest) error {
 }
 
 // secureSSOConfig 在配置入库前复用基础层加密凭据字段,避免敏感配置明文落库。
-func (s *Service) secureSSOConfig(req SSOConfigRequest, old SSOConfig) (map[string]any, error) {
+func (s *Service) secureSSOConfig(req SSOConfigRequest) (map[string]any, error) {
 	out := make(map[string]any, len(req.Config))
 	for key, value := range req.Config {
 		out[key] = value
@@ -196,15 +189,7 @@ func (s *Service) secureSSOConfig(req SSOConfigRequest, old SSOConfig) (map[stri
 		return nil, apperr.ErrIdentitySSOConfigInvalid
 	}
 	if password == secretmap.MaskedValue {
-		oldData, err := jsonx.ObjectMapStrict(old.Config)
-		if err != nil {
-			return nil, apperr.ErrIdentitySSOConfigInvalid.WithCause(err)
-		}
-		oldPassword, ok := oldData["bind_password"]
-		if !ok {
-			return nil, apperr.ErrIdentitySSOConfigInvalid
-		}
-		out["bind_password"] = oldPassword
+		return nil, apperr.ErrIdentitySSOConfigInvalid
 	}
 	protected, err := secretmap.Protect(s.cipher, out, "identity sso config")
 	if err != nil {
@@ -447,10 +432,12 @@ func (s *Service) matchSSOAccount(ctx context.Context, tenantID int64, matchFiel
 
 // finishSSOLogin 校验租户和名单账号状态,并把 SSO 首登的待激活账号推进为正常账号。
 func (s *Service) finishSSOLogin(ctx context.Context, tenantID int64, account Account, device, ip string) (LoginResponse, error) {
-	var tenantSnapshot Tenant
 	if err := s.store.TenantTx(ctx, tenantID, func(ctx context.Context, tx TxStore) error {
 		t, err := tx.GetTenantByID(ctx, tenantID)
 		if err != nil {
+			return err
+		}
+		if err := EnsureTenantCanLogin(t, timex.Now()); err != nil {
 			return err
 		}
 		if account.Status == AccountStatusPending {
@@ -461,13 +448,9 @@ func (s *Service) finishSSOLogin(ctx context.Context, tenantID int64, account Ac
 			}
 			account = activated
 		}
-		tenantSnapshot = t
 		return nil
 	}); err != nil {
 		return LoginResponse{}, apperr.ErrInternal.WithCause(err)
-	}
-	if err := EnsureTenantCanLogin(tenantSnapshot, timex.Now()); err != nil {
-		return LoginResponse{}, err
 	}
 	if err := EnsureAccountCanLogin(account, timex.Now()); err != nil {
 		return LoginResponse{}, err

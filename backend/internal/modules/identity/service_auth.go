@@ -171,38 +171,42 @@ func (s *Service) LoginSMS(ctx context.Context, req LoginSMSRequest, device, ip 
 	if err := ValidatePhone(req.Phone); err != nil {
 		return LoginResponse{}, err
 	}
+	phone := strings.TrimSpace(req.Phone)
 	tenantID, err := s.resolveSMSCredentialTenant(ctx, req.Phone, req.TenantID, apperr.ErrIdentitySMSNeedsTenant, apperr.ErrIdentitySMSNeedsTenant)
 	if err != nil {
 		return LoginResponse{}, err
 	}
-	if err := s.verifySMSCode(ctx, tenantID, req.Phone, SMSSceneLogin, req.Code); err != nil {
-		return LoginResponse{}, err
-	}
-	if err := s.ensureTenantAcceptsCredentials(ctx, tenantID); err != nil {
-		return LoginResponse{}, err
-	}
 	// 短信只证明手机号持有,仍要读取租户和账号状态,不能绕过停用/到期/锁定判断。
-	hash, err := s.phoneHash(strings.TrimSpace(req.Phone))
+	phoneHash, codeHash, err := s.smsCredentialHashes(phone, req.Code)
 	if err != nil {
-		return LoginResponse{}, apperr.ErrInternal.WithCause(err)
+		return LoginResponse{}, err
 	}
 	var account Account
 	if err := s.store.TenantTx(ctx, tenantID, func(ctx context.Context, tx TxStore) error {
-		a, err := tx.GetAccountByPhoneHash(ctx, tenantID, hash)
+		tenantSnapshot, err := tx.GetTenantByID(ctx, tenantID)
 		if err != nil {
+			return err
+		}
+		if err := EnsureTenantCanLogin(tenantSnapshot, timex.Now()); err != nil {
+			return err
+		}
+		a, err := tx.GetAccountByPhoneHash(ctx, tenantID, phoneHash)
+		if err != nil {
+			return err
+		}
+		if err := EnsureAccountCanLogin(a, timex.Now()); err != nil {
+			return err
+		}
+		if a.Status != AccountStatusActive {
+			return apperr.ErrIdentityAccountDisabled
+		}
+		if err := s.verifySMSCodeInTx(ctx, tx, tenantID, phoneHash, SMSSceneLogin, codeHash); err != nil {
 			return err
 		}
 		account = a
 		return nil
 	}); err != nil {
-		return LoginResponse{}, apperr.ErrIdentityInvalidCredentials.WithCause(err)
-	}
-	now := timex.Now()
-	if err := EnsureAccountCanLogin(account, now); err != nil {
-		return LoginResponse{}, err
-	}
-	if account.Status != AccountStatusActive {
-		return LoginResponse{}, apperr.ErrIdentityAccountDisabled
+		return LoginResponse{}, apperr.AsAppError(err)
 	}
 	return s.issueTenantLogin(ctx, account, device, ip)
 }
@@ -312,31 +316,36 @@ func (s *Service) ResetPassword(ctx context.Context, req PasswordResetRequest) e
 	if err := ValidatePassword(req.NewPassword); err != nil {
 		return err
 	}
+	phone := strings.TrimSpace(req.Phone)
 	tenantID, err := s.resolveSMSCredentialTenant(ctx, req.Phone, req.TenantID, apperr.ErrIdentityResetPasswordTenantInvalid, apperr.ErrIdentityResetPasswordTenantInvalid)
 	if err != nil {
 		return err
 	}
-	if err := s.verifySMSCode(ctx, tenantID, req.Phone, SMSSceneReset, req.Code); err != nil {
-		return err
-	}
-	if err := s.ensureTenantAcceptsCredentials(ctx, tenantID); err != nil {
-		return err
-	}
-	hash, err := s.phoneHash(req.Phone)
+	phoneHash, codeHash, err := s.smsCredentialHashes(phone, req.Code)
 	if err != nil {
-		return apperr.ErrInternal.WithCause(err)
+		return err
 	}
 	passwordHash, err := crypto.HashPassword(req.NewPassword)
 	if err != nil {
 		return apperr.ErrInternal.WithCause(err)
 	}
 	if err := s.store.TenantTx(ctx, tenantID, func(ctx context.Context, tx TxStore) error {
-		account, err := tx.GetAccountByPhoneHash(ctx, tenantID, hash)
+		tenantSnapshot, err := tx.GetTenantByID(ctx, tenantID)
+		if err != nil {
+			return err
+		}
+		if err := EnsureTenantCanLogin(tenantSnapshot, timex.Now()); err != nil {
+			return err
+		}
+		account, err := tx.GetAccountByPhoneHash(ctx, tenantID, phoneHash)
 		if err != nil {
 			return err
 		}
 		if account.Status != AccountStatusActive {
 			return apperr.ErrIdentityAccountDisabled
+		}
+		if err := s.verifySMSCodeInTx(ctx, tx, tenantID, phoneHash, SMSSceneReset, codeHash); err != nil {
+			return err
 		}
 		if _, err := tx.UpdateAccountPassword(ctx, account.ID, tenantID, passwordHash, false, AccountStatusActive); err != nil {
 			return err

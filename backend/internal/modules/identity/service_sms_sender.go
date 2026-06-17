@@ -37,11 +37,9 @@ func NewSMSSender(cfg config.SMSConfig) (SMSSender, error) {
 	return &HTTPSMSSender{cfg: cfg, client: client}, nil
 }
 
-// Send 按配置发送验证码;log provider 仅允许开发环境显式使用,生产应配置 HTTP 网关。
+// Send 按配置发送验证码,仅支持受控 HTTP 短信代理网关。
 func (s *HTTPSMSSender) Send(ctx context.Context, phone string, scene int16, code string) error {
 	switch strings.ToLower(strings.TrimSpace(s.cfg.Provider)) {
-	case "log":
-		return nil
 	case "http":
 		return s.sendHTTP(ctx, phone, scene, code)
 	default:

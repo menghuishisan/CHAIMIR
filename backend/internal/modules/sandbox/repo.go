@@ -247,6 +247,11 @@ func (s *txStore) ListRuntimeImages(ctx context.Context, runtimeID int64) ([]Run
 
 // CreateRuntimeImage 新增运行时镜像版本。
 func (s *txStore) CreateRuntimeImage(ctx context.Context, id, runtimeID int64, req RuntimeImageRequest) (RuntimeImage, error) {
+	if req.IsDefault {
+		if err := s.q.MarkOtherRuntimeImagesNotDefault(ctx, sqlcgen.MarkOtherRuntimeImagesNotDefaultParams{RuntimeID: runtimeID, ID: id}); err != nil {
+			return RuntimeImage{}, err
+		}
+	}
 	row, err := s.q.CreateRuntimeImage(ctx, sqlcgen.CreateRuntimeImageParams{
 		ID:           id,
 		RuntimeID:    runtimeID,
@@ -257,11 +262,6 @@ func (s *txStore) CreateRuntimeImage(ctx context.Context, id, runtimeID int64, r
 	})
 	if err != nil {
 		return RuntimeImage{}, err
-	}
-	if req.IsDefault {
-		if err := s.q.MarkOtherRuntimeImagesNotDefault(ctx, sqlcgen.MarkOtherRuntimeImagesNotDefaultParams{RuntimeID: runtimeID, ID: id}); err != nil {
-			return RuntimeImage{}, err
-		}
 	}
 	return runtimeImageFromRow(row), nil
 }
@@ -387,6 +387,10 @@ func (s *txStore) CountActiveSandboxes(ctx context.Context, tenantID int64) (int
 
 // CreateSandbox 创建沙箱实例记录。
 func (s *txStore) CreateSandbox(ctx context.Context, input CreateSandboxInput) (Sandbox, error) {
+	snapshotDomains, err := jsonStringArray(input.SnapshotDomains)
+	if err != nil {
+		return Sandbox{}, fmt.Errorf("编码沙箱快照域失败: %w", err)
+	}
 	row, err := s.q.CreateSandbox(ctx, sqlcgen.CreateSandboxParams{
 		ID:                input.ID,
 		TenantID:          input.TenantID,
@@ -404,7 +408,7 @@ func (s *txStore) CreateSandbox(ctx context.Context, input CreateSandboxInput) (
 		InitCodeRef:       pgtypex.Text(input.InitCodeRef),
 		InitScriptRef:     pgtypex.Text(input.InitScriptRef),
 		SnapshotRef:       pgtypex.Text(input.SnapshotRef),
-		SnapshotDomains:   jsonStringArray(input.SnapshotDomains),
+		SnapshotDomains:   snapshotDomains,
 		SnapshotCreatedAt: timex.Timestamptz(input.SnapshotCreatedAt),
 		SnapshotExpireAt:  timex.Timestamptz(input.SnapshotExpireAt),
 		KeepAliveUntil:    timex.Timestamptz(input.KeepAliveUntil),
@@ -413,7 +417,7 @@ func (s *txStore) CreateSandbox(ctx context.Context, input CreateSandboxInput) (
 	if err != nil {
 		return Sandbox{}, err
 	}
-	return sandboxFromRow(row), nil
+	return sandboxFromRow(row)
 }
 
 // GetSandbox 查询单个沙箱。
@@ -422,7 +426,7 @@ func (s *txStore) GetSandbox(ctx context.Context, tenantID, sandboxID int64) (Sa
 	if err != nil {
 		return Sandbox{}, err
 	}
-	return sandboxFromRow(row), nil
+	return sandboxFromRow(row)
 }
 
 // ListSandboxesBySourceRef 查询来源下未销毁沙箱。
@@ -431,7 +435,7 @@ func (s *txStore) ListSandboxesBySourceRef(ctx context.Context, tenantID int64, 
 	if err != nil {
 		return nil, err
 	}
-	return sandboxRows(rows), nil
+	return sandboxRows(rows)
 }
 
 // ListRecycleCandidates 查询需要回收的沙箱候选。
@@ -443,7 +447,7 @@ func (s *txStore) ListRecycleCandidates(ctx context.Context, readyDeadline time.
 	if err != nil {
 		return nil, err
 	}
-	return sandboxRows(rows), nil
+	return sandboxRows(rows)
 }
 
 // MarkIdleSandboxes 将超时的运行中沙箱标记为空闲。
@@ -452,7 +456,7 @@ func (s *txStore) MarkIdleSandboxes(ctx context.Context) ([]Sandbox, error) {
 	if err != nil {
 		return nil, err
 	}
-	return sandboxRows(rows), nil
+	return sandboxRows(rows)
 }
 
 // ListSnapshotCleanupCandidates 查询快照保留到期候选。
@@ -461,7 +465,7 @@ func (s *txStore) ListSnapshotCleanupCandidates(ctx context.Context, limit int32
 	if err != nil {
 		return nil, err
 	}
-	return sandboxRows(rows), nil
+	return sandboxRows(rows)
 }
 
 // UpdateSandboxPhaseStatus 更新沙箱阶段和状态。
@@ -470,7 +474,7 @@ func (s *txStore) UpdateSandboxPhaseStatus(ctx context.Context, tenantID, sandbo
 	if err != nil {
 		return Sandbox{}, err
 	}
-	return sandboxFromRow(row), nil
+	return sandboxFromRow(row)
 }
 
 // MarkSandboxActive 更新沙箱最近活跃时间。
@@ -479,7 +483,7 @@ func (s *txStore) MarkSandboxActive(ctx context.Context, tenantID, sandboxID int
 	if err != nil {
 		return Sandbox{}, err
 	}
-	return sandboxFromRow(row), nil
+	return sandboxFromRow(row)
 }
 
 // UpdateSandboxCode 更新沙箱代码对象引用和哈希。
@@ -488,23 +492,27 @@ func (s *txStore) UpdateSandboxCode(ctx context.Context, tenantID, sandboxID int
 	if err != nil {
 		return Sandbox{}, err
 	}
-	return sandboxFromRow(row), nil
+	return sandboxFromRow(row)
 }
 
 // UpdateSandboxSnapshot 更新沙箱快照引用和真实覆盖卷域。
 func (s *txStore) UpdateSandboxSnapshot(ctx context.Context, tenantID, sandboxID int64, ref string, domains []string, createdAt, expireAt time.Time) (Sandbox, error) {
+	snapshotDomains, err := jsonStringArray(domains)
+	if err != nil {
+		return Sandbox{}, fmt.Errorf("编码沙箱快照域失败: %w", err)
+	}
 	row, err := s.q.UpdateSandboxSnapshot(ctx, sqlcgen.UpdateSandboxSnapshotParams{
 		TenantID:          tenantID,
 		ID:                sandboxID,
 		SnapshotRef:       pgtypex.Text(ref),
-		SnapshotDomains:   jsonStringArray(domains),
+		SnapshotDomains:   snapshotDomains,
 		SnapshotCreatedAt: timex.Timestamptz(createdAt),
 		SnapshotExpireAt:  timex.Timestamptz(expireAt),
 	})
 	if err != nil {
 		return Sandbox{}, err
 	}
-	return sandboxFromRow(row), nil
+	return sandboxFromRow(row)
 }
 
 // CreateSandboxTool 创建沙箱工具挂载记录。
@@ -609,21 +617,21 @@ func (s *txStore) StatsByTenant(ctx context.Context, tenantID int64) (TenantQuot
 }
 
 // sandboxRows 批量转换 sqlc 沙箱行。
-func sandboxRows(rows []sqlcgen.Sandbox) []Sandbox {
+func sandboxRows(rows []sqlcgen.Sandbox) ([]Sandbox, error) {
 	out := make([]Sandbox, 0, len(rows))
 	for _, row := range rows {
-		out = append(out, sandboxFromRow(row))
+		item, err := sandboxFromRow(row)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, item)
 	}
-	return out
+	return out, nil
 }
 
 // jsonStringArray 把字符串数组编码为 JSONB 参数,空数组保持可审计的显式空列表。
-func jsonStringArray(values []string) []byte {
-	raw, err := jsonBytes(values)
-	if err != nil {
-		return []byte(`[]`)
-	}
-	return raw
+func jsonStringArray(values []string) ([]byte, error) {
+	return jsonBytes(values)
 }
 
 // stringsJoin 把生态标签列表写成文档约定的逗号分隔字段。

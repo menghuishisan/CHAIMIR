@@ -356,22 +356,63 @@ export interface SubmitRequest {
 // ===== M2 Sandbox 模块 =====
 
 export interface SandboxInstance {
-  id: string
-  tenant_id: string
-  user_id: string
+  sandbox_id: number
+  tenant_id: number
+  owner_account_id: number
   runtime_code: string
+  runtime_image_version: string
+  source_ref: string
+  namespace: string
+  phase: number
   status: number
-  pod_name?: string
-  namespace?: string
-  access_url?: string
-  created_at: string
-  expires_at: string
+  tool_access: SandboxToolAccess[]
+  resource_usage: SandboxResourceUsage
 }
 
-export interface CreateSandboxRequest {
-  runtime_code: string
-  ttl_seconds?: number
-  resources?: Record<string, any>
+export interface SandboxToolAccess {
+  tool_code: string
+  kind: number
+  endpoint: string
+  status: number
+}
+
+export interface SandboxResourceUsage {
+  cpu_usage_milli: number
+  memory_usage_mib: number
+  cpu_request_milli: number
+  cpu_limit_milli: number
+  memory_request_mib: number
+  memory_limit_mib: number
+  storage_bytes: number
+}
+
+export interface SandboxFileReadResponse {
+  relative_path: string
+  content_base64: string
+  content_sha256: string
+  content_size: number
+}
+
+export interface SandboxFileEntry {
+  name: string
+  relative_path: string
+  is_dir: boolean
+  size: number
+}
+
+export interface SandboxFileListResponse {
+  relative_path: string
+  entries: SandboxFileEntry[]
+}
+
+export interface SandboxFileWriteRequest {
+  relative_path: string
+  content_base64: string
+}
+
+export interface SandboxFileSaveResponse {
+  code_storage_key: string
+  code_hash: string
 }
 
 // ===== M3 Judge 模块 =====

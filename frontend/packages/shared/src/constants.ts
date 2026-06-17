@@ -90,12 +90,24 @@ export enum SubmissionStatus {
  * 沙箱状态
  */
 export enum SandboxStatus {
-  PENDING = 1,    // 等待中
-  CREATING = 2,   // 创建中
-  RUNNING = 3,    // 运行中
-  STOPPING = 4,   // 停止中
-  STOPPED = 5,    // 已停止
-  ERROR = 6,      // 错误
+  CREATING = 1,   // 创建中
+  RUNNING = 2,    // 运行中
+  PAUSED = 3,     // 已暂停
+  RECYCLING = 4,  // 回收中
+  DESTROYED = 5,  // 已销毁
+  FAILED = 6,     // 启动或运行失败
+  READY = 7,      // 环境已就绪
+  IDLE = 8,       // 空闲等待回收或恢复
+}
+
+/**
+ * 沙箱启动阶段
+ */
+export enum SandboxPhase {
+  ALLOCATING = 1,   // 分配资源
+  READY = 2,        // 环境就绪
+  INITIALIZING = 3, // 个性化初始化中
+  FULLY_READY = 4,  // 完全可用
 }
 
 /**

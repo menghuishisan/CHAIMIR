@@ -60,6 +60,9 @@ func validateComponentConfig(cfg ComponentConfig, collabMode int16, group GroupC
 		if ids[id] || strings.TrimSpace(env.RuntimeCode) == "" {
 			return apperr.ErrExperimentInvalid
 		}
+		if err := validateEnvComponentSandboxContract(env); err != nil {
+			return err
+		}
 		ids[id] = true
 		envIDs[id] = true
 	}
@@ -94,6 +97,25 @@ func validateComponentConfig(cfg ComponentConfig, collabMode int16, group GroupC
 		if group.Size < 2 || len(group.Roles) == 0 {
 			return apperr.ErrExperimentGroupInvalid
 		}
+	}
+	return nil
+}
+
+// validateEnvComponentSandboxContract 在 M7 输入边界落实 M2 沙箱配置合同,避免保存无法启动的实验定义。
+func validateEnvComponentSandboxContract(env EnvComponent) error {
+	if env.KeepAlive {
+		if env.KeepAliveMinutes <= 0 {
+			return apperr.ErrExperimentInvalid
+		}
+	} else if env.KeepAliveMinutes != 0 {
+		return apperr.ErrExperimentInvalid
+	}
+	if env.SnapshotEnabled {
+		if env.SnapshotRetentionMinutes <= 0 {
+			return apperr.ErrExperimentInvalid
+		}
+	} else if env.SnapshotRetentionMinutes != 0 {
+		return apperr.ErrExperimentInvalid
 	}
 	return nil
 }

@@ -107,7 +107,10 @@ func (s *Service) runInitScriptIfNeeded(ctx context.Context, sb Sandbox, runtime
 		if err != nil {
 			return apperr.ErrSandboxStatePersistFailed.WithCause(err)
 		}
-		return tx.CreateSandboxEvent(ctx, s.ids.Generate(), sb.TenantID, sb.ID, EventTypeExec, detail)
+		if err := tx.CreateSandboxEvent(ctx, s.ids.Generate(), sb.TenantID, sb.ID, EventTypeExec, detail); err != nil {
+			return apperr.ErrSandboxStatePersistFailed.WithCause(err)
+		}
+		return nil
 	})
 }
 

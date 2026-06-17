@@ -42,7 +42,7 @@ func (s *Service) CreateEnv(ctx context.Context, contestID, problemID int64, req
 	}); err != nil {
 		return EnvDTO{}, err
 	}
-	info, err := s.sandbox.CreateSandbox(ctx, contracts.SandboxCreateRequest{TenantID: id.TenantID, RuntimeCode: req.RuntimeCode, RuntimeImageVersion: req.RuntimeImageVersion, ToolCodes: req.ToolCodes, InitCodeRef: req.InitCodeRef, InitScriptRef: req.InitScriptRef, OwnerAccountID: id.AccountID, SourceRef: sourceRef, KeepAlive: true, SnapshotEnabled: true})
+	info, err := s.sandbox.CreateSandbox(ctx, contracts.SandboxCreateRequest{TenantID: id.TenantID, RuntimeCode: req.RuntimeCode, RuntimeImageVersion: req.RuntimeImageVersion, ToolCodes: req.ToolCodes, InitCodeRef: req.InitCodeRef, InitScriptRef: req.InitScriptRef, OwnerAccountID: id.AccountID, SourceRef: sourceRef, KeepAlive: false, SnapshotEnabled: false})
 	if err != nil {
 		return EnvDTO{}, apperr.ErrContestSandboxUnavailable.WithCause(err)
 	}

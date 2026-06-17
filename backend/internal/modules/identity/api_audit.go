@@ -41,11 +41,6 @@ func (a auditAPI) queryAudit(c *gin.Context) {
 // bindAuditQuery 解析审计查询参数,时间参数使用 RFC3339 避免时区歧义。
 func bindAuditQuery(c *gin.Context) (AuditQueryRequest, bool) {
 	req := AuditQueryRequest{}
-	tenantID, ok := httpx.QueryInt(c, "tenant_id", httpx.QueryIntRule{BitSize: 64, Min: 0})
-	if !ok {
-		return AuditQueryRequest{}, false
-	}
-	req.TenantID = tenantID
 	actorID, ok := httpx.QueryInt(c, "actor_id", httpx.QueryIntRule{BitSize: 64, Min: 0})
 	if !ok {
 		return AuditQueryRequest{}, false

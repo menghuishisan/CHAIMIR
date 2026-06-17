@@ -2072,7 +2072,7 @@ func (q *Queries) PromoteClasses(ctx context.Context, tenantID int64) error {
 const queryAuditLogs = `-- name: QueryAuditLogs :many
 SELECT id, tenant_id, actor_id, actor_role, action, target_type, target_id, detail, ip, trace_id, created_at, COUNT(*) OVER() AS total_count
 FROM audit_log
-WHERE (($1::bigint = -1 AND tenant_id IS NULL) OR ($1::bigint <> -1 AND ($1::bigint = 0 OR tenant_id = $1)))
+WHERE ($1::bigint = -1 OR ($1::bigint <> -1 AND ($1::bigint = 0 OR tenant_id = $1)))
   AND ($2::bigint = 0 OR actor_id = $2)
   AND ($3::text = '' OR action = $3)
   AND ($4::text = '' OR target_type = $4)

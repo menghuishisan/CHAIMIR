@@ -4,6 +4,7 @@ package identity
 import (
 	"context"
 	"errors"
+	"strings"
 
 	"chaimir/internal/contracts"
 	"chaimir/internal/platform/audit"
@@ -108,22 +109,23 @@ func (s *Service) ChangeMyPhone(ctx context.Context, req ChangePhoneRequest) err
 	if err := ValidatePhone(req.Phone); err != nil {
 		return err
 	}
-	phoneHash, err := s.phoneHash(req.Phone)
+	phone := strings.TrimSpace(req.Phone)
+	phoneHash, codeHash, err := s.smsCredentialHashes(phone, req.Code)
 	if err != nil {
-		return apperr.ErrInternal.WithCause(err)
-	}
-	if err := s.ensurePhoneAvailable(ctx, id, phoneHash); err != nil {
 		return err
 	}
-	if err := s.verifySMSCode(ctx, id.TenantID, req.Phone, SMSSceneChangePhone, req.Code); err != nil {
-		return err
-	}
-	phoneEnc, err := s.encryptPhone(req.Phone)
+	phoneEnc, err := s.encryptPhone(phone)
 	if err != nil {
 		return apperr.ErrInternal.WithCause(err)
 	}
 	var account Account
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
+		if err := ensurePhoneAvailableInTx(ctx, tx, id, phoneHash); err != nil {
+			return err
+		}
+		if err := s.verifySMSCodeInTx(ctx, tx, id.TenantID, phoneHash, SMSSceneChangePhone, codeHash); err != nil {
+			return err
+		}
 		row, err := tx.UpdateAccountPhone(ctx, id.TenantID, id.AccountID, phoneEnc, phoneHash)
 		if err != nil {
 			return err
@@ -247,21 +249,19 @@ func (s *Service) listPlatformSessions(ctx context.Context, accountID int64) ([]
 	return out, nil
 }
 
-// ensurePhoneAvailable 确认新手机号未被同租户其他账号占用。
-func (s *Service) ensurePhoneAvailable(ctx context.Context, id tenant.Identity, phoneHash string) error {
-	return s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
-		account, err := tx.GetAccountByPhoneHash(ctx, id.TenantID, phoneHash)
-		if errors.Is(err, pgx.ErrNoRows) {
-			return nil
-		}
-		if err != nil {
-			return err
-		}
-		if account.ID != id.AccountID {
-			return apperr.ErrIdentityPhoneAlreadyUsed
-		}
+// ensurePhoneAvailableInTx 确认新手机号未被同租户其他账号占用。
+func ensurePhoneAvailableInTx(ctx context.Context, tx TxStore, id tenant.Identity, phoneHash string) error {
+	account, err := tx.GetAccountByPhoneHash(ctx, id.TenantID, phoneHash)
+	if errors.Is(err, pgx.ErrNoRows) {
 		return nil
-	})
+	}
+	if err != nil {
+		return err
+	}
+	if account.ID != id.AccountID {
+		return apperr.ErrIdentityPhoneAlreadyUsed
+	}
+	return nil
 }
 
 // requireTenantSession 读取当前租户登录身份,拒绝平台身份进入租户个人中心。

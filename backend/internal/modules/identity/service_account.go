@@ -220,6 +220,9 @@ func (s *Service) GrantSchoolAdmin(ctx context.Context, accountID int64) error {
 		if err != nil {
 			return err
 		}
+		if account.Status != AccountStatusActive {
+			return apperr.ErrIdentityAccountDisabled
+		}
 		if account.BaseIdentity != BaseIdentityTeacher {
 			return apperr.ErrIdentityTeacherAdminRequired
 		}
@@ -297,6 +300,9 @@ func (s *Service) ForceLogoutAccountByAdmin(ctx context.Context, accountID int64
 		return err
 	}
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
+		if _, err := tx.GetAccount(ctx, accountID); err != nil {
+			return err
+		}
 		return tx.RevokeAccountSessions(ctx, id.TenantID, accountID)
 	}); err != nil {
 		return apperr.ErrInternal.WithCause(err)

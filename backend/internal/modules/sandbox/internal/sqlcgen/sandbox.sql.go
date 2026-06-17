@@ -630,7 +630,7 @@ JOIN tenant_quota tq ON tq.tenant_id = s.tenant_id
 WHERE s.status IN (4, 6)
    OR (s.status = 1 AND s.last_active_at <= $1)
    OR (s.status = 7 AND s.last_active_at <= $1)
-   OR (s.status = 8 AND s.keep_alive = false)
+   OR (s.status = 8 AND s.keep_alive = false AND s.last_active_at <= now() - make_interval(mins => tq.idle_timeout_min))
    OR (s.status IN (1, 2, 3, 7, 8) AND s.expire_at <= now())
    OR (s.status IN (1, 2, 3, 7, 8) AND s.keep_alive_until IS NOT NULL AND s.keep_alive_until <= now())
 ORDER BY s.updated_at ASC, s.id ASC

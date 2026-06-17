@@ -94,34 +94,48 @@ func (s *Service) rollbackSMSRateLimit(ctx context.Context, resendKey, dayKey st
 
 // verifySMSCode 校验短信验证码,失败次数达到上限后要求重新获取。
 func (s *Service) verifySMSCode(ctx context.Context, tenantID int64, phone string, scene int16, code string) error {
+	phoneHash, codeHash, err := s.smsCredentialHashes(phone, code)
+	if err != nil {
+		return err
+	}
+	return s.store.TenantTx(ctx, tenantID, func(ctx context.Context, tx TxStore) error {
+		return s.verifySMSCodeInTx(ctx, tx, tenantID, phoneHash, scene, codeHash)
+	})
+}
+
+// verifySMSCodeInTx 在调用方事务内完成验证码校验和一次性消费。
+func (s *Service) verifySMSCodeInTx(ctx context.Context, tx TxStore, tenantID int64, phoneHash string, scene int16, codeHash string) error {
+	row, err := tx.GetLatestSMSCode(ctx, tenantID, phoneHash, scene)
+	if err != nil {
+		return apperr.ErrIdentitySMSInvalid
+	}
+	if row.Used || timex.Now().After(row.ExpireAt) {
+		return apperr.ErrIdentitySMSInvalid
+	}
+	if row.VerifyAttempts >= int16(s.cfg.SMSVerifyMaxAttempts) {
+		return apperr.ErrIdentitySMSAttemptsLimited
+	}
+	if !crypto.EqualHMAC(row.CodeHash, codeHash) {
+		// 错误尝试必须落库计数,不能只在内存中统计,否则多实例部署会绕过上限。
+		if err := tx.IncrementSMSVerifyAttempts(ctx, tenantID, row.ID); err != nil {
+			return err
+		}
+		return apperr.ErrIdentitySMSInvalid
+	}
+	return tx.MarkSMSCodeUsed(ctx, tenantID, row.ID)
+}
+
+// smsCredentialHashes 统一计算短信验证码查询哈希和明文验证码哈希。
+func (s *Service) smsCredentialHashes(phone string, code string) (string, string, error) {
 	phoneHash, err := s.phoneHash(phone)
 	if err != nil {
-		return apperr.ErrInternal.WithCause(err)
+		return "", "", apperr.ErrInternal.WithCause(err)
 	}
 	codeHash, err := s.hashSecret(strings.TrimSpace(code))
 	if err != nil {
-		return apperr.ErrInternal.WithCause(err)
+		return "", "", apperr.ErrInternal.WithCause(err)
 	}
-	return s.store.TenantTx(ctx, tenantID, func(ctx context.Context, tx TxStore) error {
-		row, err := tx.GetLatestSMSCode(ctx, tenantID, phoneHash, scene)
-		if err != nil {
-			return apperr.ErrIdentitySMSInvalid
-		}
-		if row.Used || timex.Now().After(row.ExpireAt) {
-			return apperr.ErrIdentitySMSInvalid
-		}
-		if row.VerifyAttempts >= int16(s.cfg.SMSVerifyMaxAttempts) {
-			return apperr.ErrIdentitySMSAttemptsLimited
-		}
-		if !crypto.EqualHMAC(row.CodeHash, codeHash) {
-			// 错误尝试必须落库计数,不能只在内存中统计,否则多实例部署会绕过上限。
-			if err := tx.IncrementSMSVerifyAttempts(ctx, tenantID, row.ID); err != nil {
-				return err
-			}
-			return apperr.ErrIdentitySMSInvalid
-		}
-		return tx.MarkSMSCodeUsed(ctx, tenantID, row.ID)
-	})
+	return phoneHash, codeHash, nil
 }
 
 // resolveSMSSendTenant 按验证码场景定位验证码所属租户。

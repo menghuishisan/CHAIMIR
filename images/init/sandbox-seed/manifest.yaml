@@ -55,10 +55,19 @@ selftest:
         - sh
         - -n
         - /usr/local/bin/chaimir-sandbox-seed
+    - name: reject-symlink-source
+      command:
+        - sh
+        - -c
+        - tmp="$(mktemp -d)" && mkdir -p "$tmp/src" "$tmp/dst" && touch "$tmp/src/plain" && ln -s /etc/passwd "$tmp/src/link" && CHAIMIR_SEED_SOURCE="$tmp/src" CHAIMIR_SEED_TARGET="$tmp/dst" /usr/local/bin/chaimir-sandbox-seed; code="$?"; rm -rf "$tmp"; test "$code" -eq 65
+    - name: reject-non-workspace-target
+      command:
+        - sh
+        - -c
+        - tmp="$(mktemp -d)" && mkdir -p "$tmp/src" && touch "$tmp/src/plain" && CHAIMIR_SEED_SOURCE="$tmp/src" CHAIMIR_SEED_TARGET="$tmp/out" /usr/local/bin/chaimir-sandbox-seed; code="$?"; rm -rf "$tmp"; test "$code" -eq 66
 supply_chain:
   sbom: true
   trivy_required: true
   cosign_required: true
   pull_by_digest_in_production: true
-
 

@@ -1,5 +1,7 @@
-// sandbox enum 文件定义 M2 沙箱引擎请求、状态机和技术事件使用的枚举常量。
+// sandbox enum 文件定义 M2 沙箱引擎请求、私有状态和技术事件使用的枚举常量。
 package sandbox
+
+import "chaimir/internal/contracts"
 
 const (
 	// BuiltinExecCapability 表示由 M2 通过运行时声明的受控命令执行 L2 链能力。
@@ -8,32 +10,32 @@ const (
 
 const (
 	// SandboxPhaseAllocating 表示沙箱处于资源分配阶段。
-	SandboxPhaseAllocating int16 = 1
+	SandboxPhaseAllocating = contracts.SandboxPhaseAllocating
 	// SandboxPhaseReady 表示环境就绪,前端已可进入。
-	SandboxPhaseReady int16 = 2
+	SandboxPhaseReady = contracts.SandboxPhaseReady
 	// SandboxPhaseInitializing 表示个性化初始化仍在执行。
-	SandboxPhaseInitializing int16 = 3
+	SandboxPhaseInitializing = contracts.SandboxPhaseInitializing
 	// SandboxPhaseFullyReady 表示沙箱完全可用。
-	SandboxPhaseFullyReady int16 = 4
+	SandboxPhaseFullyReady = contracts.SandboxPhaseFullyReady
 )
 
 const (
 	// SandboxStatusCreating 表示沙箱创建中。
-	SandboxStatusCreating int16 = 1
+	SandboxStatusCreating = contracts.SandboxStatusCreating
 	// SandboxStatusRunning 表示沙箱运行中。
-	SandboxStatusRunning int16 = 2
+	SandboxStatusRunning = contracts.SandboxStatusRunning
 	// SandboxStatusPaused 表示沙箱已暂停。
-	SandboxStatusPaused int16 = 3
+	SandboxStatusPaused = contracts.SandboxStatusPaused
 	// SandboxStatusRecycling 表示沙箱回收中。
-	SandboxStatusRecycling int16 = 4
+	SandboxStatusRecycling = contracts.SandboxStatusRecycling
 	// SandboxStatusDestroyed 表示沙箱已销毁。
-	SandboxStatusDestroyed int16 = 5
+	SandboxStatusDestroyed = contracts.SandboxStatusDestroyed
 	// SandboxStatusFailed 表示沙箱启动或运行失败。
-	SandboxStatusFailed int16 = 6
+	SandboxStatusFailed = contracts.SandboxStatusFailed
 	// SandboxStatusReady 表示沙箱环境已就绪但尚未发生学生操作。
-	SandboxStatusReady int16 = 7
+	SandboxStatusReady = contracts.SandboxStatusReady
 	// SandboxStatusIdle 表示沙箱已运行但超过空闲计时阈值,等待回收或恢复操作。
-	SandboxStatusIdle int16 = 8
+	SandboxStatusIdle = contracts.SandboxStatusIdle
 )
 
 const (
@@ -49,11 +51,11 @@ const (
 
 const (
 	// SandboxToolKindBuiltin 表示平台内建工具。
-	SandboxToolKindBuiltin int16 = 1
+	SandboxToolKindBuiltin = contracts.SandboxToolKindBuiltin
 	// SandboxToolKindTerminal 表示终端类工具。
-	SandboxToolKindTerminal int16 = 2
+	SandboxToolKindTerminal = contracts.SandboxToolKindTerminal
 	// SandboxToolKindWebEmbed 表示 Web 嵌入类工具。
-	SandboxToolKindWebEmbed int16 = 3
+	SandboxToolKindWebEmbed = contracts.SandboxToolKindWebEmbed
 )
 
 const (
@@ -137,7 +139,7 @@ const (
 )
 
 const (
-	// InitAssetApplyPhaseInit 表示初始化资产在历史初始化阶段执行。
+	// InitAssetApplyPhaseInit 表示初始化资产在沙箱个性化初始化阶段开始时执行。
 	InitAssetApplyPhaseInit = "init"
 	// InitAssetApplyPhasePersonalization 表示初始化资产在文档定义的个性化阶段执行。
 	InitAssetApplyPhasePersonalization = "personalization"

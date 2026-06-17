@@ -120,7 +120,10 @@ func (s *Service) recordTerminalOpen(ctx context.Context, target TerminalTarget)
 		if err != nil {
 			return apperr.ErrSandboxStatePersistFailed.WithCause(err)
 		}
-		return tx.CreateSandboxEvent(ctx, s.ids.Generate(), target.TenantID, target.SandboxID, EventTypeExec, detail)
+		if err := tx.CreateSandboxEvent(ctx, s.ids.Generate(), target.TenantID, target.SandboxID, EventTypeExec, detail); err != nil {
+			return apperr.ErrSandboxStatePersistFailed.WithCause(err)
+		}
+		return nil
 	})
 }
 

@@ -120,13 +120,6 @@ export class IdentityApi {
     return this.client.get('/me/sessions')
   }
 
-  /**
-   * 终止指定会话
-   */
-  async terminateSession(sessionId: string): Promise<void> {
-    return this.client.delete(`/me/sessions/${sessionId}`)
-  }
-
   // ===== 审计日志 =====
 
   /**
@@ -141,7 +134,7 @@ export class IdentityApi {
     page?: number
     size?: number
   }): Promise<PaginatedResponse<AuditLog>> {
-    return this.client.get('/admin/audit', params)
+    return this.client.get('/audit', params)
   }
 
   // ===== 租户管理（平台管理员） =====

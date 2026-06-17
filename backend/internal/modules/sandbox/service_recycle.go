@@ -95,7 +95,7 @@ func (s *Service) recycleOne(ctx context.Context, sb Sandbox, reason string) err
 		if retention <= 0 {
 			retention = time.Minute
 		}
-		snapshotCtx, cancel := context.WithTimeout(ctx, time.Duration(s.cfg.ReadyTimeoutSeconds)*time.Second)
+		snapshotCtx, cancel := context.WithTimeout(ctx, timeDurationSeconds(s.cfg.ReadyTimeoutSeconds))
 		plan, err := s.planForExistingSandbox(ctx, sb)
 		if err != nil {
 			cancel()
@@ -131,7 +131,7 @@ func (s *Service) recycleOne(ctx context.Context, sb Sandbox, reason string) err
 			return apperr.ErrSandboxStatePersistFailed.WithCause(err)
 		}
 		if err := tx.CreateSandboxEvent(ctx, s.ids.Generate(), sb.TenantID, sb.ID, EventTypeRecycle, detail); err != nil {
-			return err
+			return apperr.ErrSandboxStatePersistFailed.WithCause(err)
 		}
 		_, err = tx.CreateSandboxRecycleOutbox(ctx, s.ids.Generate(), sb, reason, response.TraceFromContext(ctx), timex.Now())
 		if err != nil {
@@ -259,15 +259,18 @@ func (s *Service) markRecycleFailed(ctx context.Context, sb Sandbox, cause error
 	if err := s.store.TenantTx(ctx, sb.TenantID, func(ctx context.Context, tx TxStore) error {
 		_, err := tx.UpdateSandboxPhaseStatus(ctx, sb.TenantID, sb.ID, sb.Phase, SandboxStatusRecycling)
 		if err != nil {
-			return err
+			return apperr.ErrSandboxStatePersistFailed.WithCause(err)
 		}
 		detail, err := jsonBytes(map[string]any{"stage": "recycle", "error": logging.SanitizeError(cause.Error())})
 		if err != nil {
-			return err
+			return apperr.ErrSandboxStatePersistFailed.WithCause(err)
 		}
-		return tx.CreateSandboxEvent(ctx, s.ids.Generate(), sb.TenantID, sb.ID, EventTypeError, detail)
+		if err := tx.CreateSandboxEvent(ctx, s.ids.Generate(), sb.TenantID, sb.ID, EventTypeError, detail); err != nil {
+			return apperr.ErrSandboxStatePersistFailed.WithCause(err)
+		}
+		return nil
 	}); err != nil {
-		logging.ErrorContext(ctx, "sandbox recycle failure mark failed", err.Error(), slog.Int64("tenant_id", sb.TenantID), slog.Int64("sandbox_id", sb.ID))
+		logging.ErrorContext(ctx, "sandbox recycle failure mark failed", apperr.AsAppError(err).LogString(), slog.Int64("tenant_id", sb.TenantID), slog.Int64("sandbox_id", sb.ID))
 	}
 	s.broadcastProgress(ctx, sb.TenantID, sb.ID, sb.Phase, SandboxStatusRecycling, response.TraceFromContext(ctx))
 }

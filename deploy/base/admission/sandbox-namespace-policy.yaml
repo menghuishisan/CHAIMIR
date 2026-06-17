@@ -1,6 +1,6 @@
 # 动态沙箱命名空间准入策略。
 # 依据 docs/总-部署架构设计.md §二/§九:后端 ServiceAccount 只能操作 sbx-*/judge-*/battle-* 动态命名空间。
-# Kubernetes RBAC 无法用通配符限制 namespace 名称,因此用 ValidatingAdmissionPolicy 在准入层兜底。
+# Kubernetes RBAC 无法用通配符限制 namespace 名称,因此用 ValidatingAdmissionPolicy 在准入层强制约束。
 ---
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicy
@@ -22,9 +22,9 @@ spec:
           request.userInfo.username == 'system:serviceaccount:chaimir-system:chaimir-backend'
         ) ||
         (
-          object.metadata.name.startsWith('sbx-') ||
-          object.metadata.name.startsWith('judge-') ||
-          object.metadata.name.startsWith('battle-')
+          request.name.startsWith('sbx-') ||
+          request.name.startsWith('judge-') ||
+          request.name.startsWith('battle-')
         )
       message: "Chaimir 后端只能管理 sbx-/judge-/battle- 前缀的动态沙箱命名空间。"
     - expression: >

@@ -182,14 +182,21 @@ func (s *Service) QueryAuditLogs(ctx context.Context, query contracts.AuditQuery
 	query.Size = int32(size)
 	var rows []AuditLogRow
 	var total int64
-	if err := s.store.PrivilegedTx(ctx, func(ctx context.Context, tx TxStore) error {
+	read := func(ctx context.Context, tx TxStore) error {
 		list, n, err := tx.QueryAuditLogs(ctx, AuditQueryInput{TenantID: auditTenantFilter(query), ActorID: query.ActorID, Action: query.Action, TargetType: query.TargetType, From: query.From, To: query.To, Page: query.Page, Size: query.Size})
 		if err != nil {
 			return err
 		}
 		rows, total = list, n
 		return nil
-	}); err != nil {
+	}
+	var err error
+	if query.IncludePlatform {
+		err = s.store.PrivilegedTx(ctx, read)
+	} else {
+		err = s.store.TenantTx(ctx, query.TenantID, read)
+	}
+	if err != nil {
 		return contracts.AuditQueryResult{}, apperr.ErrInternal.WithCause(err)
 	}
 	out := make([]contracts.AuditLogEntry, 0, len(rows))
@@ -211,7 +218,7 @@ func ensureAccountVisibleInContext(ctx context.Context, accountTenantID int64) e
 	return nil
 }
 
-// auditTenantFilter 把平台级审计范围转换为 repo 层哨兵值,零值仍保留聚合层全租户查询语义。
+// auditTenantFilter 把平台级审计范围转换为 repo 层全量查询,租户路径固定收敛到本租户。
 func auditTenantFilter(query contracts.AuditQuery) int64 {
 	if query.IncludePlatform {
 		return -1

@@ -7,7 +7,7 @@ import (
 	"chaimir/internal/platform/eventbus"
 )
 
-// RegisterEventSubscriptions 注册沙箱模块事件订阅;当前 M2 只发布 sandbox.recycled,不消费上层事件。
+// RegisterEventSubscriptions 校验 M2 事件装配入口;M2 只发布 sandbox.recycled,不订阅上层事件。
 func RegisterEventSubscriptions(bus eventbus.Bus, svc *Service) error {
 	if bus == nil || svc == nil {
 		return fmt.Errorf("sandbox event subscriptions require initialized bus and service")
