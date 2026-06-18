@@ -214,6 +214,5 @@
     x-chaimir-internal: true
     security: [{ serviceAuth: [] }]
     parameters:
-      - { name: tenant_id, in: query, schema: { type: integer, format: int64 } }
       - { name: course_id, in: query, schema: { type: integer, format: int64 } }
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }

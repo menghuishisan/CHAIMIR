@@ -336,25 +336,17 @@ func (a experimentAPI) internalScore(c *gin.Context) {
 	if !ok {
 		return
 	}
-	tenantID, ok := httpx.QueryInt(c, "tenant_id", httpx.QueryIntRule{Min: 1})
-	if !ok {
-		return
-	}
-	out, err := a.svc.GetInstanceScore(c.Request.Context(), tenantID, id)
+	out, err := a.svc.GetInstanceScore(c.Request.Context(), 0, id)
 	httpx.Write(c, out, err)
 }
 
 // internalStats 读取内部实验统计。
 func (a experimentAPI) internalStats(c *gin.Context) {
-	tenantID, ok := httpx.QueryInt(c, "tenant_id", httpx.QueryIntRule{Min: 1})
-	if !ok {
-		return
-	}
 	courseID, ok := httpx.QueryInt(c, "course_id", httpx.QueryIntRule{Default: 0, Min: 0})
 	if !ok {
 		return
 	}
-	out, err := a.svc.Stats(c.Request.Context(), contracts.ExperimentStatsQuery{TenantID: tenantID, CourseID: courseID})
+	out, err := a.svc.Stats(c.Request.Context(), contracts.ExperimentStatsQuery{CourseID: courseID})
 	httpx.Write(c, out, err)
 }
 

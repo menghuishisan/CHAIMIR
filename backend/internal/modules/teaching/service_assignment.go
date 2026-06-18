@@ -45,7 +45,7 @@ func (s *Service) CreateAssignment(ctx context.Context, courseID int64, req Assi
 		if err != nil {
 			return err
 		}
-		if err := s.refreshAssignmentUsageRefs(ctx, id.TenantID, assignment.ID, items); err != nil {
+		if err := s.refreshAssignmentUsageRefs(ctx, id.TenantID, assignment, items); err != nil {
 			return err
 		}
 		return err
@@ -95,7 +95,7 @@ func (s *Service) UpdateAssignment(ctx context.Context, assignmentID int64, req 
 		if err != nil {
 			return err
 		}
-		if err := s.refreshAssignmentUsageRefs(ctx, id.TenantID, assignmentID, items); err != nil {
+		if err := s.refreshAssignmentUsageRefs(ctx, id.TenantID, assignment, items); err != nil {
 			return err
 		}
 		return err
@@ -546,7 +546,7 @@ func aggregateCompletedAutoScore(outboxes []JudgeOutbox) (int32, bool) {
 }
 
 // refreshAssignmentUsageRefs 按作业来源替换 M5 内容引用集合,由 M5 幂等维护 usage_count。
-func (s *Service) refreshAssignmentUsageRefs(ctx context.Context, tenantID, assignmentID int64, items []AssignmentItem) error {
+func (s *Service) refreshAssignmentUsageRefs(ctx context.Context, tenantID int64, assignment Assignment, items []AssignmentItem) error {
 	refs := make([]contracts.ContentItemRef, 0, len(items))
 	seen := map[string]struct{}{}
 	for _, item := range items {
@@ -557,7 +557,7 @@ func (s *Service) refreshAssignmentUsageRefs(ctx context.Context, tenantID, assi
 		seen[key] = struct{}{}
 		refs = append(refs, contracts.ContentItemRef{ItemCode: item.ItemCode, ItemVersion: item.ItemVersion})
 	}
-	sourceRef := fmt.Sprintf("teaching:assignment:%d", assignmentID)
+	sourceRef := fmt.Sprintf("teaching:%d:assignment:%d", assignment.CreatedAt.Year(), assignment.ID)
 	if err := s.content.ReplaceUsageRefs(ctx, tenantID, "teaching.assignment", sourceRef, refs); err != nil {
 		return apperr.ErrTeachingAssignmentInvalid.WithCause(err)
 	}
@@ -566,5 +566,5 @@ func (s *Service) refreshAssignmentUsageRefs(ctx context.Context, tenantID, assi
 
 // sourceRefForSubmissionItem 构造 M6 提交题目来源标识。
 func sourceRefForSubmissionItem(submissionID, assignmentItemID int64) string {
-	return fmt.Sprintf("teaching:%d:submission:%d:item:%d", timex.Now().Year(), submissionID, assignmentItemID)
+	return fmt.Sprintf("teaching:%d:submission-item:%d-%d", timex.Now().Year(), submissionID, assignmentItemID)
 }

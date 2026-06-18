@@ -620,7 +620,7 @@ func validateSourceOwnership(ownership SourceOwnership) error {
 		return apperr.ErrJudgeTaskForbidden
 	}
 	switch scope {
-	case "teaching", "exp", "contest":
+	case "teaching", "experiment", "contest":
 	default:
 		return apperr.ErrJudgeTaskForbidden
 	}

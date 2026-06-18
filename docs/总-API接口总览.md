@@ -52,7 +52,7 @@
 ### 6. 跨模块调用约定
 - 业务实时数据经 M10 `POST /notify/push` + 客户端订阅 `WS /ws`;引擎内部流(终端/仿真 stream)走各模块自有 WS。
 - 资源回收:M7/M8 调 M2 `/sandboxes/recycle`、M4 `/sessions/recycle`(按 source_ref)。
-- source_ref 格式:`<来源>:<年份>:<资源类型>:<id>`(全称,见总纲约定)。
+- source_ref 格式:`<来源>:<年份>:<资源类型>:<id>`(全称,见总纲约定;M7 实例统一为 `experiment:<年份>:instance:<id>`)。
 
 ---
 
@@ -111,11 +111,11 @@
 
 ### M7 实验 `/api/v1/experiment`
 - `/experiments/*`:配置/校验/发布。
-- `/experiments/{id}/instances`、`/instances/{id}`:实例创建(编排 M2/M4)/工作台/控制;`/instances/{id}/stages/{stage}/activate` 是阶段资源创建唯一写入口;`WS /instances/{id}/progress`。
+- `/experiments/{id}/instances`、`/instances/{id}`:实例创建(编排 M2/M4)/工作台/控制;`/instances/{id}/stages/{stage}/activate` 是阶段资源创建唯一写入口;`/instances/{id}/progress` 返回 M10 订阅元信息。
 - `/instances/{id}/checkpoints/{cp}/judge`:检查点判分(调 M3)。
 - `/instances/{id}/report`、`/reports/{id}/grade`:报告。
 - `/groups/*`:多人协作。
-- `/instances/{id}/score`、`/internal/stats` `[内部]`(供上层聚合/M9;M7 不直接依赖同层 M6)。
+- `/internal/instances/{id}/score`、`/internal/stats` `[内部]`(供上层聚合/M9;M7 不直接依赖同层 M6)。
 
 ### M8 竞赛 `/api/v1/contest`
 - `/contests/*`:赛事管理/题目编排/发布开始结束。

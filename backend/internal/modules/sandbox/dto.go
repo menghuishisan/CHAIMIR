@@ -1,7 +1,11 @@
 // sandbox dto 文件定义 M2 HTTP 请求和响应结构,不承载业务编排逻辑。
 package sandbox
 
-import "encoding/json"
+import (
+	"encoding/json"
+
+	"chaimir/internal/contracts"
+)
 
 // RuntimeRequest 是平台管理员注册或更新运行时的请求。
 type RuntimeRequest struct {
@@ -100,6 +104,20 @@ type RuntimeSelftestResponse struct {
 	SelftestStatus int16           `json:"selftest_status"`
 	RuntimeStatus  int16           `json:"runtime_status"`
 	Detail         json.RawMessage `json:"detail"`
+}
+
+// SandboxResponse 描述用户侧可见的沙箱状态,不暴露 Kubernetes Namespace 等内部资源名。
+type SandboxResponse struct {
+	SandboxID           int64                          `json:"sandbox_id"`
+	TenantID            int64                          `json:"tenant_id"`
+	SourceRef           string                         `json:"source_ref"`
+	OwnerAccountID      int64                          `json:"owner_account_id"`
+	RuntimeCode         string                         `json:"runtime_code"`
+	RuntimeImageVersion string                         `json:"runtime_image_version"`
+	Phase               int16                          `json:"phase"`
+	Status              int16                          `json:"status"`
+	ToolAccess          []contracts.SandboxToolAccess  `json:"tool_access"`
+	ResourceUsage       contracts.SandboxResourceUsage `json:"resource_usage"`
 }
 
 // FileSaveResponse 描述立即保存工作区后的对象引用和内容哈希。

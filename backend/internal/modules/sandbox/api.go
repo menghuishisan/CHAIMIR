@@ -252,7 +252,11 @@ func (a sandboxAPI) getSandbox(c *gin.Context) {
 		return
 	}
 	out, err := a.svc.GetSandboxForOwner(c.Request.Context(), current.TenantID, current.AccountID, id)
-	httpx.Write(c, out, err)
+	if err != nil {
+		httpx.Write(c, nil, err)
+		return
+	}
+	httpx.Write(c, sandboxResponseFromInfo(out), nil)
 }
 
 // pauseSandbox 绑定内部暂停请求。

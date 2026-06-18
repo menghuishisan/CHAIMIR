@@ -20,7 +20,7 @@ CREATE TABLE IF NOT EXISTS judge_task (
     source_ref VARCHAR(128) NOT NULL,
     source_owner_id BIGINT NOT NULL CHECK (source_owner_id > 0),
     source_course_id BIGINT NOT NULL CHECK (source_course_id >= 0),
-    source_scope VARCHAR(32) NOT NULL CHECK (source_scope IN ('teaching', 'exp', 'contest')),
+    source_scope VARCHAR(32) NOT NULL CHECK (source_scope IN ('teaching', 'experiment', 'contest')),
     submitter_id BIGINT NOT NULL,
     problem_ref VARCHAR(128) NOT NULL,
     code_storage_key VARCHAR(255) NOT NULL,

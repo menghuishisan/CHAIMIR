@@ -49,6 +49,7 @@ const (
 
 // SandboxCreateRequest 是业务模块创建沙箱时提交的最小编排请求。
 // 调用方只能通过本契约使用 M2,不得 import sandbox 模块内部包。
+// SourceRef 必须使用全局四段规范,实验实例必须传 experiment:<year>:instance:<id>,不得使用 exp 等短前缀别名。
 // keep_alive 与 snapshot_enabled 默认必须为 false;只有调用方业务明确要求保活或快照时才能开启。
 // 开启 keep_alive 必须同时提交正数 keep_alive_minutes;开启 snapshot_enabled 必须同时提交正数 snapshot_retention_minutes。
 // 未开启对应能力时分钟数字段必须为 0,不得用隐式默认值绕过 M2 配额校验。
@@ -86,7 +87,8 @@ type SandboxResourceUsage struct {
 	StorageBytes     int64 `json:"storage_bytes"`
 }
 
-// SandboxInfo 是跨模块传递的沙箱摘要,不暴露 K8s 内部对象细节。
+// SandboxInfo 是跨模块传递给服务端调用方的沙箱摘要。
+// Namespace 仅允许调用方用于服务端内部资源归属校验和补偿排障,不得透传给前端工作台响应。
 type SandboxInfo struct {
 	SandboxID           int64                `json:"sandbox_id"`
 	TenantID            int64                `json:"tenant_id"`

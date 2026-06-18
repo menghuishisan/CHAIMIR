@@ -52,7 +52,7 @@ func sandboxRefFromContract(componentID string, info contracts.SandboxInfo) Sand
 	for _, tool := range info.ToolAccess {
 		tools = append(tools, SandboxToolDTO{Code: tool.ToolCode, Kind: tool.Kind, Endpoint: tool.Endpoint, Status: tool.Status})
 	}
-	return SandboxRef{ComponentID: componentID, SandboxID: info.SandboxID, RuntimeCode: info.RuntimeCode, Tools: tools, Meta: map[string]string{"namespace": info.Namespace}}
+	return SandboxRef{ComponentID: componentID, SandboxID: info.SandboxID, RuntimeCode: info.RuntimeCode, Tools: tools}
 }
 
 // simRefFromContract 提取 M4 仿真摘要中工作台需要的稳定字段。

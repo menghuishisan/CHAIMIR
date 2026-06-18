@@ -395,7 +395,7 @@ func (s *Service) cloneAssignments(ctx context.Context, tx TxStore, source Cours
 		if err != nil {
 			return err
 		}
-		if err := s.refreshAssignmentUsageRefs(ctx, targetTenantID, clonedAssignment.ID, persistedItems); err != nil {
+		if err := s.refreshAssignmentUsageRefs(ctx, targetTenantID, clonedAssignment, persistedItems); err != nil {
 			return err
 		}
 	}

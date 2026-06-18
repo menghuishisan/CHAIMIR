@@ -7,6 +7,7 @@ import (
 )
 
 // SimCreateSessionRequest 是业务模块创建仿真会话时提交的稳定请求。
+// SourceRef 必须使用全局四段规范,实验实例必须传 experiment:<year>:instance:<id>,不得使用 exp 等短前缀别名。
 type SimCreateSessionRequest struct {
 	TenantID       int64          `json:"tenant_id"`
 	PackageCode    string         `json:"package_code"`

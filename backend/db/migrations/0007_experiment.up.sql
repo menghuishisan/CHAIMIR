@@ -125,6 +125,7 @@ CREATE INDEX IF NOT EXISTS idx_checkpoint_result_instance ON checkpoint_result(t
 CREATE INDEX IF NOT EXISTS idx_checkpoint_result_judge ON checkpoint_result(tenant_id, judge_task_ref);
 CREATE INDEX IF NOT EXISTS idx_experiment_report_instance_student ON experiment_report(tenant_id, instance_id, student_id);
 CREATE INDEX IF NOT EXISTS idx_experiment_score_outbox_status ON experiment_score_outbox(status, created_at ASC);
+CREATE INDEX IF NOT EXISTS idx_experiment_score_outbox_instance_student ON experiment_score_outbox(tenant_id, instance_id, student_id);
 
 ALTER TABLE experiment ENABLE ROW LEVEL SECURITY;
 ALTER TABLE experiment_instance ENABLE ROW LEVEL SECURITY;
@@ -134,10 +135,10 @@ ALTER TABLE checkpoint_result ENABLE ROW LEVEL SECURITY;
 ALTER TABLE experiment_report ENABLE ROW LEVEL SECURITY;
 ALTER TABLE experiment_score_outbox ENABLE ROW LEVEL SECURITY;
 
-CREATE POLICY experiment_tenant_rls ON experiment USING (tenant_id = current_setting('app.tenant_id')::BIGINT);
-CREATE POLICY experiment_instance_tenant_rls ON experiment_instance USING (tenant_id = current_setting('app.tenant_id')::BIGINT);
-CREATE POLICY experiment_group_tenant_rls ON experiment_group USING (tenant_id = current_setting('app.tenant_id')::BIGINT);
-CREATE POLICY group_member_tenant_rls ON group_member USING (tenant_id = current_setting('app.tenant_id')::BIGINT);
-CREATE POLICY checkpoint_result_tenant_rls ON checkpoint_result USING (tenant_id = current_setting('app.tenant_id')::BIGINT);
-CREATE POLICY experiment_report_tenant_rls ON experiment_report USING (tenant_id = current_setting('app.tenant_id')::BIGINT);
-CREATE POLICY experiment_score_outbox_tenant_rls ON experiment_score_outbox USING (tenant_id = current_setting('app.tenant_id')::BIGINT);
+CREATE POLICY experiment_tenant_rls ON experiment USING (tenant_id = current_setting('app.tenant_id')::BIGINT) WITH CHECK (tenant_id = current_setting('app.tenant_id')::BIGINT);
+CREATE POLICY experiment_instance_tenant_rls ON experiment_instance USING (tenant_id = current_setting('app.tenant_id')::BIGINT) WITH CHECK (tenant_id = current_setting('app.tenant_id')::BIGINT);
+CREATE POLICY experiment_group_tenant_rls ON experiment_group USING (tenant_id = current_setting('app.tenant_id')::BIGINT) WITH CHECK (tenant_id = current_setting('app.tenant_id')::BIGINT);
+CREATE POLICY group_member_tenant_rls ON group_member USING (tenant_id = current_setting('app.tenant_id')::BIGINT) WITH CHECK (tenant_id = current_setting('app.tenant_id')::BIGINT);
+CREATE POLICY checkpoint_result_tenant_rls ON checkpoint_result USING (tenant_id = current_setting('app.tenant_id')::BIGINT) WITH CHECK (tenant_id = current_setting('app.tenant_id')::BIGINT);
+CREATE POLICY experiment_report_tenant_rls ON experiment_report USING (tenant_id = current_setting('app.tenant_id')::BIGINT) WITH CHECK (tenant_id = current_setting('app.tenant_id')::BIGINT);
+CREATE POLICY experiment_score_outbox_tenant_rls ON experiment_score_outbox USING (tenant_id = current_setting('app.tenant_id')::BIGINT) WITH CHECK (tenant_id = current_setting('app.tenant_id')::BIGINT);

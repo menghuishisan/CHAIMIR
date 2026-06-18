@@ -236,7 +236,7 @@ func (s *Service) refreshContentUsageRefs(ctx context.Context, item Experiment) 
 		seen[key] = true
 		refs = append(refs, contracts.ContentItemRef{ItemCode: cp.ItemCode, ItemVersion: cp.ItemVersion})
 	}
-	sourceRef := fmt.Sprintf("experiment:definition:%d", item.ID)
+	sourceRef := fmt.Sprintf("experiment:%d:definition:%d", item.CreatedAt.Year(), item.ID)
 	if err := s.content.ReplaceUsageRefs(ctx, item.TenantID, "experiment.definition", sourceRef, refs); err != nil {
 		return apperr.ErrExperimentContentUsageFailed.WithCause(err)
 	}

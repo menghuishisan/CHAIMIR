@@ -13,11 +13,11 @@ import (
 
 const claimPendingExperimentScoreOutbox = `-- name: ClaimPendingExperimentScoreOutbox :many
 UPDATE experiment_score_outbox
-SET status = 4, retry_count = retry_count + 1, updated_at = now()
+SET status = 2, retry_count = retry_count + 1, updated_at = now()
 WHERE id IN (
     SELECT id
     FROM experiment_score_outbox
-    WHERE status IN (1, 3) OR (status = 4 AND updated_at <= $1::timestamptz)
+    WHERE status IN (1, 4) OR (status = 2 AND updated_at <= $1::timestamptz)
     ORDER BY created_at ASC, id ASC
     LIMIT $2
     FOR UPDATE SKIP LOCKED
@@ -1176,7 +1176,7 @@ func (q *Queries) ListGroupMembers(ctx context.Context, arg ListGroupMembersPara
 
 const markExperimentScoreOutboxFailed = `-- name: MarkExperimentScoreOutboxFailed :one
 UPDATE experiment_score_outbox
-SET status = 3, last_error = $3, updated_at = now()
+SET status = 4, last_error = $3, updated_at = now()
 WHERE tenant_id = $1 AND id = $2
 RETURNING id, tenant_id, experiment_id, instance_id, student_id, score, trace_id, scored_at, status, retry_count, last_error, created_at, updated_at
 `
@@ -1210,7 +1210,7 @@ func (q *Queries) MarkExperimentScoreOutboxFailed(ctx context.Context, arg MarkE
 
 const markExperimentScoreOutboxPublished = `-- name: MarkExperimentScoreOutboxPublished :one
 UPDATE experiment_score_outbox
-SET status = 2, last_error = NULL, updated_at = now()
+SET status = 3, last_error = NULL, updated_at = now()
 WHERE tenant_id = $1 AND id = $2
 RETURNING id, tenant_id, experiment_id, instance_id, student_id, score, trace_id, scored_at, status, retry_count, last_error, created_at, updated_at
 `

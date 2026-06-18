@@ -9,6 +9,13 @@ import (
 
 // GetInstanceScore 读取单个实验实例的最终得分。
 func (s *Service) GetInstanceScore(ctx context.Context, tenantID, instanceID int64) (contracts.ExperimentScoreSnapshot, error) {
+	if tenantID <= 0 {
+		var err error
+		tenantID, err = currentServiceTenant(ctx)
+		if err != nil {
+			return contracts.ExperimentScoreSnapshot{}, err
+		}
+	}
 	var inst ExperimentInstance
 	if err := s.store.TenantTx(ctx, tenantID, func(ctx context.Context, tx TxStore) error {
 		var err error

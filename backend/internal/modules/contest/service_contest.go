@@ -380,7 +380,18 @@ func (s *Service) refreshProblemUsageRefs(ctx context.Context, tenantID, contest
 		seen[key] = true
 		refs = append(refs, contracts.ContentItemRef{ItemCode: problem.ItemCode, ItemVersion: problem.ItemVersion})
 	}
-	sourceRef := fmt.Sprintf("contest:contest:%d", contestID)
+	var createdAt time.Time
+	if err := s.store.TenantTx(ctx, tenantID, func(ctx context.Context, tx TxStore) error {
+		contest, err := tx.GetContest(ctx, tenantID, contestID)
+		if err != nil {
+			return err
+		}
+		createdAt = contest.CreatedAt
+		return nil
+	}); err != nil {
+		return err
+	}
+	sourceRef := fmt.Sprintf("contest:%d:contest:%d", createdAt.Year(), contestID)
 	if err := s.content.ReplaceUsageRefs(ctx, tenantID, "contest.contest", sourceRef, refs); err != nil {
 		return apperr.ErrContestContentUnavailable.WithCause(err)
 	}

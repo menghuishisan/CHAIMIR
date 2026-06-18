@@ -240,6 +240,13 @@ func (s *Service) FinishInstance(ctx context.Context, instanceID int64) (Instanc
 	if err := s.recycleEngines(ctx, inst, "finished"); err != nil {
 		return InstanceDTO{}, err
 	}
+	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
+		var err error
+		inst, err = tx.SetInstanceStatus(ctx, id.TenantID, instanceID, InstanceStatusRecycled)
+		return err
+	}); err != nil {
+		return InstanceDTO{}, err
+	}
 	return instanceDTOFromModel(inst, nil), s.writeAudit(ctx, id.TenantID, id.AccountID, contracts.RoleNumStudent, "experiment.instance.finish", auditTargetInstance, inst.ID, map[string]any{"score": inst.Score})
 }
 
@@ -454,7 +461,7 @@ func (s *Service) RunExperimentScoreOutboxOnce(ctx context.Context) error {
 	}
 	for _, item := range items {
 		if err := s.publishScoreOutboxItem(ctx, item); err != nil {
-			return err
+			logging.ErrorContext(ctx, "experiment score outbox publish failed", err.Error(), slog.Int64("tenant_id", item.TenantID), slog.Int64("instance_id", item.InstanceID), slog.Int64("outbox_id", item.ID))
 		}
 	}
 	return nil

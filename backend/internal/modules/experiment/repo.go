@@ -346,7 +346,7 @@ func (tx *txStore) UpsertCheckpoint(ctx context.Context, item CheckpointResult) 
 	if err != nil {
 		return CheckpointResult{}, apperr.ErrExperimentCheckpointInvalid.WithCause(err)
 	}
-	return checkpointFromUpsertRow(row), nil
+	return checkpointFromUpsertRow(row)
 }
 
 // GetCheckpointByJudgeTask 按 M3 判题任务引用查找检查点结果。
@@ -355,7 +355,7 @@ func (tx *txStore) GetCheckpointByJudgeTask(ctx context.Context, tenantID int64,
 	if err != nil {
 		return CheckpointResult{}, apperr.ErrExperimentCheckpointInvalid.WithCause(err)
 	}
-	return checkpointFromJudgeTaskRow(row), nil
+	return checkpointFromJudgeTaskRow(row)
 }
 
 // ListCheckpoints 查询实例检查点结果。
@@ -366,7 +366,11 @@ func (tx *txStore) ListCheckpoints(ctx context.Context, tenantID, instanceID int
 	}
 	out := make([]CheckpointResult, 0, len(rows))
 	for _, row := range rows {
-		out = append(out, checkpointFromRow(row))
+		item, err := checkpointFromRow(row)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, item)
 	}
 	return out, nil
 }

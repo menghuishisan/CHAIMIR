@@ -462,7 +462,6 @@ export interface SandboxInstance {
   runtime_code: string
   runtime_image_version: string
   source_ref: string
-  namespace: string
   phase: number
   status: number
   tool_access: SandboxToolAccess[]
@@ -698,7 +697,6 @@ export interface SandboxRef {
   sandbox_id: string
   runtime_code: string
   tools: SandboxTool[]
-  meta?: Record<string, string>
 }
 
 export interface SandboxTool {

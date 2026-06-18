@@ -93,18 +93,30 @@ func groupMemberFromRow(row sqlcgen.GroupMember) GroupMember {
 }
 
 // checkpointFromRow 转换检查点结果行。
-func checkpointFromRow(row sqlcgen.ListCheckpointResultsRow) CheckpointResult {
-	return CheckpointResult{ID: row.ID, TenantID: row.TenantID, InstanceID: row.InstanceID, CheckpointID: row.CheckpointID, JudgeTaskRef: pgtypex.TextValue(row.JudgeTaskRef), Passed: row.Passed, Score: row.Score, DetailRef: pgtypex.TextValue(row.DetailRef), BindingOutput: decodeOptionalMap(row.BindingOutput), JudgedAt: timex.FromTimestamptz(row.JudgedAt)}
+func checkpointFromRow(row sqlcgen.ListCheckpointResultsRow) (CheckpointResult, error) {
+	bindingOutput, err := decodeOptionalMap(row.BindingOutput)
+	if err != nil {
+		return CheckpointResult{}, err
+	}
+	return CheckpointResult{ID: row.ID, TenantID: row.TenantID, InstanceID: row.InstanceID, CheckpointID: row.CheckpointID, JudgeTaskRef: pgtypex.TextValue(row.JudgeTaskRef), Passed: row.Passed, Score: row.Score, DetailRef: pgtypex.TextValue(row.DetailRef), BindingOutput: bindingOutput, JudgedAt: timex.FromTimestamptz(row.JudgedAt)}, nil
 }
 
 // checkpointFromUpsertRow 转换检查点 upsert 返回行。
-func checkpointFromUpsertRow(row sqlcgen.UpsertCheckpointResultRow) CheckpointResult {
-	return CheckpointResult{ID: row.ID, TenantID: row.TenantID, InstanceID: row.InstanceID, CheckpointID: row.CheckpointID, JudgeTaskRef: pgtypex.TextValue(row.JudgeTaskRef), Passed: row.Passed, Score: row.Score, DetailRef: pgtypex.TextValue(row.DetailRef), BindingOutput: decodeOptionalMap(row.BindingOutput), JudgedAt: timex.FromTimestamptz(row.JudgedAt)}
+func checkpointFromUpsertRow(row sqlcgen.UpsertCheckpointResultRow) (CheckpointResult, error) {
+	bindingOutput, err := decodeOptionalMap(row.BindingOutput)
+	if err != nil {
+		return CheckpointResult{}, err
+	}
+	return CheckpointResult{ID: row.ID, TenantID: row.TenantID, InstanceID: row.InstanceID, CheckpointID: row.CheckpointID, JudgeTaskRef: pgtypex.TextValue(row.JudgeTaskRef), Passed: row.Passed, Score: row.Score, DetailRef: pgtypex.TextValue(row.DetailRef), BindingOutput: bindingOutput, JudgedAt: timex.FromTimestamptz(row.JudgedAt)}, nil
 }
 
 // checkpointFromJudgeTaskRow 转换按判题任务查询返回行。
-func checkpointFromJudgeTaskRow(row sqlcgen.GetCheckpointResultByJudgeTaskRow) CheckpointResult {
-	return CheckpointResult{ID: row.ID, TenantID: row.TenantID, InstanceID: row.InstanceID, CheckpointID: row.CheckpointID, JudgeTaskRef: pgtypex.TextValue(row.JudgeTaskRef), Passed: row.Passed, Score: row.Score, DetailRef: pgtypex.TextValue(row.DetailRef), BindingOutput: decodeOptionalMap(row.BindingOutput), JudgedAt: timex.FromTimestamptz(row.JudgedAt)}
+func checkpointFromJudgeTaskRow(row sqlcgen.GetCheckpointResultByJudgeTaskRow) (CheckpointResult, error) {
+	bindingOutput, err := decodeOptionalMap(row.BindingOutput)
+	if err != nil {
+		return CheckpointResult{}, err
+	}
+	return CheckpointResult{ID: row.ID, TenantID: row.TenantID, InstanceID: row.InstanceID, CheckpointID: row.CheckpointID, JudgeTaskRef: pgtypex.TextValue(row.JudgeTaskRef), Passed: row.Passed, Score: row.Score, DetailRef: pgtypex.TextValue(row.DetailRef), BindingOutput: bindingOutput, JudgedAt: timex.FromTimestamptz(row.JudgedAt)}, nil
 }
 
 // reportFromUpsertRow 转换报告提交返回行。
@@ -197,13 +209,13 @@ func encodeJSON(v any, invalid *apperr.Error) ([]byte, error) {
 }
 
 // decodeOptionalMap 解析可选 JSON 对象,用于检查点参数绑定输出。
-func decodeOptionalMap(raw []byte) map[string]any {
+func decodeOptionalMap(raw []byte) (map[string]any, error) {
 	out := map[string]any{}
 	if len(raw) == 0 {
-		return out
+		return out, nil
 	}
 	if err := jsonx.DecodeStrict(raw, &out); err != nil {
-		return map[string]any{}
+		return nil, apperr.ErrExperimentCheckpointInvalid.WithCause(err)
 	}
-	return out
+	return out, nil
 }

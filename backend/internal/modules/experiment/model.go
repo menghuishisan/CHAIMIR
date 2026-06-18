@@ -125,12 +125,11 @@ type ExperimentInstance struct {
 
 // SandboxRef 保存 M7 对 M2 沙箱资源的稳定引用和工具接入摘要。
 type SandboxRef struct {
-	ComponentID string            `json:"component_id"`
-	Stage       int32             `json:"stage"`
-	SandboxID   int64             `json:"sandbox_id"`
-	RuntimeCode string            `json:"runtime_code"`
-	Tools       []SandboxToolDTO  `json:"tools"`
-	Meta        map[string]string `json:"meta"`
+	ComponentID string           `json:"component_id"`
+	Stage       int32            `json:"stage"`
+	SandboxID   int64            `json:"sandbox_id"`
+	RuntimeCode string           `json:"runtime_code"`
+	Tools       []SandboxToolDTO `json:"tools"`
 }
 
 // SimSessionRef 保存 M7 对 M4 仿真会话的稳定引用。

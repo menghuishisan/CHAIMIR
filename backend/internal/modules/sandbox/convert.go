@@ -39,6 +39,22 @@ func sandboxToolAccessFromModel(tools []SandboxTool) []contracts.SandboxToolAcce
 	return out
 }
 
+// sandboxResponseFromInfo 删除仅服务端内部可用的资源定位字段后返回给前端。
+func sandboxResponseFromInfo(info contracts.SandboxInfo) SandboxResponse {
+	return SandboxResponse{
+		SandboxID:           info.SandboxID,
+		TenantID:            info.TenantID,
+		SourceRef:           info.SourceRef,
+		OwnerAccountID:      info.OwnerAccountID,
+		RuntimeCode:         info.RuntimeCode,
+		RuntimeImageVersion: info.RuntimeImageVersion,
+		Phase:               info.Phase,
+		Status:              info.Status,
+		ToolAccess:          info.ToolAccess,
+		ResourceUsage:       info.ResourceUsage,
+	}
+}
+
 // contractCreateFromDTO 把内部 HTTP 创建请求转换为跨模块创建契约。
 func contractCreateFromDTO(req CreateSandboxRequest) contracts.SandboxCreateRequest {
 	return contracts.SandboxCreateRequest{

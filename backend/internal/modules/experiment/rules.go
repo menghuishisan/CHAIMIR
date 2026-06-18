@@ -311,7 +311,7 @@ func validateManualScore(score float64) error {
 
 // sourceRefForInstance 按全局 source_ref 规范生成实验实例来源引用。
 func sourceRefForInstance(id int64, now time.Time) string {
-	return fmt.Sprintf("exp:%04d:instance:%d", now.Year(), id)
+	return fmt.Sprintf("experiment:%04d:instance:%d", now.Year(), id)
 }
 
 // componentID 返回显式组件 ID 或稳定派生 ID,避免存储空组件键。
@@ -324,5 +324,5 @@ func componentID(raw, prefix string, idx int) string {
 
 // validExperimentSourceRef 校验事件来源确属 M7 实例。
 func validExperimentSourceRef(sourceRef string) bool {
-	return auth.ValidSourceRef(sourceRef) && strings.HasPrefix(strings.TrimSpace(sourceRef), "exp:")
+	return auth.ValidSourceRef(sourceRef) && strings.HasPrefix(strings.TrimSpace(sourceRef), "experiment:")
 }

@@ -28,8 +28,8 @@ type ExperimentScoreSnapshot struct {
 
 // ExperimentReadService 是 M7 对聚合层和受控内部流程开放的只读契约。
 type ExperimentReadService interface {
-	// GetInstanceScore 读取单个实验实例的最终得分。
+	// GetInstanceScore 读取单个实验实例的最终得分。内部 HTTP 入口必须使用服务签名上下文中的 tenant_id,不得信任查询参数覆盖租户边界。
 	GetInstanceScore(ctx context.Context, tenantID, instanceID int64) (ExperimentScoreSnapshot, error)
-	// Stats 按过滤条件读取实验统计,供 M9 学校看板聚合。
+	// Stats 按过滤条件读取实验统计,供 M9 学校看板聚合。内部 HTTP 入口必须使用服务签名上下文中的 tenant_id,不得信任查询参数覆盖租户边界。
 	Stats(ctx context.Context, query ExperimentStatsQuery) (ExperimentStats, error)
 }

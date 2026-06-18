@@ -331,7 +331,7 @@ func (s *Service) runVulnPrevalidation(ctx context.Context, tenantID, accountID 
 
 // runVulnValidationCase 执行一条正向或反向预验证用例。
 func (s *Service) runVulnValidationCase(ctx context.Context, tenantID, accountID int64, problem VulnProblem, req PrevalidateRequest, phase string, positive bool) (result map[string]any, retErr error) {
-	sourceRef := fmt.Sprintf("contest:%04d:vuln-prevalidate:%d:%s", timex.Now().Year(), problem.ID, phase)
+	sourceRef := fmt.Sprintf("contest:%04d:vuln-prevalidate-%s:%d", timex.Now().Year(), phase, problem.ID)
 	info, err := s.sandbox.CreateSandbox(ctx, contracts.SandboxCreateRequest{TenantID: tenantID, RuntimeCode: req.RuntimeCode, RuntimeImageVersion: req.RuntimeImageVersion, ToolCodes: req.ToolCodes, InitCodeRef: req.InitCodeRef, InitScriptRef: req.InitScriptRef, OwnerAccountID: accountID, SourceRef: sourceRef, KeepAlive: false, SnapshotEnabled: false})
 	if err != nil {
 		return nil, apperr.ErrContestSandboxUnavailable.WithCause(err)
