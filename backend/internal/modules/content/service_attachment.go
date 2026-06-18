@@ -28,9 +28,8 @@ type AttachmentUploadDTO struct {
 
 // AttachmentDownloadGrantDTO 是附件短时下载授权响应。
 type AttachmentDownloadGrantDTO struct {
-	Token     string                `json:"token"`
-	Grant     storage.DownloadGrant `json:"grant"`
-	ExpiresAt string                `json:"expires_at"`
+	Token     string `json:"token"`
+	ExpiresAt string `json:"expires_at"`
 }
 
 // UploadAttachment 通过统一文件服务校验并写入附件对象,正文只应保存返回的 object_ref。
@@ -93,5 +92,5 @@ func (s *Service) IssueAttachmentDownloadGrant(ctx context.Context, resourceID, 
 	if err := s.writeAudit(ctx, id.TenantID, id.AccountID, contracts.RoleNumTeacher, "content.attachment.download", contentAuditTargetItem, 0, map[string]any{"resource_id": resourceID}); err != nil {
 		return AttachmentDownloadGrantDTO{}, err
 	}
-	return AttachmentDownloadGrantDTO{Token: token, Grant: grant, ExpiresAt: grant.ExpiresAt.Format("2006-01-02T15:04:05Z07:00")}, nil
+	return AttachmentDownloadGrantDTO{Token: token, ExpiresAt: grant.ExpiresAt.Format("2006-01-02T15:04:05Z07:00")}, nil
 }

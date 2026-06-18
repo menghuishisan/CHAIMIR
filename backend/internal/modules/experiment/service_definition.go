@@ -139,7 +139,7 @@ func (s *Service) PublishExperiment(ctx context.Context, experimentID int64) (Ex
 	if err := validatePublishResult(result); err != nil {
 		return ExperimentDTO{}, err
 	}
-	if err := s.incrementContentUsage(ctx, item); err != nil {
+	if err := s.refreshContentUsageRefs(ctx, item); err != nil {
 		return ExperimentDTO{}, err
 	}
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
@@ -220,23 +220,25 @@ func (s *Service) validateExperimentComponents(ctx context.Context, item Experim
 	return result
 }
 
-// incrementContentUsage 在发布时登记 M5 内容引用,用于删除保护和复用统计。
-func (s *Service) incrementContentUsage(ctx context.Context, item Experiment) error {
-	if item.TemplateRef != "" {
-		if err := s.content.IncrementUsage(ctx, item.TenantID, contracts.ContentItemRef{ItemCode: item.TemplateRef, ItemVersion: item.TemplateVersion}); err != nil {
-			return apperr.ErrExperimentContentUsageFailed.WithCause(err)
-		}
-	}
+// refreshContentUsageRefs 在发布时登记 M5 内容引用,用于删除保护和复用统计。
+func (s *Service) refreshContentUsageRefs(ctx context.Context, item Experiment) error {
+	refs := make([]contracts.ContentItemRef, 0, 1+len(item.Components.Checkpoints))
 	seen := map[string]bool{}
+	if item.TemplateRef != "" {
+		refs = append(refs, contracts.ContentItemRef{ItemCode: item.TemplateRef, ItemVersion: item.TemplateVersion})
+		seen[item.TemplateRef+"\x00"+item.TemplateVersion] = true
+	}
 	for _, cp := range item.Components.Checkpoints {
-		key := cp.ItemCode + ":" + cp.ItemVersion
+		key := cp.ItemCode + "\x00" + cp.ItemVersion
 		if seen[key] {
 			continue
 		}
 		seen[key] = true
-		if err := s.content.IncrementUsage(ctx, item.TenantID, contracts.ContentItemRef{ItemCode: cp.ItemCode, ItemVersion: cp.ItemVersion}); err != nil {
-			return apperr.ErrExperimentContentUsageFailed.WithCause(err)
-		}
+		refs = append(refs, contracts.ContentItemRef{ItemCode: cp.ItemCode, ItemVersion: cp.ItemVersion})
+	}
+	sourceRef := fmt.Sprintf("experiment:definition:%d", item.ID)
+	if err := s.content.ReplaceUsageRefs(ctx, item.TenantID, "experiment.definition", sourceRef, refs); err != nil {
+		return apperr.ErrExperimentContentUsageFailed.WithCause(err)
 	}
 	return nil
 }

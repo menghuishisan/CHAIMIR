@@ -287,8 +287,6 @@ paths:
     $ref: './paths/content.yaml#/api/v1/content/items/{item}/{version}/full'
   /api/v1/content/items/{item}/{version}/clone:
     $ref: './paths/content.yaml#/api/v1/content/items/{item}/{version}/clone'
-  /api/v1/content/items/{item}/{version}/usage:
-    $ref: './paths/content.yaml#/api/v1/content/items/{item}/{version}/usage'
   /api/v1/content/attachments:
     $ref: './paths/content.yaml#/api/v1/content/attachments'
   /api/v1/content/attachments/download-grant:

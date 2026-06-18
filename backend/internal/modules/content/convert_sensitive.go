@@ -1,7 +1,11 @@
 // content convert_sensitive 文件实现题面敏感字段剥离,确保答案和判题配置不下发。
 package content
 
-import "strings"
+import (
+	"strings"
+
+	"chaimir/internal/platform/jsonx"
+)
 
 var defaultSensitivePaths = []string{
 	"answer",
@@ -19,23 +23,30 @@ var defaultSensitivePaths = []string{
 }
 
 // faceSnapshot 返回剥离敏感字段后的题面快照。
-func faceSnapshot(item ItemWithBody) ItemWithBody {
+func faceSnapshot(item ItemWithBody) (ItemWithBody, error) {
 	out := item
-	out.Body = stripSensitiveFields(item.Body, item.SensitiveFields)
+	body, err := stripSensitiveFields(item.Body, item.SensitiveFields)
+	if err != nil {
+		return ItemWithBody{}, err
+	}
+	out.Body = body
 	out.SensitiveFields = nil
-	return out
+	return out, nil
 }
 
 // stripSensitiveFields 递归删除显式和默认敏感路径。
-func stripSensitiveFields(body map[string]any, fields []string) map[string]any {
-	out := cloneMap(body)
+func stripSensitiveFields(body map[string]any, fields []string) (map[string]any, error) {
+	out, err := jsonx.CloneObjectStrict(body)
+	if err != nil {
+		return nil, err
+	}
 	for _, path := range defaultSensitivePaths {
 		deletePath(out, path)
 	}
 	for _, path := range fields {
 		deletePath(out, path)
 	}
-	return out
+	return out, nil
 }
 
 // deletePath 按点分路径删除字段,并对数组内对象递归应用同一路径。

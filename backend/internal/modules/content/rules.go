@@ -5,6 +5,7 @@ import (
 	"regexp"
 	"strings"
 
+	"chaimir/internal/platform/storage"
 	"chaimir/pkg/apperr"
 )
 
@@ -15,7 +16,7 @@ var (
 	semverRe      = regexp.MustCompile(`^v?[0-9]+(\.[0-9]+){1,2}(-[0-9A-Za-z.-]+)?$`)
 )
 
-// validateCreateRequest 校验教师创建草稿请求。
+// validateCreateRequest 校验教师创建草稿请求,共享库发布必须通过显式 share 流程。
 func validateCreateRequest(req CreateItemRequest) (CreateItemRequest, error) {
 	req.Code = strings.TrimSpace(req.Code)
 	req.Version = strings.TrimSpace(req.Version)
@@ -23,7 +24,7 @@ func validateCreateRequest(req CreateItemRequest) (CreateItemRequest, error) {
 	req.Tags = normalizedStrings(req.Tags)
 	req.KnowledgePoints = normalizedStrings(req.KnowledgePoints)
 	req.SensitiveFields = normalizedStrings(append(req.SensitiveFields, defaultSensitivePaths...))
-	if !validCode(req.Code) || !validVersion(req.Version) || !validType(req.Type) || req.Title == "" || !validDifficulty(req.Difficulty) || !validVisibility(req.Visibility) || req.Body == nil {
+	if !validCode(req.Code) || !validVersion(req.Version) || !validType(req.Type) || req.Title == "" || !validDifficulty(req.Difficulty) || !validDraftVisibility(req.Visibility) || req.Body == nil {
 		return CreateItemRequest{}, apperr.ErrContentInvalid
 	}
 	if err := validateContentBodyRefs(req.Body); err != nil {
@@ -32,13 +33,13 @@ func validateCreateRequest(req CreateItemRequest) (CreateItemRequest, error) {
 	return req, nil
 }
 
-// validateUpdateRequest 校验草稿编辑请求。
+// validateUpdateRequest 校验草稿编辑请求,草稿不能直接进入跨租户共享库。
 func validateUpdateRequest(req UpdateItemRequest) (UpdateItemRequest, error) {
 	req.Title = strings.TrimSpace(req.Title)
 	req.Tags = normalizedStrings(req.Tags)
 	req.KnowledgePoints = normalizedStrings(req.KnowledgePoints)
 	req.SensitiveFields = normalizedStrings(append(req.SensitiveFields, defaultSensitivePaths...))
-	if req.Title == "" || !validDifficulty(req.Difficulty) || !validVisibility(req.Visibility) || req.Body == nil {
+	if req.Title == "" || !validDifficulty(req.Difficulty) || !validDraftVisibility(req.Visibility) || req.Body == nil {
 		return UpdateItemRequest{}, apperr.ErrContentInvalid
 	}
 	if err := validateContentBodyRefs(req.Body); err != nil {
@@ -146,6 +147,11 @@ func validVisibility(value int16) bool {
 	return value == VisibilityPrivate || value == VisibilityTenant || value == VisibilityShared
 }
 
+// validDraftVisibility 校验草稿可见性,跨租户共享只能在发布后通过 share 状态流转进入。
+func validDraftVisibility(value int16) bool {
+	return value == VisibilityPrivate || value == VisibilityTenant
+}
+
 // validateContentBodyRefs 拒绝正文内联大文件、data URL 和外部直链,附件必须走统一文件服务对象引用。
 func validateContentBodyRefs(body map[string]any) error {
 	return walkContentBody(body)
@@ -170,6 +176,9 @@ func walkContentBody(value any) error {
 		if unsafeInlineBodyString(v) {
 			return apperr.ErrContentBodyInvalid
 		}
+		if err := validateObjectRefString(v); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -182,4 +191,16 @@ func unsafeInlineBodyString(value string) bool {
 		return true
 	}
 	return len([]byte(trimmed)) > contentBodyMaxInlineStringBytes
+}
+
+// validateObjectRefString 要求正文中的对象引用必须符合统一文件服务格式。
+func validateObjectRefString(value string) error {
+	trimmed := strings.TrimSpace(value)
+	if !strings.HasPrefix(strings.ToLower(trimmed), "minio://") {
+		return nil
+	}
+	if _, err := storage.ParseObjectRef(trimmed); err != nil {
+		return apperr.ErrContentBodyInvalid.WithCause(err)
+	}
+	return nil
 }

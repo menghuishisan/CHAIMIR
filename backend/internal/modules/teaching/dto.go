@@ -172,7 +172,7 @@ type SubmissionDTO struct {
 	AssignmentID int64          `json:"assignment_id"`
 	StudentID    int64          `json:"student_id"`
 	AttemptNo    int32          `json:"attempt_no"`
-	ContentRef   map[string]any `json:"content_ref"`
+	Content      map[string]any `json:"content"`
 	JudgeTaskRef string         `json:"judge_task_ref,omitempty"`
 	AutoScore    int32          `json:"auto_score,omitempty"`
 	ManualScore  int32          `json:"manual_score,omitempty"`

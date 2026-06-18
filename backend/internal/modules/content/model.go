@@ -32,6 +32,18 @@ type ItemWithBody struct {
 	SensitiveFields []string
 }
 
+// UsageRef 表示一个业务来源对某个内容版本的幂等引用。
+type UsageRef struct {
+	ID          int64
+	TenantID    int64
+	ItemID      int64
+	ItemCode    string
+	ItemVersion string
+	SourceScope string
+	SourceRef   string
+	CreatedAt   time.Time
+}
+
 // Category 表示内容分类树节点。
 type Category struct {
 	ID        int64
@@ -100,6 +112,7 @@ type ItemListFilter struct {
 	Visibility      int16
 	Status          int16
 	AuthorID        int64
+	ViewerID        int64
 	OnlyShared      bool
 	PublishedShared bool
 	Page            int

@@ -36,16 +36,24 @@ func itemDTO(item Item) ItemDTO {
 }
 
 // itemSnapshotDTO 转换内容快照为 HTTP DTO,full 响应可携带敏感路径清单。
-func itemSnapshotDTO(item ItemWithBody, includeSensitivePaths bool) ItemSnapshotDTO {
-	out := ItemSnapshotDTO{ItemDTO: itemDTO(item.Item), Body: cloneMap(item.Body)}
+func itemSnapshotDTO(item ItemWithBody, includeSensitivePaths bool) (ItemSnapshotDTO, error) {
+	body, err := cloneMapStrict(item.Body)
+	if err != nil {
+		return ItemSnapshotDTO{}, err
+	}
+	out := ItemSnapshotDTO{ItemDTO: itemDTO(item.Item), Body: body}
 	if includeSensitivePaths {
 		out.SensitiveFields = cloneStrings(item.SensitiveFields)
 	}
-	return out
+	return out, nil
 }
 
 // contractSnapshot 转换为跨模块内容快照。
-func contractSnapshot(item ItemWithBody) contracts.ContentItemSnapshot {
+func contractSnapshot(item ItemWithBody) (contracts.ContentItemSnapshot, error) {
+	body, err := cloneMapStrict(item.Body)
+	if err != nil {
+		return contracts.ContentItemSnapshot{}, err
+	}
 	return contracts.ContentItemSnapshot{
 		ItemCode:        item.Code,
 		ItemVersion:     item.Version,
@@ -55,10 +63,10 @@ func contractSnapshot(item ItemWithBody) contracts.ContentItemSnapshot {
 		Visibility:      item.Visibility,
 		Tags:            cloneStrings(item.Tags),
 		KnowledgePoints: cloneStrings(item.KnowledgePoints),
-		Body:            cloneMap(item.Body),
+		Body:            body,
 		VersionHash:     item.VersionHash,
 		Status:          item.Status,
-	}
+	}, nil
 }
 
 // categoryDTO 转换分类响应。
@@ -72,9 +80,13 @@ func paperDTO(paper Paper) PaperDTO {
 }
 
 // paperDetailDTO 转换试卷详情响应。
-func paperDetailDTO(detail PaperWithItems) PaperDetailDTO {
+func paperDetailDTO(detail PaperWithItems) (PaperDetailDTO, error) {
 	items := make([]PaperItemFaceDTO, 0, len(detail.Items))
 	for _, item := range detail.Items {
+		body, err := cloneMapStrict(item.Body)
+		if err != nil {
+			return PaperDetailDTO{}, err
+		}
 		items = append(items, PaperItemFaceDTO{
 			ID:      item.ID,
 			Code:    item.ItemCode,
@@ -82,10 +94,10 @@ func paperDetailDTO(detail PaperWithItems) PaperDetailDTO {
 			Score:   item.Score,
 			Seq:     item.Seq,
 			Item:    item.Item,
-			Body:    cloneMap(item.Body),
+			Body:    body,
 		})
 	}
-	return PaperDetailDTO{Paper: paperDTO(detail.Paper), Items: items}
+	return PaperDetailDTO{Paper: paperDTO(detail.Paper), Items: items}, nil
 }
 
 // versionHash 对外壳关键字段和正文生成稳定 SHA-256 摘要,用于发布版本完整性校验。
@@ -110,24 +122,9 @@ func versionHash(item Item, body map[string]any, sensitive []string) (string, er
 	return crypto.SHA256Hex(raw), nil
 }
 
-// cloneMap 深拷贝 JSON 对象,避免调用方修改 service 内部快照。
-func cloneMap(in map[string]any) map[string]any {
-	if in == nil {
-		return map[string]any{}
-	}
-	raw, err := jsonx.AnyBytes(in, apperr.ErrInternal)
-	if err != nil {
-		shallow := make(map[string]any, len(in))
-		for k, v := range in {
-			shallow[k] = v
-		}
-		return shallow
-	}
-	out, err := jsonx.ObjectMapStrict(raw)
-	if err != nil {
-		return map[string]any{}
-	}
-	return out
+// cloneMapStrict 深拷贝 JSON 对象,转换失败时显式返回错误避免坏正文伪装为空对象。
+func cloneMapStrict(in map[string]any) (map[string]any, error) {
+	return jsonx.CloneObjectStrict(in)
 }
 
 // cloneStrings 拷贝字符串切片。

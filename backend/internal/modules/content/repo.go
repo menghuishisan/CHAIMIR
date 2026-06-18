@@ -31,7 +31,8 @@ type TxStore interface {
 	DeprecateItem(ctx context.Context, tenantID, id int64) (Item, error)
 	DeleteDraftItem(ctx context.Context, tenantID, id int64) (Item, error)
 	SetVisibility(ctx context.Context, tenantID, id int64, visibility int16) (Item, error)
-	IncrementUsage(ctx context.Context, tenantID int64, code, version string) (Item, error)
+	GetPublishedItemForUsage(ctx context.Context, tenantID int64, code, version string) (Item, error)
+	ReplaceUsageRefs(ctx context.Context, tenantID int64, sourceScope, sourceRef string, refs []UsageRef) error
 	CreateCategory(ctx context.Context, category Category) (Category, error)
 	UpdateCategory(ctx context.Context, category Category) (Category, error)
 	DeleteCategory(ctx context.Context, tenantID, id int64) (Category, error)
@@ -135,12 +136,12 @@ func (s *txStore) GetItemWithBodyByRef(ctx context.Context, tenantID int64, code
 
 // ListItems 查询内容分页。
 func (s *txStore) ListItems(ctx context.Context, tenantID int64, filter ItemListFilter) ([]Item, int64, error) {
-	params := sqlcgen.ListContentItemsParams{TenantID: tenantID, Column2: filter.Type, Column3: filter.CategoryID, Column4: filter.Difficulty, Column5: filter.Tag, Column6: filter.KnowledgePoint, Column7: filter.Keyword, Column8: filter.Visibility, Column9: filter.Status, Column10: filter.AuthorID, Column11: filter.OnlyShared, Limit: int32(filter.Size), Offset: int32((filter.Page - 1) * filter.Size)}
+	params := sqlcgen.ListContentItemsParams{TenantID: tenantID, Column2: filter.Type, Column3: filter.CategoryID, Column4: filter.Difficulty, Column5: filter.Tag, Column6: filter.KnowledgePoint, Column7: filter.Keyword, Column8: filter.Visibility, Column9: filter.Status, Column10: filter.AuthorID, Column11: filter.OnlyShared, AuthorID: filter.ViewerID, Limit: int32(filter.Size), Offset: int32((filter.Page - 1) * filter.Size)}
 	rows, err := s.q.ListContentItems(ctx, params)
 	if err != nil {
 		return nil, 0, err
 	}
-	total, err := s.q.CountContentItems(ctx, sqlcgen.CountContentItemsParams{TenantID: tenantID, Column2: filter.Type, Column3: filter.CategoryID, Column4: filter.Difficulty, Column5: filter.Tag, Column6: filter.KnowledgePoint, Column7: filter.Keyword, Column8: filter.Visibility, Column9: filter.Status, Column10: filter.AuthorID, Column11: filter.OnlyShared})
+	total, err := s.q.CountContentItems(ctx, sqlcgen.CountContentItemsParams{TenantID: tenantID, Column2: filter.Type, Column3: filter.CategoryID, Column4: filter.Difficulty, Column5: filter.Tag, Column6: filter.KnowledgePoint, Column7: filter.Keyword, Column8: filter.Visibility, Column9: filter.Status, Column10: filter.AuthorID, Column11: filter.OnlyShared, AuthorID: filter.ViewerID})
 	if err != nil {
 		return nil, 0, err
 	}
@@ -148,6 +149,9 @@ func (s *txStore) ListItems(ctx context.Context, tenantID int64, filter ItemList
 	for _, row := range rows {
 		item := itemFromRow(row)
 		if filter.PublishedShared && (item.Visibility != VisibilityShared || item.Status != StatusPublished) {
+			continue
+		}
+		if item.Visibility == VisibilityPrivate && item.AuthorID != filter.ViewerID {
 			continue
 		}
 		out = append(out, item)
@@ -204,13 +208,40 @@ func (s *txStore) SetVisibility(ctx context.Context, tenantID, id int64, visibil
 	return itemFromRow(row), nil
 }
 
-// IncrementUsage 增加已发布内容引用计数。
-func (s *txStore) IncrementUsage(ctx context.Context, tenantID int64, code, version string) (Item, error) {
-	row, err := s.q.IncrementContentUsage(ctx, sqlcgen.IncrementContentUsageParams{TenantID: tenantID, Code: code, Version: version})
+// GetPublishedItemForUsage 读取可被业务引用的已发布内容版本。
+func (s *txStore) GetPublishedItemForUsage(ctx context.Context, tenantID int64, code, version string) (Item, error) {
+	row, err := s.q.GetPublishedContentItemForUsage(ctx, sqlcgen.GetPublishedContentItemForUsageParams{TenantID: tenantID, Code: code, Version: version})
 	if err != nil {
 		return Item{}, err
 	}
 	return itemFromRow(row), nil
+}
+
+// ReplaceUsageRefs 替换业务来源持有的内容引用集合并刷新计数。
+func (s *txStore) ReplaceUsageRefs(ctx context.Context, tenantID int64, sourceScope, sourceRef string, refs []UsageRef) error {
+	oldItemIDs, err := s.q.ListContentUsageItemIDsBySource(ctx, sqlcgen.ListContentUsageItemIDsBySourceParams{TenantID: tenantID, SourceScope: sourceScope, SourceRef: sourceRef})
+	if err != nil {
+		return err
+	}
+	if err := s.q.DeleteContentUsageRefsBySource(ctx, sqlcgen.DeleteContentUsageRefsBySourceParams{TenantID: tenantID, SourceScope: sourceScope, SourceRef: sourceRef}); err != nil {
+		return err
+	}
+	changed := map[int64]struct{}{}
+	for _, itemID := range oldItemIDs {
+		changed[itemID] = struct{}{}
+	}
+	for _, ref := range refs {
+		if _, err := s.q.CreateContentUsageRef(ctx, sqlcgen.CreateContentUsageRefParams{ID: ref.ID, TenantID: tenantID, ItemID: ref.ItemID, ItemCode: ref.ItemCode, ItemVersion: ref.ItemVersion, SourceScope: sourceScope, SourceRef: sourceRef}); err != nil {
+			return err
+		}
+		changed[ref.ItemID] = struct{}{}
+	}
+	for itemID := range changed {
+		if _, err := s.q.RefreshContentUsageCount(ctx, sqlcgen.RefreshContentUsageCountParams{TenantID: tenantID, ID: itemID}); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // CreateCategory 创建分类。

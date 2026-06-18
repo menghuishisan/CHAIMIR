@@ -3,6 +3,7 @@ package contest
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"time"
 
@@ -353,7 +354,7 @@ func (s *Service) transitionContest(ctx context.Context, contestID int64, next i
 		return ContestDTO{}, err
 	}
 	if requireProblems {
-		if err := s.incrementProblemUsage(ctx, item.TenantID, problems); err != nil {
+		if err := s.refreshProblemUsageRefs(ctx, item.TenantID, contestID, problems); err != nil {
 			return ContestDTO{}, err
 		}
 	}
@@ -367,18 +368,21 @@ func (s *Service) transitionContest(ctx context.Context, contestID int64, next i
 	return contestDTOFromModel(item), s.writeAudit(ctx, id.TenantID, id.AccountID, contracts.RoleNumTeacher, action, auditTargetContest, item.ID, nil)
 }
 
-// incrementProblemUsage 在发布时登记 M5 内容引用,用于删除保护和复用统计。
-func (s *Service) incrementProblemUsage(ctx context.Context, tenantID int64, problems []ContestProblem) error {
+// refreshProblemUsageRefs 在发布时登记 M5 内容引用,用于删除保护和复用统计。
+func (s *Service) refreshProblemUsageRefs(ctx context.Context, tenantID, contestID int64, problems []ContestProblem) error {
 	seen := map[string]bool{}
+	refs := make([]contracts.ContentItemRef, 0, len(problems))
 	for _, problem := range problems {
 		key := problem.ItemCode + ":" + problem.ItemVersion
 		if seen[key] {
 			continue
 		}
 		seen[key] = true
-		if err := s.content.IncrementUsage(ctx, tenantID, contracts.ContentItemRef{ItemCode: problem.ItemCode, ItemVersion: problem.ItemVersion}); err != nil {
-			return apperr.ErrContestContentUnavailable.WithCause(err)
-		}
+		refs = append(refs, contracts.ContentItemRef{ItemCode: problem.ItemCode, ItemVersion: problem.ItemVersion})
+	}
+	sourceRef := fmt.Sprintf("contest:contest:%d", contestID)
+	if err := s.content.ReplaceUsageRefs(ctx, tenantID, "contest.contest", sourceRef, refs); err != nil {
+		return apperr.ErrContestContentUnavailable.WithCause(err)
 	}
 	return nil
 }

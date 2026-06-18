@@ -53,7 +53,6 @@ func (a teachingAPI) registerSharedRoutes(g gin.IRouter) {
 	g.POST("/courses/:id/posts", a.createPost)
 	g.POST("/posts/:id/like", a.likePost)
 	g.GET("/courses/:id/announcements", a.listAnnouncements)
-	g.GET("/courses/:id/grade-weights", a.listGradeWeights)
 }
 
 // registerTeacherRoutes 注册授课教师和学校管理员管理接口。
@@ -86,6 +85,7 @@ func (a teachingAPI) registerTeacherRoutes(g gin.IRouter) {
 	g.POST("/courses/:id/announcements", a.createAnnouncement)
 	g.POST("/announcements/:id/pin", a.pinAnnouncement)
 	g.GET("/courses/:id/progress-stats", a.progressStats)
+	g.GET("/courses/:id/grade-weights", a.listGradeWeights)
 	g.PUT("/courses/:id/grade-weights", a.setGradeWeights)
 	g.POST("/courses/:id/grades/compute", a.computeGrades)
 	g.GET("/courses/:id/grades", a.listGrades)

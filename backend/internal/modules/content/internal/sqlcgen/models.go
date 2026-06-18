@@ -50,6 +50,17 @@ type ContentItem struct {
 	DeletedAt       pgtype.Timestamptz `json:"deleted_at"`
 }
 
+type ContentUsageRef struct {
+	ID          int64              `json:"id"`
+	TenantID    int64              `json:"tenant_id"`
+	ItemID      int64              `json:"item_id"`
+	ItemCode    string             `json:"item_code"`
+	ItemVersion string             `json:"item_version"`
+	SourceScope string             `json:"source_scope"`
+	SourceRef   string             `json:"source_ref"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+}
+
 type Paper struct {
 	ID          int64              `json:"id"`
 	TenantID    int64              `json:"tenant_id"`

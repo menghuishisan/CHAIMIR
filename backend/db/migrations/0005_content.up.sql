@@ -48,6 +48,19 @@ CREATE TABLE IF NOT EXISTS content_body (
     FOREIGN KEY (tenant_id, item_id) REFERENCES content_item(tenant_id, id) ON DELETE CASCADE
 );
 
+CREATE TABLE IF NOT EXISTS content_usage_ref (
+    id BIGINT PRIMARY KEY,
+    tenant_id BIGINT NOT NULL REFERENCES tenant(id),
+    item_id BIGINT NOT NULL,
+    item_code VARCHAR(96) NOT NULL,
+    item_version VARCHAR(32) NOT NULL,
+    source_scope VARCHAR(32) NOT NULL,
+    source_ref VARCHAR(128) NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (tenant_id, source_scope, source_ref, item_code, item_version),
+    FOREIGN KEY (tenant_id, item_id) REFERENCES content_item(tenant_id, id) ON DELETE CASCADE
+);
+
 CREATE TABLE IF NOT EXISTS paper (
     id BIGINT PRIMARY KEY,
     tenant_id BIGINT NOT NULL REFERENCES tenant(id),
@@ -81,27 +94,33 @@ CREATE INDEX IF NOT EXISTS idx_content_item_author ON content_item(tenant_id, au
 CREATE INDEX IF NOT EXISTS idx_content_item_visibility ON content_item(visibility) WHERE deleted_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_content_item_tags ON content_item USING GIN(tags);
 CREATE INDEX IF NOT EXISTS idx_content_item_kps ON content_item USING GIN(knowledge_points);
+CREATE INDEX IF NOT EXISTS idx_content_usage_ref_item ON content_usage_ref(tenant_id, item_id);
+CREATE INDEX IF NOT EXISTS idx_content_usage_ref_source ON content_usage_ref(tenant_id, source_scope, source_ref);
 CREATE INDEX IF NOT EXISTS idx_paper_author ON paper(tenant_id, author_id) WHERE deleted_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_paper_item_paper_seq ON paper_item(tenant_id, paper_id, seq);
 
 ALTER TABLE content_category ENABLE ROW LEVEL SECURITY;
 ALTER TABLE content_item ENABLE ROW LEVEL SECURITY;
 ALTER TABLE content_body ENABLE ROW LEVEL SECURITY;
+ALTER TABLE content_usage_ref ENABLE ROW LEVEL SECURITY;
 ALTER TABLE paper ENABLE ROW LEVEL SECURITY;
 ALTER TABLE paper_item ENABLE ROW LEVEL SECURITY;
 
-CREATE POLICY content_category_tenant_rls ON content_category USING (tenant_id = current_setting('app.tenant_id')::BIGINT);
-CREATE POLICY content_item_select_tenant_or_shared_rls ON content_item FOR SELECT USING (tenant_id = current_setting('app.tenant_id')::BIGINT OR visibility = 3);
+CREATE POLICY content_category_tenant_rls ON content_category USING (tenant_id = current_setting('app.tenant_id')::BIGINT) WITH CHECK (tenant_id = current_setting('app.tenant_id')::BIGINT);
+CREATE POLICY content_item_select_tenant_or_shared_rls ON content_item FOR SELECT USING (
+    tenant_id = current_setting('app.tenant_id')::BIGINT OR (visibility = 3 AND status = 2 AND deleted_at IS NULL)
+);
 CREATE POLICY content_item_insert_tenant_rls ON content_item FOR INSERT WITH CHECK (tenant_id = current_setting('app.tenant_id')::BIGINT);
 CREATE POLICY content_item_update_tenant_rls ON content_item FOR UPDATE USING (tenant_id = current_setting('app.tenant_id')::BIGINT) WITH CHECK (tenant_id = current_setting('app.tenant_id')::BIGINT);
 CREATE POLICY content_item_delete_tenant_rls ON content_item FOR DELETE USING (tenant_id = current_setting('app.tenant_id')::BIGINT);
 CREATE POLICY content_body_select_tenant_or_shared_rls ON content_body FOR SELECT USING (
     tenant_id = current_setting('app.tenant_id')::BIGINT OR EXISTS (
-        SELECT 1 FROM content_item ci WHERE ci.id = content_body.item_id AND ci.visibility = 3 AND ci.deleted_at IS NULL
+        SELECT 1 FROM content_item ci WHERE ci.tenant_id = content_body.tenant_id AND ci.id = content_body.item_id AND ci.visibility = 3 AND ci.status = 2 AND ci.deleted_at IS NULL
     )
 );
 CREATE POLICY content_body_insert_tenant_rls ON content_body FOR INSERT WITH CHECK (tenant_id = current_setting('app.tenant_id')::BIGINT);
 CREATE POLICY content_body_update_tenant_rls ON content_body FOR UPDATE USING (tenant_id = current_setting('app.tenant_id')::BIGINT) WITH CHECK (tenant_id = current_setting('app.tenant_id')::BIGINT);
 CREATE POLICY content_body_delete_tenant_rls ON content_body FOR DELETE USING (tenant_id = current_setting('app.tenant_id')::BIGINT);
-CREATE POLICY paper_tenant_rls ON paper USING (tenant_id = current_setting('app.tenant_id')::BIGINT);
-CREATE POLICY paper_item_tenant_rls ON paper_item USING (tenant_id = current_setting('app.tenant_id')::BIGINT);
+CREATE POLICY content_usage_ref_tenant_rls ON content_usage_ref USING (tenant_id = current_setting('app.tenant_id')::BIGINT) WITH CHECK (tenant_id = current_setting('app.tenant_id')::BIGINT);
+CREATE POLICY paper_tenant_rls ON paper USING (tenant_id = current_setting('app.tenant_id')::BIGINT) WITH CHECK (tenant_id = current_setting('app.tenant_id')::BIGINT);
+CREATE POLICY paper_item_tenant_rls ON paper_item USING (tenant_id = current_setting('app.tenant_id')::BIGINT) WITH CHECK (tenant_id = current_setting('app.tenant_id')::BIGINT);

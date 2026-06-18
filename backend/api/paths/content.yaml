@@ -147,17 +147,6 @@
     parameters: [{ $ref: "#/components/parameters/ItemPath" }, { $ref: "#/components/parameters/VersionPath" }]
     requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
-/api/v1/content/items/{item}/{version}/usage:
-  post:
-    tags: [content]
-    summary: 上报内容引用计数
-    operationId: contentIncrementUsage
-    x-chaimir-audience: internal
-    x-chaimir-internal: true
-    security: [{ serviceAuth: [] }]
-    parameters: [{ $ref: "#/components/parameters/ItemPath" }, { $ref: "#/components/parameters/VersionPath" }]
-    requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
-    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
 /api/v1/content/attachments:
   post:
     tags: [content]

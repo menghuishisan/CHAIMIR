@@ -143,7 +143,7 @@ func (s *Service) CreateLesson(ctx context.Context, chapterID int64, req LessonR
 	}); err != nil {
 		return LessonDTO{}, mapCourseError(err)
 	}
-	return lessonDTO(lesson), nil
+	return lessonDTO(lesson)
 }
 
 // GetLessonForUser 读取课时内容。
@@ -167,7 +167,7 @@ func (s *Service) GetLessonForUser(ctx context.Context, lessonID int64) (LessonD
 	}); err != nil {
 		return LessonDTO{}, mapCourseError(err)
 	}
-	return lessonDTO(lesson), nil
+	return lessonDTO(lesson)
 }
 
 // ListLessonsByChapter 查询章节下课时列表。
@@ -192,7 +192,11 @@ func (s *Service) ListLessonsByChapter(ctx context.Context, chapterID int64) ([]
 	}
 	out := make([]LessonDTO, 0, len(lessons))
 	for _, lesson := range lessons {
-		out = append(out, lessonDTO(lesson))
+		dto, err := lessonDTO(lesson)
+		if err != nil {
+			return nil, mapCourseError(err)
+		}
+		out = append(out, dto)
 	}
 	return out, nil
 }
@@ -230,7 +234,7 @@ func (s *Service) UpdateLesson(ctx context.Context, lessonID int64, req LessonRe
 	}); err != nil {
 		return LessonDTO{}, mapCourseError(err)
 	}
-	return lessonDTO(lesson), nil
+	return lessonDTO(lesson)
 }
 
 // SetLessonContent 更新课时绑定的内容引用。
@@ -265,7 +269,7 @@ func (s *Service) SetLessonContent(ctx context.Context, lessonID int64, req Less
 	}); err != nil {
 		return LessonDTO{}, mapCourseError(err)
 	}
-	return lessonDTO(lesson), nil
+	return lessonDTO(lesson)
 }
 
 // DeleteLesson 删除课时。
@@ -453,12 +457,20 @@ func (s *Service) GetCourseOutline(ctx context.Context, courseID int64) (Outline
 	}); err != nil {
 		return OutlineDTO{}, mapCourseError(err)
 	}
-	out := OutlineDTO{Course: courseDTO(course)}
+	courseDTOValue, err := courseDTO(course)
+	if err != nil {
+		return OutlineDTO{}, mapCourseError(err)
+	}
+	out := OutlineDTO{Course: courseDTOValue}
 	for _, chapter := range chapters {
 		out.Chapters = append(out.Chapters, chapterDTO(chapter))
 	}
 	for _, lesson := range lessons {
-		out.Lessons = append(out.Lessons, lessonDTO(lesson))
+		dto, err := lessonDTO(lesson)
+		if err != nil {
+			return OutlineDTO{}, mapCourseError(err)
+		}
+		out.Lessons = append(out.Lessons, dto)
 	}
 	for _, progress := range progresses {
 		out.Progress = append(out.Progress, progressDTO(progress))

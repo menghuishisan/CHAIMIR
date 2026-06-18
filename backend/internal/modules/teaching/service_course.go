@@ -43,7 +43,11 @@ func (s *Service) ListCourses(ctx context.Context, filter CourseListFilter) ([]C
 	}
 	out := make([]CourseDTO, 0, len(courses))
 	for _, course := range courses {
-		out = append(out, courseDTO(course))
+		dto, err := courseDTO(course)
+		if err != nil {
+			return nil, 0, 0, 0, mapCourseError(err)
+		}
+		out = append(out, dto)
 	}
 	return out, total, filter.Page, filter.Size, nil
 }
@@ -72,7 +76,7 @@ func (s *Service) CreateCourse(ctx context.Context, req CourseRequest) (CourseDT
 	if err := s.writeAudit(ctx, id.TenantID, id.AccountID, contracts.RoleNumTeacher, "teaching.course.create", auditTargetCourse, course.ID, map[string]any{"name": course.Name}); err != nil {
 		return CourseDTO{}, err
 	}
-	return courseDTO(course), nil
+	return courseDTO(course)
 }
 
 // UpdateCourse 更新课程基础信息。
@@ -100,7 +104,7 @@ func (s *Service) UpdateCourse(ctx context.Context, courseID int64, req CourseRe
 	}); err != nil {
 		return CourseDTO{}, mapCourseError(err)
 	}
-	return courseDTO(course), nil
+	return courseDTO(course)
 }
 
 // CloneCourse 克隆本租户课程或共享课程库课程为当前教师的私有草稿。
@@ -138,7 +142,7 @@ func (s *Service) CloneCourse(ctx context.Context, courseID int64, req CloneCour
 	if err := s.writeAudit(ctx, id.TenantID, id.AccountID, contracts.RoleNumTeacher, "teaching.course.clone", auditTargetCourse, cloned.ID, map[string]any{"source_course_id": courseID}); err != nil {
 		return CourseDTO{}, err
 	}
-	return courseDTO(cloned), nil
+	return courseDTO(cloned)
 }
 
 // PublishCourse 发布课程。
@@ -176,7 +180,7 @@ func (s *Service) ShareCourse(ctx context.Context, courseID int64) (CourseDTO, e
 	}); err != nil {
 		return CourseDTO{}, mapCourseError(err)
 	}
-	return courseDTO(course), nil
+	return courseDTO(course)
 }
 
 // RefreshInviteCode 刷新课程邀请码。
@@ -203,7 +207,7 @@ func (s *Service) RefreshInviteCode(ctx context.Context, courseID int64) (Course
 	}); err != nil {
 		return CourseDTO{}, mapCourseError(err)
 	}
-	return courseDTO(course), nil
+	return courseDTO(course)
 }
 
 // AdvanceCourseStatusesOnce 按课程起止时间推进 published/running/ended 状态。
@@ -275,7 +279,7 @@ func (s *Service) setCourseStatus(ctx context.Context, courseID int64, status in
 	if err := s.writeAudit(ctx, id.TenantID, id.AccountID, contracts.RoleNumTeacher, action, auditTargetCourse, course.ID, map[string]any{"status": status}); err != nil {
 		return CourseDTO{}, err
 	}
-	return courseDTO(course), nil
+	return courseDTO(course)
 }
 
 // cloneCourseGraph 在同一个事务中复制课程、章节、课时、作业和作业题目引用。
@@ -301,13 +305,18 @@ func (s *Service) cloneCourseGraph(ctx context.Context, tx TxStore, source Cours
 		CoverURL:    source.CoverURL,
 		Semester:    source.Semester,
 		Credits:     source.Credits,
-		Schedule:    cloneMap(source.Schedule),
+		Schedule:    nil,
 		StartAt:     source.StartAt,
 		EndAt:       source.EndAt,
 		InviteCode:  inviteCode,
 		Status:      CourseStatusDraft,
 		Visibility:  CourseVisibilityPrivate,
 	}
+	schedule, err := cloneMap(source.Schedule)
+	if err != nil {
+		return Course{}, err
+	}
+	cloned.Schedule = schedule
 	created, err := tx.CreateCourse(ctx, cloned)
 	if err != nil {
 		return Course{}, err
@@ -340,7 +349,11 @@ func (s *Service) cloneChaptersAndLessons(ctx context.Context, tx TxStore, sourc
 			return nil, err
 		}
 		for _, lesson := range lessons {
-			if _, err := tx.CreateLesson(ctx, Lesson{ID: s.ids.Generate(), TenantID: targetTenantID, ChapterID: clonedChapter.ID, Title: lesson.Title, ContentType: lesson.ContentType, ContentRef: cloneMap(lesson.ContentRef), Sort: lesson.Sort}); err != nil {
+			contentRef, err := cloneMap(lesson.ContentRef)
+			if err != nil {
+				return nil, err
+			}
+			if _, err := tx.CreateLesson(ctx, Lesson{ID: s.ids.Generate(), TenantID: targetTenantID, ChapterID: clonedChapter.ID, Title: lesson.Title, ContentType: lesson.ContentType, ContentRef: contentRef, Sort: lesson.Sort}); err != nil {
 				return nil, err
 			}
 		}
@@ -362,7 +375,11 @@ func (s *Service) cloneAssignments(ctx context.Context, tx TxStore, source Cours
 				return apperr.ErrTeachingAssignmentInvalid
 			}
 		}
-		clonedAssignment, err := tx.CreateAssignment(ctx, Assignment{ID: s.ids.Generate(), TenantID: targetTenantID, CourseID: targetCourseID, Title: assignment.Title, ChapterID: targetChapterID, DueAt: assignment.DueAt, MaxAttempts: assignment.MaxAttempts, LatePolicy: assignment.LatePolicy, LatePenalty: cloneMap(assignment.LatePenalty), Status: AssignmentStatusDraft})
+		latePenalty, err := cloneMap(assignment.LatePenalty)
+		if err != nil {
+			return err
+		}
+		clonedAssignment, err := tx.CreateAssignment(ctx, Assignment{ID: s.ids.Generate(), TenantID: targetTenantID, CourseID: targetCourseID, Title: assignment.Title, ChapterID: targetChapterID, DueAt: assignment.DueAt, MaxAttempts: assignment.MaxAttempts, LatePolicy: assignment.LatePolicy, LatePenalty: latePenalty, Status: AssignmentStatusDraft})
 		if err != nil {
 			return err
 		}
@@ -372,12 +389,13 @@ func (s *Service) cloneAssignments(ctx context.Context, tx TxStore, source Cours
 		}
 		clonedItems := make([]AssignmentItem, 0, len(items))
 		for _, item := range items {
-			if err := s.content.IncrementUsage(ctx, targetTenantID, contracts.ContentItemRef{ItemCode: item.ItemCode, ItemVersion: item.ItemVersion}); err != nil {
-				return apperr.ErrTeachingAssignmentInvalid.WithCause(err)
-			}
 			clonedItems = append(clonedItems, AssignmentItem{ID: s.ids.Generate(), TenantID: targetTenantID, AssignmentID: clonedAssignment.ID, ItemCode: item.ItemCode, ItemVersion: item.ItemVersion, Score: item.Score, Seq: item.Seq, GradingMode: item.GradingMode, JudgerCode: item.JudgerCode})
 		}
-		if _, err := tx.ReplaceAssignmentItems(ctx, targetTenantID, clonedAssignment.ID, clonedItems); err != nil {
+		persistedItems, err := tx.ReplaceAssignmentItems(ctx, targetTenantID, clonedAssignment.ID, clonedItems)
+		if err != nil {
+			return err
+		}
+		if err := s.refreshAssignmentUsageRefs(ctx, targetTenantID, clonedAssignment.ID, persistedItems); err != nil {
 			return err
 		}
 	}

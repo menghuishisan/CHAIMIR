@@ -23,7 +23,11 @@ func (s *Service) GetJudgeSpec(ctx context.Context, tenantID int64, itemCode, it
 		spec.SuiteRef = stringFromAny(raw["suite_ref"])
 		spec.MaxScore = int32FromAny(raw["max_score"])
 		if expectation, ok := raw["expectation"].(map[string]any); ok {
-			spec.Expectation = cloneMap(expectation)
+			cloned, err := cloneMapStrict(expectation)
+			if err != nil {
+				return contracts.ContentJudgeSpec{}, apperr.ErrContentBodyInvalid.WithCause(err)
+			}
+			spec.Expectation = cloned
 		}
 	}
 	if spec.MaxScore == 0 {
@@ -35,7 +39,11 @@ func (s *Service) GetJudgeSpec(ctx context.Context, tenantID int64, itemCode, it
 	if spec.Expectation == nil {
 		spec.Expectation = map[string]any{}
 		if expectation, ok := item.Body["expectation"].(map[string]any); ok {
-			spec.Expectation = cloneMap(expectation)
+			cloned, err := cloneMapStrict(expectation)
+			if err != nil {
+				return contracts.ContentJudgeSpec{}, apperr.ErrContentBodyInvalid.WithCause(err)
+			}
+			spec.Expectation = cloned
 		}
 	}
 	if spec.JudgerCode == "" || spec.MaxScore <= 0 {
@@ -57,7 +65,11 @@ func (s *Service) SystemImportContent(ctx context.Context, req contracts.Content
 	if err != nil {
 		return contracts.ContentItemSnapshot{}, err
 	}
-	item := ItemWithBody{Item: Item{ID: s.ids.Generate(), TenantID: tenantID, Code: httpReq.Code, Version: httpReq.Version, Type: httpReq.Type, Title: httpReq.Title, CategoryID: httpReq.CategoryID, Difficulty: httpReq.Difficulty, Tags: httpReq.Tags, KnowledgePoints: httpReq.KnowledgePoints, AuthorID: httpReq.AuthorID, AuthorType: httpReq.AuthorType, Visibility: httpReq.Visibility, Status: StatusDraft}, Body: cloneMap(httpReq.Body), SensitiveFields: httpReq.SensitiveFields}
+	body, err := jsonx.CloneObjectStrict(httpReq.Body)
+	if err != nil {
+		return contracts.ContentItemSnapshot{}, apperr.ErrContentBodyInvalid.WithCause(err)
+	}
+	item := ItemWithBody{Item: Item{ID: s.ids.Generate(), TenantID: tenantID, Code: httpReq.Code, Version: httpReq.Version, Type: httpReq.Type, Title: httpReq.Title, CategoryID: httpReq.CategoryID, Difficulty: httpReq.Difficulty, Tags: httpReq.Tags, KnowledgePoints: httpReq.KnowledgePoints, AuthorID: httpReq.AuthorID, AuthorType: httpReq.AuthorType, Visibility: httpReq.Visibility, Status: StatusDraft}, Body: body, SensitiveFields: httpReq.SensitiveFields}
 	if httpReq.AutoPublish {
 		item.Status = StatusPublished
 	}
@@ -80,7 +92,7 @@ func (s *Service) SystemImportContent(ctx context.Context, req contracts.Content
 	if err := s.writeAudit(ctx, tenantID, 0, audit.ActorRoleSystem, "content.system_import", contentAuditTargetItem, created.ID, detail); err != nil {
 		return contracts.ContentItemSnapshot{}, err
 	}
-	return contractSnapshot(created), nil
+	return contractSnapshot(created)
 }
 
 // SystemImportContentFromHTTP 适配内部 HTTP 系统建题入口。

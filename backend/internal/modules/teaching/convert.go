@@ -10,8 +10,12 @@ import (
 )
 
 // courseDTO 将课程领域模型转换为 HTTP 响应结构。
-func courseDTO(c Course) CourseDTO {
-	return CourseDTO{ID: c.ID, TenantID: c.TenantID, TeacherID: c.TeacherID, Name: c.Name, Description: c.Description, Type: c.Type, Difficulty: c.Difficulty, CoverURL: c.CoverURL, Semester: c.Semester, Credits: c.Credits, Schedule: cloneMap(c.Schedule), StartAt: formatTime(c.StartAt), EndAt: formatTime(c.EndAt), InviteCode: c.InviteCode, Status: c.Status, Visibility: c.Visibility, CreatedAt: formatTime(c.CreatedAt), UpdatedAt: formatTime(c.UpdatedAt)}
+func courseDTO(c Course) (CourseDTO, error) {
+	schedule, err := cloneMap(c.Schedule)
+	if err != nil {
+		return CourseDTO{}, err
+	}
+	return CourseDTO{ID: c.ID, TenantID: c.TenantID, TeacherID: c.TeacherID, Name: c.Name, Description: c.Description, Type: c.Type, Difficulty: c.Difficulty, CoverURL: c.CoverURL, Semester: c.Semester, Credits: c.Credits, Schedule: schedule, StartAt: formatTime(c.StartAt), EndAt: formatTime(c.EndAt), InviteCode: c.InviteCode, Status: c.Status, Visibility: c.Visibility, CreatedAt: formatTime(c.CreatedAt), UpdatedAt: formatTime(c.UpdatedAt)}, nil
 }
 
 // chapterDTO 将章节领域模型转换为 HTTP 响应结构。
@@ -20,8 +24,12 @@ func chapterDTO(c Chapter) ChapterDTO {
 }
 
 // lessonDTO 将课时领域模型转换为 HTTP 响应结构。
-func lessonDTO(l Lesson) LessonDTO {
-	return LessonDTO{ID: l.ID, ChapterID: l.ChapterID, Title: l.Title, ContentType: l.ContentType, ContentRef: cloneMap(l.ContentRef), Sort: l.Sort, CreatedAt: formatTime(l.CreatedAt), UpdatedAt: formatTime(l.UpdatedAt)}
+func lessonDTO(l Lesson) (LessonDTO, error) {
+	contentRef, err := cloneMap(l.ContentRef)
+	if err != nil {
+		return LessonDTO{}, err
+	}
+	return LessonDTO{ID: l.ID, ChapterID: l.ChapterID, Title: l.Title, ContentType: l.ContentType, ContentRef: contentRef, Sort: l.Sort, CreatedAt: formatTime(l.CreatedAt), UpdatedAt: formatTime(l.UpdatedAt)}, nil
 }
 
 // memberDTO 将课程成员关系转换为 HTTP 响应结构。
@@ -30,22 +38,38 @@ func memberDTO(m CourseMember) MemberDTO {
 }
 
 // assignmentDTO 将作业外壳转换为 HTTP 响应结构。
-func assignmentDTO(a Assignment) AssignmentDTO {
-	return AssignmentDTO{ID: a.ID, CourseID: a.CourseID, Title: a.Title, ChapterID: a.ChapterID, DueAt: formatTime(a.DueAt), MaxAttempts: a.MaxAttempts, LatePolicy: a.LatePolicy, LatePenalty: cloneMap(a.LatePenalty), Status: a.Status, CreatedAt: formatTime(a.CreatedAt), UpdatedAt: formatTime(a.UpdatedAt)}
+func assignmentDTO(a Assignment) (AssignmentDTO, error) {
+	latePenalty, err := cloneMap(a.LatePenalty)
+	if err != nil {
+		return AssignmentDTO{}, err
+	}
+	return AssignmentDTO{ID: a.ID, CourseID: a.CourseID, Title: a.Title, ChapterID: a.ChapterID, DueAt: formatTime(a.DueAt), MaxAttempts: a.MaxAttempts, LatePolicy: a.LatePolicy, LatePenalty: latePenalty, Status: a.Status, CreatedAt: formatTime(a.CreatedAt), UpdatedAt: formatTime(a.UpdatedAt)}, nil
 }
 
 // assignmentItemDTO 将作业题目引用和 M5 题面快照组合为响应结构。
-func assignmentItemDTO(item AssignmentItemFace) AssignmentItemDTO {
-	return AssignmentItemDTO{ID: item.ID, ItemCode: item.ItemCode, ItemVersion: item.ItemVersion, Score: item.Score, Seq: item.Seq, GradingMode: item.GradingMode, JudgerCode: item.JudgerCode, Title: item.Title, Type: item.Type, Difficulty: item.Difficulty, Body: cloneMap(item.Body)}
+func assignmentItemDTO(item AssignmentItemFace) (AssignmentItemDTO, error) {
+	body, err := cloneMap(item.Body)
+	if err != nil {
+		return AssignmentItemDTO{}, err
+	}
+	return AssignmentItemDTO{ID: item.ID, ItemCode: item.ItemCode, ItemVersion: item.ItemVersion, Score: item.Score, Seq: item.Seq, GradingMode: item.GradingMode, JudgerCode: item.JudgerCode, Title: item.Title, Type: item.Type, Difficulty: item.Difficulty, Body: body}, nil
 }
 
 // assignmentDetailDTO 将作业详情转换为学生或教师读取的完整响应。
-func assignmentDetailDTO(detail AssignmentDetail) AssignmentDetailDTO {
+func assignmentDetailDTO(detail AssignmentDetail) (AssignmentDetailDTO, error) {
 	items := make([]AssignmentItemDTO, 0, len(detail.Items))
 	for _, item := range detail.Items {
-		items = append(items, assignmentItemDTO(item))
+		dto, err := assignmentItemDTO(item)
+		if err != nil {
+			return AssignmentDetailDTO{}, err
+		}
+		items = append(items, dto)
 	}
-	return AssignmentDetailDTO{Assignment: assignmentDTO(detail.Assignment), Items: items}
+	assignment, err := assignmentDTO(detail.Assignment)
+	if err != nil {
+		return AssignmentDetailDTO{}, err
+	}
+	return AssignmentDetailDTO{Assignment: assignment, Items: items}, nil
 }
 
 // assignmentItemFaces 将纯作业题目引用提升为无题面快照的详情项。
@@ -57,14 +81,22 @@ func assignmentItemFaces(items []AssignmentItem) []AssignmentItemFace {
 	return out
 }
 
-// submissionDTO 将提交记录转换为 HTTP 响应结构。
-func submissionDTO(s Submission) SubmissionDTO {
-	return SubmissionDTO{ID: s.ID, AssignmentID: s.AssignmentID, StudentID: s.StudentID, AttemptNo: s.AttemptNo, ContentRef: cloneMap(s.ContentRef), JudgeTaskRef: s.JudgeTaskRef, AutoScore: s.AutoScore, ManualScore: s.ManualScore, FinalScore: s.FinalScore, Comment: s.Comment, IsLate: s.IsLate, Status: s.Status, SubmittedAt: formatTime(s.SubmittedAt)}
+// submissionDTO 将提交记录转换为 HTTP 响应结构,过滤对象存储 key/hash 等内部细节。
+func submissionDTO(s Submission) (SubmissionDTO, error) {
+	content, err := publicSubmissionContent(s.ContentRef)
+	if err != nil {
+		return SubmissionDTO{}, err
+	}
+	return SubmissionDTO{ID: s.ID, AssignmentID: s.AssignmentID, StudentID: s.StudentID, AttemptNo: s.AttemptNo, Content: content, JudgeTaskRef: s.JudgeTaskRef, AutoScore: s.AutoScore, ManualScore: s.ManualScore, FinalScore: s.FinalScore, Comment: s.Comment, IsLate: s.IsLate, Status: s.Status, SubmittedAt: formatTime(s.SubmittedAt)}, nil
 }
 
 // draftDTO 将服务端权威作答草稿转换为 HTTP 响应结构。
-func draftDTO(d SubmissionDraft) DraftDTO {
-	return DraftDTO{AssignmentID: d.AssignmentID, StudentID: d.StudentID, Content: cloneMap(d.Content), UpdatedAt: formatTime(d.UpdatedAt), Exists: true}
+func draftDTO(d SubmissionDraft) (DraftDTO, error) {
+	content, err := cloneMap(d.Content)
+	if err != nil {
+		return DraftDTO{}, err
+	}
+	return DraftDTO{AssignmentID: d.AssignmentID, StudentID: d.StudentID, Content: content, UpdatedAt: formatTime(d.UpdatedAt), Exists: true}, nil
 }
 
 // progressDTO 将学习进度转换为 HTTP 响应结构。
@@ -126,11 +158,37 @@ func finalTotal(g CourseGrade) float64 {
 }
 
 // cloneMap 深拷贝 JSON 对象,避免响应转换后调用方修改内部快照。
-func cloneMap(in map[string]any) map[string]any {
-	if in == nil {
-		return map[string]any{}
+func cloneMap(in map[string]any) (map[string]any, error) {
+	return jsonx.CloneObjectStrict(in)
+}
+
+// publicSubmissionContent 深拷贝提交内容并移除内部对象存储和哈希字段。
+func publicSubmissionContent(in map[string]any) (map[string]any, error) {
+	cloned, err := cloneMap(in)
+	if err != nil {
+		return nil, err
 	}
-	return jsonx.CloneObject(in)
+	stripInternalSubmissionFields(cloned)
+	return cloned, nil
+}
+
+// stripInternalSubmissionFields 递归移除不应出现在用户响应中的存储实现细节。
+func stripInternalSubmissionFields(value any) {
+	switch node := value.(type) {
+	case map[string]any:
+		for key, child := range node {
+			switch key {
+			case "code_storage_key", "code_hash", "object_key", "storage_key", "bucket", "object_ref":
+				delete(node, key)
+				continue
+			}
+			stripInternalSubmissionFields(child)
+		}
+	case []any:
+		for _, child := range node {
+			stripInternalSubmissionFields(child)
+		}
+	}
 }
 
 // formatTime 输出统一的 UTC RFC3339 时间字符串。

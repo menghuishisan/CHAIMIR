@@ -37,7 +37,7 @@ WHERE tenant_id = $1 AND id = $2 AND deleted_at IS NULL;
 -- name: GetContentItemByRef :one
 SELECT id, tenant_id, code, version, type, title, category_id, difficulty, tags, knowledge_points, author_id, author_type, visibility, status, usage_count, version_hash, created_at, updated_at, deleted_at
 FROM content_item
-WHERE code = $1 AND version = $2 AND deleted_at IS NULL AND (tenant_id = $3 OR visibility = 3)
+WHERE code = $1 AND version = $2 AND deleted_at IS NULL AND (tenant_id = $3 OR (visibility = 3 AND status = 2))
 ORDER BY CASE WHEN tenant_id = $3 THEN 0 ELSE 1 END
 LIMIT 1;
 
@@ -46,7 +46,7 @@ SELECT i.id, i.tenant_id, i.code, i.version, i.type, i.title, i.category_id, i.d
        b.body, b.sensitive_fields
 FROM content_item i
 JOIN content_body b ON b.tenant_id = i.tenant_id AND b.item_id = i.id
-WHERE i.code = $1 AND i.version = $2 AND i.deleted_at IS NULL AND (i.tenant_id = $3 OR i.visibility = 3)
+WHERE i.code = $1 AND i.version = $2 AND i.deleted_at IS NULL AND (i.tenant_id = $3 OR (i.visibility = 3 AND i.status = 2))
 ORDER BY CASE WHEN i.tenant_id = $3 THEN 0 ELSE 1 END
 LIMIT 1;
 
@@ -61,7 +61,7 @@ WHERE i.tenant_id = $1 AND i.id = $2 AND i.deleted_at IS NULL;
 SELECT id, tenant_id, code, version, type, title, category_id, difficulty, tags, knowledge_points, author_id, author_type, visibility, status, usage_count, version_hash, created_at, updated_at, deleted_at
 FROM content_item
 WHERE deleted_at IS NULL
-  AND (tenant_id = $1 OR ($11::boolean AND visibility = 3))
+  AND (tenant_id = $1 OR ($11::boolean AND visibility = 3 AND status = 2))
   AND ($2::smallint = 0 OR type = $2)
   AND ($3::bigint = 0 OR category_id = $3)
   AND ($4::smallint = 0 OR difficulty = $4)
@@ -71,14 +71,15 @@ WHERE deleted_at IS NULL
   AND ($8::smallint = 0 OR visibility = $8)
   AND ($9::smallint = 0 OR status = $9)
   AND ($10::bigint = 0 OR author_id = $10)
+  AND (visibility <> 1 OR author_id = $12)
 ORDER BY updated_at DESC, id DESC
-LIMIT $12 OFFSET $13;
+LIMIT $13 OFFSET $14;
 
 -- name: CountContentItems :one
 SELECT COUNT(*)::bigint
 FROM content_item
 WHERE deleted_at IS NULL
-  AND (tenant_id = $1 OR ($11::boolean AND visibility = 3))
+  AND (tenant_id = $1 OR ($11::boolean AND visibility = 3 AND status = 2))
   AND ($2::smallint = 0 OR type = $2)
   AND ($3::bigint = 0 OR category_id = $3)
   AND ($4::smallint = 0 OR difficulty = $4)
@@ -87,12 +88,13 @@ WHERE deleted_at IS NULL
   AND ($7::text = '' OR title ILIKE '%' || $7 || '%' OR code ILIKE '%' || $7 || '%')
   AND ($8::smallint = 0 OR visibility = $8)
   AND ($9::smallint = 0 OR status = $9)
-  AND ($10::bigint = 0 OR author_id = $10);
+  AND ($10::bigint = 0 OR author_id = $10)
+  AND (visibility <> 1 OR author_id = $12);
 
 -- name: ListContentVersions :many
 SELECT id, tenant_id, code, version, type, title, category_id, difficulty, tags, knowledge_points, author_id, author_type, visibility, status, usage_count, version_hash, created_at, updated_at, deleted_at
 FROM content_item
-WHERE code = $1 AND deleted_at IS NULL AND (tenant_id = $2 OR visibility = 3)
+WHERE code = $1 AND deleted_at IS NULL AND (tenant_id = $2 OR (visibility = 3 AND status = 2))
 ORDER BY created_at DESC, id DESC;
 
 -- name: PublishContentItem :one
@@ -119,10 +121,34 @@ SET visibility = $3, updated_at = now()
 WHERE tenant_id = $1 AND id = $2 AND status = 2 AND deleted_at IS NULL
 RETURNING id, tenant_id, code, version, type, title, category_id, difficulty, tags, knowledge_points, author_id, author_type, visibility, status, usage_count, version_hash, created_at, updated_at, deleted_at;
 
--- name: IncrementContentUsage :one
-UPDATE content_item
-SET usage_count = usage_count + 1, updated_at = now()
-WHERE code = $1 AND version = $2 AND tenant_id = $3 AND status = 2 AND deleted_at IS NULL
+-- name: GetPublishedContentItemForUsage :one
+SELECT id, tenant_id, code, version, type, title, category_id, difficulty, tags, knowledge_points, author_id, author_type, visibility, status, usage_count, version_hash, created_at, updated_at, deleted_at
+FROM content_item
+WHERE code = $1 AND version = $2 AND tenant_id = $3 AND status = 2 AND deleted_at IS NULL;
+
+-- name: DeleteContentUsageRefsBySource :exec
+DELETE FROM content_usage_ref
+WHERE tenant_id = $1 AND source_scope = $2 AND source_ref = $3;
+
+-- name: ListContentUsageItemIDsBySource :many
+SELECT DISTINCT item_id
+FROM content_usage_ref
+WHERE tenant_id = $1 AND source_scope = $2 AND source_ref = $3;
+
+-- name: CreateContentUsageRef :one
+INSERT INTO content_usage_ref (id, tenant_id, item_id, item_code, item_version, source_scope, source_ref, created_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, now())
+ON CONFLICT (tenant_id, source_scope, source_ref, item_code, item_version) DO UPDATE SET item_id = EXCLUDED.item_id
+RETURNING id, tenant_id, item_id, item_code, item_version, source_scope, source_ref, created_at;
+
+-- name: RefreshContentUsageCount :one
+UPDATE content_item AS ci
+SET usage_count = (
+    SELECT COUNT(*)::int
+    FROM content_usage_ref r
+    WHERE r.tenant_id = ci.tenant_id AND r.item_id = ci.id
+), updated_at = now()
+WHERE ci.tenant_id = $1 AND ci.id = $2
 RETURNING id, tenant_id, code, version, type, title, category_id, difficulty, tags, knowledge_points, author_id, author_type, visibility, status, usage_count, version_hash, created_at, updated_at, deleted_at;
 
 -- name: CreateContentCategory :one

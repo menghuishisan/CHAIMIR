@@ -150,6 +150,20 @@ func (s *Storage) Get(ctx context.Context, bucket, key string) (io.ReadCloser, e
 	return obj, nil
 }
 
+// Delete 删除指定 bucket/key 对象,供业务在跨资源事务失败时清理已写对象。
+func (s *Storage) Delete(ctx context.Context, bucket, key string) error {
+	if s == nil || s.client == nil {
+		return fmt.Errorf("对象存储客户端未初始化")
+	}
+	if !safeObjectRefBucket(bucket) || !safeObjectRefKey(key) {
+		return ErrObjectRefInvalid
+	}
+	if err := s.client.RemoveObject(ctx, bucket, key, minio.RemoveObjectOptions{}); err != nil {
+		return fmt.Errorf("删除对象 %s/%s 失败: %w", bucket, key, err)
+	}
+	return nil
+}
+
 // BucketCode 返回代码桶名。
 func (s *Storage) BucketCode() string { return s.bucketCode }
 

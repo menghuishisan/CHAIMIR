@@ -10,10 +10,13 @@ import type {
   ChapterRequest,
   Lesson,
   LessonRequest,
+  Progress,
+  ProgressRequest,
   JoinCourseRequest,
   Assignment,
   AssignmentRequest,
   AssignmentDetail,
+  Draft,
   Submission,
   SubmitRequest,
   PaginatedResponse,
@@ -28,19 +31,12 @@ export class TeachingApi {
    * 获取课程列表
    */
   async getCourses(params?: {
-    teacher_id?: string
+    role?: 'teacher' | 'student'
     status?: number
     page?: number
     size?: number
   }): Promise<PaginatedResponse<Course>> {
     return this.client.get('/teaching/courses', params)
-  }
-
-  /**
-   * 获取课程详情
-   */
-  async getCourse(courseId: string): Promise<Course> {
-    return this.client.get(`/teaching/courses/${courseId}`)
   }
 
   /**
@@ -54,14 +50,7 @@ export class TeachingApi {
    * 更新课程
    */
   async updateCourse(courseId: string, data: CourseRequest): Promise<Course> {
-    return this.client.put(`/teaching/courses/${courseId}`, data)
-  }
-
-  /**
-   * 删除课程
-   */
-  async deleteCourse(courseId: string): Promise<void> {
-    return this.client.delete(`/teaching/courses/${courseId}`)
+    return this.client.patch(`/teaching/courses/${courseId}`, data)
   }
 
   /**
@@ -97,15 +86,15 @@ export class TeachingApi {
   /**
    * 更新章节
    */
-  async updateChapter(chapterId: string, data: ChapterRequest): Promise<Chapter> {
-    return this.client.put(`/teaching/chapters/${chapterId}`, data)
+  async updateChapter(courseId: string, chapterId: string, data: ChapterRequest): Promise<Chapter> {
+    return this.client.patch(`/teaching/courses/${courseId}/chapters/${chapterId}`, data)
   }
 
   /**
    * 删除章节
    */
-  async deleteChapter(chapterId: string): Promise<void> {
-    return this.client.delete(`/teaching/chapters/${chapterId}`)
+  async deleteChapter(courseId: string, chapterId: string): Promise<void> {
+    return this.client.delete(`/teaching/courses/${courseId}/chapters/${chapterId}`)
   }
 
   // ===== 课时 =====
@@ -120,36 +109,25 @@ export class TeachingApi {
   /**
    * 更新课时
    */
-  async updateLesson(lessonId: string, data: LessonRequest): Promise<Lesson> {
-    return this.client.put(`/teaching/lessons/${lessonId}`, data)
+  async updateLesson(chapterId: string, lessonId: string, data: LessonRequest): Promise<Lesson> {
+    return this.client.patch(`/teaching/chapters/${chapterId}/lessons/${lessonId}`, data)
   }
 
   /**
    * 删除课时
    */
-  async deleteLesson(lessonId: string): Promise<void> {
-    return this.client.delete(`/teaching/lessons/${lessonId}`)
+  async deleteLesson(chapterId: string, lessonId: string): Promise<void> {
+    return this.client.delete(`/teaching/chapters/${chapterId}/lessons/${lessonId}`)
   }
 
   /**
-   * 标记课时完成
+   * 上报课时学习进度
    */
-  async completeLesson(lessonId: string): Promise<void> {
-    return this.client.post(`/teaching/lessons/${lessonId}/complete`)
+  async reportProgress(lessonId: string, data: ProgressRequest): Promise<Progress> {
+    return this.client.post(`/teaching/lessons/${lessonId}/progress`, data)
   }
 
   // ===== 作业 =====
-
-  /**
-   * 获取作业列表
-   */
-  async getAssignments(courseId: string, params?: {
-    status?: number
-    page?: number
-    size?: number
-  }): Promise<PaginatedResponse<Assignment>> {
-    return this.client.get(`/teaching/courses/${courseId}/assignments`, params)
-  }
 
   /**
    * 获取作业详情（含题目列表）
@@ -161,28 +139,21 @@ export class TeachingApi {
   /**
    * 创建作业
    */
-  async createAssignment(courseId: string, data: AssignmentRequest): Promise<Assignment> {
+  async createAssignment(courseId: string, data: AssignmentRequest): Promise<AssignmentDetail> {
     return this.client.post(`/teaching/courses/${courseId}/assignments`, data)
   }
 
   /**
    * 更新作业
    */
-  async updateAssignment(assignmentId: string, data: AssignmentRequest): Promise<Assignment> {
-    return this.client.put(`/teaching/assignments/${assignmentId}`, data)
-  }
-
-  /**
-   * 删除作业
-   */
-  async deleteAssignment(assignmentId: string): Promise<void> {
-    return this.client.delete(`/teaching/assignments/${assignmentId}`)
+  async updateAssignment(assignmentId: string, data: AssignmentRequest): Promise<AssignmentDetail> {
+    return this.client.patch(`/teaching/assignments/${assignmentId}`, data)
   }
 
   /**
    * 发布作业
    */
-  async publishAssignment(assignmentId: string): Promise<void> {
+  async publishAssignment(assignmentId: string): Promise<Assignment> {
     return this.client.post(`/teaching/assignments/${assignmentId}/publish`)
   }
 
@@ -192,8 +163,6 @@ export class TeachingApi {
    * 获取学生提交列表
    */
   async getSubmissions(assignmentId: string, params?: {
-    student_id?: string
-    status?: number
     page?: number
     size?: number
   }): Promise<PaginatedResponse<Submission>> {
@@ -217,14 +186,14 @@ export class TeachingApi {
   /**
    * 保存草稿
    */
-  async saveDraft(assignmentId: string, data: { content: Record<string, any> }): Promise<void> {
+  async saveDraft(assignmentId: string, data: { content: Record<string, any> }): Promise<{ updated_at: string }> {
     return this.client.post(`/teaching/assignments/${assignmentId}/draft`, data)
   }
 
   /**
    * 获取草稿
    */
-  async getDraft(assignmentId: string): Promise<{ content: Record<string, any> }> {
+  async getDraft(assignmentId: string): Promise<Draft> {
     return this.client.get(`/teaching/assignments/${assignmentId}/draft`)
   }
 }

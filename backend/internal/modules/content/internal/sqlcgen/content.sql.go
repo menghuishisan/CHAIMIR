@@ -15,7 +15,7 @@ const countContentItems = `-- name: CountContentItems :one
 SELECT COUNT(*)::bigint
 FROM content_item
 WHERE deleted_at IS NULL
-  AND (tenant_id = $1 OR ($11::boolean AND visibility = 3))
+  AND (tenant_id = $1 OR ($11::boolean AND visibility = 3 AND status = 2))
   AND ($2::smallint = 0 OR type = $2)
   AND ($3::bigint = 0 OR category_id = $3)
   AND ($4::smallint = 0 OR difficulty = $4)
@@ -25,6 +25,7 @@ WHERE deleted_at IS NULL
   AND ($8::smallint = 0 OR visibility = $8)
   AND ($9::smallint = 0 OR status = $9)
   AND ($10::bigint = 0 OR author_id = $10)
+  AND (visibility <> 1 OR author_id = $12)
 `
 
 type CountContentItemsParams struct {
@@ -39,6 +40,7 @@ type CountContentItemsParams struct {
 	Column9  int16  `json:"column_9"`
 	Column10 int64  `json:"column_10"`
 	Column11 bool   `json:"column_11"`
+	AuthorID int64  `json:"author_id"`
 }
 
 func (q *Queries) CountContentItems(ctx context.Context, arg CountContentItemsParams) (int64, error) {
@@ -54,6 +56,7 @@ func (q *Queries) CountContentItems(ctx context.Context, arg CountContentItemsPa
 		arg.Column9,
 		arg.Column10,
 		arg.Column11,
+		arg.AuthorID,
 	)
 	var column_1 int64
 	err := row.Scan(&column_1)
@@ -206,6 +209,47 @@ func (q *Queries) CreateContentItem(ctx context.Context, arg CreateContentItemPa
 	return i, err
 }
 
+const createContentUsageRef = `-- name: CreateContentUsageRef :one
+INSERT INTO content_usage_ref (id, tenant_id, item_id, item_code, item_version, source_scope, source_ref, created_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, now())
+ON CONFLICT (tenant_id, source_scope, source_ref, item_code, item_version) DO UPDATE SET item_id = EXCLUDED.item_id
+RETURNING id, tenant_id, item_id, item_code, item_version, source_scope, source_ref, created_at
+`
+
+type CreateContentUsageRefParams struct {
+	ID          int64  `json:"id"`
+	TenantID    int64  `json:"tenant_id"`
+	ItemID      int64  `json:"item_id"`
+	ItemCode    string `json:"item_code"`
+	ItemVersion string `json:"item_version"`
+	SourceScope string `json:"source_scope"`
+	SourceRef   string `json:"source_ref"`
+}
+
+func (q *Queries) CreateContentUsageRef(ctx context.Context, arg CreateContentUsageRefParams) (ContentUsageRef, error) {
+	row := q.db.QueryRow(ctx, createContentUsageRef,
+		arg.ID,
+		arg.TenantID,
+		arg.ItemID,
+		arg.ItemCode,
+		arg.ItemVersion,
+		arg.SourceScope,
+		arg.SourceRef,
+	)
+	var i ContentUsageRef
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.ItemID,
+		&i.ItemCode,
+		&i.ItemVersion,
+		&i.SourceScope,
+		&i.SourceRef,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const createPaper = `-- name: CreatePaper :one
 INSERT INTO paper (id, tenant_id, name, author_id, gen_mode, gen_criteria, created_at, updated_at, deleted_at)
 VALUES ($1, $2, $3, $4, $5, $6, now(), now(), NULL)
@@ -313,6 +357,22 @@ func (q *Queries) DeleteContentCategory(ctx context.Context, arg DeleteContentCa
 	return i, err
 }
 
+const deleteContentUsageRefsBySource = `-- name: DeleteContentUsageRefsBySource :exec
+DELETE FROM content_usage_ref
+WHERE tenant_id = $1 AND source_scope = $2 AND source_ref = $3
+`
+
+type DeleteContentUsageRefsBySourceParams struct {
+	TenantID    int64  `json:"tenant_id"`
+	SourceScope string `json:"source_scope"`
+	SourceRef   string `json:"source_ref"`
+}
+
+func (q *Queries) DeleteContentUsageRefsBySource(ctx context.Context, arg DeleteContentUsageRefsBySourceParams) error {
+	_, err := q.db.Exec(ctx, deleteContentUsageRefsBySource, arg.TenantID, arg.SourceScope, arg.SourceRef)
+	return err
+}
+
 const deletePaperItems = `-- name: DeletePaperItems :exec
 DELETE FROM paper_item WHERE tenant_id = $1 AND paper_id = $2
 `
@@ -407,7 +467,7 @@ func (q *Queries) GetContentItemByID(ctx context.Context, arg GetContentItemByID
 const getContentItemByRef = `-- name: GetContentItemByRef :one
 SELECT id, tenant_id, code, version, type, title, category_id, difficulty, tags, knowledge_points, author_id, author_type, visibility, status, usage_count, version_hash, created_at, updated_at, deleted_at
 FROM content_item
-WHERE code = $1 AND version = $2 AND deleted_at IS NULL AND (tenant_id = $3 OR visibility = 3)
+WHERE code = $1 AND version = $2 AND deleted_at IS NULL AND (tenant_id = $3 OR (visibility = 3 AND status = 2))
 ORDER BY CASE WHEN tenant_id = $3 THEN 0 ELSE 1 END
 LIMIT 1
 `
@@ -516,7 +576,7 @@ SELECT i.id, i.tenant_id, i.code, i.version, i.type, i.title, i.category_id, i.d
        b.body, b.sensitive_fields
 FROM content_item i
 JOIN content_body b ON b.tenant_id = i.tenant_id AND b.item_id = i.id
-WHERE i.code = $1 AND i.version = $2 AND i.deleted_at IS NULL AND (i.tenant_id = $3 OR i.visibility = 3)
+WHERE i.code = $1 AND i.version = $2 AND i.deleted_at IS NULL AND (i.tenant_id = $3 OR (i.visibility = 3 AND i.status = 2))
 ORDER BY CASE WHEN i.tenant_id = $3 THEN 0 ELSE 1 END
 LIMIT 1
 `
@@ -608,21 +668,20 @@ func (q *Queries) GetPaper(ctx context.Context, arg GetPaperParams) (Paper, erro
 	return i, err
 }
 
-const incrementContentUsage = `-- name: IncrementContentUsage :one
-UPDATE content_item
-SET usage_count = usage_count + 1, updated_at = now()
+const getPublishedContentItemForUsage = `-- name: GetPublishedContentItemForUsage :one
+SELECT id, tenant_id, code, version, type, title, category_id, difficulty, tags, knowledge_points, author_id, author_type, visibility, status, usage_count, version_hash, created_at, updated_at, deleted_at
+FROM content_item
 WHERE code = $1 AND version = $2 AND tenant_id = $3 AND status = 2 AND deleted_at IS NULL
-RETURNING id, tenant_id, code, version, type, title, category_id, difficulty, tags, knowledge_points, author_id, author_type, visibility, status, usage_count, version_hash, created_at, updated_at, deleted_at
 `
 
-type IncrementContentUsageParams struct {
+type GetPublishedContentItemForUsageParams struct {
 	Code     string `json:"code"`
 	Version  string `json:"version"`
 	TenantID int64  `json:"tenant_id"`
 }
 
-func (q *Queries) IncrementContentUsage(ctx context.Context, arg IncrementContentUsageParams) (ContentItem, error) {
-	row := q.db.QueryRow(ctx, incrementContentUsage, arg.Code, arg.Version, arg.TenantID)
+func (q *Queries) GetPublishedContentItemForUsage(ctx context.Context, arg GetPublishedContentItemForUsageParams) (ContentItem, error) {
+	row := q.db.QueryRow(ctx, getPublishedContentItemForUsage, arg.Code, arg.Version, arg.TenantID)
 	var i ContentItem
 	err := row.Scan(
 		&i.ID,
@@ -688,7 +747,7 @@ const listContentItems = `-- name: ListContentItems :many
 SELECT id, tenant_id, code, version, type, title, category_id, difficulty, tags, knowledge_points, author_id, author_type, visibility, status, usage_count, version_hash, created_at, updated_at, deleted_at
 FROM content_item
 WHERE deleted_at IS NULL
-  AND (tenant_id = $1 OR ($11::boolean AND visibility = 3))
+  AND (tenant_id = $1 OR ($11::boolean AND visibility = 3 AND status = 2))
   AND ($2::smallint = 0 OR type = $2)
   AND ($3::bigint = 0 OR category_id = $3)
   AND ($4::smallint = 0 OR difficulty = $4)
@@ -698,8 +757,9 @@ WHERE deleted_at IS NULL
   AND ($8::smallint = 0 OR visibility = $8)
   AND ($9::smallint = 0 OR status = $9)
   AND ($10::bigint = 0 OR author_id = $10)
+  AND (visibility <> 1 OR author_id = $12)
 ORDER BY updated_at DESC, id DESC
-LIMIT $12 OFFSET $13
+LIMIT $13 OFFSET $14
 `
 
 type ListContentItemsParams struct {
@@ -714,6 +774,7 @@ type ListContentItemsParams struct {
 	Column9  int16  `json:"column_9"`
 	Column10 int64  `json:"column_10"`
 	Column11 bool   `json:"column_11"`
+	AuthorID int64  `json:"author_id"`
 	Limit    int32  `json:"limit"`
 	Offset   int32  `json:"offset"`
 }
@@ -731,6 +792,7 @@ func (q *Queries) ListContentItems(ctx context.Context, arg ListContentItemsPara
 		arg.Column9,
 		arg.Column10,
 		arg.Column11,
+		arg.AuthorID,
 		arg.Limit,
 		arg.Offset,
 	)
@@ -772,10 +834,42 @@ func (q *Queries) ListContentItems(ctx context.Context, arg ListContentItemsPara
 	return items, nil
 }
 
+const listContentUsageItemIDsBySource = `-- name: ListContentUsageItemIDsBySource :many
+SELECT DISTINCT item_id
+FROM content_usage_ref
+WHERE tenant_id = $1 AND source_scope = $2 AND source_ref = $3
+`
+
+type ListContentUsageItemIDsBySourceParams struct {
+	TenantID    int64  `json:"tenant_id"`
+	SourceScope string `json:"source_scope"`
+	SourceRef   string `json:"source_ref"`
+}
+
+func (q *Queries) ListContentUsageItemIDsBySource(ctx context.Context, arg ListContentUsageItemIDsBySourceParams) ([]int64, error) {
+	rows, err := q.db.Query(ctx, listContentUsageItemIDsBySource, arg.TenantID, arg.SourceScope, arg.SourceRef)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []int64{}
+	for rows.Next() {
+		var item_id int64
+		if err := rows.Scan(&item_id); err != nil {
+			return nil, err
+		}
+		items = append(items, item_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listContentVersions = `-- name: ListContentVersions :many
 SELECT id, tenant_id, code, version, type, title, category_id, difficulty, tags, knowledge_points, author_id, author_type, visibility, status, usage_count, version_hash, created_at, updated_at, deleted_at
 FROM content_item
-WHERE code = $1 AND deleted_at IS NULL AND (tenant_id = $2 OR visibility = 3)
+WHERE code = $1 AND deleted_at IS NULL AND (tenant_id = $2 OR (visibility = 3 AND status = 2))
 ORDER BY created_at DESC, id DESC
 `
 
@@ -1011,6 +1105,49 @@ func (q *Queries) RandomPickContentItems(ctx context.Context, arg RandomPickCont
 		return nil, err
 	}
 	return items, nil
+}
+
+const refreshContentUsageCount = `-- name: RefreshContentUsageCount :one
+UPDATE content_item AS ci
+SET usage_count = (
+    SELECT COUNT(*)::int
+    FROM content_usage_ref r
+    WHERE r.tenant_id = ci.tenant_id AND r.item_id = ci.id
+), updated_at = now()
+WHERE ci.tenant_id = $1 AND ci.id = $2
+RETURNING id, tenant_id, code, version, type, title, category_id, difficulty, tags, knowledge_points, author_id, author_type, visibility, status, usage_count, version_hash, created_at, updated_at, deleted_at
+`
+
+type RefreshContentUsageCountParams struct {
+	TenantID int64 `json:"tenant_id"`
+	ID       int64 `json:"id"`
+}
+
+func (q *Queries) RefreshContentUsageCount(ctx context.Context, arg RefreshContentUsageCountParams) (ContentItem, error) {
+	row := q.db.QueryRow(ctx, refreshContentUsageCount, arg.TenantID, arg.ID)
+	var i ContentItem
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.Code,
+		&i.Version,
+		&i.Type,
+		&i.Title,
+		&i.CategoryID,
+		&i.Difficulty,
+		&i.Tags,
+		&i.KnowledgePoints,
+		&i.AuthorID,
+		&i.AuthorType,
+		&i.Visibility,
+		&i.Status,
+		&i.UsageCount,
+		&i.VersionHash,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DeletedAt,
+	)
+	return i, err
 }
 
 const setContentVisibility = `-- name: SetContentVisibility :one

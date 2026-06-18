@@ -148,7 +148,7 @@ export interface ContentItem {
   version: string
   type: number
   title: string
-  category_id?: string
+  category_id?: number
   difficulty: number
   tags: string[]
   knowledge_points: string[]
@@ -172,7 +172,7 @@ export interface CreateItemRequest {
   version: string
   type: number
   title: string
-  category_id: string
+  category_id: number
   difficulty: number
   tags: string[]
   knowledge_points: string[]
@@ -183,7 +183,7 @@ export interface CreateItemRequest {
 
 export interface UpdateItemRequest {
   title: string
-  category_id: string
+  category_id: number
   difficulty: number
   tags: string[]
   knowledge_points: string[]
@@ -192,9 +192,91 @@ export interface UpdateItemRequest {
   sensitive_fields: string[]
 }
 
-export interface ItemRef {
+export interface NewVersionRequest {
+  source_version: string
+  new_version: string
+}
+
+export interface CloneItemRequest {
+  new_code: string
+  new_version: string
+}
+
+export interface ContentCategory {
+  id: string
+  parent_id?: string
+  name: string
+  sort: number
+  created_at: string
+  updated_at: string
+}
+
+export interface ContentCategoryRequest {
+  parent_id: number
+  name: string
+  sort: number
+}
+
+export interface ContentAttachmentUpload {
+  object_ref: string
+  file_name: string
+  size: number
+}
+
+export interface ContentAttachmentDownloadGrantRequest {
+  resource_id: string
+  object_ref: string
+}
+
+export interface ContentAttachmentDownloadGrant {
+  token: string
+  expires_at: string
+}
+
+export interface PaperCriteria {
+  type?: number
+  difficulty?: number[]
+  knowledge_points?: string[]
+  count?: number
+  default_score?: number
+}
+
+export interface PaperItemInput {
   code: string
   version: string
+  score: number
+}
+
+export interface CreatePaperRequest {
+  name: string
+  gen_mode: number
+  gen_criteria: PaperCriteria
+  items: PaperItemInput[]
+}
+
+export interface Paper {
+  id: string
+  name: string
+  author_id: string
+  gen_mode: number
+  gen_criteria: PaperCriteria
+  created_at: string
+  updated_at: string
+}
+
+export interface PaperItemFace {
+  id: string
+  code: string
+  version: string
+  score: number
+  seq: number
+  item: ContentItem
+  body: Record<string, any>
+}
+
+export interface PaperDetail {
+  paper: Paper
+  items: PaperItemFace[]
 }
 
 // ===== M6 Teaching 模块 =====
@@ -273,11 +355,18 @@ export interface CourseOutline {
 }
 
 export interface Progress {
-  id: string
-  student_id: string
   lesson_id: string
+  student_id: string
   status: number
-  completed_at?: string
+  video_pos: number
+  duration_sec: number
+  updated_at: string
+}
+
+export interface ProgressRequest {
+  status: number
+  video_pos: number
+  duration_sec: number
 }
 
 export interface JoinCourseRequest {
@@ -336,21 +425,32 @@ export interface AssignmentDetail {
   items: AssignmentItem[]
 }
 
+export interface Draft {
+  assignment_id: string
+  student_id: string
+  content: Record<string, any>
+  updated_at: string
+  exists: boolean
+}
+
 export interface Submission {
   id: string
   assignment_id: string
   student_id: string
   attempt_no: number
   content: Record<string, any>
+  judge_task_ref?: string
+  auto_score?: number
+  manual_score?: number
+  final_score?: number
+  comment?: string
+  is_late: boolean
   status: number
-  score?: number
-  submitted_at?: string
-  judged_at?: string
-  created_at: string
+  submitted_at: string
 }
 
 export interface SubmitRequest {
-  content: Record<string, any>
+  content_ref: Record<string, any>
 }
 
 // ===== M2 Sandbox 模块 =====

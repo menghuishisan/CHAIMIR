@@ -115,13 +115,16 @@ func Valid(data []byte) bool {
 	return json.Valid(data)
 }
 
-// CloneObject 对 JSON 对象做深拷贝;不可序列化时返回空对象。
-func CloneObject(in map[string]any) map[string]any {
+// CloneObjectStrict 对 JSON 对象做深拷贝;不可序列化时显式返回错误。
+func CloneObjectStrict(in map[string]any) (map[string]any, error) {
+	if in == nil {
+		return map[string]any{}, nil
+	}
 	data, err := json.Marshal(in)
 	if err != nil {
-		return map[string]any{}
+		return nil, err
 	}
-	return ObjectMap(data)
+	return ObjectMapStrict(data)
 }
 
 // Equal 按 JSON 结构语义比较两个值,避免 map 顺序和具体实现影响比较结果。

@@ -56,6 +56,12 @@ type ContentSystemImportRequest struct {
 }
 
 // ContentReadService 是 M5 对 M2/M4/M6/M7/M8 暴露的内容读取与引用计数契约。
+//
+// 硬约束:
+// - 业务引用必须锁定 ContentItemRef 的 item_code + item_version,不得只传 item_code 或最新版本别名。
+// - 普通展示、组卷展开和学生可见链路只能调用 GetContentFace/BatchGetContentFace,返回体必须已剥离 answer、flag、judge_config、testcases 等敏感字段。
+// - GetContentFull 只能用于当前租户内的内部执行路径或 M5 受控教师作者路径,不得拿它跨租户读取共享库答案;跨校复用必须走 M5 clone 生成本租户独立草稿。
+// - ReplaceUsageRefs 是内容引用计数唯一写入口,调用方必须传稳定 source_scope + source_ref,由 M5 幂等维护引用集合和 usage_count。
 type ContentReadService interface {
 	// GetContentFace 按锁定版本读取题面视角内容,敏感字段已被剥离。
 	GetContentFace(ctx context.Context, tenantID int64, ref ContentItemRef) (ContentItemSnapshot, error)
@@ -63,17 +69,21 @@ type ContentReadService interface {
 	GetContentFull(ctx context.Context, tenantID int64, ref ContentItemRef) (ContentItemSnapshot, error)
 	// BatchGetContentFace 批量读取题面内容,供组卷展开或题目列表批量渲染使用。
 	BatchGetContentFace(ctx context.Context, tenantID int64, refs []ContentItemRef) ([]ContentItemSnapshot, error)
-	// IncrementUsage 记录内容被业务引用,用于删除保护与复用统计。
-	IncrementUsage(ctx context.Context, tenantID int64, ref ContentItemRef) error
+	// ReplaceUsageRefs 替换某业务来源持有的内容引用集合,用于删除保护与复用统计。
+	ReplaceUsageRefs(ctx context.Context, tenantID int64, sourceScope, sourceRef string, refs []ContentItemRef) error
 }
 
 // ContentJudgeReadService 是 M5 对 M3 判题路径暴露的只读判题配置契约。
+//
+// 硬约束:该契约只供判题服务在隔离执行路径读取黑盒判题配置,不得把返回的 expectation、suite_ref 或 judge_config 派生内容回传给学生端。
 type ContentJudgeReadService interface {
 	// GetJudgeSpec 按租户与锁定版本读取判题配置与答案快照,强制保留多租户边界。
 	GetJudgeSpec(ctx context.Context, tenantID int64, itemCode, itemVersion string) (ContentJudgeSpec, error)
 }
 
 // ContentImportService 是 M5 对 M8 等内部模块暴露的系统建题契约。
+//
+// 硬约束:调用方必须使用服务端已验签的租户上下文,请求体 TenantID 只能为空或与上下文一致;AuthorType 只能是系统或外部源,不得伪装教师来源。
 type ContentImportService interface {
 	// SystemImportContent 把预验证后的自包含题目固化到内容中心。
 	SystemImportContent(ctx context.Context, req ContentSystemImportRequest) (ContentItemSnapshot, error)

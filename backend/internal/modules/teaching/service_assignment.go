@@ -4,6 +4,7 @@ package teaching
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"chaimir/internal/contracts"
 	"chaimir/internal/platform/ids"
@@ -36,19 +37,17 @@ func (s *Service) CreateAssignment(ctx context.Context, courseID int64, req Assi
 		if err := ensureTeacherOwned(course, id.AccountID); err != nil {
 			return err
 		}
-		for _, item := range items {
-			if _, err := s.content.GetContentFace(ctx, id.TenantID, contracts.ContentItemRef{ItemCode: item.ItemCode, ItemVersion: item.ItemVersion}); err != nil {
-				return apperr.ErrTeachingAssignmentInvalid.WithCause(err)
-			}
-			if err := s.content.IncrementUsage(ctx, id.TenantID, contracts.ContentItemRef{ItemCode: item.ItemCode, ItemVersion: item.ItemVersion}); err != nil {
-				return apperr.ErrTeachingAssignmentInvalid.WithCause(err)
-			}
-		}
 		assignment, err = tx.CreateAssignment(ctx, assignment)
 		if err != nil {
 			return err
 		}
 		items, err = tx.ReplaceAssignmentItems(ctx, id.TenantID, assignment.ID, items)
+		if err != nil {
+			return err
+		}
+		if err := s.refreshAssignmentUsageRefs(ctx, id.TenantID, assignment.ID, items); err != nil {
+			return err
+		}
 		return err
 	}); err != nil {
 		return AssignmentDetailDTO{}, mapAssignmentError(err)
@@ -56,7 +55,7 @@ func (s *Service) CreateAssignment(ctx context.Context, courseID int64, req Assi
 	if err := s.writeAudit(ctx, id.TenantID, id.AccountID, contracts.RoleNumTeacher, "teaching.assignment.create", auditTargetAssignment, assignment.ID, map[string]any{"course_id": courseID}); err != nil {
 		return AssignmentDetailDTO{}, err
 	}
-	return assignmentDetailDTO(AssignmentDetail{Assignment: assignment, Items: assignmentItemFaces(items)}), nil
+	return assignmentDetailDTO(AssignmentDetail{Assignment: assignment, Items: assignmentItemFaces(items)})
 }
 
 // UpdateAssignment 更新草稿作业。
@@ -93,11 +92,17 @@ func (s *Service) UpdateAssignment(ctx context.Context, assignmentID int64, req 
 			next = append(next, AssignmentItem{ID: s.ids.Generate(), TenantID: id.TenantID, AssignmentID: assignmentID, ItemCode: item.ItemCode, ItemVersion: item.ItemVersion, Score: item.Score, Seq: item.Seq, GradingMode: item.GradingMode, JudgerCode: item.JudgerCode})
 		}
 		items, err = tx.ReplaceAssignmentItems(ctx, id.TenantID, assignmentID, next)
+		if err != nil {
+			return err
+		}
+		if err := s.refreshAssignmentUsageRefs(ctx, id.TenantID, assignmentID, items); err != nil {
+			return err
+		}
 		return err
 	}); err != nil {
 		return AssignmentDetailDTO{}, mapAssignmentError(err)
 	}
-	return assignmentDetailDTO(AssignmentDetail{Assignment: assignment, Items: assignmentItemFaces(items)}), nil
+	return assignmentDetailDTO(AssignmentDetail{Assignment: assignment, Items: assignmentItemFaces(items)})
 }
 
 // PublishAssignment 发布作业。
@@ -131,7 +136,7 @@ func (s *Service) PublishAssignment(ctx context.Context, assignmentID int64) (As
 	}); err != nil {
 		return AssignmentDTO{}, mapAssignmentError(err)
 	}
-	return assignmentDTO(assignment), nil
+	return assignmentDTO(assignment)
 }
 
 // GetAssignmentForStudent 读取作业详情并从 M5 展开题面。
@@ -164,7 +169,7 @@ func (s *Service) GetAssignmentForStudent(ctx context.Context, assignmentID int6
 		}
 		detail.Items = append(detail.Items, AssignmentItemFace{AssignmentItem: item, Title: face.Title, Type: face.Type, Difficulty: face.Difficulty, Body: face.Body})
 	}
-	return assignmentDetailDTO(detail), nil
+	return assignmentDetailDTO(detail)
 }
 
 // SaveDraft 保存服务端权威作答草稿。
@@ -221,7 +226,7 @@ func (s *Service) GetDraft(ctx context.Context, assignmentID int64) (DraftDTO, e
 	if draft.ID == 0 {
 		return DraftDTO{AssignmentID: assignmentID, StudentID: id.AccountID, Content: map[string]any{}, Exists: false}, nil
 	}
-	return draftDTO(draft), nil
+	return draftDTO(draft)
 }
 
 // SubmitAssignment 创建正式提交并写入自动判题 outbox。
@@ -305,7 +310,7 @@ func (s *Service) SubmitAssignment(ctx context.Context, assignmentID int64, req 
 	if err := s.writeAudit(ctx, id.TenantID, id.AccountID, contracts.RoleNumStudent, "teaching.assignment.submit", auditTargetSubmission, sub.ID, map[string]any{"assignment_id": assignmentID}); err != nil {
 		return SubmissionDTO{}, err
 	}
-	return submissionDTO(sub), nil
+	return submissionDTO(sub)
 }
 
 // GradeSubmission 教师批改主观题或报告提交。
@@ -344,7 +349,7 @@ func (s *Service) GradeSubmission(ctx context.Context, submissionID int64, req G
 	}); err != nil {
 		return SubmissionDTO{}, mapAssignmentError(err)
 	}
-	return submissionDTO(sub), nil
+	return submissionDTO(sub)
 }
 
 // ListSubmissions 查询作业提交情况。
@@ -375,7 +380,11 @@ func (s *Service) ListSubmissions(ctx context.Context, assignmentID int64, page,
 	}
 	out := make([]SubmissionDTO, 0, len(subs))
 	for _, sub := range subs {
-		out = append(out, submissionDTO(sub))
+		dto, err := submissionDTO(sub)
+		if err != nil {
+			return nil, 0, 0, 0, mapAssignmentError(err)
+		}
+		out = append(out, dto)
 	}
 	return out, total, page, size, nil
 }
@@ -410,7 +419,7 @@ func (s *Service) GetSubmissionForUser(ctx context.Context, submissionID int64) 
 	}); err != nil {
 		return SubmissionDTO{}, mapAssignmentError(err)
 	}
-	return submissionDTO(sub), nil
+	return submissionDTO(sub)
 }
 
 // RunJudgeOutboxOnce 派发一轮 M6 本地自动判题 outbox。
@@ -534,6 +543,25 @@ func aggregateCompletedAutoScore(outboxes []JudgeOutbox) (int32, bool) {
 		total += outbox.Score
 	}
 	return total, true
+}
+
+// refreshAssignmentUsageRefs 按作业来源替换 M5 内容引用集合,由 M5 幂等维护 usage_count。
+func (s *Service) refreshAssignmentUsageRefs(ctx context.Context, tenantID, assignmentID int64, items []AssignmentItem) error {
+	refs := make([]contracts.ContentItemRef, 0, len(items))
+	seen := map[string]struct{}{}
+	for _, item := range items {
+		key := strings.TrimSpace(item.ItemCode) + "\x00" + strings.TrimSpace(item.ItemVersion)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		refs = append(refs, contracts.ContentItemRef{ItemCode: item.ItemCode, ItemVersion: item.ItemVersion})
+	}
+	sourceRef := fmt.Sprintf("teaching:assignment:%d", assignmentID)
+	if err := s.content.ReplaceUsageRefs(ctx, tenantID, "teaching.assignment", sourceRef, refs); err != nil {
+		return apperr.ErrTeachingAssignmentInvalid.WithCause(err)
+	}
+	return nil
 }
 
 // sourceRefForSubmissionItem 构造 M6 提交题目来源标识。

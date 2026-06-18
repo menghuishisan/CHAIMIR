@@ -20,6 +20,8 @@ const (
 )
 
 type objectStorage interface {
+	Delete(ctx context.Context, bucket, key string) error
+	Get(ctx context.Context, bucket, key string) (io.ReadCloser, error)
 	Put(ctx context.Context, bucket, key string, r io.Reader, size int64, contentType string) error
 	BucketAttach() string
 }

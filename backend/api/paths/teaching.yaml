@@ -430,7 +430,7 @@
     tags: [teaching]
     summary: 成绩权重配置
     operationId: teachingListGradeWeights
-    x-chaimir-audience: user
+    x-chaimir-audience: teacher
     security: [{ bearerAuth: [] }]
     parameters: [{ $ref: "#/components/parameters/IDPath" }]
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }

@@ -61,7 +61,7 @@ func (s *Service) CreatePaper(ctx context.Context, req CreatePaperRequest) (Pape
 	if err := s.writeAudit(ctx, id.TenantID, id.AccountID, contracts.RoleNumTeacher, "content.paper.create", contentAuditTargetPaper, detail.Paper.ID, map[string]any{"name": detail.Paper.Name, "gen_mode": detail.Paper.GenMode}); err != nil {
 		return PaperDetailDTO{}, err
 	}
-	return paperDetailDTO(detail), nil
+	return paperDetailDTO(detail)
 }
 
 // GetPaperDetail 查询试卷详情并展开题面。
@@ -85,7 +85,7 @@ func (s *Service) GetPaperDetail(ctx context.Context, paperID int64) (PaperDetai
 	}); err != nil {
 		return PaperDetailDTO{}, err
 	}
-	return paperDetailDTO(detail), nil
+	return paperDetailDTO(detail)
 }
 
 // RegeneratePaper 按原随机条件重新抽题。
@@ -116,7 +116,7 @@ func (s *Service) RegeneratePaper(ctx context.Context, paperID int64) (PaperDeta
 	if err := s.writeAudit(ctx, id.TenantID, id.AccountID, contracts.RoleNumTeacher, "content.paper.regenerate", contentAuditTargetPaper, paperID, map[string]any{}); err != nil {
 		return PaperDetailDTO{}, err
 	}
-	return paperDetailDTO(detail), nil
+	return paperDetailDTO(detail)
 }
 
 // buildPaperItems 生成手动或随机组卷题目集合。
@@ -127,6 +127,9 @@ func (s *Service) buildPaperItems(ctx context.Context, tx TxStore, tenantID, pap
 			item, err := tx.GetItemWithBodyByRef(ctx, tenantID, input.Code, input.Version)
 			if err != nil {
 				return nil, mapContentReadError(err)
+			}
+			if item.TenantID != tenantID {
+				return nil, apperr.ErrContentSharedNotFound
 			}
 			if item.Status != StatusPublished {
 				return nil, apperr.ErrContentVersionNotPublished
@@ -157,7 +160,10 @@ func (s *Service) paperDetailFromItems(ctx context.Context, tx TxStore, tenantID
 		if err != nil {
 			return PaperWithItems{}, mapContentReadError(err)
 		}
-		face := faceSnapshot(snapshot)
+		face, err := faceSnapshot(snapshot)
+		if err != nil {
+			return PaperWithItems{}, apperr.ErrContentBodyInvalid.WithCause(err)
+		}
 		out.Items = append(out.Items, PaperItemFace{PaperItem: item, Item: itemDTO(face.Item), Body: face.Body})
 	}
 	return out, nil

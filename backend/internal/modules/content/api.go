@@ -29,7 +29,7 @@ func RegisterRoutes(r gin.IRouter, svc *Service, authn *auth.Manager, roles cont
 	g := r.Group("/api/v1/content")
 	api.registerTeacherRoutes(g.Group("", authn.Middleware(), auth.RequireTenantAnyRole(roles, contracts.RoleTeacher, contracts.RoleSchoolAdmin)))
 	api.registerInternalRoutes(g.Group("", authn.ServiceMiddleware()))
-	g.GET("/items/:item/:version/full", authn.ServiceOrTenantAnyRoleMiddleware(roles, contracts.RoleTeacher, contracts.RoleSchoolAdmin), api.getFull)
+	g.GET("/items/:item/:version/full", authn.ServiceOrTenantAnyRoleMiddleware(roles, contracts.RoleTeacher), api.getFull)
 	return nil
 }
 
@@ -69,7 +69,6 @@ func (a contentAPI) registerTeacherRoutes(g gin.IRouter) {
 func (a contentAPI) registerInternalRoutes(g gin.IRouter) {
 	g.POST("/items/system-import", a.systemImport)
 	g.POST("/items/batch", a.batchItems)
-	g.POST("/items/:item/:version/usage", a.incrementUsage)
 }
 
 // listItems 绑定题库检索参数。
@@ -269,16 +268,6 @@ func (a contentAPI) batchItems(c *gin.Context) {
 	}
 	out, err := a.svc.BatchGetContentFace(c.Request.Context(), tenantID, refs)
 	httpx.Write(c, out, err)
-}
-
-// incrementUsage 绑定内部引用计数上报。
-func (a contentAPI) incrementUsage(c *gin.Context) {
-	tenantID, ok := currentServiceTenantID(c)
-	if !ok {
-		return
-	}
-	err := a.svc.IncrementUsage(c.Request.Context(), tenantID, contracts.ContentItemRef{ItemCode: c.Param("item"), ItemVersion: c.Param("version")})
-	httpx.Write(c, gin.H{}, err)
 }
 
 // systemImport 绑定内部系统建题入口。
