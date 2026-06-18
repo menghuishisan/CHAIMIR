@@ -17,7 +17,7 @@ func RegisterRoutes(r gin.IRouter, svc *Service, authn *auth.Manager, roles cont
 		return apperr.ErrHTTPServiceMissing
 	}
 	api := transferAPI{svc: svc, roles: roles}
-	g := r.Group("/api/v1/transfer", authn.Middleware(), auth.RequireTenantAnyRole(roles, contracts.RoleStudent, contracts.RoleTeacher, contracts.RoleSchoolAdmin))
+	g := r.Group("/api/v1/transfer", authn.Middleware(), auth.RequirePlatformOrAnyRole(roles, contracts.RoleStudent, contracts.RoleTeacher, contracts.RoleSchoolAdmin))
 	g.GET("/tasks", api.listTasks)
 	g.GET("/tasks/:id", api.getTask)
 	g.POST("/tasks/:id/download-grant", api.downloadGrant)
@@ -56,7 +56,9 @@ func (a transferAPI) getTask(c *gin.Context) {
 	task, err := a.svc.GetTask(c.Request.Context(), id.TenantID, taskID)
 	if err == nil {
 		var tenantAdmin bool
-		tenantAdmin, err = a.isSchoolAdmin(c, id.AccountID)
+		if !id.IsPlatform {
+			tenantAdmin, err = a.isSchoolAdmin(c, id.AccountID)
+		}
 		if err == nil {
 			err = EnsureTaskOwner(task, id.TenantID, id.AccountID, tenantAdmin)
 		}
@@ -74,19 +76,31 @@ func (a transferAPI) downloadGrant(c *gin.Context) {
 	if !ok {
 		return
 	}
-	tenantAdmin, err := a.isSchoolAdmin(c, id.AccountID)
-	if err != nil {
-		httpx.Write(c, gin.H{}, err)
-		return
+	tenantAdmin := false
+	if !id.IsPlatform {
+		var err error
+		tenantAdmin, err = a.isSchoolAdmin(c, id.AccountID)
+		if err != nil {
+			httpx.Write(c, gin.H{}, err)
+			return
+		}
 	}
 	out, err := a.svc.BuildDownloadGrant(c.Request.Context(), id.TenantID, taskID, id.AccountID, tenantAdmin)
 	httpx.Write(c, out, err)
 }
 
-// currentTenantIdentity 读取已鉴权租户身份并拒绝平台身份访问租户任务中心。
+// currentTenantIdentity 读取已鉴权身份,平台身份只允许访问 tenant_id=0 的平台任务。
 func currentTenantIdentity(c *gin.Context) (tenant.Identity, bool) {
 	id, ok := tenant.FromContext(c.Request.Context())
-	if !ok || id.IsPlatform || id.TenantID <= 0 || id.AccountID <= 0 {
+	if !ok || id.AccountID <= 0 {
+		httpx.Write(c, gin.H{}, apperr.ErrUnauthorized)
+		return tenant.Identity{}, false
+	}
+	if id.IsPlatform {
+		id.TenantID = 0
+		return id, true
+	}
+	if id.TenantID <= 0 {
 		httpx.Write(c, gin.H{}, apperr.ErrUnauthorized)
 		return tenant.Identity{}, false
 	}

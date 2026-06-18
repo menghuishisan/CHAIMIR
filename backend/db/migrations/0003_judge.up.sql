@@ -23,8 +23,8 @@ CREATE TABLE IF NOT EXISTS judge_task (
     source_scope VARCHAR(32) NOT NULL CHECK (source_scope IN ('teaching', 'experiment', 'contest')),
     submitter_id BIGINT NOT NULL,
     problem_ref VARCHAR(128) NOT NULL,
-    code_storage_key VARCHAR(255) NOT NULL,
-    code_hash VARCHAR(64) NOT NULL,
+    code_storage_key VARCHAR(255) NOT NULL DEFAULT '',
+    code_hash VARCHAR(64) NOT NULL DEFAULT '',
     input_snapshot JSONB NOT NULL DEFAULT '{}'::jsonb,
     sandbox_mode SMALLINT NOT NULL CHECK (sandbox_mode IN (1, 2)),
     target_sandbox_ref VARCHAR(64),
@@ -97,7 +97,7 @@ ALTER TABLE judge_result ENABLE ROW LEVEL SECURITY;
 ALTER TABLE judge_event_outbox ENABLE ROW LEVEL SECURITY;
 ALTER TABLE submission_fingerprint ENABLE ROW LEVEL SECURITY;
 
-CREATE POLICY judge_task_tenant_rls ON judge_task USING (tenant_id = current_setting('app.tenant_id')::BIGINT);
-CREATE POLICY judge_result_tenant_rls ON judge_result USING (tenant_id = current_setting('app.tenant_id')::BIGINT);
-CREATE POLICY judge_event_outbox_tenant_rls ON judge_event_outbox USING (tenant_id = current_setting('app.tenant_id')::BIGINT);
-CREATE POLICY submission_fingerprint_tenant_rls ON submission_fingerprint USING (tenant_id = current_setting('app.tenant_id')::BIGINT);
+CREATE POLICY judge_task_tenant_rls ON judge_task USING (tenant_id = current_setting('app.tenant_id')::BIGINT) WITH CHECK (tenant_id = current_setting('app.tenant_id')::BIGINT);
+CREATE POLICY judge_result_tenant_rls ON judge_result USING (tenant_id = current_setting('app.tenant_id')::BIGINT) WITH CHECK (tenant_id = current_setting('app.tenant_id')::BIGINT);
+CREATE POLICY judge_event_outbox_tenant_rls ON judge_event_outbox USING (tenant_id = current_setting('app.tenant_id')::BIGINT) WITH CHECK (tenant_id = current_setting('app.tenant_id')::BIGINT);
+CREATE POLICY submission_fingerprint_tenant_rls ON submission_fingerprint USING (tenant_id = current_setting('app.tenant_id')::BIGINT) WITH CHECK (tenant_id = current_setting('app.tenant_id')::BIGINT);

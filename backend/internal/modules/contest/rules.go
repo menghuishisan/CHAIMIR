@@ -55,10 +55,44 @@ func validateProblemRequest(req ProblemRequest, mode int16) (ProblemRequest, err
 		if !registeredBattleRule(req.BattleRule) {
 			return ProblemRequest{}, apperr.ErrContestProblemInvalid
 		}
+		if err := validateBattleConfig(req.BattleConfig); err != nil {
+			return ProblemRequest{}, err
+		}
 	} else {
 		req.BattleRule = 0
+		req.BattleConfig = map[string]any{}
 	}
 	return req, nil
+}
+
+// validateBattleConfig 校验对抗题执行所需的沙箱运行时配置。
+func validateBattleConfig(cfg map[string]any) error {
+	if len(cfg) == 0 {
+		return apperr.ErrContestProblemInvalid
+	}
+	for _, key := range []string{"runtime_code", "runtime_image_version"} {
+		if strings.TrimSpace(stringValue(cfg[key])) == "" {
+			return apperr.ErrContestProblemInvalid
+		}
+	}
+	if raw, ok := cfg["tool_codes"]; ok {
+		items, ok := raw.([]any)
+		if !ok {
+			return apperr.ErrContestProblemInvalid
+		}
+		for _, item := range items {
+			if strings.TrimSpace(stringValue(item)) == "" {
+				return apperr.ErrContestProblemInvalid
+			}
+		}
+	}
+	return nil
+}
+
+// stringValue 在规则校验中读取 JSON 字符串值。
+func stringValue(v any) string {
+	s, _ := v.(string)
+	return s
 }
 
 // validateContestTransition 校验竞赛生命周期状态流转。

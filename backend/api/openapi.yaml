@@ -495,8 +495,6 @@ paths:
     $ref: './paths/contest.yaml#/api/v1/contest/vuln-problems/{id}/finalize'
   /api/v1/contest/internal/stats:
     $ref: './paths/contest.yaml#/api/v1/contest/internal/stats'
-  /api/v1/contest/internal/students/{id}/achievements:
-    $ref: './paths/contest.yaml#/api/v1/contest/internal/students/{id}/achievements'
   /api/v1/contest/internal/students/{id}/contest-achievements:
     $ref: './paths/contest.yaml#/api/v1/contest/internal/students/{id}/contest-achievements'
   /api/v1/admin/platform/dashboard:
@@ -511,8 +509,6 @@ paths:
     $ref: './paths/admin.yaml#/api/v1/admin/platform/monitoring/panels'
   /api/v1/admin/platform/backups:
     $ref: './paths/admin.yaml#/api/v1/admin/platform/backups'
-  /api/v1/admin/platform/backups/trigger:
-    $ref: './paths/admin.yaml#/api/v1/admin/platform/backups/trigger'
   /api/v1/admin/school/dashboard:
     $ref: './paths/admin.yaml#/api/v1/admin/school/dashboard'
   /api/v1/admin/school/statistics:

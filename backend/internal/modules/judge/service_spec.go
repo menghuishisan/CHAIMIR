@@ -71,10 +71,12 @@ func validateJudgerRequest(req JudgerRequest) (JudgerResourceSpec, error) {
 
 // validateSubmitRequest 校验内部判题提交契约。
 func validateSubmitRequest(req contracts.JudgeSubmitRequest) error {
-	if req.TenantID <= 0 || req.SubmitterID <= 0 || strings.TrimSpace(req.JudgerCode) == "" ||
+	if req.TenantID <= 0 || req.SubmitterID <= 0 ||
 		strings.TrimSpace(req.ItemCode) == "" || strings.TrimSpace(req.ItemVersion) == "" ||
-		strings.TrimSpace(req.CodeStorageKey) == "" || !isSHA256Hex(req.CodeHash) ||
 		!auth.ValidSourceRef(req.SourceRef) {
+		return apperr.ErrJudgeSubmitInvalid
+	}
+	if strings.TrimSpace(req.CodeHash) != "" && !isSHA256Hex(req.CodeHash) {
 		return apperr.ErrJudgeSubmitInvalid
 	}
 	mode, err := normalizedSandboxMode(req.SandboxMode)
@@ -99,6 +101,18 @@ func normalizedSandboxMode(mode string) (int16, error) {
 		return JudgeSandboxModeReuse, nil
 	default:
 		return 0, apperr.ErrJudgeSubmitInvalid
+	}
+}
+
+// judgerRequiresCode 统一判定判题任务是否必须携带提交代码对象。
+func judgerRequiresCode(typ int16, mode int16) bool {
+	switch typ {
+	case JudgerTypeTestcase, JudgerTypeStaticScan:
+		return true
+	case JudgerTypeOnchainAssert:
+		return mode == JudgeSandboxModeFresh
+	default:
+		return false
 	}
 }
 

@@ -178,8 +178,10 @@ func (s *Service) resolveSandbox(ctx context.Context, task JudgeTask) (int64, bo
 	if err := s.waitSandboxReady(ctx, task, info.SandboxID); err != nil {
 		return info.SandboxID, true, err
 	}
-	if err := s.injectStudentCode(ctx, task, info.SandboxID); err != nil {
-		return info.SandboxID, true, err
+	if judgerRequiresCode(task.InputSnapshot.JudgerType, task.SandboxMode) {
+		if err := s.injectStudentCode(ctx, task, info.SandboxID); err != nil {
+			return info.SandboxID, true, err
+		}
 	}
 	if err := s.injectPrivateSuite(ctx, task, info.SandboxID); err != nil {
 		return info.SandboxID, true, err

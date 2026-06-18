@@ -796,6 +796,7 @@ export interface ContestProblem {
   item_version: string
   score: number
   dynamic_score?: Record<string, any>
+  battle_config?: Record<string, any>
   battle_rule?: number
   seq: number
   face?: Record<string, any>
@@ -806,6 +807,7 @@ export interface ContestProblemRequest {
   item_version: string
   score: number
   dynamic_score?: Record<string, any>
+  battle_config?: Record<string, any>
   battle_rule?: number
   seq: number
 }
@@ -843,47 +845,178 @@ export interface ContestSubmission {
   problem_id: string
   team_id: string
   submitter_id: string
-  content: Record<string, any>
-  status: number
-  score?: number
+  content_ref: Record<string, any>
+  source_ref: string
+  judge_task_ref?: string
+  passed: boolean
+  score: number
+  sandbox_ref?: string
   submitted_at: string
-  judged_at?: string
 }
 
 export interface ContestSubmitRequest {
-  content: Record<string, any>
+  content_ref: Record<string, any>
+  code_storage_key?: string
+  code_hash?: string
+  sandbox_ref?: string
 }
 
-export interface Leaderboard {
+export interface EnvRequest {
+  runtime_code: string
+  runtime_image_version: string
+  tool_codes: string[]
+  init_code_ref?: string
+  init_script_ref?: string
+}
+
+export interface EnvSummary {
+  sandbox_id: string
+  source_ref: string
+  status: number
+}
+
+export interface BattleEntryRequest {
+  problem_id: number
+  role: number
+  artifact_ref: string
+  code_hash: string
+}
+
+export interface BattleEntry {
+  id: string
   contest_id: string
-  freeze_at?: string
-  ranks: LeaderboardRank[]
+  problem_id: string
+  team_id: string
+  role: number
+  artifact_ref: string
+  code_hash: string
+  version_no: number
+  is_active: boolean
+  submitted_at: string
+}
+
+export interface BattleMatch {
+  id: string
+  contest_id: string
+  problem_id: string
+  entry_a_id: string
+  entry_b_id: string
+  source_ref: string
+  sandbox_ref?: string
+  judge_task_ref?: string
+  result?: number
+  score_delta: Record<string, any>
+  replay_ref?: string
+  status: number
+  matched_at: string
+  finished_at?: string
+}
+
+export interface BattleReplayRef {
+  match_id: string
+  replay_ref: string
+}
+
+export interface LadderRank {
+  team_id: string
+  score: number
+  solved_count: number
+  last_solve_at?: string
+  rank: number
   updated_at: string
 }
 
-export interface LeaderboardRank {
-  rank: number
-  team_id: string
-  team_name: string
-  score: number
-  penalty?: number
-  solved_count: number
-  problems?: Record<string, any>
-}
-
-export interface BattleReplay {
-  battle_id: string
+export interface ResultSnapshot {
+  id: string
+  tenant_id?: string
   contest_id: string
-  problem_id: string
-  teams: string[]
-  timeline: BattleEvent[]
-  result: Record<string, any>
+  final_ranking: Record<string, any>[]
+  generated_at: string
 }
 
-export interface BattleEvent {
-  timestamp: string
-  type: string
-  data: Record<string, any>
+export interface CheatRecordRequest {
+  team_id: number
+  type: number
+  evidence: Record<string, any>
+  action: number
+}
+
+export interface CheatRecord {
+  id: string
+  contest_id: string
+  team_id: string
+  type: number
+  evidence: Record<string, any>
+  action: number
+  operator_id?: string
+  created_at: string
+}
+
+export interface CheatSuspect {
+  source_ref: string
+  submitter_id: string
+  score: number
+  code_hash?: string
+}
+
+export interface ContestRecord {
+  contest_id: string
+  team_id: string
+  score: number
+  rank: number
+  contest_name: string
+  contest_status: number
+}
+
+export interface VulnSourceRequest {
+  id?: number
+  type: number
+  name: string
+  config: Record<string, any>
+  default_level: number
+  enabled: boolean
+}
+
+export interface VulnSource {
+  id: string
+  type: number
+  name: string
+  config: Record<string, any>
+  default_level: number
+  enabled: boolean
+  last_sync_at?: string
+}
+
+export interface VulnProblemImportRequest {
+  source_id?: number
+  external_ref?: string
+  title: string
+  level: number
+  runtime_mode: number
+  draft_body: Record<string, any>
+}
+
+export interface VulnPrevalidateRequest {
+  runtime_code: string
+  runtime_image_version: string
+  tool_codes: string[]
+  init_code_ref?: string
+  init_script_ref?: string
+}
+
+export interface VulnProblem {
+  id: string
+  source_id?: string
+  external_ref?: string
+  title: string
+  level: number
+  runtime_mode: number
+  draft_body: Record<string, any>
+  prevalidate_status: number
+  prevalidate_detail: Record<string, any>
+  content_item_code?: string
+  content_item_version?: string
+  status: number
 }
 
 // ===== M9 Admin 模块 =====
@@ -895,6 +1028,7 @@ export interface SystemConfig {
   key: string
   value: Record<string, any>
   version: number
+  updated_by: string
   updated_at: string
 }
 
@@ -904,6 +1038,23 @@ export interface ConfigUpdateRequest {
   value: Record<string, any>
   version: number
   change_log_id?: string
+}
+
+export interface ConfigRollbackRequest {
+  scope: number
+  tenant_id?: string
+  version: number
+  change_log_id: string
+}
+
+export interface ConfigChangeLog {
+  id: string
+  config_id: string
+  tenant_id?: string
+  old_value: Record<string, any>
+  new_value: Record<string, any>
+  operator_id: string
+  created_at: string
 }
 
 export interface AlertRule {
@@ -941,6 +1092,10 @@ export interface AlertEvent {
   handled_at?: string
 }
 
+export interface AlertEventRequest {
+  status: number
+}
+
 export interface Statistics {
   scope: number
   tenant_id?: string
@@ -951,12 +1106,108 @@ export interface Statistics {
 export interface BackupRecord {
   id: string
   type: number
+  size_bytes: number
   status: number
-  size_bytes?: number
-  storage_path?: string
+  started_at: string
+  finished_at?: string
+}
+
+export interface Dashboard {
+  scope: number
+  tenant_id?: string
+  tenant_count?: number
+  account_count: number
+  teacher_count: number
+  student_count: number
+  active_account_count: number
+  course_count: number
+  active_course_count: number
+  experiment_count: number
+  active_instance_count: number
+  contest_count: number
+  active_contest_count: number
+  active_sandbox_count: number
+  pending_apply_count?: number
+  resource_quota_snapshot?: Record<string, any>
+  generated_at: string
+}
+
+export interface MonitoringPanel {
+  name: string
+  url: string
+}
+
+export interface TenantSummary {
+  tenant_id: string
+  code: string
+  name: string
+  type: number
+  status: number
+  deploy_mode: number
+  expire_at?: string
   created_at: string
+  updated_at: string
+}
+
+export interface TenantApplicationSummary {
+  application_id: string
+  school_name: string
+  school_type: number
+  contact_name: string
+  contact_phone: string
+  contact_email: string
+  status: number
+  submitted_at: string
+  reviewed_at?: string
+}
+
+export interface AuditLogEntry {
+  id: string
+  tenant_id: string
+  actor_id: string
+  actor_role: number
+  action: string
+  target_type: string
+  target_id: string
+  detail: string
+  ip: string
+  trace_id: string
+  created_at: string
+}
+
+export interface AuditQueryParams {
+  actor_id?: string
+  action?: string
+  target_type?: string
+  from?: string
+  to?: string
+  page?: number
+  size?: number
+}
+
+export interface AuditQueryResult {
+  list: AuditLogEntry[]
+  total: number
+  page: number
+  size: number
+}
+
+export interface AuditExportTask {
+  task_id: string
+  channel: string
+  subject: string
+  status: string
+  content_type?: string
+  file_name?: string
+  attempt_count: number
+  max_attempts: number
+  artifact_size?: number
+  artifact_content_type?: string
+  artifact_file_name?: string
+  created_at: string
+  updated_at: string
   completed_at?: string
-  error_message?: string
+  next_attempt_after?: string
 }
 
 // ===== M10 Notify 模块 =====

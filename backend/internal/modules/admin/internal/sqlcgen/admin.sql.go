@@ -288,6 +288,7 @@ const handleAlertEvent = `-- name: HandleAlertEvent :one
 UPDATE alert_event
 SET status = $2, handler_id = $3, handled_at = now()
 WHERE id = $1 AND status = 1
+  AND (($4::bigint IS NULL) OR tenant_id = $4::bigint)
 RETURNING id, rule_id, tenant_id, level, message, status, handler_id, triggered_at, handled_at
 `
 
@@ -295,10 +296,16 @@ type HandleAlertEventParams struct {
 	ID        int64       `json:"id"`
 	Status    int16       `json:"status"`
 	HandlerID pgtype.Int8 `json:"handler_id"`
+	TenantID  pgtype.Int8 `json:"tenant_id"`
 }
 
 func (q *Queries) HandleAlertEvent(ctx context.Context, arg HandleAlertEventParams) (AlertEvent, error) {
-	row := q.db.QueryRow(ctx, handleAlertEvent, arg.ID, arg.Status, arg.HandlerID)
+	row := q.db.QueryRow(ctx, handleAlertEvent,
+		arg.ID,
+		arg.Status,
+		arg.HandlerID,
+		arg.TenantID,
+	)
 	var i AlertEvent
 	err := row.Scan(
 		&i.ID,
@@ -369,7 +376,7 @@ const listAlertRules = `-- name: ListAlertRules :many
 SELECT id, scope, tenant_id, name, metric, condition, level, enabled, created_at, updated_at
 FROM alert_rule
 WHERE ($1::smallint = 0 OR scope = $1::smallint)
-  AND (($2::bigint IS NULL) OR tenant_id = $2::bigint)
+  AND (($2::bigint IS NULL AND tenant_id IS NULL) OR tenant_id = $2::bigint)
 ORDER BY updated_at DESC
 `
 
@@ -543,7 +550,7 @@ const listSystemConfigs = `-- name: ListSystemConfigs :many
 SELECT id, scope, tenant_id, key, value, version, updated_by, updated_at
 FROM system_config
 WHERE ($1::smallint = 0 OR scope = $1::smallint)
-  AND (($2::bigint IS NULL) OR tenant_id = $2::bigint)
+  AND (($2::bigint IS NULL AND tenant_id IS NULL) OR tenant_id = $2::bigint)
 ORDER BY key
 `
 
@@ -585,16 +592,20 @@ const updateAlertRule = `-- name: UpdateAlertRule :one
 UPDATE alert_rule
 SET name = $2, metric = $3, condition = $4, level = $5, enabled = $6, updated_at = now()
 WHERE id = $1
+  AND scope = $7::smallint
+  AND ((tenant_id IS NULL AND $8::bigint IS NULL) OR tenant_id = $8::bigint)
 RETURNING id, scope, tenant_id, name, metric, condition, level, enabled, created_at, updated_at
 `
 
 type UpdateAlertRuleParams struct {
-	ID        int64  `json:"id"`
-	Name      string `json:"name"`
-	Metric    string `json:"metric"`
-	Condition []byte `json:"condition"`
-	Level     int16  `json:"level"`
-	Enabled   bool   `json:"enabled"`
+	ID        int64       `json:"id"`
+	Name      string      `json:"name"`
+	Metric    string      `json:"metric"`
+	Condition []byte      `json:"condition"`
+	Level     int16       `json:"level"`
+	Enabled   bool        `json:"enabled"`
+	Scope     int16       `json:"scope"`
+	TenantID  pgtype.Int8 `json:"tenant_id"`
 }
 
 func (q *Queries) UpdateAlertRule(ctx context.Context, arg UpdateAlertRuleParams) (AlertRule, error) {
@@ -605,6 +616,8 @@ func (q *Queries) UpdateAlertRule(ctx context.Context, arg UpdateAlertRuleParams
 		arg.Condition,
 		arg.Level,
 		arg.Enabled,
+		arg.Scope,
+		arg.TenantID,
 	)
 	var i AlertRule
 	err := row.Scan(

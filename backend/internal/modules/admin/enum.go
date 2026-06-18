@@ -20,8 +20,6 @@ const (
 const (
 	// BackupTypeFull 表示全量备份。
 	BackupTypeFull int16 = 1
-	// BackupTypeIncremental 表示增量备份。
-	BackupTypeIncremental int16 = 2
 )
 
 const (

@@ -32,6 +32,7 @@ type ContestProblem struct {
 	ItemVersion  string
 	Score        int32
 	DynamicScore map[string]any
+	BattleConfig map[string]any
 	BattleRule   int16
 	Seq          int32
 }

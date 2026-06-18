@@ -1,103 +1,14 @@
-# 部署层兜底定时任务(CronJob)。
-# 依据 docs/总-部署架构设计.md §六/§七:
-#   PV 清理、镜像 GC、每日数据备份(记录入 M9 backup_record)、僵尸沙箱兜底回收。
-# 这些为兜底机制:M2/M4/M7/M8 各自回收逻辑为主,部署层扫描超期资源强制清理防泄漏。
-#
-# 实现:复用 chaimir/backend 镜像不同子命令(同镜像不同启动参数,与 worker 一致)。
-# 标签 chaimir.io/platform-level 标记平台级任务,prod-school overlay 据此 patch 删除
-# (私有化关平台层:平台级定时任务不运行)。
+# 部署层受控定时任务。
+# 当前仅保留已实现的每日备份任务;模块生命周期清理由各模块 server 内后台任务负责。
 ---
-apiVersion: batch/v1
-kind: CronJob
+apiVersion: v1
+kind: ServiceAccount
 metadata:
-  name: chaimir-reclaim-zombie-sandbox
+  name: chaimir-cron
   namespace: chaimir-system
   labels:
+    app.kubernetes.io/name: chaimir-cron
     app.kubernetes.io/part-of: chaimir
-    app.kubernetes.io/component: cronjob
-spec:
-  schedule: "*/13 * * * *"  # 每 13 分钟扫描一次超期未回收的动态命名空间。
-  concurrencyPolicy: Forbid
-  successfulJobsHistoryLimit: 3
-  failedJobsHistoryLimit: 3
-  jobTemplate:
-    spec:
-      ttlSecondsAfterFinished: 600
-      template:
-        metadata:
-          labels:
-            app.kubernetes.io/part-of: chaimir
-        spec:
-          restartPolicy: Never
-          serviceAccountName: chaimir-backend  # 需删除 sbx-*/judge-*/battle-* 命名空间。
-          securityContext:
-            runAsNonRoot: true
-            runAsUser: 65532
-            seccompProfile:
-              type: RuntimeDefault
-          containers:
-            - name: reclaim
-              image: chaimir/backend:placeholder
-              args: ["cron", "--task=reclaim-sandbox"]
-              envFrom:
-                - configMapRef:
-                    name: chaimir-config
-                - secretRef:
-                    name: chaimir-secret
-              securityContext:
-                allowPrivilegeEscalation: false
-                readOnlyRootFilesystem: true
-                capabilities:
-                  drop: ["ALL"]
-              resources:
-                requests: {cpu: 50m, memory: 64Mi}
-                limits: {cpu: 200m, memory: 128Mi}
----
-apiVersion: batch/v1
-kind: CronJob
-metadata:
-  name: chaimir-pv-cleanup
-  namespace: chaimir-system
-  labels:
-    app.kubernetes.io/part-of: chaimir
-    app.kubernetes.io/component: cronjob
-spec:
-  schedule: "17 3 * * *"  # 每日 03:17 清理孤立 PV/超期卷。
-  concurrencyPolicy: Forbid
-  successfulJobsHistoryLimit: 3
-  failedJobsHistoryLimit: 3
-  jobTemplate:
-    spec:
-      ttlSecondsAfterFinished: 600
-      template:
-        metadata:
-          labels:
-            app.kubernetes.io/part-of: chaimir
-        spec:
-          restartPolicy: Never
-          serviceAccountName: chaimir-backend
-          securityContext:
-            runAsNonRoot: true
-            runAsUser: 65532
-            seccompProfile:
-              type: RuntimeDefault
-          containers:
-            - name: pv-cleanup
-              image: chaimir/backend:placeholder
-              args: ["cron", "--task=pv-cleanup"]
-              envFrom:
-                - configMapRef:
-                    name: chaimir-config
-                - secretRef:
-                    name: chaimir-secret
-              securityContext:
-                allowPrivilegeEscalation: false
-                readOnlyRootFilesystem: true
-                capabilities:
-                  drop: ["ALL"]
-              resources:
-                requests: {cpu: 50m, memory: 64Mi}
-                limits: {cpu: 200m, memory: 128Mi}
 ---
 apiVersion: batch/v1
 kind: CronJob
@@ -108,7 +19,7 @@ metadata:
     app.kubernetes.io/part-of: chaimir
     app.kubernetes.io/component: cronjob
 spec:
-  schedule: "23 2 * * *"  # 每日 02:23 全量备份(DB + MinIO),记录入 M9 backup_record。
+  schedule: "23 2 * * *"  # 每日 02:23 全量备份 DB + MinIO 业务对象,并写入 M9 backup_record。
   concurrencyPolicy: Forbid
   successfulJobsHistoryLimit: 7
   failedJobsHistoryLimit: 3
@@ -121,16 +32,17 @@ spec:
             app.kubernetes.io/part-of: chaimir
         spec:
           restartPolicy: Never
-          serviceAccountName: chaimir-backend
+          serviceAccountName: chaimir-cron
           securityContext:
             runAsNonRoot: true
             runAsUser: 65532
+            runAsGroup: 65532
             seccompProfile:
               type: RuntimeDefault
           containers:
             - name: backup
-              image: chaimir/backend:placeholder
-              args: ["cron", "--task=backup"]
+              image: chaimir/cron:placeholder
+              args: ["--task=backup"]
               envFrom:
                 - configMapRef:
                     name: chaimir-config
@@ -141,54 +53,13 @@ spec:
                 readOnlyRootFilesystem: true
                 capabilities:
                   drop: ["ALL"]
+              volumeMounts:
+                - name: backup-tmp
+                  mountPath: /tmp
               resources:
-                requests: {cpu: 100m, memory: 128Mi}
-                limits: {cpu: 500m, memory: 512Mi}
----
-# 镜像 GC 为平台级任务(SaaS 公网 Harbor 清理),私有化关平台层时移除。
-apiVersion: batch/v1
-kind: CronJob
-metadata:
-  name: chaimir-image-gc
-  namespace: chaimir-system
-  labels:
-    app.kubernetes.io/part-of: chaimir
-    app.kubernetes.io/component: cronjob
-    chaimir.io/platform-level: "true"  # prod-school overlay 据此 patch 删除。
-spec:
-  schedule: "47 4 * * 0"  # 每周日 04:47 镜像仓库 GC。
-  concurrencyPolicy: Forbid
-  successfulJobsHistoryLimit: 3
-  failedJobsHistoryLimit: 3
-  jobTemplate:
-    spec:
-      ttlSecondsAfterFinished: 600
-      template:
-        metadata:
-          labels:
-            app.kubernetes.io/part-of: chaimir
-        spec:
-          restartPolicy: Never
-          serviceAccountName: chaimir-backend
-          securityContext:
-            runAsNonRoot: true
-            runAsUser: 65532
-            seccompProfile:
-              type: RuntimeDefault
-          containers:
-            - name: image-gc
-              image: chaimir/backend:placeholder
-              args: ["cron", "--task=image-gc"]
-              envFrom:
-                - configMapRef:
-                    name: chaimir-config
-                - secretRef:
-                    name: chaimir-secret
-              securityContext:
-                allowPrivilegeEscalation: false
-                readOnlyRootFilesystem: true
-                capabilities:
-                  drop: ["ALL"]
-              resources:
-                requests: {cpu: 50m, memory: 64Mi}
-                limits: {cpu: 200m, memory: 128Mi}
+                requests: {cpu: 100m, memory: 256Mi, ephemeral-storage: 1Gi}
+                limits: {cpu: "1", memory: 1Gi, ephemeral-storage: 4Gi}
+          volumes:
+            - name: backup-tmp
+              emptyDir:
+                sizeLimit: 4Gi

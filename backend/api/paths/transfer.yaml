@@ -4,7 +4,7 @@
     tags: [transfer]
     summary: 查询当前账号可见的导入导出任务
     operationId: transferListTasks
-    x-chaimir-audience: user
+    x-chaimir-audience: platform_or_user
     security:
       - bearerAuth: []
     parameters:
@@ -24,7 +24,7 @@
     tags: [transfer]
     summary: 读取导入导出任务快照
     operationId: transferGetTask
-    x-chaimir-audience: user
+    x-chaimir-audience: platform_or_user
     security:
       - bearerAuth: []
     parameters:
@@ -39,7 +39,7 @@
     tags: [transfer]
     summary: 签发导入导出产物短时下载授权
     operationId: transferDownloadGrant
-    x-chaimir-audience: user
+    x-chaimir-audience: platform_or_user
     security:
       - bearerAuth: []
     parameters:

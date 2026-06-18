@@ -324,20 +324,10 @@
     security: [{ serviceAuth: [] }]
     parameters: [{ name: tenant_id, in: query, schema: { type: integer, format: int64 } }]
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
-/api/v1/contest/internal/students/{id}/achievements:
-  get:
-    tags: [contest]
-    summary: 内部读取学生竞赛成就
-    operationId: contestInternalAchievements
-    x-chaimir-audience: internal
-    x-chaimir-internal: true
-    security: [{ serviceAuth: [] }]
-    parameters: [{ $ref: "#/components/parameters/IDPath" }]
-    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
 /api/v1/contest/internal/students/{id}/contest-achievements:
   get:
     tags: [contest]
-    summary: 内部读取学生竞赛成就兼容路径
+    summary: 内部读取学生竞赛成就
     operationId: contestInternalContestAchievements
     x-chaimir-audience: internal
     x-chaimir-internal: true

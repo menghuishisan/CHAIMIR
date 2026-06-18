@@ -42,6 +42,7 @@ type ProblemRequest struct {
 	ItemVersion  string         `json:"item_version"`
 	Score        int32          `json:"score"`
 	DynamicScore map[string]any `json:"dynamic_score"`
+	BattleConfig map[string]any `json:"battle_config"`
 	BattleRule   int16          `json:"battle_rule"`
 	Seq          int32          `json:"seq"`
 }
@@ -54,6 +55,7 @@ type ProblemDTO struct {
 	ItemVersion  string         `json:"item_version"`
 	Score        int32          `json:"score"`
 	DynamicScore map[string]any `json:"dynamic_score,omitempty"`
+	BattleConfig map[string]any `json:"battle_config,omitempty"`
 	BattleRule   int16          `json:"battle_rule,omitempty"`
 	Seq          int32          `json:"seq"`
 	Face         map[string]any `json:"face,omitempty"`

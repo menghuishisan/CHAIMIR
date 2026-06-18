@@ -107,7 +107,15 @@ func (s *Service) PlatformDashboard(ctx context.Context) (DashboardDTO, error) {
 	if err != nil {
 		return DashboardDTO{}, apperr.ErrAdminDashboardIdentityFailed.WithCause(err)
 	}
-	return DashboardDTO{Scope: ScopeGlobal, TenantCount: stats.TenantCount, AccountCount: stats.AccountCount, TeacherCount: stats.TeacherCount, StudentCount: stats.StudentCount, ActiveAccountCount: stats.ActiveAccountCount, PendingApplyCount: stats.PendingApplyCount, GeneratedAt: timex.Now()}, nil
+	tenants, err := s.identity.ListTenants(ctx)
+	if err != nil {
+		return DashboardDTO{}, apperr.ErrAdminDashboardIdentityFailed.WithCause(err)
+	}
+	ops, err := s.aggregateTenantOperations(ctx, tenants)
+	if err != nil {
+		return DashboardDTO{}, err
+	}
+	return DashboardDTO{Scope: ScopeGlobal, TenantCount: stats.TenantCount, AccountCount: stats.AccountCount, TeacherCount: stats.TeacherCount, StudentCount: stats.StudentCount, ActiveAccountCount: stats.ActiveAccountCount, CourseCount: ops.CourseCount, ActiveCourseCount: ops.ActiveCourseCount, ExperimentCount: ops.ExperimentCount, ActiveInstanceCount: ops.ActiveInstanceCount, ContestCount: ops.ContestCount, ActiveContestCount: ops.ActiveContestCount, ActiveSandboxCount: ops.ActiveSandboxCount, PendingApplyCount: stats.PendingApplyCount, ResourceQuotaSnapshot: ops.ResourceQuotaSnapshot(), GeneratedAt: timex.Now()}, nil
 }
 
 // SchoolDashboard 聚合学校级看板。
@@ -186,12 +194,12 @@ func (s *Service) SchoolStatistics(ctx context.Context, fromDate, toDate string)
 // RunStatisticsSnapshotOnce 生成当天平台与租户统计快照。
 func (s *Service) RunStatisticsSnapshotOnce(ctx context.Context) error {
 	statDate := timex.Now().Format("2006-01-02")
-	if err := s.snapshotGlobalStats(ctx, statDate); err != nil {
-		return err
-	}
 	tenants, err := s.identity.ListTenants(ctx)
 	if err != nil {
 		return apperr.ErrAdminStatisticsInvalid.WithCause(err)
+	}
+	if err := s.snapshotGlobalStats(ctx, statDate, tenants); err != nil {
+		return err
 	}
 	for _, item := range tenants {
 		if item.TenantID <= 0 {
@@ -228,6 +236,8 @@ func (s *Service) QueryAudit(ctx context.Context, query contracts.AuditQuery) (c
 	}
 	if !id.IsPlatform {
 		query.TenantID = id.TenantID
+	} else {
+		query.IncludePlatform = true
 	}
 	result, err := s.auditRead.QueryAuditLogs(ctx, query)
 	if err != nil {
@@ -244,9 +254,7 @@ func (s *Service) ExportAuditCSV(ctx context.Context, query contracts.AuditQuery
 	if err != nil {
 		return transfer.TaskDTO{}, err
 	}
-	query.Page = 1
-	query.Size = 1000
-	result, err := s.QueryAudit(ctx, query)
+	result, err := s.collectAuditExportRows(ctx, query)
 	if err != nil {
 		return transfer.TaskDTO{}, err
 	}
@@ -267,17 +275,18 @@ func (s *Service) ExportAuditCSV(ctx context.Context, query contracts.AuditQuery
 		return transfer.TaskDTO{}, apperr.ErrAdminAuditExportCSVFailed.WithCause(err)
 	}
 	plan, err := s.files.PlanUpload(ctx, storage.PlanUploadRequest{
-		TenantID:        id.TenantID,
-		AccountID:       id.AccountID,
-		Module:          "transfer",
-		ResourceType:    string(transfer.ChannelExport),
-		ResourceID:      fmt.Sprint(task.TaskID),
-		FileName:        fileName,
-		ContentType:     "text/csv; charset=utf-8",
-		Size:            int64(len(data)),
-		ExpectedBucket:  s.storage.BucketReport(),
-		AllowedFileName: true,
-		Content:         data,
+		TenantID:           id.TenantID,
+		AccountID:          id.AccountID,
+		AllowPlatformScope: id.IsPlatform,
+		Module:             "transfer",
+		ResourceType:       string(transfer.ChannelExport),
+		ResourceID:         fmt.Sprint(task.TaskID),
+		FileName:           fileName,
+		ContentType:        "text/csv; charset=utf-8",
+		Size:               int64(len(data)),
+		ExpectedBucket:     s.storage.BucketReport(),
+		AllowedFileName:    true,
+		Content:            data,
 	})
 	if err != nil {
 		return transfer.TaskDTO{}, apperr.ErrAdminAuditExportUploadPlanFailed.WithCause(err)
@@ -293,6 +302,29 @@ func (s *Service) ExportAuditCSV(ctx context.Context, query contracts.AuditQuery
 		return transfer.TaskDTO{}, apperr.ErrAdminAuditWriteFailed.WithCause(err)
 	}
 	return exportTaskDTO(completed), nil
+}
+
+// collectAuditExportRows 按统一分页上限拉取当前权限范围内全部匹配审计记录。
+func (s *Service) collectAuditExportRows(ctx context.Context, query contracts.AuditQuery) (contracts.AuditQueryResult, error) {
+	var out contracts.AuditQueryResult
+	for page := int32(1); ; page++ {
+		query.Page = page
+		query.Size = 0
+		result, err := s.QueryAudit(ctx, query)
+		if err != nil {
+			return contracts.AuditQueryResult{}, err
+		}
+		if out.Page == 0 {
+			out.Page = 1
+			out.Size = result.Size
+			out.Total = result.Total
+		}
+		out.List = append(out.List, result.List...)
+		if len(result.List) == 0 || int64(len(out.List)) >= result.Total {
+			break
+		}
+	}
+	return out, nil
 }
 
 // auditCSVBytes 将审计查询结果编码为 CSV 文件内容。
@@ -321,7 +353,14 @@ func (s *Service) ListConfigs(ctx context.Context, scope int16) ([]ConfigDTO, er
 		return nil, err
 	}
 	tenantID := int64(0)
-	if !id.IsPlatform {
+	if id.IsPlatform {
+		if scope == 0 {
+			scope = ScopeGlobal
+		}
+		if scope != ScopeGlobal {
+			return nil, apperr.ErrAdminConfigInvalid
+		}
+	} else {
 		scope = ScopeTenant
 		tenantID = id.TenantID
 	}
@@ -347,6 +386,9 @@ func (s *Service) UpdateConfig(ctx context.Context, key string, req ConfigUpdate
 	if !id.IsPlatform {
 		req.Scope = ScopeTenant
 		req.TenantID = id.TenantID
+	}
+	if id.IsPlatform && req.Scope == ScopeTenant {
+		return ConfigDTO{}, apperr.ErrAdminConfigInvalid
 	}
 	protected, err := secretmap.Protect(s.secretCipher, req.Value, "系统配置")
 	if err != nil {
@@ -396,6 +438,8 @@ func (s *Service) ListConfigHistory(ctx context.Context, scope int16, tenantID i
 	if !id.IsPlatform {
 		scope = ScopeTenant
 		tenantID = id.TenantID
+	} else if scope != ScopeGlobal {
+		return nil, apperr.ErrAdminConfigInvalid
 	}
 	return runAdminRead(ctx, s.store, tenantID, func(ctx context.Context, tx TxStore) ([]ConfigChangeLogDTO, error) {
 		cfg, err := tx.GetSystemConfig(ctx, scope, tenantID, key)
@@ -411,7 +455,7 @@ func (s *Service) ListConfigHistory(ctx context.Context, scope int16, tenantID i
 }
 
 // RollbackConfig 把配置回退到指定历史记录的变更前值。
-func (s *Service) RollbackConfig(ctx context.Context, key string, req ConfigUpdateRequest) (ConfigDTO, error) {
+func (s *Service) RollbackConfig(ctx context.Context, key string, req ConfigRollbackRequest) (ConfigDTO, error) {
 	id, err := s.currentAdminIdentity(ctx)
 	if err != nil {
 		return ConfigDTO{}, err
@@ -423,6 +467,9 @@ func (s *Service) RollbackConfig(ctx context.Context, key string, req ConfigUpda
 	if !id.IsPlatform {
 		req.Scope = ScopeTenant
 		req.TenantID = id.TenantID
+	}
+	if id.IsPlatform && req.Scope == ScopeTenant {
+		return ConfigDTO{}, apperr.ErrAdminConfigInvalid
 	}
 	if err := validateScopeTenant(req.Scope, req.TenantID); err != nil {
 		return ConfigDTO{}, err
@@ -461,7 +508,14 @@ func (s *Service) ListAlertRules(ctx context.Context, scope int16) ([]AlertRuleD
 		return nil, err
 	}
 	tenantID := int64(0)
-	if !id.IsPlatform {
+	if id.IsPlatform {
+		if scope == 0 {
+			scope = ScopeGlobal
+		}
+		if scope != ScopeGlobal {
+			return nil, apperr.ErrAdminAlertInvalid
+		}
+	} else {
 		scope = ScopeTenant
 		tenantID = id.TenantID
 	}
@@ -479,6 +533,9 @@ func (s *Service) CreateAlertRule(ctx context.Context, req AlertRuleRequest) (Al
 	if !id.IsPlatform {
 		req.Scope = ScopeTenant
 		req.TenantID = id.TenantID
+	}
+	if id.IsPlatform && req.Scope == ScopeTenant {
+		return AlertRuleDTO{}, apperr.ErrAdminAlertInvalid
 	}
 	if err := validateAlertRule(req); err != nil {
 		return AlertRuleDTO{}, err
@@ -507,6 +564,9 @@ func (s *Service) UpdateAlertRule(ctx context.Context, ruleID int64, req AlertRu
 	if !id.IsPlatform {
 		req.Scope = ScopeTenant
 		req.TenantID = id.TenantID
+	}
+	if id.IsPlatform && req.Scope == ScopeTenant {
+		return AlertRuleDTO{}, apperr.ErrAdminAlertInvalid
 	}
 	if err := validateAlertRule(req); err != nil {
 		return AlertRuleDTO{}, err
@@ -553,7 +613,7 @@ func (s *Service) HandleAlertEvent(ctx context.Context, eventID int64, req Alert
 	var out AlertEventDTO
 	err = s.runWrite(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
 		var err error
-		out, err = tx.HandleAlertEvent(ctx, eventID, req.Status, id.AccountID)
+		out, err = tx.HandleAlertEvent(ctx, eventID, id.TenantID, req.Status, id.AccountID)
 		return err
 	})
 	if err != nil {
@@ -598,31 +658,6 @@ func (s *Service) ListBackups(ctx context.Context, page, size int) ([]BackupReco
 	return runAdminRead(ctx, s.store, 0, func(ctx context.Context, tx TxStore) ([]BackupRecordDTO, error) {
 		return tx.ListBackupRecords(ctx, page, size)
 	})
-}
-
-// TriggerBackup 创建手工备份记录。
-func (s *Service) TriggerBackup(ctx context.Context, req BackupTriggerRequest) (BackupRecordDTO, error) {
-	id, err := requirePlatform(ctx)
-	if err != nil {
-		return BackupRecordDTO{}, err
-	}
-	if req.Type != BackupTypeFull && req.Type != BackupTypeIncremental {
-		return BackupRecordDTO{}, apperr.ErrAdminBackupInvalid
-	}
-	var out BackupRecordDTO
-	err = s.store.PlatformTx(ctx, func(ctx context.Context, tx TxStore) error {
-		var err error
-		ref := fmt.Sprintf("backup://manual/%d", s.ids.Generate())
-		out, err = tx.CreateBackupRecord(ctx, s.ids.Generate(), req.Type, ref, 0, BackupStatusRunning)
-		return err
-	})
-	if err != nil {
-		return BackupRecordDTO{}, apperr.ErrAdminBackupInvalid.WithCause(err)
-	}
-	if err := s.writeAudit(ctx, id, "admin.backup.trigger", "backup_record", out.ID, map[string]any{"type": req.Type}); err != nil {
-		return BackupRecordDTO{}, apperr.ErrAdminAuditWriteFailed.WithCause(err)
-	}
-	return out, nil
 }
 
 // runWrite 按是否存在 tenant_id 选择平台事务或租户 RLS 事务。
@@ -716,18 +751,34 @@ func (s *Service) writeAudit(ctx context.Context, id tenant.Identity, action, ta
 }
 
 // snapshotGlobalStats 聚合平台级只读指标并写入 M9 自有统计快照。
-func (s *Service) snapshotGlobalStats(ctx context.Context, statDate string) error {
+func (s *Service) snapshotGlobalStats(ctx context.Context, statDate string, tenants []contracts.TenantSummary) error {
 	stats, err := s.stats.PlatformStats(ctx)
 	if err != nil {
 		return apperr.ErrAdminStatisticsInvalid.WithCause(err)
 	}
+	ops, err := s.aggregateTenantOperations(ctx, tenants)
+	if err != nil {
+		return apperr.ErrAdminStatisticsInvalid.WithCause(err)
+	}
 	metrics := map[string]any{
-		"tenant_count":         stats.TenantCount,
-		"account_count":        stats.AccountCount,
-		"teacher_count":        stats.TeacherCount,
-		"student_count":        stats.StudentCount,
-		"active_account_count": stats.ActiveAccountCount,
-		"pending_apply_count":  stats.PendingApplyCount,
+		"tenant_count":           stats.TenantCount,
+		"account_count":          stats.AccountCount,
+		"teacher_count":          stats.TeacherCount,
+		"student_count":          stats.StudentCount,
+		"active_account_count":   stats.ActiveAccountCount,
+		"pending_apply_count":    stats.PendingApplyCount,
+		"course_count":           ops.CourseCount,
+		"active_course_count":    ops.ActiveCourseCount,
+		"learning_duration_sec":  ops.LearningDurationSec,
+		"experiment_count":       ops.ExperimentCount,
+		"active_instance_count":  ops.ActiveInstanceCount,
+		"contest_count":          ops.ContestCount,
+		"active_contest_count":   ops.ActiveContestCount,
+		"participant_count":      ops.ParticipantCount,
+		"active_sandbox_count":   ops.ActiveSandboxCount,
+		"max_concurrent_sandbox": ops.MaxConcurrentSandbox,
+		"max_cpu":                ops.MaxCPU,
+		"max_memory_mb":          ops.MaxMemoryMB,
 	}
 	return s.upsertStatistics(ctx, 0, ScopeGlobal, 0, statDate, metrics)
 }

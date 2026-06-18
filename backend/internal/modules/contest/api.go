@@ -91,7 +91,6 @@ func (a contestAPI) registerSharedRoutes(g gin.IRouter) {
 // registerInternalRoutes 注册内部只读接口。
 func (a contestAPI) registerInternalRoutes(g gin.IRouter) {
 	g.GET("/stats", a.internalStats)
-	g.GET("/students/:id/achievements", a.internalAchievements)
 	g.GET("/students/:id/contest-achievements", a.internalAchievements)
 }
 
@@ -405,7 +404,7 @@ func (a contestAPI) listCheatSuspects(c *gin.Context) {
 	if !ok {
 		return
 	}
-	threshold := 0.8
+	var threshold float64
 	if raw := strings.TrimSpace(c.Query("threshold")); raw != "" {
 		v, err := strconv.ParseFloat(raw, 64)
 		if err != nil || v <= 0 || v >= 1 {

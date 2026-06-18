@@ -9,9 +9,11 @@ import (
 	"strconv"
 	"strings"
 
+	"chaimir/internal/contracts"
 	"chaimir/internal/platform/storage"
 	"chaimir/internal/platform/upload"
 	"chaimir/pkg/apperr"
+	pkgcrypto "chaimir/pkg/crypto"
 	"chaimir/pkg/logging"
 )
 
@@ -41,6 +43,16 @@ func (s *Service) restoreInitCodeIfNeeded(ctx context.Context, sb Sandbox, runti
 
 // restoreArchiveToWorkspace 把对象存储中的已校验归档安全解包到沙箱工作区。
 func (s *Service) restoreArchiveToWorkspace(ctx context.Context, sb Sandbox, runtime Runtime, objectRef string) error {
+	return s.restoreArchiveToWorkspaceDir(ctx, sb, runtime, objectRef, ".")
+}
+
+// restoreArchiveToWorkspaceDir 把对象存储中的已校验归档安全解包到沙箱工作区指定子目录。
+func (s *Service) restoreArchiveToWorkspaceDir(ctx context.Context, sb Sandbox, runtime Runtime, objectRef, targetDir string) error {
+	return s.restoreArchiveToWorkspaceDirChecked(ctx, sb, runtime, objectRef, "", targetDir)
+}
+
+// restoreArchiveToWorkspaceDirChecked 校验对象归属、可选哈希和归档安全后恢复到工作区。
+func (s *Service) restoreArchiveToWorkspaceDirChecked(ctx context.Context, sb Sandbox, runtime Runtime, objectRef, expectedHash, targetDir string) error {
 	ref, err := storage.ParseObjectRef(objectRef)
 	if err != nil {
 		return apperr.ErrSandboxInitObjectRefInvalid.WithCause(err)
@@ -60,15 +72,41 @@ func (s *Service) restoreArchiveToWorkspace(ctx context.Context, sb Sandbox, run
 	if sizeResult == upload.SizeEmpty || sizeResult == upload.SizeTooLarge {
 		return apperr.ErrSandboxInitArchiveTooLarge
 	}
+	if strings.TrimSpace(expectedHash) != "" && !strings.EqualFold(strings.TrimSpace(expectedHash), pkgcrypto.SHA256Hex(data)) {
+		return apperr.ErrSandboxInitArchiveInvalid
+	}
 	tarball, err := upload.SafeArchiveTar(ref.Key, data, upload.ArchiveLimits{MaxFiles: s.cfg.InitArchiveMaxFiles, MaxUnpackedBytes: s.cfg.InitArchiveMaxUnpackedBytes})
 	if err != nil {
 		return apperr.ErrSandboxInitArchiveInvalid.WithCause(err)
 	}
-	command := workspaceCommand(runtime.AdapterSpec.WorkspaceOps.UnpackTar, runtime.AdapterSpec.WorkspaceDir, runtime.AdapterSpec.WorkspaceDir, "")
+	target := runtime.AdapterSpec.WorkspaceDir
+	if strings.TrimSpace(targetDir) != "" && strings.TrimSpace(targetDir) != "." {
+		relative, err := validateWorkspaceListPath(targetDir)
+		if err != nil {
+			return err
+		}
+		target = path.Join(runtime.AdapterSpec.WorkspaceDir, relative)
+	}
+	command := workspaceCommand(runtime.AdapterSpec.WorkspaceOps.UnpackTar, runtime.AdapterSpec.WorkspaceDir, target, "")
 	if _, stderr, err := s.orchestrator.Exec(ctx, sb.Namespace, runtimeExecTarget(runtime), command, tarball, false); err != nil {
 		return apperr.ErrSandboxInitExecFailed.WithCause(fmt.Errorf("%w: %s", err, string(stderr)))
 	}
 	return nil
+}
+
+// RestoreSandboxArchive 将公开归档恢复到工作区子目录,供上层编排真实代码对局等场景使用。
+func (s *Service) RestoreSandboxArchive(ctx context.Context, req contracts.SandboxArchiveRestoreRequest) error {
+	if req.TenantID <= 0 || req.SandboxID <= 0 || !validSourceRef(req.SourceRef) || strings.TrimSpace(req.ObjectRef) == "" {
+		return apperr.ErrSandboxCreateRequestInvalid
+	}
+	sb, runtime, err := s.sandboxRuntimeForSource(ctx, req.TenantID, req.SandboxID, req.SourceRef)
+	if err != nil {
+		return err
+	}
+	if err := s.markSandboxExecutionActive(ctx, sb); err != nil {
+		return err
+	}
+	return s.restoreArchiveToWorkspaceDirChecked(ctx, sb, runtime, req.ObjectRef, req.ExpectedHash, req.TargetDir)
 }
 
 // runInitScriptIfNeeded 在沙箱内部执行已授权初始化脚本引用,用于重放部署动作。

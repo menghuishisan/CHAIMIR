@@ -80,6 +80,7 @@ type ContestProblem struct {
 	ItemVersion  string      `json:"item_version"`
 	Score        int32       `json:"score"`
 	DynamicScore []byte      `json:"dynamic_score"`
+	BattleConfig []byte      `json:"battle_config"`
 	BattleRule   pgtype.Int2 `json:"battle_rule"`
 	Seq          int32       `json:"seq"`
 }

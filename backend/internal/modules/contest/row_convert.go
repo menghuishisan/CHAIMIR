@@ -24,7 +24,11 @@ func problemFromRow(row sqlcgen.ContestProblem) (ContestProblem, error) {
 	if err != nil {
 		return ContestProblem{}, err
 	}
-	return ContestProblem{ID: row.ID, TenantID: row.TenantID, ContestID: row.ContestID, ItemCode: row.ItemCode, ItemVersion: row.ItemVersion, Score: row.Score, DynamicScore: dynamic, BattleRule: pgtypex.Int2Value(row.BattleRule), Seq: row.Seq}, nil
+	battleConfig, err := decodeMap(row.BattleConfig, apperr.ErrContestProblemInvalid)
+	if err != nil {
+		return ContestProblem{}, err
+	}
+	return ContestProblem{ID: row.ID, TenantID: row.TenantID, ContestID: row.ContestID, ItemCode: row.ItemCode, ItemVersion: row.ItemVersion, Score: row.Score, DynamicScore: dynamic, BattleConfig: battleConfig, BattleRule: pgtypex.Int2Value(row.BattleRule), Seq: row.Seq}, nil
 }
 
 // teamFromRows 组合队伍和成员。

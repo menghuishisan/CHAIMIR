@@ -37,6 +37,9 @@ images:
   - name: chaimir/migrate
     newName: harbor.school.local/service/migrate
     newTag: "1.0.0"
+  - name: chaimir/cron
+    newName: harbor.school.local/service/cron
+    newTag: "1.0.0"
 
 # 私有化形态:school 单租户 + 关平台层。
 configMapGenerator:
@@ -51,17 +54,6 @@ configMapGenerator:
       - PG_SSLMODE=disable
 
 patches:
-  # 关平台层:删除平台级定时任务(镜像 GC 等带 chaimir.io/platform-level 标签)。
-  - target:
-      kind: CronJob
-      labelSelector: "chaimir.io/platform-level=true"
-    patch: |-
-      $patch: delete
-      apiVersion: batch/v1
-      kind: CronJob
-      metadata:
-        name: chaimir-image-gc
-        namespace: chaimir-system
   # 校内域名(私有化按校配置)。
   - target:
       kind: Ingress

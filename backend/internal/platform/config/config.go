@@ -189,14 +189,17 @@ type TransferConfig struct {
 
 // ContestConfig 描述竞赛外部源访问边界。
 type ContestConfig struct {
-	VulnSourceMaxResponseBytes    int64
-	VulnSourceTimeoutSeconds      int
-	MatchmakerPollIntervalSeconds int
-	MatchmakerBatchSize           int
-	SubmitRateLimitSeconds        int
-	FailedCooldownSeconds         int
-	BattleELOInitialScore         float64
-	BattleELOKFactor              float64
+	VulnSourceMaxResponseBytes       int64
+	VulnSourceTimeoutSeconds         int
+	MatchmakerPollIntervalSeconds    int
+	AutoArchivePollIntervalSeconds   int
+	BattleSandboxReadyTimeoutSeconds int
+	BattleSandboxReadyPollIntervalMs int
+	MatchmakerBatchSize              int
+	SubmitRateLimitSeconds           int
+	FailedCooldownSeconds            int
+	BattleELOInitialScore            float64
+	BattleELOKFactor                 float64
 }
 
 // NotifyConfig 描述通知事件消费和限频边界。
@@ -338,7 +341,8 @@ type MonitoringConfig struct {
 
 // SnowflakeConfig 描述雪花 ID 节点编号。
 type SnowflakeConfig struct {
-	NodeID int64
+	NodeID     int64
+	CronNodeID int64
 }
 
 // Load 从环境变量装载并校验配置;任何必填项缺失或格式错误都统一返回。
@@ -529,14 +533,17 @@ func Load() (*Config, error) {
 		TaskDownloadTTLSeconds: reqInt("TRANSFER_TASK_DOWNLOAD_TTL_SECONDS"),
 	}
 	c.Contest = ContestConfig{
-		VulnSourceMaxResponseBytes:    reqInt64("CONTEST_VULN_SOURCE_MAX_RESPONSE_BYTES"),
-		VulnSourceTimeoutSeconds:      reqInt("CONTEST_VULN_SOURCE_TIMEOUT_SECONDS"),
-		MatchmakerPollIntervalSeconds: reqInt("CONTEST_MATCHMAKER_POLL_INTERVAL_SECONDS"),
-		MatchmakerBatchSize:           reqInt("CONTEST_MATCHMAKER_BATCH_SIZE"),
-		SubmitRateLimitSeconds:        reqInt("CONTEST_SUBMIT_RATE_LIMIT_SECONDS"),
-		FailedCooldownSeconds:         reqInt("CONTEST_FAILED_COOLDOWN_SECONDS"),
-		BattleELOInitialScore:         reqFloat64("CONTEST_BATTLE_ELO_INITIAL_SCORE"),
-		BattleELOKFactor:              reqFloat64("CONTEST_BATTLE_ELO_K_FACTOR"),
+		VulnSourceMaxResponseBytes:       reqInt64("CONTEST_VULN_SOURCE_MAX_RESPONSE_BYTES"),
+		VulnSourceTimeoutSeconds:         reqInt("CONTEST_VULN_SOURCE_TIMEOUT_SECONDS"),
+		MatchmakerPollIntervalSeconds:    reqInt("CONTEST_MATCHMAKER_POLL_INTERVAL_SECONDS"),
+		AutoArchivePollIntervalSeconds:   reqInt("CONTEST_AUTO_ARCHIVE_POLL_INTERVAL_SECONDS"),
+		BattleSandboxReadyTimeoutSeconds: reqInt("CONTEST_BATTLE_SANDBOX_READY_TIMEOUT_SECONDS"),
+		BattleSandboxReadyPollIntervalMs: reqInt("CONTEST_BATTLE_SANDBOX_READY_POLL_INTERVAL_MS"),
+		MatchmakerBatchSize:              reqInt("CONTEST_MATCHMAKER_BATCH_SIZE"),
+		SubmitRateLimitSeconds:           reqInt("CONTEST_SUBMIT_RATE_LIMIT_SECONDS"),
+		FailedCooldownSeconds:            reqInt("CONTEST_FAILED_COOLDOWN_SECONDS"),
+		BattleELOInitialScore:            reqFloat64("CONTEST_BATTLE_ELO_INITIAL_SCORE"),
+		BattleELOKFactor:                 reqFloat64("CONTEST_BATTLE_ELO_K_FACTOR"),
 	}
 	c.Notify = NotifyConfig{
 		EventRetryMax:          reqInt("NOTIFY_EVENT_RETRY_MAX"),
@@ -644,7 +651,8 @@ func Load() (*Config, error) {
 		PanelsJSON: req("MONITORING_PANELS_JSON"),
 	}
 	c.Snowflake = SnowflakeConfig{
-		NodeID: reqInt64("SNOWFLAKE_NODE_ID"),
+		NodeID:     reqInt64("SNOWFLAKE_NODE_ID"),
+		CronNodeID: reqInt64("CRON_SNOWFLAKE_NODE_ID"),
 	}
 
 	// 第三步:集中执行跨字段约束和安全边界校验,避免运行时才暴露配置问题。
@@ -740,6 +748,15 @@ func Load() (*Config, error) {
 	}
 	if c.Contest.MatchmakerPollIntervalSeconds <= 0 {
 		errs = append(errs, "CONTEST_MATCHMAKER_POLL_INTERVAL_SECONDS 必须大于 0")
+	}
+	if c.Contest.AutoArchivePollIntervalSeconds <= 0 {
+		errs = append(errs, "CONTEST_AUTO_ARCHIVE_POLL_INTERVAL_SECONDS 必须大于 0")
+	}
+	if c.Contest.BattleSandboxReadyTimeoutSeconds <= 0 {
+		errs = append(errs, "CONTEST_BATTLE_SANDBOX_READY_TIMEOUT_SECONDS 必须大于 0")
+	}
+	if c.Contest.BattleSandboxReadyPollIntervalMs <= 0 {
+		errs = append(errs, "CONTEST_BATTLE_SANDBOX_READY_POLL_INTERVAL_MS 必须大于 0")
 	}
 	if c.Contest.MatchmakerBatchSize <= 0 {
 		errs = append(errs, "CONTEST_MATCHMAKER_BATCH_SIZE 必须大于 0")
@@ -872,6 +889,9 @@ func Load() (*Config, error) {
 	}
 	if c.Snowflake.NodeID < 0 || c.Snowflake.NodeID > 1023 {
 		errs = append(errs, "SNOWFLAKE_NODE_ID 必须在 0 到 1023 之间,且同一部署内每个后端副本必须唯一")
+	}
+	if c.Snowflake.CronNodeID < 0 || c.Snowflake.CronNodeID > 1023 {
+		errs = append(errs, "CRON_SNOWFLAKE_NODE_ID 必须在 0 到 1023 之间,且不得与后端服务副本节点号冲突")
 	}
 	if c.Sandbox.PrepullTimeoutSeconds <= 0 {
 		errs = append(errs, "SANDBOX_PREPULL_TIMEOUT_SECONDS 必须大于 0")

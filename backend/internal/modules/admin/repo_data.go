@@ -133,7 +133,7 @@ func (t *txStore) UpdateAlertRule(ctx context.Context, id int64, req AlertRuleRe
 	if err != nil {
 		return AlertRuleDTO{}, err
 	}
-	row, err := t.q.UpdateAlertRule(ctx, sqlcgen.UpdateAlertRuleParams{ID: id, Name: req.Name, Metric: req.Metric, Condition: condition, Level: req.Level, Enabled: req.Enabled})
+	row, err := t.q.UpdateAlertRule(ctx, sqlcgen.UpdateAlertRuleParams{ID: id, Name: req.Name, Metric: req.Metric, Condition: condition, Level: req.Level, Enabled: req.Enabled, Scope: req.Scope, TenantID: pgtypex.Int8When(req.TenantID, req.TenantID > 0)})
 	if err != nil {
 		return AlertRuleDTO{}, err
 	}
@@ -163,8 +163,8 @@ func (t *txStore) ListAlertEvents(ctx context.Context, status int16, tenantID in
 }
 
 // HandleAlertEvent 处理告警事件。
-func (t *txStore) HandleAlertEvent(ctx context.Context, id int64, status int16, handlerID int64) (AlertEventDTO, error) {
-	row, err := t.q.HandleAlertEvent(ctx, sqlcgen.HandleAlertEventParams{ID: id, Status: status, HandlerID: pgtypex.Int8(handlerID)})
+func (t *txStore) HandleAlertEvent(ctx context.Context, id, tenantID int64, status int16, handlerID int64) (AlertEventDTO, error) {
+	row, err := t.q.HandleAlertEvent(ctx, sqlcgen.HandleAlertEventParams{ID: id, Status: status, HandlerID: pgtypex.Int8(handlerID), TenantID: pgtypex.Int8When(tenantID, tenantID > 0)})
 	if err != nil {
 		return AlertEventDTO{}, err
 	}
@@ -214,13 +214,13 @@ func (t *txStore) UpsertPlatformStatistics(ctx context.Context, id int64, scope 
 	return StatisticsDTO{Scope: row.Scope, TenantID: pgtypex.Int8Value(row.TenantID), Date: pgtypex.DateValue(row.StatDate).Format("2006-01-02"), Metrics: jsonx.ObjectMap(row.Metrics)}, nil
 }
 
-// CreateBackupRecord 创建备份记录。
-func (t *txStore) CreateBackupRecord(ctx context.Context, id int64, typ int16, ref string, sizeBytes int64, status int16) (BackupRecordDTO, error) {
+// CreateBackupRecord 写入真实运维备份执行结果。
+func (t *txStore) CreateBackupRecord(ctx context.Context, id int64, req BackupRecordCreate) (BackupRecordDTO, error) {
 	finishedAt := pgtype.Timestamptz{}
-	if status == BackupStatusSucceeded || status == BackupStatusFailed {
+	if req.Status == BackupStatusSucceeded || req.Status == BackupStatusFailed {
 		finishedAt = timex.RequiredTimestamptz(timex.Now())
 	}
-	row, err := t.q.CreateBackupRecord(ctx, sqlcgen.CreateBackupRecordParams{ID: id, Type: typ, StorageRef: ref, SizeBytes: sizeBytes, Status: status, FinishedAt: finishedAt})
+	row, err := t.q.CreateBackupRecord(ctx, sqlcgen.CreateBackupRecordParams{ID: id, Type: req.Type, StorageRef: req.StorageRef, SizeBytes: req.SizeBytes, Status: req.Status, FinishedAt: finishedAt})
 	if err != nil {
 		return BackupRecordDTO{}, err
 	}
@@ -262,7 +262,7 @@ func alertEventDTO(row sqlcgen.AlertEvent) AlertEventDTO {
 
 // backupDTO 转换备份记录行。
 func backupDTO(row sqlcgen.BackupRecord) BackupRecordDTO {
-	return BackupRecordDTO{ID: row.ID, Type: row.Type, StorageRef: row.StorageRef, SizeBytes: row.SizeBytes, Status: row.Status, StartedAt: row.StartedAt.Time.Format(time.RFC3339), FinishedAt: formatOptionalTime(row.FinishedAt)}
+	return BackupRecordDTO{ID: row.ID, Type: row.Type, SizeBytes: row.SizeBytes, Status: row.Status, StartedAt: row.StartedAt.Time.Format(time.RFC3339), FinishedAt: formatOptionalTime(row.FinishedAt)}
 }
 
 // formatOptionalTime 把可空时间转换为 API 字符串。

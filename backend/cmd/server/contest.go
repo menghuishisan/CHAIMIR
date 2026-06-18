@@ -113,8 +113,8 @@ func contestAutoArchiveTask(cfg config.ContestConfig, svc *contest.Service) (bac
 	if svc == nil {
 		return background.Task{}, fmt.Errorf("contest auto archive task 缺少 service")
 	}
-	if cfg.MatchmakerPollIntervalSeconds <= 0 {
-		return background.Task{}, fmt.Errorf("CONTEST_MATCHMAKER_POLL_INTERVAL_SECONDS 必须大于 0")
+	if cfg.AutoArchivePollIntervalSeconds <= 0 {
+		return background.Task{}, fmt.Errorf("CONTEST_AUTO_ARCHIVE_POLL_INTERVAL_SECONDS 必须大于 0")
 	}
-	return background.Task{Name: "contest.auto_archive", Interval: time.Duration(cfg.MatchmakerPollIntervalSeconds) * time.Second, Run: svc.RunAutoArchiveOnce}, nil
+	return background.Task{Name: "contest.auto_archive", Interval: time.Duration(cfg.AutoArchivePollIntervalSeconds) * time.Second, Run: svc.RunAutoArchiveOnce}, nil
 }

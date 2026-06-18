@@ -28,6 +28,13 @@ type Storage struct {
 	bucketBackup string
 }
 
+// ObjectInfo 是统一对象存储对外暴露的安全对象摘要。
+type ObjectInfo struct {
+	Bucket string
+	Key    string
+	Size   int64
+}
+
 // TenantQuota 表示统一文件服务执行上传前校验所需的租户文件配额快照。
 type TenantQuota struct {
 	MaxFiles  int64
@@ -109,6 +116,9 @@ func (q TenantQuota) AllowUpload(fileCount, totalBytes int64) error {
 
 // ObjectKey 按统一约定生成对象 key:{tenant_id}/{module}/{resourceType}/{parts...}。
 func ObjectKey(tenantID int64, module, resourceType string, parts ...string) (string, error) {
+	if tenantID < 0 {
+		return "", fmt.Errorf("对象 key 缺少租户或平台作用域")
+	}
 	segs := append([]string{strconv.FormatInt(tenantID, 10), module, resourceType}, parts...)
 	for _, seg := range segs {
 		if seg != strings.TrimSpace(seg) || seg == "" || seg == "." || seg == ".." || strings.Contains(seg, "/") || strings.Contains(seg, "\\") {
@@ -162,6 +172,52 @@ func (s *Storage) Delete(ctx context.Context, bucket, key string) error {
 		return fmt.Errorf("删除对象 %s/%s 失败: %w", bucket, key, err)
 	}
 	return nil
+}
+
+// ListObjects 流式枚举指定 bucket 下的安全对象摘要,供受控后台任务生成备份清单。
+func (s *Storage) ListObjects(ctx context.Context, bucket, prefix string) (<-chan ObjectInfo, <-chan error, error) {
+	if s == nil || s.client == nil {
+		return nil, nil, fmt.Errorf("对象存储客户端未初始化")
+	}
+	if !safeObjectRefBucket(bucket) {
+		return nil, nil, ErrObjectRefInvalid
+	}
+	if prefix != "" && !safeObjectRefKey(strings.TrimSuffix(prefix, "/")) {
+		return nil, nil, ErrObjectRefInvalid
+	}
+	out := make(chan ObjectInfo)
+	errs := make(chan error, 1)
+	go func() {
+		defer close(out)
+		defer close(errs)
+		for obj := range s.client.ListObjects(ctx, bucket, minio.ListObjectsOptions{Prefix: prefix, Recursive: true}) {
+			if obj.Err != nil {
+				errs <- fmt.Errorf("枚举对象 %s 失败: %w", bucket, obj.Err)
+				return
+			}
+			if obj.Key == "" || !safeObjectRefKey(obj.Key) {
+				errs <- ErrObjectRefInvalid
+				return
+			}
+			out <- ObjectInfo{Bucket: bucket, Key: obj.Key, Size: obj.Size}
+		}
+	}()
+	return out, errs, nil
+}
+
+// CopyObject 在对象存储服务端复制对象,用于备份任务避免把大对象落到本地磁盘。
+func (s *Storage) CopyObject(ctx context.Context, srcBucket, srcKey, dstBucket, dstKey string) (int64, error) {
+	if s == nil || s.client == nil {
+		return 0, fmt.Errorf("对象存储客户端未初始化")
+	}
+	if !safeObjectRefBucket(srcBucket) || !safeObjectRefBucket(dstBucket) || !safeObjectRefKey(srcKey) || !safeObjectRefKey(dstKey) {
+		return 0, ErrObjectRefInvalid
+	}
+	info, err := s.client.CopyObject(ctx, minio.CopyDestOptions{Bucket: dstBucket, Object: dstKey}, minio.CopySrcOptions{Bucket: srcBucket, Object: srcKey})
+	if err != nil {
+		return 0, fmt.Errorf("复制对象 %s/%s 到 %s/%s 失败: %w", srcBucket, srcKey, dstBucket, dstKey, err)
+	}
+	return info.Size, nil
 }
 
 // BucketCode 返回代码桶名。

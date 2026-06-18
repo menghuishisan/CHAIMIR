@@ -43,7 +43,6 @@ func RegisterRoutes(r gin.IRouter, svc *Service, authn *auth.Manager, roles cont
 	mixed.GET("/alert-events", api.listAlertEvents)
 	mixed.POST("/alert-events/:id/handle", api.handleAlertEvent)
 	platform.GET("/backups", api.listBackups)
-	platform.POST("/backups/trigger", api.triggerBackup)
 	return nil
 }
 
@@ -105,7 +104,7 @@ func (a adminAPI) queryAudit(c *gin.Context) {
 
 // exportAudit 导出审计 CSV。
 func (a adminAPI) exportAudit(c *gin.Context) {
-	query, ok := auditQuery(c, 1, 1000)
+	query, ok := auditQuery(c, 1, 0)
 	if !ok {
 		return
 	}
@@ -139,15 +138,21 @@ func (a adminAPI) configHistory(c *gin.Context) {
 	if !ok {
 		return
 	}
-	scope, _ := httpx.QueryInt(c, "scope", httpx.QueryIntRule{Default: 1, Min: 1, Max: 2, HasMax: true})
-	tenantID, _ := httpx.QueryInt(c, "tenant_id", httpx.QueryIntRule{Default: 0, Min: 0})
+	scope, ok := httpx.QueryInt(c, "scope", httpx.QueryIntRule{Default: 1, Min: 1, Max: 2, HasMax: true})
+	if !ok {
+		return
+	}
+	tenantID, ok := httpx.QueryInt(c, "tenant_id", httpx.QueryIntRule{Default: 0, Min: 0})
+	if !ok {
+		return
+	}
 	out4, err := a.svc.ListConfigHistory(c.Request.Context(), int16(scope), tenantID, c.Param("key"), page, size)
 	httpx.Write(c, out4, err)
 }
 
 // rollbackConfig 回滚配置。
 func (a adminAPI) rollbackConfig(c *gin.Context) {
-	var req ConfigUpdateRequest
+	var req ConfigRollbackRequest
 	if !httpx.BindJSONWithError(c, &req, apperr.ErrAdminConfigInvalid) {
 		return
 	}
@@ -157,7 +162,10 @@ func (a adminAPI) rollbackConfig(c *gin.Context) {
 
 // listAlertRules 查询告警规则。
 func (a adminAPI) listAlertRules(c *gin.Context) {
-	scope, _ := httpx.QueryInt(c, "scope", httpx.QueryIntRule{Default: 0, Min: 0, Max: 2, HasMax: true})
+	scope, ok := httpx.QueryInt(c, "scope", httpx.QueryIntRule{Default: 0, Min: 0, Max: 2, HasMax: true})
+	if !ok {
+		return
+	}
 	out6, err := a.svc.ListAlertRules(c.Request.Context(), int16(scope))
 	httpx.Write(c, out6, err)
 }
@@ -192,7 +200,10 @@ func (a adminAPI) listAlertEvents(c *gin.Context) {
 	if !ok {
 		return
 	}
-	status, _ := httpx.QueryInt(c, "status", httpx.QueryIntRule{Default: 0, Min: 0, Max: 3, HasMax: true})
+	status, ok := httpx.QueryInt(c, "status", httpx.QueryIntRule{Default: 0, Min: 0, Max: 3, HasMax: true})
+	if !ok {
+		return
+	}
 	out9, err := a.svc.ListAlertEvents(c.Request.Context(), int16(status), page, size)
 	httpx.Write(c, out9, err)
 }
@@ -225,16 +236,6 @@ func (a adminAPI) listBackups(c *gin.Context) {
 	}
 	out11, err := a.svc.ListBackups(c.Request.Context(), page, size)
 	httpx.Write(c, out11, err)
-}
-
-// triggerBackup 触发备份记录。
-func (a adminAPI) triggerBackup(c *gin.Context) {
-	var req BackupTriggerRequest
-	if !httpx.BindJSONWithError(c, &req, apperr.ErrAdminBackupInvalid) {
-		return
-	}
-	out12, err := a.svc.TriggerBackup(c.Request.Context(), req)
-	httpx.Write(c, out12, err)
 }
 
 // auditQuery 解析审计中心文档定义的过滤条件。

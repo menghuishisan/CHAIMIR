@@ -205,13 +205,14 @@ func (m Manager) BuildDownloadGrant(task Task, now time.Time) (string, storage.D
 		DownloadGrantTTL: m.Config.DownloadGrantTTL,
 	}
 	return service.IssueDownloadGrant(storage.IssueDownloadGrantRequest{
-		TenantID:     task.TenantID,
-		AccountID:    task.AccountID,
-		ObjectRef:    task.Artifact.ObjectRef,
-		Module:       "transfer",
-		ResourceType: string(task.Channel),
-		ResourceID:   strconv.FormatInt(task.TaskID, 10),
-		ExpiresAt:    now.Add(m.Config.DownloadGrantTTL),
+		TenantID:           task.TenantID,
+		AccountID:          task.AccountID,
+		AllowPlatformScope: task.TenantID == 0,
+		ObjectRef:          task.Artifact.ObjectRef,
+		Module:             "transfer",
+		ResourceType:       string(task.Channel),
+		ResourceID:         strconv.FormatInt(task.TaskID, 10),
+		ExpiresAt:          now.Add(m.Config.DownloadGrantTTL),
 	})
 }
 

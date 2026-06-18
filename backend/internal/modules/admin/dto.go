@@ -10,6 +10,14 @@ type ConfigUpdateRequest struct {
 	ChangeLogID int64          `json:"change_log_id,string,omitempty"`
 }
 
+// ConfigRollbackRequest 是配置回滚请求,只携带回滚所需的历史记录和当前版本。
+type ConfigRollbackRequest struct {
+	Scope       int16 `json:"scope"`
+	TenantID    int64 `json:"tenant_id,string,omitempty"`
+	Version     int32 `json:"version"`
+	ChangeLogID int64 `json:"change_log_id,string,omitempty"`
+}
+
 // AlertRuleRequest 是告警规则创建和编辑请求。
 type AlertRuleRequest struct {
 	Scope     int16          `json:"scope"`
@@ -24,11 +32,6 @@ type AlertRuleRequest struct {
 // AlertEventRequest 是告警处理请求。
 type AlertEventRequest struct {
 	Status int16 `json:"status"`
-}
-
-// BackupTriggerRequest 是手工触发备份记录请求。
-type BackupTriggerRequest struct {
-	Type int16 `json:"type"`
 }
 
 // ConfigChangeLogDTO 表示配置变更历史响应。
@@ -81,9 +84,16 @@ type StatisticsDTO struct {
 type BackupRecordDTO struct {
 	ID         int64  `json:"id,string"`
 	Type       int16  `json:"type"`
-	StorageRef string `json:"storage_ref"`
 	SizeBytes  int64  `json:"size_bytes"`
 	Status     int16  `json:"status"`
 	StartedAt  string `json:"started_at"`
 	FinishedAt string `json:"finished_at,omitempty"`
+}
+
+// BackupRecordCreate 是受控运维任务写入备份记录的内部请求。
+type BackupRecordCreate struct {
+	Type       int16
+	StorageRef string
+	SizeBytes  int64
+	Status     int16
 }

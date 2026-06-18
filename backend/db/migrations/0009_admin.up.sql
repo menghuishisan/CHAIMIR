@@ -82,7 +82,7 @@ CREATE TABLE IF NOT EXISTS backup_record (
     status SMALLINT NOT NULL,
     started_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     finished_at TIMESTAMPTZ NULL,
-    CONSTRAINT chk_backup_record_type CHECK (type IN (1,2)),
+    CONSTRAINT chk_backup_record_type CHECK (type = 1),
     CONSTRAINT chk_backup_record_status CHECK (status IN (1,2,3))
 );
 
@@ -94,8 +94,33 @@ ALTER TABLE alert_rule ENABLE ROW LEVEL SECURITY;
 ALTER TABLE alert_event ENABLE ROW LEVEL SECURITY;
 ALTER TABLE platform_statistics ENABLE ROW LEVEL SECURITY;
 
-CREATE POLICY system_config_tenant_rls ON system_config USING (tenant_id IS NULL OR tenant_id = current_setting('app.tenant_id')::BIGINT);
-CREATE POLICY config_change_log_tenant_rls ON config_change_log USING (tenant_id IS NULL OR tenant_id = current_setting('app.tenant_id')::BIGINT);
-CREATE POLICY alert_rule_tenant_rls ON alert_rule USING (tenant_id IS NULL OR tenant_id = current_setting('app.tenant_id')::BIGINT);
-CREATE POLICY alert_event_tenant_rls ON alert_event USING (tenant_id IS NULL OR tenant_id = current_setting('app.tenant_id')::BIGINT);
-CREATE POLICY platform_statistics_tenant_rls ON platform_statistics USING (tenant_id IS NULL OR tenant_id = current_setting('app.tenant_id')::BIGINT);
+CREATE POLICY system_config_tenant_rls ON system_config
+    USING (tenant_id IS NULL OR tenant_id = NULLIF(current_setting('app.tenant_id', true), '')::BIGINT)
+    WITH CHECK (
+        (scope = 1 AND tenant_id IS NULL)
+        OR (scope = 2 AND tenant_id = NULLIF(current_setting('app.tenant_id', true), '')::BIGINT)
+    );
+CREATE POLICY config_change_log_tenant_rls ON config_change_log
+    USING (tenant_id IS NULL OR tenant_id = NULLIF(current_setting('app.tenant_id', true), '')::BIGINT)
+    WITH CHECK (
+        tenant_id IS NULL
+        OR tenant_id = NULLIF(current_setting('app.tenant_id', true), '')::BIGINT
+    );
+CREATE POLICY alert_rule_tenant_rls ON alert_rule
+    USING (tenant_id IS NULL OR tenant_id = NULLIF(current_setting('app.tenant_id', true), '')::BIGINT)
+    WITH CHECK (
+        (scope = 1 AND tenant_id IS NULL)
+        OR (scope = 2 AND tenant_id = NULLIF(current_setting('app.tenant_id', true), '')::BIGINT)
+    );
+CREATE POLICY alert_event_tenant_rls ON alert_event
+    USING (tenant_id IS NULL OR tenant_id = NULLIF(current_setting('app.tenant_id', true), '')::BIGINT)
+    WITH CHECK (
+        tenant_id IS NULL
+        OR tenant_id = NULLIF(current_setting('app.tenant_id', true), '')::BIGINT
+    );
+CREATE POLICY platform_statistics_tenant_rls ON platform_statistics
+    USING (tenant_id IS NULL OR tenant_id = NULLIF(current_setting('app.tenant_id', true), '')::BIGINT)
+    WITH CHECK (
+        (scope = 1 AND tenant_id IS NULL)
+        OR (scope = 2 AND tenant_id = NULLIF(current_setting('app.tenant_id', true), '')::BIGINT)
+    );

@@ -1,0 +1,63 @@
+# 本文件声明 service/cron 镜像的职责、工具、安全和供应链约束。
+schema_version: 1
+category: service
+name: cron
+image: service/cron
+labels:
+  app.kubernetes.io/name: cron
+  app.kubernetes.io/component: cronjob
+  app.kubernetes.io/part-of: chaimir
+  chaimir.io/category: service
+  chaimir.io/image: service/cron
+  chaimir.io/data-driven: "false"
+  chaimir.io/student-access: "false"
+  chaimir.io/sensitivity: control-plane
+  chaimir.io/scope: platform
+  chaimir.io/source: platform-built
+description: 受控定时任务镜像,用于真实执行平台备份并写入 M9 backup_record。
+source:
+  type: platform-built
+upstream:
+  builder: golang:1.25-bookworm
+  runtime: postgres:16-bookworm
+  reuse_policy: multi-stage-build
+data_driven: false
+capabilities:
+  - platform-service
+  - cron-runner
+  - database-backup
+ports: []
+local_dev:
+  host_mappings: []
+security:
+  run_as_non_root: true
+  read_only_root_filesystem: true
+  allow_privilege_escalation: false
+  privileged: false
+  host_network: false
+  automount_service_account_token: false
+  drop_capabilities:
+    - ALL
+  network_policy: deny-all
+student_access:
+  enabled: false
+resources:
+  cpu_request: 100m
+  cpu_limit: "1"
+  memory_request: 256Mi
+  memory_limit: 1Gi
+  ephemeral_storage_limit: 4Gi
+build:
+  context: ../../..
+  dockerfile: images/service/cron/Dockerfile
+selftest:
+  commands:
+    - name: binary-help
+      command:
+        - /app/cron
+        - --help
+supply_chain:
+  sbom: true
+  trivy_required: true
+  cosign_required: true
+  pull_by_digest_in_production: true

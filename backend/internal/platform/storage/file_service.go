@@ -23,20 +23,21 @@ type Service struct {
 
 // PlanUploadRequest 描述统一文件服务生成对象引用前需要确认的资源边界和安全校验参数。
 type PlanUploadRequest struct {
-	TenantID        int64
-	AccountID       int64
-	Module          string
-	ResourceType    string
-	ResourceID      string
-	FileName        string
-	ContentType     string
-	Size            int64
-	MaxBytes        int64
-	ExpectedBucket  string
-	AllowedFileName bool
-	Content         []byte
-	KindValidator   func(fileName, contentType string, content []byte) bool
-	ScanPolicy      upload.ScanPolicy
+	TenantID           int64
+	AccountID          int64
+	AllowPlatformScope bool
+	Module             string
+	ResourceType       string
+	ResourceID         string
+	FileName           string
+	ContentType        string
+	Size               int64
+	MaxBytes           int64
+	ExpectedBucket     string
+	AllowedFileName    bool
+	Content            []byte
+	KindValidator      func(fileName, contentType string, content []byte) bool
+	ScanPolicy         upload.ScanPolicy
 }
 
 // UploadPlan 表示统一文件服务规划出的受控对象路径和默认下载授权边界。
@@ -57,13 +58,14 @@ type UploadPlan struct {
 
 // IssueDownloadGrantRequest 描述统一文件服务为某个对象引用签发短时下载授权所需参数。
 type IssueDownloadGrantRequest struct {
-	TenantID     int64
-	AccountID    int64
-	ObjectRef    string
-	Module       string
-	ResourceType string
-	ResourceID   string
-	ExpiresAt    time.Time
+	TenantID           int64
+	AccountID          int64
+	AllowPlatformScope bool
+	ObjectRef          string
+	Module             string
+	ResourceType       string
+	ResourceID         string
+	ExpiresAt          time.Time
 }
 
 // NewServiceFromConfig 根据统一配置构造文件服务,收敛下载授权和上传安全扫描装配。
@@ -94,7 +96,7 @@ func (s Service) PlanUpload(ctx context.Context, req PlanUploadRequest) (UploadP
 	if ctx == nil {
 		return UploadPlan{}, fmt.Errorf("上传规划上下文不能为空")
 	}
-	if req.TenantID <= 0 {
+	if req.TenantID < 0 || (req.TenantID == 0 && !req.AllowPlatformScope) {
 		return UploadPlan{}, fmt.Errorf("上传规划缺少 tenant_id")
 	}
 	if req.AccountID <= 0 {
@@ -172,13 +174,14 @@ func (s Service) IssueDownloadGrant(req IssueDownloadGrantRequest) (string, Down
 		}
 	}
 	grant, err := BuildDownloadGrant(DownloadGrantRequest{
-		TenantID:     req.TenantID,
-		AccountID:    req.AccountID,
-		ObjectRef:    req.ObjectRef,
-		Module:       req.Module,
-		ResourceType: req.ResourceType,
-		ResourceID:   req.ResourceID,
-		ExpiresAt:    expiresAt,
+		TenantID:           req.TenantID,
+		AccountID:          req.AccountID,
+		AllowPlatformScope: req.AllowPlatformScope,
+		ObjectRef:          req.ObjectRef,
+		Module:             req.Module,
+		ResourceType:       req.ResourceType,
+		ResourceID:         req.ResourceID,
+		ExpiresAt:          expiresAt,
 	})
 	if err != nil {
 		return "", DownloadGrant{}, err

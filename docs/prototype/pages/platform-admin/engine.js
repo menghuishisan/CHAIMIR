@@ -503,7 +503,7 @@
     const data = [
       { time: '2026-06-07 15:42', actor: '平台管理员', action: '停用租户', obj: '租户 · 云岭师范学院', ip: '10.0.2.31', result: '成功' },
       { time: '2026-06-07 14:20', actor: '平台管理员', action: '修改系统配置', obj: '配置 · sandbox.default_runtime', ip: '10.0.2.31', result: '成功' },
-      { time: '2026-06-07 11:08', actor: '运维', action: '触发备份', obj: '备份 · 全量', ip: '10.0.2.45', result: '成功' },
+      { time: '2026-06-07 11:08', actor: '系统任务', action: '完成自动备份', obj: '备份 · 全量', ip: '10.0.2.45', result: '成功' },
       { time: '2026-06-06 16:40', actor: '平台管理员', action: '审核通过入驻', obj: '租户 · 示例大学', ip: '10.0.2.31', result: '成功' },
       { time: '2026-06-06 09:55', actor: '运维', action: '接入运行时', obj: '运行时 · Hyperledger Fabric', ip: '10.0.2.45', result: '失败' },
     ];
@@ -556,45 +556,28 @@
      ============================================================ */
   function backups() {
     const data = [
-      { id: 1, type: '全量', loc: 'OSS · backup/2026-06-07-full', size: '12.4 GB', status: '成功', start: '2026-06-07 02:00', end: '2026-06-07 02:38' },
-      { id: 2, type: '增量', loc: 'OSS · backup/2026-06-06-incr', size: '860 MB', status: '成功', start: '2026-06-06 02:00', end: '2026-06-06 02:06' },
-      { id: 3, type: '增量', loc: 'OSS · backup/2026-06-05-incr', size: '910 MB', status: '成功', start: '2026-06-05 02:00', end: '2026-06-05 02:07' },
-      { id: 4, type: '全量', loc: 'OSS · backup/2026-05-31-full', size: '11.9 GB', status: '失败', start: '2026-05-31 02:00', end: '2026-05-31 02:12' },
+      { id: 1, type: '全量', size: '12.4 GB', status: '成功', start: '2026-06-07 02:00', end: '2026-06-07 02:38' },
+      { id: 2, type: '全量', size: '12.1 GB', status: '成功', start: '2026-06-06 02:00', end: '2026-06-06 02:36' },
+      { id: 3, type: '全量', size: '12.0 GB', status: '成功', start: '2026-06-05 02:00', end: '2026-06-05 02:34' },
+      { id: 4, type: '全量', size: '11.9 GB', status: '失败', start: '2026-05-31 02:00', end: '2026-05-31 02:12' },
     ];
     const rows = data.map(d => `<tr>
-      <td>${C.badge(d.type, d.type === '全量' ? 'purple' : 'blue')}</td>
-      <td class="mono text-sm">${C.esc(d.loc)}</td>
+      <td>${C.badge(d.type, 'purple')}</td>
       <td class="mono">${C.esc(d.size)}</td>
       <td>${C.statusDot(d.status === '成功' ? 'green' : 'red', d.status)}</td>
       <td class="mono text-sm">${C.esc(d.start)}</td>
       <td class="mono text-sm">${C.esc(d.end)}</td>
-      <td class="row-actions">${d.status === '成功'
-        ? `<button class="btn btn-outline btn-sm" onclick="Chaimir.paRestore('${C.esc(d.loc)}')">${C.icon('rotate-ccw')} 恢复</button>`
-        : `<button class="btn btn-outline btn-sm" onclick="Chaimir.toast('info','查看失败原因','原型演示:打开任务日志定位失败原因')">查看原因</button>`}</td>
     </tr>`).join('');
-    return `${C.head('备份记录', '运维', `<button class="btn btn-primary" onclick="Chaimir.paTriggerBackup()">${C.icon('database-backup')} 触发备份</button>`)}
+    return `${C.head('备份记录', '运维')}
       <div class="grid grid-3 mb-4">
         ${C.stat('check-circle-2', '最近成功', '2026-06-07 02:38', 'green')}
         ${C.stat('hard-drive', '12.4 GB', '最近全量大小', 'purple')}
-        ${C.stat('calendar-check', '每日 02:00', '自动备份计划', 'blue')}
+        ${C.stat('calendar-check', '每日 02:23', '自动备份计划', 'blue')}
       </div>
       <div class="table-wrap"><table class="table"><thead><tr>
-        <th>类型</th><th>存储位置</th><th>大小</th><th>状态</th><th>开始时间</th><th>结束时间</th><th></th>
+        <th>类型</th><th>大小</th><th>状态</th><th>开始时间</th><th>结束时间</th>
       </tr></thead><tbody>${rows}</tbody></table></div>`;
   }
-  C.paTriggerBackup = function () {
-    C.modal({
-      title: '触发备份', size: '',
-      body: `<div class="field"><label>备份类型</label><select class="select"><option>全量备份</option><option>增量备份</option></select></div>
-        <div class="field" style="margin-bottom:0"><label>存储位置</label><input class="input mono" value="OSS · backup/" readonly></div>`,
-      foot: `<button class="btn btn-outline" onclick="document.querySelector('.overlay').remove()">取消</button>
-             <button class="btn btn-primary" onclick="document.querySelector('.overlay').remove();Chaimir.toast('success','备份任务已启动','完成后将记入备份记录')">开始备份</button>`,
-    });
-  };
-  C.paRestore = async function (loc) {
-    if (await C.confirm({ title: '从备份恢复', danger: true, confirmText: '确认恢复', message: `将使用「${loc}」覆盖恢复平台数据,该操作不可逆且会中断当前服务。确认恢复?` }))
-      C.toast('success', '恢复任务已提交', '系统将进入维护态执行恢复,完成后自动恢复服务');
-  };
 
   /* ============================================================
      12) 个人中心

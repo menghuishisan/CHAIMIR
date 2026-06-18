@@ -13,7 +13,7 @@ func contestDTOFromModel(item Contest) ContestDTO {
 
 // problemDTOFromModel 转换竞赛题引用为 HTTP 输出。
 func problemDTOFromModel(item ContestProblem) ProblemDTO {
-	return ProblemDTO{ID: item.ID, ContestID: item.ContestID, ItemCode: item.ItemCode, ItemVersion: item.ItemVersion, Score: item.Score, DynamicScore: item.DynamicScore, BattleRule: item.BattleRule, Seq: item.Seq}
+	return ProblemDTO{ID: item.ID, ContestID: item.ContestID, ItemCode: item.ItemCode, ItemVersion: item.ItemVersion, Score: item.Score, DynamicScore: item.DynamicScore, BattleConfig: item.BattleConfig, BattleRule: item.BattleRule, Seq: item.Seq}
 }
 
 // teamDTOFromModel 转换队伍及成员为 HTTP 输出。

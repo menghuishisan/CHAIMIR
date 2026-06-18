@@ -122,6 +122,17 @@ type SandboxPrivateArchiveInjectRequest struct {
 	ContentBase64 string `json:"content_base64"`
 }
 
+// SandboxArchiveRestoreRequest 是内部服务把已授权对象归档恢复到工作区子目录的请求。
+// ExpectedHash 非空时 M2 必须按对象实际内容计算 SHA-256 后逐字匹配,调用方不得只信任提交时声明。
+type SandboxArchiveRestoreRequest struct {
+	TenantID     int64  `json:"tenant_id"`
+	SandboxID    int64  `json:"sandbox_id"`
+	SourceRef    string `json:"source_ref"`
+	ObjectRef    string `json:"object_ref"`
+	ExpectedHash string `json:"expected_hash"`
+	TargetDir    string `json:"target_dir"`
+}
+
 // SandboxSaveRequest 是内部服务请求立即保存工作区的来源绑定请求。
 type SandboxSaveRequest struct {
 	TenantID  int64  `json:"tenant_id"`
@@ -221,6 +232,8 @@ type SandboxService interface {
 	PutSandboxFile(ctx context.Context, req SandboxFileWriteRequest) error
 	// PutSandboxPrivateArchive 把隐藏测试、答案或评分脚本安全解包到私有判题域。
 	PutSandboxPrivateArchive(ctx context.Context, req SandboxPrivateArchiveInjectRequest) error
+	// RestoreSandboxArchive 把调用方已保存的公开参战物或代码归档安全恢复到工作区子目录。
+	RestoreSandboxArchive(ctx context.Context, req SandboxArchiveRestoreRequest) error
 	// SaveSandboxFiles 立即持久化当前工作区,返回保存后的代码引用与哈希。
 	SaveSandboxFiles(ctx context.Context, req SandboxSaveRequest) (string, string, error)
 	// ExecSandboxCommand 在沙箱内执行受限命令,供判题 worker 运行套件。

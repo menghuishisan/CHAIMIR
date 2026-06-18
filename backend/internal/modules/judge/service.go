@@ -242,7 +242,18 @@ func (s *Service) SubmitJudgeTask(ctx context.Context, req contracts.JudgeSubmit
 	} else if ok {
 		return contractTaskInfoFromModel(JudgeTaskInfo{Task: existing, Existing: true}), nil
 	}
-	j, err := s.loadAvailableJudger(ctx, req.JudgerCode)
+	spec, err := s.content.GetJudgeSpec(ctx, req.TenantID, req.ItemCode, req.ItemVersion)
+	if err != nil {
+		return contracts.JudgeTaskInfo{}, apperr.ErrJudgeSpecUnavailable.WithCause(err)
+	}
+	judgerCode := strings.TrimSpace(req.JudgerCode)
+	if judgerCode == "" {
+		judgerCode = spec.JudgerCode
+	}
+	if judgerCode == "" || (strings.TrimSpace(req.JudgerCode) != "" && strings.TrimSpace(req.JudgerCode) != spec.JudgerCode) {
+		return contracts.JudgeTaskInfo{}, apperr.ErrJudgeSubmitInvalid
+	}
+	j, err := s.loadAvailableJudger(ctx, judgerCode)
 	if err != nil {
 		return contracts.JudgeTaskInfo{}, err
 	}
@@ -253,10 +264,6 @@ func (s *Service) SubmitJudgeTask(ctx context.Context, req contracts.JudgeSubmit
 	if err := validateJudgerSandboxMode(j.Type, mode, req.TargetSandboxRef); err != nil {
 		return contracts.JudgeTaskInfo{}, err
 	}
-	spec, err := s.content.GetJudgeSpec(ctx, req.TenantID, req.ItemCode, req.ItemVersion)
-	if err != nil {
-		return contracts.JudgeTaskInfo{}, apperr.ErrJudgeSpecUnavailable.WithCause(err)
-	}
 	snapshot, err := s.buildInputSnapshot(j, spec, req.ExtraInput)
 	if err != nil {
 		return contracts.JudgeTaskInfo{}, err
@@ -266,18 +273,10 @@ func (s *Service) SubmitJudgeTask(ctx context.Context, req contracts.JudgeSubmit
 		return contracts.JudgeTaskInfo{}, apperr.ErrJudgeSubmitInvalid.WithCause(fmt.Errorf("判题提交缺少 trace_id"))
 	}
 	snapshot.TraceID = traceID
-	codeName, codeData, err := s.readObjectRef(ctx, req.CodeStorageKey)
+	requiresCode := judgerRequiresCode(j.Type, mode)
+	codeHash, vector, sanitizedCode, err := s.prepareSubmittedCode(ctx, req, requiresCode)
 	if err != nil {
-		return contracts.JudgeTaskInfo{}, apperr.ErrJudgeInputArchiveInvalid.WithCause(err)
-	}
-	codeHash := pkgcrypto.SHA256Hex(codeData)
-	if !strings.EqualFold(strings.TrimSpace(req.CodeHash), codeHash) {
-		return contracts.JudgeTaskInfo{}, apperr.ErrJudgeSubmitInvalid.WithCause(fmt.Errorf("提交代码哈希与对象内容不一致"))
-	}
-	limits := upload.ArchiveLimits{MaxFiles: s.cfg.InputArchiveMaxFiles, MaxUnpackedBytes: s.cfg.InputArchiveMaxUnpackedBytes}
-	sanitizedCode, err := upload.SafeArchiveTar(codeName, codeData, limits)
-	if err != nil {
-		return contracts.JudgeTaskInfo{}, apperr.ErrJudgeInputArchiveInvalid.WithCause(err)
+		return contracts.JudgeTaskInfo{}, err
 	}
 	ownership := sourceOwnershipFromRequest(req)
 	if err := validateSourceOwnership(ownership); err != nil {
@@ -308,16 +307,14 @@ func (s *Service) SubmitJudgeTask(ctx context.Context, req contracts.JudgeSubmit
 	if err := s.checkSubmitRate(ctx, task); err != nil {
 		return contracts.JudgeTaskInfo{}, err
 	}
-	vector, err := fingerprintVectorFromArchive(codeName, codeData, limits)
-	if err != nil {
-		return contracts.JudgeTaskInfo{}, apperr.ErrFingerprintSimilarityFailed.WithCause(err)
+	if requiresCode {
+		archiveRef, err := s.storeSanitizedCodeArchive(ctx, task.TenantID, task.ID, sanitizedCode)
+		if err != nil {
+			return contracts.JudgeTaskInfo{}, err
+		}
+		task.InputSnapshot.SanitizedCodeArchiveName = "submission.tar"
+		task.InputSnapshot.SanitizedCodeArchiveRef = archiveRef
 	}
-	archiveRef, err := s.storeSanitizedCodeArchive(ctx, task.TenantID, task.ID, sanitizedCode)
-	if err != nil {
-		return contracts.JudgeTaskInfo{}, err
-	}
-	task.InputSnapshot.SanitizedCodeArchiveName = "submission.tar"
-	task.InputSnapshot.SanitizedCodeArchiveRef = archiveRef
 	createdNew := false
 	if err := s.store.TenantTx(ctx, task.TenantID, func(ctx context.Context, tx TxStore) error {
 		requestedID := task.ID
@@ -330,16 +327,18 @@ func (s *Service) SubmitJudgeTask(ctx context.Context, req contracts.JudgeSubmit
 		if !createdNew {
 			return nil
 		}
-		if _, err := tx.CreateFingerprint(ctx, SubmissionFingerprint{
-			ID:          s.ids.Generate(),
-			TenantID:    task.TenantID,
-			SourceRef:   task.SourceRef,
-			ProblemRef:  task.ProblemRef,
-			SubmitterID: task.SubmitterID,
-			CodeHash:    task.CodeHash,
-			SimVector:   vector,
-		}); err != nil {
-			return apperr.ErrFingerprintSimilarityFailed.WithCause(err)
+		if requiresCode {
+			if _, err := tx.CreateFingerprint(ctx, SubmissionFingerprint{
+				ID:          s.ids.Generate(),
+				TenantID:    task.TenantID,
+				SourceRef:   task.SourceRef,
+				ProblemRef:  task.ProblemRef,
+				SubmitterID: task.SubmitterID,
+				CodeHash:    task.CodeHash,
+				SimVector:   vector,
+			}); err != nil {
+				return apperr.ErrFingerprintSimilarityFailed.WithCause(err)
+			}
 		}
 		return nil
 	}); err != nil {
@@ -353,6 +352,37 @@ func (s *Service) SubmitJudgeTask(ctx context.Context, req contracts.JudgeSubmit
 		return contracts.JudgeTaskInfo{}, err
 	}
 	return contractTaskInfoFromModel(JudgeTaskInfo{Task: task}), nil
+}
+
+// prepareSubmittedCode 校验需要代码对象的判题输入,非代码判题器不生成归档和指纹。
+func (s *Service) prepareSubmittedCode(ctx context.Context, req contracts.JudgeSubmitRequest, required bool) (string, map[string]float64, []byte, error) {
+	if !required {
+		if strings.TrimSpace(req.CodeStorageKey) != "" || strings.TrimSpace(req.CodeHash) != "" {
+			return "", nil, nil, apperr.ErrJudgeSubmitInvalid
+		}
+		return "", nil, nil, nil
+	}
+	if strings.TrimSpace(req.CodeStorageKey) == "" || !isSHA256Hex(req.CodeHash) {
+		return "", nil, nil, apperr.ErrJudgeSubmitInvalid
+	}
+	codeName, codeData, err := s.readObjectRef(ctx, req.CodeStorageKey)
+	if err != nil {
+		return "", nil, nil, apperr.ErrJudgeInputArchiveInvalid.WithCause(err)
+	}
+	codeHash := pkgcrypto.SHA256Hex(codeData)
+	if !strings.EqualFold(strings.TrimSpace(req.CodeHash), codeHash) {
+		return "", nil, nil, apperr.ErrJudgeSubmitInvalid.WithCause(fmt.Errorf("提交代码哈希与对象内容不一致"))
+	}
+	limits := upload.ArchiveLimits{MaxFiles: s.cfg.InputArchiveMaxFiles, MaxUnpackedBytes: s.cfg.InputArchiveMaxUnpackedBytes}
+	sanitizedCode, err := upload.SafeArchiveTar(codeName, codeData, limits)
+	if err != nil {
+		return "", nil, nil, apperr.ErrJudgeInputArchiveInvalid.WithCause(err)
+	}
+	vector, err := fingerprintVectorFromArchive(codeName, codeData, limits)
+	if err != nil {
+		return "", nil, nil, apperr.ErrFingerprintSimilarityFailed.WithCause(err)
+	}
+	return codeHash, vector, sanitizedCode, nil
 }
 
 // findExistingTaskBySourceRef 在读取对象存储和构建指纹前完成提交幂等短路。

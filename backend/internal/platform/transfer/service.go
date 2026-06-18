@@ -101,7 +101,7 @@ func (s *Service) CreateTask(ctx context.Context, req NewTaskRequest) (Task, err
 
 // GetTask 读取单个任务。
 func (s *Service) GetTask(ctx context.Context, tenantID, taskID int64) (Task, error) {
-	if tenantID <= 0 || taskID <= 0 {
+	if tenantID < 0 || taskID <= 0 {
 		return Task{}, apperr.ErrTransferTaskInvalid
 	}
 	return s.store.GetTask(ctx, tenantID, taskID)
@@ -109,7 +109,7 @@ func (s *Service) GetTask(ctx context.Context, tenantID, taskID int64) (Task, er
 
 // ListTasks 查询当前账号的导入导出任务。
 func (s *Service) ListTasks(ctx context.Context, query TaskListQuery) ([]Task, int, int, error) {
-	if query.TenantID <= 0 || query.AccountID <= 0 {
+	if query.TenantID < 0 || query.AccountID <= 0 {
 		return nil, 0, 0, apperr.ErrTransferTaskInvalid
 	}
 	if query.Channel != "" {

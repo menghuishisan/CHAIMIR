@@ -2,7 +2,7 @@
 SELECT id, scope, tenant_id, key, value, version, updated_by, updated_at
 FROM system_config
 WHERE (sqlc.arg(scope)::smallint = 0 OR scope = sqlc.arg(scope)::smallint)
-  AND ((sqlc.narg(tenant_id)::bigint IS NULL) OR tenant_id = sqlc.narg(tenant_id)::bigint)
+  AND ((sqlc.narg(tenant_id)::bigint IS NULL AND tenant_id IS NULL) OR tenant_id = sqlc.narg(tenant_id)::bigint)
 ORDER BY key;
 
 -- name: GetSystemConfig :one
@@ -52,7 +52,7 @@ RETURNING id, scope, tenant_id, name, metric, condition, level, enabled, created
 SELECT id, scope, tenant_id, name, metric, condition, level, enabled, created_at, updated_at
 FROM alert_rule
 WHERE (sqlc.arg(scope)::smallint = 0 OR scope = sqlc.arg(scope)::smallint)
-  AND ((sqlc.narg(tenant_id)::bigint IS NULL) OR tenant_id = sqlc.narg(tenant_id)::bigint)
+  AND ((sqlc.narg(tenant_id)::bigint IS NULL AND tenant_id IS NULL) OR tenant_id = sqlc.narg(tenant_id)::bigint)
 ORDER BY updated_at DESC;
 
 -- name: GetAlertRule :one
@@ -64,6 +64,8 @@ WHERE id = $1;
 UPDATE alert_rule
 SET name = $2, metric = $3, condition = $4, level = $5, enabled = $6, updated_at = now()
 WHERE id = $1
+  AND scope = sqlc.arg(scope)::smallint
+  AND ((tenant_id IS NULL AND sqlc.narg(tenant_id)::bigint IS NULL) OR tenant_id = sqlc.narg(tenant_id)::bigint)
 RETURNING id, scope, tenant_id, name, metric, condition, level, enabled, created_at, updated_at;
 
 -- name: CreateAlertEvent :one
@@ -83,6 +85,7 @@ LIMIT sqlc.arg(page_limit)::int OFFSET sqlc.arg(page_offset)::int;
 UPDATE alert_event
 SET status = $2, handler_id = $3, handled_at = now()
 WHERE id = $1 AND status = 1
+  AND ((sqlc.narg(tenant_id)::bigint IS NULL) OR tenant_id = sqlc.narg(tenant_id)::bigint)
 RETURNING id, rule_id, tenant_id, level, message, status, handler_id, triggered_at, handled_at;
 
 -- name: UpsertGlobalPlatformStatistics :one

@@ -68,9 +68,9 @@
 - `/audit`:审计查询(M9 复用)。
 
 ### 基础横切 transfer `/api/v1/transfer`
-- `GET /tasks`:查询当前账号导入/导出任务,支持 `channel`、`status`、分页过滤。
-- `GET /tasks/{id}`:读取当前账号或学校管理员可见的任务快照。
-- `POST /tasks/{id}/download-grant`:对已完成任务签发统一文件服务短时下载授权。
+- `GET /tasks`:查询当前账号导入/导出任务,支持 `channel`、`status`、分页过滤;平台管理员只访问 `tenant_id=0` 的平台任务,租户账号只访问本租户任务。
+- `GET /tasks/{id}`:读取当前账号、学校管理员或平台管理员可见的任务快照。
+- `POST /tasks/{id}/download-grant`:对已完成任务签发统一文件服务短时下载授权,平台任务和租户任务都必须走统一 storage 对象前缀校验。
 
 > transfer 只暴露通用任务状态和下载授权,不承载模块业务预览、业务结果或业务审批数据。模块导出接口应返回 transfer 任务快照,客户端下载文件需再走 download-grant,禁止模块接口直接返回对象存储直链或 base64 文件体。
 
@@ -132,8 +132,8 @@
 - `/school/dashboard`、`/school/statistics`:学校看板。
 - `/audit`、`/audit/export`:统一审计查询中心(查 M1 audit_log)。
 - `/configs/*`、`/alert-rules`、`/alert-events/*`:配置/告警。
-- `/monitoring/panels`:外接监控嵌入入口。
-- `/backups`:备份记录。
+- `/platform/monitoring/panels`:外接监控嵌入入口。
+- `/platform/backups`:备份记录。
 
 ### M10 通知与实时推送 `/api/v1/notify`
 - `/send` `[内部]`:统一通知发送。

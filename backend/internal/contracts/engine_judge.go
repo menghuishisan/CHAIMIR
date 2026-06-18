@@ -25,10 +25,12 @@ const (
 
 // JudgeSubmitRequest 是业务模块提交判题任务时使用的稳定契约。
 type JudgeSubmitRequest struct {
-	TenantID         int64          `json:"tenant_id"`
-	JudgerCode       string         `json:"judger_code"`
-	ItemCode         string         `json:"item_code"`
-	ItemVersion      string         `json:"item_version"`
+	TenantID int64 `json:"tenant_id"`
+	// JudgerCode 为空时由 M3 使用 M5 锁定题目版本的 judge_config.judger_code;业务模块不得硬编码题目判题器别名。
+	JudgerCode  string `json:"judger_code"`
+	ItemCode    string `json:"item_code"`
+	ItemVersion string `json:"item_version"`
+	// CodeStorageKey/CodeHash 仅代码类判题器必填;Flag、仿真检查点、人工评分和 reuse 链上断言必须留空。
 	CodeStorageKey   string         `json:"code_storage_key"`
 	CodeHash         string         `json:"code_hash"`
 	SubmitterID      int64          `json:"submitter_id"`
@@ -90,7 +92,7 @@ type FingerprintMatch struct {
 
 // JudgeService 是 M3 评测引擎对 M6/M7/M8 暴露的标准判题契约。
 type JudgeService interface {
-	// SubmitJudgeTask 创建判题任务并返回初始任务摘要。
+	// SubmitJudgeTask 创建判题任务并返回初始任务摘要。JudgerCode 为空时必须使用 M5 锁定题目版本的 judge_config.judger_code,业务模块不得硬编码题目判题器别名。
 	SubmitJudgeTask(ctx context.Context, req JudgeSubmitRequest) (JudgeTaskInfo, error)
 	// GetJudgeTask 读取任务状态与结果摘要。
 	GetJudgeTask(ctx context.Context, tenantID, taskID int64) (JudgeTaskInfo, error)

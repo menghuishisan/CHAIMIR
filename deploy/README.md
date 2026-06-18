@@ -3,7 +3,7 @@
 Chaimir 区块链「教学·实验·竞赛」平台的部署清单。双形态:SaaS 公网多租户 + 学校私有化。
 编排用 **Kustomize**(base + overlays),依据 `docs/总-部署架构设计.md` 与 `docs/总-镜像与容器设计.md`。
 
-> 注:应用镜像(chaimir/backend|frontend|migrate)为逻辑占位,由目录2(backend)/目录3(images)
+> 注:应用镜像(chaimir/backend|frontend|migrate|cron)为逻辑占位,由目录2(backend)/目录3(images)
 > 构建产出后经 overlay 的 `images:` 覆盖生效。本目录提供的是完整运行底座。
 
 ## 目录结构
@@ -25,7 +25,7 @@ deploy/
 │   ├── migrate/             迁移 + RLS 初始化 + seed Job
 │   ├── ingress/             Ingress(/ 前端、/api 后端、/ws Hub)
 │   ├── networkpolicy/       静态命名空间 deny-all + 精确放行;动态沙箱 deny-all 模板
-│   └── cronjobs/            僵尸沙箱回收/PV 清理/每日备份/镜像 GC
+│   └── cronjobs/            每日备份;业务生命周期清理由各模块后台任务负责
 ├── components/middleware/   PG16/Redis7/NATS2.10/MinIO 单实例(overlay 按需 include)
 ├── overlays/
 │   ├── local-dev/           kind 集群 + 单实例中间件 + 本地镜像 + dev 密钥

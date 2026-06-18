@@ -44,22 +44,23 @@ WHERE tenant_id = $1 AND id = $2 AND deleted_at IS NULL
 RETURNING id, tenant_id, organizer_id, name, mode, match_mode, team_mode, signup_start, signup_end, start_at, end_at, freeze_minutes, rules, status, created_at, updated_at, deleted_at;
 
 -- name: UpsertContestProblem :one
-INSERT INTO contest_problem (id, tenant_id, contest_id, item_code, item_version, score, dynamic_score, battle_rule, seq)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+INSERT INTO contest_problem (id, tenant_id, contest_id, item_code, item_version, score, dynamic_score, battle_config, battle_rule, seq)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 ON CONFLICT (tenant_id, contest_id, item_code, item_version) DO UPDATE
 SET score = EXCLUDED.score,
     dynamic_score = EXCLUDED.dynamic_score,
+    battle_config = EXCLUDED.battle_config,
     battle_rule = EXCLUDED.battle_rule,
     seq = EXCLUDED.seq
-RETURNING id, tenant_id, contest_id, item_code, item_version, score, dynamic_score, battle_rule, seq;
+RETURNING id, tenant_id, contest_id, item_code, item_version, score, dynamic_score, battle_config, battle_rule, seq;
 
 -- name: GetContestProblem :one
-SELECT id, tenant_id, contest_id, item_code, item_version, score, dynamic_score, battle_rule, seq
+SELECT id, tenant_id, contest_id, item_code, item_version, score, dynamic_score, battle_config, battle_rule, seq
 FROM contest_problem
 WHERE tenant_id = $1 AND id = $2;
 
 -- name: ListContestProblems :many
-SELECT id, tenant_id, contest_id, item_code, item_version, score, dynamic_score, battle_rule, seq
+SELECT id, tenant_id, contest_id, item_code, item_version, score, dynamic_score, battle_config, battle_rule, seq
 FROM contest_problem
 WHERE tenant_id = $1 AND contest_id = $2
 ORDER BY seq ASC, id ASC;

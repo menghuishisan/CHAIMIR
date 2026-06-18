@@ -23,6 +23,9 @@ images:
   - name: chaimir/migrate
     newName: harbor.chaimir.local/service/migrate
     newTag: staging
+  - name: chaimir/cron
+    newName: harbor.chaimir.local/service/cron
+    newTag: staging
 
 # 中间件外接端点 + SaaS 形态(host 为 staging 托管中间件内部域名)。
 configMapGenerator:

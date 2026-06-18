@@ -7,6 +7,7 @@ import (
 	"math"
 	"strconv"
 	"strings"
+	"time"
 
 	"chaimir/internal/contracts"
 	"chaimir/internal/platform/audit"
@@ -230,7 +231,16 @@ func (s *Service) executeBattleMatch(ctx context.Context, match BattleMatch) err
 		}
 		return apperr.ErrContestSandboxUnavailable.WithCause(err)
 	}
-	task, err := s.judge.SubmitJudgeTask(ctx, contracts.JudgeSubmitRequest{TenantID: match.TenantID, JudgerCode: spec.JudgerCode, ItemCode: problem.ItemCode, ItemVersion: problem.ItemVersion, CodeStorageKey: entryA.ArtifactRef, CodeHash: entryA.ArtifactHash, SubmitterID: ownerID, SourceRef: match.SourceRef, SourceOwnerID: ownerID, SourceCourseID: 0, SourceScope: "contest", SandboxMode: contracts.JudgeSandboxModeReuse, TargetSandboxRef: strconv.FormatInt(info.SandboxID, 10), ExtraInput: map[string]any{"entry_a": entryA.ArtifactRef, "entry_b": entryB.ArtifactRef, "role_a": entryA.Role, "role_b": entryB.Role}, Priority: 9})
+	if err := s.prepareBattleSandbox(ctx, match, info.SandboxID, entryA, entryB); err != nil {
+		if recycleErr := s.sandbox.RecycleBySourceRef(ctx, contracts.SandboxRecycleRequest{TenantID: match.TenantID, SourceRef: match.SourceRef, Reason: "battle_sandbox_prepare_failed"}); recycleErr != nil {
+			return apperr.ErrContestBattleMatchFailed.WithCause(fmt.Errorf("准备对局沙箱失败: %w; 回收沙箱失败: %v", err, recycleErr))
+		}
+		if failErr := s.markBattleFailed(ctx, match); failErr != nil {
+			return apperr.ErrContestBattleMatchFailed.WithCause(fmt.Errorf("准备对局沙箱失败: %w; 标记对局失败也失败: %v", err, failErr))
+		}
+		return apperr.ErrContestSandboxUnavailable.WithCause(err)
+	}
+	task, err := s.judge.SubmitJudgeTask(ctx, contracts.JudgeSubmitRequest{TenantID: match.TenantID, ItemCode: problem.ItemCode, ItemVersion: problem.ItemVersion, SubmitterID: ownerID, SourceRef: match.SourceRef, SourceOwnerID: ownerID, SourceCourseID: 0, SourceScope: "contest", SandboxMode: contracts.JudgeSandboxModeReuse, TargetSandboxRef: strconv.FormatInt(info.SandboxID, 10), ExtraInput: map[string]any{"entry_a": entryA.ArtifactRef, "entry_b": entryB.ArtifactRef, "entry_a_hash": entryA.ArtifactHash, "entry_b_hash": entryB.ArtifactHash, "role_a": entryA.Role, "role_b": entryB.Role}, Priority: 9})
 	if err != nil {
 		if recycleErr := s.sandbox.RecycleBySourceRef(ctx, contracts.SandboxRecycleRequest{TenantID: match.TenantID, SourceRef: match.SourceRef, Reason: "battle_judge_submit_failed"}); recycleErr != nil {
 			return apperr.ErrContestBattleMatchFailed.WithCause(fmt.Errorf("提交对局判题失败: %w; 回收沙箱失败: %v", err, recycleErr))
@@ -244,6 +254,55 @@ func (s *Service) executeBattleMatch(ctx context.Context, match BattleMatch) err
 		_, err := tx.StartBattleMatch(ctx, match.TenantID, match.ID, ids.Format(info.SandboxID), ids.Format(task.TaskID))
 		return err
 	})
+}
+
+// prepareBattleSandbox 等待对局沙箱就绪后恢复双方参战物到工作区。
+func (s *Service) prepareBattleSandbox(ctx context.Context, match BattleMatch, sandboxID int64, entryA, entryB BattleEntry) error {
+	if err := s.waitBattleSandboxReady(ctx, match.TenantID, sandboxID); err != nil {
+		return err
+	}
+	for _, item := range []struct {
+		entry BattleEntry
+		dir   string
+	}{
+		{entry: entryA, dir: "battle/entry_a"},
+		{entry: entryB, dir: "battle/entry_b"},
+	} {
+		if err := s.sandbox.RestoreSandboxArchive(ctx, contracts.SandboxArchiveRestoreRequest{TenantID: match.TenantID, SandboxID: sandboxID, SourceRef: match.SourceRef, ObjectRef: item.entry.ArtifactRef, ExpectedHash: item.entry.ArtifactHash, TargetDir: item.dir}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// waitBattleSandboxReady 轮询 M2 状态,确保工作区恢复和判题复用发生在沙箱可执行后。
+func (s *Service) waitBattleSandboxReady(ctx context.Context, tenantID, sandboxID int64) error {
+	timeout := time.Duration(s.cfg.BattleSandboxReadyTimeoutSeconds) * time.Second
+	interval := time.Duration(s.cfg.BattleSandboxReadyPollIntervalMs) * time.Millisecond
+	if timeout <= 0 || interval <= 0 {
+		return apperr.ErrContestSandboxUnavailable
+	}
+	deadline := timex.Now().Add(timeout)
+	for {
+		info, err := s.sandbox.GetSandbox(ctx, tenantID, sandboxID)
+		if err != nil {
+			return apperr.ErrContestSandboxUnavailable.WithCause(err)
+		}
+		if info.Status == contracts.SandboxStatusFailed || info.Status == contracts.SandboxStatusDestroyed {
+			return apperr.ErrContestSandboxUnavailable
+		}
+		if (info.Status == contracts.SandboxStatusReady || info.Status == contracts.SandboxStatusRunning || info.Status == contracts.SandboxStatusIdle) && info.Phase >= contracts.SandboxPhaseReady {
+			return nil
+		}
+		if timex.Now().After(deadline) {
+			return apperr.ErrContestSandboxUnavailable
+		}
+		select {
+		case <-ctx.Done():
+			return apperr.ErrContestSandboxUnavailable.WithCause(ctx.Err())
+		case <-time.After(interval):
+		}
+	}
 }
 
 // HandleBattleJudgeCompleted 消费 M3 判题完成事件并结算对局。
@@ -394,7 +453,6 @@ func (s *Service) markBattleFailed(ctx context.Context, match BattleMatch) error
 }
 
 type battleRuntimeSpec struct {
-	JudgerCode          string
 	RuntimeCode         string
 	RuntimeImageVersion string
 	ToolCodes           []string
@@ -403,20 +461,20 @@ type battleRuntimeSpec struct {
 // battleRuntimeSpecFromProblem 从题目配置读取对抗执行所需运行时,配置缺失时显式失败。
 func battleRuntimeSpecFromProblem(problem ContestProblem) (battleRuntimeSpec, error) {
 	get := func(key string) string {
-		if v, ok := problem.DynamicScore[key].(string); ok {
+		if v, ok := problem.BattleConfig[key].(string); ok {
 			return strings.TrimSpace(v)
 		}
 		return ""
 	}
-	spec := battleRuntimeSpec{JudgerCode: get("judger_code"), RuntimeCode: get("runtime_code"), RuntimeImageVersion: get("runtime_image_version")}
-	if raw, ok := problem.DynamicScore["tool_codes"].([]any); ok {
+	spec := battleRuntimeSpec{RuntimeCode: get("runtime_code"), RuntimeImageVersion: get("runtime_image_version")}
+	if raw, ok := problem.BattleConfig["tool_codes"].([]any); ok {
 		for _, item := range raw {
 			if s, ok := item.(string); ok && strings.TrimSpace(s) != "" {
 				spec.ToolCodes = append(spec.ToolCodes, strings.TrimSpace(s))
 			}
 		}
 	}
-	if spec.JudgerCode == "" || spec.RuntimeCode == "" || spec.RuntimeImageVersion == "" {
+	if spec.RuntimeCode == "" || spec.RuntimeImageVersion == "" {
 		return battleRuntimeSpec{}, apperr.ErrContestProblemInvalid
 	}
 	return spec, nil

@@ -35,6 +35,9 @@ images:
   - name: chaimir/migrate
     newName: chaimir/migrate
     newTag: dev
+  - name: chaimir/cron
+    newName: chaimir/cron
+    newTag: dev
 
 # 本地形态:SaaS 多租户 + 平台层开(便于本地验证全功能)。
 configMapGenerator:

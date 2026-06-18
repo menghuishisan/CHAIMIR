@@ -21,7 +21,8 @@ type ContestAchievement struct {
 	Rank      int32   `json:"rank"`
 }
 
-// ContestReadService 是 M8 对聚合层开放的只读竞赛契约。
+// ContestReadService 是 M8 对聚合层开放的唯一只读竞赛契约。
+// 聚合模块只能通过本接口读取竞赛统计和成就,不得直接写 M8 表或新增旧式 HTTP 别名。
 type ContestReadService interface {
 	// Stats 读取租户级竞赛统计,供 M9 学校看板聚合。
 	Stats(ctx context.Context, tenantID int64) (ContestStats, error)

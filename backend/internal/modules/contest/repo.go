@@ -187,7 +187,11 @@ func (tx *txStore) UpsertContestProblem(ctx context.Context, item ContestProblem
 	if err != nil {
 		return ContestProblem{}, err
 	}
-	row, err := tx.q.UpsertContestProblem(ctx, sqlcgen.UpsertContestProblemParams{ID: item.ID, TenantID: item.TenantID, ContestID: item.ContestID, ItemCode: item.ItemCode, ItemVersion: item.ItemVersion, Score: item.Score, DynamicScore: dynamic, BattleRule: pgtypex.Int2(item.BattleRule), Seq: item.Seq})
+	battleConfig, err := encodeJSON(item.BattleConfig, apperr.ErrContestProblemInvalid)
+	if err != nil {
+		return ContestProblem{}, err
+	}
+	row, err := tx.q.UpsertContestProblem(ctx, sqlcgen.UpsertContestProblemParams{ID: item.ID, TenantID: item.TenantID, ContestID: item.ContestID, ItemCode: item.ItemCode, ItemVersion: item.ItemVersion, Score: item.Score, DynamicScore: dynamic, BattleConfig: battleConfig, BattleRule: pgtypex.Int2(item.BattleRule), Seq: item.Seq})
 	if err != nil {
 		return ContestProblem{}, apperr.ErrContestProblemInvalid.WithCause(err)
 	}

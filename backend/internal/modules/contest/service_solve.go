@@ -49,14 +49,17 @@ func (s *Service) CreateEnv(ctx context.Context, contestID, problemID int64, req
 	return EnvDTO{SandboxID: info.SandboxID, SourceRef: info.SourceRef, Status: info.Status}, nil
 }
 
-// SubmitSolve 提交解题赛代码并创建 M3 判题任务。
+// SubmitSolve 提交解题赛答案或代码引用并创建 M3 判题任务。
 func (s *Service) SubmitSolve(ctx context.Context, contestID, problemID int64, req SubmitRequest) (SubmissionDTO, error) {
 	id, err := currentIdentity(ctx)
 	if err != nil {
 		return SubmissionDTO{}, err
 	}
 	req.CodeHash = strings.TrimSpace(req.CodeHash)
-	if req.ContentRef == nil || req.CodeStorageKey == "" || !isSHA256Hex(req.CodeHash) {
+	req.CodeStorageKey = strings.TrimSpace(req.CodeStorageKey)
+	req.SandboxRef = strings.TrimSpace(req.SandboxRef)
+	hasCode := req.CodeStorageKey != "" || req.CodeHash != ""
+	if req.ContentRef == nil || (hasCode && (req.CodeStorageKey == "" || !isSHA256Hex(req.CodeHash))) {
 		return SubmissionDTO{}, apperr.ErrContestSubmissionInvalid
 	}
 	var contest Contest
@@ -102,7 +105,7 @@ func (s *Service) SubmitSolve(ctx context.Context, contestID, problemID int64, r
 	}); err != nil {
 		return SubmissionDTO{}, err
 	}
-	task, err := s.judge.SubmitJudgeTask(ctx, contracts.JudgeSubmitRequest{TenantID: id.TenantID, JudgerCode: "contest-solve", ItemCode: problem.ItemCode, ItemVersion: problem.ItemVersion, CodeStorageKey: req.CodeStorageKey, CodeHash: req.CodeHash, SubmitterID: id.AccountID, SourceRef: sourceRef, SourceOwnerID: id.AccountID, SourceCourseID: 0, SourceScope: "contest", SandboxMode: sandboxModeForSolve(req), TargetSandboxRef: req.SandboxRef, ExtraInput: map[string]any{"contest_id": contestID, "problem_id": problemID, "content_ref": req.ContentRef}, Priority: 8})
+	task, err := s.judge.SubmitJudgeTask(ctx, contracts.JudgeSubmitRequest{TenantID: id.TenantID, ItemCode: problem.ItemCode, ItemVersion: problem.ItemVersion, CodeStorageKey: req.CodeStorageKey, CodeHash: req.CodeHash, SubmitterID: id.AccountID, SourceRef: sourceRef, SourceOwnerID: id.AccountID, SourceCourseID: 0, SourceScope: "contest", SandboxMode: sandboxModeForSolve(req), TargetSandboxRef: req.SandboxRef, ExtraInput: req.ContentRef, Priority: 8})
 	if err != nil {
 		return SubmissionDTO{}, apperr.ErrContestJudgeUnavailable.WithCause(err)
 	}

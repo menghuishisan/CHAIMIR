@@ -48,15 +48,6 @@
     x-chaimir-audience: platform-admin
     security: [{ bearerAuth: [] }]
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
-/api/v1/admin/platform/backups/trigger:
-  post:
-    tags: [admin]
-    summary: 触发备份记录
-    operationId: adminTriggerBackup
-    x-chaimir-audience: platform-admin
-    security: [{ bearerAuth: [] }]
-    requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
-    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
 /api/v1/admin/school/dashboard:
   get:
     tags: [admin]

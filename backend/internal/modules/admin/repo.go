@@ -40,11 +40,25 @@ type TxStore interface {
 	UpdateAlertRule(context.Context, int64, AlertRuleRequest) (AlertRuleDTO, error)
 	CreateAlertEvent(context.Context, int64, int64, int64, int16, string) (AlertEventDTO, error)
 	ListAlertEvents(context.Context, int16, int64, int, int) ([]AlertEventDTO, error)
-	HandleAlertEvent(context.Context, int64, int16, int64) (AlertEventDTO, error)
+	HandleAlertEvent(context.Context, int64, int64, int16, int64) (AlertEventDTO, error)
 	ListPlatformStatistics(context.Context, int16, int64, string, string) ([]StatisticsDTO, error)
 	UpsertPlatformStatistics(context.Context, int64, int16, int64, string, map[string]any) (StatisticsDTO, error)
-	CreateBackupRecord(context.Context, int64, int16, string, int64, int16) (BackupRecordDTO, error)
+	CreateBackupRecord(context.Context, int64, BackupRecordCreate) (BackupRecordDTO, error)
 	ListBackupRecords(context.Context, int, int) ([]BackupRecordDTO, error)
+}
+
+// RecordBackupResult 写入受控运维备份任务结果,仅供组合根 cron 命令使用。
+func RecordBackupResult(ctx context.Context, store Store, id int64, req BackupRecordCreate) (BackupRecordDTO, error) {
+	if store == nil || id <= 0 {
+		return BackupRecordDTO{}, fmt.Errorf("备份记录写入依赖不完整")
+	}
+	var out BackupRecordDTO
+	err := store.PlatformTx(ctx, func(ctx context.Context, tx TxStore) error {
+		var err error
+		out, err = tx.CreateBackupRecord(ctx, id, req)
+		return err
+	})
+	return out, err
 }
 
 type store struct{ database *db.DB }

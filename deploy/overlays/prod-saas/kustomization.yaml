@@ -24,6 +24,9 @@ images:
   - name: chaimir/migrate
     newName: harbor.chaimir.io/service/migrate
     newTag: "1.0.0"
+  - name: chaimir/cron
+    newName: harbor.chaimir.io/service/cron
+    newTag: "1.0.0"
 
 configMapGenerator:
   - name: chaimir-config

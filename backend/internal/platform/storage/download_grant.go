@@ -14,13 +14,14 @@ import (
 
 // DownloadGrantRequest 描述一次经过业务鉴权后的受控下载授权请求。
 type DownloadGrantRequest struct {
-	TenantID     int64
-	AccountID    int64
-	ObjectRef    string
-	Module       string
-	ResourceType string
-	ResourceID   string
-	ExpiresAt    time.Time
+	TenantID           int64
+	AccountID          int64
+	AllowPlatformScope bool
+	ObjectRef          string
+	Module             string
+	ResourceType       string
+	ResourceID         string
+	ExpiresAt          time.Time
 }
 
 // DownloadGrant 表示统一文件服务生成的一次性受控下载授权快照。
@@ -43,7 +44,7 @@ const maxDownloadGrantTokenLength = 8192
 
 // BuildDownloadGrant 校验对象引用和租户前缀后生成下载授权,避免业务模块直接暴露存储直链。
 func BuildDownloadGrant(req DownloadGrantRequest) (DownloadGrant, error) {
-	if req.TenantID <= 0 {
+	if req.TenantID < 0 || (req.TenantID == 0 && !req.AllowPlatformScope) {
 		return DownloadGrant{}, fmt.Errorf("下载授权缺少 tenant_id")
 	}
 	if req.AccountID <= 0 {
@@ -162,7 +163,7 @@ func verifyDownloadGrantTokenAt(token string, signingKey string, now time.Time) 
 
 // validateDownloadGrant 在签发和验签两端统一执行授权边界校验,避免令牌内容绕过对象前缀限制。
 func validateDownloadGrant(grant DownloadGrant, now time.Time) error {
-	if grant.TenantID <= 0 {
+	if grant.TenantID < 0 {
 		return fmt.Errorf("下载授权缺少 tenant_id")
 	}
 	if grant.AccountID <= 0 {
