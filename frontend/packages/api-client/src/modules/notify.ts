@@ -20,39 +20,39 @@ export class NotifyApi {
    */
   async getNotifications(params?: {
     type?: string
-    read?: boolean
+    is_read?: boolean
     page?: number
     size?: number
   }): Promise<PaginatedResponse<Notification>> {
-    return this.client.get('/notify/notifications', params)
+    return this.client.get('/notify/inbox', params)
   }
 
   /**
    * 获取未读数量
    */
   async getUnreadCount(): Promise<{ unread: number }> {
-    return this.client.get('/notify/notifications/unread')
+    return this.client.get('/notify/inbox/unread-count')
   }
 
   /**
    * 标记为已读
    */
-  async markAsRead(notificationIds: string[]): Promise<void> {
-    return this.client.post('/notify/notifications/mark-read', { notification_ids: notificationIds })
+  async markAsRead(notificationId: string): Promise<Notification> {
+    return this.client.post(`/notify/inbox/${notificationId}/read`)
   }
 
   /**
    * 全部标记为已读
    */
   async markAllAsRead(): Promise<void> {
-    return this.client.post('/notify/notifications/mark-all-read')
+    return this.client.post('/notify/inbox/read-all')
   }
 
   /**
    * 删除通知
    */
   async deleteNotification(notificationId: string): Promise<void> {
-    return this.client.delete(`/notify/notifications/${notificationId}`)
+    return this.client.delete(`/notify/inbox/${notificationId}`)
   }
 
   // ===== 通知偏好 =====
@@ -67,8 +67,8 @@ export class NotifyApi {
   /**
    * 更新通知偏好
    */
-  async updatePreference(type: string, data: { enabled: boolean }): Promise<void> {
-    return this.client.put(`/notify/preferences/${type}`, data)
+  async updatePreference(type: string, data: { enabled: boolean }): Promise<NotificationPreference> {
+    return this.client.put('/notify/preferences', { type, enabled: data.enabled })
   }
 
   // ===== 公告 =====
@@ -76,19 +76,8 @@ export class NotifyApi {
   /**
    * 获取公告列表
    */
-  async getAnnouncements(params?: {
-    scope?: number
-    page?: number
-    size?: number
-  }): Promise<PaginatedResponse<Announcement>> {
+  async getAnnouncements(params?: { page?: number; size?: number }): Promise<PaginatedResponse<Announcement>> {
     return this.client.get('/notify/announcements', params)
-  }
-
-  /**
-   * 获取公告详情
-   */
-  async getAnnouncement(announcementId: string): Promise<Announcement> {
-    return this.client.get(`/notify/announcements/${announcementId}`)
   }
 
   /**
@@ -99,17 +88,10 @@ export class NotifyApi {
   }
 
   /**
-   * 更新公告
+   * 标记公告已读
    */
-  async updateAnnouncement(announcementId: string, data: AnnouncementRequest): Promise<Announcement> {
-    return this.client.put(`/notify/announcements/${announcementId}`, data)
-  }
-
-  /**
-   * 删除公告
-   */
-  async deleteAnnouncement(announcementId: string): Promise<void> {
-    return this.client.delete(`/notify/announcements/${announcementId}`)
+  async markAnnouncementRead(announcementId: string): Promise<void> {
+    return this.client.post(`/notify/announcements/${announcementId}/read`)
   }
 
   // ===== WebSocket =====

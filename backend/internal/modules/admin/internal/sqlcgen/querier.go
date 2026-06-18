@@ -9,6 +9,9 @@ import (
 )
 
 type Querier interface {
+	CountAlertEvents(ctx context.Context, arg CountAlertEventsParams) (int64, error)
+	CountBackupRecords(ctx context.Context) (int64, error)
+	CountConfigChangeLogs(ctx context.Context, configID int64) (int64, error)
 	CreateAlertEvent(ctx context.Context, arg CreateAlertEventParams) (AlertEvent, error)
 	CreateAlertRule(ctx context.Context, arg CreateAlertRuleParams) (AlertRule, error)
 	CreateBackupRecord(ctx context.Context, arg CreateBackupRecordParams) (BackupRecord, error)

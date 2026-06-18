@@ -48,7 +48,10 @@
     operationId: gradeListReviews
     x-chaimir-audience: school-admin
     security: [{ bearerAuth: [] }]
-    parameters: [{ $ref: "#/components/parameters/StatusQuery" }]
+    parameters:
+      - { $ref: "#/components/parameters/StatusQuery" }
+      - { $ref: "#/components/parameters/PageQuery" }
+      - { $ref: "#/components/parameters/SizeQuery" }
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
   post:
     tags: [grade]
@@ -121,7 +124,10 @@
     operationId: gradeListAppeals
     x-chaimir-audience: teacher
     security: [{ bearerAuth: [] }]
-    parameters: [{ $ref: "#/components/parameters/StatusQuery" }]
+    parameters:
+      - { $ref: "#/components/parameters/StatusQuery" }
+      - { $ref: "#/components/parameters/PageQuery" }
+      - { $ref: "#/components/parameters/SizeQuery" }
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
   post:
     tags: [grade]
@@ -173,7 +179,10 @@
     operationId: gradeListWarnings
     x-chaimir-audience: student-or-school-admin
     security: [{ bearerAuth: [] }]
-    parameters: [{ name: student_id, in: query, schema: { type: integer, format: int64 } }]
+    parameters:
+      - { name: student_id, in: query, schema: { type: integer, format: int64 } }
+      - { $ref: "#/components/parameters/PageQuery" }
+      - { $ref: "#/components/parameters/SizeQuery" }
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
 /api/v1/grade-center/warnings/{id}/ack:
   post:
@@ -204,7 +213,7 @@
 /api/v1/grade-center/transcripts/{id}:
   get:
     tags: [grade]
-    summary: 获取成绩单短时下载授权
+    summary: 获取成绩单短时下载授权 JSON
     operationId: gradeDownloadTranscript
     x-chaimir-audience: user
     security: [{ bearerAuth: [] }]

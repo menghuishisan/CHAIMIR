@@ -18,6 +18,7 @@ type Querier interface {
 	CountAssignmentSubmissions(ctx context.Context, arg CountAssignmentSubmissionsParams) (int64, error)
 	CountCourseLessons(ctx context.Context, arg CountCourseLessonsParams) (int64, error)
 	CountCourseMembers(ctx context.Context, arg CountCourseMembersParams) (int64, error)
+	CountDiscussionPosts(ctx context.Context, arg CountDiscussionPostsParams) (int64, error)
 	CountStudentAttempts(ctx context.Context, arg CountStudentAttemptsParams) (int64, error)
 	CountStudentCourses(ctx context.Context, arg CountStudentCoursesParams) (int64, error)
 	CountSubmissionsByAssignment(ctx context.Context, arg CountSubmissionsByAssignmentParams) (int64, error)

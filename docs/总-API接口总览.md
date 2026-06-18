@@ -50,7 +50,7 @@
 补充:生产代码不得用同一错误码动态替换多种用户文案;新增场景应在对应段落补稳定错误码。`11503–11508` 只用于服务端装配依赖缺失,详细技术原因只进入日志。
 
 ### 6. 跨模块调用约定
-- 业务实时数据经 M10 `POST /notify/push` + 客户端订阅 `WS /ws`;引擎内部流(终端/仿真 stream)走各模块自有 WS。
+- 业务实时数据经 M10 `POST /notify/push` + 客户端订阅 `WS /ws`;topic 必须带租户前缀 `tenant:{tenant_id}:...`;引擎内部流(终端/仿真 stream)走各模块自有 WS。
 - 资源回收:M7/M8 调 M2 `/sandboxes/recycle`、M4 `/sessions/recycle`(按 source_ref)。
 - source_ref 格式:`<来源>:<年份>:<资源类型>:<id>`(全称,见总纲约定;M7 实例统一为 `experiment:<年份>:instance:<id>`)。
 
@@ -137,7 +137,7 @@
 
 ### M10 通知与实时推送 `/api/v1/notify`
 - `/send` `[内部]`:统一通知发送。
-- `/push` `[内部]`:实时推送到 topic。
+- `/push` `[内部]`:实时推送到带租户前缀的 topic。
 - `WS /ws`:统一实时通道(订阅 topic)。
 - `/inbox/*`、`/preferences`:站内信/偏好 `[用户]`。
 - `/announcements/*`:系统公告。

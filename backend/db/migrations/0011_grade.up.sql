@@ -88,6 +88,9 @@ CREATE TABLE IF NOT EXISTS grade_appeal (
 );
 
 CREATE INDEX IF NOT EXISTS idx_grade_appeal_student_status ON grade_appeal(tenant_id, student_id, status);
+CREATE UNIQUE INDEX IF NOT EXISTS uk_grade_appeal_active_course_student
+    ON grade_appeal(tenant_id, student_id, course_id)
+    WHERE status IN (1, 2);
 
 CREATE TABLE IF NOT EXISTS academic_warning (
     id BIGINT PRIMARY KEY,
@@ -126,11 +129,27 @@ ALTER TABLE grade_appeal ENABLE ROW LEVEL SECURITY;
 ALTER TABLE academic_warning ENABLE ROW LEVEL SECURITY;
 ALTER TABLE transcript_record ENABLE ROW LEVEL SECURITY;
 
-CREATE POLICY grade_level_config_tenant_rls ON grade_level_config USING (tenant_id = current_setting('app.tenant_id')::BIGINT);
-CREATE POLICY semester_tenant_rls ON semester USING (tenant_id = current_setting('app.tenant_id')::BIGINT);
-CREATE POLICY grade_review_tenant_rls ON grade_review USING (tenant_id = current_setting('app.tenant_id')::BIGINT);
-CREATE POLICY grade_lock_outbox_tenant_rls ON grade_lock_outbox USING (tenant_id = current_setting('app.tenant_id')::BIGINT);
-CREATE POLICY student_semester_grade_tenant_rls ON student_semester_grade USING (tenant_id = current_setting('app.tenant_id')::BIGINT);
-CREATE POLICY grade_appeal_tenant_rls ON grade_appeal USING (tenant_id = current_setting('app.tenant_id')::BIGINT);
-CREATE POLICY academic_warning_tenant_rls ON academic_warning USING (tenant_id = current_setting('app.tenant_id')::BIGINT);
-CREATE POLICY transcript_record_tenant_rls ON transcript_record USING (tenant_id = current_setting('app.tenant_id')::BIGINT);
+CREATE POLICY grade_level_config_tenant_rls ON grade_level_config
+    USING (tenant_id = current_setting('app.tenant_id')::BIGINT)
+    WITH CHECK (tenant_id = current_setting('app.tenant_id')::BIGINT);
+CREATE POLICY semester_tenant_rls ON semester
+    USING (tenant_id = current_setting('app.tenant_id')::BIGINT)
+    WITH CHECK (tenant_id = current_setting('app.tenant_id')::BIGINT);
+CREATE POLICY grade_review_tenant_rls ON grade_review
+    USING (tenant_id = current_setting('app.tenant_id')::BIGINT)
+    WITH CHECK (tenant_id = current_setting('app.tenant_id')::BIGINT);
+CREATE POLICY grade_lock_outbox_tenant_rls ON grade_lock_outbox
+    USING (tenant_id = current_setting('app.tenant_id')::BIGINT)
+    WITH CHECK (tenant_id = current_setting('app.tenant_id')::BIGINT);
+CREATE POLICY student_semester_grade_tenant_rls ON student_semester_grade
+    USING (tenant_id = current_setting('app.tenant_id')::BIGINT)
+    WITH CHECK (tenant_id = current_setting('app.tenant_id')::BIGINT);
+CREATE POLICY grade_appeal_tenant_rls ON grade_appeal
+    USING (tenant_id = current_setting('app.tenant_id')::BIGINT)
+    WITH CHECK (tenant_id = current_setting('app.tenant_id')::BIGINT);
+CREATE POLICY academic_warning_tenant_rls ON academic_warning
+    USING (tenant_id = current_setting('app.tenant_id')::BIGINT)
+    WITH CHECK (tenant_id = current_setting('app.tenant_id')::BIGINT);
+CREATE POLICY transcript_record_tenant_rls ON transcript_record
+    USING (tenant_id = current_setting('app.tenant_id')::BIGINT)
+    WITH CHECK (tenant_id = current_setting('app.tenant_id')::BIGINT);

@@ -88,17 +88,21 @@ func (t *txStore) GetConfigChangeLog(ctx context.Context, id, configID int64) (C
 	return configLogDTO(row), nil
 }
 
-// ListConfigChangeLogs 查询配置变更历史。
-func (t *txStore) ListConfigChangeLogs(ctx context.Context, configID int64, page, size int) ([]ConfigChangeLogDTO, error) {
+// ListConfigChangeLogs 查询配置变更历史和总数。
+func (t *txStore) ListConfigChangeLogs(ctx context.Context, configID int64, page, size int) ([]ConfigChangeLogDTO, int64, error) {
 	rows, err := t.q.ListConfigChangeLogs(ctx, sqlcgen.ListConfigChangeLogsParams{ConfigID: configID, Limit: int32(size), Offset: int32((page - 1) * size)})
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	out := make([]ConfigChangeLogDTO, 0, len(rows))
 	for _, row := range rows {
 		out = append(out, configLogDTO(row))
 	}
-	return out, nil
+	total, err := t.q.CountConfigChangeLogs(ctx, configID)
+	if err != nil {
+		return nil, 0, err
+	}
+	return out, total, nil
 }
 
 // CreateAlertRule 创建告警规则。
@@ -149,17 +153,21 @@ func (t *txStore) CreateAlertEvent(ctx context.Context, id, ruleID, tenantID int
 	return alertEventDTO(row), nil
 }
 
-// ListAlertEvents 查询告警事件。
-func (t *txStore) ListAlertEvents(ctx context.Context, status int16, tenantID int64, page, size int) ([]AlertEventDTO, error) {
+// ListAlertEvents 查询告警事件和总数。
+func (t *txStore) ListAlertEvents(ctx context.Context, status int16, tenantID int64, page, size int) ([]AlertEventDTO, int64, error) {
 	rows, err := t.q.ListAlertEvents(ctx, sqlcgen.ListAlertEventsParams{Status: status, TenantID: pgtypex.Int8(tenantID), PageOffset: int32((page - 1) * size), PageLimit: int32(size)})
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	out := make([]AlertEventDTO, 0, len(rows))
 	for _, row := range rows {
 		out = append(out, alertEventDTO(row))
 	}
-	return out, nil
+	total, err := t.q.CountAlertEvents(ctx, sqlcgen.CountAlertEventsParams{Status: status, TenantID: pgtypex.Int8(tenantID)})
+	if err != nil {
+		return nil, 0, err
+	}
+	return out, total, nil
 }
 
 // HandleAlertEvent 处理告警事件。
@@ -227,17 +235,21 @@ func (t *txStore) CreateBackupRecord(ctx context.Context, id int64, req BackupRe
 	return backupDTO(row), nil
 }
 
-// ListBackupRecords 查询备份记录。
-func (t *txStore) ListBackupRecords(ctx context.Context, page, size int) ([]BackupRecordDTO, error) {
+// ListBackupRecords 查询备份记录和总数。
+func (t *txStore) ListBackupRecords(ctx context.Context, page, size int) ([]BackupRecordDTO, int64, error) {
 	rows, err := t.q.ListBackupRecords(ctx, sqlcgen.ListBackupRecordsParams{Limit: int32(size), Offset: int32((page - 1) * size)})
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	out := make([]BackupRecordDTO, 0, len(rows))
 	for _, row := range rows {
 		out = append(out, backupDTO(row))
 	}
-	return out, nil
+	total, err := t.q.CountBackupRecords(ctx)
+	if err != nil {
+		return nil, 0, err
+	}
+	return out, total, nil
 }
 
 // configDTO 转换配置行。

@@ -11,6 +11,7 @@ import (
 )
 
 type Querier interface {
+	CountAnnouncements(ctx context.Context, arg CountAnnouncementsParams) (int64, error)
 	CountNotifications(ctx context.Context, arg CountNotificationsParams) (int64, error)
 	CountUnreadNotifications(ctx context.Context, receiverID int64) (int64, error)
 	CreateAnnouncement(ctx context.Context, arg CreateAnnouncementParams) (SystemAnnouncement, error)

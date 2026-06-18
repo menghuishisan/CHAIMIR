@@ -558,8 +558,8 @@ func (a teachingAPI) listPosts(c *gin.Context) {
 	if !ok {
 		return
 	}
-	out, p, s, err := a.svc.ListPosts(c.Request.Context(), courseID, page, size)
-	httpx.Write(c, gin.H{"items": out, "page": p, "size": s}, err)
+	out, total, p, s, err := a.svc.ListPosts(c.Request.Context(), courseID, page, size)
+	httpx.WritePage(c, out, total, p, s, err)
 }
 
 // likePost 点赞讨论。

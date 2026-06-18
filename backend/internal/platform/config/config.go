@@ -238,12 +238,13 @@ type ExperimentConfig struct {
 
 // GradeConfig 描述成绩中心申诉和成绩单签名边界。
 type GradeConfig struct {
-	AppealWindowDays     int
-	TranscriptSigningKey string
-	TranscriptMaxBytes   int64
-	LockOutboxBatchSize  int
-	LockOutboxPollMs     int
-	LockOutboxStaleMs    int
+	AppealWindowDays       int
+	SummaryCacheTTLSeconds int
+	TranscriptSigningKey   string
+	TranscriptMaxBytes     int64
+	LockOutboxBatchSize    int
+	LockOutboxPollMs       int
+	LockOutboxStaleMs      int
 }
 
 // AdminConfig 描述管理后台统计快照后台任务边界。
@@ -574,12 +575,13 @@ func Load() (*Config, error) {
 		ScoreOutboxStaleMs:         reqInt("EXPERIMENT_SCORE_OUTBOX_STALE_INTERVAL_MS"),
 	}
 	c.Grade = GradeConfig{
-		AppealWindowDays:     reqInt("GRADE_APPEAL_WINDOW_DAYS"),
-		TranscriptSigningKey: req("GRADE_TRANSCRIPT_SIGNING_KEY"),
-		TranscriptMaxBytes:   reqInt64("GRADE_TRANSCRIPT_MAX_BYTES"),
-		LockOutboxBatchSize:  reqInt("GRADE_LOCK_OUTBOX_BATCH_SIZE"),
-		LockOutboxPollMs:     reqInt("GRADE_LOCK_OUTBOX_POLL_INTERVAL_MS"),
-		LockOutboxStaleMs:    reqInt("GRADE_LOCK_OUTBOX_STALE_INTERVAL_MS"),
+		AppealWindowDays:       reqInt("GRADE_APPEAL_WINDOW_DAYS"),
+		SummaryCacheTTLSeconds: reqInt("GRADE_SUMMARY_CACHE_TTL_SECONDS"),
+		TranscriptSigningKey:   req("GRADE_TRANSCRIPT_SIGNING_KEY"),
+		TranscriptMaxBytes:     reqInt64("GRADE_TRANSCRIPT_MAX_BYTES"),
+		LockOutboxBatchSize:    reqInt("GRADE_LOCK_OUTBOX_BATCH_SIZE"),
+		LockOutboxPollMs:       reqInt("GRADE_LOCK_OUTBOX_POLL_INTERVAL_MS"),
+		LockOutboxStaleMs:      reqInt("GRADE_LOCK_OUTBOX_STALE_INTERVAL_MS"),
 	}
 	c.Admin = AdminConfig{
 		StatisticsSnapshotIntervalSeconds: reqInt("ADMIN_STATISTICS_SNAPSHOT_INTERVAL_SECONDS"),
@@ -838,6 +840,12 @@ func Load() (*Config, error) {
 	}
 	if c.Experiment.ScoreOutboxStaleMs <= 0 {
 		errs = append(errs, "EXPERIMENT_SCORE_OUTBOX_STALE_INTERVAL_MS 必须大于 0")
+	}
+	if c.Grade.AppealWindowDays <= 0 {
+		errs = append(errs, "GRADE_APPEAL_WINDOW_DAYS 必须大于 0")
+	}
+	if c.Grade.SummaryCacheTTLSeconds <= 0 {
+		errs = append(errs, "GRADE_SUMMARY_CACHE_TTL_SECONDS 必须大于 0")
 	}
 	if c.Grade.TranscriptMaxBytes <= 0 {
 		errs = append(errs, "GRADE_TRANSCRIPT_MAX_BYTES 必须大于 0")

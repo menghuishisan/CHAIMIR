@@ -177,7 +177,7 @@ export class ContestApi {
   /**
    * 查询当前队伍对局列表。
    */
-  async listBattleMatches(contestId: string, params?: { page?: number; size?: number }): Promise<BattleMatch[]> {
+  async listBattleMatches(contestId: string, params?: { page?: number; size?: number }): Promise<PaginatedResponse<BattleMatch>> {
     return this.client.get(`/contest/contests/${contestId}/battle/matches`, params)
   }
 
@@ -222,7 +222,7 @@ export class ContestApi {
   /**
    * 查询违规处理记录。
    */
-  async listCheatRecords(contestId: string, params?: { page?: number; size?: number }): Promise<CheatRecord[]> {
+  async listCheatRecords(contestId: string, params?: { page?: number; size?: number }): Promise<PaginatedResponse<CheatRecord>> {
     return this.client.get(`/contest/contests/${contestId}/cheat-records`, params)
   }
 
@@ -257,7 +257,7 @@ export class ContestApi {
   /**
    * 查询漏洞题草稿。
    */
-  async listVulnProblems(params?: { source_id?: number; status?: number; page?: number; size?: number }): Promise<VulnProblem[]> {
+  async listVulnProblems(params?: { source_id?: number; status?: number; page?: number; size?: number }): Promise<PaginatedResponse<VulnProblem>> {
     return this.client.get('/contest/vuln-problems', params)
   }
 

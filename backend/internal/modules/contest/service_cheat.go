@@ -54,27 +54,28 @@ func (s *Service) CreateCheatRecord(ctx context.Context, contestID int64, req Ch
 	return cheatDTOFromModel(item), nil
 }
 
-// ListCheatRecords 查询教师可见的违规处理记录。
-func (s *Service) ListCheatRecords(ctx context.Context, contestID int64, page, size int) ([]CheatRecordDTO, error) {
+// ListCheatRecords 查询教师可见的违规处理记录分页。
+func (s *Service) ListCheatRecords(ctx context.Context, contestID int64, page, size int) ([]CheatRecordDTO, int64, int, int, error) {
 	id, err := currentIdentity(ctx)
 	if err != nil {
-		return nil, err
+		return nil, 0, page, size, err
 	}
 	var items []CheatRecord
+	var total int64
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
 		if _, err := s.loadContestForManage(ctx, tx, id.TenantID, id.AccountID, contestID); err != nil {
 			return err
 		}
-		items, err = tx.ListCheatRecords(ctx, id.TenantID, contestID, page, size)
+		items, total, err = tx.ListCheatRecords(ctx, id.TenantID, contestID, page, size)
 		return err
 	}); err != nil {
-		return nil, err
+		return nil, 0, page, size, err
 	}
 	out := make([]CheatRecordDTO, 0, len(items))
 	for _, item := range items {
 		out = append(out, cheatDTOFromModel(item))
 	}
-	return out, nil
+	return out, total, page, size, nil
 }
 
 // ListCheatSuspects 按 M3 指纹服务读取疑似相似提交线索。

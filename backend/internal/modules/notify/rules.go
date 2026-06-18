@@ -11,7 +11,13 @@ import (
 	"chaimir/pkg/apperr"
 )
 
-var businessTopicPattern = regexp.MustCompile(`^tenant:([1-9][0-9]*):(contest|sandbox|sim|exp|experiment|course):[1-9][0-9]*:[a-z][a-z0-9_-]*$`)
+var (
+	tenantTopicPrefixPattern = regexp.MustCompile(`^tenant:([1-9][0-9]*):`)
+	businessTopicPattern     = regexp.MustCompile(`^tenant:([1-9][0-9]*):(contest|sandbox|sim|experiment|course):[1-9][0-9]*:[a-z][a-z0-9_-]*$`)
+	notifyTopicPattern       = regexp.MustCompile(`^tenant:([1-9][0-9]*):notify:([1-9][0-9]*)$`)
+	templateVarPattern       = regexp.MustCompile(`\{\{[a-zA-Z0-9_.-]+\}\}`)
+	linkPattern              = regexp.MustCompile(`^/[A-Za-z0-9/_?&=.#:%+-]*$`)
+)
 
 // AuthorizeTopic 校验实时 topic 语法和 M10 可独立判断的租户/个人边界。
 func AuthorizeTopic(tenantID, accountID int64, topic string) error {
@@ -19,13 +25,13 @@ func AuthorizeTopic(tenantID, accountID int64, topic string) error {
 	if tenantID <= 0 || accountID <= 0 || topic == "" {
 		return apperr.ErrNotifySubscribeInvalid
 	}
-	if want := fmt.Sprintf("notify:%d", accountID); strings.HasPrefix(topic, "notify:") {
+	if want := personalNotifyTopic(tenantID, accountID); strings.Contains(topic, ":notify:") {
 		if topic != want {
 			return apperr.ErrNotifyTopicForbidden
 		}
 		return nil
 	}
-	if want := fmt.Sprintf("alert:%d", tenantID); strings.HasPrefix(topic, "alert:") {
+	if want := tenantAlertTopic(tenantID); strings.HasSuffix(topic, ":alert") {
 		if topic != want {
 			return apperr.ErrNotifyTopicForbidden
 		}
@@ -33,6 +39,9 @@ func AuthorizeTopic(tenantID, accountID int64, topic string) error {
 	}
 	if businessTopicTenantID(topic) == tenantID {
 		return nil
+	}
+	if parsed := topicTenantID(topic); parsed > 0 && parsed != tenantID {
+		return apperr.ErrNotifyTopicForbidden
 	}
 	return apperr.ErrNotifySubscribeInvalid
 }
@@ -43,14 +52,17 @@ func ValidatePushTopic(tenantID int64, topic string) error {
 	if tenantID <= 0 || topic == "" {
 		return apperr.ErrNotifySubscribeInvalid
 	}
-	if raw, ok := strings.CutPrefix(topic, "notify:"); ok {
-		accountID, err := strconv.ParseInt(raw, 10, 64)
+	if matches := notifyTopicPattern.FindStringSubmatch(topic); len(matches) == 3 {
+		if topicTenantID(topic) != tenantID {
+			return apperr.ErrNotifyTopicForbidden
+		}
+		accountID, err := strconv.ParseInt(matches[2], 10, 64)
 		if err != nil || accountID <= 0 {
 			return apperr.ErrNotifySubscribeInvalid
 		}
 		return nil
 	}
-	if want := fmt.Sprintf("alert:%d", tenantID); strings.HasPrefix(topic, "alert:") {
+	if want := tenantAlertTopic(tenantID); strings.HasSuffix(topic, ":alert") {
 		if topic != want {
 			return apperr.ErrNotifyTopicForbidden
 		}
@@ -59,7 +71,33 @@ func ValidatePushTopic(tenantID int64, topic string) error {
 	if businessTopicTenantID(topic) == tenantID {
 		return nil
 	}
+	if parsed := topicTenantID(topic); parsed > 0 && parsed != tenantID {
+		return apperr.ErrNotifyTopicForbidden
+	}
 	return apperr.ErrNotifySubscribeInvalid
+}
+
+// personalNotifyTopic 生成当前租户下个人红点 topic,避免账号 ID 单独暴露为跨租户通道名。
+func personalNotifyTopic(tenantID, accountID int64) string {
+	return fmt.Sprintf("tenant:%d:notify:%d", tenantID, accountID)
+}
+
+// tenantAlertTopic 生成当前租户告警 topic。
+func tenantAlertTopic(tenantID int64) string {
+	return fmt.Sprintf("tenant:%d:alert", tenantID)
+}
+
+// topicTenantID 解析所有 M10 统一实时 topic 的租户前缀,不命中时返回 0。
+func topicTenantID(topic string) int64 {
+	matches := tenantTopicPrefixPattern.FindStringSubmatch(strings.TrimSpace(topic))
+	if len(matches) != 2 {
+		return 0
+	}
+	tenantID, err := strconv.ParseInt(matches[1], 10, 64)
+	if err != nil {
+		return 0
+	}
+	return tenantID
 }
 
 // businessTopicTenantID 解析统一业务实时 topic 中的租户前缀,不命中时返回 0。
@@ -80,6 +118,9 @@ func validateSendRequest(req SendRequest) (SendRequest, error) {
 	req.Type = strings.TrimSpace(req.Type)
 	req.Link = strings.TrimSpace(req.Link)
 	if req.TenantID <= 0 || req.Type == "" || len(req.Receivers) == 0 {
+		return SendRequest{}, apperr.ErrNotifyRequestInvalid
+	}
+	if req.Link != "" && !linkPattern.MatchString(req.Link) {
 		return SendRequest{}, apperr.ErrNotifyRequestInvalid
 	}
 	if req.Params == nil {
@@ -128,6 +169,16 @@ func validateAnnouncementRequest(req AnnouncementRequest, isPlatform bool) error
 		return apperr.ErrNotifyAnnouncementInvalid
 	}
 	return nil
+}
+
+// renderNotificationTemplate 渲染标题和正文,并拒绝缺失变量的模板输出。
+func renderNotificationTemplate(tpl notificationTemplate, params map[string]string) (string, string, error) {
+	title := renderTemplate(tpl.TitleTpl, params)
+	content := renderTemplate(tpl.ContentTpl, params)
+	if templateVarPattern.MatchString(title) || templateVarPattern.MatchString(content) {
+		return "", "", apperr.ErrNotifyTemplateUnavailable
+	}
+	return title, content, nil
 }
 
 // renderTemplate 用参数替换 {{key}} 模板变量。

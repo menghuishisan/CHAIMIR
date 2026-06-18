@@ -11,6 +11,26 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const countAnnouncements = `-- name: CountAnnouncements :one
+SELECT COUNT(*)
+FROM system_announcement a
+WHERE (a.tenant_id IS NULL OR a.tenant_id = $1)
+  AND (a.expire_at IS NULL OR a.expire_at > now())
+  AND (a.scope <> 3 OR a.target_roles && $2::smallint[])
+`
+
+type CountAnnouncementsParams struct {
+	TenantID    pgtype.Int8 `json:"tenant_id"`
+	RoleNumbers []int16     `json:"role_numbers"`
+}
+
+func (q *Queries) CountAnnouncements(ctx context.Context, arg CountAnnouncementsParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countAnnouncements, arg.TenantID, arg.RoleNumbers)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const countNotifications = `-- name: CountNotifications :one
 SELECT COUNT(*) FROM notification
 WHERE receiver_id = $1

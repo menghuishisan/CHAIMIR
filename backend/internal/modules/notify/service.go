@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"chaimir/internal/contracts"
+	"chaimir/internal/platform/audit"
 	"chaimir/internal/platform/config"
 	"chaimir/internal/platform/jsonx"
 	"chaimir/internal/platform/tenant"
@@ -26,6 +27,7 @@ type Service struct {
 	redis Cache
 	hub   *ws.Hub
 	roles RoleReader
+	audit audit.Writer
 	cfg   config.NotifyConfig
 }
 
@@ -49,18 +51,19 @@ type ServiceDeps struct {
 	Redis  Cache
 	Hub    *ws.Hub
 	Roles  RoleReader
+	Audit  audit.Writer
 	Config config.NotifyConfig
 }
 
 // NewService 构造 M10 服务。
 func NewService(deps ServiceDeps) (*Service, error) {
-	if deps.Store == nil || deps.IDs == nil || deps.Redis == nil || deps.Hub == nil || deps.Roles == nil {
+	if deps.Store == nil || deps.IDs == nil || deps.Redis == nil || deps.Hub == nil || deps.Roles == nil || deps.Audit == nil {
 		return nil, fmt.Errorf("notify service 依赖不完整")
 	}
 	if deps.Config.UnreadTTLHours <= 0 || deps.Config.SendRateWindowSeconds <= 0 || deps.Config.SendRateMax <= 0 {
 		return nil, fmt.Errorf("notify service 配置不完整")
 	}
-	return &Service{store: deps.Store, ids: deps.IDs, redis: deps.Redis, hub: deps.Hub, roles: deps.Roles, cfg: deps.Config}, nil
+	return &Service{store: deps.Store, ids: deps.IDs, redis: deps.Redis, hub: deps.Hub, roles: deps.Roles, audit: deps.Audit, cfg: deps.Config}, nil
 }
 
 // Send 渲染模板并按接收人偏好写入站内信。
@@ -69,14 +72,15 @@ func (s *Service) Send(ctx context.Context, req contracts.NotifySendRequest) err
 	if err != nil {
 		return err
 	}
-	if err := s.checkRateLimit(ctx, input.TenantID, input.Type); err != nil {
-		return err
-	}
-	var delivered []int64
+	delivered := make([]int64, 0, len(input.Receivers))
 	err = s.store.TenantTx(ctx, input.TenantID, func(ctx context.Context, tx TxStore) error {
 		tpl, err := tx.GetNotificationTemplate(ctx, input.Type)
 		if err != nil {
 			return apperr.ErrNotifyTemplateUnavailable.WithCause(err)
+		}
+		title, content, err := renderNotificationTemplate(tpl, input.Params)
+		if err != nil {
+			return err
 		}
 		rows := make([]notificationRecord, 0, len(input.Receivers))
 		for _, receiverID := range input.Receivers {
@@ -90,11 +94,14 @@ func (s *Service) Send(ctx context.Context, req contracts.NotifySendRequest) err
 			if !enabled {
 				continue
 			}
-			rows = append(rows, notificationRecord{ID: s.ids.Generate(), TenantID: input.TenantID, ReceiverID: receiverID, Type: input.Type, Title: renderTemplate(tpl.TitleTpl, input.Params), Content: renderTemplate(tpl.ContentTpl, input.Params), Link: input.Link})
+			rows = append(rows, notificationRecord{ID: s.ids.Generate(), TenantID: input.TenantID, ReceiverID: receiverID, Type: input.Type, Title: title, Content: content, Link: input.Link})
 			delivered = append(delivered, receiverID)
 		}
 		if len(rows) == 0 {
 			return nil
+		}
+		if err := s.checkRateLimit(ctx, input.TenantID, input.Type); err != nil {
+			return err
 		}
 		return tx.CreateNotifications(ctx, rows)
 	})
@@ -172,11 +179,8 @@ func (s *Service) MarkRead(ctx context.Context, notificationID int64) (Notificat
 	if err != nil {
 		return NotificationDTO{}, apperr.ErrNotifyInboxNotFound.WithCause(err)
 	}
-	if err := s.invalidateUnread(ctx, id.TenantID, id.AccountID); err != nil {
-		return NotificationDTO{}, apperr.ErrNotifyInboxQueryInvalid.WithCause(err)
-	}
 	if err := s.refreshUnread(ctx, id.TenantID, id.AccountID); err != nil {
-		return NotificationDTO{}, apperr.ErrNotifyInboxQueryInvalid.WithCause(err)
+		logging.ErrorContext(ctx, "刷新通知未读数失败", err.Error(), slog.Int64("tenant_id", id.TenantID), slog.Int64("account_id", id.AccountID))
 	}
 	return out, nil
 }
@@ -192,10 +196,10 @@ func (s *Service) MarkAllRead(ctx context.Context) error {
 	}); err != nil {
 		return apperr.ErrNotifyInboxQueryInvalid.WithCause(err)
 	}
-	if err := s.invalidateUnread(ctx, id.TenantID, id.AccountID); err != nil {
-		return apperr.ErrNotifyInboxQueryInvalid.WithCause(err)
+	if err := s.refreshUnread(ctx, id.TenantID, id.AccountID); err != nil {
+		logging.ErrorContext(ctx, "刷新通知未读数失败", err.Error(), slog.Int64("tenant_id", id.TenantID), slog.Int64("account_id", id.AccountID))
 	}
-	return s.refreshUnread(ctx, id.TenantID, id.AccountID)
+	return nil
 }
 
 // DeleteNotification 删除当前用户站内信。
@@ -213,11 +217,8 @@ func (s *Service) DeleteNotification(ctx context.Context, notificationID int64) 
 	if err != nil {
 		return NotificationDTO{}, apperr.ErrNotifyInboxNotFound.WithCause(err)
 	}
-	if err := s.invalidateUnread(ctx, id.TenantID, id.AccountID); err != nil {
-		return NotificationDTO{}, apperr.ErrNotifyInboxQueryInvalid.WithCause(err)
-	}
 	if err := s.refreshUnread(ctx, id.TenantID, id.AccountID); err != nil {
-		return NotificationDTO{}, apperr.ErrNotifyInboxQueryInvalid.WithCause(err)
+		logging.ErrorContext(ctx, "刷新通知未读数失败", err.Error(), slog.Int64("tenant_id", id.TenantID), slog.Int64("account_id", id.AccountID))
 	}
 	return out, nil
 }
@@ -286,29 +287,41 @@ func (s *Service) CreateAnnouncement(ctx context.Context, req AnnouncementReques
 	} else {
 		err = s.store.TenantTx(ctx, tenantID, write)
 	}
-	return out, err
+	if err != nil {
+		return AnnouncementDTO{}, err
+	}
+	if err := s.writeAudit(ctx, tenantID, id.AccountID, auditRoleForIdentity(id), "notify.announcement.publish", auditTargetAnnouncement, out.ID, map[string]any{"scope": out.Scope, "tenant_id": out.TenantID}); err != nil {
+		return AnnouncementDTO{}, err
+	}
+	s.broadcastAnnouncement(ctx, out)
+	return out, nil
 }
 
 // ListAnnouncements 查询可见公告。
-func (s *Service) ListAnnouncements(ctx context.Context, page, size int) ([]AnnouncementDTO, error) {
+func (s *Service) ListAnnouncements(ctx context.Context, page, size int) (AnnouncementListDTO, error) {
 	id, err := currentIdentity(ctx)
 	if err != nil {
-		return nil, err
+		return AnnouncementListDTO{}, err
 	}
 	var out []AnnouncementDTO
+	var total int64
 	roleNumbers, err := s.currentRoleNumbers(ctx, id.AccountID)
 	if err != nil {
-		return nil, err
+		return AnnouncementListDTO{}, err
 	}
 	err = s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
 		var err error
-		out, err = tx.ListAnnouncements(ctx, id.TenantID, id.AccountID, roleNumbers, page, size)
+		out, total, err = tx.ListAnnouncements(ctx, id.TenantID, id.AccountID, roleNumbers, page, size)
 		return err
 	})
 	if err != nil {
-		return nil, err
+		return AnnouncementListDTO{}, err
 	}
-	return s.filterAnnouncementsByRole(ctx, id.AccountID, out)
+	filtered, err := s.filterAnnouncementsByRole(ctx, id.AccountID, out)
+	if err != nil {
+		return AnnouncementListDTO{}, err
+	}
+	return AnnouncementListDTO{List: filtered, Total: total, Page: page, Size: size}, nil
 }
 
 // MarkAnnouncementRead 标记公告已读。
@@ -338,7 +351,7 @@ func (s *Service) HandleSubscribe(ctx context.Context, conn *ws.Conn) error {
 	if err := conn.BindSession(ws.SessionKey{TenantID: id.TenantID, AccountID: id.AccountID}); err != nil {
 		return apperr.ErrNotifyChannelUnavailable.WithCause(err)
 	}
-	if err := s.hub.Subscribe(conn, fmt.Sprintf("notify:%d", id.AccountID)); err != nil {
+	if err := s.hub.Subscribe(conn, personalNotifyTopic(id.TenantID, id.AccountID)); err != nil {
 		return apperr.ErrNotifyChannelUnavailable.WithCause(err)
 	}
 	for {
@@ -368,6 +381,19 @@ func (s *Service) CloseSession(ctx context.Context, tenantID, accountID int64) e
 	return s.hub.CloseSession(ws.SessionKey{TenantID: tenantID, AccountID: accountID})
 }
 
+// broadcastAnnouncement 用租户告警主题提示在线用户刷新公告列表。
+func (s *Service) broadcastAnnouncement(ctx context.Context, ann AnnouncementDTO) {
+	if ann.TenantID <= 0 {
+		return
+	}
+	data, err := jsonx.AnyBytes(map[string]any{"type": "announcement", "announcement_id": fmt.Sprintf("%d", ann.ID), "scope": ann.Scope}, apperr.ErrNotifyPushFailed)
+	if err != nil {
+		logging.ErrorContext(ctx, "公告实时提醒序列化失败", err.Error(), slog.Int64("tenant_id", ann.TenantID), slog.Int64("announcement_id", ann.ID))
+		return
+	}
+	s.hub.Broadcast(tenantAlertTopic(ann.TenantID), data)
+}
+
 // RunCleanupOnce 执行一次站内信过期清理任务。
 func (s *Service) RunCleanupOnce(ctx context.Context) error {
 	cutoff := timex.Now().Add(-time.Duration(s.cfg.RetentionDays) * 24 * time.Hour)
@@ -391,6 +417,9 @@ func (s *Service) checkRateLimit(ctx context.Context, tenantID int64, typ string
 
 // refreshUnread 重算未读数并通过统一实时通道推送给用户。
 func (s *Service) refreshUnread(ctx context.Context, tenantID, accountID int64) error {
+	if err := s.redis.Delete(ctx, unreadKey(tenantID, accountID)); err != nil {
+		return err
+	}
 	unread, err := s.countUnread(ctx, tenantID, accountID)
 	if err != nil {
 		return err
@@ -399,13 +428,8 @@ func (s *Service) refreshUnread(ctx context.Context, tenantID, accountID int64) 
 	if err != nil {
 		return err
 	}
-	s.hub.Broadcast(fmt.Sprintf("notify:%d", accountID), data)
+	s.hub.Broadcast(personalNotifyTopic(tenantID, accountID), data)
 	return nil
-}
-
-// invalidateUnread 删除未读缓存,确保后续重建读取权威站内信状态。
-func (s *Service) invalidateUnread(ctx context.Context, tenantID, accountID int64) error {
-	return s.redis.Delete(ctx, unreadKey(tenantID, accountID))
 }
 
 // countUnread 在租户事务中读取用户未读站内信数量。

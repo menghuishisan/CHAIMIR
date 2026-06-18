@@ -11,6 +11,50 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const countAlertEvents = `-- name: CountAlertEvents :one
+SELECT count(*)::bigint
+FROM alert_event
+WHERE ($1::smallint = 0 OR status = $1::smallint)
+  AND (($2::bigint IS NULL) OR tenant_id = $2::bigint)
+`
+
+type CountAlertEventsParams struct {
+	Status   int16       `json:"status"`
+	TenantID pgtype.Int8 `json:"tenant_id"`
+}
+
+func (q *Queries) CountAlertEvents(ctx context.Context, arg CountAlertEventsParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countAlertEvents, arg.Status, arg.TenantID)
+	var column_1 int64
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
+const countBackupRecords = `-- name: CountBackupRecords :one
+SELECT count(*)::bigint
+FROM backup_record
+`
+
+func (q *Queries) CountBackupRecords(ctx context.Context) (int64, error) {
+	row := q.db.QueryRow(ctx, countBackupRecords)
+	var column_1 int64
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
+const countConfigChangeLogs = `-- name: CountConfigChangeLogs :one
+SELECT count(*)::bigint
+FROM config_change_log
+WHERE config_id = $1
+`
+
+func (q *Queries) CountConfigChangeLogs(ctx context.Context, configID int64) (int64, error) {
+	row := q.db.QueryRow(ctx, countConfigChangeLogs, configID)
+	var column_1 int64
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
 const createAlertEvent = `-- name: CreateAlertEvent :one
 INSERT INTO alert_event (id, rule_id, tenant_id, level, message, status, triggered_at)
 VALUES ($1, $2, $3, $4, $5, 1, now())

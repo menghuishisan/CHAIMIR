@@ -14,6 +14,7 @@ import (
 	"chaimir/internal/platform/config"
 	"chaimir/internal/platform/db"
 	"chaimir/internal/platform/eventbus"
+	"chaimir/internal/platform/redis"
 	"chaimir/internal/platform/storage"
 	"chaimir/pkg/snowflake"
 
@@ -29,6 +30,7 @@ type GradeModuleDeps struct {
 	Teaching   contracts.TeachingReadService
 	Notify     contracts.NotifyService
 	EventBus   eventbus.Bus
+	Redis      *redis.Client
 	Storage    *storage.Storage
 	Upload     config.UploadConfig
 	MinIO      config.MinIOConfig
@@ -62,6 +64,7 @@ func RegisterGradeModule(ctx context.Context, deps GradeModuleDeps) (*grade.Serv
 		Teaching:    deps.Teaching,
 		Notify:      deps.Notify,
 		Bus:         deps.EventBus,
+		Cache:       deps.Redis,
 		Storage:     deps.Storage,
 		FileService: fileService,
 		Config:      deps.Config,

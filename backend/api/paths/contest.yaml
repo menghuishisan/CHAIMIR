@@ -150,11 +150,11 @@
 /api/v1/contest/contests/{id}/battle/matches:
   get:
     tags: [contest]
-    summary: 我的对抗赛对局列表
+    summary: 我的对抗赛对局分页列表
     operationId: contestListBattleMatches
     x-chaimir-audience: student
     security: [{ bearerAuth: [] }]
-    parameters: [{ $ref: "#/components/parameters/IDPath" }, { name: team_id, in: query, schema: { type: integer, format: int64 } }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }, { $ref: "#/components/parameters/PageQuery" }, { $ref: "#/components/parameters/SizeQuery" }]
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
 /api/v1/contest/contests/{id}/ladder:
   get:
@@ -177,11 +177,11 @@
 /api/v1/contest/contests/{id}/cheat-records:
   get:
     tags: [contest]
-    summary: 作弊处理记录列表
+    summary: 作弊处理记录分页列表
     operationId: contestListCheatRecords
     x-chaimir-audience: teacher
     security: [{ bearerAuth: [] }]
-    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }, { $ref: "#/components/parameters/PageQuery" }, { $ref: "#/components/parameters/SizeQuery" }]
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
   post:
     tags: [contest]
@@ -283,10 +283,15 @@
 /api/v1/contest/vuln-problems:
   get:
     tags: [contest]
-    summary: 漏洞题草稿列表
+    summary: 漏洞题草稿分页列表
     operationId: contestListVulnProblems
     x-chaimir-audience: teacher
     security: [{ bearerAuth: [] }]
+    parameters:
+      - { name: source_id, in: query, schema: { type: integer, format: int64 } }
+      - { $ref: "#/components/parameters/StatusQuery" }
+      - { $ref: "#/components/parameters/PageQuery" }
+      - { $ref: "#/components/parameters/SizeQuery" }
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
   post:
     tags: [contest]

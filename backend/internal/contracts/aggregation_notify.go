@@ -14,9 +14,13 @@ type NotifySendRequest struct {
 
 // NotifyPushRequest 是模块通过 M10 向业务主题推送实时消息的统一请求。
 type NotifyPushRequest struct {
-	TenantID int64          `json:"tenant_id"`
-	Topic    string         `json:"topic"`
-	Payload  map[string]any `json:"payload"`
+	TenantID int64 `json:"tenant_id"`
+	// Topic 必须使用 M10 唯一实时 topic 规范:
+	// tenant:{tenant_id}:notify:{account_id}、tenant:{tenant_id}:alert、
+	// tenant:{tenant_id}:{contest|sandbox|sim|experiment|course}:{resource_id}:{channel}。
+	// 不得回退到无租户前缀 topic,否则无法在 M10 边界独立校验租户隔离。
+	Topic   string         `json:"topic"`
+	Payload map[string]any `json:"payload"`
 }
 
 // NotifyService 是 M10 对全平台开放的通知与实时推送契约。

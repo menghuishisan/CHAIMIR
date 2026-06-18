@@ -168,16 +168,20 @@ func (t *txStore) CreateAnnouncement(ctx context.Context, id, tenantID, publishe
 }
 
 // ListAnnouncements 查询系统公告。
-func (t *txStore) ListAnnouncements(ctx context.Context, tenantID, accountID int64, roleNumbers []int16, page, size int) ([]AnnouncementDTO, error) {
+func (t *txStore) ListAnnouncements(ctx context.Context, tenantID, accountID int64, roleNumbers []int16, page, size int) ([]AnnouncementDTO, int64, error) {
 	rows, err := t.q.ListAnnouncements(ctx, sqlcgen.ListAnnouncementsParams{TenantID: tenantID, AccountID: accountID, RoleNumbers: roleNumbers, PageLimit: int32(size), PageOffset: int32((page - 1) * size)})
 	if err != nil {
-		return nil, err
+		return nil, 0, err
+	}
+	total, err := t.q.CountAnnouncements(ctx, sqlcgen.CountAnnouncementsParams{TenantID: pgtypex.Int8(tenantID), RoleNumbers: roleNumbers})
+	if err != nil {
+		return nil, 0, err
 	}
 	out := make([]AnnouncementDTO, 0, len(rows))
 	for _, row := range rows {
 		out = append(out, announcementRowDTO(row))
 	}
-	return out, nil
+	return out, total, nil
 }
 
 // GetVisibleAnnouncement 查询当前用户可见公告。

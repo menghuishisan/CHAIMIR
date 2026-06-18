@@ -109,28 +109,29 @@ func (s *Service) ListBattleEntries(ctx context.Context, contestID int64) ([]Bat
 	return out, nil
 }
 
-// ListBattleMatches 查询当前账号队伍的对局历史。
-func (s *Service) ListBattleMatches(ctx context.Context, contestID int64, page, size int) ([]BattleMatchDTO, error) {
+// ListBattleMatches 查询当前账号队伍的对局历史分页。
+func (s *Service) ListBattleMatches(ctx context.Context, contestID int64, page, size int) ([]BattleMatchDTO, int64, int, int, error) {
 	id, err := currentIdentity(ctx)
 	if err != nil {
-		return nil, err
+		return nil, 0, page, size, err
 	}
 	var matches []BattleMatch
+	var total int64
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
 		team, err := s.currentAccountTeam(ctx, tx, id.TenantID, contestID, id.AccountID)
 		if err != nil {
 			return err
 		}
-		matches, err = tx.ListBattleMatchesForTeam(ctx, id.TenantID, contestID, team.ID, page, size)
+		matches, total, err = tx.ListBattleMatchesForTeam(ctx, id.TenantID, contestID, team.ID, page, size)
 		return err
 	}); err != nil {
-		return nil, err
+		return nil, 0, page, size, err
 	}
 	out := make([]BattleMatchDTO, 0, len(matches))
 	for _, match := range matches {
 		out = append(out, battleMatchDTOFromModel(match))
 	}
-	return out, nil
+	return out, total, page, size, nil
 }
 
 // GetBattleReplay 读取对局回放引用,只向参赛队伍成员开放。

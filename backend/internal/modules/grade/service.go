@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"strconv"
 	"strings"
 	"time"
 
@@ -14,6 +15,7 @@ import (
 	"chaimir/internal/platform/audit"
 	"chaimir/internal/platform/config"
 	"chaimir/internal/platform/eventbus"
+	"chaimir/internal/platform/jsonx"
 	"chaimir/internal/platform/response"
 	"chaimir/internal/platform/storage"
 	"chaimir/internal/platform/tenant"
@@ -40,6 +42,13 @@ type fileService interface {
 	IssueDownloadGrant(req storage.IssueDownloadGrantRequest) (string, storage.DownloadGrant, error)
 }
 
+// summaryCache 是 M11 学业概览缓存所需的最小基础层 Redis 能力。
+type summaryCache interface {
+	GetBytes(ctx context.Context, key string) ([]byte, bool, error)
+	SetBytes(ctx context.Context, key string, value []byte, ttl time.Duration) error
+	Delete(ctx context.Context, key string) error
+}
+
 // Service 承载 M11 成绩中心业务编排。
 type Service struct {
 	store    Store
@@ -49,6 +58,7 @@ type Service struct {
 	teaching contracts.TeachingReadService
 	notify   contracts.NotifyService
 	bus      eventbus.Bus
+	cache    summaryCache
 	storage  objectStorage
 	files    fileService
 	cfg      config.GradeConfig
@@ -63,6 +73,7 @@ type ServiceDeps struct {
 	Teaching    contracts.TeachingReadService
 	Notify      contracts.NotifyService
 	Bus         eventbus.Bus
+	Cache       summaryCache
 	Storage     *storage.Storage
 	Objects     objectStorage
 	FileService fileService
@@ -84,10 +95,13 @@ func NewService(deps ServiceDeps) (*Service, error) {
 	if deps.FileService == nil {
 		return nil, fmt.Errorf("grade service 统一文件服务依赖不完整")
 	}
-	if deps.Config.AppealWindowDays <= 0 || strings.TrimSpace(deps.Config.TranscriptSigningKey) == "" || deps.Config.TranscriptMaxBytes <= 0 || deps.Config.LockOutboxBatchSize <= 0 || deps.Config.LockOutboxStaleMs <= 0 {
+	if deps.Cache == nil {
+		return nil, fmt.Errorf("grade service 缓存依赖不完整")
+	}
+	if deps.Config.AppealWindowDays <= 0 || deps.Config.SummaryCacheTTLSeconds <= 0 || strings.TrimSpace(deps.Config.TranscriptSigningKey) == "" || deps.Config.TranscriptMaxBytes <= 0 || deps.Config.LockOutboxBatchSize <= 0 || deps.Config.LockOutboxStaleMs <= 0 {
 		return nil, fmt.Errorf("grade service 配置不完整")
 	}
-	return &Service{store: deps.Store, ids: deps.IDs, audit: deps.Audit, roles: deps.Roles, teaching: deps.Teaching, notify: deps.Notify, bus: deps.Bus, storage: objects, files: deps.FileService, cfg: deps.Config}, nil
+	return &Service{store: deps.Store, ids: deps.IDs, audit: deps.Audit, roles: deps.Roles, teaching: deps.Teaching, notify: deps.Notify, bus: deps.Bus, cache: deps.Cache, storage: objects, files: deps.FileService, cfg: deps.Config}, nil
 }
 
 // CreateLevelConfig 创建等级映射配置。
@@ -245,19 +259,20 @@ func (s *Service) SubmitReview(ctx context.Context, req ReviewRequest) (ReviewDT
 	return out, nil
 }
 
-// ListReviews 查询成绩审核列表。
-func (s *Service) ListReviews(ctx context.Context, status int16, page, size int) ([]ReviewDTO, error) {
+// ListReviews 查询成绩审核分页列表。
+func (s *Service) ListReviews(ctx context.Context, status int16, page, size int) ([]ReviewDTO, int64, int, int, error) {
 	id, err := s.requireSchoolAdmin(ctx)
 	if err != nil {
-		return nil, err
+		return nil, 0, page, size, err
 	}
 	var out []ReviewDTO
+	var total int64
 	err = s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
 		var err error
-		out, err = tx.ListGradeReviews(ctx, status, page, size)
+		out, total, err = tx.ListGradeReviews(ctx, status, page, size)
 		return err
 	})
-	return out, mapGradeReviewErr(err)
+	return out, total, page, size, mapGradeReviewErr(err)
 }
 
 // ApproveReview 通过审核、锁定 M6 单课程成绩并重算 GPA。
@@ -272,6 +287,13 @@ func (s *Service) ApproveReview(ctx context.Context, reviewID int64, req ReviewD
 	if _, err := s.getSemester(ctx, id.TenantID, req.SemesterID); err != nil {
 		return ReviewDTO{}, err
 	}
+	review, err := s.getReview(ctx, id.TenantID, reviewID)
+	if err != nil {
+		return ReviewDTO{}, err
+	}
+	if err := s.validateReviewCourseMatchesSemester(ctx, id.TenantID, review.CourseID, req.SemesterID); err != nil {
+		return ReviewDTO{}, err
+	}
 	var out ReviewDTO
 	err = s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
 		var err error
@@ -283,9 +305,6 @@ func (s *Service) ApproveReview(ctx context.Context, reviewID int64, req ReviewD
 	})
 	if err != nil {
 		return ReviewDTO{}, mapGradeReviewErr(err)
-	}
-	if err := s.validateReviewCourseMatchesSemester(ctx, id.TenantID, out.CourseID, out.SemesterID); err != nil {
-		return ReviewDTO{}, err
 	}
 	s.drainLockOutboxBestEffort(ctx)
 	if err := s.recomputeCourse(ctx, id.TenantID, out.CourseID, out.SemesterID); err != nil {
@@ -318,6 +337,9 @@ func (s *Service) RejectReview(ctx context.Context, reviewID int64, req ReviewDe
 	if err := s.writeAudit(ctx, id.TenantID, id.AccountID, contracts.RoleNumSchoolAdmin, "grade.review.reject", auditTargetGradeReview, out.ID, map[string]any{"course_id": out.CourseID}); err != nil {
 		return ReviewDTO{}, err
 	}
+	if out.SemesterID > 0 {
+		s.invalidateCourseSummaryCache(ctx, id.TenantID, out.CourseID, out.SemesterID)
+	}
 	return out, nil
 }
 
@@ -346,6 +368,9 @@ func (s *Service) UnlockReview(ctx context.Context, reviewID int64, req ReviewDe
 	if err := s.writeAudit(ctx, id.TenantID, id.AccountID, contracts.RoleNumSchoolAdmin, "grade.review.unlock", auditTargetGradeReview, out.ID, map[string]any{"course_id": out.CourseID}); err != nil {
 		return ReviewDTO{}, err
 	}
+	if out.SemesterID > 0 {
+		s.invalidateCourseSummaryCache(ctx, id.TenantID, out.CourseID, out.SemesterID)
+	}
 	return out, nil
 }
 
@@ -354,6 +379,10 @@ func (s *Service) StudentSummary(ctx context.Context, studentID int64) (GradeSum
 	id, studentID, err := s.normalizeReadableStudent(ctx, studentID)
 	if err != nil {
 		return GradeSummaryDTO{}, err
+	}
+	cacheKey := s.summaryCacheKey(id.TenantID, studentID, 0)
+	if cached, ok := s.readSummaryCache(ctx, cacheKey); ok {
+		return cached, nil
 	}
 	grades, err := s.teaching.ListStudentGrades(ctx, id.TenantID, studentID)
 	if err != nil {
@@ -368,7 +397,9 @@ func (s *Service) StudentSummary(ctx context.Context, studentID int64) (GradeSum
 	if err != nil {
 		return GradeSummaryDTO{}, err
 	}
-	return GradeSummaryDTO{StudentID: studentID, GPA: gpa, CumulativeGPA: gpa, TotalCredits: credits, CourseGrades: inputs, ComputedAt: timex.Now()}, nil
+	out := GradeSummaryDTO{StudentID: studentID, GPA: gpa, CumulativeGPA: gpa, TotalCredits: credits, CourseGrades: inputs, ComputedAt: timex.Now()}
+	s.writeSummaryCache(ctx, cacheKey, out)
+	return out, nil
 }
 
 // StudentGrades 查询学生实时课程成绩明细并计算指定学期或全部 GPA。
@@ -376,6 +407,10 @@ func (s *Service) StudentGrades(ctx context.Context, studentID, semesterID int64
 	id, studentID, err := s.normalizeReadableStudent(ctx, studentID)
 	if err != nil {
 		return GradeSummaryDTO{}, err
+	}
+	cacheKey := s.summaryCacheKey(id.TenantID, studentID, semesterID)
+	if cached, ok := s.readSummaryCache(ctx, cacheKey); ok {
+		return cached, nil
 	}
 	grades, err := s.teaching.ListStudentGrades(ctx, id.TenantID, studentID)
 	if err != nil {
@@ -397,7 +432,9 @@ func (s *Service) StudentGrades(ctx context.Context, studentID, semesterID int64
 	if err != nil {
 		return GradeSummaryDTO{}, err
 	}
-	return GradeSummaryDTO{StudentID: studentID, SemesterID: semesterID, GPA: gpa, CumulativeGPA: gpa, TotalCredits: credits, CourseGrades: inputs, ComputedAt: timex.Now()}, nil
+	out := GradeSummaryDTO{StudentID: studentID, SemesterID: semesterID, GPA: gpa, CumulativeGPA: gpa, TotalCredits: credits, CourseGrades: inputs, ComputedAt: timex.Now()}
+	s.writeSummaryCache(ctx, cacheKey, out)
+	return out, nil
 }
 
 // StudentGPA 查询学生已落库的学期与累计 GPA 聚合结果。
@@ -430,6 +467,7 @@ func (s *Service) RecomputeStudentGrade(ctx context.Context, studentID int64, re
 	if err := s.recomputeStudent(ctx, id.TenantID, studentID, req.SemesterID); err != nil {
 		return GradeSummaryDTO{}, err
 	}
+	s.invalidateSummaryCache(ctx, id.TenantID, studentID, req.SemesterID)
 	var summaries []GradeSummaryDTO
 	err = s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
 		var err error
@@ -460,17 +498,26 @@ func (s *Service) CreateAppeal(ctx context.Context, req AppealRequest) (AppealDT
 		return AppealDTO{}, err
 	}
 	var out AppealDTO
+	var appealSemesterID int64
 	err = s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
 		review, err := tx.GetLatestApprovedReviewByCourse(ctx, req.CourseID)
 		if err != nil {
 			return apperr.ErrGradeAppealInvalid.WithCause(err)
 		}
+		appealSemesterID = review.SemesterID
 		reviewedAt, err := time.Parse(time.RFC3339, review.ReviewedAt)
 		if err != nil {
 			return apperr.ErrGradeAppealInvalid.WithCause(err)
 		}
 		if err := EnsureAppealWithinWindow(reviewedAt, timex.Now(), s.cfg.AppealWindowDays); err != nil {
 			return err
+		}
+		hasOpen, err := tx.HasOpenGradeAppeal(ctx, req.CourseID, id.AccountID)
+		if err != nil {
+			return apperr.ErrGradeAppealInvalid.WithCause(err)
+		}
+		if hasOpen {
+			return apperr.ErrGradeAppealInvalid
 		}
 		out, err = tx.CreateGradeAppeal(ctx, s.ids.Generate(), id.TenantID, id.AccountID, req)
 		return err
@@ -481,22 +528,24 @@ func (s *Service) CreateAppeal(ctx context.Context, req AppealRequest) (AppealDT
 	if err := s.writeAudit(ctx, id.TenantID, id.AccountID, contracts.RoleNumStudent, "grade.appeal.create", auditTargetAppeal, out.ID, map[string]any{"course_id": req.CourseID}); err != nil {
 		return AppealDTO{}, err
 	}
+	s.invalidateSummaryCache(ctx, id.TenantID, id.AccountID, appealSemesterID)
 	return out, nil
 }
 
-// ListAppeals 查询申诉列表。
-func (s *Service) ListAppeals(ctx context.Context, status int16, page, size int) ([]AppealDTO, error) {
+// ListAppeals 查询申诉分页列表。
+func (s *Service) ListAppeals(ctx context.Context, status int16, page, size int) ([]AppealDTO, int64, int, int, error) {
 	id, err := s.requireTeacherAdmin(ctx)
 	if err != nil {
-		return nil, err
+		return nil, 0, page, size, err
 	}
 	var out []AppealDTO
+	var total int64
 	err = s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
 		var err error
-		out, err = tx.ListGradeAppeals(ctx, status, page, size)
+		out, total, err = tx.ListGradeAppeals(ctx, status, page, size)
 		return err
 	})
-	return out, mapGradeAppealErr(err)
+	return out, total, page, size, mapGradeAppealErr(err)
 }
 
 // AcceptAppeal 受理申诉并解锁对应课程审核。
@@ -509,38 +558,39 @@ func (s *Service) RejectAppeal(ctx context.Context, appealID int64, req AppealDe
 	return s.decideAppeal(ctx, appealID, AppealStatusRejected, req.Comment)
 }
 
-// ListWarnings 查询学业预警。
-func (s *Service) ListWarnings(ctx context.Context, studentID int64, page, size int) ([]WarningDTO, error) {
+// ListWarnings 查询学业预警分页列表。
+func (s *Service) ListWarnings(ctx context.Context, studentID int64, page, size int) ([]WarningDTO, int64, int, int, error) {
 	id, err := requireTenantUser(ctx)
 	if err != nil {
-		return nil, err
+		return nil, 0, page, size, err
 	}
 	if studentID == 0 {
 		studentID = id.AccountID
 	}
 	isAdmin, err := s.roles.HasRole(ctx, id.AccountID, contracts.RoleSchoolAdmin)
 	if err != nil {
-		return nil, apperr.ErrGradeForbidden.WithCause(err)
+		return nil, 0, page, size, apperr.ErrGradeForbidden.WithCause(err)
 	}
 	if !isAdmin {
 		isStudent, err := s.roles.HasRole(ctx, id.AccountID, contracts.RoleStudent)
 		if err != nil {
-			return nil, apperr.ErrGradeForbidden.WithCause(err)
+			return nil, 0, page, size, apperr.ErrGradeForbidden.WithCause(err)
 		}
 		if !isStudent || studentID != id.AccountID {
-			return nil, apperr.ErrGradeForbidden
+			return nil, 0, page, size, apperr.ErrGradeForbidden
 		}
 	}
 	if studentID <= 0 {
-		return nil, apperr.ErrGradeForbidden
+		return nil, 0, page, size, apperr.ErrGradeForbidden
 	}
 	var out []WarningDTO
+	var total int64
 	err = s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
 		var err error
-		out, err = tx.ListAcademicWarnings(ctx, studentID, page, size)
+		out, total, err = tx.ListAcademicWarnings(ctx, studentID, page, size)
 		return err
 	})
-	return out, mapGradeWarningErr(err)
+	return out, total, page, size, mapGradeWarningErr(err)
 }
 
 // AckWarning 确认本人学业预警。
@@ -752,25 +802,24 @@ func (s *Service) HandleGradeUpdated(ctx context.Context, evt contracts.Teaching
 		if err != nil {
 			return err
 		}
-		for _, appeal := range acceptedAppeals {
-			if _, err := tx.UpdateGradeAppealStatus(ctx, appeal.ID, AppealStatusCompleted, appeal.HandlerID, "成绩已更新"); err != nil {
-				return err
-			}
-		}
 		return nil
 	}); err != nil {
 		return apperr.ErrGradeAggregationFailed.WithCause(err)
 	}
-	if len(acceptedAppeals) == 0 {
-		return nil
-	}
 	if err := s.recomputeStudent(ctx, evt.TenantID, evt.StudentID, review.SemesterID); err != nil {
 		return err
 	}
-	var relocked ReviewDTO
+	s.invalidateSummaryCache(ctx, evt.TenantID, evt.StudentID, review.SemesterID)
+	if len(acceptedAppeals) == 0 {
+		return nil
+	}
 	if err := s.store.TenantTx(ctx, evt.TenantID, func(ctx context.Context, tx TxStore) error {
-		var err error
-		relocked, err = tx.RelockGradeReview(ctx, review.ID, review.ReviewerID, "成绩已更新并完成复核")
+		for _, appeal := range acceptedAppeals {
+			if _, err := tx.UpdateGradeAppealStatus(ctx, appeal.ID, AppealStatusAccepted, AppealStatusCompleted, appeal.HandlerID, "成绩已更新"); err != nil {
+				return err
+			}
+		}
+		relocked, err := tx.RelockGradeReview(ctx, review.ID, review.ReviewerID, "成绩已更新并完成复核")
 		if err != nil {
 			return err
 		}
@@ -804,43 +853,41 @@ func (s *Service) decideAppeal(ctx context.Context, appealID int64, status int16
 		return AppealDTO{}, err
 	}
 	var out AppealDTO
-	err = s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
-		var err error
-		out, err = tx.UpdateGradeAppealStatus(ctx, appealID, status, id.AccountID, comment)
-		return err
-	})
-	if err != nil {
-		return AppealDTO{}, mapGradeAppealErr(err)
-	}
 	action := "grade.appeal.reject"
 	if status == AppealStatusAccepted {
 		action = "grade.appeal.accept"
 	}
-	if status == AppealStatusAccepted {
-		var review ReviewDTO
-		err = s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
-			var err error
-			review, err = tx.GetLatestApprovedReviewByCourse(ctx, out.CourseID)
+	var affectedSemesterID int64
+	err = s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
+		var err error
+		out, err = tx.UpdateGradeAppealStatus(ctx, appealID, AppealStatusPending, status, id.AccountID, comment)
+		if err != nil {
+			return err
+		}
+		if status == AppealStatusAccepted {
+			review, err := tx.GetLatestApprovedReviewByCourse(ctx, out.CourseID)
 			if err != nil {
 				return err
 			}
+			affectedSemesterID = review.SemesterID
 			review, err = tx.UnlockGradeReview(ctx, review.ID, id.AccountID, comment)
 			if err != nil {
 				return err
 			}
 			return s.enqueueLockOutbox(ctx, tx, review, false, "appeal_accepted")
-		})
-		if err == nil {
-			s.drainLockOutboxBestEffort(ctx)
-			if err := s.writeAudit(ctx, id.TenantID, id.AccountID, actorRole, action, auditTargetAppeal, out.ID, map[string]any{"course_id": out.CourseID}); err != nil {
-				return AppealDTO{}, err
-			}
-			return out, nil
 		}
+		return nil
+	})
+	if err != nil {
+		return AppealDTO{}, mapGradeAppealErr(err)
+	}
+	if status == AppealStatusAccepted {
+		s.drainLockOutboxBestEffort(ctx)
 	}
 	if err := s.writeAudit(ctx, id.TenantID, id.AccountID, actorRole, action, auditTargetAppeal, out.ID, map[string]any{"course_id": out.CourseID}); err != nil {
 		return AppealDTO{}, err
 	}
+	s.invalidateSummaryCache(ctx, id.TenantID, out.StudentID, affectedSemesterID)
 	return out, nil
 }
 
@@ -900,7 +947,78 @@ func (s *Service) recomputeStudentWarnings(ctx context.Context, tenantID, studen
 		created, err = s.createWarnings(ctx, tx, tenantID, studentID, semesterID, inputs, gpa, cfg.WarningRules)
 		return err
 	})
+	if err == nil {
+		s.invalidateSummaryCache(ctx, tenantID, studentID, semesterID)
+	}
 	return created, err
+}
+
+// summaryCacheKey 构造租户隔离的成绩概览缓存键,semester=0 表示全量概览。
+func (s *Service) summaryCacheKey(tenantID, studentID, semesterID int64) string {
+	return "tenant:" + strconv.FormatInt(tenantID, 10) + ":grade:summary:" + strconv.FormatInt(studentID, 10) + ":" + strconv.FormatInt(semesterID, 10)
+}
+
+// readSummaryCache 读取成绩概览缓存;缓存失败显式记录后回源,不向用户暴露 Redis 细节。
+func (s *Service) readSummaryCache(ctx context.Context, key string) (GradeSummaryDTO, bool) {
+	data, ok, err := s.cache.GetBytes(ctx, key)
+	if err != nil {
+		logging.ErrorContext(ctx, "grade summary cache read failed", err.Error(), slog.String("cache_key", key))
+		return GradeSummaryDTO{}, false
+	}
+	if !ok {
+		return GradeSummaryDTO{}, false
+	}
+	var out GradeSummaryDTO
+	if err := jsonx.DecodeStrictKnownFields(data, &out); err != nil {
+		logging.ErrorContext(ctx, "grade summary cache decode failed", err.Error(), slog.String("cache_key", key))
+		if delErr := s.cache.Delete(ctx, key); delErr != nil {
+			logging.ErrorContext(ctx, "grade summary cache delete corrupt value failed", delErr.Error(), slog.String("cache_key", key))
+		}
+		return GradeSummaryDTO{}, false
+	}
+	return out, true
+}
+
+// writeSummaryCache 写入成绩概览缓存;失败只影响缓存命中率,权威数据仍来自 M6 和 M11 自有表。
+func (s *Service) writeSummaryCache(ctx context.Context, key string, summary GradeSummaryDTO) {
+	data, err := jsonx.AnyBytes(summary, apperr.ErrGradeAggregationFailed)
+	if err != nil {
+		logging.ErrorContext(ctx, "grade summary cache encode failed", err.Error(), slog.String("cache_key", key))
+		return
+	}
+	if err := s.cache.SetBytes(ctx, key, data, time.Duration(s.cfg.SummaryCacheTTLSeconds)*time.Second); err != nil {
+		logging.ErrorContext(ctx, "grade summary cache write failed", err.Error(), slog.String("cache_key", key))
+	}
+}
+
+// invalidateSummaryCache 删除学生全量和指定学期成绩概览缓存,用于成绩变更、审核和申诉状态变化。
+func (s *Service) invalidateSummaryCache(ctx context.Context, tenantID, studentID, semesterID int64) {
+	keys := []string{s.summaryCacheKey(tenantID, studentID, 0)}
+	if semesterID > 0 {
+		keys = append(keys, s.summaryCacheKey(tenantID, studentID, semesterID))
+	}
+	for _, key := range keys {
+		if err := s.cache.Delete(ctx, key); err != nil {
+			logging.ErrorContext(ctx, "grade summary cache invalidate failed", err.Error(), slog.Int64("tenant_id", tenantID), slog.Int64("student_id", studentID), slog.Int64("semester_id", semesterID), slog.String("cache_key", key))
+		}
+	}
+}
+
+// invalidateCourseSummaryCache 通过 M6 课程成绩契约定位课程学生,再逐个失效成绩概览缓存。
+func (s *Service) invalidateCourseSummaryCache(ctx context.Context, tenantID, courseID, semesterID int64) {
+	grades, err := s.teaching.ListCourseGrades(ctx, tenantID, courseID)
+	if err != nil {
+		logging.ErrorContext(ctx, "grade course summary cache invalidation source read failed", err.Error(), slog.Int64("tenant_id", tenantID), slog.Int64("course_id", courseID))
+		return
+	}
+	seen := map[int64]struct{}{}
+	for _, row := range grades {
+		if _, ok := seen[row.StudentID]; ok {
+			continue
+		}
+		seen[row.StudentID] = struct{}{}
+		s.invalidateSummaryCache(ctx, tenantID, row.StudentID, semesterID)
+	}
 }
 
 // createWarnings 根据预警规则写入学业预警并统一走通知模块提醒学生。
@@ -964,6 +1082,20 @@ func (s *Service) getSemester(ctx context.Context, tenantID, semesterID int64) (
 		}
 	}
 	return SemesterDTO{}, apperr.ErrGradeConfigInvalid
+}
+
+// getReview 在租户内读取审核记录,供事务前校验跨模块课程边界。
+func (s *Service) getReview(ctx context.Context, tenantID, reviewID int64) (ReviewDTO, error) {
+	var review ReviewDTO
+	err := s.store.TenantTx(ctx, tenantID, func(ctx context.Context, tx TxStore) error {
+		var err error
+		review, err = tx.GetGradeReview(ctx, reviewID)
+		return err
+	})
+	if err != nil {
+		return ReviewDTO{}, apperr.ErrGradeReviewStateInvalid.WithCause(err)
+	}
+	return review, nil
 }
 
 // enqueueLockOutbox 在状态变更同一事务内保存 M6 锁定投影事件。

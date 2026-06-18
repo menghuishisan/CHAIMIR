@@ -155,25 +155,26 @@ func (s *Service) ImportVulnProblem(ctx context.Context, req ImportVulnProblemRe
 	return vulnProblemDTOFromModel(item), nil
 }
 
-// ListVulnProblems 查询漏洞题草稿列表。
-func (s *Service) ListVulnProblems(ctx context.Context, sourceID int64, status int16, page, size int) ([]VulnProblemDTO, error) {
+// ListVulnProblems 查询漏洞题草稿分页列表。
+func (s *Service) ListVulnProblems(ctx context.Context, sourceID int64, status int16, page, size int) ([]VulnProblemDTO, int64, int, int, error) {
 	id, err := currentIdentity(ctx)
 	if err != nil {
-		return nil, err
+		return nil, 0, page, size, err
 	}
 	var items []VulnProblem
+	var total int64
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
 		var err error
-		items, err = tx.ListVulnProblems(ctx, id.TenantID, sourceID, status, page, size)
+		items, total, err = tx.ListVulnProblems(ctx, id.TenantID, sourceID, status, page, size)
 		return err
 	}); err != nil {
-		return nil, err
+		return nil, 0, page, size, err
 	}
 	out := make([]VulnProblemDTO, 0, len(items))
 	for _, item := range items {
 		out = append(out, vulnProblemDTOFromModel(item))
 	}
-	return out, nil
+	return out, total, page, size, nil
 }
 
 // SetVulnPrevalidate 运行漏洞题正反向预验证并保存结果。

@@ -141,6 +141,41 @@ func (c *Client) SetInt64(ctx context.Context, key string, value int64, ttl time
 	return nil
 }
 
+// GetBytes 读取通用字节缓存,显式区分缓存缺失与 Redis 错误。
+func (c *Client) GetBytes(ctx context.Context, key string) ([]byte, bool, error) {
+	if c == nil || c.rdb == nil {
+		return nil, false, fmt.Errorf("Redis 客户端未初始化")
+	}
+	if key == "" {
+		return nil, false, fmt.Errorf("Redis GetBytes 参数非法")
+	}
+	raw, err := c.rdb.Get(ctx, key).Bytes()
+	if errors.Is(err, goredis.Nil) {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, fmt.Errorf("Redis GetBytes 失败: %w", err)
+	}
+	return raw, true, nil
+}
+
+// SetBytes 写入通用字节缓存并设置过期时间,用于模块保存已校验的 JSON 等结构化结果。
+func (c *Client) SetBytes(ctx context.Context, key string, value []byte, ttl time.Duration) error {
+	if c == nil || c.rdb == nil {
+		return fmt.Errorf("Redis 客户端未初始化")
+	}
+	if key == "" || ttl <= 0 {
+		return fmt.Errorf("Redis SetBytes 参数非法")
+	}
+	if len(value) == 0 {
+		return fmt.Errorf("Redis SetBytes 值不能为空")
+	}
+	if err := c.rdb.Set(ctx, key, value, ttl).Err(); err != nil {
+		return fmt.Errorf("Redis SetBytes 失败: %w", err)
+	}
+	return nil
+}
+
 // Delete 删除缓存键,用于权威状态变更后主动失效。
 func (c *Client) Delete(ctx context.Context, key string) error {
 	if c == nil || c.rdb == nil {

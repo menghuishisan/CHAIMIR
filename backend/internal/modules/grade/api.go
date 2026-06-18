@@ -117,8 +117,8 @@ func (a gradeAPI) listReviews(c *gin.Context) {
 		return
 	}
 	status, _ := httpx.QueryInt(c, "status", httpx.QueryIntRule{Default: 0, Min: 0, Max: 3, HasMax: true})
-	out5, err := a.svc.ListReviews(c.Request.Context(), int16(status), page, size)
-	httpx.Write(c, out5, err)
+	out5, total, p, s, err := a.svc.ListReviews(c.Request.Context(), int16(status), page, size)
+	httpx.WritePage(c, out5, total, p, s, err)
 }
 
 // approveReview 绑定审核通过操作。
@@ -198,8 +198,8 @@ func (a gradeAPI) listAppeals(c *gin.Context) {
 		return
 	}
 	status, _ := httpx.QueryInt(c, "status", httpx.QueryIntRule{Default: 0, Min: 0, Max: 4, HasMax: true})
-	out9, err := a.svc.ListAppeals(c.Request.Context(), int16(status), page, size)
-	httpx.Write(c, out9, err)
+	out9, total, p, s, err := a.svc.ListAppeals(c.Request.Context(), int16(status), page, size)
+	httpx.WritePage(c, out9, total, p, s, err)
 }
 
 // acceptAppeal 绑定申诉受理操作。
@@ -245,8 +245,8 @@ func (a gradeAPI) listWarnings(c *gin.Context) {
 		return
 	}
 	studentID, _ := httpx.QueryInt(c, "student_id", httpx.QueryIntRule{Default: 0, Min: 0})
-	out11, err := a.svc.ListWarnings(c.Request.Context(), studentID, page, size)
-	httpx.Write(c, out11, err)
+	out11, total, p, s, err := a.svc.ListWarnings(c.Request.Context(), studentID, page, size)
+	httpx.WritePage(c, out11, total, p, s, err)
 }
 
 // ackWarning 绑定学生确认预警操作。

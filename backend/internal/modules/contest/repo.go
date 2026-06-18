@@ -65,21 +65,21 @@ type TxStore interface {
 	StartBattleMatch(context.Context, int64, int64, string, string) (BattleMatch, error)
 	GetBattleMatch(context.Context, int64, int64) (BattleMatch, error)
 	GetBattleMatchByJudgeTask(context.Context, int64, string) (BattleMatch, error)
-	ListBattleMatchesForTeam(context.Context, int64, int64, int64, int, int) ([]BattleMatch, error)
+	ListBattleMatchesForTeam(context.Context, int64, int64, int64, int, int) ([]BattleMatch, int64, error)
 	ListActiveBattleSourceRefsForArchive(context.Context, int64, int64) ([]string, error)
 	FinishBattleMatch(context.Context, BattleMatch) (BattleMatch, error)
 	FailBattleMatch(context.Context, int64, int64) (BattleMatch, error)
 	CreateResultSnapshot(context.Context, ResultSnapshot) (ResultSnapshot, error)
 	GetResultSnapshot(context.Context, int64, int64) (ResultSnapshot, error)
 	CreateCheatRecord(context.Context, CheatRecord) (CheatRecord, error)
-	ListCheatRecords(context.Context, int64, int64, int, int) ([]CheatRecord, error)
+	ListCheatRecords(context.Context, int64, int64, int, int) ([]CheatRecord, int64, error)
 	UpsertVulnSource(context.Context, VulnSource) (VulnSource, error)
 	ListVulnSources(context.Context, int64) ([]VulnSource, error)
 	GetVulnSource(context.Context, int64, int64) (VulnSource, error)
 	MarkVulnSourceSynced(context.Context, int64, int64) (VulnSource, error)
 	UpsertVulnProblem(context.Context, VulnProblem) (VulnProblem, error)
 	GetVulnProblem(context.Context, int64, int64) (VulnProblem, error)
-	ListVulnProblems(context.Context, int64, int64, int16, int, int) ([]VulnProblem, error)
+	ListVulnProblems(context.Context, int64, int64, int16, int, int) ([]VulnProblem, int64, error)
 	SetVulnProblemPrevalidate(context.Context, int64, int64, int16, map[string]any) (VulnProblem, error)
 	FinalizeVulnProblem(context.Context, int64, int64, string, string) (VulnProblem, error)
 	ListStudentContestRecords(context.Context, int64, int64) ([]StudentContestRecord, error)
@@ -545,21 +545,25 @@ func (tx *txStore) GetBattleMatchByJudgeTask(ctx context.Context, tenantID int64
 	return battleMatchFromRow(row)
 }
 
-// ListBattleMatchesForTeam 查询队伍对局历史。
-func (tx *txStore) ListBattleMatchesForTeam(ctx context.Context, tenantID, contestID, teamID int64, page, size int) ([]BattleMatch, error) {
+// ListBattleMatchesForTeam 查询队伍对局历史和总数。
+func (tx *txStore) ListBattleMatchesForTeam(ctx context.Context, tenantID, contestID, teamID int64, page, size int) ([]BattleMatch, int64, error) {
 	rows, err := tx.q.ListBattleMatchesForTeam(ctx, sqlcgen.ListBattleMatchesForTeamParams{TenantID: tenantID, ContestID: contestID, TeamID: teamID, Limit: int32(size), Offset: int32((page - 1) * size)})
 	if err != nil {
-		return nil, apperr.ErrContestBattleMatchFailed.WithCause(err)
+		return nil, 0, apperr.ErrContestBattleMatchFailed.WithCause(err)
 	}
 	out := make([]BattleMatch, 0, len(rows))
 	for _, row := range rows {
 		item, err := battleMatchFromRow(row)
 		if err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 		out = append(out, item)
 	}
-	return out, nil
+	total, err := tx.q.CountBattleMatchesForTeam(ctx, sqlcgen.CountBattleMatchesForTeamParams{TenantID: tenantID, ContestID: contestID, TeamID: teamID})
+	if err != nil {
+		return nil, 0, apperr.ErrContestBattleMatchFailed.WithCause(err)
+	}
+	return out, total, nil
 }
 
 // ListActiveBattleSourceRefsForArchive 查询归档时仍需回收的对抗对局沙箱来源。
@@ -628,21 +632,25 @@ func (tx *txStore) CreateCheatRecord(ctx context.Context, item CheatRecord) (Che
 	return cheatFromRow(row)
 }
 
-// ListCheatRecords 查询违规记录。
-func (tx *txStore) ListCheatRecords(ctx context.Context, tenantID, contestID int64, page, size int) ([]CheatRecord, error) {
+// ListCheatRecords 查询违规记录和总数。
+func (tx *txStore) ListCheatRecords(ctx context.Context, tenantID, contestID int64, page, size int) ([]CheatRecord, int64, error) {
 	rows, err := tx.q.ListCheatRecords(ctx, sqlcgen.ListCheatRecordsParams{TenantID: tenantID, ContestID: contestID, Limit: int32(size), Offset: int32((page - 1) * size)})
 	if err != nil {
-		return nil, apperr.ErrContestCheatInvalid.WithCause(err)
+		return nil, 0, apperr.ErrContestCheatInvalid.WithCause(err)
 	}
 	out := make([]CheatRecord, 0, len(rows))
 	for _, row := range rows {
 		item, err := cheatFromRow(row)
 		if err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 		out = append(out, item)
 	}
-	return out, nil
+	total, err := tx.q.CountCheatRecords(ctx, sqlcgen.CountCheatRecordsParams{TenantID: tenantID, ContestID: contestID})
+	if err != nil {
+		return nil, 0, apperr.ErrContestCheatInvalid.WithCause(err)
+	}
+	return out, total, nil
 }
 
 // UpsertVulnSource 新增或更新租户漏洞源配置。
@@ -715,21 +723,25 @@ func (tx *txStore) GetVulnProblem(ctx context.Context, tenantID, id int64) (Vuln
 	return vulnProblemFromRow(row)
 }
 
-// ListVulnProblems 查询漏洞题草稿。
-func (tx *txStore) ListVulnProblems(ctx context.Context, tenantID, sourceID int64, status int16, page, size int) ([]VulnProblem, error) {
+// ListVulnProblems 查询漏洞题草稿和总数。
+func (tx *txStore) ListVulnProblems(ctx context.Context, tenantID, sourceID int64, status int16, page, size int) ([]VulnProblem, int64, error) {
 	rows, err := tx.q.ListVulnProblems(ctx, sqlcgen.ListVulnProblemsParams{TenantID: tenantID, Column2: sourceID, Column3: status, Limit: int32(size), Offset: int32((page - 1) * size)})
 	if err != nil {
-		return nil, apperr.ErrContestVulnProblemInvalid.WithCause(err)
+		return nil, 0, apperr.ErrContestVulnProblemInvalid.WithCause(err)
 	}
 	out := make([]VulnProblem, 0, len(rows))
 	for _, row := range rows {
 		item, err := vulnProblemFromRow(row)
 		if err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 		out = append(out, item)
 	}
-	return out, nil
+	total, err := tx.q.CountVulnProblems(ctx, sqlcgen.CountVulnProblemsParams{TenantID: tenantID, Column2: sourceID, Column3: status})
+	if err != nil {
+		return nil, 0, apperr.ErrContestVulnProblemInvalid.WithCause(err)
+	}
+	return out, total, nil
 }
 
 // SetVulnProblemPrevalidate 保存预验证结论。

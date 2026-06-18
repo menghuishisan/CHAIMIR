@@ -346,11 +346,11 @@
 /api/v1/teaching/courses/{id}/posts:
   get:
     tags: [teaching]
-    summary: 课程讨论列表
+    summary: 课程讨论分页列表
     operationId: teachingListPosts
     x-chaimir-audience: user
     security: [{ bearerAuth: [] }]
-    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }, { $ref: "#/components/parameters/PageQuery" }, { $ref: "#/components/parameters/SizeQuery" }]
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
   post:
     tags: [teaching]

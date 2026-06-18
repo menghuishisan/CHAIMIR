@@ -85,7 +85,7 @@ type TxStore interface {
 	ListStudentProgressByCourse(context.Context, int64, int64, int64) ([]LessonProgress, error)
 	CreatePost(context.Context, DiscussionPost) (DiscussionPost, error)
 	GetPost(context.Context, int64, int64) (DiscussionPost, error)
-	ListPosts(context.Context, int64, int64, int, int) ([]DiscussionPost, error)
+	ListPosts(context.Context, int64, int64, int, int) ([]DiscussionPost, int64, error)
 	LikePost(context.Context, int64, int64) (DiscussionPost, error)
 	PinPost(context.Context, int64, int64, bool) (DiscussionPost, error)
 	DeletePost(context.Context, int64, int64) (DiscussionPost, error)

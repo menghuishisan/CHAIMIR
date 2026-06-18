@@ -63,7 +63,7 @@
 /api/v1/notify/announcements:
   get:
     tags: [notify]
-    summary: 系统公告列表
+    summary: 系统公告分页列表
     operationId: notifyListAnnouncements
     x-chaimir-audience: user
     security: [{ bearerAuth: [] }]
@@ -85,7 +85,7 @@
     security: [{ bearerAuth: [] }]
     parameters: [{ $ref: "#/components/parameters/IDPath" }]
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
-/api/v1/notify/ws:
+/ws:
   get:
     tags: [notify]
     summary: 统一实时通道 WebSocket
@@ -98,7 +98,7 @@
 /api/v1/notify/send:
   post:
     tags: [notify]
-    summary: 统一通知发送
+    summary: 统一通知发送；异步等价事件为 notify.send.requested
     operationId: notifySend
     x-chaimir-audience: internal
     x-chaimir-internal: true
@@ -108,7 +108,7 @@
 /api/v1/notify/push:
   post:
     tags: [notify]
-    summary: 推送实时消息到 topic
+    summary: 推送实时消息到带租户前缀的 topic；异步等价事件为 notify.push.requested
     operationId: notifyPush
     x-chaimir-audience: internal
     x-chaimir-internal: true

@@ -275,6 +275,24 @@ func (q *Queries) CountCourseMembers(ctx context.Context, arg CountCourseMembers
 	return column_1, err
 }
 
+const countDiscussionPosts = `-- name: CountDiscussionPosts :one
+SELECT count(*)::bigint
+FROM discussion_post
+WHERE tenant_id = $1 AND course_id = $2 AND deleted_at IS NULL
+`
+
+type CountDiscussionPostsParams struct {
+	TenantID int64 `json:"tenant_id"`
+	CourseID int64 `json:"course_id"`
+}
+
+func (q *Queries) CountDiscussionPosts(ctx context.Context, arg CountDiscussionPostsParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countDiscussionPosts, arg.TenantID, arg.CourseID)
+	var column_1 int64
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
 const countStudentAttempts = `-- name: CountStudentAttempts :one
 SELECT COUNT(*)::bigint FROM submission WHERE tenant_id = $1 AND assignment_id = $2 AND student_id = $3
 `

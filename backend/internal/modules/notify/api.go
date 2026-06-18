@@ -5,6 +5,7 @@ import (
 	"chaimir/internal/contracts"
 	"chaimir/internal/platform/auth"
 	"chaimir/internal/platform/httpx"
+	"chaimir/internal/platform/tenant"
 	"chaimir/internal/platform/ws"
 	"chaimir/pkg/apperr"
 
@@ -30,7 +31,7 @@ func RegisterRoutes(r gin.IRouter, svc *Service, authn *auth.Manager, roles cont
 	user.PUT("/preferences", api.upsertPreference)
 	user.GET("/announcements", api.listAnnouncements)
 	user.POST("/announcements/:id/read", api.markAnnouncementRead)
-	g.GET("/ws", authn.WebSocketMiddleware(), auth.RequireTenantAnyRole(roles, contracts.RoleStudent, contracts.RoleTeacher, contracts.RoleSchoolAdmin), api.websocket)
+	r.GET("/ws", authn.WebSocketMiddleware(), auth.RequireTenantAnyRole(roles, contracts.RoleStudent, contracts.RoleTeacher, contracts.RoleSchoolAdmin), api.websocket)
 	admin.POST("/announcements", api.createAnnouncement)
 	internal.POST("/send", api.send)
 	internal.POST("/push", api.push)
@@ -132,6 +133,9 @@ func (a notifyAPI) send(c *gin.Context) {
 	if !httpx.BindJSONWithError(c, &req, apperr.ErrNotifyRequestInvalid) {
 		return
 	}
+	if !serviceTenantMatches(c, req.TenantID) {
+		return
+	}
 	httpx.Write(c, gin.H{}, a.svc.Send(c.Request.Context(), contracts.NotifySendRequest{TenantID: req.TenantID, Type: req.Type, Receivers: req.Receivers, Params: req.Params, Link: req.Link}))
 }
 
@@ -141,7 +145,20 @@ func (a notifyAPI) push(c *gin.Context) {
 	if !httpx.BindJSONWithError(c, &req, apperr.ErrNotifySubscribeInvalid) {
 		return
 	}
+	if !serviceTenantMatches(c, req.TenantID) {
+		return
+	}
 	httpx.Write(c, gin.H{}, a.svc.Push(c.Request.Context(), contracts.NotifyPushRequest{TenantID: req.TenantID, Topic: req.Topic, Payload: req.Payload}))
+}
+
+// serviceTenantMatches 确保内部通知请求正文的租户与已验签服务租户一致。
+func serviceTenantMatches(c *gin.Context, bodyTenantID int64) bool {
+	id, ok := tenant.FromContext(c.Request.Context())
+	if !ok || !id.IsSystem || id.TenantID <= 0 || bodyTenantID != id.TenantID {
+		httpx.Write(c, gin.H{}, apperr.ErrServiceUnauthorized)
+		return false
+	}
+	return true
 }
 
 // websocket 建立通知订阅 WebSocket。

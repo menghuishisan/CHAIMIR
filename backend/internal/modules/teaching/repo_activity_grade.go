@@ -72,17 +72,21 @@ func (s *txStore) GetPost(ctx context.Context, tenantID, id int64) (DiscussionPo
 	return postFromRow(row), nil
 }
 
-// ListPosts 查询课程讨论。
-func (s *txStore) ListPosts(ctx context.Context, tenantID, courseID int64, page, size int) ([]DiscussionPost, error) {
+// ListPosts 查询课程讨论和总数。
+func (s *txStore) ListPosts(ctx context.Context, tenantID, courseID int64, page, size int) ([]DiscussionPost, int64, error) {
 	rows, err := s.q.ListDiscussionPosts(ctx, sqlcgen.ListDiscussionPostsParams{TenantID: tenantID, CourseID: courseID, Limit: int32(size), Offset: int32((page - 1) * size)})
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	out := make([]DiscussionPost, 0, len(rows))
 	for _, row := range rows {
 		out = append(out, postFromRow(row))
 	}
-	return out, nil
+	total, err := s.q.CountDiscussionPosts(ctx, sqlcgen.CountDiscussionPostsParams{TenantID: tenantID, CourseID: courseID})
+	if err != nil {
+		return nil, 0, err
+	}
+	return out, total, nil
 }
 
 // LikePost 增加讨论点赞数。

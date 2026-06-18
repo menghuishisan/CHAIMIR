@@ -430,28 +430,31 @@ func (s *Service) UpdateConfig(ctx context.Context, key string, req ConfigUpdate
 }
 
 // ListConfigHistory 查询配置历史。
-func (s *Service) ListConfigHistory(ctx context.Context, scope int16, tenantID int64, key string, page, size int) ([]ConfigChangeLogDTO, error) {
+func (s *Service) ListConfigHistory(ctx context.Context, scope int16, tenantID int64, key string, page, size int) ([]ConfigChangeLogDTO, int64, int, int, error) {
 	id, err := s.currentAdminIdentity(ctx)
 	if err != nil {
-		return nil, err
+		return nil, 0, page, size, err
 	}
 	if !id.IsPlatform {
 		scope = ScopeTenant
 		tenantID = id.TenantID
 	} else if scope != ScopeGlobal {
-		return nil, apperr.ErrAdminConfigInvalid
+		return nil, 0, page, size, apperr.ErrAdminConfigInvalid
 	}
-	return runAdminRead(ctx, s.store, tenantID, func(ctx context.Context, tx TxStore) ([]ConfigChangeLogDTO, error) {
+	var total int64
+	rows, err := runAdminRead(ctx, s.store, tenantID, func(ctx context.Context, tx TxStore) ([]ConfigChangeLogDTO, error) {
 		cfg, err := tx.GetSystemConfig(ctx, scope, tenantID, key)
 		if err != nil {
 			return nil, apperr.ErrAdminConfigNotFound.WithCause(err)
 		}
-		rows, err := tx.ListConfigChangeLogs(ctx, cfg.ID, page, size)
+		rows, count, err := tx.ListConfigChangeLogs(ctx, cfg.ID, page, size)
 		if err != nil {
 			return nil, err
 		}
+		total = count
 		return maskConfigLogs(rows), nil
 	})
+	return rows, total, page, size, err
 }
 
 // RollbackConfig 把配置回退到指定历史记录的变更前值。
@@ -587,18 +590,22 @@ func (s *Service) UpdateAlertRule(ctx context.Context, ruleID int64, req AlertRu
 }
 
 // ListAlertEvents 查询告警事件。
-func (s *Service) ListAlertEvents(ctx context.Context, status int16, page, size int) ([]AlertEventDTO, error) {
+func (s *Service) ListAlertEvents(ctx context.Context, status int16, page, size int) ([]AlertEventDTO, int64, int, int, error) {
 	id, err := s.currentAdminIdentity(ctx)
 	if err != nil {
-		return nil, err
+		return nil, 0, page, size, err
 	}
 	tenantID := int64(0)
 	if !id.IsPlatform {
 		tenantID = id.TenantID
 	}
-	return runAdminRead(ctx, s.store, tenantID, func(ctx context.Context, tx TxStore) ([]AlertEventDTO, error) {
-		return tx.ListAlertEvents(ctx, status, tenantID, page, size)
+	var total int64
+	rows, err := runAdminRead(ctx, s.store, tenantID, func(ctx context.Context, tx TxStore) ([]AlertEventDTO, error) {
+		out, count, err := tx.ListAlertEvents(ctx, status, tenantID, page, size)
+		total = count
+		return out, err
 	})
+	return rows, total, page, size, err
 }
 
 // HandleAlertEvent 处理告警事件。
@@ -651,13 +658,17 @@ func (s *Service) MonitoringPanels(ctx context.Context) ([]MonitoringPanel, erro
 }
 
 // ListBackups 查询备份记录。
-func (s *Service) ListBackups(ctx context.Context, page, size int) ([]BackupRecordDTO, error) {
+func (s *Service) ListBackups(ctx context.Context, page, size int) ([]BackupRecordDTO, int64, int, int, error) {
 	if _, err := requirePlatform(ctx); err != nil {
-		return nil, err
+		return nil, 0, page, size, err
 	}
-	return runAdminRead(ctx, s.store, 0, func(ctx context.Context, tx TxStore) ([]BackupRecordDTO, error) {
-		return tx.ListBackupRecords(ctx, page, size)
+	var total int64
+	rows, err := runAdminRead(ctx, s.store, 0, func(ctx context.Context, tx TxStore) ([]BackupRecordDTO, error) {
+		out, count, err := tx.ListBackupRecords(ctx, page, size)
+		total = count
+		return out, err
 	})
+	return rows, total, page, size, err
 }
 
 // runWrite 按是否存在 tenant_id 选择平台事务或租户 RLS 事务。

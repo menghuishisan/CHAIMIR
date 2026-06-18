@@ -43,10 +43,11 @@
 /api/v1/admin/platform/backups:
   get:
     tags: [admin]
-    summary: 备份记录列表
+    summary: 备份记录分页列表
     operationId: adminListBackups
     x-chaimir-audience: platform-admin
     security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/PageQuery" }, { $ref: "#/components/parameters/SizeQuery" }]
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
 /api/v1/admin/school/dashboard:
   get:
@@ -113,7 +114,7 @@
     operationId: adminConfigHistory
     x-chaimir-audience: platform-or-school-admin
     security: [{ bearerAuth: [] }]
-    parameters: [{ $ref: "#/components/parameters/KeyPath" }]
+    parameters: [{ $ref: "#/components/parameters/KeyPath" }, { $ref: "#/components/parameters/PageQuery" }, { $ref: "#/components/parameters/SizeQuery" }]
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
 /api/v1/admin/configs/{key}/rollback:
   post:
@@ -154,11 +155,11 @@
 /api/v1/admin/alert-events:
   get:
     tags: [admin]
-    summary: 告警事件列表
+    summary: 告警事件分页列表
     operationId: adminListAlertEvents
     x-chaimir-audience: platform-or-school-admin
     security: [{ bearerAuth: [] }]
-    parameters: [{ $ref: "#/components/parameters/StatusQuery" }]
+    parameters: [{ $ref: "#/components/parameters/StatusQuery" }, { $ref: "#/components/parameters/PageQuery" }, { $ref: "#/components/parameters/SizeQuery" }]
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
 /api/v1/admin/alert-events/{id}/handle:
   post:

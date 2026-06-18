@@ -8,6 +8,7 @@ import (
 
 	"chaimir/internal/contracts"
 	"chaimir/internal/modules/notify"
+	"chaimir/internal/platform/audit"
 	"chaimir/internal/platform/auth"
 	"chaimir/internal/platform/background"
 	"chaimir/internal/platform/config"
@@ -31,6 +32,7 @@ type NotifyModuleDeps struct {
 	EventBus eventbus.Bus
 	Auth     *auth.Manager
 	Roles    contracts.IdentityService
+	Audit    audit.Writer
 }
 
 // RegisterNotifyModule 构造通知 store/service,注册路由和事件订阅。
@@ -45,7 +47,7 @@ func RegisterNotifyModule(ctx context.Context, deps NotifyModuleDeps) (*notify.S
 		return nil, fmt.Errorf("notify module 缺少 database")
 	}
 	store := notify.NewStore(deps.Database)
-	svc, err := notify.NewService(notify.ServiceDeps{Store: store, IDs: deps.IDs, Redis: deps.Redis, Hub: deps.Hub, Roles: deps.Roles, Config: deps.Config})
+	svc, err := notify.NewService(notify.ServiceDeps{Store: store, IDs: deps.IDs, Redis: deps.Redis, Hub: deps.Hub, Roles: deps.Roles, Audit: deps.Audit, Config: deps.Config})
 	if err != nil {
 		return nil, err
 	}

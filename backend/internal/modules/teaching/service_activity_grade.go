@@ -145,28 +145,29 @@ func (s *Service) CreatePost(ctx context.Context, courseID int64, req PostReques
 }
 
 // ListPosts 查询课程讨论。
-func (s *Service) ListPosts(ctx context.Context, courseID int64, page, size int) ([]PostDTO, int, int, error) {
+func (s *Service) ListPosts(ctx context.Context, courseID int64, page, size int) ([]PostDTO, int64, int, int, error) {
 	id, err := currentIdentity(ctx)
 	if err != nil {
-		return nil, 0, 0, err
+		return nil, 0, 0, 0, err
 	}
 	page, size = pagex.Normalize(page, size)
 	var posts []DiscussionPost
+	var total int64
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
 		if err := s.ensureCourseReadable(ctx, tx, id.TenantID, courseID, id.AccountID); err != nil {
 			return err
 		}
 		var err error
-		posts, err = tx.ListPosts(ctx, id.TenantID, courseID, page, size)
+		posts, total, err = tx.ListPosts(ctx, id.TenantID, courseID, page, size)
 		return err
 	}); err != nil {
-		return nil, 0, 0, mapCourseError(err)
+		return nil, 0, 0, 0, mapCourseError(err)
 	}
 	out := make([]PostDTO, 0, len(posts))
 	for _, post := range posts {
 		out = append(out, postDTO(post))
 	}
-	return out, page, size, nil
+	return out, total, page, size, nil
 }
 
 // LikePost 点赞讨论。

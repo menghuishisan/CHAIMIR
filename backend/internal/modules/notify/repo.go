@@ -38,7 +38,7 @@ type TxStore interface {
 	PreferenceEnabled(context.Context, int64, int64, string) (bool, error)
 	UpsertPreference(context.Context, int64, int64, int64, string, bool) (PreferenceDTO, error)
 	CreateAnnouncement(context.Context, int64, int64, int64, AnnouncementRequest) (AnnouncementDTO, error)
-	ListAnnouncements(context.Context, int64, int64, []int16, int, int) ([]AnnouncementDTO, error)
+	ListAnnouncements(context.Context, int64, int64, []int16, int, int) ([]AnnouncementDTO, int64, error)
 	GetVisibleAnnouncement(context.Context, int64, int64, []int16, int64) (AnnouncementDTO, error)
 	MarkAnnouncementRead(context.Context, int64, int64, int64, int64) error
 }

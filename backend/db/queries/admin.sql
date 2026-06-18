@@ -38,6 +38,11 @@ WHERE config_id = $1
 ORDER BY created_at DESC
 LIMIT $2 OFFSET $3;
 
+-- name: CountConfigChangeLogs :one
+SELECT count(*)::bigint
+FROM config_change_log
+WHERE config_id = $1;
+
 -- name: GetConfigChangeLog :one
 SELECT id, config_id, tenant_id, old_value, new_value, operator_id, created_at
 FROM config_change_log
@@ -81,6 +86,12 @@ WHERE (sqlc.arg(status)::smallint = 0 OR status = sqlc.arg(status)::smallint)
 ORDER BY triggered_at DESC
 LIMIT sqlc.arg(page_limit)::int OFFSET sqlc.arg(page_offset)::int;
 
+-- name: CountAlertEvents :one
+SELECT count(*)::bigint
+FROM alert_event
+WHERE (sqlc.arg(status)::smallint = 0 OR status = sqlc.arg(status)::smallint)
+  AND ((sqlc.narg(tenant_id)::bigint IS NULL) OR tenant_id = sqlc.narg(tenant_id)::bigint);
+
 -- name: HandleAlertEvent :one
 UPDATE alert_event
 SET status = $2, handler_id = $3, handled_at = now()
@@ -120,3 +131,7 @@ SELECT id, type, storage_ref, size_bytes, status, started_at, finished_at
 FROM backup_record
 ORDER BY started_at DESC
 LIMIT $1 OFFSET $2;
+
+-- name: CountBackupRecords :one
+SELECT count(*)::bigint
+FROM backup_record;

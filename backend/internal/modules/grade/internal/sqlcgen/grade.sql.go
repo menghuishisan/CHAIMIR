@@ -129,6 +129,45 @@ func (q *Queries) ClaimPendingGradeLockOutbox(ctx context.Context, arg ClaimPend
 	return items, nil
 }
 
+const countAcademicWarnings = `-- name: CountAcademicWarnings :one
+SELECT count(*)::bigint
+FROM academic_warning
+WHERE ($1::bigint = 0 OR student_id = $1::bigint)
+`
+
+func (q *Queries) CountAcademicWarnings(ctx context.Context, studentID int64) (int64, error) {
+	row := q.db.QueryRow(ctx, countAcademicWarnings, studentID)
+	var column_1 int64
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
+const countGradeAppeals = `-- name: CountGradeAppeals :one
+SELECT count(*)::bigint
+FROM grade_appeal
+WHERE ($1::smallint = 0 OR status = $1::smallint)
+`
+
+func (q *Queries) CountGradeAppeals(ctx context.Context, status int16) (int64, error) {
+	row := q.db.QueryRow(ctx, countGradeAppeals, status)
+	var column_1 int64
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
+const countGradeReviews = `-- name: CountGradeReviews :one
+SELECT count(*)::bigint
+FROM grade_review
+WHERE ($1::smallint = 0 OR status = $1::smallint)
+`
+
+func (q *Queries) CountGradeReviews(ctx context.Context, status int16) (int64, error) {
+	row := q.db.QueryRow(ctx, countGradeReviews, status)
+	var column_1 int64
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
 const createAcademicWarning = `-- name: CreateAcademicWarning :one
 INSERT INTO academic_warning (id, tenant_id, student_id, semester_id, type, detail, status, created_at)
 VALUES ($1, $2, $3, $4, $5, $6, 1, now())
@@ -567,6 +606,26 @@ func (q *Queries) GetTranscriptRecord(ctx context.Context, id int64) (Transcript
 		&i.GeneratedAt,
 	)
 	return i, err
+}
+
+const hasOpenGradeAppeal = `-- name: HasOpenGradeAppeal :one
+SELECT EXISTS (
+    SELECT 1
+    FROM grade_appeal
+    WHERE course_id = $1 AND student_id = $2 AND status IN (1, 2)
+)::boolean
+`
+
+type HasOpenGradeAppealParams struct {
+	CourseID  int64 `json:"course_id"`
+	StudentID int64 `json:"student_id"`
+}
+
+func (q *Queries) HasOpenGradeAppeal(ctx context.Context, arg HasOpenGradeAppealParams) (bool, error) {
+	row := q.db.QueryRow(ctx, hasOpenGradeAppeal, arg.CourseID, arg.StudentID)
+	var column_1 bool
+	err := row.Scan(&column_1)
+	return column_1, err
 }
 
 const listAcademicWarnings = `-- name: ListAcademicWarnings :many
@@ -1091,24 +1150,29 @@ func (q *Queries) UnlockGradeReview(ctx context.Context, arg UnlockGradeReviewPa
 
 const updateGradeAppealStatus = `-- name: UpdateGradeAppealStatus :one
 UPDATE grade_appeal
-SET status = $2, handler_id = $3, result_comment = $4, handled_at = now()
-WHERE id = $1
+SET status = $1::smallint,
+    handler_id = $2::bigint,
+    result_comment = $3::text,
+    handled_at = now()
+WHERE id = $4::bigint AND status = $5::smallint
 RETURNING id, tenant_id, student_id, course_id, reason, status, handler_id, result_comment, created_at, handled_at
 `
 
 type UpdateGradeAppealStatusParams struct {
-	ID            int64       `json:"id"`
-	Status        int16       `json:"status"`
-	HandlerID     pgtype.Int8 `json:"handler_id"`
-	ResultComment pgtype.Text `json:"result_comment"`
+	ToStatus      int16  `json:"to_status"`
+	HandlerID     int64  `json:"handler_id"`
+	ResultComment string `json:"result_comment"`
+	ID            int64  `json:"id"`
+	FromStatus    int16  `json:"from_status"`
 }
 
 func (q *Queries) UpdateGradeAppealStatus(ctx context.Context, arg UpdateGradeAppealStatusParams) (GradeAppeal, error) {
 	row := q.db.QueryRow(ctx, updateGradeAppealStatus,
-		arg.ID,
-		arg.Status,
+		arg.ToStatus,
 		arg.HandlerID,
 		arg.ResultComment,
+		arg.ID,
+		arg.FromStatus,
 	)
 	var i GradeAppeal
 	err := row.Scan(

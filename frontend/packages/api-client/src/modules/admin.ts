@@ -15,13 +15,14 @@ import type {
   ConfigUpdateRequest,
   Dashboard,
   MonitoringPanel,
+  PaginatedResponse,
   Statistics,
   SystemConfig,
   TenantApplicationSummary,
   TenantSummary,
 } from '../types'
 
-// AdminApi 封装 M9 文档定义的管理后台 HTTP API,不保留旧路径或兼容别名。
+// AdminApi 封装 M9 文档定义的管理后台 HTTP API,不保留旧路径或过渡别名。
 export class AdminApi {
   constructor(private client: ApiClient) {}
 
@@ -79,7 +80,7 @@ export class AdminApi {
   async listConfigHistory(
     key: string,
     params?: { scope?: number; tenant_id?: string; page?: number; size?: number },
-  ): Promise<ConfigChangeLog[]> {
+  ): Promise<PaginatedResponse<ConfigChangeLog>> {
     return this.client.get(`/admin/configs/${encodeURIComponent(key)}/history`, params)
   }
 
@@ -104,7 +105,7 @@ export class AdminApi {
   }
 
   // listAlertEvents 查询业务级告警事件。
-  async listAlertEvents(params?: { status?: number; page?: number; size?: number }): Promise<AlertEvent[]> {
+  async listAlertEvents(params?: { status?: number; page?: number; size?: number }): Promise<PaginatedResponse<AlertEvent>> {
     return this.client.get('/admin/alert-events', params)
   }
 
@@ -119,7 +120,7 @@ export class AdminApi {
   }
 
   // listBackups 查询受控运维任务写入的备份记录。
-  async listBackups(params?: { page?: number; size?: number }): Promise<BackupRecord[]> {
+  async listBackups(params?: { page?: number; size?: number }): Promise<PaginatedResponse<BackupRecord>> {
     return this.client.get('/admin/platform/backups', params)
   }
 }

@@ -1,188 +1,202 @@
-// Grade API：成绩中心
-// 对应后端 M11 模块
+// Grade API：成绩中心。
+// 对应后端 M11 模块的当前接口。
 
 import { ApiClient } from '../client'
 import type {
-  GradeTranscript,
-  GradeApplication,
-  GradeApplicationRequest,
-  GradeReviewRequest,
   GradeAppeal,
   GradeAppealRequest,
+  GradeReviewRequest,
+  GradeReview,
+  GradeSummary,
+  GradeTranscript,
   GradeWarning,
+  LevelConfig,
+  LevelConfigRequest,
   PaginatedResponse,
+  ReviewDecision,
+  Semester,
+  SemesterRequest,
+  TranscriptDownloadGrant,
+  TranscriptRequest,
+  WarningRules,
+  WarningScanResult,
 } from '../types'
 
 export class GradeApi {
   constructor(private client: ApiClient) {}
 
-  // ===== 成绩单 =====
-
   /**
-   * 获取学生成绩单
+   * 查询当前租户的等级映射配置。
    */
-  async getMyTranscript(): Promise<GradeTranscript> {
-    return this.client.get('/grade/transcript/my')
+  async listLevelConfigs(): Promise<LevelConfig[]> {
+    return this.client.get('/grade-center/level-configs')
   }
 
   /**
-   * 获取指定学生成绩单（教师/管理员）
+   * 创建等级映射配置。
    */
-  async getStudentTranscript(studentId: string): Promise<GradeTranscript> {
-    return this.client.get(`/grade/transcript/student/${studentId}`)
+  async createLevelConfig(data: LevelConfigRequest): Promise<LevelConfig> {
+    return this.client.post('/grade-center/level-configs', data)
   }
 
   /**
-   * 导出成绩单 PDF
+   * 更新指定等级映射配置。
    */
-  async exportTranscriptPDF(studentId: string): Promise<void> {
-    return this.client.download(`/grade/transcript/${studentId}/pdf`, `transcript_${studentId}.pdf`)
-  }
-
-  // ===== 成绩上报与审核 =====
-
-  /**
-   * 教师提交成绩上报申请
-   */
-  async submitGradeApplication(data: GradeApplicationRequest): Promise<GradeApplication> {
-    return this.client.post('/grade/applications', data)
+  async updateLevelConfig(id: string, data: LevelConfigRequest): Promise<LevelConfig> {
+    return this.client.put(`/grade-center/level-configs/${id}`, data)
   }
 
   /**
-   * 获取成绩上报申请列表
+   * 查询当前租户的学期列表。
    */
-  async getGradeApplications(params?: {
-    course_id?: string
-    status?: number
-    page?: number
-    size?: number
-  }): Promise<PaginatedResponse<GradeApplication>> {
-    return this.client.get('/grade/applications', params)
+  async listSemesters(): Promise<Semester[]> {
+    return this.client.get('/grade-center/semesters')
   }
 
   /**
-   * 获取成绩上报申请详情
+   * 创建学期配置。
    */
-  async getGradeApplication(applicationId: string): Promise<GradeApplication> {
-    return this.client.get(`/grade/applications/${applicationId}`)
+  async createSemester(data: SemesterRequest): Promise<Semester> {
+    return this.client.post('/grade-center/semesters', data)
   }
 
   /**
-   * 学校管理员审核成绩
+   * 提交课程成绩审核。
    */
-  async reviewGradeApplication(applicationId: string, data: GradeReviewRequest): Promise<void> {
-    return this.client.post(`/grade/applications/${applicationId}/review`, data)
+  async submitReview(data: GradeReviewRequest): Promise<GradeReview> {
+    return this.client.post('/grade-center/reviews', data)
   }
 
   /**
-   * 撤回成绩上报申请
+   * 查询成绩审核列表。
    */
-  async withdrawGradeApplication(applicationId: string): Promise<void> {
-    return this.client.post(`/grade/applications/${applicationId}/withdraw`)
+  async listReviews(params?: { status?: number; page?: number; size?: number }): Promise<PaginatedResponse<GradeReview>> {
+    return this.client.get('/grade-center/reviews', params)
   }
 
-  // ===== 成绩申诉 =====
+  /**
+   * 学校管理员通过成绩审核。
+   */
+  async approveReview(id: string, data: ReviewDecision): Promise<GradeReview> {
+    return this.client.post(`/grade-center/reviews/${id}/approve`, data)
+  }
 
   /**
-   * 学生提交成绩申诉
+   * 学校管理员驳回成绩审核。
+   */
+  async rejectReview(id: string, data: ReviewDecision): Promise<GradeReview> {
+    return this.client.post(`/grade-center/reviews/${id}/reject`, data)
+  }
+
+  /**
+   * 学校管理员解锁已通过的成绩审核。
+   */
+  async unlockReview(id: string, data: ReviewDecision): Promise<GradeReview> {
+    return this.client.post(`/grade-center/reviews/${id}/unlock`, data)
+  }
+
+  /**
+   * 查询学生课程成绩明细与 GPA 汇总。
+   */
+  async studentGrades(studentId: string, semester?: string): Promise<GradeSummary> {
+    return this.client.get(`/grade-center/students/${studentId}/grades`, semester ? { semester } : undefined)
+  }
+
+  /**
+   * 查询学生已落库的学期 GPA。
+   */
+  async studentGPA(studentId: string): Promise<GradeSummary[]> {
+    return this.client.get(`/grade-center/students/${studentId}/gpa`)
+  }
+
+  /**
+   * 管理员触发指定学生的 GPA 重算。
+   */
+  async recomputeStudentGrade(studentId: string, data: { semester_id: string }): Promise<GradeSummary> {
+    return this.client.post(`/grade-center/students/${studentId}/recompute`, data)
+  }
+
+  /**
+   * 学生提交成绩申诉。
    */
   async submitAppeal(data: GradeAppealRequest): Promise<GradeAppeal> {
-    return this.client.post('/grade/appeals', data)
+    return this.client.post('/grade-center/appeals', data)
   }
 
   /**
-   * 获取成绩申诉列表
+   * 教师或管理员查询成绩申诉列表。
    */
-  async getAppeals(params?: {
-    course_id?: string
-    student_id?: string
-    status?: number
-    page?: number
-    size?: number
-  }): Promise<PaginatedResponse<GradeAppeal>> {
-    return this.client.get('/grade/appeals', params)
+  async listAppeals(params?: { status?: number; page?: number; size?: number }): Promise<PaginatedResponse<GradeAppeal>> {
+    return this.client.get('/grade-center/appeals', params)
   }
 
   /**
-   * 获取成绩申诉详情
+   * 教师或管理员受理成绩申诉。
    */
-  async getAppeal(appealId: string): Promise<GradeAppeal> {
-    return this.client.get(`/grade/appeals/${appealId}`)
+  async acceptAppeal(id: string, data: Record<string, any>): Promise<GradeAppeal> {
+    return this.client.post(`/grade-center/appeals/${id}/accept`, data)
   }
 
   /**
-   * 教师处理成绩申诉
+   * 教师或管理员驳回成绩申诉。
    */
-  async handleAppeal(
-    appealId: string,
-    data: { status: number; reply: string; new_score?: number }
-  ): Promise<void> {
-    return this.client.post(`/grade/appeals/${appealId}/handle`, data)
-  }
-
-  // ===== 学业预警 =====
-
-  /**
-   * 获取学业预警列表
-   */
-  async getWarnings(params?: {
-    student_id?: string
-    level?: number
-    status?: number
-    page?: number
-    size?: number
-  }): Promise<PaginatedResponse<GradeWarning>> {
-    return this.client.get('/grade/warnings', params)
+  async rejectAppeal(id: string, data: Record<string, any>): Promise<GradeAppeal> {
+    return this.client.post(`/grade-center/appeals/${id}/reject`, data)
   }
 
   /**
-   * 获取我的学业预警
+   * 查询学业预警规则。
    */
-  async getMyWarnings(): Promise<GradeWarning[]> {
-    return this.client.get('/grade/warnings/my')
+  async getWarningRules(): Promise<WarningRules> {
+    return this.client.get('/grade-center/warning-rules')
   }
 
   /**
-   * 确认已阅学业预警
+   * 更新学业预警规则。
    */
-  async acknowledgeWarning(warningId: string): Promise<void> {
-    return this.client.post(`/grade/warnings/${warningId}/acknowledge`)
+  async updateWarningRules(data: WarningRules): Promise<WarningRules> {
+    return this.client.put('/grade-center/warning-rules', data)
   }
 
   /**
-   * 处理学业预警（辅导员/管理员）
+   * 查询当前用户可见的学业预警。
    */
-  async handleWarning(warningId: string, data: { status: number; note: string }): Promise<void> {
-    return this.client.post(`/grade/warnings/${warningId}/handle`, data)
-  }
-
-  // ===== 成绩配置 =====
-
-  /**
-   * 获取 GPA 计算规则
-   */
-  async getGPAConfig(): Promise<Record<string, any>> {
-    return this.client.get('/grade/config/gpa')
+  async listWarnings(params?: { student_id?: string; page?: number; size?: number }): Promise<PaginatedResponse<GradeWarning>> {
+    return this.client.get('/grade-center/warnings', params)
   }
 
   /**
-   * 更新 GPA 计算规则（管理员）
+   * 学生确认本人学业预警。
    */
-  async updateGPAConfig(data: Record<string, any>): Promise<void> {
-    return this.client.put('/grade/config/gpa', data)
+  async ackWarning(id: string): Promise<GradeWarning> {
+    return this.client.post(`/grade-center/warnings/${id}/ack`)
   }
 
   /**
-   * 获取预警规则
+   * 管理员触发学业预警扫描。
    */
-  async getWarningRules(): Promise<Record<string, any>> {
-    return this.client.get('/grade/config/warning-rules')
+  async scanWarnings(data: { student_id?: string; semester_id?: string }): Promise<WarningScanResult> {
+    return this.client.post('/grade-center/warnings/scan', data)
   }
 
   /**
-   * 更新预警规则（管理员）
+   * 生成单人成绩单记录。
    */
-  async updateWarningRules(data: Record<string, any>): Promise<void> {
-    return this.client.put('/grade/config/warning-rules', data)
+  async generateTranscript(data: TranscriptRequest): Promise<GradeTranscript> {
+    return this.client.post('/grade-center/transcripts', data)
+  }
+
+  /**
+   * 批量生成成绩单记录。
+   */
+  async generateTranscriptBatch(data: { student_ids: string[]; scope: number; semester_id?: string }): Promise<GradeTranscript[]> {
+    return this.client.post('/grade-center/transcripts/batch', data)
+  }
+
+  /**
+   * 下载成绩单文件。
+   */
+  async downloadTranscript(id: string): Promise<TranscriptDownloadGrant> {
+    return this.client.get(`/grade-center/transcripts/${id}`)
   }
 }

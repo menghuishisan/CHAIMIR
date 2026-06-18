@@ -332,8 +332,8 @@ func (a contestAPI) listBattleMatches(c *gin.Context) {
 	if !ok {
 		return
 	}
-	out, err := a.svc.ListBattleMatches(c.Request.Context(), id, page, size)
-	httpx.Write(c, out, err)
+	out, total, p, s, err := a.svc.ListBattleMatches(c.Request.Context(), id, page, size)
+	httpx.WritePage(c, out, total, p, s, err)
 }
 
 // getBattleReplay 读取回放引用。
@@ -390,8 +390,8 @@ func (a contestAPI) listCheatRecords(c *gin.Context) {
 	if !ok {
 		return
 	}
-	out, err := a.svc.ListCheatRecords(c.Request.Context(), id, page, size)
-	httpx.Write(c, out, err)
+	out, total, p, s, err := a.svc.ListCheatRecords(c.Request.Context(), id, page, size)
+	httpx.WritePage(c, out, total, p, s, err)
 }
 
 // listCheatSuspects 查询查重疑似线索。
@@ -457,8 +457,8 @@ func (a contestAPI) listVulnProblems(c *gin.Context) {
 	if !ok {
 		return
 	}
-	out, err := a.svc.ListVulnProblems(c.Request.Context(), sourceID, int16(status), page, size)
-	httpx.Write(c, out, err)
+	out, total, p, s, err := a.svc.ListVulnProblems(c.Request.Context(), sourceID, int16(status), page, size)
+	httpx.WritePage(c, out, total, p, s, err)
 }
 
 // importVulnProblem 手动导入漏洞题。

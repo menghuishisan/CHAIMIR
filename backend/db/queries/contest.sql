@@ -302,6 +302,13 @@ WHERE m.tenant_id = $1 AND m.contest_id = $2 AND (a.team_id = $3 OR b.team_id = 
 ORDER BY m.matched_at DESC, m.id DESC
 LIMIT $4 OFFSET $5;
 
+-- name: CountBattleMatchesForTeam :one
+SELECT count(*)::bigint
+FROM battle_match m
+JOIN battle_entry a ON a.tenant_id = m.tenant_id AND a.id = m.entry_a_id
+JOIN battle_entry b ON b.tenant_id = m.tenant_id AND b.id = m.entry_b_id
+WHERE m.tenant_id = $1 AND m.contest_id = $2 AND (a.team_id = $3 OR b.team_id = $3);
+
 -- name: ListActiveBattleSourceRefsForArchive :many
 SELECT DISTINCT source_ref
 FROM battle_match
@@ -370,6 +377,11 @@ WHERE tenant_id = $1 AND contest_id = $2
 ORDER BY created_at DESC, id DESC
 LIMIT $3 OFFSET $4;
 
+-- name: CountCheatRecords :one
+SELECT count(*)::bigint
+FROM cheat_record
+WHERE tenant_id = $1 AND contest_id = $2;
+
 -- name: UpsertVulnSource :one
 INSERT INTO vuln_source (id, tenant_id, type, name, config, default_level, enabled, last_sync_at, created_at, updated_at)
 VALUES ($1, $2, $3, $4, $5, $6, $7, NULL, now(), now())
@@ -421,6 +433,11 @@ FROM vuln_problem
 WHERE tenant_id = $1 AND ($2::bigint = 0 OR source_id = $2) AND ($3::smallint = 0 OR status = $3)
 ORDER BY updated_at DESC, id DESC
 LIMIT $4 OFFSET $5;
+
+-- name: CountVulnProblems :one
+SELECT count(*)::bigint
+FROM vuln_problem
+WHERE tenant_id = $1 AND ($2::bigint = 0 OR source_id = $2) AND ($3::smallint = 0 OR status = $3);
 
 -- name: SetVulnProblemPrevalidate :one
 UPDATE vuln_problem

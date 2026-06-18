@@ -73,6 +73,11 @@ WHERE (sqlc.arg(status)::smallint = 0 OR status = sqlc.arg(status)::smallint)
 ORDER BY submitted_at DESC
 LIMIT sqlc.arg(page_limit)::int OFFSET sqlc.arg(page_offset)::int;
 
+-- name: CountGradeReviews :one
+SELECT count(*)::bigint
+FROM grade_review
+WHERE (sqlc.arg(status)::smallint = 0 OR status = sqlc.arg(status)::smallint);
+
 -- name: ApproveGradeReview :one
 UPDATE grade_review
 SET status = 2, is_locked = true, reviewer_id = $2, semester_id = $3, comment = $4, reviewed_at = now()
@@ -151,6 +156,13 @@ INSERT INTO grade_appeal (id, tenant_id, student_id, course_id, reason, status, 
 VALUES ($1, $2, $3, $4, $5, 1, now())
 RETURNING id, tenant_id, student_id, course_id, reason, status, handler_id, result_comment, created_at, handled_at;
 
+-- name: HasOpenGradeAppeal :one
+SELECT EXISTS (
+    SELECT 1
+    FROM grade_appeal
+    WHERE course_id = $1 AND student_id = $2 AND status IN (1, 2)
+)::boolean;
+
 -- name: GetGradeAppeal :one
 SELECT id, tenant_id, student_id, course_id, reason, status, handler_id, result_comment, created_at, handled_at
 FROM grade_appeal
@@ -163,10 +175,18 @@ WHERE (sqlc.arg(status)::smallint = 0 OR status = sqlc.arg(status)::smallint)
 ORDER BY created_at DESC
 LIMIT sqlc.arg(page_limit)::int OFFSET sqlc.arg(page_offset)::int;
 
+-- name: CountGradeAppeals :one
+SELECT count(*)::bigint
+FROM grade_appeal
+WHERE (sqlc.arg(status)::smallint = 0 OR status = sqlc.arg(status)::smallint);
+
 -- name: UpdateGradeAppealStatus :one
 UPDATE grade_appeal
-SET status = $2, handler_id = $3, result_comment = $4, handled_at = now()
-WHERE id = $1
+SET status = sqlc.arg(to_status)::smallint,
+    handler_id = sqlc.arg(handler_id)::bigint,
+    result_comment = sqlc.arg(result_comment)::text,
+    handled_at = now()
+WHERE id = sqlc.arg(id)::bigint AND status = sqlc.arg(from_status)::smallint
 RETURNING id, tenant_id, student_id, course_id, reason, status, handler_id, result_comment, created_at, handled_at;
 
 -- name: CreateAcademicWarning :one
@@ -180,6 +200,11 @@ FROM academic_warning
 WHERE (sqlc.arg(student_id)::bigint = 0 OR student_id = sqlc.arg(student_id)::bigint)
 ORDER BY created_at DESC
 LIMIT sqlc.arg(page_limit)::int OFFSET sqlc.arg(page_offset)::int;
+
+-- name: CountAcademicWarnings :one
+SELECT count(*)::bigint
+FROM academic_warning
+WHERE (sqlc.arg(student_id)::bigint = 0 OR student_id = sqlc.arg(student_id)::bigint);
 
 -- name: AckAcademicWarning :one
 UPDATE academic_warning

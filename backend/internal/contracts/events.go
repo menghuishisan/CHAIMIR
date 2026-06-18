@@ -18,6 +18,10 @@ const (
 	SubjectGradeReviewLockChanged = "grade.review.lock_changed"
 	// SubjectIdentitySessionRevoked 表示账号会话被吊销,由 M1 发布供 M10 踢线联动。
 	SubjectIdentitySessionRevoked = "identity.session.revoked"
+	// SubjectNotifySendRequested 表示异步站内信投递请求,由业务模块发布并由 M10 消费。
+	SubjectNotifySendRequested = "notify.send.requested"
+	// SubjectNotifyPushRequested 表示异步实时推送请求,由业务模块发布并由 M10 消费。
+	SubjectNotifyPushRequested = "notify.push.requested"
 )
 
 // JudgeCompletedEvent 是判题完成事件载荷。
@@ -92,4 +96,23 @@ type IdentitySessionRevokedEvent struct {
 	Reason     string    `json:"reason"`
 	RevokedAt  time.Time `json:"revoked_at"`
 	IsPlatform bool      `json:"is_platform"`
+}
+
+// NotifySendRequestedEvent 是业务模块经事件总线异步请求 M10 写站内信的唯一载荷。
+type NotifySendRequestedEvent struct {
+	TenantID  int64             `json:"tenant_id"`
+	TraceID   string            `json:"trace_id"`
+	Type      string            `json:"type"`
+	Receivers []int64           `json:"receivers"`
+	Params    map[string]string `json:"params"`
+	Link      string            `json:"link"`
+}
+
+// NotifyPushRequestedEvent 是业务模块经事件总线异步请求 M10 推送实时消息的唯一载荷。
+type NotifyPushRequestedEvent struct {
+	TenantID int64  `json:"tenant_id"`
+	TraceID  string `json:"trace_id"`
+	// Topic 必须使用 M10 统一租户前缀规范,不得发布无租户前缀或旧格式主题。
+	Topic   string         `json:"topic"`
+	Payload map[string]any `json:"payload"`
 }

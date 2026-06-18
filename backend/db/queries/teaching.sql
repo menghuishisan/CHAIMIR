@@ -407,6 +407,11 @@ WHERE tenant_id = $1 AND course_id = $2 AND deleted_at IS NULL
 ORDER BY is_pinned DESC, created_at DESC, id DESC
 LIMIT $3 OFFSET $4;
 
+-- name: CountDiscussionPosts :one
+SELECT count(*)::bigint
+FROM discussion_post
+WHERE tenant_id = $1 AND course_id = $2 AND deleted_at IS NULL;
+
 -- name: GetDiscussionPost :one
 SELECT id, tenant_id, course_id, parent_id, author_id, content, is_pinned, like_count, created_at, deleted_at
 FROM discussion_post

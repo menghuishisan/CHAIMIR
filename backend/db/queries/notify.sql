@@ -89,6 +89,13 @@ WHERE (a.tenant_id IS NULL OR a.tenant_id = $1)
 ORDER BY a.published_at DESC
 LIMIT sqlc.arg(page_limit)::int OFFSET sqlc.arg(page_offset)::int;
 
+-- name: CountAnnouncements :one
+SELECT COUNT(*)
+FROM system_announcement a
+WHERE (a.tenant_id IS NULL OR a.tenant_id = $1)
+  AND (a.expire_at IS NULL OR a.expire_at > now())
+  AND (a.scope <> 3 OR a.target_roles && sqlc.arg(role_numbers)::smallint[]);
+
 -- name: GetVisibleAnnouncement :one
 SELECT a.id, a.tenant_id, a.title, a.content, a.scope, a.target_roles, a.publisher_id, a.published_at, a.expire_at,
        (r.id IS NOT NULL)::boolean AS is_read

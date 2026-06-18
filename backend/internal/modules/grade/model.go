@@ -18,10 +18,10 @@ type WarningRules struct {
 
 // CourseGradeInput 是 GPA 计算所需的单课程成绩输入。
 type CourseGradeInput struct {
-	CourseID   int64
-	StudentID  int64
-	FinalTotal float64
-	Credits    float64
+	CourseID   int64   `json:"course_id,string"`
+	StudentID  int64   `json:"student_id,string"`
+	FinalTotal float64 `json:"final_total"`
+	Credits    float64 `json:"credits"`
 }
 
 // GradeSummaryDTO 是学生成绩聚合响应。

@@ -118,17 +118,21 @@ func (t *txStore) CreateGradeReview(ctx context.Context, id, tenantID, submitter
 	return reviewDTO(row), nil
 }
 
-// ListGradeReviews 查询成绩审核列表。
-func (t *txStore) ListGradeReviews(ctx context.Context, status int16, page, size int) ([]ReviewDTO, error) {
+// ListGradeReviews 查询成绩审核分页列表和总数。
+func (t *txStore) ListGradeReviews(ctx context.Context, status int16, page, size int) ([]ReviewDTO, int64, error) {
 	rows, err := t.q.ListGradeReviews(ctx, sqlcgen.ListGradeReviewsParams{Status: status, PageOffset: int32((page - 1) * size), PageLimit: int32(size)})
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	out := make([]ReviewDTO, 0, len(rows))
 	for _, row := range rows {
 		out = append(out, reviewDTO(row))
 	}
-	return out, nil
+	total, err := t.q.CountGradeReviews(ctx, status)
+	if err != nil {
+		return nil, 0, err
+	}
+	return out, total, nil
 }
 
 // GetGradeReview 查询成绩审核。
@@ -290,6 +294,11 @@ func (t *txStore) CreateGradeAppeal(ctx context.Context, id, tenantID, studentID
 	return appealDTO(row), nil
 }
 
+// HasOpenGradeAppeal 判断同一学生同一课程是否已有待处理或受理中的申诉。
+func (t *txStore) HasOpenGradeAppeal(ctx context.Context, courseID, studentID int64) (bool, error) {
+	return t.q.HasOpenGradeAppeal(ctx, sqlcgen.HasOpenGradeAppealParams{CourseID: courseID, StudentID: studentID})
+}
+
 // GetGradeAppeal 查询成绩申诉。
 func (t *txStore) GetGradeAppeal(ctx context.Context, id int64) (AppealDTO, error) {
 	row, err := t.q.GetGradeAppeal(ctx, id)
@@ -299,17 +308,21 @@ func (t *txStore) GetGradeAppeal(ctx context.Context, id int64) (AppealDTO, erro
 	return appealDTO(row), nil
 }
 
-// ListGradeAppeals 查询成绩申诉列表。
-func (t *txStore) ListGradeAppeals(ctx context.Context, status int16, page, size int) ([]AppealDTO, error) {
+// ListGradeAppeals 查询成绩申诉分页列表和总数。
+func (t *txStore) ListGradeAppeals(ctx context.Context, status int16, page, size int) ([]AppealDTO, int64, error) {
 	rows, err := t.q.ListGradeAppeals(ctx, sqlcgen.ListGradeAppealsParams{Status: status, PageOffset: int32((page - 1) * size), PageLimit: int32(size)})
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	out := make([]AppealDTO, 0, len(rows))
 	for _, row := range rows {
 		out = append(out, appealDTO(row))
 	}
-	return out, nil
+	total, err := t.q.CountGradeAppeals(ctx, status)
+	if err != nil {
+		return nil, 0, err
+	}
+	return out, total, nil
 }
 
 // ListAcceptedAppealsByCourseStudent 查询待 M6 改分后收口的申诉。
@@ -325,9 +338,9 @@ func (t *txStore) ListAcceptedAppealsByCourseStudent(ctx context.Context, course
 	return out, nil
 }
 
-// UpdateGradeAppealStatus 更新申诉状态。
-func (t *txStore) UpdateGradeAppealStatus(ctx context.Context, id int64, status int16, handlerID int64, comment string) (AppealDTO, error) {
-	row, err := t.q.UpdateGradeAppealStatus(ctx, sqlcgen.UpdateGradeAppealStatusParams{ID: id, Status: status, HandlerID: pgtypex.Int8(handlerID), ResultComment: pgtypex.Text(comment)})
+// UpdateGradeAppealStatus 按明确前置状态更新申诉,避免重复处理旧状态。
+func (t *txStore) UpdateGradeAppealStatus(ctx context.Context, id int64, fromStatus, toStatus int16, handlerID int64, comment string) (AppealDTO, error) {
+	row, err := t.q.UpdateGradeAppealStatus(ctx, sqlcgen.UpdateGradeAppealStatusParams{ID: id, FromStatus: fromStatus, ToStatus: toStatus, HandlerID: handlerID, ResultComment: comment})
 	if err != nil {
 		return AppealDTO{}, err
 	}
@@ -347,17 +360,21 @@ func (t *txStore) CreateAcademicWarning(ctx context.Context, id, tenantID, stude
 	return warningDTO(row), nil
 }
 
-// ListAcademicWarnings 查询学业预警。
-func (t *txStore) ListAcademicWarnings(ctx context.Context, studentID int64, page, size int) ([]WarningDTO, error) {
+// ListAcademicWarnings 查询学业预警分页列表和总数。
+func (t *txStore) ListAcademicWarnings(ctx context.Context, studentID int64, page, size int) ([]WarningDTO, int64, error) {
 	rows, err := t.q.ListAcademicWarnings(ctx, sqlcgen.ListAcademicWarningsParams{StudentID: studentID, PageOffset: int32((page - 1) * size), PageLimit: int32(size)})
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	out := make([]WarningDTO, 0, len(rows))
 	for _, row := range rows {
 		out = append(out, warningDTO(row))
 	}
-	return out, nil
+	total, err := t.q.CountAcademicWarnings(ctx, studentID)
+	if err != nil {
+		return nil, 0, err
+	}
+	return out, total, nil
 }
 
 // AckAcademicWarning 确认学业预警。

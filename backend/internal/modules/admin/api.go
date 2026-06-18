@@ -146,8 +146,8 @@ func (a adminAPI) configHistory(c *gin.Context) {
 	if !ok {
 		return
 	}
-	out4, err := a.svc.ListConfigHistory(c.Request.Context(), int16(scope), tenantID, c.Param("key"), page, size)
-	httpx.Write(c, out4, err)
+	out4, total, p, s, err := a.svc.ListConfigHistory(c.Request.Context(), int16(scope), tenantID, c.Param("key"), page, size)
+	httpx.WritePage(c, out4, total, p, s, err)
 }
 
 // rollbackConfig 回滚配置。
@@ -204,8 +204,8 @@ func (a adminAPI) listAlertEvents(c *gin.Context) {
 	if !ok {
 		return
 	}
-	out9, err := a.svc.ListAlertEvents(c.Request.Context(), int16(status), page, size)
-	httpx.Write(c, out9, err)
+	out9, total, p, s, err := a.svc.ListAlertEvents(c.Request.Context(), int16(status), page, size)
+	httpx.WritePage(c, out9, total, p, s, err)
 }
 
 // handleAlertEvent 处理告警事件。
@@ -234,8 +234,8 @@ func (a adminAPI) listBackups(c *gin.Context) {
 	if !ok {
 		return
 	}
-	out11, err := a.svc.ListBackups(c.Request.Context(), page, size)
-	httpx.Write(c, out11, err)
+	out11, total, p, s, err := a.svc.ListBackups(c.Request.Context(), page, size)
+	httpx.WritePage(c, out11, total, p, s, err)
 }
 
 // auditQuery 解析审计中心文档定义的过滤条件。

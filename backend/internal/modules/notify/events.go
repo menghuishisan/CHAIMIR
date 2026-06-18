@@ -26,5 +26,27 @@ func SubscribeEvents(bus eventbus.Bus, svc *Service) ([]eventbus.Subscription, e
 		return nil, apperr.ErrNotifyChannelUnavailable.WithCause(err)
 	}
 	subs = append(subs, revokeSub)
+	sendSub, err := bus.Subscribe(contracts.SubjectNotifySendRequested, "notify-send", func(ctx context.Context, data []byte) error {
+		var evt contracts.NotifySendRequestedEvent
+		if err := eventbus.Decode(data, &evt, apperr.ErrNotifyRequestInvalid); err != nil {
+			return err
+		}
+		return svc.Send(ctx, contracts.NotifySendRequest{TenantID: evt.TenantID, Type: evt.Type, Receivers: evt.Receivers, Params: evt.Params, Link: evt.Link})
+	})
+	if err != nil {
+		return nil, apperr.ErrNotifyChannelUnavailable.WithCause(err)
+	}
+	subs = append(subs, sendSub)
+	pushSub, err := bus.Subscribe(contracts.SubjectNotifyPushRequested, "notify-push", func(ctx context.Context, data []byte) error {
+		var evt contracts.NotifyPushRequestedEvent
+		if err := eventbus.Decode(data, &evt, apperr.ErrNotifySubscribeInvalid); err != nil {
+			return err
+		}
+		return svc.Push(ctx, contracts.NotifyPushRequest{TenantID: evt.TenantID, Topic: evt.Topic, Payload: evt.Payload})
+	})
+	if err != nil {
+		return nil, apperr.ErrNotifyChannelUnavailable.WithCause(err)
+	}
+	subs = append(subs, pushSub)
 	return subs, nil
 }

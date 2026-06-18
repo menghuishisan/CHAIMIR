@@ -34,17 +34,17 @@ type TxStore interface {
 	UpdateSystemConfig(context.Context, int16, int64, string, map[string]any, int64, int32) (ConfigDTO, error)
 	CreateConfigChangeLog(context.Context, int64, int64, int64, map[string]any, map[string]any, int64) (ConfigChangeLogDTO, error)
 	GetConfigChangeLog(context.Context, int64, int64) (ConfigChangeLogDTO, error)
-	ListConfigChangeLogs(context.Context, int64, int, int) ([]ConfigChangeLogDTO, error)
+	ListConfigChangeLogs(context.Context, int64, int, int) ([]ConfigChangeLogDTO, int64, error)
 	CreateAlertRule(context.Context, int64, AlertRuleRequest) (AlertRuleDTO, error)
 	ListAlertRules(context.Context, int16, int64) ([]AlertRuleDTO, error)
 	UpdateAlertRule(context.Context, int64, AlertRuleRequest) (AlertRuleDTO, error)
 	CreateAlertEvent(context.Context, int64, int64, int64, int16, string) (AlertEventDTO, error)
-	ListAlertEvents(context.Context, int16, int64, int, int) ([]AlertEventDTO, error)
+	ListAlertEvents(context.Context, int16, int64, int, int) ([]AlertEventDTO, int64, error)
 	HandleAlertEvent(context.Context, int64, int64, int16, int64) (AlertEventDTO, error)
 	ListPlatformStatistics(context.Context, int16, int64, string, string) ([]StatisticsDTO, error)
 	UpsertPlatformStatistics(context.Context, int64, int16, int64, string, map[string]any) (StatisticsDTO, error)
 	CreateBackupRecord(context.Context, int64, BackupRecordCreate) (BackupRecordDTO, error)
-	ListBackupRecords(context.Context, int, int) ([]BackupRecordDTO, error)
+	ListBackupRecords(context.Context, int, int) ([]BackupRecordDTO, int64, error)
 }
 
 // RecordBackupResult 写入受控运维备份任务结果,仅供组合根 cron 命令使用。

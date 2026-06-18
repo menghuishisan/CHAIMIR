@@ -210,6 +210,45 @@ func (q *Queries) ContestStats(ctx context.Context, tenantID int64) (ContestStat
 	return i, err
 }
 
+const countBattleMatchesForTeam = `-- name: CountBattleMatchesForTeam :one
+SELECT count(*)::bigint
+FROM battle_match m
+JOIN battle_entry a ON a.tenant_id = m.tenant_id AND a.id = m.entry_a_id
+JOIN battle_entry b ON b.tenant_id = m.tenant_id AND b.id = m.entry_b_id
+WHERE m.tenant_id = $1 AND m.contest_id = $2 AND (a.team_id = $3 OR b.team_id = $3)
+`
+
+type CountBattleMatchesForTeamParams struct {
+	TenantID  int64 `json:"tenant_id"`
+	ContestID int64 `json:"contest_id"`
+	TeamID    int64 `json:"team_id"`
+}
+
+func (q *Queries) CountBattleMatchesForTeam(ctx context.Context, arg CountBattleMatchesForTeamParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countBattleMatchesForTeam, arg.TenantID, arg.ContestID, arg.TeamID)
+	var column_1 int64
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
+const countCheatRecords = `-- name: CountCheatRecords :one
+SELECT count(*)::bigint
+FROM cheat_record
+WHERE tenant_id = $1 AND contest_id = $2
+`
+
+type CountCheatRecordsParams struct {
+	TenantID  int64 `json:"tenant_id"`
+	ContestID int64 `json:"contest_id"`
+}
+
+func (q *Queries) CountCheatRecords(ctx context.Context, arg CountCheatRecordsParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countCheatRecords, arg.TenantID, arg.ContestID)
+	var column_1 int64
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
 const countContests = `-- name: CountContests :one
 SELECT COUNT(*)::bigint
 FROM contest
@@ -267,6 +306,25 @@ type CountProblemSolvedTeamsParams struct {
 
 func (q *Queries) CountProblemSolvedTeams(ctx context.Context, arg CountProblemSolvedTeamsParams) (int64, error) {
 	row := q.db.QueryRow(ctx, countProblemSolvedTeams, arg.TenantID, arg.ContestID, arg.ProblemID)
+	var column_1 int64
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
+const countVulnProblems = `-- name: CountVulnProblems :one
+SELECT count(*)::bigint
+FROM vuln_problem
+WHERE tenant_id = $1 AND ($2::bigint = 0 OR source_id = $2) AND ($3::smallint = 0 OR status = $3)
+`
+
+type CountVulnProblemsParams struct {
+	TenantID int64 `json:"tenant_id"`
+	Column2  int64 `json:"column_2"`
+	Column3  int16 `json:"column_3"`
+}
+
+func (q *Queries) CountVulnProblems(ctx context.Context, arg CountVulnProblemsParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countVulnProblems, arg.TenantID, arg.Column2, arg.Column3)
 	var column_1 int64
 	err := row.Scan(&column_1)
 	return column_1, err
