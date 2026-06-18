@@ -14,8 +14,10 @@ import (
 	"chaimir/internal/contracts"
 	"chaimir/internal/platform/jsonx"
 	"chaimir/internal/platform/netx"
+	"chaimir/internal/platform/pagex"
 	"chaimir/internal/platform/secretmap"
 	"chaimir/internal/platform/timex"
+	"chaimir/internal/platform/upload"
 	"chaimir/pkg/apperr"
 	"chaimir/pkg/chainassert"
 	"chaimir/pkg/logging"
@@ -161,6 +163,7 @@ func (s *Service) ListVulnProblems(ctx context.Context, sourceID int64, status i
 	if err != nil {
 		return nil, 0, page, size, err
 	}
+	page, size = pagex.Normalize(page, size)
 	var items []VulnProblem
 	var total int64
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
@@ -284,13 +287,15 @@ func (s *Service) fetchVulnCases(ctx context.Context, source VulnSource) ([]Vuln
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return nil, apperr.ErrContestVulnSourceBadStatus
 	}
-	limited := io.LimitReader(resp.Body, s.cfg.VulnSourceMaxResponseBytes+1)
-	raw, err := io.ReadAll(limited)
+	raw, sizeResult, err := upload.ReadBounded(resp.Body, s.cfg.VulnSourceMaxResponseBytes)
 	if err != nil {
 		return nil, apperr.ErrContestVulnSourceReadFailed.WithCause(err)
 	}
-	if int64(len(raw)) > s.cfg.VulnSourceMaxResponseBytes {
+	if sizeResult == upload.SizeTooLarge {
 		return nil, apperr.ErrContestVulnSourceTooLarge
+	}
+	if sizeResult == upload.SizeEmpty {
+		return nil, apperr.ErrContestVulnSourceJSONInvalid
 	}
 	var payload any
 	if err := jsonx.DecodeStrict(raw, &payload); err != nil {

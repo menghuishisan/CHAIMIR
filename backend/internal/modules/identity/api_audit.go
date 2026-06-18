@@ -30,12 +30,8 @@ func (a auditAPI) queryAudit(c *gin.Context) {
 	if !ok {
 		return
 	}
-	out, err := a.svc.QueryAuditLogsForCurrent(c.Request.Context(), req)
-	if err != nil {
-		httpx.Write(c, gin.H{}, err)
-		return
-	}
-	httpx.Write(c, out, nil)
+	list, total, page, size, err := a.svc.QueryAuditLogsForCurrent(c.Request.Context(), req)
+	httpx.WritePage(c, list, total, page, size, err)
 }
 
 // bindAuditQuery 解析审计查询参数,时间参数使用 RFC3339 避免时区歧义。

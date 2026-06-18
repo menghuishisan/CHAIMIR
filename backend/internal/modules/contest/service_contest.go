@@ -9,6 +9,7 @@ import (
 
 	"chaimir/internal/contracts"
 	"chaimir/internal/platform/audit"
+	"chaimir/internal/platform/pagex"
 	"chaimir/pkg/apperr"
 )
 
@@ -18,6 +19,7 @@ func (s *Service) ListContests(ctx context.Context, status int16, page, size int
 	if err != nil {
 		return nil, 0, 0, 0, err
 	}
+	page, size = pagex.Normalize(page, size)
 	var items []Contest
 	var total int64
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {

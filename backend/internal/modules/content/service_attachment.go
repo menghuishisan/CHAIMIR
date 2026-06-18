@@ -55,6 +55,7 @@ func (s *Service) UploadAttachment(ctx context.Context, req UploadAttachmentRequ
 		ExpectedBucket:  s.storage.BucketAttach(),
 		AllowedFileName: true,
 		Content:         req.Content,
+		ScanPolicy:      s.attachmentScanPolicy,
 	})
 	if err != nil {
 		return AttachmentUploadDTO{}, apperr.ErrContentAttachmentInvalid.WithCause(err)

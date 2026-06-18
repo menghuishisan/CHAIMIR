@@ -12,6 +12,7 @@ import (
 	"chaimir/internal/platform/audit"
 	"chaimir/internal/platform/config"
 	"chaimir/internal/platform/jsonx"
+	"chaimir/internal/platform/pagex"
 	"chaimir/internal/platform/tenant"
 	"chaimir/internal/platform/timex"
 	"chaimir/internal/platform/ws"
@@ -138,6 +139,7 @@ func (s *Service) Inbox(ctx context.Context, isRead *bool, typ string, page, siz
 	if err != nil {
 		return nil, 0, err
 	}
+	page, size = pagex.Normalize(page, size)
 	var out []NotificationDTO
 	var total int64
 	err = s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
@@ -297,17 +299,18 @@ func (s *Service) CreateAnnouncement(ctx context.Context, req AnnouncementReques
 	return out, nil
 }
 
-// ListAnnouncements 查询可见公告。
-func (s *Service) ListAnnouncements(ctx context.Context, page, size int) (AnnouncementListDTO, error) {
+// ListAnnouncements 查询可见公告分页。
+func (s *Service) ListAnnouncements(ctx context.Context, page, size int) ([]AnnouncementDTO, int64, int, int, error) {
 	id, err := currentIdentity(ctx)
 	if err != nil {
-		return AnnouncementListDTO{}, err
+		return nil, 0, page, size, err
 	}
+	page, size = pagex.Normalize(page, size)
 	var out []AnnouncementDTO
 	var total int64
 	roleNumbers, err := s.currentRoleNumbers(ctx, id.AccountID)
 	if err != nil {
-		return AnnouncementListDTO{}, err
+		return nil, 0, page, size, err
 	}
 	err = s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
 		var err error
@@ -315,13 +318,13 @@ func (s *Service) ListAnnouncements(ctx context.Context, page, size int) (Announ
 		return err
 	})
 	if err != nil {
-		return AnnouncementListDTO{}, err
+		return nil, 0, page, size, err
 	}
 	filtered, err := s.filterAnnouncementsByRole(ctx, id.AccountID, out)
 	if err != nil {
-		return AnnouncementListDTO{}, err
+		return nil, 0, page, size, err
 	}
-	return AnnouncementListDTO{List: filtered, Total: total, Page: page, Size: size}, nil
+	return filtered, total, page, size, nil
 }
 
 // MarkAnnouncementRead 标记公告已读。

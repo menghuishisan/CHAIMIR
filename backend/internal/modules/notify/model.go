@@ -28,11 +28,3 @@ type AnnouncementDTO struct {
 	ExpireAt    *time.Time `json:"expire_at,omitempty"`
 	IsRead      bool       `json:"is_read"`
 }
-
-// AnnouncementListDTO 是公告分页列表响应。
-type AnnouncementListDTO struct {
-	List  []AnnouncementDTO `json:"list"`
-	Total int64             `json:"total"`
-	Page  int               `json:"page"`
-	Size  int               `json:"size"`
-}

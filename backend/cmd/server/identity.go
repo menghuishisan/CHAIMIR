@@ -9,6 +9,7 @@ import (
 	"chaimir/internal/platform/config"
 	"chaimir/internal/platform/db"
 	"chaimir/internal/platform/redis"
+	"chaimir/internal/platform/upload"
 	"chaimir/pkg/snowflake"
 
 	"github.com/gin-gonic/gin"
@@ -40,6 +41,10 @@ func RegisterIdentityModule(deps IdentityModuleDeps) (*identity.Service, error) 
 	if err != nil {
 		return nil, err
 	}
+	scanner, err := upload.NewScannerFromConfig(deps.Config.Upload)
+	if err != nil {
+		return nil, err
+	}
 	svc, err := identity.NewService(identity.ServiceDeps{
 		Store:          store,
 		Auth:           deps.Auth,
@@ -48,6 +53,7 @@ func RegisterIdentityModule(deps IdentityModuleDeps) (*identity.Service, error) 
 		AuthConfig:     deps.Config.Auth,
 		IdentityConfig: deps.Config.Identity,
 		UploadConfig:   deps.Config.Upload,
+		Scanner:        scanner,
 		DeployConfig:   deps.Config.Deploy,
 		SMSSender:      smsSender,
 	})

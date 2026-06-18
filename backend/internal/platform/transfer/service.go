@@ -9,7 +9,6 @@ import (
 
 	"chaimir/internal/platform/ids"
 	"chaimir/internal/platform/pagex"
-	"chaimir/internal/platform/storage"
 	"chaimir/internal/platform/timex"
 	"chaimir/pkg/apperr"
 	"chaimir/pkg/snowflake"
@@ -41,10 +40,9 @@ type TaskListQuery struct {
 
 // DownloadGrantDTO 是签发给前端的统一下载授权响应。
 type DownloadGrantDTO struct {
-	Token     string                `json:"token"`
-	Grant     storage.DownloadGrant `json:"grant"`
-	Task      TaskDTO               `json:"task"`
-	ExpiresAt string                `json:"expires_at"`
+	Token     string  `json:"token"`
+	Task      TaskDTO `json:"task"`
+	ExpiresAt string  `json:"expires_at"`
 }
 
 // TaskDTO 是统一导入导出任务的用户向快照。
@@ -177,7 +175,7 @@ func (s *Service) BuildDownloadGrant(ctx context.Context, tenantID, taskID, acco
 	if err != nil {
 		return DownloadGrantDTO{}, apperr.ErrTransferTaskNotDownloadable.WithCause(err)
 	}
-	return DownloadGrantDTO{Token: token, Grant: grant, Task: TaskToDTO(task), ExpiresAt: formatOptionalTime(grant.ExpiresAt)}, nil
+	return DownloadGrantDTO{Token: token, Task: TaskToDTO(task), ExpiresAt: formatOptionalTime(grant.ExpiresAt)}, nil
 }
 
 // EnsureTaskOwner 校验任务访问者必须在同租户内,且只能读本人任务或由租户管理员读取。

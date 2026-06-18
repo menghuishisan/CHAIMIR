@@ -1389,7 +1389,6 @@ export interface TranscriptRequest {
 
 export interface TranscriptDownloadGrant {
   token: string
-  grant: Record<string, any>
   transcript: GradeTranscript
   expires_at: string
 }

@@ -231,7 +231,7 @@ func (s *Service) CreateSandbox(ctx context.Context, req contracts.SandboxCreate
 
 // cleanupCreatedSandboxAfterAuditFailure 避免审计失败后留下未启动的 creating 记录。
 func (s *Service) cleanupCreatedSandboxAfterAuditFailure(ctx context.Context, sb Sandbox, cause error) {
-	cleanupBase := logging.WithAttrs(context.Background(), logging.AttrsFromContext(ctx)...)
+	cleanupBase := logging.WithAttrs(context.WithoutCancel(ctx), logging.AttrsFromContext(ctx)...)
 	cleanupCtx, cancel := context.WithTimeout(cleanupBase, timeDurationSeconds(s.cfg.ReadyTimeoutSeconds))
 	defer cancel()
 	if err := s.orchestrator.DestroySandboxResources(cleanupCtx, sb); err != nil {
@@ -755,7 +755,7 @@ func (s *Service) transition(ctx context.Context, tenantID, sandboxID int64, pha
 
 // startAsync 提交异步启动任务,请求返回后继续推进 K8s 创建和阶段变化。
 func (s *Service) startAsync(ctx context.Context, plan CreateSandboxPlan) {
-	traceCtx := logging.WithAttrs(context.Background(), logging.AttrsFromContext(ctx)...)
+	traceCtx := logging.WithAttrs(context.WithoutCancel(ctx), logging.AttrsFromContext(ctx)...)
 	go s.startSandbox(traceCtx, plan)
 }
 
@@ -852,7 +852,7 @@ func sandboxNeedsInitialization(plan CreateSandboxPlan) bool {
 
 // cleanupAfterStartFailure 在阶段一创建失败后用独立有界上下文清理可能已创建的 K8s 资源。
 func (s *Service) cleanupAfterStartFailure(ctx context.Context, sb Sandbox) {
-	cleanupBase := logging.WithAttrs(context.Background(), logging.AttrsFromContext(ctx)...)
+	cleanupBase := logging.WithAttrs(context.WithoutCancel(ctx), logging.AttrsFromContext(ctx)...)
 	cleanupCtx, cancel := context.WithTimeout(cleanupBase, timeDurationSeconds(s.cfg.ReadyTimeoutSeconds))
 	defer cancel()
 	if err := s.orchestrator.DestroySandboxResources(cleanupCtx, sb); err != nil {

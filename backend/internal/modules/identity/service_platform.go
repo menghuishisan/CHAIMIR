@@ -9,6 +9,7 @@ import (
 	"chaimir/internal/contracts"
 	"chaimir/internal/platform/audit"
 	"chaimir/internal/platform/config"
+	"chaimir/internal/platform/pagex"
 	"chaimir/internal/platform/tenant"
 	"chaimir/internal/platform/timex"
 	"chaimir/pkg/apperr"
@@ -157,31 +158,34 @@ func (s *Service) ListApplicationsByPlatform(ctx context.Context, status int16) 
 	return out, nil
 }
 
-// ListTenantsByPlatform 读取平台租户列表,用于 SaaS 平台学校管理页。
-func (s *Service) ListTenantsByPlatform(ctx context.Context) ([]TenantDTO, error) {
+// ListTenantsByPlatform 分页读取平台租户列表,用于 SaaS 平台学校管理页。
+func (s *Service) ListTenantsByPlatform(ctx context.Context, page, size int) ([]TenantDTO, int64, int, int, error) {
 	if err := s.ensurePlatformLayerEnabled(); err != nil {
-		return nil, err
+		return nil, 0, page, size, err
 	}
 	id, ok := tenant.FromContext(ctx)
 	if !ok || !id.IsPlatform {
-		return nil, apperr.ErrForbidden
+		return nil, 0, page, size, apperr.ErrForbidden
 	}
+	page, size = pagex.Normalize(page, size)
 	var rows []Tenant
+	var total int64
 	if err := s.store.PlatformTx(ctx, func(ctx context.Context, tx TxStore) error {
-		items, err := tx.ListTenants(ctx)
+		items, count, err := tx.ListTenants(ctx, page, size)
 		if err != nil {
 			return err
 		}
 		rows = items
+		total = count
 		return nil
 	}); err != nil {
-		return nil, apperr.ErrInternal.WithCause(err)
+		return nil, 0, page, size, apperr.ErrInternal.WithCause(err)
 	}
 	out := make([]TenantDTO, 0, len(rows))
 	for _, row := range rows {
 		out = append(out, ToTenantDTO(row))
 	}
-	return out, nil
+	return out, total, page, size, nil
 }
 
 // GetTenantByPlatform 读取单个租户详情,用于平台管理员管理学校状态。

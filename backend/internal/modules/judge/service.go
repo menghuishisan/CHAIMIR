@@ -737,7 +737,7 @@ func (s *Service) publishProgress(ctx context.Context, tenantID, taskID int64, s
 
 // judgeProgressTopic 生成判题进度 WebSocket topic。
 func judgeProgressTopic(tenantID, taskID int64) string {
-	return "judge:" + ids.Format(tenantID) + ":" + ids.Format(taskID) + ":progress"
+	return "tenant:" + ids.Format(tenantID) + ":judge:" + ids.Format(taskID) + ":progress"
 }
 
 // normalizeJudgerRequest 修剪判题器请求字段。

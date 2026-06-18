@@ -199,15 +199,11 @@ func (a judgeAPI) listTasks(c *gin.Context) {
 	if !ok {
 		return
 	}
-	page, ok := httpx.QueryInt(c, "page", httpx.QueryIntRule{Default: 1, Min: 1})
+	page, size, ok := httpx.Page(c)
 	if !ok {
 		return
 	}
-	size, ok := httpx.QueryInt(c, "size", httpx.QueryIntRule{Default: 20, Min: 1, Max: 100, HasMax: true})
-	if !ok {
-		return
-	}
-	items, total, p, s, err := a.svc.ListTasks(c.Request.Context(), current.TenantID, current.AccountID, c.Query("source_ref"), c.Query("pending_manual") == "true", int(page), int(size))
+	items, total, p, s, err := a.svc.ListTasks(c.Request.Context(), current.TenantID, current.AccountID, c.Query("source_ref"), c.Query("pending_manual") == "true", page, size)
 	httpx.WritePage(c, items, total, p, s, err)
 }
 

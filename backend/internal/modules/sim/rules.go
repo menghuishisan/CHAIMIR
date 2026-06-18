@@ -3,7 +3,6 @@ package sim
 
 import (
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"regexp"
 	"strconv"
@@ -145,7 +144,7 @@ func validateAction(req ReportActionRequest) error {
 	if req.Payload == nil {
 		return nil
 	}
-	raw, err := json.Marshal(req.Payload)
+	raw, err := jsonx.AnyBytes(req.Payload, apperr.ErrSimActionSeqInvalid)
 	if err != nil || len(raw) > maxActionPayloadBytes {
 		return apperr.ErrSimActionSeqInvalid
 	}

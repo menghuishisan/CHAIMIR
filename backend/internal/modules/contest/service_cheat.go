@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"chaimir/internal/contracts"
+	"chaimir/internal/platform/pagex"
 	"chaimir/pkg/apperr"
 )
 
@@ -60,6 +61,7 @@ func (s *Service) ListCheatRecords(ctx context.Context, contestID int64, page, s
 	if err != nil {
 		return nil, 0, page, size, err
 	}
+	page, size = pagex.Normalize(page, size)
 	var items []CheatRecord
 	var total int64
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {

@@ -137,7 +137,7 @@ func (s *Service) PreviewAccountImport(ctx context.Context, req ImportPreviewReq
 	if req.TargetType != ImportTargetTeacher && req.TargetType != ImportTargetStudent {
 		return ImportPreviewResponse{}, apperr.ErrIdentityImportTypeInvalid
 	}
-	rows, results, err := s.parseImportFile(req.Content, req.FileName, req.ContentType, req.TargetType)
+	rows, results, err := s.parseImportFile(ctx, req.Content, req.FileName, req.ContentType, req.TargetType)
 	if err != nil {
 		return ImportPreviewResponse{}, err
 	}
@@ -396,7 +396,7 @@ func accountImportOrgExists(ctx context.Context, tx TxStore, tenantID int64, row
 }
 
 // parseImportFile 按统一上传安全原语识别 CSV/XLSX,再进入对应解析器。
-func (s *Service) parseImportFile(raw []byte, fileName, contentType string, targetType int16) ([]importRow, []ImportRowResult, error) {
+func (s *Service) parseImportFile(ctx context.Context, raw []byte, fileName, contentType string, targetType int16) ([]importRow, []ImportRowResult, error) {
 	if filepath.Base(fileName) != fileName || strings.TrimSpace(fileName) == "" {
 		return nil, nil, apperr.ErrIdentityImportUnsupportedFile
 	}
@@ -405,6 +405,9 @@ func (s *Service) parseImportFile(raw []byte, fileName, contentType string, targ
 		return nil, nil, apperr.ErrIdentityImportContentInvalid
 	case upload.SizeTooLarge:
 		return nil, nil, apperr.ErrIdentityImportFileTooLarge
+	}
+	if err := upload.VerifyScan(ctx, s.scanner, upload.ScanPolicy{Required: s.uploadCfg.VirusScanRequired}, upload.ScanRequest{FileName: fileName, Content: raw}); err != nil {
+		return nil, nil, apperr.ErrIdentityImportUnsupportedFile.WithCause(err)
 	}
 	switch upload.CSVOrXLSXKind(fileName, contentType, raw) {
 	case upload.KindCSV:

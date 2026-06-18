@@ -91,7 +91,7 @@ func (s *Service) HasRole(ctx context.Context, accountID int64, role string) (bo
 func (s *Service) ListTenants(ctx context.Context) ([]contracts.TenantSummary, error) {
 	var tenants []Tenant
 	if err := s.store.PlatformTx(ctx, func(ctx context.Context, tx TxStore) error {
-		rows, err := tx.ListTenants(ctx)
+		rows, err := tx.ListAllTenants(ctx)
 		if err != nil {
 			return err
 		}

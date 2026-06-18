@@ -76,13 +76,6 @@ type AccountDTO struct {
 	CreatedAt    string  `json:"created_at,omitempty"`
 }
 
-type AccountListResponse struct {
-	List  []AccountDTO `json:"list"`
-	Total int64        `json:"total"`
-	Page  int32        `json:"page"`
-	Size  int32        `json:"size"`
-}
-
 type MeResponse struct {
 	Account AccountDTO `json:"account"`
 }
@@ -129,13 +122,6 @@ type AuditLogDTO struct {
 	IP         string `json:"ip,omitempty"`
 	TraceID    string `json:"trace_id,omitempty"`
 	CreatedAt  string `json:"created_at"`
-}
-
-type AuditListResponse struct {
-	List  []AuditLogDTO `json:"list"`
-	Total int64         `json:"total"`
-	Page  int32         `json:"page"`
-	Size  int32         `json:"size"`
 }
 
 type CreateApplicationRequest struct {

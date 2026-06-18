@@ -1963,6 +1963,73 @@ func (q *Queries) ListTenants(ctx context.Context) ([]Tenant, error) {
 	return items, nil
 }
 
+const listTenantsPaged = `-- name: ListTenantsPaged :many
+SELECT id, code, name, type, status, deploy_mode, expire_at, logo_url, display_name, feature_flags, auth_mode, enable_activation_code, created_at, updated_at,
+       COUNT(*) OVER() AS total_count
+FROM tenant
+ORDER BY created_at DESC, id DESC
+LIMIT $1 OFFSET $2
+`
+
+type ListTenantsPagedParams struct {
+	Limit  int32 `json:"limit"`
+	Offset int32 `json:"offset"`
+}
+
+type ListTenantsPagedRow struct {
+	ID                   int64              `json:"id"`
+	Code                 string             `json:"code"`
+	Name                 string             `json:"name"`
+	Type                 int16              `json:"type"`
+	Status               int16              `json:"status"`
+	DeployMode           int16              `json:"deploy_mode"`
+	ExpireAt             pgtype.Timestamptz `json:"expire_at"`
+	LogoUrl              pgtype.Text        `json:"logo_url"`
+	DisplayName          pgtype.Text        `json:"display_name"`
+	FeatureFlags         []byte             `json:"feature_flags"`
+	AuthMode             int16              `json:"auth_mode"`
+	EnableActivationCode bool               `json:"enable_activation_code"`
+	CreatedAt            pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt            pgtype.Timestamptz `json:"updated_at"`
+	TotalCount           int64              `json:"total_count"`
+}
+
+func (q *Queries) ListTenantsPaged(ctx context.Context, arg ListTenantsPagedParams) ([]ListTenantsPagedRow, error) {
+	rows, err := q.db.Query(ctx, listTenantsPaged, arg.Limit, arg.Offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListTenantsPagedRow{}
+	for rows.Next() {
+		var i ListTenantsPagedRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Code,
+			&i.Name,
+			&i.Type,
+			&i.Status,
+			&i.DeployMode,
+			&i.ExpireAt,
+			&i.LogoUrl,
+			&i.DisplayName,
+			&i.FeatureFlags,
+			&i.AuthMode,
+			&i.EnableActivationCode,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.TotalCount,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const majorExists = `-- name: MajorExists :one
 SELECT EXISTS(SELECT 1 FROM major WHERE id = $1 AND tenant_id = $2 AND deleted_at IS NULL)
 `

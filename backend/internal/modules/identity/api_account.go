@@ -54,12 +54,8 @@ func (a accountAPI) listAccounts(c *gin.Context) {
 	if !ok {
 		return
 	}
-	out, err := a.svc.ListAccountsByAdmin(c.Request.Context(), query)
-	if err != nil {
-		httpx.Write(c, gin.H{}, err)
-		return
-	}
-	httpx.Write(c, out, nil)
+	list, total, page, size, err := a.svc.ListAccountsByAdmin(c.Request.Context(), query)
+	httpx.WritePage(c, list, total, page, size, err)
 }
 
 // createAccount 绑定单个账号创建请求。

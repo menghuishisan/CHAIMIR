@@ -4,7 +4,6 @@ package content
 import (
 	"bytes"
 	"context"
-	"io"
 	"log/slog"
 	"strconv"
 	"strings"
@@ -13,6 +12,7 @@ import (
 	"chaimir/internal/platform/jsonx"
 	"chaimir/internal/platform/pagex"
 	"chaimir/internal/platform/storage"
+	"chaimir/internal/platform/upload"
 	"chaimir/pkg/apperr"
 	"chaimir/pkg/crypto"
 	"chaimir/pkg/logging"
@@ -457,12 +457,11 @@ func (s *Service) copyAttachmentObject(ctx context.Context, ref storage.ObjectRe
 	if err != nil {
 		return "", storage.ObjectRef{}, apperr.ErrContentCloneInvalid.WithCause(err)
 	}
-	limited := io.LimitReader(reader, s.contentAttachmentMaxBytes+1)
-	content, err := io.ReadAll(limited)
+	content, sizeResult, err := upload.ReadBounded(reader, s.contentAttachmentMaxBytes)
 	if err != nil {
 		return "", storage.ObjectRef{}, apperr.ErrContentCloneInvalid.WithCause(err)
 	}
-	if int64(len(content)) == 0 || int64(len(content)) > s.contentAttachmentMaxBytes {
+	if len(content) == 0 || sizeResult != upload.SizeOK {
 		return "", storage.ObjectRef{}, apperr.ErrContentCloneInvalid
 	}
 	if err := s.storage.Put(ctx, s.storage.BucketAttach(), key, bytes.NewReader(content), int64(len(content)), "application/octet-stream"); err != nil {

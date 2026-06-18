@@ -11,6 +11,7 @@ import (
 	"chaimir/internal/platform/config"
 	"chaimir/internal/platform/db"
 	"chaimir/internal/platform/storage"
+	"chaimir/internal/platform/upload"
 	"chaimir/pkg/snowflake"
 
 	"github.com/gin-gonic/gin"
@@ -53,6 +54,7 @@ func RegisterContentModule(deps ContentModuleDeps) (*content.Service, error) {
 		Storage:                   deps.Storage,
 		FileService:               fileService,
 		ContentAttachmentMaxBytes: deps.Upload.ContentAttachmentMaxBytes,
+		AttachmentScanPolicy:      upload.ScanPolicy{Required: deps.Upload.VirusScanRequired},
 	})
 	if err != nil {
 		return nil, err

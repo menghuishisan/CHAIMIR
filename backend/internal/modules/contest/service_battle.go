@@ -12,6 +12,7 @@ import (
 	"chaimir/internal/contracts"
 	"chaimir/internal/platform/audit"
 	"chaimir/internal/platform/ids"
+	"chaimir/internal/platform/pagex"
 	"chaimir/internal/platform/timex"
 	"chaimir/pkg/apperr"
 )
@@ -115,6 +116,7 @@ func (s *Service) ListBattleMatches(ctx context.Context, contestID int64, page, 
 	if err != nil {
 		return nil, 0, page, size, err
 	}
+	page, size = pagex.Normalize(page, size)
 	var matches []BattleMatch
 	var total int64
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {

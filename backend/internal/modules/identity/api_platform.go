@@ -91,12 +91,12 @@ func (a platformAPI) rejectApplication(c *gin.Context) {
 
 // listTenants 读取平台租户列表,API 层不直接访问 repo。
 func (a platformAPI) listTenants(c *gin.Context) {
-	out, err := a.svc.ListTenantsByPlatform(c.Request.Context())
-	if err != nil {
-		httpx.Write(c, gin.H{}, err)
+	page, size, ok := httpx.Page(c)
+	if !ok {
 		return
 	}
-	httpx.Write(c, out, nil)
+	out, total, p, s, err := a.svc.ListTenantsByPlatform(c.Request.Context(), page, size)
+	httpx.WritePage(c, out, total, p, s, err)
 }
 
 // getTenant 读取单个租户详情,路径 ID 解析失败时返回统一用户向错误。

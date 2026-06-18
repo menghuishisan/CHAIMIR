@@ -220,7 +220,7 @@ func (s *Service) RunRuntimeSelftest(ctx context.Context, runtimeID int64) (Runt
 	if err == nil {
 		err = s.runRuntimeCapabilitySelftest(testCtx, sb, runtime)
 	}
-	cleanupBase := logging.WithAttrs(context.Background(), logging.AttrsFromContext(ctx)...)
+	cleanupBase := logging.WithAttrs(context.WithoutCancel(ctx), logging.AttrsFromContext(ctx)...)
 	cleanupCtx, cleanupCancel := context.WithTimeout(cleanupBase, timeDurationSeconds(s.cfg.SelftestRecycleTimeoutSeconds))
 	defer cleanupCancel()
 	if cleanupErr := s.orchestrator.DestroySandboxResources(cleanupCtx, sb); cleanupErr != nil {

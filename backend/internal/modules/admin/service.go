@@ -13,6 +13,7 @@ import (
 	"chaimir/internal/contracts"
 	"chaimir/internal/platform/audit"
 	"chaimir/internal/platform/config"
+	"chaimir/internal/platform/pagex"
 	"chaimir/internal/platform/secretmap"
 	"chaimir/internal/platform/storage"
 	"chaimir/internal/platform/tenant"
@@ -435,6 +436,7 @@ func (s *Service) ListConfigHistory(ctx context.Context, scope int16, tenantID i
 	if err != nil {
 		return nil, 0, page, size, err
 	}
+	page, size = pagex.Normalize(page, size)
 	if !id.IsPlatform {
 		scope = ScopeTenant
 		tenantID = id.TenantID
@@ -595,6 +597,7 @@ func (s *Service) ListAlertEvents(ctx context.Context, status int16, page, size 
 	if err != nil {
 		return nil, 0, page, size, err
 	}
+	page, size = pagex.Normalize(page, size)
 	tenantID := int64(0)
 	if !id.IsPlatform {
 		tenantID = id.TenantID
@@ -626,22 +629,20 @@ func (s *Service) HandleAlertEvent(ctx context.Context, eventID int64, req Alert
 	if err != nil {
 		return AlertEventDTO{}, apperr.ErrAdminAlertNotFound.WithCause(err)
 	}
-	topicTenantID := id.TenantID
 	if out.TenantID > 0 {
-		topicTenantID = out.TenantID
-	}
-	if err := s.notify.Push(ctx, contracts.NotifyPushRequest{
-		TenantID: topicTenantID,
-		Topic:    fmt.Sprintf("alert:%d", topicTenantID),
-		Payload: map[string]any{
-			"event_id":   out.ID,
-			"rule_id":    out.RuleID,
-			"level":      out.Level,
-			"status":     out.Status,
-			"handler_id": out.HandlerID,
-		},
-	}); err != nil {
-		return AlertEventDTO{}, apperr.ErrAdminAlertInvalid.WithCause(err)
+		if err := s.notify.Push(ctx, contracts.NotifyPushRequest{
+			TenantID: out.TenantID,
+			Topic:    fmt.Sprintf("tenant:%d:alert", out.TenantID),
+			Payload: map[string]any{
+				"event_id":   out.ID,
+				"rule_id":    out.RuleID,
+				"level":      out.Level,
+				"status":     out.Status,
+				"handler_id": out.HandlerID,
+			},
+		}); err != nil {
+			return AlertEventDTO{}, apperr.ErrAdminAlertInvalid.WithCause(err)
+		}
 	}
 	if err := s.writeAudit(ctx, id, "admin.alert.handle", "alert_event", out.ID, map[string]any{"status": out.Status}); err != nil {
 		return AlertEventDTO{}, apperr.ErrAdminAuditWriteFailed.WithCause(err)
@@ -662,6 +663,7 @@ func (s *Service) ListBackups(ctx context.Context, page, size int) ([]BackupReco
 	if _, err := requirePlatform(ctx); err != nil {
 		return nil, 0, page, size, err
 	}
+	page, size = pagex.Normalize(page, size)
 	var total int64
 	rows, err := runAdminRead(ctx, s.store, 0, func(ctx context.Context, tx TxStore) ([]BackupRecordDTO, error) {
 		out, count, err := tx.ListBackupRecords(ctx, page, size)

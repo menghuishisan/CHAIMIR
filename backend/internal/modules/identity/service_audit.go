@@ -10,10 +10,10 @@ import (
 )
 
 // QueryAuditLogsForCurrent 按当前身份收敛审计查询范围。
-func (s *Service) QueryAuditLogsForCurrent(ctx context.Context, req AuditQueryRequest) (AuditListResponse, error) {
+func (s *Service) QueryAuditLogsForCurrent(ctx context.Context, req AuditQueryRequest) ([]AuditLogDTO, int64, int, int, error) {
 	id, ok := tenant.FromContext(ctx)
 	if !ok {
-		return AuditListResponse{}, apperr.ErrUnauthorized
+		return nil, 0, int(req.Page), int(req.Size), apperr.ErrUnauthorized
 	}
 	query := contracts.AuditQuery{
 		TenantID:   req.TenantID,
@@ -31,24 +31,24 @@ func (s *Service) QueryAuditLogsForCurrent(ctx context.Context, req AuditQueryRe
 	}
 	if !id.IsPlatform {
 		if id.TenantID <= 0 || id.AccountID <= 0 {
-			return AuditListResponse{}, apperr.ErrForbidden
+			return nil, 0, int(req.Page), int(req.Size), apperr.ErrForbidden
 		}
 		has, err := s.HasRole(ctx, id.AccountID, contracts.RoleSchoolAdmin)
 		if err != nil {
-			return AuditListResponse{}, apperr.ErrForbidden.WithCause(err)
+			return nil, 0, int(req.Page), int(req.Size), apperr.ErrForbidden.WithCause(err)
 		}
 		if !has {
-			return AuditListResponse{}, apperr.ErrForbidden
+			return nil, 0, int(req.Page), int(req.Size), apperr.ErrForbidden
 		}
 		query.TenantID = id.TenantID
 	}
 	result, err := s.QueryAuditLogs(ctx, query)
 	if err != nil {
-		return AuditListResponse{}, err
+		return nil, 0, int(req.Page), int(req.Size), err
 	}
 	list := make([]AuditLogDTO, 0, len(result.List))
 	for _, row := range result.List {
 		list = append(list, ToAuditLogDTO(row))
 	}
-	return AuditListResponse{List: list, Total: result.Total, Page: result.Page, Size: result.Size}, nil
+	return list, result.Total, int(result.Page), int(result.Size), nil
 }

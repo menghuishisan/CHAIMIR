@@ -10,6 +10,7 @@ import (
 	"chaimir/internal/platform/config"
 	"chaimir/internal/platform/redis"
 	"chaimir/internal/platform/timex"
+	"chaimir/internal/platform/upload"
 	"chaimir/pkg/crypto"
 	"chaimir/pkg/snowflake"
 )
@@ -24,6 +25,7 @@ type Service struct {
 	hmacKey     []byte
 	cfg         config.IdentityConfig
 	uploadCfg   config.UploadConfig
+	scanner     upload.Scanner
 	deploy      config.DeployConfig
 	authCfg     config.AuthConfig
 	sms         SMSSender
@@ -58,6 +60,7 @@ func NewService(deps ServiceDeps) (*Service, error) {
 		hmacKey:   []byte(deps.AuthConfig.HMACKey),
 		cfg:       deps.IdentityConfig,
 		uploadCfg: deps.UploadConfig,
+		scanner:   deps.Scanner,
 		deploy:    deps.DeployConfig,
 		authCfg:   deps.AuthConfig,
 		sms:       deps.SMSSender,
@@ -79,6 +82,7 @@ type ServiceDeps struct {
 	AuthConfig     config.AuthConfig
 	IdentityConfig config.IdentityConfig
 	UploadConfig   config.UploadConfig
+	Scanner        upload.Scanner
 	DeployConfig   config.DeployConfig
 	SMSSender      SMSSender
 }

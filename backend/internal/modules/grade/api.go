@@ -116,7 +116,10 @@ func (a gradeAPI) listReviews(c *gin.Context) {
 	if !ok {
 		return
 	}
-	status, _ := httpx.QueryInt(c, "status", httpx.QueryIntRule{Default: 0, Min: 0, Max: 3, HasMax: true})
+	status, ok := httpx.QueryInt(c, "status", httpx.QueryIntRule{Default: 0, Min: 0, Max: 3, HasMax: true})
+	if !ok {
+		return
+	}
 	out5, total, p, s, err := a.svc.ListReviews(c.Request.Context(), int16(status), page, size)
 	httpx.WritePage(c, out5, total, p, s, err)
 }
@@ -197,7 +200,10 @@ func (a gradeAPI) listAppeals(c *gin.Context) {
 	if !ok {
 		return
 	}
-	status, _ := httpx.QueryInt(c, "status", httpx.QueryIntRule{Default: 0, Min: 0, Max: 4, HasMax: true})
+	status, ok := httpx.QueryInt(c, "status", httpx.QueryIntRule{Default: 0, Min: 0, Max: 4, HasMax: true})
+	if !ok {
+		return
+	}
 	out9, total, p, s, err := a.svc.ListAppeals(c.Request.Context(), int16(status), page, size)
 	httpx.WritePage(c, out9, total, p, s, err)
 }
@@ -244,7 +250,10 @@ func (a gradeAPI) listWarnings(c *gin.Context) {
 	if !ok {
 		return
 	}
-	studentID, _ := httpx.QueryInt(c, "student_id", httpx.QueryIntRule{Default: 0, Min: 0})
+	studentID, ok := httpx.QueryInt(c, "student_id", httpx.QueryIntRule{Default: 0, Min: 0})
+	if !ok {
+		return
+	}
 	out11, total, p, s, err := a.svc.ListWarnings(c.Request.Context(), studentID, page, size)
 	httpx.WritePage(c, out11, total, p, s, err)
 }

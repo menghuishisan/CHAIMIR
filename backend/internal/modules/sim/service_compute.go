@@ -3,9 +3,9 @@ package sim
 
 import (
 	"context"
-	"encoding/json"
 	"strings"
 
+	"chaimir/internal/platform/jsonx"
 	"chaimir/internal/platform/ws"
 	"chaimir/pkg/apperr"
 )
@@ -84,11 +84,11 @@ func (c *backendValidatedConn) ReadJSON(v any) error {
 		*out = event
 		return nil
 	}
-	raw, err := json.Marshal(event)
+	raw, err := jsonx.AnyBytes(event, apperr.ErrSimActionSeqInvalid)
 	if err != nil {
 		return err
 	}
-	return json.Unmarshal(raw, v)
+	return jsonx.DecodeStrict(raw, v)
 }
 
 // SendJSON 复用统一 WebSocket 发送队列输出后端状态。

@@ -65,8 +65,8 @@ func (t *txStore) GetTenantByID(ctx context.Context, id int64) (Tenant, error) {
 	return tenantFromRow(row), nil
 }
 
-// ListTenants 读取所有租户摘要。
-func (t *txStore) ListTenants(ctx context.Context) ([]Tenant, error) {
+// ListAllTenants 读取所有租户摘要,仅供聚合层只读汇总使用。
+func (t *txStore) ListAllTenants(ctx context.Context) ([]Tenant, error) {
 	rows, err := t.q.ListTenants(ctx)
 	if err != nil {
 		return nil, err
@@ -76,6 +76,21 @@ func (t *txStore) ListTenants(ctx context.Context) ([]Tenant, error) {
 		out = append(out, tenantFromRow(row))
 	}
 	return out, nil
+}
+
+// ListTenants 分页读取平台租户摘要。
+func (t *txStore) ListTenants(ctx context.Context, page, size int) ([]Tenant, int64, error) {
+	rows, err := t.q.ListTenantsPaged(ctx, sqlcgen.ListTenantsPagedParams{Limit: int32(size), Offset: int32((page - 1) * size)})
+	if err != nil {
+		return nil, 0, err
+	}
+	out := make([]Tenant, 0, len(rows))
+	var total int64
+	for _, row := range rows {
+		total = row.TotalCount
+		out = append(out, tenantFromPagedRow(row))
+	}
+	return out, total, nil
 }
 
 // CreateTenant 创建学校租户及内联配置。

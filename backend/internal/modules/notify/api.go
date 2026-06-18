@@ -113,10 +113,11 @@ func (a notifyAPI) createAnnouncement(c *gin.Context) {
 // listAnnouncements 查询当前用户可见公告。
 func (a notifyAPI) listAnnouncements(c *gin.Context) {
 	page, size, ok := httpx.Page(c)
-	if ok {
-		out5, err := a.svc.ListAnnouncements(c.Request.Context(), page, size)
-		httpx.Write(c, out5, err)
+	if !ok {
+		return
 	}
+	items, total, p, s, err := a.svc.ListAnnouncements(c.Request.Context(), page, size)
+	httpx.WritePage(c, items, total, p, s, err)
 }
 
 // markAnnouncementRead 标记公告已读。

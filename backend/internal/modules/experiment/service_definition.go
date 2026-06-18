@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"chaimir/internal/contracts"
+	"chaimir/internal/platform/pagex"
 	"chaimir/pkg/apperr"
 )
 
@@ -15,6 +16,7 @@ func (s *Service) ListExperiments(ctx context.Context, courseID int64, status in
 	if err != nil {
 		return nil, 0, 0, 0, err
 	}
+	page, size = pagex.Normalize(page, size)
 	items := []Experiment{}
 	var total int64
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {

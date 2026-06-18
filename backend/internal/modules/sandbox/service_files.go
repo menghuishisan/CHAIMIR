@@ -441,14 +441,16 @@ func (s *Service) scheduleDebouncedSave(ctx context.Context, tenantID, sandboxID
 	if timer := s.saveTimers[sandboxID]; timer != nil {
 		timer.Stop()
 	}
+	saveBase := logging.WithAttrs(context.WithoutCancel(ctx), traceAttrs...)
 	var timer *time.Timer
 	timer = time.AfterFunc(delay, func() {
-		saveCtx := logging.WithAttrs(context.Background(), traceAttrs...)
 		s.saveMu.Lock()
 		if s.saveTimers[sandboxID] == timer {
 			delete(s.saveTimers, sandboxID)
 		}
 		s.saveMu.Unlock()
+		saveCtx, cancel := context.WithTimeout(saveBase, timeDurationSeconds(s.cfg.ExecTimeoutSeconds))
+		defer cancel()
 		if _, _, err := s.saveSandboxFiles(saveCtx, tenantID, sandboxID); err != nil {
 			s.recordDebouncedSaveFailure(saveCtx, tenantID, sandboxID, err)
 		}

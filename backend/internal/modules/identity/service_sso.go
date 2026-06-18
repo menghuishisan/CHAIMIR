@@ -6,7 +6,6 @@ import (
 	"crypto/tls"
 	"encoding/xml"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -17,6 +16,7 @@ import (
 	"chaimir/internal/platform/netx"
 	"chaimir/internal/platform/secretmap"
 	"chaimir/internal/platform/timex"
+	"chaimir/internal/platform/upload"
 	"chaimir/pkg/apperr"
 	"chaimir/pkg/logging"
 	ldap "github.com/go-ldap/ldap/v3"
@@ -348,11 +348,11 @@ func (s *Service) validateCASTicket(ctx context.Context, cfg SSOConfig, ticket, 
 	if s.cfg.SSOCASResponseMaxBytes <= 0 {
 		return "", apperr.ErrIdentitySSOResponseInvalid
 	}
-	body, err := io.ReadAll(io.LimitReader(resp.Body, s.cfg.SSOCASResponseMaxBytes+1))
+	body, sizeResult, err := upload.ReadBounded(resp.Body, s.cfg.SSOCASResponseMaxBytes)
 	if err != nil {
 		return "", apperr.ErrIdentitySSOResponseInvalid.WithCause(err)
 	}
-	if int64(len(body)) > s.cfg.SSOCASResponseMaxBytes {
+	if sizeResult != upload.SizeOK {
 		return "", apperr.ErrIdentitySSOResponseInvalid
 	}
 	var parsed casServiceResponse

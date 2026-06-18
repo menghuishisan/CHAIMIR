@@ -346,7 +346,7 @@ func (s *Service) PreviewOrgImportByAdmin(ctx context.Context, req ImportPreview
 	if err != nil {
 		return ImportPreviewResponse{}, err
 	}
-	rows, results, err := s.parseOrgImportFile(req.Content, req.FileName, req.ContentType)
+	rows, results, err := s.parseOrgImportFile(ctx, req.Content, req.FileName, req.ContentType)
 	if err != nil {
 		return ImportPreviewResponse{}, err
 	}
@@ -534,7 +534,7 @@ func (s *Service) ArchiveClassesByAdmin(ctx context.Context, req ArchiveClassesR
 }
 
 // parseOrgImportFile 按统一上传安全原语识别 CSV/XLSX,再进入对应解析器。
-func (s *Service) parseOrgImportFile(raw []byte, fileName, contentType string) ([]orgImportRow, []ImportRowResult, error) {
+func (s *Service) parseOrgImportFile(ctx context.Context, raw []byte, fileName, contentType string) ([]orgImportRow, []ImportRowResult, error) {
 	if filepath.Base(fileName) != fileName || strings.TrimSpace(fileName) == "" {
 		return nil, nil, apperr.ErrIdentityImportUnsupportedFile
 	}
@@ -543,6 +543,9 @@ func (s *Service) parseOrgImportFile(raw []byte, fileName, contentType string) (
 		return nil, nil, apperr.ErrIdentityImportContentInvalid
 	case upload.SizeTooLarge:
 		return nil, nil, apperr.ErrIdentityImportFileTooLarge
+	}
+	if err := upload.VerifyScan(ctx, s.scanner, upload.ScanPolicy{Required: s.uploadCfg.VirusScanRequired}, upload.ScanRequest{FileName: fileName, Content: raw}); err != nil {
+		return nil, nil, apperr.ErrIdentityImportUnsupportedFile.WithCause(err)
 	}
 	switch upload.CSVOrXLSXKind(fileName, contentType, raw) {
 	case upload.KindCSV:

@@ -16,6 +16,7 @@ import (
 	"chaimir/internal/platform/config"
 	"chaimir/internal/platform/eventbus"
 	"chaimir/internal/platform/jsonx"
+	"chaimir/internal/platform/pagex"
 	"chaimir/internal/platform/response"
 	"chaimir/internal/platform/storage"
 	"chaimir/internal/platform/tenant"
@@ -265,6 +266,7 @@ func (s *Service) ListReviews(ctx context.Context, status int16, page, size int)
 	if err != nil {
 		return nil, 0, page, size, err
 	}
+	page, size = pagex.Normalize(page, size)
 	var out []ReviewDTO
 	var total int64
 	err = s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
@@ -538,6 +540,7 @@ func (s *Service) ListAppeals(ctx context.Context, status int16, page, size int)
 	if err != nil {
 		return nil, 0, page, size, err
 	}
+	page, size = pagex.Normalize(page, size)
 	var out []AppealDTO
 	var total int64
 	err = s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
@@ -564,6 +567,7 @@ func (s *Service) ListWarnings(ctx context.Context, studentID int64, page, size 
 	if err != nil {
 		return nil, 0, page, size, err
 	}
+	page, size = pagex.Normalize(page, size)
 	if studentID == 0 {
 		studentID = id.AccountID
 	}
@@ -778,7 +782,7 @@ func (s *Service) DownloadTranscript(ctx context.Context, transcriptID int64) (T
 	if err := s.writeAudit(ctx, id.TenantID, id.AccountID, s.transcriptActorRole(ctx, id.AccountID, record.StudentID), "grade.transcript.download", auditTargetTranscript, record.ID, map[string]any{"student_id": record.StudentID}); err != nil {
 		return TranscriptDownloadGrantDTO{}, err
 	}
-	return TranscriptDownloadGrantDTO{Token: token, Grant: grant, Transcript: record, ExpiresAt: grant.ExpiresAt.Format(time.RFC3339)}, nil
+	return TranscriptDownloadGrantDTO{Token: token, Transcript: record, ExpiresAt: grant.ExpiresAt.Format(time.RFC3339)}, nil
 }
 
 // HandleGradeUpdated 处理 M6 单课程成绩更新事件。

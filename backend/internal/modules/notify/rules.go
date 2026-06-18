@@ -13,7 +13,7 @@ import (
 
 var (
 	tenantTopicPrefixPattern = regexp.MustCompile(`^tenant:([1-9][0-9]*):`)
-	businessTopicPattern     = regexp.MustCompile(`^tenant:([1-9][0-9]*):(contest|sandbox|sim|experiment|course):[1-9][0-9]*:[a-z][a-z0-9_-]*$`)
+	businessTopicPattern     = regexp.MustCompile(`^tenant:([1-9][0-9]*):(contest|sandbox|sim|experiment|course|judge):[1-9][0-9]*:[a-z][a-z0-9_-]*$`)
 	notifyTopicPattern       = regexp.MustCompile(`^tenant:([1-9][0-9]*):notify:([1-9][0-9]*)$`)
 	templateVarPattern       = regexp.MustCompile(`\{\{[a-zA-Z0-9_.-]+\}\}`)
 	linkPattern              = regexp.MustCompile(`^/[A-Za-z0-9/_?&=.#:%+-]*$`)

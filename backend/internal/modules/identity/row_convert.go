@@ -5,25 +5,37 @@ import (
 	"chaimir/internal/modules/identity/internal/sqlcgen"
 	"chaimir/internal/platform/pgtypex"
 	"chaimir/internal/platform/timex"
+
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 // tenantFromRow 转换租户 sqlc 行为领域模型。
 func tenantFromRow(row sqlcgen.Tenant) Tenant {
+	return tenantFields(row.ID, row.Code, row.Name, row.Type, row.Status, row.DeployMode, row.ExpireAt, row.LogoUrl, row.DisplayName, row.FeatureFlags, row.AuthMode, row.EnableActivationCode, row.CreatedAt, row.UpdatedAt)
+}
+
+// tenantFromPagedRow 转换分页租户查询行,忽略 repo 单独处理的窗口计数字段。
+func tenantFromPagedRow(row sqlcgen.ListTenantsPagedRow) Tenant {
+	return tenantFields(row.ID, row.Code, row.Name, row.Type, row.Status, row.DeployMode, row.ExpireAt, row.LogoUrl, row.DisplayName, row.FeatureFlags, row.AuthMode, row.EnableActivationCode, row.CreatedAt, row.UpdatedAt)
+}
+
+// tenantFields 统一租户字段映射,避免普通查询和分页查询复制转换口径。
+func tenantFields(id int64, code, name string, typ, status, deployMode int16, expireAt pgtype.Timestamptz, logoURL, displayName pgtype.Text, featureFlags []byte, authMode int16, enableActivationCode bool, createdAt, updatedAt pgtype.Timestamptz) Tenant {
 	return Tenant{
-		ID:                   row.ID,
-		Code:                 row.Code,
-		Name:                 row.Name,
-		Type:                 row.Type,
-		Status:               row.Status,
-		DeployMode:           row.DeployMode,
-		ExpireAt:             timex.PtrFromTimestamptz(row.ExpireAt),
-		LogoURL:              pgtypex.TextValue(row.LogoUrl),
-		DisplayName:          pgtypex.TextValue(row.DisplayName),
-		FeatureFlags:         row.FeatureFlags,
-		AuthMode:             row.AuthMode,
-		EnableActivationCode: row.EnableActivationCode,
-		CreatedAt:            timex.FromTimestamptz(row.CreatedAt),
-		UpdatedAt:            timex.FromTimestamptz(row.UpdatedAt),
+		ID:                   id,
+		Code:                 code,
+		Name:                 name,
+		Type:                 typ,
+		Status:               status,
+		DeployMode:           deployMode,
+		ExpireAt:             timex.PtrFromTimestamptz(expireAt),
+		LogoURL:              pgtypex.TextValue(logoURL),
+		DisplayName:          pgtypex.TextValue(displayName),
+		FeatureFlags:         featureFlags,
+		AuthMode:             authMode,
+		EnableActivationCode: enableActivationCode,
+		CreatedAt:            timex.FromTimestamptz(createdAt),
+		UpdatedAt:            timex.FromTimestamptz(updatedAt),
 	}
 }
 

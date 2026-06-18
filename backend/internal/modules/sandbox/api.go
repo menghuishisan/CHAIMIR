@@ -575,7 +575,11 @@ func (a sandboxAPI) upsertQuota(c *gin.Context) {
 	if !httpx.BindJSONWithError(c, &req, apperr.ErrSandboxQuotaUpdateInvalid) {
 		return
 	}
-	current, _ := tenant.FromContext(c.Request.Context())
+	current, ok := tenant.FromContext(c.Request.Context())
+	if !ok {
+		response.Fail(c, apperr.ErrUnauthorized)
+		return
+	}
 	if !current.IsPlatform {
 		req.TenantID = current.TenantID
 	}

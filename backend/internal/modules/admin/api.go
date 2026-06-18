@@ -99,7 +99,7 @@ func (a adminAPI) queryAudit(c *gin.Context) {
 		return
 	}
 	result, err := a.svc.QueryAudit(c.Request.Context(), query)
-	httpx.Write(c, result, err)
+	httpx.WritePage(c, result.List, result.Total, int(result.Page), int(result.Size), err)
 }
 
 // exportAudit 导出审计 CSV。

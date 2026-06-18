@@ -63,6 +63,7 @@ type Querier interface {
 	ListSSOConfigs(ctx context.Context, tenantID int64) ([]SsoConfig, error)
 	ListTenantApplications(ctx context.Context, dollar_1 int16) ([]TenantApplication, error)
 	ListTenants(ctx context.Context) ([]Tenant, error)
+	ListTenantsPaged(ctx context.Context, arg ListTenantsPagedParams) ([]ListTenantsPagedRow, error)
 	MajorExists(ctx context.Context, arg MajorExistsParams) (bool, error)
 	MarkImportPreviewSubmitted(ctx context.Context, arg MarkImportPreviewSubmittedParams) (int64, error)
 	MarkSMSCodeUsed(ctx context.Context, arg MarkSMSCodeUsedParams) error

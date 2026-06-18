@@ -29,7 +29,8 @@ type TxStore interface {
 	UpdatePlatformAdminPassword(ctx context.Context, adminID int64, passwordHash string) error
 	GetTenantByCode(ctx context.Context, code string) (Tenant, error)
 	GetTenantByID(ctx context.Context, id int64) (Tenant, error)
-	ListTenants(ctx context.Context) ([]Tenant, error)
+	ListAllTenants(ctx context.Context) ([]Tenant, error)
+	ListTenants(ctx context.Context, page, size int) ([]Tenant, int64, error)
 	CreateTenant(ctx context.Context, input CreateTenantInput) (Tenant, error)
 	UpdateTenantConfig(ctx context.Context, input UpdateTenantConfigInput) (Tenant, error)
 	UpdateTenantStatus(ctx context.Context, input UpdateTenantStatusInput) (Tenant, error)

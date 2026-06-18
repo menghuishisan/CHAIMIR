@@ -13,7 +13,7 @@ import (
 
 // progressTopic 生成租户内单沙箱进度主题,确保不同租户和沙箱不会串线。
 func progressTopic(tenantID, sandboxID int64) string {
-	return fmt.Sprintf("sandbox:%d:%d:progress", tenantID, sandboxID)
+	return fmt.Sprintf("tenant:%d:sandbox:%d:progress", tenantID, sandboxID)
 }
 
 // ProgressSubscription 校验沙箱归属并返回进度主题和当前快照。

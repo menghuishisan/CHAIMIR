@@ -10,6 +10,7 @@ import (
 	"chaimir/internal/platform/audit"
 	"chaimir/internal/platform/storage"
 	"chaimir/internal/platform/tenant"
+	"chaimir/internal/platform/upload"
 	"chaimir/pkg/apperr"
 	"chaimir/pkg/snowflake"
 )
@@ -39,6 +40,7 @@ type Service struct {
 	storage                   objectStorage
 	files                     fileService
 	contentAttachmentMaxBytes int64
+	attachmentScanPolicy      upload.ScanPolicy
 }
 
 // ServiceDeps 是 content service 的装配依赖集合。
@@ -49,6 +51,7 @@ type ServiceDeps struct {
 	Storage                   *storage.Storage
 	FileService               fileService
 	ContentAttachmentMaxBytes int64
+	AttachmentScanPolicy      upload.ScanPolicy
 }
 
 // NewService 构造 content 服务,不接收数据库连接,由装配层传入 Store。
@@ -71,7 +74,7 @@ func NewService(deps ServiceDeps) (*Service, error) {
 	if deps.ContentAttachmentMaxBytes <= 0 {
 		return nil, fmt.Errorf("content service 缺少附件大小配置")
 	}
-	return &Service{store: deps.Store, ids: deps.IDs, audit: deps.Audit, storage: deps.Storage, files: deps.FileService, contentAttachmentMaxBytes: deps.ContentAttachmentMaxBytes}, nil
+	return &Service{store: deps.Store, ids: deps.IDs, audit: deps.Audit, storage: deps.Storage, files: deps.FileService, contentAttachmentMaxBytes: deps.ContentAttachmentMaxBytes, attachmentScanPolicy: deps.AttachmentScanPolicy}, nil
 }
 
 // currentIdentity 读取租户账号身份。

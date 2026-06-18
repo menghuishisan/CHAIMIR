@@ -141,7 +141,7 @@ func (s *Service) GetProgress(ctx context.Context, instanceID int64) (ProgressDT
 	}); err != nil {
 		return ProgressDTO{}, err
 	}
-	return ProgressDTO{Topic: fmt.Sprintf("experiment:%d:%s", inst.ID, progressChannelName), Channel: progressChannelName}, nil
+	return ProgressDTO{Topic: fmt.Sprintf("tenant:%d:experiment:%d:%s", inst.TenantID, inst.ID, progressChannelName), Channel: progressChannelName}, nil
 }
 
 // PauseInstance 暂停实验实例并通知 M2 暂停已有沙箱。

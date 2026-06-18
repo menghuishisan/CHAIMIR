@@ -8,6 +8,7 @@ import (
 
 	"chaimir/internal/contracts"
 	"chaimir/internal/platform/ids"
+	"chaimir/internal/platform/pagex"
 	"chaimir/internal/platform/timex"
 	"chaimir/pkg/apperr"
 )
@@ -251,6 +252,7 @@ func (s *Service) ListLadder(ctx context.Context, contestID int64, page, size in
 	if err != nil {
 		return nil, 0, 0, 0, err
 	}
+	page, size = pagex.Normalize(page, size)
 	var ranks []LadderRank
 	var total int64
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {

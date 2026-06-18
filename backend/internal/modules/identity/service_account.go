@@ -14,10 +14,10 @@ import (
 )
 
 // ListAccountsByAdmin 分页读取租户账号列表并做手机号脱敏。
-func (s *Service) ListAccountsByAdmin(ctx context.Context, query AccountQuery) (AccountListResponse, error) {
+func (s *Service) ListAccountsByAdmin(ctx context.Context, query AccountQuery) ([]AccountDTO, int64, int, int, error) {
 	id, err := requireTenantRole(ctx, s, contracts.RoleSchoolAdmin)
 	if err != nil {
-		return AccountListResponse{}, err
+		return nil, 0, int(query.Page), int(query.Size), err
 	}
 	page, size := pagex.Normalize(int(query.Page), int(query.Size))
 	query.Page = int32(page)
@@ -33,17 +33,17 @@ func (s *Service) ListAccountsByAdmin(ctx context.Context, query AccountQuery) (
 		total = count
 		return nil
 	}); err != nil {
-		return AccountListResponse{}, apperr.ErrInternal.WithCause(err)
+		return nil, 0, page, size, apperr.ErrInternal.WithCause(err)
 	}
 	list := make([]AccountDTO, 0, len(rows))
 	for _, row := range rows {
 		phonePlain, err := s.decryptPhone(row.PhoneEnc)
 		if err != nil {
-			return AccountListResponse{}, apperr.ErrInternal.WithCause(err)
+			return nil, 0, page, size, apperr.ErrInternal.WithCause(err)
 		}
 		list = append(list, ToAccountDTO(row, phonePlain))
 	}
-	return AccountListResponse{List: list, Total: total, Page: query.Page, Size: query.Size}, nil
+	return list, total, page, size, nil
 }
 
 // CreateAccountByAdmin 由学校管理员创建单个师生账号。

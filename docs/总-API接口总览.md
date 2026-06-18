@@ -50,7 +50,7 @@
 补充:生产代码不得用同一错误码动态替换多种用户文案;新增场景应在对应段落补稳定错误码。`11503–11508` 只用于服务端装配依赖缺失,详细技术原因只进入日志。
 
 ### 6. 跨模块调用约定
-- 业务实时数据经 M10 `POST /notify/push` + 客户端订阅 `WS /ws`;topic 必须带租户前缀 `tenant:{tenant_id}:...`;引擎内部流(终端/仿真 stream)走各模块自有 WS。
+- 业务实时数据经 M10 `POST /notify/push` 或模块授权后的进度 WS 入口推送;topic 必须带租户前缀 `tenant:{tenant_id}:...`;引擎内部字节流(终端/仿真 stream)走各模块自有 WS。
 - 资源回收:M7/M8 调 M2 `/sandboxes/recycle`、M4 `/sessions/recycle`(按 source_ref)。
 - source_ref 格式:`<来源>:<年份>:<资源类型>:<id>`(全称,见总纲约定;M7 实例统一为 `experiment:<年份>:instance:<id>`)。
 
@@ -70,7 +70,7 @@
 ### 基础横切 transfer `/api/v1/transfer`
 - `GET /tasks`:查询当前账号导入/导出任务,支持 `channel`、`status`、分页过滤;平台管理员只访问 `tenant_id=0` 的平台任务,租户账号只访问本租户任务。
 - `GET /tasks/{id}`:读取当前账号、学校管理员或平台管理员可见的任务快照。
-- `POST /tasks/{id}/download-grant`:对已完成任务签发统一文件服务短时下载授权,平台任务和租户任务都必须走统一 storage 对象前缀校验。
+- `POST /tasks/{id}/download-grant`:对已完成任务签发统一文件服务短时下载授权,响应只暴露 `{ token, task, expires_at }`,平台任务和租户任务都必须走统一 storage 对象前缀校验。
 
 > transfer 只暴露通用任务状态和下载授权,不承载模块业务预览、业务结果或业务审批数据。模块导出接口应返回 transfer 任务快照,客户端下载文件需再走 download-grant,禁止模块接口直接返回对象存储直链或 base64 文件体。
 

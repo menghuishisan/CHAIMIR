@@ -2,9 +2,6 @@
 package sim
 
 import (
-	"bytes"
-	"encoding/json"
-	"io"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -236,16 +233,7 @@ func cleanManifestName(name string) string {
 // parseBundleManifest 强校验自描述协议,并提取后端运行时需要的最小白名单。
 func parseBundleManifest(raw []byte) (bundleManifest, []string) {
 	var doc simPackageManifest
-	dec := json.NewDecoder(bytes.NewReader(raw))
-	dec.DisallowUnknownFields()
-	if err := dec.Decode(&doc); err != nil {
-		return bundleManifest{}, []string{"manifest:invalid-json"}
-	}
-	var extra any
-	if err := dec.Decode(&extra); err != io.EOF {
-		if err == nil {
-			return bundleManifest{}, []string{"manifest:trailing-json"}
-		}
+	if err := jsonx.DecodeStrictKnownFields(raw, &doc); err != nil {
 		return bundleManifest{}, []string{"manifest:invalid-json"}
 	}
 	return buildBundleManifest(doc)
