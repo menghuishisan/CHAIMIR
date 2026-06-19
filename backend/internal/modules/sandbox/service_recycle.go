@@ -216,7 +216,7 @@ func (s *Service) drainSandboxRecycleOutboxBestEffort(ctx context.Context) {
 
 // shouldPersistBeforeRecycle 判断回收前是否必须保存工作区代码。
 func shouldPersistBeforeRecycle(sb Sandbox) bool {
-	return !(sb.Status == SandboxStatusFailed && sb.Phase == SandboxPhaseAllocating && sb.CodeHash == "")
+	return !(sb.Phase == SandboxPhaseAllocating && sb.CodeHash == "")
 }
 
 // lockRecycle 在任何资源清理前先把沙箱锁定为 recycling,保证失败后调度器可继续重试。

@@ -22,7 +22,7 @@ deploy/
 │   ├── backend/             后端单体 Deployment + Service
 │   ├── frontend/            前端 Nginx Deployment + Service
 │   ├── migrate/             迁移 + RLS 初始化 + seed Job
-│   ├── ingress/             Ingress(/ 前端、/api 后端、/ws Hub)
+│   ├── ingress/             Ingress(/ 前端、/api 后端与统一实时通道)
 │   ├── networkpolicy/       静态命名空间 deny-all + 精确放行;动态沙箱 deny-all 模板
 │   └── cronjobs/            每日备份;业务生命周期清理由各模块后台任务负责
 ├── components/middleware/   PG16/Redis7/NATS2.10/MinIO 单实例(overlay 按需 include)

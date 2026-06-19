@@ -191,6 +191,7 @@ func (i *infrastructure) close() {
 func newRouter(cfg *config.Config, infra *infrastructure) *gin.Engine {
 	r := gin.New()
 	r.Use(response.TraceMiddleware(), httpx.AuditContextMiddleware(), response.RecoveryMiddleware())
+	r.NoRoute(response.NoRoute)
 	r.GET("/api/healthz", func(c *gin.Context) {
 		response.OK(c, map[string]string{"status": "ok"})
 	})

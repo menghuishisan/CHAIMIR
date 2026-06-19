@@ -17,6 +17,11 @@ func ValidatePublicHTTPURL(raw string) (string, error) {
 	return validatePublicURL(raw, "HTTP", map[string]struct{}{"http": {}, "https": {}})
 }
 
+// ValidateLoopbackHTTPURL 校验本地验收 HTTP(S) 网关,只允许字面量 loopback IP。
+func ValidateLoopbackHTTPURL(raw string) (string, error) {
+	return validateLoopbackURL(raw, "HTTP", map[string]struct{}{"http": {}, "https": {}})
+}
+
 // ValidatePublicLDAPSURL 校验外部 LDAPS 端点,用于 SSO/LDAP 这类租户可配置的目录服务。
 func ValidatePublicLDAPSURL(raw string) (string, error) {
 	return validatePrivateCapableURL(raw, "LDAPS", map[string]struct{}{"ldaps": {}})
@@ -84,6 +89,14 @@ func NewPublicHTTPClient(timeout time.Duration) (*http.Client, error) {
 	return &http.Client{Timeout: timeout, Transport: PublicHTTPTransport(nil)}, nil
 }
 
+// NewLoopbackHTTPClient 创建仅允许 loopback 拨号的 HTTP client,用于本地验收模拟网关。
+func NewLoopbackHTTPClient(timeout time.Duration) (*http.Client, error) {
+	if timeout <= 0 {
+		return nil, fmt.Errorf("本地 HTTP client 超时必须大于 0")
+	}
+	return &http.Client{Timeout: timeout, Transport: LoopbackHTTPTransport(nil)}, nil
+}
+
 // PublicHTTPTransport 返回带出站地址防护的 HTTP Transport,防止 DNS 解析后落到内网地址。
 func PublicHTTPTransport(base *http.Transport) *http.Transport {
 	if base == nil {
@@ -99,6 +112,29 @@ func PublicHTTPTransport(base *http.Transport) *http.Transport {
 			return nil, fmt.Errorf("解析出站地址失败: %w", err)
 		}
 		dialAddress, err := publicDialAddress(ctx, host, port)
+		if err != nil {
+			return nil, err
+		}
+		return dialer.DialContext(ctx, network, dialAddress)
+	}
+	return base
+}
+
+// LoopbackHTTPTransport 返回只允许 loopback 目标的 Transport,防止本地验收开关扩大到私网。
+func LoopbackHTTPTransport(base *http.Transport) *http.Transport {
+	if base == nil {
+		base = http.DefaultTransport.(*http.Transport).Clone()
+	} else {
+		base = base.Clone()
+	}
+	base.Proxy = nil
+	dialer := &net.Dialer{}
+	base.DialContext = func(ctx context.Context, network, address string) (net.Conn, error) {
+		host, port, err := net.SplitHostPort(address)
+		if err != nil {
+			return nil, fmt.Errorf("解析本地出站地址失败: %w", err)
+		}
+		dialAddress, err := loopbackDialAddress(host, port)
 		if err != nil {
 			return nil, err
 		}
@@ -206,6 +242,41 @@ func validatePrivateCapableURL(raw, label string, schemes map[string]struct{}) (
 		}
 	}
 	return parsed.String(), nil
+}
+
+// validateLoopbackURL 校验本地验收端点,拒绝主机名和非 loopback 地址。
+func validateLoopbackURL(raw, label string, schemes map[string]struct{}) (string, error) {
+	parsed, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		return "", fmt.Errorf("本地%s端点 URL 格式非法", label)
+	}
+	parsed.Scheme = strings.ToLower(parsed.Scheme)
+	if _, ok := schemes[parsed.Scheme]; !ok {
+		return "", fmt.Errorf("本地%s端点协议不允许", label)
+	}
+	if parsed.User != nil {
+		return "", fmt.Errorf("本地%s端点不允许携带凭据", label)
+	}
+	host := parsed.Hostname()
+	addr, err := netip.ParseAddr(host)
+	if err != nil || !addr.IsLoopback() {
+		return "", fmt.Errorf("本地%s端点只允许 loopback IP", label)
+	}
+	if parsed.Port() == "" {
+		parsed.Host = addr.String()
+	} else {
+		parsed.Host = net.JoinHostPort(addr.String(), parsed.Port())
+	}
+	return parsed.String(), nil
+}
+
+// loopbackDialAddress 校验运行时拨号目标仍为 loopback 地址。
+func loopbackDialAddress(host, port string) (string, error) {
+	addr, err := netip.ParseAddr(host)
+	if err != nil || !addr.IsLoopback() {
+		return "", fmt.Errorf("本地端点只允许 loopback IP")
+	}
+	return net.JoinHostPort(addr.String(), port), nil
 }
 
 // privateCapableDialAddress 解析允许私网的受控目标,仅禁止本机和未解析结果。

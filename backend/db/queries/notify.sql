@@ -8,7 +8,7 @@ SELECT id, type, title_tpl, content_tpl, channels, force, created_at, updated_at
 FROM notification_template
 ORDER BY type;
 
--- name: CreateNotifications :copyfrom
+-- name: CreateNotification :exec
 INSERT INTO notification (id, tenant_id, receiver_id, type, title, content, link, is_read, created_at)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9);
 

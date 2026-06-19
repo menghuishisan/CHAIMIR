@@ -53,6 +53,16 @@ func WithServiceSourceRef(ctx context.Context, sourceRef string) context.Context
 	return context.WithValue(ctx, serviceSourceRefKey{}, sourceRef)
 }
 
+// WithServiceIdentity 为进程内跨模块契约调用建立系统服务身份边界。
+func WithServiceIdentity(ctx context.Context, tenantID int64, sourceRef string) (context.Context, error) {
+	sourceRef = strings.TrimSpace(sourceRef)
+	if tenantID <= 0 || !ValidSourceRef(sourceRef) {
+		return nil, apperr.ErrServiceUnauthorized
+	}
+	ctx = tenant.WithContext(ctx, tenant.Identity{TenantID: tenantID, IsSystem: true})
+	return WithServiceSourceRef(ctx, sourceRef), nil
+}
+
 // ServiceSourceRefAuthorized 检查当前上下文是否允许访问目标来源;普通用户上下文不受此限制。
 func ServiceSourceRefAuthorized(ctx context.Context, sourceRef string) bool {
 	signedSourceRef, ok := ServiceSourceRefFromContext(ctx)
@@ -383,8 +393,12 @@ func (m *Manager) injectServiceIdentity(c *gin.Context) bool {
 		return false
 	}
 
-	ctx := tenant.WithContext(c.Request.Context(), tenant.Identity{TenantID: tenantID, IsSystem: true})
-	ctx = WithServiceSourceRef(ctx, sourceRef)
+	ctx, err := WithServiceIdentity(c.Request.Context(), tenantID, sourceRef)
+	if err != nil {
+		response.Fail(c, err)
+		c.Abort()
+		return false
+	}
 	ctx = logging.WithAttrs(ctx,
 		slog.Int64("tenant_id", tenantID),
 		slog.String("service", service),

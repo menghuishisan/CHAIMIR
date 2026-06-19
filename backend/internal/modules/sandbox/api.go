@@ -100,7 +100,7 @@ func (a sandboxAPI) registerUserRoutes(g gin.IRouter) {
 	g.GET("/sandboxes/:id/files", a.getFiles)
 	g.PUT("/sandboxes/:id/files", a.writeFile)
 	g.POST("/sandboxes/:id/files/save", a.saveFiles)
-	g.Any("/sandboxes/:id/tools/:tool_code/*proxy_path", a.toolProxy)
+	g.Match([]string{http.MethodGet, http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete, http.MethodHead, http.MethodOptions}, "/sandboxes/:id/tools/:tool_code/*proxy_path", a.toolProxy)
 }
 
 // registerQuotaRoutes 注册配额查询和调整接口。

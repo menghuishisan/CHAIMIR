@@ -15,7 +15,7 @@ type Querier interface {
 	CountNotifications(ctx context.Context, arg CountNotificationsParams) (int64, error)
 	CountUnreadNotifications(ctx context.Context, receiverID int64) (int64, error)
 	CreateAnnouncement(ctx context.Context, arg CreateAnnouncementParams) (SystemAnnouncement, error)
-	CreateNotifications(ctx context.Context, arg []CreateNotificationsParams) (int64, error)
+	CreateNotification(ctx context.Context, arg CreateNotificationParams) error
 	DeleteExpiredNotifications(ctx context.Context, createdAt pgtype.Timestamptz) error
 	DeleteNotification(ctx context.Context, arg DeleteNotificationParams) (Notification, error)
 	GetNotificationTemplate(ctx context.Context, type_ string) (NotificationTemplate, error)

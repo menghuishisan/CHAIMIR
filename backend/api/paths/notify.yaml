@@ -85,7 +85,7 @@
     security: [{ bearerAuth: [] }]
     parameters: [{ $ref: "#/components/parameters/IDPath" }]
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
-/ws:
+/api/ws:
   get:
     tags: [notify]
     summary: 统一实时通道 WebSocket

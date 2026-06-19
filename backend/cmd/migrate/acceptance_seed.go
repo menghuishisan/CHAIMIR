@@ -33,11 +33,17 @@ type acceptanceSeedIDs struct {
 	StudentA           int64
 	StudentB           int64
 	StudentC           int64
+	AuthSession        int64
 	Runtime            int64
 	RuntimeImage       int64
 	ToolVSCode         int64
 	ToolExplorer       int64
+	Sandbox            int64
+	SandboxTool        int64
+	SandboxEvent       int64
 	Judger             int64
+	JudgeTask          int64
+	JudgeResult        int64
 	SimPackage         int64
 	ContentCat         int64
 	ContentLab         int64
@@ -94,6 +100,7 @@ type acceptanceSeedIDs struct {
 	AlertEvent         int64
 	Statistics         int64
 	BackupRecord       int64
+	TransferTask       int64
 	AuditEntry         int64
 }
 
@@ -101,9 +108,10 @@ var acceptanceIDs = acceptanceSeedIDs{
 	TenantID: 910000000000000001, DepartmentCS: 910000000000000011, DepartmentSec: 910000000000000012,
 	MajorChain: 910000000000000021, MajorSecurity: 910000000000000022, ClassChain: 910000000000000031, ClassSecurity: 910000000000000032,
 	SchoolAdmin: 910000000000000101, TeacherMain: 910000000000000102, TeacherAssist: 910000000000000103,
-	StudentA: 910000000000000201, StudentB: 910000000000000202, StudentC: 910000000000000203,
+	StudentA: 910000000000000201, StudentB: 910000000000000202, StudentC: 910000000000000203, AuthSession: 910000000000000301,
 	Runtime: 910000000000001001, RuntimeImage: 910000000000001002, ToolVSCode: 910000000000001011, ToolExplorer: 910000000000001012,
-	Judger: 910000000000002001, SimPackage: 910000000000003001,
+	Sandbox: 910000000000001021, SandboxTool: 910000000000001022, SandboxEvent: 910000000000001023,
+	Judger: 910000000000002001, JudgeTask: 910000000000002011, JudgeResult: 910000000000002012, SimPackage: 910000000000003001,
 	ContentCat: 910000000000004001, ContentLab: 910000000000004011, ContentContest: 910000000000004012, ContentTheory: 910000000000004013, Paper: 910000000000004021,
 	Course: 910000000000005001, ChapterIntro: 910000000000005011, ChapterLab: 910000000000005012, LessonIntro: 910000000000005021, LessonLab: 910000000000005022,
 	Assignment: 910000000000005031, AssignmentItem: 910000000000005032, SubmissionA: 910000000000005041, DraftB: 910000000000005042, ProgressA: 910000000000005043,
@@ -117,7 +125,8 @@ var acceptanceIDs = acceptanceSeedIDs{
 	GradeLevel: 910000000000011001, Semester: 910000000000011002, GradeReview: 910000000000011003, GradeAppeal: 910000000000011004,
 	AcademicWarning: 910000000000011005, Transcript: 910000000000011006,
 	SystemConfig: 910000000000012001, AlertRule: 910000000000012002, AlertEvent: 910000000000012003, Statistics: 910000000000012004, BackupRecord: 910000000000012005,
-	AuditEntry: 910000000000099001,
+	TransferTask: 910000000000013001,
+	AuditEntry:   910000000000099001,
 }
 
 type acceptanceAccount struct {
@@ -228,7 +237,7 @@ func seedAcceptanceAccounts(ctx context.Context, database *db.DB, initialPasswor
 			return err
 		}
 	}
-	return nil
+	return seedAcceptanceAuthSession(ctx, database)
 }
 
 // ensureAcceptanceAccount 幂等写入单个账号、角色和组织档案。
@@ -256,7 +265,7 @@ ON CONFLICT (id) DO UPDATE SET phone_enc=EXCLUDED.phone_enc, phone_hash=EXCLUDED
 			return err
 		}
 		for i, role := range account.Roles {
-			if err := upsertAccountRole(ctx, tx, account.ID, role, account.ID+int64(10+i)); err != nil {
+			if err := upsertAccountRole(ctx, tx, account.ID, role, acceptanceRoleID(account.ID, i)); err != nil {
 				return err
 			}
 		}
@@ -267,6 +276,27 @@ ON CONFLICT (account_id) DO UPDATE SET no=EXCLUDED.no, org_id=EXCLUDED.org_id, e
 			account.ID, acceptanceIDs.TenantID, account.No, account.OrgID, nullInt16(account.EnrollmentYear), account.Title)
 		return err
 	})
+}
+
+// seedAcceptanceAuthSession 写入一条已吊销会话,用于会话列表和非法 Refresh 测试。
+func seedAcceptanceAuthSession(ctx context.Context, database *db.DB) error {
+	refreshHash, err := crypto.HMACHash([]byte(osEnv("APP_HMAC_KEY")), "acceptance-revoked-refresh-token")
+	if err != nil {
+		return err
+	}
+	return database.WithTenantTxID(ctx, acceptanceIDs.TenantID, func(ctx context.Context, tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `
+INSERT INTO auth_session (id, tenant_id, account_id, refresh_token_hash, device_info, ip, status, expire_at)
+VALUES ($1,$2,$3,$4,'acceptance-seed-revoked','127.0.0.1',2,now() - interval '1 hour')
+ON CONFLICT (id) DO UPDATE SET refresh_token_hash=EXCLUDED.refresh_token_hash, device_info=EXCLUDED.device_info, ip=EXCLUDED.ip, status=EXCLUDED.status, expire_at=EXCLUDED.expire_at`,
+			acceptanceIDs.AuthSession, acceptanceIDs.TenantID, acceptanceIDs.StudentA, refreshHash)
+		return err
+	})
+}
+
+// acceptanceRoleID 按账号固定 ID 派生角色行 ID,避免相邻账号之间发生主键碰撞。
+func acceptanceRoleID(accountID int64, index int) int64 {
+	return accountID*10 + int64(index+1)
 }
 
 // seedAcceptanceBusiness 写入跨模块验收业务数据。
@@ -282,6 +312,7 @@ func seedAcceptanceBusiness(ctx context.Context, database *db.DB) error {
 			seedNotifyRows,
 			seedGradeRows,
 			seedAdminRows,
+			seedTransferRows,
 			seedAuditRows,
 		} {
 			if err := fn(ctx, tx); err != nil {

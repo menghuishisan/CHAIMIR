@@ -185,7 +185,11 @@ BEGIN
 END $$;`); err != nil {
 		return fmt.Errorf("创建应用角色失败: %w", err)
 	}
-	if _, err := sqlDB.ExecContext(grantCtx, "ALTER ROLE chaimir_app WITH PASSWORD $1", pg.Password); err != nil {
+	passwordLiteral, err := quoteRolePasswordLiteral(grantCtx, sqlDB, pg.Password)
+	if err != nil {
+		return err
+	}
+	if _, err := sqlDB.ExecContext(grantCtx, "ALTER ROLE chaimir_app WITH PASSWORD "+passwordLiteral); err != nil {
 		return fmt.Errorf("更新应用角色密码失败: %w", err)
 	}
 	statements := []string{
@@ -202,6 +206,18 @@ END $$;`); err != nil {
 		}
 	}
 	return nil
+}
+
+// quoteRolePasswordLiteral 使用 PostgreSQL 自身的字面量转义规则生成角色密码片段。
+func quoteRolePasswordLiteral(ctx context.Context, db *sql.DB, password string) (string, error) {
+	var literal string
+	if err := db.QueryRowContext(ctx, "SELECT quote_literal($1)", password).Scan(&literal); err != nil {
+		return "", fmt.Errorf("转义应用角色密码失败: %w", err)
+	}
+	if strings.TrimSpace(literal) == "" {
+		return "", fmt.Errorf("转义应用角色密码结果为空")
+	}
+	return literal, nil
 }
 
 // seed 执行依赖业务规则的初始化动作,不在 cmd 中复制模块业务逻辑。

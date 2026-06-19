@@ -94,6 +94,7 @@ type NATSConfig struct {
 	ReconnectWaitSeconds int
 	ConsumerRetryMax     int
 	ConsumerRetryDelayMs int
+	FlushTimeoutMs       int
 	DeadLetterPrefix     string
 }
 
@@ -155,13 +156,14 @@ type IdentityConfig struct {
 
 // SMSConfig 描述短信网关接入边界。
 type SMSConfig struct {
-	Provider       string
-	Endpoint       string
-	Token          string
-	LoginTemplate  string
-	ResetTemplate  string
-	ChangeTemplate string
-	TimeoutSeconds int
+	Provider              string
+	Endpoint              string
+	Token                 string
+	LoginTemplate         string
+	ResetTemplate         string
+	ChangeTemplate        string
+	TimeoutSeconds        int
+	AllowLoopbackEndpoint bool
 }
 
 // UploadConfig 描述统一上传边界。
@@ -406,6 +408,21 @@ func Load() (*Config, error) {
 			return false
 		}
 	}
+	optBool := func(key string) bool {
+		v := strings.TrimSpace(os.Getenv(key))
+		if v == "" {
+			return false
+		}
+		switch strings.ToLower(v) {
+		case "true", "1", "yes", "y", "on":
+			return true
+		case "false", "0", "no", "n", "off":
+			return false
+		default:
+			errs = append(errs, fmt.Sprintf("环境变量 %s 需为布尔值,实际=%q", key, os.Getenv(key)))
+			return false
+		}
+	}
 
 	// 第二步:按配置域分组装载环境变量,保持 deploy/server/db/... 的职责边界清晰。
 	c.Deploy = DeployConfig{
@@ -455,6 +472,7 @@ func Load() (*Config, error) {
 		ReconnectWaitSeconds: reqInt("NATS_RECONNECT_WAIT_SECONDS"),
 		ConsumerRetryMax:     reqInt("NATS_CONSUMER_RETRY_MAX"),
 		ConsumerRetryDelayMs: reqInt("NATS_CONSUMER_RETRY_DELAY_MS"),
+		FlushTimeoutMs:       reqInt("NATS_FLUSH_TIMEOUT_MS"),
 		DeadLetterPrefix:     req("NATS_DEAD_LETTER_PREFIX"),
 	}
 	c.MinIO = MinIOConfig{
@@ -506,13 +524,14 @@ func Load() (*Config, error) {
 		ImportPreviewTTLHours:    reqInt("IDENTITY_IMPORT_PREVIEW_TTL_HOURS"),
 	}
 	c.SMS = SMSConfig{
-		Provider:       req("SMS_PROVIDER"),
-		Endpoint:       os.Getenv("SMS_HTTP_ENDPOINT"),
-		Token:          os.Getenv("SMS_HTTP_TOKEN"),
-		LoginTemplate:  os.Getenv("SMS_TEMPLATE_LOGIN"),
-		ResetTemplate:  os.Getenv("SMS_TEMPLATE_RESET"),
-		ChangeTemplate: os.Getenv("SMS_TEMPLATE_CHANGE_PHONE"),
-		TimeoutSeconds: reqInt("SMS_TIMEOUT_SECONDS"),
+		Provider:              req("SMS_PROVIDER"),
+		Endpoint:              os.Getenv("SMS_HTTP_ENDPOINT"),
+		Token:                 os.Getenv("SMS_HTTP_TOKEN"),
+		LoginTemplate:         os.Getenv("SMS_TEMPLATE_LOGIN"),
+		ResetTemplate:         os.Getenv("SMS_TEMPLATE_RESET"),
+		ChangeTemplate:        os.Getenv("SMS_TEMPLATE_CHANGE_PHONE"),
+		TimeoutSeconds:        reqInt("SMS_TIMEOUT_SECONDS"),
+		AllowLoopbackEndpoint: optBool("SMS_HTTP_ALLOW_LOOPBACK"),
 	}
 	c.Upload = UploadConfig{
 		ImportMaxBytes:              reqInt64("UPLOAD_IMPORT_MAX_BYTES"),
@@ -699,6 +718,9 @@ func Load() (*Config, error) {
 	}
 	if c.NATS.ConsumerRetryDelayMs <= 0 {
 		errs = append(errs, "NATS_CONSUMER_RETRY_DELAY_MS 必须大于 0")
+	}
+	if c.NATS.FlushTimeoutMs <= 0 {
+		errs = append(errs, "NATS_FLUSH_TIMEOUT_MS 必须大于 0")
 	}
 	if strings.TrimSpace(c.NATS.DeadLetterPrefix) == "" {
 		errs = append(errs, "NATS_DEAD_LETTER_PREFIX 不能为空")
@@ -986,6 +1008,9 @@ func Load() (*Config, error) {
 	if c.SMS.TimeoutSeconds <= 0 {
 		errs = append(errs, "SMS_TIMEOUT_SECONDS 必须大于 0")
 	}
+	if c.SMS.AllowLoopbackEndpoint && !isLocalLikeEnv(c.Server.AppEnv) {
+		errs = append(errs, "SMS_HTTP_ALLOW_LOOPBACK 只能在 APP_ENV=local/dev/test 时开启")
+	}
 	switch strings.ToLower(strings.TrimSpace(c.SMS.Provider)) {
 	case "http":
 		if strings.TrimSpace(c.SMS.Endpoint) == "" || strings.TrimSpace(c.SMS.Token) == "" {
@@ -1016,6 +1041,16 @@ func Load() (*Config, error) {
 func validOrigin(raw string) bool {
 	u, err := url.Parse(strings.TrimSpace(raw))
 	return err == nil && u.Scheme != "" && u.Host != "" && u.Path == "" && u.RawQuery == "" && u.Fragment == ""
+}
+
+// isLocalLikeEnv 判断配置是否处于本地或测试环境,用于限制验收专用能力。
+func isLocalLikeEnv(appEnv string) bool {
+	switch strings.ToLower(strings.TrimSpace(appEnv)) {
+	case "local", "dev", "development", "test":
+		return true
+	default:
+		return false
+	}
 }
 
 // readSandboxImageAttestations 解析镜像证明 JSON 数组,并校验证明字段完整性。

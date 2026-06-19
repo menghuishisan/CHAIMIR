@@ -549,8 +549,8 @@ paths:
     $ref: './paths/notify.yaml#/api/v1/notify/announcements'
   /api/v1/notify/announcements/{id}/read:
     $ref: './paths/notify.yaml#/api/v1/notify/announcements/{id}/read'
-  /ws:
-    $ref: './paths/notify.yaml#/ws'
+  /api/ws:
+    $ref: './paths/notify.yaml#/api/ws'
   /api/v1/notify/send:
     $ref: './paths/notify.yaml#/api/v1/notify/send'
   /api/v1/notify/push:

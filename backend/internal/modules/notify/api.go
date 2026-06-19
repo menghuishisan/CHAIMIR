@@ -31,7 +31,7 @@ func RegisterRoutes(r gin.IRouter, svc *Service, authn *auth.Manager, roles cont
 	user.PUT("/preferences", api.upsertPreference)
 	user.GET("/announcements", api.listAnnouncements)
 	user.POST("/announcements/:id/read", api.markAnnouncementRead)
-	r.GET("/ws", authn.WebSocketMiddleware(), auth.RequireTenantAnyRole(roles, contracts.RoleStudent, contracts.RoleTeacher, contracts.RoleSchoolAdmin), api.websocket)
+	r.GET("/api/ws", authn.WebSocketMiddleware(), auth.RequireTenantAnyRole(roles, contracts.RoleStudent, contracts.RoleTeacher, contracts.RoleSchoolAdmin), api.websocket)
 	admin.POST("/announcements", api.createAnnouncement)
 	internal.POST("/send", api.send)
 	internal.POST("/push", api.push)

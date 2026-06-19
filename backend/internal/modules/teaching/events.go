@@ -4,8 +4,10 @@ package teaching
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"chaimir/internal/contracts"
+	"chaimir/internal/platform/auth"
 	"chaimir/internal/platform/eventbus"
 	"chaimir/pkg/apperr"
 )
@@ -50,6 +52,12 @@ func handleJudgeCompletedEvent(svc *Service) eventbus.Handler {
 		if err := eventbus.Decode(data, &event, apperr.ErrTeachingSubmissionInvalid); err != nil {
 			return err
 		}
+		if !auth.ValidSourceRef(event.SourceRef) {
+			return apperr.ErrTeachingSubmissionInvalid
+		}
+		if !strings.HasPrefix(strings.TrimSpace(event.SourceRef), "teaching:") {
+			return nil
+		}
 		return svc.HandleJudgeCompleted(ctx, event)
 	}
 }
@@ -60,6 +68,12 @@ func handleJudgeFailedEvent(svc *Service) eventbus.Handler {
 		var event contracts.JudgeFailedEvent
 		if err := eventbus.Decode(data, &event, apperr.ErrTeachingSubmissionInvalid); err != nil {
 			return err
+		}
+		if !auth.ValidSourceRef(event.SourceRef) {
+			return apperr.ErrTeachingSubmissionInvalid
+		}
+		if !strings.HasPrefix(strings.TrimSpace(event.SourceRef), "teaching:") {
+			return nil
 		}
 		return svc.HandleJudgeFailed(ctx, event)
 	}

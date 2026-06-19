@@ -30,7 +30,16 @@ type HTTPSMSSender struct {
 
 // NewSMSSender 根据统一配置创建短信发送器,启动期显式校验 HTTP 出站客户端边界。
 func NewSMSSender(cfg config.SMSConfig) (SMSSender, error) {
-	client, err := netx.NewPublicHTTPClient(time.Duration(cfg.TimeoutSeconds) * time.Second)
+	timeout := time.Duration(cfg.TimeoutSeconds) * time.Second
+	var (
+		client *http.Client
+		err    error
+	)
+	if cfg.AllowLoopbackEndpoint {
+		client, err = netx.NewLoopbackHTTPClient(timeout)
+	} else {
+		client, err = netx.NewPublicHTTPClient(timeout)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("创建短信 HTTP 客户端失败: %w", err)
 	}
@@ -52,7 +61,15 @@ func (s *HTTPSMSSender) sendHTTP(ctx context.Context, phone string, scene int16,
 	if strings.TrimSpace(s.cfg.Endpoint) == "" || strings.TrimSpace(s.cfg.Token) == "" {
 		return fmt.Errorf("短信 HTTP 网关配置不完整")
 	}
-	endpoint, err := netx.ValidatePublicHTTPURL(s.cfg.Endpoint)
+	var (
+		endpoint string
+		err      error
+	)
+	if s.cfg.AllowLoopbackEndpoint {
+		endpoint, err = netx.ValidateLoopbackHTTPURL(s.cfg.Endpoint)
+	} else {
+		endpoint, err = netx.ValidatePublicHTTPURL(s.cfg.Endpoint)
+	}
 	if err != nil {
 		return fmt.Errorf("短信 HTTP 网关地址不安全: %w", err)
 	}

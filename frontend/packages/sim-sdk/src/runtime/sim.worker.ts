@@ -81,10 +81,17 @@ async function init(request: Extract<WorkerRequest, { type: 'init' }>): Promise<
   postToMain({ type: 'ready', requestId: request.requestId, descriptor, snapshot: snapshot() });
 }
 
-function ensureReady(): asserts simPackage is SimPackage {
+// ensureReady 统一校验 worker 是否完成初始化,供只需要状态校验的消息分支使用。
+function ensureReady(): void {
+  void readyPackage();
+}
+
+// readyPackage 返回已初始化的仿真包,让后续状态机逻辑获得明确的类型收窄结果。
+function readyPackage(): SimPackage {
   if (!simPackage || !descriptor) {
     throw new Error('sim worker not initialized');
   }
+  return simPackage;
 }
 
 function currentState(): SimState {
@@ -95,15 +102,15 @@ function currentState(): SimState {
 }
 
 function resetState(): void {
-  ensureReady();
+  const pkg = readyPackage();
   tick = 0;
   seq = 1;
   events = [];
-  state = simPackage.initState(initParams, seed);
+  state = pkg.initState(initParams, seed);
 }
 
 function applyEvent(eventInput: Omit<SimEvent, 'seq' | 'atTick'>): void {
-  ensureReady();
+  const pkg = readyPackage();
   const previousState = currentState();
   enforceEventLimit(eventInput);
   const event: SimEvent = { ...eventInput, atTick: tick, seq };
@@ -111,9 +118,9 @@ function applyEvent(eventInput: Omit<SimEvent, 'seq' | 'atTick'>): void {
     seed,
     tick,
     seq,
-    random: new XorShiftRandom(hashSeed(seed, `${simPackage.meta.code}:${tick}:${seq}`)),
+    random: new XorShiftRandom(hashSeed(seed, `${pkg.meta.code}:${tick}:${seq}`)),
   };
-  state = simPackage.reducer(previousState, event, context);
+  state = pkg.reducer(previousState, event, context);
   seq += 1;
   if (event.source === 'tick') {
     tick += 1;
@@ -122,19 +129,19 @@ function applyEvent(eventInput: Omit<SimEvent, 'seq' | 'atTick'>): void {
 }
 
 function replay(nextEvents: SimEvent[]): void {
-  ensureReady();
+  const pkg = readyPackage();
   tick = 0;
   seq = 1;
   events = [];
-  let replayState = simPackage.initState(initParams, seed);
+  let replayState = pkg.initState(initParams, seed);
   for (const event of nextEvents) {
     const context: ReducerContext = {
       seed,
       tick: event.atTick,
       seq: event.seq,
-      random: new XorShiftRandom(hashSeed(seed, `${simPackage.meta.code}:${event.atTick}:${event.seq}`)),
+      random: new XorShiftRandom(hashSeed(seed, `${pkg.meta.code}:${event.atTick}:${event.seq}`)),
     };
-    replayState = simPackage.reducer(replayState, event, context);
+    replayState = pkg.reducer(replayState, event, context);
     tick = event.source === 'tick' ? event.atTick + 1 : event.atTick;
     seq = event.seq + 1;
     events.push(event);
@@ -143,17 +150,17 @@ function replay(nextEvents: SimEvent[]): void {
 }
 
 function snapshot(): RuntimeSnapshot {
-  ensureReady();
+  const pkg = readyPackage();
   const current = currentState();
   const currentStep = currentNarrativeStep();
-  const view = simPackage.render(current);
+  const view = pkg.render(current);
   enforceViewLimit(view);
   const checkpointResults: RuntimeSnapshot['checkpointResults'] = {};
-  for (const checkpoint of simPackage.checkpoints ?? []) {
+  for (const checkpoint of pkg.checkpoints ?? []) {
     checkpointResults[checkpoint.id] = checkpoint.evaluate(current);
   }
   const interactionAvailability: Record<string, boolean> = {};
-  for (const interaction of simPackage.interactions) {
+  for (const interaction of pkg.interactions) {
     interactionAvailability[interaction.id] = interaction.availableWhen ? interaction.availableWhen(current) : true;
   }
   return {
@@ -172,9 +179,9 @@ function postSnapshot(requestId: number, event?: SimEvent): void {
 }
 
 function currentNarrativeStep(): NarrativeStepDescriptor | undefined {
-  ensureReady();
+  const pkg = readyPackage();
   const current = currentState();
-  const steps = simPackage.narrative ?? [];
+  const steps = pkg.narrative ?? [];
   const matched = steps.find((step) => step.trigger(current));
   return stripNarrativeStep(matched ?? steps[0]);
 }
@@ -189,7 +196,7 @@ function describePackage(pkg: SimPackage): SimPackageDescriptor {
   };
 }
 
-function stripNarrativeStep(step?: SimPackage['narrative'][number]): NarrativeStepDescriptor | undefined {
+function stripNarrativeStep(step?: NonNullable<SimPackage['narrative']>[number]): NarrativeStepDescriptor | undefined {
   if (!step) {
     return undefined;
   }
@@ -232,18 +239,18 @@ function assertPackage(pkg: SimPackage | undefined): asserts pkg is SimPackage {
 }
 
 function enforceEventLimit(eventInput: Omit<SimEvent, 'seq' | 'atTick'>): void {
-  ensureReady();
-  if (eventInput.source === 'tick' && tick >= simPackage.meta.scaleLimit.maxTick) {
+  const pkg = readyPackage();
+  if (eventInput.source === 'tick' && tick >= pkg.meta.scaleLimit.maxTick) {
     throw new Error('sim package tick limit exceeded');
   }
-  if (events.length >= simPackage.meta.scaleLimit.maxEvents) {
+  if (events.length >= pkg.meta.scaleLimit.maxEvents) {
     throw new Error('sim package event limit exceeded');
   }
 }
 
 function enforceViewLimit(view: ViewSpec): void {
-  ensureReady();
-  if (countRenderableNodes(view) > simPackage.meta.scaleLimit.nodes) {
+  const pkg = readyPackage();
+  if (countRenderableNodes(view) > pkg.meta.scaleLimit.nodes) {
     throw new Error('sim package node limit exceeded');
   }
 }

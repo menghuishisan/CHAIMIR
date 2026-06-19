@@ -138,7 +138,7 @@
 ### M10 通知与实时推送 `/api/v1/notify`
 - `/send` `[内部]`:统一通知发送。
 - `/push` `[内部]`:实时推送到带租户前缀的 topic。
-- `WS /ws`:统一实时通道(订阅 topic)。
+- `WS /api/ws`:统一实时通道(订阅 topic)。
 - `/inbox/*`、`/preferences`:站内信/偏好 `[用户]`。
 - `/announcements/*`:系统公告。
 

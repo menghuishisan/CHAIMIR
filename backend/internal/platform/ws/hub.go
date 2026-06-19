@@ -145,6 +145,9 @@ func (h *Hub) Serve(w http.ResponseWriter, r *http.Request, subscribe func(c *Co
 	if subscribe == nil {
 		return fmt.Errorf("WebSocket 订阅回调不能为空")
 	}
+	if !websocket.IsWebSocketUpgrade(r) {
+		return fmt.Errorf("WebSocket 协议升级请求不完整")
+	}
 	upgrader := h.upgrader()
 	socket, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
@@ -181,6 +184,9 @@ func (h *Hub) ServeInteractive(w http.ResponseWriter, r *http.Request, handle fu
 	}
 	if handle == nil {
 		return fmt.Errorf("WebSocket 处理回调不能为空")
+	}
+	if !websocket.IsWebSocketUpgrade(r) {
+		return fmt.Errorf("WebSocket 协议升级请求不完整")
 	}
 	upgrader := h.upgrader()
 	socket, err := upgrader.Upgrade(w, r, nil)

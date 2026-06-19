@@ -862,7 +862,9 @@ func (s *Service) cleanupAfterStartFailure(ctx context.Context, sb Sandbox) {
 
 // markStartFailed 记录启动失败,并避免把未完成资源伪装成 ready。
 func (s *Service) markStartFailed(ctx context.Context, sb Sandbox, cause error) {
-	if err := s.store.TenantTx(ctx, sb.TenantID, func(ctx context.Context, tx TxStore) error {
+	persistCtx, cancel := failurePersistenceContext(ctx, timeDurationSeconds(s.cfg.ReadyTimeoutSeconds))
+	defer cancel()
+	if err := s.store.TenantTx(persistCtx, sb.TenantID, func(ctx context.Context, tx TxStore) error {
 		_, err := tx.UpdateSandboxPhaseStatus(ctx, sb.TenantID, sb.ID, sb.Phase, SandboxStatusFailed)
 		if err != nil {
 			return apperr.ErrSandboxStatePersistFailed.WithCause(err)
@@ -876,7 +878,7 @@ func (s *Service) markStartFailed(ctx context.Context, sb Sandbox, cause error) 
 		}
 		return nil
 	}); err != nil {
-		logging.ErrorContext(ctx, "sandbox start failure mark failed", apperr.AsAppError(err).LogString(), slog.Int64("tenant_id", sb.TenantID), slog.Int64("sandbox_id", sb.ID))
+		logging.ErrorContext(persistCtx, "sandbox start failure mark failed", apperr.AsAppError(err).LogString(), slog.Int64("tenant_id", sb.TenantID), slog.Int64("sandbox_id", sb.ID))
 	}
 	s.broadcastProgress(ctx, sb.TenantID, sb.ID, sb.Phase, SandboxStatusFailed, response.TraceFromContext(ctx))
 	logging.ErrorContext(ctx, "sandbox start failed", cause.Error(), slog.Int64("tenant_id", sb.TenantID), slog.Int64("sandbox_id", sb.ID))
@@ -884,7 +886,9 @@ func (s *Service) markStartFailed(ctx context.Context, sb Sandbox, cause error) 
 
 // markInitFailed 记录阶段二个性化初始化失败,保留阶段一可进入状态供用户继续查看和修复。
 func (s *Service) markInitFailed(ctx context.Context, sb Sandbox, cause error) {
-	if err := s.store.TenantTx(ctx, sb.TenantID, func(ctx context.Context, tx TxStore) error {
+	persistCtx, cancel := failurePersistenceContext(ctx, timeDurationSeconds(s.cfg.ReadyTimeoutSeconds))
+	defer cancel()
+	if err := s.store.TenantTx(persistCtx, sb.TenantID, func(ctx context.Context, tx TxStore) error {
 		if _, err := tx.UpdateSandboxPhaseStatus(ctx, sb.TenantID, sb.ID, SandboxPhaseInitializing, SandboxStatusRunning); err != nil {
 			return apperr.ErrSandboxStatePersistFailed.WithCause(err)
 		}
@@ -897,10 +901,19 @@ func (s *Service) markInitFailed(ctx context.Context, sb Sandbox, cause error) {
 		}
 		return nil
 	}); err != nil {
-		logging.ErrorContext(ctx, "sandbox init failure mark failed", apperr.AsAppError(err).LogString(), slog.Int64("tenant_id", sb.TenantID), slog.Int64("sandbox_id", sb.ID))
+		logging.ErrorContext(persistCtx, "sandbox init failure mark failed", apperr.AsAppError(err).LogString(), slog.Int64("tenant_id", sb.TenantID), slog.Int64("sandbox_id", sb.ID))
 	}
 	s.broadcastProgress(ctx, sb.TenantID, sb.ID, SandboxPhaseInitializing, SandboxStatusRunning, response.TraceFromContext(ctx))
 	logging.ErrorContext(ctx, "sandbox init failed", cause.Error(), slog.Int64("tenant_id", sb.TenantID), slog.Int64("sandbox_id", sb.ID))
+}
+
+// failurePersistenceContext 为异步失败状态回写创建独立有界上下文,保留 trace/tenant 日志属性。
+func failurePersistenceContext(ctx context.Context, timeout time.Duration) (context.Context, context.CancelFunc) {
+	if timeout <= 0 {
+		timeout = time.Second
+	}
+	base := logging.WithAttrs(context.WithoutCancel(ctx), logging.AttrsFromContext(ctx)...)
+	return context.WithTimeout(base, timeout)
 }
 
 // updateToolReadiness 将 Web 工具真实健康检查结果写回控制面,避免未就绪工具被代理。

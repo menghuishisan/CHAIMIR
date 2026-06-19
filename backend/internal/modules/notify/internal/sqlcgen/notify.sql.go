@@ -107,7 +107,12 @@ func (q *Queries) CreateAnnouncement(ctx context.Context, arg CreateAnnouncement
 	return i, err
 }
 
-type CreateNotificationsParams struct {
+const createNotification = `-- name: CreateNotification :exec
+INSERT INTO notification (id, tenant_id, receiver_id, type, title, content, link, is_read, created_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+`
+
+type CreateNotificationParams struct {
 	ID         int64              `json:"id"`
 	TenantID   int64              `json:"tenant_id"`
 	ReceiverID int64              `json:"receiver_id"`
@@ -117,6 +122,21 @@ type CreateNotificationsParams struct {
 	Link       pgtype.Text        `json:"link"`
 	IsRead     bool               `json:"is_read"`
 	CreatedAt  pgtype.Timestamptz `json:"created_at"`
+}
+
+func (q *Queries) CreateNotification(ctx context.Context, arg CreateNotificationParams) error {
+	_, err := q.db.Exec(ctx, createNotification,
+		arg.ID,
+		arg.TenantID,
+		arg.ReceiverID,
+		arg.Type,
+		arg.Title,
+		arg.Content,
+		arg.Link,
+		arg.IsRead,
+		arg.CreatedAt,
+	)
+	return err
 }
 
 const deleteExpiredNotifications = `-- name: DeleteExpiredNotifications :exec

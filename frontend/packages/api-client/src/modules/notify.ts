@@ -103,6 +103,6 @@ export class NotifyApi {
     const baseUrl = this.client['config'].baseURL || ''
     const wsProtocol = baseUrl.startsWith('https') ? 'wss' : 'ws'
     const wsBaseUrl = baseUrl.replace(/^https?/, wsProtocol)
-    return `${wsBaseUrl}/ws`
+    return `${wsBaseUrl}/api/ws`
   }
 }

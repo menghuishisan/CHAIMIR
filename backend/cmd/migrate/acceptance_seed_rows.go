@@ -5,6 +5,7 @@ import (
 	"context"
 	"time"
 
+	"chaimir/internal/contracts"
 	"chaimir/pkg/crypto"
 
 	"github.com/jackc/pgx/v5"
@@ -12,8 +13,46 @@ import (
 
 // seedRuntimeRows 写入沙箱运行时、镜像、工具和判题器基础能力。
 func seedRuntimeRows(ctx context.Context, tx pgx.Tx) error {
-	runtimeSpec, _ := jsonb(map[string]any{"adapter": "kubernetes", "entrypoint": "/usr/local/bin/start-lab"})
-	resourceSpec, _ := jsonb(map[string]any{"cpu": "500m", "memory": "512Mi"})
+	runtimeSpec, _ := jsonb(map[string]any{
+		"workspace_dir": "/workspace",
+		"volume_domains": []map[string]any{
+			{"name": "workspace", "mount_path": "/workspace", "student_access": "rw", "persistence": "snapshot", "snapshot_scope": "workspace"},
+		},
+		"runtime_container": map[string]any{
+			"name":      "foundry",
+			"image_url": "chaimir/runtime/ethereum-foundry:dev",
+			"command":   []string{"/usr/local/bin/start-lab"},
+			"resources": map[string]any{
+				"requests": map[string]string{"cpu": "500m", "memory": "512Mi"},
+				"limits":   map[string]string{"cpu": "1", "memory": "1Gi"},
+			},
+		},
+		"default_tool_codes": []string{"web-ide"},
+		"workspace_ops": map[string]any{
+			"read_file":  []string{"/usr/local/bin/chaimir-workspace", "read"},
+			"write_file": []string{"/usr/local/bin/chaimir-workspace", "write"},
+			"list_files": []string{"/usr/local/bin/chaimir-workspace", "list"},
+			"pack_tar":   []string{"/usr/local/bin/chaimir-workspace", "pack"},
+			"unpack_tar": []string{"/usr/local/bin/chaimir-workspace", "unpack"},
+			"run_script": []string{"/usr/local/bin/chaimir-workspace", "run"},
+			"terminal":   []string{"/usr/local/bin/chaimir-workspace", "terminal"},
+			"selftest":   []string{"/usr/local/bin/chaimir-workspace", "selftest"},
+		},
+		"capability_commands": map[string]any{
+			"deploy": map[string]any{"command": []string{"/usr/local/bin/chaimir-chain", "deploy"}, "timeout_seconds": 60},
+			"tx":     map[string]any{"command": []string{"/usr/local/bin/chaimir-chain", "tx"}, "timeout_seconds": 60},
+			"query":  map[string]any{"command": []string{"/usr/local/bin/chaimir-chain", "query"}, "timeout_seconds": 30},
+			"reset":  map[string]any{"command": []string{"/usr/local/bin/chaimir-chain", "reset"}, "timeout_seconds": 30},
+		},
+		"selftest": map[string]any{"command": "chaimir-workspace selftest"},
+	})
+	resourceSpec, _ := jsonb(map[string]any{
+		"mount_workspace": true,
+		"resources": map[string]any{
+			"requests": map[string]string{"cpu": "100m", "memory": "128Mi"},
+			"limits":   map[string]string{"cpu": "500m", "memory": "512Mi"},
+		},
+	})
 	if err := execJSON(ctx, tx, `
 INSERT INTO runtime (id, code, name, eco, adapter_level, adapter_spec, capability_impl, selftest_status, selftest_detail, status)
 VALUES ($1,'ethereum-foundry','Ethereum Foundry 教学运行时','ethereum',2,$2,'sandbox-exec',2,'{"checked_by":"acceptance-seed"}'::jsonb,1)
@@ -23,7 +62,7 @@ ON CONFLICT (code) DO UPDATE SET name=EXCLUDED.name, eco=EXCLUDED.eco, adapter_l
 	}
 	if err := execJSON(ctx, tx, `
 INSERT INTO runtime_image (id, runtime_id, image_url, version, status, prepulled, prepull_status, prepull_detail, prepulled_at, genesis_baked, is_default)
-VALUES ($1,$2,'chaimir/runtime/ethereum-foundry:dev','2026.06',1,true,2,'{"source":"local-dev-image"}'::jsonb,now(),false,true)
+VALUES ($1,$2,'chaimir/runtime/ethereum-foundry:dev','2026.06',1,true,2,'{"source":"local-dev-image"}'::jsonb,now(),true,true)
 ON CONFLICT (runtime_id, version) DO UPDATE SET image_url=EXCLUDED.image_url, status=EXCLUDED.status, prepulled=EXCLUDED.prepulled, prepull_status=EXCLUDED.prepull_status, prepull_detail=EXCLUDED.prepull_detail, prepulled_at=EXCLUDED.prepulled_at, genesis_baked=EXCLUDED.genesis_baked, is_default=EXCLUDED.is_default`,
 		acceptanceIDs.RuntimeImage, acceptanceIDs.Runtime); err != nil {
 		return err
@@ -42,18 +81,143 @@ ON CONFLICT (code) DO UPDATE SET name=EXCLUDED.name, kind=EXCLUDED.kind, image_u
 		acceptanceIDs.ToolExplorer, resourceSpec); err != nil {
 		return err
 	}
-	judgeSpec, _ := jsonb(map[string]any{"cpu": "1", "memory": "1Gi", "timeout_seconds": 60})
-	return execJSON(ctx, tx, `
+	judgeSpec, _ := jsonb(map[string]any{
+		"runtime_code":          "ethereum-foundry",
+		"runtime_image_version": "2026.06",
+		"genesis_ref":           "genesis/ethereum-foundry/acceptance.json",
+		"tool_codes":            []string{"web-ide"},
+		"command":               []string{"/usr/local/bin/chaimir-judge", "solidity-unit"},
+		"timeout_sec":           60,
+		"max_retries":           1,
+		"suite_archive_name":    "public-regression.tar.gz",
+		"selftest":              map[string]any{"case": "public-regression"},
+	})
+	if err := execJSON(ctx, tx, `
 INSERT INTO judger (id, code, name, type, executor_ref, runtime_required, default_timeout_sec, resource_spec, selftest_status, status)
 VALUES ($1,'solidity-unit','Solidity 单元测试判题器',1,'chaimir/judger/solidity-unit:dev',true,60,$2,2,1)
 ON CONFLICT (code) DO UPDATE SET name=EXCLUDED.name, type=EXCLUDED.type, executor_ref=EXCLUDED.executor_ref, runtime_required=EXCLUDED.runtime_required, default_timeout_sec=EXCLUDED.default_timeout_sec, resource_spec=EXCLUDED.resource_spec, selftest_status=EXCLUDED.selftest_status, status=EXCLUDED.status, updated_at=now()`,
-		acceptanceIDs.Judger, judgeSpec)
+		acceptanceIDs.Judger, judgeSpec); err != nil {
+		return err
+	}
+	if err := seedTenantQuotaRow(ctx, tx); err != nil {
+		return err
+	}
+	if err := seedSandboxRows(ctx, tx); err != nil {
+		return err
+	}
+	return seedJudgeRows(ctx, tx)
+}
+
+// seedTenantQuotaRow 写入租户沙箱配额,确保沙箱统计和创建流程使用真实配额表。
+func seedTenantQuotaRow(ctx context.Context, tx pgx.Tx) error {
+	return execJSON(ctx, tx, `
+INSERT INTO tenant_quota (
+	tenant_id, max_concurrent_sandbox, max_cpu, max_memory_mb,
+	idle_timeout_min, max_lifetime_min, max_keepalive_min, max_snapshot_retention_min
+) VALUES (
+	$1,30,64,131072,45,240,120,10080
+)
+ON CONFLICT (tenant_id) DO UPDATE SET
+	max_concurrent_sandbox=EXCLUDED.max_concurrent_sandbox,
+	max_cpu=EXCLUDED.max_cpu,
+	max_memory_mb=EXCLUDED.max_memory_mb,
+	idle_timeout_min=EXCLUDED.idle_timeout_min,
+	max_lifetime_min=EXCLUDED.max_lifetime_min,
+	max_keepalive_min=EXCLUDED.max_keepalive_min,
+	max_snapshot_retention_min=EXCLUDED.max_snapshot_retention_min,
+	updated_at=now()`,
+		acceptanceIDs.TenantID)
+}
+
+// seedSandboxRows 写入历史沙箱和工具行,用于沙箱详情、鉴权和历史记录查询。
+func seedSandboxRows(ctx context.Context, tx pgx.Tx) error {
+	if err := execJSON(ctx, tx, `
+INSERT INTO sandbox (
+	id, tenant_id, runtime_id, image_id, namespace, source_ref, owner_account_id, phase, status,
+	keep_alive, snapshot_enabled, code_storage_key, code_hash, init_code_ref, init_script_ref, snapshot_ref, snapshot_domains,
+	snapshot_created_at, snapshot_expire_at, keep_alive_until, expire_at
+) VALUES (
+	$1,$2,$3,$4,'chaimir-acceptance-sandbox-a','sandbox:acceptance:reentrancy-a',$5,$6,$7,
+	false,true,'910000000000000001/sandbox/code/910000000000001021/workspace.tar','6d0f2d2a4f7a7b7b6b0e0e9f7c8a1c2d3e4f506172839405162738495a6b7c8d','content/lab-reentrancy-foundry.zip','scripts/init-reentrancy.sh','snapshots/acceptance/reentrancy-a.tar','["workspace"]'::jsonb,
+	now(),now() + interval '7 days',NULL,now() + interval '2 hours'
+)
+ON CONFLICT (id) DO UPDATE SET runtime_id=EXCLUDED.runtime_id, image_id=EXCLUDED.image_id, namespace=EXCLUDED.namespace, source_ref=EXCLUDED.source_ref, owner_account_id=EXCLUDED.owner_account_id, phase=EXCLUDED.phase, status=EXCLUDED.status, keep_alive=EXCLUDED.keep_alive, snapshot_enabled=EXCLUDED.snapshot_enabled, code_storage_key=EXCLUDED.code_storage_key, code_hash=EXCLUDED.code_hash, init_code_ref=EXCLUDED.init_code_ref, init_script_ref=EXCLUDED.init_script_ref, snapshot_ref=EXCLUDED.snapshot_ref, snapshot_domains=EXCLUDED.snapshot_domains, snapshot_created_at=EXCLUDED.snapshot_created_at, snapshot_expire_at=EXCLUDED.snapshot_expire_at, keep_alive_until=EXCLUDED.keep_alive_until, expire_at=EXCLUDED.expire_at, updated_at=now()`,
+		acceptanceIDs.Sandbox, acceptanceIDs.TenantID, acceptanceIDs.Runtime, acceptanceIDs.RuntimeImage, acceptanceIDs.StudentA, contracts.SandboxPhaseFullyReady, contracts.SandboxStatusDestroyed); err != nil {
+		return err
+	}
+	if err := execJSON(ctx, tx, `
+INSERT INTO sandbox_tool (id, tenant_id, sandbox_id, tool_id, access_endpoint, status)
+VALUES ($1,$2,$3,$4,'http://chaimir-acceptance-sandbox-a-web-ide.chaimir-sandbox.svc.cluster.local:8080',1)
+ON CONFLICT (tenant_id, sandbox_id, tool_id) DO UPDATE SET access_endpoint=EXCLUDED.access_endpoint, status=EXCLUDED.status`,
+		acceptanceIDs.SandboxTool, acceptanceIDs.TenantID, acceptanceIDs.Sandbox, acceptanceIDs.ToolVSCode); err != nil {
+		return err
+	}
+	return execJSON(ctx, tx, `
+INSERT INTO sandbox_event (id, tenant_id, sandbox_id, event_type, detail)
+VALUES ($1,$2,$3,'create','{"seed":"acceptance","status":"ready"}'::jsonb)
+ON CONFLICT (id) DO UPDATE SET event_type=EXCLUDED.event_type, detail=EXCLUDED.detail`,
+		acceptanceIDs.SandboxEvent, acceptanceIDs.TenantID, acceptanceIDs.Sandbox)
+}
+
+// seedJudgeRows 写入一个已完成判题任务和脱敏结果,用于判题详情和重判测试。
+func seedJudgeRows(ctx context.Context, tx pgx.Tx) error {
+	snapshot, _ := jsonb(map[string]any{
+		"item_code":                   "ctf-reentrancy-vault",
+		"item_version":                "1.0.0",
+		"trace_id":                    "trace-acceptance-judge",
+		"judger_code":                 "solidity-unit",
+		"judger_type":                 1,
+		"judger_version":              "2026.06",
+		"suite_ref":                   "minio://chaimir-code/910000000000000001/judge/suites/ctf-reentrancy-vault/public-regression.tar.gz",
+		"suite_archive_name":          "public-regression.tar.gz",
+		"version_hash":                "acceptance-version-hash",
+		"runtime_code":                "ethereum-foundry",
+		"runtime_image_version":       "2026.06",
+		"genesis_ref":                 "genesis/ethereum-foundry/acceptance.json",
+		"tool_codes":                  []string{"web-ide"},
+		"command":                     []string{"/usr/local/bin/chaimir-judge", "solidity-unit"},
+		"timeout_sec":                 60,
+		"max_retries":                 1,
+		"max_score":                   100,
+		"expectation":                 map[string]any{"public": true},
+		"sanitized_code_archive_name": "submission.zip",
+		"sanitized_code_archive_ref":  "minio://chaimir-code/acceptance/submissions/S20260001/reentrancy-fixed.zip",
+	})
+	details, _ := jsonb([]map[string]any{{"case": "public-visible-tests", "passed": true, "actual": "全部公开断言通过"}})
+	if err := execJSON(ctx, tx, `
+INSERT INTO judge_task (
+	id, tenant_id, judger_id, source_ref, source_owner_id, source_course_id, source_scope,
+	submitter_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode,
+	target_sandbox_ref, priority, status, retry_count, max_retries
+) VALUES (
+	$1,$2,$3,'teaching:2026:submission-item:910000000000005041-910000000000005032',$4,$5,'teaching',$6,'ctf-reentrancy-vault:1.0.0',
+	'minio://chaimir-code/acceptance/submissions/S20260001/reentrancy-fixed.zip','6d0f2d2a4f7a7b7b6b0e0e9f7c8a1c2d3e4f506172839405162738495a6b7c8d',
+	$7,2,'sandbox:acceptance:reentrancy-a',5,$8,0,1
+)
+ON CONFLICT (tenant_id, source_ref) DO UPDATE SET judger_id=EXCLUDED.judger_id, source_owner_id=EXCLUDED.source_owner_id, source_course_id=EXCLUDED.source_course_id, source_scope=EXCLUDED.source_scope, submitter_id=EXCLUDED.submitter_id, problem_ref=EXCLUDED.problem_ref, code_storage_key=EXCLUDED.code_storage_key, code_hash=EXCLUDED.code_hash, input_snapshot=EXCLUDED.input_snapshot, sandbox_mode=EXCLUDED.sandbox_mode, target_sandbox_ref=EXCLUDED.target_sandbox_ref, priority=EXCLUDED.priority, status=EXCLUDED.status, retry_count=EXCLUDED.retry_count, max_retries=EXCLUDED.max_retries, updated_at=now()`,
+		acceptanceIDs.JudgeTask, acceptanceIDs.TenantID, acceptanceIDs.Judger, acceptanceIDs.TeacherMain, acceptanceIDs.Course, acceptanceIDs.StudentA, snapshot, contracts.JudgeTaskStatusDone); err != nil {
+		return err
+	}
+	return execJSON(ctx, tx, `
+INSERT INTO judge_result (id, task_id, tenant_id, version, passed, score, max_score, details, judge_sandbox_ref, judged_at, is_rejudge)
+VALUES ($1,$2,$3,1,true,92,100,$4,'sandbox:acceptance:reentrancy-a',now(),false)
+ON CONFLICT (tenant_id, task_id, version) DO UPDATE SET passed=EXCLUDED.passed, score=EXCLUDED.score, max_score=EXCLUDED.max_score, details=EXCLUDED.details, judge_sandbox_ref=EXCLUDED.judge_sandbox_ref, judged_at=EXCLUDED.judged_at, is_rejudge=EXCLUDED.is_rejudge`,
+		acceptanceIDs.JudgeResult, acceptanceIDs.JudgeTask, acceptanceIDs.TenantID, details)
 }
 
 // seedContentRows 写入内容库、题库和试卷数据。
 func seedContentRows(ctx context.Context, tx pgx.Tx) error {
 	bodyLab, _ := jsonb(map[string]any{"summary": "使用 Foundry 复现可重入漏洞并完成修复。", "steps": []string{"审计 withdraw 调用顺序", "编写攻击合约", "应用 checks-effects-interactions 修复"}})
-	bodyContest, _ := jsonb(map[string]any{"scenario": "给定简化金库合约,提交能够触发资金重复提取的最小攻击代码。", "flag_rule": "链上余额断言通过后计分"})
+	bodyContest, _ := jsonb(map[string]any{
+		"scenario":  "给定简化金库合约,提交能够触发资金重复提取的最小攻击代码。",
+		"flag_rule": "链上余额断言通过后计分",
+		"judge_config": map[string]any{
+			"judger_code": "solidity-unit",
+			"suite_ref":   "minio://chaimir-code/910000000000000001/judge/suites/ctf-reentrancy-vault/public-regression.tar.gz",
+			"max_score":   100,
+			"expectation": map[string]any{"public": true},
+		},
+	})
 	bodyTheory, _ := jsonb(map[string]any{"question": "解释拜占庭容错共识中安全性和活性的取舍。", "choices": []string{"只提高出块速度", "在部分节点作恶时仍保持一致性", "取消交易签名", "跳过网络传播"}})
 	if err := execJSON(ctx, tx, `
 INSERT INTO content_category (id, tenant_id, parent_id, name, sort)
@@ -62,13 +226,13 @@ ON CONFLICT (id) DO UPDATE SET name=EXCLUDED.name, sort=EXCLUDED.sort, deleted_a
 		acceptanceIDs.ContentCat, acceptanceIDs.TenantID); err != nil {
 		return err
 	}
-	if err := upsertContentItem(ctx, tx, acceptanceIDs.ContentLab, "lab-reentrancy-foundry", "1.0.0", 1, "Foundry 可重入漏洞复现实验", 2, bodyLab); err != nil {
+	if err := upsertContentItem(ctx, tx, acceptanceIDs.ContentLab, "lab-reentrancy-foundry", "1.0.0", 1, "Foundry 可重入漏洞复现实验", 2, bodyLab, []string{}); err != nil {
 		return err
 	}
-	if err := upsertContentItem(ctx, tx, acceptanceIDs.ContentContest, "ctf-reentrancy-vault", "1.0.0", 2, "Reentrancy Vault 攻击题", 3, bodyContest); err != nil {
+	if err := upsertContentItem(ctx, tx, acceptanceIDs.ContentContest, "ctf-reentrancy-vault", "1.0.0", 2, "Reentrancy Vault 攻击题", 3, bodyContest, []string{"flag_rule", "judge_config"}); err != nil {
 		return err
 	}
-	if err := upsertContentItem(ctx, tx, acceptanceIDs.ContentTheory, "quiz-bft-safety-liveness", "1.0.0", 3, "BFT 安全性与活性理解题", 2, bodyTheory); err != nil {
+	if err := upsertContentItem(ctx, tx, acceptanceIDs.ContentTheory, "quiz-bft-safety-liveness", "1.0.0", 3, "BFT 安全性与活性理解题", 2, bodyTheory, []string{}); err != nil {
 		return err
 	}
 	criteria, _ := jsonb(map[string]any{"source": "manual", "coverage": []string{"solidity", "bft"}})
@@ -101,7 +265,7 @@ ON CONFLICT (tenant_id, paper_id, seq) DO UPDATE SET item_code=EXCLUDED.item_cod
 }
 
 // upsertContentItem 幂等写入内容条目及正文。
-func upsertContentItem(ctx context.Context, tx pgx.Tx, id int64, code, version string, itemType int16, title string, difficulty int16, body []byte) error {
+func upsertContentItem(ctx context.Context, tx pgx.Tx, id int64, code, version string, itemType int16, title string, difficulty int16, body []byte, sensitive []string) error {
 	versionHash := crypto.SHA256Hex(body)
 	if err := execJSON(ctx, tx, `
 INSERT INTO content_item (id, tenant_id, code, version, type, title, category_id, difficulty, tags, knowledge_points, author_id, author_type, visibility, status, usage_count, version_hash)
@@ -112,14 +276,14 @@ ON CONFLICT (id) DO UPDATE SET code=EXCLUDED.code, version=EXCLUDED.version, typ
 	}
 	return execJSON(ctx, tx, `
 INSERT INTO content_body (item_id, tenant_id, body, sensitive_fields)
-VALUES ($1,$2,$3,'{}')
+VALUES ($1,$2,$3,$4)
 ON CONFLICT (item_id) DO UPDATE SET body=EXCLUDED.body, sensitive_fields=EXCLUDED.sensitive_fields, updated_at=now()`,
-		id, acceptanceIDs.TenantID, body)
+		id, acceptanceIDs.TenantID, body, sensitive)
 }
 
 // seedTeachingRows 写入课程、课节、作业、提交、讨论和课程成绩。
 func seedTeachingRows(ctx context.Context, tx pgx.Tx) error {
-	schedule, _ := jsonb([]map[string]any{{"weekday": 2, "time": "13:30-15:05", "room": "链安实验室 A302"}})
+	schedule, _ := jsonb(map[string]any{"items": []map[string]any{{"weekday": 2, "time": "13:30-15:05", "room": "链安实验室 A302"}}})
 	start := time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)
 	end := time.Date(2027, 1, 15, 23, 59, 59, 0, time.UTC)
 	if err := execJSON(ctx, tx, `
@@ -248,9 +412,23 @@ ON CONFLICT (id) DO UPDATE SET chapter_id=EXCLUDED.chapter_id, title=EXCLUDED.ti
 // seedExperimentRows 写入实验定义、分组、实例、检查点和报告。
 func seedExperimentRows(ctx context.Context, tx pgx.Tx) error {
 	components, _ := jsonb(map[string]any{
-		"envs":        []map[string]any{{"runtime_code": "ethereum-foundry", "tools": []string{"web-ide", "block-explorer"}}},
-		"checkpoints": []map[string]any{{"id": "withdraw-guard", "score": 60}, {"id": "attack-regression", "score": 40}},
-		"stages":      []string{"prepare", "exploit", "fix", "report"},
+		"envs": []map[string]any{{
+			"id":                    "lab-foundry",
+			"runtime_code":          "ethereum-foundry",
+			"runtime_image_version": "2026.06",
+			"tools":                 []string{"web-ide", "block-explorer"},
+			"init_code_ref":         "content/lab-reentrancy-foundry.zip",
+			"init_script_ref":       "scripts/init-reentrancy.sh",
+			"snapshot_enabled":      true,
+			"keep_alive_minutes":    60,
+		}},
+		"checkpoints": []map[string]any{
+			{"id": "withdraw-guard", "judger": "solidity-unit", "item_code": "ctf-reentrancy-vault", "item_version": "1.0.0", "score": 60, "mode": "reuse", "env_id": "lab-foundry"},
+			{"id": "attack-regression", "judger": "solidity-unit", "item_code": "ctf-reentrancy-vault", "item_version": "1.0.0", "score": 40, "mode": "reuse", "env_id": "lab-foundry"},
+		},
+		"stages": []map[string]any{
+			{"stage": 1, "title": "漏洞复现与修复", "description": "使用 Foundry 复现可重入攻击并完成修复。", "components": map[string]any{"envs": []string{"lab-foundry"}}},
+		},
 	})
 	if err := execJSON(ctx, tx, `
 INSERT INTO experiment (id, tenant_id, course_id, author_id, template_ref, template_version, name, description, components, collab_mode, require_report, wizard_step, status)
@@ -279,8 +457,26 @@ ON CONFLICT (tenant_id, group_id, student_id) DO UPDATE SET role=EXCLUDED.role`,
 			return err
 		}
 	}
-	sandboxRefs, _ := jsonb([]string{"sandbox:2026:experiment:reentrancy-lab-a"})
-	simRefs, _ := jsonb([]string{"sim:2026:experiment:gas-market-a"})
+	sandboxRefs, _ := jsonb([]map[string]any{{
+		"component_id": "lab-foundry",
+		"stage":        1,
+		"sandbox_id":   acceptanceIDs.Sandbox,
+		"runtime_code": "ethereum-foundry",
+		"tools": []map[string]any{{
+			"code":     "web-ide",
+			"kind":     3,
+			"endpoint": "/api/v1/sandbox/sandboxes/910000000000001021/tools/web-ide/",
+			"status":   1,
+		}},
+	}})
+	simRefs, _ := jsonb([]map[string]any{{
+		"component_id": "gas-market",
+		"stage":        1,
+		"session_id":   acceptanceIDs.SimSession,
+		"package_code": "builtin__gas-market",
+		"version":      "1.0.0",
+		"bundle_ref":   "sim/builtin/gas-market-1.0.0.zip",
+	}})
 	if err := execJSON(ctx, tx, `
 INSERT INTO experiment_instance (id, tenant_id, experiment_id, owner_account_id, group_id, source_ref, sandbox_refs, sim_session_refs, status, score, finished_at)
 VALUES ($1,$2,$3,$4,$5,'experiment:2026:reentrancy:instance-a',$6,$7,4,88.50,now())
@@ -306,10 +502,21 @@ ON CONFLICT (tenant_id, instance_id, student_id) DO UPDATE SET content_ref=EXCLU
 // seedSimRows 写入仿真包、会话、动作、检查点和分享码。
 func seedSimRows(ctx context.Context, tx pgx.Tx) error {
 	scale, _ := jsonb(map[string]any{"max_nodes": 32, "max_ticks": 1000})
-	schema, _ := jsonb(map[string]any{"events": map[string]any{"submit_tx": map[string]any{"fields": []string{"from", "to", "amount"}}}})
+	priorityMin := 0.0
+	priorityMax := 10.0
+	schema, _ := jsonb(map[string]any{"events": map[string]any{"submit_tx": map[string]any{
+		"interaction_id": "submit-tx",
+		"kind":           "form",
+		"target":         "global",
+		"params": []map[string]any{
+			{"name": "from", "type": "string", "required": true},
+			{"name": "max_fee", "type": "number", "required": true, "min": 0.0},
+			{"name": "priority_fee", "type": "number", "required": true, "min": priorityMin, "max": priorityMax},
+		},
+	}}})
 	if err := execJSON(ctx, tx, `
 INSERT INTO sim_package (id, code, version, name, category, compute, scale_limit, bundle_key, bundle_hash, interaction_schema, author_type, status)
-VALUES ($1,'builtin__gas-market','1.0.0','EIP-1559 Gas 市场仿真','consensus',1,$2,'sim/builtin/gas-market-1.0.0.zip','b3c6d8f1e6a9f2d4c5b6a7e8f90123456789abcd1234567890abcdef12345678',$3,1,3)
+VALUES ($1,'builtin__gas-market','1.0.0','EIP-1559 Gas 市场仿真','consensus',1,$2,'minio://chaimir-code/910000000000000001/sim/package-bundle/910000000000003001/gas-market-1.0.0.zip','b3c6d8f1e6a9f2d4c5b6a7e8f90123456789abcd1234567890abcdef12345678',$3,1,3)
 ON CONFLICT (code, version) DO UPDATE SET name=EXCLUDED.name, category=EXCLUDED.category, compute=EXCLUDED.compute, scale_limit=EXCLUDED.scale_limit, bundle_key=EXCLUDED.bundle_key, bundle_hash=EXCLUDED.bundle_hash, interaction_schema=EXCLUDED.interaction_schema, author_type=EXCLUDED.author_type, status=EXCLUDED.status, updated_at=now()`,
 		acceptanceIDs.SimPackage, scale, schema); err != nil {
 		return err
@@ -541,6 +748,22 @@ INSERT INTO backup_record (id, type, storage_ref, size_bytes, status, started_at
 VALUES ($1,1,'backups/local/chaimir-acceptance-20260619.dump',73400320,2,now() - interval '1 hour',now() - interval '58 minutes')
 ON CONFLICT (id) DO UPDATE SET storage_ref=EXCLUDED.storage_ref, size_bytes=EXCLUDED.size_bytes, status=EXCLUDED.status, started_at=EXCLUDED.started_at, finished_at=EXCLUDED.finished_at`,
 		acceptanceIDs.BackupRecord)
+}
+
+// seedTransferRows 写入一个成功导出任务,用于统一 transfer API 和下载授权测试。
+func seedTransferRows(ctx context.Context, tx pgx.Tx) error {
+	return execJSON(ctx, tx, `
+INSERT INTO transfer_task (
+	id, tenant_id, account_id, channel, subject, status, content_type, file_name,
+	attempt_count, max_attempts, last_error, artifact_ref, artifact_size,
+	artifact_content_type, artifact_file_name, completed_at
+) VALUES (
+	$1,$2,$3,'export','audit-log-export','succeeded','text/csv','audit-log-acceptance.csv',
+	1,3,'','minio://chaimir-report/910000000000000001/transfer/export/910000000000013001/audit-log-acceptance.csv',2048,
+	'text/csv','audit-log-acceptance.csv',now()
+)
+ON CONFLICT (id) DO UPDATE SET account_id=EXCLUDED.account_id, channel=EXCLUDED.channel, subject=EXCLUDED.subject, status=EXCLUDED.status, content_type=EXCLUDED.content_type, file_name=EXCLUDED.file_name, attempt_count=EXCLUDED.attempt_count, max_attempts=EXCLUDED.max_attempts, last_error=EXCLUDED.last_error, artifact_ref=EXCLUDED.artifact_ref, artifact_size=EXCLUDED.artifact_size, artifact_content_type=EXCLUDED.artifact_content_type, artifact_file_name=EXCLUDED.artifact_file_name, completed_at=EXCLUDED.completed_at, updated_at=now()`,
+		acceptanceIDs.TransferTask, acceptanceIDs.TenantID, acceptanceIDs.SchoolAdmin)
 }
 
 // seedAuditRows 写入一条系统审计记录,便于审计列表接口有可核对数据。

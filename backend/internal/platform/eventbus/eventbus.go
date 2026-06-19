@@ -84,7 +84,7 @@ func (b *natsBus) Publish(ctx context.Context, subject string, payload any) erro
 	if err := b.conn.Publish(subject, data); err != nil {
 		return fmt.Errorf("发布事件 %s 失败: %w", subject, err)
 	}
-	if err := b.conn.FlushWithContext(ctx); err != nil {
+	if err := b.flush(ctx); err != nil {
 		return fmt.Errorf("确认发布事件 %s 失败: %w", subject, err)
 	}
 	return nil

@@ -54,10 +54,9 @@ func (t *txStore) ListNotificationTemplates(ctx context.Context) ([]notification
 
 // CreateNotifications 批量写入站内信。
 func (t *txStore) CreateNotifications(ctx context.Context, records []notificationRecord) error {
-	rows := make([]sqlcgen.CreateNotificationsParams, 0, len(records))
 	now := timex.Now()
 	for _, item := range records {
-		rows = append(rows, sqlcgen.CreateNotificationsParams{
+		if err := t.q.CreateNotification(ctx, sqlcgen.CreateNotificationParams{
 			ID:         item.ID,
 			TenantID:   item.TenantID,
 			ReceiverID: item.ReceiverID,
@@ -67,13 +66,11 @@ func (t *txStore) CreateNotifications(ctx context.Context, records []notificatio
 			Link:       pgtypex.Text(item.Link),
 			IsRead:     false,
 			CreatedAt:  timex.RequiredTimestamptz(now),
-		})
+		}); err != nil {
+			return err
+		}
 	}
-	if len(rows) == 0 {
-		return nil
-	}
-	_, err := t.q.CreateNotifications(ctx, rows)
-	return err
+	return nil
 }
 
 // ListNotifications 查询站内信分页。

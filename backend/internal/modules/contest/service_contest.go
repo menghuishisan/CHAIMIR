@@ -10,6 +10,7 @@ import (
 	"chaimir/internal/contracts"
 	"chaimir/internal/platform/audit"
 	"chaimir/internal/platform/pagex"
+	"chaimir/internal/platform/timex"
 	"chaimir/pkg/apperr"
 )
 
@@ -335,7 +336,7 @@ func (s *Service) transitionContest(ctx context.Context, contestID int64, next i
 		if err != nil {
 			return err
 		}
-		if err := validateContestTransition(current.Status, next); err != nil {
+		if err := validateContestTransitionWindow(current, next, timex.Now()); err != nil {
 			return err
 		}
 		problems, err = tx.ListContestProblems(ctx, id.TenantID, contestID)

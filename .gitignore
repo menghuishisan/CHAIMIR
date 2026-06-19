@@ -62,6 +62,7 @@ images/**/build/
 # ---- 工具/IDE ----
 .DS_Store
 *.log
+.tmp/
 .idea/
 .vscode/
 .claude/

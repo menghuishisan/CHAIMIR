@@ -8,6 +8,7 @@ import (
 
 	"chaimir/internal/contracts"
 	"chaimir/internal/platform/storage"
+	"chaimir/internal/platform/upload"
 	"chaimir/pkg/apperr"
 )
 
@@ -55,6 +56,7 @@ func (s *Service) UploadAttachment(ctx context.Context, req UploadAttachmentRequ
 		ExpectedBucket:  s.storage.BucketAttach(),
 		AllowedFileName: true,
 		Content:         req.Content,
+		KindValidator:   upload.AttachmentKindValid,
 		ScanPolicy:      s.attachmentScanPolicy,
 	})
 	if err != nil {

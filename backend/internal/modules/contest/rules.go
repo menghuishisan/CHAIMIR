@@ -122,6 +122,36 @@ func validateContestTransition(current, next int16) error {
 	return apperr.ErrContestStateInvalid
 }
 
+// validateContestTransitionWindow 在状态图基础上叠加竞赛时间窗口约束。
+func validateContestTransitionWindow(item Contest, next int16, now time.Time) error {
+	if err := validateContestTransition(item.Status, next); err != nil {
+		return err
+	}
+	switch next {
+	case ContestStatusSignup:
+		if now.After(item.SignupEnd) {
+			return apperr.ErrContestStateInvalid
+		}
+	case ContestStatusRunning:
+		if now.Before(item.StartAt) || !now.Before(item.EndAt) {
+			return apperr.ErrContestStateInvalid
+		}
+	case ContestStatusFrozen:
+		if item.FreezeMinutes <= 0 {
+			return apperr.ErrContestStateInvalid
+		}
+		freezeStart := item.EndAt.Add(-time.Duration(item.FreezeMinutes) * time.Minute)
+		if now.Before(freezeStart) || !now.Before(item.EndAt) {
+			return apperr.ErrContestStateInvalid
+		}
+	case ContestStatusEnded:
+		if now.Before(item.EndAt) {
+			return apperr.ErrContestStateInvalid
+		}
+	}
+	return nil
+}
+
 // canManageContest 校验教师作者或学校管理员对竞赛的管理权限。
 func canManageContest(accountID int64, isSchoolAdmin bool, item Contest) error {
 	if isSchoolAdmin || item.OrganizerID == accountID {

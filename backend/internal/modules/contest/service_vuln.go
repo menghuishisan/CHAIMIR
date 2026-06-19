@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"chaimir/internal/contracts"
+	"chaimir/internal/platform/auth"
 	"chaimir/internal/platform/jsonx"
 	"chaimir/internal/platform/netx"
 	"chaimir/internal/platform/pagex"
@@ -227,7 +228,17 @@ func (s *Service) FinalizeVulnProblem(ctx context.Context, problemID int64) (Vul
 	if item.PrevalidateStatus != VulnPrevalidatePassed {
 		return VulnProblemDTO{}, apperr.ErrContestVulnPrevalidateFailed
 	}
-	snapshot, err := s.contentImport.SystemImportContent(ctx, contracts.ContentSystemImportRequest{TenantID: id.TenantID, Code: stableContestCode(item), Version: "v1", Type: contentTypeContestProblem, Title: item.Title, Difficulty: contentDifficultyBasic, AuthorID: id.AccountID, AuthorType: contentAuthorExternal, Visibility: contentVisibilityTenant, Body: item.DraftBody, SensitiveFields: []string{"answer", "flag", "judge"}, AutoPublish: true, SystemImportNote: map[string]any{"source": "contest_vuln_problem", "vuln_problem_id": item.ID}})
+	if item.Status == VulnProblemStatusFinalized {
+		return vulnProblemDTOFromModel(item), nil
+	}
+	if item.Status != VulnProblemStatusDraft {
+		return VulnProblemDTO{}, apperr.ErrContestVulnPrevalidateFailed
+	}
+	importCtx, err := auth.WithServiceIdentity(ctx, id.TenantID, fmt.Sprintf("contest:%04d:vuln-finalize:%d", timex.Now().Year(), item.ID))
+	if err != nil {
+		return VulnProblemDTO{}, apperr.ErrContestVulnFinalizeFailed.WithCause(err)
+	}
+	snapshot, err := s.contentImport.SystemImportContent(importCtx, contracts.ContentSystemImportRequest{TenantID: id.TenantID, Code: stableContestCode(item), Version: "1.0.0", Type: contentTypeContestProblem, Title: item.Title, Difficulty: contentDifficultyBasic, AuthorID: id.AccountID, AuthorType: contentAuthorExternal, Visibility: contentVisibilityTenant, Body: item.DraftBody, SensitiveFields: []string{"answer", "flag", "judge"}, AutoPublish: true, SystemImportNote: map[string]any{"source": "contest_vuln_problem", "vuln_problem_id": item.ID}})
 	if err != nil {
 		return VulnProblemDTO{}, apperr.ErrContestVulnFinalizeFailed.WithCause(err)
 	}

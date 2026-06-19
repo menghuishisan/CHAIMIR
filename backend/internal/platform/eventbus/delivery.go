@@ -17,6 +17,7 @@ import (
 type deliveryConfig struct {
 	retryMax     int
 	retryDelay   time.Duration
+	flushTimeout time.Duration
 	deadPrefix   string
 	deadSubject  string
 	publishFlush bool
@@ -37,6 +38,7 @@ func newDeliveryConfig(cfg config.NATSConfig) deliveryConfig {
 	return deliveryConfig{
 		retryMax:     cfg.ConsumerRetryMax,
 		retryDelay:   time.Duration(cfg.ConsumerRetryDelayMs) * time.Millisecond,
+		flushTimeout: time.Duration(cfg.FlushTimeoutMs) * time.Millisecond,
 		deadPrefix:   strings.TrimSpace(cfg.DeadLetterPrefix),
 		publishFlush: true,
 	}
@@ -139,11 +141,29 @@ func (b *natsBus) publishDeadLetter(ctx context.Context, subject, queue string, 
 	}
 	if b.cfg.publishFlush {
 		// 死信也必须等待 flush 确认,否则仍可能只停留在客户端缓冲区。
-		if err := b.conn.FlushWithContext(ctx); err != nil {
+		if err := b.flush(ctx); err != nil {
 			return fmt.Errorf("确认死信 %s 失败: %w", deadSubject, err)
 		}
 	}
 	return nil
+}
+
+// flush 按平台统一配置等待 NATS 客户端缓冲确认,并及时释放补充的超时计时器。
+func (b *natsBus) flush(ctx context.Context) error {
+	flushCtx, cancel := b.flushContext(ctx)
+	defer cancel()
+	return b.conn.FlushWithContext(flushCtx)
+}
+
+// flushContext 为 NATS flush 确认补充配置化 deadline,满足 nats.go 对上下文的要求。
+func (b *natsBus) flushContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if _, ok := ctx.Deadline(); ok {
+		return ctx, func() {}
+	}
+	return context.WithTimeout(ctx, b.cfg.flushTimeout)
 }
 
 // max 返回较大的整数,供重试配置兜底复用。

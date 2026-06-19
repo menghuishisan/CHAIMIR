@@ -115,6 +115,11 @@ func Fail(c *gin.Context, err error) {
 	c.JSON(http.StatusOK, Envelope{Code: ae.Code, Message: ae.Message, TraceID: traceID})
 }
 
+// NoRoute 将未注册路径收敛为统一错误信封,避免 Gin 默认 404 空响应。
+func NoRoute(c *gin.Context) {
+	Fail(c, apperr.ErrNotFound)
+}
+
 // isSafeTraceID 限制上游 trace_id 为短可见标识,避免日志污染。
 func isSafeTraceID(traceID string) bool {
 	if len(traceID) == 0 || len(traceID) > 128 {

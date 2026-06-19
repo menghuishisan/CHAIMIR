@@ -254,7 +254,7 @@ func (s *txStore) ListReviews(ctx context.Context, result int16, limit, offset i
 
 // MergeValidationReport 合并动态预览报告。
 func (s *txStore) MergeValidationReport(ctx context.Context, packageID int64, report ValidationReport) (Review, error) {
-	raw, err := jsonx.AnyBytes(report, apperr.ErrSimPackageValidationFailed)
+	raw, err := dynamicValidationReportJSON(report)
 	if err != nil {
 		return Review{}, err
 	}
@@ -430,4 +430,16 @@ func packageJSON(pkg Package) ([]byte, []byte, error) {
 		return nil, nil, err
 	}
 	return scale, backend, nil
+}
+
+// dynamicValidationReportJSON 只序列化受控动态报告字段,避免覆盖上传阶段生成的静态安全门禁。
+func dynamicValidationReportJSON(report ValidationReport) ([]byte, error) {
+	payload := map[string]any{
+		"determinism_check": report.DeterminismCheck,
+		"worker_preview":    report.WorkerPreview,
+	}
+	if report.Details != nil {
+		payload["details"] = report.Details
+	}
+	return jsonx.AnyBytes(payload, apperr.ErrSimPackageValidationFailed)
 }
