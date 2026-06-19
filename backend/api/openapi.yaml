@@ -39,10 +39,10 @@ tags:
   - name: grade
     description: M11 成绩中心
 paths:
-  /healthz:
-    $ref: './paths/health.yaml#/healthz'
-  /readyz:
-    $ref: './paths/health.yaml#/readyz'
+  /api/healthz:
+    $ref: './paths/health.yaml#/api/healthz'
+  /api/readyz:
+    $ref: './paths/health.yaml#/api/readyz'
   /api/v1/auth/login/platform:
     $ref: './paths/identity.yaml#/api/v1/auth/login/platform'
   /api/v1/auth/login/phone:

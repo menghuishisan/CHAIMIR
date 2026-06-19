@@ -1,7 +1,7 @@
 # 配置 Component:从「唯一」环境变量键源 config/chaimir.env 生成两个命名空间的 ConfigMap。
 # 依据 CLAUDE.md §6:配置全走环境变量,单一来源不重复。
 # ConfigMap/Secret 命名空间隔离,故同一份 env 生成两个 ConfigMap(同源同值):
-#   · chaimir-config(chaimir-system):后端/worker/migrate envFrom。
+#   · chaimir-config(chaimir-system):后端/migrate envFrom。
 #   · chaimir-data-config(chaimir-data):中间件 Pod 引用(PG 初始化库名/用户等)。
 # 以 Component 形式被 base 引用,从而单文件读取一次、无跨目录引用问题。
 # 密钥变量名也登记在 chaimir.env,但只能使用 "# secret-env: KEY" 注释形式,不会进入 ConfigMap;

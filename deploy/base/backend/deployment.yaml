@@ -34,7 +34,7 @@ spec:
       containers:
         - name: server
           image: chaimir/backend:placeholder  # overlay images: 覆盖。
-          args: ["serve"]  # 控制面 HTTP/WS 主进程(worker 用不同子命令)。
+          args: ["serve"]  # 控制面 HTTP/WS 主进程,后台任务由 server 内统一 background runner 承载。
           ports:
             - name: http
               containerPort: 8080
@@ -55,16 +55,16 @@ spec:
             limits:
               cpu: "1"
               memory: 512Mi
-          # 就绪/存活探针:后端暴露 /api/healthz(就绪)/api/livez(存活)。
+          # 就绪/存活探针:后端暴露 /api/healthz(存活) 与 /api/readyz(依赖就绪)。
           readinessProbe:
             httpGet:
-              path: /api/healthz
+              path: /api/readyz
               port: http
             initialDelaySeconds: 5
             periodSeconds: 10
           livenessProbe:
             httpGet:
-              path: /api/livez
+              path: /api/healthz
               port: http
             initialDelaySeconds: 15
             periodSeconds: 20

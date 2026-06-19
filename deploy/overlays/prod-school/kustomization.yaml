@@ -3,7 +3,7 @@
 #   单租户(tenant_id 恒定)、无平台管理员、k3s + 单实例中间件、离线镜像包。
 #   私有化 overlay:去掉 /platform 入口、平台级定时任务,初始化脚本建首个学校管理员。
 #
-# 密钥:私有化用 secretGenerator 从本地 secret.env(交付时由运维填入,被 .gitignore 忽略)。
+# 密钥:私有化用 secretGenerator 从 deploy/config/secret.env(交付时由运维填入,被 .gitignore 忽略)。
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
@@ -14,17 +14,17 @@ resources:
 components:
   - ../../components/middleware
 
-# 私有化密钥由交付运维填入本地 secret.env。
+# 私有化密钥由交付运维填入 deploy/config/secret.env。
 # 生成两份(命名空间隔离):chaimir-system 给应用,chaimir-data 给中间件。同源,单一来源。
 secretGenerator:
   - name: chaimir-secret
     namespace: chaimir-system
     envs:
-      - secret.env
+      - ../../config/secret.env
   - name: chaimir-data-secret
     namespace: chaimir-data
     envs:
-      - secret.env
+      - ../../config/secret.env
 
 # 镜像来自校内 Harbor(离线导入),版本随平台版本固定。
 images:
@@ -39,6 +39,9 @@ images:
     newTag: "1.0.0"
   - name: chaimir/cron
     newName: harbor.school.local/service/cron
+    newTag: "1.0.0"
+  - name: chaimir/middleware/minio
+    newName: harbor.school.local/middleware/minio
     newTag: "1.0.0"
 
 # 私有化形态:school 单租户 + 关平台层。

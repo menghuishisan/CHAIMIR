@@ -1,5 +1,5 @@
 # 本文件按模块维护 health 路径项。
-/healthz:
+/api/healthz:
   get:
     tags: [health]
     summary: 服务存活检查
@@ -7,7 +7,7 @@
     responses:
       "200":
         $ref: "#/components/responses/PlainOK"
-/readyz:
+/api/readyz:
   get:
     tags: [health]
     summary: 服务就绪检查

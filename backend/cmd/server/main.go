@@ -191,10 +191,10 @@ func (i *infrastructure) close() {
 func newRouter(cfg *config.Config, infra *infrastructure) *gin.Engine {
 	r := gin.New()
 	r.Use(response.TraceMiddleware(), httpx.AuditContextMiddleware(), response.RecoveryMiddleware())
-	r.GET("/healthz", func(c *gin.Context) {
+	r.GET("/api/healthz", func(c *gin.Context) {
 		response.OK(c, map[string]string{"status": "ok"})
 	})
-	r.GET("/readyz", func(c *gin.Context) {
+	r.GET("/api/readyz", func(c *gin.Context) {
 		ctx, cancel := context.WithTimeout(c.Request.Context(), time.Duration(cfg.Server.HealthTimeoutSeconds)*time.Second)
 		defer cancel()
 		if err := infra.database.Ping(ctx); err != nil {

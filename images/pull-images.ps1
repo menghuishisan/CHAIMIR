@@ -297,6 +297,10 @@ if ($missing.Count -gt 0) {
 
 $failures = New-Object System.Collections.Generic.List[string]
 foreach ($item in $items) {
+    if (Test-LocalImageRef -Ref $item.Ref) {
+        Write-Host "Skipping existing image $($item.Ref)"
+        continue
+    }
     if (-not (Invoke-DockerPullWithRetry -Item $item)) {
         $failures.Add("$($item.Ref) ($($item.Manifest))")
         break

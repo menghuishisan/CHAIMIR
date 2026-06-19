@@ -68,7 +68,7 @@ spec:
         - protocol: TCP
           port: 53
 ---
-# 允许后端/worker/migrate → chaimir-data 中间件端口。
+# 允许后端/migrate → chaimir-data 中间件端口。
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -81,7 +81,7 @@ spec:
     matchExpressions:
       - key: app.kubernetes.io/component
         operator: In
-        values: ["control-plane", "worker", "migration"]
+        values: ["control-plane", "migration"]
   policyTypes: ["Egress"]
   egress:
     - to:
@@ -97,8 +97,10 @@ spec:
           port: 4222   # NATS
         - protocol: TCP
           port: 9000   # MinIO
+        - protocol: TCP
+          port: 3310   # ClamAV clamd
 ---
-# 允许后端/worker → kube-apiserver(client-go 管理动态沙箱)。
+# 允许后端 → kube-apiserver(client-go 管理动态沙箱)。
 # apiserver 通常在 default 命名空间的 kubernetes Service(443),CNI 对 apiserver 的
 # egress 放行依实现而异;此规则放行到 443,生产按 CNI(Cilium/Calico)细化目标。
 apiVersion: networking.k8s.io/v1
@@ -113,7 +115,7 @@ spec:
     matchExpressions:
       - key: app.kubernetes.io/component
         operator: In
-        values: ["control-plane", "worker"]
+        values: ["control-plane"]
   policyTypes: ["Egress"]
   egress:
     - ports:

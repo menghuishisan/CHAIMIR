@@ -41,6 +41,7 @@ configMapGenerator:
       - REDIS_HOST=redis.prod-data.internal
       - NATS_URL=nats://nats.prod-data.internal:4222
       - MINIO_ENDPOINT=minio.prod-data.internal:9000
+      - UPLOAD_VIRUS_SCAN_ADDRESS=clamav.prod-data.internal:3310
 
 # 生产后端起步 3 副本(HPA 接管伸缩区间)。
 replicas:
@@ -76,44 +77,47 @@ patches:
         path: /spec/refreshInterval
         value: 5m
       - op: replace
-        path: /spec/data/0/remoteRef/key
-        value: prod/chaimir/JWT_SIGNING_KEY
-      - op: replace
-        path: /spec/data/1/remoteRef/key
-        value: prod/chaimir/APP_ENCRYPTION_KEY
-      - op: replace
-        path: /spec/data/2/remoteRef/key
-        value: prod/chaimir/APP_HMAC_KEY
-      - op: replace
-        path: /spec/data/3/remoteRef/key
-        value: prod/chaimir/PG_PASSWORD
-      - op: replace
-        path: /spec/data/4/remoteRef/key
-        value: prod/chaimir/PG_PRIV_USER
-      - op: replace
-        path: /spec/data/5/remoteRef/key
-        value: prod/chaimir/PG_PRIV_PASSWORD
-      - op: replace
-        path: /spec/data/6/remoteRef/key
-        value: prod/chaimir/REDIS_PASSWORD
-      - op: replace
-        path: /spec/data/7/remoteRef/key
-        value: prod/chaimir/MINIO_ACCESS_KEY
-      - op: replace
-        path: /spec/data/8/remoteRef/key
-        value: prod/chaimir/MINIO_SECRET_KEY
-      - op: replace
-        path: /spec/data/9/remoteRef/key
-        value: prod/chaimir/NATS_TOKEN
-      - op: replace
-        path: /spec/data/10/remoteRef/key
-        value: prod/chaimir/BOOTSTRAP_ADMIN_PHONE
-      - op: replace
-        path: /spec/data/11/remoteRef/key
-        value: prod/chaimir/BOOTSTRAP_ADMIN_NAME
-      - op: replace
-        path: /spec/data/12/remoteRef/key
-        value: prod/chaimir/BOOTSTRAP_ADMIN_PASSWORD
-      - op: replace
-        path: /spec/data/13/remoteRef/key
-        value: prod/chaimir/BOOTSTRAP_PLATFORM_ADMIN_PASSWORD
+        path: /spec/data
+        value:
+          - secretKey: JWT_SIGNING_KEY
+            remoteRef: {key: prod/chaimir/JWT_SIGNING_KEY}
+          - secretKey: APP_ENCRYPTION_KEY
+            remoteRef: {key: prod/chaimir/APP_ENCRYPTION_KEY}
+          - secretKey: APP_HMAC_KEY
+            remoteRef: {key: prod/chaimir/APP_HMAC_KEY}
+          - secretKey: PG_PASSWORD
+            remoteRef: {key: prod/chaimir/PG_PASSWORD}
+          - secretKey: PG_PRIV_USER
+            remoteRef: {key: prod/chaimir/PG_PRIV_USER}
+          - secretKey: PG_PRIV_PASSWORD
+            remoteRef: {key: prod/chaimir/PG_PRIV_PASSWORD}
+          - secretKey: REDIS_PASSWORD
+            remoteRef: {key: prod/chaimir/REDIS_PASSWORD}
+          - secretKey: MINIO_ACCESS_KEY
+            remoteRef: {key: prod/chaimir/MINIO_ACCESS_KEY}
+          - secretKey: MINIO_SECRET_KEY
+            remoteRef: {key: prod/chaimir/MINIO_SECRET_KEY}
+          - secretKey: NATS_TOKEN
+            remoteRef: {key: prod/chaimir/NATS_TOKEN}
+          - secretKey: GRADE_TRANSCRIPT_SIGNING_KEY
+            remoteRef: {key: prod/chaimir/GRADE_TRANSCRIPT_SIGNING_KEY}
+          - secretKey: SMS_HTTP_TOKEN
+            remoteRef: {key: prod/chaimir/SMS_HTTP_TOKEN}
+          - secretKey: CHAIMIR_WALLET_SIGNER_PRIVATE_KEY
+            remoteRef: {key: prod/chaimir/CHAIMIR_WALLET_SIGNER_PRIVATE_KEY}
+          - secretKey: CHAIMIR_WALLET_SESSION_SECRET
+            remoteRef: {key: prod/chaimir/CHAIMIR_WALLET_SESSION_SECRET}
+          - secretKey: CHAIMIR_PAYMASTER_PRIVATE_KEY
+            remoteRef: {key: prod/chaimir/CHAIMIR_PAYMASTER_PRIVATE_KEY}
+          - secretKey: CHAIMIR_PAYMASTER_SERVICE_AUTH_SECRET
+            remoteRef: {key: prod/chaimir/CHAIMIR_PAYMASTER_SERVICE_AUTH_SECRET}
+          - secretKey: CHAIMIR_EVENT_LISTENER_SERVICE_AUTH_SECRET
+            remoteRef: {key: prod/chaimir/CHAIMIR_EVENT_LISTENER_SERVICE_AUTH_SECRET}
+          - secretKey: BOOTSTRAP_ADMIN_PHONE
+            remoteRef: {key: prod/chaimir/BOOTSTRAP_ADMIN_PHONE}
+          - secretKey: BOOTSTRAP_ADMIN_NAME
+            remoteRef: {key: prod/chaimir/BOOTSTRAP_ADMIN_NAME}
+          - secretKey: BOOTSTRAP_ADMIN_PASSWORD
+            remoteRef: {key: prod/chaimir/BOOTSTRAP_ADMIN_PASSWORD}
+          - secretKey: BOOTSTRAP_PLATFORM_ADMIN_PASSWORD
+            remoteRef: {key: prod/chaimir/BOOTSTRAP_PLATFORM_ADMIN_PASSWORD}

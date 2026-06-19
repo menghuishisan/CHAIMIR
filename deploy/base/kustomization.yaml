@@ -12,7 +12,6 @@ resources:
   - namespaces/namespaces.yaml
   - rbac/backend-sa.yaml
   - backend/deployment.yaml
-  - worker/deployment.yaml
   - frontend/deployment.yaml
   - migrate/migrate-job.yaml
   - ingress/ingress.yaml
@@ -31,7 +30,7 @@ components:
 #   local-dev / prod-school:overlay 用 secretGenerator 从 gitignored secret.env 生成;
 #   staging / prod-saas:overlay 引用 ../config/external-secret component,由 External Secrets/KMS 同步。
 # base 资源以字面名引用;overlay 有 secretGenerator 时 kustomize 自动改写为带哈希名。
-# 模板见 config/secret.env.example(各 overlay 复制为本地 secret.env)。
+# 模板见 config/secret.env.example(复制为 config/secret.env,本地文件不入仓)。
 
 # 镜像占位:overlay 覆盖。
 images:

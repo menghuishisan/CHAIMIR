@@ -1,4 +1,4 @@
-# 中间件 Kustomize Component(PG/Redis/NATS/MinIO 单实例)。
+# 中间件 Kustomize Component(PG/Redis/NATS/MinIO/ClamAV 单实例)。
 # 依据 docs/总-部署架构设计.md §五:私有化/本地用单实例中间件;
 #   SaaS/staging 用托管/集群(不 include 本 component,overlay 经 ConfigMap 接外部端点)。
 # 以 Component 形式提供,供 overlays/local-dev 与 overlays/prod-school 按需 include。
@@ -10,6 +10,7 @@ resources:
   - redis.yaml
   - nats.yaml
   - minio.yaml
+  - clamav.yaml
 
 # 注:chaimir-data-config(PG 库名/用户等非密值)由 deploy/config 这个 config component
 #   从「唯一」env 源 chaimir.env 统一生成,本 component 不再单独生成,避免重复定义。

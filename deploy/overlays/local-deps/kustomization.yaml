@@ -1,0 +1,26 @@
+# local-deps overlay 只部署本地联调所需中间件,业务前后端仍在工作区直接运行。
+# 该 overlay 使用当前 kubeconfig 指向的 Kubernetes 集群;生产部署仍走 local-dev/staging/prod-* 完整 overlay。
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../base/namespaces/namespaces.yaml
+
+components:
+  - ../../config
+  - ../../components/middleware
+
+# 本地依赖密钥统一读取 deploy/config/secret.env,避免维护第二份真实密钥文件。
+secretGenerator:
+  - name: chaimir-data-secret
+    namespace: chaimir-data
+    envs:
+      - ../../config/secret.env
+
+images:
+  - name: chaimir/middleware/minio
+    newName: chaimir/middleware/minio
+    newTag: dev
+
+generatorOptions:
+  disableNameSuffixHash: false
