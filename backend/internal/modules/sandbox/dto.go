@@ -74,6 +74,19 @@ type ChainRequest struct {
 	Payload  map[string]any `json:"payload"`
 }
 
+// ToolRunRequest 是用户触发命令类工具的一次受控执行请求。
+type ToolRunRequest struct {
+	Command     []string `json:"command"`
+	StdinBase64 string   `json:"stdin_base64"`
+	TimeoutSec  int32    `json:"timeout_sec"`
+}
+
+// ToolRunResponse 是命令类工具执行后的脱敏输出。
+type ToolRunResponse struct {
+	StdoutBase64 string `json:"stdout_base64"`
+	StderrBase64 string `json:"stderr_base64"`
+}
+
 // QuotaRequest 是配额调整请求。
 type QuotaRequest struct {
 	TenantID                int64 `json:"tenant_id"`
@@ -88,11 +101,13 @@ type QuotaRequest struct {
 
 // PrepullResponse 描述镜像预拉取状态响应。
 type PrepullResponse struct {
-	ImageID       int64  `json:"image_id"`
-	PrepullStatus int16  `json:"prepull_status"`
-	DesiredNodes  int32  `json:"desired_nodes"`
-	ReadyNodes    int32  `json:"ready_nodes"`
-	DaemonSet     string `json:"daemonset"`
+	ImageID       int64    `json:"image_id"`
+	PrepullStatus int16    `json:"prepull_status"`
+	DesiredNodes  int32    `json:"desired_nodes"`
+	ReadyNodes    int32    `json:"ready_nodes"`
+	DaemonSet     string   `json:"daemonset"`
+	ImageCount    int      `json:"image_count"`
+	Images        []string `json:"images"`
 }
 
 // RuntimeSelftestResponse 描述运行时接入即测的当前结果。

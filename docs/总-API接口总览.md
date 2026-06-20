@@ -77,7 +77,7 @@
 ### M2 沙箱引擎 `/api/v1/sandbox`
 - `/runtimes`、`/tools`:运行时/工具管理 + 接入即测 `[平台管理员]`;镜像预拉取提供触发与状态查询,完成以全目标节点真实拉取成功为准。
 - `/sandboxes`:创建/查询/销毁/回收 `[内部]`;`WS /sandboxes/{id}/progress`、`/terminal`。
-- `/sandboxes/{id}/files`、`/tools/{code}/*`:文件/工具代理 `[用户]`。
+- `/sandboxes/{id}/files`、`/tools/{code}/*`、`/command-tools/{code}/run`:文件、Web 工具代理和受控命令工具 `[用户]`。
 - `/sandboxes/{id}/chain/*`:链上能力(deploy/tx/query/reset)`[内部]`。
 - `/quota`:配额。
 

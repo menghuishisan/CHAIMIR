@@ -139,11 +139,11 @@ type CreateSandboxInputModel struct {
 type AdapterSpec struct {
 	WorkspaceDir       string                     `json:"workspace_dir"`
 	VolumeDomains      []VolumeDomainSpec         `json:"volume_domains"`
-	RuntimeContainer   workload.ComponentSpec      `json:"runtime_container"`
-	InfraSidecars      []workload.ComponentSpec    `json:"infra_sidecars"`
-	Pods               []workload.PodSpec          `json:"pods"`
-	Services           []workload.ServiceSpec      `json:"services"`
-	Routes             []workload.RouteSpec        `json:"routes"`
+	RuntimeContainer   workload.ComponentSpec     `json:"runtime_container"`
+	InfraSidecars      []workload.ComponentSpec   `json:"infra_sidecars"`
+	Pods               []workload.PodSpec         `json:"pods"`
+	Services           []workload.ServiceSpec     `json:"services"`
+	Routes             []workload.RouteSpec       `json:"routes"`
 	NetworkRules       []workload.NetworkRuleSpec `json:"network_rules"`
 	InitAssets         []InitAssetSpec            `json:"init_assets"`
 	DefaultToolCodes   []string                   `json:"default_tool_codes"`
@@ -197,10 +197,18 @@ type CapabilityCommandSpec struct {
 // ToolResourceSpec 是 tool.resource_spec 的控制面可执行结构。
 type ToolResourceSpec struct {
 	BuiltinEndpoint string                     `json:"builtin_endpoint"`
-	Components      []workload.ComponentSpec  `json:"components"`
-	Services        []workload.ServiceSpec    `json:"services"`
-	Routes          []workload.RouteSpec      `json:"routes"`
+	Components      []workload.ComponentSpec   `json:"components"`
+	Services        []workload.ServiceSpec     `json:"services"`
+	Routes          []workload.RouteSpec       `json:"routes"`
 	NetworkRules    []workload.NetworkRuleSpec `json:"network_rules"`
+	CommandPolicy   CommandToolPolicy          `json:"command_policy"`
+}
+
+// CommandToolPolicy 描述命令工具允许执行的入口命令和超时边界。
+type CommandToolPolicy struct {
+	AllowedCommands       []string `json:"allowed_commands"`
+	DefaultTimeoutSeconds int32    `json:"default_timeout_seconds"`
+	MaxTimeoutSeconds     int32    `json:"max_timeout_seconds"`
 }
 
 // CreateSandboxPlan 汇总创建沙箱时 service 交给编排器的完整上下文。

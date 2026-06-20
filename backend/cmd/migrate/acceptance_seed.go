@@ -36,8 +36,6 @@ type acceptanceSeedIDs struct {
 	AuthSession        int64
 	Runtime            int64
 	RuntimeImage       int64
-	ToolVSCode         int64
-	ToolExplorer       int64
 	Sandbox            int64
 	SandboxTool        int64
 	SandboxEvent       int64
@@ -109,7 +107,7 @@ var acceptanceIDs = acceptanceSeedIDs{
 	MajorChain: 910000000000000021, MajorSecurity: 910000000000000022, ClassChain: 910000000000000031, ClassSecurity: 910000000000000032,
 	SchoolAdmin: 910000000000000101, TeacherMain: 910000000000000102, TeacherAssist: 910000000000000103,
 	StudentA: 910000000000000201, StudentB: 910000000000000202, StudentC: 910000000000000203, AuthSession: 910000000000000301,
-	Runtime: 910000000000001001, RuntimeImage: 910000000000001002, ToolVSCode: 910000000000001011, ToolExplorer: 910000000000001012,
+	Runtime: 910000000000001001, RuntimeImage: 910000000000001002,
 	Sandbox: 910000000000001021, SandboxTool: 910000000000001022, SandboxEvent: 910000000000001023,
 	Judger: 910000000000002001, JudgeTask: 910000000000002011, JudgeResult: 910000000000002012, SimPackage: 910000000000003001,
 	ContentCat: 910000000000004001, ContentLab: 910000000000004011, ContentContest: 910000000000004012, ContentTheory: 910000000000004013, Paper: 910000000000004021,

@@ -195,6 +195,8 @@ paths:
     $ref: './paths/sandbox.yaml#/api/v1/sandbox/sandboxes/{id}/chain/query'
   /api/v1/sandbox/sandboxes/{id}/chain/reset:
     $ref: './paths/sandbox.yaml#/api/v1/sandbox/sandboxes/{id}/chain/reset'
+  /api/v1/sandbox/sandboxes/{id}/command-tools/{tool_code}/run:
+    $ref: './paths/sandbox.yaml#/api/v1/sandbox/sandboxes/{id}/command-tools/{tool_code}/run'
   /api/v1/sandbox/sandboxes/{id}/tools/{tool_code}/{proxy_path}:
     $ref: './paths/sandbox.yaml#/api/v1/sandbox/sandboxes/{id}/tools/{tool_code}/{proxy_path}'
   /api/v1/sandbox/quota:

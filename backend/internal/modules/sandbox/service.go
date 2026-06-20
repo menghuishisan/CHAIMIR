@@ -44,8 +44,8 @@ type Orchestrator interface {
 	Exec(ctx context.Context, namespace, container string, command []string, stdin []byte, tty bool) ([]byte, []byte, error)
 	// ExecStream 在沙箱容器中执行交互式命令并透传流。
 	ExecStream(ctx context.Context, namespace, container string, command []string, stdin io.Reader, stdout io.Writer, stderr io.Writer, tty bool) error
-	// PrepullImage 创建或更新预拉取 DaemonSet 并等待真实节点 Ready。
-	PrepullImage(ctx context.Context, image RuntimeImage) (PrepullResult, error)
+	// PrepullImage 创建或更新预拉取 DaemonSet 并等待工作负载镜像集合在真实节点 Ready。
+	PrepullImage(ctx context.Context, image RuntimeImage, imageURLs []string) (PrepullResult, error)
 	// DeletePrepullDaemonSet 删除镜像预拉取 DaemonSet,用于镜像停用或删除闭环。
 	DeletePrepullDaemonSet(ctx context.Context, image RuntimeImage) error
 	// ToolReady 校验 Web 工具容器已达到可代理状态。
@@ -649,7 +649,7 @@ func (s *Service) createToolRecords(ctx context.Context, tx TxStore, sb Sandbox,
 	for _, tool := range tools {
 		endpoint := toolEndpoint(sb.ID, tool)
 		status := SandboxToolStatusReady
-		if tool.Kind == SandboxToolKindWebEmbed {
+		if tool.Kind == SandboxToolKindWebEmbed || tool.Kind == SandboxToolKindCommand {
 			status = SandboxToolStatusStarting
 		}
 		row, err := tx.CreateSandboxTool(ctx, s.ids.Generate(), sb.TenantID, sb.ID, tool, endpoint, status)
@@ -668,6 +668,8 @@ func toolEndpoint(sandboxID int64, tool Tool) string {
 		return renderBuiltinToolEndpoint(sandboxID, tool.ResourceSpec)
 	case SandboxToolKindTerminal:
 		return fmt.Sprintf("/api/v1/sandbox/sandboxes/%d/terminal", sandboxID)
+	case SandboxToolKindCommand:
+		return fmt.Sprintf("/api/v1/sandbox/sandboxes/%d/command-tools/%s/run", sandboxID, tool.Code)
 	default:
 		return fmt.Sprintf("/api/v1/sandbox/sandboxes/%d/tools/%s/", sandboxID, tool.Code)
 	}
@@ -831,7 +833,7 @@ func (s *Service) updateToolsAsync(ctx context.Context, plan CreateSandboxPlan) 
 func toolReadinessTimeoutForPlan(cfg config.SandboxConfig, plan CreateSandboxPlan) int64 {
 	timeout := int64(cfg.ReadyTimeoutSeconds)
 	for _, tool := range plan.Tools {
-		if tool.Kind != SandboxToolKindWebEmbed {
+		if tool.Kind != SandboxToolKindWebEmbed && tool.Kind != SandboxToolKindCommand {
 			continue
 		}
 		for _, component := range tool.ResourceSpec.Components {
@@ -995,27 +997,51 @@ func (s *Service) markInitFailed(ctx context.Context, sb Sandbox, cause error) {
 	logging.ErrorContext(ctx, "sandbox init failed", cause.Error(), slog.Int64("tenant_id", sb.TenantID), slog.Int64("sandbox_id", sb.ID))
 }
 
-// updateToolReadiness 将 Web 工具真实健康检查结果写回控制面,避免未就绪工具被代理。
+// updateToolReadiness 将工具真实健康检查结果写回控制面,避免未就绪工具被访问。
 func (s *Service) updateToolReadiness(ctx context.Context, plan CreateSandboxPlan) error {
-	for _, tool := range plan.Tools {
-		if tool.Kind != SandboxToolKindWebEmbed {
+	return runToolReadinessChecks(ctx, plan.Sandbox, plan.Tools, s.waitToolReady, s.persistToolStatus)
+}
+
+type toolReadinessWaitFunc func(context.Context, Sandbox, Tool) error
+type toolReadinessPersistFunc func(context.Context, Sandbox, Tool, int16) error
+
+// runToolReadinessChecks 并行推进工具就绪检查,避免某个慢工具阻塞其他工具入口解灰。
+func runToolReadinessChecks(ctx context.Context, sb Sandbox, tools []Tool, wait toolReadinessWaitFunc, persist toolReadinessPersistFunc) error {
+	errs := make(chan error, len(tools))
+	var wg sync.WaitGroup
+	for _, tool := range tools {
+		if tool.Kind != SandboxToolKindWebEmbed && tool.Kind != SandboxToolKindCommand {
 			continue
 		}
-		if err := s.waitToolReady(ctx, plan.Sandbox, tool); err != nil {
-			if persistErr := s.persistToolStatus(ctx, plan.Sandbox, tool, SandboxToolStatusFailed); persistErr != nil {
-				return persistErr
+		tool := tool
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if err := wait(ctx, sb, tool); err != nil {
+				if persistErr := persist(ctx, sb, tool, SandboxToolStatusFailed); persistErr != nil {
+					errs <- persistErr
+					return
+				}
+				logging.ErrorContext(ctx, "sandbox tool readiness failed", err.Error(), slog.Int64("tenant_id", sb.TenantID), slog.Int64("sandbox_id", sb.ID), slog.String("tool_code", tool.Code))
+				errs <- apperr.ErrSandboxToolProxyUnavailable.WithCause(err)
+				return
 			}
-			logging.ErrorContext(ctx, "sandbox tool readiness failed", err.Error(), slog.Int64("tenant_id", plan.Sandbox.TenantID), slog.Int64("sandbox_id", plan.Sandbox.ID), slog.String("tool_code", tool.Code))
-			return apperr.ErrSandboxToolProxyUnavailable.WithCause(err)
-		}
-		if err := s.persistToolStatus(ctx, plan.Sandbox, tool, SandboxToolStatusReady); err != nil {
+			if err := persist(ctx, sb, tool, SandboxToolStatusReady); err != nil {
+				errs <- err
+			}
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-// waitToolReady 按配置轮询 Web 工具就绪状态,避免慢启动工具被一次探测永久判失败。
+// waitToolReady 按配置轮询工具就绪状态,避免慢启动工具被一次探测永久判失败。
 func (s *Service) waitToolReady(ctx context.Context, sb Sandbox, tool Tool) error {
 	interval := time.Duration(s.cfg.ReadyPollIntervalSeconds) * time.Second
 	if interval <= 0 {

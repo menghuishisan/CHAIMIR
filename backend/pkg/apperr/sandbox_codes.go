@@ -152,6 +152,8 @@ const (
 	CodeSandboxToolCreateInvalid = "23004"
 	// CodeSandboxToolPersistFailed 表示工具配置持久化失败。
 	CodeSandboxToolPersistFailed = "23005"
+	// CodeSandboxToolRunRequestInvalid 表示命令工具执行请求非法。
+	CodeSandboxToolRunRequestInvalid = "23006"
 )
 
 const (
@@ -324,6 +326,8 @@ var (
 	ErrSandboxToolCreateInvalid = New(CodeSandboxToolCreateInvalid, "工具注册信息不完整,请检查后重试")
 	// ErrSandboxToolPersistFailed 表示工具配置保存失败。
 	ErrSandboxToolPersistFailed = New(CodeSandboxToolPersistFailed, "工具配置保存失败,请稍后重试")
+	// ErrSandboxToolRunRequestInvalid 表示命令工具执行请求不完整。
+	ErrSandboxToolRunRequestInvalid = New(CodeSandboxToolRunRequestInvalid, "工具执行请求不完整,请检查后重试")
 )
 
 var (

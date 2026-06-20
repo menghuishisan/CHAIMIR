@@ -100,6 +100,7 @@ func (a sandboxAPI) registerUserRoutes(g gin.IRouter) {
 	g.GET("/sandboxes/:id/files", a.getFiles)
 	g.PUT("/sandboxes/:id/files", a.writeFile)
 	g.POST("/sandboxes/:id/files/save", a.saveFiles)
+	g.POST("/sandboxes/:id/command-tools/:tool_code/run", a.runCommandTool)
 	g.Match([]string{http.MethodGet, http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete, http.MethodHead, http.MethodOptions}, "/sandboxes/:id/tools/:tool_code/*proxy_path", a.toolProxy)
 }
 
@@ -461,23 +462,29 @@ func (a sandboxAPI) toolProxy(c *gin.Context) {
 	}
 	a.svc.ObserveToolAccess(c.Request.Context(), sb)
 	target := toolProxyURL(sb, tool)
-	proxy := httputil.NewSingleHostReverseProxy(target)
-	proxy.ErrorHandler = func(w http.ResponseWriter, _ *http.Request, err error) {
+	proxy := newToolReverseProxy(target, c.Param("proxy_path"), func(w http.ResponseWriter, _ *http.Request, err error) {
 		response.Fail(c, apperr.ErrSandboxToolProxyUnavailable.WithCause(err))
-	}
-	proxy.Rewrite = func(pr *httputil.ProxyRequest) {
-		pr.SetURL(target)
-		pr.Out.URL.Path = strings.TrimPrefix(c.Param("proxy_path"), "/")
-		if pr.Out.URL.Path == "" {
-			pr.Out.URL.Path = "/"
-		} else {
-			pr.Out.URL.Path = "/" + pr.Out.URL.Path
-		}
-		pr.Out.Host = target.Host
-		sanitizeToolProxyHeaders(pr.Out.Header)
-	}
+	})
 	proxy.ServeHTTP(c.Writer, c.Request)
 	a.svc.ObserveToolAccess(c.Request.Context(), sb)
+}
+
+// runCommandTool 执行命令类工具的一次受控命令。
+func (a sandboxAPI) runCommandTool(c *gin.Context) {
+	id, ok := httpx.PathID(c, "id")
+	if !ok {
+		return
+	}
+	current, ok := currentTenantIdentity(c)
+	if !ok {
+		return
+	}
+	var req ToolRunRequest
+	if !httpx.BindJSONWithError(c, &req, apperr.ErrSandboxToolRunRequestInvalid) {
+		return
+	}
+	out, err := a.svc.RunCommandToolForOwner(c.Request.Context(), current.TenantID, current.AccountID, id, c.Param("tool_code"), req)
+	httpx.Write(c, out, err)
 }
 
 // chainDeploy 绑定链部署请求。
@@ -627,10 +634,54 @@ func serviceSourceRef(c *gin.Context) (string, bool) {
 
 // toolProxyURL 生成集群内 Web 工具 Service 目标地址,不暴露外部直链。
 func toolProxyURL(sb Sandbox, tool SandboxTool) *url.URL {
+	serviceName, servicePort, ok := toolProxyRouteTarget(tool.ResourceSpec)
+	if !ok {
+		return &url.URL{Scheme: "http"}
+	}
 	return &url.URL{
 		Scheme: "http",
-		Host:   "tool-" + tool.ToolCode + "." + sb.Namespace + ".svc.cluster.local",
+		Host:   fmt.Sprintf("%s.%s.svc.cluster.local:%d", serviceName, sb.Namespace, servicePort),
 	}
+}
+
+// newToolReverseProxy 构造只使用 Rewrite 的反向代理,避免与 Director 旧机制混用。
+func newToolReverseProxy(target *url.URL, proxyPath string, errorHandler func(http.ResponseWriter, *http.Request, error)) *httputil.ReverseProxy {
+	return &httputil.ReverseProxy{
+		ErrorHandler: errorHandler,
+		Rewrite: func(pr *httputil.ProxyRequest) {
+			pr.SetURL(target)
+			pr.Out.URL.Path = strings.TrimPrefix(proxyPath, "/")
+			if pr.Out.URL.Path == "" {
+				pr.Out.URL.Path = "/"
+			} else {
+				pr.Out.URL.Path = "/" + pr.Out.URL.Path
+			}
+			pr.Out.Host = target.Host
+			sanitizeToolProxyHeaders(pr.Out.Header)
+		},
+	}
+}
+
+// toolProxyRouteTarget 解析工具声明的首个平台代理路由,与 K8s Service 创建共用 resource_spec。
+func toolProxyRouteTarget(spec ToolResourceSpec) (string, int32, bool) {
+	for _, route := range spec.Routes {
+		serviceName := strings.TrimSpace(route.Service)
+		portName := strings.TrimSpace(route.Port)
+		if serviceName == "" || portName == "" {
+			continue
+		}
+		for _, service := range spec.Services {
+			if strings.TrimSpace(service.Name) != serviceName {
+				continue
+			}
+			for _, port := range service.Ports {
+				if strings.TrimSpace(port.Name) == portName && port.Port > 0 {
+					return serviceName, port.Port, true
+				}
+			}
+		}
+	}
+	return "", 0, false
 }
 
 // sanitizeToolProxyHeaders 删除平台身份凭据和内部服务签名,防止沙箱工具读取用户或服务端 token。

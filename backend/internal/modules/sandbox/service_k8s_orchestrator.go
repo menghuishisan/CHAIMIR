@@ -34,6 +34,8 @@ import (
 
 var errMetricsUnavailable = errors.New("kubernetes metrics api unavailable")
 
+const sandboxWorkloadServiceAccount = "sandbox-workload"
+
 // K8sOrchestrator 使用 client-go 创建、回收和预拉取沙箱资源。
 type K8sOrchestrator struct {
 	client *platformk8s.Client
@@ -51,6 +53,9 @@ func (o *K8sOrchestrator) CreateSandboxResources(ctx context.Context, plan Creat
 	ns := namespaceObject(plan.Sandbox.Namespace, plan.Sandbox)
 	if _, err := cs.CoreV1().Namespaces().Create(ctx, ns, metav1.CreateOptions{}); err != nil && !apierrors.IsAlreadyExists(err) {
 		return fmt.Errorf("创建沙箱 Namespace 失败: %w", err)
+	}
+	if err := o.applySandboxServiceAccount(ctx, cs, plan); err != nil {
+		return err
 	}
 	if err := o.applyResourceQuota(ctx, cs, plan); err != nil {
 		return err
@@ -184,6 +189,9 @@ func (o *K8sOrchestrator) RestoreSnapshotResources(ctx context.Context, plan Cre
 	if _, err := cs.CoreV1().Namespaces().Create(ctx, ns, metav1.CreateOptions{}); err != nil && !apierrors.IsAlreadyExists(err) {
 		return fmt.Errorf("创建快照恢复 Namespace 失败: %w", err)
 	}
+	if err := o.applySandboxServiceAccount(ctx, cs, plan); err != nil {
+		return err
+	}
 	if err := o.applyResourceQuota(ctx, cs, plan); err != nil {
 		return err
 	}
@@ -299,9 +307,9 @@ func (o *K8sOrchestrator) ExecStream(ctx context.Context, namespace, container s
 	return o.client.ExecStream(ctx, namespace, podName, containerName, command, stdin, stdout, stderr, tty)
 }
 
-// PrepullImage 创建或更新预拉取 DaemonSet 并等待真实节点 Ready。
-func (o *K8sOrchestrator) PrepullImage(ctx context.Context, image RuntimeImage) (PrepullResult, error) {
-	ds := o.prepullDaemonSet(image)
+// PrepullImage 创建或更新预拉取 DaemonSet 并等待工作负载镜像集合在真实节点 Ready。
+func (o *K8sOrchestrator) PrepullImage(ctx context.Context, image RuntimeImage, imageURLs []string) (PrepullResult, error) {
+	ds := o.prepullDaemonSet(image, imageURLs)
 	cs := o.client.Clientset()
 	client := cs.AppsV1().DaemonSets(o.cfg.PrepullNamespace)
 	existing, err := client.Get(ctx, ds.Name, metav1.GetOptions{})
@@ -326,7 +334,7 @@ func (o *K8sOrchestrator) PrepullImage(ctx context.Context, image RuntimeImage) 
 		if err != nil {
 			return PrepullResult{DaemonSet: ds.Name}, fmt.Errorf("查询预拉取状态失败: %w", err)
 		}
-		detail, err := jsonBytes(map[string]any{"desired_nodes": current.Status.DesiredNumberScheduled, "ready_nodes": current.Status.NumberReady, "daemonset": ds.Name})
+		detail, err := jsonBytes(map[string]any{"desired_nodes": current.Status.DesiredNumberScheduled, "ready_nodes": current.Status.NumberReady, "daemonset": ds.Name, "image_count": len(imageURLs), "images": imageURLs})
 		if err != nil {
 			return PrepullResult{DaemonSet: ds.Name}, fmt.Errorf("编码预拉取状态失败: %w", err)
 		}
@@ -365,7 +373,7 @@ func (o *K8sOrchestrator) PrepullImage(ctx context.Context, image RuntimeImage) 
 
 // DeletePrepullDaemonSet 删除镜像预拉取 DaemonSet,NotFound 视为幂等成功。
 func (o *K8sOrchestrator) DeletePrepullDaemonSet(ctx context.Context, image RuntimeImage) error {
-	ds := o.prepullDaemonSet(image)
+	ds := o.prepullDaemonSet(image, []string{image.ImageURL})
 	err := o.client.Clientset().AppsV1().DaemonSets(o.cfg.PrepullNamespace).Delete(ctx, ds.Name, metav1.DeleteOptions{})
 	if apierrors.IsNotFound(err) {
 		return nil
@@ -518,6 +526,27 @@ func namespaceObject(name string, sb Sandbox) *corev1.Namespace {
 			"pod-security.kubernetes.io/enforce": "restricted",
 		},
 	}}
+}
+
+// applySandboxServiceAccount 创建无权限工作负载账号,避免依赖 Kubernetes 默认 SA 异步生成。
+func (o *K8sOrchestrator) applySandboxServiceAccount(ctx context.Context, cs kubernetes.Interface, plan CreateSandboxPlan) error {
+	automount := false
+	sa := &corev1.ServiceAccount{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      sandboxWorkloadServiceAccount,
+			Namespace: plan.Sandbox.Namespace,
+			Labels: map[string]string{
+				"app":                   "chaimir",
+				"module":                "sandbox",
+				"chaimir.io/sandbox-id": fmt.Sprintf("%d", plan.Sandbox.ID),
+			},
+		},
+		AutomountServiceAccountToken: &automount,
+	}
+	if _, err := cs.CoreV1().ServiceAccounts(plan.Sandbox.Namespace).Create(ctx, sa, metav1.CreateOptions{}); err != nil && !apierrors.IsAlreadyExists(err) {
+		return fmt.Errorf("创建沙箱 ServiceAccount 失败: %w", err)
+	}
+	return nil
 }
 
 // applyResourceQuota 创建 Namespace 级资源硬限。
@@ -838,7 +867,7 @@ func (o *K8sOrchestrator) podsForPlan(plan CreateSandboxPlan) []*corev1.Pod {
 		out = append(out, o.podFromSpec(plan, pod))
 	}
 	for _, tool := range plan.Tools {
-		if tool.Kind == SandboxToolKindWebEmbed {
+		if tool.Kind == SandboxToolKindWebEmbed || tool.Kind == SandboxToolKindCommand {
 			for _, component := range tool.ResourceSpec.Components {
 				out = append(out, o.toolPodForPlan(plan, tool, component))
 			}
@@ -884,6 +913,7 @@ func (o *K8sOrchestrator) podFromSpec(plan CreateSandboxPlan, spec workload.PodS
 		},
 		Spec: corev1.PodSpec{
 			AutomountServiceAccountToken: &automount,
+			ServiceAccountName:           sandboxWorkloadServiceAccount,
 			RestartPolicy:                corev1.RestartPolicyNever,
 			SecurityContext:              podSecurityContext(),
 			Containers:                   containers,
@@ -913,6 +943,7 @@ func (o *K8sOrchestrator) toolPodForPlan(plan CreateSandboxPlan, tool Tool, comp
 		},
 		Spec: corev1.PodSpec{
 			AutomountServiceAccountToken: &automount,
+			ServiceAccountName:           sandboxWorkloadServiceAccount,
 			RestartPolicy:                corev1.RestartPolicyNever,
 			SecurityContext:              podSecurityContext(),
 			Containers:                   []corev1.Container{o.containerFromTool(tool, component, plan.Runtime.AdapterSpec)},
@@ -1322,9 +1353,23 @@ func splitExecTarget(target string) (string, string) {
 }
 
 // prepullDaemonSet 构造镜像预拉取 DaemonSet。
-func (o *K8sOrchestrator) prepullDaemonSet(image RuntimeImage) *appsv1.DaemonSet {
+func (o *K8sOrchestrator) prepullDaemonSet(image RuntimeImage, imageURLs []string) *appsv1.DaemonSet {
 	labels := map[string]string{"app": "chaimir", "module": "sandbox", "runtime_image_id": fmt.Sprintf("%d", image.ID)}
 	automount := false
+	containers := make([]corev1.Container, 0, len(imageURLs))
+	for idx, imageURL := range imageURLs {
+		containers = append(containers, corev1.Container{
+			Name:            prepullContainerName(idx, imageURL),
+			Image:           imageURL,
+			ImagePullPolicy: corev1.PullIfNotPresent,
+			Command:         []string{"sleep", fmt.Sprintf("%d", o.cfg.PrepullHoldSeconds)},
+			Resources: corev1.ResourceRequirements{
+				Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse(o.cfg.PrepullRequestCPU), corev1.ResourceMemory: resource.MustParse(o.cfg.PrepullRequestMemory)},
+				Limits:   corev1.ResourceList{corev1.ResourceCPU: resource.MustParse(o.cfg.PrepullLimitCPU), corev1.ResourceMemory: resource.MustParse(o.cfg.PrepullLimitMemory)},
+			},
+			SecurityContext: containerSecurityContext(true),
+		})
+	}
 	return &appsv1.DaemonSet{
 		ObjectMeta: metav1.ObjectMeta{Name: fmt.Sprintf("chaimir-prepull-%d", image.ID), Namespace: o.cfg.PrepullNamespace, Labels: labels},
 		Spec: appsv1.DaemonSetSpec{
@@ -1336,22 +1381,27 @@ func (o *K8sOrchestrator) prepullDaemonSet(image RuntimeImage) *appsv1.DaemonSet
 					RestartPolicy:                corev1.RestartPolicyAlways,
 					NodeSelector:                 copyStringMap(o.cfg.SandboxNodeSelector),
 					Tolerations:                  sandboxTolerations(o.cfg.SandboxNodeTolerations),
-					Containers: []corev1.Container{{
-						Name:            "prepull",
-						Image:           image.ImageURL,
-						ImagePullPolicy: corev1.PullIfNotPresent,
-						Command:         []string{"sleep", fmt.Sprintf("%d", o.cfg.PrepullHoldSeconds)},
-						Resources: corev1.ResourceRequirements{
-							Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse(o.cfg.PrepullRequestCPU), corev1.ResourceMemory: resource.MustParse(o.cfg.PrepullRequestMemory)},
-							Limits:   corev1.ResourceList{corev1.ResourceCPU: resource.MustParse(o.cfg.PrepullLimitCPU), corev1.ResourceMemory: resource.MustParse(o.cfg.PrepullLimitMemory)},
-						},
-						SecurityContext: containerSecurityContext(true),
-					}},
-					SecurityContext: podSecurityContext(),
+					Containers:                   containers,
+					SecurityContext:              podSecurityContext(),
 				},
 			},
 		},
 	}
+}
+
+// prepullContainerName 基于镜像位置生成稳定容器名,避免多镜像预拉取时名称冲突。
+func prepullContainerName(index int, imageURL string) string {
+	sum := sha256.Sum256([]byte(imageURL))
+	name := strings.NewReplacer("/", "-", ":", "-", "@", "-").Replace(strings.TrimSpace(imageURL))
+	name = strings.ToLower(name)
+	if len(name) > 36 {
+		name = name[len(name)-36:]
+	}
+	name = strings.Trim(name, "-.")
+	if name == "" {
+		name = "image"
+	}
+	return fmt.Sprintf("prepull-%02d-%s-%s", index, name, hex.EncodeToString(sum[:3]))
 }
 
 // copyStringMap 复制调度标签映射,避免调用方持有的配置被 Kubernetes 对象修改。

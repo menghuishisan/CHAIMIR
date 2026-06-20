@@ -1,13 +1,15 @@
-# 静态命名空间定义(平台常驻三命名空间)。
+# 静态命名空间定义(平台常驻命名空间)。
 # 依据 docs/总-部署架构设计.md §二:
 #   chaimir-system  后端单体 / 前端
 #   chaimir-data    PostgreSQL / Redis / MinIO / NATS / ClamAV(或外接托管)
+#   chaimir-prepull M2 镜像预拉取 DaemonSet
 #   monitoring      Prometheus / Grafana(外接,M9 嵌入)
 # 动态命名空间 sbx-* / judge-* / battle-* 由后端 ServiceAccount 运行时按需创建/销毁,
 # 不在此处静态声明(见 base/rbac 与 base/networkpolicy 的动态模板)。
 #
 # PodSecurity Admission:
 #   chaimir-system 跑受信平台代码,但统一以最严档位运行 → enforce=restricted。
+#   chaimir-prepull 仅运行 M2 预拉取 DaemonSet,同样采用 restricted。
 #   chaimir-data 中间件(PG/MinIO 等)需要写卷/特定 uid → baseline。
 ---
 apiVersion: v1
@@ -32,6 +34,19 @@ metadata:
     chaimir.io/layer: data
     # 中间件需挂数据卷、部分镜像固定 uid,放宽到 baseline(仍禁特权/主机命名空间)。
     pod-security.kubernetes.io/enforce: baseline
+    pod-security.kubernetes.io/enforce-version: latest
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: chaimir-prepull
+  labels:
+    app.kubernetes.io/part-of: chaimir
+    chaimir.io/layer: sandbox-prepull
+    # 镜像预拉取仅运行非业务 DaemonSet,必须保持 restricted。
+    pod-security.kubernetes.io/enforce: restricted
     pod-security.kubernetes.io/enforce-version: latest
     pod-security.kubernetes.io/audit: restricted
     pod-security.kubernetes.io/warn: restricted

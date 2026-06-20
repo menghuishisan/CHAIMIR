@@ -475,6 +475,17 @@ export interface SandboxToolAccess {
   status: number
 }
 
+export interface SandboxCommandToolRunRequest {
+  command: string[]
+  stdin_base64?: string
+  timeout_sec?: number
+}
+
+export interface SandboxCommandToolRunResponse {
+  stdout_base64: string
+  stderr_base64: string
+}
+
 export interface SandboxResourceUsage {
   cpu_usage_milli: number
   memory_usage_mib: number

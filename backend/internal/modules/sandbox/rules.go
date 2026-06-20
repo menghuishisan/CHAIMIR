@@ -79,12 +79,12 @@ func validateRuntimeRequest(req RuntimeRequest, cfg config.SandboxConfig) (Adapt
 	return spec, nil
 }
 
-// validateToolRequest 校验工具定义,确保 web-embed 只通过 WorkloadSpec 声明组件和路由。
+// validateToolRequest 校验工具定义,确保不同工具类型只走各自唯一声明口径。
 func validateToolRequest(req ToolRequest, cfg config.SandboxConfig) (ToolResourceSpec, error) {
 	if !codePattern.MatchString(req.Code) || strings.TrimSpace(req.Name) == "" {
 		return ToolResourceSpec{}, apperr.ErrSandboxToolCreateInvalid
 	}
-	if req.Kind < SandboxToolKindBuiltin || req.Kind > SandboxToolKindWebEmbed {
+	if req.Kind < SandboxToolKindBuiltin || req.Kind > SandboxToolKindCommand {
 		return ToolResourceSpec{}, apperr.ErrSandboxToolCreateInvalid
 	}
 	if req.Status != 0 && req.Status != ToolStatusAvailable && req.Status != ToolStatusDisabled {
@@ -97,6 +97,9 @@ func validateToolRequest(req ToolRequest, cfg config.SandboxConfig) (ToolResourc
 		}
 	}
 	if req.Kind == SandboxToolKindWebEmbed {
+		if commandPolicyConfigured(spec.CommandPolicy) {
+			return ToolResourceSpec{}, apperr.ErrSandboxToolCreateInvalid
+		}
 		if len(spec.Components) == 0 || len(spec.Services) == 0 || len(spec.Routes) == 0 {
 			return ToolResourceSpec{}, apperr.ErrSandboxToolCreateInvalid
 		}
@@ -119,12 +122,20 @@ func validateToolRequest(req ToolRequest, cfg config.SandboxConfig) (ToolResourc
 			}
 		}
 	}
+	if req.Kind == SandboxToolKindCommand {
+		if err := validateCommandToolSpec(&spec, cfg); err != nil {
+			return ToolResourceSpec{}, err
+		}
+	}
 	if req.Kind == SandboxToolKindBuiltin {
+		if commandPolicyConfigured(spec.CommandPolicy) {
+			return ToolResourceSpec{}, apperr.ErrSandboxToolCreateInvalid
+		}
 		if !validBuiltinEndpointTemplate(spec.BuiltinEndpoint) {
 			return ToolResourceSpec{}, apperr.ErrSandboxToolCreateInvalid
 		}
 	}
-	if req.Kind != SandboxToolKindWebEmbed && toolHasContainerSpec(spec) {
+	if req.Kind != SandboxToolKindWebEmbed && req.Kind != SandboxToolKindCommand && toolHasContainerSpec(spec) {
 		return ToolResourceSpec{}, apperr.ErrSandboxToolCreateInvalid
 	}
 	if req.Kind != SandboxToolKindWebEmbed && len(spec.NetworkRules) > 0 {
@@ -137,6 +148,85 @@ func validateToolRequest(req ToolRequest, cfg config.SandboxConfig) (ToolResourc
 		return ToolResourceSpec{}, err
 	}
 	return spec, nil
+}
+
+// validateCommandToolSpec 校验命令工具只能声明无端口执行容器,不得暴露平台代理入口。
+func validateCommandToolSpec(spec *ToolResourceSpec, cfg config.SandboxConfig) error {
+	if spec == nil {
+		return apperr.ErrSandboxToolCreateInvalid
+	}
+	if len(spec.Components) != 1 || len(spec.Services) > 0 || len(spec.Routes) > 0 || len(spec.NetworkRules) > 0 {
+		return apperr.ErrSandboxToolCreateInvalid
+	}
+	if err := validateCommandToolPolicy(&spec.CommandPolicy); err != nil {
+		return err
+	}
+	if err := validateCommandContainerSpec(&spec.Components[0], cfg); err != nil {
+		return apperr.ErrSandboxToolCreateInvalid.WithCause(err)
+	}
+	return nil
+}
+
+// validateCommandToolPolicy 校验命令工具只允许声明固定入口命令和正数超时。
+func validateCommandToolPolicy(policy *CommandToolPolicy) error {
+	if policy == nil || len(policy.AllowedCommands) == 0 || policy.DefaultTimeoutSeconds <= 0 || policy.MaxTimeoutSeconds <= 0 || policy.DefaultTimeoutSeconds > policy.MaxTimeoutSeconds {
+		return apperr.ErrSandboxToolCreateInvalid
+	}
+	seen := map[string]struct{}{}
+	for i := range policy.AllowedCommands {
+		command := strings.TrimSpace(policy.AllowedCommands[i])
+		if command == "" || strings.ContainsAny(command, `/\`) {
+			return apperr.ErrSandboxToolCreateInvalid
+		}
+		if _, exists := seen[command]; exists {
+			return apperr.ErrSandboxToolCreateInvalid
+		}
+		seen[command] = struct{}{}
+		policy.AllowedCommands[i] = command
+	}
+	return nil
+}
+
+// commandPolicyConfigured 判断非命令工具是否误带命令策略。
+func commandPolicyConfigured(policy CommandToolPolicy) bool {
+	return len(policy.AllowedCommands) > 0 || policy.DefaultTimeoutSeconds != 0 || policy.MaxTimeoutSeconds != 0
+}
+
+// validateCommandContainerSpec 校验命令工具容器长期待命且不暴露网络端口。
+func validateCommandContainerSpec(spec *workload.ComponentSpec, cfg config.SandboxConfig) error {
+	spec.Name = strings.TrimSpace(spec.Name)
+	if !mountNamePattern.MatchString(spec.Name) || len(spec.Ports) != 0 {
+		return apperr.ErrSandboxContainerSpecInvalid
+	}
+	if strings.TrimSpace(spec.ImageURL) == "" || digestFromImageURL(spec.ImageURL) == "" {
+		return apperr.ErrSandboxContainerSpecInvalid
+	}
+	if !imageAttested(cfg, spec.ImageURL, digestFromImageURL(spec.ImageURL)) {
+		return apperr.ErrSandboxToolCreateInvalid
+	}
+	if err := validateLiteralEnv(spec.Env); err != nil {
+		return err
+	}
+	if err := validateResourceSpec(spec.Resources); err != nil {
+		return err
+	}
+	normalizeProbe(&spec.ReadinessProbe, cfg)
+	normalizeProbe(&spec.LivenessProbe, cfg)
+	for _, probe := range []*workload.ProbeSpec{&spec.ReadinessProbe, &spec.LivenessProbe} {
+		if err := validateProbeSpec(probe, map[string]struct{}{}); err != nil {
+			return err
+		}
+	}
+	if !safeNonShellCommand(spec.Command) {
+		return apperr.ErrSandboxContainerSpecInvalid
+	}
+	if spec.MountWorkspace == nil {
+		return apperr.ErrSandboxContainerSpecInvalid
+	}
+	if err := validateToolEphemeralMounts(spec.EphemeralMounts); err != nil {
+		return err
+	}
+	return nil
 }
 
 // validateQuota 校验租户沙箱配额均为显式正数,快照和保活上限允许为零表示禁用。
@@ -298,7 +388,7 @@ type declaredResourceUsage struct {
 	PodCount           int64
 }
 
-// sandboxDeclaredResourceUsage 汇总默认拓扑、显式 Pod 组和 web-embed 工具的声明式资源。
+// sandboxDeclaredResourceUsage 汇总默认拓扑、显式 Pod 组和会创建 Pod 的工具声明式资源。
 func sandboxDeclaredResourceUsage(adapter AdapterSpec, tools []Tool, cfg config.SandboxConfig) (declaredResourceUsage, error) {
 	usage := declaredResourceUsage{PodCount: int64(len(podTopologyForAdapter(adapter)))}
 	for _, pod := range podTopologyForAdapter(adapter) {
@@ -309,7 +399,7 @@ func sandboxDeclaredResourceUsage(adapter AdapterSpec, tools []Tool, cfg config.
 		}
 	}
 	for _, tool := range tools {
-		if tool.Kind != SandboxToolKindWebEmbed {
+		if tool.Kind != SandboxToolKindWebEmbed && tool.Kind != SandboxToolKindCommand {
 			continue
 		}
 		usage.PodCount += int64(len(tool.ResourceSpec.Components))

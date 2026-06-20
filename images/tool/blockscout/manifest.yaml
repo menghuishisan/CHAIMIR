@@ -29,6 +29,34 @@ tool:
   eco_tags:
     - evm
   mount_workspace: false
+  command:
+    - /usr/local/bin/chaimir-blockscout-entrypoint
+  env:
+    - name: DATABASE_URL
+      value: postgresql://postgres:postgres@runtime-sandbox:5432/blockscout
+    - name: ETHEREUM_JSONRPC_HTTP_URL
+      value: http://runtime-sandbox:8545
+    - name: ETHEREUM_JSONRPC_TRACE_URL
+      value: http://runtime-sandbox:8545
+    - name: ETHEREUM_JSONRPC_VARIANT
+      value: geth
+    - name: ECTO_USE_SSL
+      value: "false"
+    - name: PORT
+      value: "4000"
+    - name: DISABLE_EXCHANGE_RATES
+      value: "true"
+    - name: INDEXER_DISABLE_PENDING_TRANSACTIONS_FETCHER
+      value: "true"
+    - name: BLOCKSCOUT_DEPENDENCY_TIMEOUT_SECONDS
+      value: "180"
+    - name: BLOCKSCOUT_DEPENDENCY_POLL_SECONDS
+      value: "2"
+  ephemeral_mounts:
+    - name: blockscout-tmp
+      mount_path: /tmp
+    - name: blockscout-cache
+      mount_path: /tmp/blockscout
 ports:
   - name: http
     container_port: 4000

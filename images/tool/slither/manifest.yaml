@@ -25,10 +25,18 @@ capabilities:
   - security-scan
   - solidity-static-analysis
 tool:
-  kind: cli
+  kind: command-tool
   eco_tags:
     - evm
   mount_workspace: true
+  keepalive_command:
+    - sleep
+    - "2147483647"
+  command_policy:
+    allowed_commands:
+      - slither
+    default_timeout_seconds: 60
+    max_timeout_seconds: 180
 ports: []
 local_dev:
   host_mappings: []

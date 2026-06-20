@@ -3,6 +3,8 @@ package sandbox
 
 import (
 	"context"
+	"encoding/base64"
+	"fmt"
 	"io"
 	"strings"
 
@@ -84,6 +86,144 @@ func (s *Service) ToolProxyTargetForOwner(ctx context.Context, tenantID, account
 		}
 	}
 	return Sandbox{}, SandboxTool{}, apperr.ErrSandboxToolNotFound
+}
+
+// RunCommandToolForOwner 在命令工具容器中执行一次受控 argv 命令。
+func (s *Service) RunCommandToolForOwner(ctx context.Context, tenantID, accountID, sandboxID int64, toolCode string, req ToolRunRequest) (ToolRunResponse, error) {
+	if tenantID <= 0 || accountID <= 0 || sandboxID <= 0 || strings.TrimSpace(toolCode) == "" || !safeNonShellCommand(req.Command) {
+		return ToolRunResponse{}, apperr.ErrSandboxToolRunRequestInvalid
+	}
+	stdin, err := decodeOptionalBase64(req.StdinBase64)
+	if err != nil {
+		return ToolRunResponse{}, apperr.ErrSandboxToolRunRequestInvalid.WithCause(err)
+	}
+	sb, tool, err := s.commandToolTargetForOwner(ctx, tenantID, accountID, sandboxID, toolCode)
+	if err != nil {
+		return ToolRunResponse{}, err
+	}
+	if err := s.markSandboxExecutionActive(ctx, sb); err != nil {
+		return ToolRunResponse{}, err
+	}
+	target := commandToolExecTarget(tool)
+	if target == "" {
+		return ToolRunResponse{}, apperr.ErrSandboxToolProxyUnavailable
+	}
+	if !commandToolCommandAllowed(tool.ResourceSpec.CommandPolicy, req.Command[0]) {
+		return ToolRunResponse{}, apperr.ErrSandboxToolRunRequestInvalid
+	}
+	timeoutSec := commandToolTimeoutSeconds(tool.ResourceSpec.CommandPolicy, req.TimeoutSec, int32(s.cfg.ExecTimeoutSeconds))
+	if timeoutSec <= 0 {
+		return ToolRunResponse{}, apperr.ErrSandboxToolRunRequestInvalid
+	}
+	execCtx, cancel := context.WithTimeout(ctx, timeDurationSeconds(int(timeoutSec)))
+	defer cancel()
+	stdout, stderr, err := s.orchestrator.Exec(execCtx, sb.Namespace, target, req.Command, stdin, false)
+	if err != nil {
+		return ToolRunResponse{}, apperr.ErrSandboxExecFailed.WithCause(fmt.Errorf("%w: %s", err, string(stderr)))
+	}
+	if err := s.recordCommandToolRun(ctx, sb, tool, req.Command); err != nil {
+		return ToolRunResponse{}, err
+	}
+	return ToolRunResponse{
+		StdoutBase64: base64.StdEncoding.EncodeToString(stdout),
+		StderrBase64: base64.StdEncoding.EncodeToString(stderr),
+	}, nil
+}
+
+// commandToolTargetForOwner 校验用户归属并解析已挂载的命令工具。
+func (s *Service) commandToolTargetForOwner(ctx context.Context, tenantID, accountID, sandboxID int64, toolCode string) (Sandbox, SandboxTool, error) {
+	var sb Sandbox
+	var tools []SandboxTool
+	if err := s.store.TenantTx(ctx, tenantID, func(ctx context.Context, tx TxStore) error {
+		var err error
+		sb, err = tx.GetSandbox(ctx, tenantID, sandboxID)
+		if err != nil {
+			return apperr.ErrSandboxNotFound.WithCause(err)
+		}
+		if sb.OwnerAccountID != accountID {
+			return apperr.ErrSandboxOwnershipInvalid
+		}
+		tools, err = tx.ListSandboxTools(ctx, tenantID, sandboxID)
+		if err != nil {
+			return apperr.ErrSandboxToolNotFound.WithCause(err)
+		}
+		return nil
+	}); err != nil {
+		return Sandbox{}, SandboxTool{}, err
+	}
+	for _, tool := range tools {
+		if tool.Kind == SandboxToolKindCommand && tool.Status == SandboxToolStatusReady && strings.EqualFold(tool.ToolCode, strings.TrimSpace(toolCode)) {
+			return sb, tool, nil
+		}
+	}
+	return Sandbox{}, SandboxTool{}, apperr.ErrSandboxToolNotFound
+}
+
+// commandToolExecTarget 返回命令工具唯一组件的 exec 目标。
+func commandToolExecTarget(tool SandboxTool) string {
+	if len(tool.ResourceSpec.Components) == 0 {
+		return ""
+	}
+	component := tool.ResourceSpec.Components[0]
+	if strings.TrimSpace(component.Name) == "" {
+		return ""
+	}
+	return toolComponentPodName(tool.ToolCode, component.Name) + "/" + component.Name
+}
+
+// commandToolCommandAllowed 判断请求命令是否命中工具白名单。
+func commandToolCommandAllowed(policy CommandToolPolicy, command string) bool {
+	command = strings.TrimSpace(command)
+	if command == "" {
+		return false
+	}
+	for _, allowed := range policy.AllowedCommands {
+		if command == strings.TrimSpace(allowed) {
+			return true
+		}
+	}
+	return false
+}
+
+// commandToolTimeoutSeconds 计算命令工具实际执行超时。
+func commandToolTimeoutSeconds(policy CommandToolPolicy, requested, platformMax int32) int32 {
+	if requested <= 0 {
+		requested = policy.DefaultTimeoutSeconds
+	}
+	limit := policy.MaxTimeoutSeconds
+	if platformMax > 0 && (limit <= 0 || platformMax < limit) {
+		limit = platformMax
+	}
+	if limit <= 0 {
+		return 0
+	}
+	if requested > limit {
+		return limit
+	}
+	return requested
+}
+
+// decodeOptionalBase64 解码可选 stdin,空字符串表示无输入。
+func decodeOptionalBase64(raw string) ([]byte, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil, nil
+	}
+	return base64.StdEncoding.DecodeString(raw)
+}
+
+// recordCommandToolRun 写入命令工具执行技术事件,不记录输入输出内容。
+func (s *Service) recordCommandToolRun(ctx context.Context, sb Sandbox, tool SandboxTool, command []string) error {
+	return s.store.TenantTx(ctx, sb.TenantID, func(ctx context.Context, tx TxStore) error {
+		detail, err := jsonBytes(map[string]any{"tool_code": tool.ToolCode, "command": command[0]})
+		if err != nil {
+			return apperr.ErrSandboxStatePersistFailed.WithCause(err)
+		}
+		if err := tx.CreateSandboxEvent(ctx, s.ids.Generate(), sb.TenantID, sb.ID, EventTypeExec, detail); err != nil {
+			return apperr.ErrSandboxStatePersistFailed.WithCause(err)
+		}
+		return nil
+	})
 }
 
 // runtimeContainerAllowed 判断终端是否允许进入运行时声明中的容器。

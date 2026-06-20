@@ -45,6 +45,8 @@ const (
 	SandboxToolKindTerminal int16 = 2
 	// SandboxToolKindWebEmbed 表示 Web 嵌入类工具。
 	SandboxToolKindWebEmbed int16 = 3
+	// SandboxToolKindCommand 表示受控命令类工具。
+	SandboxToolKindCommand int16 = 4
 )
 
 // SandboxCreateRequest 是业务模块创建沙箱时提交的最小编排请求。

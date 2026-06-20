@@ -3,6 +3,8 @@ package main
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"strings"
 	"time"
 
@@ -12,158 +14,63 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// acceptanceImageURL 使用部署配置中的镜像仓库拼接规范镜像身份,避免验收种子写死本地标签。
-func acceptanceImageURL(image string) string {
+type acceptanceImageAttestation struct {
+	ImageURL       string `json:"image_url"`
+	Digest         string `json:"digest"`
+	CosignVerified bool   `json:"cosign_verified"`
+	TrivyStatus    string `json:"trivy_status"`
+}
+
+// acceptanceImageURL 从受控镜像证明清单选择不可变 digest 地址,保证验收种子和沙箱安全规则使用同一来源。
+func acceptanceImageURL(image string) (string, error) {
 	registry := strings.TrimRight(osEnv("IMAGE_REGISTRY"), "/")
 	if registry == "" {
 		registry = "harbor.chaimir.local"
 	}
-	return registry + "/" + strings.TrimLeft(image, "/") + ":2026.06"
+	prefix := registry + "/" + strings.TrimLeft(image, "/") + "@sha256:"
+	raw := strings.TrimSpace(osEnv("SANDBOX_IMAGE_ATTESTATIONS_JSON"))
+	if raw == "" {
+		return "", fmt.Errorf("SANDBOX_IMAGE_ATTESTATIONS_JSON 缺少 %s 的镜像证明", image)
+	}
+	var items []acceptanceImageAttestation
+	if err := json.Unmarshal([]byte(raw), &items); err != nil {
+		return "", fmt.Errorf("SANDBOX_IMAGE_ATTESTATIONS_JSON 解析失败: %w", err)
+	}
+	for _, item := range items {
+		imageURL := strings.TrimSpace(item.ImageURL)
+		digest := acceptanceImageDigest(imageURL)
+		if strings.HasPrefix(imageURL, prefix) &&
+			digest != "" &&
+			digest == strings.TrimSpace(item.Digest) &&
+			item.CosignVerified &&
+			strings.EqualFold(strings.TrimSpace(item.TrivyStatus), "passed") {
+			return imageURL, nil
+		}
+	}
+	return "", fmt.Errorf("SANDBOX_IMAGE_ATTESTATIONS_JSON 未包含通过校验的 %s digest 镜像证明", image)
+}
+
+// acceptanceImageDigest 提取 image@sha256:... 中的不可变 digest。
+func acceptanceImageDigest(imageURL string) string {
+	parts := strings.Split(strings.TrimSpace(imageURL), "@")
+	if len(parts) != 2 || !strings.HasPrefix(parts[1], "sha256:") {
+		return ""
+	}
+	return parts[1]
 }
 
 // seedRuntimeRows 写入沙箱运行时、镜像、工具和判题器基础能力。
 func seedRuntimeRows(ctx context.Context, tx pgx.Tx) error {
-	codeServerMountWorkspace := true
-	blockscoutReadOnlyRoot := false
 	postgresReadOnlyRoot := false
-	runtimeSpec, _ := jsonb(map[string]any{
-		"workspace_dir": "/workspace",
-		"volume_domains": []map[string]any{
-			{"name": "workspace", "mount_path": "/workspace", "student_access": "read_write", "persistence": "minio_code", "snapshot_scope": "always"},
-			{"name": "runtime-state", "mount_path": "/runtime-state", "student_access": "none", "persistence": "ephemeral", "snapshot_scope": "snapshot_enabled"},
-			{"name": "runtime-tmp", "mount_path": "/tmp", "student_access": "none", "persistence": "ephemeral", "snapshot_scope": "never"},
-		},
-		"runtime_container": map[string]any{
-			"name": "foundry",
-			"ports": []map[string]any{
-				{"name": "rpc", "container_port": 8545, "service_port": 8545, "protocol": "TCP"},
-			},
-			"resources": map[string]any{
-				"requests": map[string]string{"cpu": "250m", "memory": "512Mi"},
-				"limits":   map[string]string{"cpu": "2", "memory": "2Gi"},
-			},
-			"readiness_probe": map[string]any{"type": "tcp", "port": "rpc", "period_seconds": 2, "failure_threshold": 30},
-			"labels":          map[string]string{"chaimir.io/student-access": "false"},
-		},
-		"infra_sidecars": []map[string]any{{
-			"name":      "blockscout-postgres",
-			"image_url": acceptanceImageURL("infra/postgres-graph"),
-			"env": []map[string]string{
-				{"name": "POSTGRES_DB", "value": "blockscout"},
-				{"name": "POSTGRES_USER", "value": "postgres"},
-				{"name": "POSTGRES_PASSWORD", "value": "postgres"},
-				{"name": "PGDATA", "value": "/runtime-state/blockscout-postgres"},
-			},
-			"ports": []map[string]any{
-				{"name": "postgres", "container_port": 5432, "service_port": 5432, "protocol": "TCP"},
-			},
-			"resources": map[string]any{
-				"requests": map[string]string{"cpu": "250m", "memory": "512Mi"},
-				"limits":   map[string]string{"cpu": "1", "memory": "2Gi"},
-			},
-			"readiness_probe":           map[string]any{"type": "tcp", "port": "postgres", "period_seconds": 2, "failure_threshold": 30},
-			"read_only_root_filesystem": postgresReadOnlyRoot,
-			"labels":                    map[string]string{"chaimir.io/student-access": "false"},
-		}},
-		"default_tool_codes": []string{"code-server", "blockscout"},
-		"workspace_ops": map[string]any{
-			"read_file":  []string{"/usr/local/bin/chaimir-workspace", "read", "{{workspace}}", "{{path}}"},
-			"write_file": []string{"/usr/local/bin/chaimir-workspace", "write", "{{workspace}}", "{{path}}"},
-			"list_files": []string{"/usr/local/bin/chaimir-workspace", "list", "{{workspace}}", "{{path}}"},
-			"pack_tar":   []string{"/usr/local/bin/chaimir-workspace", "pack", "{{workspace}}", "{{path}}"},
-			"unpack_tar": []string{"/usr/local/bin/chaimir-workspace", "unpack", "{{workspace}}", "{{path}}"},
-			"run_script": []string{"/usr/local/bin/chaimir-workspace", "run", "{{workspace}}", "{{workspace}}", "{{script}}"},
-			"terminal":   []string{"/usr/local/bin/chaimir-workspace", "terminal", "{{workspace}}"},
-			"selftest":   []string{"/usr/local/bin/chaimir-workspace", "selftest"},
-		},
-		"capability_commands": map[string]any{
-			"deploy": map[string]any{"command": []string{"/usr/local/bin/chaimir-chain", "deploy"}, "timeout_seconds": 60},
-			"tx":     map[string]any{"command": []string{"/usr/local/bin/chaimir-chain", "tx"}, "timeout_seconds": 60},
-			"query":  map[string]any{"command": []string{"/usr/local/bin/chaimir-chain", "query"}, "timeout_seconds": 30},
-			"reset":  map[string]any{"command": []string{"/usr/local/bin/chaimir-chain", "reset"}, "timeout_seconds": 30},
-		},
-		"selftest": map[string]any{
-			"deploy_payload": map[string]any{"bytecode": "0x6080604052348015600f57600080fd5b50600080f3"},
-			"query_target":   "chainId",
-		},
-	})
-	codeServerSpec, _ := jsonb(map[string]any{
-		"components": []map[string]any{{
-			"name":            "web",
-			"image_url":       acceptanceImageURL("tool/code-server"),
-			"mount_workspace": codeServerMountWorkspace,
-			"command":         []string{"code-server"},
-			"args":            []string{"--bind-addr", "0.0.0.0:8080", "--auth", "none", "/workspace"},
-			"ports": []map[string]any{
-				{"name": "http", "container_port": 8080, "service_port": 8080, "protocol": "TCP"},
-			},
-			"ephemeral_mounts": []map[string]string{
-				{"name": "code-server-config", "mount_path": "/home/coder/.config"},
-				{"name": "code-server-data", "mount_path": "/home/coder/.local/share/code-server"},
-				{"name": "tmp", "mount_path": "/tmp"},
-			},
-			"resources": map[string]any{
-				"requests": map[string]string{"cpu": "150m", "memory": "256Mi"},
-				"limits":   map[string]string{"cpu": "1", "memory": "1Gi"},
-			},
-			"readiness_probe": map[string]any{"type": "http", "path": "/", "port": "http", "period_seconds": 2, "failure_threshold": 30},
-		}},
-		"services": []map[string]any{{
-			"name":      "tool-code-server-web",
-			"component": "web",
-			"ports":     []map[string]any{{"name": "http", "port": 8080, "target_port": "http", "protocol": "TCP"}},
-		}},
-		"routes": []map[string]any{{
-			"path_prefix": "/",
-			"service":     "tool-code-server-web",
-			"port":        "http",
-		}},
-	})
-	blockscoutSpec, _ := jsonb(map[string]any{
-		"components": []map[string]any{{
-			"name":            "web",
-			"image_url":       acceptanceImageURL("tool/blockscout"),
-			"mount_workspace": false,
-			"command":         []string{"/usr/local/bin/chaimir-blockscout-entrypoint"},
-			"env": []map[string]string{
-				{"name": "DATABASE_URL", "value": "postgresql://postgres:postgres@runtime-sandbox:5432/blockscout"},
-				{"name": "ETHEREUM_JSONRPC_HTTP_URL", "value": "http://runtime-sandbox:8545"},
-				{"name": "ETHEREUM_JSONRPC_TRACE_URL", "value": "http://runtime-sandbox:8545"},
-				{"name": "ETHEREUM_JSONRPC_VARIANT", "value": "geth"},
-				{"name": "ECTO_USE_SSL", "value": "false"},
-				{"name": "PORT", "value": "4000"},
-				{"name": "DISABLE_EXCHANGE_RATES", "value": "true"},
-				{"name": "INDEXER_DISABLE_PENDING_TRANSACTIONS_FETCHER", "value": "true"},
-				{"name": "BLOCKSCOUT_DEPENDENCY_TIMEOUT_SECONDS", "value": "180"},
-				{"name": "BLOCKSCOUT_DEPENDENCY_POLL_SECONDS", "value": "2"},
-			},
-			"ports": []map[string]any{
-				{"name": "http", "container_port": 4000, "service_port": 4000, "protocol": "TCP"},
-			},
-			"resources": map[string]any{
-				"requests": map[string]string{"cpu": "500m", "memory": "1Gi"},
-				"limits":   map[string]string{"cpu": "2", "memory": "3Gi"},
-			},
-			"readiness_probe":           map[string]any{"type": "http", "path": "/", "port": "http", "period_seconds": 5, "failure_threshold": 60},
-			"read_only_root_filesystem": blockscoutReadOnlyRoot,
-		}},
-		"services": []map[string]any{{
-			"name":      "tool-blockscout-web",
-			"component": "web",
-			"ports":     []map[string]any{{"name": "http", "port": 4000, "target_port": "http", "protocol": "TCP"}},
-		}},
-		"routes": []map[string]any{{
-			"path_prefix": "/",
-			"service":     "tool-blockscout-web",
-			"port":        "http",
-		}},
-		"network_rules": []map[string]any{{
-			"name":  "blockscout-to-runtime",
-			"from":  "web",
-			"to":    "sandbox",
-			"ports": []map[string]any{{"name": "rpc"}, {"name": "postgres"}},
-		}},
-	})
+	runtimeImageURL, err := acceptanceImageURL("runtime/evm-foundry")
+	if err != nil {
+		return err
+	}
+	postgresGraphImageURL, err := acceptanceImageURL("infra/postgres-graph")
+	if err != nil {
+		return err
+	}
+	runtimeSpec, _ := jsonb(acceptanceRuntimeAdapterSpec(runtimeImageURL, postgresGraphImageURL, postgresReadOnlyRoot))
 	if err := execJSON(ctx, tx, `
 INSERT INTO runtime (id, code, name, eco, adapter_level, adapter_spec, capability_impl, selftest_status, selftest_detail, status)
 VALUES ($1,'evm-foundry','EVM Foundry 教学运行时','evm',2,$2,'sandbox-exec',2,'{"checked_by":"acceptance-seed"}'::jsonb,1)
@@ -175,21 +82,10 @@ ON CONFLICT (id) DO UPDATE SET code=EXCLUDED.code, name=EXCLUDED.name, eco=EXCLU
 INSERT INTO runtime_image (id, runtime_id, image_url, version, status, prepulled, prepull_status, prepull_detail, prepulled_at, genesis_baked, is_default)
 VALUES ($1,$2,$3,'2026.06',1,false,1,'{"source":"acceptance-seed","prepulled":false}'::jsonb,NULL,true,true)
 ON CONFLICT (runtime_id, version) DO UPDATE SET image_url=EXCLUDED.image_url, status=EXCLUDED.status, prepulled=EXCLUDED.prepulled, prepull_status=EXCLUDED.prepull_status, prepull_detail=EXCLUDED.prepull_detail, prepulled_at=EXCLUDED.prepulled_at, genesis_baked=EXCLUDED.genesis_baked, is_default=EXCLUDED.is_default`,
-		acceptanceIDs.RuntimeImage, acceptanceIDs.Runtime, acceptanceImageURL("runtime/evm-foundry")); err != nil {
+		acceptanceIDs.RuntimeImage, acceptanceIDs.Runtime, runtimeImageURL); err != nil {
 		return err
 	}
-	if err := execJSON(ctx, tx, `
-INSERT INTO tool (id, code, name, kind, eco_tags, resource_spec, status)
-VALUES ($1,'code-server','Code Server',3,'evm,solidity',$2,1)
-ON CONFLICT (id) DO UPDATE SET code=EXCLUDED.code, name=EXCLUDED.name, kind=EXCLUDED.kind, eco_tags=EXCLUDED.eco_tags, resource_spec=EXCLUDED.resource_spec, status=EXCLUDED.status, updated_at=now()`,
-		acceptanceIDs.ToolVSCode, codeServerSpec); err != nil {
-		return err
-	}
-	if err := execJSON(ctx, tx, `
-INSERT INTO tool (id, code, name, kind, eco_tags, resource_spec, status)
-VALUES ($1,'blockscout','Blockscout 区块链浏览器',3,'evm',$2,1)
-ON CONFLICT (id) DO UPDATE SET code=EXCLUDED.code, name=EXCLUDED.name, kind=EXCLUDED.kind, eco_tags=EXCLUDED.eco_tags, resource_spec=EXCLUDED.resource_spec, status=EXCLUDED.status, updated_at=now()`,
-		acceptanceIDs.ToolExplorer, blockscoutSpec); err != nil {
+	if err := seedToolRows(ctx, tx); err != nil {
 		return err
 	}
 	judgeSpec, _ := jsonb(map[string]any{
@@ -217,6 +113,108 @@ ON CONFLICT (code) DO UPDATE SET name=EXCLUDED.name, type=EXCLUDED.type, executo
 		return err
 	}
 	return seedJudgeRows(ctx, tx)
+}
+
+// acceptanceRuntimeAdapterSpec 构造验收运行时声明,包含独立学生终端 sidecar。
+func acceptanceRuntimeAdapterSpec(runtimeImageURL, postgresGraphImageURL string, postgresReadOnlyRoot bool) map[string]any {
+	return map[string]any{
+		"workspace_dir": "/workspace",
+		"volume_domains": []map[string]any{
+			{"name": "workspace", "mount_path": "/workspace", "student_access": "read_write", "persistence": "minio_code", "snapshot_scope": "always"},
+			{"name": "runtime-state", "mount_path": "/runtime-state", "student_access": "none", "persistence": "ephemeral", "snapshot_scope": "snapshot_enabled"},
+			{"name": "runtime-tmp", "mount_path": "/tmp", "student_access": "none", "persistence": "ephemeral", "snapshot_scope": "never"},
+		},
+		"runtime_container": map[string]any{
+			"name": "foundry",
+			"ports": []map[string]any{
+				{"name": "rpc", "container_port": 8545, "service_port": 8545, "protocol": "TCP"},
+			},
+			"resources": map[string]any{
+				"requests": map[string]string{"cpu": "250m", "memory": "512Mi"},
+				"limits":   map[string]string{"cpu": "2", "memory": "2Gi"},
+			},
+			"readiness_probe": map[string]any{"type": "tcp", "port": "rpc", "period_seconds": 2, "failure_threshold": 30},
+			"labels":          map[string]string{"chaimir.io/student-access": "false"},
+		},
+		"infra_sidecars": []map[string]any{{
+			"name":      "blockscout-postgres",
+			"image_url": postgresGraphImageURL,
+			"env": []map[string]string{
+				{"name": "POSTGRES_DB", "value": "blockscout"},
+				{"name": "POSTGRES_USER", "value": "postgres"},
+				{"name": "POSTGRES_PASSWORD", "value": "postgres"},
+				{"name": "PGDATA", "value": "/runtime-state/blockscout-postgres"},
+			},
+			"ports": []map[string]any{
+				{"name": "postgres", "container_port": 5432, "service_port": 5432, "protocol": "TCP"},
+			},
+			"resources": map[string]any{
+				"requests": map[string]string{"cpu": "250m", "memory": "512Mi"},
+				"limits":   map[string]string{"cpu": "1", "memory": "2Gi"},
+			},
+			"readiness_probe":           map[string]any{"type": "tcp", "port": "postgres", "period_seconds": 2, "failure_threshold": 30},
+			"read_only_root_filesystem": postgresReadOnlyRoot,
+			"labels":                    map[string]string{"chaimir.io/student-access": "false"},
+		}, {
+			"name":      "student-shell",
+			"image_url": runtimeImageURL,
+			"command":   []string{"sleep", "2147483647"},
+			"resources": map[string]any{
+				"requests": map[string]string{"cpu": "50m", "memory": "64Mi"},
+				"limits":   map[string]string{"cpu": "250m", "memory": "256Mi"},
+			},
+			"read_only_root_filesystem": true,
+			"labels":                    map[string]string{"chaimir.io/student-access": "true"},
+		}},
+		"default_tool_codes": []string{"code-server", "blockscout", "terminal"},
+		"workspace_ops": map[string]any{
+			"read_file":  []string{"/usr/local/bin/chaimir-workspace", "read", "{{workspace}}", "{{path}}"},
+			"write_file": []string{"/usr/local/bin/chaimir-workspace", "write", "{{workspace}}", "{{path}}"},
+			"list_files": []string{"/usr/local/bin/chaimir-workspace", "list", "{{workspace}}", "{{path}}"},
+			"pack_tar":   []string{"/usr/local/bin/chaimir-workspace", "pack", "{{workspace}}", "{{path}}"},
+			"unpack_tar": []string{"/usr/local/bin/chaimir-workspace", "unpack", "{{workspace}}", "{{path}}"},
+			"run_script": []string{"/usr/local/bin/chaimir-workspace", "run", "{{workspace}}", "{{workspace}}", "{{script}}"},
+			"terminal":   []string{"/usr/local/bin/chaimir-workspace", "terminal", "{{workspace}}"},
+			"selftest":   []string{"/usr/local/bin/chaimir-workspace", "selftest"},
+		},
+		"capability_commands": map[string]any{
+			"deploy": map[string]any{"command": []string{"/usr/local/bin/chaimir-chain", "deploy"}, "timeout_seconds": 60},
+			"tx":     map[string]any{"command": []string{"/usr/local/bin/chaimir-chain", "tx"}, "timeout_seconds": 60},
+			"query":  map[string]any{"command": []string{"/usr/local/bin/chaimir-chain", "query"}, "timeout_seconds": 30},
+			"reset":  map[string]any{"command": []string{"/usr/local/bin/chaimir-chain", "reset"}, "timeout_seconds": 30},
+		},
+		"selftest": map[string]any{
+			"deploy_payload": map[string]any{"bytecode": "0x6080604052348015600f57600080fd5b50600080f3"},
+			"query_target":   "chainId",
+		},
+	}
+}
+
+// seedToolRows 从 images/tool manifest 重建工具表,避免 seed 内保留工具专用分支。
+func seedToolRows(ctx context.Context, tx pgx.Tx) error {
+	defs, err := acceptanceSeedToolDefinitions()
+	if err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `DELETE FROM sandbox_tool`); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `DELETE FROM tool`); err != nil {
+		return err
+	}
+	for _, def := range defs {
+		spec, err := jsonb(def.ResourceSpec)
+		if err != nil {
+			return err
+		}
+		if err := execJSON(ctx, tx, `
+INSERT INTO tool (id, code, name, kind, eco_tags, resource_spec, status)
+VALUES ($1,$2,$3,$4,$5,$6,1)`,
+			def.ID, def.Code, def.Name, def.Kind, strings.Join(def.EcoTags, ","), spec); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // seedTenantQuotaRow 写入租户沙箱配额,确保沙箱统计和创建流程使用真实配额表。
@@ -258,9 +256,9 @@ ON CONFLICT (id) DO UPDATE SET runtime_id=EXCLUDED.runtime_id, image_id=EXCLUDED
 	}
 	if err := execJSON(ctx, tx, `
 INSERT INTO sandbox_tool (id, tenant_id, sandbox_id, tool_id, access_endpoint, status)
-VALUES ($1,$2,$3,$4,'/api/v1/sandbox/sandboxes/910000000000001021/tools/code-server/',1)
+VALUES ($1,$2,$3,(SELECT id FROM tool WHERE code='code-server'),'/api/v1/sandbox/sandboxes/910000000000001021/tools/code-server/',1)
 ON CONFLICT (tenant_id, sandbox_id, tool_id) DO UPDATE SET access_endpoint=EXCLUDED.access_endpoint, status=EXCLUDED.status`,
-		acceptanceIDs.SandboxTool, acceptanceIDs.TenantID, acceptanceIDs.Sandbox, acceptanceIDs.ToolVSCode); err != nil {
+		acceptanceIDs.SandboxTool, acceptanceIDs.TenantID, acceptanceIDs.Sandbox); err != nil {
 		return err
 	}
 	return execJSON(ctx, tx, `

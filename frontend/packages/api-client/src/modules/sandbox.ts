@@ -3,6 +3,8 @@
 
 import { ApiClient } from '../client'
 import type {
+  SandboxCommandToolRunRequest,
+  SandboxCommandToolRunResponse,
   SandboxFileListResponse,
   SandboxFileReadResponse,
   SandboxFileSaveResponse,
@@ -67,6 +69,13 @@ export class SandboxApi {
    */
   async saveFiles(instanceId: string): Promise<SandboxFileSaveResponse> {
     return this.client.post(`/sandbox/sandboxes/${instanceId}/files/save`)
+  }
+
+  /**
+   * 执行受控命令工具
+   */
+  async runCommandTool(instanceId: string, toolCode: string, data: SandboxCommandToolRunRequest): Promise<SandboxCommandToolRunResponse> {
+    return this.client.post(`/sandbox/sandboxes/${instanceId}/command-tools/${toolCode}/run`, data)
   }
 
   /**

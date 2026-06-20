@@ -56,6 +56,8 @@ const (
 	SandboxToolKindTerminal = contracts.SandboxToolKindTerminal
 	// SandboxToolKindWebEmbed 表示 Web 嵌入类工具。
 	SandboxToolKindWebEmbed = contracts.SandboxToolKindWebEmbed
+	// SandboxToolKindCommand 表示受控命令类工具。
+	SandboxToolKindCommand = contracts.SandboxToolKindCommand
 )
 
 const (

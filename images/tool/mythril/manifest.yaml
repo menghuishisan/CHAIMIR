@@ -25,10 +25,18 @@ capabilities:
   - security-scan
   - symbolic-execution
 tool:
-  kind: cli
+  kind: command-tool
   eco_tags:
     - evm
   mount_workspace: true
+  keepalive_command:
+    - sleep
+    - "2147483647"
+  command_policy:
+    allowed_commands:
+      - myth
+    default_timeout_seconds: 120
+    max_timeout_seconds: 300
 ports: []
 local_dev:
   host_mappings: []

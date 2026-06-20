@@ -330,30 +330,53 @@ func (s *Service) PrepullRuntimeImage(ctx context.Context, runtimeID, imageID in
 	if runtimeID <= 0 || imageID <= 0 {
 		return PrepullResponse{}, apperr.ErrSandboxImagePrepullParamInvalid
 	}
+	var runtime Runtime
 	var image RuntimeImage
+	var tools []Tool
 	if err := s.store.PlatformTx(ctx, func(ctx context.Context, tx TxStore) error {
 		var err error
+		runtime, err = tx.GetRuntimeByID(ctx, runtimeID)
+		if err != nil {
+			return apperr.ErrSandboxRuntimeNotFound.WithCause(err)
+		}
 		image, err = tx.GetRuntimeImageByID(ctx, runtimeID, imageID)
 		if err != nil {
 			return apperr.ErrSandboxRuntimeImageNotFound.WithCause(err)
+		}
+		tools, err = tx.ListTools(ctx)
+		if err != nil {
+			return apperr.ErrSandboxToolNotFound.WithCause(err)
 		}
 		return nil
 	}); err != nil {
 		return PrepullResponse{}, err
 	}
-	if image.Status != RuntimeImageStatusAvailable {
+	if runtime.Status != RuntimeStatusAvailable || image.Status != RuntimeImageStatusAvailable {
 		return PrepullResponse{}, apperr.ErrSandboxRuntimeUnavailable
 	}
-	if !imageAttested(s.cfg, image.ImageURL, digestFromImageURL(image.ImageURL)) {
+	imageURLs := prepullImageURLsForRuntime(runtime, image, tools)
+	if len(imageURLs) == 0 {
 		return PrepullResponse{}, apperr.ErrSandboxImageAttestationInvalid
 	}
+	for _, imageURL := range imageURLs {
+		if !imageAttested(s.cfg, imageURL, digestFromImageURL(imageURL)) {
+			return PrepullResponse{}, apperr.ErrSandboxImageAttestationInvalid
+		}
+	}
+	if !containsString(imageURLs, image.ImageURL) {
+		return PrepullResponse{}, apperr.ErrSandboxImageAttestationInvalid
+	}
+	startingDetail, err := jsonBytes(map[string]any{"stage": "starting", "image_count": len(imageURLs), "images": imageURLs})
+	if err != nil {
+		return PrepullResponse{}, apperr.ErrSandboxImagePrepullFailed.WithCause(err)
+	}
 	if err := s.store.PlatformTx(ctx, func(ctx context.Context, tx TxStore) error {
-		_, err := tx.UpdateRuntimeImagePrepull(ctx, runtimeID, imageID, false, ImagePrepullRunning, []byte(`{"stage":"starting"}`), time.Time{})
+		_, err := tx.UpdateRuntimeImagePrepull(ctx, runtimeID, imageID, false, ImagePrepullRunning, startingDetail, time.Time{})
 		return err
 	}); err != nil {
 		return PrepullResponse{}, err
 	}
-	result, err := s.orchestrator.PrepullImage(ctx, image)
+	result, err := s.orchestrator.PrepullImage(ctx, image, imageURLs)
 	status := ImagePrepullSucceeded
 	prepulled := true
 	at := timex.Now()
@@ -362,7 +385,7 @@ func (s *Service) PrepullRuntimeImage(ctx context.Context, runtimeID, imageID in
 		prepulled = false
 		at = time.Time{}
 		logging.ErrorContext(ctx, "sandbox image prepull failed", err.Error(), slog.Int64("tenant_id", 0), slog.Int64("runtime_id", runtimeID), slog.Int64("image_id", imageID), slog.String("daemonset", result.DaemonSet))
-		detail, encodeErr := jsonBytes(map[string]any{"stage": "failed", "daemonset": result.DaemonSet, "desired_nodes": result.DesiredNodes, "ready_nodes": result.ReadyNodes})
+		detail, encodeErr := jsonBytes(map[string]any{"stage": "failed", "daemonset": result.DaemonSet, "desired_nodes": result.DesiredNodes, "ready_nodes": result.ReadyNodes, "image_count": len(imageURLs), "images": imageURLs})
 		if encodeErr != nil {
 			return PrepullResponse{}, apperr.ErrSandboxImagePrepullFailed.WithCause(encodeErr)
 		}
@@ -380,7 +403,45 @@ func (s *Service) PrepullRuntimeImage(ctx context.Context, runtimeID, imageID in
 	if err != nil {
 		return PrepullResponse{}, apperr.ErrSandboxImagePrepullFailed.WithCause(err)
 	}
-	return PrepullResponse{ImageID: imageID, PrepullStatus: status, DesiredNodes: result.DesiredNodes, ReadyNodes: result.ReadyNodes, DaemonSet: result.DaemonSet}, nil
+	return PrepullResponse{ImageID: imageID, PrepullStatus: status, DesiredNodes: result.DesiredNodes, ReadyNodes: result.ReadyNodes, DaemonSet: result.DaemonSet, ImageCount: len(imageURLs), Images: imageURLs}, nil
+}
+
+// prepullImageURLsForRuntime 汇总运行时默认工作负载会用到的不可变镜像集合。
+func prepullImageURLsForRuntime(runtime Runtime, image RuntimeImage, tools []Tool) []string {
+	seen := map[string]struct{}{}
+	out := make([]string, 0, 1+len(runtime.AdapterSpec.InfraSidecars)+len(tools))
+	add := func(imageURL string) {
+		imageURL = strings.TrimSpace(imageURL)
+		if imageURL == "" {
+			return
+		}
+		if _, exists := seen[imageURL]; exists {
+			return
+		}
+		seen[imageURL] = struct{}{}
+		out = append(out, imageURL)
+	}
+	add(image.ImageURL)
+	for _, component := range runtime.AdapterSpec.InfraSidecars {
+		add(component.ImageURL)
+	}
+	for _, pod := range runtime.AdapterSpec.Pods {
+		for _, component := range pod.Containers {
+			if strings.TrimSpace(component.Name) == strings.TrimSpace(runtime.AdapterSpec.RuntimeContainer.Name) {
+				continue
+			}
+			add(component.ImageURL)
+		}
+	}
+	for _, tool := range tools {
+		if tool.Status != ToolStatusAvailable || !toolCompatible(runtime.Eco, tool.EcoTags) {
+			continue
+		}
+		for _, component := range tool.ResourceSpec.Components {
+			add(component.ImageURL)
+		}
+	}
+	return out
 }
 
 // GetRuntimeImagePrepull 查询镜像预拉取状态,只返回文档允许的进度字段。
@@ -404,9 +465,11 @@ func (s *Service) GetRuntimeImagePrepull(ctx context.Context, runtimeID, imageID
 		return resp, nil
 	}
 	var detail struct {
-		DesiredNodes int32  `json:"desired_nodes"`
-		ReadyNodes   int32  `json:"ready_nodes"`
-		DaemonSet    string `json:"daemonset"`
+		DesiredNodes int32    `json:"desired_nodes"`
+		ReadyNodes   int32    `json:"ready_nodes"`
+		DaemonSet    string   `json:"daemonset"`
+		ImageCount   int      `json:"image_count"`
+		Images       []string `json:"images"`
 	}
 	if err := jsonx.DecodeStrict(image.PrepullDetail, &detail); err != nil {
 		return PrepullResponse{}, apperr.ErrSandboxImagePrepullFailed.WithCause(err)
@@ -414,6 +477,8 @@ func (s *Service) GetRuntimeImagePrepull(ctx context.Context, runtimeID, imageID
 	resp.DesiredNodes = detail.DesiredNodes
 	resp.ReadyNodes = detail.ReadyNodes
 	resp.DaemonSet = detail.DaemonSet
+	resp.ImageCount = detail.ImageCount
+	resp.Images = detail.Images
 	return resp, nil
 }
 
