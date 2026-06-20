@@ -15,16 +15,16 @@ components:
 
 images:
   - name: chaimir/backend
-    newName: harbor.chaimir.local/service/backend
+    newName: harbor.chaimir/service/backend
     newTag: staging
   - name: chaimir/frontend
-    newName: harbor.chaimir.local/service/frontend
+    newName: harbor.chaimir/service/frontend
     newTag: staging
   - name: chaimir/migrate
-    newName: harbor.chaimir.local/service/migrate
+    newName: harbor.chaimir/service/migrate
     newTag: staging
   - name: chaimir/cron
-    newName: harbor.chaimir.local/service/cron
+    newName: harbor.chaimir/service/cron
     newTag: staging
 
 # 中间件外接端点 + SaaS 形态(host 为 staging 托管中间件内部域名)。

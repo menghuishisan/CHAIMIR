@@ -82,3 +82,42 @@ jobs:
         with:
           name: image-digest-${{ steps.meta.outputs.safe }}
           path: image-digest-artifacts/${{ steps.meta.outputs.safe }}.lock
+
+  merge-digest-lock:
+    needs: build-push
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.build-push.result == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: 下载镜像 digest 锁片段
+        uses: actions/download-artifact@v4
+        with:
+          pattern: image-digest-*
+          path: image-digest-artifacts
+          merge-multiple: true
+      - name: 合并完整 image-digests.lock
+        run: |
+          set -euo pipefail
+          mkdir -p images
+          if ! find image-digest-artifacts -name '*.lock' -type f | grep -q .; then
+            echo "未找到镜像 digest 锁片段" >&2
+            exit 1
+          fi
+
+          cat image-digest-artifacts/*.lock | tr -d '\r' | sed '/^[[:space:]]*$/d' | sort > images/image-digests.lock
+          awk '
+            NF != 2 || $2 !~ /^sha256:[0-9a-f]{64}$/ {
+              printf("digest 锁格式非法: %s\n", $0) > "/dev/stderr";
+              exit 1;
+            }
+            seen[$1] && seen[$1] != $2 {
+              printf("镜像 %s 存在多个 digest: %s / %s\n", $1, seen[$1], $2) > "/dev/stderr";
+              exit 1;
+            }
+            { seen[$1] = $2 }
+          ' images/image-digests.lock
+      - name: 上传完整 image-digests.lock
+        uses: actions/upload-artifact@v4
+        with:
+          name: image-digests-lock
+          path: images/image-digests.lock

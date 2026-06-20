@@ -29,6 +29,16 @@ tool:
   eco_tags:
     - fabric
   mount_workspace: false
+  runtime_config_required: true
+  ephemeral_mounts:
+    - name: tmp
+      mount_path: /tmp
+    - name: logs
+      mount_path: /opt/explorer/logs
+    - name: walletstore
+      mount_path: /opt/explorer/walletstore
+    - name: npm-cache
+      mount_path: /home/node/.npm
 ports:
   - name: http
     container_port: 8080
@@ -43,7 +53,7 @@ local_dev:
       container_port: 8080
 security:
   run_as_non_root: true
-  read_only_root_filesystem: false
+  read_only_root_filesystem: true
   allow_privilege_escalation: false
   privileged: false
   host_network: false
@@ -51,11 +61,6 @@ security:
   drop_capabilities:
     - ALL
   network_policy: deny-all
-security_exceptions:
-  - field: read_only_root_filesystem
-    reason: Fabric Explorer 上游服务需要写连接缓存和运行临时文件;仅允许写入工具缓存卷。
-    writable_mounts:
-      - tool-cache
 student_access:
   enabled: true
   shell: restricted

@@ -1,0 +1,126 @@
+# Harbor 官方 Helm chart 的非密 values;密钥由 supply-chain.secret.env 或 KMS 注入。
+externalURL: http://harbor.chaimir:30080
+harborAdminPassword: ""
+
+expose:
+  type: ingress
+  tls:
+    enabled: false
+  ingress:
+    hosts:
+      core: harbor.chaimir
+    className: nginx
+    annotations:
+      ingress.kubernetes.io/ssl-redirect: "false"
+      nginx.ingress.kubernetes.io/ssl-redirect: "false"
+
+persistence:
+  enabled: true
+  persistentVolumeClaim:
+    registry:
+      size: 120Gi
+    database:
+      size: 20Gi
+    redis:
+      size: 5Gi
+    jobservice:
+      jobLog:
+        size: 10Gi
+    trivy:
+      size: 20Gi
+
+trivy:
+  enabled: true
+  resources:
+    requests:
+      cpu: 300m
+      memory: 768Mi
+    limits:
+      cpu: "2"
+      memory: 2Gi
+  skipUpdate: true
+  offlineScan: true
+  timeout: 15m0s
+
+notary:
+  enabled: false
+
+core:
+  resources:
+    requests:
+      cpu: 300m
+      memory: 512Mi
+    limits:
+      cpu: "2"
+      memory: 2Gi
+  livenessProbe:
+    timeoutSeconds: 5
+    failureThreshold: 6
+  readinessProbe:
+    timeoutSeconds: 5
+    failureThreshold: 6
+
+registry:
+  registry:
+    resources:
+      requests:
+        cpu: 300m
+        memory: 512Mi
+      limits:
+        cpu: "2"
+        memory: 2Gi
+    livenessProbe:
+      timeoutSeconds: 5
+      failureThreshold: 6
+    readinessProbe:
+      timeoutSeconds: 5
+      failureThreshold: 6
+  controller:
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        cpu: "1"
+        memory: 1Gi
+    livenessProbe:
+      timeoutSeconds: 5
+      failureThreshold: 6
+    readinessProbe:
+      timeoutSeconds: 5
+      failureThreshold: 6
+
+database:
+  internal:
+    resources:
+      requests:
+        cpu: 500m
+        memory: 1Gi
+      limits:
+        cpu: "2"
+        memory: 2Gi
+    shmSizeLimit: 1Gi
+    livenessProbe:
+      timeoutSeconds: 10
+      failureThreshold: 6
+    readinessProbe:
+      timeoutSeconds: 10
+      failureThreshold: 6
+  maxIdleConns: 50
+  maxOpenConns: 200
+
+redis:
+  internal:
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        cpu: "1"
+        memory: 1Gi
+    livenessProbe:
+      timeoutSeconds: 5
+      failureThreshold: 6
+    readinessProbe:
+      timeoutSeconds: 5
+      failureThreshold: 6

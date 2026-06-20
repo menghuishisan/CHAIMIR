@@ -4,6 +4,8 @@
 # ---- 密钥(绝不提交,仅提交 *.example 模板)----
 **/secret.env
 !**/secret.env.example
+**/*.secret.env
+!**/*.secret.env.example
 *.kubeconfig
 kubeconfig
 *.pem

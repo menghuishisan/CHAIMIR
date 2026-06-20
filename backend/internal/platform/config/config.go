@@ -1072,9 +1072,6 @@ func readSandboxImageAttestations(key string, errs *[]string) []SandboxImageAtte
 		*errs = append(*errs, fmt.Sprintf("环境变量 %s 需为镜像证明 JSON 数组: %v", key, err))
 		return nil
 	}
-	if len(out) == 0 {
-		*errs = append(*errs, "环境变量 "+key+" 至少包含一个镜像证明")
-	}
 	for i, item := range out {
 		if strings.TrimSpace(item.ImageURL) == "" || strings.TrimSpace(item.Digest) == "" || strings.TrimSpace(item.TrivyStatus) == "" {
 			*errs = append(*errs, fmt.Sprintf("环境变量 %s 第 %d 项镜像证明不完整", key, i))

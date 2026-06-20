@@ -6,10 +6,18 @@ LABEL org.opencontainers.image.description="Chaimir Remix Solidity IDE image"
 
 USER root
 
-# 创建工作区目录,Remix 静态服务由上游镜像提供。
-RUN mkdir -p /workspace \
-    && chown -R 1000:1000 /workspace
+# Remix 使用 nginx 提供静态 IDE,运行期必须以非 root 写入 pid 与临时目录。
+RUN mkdir -p /workspace /tmp/nginx/client_temp /tmp/nginx/proxy_temp /tmp/nginx/fastcgi_temp /tmp/nginx/uwsgi_temp /tmp/nginx/scgi_temp \
+    && chown -R 1000:1000 /workspace /tmp/nginx \
+    && sed -i 's|pid .*|pid /tmp/nginx.pid;|' /etc/nginx/nginx.conf \
+    && sed -i 's|error_log  /var/log/nginx/error.log notice;|error_log /dev/stderr notice;|' /etc/nginx/nginx.conf \
+    && sed -i 's|access_log  /var/log/nginx/access.log  main;|access_log /dev/stdout main;|' /etc/nginx/nginx.conf \
+    && sed -i '/include \/etc\/nginx\/conf.d\/\*.conf;/i\    client_body_temp_path /tmp/nginx/client_temp;\n    proxy_temp_path /tmp/nginx/proxy_temp;\n    fastcgi_temp_path /tmp/nginx/fastcgi_temp;\n    uwsgi_temp_path /tmp/nginx/uwsgi_temp;\n    scgi_temp_path /tmp/nginx/scgi_temp;' /etc/nginx/nginx.conf \
+    && sed -i 's|listen       80;|listen       8080;|' /etc/nginx/conf.d/default.conf
+COPY entrypoint.sh /usr/local/bin/chaimir-remix-entrypoint
+RUN chmod +x /usr/local/bin/chaimir-remix-entrypoint
 
 USER 1000:1000
 WORKDIR /workspace
 EXPOSE 8080
+ENTRYPOINT ["/usr/local/bin/chaimir-remix-entrypoint"]

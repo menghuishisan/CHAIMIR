@@ -11,7 +11,7 @@ metadata:
 spec:
   images:
     - glob: "harbor.chaimir.io/**"
-    - glob: "harbor.chaimir.local/**"
+    - glob: "harbor.chaimir/**"
     - glob: "harbor.school.local/**"
   authorities:
     - name: chaimir-cosign

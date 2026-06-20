@@ -96,16 +96,17 @@ func (o *K8sOrchestrator) DestroySandboxResources(ctx context.Context, sb Sandbo
 	if err := o.client.Clientset().CoreV1().Namespaces().Delete(ctx, sb.Namespace, metav1.DeleteOptions{PropagationPolicy: &policy}); err != nil && !apierrors.IsNotFound(err) {
 		return fmt.Errorf("删除沙箱 Namespace 失败: %w", err)
 	}
-	return nil
+	return waitNamespaceDeleted(ctx, o.client.Clientset(), sb.Namespace, o.cfg.ReadyPollIntervalSeconds)
 }
 
 // StopComputeKeepSnapshot 释放计算工作负载但保留快照命名空间和 PVC。
 func (o *K8sOrchestrator) StopComputeKeepSnapshot(ctx context.Context, sb Sandbox) error {
+	cs := o.client.Clientset()
 	selector := fmt.Sprintf("chaimir.io/sandbox-id=%d", sb.ID)
-	if err := o.client.Clientset().CoreV1().Pods(sb.Namespace).DeleteCollection(ctx, metav1.DeleteOptions{}, metav1.ListOptions{LabelSelector: selector}); err != nil && !apierrors.IsNotFound(err) {
+	if err := cs.CoreV1().Pods(sb.Namespace).DeleteCollection(ctx, metav1.DeleteOptions{}, metav1.ListOptions{LabelSelector: selector}); err != nil && !apierrors.IsNotFound(err) {
 		return fmt.Errorf("删除快照沙箱计算 Pod 失败: %w", err)
 	}
-	return nil
+	return o.cleanupSnapshotRetainedNamespace(ctx, cs, sb)
 }
 
 // CreateSnapshot 创建 CSI VolumeSnapshot 并返回 namespaced 引用。
@@ -503,12 +504,86 @@ func (o *K8sOrchestrator) SnapshotSupported(ctx context.Context) (bool, error) {
 		return false, err
 	}
 	classGVR := schema.GroupVersionResource{Group: "snapshot.storage.k8s.io", Version: "v1", Resource: "volumesnapshotclasses"}
-	if _, err := o.client.Dynamic().Resource(classGVR).Get(ctx, o.cfg.VolumeSnapshotClassName, metav1.GetOptions{}); apierrors.IsNotFound(err) {
+	class, err := o.client.Dynamic().Resource(classGVR).Get(ctx, o.cfg.VolumeSnapshotClassName, metav1.GetOptions{})
+	if apierrors.IsNotFound(err) {
 		return false, nil
 	} else if err != nil {
 		return false, err
 	}
-	return true, nil
+	return volumeSnapshotClassAllowsDeletion(class), nil
+}
+
+// volumeSnapshotClassAllowsDeletion 要求快照类删除策略为 Delete,避免到期清理后底层快照继续占用存储。
+func volumeSnapshotClassAllowsDeletion(class *unstructured.Unstructured) bool {
+	if class == nil {
+		return false
+	}
+	policy, _, _ := unstructured.NestedString(class.Object, "deletionPolicy")
+	return strings.EqualFold(strings.TrimSpace(policy), "Delete")
+}
+
+// waitNamespaceDeleted 等待动态沙箱 Namespace 真正消失,避免数据库状态先行标记 destroyed 后存储仍残留。
+func waitNamespaceDeleted(ctx context.Context, cs kubernetes.Interface, namespace string, pollSeconds int) error {
+	if pollSeconds <= 0 {
+		return fmt.Errorf("SANDBOX_READY_POLL_INTERVAL_SECONDS 必须大于 0")
+	}
+	ticker := time.NewTicker(time.Duration(pollSeconds) * time.Second)
+	defer ticker.Stop()
+	for {
+		if _, err := cs.CoreV1().Namespaces().Get(ctx, namespace, metav1.GetOptions{}); apierrors.IsNotFound(err) {
+			return nil
+		} else if err != nil {
+			return fmt.Errorf("查询沙箱 Namespace 删除状态失败: %w", err)
+		}
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("等待沙箱 Namespace 删除超时: %w", ctx.Err())
+		case <-ticker.C:
+		}
+	}
+}
+
+// cleanupSnapshotRetainedNamespace 只保留快照恢复所需的 PVC 与 VolumeSnapshot,其余运行资源立即释放。
+func (o *K8sOrchestrator) cleanupSnapshotRetainedNamespace(ctx context.Context, cs kubernetes.Interface, sb Sandbox) error {
+	if err := deleteServices(ctx, cs, sb.Namespace); err != nil {
+		return err
+	}
+	if err := cs.CoreV1().ConfigMaps(sb.Namespace).DeleteCollection(ctx, metav1.DeleteOptions{}, metav1.ListOptions{LabelSelector: "app=chaimir,module=sandbox"}); err != nil && !apierrors.IsNotFound(err) {
+		return fmt.Errorf("删除快照沙箱 ConfigMap 失败: %w", err)
+	}
+	if err := cs.CoreV1().Secrets(sb.Namespace).DeleteCollection(ctx, metav1.DeleteOptions{}, metav1.ListOptions{LabelSelector: "app=chaimir,module=sandbox"}); err != nil && !apierrors.IsNotFound(err) {
+		return fmt.Errorf("删除快照沙箱 Secret 失败: %w", err)
+	}
+	if err := cs.NetworkingV1().NetworkPolicies(sb.Namespace).DeleteCollection(ctx, metav1.DeleteOptions{}, metav1.ListOptions{}); err != nil && !apierrors.IsNotFound(err) {
+		return fmt.Errorf("删除快照沙箱 NetworkPolicy 失败: %w", err)
+	}
+	if err := cs.CoreV1().ResourceQuotas(sb.Namespace).DeleteCollection(ctx, metav1.DeleteOptions{}, metav1.ListOptions{}); err != nil && !apierrors.IsNotFound(err) {
+		return fmt.Errorf("删除快照沙箱 ResourceQuota 失败: %w", err)
+	}
+	if err := cs.CoreV1().LimitRanges(sb.Namespace).DeleteCollection(ctx, metav1.DeleteOptions{}, metav1.ListOptions{}); err != nil && !apierrors.IsNotFound(err) {
+		return fmt.Errorf("删除快照沙箱 LimitRange 失败: %w", err)
+	}
+	if err := cs.CoreV1().ServiceAccounts(sb.Namespace).DeleteCollection(ctx, metav1.DeleteOptions{}, metav1.ListOptions{LabelSelector: "app=chaimir,module=sandbox"}); err != nil && !apierrors.IsNotFound(err) {
+		return fmt.Errorf("删除快照沙箱 ServiceAccount 失败: %w", err)
+	}
+	return nil
+}
+
+// deleteServices 显式逐个删除 Service;client-go 的 ServiceInterface 不提供 DeleteCollection。
+func deleteServices(ctx context.Context, cs kubernetes.Interface, namespace string) error {
+	services, err := cs.CoreV1().Services(namespace).List(ctx, metav1.ListOptions{})
+	if apierrors.IsNotFound(err) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("列出快照沙箱 Service 失败: %w", err)
+	}
+	for _, svc := range services.Items {
+		if err := cs.CoreV1().Services(namespace).Delete(ctx, svc.Name, metav1.DeleteOptions{}); err != nil && !apierrors.IsNotFound(err) {
+			return fmt.Errorf("删除快照沙箱 Service 失败: %w", err)
+		}
+	}
+	return nil
 }
 
 // namespaceObject 构造带平台所有权标签的动态沙箱 Namespace。

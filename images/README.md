@@ -32,10 +32,26 @@ runtime/evm-hardhat sha256:<64位hex>
 service/backend sha256:<64位hex>
 ```
 
-CI 的 images 流水线在推送 Harbor 后解析真实 digest,上传 `image-digest-*` 锁片段。发布或离线包制作时必须把已构建镜像的锁片段合并为 `images/image-digests.lock`,再执行:
+CI 的 images 流水线在推送 Harbor 后解析真实 digest,先上传 `image-digest-*` 锁片段,再由同一流水线合并并校验为完整 `image-digests.lock` artifact。发布或离线包制作时必须使用这份完整锁文件作为 `images/image-digests.lock`,再执行:
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File images/pull-images.ps1 -Scope all -Registry harbor.chaimir.local
+powershell -NoProfile -ExecutionPolicy Bypass -File images/pull-images.ps1 -Scope all -Registry harbor.chaimir:30080
 ```
 
 脚本默认每个镜像最多尝试 3 次。单次 `docker pull` 失败后,若本地原本没有该 digest 引用,会执行 `docker image rm <ref>` 清理失败残留后重试;若本地已存在该 digest,则保留本地可用镜像,避免瞬时 registry 错误破坏已预热结果。当前镜像全部重试失败后立即停止并返回非 0,不得继续拉取后续镜像。生产不应启用 `-NoCleanupFailedPull`,该开关仅用于诊断 Docker 本地状态。
+
+本地完整功能测试也必须走同一套 registry + digest lock 机制。若本地已有 `chaimir.local/<image>:dev` 构建产物,先把它们发布到一个开发者可控 registry,由脚本从 registry 返回值生成临时锁文件,再用同一脚本按 digest 拉取:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File images/pull-images.ps1 `
+  -Scope all `
+  -Registry harbor.chaimir:30080 `
+  -DockerConfig .tmp/backend-functional-test/docker-config `
+  -DigestLock .tmp/backend-functional-test/evidence/local-registry-image-digests.lock `
+  -PublishLocalBuilt `
+  -LocalSourceRegistry chaimir.local `
+  -LocalSourceTag dev `
+  -PublishTag local-dev
+```
+
+`-PublishLocalBuilt` 只发布 `source.type=platform-built|thin-wrapper|build-base` 的镜像;纯上游固定镜像仍按 manifest 中的上游 digest 拉取。脚本会先校验所有构建类 manifest 都存在本地源镜像,缺项直接失败,不会跳过、不会回退到 tag。该模式用于本地真实功能测试和离线包预演;生产发布仍必须使用 CI/Harbor 生成并经 Trivy/Cosign 门禁通过的完整 `image-digests.lock`。

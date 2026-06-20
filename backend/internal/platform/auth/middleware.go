@@ -4,6 +4,7 @@ package auth
 import (
 	"context"
 	"log/slog"
+	"net/http"
 	"regexp"
 	"strconv"
 	"strings"
@@ -21,6 +22,10 @@ import (
 )
 
 const (
+	// BrowserAccessCookieName 是浏览器内嵌工具入口使用的路径受限 access cookie 名称。
+	BrowserAccessCookieName = "chaimir_access"
+	// BrowserAccessTokenQuery 是浏览器无法设置 Authorization 头时使用的一次性入口参数。
+	BrowserAccessTokenQuery = "token"
 	// ServiceNameHeader 标识内部服务调用方。
 	ServiceNameHeader = "X-Chaimir-Service"
 	// ServiceTenantHeader 显式携带内部服务请求绑定的租户边界。
@@ -34,6 +39,18 @@ const (
 )
 
 type serviceSourceRefKey struct{}
+type browserAccessTokenSource string
+
+const (
+	browserAccessTokenSourceHeader browserAccessTokenSource = "header"
+	browserAccessTokenSourceQuery  browserAccessTokenSource = "query"
+	browserAccessTokenSourceCookie browserAccessTokenSource = "cookie"
+)
+
+const (
+	browserAccessTokenContextKey = "auth_browser_access_token"
+	browserAccessSourceKey       = "auth_browser_access_source"
+)
 
 var serviceSourceRefRe = regexp.MustCompile(`^[a-z]+:[0-9]{4}:[a-z][a-z0-9_-]*:[0-9A-Za-z_-]+$`)
 
@@ -103,6 +120,23 @@ func (m *Manager) WebSocketMiddleware() gin.HandlerFunc {
 			return
 		}
 		injectAccessIdentity(c, claims)
+		c.Next()
+	}
+}
+
+// BrowserAccessMiddleware 校验浏览器内嵌工具入口的 Bearer、一次性 query token 或路径受限 Cookie。
+func (m *Manager) BrowserAccessMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		claims, token, source, ok := m.browserAccessClaims(c)
+		if !ok {
+			return
+		}
+		if !m.validateAccessSession(c, claims) {
+			return
+		}
+		injectAccessIdentity(c, claims)
+		c.Set(browserAccessTokenContextKey, token)
+		c.Set(browserAccessSourceKey, string(source))
 		c.Next()
 	}
 }
@@ -289,6 +323,89 @@ func (m *Manager) accessClaims(c *gin.Context) (*Claims, bool) {
 		return nil, false
 	}
 	return claims, true
+}
+
+// browserAccessClaims 按浏览器真实能力依次读取 Header、query token 和路径受限 Cookie。
+func (m *Manager) browserAccessClaims(c *gin.Context) (*Claims, string, browserAccessTokenSource, bool) {
+	if token, ok := bearerAccessToken(c); ok {
+		claims, ok := m.verifyAccessClaims(c, token)
+		return claims, token, browserAccessTokenSourceHeader, ok
+	}
+	if token := strings.TrimSpace(c.Query(BrowserAccessTokenQuery)); token != "" {
+		claims, ok := m.verifyAccessClaims(c, token)
+		return claims, token, browserAccessTokenSourceQuery, ok
+	}
+	if cookie, err := c.Request.Cookie(BrowserAccessCookieName); err == nil {
+		token := strings.TrimSpace(cookie.Value)
+		if token != "" {
+			claims, ok := m.verifyAccessClaims(c, token)
+			return claims, token, browserAccessTokenSourceCookie, ok
+		}
+	}
+	response.Fail(c, apperr.ErrUnauthorized)
+	c.Abort()
+	return nil, "", "", false
+}
+
+// bearerAccessToken 从 Authorization 头读取 Bearer token,不写响应便于浏览器入口继续尝试 Cookie。
+func bearerAccessToken(c *gin.Context) (string, bool) {
+	raw := c.GetHeader("Authorization")
+	token, ok := strings.CutPrefix(raw, "Bearer ")
+	token = strings.TrimSpace(token)
+	return token, ok && token != ""
+}
+
+// verifyAccessClaims 校验 access token 并统一输出用户向未登录错误。
+func (m *Manager) verifyAccessClaims(c *gin.Context, token string) (*Claims, bool) {
+	claims, err := m.VerifyAccess(strings.TrimSpace(token))
+	if err != nil {
+		response.Fail(c, apperr.ErrUnauthorized.WithCause(err))
+		c.Abort()
+		return nil, false
+	}
+	return claims, true
+}
+
+// BrowserAccessToken 返回浏览器入口中间件已验证过的原始 access token。
+func BrowserAccessToken(c *gin.Context) (string, bool) {
+	token, ok := c.Get(browserAccessTokenContextKey)
+	if !ok {
+		return "", false
+	}
+	raw, ok := token.(string)
+	return raw, ok && strings.TrimSpace(raw) != ""
+}
+
+// BrowserAccessFromQuery 判断当前请求是否通过一次性 query token 完成鉴权。
+func BrowserAccessFromQuery(c *gin.Context) bool {
+	source, ok := c.Get(browserAccessSourceKey)
+	return ok && source == string(browserAccessTokenSourceQuery)
+}
+
+// SetBrowserAccessCookie 写入路径受限 HttpOnly access cookie,供内嵌工具后续资源请求复用平台代理鉴权。
+func (m *Manager) SetBrowserAccessCookie(c *gin.Context, pathPrefix, token string) {
+	pathPrefix = "/" + strings.Trim(strings.TrimSpace(pathPrefix), "/")
+	if pathPrefix == "/" || strings.TrimSpace(token) == "" {
+		return
+	}
+	maxAge := int(m.accessTTL.Seconds())
+	if maxAge <= 0 {
+		maxAge = 900
+	}
+	http.SetCookie(c.Writer, &http.Cookie{
+		Name:     BrowserAccessCookieName,
+		Value:    strings.TrimSpace(token),
+		Path:     pathPrefix,
+		MaxAge:   maxAge,
+		HttpOnly: true,
+		Secure:   browserCookieSecure(c),
+		SameSite: http.SameSiteLaxMode,
+	})
+}
+
+// browserCookieSecure 判断当前入口是否应写 Secure cookie,支持 TLS 终止在前置网关的部署。
+func browserCookieSecure(c *gin.Context) bool {
+	return c.Request.TLS != nil || strings.EqualFold(strings.TrimSpace(c.GetHeader("X-Forwarded-Proto")), "https")
 }
 
 // queryAccessClaims 提取并校验查询参数中的 access token,用于浏览器 WebSocket 连接。

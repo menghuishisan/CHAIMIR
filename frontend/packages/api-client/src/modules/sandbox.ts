@@ -29,7 +29,7 @@ export class SandboxApi {
     const baseUrl = this.client['config'].baseURL || ''
     const wsProtocol = baseUrl.startsWith('https') ? 'wss' : 'ws'
     const wsBaseUrl = baseUrl.replace(/^https?/, wsProtocol)
-    const query = container ? `?container=${encodeURIComponent(container)}` : ''
+    const query = this.buildBrowserTokenQuery(container ? { container } : undefined)
     return `${wsBaseUrl}/sandbox/sandboxes/${instanceId}/terminal${query}`
   }
 
@@ -40,7 +40,7 @@ export class SandboxApi {
     const baseUrl = this.client['config'].baseURL || ''
     const wsProtocol = baseUrl.startsWith('https') ? 'wss' : 'ws'
     const wsBaseUrl = baseUrl.replace(/^https?/, wsProtocol)
-    return `${wsBaseUrl}/sandbox/sandboxes/${instanceId}/progress`
+    return `${wsBaseUrl}/sandbox/sandboxes/${instanceId}/progress${this.buildBrowserTokenQuery()}`
   }
 
   /**
@@ -85,6 +85,25 @@ export class SandboxApi {
     const baseUrl = this.client['config'].baseURL || ''
     const normalizedBase = baseUrl.replace(/\/+$/, '')
     const normalizedPath = proxyPath.replace(/^\/+/, '')
-    return `${normalizedBase}/sandbox/sandboxes/${instanceId}/tools/${toolCode}/${normalizedPath}`
+    const encodedTool = encodeURIComponent(toolCode)
+    return `${normalizedBase}/sandbox/sandboxes/${instanceId}/tools/${encodedTool}/${normalizedPath}${this.buildBrowserTokenQuery()}`
+  }
+
+  /**
+   * 构造浏览器原生 WS/iframe 无法设置 Authorization 头时使用的一次性入口 token。
+   */
+  private buildBrowserTokenQuery(extra?: Record<string, string | undefined>): string {
+    const params = new URLSearchParams()
+    for (const [key, value] of Object.entries(extra || {})) {
+      if (value) {
+        params.set(key, value)
+      }
+    }
+    const token = this.client['config'].getToken?.()
+    if (token) {
+      params.set('token', token)
+    }
+    const query = params.toString()
+    return query ? `?${query}` : ''
   }
 }

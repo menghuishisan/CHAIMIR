@@ -22,6 +22,7 @@ type acceptanceToolDefinition struct {
 	Kind         int16
 	EcoTags      []string
 	ResourceSpec map[string]any
+	Status       int16
 }
 
 const acceptanceTerminalToolID int64 = 910000000000001099
@@ -52,15 +53,16 @@ type toolManifest struct {
 }
 
 type toolManifestTool struct {
-	Kind             string                        `json:"kind"`
-	EcoTags          []string                      `json:"eco_tags"`
-	MountWorkspace   bool                          `json:"mount_workspace"`
-	Command          []string                      `json:"command"`
-	Args             []string                      `json:"args"`
-	Env              []workload.EnvVarSpec         `json:"env"`
-	EphemeralMounts  []workload.EphemeralMountSpec `json:"ephemeral_mounts"`
-	KeepaliveCommand []string                      `json:"keepalive_command"`
-	CommandPolicy    map[string]any                `json:"command_policy"`
+	Kind                  string                        `json:"kind"`
+	EcoTags               []string                      `json:"eco_tags"`
+	MountWorkspace        bool                          `json:"mount_workspace"`
+	RuntimeConfigRequired bool                          `json:"runtime_config_required"`
+	Command               []string                      `json:"command"`
+	Args                  []string                      `json:"args"`
+	Env                   []workload.EnvVarSpec         `json:"env"`
+	EphemeralMounts       []workload.EphemeralMountSpec `json:"ephemeral_mounts"`
+	KeepaliveCommand      []string                      `json:"keepalive_command"`
+	CommandPolicy         map[string]any                `json:"command_policy"`
 }
 
 type toolManifestPort struct {
@@ -136,6 +138,7 @@ func acceptanceSeedToolDefinitions() ([]acceptanceToolDefinition, error) {
 		Kind:         contracts.SandboxToolKindTerminal,
 		EcoTags:      []string{"*"},
 		ResourceSpec: map[string]any{},
+		Status:       1,
 	})
 	return defs, nil
 }
@@ -201,6 +204,10 @@ func toolDefinitionFromManifest(index int, manifest toolManifest) (acceptanceToo
 	if kind == contracts.SandboxToolKindCommand {
 		spec["command_policy"] = manifest.Tool.CommandPolicy
 	}
+	status := int16(1)
+	if manifest.Tool.RuntimeConfigRequired {
+		status = 2
+	}
 	return acceptanceToolDefinition{
 		ID:           acceptanceToolID(manifest.Name, index),
 		Code:         manifest.Name,
@@ -208,6 +215,7 @@ func toolDefinitionFromManifest(index int, manifest toolManifest) (acceptanceToo
 		Kind:         kind,
 		EcoTags:      manifest.Tool.EcoTags,
 		ResourceSpec: spec,
+		Status:       status,
 	}, nil
 }
 

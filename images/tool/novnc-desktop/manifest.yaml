@@ -42,7 +42,7 @@ tool:
   mount_workspace: true
 ports:
   - name: http
-    container_port: 80
+    container_port: 8080
     protocol: TCP
     expose: proxy
     purpose: noVNC web desktop
@@ -51,7 +51,7 @@ local_dev:
     - host: 127.0.0.1
       env: CHAIMIR_DEV_NOVNC_PORT
       default: 18098
-      container_port: 80
+      container_port: 8080
 security:
   run_as_non_root: true
   read_only_root_filesystem: false

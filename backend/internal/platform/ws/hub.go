@@ -206,10 +206,12 @@ func (h *Hub) ServeInteractive(w http.ResponseWriter, r *http.Request, handle fu
 	close(conn.done)
 	h.Unsubscribe(conn)
 	close(conn.send)
+	// 协议升级成功后连接已被 hijack,业务流结束或断开不能再返回给 HTTP handler 写 JSON 响应。
+	// 升级前的错误仍由调用方按统一错误结构返回给客户端。
 	if closeErr := socket.Close(); closeErr != nil && err == nil {
-		return closeErr
+		return nil
 	}
-	return err
+	return nil
 }
 
 // Subscribe 把连接加入指定 topic,并维护反向索引供断连时清理。

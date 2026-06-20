@@ -35,6 +35,10 @@ rules:
   - apiGroups: [""]
     resources: ["nodes"]
     verbs: ["get", "list", "watch"]
+  # 快照能力检测需读取 StorageClass,用于拒绝未接入真实 CSI 存储的 snapshot_enabled。
+  - apiGroups: ["storage.k8s.io"]
+    resources: ["storageclasses"]
+    verbs: ["get", "list", "watch"]
 ---
 # 命名空间内工作负载管理权限,经下方 ClusterRoleBinding 绑定后,
 # 在后端创建的每个动态命名空间内由 client-go 套用(此处定义为可复用 ClusterRole,
@@ -49,6 +53,10 @@ rules:
   # 沙箱 Pod 组的编排(每沙箱 = Namespace + Pod(s),见 docs/镜像 §三之二)。
   - apiGroups: [""]
     resources: ["pods", "pods/log", "pods/exec", "pods/status"]
+    verbs: ["create", "delete", "get", "list", "watch"]
+  # 每个动态沙箱命名空间内显式创建最小权限 ServiceAccount,禁止依赖 default SA。
+  - apiGroups: [""]
+    resources: ["serviceaccounts"]
     verbs: ["create", "delete", "get", "list", "watch"]
   # 工具容器(code-server/remix 等)的 ClusterIP 暴露 + 配置注入。
   - apiGroups: [""]
@@ -74,6 +82,10 @@ rules:
   - apiGroups: ["snapshot.storage.k8s.io"]
     resources: ["volumesnapshots"]
     verbs: ["create", "delete", "get", "list", "watch"]
+  # 快照准入和 ready 校验只读 VolumeSnapshotClass/Content,不允许后端直接改写底层快照内容。
+  - apiGroups: ["snapshot.storage.k8s.io"]
+    resources: ["volumesnapshotcontents", "volumesnapshotclasses"]
+    verbs: ["get", "list", "watch"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding

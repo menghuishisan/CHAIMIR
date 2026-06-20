@@ -4,7 +4,6 @@ package sandbox
 import (
 	"fmt"
 	"net/http"
-	"net/http/httputil"
 	"net/url"
 	"strings"
 
@@ -30,17 +29,19 @@ func RegisterRoutes(r gin.IRouter, svc *Service, authn *auth.Manager, roles cont
 	if authn == nil {
 		return fmt.Errorf("sandbox routes 缺少 auth manager")
 	}
-	api := sandboxAPI{svc: svc}
+	api := sandboxAPI{svc: svc, authn: authn}
 	g := r.Group("/api/v1/sandbox")
 	api.registerPlatformRoutes(g.Group("", authn.Middleware(), auth.RequirePlatformIdentity()))
 	api.registerInternalRoutes(g.Group("", authn.ServiceMiddleware()))
 	api.registerUserRoutes(g.Group("", authn.Middleware(), auth.RequireTenantAnyRole(roles, contracts.RoleStudent, contracts.RoleTeacher, contracts.RoleSchoolAdmin)))
+	api.registerInteractiveRoutes(g.Group("", authn.BrowserAccessMiddleware(), auth.RequireTenantAnyRole(roles, contracts.RoleStudent, contracts.RoleTeacher, contracts.RoleSchoolAdmin)))
 	api.registerQuotaRoutes(g, authn, roles)
 	return nil
 }
 
 type sandboxAPI struct {
-	svc *Service
+	svc   *Service
+	authn *auth.Manager
 }
 
 // registerPlatformRoutes 注册运行时、镜像和工具管理接口。
@@ -95,12 +96,16 @@ func (a sandboxAPI) registerInternalRoutes(g gin.IRouter) {
 // registerUserRoutes 注册用户侧沙箱查询、文件和进度接口。
 func (a sandboxAPI) registerUserRoutes(g gin.IRouter) {
 	g.GET("/sandboxes/:id", a.getSandbox)
-	g.GET("/sandboxes/:id/progress", a.progress)
-	g.GET("/sandboxes/:id/terminal", a.terminal)
 	g.GET("/sandboxes/:id/files", a.getFiles)
 	g.PUT("/sandboxes/:id/files", a.writeFile)
 	g.POST("/sandboxes/:id/files/save", a.saveFiles)
 	g.POST("/sandboxes/:id/command-tools/:tool_code/run", a.runCommandTool)
+}
+
+// registerInteractiveRoutes 注册浏览器工具、终端和进度流入口,允许路径受限 Cookie 支撑工具资源加载。
+func (a sandboxAPI) registerInteractiveRoutes(g gin.IRouter) {
+	g.GET("/sandboxes/:id/progress", a.progress)
+	g.GET("/sandboxes/:id/terminal", a.terminal)
 	g.Match([]string{http.MethodGet, http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete, http.MethodHead, http.MethodOptions}, "/sandboxes/:id/tools/:tool_code/*proxy_path", a.toolProxy)
 }
 
@@ -462,11 +467,33 @@ func (a sandboxAPI) toolProxy(c *gin.Context) {
 	}
 	a.svc.ObserveToolAccess(c.Request.Context(), sb)
 	target := toolProxyURL(sb, tool)
-	proxy := newToolReverseProxy(target, c.Param("proxy_path"), func(w http.ResponseWriter, _ *http.Request, err error) {
-		response.Fail(c, apperr.ErrSandboxToolProxyUnavailable.WithCause(err))
+	externalPrefix := toolProxyExternalPrefix(id, c.Param("tool_code"))
+	if !a.prepareToolBrowserAccess(c, externalPrefix) {
+		return
+	}
+	proxy := httpx.NewPrefixReverseProxy(httpx.PrefixReverseProxyConfig{
+		Target:         target,
+		ProxyPath:      c.Param("proxy_path"),
+		ExternalPrefix: externalPrefix,
+		ErrorHandler: func(w http.ResponseWriter, _ *http.Request, err error) {
+			response.Fail(c, apperr.ErrSandboxToolProxyUnavailable.WithCause(err))
+		},
 	})
 	proxy.ServeHTTP(c.Writer, c.Request)
 	a.svc.ObserveToolAccess(c.Request.Context(), sb)
+}
+
+// prepareToolBrowserAccess 为浏览器工具写入路径受限 Cookie,并清除一次性 query token 后再进入上游代理。
+func (a sandboxAPI) prepareToolBrowserAccess(c *gin.Context, externalPrefix string) bool {
+	token, ok := auth.BrowserAccessToken(c)
+	if ok && a.authn != nil {
+		a.authn.SetBrowserAccessCookie(c, externalPrefix, token)
+	}
+	if !auth.BrowserAccessFromQuery(c) {
+		return true
+	}
+	c.Redirect(http.StatusFound, toolProxyCleanRequestURI(c))
+	return false
 }
 
 // runCommandTool 执行命令类工具的一次受控命令。
@@ -644,22 +671,18 @@ func toolProxyURL(sb Sandbox, tool SandboxTool) *url.URL {
 	}
 }
 
-// newToolReverseProxy 构造只使用 Rewrite 的反向代理,避免与 Director 旧机制混用。
-func newToolReverseProxy(target *url.URL, proxyPath string, errorHandler func(http.ResponseWriter, *http.Request, error)) *httputil.ReverseProxy {
-	return &httputil.ReverseProxy{
-		ErrorHandler: errorHandler,
-		Rewrite: func(pr *httputil.ProxyRequest) {
-			pr.SetURL(target)
-			pr.Out.URL.Path = strings.TrimPrefix(proxyPath, "/")
-			if pr.Out.URL.Path == "" {
-				pr.Out.URL.Path = "/"
-			} else {
-				pr.Out.URL.Path = "/" + pr.Out.URL.Path
-			}
-			pr.Out.Host = target.Host
-			sanitizeToolProxyHeaders(pr.Out.Header)
-		},
-	}
+// toolProxyExternalPrefix 返回浏览器可见的工具代理前缀,用于保持 Web 工具重定向不跳出鉴权入口。
+func toolProxyExternalPrefix(sandboxID int64, toolCode string) string {
+	return fmt.Sprintf("/api/v1/sandbox/sandboxes/%d/tools/%s", sandboxID, url.PathEscape(strings.TrimSpace(toolCode)))
+}
+
+// toolProxyCleanRequestURI 删除浏览器入口一次性 token,确保 token 不进入上游工具日志或重定向。
+func toolProxyCleanRequestURI(c *gin.Context) string {
+	u := *c.Request.URL
+	query := u.Query()
+	query.Del(auth.BrowserAccessTokenQuery)
+	u.RawQuery = query.Encode()
+	return u.RequestURI()
 }
 
 // toolProxyRouteTarget 解析工具声明的首个平台代理路由,与 K8s Service 创建共用 resource_spec。
@@ -682,26 +705,4 @@ func toolProxyRouteTarget(spec ToolResourceSpec) (string, int32, bool) {
 		}
 	}
 	return "", 0, false
-}
-
-// sanitizeToolProxyHeaders 删除平台身份凭据和内部服务签名,防止沙箱工具读取用户或服务端 token。
-func sanitizeToolProxyHeaders(header http.Header) {
-	for _, key := range []string{
-		"Authorization",
-		"Cookie",
-		"Proxy-Authorization",
-		"X-Api-Key",
-		"X-CSRF-Token",
-		"X-Forwarded-For",
-		"X-Forwarded-Host",
-		"X-Forwarded-Proto",
-		"X-Real-IP",
-		auth.ServiceNameHeader,
-		auth.ServiceTenantHeader,
-		auth.ServiceSourceRefHeader,
-		auth.ServiceTimestampHeader,
-		auth.ServiceSignatureHeader,
-	} {
-		header.Del(key)
-	}
 }

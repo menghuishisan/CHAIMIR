@@ -25,7 +25,7 @@ type acceptanceImageAttestation struct {
 func acceptanceImageURL(image string) (string, error) {
 	registry := strings.TrimRight(osEnv("IMAGE_REGISTRY"), "/")
 	if registry == "" {
-		registry = "harbor.chaimir.local"
+		registry = "harbor.chaimir"
 	}
 	prefix := registry + "/" + strings.TrimLeft(image, "/") + "@sha256:"
 	raw := strings.TrimSpace(osEnv("SANDBOX_IMAGE_ATTESTATIONS_JSON"))
@@ -209,8 +209,8 @@ func seedToolRows(ctx context.Context, tx pgx.Tx) error {
 		}
 		if err := execJSON(ctx, tx, `
 INSERT INTO tool (id, code, name, kind, eco_tags, resource_spec, status)
-VALUES ($1,$2,$3,$4,$5,$6,1)`,
-			def.ID, def.Code, def.Name, def.Kind, strings.Join(def.EcoTags, ","), spec); err != nil {
+VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+			def.ID, def.Code, def.Name, def.Kind, strings.Join(def.EcoTags, ","), spec, def.Status); err != nil {
 			return err
 		}
 	}

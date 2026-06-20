@@ -24,6 +24,7 @@
 - JWT 双 Token(M1):`Authorization: Bearer <access_token>`。
 - 登录前定位租户:`X-Tenant-Code`(学校短码)。
 - Access 15min,Refresh 7d 轮转;单端登录。
+- 浏览器原生 WebSocket/iframe 工具入口不能设置 `Authorization` 头时,仅 sandbox 交互入口允许一次性 `?token=<access_token>` 进入;后端校验后写路径受限 HttpOnly Cookie 并清除 query,不得把 token 透传给工具容器。
 
 ### 4. 接口分类
 - **`[用户]`**:前端调用,JWT + 角色鉴权。
@@ -77,7 +78,7 @@
 ### M2 沙箱引擎 `/api/v1/sandbox`
 - `/runtimes`、`/tools`:运行时/工具管理 + 接入即测 `[平台管理员]`;镜像预拉取提供触发与状态查询,完成以全目标节点真实拉取成功为准。
 - `/sandboxes`:创建/查询/销毁/回收 `[内部]`;`WS /sandboxes/{id}/progress`、`/terminal`。
-- `/sandboxes/{id}/files`、`/tools/{code}/*`、`/command-tools/{code}/run`:文件、Web 工具代理和受控命令工具 `[用户]`。
+- `/sandboxes/{id}/files`、`/tools/{code}/*`、`/command-tools/{code}/run`:文件、Web 工具代理和受控命令工具 `[用户]`;Web 工具代理支持浏览器一次性 `token` 入口并换成路径受限 Cookie。
 - `/sandboxes/{id}/chain/*`:链上能力(deploy/tx/query/reset)`[内部]`。
 - `/quota`:配额。
 

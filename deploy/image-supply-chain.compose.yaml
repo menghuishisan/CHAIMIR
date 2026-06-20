@@ -1,0 +1,53 @@
+# 容器化镜像供应链工具入口,避免在宿主机安装 Trivy/Cosign/Helm。
+services:
+  trivy:
+    image: ${SUPPLY_CHAIN_TRIVY_IMAGE:?SUPPLY_CHAIN_TRIVY_IMAGE is required}
+    entrypoint: ["trivy"]
+    env_file:
+      - config/chaimir.env
+    volumes:
+      - type: bind
+        source: ${SUPPLY_CHAIN_DOCKER_SOCKET:-/var/run/docker.sock}
+        target: /var/run/docker.sock
+      - type: volume
+        source: trivy-cache
+        target: /root/.cache/trivy
+
+  cosign:
+    image: ${SUPPLY_CHAIN_COSIGN_IMAGE:?SUPPLY_CHAIN_COSIGN_IMAGE is required}
+    entrypoint: ["cosign"]
+    working_dir: /workspace
+    env_file:
+      - config/chaimir.env
+    environment:
+      COSIGN_PASSWORD: ${COSIGN_PRIVATE_KEY_PASSWORD:-}
+    volumes:
+      - type: bind
+        source: ${SUPPLY_CHAIN_REPO_HOST_PATH:?SUPPLY_CHAIN_REPO_HOST_PATH is required}
+        target: /workspace
+      - type: bind
+        source: ${SUPPLY_CHAIN_COSIGN_KEY_HOST_DIR:?SUPPLY_CHAIN_COSIGN_KEY_HOST_DIR is required}
+        target: /cosign
+        read_only: true
+
+  helm:
+    image: ${SUPPLY_CHAIN_HELM_IMAGE:?SUPPLY_CHAIN_HELM_IMAGE is required}
+    entrypoint: ["helm"]
+    working_dir: /workspace
+    env_file:
+      - config/chaimir.env
+    environment:
+      KUBECONFIG: /kubeconfig
+      HARBOR_ADMIN_PASSWORD: ${HARBOR_ADMIN_PASSWORD:-}
+    volumes:
+      - type: bind
+        source: ${SUPPLY_CHAIN_REPO_HOST_PATH:?SUPPLY_CHAIN_REPO_HOST_PATH is required}
+        target: /workspace
+      - type: bind
+        source: ${SUPPLY_CHAIN_KUBECONFIG_HOST_PATH:-config/supply-chain.kubeconfig}
+        target: /kubeconfig
+        read_only: true
+
+volumes:
+  trivy-cache:
+    name: ${SUPPLY_CHAIN_TRIVY_CACHE_VOLUME:-chaimir-supply-chain-trivy-cache}

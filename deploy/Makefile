@@ -2,7 +2,7 @@
 # 依据 docs/总-部署架构设计.md:local-dev 使用当前 kubeconfig 指向的 Kubernetes 集群。
 # 用法:make dev-up(当前集群部署中间件+应用) / make deps-up(仅部署本地联调依赖)。
 #
-# 前置:docker、kubectl(内置 kustomize)、helm(仅 harbor-up 需要)。
+# 前置:docker、kubectl(内置 kustomize)。Harbor/Trivy/Cosign/Helm 统一走容器化工具入口。
 # 注:本仓库用 kubectl 内置 kustomize(kubectl kustomize / kubectl apply -k)。
 
 SHELL := /bin/bash
@@ -10,6 +10,11 @@ OVERLAY := overlays/local-dev
 DEPS_OVERLAY := overlays/local-deps
 SECRET_FILE := config/secret.env
 SECRET_EXAMPLE := config/secret.env.example
+SUPPLY_CHAIN_CONFIG := config/chaimir.env
+SUPPLY_CHAIN_SECRET_FILE := config/supply-chain.secret.env
+SUPPLY_CHAIN_SECRET_EXAMPLE := config/supply-chain.secret.env.example
+SUPPLY_CHAIN_COMPOSE := image-supply-chain.compose.yaml
+SUPPLY_CHAIN_PROJECT := chaimir-supply-chain
 INGRESS_NGINX_VERSION := controller-v1.11.3
 METRICS_SERVER_VERSION := v0.8.1
 # CSI snapshotter 只安装 VolumeSnapshot CRD 与 snapshot-controller;
@@ -87,6 +92,13 @@ gen-secret: ## 校验 config/secret.env 已由运维/开发者按模板填好
 		exit 1; \
 	else echo "$(SECRET_FILE) 已存在"; fi
 
+.PHONY: supply-chain-secret-check
+supply-chain-secret-check: ## 校验供应链专用密钥文件存在,不注入应用 Pod
+	@if [ ! -f $(SUPPLY_CHAIN_SECRET_FILE) ]; then \
+		echo "缺少 $(SUPPLY_CHAIN_SECRET_FILE)。请复制 $(SUPPLY_CHAIN_SECRET_EXAMPLE) 为 $(SUPPLY_CHAIN_SECRET_FILE),按模板填入真实值。"; \
+		exit 1; \
+	else echo "$(SUPPLY_CHAIN_SECRET_FILE) 已存在"; fi
+
 # ---- 应用部署 ----
 .PHONY: apply-dev
 apply-dev: gen-secret ## apply local-dev overlay(命名空间/中间件/应用)
@@ -112,13 +124,38 @@ migrate: ## 运行迁移 + RLS 初始化 + seed(删旧 Job 后重建)
 load-images: ## 将本地构建的 chaimir 镜像导入当前集群;Docker Desktop 通常无需额外导入
 	@echo "Docker Desktop Kubernetes 直接复用本机 Docker 镜像;其他集群请推送到 overlay 配置的 registry。"
 
-# ---- Harbor(可选,本地私有仓)----
+# ---- 镜像供应链工具与 Harbor(可选,本地/私有化私有仓)----
+.PHONY: supply-chain-tools-pull
+supply-chain-tools-pull: ## 拉取容器化 Trivy/Cosign/Helm 工具镜像
+	docker compose --project-name $(SUPPLY_CHAIN_PROJECT) --env-file $(SUPPLY_CHAIN_CONFIG) -f $(SUPPLY_CHAIN_COMPOSE) pull trivy cosign helm
+
+.PHONY: supply-chain-tools-check
+supply-chain-tools-check: ## 通过 Docker 容器检查 Trivy/Cosign/Helm 可执行
+	docker compose --project-name $(SUPPLY_CHAIN_PROJECT) --env-file $(SUPPLY_CHAIN_CONFIG) -f $(SUPPLY_CHAIN_COMPOSE) run --rm trivy --version
+	docker compose --project-name $(SUPPLY_CHAIN_PROJECT) --env-file $(SUPPLY_CHAIN_CONFIG) -f $(SUPPLY_CHAIN_COMPOSE) run --rm cosign version
+	docker compose --project-name $(SUPPLY_CHAIN_PROJECT) --env-file $(SUPPLY_CHAIN_CONFIG) -f $(SUPPLY_CHAIN_COMPOSE) run --rm helm version
+
 .PHONY: harbor-up
-harbor-up: ## 经官方 Helm chart 安装 Harbor 到当前集群(中间件官方安装方式,非我方清单)
-	helm repo add harbor https://helm.goharbor.io
-	helm repo update
-	helm upgrade --install harbor harbor/harbor --namespace harbor --create-namespace \
-		--set expose.type=clusterIP --set persistence.enabled=true
+harbor-up: supply-chain-secret-check ## 经容器化 Helm 安装 Harbor 到当前集群(官方 chart,非我方平台清单)
+	@test -n "$$(sed -n 's/^SUPPLY_CHAIN_KUBECONFIG_HOST_PATH=//p' $(SUPPLY_CHAIN_CONFIG))" || { echo "请先在 $(SUPPLY_CHAIN_CONFIG) 填写 SUPPLY_CHAIN_KUBECONFIG_HOST_PATH"; exit 1; }
+	@test -n "$$(sed -n 's/^HARBOR_ADMIN_PASSWORD=//p' $(SUPPLY_CHAIN_SECRET_FILE))" || { echo "请先在 $(SUPPLY_CHAIN_SECRET_FILE) 填写 HARBOR_ADMIN_PASSWORD"; exit 1; }
+	docker compose --project-name $(SUPPLY_CHAIN_PROJECT) --env-file $(SUPPLY_CHAIN_CONFIG) -f $(SUPPLY_CHAIN_COMPOSE) run --rm --env-from-file $(SUPPLY_CHAIN_SECRET_FILE) --entrypoint sh helm -lc 'set -eu; helm repo add harbor "$$SUPPLY_CHAIN_HARBOR_CHART_REPOSITORY"; helm repo update; helm upgrade --install "$$SUPPLY_CHAIN_HARBOR_RELEASE_NAME" harbor/harbor --namespace "$$SUPPLY_CHAIN_HARBOR_NAMESPACE" --create-namespace -f "$$SUPPLY_CHAIN_HARBOR_VALUES_PATH" --set-string externalURL="$$SUPPLY_CHAIN_HARBOR_EXTERNAL_URL" --set-string harborAdminPassword="$$HARBOR_ADMIN_PASSWORD"'
+
+.PHONY: harbor-projects-ensure
+harbor-projects-ensure: supply-chain-secret-check ## 按镜像分类创建 Harbor project,不把镜像推到 library
+	@test -n "$$(sed -n 's/^SUPPLY_CHAIN_HARBOR_EXTERNAL_URL=//p' $(SUPPLY_CHAIN_CONFIG))" || { echo "请先在 $(SUPPLY_CHAIN_CONFIG) 填写 SUPPLY_CHAIN_HARBOR_EXTERNAL_URL"; exit 1; }
+	powershell -NoProfile -ExecutionPolicy Bypass -File scripts/harbor-projects-ensure.ps1 -ConfigPath "$(SUPPLY_CHAIN_CONFIG)" -SecretPath "$(SUPPLY_CHAIN_SECRET_FILE)"
+
+.PHONY: harbor-forward
+harbor-forward: ## 本地固定端口暴露 Harbor Ingress;在单独终端保持运行
+	@test -n "$$(sed -n 's/^SUPPLY_CHAIN_HARBOR_FORWARD_PORT=//p' $(SUPPLY_CHAIN_CONFIG))" || { echo "请先在 $(SUPPLY_CHAIN_CONFIG) 填写 SUPPLY_CHAIN_HARBOR_FORWARD_PORT"; exit 1; }
+	@test -n "$$(sed -n 's/^SUPPLY_CHAIN_HARBOR_FORWARD_NAMESPACE=//p' $(SUPPLY_CHAIN_CONFIG))" || { echo "请先在 $(SUPPLY_CHAIN_CONFIG) 填写 SUPPLY_CHAIN_HARBOR_FORWARD_NAMESPACE"; exit 1; }
+	@test -n "$$(sed -n 's/^SUPPLY_CHAIN_HARBOR_FORWARD_SERVICE=//p' $(SUPPLY_CHAIN_CONFIG))" || { echo "请先在 $(SUPPLY_CHAIN_CONFIG) 填写 SUPPLY_CHAIN_HARBOR_FORWARD_SERVICE"; exit 1; }
+	kubectl -n "$$(sed -n 's/^SUPPLY_CHAIN_HARBOR_FORWARD_NAMESPACE=//p' $(SUPPLY_CHAIN_CONFIG))" port-forward "svc/$$(sed -n 's/^SUPPLY_CHAIN_HARBOR_FORWARD_SERVICE=//p' $(SUPPLY_CHAIN_CONFIG))" "$$(sed -n 's/^SUPPLY_CHAIN_HARBOR_FORWARD_PORT=//p' $(SUPPLY_CHAIN_CONFIG)):80" --address "$$(sed -n 's/^SUPPLY_CHAIN_HARBOR_FORWARD_ADDRESS=//p' $(SUPPLY_CHAIN_CONFIG))"
+
+.PHONY: harbor-forward-status
+harbor-forward-status: ## 检查本地 Harbor 固定端口转发状态
+	powershell -NoProfile -Command "$$port = [int]((Get-Content $(SUPPLY_CHAIN_CONFIG) | Select-String '^SUPPLY_CHAIN_HARBOR_FORWARD_PORT=').Line.Split('=',2)[1]); Get-NetTCPConnection -LocalPort $$port -ErrorAction SilentlyContinue | Select-Object LocalAddress,LocalPort,State,OwningProcess"
 
 # ---- 校验(无需集群)----
 .PHONY: render
