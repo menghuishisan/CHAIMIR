@@ -16,6 +16,7 @@ import (
 	"chaimir/internal/contracts"
 	"chaimir/internal/platform/config"
 	platformk8s "chaimir/internal/platform/k8s"
+	"chaimir/internal/platform/workload"
 	"chaimir/pkg/logging"
 
 	appsv1 "k8s.io/api/apps/v1"
@@ -61,6 +62,9 @@ func (o *K8sOrchestrator) CreateSandboxResources(ctx context.Context, plan Creat
 		return err
 	}
 	if err := o.applyWorkspacePVC(ctx, cs, plan); err != nil {
+		return err
+	}
+	if err := o.applyRuntimeServices(ctx, cs, plan); err != nil {
 		return err
 	}
 	for _, pod := range o.podsForPlan(plan) {
@@ -192,6 +196,9 @@ func (o *K8sOrchestrator) RestoreSnapshotResources(ctx context.Context, plan Cre
 	if err := o.applyWorkspacePVCFromSnapshot(ctx, cs, plan); err != nil {
 		return err
 	}
+	if err := o.applyRuntimeServices(ctx, cs, plan); err != nil {
+		return err
+	}
 	for _, pod := range o.podsForPlan(plan) {
 		if _, err := cs.CoreV1().Pods(plan.Sandbox.Namespace).Create(ctx, pod, metav1.CreateOptions{}); err != nil && !apierrors.IsAlreadyExists(err) {
 			return fmt.Errorf("创建快照恢复 Pod 失败: %w", err)
@@ -273,17 +280,17 @@ func metricsUnavailableError(err error) error {
 // Exec 在沙箱容器中执行受控命令。
 func (o *K8sOrchestrator) Exec(ctx context.Context, namespace, container string, command []string, stdin []byte, tty bool) ([]byte, []byte, error) {
 	podName, containerName := splitExecTarget(container)
-	var in *bytes.Reader
-	if stdin != nil {
-		in = bytes.NewReader(stdin)
-	}
 	var stdout, stderr bytes.Buffer
-	var inputReader *bytes.Reader
-	if in != nil {
-		inputReader = in
-	}
-	err := o.client.Exec(ctx, namespace, podName, containerName, command, inputReader, &stdout, &stderr, tty)
+	err := o.client.Exec(ctx, namespace, podName, containerName, command, execInputReader(stdin), &stdout, &stderr, tty)
 	return stdout.Bytes(), stderr.Bytes(), err
+}
+
+// execInputReader 把可选 stdin 转为真正的 io.Reader,避免把带类型的 nil 传给 client-go exec。
+func execInputReader(stdin []byte) io.Reader {
+	if stdin == nil {
+		return nil
+	}
+	return bytes.NewReader(stdin)
 }
 
 // ExecStream 在沙箱容器中执行交互式命令并透传标准流。
@@ -426,21 +433,31 @@ func (o *K8sOrchestrator) waitSandboxPodReady(ctx context.Context, cs kubernetes
 	}
 }
 
-// ToolReady 校验 Web 工具容器已通过 Kubernetes Ready 条件。
+// ToolReady 校验 Web 工具的所有声明组件都已通过 Kubernetes Ready 条件。
 func (o *K8sOrchestrator) ToolReady(ctx context.Context, sb Sandbox, tool Tool) error {
-	pod, err := o.client.Clientset().CoreV1().Pods(sb.Namespace).Get(ctx, toolPodName(tool.Code), metav1.GetOptions{})
-	if err != nil {
-		return fmt.Errorf("查询工具 Pod 状态失败: %w", err)
+	if len(tool.ResourceSpec.Components) == 0 {
+		return fmt.Errorf("工具组件未声明")
 	}
-	for _, status := range pod.Status.ContainerStatuses {
-		if status.Name == tool.Code {
-			if status.Ready {
-				return nil
+	for _, component := range tool.ResourceSpec.Components {
+		pod, err := o.client.Clientset().CoreV1().Pods(sb.Namespace).Get(ctx, toolComponentPodName(tool.Code, component.Name), metav1.GetOptions{})
+		if err != nil {
+			return fmt.Errorf("查询工具 Pod 状态失败: %w", err)
+		}
+		found := false
+		for _, status := range pod.Status.ContainerStatuses {
+			if status.Name == component.Name {
+				found = true
+				if !status.Ready {
+					return fmt.Errorf("工具组件尚未就绪")
+				}
+				break
 			}
-			return fmt.Errorf("工具容器尚未就绪")
+		}
+		if !found {
+			return fmt.Errorf("工具组件不存在")
 		}
 	}
-	return fmt.Errorf("工具容器不存在")
+	return nil
 }
 
 // sandboxPodReady 判断 Kubernetes Pod 是否达到 Ready 条件。
@@ -551,7 +568,7 @@ func (o *K8sOrchestrator) applyLimitRange(ctx context.Context, cs kubernetes.Int
 // applyNetworkPolicies 创建默认拒绝、控制面入口和清单声明的同沙箱 Pod 互通策略。
 func (o *K8sOrchestrator) applyNetworkPolicies(ctx context.Context, cs kubernetes.Interface, plan CreateSandboxPlan) error {
 	deny := &netv1.NetworkPolicy{
-		ObjectMeta: metav1.ObjectMeta{Name: "sandbox-deny-all", Namespace: plan.Sandbox.Namespace},
+		ObjectMeta: metav1.ObjectMeta{Name: "sandbox-deny-all", Namespace: plan.Sandbox.Namespace, Labels: sandboxPolicyLabels()},
 		Spec: netv1.NetworkPolicySpec{
 			PodSelector: metav1.LabelSelector{},
 			PolicyTypes: []netv1.PolicyType{netv1.PolicyTypeIngress, netv1.PolicyTypeEgress},
@@ -559,6 +576,9 @@ func (o *K8sOrchestrator) applyNetworkPolicies(ctx context.Context, cs kubernete
 	}
 	if _, err := cs.NetworkingV1().NetworkPolicies(plan.Sandbox.Namespace).Create(ctx, deny, metav1.CreateOptions{}); err != nil && !apierrors.IsAlreadyExists(err) {
 		return fmt.Errorf("创建 deny-all NetworkPolicy 失败: %w", err)
+	}
+	if _, err := cs.NetworkingV1().NetworkPolicies(plan.Sandbox.Namespace).Create(ctx, o.dnsEgressPolicy(plan.Sandbox), metav1.CreateOptions{}); err != nil && !apierrors.IsAlreadyExists(err) {
+		return fmt.Errorf("创建 DNS NetworkPolicy 失败: %w", err)
 	}
 	for _, policy := range o.allowControlPlanePolicies(plan) {
 		if _, err := cs.NetworkingV1().NetworkPolicies(plan.Sandbox.Namespace).Create(ctx, policy, metav1.CreateOptions{}); err != nil && !apierrors.IsAlreadyExists(err) {
@@ -578,6 +598,35 @@ func (o *K8sOrchestrator) applyNetworkPolicies(ctx context.Context, cs kubernete
 	return nil
 }
 
+// dnsEgressPolicy 允许沙箱内 Pod 解析集群 Service DNS,但不放开其他出站目标。
+func (o *K8sOrchestrator) dnsEgressPolicy(sb Sandbox) *netv1.NetworkPolicy {
+	return &netv1.NetworkPolicy{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "sandbox-allow-dns-egress",
+			Namespace: sb.Namespace,
+			Labels:    sandboxPolicyLabels(),
+		},
+		Spec: netv1.NetworkPolicySpec{
+			PodSelector: metav1.LabelSelector{},
+			PolicyTypes: []netv1.PolicyType{netv1.PolicyTypeEgress},
+			Egress: []netv1.NetworkPolicyEgressRule{{
+				To: []netv1.NetworkPolicyPeer{{
+					NamespaceSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"kubernetes.io/metadata.name": o.cfg.DNSNamespace}},
+				}},
+				Ports: dnsNetworkPolicyPorts(o.cfg.DNSPort),
+			}},
+		},
+	}
+}
+
+// sandboxPolicyLabels 与部署层动态沙箱 NetworkPolicy 审计模板保持一致。
+func sandboxPolicyLabels() map[string]string {
+	return map[string]string{
+		"app.kubernetes.io/part-of": "chaimir",
+		"chaimir.io/sandbox":        "true",
+	}
+}
+
 // allowControlPlanePolicies 只允许后端控制面按 Pod 角色访问运行时和工具各自声明的端口。
 func (o *K8sOrchestrator) allowControlPlanePolicies(plan CreateSandboxPlan) []*netv1.NetworkPolicy {
 	policies := []*netv1.NetworkPolicy{}
@@ -589,8 +638,14 @@ func (o *K8sOrchestrator) allowControlPlanePolicies(plan CreateSandboxPlan) []*n
 		policies = append(policies, o.controlPlaneIngressPolicy(plan.Sandbox, "sandbox-allow-control-plane-"+pod.Name, pod.Name, ports))
 	}
 	for _, tool := range plan.Tools {
-		if tool.Kind == SandboxToolKindWebEmbed && tool.Port > 0 {
-			policies = append(policies, o.controlPlaneIngressPolicy(plan.Sandbox, "sandbox-allow-control-plane-"+toolPodName(tool.Code), toolPodName(tool.Code), []netv1.NetworkPolicyPort{networkPolicyPort(tool.Port)}))
+		if tool.Kind != SandboxToolKindWebEmbed {
+			continue
+		}
+		for role, ports := range toolControlPlanePorts(tool) {
+			if len(ports) == 0 {
+				continue
+			}
+			policies = append(policies, o.controlPlaneIngressPolicy(plan.Sandbox, "sandbox-allow-control-plane-"+role, role, ports))
 		}
 	}
 	return policies
@@ -629,14 +684,14 @@ func (o *K8sOrchestrator) allowSandboxPodLinkPolicies(plan CreateSandboxPlan) []
 }
 
 // sandboxPodIngressPolicy 允许来源 Pod 访问目标 Pod 的声明端口。
-func sandboxPodIngressPolicy(plan CreateSandboxPlan, rule NetworkRuleSpec, ports []netv1.NetworkPolicyPort) *netv1.NetworkPolicy {
+func sandboxPodIngressPolicy(plan CreateSandboxPlan, rule workload.NetworkRuleSpec, ports []netv1.NetworkPolicyPort) *netv1.NetworkPolicy {
 	return &netv1.NetworkPolicy{
 		ObjectMeta: metav1.ObjectMeta{Name: "sandbox-allow-" + rule.Name + "-ingress", Namespace: plan.Sandbox.Namespace},
 		Spec: netv1.NetworkPolicySpec{
-			PodSelector: metav1.LabelSelector{MatchLabels: sandboxPodRoleLabels(plan.Sandbox, rule.ToPod)},
+			PodSelector: metav1.LabelSelector{MatchLabels: sandboxPodRoleLabels(plan.Sandbox, rule.To)},
 			PolicyTypes: []netv1.PolicyType{netv1.PolicyTypeIngress},
 			Ingress: []netv1.NetworkPolicyIngressRule{{
-				From:  []netv1.NetworkPolicyPeer{{PodSelector: &metav1.LabelSelector{MatchLabels: sandboxPodRoleLabels(plan.Sandbox, rule.FromPod)}}},
+				From:  []netv1.NetworkPolicyPeer{{PodSelector: &metav1.LabelSelector{MatchLabels: sandboxPodRoleLabels(plan.Sandbox, rule.From)}}},
 				Ports: ports,
 			}},
 		},
@@ -644,14 +699,14 @@ func sandboxPodIngressPolicy(plan CreateSandboxPlan, rule NetworkRuleSpec, ports
 }
 
 // sandboxPodEgressPolicy 允许来源 Pod 出站访问目标 Pod 的声明端口。
-func sandboxPodEgressPolicy(plan CreateSandboxPlan, rule NetworkRuleSpec, ports []netv1.NetworkPolicyPort) *netv1.NetworkPolicy {
+func sandboxPodEgressPolicy(plan CreateSandboxPlan, rule workload.NetworkRuleSpec, ports []netv1.NetworkPolicyPort) *netv1.NetworkPolicy {
 	return &netv1.NetworkPolicy{
 		ObjectMeta: metav1.ObjectMeta{Name: "sandbox-allow-" + rule.Name + "-egress", Namespace: plan.Sandbox.Namespace},
 		Spec: netv1.NetworkPolicySpec{
-			PodSelector: metav1.LabelSelector{MatchLabels: sandboxPodRoleLabels(plan.Sandbox, rule.FromPod)},
+			PodSelector: metav1.LabelSelector{MatchLabels: sandboxPodRoleLabels(plan.Sandbox, rule.From)},
 			PolicyTypes: []netv1.PolicyType{netv1.PolicyTypeEgress},
 			Egress: []netv1.NetworkPolicyEgressRule{{
-				To:    []netv1.NetworkPolicyPeer{{PodSelector: &metav1.LabelSelector{MatchLabels: sandboxPodRoleLabels(plan.Sandbox, rule.ToPod)}}},
+				To:    []netv1.NetworkPolicyPeer{{PodSelector: &metav1.LabelSelector{MatchLabels: sandboxPodRoleLabels(plan.Sandbox, rule.To)}}},
 				Ports: ports,
 			}},
 		},
@@ -677,14 +732,15 @@ func (o *K8sOrchestrator) allowToolPodLinkPolicies(plan CreateSandboxPlan) []*ne
 }
 
 // toolPodIngressPolicy 允许工具 Pod 访问目标运行时 Pod 的声明端口。
-func toolPodIngressPolicy(plan CreateSandboxPlan, tool Tool, rule ToolNetworkRuleSpec, ports []netv1.NetworkPolicyPort) *netv1.NetworkPolicy {
+func toolPodIngressPolicy(plan CreateSandboxPlan, tool Tool, rule workload.NetworkRuleSpec, ports []netv1.NetworkPolicyPort) *netv1.NetworkPolicy {
+	role := toolComponentPodName(tool.Code, rule.From)
 	return &netv1.NetworkPolicy{
 		ObjectMeta: metav1.ObjectMeta{Name: "sandbox-allow-tool-" + rule.Name + "-ingress", Namespace: plan.Sandbox.Namespace},
 		Spec: netv1.NetworkPolicySpec{
-			PodSelector: metav1.LabelSelector{MatchLabels: sandboxPodRoleLabels(plan.Sandbox, rule.ToPod)},
+			PodSelector: metav1.LabelSelector{MatchLabels: sandboxPodRoleLabels(plan.Sandbox, rule.To)},
 			PolicyTypes: []netv1.PolicyType{netv1.PolicyTypeIngress},
 			Ingress: []netv1.NetworkPolicyIngressRule{{
-				From:  []netv1.NetworkPolicyPeer{{PodSelector: &metav1.LabelSelector{MatchLabels: sandboxPodRoleLabels(plan.Sandbox, toolPodName(tool.Code))}}},
+				From:  []netv1.NetworkPolicyPeer{{PodSelector: &metav1.LabelSelector{MatchLabels: sandboxPodRoleLabels(plan.Sandbox, role)}}},
 				Ports: ports,
 			}},
 		},
@@ -692,14 +748,15 @@ func toolPodIngressPolicy(plan CreateSandboxPlan, tool Tool, rule ToolNetworkRul
 }
 
 // toolPodEgressPolicy 允许工具 Pod 出站访问目标运行时 Pod 的声明端口。
-func toolPodEgressPolicy(plan CreateSandboxPlan, tool Tool, rule ToolNetworkRuleSpec, ports []netv1.NetworkPolicyPort) *netv1.NetworkPolicy {
+func toolPodEgressPolicy(plan CreateSandboxPlan, tool Tool, rule workload.NetworkRuleSpec, ports []netv1.NetworkPolicyPort) *netv1.NetworkPolicy {
+	role := toolComponentPodName(tool.Code, rule.From)
 	return &netv1.NetworkPolicy{
 		ObjectMeta: metav1.ObjectMeta{Name: "sandbox-allow-tool-" + rule.Name + "-egress", Namespace: plan.Sandbox.Namespace},
 		Spec: netv1.NetworkPolicySpec{
-			PodSelector: metav1.LabelSelector{MatchLabels: sandboxPodRoleLabels(plan.Sandbox, toolPodName(tool.Code))},
+			PodSelector: metav1.LabelSelector{MatchLabels: sandboxPodRoleLabels(plan.Sandbox, role)},
 			PolicyTypes: []netv1.PolicyType{netv1.PolicyTypeEgress},
 			Egress: []netv1.NetworkPolicyEgressRule{{
-				To:    []netv1.NetworkPolicyPeer{{PodSelector: &metav1.LabelSelector{MatchLabels: sandboxPodRoleLabels(plan.Sandbox, rule.ToPod)}}},
+				To:    []netv1.NetworkPolicyPeer{{PodSelector: &metav1.LabelSelector{MatchLabels: sandboxPodRoleLabels(plan.Sandbox, rule.To)}}},
 				Ports: ports,
 			}},
 		},
@@ -782,30 +839,32 @@ func (o *K8sOrchestrator) podsForPlan(plan CreateSandboxPlan) []*corev1.Pod {
 	}
 	for _, tool := range plan.Tools {
 		if tool.Kind == SandboxToolKindWebEmbed {
-			out = append(out, o.toolPodForPlan(plan, tool))
+			for _, component := range tool.ResourceSpec.Components {
+				out = append(out, o.toolPodForPlan(plan, tool, component))
+			}
 		}
 	}
 	return out
 }
 
 // podGroupForPlan 返回运行时声明的 Pod 组;未声明时按 runtime_container + infra_sidecars 生成单 Pod 拓扑。
-func podGroupForPlan(plan CreateSandboxPlan) []PodSpec {
+func podGroupForPlan(plan CreateSandboxPlan) []workload.PodSpec {
 	if len(plan.Runtime.AdapterSpec.Pods) > 0 {
 		return plan.Runtime.AdapterSpec.Pods
 	}
-	specContainers := []ContainerSpec{plan.Runtime.AdapterSpec.RuntimeContainer}
-	specContainers[0].Image = plan.Image.ImageURL
+	specContainers := []workload.ComponentSpec{plan.Runtime.AdapterSpec.RuntimeContainer}
+	specContainers[0].ImageURL = plan.Image.ImageURL
 	for _, sidecar := range plan.Runtime.AdapterSpec.InfraSidecars {
 		specContainers = append(specContainers, sidecar)
 	}
-	return []PodSpec{{Name: "sandbox", Containers: specContainers}}
+	return []workload.PodSpec{{Name: "sandbox", Containers: specContainers}}
 }
 
 // podFromSpec 把运行时 Pod 拓扑转换为受限 Kubernetes Pod。
-func (o *K8sOrchestrator) podFromSpec(plan CreateSandboxPlan, spec PodSpec) *corev1.Pod {
+func (o *K8sOrchestrator) podFromSpec(plan CreateSandboxPlan, spec workload.PodSpec) *corev1.Pod {
 	containers := make([]corev1.Container, 0, len(spec.Containers))
 	for _, container := range spec.Containers {
-		image := container.Image
+		image := container.ImageURL
 		if container.Name == plan.Runtime.AdapterSpec.RuntimeContainer.Name && image == "" {
 			image = plan.Image.ImageURL
 		}
@@ -835,10 +894,10 @@ func (o *K8sOrchestrator) podFromSpec(plan CreateSandboxPlan, spec PodSpec) *cor
 	}
 }
 
-// toolPodForPlan 为 web-embed 工具创建独立 Pod,避免动态工具影响运行时 Pod 组拓扑。
-func (o *K8sOrchestrator) toolPodForPlan(plan CreateSandboxPlan, tool Tool) *corev1.Pod {
+// toolPodForPlan 为 web-embed 工具组件创建独立 Pod,避免动态工具影响运行时 Pod 组拓扑。
+func (o *K8sOrchestrator) toolPodForPlan(plan CreateSandboxPlan, tool Tool, component workload.ComponentSpec) *corev1.Pod {
 	automount := false
-	podName := toolPodName(tool.Code)
+	podName := toolComponentPodName(tool.Code, component.Name)
 	return &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      podName,
@@ -848,6 +907,7 @@ func (o *K8sOrchestrator) toolPodForPlan(plan CreateSandboxPlan, tool Tool) *cor
 				"module":                "sandbox",
 				"chaimir.io/sandbox-id": fmt.Sprintf("%d", plan.Sandbox.ID),
 				"chaimir.io/tool-code":  tool.Code,
+				"chaimir.io/component":  component.Name,
 				"chaimir.io/pod-role":   podName,
 			},
 		},
@@ -855,18 +915,18 @@ func (o *K8sOrchestrator) toolPodForPlan(plan CreateSandboxPlan, tool Tool) *cor
 			AutomountServiceAccountToken: &automount,
 			RestartPolicy:                corev1.RestartPolicyNever,
 			SecurityContext:              podSecurityContext(),
-			Containers:                   []corev1.Container{o.containerFromTool(tool, plan.Runtime.AdapterSpec)},
+			Containers:                   []corev1.Container{o.containerFromTool(tool, component, plan.Runtime.AdapterSpec)},
 			NodeSelector:                 copyStringMap(o.cfg.SandboxNodeSelector),
 			Tolerations:                  sandboxTolerations(o.cfg.SandboxNodeTolerations),
-			Volumes:                      podVolumesForTool(plan, tool),
+			Volumes:                      podVolumesForTool(plan, tool, component),
 		},
 	}
 }
 
 // containerFromRuntime 构造运行时或 infra sidecar 容器。
-func (o *K8sOrchestrator) containerFromRuntime(spec ContainerSpec, image string, adapter AdapterSpec) corev1.Container {
+func (o *K8sOrchestrator) containerFromRuntime(spec workload.ComponentSpec, image string, adapter AdapterSpec) corev1.Container {
 	if image == "" {
-		image = spec.Image
+		image = spec.ImageURL
 	}
 	return corev1.Container{
 		Name:            spec.Name,
@@ -878,33 +938,34 @@ func (o *K8sOrchestrator) containerFromRuntime(spec ContainerSpec, image string,
 		Env:             envVars(spec.Env),
 		Ports:           containerPorts(spec.Ports),
 		Resources:       resources(spec.Resources, o.cfg),
-		SecurityContext: containerSecurityContext(),
+		SecurityContext: containerSecurityContext(readOnlyRootFilesystem(spec.ReadOnlyRootFilesystem)),
 		VolumeMounts:    volumeMountsForContainer(adapter, spec),
 		ReadinessProbe:  probe(spec.ReadinessProbe),
 		LivenessProbe:   probe(spec.LivenessProbe),
 	}
 }
 
-// containerFromTool 构造 web-embed 工具容器。
-func (o *K8sOrchestrator) containerFromTool(tool Tool, adapter AdapterSpec) corev1.Container {
+// containerFromTool 构造 web-embed 工具组件容器。
+func (o *K8sOrchestrator) containerFromTool(tool Tool, component workload.ComponentSpec, adapter AdapterSpec) corev1.Container {
 	mounts := []corev1.VolumeMount{}
-	if shouldMountWorkspace(tool.ResourceSpec) {
+	if shouldMountWorkspace(component) {
 		mounts = append(mounts, corev1.VolumeMount{Name: VolumeDomainWorkspace, MountPath: adapter.WorkspaceDir})
 	}
-	mounts = append(mounts, toolEphemeralVolumeMounts(tool)...)
+	mounts = append(mounts, toolEphemeralVolumeMounts(tool, component)...)
 	return corev1.Container{
-		Name:            tool.Code,
-		Image:           tool.ImageURL,
+		Name:            component.Name,
+		Image:           component.ImageURL,
 		ImagePullPolicy: corev1.PullIfNotPresent,
-		Command:         tool.ResourceSpec.Command,
-		Args:            tool.ResourceSpec.Args,
-		WorkingDir:      tool.ResourceSpec.Workdir,
-		Env:             envVars(tool.ResourceSpec.Env),
-		Ports:           []corev1.ContainerPort{{Name: "http", ContainerPort: tool.Port}},
-		Resources:       resources(tool.ResourceSpec.Resources, o.cfg),
-		SecurityContext: containerSecurityContext(),
+		Command:         component.Command,
+		Args:            component.Args,
+		WorkingDir:      component.Workdir,
+		Env:             envVars(component.Env),
+		Ports:           containerPorts(component.Ports),
+		Resources:       resources(component.Resources, o.cfg),
+		SecurityContext: containerSecurityContext(readOnlyRootFilesystem(component.ReadOnlyRootFilesystem)),
 		VolumeMounts:    mounts,
-		ReadinessProbe:  probe(tool.ResourceSpec.ReadinessProbe),
+		ReadinessProbe:  probe(component.ReadinessProbe),
+		LivenessProbe:   probe(component.LivenessProbe),
 	}
 }
 
@@ -915,17 +976,17 @@ func podVolumesForPlan(plan CreateSandboxPlan) []corev1.Volume {
 }
 
 // podVolumesForTool 汇总工具需要的工作区 PVC 和私有临时卷。
-func podVolumesForTool(plan CreateSandboxPlan, tool Tool) []corev1.Volume {
+func podVolumesForTool(plan CreateSandboxPlan, tool Tool, component workload.ComponentSpec) []corev1.Volume {
 	volumes := []corev1.Volume{}
-	if shouldMountWorkspace(tool.ResourceSpec) {
+	if shouldMountWorkspace(component) {
 		volumes = append(volumes, corev1.Volume{
 			Name:         VolumeDomainWorkspace,
 			VolumeSource: corev1.VolumeSource{PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: VolumeDomainWorkspace}},
 		})
 	}
-	for _, mount := range tool.ResourceSpec.EphemeralMounts {
+	for _, mount := range component.EphemeralMounts {
 		volumes = append(volumes, corev1.Volume{
-			Name:         toolEphemeralVolumeName(tool.Code, mount.Name),
+			Name:         toolEphemeralVolumeName(tool.Code, component.Name, mount.Name),
 			VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}},
 		})
 	}
@@ -933,11 +994,11 @@ func podVolumesForTool(plan CreateSandboxPlan, tool Tool) []corev1.Volume {
 }
 
 // toolEphemeralVolumeMounts 将工具声明的临时目录转换为只挂给该工具容器的 emptyDir。
-func toolEphemeralVolumeMounts(tool Tool) []corev1.VolumeMount {
-	mounts := make([]corev1.VolumeMount, 0, len(tool.ResourceSpec.EphemeralMounts))
-	for _, mount := range tool.ResourceSpec.EphemeralMounts {
+func toolEphemeralVolumeMounts(tool Tool, component workload.ComponentSpec) []corev1.VolumeMount {
+	mounts := make([]corev1.VolumeMount, 0, len(component.EphemeralMounts))
+	for _, mount := range component.EphemeralMounts {
 		mounts = append(mounts, corev1.VolumeMount{
-			Name:      toolEphemeralVolumeName(tool.Code, mount.Name),
+			Name:      toolEphemeralVolumeName(tool.Code, component.Name, mount.Name),
 			MountPath: path.Clean(mount.MountPath),
 		})
 	}
@@ -945,8 +1006,8 @@ func toolEphemeralVolumeMounts(tool Tool) []corev1.VolumeMount {
 }
 
 // toolEphemeralVolumeName 生成工具私有临时卷名,避免不同工具的缓存目录发生命名碰撞。
-func toolEphemeralVolumeName(toolCode, mountName string) string {
-	name := "tool-" + toolCode + "-" + mountName
+func toolEphemeralVolumeName(toolCode, componentName, mountName string) string {
+	name := "tool-" + toolCode + "-" + componentName + "-" + mountName
 	if len(name) <= 63 {
 		return name
 	}
@@ -981,7 +1042,7 @@ func volumeForDomain(domain VolumeDomainSpec) corev1.Volume {
 }
 
 // volumeMountsForContainer 按容器职责决定挂载域,防止终端或协同容器绕过文件 API 读取私有资产。
-func volumeMountsForContainer(adapter AdapterSpec, spec ContainerSpec) []corev1.VolumeMount {
+func volumeMountsForContainer(adapter AdapterSpec, spec workload.ComponentSpec) []corev1.VolumeMount {
 	mounts := make([]corev1.VolumeMount, 0, len(adapter.VolumeDomains))
 	for _, domain := range adapter.VolumeDomains {
 		if studentAccessibleContainer(spec) && domain.StudentAccess == VolumeAccessNone {
@@ -1005,7 +1066,7 @@ func volumeMountForDomain(domain VolumeDomainSpec) corev1.VolumeMount {
 }
 
 // studentAccessibleContainer 判断容器是否声明允许学生通过终端进入。
-func studentAccessibleContainer(spec ContainerSpec) bool {
+func studentAccessibleContainer(spec workload.ComponentSpec) bool {
 	return strings.EqualFold(strings.TrimSpace(spec.Labels[studentAccessLabel]), "true")
 }
 
@@ -1088,29 +1149,47 @@ func containsString(values []string, target string) bool {
 	return false
 }
 
-// applyToolService 为 Web 工具创建仅集群内访问的 Service。
+// applyToolService 按工具 WorkloadSpec 创建仅集群内访问的 Service。
 func (o *K8sOrchestrator) applyToolService(ctx context.Context, cs kubernetes.Interface, sb Sandbox, tool Tool) error {
-	svc := o.toolServiceFor(sb, tool)
-	if _, err := cs.CoreV1().Services(sb.Namespace).Create(ctx, svc, metav1.CreateOptions{}); err != nil && !apierrors.IsAlreadyExists(err) {
-		return fmt.Errorf("创建工具 Service 失败: %w", err)
+	for _, service := range tool.ResourceSpec.Services {
+		svc := o.toolServiceFor(sb, tool, service)
+		if _, err := cs.CoreV1().Services(sb.Namespace).Create(ctx, svc, metav1.CreateOptions{}); err != nil && !apierrors.IsAlreadyExists(err) {
+			return fmt.Errorf("创建工具 Service 失败: %w", err)
+		}
 	}
 	return nil
 }
 
-// toolServiceFor 构造只选择当前沙箱 Pod 的 Web 工具 ClusterIP Service。
-func (o *K8sOrchestrator) toolServiceFor(sb Sandbox, tool Tool) *corev1.Service {
-	podName := toolPodName(tool.Code)
-	return &corev1.Service{
-		ObjectMeta: metav1.ObjectMeta{Name: "tool-" + tool.Code, Namespace: sb.Namespace},
-		Spec: corev1.ServiceSpec{
-			Type: corev1.ServiceTypeClusterIP,
-			Selector: map[string]string{
-				"app":                   "chaimir",
-				"module":                "sandbox",
-				"chaimir.io/sandbox-id": fmt.Sprintf("%d", sb.ID),
-				"chaimir.io/pod-role":   podName,
+// applyRuntimeServices 为运行时 Pod 创建内部 ClusterIP,供声明式工具 NetworkPolicy 访问。
+func (o *K8sOrchestrator) applyRuntimeServices(ctx context.Context, cs kubernetes.Interface, plan CreateSandboxPlan) error {
+	for _, pod := range podGroupForPlan(plan) {
+		ports := servicePortsForPod(pod)
+		if len(ports) == 0 {
+			continue
+		}
+		svc := &corev1.Service{
+			ObjectMeta: metav1.ObjectMeta{Name: runtimeServiceName(pod.Name), Namespace: plan.Sandbox.Namespace},
+			Spec: corev1.ServiceSpec{
+				Type:     corev1.ServiceTypeClusterIP,
+				Selector: sandboxPodRoleLabels(plan.Sandbox, pod.Name),
+				Ports:    ports,
 			},
-			Ports: []corev1.ServicePort{{Name: "http", Port: tool.Port, TargetPort: intstr.FromInt32(tool.Port)}},
+		}
+		if _, err := cs.CoreV1().Services(plan.Sandbox.Namespace).Create(ctx, svc, metav1.CreateOptions{}); err != nil && !apierrors.IsAlreadyExists(err) {
+			return fmt.Errorf("创建运行时 Service 失败: %w", err)
+		}
+	}
+	return nil
+}
+
+// toolServiceFor 构造选择指定工具组件 Pod 的 ClusterIP Service。
+func (o *K8sOrchestrator) toolServiceFor(sb Sandbox, tool Tool, service workload.ServiceSpec) *corev1.Service {
+	return &corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{Name: service.Name, Namespace: sb.Namespace},
+		Spec: corev1.ServiceSpec{
+			Type:     corev1.ServiceTypeClusterIP,
+			Selector: sandboxPodRoleLabels(sb, toolComponentPodName(tool.Code, service.Component)),
+			Ports:    servicePortsForSpec(service.Ports),
 		},
 	}
 }
@@ -1123,6 +1202,104 @@ func sandboxPodRoleLabels(sb Sandbox, role string) map[string]string {
 		"chaimir.io/sandbox-id": fmt.Sprintf("%d", sb.ID),
 		"chaimir.io/pod-role":   role,
 	}
+}
+
+// servicePortsForPod 汇总运行时 Pod 中显式声明的端口,用于内部服务发现。
+func servicePortsForPod(pod workload.PodSpec) []corev1.ServicePort {
+	ports := []corev1.ServicePort{}
+	seen := map[string]struct{}{}
+	for _, container := range pod.Containers {
+		for _, port := range container.Ports {
+			if port.Name == "" || port.ContainerPort <= 0 {
+				continue
+			}
+			if _, ok := seen[port.Name]; ok {
+				continue
+			}
+			seen[port.Name] = struct{}{}
+			ports = append(ports, corev1.ServicePort{Name: port.Name, Port: port.ContainerPort, TargetPort: intstr.FromString(port.Name)})
+		}
+	}
+	return ports
+}
+
+// servicePortsForSpec 把 WorkloadSpec Service 端口转换为 Kubernetes Service 端口。
+func servicePortsForSpec(items []workload.ServicePortSpec) []corev1.ServicePort {
+	ports := make([]corev1.ServicePort, 0, len(items))
+	for _, item := range items {
+		protocol := corev1.ProtocolTCP
+		if strings.EqualFold(item.Protocol, "UDP") {
+			protocol = corev1.ProtocolUDP
+		}
+		ports = append(ports, corev1.ServicePort{
+			Name:       item.Name,
+			Port:       item.Port,
+			TargetPort: intstr.FromString(item.TargetPort),
+			Protocol:   protocol,
+		})
+	}
+	return ports
+}
+
+// runtimeServiceName 生成运行时 Pod 的内部服务名,与工具 env 中的服务发现口径保持一致。
+func runtimeServiceName(podName string) string {
+	return "runtime-" + strings.TrimSpace(podName)
+}
+
+// toolControlPlanePorts 汇总平台代理路由实际需要访问的工具组件端口。
+func toolControlPlanePorts(tool Tool) map[string][]netv1.NetworkPolicyPort {
+	componentPorts := componentPortMap(tool.ResourceSpec.Components)
+	serviceIndex := map[string]workload.ServiceSpec{}
+	for _, service := range tool.ResourceSpec.Services {
+		serviceIndex[service.Name] = service
+	}
+	rolePorts := map[string][]netv1.NetworkPolicyPort{}
+	seen := map[string]map[int32]struct{}{}
+	for _, route := range tool.ResourceSpec.Routes {
+		service, ok := serviceIndex[route.Service]
+		if !ok {
+			continue
+		}
+		declared, ok := componentPorts[service.Component]
+		if !ok {
+			continue
+		}
+		for _, servicePort := range service.Ports {
+			if servicePort.Name != route.Port {
+				continue
+			}
+			port, ok := declared[servicePort.TargetPort]
+			if !ok || port <= 0 {
+				continue
+			}
+			role := toolComponentPodName(tool.Code, service.Component)
+			if seen[role] == nil {
+				seen[role] = map[int32]struct{}{}
+			}
+			if _, exists := seen[role][port]; exists {
+				continue
+			}
+			seen[role][port] = struct{}{}
+			rolePorts[role] = append(rolePorts[role], networkPolicyPort(port))
+		}
+	}
+	return rolePorts
+}
+
+// toolComponentPodName 生成工具组件 Pod 名,避免回退到旧的单工具 Pod 命名。
+func toolComponentPodName(toolCode, componentName string) string {
+	name := "tool-" + strings.TrimSpace(toolCode) + "-" + strings.TrimSpace(componentName)
+	if len(name) <= 63 {
+		return name
+	}
+	sum := sha256.Sum256([]byte(name))
+	suffix := hex.EncodeToString(sum[:4])
+	base := "tool-" + strings.TrimSpace(toolCode)
+	maxBase := 63 - len(suffix) - 1
+	if len(base) > maxBase {
+		base = base[:maxBase]
+	}
+	return strings.TrimRight(base, "-") + "-" + suffix
 }
 
 // runtimePodNames 返回阶段一必须 Ready 的运行时 Pod 列表,不把动态 Web 工具失败混作链节点失败。
@@ -1142,11 +1319,6 @@ func splitExecTarget(target string) (string, string) {
 		return strings.TrimSpace(parts[0]), strings.TrimSpace(parts[1])
 	}
 	return "sandbox", strings.TrimSpace(target)
-}
-
-// toolPodName 生成工具 Pod 名,与对应 Service selector 保持一致。
-func toolPodName(toolCode string) string {
-	return "tool-" + strings.TrimSpace(toolCode)
 }
 
 // prepullDaemonSet 构造镜像预拉取 DaemonSet。
@@ -1173,7 +1345,7 @@ func (o *K8sOrchestrator) prepullDaemonSet(image RuntimeImage) *appsv1.DaemonSet
 							Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse(o.cfg.PrepullRequestCPU), corev1.ResourceMemory: resource.MustParse(o.cfg.PrepullRequestMemory)},
 							Limits:   corev1.ResourceList{corev1.ResourceCPU: resource.MustParse(o.cfg.PrepullLimitCPU), corev1.ResourceMemory: resource.MustParse(o.cfg.PrepullLimitMemory)},
 						},
-						SecurityContext: containerSecurityContext(),
+						SecurityContext: containerSecurityContext(true),
 					}},
 					SecurityContext: podSecurityContext(),
 				},
@@ -1234,20 +1406,27 @@ func podSecurityContext() *corev1.PodSecurityContext {
 }
 
 // containerSecurityContext 构造容器最小权限安全上下文。
-func containerSecurityContext() *corev1.SecurityContext {
+func containerSecurityContext(readOnlyRoot bool) *corev1.SecurityContext {
 	allow := false
 	privileged := false
-	readOnly := true
 	return &corev1.SecurityContext{
 		Privileged:               &privileged,
 		AllowPrivilegeEscalation: &allow,
-		ReadOnlyRootFilesystem:   &readOnly,
+		ReadOnlyRootFilesystem:   &readOnlyRoot,
 		Capabilities:             &corev1.Capabilities{Drop: []corev1.Capability{"ALL"}},
 	}
 }
 
+// readOnlyRootFilesystem 默认保持只读根文件系统,仅当声明式镜像规格明确关闭时放开。
+func readOnlyRootFilesystem(value *bool) bool {
+	if value == nil {
+		return true
+	}
+	return *value
+}
+
 // envVars 转换非敏感字面量环境变量。
-func envVars(items []EnvVarSpec) []corev1.EnvVar {
+func envVars(items []workload.EnvVarSpec) []corev1.EnvVar {
 	out := make([]corev1.EnvVar, 0, len(items))
 	for _, item := range items {
 		out = append(out, corev1.EnvVar{Name: item.Name, Value: item.Value})
@@ -1256,7 +1435,7 @@ func envVars(items []EnvVarSpec) []corev1.EnvVar {
 }
 
 // containerPorts 转换容器端口声明。
-func containerPorts(items []PortSpec) []corev1.ContainerPort {
+func containerPorts(items []workload.PortSpec) []corev1.ContainerPort {
 	out := make([]corev1.ContainerPort, 0, len(items))
 	for _, item := range items {
 		protocol := corev1.ProtocolTCP
@@ -1269,7 +1448,7 @@ func containerPorts(items []PortSpec) []corev1.ContainerPort {
 }
 
 // resources 转换容器资源 requests/limits,缺省时使用平台默认值。
-func resources(spec ResourceSpec, cfg config.SandboxConfig) corev1.ResourceRequirements {
+func resources(spec workload.ResourceSpec, cfg config.SandboxConfig) corev1.ResourceRequirements {
 	reqCPU := valueOrDefault(spec.Requests["cpu"], cfg.DefaultReqCPU)
 	reqMem := valueOrDefault(spec.Requests["memory"], cfg.DefaultReqMemory)
 	limCPU := valueOrDefault(spec.Limits["cpu"], cfg.DefaultCPU)
@@ -1317,7 +1496,7 @@ func bytesToMiB(value int64) int64 {
 }
 
 // probe 转换声明式探针。
-func probe(spec ProbeSpec) *corev1.Probe {
+func probe(spec workload.ProbeSpec) *corev1.Probe {
 	if spec.Type == "" {
 		return nil
 	}
@@ -1339,8 +1518,18 @@ func networkPolicyPort(port int32) netv1.NetworkPolicyPort {
 	return netv1.NetworkPolicyPort{Protocol: &protocol, Port: &intstr.IntOrString{Type: intstr.Int, IntVal: port}}
 }
 
+// dnsNetworkPolicyPorts 返回 Kubernetes DNS 所需的 UDP/TCP 端口集合。
+func dnsNetworkPolicyPorts(port int32) []netv1.NetworkPolicyPort {
+	udp := corev1.ProtocolUDP
+	tcp := corev1.ProtocolTCP
+	return []netv1.NetworkPolicyPort{
+		{Protocol: &udp, Port: &intstr.IntOrString{Type: intstr.Int, IntVal: port}},
+		{Protocol: &tcp, Port: &intstr.IntOrString{Type: intstr.Int, IntVal: port}},
+	}
+}
+
 // networkPolicyPortsForPodGroup 汇总运行时 Pod 组声明端口,用于控制面精确访问。
-func networkPolicyPortsForPodGroup(pods []PodSpec) []netv1.NetworkPolicyPort {
+func networkPolicyPortsForPodGroup(pods []workload.PodSpec) []netv1.NetworkPolicyPort {
 	ports := []netv1.NetworkPolicyPort{}
 	seen := map[int32]struct{}{}
 	for _, pod := range pods {
@@ -1358,12 +1547,12 @@ func networkPolicyPortsForPodGroup(pods []PodSpec) []netv1.NetworkPolicyPort {
 }
 
 // networkPolicyPortsForSinglePod 复用 Pod 组端口汇总逻辑,用于控制面对单个运行时 Pod 的精确放行。
-func networkPolicyPortsForSinglePod(pod PodSpec) []netv1.NetworkPolicyPort {
-	return networkPolicyPortsForPodGroup([]PodSpec{pod})
+func networkPolicyPortsForSinglePod(pod workload.PodSpec) []netv1.NetworkPolicyPort {
+	return networkPolicyPortsForPodGroup([]workload.PodSpec{pod})
 }
 
 // networkPolicyPortsForRefs 把 adapter 显式网络规则端口转换为 K8s NetworkPolicy 端口。
-func networkPolicyPortsForRefs(refs []NetworkPortRef) []netv1.NetworkPolicyPort {
+func networkPolicyPortsForRefs(refs []workload.NetworkPortRef) []netv1.NetworkPolicyPort {
 	ports := make([]netv1.NetworkPolicyPort, 0, len(refs))
 	for _, ref := range refs {
 		ports = append(ports, networkPolicyPort(ref.Port))

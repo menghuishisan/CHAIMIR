@@ -3,6 +3,7 @@ package main
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"chaimir/internal/contracts"
@@ -11,31 +12,68 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
+// acceptanceImageURL 使用部署配置中的镜像仓库拼接规范镜像身份,避免验收种子写死本地标签。
+func acceptanceImageURL(image string) string {
+	registry := strings.TrimRight(osEnv("IMAGE_REGISTRY"), "/")
+	if registry == "" {
+		registry = "harbor.chaimir.local"
+	}
+	return registry + "/" + strings.TrimLeft(image, "/") + ":2026.06"
+}
+
 // seedRuntimeRows 写入沙箱运行时、镜像、工具和判题器基础能力。
 func seedRuntimeRows(ctx context.Context, tx pgx.Tx) error {
+	codeServerMountWorkspace := true
+	blockscoutReadOnlyRoot := false
+	postgresReadOnlyRoot := false
 	runtimeSpec, _ := jsonb(map[string]any{
 		"workspace_dir": "/workspace",
 		"volume_domains": []map[string]any{
-			{"name": "workspace", "mount_path": "/workspace", "student_access": "rw", "persistence": "snapshot", "snapshot_scope": "workspace"},
+			{"name": "workspace", "mount_path": "/workspace", "student_access": "read_write", "persistence": "minio_code", "snapshot_scope": "always"},
+			{"name": "runtime-state", "mount_path": "/runtime-state", "student_access": "none", "persistence": "ephemeral", "snapshot_scope": "snapshot_enabled"},
+			{"name": "runtime-tmp", "mount_path": "/tmp", "student_access": "none", "persistence": "ephemeral", "snapshot_scope": "never"},
 		},
 		"runtime_container": map[string]any{
-			"name":      "foundry",
-			"image_url": "chaimir/runtime/ethereum-foundry:dev",
-			"command":   []string{"/usr/local/bin/start-lab"},
-			"resources": map[string]any{
-				"requests": map[string]string{"cpu": "500m", "memory": "512Mi"},
-				"limits":   map[string]string{"cpu": "1", "memory": "1Gi"},
+			"name": "foundry",
+			"ports": []map[string]any{
+				{"name": "rpc", "container_port": 8545, "service_port": 8545, "protocol": "TCP"},
 			},
+			"resources": map[string]any{
+				"requests": map[string]string{"cpu": "250m", "memory": "512Mi"},
+				"limits":   map[string]string{"cpu": "2", "memory": "2Gi"},
+			},
+			"readiness_probe": map[string]any{"type": "tcp", "port": "rpc", "period_seconds": 2, "failure_threshold": 30},
+			"labels":          map[string]string{"chaimir.io/student-access": "false"},
 		},
-		"default_tool_codes": []string{"web-ide"},
+		"infra_sidecars": []map[string]any{{
+			"name":      "blockscout-postgres",
+			"image_url": acceptanceImageURL("infra/postgres-graph"),
+			"env": []map[string]string{
+				{"name": "POSTGRES_DB", "value": "blockscout"},
+				{"name": "POSTGRES_USER", "value": "postgres"},
+				{"name": "POSTGRES_PASSWORD", "value": "postgres"},
+				{"name": "PGDATA", "value": "/runtime-state/blockscout-postgres"},
+			},
+			"ports": []map[string]any{
+				{"name": "postgres", "container_port": 5432, "service_port": 5432, "protocol": "TCP"},
+			},
+			"resources": map[string]any{
+				"requests": map[string]string{"cpu": "250m", "memory": "512Mi"},
+				"limits":   map[string]string{"cpu": "1", "memory": "2Gi"},
+			},
+			"readiness_probe":           map[string]any{"type": "tcp", "port": "postgres", "period_seconds": 2, "failure_threshold": 30},
+			"read_only_root_filesystem": postgresReadOnlyRoot,
+			"labels":                    map[string]string{"chaimir.io/student-access": "false"},
+		}},
+		"default_tool_codes": []string{"code-server", "blockscout"},
 		"workspace_ops": map[string]any{
-			"read_file":  []string{"/usr/local/bin/chaimir-workspace", "read"},
-			"write_file": []string{"/usr/local/bin/chaimir-workspace", "write"},
-			"list_files": []string{"/usr/local/bin/chaimir-workspace", "list"},
-			"pack_tar":   []string{"/usr/local/bin/chaimir-workspace", "pack"},
-			"unpack_tar": []string{"/usr/local/bin/chaimir-workspace", "unpack"},
-			"run_script": []string{"/usr/local/bin/chaimir-workspace", "run"},
-			"terminal":   []string{"/usr/local/bin/chaimir-workspace", "terminal"},
+			"read_file":  []string{"/usr/local/bin/chaimir-workspace", "read", "{{workspace}}", "{{path}}"},
+			"write_file": []string{"/usr/local/bin/chaimir-workspace", "write", "{{workspace}}", "{{path}}"},
+			"list_files": []string{"/usr/local/bin/chaimir-workspace", "list", "{{workspace}}", "{{path}}"},
+			"pack_tar":   []string{"/usr/local/bin/chaimir-workspace", "pack", "{{workspace}}", "{{path}}"},
+			"unpack_tar": []string{"/usr/local/bin/chaimir-workspace", "unpack", "{{workspace}}", "{{path}}"},
+			"run_script": []string{"/usr/local/bin/chaimir-workspace", "run", "{{workspace}}", "{{workspace}}", "{{script}}"},
+			"terminal":   []string{"/usr/local/bin/chaimir-workspace", "terminal", "{{workspace}}"},
 			"selftest":   []string{"/usr/local/bin/chaimir-workspace", "selftest"},
 		},
 		"capability_commands": map[string]any{
@@ -44,48 +82,121 @@ func seedRuntimeRows(ctx context.Context, tx pgx.Tx) error {
 			"query":  map[string]any{"command": []string{"/usr/local/bin/chaimir-chain", "query"}, "timeout_seconds": 30},
 			"reset":  map[string]any{"command": []string{"/usr/local/bin/chaimir-chain", "reset"}, "timeout_seconds": 30},
 		},
-		"selftest": map[string]any{"command": "chaimir-workspace selftest"},
-	})
-	resourceSpec, _ := jsonb(map[string]any{
-		"mount_workspace": true,
-		"resources": map[string]any{
-			"requests": map[string]string{"cpu": "100m", "memory": "128Mi"},
-			"limits":   map[string]string{"cpu": "500m", "memory": "512Mi"},
+		"selftest": map[string]any{
+			"deploy_payload": map[string]any{"bytecode": "0x6080604052348015600f57600080fd5b50600080f3"},
+			"query_target":   "chainId",
 		},
+	})
+	codeServerSpec, _ := jsonb(map[string]any{
+		"components": []map[string]any{{
+			"name":            "web",
+			"image_url":       acceptanceImageURL("tool/code-server"),
+			"mount_workspace": codeServerMountWorkspace,
+			"command":         []string{"code-server"},
+			"args":            []string{"--bind-addr", "0.0.0.0:8080", "--auth", "none", "/workspace"},
+			"ports": []map[string]any{
+				{"name": "http", "container_port": 8080, "service_port": 8080, "protocol": "TCP"},
+			},
+			"ephemeral_mounts": []map[string]string{
+				{"name": "code-server-config", "mount_path": "/home/coder/.config"},
+				{"name": "code-server-data", "mount_path": "/home/coder/.local/share/code-server"},
+				{"name": "tmp", "mount_path": "/tmp"},
+			},
+			"resources": map[string]any{
+				"requests": map[string]string{"cpu": "150m", "memory": "256Mi"},
+				"limits":   map[string]string{"cpu": "1", "memory": "1Gi"},
+			},
+			"readiness_probe": map[string]any{"type": "http", "path": "/", "port": "http", "period_seconds": 2, "failure_threshold": 30},
+		}},
+		"services": []map[string]any{{
+			"name":      "tool-code-server-web",
+			"component": "web",
+			"ports":     []map[string]any{{"name": "http", "port": 8080, "target_port": "http", "protocol": "TCP"}},
+		}},
+		"routes": []map[string]any{{
+			"path_prefix": "/",
+			"service":     "tool-code-server-web",
+			"port":        "http",
+		}},
+	})
+	blockscoutSpec, _ := jsonb(map[string]any{
+		"components": []map[string]any{{
+			"name":            "web",
+			"image_url":       acceptanceImageURL("tool/blockscout"),
+			"mount_workspace": false,
+			"command":         []string{"/usr/local/bin/chaimir-blockscout-entrypoint"},
+			"env": []map[string]string{
+				{"name": "DATABASE_URL", "value": "postgresql://postgres:postgres@runtime-sandbox:5432/blockscout"},
+				{"name": "ETHEREUM_JSONRPC_HTTP_URL", "value": "http://runtime-sandbox:8545"},
+				{"name": "ETHEREUM_JSONRPC_TRACE_URL", "value": "http://runtime-sandbox:8545"},
+				{"name": "ETHEREUM_JSONRPC_VARIANT", "value": "geth"},
+				{"name": "ECTO_USE_SSL", "value": "false"},
+				{"name": "PORT", "value": "4000"},
+				{"name": "DISABLE_EXCHANGE_RATES", "value": "true"},
+				{"name": "INDEXER_DISABLE_PENDING_TRANSACTIONS_FETCHER", "value": "true"},
+				{"name": "BLOCKSCOUT_DEPENDENCY_TIMEOUT_SECONDS", "value": "180"},
+				{"name": "BLOCKSCOUT_DEPENDENCY_POLL_SECONDS", "value": "2"},
+			},
+			"ports": []map[string]any{
+				{"name": "http", "container_port": 4000, "service_port": 4000, "protocol": "TCP"},
+			},
+			"resources": map[string]any{
+				"requests": map[string]string{"cpu": "500m", "memory": "1Gi"},
+				"limits":   map[string]string{"cpu": "2", "memory": "3Gi"},
+			},
+			"readiness_probe":           map[string]any{"type": "http", "path": "/", "port": "http", "period_seconds": 5, "failure_threshold": 60},
+			"read_only_root_filesystem": blockscoutReadOnlyRoot,
+		}},
+		"services": []map[string]any{{
+			"name":      "tool-blockscout-web",
+			"component": "web",
+			"ports":     []map[string]any{{"name": "http", "port": 4000, "target_port": "http", "protocol": "TCP"}},
+		}},
+		"routes": []map[string]any{{
+			"path_prefix": "/",
+			"service":     "tool-blockscout-web",
+			"port":        "http",
+		}},
+		"network_rules": []map[string]any{{
+			"name":  "blockscout-to-runtime",
+			"from":  "web",
+			"to":    "sandbox",
+			"ports": []map[string]any{{"name": "rpc"}, {"name": "postgres"}},
+		}},
 	})
 	if err := execJSON(ctx, tx, `
 INSERT INTO runtime (id, code, name, eco, adapter_level, adapter_spec, capability_impl, selftest_status, selftest_detail, status)
-VALUES ($1,'ethereum-foundry','Ethereum Foundry 教学运行时','ethereum',2,$2,'sandbox-exec',2,'{"checked_by":"acceptance-seed"}'::jsonb,1)
-ON CONFLICT (code) DO UPDATE SET name=EXCLUDED.name, eco=EXCLUDED.eco, adapter_level=EXCLUDED.adapter_level, adapter_spec=EXCLUDED.adapter_spec, capability_impl=EXCLUDED.capability_impl, selftest_status=EXCLUDED.selftest_status, selftest_detail=EXCLUDED.selftest_detail, status=EXCLUDED.status, updated_at=now()`,
+VALUES ($1,'evm-foundry','EVM Foundry 教学运行时','evm',2,$2,'sandbox-exec',2,'{"checked_by":"acceptance-seed"}'::jsonb,1)
+ON CONFLICT (id) DO UPDATE SET code=EXCLUDED.code, name=EXCLUDED.name, eco=EXCLUDED.eco, adapter_level=EXCLUDED.adapter_level, adapter_spec=EXCLUDED.adapter_spec, capability_impl=EXCLUDED.capability_impl, selftest_status=EXCLUDED.selftest_status, selftest_detail=EXCLUDED.selftest_detail, status=EXCLUDED.status, updated_at=now()`,
 		acceptanceIDs.Runtime, runtimeSpec); err != nil {
 		return err
 	}
 	if err := execJSON(ctx, tx, `
 INSERT INTO runtime_image (id, runtime_id, image_url, version, status, prepulled, prepull_status, prepull_detail, prepulled_at, genesis_baked, is_default)
-VALUES ($1,$2,'chaimir/runtime/ethereum-foundry:dev','2026.06',1,true,2,'{"source":"local-dev-image"}'::jsonb,now(),true,true)
+VALUES ($1,$2,$3,'2026.06',1,false,1,'{"source":"acceptance-seed","prepulled":false}'::jsonb,NULL,true,true)
 ON CONFLICT (runtime_id, version) DO UPDATE SET image_url=EXCLUDED.image_url, status=EXCLUDED.status, prepulled=EXCLUDED.prepulled, prepull_status=EXCLUDED.prepull_status, prepull_detail=EXCLUDED.prepull_detail, prepulled_at=EXCLUDED.prepulled_at, genesis_baked=EXCLUDED.genesis_baked, is_default=EXCLUDED.is_default`,
-		acceptanceIDs.RuntimeImage, acceptanceIDs.Runtime); err != nil {
+		acceptanceIDs.RuntimeImage, acceptanceIDs.Runtime, acceptanceImageURL("runtime/evm-foundry")); err != nil {
 		return err
 	}
 	if err := execJSON(ctx, tx, `
-INSERT INTO tool (id, code, name, kind, image_url, port, eco_tags, resource_spec, status)
-VALUES ($1,'web-ide','Web IDE',3,'chaimir/tools/web-ide:dev',8080,'ethereum,solidity',$2,1)
-ON CONFLICT (code) DO UPDATE SET name=EXCLUDED.name, kind=EXCLUDED.kind, image_url=EXCLUDED.image_url, port=EXCLUDED.port, eco_tags=EXCLUDED.eco_tags, resource_spec=EXCLUDED.resource_spec, status=EXCLUDED.status, updated_at=now()`,
-		acceptanceIDs.ToolVSCode, resourceSpec); err != nil {
+INSERT INTO tool (id, code, name, kind, eco_tags, resource_spec, status)
+VALUES ($1,'code-server','Code Server',3,'evm,solidity',$2,1)
+ON CONFLICT (id) DO UPDATE SET code=EXCLUDED.code, name=EXCLUDED.name, kind=EXCLUDED.kind, eco_tags=EXCLUDED.eco_tags, resource_spec=EXCLUDED.resource_spec, status=EXCLUDED.status, updated_at=now()`,
+		acceptanceIDs.ToolVSCode, codeServerSpec); err != nil {
 		return err
 	}
 	if err := execJSON(ctx, tx, `
-INSERT INTO tool (id, code, name, kind, image_url, port, eco_tags, resource_spec, status)
-VALUES ($1,'block-explorer','区块链浏览器',3,'chaimir/tools/block-explorer:dev',4000,'ethereum',$2,1)
-ON CONFLICT (code) DO UPDATE SET name=EXCLUDED.name, kind=EXCLUDED.kind, image_url=EXCLUDED.image_url, port=EXCLUDED.port, eco_tags=EXCLUDED.eco_tags, resource_spec=EXCLUDED.resource_spec, status=EXCLUDED.status, updated_at=now()`,
-		acceptanceIDs.ToolExplorer, resourceSpec); err != nil {
+INSERT INTO tool (id, code, name, kind, eco_tags, resource_spec, status)
+VALUES ($1,'blockscout','Blockscout 区块链浏览器',3,'evm',$2,1)
+ON CONFLICT (id) DO UPDATE SET code=EXCLUDED.code, name=EXCLUDED.name, kind=EXCLUDED.kind, eco_tags=EXCLUDED.eco_tags, resource_spec=EXCLUDED.resource_spec, status=EXCLUDED.status, updated_at=now()`,
+		acceptanceIDs.ToolExplorer, blockscoutSpec); err != nil {
 		return err
 	}
 	judgeSpec, _ := jsonb(map[string]any{
-		"runtime_code":          "ethereum-foundry",
+		"runtime_code":          "evm-foundry",
 		"runtime_image_version": "2026.06",
-		"genesis_ref":           "genesis/ethereum-foundry/acceptance.json",
-		"tool_codes":            []string{"web-ide"},
+		"genesis_ref":           "genesis/evm-foundry/acceptance.json",
+		"tool_codes":            []string{"code-server", "blockscout"},
 		"command":               []string{"/usr/local/bin/chaimir-judge", "solidity-unit"},
 		"timeout_sec":           60,
 		"max_retries":           1,
@@ -147,7 +258,7 @@ ON CONFLICT (id) DO UPDATE SET runtime_id=EXCLUDED.runtime_id, image_id=EXCLUDED
 	}
 	if err := execJSON(ctx, tx, `
 INSERT INTO sandbox_tool (id, tenant_id, sandbox_id, tool_id, access_endpoint, status)
-VALUES ($1,$2,$3,$4,'http://chaimir-acceptance-sandbox-a-web-ide.chaimir-sandbox.svc.cluster.local:8080',1)
+VALUES ($1,$2,$3,$4,'/api/v1/sandbox/sandboxes/910000000000001021/tools/code-server/',1)
 ON CONFLICT (tenant_id, sandbox_id, tool_id) DO UPDATE SET access_endpoint=EXCLUDED.access_endpoint, status=EXCLUDED.status`,
 		acceptanceIDs.SandboxTool, acceptanceIDs.TenantID, acceptanceIDs.Sandbox, acceptanceIDs.ToolVSCode); err != nil {
 		return err
@@ -171,10 +282,10 @@ func seedJudgeRows(ctx context.Context, tx pgx.Tx) error {
 		"suite_ref":                   "minio://chaimir-code/910000000000000001/judge/suites/ctf-reentrancy-vault/public-regression.tar.gz",
 		"suite_archive_name":          "public-regression.tar.gz",
 		"version_hash":                "acceptance-version-hash",
-		"runtime_code":                "ethereum-foundry",
+		"runtime_code":                "evm-foundry",
 		"runtime_image_version":       "2026.06",
-		"genesis_ref":                 "genesis/ethereum-foundry/acceptance.json",
-		"tool_codes":                  []string{"web-ide"},
+		"genesis_ref":                 "genesis/evm-foundry/acceptance.json",
+		"tool_codes":                  []string{"code-server", "blockscout"},
 		"command":                     []string{"/usr/local/bin/chaimir-judge", "solidity-unit"},
 		"timeout_sec":                 60,
 		"max_retries":                 1,
@@ -414,9 +525,9 @@ func seedExperimentRows(ctx context.Context, tx pgx.Tx) error {
 	components, _ := jsonb(map[string]any{
 		"envs": []map[string]any{{
 			"id":                    "lab-foundry",
-			"runtime_code":          "ethereum-foundry",
+			"runtime_code":          "evm-foundry",
 			"runtime_image_version": "2026.06",
-			"tools":                 []string{"web-ide", "block-explorer"},
+			"tools":                 []string{"code-server", "blockscout"},
 			"init_code_ref":         "content/lab-reentrancy-foundry.zip",
 			"init_script_ref":       "scripts/init-reentrancy.sh",
 			"snapshot_enabled":      true,
@@ -461,11 +572,16 @@ ON CONFLICT (tenant_id, group_id, student_id) DO UPDATE SET role=EXCLUDED.role`,
 		"component_id": "lab-foundry",
 		"stage":        1,
 		"sandbox_id":   acceptanceIDs.Sandbox,
-		"runtime_code": "ethereum-foundry",
+		"runtime_code": "evm-foundry",
 		"tools": []map[string]any{{
-			"code":     "web-ide",
+			"code":     "code-server",
 			"kind":     3,
-			"endpoint": "/api/v1/sandbox/sandboxes/910000000000001021/tools/web-ide/",
+			"endpoint": "/api/v1/sandbox/sandboxes/910000000000001021/tools/code-server/",
+			"status":   1,
+		}, {
+			"code":     "blockscout",
+			"kind":     3,
+			"endpoint": "/api/v1/sandbox/sandboxes/910000000000001021/tools/blockscout/",
 			"status":   1,
 		}},
 	}})

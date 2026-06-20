@@ -599,7 +599,7 @@ func (q *Queries) GetTenantQuotaForUpdate(ctx context.Context, tenantID int64) (
 }
 
 const getToolByCode = `-- name: GetToolByCode :one
-SELECT id, code, name, kind, image_url, port, eco_tags, resource_spec, status, created_at, updated_at
+SELECT id, code, name, kind, eco_tags, resource_spec, status, created_at, updated_at
 FROM tool
 WHERE code = $1
 `
@@ -612,8 +612,6 @@ func (q *Queries) GetToolByCode(ctx context.Context, code string) (Tool, error) 
 		&i.Code,
 		&i.Name,
 		&i.Kind,
-		&i.ImageUrl,
-		&i.Port,
 		&i.EcoTags,
 		&i.ResourceSpec,
 		&i.Status,
@@ -769,7 +767,7 @@ func (q *Queries) ListRuntimes(ctx context.Context) ([]Runtime, error) {
 
 const listSandboxTools = `-- name: ListSandboxTools :many
 SELECT st.id, st.tenant_id, st.sandbox_id, st.tool_id, st.access_endpoint, st.status,
-       t.code, t.kind
+       t.code, t.kind, t.resource_spec
 FROM sandbox_tool st
 JOIN tool t ON t.id = st.tool_id
 WHERE st.tenant_id = $1 AND st.sandbox_id = $2
@@ -790,6 +788,7 @@ type ListSandboxToolsRow struct {
 	Status         int16  `json:"status"`
 	Code           string `json:"code"`
 	Kind           int16  `json:"kind"`
+	ResourceSpec   []byte `json:"resource_spec"`
 }
 
 func (q *Queries) ListSandboxTools(ctx context.Context, arg ListSandboxToolsParams) ([]ListSandboxToolsRow, error) {
@@ -810,6 +809,7 @@ func (q *Queries) ListSandboxTools(ctx context.Context, arg ListSandboxToolsPara
 			&i.Status,
 			&i.Code,
 			&i.Kind,
+			&i.ResourceSpec,
 		); err != nil {
 			return nil, err
 		}
@@ -932,7 +932,7 @@ func (q *Queries) ListSnapshotCleanupCandidates(ctx context.Context, limit int32
 }
 
 const listTools = `-- name: ListTools :many
-SELECT id, code, name, kind, image_url, port, eco_tags, resource_spec, status, created_at, updated_at
+SELECT id, code, name, kind, eco_tags, resource_spec, status, created_at, updated_at
 FROM tool
 ORDER BY created_at DESC, id DESC
 `
@@ -951,8 +951,6 @@ func (q *Queries) ListTools(ctx context.Context) ([]Tool, error) {
 			&i.Code,
 			&i.Name,
 			&i.Kind,
-			&i.ImageUrl,
-			&i.Port,
 			&i.EcoTags,
 			&i.ResourceSpec,
 			&i.Status,
@@ -1590,30 +1588,26 @@ func (q *Queries) UpsertTenantQuota(ctx context.Context, arg UpsertTenantQuotaPa
 }
 
 const upsertTool = `-- name: UpsertTool :one
-INSERT INTO tool (id, code, name, kind, image_url, port, eco_tags, resource_spec, status, created_at, updated_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, now(), now())
+INSERT INTO tool (id, code, name, kind, eco_tags, resource_spec, status, created_at, updated_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, now(), now())
 ON CONFLICT (code) DO UPDATE
 SET name = EXCLUDED.name,
     kind = EXCLUDED.kind,
-    image_url = EXCLUDED.image_url,
-    port = EXCLUDED.port,
     eco_tags = EXCLUDED.eco_tags,
     resource_spec = EXCLUDED.resource_spec,
     status = EXCLUDED.status,
     updated_at = now()
-RETURNING id, code, name, kind, image_url, port, eco_tags, resource_spec, status, created_at, updated_at
+RETURNING id, code, name, kind, eco_tags, resource_spec, status, created_at, updated_at
 `
 
 type UpsertToolParams struct {
-	ID           int64       `json:"id"`
-	Code         string      `json:"code"`
-	Name         string      `json:"name"`
-	Kind         int16       `json:"kind"`
-	ImageUrl     pgtype.Text `json:"image_url"`
-	Port         pgtype.Int4 `json:"port"`
-	EcoTags      string      `json:"eco_tags"`
-	ResourceSpec []byte      `json:"resource_spec"`
-	Status       int16       `json:"status"`
+	ID           int64  `json:"id"`
+	Code         string `json:"code"`
+	Name         string `json:"name"`
+	Kind         int16  `json:"kind"`
+	EcoTags      string `json:"eco_tags"`
+	ResourceSpec []byte `json:"resource_spec"`
+	Status       int16  `json:"status"`
 }
 
 func (q *Queries) UpsertTool(ctx context.Context, arg UpsertToolParams) (Tool, error) {
@@ -1622,8 +1616,6 @@ func (q *Queries) UpsertTool(ctx context.Context, arg UpsertToolParams) (Tool, e
 		arg.Code,
 		arg.Name,
 		arg.Kind,
-		arg.ImageUrl,
-		arg.Port,
 		arg.EcoTags,
 		arg.ResourceSpec,
 		arg.Status,
@@ -1634,8 +1626,6 @@ func (q *Queries) UpsertTool(ctx context.Context, arg UpsertToolParams) (Tool, e
 		&i.Code,
 		&i.Name,
 		&i.Kind,
-		&i.ImageUrl,
-		&i.Port,
 		&i.EcoTags,
 		&i.ResourceSpec,
 		&i.Status,

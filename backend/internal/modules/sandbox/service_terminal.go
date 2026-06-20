@@ -6,6 +6,7 @@ import (
 	"io"
 	"strings"
 
+	"chaimir/internal/platform/workload"
 	"chaimir/pkg/apperr"
 )
 
@@ -140,6 +141,6 @@ func runtimeExecTarget(runtime Runtime) string {
 }
 
 // podGroupForRuntime 复用编排拓扑,让终端和内部 exec 解析同一组 Pod。
-func podGroupForRuntime(runtime Runtime) []PodSpec {
+func podGroupForRuntime(runtime Runtime) []workload.PodSpec {
 	return podTopologyForAdapter(runtime.AdapterSpec)
 }

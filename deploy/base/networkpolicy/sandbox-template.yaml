@@ -25,3 +25,26 @@ spec:
 # 同一沙箱 Pod 组内容器走 localhost(同 Pod)无需放行;
 # 跨 Pod 的链组网/工具访问由后端按实验需要追加精确放行策略(白名单),
 # 受控出网(如 forked 漏洞题取链上状态)经专用代理白名单(见 docs M2 安全)。
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: sandbox-allow-dns-egress
+  namespace: __SANDBOX_NAMESPACE__  # 运行时实际命名空间名,用于约束策略落点。
+  labels:
+    app.kubernetes.io/part-of: chaimir
+    chaimir.io/sandbox: "true"
+spec:
+  # 仅允许沙箱内 Pod 解析集群 Service DNS;不放开公网、控制面或数据面访问。
+  podSelector: {}
+  policyTypes: ["Egress"]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53

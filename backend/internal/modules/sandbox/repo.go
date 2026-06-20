@@ -332,8 +332,6 @@ func (s *txStore) UpsertTool(ctx context.Context, id int64, req ToolRequest, spe
 		Code:         req.Code,
 		Name:         req.Name,
 		Kind:         req.Kind,
-		ImageUrl:     pgtypex.Text(req.ImageURL),
-		Port:         pgtypex.Int4When(req.Port, req.Port > 0),
 		EcoTags:      stringsJoin(req.EcoTags),
 		ResourceSpec: rawSpec,
 		Status:       req.Status,
@@ -532,7 +530,11 @@ func (s *txStore) ListSandboxTools(ctx context.Context, tenantID, sandboxID int6
 	}
 	out := make([]SandboxTool, 0, len(rows))
 	for _, row := range rows {
-		out = append(out, sandboxToolFromRow(row))
+		item, err := sandboxToolFromRow(row)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, item)
 	}
 	return out, nil
 }

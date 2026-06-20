@@ -33,9 +33,6 @@ type ToolRequest struct {
 	Code         string          `json:"code"`
 	Name         string          `json:"name"`
 	Kind         int16           `json:"kind"`
-	ImageURL     string          `json:"image_url"`
-	Digest       string          `json:"digest"`
-	Port         int32           `json:"port"`
 	EcoTags      []string        `json:"eco_tags"`
 	ResourceSpec json.RawMessage `json:"resource_spec"`
 	Status       int16           `json:"status"`

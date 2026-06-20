@@ -303,6 +303,8 @@ type SandboxConfig struct {
 	ControlNamespace              string
 	ControlPodLabelKey            string
 	ControlPodLabelValue          string
+	DNSNamespace                  string
+	DNSPort                       int32
 }
 
 // SandboxToleration 描述沙箱工作负载允许调度到带污点节点的最小配置。
@@ -653,6 +655,8 @@ func Load() (*Config, error) {
 		ControlNamespace:              req("SANDBOX_CONTROL_NAMESPACE"),
 		ControlPodLabelKey:            req("SANDBOX_CONTROL_POD_LABEL_KEY"),
 		ControlPodLabelValue:          req("SANDBOX_CONTROL_POD_LABEL_VALUE"),
+		DNSNamespace:                  req("SANDBOX_DNS_NAMESPACE"),
+		DNSPort:                       int32(reqInt("SANDBOX_DNS_PORT")),
 	}
 	errs = append(errs, validateSandboxQuantities(c.Sandbox)...)
 	c.Judge = JudgeConfig{
@@ -982,6 +986,9 @@ func Load() (*Config, error) {
 	}
 	if c.Sandbox.SelftestRecycleTimeoutSeconds <= 0 {
 		errs = append(errs, "SANDBOX_SELFTEST_RECYCLE_TIMEOUT_SECONDS 必须大于 0")
+	}
+	if c.Sandbox.DNSPort <= 0 || c.Sandbox.DNSPort > 65535 {
+		errs = append(errs, "SANDBOX_DNS_PORT 必须在 1 到 65535 之间")
 	}
 	if strings.TrimSpace(c.Sandbox.VolumeSnapshotClassName) != "" && strings.TrimSpace(c.Sandbox.StorageClassName) == "" {
 		errs = append(errs, "SANDBOX_VOLUME_SNAPSHOT_CLASS_NAME 已配置时必须同时配置 SANDBOX_STORAGE_CLASS_NAME")

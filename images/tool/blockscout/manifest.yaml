@@ -76,7 +76,7 @@ selftest:
       command:
         - sh
         - -lc
-        - "test -d /app || test -d /opt/app"
+        - "test -x /usr/local/bin/chaimir-blockscout-entrypoint && /app/bin/blockscout version"
 supply_chain:
   sbom: true
   trivy_required: true

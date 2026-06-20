@@ -423,9 +423,6 @@ func (s *Service) RegisterTool(ctx context.Context, req ToolRequest) (Tool, erro
 	if err != nil {
 		return Tool{}, err
 	}
-	if req.Kind == SandboxToolKindWebEmbed && !imageAttested(s.cfg, req.ImageURL, req.Digest) {
-		return Tool{}, apperr.ErrSandboxToolCreateInvalid
-	}
 	if req.Status == 0 {
 		req.Status = ToolStatusAvailable
 	}

@@ -1,0 +1,112 @@
+#!/usr/bin/env sh
+# EVM chain capability helper for the Foundry runtime.
+set -eu
+
+cmd="${1:-}"
+rpc_url="${CHAIMIR_EVM_RPC_URL:-http://127.0.0.1:${CHAIMIR_RUNTIME_RPC_PORT:-8545}}"
+state_dir="${CHAIMIR_CHAIN_STATE_DIR:-/runtime-state}"
+last_contract_file="$state_dir/last-contract-address"
+
+fail() {
+  echo "$1" >&2
+  exit "${2:-1}"
+}
+
+read_payload() {
+  payload="$(cat)"
+  if [ -z "$payload" ]; then
+    payload='{}'
+  fi
+  printf '%s' "$payload" | jq -e . >/dev/null
+  printf '%s' "$payload"
+}
+
+json_string() {
+  jq -r "$1 // empty"
+}
+
+case "$cmd" in
+  reset)
+    mkdir -p "$state_dir"
+    cast rpc --rpc-url "$rpc_url" anvil_reset >/dev/null
+    rm -f "$last_contract_file"
+    printf '{}'
+    ;;
+  deploy)
+    payload="$(read_payload)"
+    bytecode="$(printf '%s' "$payload" | json_string '.bytecode')"
+    project_dir="$(printf '%s' "$payload" | json_string '.project_dir')"
+    artifact="$(printf '%s' "$payload" | json_string '.artifact')"
+    private_key="$(printf '%s' "$payload" | json_string '.private_key')"
+    if [ -z "$private_key" ]; then
+      private_key="${CHAIMIR_EVM_DEPLOYER_PRIVATE_KEY:-0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80}"
+    fi
+    if [ -z "$bytecode" ] && [ -n "$project_dir" ] && [ -n "$artifact" ]; then
+      bytecode="$(jq -r '.bytecode.object // .bytecode // empty' "$project_dir/$artifact")"
+    fi
+    [ -n "$bytecode" ] || fail "deploy payload requires bytecode or project_dir plus artifact" 22
+    output="$(cast send --rpc-url "$rpc_url" --private-key "$private_key" --create "$bytecode" --json)"
+    address="$(printf '%s' "$output" | jq -r '.contractAddress // .contract_address // empty')"
+    [ -n "$address" ] || fail "deploy did not return contract address" 70
+    mkdir -p "$state_dir"
+    printf '%s' "$address" > "$last_contract_file"
+    jq -cn --arg contract_address "$address" --argjson receipt "$output" \
+      '{contract_address:$contract_address,receipt:$receipt}'
+    ;;
+  tx)
+    payload="$(read_payload)"
+    to="$(printf '%s' "$payload" | json_string '.to')"
+    data="$(printf '%s' "$payload" | json_string '.data')"
+    value="$(printf '%s' "$payload" | json_string '.value')"
+    private_key="$(printf '%s' "$payload" | json_string '.private_key')"
+    if [ -z "$to" ] && [ -f "$last_contract_file" ]; then
+      to="$(cat "$last_contract_file")"
+    fi
+    if [ -z "$private_key" ]; then
+      private_key="${CHAIMIR_EVM_DEPLOYER_PRIVATE_KEY:-0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80}"
+    fi
+    [ -n "$to" ] || fail "tx payload requires to or a previous deployment" 22
+    [ -n "$data" ] || fail "tx payload requires data" 22
+    if [ -n "$value" ]; then
+      output="$(cast send --rpc-url "$rpc_url" --private-key "$private_key" --value "$value" "$to" "$data" --json)"
+    else
+      output="$(cast send --rpc-url "$rpc_url" --private-key "$private_key" "$to" "$data" --json)"
+    fi
+    jq -cn --argjson receipt "$output" '{receipt:$receipt}'
+    ;;
+  query)
+    payload="$(read_payload)"
+    target="$(printf '%s' "$payload" | json_string '.target')"
+    [ -n "$target" ] || fail "query target is required" 22
+    case "$target" in
+      latest|blockNumber)
+        value="$(cast block-number --rpc-url "$rpc_url")"
+        jq -cn --arg target "$target" --argjson block_number "$value" '{target:$target,block_number:$block_number}'
+        ;;
+      chainId)
+        value="$(cast chain-id --rpc-url "$rpc_url")"
+        jq -cn --arg target "$target" --argjson chain_id "$value" '{target:$target,chain_id:$chain_id}'
+        ;;
+      balance:*)
+        address="${target#balance:}"
+        value="$(cast balance --rpc-url "$rpc_url" "$address")"
+        jq -cn --arg target "$target" --arg balance "$value" '{target:$target,balance:$balance}'
+        ;;
+      code:*)
+        address="${target#code:}"
+        value="$(cast code --rpc-url "$rpc_url" "$address")"
+        jq -cn --arg target "$target" --arg code "$value" '{target:$target,code:$code}'
+        ;;
+      *)
+        fail "unsupported query target" 22
+        ;;
+    esac
+    ;;
+  selftest)
+    command -v cast >/dev/null
+    command -v jq >/dev/null
+    ;;
+  *)
+    fail "unknown chain command" 64
+    ;;
+esac

@@ -86,6 +86,12 @@ func handleSandboxRecycledEvent(svc *Service) eventbus.Handler {
 		if err := eventbus.Decode(data, &event, apperr.ErrExperimentInstanceInvalid); err != nil {
 			return err
 		}
+		if !auth.ValidSourceRef(event.SourceRef) {
+			return apperr.ErrExperimentSourceRefInvalid
+		}
+		if !strings.HasPrefix(strings.TrimSpace(event.SourceRef), "experiment:") {
+			return nil
+		}
 		return svc.HandleSandboxRecycled(ctx, event)
 	}
 }

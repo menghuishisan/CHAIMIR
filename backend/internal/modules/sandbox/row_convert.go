@@ -63,8 +63,6 @@ func toolFromRow(row sqlcgen.Tool) (Tool, error) {
 		Code:         row.Code,
 		Name:         row.Name,
 		Kind:         row.Kind,
-		ImageURL:     pgtypex.TextValue(row.ImageUrl),
-		Port:         pgtypex.Int4Value(row.Port),
 		EcoTags:      splitCSV(row.EcoTags),
 		ResourceSpec: spec,
 		Status:       row.Status,
@@ -125,7 +123,11 @@ func sandboxRecycleOutbox(row sqlcgen.SandboxRecycleOutbox) SandboxRecycleOutbox
 }
 
 // sandboxToolFromRow 把沙箱工具联查行转换为内部 SandboxTool 模型。
-func sandboxToolFromRow(row sqlcgen.ListSandboxToolsRow) SandboxTool {
+func sandboxToolFromRow(row sqlcgen.ListSandboxToolsRow) (SandboxTool, error) {
+	spec, err := toolResourceSpecFromJSON(row.ResourceSpec)
+	if err != nil {
+		return SandboxTool{}, err
+	}
 	return SandboxTool{
 		ID:             row.ID,
 		TenantID:       row.TenantID,
@@ -133,9 +135,10 @@ func sandboxToolFromRow(row sqlcgen.ListSandboxToolsRow) SandboxTool {
 		ToolID:         row.ToolID,
 		ToolCode:       row.Code,
 		Kind:           row.Kind,
+		ResourceSpec:   spec,
 		AccessEndpoint: row.AccessEndpoint,
 		Status:         row.Status,
-	}
+	}, nil
 }
 
 // sandboxToolFromStatusRow 把 sqlc sandbox_tool 行和工具定义合成为内部工具挂载模型。
@@ -147,9 +150,22 @@ func sandboxToolFromStatusRow(row sqlcgen.SandboxTool, tool Tool) SandboxTool {
 		ToolID:         row.ToolID,
 		ToolCode:       tool.Code,
 		Kind:           tool.Kind,
+		ResourceSpec:   tool.ResourceSpec,
 		AccessEndpoint: row.AccessEndpoint,
 		Status:         row.Status,
 	}
+}
+
+// toolResourceSpecFromJSON 解析已入库工具 WorkloadSpec,失败时显式交给调用链处理。
+func toolResourceSpecFromJSON(raw []byte) (ToolResourceSpec, error) {
+	var spec ToolResourceSpec
+	if len(raw) == 0 {
+		return spec, nil
+	}
+	if err := jsonx.DecodeStrict(raw, &spec); err != nil {
+		return ToolResourceSpec{}, err
+	}
+	return spec, nil
 }
 
 // stringArrayFromJSON 从 JSONB 字符串数组提取快照卷域,解析失败时显式返回错误。

@@ -41,8 +41,6 @@ CREATE TABLE IF NOT EXISTS tool (
     code VARCHAR(64) NOT NULL UNIQUE,
     name VARCHAR(128) NOT NULL,
     kind SMALLINT NOT NULL CHECK (kind IN (1, 2, 3)),
-    image_url VARCHAR(255),
-    port INT,
     eco_tags VARCHAR(255) NOT NULL,
     resource_spec JSONB NOT NULL DEFAULT '{}'::jsonb,
     status SMALLINT NOT NULL CHECK (status IN (1, 2)),

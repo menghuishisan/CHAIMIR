@@ -26,6 +26,8 @@ capabilities:
   - evm-json-rpc
   - foundry-toolchain
   - fork-capable
+  - workspace-helper
+  - chain-capability-helper
 runtime:
   eco: evm
   adapter_level: 2
@@ -73,7 +75,7 @@ selftest:
       command:
         - sh
         - -lc
-        - "forge --version && anvil --version && cast --version"
+        - "forge --version && anvil --version && cast --version && chaimir-workspace selftest && chaimir-chain selftest"
 supply_chain:
   sbom: true
   trivy_required: true

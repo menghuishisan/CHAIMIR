@@ -4,6 +4,8 @@ package sandbox
 import (
 	"encoding/json"
 	"time"
+
+	"chaimir/internal/platform/workload"
 )
 
 // Runtime 描述可调度链运行时及其声明式适配器清单。
@@ -42,8 +44,6 @@ type Tool struct {
 	Code         string
 	Name         string
 	Kind         int16
-	ImageURL     string
-	Port         int32
 	EcoTags      []string
 	ResourceSpec ToolResourceSpec
 	Status       int16
@@ -85,6 +85,7 @@ type SandboxTool struct {
 	ToolID         int64
 	ToolCode       string
 	Kind           int16
+	ResourceSpec   ToolResourceSpec
 	AccessEndpoint string
 	Status         int16
 }
@@ -136,17 +137,19 @@ type CreateSandboxInputModel struct {
 
 // AdapterSpec 是 runtime.adapter_spec 的控制面可执行结构。
 type AdapterSpec struct {
-	WorkspaceDir       string               `json:"workspace_dir"`
-	VolumeDomains      []VolumeDomainSpec   `json:"volume_domains"`
-	RuntimeContainer   ContainerSpec        `json:"runtime_container"`
-	InfraSidecars      []ContainerSpec      `json:"infra_sidecars"`
-	Pods               []PodSpec            `json:"pods"`
-	NetworkRules       []NetworkRuleSpec    `json:"network_rules"`
-	InitAssets         []InitAssetSpec      `json:"init_assets"`
-	DefaultToolCodes   []string             `json:"default_tool_codes"`
-	Selftest           map[string]any       `json:"selftest"`
-	WorkspaceOps       WorkspaceOps         `json:"workspace_ops"`
-	CapabilityCommands CapabilityCommandSet `json:"capability_commands"`
+	WorkspaceDir       string                     `json:"workspace_dir"`
+	VolumeDomains      []VolumeDomainSpec         `json:"volume_domains"`
+	RuntimeContainer   workload.ComponentSpec      `json:"runtime_container"`
+	InfraSidecars      []workload.ComponentSpec    `json:"infra_sidecars"`
+	Pods               []workload.PodSpec          `json:"pods"`
+	Services           []workload.ServiceSpec      `json:"services"`
+	Routes             []workload.RouteSpec        `json:"routes"`
+	NetworkRules       []workload.NetworkRuleSpec `json:"network_rules"`
+	InitAssets         []InitAssetSpec            `json:"init_assets"`
+	DefaultToolCodes   []string                   `json:"default_tool_codes"`
+	Selftest           map[string]any             `json:"selftest"`
+	WorkspaceOps       WorkspaceOps               `json:"workspace_ops"`
+	CapabilityCommands CapabilityCommandSet       `json:"capability_commands"`
 }
 
 // VolumeDomainSpec 描述沙箱卷安全域,用于区分学生工作区、运行态和私有判题数据。
@@ -156,72 +159,6 @@ type VolumeDomainSpec struct {
 	StudentAccess string `json:"student_access"`
 	Persistence   string `json:"persistence"`
 	SnapshotScope string `json:"snapshot_scope"`
-}
-
-// ContainerSpec 描述运行时或协同容器的启动、安全和探活配置。
-type ContainerSpec struct {
-	Name           string            `json:"name"`
-	Image          string            `json:"image_url"`
-	Command        []string          `json:"command"`
-	Args           []string          `json:"args"`
-	Env            []EnvVarSpec      `json:"env"`
-	Ports          []PortSpec        `json:"ports"`
-	Resources      ResourceSpec      `json:"resources"`
-	ReadinessProbe ProbeSpec         `json:"readiness_probe"`
-	LivenessProbe  ProbeSpec         `json:"liveness_probe"`
-	Workdir        string            `json:"workdir"`
-	Labels         map[string]string `json:"labels"`
-}
-
-// PodSpec 描述一个沙箱工作负载 Pod 及其容器组。
-type PodSpec struct {
-	Name       string            `json:"name"`
-	Labels     map[string]string `json:"labels"`
-	Containers []ContainerSpec   `json:"containers"`
-}
-
-// NetworkRuleSpec 描述同一沙箱内不同 Pod 之间显式允许的网络访问。
-type NetworkRuleSpec struct {
-	Name    string           `json:"name"`
-	FromPod string           `json:"from_pod"`
-	ToPod   string           `json:"to_pod"`
-	Ports   []NetworkPortRef `json:"ports"`
-}
-
-// NetworkPortRef 描述网络策略放行的目标端口,优先使用容器端口名称。
-type NetworkPortRef struct {
-	Name string `json:"name"`
-	Port int32  `json:"port"`
-}
-
-// EnvVarSpec 描述允许注入容器的非敏感字面量环境变量。
-type EnvVarSpec struct {
-	Name  string `json:"name"`
-	Value string `json:"value"`
-}
-
-// PortSpec 描述容器端口和平台代理暴露口径。
-type PortSpec struct {
-	Name          string `json:"name"`
-	ContainerPort int32  `json:"container_port"`
-	ServicePort   int32  `json:"service_port"`
-	Protocol      string `json:"protocol"`
-}
-
-// ResourceSpec 描述容器 requests/limits。
-type ResourceSpec struct {
-	Requests map[string]string `json:"requests"`
-	Limits   map[string]string `json:"limits"`
-}
-
-// ProbeSpec 描述运行时声明的探活探针。
-type ProbeSpec struct {
-	Type             string   `json:"type"`
-	Path             string   `json:"path"`
-	Port             string   `json:"port"`
-	Command          []string `json:"command"`
-	PeriodSeconds    int32    `json:"period_seconds"`
-	FailureThreshold int32    `json:"failure_threshold"`
 }
 
 // InitAssetSpec 描述个性化阶段注入的已审核资产。
@@ -259,29 +196,11 @@ type CapabilityCommandSpec struct {
 
 // ToolResourceSpec 是 tool.resource_spec 的控制面可执行结构。
 type ToolResourceSpec struct {
-	MountWorkspace  *bool                    `json:"mount_workspace"`
-	BuiltinEndpoint string                   `json:"builtin_endpoint"`
-	EphemeralMounts []ToolEphemeralMountSpec `json:"ephemeral_mounts"`
-	NetworkRules    []ToolNetworkRuleSpec    `json:"network_rules"`
-	Workdir         string                   `json:"workdir"`
-	Command         []string                 `json:"command"`
-	Args            []string                 `json:"args"`
-	Env             []EnvVarSpec             `json:"env"`
-	Resources       ResourceSpec             `json:"resources"`
-	ReadinessProbe  ProbeSpec                `json:"readiness_probe"`
-}
-
-// ToolEphemeralMountSpec 描述工具容器在只读根文件系统下需要的临时可写目录。
-type ToolEphemeralMountSpec struct {
-	Name      string `json:"name"`
-	MountPath string `json:"mount_path"`
-}
-
-// ToolNetworkRuleSpec 描述工具 Pod 访问运行时 Pod 的最小网络放行。
-type ToolNetworkRuleSpec struct {
-	Name  string           `json:"name"`
-	ToPod string           `json:"to_pod"`
-	Ports []NetworkPortRef `json:"ports"`
+	BuiltinEndpoint string                     `json:"builtin_endpoint"`
+	Components      []workload.ComponentSpec  `json:"components"`
+	Services        []workload.ServiceSpec    `json:"services"`
+	Routes          []workload.RouteSpec      `json:"routes"`
+	NetworkRules    []workload.NetworkRuleSpec `json:"network_rules"`
 }
 
 // CreateSandboxPlan 汇总创建沙箱时 service 交给编排器的完整上下文。

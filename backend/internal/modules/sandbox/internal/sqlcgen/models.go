@@ -117,8 +117,6 @@ type Tool struct {
 	Code         string             `json:"code"`
 	Name         string             `json:"name"`
 	Kind         int16              `json:"kind"`
-	ImageUrl     pgtype.Text        `json:"image_url"`
-	Port         pgtype.Int4        `json:"port"`
 	EcoTags      string             `json:"eco_tags"`
 	ResourceSpec []byte             `json:"resource_spec"`
 	Status       int16              `json:"status"`

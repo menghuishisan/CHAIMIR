@@ -1,0 +1,103 @@
+#!/usr/bin/env sh
+# Workspace helper used by M2 to access only the declared workspace domain.
+set -eu
+
+cmd="${1:-}"
+workspace="${2:-/workspace}"
+target="${3:-$workspace}"
+script="${4:-}"
+
+fail() {
+  echo "$1" >&2
+  exit "${2:-1}"
+}
+
+workspace_real() {
+  mkdir -p "$workspace"
+  realpath -m "$workspace"
+}
+
+inside_workspace() {
+  root="$(workspace_real)"
+  resolved="$(realpath -m "$1")"
+  case "$resolved" in
+    "$root"|"$root"/*) printf '%s' "$resolved" ;;
+    *) fail "path escapes workspace" 22 ;;
+  esac
+}
+
+relative_to_workspace() {
+  root="$(workspace_real)"
+  resolved="$(inside_workspace "$1")"
+  if [ "$resolved" = "$root" ]; then
+    printf '.'
+    return
+  fi
+  printf '%s' "${resolved#"$root"/}"
+}
+
+case "$cmd" in
+  read)
+    target_real="$(inside_workspace "$target")"
+    [ -f "$target_real" ] || fail "workspace file does not exist" 2
+    cat "$target_real"
+    ;;
+  write)
+    target_real="$(inside_workspace "$target")"
+    mkdir -p "$(dirname "$target_real")"
+    cat > "$target_real"
+    ;;
+  list)
+    target_real="$(inside_workspace "$target")"
+    [ -d "$target_real" ] || fail "workspace directory does not exist" 2
+    first=1
+    printf '['
+    find "$target_real" -mindepth 1 -maxdepth 1 -print | sort | while IFS= read -r item; do
+      name="$(basename "$item")"
+      rel="$(relative_to_workspace "$item")"
+      if [ -d "$item" ]; then
+        is_dir=true
+        size=0
+      else
+        is_dir=false
+        size="$(stat -c '%s' "$item")"
+      fi
+      if [ "$first" -eq 0 ]; then
+        printf ','
+      fi
+      first=0
+      jq -cn --arg name "$name" --arg relative_path "$rel" --argjson is_dir "$is_dir" --argjson size "$size" \
+        '{name:$name,relative_path:$relative_path,is_dir:$is_dir,size:$size}'
+    done
+    printf ']'
+    ;;
+  pack)
+    target_real="$(inside_workspace "$target")"
+    [ -d "$target_real" ] || fail "workspace pack target is not a directory" 2
+    tar -C "$target_real" --sort=name --mtime='UTC 1970-01-01' --owner=0 --group=0 --numeric-owner -cf - .
+    ;;
+  unpack)
+    target_real="$(inside_workspace "$target")"
+    mkdir -p "$target_real"
+    tar -C "$target_real" --no-same-owner --no-same-permissions -xf -
+    ;;
+  run)
+    [ -n "$script" ] || fail "script path is required" 22
+    script_real="$(inside_workspace "$script")"
+    [ -f "$script_real" ] || fail "workspace script does not exist" 2
+    chmod 700 "$script_real"
+    sh "$script_real"
+    ;;
+  terminal)
+    cd "$(workspace_real)"
+    exec sh -l
+    ;;
+  selftest)
+    test -d "$(workspace_real)"
+    command -v tar >/dev/null
+    command -v jq >/dev/null
+    ;;
+  *)
+    fail "unknown workspace command" 64
+    ;;
+esac

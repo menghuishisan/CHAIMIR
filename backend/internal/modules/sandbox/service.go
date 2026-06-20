@@ -17,6 +17,7 @@ import (
 	"chaimir/internal/platform/response"
 	"chaimir/internal/platform/storage"
 	"chaimir/internal/platform/timex"
+	"chaimir/internal/platform/workload"
 	"chaimir/internal/platform/ws"
 	"chaimir/pkg/apperr"
 	"chaimir/pkg/logging"
@@ -180,11 +181,11 @@ func (s *Service) CreateSandbox(ctx context.Context, req contracts.SandboxCreate
 		if err != nil {
 			return apperr.ErrSandboxCreateFailed.WithCause(err)
 		}
-		if err := validateQuotaForCreate(input, quota, active, s.cfg); err != nil {
-			return err
-		}
 		tools, err := s.resolveTools(ctx, tx, runtime, input.ToolCodes)
 		if err != nil {
+			return err
+		}
+		if err := validateQuotaForCreate(input, quota, active, s.cfg, runtime.AdapterSpec, tools); err != nil {
 			return err
 		}
 		if input.SnapshotEnabled {
@@ -768,47 +769,26 @@ func (s *Service) startSandbox(ctx context.Context, plan CreateSandboxPlan) {
 		s.markStartFailed(ctx, plan.Sandbox, err)
 		return
 	}
-	if err := s.updateToolReadiness(ctx, plan); err != nil {
-		logging.ErrorContext(ctx, "sandbox tool readiness update failed", err.Error(), slog.Int64("tenant_id", plan.Sandbox.TenantID), slog.Int64("sandbox_id", plan.Sandbox.ID))
-		s.cleanupAfterStartFailure(ctx, plan.Sandbox)
-		s.markStartFailed(ctx, plan.Sandbox, err)
-		return
-	}
-	if err := s.store.TenantTx(ctx, plan.Sandbox.TenantID, func(ctx context.Context, tx TxStore) error {
-		if _, err := tx.UpdateSandboxPhaseStatus(ctx, plan.Sandbox.TenantID, plan.Sandbox.ID, SandboxPhaseReady, SandboxStatusReady); err != nil {
-			return apperr.ErrSandboxStatePersistFailed.WithCause(err)
-		}
-		detail, err := jsonBytes(map[string]any{"phase": SandboxPhaseReady, "status": SandboxStatusReady})
-		if err != nil {
-			return apperr.ErrSandboxStatePersistFailed.WithCause(err)
-		}
-		if err := tx.CreateSandboxEvent(ctx, s.ids.Generate(), plan.Sandbox.TenantID, plan.Sandbox.ID, EventTypePhaseChange, detail); err != nil {
-			return apperr.ErrSandboxStatePersistFailed.WithCause(err)
-		}
-		return nil
-	}); err != nil {
+	advanced, err := s.advanceStartupState(ctx, plan.Sandbox.TenantID, plan.Sandbox.ID, SandboxPhaseReady, SandboxStatusReady, map[string]any{"phase": SandboxPhaseReady, "status": SandboxStatusReady}, SandboxStatusCreating)
+	if err != nil {
 		logging.ErrorContext(ctx, "sandbox phase update failed", apperr.AsAppError(err).LogString(), slog.Int64("tenant_id", plan.Sandbox.TenantID), slog.Int64("sandbox_id", plan.Sandbox.ID))
 		return
 	}
+	if !advanced {
+		return
+	}
 	s.broadcastProgress(ctx, plan.Sandbox.TenantID, plan.Sandbox.ID, SandboxPhaseReady, SandboxStatusReady, response.TraceFromContext(ctx))
+	go s.updateToolsAsync(ctx, plan)
 	if sandboxNeedsInitialization(plan) {
-		s.broadcastProgress(ctx, plan.Sandbox.TenantID, plan.Sandbox.ID, SandboxPhaseInitializing, SandboxStatusRunning, response.TraceFromContext(ctx))
-		if err := s.store.TenantTx(ctx, plan.Sandbox.TenantID, func(ctx context.Context, tx TxStore) error {
-			if _, err := tx.UpdateSandboxPhaseStatus(ctx, plan.Sandbox.TenantID, plan.Sandbox.ID, SandboxPhaseInitializing, SandboxStatusRunning); err != nil {
-				return apperr.ErrSandboxStatePersistFailed.WithCause(err)
-			}
-			detail, err := jsonBytes(map[string]any{"phase": SandboxPhaseInitializing})
-			if err != nil {
-				return apperr.ErrSandboxStatePersistFailed.WithCause(err)
-			}
-			if err := tx.CreateSandboxEvent(ctx, s.ids.Generate(), plan.Sandbox.TenantID, plan.Sandbox.ID, EventTypePhaseChange, detail); err != nil {
-				return apperr.ErrSandboxStatePersistFailed.WithCause(err)
-			}
-			return nil
-		}); err != nil {
+		advanced, err = s.advanceStartupState(ctx, plan.Sandbox.TenantID, plan.Sandbox.ID, SandboxPhaseInitializing, SandboxStatusRunning, map[string]any{"phase": SandboxPhaseInitializing}, SandboxStatusReady)
+		if err != nil {
 			logging.ErrorContext(ctx, "sandbox init phase update failed", apperr.AsAppError(err).LogString(), slog.Int64("tenant_id", plan.Sandbox.TenantID), slog.Int64("sandbox_id", plan.Sandbox.ID))
 			return
 		}
+		if !advanced {
+			return
+		}
+		s.broadcastProgress(ctx, plan.Sandbox.TenantID, plan.Sandbox.ID, SandboxPhaseInitializing, SandboxStatusRunning, response.TraceFromContext(ctx))
 		if err := s.applyInitAssetsIfNeeded(ctx, plan.Sandbox, plan.Runtime); err != nil {
 			s.markInitFailed(ctx, plan.Sandbox, err)
 			return
@@ -825,24 +805,109 @@ func (s *Service) startSandbox(ctx context.Context, plan CreateSandboxPlan) {
 				return
 			}
 		}
-		if err := s.store.TenantTx(ctx, plan.Sandbox.TenantID, func(ctx context.Context, tx TxStore) error {
-			if _, err := tx.UpdateSandboxPhaseStatus(ctx, plan.Sandbox.TenantID, plan.Sandbox.ID, SandboxPhaseFullyReady, SandboxStatusRunning); err != nil {
-				return apperr.ErrSandboxStatePersistFailed.WithCause(err)
-			}
-			detail, err := jsonBytes(map[string]any{"phase": SandboxPhaseFullyReady})
-			if err != nil {
-				return apperr.ErrSandboxStatePersistFailed.WithCause(err)
-			}
-			if err := tx.CreateSandboxEvent(ctx, s.ids.Generate(), plan.Sandbox.TenantID, plan.Sandbox.ID, EventTypePhaseChange, detail); err != nil {
-				return apperr.ErrSandboxStatePersistFailed.WithCause(err)
-			}
-			return nil
-		}); err != nil {
+		advanced, err = s.advanceStartupState(ctx, plan.Sandbox.TenantID, plan.Sandbox.ID, SandboxPhaseFullyReady, SandboxStatusRunning, map[string]any{"phase": SandboxPhaseFullyReady}, SandboxStatusRunning)
+		if err != nil {
 			logging.ErrorContext(ctx, "sandbox init phase update failed", apperr.AsAppError(err).LogString(), slog.Int64("tenant_id", plan.Sandbox.TenantID), slog.Int64("sandbox_id", plan.Sandbox.ID))
+			return
+		}
+		if !advanced {
 			return
 		}
 		s.broadcastProgress(ctx, plan.Sandbox.TenantID, plan.Sandbox.ID, SandboxPhaseFullyReady, SandboxStatusRunning, response.TraceFromContext(ctx))
 	}
+}
+
+// updateToolsAsync 在环境就绪后独立推进 Web 工具状态,不让慢启动工具阻塞 phase=2。
+func (s *Service) updateToolsAsync(ctx context.Context, plan CreateSandboxPlan) {
+	base := logging.WithAttrs(context.WithoutCancel(ctx), logging.AttrsFromContext(ctx)...)
+	toolCtx, cancel := context.WithTimeout(base, timeDurationSeconds(int(toolReadinessTimeoutForPlan(s.cfg, plan))))
+	defer cancel()
+	if err := s.updateToolReadiness(toolCtx, plan); err != nil {
+		logging.ErrorContext(toolCtx, "sandbox tool readiness update failed", err.Error(), slog.Int64("tenant_id", plan.Sandbox.TenantID), slog.Int64("sandbox_id", plan.Sandbox.ID))
+	}
+}
+
+// toolReadinessTimeoutForPlan 以工具声明式 readiness 窗口作为工具状态更新等待下限。
+func toolReadinessTimeoutForPlan(cfg config.SandboxConfig, plan CreateSandboxPlan) int64 {
+	timeout := int64(cfg.ReadyTimeoutSeconds)
+	for _, tool := range plan.Tools {
+		if tool.Kind != SandboxToolKindWebEmbed {
+			continue
+		}
+		for _, component := range tool.ResourceSpec.Components {
+			timeout = max(timeout, readinessWindowSeconds(cfg, component.ReadinessProbe))
+		}
+	}
+	if timeout <= 0 {
+		return 1
+	}
+	return timeout
+}
+
+// readinessWindowSeconds 按 K8s 探针周期和失败阈值计算声明的最大 readiness 等待秒数。
+func readinessWindowSeconds(cfg config.SandboxConfig, probe workload.ProbeSpec) int64 {
+	if strings.TrimSpace(probe.Type) == "" {
+		return 0
+	}
+	period := probe.PeriodSeconds
+	if period <= 0 {
+		period = cfg.ProbeDefaultPeriodSeconds
+	}
+	threshold := probe.FailureThreshold
+	if threshold <= 0 {
+		threshold = cfg.ProbeDefaultFailureThreshold
+	}
+	return int64(period) * int64(threshold)
+}
+
+// advanceStartupState 只允许异步启动任务从预期状态推进;若回收已接管则停止本次启动链路。
+func (s *Service) advanceStartupState(ctx context.Context, tenantID, sandboxID int64, phase, status int16, detail map[string]any, expectedStatuses ...int16) (bool, error) {
+	advanced := false
+	if err := s.store.TenantTx(ctx, tenantID, func(ctx context.Context, tx TxStore) error {
+		sb, err := tx.GetSandbox(ctx, tenantID, sandboxID)
+		if err != nil {
+			return apperr.ErrSandboxNotFound.WithCause(err)
+		}
+		if startupStateOwnedByRecycle(sb.Status) {
+			return nil
+		}
+		if !statusIn(sb.Status, expectedStatuses...) {
+			return apperr.ErrSandboxStateInvalid
+		}
+		if err := validateStateTransition(sb.Status, status); err != nil {
+			return err
+		}
+		if _, err := tx.UpdateSandboxPhaseStatus(ctx, tenantID, sandboxID, phase, status); err != nil {
+			return apperr.ErrSandboxStatePersistFailed.WithCause(err)
+		}
+		rawDetail, err := jsonBytes(detail)
+		if err != nil {
+			return apperr.ErrSandboxStatePersistFailed.WithCause(err)
+		}
+		if err := tx.CreateSandboxEvent(ctx, s.ids.Generate(), tenantID, sandboxID, EventTypePhaseChange, rawDetail); err != nil {
+			return apperr.ErrSandboxStatePersistFailed.WithCause(err)
+		}
+		advanced = true
+		return nil
+	}); err != nil {
+		return false, err
+	}
+	return advanced, nil
+}
+
+// startupStateOwnedByRecycle 判断沙箱状态是否已由回收链路接管,异步启动不得再写入。
+func startupStateOwnedByRecycle(status int16) bool {
+	return status == SandboxStatusRecycling || status == SandboxStatusDestroyed
+}
+
+// statusIn 判断当前状态是否处在异步启动允许推进的前置状态集合中。
+func statusIn(status int16, candidates ...int16) bool {
+	for _, candidate := range candidates {
+		if status == candidate {
+			return true
+		}
+	}
+	return false
 }
 
 // sandboxNeedsInitialization 判断沙箱是否存在个性化资产、代码或脚本需要异步执行。
@@ -862,13 +927,22 @@ func (s *Service) cleanupAfterStartFailure(ctx context.Context, sb Sandbox) {
 
 // markStartFailed 记录启动失败,并避免把未完成资源伪装成 ready。
 func (s *Service) markStartFailed(ctx context.Context, sb Sandbox, cause error) {
-	persistCtx, cancel := failurePersistenceContext(ctx, timeDurationSeconds(s.cfg.ReadyTimeoutSeconds))
+	persistCtx, cancel := asyncPersistenceContext(ctx, timeDurationSeconds(s.cfg.ReadyTimeoutSeconds))
 	defer cancel()
+	shouldBroadcast := false
+	broadcastPhase := sb.Phase
 	if err := s.store.TenantTx(persistCtx, sb.TenantID, func(ctx context.Context, tx TxStore) error {
-		_, err := tx.UpdateSandboxPhaseStatus(ctx, sb.TenantID, sb.ID, sb.Phase, SandboxStatusFailed)
+		current, err := tx.GetSandbox(ctx, sb.TenantID, sb.ID)
 		if err != nil {
 			return apperr.ErrSandboxStatePersistFailed.WithCause(err)
 		}
+		if startupStateOwnedByRecycle(current.Status) {
+			return nil
+		}
+		if _, err := tx.UpdateSandboxPhaseStatus(ctx, sb.TenantID, sb.ID, current.Phase, SandboxStatusFailed); err != nil {
+			return apperr.ErrSandboxStatePersistFailed.WithCause(err)
+		}
+		broadcastPhase = current.Phase
 		detail, err := jsonBytes(map[string]any{"stage": "start", "error": logging.SanitizeError(cause.Error())})
 		if err != nil {
 			return apperr.ErrSandboxStatePersistFailed.WithCause(err)
@@ -876,19 +950,30 @@ func (s *Service) markStartFailed(ctx context.Context, sb Sandbox, cause error) 
 		if err := tx.CreateSandboxEvent(ctx, s.ids.Generate(), sb.TenantID, sb.ID, EventTypeError, detail); err != nil {
 			return apperr.ErrSandboxStatePersistFailed.WithCause(err)
 		}
+		shouldBroadcast = true
 		return nil
 	}); err != nil {
 		logging.ErrorContext(persistCtx, "sandbox start failure mark failed", apperr.AsAppError(err).LogString(), slog.Int64("tenant_id", sb.TenantID), slog.Int64("sandbox_id", sb.ID))
 	}
-	s.broadcastProgress(ctx, sb.TenantID, sb.ID, sb.Phase, SandboxStatusFailed, response.TraceFromContext(ctx))
+	if shouldBroadcast {
+		s.broadcastProgress(ctx, sb.TenantID, sb.ID, broadcastPhase, SandboxStatusFailed, response.TraceFromContext(ctx))
+	}
 	logging.ErrorContext(ctx, "sandbox start failed", cause.Error(), slog.Int64("tenant_id", sb.TenantID), slog.Int64("sandbox_id", sb.ID))
 }
 
 // markInitFailed 记录阶段二个性化初始化失败,保留阶段一可进入状态供用户继续查看和修复。
 func (s *Service) markInitFailed(ctx context.Context, sb Sandbox, cause error) {
-	persistCtx, cancel := failurePersistenceContext(ctx, timeDurationSeconds(s.cfg.ReadyTimeoutSeconds))
+	persistCtx, cancel := asyncPersistenceContext(ctx, timeDurationSeconds(s.cfg.ReadyTimeoutSeconds))
 	defer cancel()
+	shouldBroadcast := false
 	if err := s.store.TenantTx(persistCtx, sb.TenantID, func(ctx context.Context, tx TxStore) error {
+		current, err := tx.GetSandbox(ctx, sb.TenantID, sb.ID)
+		if err != nil {
+			return apperr.ErrSandboxStatePersistFailed.WithCause(err)
+		}
+		if startupStateOwnedByRecycle(current.Status) {
+			return nil
+		}
 		if _, err := tx.UpdateSandboxPhaseStatus(ctx, sb.TenantID, sb.ID, SandboxPhaseInitializing, SandboxStatusRunning); err != nil {
 			return apperr.ErrSandboxStatePersistFailed.WithCause(err)
 		}
@@ -899,21 +984,15 @@ func (s *Service) markInitFailed(ctx context.Context, sb Sandbox, cause error) {
 		if err := tx.CreateSandboxEvent(ctx, s.ids.Generate(), sb.TenantID, sb.ID, EventTypeError, detail); err != nil {
 			return apperr.ErrSandboxStatePersistFailed.WithCause(err)
 		}
+		shouldBroadcast = true
 		return nil
 	}); err != nil {
 		logging.ErrorContext(persistCtx, "sandbox init failure mark failed", apperr.AsAppError(err).LogString(), slog.Int64("tenant_id", sb.TenantID), slog.Int64("sandbox_id", sb.ID))
 	}
-	s.broadcastProgress(ctx, sb.TenantID, sb.ID, SandboxPhaseInitializing, SandboxStatusRunning, response.TraceFromContext(ctx))
-	logging.ErrorContext(ctx, "sandbox init failed", cause.Error(), slog.Int64("tenant_id", sb.TenantID), slog.Int64("sandbox_id", sb.ID))
-}
-
-// failurePersistenceContext 为异步失败状态回写创建独立有界上下文,保留 trace/tenant 日志属性。
-func failurePersistenceContext(ctx context.Context, timeout time.Duration) (context.Context, context.CancelFunc) {
-	if timeout <= 0 {
-		timeout = time.Second
+	if shouldBroadcast {
+		s.broadcastProgress(ctx, sb.TenantID, sb.ID, SandboxPhaseInitializing, SandboxStatusRunning, response.TraceFromContext(ctx))
 	}
-	base := logging.WithAttrs(context.WithoutCancel(ctx), logging.AttrsFromContext(ctx)...)
-	return context.WithTimeout(base, timeout)
+	logging.ErrorContext(ctx, "sandbox init failed", cause.Error(), slog.Int64("tenant_id", sb.TenantID), slog.Int64("sandbox_id", sb.ID))
 }
 
 // updateToolReadiness 将 Web 工具真实健康检查结果写回控制面,避免未就绪工具被代理。
@@ -963,7 +1042,9 @@ func (s *Service) waitToolReady(ctx context.Context, sb Sandbox, tool Tool) erro
 // persistToolStatus 写入单个工具状态和统一代理端点。
 func (s *Service) persistToolStatus(ctx context.Context, sb Sandbox, tool Tool, status int16) error {
 	endpoint := toolEndpoint(sb.ID, tool)
-	if err := s.store.TenantTx(ctx, sb.TenantID, func(ctx context.Context, tx TxStore) error {
+	persistCtx, cancel := asyncPersistenceContext(ctx, timeDurationSeconds(s.cfg.ReadyTimeoutSeconds))
+	defer cancel()
+	if err := s.store.TenantTx(persistCtx, sb.TenantID, func(ctx context.Context, tx TxStore) error {
 		if _, err := tx.UpdateSandboxToolStatus(ctx, sb.TenantID, sb.ID, tool, endpoint, status); err != nil {
 			return apperr.ErrSandboxToolPersistFailed.WithCause(err)
 		}
@@ -972,6 +1053,15 @@ func (s *Service) persistToolStatus(ctx context.Context, sb Sandbox, tool Tool, 
 		return err
 	}
 	return nil
+}
+
+// asyncPersistenceContext 为异步状态回写创建独立有界上下文,避免探测 deadline 取消数据库写入。
+func asyncPersistenceContext(ctx context.Context, timeout time.Duration) (context.Context, context.CancelFunc) {
+	if timeout <= 0 {
+		timeout = time.Second
+	}
+	base := logging.WithAttrs(context.WithoutCancel(ctx), logging.AttrsFromContext(ctx)...)
+	return context.WithTimeout(base, timeout)
 }
 
 // selectRuntimeImage 按请求固定版本或默认版本选择已登记镜像。

@@ -2,7 +2,6 @@
 package sandbox
 
 import (
-	"fmt"
 	"path"
 	"path/filepath"
 	"regexp"
@@ -11,6 +10,7 @@ import (
 	"chaimir/internal/platform/auth"
 	"chaimir/internal/platform/config"
 	"chaimir/internal/platform/jsonx"
+	"chaimir/internal/platform/workload"
 	"chaimir/pkg/apperr"
 
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -79,7 +79,7 @@ func validateRuntimeRequest(req RuntimeRequest, cfg config.SandboxConfig) (Adapt
 	return spec, nil
 }
 
-// validateToolRequest 校验工具定义,确保 web-embed 镜像、探针默认值和工作区挂载语义明确。
+// validateToolRequest 校验工具定义,确保 web-embed 只通过 WorkloadSpec 声明组件和路由。
 func validateToolRequest(req ToolRequest, cfg config.SandboxConfig) (ToolResourceSpec, error) {
 	if !codePattern.MatchString(req.Code) || strings.TrimSpace(req.Name) == "" {
 		return ToolResourceSpec{}, apperr.ErrSandboxToolCreateInvalid
@@ -90,9 +90,6 @@ func validateToolRequest(req ToolRequest, cfg config.SandboxConfig) (ToolResourc
 	if req.Status != 0 && req.Status != ToolStatusAvailable && req.Status != ToolStatusDisabled {
 		return ToolResourceSpec{}, apperr.ErrSandboxToolCreateInvalid
 	}
-	if req.Kind != SandboxToolKindWebEmbed && (strings.TrimSpace(req.ImageURL) != "" || req.Port > 0 || strings.TrimSpace(req.Digest) != "") {
-		return ToolResourceSpec{}, apperr.ErrSandboxToolCreateInvalid
-	}
 	var spec ToolResourceSpec
 	if len(req.ResourceSpec) > 0 {
 		if err := jsonx.DecodeStrict(req.ResourceSpec, &spec); err != nil {
@@ -100,21 +97,26 @@ func validateToolRequest(req ToolRequest, cfg config.SandboxConfig) (ToolResourc
 		}
 	}
 	if req.Kind == SandboxToolKindWebEmbed {
-		if strings.TrimSpace(req.ImageURL) == "" || req.Port <= 0 || strings.TrimSpace(spec.ReadinessProbe.Type) == "" {
+		if len(spec.Components) == 0 || len(spec.Services) == 0 || len(spec.Routes) == 0 {
 			return ToolResourceSpec{}, apperr.ErrSandboxToolCreateInvalid
 		}
-		if spec.MountWorkspace == nil {
-			return ToolResourceSpec{}, apperr.ErrSandboxToolCreateInvalid
-		}
-		normalizeProbe(&spec.ReadinessProbe, cfg)
-		if len(spec.Command) > 0 && !safeNonShellCommand(spec.Command) {
-			return ToolResourceSpec{}, apperr.ErrSandboxToolCreateInvalid
-		}
-		if err := validateResourceSpec(spec.Resources); err != nil {
-			return ToolResourceSpec{}, apperr.ErrSandboxToolCreateInvalid.WithCause(err)
-		}
-		if err := validateProbeSpec(&spec.ReadinessProbe, map[string]struct{}{"http": {}}); err != nil {
-			return ToolResourceSpec{}, apperr.ErrSandboxToolCreateInvalid.WithCause(err)
+		for i := range spec.Components {
+			component := &spec.Components[i]
+			if err := validateContainerSpec(component, cfg); err != nil {
+				return ToolResourceSpec{}, apperr.ErrSandboxToolCreateInvalid.WithCause(err)
+			}
+			if err := validateToolEphemeralMounts(component.EphemeralMounts); err != nil {
+				return ToolResourceSpec{}, err
+			}
+			if !imageAttested(cfg, component.ImageURL, digestFromImageURL(component.ImageURL)) {
+				return ToolResourceSpec{}, apperr.ErrSandboxToolCreateInvalid
+			}
+			if component.MountWorkspace == nil {
+				return ToolResourceSpec{}, apperr.ErrSandboxToolCreateInvalid
+			}
+			if len(component.Command) > 0 && !safeNonShellCommand(component.Command) {
+				return ToolResourceSpec{}, apperr.ErrSandboxToolCreateInvalid
+			}
 		}
 	}
 	if req.Kind == SandboxToolKindBuiltin {
@@ -125,14 +127,11 @@ func validateToolRequest(req ToolRequest, cfg config.SandboxConfig) (ToolResourc
 	if req.Kind != SandboxToolKindWebEmbed && toolHasContainerSpec(spec) {
 		return ToolResourceSpec{}, apperr.ErrSandboxToolCreateInvalid
 	}
-	if err := validateLiteralEnv(spec.Env); err != nil {
-		return ToolResourceSpec{}, err
-	}
-	if err := validateToolEphemeralMounts(spec.EphemeralMounts); err != nil {
-		return ToolResourceSpec{}, err
-	}
 	if req.Kind != SandboxToolKindWebEmbed && len(spec.NetworkRules) > 0 {
 		return ToolResourceSpec{}, apperr.ErrSandboxToolCreateInvalid
+	}
+	if err := validateToolServicesAndRoutes(&spec); err != nil {
+		return ToolResourceSpec{}, err
 	}
 	if err := validateToolNetworkRules(&spec); err != nil {
 		return ToolResourceSpec{}, err
@@ -149,10 +148,101 @@ func validateQuota(q TenantQuota) error {
 	return nil
 }
 
-// validateQuotaForCreate 校验本次创建是否超过租户并发、保活和快照上限。
-func validateQuotaForCreate(req CreateSandboxInputModel, quota TenantQuota, active int64, cfg config.SandboxConfig) error {
+// validateToolServicesAndRoutes 校验 Web 工具的 Service 与代理路由都引用已声明组件和端口。
+func validateToolServicesAndRoutes(spec *ToolResourceSpec) error {
+	if spec == nil || len(spec.Components) == 0 {
+		if len(spec.Services) > 0 || len(spec.Routes) > 0 {
+			return apperr.ErrSandboxToolCreateInvalid
+		}
+		return nil
+	}
+	componentPorts := componentPortMap(spec.Components)
+	servicePorts := map[string]map[string]struct{}{}
+	for i := range spec.Services {
+		service := &spec.Services[i]
+		service.Name = strings.TrimSpace(service.Name)
+		service.Component = strings.TrimSpace(service.Component)
+		if !mountNamePattern.MatchString(service.Name) || len(service.Ports) == 0 {
+			return apperr.ErrSandboxToolCreateInvalid
+		}
+		ports, ok := componentPorts[service.Component]
+		if !ok {
+			return apperr.ErrSandboxToolCreateInvalid
+		}
+		declared := map[string]struct{}{}
+		for j := range service.Ports {
+			port := &service.Ports[j]
+			port.Name = strings.TrimSpace(port.Name)
+			port.TargetPort = strings.TrimSpace(port.TargetPort)
+			port.Protocol = strings.ToUpper(strings.TrimSpace(port.Protocol))
+			if port.Protocol == "" {
+				port.Protocol = "TCP"
+			}
+			if !portNamePattern.MatchString(port.Name) || port.Port <= 0 || port.Port > 65535 ||
+				port.TargetPort == "" || (port.Protocol != "TCP" && port.Protocol != "UDP") {
+				return apperr.ErrSandboxToolCreateInvalid
+			}
+			if _, ok := ports[port.TargetPort]; !ok {
+				return apperr.ErrSandboxToolCreateInvalid
+			}
+			if _, exists := declared[port.Name]; exists {
+				return apperr.ErrSandboxToolCreateInvalid
+			}
+			declared[port.Name] = struct{}{}
+		}
+		if _, exists := servicePorts[service.Name]; exists {
+			return apperr.ErrSandboxToolCreateInvalid
+		}
+		servicePorts[service.Name] = declared
+	}
+	for i := range spec.Routes {
+		route := &spec.Routes[i]
+		route.PathPrefix = strings.TrimSpace(route.PathPrefix)
+		route.Service = strings.TrimSpace(route.Service)
+		route.Port = strings.TrimSpace(route.Port)
+		if !validToolRoutePrefix(route.PathPrefix) {
+			return apperr.ErrSandboxToolCreateInvalid
+		}
+		ports, ok := servicePorts[route.Service]
+		if !ok {
+			return apperr.ErrSandboxToolCreateInvalid
+		}
+		if _, ok := ports[route.Port]; !ok {
+			return apperr.ErrSandboxToolCreateInvalid
+		}
+	}
+	return nil
+}
+
+// componentPortMap 汇总组件名称到端口名称的索引。
+func componentPortMap(components []workload.ComponentSpec) map[string]map[string]int32 {
+	out := map[string]map[string]int32{}
+	for _, component := range components {
+		ports := map[string]int32{}
+		for _, port := range component.Ports {
+			ports[port.Name] = port.ContainerPort
+		}
+		out[component.Name] = ports
+	}
+	return out
+}
+
+// validToolRoutePrefix 校验工具代理前缀必须是绝对路径且不能包含路径穿越。
+func validToolRoutePrefix(prefix string) bool {
+	if prefix == "" || !strings.HasPrefix(prefix, "/") || strings.Contains(prefix, "\\") {
+		return false
+	}
+	clean := path.Clean(prefix)
+	return clean == prefix && !strings.Contains(prefix, "/../")
+}
+
+// validateQuotaForCreate 校验本次创建是否超过单沙箱资源、租户并发、保活和快照上限。
+func validateQuotaForCreate(req CreateSandboxInputModel, quota TenantQuota, active int64, cfg config.SandboxConfig, adapter AdapterSpec, tools []Tool) error {
 	if active >= int64(quota.MaxConcurrentSandbox) {
 		return apperr.ErrSandboxQuotaExceeded
+	}
+	if err := validateSingleSandboxResourceLimit(adapter, tools, cfg); err != nil {
+		return err
 	}
 	if err := validateTenantResourceCapacity(quota, active+1, cfg); err != nil {
 		return err
@@ -167,6 +257,93 @@ func validateQuotaForCreate(req CreateSandboxInputModel, quota TenantQuota, acti
 			return apperr.ErrSandboxSnapshotQuotaExceeded
 		}
 	}
+	return nil
+}
+
+// validateSingleSandboxResourceLimit 按 runtime/tool 声明式规格汇总资源,在写入 K8s 前拒绝超过 Namespace 上限的组合。
+func validateSingleSandboxResourceLimit(adapter AdapterSpec, tools []Tool, cfg config.SandboxConfig) error {
+	usage, err := sandboxDeclaredResourceUsage(adapter, tools, cfg)
+	if err != nil {
+		return apperr.ErrSandboxQuotaInvalid.WithCause(err)
+	}
+	maxCPU, err := resource.ParseQuantity(cfg.MaxCPU)
+	if err != nil {
+		return apperr.ErrSandboxQuotaInvalid.WithCause(err)
+	}
+	maxMemory, err := resource.ParseQuantity(cfg.MaxMemory)
+	if err != nil {
+		return apperr.ErrSandboxQuotaInvalid.WithCause(err)
+	}
+	maxPods, err := resource.ParseQuantity(cfg.MaxPods)
+	if err != nil {
+		return apperr.ErrSandboxQuotaInvalid.WithCause(err)
+	}
+	if usage.RequestCPUMilli > maxCPU.MilliValue() || usage.LimitCPUMilli > maxCPU.MilliValue() {
+		return apperr.ErrSandboxResourceQuotaExceeded
+	}
+	if usage.RequestMemoryBytes > maxMemory.Value() || usage.LimitMemoryBytes > maxMemory.Value() {
+		return apperr.ErrSandboxResourceQuotaExceeded
+	}
+	if usage.PodCount > maxPods.Value() {
+		return apperr.ErrSandboxResourceQuotaExceeded
+	}
+	return nil
+}
+
+type declaredResourceUsage struct {
+	RequestCPUMilli    int64
+	LimitCPUMilli      int64
+	RequestMemoryBytes int64
+	LimitMemoryBytes   int64
+	PodCount           int64
+}
+
+// sandboxDeclaredResourceUsage 汇总默认拓扑、显式 Pod 组和 web-embed 工具的声明式资源。
+func sandboxDeclaredResourceUsage(adapter AdapterSpec, tools []Tool, cfg config.SandboxConfig) (declaredResourceUsage, error) {
+	usage := declaredResourceUsage{PodCount: int64(len(podTopologyForAdapter(adapter)))}
+	for _, pod := range podTopologyForAdapter(adapter) {
+		for _, container := range pod.Containers {
+			if err := addDeclaredContainerResources(&usage, container.Resources, cfg); err != nil {
+				return declaredResourceUsage{}, err
+			}
+		}
+	}
+	for _, tool := range tools {
+		if tool.Kind != SandboxToolKindWebEmbed {
+			continue
+		}
+		usage.PodCount += int64(len(tool.ResourceSpec.Components))
+		for _, component := range tool.ResourceSpec.Components {
+			if err := addDeclaredContainerResources(&usage, component.Resources, cfg); err != nil {
+				return declaredResourceUsage{}, err
+			}
+		}
+	}
+	return usage, nil
+}
+
+// addDeclaredContainerResources 按与编排器一致的默认值口径累加单容器 requests/limits。
+func addDeclaredContainerResources(usage *declaredResourceUsage, spec workload.ResourceSpec, cfg config.SandboxConfig) error {
+	reqCPU, err := resource.ParseQuantity(valueOrDefault(spec.Requests["cpu"], cfg.DefaultReqCPU))
+	if err != nil {
+		return err
+	}
+	reqMemory, err := resource.ParseQuantity(valueOrDefault(spec.Requests["memory"], cfg.DefaultReqMemory))
+	if err != nil {
+		return err
+	}
+	limitCPU, err := resource.ParseQuantity(valueOrDefault(spec.Limits["cpu"], cfg.DefaultCPU))
+	if err != nil {
+		return err
+	}
+	limitMemory, err := resource.ParseQuantity(valueOrDefault(spec.Limits["memory"], cfg.DefaultMemory))
+	if err != nil {
+		return err
+	}
+	usage.RequestCPUMilli += reqCPU.MilliValue()
+	usage.RequestMemoryBytes += reqMemory.Value()
+	usage.LimitCPUMilli += limitCPU.MilliValue()
+	usage.LimitMemoryBytes += limitMemory.Value()
 	return nil
 }
 
@@ -322,7 +499,7 @@ func normalizeAndValidateAdapterSpec(spec *AdapterSpec, cfg config.SandboxConfig
 // validateRuntimeContainerNames 保证运行时清单内所有容器名全局唯一,避免 Pod 引用表覆盖错误容器。
 func validateRuntimeContainerNames(spec *AdapterSpec) error {
 	seen := map[string]struct{}{}
-	containers := append([]ContainerSpec{spec.RuntimeContainer}, spec.InfraSidecars...)
+	containers := append([]workload.ComponentSpec{spec.RuntimeContainer}, spec.InfraSidecars...)
 	for _, container := range containers {
 		if !mountNamePattern.MatchString(container.Name) {
 			return apperr.ErrSandboxContainerSpecInvalid
@@ -391,8 +568,8 @@ func validatePodTopology(spec *AdapterSpec, cfg config.SandboxConfig) error {
 }
 
 // declaredContainerMap 建立运行时主容器和 infra sidecar 的唯一声明表,显式 Pod 组只能引用这里的容器。
-func declaredContainerMap(spec AdapterSpec) map[string]ContainerSpec {
-	out := map[string]ContainerSpec{spec.RuntimeContainer.Name: spec.RuntimeContainer}
+func declaredContainerMap(spec AdapterSpec) map[string]workload.ComponentSpec {
+	out := map[string]workload.ComponentSpec{spec.RuntimeContainer.Name: spec.RuntimeContainer}
 	for _, container := range spec.InfraSidecars {
 		out[container.Name] = container
 	}
@@ -400,9 +577,9 @@ func declaredContainerMap(spec AdapterSpec) map[string]ContainerSpec {
 }
 
 // podContainerIsReferenceOnly 保证 pods[].containers 只是引用,避免同一容器在 adapter_spec 中出现两套声明。
-func podContainerIsReferenceOnly(spec ContainerSpec) bool {
+func podContainerIsReferenceOnly(spec workload.ComponentSpec) bool {
 	return spec.Name != "" &&
-		strings.TrimSpace(spec.Image) == "" &&
+		strings.TrimSpace(spec.ImageURL) == "" &&
 		len(spec.Command) == 0 &&
 		len(spec.Args) == 0 &&
 		len(spec.Env) == 0 &&
@@ -412,7 +589,10 @@ func podContainerIsReferenceOnly(spec ContainerSpec) bool {
 		strings.TrimSpace(spec.ReadinessProbe.Type) == "" &&
 		strings.TrimSpace(spec.LivenessProbe.Type) == "" &&
 		strings.TrimSpace(spec.Workdir) == "" &&
-		len(spec.Labels) == 0
+		spec.ReadOnlyRootFilesystem == nil &&
+		len(spec.Labels) == 0 &&
+		spec.MountWorkspace == nil &&
+		len(spec.EphemeralMounts) == 0
 }
 
 // validateNetworkRules 校验同沙箱 Pod 互通必须显式引用已声明的目标端口。
@@ -426,19 +606,19 @@ func validateNetworkRules(spec *AdapterSpec) error {
 	for i := range spec.NetworkRules {
 		rule := &spec.NetworkRules[i]
 		rule.Name = strings.TrimSpace(rule.Name)
-		rule.FromPod = strings.TrimSpace(rule.FromPod)
-		rule.ToPod = strings.TrimSpace(rule.ToPod)
-		if !mountNamePattern.MatchString(rule.Name) || rule.FromPod == "" || rule.ToPod == "" || len(rule.Ports) == 0 {
+		rule.From = strings.TrimSpace(rule.From)
+		rule.To = strings.TrimSpace(rule.To)
+		if !mountNamePattern.MatchString(rule.Name) || rule.From == "" || rule.To == "" || len(rule.Ports) == 0 {
 			return apperr.ErrSandboxNetworkPolicyInvalid
 		}
 		if _, exists := seenRules[rule.Name]; exists {
 			return apperr.ErrSandboxNetworkPolicyInvalid
 		}
 		seenRules[rule.Name] = struct{}{}
-		if _, ok := podPorts[rule.FromPod]; !ok {
+		if _, ok := podPorts[rule.From]; !ok {
 			return apperr.ErrSandboxNetworkPolicyInvalid
 		}
-		targetPorts, ok := podPorts[rule.ToPod]
+		targetPorts, ok := podPorts[rule.To]
 		if !ok {
 			return apperr.ErrSandboxNetworkPolicyInvalid
 		}
@@ -472,32 +652,28 @@ func validateNetworkRules(spec *AdapterSpec) error {
 // validateToolNetworkRules 校验工具网络规则自身格式,目标 Pod 引用在沙箱创建时结合运行时拓扑校验。
 func validateToolNetworkRules(spec *ToolResourceSpec) error {
 	seenRules := map[string]struct{}{}
+	componentPorts := componentPortMap(spec.Components)
 	for i := range spec.NetworkRules {
 		rule := &spec.NetworkRules[i]
 		rule.Name = strings.TrimSpace(rule.Name)
-		rule.ToPod = strings.TrimSpace(rule.ToPod)
-		if !mountNamePattern.MatchString(rule.Name) || rule.ToPod == "" || len(rule.Ports) == 0 {
+		rule.From = strings.TrimSpace(rule.From)
+		rule.To = strings.TrimSpace(rule.To)
+		if !mountNamePattern.MatchString(rule.Name) || rule.From == "" || rule.To == "" || len(rule.Ports) == 0 {
 			return apperr.ErrSandboxToolCreateInvalid
 		}
 		if _, exists := seenRules[rule.Name]; exists {
 			return apperr.ErrSandboxToolCreateInvalid
 		}
 		seenRules[rule.Name] = struct{}{}
-		seenPorts := map[string]struct{}{}
+		if _, ok := componentPorts[rule.From]; !ok {
+			return apperr.ErrSandboxToolCreateInvalid
+		}
 		for j := range rule.Ports {
 			ref := &rule.Ports[j]
 			ref.Name = strings.TrimSpace(ref.Name)
 			if ref.Name == "" && ref.Port <= 0 {
 				return apperr.ErrSandboxToolCreateInvalid
 			}
-			key := ref.Name
-			if key == "" {
-				key = fmt.Sprintf("%d", ref.Port)
-			}
-			if _, ok := seenPorts[key]; ok {
-				return apperr.ErrSandboxToolCreateInvalid
-			}
-			seenPorts[key] = struct{}{}
 		}
 	}
 	return nil
@@ -505,15 +681,9 @@ func validateToolNetworkRules(spec *ToolResourceSpec) error {
 
 // toolHasContainerSpec 判断非 web 工具是否误带容器运行配置,终端和平台内置工具不创建 sidecar。
 func toolHasContainerSpec(spec ToolResourceSpec) bool {
-	return spec.MountWorkspace != nil ||
-		len(spec.Command) > 0 ||
-		len(spec.Args) > 0 ||
-		len(spec.Env) > 0 ||
-		len(spec.EphemeralMounts) > 0 ||
-		strings.TrimSpace(spec.Workdir) != "" ||
-		len(spec.Resources.Requests) > 0 ||
-		len(spec.Resources.Limits) > 0 ||
-		strings.TrimSpace(spec.ReadinessProbe.Type) != ""
+	return len(spec.Components) > 0 ||
+		len(spec.Services) > 0 ||
+		len(spec.Routes) > 0
 }
 
 // validateToolNetworkRulesForRuntime 校验工具网络规则只能访问运行时拓扑中已声明的目标端口。
@@ -521,7 +691,7 @@ func validateToolNetworkRulesForRuntime(tool Tool, adapter AdapterSpec) error {
 	podPorts := podPortMap(podTopologyForAdapter(adapter))
 	for i := range tool.ResourceSpec.NetworkRules {
 		rule := &tool.ResourceSpec.NetworkRules[i]
-		targetPorts, ok := podPorts[rule.ToPod]
+		targetPorts, ok := podPorts[rule.To]
 		if !ok {
 			return apperr.ErrSandboxToolIncompatible
 		}
@@ -543,7 +713,7 @@ func validateToolNetworkRulesForRuntime(tool Tool, adapter AdapterSpec) error {
 }
 
 // podPortMap 汇总 Pod 名称到该 Pod 已声明端口的索引。
-func podPortMap(pods []PodSpec) map[string]map[string]int32 {
+func podPortMap(pods []workload.PodSpec) map[string]map[string]int32 {
 	podPorts := map[string]map[string]int32{}
 	for _, pod := range pods {
 		ports := map[string]int32{}
@@ -568,13 +738,13 @@ func networkPortDeclared(ports map[string]int32, port int32) bool {
 }
 
 // podTopologyForAdapter 返回 adapter 归一化后的运行时 Pod 组,供校验与服务解析复用。
-func podTopologyForAdapter(spec AdapterSpec) []PodSpec {
+func podTopologyForAdapter(spec AdapterSpec) []workload.PodSpec {
 	if len(spec.Pods) > 0 {
 		return spec.Pods
 	}
-	containers := []ContainerSpec{spec.RuntimeContainer}
+	containers := []workload.ComponentSpec{spec.RuntimeContainer}
 	containers = append(containers, spec.InfraSidecars...)
-	return []PodSpec{{Name: "sandbox", Containers: containers}}
+	return []workload.PodSpec{{Name: "sandbox", Containers: containers}}
 }
 
 // validatePrivateArchiveExecutionTarget 保证隐藏判题域只会进入非学生入口的执行容器。
@@ -672,8 +842,8 @@ func volumePathOverlaps(left, right string) bool {
 }
 
 // validateInfraSidecarImage 校验运行时协同容器镜像命中受控证明清单。
-func validateInfraSidecarImage(spec ContainerSpec, cfg config.SandboxConfig) error {
-	imageURL := strings.TrimSpace(spec.Image)
+func validateInfraSidecarImage(spec workload.ComponentSpec, cfg config.SandboxConfig) error {
+	imageURL := strings.TrimSpace(spec.ImageURL)
 	digest := digestFromImageURL(imageURL)
 	if imageURL == "" || digest == "" || !imageAttested(cfg, imageURL, digest) {
 		return apperr.ErrSandboxSidecarImageInvalid
@@ -772,7 +942,7 @@ func safeNonShellCommand(command []string) bool {
 }
 
 // validateContainerSpec 校验单个容器声明不会绕过安全上下文或硬编码无效探针。
-func validateContainerSpec(spec *ContainerSpec, cfg config.SandboxConfig) error {
+func validateContainerSpec(spec *workload.ComponentSpec, cfg config.SandboxConfig) error {
 	spec.Name = strings.TrimSpace(spec.Name)
 	if !mountNamePattern.MatchString(spec.Name) || len(spec.Ports) == 0 {
 		return apperr.ErrSandboxContainerSpecInvalid
@@ -789,7 +959,7 @@ func validateContainerSpec(spec *ContainerSpec, cfg config.SandboxConfig) error 
 	normalizeProbe(&spec.ReadinessProbe, cfg)
 	normalizeProbe(&spec.LivenessProbe, cfg)
 	portNames := declaredPortNames(spec.Ports)
-	for _, probe := range []*ProbeSpec{&spec.ReadinessProbe, &spec.LivenessProbe} {
+	for _, probe := range []*workload.ProbeSpec{&spec.ReadinessProbe, &spec.LivenessProbe} {
 		if err := validateProbeSpec(probe, portNames); err != nil {
 			return err
 		}
@@ -798,7 +968,7 @@ func validateContainerSpec(spec *ContainerSpec, cfg config.SandboxConfig) error 
 }
 
 // validatePortSpecs 校验容器端口声明可被探针、NetworkPolicy 和工具规则稳定引用。
-func validatePortSpecs(ports []PortSpec) error {
+func validatePortSpecs(ports []workload.PortSpec) error {
 	seen := map[string]struct{}{}
 	for i := range ports {
 		port := &ports[i]
@@ -820,7 +990,7 @@ func validatePortSpecs(ports []PortSpec) error {
 }
 
 // declaredPortNames 建立端口名索引,供探针和网络规则引用校验。
-func declaredPortNames(ports []PortSpec) map[string]struct{} {
+func declaredPortNames(ports []workload.PortSpec) map[string]struct{} {
 	out := map[string]struct{}{}
 	for _, port := range ports {
 		out[port.Name] = struct{}{}
@@ -829,7 +999,7 @@ func declaredPortNames(ports []PortSpec) map[string]struct{} {
 }
 
 // validateProbeSpec 校验探针类型与目标,exec 探针也必须走 argv 且不能以 shell 字符串入口执行。
-func validateProbeSpec(probe *ProbeSpec, portNames map[string]struct{}) error {
+func validateProbeSpec(probe *workload.ProbeSpec, portNames map[string]struct{}) error {
 	if probe == nil || strings.TrimSpace(probe.Type) == "" {
 		return nil
 	}
@@ -856,7 +1026,7 @@ func validateProbeSpec(probe *ProbeSpec, portNames map[string]struct{}) error {
 }
 
 // validateResourceSpec 校验显式资源配置必须同时声明 requests 与 limits,并能被 K8s quantity 解析。
-func validateResourceSpec(spec ResourceSpec) error {
+func validateResourceSpec(spec workload.ResourceSpec) error {
 	if len(spec.Requests) == 0 && len(spec.Limits) == 0 {
 		return nil
 	}
@@ -875,7 +1045,7 @@ func validateResourceSpec(spec ResourceSpec) error {
 }
 
 // normalizeProbe 从配置补齐探针默认值,避免编排代码硬编码周期和失败阈值。
-func normalizeProbe(probe *ProbeSpec, cfg config.SandboxConfig) {
+func normalizeProbe(probe *workload.ProbeSpec, cfg config.SandboxConfig) {
 	if probe.PeriodSeconds <= 0 {
 		probe.PeriodSeconds = cfg.ProbeDefaultPeriodSeconds
 	}
@@ -885,7 +1055,7 @@ func normalizeProbe(probe *ProbeSpec, cfg config.SandboxConfig) {
 }
 
 // validateLiteralEnv 拒绝密钥式字段进入声明式配置,敏感值必须走平台 Secret。
-func validateLiteralEnv(env []EnvVarSpec) error {
+func validateLiteralEnv(env []workload.EnvVarSpec) error {
 	for _, item := range env {
 		name := strings.TrimSpace(item.Name)
 		if !envNamePattern.MatchString(name) {
@@ -900,7 +1070,7 @@ func validateLiteralEnv(env []EnvVarSpec) error {
 }
 
 // validateToolEphemeralMounts 校验工具临时写目录,防止只读 rootfs 例外覆盖工作区或敏感系统目录。
-func validateToolEphemeralMounts(mounts []ToolEphemeralMountSpec) error {
+func validateToolEphemeralMounts(mounts []workload.EphemeralMountSpec) error {
 	seen := map[string]struct{}{}
 	paths := []string{}
 	for _, mount := range mounts {
@@ -963,7 +1133,7 @@ func imageUnderRegistry(imageURL, registry string) bool {
 	return registry != "" && strings.HasPrefix(imageURL, registry+"/")
 }
 
-// shouldMountWorkspace 判定工具容器是否挂载工作区:运行时默认挂载,工具必须显式声明。
-func shouldMountWorkspace(spec ToolResourceSpec) bool {
+// shouldMountWorkspace 判定工具组件是否挂载工作区,工具必须显式声明。
+func shouldMountWorkspace(spec workload.ComponentSpec) bool {
 	return spec.MountWorkspace != nil && *spec.MountWorkspace
 }

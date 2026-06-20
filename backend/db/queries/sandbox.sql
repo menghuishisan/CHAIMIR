@@ -84,28 +84,26 @@ WHERE id = $1 AND runtime_id = $2
 RETURNING id, runtime_id, image_url, version, status, prepulled, prepull_status, prepull_detail, prepulled_at, genesis_baked, is_default, created_at;
 
 -- name: GetToolByCode :one
-SELECT id, code, name, kind, image_url, port, eco_tags, resource_spec, status, created_at, updated_at
+SELECT id, code, name, kind, eco_tags, resource_spec, status, created_at, updated_at
 FROM tool
 WHERE code = $1;
 
 -- name: ListTools :many
-SELECT id, code, name, kind, image_url, port, eco_tags, resource_spec, status, created_at, updated_at
+SELECT id, code, name, kind, eco_tags, resource_spec, status, created_at, updated_at
 FROM tool
 ORDER BY created_at DESC, id DESC;
 
 -- name: UpsertTool :one
-INSERT INTO tool (id, code, name, kind, image_url, port, eco_tags, resource_spec, status, created_at, updated_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, now(), now())
+INSERT INTO tool (id, code, name, kind, eco_tags, resource_spec, status, created_at, updated_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, now(), now())
 ON CONFLICT (code) DO UPDATE
 SET name = EXCLUDED.name,
     kind = EXCLUDED.kind,
-    image_url = EXCLUDED.image_url,
-    port = EXCLUDED.port,
     eco_tags = EXCLUDED.eco_tags,
     resource_spec = EXCLUDED.resource_spec,
     status = EXCLUDED.status,
     updated_at = now()
-RETURNING id, code, name, kind, image_url, port, eco_tags, resource_spec, status, created_at, updated_at;
+RETURNING id, code, name, kind, eco_tags, resource_spec, status, created_at, updated_at;
 
 -- name: GetTenantQuota :one
 SELECT tenant_id, max_concurrent_sandbox, max_cpu, max_memory_mb, idle_timeout_min, max_lifetime_min, max_keepalive_min, max_snapshot_retention_min, updated_at
@@ -225,7 +223,7 @@ RETURNING id, tenant_id, sandbox_id, tool_id, access_endpoint, status;
 
 -- name: ListSandboxTools :many
 SELECT st.id, st.tenant_id, st.sandbox_id, st.tool_id, st.access_endpoint, st.status,
-       t.code, t.kind
+       t.code, t.kind, t.resource_spec
 FROM sandbox_tool st
 JOIN tool t ON t.id = st.tool_id
 WHERE st.tenant_id = $1 AND st.sandbox_id = $2
