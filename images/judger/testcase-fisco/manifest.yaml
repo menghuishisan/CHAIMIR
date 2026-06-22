@@ -19,7 +19,7 @@ source:
   type: platform-built
 upstream:
   image: fiscoorg/fiscobcos:v3.12.1
-  reuse_policy: self-developed-judger
+  reuse_policy: official-static-binary-on-supported-base
 data_driven: true
 capabilities:
   - judger

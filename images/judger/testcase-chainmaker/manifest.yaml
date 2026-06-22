@@ -18,8 +18,11 @@ description: 长安链合约测试用例判题镜像。
 source:
   type: platform-built
 upstream:
-  image: chainmakerofficial/chainmaker:v2.3.5
-  reuse_policy: self-developed-judger
+  image: chainmaker-go-source
+  version: v2.3.8
+  source_archive: images/vendor/chainmaker/chainmaker-go-v2.3.8.tar.gz
+  source_sha256_build_arg: CHAINMAKER_SOURCE_SHA256
+  reuse_policy: source-rebuild-judger
 data_driven: true
 capabilities:
   - judger
@@ -58,8 +61,8 @@ resources:
   ephemeral_storage_limit: 4Gi
   timeout_seconds: 180
 build:
-  context: images/judger/testcase-chainmaker
-  dockerfile: Dockerfile
+  context: ../../..
+  dockerfile: images/judger/testcase-chainmaker/Dockerfile
 selftest:
   commands:
     - name: chainmaker-version

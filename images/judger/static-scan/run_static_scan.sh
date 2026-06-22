@@ -11,9 +11,9 @@ if command -v slither >/dev/null 2>&1; then
   status=$?
   set -e
   if [ "${status}" -gt 1 ]; then
-    exec python /usr/local/bin/normalize-result --mode exit-code --exit-code "${status}" --source slither --stdout /tmp/chaimir-static-scan.log
+    exec /usr/local/bin/normalize-result --mode exit-code --exit-code "${status}" --source slither --stdout /tmp/chaimir-static-scan.log
   fi
-  exec python /usr/local/bin/normalize-result --mode slither --report /judge/result.json
+  exec /usr/local/bin/normalize-result --mode slither --report /judge/result.json
 fi
 
 echo "静态扫描工具不可用" >&2

@@ -1,23 +1,30 @@
 # 本文件构建 Chaimir 受控定时任务镜像,包含 cron 二进制和 PostgreSQL 官方备份客户端。
-FROM golang:1.25-bookworm AS builder
+ARG GO_BUILDER_IMAGE=chaimir/base/go-builder:dev
+ARG PG_CLIENT_IMAGE=postgres:16-bookworm
+
+FROM ${GO_BUILDER_IMAGE} AS builder
 
 WORKDIR /src
 
 # 先下载依赖,再复制源码,保证依赖层可缓存。
-COPY backend/go.mod backend/go.sum ./
-RUN --mount=type=cache,target=/go/pkg/mod go mod download
-COPY backend/ ./
+COPY --chown=1000:1000 backend/go.mod backend/go.sum ./
+RUN --mount=type=cache,target=/go/pkg/mod,uid=1000,gid=1000 go mod download
+COPY --chown=1000:1000 backend/ ./
 
 # cron 命令用于部署层真实备份任务,不承载 HTTP 服务。
-RUN --mount=type=cache,target=/go/pkg/mod --mount=type=cache,target=/root/.cache/go-build \
+RUN --mount=type=cache,target=/go/pkg/mod,uid=1000,gid=1000 --mount=type=cache,target=/tmp/go-cache,uid=1000,gid=1000 \
     CGO_ENABLED=0 GOOS=linux GOMAXPROCS=2 go build -p=2 -trimpath -ldflags="-s -w" -o /out/cron ./cmd/cron
 
-FROM postgres:16-bookworm
+FROM ${PG_CLIENT_IMAGE}
 
 LABEL org.opencontainers.image.title="service/cron"
 LABEL org.opencontainers.image.description="Chaimir controlled cron task image"
 
-RUN groupadd --system --gid 65532 nonroot \
+RUN apt-get update \
+    && apt-get upgrade -y --no-install-recommends \
+    && rm -f /usr/local/bin/gosu \
+    && rm -rf /var/lib/apt/lists/* \
+    && groupadd --system --gid 65532 nonroot \
     && useradd --system --uid 65532 --gid 65532 --home-dir /nonexistent --shell /usr/sbin/nologin nonroot
 
 WORKDIR /app

@@ -1056,10 +1056,7 @@ func (s *Service) waitToolReady(ctx context.Context, sb Sandbox, tool Tool) erro
 		}
 		select {
 		case <-ctx.Done():
-			if lastErr != nil {
-				return fmt.Errorf("%w: %v", ctx.Err(), lastErr)
-			}
-			return ctx.Err()
+			return fmt.Errorf("%w: %v", ctx.Err(), lastErr)
 		case <-time.After(interval):
 		}
 	}

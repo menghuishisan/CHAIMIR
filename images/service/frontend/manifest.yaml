@@ -64,6 +64,8 @@ selftest:
         - nginx
         - -v
 supply_chain:
+  deployable: false
+  block_reason: frontend/dist 静态产物尚未由真实前端应用构建生成,不得把源码目录作为发布镜像内容。
   sbom: true
   trivy_required: true
   cosign_required: true

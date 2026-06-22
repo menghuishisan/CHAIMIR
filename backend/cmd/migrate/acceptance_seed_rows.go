@@ -61,16 +61,11 @@ func acceptanceImageDigest(imageURL string) string {
 
 // seedRuntimeRows 写入沙箱运行时、镜像、工具和判题器基础能力。
 func seedRuntimeRows(ctx context.Context, tx pgx.Tx) error {
-	postgresReadOnlyRoot := false
 	runtimeImageURL, err := acceptanceImageURL("runtime/evm-foundry")
 	if err != nil {
 		return err
 	}
-	postgresGraphImageURL, err := acceptanceImageURL("infra/postgres-graph")
-	if err != nil {
-		return err
-	}
-	runtimeSpec, _ := jsonb(acceptanceRuntimeAdapterSpec(runtimeImageURL, postgresGraphImageURL, postgresReadOnlyRoot))
+	runtimeSpec, _ := jsonb(acceptanceRuntimeAdapterSpec(runtimeImageURL))
 	if err := execJSON(ctx, tx, `
 INSERT INTO runtime (id, code, name, eco, adapter_level, adapter_spec, capability_impl, selftest_status, selftest_detail, status)
 VALUES ($1,'evm-foundry','EVM Foundry 教学运行时','evm',2,$2,'sandbox-exec',2,'{"checked_by":"acceptance-seed"}'::jsonb,1)
@@ -92,7 +87,7 @@ ON CONFLICT (runtime_id, version) DO UPDATE SET image_url=EXCLUDED.image_url, st
 		"runtime_code":          "evm-foundry",
 		"runtime_image_version": "2026.06",
 		"genesis_ref":           "genesis/evm-foundry/acceptance.json",
-		"tool_codes":            []string{"code-server", "blockscout"},
+		"tool_codes":            []string{"code-server"},
 		"command":               []string{"/usr/local/bin/chaimir-judge", "solidity-unit"},
 		"timeout_sec":           60,
 		"max_retries":           1,
@@ -116,7 +111,7 @@ ON CONFLICT (code) DO UPDATE SET name=EXCLUDED.name, type=EXCLUDED.type, executo
 }
 
 // acceptanceRuntimeAdapterSpec 构造验收运行时声明,包含独立学生终端 sidecar。
-func acceptanceRuntimeAdapterSpec(runtimeImageURL, postgresGraphImageURL string, postgresReadOnlyRoot bool) map[string]any {
+func acceptanceRuntimeAdapterSpec(runtimeImageURL string) map[string]any {
 	return map[string]any{
 		"workspace_dir": "/workspace",
 		"volume_domains": []map[string]any{
@@ -137,25 +132,6 @@ func acceptanceRuntimeAdapterSpec(runtimeImageURL, postgresGraphImageURL string,
 			"labels":          map[string]string{"chaimir.io/student-access": "false"},
 		},
 		"infra_sidecars": []map[string]any{{
-			"name":      "blockscout-postgres",
-			"image_url": postgresGraphImageURL,
-			"env": []map[string]string{
-				{"name": "POSTGRES_DB", "value": "blockscout"},
-				{"name": "POSTGRES_USER", "value": "postgres"},
-				{"name": "POSTGRES_PASSWORD", "value": "postgres"},
-				{"name": "PGDATA", "value": "/runtime-state/blockscout-postgres"},
-			},
-			"ports": []map[string]any{
-				{"name": "postgres", "container_port": 5432, "service_port": 5432, "protocol": "TCP"},
-			},
-			"resources": map[string]any{
-				"requests": map[string]string{"cpu": "250m", "memory": "512Mi"},
-				"limits":   map[string]string{"cpu": "1", "memory": "2Gi"},
-			},
-			"readiness_probe":           map[string]any{"type": "tcp", "port": "postgres", "period_seconds": 2, "failure_threshold": 30},
-			"read_only_root_filesystem": postgresReadOnlyRoot,
-			"labels":                    map[string]string{"chaimir.io/student-access": "false"},
-		}, {
 			"name":      "student-shell",
 			"image_url": runtimeImageURL,
 			"command":   []string{"sleep", "2147483647"},
@@ -166,7 +142,7 @@ func acceptanceRuntimeAdapterSpec(runtimeImageURL, postgresGraphImageURL string,
 			"read_only_root_filesystem": true,
 			"labels":                    map[string]string{"chaimir.io/student-access": "true"},
 		}},
-		"default_tool_codes": []string{"code-server", "blockscout", "terminal"},
+		"default_tool_codes": []string{"code-server", "terminal"},
 		"workspace_ops": map[string]any{
 			"read_file":  []string{"/usr/local/bin/chaimir-workspace", "read", "{{workspace}}", "{{path}}"},
 			"write_file": []string{"/usr/local/bin/chaimir-workspace", "write", "{{workspace}}", "{{path}}"},
@@ -283,7 +259,7 @@ func seedJudgeRows(ctx context.Context, tx pgx.Tx) error {
 		"runtime_code":                "evm-foundry",
 		"runtime_image_version":       "2026.06",
 		"genesis_ref":                 "genesis/evm-foundry/acceptance.json",
-		"tool_codes":                  []string{"code-server", "blockscout"},
+		"tool_codes":                  []string{"code-server"},
 		"command":                     []string{"/usr/local/bin/chaimir-judge", "solidity-unit"},
 		"timeout_sec":                 60,
 		"max_retries":                 1,
@@ -525,7 +501,7 @@ func seedExperimentRows(ctx context.Context, tx pgx.Tx) error {
 			"id":                    "lab-foundry",
 			"runtime_code":          "evm-foundry",
 			"runtime_image_version": "2026.06",
-			"tools":                 []string{"code-server", "blockscout"},
+			"tools":                 []string{"code-server"},
 			"init_code_ref":         "content/lab-reentrancy-foundry.zip",
 			"init_script_ref":       "scripts/init-reentrancy.sh",
 			"snapshot_enabled":      true,
@@ -575,11 +551,6 @@ ON CONFLICT (tenant_id, group_id, student_id) DO UPDATE SET role=EXCLUDED.role`,
 			"code":     "code-server",
 			"kind":     3,
 			"endpoint": "/api/v1/sandbox/sandboxes/910000000000001021/tools/code-server/",
-			"status":   1,
-		}, {
-			"code":     "blockscout",
-			"kind":     3,
-			"endpoint": "/api/v1/sandbox/sandboxes/910000000000001021/tools/blockscout/",
 			"status":   1,
 		}},
 	}})

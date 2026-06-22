@@ -7,6 +7,9 @@ LABEL org.opencontainers.image.description="Chaimir RPC gateway proxy image"
 USER root
 
 RUN mkdir -p /workspace /etc/chaimir \
+    && apt-get update \
+    && apt-get -y upgrade \
+    && rm -rf /var/lib/apt/lists/* \
     && chown -R 1000:1000 /workspace /etc/chaimir
 COPY envoy.yaml /etc/chaimir/envoy.yaml
 

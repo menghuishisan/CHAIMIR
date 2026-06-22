@@ -212,9 +212,8 @@
     tags: [sandbox]
     summary: 链上部署
     operationId: sandboxChainDeploy
-    x-chaimir-audience: internal
-    x-chaimir-internal: true
-    security: [{ serviceAuth: [] }]
+    x-chaimir-audience: user-internal
+    security: [{ bearerAuth: [] }, { serviceAuth: [] }]
     parameters: [{ $ref: "#/components/parameters/IDPath" }]
     requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
@@ -223,9 +222,8 @@
     tags: [sandbox]
     summary: 链上交易
     operationId: sandboxChainSendTx
-    x-chaimir-audience: internal
-    x-chaimir-internal: true
-    security: [{ serviceAuth: [] }]
+    x-chaimir-audience: user-internal
+    security: [{ bearerAuth: [] }, { serviceAuth: [] }]
     parameters: [{ $ref: "#/components/parameters/IDPath" }]
     requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
@@ -234,9 +232,8 @@
     tags: [sandbox]
     summary: 链上查询
     operationId: sandboxChainQuery
-    x-chaimir-audience: internal
-    x-chaimir-internal: true
-    security: [{ serviceAuth: [] }]
+    x-chaimir-audience: user-internal
+    security: [{ bearerAuth: [] }, { serviceAuth: [] }]
     parameters: [{ $ref: "#/components/parameters/IDPath" }, { name: target, in: query, schema: { type: string } }]
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
 /api/v1/sandbox/sandboxes/{id}/chain/reset:

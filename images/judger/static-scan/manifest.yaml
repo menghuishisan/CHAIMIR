@@ -66,8 +66,9 @@ selftest:
   commands:
     - name: slither-version
       command:
-        - slither
-        - --version
+        - sh
+        - -lc
+        - slither --version
 supply_chain:
   sbom: true
   trivy_required: true

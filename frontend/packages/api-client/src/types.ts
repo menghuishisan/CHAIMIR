@@ -525,6 +525,12 @@ export interface SandboxFileSaveResponse {
   code_hash: string
 }
 
+export interface SandboxChainRequest {
+  payload: Record<string, any>
+}
+
+export type SandboxChainResponse = Record<string, any>
+
 // ===== M3 Judge 模块 =====
 
 export interface JudgeTask {

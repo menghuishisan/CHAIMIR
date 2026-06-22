@@ -18,7 +18,7 @@ description: 沙箱工作区初始化镜像。
 source:
   type: platform-built
 upstream:
-  image: alpine:3.20
+  image: alpine:3.22
   reuse_policy: self-developed-init
 data_driven: false
 capabilities:
@@ -70,4 +70,3 @@ supply_chain:
   trivy_required: true
   cosign_required: true
   pull_by_digest_in_production: true
-

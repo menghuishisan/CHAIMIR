@@ -84,6 +84,63 @@ func (s *Service) ChainReset(ctx context.Context, req contracts.SandboxChainRese
 	return nil
 }
 
+// ChainDeployForOwner 校验用户归属后调用统一链部署能力,供用户工作台使用。
+func (s *Service) ChainDeployForOwner(ctx context.Context, tenantID, accountID, sandboxID int64, payload map[string]any) (map[string]any, error) {
+	if tenantID <= 0 || accountID <= 0 || sandboxID <= 0 || len(payload) == 0 {
+		return nil, apperr.ErrSandboxDeployRequestInvalid
+	}
+	sb, runtime, cap, err := s.chainCapabilityForOwner(ctx, tenantID, accountID, sandboxID)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.markSandboxExecutionActive(ctx, sb); err != nil {
+		return nil, err
+	}
+	out, err := cap.Deploy(ctx, sb, runtime, payload)
+	if err != nil {
+		return nil, apperr.ErrSandboxChainFailed.WithCause(err)
+	}
+	return out, nil
+}
+
+// ChainSendTxForOwner 校验用户归属后调用统一链交易能力,避免工具容器直连链节点。
+func (s *Service) ChainSendTxForOwner(ctx context.Context, tenantID, accountID, sandboxID int64, payload map[string]any) (map[string]any, error) {
+	if tenantID <= 0 || accountID <= 0 || sandboxID <= 0 || len(payload) == 0 {
+		return nil, apperr.ErrSandboxTxRequestInvalid
+	}
+	sb, runtime, cap, err := s.chainCapabilityForOwner(ctx, tenantID, accountID, sandboxID)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.markSandboxExecutionActive(ctx, sb); err != nil {
+		return nil, err
+	}
+	out, err := cap.SendTx(ctx, sb, runtime, payload)
+	if err != nil {
+		return nil, apperr.ErrSandboxChainFailed.WithCause(err)
+	}
+	return out, nil
+}
+
+// ChainQueryForOwner 校验用户归属后调用统一链查询能力,返回前由能力实现负责结果脱敏。
+func (s *Service) ChainQueryForOwner(ctx context.Context, tenantID, accountID, sandboxID int64, target string) (map[string]any, error) {
+	if tenantID <= 0 || accountID <= 0 || sandboxID <= 0 || target == "" {
+		return nil, apperr.ErrSandboxContractRequestInvalid
+	}
+	sb, runtime, cap, err := s.chainCapabilityForOwner(ctx, tenantID, accountID, sandboxID)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.markSandboxExecutionActive(ctx, sb); err != nil {
+		return nil, err
+	}
+	out, err := cap.Query(ctx, sb, runtime, target)
+	if err != nil {
+		return nil, apperr.ErrSandboxChainFailed.WithCause(err)
+	}
+	return out, nil
+}
+
 // chainCapability 查询沙箱运行时并解析 L2 能力实现器。
 func (s *Service) chainCapability(ctx context.Context, tenantID, sandboxID int64, sourceRef string) (Sandbox, Runtime, ChainCapability, error) {
 	sb, runtime, err := s.sandboxRuntime(ctx, tenantID, sandboxID)
@@ -92,6 +149,22 @@ func (s *Service) chainCapability(ctx context.Context, tenantID, sandboxID int64
 	}
 	if sb.SourceRef != strings.TrimSpace(sourceRef) {
 		return Sandbox{}, Runtime{}, nil, apperr.ErrSandboxOwnershipInvalid
+	}
+	if !sandboxExecAllowed(sb) {
+		return Sandbox{}, Runtime{}, nil, apperr.ErrSandboxStateInvalid
+	}
+	cap, err := s.resolveCapability(runtime)
+	if err != nil {
+		return Sandbox{}, Runtime{}, nil, err
+	}
+	return sb, runtime, cap, nil
+}
+
+// chainCapabilityForOwner 查询用户自己的沙箱运行时并解析 L2 能力实现器。
+func (s *Service) chainCapabilityForOwner(ctx context.Context, tenantID, accountID, sandboxID int64) (Sandbox, Runtime, ChainCapability, error) {
+	sb, runtime, err := s.sandboxRuntimeForOwner(ctx, tenantID, accountID, sandboxID)
+	if err != nil {
+		return Sandbox{}, Runtime{}, nil, err
 	}
 	if !sandboxExecAllowed(sb) {
 		return Sandbox{}, Runtime{}, nil, apperr.ErrSandboxStateInvalid

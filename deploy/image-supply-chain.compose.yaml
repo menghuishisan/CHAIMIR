@@ -5,10 +5,16 @@ services:
     entrypoint: ["trivy"]
     env_file:
       - config/chaimir.env
+    extra_hosts:
+      - "${SUPPLY_CHAIN_REGISTRY_HOST_ALIAS:-harbor.chaimir}:host-gateway"
     volumes:
       - type: bind
         source: ${SUPPLY_CHAIN_DOCKER_SOCKET:-/var/run/docker.sock}
         target: /var/run/docker.sock
+      - type: bind
+        source: ${SUPPLY_CHAIN_DOCKER_CONFIG_HOST_DIR:-config/docker-auth}
+        target: /root/.docker
+        read_only: true
       - type: volume
         source: trivy-cache
         target: /root/.cache/trivy
@@ -19,8 +25,11 @@ services:
     working_dir: /workspace
     env_file:
       - config/chaimir.env
+    extra_hosts:
+      - "${SUPPLY_CHAIN_REGISTRY_HOST_ALIAS:-harbor.chaimir}:host-gateway"
     environment:
       COSIGN_PASSWORD: ${COSIGN_PRIVATE_KEY_PASSWORD:-}
+      DOCKER_CONFIG: /root/.docker
     volumes:
       - type: bind
         source: ${SUPPLY_CHAIN_REPO_HOST_PATH:?SUPPLY_CHAIN_REPO_HOST_PATH is required}
@@ -28,6 +37,9 @@ services:
       - type: bind
         source: ${SUPPLY_CHAIN_COSIGN_KEY_HOST_DIR:?SUPPLY_CHAIN_COSIGN_KEY_HOST_DIR is required}
         target: /cosign
+      - type: bind
+        source: ${SUPPLY_CHAIN_DOCKER_CONFIG_HOST_DIR:-config/docker-auth}
+        target: /root/.docker
         read_only: true
 
   helm:
@@ -36,6 +48,8 @@ services:
     working_dir: /workspace
     env_file:
       - config/chaimir.env
+    extra_hosts:
+      - "${SUPPLY_CHAIN_REGISTRY_HOST_ALIAS:-harbor.chaimir}:host-gateway"
     environment:
       KUBECONFIG: /kubeconfig
       HARBOR_ADMIN_PASSWORD: ${HARBOR_ADMIN_PASSWORD:-}

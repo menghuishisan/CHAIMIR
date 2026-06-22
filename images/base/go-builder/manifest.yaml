@@ -18,8 +18,19 @@ description: Go 多阶段构建基座镜像。
 source:
   type: build-base
 upstream:
-  image: golang:1.25-bookworm
-  reuse_policy: thin-wrapper
+  components:
+    - image: library/debian
+      registry: docker.io
+      version: 12-slim
+      digest: sha256:96e378d7e6531ac9a15ad505478fcc2e69f371b10f5cdf87857c4b8188404716
+    - image: go
+      registry: https://go.dev/dl
+      version: go1.26.4
+      digest: sha256:1153d3d50e0ac764b447adfe05c2bcf08e889d42a02e0fe0259bd47f6733ad7f
+  release_url: https://go.dev/dl/go1.26.4.linux-amd64.tar.gz
+  sha256: 1153d3d50e0ac764b447adfe05c2bcf08e889d42a02e0fe0259bd47f6733ad7f
+  version: go1.26.4
+  reuse_policy: official-release-toolchain
 data_driven: false
 capabilities:
   - build-base

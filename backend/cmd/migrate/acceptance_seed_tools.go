@@ -2,6 +2,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -9,6 +10,7 @@ import (
 	"strings"
 
 	"chaimir/internal/contracts"
+	"chaimir/internal/modules/sandbox"
 	"chaimir/internal/platform/workload"
 
 	"sigs.k8s.io/yaml"
@@ -57,6 +59,7 @@ type toolManifestTool struct {
 	EcoTags               []string                      `json:"eco_tags"`
 	MountWorkspace        bool                          `json:"mount_workspace"`
 	RuntimeConfigRequired bool                          `json:"runtime_config_required"`
+	ResourceSpec          map[string]any                `json:"resource_spec"`
 	Command               []string                      `json:"command"`
 	Args                  []string                      `json:"args"`
 	Env                   []workload.EnvVarSpec         `json:"env"`
@@ -187,22 +190,9 @@ func toolDefinitionFromManifest(index int, manifest toolManifest) (acceptanceToo
 	if err != nil {
 		return acceptanceToolDefinition{}, err
 	}
-	component, err := toolComponentFromManifest(manifest, imageURL, kind)
+	spec, err := toolResourceSpecFromManifest(manifest, imageURL, kind)
 	if err != nil {
 		return acceptanceToolDefinition{}, err
-	}
-	spec := map[string]any{"components": []workload.ComponentSpec{component}}
-	if kind == contracts.SandboxToolKindWebEmbed {
-		serviceName := "tool-" + manifest.Name + "-web"
-		spec["services"] = []workload.ServiceSpec{{
-			Name:      serviceName,
-			Component: component.Name,
-			Ports:     []workload.ServicePortSpec{{Name: "http", Port: component.Ports[0].ServicePort, TargetPort: "http", Protocol: component.Ports[0].Protocol}},
-		}}
-		spec["routes"] = []workload.RouteSpec{{PathPrefix: "/", Service: serviceName, Port: "http"}}
-	}
-	if kind == contracts.SandboxToolKindCommand {
-		spec["command_policy"] = manifest.Tool.CommandPolicy
 	}
 	status := int16(1)
 	if manifest.Tool.RuntimeConfigRequired {
@@ -217,6 +207,119 @@ func toolDefinitionFromManifest(index int, manifest toolManifest) (acceptanceToo
 		ResourceSpec: spec,
 		Status:       status,
 	}, nil
+}
+
+// toolResourceSpecFromManifest 读取工具显式 WorkloadSpec;未声明时仅为单组件工具生成默认规格。
+func toolResourceSpecFromManifest(manifest toolManifest, imageURL string, kind int16) (map[string]any, error) {
+	if len(manifest.Tool.ResourceSpec) > 0 {
+		spec, err := normalizeExplicitToolResourceSpec(manifest.Tool.ResourceSpec, imageURL, kind)
+		if err != nil {
+			return nil, err
+		}
+		return spec, nil
+	}
+	component, err := toolComponentFromManifest(manifest, imageURL, kind)
+	if err != nil {
+		return nil, err
+	}
+	spec := map[string]any{"components": []workload.ComponentSpec{component}}
+	if kind == contracts.SandboxToolKindWebEmbed {
+		serviceName := "tool-" + manifest.Name + "-web"
+		spec["services"] = []workload.ServiceSpec{{
+			Name:      serviceName,
+			Component: component.Name,
+			Ports:     []workload.ServicePortSpec{{Name: "http", Port: component.Ports[0].ServicePort, TargetPort: "http", Protocol: component.Ports[0].Protocol}},
+		}}
+		spec["routes"] = []workload.RouteSpec{{PathPrefix: "/", Service: serviceName, Port: "http"}}
+	}
+	if kind == contracts.SandboxToolKindCommand {
+		spec["command_policy"] = manifest.Tool.CommandPolicy
+	}
+	if err := validateGeneratedToolResourceSpec(spec, kind); err != nil {
+		return nil, err
+	}
+	return spec, nil
+}
+
+// normalizeExplicitToolResourceSpec 校验显式 WorkloadSpec 的基本形态,并把 @self 替换为本镜像 digest。
+func normalizeExplicitToolResourceSpec(input map[string]any, imageURL string, kind int16) (map[string]any, error) {
+	spec := deepCopyMap(input).(map[string]any)
+	components, ok := spec["components"].([]any)
+	if !ok || len(components) == 0 {
+		return nil, fmt.Errorf("显式工具 WorkloadSpec 必须声明 components")
+	}
+	for _, item := range components {
+		component, ok := item.(map[string]any)
+		if !ok {
+			return nil, fmt.Errorf("显式工具 WorkloadSpec component 格式非法")
+		}
+		if strings.TrimSpace(anyString(component["name"])) == "" {
+			return nil, fmt.Errorf("显式工具 WorkloadSpec component 缺少 name")
+		}
+		switch strings.TrimSpace(anyString(component["image_url"])) {
+		case "":
+			return nil, fmt.Errorf("显式工具 WorkloadSpec component 缺少 image_url")
+		case "@self":
+			component["image_url"] = imageURL
+		}
+	}
+	if kind == contracts.SandboxToolKindWebEmbed {
+		if _, ok := spec["services"].([]any); !ok {
+			return nil, fmt.Errorf("web 工具显式 WorkloadSpec 必须声明 services")
+		}
+		if _, ok := spec["routes"].([]any); !ok {
+			return nil, fmt.Errorf("web 工具显式 WorkloadSpec 必须声明 routes")
+		}
+	}
+	if kind == contracts.SandboxToolKindCommand {
+		if _, ok := spec["command_policy"].(map[string]any); !ok {
+			return nil, fmt.Errorf("命令工具显式 WorkloadSpec 必须声明 command_policy")
+		}
+	}
+	if err := validateGeneratedToolResourceSpec(spec, kind); err != nil {
+		return nil, err
+	}
+	return spec, nil
+}
+
+// validateGeneratedToolResourceSpec 复用 M2 规则层校验 seed 产物,避免迁移入口绕过运行期约束。
+func validateGeneratedToolResourceSpec(spec map[string]any, kind int16) error {
+	raw, err := json.Marshal(spec)
+	if err != nil {
+		return fmt.Errorf("编码工具 WorkloadSpec 失败: %w", err)
+	}
+	if err := sandbox.ValidateToolResourceSpecDefinition(raw, kind); err != nil {
+		return fmt.Errorf("工具 WorkloadSpec 校验失败: %w", err)
+	}
+	return nil
+}
+
+// deepCopyMap 复制 YAML 解析出的 map/slice,避免规范化过程修改原始 manifest 结构。
+func deepCopyMap(value any) any {
+	switch typed := value.(type) {
+	case map[string]any:
+		out := make(map[string]any, len(typed))
+		for key, item := range typed {
+			out[key] = deepCopyMap(item)
+		}
+		return out
+	case []any:
+		out := make([]any, 0, len(typed))
+		for _, item := range typed {
+			out = append(out, deepCopyMap(item))
+		}
+		return out
+	default:
+		return typed
+	}
+}
+
+// anyString 返回 YAML 标量的字符串值,仅用于 manifest 结构校验。
+func anyString(value any) string {
+	if text, ok := value.(string); ok {
+		return text
+	}
+	return ""
 }
 
 // toolKindFromManifest 把 manifest 的唯一工具类型转换为数据库枚举。

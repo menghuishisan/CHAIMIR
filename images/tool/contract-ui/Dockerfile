@@ -4,7 +4,8 @@ FROM python:3.13-alpine
 LABEL org.opencontainers.image.title="tool/contract-ui"
 LABEL org.opencontainers.image.description="Chaimir contract interaction panel image"
 
-RUN addgroup -S -g 1000 chaimir \
+RUN apk upgrade --no-cache \
+    && addgroup -S -g 1000 chaimir \
     && adduser -S -u 1000 -G chaimir -h /app chaimir
 
 WORKDIR /app

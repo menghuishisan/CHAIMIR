@@ -4,7 +4,8 @@ FROM python:3.13-alpine
 LABEL org.opencontainers.image.title="sidecar/collector"
 LABEL org.opencontainers.image.description="Chaimir sandbox telemetry collector sidecar"
 
-RUN addgroup -S chaimir \
+RUN apk upgrade --no-cache \
+    && addgroup -S chaimir \
     && adduser -S -G chaimir -h /collector chaimir
 
 WORKDIR /collector

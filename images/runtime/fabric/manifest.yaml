@@ -18,7 +18,7 @@ description: Hyperledger Fabric 工具运行时镜像。
 source:
   type: thin-wrapper
 upstream:
-  image: hyperledger/fabric-tools:2.5
+  image: hyperledger/fabric-tools:2.5.16
   reuse_policy: thin-wrapper
 data_driven: true
 capabilities:

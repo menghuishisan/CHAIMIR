@@ -18,7 +18,7 @@ description: Ganache 轻量 EVM 教学运行时镜像。
 source:
   type: thin-wrapper
 upstream:
-  image: node:20-bookworm-slim
+  image: node:22-bookworm-slim
   reuse_policy: toolchain-wrapper
 data_driven: true
 capabilities:

@@ -96,13 +96,10 @@ func validateToolRequest(req ToolRequest, cfg config.SandboxConfig) (ToolResourc
 			return ToolResourceSpec{}, apperr.ErrSandboxToolCreateInvalid.WithCause(err)
 		}
 	}
+	if err := validateToolResourceSpecShape(&spec, req.Kind); err != nil {
+		return ToolResourceSpec{}, err
+	}
 	if req.Kind == SandboxToolKindWebEmbed {
-		if commandPolicyConfigured(spec.CommandPolicy) {
-			return ToolResourceSpec{}, apperr.ErrSandboxToolCreateInvalid
-		}
-		if len(spec.Components) == 0 || len(spec.Services) == 0 || len(spec.Routes) == 0 {
-			return ToolResourceSpec{}, apperr.ErrSandboxToolCreateInvalid
-		}
 		for i := range spec.Components {
 			component := &spec.Components[i]
 			if err := validateContainerSpec(component, cfg); err != nil {
@@ -123,43 +120,65 @@ func validateToolRequest(req ToolRequest, cfg config.SandboxConfig) (ToolResourc
 		}
 	}
 	if req.Kind == SandboxToolKindCommand {
-		if err := validateCommandToolSpec(&spec, cfg); err != nil {
+		if err := validateCommandToolRuntimeSpec(&spec, cfg); err != nil {
 			return ToolResourceSpec{}, err
 		}
-	}
-	if req.Kind == SandboxToolKindBuiltin {
-		if commandPolicyConfigured(spec.CommandPolicy) {
-			return ToolResourceSpec{}, apperr.ErrSandboxToolCreateInvalid
-		}
-		if !validBuiltinEndpointTemplate(spec.BuiltinEndpoint) {
-			return ToolResourceSpec{}, apperr.ErrSandboxToolCreateInvalid
-		}
-	}
-	if req.Kind != SandboxToolKindWebEmbed && req.Kind != SandboxToolKindCommand && toolHasContainerSpec(spec) {
-		return ToolResourceSpec{}, apperr.ErrSandboxToolCreateInvalid
-	}
-	if req.Kind != SandboxToolKindWebEmbed && len(spec.NetworkRules) > 0 {
-		return ToolResourceSpec{}, apperr.ErrSandboxToolCreateInvalid
-	}
-	if err := validateToolServicesAndRoutes(&spec); err != nil {
-		return ToolResourceSpec{}, err
-	}
-	if err := validateToolNetworkRules(&spec); err != nil {
-		return ToolResourceSpec{}, err
 	}
 	return spec, nil
 }
 
-// validateCommandToolSpec 校验命令工具只能声明无端口执行容器,不得暴露平台代理入口。
-func validateCommandToolSpec(spec *ToolResourceSpec, cfg config.SandboxConfig) error {
+// ValidateToolResourceSpecDefinition 校验工具 WorkloadSpec 的类型形态,供运行期注册和迁移 seed 共用同一套领域规则。
+func ValidateToolResourceSpecDefinition(raw []byte, kind int16) error {
+	var spec ToolResourceSpec
+	if len(raw) > 0 {
+		if err := jsonx.DecodeStrict(raw, &spec); err != nil {
+			return apperr.ErrSandboxToolCreateInvalid.WithCause(err)
+		}
+	}
+	return validateToolResourceSpecShape(&spec, kind)
+}
+
+// validateToolResourceSpecShape 校验工具类型与组件、服务、路由、网络规则和命令策略之间的唯一合法组合。
+func validateToolResourceSpecShape(spec *ToolResourceSpec, kind int16) error {
 	if spec == nil {
 		return apperr.ErrSandboxToolCreateInvalid
 	}
-	if len(spec.Components) != 1 || len(spec.Services) > 0 || len(spec.Routes) > 0 || len(spec.NetworkRules) > 0 {
+	switch kind {
+	case SandboxToolKindWebEmbed:
+		if commandPolicyConfigured(spec.CommandPolicy) || len(spec.Components) == 0 || len(spec.Services) == 0 || len(spec.Routes) == 0 {
+			return apperr.ErrSandboxToolCreateInvalid
+		}
+	case SandboxToolKindCommand:
+		if len(spec.Components) != 1 || len(spec.Services) > 0 || len(spec.Routes) > 0 || len(spec.NetworkRules) > 0 {
+			return apperr.ErrSandboxToolCreateInvalid
+		}
+		if err := validateCommandToolPolicy(&spec.CommandPolicy); err != nil {
+			return err
+		}
+	case SandboxToolKindBuiltin:
+		if commandPolicyConfigured(spec.CommandPolicy) || toolHasContainerSpec(*spec) || len(spec.NetworkRules) > 0 || !validBuiltinEndpointTemplate(spec.BuiltinEndpoint) {
+			return apperr.ErrSandboxToolCreateInvalid
+		}
+	case SandboxToolKindTerminal:
+		if commandPolicyConfigured(spec.CommandPolicy) || toolHasContainerSpec(*spec) || len(spec.NetworkRules) > 0 || strings.TrimSpace(spec.BuiltinEndpoint) != "" {
+			return apperr.ErrSandboxToolCreateInvalid
+		}
+	default:
 		return apperr.ErrSandboxToolCreateInvalid
 	}
-	if err := validateCommandToolPolicy(&spec.CommandPolicy); err != nil {
+	if err := validateToolServicesAndRoutes(spec); err != nil {
 		return err
+	}
+	if err := validateToolNetworkRules(spec); err != nil {
+		return err
+	}
+	return nil
+}
+
+// validateCommandToolRuntimeSpec 校验命令工具的容器安全边界,类型形态已由 validateToolResourceSpecShape 收口。
+func validateCommandToolRuntimeSpec(spec *ToolResourceSpec, cfg config.SandboxConfig) error {
+	if spec == nil {
+		return apperr.ErrSandboxToolCreateInvalid
 	}
 	if err := validateCommandContainerSpec(&spec.Components[0], cfg); err != nil {
 		return apperr.ErrSandboxToolCreateInvalid.WithCause(err)
@@ -577,7 +596,7 @@ func normalizeAndValidateAdapterSpec(spec *AdapterSpec, cfg config.SandboxConfig
 	if err := validateRuntimeContainerNames(spec); err != nil {
 		return err
 	}
-	if err := validatePodTopology(spec, cfg); err != nil {
+	if err := validatePodTopology(spec); err != nil {
 		return err
 	}
 	if err := validateNetworkRules(spec); err != nil {
@@ -603,7 +622,7 @@ func validateRuntimeContainerNames(spec *AdapterSpec) error {
 }
 
 // validatePodTopology 校验显式 Pod 组拓扑,缺省时使用单 Pod 多容器口径。
-func validatePodTopology(spec *AdapterSpec, cfg config.SandboxConfig) error {
+func validatePodTopology(spec *AdapterSpec) error {
 	if len(spec.Pods) == 0 {
 		return nil
 	}

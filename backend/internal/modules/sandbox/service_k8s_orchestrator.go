@@ -1024,7 +1024,7 @@ func (o *K8sOrchestrator) toolPodForPlan(plan CreateSandboxPlan, tool Tool, comp
 			Containers:                   []corev1.Container{o.containerFromTool(tool, component, plan.Runtime.AdapterSpec)},
 			NodeSelector:                 copyStringMap(o.cfg.SandboxNodeSelector),
 			Tolerations:                  sandboxTolerations(o.cfg.SandboxNodeTolerations),
-			Volumes:                      podVolumesForTool(plan, tool, component),
+			Volumes:                      podVolumesForTool(tool, component),
 		},
 	}
 }
@@ -1082,7 +1082,7 @@ func podVolumesForPlan(plan CreateSandboxPlan) []corev1.Volume {
 }
 
 // podVolumesForTool 汇总工具需要的工作区 PVC 和私有临时卷。
-func podVolumesForTool(plan CreateSandboxPlan, tool Tool, component workload.ComponentSpec) []corev1.Volume {
+func podVolumesForTool(tool Tool, component workload.ComponentSpec) []corev1.Volume {
 	volumes := []corev1.Volume{}
 	if shouldMountWorkspace(component) {
 		volumes = append(volumes, corev1.Volume{

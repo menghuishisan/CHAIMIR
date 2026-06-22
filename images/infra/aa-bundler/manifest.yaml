@@ -18,11 +18,14 @@ description: ERC-4337 账户抽象 bundler 教学镜像。
 source:
   type: thin-wrapper
 upstream:
-  image: stackupwallet/stackup-bundler:v0.6.47
+  image: alchemyplatform/rundler:v0.11.0
   reuse_policy: thin-wrapper
 env_keys:
   config:
-    - CHAIMIR_AA_BUNDLER_CONFIG
+    - NODE_HTTP
+    - NETWORK
+    - RPC_PORT
+    - METRICS_PORT
   secret: []
 data_driven: true
 capabilities:
@@ -35,16 +38,21 @@ infra:
     - bundler
 ports:
   - name: http
-    container_port: 4337
+    container_port: 3000
     protocol: TCP
     expose: internal
     purpose: ERC-4337 bundler RPC
+  - name: metrics
+    container_port: 8080
+    protocol: TCP
+    expose: internal
+    purpose: Rundler metrics
 local_dev:
   host_mappings:
     - host: 127.0.0.1
       env: CHAIMIR_DEV_AA_BUNDLER_PORT
       default: 18089
-      container_port: 4337
+      container_port: 3000
 security:
   run_as_non_root: true
   read_only_root_filesystem: true
@@ -73,6 +81,10 @@ selftest:
         - sh
         - -n
         - /usr/local/bin/chaimir-aa-bundler-entrypoint
+    - name: rundler-help
+      command:
+        - rundler
+        - --help
 supply_chain:
   sbom: true
   trivy_required: true

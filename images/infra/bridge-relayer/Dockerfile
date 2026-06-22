@@ -6,7 +6,10 @@ LABEL org.opencontainers.image.description="Chaimir bridge relayer toolchain ima
 
 WORKDIR /opt/chaimir/bridge-relayer
 COPY package.json package-lock.json /opt/chaimir/bridge-relayer/
-RUN npm ci --omit=dev --ignore-scripts --no-audit --no-fund \
+RUN apt-get update \
+    && apt-get upgrade -y --no-install-recommends \
+    && npm ci --omit=dev --ignore-scripts --no-audit --no-fund \
+    && rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx /root/.npm /var/lib/apt/lists/* \
     && mkdir -p /workspace \
     && chown -R 1000:1000 /workspace /opt/chaimir/bridge-relayer
 

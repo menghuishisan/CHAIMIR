@@ -18,8 +18,10 @@ description: IPFS Cluster 多节点存储协调镜像。
 source:
   type: thin-wrapper
 upstream:
-  image: ipfs/ipfs-cluster:v1.1.3
-  reuse_policy: thin-wrapper
+  source_repo: https://github.com/ipfs-cluster/ipfs-cluster
+  source_ref: v1.1.6
+  version: v1.1.6
+  reuse_policy: rebuild-official-release-source
 data_driven: true
 capabilities:
   - decentralized-storage

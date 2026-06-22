@@ -18,12 +18,13 @@ description: 判题执行器最小安全基座镜像。
 source:
   type: build-base
 upstream:
-  image: alpine:3.20
+  image: alpine:3.22
   reuse_policy: thin-wrapper
 data_driven: false
 capabilities:
   - runtime-base
   - minimal-judge-runtime
+  - judge-result-normalizer
 ports: []
 local_dev:
   host_mappings: []
@@ -55,6 +56,11 @@ selftest:
         - bash
         - -lc
         - "test $(id -u) -ne 0"
+    - name: normalize-result-contract
+      command:
+        - bash
+        - -lc
+        - "normalize-result --mode exit-code --exit-code 0 --source selftest | grep '\"passed\":true'"
 supply_chain:
   sbom: true
   trivy_required: true

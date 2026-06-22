@@ -7,9 +7,9 @@ param(
     [string]$DockerConfig = $env:DOCKER_CONFIG,
     [string]$DigestLock = "",
     [switch]$PublishLocalBuilt,
-    [string]$LocalSourceRegistry = "chaimir.local",
+    [string]$LocalSourceRegistry = "chaimir",
     [string]$LocalSourceTag = "dev",
-    [string]$PublishTag = "local-dev",
+    [string]$PublishTag = "dev",
     [int]$MaxAttempts = 3,
     [int]$RetryDelaySeconds = 5,
     [switch]$FailFast,
@@ -421,13 +421,6 @@ function Publish-LocalBuiltImages {
     }
 
     foreach ($record in ($records | Sort-Object Image)) {
-        $remoteDigest = Get-RemoteDigestFromHarbor -TaggedRef $record.TargetRef
-        if (-not [string]::IsNullOrWhiteSpace($remoteDigest)) {
-            Write-Host "Using existing registry image $($record.TargetRef)@$remoteDigest"
-            $lockItems[$record.Image] = $remoteDigest
-            Write-BuiltDigestLock -Path $OutputLock -Items $lockItems
-            continue
-        }
         Write-Host "Publishing local image $($record.SourceRef) -> $($record.TargetRef)"
         Invoke-CheckedDocker -Arguments @("tag", $record.SourceRef, $record.TargetRef) -Context "标记镜像: $($record.TargetRef)" | Out-Null
         Invoke-CheckedDocker -Arguments @("push", $record.TargetRef) -Context "docker push: $($record.TargetRef)" | Out-Null

@@ -13,13 +13,16 @@ labels:
   chaimir.io/student-access: "false"
   chaimir.io/sensitivity: student-runtime
   chaimir.io/scope: sandbox
-  chaimir.io/source: thin-wrapper
+  chaimir.io/source: platform-built
 description: 长安链教学运行时镜像。
 source:
-  type: thin-wrapper
+  type: platform-built
 upstream:
-  image: chainmakerofficial/chainmaker:v2.3.5
-  reuse_policy: thin-wrapper
+  image: chainmaker-go-source
+  version: v2.3.8
+  source_archive: images/vendor/chainmaker/chainmaker-go-v2.3.8.tar.gz
+  source_sha256_build_arg: CHAINMAKER_SOURCE_SHA256
+  reuse_policy: source-rebuild
 data_driven: true
 capabilities:
   - chain-runtime
@@ -63,8 +66,8 @@ resources:
   memory_limit: 3Gi
   ephemeral_storage_limit: 4Gi
 build:
-  context: images/runtime/chainmaker
-  dockerfile: Dockerfile
+  context: ../../..
+  dockerfile: images/runtime/chainmaker/Dockerfile
 selftest:
   commands:
     - name: chainmaker-version

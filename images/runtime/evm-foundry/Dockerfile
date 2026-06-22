@@ -7,8 +7,9 @@ LABEL org.opencontainers.image.description="Chaimir Foundry and Anvil EVM runtim
 USER root
 
 # 复用上游 foundry:1000:1000,缓存写入 runtime-state 而不是学生 workspace。
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends jq ca-certificates \
+RUN apt-get -o Acquire::Retries=3 update \
+    && apt-get -o Acquire::Retries=3 -y upgrade \
+    && apt-get -o Acquire::Retries=3 install -y --no-install-recommends jq ca-certificates \
     && rm -rf /var/lib/apt/lists/* \
     && mkdir -p /workspace /runtime-state/foundry-home \
     && chown -R 1000:1000 /workspace /runtime-state

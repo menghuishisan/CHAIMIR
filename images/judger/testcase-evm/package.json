@@ -2,5 +2,9 @@
   "type": "module",
   "dependencies": {
     "hardhat": "3.9.0"
+  },
+  "overrides": {
+    "picomatch": "4.0.4",
+    "undici": "6.27.0"
   }
 }

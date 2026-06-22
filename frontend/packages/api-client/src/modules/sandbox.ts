@@ -3,6 +3,8 @@
 
 import { ApiClient } from '../client'
 import type {
+  SandboxChainRequest,
+  SandboxChainResponse,
   SandboxCommandToolRunRequest,
   SandboxCommandToolRunResponse,
   SandboxFileListResponse,
@@ -76,6 +78,27 @@ export class SandboxApi {
    */
   async runCommandTool(instanceId: string, toolCode: string, data: SandboxCommandToolRunRequest): Promise<SandboxCommandToolRunResponse> {
     return this.client.post(`/sandbox/sandboxes/${instanceId}/command-tools/${toolCode}/run`, data)
+  }
+
+  /**
+   * 调用运行时统一链部署能力。
+   */
+  async chainDeploy(instanceId: string, data: SandboxChainRequest): Promise<SandboxChainResponse> {
+    return this.client.post(`/sandbox/sandboxes/${instanceId}/chain/deploy`, data)
+  }
+
+  /**
+   * 调用运行时统一链交易能力。
+   */
+  async chainSendTx(instanceId: string, data: SandboxChainRequest): Promise<SandboxChainResponse> {
+    return this.client.post(`/sandbox/sandboxes/${instanceId}/chain/tx`, data)
+  }
+
+  /**
+   * 查询运行时链上状态。
+   */
+  async chainQuery(instanceId: string, target: string): Promise<SandboxChainResponse> {
+    return this.client.get(`/sandbox/sandboxes/${instanceId}/chain/query`, { target })
   }
 
   /**

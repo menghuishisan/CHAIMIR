@@ -18,7 +18,7 @@ description: Fabric 链码测试用例判题镜像。
 source:
   type: platform-built
 upstream:
-  image: hyperledger/fabric-tools:2.5
+  image: hyperledger/fabric-tools:2.5.16
   reuse_policy: self-developed-judger
 data_driven: true
 capabilities:

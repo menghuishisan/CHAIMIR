@@ -15,12 +15,14 @@ COPY --from=foundry /usr/local/bin/anvil /usr/local/bin/anvil
 COPY --from=foundry /usr/local/bin/cast /usr/local/bin/cast
 COPY --from=foundry /usr/local/bin/chisel /usr/local/bin/chisel
 COPY package.json package-lock.json /opt/chaimir/evm-hardhat/
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends bash git ca-certificates \
+RUN apt-get -o Acquire::Retries=3 update \
+    && apt-get -o Acquire::Retries=3 -y upgrade \
+    && apt-get -o Acquire::Retries=3 install -y --no-install-recommends bash git ca-certificates \
     && rm -rf /var/lib/apt/lists/* \
     && cd /opt/chaimir/evm-hardhat \
     && npm ci --omit=dev --ignore-scripts --no-audit --no-fund \
     && ln -s /opt/chaimir/evm-hardhat/node_modules/.bin/hardhat /usr/local/bin/hardhat \
+    && rm -rf /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/corepack /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack \
     && mkdir -p /workspace /runtime-state \
     && chown -R 1000:1000 /workspace /runtime-state
 

@@ -13,4 +13,4 @@ set +e
 "${CHAIMIR_TEST_SCRIPT}" >"${RESULT_STDOUT}" 2>&1
 status=$?
 set -e
-exec python /usr/local/bin/normalize-result --mode exit-code --exit-code "${status}" --source chainmaker --stdout "${RESULT_STDOUT}"
+exec /usr/local/bin/normalize-result --mode exit-code --exit-code "${status}" --source chainmaker --stdout "${RESULT_STDOUT}"

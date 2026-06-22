@@ -30,15 +30,51 @@ tool:
     - fabric
   mount_workspace: false
   runtime_config_required: true
-  ephemeral_mounts:
-    - name: tmp
-      mount_path: /tmp
-    - name: logs
-      mount_path: /opt/explorer/logs
-    - name: walletstore
-      mount_path: /opt/explorer/walletstore
-    - name: npm-cache
-      mount_path: /home/node/.npm
+  resource_spec:
+    components:
+      - name: web
+        image_url: "@self"
+        ports:
+          - name: http
+            container_port: 8080
+            service_port: 8080
+            protocol: TCP
+        resources:
+          requests:
+            cpu: 250m
+            memory: 512Mi
+          limits:
+            cpu: "1"
+            memory: 2Gi
+        readiness_probe:
+          type: http
+          path: /
+          port: http
+          period_seconds: 2
+          failure_threshold: 60
+        read_only_root_filesystem: true
+        mount_workspace: false
+        ephemeral_mounts:
+          - name: tmp
+            mount_path: /tmp
+          - name: logs
+            mount_path: /opt/explorer/logs
+          - name: walletstore
+            mount_path: /opt/explorer/walletstore
+          - name: npm-cache
+            mount_path: /home/node/.npm
+    services:
+      - name: tool-fabric-explorer-web
+        component: web
+        ports:
+          - name: http
+            port: 8080
+            target_port: http
+            protocol: TCP
+    routes:
+      - path_prefix: /
+        service: tool-fabric-explorer-web
+        port: http
 ports:
   - name: http
     container_port: 8080

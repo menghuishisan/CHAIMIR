@@ -33,6 +33,7 @@ func RegisterRoutes(r gin.IRouter, svc *Service, authn *auth.Manager, roles cont
 	g := r.Group("/api/v1/sandbox")
 	api.registerPlatformRoutes(g.Group("", authn.Middleware(), auth.RequirePlatformIdentity()))
 	api.registerInternalRoutes(g.Group("", authn.ServiceMiddleware()))
+	api.registerChainRoutes(g.Group("", authn.ServiceOrTenantAnyRoleMiddleware(roles, contracts.RoleStudent, contracts.RoleTeacher, contracts.RoleSchoolAdmin)))
 	api.registerUserRoutes(g.Group("", authn.Middleware(), auth.RequireTenantAnyRole(roles, contracts.RoleStudent, contracts.RoleTeacher, contracts.RoleSchoolAdmin)))
 	api.registerInteractiveRoutes(g.Group("", authn.BrowserAccessMiddleware(), auth.RequireTenantAnyRole(roles, contracts.RoleStudent, contracts.RoleTeacher, contracts.RoleSchoolAdmin)))
 	api.registerQuotaRoutes(g, authn, roles)
@@ -80,17 +81,21 @@ func (a sandboxAPI) getRuntimeSelftest(c *gin.Context) {
 	httpx.Write(c, out, err)
 }
 
-// registerInternalRoutes 注册内部服务签名保护的生命周期和链能力接口。
+// registerInternalRoutes 注册内部服务签名保护的生命周期接口。
 func (a sandboxAPI) registerInternalRoutes(g gin.IRouter) {
 	g.POST("/sandboxes", a.createSandbox)
 	g.POST("/sandboxes/recycle", a.recycleBySourceRef)
 	g.POST("/sandboxes/:id/pause", a.pauseSandbox)
 	g.POST("/sandboxes/:id/resume", a.resumeSandbox)
 	g.DELETE("/sandboxes/:id", a.destroySandbox)
+	g.POST("/sandboxes/:id/chain/reset", a.chainReset)
+}
+
+// registerChainRoutes 注册链能力入口,同一路径同时服务内部业务回调和用户工作台。
+func (a sandboxAPI) registerChainRoutes(g gin.IRouter) {
 	g.POST("/sandboxes/:id/chain/deploy", a.chainDeploy)
 	g.POST("/sandboxes/:id/chain/tx", a.chainSendTx)
 	g.GET("/sandboxes/:id/chain/query", a.chainQuery)
-	g.POST("/sandboxes/:id/chain/reset", a.chainReset)
 }
 
 // registerUserRoutes 注册用户侧沙箱查询、文件和进度接口。
@@ -524,15 +529,17 @@ func (a sandboxAPI) chainDeploy(c *gin.Context) {
 	if !httpx.BindJSONWithError(c, &req, apperr.ErrSandboxDeployRequestInvalid) {
 		return
 	}
-	tenantID, ok := currentServiceTenantID(c)
+	identity, ok := currentChainIdentity(c)
 	if !ok {
 		return
 	}
-	sourceRef, ok := serviceSourceRef(c)
-	if !ok {
-		return
+	var out map[string]any
+	var err error
+	if identity.IsSystem {
+		out, err = a.svc.ChainDeploy(c.Request.Context(), contracts.SandboxChainDeployRequest{TenantID: identity.TenantID, SandboxID: id, SourceRef: identity.SourceRef, Payload: req.Payload})
+	} else {
+		out, err = a.svc.ChainDeployForOwner(c.Request.Context(), identity.TenantID, identity.AccountID, id, req.Payload)
 	}
-	out, err := a.svc.ChainDeploy(c.Request.Context(), contracts.SandboxChainDeployRequest{TenantID: tenantID, SandboxID: id, SourceRef: sourceRef, Payload: req.Payload})
 	httpx.Write(c, out, err)
 }
 
@@ -546,15 +553,17 @@ func (a sandboxAPI) chainSendTx(c *gin.Context) {
 	if !httpx.BindJSONWithError(c, &req, apperr.ErrSandboxTxRequestInvalid) {
 		return
 	}
-	tenantID, ok := currentServiceTenantID(c)
+	identity, ok := currentChainIdentity(c)
 	if !ok {
 		return
 	}
-	sourceRef, ok := serviceSourceRef(c)
-	if !ok {
-		return
+	var out map[string]any
+	var err error
+	if identity.IsSystem {
+		out, err = a.svc.ChainSendTx(c.Request.Context(), contracts.SandboxChainTxRequest{TenantID: identity.TenantID, SandboxID: id, SourceRef: identity.SourceRef, Payload: req.Payload})
+	} else {
+		out, err = a.svc.ChainSendTxForOwner(c.Request.Context(), identity.TenantID, identity.AccountID, id, req.Payload)
 	}
-	out, err := a.svc.ChainSendTx(c.Request.Context(), contracts.SandboxChainTxRequest{TenantID: tenantID, SandboxID: id, SourceRef: sourceRef, Payload: req.Payload})
 	httpx.Write(c, out, err)
 }
 
@@ -564,15 +573,17 @@ func (a sandboxAPI) chainQuery(c *gin.Context) {
 	if !ok {
 		return
 	}
-	tenantID, ok := currentServiceTenantID(c)
+	identity, ok := currentChainIdentity(c)
 	if !ok {
 		return
 	}
-	sourceRef, ok := serviceSourceRef(c)
-	if !ok {
-		return
+	var out map[string]any
+	var err error
+	if identity.IsSystem {
+		out, err = a.svc.ChainQuery(c.Request.Context(), contracts.SandboxChainQueryRequest{TenantID: identity.TenantID, SandboxID: id, SourceRef: identity.SourceRef, Target: c.Query("target")})
+	} else {
+		out, err = a.svc.ChainQueryForOwner(c.Request.Context(), identity.TenantID, identity.AccountID, id, c.Query("target"))
 	}
-	out, err := a.svc.ChainQuery(c.Request.Context(), contracts.SandboxChainQueryRequest{TenantID: tenantID, SandboxID: id, SourceRef: sourceRef, Target: c.Query("target")})
 	httpx.Write(c, out, err)
 }
 
@@ -582,15 +593,17 @@ func (a sandboxAPI) chainReset(c *gin.Context) {
 	if !ok {
 		return
 	}
-	tenantID, ok := currentServiceTenantID(c)
+	identity, ok := currentChainIdentity(c)
 	if !ok {
 		return
 	}
-	sourceRef, ok := serviceSourceRef(c)
-	if !ok {
-		return
+	var err error
+	if identity.IsSystem {
+		err = a.svc.ChainReset(c.Request.Context(), contracts.SandboxChainResetRequest{TenantID: identity.TenantID, SandboxID: id, SourceRef: identity.SourceRef})
+	} else {
+		err = apperr.ErrForbidden
 	}
-	httpx.Write(c, gin.H{}, a.svc.ChainReset(c.Request.Context(), contracts.SandboxChainResetRequest{TenantID: tenantID, SandboxID: id, SourceRef: sourceRef}))
+	httpx.Write(c, gin.H{}, err)
 }
 
 // quotaStats 查询当前租户配额和活跃数量。
@@ -638,6 +651,34 @@ func serviceTenantID(c *gin.Context) int64 {
 		return 0
 	}
 	return id.TenantID
+}
+
+type chainRequestIdentity struct {
+	TenantID  int64
+	AccountID int64
+	SourceRef string
+	IsSystem  bool
+}
+
+// currentChainIdentity 解析链能力调用身份,内部服务走 source_ref 边界,用户工作台走 owner 边界。
+func currentChainIdentity(c *gin.Context) (chainRequestIdentity, bool) {
+	id, ok := tenant.FromContext(c.Request.Context())
+	if !ok || id.TenantID <= 0 {
+		response.Fail(c, apperr.ErrUnauthorized)
+		return chainRequestIdentity{}, false
+	}
+	if id.IsSystem {
+		sourceRef, ok := serviceSourceRef(c)
+		if !ok {
+			return chainRequestIdentity{}, false
+		}
+		return chainRequestIdentity{TenantID: id.TenantID, SourceRef: sourceRef, IsSystem: true}, true
+	}
+	if id.AccountID <= 0 {
+		response.Fail(c, apperr.ErrUnauthorized)
+		return chainRequestIdentity{}, false
+	}
+	return chainRequestIdentity{TenantID: id.TenantID, AccountID: id.AccountID}, true
 }
 
 // currentServiceTenantID 读取内部服务租户边界,缺失时立即返回统一鉴权错误。

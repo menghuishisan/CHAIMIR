@@ -1,14 +1,18 @@
 # 本文件定义 Chainlink 预言机节点镜像,复用 Chainlink 官方节点镜像。
-FROM smartcontract/chainlink:2.20.0
+FROM smartcontract/chainlink:2.51.0
 
 LABEL org.opencontainers.image.title="infra/chainlink-node"
 LABEL org.opencontainers.image.description="Chaimir Chainlink oracle node image"
 
 USER root
 
-# 创建平台运行目录,节点密钥和数据库凭据只允许运行期注入。
-RUN groupadd --gid 1000 chaimir \
-    && useradd --uid 1000 --gid 1000 --home-dir /workspace --create-home --shell /usr/sbin/nologin chaimir \
+# 创建平台运行目录,节点密钥和数据库凭据只允许运行期注入;未声明的多链辅助 binary 不进入 EVM 教学镜像。
+RUN apt-get update \
+    && apt-get upgrade -y --no-install-recommends \
+    && rm -f /usr/local/bin/chainlink-aptos /usr/local/bin/chainlink-cosmos /usr/local/bin/chainlink-feeds /usr/local/bin/chainlink-starknet /usr/local/bin/chainlink-tron /usr/local/bin/confidential-http \
+    && rm -rf /var/lib/apt/lists/* \
+    && (getent group 1000 >/dev/null || groupadd --gid 1000 chaimir) \
+    && (id -u 1000 >/dev/null 2>&1 || useradd --uid 1000 --gid 1000 --home-dir /workspace --create-home --shell /usr/sbin/nologin chaimir) \
     && mkdir -p /chainlink /workspace \
     && chown -R 1000:1000 /chainlink /workspace
 

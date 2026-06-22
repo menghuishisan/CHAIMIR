@@ -1,5 +1,6 @@
 # 本文件定义 EVM 测试用例判题镜像。
 FROM ghcr.io/foundry-rs/foundry:v1.0.0 AS foundry
+FROM chaimir/base/judge-min:dev AS judge-base
 
 FROM node:22-bookworm-slim
 
@@ -17,9 +18,10 @@ COPY --from=foundry /usr/local/bin/forge /usr/local/bin/forge
 COPY --from=foundry /usr/local/bin/anvil /usr/local/bin/anvil
 COPY --from=foundry /usr/local/bin/cast /usr/local/bin/cast
 COPY --from=foundry /usr/local/bin/chisel /usr/local/bin/chisel
+COPY --from=judge-base /usr/local/bin/normalize-result /usr/local/bin/normalize-result
 COPY package.json package-lock.json /opt/chaimir/testcase-evm/
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends git bash ca-certificates python3 \
+RUN apt-get -o Acquire::Retries=3 update \
+    && apt-get -o Acquire::Retries=3 -y upgrade \
     && rm -rf /var/lib/apt/lists/* \
     && cd /opt/chaimir/testcase-evm \
     && npm ci --omit=dev --ignore-scripts --no-audit --no-fund \
@@ -33,10 +35,10 @@ RUN apt-get update \
     && cd /tmp/chaimir-hardhat-cache \
     && ./node_modules/.bin/hardhat compile \
     && rm -rf /tmp/chaimir-hardhat-cache \
+    && rm -rf /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/corepack /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack \
     && chown -R 1000:1000 /judge /opt/chaimir/cache
 
 COPY run_evm_tests.sh /usr/local/bin/run-evm-tests
-COPY normalize_result.py /usr/local/bin/normalize-result
 RUN chmod +x /usr/local/bin/run-evm-tests /usr/local/bin/normalize-result
 
 USER 1000:1000

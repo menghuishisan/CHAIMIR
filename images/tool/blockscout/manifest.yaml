@@ -29,34 +29,82 @@ tool:
   eco_tags:
     - evm
   mount_workspace: false
-  command:
-    - /usr/local/bin/chaimir-blockscout-entrypoint
-  env:
-    - name: DATABASE_URL
-      value: postgresql://postgres:postgres@runtime-sandbox:5432/blockscout
-    - name: ETHEREUM_JSONRPC_HTTP_URL
-      value: http://runtime-sandbox:8545
-    - name: ETHEREUM_JSONRPC_TRACE_URL
-      value: http://runtime-sandbox:8545
-    - name: ETHEREUM_JSONRPC_VARIANT
-      value: geth
-    - name: ECTO_USE_SSL
-      value: "false"
-    - name: PORT
-      value: "4000"
-    - name: DISABLE_EXCHANGE_RATES
-      value: "true"
-    - name: INDEXER_DISABLE_PENDING_TRANSACTIONS_FETCHER
-      value: "true"
-    - name: BLOCKSCOUT_DEPENDENCY_TIMEOUT_SECONDS
-      value: "180"
-    - name: BLOCKSCOUT_DEPENDENCY_POLL_SECONDS
-      value: "2"
-  ephemeral_mounts:
-    - name: blockscout-tmp
-      mount_path: /tmp
-    - name: blockscout-cache
-      mount_path: /tmp/blockscout
+  runtime_config_required: true
+  resource_spec:
+    components:
+      - name: web
+        image_url: "@self"
+        command:
+          - /usr/local/bin/chaimir-blockscout-entrypoint
+        env:
+          - name: DATABASE_URL
+            value: postgresql://postgres:postgres@runtime-sandbox:5432/blockscout
+          - name: ETHEREUM_JSONRPC_HTTP_URL
+            value: http://runtime-sandbox:8545
+          - name: ETHEREUM_JSONRPC_TRACE_URL
+            value: http://runtime-sandbox:8545
+          - name: ETHEREUM_JSONRPC_VARIANT
+            value: geth
+          - name: ECTO_USE_SSL
+            value: "false"
+          - name: PORT
+            value: "4000"
+          - name: DISABLE_EXCHANGE_RATES
+            value: "true"
+          - name: INDEXER_DISABLE_PENDING_TRANSACTIONS_FETCHER
+            value: "true"
+          - name: BLOCKSCOUT_DEPENDENCY_TIMEOUT_SECONDS
+            value: "180"
+          - name: BLOCKSCOUT_DEPENDENCY_POLL_SECONDS
+            value: "2"
+        ports:
+          - name: http
+            container_port: 4000
+            service_port: 4000
+            protocol: TCP
+        resources:
+          requests:
+            cpu: 500m
+            memory: 1Gi
+          limits:
+            cpu: "2"
+            memory: 3Gi
+        readiness_probe:
+          type: http
+          path: /
+          port: http
+          period_seconds: 2
+          failure_threshold: 90
+        read_only_root_filesystem: false
+        mount_workspace: false
+        ephemeral_mounts:
+          - name: blockscout-tmp
+            mount_path: /tmp
+          - name: blockscout-cache
+            mount_path: /tmp/blockscout
+    services:
+      - name: tool-blockscout-web
+        component: web
+        ports:
+          - name: http
+            port: 4000
+            target_port: http
+            protocol: TCP
+    routes:
+      - path_prefix: /
+        service: tool-blockscout-web
+        port: http
+    network_rules:
+      - name: blockscout-runtime-rpc
+        from: web
+        to: sandbox
+        ports:
+          - name: rpc
+      - name: blockscout-runtime-postgres
+        from: web
+        to: sandbox
+        ports:
+          - name: postgres
 ports:
   - name: http
     container_port: 4000

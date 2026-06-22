@@ -158,9 +158,25 @@ Docker/K8s 重启变化。统一使用 `SUPPLY_CHAIN_HARBOR_EXTERNAL_URL=http://
 Ingress Controller,不能直连 `harbor-core`,否则 `/v2/` 上传路径与生产不一致。生产/预发布必须通过交付配置把
 `SUPPLY_CHAIN_HARBOR_EXTERNAL_URL` 和 `SUPPLY_CHAIN_REGISTRY` 覆盖为 HTTPS 真实域名。
 
-`harbor-projects-ensure` 只创建镜像规范里的 Harbor project:`service/runtime/infra/tool/judger/sim/sidecar/init/base/middleware/observability/ingress`。平台镜像不得推到默认 `library`,否则 digest 锁和准入策略无法按分类审计。
+`harbor-projects-ensure` 创建镜像规范里的 Harbor project:`service/runtime/infra/tool/judger/sim/sidecar/init/base/middleware/observability/ingress`,并创建供应链 robot 账号。平台镜像不得推到默认 `library`,否则 digest 锁和准入策略无法按分类审计。
 
-该目标通过 `deploy/scripts/harbor-projects-ensure.ps1` 运行,避免把 PowerShell 逻辑塞进 Makefile 字符串里。
+该目标通过 `deploy/scripts/harbor-projects-ensure.ps1` 运行,避免把 PowerShell 逻辑塞进 Makefile 字符串里。首次创建 robot 时,Harbor 只返回一次 token;脚本会把 `HARBOR_ROBOT_USERNAME` 和 `HARBOR_ROBOT_PASSWORD` 回写到被忽略的 `deploy/config/supply-chain.secret.env`,不得提交。
+
+镜像完成构建、推送和 digest 锁生成后,使用统一供应链入口生成沙箱准入证明:
+
+```bash
+cd deploy
+make image-attestations-generate
+```
+
+该目标会通过容器化 Trivy/Cosign 扫描、签名、验签 digest 锁中的镜像,并把
+`SANDBOX_IMAGE_ATTESTATIONS_JSON` 同步回写到 `deploy/config/chaimir.env` 与
+`backend/.env`。Cosign 私钥目录固定由 `SUPPLY_CHAIN_COSIGN_KEY_HOST_DIR` 指向,默认是
+`deploy/config/cosign/`;Docker registry 认证目录由 `SUPPLY_CHAIN_DOCKER_CONFIG_HOST_DIR`
+指向,默认是 `deploy/config/docker-auth/`。这两个目录只保存本地/私有化凭据,已被 Git 忽略,
+不得提交到仓库。`SUPPLY_CHAIN_REGISTRY_HOST_ALIAS` 只用于容器化供应链工具访问宿主机暴露的
+Harbor 入口,必须与 `SUPPLY_CHAIN_REGISTRY` 的主机名一致。生产/预发布环境应由 CI/Harbor/KMS
+提供对应密钥和认证配置。
 
 只有进入 Chaimir 镜像供应链或实验真实测试流程时才启动 `make harbor-forward`;日常只打开 Docker
 Desktop 做其他项目时不应自动占用该端口。生产不得依赖 port-forward。

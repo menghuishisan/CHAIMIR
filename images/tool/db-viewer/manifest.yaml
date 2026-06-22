@@ -30,6 +30,43 @@ tool:
     - fabric
     - evm
   mount_workspace: false
+  runtime_config_required: true
+  resource_spec:
+    components:
+      - name: web
+        image_url: "@self"
+        ports:
+          - name: http
+            container_port: 8081
+            service_port: 8081
+            protocol: TCP
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
+        readiness_probe:
+          type: http
+          path: /
+          port: http
+          period_seconds: 2
+          failure_threshold: 30
+        read_only_root_filesystem: false
+        mount_workspace: false
+    services:
+      - name: tool-db-viewer-web
+        component: web
+        ports:
+          - name: http
+            port: 8081
+            target_port: http
+            protocol: TCP
+    routes:
+      - path_prefix: /
+        service: tool-db-viewer-web
+        port: http
 ports:
   - name: http
     container_port: 8081

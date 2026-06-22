@@ -11,6 +11,8 @@ kubeconfig
 *.pem
 *.key
 !**/*.example
+deploy/config/cosign/
+deploy/config/docker-auth/
 
 # ---- K8s/部署本地产物 ----
 deploy/**/rendered.yaml
@@ -59,6 +61,8 @@ pnpm-debug.log*
 
 # ---- 镜像构建产物(目录3 images)----
 *.tar
+images/vendor/**/*.tar.gz
+images/vendor/**/*.zip
 images/**/build/
 
 # ---- 工具/IDE ----

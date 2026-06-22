@@ -4,7 +4,8 @@ FROM python:3.13-alpine
 LABEL org.opencontainers.image.title="runtime/edu-chain"
 LABEL org.opencontainers.image.description="Chaimir deterministic teaching chain runtime"
 
-RUN addgroup -S -g 1000 chaimir \
+RUN apk upgrade --no-cache \
+    && addgroup -S -g 1000 chaimir \
     && adduser -S -u 1000 -G chaimir -h /workspace chaimir \
     && mkdir -p /runtime-state/edu-chain \
     && chown -R 1000:1000 /workspace /runtime-state

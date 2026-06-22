@@ -1,10 +1,11 @@
 # 本文件构建沙箱初始化容器镜像。
-FROM alpine:3.20
+FROM alpine:3.22
 
 LABEL org.opencontainers.image.title="init/sandbox-seed"
 LABEL org.opencontainers.image.description="Chaimir sandbox workspace seeding init image"
 
-RUN addgroup -S chaimir \
+RUN apk upgrade --no-cache \
+    && addgroup -S chaimir \
     && adduser -S -G chaimir -h /seed chaimir
 
 WORKDIR /seed

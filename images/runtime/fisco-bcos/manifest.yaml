@@ -19,7 +19,7 @@ source:
   type: thin-wrapper
 upstream:
   image: fiscoorg/fiscobcos:v3.12.1
-  reuse_policy: thin-wrapper
+  reuse_policy: official-static-binary-on-supported-base
 data_driven: true
 capabilities:
   - chain-runtime
