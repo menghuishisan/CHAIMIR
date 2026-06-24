@@ -1,15 +1,14 @@
 # 本文件构建链上事件监听服务镜像。
-FROM node:20-bookworm-slim
+FROM node:24-alpine3.23
 
 LABEL org.opencontainers.image.title="infra/event-listener"
 LABEL org.opencontainers.image.description="Chaimir blockchain event listener service"
 
 WORKDIR /app
 COPY package.json package-lock.json /app/
-RUN apt-get update \
-    && apt-get upgrade -y --no-install-recommends \
+RUN apk upgrade --no-cache \
     && npm ci --omit=dev --ignore-scripts --no-audit --no-fund \
-    && rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx /root/.npm /var/lib/apt/lists/*
+    && rm -rf /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/corepack /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack /root/.npm
 COPY event-listener.mjs /app/event-listener.mjs
 RUN chown -R 1000:1000 /app
 

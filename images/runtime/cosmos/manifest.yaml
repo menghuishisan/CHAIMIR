@@ -13,13 +13,16 @@ labels:
   chaimir.io/student-access: "false"
   chaimir.io/sensitivity: student-runtime
   chaimir.io/scope: sandbox
-  chaimir.io/source: thin-wrapper
+  chaimir.io/source: platform-built
 description: Cosmos SDK/Tendermint 单链教学运行时镜像。
 source:
-  type: thin-wrapper
+  type: platform-built
 upstream:
-  image: ghcr.io/cosmos/gaia:v21.0.1
-  reuse_policy: thin-wrapper
+  source_repository: https://github.com/cosmos/gaia
+  version: v27.4.0
+  builder: debian:12-slim + go1.25.11
+  runtime: debian:12-slim
+  reuse_policy: source-build
 data_driven: true
 capabilities:
   - chain-runtime

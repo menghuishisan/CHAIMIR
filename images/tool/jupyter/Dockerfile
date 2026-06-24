@@ -5,7 +5,25 @@ LABEL org.opencontainers.image.title="tool/jupyter"
 LABEL org.opencontainers.image.description="Chaimir Jupyter notebook tool image"
 
 USER root
-RUN groupadd --gid 1000 chaimir \
+RUN apt-get -o Acquire::Retries=3 update \
+    && apt-get -o Acquire::Retries=3 -y upgrade \
+    && /opt/conda/bin/python -m pip install --no-cache-dir --upgrade \
+        "setuptools" \
+        "jupyter_server>=2.17.0" \
+        "jupyterlab>=4.5.0" \
+        "notebook>=7.5.0" \
+        "nbconvert>=7.17.0" \
+        "mistune>=3.2.1" \
+        "tornado>=6.5.2" \
+        "urllib3>=2.6.0" \
+        "PyJWT>=2.10.2" \
+        "wheel>=0.46.0" \
+        "Mako>=1.3.10" \
+        "Brotli>=1.2.0" \
+        "cryptography>=46.0.0" \
+    && /opt/conda/bin/python -m pip uninstall -y nbclassic \
+    && rm -rf /var/lib/apt/lists/* /root/.cache/pip \
+    && groupadd --gid 1000 chaimir \
     && usermod --gid 1000 jovyan \
     && mkdir -p /workspace \
     && chown -R 1000:1000 /workspace /home/jovyan

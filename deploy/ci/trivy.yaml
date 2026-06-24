@@ -6,8 +6,9 @@ severity:
   - CRITICAL
 # 命中高危/严重即非零退出,阻断推送。
 exit-code: 1
-# 仅对有修复方案的漏洞阻断,避免无解 CVE 卡死流水线(可由安全评审收紧)。
-ignore-unfixed: true
+# 生产门禁不忽略 unfixed。无官方修复版本的高危/严重漏洞必须通过上游替换、
+# 源码重建或 manifest deployable=false 阻断处理,不得在扫描层静默放行。
+ignore-unfixed: false
 vulnerability:
   type:
     - os

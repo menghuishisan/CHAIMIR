@@ -1,5 +1,5 @@
 # 本文件定义长安链运行时镜像,从可校验源码归档重建 ChainMaker 节点。
-ARG GO_BUILDER_IMAGE=chaimir/base/go-builder:dev
+ARG GO_BUILDER_IMAGE
 ARG RUNTIME_IMAGE=debian:12-slim
 ARG CHAINMAKER_SOURCE_ARCHIVE=images/vendor/chainmaker/chainmaker-go-v2.3.8.tar.gz
 ARG CHAINMAKER_SOURCE_SHA256=
@@ -16,9 +16,7 @@ ARG CHAINMAKER_GIT_BRANCH
 ARG CHAINMAKER_GIT_COMMIT
 
 USER root
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends build-essential \
-    && rm -rf /var/lib/apt/lists/* \
+RUN apk add --no-cache build-base \
     && mkdir -p /src/chainmaker-go /out \
     && chown -R 1000:1000 /src/chainmaker-go /out
 USER 1000:1000

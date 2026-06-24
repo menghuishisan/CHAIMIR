@@ -80,4 +80,6 @@ supply_chain:
   trivy_required: true
   cosign_required: true
   pull_by_digest_in_production: true
+  deployable: false
+  block_reason: "2026-06-23 本地缺少 manifest 声明的 images/vendor/chainmaker/chainmaker-go-v2.3.8.tar.gz 可校验源码归档;当前 Harbor digest 内 /chainmaker-go/bin/chainmaker 的 Go build info 为 go1.16.6,Trivy 0.71.2 报告 18 个 CRITICAL 与 178 个 HIGH。补齐可信 v2.3.8 源码归档或可认证官方源码并用当前 Go builder 重建、扫描通过前不得部署。"
 

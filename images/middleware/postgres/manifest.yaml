@@ -13,16 +13,15 @@ labels:
   chaimir.io/student-access: "false"
   chaimir.io/sensitivity: stateful-middleware
   chaimir.io/scope: middleware
-  chaimir.io/source: upstream-pinned
-description: PostgreSQL 主数据库上游固定镜像。
+  chaimir.io/source: thin-wrapper
+description: PostgreSQL 主数据库官方薄封装镜像。
 source:
-  type: upstream-pinned
+  type: thin-wrapper
 upstream:
   registry: docker.io
   image: library/postgres
-  version: "16-alpine"
-  digest: sha256:16bc17c64a573ef34162af9298258d1aec548232985b33ed7b1eac33ba35c229
-  digest_required: true
+  version: "18-alpine"
+  reuse_policy: security-thin-wrapper
   license: PostgreSQL
 private_delivery:
   offline_bundle: true
@@ -91,6 +90,9 @@ selftest:
     type: exec
     command:
       - pg_isready
+build:
+  context: images/middleware/postgres
+  dockerfile: Dockerfile
 supply_chain:
   sbom: true
   trivy_required: true

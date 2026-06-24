@@ -40,18 +40,29 @@ powershell -NoProfile -ExecutionPolicy Bypass -File images/pull-images.ps1 -Scop
 
 脚本默认每个镜像最多尝试 3 次。单次 `docker pull` 失败后,若本地原本没有该 digest 引用,会执行 `docker image rm <ref>` 清理失败残留后重试;若本地已存在该 digest,则保留本地可用镜像,避免瞬时 registry 错误破坏已预热结果。当前镜像全部重试失败后立即停止并返回非 0,不得继续拉取后续镜像。生产不应启用 `-NoCleanupFailedPull`,该开关仅用于诊断 Docker 本地状态。
 
-本地完整功能测试也必须走同一套 registry + digest lock 机制。若本地已有 `chaimir/<image>:dev` 构建产物,先把它们发布到一个开发者可控 registry,由脚本从 registry 返回值生成临时锁文件,再用同一脚本按 digest 拉取:
+## 构建与候选锁
+
+本地完整功能测试、预发布和生产必须走同一套 Harbor + digest lock 机制。构建类镜像不得先落到 `local`、`chaimir/*:dev` 或其他本地命名空间再转换;构建命令必须直接使用与生产一致的 Harbor 分类命名空间,并从 Harbor 返回值生成候选锁:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File images/build-images.ps1 `
+  -Registry harbor.chaimir:30080 `
+  -Tag $env:GIT_COMMIT `
+  -DigestLock .tmp/backend-functional-test/evidence/candidate-image-digests.lock `
+  -DigestLockOut .tmp/backend-functional-test/evidence/candidate-image-digests.lock `
+  -Platform linux/amd64 `
+  -Push
+```
+
+`-Push` 使用 `docker buildx build --push` 将镜像直接推入 Harbor,并把 Harbor 解析出的 digest 写入 `-DigestLockOut`。`-DigestLock` 同时作为构建依赖输入:例如 `base/judge-min` 依赖 `base/go-builder` 时,必须先让 `base/go-builder` 写入同一候选锁,后续镜像才能按 `harbor.chaimir:30080/base/go-builder@sha256:...` 构建。
+
+候选锁只能用于回拉和安全校验,不能直接作为正式发布锁。完成构建后必须用同一拉取脚本按 digest 拉回:
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File images/pull-images.ps1 `
   -Scope all `
   -Registry harbor.chaimir:30080 `
-  -DockerConfig .tmp/backend-functional-test/docker-config `
-  -DigestLock .tmp/backend-functional-test/evidence/local-registry-image-digests.lock `
-  -PublishLocalBuilt `
-  -LocalSourceRegistry chaimir `
-  -LocalSourceTag dev `
-  -PublishTag dev
+  -DigestLock .tmp/backend-functional-test/evidence/candidate-image-digests.lock
 ```
 
-`-PublishLocalBuilt` 只发布 `source.type=platform-built|thin-wrapper|build-base` 的镜像;纯上游固定镜像仍按 manifest 中的上游 digest 拉取。脚本会先校验所有构建类 manifest 都存在本地源镜像,缺项直接失败,不会跳过、不会回退到 tag。该模式用于本地真实功能测试和离线包预演;生产发布仍必须使用 CI/Harbor 生成并经 Trivy/Cosign 门禁通过的完整 `image-digests.lock`。
+拉回后的镜像必须经过 Trivy HIGH/CRITICAL 阻断扫描和 Cosign 签名/验签。只有全部非前端镜像通过后,候选锁才能晋升为正式 `images/image-digests.lock` 或生成 `SANDBOX_IMAGE_ATTESTATIONS_JSON`。`-PublishLocalBuilt` 仅用于旧证据重放或诊断,不得作为新验收默认路径。

@@ -302,7 +302,7 @@ foreach ($item in $items) {
     if (-not $SkipScan) {
         try {
             Invoke-ComposeTool -Tool "trivy" -ToolArgs @(
-                "image", "--ignore-unfixed", "--exit-code", "1", "--severity", $Severity,
+                "image", "--exit-code", "1", "--severity", $Severity,
                 "--username", $registryUser, "--password", $registryPassword, "--insecure", $ref
             ) -Context "Trivy 扫描 $ref" *>> $scanLog
         } catch {

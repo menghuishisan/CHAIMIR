@@ -7,7 +7,10 @@ LABEL org.opencontainers.image.description="Chaimir Hyperledger Besu enterprise 
 USER root
 
 # 复用上游 besu:1000:1000,链状态只写入 runtime-state 卷。
-RUN mkdir -p /workspace /runtime-state/besu \
+RUN apt-get -o Acquire::Retries=3 update \
+    && apt-get -o Acquire::Retries=3 -y upgrade \
+    && rm -rf /var/lib/apt/lists/* \
+    && mkdir -p /workspace /runtime-state/besu \
     && chown -R 1000:1000 /workspace /runtime-state
 
 COPY entrypoint.sh /usr/local/bin/chaimir-besu-entrypoint

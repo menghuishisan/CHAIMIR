@@ -13,16 +13,16 @@ labels:
   chaimir.io/student-access: "false"
   chaimir.io/sensitivity: stateful-middleware
   chaimir.io/scope: middleware
-  chaimir.io/source: upstream-pinned
-description: NATS 事件总线上游固定镜像。
+  chaimir.io/source: platform-built
+description: NATS 事件总线官方源码重建镜像。
 source:
-  type: upstream-pinned
+  type: platform-built
 upstream:
-  registry: docker.io
-  image: library/nats
-  version: "2.11-alpine"
-  digest: sha256:e4bf19f15fd3218814a4e3c9e0064e1334bd8aa20d5984b9f1a0afd084f8cc00
-  digest_required: true
+  source_repository: https://github.com/nats-io/nats-server
+  version: "v2.14.2"
+  builder_arg: GO_BUILDER_IMAGE
+  runtime: alpine:3.23
+  reuse_policy: source-build
   license: Apache-2.0
 private_delivery:
   offline_bundle: true
@@ -92,6 +92,9 @@ selftest:
     type: http
     path: /healthz
     port: 8222
+build:
+  context: images/middleware/nats
+  dockerfile: Dockerfile
 supply_chain:
   sbom: true
   trivy_required: true

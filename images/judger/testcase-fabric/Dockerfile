@@ -1,5 +1,7 @@
 # 本文件定义 Fabric 链码测试判题镜像。
-FROM chaimir/base/judge-min:dev AS judge-base
+ARG JUDGE_MIN_IMAGE
+
+FROM ${JUDGE_MIN_IMAGE} AS judge-base
 
 FROM hyperledger/fabric-tools:2.5.16
 

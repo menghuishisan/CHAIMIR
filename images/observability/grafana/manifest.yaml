@@ -20,8 +20,8 @@ source:
 upstream:
   registry: docker.io
   image: grafana/grafana
-  version: "12.1.0"
-  digest: sha256:6ac590e7cabc2fbe8d7b8fc1ce9c9f0582177b334e0df9c927ebd9670469440f
+  version: "13.0.2"
+  digest: sha256:5dad0df181cb644a14e13617b913b261a54f7d4fd4510721dba420929f35bea2
   digest_required: true
   license: AGPL-3.0
 private_delivery:
@@ -87,3 +87,5 @@ supply_chain:
   trivy_required: true
   cosign_required: true
   pull_by_digest_in_production: true
+  deployable: false
+  block_reason: "2026-06-22 升级到 13.0.2 后 Trivy 0.71.2 仍报告 14 个 HIGH 且均有 fixed version;在上游干净 digest 或源码重建通过门禁前不得部署。"

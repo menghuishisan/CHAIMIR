@@ -20,8 +20,8 @@ source:
 upstream:
   registry: registry.k8s.io
   image: ingress-nginx/controller
-  version: "v1.13.0"
-  digest: sha256:dc75a7baec7a3b827a5d7ab0acd10ab507904c7dad692365b3e3b596eca1afd2
+  version: "v1.15.1"
+  digest: sha256:594ceea76b01c592858f803f9ff4d2cb40542cae2060410b2c95f75907d659e1
   digest_required: true
   license: Apache-2.0
 private_delivery:
@@ -97,3 +97,5 @@ supply_chain:
   trivy_required: true
   cosign_required: true
   pull_by_digest_in_production: true
+  deployable: false
+  block_reason: "2026-06-22 升级到 controller-v1.15.1 后 Trivy 0.71.2 仍报告 3 个 CRITICAL 与 55 个 HIGH 且均有 fixed version;在上游干净 digest 或源码重建通过门禁前不得部署。"

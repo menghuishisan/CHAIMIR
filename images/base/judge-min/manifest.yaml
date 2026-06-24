@@ -18,7 +18,8 @@ description: 判题执行器最小安全基座镜像。
 source:
   type: build-base
 upstream:
-  image: alpine:3.22
+  image: alpine:3.23
+  digest: sha256:fd791d74b68913cbb027c6546007b3f0d3bc45125f797758156952bc2d6daf40
   reuse_policy: thin-wrapper
 data_driven: false
 capabilities:
@@ -47,8 +48,8 @@ resources:
   memory_limit: 512Mi
   ephemeral_storage_limit: 1Gi
 build:
-  context: ../../..
-  dockerfile: images/base/judge-min/Dockerfile
+  context: images/base/judge-min
+  dockerfile: Dockerfile
 selftest:
   commands:
     - name: non-root-user

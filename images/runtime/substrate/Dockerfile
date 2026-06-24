@@ -1,14 +1,15 @@
-# 本文件定义 Substrate/Polkadot 开发链运行时镜像。
-FROM parity/substrate:v3.0.0
+# 本文件定义 Substrate/Polkadot 开发链运行时镜像,复用 Polkadot SDK 官方节点镜像。
+FROM parity/polkadot:stable2603-3
 
 LABEL org.opencontainers.image.title="runtime/substrate"
-LABEL org.opencontainers.image.description="Chaimir Substrate development chain runtime"
+LABEL org.opencontainers.image.description="Chaimir Polkadot SDK development chain runtime"
 
 USER root
 
-# 创建非 root 用户和链状态目录。
-RUN if ! getent group 1000 >/dev/null; then groupadd --gid 1000 chaimir; fi \
-    && if ! id -u 1000 >/dev/null 2>&1; then useradd --uid 1000 --gid 1000 --home-dir /workspace --create-home --shell /usr/sbin/nologin chaimir; fi \
+# 官方镜像已提供 parity:1000:1000;只升级系统安全包并创建平台声明的写入目录。
+RUN apt-get -o Acquire::Retries=3 update \
+    && apt-get -o Acquire::Retries=3 -y upgrade \
+    && rm -rf /var/lib/apt/lists/* \
     && mkdir -p /workspace \
     && mkdir -p /runtime-state/substrate \
     && chown -R 1000:1000 /workspace /runtime-state

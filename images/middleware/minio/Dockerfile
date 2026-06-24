@@ -1,5 +1,5 @@
 # 本文件从 MinIO 官方源码构建对象存储服务镜像,避免依赖已停止更新的社区 Docker tag。
-ARG GO_BUILDER_IMAGE=chaimir/base/go-builder:dev
+ARG GO_BUILDER_IMAGE
 FROM ${GO_BUILDER_IMAGE} AS build
 
 ARG MINIO_VERSION=RELEASE.2025-10-15T17-29-55Z

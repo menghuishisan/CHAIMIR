@@ -1,5 +1,6 @@
 # 本文件定义长安链合约测试判题镜像,从可校验源码归档重建 ChainMaker 工具。
-ARG GO_BUILDER_IMAGE=chaimir/base/go-builder:dev
+ARG GO_BUILDER_IMAGE
+ARG JUDGE_MIN_IMAGE
 ARG RUNTIME_IMAGE=debian:12-slim
 ARG CHAINMAKER_SOURCE_ARCHIVE=images/vendor/chainmaker/chainmaker-go-v2.3.8.tar.gz
 ARG CHAINMAKER_SOURCE_SHA256=
@@ -8,7 +9,6 @@ ARG CHAINMAKER_GIT_BRANCH=source-archive
 ARG CHAINMAKER_GIT_COMMIT=source-archive
 
 FROM ${GO_BUILDER_IMAGE} AS chainmaker-build
-FROM chaimir/base/judge-min:dev AS judge-base
 
 ARG CHAINMAKER_SOURCE_ARCHIVE
 ARG CHAINMAKER_SOURCE_SHA256
@@ -17,9 +17,7 @@ ARG CHAINMAKER_GIT_BRANCH
 ARG CHAINMAKER_GIT_COMMIT
 
 USER root
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends build-essential \
-    && rm -rf /var/lib/apt/lists/* \
+RUN apk add --no-cache build-base \
     && mkdir -p /src/chainmaker-go /out \
     && chown -R 1000:1000 /src/chainmaker-go /out
 USER 1000:1000
@@ -32,6 +30,8 @@ RUN test -n "${CHAINMAKER_SOURCE_SHA256}" \
     && go build -trimpath -ldflags="-s -w -X chainmaker.org/chainmaker-go/module/blockchain.CurrentVersion=${CHAINMAKER_VERSION} -X chainmaker.org/chainmaker-go/module/blockchain.BuildDateTime=source-archive -X chainmaker.org/chainmaker-go/module/blockchain.GitBranch=${CHAINMAKER_GIT_BRANCH} -X chainmaker.org/chainmaker-go/module/blockchain.GitCommit=${CHAINMAKER_GIT_COMMIT}" -o /out/chainmaker \
     && cp /src/chainmaker-go/main/libwasmer_runtime_c_api.so /out/libwasmer.so \
     && cp /src/chainmaker-go/main/prebuilt/linux/wxdec /out/wxdec
+
+FROM ${JUDGE_MIN_IMAGE} AS judge-base
 
 FROM ${RUNTIME_IMAGE}
 

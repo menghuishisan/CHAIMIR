@@ -24,50 +24,118 @@ jobs:
   discover:
     runs-on: ubuntu-latest
     outputs:
-      matrix: ${{ steps.set.outputs.matrix }}
+      go_builder_matrix: ${{ steps.set.outputs.go_builder_matrix }}
+      base_matrix: ${{ steps.set.outputs.base_matrix }}
+      main_matrix: ${{ steps.set.outputs.main_matrix }}
     steps:
       - uses: actions/checkout@v4
       - id: set
         name: 收集 images/ 下含 Dockerfile 的镜像目录
         run: |
-          # 输出 {dir, image} 矩阵:dir 为镜像目录,image 由目录相对路径映射为 Harbor project/name。
-          # 例:images/runtimes/evm-hardhat → runtime/evm-hardhat。
-          dirs=$(find images -name Dockerfile -printf '%h\n' | sort -u | grep -v '^images/service/' || true)
-          json='[]'
-          for d in $dirs; do
-            rel=${d#images/}
-            json=$(echo "$json" | jq --arg d "$d" --arg r "$rel" '. + [{dir:$d, rel:$r}]')
-          done
-          echo "matrix={\"include\":$json}" >> "$GITHUB_OUTPUT"
+          set -euo pipefail
 
-  build-push:
+          # 输出矩阵项:context/dockerfile 以 manifest 为准,避免 CI 与本地构建上下文不一致。
+          go_builder='[]'
+          base='[]'
+          main='[]'
+          read_top_level() {
+            local key="$1"
+            local file="$2"
+            awk -v key="$key" '
+              $0 ~ "^" key ":" {
+                sub("^[^:]+:[[:space:]]*", "");
+                gsub(/^["'\''"]|["'\''"]$/, "");
+                print;
+                exit;
+              }
+            ' "$file"
+          }
+          read_build_value() {
+            local key="$1"
+            local file="$2"
+            awk -v key="$key" '
+              /^build:[[:space:]]*$/ { inside = 1; next }
+              inside && /^[A-Za-z_][A-Za-z0-9_]*:[[:space:]]*/ { inside = 0 }
+              inside && $0 ~ "^[[:space:]]+" key ":" {
+                sub("^[[:space:]]+" key ":[[:space:]]*", "");
+                gsub(/^["'\''"]|["'\''"]$/, "");
+                print;
+                exit;
+              }
+            ' "$file"
+          }
+          dirs=$(find images -name Dockerfile -printf '%h\n' | sort -u)
+          for d in $dirs; do
+            manifest="$d/manifest.yaml"
+            test -f "$manifest"
+            logical=$(read_top_level image "$manifest")
+            safe=${logical//\//-}
+            context_value=$(read_build_value context "$manifest")
+            dockerfile_value=$(read_build_value dockerfile "$manifest")
+            if [[ -z "$logical" ]]; then
+              echo "manifest 缺少顶层 image: $manifest" >&2
+              exit 1
+            fi
+            if [[ -z "$context_value" ]]; then
+              context_value="."
+            fi
+            if [[ -z "$dockerfile_value" ]]; then
+              dockerfile_value="Dockerfile"
+            fi
+            if [[ "$context_value" == images/* ]]; then
+              context_rel="$context_value"
+            else
+              context_abs=$(realpath -m "$d/$context_value")
+              context_rel=$(realpath --relative-to="$GITHUB_WORKSPACE" "$context_abs")
+              if [[ "$context_rel" == "." ]]; then
+                context_rel="."
+              fi
+            fi
+            if [[ "$dockerfile_value" == images/* ]]; then
+              dockerfile_rel="$dockerfile_value"
+            elif [[ "$context_rel" == "." ]]; then
+              dockerfile_rel="$dockerfile_value"
+            else
+              dockerfile_rel="$context_rel/$dockerfile_value"
+            fi
+            item=$(jq -cn \
+              --arg dir "$d" \
+              --arg logical "$logical" \
+              --arg safe "$safe" \
+              --arg context "$context_rel" \
+              --arg dockerfile "$dockerfile_rel" \
+              '{dir:$dir, logical:$logical, safe:$safe, context:$context, dockerfile:$dockerfile}')
+            if [[ "$logical" == "base/go-builder" ]]; then
+              go_builder=$(echo "$go_builder" | jq -c --argjson item "$item" '. + [$item]')
+            elif [[ "$logical" == base/* ]]; then
+              base=$(echo "$base" | jq -c --argjson item "$item" '. + [$item]')
+            else
+              main=$(echo "$main" | jq -c --argjson item "$item" '. + [$item]')
+            fi
+          done
+          echo "go_builder_matrix={\"include\":$go_builder}" >> "$GITHUB_OUTPUT"
+          echo "base_matrix={\"include\":$base}" >> "$GITHUB_OUTPUT"
+          echo "main_matrix={\"include\":$main}" >> "$GITHUB_OUTPUT"
+
+  build-go-builder:
     needs: discover
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.discover.outputs.matrix != '{"include":[]}'
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.discover.outputs.go_builder_matrix != '{"include":[]}'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
-      matrix: ${{ fromJson(needs.discover.outputs.matrix) }}
+      matrix: ${{ fromJson(needs.discover.outputs.go_builder_matrix) }}
     steps:
       - uses: actions/checkout@v4
       - name: 安装 Cosign
         uses: sigstore/cosign-installer@v3
-      - name: 解析 manifest 镜像名
-        id: meta
-        run: |
-          # 镜像逻辑名取自 manifest.yaml(数据驱动:平台代码不改,加镜像即接入)。
-          name=$(yq '.image' "${{ matrix.dir }}/manifest.yaml")
-          safe=${name//\//-}
-          echo "logical=$name" >> "$GITHUB_OUTPUT"
-          echo "safe=$safe" >> "$GITHUB_OUTPUT"
-          echo "image=${{ secrets.HARBOR_REGISTRY }}/$name" >> "$GITHUB_OUTPUT"
       - name: 构建+扫描+签名+推送
         id: build
         uses: ./deploy/ci/build-scan-sign-push
         with:
-          image: ${{ steps.meta.outputs.image }}
+          image: ${{ secrets.HARBOR_REGISTRY }}/${{ matrix.logical }}
           tag: ${{ github.sha }}
-          context: ${{ matrix.dir }}
-          dockerfile: ${{ matrix.dir }}/Dockerfile
+          context: ${{ matrix.context }}
+          dockerfile: ${{ matrix.dockerfile }}
           registry: ${{ secrets.HARBOR_REGISTRY }}
           registry-username: ${{ secrets.HARBOR_USERNAME }}
           registry-password: ${{ secrets.HARBOR_PASSWORD }}
@@ -76,16 +144,89 @@ jobs:
       - name: 写入构建产物 digest 锁片段
         run: |
           mkdir -p image-digest-artifacts
-          printf '%s %s\n' "${{ steps.meta.outputs.logical }}" "${{ steps.build.outputs.digest }}" > "image-digest-artifacts/${{ steps.meta.outputs.safe }}.lock"
+          printf '%s %s\n' "${{ matrix.logical }}" "${{ steps.build.outputs.digest }}" > "image-digest-artifacts/${{ matrix.safe }}.lock"
       - name: 上传构建产物 digest 锁片段
         uses: actions/upload-artifact@v4
         with:
-          name: image-digest-${{ steps.meta.outputs.safe }}
-          path: image-digest-artifacts/${{ steps.meta.outputs.safe }}.lock
+          name: image-digest-${{ matrix.safe }}
+          path: image-digest-artifacts/${{ matrix.safe }}.lock
+
+  build-base:
+    needs: [discover, build-go-builder]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.discover.outputs.base_matrix != '{"include":[]}' && needs.build-go-builder.result == 'success'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.discover.outputs.base_matrix) }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: 安装 Cosign
+        uses: sigstore/cosign-installer@v3
+      - name: 构建+扫描+签名+推送
+        id: build
+        uses: ./deploy/ci/build-scan-sign-push
+        with:
+          image: ${{ secrets.HARBOR_REGISTRY }}/${{ matrix.logical }}
+          tag: ${{ github.sha }}
+          context: ${{ matrix.context }}
+          dockerfile: ${{ matrix.dockerfile }}
+          build-args: |
+            GO_BUILDER_IMAGE=${{ secrets.HARBOR_REGISTRY }}/base/go-builder:${{ github.sha }}
+          registry: ${{ secrets.HARBOR_REGISTRY }}
+          registry-username: ${{ secrets.HARBOR_USERNAME }}
+          registry-password: ${{ secrets.HARBOR_PASSWORD }}
+          cosign-key: ${{ secrets.COSIGN_KEY }}
+          cosign-password: ${{ secrets.COSIGN_PASSWORD }}
+      - name: 写入构建产物 digest 锁片段
+        run: |
+          mkdir -p image-digest-artifacts
+          printf '%s %s\n' "${{ matrix.logical }}" "${{ steps.build.outputs.digest }}" > "image-digest-artifacts/${{ matrix.safe }}.lock"
+      - name: 上传构建产物 digest 锁片段
+        uses: actions/upload-artifact@v4
+        with:
+          name: image-digest-${{ matrix.safe }}
+          path: image-digest-artifacts/${{ matrix.safe }}.lock
+
+  build-main:
+    needs: [discover, build-base]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.discover.outputs.main_matrix != '{"include":[]}' && needs.build-base.result == 'success'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.discover.outputs.main_matrix) }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: 安装 Cosign
+        uses: sigstore/cosign-installer@v3
+      - name: 构建+扫描+签名+推送
+        id: build
+        uses: ./deploy/ci/build-scan-sign-push
+        with:
+          image: ${{ secrets.HARBOR_REGISTRY }}/${{ matrix.logical }}
+          tag: ${{ github.sha }}
+          context: ${{ matrix.context }}
+          dockerfile: ${{ matrix.dockerfile }}
+          build-args: |
+            GO_BUILDER_IMAGE=${{ secrets.HARBOR_REGISTRY }}/base/go-builder:${{ github.sha }}
+            JUDGE_MIN_IMAGE=${{ secrets.HARBOR_REGISTRY }}/base/judge-min:${{ github.sha }}
+          registry: ${{ secrets.HARBOR_REGISTRY }}
+          registry-username: ${{ secrets.HARBOR_USERNAME }}
+          registry-password: ${{ secrets.HARBOR_PASSWORD }}
+          cosign-key: ${{ secrets.COSIGN_KEY }}
+          cosign-password: ${{ secrets.COSIGN_PASSWORD }}
+      - name: 写入构建产物 digest 锁片段
+        run: |
+          mkdir -p image-digest-artifacts
+          printf '%s %s\n' "${{ matrix.logical }}" "${{ steps.build.outputs.digest }}" > "image-digest-artifacts/${{ matrix.safe }}.lock"
+      - name: 上传构建产物 digest 锁片段
+        uses: actions/upload-artifact@v4
+        with:
+          name: image-digest-${{ matrix.safe }}
+          path: image-digest-artifacts/${{ matrix.safe }}.lock
 
   merge-digest-lock:
-    needs: build-push
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.build-push.result == 'success'
+    needs: [build-go-builder, build-base, build-main]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.build-go-builder.result == 'success' && needs.build-base.result == 'success' && needs.build-main.result == 'success'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

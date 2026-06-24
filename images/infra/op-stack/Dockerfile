@@ -1,5 +1,5 @@
 # 本文件定义 OP Stack op-node 源码重建镜像,完整 L2 工作负载由 M2 WorkloadSpec 组合编排。
-ARG GO_BUILDER_IMAGE=chaimir/base/go-builder:dev
+ARG GO_BUILDER_IMAGE
 ARG RUNTIME_IMAGE=gcr.io/distroless/static-debian12:nonroot
 
 FROM ${GO_BUILDER_IMAGE} AS op-node-build

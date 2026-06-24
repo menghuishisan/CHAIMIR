@@ -1,12 +1,12 @@
 # 本文件定义判题执行器安全基座,供具体 judger 镜像继承。
-ARG GO_BUILDER_IMAGE=chaimir/base/go-builder:dev
+ARG GO_BUILDER_IMAGE
 
 FROM ${GO_BUILDER_IMAGE} AS normalizer-build
 
 COPY normalize_result.go /src/normalize_result.go
 RUN go build -trimpath -ldflags "-s -w" -o /out/normalize-result /src/normalize_result.go
 
-FROM alpine:3.22
+FROM alpine:3.23
 
 LABEL org.opencontainers.image.title="base/judge-min"
 LABEL org.opencontainers.image.description="Chaimir minimal judge runner base image"

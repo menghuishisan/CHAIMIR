@@ -18,10 +18,11 @@ description: IPFS/Kubo 内容寻址存储节点镜像。
 source:
   type: thin-wrapper
 upstream:
-  release_url: https://dist.ipfs.tech/kubo/v0.42.0/kubo_v0.42.0_linux-amd64.tar.gz
-  sha512: 054c38a0cf66f7d738e25085ad62cb3a42d03d4bac329b7dd25c1d71cf18e1ce87d55b1d1b705b04c65210dca9109973579e0eb1cd72f6341ecb3311d840d156
+  registry: docker.io
+  image: ipfs/kubo
   version: v0.42.0
-  reuse_policy: official-release-binary
+  digest: sha256:6a99314a4fae81abc50a73ccccc0dc4cd49da672a08aca84d25c38c5aa3a8bb3
+  reuse_policy: official-image-binary
 data_driven: true
 capabilities:
   - decentralized-storage

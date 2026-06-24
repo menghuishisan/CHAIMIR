@@ -7,9 +7,10 @@ param(
     [string]$DockerConfig = $env:DOCKER_CONFIG,
     [string]$DigestLock = "",
     [switch]$PublishLocalBuilt,
-    [string]$LocalSourceRegistry = "chaimir",
-    [string]$LocalSourceTag = "dev",
-    [string]$PublishTag = "dev",
+    [string]$LocalSourceRegistry = "",
+    [string]$LocalSourceTag = "",
+    [string]$PublishTag = "",
+    [switch]$PrintBuildArgs,
     [int]$MaxAttempts = 3,
     [int]$RetryDelaySeconds = 5,
     [switch]$FailFast,
@@ -39,14 +40,17 @@ if ($RetryDelaySeconds -lt 0) {
 if ($PublishLocalBuilt -and $Scope -eq "upstream-pinned") {
     throw "PublishLocalBuilt 只能与 Scope=all 或 Scope=built 一起使用"
 }
+if ($PrintBuildArgs -and $Scope -eq "upstream-pinned") {
+    throw "PrintBuildArgs 只能与 Scope=all 或 Scope=built 一起使用"
+}
 if ($PublishLocalBuilt -and [string]::IsNullOrWhiteSpace($LocalSourceRegistry)) {
-    throw "LocalSourceRegistry 不能为空"
+    $LocalSourceRegistry = $Registry
 }
 if ($PublishLocalBuilt -and [string]::IsNullOrWhiteSpace($LocalSourceTag)) {
-    throw "LocalSourceTag 不能为空"
+    throw "启用 PublishLocalBuilt 时必须显式传入 LocalSourceTag,不得隐式使用本地可变调试标签"
 }
 if ($PublishLocalBuilt -and [string]::IsNullOrWhiteSpace($PublishTag)) {
-    throw "PublishTag 不能为空"
+    throw "启用 PublishLocalBuilt 时必须显式传入 PublishTag,不得隐式发布可变调试标签"
 }
 
 function Read-YamlValue {
@@ -152,6 +156,19 @@ function Read-DigestLock {
         throw "digest 锁格式非法: $Path -> $line"
     }
     return $items
+}
+
+function Get-BuildArgRef {
+    param(
+        [hashtable]$DigestLockItems,
+        [string]$ImageName,
+        [string]$ArgName
+    )
+    $digest = $DigestLockItems[$ImageName]
+    if ([string]::IsNullOrWhiteSpace($digest)) {
+        throw "无法生成 $ArgName, digest 锁缺少 $ImageName"
+    }
+    return "$ArgName=$Registry/$ImageName@$digest"
 }
 
 function Add-ImageRef {
@@ -497,6 +514,11 @@ if ($PublishLocalBuilt) {
     Publish-LocalBuiltImages -Manifests $manifests -OutputLock $DigestLock
 }
 $digestLockItems = Read-DigestLock -Path $DigestLock
+if ($PrintBuildArgs) {
+    Write-Output (Get-BuildArgRef -DigestLockItems $digestLockItems -ImageName "base/go-builder" -ArgName "GO_BUILDER_IMAGE")
+    Write-Output (Get-BuildArgRef -DigestLockItems $digestLockItems -ImageName "base/judge-min" -ArgName "JUDGE_MIN_IMAGE")
+    exit 0
+}
 $items = New-Object System.Collections.Generic.List[object]
 $seen = @{}
 $missing = New-Object System.Collections.Generic.List[string]

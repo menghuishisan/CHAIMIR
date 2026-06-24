@@ -1,7 +1,8 @@
 # 本文件定义 Hardhat 教学运行时镜像,用于 Solidity 开发体验类实验。
+ARG NODE_BUILDER_IMAGE
 FROM ghcr.io/foundry-rs/foundry:v1.0.0 AS foundry
 
-FROM node:22-bookworm-slim
+FROM ${NODE_BUILDER_IMAGE}
 
 LABEL org.opencontainers.image.title="runtime/evm-hardhat"
 LABEL org.opencontainers.image.description="Chaimir Hardhat EVM teaching runtime"
@@ -15,10 +16,8 @@ COPY --from=foundry /usr/local/bin/anvil /usr/local/bin/anvil
 COPY --from=foundry /usr/local/bin/cast /usr/local/bin/cast
 COPY --from=foundry /usr/local/bin/chisel /usr/local/bin/chisel
 COPY package.json package-lock.json /opt/chaimir/evm-hardhat/
-RUN apt-get -o Acquire::Retries=3 update \
-    && apt-get -o Acquire::Retries=3 -y upgrade \
-    && apt-get -o Acquire::Retries=3 install -y --no-install-recommends bash git ca-certificates \
-    && rm -rf /var/lib/apt/lists/* \
+RUN apk upgrade --no-cache \
+    && apk add --no-cache bash git ca-certificates \
     && cd /opt/chaimir/evm-hardhat \
     && npm ci --omit=dev --ignore-scripts --no-audit --no-fund \
     && ln -s /opt/chaimir/evm-hardhat/node_modules/.bin/hardhat /usr/local/bin/hardhat \

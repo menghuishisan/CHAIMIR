@@ -7,7 +7,10 @@ LABEL org.opencontainers.image.description="Chaimir Solana test validator runtim
 USER root
 
 # 创建固定 UID/GID 的沙箱用户,测试链账本只写入 runtime-state。
-RUN groupadd --gid 1000 chaimir \
+RUN apt-get -o Acquire::Retries=3 update \
+    && apt-get -o Acquire::Retries=3 -y upgrade \
+    && rm -rf /var/lib/apt/lists/* \
+    && groupadd --gid 1000 chaimir \
     && useradd --uid 1000 --gid 1000 --home-dir /workspace --create-home --shell /usr/sbin/nologin chaimir \
     && mkdir -p /runtime-state/solana \
     && chown -R 1000:1000 /workspace /runtime-state

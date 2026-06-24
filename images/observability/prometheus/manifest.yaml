@@ -20,8 +20,8 @@ source:
 upstream:
   registry: quay.io
   image: prometheus/prometheus
-  version: "v3.5.0"
-  digest: sha256:63805ebb8d2b3920190daf1cb14a60871b16fd38bed42b857a3182bc621f4996
+  version: "v3.12.0"
+  digest: sha256:69f5241418838263316593f7274a304b095c40bcf22e57272865da91bd60a8ac
   digest_required: true
   license: Apache-2.0
 private_delivery:
@@ -87,3 +87,5 @@ supply_chain:
   trivy_required: true
   cosign_required: true
   pull_by_digest_in_production: true
+  deployable: false
+  block_reason: "2026-06-22 升级到 v3.12.0 后 Trivy 0.71.2 仍报告 2 个 HIGH 且均有 fixed version;在上游干净 digest 或源码重建通过门禁前不得部署。"

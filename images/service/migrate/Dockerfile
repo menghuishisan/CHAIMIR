@@ -1,5 +1,5 @@
 # 本文件构建 Chaimir 部署期 migrate 命令镜像。
-ARG GO_BUILDER_IMAGE=chaimir/base/go-builder:dev
+ARG GO_BUILDER_IMAGE
 ARG RUNTIME_IMAGE=gcr.io/distroless/static-debian12:nonroot
 
 FROM ${GO_BUILDER_IMAGE} AS builder

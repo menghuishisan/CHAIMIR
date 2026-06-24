@@ -21,7 +21,7 @@ upstream:
   components:
     - image: ghcr.io/foundry-rs/foundry:v1.0.0
       role: foundry-toolchain
-    - image: node:22-bookworm-slim
+    - image: node:24-alpine3.23
       role: node-runtime
   reuse_policy: self-developed-judger
 data_driven: true

@@ -19,10 +19,10 @@ source:
   type: build-base
 upstream:
   components:
-    - image: library/debian
+    - image: library/alpine
       registry: docker.io
-      version: 12-slim
-      digest: sha256:96e378d7e6531ac9a15ad505478fcc2e69f371b10f5cdf87857c4b8188404716
+      version: "3.23"
+      digest: sha256:fd791d74b68913cbb027c6546007b3f0d3bc45125f797758156952bc2d6daf40
     - image: go
       registry: https://go.dev/dl
       version: go1.26.4

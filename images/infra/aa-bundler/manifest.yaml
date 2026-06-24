@@ -18,7 +18,10 @@ description: ERC-4337 账户抽象 bundler 教学镜像。
 source:
   type: thin-wrapper
 upstream:
-  image: alchemyplatform/rundler:v0.11.0
+  registry: docker.io
+  image: alchemyplatform/rundler
+  version: v0.11.0
+  digest: sha256:ffdc5fca2d5566152af6fe96f88c50a4cf22ce88852bb626c591d3e8ea426178
   reuse_policy: thin-wrapper
 env_keys:
   config:

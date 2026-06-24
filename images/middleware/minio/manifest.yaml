@@ -20,7 +20,7 @@ source:
 upstream:
   source_repository: https://github.com/minio/minio
   version: "RELEASE.2025-10-15T17-29-55Z"
-  builder: chaimir/base/go-builder:dev
+  builder_arg: GO_BUILDER_IMAGE
   runtime: gcr.io/distroless/static-debian12:nonroot
   reuse_policy: source-build
   license: AGPL-3.0

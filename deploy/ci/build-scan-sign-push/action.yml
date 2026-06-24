@@ -18,6 +18,10 @@ inputs:
   dockerfile:
     description: Dockerfile 路径
     required: true
+  build-args:
+    description: 逐行传入 docker build 的构建参数,格式为 KEY=VALUE
+    required: false
+    default: ""
   registry:
     description: Harbor 仓库地址
     required: true
@@ -53,9 +57,18 @@ runs:
 
     - name: 多阶段构建镜像
       shell: bash
+      env:
+        BUILD_ARGS: ${{ inputs.build-args }}
       run: |
+        build_args=()
+        while IFS= read -r build_arg; do
+          if [ -n "$build_arg" ]; then
+            build_args+=(--build-arg "$build_arg")
+          fi
+        done <<< "$BUILD_ARGS"
         docker build \
           -f "${{ inputs.dockerfile }}" \
+          "${build_args[@]}" \
           -t "${{ inputs.image }}:${{ inputs.tag }}" \
           "${{ inputs.context }}"
 
@@ -66,7 +79,8 @@ runs:
         format: table
         exit-code: "1"            # 命中即失败,阻断后续推送。
         severity: HIGH,CRITICAL
-        ignore-unfixed: true
+        scanners: vuln,secret
+        ignore-unfixed: false
 
     - name: 推送镜像到 Harbor
       shell: bash

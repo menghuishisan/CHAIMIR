@@ -1,5 +1,7 @@
 # 本文件定义 FISCO BCOS 合约测试判题镜像。
-FROM chaimir/base/judge-min:dev AS judge-base
+ARG JUDGE_MIN_IMAGE
+
+FROM ${JUDGE_MIN_IMAGE} AS judge-base
 FROM fiscoorg/fiscobcos:v3.12.1 AS fisco-upstream
 
 FROM debian:12-slim

@@ -13,13 +13,17 @@ labels:
   chaimir.io/student-access: "true"
   chaimir.io/sensitivity: student-tool
   chaimir.io/scope: sandbox
-  chaimir.io/source: thin-wrapper
+  chaimir.io/source: platform-built
 description: Solidity 静态安全扫描工具镜像。
 source:
-  type: thin-wrapper
+  type: platform-built
 upstream:
-  image: trailofbits/eth-security-toolbox:nightly-20260608
-  reuse_policy: direct-upstream-wrapper
+  packages:
+    - slither-analyzer==0.11.3
+  binaries:
+    - solc 0.8.26
+  runtime: alpine:3.23
+  reuse_policy: minimal-official-package-build
 data_driven: true
 capabilities:
   - security-scan

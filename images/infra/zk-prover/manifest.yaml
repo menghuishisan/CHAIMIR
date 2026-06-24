@@ -13,13 +13,13 @@ labels:
   chaimir.io/student-access: "false"
   chaimir.io/sensitivity: sandbox-infra
   chaimir.io/scope: sandbox
-  chaimir.io/source: thin-wrapper
+  chaimir.io/source: platform-built
 description: ZK rollup 证明器教学镜像。
 source:
-  type: thin-wrapper
+  type: platform-built
 upstream:
-  image: node:22-bookworm-slim
-  reuse_policy: toolchain-wrapper
+  image: node:24-alpine3.23
+  reuse_policy: self-developed-toolchain
 data_driven: true
 capabilities:
   - zk-prover

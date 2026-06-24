@@ -18,8 +18,12 @@ description: Solidity/SWC/gas 静态扫描判题镜像。
 source:
   type: platform-built
 upstream:
-  image: trailofbits/eth-security-toolbox:nightly-20260608
-  reuse_policy: self-developed-judger
+  packages:
+    - slither-analyzer==0.11.3
+  binaries:
+    - solc 0.8.26
+  runtime: alpine:3.23
+  reuse_policy: mature-security-toolchain-wrapper
 data_driven: true
 capabilities:
   - judger
@@ -42,7 +46,7 @@ local_dev:
   host_mappings: []
 security:
   run_as_non_root: true
-  read_only_root_filesystem: true
+  read_only_root_filesystem: false
   allow_privilege_escalation: false
   privileged: false
   host_network: false
@@ -50,6 +54,12 @@ security:
   drop_capabilities:
     - ALL
   network_policy: deny-all
+security_exceptions:
+  - field: read_only_root_filesystem
+    reason: Slither 判题需要写入 /judge/result.json 与临时分析日志;运行期只允许挂载 judge 工作目录和临时缓存。
+    writable_mounts:
+      - judge-workdir
+      - tool-cache
 student_access:
   enabled: false
 resources:
@@ -68,7 +78,7 @@ selftest:
       command:
         - sh
         - -lc
-        - slither --version
+        - slither --version && solc --version
 supply_chain:
   sbom: true
   trivy_required: true

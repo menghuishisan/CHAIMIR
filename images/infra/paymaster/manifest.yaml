@@ -13,13 +13,13 @@ labels:
   chaimir.io/student-access: "false"
   chaimir.io/sensitivity: sandbox-infra
   chaimir.io/scope: sandbox
-  chaimir.io/source: thin-wrapper
+  chaimir.io/source: platform-built
 description: 账户抽象代付 gas 教学服务镜像。
 source:
-  type: thin-wrapper
+  type: platform-built
 upstream:
-  image: node:22-bookworm-slim
-  reuse_policy: service-wrapper
+  image: node:24-alpine3.23
+  reuse_policy: runtime-base
 env_keys:
   config:
     - CHAIMIR_IMAGE_PORT

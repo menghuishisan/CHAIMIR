@@ -2,8 +2,9 @@
 # 本脚本启动 Substrate 开发链。
 set -eu
 
-exec substrate \
+exec polkadot \
   --dev \
   --base-path /runtime-state/substrate \
   --unsafe-rpc-external \
-  --rpc-port "${CHAIMIR_RUNTIME_RPC_PORT:-9944}"
+  --rpc-port "${CHAIMIR_RUNTIME_RPC_PORT:-9944}" \
+  --rpc-cors all

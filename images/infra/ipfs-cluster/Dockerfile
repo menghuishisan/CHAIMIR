@@ -1,5 +1,5 @@
 # 本文件定义 IPFS Cluster 镜像,固定上游 release 源码并用加固 Go 工具链重建。
-ARG GO_BUILDER_IMAGE=chaimir/base/go-builder:dev
+ARG GO_BUILDER_IMAGE
 
 FROM ${GO_BUILDER_IMAGE} AS cluster-build
 

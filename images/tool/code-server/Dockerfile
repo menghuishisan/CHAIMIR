@@ -5,7 +5,10 @@ LABEL org.opencontainers.image.title="tool/code-server"
 LABEL org.opencontainers.image.description="Chaimir code-server web IDE image"
 
 USER root
-RUN mkdir -p /workspace \
+RUN apt-get -o Acquire::Retries=3 update \
+    && apt-get -o Acquire::Retries=3 -y upgrade \
+    && rm -rf /var/lib/apt/lists/* \
+    && mkdir -p /workspace \
     && chown -R 1000:1000 /workspace
 
 USER 1000:1000

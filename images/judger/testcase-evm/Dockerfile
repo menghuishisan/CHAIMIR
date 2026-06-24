@@ -1,8 +1,10 @@
 # 本文件定义 EVM 测试用例判题镜像。
-FROM ghcr.io/foundry-rs/foundry:v1.0.0 AS foundry
-FROM chaimir/base/judge-min:dev AS judge-base
+ARG JUDGE_MIN_IMAGE
 
-FROM node:22-bookworm-slim
+FROM ghcr.io/foundry-rs/foundry:v1.0.0 AS foundry
+FROM ${JUDGE_MIN_IMAGE} AS judge-base
+
+FROM node:24-alpine3.23
 
 LABEL org.opencontainers.image.title="judger/testcase-evm"
 LABEL org.opencontainers.image.description="Chaimir EVM testcase judger image"
@@ -20,9 +22,8 @@ COPY --from=foundry /usr/local/bin/cast /usr/local/bin/cast
 COPY --from=foundry /usr/local/bin/chisel /usr/local/bin/chisel
 COPY --from=judge-base /usr/local/bin/normalize-result /usr/local/bin/normalize-result
 COPY package.json package-lock.json /opt/chaimir/testcase-evm/
-RUN apt-get -o Acquire::Retries=3 update \
-    && apt-get -o Acquire::Retries=3 -y upgrade \
-    && rm -rf /var/lib/apt/lists/* \
+RUN apk upgrade --no-cache \
+    && apk add --no-cache bash ca-certificates \
     && cd /opt/chaimir/testcase-evm \
     && npm ci --omit=dev --ignore-scripts --no-audit --no-fund \
     && ln -s /opt/chaimir/testcase-evm/node_modules/.bin/hardhat /usr/local/bin/hardhat \

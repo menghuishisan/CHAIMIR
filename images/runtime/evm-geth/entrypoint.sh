@@ -2,6 +2,10 @@
 # 本脚本启动仅限沙箱内部访问的 geth dev 链。
 set -eu
 
+if [ "$#" -gt 0 ]; then
+  exec "$@"
+fi
+
 # HTTP RPC 监听容器端口,真实对外入口由平台代理鉴权控制。
 exec geth \
   --dev \

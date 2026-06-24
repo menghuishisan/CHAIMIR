@@ -13,13 +13,16 @@ labels:
   chaimir.io/student-access: "false"
   chaimir.io/sensitivity: student-runtime
   chaimir.io/scope: sandbox
-  chaimir.io/source: thin-wrapper
-description: go-ethereum 私链运行时镜像。
+  chaimir.io/source: platform-built
+description: go-ethereum 私链运行时官方源码重建镜像。
 source:
-  type: thin-wrapper
+  type: platform-built
 upstream:
-  image: ethereum/client-go:v1.16.2
-  reuse_policy: thin-wrapper
+  source_repository: https://github.com/ethereum/go-ethereum
+  version: v1.17.4
+  builder_arg: GO_BUILDER_IMAGE
+  runtime: alpine:3.23
+  reuse_policy: source-build
 data_driven: true
 capabilities:
   - chain-runtime

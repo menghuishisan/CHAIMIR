@@ -1,11 +1,11 @@
 # 本文件定义 ZK 证明器镜像,提供 circom/snarkjs 证明工具链。
-FROM node:22-bookworm-slim AS deps
+FROM node:24-alpine3.23 AS deps
 
 WORKDIR /opt/chaimir/zk-prover
 COPY package.json package-lock.json /opt/chaimir/zk-prover/
 RUN npm ci --omit=dev --ignore-scripts --no-audit --no-fund
 
-FROM node:22-bookworm-slim
+FROM node:24-alpine3.23
 
 LABEL org.opencontainers.image.title="infra/zk-prover"
 LABEL org.opencontainers.image.description="Chaimir ZK prover toolchain image"
@@ -13,11 +13,10 @@ ENV HOME=/workspace
 
 WORKDIR /opt/chaimir/zk-prover
 COPY --from=deps /opt/chaimir/zk-prover /opt/chaimir/zk-prover
-RUN apt-get update \
-    && apt-get -y upgrade \
-    && rm -rf /var/lib/apt/lists/* \
+RUN apk upgrade --no-cache \
+    && apk add --no-cache bash ca-certificates \
     && ln -s /opt/chaimir/zk-prover/node_modules/.bin/snarkjs /usr/local/bin/snarkjs \
-    && rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack \
+    && rm -rf /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/corepack /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack \
     && mkdir -p /workspace \
     && chown -R 1000:1000 /workspace
 

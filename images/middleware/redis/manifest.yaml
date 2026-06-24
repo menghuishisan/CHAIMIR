@@ -13,16 +13,15 @@ labels:
   chaimir.io/student-access: "false"
   chaimir.io/sensitivity: stateful-middleware
   chaimir.io/scope: middleware
-  chaimir.io/source: upstream-pinned
-description: Redis 缓存、会话和轻量队列上游固定镜像。
+  chaimir.io/source: thin-wrapper
+description: Redis 缓存、会话和轻量队列官方薄封装镜像。
 source:
-  type: upstream-pinned
+  type: thin-wrapper
 upstream:
   registry: docker.io
   image: library/redis
-  version: "7.4-alpine"
-  digest: sha256:6ab0b6e7381779332f97b8ca76193e45b0756f38d4c0dcda72dbb3c32061ab99
-  digest_required: true
+  version: "8-alpine"
+  reuse_policy: security-thin-wrapper
   license: BSD-3-Clause
 private_delivery:
   offline_bundle: true
@@ -89,6 +88,9 @@ selftest:
     command:
       - redis-cli
       - ping
+build:
+  context: images/middleware/redis
+  dockerfile: Dockerfile
 supply_chain:
   sbom: true
   trivy_required: true

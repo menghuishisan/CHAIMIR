@@ -18,7 +18,8 @@ description: Node 前端构建基座镜像。
 source:
   type: build-base
 upstream:
-  image: node:20-bookworm-slim
+  image: node:24-alpine3.23
+  digest: sha256:7c70d1235c0b4c2bc9eeed5393d19f1bbdde6885ba0d58ba62bb385d7b0f3ff1
   reuse_policy: thin-wrapper
 data_driven: false
 capabilities:

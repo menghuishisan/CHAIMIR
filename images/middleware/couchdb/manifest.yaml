@@ -20,8 +20,8 @@ source:
 upstream:
   registry: docker.io
   image: library/couchdb
-  version: "3.4"
-  digest: sha256:9cce5bc04939873f599c1ea6dc1cd4c7f167c211d66f3b75c4194bea1ed414c4
+  version: "3.5.2"
+  digest: sha256:3d084addff475d306e649594c0c160e15061288ea7cebf7aee7423201ccd1137
   digest_required: true
   license: Apache-2.0
 private_delivery:
@@ -86,3 +86,5 @@ supply_chain:
   trivy_required: true
   cosign_required: true
   pull_by_digest_in_production: true
+  deployable: false
+  block_reason: "2026-06-22 升级到 3.5.2 后 Trivy 0.71.2 仍报告 2 个 CRITICAL 与 22 个 HIGH;在上游干净 digest 或替代状态库镜像通过门禁前不得部署。"

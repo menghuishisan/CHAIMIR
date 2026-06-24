@@ -10,7 +10,10 @@ if command -v slither >/dev/null 2>&1; then
   slither . --json /judge/result.json >/tmp/chaimir-static-scan.log 2>&1
   status=$?
   set -e
-  if [ "${status}" -gt 1 ]; then
+  if [ -s /judge/result.json ]; then
+    exec /usr/local/bin/normalize-result --mode slither --report /judge/result.json
+  fi
+  if [ "${status}" -ne 0 ]; then
     exec /usr/local/bin/normalize-result --mode exit-code --exit-code "${status}" --source slither --stdout /tmp/chaimir-static-scan.log
   fi
   exec /usr/local/bin/normalize-result --mode slither --report /judge/result.json

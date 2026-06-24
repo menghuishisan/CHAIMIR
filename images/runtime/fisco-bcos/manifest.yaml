@@ -19,6 +19,7 @@ source:
   type: thin-wrapper
 upstream:
   image: fiscoorg/fiscobcos:v3.12.1
+  runtime: alpine:3.23
   reuse_policy: official-static-binary-on-supported-base
 data_driven: true
 capabilities:

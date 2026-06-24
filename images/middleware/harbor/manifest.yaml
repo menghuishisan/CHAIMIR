@@ -20,37 +20,37 @@ source:
 upstream:
   registry: docker.io
   image: harbor-component-bundle
-  version: "v2.12.0"
+  version: "v2.15.1"
   digest_required: true
   component_bundle: true
   components:
     - image: goharbor/nginx-photon
-      version: v2.12.0
-      digest: sha256:ad01e87fe72d7e9fcf381291b49f1f32fef817b7fde0d0259199aeadc6d6bb6e
+      version: v2.15.1
+      digest: sha256:1f9d06d040f2478f6cf7f6da0091877bf987a641810f4bfaadb2a87d73dbf4fb
     - image: goharbor/harbor-core
-      version: v2.12.0
-      digest: sha256:0d5499810373c66674bf7f83310bff2224fbae73bba731a807ecadb3b9aa0c2b
+      version: v2.15.1
+      digest: sha256:887a85b8ea98b76bfc9f715f1a0785bb99f9a1034241513902dd6e95be922a83
     - image: goharbor/harbor-jobservice
-      version: v2.12.0
-      digest: sha256:3c7a378dd9569ae5dc5f474c5b046e965178107bb2c35d92cb88bfb885c46816
+      version: v2.15.1
+      digest: sha256:0de4fd2ce3a02d3e6591b439e4674ea085885ddf43652b44004cc67eb19dba12
     - image: goharbor/harbor-portal
-      version: v2.12.0
-      digest: sha256:cad22911ef583abed3cff92a7e29f88c01f1cfee6421fd264a5f3ab43ec6f7b4
+      version: v2.15.1
+      digest: sha256:ac55161c57a8351807adf8f8def264bdd52667c371d0436beefebdac4341c9e2
     - image: goharbor/harbor-registryctl
-      version: v2.12.0
-      digest: sha256:18c83c13168cf77a87ff7451e1996142644bd3608206f11eb12055032d980e7e
+      version: v2.15.1
+      digest: sha256:554147a956989175f63f8d41573d716c6ddf6052acd1749c88c0f99ce6ee2bff
     - image: goharbor/registry-photon
-      version: v2.12.0
-      digest: sha256:2639fa93ae300c02633a495804583845dc0558738d48371480c6b20d381eaa0d
+      version: v2.15.1
+      digest: sha256:ebf0325c2661729dbb317cbf839608eb8b15cfa158911a94976f2c21563c466e
     - image: goharbor/harbor-db
-      version: v2.12.0
-      digest: sha256:64c10c451c3bae1fdbb804f73faab8c5430ec4ebd117ddbe9e0f46d2120305dc
+      version: v2.15.1
+      digest: sha256:7944d8594a48a8d014e1fa440bc788348f2a779fa2c612ed6b79390cd767e6db
     - image: goharbor/redis-photon
-      version: v2.12.0
-      digest: sha256:d1a229a99af5cd007d167fcf0a2acc383fa060f868ceedfccb977d5d2e7ed9cc
+      version: v2.15.1
+      digest: sha256:5669d4828805d9ed0bbfc18c101c6ec82d26a13cb9242b48f6348a3e3b2e4cca
     - image: goharbor/trivy-adapter-photon
-      version: v2.12.0
-      digest: sha256:0266317effc5fa674363b2c6d37360b453bfeb09c08c83203ab085e2dec63685
+      version: v2.15.1
+      digest: sha256:f0c52bed36c083ec4fded26cefab01e4cd58c9354c261cb3156c69f57bb50131
   license: Apache-2.0
 private_delivery:
   offline_bundle: true
@@ -116,3 +116,5 @@ supply_chain:
   trivy_required: true
   cosign_required: true
   pull_by_digest_in_production: true
+  deployable: false
+  block_reason: "2026-06-22 使用 Trivy 0.71.2 扫描 Harbor v2.15.1 官方组件集仍存在 56 个 CRITICAL 与 389 个 HIGH,其中 436 个带 fixed version;在官方干净版本、源码重建或替代仓库方案通过门禁前不得部署。"
