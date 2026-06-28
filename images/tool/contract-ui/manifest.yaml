@@ -1,4 +1,4 @@
-﻿# 本文件声明 tool/contract-ui 镜像的职责、端口、安全、资源和供应链约束。
+# 本文件声明 tool/contract-ui 镜像的职责、端口、安全、资源和供应链约束。
 schema_version: 1
 category: tool
 name: contract-ui
@@ -18,7 +18,12 @@ description: 合约 ABI 交互面板工具镜像。
 source:
   type: platform-built
 upstream:
-  image: python:3.13-alpine
+  image: cgr.dev/chainguard/wolfi-base:latest
+  packages:
+    - python-3.13
+    - eth-abi==5.2.0
+    - eth-utils==5.3.1
+    - eth-hash[pycryptodome]==0.8.0
   reuse_policy: self-developed-tool
 env_keys:
   config:
@@ -35,7 +40,6 @@ tool:
     - evm
     - fabric
     - fisco
-    - chainmaker
   mount_workspace: true
 ports:
   - name: http
@@ -76,15 +80,13 @@ build:
   dockerfile: Dockerfile
 selftest:
   commands:
-    - name: syntax
+    - name: calldata-generation
       command:
         - python
-        - -m
-        - py_compile
-        - /app/contract_ui.py
+        - -c
+        - "import importlib.util; spec=importlib.util.spec_from_file_location('contract_ui','/app/contract_ui.py'); m=importlib.util.module_from_spec(spec); spec.loader.exec_module(m); abi=[{'type':'function','name':'transfer','inputs':[{'name':'to','type':'address'},{'name':'amount','type':'uint256'}]}]; r=m.build_call_data(abi,'transfer',['0x0000000000000000000000000000000000000001',5]); assert r['calldata'].startswith('0xa9059cbb')"
 supply_chain:
   sbom: true
   trivy_required: true
   cosign_required: true
   pull_by_digest_in_production: true
-

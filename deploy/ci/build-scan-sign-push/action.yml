@@ -73,14 +73,57 @@ runs:
           "${{ inputs.context }}"
 
     - name: Trivy 漏洞扫描(高危/严重阻断)
-      uses: aquasecurity/trivy-action@master
-      with:
-        image-ref: "${{ inputs.image }}:${{ inputs.tag }}"
-        format: table
-        exit-code: "1"            # 命中即失败,阻断后续推送。
-        severity: HIGH,CRITICAL
-        scanners: vuln,secret
-        ignore-unfixed: false
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        logical="${{ inputs.image }}"
+        logical="${logical#${{ inputs.registry }}/}"
+        manifest="images/${logical}/manifest.yaml"
+        skip_args=()
+        if [ -f "$manifest" ]; then
+          skip_reason="$(awk '
+            /^supply_chain:[[:space:]]*$/ { inside=1; next }
+            inside && /^[A-Za-z_][A-Za-z0-9_]*:[[:space:]]*/ { inside=0 }
+            inside && /^[[:space:]]+trivy_skip_reason:[[:space:]]*/ {
+              sub("^[[:space:]]+trivy_skip_reason:[[:space:]]*", "");
+              gsub(/^["'\''"]|["'\''"]$/, "");
+              print;
+              exit;
+            }
+          ' "$manifest")"
+          mapfile -t skip_files < <(awk '
+            /^supply_chain:[[:space:]]*$/ { sc=1; next }
+            sc && /^[A-Za-z_][A-Za-z0-9_]*:[[:space:]]*/ { sc=0; sf=0 }
+            sc && /^[[:space:]]+trivy_skip_files:[[:space:]]*$/ { sf=1; next }
+            sf && /^[[:space:]]+-[[:space:]]*/ {
+              sub("^[[:space:]]+-[[:space:]]*", "");
+              gsub(/^["'\''"]|["'\''"]$/, "");
+              print;
+              next;
+            }
+            sf && /^[[:space:]]+[A-Za-z_][A-Za-z0-9_]*:[[:space:]]*/ { sf=0 }
+          ' "$manifest")
+          if [ "${#skip_files[@]}" -gt 0 ] && [ -z "$skip_reason" ]; then
+            echo "$manifest 声明 trivy_skip_files 但缺少 trivy_skip_reason" >&2
+            exit 1
+          fi
+          for skip_file in "${skip_files[@]}"; do
+            skip_args+=(--skip-files "$skip_file")
+          done
+        fi
+
+        docker run --rm \
+          -v /var/run/docker.sock:/var/run/docker.sock \
+          -e TRIVY_DB_REPOSITORY=ghcr.io/aquasecurity/trivy-db:2 \
+          aquasec/trivy:0.71.2 image \
+            --format table \
+            --exit-code 1 \
+            --severity HIGH,CRITICAL \
+            --scanners vuln,secret \
+            --ignore-unfixed=false \
+            "${skip_args[@]}" \
+            "${{ inputs.image }}:${{ inputs.tag }}"
 
     - name: 推送镜像到 Harbor
       shell: bash

@@ -108,6 +108,22 @@ function Read-SourceType {
     return Read-YamlValue -Lines $source -Key "type"
 }
 
+# Test-DeployableManifest 判断 manifest 是否允许进入拉取、扫描和准入流程。
+function Test-DeployableManifest {
+    param([string]$Path)
+    $supplyChain = Read-YamlBlock -Path $Path -BlockName "supply_chain"
+    $deployable = Read-YamlValue -Lines $supplyChain -Key "deployable"
+    if ($deployable -ne "false") {
+        return $true
+    }
+    $reason = Read-YamlValue -Lines $supplyChain -Key "block_reason"
+    if ([string]::IsNullOrWhiteSpace($reason)) {
+        throw "${Path}: supply_chain.deployable=false 必须声明 block_reason"
+    }
+    Write-Host "Skipping non-deployable image manifest: $Path ($reason)"
+    return $false
+}
+
 function Read-Components {
     param([string[]]$Upstream)
     $components = @()
@@ -524,6 +540,9 @@ $seen = @{}
 $missing = New-Object System.Collections.Generic.List[string]
 
 foreach ($manifest in $manifests) {
+    if (-not (Test-DeployableManifest -Path $manifest.FullName)) {
+        continue
+    }
     $sourceType = Read-SourceType -Path $manifest.FullName
     switch ($sourceType) {
         "upstream-pinned" {

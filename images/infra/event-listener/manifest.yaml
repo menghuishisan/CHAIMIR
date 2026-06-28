@@ -1,4 +1,4 @@
-﻿# 本文件声明 infra/event-listener 镜像的职责、端口、安全、资源和供应链约束。
+# 本文件声明 infra/event-listener 镜像的职责、端口、安全、资源和供应链约束。
 schema_version: 1
 category: infra
 name: event-listener
@@ -42,7 +42,6 @@ infra:
     - evm
     - fabric
     - fisco
-    - chainmaker
     - solana
     - aptos
     - sui
@@ -104,4 +103,3 @@ supply_chain:
   trivy_required: true
   cosign_required: true
   pull_by_digest_in_production: true
-

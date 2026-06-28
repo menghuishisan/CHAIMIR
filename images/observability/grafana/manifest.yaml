@@ -13,16 +13,17 @@ labels:
   chaimir.io/student-access: "false"
   chaimir.io/sensitivity: observability
   chaimir.io/scope: observability
-  chaimir.io/source: upstream-pinned
-description: Grafana 监控看板上游固定镜像。
+  chaimir.io/source: thin-wrapper
+description: Grafana 监控看板安全薄封装镜像。
 source:
-  type: upstream-pinned
+  type: thin-wrapper
 upstream:
-  registry: docker.io
-  image: grafana/grafana
-  version: "13.0.2"
-  digest: sha256:5dad0df181cb644a14e13617b913b261a54f7d4fd4510721dba420929f35bea2
-  digest_required: true
+  registry: cgr.dev
+  image: chainguard/wolfi-base
+  version: "latest"
+  packages:
+    - grafana-13.0=13.0.2
+  reuse_policy: wolfi-package-build
   license: AGPL-3.0
 private_delivery:
   offline_bundle: true
@@ -82,10 +83,11 @@ selftest:
     type: http
     path: /api/health
     port: 3000
+build:
+  context: images/observability/grafana
+  dockerfile: Dockerfile
 supply_chain:
   sbom: true
   trivy_required: true
   cosign_required: true
   pull_by_digest_in_production: true
-  deployable: false
-  block_reason: "2026-06-22 升级到 13.0.2 后 Trivy 0.71.2 仍报告 14 个 HIGH 且均有 fixed version;在上游干净 digest 或源码重建通过门禁前不得部署。"

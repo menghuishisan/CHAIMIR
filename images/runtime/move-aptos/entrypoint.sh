@@ -5,4 +5,6 @@ set -eu
 exec aptos node run-local-testnet \
   --test-dir /runtime-state/aptos \
   --with-faucet \
-  --force-restart
+  --force-restart \
+  --assume-yes \
+  --bind-to 0.0.0.0

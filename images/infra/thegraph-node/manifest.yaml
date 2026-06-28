@@ -18,7 +18,9 @@ description: The Graph subgraph 索引节点镜像。
 source:
   type: thin-wrapper
 upstream:
-  image: graphprotocol/graph-node:v0.35.1
+  image: graphprotocol/graph-node:latest
+  version: "0.44.0"
+  runtime: cgr.dev/chainguard/wolfi-base:latest
   reuse_policy: thin-wrapper
 data_driven: true
 capabilities:

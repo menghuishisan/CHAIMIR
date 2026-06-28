@@ -13,13 +13,16 @@ labels:
   chaimir.io/student-access: "true"
   chaimir.io/sensitivity: student-tool
   chaimir.io/scope: sandbox
-  chaimir.io/source: thin-wrapper
+  chaimir.io/source: platform-built
 description: Mythril 符号执行漏洞检测工具镜像。
 source:
-  type: thin-wrapper
+  type: platform-built
 upstream:
-  image: mythril/myth:0.24.8
-  reuse_policy: thin-wrapper
+  package: mythril
+  version: "0.24.8"
+  source_repository: https://github.com/ConsenSysDiligence/mythril
+  runtime: cgr.dev/chainguard/wolfi-base
+  reuse_policy: pypi-source-build
 data_driven: true
 capabilities:
   - security-scan

@@ -245,6 +245,16 @@ function Get-RegistryDigest {
     if (-not [string]::IsNullOrWhiteSpace($digest)) {
         return $digest
     }
+    $repository = $Ref
+    if ($Ref -match "^(.+):[^/:]+$") {
+        $repository = $Matches[1]
+    }
+    $localDigestOutput = Invoke-DockerCli -Arguments @("image", "inspect", "--format", "{{json .RepoDigests}}", $Ref) 2>&1
+    foreach ($line in $localDigestOutput) {
+        if ($line -match "$([regex]::Escape($repository))@(sha256:[0-9a-f]{64})") {
+            return $Matches[1]
+        }
+    }
     $output = Invoke-DockerCli -Arguments @("buildx", "imagetools", "inspect", $Ref) 2>&1
     foreach ($line in $output) {
         if ($line -match "^\s*Digest:\s*(sha256:[0-9a-f]{64})\s*$") {
@@ -352,6 +362,9 @@ foreach ($item in $selected) {
     }
     if ($item.DockerfileText -match "(?m)^\s*ARG\s+JUDGE_MIN_IMAGE\b") {
         $args += @("--build-arg", ("JUDGE_MIN_IMAGE=" + (Get-LockedRef -DigestLockItems $digestLockItems -Image "base/judge-min")))
+    }
+    if ($item.DockerfileText -match "(?m)^\s*ARG\s+GO_MODULE_PROXY\b" -and -not [string]::IsNullOrWhiteSpace($env:GO_MODULE_PROXY)) {
+        $args += @("--build-arg", ("GO_MODULE_PROXY=" + $env:GO_MODULE_PROXY))
     }
     $args += $item.Context
     Write-Host "Building $($item.Image) -> $($item.Ref)"

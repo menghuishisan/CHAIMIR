@@ -18,7 +18,8 @@ description: Chainlink 预言机节点镜像。
 source:
   type: thin-wrapper
 upstream:
-  image: smartcontract/chainlink:2.51.0
+  image: smartcontract/chainlink:2.52.0
+  digest: sha256:2400c0d06aa974cb0d3aa32b9370440517e5f61458f9b0b8d5c2160eea63441c
   reuse_policy: thin-wrapper
 data_driven: true
 capabilities:

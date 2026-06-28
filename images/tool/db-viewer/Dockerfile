@@ -1,15 +1,27 @@
-# 本文件定义数据库可视化工具镜像。
-FROM sosedoff/pgweb:0.16.2
+# 本文件定义数据库可视化工具镜像,从 pgweb 官方源码重建单二进制运行时。
+ARG GO_BUILDER_IMAGE
+
+FROM ${GO_BUILDER_IMAGE} AS build
+
+ARG PGWEB_VERSION=v0.16.2
+ARG PGWEB_COMMIT=e63945ee7182435a729f22a4203e2f15d00f6350
+
+RUN git clone --branch "${PGWEB_VERSION}" --depth 1 https://github.com/sosedoff/pgweb.git /src/pgweb
+WORKDIR /src/pgweb
+RUN test "$(git rev-parse HEAD)" = "${PGWEB_COMMIT}" \
+    && go get \
+        github.com/sirupsen/logrus@v1.9.4 \
+        golang.org/x/crypto@v0.52.0 \
+        golang.org/x/net@v0.55.0 \
+    && go mod tidy \
+    && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o /out/pgweb .
+
+FROM gcr.io/distroless/static-debian12:nonroot
 
 LABEL org.opencontainers.image.title="tool/db-viewer"
 LABEL org.opencontainers.image.description="Chaimir database viewer tool image"
 
-USER root
-RUN apk upgrade --no-cache \
-    && if ! getent group 1000 >/dev/null; then groupadd --gid 1000 chaimir; fi \
-    && if ! id -u 1000 >/dev/null 2>&1; then useradd --uid 1000 --gid 1000 --home-dir /workspace --create-home --shell /usr/sbin/nologin chaimir; fi \
-    && mkdir -p /workspace \
-    && chown -R 1000:1000 /workspace
+COPY --from=build /out/pgweb /usr/local/bin/pgweb
 
 USER 1000:1000
 WORKDIR /workspace

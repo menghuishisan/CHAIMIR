@@ -30,7 +30,6 @@ runtime:
   adapter_level: 2
   default_tool_codes:
     - code-server
-    - fabric-explorer
 ports: []
 local_dev:
   host_mappings: []

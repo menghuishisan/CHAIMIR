@@ -25,6 +25,15 @@ json_string() {
   jq -r "$1 // empty"
 }
 
+require_private_key() {
+  private_key="$1"
+  if [ -z "$private_key" ]; then
+    private_key="${CHAIMIR_EVM_DEPLOYER_PRIVATE_KEY:-}"
+  fi
+  [ -n "$private_key" ] || fail "private key must be provided by payload or CHAIMIR_EVM_DEPLOYER_PRIVATE_KEY" 64
+  printf '%s' "$private_key"
+}
+
 case "$cmd" in
   reset)
     mkdir -p "$state_dir"
@@ -38,9 +47,7 @@ case "$cmd" in
     project_dir="$(printf '%s' "$payload" | json_string '.project_dir')"
     artifact="$(printf '%s' "$payload" | json_string '.artifact')"
     private_key="$(printf '%s' "$payload" | json_string '.private_key')"
-    if [ -z "$private_key" ]; then
-      private_key="${CHAIMIR_EVM_DEPLOYER_PRIVATE_KEY:-0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80}"
-    fi
+    private_key="$(require_private_key "$private_key")"
     if [ -z "$bytecode" ] && [ -n "$project_dir" ] && [ -n "$artifact" ]; then
       bytecode="$(jq -r '.bytecode.object // .bytecode // empty' "$project_dir/$artifact")"
     fi
@@ -62,9 +69,7 @@ case "$cmd" in
     if [ -z "$to" ] && [ -f "$last_contract_file" ]; then
       to="$(cat "$last_contract_file")"
     fi
-    if [ -z "$private_key" ]; then
-      private_key="${CHAIMIR_EVM_DEPLOYER_PRIVATE_KEY:-0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80}"
-    fi
+    private_key="$(require_private_key "$private_key")"
     [ -n "$to" ] || fail "tx payload requires to or a previous deployment" 22
     [ -n "$data" ] || fail "tx payload requires data" 22
     if [ -n "$value" ]; then

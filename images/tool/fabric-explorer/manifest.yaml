@@ -123,4 +123,6 @@ supply_chain:
   trivy_required: true
   cosign_required: true
   pull_by_digest_in_production: true
+  deployable: false
+  block_reason: "2026-06-28 使用 Trivy 0.71.2 扫描当前 hyperledger/explorer:1.1.8 薄封装产物仍存在 21 个 CRITICAL 与 155 个 HIGH;官方 Hyperledger Explorer v2.0.0 源码存在 22 个 CRITICAL 与 200 个 HIGH 且官方仓库已归档。已排查 FabEx 与 Fabric-X Block Explorer:FabEx 更接近标准 Fabric 浏览器但依赖 MongoDB 且源码扫描仍有 1 个 CRITICAL 与 38 个 HIGH;Fabric-X Block Explorer 需要 Fabric-X sidecar,不是标准 Fabric connection profile/证书模型的等价替换,源码扫描仍有 1 个 CRITICAL 与 38 个 HIGH。在官方安全版本、可验证源码重建或完整契约适配且通过门禁的替代组件前不得 seed 为可调度。"
 

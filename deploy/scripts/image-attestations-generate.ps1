@@ -197,6 +197,43 @@ function Read-ManifestAdmissionMap {
     return $blocked
 }
 
+# Read-ManifestTrivySkipMap 返回经 manifest 明确说明的 Trivy 单文件排除。
+function Read-ManifestTrivySkipMap {
+    param([string]$ImagesRoot)
+    $items = @{}
+    foreach ($manifest in Get-ChildItem -Path $ImagesRoot -Recurse -Filter manifest.yaml) {
+        $lines = Get-Content -LiteralPath $manifest.FullName
+        $image = Read-YamlValue -Lines $lines -Key "image"
+        if ([string]::IsNullOrWhiteSpace($image)) {
+            continue
+        }
+        $supplyChain = Read-YamlBlock -Path $manifest.FullName -BlockName "supply_chain"
+        $reason = Read-YamlValue -Lines $supplyChain -Key "trivy_skip_reason"
+        $skipFiles = [System.Collections.Generic.List[string]]::new()
+        $insideSkipFiles = $false
+        foreach ($line in $supplyChain) {
+            if ($line -match "^\s+trivy_skip_files:\s*$") {
+                $insideSkipFiles = $true
+                continue
+            }
+            if ($insideSkipFiles -and $line -match "^\s+-\s*(.+?)\s*$") {
+                $skipFiles.Add($Matches[1].Trim().Trim('"').Trim("'"))
+                continue
+            }
+            if ($insideSkipFiles -and $line -match "^\s+[A-Za-z_][A-Za-z0-9_]*:\s*") {
+                $insideSkipFiles = $false
+            }
+        }
+        if ($skipFiles.Count -gt 0) {
+            if ([string]::IsNullOrWhiteSpace($reason)) {
+                throw "$image 声明了 trivy_skip_files 但缺少 trivy_skip_reason"
+            }
+            $items[$image] = ,$skipFiles.ToArray()
+        }
+    }
+    return $items
+}
+
 # Invoke-ComposeTool 通过统一 Docker Compose 入口运行 Trivy/Cosign。
 function Invoke-ComposeTool {
     param(
@@ -283,6 +320,7 @@ Remove-Item -LiteralPath $scanLog, $signLog -ErrorAction SilentlyContinue
 
 $items = Read-DigestLock -Path $DigestLock
 $blockedByManifest = Read-ManifestAdmissionMap -ImagesRoot (Join-Path $RepoRoot "images")
+$trivySkipByManifest = Read-ManifestTrivySkipMap -ImagesRoot (Join-Path $RepoRoot "images")
 $blockedItems = [System.Collections.Generic.List[object]]::new()
 $attestations = [System.Collections.Generic.List[object]]::new()
 foreach ($item in $items) {
@@ -301,10 +339,18 @@ foreach ($item in $items) {
     Write-Host "Attesting $ref"
     if (-not $SkipScan) {
         try {
-            Invoke-ComposeTool -Tool "trivy" -ToolArgs @(
+            $trivyArgs = @(
                 "image", "--exit-code", "1", "--severity", $Severity,
-                "--username", $registryUser, "--password", $registryPassword, "--insecure", $ref
-            ) -Context "Trivy 扫描 $ref" *>> $scanLog
+                "--scanners", "vuln,secret", "--ignore-unfixed=false",
+                "--username", $registryUser, "--password", $registryPassword, "--insecure"
+            )
+            if ($trivySkipByManifest.ContainsKey($item.Image)) {
+                foreach ($skipFile in @($trivySkipByManifest[$item.Image])) {
+                    $trivyArgs += @("--skip-files", $skipFile)
+                }
+            }
+            $trivyArgs += $ref
+            Invoke-ComposeTool -Tool "trivy" -ToolArgs $trivyArgs -Context "Trivy 扫描 $ref" *>> $scanLog
         } catch {
             $blockedItems.Add([pscustomobject]@{
                 image    = $item.Image

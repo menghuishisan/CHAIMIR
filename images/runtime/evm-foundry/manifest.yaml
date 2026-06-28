@@ -20,6 +20,17 @@ source:
 upstream:
   image: ghcr.io/foundry-rs/foundry:v1.0.0
   reuse_policy: thin-wrapper
+env_keys:
+  config:
+    - CHAIMIR_EVM_RPC_URL
+    - CHAIMIR_RUNTIME_RPC_PORT
+    - CHAIMIR_CHAIN_STATE_DIR
+  secret:
+    - CHAIMIR_EVM_DEPLOYER_PRIVATE_KEY
+secrets_required:
+  - env: CHAIMIR_EVM_DEPLOYER_PRIVATE_KEY
+    source: deploy/config/chaimir.env
+    runtime_value: secret-or-payload
 data_driven: true
 capabilities:
   - chain-runtime

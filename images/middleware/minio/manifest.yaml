@@ -19,7 +19,8 @@ source:
   type: platform-built
 upstream:
   source_repository: https://github.com/minio/minio
-  version: "RELEASE.2025-10-15T17-29-55Z"
+  commit: 7aac2a2c5b7c882e68c1ce017d8256be2feea27f
+  version: "RELEASE.2026-06-27T00-00-00Z.chaimir.7aac2a2c5b7c"
   builder_arg: GO_BUILDER_IMAGE
   runtime: gcr.io/distroless/static-debian12:nonroot
   reuse_policy: source-build

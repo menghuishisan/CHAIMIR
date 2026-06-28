@@ -18,7 +18,7 @@ description: Hyperledger Besu 企业 EVM 教学运行时镜像。
 source:
   type: thin-wrapper
 upstream:
-  image: hyperledger/besu:24.12.2
+  image: hyperledger/besu:26.6.1
   reuse_policy: thin-wrapper
 data_driven: true
 capabilities:

@@ -13,16 +13,17 @@ labels:
   chaimir.io/student-access: "false"
   chaimir.io/sensitivity: observability
   chaimir.io/scope: observability
-  chaimir.io/source: upstream-pinned
-description: Prometheus 指标采集上游固定镜像。
+  chaimir.io/source: platform-built
+description: Prometheus 指标采集平台 Wolfi 安全运行镜像。
 source:
-  type: upstream-pinned
+  type: platform-built
 upstream:
-  registry: quay.io
-  image: prometheus/prometheus
-  version: "v3.12.0"
-  digest: sha256:69f5241418838263316593f7274a304b095c40bcf22e57272865da91bd60a8ac
-  digest_required: true
+  registry: cgr.dev
+  image: chainguard/wolfi-base
+  version: "latest"
+  packages:
+    - prometheus-3.12=3.12.0
+  reuse_policy: wolfi-package-build
   license: Apache-2.0
 private_delivery:
   offline_bundle: true
@@ -82,10 +83,11 @@ selftest:
     type: http
     path: /-/ready
     port: 9090
+build:
+  context: images/observability/prometheus
+  dockerfile: Dockerfile
 supply_chain:
   sbom: true
   trivy_required: true
   cosign_required: true
   pull_by_digest_in_production: true
-  deployable: false
-  block_reason: "2026-06-22 升级到 v3.12.0 后 Trivy 0.71.2 仍报告 2 个 HIGH 且均有 fixed version;在上游干净 digest 或源码重建通过门禁前不得部署。"

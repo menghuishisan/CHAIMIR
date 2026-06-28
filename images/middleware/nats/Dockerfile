@@ -3,6 +3,7 @@ ARG GO_BUILDER_IMAGE
 FROM ${GO_BUILDER_IMAGE} AS build
 
 ARG NATS_VERSION=v2.14.2
+ARG GO_MODULE_PROXY=
 ENV CGO_ENABLED=0
 
 # 固定官方源码 tag 构建 nats-server,生产 digest 由 CI 推送后写入 image-digests.lock。
@@ -11,7 +12,8 @@ RUN mkdir -p /out && chown 1000:1000 /out
 USER 1000:1000
 RUN git clone --branch "${NATS_VERSION}" --depth 1 https://github.com/nats-io/nats-server.git /src/nats-server
 WORKDIR /src/nats-server
-RUN go build -trimpath -ldflags "-s -w" -o /out/nats-server ./main.go
+RUN if [ -n "${GO_MODULE_PROXY}" ]; then go env -w GOPROXY="${GO_MODULE_PROXY}"; fi \
+    && go build -trimpath -ldflags "-s -w" -o /out/nats-server ./main.go
 
 FROM alpine:3.23
 

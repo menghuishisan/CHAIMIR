@@ -76,11 +76,10 @@ build:
   dockerfile: Dockerfile
 selftest:
   commands:
-    - name: web-root
+    - name: static-server-version
       command:
-        - sh
-        - -lc
-        - "test -d /usr/share/nginx/html || test -d /app"
+        - /usr/local/bin/remix-static-server
+        - -version
 supply_chain:
   sbom: true
   trivy_required: true

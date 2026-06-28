@@ -1,4 +1,4 @@
-﻿# 本文件声明 tool/novnc-desktop 镜像的职责、端口、安全、资源和供应链约束。
+# 本文件声明 tool/novnc-desktop 镜像的职责、端口、安全、资源和供应链约束。
 schema_version: 1
 category: tool
 name: novnc-desktop
@@ -18,7 +18,7 @@ description: noVNC 图形桌面工具镜像。
 source:
   type: thin-wrapper
 upstream:
-  image: dorowu/ubuntu-desktop-lxde-vnc:focal
+  image: alpine:3.23
   reuse_policy: thin-wrapper
 data_driven: true
 capabilities:
@@ -30,7 +30,6 @@ tool:
     - evm
     - fabric
     - fisco
-    - chainmaker
     - solana
     - aptos
     - sui
@@ -42,7 +41,7 @@ tool:
   mount_workspace: true
 ports:
   - name: http
-    container_port: 8080
+    container_port: 6080
     protocol: TCP
     expose: proxy
     purpose: noVNC web desktop
@@ -51,7 +50,7 @@ local_dev:
     - host: 127.0.0.1
       env: CHAIMIR_DEV_NOVNC_PORT
       default: 18098
-      container_port: 8080
+      container_port: 6080
 security:
   run_as_non_root: true
   read_only_root_filesystem: false
@@ -89,10 +88,9 @@ selftest:
       command:
         - sh
         - -lc
-        - "test -d /workspace"
+        - "test -d /workspace && test -f /usr/share/novnc/vnc.html && websockify --help >/dev/null && supervisord -v"
 supply_chain:
   sbom: true
   trivy_required: true
   cosign_required: true
   pull_by_digest_in_production: true
-

@@ -1,4 +1,4 @@
-﻿# 本文件声明 tool/code-server 镜像的职责、端口、安全、资源和供应链约束。
+# 本文件声明 tool/code-server 镜像的职责、端口、安全、资源和供应链约束。
 schema_version: 1
 category: tool
 name: code-server
@@ -18,19 +18,20 @@ description: VS Code Web 编辑器镜像。
 source:
   type: thin-wrapper
 upstream:
-  image: codercom/code-server:4.101.1
+  image: ghcr.io/coder/code-server:4.126.0
   reuse_policy: thin-wrapper
 data_driven: true
 capabilities:
   - web-ide
   - code-editing
+  - git-client
+  - dependency-download
 tool:
   kind: web-embed
   eco_tags:
     - evm
     - fabric
     - fisco
-    - chainmaker
     - solana
     - aptos
     - sui
@@ -98,10 +99,16 @@ selftest:
       command:
         - code-server
         - --version
+    - name: development-tools
+      command:
+        - sh
+        - -lc
+        - "git --version && git lfs version && ssh -V 2>&1 && node --version && npm --version"
 supply_chain:
   sbom: true
   trivy_required: true
+  trivy_skip_files:
+    - /usr/lib/code-server/lib/vscode/extensions/npm/package.json
+  trivy_skip_reason: "VS Code 内置 npm 扩展的 package.json 声明 publisher=vscode、private=true、version=1.0.1,不是容器内 npm CLI 或可执行包;真实 npm CLI 由 Wolfi npm 11.17.0 提供并纳入扫描。不得修改该扩展元数据或删除扩展来规避扫描。"
   cosign_required: true
   pull_by_digest_in_production: true
-
-

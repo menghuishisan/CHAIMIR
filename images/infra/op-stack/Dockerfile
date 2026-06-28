@@ -7,6 +7,7 @@ FROM ${GO_BUILDER_IMAGE} AS op-node-build
 ARG OP_NODE_VERSION=v1.19.0
 ARG OP_NODE_SOURCE_SHA256=195b8a3de77284f620e554cf9462061fd0080adc143cc2784402351390cfab8c
 ARG OP_NODE_SOURCE_URL=https://github.com/ethereum-optimism/optimism/archive/refs/tags/op-node/${OP_NODE_VERSION}.tar.gz
+ARG GO_MODULE_PROXY=
 
 USER root
 ADD ${OP_NODE_SOURCE_URL} /tmp/op-node-source.tar.gz
@@ -18,8 +19,11 @@ RUN echo "${OP_NODE_SOURCE_SHA256}  /tmp/op-node-source.tar.gz" | sha256sum -c -
 
 USER 1000:1000
 WORKDIR /src/op-stack
-RUN go get github.com/libp2p/go-libp2p@v0.39.1 \
+RUN if [ -n "${GO_MODULE_PROXY}" ]; then go env -w GOPROXY="${GO_MODULE_PROXY}"; fi \
+    && go get github.com/libp2p/go-libp2p@v0.39.1 \
         github.com/quic-go/quic-go@v0.49.1 \
+        golang.org/x/crypto@v0.52.0 \
+        golang.org/x/net@v0.55.0 \
         go.opentelemetry.io/otel@v1.41.0 \
         go.opentelemetry.io/otel/trace@v1.41.0 \
         go.opentelemetry.io/otel/metric@v1.41.0 \
