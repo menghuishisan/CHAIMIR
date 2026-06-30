@@ -22,10 +22,13 @@ spec:
     metadata:
       labels:
         app.kubernetes.io/name: chaimir-migrate
+        app.kubernetes.io/component: migration
         app.kubernetes.io/part-of: chaimir
     spec:
       restartPolicy: Never
       automountServiceAccountToken: false
+      imagePullSecrets:
+        - name: chaimir-harbor-pull
       securityContext:
         runAsNonRoot: true
         runAsUser: 65532

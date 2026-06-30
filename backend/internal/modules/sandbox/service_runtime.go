@@ -4,12 +4,14 @@ package sandbox
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"strings"
 	"time"
 
 	"chaimir/internal/platform/jsonx"
 	"chaimir/internal/platform/timex"
+	"chaimir/internal/platform/workload"
 	"chaimir/pkg/apperr"
 	"chaimir/pkg/logging"
 )
@@ -354,10 +356,14 @@ func (s *Service) PrepullRuntimeImage(ctx context.Context, runtimeID, imageID in
 	if runtime.Status != RuntimeStatusAvailable || image.Status != RuntimeImageStatusAvailable {
 		return PrepullResponse{}, apperr.ErrSandboxRuntimeUnavailable
 	}
-	imageURLs := prepullImageURLsForRuntime(runtime, image, tools)
-	if len(imageURLs) == 0 {
+	prepullSpecs, err := prepullImageSpecsForRuntime(runtime, image, tools)
+	if err != nil {
+		return PrepullResponse{}, apperr.ErrSandboxImageAttestationInvalid.WithCause(err)
+	}
+	if len(prepullSpecs) == 0 {
 		return PrepullResponse{}, apperr.ErrSandboxImageAttestationInvalid
 	}
+	imageURLs := prepullImageURLs(prepullSpecs)
 	for _, imageURL := range imageURLs {
 		if !imageAttested(s.cfg, imageURL, digestFromImageURL(imageURL)) {
 			return PrepullResponse{}, apperr.ErrSandboxImageAttestationInvalid
@@ -376,7 +382,7 @@ func (s *Service) PrepullRuntimeImage(ctx context.Context, runtimeID, imageID in
 	}); err != nil {
 		return PrepullResponse{}, err
 	}
-	result, err := s.orchestrator.PrepullImage(ctx, image, imageURLs)
+	result, err := s.orchestrator.PrepullImage(ctx, image, prepullSpecs)
 	status := ImagePrepullSucceeded
 	prepulled := true
 	at := timex.Now()
@@ -406,31 +412,49 @@ func (s *Service) PrepullRuntimeImage(ctx context.Context, runtimeID, imageID in
 	return PrepullResponse{ImageID: imageID, PrepullStatus: status, DesiredNodes: result.DesiredNodes, ReadyNodes: result.ReadyNodes, DaemonSet: result.DaemonSet, ImageCount: len(imageURLs), Images: imageURLs}, nil
 }
 
-// prepullImageURLsForRuntime 汇总运行时默认工作负载会用到的不可变镜像集合。
-func prepullImageURLsForRuntime(runtime Runtime, image RuntimeImage, tools []Tool) []string {
-	seen := map[string]struct{}{}
-	out := make([]string, 0, 1+len(runtime.AdapterSpec.InfraSidecars)+len(tools))
-	add := func(imageURL string) {
+// prepullImageSpecsForRuntime 汇总运行时默认工作负载会用到的不可变镜像和最小自检命令。
+func prepullImageSpecsForRuntime(runtime Runtime, image RuntimeImage, tools []Tool) ([]PrepullImageSpec, error) {
+	seen := map[string]int{}
+	out := make([]PrepullImageSpec, 0, 1+len(runtime.AdapterSpec.InfraSidecars)+len(tools))
+	add := func(imageURL string, command []string, hold bool, mounts []workload.EphemeralMountSpec) error {
 		imageURL = strings.TrimSpace(imageURL)
 		if imageURL == "" {
-			return
+			return nil
 		}
-		if _, exists := seen[imageURL]; exists {
-			return
+		command = compactCommand(command)
+		if len(command) == 0 {
+			return fmt.Errorf("预拉取镜像 %s 缺少自检命令", imageURL)
 		}
-		seen[imageURL] = struct{}{}
-		out = append(out, imageURL)
+		key := prepullImageSpecKey(imageURL, hold)
+		if index, exists := seen[key]; exists {
+			out[index].EphemeralMounts = mergePrepullEphemeralMounts(out[index].EphemeralMounts, mounts)
+			return nil
+		}
+		seen[key] = len(out)
+		out = append(out, PrepullImageSpec{
+			ImageURL:        imageURL,
+			Command:         command,
+			Hold:            hold,
+			EphemeralMounts: mergePrepullEphemeralMounts(nil, mounts),
+		})
+		return nil
 	}
-	add(image.ImageURL)
+	if err := add(image.ImageURL, runtime.AdapterSpec.WorkspaceOps.Selftest, false, nil); err != nil {
+		return nil, err
+	}
 	for _, component := range runtime.AdapterSpec.InfraSidecars {
-		add(component.ImageURL)
+		if err := add(component.ImageURL, component.Command, true, component.EphemeralMounts); err != nil {
+			return nil, err
+		}
 	}
 	for _, pod := range runtime.AdapterSpec.Pods {
 		for _, component := range pod.Containers {
 			if strings.TrimSpace(component.Name) == strings.TrimSpace(runtime.AdapterSpec.RuntimeContainer.Name) {
 				continue
 			}
-			add(component.ImageURL)
+			if err := add(component.ImageURL, component.Command, true, component.EphemeralMounts); err != nil {
+				return nil, err
+			}
 		}
 	}
 	for _, tool := range tools {
@@ -438,7 +462,77 @@ func prepullImageURLsForRuntime(runtime Runtime, image RuntimeImage, tools []Too
 			continue
 		}
 		for _, component := range tool.ResourceSpec.Components {
-			add(component.ImageURL)
+			if err := add(component.ImageURL, tool.ResourceSpec.PrepullCommand, false, component.EphemeralMounts); err != nil {
+				return nil, err
+			}
+		}
+	}
+	for i := range out {
+		if out[i].Hold {
+			return out, nil
+		}
+	}
+	return nil, fmt.Errorf("运行时 %s 缺少预拉取保持容器命令", runtime.Code)
+}
+
+// prepullImageSpecKey 保持同镜像在自检和常驻两种用途下独立去重。
+func prepullImageSpecKey(imageURL string, hold bool) string {
+	return fmt.Sprintf("%s\x00%t", imageURL, hold)
+}
+
+// mergePrepullEphemeralMounts 合并同镜像声明的预拉取临时目录,保留 manifest 首次出现顺序。
+func mergePrepullEphemeralMounts(base, extra []workload.EphemeralMountSpec) []workload.EphemeralMountSpec {
+	if len(base) == 0 && len(extra) == 0 {
+		return nil
+	}
+	out := make([]workload.EphemeralMountSpec, 0, len(base)+len(extra))
+	seen := map[string]struct{}{}
+	add := func(mount workload.EphemeralMountSpec) {
+		name := strings.TrimSpace(mount.Name)
+		mountPath := strings.TrimSpace(mount.MountPath)
+		if name == "" || mountPath == "" {
+			return
+		}
+		key := name + "\x00" + mountPath
+		if _, exists := seen[key]; exists {
+			return
+		}
+		seen[key] = struct{}{}
+		out = append(out, workload.EphemeralMountSpec{Name: name, MountPath: mountPath})
+	}
+	for _, mount := range base {
+		add(mount)
+	}
+	for _, mount := range extra {
+		add(mount)
+	}
+	return out
+}
+
+// prepullImageURLs 提取预拉取响应和审计使用的不可变镜像 URL 列表。
+func prepullImageURLs(specs []PrepullImageSpec) []string {
+	out := make([]string, 0, len(specs))
+	seen := map[string]struct{}{}
+	for _, spec := range specs {
+		imageURL := strings.TrimSpace(spec.ImageURL)
+		if imageURL == "" {
+			continue
+		}
+		if _, exists := seen[imageURL]; exists {
+			continue
+		}
+		seen[imageURL] = struct{}{}
+		out = append(out, imageURL)
+	}
+	return out
+}
+
+// compactCommand 清理命令数组中的空白,保持 manifest 声明顺序。
+func compactCommand(command []string) []string {
+	out := make([]string, 0, len(command))
+	for _, part := range command {
+		if trimmed := strings.TrimSpace(part); trimmed != "" {
+			out = append(out, trimmed)
 		}
 	}
 	return out

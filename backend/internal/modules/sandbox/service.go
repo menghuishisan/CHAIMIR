@@ -45,7 +45,7 @@ type Orchestrator interface {
 	// ExecStream 在沙箱容器中执行交互式命令并透传流。
 	ExecStream(ctx context.Context, namespace, container string, command []string, stdin io.Reader, stdout io.Writer, stderr io.Writer, tty bool) error
 	// PrepullImage 创建或更新预拉取 DaemonSet 并等待工作负载镜像集合在真实节点 Ready。
-	PrepullImage(ctx context.Context, image RuntimeImage, imageURLs []string) (PrepullResult, error)
+	PrepullImage(ctx context.Context, image RuntimeImage, specs []PrepullImageSpec) (PrepullResult, error)
 	// DeletePrepullDaemonSet 删除镜像预拉取 DaemonSet,用于镜像停用或删除闭环。
 	DeletePrepullDaemonSet(ctx context.Context, image RuntimeImage) error
 	// ToolReady 校验 Web 工具容器已达到可代理状态。
@@ -183,6 +183,9 @@ func (s *Service) CreateSandbox(ctx context.Context, req contracts.SandboxCreate
 		}
 		tools, err := s.resolveTools(ctx, tx, runtime, input.ToolCodes)
 		if err != nil {
+			return err
+		}
+		if err := validatePlanImagesCurrentlyAdmitted(s.cfg, runtime, image, tools); err != nil {
 			return err
 		}
 		if err := validateQuotaForCreate(input, quota, active, s.cfg, runtime.AdapterSpec, tools); err != nil {
@@ -519,6 +522,9 @@ func (s *Service) planForExistingSandbox(ctx context.Context, sb Sandbox) (Creat
 	}
 	tools, err := s.toolsForSandbox(ctx, sb.TenantID, sb.ID)
 	if err != nil {
+		return CreateSandboxPlan{}, err
+	}
+	if err := validatePlanImagesCurrentlyAdmitted(s.cfg, runtime, image, tools); err != nil {
 		return CreateSandboxPlan{}, err
 	}
 	return CreateSandboxPlan{Sandbox: sb, Runtime: runtime, Image: image, Tools: tools}, nil

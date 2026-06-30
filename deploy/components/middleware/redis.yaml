@@ -1,5 +1,5 @@
 # Redis 7 单实例(缓存/会话/未读计数/队列)。
-# 依据 docs/总-技术选型.md §9:Redis 7+;官方镜像不重打包。
+# 依据 docs/总-技术选型.md §9:Redis 7+;使用项目 Harbor 中间件镜像。
 # 密码从 chaimir-secret 注入(--requirepass)。
 ---
 apiVersion: v1
@@ -38,6 +38,8 @@ spec:
         app.kubernetes.io/name: redis
         app.kubernetes.io/part-of: chaimir
     spec:
+      imagePullSecrets:
+        - name: chaimir-harbor-pull
       securityContext:
         runAsNonRoot: true
         runAsUser: 999  # 官方 redis 镜像的 redis 用户。
@@ -46,7 +48,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: redis
-          image: redis:7.4-alpine
+          image: chaimir/middleware/redis:placeholder
           # 从环境变量读取密码并以 requirepass 启动(避免硬编码到 args)。
           command: ["sh", "-c", "exec redis-server --requirepass \"$REDIS_PASSWORD\" --appendonly yes"]
           ports:

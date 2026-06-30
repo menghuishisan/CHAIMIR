@@ -27,6 +27,7 @@ data_driven: true
 capabilities:
   - security-scan
   - symbolic-execution
+  - solc-compile
 tool:
   kind: command-tool
   eco_tags:
@@ -78,8 +79,9 @@ selftest:
   commands:
     - name: myth-version
       command:
-        - myth
-        - version
+        - sh
+        - -lc
+        - solc --version >/dev/null && myth version
 supply_chain:
   sbom: true
   trivy_required: true

@@ -25,12 +25,7 @@ if ([string]::IsNullOrWhiteSpace($SecretPath)) {
     $SecretPath = Join-Path $RepoRoot "deploy\config\supply-chain.secret.env"
 }
 if ([string]::IsNullOrWhiteSpace($DigestLock)) {
-    $localLock = Join-Path $RepoRoot ".tmp\backend-functional-test\evidence\local-registry-image-digests.lock"
-    if (Test-Path -LiteralPath $localLock) {
-        $DigestLock = $localLock
-    } else {
-        $DigestLock = Join-Path $RepoRoot "images\image-digests.lock"
-    }
+    $DigestLock = Join-Path $RepoRoot "images\image-digests.lock"
 }
 if ([string]::IsNullOrWhiteSpace($BackendEnvPath)) {
     $BackendEnvPath = Join-Path $RepoRoot "backend\.env"

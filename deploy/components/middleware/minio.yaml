@@ -41,6 +41,8 @@ spec:
         app.kubernetes.io/name: minio
         app.kubernetes.io/part-of: chaimir
     spec:
+      imagePullSecrets:
+        - name: chaimir-harbor-pull
       securityContext:
         runAsNonRoot: true
         runAsUser: 1000

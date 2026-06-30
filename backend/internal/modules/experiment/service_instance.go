@@ -475,7 +475,35 @@ func (s *Service) publishScoreOutboxItem(ctx context.Context, item ExperimentSco
 		s.recordExperimentScoreOutboxFailure(eventCtx, item, err)
 		return apperr.ErrExperimentEventFailed.WithCause(err)
 	}
+	if err := s.publishExperimentCompletedNotification(eventCtx, item); err != nil {
+		s.recordExperimentScoreOutboxFailure(eventCtx, item, err)
+		return apperr.ErrExperimentEventFailed.WithCause(err)
+	}
 	return s.markExperimentScoreOutboxPublished(eventCtx, item)
+}
+
+// publishExperimentCompletedNotification 通过 M10 统一通知事件写入实验完成站内信。
+func (s *Service) publishExperimentCompletedNotification(ctx context.Context, item ExperimentScoreOutbox) error {
+	var exp Experiment
+	if err := s.store.PrivilegedTx(ctx, func(ctx context.Context, tx TxStore) error {
+		var err error
+		exp, err = tx.GetExperiment(ctx, item.TenantID, item.ExperimentID)
+		return err
+	}); err != nil {
+		return err
+	}
+	evt := contracts.NotifySendRequestedEvent{
+		TenantID:  item.TenantID,
+		TraceID:   item.TraceID,
+		Type:      "experiment.completed",
+		Receivers: []int64{item.StudentID},
+		Params: map[string]string{
+			"experiment": exp.Name,
+			"score":      fmt.Sprintf("%.2f", item.Score),
+		},
+		Link: fmt.Sprintf("student/experiment-detail?id=%d", item.ExperimentID),
+	}
+	return s.bus.Publish(ctx, contracts.SubjectNotifySendRequested, evt)
 }
 
 // markExperimentScoreOutboxPublished 标记实验得分事件发布成功。

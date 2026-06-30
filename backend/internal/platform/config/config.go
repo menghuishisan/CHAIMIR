@@ -51,6 +51,7 @@ type ServerConfig struct {
 	Port                     int
 	WSPath                   string
 	WSAllowedOrigins         []string
+	TrustedProxies           []string
 	LogLevel                 string
 	LogFormat                string
 	AppEnv                   string
@@ -263,6 +264,7 @@ type SandboxConfig struct {
 	PrepullNamespace              string
 	SandboxNodeSelector           map[string]string
 	SandboxNodeTolerations        []SandboxToleration
+	ImagePullSecretNames          []string
 	ImageRegistry                 string
 	ImageAttestations             []SandboxImageAttestation
 	CollectorAllowedPrefixes      []string
@@ -437,6 +439,7 @@ func Load() (*Config, error) {
 		Port:                     reqInt("HTTP_PORT"),
 		WSPath:                   req("WS_PATH"),
 		WSAllowedOrigins:         getCSV("WS_ALLOWED_ORIGINS"),
+		TrustedProxies:           getCSV("HTTP_TRUSTED_PROXIES"),
 		LogLevel:                 req("LOG_LEVEL"),
 		LogFormat:                req("LOG_FORMAT"),
 		AppEnv:                   req("APP_ENV"),
@@ -615,6 +618,7 @@ func Load() (*Config, error) {
 		PrepullNamespace:              req("SANDBOX_PREPULL_NAMESPACE"),
 		SandboxNodeSelector:           getKeyValueMap("SANDBOX_NODE_SELECTOR", &errs),
 		SandboxNodeTolerations:        readSandboxTolerations("SANDBOX_NODE_TOLERATIONS_JSON", &errs),
+		ImagePullSecretNames:          getCSV("SANDBOX_IMAGE_PULL_SECRET_NAMES"),
 		ImageRegistry:                 req("IMAGE_REGISTRY"),
 		ImageAttestations:             readSandboxImageAttestations("SANDBOX_IMAGE_ATTESTATIONS_JSON", &errs),
 		CollectorAllowedPrefixes:      getCSV("CHAIMIR_COLLECTOR_ALLOWED_PREFIXES"),

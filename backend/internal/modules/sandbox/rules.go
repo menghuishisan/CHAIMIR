@@ -172,6 +172,9 @@ func validateToolResourceSpecShape(spec *ToolResourceSpec, kind int16) error {
 	if err := validateToolNetworkRules(spec); err != nil {
 		return err
 	}
+	if err := validatePrepullCommand(spec.PrepullCommand); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -209,6 +212,17 @@ func validateCommandToolPolicy(policy *CommandToolPolicy) error {
 // commandPolicyConfigured 判断非命令工具是否误带命令策略。
 func commandPolicyConfigured(policy CommandToolPolicy) bool {
 	return len(policy.AllowedCommands) > 0 || policy.DefaultTimeoutSeconds != 0 || policy.MaxTimeoutSeconds != 0
+}
+
+// validatePrepullCommand 校验镜像预拉取自检命令由 manifest 显式声明且没有空参数。
+func validatePrepullCommand(command []string) error {
+	for i := range command {
+		command[i] = strings.TrimSpace(command[i])
+		if command[i] == "" {
+			return apperr.ErrSandboxToolCreateInvalid
+		}
+	}
+	return nil
 }
 
 // validateCommandContainerSpec 校验命令工具容器长期待命且不暴露网络端口。
@@ -952,12 +966,37 @@ func volumePathOverlaps(left, right string) bool {
 
 // validateInfraSidecarImage 校验运行时协同容器镜像命中受控证明清单。
 func validateInfraSidecarImage(spec workload.ComponentSpec, cfg config.SandboxConfig) error {
-	imageURL := strings.TrimSpace(spec.ImageURL)
-	digest := digestFromImageURL(imageURL)
-	if imageURL == "" || digest == "" || !imageAttested(cfg, imageURL, digest) {
+	if !imageRefAttested(cfg, spec.ImageURL) {
 		return apperr.ErrSandboxSidecarImageInvalid
 	}
 	return nil
+}
+
+// validatePlanImagesCurrentlyAdmitted 在启动或恢复前用当前证明校验已入库镜像引用。
+func validatePlanImagesCurrentlyAdmitted(cfg config.SandboxConfig, runtime Runtime, image RuntimeImage, tools []Tool) error {
+	if !imageRefAttested(cfg, image.ImageURL) {
+		return apperr.ErrSandboxImageAttestationInvalid
+	}
+	for _, component := range runtime.AdapterSpec.InfraSidecars {
+		if err := validateInfraSidecarImage(component, cfg); err != nil {
+			return err
+		}
+	}
+	for _, tool := range tools {
+		for _, component := range tool.ResourceSpec.Components {
+			if !imageRefAttested(cfg, component.ImageURL) {
+				return apperr.ErrSandboxImageAttestationInvalid
+			}
+		}
+	}
+	return nil
+}
+
+// imageRefAttested 判断镜像引用是否是当前配置允许的 Harbor digest 证明。
+func imageRefAttested(cfg config.SandboxConfig, imageURL string) bool {
+	imageURL = strings.TrimSpace(imageURL)
+	digest := digestFromImageURL(imageURL)
+	return imageURL != "" && digest != "" && imageAttested(cfg, imageURL, digest)
 }
 
 // digestFromImageURL 从 image@sha256:... 提取不可变 digest。

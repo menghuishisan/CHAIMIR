@@ -7,11 +7,3 @@
     responses:
       "200":
         $ref: "#/components/responses/PlainOK"
-/api/readyz:
-  get:
-    tags: [health]
-    summary: 服务就绪检查
-    operationId: readyz
-    responses:
-      "200":
-        $ref: "#/components/responses/PlainOK"

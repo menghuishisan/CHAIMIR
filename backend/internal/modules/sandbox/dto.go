@@ -85,6 +85,7 @@ type ToolRunRequest struct {
 type ToolRunResponse struct {
 	StdoutBase64 string `json:"stdout_base64"`
 	StderrBase64 string `json:"stderr_base64"`
+	ExitCode     int    `json:"exit_code"`
 }
 
 // QuotaRequest 是配额调整请求。

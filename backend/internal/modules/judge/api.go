@@ -29,7 +29,7 @@ func RegisterRoutes(r gin.IRouter, svc *Service, authn *auth.Manager, roles cont
 	api := judgeAPI{svc: svc}
 	g := r.Group("/api/v1/judge")
 	api.registerPlatformRoutes(g.Group("", authn.Middleware(), auth.RequirePlatformIdentity()))
-	api.registerInternalRoutes(g.Group("", authn.ServiceMiddleware()))
+	api.registerInternalRoutes(g.Group("/internal", authn.ServiceMiddleware()))
 	api.registerUserRoutes(g.Group("", authn.Middleware(), auth.RequireTenantAnyRole(roles, contracts.RoleTeacher, contracts.RoleSchoolAdmin)))
 	g.POST("/tasks/:id/rejudge", authn.ServiceOrTenantAnyRoleMiddleware(roles, contracts.RoleTeacher, contracts.RoleSchoolAdmin), api.rejudgeTask)
 	return nil

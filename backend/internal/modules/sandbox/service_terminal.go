@@ -4,12 +4,14 @@ package sandbox
 import (
 	"context"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
 
 	"chaimir/internal/platform/workload"
 	"chaimir/pkg/apperr"
+	k8sexec "k8s.io/client-go/util/exec"
 )
 
 const studentAccessLabel = "chaimir.io/student-access"
@@ -119,6 +121,16 @@ func (s *Service) RunCommandToolForOwner(ctx context.Context, tenantID, accountI
 	defer cancel()
 	stdout, stderr, err := s.orchestrator.Exec(execCtx, sb.Namespace, target, req.Command, stdin, false)
 	if err != nil {
+		if exitCode, ok := commandToolExitCode(err); ok {
+			if recordErr := s.recordCommandToolRun(ctx, sb, tool, req.Command); recordErr != nil {
+				return ToolRunResponse{}, recordErr
+			}
+			return ToolRunResponse{
+				StdoutBase64: base64.StdEncoding.EncodeToString(stdout),
+				StderrBase64: base64.StdEncoding.EncodeToString(stderr),
+				ExitCode:     exitCode,
+			}, nil
+		}
 		return ToolRunResponse{}, apperr.ErrSandboxExecFailed.WithCause(fmt.Errorf("%w: %s", err, string(stderr)))
 	}
 	if err := s.recordCommandToolRun(ctx, sb, tool, req.Command); err != nil {
@@ -127,7 +139,17 @@ func (s *Service) RunCommandToolForOwner(ctx context.Context, tenantID, accountI
 	return ToolRunResponse{
 		StdoutBase64: base64.StdEncoding.EncodeToString(stdout),
 		StderrBase64: base64.StdEncoding.EncodeToString(stderr),
+		ExitCode:     0,
 	}, nil
+}
+
+// commandToolExitCode 从 Kubernetes exec 错误链中提取容器进程退出码。
+func commandToolExitCode(err error) (int, bool) {
+	var exitErr k8sexec.CodeExitError
+	if errors.As(err, &exitErr) {
+		return exitErr.ExitStatus(), true
+	}
+	return 0, false
 }
 
 // commandToolTargetForOwner 校验用户归属并解析已挂载的命令工具。

@@ -202,6 +202,15 @@ type ToolResourceSpec struct {
 	Routes          []workload.RouteSpec       `json:"routes"`
 	NetworkRules    []workload.NetworkRuleSpec `json:"network_rules"`
 	CommandPolicy   CommandToolPolicy          `json:"command_policy"`
+	PrepullCommand  []string                   `json:"prepull_command"`
+}
+
+// PrepullImageSpec 描述预拉取闭环中单个镜像的真实拉取与最小自检命令。
+type PrepullImageSpec struct {
+	ImageURL        string
+	Command         []string
+	Hold            bool
+	EphemeralMounts []workload.EphemeralMountSpec
 }
 
 // CommandToolPolicy 描述命令工具允许执行的入口命令和超时边界。

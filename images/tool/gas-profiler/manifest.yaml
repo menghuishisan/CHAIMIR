@@ -67,12 +67,11 @@ build:
   dockerfile: Dockerfile
 selftest:
   commands:
-    - name: syntax
+    - name: receipt-summary
       command:
         - python
-        - -m
-        - py_compile
-        - /usr/local/bin/gas-profiler
+        - -c
+        - import json,subprocess;p="/tmp/receipts.json";open(p,"w",encoding="utf-8").write(json.dumps(dict(receipts=[dict(gasUsed=21000),dict(gasUsed=45000)])));out=subprocess.check_output(["gas-profiler",p],text=True);assert json.loads(out)["total"]==66000
 supply_chain:
   sbom: true
   trivy_required: true

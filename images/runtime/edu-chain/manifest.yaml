@@ -18,8 +18,8 @@ description: 平台自研教学链运行时镜像。
 source:
   type: platform-built
 upstream:
-  image: python:3.13-alpine
-  reuse_policy: self-developed-runtime
+  builder: base/go-builder
+  reuse_policy: self-developed-static-runtime
 env_keys:
   config:
     - CHAIMIR_EDU_CHAIN_PORT
@@ -31,6 +31,7 @@ capabilities:
   - chain-runtime
   - teaching-consensus
   - protocol-visualization
+  - static-runtime
 runtime:
   eco: edu
   adapter_level: 2
@@ -75,10 +76,8 @@ selftest:
   commands:
     - name: syntax
       command:
-        - python
-        - -m
-        - py_compile
-        - /app/edu_chain.py
+        - /usr/local/bin/chaimir-edu-chain
+        - -selftest
 supply_chain:
   sbom: true
   trivy_required: true

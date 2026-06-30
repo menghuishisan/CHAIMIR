@@ -13,6 +13,7 @@ kubeconfig
 !**/*.example
 deploy/config/cosign/
 deploy/config/docker-auth/
+deploy/config/harbor-tls/
 
 # ---- K8s/部署本地产物 ----
 deploy/**/rendered.yaml
@@ -78,6 +79,7 @@ images/**/build/
 .gocache/
 .agents/
 .codex/
+.playwright-mcp/
 
 # ---- AI/本地开发规范文件(不上传公共仓库)----
 AGENTS.md

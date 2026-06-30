@@ -39,6 +39,7 @@ tool:
     - fabric
     - fisco
   mount_workspace: true
+  readiness_path: /healthz
 ports:
   - name: http
     container_port: 8080

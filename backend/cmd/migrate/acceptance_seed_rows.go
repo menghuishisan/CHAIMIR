@@ -21,6 +21,11 @@ type acceptanceImageAttestation struct {
 	TrivyStatus    string `json:"trivy_status"`
 }
 
+const (
+	acceptanceInitCodeRef   = "minio://chaimir-code/910000000000000001/sandbox/init/lab-reentrancy-foundry/workspace.tar"
+	acceptanceInitScriptRef = "minio://chaimir-code/910000000000000001/sandbox/init/lab-reentrancy-foundry/init.sh"
+)
+
 // acceptanceImageURL 从受控镜像证明清单选择不可变 digest 地址,保证验收种子和沙箱安全规则使用同一来源。
 func acceptanceImageURL(image string) (string, error) {
 	registry := strings.TrimRight(osEnv("IMAGE_REGISTRY"), "/")
@@ -223,11 +228,11 @@ INSERT INTO sandbox (
 	snapshot_created_at, snapshot_expire_at, keep_alive_until, expire_at
 ) VALUES (
 	$1,$2,$3,$4,'chaimir-acceptance-sandbox-a','sandbox:acceptance:reentrancy-a',$5,$6,$7,
-	false,true,'910000000000000001/sandbox/code/910000000000001021/workspace.tar','6d0f2d2a4f7a7b7b6b0e0e9f7c8a1c2d3e4f506172839405162738495a6b7c8d','content/lab-reentrancy-foundry.zip','scripts/init-reentrancy.sh','snapshots/acceptance/reentrancy-a.tar','["workspace"]'::jsonb,
+	false,true,'910000000000000001/sandbox/code/910000000000001021/workspace.tar','6d0f2d2a4f7a7b7b6b0e0e9f7c8a1c2d3e4f506172839405162738495a6b7c8d',$8,$9,'snapshots/acceptance/reentrancy-a.tar','["workspace"]'::jsonb,
 	now(),now() + interval '7 days',NULL,now() + interval '2 hours'
 )
 ON CONFLICT (id) DO UPDATE SET runtime_id=EXCLUDED.runtime_id, image_id=EXCLUDED.image_id, namespace=EXCLUDED.namespace, source_ref=EXCLUDED.source_ref, owner_account_id=EXCLUDED.owner_account_id, phase=EXCLUDED.phase, status=EXCLUDED.status, keep_alive=EXCLUDED.keep_alive, snapshot_enabled=EXCLUDED.snapshot_enabled, code_storage_key=EXCLUDED.code_storage_key, code_hash=EXCLUDED.code_hash, init_code_ref=EXCLUDED.init_code_ref, init_script_ref=EXCLUDED.init_script_ref, snapshot_ref=EXCLUDED.snapshot_ref, snapshot_domains=EXCLUDED.snapshot_domains, snapshot_created_at=EXCLUDED.snapshot_created_at, snapshot_expire_at=EXCLUDED.snapshot_expire_at, keep_alive_until=EXCLUDED.keep_alive_until, expire_at=EXCLUDED.expire_at, updated_at=now()`,
-		acceptanceIDs.Sandbox, acceptanceIDs.TenantID, acceptanceIDs.Runtime, acceptanceIDs.RuntimeImage, acceptanceIDs.StudentA, contracts.SandboxPhaseFullyReady, contracts.SandboxStatusDestroyed); err != nil {
+		acceptanceIDs.Sandbox, acceptanceIDs.TenantID, acceptanceIDs.Runtime, acceptanceIDs.RuntimeImage, acceptanceIDs.StudentA, contracts.SandboxPhaseFullyReady, contracts.SandboxStatusDestroyed, acceptanceInitCodeRef, acceptanceInitScriptRef); err != nil {
 		return err
 	}
 	if err := execJSON(ctx, tx, `
@@ -502,8 +507,8 @@ func seedExperimentRows(ctx context.Context, tx pgx.Tx) error {
 			"runtime_code":          "evm-foundry",
 			"runtime_image_version": "2026.06",
 			"tools":                 []string{"code-server"},
-			"init_code_ref":         "content/lab-reentrancy-foundry.zip",
-			"init_script_ref":       "scripts/init-reentrancy.sh",
+			"init_code_ref":         acceptanceInitCodeRef,
+			"init_script_ref":       acceptanceInitScriptRef,
 			"snapshot_enabled":      true,
 			"keep_alive_minutes":    60,
 		}},

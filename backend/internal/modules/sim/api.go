@@ -49,8 +49,8 @@ func RegisterRoutes(r gin.IRouter, svc *Service, authn *auth.Manager, roles cont
 	api.registerPublicRoutes(g)
 	api.registerUserRoutes(g.Group("", authn.Middleware(), auth.RequireTenantAnyRole(roles, contracts.RoleStudent, contracts.RoleTeacher, contracts.RoleSchoolAdmin)))
 	api.registerTeacherRoutes(g.Group("", authn.Middleware(), auth.RequireTenantAnyRole(roles, contracts.RoleTeacher, contracts.RoleSchoolAdmin)))
-	api.registerInternalRoutes(g.Group("", authn.ServiceMiddleware()))
-	g.POST("/packages/:key/validation-report", authn.ServiceMiddleware(), api.validationReport)
+	api.registerInternalRoutes(g.Group("/internal", authn.ServiceMiddleware()))
+	g.POST("/internal/packages/:key/validation-report", authn.ServiceMiddleware(), api.validationReport)
 	api.registerPlatformRoutes(g.Group("", authn.Middleware(), auth.RequirePlatformIdentity()))
 	return nil
 }

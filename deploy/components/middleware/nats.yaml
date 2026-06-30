@@ -1,6 +1,6 @@
 # NATS 2.10 单实例(事件总线,模块反向通信)。
 # 依据 docs/总-技术选型.md §9:NATS 2.10+;docs/总-工程目录设计:反向通信走 NATS 事件。
-# 官方镜像不重打包。token 认证从 chaimir-secret 注入。
+# 项目 Harbor 中间件镜像经安全准入后使用。token 认证从 chaimir-secret 注入。
 ---
 apiVersion: v1
 kind: Service
@@ -41,6 +41,8 @@ spec:
         app.kubernetes.io/name: nats
         app.kubernetes.io/part-of: chaimir
     spec:
+      imagePullSecrets:
+        - name: chaimir-harbor-pull
       securityContext:
         runAsNonRoot: true
         runAsUser: 1000
@@ -49,7 +51,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: nats
-          image: nats:2.11-alpine
+          image: chaimir/middleware/nats:placeholder
           # JetStream 持久化 + token 认证(token 经环境变量,不硬编码)。
           command: ["sh", "-c", "exec nats-server -js -sd /data -m 8222 --auth \"$NATS_TOKEN\""]
           ports:

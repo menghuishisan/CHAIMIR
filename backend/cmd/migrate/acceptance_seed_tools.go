@@ -64,6 +64,7 @@ type toolManifestTool struct {
 	Args                  []string                      `json:"args"`
 	Env                   []workload.EnvVarSpec         `json:"env"`
 	EphemeralMounts       []workload.EphemeralMountSpec `json:"ephemeral_mounts"`
+	ReadinessPath         string                        `json:"readiness_path"`
 	KeepaliveCommand      []string                      `json:"keepalive_command"`
 	CommandPolicy         map[string]any                `json:"command_policy"`
 }
@@ -95,6 +96,15 @@ type toolManifestResources struct {
 	EphemeralStorageLimit string `json:"ephemeral_storage_limit"`
 }
 
+type toolManifestSelftestCommand struct {
+	Name    string   `json:"name"`
+	Command []string `json:"command"`
+}
+
+type toolManifestSelftest struct {
+	Commands []toolManifestSelftestCommand `json:"commands"`
+}
+
 // acceptanceToolDefinitions 读取全部 tool manifest 并转换为 tool 表种子数据。
 func acceptanceToolDefinitions() ([]acceptanceToolDefinition, error) {
 	root, err := acceptanceImagesRoot()
@@ -115,6 +125,9 @@ func acceptanceToolDefinitions() ([]acceptanceToolDefinition, error) {
 		manifest, err := readToolManifest(filepath.Join(toolRoot, entry.Name(), "manifest.yaml"))
 		if err != nil {
 			return nil, err
+		}
+		if !toolManifestDeployable(manifest) {
+			continue
 		}
 		def, err := toolDefinitionFromManifest(len(defs), manifest)
 		if err != nil {
@@ -194,10 +207,6 @@ func toolDefinitionFromManifest(index int, manifest toolManifest) (acceptanceToo
 	if err != nil {
 		return acceptanceToolDefinition{}, err
 	}
-	status := int16(1)
-	if manifest.Tool.RuntimeConfigRequired {
-		status = 2
-	}
 	return acceptanceToolDefinition{
 		ID:           acceptanceToolID(manifest.Name, index),
 		Code:         manifest.Name,
@@ -205,7 +214,7 @@ func toolDefinitionFromManifest(index int, manifest toolManifest) (acceptanceToo
 		Kind:         kind,
 		EcoTags:      manifest.Tool.EcoTags,
 		ResourceSpec: spec,
-		Status:       status,
+		Status:       1,
 	}, nil
 }
 
@@ -214,6 +223,14 @@ func toolResourceSpecFromManifest(manifest toolManifest, imageURL string, kind i
 	if len(manifest.Tool.ResourceSpec) > 0 {
 		spec, err := normalizeExplicitToolResourceSpec(manifest.Tool.ResourceSpec, imageURL, kind)
 		if err != nil {
+			return nil, err
+		}
+		command := toolPrepullCommandFromManifest(manifest)
+		if len(command) == 0 {
+			return nil, fmt.Errorf("显式工具 WorkloadSpec 必须声明 selftest.commands 作为预拉取自检命令: %s", manifest.Name)
+		}
+		spec["prepull_command"] = command
+		if err := validateGeneratedToolResourceSpec(spec, kind); err != nil {
 			return nil, err
 		}
 		return spec, nil
@@ -234,6 +251,9 @@ func toolResourceSpecFromManifest(manifest toolManifest, imageURL string, kind i
 	}
 	if kind == contracts.SandboxToolKindCommand {
 		spec["command_policy"] = manifest.Tool.CommandPolicy
+	}
+	if command := toolPrepullCommandFromManifest(manifest); len(command) > 0 {
+		spec["prepull_command"] = command
 	}
 	if err := validateGeneratedToolResourceSpec(spec, kind); err != nil {
 		return nil, err
@@ -280,6 +300,34 @@ func normalizeExplicitToolResourceSpec(input map[string]any, imageURL string, ki
 		return nil, err
 	}
 	return spec, nil
+}
+
+// toolPrepullCommandFromManifest 选择镜像声明的首个自检命令作为预拉取启动命令。
+func toolPrepullCommandFromManifest(manifest toolManifest) []string {
+	raw, ok := manifest.Selftest["commands"]
+	if !ok {
+		return nil
+	}
+	data, err := json.Marshal(raw)
+	if err != nil {
+		return nil
+	}
+	var commands []toolManifestSelftestCommand
+	if err := json.Unmarshal(data, &commands); err != nil || len(commands) == 0 {
+		return nil
+	}
+	command := commands[0].Command
+	if len(command) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(command))
+	for _, part := range command {
+		trimmed := strings.TrimSpace(part)
+		if trimmed != "" {
+			out = append(out, trimmed)
+		}
+	}
+	return out
 }
 
 // validateGeneratedToolResourceSpec 复用 M2 规则层校验 seed 产物,避免迁移入口绕过运行期约束。
@@ -334,6 +382,19 @@ func toolKindFromManifest(kind string) (int16, error) {
 	}
 }
 
+// toolManifestDeployable 只让供应链准入的工具进入验收种子。
+func toolManifestDeployable(manifest toolManifest) bool {
+	value, ok := manifest.SupplyChain["deployable"]
+	if !ok {
+		return true
+	}
+	deployable, ok := value.(bool)
+	if !ok {
+		return true
+	}
+	return deployable
+}
+
 // toolComponentFromManifest 构造工具容器声明。
 func toolComponentFromManifest(manifest toolManifest, imageURL string, kind int16) (workload.ComponentSpec, error) {
 	mountWorkspace := manifest.Tool.MountWorkspace
@@ -354,7 +415,11 @@ func toolComponentFromManifest(manifest toolManifest, imageURL string, kind int1
 		}
 		port := manifest.Ports[0]
 		component.Ports = []workload.PortSpec{{Name: "http", ContainerPort: port.ContainerPort, ServicePort: port.ContainerPort, Protocol: defaultProtocol(port.Protocol)}}
-		component.ReadinessProbe = workload.ProbeSpec{Type: "http", Path: "/", Port: "http", PeriodSeconds: 2, FailureThreshold: 30}
+		readinessPath, err := toolReadinessPath(manifest)
+		if err != nil {
+			return workload.ComponentSpec{}, err
+		}
+		component.ReadinessProbe = workload.ProbeSpec{Type: "http", Path: readinessPath, Port: "http", PeriodSeconds: 2, FailureThreshold: 30}
 		return component, nil
 	}
 	if len(manifest.Ports) != 0 || len(manifest.Tool.KeepaliveCommand) == 0 {
@@ -362,6 +427,18 @@ func toolComponentFromManifest(manifest toolManifest, imageURL string, kind int1
 	}
 	component.Command = manifest.Tool.KeepaliveCommand
 	return component, nil
+}
+
+// toolReadinessPath 返回 Web 工具声明的健康检查路径,默认沿用根路径。
+func toolReadinessPath(manifest toolManifest) (string, error) {
+	path := strings.TrimSpace(manifest.Tool.ReadinessPath)
+	if path == "" {
+		return "/", nil
+	}
+	if !strings.HasPrefix(path, "/") {
+		return "", fmt.Errorf("web 工具 readiness_path 必须以 / 开头: %s", manifest.Name)
+	}
+	return path, nil
 }
 
 // toolComponentName 返回工具类型内唯一组件名。

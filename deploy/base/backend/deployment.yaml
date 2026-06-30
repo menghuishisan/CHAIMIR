@@ -55,16 +55,17 @@ spec:
             limits:
               cpu: "1"
               memory: 512Mi
-          # 就绪/存活探针:后端暴露 /api/healthz(存活) 与 /api/readyz(依赖就绪)。
+          # 就绪探针走集群内专用路径,不经公网 /api Ingress 暴露依赖状态;
+          # /api/healthz 仅保留最小公开 liveness。
           readinessProbe:
             httpGet:
-              path: /api/readyz
+              path: /-/readyz
               port: http
             initialDelaySeconds: 5
             periodSeconds: 10
           livenessProbe:
             httpGet:
-              path: /api/healthz
+              path: /-/healthz
               port: http
             initialDelaySeconds: 15
             periodSeconds: 20

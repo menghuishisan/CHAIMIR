@@ -41,8 +41,6 @@ tags:
 paths:
   /api/healthz:
     $ref: './paths/health.yaml#/api/healthz'
-  /api/readyz:
-    $ref: './paths/health.yaml#/api/readyz'
   /api/v1/auth/login/platform:
     $ref: './paths/identity.yaml#/api/v1/auth/login/platform'
   /api/v1/auth/login/phone:
@@ -169,16 +167,18 @@ paths:
     $ref: './paths/sandbox.yaml#/api/v1/sandbox/runtimes/{id}/images/{img}/prepull'
   /api/v1/sandbox/tools:
     $ref: './paths/sandbox.yaml#/api/v1/sandbox/tools'
-  /api/v1/sandbox/sandboxes:
-    $ref: './paths/sandbox.yaml#/api/v1/sandbox/sandboxes'
-  /api/v1/sandbox/sandboxes/recycle:
-    $ref: './paths/sandbox.yaml#/api/v1/sandbox/sandboxes/recycle'
+  /api/v1/sandbox/internal/sandboxes:
+    $ref: './paths/sandbox.yaml#/api/v1/sandbox/internal/sandboxes'
+  /api/v1/sandbox/internal/sandboxes/recycle:
+    $ref: './paths/sandbox.yaml#/api/v1/sandbox/internal/sandboxes/recycle'
   /api/v1/sandbox/sandboxes/{id}:
     $ref: './paths/sandbox.yaml#/api/v1/sandbox/sandboxes/{id}'
-  /api/v1/sandbox/sandboxes/{id}/pause:
-    $ref: './paths/sandbox.yaml#/api/v1/sandbox/sandboxes/{id}/pause'
-  /api/v1/sandbox/sandboxes/{id}/resume:
-    $ref: './paths/sandbox.yaml#/api/v1/sandbox/sandboxes/{id}/resume'
+  /api/v1/sandbox/internal/sandboxes/{id}:
+    $ref: './paths/sandbox.yaml#/api/v1/sandbox/internal/sandboxes/{id}'
+  /api/v1/sandbox/internal/sandboxes/{id}/pause:
+    $ref: './paths/sandbox.yaml#/api/v1/sandbox/internal/sandboxes/{id}/pause'
+  /api/v1/sandbox/internal/sandboxes/{id}/resume:
+    $ref: './paths/sandbox.yaml#/api/v1/sandbox/internal/sandboxes/{id}/resume'
   /api/v1/sandbox/sandboxes/{id}/progress:
     $ref: './paths/sandbox.yaml#/api/v1/sandbox/sandboxes/{id}/progress'
   /api/v1/sandbox/sandboxes/{id}/terminal:
@@ -193,8 +193,8 @@ paths:
     $ref: './paths/sandbox.yaml#/api/v1/sandbox/sandboxes/{id}/chain/tx'
   /api/v1/sandbox/sandboxes/{id}/chain/query:
     $ref: './paths/sandbox.yaml#/api/v1/sandbox/sandboxes/{id}/chain/query'
-  /api/v1/sandbox/sandboxes/{id}/chain/reset:
-    $ref: './paths/sandbox.yaml#/api/v1/sandbox/sandboxes/{id}/chain/reset'
+  /api/v1/sandbox/internal/sandboxes/{id}/chain/reset:
+    $ref: './paths/sandbox.yaml#/api/v1/sandbox/internal/sandboxes/{id}/chain/reset'
   /api/v1/sandbox/sandboxes/{id}/command-tools/{tool_code}/run:
     $ref: './paths/sandbox.yaml#/api/v1/sandbox/sandboxes/{id}/command-tools/{tool_code}/run'
   /api/v1/sandbox/sandboxes/{id}/tools/{tool_code}/{proxy_path}:
@@ -209,20 +209,24 @@ paths:
     $ref: './paths/judge.yaml#/api/v1/judge/judgers/{id}/selftest'
   /api/v1/judge/tasks:
     $ref: './paths/judge.yaml#/api/v1/judge/tasks'
+  /api/v1/judge/internal/tasks:
+    $ref: './paths/judge.yaml#/api/v1/judge/internal/tasks'
   /api/v1/judge/tasks/{id}:
     $ref: './paths/judge.yaml#/api/v1/judge/tasks/{id}'
+  /api/v1/judge/internal/tasks/{id}:
+    $ref: './paths/judge.yaml#/api/v1/judge/internal/tasks/{id}'
   /api/v1/judge/tasks/{id}/progress:
     $ref: './paths/judge.yaml#/api/v1/judge/tasks/{id}/progress'
   /api/v1/judge/tasks/{id}/rejudge:
     $ref: './paths/judge.yaml#/api/v1/judge/tasks/{id}/rejudge'
   /api/v1/judge/tasks/{id}/manual-score:
     $ref: './paths/judge.yaml#/api/v1/judge/tasks/{id}/manual-score'
-  /api/v1/judge/rejudge/batch:
-    $ref: './paths/judge.yaml#/api/v1/judge/rejudge/batch'
-  /api/v1/judge/fingerprints/exact:
-    $ref: './paths/judge.yaml#/api/v1/judge/fingerprints/exact'
-  /api/v1/judge/fingerprints/similarity:
-    $ref: './paths/judge.yaml#/api/v1/judge/fingerprints/similarity'
+  /api/v1/judge/internal/rejudge/batch:
+    $ref: './paths/judge.yaml#/api/v1/judge/internal/rejudge/batch'
+  /api/v1/judge/internal/fingerprints/exact:
+    $ref: './paths/judge.yaml#/api/v1/judge/internal/fingerprints/exact'
+  /api/v1/judge/internal/fingerprints/similarity:
+    $ref: './paths/judge.yaml#/api/v1/judge/internal/fingerprints/similarity'
   /api/v1/sim/shared/{code}:
     $ref: './paths/sim.yaml#/api/v1/sim/shared/{code}'
   /api/v1/sim/packages:
@@ -235,8 +239,8 @@ paths:
     $ref: './paths/sim.yaml#/api/v1/sim/packages/{key}/{version}/bundle'
   /api/v1/sim/packages/{key}/preview:
     $ref: './paths/sim.yaml#/api/v1/sim/packages/{key}/preview'
-  /api/v1/sim/packages/{key}/validation-report:
-    $ref: './paths/sim.yaml#/api/v1/sim/packages/{key}/validation-report'
+  /api/v1/sim/internal/packages/{key}/validation-report:
+    $ref: './paths/sim.yaml#/api/v1/sim/internal/packages/{key}/validation-report'
   /api/v1/sim/packages/{key}/archive:
     $ref: './paths/sim.yaml#/api/v1/sim/packages/{key}/archive'
   /api/v1/sim/packages/{key}/republish:
@@ -247,12 +251,12 @@ paths:
     $ref: './paths/sim.yaml#/api/v1/sim/reviews/{id}/approve'
   /api/v1/sim/reviews/{id}/reject:
     $ref: './paths/sim.yaml#/api/v1/sim/reviews/{id}/reject'
-  /api/v1/sim/sessions:
-    $ref: './paths/sim.yaml#/api/v1/sim/sessions'
-  /api/v1/sim/sessions/recycle:
-    $ref: './paths/sim.yaml#/api/v1/sim/sessions/recycle'
-  /api/v1/sim/sessions/{id}:
-    $ref: './paths/sim.yaml#/api/v1/sim/sessions/{id}'
+  /api/v1/sim/internal/sessions:
+    $ref: './paths/sim.yaml#/api/v1/sim/internal/sessions'
+  /api/v1/sim/internal/sessions/recycle:
+    $ref: './paths/sim.yaml#/api/v1/sim/internal/sessions/recycle'
+  /api/v1/sim/internal/sessions/{id}:
+    $ref: './paths/sim.yaml#/api/v1/sim/internal/sessions/{id}'
   /api/v1/sim/sessions/{id}/actions:
     $ref: './paths/sim.yaml#/api/v1/sim/sessions/{id}/actions'
   /api/v1/sim/sessions/{id}/replay:
@@ -261,14 +265,14 @@ paths:
     $ref: './paths/sim.yaml#/api/v1/sim/sessions/{id}/share'
   /api/v1/sim/sessions/{id}/stream:
     $ref: './paths/sim.yaml#/api/v1/sim/sessions/{id}/stream'
-  /api/v1/sim/sessions/{id}/checkpoints:
-    $ref: './paths/sim.yaml#/api/v1/sim/sessions/{id}/checkpoints'
+  /api/v1/sim/internal/sessions/{id}/checkpoints:
+    $ref: './paths/sim.yaml#/api/v1/sim/internal/sessions/{id}/checkpoints'
   /api/v1/content/items:
     $ref: './paths/content.yaml#/api/v1/content/items'
-  /api/v1/content/items/system-import:
-    $ref: './paths/content.yaml#/api/v1/content/items/system-import'
-  /api/v1/content/items/batch:
-    $ref: './paths/content.yaml#/api/v1/content/items/batch'
+  /api/v1/content/internal/items/system-import:
+    $ref: './paths/content.yaml#/api/v1/content/internal/items/system-import'
+  /api/v1/content/internal/items/batch:
+    $ref: './paths/content.yaml#/api/v1/content/internal/items/batch'
   /api/v1/content/items/{item}:
     $ref: './paths/content.yaml#/api/v1/content/items/{item}'
   /api/v1/content/items/{item}/publish:
@@ -553,10 +557,10 @@ paths:
     $ref: './paths/notify.yaml#/api/v1/notify/announcements/{id}/read'
   /api/ws:
     $ref: './paths/notify.yaml#/api/ws'
-  /api/v1/notify/send:
-    $ref: './paths/notify.yaml#/api/v1/notify/send'
-  /api/v1/notify/push:
-    $ref: './paths/notify.yaml#/api/v1/notify/push'
+  /api/v1/notify/internal/send:
+    $ref: './paths/notify.yaml#/api/v1/notify/internal/send'
+  /api/v1/notify/internal/push:
+    $ref: './paths/notify.yaml#/api/v1/notify/internal/push'
   /api/v1/grade-center/level-configs:
     $ref: './paths/grade.yaml#/api/v1/grade-center/level-configs'
   /api/v1/grade-center/level-configs/{id}:

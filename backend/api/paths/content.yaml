@@ -26,7 +26,7 @@
     security: [{ bearerAuth: [] }]
     requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
-/api/v1/content/items/system-import:
+/api/v1/content/internal/items/system-import:
   post:
     tags: [content]
     summary: 系统或外部源自动建题入口
@@ -36,7 +36,7 @@
     security: [{ serviceAuth: [] }]
     requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
-/api/v1/content/items/batch:
+/api/v1/content/internal/items/batch:
   post:
     tags: [content]
     summary: 批量取内容

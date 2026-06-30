@@ -18,9 +18,21 @@ secretGenerator:
       - ../../config/secret.env
 
 images:
+  - name: chaimir/middleware/clamav
+    newName: harbor.chaimir:30080/middleware/clamav
+    digest: sha256:833c257e088e8480f825bf03dc5c37d907747acb2c371c51a07034a38cc24143
   - name: chaimir/middleware/minio
-    newName: chaimir/middleware/minio
-    newTag: dev
+    newName: harbor.chaimir:30080/middleware/minio
+    digest: sha256:5d4553bf53b4981ca52343d86271c71a1e6d20859133561f01ac645b389755b6
+  - name: chaimir/middleware/nats
+    newName: harbor.chaimir:30080/middleware/nats
+    digest: sha256:9524c61e8791a6417ff875878adb8229865bf99d00fe1b6bf5192ece77adde95
+  - name: chaimir/middleware/postgres
+    newName: harbor.chaimir:30080/middleware/postgres
+    digest: sha256:ef20d46eba750371f6710e18cae1502e7dc538afd4aab4a0d8937712f2aefc31
+  - name: chaimir/middleware/redis
+    newName: harbor.chaimir:30080/middleware/redis
+    digest: sha256:0ba43c28f35d08b10f4a4b56ce249aee7bd3541ec8215b30682cffb59d84a37d
 
 generatorOptions:
   disableNameSuffixHash: false

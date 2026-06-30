@@ -17,6 +17,8 @@ metadata:
   labels:
     app.kubernetes.io/name: chaimir-backend
     app.kubernetes.io/part-of: chaimir
+imagePullSecrets:
+  - name: chaimir-harbor-pull
 ---
 # 集群级:仅命名空间生命周期 + 节点/命名空间只读(调度决策需要)。
 # 不含 secrets/configmaps 的集群级读,不含任何 RBAC/集群资源写。
@@ -57,11 +59,15 @@ rules:
   # 每个动态沙箱命名空间内显式创建最小权限 ServiceAccount,禁止依赖 default SA。
   - apiGroups: [""]
     resources: ["serviceaccounts"]
-    verbs: ["create", "delete", "get", "list", "watch"]
+    verbs: ["create", "delete", "get", "list", "watch", "update"]
   # 工具容器(code-server/remix 等)的 ClusterIP 暴露 + 配置注入。
   - apiGroups: [""]
-    resources: ["services", "configmaps", "secrets"]
+    resources: ["services", "configmaps"]
     verbs: ["create", "delete", "get", "list", "watch"]
+  # 动态沙箱命名空间内只同步 imagePullSecret,用于 Harbor 私有 digest 镜像拉取。
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["create", "delete", "get", "list", "watch", "update"]
   # 持久卷声明(部分实验需可写卷)。
   - apiGroups: [""]
     resources: ["persistentvolumeclaims"]
@@ -97,6 +103,39 @@ roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
   name: chaimir-backend-sandbox-ns
+subjects:
+  - kind: ServiceAccount
+    name: chaimir-backend
+    namespace: chaimir-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: chaimir-backend-prepull-workload
+  namespace: chaimir-prepull
+  labels:
+    app.kubernetes.io/part-of: chaimir
+rules:
+  # M2 预拉取闭环只在 chaimir-prepull 命名空间管理 DaemonSet,不扩大到其他静态命名空间。
+  - apiGroups: ["apps"]
+    resources: ["daemonsets"]
+    verbs: ["create", "delete", "get", "list", "watch", "update"]
+  # 预拉取状态需要读取 DaemonSet 创建的 Pod,用于识别 ImagePullBackOff 等真实失败。
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: chaimir-backend-prepull-workload
+  namespace: chaimir-prepull
+  labels:
+    app.kubernetes.io/part-of: chaimir
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: chaimir-backend-prepull-workload
 subjects:
   - kind: ServiceAccount
     name: chaimir-backend

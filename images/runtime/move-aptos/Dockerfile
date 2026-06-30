@@ -1,7 +1,7 @@
 # 本文件定义 Aptos Move 本地网运行时镜像,从官方工具镜像提取 Aptos CLI 到干净运行层。
 FROM aptoslabs/tools:aptos-node-v1.46.2 AS aptos-tools
 
-FROM debian:13.5-slim AS runtime-libs
+FROM debian:13.5-slim@sha256:28de0877c2189802884ccd20f15ee41c203573bd87bb6b883f5f46362d24c5c2 AS runtime-libs
 RUN apt-get -o Acquire::Retries=3 update \
     && apt-get -o Acquire::Retries=3 -y install --no-install-recommends ca-certificates libstdc++6 libudev1 libssl3t64 libcap2 zlib1g libzstd1 \
     && rm -rf /var/lib/apt/lists/*

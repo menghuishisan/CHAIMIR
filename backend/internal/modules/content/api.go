@@ -28,7 +28,7 @@ func RegisterRoutes(r gin.IRouter, svc *Service, authn *auth.Manager, roles cont
 	api := contentAPI{svc: svc, roles: roles}
 	g := r.Group("/api/v1/content")
 	api.registerTeacherRoutes(g.Group("", authn.Middleware(), auth.RequireTenantAnyRole(roles, contracts.RoleTeacher, contracts.RoleSchoolAdmin)))
-	api.registerInternalRoutes(g.Group("", authn.ServiceMiddleware()))
+	api.registerInternalRoutes(g.Group("/internal", authn.ServiceMiddleware()))
 	g.GET("/items/:item/:version/full", authn.ServiceOrTenantAnyRoleMiddleware(roles, contracts.RoleTeacher), api.getFull)
 	return nil
 }

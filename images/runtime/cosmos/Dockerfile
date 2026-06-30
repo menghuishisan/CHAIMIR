@@ -1,5 +1,6 @@
+# syntax=docker/dockerfile:1.7
 # 本文件定义 Cosmos SDK/Tendermint 单链运行时镜像,从 Gaia 官方源码构建。
-FROM debian:12-slim AS build
+FROM debian:13.5-slim@sha256:28de0877c2189802884ccd20f15ee41c203573bd87bb6b883f5f46362d24c5c2 AS build
 
 ARG GAIA_VERSION=v27.4.0
 ARG GAIA_SOURCE_COMMIT=849a28da07aac0aab12adaec22ff6d6a39f20d47
@@ -42,29 +43,67 @@ RUN if [ -n "${GO_MODULE_PROXY}" ]; then go env -w GOPROXY="${GO_MODULE_PROXY}";
     && go mod tidy \
     && CGO_CFLAGS="-D__BLST_PORTABLE__" go build -trimpath -tags "netgo" -ldflags "-s -w" -o /out/gaiad ./cmd/gaiad \
     && find /go/pkg/mod -name "libwasmvm.x86_64.so" -type f -print -exec cp {} /out/libwasmvm.x86_64.so \;
+RUN cat > /tmp/chaimir-cosmos-entrypoint.go <<'EOF'
+package main
 
-FROM debian:13.5-slim AS runtime-libs
-RUN apt-get -o Acquire::Retries=3 update \
-    && apt-get -o Acquire::Retries=3 -y install --no-install-recommends ca-certificates libgcc-s1 \
-    && rm -rf /var/lib/apt/lists/*
+import (
+	"fmt"
+	"os"
+	"syscall"
+)
 
-FROM alpine:3.23 AS runtime-dirs
-RUN mkdir -p /workspace /runtime-state/cosmos /tmp \
-    && chown -R 1000:1000 /workspace /runtime-state /tmp
+func ensureEnv(key, value string) {
+	if os.Getenv(key) != "" {
+		return
+	}
+	os.Setenv(key, value)
+}
 
-FROM scratch
+func main() {
+	runtimeHome := os.Getenv("CHAIMIR_COSMOS_HOME")
+	ensureEnv("HOME", "/workspace")
+	if os.Getenv("TMPDIR") == "" {
+		if runtimeHome == "" {
+			ensureEnv("TMPDIR", "/tmp")
+		} else {
+			ensureEnv("TMPDIR", runtimeHome+"/tmp")
+		}
+	}
+	for _, dir := range []string{os.Getenv("HOME"), os.Getenv("TMPDIR")} {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			fmt.Fprintf(os.Stderr, "创建 Cosmos 运行目录失败: %v\n", err)
+			os.Exit(1)
+		}
+	}
+	if os.Getenv("CHAIMIR_SELFTEST") == "1" {
+		execGaiad([]string{"gaiad", "version"})
+	}
+	if runtimeHome == "" {
+		fmt.Fprintln(os.Stderr, "必须通过初始化卷提供 CHAIMIR_COSMOS_HOME")
+		os.Exit(1)
+	}
+	execGaiad([]string{"gaiad", "start", "--home", runtimeHome})
+}
+
+func execGaiad(args []string) {
+	if err := syscall.Exec("/usr/local/bin/gaiad", args, os.Environ()); err != nil {
+		fmt.Fprintf(os.Stderr, "启动 gaiad 失败: %v\n", err)
+		os.Exit(1)
+	}
+}
+EOF
+RUN CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o /out/chaimir-cosmos-entrypoint /tmp/chaimir-cosmos-entrypoint.go \
+    && mkdir -p /out/rootfs/workspace /out/rootfs/runtime-state/cosmos /out/rootfs/tmp
+
+FROM gcr.io/distroless/cc-debian12:nonroot@sha256:b0ae8e989418b458e0f25489bc3be523718938a2b70864cc0f6a00af1ddbd985
 
 LABEL org.opencontainers.image.title="runtime/cosmos"
 LABEL org.opencontainers.image.description="Chaimir Cosmos SDK local chain runtime built from official Gaia source"
 
-COPY --from=runtime-libs /lib/x86_64-linux-gnu/ /lib/x86_64-linux-gnu/
-COPY --from=runtime-libs /lib64/ /lib64/
-COPY --from=runtime-libs /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
-COPY --from=runtime-dirs --chown=1000:1000 /workspace /workspace
-COPY --from=runtime-dirs --chown=1000:1000 /runtime-state /runtime-state
-COPY --from=runtime-dirs --chown=1000:1000 /tmp /tmp
+COPY --from=build --chown=1000:1000 /out/rootfs/ /
 COPY --from=build --chown=1000:1000 /out/gaiad /usr/local/bin/gaiad
 COPY --from=build --chown=1000:1000 /out/libwasmvm.x86_64.so /usr/local/lib/libwasmvm.x86_64.so
+COPY --from=build --chown=1000:1000 /out/chaimir-cosmos-entrypoint /usr/local/bin/chaimir-cosmos-entrypoint
 
 ENV LD_LIBRARY_PATH=/usr/local/lib
 ENV HOME=/workspace
@@ -72,5 +111,4 @@ ENV TMPDIR=/tmp
 USER 1000:1000
 WORKDIR /workspace
 EXPOSE 26657 1317
-ENTRYPOINT ["/usr/local/bin/gaiad"]
-CMD ["start", "--home", "/runtime-state/cosmos"]
+ENTRYPOINT ["/usr/local/bin/chaimir-cosmos-entrypoint"]

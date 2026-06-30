@@ -54,6 +54,9 @@ func (o *K8sOrchestrator) CreateSandboxResources(ctx context.Context, plan Creat
 	if _, err := cs.CoreV1().Namespaces().Create(ctx, ns, metav1.CreateOptions{}); err != nil && !apierrors.IsAlreadyExists(err) {
 		return fmt.Errorf("创建沙箱 Namespace 失败: %w", err)
 	}
+	if err := o.ensureImagePullSecrets(ctx, cs, plan.Sandbox.Namespace); err != nil {
+		return err
+	}
 	if err := o.applySandboxServiceAccount(ctx, cs, plan); err != nil {
 		return err
 	}
@@ -190,6 +193,9 @@ func (o *K8sOrchestrator) RestoreSnapshotResources(ctx context.Context, plan Cre
 	if _, err := cs.CoreV1().Namespaces().Create(ctx, ns, metav1.CreateOptions{}); err != nil && !apierrors.IsAlreadyExists(err) {
 		return fmt.Errorf("创建快照恢复 Namespace 失败: %w", err)
 	}
+	if err := o.ensureImagePullSecrets(ctx, cs, plan.Sandbox.Namespace); err != nil {
+		return err
+	}
 	if err := o.applySandboxServiceAccount(ctx, cs, plan); err != nil {
 		return err
 	}
@@ -309,9 +315,13 @@ func (o *K8sOrchestrator) ExecStream(ctx context.Context, namespace, container s
 }
 
 // PrepullImage 创建或更新预拉取 DaemonSet 并等待工作负载镜像集合在真实节点 Ready。
-func (o *K8sOrchestrator) PrepullImage(ctx context.Context, image RuntimeImage, imageURLs []string) (PrepullResult, error) {
-	ds := o.prepullDaemonSet(image, imageURLs)
+func (o *K8sOrchestrator) PrepullImage(ctx context.Context, image RuntimeImage, specs []PrepullImageSpec) (PrepullResult, error) {
+	imageURLs := prepullSpecImageURLs(specs)
+	ds := o.prepullDaemonSet(image, specs)
 	cs := o.client.Clientset()
+	if err := o.ensureImagePullSecrets(ctx, cs, o.cfg.PrepullNamespace); err != nil {
+		return PrepullResult{DaemonSet: ds.Name}, err
+	}
 	client := cs.AppsV1().DaemonSets(o.cfg.PrepullNamespace)
 	existing, err := client.Get(ctx, ds.Name, metav1.GetOptions{})
 	if apierrors.IsNotFound(err) {
@@ -357,6 +367,14 @@ func (o *K8sOrchestrator) PrepullImage(ctx context.Context, image RuntimeImage, 
 			result.Detail = detail
 			return result, err
 		}
+		if err := containerRuntimeFailureFromPods(pods.Items); err != nil {
+			detail, encodeErr := jsonBytes(map[string]any{"error": logging.SanitizeError(err.Error()), "daemonset": ds.Name})
+			if encodeErr != nil {
+				return result, fmt.Errorf("编码预拉取失败详情失败: %w", encodeErr)
+			}
+			result.Detail = detail
+			return result, err
+		}
 		if current.Status.DesiredNumberScheduled > 0 &&
 			current.Status.DesiredNumberScheduled == current.Status.NumberReady &&
 			current.Status.DesiredNumberScheduled == current.Status.UpdatedNumberScheduled {
@@ -374,8 +392,8 @@ func (o *K8sOrchestrator) PrepullImage(ctx context.Context, image RuntimeImage, 
 
 // DeletePrepullDaemonSet 删除镜像预拉取 DaemonSet,NotFound 视为幂等成功。
 func (o *K8sOrchestrator) DeletePrepullDaemonSet(ctx context.Context, image RuntimeImage) error {
-	ds := o.prepullDaemonSet(image, []string{image.ImageURL})
-	err := o.client.Clientset().AppsV1().DaemonSets(o.cfg.PrepullNamespace).Delete(ctx, ds.Name, metav1.DeleteOptions{})
+	name := fmt.Sprintf("chaimir-prepull-%d", image.ID)
+	err := o.client.Clientset().AppsV1().DaemonSets(o.cfg.PrepullNamespace).Delete(ctx, name, metav1.DeleteOptions{})
 	if apierrors.IsNotFound(err) {
 		return nil
 	}
@@ -393,20 +411,86 @@ func imagePullFailureFromPods(pods []corev1.Pod) error {
 		"InvalidImageName": {},
 	}
 	for _, pod := range pods {
-		for _, status := range pod.Status.ContainerStatuses {
-			if status.State.Waiting == nil {
-				continue
-			}
-			reason := strings.TrimSpace(status.State.Waiting.Reason)
-			if _, failed := failureReasons[reason]; !failed {
-				continue
-			}
-			message := strings.TrimSpace(status.State.Waiting.Message)
-			if message == "" {
-				return fmt.Errorf("预拉取 Pod %s 容器 %s 镜像拉取失败: %s", pod.Name, status.Name, reason)
-			}
-			return fmt.Errorf("预拉取 Pod %s 容器 %s 镜像拉取失败: %s: %s", pod.Name, status.Name, reason, message)
+		if err := imagePullFailureFromContainerStatuses(pod.Name, pod.Status.InitContainerStatuses, failureReasons); err != nil {
+			return err
 		}
+		if err := imagePullFailureFromContainerStatuses(pod.Name, pod.Status.ContainerStatuses, failureReasons); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// imagePullFailureFromContainerStatuses 从容器状态中提取镜像拉取失败原因。
+func imagePullFailureFromContainerStatuses(podName string, statuses []corev1.ContainerStatus, failureReasons map[string]struct{}) error {
+	for _, status := range statuses {
+		if status.State.Waiting == nil {
+			continue
+		}
+		reason := strings.TrimSpace(status.State.Waiting.Reason)
+		if _, failed := failureReasons[reason]; !failed {
+			continue
+		}
+		message := strings.TrimSpace(status.State.Waiting.Message)
+		if message == "" {
+			return fmt.Errorf("预拉取 Pod %s 容器 %s 镜像拉取失败: %s", podName, status.Name, reason)
+		}
+		return fmt.Errorf("预拉取 Pod %s 容器 %s 镜像拉取失败: %s: %s", podName, status.Name, reason, message)
+	}
+	return nil
+}
+
+// containerRuntimeFailureFromPods 从预拉取 Pod 状态中识别自检命令或容器启动失败。
+func containerRuntimeFailureFromPods(pods []corev1.Pod) error {
+	failureReasons := map[string]struct{}{
+		"CreateContainerConfigError": {},
+		"RunContainerError":          {},
+		"CrashLoopBackOff":           {},
+	}
+	for _, pod := range pods {
+		if err := containerRuntimeFailureFromContainerStatuses(pod.Name, pod.Status.InitContainerStatuses, failureReasons); err != nil {
+			return err
+		}
+		if err := containerRuntimeFailureFromContainerStatuses(pod.Name, pod.Status.ContainerStatuses, failureReasons); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// containerRuntimeFailureFromContainerStatuses 从容器状态中提取启动或自检失败原因。
+func containerRuntimeFailureFromContainerStatuses(podName string, statuses []corev1.ContainerStatus, failureReasons map[string]struct{}) error {
+	for _, status := range statuses {
+		if status.LastTerminationState.Terminated != nil && status.LastTerminationState.Terminated.ExitCode != 0 {
+			terminated := status.LastTerminationState.Terminated
+			reason := strings.TrimSpace(terminated.Reason)
+			message := strings.TrimSpace(terminated.Message)
+			if message == "" {
+				return fmt.Errorf("预拉取 Pod %s 容器 %s 曾异常退出: %s exit=%d", podName, status.Name, reason, terminated.ExitCode)
+			}
+			return fmt.Errorf("预拉取 Pod %s 容器 %s 曾异常退出: %s exit=%d: %s", podName, status.Name, reason, terminated.ExitCode, message)
+		}
+		if status.State.Terminated != nil && status.State.Terminated.ExitCode != 0 {
+			terminated := status.State.Terminated
+			reason := strings.TrimSpace(terminated.Reason)
+			message := strings.TrimSpace(terminated.Message)
+			if message == "" {
+				return fmt.Errorf("预拉取 Pod %s 容器 %s 异常退出: %s exit=%d", podName, status.Name, reason, terminated.ExitCode)
+			}
+			return fmt.Errorf("预拉取 Pod %s 容器 %s 异常退出: %s exit=%d: %s", podName, status.Name, reason, terminated.ExitCode, message)
+		}
+		if status.State.Waiting == nil {
+			continue
+		}
+		reason := strings.TrimSpace(status.State.Waiting.Reason)
+		if _, failed := failureReasons[reason]; !failed {
+			continue
+		}
+		message := strings.TrimSpace(status.State.Waiting.Message)
+		if message == "" {
+			return fmt.Errorf("预拉取 Pod %s 容器 %s 启动失败: %s", podName, status.Name, reason)
+		}
+		return fmt.Errorf("预拉取 Pod %s 容器 %s 启动失败: %s: %s", podName, status.Name, reason, message)
 	}
 	return nil
 }
@@ -606,6 +690,7 @@ func namespaceObject(name string, sb Sandbox) *corev1.Namespace {
 // applySandboxServiceAccount 创建无权限工作负载账号,避免依赖 Kubernetes 默认 SA 异步生成。
 func (o *K8sOrchestrator) applySandboxServiceAccount(ctx context.Context, cs kubernetes.Interface, plan CreateSandboxPlan) error {
 	automount := false
+	refs := imagePullSecrets(o.cfg.ImagePullSecretNames)
 	sa := &corev1.ServiceAccount{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      sandboxWorkloadServiceAccount,
@@ -617,11 +702,145 @@ func (o *K8sOrchestrator) applySandboxServiceAccount(ctx context.Context, cs kub
 			},
 		},
 		AutomountServiceAccountToken: &automount,
+		ImagePullSecrets:             refs,
 	}
-	if _, err := cs.CoreV1().ServiceAccounts(plan.Sandbox.Namespace).Create(ctx, sa, metav1.CreateOptions{}); err != nil && !apierrors.IsAlreadyExists(err) {
-		return fmt.Errorf("创建沙箱 ServiceAccount 失败: %w", err)
+	client := cs.CoreV1().ServiceAccounts(plan.Sandbox.Namespace)
+	existing, err := client.Get(ctx, sandboxWorkloadServiceAccount, metav1.GetOptions{})
+	if apierrors.IsNotFound(err) {
+		if _, err := client.Create(ctx, sa, metav1.CreateOptions{}); err != nil {
+			return fmt.Errorf("创建沙箱 ServiceAccount 失败: %w", err)
+		}
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("查询沙箱 ServiceAccount 失败: %w", err)
+	}
+	if !sameLocalObjectReferences(existing.ImagePullSecrets, refs) ||
+		existing.AutomountServiceAccountToken == nil ||
+		*existing.AutomountServiceAccountToken {
+		updated := existing.DeepCopy()
+		updated.ImagePullSecrets = refs
+		updated.AutomountServiceAccountToken = &automount
+		if _, err := client.Update(ctx, updated, metav1.UpdateOptions{}); err != nil {
+			return fmt.Errorf("更新沙箱 ServiceAccount 失败: %w", err)
+		}
 	}
 	return nil
+}
+
+// ensureImagePullSecrets 将控制命名空间的镜像拉取 Secret 同步到目标命名空间。
+func (o *K8sOrchestrator) ensureImagePullSecrets(ctx context.Context, cs kubernetes.Interface, namespace string) error {
+	refs := imagePullSecrets(o.cfg.ImagePullSecretNames)
+	if len(refs) == 0 {
+		return nil
+	}
+	sourceNamespace := strings.TrimSpace(o.cfg.ControlNamespace)
+	if sourceNamespace == "" {
+		return fmt.Errorf("SANDBOX_CONTROL_NAMESPACE 不能为空")
+	}
+	if namespace == sourceNamespace {
+		return nil
+	}
+	sourceClient := cs.CoreV1().Secrets(sourceNamespace)
+	targetClient := cs.CoreV1().Secrets(namespace)
+	for _, ref := range refs {
+		source, err := sourceClient.Get(ctx, ref.Name, metav1.GetOptions{})
+		if err != nil {
+			return fmt.Errorf("查询镜像拉取 Secret %s/%s 失败: %w", sourceNamespace, ref.Name, err)
+		}
+		if !isImagePullSecretType(source.Type) {
+			return fmt.Errorf("镜像拉取 Secret %s/%s 类型不符合 imagePullSecret 要求", sourceNamespace, ref.Name)
+		}
+		desired := imagePullSecretForNamespace(source, namespace)
+		existing, err := targetClient.Get(ctx, desired.Name, metav1.GetOptions{})
+		if apierrors.IsNotFound(err) {
+			if _, err := targetClient.Create(ctx, desired, metav1.CreateOptions{}); err != nil {
+				return fmt.Errorf("创建镜像拉取 Secret %s/%s 失败: %w", namespace, desired.Name, err)
+			}
+			continue
+		}
+		if err != nil {
+			return fmt.Errorf("查询镜像拉取 Secret %s/%s 失败: %w", namespace, desired.Name, err)
+		}
+		if sameSecretTypeAndData(existing, desired) {
+			continue
+		}
+		updated := existing.DeepCopy()
+		updated.Type = desired.Type
+		updated.Data = desired.Data
+		if updated.Labels == nil {
+			updated.Labels = map[string]string{}
+		}
+		for key, value := range desired.Labels {
+			updated.Labels[key] = value
+		}
+		if _, err := targetClient.Update(ctx, updated, metav1.UpdateOptions{}); err != nil {
+			return fmt.Errorf("更新镜像拉取 Secret %s/%s 失败: %w", namespace, desired.Name, err)
+		}
+	}
+	return nil
+}
+
+// isImagePullSecretType 限定复制范围,避免把普通业务 Secret 当作镜像凭据传播。
+func isImagePullSecretType(secretType corev1.SecretType) bool {
+	return secretType == corev1.SecretTypeDockerConfigJson || secretType == corev1.SecretTypeDockercfg
+}
+
+// imagePullSecretForNamespace 构造目标命名空间内的最小镜像拉取 Secret。
+func imagePullSecretForNamespace(source *corev1.Secret, namespace string) *corev1.Secret {
+	return &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      source.Name,
+			Namespace: namespace,
+			Labels: map[string]string{
+				"app":                   "chaimir",
+				"module":                "sandbox",
+				"chaimir.io/managed-by": "chaimir-backend",
+				"chaimir.io/purpose":    "image-pull",
+			},
+		},
+		Type: source.Type,
+		Data: copySecretData(source.Data),
+	}
+}
+
+// sameSecretTypeAndData 判断目标 Secret 是否已与源 Secret 同步,避免无意义更新。
+func sameSecretTypeAndData(current, desired *corev1.Secret) bool {
+	if current.Type != desired.Type || len(current.Data) != len(desired.Data) {
+		return false
+	}
+	for key, desiredValue := range desired.Data {
+		currentValue, ok := current.Data[key]
+		if !ok || !bytes.Equal(currentValue, desiredValue) {
+			return false
+		}
+	}
+	return true
+}
+
+// copySecretData 深拷贝 Secret 数据,避免复用 informer/client 对象底层切片。
+func copySecretData(in map[string][]byte) map[string][]byte {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(map[string][]byte, len(in))
+	for key, value := range in {
+		out[key] = append([]byte(nil), value...)
+	}
+	return out
+}
+
+// sameLocalObjectReferences 比较 ServiceAccount 镜像拉取引用是否已经是期望值。
+func sameLocalObjectReferences(current, desired []corev1.LocalObjectReference) bool {
+	if len(current) != len(desired) {
+		return false
+	}
+	for index := range desired {
+		if current[index].Name != desired[index].Name {
+			return false
+		}
+	}
+	return true
 }
 
 // applyResourceQuota 创建 Namespace 级资源硬限。
@@ -1428,22 +1647,39 @@ func splitExecTarget(target string) (string, string) {
 }
 
 // prepullDaemonSet 构造镜像预拉取 DaemonSet。
-func (o *K8sOrchestrator) prepullDaemonSet(image RuntimeImage, imageURLs []string) *appsv1.DaemonSet {
+func (o *K8sOrchestrator) prepullDaemonSet(image RuntimeImage, specs []PrepullImageSpec) *appsv1.DaemonSet {
 	labels := map[string]string{"app": "chaimir", "module": "sandbox", "runtime_image_id": fmt.Sprintf("%d", image.ID)}
 	automount := false
-	containers := make([]corev1.Container, 0, len(imageURLs))
-	for idx, imageURL := range imageURLs {
-		containers = append(containers, corev1.Container{
-			Name:            prepullContainerName(idx, imageURL),
-			Image:           imageURL,
+	initContainers := make([]corev1.Container, 0, len(specs))
+	for idx, spec := range specs {
+		if spec.Hold {
+			continue
+		}
+		initContainers = append(initContainers, corev1.Container{
+			Name:            prepullContainerName(idx, spec.ImageURL),
+			Image:           spec.ImageURL,
 			ImagePullPolicy: corev1.PullIfNotPresent,
-			Command:         []string{"sleep", fmt.Sprintf("%d", o.cfg.PrepullHoldSeconds)},
+			Command:         spec.Command,
 			Resources: corev1.ResourceRequirements{
 				Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse(o.cfg.PrepullRequestCPU), corev1.ResourceMemory: resource.MustParse(o.cfg.PrepullRequestMemory)},
 				Limits:   corev1.ResourceList{corev1.ResourceCPU: resource.MustParse(o.cfg.PrepullLimitCPU), corev1.ResourceMemory: resource.MustParse(o.cfg.PrepullLimitMemory)},
 			},
 			SecurityContext: containerSecurityContext(true),
+			VolumeMounts:    prepullVolumeMounts(spec),
 		})
+	}
+	holdSpec := prepullHoldSpec(specs)
+	hold := corev1.Container{
+		Name:            "prepull-ready",
+		Image:           holdSpec.ImageURL,
+		ImagePullPolicy: corev1.PullIfNotPresent,
+		Command:         holdSpec.Command,
+		Resources: corev1.ResourceRequirements{
+			Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse(o.cfg.PrepullRequestCPU), corev1.ResourceMemory: resource.MustParse(o.cfg.PrepullRequestMemory)},
+			Limits:   corev1.ResourceList{corev1.ResourceCPU: resource.MustParse(o.cfg.PrepullLimitCPU), corev1.ResourceMemory: resource.MustParse(o.cfg.PrepullLimitMemory)},
+		},
+		SecurityContext: containerSecurityContext(true),
+		VolumeMounts:    prepullVolumeMounts(holdSpec),
 	}
 	return &appsv1.DaemonSet{
 		ObjectMeta: metav1.ObjectMeta{Name: fmt.Sprintf("chaimir-prepull-%d", image.ID), Namespace: o.cfg.PrepullNamespace, Labels: labels},
@@ -1454,14 +1690,121 @@ func (o *K8sOrchestrator) prepullDaemonSet(image RuntimeImage, imageURLs []strin
 				Spec: corev1.PodSpec{
 					AutomountServiceAccountToken: &automount,
 					RestartPolicy:                corev1.RestartPolicyAlways,
+					ImagePullSecrets:             imagePullSecrets(o.cfg.ImagePullSecretNames),
 					NodeSelector:                 copyStringMap(o.cfg.SandboxNodeSelector),
 					Tolerations:                  sandboxTolerations(o.cfg.SandboxNodeTolerations),
-					Containers:                   containers,
+					InitContainers:               initContainers,
+					Containers:                   []corev1.Container{hold},
 					SecurityContext:              podSecurityContext(),
+					Volumes:                      prepullVolumes(specs),
 				},
 			},
 		},
 	}
+}
+
+// prepullVolumeMounts 提供镜像自检所需的最小临时工作目录,并复用镜像清单声明的临时可写目录。
+func prepullVolumeMounts(spec PrepullImageSpec) []corev1.VolumeMount {
+	mounts := []corev1.VolumeMount{
+		{Name: "prepull-workspace", MountPath: "/workspace"},
+		{Name: "prepull-tmp", MountPath: "/tmp"},
+	}
+	seenPaths := map[string]struct{}{"/workspace": {}, "/tmp": {}}
+	for _, mount := range spec.EphemeralMounts {
+		mountPath := path.Clean(strings.TrimSpace(mount.MountPath))
+		if !strings.HasPrefix(mountPath, "/") {
+			continue
+		}
+		if _, exists := seenPaths[mountPath]; exists {
+			continue
+		}
+		seenPaths[mountPath] = struct{}{}
+		mounts = append(mounts, corev1.VolumeMount{
+			Name:      prepullExtraVolumeName(mount),
+			MountPath: mountPath,
+		})
+	}
+	return mounts
+}
+
+// prepullVolumes 为预拉取容器提供只在当前 Pod 生命周期内存在的临时卷。
+func prepullVolumes(specs []PrepullImageSpec) []corev1.Volume {
+	volumes := []corev1.Volume{
+		{Name: "prepull-workspace", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}},
+		{Name: "prepull-tmp", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}},
+	}
+	seen := map[string]struct{}{"prepull-workspace": {}, "prepull-tmp": {}}
+	for _, spec := range specs {
+		for _, mount := range spec.EphemeralMounts {
+			if mountPath := path.Clean(strings.TrimSpace(mount.MountPath)); !strings.HasPrefix(mountPath, "/") {
+				continue
+			}
+			name := prepullExtraVolumeName(mount)
+			if _, exists := seen[name]; exists {
+				continue
+			}
+			seen[name] = struct{}{}
+			volumes = append(volumes, corev1.Volume{
+				Name:         name,
+				VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}},
+			})
+		}
+	}
+	return volumes
+}
+
+// prepullExtraVolumeName 为预拉取临时挂载生成稳定卷名,避免长名称和同名路径冲突。
+func prepullExtraVolumeName(mount workload.EphemeralMountSpec) string {
+	key := strings.TrimSpace(mount.Name) + "\x00" + strings.TrimSpace(mount.MountPath)
+	sum := sha256.Sum256([]byte(key))
+	suffix := hex.EncodeToString(sum[:4])
+	base := "prepull-" + strings.TrimSpace(mount.Name)
+	base = strings.ToLower(base)
+	var b strings.Builder
+	for _, r := range base {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '-' {
+			b.WriteRune(r)
+			continue
+		}
+		b.WriteByte('-')
+	}
+	base = strings.Trim(b.String(), "-")
+	if base == "" || base == "prepull" {
+		base = "prepull-mount"
+	}
+	maxBase := 63 - len(suffix) - 1
+	if len(base) > maxBase {
+		base = base[:maxBase]
+	}
+	return strings.TrimRight(base, "-") + "-" + suffix
+}
+
+// prepullHoldSpec 选择运行时声明的长期保持容器,确保 DaemonSet Ready 后新节点会持续补拉。
+func prepullHoldSpec(specs []PrepullImageSpec) PrepullImageSpec {
+	for _, spec := range specs {
+		if spec.Hold {
+			return spec
+		}
+	}
+	return PrepullImageSpec{}
+}
+
+// prepullSpecImageURLs 提取预拉取状态响应中的镜像 URL 列表。
+func prepullSpecImageURLs(specs []PrepullImageSpec) []string {
+	out := make([]string, 0, len(specs))
+	seen := map[string]struct{}{}
+	for _, spec := range specs {
+		imageURL := strings.TrimSpace(spec.ImageURL)
+		if imageURL == "" {
+			continue
+		}
+		if _, exists := seen[imageURL]; exists {
+			continue
+		}
+		seen[imageURL] = struct{}{}
+		out = append(out, imageURL)
+	}
+	return out
 }
 
 // prepullContainerName 基于镜像位置生成稳定容器名,避免多镜像预拉取时名称冲突。
@@ -1477,6 +1820,20 @@ func prepullContainerName(index int, imageURL string) string {
 		name = "image"
 	}
 	return fmt.Sprintf("prepull-%02d-%s-%s", index, name, hex.EncodeToString(sum[:3]))
+}
+
+// imagePullSecrets 把配置中的 registry 拉取凭据名称转换为 Kubernetes 引用。
+func imagePullSecrets(names []string) []corev1.LocalObjectReference {
+	if len(names) == 0 {
+		return nil
+	}
+	out := make([]corev1.LocalObjectReference, 0, len(names))
+	for _, name := range names {
+		if trimmed := strings.TrimSpace(name); trimmed != "" {
+			out = append(out, corev1.LocalObjectReference{Name: trimmed})
+		}
+	}
+	return out
 }
 
 // copyStringMap 复制调度标签映射,避免调用方持有的配置被 Kubernetes 对象修改。

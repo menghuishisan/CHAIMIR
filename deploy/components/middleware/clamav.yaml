@@ -1,6 +1,6 @@
 # ClamAV 单实例病毒扫描服务。
 # 依据 AGENTS.md 安全标准:文件上传必须执行类型/大小/病毒校验;后端通过 clamd INSTREAM 协议访问 3310。
-# 官方镜像以 /init-unprivileged 运行时支持非 root 启动,避免在数据命名空间放宽权限。
+# 项目 Harbor 中间件镜像自带非 root 入口,避免在数据命名空间放宽权限。
 ---
 apiVersion: v1
 kind: Service
@@ -40,17 +40,18 @@ spec:
         app.kubernetes.io/name: clamav
         app.kubernetes.io/part-of: chaimir
     spec:
+      imagePullSecrets:
+        - name: chaimir-harbor-pull
       securityContext:
         runAsNonRoot: true
-        runAsUser: 100
-        runAsGroup: 101
-        fsGroup: 101
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
         seccompProfile:
           type: RuntimeDefault
       containers:
         - name: clamav
-          image: clamav/clamav:1.4.4-debian
-          command: ["/init-unprivileged"]
+          image: chaimir/middleware/clamav:placeholder
           ports:
             - name: clamd
               containerPort: 3310

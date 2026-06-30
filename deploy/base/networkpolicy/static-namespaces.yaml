@@ -123,6 +123,30 @@ spec:
           port: 443
         - protocol: TCP
           port: 6443
+---
+# 允许后端控制面访问动态沙箱命名空间内由后端显式放行的运行时/工具端口。
+# 出站侧仅限定到 Chaimir 管理的动态命名空间;目标 Pod 与端口仍由动态命名空间内
+# sandbox-allow-control-plane-* ingress 策略按 runtime/tool 声明精确约束。
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-egress-to-managed-sandboxes
+  namespace: chaimir-system
+  labels:
+    app.kubernetes.io/part-of: chaimir
+spec:
+  podSelector:
+    matchExpressions:
+      - key: app.kubernetes.io/component
+        operator: In
+        values: ["control-plane"]
+  policyTypes: ["Egress"]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              app.kubernetes.io/part-of: chaimir
+              chaimir.io/sandbox: "true"
 
 # ===== chaimir-data:默认拒绝 + 仅放行来自 chaimir-system =====
 ---

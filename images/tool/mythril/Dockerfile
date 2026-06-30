@@ -1,6 +1,10 @@
 # 本文件定义 Mythril 符号执行安全分析工具镜像。
 FROM cgr.dev/chainguard/wolfi-base:latest AS build
 
+ARG SOLC_VERSION=0.8.26
+ARG SOLC_PATH=solc-linux-amd64-v0.8.26+commit.8a97fa7a
+ARG SOLC_SHA256=d5f23436f443edb85d8e76906d12f0a86ce0490e7663a9e608efeb7a93f149ef
+
 RUN apk add --no-cache \
         ca-certificates \
         gcc \
@@ -26,16 +30,34 @@ RUN apk add --no-cache \
 
 FROM cgr.dev/chainguard/wolfi-base:latest
 
+ARG SOLC_VERSION=0.8.26
+ARG SOLC_PATH=solc-linux-amd64-v0.8.26+commit.8a97fa7a
+ARG SOLC_SHA256=d5f23436f443edb85d8e76906d12f0a86ce0490e7663a9e608efeb7a93f149ef
+
 LABEL org.opencontainers.image.title="tool/mythril"
 LABEL org.opencontainers.image.description="Chaimir Mythril symbolic execution tool image"
 
+ADD https://binaries.soliditylang.org/linux-amd64/${SOLC_PATH} /usr/local/bin/solc-${SOLC_VERSION}
 RUN apk add --no-cache ca-certificates libstdc++ python-3.10
 COPY --from=build /opt/mythril /opt/mythril
 RUN addgroup -g 1000 chaimir \
     && adduser -D -u 1000 -G chaimir -h /workspace -s /sbin/nologin chaimir \
+    && mkdir -p /usr/local/bin /opt/solcx \
+    && echo "${SOLC_SHA256}  /usr/local/bin/solc-${SOLC_VERSION}" | sha256sum -c - \
+    && chmod 0755 /usr/local/bin/solc-${SOLC_VERSION} \
+    && ln -sf /usr/local/bin/solc-${SOLC_VERSION} /usr/local/bin/solc \
+    && ln -sf /opt/mythril/bin/myth /usr/local/bin/myth \
+    && SOLCX_BINARY_PATH=/opt/solcx /opt/mythril/bin/python -c "import solcx; solcx.import_installed_solc()" \
     && chown -R 1000:1000 /workspace \
-    && /opt/mythril/bin/myth version
+    && chmod -R a+rX /opt/solcx \
+    && solc --version >/dev/null \
+    && myth version
 
 USER 1000:1000
+ENV HOME=/workspace
+ENV SOLCX_BINARY_PATH=/opt/solcx
+ENV MPLCONFIGDIR=/tmp/matplotlib
+ENV XDG_CONFIG_HOME=/tmp
+ENV PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/opt/mythril/bin
 WORKDIR /workspace
 ENTRYPOINT ["/opt/mythril/bin/myth"]

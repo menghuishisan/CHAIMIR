@@ -220,5 +220,5 @@ GitHub Actions(`.github/workflows/`)+ 可复用配置(`deploy/ci/`):
 - metrics-server:暴露 `metrics.k8s.io`,供 M2 沙箱资源用量读取真实 CPU/内存指标。
 - CSI snapshotter:提供 `VolumeSnapshot` CRD 与 snapshot-controller;生产还必须接入支持快照的 CSI
   存储驱动并创建 `VolumeSnapshotClass`。
-- Sigstore policy-controller:执行平台镜像 Cosign 签名门禁。
+- Sigstore policy-controller:执行平台镜像 Cosign 签名门禁。应用包含 `ClusterImagePolicy`,因此部署平台 overlay 前必须先运行 `make policy-controller-up`,由容器化 Helm 安装 CRD/controller 并把本地 `config/cosign/cosign.pub` 注入 `cosign-system/cosign-public-key` Secret。
 - Ingress Controller 与证书签发器:执行 Ingress HTTPS 与证书引用。

@@ -24,23 +24,35 @@ secretGenerator:
     envs:
       - ../../config/secret.env
 
-# 本地镜像:目录2/3 构建后导入当前集群或推送到本地 registry,tag=dev。
+# 本地验收镜像也必须使用 Harbor digest,不再保留旧 chaimir/*:dev 兼容路径。
 images:
   - name: chaimir/backend
-    newName: chaimir/backend
-    newTag: dev
+    newName: harbor.chaimir:30080/service/backend
+    digest: sha256:866e573f760cae8271d2763bd61b95af5d6875b66fad72c85774bddc737dd060
   - name: chaimir/frontend
     newName: chaimir/frontend
     newTag: dev
   - name: chaimir/migrate
-    newName: chaimir/migrate
-    newTag: dev
+    newName: harbor.chaimir:30080/service/migrate
+    digest: sha256:d6dc0ae9a52a26c187993d369d208e365baa327c8eabbdafd9a56d4603945b66
   - name: chaimir/cron
-    newName: chaimir/cron
-    newTag: dev
+    newName: harbor.chaimir:30080/service/cron
+    digest: sha256:67ef95de11ddd238b0e0e75aa58fbaa30314eb856e211485bb449b7209a1aac6
+  - name: chaimir/middleware/clamav
+    newName: harbor.chaimir:30080/middleware/clamav
+    digest: sha256:833c257e088e8480f825bf03dc5c37d907747acb2c371c51a07034a38cc24143
   - name: chaimir/middleware/minio
-    newName: chaimir/middleware/minio
-    newTag: dev
+    newName: harbor.chaimir:30080/middleware/minio
+    digest: sha256:5d4553bf53b4981ca52343d86271c71a1e6d20859133561f01ac645b389755b6
+  - name: chaimir/middleware/nats
+    newName: harbor.chaimir:30080/middleware/nats
+    digest: sha256:9524c61e8791a6417ff875878adb8229865bf99d00fe1b6bf5192ece77adde95
+  - name: chaimir/middleware/postgres
+    newName: harbor.chaimir:30080/middleware/postgres
+    digest: sha256:ef20d46eba750371f6710e18cae1502e7dc538afd4aab4a0d8937712f2aefc31
+  - name: chaimir/middleware/redis
+    newName: harbor.chaimir:30080/middleware/redis
+    digest: sha256:0ba43c28f35d08b10f4a4b56ce249aee7bd3541ec8215b30682cffb59d84a37d
 
 # 本地形态:SaaS 多租户 + 平台层开(便于本地验证全功能)。
 configMapGenerator:
@@ -48,7 +60,13 @@ configMapGenerator:
     namespace: chaimir-system
     behavior: merge
     literals:
+      - APP_ENV=local
       - DEPLOY_MODE=saas
       - PLATFORM_LAYER_ENABLED=true
       - LOG_LEVEL=debug
       - PG_SSLMODE=disable
+      - SMS_HTTP_ENDPOINT=http://sms-gateway.chaimir-system.svc.cluster.local:18080/sms
+      - SMS_HTTP_ALLOW_LOOPBACK=false
+      - SMS_TEMPLATE_LOGIN=local-login
+      - SMS_TEMPLATE_RESET=local-reset
+      - SMS_TEMPLATE_CHANGE_PHONE=local-change-phone

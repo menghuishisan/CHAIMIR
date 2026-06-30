@@ -40,8 +40,20 @@ images:
   - name: chaimir/cron
     newName: harbor.school.local/service/cron
     newTag: "1.0.0"
+  - name: chaimir/middleware/clamav
+    newName: harbor.school.local/middleware/clamav
+    newTag: "1.0.0"
   - name: chaimir/middleware/minio
     newName: harbor.school.local/middleware/minio
+    newTag: "1.0.0"
+  - name: chaimir/middleware/nats
+    newName: harbor.school.local/middleware/nats
+    newTag: "1.0.0"
+  - name: chaimir/middleware/postgres
+    newName: harbor.school.local/middleware/postgres
+    newTag: "1.0.0"
+  - name: chaimir/middleware/redis
+    newName: harbor.school.local/middleware/redis
     newTag: "1.0.0"
 
 # 私有化形态:school 单租户 + 关平台层。

@@ -32,7 +32,7 @@ func RegisterRoutes(r gin.IRouter, svc *Service, authn *auth.Manager, roles cont
 	api := sandboxAPI{svc: svc, authn: authn}
 	g := r.Group("/api/v1/sandbox")
 	api.registerPlatformRoutes(g.Group("", authn.Middleware(), auth.RequirePlatformIdentity()))
-	api.registerInternalRoutes(g.Group("", authn.ServiceMiddleware()))
+	api.registerInternalRoutes(g.Group("/internal", authn.ServiceMiddleware()))
 	api.registerChainRoutes(g.Group("", authn.ServiceOrTenantAnyRoleMiddleware(roles, contracts.RoleStudent, contracts.RoleTeacher, contracts.RoleSchoolAdmin)))
 	api.registerUserRoutes(g.Group("", authn.Middleware(), auth.RequireTenantAnyRole(roles, contracts.RoleStudent, contracts.RoleTeacher, contracts.RoleSchoolAdmin)))
 	api.registerInteractiveRoutes(g.Group("", authn.BrowserAccessMiddleware(), auth.RequireTenantAnyRole(roles, contracts.RoleStudent, contracts.RoleTeacher, contracts.RoleSchoolAdmin)))

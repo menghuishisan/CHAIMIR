@@ -17,6 +17,7 @@ SUPPLY_CHAIN_COMPOSE := image-supply-chain.compose.yaml
 SUPPLY_CHAIN_PROJECT := chaimir-supply-chain
 INGRESS_NGINX_VERSION := controller-v1.11.3
 METRICS_SERVER_VERSION := v0.8.1
+POLICY_CONTROLLER_VERSION := 0.10.6
 # CSI snapshotter 只安装 VolumeSnapshot CRD 与 snapshot-controller;
 # 真实快照能力仍取决于生产集群的 CSI 驱动和 VolumeSnapshotClass。
 SNAPSHOTTER_VERSION := v8.6.0
@@ -28,7 +29,7 @@ help: ## 显示可用目标
 
 # ---- 一键起步 ----
 .PHONY: dev-up
-dev-up: context-check ingress-up metrics-up-local gen-secret middleware-wait apply-dev migrate ## 使用当前 K8s context 拉起完整本地部署(中间件+应用+迁移)
+dev-up: context-check ingress-up metrics-up-local policy-controller-up gen-secret middleware-wait apply-dev migrate ## 使用当前 K8s context 拉起完整本地部署(中间件+应用+迁移)
 	@echo "本地环境就绪。前端: http://chaimir.local (需将 chaimir.local 指向 127.0.0.1)"
 
 .PHONY: dev-down
@@ -83,6 +84,15 @@ snapshot-check: ## 检查集群是否具备 M2 快照前置能力(CRD/controller
 	kubectl get volumesnapshots.snapshot.storage.k8s.io --all-namespaces
 	kubectl get volumesnapshotcontents.snapshot.storage.k8s.io
 	kubectl get storageclass
+
+# ---- Sigstore policy-controller ----
+.PHONY: policy-controller-up
+policy-controller-up: supply-chain-tools-pull ## 安装 Sigstore policy-controller CRD/controller 并注入 Cosign 公钥
+	@test -f config/cosign/cosign.pub || { echo "缺少 config/cosign/cosign.pub。请先用供应链流程生成 Cosign 公私钥,私钥不得提交。"; exit 1; }
+	kubectl get namespace cosign-system >/dev/null 2>&1 || kubectl create namespace cosign-system
+	kubectl -n cosign-system create secret generic cosign-public-key --from-file=cosign.pub=config/cosign/cosign.pub --dry-run=client -o yaml | kubectl apply -f -
+	docker compose --project-name $(SUPPLY_CHAIN_PROJECT) --env-file $(SUPPLY_CHAIN_CONFIG) -f $(SUPPLY_CHAIN_COMPOSE) run --rm --entrypoint sh helm -lc 'set -eu; helm repo add sigstore https://sigstore.github.io/helm-charts; helm repo update; helm upgrade --install policy-controller sigstore/policy-controller --version "$(POLICY_CONTROLLER_VERSION)" --namespace cosign-system --create-namespace --wait'
+	kubectl wait --for=condition=Established crd/clusterimagepolicies.policy.sigstore.dev --timeout=120s
 
 # ---- 密钥(dev 随机生成)----
 .PHONY: gen-secret

@@ -9,6 +9,8 @@ metadata:
   labels:
     app.kubernetes.io/name: chaimir-cron
     app.kubernetes.io/part-of: chaimir
+imagePullSecrets:
+  - name: chaimir-harbor-pull
 ---
 apiVersion: batch/v1
 kind: CronJob

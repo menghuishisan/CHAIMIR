@@ -95,7 +95,7 @@
     security: [{ bearerAuth: [] }]
     parameters: [{ name: token, in: query, schema: { type: string } }]
     responses: { "101": { description: WebSocket 升级成功 }, default: { $ref: "#/components/responses/Error" } }
-/api/v1/notify/send:
+/api/v1/notify/internal/send:
   post:
     tags: [notify]
     summary: 统一通知发送；异步等价事件为 notify.send.requested
@@ -105,7 +105,7 @@
     security: [{ serviceAuth: [] }]
     requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
-/api/v1/notify/push:
+/api/v1/notify/internal/push:
   post:
     tags: [notify]
     summary: 推送实时消息到带租户前缀的 topic；异步等价事件为 notify.push.requested

@@ -13,7 +13,6 @@ import type {
   SimReplay,
   SimShareCreate,
   SimShareResult,
-  SimValidationReportRequest,
   PaginatedResponse,
 } from '../types'
 
@@ -75,16 +74,6 @@ export class SimApi {
    */
   async previewPackage(packageId: string): Promise<SimPackageReview> {
     return this.client.get(`/sim/packages/${packageId}/preview`)
-  }
-
-  /**
-   * 受控预览流程回写动态校验报告
-   */
-  async submitValidationReport(
-    packageId: string,
-    data: SimValidationReportRequest
-  ): Promise<SimPackageReview> {
-    return this.client.post(`/sim/packages/${packageId}/validation-report`, data)
   }
 
   // ===== 仿真包审核 =====

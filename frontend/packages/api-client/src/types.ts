@@ -484,6 +484,7 @@ export interface SandboxCommandToolRunRequest {
 export interface SandboxCommandToolRunResponse {
   stdout_base64: string
   stderr_base64: string
+  exit_code: number
 }
 
 export interface SandboxResourceUsage {

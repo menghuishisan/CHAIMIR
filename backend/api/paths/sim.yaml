@@ -64,13 +64,14 @@
     security: [{ bearerAuth: [] }]
     parameters: [{ $ref: "#/components/parameters/KeyPath" }]
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
-/api/v1/sim/packages/{key}/validation-report:
+/api/v1/sim/internal/packages/{key}/validation-report:
   post:
     tags: [sim]
     summary: 回写仿真包受控验证报告
     operationId: simValidationReport
-    x-chaimir-audience: platform-or-internal
-    security: [{ bearerAuth: [] }, { serviceAuth: [] }]
+    x-chaimir-audience: internal
+    x-chaimir-internal: true
+    security: [{ serviceAuth: [] }]
     parameters: [{ $ref: "#/components/parameters/KeyPath" }]
     requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
@@ -120,7 +121,7 @@
     parameters: [{ $ref: "#/components/parameters/IDPath" }]
     requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
-/api/v1/sim/sessions:
+/api/v1/sim/internal/sessions:
   post:
     tags: [sim]
     summary: 创建仿真会话
@@ -130,7 +131,7 @@
     security: [{ serviceAuth: [] }]
     requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
-/api/v1/sim/sessions/recycle:
+/api/v1/sim/internal/sessions/recycle:
   post:
     tags: [sim]
     summary: 按 source_ref 批量回收仿真会话
@@ -140,7 +141,7 @@
     security: [{ serviceAuth: [] }]
     requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
-/api/v1/sim/sessions/{id}:
+/api/v1/sim/internal/sessions/{id}:
   delete:
     tags: [sim]
     summary: 回收单个仿真会话
@@ -188,7 +189,7 @@
     security: [{ bearerAuth: [] }]
     parameters: [{ $ref: "#/components/parameters/IDPath" }]
     responses: { "101": { description: WebSocket 升级成功 }, default: { $ref: "#/components/responses/Error" } }
-/api/v1/sim/sessions/{id}/checkpoints:
+/api/v1/sim/internal/sessions/{id}/checkpoints:
   post:
     tags: [sim]
     summary: 上报仿真检查点

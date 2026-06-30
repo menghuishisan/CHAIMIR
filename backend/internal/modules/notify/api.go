@@ -21,7 +21,7 @@ func RegisterRoutes(r gin.IRouter, svc *Service, authn *auth.Manager, roles cont
 	g := r.Group("/api/v1/notify")
 	user := g.Group("", authn.Middleware(), auth.RequireTenantAnyRole(roles, contracts.RoleStudent, contracts.RoleTeacher, contracts.RoleSchoolAdmin))
 	admin := g.Group("", authn.Middleware(), auth.RequirePlatformOrAnyRole(roles, contracts.RoleSchoolAdmin))
-	internal := g.Group("", authn.ServiceMiddleware())
+	internal := g.Group("/internal", authn.ServiceMiddleware())
 	user.GET("/inbox", api.inbox)
 	user.GET("/inbox/unread-count", api.unread)
 	user.POST("/inbox/:id/read", api.markRead)

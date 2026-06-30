@@ -102,7 +102,7 @@
     security: [{ bearerAuth: [] }]
     requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
-/api/v1/sandbox/sandboxes:
+/api/v1/sandbox/internal/sandboxes:
   post:
     tags: [sandbox]
     summary: 创建沙箱
@@ -112,7 +112,7 @@
     security: [{ serviceAuth: [] }]
     requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
-/api/v1/sandbox/sandboxes/recycle:
+/api/v1/sandbox/internal/sandboxes/recycle:
   post:
     tags: [sandbox]
     summary: 按 source_ref 批量回收沙箱
@@ -131,6 +131,7 @@
     security: [{ bearerAuth: [] }]
     parameters: [{ $ref: "#/components/parameters/IDPath" }]
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/sandbox/internal/sandboxes/{id}:
   delete:
     tags: [sandbox]
     summary: 主动销毁沙箱
@@ -140,7 +141,7 @@
     security: [{ serviceAuth: [] }]
     parameters: [{ $ref: "#/components/parameters/IDPath" }]
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
-/api/v1/sandbox/sandboxes/{id}/pause:
+/api/v1/sandbox/internal/sandboxes/{id}/pause:
   post:
     tags: [sandbox]
     summary: 暂停沙箱
@@ -150,7 +151,7 @@
     security: [{ serviceAuth: [] }]
     parameters: [{ $ref: "#/components/parameters/IDPath" }]
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
-/api/v1/sandbox/sandboxes/{id}/resume:
+/api/v1/sandbox/internal/sandboxes/{id}/resume:
   post:
     tags: [sandbox]
     summary: 恢复沙箱
@@ -236,7 +237,7 @@
     security: [{ bearerAuth: [] }, { serviceAuth: [] }]
     parameters: [{ $ref: "#/components/parameters/IDPath" }, { name: target, in: query, schema: { type: string } }]
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
-/api/v1/sandbox/sandboxes/{id}/chain/reset:
+/api/v1/sandbox/internal/sandboxes/{id}/chain/reset:
   post:
     tags: [sandbox]
     summary: 链恢复创世就绪态
@@ -255,7 +256,24 @@
     security: [{ bearerAuth: [] }]
     parameters: [{ $ref: "#/components/parameters/IDPath" }, { $ref: "#/components/parameters/ToolCodePath" }]
     requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
-    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+    responses:
+      "200":
+        description: 命令工具执行结果
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: "#/components/schemas/StandardResponse"
+                - type: object
+                  properties:
+                    data:
+                      type: object
+                      required: [stdout_base64, stderr_base64, exit_code]
+                      properties:
+                        stdout_base64: { type: string }
+                        stderr_base64: { type: string }
+                        exit_code: { type: integer }
+      default: { $ref: "#/components/responses/Error" }
 /api/v1/sandbox/sandboxes/{id}/tools/{tool_code}/{proxy_path}:
   get:
     tags: [sandbox]

@@ -47,6 +47,7 @@
       - { $ref: "#/components/parameters/PageQuery" }
       - { $ref: "#/components/parameters/SizeQuery" }
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/judge/internal/tasks:
   post:
     tags: [judge]
     summary: 提交判题任务
@@ -65,6 +66,7 @@
     security: [{ bearerAuth: [] }]
     parameters: [{ $ref: "#/components/parameters/IDPath" }]
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/judge/internal/tasks/{id}:
   delete:
     tags: [judge]
     summary: 取消排队中的判题任务
@@ -103,7 +105,7 @@
     parameters: [{ $ref: "#/components/parameters/IDPath" }]
     requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
-/api/v1/judge/rejudge/batch:
+/api/v1/judge/internal/rejudge/batch:
   post:
     tags: [judge]
     summary: 按 source_ref 批量重判
@@ -113,7 +115,7 @@
     security: [{ serviceAuth: [] }]
     requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
-/api/v1/judge/fingerprints/exact:
+/api/v1/judge/internal/fingerprints/exact:
   get:
     tags: [judge]
     summary: 精确哈希查重
@@ -125,7 +127,7 @@
       - { name: problem_ref, in: query, schema: { type: string } }
       - { name: code_hash, in: query, schema: { type: string } }
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
-/api/v1/judge/fingerprints/similarity:
+/api/v1/judge/internal/fingerprints/similarity:
   post:
     tags: [judge]
     summary: 相似度查重
