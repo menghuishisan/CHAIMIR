@@ -45,7 +45,7 @@ func ZIPEntryNames(r *zip.Reader, limits ArchiveLimits) ([]string, error) {
 		for _, file := range r.File {
 			// 第一步:目录只校验路径安全,不计入实际文件数量。
 			if file.FileInfo().IsDir() {
-				if _, ok := SafeArchiveEntryName(file.Name, map[string]struct{}{}); !ok {
+				if !SafeArchiveDirectoryName(file.Name) {
 					return fmt.Errorf("ZIP 归档成员路径非法: %s", file.Name)
 				}
 				continue
@@ -79,7 +79,7 @@ func TAREntryNames(r *tar.Reader, limits ArchiveLimits) ([]string, error) {
 			}
 			switch header.Typeflag {
 			case tar.TypeDir:
-				if _, ok := SafeArchiveEntryName(header.Name, map[string]struct{}{}); !ok {
+				if !SafeArchiveDirectoryName(header.Name) {
 					return fmt.Errorf("TAR 归档成员路径非法: %s", header.Name)
 				}
 				continue

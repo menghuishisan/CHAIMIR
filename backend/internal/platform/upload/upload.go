@@ -176,6 +176,19 @@ func SafeArchiveEntryName(name string, existing map[string]struct{}) (string, bo
 	return clean, true
 }
 
+// SafeArchiveDirectoryName 校验归档目录条目,允许 tar -C dir . 产生的根目录占位。
+func SafeArchiveDirectoryName(name string) bool {
+	raw := strings.ReplaceAll(strings.TrimSpace(name), "\\", "/")
+	clean := path.Clean(raw)
+	if raw == "" {
+		return false
+	}
+	if clean == "." {
+		return true
+	}
+	return clean != ".." && !path.IsAbs(clean) && !strings.HasPrefix(clean, "../") && !strings.Contains(clean, ":")
+}
+
 // baseContentType 去掉 MIME 参数并规整大小写。
 func baseContentType(contentType string) string {
 	return strings.ToLower(strings.TrimSpace(strings.Split(contentType, ";")[0]))

@@ -133,6 +133,7 @@ type CreateSandboxInputModel struct {
 	SnapshotEnabled          bool
 	KeepAliveMinutes         int32
 	SnapshotRetentionMinutes int32
+	PrivateSidecars          []workload.ComponentSpec
 }
 
 // AdapterSpec 是 runtime.adapter_spec 的控制面可执行结构。
@@ -222,10 +223,11 @@ type CommandToolPolicy struct {
 
 // CreateSandboxPlan 汇总创建沙箱时 service 交给编排器的完整上下文。
 type CreateSandboxPlan struct {
-	Sandbox Sandbox
-	Runtime Runtime
-	Image   RuntimeImage
-	Tools   []Tool
+	Sandbox         Sandbox
+	Runtime         Runtime
+	Image           RuntimeImage
+	Tools           []Tool
+	PrivateSidecars []workload.ComponentSpec
 }
 
 // SnapshotResult 描述一次 CSI 快照成功创建后的可恢复引用和覆盖卷域。

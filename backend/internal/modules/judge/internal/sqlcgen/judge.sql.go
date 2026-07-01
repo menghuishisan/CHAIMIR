@@ -170,7 +170,7 @@ WITH inserted AS (
         created_at, updated_at
     )
     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, 0, $17, NULL, now(), now())
-    ON CONFLICT (tenant_id, source_ref) DO NOTHING
+    ON CONFLICT (tenant_id, source_ref, problem_ref) DO NOTHING
     RETURNING id, tenant_id, judger_id, source_ref, source_owner_id, source_course_id, source_scope, submitter_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, last_error, created_at, updated_at
 )
 SELECT id, tenant_id, judger_id, source_ref, source_owner_id, source_course_id, source_scope, submitter_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, last_error, created_at, updated_at
@@ -178,7 +178,7 @@ FROM inserted
 UNION ALL
 SELECT id, tenant_id, judger_id, source_ref, source_owner_id, source_course_id, source_scope, submitter_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, last_error, created_at, updated_at
 FROM judge_task
-WHERE tenant_id = $2 AND source_ref = $4 AND NOT EXISTS (SELECT 1 FROM inserted)
+WHERE tenant_id = $2 AND source_ref = $4 AND problem_ref = $9 AND NOT EXISTS (SELECT 1 FROM inserted)
 LIMIT 1
 `
 
@@ -496,16 +496,17 @@ func (q *Queries) GetJudgeTask(ctx context.Context, arg GetJudgeTaskParams) (Jud
 const getJudgeTaskBySourceRef = `-- name: GetJudgeTaskBySourceRef :one
 SELECT id, tenant_id, judger_id, source_ref, source_owner_id, source_course_id, source_scope, submitter_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, last_error, created_at, updated_at
 FROM judge_task
-WHERE tenant_id = $1 AND source_ref = $2
+WHERE tenant_id = $1 AND source_ref = $2 AND problem_ref = $3
 `
 
 type GetJudgeTaskBySourceRefParams struct {
-	TenantID  int64  `json:"tenant_id"`
-	SourceRef string `json:"source_ref"`
+	TenantID   int64  `json:"tenant_id"`
+	SourceRef  string `json:"source_ref"`
+	ProblemRef string `json:"problem_ref"`
 }
 
 func (q *Queries) GetJudgeTaskBySourceRef(ctx context.Context, arg GetJudgeTaskBySourceRefParams) (JudgeTask, error) {
-	row := q.db.QueryRow(ctx, getJudgeTaskBySourceRef, arg.TenantID, arg.SourceRef)
+	row := q.db.QueryRow(ctx, getJudgeTaskBySourceRef, arg.TenantID, arg.SourceRef, arg.ProblemRef)
 	var i JudgeTask
 	err := row.Scan(
 		&i.ID,

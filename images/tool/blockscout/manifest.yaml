@@ -29,7 +29,7 @@ tool:
   eco_tags:
     - evm
   mount_workspace: false
-  runtime_config_required: true
+  runtime_config_required: false
   resource_spec:
     components:
       - name: web
@@ -38,7 +38,7 @@ tool:
           - /usr/local/bin/chaimir-blockscout-entrypoint
         env:
           - name: DATABASE_URL
-            value: postgresql://postgres:postgres@runtime-sandbox:5432/blockscout
+            value: postgresql://postgres:postgres@tool-blockscout-postgres:5432/blockscout
           - name: ETHEREUM_JSONRPC_HTTP_URL
             value: http://runtime-sandbox:8545
           - name: ETHEREUM_JSONRPC_TRACE_URL
@@ -82,6 +82,39 @@ tool:
             mount_path: /tmp
           - name: blockscout-cache
             mount_path: /tmp/blockscout
+      - name: postgres
+        image_url: "@image:infra/postgres-graph"
+        env:
+          - name: POSTGRES_DB
+            value: blockscout
+          - name: POSTGRES_USER
+            value: postgres
+          - name: POSTGRES_HOST_AUTH_METHOD
+            value: trust
+          - name: PGDATA
+            value: /tmp/postgres-graph
+        ports:
+          - name: postgres
+            container_port: 5432
+            service_port: 5432
+            protocol: TCP
+        resources:
+          requests:
+            cpu: 250m
+            memory: 512Mi
+          limits:
+            cpu: "1"
+            memory: 2Gi
+        readiness_probe:
+          type: tcp
+          port: postgres
+          period_seconds: 2
+          failure_threshold: 60
+        read_only_root_filesystem: false
+        mount_workspace: false
+        ephemeral_mounts:
+          - name: postgres-graph-data
+            mount_path: /tmp
     services:
       - name: tool-blockscout-web
         component: web
@@ -89,6 +122,13 @@ tool:
           - name: http
             port: 4000
             target_port: http
+            protocol: TCP
+      - name: tool-blockscout-postgres
+        component: postgres
+        ports:
+          - name: postgres
+            port: 5432
+            target_port: postgres
             protocol: TCP
     routes:
       - path_prefix: /
@@ -100,9 +140,9 @@ tool:
         to: sandbox
         ports:
           - name: rpc
-      - name: blockscout-runtime-postgres
+      - name: blockscout-postgres
         from: web
-        to: sandbox
+        to: postgres
         ports:
           - name: postgres
 ports:

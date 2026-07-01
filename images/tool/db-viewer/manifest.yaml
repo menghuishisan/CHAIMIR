@@ -30,11 +30,19 @@ tool:
     - fabric
     - evm
   mount_workspace: false
-  runtime_config_required: true
+  runtime_config_required: false
   resource_spec:
     components:
       - name: web
         image_url: "@self"
+        command:
+          - pgweb
+        args:
+          - --bind=0.0.0.0
+          - --listen=8081
+          - --url=postgres://student@tool-db-viewer-postgres:5432/student_state?sslmode=disable
+          - --open-retry=60
+          - --open-retry-delay=2
         ports:
           - name: http
             container_port: 8081
@@ -55,6 +63,39 @@ tool:
           failure_threshold: 30
         read_only_root_filesystem: false
         mount_workspace: false
+      - name: postgres
+        image_url: "@image:infra/postgres-graph"
+        env:
+          - name: POSTGRES_DB
+            value: student_state
+          - name: POSTGRES_USER
+            value: student
+          - name: POSTGRES_HOST_AUTH_METHOD
+            value: trust
+          - name: PGDATA
+            value: /tmp/db-viewer-postgres
+        ports:
+          - name: postgres
+            container_port: 5432
+            service_port: 5432
+            protocol: TCP
+        resources:
+          requests:
+            cpu: 100m
+            memory: 256Mi
+          limits:
+            cpu: 500m
+            memory: 1Gi
+        readiness_probe:
+          type: tcp
+          port: postgres
+          period_seconds: 2
+          failure_threshold: 60
+        read_only_root_filesystem: false
+        mount_workspace: false
+        ephemeral_mounts:
+          - name: db-viewer-postgres-data
+            mount_path: /tmp
     services:
       - name: tool-db-viewer-web
         component: web
@@ -63,10 +104,23 @@ tool:
             port: 8081
             target_port: http
             protocol: TCP
+      - name: tool-db-viewer-postgres
+        component: postgres
+        ports:
+          - name: postgres
+            port: 5432
+            target_port: postgres
+            protocol: TCP
     routes:
       - path_prefix: /
         service: tool-db-viewer-web
         port: http
+    network_rules:
+      - name: db-viewer-postgres
+        from: web
+        to: postgres
+        ports:
+          - name: postgres
 ports:
   - name: http
     container_port: 8081

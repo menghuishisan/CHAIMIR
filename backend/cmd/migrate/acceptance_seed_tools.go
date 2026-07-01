@@ -214,8 +214,16 @@ func toolDefinitionFromManifest(index int, manifest toolManifest) (acceptanceToo
 		Kind:         kind,
 		EcoTags:      manifest.Tool.EcoTags,
 		ResourceSpec: spec,
-		Status:       1,
+		Status:       toolStatusFromManifest(manifest),
 	}, nil
+}
+
+// toolStatusFromManifest 避免把仍需运行时/实验注入私有配置的工具误标为可调度。
+func toolStatusFromManifest(manifest toolManifest) int16 {
+	if manifest.Tool.RuntimeConfigRequired {
+		return sandbox.ToolStatusDisabled
+	}
+	return sandbox.ToolStatusAvailable
 }
 
 // toolResourceSpecFromManifest 读取工具显式 WorkloadSpec;未声明时仅为单组件工具生成默认规格。
@@ -281,6 +289,10 @@ func normalizeExplicitToolResourceSpec(input map[string]any, imageURL string, ki
 			return nil, fmt.Errorf("显式工具 WorkloadSpec component 缺少 image_url")
 		case "@self":
 			component["image_url"] = imageURL
+		default:
+			if err := normalizeReferencedComponentImage(component); err != nil {
+				return nil, err
+			}
 		}
 	}
 	if kind == contracts.SandboxToolKindWebEmbed {
@@ -300,6 +312,37 @@ func normalizeExplicitToolResourceSpec(input map[string]any, imageURL string, ki
 		return nil, err
 	}
 	return spec, nil
+}
+
+// normalizeReferencedComponentImage 把显式工具组件里的受控镜像占位符替换为已证明的 Harbor digest。
+func normalizeReferencedComponentImage(component map[string]any) error {
+	raw := strings.TrimSpace(anyString(component["image_url"]))
+	if !strings.HasPrefix(raw, "@image:") {
+		return nil
+	}
+	image := strings.TrimSpace(strings.TrimPrefix(raw, "@image:"))
+	parts := strings.Split(image, "/")
+	if len(parts) != 2 || strings.TrimSpace(parts[0]) == "" || strings.TrimSpace(parts[1]) == "" {
+		return fmt.Errorf("显式工具 WorkloadSpec component 镜像占位符非法: %s", raw)
+	}
+	imageURL, err := acceptanceImageURL(image)
+	if err != nil {
+		return err
+	}
+	component["image_url"] = imageURL
+	if _, ok := component["prepull_command"]; ok {
+		return nil
+	}
+	manifest, err := acceptanceImageUnitManifestFor(image, parts[0])
+	if err != nil {
+		return err
+	}
+	command, err := acceptanceManifestSelftestCommand(manifest)
+	if err != nil {
+		return err
+	}
+	component["prepull_command"] = command
+	return nil
 }
 
 // toolPrepullCommandFromManifest 选择镜像声明的首个自检命令作为预拉取启动命令。

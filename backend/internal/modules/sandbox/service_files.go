@@ -299,7 +299,14 @@ func (s *Service) ExecSandboxCommand(ctx context.Context, req contracts.SandboxE
 	if err := s.markSandboxExecutionActive(ctx, sb); err != nil {
 		return contracts.SandboxExecResult{}, err
 	}
-	stdout, stderr, err := s.orchestrator.Exec(execCtx, sb.Namespace, runtimeExecTarget(runtime), req.Command, req.Stdin, false)
+	target := runtimeExecTarget(runtime)
+	if strings.TrimSpace(req.Container) != "" {
+		target = strings.TrimSpace(req.Container)
+		if !safeExecTarget(target) {
+			return contracts.SandboxExecResult{}, apperr.ErrSandboxContractRequestInvalid
+		}
+	}
+	stdout, stderr, err := s.orchestrator.Exec(execCtx, sb.Namespace, target, req.Command, req.Stdin, false)
 	if err != nil {
 		return contracts.SandboxExecResult{}, apperr.ErrSandboxExecFailed.WithCause(fmt.Errorf("%w: %s", err, string(stderr)))
 	}
@@ -316,6 +323,12 @@ func (s *Service) ExecSandboxCommand(ctx context.Context, req contracts.SandboxE
 		return contracts.SandboxExecResult{}, apperr.ErrSandboxStatePersistFailed.WithCause(err)
 	}
 	return contracts.SandboxExecResult{Stdout: stdout, Stderr: stderr}, nil
+}
+
+// safeExecTarget 限定内部执行目标为已命名 Pod/容器,避免服务调用方传入空白或特殊路径。
+func safeExecTarget(target string) bool {
+	podName, containerName := splitExecTarget(target)
+	return mountNamePattern.MatchString(podName) && mountNamePattern.MatchString(containerName)
 }
 
 // ObserveToolAccess 安排工作区防抖保存,覆盖经平台代理的 IDE/浏览器写入路径。

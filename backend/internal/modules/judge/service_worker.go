@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"reflect"
 	"strconv"
 	"strings"
@@ -18,6 +19,7 @@ import (
 	"chaimir/internal/platform/jsonx"
 	"chaimir/internal/platform/timex"
 	"chaimir/internal/platform/upload"
+	"chaimir/internal/platform/workload"
 	"chaimir/pkg/apperr"
 	"chaimir/pkg/logging"
 )
@@ -88,11 +90,11 @@ func (s *Service) executeTask(ctx context.Context, task JudgeTask) (JudgeExecuti
 		}
 	}
 	sandboxID, fresh, err := s.resolveSandbox(ctx, executionTask)
-	if err != nil {
-		return JudgeExecutionResult{}, err
-	}
 	if fresh {
 		defer s.destroyJudgeSandbox(ctx, executionTask, sandboxID)
+	}
+	if err != nil {
+		return JudgeExecutionResult{}, err
 	}
 	if result, handled, err := s.executeJudgerStrategy(ctx, executionTask, sandboxID); handled {
 		if err != nil {
@@ -171,6 +173,7 @@ func (s *Service) resolveSandbox(ctx context.Context, task JudgeTask) (int64, bo
 		SourceRef:           task.SourceRef,
 		KeepAlive:           false,
 		SnapshotEnabled:     false,
+		PrivateSidecars:     privateSidecarsForSandbox(task.InputSnapshot.ExecutionSidecars),
 	})
 	if err != nil {
 		return 0, false, apperr.ErrJudgeWorkerFailed.WithCause(err)
@@ -187,6 +190,35 @@ func (s *Service) resolveSandbox(ctx context.Context, task JudgeTask) (int64, bo
 		return info.SandboxID, true, err
 	}
 	return info.SandboxID, true, nil
+}
+
+// privateSidecarsForSandbox 把 M3 判题器内部 WorkloadSpec 转为 M2 跨模块 DTO。
+func privateSidecarsForSandbox(items []workload.ComponentSpec) []contracts.SandboxPrivateSidecarSpec {
+	out := make([]contracts.SandboxPrivateSidecarSpec, 0, len(items))
+	for _, item := range items {
+		env := make([]contracts.SandboxEnvVarSpec, 0, len(item.Env))
+		for _, v := range item.Env {
+			env = append(env, contracts.SandboxEnvVarSpec{Name: v.Name, Value: v.Value})
+		}
+		mounts := make([]contracts.SandboxEphemeralMountSpec, 0, len(item.EphemeralMounts))
+		for _, mount := range item.EphemeralMounts {
+			mounts = append(mounts, contracts.SandboxEphemeralMountSpec{Name: mount.Name, MountPath: mount.MountPath})
+		}
+		out = append(out, contracts.SandboxPrivateSidecarSpec{
+			Name:                   item.Name,
+			ImageURL:               item.ImageURL,
+			Command:                append([]string(nil), item.Command...),
+			Args:                   append([]string(nil), item.Args...),
+			Env:                    env,
+			Resources:              contracts.SandboxResourceSpec{Requests: maps.Clone(item.Resources.Requests), Limits: maps.Clone(item.Resources.Limits)},
+			Workdir:                item.Workdir,
+			ReadOnlyRootFilesystem: item.ReadOnlyRootFilesystem,
+			Labels:                 maps.Clone(item.Labels),
+			MountWorkspace:         item.MountWorkspace,
+			EphemeralMounts:        mounts,
+		})
+	}
+	return out
 }
 
 // waitSandboxReady 轮询 M2 沙箱状态直到运行时可执行或超时。
@@ -302,6 +334,7 @@ func (s *Service) runJudgeCommand(ctx context.Context, task JudgeTask, sandboxID
 		TenantID:   task.TenantID,
 		SandboxID:  sandboxID,
 		SourceRef:  task.SourceRef,
+		Container:  task.InputSnapshot.ExecTarget,
 		Command:    task.InputSnapshot.Command,
 		Stdin:      stdin,
 		TimeoutSec: task.InputSnapshot.TimeoutSec,
@@ -539,6 +572,8 @@ func (s *Service) executeJudgerSelftest(ctx context.Context, j Judger) error {
 			ToolCodes:                append([]string(nil), j.ResourceSpec.ToolCodes...),
 			InitScriptRef:            j.ResourceSpec.InitScriptRef,
 			Command:                  append([]string(nil), j.ResourceSpec.Command...),
+			ExecTarget:               strings.TrimSpace(j.ResourceSpec.ExecTarget),
+			ExecutionSidecars:        append([]workload.ComponentSpec(nil), j.ResourceSpec.ExecutionSidecars...),
 			TimeoutSec:               timeoutForSnapshot(j),
 			MaxScore:                 int32FromAny(j.ResourceSpec.Selftest["max_score"]),
 			Expectation:              snapshot,

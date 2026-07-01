@@ -94,6 +94,14 @@ type Service struct {
 	saveTimers   map[int64]*time.Timer
 }
 
+// resolvedSandboxCreateDependencies 是创建或发布前校验沙箱模板时解析出的 M2 能力快照。
+type resolvedSandboxCreateDependencies struct {
+	Runtime Runtime
+	Image   RuntimeImage
+	Quota   TenantQuota
+	Tools   []Tool
+}
+
 // ServiceDeps 是 sandbox service 的装配依赖集合。
 type ServiceDeps struct {
 	Store        Store
@@ -151,6 +159,18 @@ func NewService(deps ServiceDeps) (*Service, error) {
 	}, nil
 }
 
+// ValidateSandboxTemplate 校验教师/业务模块声明的实验环境能解析到当前可调度的运行时、镜像和工具。
+func (s *Service) ValidateSandboxTemplate(ctx context.Context, req contracts.SandboxCreateRequest) error {
+	input := createInputFromContract(req)
+	if err := validateCreateRequest(input); err != nil {
+		return err
+	}
+	return s.store.TenantTx(ctx, input.TenantID, func(ctx context.Context, tx TxStore) error {
+		_, err := s.resolveSandboxCreateDependencies(ctx, tx, input, false)
+		return err
+	})
+}
+
 // CreateSandbox 创建沙箱控制面记录并异步推进 K8s 启动。
 func (s *Service) CreateSandbox(ctx context.Context, req contracts.SandboxCreateRequest) (contracts.SandboxInfo, error) {
 	input := createInputFromContract(req)
@@ -159,57 +179,20 @@ func (s *Service) CreateSandbox(ctx context.Context, req contracts.SandboxCreate
 	}
 	var plan CreateSandboxPlan
 	if err := s.store.TenantTx(ctx, input.TenantID, func(ctx context.Context, tx TxStore) error {
-		runtime, err := tx.GetRuntimeByCode(ctx, input.RuntimeCode)
-		if err != nil {
-			return apperr.ErrSandboxRuntimeNotFound.WithCause(err)
-		}
-		if runtime.Status != RuntimeStatusAvailable || runtime.SelftestStatus != RuntimeSelftestPassed {
-			return apperr.ErrSandboxRuntimeUnavailable
-		}
-		image, err := selectRuntimeImage(ctx, tx, runtime.ID, input.RuntimeImageVersion)
+		resolved, err := s.resolveSandboxCreateDependencies(ctx, tx, input, true)
 		if err != nil {
 			return err
 		}
-		if !image.Prepulled || image.PrepullStatus != ImagePrepullSucceeded || !image.GenesisBaked {
-			return apperr.ErrSandboxRuntimeUnavailable
-		}
-		quota, err := tx.GetTenantQuotaForUpdate(ctx, input.TenantID)
-		if err != nil {
-			return apperr.ErrSandboxQuotaInvalid.WithCause(err)
-		}
-		active, err := tx.CountActiveSandboxes(ctx, input.TenantID)
-		if err != nil {
-			return apperr.ErrSandboxCreateFailed.WithCause(err)
-		}
-		tools, err := s.resolveTools(ctx, tx, runtime, input.ToolCodes)
+		sb, err := s.createSandboxRecord(ctx, tx, input, resolved.Runtime, resolved.Image, resolved.Quota)
 		if err != nil {
 			return err
 		}
-		if err := validatePlanImagesCurrentlyAdmitted(s.cfg, runtime, image, tools); err != nil {
-			return err
-		}
-		if err := validateQuotaForCreate(input, quota, active, s.cfg, runtime.AdapterSpec, tools); err != nil {
-			return err
-		}
-		if input.SnapshotEnabled {
-			ok, err := s.orchestrator.SnapshotSupported(ctx)
-			if err != nil {
-				return apperr.ErrSandboxSnapshotUnavailable.WithCause(err)
-			}
-			if !ok {
-				return apperr.ErrSandboxSnapshotUnavailable
-			}
-		}
-		sb, err := s.createSandboxRecord(ctx, tx, input, runtime, image, quota)
-		if err != nil {
-			return err
-		}
-		if _, err := s.createToolRecords(ctx, tx, sb, tools); err != nil {
+		if _, err := s.createToolRecords(ctx, tx, sb, resolved.Tools); err != nil {
 			return err
 		}
 		detail, err := jsonBytes(map[string]any{
-			"runtime_code": runtime.Code,
-			"image":        image.ImageURL,
+			"runtime_code": resolved.Runtime.Code,
+			"image":        resolved.Image.ImageURL,
 			"source_ref":   input.SourceRef,
 		})
 		if err != nil {
@@ -218,7 +201,7 @@ func (s *Service) CreateSandbox(ctx context.Context, req contracts.SandboxCreate
 		if err := tx.CreateSandboxEvent(ctx, s.ids.Generate(), input.TenantID, sb.ID, EventTypeCreate, detail); err != nil {
 			return apperr.ErrSandboxStatePersistFailed.WithCause(err)
 		}
-		plan = CreateSandboxPlan{Sandbox: sb, Runtime: runtime, Image: image, Tools: tools}
+		plan = CreateSandboxPlan{Sandbox: sb, Runtime: resolved.Runtime, Image: resolved.Image, Tools: resolved.Tools, PrivateSidecars: input.PrivateSidecars}
 		plan.Sandbox.Status = SandboxStatusCreating
 		return nil
 	}); err != nil {
@@ -231,6 +214,58 @@ func (s *Service) CreateSandbox(ctx context.Context, req contracts.SandboxCreate
 	s.startAsync(ctx, plan)
 	s.broadcastProgress(ctx, input.TenantID, plan.Sandbox.ID, SandboxPhaseAllocating, SandboxStatusCreating, response.TraceFromContext(ctx))
 	return s.info(ctx, plan.Sandbox.TenantID, plan.Sandbox.ID)
+}
+
+// resolveSandboxCreateDependencies 用同一套规则服务发布前校验和真实创建,避免 M7 与 M2 对运行时/工具可用性判断分叉。
+func (s *Service) resolveSandboxCreateDependencies(ctx context.Context, tx TxStore, input CreateSandboxInputModel, enforceLiveCapacity bool) (resolvedSandboxCreateDependencies, error) {
+	runtime, err := tx.GetRuntimeByCode(ctx, input.RuntimeCode)
+	if err != nil {
+		return resolvedSandboxCreateDependencies{}, apperr.ErrSandboxRuntimeNotFound.WithCause(err)
+	}
+	if runtime.Status != RuntimeStatusAvailable || runtime.SelftestStatus != RuntimeSelftestPassed {
+		return resolvedSandboxCreateDependencies{}, apperr.ErrSandboxRuntimeUnavailable
+	}
+	image, err := selectRuntimeImage(ctx, tx, runtime.ID, input.RuntimeImageVersion)
+	if err != nil {
+		return resolvedSandboxCreateDependencies{}, err
+	}
+	if !image.Prepulled || image.PrepullStatus != ImagePrepullSucceeded || !image.GenesisBaked {
+		return resolvedSandboxCreateDependencies{}, apperr.ErrSandboxRuntimeUnavailable
+	}
+	quota, err := tx.GetTenantQuotaForUpdate(ctx, input.TenantID)
+	if err != nil {
+		return resolvedSandboxCreateDependencies{}, apperr.ErrSandboxQuotaInvalid.WithCause(err)
+	}
+	active := int64(0)
+	if enforceLiveCapacity {
+		active, err = tx.CountActiveSandboxes(ctx, input.TenantID)
+		if err != nil {
+			return resolvedSandboxCreateDependencies{}, apperr.ErrSandboxCreateFailed.WithCause(err)
+		}
+	}
+	tools, err := s.resolveTools(ctx, tx, runtime, input.ToolCodes)
+	if err != nil {
+		return resolvedSandboxCreateDependencies{}, err
+	}
+	if err := validatePrivateSidecars(input.PrivateSidecars, s.cfg, runtime.AdapterSpec); err != nil {
+		return resolvedSandboxCreateDependencies{}, err
+	}
+	if err := validatePlanImagesCurrentlyAdmitted(s.cfg, runtime, image, tools, input.PrivateSidecars); err != nil {
+		return resolvedSandboxCreateDependencies{}, err
+	}
+	if err := validateQuotaForCreate(input, quota, active, s.cfg, runtime.AdapterSpec, tools); err != nil {
+		return resolvedSandboxCreateDependencies{}, err
+	}
+	if input.SnapshotEnabled {
+		ok, err := s.orchestrator.SnapshotSupported(ctx)
+		if err != nil {
+			return resolvedSandboxCreateDependencies{}, apperr.ErrSandboxSnapshotUnavailable.WithCause(err)
+		}
+		if !ok {
+			return resolvedSandboxCreateDependencies{}, apperr.ErrSandboxSnapshotUnavailable
+		}
+	}
+	return resolvedSandboxCreateDependencies{Runtime: runtime, Image: image, Quota: quota, Tools: tools}, nil
 }
 
 // cleanupCreatedSandboxAfterAuditFailure 避免审计失败后留下未启动的 creating 记录。
@@ -524,7 +559,7 @@ func (s *Service) planForExistingSandbox(ctx context.Context, sb Sandbox) (Creat
 	if err != nil {
 		return CreateSandboxPlan{}, err
 	}
-	if err := validatePlanImagesCurrentlyAdmitted(s.cfg, runtime, image, tools); err != nil {
+	if err := validatePlanImagesCurrentlyAdmitted(s.cfg, runtime, image, tools, nil); err != nil {
 		return CreateSandboxPlan{}, err
 	}
 	return CreateSandboxPlan{Sandbox: sb, Runtime: runtime, Image: image, Tools: tools}, nil

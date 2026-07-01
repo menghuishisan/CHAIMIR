@@ -5,13 +5,17 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
 	"chaimir/internal/contracts"
+	"chaimir/internal/platform/workload"
 	"chaimir/pkg/crypto"
 
 	"github.com/jackc/pgx/v5"
+	"sigs.k8s.io/yaml"
 )
 
 type acceptanceImageAttestation struct {
@@ -88,12 +92,18 @@ ON CONFLICT (runtime_id, version) DO UPDATE SET image_url=EXCLUDED.image_url, st
 	if err := seedToolRows(ctx, tx); err != nil {
 		return err
 	}
+	judgerImageURL, err := acceptanceImageURL("judger/testcase-evm")
+	if err != nil {
+		return err
+	}
 	judgeSpec, _ := jsonb(map[string]any{
 		"runtime_code":          "evm-foundry",
 		"runtime_image_version": "2026.06",
 		"genesis_ref":           "genesis/evm-foundry/acceptance.json",
 		"tool_codes":            []string{"code-server"},
-		"command":               []string{"/usr/local/bin/chaimir-judge", "solidity-unit"},
+		"command":               []string{"run-evm-tests"},
+		"exec_target":           "sandbox/testcase-evm",
+		"execution_sidecars":    []workload.ComponentSpec{acceptanceEVMJudgerSidecar(judgerImageURL)},
 		"timeout_sec":           60,
 		"max_retries":           1,
 		"suite_archive_name":    "public-regression.tar.gz",
@@ -101,9 +111,9 @@ ON CONFLICT (runtime_id, version) DO UPDATE SET image_url=EXCLUDED.image_url, st
 	})
 	if err := execJSON(ctx, tx, `
 INSERT INTO judger (id, code, name, type, executor_ref, runtime_required, default_timeout_sec, resource_spec, selftest_status, status)
-VALUES ($1,'solidity-unit','Solidity 单元测试判题器',1,'chaimir/judger/solidity-unit:dev',true,60,$2,2,1)
+VALUES ($1,'solidity-unit','Solidity 单元测试判题器',1,$3,true,60,$2,2,1)
 ON CONFLICT (code) DO UPDATE SET name=EXCLUDED.name, type=EXCLUDED.type, executor_ref=EXCLUDED.executor_ref, runtime_required=EXCLUDED.runtime_required, default_timeout_sec=EXCLUDED.default_timeout_sec, resource_spec=EXCLUDED.resource_spec, selftest_status=EXCLUDED.selftest_status, status=EXCLUDED.status, updated_at=now()`,
-		acceptanceIDs.Judger, judgeSpec); err != nil {
+		acceptanceIDs.Judger, judgeSpec, judgerImageURL); err != nil {
 		return err
 	}
 	if err := seedTenantQuotaRow(ctx, tx); err != nil {
@@ -115,7 +125,33 @@ ON CONFLICT (code) DO UPDATE SET name=EXCLUDED.name, type=EXCLUDED.type, executo
 	return seedJudgeRows(ctx, tx)
 }
 
-// acceptanceRuntimeAdapterSpec 构造验收运行时声明,包含独立学生终端 sidecar。
+// acceptanceEVMJudgerSidecar 生成 EVM testcase 判题器私有执行容器声明。
+func acceptanceEVMJudgerSidecar(imageURL string) workload.ComponentSpec {
+	readOnlyRoot := true
+	mountWorkspace := true
+	return workload.ComponentSpec{
+		Name:     "testcase-evm",
+		ImageURL: imageURL,
+		Command:  []string{"sleep", "2147483647"},
+		Env: []workload.EnvVarSpec{
+			{Name: "CHAIMIR_SUBMISSION_DIR", Value: "/judge-private"},
+		},
+		Resources: workload.ResourceSpec{
+			Requests: map[string]string{"cpu": "500m", "memory": "1Gi"},
+			Limits:   map[string]string{"cpu": "2", "memory": "4Gi"},
+		},
+		Workdir:                "/workspace",
+		ReadOnlyRootFilesystem: &readOnlyRoot,
+		Labels:                 map[string]string{"chaimir.io/student-access": "false", "chaimir.io/sensitivity": "judge-private"},
+		MountWorkspace:         &mountWorkspace,
+		EphemeralMounts: []workload.EphemeralMountSpec{
+			{Name: "judge-workdir", MountPath: "/judge"},
+			{Name: "judge-tmp", MountPath: "/tmp"},
+		},
+	}
+}
+
+// acceptanceRuntimeAdapterSpec 构造验收运行时声明,只放运行时必需组件;工具私有依赖必须留在工具 WorkloadSpec 内。
 func acceptanceRuntimeAdapterSpec(runtimeImageURL string) map[string]any {
 	return map[string]any{
 		"workspace_dir": "/workspace",
@@ -136,17 +172,21 @@ func acceptanceRuntimeAdapterSpec(runtimeImageURL string) map[string]any {
 			"readiness_probe": map[string]any{"type": "tcp", "port": "rpc", "period_seconds": 2, "failure_threshold": 30},
 			"labels":          map[string]string{"chaimir.io/student-access": "false"},
 		},
-		"infra_sidecars": []map[string]any{{
-			"name":      "student-shell",
-			"image_url": runtimeImageURL,
-			"command":   []string{"sleep", "2147483647"},
-			"resources": map[string]any{
-				"requests": map[string]string{"cpu": "50m", "memory": "64Mi"},
-				"limits":   map[string]string{"cpu": "250m", "memory": "256Mi"},
+		"infra_sidecars": []map[string]any{
+			{
+				"name":      "student-shell",
+				"image_url": runtimeImageURL,
+				"command":   []string{"sleep", "2147483647"},
+				"resources": map[string]any{
+					"requests": map[string]string{"cpu": "50m", "memory": "64Mi"},
+					"limits":   map[string]string{"cpu": "250m", "memory": "256Mi"},
+				},
+				"read_only_root_filesystem": true,
+				"labels":                    map[string]string{"chaimir.io/student-access": "true"},
+				"prepull_command":           []string{"sleep", "2147483647"},
+				"prepull_hold":              true,
 			},
-			"read_only_root_filesystem": true,
-			"labels":                    map[string]string{"chaimir.io/student-access": "true"},
-		}},
+		},
 		"default_tool_codes": []string{"code-server", "terminal"},
 		"workspace_ops": map[string]any{
 			"read_file":  []string{"/usr/local/bin/chaimir-workspace", "read", "{{workspace}}", "{{path}}"},
@@ -169,6 +209,83 @@ func acceptanceRuntimeAdapterSpec(runtimeImageURL string) map[string]any {
 			"query_target":   "chainId",
 		},
 	}
+}
+
+type acceptanceImageUnitManifest struct {
+	SchemaVersion      int                   `json:"schema_version"`
+	Category           string                `json:"category"`
+	Name               string                `json:"name"`
+	Image              string                `json:"image"`
+	Description        string                `json:"description"`
+	Source             map[string]any        `json:"source"`
+	Upstream           map[string]any        `json:"upstream"`
+	DataDriven         bool                  `json:"data_driven"`
+	Infra              map[string]any        `json:"infra"`
+	Ports              []toolManifestPort    `json:"ports"`
+	LocalDev           map[string]any        `json:"local_dev"`
+	Security           toolManifestSecurity  `json:"security"`
+	SecurityExceptions []map[string]any      `json:"security_exceptions"`
+	StudentAccess      map[string]any        `json:"student_access"`
+	Resources          toolManifestResources `json:"resources"`
+	Build              map[string]any        `json:"build"`
+	Selftest           map[string]any        `json:"selftest"`
+	SupplyChain        map[string]any        `json:"supply_chain"`
+	Labels             map[string]string     `json:"labels"`
+	Capabilities       []string              `json:"capabilities"`
+}
+
+// acceptanceImageUnitManifestFor 严格读取指定镜像单元 manifest,并校验目录分类与镜像名前缀一致。
+func acceptanceImageUnitManifestFor(image, category string) (acceptanceImageUnitManifest, error) {
+	root, err := acceptanceImagesRoot()
+	if err != nil {
+		return acceptanceImageUnitManifest{}, err
+	}
+	path := filepath.Join(root, filepath.FromSlash(image), "manifest.yaml")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return acceptanceImageUnitManifest{}, fmt.Errorf("读取镜像 manifest 失败 %s: %w", image, err)
+	}
+	var manifest acceptanceImageUnitManifest
+	if err := yaml.UnmarshalStrict(raw, &manifest); err != nil {
+		return acceptanceImageUnitManifest{}, fmt.Errorf("解析镜像 manifest 失败 %s: %w", image, err)
+	}
+	if manifest.Category != category || manifest.Image != image || strings.TrimSpace(manifest.Name) == "" {
+		return acceptanceImageUnitManifest{}, fmt.Errorf("镜像 manifest 分类或镜像名不一致: %s", image)
+	}
+	return manifest, nil
+}
+
+// acceptanceManifestSelftestCommand 选择镜像 manifest 首个自检命令作为预拉取自检命令。
+func acceptanceManifestSelftestCommand(manifest acceptanceImageUnitManifest) ([]string, error) {
+	raw, ok := manifest.Selftest["commands"]
+	if !ok {
+		return nil, fmt.Errorf("%s 缺少 selftest.commands", manifest.Image)
+	}
+	data, err := json.Marshal(raw)
+	if err != nil {
+		return nil, fmt.Errorf("编码 %s selftest.commands 失败: %w", manifest.Image, err)
+	}
+	var commands []toolManifestSelftestCommand
+	if err := json.Unmarshal(data, &commands); err != nil || len(commands) == 0 {
+		return nil, fmt.Errorf("解析 %s selftest.commands 失败: %w", manifest.Image, err)
+	}
+	command := acceptanceCompactCommand(commands[0].Command)
+	if len(command) == 0 {
+		return nil, fmt.Errorf("%s selftest.commands 为空", manifest.Image)
+	}
+	return command, nil
+}
+
+// acceptanceCompactCommand 清理 manifest 命令数组中的空白参数,保持声明顺序。
+func acceptanceCompactCommand(command []string) []string {
+	out := make([]string, 0, len(command))
+	for _, part := range command {
+		trimmed := strings.TrimSpace(part)
+		if trimmed != "" {
+			out = append(out, trimmed)
+		}
+	}
+	return out
 }
 
 // seedToolRows 从 images/tool manifest 重建工具表,避免 seed 内保留工具专用分支。
@@ -251,13 +368,17 @@ ON CONFLICT (id) DO UPDATE SET event_type=EXCLUDED.event_type, detail=EXCLUDED.d
 
 // seedJudgeRows 写入一个已完成判题任务和脱敏结果,用于判题详情和重判测试。
 func seedJudgeRows(ctx context.Context, tx pgx.Tx) error {
+	judgerImageURL, err := acceptanceImageURL("judger/testcase-evm")
+	if err != nil {
+		return err
+	}
 	snapshot, _ := jsonb(map[string]any{
 		"item_code":                   "ctf-reentrancy-vault",
 		"item_version":                "1.0.0",
 		"trace_id":                    "trace-acceptance-judge",
 		"judger_code":                 "solidity-unit",
 		"judger_type":                 1,
-		"judger_version":              "2026.06",
+		"judger_version":              judgerImageURL,
 		"suite_ref":                   "minio://chaimir-code/910000000000000001/judge/suites/ctf-reentrancy-vault/public-regression.tar.gz",
 		"suite_archive_name":          "public-regression.tar.gz",
 		"version_hash":                "acceptance-version-hash",
@@ -265,7 +386,9 @@ func seedJudgeRows(ctx context.Context, tx pgx.Tx) error {
 		"runtime_image_version":       "2026.06",
 		"genesis_ref":                 "genesis/evm-foundry/acceptance.json",
 		"tool_codes":                  []string{"code-server"},
-		"command":                     []string{"/usr/local/bin/chaimir-judge", "solidity-unit"},
+		"command":                     []string{"run-evm-tests"},
+		"exec_target":                 "sandbox/testcase-evm",
+		"execution_sidecars":          []workload.ComponentSpec{acceptanceEVMJudgerSidecar(judgerImageURL)},
 		"timeout_sec":                 60,
 		"max_retries":                 1,
 		"max_score":                   100,
@@ -284,7 +407,7 @@ INSERT INTO judge_task (
 	'minio://chaimir-code/acceptance/submissions/S20260001/reentrancy-fixed.zip','6d0f2d2a4f7a7b7b6b0e0e9f7c8a1c2d3e4f506172839405162738495a6b7c8d',
 	$7,2,'sandbox:acceptance:reentrancy-a',5,$8,0,1
 )
-ON CONFLICT (tenant_id, source_ref) DO UPDATE SET judger_id=EXCLUDED.judger_id, source_owner_id=EXCLUDED.source_owner_id, source_course_id=EXCLUDED.source_course_id, source_scope=EXCLUDED.source_scope, submitter_id=EXCLUDED.submitter_id, problem_ref=EXCLUDED.problem_ref, code_storage_key=EXCLUDED.code_storage_key, code_hash=EXCLUDED.code_hash, input_snapshot=EXCLUDED.input_snapshot, sandbox_mode=EXCLUDED.sandbox_mode, target_sandbox_ref=EXCLUDED.target_sandbox_ref, priority=EXCLUDED.priority, status=EXCLUDED.status, retry_count=EXCLUDED.retry_count, max_retries=EXCLUDED.max_retries, updated_at=now()`,
+ON CONFLICT (tenant_id, source_ref, problem_ref) DO UPDATE SET judger_id=EXCLUDED.judger_id, source_owner_id=EXCLUDED.source_owner_id, source_course_id=EXCLUDED.source_course_id, source_scope=EXCLUDED.source_scope, submitter_id=EXCLUDED.submitter_id, code_storage_key=EXCLUDED.code_storage_key, code_hash=EXCLUDED.code_hash, input_snapshot=EXCLUDED.input_snapshot, sandbox_mode=EXCLUDED.sandbox_mode, target_sandbox_ref=EXCLUDED.target_sandbox_ref, priority=EXCLUDED.priority, status=EXCLUDED.status, retry_count=EXCLUDED.retry_count, max_retries=EXCLUDED.max_retries, updated_at=now()`,
 		acceptanceIDs.JudgeTask, acceptanceIDs.TenantID, acceptanceIDs.Judger, acceptanceIDs.TeacherMain, acceptanceIDs.Course, acceptanceIDs.StudentA, snapshot, contracts.JudgeTaskStatusDone); err != nil {
 		return err
 	}
@@ -503,18 +626,20 @@ ON CONFLICT (id) DO UPDATE SET chapter_id=EXCLUDED.chapter_id, title=EXCLUDED.ti
 func seedExperimentRows(ctx context.Context, tx pgx.Tx) error {
 	components, _ := jsonb(map[string]any{
 		"envs": []map[string]any{{
-			"id":                    "lab-foundry",
-			"runtime_code":          "evm-foundry",
-			"runtime_image_version": "2026.06",
-			"tools":                 []string{"code-server"},
-			"init_code_ref":         acceptanceInitCodeRef,
-			"init_script_ref":       acceptanceInitScriptRef,
-			"snapshot_enabled":      true,
-			"keep_alive_minutes":    60,
+			"id":                         "lab-foundry",
+			"runtime_code":               "evm-foundry",
+			"runtime_image_version":      "2026.06",
+			"tools":                      []string{"code-server"},
+			"init_code_ref":              acceptanceInitCodeRef,
+			"init_script_ref":            acceptanceInitScriptRef,
+			"snapshot_enabled":           false,
+			"snapshot_retention_minutes": 0,
+			"keep_alive":                 true,
+			"keep_alive_minutes":         60,
 		}},
 		"checkpoints": []map[string]any{
-			{"id": "withdraw-guard", "judger": "solidity-unit", "item_code": "ctf-reentrancy-vault", "item_version": "1.0.0", "score": 60, "mode": "reuse", "env_id": "lab-foundry"},
-			{"id": "attack-regression", "judger": "solidity-unit", "item_code": "ctf-reentrancy-vault", "item_version": "1.0.0", "score": 40, "mode": "reuse", "env_id": "lab-foundry"},
+			{"id": "withdraw-guard", "judger": "solidity-unit", "item_code": "ctf-reentrancy-vault", "item_version": "1.0.0", "score": 60, "mode": "fresh", "env_id": "lab-foundry"},
+			{"id": "attack-regression", "judger": "solidity-unit", "item_code": "ctf-reentrancy-vault", "item_version": "1.0.0", "score": 40, "mode": "fresh", "env_id": "lab-foundry"},
 		},
 		"stages": []map[string]any{
 			{"stage": 1, "title": "漏洞复现与修复", "description": "使用 Foundry 复现可重入攻击并完成修复。", "components": map[string]any{"envs": []string{"lab-foundry"}}},

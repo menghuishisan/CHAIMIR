@@ -6,6 +6,7 @@ import (
 
 	"chaimir/internal/contracts"
 	"chaimir/internal/platform/jsonx"
+	"chaimir/internal/platform/workload"
 	"chaimir/pkg/apperr"
 )
 
@@ -88,7 +89,37 @@ func createInputFromContract(req contracts.SandboxCreateRequest) CreateSandboxIn
 		SnapshotEnabled:          req.SnapshotEnabled,
 		KeepAliveMinutes:         req.KeepAliveMinutes,
 		SnapshotRetentionMinutes: req.SnapshotRetentionMinutes,
+		PrivateSidecars:          privateSidecarsFromContract(req.PrivateSidecars),
 	}
+}
+
+// privateSidecarsFromContract 在 M2 边界把跨模块 DTO 转为内部 WorkloadSpec。
+func privateSidecarsFromContract(items []contracts.SandboxPrivateSidecarSpec) []workload.ComponentSpec {
+	out := make([]workload.ComponentSpec, 0, len(items))
+	for _, item := range items {
+		env := make([]workload.EnvVarSpec, 0, len(item.Env))
+		for _, v := range item.Env {
+			env = append(env, workload.EnvVarSpec{Name: v.Name, Value: v.Value})
+		}
+		mounts := make([]workload.EphemeralMountSpec, 0, len(item.EphemeralMounts))
+		for _, mount := range item.EphemeralMounts {
+			mounts = append(mounts, workload.EphemeralMountSpec{Name: mount.Name, MountPath: mount.MountPath})
+		}
+		out = append(out, workload.ComponentSpec{
+			Name:                   item.Name,
+			ImageURL:               item.ImageURL,
+			Command:                append([]string(nil), item.Command...),
+			Args:                   append([]string(nil), item.Args...),
+			Env:                    env,
+			Resources:              workload.ResourceSpec{Requests: copyStringMap(item.Resources.Requests), Limits: copyStringMap(item.Resources.Limits)},
+			Workdir:                item.Workdir,
+			ReadOnlyRootFilesystem: item.ReadOnlyRootFilesystem,
+			Labels:                 copyStringMap(item.Labels),
+			MountWorkspace:         item.MountWorkspace,
+			EphemeralMounts:        mounts,
+		})
+	}
+	return out
 }
 
 // jsonBytes 在入库前把已校验结构转换为 JSON 字节,失败时显式返回错误链。

@@ -2,4 +2,4 @@
 
 本镜像提供状态数据库可视化工具,用于 Fabric CouchDB 或实验内 PostgreSQL 状态查看。
 
-`manifest.yaml` 声明 `tool.runtime_config_required=true`:只有当运行时/实验 WorkloadSpec 已真实提供目标数据库 Service、最小权限短期凭证、NetworkPolicy 和平台代理路由后,才能把该工具标记为可调度。连接串不得由教师或学生手填,也不得暴露数据库直连入口。
+`manifest.yaml` 已声明受控 PostgreSQL 数据源、固定 pgweb 连接 URL、启动重试、Service 与最小 NetworkPolicy。学生只能通过 M2 平台代理访问 Web UI,不能手填连接串,也不能直连平台数据库、其他租户数据库或 Secret。后续 Fabric CouchDB 等数据源必须继续通过 WorkloadSpec 显式声明和后端注入,不得在前端开放任意连接入口。

@@ -68,6 +68,41 @@ type SandboxCreateRequest struct {
 	SnapshotEnabled          bool     `json:"snapshot_enabled"`
 	KeepAliveMinutes         int32    `json:"keep_alive_minutes"`
 	SnapshotRetentionMinutes int32    `json:"snapshot_retention_minutes"`
+	// PrivateSidecars 仅供服务端内部判题等场景挂载非学生可访问执行容器。
+	PrivateSidecars []SandboxPrivateSidecarSpec `json:"private_sidecars,omitempty"`
+}
+
+// SandboxEnvVarSpec 描述内部私有执行容器允许注入的非敏感字面量环境变量。
+type SandboxEnvVarSpec struct {
+	Name  string `json:"name"`
+	Value string `json:"value"`
+}
+
+// SandboxResourceSpec 描述内部私有执行容器 requests/limits。
+type SandboxResourceSpec struct {
+	Requests map[string]string `json:"requests"`
+	Limits   map[string]string `json:"limits"`
+}
+
+// SandboxEphemeralMountSpec 描述内部私有执行容器只读根文件系统下的临时可写目录。
+type SandboxEphemeralMountSpec struct {
+	Name      string `json:"name"`
+	MountPath string `json:"mount_path"`
+}
+
+// SandboxPrivateSidecarSpec 是 M3 判题等服务端内部场景传给 M2 的非学生执行容器声明。
+type SandboxPrivateSidecarSpec struct {
+	Name                   string                      `json:"name"`
+	ImageURL               string                      `json:"image_url"`
+	Command                []string                    `json:"command"`
+	Args                   []string                    `json:"args"`
+	Env                    []SandboxEnvVarSpec         `json:"env"`
+	Resources              SandboxResourceSpec         `json:"resources"`
+	Workdir                string                      `json:"workdir"`
+	ReadOnlyRootFilesystem *bool                       `json:"read_only_root_filesystem"`
+	Labels                 map[string]string           `json:"labels"`
+	MountWorkspace         *bool                       `json:"mount_workspace"`
+	EphemeralMounts        []SandboxEphemeralMountSpec `json:"ephemeral_mounts"`
 }
 
 // SandboxToolAccess 是沙箱内某个工具的可访问接入信息。
@@ -147,6 +182,7 @@ type SandboxExecRequest struct {
 	TenantID   int64    `json:"tenant_id"`
 	SandboxID  int64    `json:"sandbox_id"`
 	SourceRef  string   `json:"source_ref"`
+	Container  string   `json:"container,omitempty"`
 	Command    []string `json:"command"`
 	Stdin      []byte   `json:"stdin"`
 	TimeoutSec int32    `json:"timeout_sec"`
@@ -218,6 +254,8 @@ type SandboxQuotaStats struct {
 
 // SandboxService 是 M2 沙箱引擎对 M3/M7/M8/M9 暴露的标准能力契约。
 type SandboxService interface {
+	// ValidateSandboxTemplate 校验业务模块保存/发布的沙箱模板能解析到可调度运行时、镜像和工具,但不创建资源。
+	ValidateSandboxTemplate(ctx context.Context, req SandboxCreateRequest) error
 	// CreateSandbox 创建沙箱并返回控制面摘要,实际启动过程异步推进。
 	CreateSandbox(ctx context.Context, req SandboxCreateRequest) (SandboxInfo, error)
 	// GetSandbox 查询单个沙箱当前状态与工具接入信息。

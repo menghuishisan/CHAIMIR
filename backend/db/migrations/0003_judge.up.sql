@@ -36,7 +36,7 @@ CREATE TABLE IF NOT EXISTS judge_task (
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     UNIQUE (tenant_id, id),
-    UNIQUE (tenant_id, source_ref),
+    UNIQUE (tenant_id, source_ref, problem_ref),
     FOREIGN KEY (tenant_id, submitter_id) REFERENCES account(tenant_id, id)
 );
 

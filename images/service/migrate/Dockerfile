@@ -11,12 +11,13 @@ COPY --chown=1000:1000 backend/go.mod backend/go.sum ./
 RUN --mount=type=cache,target=/go/pkg/mod,uid=1000,gid=1000 go mod download
 COPY --chown=1000:1000 backend/ ./
 COPY --chown=1000:1000 images/tool /src/acceptance-images/tool
+COPY --chown=1000:1000 images/infra /src/acceptance-images/infra
 
 # migrate 命令用于部署期 migration、授权和 seed 编排。
 RUN --mount=type=cache,target=/go/pkg/mod,uid=1000,gid=1000 --mount=type=cache,target=/tmp/go-cache,uid=1000,gid=1000 \
     CGO_ENABLED=0 GOOS=linux GOMAXPROCS=2 go build -p=2 -trimpath -ldflags="-s -w" -o /out/migrate ./cmd/migrate
-RUN find /src/acceptance-images/tool -type f ! -name manifest.yaml -delete && \
-    find /src/acceptance-images/tool -type d -empty -delete
+RUN find /src/acceptance-images -type f ! -name manifest.yaml -delete && \
+    find /src/acceptance-images -type d -empty -delete
 
 FROM ${RUNTIME_IMAGE}
 

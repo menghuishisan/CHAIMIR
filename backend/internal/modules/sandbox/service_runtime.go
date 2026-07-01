@@ -443,7 +443,7 @@ func prepullImageSpecsForRuntime(runtime Runtime, image RuntimeImage, tools []To
 		return nil, err
 	}
 	for _, component := range runtime.AdapterSpec.InfraSidecars {
-		if err := add(component.ImageURL, component.Command, true, component.EphemeralMounts); err != nil {
+		if err := add(component.ImageURL, component.PrepullCommand, component.PrepullHold, component.EphemeralMounts); err != nil {
 			return nil, err
 		}
 	}
@@ -452,7 +452,7 @@ func prepullImageSpecsForRuntime(runtime Runtime, image RuntimeImage, tools []To
 			if strings.TrimSpace(component.Name) == strings.TrimSpace(runtime.AdapterSpec.RuntimeContainer.Name) {
 				continue
 			}
-			if err := add(component.ImageURL, component.Command, true, component.EphemeralMounts); err != nil {
+			if err := add(component.ImageURL, component.PrepullCommand, component.PrepullHold, component.EphemeralMounts); err != nil {
 				return nil, err
 			}
 		}
@@ -462,7 +462,11 @@ func prepullImageSpecsForRuntime(runtime Runtime, image RuntimeImage, tools []To
 			continue
 		}
 		for _, component := range tool.ResourceSpec.Components {
-			if err := add(component.ImageURL, tool.ResourceSpec.PrepullCommand, false, component.EphemeralMounts); err != nil {
+			command := component.PrepullCommand
+			if len(command) == 0 {
+				command = tool.ResourceSpec.PrepullCommand
+			}
+			if err := add(component.ImageURL, command, component.PrepullHold, component.EphemeralMounts); err != nil {
 				return nil, err
 			}
 		}

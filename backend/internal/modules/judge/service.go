@@ -20,6 +20,7 @@ import (
 	"chaimir/internal/platform/storage"
 	"chaimir/internal/platform/timex"
 	"chaimir/internal/platform/upload"
+	"chaimir/internal/platform/workload"
 	"chaimir/internal/platform/ws"
 	"chaimir/pkg/apperr"
 	pkgcrypto "chaimir/pkg/crypto"
@@ -237,7 +238,8 @@ func (s *Service) SubmitJudgeTask(ctx context.Context, req contracts.JudgeSubmit
 	if err := validateSubmitRequest(req); err != nil {
 		return contracts.JudgeTaskInfo{}, err
 	}
-	if existing, ok, err := s.findExistingTaskBySourceRef(ctx, req.TenantID, req.SourceRef); err != nil {
+	problemRef := req.ItemCode + ":" + req.ItemVersion
+	if existing, ok, err := s.findExistingTaskBySourceRef(ctx, req.TenantID, req.SourceRef, problemRef); err != nil {
 		return contracts.JudgeTaskInfo{}, err
 	} else if ok {
 		return contractTaskInfoFromModel(JudgeTaskInfo{Task: existing, Existing: true}), nil
@@ -291,7 +293,7 @@ func (s *Service) SubmitJudgeTask(ctx context.Context, req contracts.JudgeSubmit
 		SourceCourseID:   ownership.CourseID,
 		SourceScope:      ownership.Scope,
 		SubmitterID:      req.SubmitterID,
-		ProblemRef:       req.ItemCode + ":" + req.ItemVersion,
+		ProblemRef:       problemRef,
 		CodeStorageKey:   req.CodeStorageKey,
 		CodeHash:         codeHash,
 		InputSnapshot:    snapshot,
@@ -385,12 +387,12 @@ func (s *Service) prepareSubmittedCode(ctx context.Context, req contracts.JudgeS
 	return codeHash, vector, sanitizedCode, nil
 }
 
-// findExistingTaskBySourceRef 在读取对象存储和构建指纹前完成提交幂等短路。
-func (s *Service) findExistingTaskBySourceRef(ctx context.Context, tenantID int64, sourceRef string) (JudgeTask, bool, error) {
+// findExistingTaskBySourceRef 在读取对象存储和构建指纹前完成同来源同题目的提交幂等短路。
+func (s *Service) findExistingTaskBySourceRef(ctx context.Context, tenantID int64, sourceRef, problemRef string) (JudgeTask, bool, error) {
 	var existing JudgeTask
 	err := s.store.TenantTx(ctx, tenantID, func(ctx context.Context, tx TxStore) error {
 		var err error
-		existing, err = tx.GetJudgeTaskBySourceRef(ctx, tenantID, sourceRef)
+		existing, err = tx.GetJudgeTaskBySourceRef(ctx, tenantID, sourceRef, problemRef)
 		return err
 	})
 	if err == nil {
@@ -553,6 +555,8 @@ func (s *Service) buildInputSnapshot(j Judger, spec contracts.ContentJudgeSpec, 
 		ToolCodes:           append([]string(nil), j.ResourceSpec.ToolCodes...),
 		InitScriptRef:       j.ResourceSpec.InitScriptRef,
 		Command:             append([]string(nil), j.ResourceSpec.Command...),
+		ExecTarget:          strings.TrimSpace(j.ResourceSpec.ExecTarget),
+		ExecutionSidecars:   append([]workload.ComponentSpec(nil), j.ResourceSpec.ExecutionSidecars...),
 		TimeoutSec:          timeoutForSnapshot(j),
 		MaxRetries:          maxRetriesForJudger(j, s.cfg.DefaultMaxRetries),
 		MaxScore:            spec.MaxScore,

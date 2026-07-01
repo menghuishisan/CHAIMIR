@@ -364,7 +364,7 @@ func validateQuotaForCreate(req CreateSandboxInputModel, quota TenantQuota, acti
 	if active >= int64(quota.MaxConcurrentSandbox) {
 		return apperr.ErrSandboxQuotaExceeded
 	}
-	if err := validateSingleSandboxResourceLimit(adapter, tools, cfg); err != nil {
+	if err := validateSingleSandboxResourceLimit(adapter, tools, req.PrivateSidecars, cfg); err != nil {
 		return err
 	}
 	if err := validateTenantResourceCapacity(quota, active+1, cfg); err != nil {
@@ -384,8 +384,8 @@ func validateQuotaForCreate(req CreateSandboxInputModel, quota TenantQuota, acti
 }
 
 // validateSingleSandboxResourceLimit 按 runtime/tool 声明式规格汇总资源,在写入 K8s 前拒绝超过 Namespace 上限的组合。
-func validateSingleSandboxResourceLimit(adapter AdapterSpec, tools []Tool, cfg config.SandboxConfig) error {
-	usage, err := sandboxDeclaredResourceUsage(adapter, tools, cfg)
+func validateSingleSandboxResourceLimit(adapter AdapterSpec, tools []Tool, privateSidecars []workload.ComponentSpec, cfg config.SandboxConfig) error {
+	usage, err := sandboxDeclaredResourceUsage(adapter, tools, privateSidecars, cfg)
 	if err != nil {
 		return apperr.ErrSandboxQuotaInvalid.WithCause(err)
 	}
@@ -422,7 +422,7 @@ type declaredResourceUsage struct {
 }
 
 // sandboxDeclaredResourceUsage 汇总默认拓扑、显式 Pod 组和会创建 Pod 的工具声明式资源。
-func sandboxDeclaredResourceUsage(adapter AdapterSpec, tools []Tool, cfg config.SandboxConfig) (declaredResourceUsage, error) {
+func sandboxDeclaredResourceUsage(adapter AdapterSpec, tools []Tool, privateSidecars []workload.ComponentSpec, cfg config.SandboxConfig) (declaredResourceUsage, error) {
 	usage := declaredResourceUsage{PodCount: int64(len(podTopologyForAdapter(adapter)))}
 	for _, pod := range podTopologyForAdapter(adapter) {
 		for _, container := range pod.Containers {
@@ -440,6 +440,11 @@ func sandboxDeclaredResourceUsage(adapter AdapterSpec, tools []Tool, cfg config.
 			if err := addDeclaredContainerResources(&usage, component.Resources, cfg); err != nil {
 				return declaredResourceUsage{}, err
 			}
+		}
+	}
+	for _, component := range privateSidecars {
+		if err := addDeclaredContainerResources(&usage, component.Resources, cfg); err != nil {
+			return declaredResourceUsage{}, err
 		}
 	}
 	return usage, nil
@@ -580,7 +585,7 @@ func normalizeAndValidateAdapterSpec(spec *AdapterSpec, cfg config.SandboxConfig
 	if err := validateCapabilityCommands(spec, cfg); err != nil {
 		return err
 	}
-	if err := validateContainerSpec(&spec.RuntimeContainer, cfg); err != nil {
+	if err := validateRuntimeContainerSpec(&spec.RuntimeContainer, cfg, true); err != nil {
 		return err
 	}
 	if err := validatePrivateArchiveExecutionTarget(spec); err != nil {
@@ -594,11 +599,14 @@ func normalizeAndValidateAdapterSpec(spec *AdapterSpec, cfg config.SandboxConfig
 		ports[port.Name] = struct{}{}
 	}
 	for i := range spec.InfraSidecars {
-		if err := validateContainerSpec(&spec.InfraSidecars[i], cfg); err != nil {
+		if err := validateRuntimeContainerSpec(&spec.InfraSidecars[i], cfg, false); err != nil {
 			return err
 		}
 		if err := validateInfraSidecarImage(spec.InfraSidecars[i], cfg); err != nil {
 			return err
+		}
+		if err := validatePrepullCommand(spec.InfraSidecars[i].PrepullCommand); err != nil || len(spec.InfraSidecars[i].PrepullCommand) == 0 {
+			return apperr.ErrSandboxAdapterSpecInvalid
 		}
 		for _, port := range spec.InfraSidecars[i].Ports {
 			if _, exists := ports[port.Name]; exists {
@@ -615,6 +623,37 @@ func normalizeAndValidateAdapterSpec(spec *AdapterSpec, cfg config.SandboxConfig
 	}
 	if err := validateNetworkRules(spec); err != nil {
 		return err
+	}
+	return nil
+}
+
+// validateRuntimeContainerSpec 校验运行时组件声明;主容器必须有服务端口,执行类 sidecar 可无端口但仍受同一安全边界约束。
+func validateRuntimeContainerSpec(spec *workload.ComponentSpec, cfg config.SandboxConfig, requirePort bool) error {
+	spec.Name = strings.TrimSpace(spec.Name)
+	if !mountNamePattern.MatchString(spec.Name) || (requirePort && len(spec.Ports) == 0) {
+		return apperr.ErrSandboxContainerSpecInvalid
+	}
+	if err := validateLiteralEnv(spec.Env); err != nil {
+		return err
+	}
+	if err := validateResourceSpec(spec.Resources); err != nil {
+		return err
+	}
+	if len(spec.Ports) > 0 {
+		if err := validatePortSpecs(spec.Ports); err != nil {
+			return err
+		}
+	}
+	normalizeProbe(&spec.ReadinessProbe, cfg)
+	normalizeProbe(&spec.LivenessProbe, cfg)
+	portNames := declaredPortNames(spec.Ports)
+	for _, probe := range []*workload.ProbeSpec{&spec.ReadinessProbe, &spec.LivenessProbe} {
+		if err := validateProbeSpec(probe, portNames); err != nil {
+			return err
+		}
+	}
+	if len(spec.Command) > 0 && !safeNonShellCommand(spec.Command) {
+		return apperr.ErrSandboxContainerSpecInvalid
 	}
 	return nil
 }
@@ -809,14 +848,18 @@ func toolHasContainerSpec(spec ToolResourceSpec) bool {
 		len(spec.Routes) > 0
 }
 
-// validateToolNetworkRulesForRuntime 校验工具网络规则只能访问运行时拓扑中已声明的目标端口。
+// validateToolNetworkRulesForRuntime 校验工具网络规则只能访问同工具组件或运行时拓扑中已声明的目标端口。
 func validateToolNetworkRulesForRuntime(tool Tool, adapter AdapterSpec) error {
 	podPorts := podPortMap(podTopologyForAdapter(adapter))
+	componentPorts := componentPortMap(tool.ResourceSpec.Components)
 	for i := range tool.ResourceSpec.NetworkRules {
 		rule := &tool.ResourceSpec.NetworkRules[i]
 		targetPorts, ok := podPorts[rule.To]
 		if !ok {
-			return apperr.ErrSandboxToolIncompatible
+			targetPorts, ok = componentPorts[rule.To]
+			if !ok {
+				return apperr.ErrSandboxToolIncompatible
+			}
 		}
 		for j := range rule.Ports {
 			ref := &rule.Ports[j]
@@ -972,8 +1015,30 @@ func validateInfraSidecarImage(spec workload.ComponentSpec, cfg config.SandboxCo
 	return nil
 }
 
+// validatePrivateSidecars 校验内部执行 sidecar,避免把判题器等私有容器暴露为学生终端或绕过镜像证明。
+func validatePrivateSidecars(items []workload.ComponentSpec, cfg config.SandboxConfig, adapter AdapterSpec) error {
+	seen := declaredContainerMap(adapter)
+	for i := range items {
+		item := &items[i]
+		if err := validateRuntimeContainerSpec(item, cfg, false); err != nil {
+			return err
+		}
+		if studentAccessibleContainer(*item) {
+			return apperr.ErrSandboxPrivateDomainInvalid
+		}
+		if _, exists := seen[item.Name]; exists {
+			return apperr.ErrSandboxContainerSpecInvalid
+		}
+		seen[item.Name] = *item
+		if err := validateInfraSidecarImage(*item, cfg); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // validatePlanImagesCurrentlyAdmitted 在启动或恢复前用当前证明校验已入库镜像引用。
-func validatePlanImagesCurrentlyAdmitted(cfg config.SandboxConfig, runtime Runtime, image RuntimeImage, tools []Tool) error {
+func validatePlanImagesCurrentlyAdmitted(cfg config.SandboxConfig, runtime Runtime, image RuntimeImage, tools []Tool, privateSidecars []workload.ComponentSpec) error {
 	if !imageRefAttested(cfg, image.ImageURL) {
 		return apperr.ErrSandboxImageAttestationInvalid
 	}
@@ -987,6 +1052,11 @@ func validatePlanImagesCurrentlyAdmitted(cfg config.SandboxConfig, runtime Runti
 			if !imageRefAttested(cfg, component.ImageURL) {
 				return apperr.ErrSandboxImageAttestationInvalid
 			}
+		}
+	}
+	for _, component := range privateSidecars {
+		if !imageRefAttested(cfg, component.ImageURL) {
+			return apperr.ErrSandboxImageAttestationInvalid
 		}
 	}
 	return nil

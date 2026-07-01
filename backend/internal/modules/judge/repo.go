@@ -33,7 +33,7 @@ type TxStore interface {
 	UpdateJudgerSelftest(ctx context.Context, id int64, selftestStatus, status int16) (Judger, error)
 	CreateJudgeTask(ctx context.Context, task JudgeTask) (JudgeTask, error)
 	GetJudgeTask(ctx context.Context, tenantID, taskID int64) (JudgeTask, error)
-	GetJudgeTaskBySourceRef(ctx context.Context, tenantID int64, sourceRef string) (JudgeTask, error)
+	GetJudgeTaskBySourceRef(ctx context.Context, tenantID int64, sourceRef, problemRef string) (JudgeTask, error)
 	GetJudgeTaskInfo(ctx context.Context, tenantID, taskID int64) (JudgeTaskInfo, error)
 	ListJudgeTasksBySourceRef(ctx context.Context, tenantID int64, sourceRef string) ([]JudgeTask, error)
 	ListRecentJudgeTasksBySubmitterProblem(ctx context.Context, tenantID, submitterID int64, problemRef string, windowSeconds int32) ([]JudgeTask, error)
@@ -212,9 +212,9 @@ func (s *txStore) GetJudgeTask(ctx context.Context, tenantID, taskID int64) (Jud
 	return taskFromRow(row)
 }
 
-// GetJudgeTaskBySourceRef 按幂等来源读取已存在任务。
-func (s *txStore) GetJudgeTaskBySourceRef(ctx context.Context, tenantID int64, sourceRef string) (JudgeTask, error) {
-	row, err := s.q.GetJudgeTaskBySourceRef(ctx, sqlcgen.GetJudgeTaskBySourceRefParams{TenantID: tenantID, SourceRef: sourceRef})
+// GetJudgeTaskBySourceRef 按来源和题目读取已存在任务,允许实验实例下多个检查点各自幂等。
+func (s *txStore) GetJudgeTaskBySourceRef(ctx context.Context, tenantID int64, sourceRef, problemRef string) (JudgeTask, error) {
+	row, err := s.q.GetJudgeTaskBySourceRef(ctx, sqlcgen.GetJudgeTaskBySourceRefParams{TenantID: tenantID, SourceRef: sourceRef, ProblemRef: problemRef})
 	if err != nil {
 		return JudgeTask{}, err
 	}

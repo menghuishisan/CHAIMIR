@@ -458,18 +458,9 @@ func containerRuntimeFailureFromPods(pods []corev1.Pod) error {
 	return nil
 }
 
-// containerRuntimeFailureFromContainerStatuses 从容器状态中提取启动或自检失败原因。
+// containerRuntimeFailureFromContainerStatuses 从容器当前状态中提取启动或自检失败原因。
 func containerRuntimeFailureFromContainerStatuses(podName string, statuses []corev1.ContainerStatus, failureReasons map[string]struct{}) error {
 	for _, status := range statuses {
-		if status.LastTerminationState.Terminated != nil && status.LastTerminationState.Terminated.ExitCode != 0 {
-			terminated := status.LastTerminationState.Terminated
-			reason := strings.TrimSpace(terminated.Reason)
-			message := strings.TrimSpace(terminated.Message)
-			if message == "" {
-				return fmt.Errorf("预拉取 Pod %s 容器 %s 曾异常退出: %s exit=%d", podName, status.Name, reason, terminated.ExitCode)
-			}
-			return fmt.Errorf("预拉取 Pod %s 容器 %s 曾异常退出: %s exit=%d: %s", podName, status.Name, reason, terminated.ExitCode, message)
-		}
 		if status.State.Terminated != nil && status.State.Terminated.ExitCode != 0 {
 			terminated := status.State.Terminated
 			reason := strings.TrimSpace(terminated.Reason)
@@ -501,7 +492,7 @@ func (o *K8sOrchestrator) waitSandboxPodReady(ctx context.Context, cs kubernetes
 		return fmt.Errorf("SANDBOX_READY_POLL_INTERVAL_SECONDS 必须大于 0")
 	}
 	podNames := runtimePodNames(plan)
-	ticker := time.NewTicker(time.Duration(o.cfg.ReadyPollIntervalSeconds) * time.Second)
+	ticker := time.NewTicker(sandboxPodReadyPollInterval(o.cfg.ReadyPollIntervalSeconds))
 	defer ticker.Stop()
 	for {
 		ready := true
@@ -524,6 +515,19 @@ func (o *K8sOrchestrator) waitSandboxPodReady(ctx context.Context, cs kubernetes
 		case <-ticker.C:
 		}
 	}
+}
+
+// sandboxPodReadyPollInterval 使用短轮询压缩阶段一可进入延迟,仍以真实 Pod Ready 为准。
+func sandboxPodReadyPollInterval(configuredSeconds int) time.Duration {
+	if configuredSeconds <= 0 {
+		return time.Second
+	}
+	configured := time.Duration(configuredSeconds) * time.Second
+	fast := 200 * time.Millisecond
+	if configured < fast {
+		return configured
+	}
+	return fast
 }
 
 // ToolReady 校验 Web 工具的所有声明组件都已通过 Kubernetes Ready 条件。
@@ -1054,36 +1058,49 @@ func (o *K8sOrchestrator) allowToolPodLinkPolicies(plan CreateSandboxPlan) []*ne
 	return policies
 }
 
-// toolPodIngressPolicy 允许工具 Pod 访问目标运行时 Pod 的声明端口。
+// toolPodIngressPolicy 允许工具 Pod 访问同工具组件或目标运行时 Pod 的声明端口。
 func toolPodIngressPolicy(plan CreateSandboxPlan, tool Tool, rule workload.NetworkRuleSpec, ports []netv1.NetworkPolicyPort) *netv1.NetworkPolicy {
-	role := toolComponentPodName(tool.Code, rule.From)
+	fromRole := toolComponentPodName(tool.Code, rule.From)
+	toRole := toolNetworkRuleTargetRole(tool, rule.To)
 	return &netv1.NetworkPolicy{
 		ObjectMeta: metav1.ObjectMeta{Name: "sandbox-allow-tool-" + rule.Name + "-ingress", Namespace: plan.Sandbox.Namespace},
 		Spec: netv1.NetworkPolicySpec{
-			PodSelector: metav1.LabelSelector{MatchLabels: sandboxPodRoleLabels(plan.Sandbox, rule.To)},
+			PodSelector: metav1.LabelSelector{MatchLabels: sandboxPodRoleLabels(plan.Sandbox, toRole)},
 			PolicyTypes: []netv1.PolicyType{netv1.PolicyTypeIngress},
 			Ingress: []netv1.NetworkPolicyIngressRule{{
-				From:  []netv1.NetworkPolicyPeer{{PodSelector: &metav1.LabelSelector{MatchLabels: sandboxPodRoleLabels(plan.Sandbox, role)}}},
+				From:  []netv1.NetworkPolicyPeer{{PodSelector: &metav1.LabelSelector{MatchLabels: sandboxPodRoleLabels(plan.Sandbox, fromRole)}}},
 				Ports: ports,
 			}},
 		},
 	}
 }
 
-// toolPodEgressPolicy 允许工具 Pod 出站访问目标运行时 Pod 的声明端口。
+// toolPodEgressPolicy 允许工具 Pod 出站访问同工具组件或目标运行时 Pod 的声明端口。
 func toolPodEgressPolicy(plan CreateSandboxPlan, tool Tool, rule workload.NetworkRuleSpec, ports []netv1.NetworkPolicyPort) *netv1.NetworkPolicy {
-	role := toolComponentPodName(tool.Code, rule.From)
+	fromRole := toolComponentPodName(tool.Code, rule.From)
+	toRole := toolNetworkRuleTargetRole(tool, rule.To)
 	return &netv1.NetworkPolicy{
 		ObjectMeta: metav1.ObjectMeta{Name: "sandbox-allow-tool-" + rule.Name + "-egress", Namespace: plan.Sandbox.Namespace},
 		Spec: netv1.NetworkPolicySpec{
-			PodSelector: metav1.LabelSelector{MatchLabels: sandboxPodRoleLabels(plan.Sandbox, role)},
+			PodSelector: metav1.LabelSelector{MatchLabels: sandboxPodRoleLabels(plan.Sandbox, fromRole)},
 			PolicyTypes: []netv1.PolicyType{netv1.PolicyTypeEgress},
 			Egress: []netv1.NetworkPolicyEgressRule{{
-				To:    []netv1.NetworkPolicyPeer{{PodSelector: &metav1.LabelSelector{MatchLabels: sandboxPodRoleLabels(plan.Sandbox, rule.To)}}},
+				To:    []netv1.NetworkPolicyPeer{{PodSelector: &metav1.LabelSelector{MatchLabels: sandboxPodRoleLabels(plan.Sandbox, toRole)}}},
 				Ports: ports,
 			}},
 		},
 	}
+}
+
+// toolNetworkRuleTargetRole 把工具内组件目标解析为实际 Pod role;其他目标保持运行时 Pod 名称。
+func toolNetworkRuleTargetRole(tool Tool, target string) string {
+	target = strings.TrimSpace(target)
+	for _, component := range tool.ResourceSpec.Components {
+		if strings.TrimSpace(component.Name) == target {
+			return toolComponentPodName(tool.Code, target)
+		}
+	}
+	return target
 }
 
 // applyWorkspacePVC 为所有声明为持久化的卷安全域创建 PVC。
@@ -1173,14 +1190,32 @@ func (o *K8sOrchestrator) podsForPlan(plan CreateSandboxPlan) []*corev1.Pod {
 // podGroupForPlan 返回运行时声明的 Pod 组;未声明时按 runtime_container + infra_sidecars 生成单 Pod 拓扑。
 func podGroupForPlan(plan CreateSandboxPlan) []workload.PodSpec {
 	if len(plan.Runtime.AdapterSpec.Pods) > 0 {
-		return plan.Runtime.AdapterSpec.Pods
+		pods := append([]workload.PodSpec(nil), plan.Runtime.AdapterSpec.Pods...)
+		return appendPrivateSidecarsToRuntimePod(pods, plan.Runtime.AdapterSpec.RuntimeContainer.Name, plan.PrivateSidecars)
 	}
 	specContainers := []workload.ComponentSpec{plan.Runtime.AdapterSpec.RuntimeContainer}
 	specContainers[0].ImageURL = plan.Image.ImageURL
 	for _, sidecar := range plan.Runtime.AdapterSpec.InfraSidecars {
 		specContainers = append(specContainers, sidecar)
 	}
+	specContainers = append(specContainers, plan.PrivateSidecars...)
 	return []workload.PodSpec{{Name: "sandbox", Containers: specContainers}}
+}
+
+// appendPrivateSidecarsToRuntimePod 把服务端私有执行容器放入运行时所在 Pod,不创建可代理工具入口。
+func appendPrivateSidecarsToRuntimePod(pods []workload.PodSpec, runtimeContainer string, sidecars []workload.ComponentSpec) []workload.PodSpec {
+	if len(sidecars) == 0 {
+		return pods
+	}
+	for i := range pods {
+		for _, container := range pods[i].Containers {
+			if container.Name == runtimeContainer {
+				pods[i].Containers = append(pods[i].Containers, sidecars...)
+				return pods
+			}
+		}
+	}
+	return pods
 }
 
 // podFromSpec 把运行时 Pod 拓扑转换为受限 Kubernetes Pod。
@@ -1273,10 +1308,13 @@ func (o *K8sOrchestrator) containerFromRuntime(spec workload.ComponentSpec, imag
 // containerFromTool 构造 web-embed 工具组件容器。
 func (o *K8sOrchestrator) containerFromTool(tool Tool, component workload.ComponentSpec, adapter AdapterSpec) corev1.Container {
 	mounts := []corev1.VolumeMount{}
+	seenMountPaths := map[string]struct{}{}
 	if shouldMountWorkspace(component) {
-		mounts = append(mounts, corev1.VolumeMount{Name: VolumeDomainWorkspace, MountPath: adapter.WorkspaceDir})
+		mounts = appendUniqueVolumeMount(mounts, seenMountPaths, corev1.VolumeMount{Name: VolumeDomainWorkspace, MountPath: adapter.WorkspaceDir})
 	}
-	mounts = append(mounts, toolEphemeralVolumeMounts(tool, component)...)
+	for _, mount := range toolEphemeralVolumeMounts(tool, component) {
+		mounts = appendUniqueVolumeMount(mounts, seenMountPaths, mount)
+	}
 	return corev1.Container{
 		Name:            component.Name,
 		Image:           component.ImageURL,
@@ -1297,6 +1335,25 @@ func (o *K8sOrchestrator) containerFromTool(tool Tool, component workload.Compon
 // podVolumesForPlan 汇总运行时卷域与工具临时卷,保证工具缓存不复用学生工作区或私有域。
 func podVolumesForPlan(plan CreateSandboxPlan) []corev1.Volume {
 	volumes := volumeDomains(plan.Runtime.AdapterSpec)
+	seen := map[string]struct{}{}
+	for _, volume := range volumes {
+		seen[volume.Name] = struct{}{}
+	}
+	for _, pod := range podGroupForPlan(plan) {
+		for _, container := range pod.Containers {
+			for _, mount := range container.EphemeralMounts {
+				name := runtimeEphemeralVolumeName(container.Name, mount.Name)
+				if _, ok := seen[name]; ok {
+					continue
+				}
+				seen[name] = struct{}{}
+				volumes = append(volumes, corev1.Volume{
+					Name:         name,
+					VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}},
+				})
+			}
+		}
+	}
 	return volumes
 }
 
@@ -1369,16 +1426,38 @@ func volumeForDomain(domain VolumeDomainSpec) corev1.Volume {
 // volumeMountsForContainer 按容器职责决定挂载域,防止终端或协同容器绕过文件 API 读取私有资产。
 func volumeMountsForContainer(adapter AdapterSpec, spec workload.ComponentSpec) []corev1.VolumeMount {
 	mounts := make([]corev1.VolumeMount, 0, len(adapter.VolumeDomains))
+	seenMountPaths := map[string]struct{}{}
 	for _, domain := range adapter.VolumeDomains {
 		if studentAccessibleContainer(spec) && domain.StudentAccess == VolumeAccessNone {
 			continue
 		}
-		if domain.Name == VolumeDomainJudgePrivate && spec.Name != adapter.RuntimeContainer.Name {
+		if domain.Name == VolumeDomainJudgePrivate && studentAccessibleContainer(spec) {
 			continue
 		}
-		mounts = append(mounts, volumeMountForDomain(domain))
+		mounts = appendUniqueVolumeMount(mounts, seenMountPaths, volumeMountForDomain(domain))
+	}
+	for _, mount := range spec.EphemeralMounts {
+		mounts = appendUniqueVolumeMount(mounts, seenMountPaths, corev1.VolumeMount{
+			Name:      runtimeEphemeralVolumeName(spec.Name, mount.Name),
+			MountPath: path.Clean(mount.MountPath),
+		})
 	}
 	return mounts
+}
+
+// appendUniqueVolumeMount 以 mountPath 为容器内唯一键,防止 WorkloadSpec 临时卷与运行时卷域重复挂载。
+func appendUniqueVolumeMount(mounts []corev1.VolumeMount, seen map[string]struct{}, mount corev1.VolumeMount) []corev1.VolumeMount {
+	mount.MountPath = path.Clean(mount.MountPath)
+	if _, ok := seen[mount.MountPath]; ok {
+		return mounts
+	}
+	seen[mount.MountPath] = struct{}{}
+	return append(mounts, mount)
+}
+
+// runtimeEphemeralVolumeName 构造运行时/私有 sidecar 的临时卷名。
+func runtimeEphemeralVolumeName(containerName, mountName string) string {
+	return strings.TrimRight("rt-"+containerName+"-"+mountName, "-")
 }
 
 // volumeMountForDomain 根据卷域访问级别构造挂载,公开素材等只读域必须在 K8s 层强制只读。

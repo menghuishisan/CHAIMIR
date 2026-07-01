@@ -53,6 +53,8 @@ type ComponentSpec struct {
 	Labels                 map[string]string    `json:"labels"`
 	MountWorkspace         *bool                `json:"mount_workspace"`
 	EphemeralMounts        []EphemeralMountSpec `json:"ephemeral_mounts"`
+	PrepullCommand         []string             `json:"prepull_command"`
+	PrepullHold            bool                 `json:"prepull_hold"`
 }
 
 // PodSpec 描述一个工作负载 Pod 及其组件组。

@@ -59,7 +59,8 @@ func (s *Service) JudgeCheckpoint(ctx context.Context, instanceID int64, checkpo
 	for key, value := range req.ExtraInput {
 		extra[key] = value
 	}
-	task, err := s.judge.SubmitJudgeTask(ctx, contracts.JudgeSubmitRequest{TenantID: inst.TenantID, JudgerCode: cp.JudgerCode, ItemCode: cp.ItemCode, ItemVersion: cp.ItemVersion, CodeStorageKey: codeKey, CodeHash: codeHash, SubmitterID: id.AccountID, SourceRef: inst.SourceRef, SourceOwnerID: inst.OwnerAccountID, SourceCourseID: exp.CourseID, SourceScope: "experiment", SandboxMode: sandboxModeForCheckpoint(cp), TargetSandboxRef: targetSandboxRef(cp, inst), ExtraInput: extra, Priority: 5})
+	mode := sandboxModeForCheckpoint(cp)
+	task, err := s.judge.SubmitJudgeTask(ctx, contracts.JudgeSubmitRequest{TenantID: inst.TenantID, JudgerCode: cp.JudgerCode, ItemCode: cp.ItemCode, ItemVersion: cp.ItemVersion, CodeStorageKey: codeKey, CodeHash: codeHash, SubmitterID: id.AccountID, SourceRef: inst.SourceRef, SourceOwnerID: inst.OwnerAccountID, SourceCourseID: exp.CourseID, SourceScope: "experiment", SandboxMode: mode, TargetSandboxRef: targetSandboxRef(cp, inst, mode), ExtraInput: extra, Priority: 5})
 	if err != nil {
 		return CheckpointDTO{}, apperr.ErrExperimentJudgeUnavailable.WithCause(err)
 	}
@@ -216,7 +217,10 @@ func sandboxModeForCheckpoint(cp CheckpointComponent) string {
 }
 
 // targetSandboxRef 返回指定检查点绑定的沙箱引用。
-func targetSandboxRef(cp CheckpointComponent, inst ExperimentInstance) string {
+func targetSandboxRef(cp CheckpointComponent, inst ExperimentInstance, mode string) string {
+	if mode != contracts.JudgeSandboxModeReuse {
+		return ""
+	}
 	if len(inst.SandboxRefs) == 0 {
 		return ""
 	}

@@ -8,21 +8,24 @@ import (
 	"chaimir/internal/contracts"
 	"chaimir/internal/platform/auth"
 	"chaimir/internal/platform/jsonx"
+	"chaimir/internal/platform/workload"
 	"chaimir/pkg/apperr"
 )
 
 // JudgerResourceSpec 描述判题器固定执行环境、自检样例和命令策略。
 type JudgerResourceSpec struct {
-	RuntimeCode         string         `json:"runtime_code,omitempty"`
-	RuntimeImageVersion string         `json:"runtime_image_version,omitempty"`
-	GenesisRef          string         `json:"genesis_ref,omitempty"`
-	ToolCodes           []string       `json:"tool_codes,omitempty"`
-	InitScriptRef       string         `json:"init_script_ref,omitempty"`
-	Command             []string       `json:"command,omitempty"`
-	TimeoutSec          int32          `json:"timeout_sec,omitempty"`
-	MaxRetries          int32          `json:"max_retries,omitempty"`
-	SuiteArchiveName    string         `json:"suite_archive_name,omitempty"`
-	Selftest            map[string]any `json:"selftest,omitempty"`
+	RuntimeCode         string                   `json:"runtime_code,omitempty"`
+	RuntimeImageVersion string                   `json:"runtime_image_version,omitempty"`
+	GenesisRef          string                   `json:"genesis_ref,omitempty"`
+	ToolCodes           []string                 `json:"tool_codes,omitempty"`
+	InitScriptRef       string                   `json:"init_script_ref,omitempty"`
+	Command             []string                 `json:"command,omitempty"`
+	ExecTarget          string                   `json:"exec_target,omitempty"`
+	ExecutionSidecars   []workload.ComponentSpec `json:"execution_sidecars,omitempty"`
+	TimeoutSec          int32                    `json:"timeout_sec,omitempty"`
+	MaxRetries          int32                    `json:"max_retries,omitempty"`
+	SuiteArchiveName    string                   `json:"suite_archive_name,omitempty"`
+	Selftest            map[string]any           `json:"selftest,omitempty"`
 }
 
 // parseJudgerResourceSpec 解析并校验平台级判题器资源声明。
@@ -43,6 +46,12 @@ func parseJudgerResourceSpec(raw []byte, typ int16, runtimeRequired bool) (Judge
 	}
 	if typ == JudgerTypeTestcase || typ == JudgerTypeStaticScan {
 		if !safeNonShellCommand(spec.Command) {
+			return JudgerResourceSpec{}, apperr.ErrJudgerConfigInvalid
+		}
+		if strings.TrimSpace(spec.ExecTarget) == "" || len(spec.ExecutionSidecars) == 0 {
+			return JudgerResourceSpec{}, apperr.ErrJudgerConfigInvalid
+		}
+		if !safeExecTarget(spec.ExecTarget) {
 			return JudgerResourceSpec{}, apperr.ErrJudgerConfigInvalid
 		}
 	}
@@ -162,4 +171,13 @@ func safeNonShellCommand(command []string) bool {
 	}
 	_, ok := blocked[strings.ToLower(path.Base(strings.TrimSpace(command[0])))]
 	return !ok
+}
+
+// safeExecTarget 校验内部执行目标是 pod/container 形式的受控 DNS 标签。
+func safeExecTarget(target string) bool {
+	parts := strings.Split(strings.TrimSpace(target), "/")
+	if len(parts) != 2 {
+		return false
+	}
+	return codePattern.MatchString(parts[0]) && codePattern.MatchString(parts[1])
 }

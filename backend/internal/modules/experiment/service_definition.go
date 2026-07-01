@@ -198,6 +198,27 @@ func (s *Service) validateExperimentComponents(ctx context.Context, item Experim
 	if s.sandbox == nil && len(item.Components.Envs) > 0 {
 		add(ValidationLevelError, "实验环境服务暂时不可用")
 	}
+	if s.sandbox != nil {
+		for _, env := range normalizedEnvComponents(item.Components.Envs) {
+			req := contracts.SandboxCreateRequest{
+				TenantID:                 item.TenantID,
+				RuntimeCode:              env.RuntimeCode,
+				RuntimeImageVersion:      env.RuntimeImageVersion,
+				ToolCodes:                env.Tools,
+				InitCodeRef:              env.InitCodeRef,
+				InitScriptRef:            env.InitScriptRef,
+				OwnerAccountID:           item.AuthorID,
+				SourceRef:                fmt.Sprintf("experiment:%d:definition:%d", item.CreatedAt.Year(), item.ID),
+				KeepAlive:                env.KeepAlive,
+				SnapshotEnabled:          env.SnapshotEnabled,
+				KeepAliveMinutes:         env.KeepAliveMinutes,
+				SnapshotRetentionMinutes: env.SnapshotRetentionMinutes,
+			}
+			if err := s.sandbox.ValidateSandboxTemplate(ctx, req); err != nil {
+				add(ValidationLevelError, fmt.Sprintf("环境 %s 当前不可调度", env.ID))
+			}
+		}
+	}
 	if s.sim == nil && len(item.Components.Sims) > 0 {
 		add(ValidationLevelError, "仿真服务暂时不可用")
 	}
