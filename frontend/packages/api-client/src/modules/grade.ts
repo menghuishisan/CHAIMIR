@@ -22,7 +22,13 @@ import type {
   WarningScanResult,
 } from '../types'
 
+/**
+ * GradeApi 封装 M11 成绩中心的前端 HTTP 契约。
+ */
 export class GradeApi {
+  /**
+   * constructor 注入统一 ApiClient,确保成绩接口共用鉴权、trace_id 和错误处理。
+   */
   constructor(private client: ApiClient) {}
 
   /**
@@ -133,14 +139,14 @@ export class GradeApi {
   /**
    * 教师或管理员受理成绩申诉。
    */
-  async acceptAppeal(id: string, data: Record<string, any>): Promise<GradeAppeal> {
+  async acceptAppeal(id: string, data: ReviewDecision): Promise<GradeAppeal> {
     return this.client.post(`/grade-center/appeals/${id}/accept`, data)
   }
 
   /**
    * 教师或管理员驳回成绩申诉。
    */
-  async rejectAppeal(id: string, data: Record<string, any>): Promise<GradeAppeal> {
+  async rejectAppeal(id: string, data: ReviewDecision): Promise<GradeAppeal> {
     return this.client.post(`/grade-center/appeals/${id}/reject`, data)
   }
 

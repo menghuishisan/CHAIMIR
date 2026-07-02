@@ -31,6 +31,7 @@ func RegisterRoutes(r gin.IRouter, svc *Service, authn *auth.Manager, roles cont
 	api.registerPlatformRoutes(g.Group("", authn.Middleware(), auth.RequirePlatformIdentity()))
 	api.registerInternalRoutes(g.Group("/internal", authn.ServiceMiddleware()))
 	api.registerUserRoutes(g.Group("", authn.Middleware(), auth.RequireTenantAnyRole(roles, contracts.RoleTeacher, contracts.RoleSchoolAdmin)))
+	api.registerProgressRoutes(g.Group("", authn.WebSocketMiddleware(), auth.RequireTenantAnyRole(roles, contracts.RoleTeacher, contracts.RoleSchoolAdmin)))
 	g.POST("/tasks/:id/rejudge", authn.ServiceOrTenantAnyRoleMiddleware(roles, contracts.RoleTeacher, contracts.RoleSchoolAdmin), api.rejudgeTask)
 	return nil
 }
@@ -60,8 +61,12 @@ func (a judgeAPI) registerInternalRoutes(g gin.IRouter) {
 func (a judgeAPI) registerUserRoutes(g gin.IRouter) {
 	g.GET("/tasks", a.listTasks)
 	g.GET("/tasks/:id", a.getTask)
-	g.GET("/tasks/:id/progress", a.progress)
 	g.POST("/tasks/:id/manual-score", a.manualScore)
+}
+
+// registerProgressRoutes 注册浏览器 WebSocket 可用的判题进度订阅入口。
+func (a judgeAPI) registerProgressRoutes(g gin.IRouter) {
+	g.GET("/tasks/:id/progress", a.progress)
 }
 
 // listJudgers 返回判题器列表。

@@ -16,7 +16,13 @@ import type {
   PaginatedResponse,
 } from '../types'
 
+/**
+ * SimApi 封装后端 M4 仿真包、审核、回放、分享和实时流接口。
+ */
 export class SimApi {
+  /**
+   * constructor 注入统一 API 客户端，复用 multipart、鉴权和 WebSocket URL 规则。
+   */
   constructor(private client: ApiClient) {}
 
   // ===== 仿真包管理 =====
@@ -148,10 +154,10 @@ export class SimApi {
   }
 
   /**
-   * 获取后端计算仿真的 WebSocket 路径，调用方复用统一 WS 客户端连接
+   * 获取后端计算仿真的 WebSocket URL。
    */
-  streamPath(sessionId: string): string {
-    return `/sim/sessions/${sessionId}/stream`
+  getStreamWsUrl(sessionId: string): string {
+    return this.client.wsURL(`/sim/sessions/${sessionId}/stream`)
   }
 }
 

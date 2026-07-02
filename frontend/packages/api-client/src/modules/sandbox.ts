@@ -12,10 +12,123 @@ import type {
   SandboxFileSaveResponse,
   SandboxFileWriteRequest,
   SandboxInstance,
+  SandboxPrepullStatus,
+  SandboxQuota,
+  SandboxRuntime,
+  SandboxRuntimeImage,
+  SandboxRuntimeImageRequest,
+  SandboxRuntimeRequest,
+  SandboxRuntimeSelftestStatus,
+  SandboxToolDefinition,
+  SandboxToolRequest,
 } from '../types'
 
+/**
+ * SandboxApi 封装后端 M2 沙箱、运行时、文件、工具和链交互接口。
+ */
 export class SandboxApi {
+  /**
+   * constructor 注入统一 API 客户端，避免沙箱模块自行拼接鉴权和错误协议。
+   */
   constructor(private client: ApiClient) {}
+
+  /**
+   * 查询平台运行时列表。
+   */
+  async listRuntimes(): Promise<SandboxRuntime[]> {
+    return this.client.get('/sandbox/runtimes')
+  }
+
+  /**
+   * 注册新的链运行时。
+   */
+  async registerRuntime(data: SandboxRuntimeRequest): Promise<SandboxRuntime> {
+    return this.client.post('/sandbox/runtimes', data)
+  }
+
+  /**
+   * 更新链运行时声明。
+   */
+  async updateRuntime(runtimeId: string, data: SandboxRuntimeRequest): Promise<SandboxRuntime> {
+    return this.client.patch(`/sandbox/runtimes/${runtimeId}`, data)
+  }
+
+  /**
+   * 触发运行时接入即测。
+   */
+  async runRuntimeSelftest(runtimeId: string): Promise<SandboxRuntimeSelftestStatus> {
+    return this.client.post(`/sandbox/runtimes/${runtimeId}/selftest`)
+  }
+
+  /**
+   * 查询运行时接入即测结果。
+   */
+  async getRuntimeSelftest(runtimeId: string): Promise<SandboxRuntimeSelftestStatus> {
+    return this.client.get(`/sandbox/runtimes/${runtimeId}/selftest`)
+  }
+
+  /**
+   * 为运行时登记镜像版本。
+   */
+  async registerRuntimeImage(runtimeId: string, data: SandboxRuntimeImageRequest): Promise<SandboxRuntimeImage> {
+    return this.client.post(`/sandbox/runtimes/${runtimeId}/images`, data)
+  }
+
+  /**
+   * 查询运行时镜像版本列表。
+   */
+  async listRuntimeImages(runtimeId: string): Promise<SandboxRuntimeImage[]> {
+    return this.client.get(`/sandbox/runtimes/${runtimeId}/images`)
+  }
+
+  /**
+   * 停用运行时镜像版本。
+   */
+  async disableRuntimeImage(runtimeId: string, imageId: string): Promise<SandboxRuntimeImage> {
+    return this.client.delete(`/sandbox/runtimes/${runtimeId}/images/${imageId}`)
+  }
+
+  /**
+   * 触发运行时镜像预拉取。
+   */
+  async prepullRuntimeImage(runtimeId: string, imageId: string): Promise<SandboxPrepullStatus> {
+    return this.client.post(`/sandbox/runtimes/${runtimeId}/images/${imageId}/prepull`)
+  }
+
+  /**
+   * 查询镜像预拉取闭环状态。
+   */
+  async getRuntimeImagePrepull(runtimeId: string, imageId: string): Promise<SandboxPrepullStatus> {
+    return this.client.get(`/sandbox/runtimes/${runtimeId}/images/${imageId}/prepull`)
+  }
+
+  /**
+   * 查询平台工具定义列表。
+   */
+  async listTools(): Promise<SandboxToolDefinition[]> {
+    return this.client.get('/sandbox/tools')
+  }
+
+  /**
+   * 注册沙箱工具定义。
+   */
+  async registerTool(data: SandboxToolRequest): Promise<SandboxToolDefinition> {
+    return this.client.post('/sandbox/tools', data)
+  }
+
+  /**
+   * 查询当前租户沙箱配额与活跃数量。
+   */
+  async getQuota(): Promise<SandboxQuota> {
+    return this.client.get('/sandbox/quota')
+  }
+
+  /**
+   * 更新租户沙箱配额，平台管理员可指定 tenant_id，学校管理员只更新本租户。
+   */
+  async updateQuota(data: SandboxQuota): Promise<SandboxQuota> {
+    return this.client.patch('/sandbox/quota', data)
+  }
 
   /**
    * 获取沙箱实例详情
@@ -28,21 +141,14 @@ export class SandboxApi {
    * 获取终端 WebSocket URL
    */
   getTerminalWsUrl(instanceId: string, container?: string): string {
-    const baseUrl = this.client['config'].baseURL || ''
-    const wsProtocol = baseUrl.startsWith('https') ? 'wss' : 'ws'
-    const wsBaseUrl = baseUrl.replace(/^https?/, wsProtocol)
-    const query = this.buildBrowserTokenQuery(container ? { container } : undefined)
-    return `${wsBaseUrl}/sandbox/sandboxes/${instanceId}/terminal${query}`
+    return this.client.wsURL(`/sandbox/sandboxes/${instanceId}/terminal`, container ? { container } : undefined)
   }
 
   /**
    * 获取进度 WebSocket URL
    */
   getProgressWsUrl(instanceId: string): string {
-    const baseUrl = this.client['config'].baseURL || ''
-    const wsProtocol = baseUrl.startsWith('https') ? 'wss' : 'ws'
-    const wsBaseUrl = baseUrl.replace(/^https?/, wsProtocol)
-    return `${wsBaseUrl}/sandbox/sandboxes/${instanceId}/progress${this.buildBrowserTokenQuery()}`
+    return this.client.wsURL(`/sandbox/sandboxes/${instanceId}/progress`)
   }
 
   /**
@@ -105,28 +211,8 @@ export class SandboxApi {
    * 获取 Web 工具代理 URL
    */
   getToolProxyUrl(instanceId: string, toolCode: string, proxyPath = ''): string {
-    const baseUrl = this.client['config'].baseURL || ''
-    const normalizedBase = baseUrl.replace(/\/+$/, '')
     const normalizedPath = proxyPath.replace(/^\/+/, '')
     const encodedTool = encodeURIComponent(toolCode)
-    return `${normalizedBase}/sandbox/sandboxes/${instanceId}/tools/${encodedTool}/${normalizedPath}${this.buildBrowserTokenQuery()}`
-  }
-
-  /**
-   * 构造浏览器原生 WS/iframe 无法设置 Authorization 头时使用的一次性入口 token。
-   */
-  private buildBrowserTokenQuery(extra?: Record<string, string | undefined>): string {
-    const params = new URLSearchParams()
-    for (const [key, value] of Object.entries(extra || {})) {
-      if (value) {
-        params.set(key, value)
-      }
-    }
-    const token = this.client['config'].getToken?.()
-    if (token) {
-      params.set('token', token)
-    }
-    const query = params.toString()
-    return query ? `?${query}` : ''
+    return this.client.browserURL(`/sandbox/sandboxes/${instanceId}/tools/${encodedTool}/${normalizedPath}`)
   }
 }

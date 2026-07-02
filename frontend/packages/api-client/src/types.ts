@@ -1,4 +1,4 @@
-// 类型定义：与后端 DTO 对齐
+﻿// 类型定义：与后端 DTO 对齐
 
 // ===== 通用类型 =====
 
@@ -139,6 +139,178 @@ export interface Tenant {
   enable_activation_code: boolean
 }
 
+export interface TenantApplication {
+  application_id: string
+  school_name: string
+  school_type: number
+  contact_name: string
+  contact_phone: string
+  contact_email: string
+  status: number
+  submitted_at: string
+  reviewed_at?: string
+}
+
+export interface ReviewApplicationRequest {
+  tenant_code?: string
+  admin_name?: string
+  admin_phone?: string
+  reason?: string
+}
+
+export interface UpdateTenantStatusRequest {
+  status: number
+  expire_at?: string
+}
+
+export interface TenantConfigRequest {
+  logo_url: string
+  display_name: string
+  feature_flags: Record<string, unknown>
+  auth_mode: number
+  enable_activation_code: boolean
+}
+
+export interface SSOConfig {
+  id: string
+  tenant_id: string
+  type: number
+  config: Record<string, unknown>
+  match_field: number
+  enabled: boolean
+}
+
+export interface SSOConfigRequest {
+  type: number
+  config: Record<string, unknown>
+  match_field: number
+  enabled: boolean
+}
+
+export interface LDAPLoginRequest {
+  username: string
+  password: string
+}
+
+export interface DepartmentRequest {
+  name: string
+  code: string
+}
+
+export interface Department {
+  id: string
+  tenant_id: string
+  name: string
+  code: string
+}
+
+export interface MajorRequest {
+  department_id: string
+  name: string
+}
+
+export interface Major {
+  id: string
+  tenant_id: string
+  department_id: string
+  name: string
+}
+
+export interface ClassRequest {
+  major_id: string
+  name: string
+  enrollment_year: number
+  status: number
+}
+
+export interface Class {
+  id: string
+  tenant_id: string
+  major_id: string
+  name: string
+  enrollment_year: number
+  status: number
+}
+
+export interface ArchiveClassesRequest {
+  enrollment_year: number
+}
+
+export interface CreateAccountRequest {
+  phone: string
+  name: string
+  no: string
+  base_identity: number
+  org_id: string
+  enrollment_year?: number
+  title?: string
+  initial_password?: string
+  use_activation: boolean
+}
+
+export interface UpdateAccountRequest {
+  name: string
+  org_id: string
+  enrollment_year?: number
+  title?: string
+}
+
+export interface CreateAccountResponse {
+  account: Account
+  activation_code?: string
+}
+
+export interface AdminResetPasswordRequest {
+  new_password: string
+  must_change_pwd: boolean
+}
+
+export interface BatchAccountIDsRequest {
+  account_ids: string[]
+}
+
+export interface ImportPreviewResponse {
+  preview_id: string
+  total: number
+  valid: number
+  invalid: number
+  rows: ImportRowResult[]
+}
+
+export interface ImportRowResult {
+  line: number
+  error?: string
+}
+
+export interface ImportCommitRequest {
+  preview_id: string
+}
+
+export interface ImportBatch {
+  id: string
+  tenant_id: string
+  operator_id: string
+  target_type: number
+  file_name: string
+  total: number
+  success: number
+  failed: number
+  status: number
+  created_at: string
+}
+
+export interface ImportActivationCode {
+  account_id: string
+  no: string
+  name: string
+  activation_code: string
+}
+
+export interface AccountImportCommitResponse {
+  batch: ImportBatch
+  activation_codes?: ImportActivationCode[]
+}
+
 // ===== M5 Content 模块 =====
 
 export interface ContentItem {
@@ -163,7 +335,7 @@ export interface ContentItem {
 }
 
 export interface ContentItemSnapshot extends ContentItem {
-  body: Record<string, any>
+  body: Record<string, unknown>
   sensitive_fields?: string[]
 }
 
@@ -177,7 +349,7 @@ export interface CreateItemRequest {
   tags: string[]
   knowledge_points: string[]
   visibility: number
-  body: Record<string, any>
+  body: Record<string, unknown>
   sensitive_fields: string[]
 }
 
@@ -188,7 +360,7 @@ export interface UpdateItemRequest {
   tags: string[]
   knowledge_points: string[]
   visibility: number
-  body: Record<string, any>
+  body: Record<string, unknown>
   sensitive_fields: string[]
 }
 
@@ -271,7 +443,7 @@ export interface PaperItemFace {
   score: number
   seq: number
   item: ContentItem
-  body: Record<string, any>
+  body: Record<string, unknown>
 }
 
 export interface PaperDetail {
@@ -292,7 +464,7 @@ export interface Course {
   cover_url?: string
   semester: string
   credits: number
-  schedule: Record<string, any>
+  schedule: Record<string, unknown>
   start_at: string
   end_at: string
   invite_code?: string
@@ -310,7 +482,7 @@ export interface CourseRequest {
   cover_url?: string
   semester: string
   credits: number
-  schedule: Record<string, any>
+  schedule: Record<string, unknown>
   start_at: string
   end_at: string
 }
@@ -334,7 +506,7 @@ export interface Lesson {
   chapter_id: string
   title: string
   content_type: number
-  content_ref: Record<string, any>
+  content_ref: Record<string, unknown>
   sort: number
   created_at: string
   updated_at: string
@@ -343,7 +515,7 @@ export interface Lesson {
 export interface LessonRequest {
   title: string
   content_type: number
-  content_ref: Record<string, any>
+  content_ref: Record<string, unknown>
   sort: number
 }
 
@@ -381,7 +553,7 @@ export interface Assignment {
   due_at: string
   max_attempts: number
   late_policy: number
-  late_penalty: Record<string, any>
+  late_penalty: Record<string, unknown>
   status: number
   created_at: string
   updated_at: string
@@ -393,7 +565,7 @@ export interface AssignmentRequest {
   due_at: string
   max_attempts: number
   late_policy: number
-  late_penalty: Record<string, any>
+  late_penalty: Record<string, unknown>
   items: AssignmentItemInput[]
 }
 
@@ -417,7 +589,7 @@ export interface AssignmentItem {
   title?: string
   type?: number
   difficulty?: number
-  body?: Record<string, any>
+  body?: Record<string, unknown>
 }
 
 export interface AssignmentDetail {
@@ -428,7 +600,7 @@ export interface AssignmentDetail {
 export interface Draft {
   assignment_id: string
   student_id: string
-  content: Record<string, any>
+  content: Record<string, unknown>
   updated_at: string
   exists: boolean
 }
@@ -438,7 +610,7 @@ export interface Submission {
   assignment_id: string
   student_id: string
   attempt_no: number
-  content: Record<string, any>
+  content: Record<string, unknown>
   judge_task_ref?: string
   auto_score?: number
   manual_score?: number
@@ -450,7 +622,7 @@ export interface Submission {
 }
 
 export interface SubmitRequest {
-  content_ref: Record<string, any>
+  content_ref: Record<string, unknown>
 }
 
 // ===== M2 Sandbox 模块 =====
@@ -527,10 +699,83 @@ export interface SandboxFileSaveResponse {
 }
 
 export interface SandboxChainRequest {
-  payload: Record<string, any>
+  payload: Record<string, unknown>
 }
 
-export type SandboxChainResponse = Record<string, any>
+export type SandboxChainResponse = Record<string, unknown>
+
+export interface SandboxRuntimeRequest {
+  code: string
+  name: string
+  eco: string
+  adapter_level: number
+  adapter_spec: Record<string, unknown>
+  capability_impl: string
+  plugin_ref: string
+  status: number
+}
+
+export interface SandboxRuntime extends SandboxRuntimeRequest {
+  id: string
+  created_at?: string
+  updated_at?: string
+}
+
+export interface SandboxRuntimeImageRequest {
+  image_url: string
+  version: string
+  digest: string
+  genesis_baked: boolean
+  is_default: boolean
+}
+
+export interface SandboxRuntimeImage extends SandboxRuntimeImageRequest {
+  id: string
+  runtime_id: string
+  status: number
+}
+
+export interface SandboxToolRequest {
+  code: string
+  name: string
+  kind: number
+  eco_tags: string[]
+  resource_spec: Record<string, unknown>
+  status: number
+}
+
+export interface SandboxToolDefinition extends SandboxToolRequest {
+  id: string
+}
+
+export interface SandboxQuota {
+  tenant_id: string
+  active_sandbox_count?: number
+  max_concurrent_sandbox: number
+  max_cpu: number
+  max_memory_mb: number
+  idle_timeout_min: number
+  max_lifetime_min: number
+  max_keepalive_min: number
+  max_snapshot_retention_min: number
+}
+
+export interface SandboxPrepullStatus {
+  image_id: string
+  prepull_status: number
+  desired_nodes: number
+  ready_nodes: number
+  daemonset: string
+  image_count: number
+  images: string[]
+}
+
+export interface SandboxRuntimeSelftestStatus {
+  runtime_id: string
+  selftest_status: number
+  runtime_status: number
+  detail: Record<string, unknown>
+}
 
 // ===== M3 Judge 模块 =====
 
@@ -569,6 +814,23 @@ export interface JudgeManualScoreRequest {
   max_score: number
   passed: boolean
   comment: string
+}
+
+export interface JudgerRequest {
+  code: string
+  name: string
+  type: number
+  executor_ref: string
+  runtime_required: boolean
+  default_timeout_sec: number
+  resource_spec: Record<string, unknown>
+  status: number
+}
+
+export interface Judger extends JudgerRequest {
+  id: string
+  created_at?: string
+  updated_at?: string
 }
 
 // ===== M7 Experiment 模块 =====
@@ -616,7 +878,7 @@ export interface SimComponent {
   package_code: string
   version: string
   seed: number
-  params: Record<string, any>
+  params: Record<string, unknown>
 }
 
 export interface CheckpointConfig {
@@ -628,7 +890,7 @@ export interface CheckpointConfig {
   mode?: string
   env_id?: string
   sim_id?: string
-  extra_input?: Record<string, any>
+  extra_input?: Record<string, unknown>
 }
 
 export interface StageConfig {
@@ -657,7 +919,7 @@ export interface ParamBinding {
   source_type: 'checkpoint' | 'constant'
   source_ref?: string
   source_path?: string
-  constant_value?: any
+  constant_value?: unknown
 }
 
 export interface GroupConfig {
@@ -739,7 +1001,7 @@ export interface CheckpointResult {
   passed: boolean
   score: number
   detail_ref?: string
-  binding_output?: Record<string, any>
+  binding_output?: Record<string, unknown>
 }
 
 export interface StageState {
@@ -759,8 +1021,8 @@ export interface ProgressDTO {
 export interface CheckpointJudgeRequest {
   code_storage_key?: string
   code_hash?: string
-  extra_input?: Record<string, any>
-  binding_output?: Record<string, any>
+  extra_input?: Record<string, unknown>
+  binding_output?: Record<string, unknown>
 }
 
 export interface ReportDTO {
@@ -772,6 +1034,135 @@ export interface ReportDTO {
   comment?: string
   status: number
   submitted_at: string
+}
+
+export interface GradeReportRequest {
+  manual_score: number
+  comment: string
+}
+
+export interface ExperimentGroupRequest {
+  name: string
+}
+
+export interface ExperimentGroupMemberRequest {
+  student_id: string
+  role: string
+}
+
+export interface ExperimentGroup {
+  id: string
+  experiment_id: string
+  name: string
+  members: ExperimentGroupMember[]
+  shared_instance?: ExperimentInstance
+  created_at: string
+}
+
+export interface ExperimentGroupMember {
+  id: string
+  group_id: string
+  student_id: string
+  role: string
+  created_at: string
+}
+
+export interface CourseMember {
+  id: string
+  course_id: string
+  student_id: string
+  join_mode: number
+  joined_at: string
+}
+
+export interface BatchMembersRequest {
+  student_ids: string[]
+}
+
+export interface TeachingPostRequest {
+  parent_id?: string
+  content: string
+}
+
+export interface TeachingPost {
+  id: string
+  course_id: string
+  parent_id?: string
+  author_id: string
+  content: string
+  is_pinned: boolean
+  like_count: number
+  created_at: string
+}
+
+export interface TeachingAnnouncementRequest {
+  title: string
+  content: string
+  is_pinned: boolean
+}
+
+export interface TeachingAnnouncement {
+  id: string
+  course_id: string
+  title: string
+  content: string
+  is_pinned: boolean
+  created_at: string
+}
+
+export interface TeachingReviewRequest {
+  rating: number
+  comment: string
+}
+
+export interface TeachingReview {
+  id: string
+  course_id: string
+  student_id: string
+  rating: number
+  comment: string
+  created_at: string
+}
+
+export interface ProgressStats {
+  course_id: string
+  member_count: number
+  lesson_count: number
+  completed_count: number
+  learning_duration_sec: number
+}
+
+export interface GradeWeightRequest {
+  items: GradeWeightInput[]
+}
+
+export interface GradeWeightInput {
+  source_type: number
+  source_ref: string
+  weight: number
+}
+
+export interface GradeWeight {
+  id: string
+  source_type: number
+  source_ref: string
+  weight: number
+}
+
+export interface OverrideGradeRequest {
+  total: number
+}
+
+export interface TeachingCourseGrade {
+  course_id: string
+  student_id: string
+  auto_total: number
+  override_total?: number
+  final_total: number
+  is_overridden: boolean
+  is_locked: boolean
+  credits: number
+  updated_at: string
 }
 
 // ===== M8 Contest 模块 =====
@@ -788,7 +1179,7 @@ export interface Contest {
   start_at: string
   end_at: string
   freeze_minutes: number
-  rules: Record<string, any>
+  rules: Record<string, unknown>
   status: number
   created_at: string
   updated_at: string
@@ -804,7 +1195,7 @@ export interface ContestRequest {
   start_at: string
   end_at: string
   freeze_minutes: number
-  rules: Record<string, any>
+  rules: Record<string, unknown>
 }
 
 export interface ContestProblem {
@@ -813,19 +1204,19 @@ export interface ContestProblem {
   item_code: string
   item_version: string
   score: number
-  dynamic_score?: Record<string, any>
-  battle_config?: Record<string, any>
+  dynamic_score?: Record<string, unknown>
+  battle_config?: Record<string, unknown>
   battle_rule?: number
   seq: number
-  face?: Record<string, any>
+  face?: Record<string, unknown>
 }
 
 export interface ContestProblemRequest {
   item_code: string
   item_version: string
   score: number
-  dynamic_score?: Record<string, any>
-  battle_config?: Record<string, any>
+  dynamic_score?: Record<string, unknown>
+  battle_config?: Record<string, unknown>
   battle_rule?: number
   seq: number
 }
@@ -863,7 +1254,7 @@ export interface ContestSubmission {
   problem_id: string
   team_id: string
   submitter_id: string
-  content_ref: Record<string, any>
+  content_ref: Record<string, unknown>
   source_ref: string
   judge_task_ref?: string
   passed: boolean
@@ -873,7 +1264,7 @@ export interface ContestSubmission {
 }
 
 export interface ContestSubmitRequest {
-  content_ref: Record<string, any>
+  content_ref: Record<string, unknown>
   code_storage_key?: string
   code_hash?: string
   sandbox_ref?: string
@@ -923,7 +1314,7 @@ export interface BattleMatch {
   sandbox_ref?: string
   judge_task_ref?: string
   result?: number
-  score_delta: Record<string, any>
+  score_delta: Record<string, unknown>
   replay_ref?: string
   status: number
   matched_at: string
@@ -948,14 +1339,14 @@ export interface ResultSnapshot {
   id: string
   tenant_id?: string
   contest_id: string
-  final_ranking: Record<string, any>[]
+  final_ranking: Record<string, unknown>[]
   generated_at: string
 }
 
 export interface CheatRecordRequest {
   team_id: number
   type: number
-  evidence: Record<string, any>
+  evidence: Record<string, unknown>
   action: number
 }
 
@@ -964,7 +1355,7 @@ export interface CheatRecord {
   contest_id: string
   team_id: string
   type: number
-  evidence: Record<string, any>
+  evidence: Record<string, unknown>
   action: number
   operator_id?: string
   created_at: string
@@ -990,7 +1381,7 @@ export interface VulnSourceRequest {
   id?: number
   type: number
   name: string
-  config: Record<string, any>
+  config: Record<string, unknown>
   default_level: number
   enabled: boolean
 }
@@ -999,7 +1390,7 @@ export interface VulnSource {
   id: string
   type: number
   name: string
-  config: Record<string, any>
+  config: Record<string, unknown>
   default_level: number
   enabled: boolean
   last_sync_at?: string
@@ -1011,7 +1402,7 @@ export interface VulnProblemImportRequest {
   title: string
   level: number
   runtime_mode: number
-  draft_body: Record<string, any>
+  draft_body: Record<string, unknown>
 }
 
 export interface VulnPrevalidateRequest {
@@ -1029,9 +1420,9 @@ export interface VulnProblem {
   title: string
   level: number
   runtime_mode: number
-  draft_body: Record<string, any>
+  draft_body: Record<string, unknown>
   prevalidate_status: number
-  prevalidate_detail: Record<string, any>
+  prevalidate_detail: Record<string, unknown>
   content_item_code?: string
   content_item_version?: string
   status: number
@@ -1044,7 +1435,7 @@ export interface SystemConfig {
   scope: number
   tenant_id?: string
   key: string
-  value: Record<string, any>
+  value: Record<string, unknown>
   version: number
   updated_by: string
   updated_at: string
@@ -1053,7 +1444,7 @@ export interface SystemConfig {
 export interface ConfigUpdateRequest {
   scope: number
   tenant_id?: string
-  value: Record<string, any>
+  value: Record<string, unknown>
   version: number
   change_log_id?: string
 }
@@ -1069,8 +1460,8 @@ export interface ConfigChangeLog {
   id: string
   config_id: string
   tenant_id?: string
-  old_value: Record<string, any>
-  new_value: Record<string, any>
+  old_value: Record<string, unknown>
+  new_value: Record<string, unknown>
   operator_id: string
   created_at: string
 }
@@ -1081,7 +1472,7 @@ export interface AlertRule {
   tenant_id?: string
   name: string
   metric: string
-  condition: Record<string, any>
+  condition: Record<string, unknown>
   level: number
   enabled: boolean
   created_at: string
@@ -1093,7 +1484,7 @@ export interface AlertRuleRequest {
   tenant_id?: string
   name: string
   metric: string
-  condition: Record<string, any>
+  condition: Record<string, unknown>
   level: number
   enabled: boolean
 }
@@ -1118,7 +1509,7 @@ export interface Statistics {
   scope: number
   tenant_id?: string
   date: string
-  metrics: Record<string, any>
+  metrics: Record<string, unknown>
 }
 
 export interface BackupRecord {
@@ -1146,7 +1537,7 @@ export interface Dashboard {
   active_contest_count: number
   active_sandbox_count: number
   pending_apply_count?: number
-  resource_quota_snapshot?: Record<string, any>
+  resource_quota_snapshot?: Record<string, unknown>
   generated_at: string
 }
 
@@ -1210,7 +1601,9 @@ export interface AuditQueryResult {
   size: number
 }
 
-export interface AuditExportTask {
+// ===== Platform Transfer 模块 =====
+
+export interface TransferTask {
   task_id: string
   channel: string
   subject: string
@@ -1226,6 +1619,18 @@ export interface AuditExportTask {
   updated_at: string
   completed_at?: string
   next_attempt_after?: string
+}
+
+export interface TransferTaskListResponse {
+  items: TransferTask[]
+  page: number
+  size: number
+}
+
+export interface TransferDownloadGrant {
+  token: string
+  task: TransferTask
+  expires_at: string
 }
 
 // ===== M10 Notify 模块 =====
@@ -1380,7 +1785,7 @@ export interface GradeWarning {
   student_id: string
   semester_id: string
   type: number
-  detail: Record<string, any>
+  detail: Record<string, unknown>
   status: number
   created_at: string
 }
@@ -1420,10 +1825,10 @@ export interface SimPackageMeta {
   name: string
   category: string
   compute: 'frontend' | 'backend'
-  scale_limit?: Record<string, any>
+  scale_limit?: Record<string, unknown>
   bundle_hash?: string
   backend_adapter?: string
-  backend_config?: Record<string, any>
+  backend_config?: Record<string, unknown>
   status: 'draft' | 'reviewing' | 'published' | 'archived' | 'rejected'
   created_at: string
   updated_at: string
@@ -1436,9 +1841,9 @@ export interface SimPackageSubmit {
   name: string
   category: string
   compute: 'frontend' | 'backend'
-  scale_limit?: Record<string, any>
+  scale_limit?: Record<string, unknown>
   backend_adapter?: string
-  backend_config?: Record<string, any>
+  backend_config?: Record<string, unknown>
 }
 
 export interface SimBundleDownloadGrant {
@@ -1505,7 +1910,7 @@ export interface SimActionLog {
   seq: number
   at_tick: number
   event_type: string
-  payload: Record<string, any>
+  payload: Record<string, unknown>
   created_at?: string
 }
 
@@ -1513,7 +1918,7 @@ export interface SimReplay {
   package_code: string
   version: string
   seed: number
-  init_params: Record<string, any>
+  init_params: Record<string, unknown>
   actions: SimActionLog[]
 }
 

@@ -1,38 +1,57 @@
-// React Hooks
+// React Hooks：提供前端共享状态、定时器、媒体查询和剪贴板交互能力。
 
 import { useState, useEffect, useCallback, useRef } from 'react'
+import { safeJsonParse } from './utils'
+
+export interface UseLocalStorageOptions {
+  /** 读写失败时的显式错误上报入口,由应用层决定如何提示或记录。 */
+  onError?: (error: unknown, context: 'read' | 'write') => void
+}
 
 /**
- * useLocalStorage：持久化到 localStorage
+ * useLocalStorage 把组件状态同步到 localStorage,不可用时退回内存状态。
  */
-export function useLocalStorage<T>(key: string, initialValue: T): [T, (value: T) => void] {
+export function useLocalStorage<T>(
+  key: string,
+  initialValue: T,
+  options?: UseLocalStorageOptions
+): [T, (value: T) => void] {
   const [storedValue, setStoredValue] = useState<T>(() => {
+    if (typeof window === 'undefined') {
+      return initialValue
+    }
+
     try {
       const item = window.localStorage.getItem(key)
-      return item ? JSON.parse(item) : initialValue
+      return item ? safeJsonParse<T>(item, initialValue, (error) => options?.onError?.(error, 'read')) : initialValue
     } catch (error) {
-      console.error('读取 localStorage 失败:', error)
+      options?.onError?.(error, 'read')
       return initialValue
     }
   })
 
   const setValue = useCallback(
     (value: T) => {
+      if (typeof window === 'undefined') {
+        setStoredValue(value)
+        return
+      }
+
       try {
         setStoredValue(value)
         window.localStorage.setItem(key, JSON.stringify(value))
       } catch (error) {
-        console.error('写入 localStorage 失败:', error)
+        options?.onError?.(error, 'write')
       }
     },
-    [key]
+    [key, options]
   )
 
   return [storedValue, setValue]
 }
 
 /**
- * useDebounce：防抖 Hook
+ * useDebounce 返回延迟稳定后的值,用于降低高频输入触发频率。
  */
 export function useDebounce<T>(value: T, delay: number): T {
   const [debouncedValue, setDebouncedValue] = useState<T>(value)
@@ -49,7 +68,7 @@ export function useDebounce<T>(value: T, delay: number): T {
 }
 
 /**
- * useInterval：interval Hook
+ * useInterval 使用最新 callback 执行可暂停的 interval。
  */
 export function useInterval(callback: () => void, delay: number | null): void {
   const savedCallback = useRef(callback)
@@ -67,7 +86,7 @@ export function useInterval(callback: () => void, delay: number | null): void {
 }
 
 /**
- * useOnClickOutside：点击外部触发
+ * useOnClickOutside 在鼠标或触摸事件落到目标元素外部时触发处理器。
  */
 export function useOnClickOutside<T extends HTMLElement = HTMLElement>(
   ref: React.RefObject<T>,
@@ -93,12 +112,19 @@ export function useOnClickOutside<T extends HTMLElement = HTMLElement>(
 }
 
 /**
- * useCopyToClipboard：复制到剪贴板
+ * useCopyToClipboard 使用 Clipboard API 复制文本,并用返回值表达是否成功。
  */
-export function useCopyToClipboard(): [(text: string) => Promise<boolean>, boolean] {
+export function useCopyToClipboard(
+  onError?: (error: unknown) => void
+): [(text: string) => Promise<boolean>, boolean] {
   const [copied, setCopied] = useState(false)
 
   const copy = useCallback(async (text: string) => {
+    if (typeof navigator === 'undefined' || !navigator.clipboard) {
+      setCopied(false)
+      return false
+    }
+
     try {
       await navigator.clipboard.writeText(text)
       setCopied(true)
@@ -106,15 +132,16 @@ export function useCopyToClipboard(): [(text: string) => Promise<boolean>, boole
       return true
     } catch (error) {
       setCopied(false)
+      onError?.(error)
       return false
     }
-  }, [])
+  }, [onError])
 
   return [copy, copied]
 }
 
 /**
- * useMediaQuery：媒体查询
+ * useMediaQuery 订阅浏览器媒体查询状态,服务端渲染时默认返回 false。
  */
 export function useMediaQuery(query: string): boolean {
   const [matches, setMatches] = useState(() => {
@@ -145,7 +172,7 @@ export function useMediaQuery(query: string): boolean {
 }
 
 /**
- * useToggle：切换 boolean 值
+ * useToggle 管理可切换的 boolean 状态。
  */
 export function useToggle(initialValue = false): [boolean, () => void] {
   const [value, setValue] = useState(initialValue)

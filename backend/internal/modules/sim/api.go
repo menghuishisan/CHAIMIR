@@ -48,6 +48,7 @@ func RegisterRoutes(r gin.IRouter, svc *Service, authn *auth.Manager, roles cont
 	g := r.Group("/api/v1/sim")
 	api.registerPublicRoutes(g)
 	api.registerUserRoutes(g.Group("", authn.Middleware(), auth.RequireTenantAnyRole(roles, contracts.RoleStudent, contracts.RoleTeacher, contracts.RoleSchoolAdmin)))
+	api.registerStreamRoutes(g.Group("", authn.WebSocketMiddleware(), auth.RequireTenantAnyRole(roles, contracts.RoleStudent, contracts.RoleTeacher, contracts.RoleSchoolAdmin)))
 	api.registerTeacherRoutes(g.Group("", authn.Middleware(), auth.RequireTenantAnyRole(roles, contracts.RoleTeacher, contracts.RoleSchoolAdmin)))
 	api.registerInternalRoutes(g.Group("/internal", authn.ServiceMiddleware()))
 	g.POST("/internal/packages/:key/validation-report", authn.ServiceMiddleware(), api.validationReport)
@@ -72,6 +73,10 @@ func (a simAPI) registerUserRoutes(g gin.IRouter) {
 	g.POST("/sessions/:id/actions", a.reportAction)
 	g.GET("/sessions/:id/replay", a.getReplay)
 	g.POST("/sessions/:id/share", a.shareSession)
+}
+
+// registerStreamRoutes 注册浏览器 WebSocket 可用的后端计算实时流入口。
+func (a simAPI) registerStreamRoutes(g gin.IRouter) {
 	g.GET("/sessions/:id/stream", a.streamSession)
 }
 

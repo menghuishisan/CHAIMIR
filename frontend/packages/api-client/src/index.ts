@@ -1,4 +1,4 @@
-// @chaimir/api-client 主入口
+// @chaimir/api-client 主入口：集中导出后端模块 API、共享类型和统一客户端工厂。
 
 export { ApiClient } from './client'
 export type { ApiConfig, ApiError, ApiResponse } from './client'
@@ -15,6 +15,7 @@ export { AdminApi } from './modules/admin'
 export { NotifyApi } from './modules/notify'
 export { GradeApi } from './modules/grade'
 export { SimApi } from './modules/sim'
+export { TransferApi } from './modules/transfer'
 
 // 类型导出
 export type * from './types'
@@ -32,6 +33,7 @@ import { AdminApi } from './modules/admin'
 import { NotifyApi } from './modules/notify'
 import { GradeApi } from './modules/grade'
 import { SimApi } from './modules/sim'
+import { TransferApi } from './modules/transfer'
 
 export interface ChaimirApi {
   identity: IdentityApi
@@ -45,8 +47,12 @@ export interface ChaimirApi {
   notify: NotifyApi
   grade: GradeApi
   sim: SimApi
+  transfer: TransferApi
 }
 
+/**
+ * createApi 使用同一个 ApiClient 实例装配所有前端可调用的后端模块。
+ */
 export function createApi(config: ApiConfig): ChaimirApi {
   const client = new ApiClient(config)
 
@@ -62,5 +68,6 @@ export function createApi(config: ApiConfig): ChaimirApi {
     notify: new NotifyApi(client),
     grade: new GradeApi(client),
     sim: new SimApi(client),
+    transfer: new TransferApi(client),
   }
 }

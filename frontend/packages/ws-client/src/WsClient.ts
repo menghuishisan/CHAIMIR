@@ -1,5 +1,4 @@
-// WebSocket 客户端封装
-// 用于实时通知、判题进度、沙箱状态等
+// WebSocket 客户端封装：统一处理后端 query token 鉴权、重连、心跳和事件分发。
 
 export interface WsClientConfig {
   url: string
@@ -9,24 +8,29 @@ export interface WsClientConfig {
   maxReconnectAttempts?: number
   heartbeatInterval?: number
   getToken?: () => string | null
+  onClientError?: (error: unknown, context: string) => void
 }
 
-export interface WsMessage<T = any> {
+export interface WsMessage<T = unknown> {
   type: string
   data: T
   timestamp?: number
 }
 
-export type WsEventHandler<T = any> = (data: T) => void
+export type WsEventHandler<T = unknown> = (data: T) => void
+type StoredWsEventHandler = WsEventHandler<unknown>
 
 export class WsClient {
   private ws: WebSocket | null = null
   private config: Required<WsClientConfig>
   private reconnectAttempts = 0
   private heartbeatTimer: ReturnType<typeof setInterval> | null = null
-  private eventHandlers = new Map<string, Set<WsEventHandler>>()
+  private eventHandlers = new Map<string, Set<StoredWsEventHandler>>()
   private isManualClose = false
 
+  /**
+   * constructor 创建一个可重连的 WebSocket 客户端实例。
+   */
   constructor(config: WsClientConfig) {
     this.config = {
       protocols: config.protocols || [],
@@ -35,6 +39,7 @@ export class WsClient {
       maxReconnectAttempts: config.maxReconnectAttempts || 5,
       heartbeatInterval: config.heartbeatInterval || 30000,
       getToken: config.getToken || (() => null),
+      onClientError: config.onClientError || (() => undefined),
       url: config.url,
     }
   }
@@ -44,21 +49,19 @@ export class WsClient {
    */
   connect(): void {
     if (this.ws?.readyState === WebSocket.OPEN) {
-      console.warn('WebSocket 已连接')
       return
     }
 
     this.isManualClose = false
 
-    // 构建 URL（带 Token）
-    const token = this.config.getToken()
-    const url = token ? `${this.config.url}?token=${token}` : this.config.url
+    // 后端 WebSocket 中间件要求通过 query token 鉴权，保留调用方已有查询参数。
+    const url = appendTokenQuery(this.config.url, this.config.getToken())
 
     try {
       this.ws = new WebSocket(url, this.config.protocols)
       this.setupEventListeners()
     } catch (error) {
-      console.error('WebSocket 连接失败:', error)
+      this.reportClientError(error, 'connect')
       this.handleReconnect()
     }
   }
@@ -79,9 +82,9 @@ export class WsClient {
   /**
    * 发送消息
    */
-  send<T = any>(type: string, data: T): void {
+  send<T = unknown>(type: string, data: T): void {
     if (this.ws?.readyState !== WebSocket.OPEN) {
-      console.error('WebSocket 未连接')
+      this.reportClientError(new Error('实时连接尚未建立'), 'send')
       return
     }
 
@@ -97,11 +100,11 @@ export class WsClient {
   /**
    * 订阅事件
    */
-  on<T = any>(type: string, handler: WsEventHandler<T>): () => void {
+  on<T = unknown>(type: string, handler: WsEventHandler<T>): () => void {
     if (!this.eventHandlers.has(type)) {
       this.eventHandlers.set(type, new Set())
     }
-    this.eventHandlers.get(type)!.add(handler)
+    this.eventHandlers.get(type)!.add(handler as StoredWsEventHandler)
 
     // 返回取消订阅函数
     return () => {
@@ -112,10 +115,10 @@ export class WsClient {
   /**
    * 取消订阅
    */
-  off<T = any>(type: string, handler: WsEventHandler<T>): void {
+  off<T = unknown>(type: string, handler: WsEventHandler<T>): void {
     const handlers = this.eventHandlers.get(type)
     if (handlers) {
-      handlers.delete(handler)
+      handlers.delete(handler as StoredWsEventHandler)
       if (handlers.size === 0) {
         this.eventHandlers.delete(type)
       }
@@ -136,11 +139,13 @@ export class WsClient {
     return this.ws?.readyState === WebSocket.OPEN
   }
 
+  /**
+   * setupEventListeners 绑定浏览器 WebSocket 事件并转换为业务事件。
+   */
   private setupEventListeners(): void {
     if (!this.ws) return
 
     this.ws.onopen = () => {
-      console.log('WebSocket 已连接')
       this.reconnectAttempts = 0
       this.startHeartbeat()
       this.emit('connected', {})
@@ -151,17 +156,16 @@ export class WsClient {
         const message: WsMessage = JSON.parse(event.data)
         this.emit(message.type, message.data)
       } catch (error) {
-        console.error('解析 WebSocket 消息失败:', error)
+        this.reportClientError(error, 'message_parse')
       }
     }
 
     this.ws.onerror = (error) => {
-      console.error('WebSocket 错误:', error)
+      this.reportClientError(error, 'socket_error')
       this.emit('error', error)
     }
 
     this.ws.onclose = (event) => {
-      console.log('WebSocket 已断开:', event.code, event.reason)
       this.clearHeartbeat()
       this.emit('disconnected', { code: event.code, reason: event.reason })
 
@@ -171,21 +175,25 @@ export class WsClient {
     }
   }
 
+  /**
+   * handleReconnect 在非手动关闭后按配置执行有限重连。
+   */
   private handleReconnect(): void {
     if (this.reconnectAttempts >= this.config.maxReconnectAttempts) {
-      console.error('WebSocket 重连次数已达上限')
       this.emit('reconnect_failed', {})
       return
     }
 
     this.reconnectAttempts++
-    console.log(`WebSocket 将在 ${this.config.reconnectInterval}ms 后重连（第 ${this.reconnectAttempts} 次）`)
 
     setTimeout(() => {
       this.connect()
     }, this.config.reconnectInterval)
   }
 
+  /**
+   * startHeartbeat 定期发送 ping,保持统一实时通道活跃。
+   */
   private startHeartbeat(): void {
     this.clearHeartbeat()
 
@@ -196,6 +204,9 @@ export class WsClient {
     }, this.config.heartbeatInterval)
   }
 
+  /**
+   * clearHeartbeat 清理心跳定时器,避免断开后残留后台任务。
+   */
   private clearHeartbeat(): void {
     if (this.heartbeatTimer) {
       clearInterval(this.heartbeatTimer)
@@ -203,16 +214,40 @@ export class WsClient {
     }
   }
 
-  private emit<T = any>(type: string, data: T): void {
+  /**
+   * emit 分发已解析的 WebSocket 事件到订阅处理器。
+   */
+  private emit<T = unknown>(type: string, data: T): void {
     const handlers = this.eventHandlers.get(type)
     if (handlers) {
       handlers.forEach((handler) => {
         try {
           handler(data)
         } catch (error) {
-          console.error(`事件处理器错误 (${type}):`, error)
+          this.reportClientError(error, `handler:${type}`)
         }
       })
     }
   }
+
+  /**
+   * reportClientError 把客户端内部错误交给应用层处理,避免共享包直接输出开发语义。
+   */
+  private reportClientError(error: unknown, context: string): void {
+    this.config.onClientError(error, context)
+  }
+}
+
+/**
+ * appendTokenQuery 为 WebSocket URL 附加后端要求的 query token,并避免重复追加。
+ */
+function appendTokenQuery(url: string, token: string | null): string {
+  if (!token) {
+    return url
+  }
+  if (/[?&]token=/.test(url)) {
+    return url
+  }
+  const separator = url.includes('?') ? '&' : '?'
+  return `${url}${separator}token=${encodeURIComponent(token)}`
 }

@@ -13,9 +13,19 @@ import type {
   PaginatedResponse,
   CheckpointResult,
   ReportDTO,
+  ExperimentGroup,
+  ExperimentGroupMemberRequest,
+  ExperimentGroupRequest,
+  GradeReportRequest,
 } from '../types'
 
+/**
+ * ExperimentApi 封装后端 M7 实验编排、实例、报告和协作小组接口。
+ */
 export class ExperimentApi {
+  /**
+   * constructor 注入统一 API 客户端，保持实验接口的路径和错误处理一致。
+   */
   constructor(private client: ApiClient) {}
 
   /**
@@ -66,6 +76,34 @@ export class ExperimentApi {
   }
 
   /**
+   * 查询实验报告列表。
+   */
+  async listReports(experimentId: string, params?: { page?: number; size?: number }): Promise<PaginatedResponse<ReportDTO>> {
+    return this.client.get(`/experiment/experiments/${experimentId}/reports`, params)
+  }
+
+  /**
+   * 教师批改实验报告。
+   */
+  async gradeReport(reportId: string, data: GradeReportRequest): Promise<ReportDTO> {
+    return this.client.post(`/experiment/reports/${reportId}/grade`, data)
+  }
+
+  /**
+   * 创建实验协作小组。
+   */
+  async createGroup(experimentId: string, data: ExperimentGroupRequest): Promise<ExperimentGroup> {
+    return this.client.post(`/experiment/experiments/${experimentId}/groups`, data)
+  }
+
+  /**
+   * 加入或调整协作小组成员角色。
+   */
+  async upsertGroupMember(groupId: string, data: ExperimentGroupMemberRequest): Promise<ExperimentGroup> {
+    return this.client.post(`/experiment/groups/${groupId}/members`, data)
+  }
+
+  /**
    * 创建实验实例（学生发起）
    */
   async createInstance(experimentId: string, data: CreateInstanceRequest): Promise<ExperimentInstance> {
@@ -102,6 +140,13 @@ export class ExperimentApi {
    */
   async getProgress(instanceId: string): Promise<ProgressDTO> {
     return this.client.get(`/experiment/instances/${instanceId}/progress`)
+  }
+
+  /**
+   * 读取协作小组详情。
+   */
+  async getGroup(groupId: string): Promise<ExperimentGroup> {
+    return this.client.get(`/experiment/groups/${groupId}`)
   }
 
   /**

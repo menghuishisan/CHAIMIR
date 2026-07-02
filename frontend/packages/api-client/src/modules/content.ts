@@ -1,5 +1,4 @@
-// Content API:题库与模板中心
-// 对应后端 M5 模块
+// Content API：题库与模板中心,对应后端 M5 模块。
 
 import { ApiClient } from '../client'
 import type {
@@ -20,8 +19,13 @@ import type {
   UpdateItemRequest,
 } from '../types'
 
-// ContentApi 封装 M5 内容中心的前端调用。
+/**
+ * ContentApi 封装 M5 内容中心的前端调用。
+ */
 export class ContentApi {
+  /**
+   * constructor 注入统一 ApiClient,确保题库接口共用鉴权、trace_id 和错误处理。
+   */
   constructor(private client: ApiClient) {}
 
   // getItems 查询内容列表。
@@ -171,5 +175,4 @@ export class ContentApi {
   async regeneratePaper(id: string): Promise<PaperDetail> {
     return this.client.post(`/content/papers/${id}/regenerate`)
   }
-
 }

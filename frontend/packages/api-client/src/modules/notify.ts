@@ -10,7 +10,13 @@ import type {
   PaginatedResponse,
 } from '../types'
 
+/**
+ * NotifyApi 封装后端 M10 通知、偏好、公告和实时推送入口。
+ */
 export class NotifyApi {
+  /**
+   * constructor 注入统一 API 客户端，复用根路径 WebSocket 和 HTTP 错误处理。
+   */
   constructor(private client: ApiClient) {}
 
   // ===== 通知列表 =====
@@ -100,9 +106,6 @@ export class NotifyApi {
    * 获取 WebSocket URL
    */
   getWebSocketUrl(): string {
-    const baseUrl = this.client['config'].baseURL || ''
-    const wsProtocol = baseUrl.startsWith('https') ? 'wss' : 'ws'
-    const wsBaseUrl = baseUrl.replace(/^https?/, wsProtocol)
-    return `${wsBaseUrl}/api/ws`
+    return this.client.rootWsURL('/api/ws')
   }
 }

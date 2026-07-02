@@ -1,4 +1,4 @@
-// 认证上下文：管理用户登录状态、Token
+// 认证上下文：管理用户登录状态、双 Token 轮转和服务端会话退出。
 
 import React, { createContext, useContext, useState, useCallback, useEffect } from 'react'
 import type { Account, LoginResponse } from '@chaimir/api-client'
@@ -14,7 +14,7 @@ export interface AuthContextValue {
   /** 登录 */
   login: (response: LoginResponse) => void
   /** 登出 */
-  logout: () => void
+  logout: () => Promise<void>
   /** 获取 Token */
   getToken: () => string | null
   /** 刷新 Token */
@@ -25,15 +25,30 @@ const AuthContext = createContext<AuthContextValue | undefined>(undefined)
 
 export interface AuthProviderProps {
   children: React.ReactNode
-  onTokenExpired?: () => void
+  /** 调用后端 /auth/refresh 完成 Refresh Token 轮转。 */
+  refreshSession: (refreshToken: string) => Promise<LoginResponse>
+  /** 调用后端 /auth/logout 吊销当前服务端会话。 */
+  revokeSession?: () => Promise<void>
+  /** 认证异常上报入口，应用层可接入用户向提示或监控。 */
+  onAuthError?: (error: unknown) => void
 }
 
-export const AuthProvider: React.FC<AuthProviderProps> = ({ children, onTokenExpired }) => {
+/**
+ * AuthProvider 维护当前浏览器会话中的用户、access token 和 refresh token 状态。
+ */
+export const AuthProvider: React.FC<AuthProviderProps> = ({
+  children,
+  refreshSession,
+  revokeSession,
+  onAuthError,
+}) => {
   const [user, setUser] = useState<Account | null>(null)
   const [isLoading, setIsLoading] = useState(true)
 
-  // 初始化：从 localStorage 恢复用户信息
   useEffect(() => {
+    /**
+     * initAuth 从本地缓存恢复浏览器会话，并在缓存损坏时清理残留状态。
+     */
     const initAuth = () => {
       try {
         const token = localStorage.getItem(StorageKeys.ACCESS_TOKEN)
@@ -44,18 +59,29 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children, onTokenExp
           setUser(userData)
         }
       } catch (error) {
-        console.error('初始化认证失败:', error)
+        clearStoredAuth()
+        onAuthError?.(error)
       } finally {
         setIsLoading(false)
       }
     }
 
     initAuth()
-  }, [])
+  }, [onAuthError])
 
-  const login = useCallback((response: LoginResponse) => {
-    if (response.access_token && response.account) {
-      // 存储 Token 和用户信息
+  /**
+   * login 写入后端登录响应中的 token 与账号信息。
+   */
+  const login = useCallback(
+    (response: LoginResponse) => {
+      if (!response.access_token || !response.account) {
+        clearStoredAuth()
+        setUser(null)
+        onAuthError?.(new Error('登录状态异常，请重新登录'))
+        return
+      }
+
+      // 存储 Token 和用户信息。
       localStorage.setItem(StorageKeys.ACCESS_TOKEN, response.access_token)
       if (response.refresh_token) {
         localStorage.setItem(StorageKeys.REFRESH_TOKEN, response.refresh_token)
@@ -63,38 +89,55 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children, onTokenExp
       localStorage.setItem(StorageKeys.USER_INFO, JSON.stringify(response.account))
 
       setUser(response.account)
+    },
+    [onAuthError]
+  )
+
+  /**
+   * logout 优先吊销后端会话,随后清理本地认证状态。
+   */
+  const logout = useCallback(async () => {
+    try {
+      await revokeSession?.()
+    } catch (error) {
+      onAuthError?.(error)
+    } finally {
+      clearStoredAuth()
+      setUser(null)
     }
-  }, [])
+  }, [onAuthError, revokeSession])
 
-  const logout = useCallback(() => {
-    // 清除所有认证信息
-    localStorage.removeItem(StorageKeys.ACCESS_TOKEN)
-    localStorage.removeItem(StorageKeys.REFRESH_TOKEN)
-    localStorage.removeItem(StorageKeys.USER_INFO)
-
-    setUser(null)
-  }, [])
-
+  /**
+   * getToken 返回当前 access token,供 API 和 WebSocket 客户端注入鉴权。
+   */
   const getToken = useCallback((): string | null => {
     return localStorage.getItem(StorageKeys.ACCESS_TOKEN)
   }, [])
 
+  /**
+   * refreshToken 使用后端 Refresh Token 轮转接口刷新浏览器登录态。
+   */
   const refreshToken = useCallback(async () => {
     try {
       const refresh = localStorage.getItem(StorageKeys.REFRESH_TOKEN)
       if (!refresh) {
-        throw new Error('无刷新令牌')
+        throw new Error('登录状态已失效，请重新登录')
       }
-
-      // 这里需要调用 API 刷新 Token
-      // 由于 AuthProvider 不直接依赖 API 实例，由外部处理
-      // 这里只是占位，实际实现在应用层
-      onTokenExpired?.()
+      const response = await refreshSession(refresh)
+      if (!response.access_token || !response.account) {
+        throw new Error('登录状态已失效，请重新登录')
+      }
+      localStorage.setItem(StorageKeys.ACCESS_TOKEN, response.access_token)
+      if (response.refresh_token) {
+        localStorage.setItem(StorageKeys.REFRESH_TOKEN, response.refresh_token)
+      }
+      localStorage.setItem(StorageKeys.USER_INFO, JSON.stringify(response.account))
+      setUser(response.account)
     } catch (error) {
-      console.error('刷新 Token 失败:', error)
-      logout()
+      onAuthError?.(error)
+      await logout()
     }
-  }, [onTokenExpired, logout])
+  }, [logout, onAuthError, refreshSession])
 
   const value: AuthContextValue = {
     user,
@@ -109,6 +152,18 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children, onTokenExp
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
 }
 
+/**
+ * clearStoredAuth 清理所有浏览器侧认证缓存。
+ */
+function clearStoredAuth(): void {
+  localStorage.removeItem(StorageKeys.ACCESS_TOKEN)
+  localStorage.removeItem(StorageKeys.REFRESH_TOKEN)
+  localStorage.removeItem(StorageKeys.USER_INFO)
+}
+
+/**
+ * useAuth 读取认证上下文,并在缺少 Provider 时显式失败。
+ */
 export function useAuth(): AuthContextValue {
   const context = useContext(AuthContext)
   if (!context) {

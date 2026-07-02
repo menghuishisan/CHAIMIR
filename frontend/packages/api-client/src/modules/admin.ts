@@ -6,7 +6,6 @@ import type {
   AlertEventRequest,
   AlertRule,
   AlertRuleRequest,
-  AuditExportTask,
   AuditQueryParams,
   AuditQueryResult,
   BackupRecord,
@@ -20,10 +19,16 @@ import type {
   SystemConfig,
   TenantApplicationSummary,
   TenantSummary,
+  TransferTask,
 } from '../types'
 
-// AdminApi 封装 M9 文档定义的管理后台 HTTP API,不保留旧路径或过渡别名。
+/**
+ * AdminApi 封装 M9 文档定义的管理后台 HTTP API,不保留旧路径或过渡别名。
+ */
 export class AdminApi {
+  /**
+   * constructor 注入统一 ApiClient,确保管理后台接口共用鉴权、trace_id 和错误处理。
+   */
   constructor(private client: ApiClient) {}
 
   // getPlatformDashboard 读取平台级聚合看板。
@@ -62,7 +67,7 @@ export class AdminApi {
   }
 
   // exportAudit 创建审计导出任务。
-  async exportAudit(params?: AuditQueryParams): Promise<AuditExportTask> {
+  async exportAudit(params?: AuditQueryParams): Promise<TransferTask> {
     return this.client.get('/admin/audit/export', params)
   }
 

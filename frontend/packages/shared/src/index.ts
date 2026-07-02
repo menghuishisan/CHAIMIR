@@ -1,4 +1,4 @@
-// @chaimir/shared 共享工具主入口
+// @chaimir/shared 主入口：集中导出共享工具、React Hooks 和跨包常量。
 
 // 工具函数
 export * from './utils'

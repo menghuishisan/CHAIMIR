@@ -31,7 +31,13 @@ import type {
   VulnPrevalidateRequest,
 } from '../types'
 
+/**
+ * ContestApi 封装 M8 竞赛模块的前端 HTTP 契约。
+ */
 export class ContestApi {
+  /**
+   * constructor 注入统一 ApiClient,确保竞赛接口共用鉴权、trace_id 和错误处理。
+   */
   constructor(private client: ApiClient) {}
 
   /**

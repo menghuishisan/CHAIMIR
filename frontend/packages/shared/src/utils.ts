@@ -1,9 +1,7 @@
-// 共享工具函数
+// 共享工具函数：提供前端通用格式化、节流防抖、类名合并和安全解析能力。
 
 /**
- * 格式化日期
- * @param date 日期字符串或 Date 对象
- * @param format 格式，默认 'YYYY-MM-DD HH:mm:ss'
+ * formatDate 把日期字符串或 Date 对象格式化为指定展示格式。
  */
 export function formatDate(date: string | Date, format = 'YYYY-MM-DD HH:mm:ss'): string {
   const d = typeof date === 'string' ? new Date(date) : date
@@ -25,7 +23,7 @@ export function formatDate(date: string | Date, format = 'YYYY-MM-DD HH:mm:ss'):
 }
 
 /**
- * 格式化相对时间（如：刚刚、5分钟前）
+ * formatRelativeTime 把时间转换为面向用户的相对时间文案。
  */
 export function formatRelativeTime(date: string | Date): string {
   const d = typeof date === 'string' ? new Date(date) : date
@@ -46,99 +44,78 @@ export function formatRelativeTime(date: string | Date): string {
 }
 
 /**
- * 防抖
+ * debounce 延迟执行连续触发的函数,用于输入搜索等高频交互。
  */
-export function debounce<T extends (...args: any[]) => any>(
-  fn: T,
+export function debounce<TArgs extends unknown[]>(
+  fn: (...args: TArgs) => void,
   delay: number
-): (...args: Parameters<T>) => void {
+): (...args: TArgs) => void {
   let timer: ReturnType<typeof setTimeout> | null = null
 
-  return function (this: any, ...args: Parameters<T>) {
+  return (...args: TArgs) => {
     if (timer) clearTimeout(timer)
     timer = setTimeout(() => {
-      fn.apply(this, args)
+      fn(...args)
     }, delay)
   }
 }
 
 /**
- * 节流
+ * throttle 限制函数在固定时间窗口内最多执行一次。
  */
-export function throttle<T extends (...args: any[]) => any>(
-  fn: T,
+export function throttle<TArgs extends unknown[]>(
+  fn: (...args: TArgs) => void,
   delay: number
-): (...args: Parameters<T>) => void {
+): (...args: TArgs) => void {
   let lastCall = 0
 
-  return function (this: any, ...args: Parameters<T>) {
+  return (...args: TArgs) => {
     const now = Date.now()
     if (now - lastCall >= delay) {
       lastCall = now
-      fn.apply(this, args)
+      fn(...args)
     }
   }
 }
 
 /**
- * 生成唯一 ID
+ * generateId 生成仅供前端临时状态使用的唯一标识。
  */
 export function generateId(prefix = 'id'): string {
-  return `${prefix}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
+  return `${prefix}-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`
 }
 
 /**
- * 复制到剪贴板
+ * copyToClipboard 使用浏览器 Clipboard API 复制文本,失败时通过返回值交给调用方提示。
  */
 export async function copyToClipboard(text: string): Promise<boolean> {
+  if (typeof navigator === 'undefined' || !navigator.clipboard) {
+    return false
+  }
+
   try {
-    // 现代浏览器使用 Clipboard API
-    if (navigator.clipboard && window.isSecureContext) {
-      await navigator.clipboard.writeText(text)
-      return true
-    }
-
-    // 兼容旧浏览器的方案
-    const textarea = document.createElement('textarea')
-    textarea.value = text
-    textarea.style.position = 'fixed'
-    textarea.style.left = '-9999px'
-    textarea.style.top = '-9999px'
-    textarea.style.opacity = '0'
-    document.body.appendChild(textarea)
-
-    textarea.focus()
-    textarea.select()
-
-    try {
-      const successful = document.execCommand('copy')
-      document.body.removeChild(textarea)
-      return successful
-    } catch (err) {
-      document.body.removeChild(textarea)
-      return false
-    }
-  } catch (error) {
-    console.error('复制失败:', error)
+    await navigator.clipboard.writeText(text)
+    return true
+  } catch {
     return false
   }
 }
 
 /**
- * 格式化文件大小
+ * formatFileSize 把字节数格式化为常用文件大小单位。
  */
 export function formatFileSize(bytes: number): string {
   if (bytes === 0) return '0 B'
 
   const k = 1024
   const sizes = ['B', 'KB', 'MB', 'GB', 'TB']
-  const i = Math.floor(Math.log(bytes) / Math.log(k))
+  const i = Math.min(Math.floor(Math.log(bytes) / Math.log(k)), sizes.length - 1)
 
   return `${(bytes / Math.pow(k, i)).toFixed(2)} ${sizes[i]}`
 }
 
 /**
- * 下载文件
+ * downloadFile 基于受控下载授权 URL 触发浏览器下载。
  */
 export function downloadFile(url: string, filename: string): void {
   const link = document.createElement('a')
@@ -147,12 +124,12 @@ export function downloadFile(url: string, filename: string): void {
   link.click()
 }
 
-/**
- * 类名合并工具（完整实现）
- * 支持字符串、数组、对象、条件值
- */
-type ClassValue = string | number | boolean | undefined | null | ClassValue[]
+type ClassDictionary = Record<string, boolean | null | undefined>
+type ClassValue = string | number | boolean | undefined | null | ClassValue[] | ClassDictionary
 
+/**
+ * cn 合并字符串、数组和对象形式的条件类名。
+ */
 export function cn(...inputs: ClassValue[]): string {
   const classes: string[] = []
 
@@ -161,10 +138,22 @@ export function cn(...inputs: ClassValue[]): string {
 
     if (typeof input === 'string' || typeof input === 'number') {
       classes.push(String(input))
-    } else if (Array.isArray(input)) {
+      continue
+    }
+
+    if (Array.isArray(input)) {
       const result = cn(...input)
       if (result) {
         classes.push(result)
+      }
+      continue
+    }
+
+    if (typeof input === 'object') {
+      for (const [className, enabled] of Object.entries(input)) {
+        if (enabled) {
+          classes.push(className)
+        }
       }
     }
   }
@@ -173,14 +162,14 @@ export function cn(...inputs: ClassValue[]): string {
 }
 
 /**
- * 延迟执行
+ * sleep 返回在指定毫秒后完成的 Promise,用于受控轮询或交互等待。
  */
 export function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
 /**
- * 脱敏手机号（保留前3后4）
+ * maskPhone 脱敏展示 11 位手机号。
  */
 export function maskPhone(phone: string): string {
   if (phone.length !== 11) return phone
@@ -188,21 +177,21 @@ export function maskPhone(phone: string): string {
 }
 
 /**
- * 验证手机号
+ * isValidPhone 校验中国大陆手机号格式。
  */
 export function isValidPhone(phone: string): boolean {
   return /^1[3-9]\d{9}$/.test(phone)
 }
 
 /**
- * 验证邮箱
+ * isValidEmail 校验基础邮箱格式。
  */
 export function isValidEmail(email: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)
 }
 
 /**
- * 获取文件扩展名
+ * getFileExtension 读取文件扩展名,无扩展名时返回空字符串。
  */
 export function getFileExtension(filename: string): string {
   const parts = filename.split('.')
@@ -210,12 +199,17 @@ export function getFileExtension(filename: string): string {
 }
 
 /**
- * 安全的 JSON 解析
+ * safeJsonParse 安全解析 JSON,失败时返回调用方提供的兜底值并可显式上报错误。
  */
-export function safeJsonParse<T = any>(str: string, fallback: T): T {
+export function safeJsonParse<T = unknown>(
+  str: string,
+  fallback: T,
+  onError?: (error: unknown) => void
+): T {
   try {
-    return JSON.parse(str)
-  } catch {
+    return JSON.parse(str) as T
+  } catch (error) {
+    onError?.(error)
     return fallback
   }
 }

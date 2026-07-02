@@ -1,4 +1,4 @@
-// @chaimir/auth 主入口
+// @chaimir/auth 主入口：集中导出认证上下文、路由守卫和角色权限工具。
 
 export { AuthProvider, useAuth } from './AuthContext'
 export type { AuthContextValue, AuthProviderProps } from './AuthContext'
