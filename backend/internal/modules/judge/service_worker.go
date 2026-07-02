@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -112,6 +113,9 @@ func (s *Service) executeTask(ctx context.Context, task JudgeTask) (JudgeExecuti
 // taskWithExecutionExpectation 为 J2/J5 执行期装载 M5 全量配置,但不改变已持久化的 input_snapshot。
 func (s *Service) taskWithExecutionExpectation(ctx context.Context, task JudgeTask) (JudgeTask, error) {
 	if task.InputSnapshot.JudgerType != JudgerTypeOnchainAssert && task.InputSnapshot.JudgerType != JudgerTypeSimCheckpoint {
+		return task, nil
+	}
+	if strings.TrimSpace(task.InputSnapshot.ItemCode) == "" || strings.TrimSpace(task.InputSnapshot.ItemVersion) == "" {
 		return task, nil
 	}
 	if s.content == nil {
@@ -465,12 +469,7 @@ func (s *Service) publishPendingOutbox(ctx context.Context) error {
 		return err
 	}
 	for _, item := range items {
-		var payload any
-		if err := jsonx.DecodeStrict(item.Payload, &payload); err != nil {
-			s.recordOutboxPublishFailure(ctx, item, err)
-			continue
-		}
-		if err := s.bus.Publish(ctx, item.Subject, payload); err != nil {
+		if err := s.bus.Publish(ctx, item.Subject, json.RawMessage(item.Payload)); err != nil {
 			s.recordOutboxPublishFailure(ctx, item, err)
 			continue
 		}
@@ -559,6 +558,10 @@ func (s *Service) executeJudgerSelftest(ctx context.Context, j Judger) error {
 	if err != nil {
 		return err
 	}
+	executionExpectation := snapshot
+	if j.Type == JudgerTypeOnchainAssert || j.Type == JudgerTypeSimCheckpoint {
+		executionExpectation = cloneExpectationMap(expectation)
+	}
 	task := JudgeTask{
 		ID:          s.ids.Generate(),
 		TenantID:    int64FromAny(j.ResourceSpec.Selftest["tenant_id"]),
@@ -576,7 +579,7 @@ func (s *Service) executeJudgerSelftest(ctx context.Context, j Judger) error {
 			ExecutionSidecars:        append([]workload.ComponentSpec(nil), j.ResourceSpec.ExecutionSidecars...),
 			TimeoutSec:               timeoutForSnapshot(j),
 			MaxScore:                 int32FromAny(j.ResourceSpec.Selftest["max_score"]),
-			Expectation:              snapshot,
+			Expectation:              executionExpectation,
 			ExtraInput:               extra,
 			SanitizedCodeArchiveName: "selftest-submission.tar",
 		},

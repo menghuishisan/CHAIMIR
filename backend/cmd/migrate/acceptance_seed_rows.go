@@ -116,6 +116,32 @@ ON CONFLICT (code) DO UPDATE SET name=EXCLUDED.name, type=EXCLUDED.type, executo
 		acceptanceIDs.Judger, judgeSpec, judgerImageURL); err != nil {
 		return err
 	}
+	onchainSpec, _ := jsonb(map[string]any{
+		"runtime_code":          "evm-foundry",
+		"runtime_image_version": "2026.06",
+		"genesis_ref":           "genesis/evm-foundry/acceptance.json",
+		"tool_codes":            []string{"code-server"},
+		"timeout_sec":           60,
+		"max_retries":           1,
+		"selftest": map[string]any{
+			"tenant_id":    acceptanceIDs.TenantID,
+			"submitter_id": acceptanceIDs.TeacherMain,
+			"source_ref":   "judge:2026:selftest:onchain-assert",
+			"max_score":    100,
+			"expectation": map[string]any{
+				"assertions": []map[string]any{
+					{"label": "判题器自检链 ID", "target": "chainId", "field": "chain_id", "op": "eq", "value": 31337, "expected_label": "链 ID 应为验收本地链"},
+				},
+			},
+		},
+	})
+	if err := execJSON(ctx, tx, `
+INSERT INTO judger (id, code, name, type, executor_ref, runtime_required, default_timeout_sec, resource_spec, selftest_status, status)
+VALUES ($1,'onchain-assert','链上状态断言判题器',2,'m3-backend-strategy',true,60,$2,2,1)
+ON CONFLICT (code) DO UPDATE SET name=EXCLUDED.name, type=EXCLUDED.type, executor_ref=EXCLUDED.executor_ref, runtime_required=EXCLUDED.runtime_required, default_timeout_sec=EXCLUDED.default_timeout_sec, resource_spec=EXCLUDED.resource_spec, selftest_status=EXCLUDED.selftest_status, status=EXCLUDED.status, updated_at=now()`,
+		acceptanceIDs.JudgerOnchain, onchainSpec); err != nil {
+		return err
+	}
 	if err := seedTenantQuotaRow(ctx, tx); err != nil {
 		return err
 	}
@@ -158,6 +184,7 @@ func acceptanceRuntimeAdapterSpec(runtimeImageURL string) map[string]any {
 		"volume_domains": []map[string]any{
 			{"name": "workspace", "mount_path": "/workspace", "student_access": "read_write", "persistence": "minio_code", "snapshot_scope": "always"},
 			{"name": "runtime-state", "mount_path": "/runtime-state", "student_access": "none", "persistence": "ephemeral", "snapshot_scope": "snapshot_enabled"},
+			{"name": "judge-private", "mount_path": "/judge-private", "student_access": "none", "persistence": "ephemeral", "snapshot_scope": "never"},
 			{"name": "runtime-tmp", "mount_path": "/tmp", "student_access": "none", "persistence": "ephemeral", "snapshot_scope": "never"},
 		},
 		"runtime_container": map[string]any{
@@ -431,6 +458,19 @@ func seedContentRows(ctx context.Context, tx pgx.Tx) error {
 			"expectation": map[string]any{"public": true},
 		},
 	})
+	bodyBattle, _ := jsonb(map[string]any{
+		"scenario": "攻方提交攻击归档,守方提交防御归档;系统在隔离对局沙箱恢复双方参战物并用链上断言判定是否攻破。",
+		"battle":   map[string]any{"rule": "attack-defense", "runtime_code": "evm-foundry", "runtime_image_version": "2026.06", "tool_codes": []string{"code-server"}},
+		"judge_config": map[string]any{
+			"judger_code": "onchain-assert",
+			"max_score":   100,
+			"expectation": map[string]any{
+				"assertions": []map[string]any{
+					{"label": "本地链已进入可判定状态", "target": "chainId", "field": "chain_id", "op": "eq", "value": 31337, "expected_label": "链 ID 应为验收本地链"},
+				},
+			},
+		},
+	})
 	bodyTheory, _ := jsonb(map[string]any{"question": "解释拜占庭容错共识中安全性和活性的取舍。", "choices": []string{"只提高出块速度", "在部分节点作恶时仍保持一致性", "取消交易签名", "跳过网络传播"}})
 	if err := execJSON(ctx, tx, `
 INSERT INTO content_category (id, tenant_id, parent_id, name, sort)
@@ -443,6 +483,9 @@ ON CONFLICT (id) DO UPDATE SET name=EXCLUDED.name, sort=EXCLUDED.sort, deleted_a
 		return err
 	}
 	if err := upsertContentItem(ctx, tx, acceptanceIDs.ContentContest, "ctf-reentrancy-vault", "1.0.0", 2, "Reentrancy Vault 攻击题", 3, bodyContest, []string{"flag_rule", "judge_config"}); err != nil {
+		return err
+	}
+	if err := upsertContentItem(ctx, tx, acceptanceIDs.ContentBattle, "battle-reentrancy-duel", "1.0.0", 2, "Reentrancy Vault 攻防对局题", 3, bodyBattle, []string{"judge_config"}); err != nil {
 		return err
 	}
 	if err := upsertContentItem(ctx, tx, acceptanceIDs.ContentTheory, "quiz-bft-safety-liveness", "1.0.0", 3, "BFT 安全性与活性理解题", 2, bodyTheory, []string{}); err != nil {

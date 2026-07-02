@@ -94,6 +94,8 @@ type FingerprintMatch struct {
 type JudgeService interface {
 	// SubmitJudgeTask 创建判题任务并返回初始任务摘要。JudgerCode 为空时必须使用 M5 锁定题目版本的 judge_config.judger_code,业务模块不得硬编码题目判题器别名。
 	SubmitJudgeTask(ctx context.Context, req JudgeSubmitRequest) (JudgeTaskInfo, error)
+	// ValidateJudgeMode 预校验锁定题目版本的判题配置是否支持指定沙箱模式,供业务模块在创建沙箱或发布赛题前走 M3 契约做能力判定。
+	ValidateJudgeMode(ctx context.Context, tenantID int64, itemCode, itemVersion, sandboxMode string) error
 	// GetJudgeTask 读取任务状态与结果摘要。
 	GetJudgeTask(ctx context.Context, tenantID, taskID int64) (JudgeTaskInfo, error)
 	// CancelJudgeTask 取消仍在排队中的判题任务,供业务流程补偿或撤回使用。

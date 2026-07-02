@@ -40,12 +40,14 @@ type acceptanceSeedIDs struct {
 	SandboxTool        int64
 	SandboxEvent       int64
 	Judger             int64
+	JudgerOnchain      int64
 	JudgeTask          int64
 	JudgeResult        int64
 	SimPackage         int64
 	ContentCat         int64
 	ContentLab         int64
 	ContentContest     int64
+	ContentBattle      int64
 	ContentTheory      int64
 	Paper              int64
 	Course             int64
@@ -109,8 +111,8 @@ var acceptanceIDs = acceptanceSeedIDs{
 	StudentA: 910000000000000201, StudentB: 910000000000000202, StudentC: 910000000000000203, AuthSession: 910000000000000301,
 	Runtime: 910000000000001001, RuntimeImage: 910000000000001002,
 	Sandbox: 910000000000001021, SandboxTool: 910000000000001022, SandboxEvent: 910000000000001023,
-	Judger: 910000000000002001, JudgeTask: 910000000000002011, JudgeResult: 910000000000002012, SimPackage: 910000000000003001,
-	ContentCat: 910000000000004001, ContentLab: 910000000000004011, ContentContest: 910000000000004012, ContentTheory: 910000000000004013, Paper: 910000000000004021,
+	Judger: 910000000000002001, JudgerOnchain: 910000000000002002, JudgeTask: 910000000000002011, JudgeResult: 910000000000002012, SimPackage: 910000000000003001,
+	ContentCat: 910000000000004001, ContentLab: 910000000000004011, ContentContest: 910000000000004012, ContentBattle: 910000000000004014, ContentTheory: 910000000000004013, Paper: 910000000000004021,
 	Course: 910000000000005001, ChapterIntro: 910000000000005011, ChapterLab: 910000000000005012, LessonIntro: 910000000000005021, LessonLab: 910000000000005022,
 	Assignment: 910000000000005031, AssignmentItem: 910000000000005032, SubmissionA: 910000000000005041, DraftB: 910000000000005042, ProgressA: 910000000000005043,
 	Discussion: 910000000000005044, CourseNotice: 910000000000005045, CourseReview: 910000000000005046, GradeWeight: 910000000000005047, CourseGradeA: 910000000000005048,

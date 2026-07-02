@@ -285,6 +285,15 @@ SELECT id, tenant_id, contest_id, problem_id, entry_a_id, entry_b_id, source_ref
 FROM battle_match
 WHERE tenant_id = $1 AND judge_task_ref = $2;
 
+-- name: ListRunningBattleMatchesWithJudgeTask :many
+SELECT id, tenant_id, contest_id, problem_id, entry_a_id, entry_b_id, source_ref, sandbox_ref, judge_task_ref, result, score_delta, replay_ref, status, matched_at, finished_at
+FROM battle_match
+WHERE status = 2
+  AND judge_task_ref IS NOT NULL
+  AND judge_task_ref <> ''
+ORDER BY matched_at ASC, id ASC
+LIMIT $1;
+
 -- name: StartBattleMatch :one
 UPDATE battle_match
 SET sandbox_ref = $3,

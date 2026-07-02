@@ -356,6 +356,37 @@ func (s *Service) SubmitJudgeTask(ctx context.Context, req contracts.JudgeSubmit
 	return contractTaskInfoFromModel(JudgeTaskInfo{Task: task}), nil
 }
 
+// ValidateJudgeMode 通过 M5 锁定判题配置和 M3 判题器定义预校验沙箱模式兼容性。
+func (s *Service) ValidateJudgeMode(ctx context.Context, tenantID int64, itemCode, itemVersion, sandboxMode string) error {
+	if tenantID <= 0 || strings.TrimSpace(itemCode) == "" || strings.TrimSpace(itemVersion) == "" {
+		return apperr.ErrJudgeSubmitInvalid
+	}
+	spec, err := s.content.GetJudgeSpec(ctx, tenantID, itemCode, itemVersion)
+	if err != nil {
+		return apperr.ErrJudgeSpecUnavailable.WithCause(err)
+	}
+	if strings.TrimSpace(spec.JudgerCode) == "" {
+		return apperr.ErrJudgeSpecUnavailable
+	}
+	j, err := s.loadAvailableJudger(ctx, spec.JudgerCode)
+	if err != nil {
+		return err
+	}
+	mode, err := normalizedSandboxMode(sandboxMode)
+	if err != nil {
+		return err
+	}
+	if err := validateJudgerSupportsSandboxMode(j.Type, mode); err != nil {
+		return err
+	}
+	if mode == JudgeSandboxModeReuse {
+		if _, err := s.buildInputSnapshot(j, spec, nil); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // prepareSubmittedCode 校验需要代码对象的判题输入,非代码判题器不生成归档和指纹。
 func (s *Service) prepareSubmittedCode(ctx context.Context, req contracts.JudgeSubmitRequest, required bool) (string, map[string]float64, []byte, error) {
 	if !required {
@@ -567,13 +598,21 @@ func (s *Service) buildInputSnapshot(j Judger, spec contracts.ContentJudgeSpec, 
 
 // validateJudgerSandboxMode 约束 reuse 只能用于链上断言只读现场状态,其他判题必须使用 fresh judge 沙箱。
 func validateJudgerSandboxMode(typ int16, mode int16, targetRef string) error {
-	if mode == JudgeSandboxModeReuse {
-		if typ != JudgerTypeOnchainAssert || strings.TrimSpace(targetRef) == "" {
-			return apperr.ErrJudgeSubmitInvalid
-		}
-		return nil
+	if err := validateJudgerSupportsSandboxMode(typ, mode); err != nil {
+		return err
 	}
-	if strings.TrimSpace(targetRef) != "" {
+	if mode == JudgeSandboxModeReuse && strings.TrimSpace(targetRef) == "" {
+		return apperr.ErrJudgeSubmitInvalid
+	}
+	if mode != JudgeSandboxModeReuse && strings.TrimSpace(targetRef) != "" {
+		return apperr.ErrJudgeSubmitInvalid
+	}
+	return nil
+}
+
+// validateJudgerSupportsSandboxMode 判断判题器类型是否支持指定沙箱模式,不掺入具体任务目标校验。
+func validateJudgerSupportsSandboxMode(typ int16, mode int16) error {
+	if mode == JudgeSandboxModeReuse && typ != JudgerTypeOnchainAssert {
 		return apperr.ErrJudgeSubmitInvalid
 	}
 	return nil

@@ -2,6 +2,7 @@
 package eventbus
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -150,7 +151,9 @@ func marshalEventPayload(ctx context.Context, payload any) ([]byte, error) {
 		return nil, err
 	}
 	var obj map[string]any
-	if err := json.Unmarshal(raw, &obj); err != nil {
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.UseNumber()
+	if err := decoder.Decode(&obj); err != nil {
 		return nil, err
 	}
 	if _, ok := obj["tenant_id"]; !ok {
@@ -196,7 +199,9 @@ func eventContext(ctx context.Context, data []byte) (context.Context, error) {
 // extractEventMetadata 只从真实存在的事件字段提取排障上下文,不为缺失字段制造默认值。
 func extractEventMetadata(data []byte) (eventMetadata, bool) {
 	var obj map[string]any
-	if err := json.Unmarshal(data, &obj); err != nil {
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.UseNumber()
+	if err := decoder.Decode(&obj); err != nil {
 		return eventMetadata{}, false
 	}
 	tenantValue, hasTenant := obj["tenant_id"]

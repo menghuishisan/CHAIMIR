@@ -179,6 +179,9 @@ func (s *Service) GetBattleReplay(ctx context.Context, matchID int64) (map[strin
 
 // RunMatchmakerOnce 执行一次待对局认领和启动,供统一 background runner 调用。
 func (s *Service) RunMatchmakerOnce(ctx context.Context) error {
+	if err := s.reconcileRunningBattleMatches(ctx); err != nil {
+		return err
+	}
 	var matches []BattleMatch
 	if err := s.store.PrivilegedTx(ctx, func(ctx context.Context, tx TxStore) error {
 		var err error
@@ -193,6 +196,47 @@ func (s *Service) RunMatchmakerOnce(ctx context.Context) error {
 		}
 	}
 	return nil
+}
+
+// reconcileRunningBattleMatches 补偿已发布但消费失败的 M3 终态事件,仍只通过 M3 contract 读取判题结果。
+func (s *Service) reconcileRunningBattleMatches(ctx context.Context) error {
+	var matches []BattleMatch
+	if err := s.store.PrivilegedTx(ctx, func(ctx context.Context, tx TxStore) error {
+		var err error
+		matches, err = tx.ListRunningBattleMatchesWithJudgeTask(ctx, s.cfg.MatchmakerBatchSize)
+		return err
+	}); err != nil {
+		return err
+	}
+	for _, match := range matches {
+		if err := s.reconcileBattleMatch(ctx, match); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// reconcileBattleMatch 根据 M3 任务终态幂等结算对局,避免 NATS 短暂失败后对局永久停留在 running。
+func (s *Service) reconcileBattleMatch(ctx context.Context, match BattleMatch) error {
+	taskID, err := strconv.ParseInt(strings.TrimSpace(match.JudgeTaskRef), 10, 64)
+	if err != nil {
+		return apperr.ErrContestBattleMatchFailed.WithCause(err)
+	}
+	if taskID <= 0 {
+		return apperr.ErrContestBattleMatchFailed.WithCause(fmt.Errorf("invalid judge_task_ref %q", match.JudgeTaskRef))
+	}
+	task, err := s.judge.GetJudgeTask(ctx, match.TenantID, taskID)
+	if err != nil {
+		return apperr.ErrContestJudgeUnavailable.WithCause(err)
+	}
+	switch task.Status {
+	case contracts.JudgeTaskStatusDone:
+		return s.HandleBattleJudgeCompleted(ctx, contracts.JudgeCompletedEvent{TenantID: match.TenantID, TaskID: taskID, SourceRef: match.SourceRef, Status: task.Status, Score: task.Result.Score, Passed: task.Result.Passed, FinishedAt: timex.Now()})
+	case contracts.JudgeTaskStatusFailed, contracts.JudgeTaskStatusCanceled:
+		return s.HandleBattleJudgeFailed(ctx, contracts.JudgeFailedEvent{TenantID: match.TenantID, TaskID: taskID, SourceRef: match.SourceRef, Reason: "judge_terminal_state", FailedAt: timex.Now()})
+	default:
+		return nil
+	}
 }
 
 // executeBattleMatch 创建对局沙箱并提交 M3 判题任务。
@@ -332,6 +376,10 @@ func (s *Service) HandleBattleJudgeCompleted(ctx context.Context, event contract
 		if current.SourceRef != event.SourceRef {
 			return apperr.ErrContestEventSourceMismatch
 		}
+		problem, err := tx.GetContestProblem(ctx, event.TenantID, current.ProblemID)
+		if err != nil {
+			return err
+		}
 		a, err := tx.GetBattleEntry(ctx, event.TenantID, current.EntryAID)
 		if err != nil {
 			return err
@@ -340,7 +388,7 @@ func (s *Service) HandleBattleJudgeCompleted(ctx context.Context, event contract
 		if err != nil {
 			return err
 		}
-		result, err := battleResultFromTask(task.Result)
+		result, err := battleResultFromTask(task.Result, problem.BattleRule, a.Role, b.Role)
 		if err != nil {
 			return err
 		}
@@ -508,8 +556,8 @@ func teamLeaderID(ctx context.Context, tx TxStore, tenantID, teamID int64) (int6
 	return team.Members[0].AccountID, nil
 }
 
-// battleResultFromTask 从判题结果中提取显式胜负,缺少胜负字段时拒绝结算。
-func battleResultFromTask(result contracts.JudgeTaskResult) (int16, error) {
+// battleResultFromTask 从判题结果和对抗规则提取胜负,攻防型按断言是否攻破映射到攻击/防守角色。
+func battleResultFromTask(result contracts.JudgeTaskResult, rule, roleA, roleB int16) (int16, error) {
 	for _, detail := range result.Details {
 		value := strings.ToLower(strings.TrimSpace(detail.Actual))
 		switch value {
@@ -519,6 +567,20 @@ func battleResultFromTask(result contracts.JudgeTaskResult) (int16, error) {
 			return BattleResultBWin, nil
 		case "draw", "tie":
 			return BattleResultDraw, nil
+		}
+	}
+	if rule == BattleRuleAttackDefense {
+		if roleA == BattleRoleAttack && roleB == BattleRoleDefense {
+			if result.Passed {
+				return BattleResultAWin, nil
+			}
+			return BattleResultBWin, nil
+		}
+		if roleA == BattleRoleDefense && roleB == BattleRoleAttack {
+			if result.Passed {
+				return BattleResultBWin, nil
+			}
+			return BattleResultAWin, nil
 		}
 	}
 	return 0, apperr.ErrContestBattleMatchFailed

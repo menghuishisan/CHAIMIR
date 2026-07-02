@@ -62,6 +62,7 @@ type TxStore interface {
 	ListActiveBattleOpponents(context.Context, int64, int64, int64, int64, int64, int16, int, float64) ([]BattleEntry, error)
 	CreateBattleMatch(context.Context, BattleMatch) (BattleMatch, error)
 	ClaimPendingBattleMatches(context.Context, int) ([]BattleMatch, error)
+	ListRunningBattleMatchesWithJudgeTask(context.Context, int) ([]BattleMatch, error)
 	StartBattleMatch(context.Context, int64, int64, string, string) (BattleMatch, error)
 	GetBattleMatch(context.Context, int64, int64) (BattleMatch, error)
 	GetBattleMatchByJudgeTask(context.Context, int64, string) (BattleMatch, error)
@@ -504,6 +505,23 @@ func (tx *txStore) CreateBattleMatch(ctx context.Context, item BattleMatch) (Bat
 // ClaimPendingBattleMatches 跨租户认领待执行对局。
 func (tx *txStore) ClaimPendingBattleMatches(ctx context.Context, limit int) ([]BattleMatch, error) {
 	rows, err := tx.q.ClaimPendingBattleMatchesAcrossTenants(ctx, int32(limit))
+	if err != nil {
+		return nil, apperr.ErrContestBattleMatchFailed.WithCause(err)
+	}
+	out := make([]BattleMatch, 0, len(rows))
+	for _, row := range rows {
+		item, err := battleMatchFromRow(row)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, item)
+	}
+	return out, nil
+}
+
+// ListRunningBattleMatchesWithJudgeTask 查询已启动但尚未结算的对局,用于补偿死信或短暂消费失败的判题完成事件。
+func (tx *txStore) ListRunningBattleMatchesWithJudgeTask(ctx context.Context, limit int) ([]BattleMatch, error) {
+	rows, err := tx.q.ListRunningBattleMatchesWithJudgeTask(ctx, int32(limit))
 	if err != nil {
 		return nil, apperr.ErrContestBattleMatchFailed.WithCause(err)
 	}

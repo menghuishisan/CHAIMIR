@@ -28,13 +28,13 @@ secretGenerator:
 images:
   - name: chaimir/backend
     newName: harbor.chaimir:30080/service/backend
-    digest: sha256:bccb6647ca7b989ae8822f1e6d0844ecf0a245250943db53bd86605b38d82388
+    digest: sha256:01bec1df5a9e87628e024d63a5522eb8d06d68be96b7b415bec5aa3a7d7b89a7
   - name: chaimir/frontend
     newName: chaimir/frontend
     newTag: dev
   - name: chaimir/migrate
     newName: harbor.chaimir:30080/service/migrate
-    digest: sha256:dc163877f3ba43195ed5bacd7e0ef1c3176d03c688fa8cded1de3d68ed755cf7
+    digest: sha256:e686bce806c20391f51bc4288264051af8b5b6128179d190b061d5a3d714ab57
   - name: chaimir/cron
     newName: harbor.chaimir:30080/service/cron
     digest: sha256:67ef95de11ddd238b0e0e75aa58fbaa30314eb856e211485bb449b7209a1aac6

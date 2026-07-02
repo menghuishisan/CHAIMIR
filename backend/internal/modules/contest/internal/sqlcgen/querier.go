@@ -57,6 +57,7 @@ type Querier interface {
 	ListContestProblems(ctx context.Context, arg ListContestProblemsParams) ([]ContestProblem, error)
 	ListContests(ctx context.Context, arg ListContestsParams) ([]Contest, error)
 	ListLadder(ctx context.Context, arg ListLadderParams) ([]ListLadderRow, error)
+	ListRunningBattleMatchesWithJudgeTask(ctx context.Context, limit int32) ([]BattleMatch, error)
 	ListStudentContestRecords(ctx context.Context, arg ListStudentContestRecordsParams) ([]ListStudentContestRecordsRow, error)
 	ListTeamMembers(ctx context.Context, arg ListTeamMembersParams) ([]TeamMember, error)
 	ListVulnProblems(ctx context.Context, arg ListVulnProblemsParams) ([]VulnProblem, error)

@@ -1739,6 +1739,52 @@ func (q *Queries) ListLadder(ctx context.Context, arg ListLadderParams) ([]ListL
 	return items, nil
 }
 
+const listRunningBattleMatchesWithJudgeTask = `-- name: ListRunningBattleMatchesWithJudgeTask :many
+SELECT id, tenant_id, contest_id, problem_id, entry_a_id, entry_b_id, source_ref, sandbox_ref, judge_task_ref, result, score_delta, replay_ref, status, matched_at, finished_at
+FROM battle_match
+WHERE status = 2
+  AND judge_task_ref IS NOT NULL
+  AND judge_task_ref <> ''
+ORDER BY matched_at ASC, id ASC
+LIMIT $1
+`
+
+func (q *Queries) ListRunningBattleMatchesWithJudgeTask(ctx context.Context, limit int32) ([]BattleMatch, error) {
+	rows, err := q.db.Query(ctx, listRunningBattleMatchesWithJudgeTask, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []BattleMatch{}
+	for rows.Next() {
+		var i BattleMatch
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.ContestID,
+			&i.ProblemID,
+			&i.EntryAID,
+			&i.EntryBID,
+			&i.SourceRef,
+			&i.SandboxRef,
+			&i.JudgeTaskRef,
+			&i.Result,
+			&i.ScoreDelta,
+			&i.ReplayRef,
+			&i.Status,
+			&i.MatchedAt,
+			&i.FinishedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listStudentContestRecords = `-- name: ListStudentContestRecords :many
 SELECT c.id AS contest_id, t.id AS team_id, COALESCE(l.score::float8, 0)::float8 AS score, COALESCE(l.rank, 0)::int AS rank, c.name AS contest_name, c.status AS contest_status
 FROM team_member tm

@@ -116,6 +116,11 @@ func (s *Service) AddProblem(ctx context.Context, contestID int64, req ProblemRe
 	if _, err := s.content.GetContentFace(ctx, id.TenantID, contracts.ContentItemRef{ItemCode: req.ItemCode, ItemVersion: req.ItemVersion}); err != nil {
 		return ProblemDTO{}, apperr.ErrContestContentUnavailable.WithCause(err)
 	}
+	if contest.Mode == ContestModeBattle {
+		if err := s.judge.ValidateJudgeMode(ctx, id.TenantID, req.ItemCode, req.ItemVersion, contracts.JudgeSandboxModeReuse); err != nil {
+			return ProblemDTO{}, apperr.ErrContestProblemInvalid.WithCause(err)
+		}
+	}
 	item := ContestProblem{ID: s.ids.Generate(), TenantID: id.TenantID, ContestID: contestID, ItemCode: req.ItemCode, ItemVersion: req.ItemVersion, Score: req.Score, DynamicScore: req.DynamicScore, BattleConfig: req.BattleConfig, BattleRule: req.BattleRule, Seq: req.Seq}
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
 		var err error
