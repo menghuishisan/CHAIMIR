@@ -9,11 +9,17 @@ on:
     branches: [main]
     paths:
       - "images/**"
+      - "!images/service/backend/**"
+      - "!images/service/frontend/**"
+      - "!images/service/migrate/**"
       - ".github/workflows/images.yml"
       - "deploy/ci/**"
   pull_request:
     paths:
       - "images/**"
+      - "!images/service/backend/**"
+      - "!images/service/frontend/**"
+      - "!images/service/migrate/**"
       - ".github/workflows/images.yml"
 
 permissions:
