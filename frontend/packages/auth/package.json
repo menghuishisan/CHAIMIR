@@ -13,6 +13,8 @@
   "dependencies": {
     "@chaimir/api-client": "workspace:*",
     "@chaimir/shared": "workspace:*",
+    "@chaimir/ui": "workspace:*",
+    "lucide-react": "^0.468.0",
     "react": "^18.3.1"
   },
   "devDependencies": {

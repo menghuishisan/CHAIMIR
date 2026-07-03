@@ -1,0 +1,32 @@
+/* Autosave 组件样式：用图标与文字同步表达保存状态。 */
+
+.chaimir-autosave {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-block-size: 2rem;
+  color: var(--color-text-sub);
+  font-size: var(--text-sm);
+}
+
+.chaimir-autosave.is-saving {
+  color: var(--color-warning);
+}
+
+.chaimir-autosave.is-saved {
+  color: var(--color-success);
+}
+
+.chaimir-autosave.is-error {
+  color: var(--color-danger);
+}
+
+.chaimir-autosave__spin {
+  animation: chaimir-autosave-spin 1s linear infinite;
+}
+
+@keyframes chaimir-autosave-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}

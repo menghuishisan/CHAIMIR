@@ -12,7 +12,10 @@ import { traceLinesForCallStack } from './trace';
  */
 export function createInitialCallStackState(params: SimInitParams, _seed: number): CallStackState {
   const contracts = stringArrayParam(params, 'contracts', ['合约 A', '合约 B'], 2, 6, 32);
-  const actors: RuntimeActor[] = [{ id: 'eoa', label: '外部账户', role: 'runtime-actor', status: 'active' }].concat(contracts.map((label, index) => ({ id: contractId(index), label, role: 'runtime-actor', status: 'idle' as const })));
+  const actors: RuntimeActor[] = [
+    { id: 'eoa', label: '外部账户', role: 'runtime-actor', status: 'active' },
+    ...contracts.map<RuntimeActor>((label, index) => ({ id: contractId(index), label, role: 'runtime-actor', status: 'idle' })),
+  ];
   return finalizeCallStackState({ tick: 0, phase: callStackPhases[0].label, phaseIndex: 0, maxDepth: integerParam(params, 'maxDepth', 4, 2, 32), frames: [], actors, messages: [], lastTransition: 'external', explanation: explain(0), metrics: {}, checkpointValues: {} });
 }
 

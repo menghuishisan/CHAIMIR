@@ -45,8 +45,8 @@
 
 /* Default - 默认灰色 */
 .chaimir-badge--default {
-  background: var(--slate-100);
-  color: var(--slate-700);
+  background: var(--color-muted-bg);
+  color: var(--color-muted-text);
 }
 
 /* Primary - 主色（青电） */
@@ -94,7 +94,7 @@
 /* === 圆点颜色（实心） === */
 
 .chaimir-badge--dot.chaimir-badge--default {
-  background: var(--slate-400);
+  background: var(--color-muted-accent);
 }
 
 .chaimir-badge--dot.chaimir-badge--primary {

@@ -45,7 +45,7 @@
 }
 
 .chaimir-form-field__error::before {
-  content: '⚠';
+  content: '!';
   font-size: var(--text-base);
 }
 

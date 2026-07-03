@@ -1,0 +1,75 @@
+/* Steps 组件样式：状态不只靠颜色，圆点数字/完成图标同步表达进度。 */
+
+.chaimir-steps {
+  display: grid;
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.chaimir-steps li {
+  position: relative;
+  display: grid;
+  grid-template-columns: 2rem 1fr;
+  gap: var(--space-3);
+  color: var(--color-text-sub);
+}
+
+.chaimir-steps li:not(:last-child)::after {
+  content: '';
+  position: absolute;
+  inset-block-start: 2rem;
+  inset-inline-start: 0.9375rem;
+  block-size: calc(100% - var(--space-1));
+  border-inline-start: 1px solid var(--color-border);
+}
+
+.chaimir-steps__marker {
+  z-index: var(--z-base);
+  display: inline-grid;
+  place-items: center;
+  inline-size: 2rem;
+  block-size: 2rem;
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-full);
+  background: var(--color-bg);
+  color: var(--color-text-sub);
+  font-size: var(--text-sm);
+  font-weight: var(--font-semibold);
+}
+
+.chaimir-steps__content {
+  display: grid;
+  gap: var(--space-1);
+  min-block-size: 2.5rem;
+}
+
+.chaimir-steps__content strong {
+  color: var(--color-text);
+  font-size: var(--text-base);
+}
+
+.chaimir-steps__content small {
+  color: var(--color-text-sub);
+  line-height: var(--leading-normal);
+}
+
+.chaimir-steps li.is-active .chaimir-steps__marker {
+  color: var(--color-primary-fg);
+  background: var(--color-primary);
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 4px var(--color-primary-soft);
+}
+
+.chaimir-steps li.is-done .chaimir-steps__marker {
+  color: var(--color-primary-fg);
+  background: var(--color-success-solid);
+  border-color: var(--color-success-solid);
+}
+
+.chaimir-steps li.is-error .chaimir-steps__marker {
+  color: var(--color-primary-fg);
+  background: var(--color-danger-solid);
+  border-color: var(--color-danger-solid);
+}

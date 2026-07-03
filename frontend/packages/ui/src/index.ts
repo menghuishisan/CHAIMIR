@@ -29,6 +29,17 @@ export * from './components/Skeleton'
 export * from './components/Tabs'
 export * from './components/Pagination'
 export * from './components/Breadcrumb'
+export * from './components/Drawer'
+export * from './components/Menu'
+export * from './components/Steps'
+export * from './components/Autosave'
 
 // 展示组件
 export * from './components/Progress'
+export * from './components/Table'
+export * from './components/Stat'
+export * from './components/Callout'
+
+// 图表与业务组件
+export * from './charts'
+export * from './biz'

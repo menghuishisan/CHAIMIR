@@ -1,5 +1,5 @@
 // Skeleton 组件：骨架屏
-// 用于加载态占位，防止 CLS（累积布局偏移）
+// 用于加载态空间预留，防止 CLS（累积布局偏移）
 
 import React from 'react'
 import { clsx } from 'clsx'

@@ -14,7 +14,7 @@
   align-items: center;
   justify-content: center;
   padding: var(--space-4);
-  background: rgba(15, 23, 42, 0.5); /* 遮罩 50% */
+  background: var(--color-scrim); /* 遮罩 50% */
   animation: chaimir-modal-overlay-in var(--t-slow) var(--ease-out);
 }
 

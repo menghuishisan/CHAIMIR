@@ -1,0 +1,65 @@
+/* SandboxStatus 业务组件样式：状态机中文化，失败态可操作且不只靠颜色表达。 */
+
+.chaimir-sandbox-status {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: var(--space-3);
+  align-items: center;
+  padding: var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg);
+  color: var(--color-text);
+}
+
+.chaimir-sandbox-status__icon {
+  display: inline-grid;
+  place-items: center;
+  inline-size: 2rem;
+  block-size: 2rem;
+  border-radius: var(--radius-full);
+  color: var(--color-primary-text);
+  background: var(--color-primary-soft);
+}
+
+.chaimir-sandbox-status strong,
+.chaimir-sandbox-status small {
+  display: block;
+}
+
+.chaimir-sandbox-status small {
+  margin-top: var(--space-1);
+  color: var(--color-text-sub);
+}
+
+.chaimir-sandbox-status button {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-block-size: 2rem;
+  color: var(--color-danger);
+  font-weight: var(--font-semibold);
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+}
+
+.chaimir-sandbox-status.is-ready .chaimir-sandbox-status__icon {
+  color: var(--color-primary-fg);
+  background: var(--color-success-solid);
+}
+
+.chaimir-sandbox-status.is-failed {
+  border-color: var(--color-danger-border);
+  background: var(--color-danger-bg);
+}
+
+.chaimir-sandbox-status.is-failed .chaimir-sandbox-status__icon {
+  color: var(--color-primary-fg);
+  background: var(--color-danger-solid);
+}
+
+.chaimir-sandbox-status.is-released .chaimir-sandbox-status__icon {
+  color: var(--color-text-sub);
+  background: var(--color-surface-sunken);
+}

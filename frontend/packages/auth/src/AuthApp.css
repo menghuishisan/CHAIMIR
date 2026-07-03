@@ -1,0 +1,223 @@
+/* PublicApp 样式：登录前公共入口使用同一套青电与琥珀令牌。 */
+
+.public-app {
+  min-block-size: 100dvh;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(22rem, 32rem);
+  color: var(--color-text);
+  background: var(--color-bg);
+}
+
+.public-hero {
+  position: relative;
+  display: grid;
+  align-content: space-between;
+  gap: var(--space-8);
+  min-block-size: 100dvh;
+  padding: var(--space-10);
+  overflow: hidden;
+  color: var(--color-dark-text);
+  background: var(--color-dark-bg);
+}
+
+.public-brand,
+.public-back {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.public-brand {
+  position: relative;
+  z-index: var(--z-base);
+  color: var(--color-dark-text);
+}
+
+.public-brand__mark {
+  display: grid;
+  place-items: center;
+  inline-size: 2.5rem;
+  block-size: 2.5rem;
+  color: var(--color-primary-fg);
+  font-weight: var(--font-bold);
+  background: var(--color-primary);
+  border-radius: var(--radius-sm);
+}
+
+.public-brand small,
+.public-hero__content p {
+  display: block;
+  color: var(--color-dark-text-sub);
+}
+
+.public-hero__content {
+  position: relative;
+  z-index: var(--z-base);
+  max-inline-size: 36rem;
+}
+
+.public-kicker {
+  color: var(--color-on-dark-accent);
+  font-size: var(--text-xs);
+  font-weight: var(--font-bold);
+  text-transform: uppercase;
+}
+
+.public-hero__content h1 {
+  margin: var(--space-3) 0;
+  font-size: var(--text-4xl);
+  line-height: var(--leading-tight);
+}
+
+.public-hero__grid {
+  position: absolute;
+  inset-inline-end: var(--space-10);
+  inset-block-end: var(--space-10);
+  display: grid;
+  grid-template-columns: repeat(2, 8rem);
+  gap: var(--space-3);
+  opacity: 0.45;
+}
+
+.public-hero__grid span {
+  aspect-ratio: 1;
+  border: 1px solid var(--color-dark-border);
+  border-radius: var(--radius);
+  background: var(--color-dark-surface);
+}
+
+.public-panel {
+  display: grid;
+  align-content: center;
+  gap: var(--space-4);
+  padding: var(--space-8);
+  background: var(--color-surface);
+}
+
+.public-back {
+  color: var(--color-primary-text);
+  font-weight: var(--font-medium);
+}
+
+.public-auth-block {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.public-auth-block h2 {
+  color: var(--color-text-strong);
+  font-size: var(--text-3xl);
+  line-height: var(--leading-tight);
+}
+
+.public-auth-block > p {
+  color: var(--color-text-sub);
+}
+
+.public-form,
+.public-field {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.public-tabs,
+.public-button-row,
+.public-code-row,
+.public-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.public-tabs {
+  padding: var(--space-1);
+  background: var(--color-surface-sunken);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+}
+
+.public-tabs .chaimir-btn {
+  flex: 1 1 7rem;
+}
+
+.public-field {
+  color: var(--color-text);
+  font-weight: var(--font-medium);
+}
+
+.public-code-row {
+  align-items: end;
+}
+
+.public-code-row .public-field {
+  flex: 1 1 12rem;
+}
+
+.public-button-row > *,
+.public-code-row > button {
+  flex: 1 1 10rem;
+}
+
+.public-links a,
+.public-card-link {
+  color: var(--color-primary-text);
+  font-weight: var(--font-medium);
+}
+
+.public-alert {
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid;
+  border-radius: var(--radius-sm);
+}
+
+.public-alert.is-success {
+  color: var(--color-success);
+  background: var(--color-success-bg);
+  border-color: var(--color-success-border);
+}
+
+.public-alert.is-error {
+  color: var(--color-danger);
+  background: var(--color-danger-bg);
+  border-color: var(--color-danger-border);
+}
+
+.public-tenant-picker {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.public-tenant-choice {
+  justify-content: flex-start;
+}
+
+@media (max-width: 1023px) {
+  .public-app {
+    grid-template-columns: 1fr;
+  }
+
+  .public-hero {
+    min-block-size: auto;
+    padding: var(--space-6);
+  }
+
+  .public-hero__grid {
+    display: none;
+  }
+
+  .public-panel {
+    padding: var(--space-6);
+  }
+}
+
+@media (max-width: 639px) {
+  .public-panel,
+  .public-hero {
+    padding: var(--space-4);
+  }
+
+  .public-hero__content h1,
+  .public-auth-block h2 {
+    font-size: var(--text-2xl);
+  }
+}

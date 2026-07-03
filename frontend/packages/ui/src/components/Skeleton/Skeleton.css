@@ -1,6 +1,6 @@
 /* Skeleton 组件样式
  *
- * 符合前端设计规范 §5.1：占位预留空间防 CLS
+ * 符合前端设计规范 §5.1：加载态预留空间防 CLS
  */
 
 .chaimir-skeleton {
@@ -44,7 +44,7 @@
   background: linear-gradient(
     90deg,
     transparent 0%,
-    rgba(255, 255, 255, 0.3) 50%,
+    var(--color-skeleton-shine) 50%,
     transparent 100%
   );
   animation: chaimir-skeleton-shimmer 1.5s ease-in-out infinite;

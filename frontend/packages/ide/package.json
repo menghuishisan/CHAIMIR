@@ -1,0 +1,23 @@
+{
+  "name": "@chaimir/ide",
+  "version": "0.1.0",
+  "description": "Chaimir 代码编辑器与终端封装",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "dev": "tsc --watch --noEmit",
+    "build": "tsc --noEmit",
+    "lint": "eslint src --ext .ts,.tsx",
+    "type-check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@xterm/xterm": "^5.5.0",
+    "monaco-editor": "^0.52.2"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.5"
+  }
+}

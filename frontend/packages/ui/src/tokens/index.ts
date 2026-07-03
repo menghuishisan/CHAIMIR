@@ -51,6 +51,12 @@ export const colors = {
   darkSurface: 'var(--color-dark-surface)',
   darkText: 'var(--color-dark-text)',
   darkTextSub: 'var(--color-dark-text-sub)',
+  onDarkAccent: 'var(--color-on-dark-accent)',
+  onDarkAccentHover: 'var(--color-on-dark-accent-hover)',
+  onDarkAccentFg: 'var(--color-on-dark-accent-fg)',
+  mutedBg: 'var(--color-muted-bg)',
+  mutedText: 'var(--color-muted-text)',
+  mutedAccent: 'var(--color-muted-accent)',
 } as const
 
 export const spacing = {

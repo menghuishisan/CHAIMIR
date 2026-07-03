@@ -1,0 +1,68 @@
+/* Stat 组件样式：数字等宽、状态图标加文字，避免只靠颜色表达趋势。 */
+
+.chaimir-stat {
+  display: grid;
+  gap: var(--space-3);
+  padding: var(--card-pad);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  background: var(--color-bg);
+  box-shadow: var(--shadow-xs);
+}
+
+.chaimir-stat header,
+.chaimir-stat footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.chaimir-stat header span:first-child {
+  color: var(--color-text-sub);
+  font-size: var(--text-sm);
+  font-weight: var(--font-medium);
+}
+
+.chaimir-stat__icon {
+  display: inline-grid;
+  place-items: center;
+  inline-size: 2.25rem;
+  block-size: 2.25rem;
+  color: var(--color-primary-text);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-primary-soft);
+}
+
+.chaimir-stat > strong {
+  color: var(--color-text-strong);
+  font-family: var(--font-mono);
+  font-size: var(--text-3xl);
+  font-variant-numeric: tabular-nums;
+  line-height: var(--leading-tight);
+}
+
+.chaimir-stat footer small {
+  color: var(--color-text-sub);
+}
+
+.chaimir-stat__delta {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-size: var(--text-sm);
+  font-weight: var(--font-semibold);
+}
+
+.chaimir-stat__delta.is-up {
+  color: var(--color-success);
+}
+
+.chaimir-stat__delta.is-down {
+  color: var(--color-danger);
+}
+
+.chaimir-stat__delta.is-flat {
+  color: var(--color-text-sub);
+}

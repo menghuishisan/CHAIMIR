@@ -231,7 +231,11 @@ export function SimulationWorkbench({
               <h2>{currentStep.question.prompt}</h2>
               <div className="sim-question__options">
                 {currentStep.question.options.map((option) => {
-                  const selected = questionAnswers[currentStep.question.checkpointId] === option;
+                  const question = currentStep.question;
+                  if (!question) {
+                    return null;
+                  }
+                  const selected = questionAnswers[question.checkpointId] === option;
                   return (
                     <button aria-pressed={selected} className={selected ? 'is-selected' : undefined} key={option} type="button" onClick={() => submitCheckpoint(currentStep, option)}>
                       {option}

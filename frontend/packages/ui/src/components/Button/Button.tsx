@@ -1,5 +1,5 @@
 // Button 组件：所有按钮交互的基础组件
-// 符合 FE-1（全令牌化）、FE-2（无障碍）、FE-3（禁用emoji，使用Lucide图标）
+// 符合 FE-1（全令牌化）、FE-2（无障碍）、FE-3（禁用表情符号，使用 Lucide 图标）
 
 import React from 'react'
 import { Loader2 } from 'lucide-react'

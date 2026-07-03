@@ -1,0 +1,45 @@
+/* CheckpointCard 业务组件样式：检查点结果用图标、文字和分值共同表达。 */
+
+.chaimir-checkpoint-card {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: var(--space-3);
+  align-items: start;
+  padding: var(--space-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  background: var(--color-bg);
+  box-shadow: var(--shadow-xs);
+}
+
+.chaimir-checkpoint-card__icon {
+  color: var(--color-text-sub);
+}
+
+.chaimir-checkpoint-card.is-passed .chaimir-checkpoint-card__icon {
+  color: var(--color-success);
+}
+
+.chaimir-checkpoint-card.is-failed .chaimir-checkpoint-card__icon {
+  color: var(--color-danger);
+}
+
+.chaimir-checkpoint-card strong {
+  color: var(--color-text-strong);
+}
+
+.chaimir-checkpoint-card p {
+  margin: var(--space-1) 0 0;
+  color: var(--color-text-sub);
+  line-height: var(--leading-normal);
+}
+
+.chaimir-checkpoint-card b {
+  color: var(--color-text-strong);
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.chaimir-checkpoint-card__action {
+  grid-column: 2 / -1;
+}

@@ -1,0 +1,26 @@
+/* GradeCell 业务组件样式：成绩数字等宽，锁定状态用图标和文字表达。 */
+
+.chaimir-grade-cell {
+  display: inline-grid;
+  gap: var(--space-1);
+  min-inline-size: 4.5rem;
+}
+
+.chaimir-grade-cell strong {
+  color: var(--color-text-strong);
+  font-family: var(--font-mono);
+  font-size: var(--text-lg);
+  font-variant-numeric: tabular-nums;
+}
+
+.chaimir-grade-cell span {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  color: var(--color-text-sub);
+  font-size: var(--text-xs);
+}
+
+.chaimir-grade-cell.is-locked span {
+  color: var(--color-warning);
+}

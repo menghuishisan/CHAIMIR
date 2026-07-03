@@ -8,3 +8,6 @@ export * from './hooks'
 
 // 常量
 export * from './constants'
+
+// 四端应用装配
+export * from './app'

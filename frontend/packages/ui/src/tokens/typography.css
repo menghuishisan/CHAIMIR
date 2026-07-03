@@ -45,18 +45,6 @@
   --tracking-widest: 0.09em;  /* 最宽：kicker 小标签 */
 }
 
-/* ===== 字体加载 =====
- *
- * 生产环境应自托管字体，此处使用 Google Fonts CDN 作为开发占位。
- * 使用 font-display: swap 确保文字始终可见。
- */
-
-/* Inter - 拉丁/数字 */
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
-
-/* JetBrains Mono - 等宽 */
-@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap');
-
 /* ===== 工具类：等宽数字 =====
  *
  * 用于统计数值/成绩/计时/表格数字列，防止数字变化时跳动。

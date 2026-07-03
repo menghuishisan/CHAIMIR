@@ -31,7 +31,7 @@
 }
 
 .chaimir-spinner--white .chaimir-spinner__icon {
-  color: #ffffff;
+  color: var(--color-white);
 }
 
 /* === 标签文字 === */
@@ -42,5 +42,5 @@
 }
 
 .chaimir-spinner--white .chaimir-spinner__label {
-  color: rgba(255, 255, 255, 0.9);
+  color: var(--color-on-dark-muted);
 }
