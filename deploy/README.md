@@ -198,7 +198,9 @@ GitHub Actions(`.github/workflows/`)+ 可复用配置(`deploy/ci/`):
 
 - `backend.yml` / `frontend.yml` / `images.yml`:路径触发 → lint+测试 → 构建 →
   Trivy 扫描(高危阻断)→ Cosign 签名 → 推 Harbor。三者共用 `ci/build-scan-sign-push` composite action。
-- `deploy.yml`:`main` → 自动部署 staging;打 `v*` tag → 人工审批(GitHub Environment 保护)→ prod-saas。
+- `deploy.yml`:backend workflow 在 `main` 成功完成并产出同 SHA 后端镜像后 → 自动部署 staging;打 `v*` tag → 人工审批(GitHub Environment 保护)→ prod-saas。
+
+README、docs 或仅前端资源变更不创建 staging Deployment。staging 只部署已经通过后端流水线构建、扫描、签名并推送到 Harbor 的镜像,避免 main 推送后部署任务早于镜像产物完成。
 
 所需 GitHub Secrets:`HARBOR_REGISTRY`、`HARBOR_USERNAME`、`HARBOR_PASSWORD`、
 `COSIGN_KEY`、`COSIGN_PASSWORD`、`KUBECONFIG_STAGING`、`KUBECONFIG_PROD_SAAS`。

@@ -1,36 +1,41 @@
-# 部署流水线:main→自动部署 staging;打 tag→人工审批→部署 prod-saas。
+# 部署流水线:backend 镜像流水线成功后自动部署 staging;打 tag→人工审批→部署 prod-saas。
 # 依据 docs/总-部署架构设计.md §六:
-#   main 分支 → 自动部署 staging;打 tag → 人工审批 → 部署 prod-saas;
+#   main 分支 backend 镜像流水线成功 → 自动部署 staging;打 tag → 人工审批 → 部署 prod-saas;
 #   私有化 → 生成离线镜像包 + 部署清单交付(见 deploy/Makefile / scripts,目录5)。
 name: deploy
 
 on:
-  push:
+  workflow_run:
+    workflows: ["backend"]
     branches: [main]
+    types: [completed]
+  push:
     tags: ["v*"]
 
 permissions:
   contents: read
 
 jobs:
-  # main 分支:自动部署 staging。
+  # main 分支:后端镜像完成构建、扫描、签名并推送后自动部署 staging。
   deploy-staging:
-    if: github.ref == 'refs/heads/main'
+    if: github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     environment: staging  # GitHub Environment(可配审批/保护规则)。
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
       - name: 配置 kubeconfig(staging)
         run: |
           mkdir -p ~/.kube
           echo "${{ secrets.KUBECONFIG_STAGING }}" > ~/.kube/config
       - name: 应用 staging overlay
         run: |
-          # 用提交 SHA 作为镜像 tag,确保部署与构建一致。
+          # 用触发 backend 流水线的提交 SHA 作为镜像 tag,确保部署与构建一致。
           cd deploy/overlays/staging
           kubectl apply -k .
           kubectl -n chaimir-system set image deployment/chaimir-backend \
-            server=${{ secrets.HARBOR_REGISTRY }}/service/backend:${{ github.sha }}
+            server=${{ secrets.HARBOR_REGISTRY }}/service/backend:${{ github.event.workflow_run.head_sha }}
           kubectl -n chaimir-system rollout status deployment/chaimir-backend --timeout=300s
 
   # 打 tag:人工审批后部署 prod-saas。
