@@ -22,16 +22,17 @@ import './PatternRenderer.css';
 export interface PatternRendererProps {
   pattern: PatternBinding;
   selectedElementId?: string;
+  reducedMotion?: boolean;
   onSelectElement?: (elementId: string, elementType?: string) => void;
 }
 
 /**
  * 按模式类型分发到平台维护的统一渲染器。
  */
-export function PatternRenderer({ pattern, selectedElementId, onSelectElement }: PatternRendererProps): React.ReactElement {
+export function PatternRenderer({ pattern, selectedElementId, reducedMotion = false, onSelectElement }: PatternRendererProps): React.ReactElement {
   switch (pattern.mode) {
     case 'graph':
-      return <GraphRenderer pattern={pattern} selectedElementId={selectedElementId} onSelectElement={onSelectElement} />;
+      return <GraphRenderer pattern={pattern} selectedElementId={selectedElementId} reducedMotion={reducedMotion} onSelectElement={onSelectElement} />;
     case 'chain':
       return <ChainRenderer pattern={pattern} selectedElementId={selectedElementId} onSelectElement={onSelectElement} />;
     case 'tree':
@@ -39,9 +40,9 @@ export function PatternRenderer({ pattern, selectedElementId, onSelectElement }:
     case 'matrix':
       return <MatrixRenderer pattern={pattern} selectedElementId={selectedElementId} onSelectElement={onSelectElement} />;
     case 'pipeline':
-      return <PipelineRenderer pattern={pattern} selectedElementId={selectedElementId} onSelectElement={onSelectElement} />;
+      return <PipelineRenderer pattern={pattern} selectedElementId={selectedElementId} reducedMotion={reducedMotion} onSelectElement={onSelectElement} />;
     case 'lane':
-      return <LaneRenderer pattern={pattern} selectedElementId={selectedElementId} onSelectElement={onSelectElement} />;
+      return <LaneRenderer pattern={pattern} selectedElementId={selectedElementId} reducedMotion={reducedMotion} onSelectElement={onSelectElement} />;
     case 'chart':
       return <ChartRenderer pattern={pattern} selectedElementId={selectedElementId} onSelectElement={onSelectElement} />;
   }
@@ -53,10 +54,12 @@ export function PatternRenderer({ pattern, selectedElementId, onSelectElement }:
 function GraphRenderer({
   pattern,
   selectedElementId,
+  reducedMotion,
   onSelectElement,
 }: {
   pattern: GraphPattern;
   selectedElementId?: string;
+  reducedMotion: boolean;
   onSelectElement?: (elementId: string, elementType?: string) => void;
 }): React.ReactElement {
   const nodes = layoutGraphNodes(pattern.data.nodes, pattern.data.layout);
@@ -72,7 +75,7 @@ function GraphRenderer({
           const to = nodeById.get(edge.to);
           if (!from || !to) return null;
           const line = shortenLine(from, to, 6.5);
-          const progress = processProgress(edge);
+          const progress = processProgress(edge, reducedMotion);
           const pulse = pointOnLine(line, progress);
           return (
             <g className="sim-graph__edge-group" key={edge.id} {...selectableElementProps(edge.id, onSelectElement, 'edge')}>
@@ -271,10 +274,12 @@ function MatrixRenderer({
 function PipelineRenderer({
   pattern,
   selectedElementId,
+  reducedMotion,
   onSelectElement,
 }: {
   pattern: PipelinePattern;
   selectedElementId?: string;
+  reducedMotion: boolean;
   onSelectElement?: (elementId: string, elementType?: string) => void;
 }): React.ReactElement {
   const complete = pattern.data.steps.filter((step) => step.status === 'complete').length;
@@ -293,7 +298,7 @@ function PipelineRenderer({
             <small>{step.detail}</small>
             {step.process && (
               <span className="sim-pipeline__progress" aria-label={`${step.process.label}${Math.round(step.process.progress * 100)}%`}>
-                <span style={{ inlineSize: `${Math.round(clamp01(step.process.progress) * 100)}%` }} />
+                <span style={{ inlineSize: `${Math.round(processSpanProgress(step.process, reducedMotion) * 100)}%` }} />
               </span>
             )}
           </li>
@@ -309,10 +314,12 @@ function PipelineRenderer({
 function LaneRenderer({
   pattern,
   selectedElementId,
+  reducedMotion,
   onSelectElement,
 }: {
   pattern: LanePattern;
   selectedElementId?: string;
+  reducedMotion: boolean;
   onSelectElement?: (elementId: string, elementType?: string) => void;
 }): React.ReactElement {
   const maxTime = Math.max(1, pattern.data.currentTime, ...pattern.data.messages.map((message) => message.endAt ?? message.at));
@@ -327,7 +334,7 @@ function LaneRenderer({
               {pattern.data.messages
                 .filter((message) => message.from === actor || message.to === actor)
                 .map((message) => {
-                  const position = messageTimePosition(message, maxTime);
+                  const position = messageTimePosition(message, maxTime, reducedMotion);
                   return (
                     <span
                       className={clsx('sim-lane__message', `is-${message.status}`, selectedElementId === message.id && 'is-selected')}
@@ -338,7 +345,7 @@ function LaneRenderer({
                     >
                       <b>{message.from === actor ? '出' : '入'}</b>
                       {message.label}
-                      {message.process && <i style={{ inlineSize: `${Math.round(clamp01(message.process.progress) * 100)}%` }} aria-hidden="true" />}
+                      {message.process && <i style={{ inlineSize: `${Math.round(processSpanProgress(message.process, reducedMotion) * 100)}%` }} aria-hidden="true" />}
                     </span>
                   );
                 })}
@@ -487,7 +494,12 @@ function shortenLine(from: PositionedGraphNode, to: PositionedGraphNode, offset:
 /**
  * processProgress 读取协议消息的过程进度,没有过程数据时保持旧的静态位置。
  */
-function processProgress(edge: GraphEdge): number {
+function processProgress(edge: GraphEdge, reducedMotion: boolean): number {
+  if (reducedMotion) {
+    if (edge.status === 'pending') return 0.15;
+    if (edge.status === 'active') return 0.5;
+    return 0.85;
+  }
   if (edge.process) return clamp01(edge.process.progress);
   if (edge.status === 'pending') return 0.15;
   if (edge.status === 'active') return 0.5;
@@ -504,10 +516,25 @@ function pointOnLine(line: ReturnType<typeof shortenLine>, progress: number): { 
 /**
  * messageTimePosition 将消息发送、到达和过程进度映射为泳道中的连续位置。
  */
-function messageTimePosition(message: LaneMessage, maxTime: number): number {
+function messageTimePosition(message: LaneMessage, maxTime: number, reducedMotion: boolean): number {
   const duration = Math.max(0, (message.endAt ?? message.at) - message.at);
-  const logicalTime = duration > 0 ? message.at + duration * clamp01(message.process?.progress ?? 1) : message.at;
+  const progress = reducedMotion ? staticMessageProgress(message) : clamp01(message.process?.progress ?? 1);
+  const logicalTime = duration > 0 ? message.at + duration * progress : message.at;
   return Math.min(92, Math.max(0, (logicalTime / maxTime) * 88));
+}
+
+/**
+ * processSpanProgress 在减少动态时只保留离散状态,不播放连续过程。
+ */
+function processSpanProgress(process: { progress: number }, reducedMotion: boolean): number {
+  return reducedMotion ? Math.round(clamp01(process.progress)) : clamp01(process.progress);
+}
+
+/**
+ * staticMessageProgress 在减少动态时把泳道消息固定到起点或终点,避免滑行动效。
+ */
+function staticMessageProgress(message: LaneMessage): number {
+  return message.status === 'sent' ? 0 : 1;
 }
 
 /**

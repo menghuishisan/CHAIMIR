@@ -1,0 +1,151 @@
+/* AttackDefenseTopology 样式：拓扑图和文字清单共同表达攻防关系。 */
+
+.chaimir-topology {
+  display: grid;
+  gap: var(--space-3);
+  padding: var(--card-pad);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  background: var(--color-bg);
+  box-shadow: var(--shadow-xs);
+}
+
+.chaimir-topology__header h3,
+.chaimir-topology__header p {
+  margin: 0;
+}
+
+.chaimir-topology__header h3 {
+  color: var(--color-text-strong);
+  font-size: var(--text-lg);
+}
+
+.chaimir-topology__header p {
+  margin-top: var(--space-1);
+  color: var(--color-text-sub);
+}
+
+.chaimir-topology__body {
+  display: grid;
+  grid-template-columns: minmax(18rem, 1fr) minmax(14rem, 20rem);
+  gap: var(--space-4);
+  align-items: start;
+}
+
+.chaimir-topology svg {
+  inline-size: 100%;
+  aspect-ratio: 18 / 11;
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+}
+
+.chaimir-topology__edge line {
+  stroke: var(--color-border-strong);
+  stroke-width: 2;
+}
+
+.chaimir-topology__edge.is-attack line {
+  stroke: var(--color-danger);
+  stroke-dasharray: 6 4;
+}
+
+.chaimir-topology__edge.is-blocked line {
+  stroke: var(--color-warning);
+  stroke-dasharray: 2 4;
+}
+
+.chaimir-topology__edge text {
+  fill: var(--color-text-sub);
+  font-size: var(--text-xs);
+  text-anchor: middle;
+}
+
+.chaimir-topology__node {
+  outline: none;
+}
+
+.chaimir-topology__node circle {
+  fill: var(--color-bg);
+  stroke: var(--color-border-strong);
+  stroke-width: 2;
+}
+
+.chaimir-topology__node text {
+  fill: var(--color-text);
+  font-size: var(--text-xs);
+  font-weight: var(--font-semibold);
+  text-anchor: middle;
+  dominant-baseline: middle;
+}
+
+.chaimir-topology__node.is-defender circle {
+  stroke: var(--color-success);
+}
+
+.chaimir-topology__node.is-attacker circle,
+.chaimir-topology__node.is-risk circle {
+  stroke: var(--color-danger);
+}
+
+.chaimir-topology__node.is-blocked circle {
+  stroke: var(--color-warning);
+}
+
+.chaimir-topology__node:focus-visible circle {
+  stroke: var(--color-focus-ring);
+  stroke-width: 4;
+}
+
+.chaimir-topology__list {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.chaimir-topology__list h4 {
+  margin: 0;
+  color: var(--color-text-strong);
+  font-size: var(--text-md);
+}
+
+.chaimir-topology__list article {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: var(--space-2);
+  align-items: center;
+  padding: var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+}
+
+.chaimir-topology__list article.is-healthy {
+  border-color: var(--color-success-border);
+}
+
+.chaimir-topology__list article.is-risk {
+  border-color: var(--color-danger-border);
+  background: var(--color-danger-bg);
+}
+
+.chaimir-topology__list article.is-blocked {
+  border-color: var(--color-warning-border);
+  background: var(--color-warning-bg);
+}
+
+.chaimir-topology__list strong,
+.chaimir-topology__list p {
+  margin: 0;
+}
+
+.chaimir-topology__list p {
+  margin-top: var(--space-1);
+  color: var(--color-text-sub);
+  font-size: var(--text-sm);
+}
+
+@media (max-width: 48rem) {
+  .chaimir-topology__body {
+    grid-template-columns: 1fr;
+  }
+}

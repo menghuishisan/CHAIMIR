@@ -615,9 +615,11 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .sim-graph__pulse,
-  .sim-lane__message,
-  .sim-pipeline__progress span {
-    transition: none;
+  .sim-pattern *,
+  .sim-pattern *::before,
+  .sim-pattern *::after {
+    animation: none !important;
+    transition: none !important;
+    scroll-behavior: auto !important;
   }
 }

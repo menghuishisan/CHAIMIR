@@ -91,6 +91,21 @@
   line-height: var(--leading-normal);
 }
 
+.sim-workbench .chaimir-sandbox-status {
+  color: var(--color-dark-text);
+  background: var(--color-dark-elevated);
+  border-color: var(--color-dark-border);
+}
+
+.sim-workbench .chaimir-sandbox-status small {
+  color: var(--color-dark-text-sub);
+}
+
+.sim-workbench .chaimir-sandbox-status__icon {
+  color: var(--color-on-dark-accent-fg);
+  background: var(--color-on-dark-accent);
+}
+
 .sim-workbench__empty {
   display: grid;
   place-items: center;
@@ -527,7 +542,8 @@
   .sim-workbench *,
   .sim-workbench *::before,
   .sim-workbench *::after {
-    animation-duration: 1ms !important;
-    transition-duration: 1ms !important;
+    animation: none !important;
+    transition: none !important;
+    scroll-behavior: auto !important;
   }
 }

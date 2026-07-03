@@ -13,6 +13,8 @@ import { toUserFacingError, UserFacingError } from './errors'
 import type { ActionValues, AppDefinition, AppRoute, DataRow, PageAction, ResourceResult, RowAction, WorkspaceResult, WorkspaceTool } from './types'
 import './ChaimirApp.css'
 
+const SIDEBAR_COLLAPSED_STORAGE_PREFIX = 'chaimir.sidebar.collapsed'
+
 export interface ChaimirAppProps {
   /** 当前四端入口提供的应用定义，业务页面定义归属各端 features 目录。 */
   definition: AppDefinition
@@ -78,7 +80,7 @@ function AppShell({
   api: ChaimirApi
   children: React.ReactNode
 }): React.ReactElement {
-  const [collapsed, setCollapsed] = useState(false)
+  const [collapsed, setCollapsed] = useState(() => readSidebarCollapsed(app))
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [search, setSearch] = useState('')
   const [unread, setUnread] = useState<number | null>(null)
@@ -131,6 +133,18 @@ function AppShell({
     drawerPanelRef.current?.querySelector<HTMLElement>('a, button')?.focus()
   }, [drawerOpen])
 
+  useEffect(() => {
+    setCollapsed(readSidebarCollapsed(app))
+  }, [app])
+
+  const toggleCollapsed = () => {
+    setCollapsed((value) => {
+      const next = !value
+      writeSidebarCollapsed(app, next)
+      return next
+    })
+  }
+
   return (
     <div className={`chaimir-app ${collapsed ? 'is-collapsed' : ''}`}>
       <a className="skip-link" href="#main-content">跳到主要内容</a>
@@ -166,7 +180,7 @@ function AppShell({
       <aside className="chaimir-app__sidebar" aria-label={`${app.title}导航`}>
         <Sidebar app={app} activePath={activePath} collapsed={collapsed} search={search} />
         <div className="chaimir-app__sidebar-footer">
-          <button className="chaimir-app__nav-item" type="button" onClick={() => setCollapsed((value) => !value)} aria-label={collapsed ? '展开侧栏' : '收起侧栏'}>
+          <button className="chaimir-app__nav-item" type="button" onClick={toggleCollapsed} aria-label={collapsed ? '展开侧栏' : '收起侧栏'}>
             {collapsed ? <PanelLeftOpen size={18} aria-hidden="true" /> : <PanelLeftClose size={18} aria-hidden="true" />}
             <span>收起侧栏</span>
           </button>
@@ -723,6 +737,36 @@ async function logout(api: ChaimirApi, setLogoutError: (message: string | null) 
   } finally {
     clearSession()
   }
+}
+
+/**
+ * readSidebarCollapsed 从浏览器本地状态恢复桌面侧栏折叠偏好；读取失败不影响主流程。
+ */
+function readSidebarCollapsed(app: AppDefinition): boolean {
+  try {
+    return window.localStorage.getItem(sidebarCollapsedStorageKey(app)) === 'true'
+  } catch (error) {
+    console.warn('无法读取侧栏显示偏好', error)
+    return false
+  }
+}
+
+/**
+ * writeSidebarCollapsed 在用户切换侧栏时保存偏好，刷新后保持同一角色端的布局状态。
+ */
+function writeSidebarCollapsed(app: AppDefinition, collapsed: boolean): void {
+  try {
+    window.localStorage.setItem(sidebarCollapsedStorageKey(app), String(collapsed))
+  } catch (error) {
+    console.warn('无法保存侧栏显示偏好', error)
+  }
+}
+
+/**
+ * sidebarCollapsedStorageKey 按角色隔离折叠偏好，避免四端互相影响。
+ */
+function sidebarCollapsedStorageKey(app: AppDefinition): string {
+  return `${SIDEBAR_COLLAPSED_STORAGE_PREFIX}.${app.role}`
 }
 
 /**

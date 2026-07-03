@@ -1,0 +1,94 @@
+/* VoteMatrix 样式：矩阵状态由图标、文字和令牌色共同表达。 */
+
+.chaimir-vote-matrix {
+  display: grid;
+  gap: var(--space-3);
+  padding: var(--card-pad);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  background: var(--color-bg);
+  box-shadow: var(--shadow-xs);
+}
+
+.chaimir-vote-matrix__header h3,
+.chaimir-vote-matrix__header p {
+  margin: 0;
+}
+
+.chaimir-vote-matrix__header h3 {
+  color: var(--color-text-strong);
+  font-size: var(--text-lg);
+}
+
+.chaimir-vote-matrix__header p {
+  margin-top: var(--space-1);
+  color: var(--color-text-sub);
+}
+
+.chaimir-vote-matrix__wrap {
+  overflow: auto;
+}
+
+.chaimir-vote-matrix table {
+  min-inline-size: 32rem;
+  inline-size: 100%;
+  border-collapse: collapse;
+}
+
+.chaimir-vote-matrix caption {
+  margin-bottom: var(--space-2);
+  color: var(--color-text-sub);
+  text-align: start;
+}
+
+.chaimir-vote-matrix th,
+.chaimir-vote-matrix td {
+  padding: var(--space-2);
+  border: 1px solid var(--color-border-subtle);
+  text-align: start;
+}
+
+.chaimir-vote-matrix th {
+  color: var(--color-text-sub);
+  font-size: var(--text-xs);
+  font-weight: var(--font-bold);
+}
+
+.chaimir-vote-matrix td span {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.chaimir-vote-matrix td small {
+  display: block;
+  margin-top: var(--space-1);
+  color: var(--color-text-sub);
+}
+
+.chaimir-vote-matrix td.is-yes {
+  color: var(--color-success);
+  background: var(--color-success-bg);
+}
+
+.chaimir-vote-matrix td.is-no,
+.chaimir-vote-matrix td.is-fault {
+  color: var(--color-danger);
+  background: var(--color-danger-bg);
+}
+
+.chaimir-vote-matrix td.is-pending {
+  color: var(--color-warning);
+  background: var(--color-warning-bg);
+}
+
+.chaimir-vote-matrix td.is-neutral {
+  color: var(--color-text);
+  background: var(--color-surface);
+}
+
+@media (max-width: 48rem) {
+  .chaimir-vote-matrix {
+    padding: var(--space-3);
+  }
+}

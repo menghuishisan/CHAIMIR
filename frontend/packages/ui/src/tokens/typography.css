@@ -1,4 +1,24 @@
-/* ===== 字体令牌 (Typography Tokens) ===== */
+/* ===== 字体令牌 (Typography Tokens) =====
+ *
+ * 字体加载策略：生产环境不依赖 Google Fonts CDN。
+ * @font-face 先读取本机或部署环境自托管字体，缺失时立即 swap 到系统字体栈。
+ */
+
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 400 800;
+  font-display: swap;
+  src: local('Inter var'), local('Inter Variable'), local('Inter');
+}
+
+@font-face {
+  font-family: 'JetBrains Mono';
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: swap;
+  src: local('JetBrains Mono'), local('JetBrainsMono-Regular');
+}
 
 :root {
   /* === 字体族 === */

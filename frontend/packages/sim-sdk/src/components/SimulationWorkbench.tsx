@@ -2,7 +2,8 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 import { AlertTriangle, CheckCircle2, Clock3, Pause, Play, RotateCcw, ShieldAlert, SkipBack, StepForward } from 'lucide-react';
-import { Button } from '@chaimir/ui';
+import { Button, SandboxStatus } from '@chaimir/ui';
+import type { SandboxStatusKind } from '@chaimir/ui';
 import type {
   CheckpointResult,
   CodeTraceDef,
@@ -19,6 +20,7 @@ import type {
 } from '../types';
 import { SimWorkerClient } from '../runtime/SimWorkerClient';
 import { PatternRenderer } from '../renderers/PatternRenderer';
+import { usePrefersReducedMotion } from '../hooks/usePrefersReducedMotion';
 import './SimulationWorkbench.css';
 
 export interface SimulationWorkbenchProps {
@@ -58,6 +60,7 @@ export function SimulationWorkbench({
   const [selectedElementId, setSelectedElementId] = useState<string | undefined>();
   const [selectedElementType, setSelectedElementType] = useState<string | undefined>();
   const [questionAnswers, setQuestionAnswers] = useState<Record<string, string>>({});
+  const reducedMotion = usePrefersReducedMotion();
 
   useEffect(() => {
     setDescriptor(undefined);
@@ -111,6 +114,14 @@ export function SimulationWorkbench({
     clientRef.current?.setStepDuration(stepDuration / speed);
   }, [stepDuration, speed]);
 
+  useEffect(() => {
+    if (!reducedMotion || !playing) {
+      return;
+    }
+    clientRef.current?.pause();
+    setPlaying(false);
+  }, [playing, reducedMotion]);
+
   const activeElementId = snapshot?.state.selectedElementId ?? selectedElementId;
   const currentStep = snapshot?.currentStep;
 
@@ -131,6 +142,11 @@ export function SimulationWorkbench({
       return;
     }
     if (playing) {
+      client.pause();
+      setPlaying(false);
+      return;
+    }
+    if (reducedMotion) {
       client.pause();
       setPlaying(false);
       return;
@@ -213,11 +229,16 @@ export function SimulationWorkbench({
         <div className="sim-workbench__status">
           <span>步进 {snapshot.tick}</span>
           <span>{snapshot.state.phase}</span>
+          {reducedMotion && <span>减少动态</span>}
         </div>
       </header>
 
       <section className="sim-workbench__layout">
         <aside className="sim-workbench__panel sim-workbench__panel--left">
+          <SandboxStatus
+            status={sandboxStatusFromSnapshot(snapshot, runtimeMessage)}
+            detail={`当前阶段：${snapshot.state.phase}`}
+          />
           <TimelinePanel descriptor={descriptor} snapshot={snapshot} stepDuration={stepDuration} speed={speed} />
           <StepList steps={descriptor.narrative} currentStep={currentStep} />
           <article className="sim-explain">
@@ -258,6 +279,7 @@ export function SimulationWorkbench({
                   key={pattern.id}
                   pattern={pattern}
                   selectedElementId={activeElementId}
+                  reducedMotion={reducedMotion}
                   onSelectElement={(elementId, elementType) => {
                     setSelectedElementId(elementId);
                     setSelectedElementType(elementType);
@@ -273,6 +295,7 @@ export function SimulationWorkbench({
                   key={pattern.id}
                   pattern={pattern}
                   selectedElementId={activeElementId}
+                  reducedMotion={reducedMotion}
                   onSelectElement={(elementId, elementType) => {
                     setSelectedElementId(elementId);
                     setSelectedElementType(elementType);
@@ -302,7 +325,7 @@ export function SimulationWorkbench({
         <Button variant="on-dark" size="sm" icon={<SkipBack size={16} />} onClick={stepBack} disabled={snapshot.tick === 0 || playing}>
           回退一步
         </Button>
-        <Button variant="primary" size="sm" icon={playing ? <Pause size={16} /> : <Play size={16} />} onClick={togglePlay}>
+        <Button variant="primary" size="sm" icon={playing ? <Pause size={16} /> : <Play size={16} />} onClick={togglePlay} disabled={reducedMotion} title={reducedMotion ? '已开启减少动态，请使用单步推进' : undefined}>
           {playing ? '暂停' : '播放'}
         </Button>
         <Button variant="on-dark" size="sm" icon={<StepForward size={16} />} onClick={stepForward} disabled={playing}>
@@ -338,6 +361,19 @@ export function SimulationWorkbench({
       </footer>
     </main>
   );
+}
+
+/**
+ * sandboxStatusFromSnapshot 把仿真阶段映射到统一沙箱状态机组件,避免各工作台自建状态外观。
+ */
+function sandboxStatusFromSnapshot(snapshot: RuntimeSnapshot, runtimeMessage?: string): SandboxStatusKind {
+  const phase = snapshot.state.phase.toLowerCase();
+  if (runtimeMessage) return 'failed';
+  if (/fail|error|异常|失败/.test(phase)) return 'failed';
+  if (/compile|build|编译|构建/.test(phase)) return 'compiling';
+  if (/mine|mining|pow|挖矿|出块/.test(phase)) return 'mining';
+  if (/seal|commit|final|封块|提交|最终/.test(phase)) return 'sealing';
+  return 'ready';
 }
 
 /**

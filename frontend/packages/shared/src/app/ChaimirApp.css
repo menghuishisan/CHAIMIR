@@ -607,3 +607,13 @@
     grid-template-columns: 1fr;
   }
 }
+
+@media (prefers-reduced-motion: reduce) {
+  .chaimir-immersive *,
+  .chaimir-immersive *::before,
+  .chaimir-immersive *::after {
+    animation: none !important;
+    transition: none !important;
+    scroll-behavior: auto !important;
+  }
+}

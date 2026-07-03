@@ -2,3 +2,5 @@
 export * from './SandboxStatus'
 export * from './CheckpointCard'
 export * from './GradeCell'
+export * from './VoteMatrix'
+export * from './AttackDefenseTopology'
