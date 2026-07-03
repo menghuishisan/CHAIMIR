@@ -2,7 +2,7 @@
 
 import React, { createContext, useContext, useState, useCallback, useEffect } from 'react'
 import type { Account, LoginResponse } from '@chaimir/api-client'
-import { StorageKeys } from '@chaimir/shared'
+import { clearSession, getAccessToken, getRefreshToken, getStoredUser, saveSession, saveStoredUser } from '@chaimir/shared'
 
 export interface AuthContextValue {
   /** 当前用户 */
@@ -51,15 +51,14 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({
      */
     const initAuth = () => {
       try {
-        const token = localStorage.getItem(StorageKeys.ACCESS_TOKEN)
-        const userStr = localStorage.getItem(StorageKeys.USER_INFO)
+        const token = getAccessToken()
+        const userData = getStoredUser<Account>()
 
-        if (token && userStr) {
-          const userData = JSON.parse(userStr)
+        if (token && userData) {
           setUser(userData)
         }
       } catch (error) {
-        clearStoredAuth()
+        clearSession()
         onAuthError?.(error)
       } finally {
         setIsLoading(false)
@@ -75,18 +74,15 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({
   const login = useCallback(
     (response: LoginResponse) => {
       if (!response.access_token || !response.account) {
-        clearStoredAuth()
+        clearSession()
         setUser(null)
         onAuthError?.(new Error('登录状态异常，请重新登录'))
         return
       }
 
       // 存储 Token 和用户信息。
-      localStorage.setItem(StorageKeys.ACCESS_TOKEN, response.access_token)
-      if (response.refresh_token) {
-        localStorage.setItem(StorageKeys.REFRESH_TOKEN, response.refresh_token)
-      }
-      localStorage.setItem(StorageKeys.USER_INFO, JSON.stringify(response.account))
+      saveSession(response.access_token, response.refresh_token)
+      saveStoredUser(response.account)
 
       setUser(response.account)
     },
@@ -102,7 +98,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({
     } catch (error) {
       onAuthError?.(error)
     } finally {
-      clearStoredAuth()
+      clearSession()
       setUser(null)
     }
   }, [onAuthError, revokeSession])
@@ -111,7 +107,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({
    * getToken 返回当前 access token,供 API 和 WebSocket 客户端注入鉴权。
    */
   const getToken = useCallback((): string | null => {
-    return localStorage.getItem(StorageKeys.ACCESS_TOKEN)
+    return getAccessToken()
   }, [])
 
   /**
@@ -119,7 +115,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({
    */
   const refreshToken = useCallback(async () => {
     try {
-      const refresh = localStorage.getItem(StorageKeys.REFRESH_TOKEN)
+      const refresh = getRefreshToken()
       if (!refresh) {
         throw new Error('登录状态已失效，请重新登录')
       }
@@ -127,11 +123,8 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({
       if (!response.access_token || !response.account) {
         throw new Error('登录状态已失效，请重新登录')
       }
-      localStorage.setItem(StorageKeys.ACCESS_TOKEN, response.access_token)
-      if (response.refresh_token) {
-        localStorage.setItem(StorageKeys.REFRESH_TOKEN, response.refresh_token)
-      }
-      localStorage.setItem(StorageKeys.USER_INFO, JSON.stringify(response.account))
+      saveSession(response.access_token, response.refresh_token)
+      saveStoredUser(response.account)
       setUser(response.account)
     } catch (error) {
       onAuthError?.(error)
@@ -150,15 +143,6 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({
   }
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
-}
-
-/**
- * clearStoredAuth 清理所有浏览器侧认证缓存。
- */
-function clearStoredAuth(): void {
-  localStorage.removeItem(StorageKeys.ACCESS_TOKEN)
-  localStorage.removeItem(StorageKeys.REFRESH_TOKEN)
-  localStorage.removeItem(StorageKeys.USER_INFO)
 }
 
 /**

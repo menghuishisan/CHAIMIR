@@ -1,7 +1,7 @@
 // 权限检查：基于角色的权限控制
 
 import type { Account } from '@chaimir/api-client'
-import { UserRole } from '@chaimir/shared'
+import { UserRole } from '@chaimir/api-client'
 
 /**
  * 检查用户是否有指定角色

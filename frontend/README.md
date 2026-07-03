@@ -2,7 +2,7 @@
 
 Chaimir 区块链「教学·实验·竞赛」三位一体平台前端 Monorepo。
 
-## 📦 包结构
+## 包结构
 
 ```
 frontend/
@@ -20,7 +20,7 @@ frontend/
     └── platform-admin/
 ```
 
-## 🚀 快速开始
+## 快速开始
 
 ### 安装依赖
 
@@ -55,7 +55,7 @@ pnpm lint
 pnpm type-check
 ```
 
-## 📐 开发规范
+## 开发规范
 
 ### 前端铁律（10条）
 
@@ -74,14 +74,14 @@ pnpm type-check
 
 详见 `docs/总-前端设计规范.md`
 
-## 🎨 设计系统
+## 设计系统
 
 - **配色**：青电(cyan) × 琥珀(amber) 双色
 - **字体**：Inter + JetBrains Mono
 - **图标**：Lucide
 - **令牌**：原始色阶 → 语义令牌
 
-## 📚 文档
+## 文档
 
 - [前端设计规范](../docs/总-前端设计规范.md)
 - [工程目录设计](../docs/总-工程目录设计.md)

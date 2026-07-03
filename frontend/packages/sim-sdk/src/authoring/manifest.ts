@@ -284,8 +284,8 @@ function validateInitialRender<TState extends SimState>(simPackage: SimPackage<T
     if (!view.summary || view.patterns.length < 1 || view.patterns.length > 3) {
       issues.push({ path: 'render.patterns', message: '渲染结果必须包含摘要和 1 到 3 个封闭可视化模式。' });
     }
-  } catch (error) {
-    issues.push({ path: 'render', message: error instanceof Error ? `初始渲染失败:${error.message}` : '初始渲染失败。' });
+  } catch {
+    issues.push({ path: 'render', message: '初始渲染失败，请检查初始状态和渲染声明。' });
   }
 }
 

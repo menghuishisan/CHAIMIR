@@ -112,7 +112,7 @@ function ensureReady(): void {
  */
 function readyPackage(): SimPackage {
   if (!simPackage || !descriptor) {
-    throw new Error('sim worker not initialized');
+    throw new Error('仿真运行环境尚未准备好，请稍后重试');
   }
   return simPackage;
 }
@@ -122,7 +122,7 @@ function readyPackage(): SimPackage {
  */
 function currentState(): SimState {
   if (!state) {
-    throw new Error('sim worker state not initialized');
+    throw new Error('仿真状态尚未初始化，请重新进入仿真工作台');
   }
   return state;
 }
@@ -170,13 +170,13 @@ function enforceEventSchema(pkg: SimPackage, eventInput: Omit<SimEvent, 'seq' | 
   }
   const interaction = pkg.interactions.find((item) => item.emits === eventInput.type);
   if (!interaction) {
-    throw new Error('sim interaction event not declared');
+    throw new Error('当前仿真包不支持这个操作');
   }
   if ((interaction.target === 'element' || interaction.kind === 'select-element') && !eventInput.target) {
-    throw new Error('sim interaction target required');
+    throw new Error('请先选择要操作的仿真对象');
   }
   if (interaction.target !== 'element' && interaction.kind !== 'select-element' && eventInput.target) {
-    throw new Error('sim interaction target not allowed');
+    throw new Error('当前对象不能执行这个操作');
   }
   const payload = eventInput.payload ?? {};
   const allowed = new Map((interaction.params ?? []).map((field) => [field.name, field]));
@@ -186,12 +186,12 @@ function enforceEventSchema(pkg: SimPackage, eventInput: Omit<SimEvent, 'seq' | 
     }
     const field = allowed.get(key);
     if (!field || !payloadValueMatchesField(payload[key], field)) {
-      throw new Error('sim interaction payload invalid');
+      throw new Error('操作参数不完整，请检查后重试');
     }
   }
   for (const field of interaction.params ?? []) {
     if (field.required && payload[field.name] === undefined) {
-      throw new Error('sim interaction required payload missing');
+      throw new Error('请补全操作参数后再继续');
     }
   }
 }
@@ -396,7 +396,7 @@ function assertPackage(pkg: SimPackage | undefined): asserts pkg is SimPackage {
     !pkg.meta ||
     !Array.isArray(pkg.interactions)
   ) {
-    throw new Error('invalid sim package');
+    throw new Error('仿真包内容不完整，请联系发布者处理');
   }
 }
 
@@ -406,10 +406,10 @@ function assertPackage(pkg: SimPackage | undefined): asserts pkg is SimPackage {
 function enforceEventLimit(eventInput: Omit<SimEvent, 'seq' | 'atTick'>): void {
   const pkg = readyPackage();
   if (eventInput.source === 'tick' && tick >= pkg.meta.scaleLimit.maxTick) {
-    throw new Error('sim package tick limit exceeded');
+    throw new Error('仿真步骤数量超过限制，请调整场景规模');
   }
   if (events.length >= pkg.meta.scaleLimit.maxEvents) {
-    throw new Error('sim package event limit exceeded');
+    throw new Error('仿真事件数量超过限制，请调整场景规模');
   }
 }
 
@@ -419,10 +419,10 @@ function enforceEventLimit(eventInput: Omit<SimEvent, 'seq' | 'atTick'>): void {
 function enforceViewLimit(view: ViewSpec): void {
   const pkg = readyPackage();
   if (view.patterns.length < 1 || view.patterns.length > 3) {
-    throw new Error('sim package pattern count limit exceeded');
+    throw new Error('仿真视图数量超过限制，请调整场景规模');
   }
   if (countRenderableNodes(view) > pkg.meta.scaleLimit.nodes) {
-    throw new Error('sim package node limit exceeded');
+    throw new Error('仿真节点数量超过限制，请调整场景规模');
   }
 }
 

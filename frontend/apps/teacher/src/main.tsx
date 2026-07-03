@@ -9,13 +9,13 @@ import { teacherApp } from './features/app-definition'
 const root = document.getElementById('root')
 
 if (!root) {
-  throw new Error('页面加载失败，请刷新后重试')
+  document.body.textContent = '页面加载失败，请刷新后重试'
+} else {
+  createRoot(root).render(
+    <React.StrictMode>
+      <AuthGate>
+        <ChaimirApp definition={teacherApp} />
+      </AuthGate>
+    </React.StrictMode>
+  )
 }
-
-createRoot(root).render(
-  <React.StrictMode>
-    <AuthGate>
-      <ChaimirApp definition={teacherApp} />
-    </AuthGate>
-  </React.StrictMode>
-)

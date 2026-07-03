@@ -1,6 +1,7 @@
 // API 客户端核心：封装后端统一信封、鉴权头、trace_id 透传和用户向错误。
 
 import axios, { AxiosInstance, AxiosError, InternalAxiosRequestConfig } from 'axios'
+import { API_BASE_PATH } from './constants'
 
 export interface ApiConfig {
   baseURL: string
@@ -12,14 +13,14 @@ export interface ApiConfig {
 
 export interface ApiResponse<T = unknown> {
   data?: T
-  code?: string
+  code?: string | number
   message?: string
   trace_id?: string
 }
 
 export interface ApiError {
   message: string
-  code?: string
+  code?: string | number
   traceId?: string
   status?: number
 }
@@ -98,13 +99,17 @@ export class ApiClient {
    */
   private transformError(error: AxiosError): ApiError {
     const response = error.response?.data as ApiResponse | undefined
+    const status = error.response?.status
+    const fallbackMessage = status
+      ? '当前操作暂时没有完成，请稍后重试'
+      : '网络连接暂时不可用，请检查网络后重试'
 
     // FE-8: 只暴露用户友好的 message + trace_id
     return {
-      message: response?.message || error.message || '网络请求失败，请稍后重试',
+      message: response?.message || fallbackMessage,
       code: response?.code,
       traceId: response?.trace_id,
-      status: error.response?.status,
+      status,
     }
   }
 
@@ -179,7 +184,7 @@ export class ApiClient {
    */
   public rootWsURL(path: string, query?: Record<string, string | undefined>): string {
     const baseURL = this.baseURL()
-    const apiRoot = '/api/v1'
+    const apiRoot = API_BASE_PATH
     const originBase = baseURL.endsWith(apiRoot) ? baseURL.slice(0, -apiRoot.length) : baseURL
     const wsBaseURL = toWebSocketBaseURL(originBase)
     return `${wsBaseURL}${normalizePath(path)}${this.browserTokenQuery(query)}`
@@ -307,8 +312,8 @@ export class ApiClient {
 /**
  * isSuccessCode 判断后端统一信封是否表示成功。
  */
-function isSuccessCode(code: string): boolean {
-  return code === '0' || code === 'OK'
+function isSuccessCode(code: string | number): boolean {
+  return code === 0 || code === '0' || code === 'OK'
 }
 
 /**

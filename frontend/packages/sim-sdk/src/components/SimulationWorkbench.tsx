@@ -89,13 +89,13 @@ export function SimulationWorkbench({
         }
       },
       onError: (message) => {
-        setRuntimeMessage(message);
+        setRuntimeMessage(userRuntimeMessage(message));
         setPlaying(false);
       },
     });
     clientRef.current = client;
     void client.init().catch((error: Error) => {
-      setRuntimeMessage(error.message);
+      setRuntimeMessage(userRuntimeMessage(error));
       setPlaying(false);
     });
     return () => {
@@ -118,7 +118,7 @@ export function SimulationWorkbench({
    * handleRuntimeError 把命令错误转为工作台可见提示并停止播放。
    */
   function handleRuntimeError(error: unknown): void {
-    setRuntimeMessage(error instanceof Error ? error.message : '仿真运行失败,请刷新后重试');
+    setRuntimeMessage(userRuntimeMessage(error));
     setPlaying(false);
   }
 
@@ -567,6 +567,14 @@ function cooldownEventWindow(cooldownMs?: number): number {
     return 0;
   }
   return Math.max(1, Math.ceil(cooldownMs / 1000));
+}
+
+/**
+ * userRuntimeMessage 只展示用户可理解的仿真错误,避免泄漏 worker 或仿真包内部细节。
+ */
+function userRuntimeMessage(error: unknown): string {
+  const message = error instanceof Error ? error.message : typeof error === 'string' ? error : '';
+  return message && /[\u4e00-\u9fa5]/.test(message) ? message : '仿真运行失败，请刷新后重试';
 }
 
 /**

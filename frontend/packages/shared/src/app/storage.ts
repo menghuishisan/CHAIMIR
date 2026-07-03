@@ -3,6 +3,7 @@
 const ACCESS_TOKEN_KEY = 'chaimir.access_token'
 const REFRESH_TOKEN_KEY = 'chaimir.refresh_token'
 const TRACE_ID_KEY = 'chaimir.trace_id'
+const USER_INFO_KEY = 'chaimir.user_info'
 
 /**
  * getAccessToken 读取后端访问令牌，未登录时返回 null。
@@ -27,11 +28,42 @@ export function saveSession(accessToken?: string, refreshToken?: string): void {
 }
 
 /**
+ * getRefreshToken 读取后端刷新令牌，供认证上下文执行服务端轮转。
+ */
+export function getRefreshToken(): string | null {
+  return safeRead(REFRESH_TOKEN_KEY)
+}
+
+/**
+ * getStoredUser 读取当前浏览器缓存的用户信息，缓存损坏时返回 null。
+ */
+export function getStoredUser<T>(): T | null {
+  const raw = safeRead(USER_INFO_KEY)
+  if (!raw) {
+    return null
+  }
+  try {
+    return JSON.parse(raw) as T
+  } catch {
+    safeRemove(USER_INFO_KEY)
+    return null
+  }
+}
+
+/**
+ * saveStoredUser 保存用户资料缓存，认证判定仍以 access token 为准。
+ */
+export function saveStoredUser(user: unknown): void {
+  safeWrite(USER_INFO_KEY, JSON.stringify(user))
+}
+
+/**
  * clearSession 清除当前浏览器登录态，用于登出或鉴权失效后的显式收敛。
  */
 export function clearSession(): void {
   safeRemove(ACCESS_TOKEN_KEY)
   safeRemove(REFRESH_TOKEN_KEY)
+  safeRemove(USER_INFO_KEY)
   if (typeof window !== 'undefined') {
     window.dispatchEvent(new Event('chaimir-auth-change'))
   }

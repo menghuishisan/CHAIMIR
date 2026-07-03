@@ -1,6 +1,7 @@
 ﻿// 路由结果工具：把后端列表、对象和工作台状态转换为四端统一页面数据。
 
-import type { DataColumn, DataRow, MetricItem, ResourceResult, WorkspaceResult } from '../types'
+import type { DataColumn, DataRow, MetricItem, PageAction, ResourceResult, WorkspaceResult, WorkspaceTool } from '../types'
+import { AccountStatus, SessionStatus } from '@chaimir/api-client'
 import { formatDate } from '../../utils'
 import { dashboardColumns } from './columns'
 
@@ -64,11 +65,19 @@ export function dashboardResult(item: object): ResourceResult {
   }
 }
 
-export function workspaceInfo(title: string, description: string, details: MetricItem[]): WorkspaceResult {
+export function workspaceInfo(
+  title: string,
+  description: string,
+  details: MetricItem[],
+  tools?: WorkspaceTool[],
+  actions?: PageAction[]
+): WorkspaceResult {
   return {
     title,
     description,
     details,
+    tools,
+    actions,
     panels: [
       { title: '说明', body: '左侧展示实验背景和阶段说明，中间展示当前实例状态，右侧展示检查点、判题与资源状态。' },
       { title: '交互', body: '运行、判题和回放状态由后端同步，页面提供清晰的加载、失败和重试路径。' },
@@ -129,11 +138,19 @@ export function dateText(value: string): string {
   return formatDate(value, 'YYYY-MM-DD HH:mm')
 }
 
-export function statusText(value: unknown): string {
+export function accountStatusText(value: unknown): string {
   const status = Number(value)
-  if (status === 1) return '正常'
-  if (status === 2) return '已停用'
-  if (status === 3) return '已归档'
-  if (status === 4) return '已结束'
+  if (status === AccountStatus.PENDING) return '待激活'
+  if (status === AccountStatus.ACTIVE) return '正常'
+  if (status === AccountStatus.DISABLED) return '已停用'
+  if (status === AccountStatus.ARCHIVED) return '已归档'
+  if (status === AccountStatus.CANCELLED) return '已注销'
+  return text(value)
+}
+
+export function sessionStatusText(value: unknown): string {
+  const status = Number(value)
+  if (status === SessionStatus.ACTIVE) return '有效'
+  if (status === SessionStatus.REVOKED) return '已退出'
   return text(value)
 }

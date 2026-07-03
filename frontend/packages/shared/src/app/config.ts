@@ -1,5 +1,7 @@
 // 前端应用配置：集中读取四端构建期环境变量，避免各端重复解析。
 
+import { API_BASE_PATH } from '@chaimir/api-client'
+
 export interface FrontendRuntimeConfig {
   apiBaseUrl: string
   wsBaseUrl?: string
@@ -20,7 +22,7 @@ type EnvMap = Record<string, string | undefined>
  */
 export function readFrontendConfig(env: EnvMap = readImportMetaEnv()): FrontendRuntimeConfig {
   return {
-    apiBaseUrl: env.VITE_API_BASE_URL || '/api/v1',
+    apiBaseUrl: env.VITE_API_BASE_URL || API_BASE_PATH,
     wsBaseUrl: env.VITE_WS_BASE_URL,
     requestTimeoutMs: readNumber(env.VITE_API_TIMEOUT_MS, 30000),
     simWorkerCommandTimeoutMs: readNumber(env.VITE_SIM_WORKER_COMMAND_TIMEOUT_MS, 2000),

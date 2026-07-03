@@ -7,9 +7,21 @@ export function hiddenResourceRoute(
   label: string,
   description: string,
   icon: AppDefinition['routes'][number]['icon'],
-  load: AppDefinition['routes'][number]['load']
+  load: AppDefinition['routes'][number]['load'],
+  group?: string
 ): AppDefinition['routes'][number] {
-  return { path, label, description, icon, hidden: true, load }
+  return { path, label, description, icon, group, hidden: true, load }
+}
+
+export function resourceRoute(
+  path: string,
+  label: string,
+  description: string,
+  icon: AppDefinition['routes'][number]['icon'],
+  load: AppDefinition['routes'][number]['load'],
+  group: string
+): AppDefinition['routes'][number] {
+  return { path, label, description, icon, group, load }
 }
 
 export function emptyResult(columns: DataColumn[], emptyTitle: string, emptyDescription: string): ResourceResult {

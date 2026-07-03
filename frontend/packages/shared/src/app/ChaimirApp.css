@@ -143,6 +143,23 @@
   gap: var(--space-2);
 }
 
+.chaimir-app__nav-group {
+  display: grid;
+  gap: var(--space-1);
+}
+
+.chaimir-app__nav-group + .chaimir-app__nav-group {
+  margin-block-start: var(--space-3);
+}
+
+.chaimir-app__nav-group-title {
+  padding: var(--space-2) var(--space-3) var(--space-1);
+  color: var(--color-dark-text-sub);
+  font-size: var(--text-xs);
+  font-weight: var(--font-bold);
+  letter-spacing: 0.08em;
+}
+
 .chaimir-app__nav-heading {
   min-block-size: 2.25rem;
   padding: var(--space-2);
@@ -404,6 +421,33 @@
   gap: var(--space-2);
 }
 
+.chaimir-immersive__tools,
+.chaimir-immersive__actions {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.chaimir-immersive__tool {
+  display: grid;
+  gap: var(--space-1);
+  padding: var(--space-3);
+  color: var(--color-dark-text);
+  background: var(--color-dark-elevated);
+  border: 1px solid var(--color-dark-border);
+  border-radius: var(--radius-sm);
+}
+
+.chaimir-immersive__tool:hover,
+.chaimir-immersive__tool:focus-visible {
+  color: var(--color-dark-text);
+  border-color: var(--color-primary);
+}
+
+.chaimir-immersive__tool span {
+  color: var(--color-dark-text-sub);
+  font-size: var(--text-sm);
+}
+
 .chaimir-immersive__stage {
   display: grid;
   place-items: center;
@@ -519,6 +563,20 @@
     padding: var(--space-4);
     color: var(--color-dark-text);
     background: var(--color-dark-bg);
+    overflow-y: auto;
+  }
+
+  .chaimir-app__drawer-close {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-block-size: 2.75rem;
+    inline-size: 100%;
+    margin-block-end: var(--space-3);
+    color: var(--color-dark-text);
+    background: var(--color-dark-surface);
+    border: 1px solid var(--color-dark-border);
+    border-radius: var(--radius-sm);
   }
 
   .chaimir-immersive__grid {

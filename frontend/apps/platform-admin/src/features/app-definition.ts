@@ -4,12 +4,14 @@ import { BarChart3, Boxes, ClipboardCheck, Flag, Gauge, Landmark, ListChecks, Mo
 import type { AppDefinition } from '@chaimir/shared'
 import {
   alertColumns,
+  alertRuleColumns,
   applicationColumns,
   arrayResult,
   auditColumns,
   backupColumns,
   configColumns,
   dashboardResult,
+  defaultPageParams,
   datetimeInput,
   defaultRange,
   hiddenResourceRoute,
@@ -24,11 +26,13 @@ import {
   quotaColumns,
   routeParam,
   rowAction,
+  resourceRoute,
   runtimeColumns,
   runtimeImageColumns,
   sharedAnnouncementRoute,
   sharedNotificationRoute,
   sharedProfileRoute,
+  sharedTransferRoute,
   simGovernanceActions,
   simReviewColumns,
   statisticsColumns,
@@ -36,6 +40,7 @@ import {
   textInput,
   textareaInput,
   toolColumns,
+  valueFlag,
   valueJson,
   valueNumber,
   valueStringArray,
@@ -54,6 +59,7 @@ export const platformAdminApp: AppDefinition = {
       label: '学校管理',
       description: '管理学校租户、状态、部署形态和到期时间',
       icon: Landmark,
+      group: '租户',
       load: async (api) => ({
         ...arrayResult(await api.admin.listTenants(), tenantColumns(), '暂无学校租户', '学校通过入驻审核后会在这里显示。'),
         actions: [
@@ -68,6 +74,10 @@ export const platformAdminApp: AppDefinition = {
             })
             return '租户状态已更新'
           }),
+          pageAction('read-identity-tenants', '读取租户原始列表', '从身份模块读取租户原始分页数据。', [], async () => {
+            await api.identity.getTenants(defaultPageParams())
+            return '租户原始列表已读取'
+          }),
         ],
       }),
     },
@@ -77,6 +87,7 @@ export const platformAdminApp: AppDefinition = {
       label: '入驻申请',
       description: '审核学校入驻申请并开通租户',
       icon: ClipboardCheck,
+      group: '租户',
       load: async (api) => ({
         ...arrayResult(await api.admin.listApplications(), applicationColumns(), '暂无入驻申请', '学校提交入驻申请后会在这里显示。'),
         actions: [
@@ -100,6 +111,10 @@ export const platformAdminApp: AppDefinition = {
             await api.identity.rejectApplication(valueText(values, 'application_id'), { reason: valueText(values, 'reason') })
             return '入驻申请已驳回'
           }),
+          pageAction('read-identity-applications', '读取申请原始列表', '从身份模块读取入驻申请原始数据。', [], async () => {
+            await api.identity.getApplications()
+            return '入驻申请原始列表已读取'
+          }),
         ],
       }),
     },
@@ -109,6 +124,7 @@ export const platformAdminApp: AppDefinition = {
       label: '平台看板',
       description: '查看平台租户、账号、课程、竞赛和沙箱概览',
       icon: Gauge,
+      group: '概览',
       load: async (api) => dashboardResult(await api.admin.getPlatformDashboard()),
     },
     {
@@ -116,6 +132,7 @@ export const platformAdminApp: AppDefinition = {
       label: '链运行时',
       description: '管理链运行时、镜像版本和接入自测',
       icon: ServerCog,
+      group: '引擎',
       load: async (api) => ({
         ...arrayResult(await api.sandbox.listRuntimes(), runtimeColumns(), '暂无运行时', '登记链运行时后会在这里显示。'),
         actions: [
@@ -153,10 +170,37 @@ export const platformAdminApp: AppDefinition = {
               image_url: valueText(values, 'image_url'),
               version: valueText(values, 'version'),
               digest: valueText(values, 'digest'),
-              genesis_baked: valueNumber(values, 'genesis_baked') === 1,
-              is_default: valueNumber(values, 'is_default') === 1,
+              genesis_baked: valueFlag(values, 'genesis_baked'),
+              is_default: valueFlag(values, 'is_default'),
             })
             return '运行时镜像版本已登记'
+          }),
+          pageAction('update-runtime', '更新运行时', '更新运行时声明和适配配置。', [
+            textInput('runtime_id', '运行时编号', true),
+            textInput('code', '运行时编码', true),
+            textInput('name', '运行时名称', true),
+            textInput('eco', '生态', true),
+            numberInput('adapter_level', '适配等级', true),
+            textareaInput('adapter_spec', '适配规格', true),
+            textInput('capability_impl', '能力实现', true),
+            textInput('plugin_ref', '插件引用', true),
+            numberInput('status', '状态', true),
+          ], async (values) => {
+            await api.sandbox.updateRuntime(valueText(values, 'runtime_id'), {
+              code: valueText(values, 'code'),
+              name: valueText(values, 'name'),
+              eco: valueText(values, 'eco'),
+              adapter_level: valueNumber(values, 'adapter_level'),
+              adapter_spec: valueJson(values, 'adapter_spec'),
+              capability_impl: valueText(values, 'capability_impl'),
+              plugin_ref: valueText(values, 'plugin_ref'),
+              status: valueNumber(values, 'status'),
+            })
+            return '运行时已更新'
+          }),
+          pageAction('read-runtime-selftest', '查看自测结果', '读取运行时最近一次接入自测结果。', [textInput('runtime_id', '运行时编号', true)], async (values) => {
+            await api.sandbox.getRuntimeSelftest(valueText(values, 'runtime_id'))
+            return '运行时自测结果已读取'
           }),
         ],
         rowActions: [
@@ -172,6 +216,7 @@ export const platformAdminApp: AppDefinition = {
       label: '沙箱工具',
       description: '管理 code-server、浏览器工具和命令工具定义',
       icon: Wrench,
+      group: '引擎',
       load: async (api) => ({
         ...arrayResult(await api.sandbox.listTools(), toolColumns(), '暂无工具', '登记沙箱工具后会在这里显示。'),
         actions: [
@@ -201,6 +246,7 @@ export const platformAdminApp: AppDefinition = {
       label: '判题器',
       description: '管理判题器执行器、自测和运行约束',
       icon: ClipboardCheck,
+      group: '引擎',
       load: async (api) => ({
         ...arrayResult(await api.judge.listJudgers(), judgerColumns(), '暂无判题器', '登记判题器后会在这里显示。'),
         actions: [
@@ -219,12 +265,35 @@ export const platformAdminApp: AppDefinition = {
               name: valueText(values, 'name'),
               type: valueNumber(values, 'type'),
               executor_ref: valueText(values, 'executor_ref'),
-              runtime_required: valueNumber(values, 'runtime_required') === 1,
+              runtime_required: valueFlag(values, 'runtime_required'),
               default_timeout_sec: valueNumber(values, 'default_timeout_sec'),
               resource_spec: valueJson(values, 'resource_spec'),
               status: valueNumber(values, 'status'),
             })
             return '判题器已登记'
+          }),
+          pageAction('update-judger', '更新判题器', '更新判题器执行器和资源约束。', [
+            textInput('judger_id', '判题器编号', true),
+            textInput('code', '判题器编码', true),
+            textInput('name', '判题器名称', true),
+            numberInput('type', '类型', true),
+            textInput('executor_ref', '执行器引用', true),
+            numberInput('runtime_required', '需要运行时', true),
+            numberInput('default_timeout_sec', '默认超时秒数', true),
+            textareaInput('resource_spec', '资源规格', true),
+            numberInput('status', '状态', true),
+          ], async (values) => {
+            await api.judge.updateJudger(valueText(values, 'judger_id'), {
+              code: valueText(values, 'code'),
+              name: valueText(values, 'name'),
+              type: valueNumber(values, 'type'),
+              executor_ref: valueText(values, 'executor_ref'),
+              runtime_required: valueFlag(values, 'runtime_required'),
+              default_timeout_sec: valueNumber(values, 'default_timeout_sec'),
+              resource_spec: valueJson(values, 'resource_spec'),
+              status: valueNumber(values, 'status'),
+            })
+            return '判题器已更新'
           }),
         ],
         rowActions: [
@@ -240,8 +309,9 @@ export const platformAdminApp: AppDefinition = {
       label: '仿真治理',
       description: '审核仿真包、查看静态扫描和确定性校验结果',
       icon: PackageCheck,
+      group: '引擎',
       load: async (api) => ({
-        ...listResult(await api.sim.getReviews({ page: 1, size: 20 }), simReviewColumns(), '暂无审核任务', '有仿真包提交后会在这里显示。'),
+        ...listResult(await api.sim.getReviews(defaultPageParams()), simReviewColumns(), '暂无审核任务', '有仿真包提交后会在这里显示。'),
         actions: simGovernanceActions(api),
       }),
     },
@@ -250,8 +320,9 @@ export const platformAdminApp: AppDefinition = {
       label: '漏洞题源',
       description: '管理漏洞来源、同步和预验证草稿',
       icon: Flag,
+      group: '引擎',
       load: async (api) => ({
-        ...listResult(await api.contest.listVulnProblems({ page: 1, size: 20 }), vulnProblemColumns(), '暂无漏洞题草稿', '同步或导入漏洞题后会在这里显示。'),
+        ...listResult(await api.contest.listVulnProblems(defaultPageParams()), vulnProblemColumns(), '暂无漏洞题草稿', '同步或导入漏洞题后会在这里显示。'),
         actions: [
           pageAction('upsert-vuln-source', '保存漏洞源', '创建或更新漏洞来源配置。', [
             numberInput('type', '来源类型', true),
@@ -265,7 +336,7 @@ export const platformAdminApp: AppDefinition = {
               name: valueText(values, 'name'),
               config: valueJson(values, 'config'),
               default_level: valueNumber(values, 'default_level'),
-              enabled: valueNumber(values, 'enabled') === 1,
+              enabled: valueFlag(values, 'enabled'),
             })
             return '漏洞源已保存'
           }),
@@ -297,8 +368,9 @@ export const platformAdminApp: AppDefinition = {
       label: '告警中心',
       description: '查看业务告警事件并完成处理',
       icon: ShieldAlert,
+      group: '运维',
       load: async (api) => ({
-        ...listResult(await api.admin.listAlertEvents({ page: 1, size: 20 }), alertColumns(), '暂无告警', '触发告警规则后会在这里显示。'),
+        ...listResult(await api.admin.listAlertEvents(defaultPageParams()), alertColumns(), '暂无告警', '触发告警规则后会在这里显示。'),
         actions: [
           pageAction('create-alert-rule', '创建告警规则', '创建业务告警规则。', [
             numberInput('scope', '作用范围', true),
@@ -314,7 +386,7 @@ export const platformAdminApp: AppDefinition = {
               metric: valueText(values, 'metric'),
               condition: valueJson(values, 'condition'),
               level: valueNumber(values, 'level'),
-              enabled: valueNumber(values, 'enabled') === 1,
+              enabled: valueFlag(values, 'enabled'),
             })
             return '告警规则已创建'
           }),
@@ -328,12 +400,44 @@ export const platformAdminApp: AppDefinition = {
         ],
       }),
     },
+    {
+      path: 'alert-rules',
+      label: '告警规则',
+      description: '维护平台和学校业务告警规则',
+      icon: ShieldAlert,
+      group: '运维',
+      load: async (api) => ({
+        ...arrayResult(await api.admin.listAlertRules(), alertRuleColumns(), '暂无告警规则', '创建规则后会在这里显示。'),
+        actions: [
+          pageAction('update-alert-rule', '更新告警规则', '更新业务告警规则。', [
+            textInput('rule_id', '规则编号', true),
+            numberInput('scope', '作用范围', true),
+            textInput('name', '规则名称', true),
+            textInput('metric', '指标', true),
+            textareaInput('condition', '触发条件', true),
+            numberInput('level', '级别', true),
+            numberInput('enabled', '是否启用', true),
+          ], async (values) => {
+            await api.admin.updateAlertRule(valueText(values, 'rule_id'), {
+              scope: valueNumber(values, 'scope'),
+              name: valueText(values, 'name'),
+              metric: valueText(values, 'metric'),
+              condition: valueJson(values, 'condition'),
+              level: valueNumber(values, 'level'),
+              enabled: valueFlag(values, 'enabled'),
+            })
+            return '告警规则已更新'
+          }),
+        ],
+      }),
+    },
     ...platformEngineDeepRoutes(),
     {
       path: 'config',
       label: '系统配置',
       description: '查看和更新平台配置项',
       icon: Settings,
+      group: '运维',
       load: async (api) => ({
         ...arrayResult(await api.admin.listConfigs(), configColumns(), '暂无配置', '创建或同步配置后会在这里显示。'),
         actions: [
@@ -352,6 +456,23 @@ export const platformAdminApp: AppDefinition = {
             })
             return '系统配置已更新'
           }),
+          pageAction('read-config-history', '查看配置历史', '按配置键读取变更历史。', [textInput('key', '配置键', true)], async (values) => {
+            await api.admin.listConfigHistory(valueText(values, 'key'), defaultPageParams())
+            return '配置历史已读取'
+          }),
+          pageAction('rollback-config', '回滚配置', '按变更记录回滚配置值。', [
+            textInput('key', '配置键', true),
+            numberInput('scope', '作用范围', true),
+            numberInput('version', '当前版本', true),
+            textInput('change_log_id', '变更记录编号', true),
+          ], async (values) => {
+            await api.admin.rollbackConfig(valueText(values, 'key'), {
+              scope: valueNumber(values, 'scope'),
+              version: valueNumber(values, 'version'),
+              change_log_id: valueText(values, 'change_log_id'),
+            })
+            return '系统配置已回滚'
+          }),
         ],
       }),
     },
@@ -360,6 +481,7 @@ export const platformAdminApp: AppDefinition = {
       label: '监控面板',
       description: '进入受控外部监控入口',
       icon: MonitorCog,
+      group: '运维',
       load: async (api) => arrayResult(await api.admin.monitoringPanels(), monitoringColumns(), '暂无监控面板', '配置监控入口后会在这里显示。'),
     },
     {
@@ -367,8 +489,9 @@ export const platformAdminApp: AppDefinition = {
       label: '备份记录',
       description: '查看受控备份任务执行状态',
       icon: Boxes,
+      group: '运维',
       load: async (api) => {
-        const result = listResult(await api.admin.listBackups({ page: 1, size: 20 }), backupColumns(), '暂无备份记录', '备份任务执行后会在这里显示。')
+        const result = listResult(await api.admin.listBackups(defaultPageParams()), backupColumns(), '暂无备份记录', '备份任务执行后会在这里显示。')
         return { ...result, rows: result.rows.map(normalizeBackupSize) }
       },
     },
@@ -377,18 +500,18 @@ export const platformAdminApp: AppDefinition = {
       label: '平台审计',
       description: '查询平台级敏感操作审计记录',
       icon: ListChecks,
-      load: async (api) => listResult(await api.admin.queryAudit({ page: 1, size: 20 }), auditColumns(), '暂无审计记录', '用户完成敏感操作后会在这里显示。'),
+      group: '运维',
+      load: async (api) => listResult(await api.admin.queryAudit(defaultPageParams()), auditColumns(), '暂无审计记录', '用户完成敏感操作后会在这里显示。'),
     },
     sharedNotificationRoute(),
     sharedAnnouncementRoute(),
+    sharedTransferRoute(),
     sharedProfileRoute(),
   ],
 }
-
 /**
- * sharedNotificationRoute 四端统一经 M10 通知接口读取数据。
+ * platformTenantDeepRoutes 补齐平台租户详情和平台统计页。
  */
-
 function platformTenantDeepRoutes(): AppDefinition['routes'] {
   return [
     hiddenResourceRoute('tenant-detail', '学校详情', '查看租户配置、状态和资源配额', Landmark, async (api, params) => {
@@ -397,7 +520,7 @@ function platformTenantDeepRoutes(): AppDefinition['routes'] {
         ? objectResult(await api.identity.getTenant(tenantId), tenantColumns(), '学校详情')
         : arrayResult(await api.admin.listTenants(), tenantColumns(), '暂无学校租户', '学校入驻后会显示。')
     }),
-    hiddenResourceRoute('statistics', '平台统计', '查看平台运营趋势和租户增长', BarChart3, async (api) => arrayResult(await api.admin.getPlatformStatistics(defaultRange()), statisticsColumns(), '暂无统计', '平台产生业务数据后会显示。')),
+    resourceRoute('statistics', '平台统计', '查看平台运营趋势和租户增长', BarChart3, async (api) => arrayResult(await api.admin.getPlatformStatistics(defaultRange()), statisticsColumns(), '暂无统计', '平台产生业务数据后会显示。'), '概览'),
   ]
 }
 
@@ -451,10 +574,24 @@ function platformEngineDeepRoutes(): AppDefinition['routes'] {
             await api.sandbox.prepullRuntimeImage(valueText(values, 'runtime_id'), valueText(values, 'image_id'))
             return '镜像预拉取已触发'
           }),
+          pageAction('read-prepull-status', '查看预拉取状态', '查看运行时镜像在目标节点上的预拉取状态。', [
+            textInput('runtime_id', '运行时编号', true),
+            textInput('image_id', '镜像编号', true),
+          ], async (values) => {
+            await api.sandbox.getRuntimeImagePrepull(valueText(values, 'runtime_id'), valueText(values, 'image_id'))
+            return '预拉取状态已读取'
+          }),
+          pageAction('disable-runtime-image', '停用镜像版本', '停用不再使用的运行时镜像版本。', [
+            textInput('runtime_id', '运行时编号', true),
+            textInput('image_id', '镜像编号', true),
+          ], async (values) => {
+            await api.sandbox.disableRuntimeImage(valueText(values, 'runtime_id'), valueText(values, 'image_id'))
+            return '镜像版本已停用'
+          }),
         ],
       }
     }),
-    hiddenResourceRoute('quota', '配额管理', '查看并调整沙箱资源配额', Gauge, async (api) => ({
+    resourceRoute('quota', '配额管理', '查看并调整沙箱资源配额', Gauge, async (api) => ({
       ...objectResult(await api.sandbox.getQuota(), quotaColumns(), '沙箱配额'),
       actions: [
         pageAction('update-quota', '更新配额', '调整沙箱资源上限。', [
@@ -481,10 +618,6 @@ function platformEngineDeepRoutes(): AppDefinition['routes'] {
           return '沙箱配额已更新'
         }),
       ],
-    })),
+    }), '引擎'),
   ]
 }
-
-/**
- * sharedAnnouncementRoute 四端统一读取系统公告。
- */

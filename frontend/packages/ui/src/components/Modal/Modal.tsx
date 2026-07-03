@@ -69,14 +69,18 @@ export const Modal: React.FC<ModalProps> = ({
   useEffect(() => {
     if (!open) return
 
-    const handleEscape = (e: KeyboardEvent) => {
+    const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         onClose()
+        return
+      }
+      if (e.key === 'Tab') {
+        trapFocus(e, modalRef.current)
       }
     }
 
-    document.addEventListener('keydown', handleEscape)
-    return () => document.removeEventListener('keydown', handleEscape)
+    document.addEventListener('keydown', handleKeyDown)
+    return () => document.removeEventListener('keydown', handleKeyDown)
   }, [open, onClose])
 
   if (!open) return null
@@ -134,3 +138,45 @@ export const Modal: React.FC<ModalProps> = ({
 }
 
 Modal.displayName = 'Modal'
+
+/**
+ * trapFocus 让 Tab/Shift+Tab 在当前模态框内循环，避免焦点逃逸到页面底层。
+ */
+function trapFocus(event: KeyboardEvent, container: HTMLElement | null): void {
+  if (!container) {
+    return
+  }
+  const focusable = getFocusableElements(container)
+  if (focusable.length === 0) {
+    event.preventDefault()
+    container.focus()
+    return
+  }
+
+  const first = focusable[0]
+  const last = focusable[focusable.length - 1]
+  if (event.shiftKey && document.activeElement === first) {
+    event.preventDefault()
+    last.focus()
+    return
+  }
+  if (!event.shiftKey && document.activeElement === last) {
+    event.preventDefault()
+    first.focus()
+  }
+}
+
+/**
+ * getFocusableElements 获取模态框内可见的交互元素。
+ */
+function getFocusableElements(container: HTMLElement): HTMLElement[] {
+  const selector = [
+    'a[href]',
+    'button:not([disabled])',
+    'input:not([disabled])',
+    'select:not([disabled])',
+    'textarea:not([disabled])',
+    '[tabindex]:not([tabindex="-1"])',
+  ].join(',')
+  return Array.from(container.querySelectorAll<HTMLElement>(selector)).filter((element) => element.offsetParent !== null)
+}

@@ -103,6 +103,9 @@ importers:
 
   apps/student:
     dependencies:
+      '@chaimir/api-client':
+        specifier: workspace:*
+        version: link:../../packages/api-client
       '@chaimir/auth':
         specifier: workspace:*
         version: link:../../packages/auth

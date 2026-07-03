@@ -122,6 +122,8 @@ export const Pagination: React.FC<PaginationProps> = ({
                 'chaimir-pagination__item',
                 page === current && 'chaimir-pagination__item--active'
               )}
+              aria-current={page === current ? 'page' : undefined}
+              aria-label={`第 ${page} 页`}
               onClick={() => handlePageChange(page as number)}
             >
               {page}
@@ -149,6 +151,7 @@ export const Pagination: React.FC<PaginationProps> = ({
             value={jumpValue}
             onChange={(e) => setJumpValue(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && handleJump()}
+            aria-label="输入要跳转的页码"
             min={1}
             max={total}
           />

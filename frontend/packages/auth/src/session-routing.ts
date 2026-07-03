@@ -1,7 +1,7 @@
 // 会话路由：统一认证成功后的登录态保存和四端跳转规则。
 
 import type { ChaimirApi, LoginResponse } from '@chaimir/api-client'
-import { readFrontendConfig, saveSession } from '@chaimir/shared'
+import { readFrontendConfig, saveSession, saveStoredUser } from '@chaimir/shared'
 import type { FormValues, LoginMode } from './types'
 import { numberOf, valueOf } from './form-state'
 
@@ -38,6 +38,9 @@ export function handleLoginResponse(response: LoginResponse, config: ReturnType<
     return
   }
   saveSession(response.access_token, response.refresh_token)
+  if (response.account) {
+    saveStoredUser(response.account)
+  }
   if (response.must_change_pwd) {
     window.location.hash = '#change-pwd'
     return

@@ -69,6 +69,16 @@ export interface WorkspaceResult {
     title: string
     body: string
   }>
+  tools?: WorkspaceTool[]
+  actions?: PageAction[]
+}
+
+export interface WorkspaceTool {
+  key: string
+  label: string
+  description: string
+  kind: 'terminal' | 'web' | 'command' | 'file' | 'chain' | 'sim' | 'status'
+  href?: string
 }
 
 export interface AppRoute {
@@ -76,6 +86,7 @@ export interface AppRoute {
   label: string
   description: string
   icon: LucideIcon
+  group?: string
   immersive?: boolean
   hidden?: boolean
   load: (api: ChaimirApi, params: URLSearchParams) => Promise<ResourceResult | WorkspaceResult>

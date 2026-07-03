@@ -1,6 +1,6 @@
 // SsoPage：学校 CAS 跳转与 LDAP 登录入口。
 
-import React from 'react'
+import React, { useEffect } from 'react'
 import type { ChaimirApi } from '@chaimir/api-client'
 import { Building2, LockKeyhole, UserRound } from 'lucide-react'
 import { Button } from '@chaimir/ui'
@@ -15,6 +15,21 @@ import { TextField } from '../components/TextField'
  */
 export function SsoPage({ api, config }: { api: ChaimirApi; config: ReturnType<typeof readFrontendConfig> }): React.ReactElement {
   const [state, setState] = useFormState()
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    const ticket = params.get('ticket')
+    const tenantCode = params.get('tenant_code')
+    if (!ticket || !tenantCode) {
+      return
+    }
+    void runSubmit(setState, async () => {
+      const service = window.location.origin + window.location.pathname
+      const response = await api.identity.casCallback(tenantCode, { ticket, service })
+      handleLoginResponse(response, config)
+      return '统一认证已通过，正在进入平台'
+    })
+  }, [api, config, setState])
 
   const ldapSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault()

@@ -460,6 +460,55 @@ export function announcementColumns(): DataColumn[] {
   ]
 }
 
+export function teachingPostColumns(): DataColumn[] {
+  return [
+    { key: 'content', title: '讨论内容', priority: 'primary' },
+    { key: 'author_id', title: '发布人' },
+    { key: 'is_pinned', title: '置顶' },
+    { key: 'like_count', title: '点赞数', align: 'end' },
+    { key: 'created_at', title: '发布时间' },
+  ]
+}
+
+export function teachingGradeColumns(): DataColumn[] {
+  return [
+    { key: 'student_id', title: '学生', priority: 'primary' },
+    { key: 'course_id', title: '课程' },
+    { key: 'final_total', title: '最终分', align: 'end' },
+    { key: 'auto_total', title: '自动分', align: 'end' },
+    { key: 'is_locked', title: '锁定' },
+  ]
+}
+
+export function contentCategoryColumns(): DataColumn[] {
+  return [
+    { key: 'name', title: '分类名称', priority: 'primary' },
+    { key: 'parent_id', title: '上级分类' },
+    { key: 'sort', title: '顺序', align: 'end' },
+    { key: 'updated_at', title: '更新时间' },
+  ]
+}
+
+export function alertRuleColumns(): DataColumn[] {
+  return [
+    { key: 'name', title: '规则名称', priority: 'primary' },
+    { key: 'metric', title: '指标' },
+    { key: 'level', title: '级别' },
+    { key: 'enabled', title: '启用' },
+    { key: 'updated_at', title: '更新时间' },
+  ]
+}
+
+export function transferTaskColumns(): DataColumn[] {
+  return [
+    { key: 'channel', title: '任务类型', priority: 'primary' },
+    { key: 'status', title: '状态' },
+    { key: 'progress', title: '进度', align: 'end' },
+    { key: 'created_at', title: '创建时间' },
+    { key: 'updated_at', title: '更新时间', priority: 'optional' },
+  ]
+}
+
 /**
  * normalizeObject 的后置修正：备份大小使用用户可读单位。
  */

@@ -2,8 +2,7 @@
 
 import React from 'react'
 import { useAuth } from './AuthContext'
-import type { Account } from '@chaimir/api-client'
-import { UserRole } from '@chaimir/shared'
+import type { Account, UserRole } from '@chaimir/api-client'
 
 export interface ProtectedRouteProps {
   /** 子元素 */

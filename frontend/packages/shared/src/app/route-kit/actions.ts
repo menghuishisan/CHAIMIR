@@ -33,6 +33,46 @@ export function teacherCourseActions(api: ChaimirApi): PageAction[] {
       await api.teaching.refreshInviteCode(valueText(values, 'course_id'))
       return '课程邀请码已刷新'
     }),
+    pageAction('update-course-detail', '更新课程', '更新课程基础信息。', [
+      textInput('course_id', '课程编号', true),
+      textInput('name', '课程名称', true),
+      textareaInput('description', '课程说明', true),
+      numberInput('type', '课程类型', true),
+      numberInput('difficulty', '难度', true),
+      textInput('semester', '学期', true),
+      numberInput('credits', '学分', true),
+      textareaInput('schedule', '课程安排', true),
+      datetimeInput('start_at', '开始时间', true),
+      datetimeInput('end_at', '结束时间', true),
+    ], async (values) => {
+      await api.teaching.updateCourse(valueText(values, 'course_id'), {
+        name: valueText(values, 'name'),
+        description: valueText(values, 'description'),
+        type: valueNumber(values, 'type'),
+        difficulty: valueNumber(values, 'difficulty'),
+        semester: valueText(values, 'semester'),
+        credits: valueNumber(values, 'credits'),
+        schedule: valueJson(values, 'schedule'),
+        start_at: valueText(values, 'start_at'),
+        end_at: valueText(values, 'end_at'),
+      })
+      return '课程已更新'
+    }),
+    pageAction('end-course', '结束课程', '结束课程并进入归档前状态。', [textInput('course_id', '课程编号', true)], async (values) => {
+      await api.teaching.endCourse(valueText(values, 'course_id'))
+      return '课程已结束'
+    }),
+    pageAction('clone-course', '克隆课程', '复制课程结构用于新学期。', [
+      textInput('course_id', '课程编号', true),
+      textInput('name', '新课程名称', true),
+    ], async (values) => {
+      await api.teaching.cloneCourse(valueText(values, 'course_id'), { name: valueText(values, 'name') })
+      return '课程已克隆'
+    }),
+    pageAction('share-course', '共享课程', '将课程设为可共享复用。', [textInput('course_id', '课程编号', true)], async (values) => {
+      await api.teaching.shareCourse(valueText(values, 'course_id'))
+      return '课程已共享'
+    }),
   ]
 }
 
@@ -62,6 +102,27 @@ export function assignmentActions(api: ChaimirApi): PageAction[] {
     pageAction('publish-assignment', '发布作业', '发布作业后学生可以作答。', [textInput('assignment_id', '作业编号', true)], async (values) => {
       await api.teaching.publishAssignment(valueText(values, 'assignment_id'))
       return '作业已发布'
+    }),
+    pageAction('update-assignment', '更新作业', '更新课程作业配置。', [
+      textInput('assignment_id', '作业编号', true),
+      textInput('title', '作业标题', true),
+      textInput('chapter_id', '章节编号', true),
+      datetimeInput('due_at', '截止时间', true),
+      numberInput('max_attempts', '提交次数', true),
+      numberInput('late_policy', '迟交策略', true),
+      textareaInput('late_penalty', '迟交扣分规则', true),
+      textareaInput('items', '题目列表', true),
+    ], async (values) => {
+      await api.teaching.updateAssignment(valueText(values, 'assignment_id'), {
+        title: valueText(values, 'title'),
+        chapter_id: valueText(values, 'chapter_id'),
+        due_at: valueText(values, 'due_at'),
+        max_attempts: valueNumber(values, 'max_attempts'),
+        late_policy: valueNumber(values, 'late_policy'),
+        late_penalty: valueJson(values, 'late_penalty'),
+        items: valueJsonArray(values, 'items') as never,
+      })
+      return '作业已更新'
     }),
   ]
 }
@@ -97,6 +158,75 @@ export function experimentAuthorActions(api: ChaimirApi): PageAction[] {
       await api.experiment.validateExperiment(valueText(values, 'experiment_id'))
       return '实验校验已完成'
     }),
+    pageAction('update-experiment', '更新实验草稿', '更新实验编排草稿。', [
+      textInput('experiment_id', '实验编号', true),
+      textInput('course_id', '课程编号', true),
+      textInput('template_ref', '模板引用', true),
+      textInput('template_version', '模板版本', true),
+      textInput('name', '实验名称', true),
+      textareaInput('description', '实验说明', true),
+      textareaInput('components', '组件配置', true),
+      numberInput('collab_mode', '协作模式', true),
+      textareaInput('group_config', '小组配置', true),
+      numberInput('wizard_step', '当前步骤', true),
+    ], async (values) => {
+      await api.experiment.updateExperiment(valueText(values, 'experiment_id'), {
+        course_id: valueNumber(values, 'course_id'),
+        template_ref: valueText(values, 'template_ref'),
+        template_version: valueText(values, 'template_version'),
+        name: valueText(values, 'name'),
+        description: valueText(values, 'description'),
+        components: valueJson(values, 'components') as never,
+        collab_mode: valueNumber(values, 'collab_mode'),
+        group_config: valueJson(values, 'group_config') as never,
+        require_report: true,
+        wizard_step: valueNumber(values, 'wizard_step'),
+      })
+      return '实验草稿已更新'
+    }),
+    pageAction('unpublish-experiment', '取消发布实验', '将已发布实验撤回到不可见状态。', [textInput('experiment_id', '实验编号', true)], async (values) => {
+      await api.experiment.unpublishExperiment(valueText(values, 'experiment_id'))
+      return '实验已取消发布'
+    }),
+    pageAction('grade-experiment-report', '批改实验报告', '为实验报告提交人工评分。', [
+      textInput('report_id', '报告编号', true),
+      numberInput('score', '分数', true),
+      textareaInput('comment', '评语', true),
+    ], async (values) => {
+      await api.experiment.gradeReport(valueText(values, 'report_id'), {
+        manual_score: valueNumber(values, 'score'),
+        comment: valueText(values, 'comment'),
+      })
+      return '实验报告已批改'
+    }),
+    pageAction('create-experiment-group', '创建实验小组', '为多人协作实验创建小组。', [
+      textInput('experiment_id', '实验编号', true),
+      textInput('name', '小组名称', true),
+    ], async (values) => {
+      await api.experiment.createGroup(valueText(values, 'experiment_id'), {
+        name: valueText(values, 'name'),
+      })
+      return '实验小组已创建'
+    }),
+    pageAction('upsert-group-member', '维护小组成员', '添加或更新实验小组成员。', [
+      textInput('group_id', '小组编号', true),
+      textInput('student_id', '学生编号', true),
+      textInput('role', '成员角色', true),
+    ], async (values) => {
+      await api.experiment.upsertGroupMember(valueText(values, 'group_id'), {
+        student_id: valueText(values, 'student_id'),
+        role: valueText(values, 'role'),
+      })
+      return '小组成员已保存'
+    }),
+    pageAction('read-instance-progress', '读取实例进度', '读取实验实例订阅和进度信息。', [textInput('instance_id', '实例编号', true)], async (values) => {
+      await api.experiment.getProgress(valueText(values, 'instance_id'))
+      return '实例进度已读取'
+    }),
+    pageAction('read-experiment-group', '读取小组详情', '按小组编号读取协作小组详情。', [textInput('group_id', '小组编号', true)], async (values) => {
+      await api.experiment.getGroup(valueText(values, 'group_id'))
+      return '小组详情已读取'
+    }),
   ]
 }
 
@@ -114,7 +244,7 @@ export function vulnSourceActions(api: ChaimirApi): PageAction[] {
         name: valueText(values, 'name'),
         config: valueJson(values, 'config'),
         default_level: valueNumber(values, 'default_level'),
-        enabled: valueNumber(values, 'enabled') === 1,
+        enabled: valueFlag(values, 'enabled'),
       })
       return '漏洞源已保存'
     }),
@@ -174,6 +304,99 @@ export function contentActions(api: ChaimirApi): PageAction[] {
       })
       return '内容已保存'
     }),
+    pageAction('update-content-detail', '更新内容', '更新题目或模板草稿。', [
+      textInput('item_id', '内容编号', true),
+      textInput('title', '标题', true),
+      numberInput('category_id', '分类编号', true),
+      numberInput('difficulty', '难度', true),
+      textInput('tags', '标签', false, '多个标签用英文逗号分隔。'),
+      textInput('knowledge_points', '知识点', false, '多个知识点用英文逗号分隔。'),
+      numberInput('visibility', '可见性', true),
+      textareaInput('body', '内容正文', true),
+      textInput('sensitive_fields', '敏感字段', false, '多个字段用英文逗号分隔。'),
+    ], async (values) => {
+      await api.content.updateItem(valueText(values, 'item_id'), {
+        title: valueText(values, 'title'),
+        category_id: valueNumber(values, 'category_id'),
+        difficulty: valueNumber(values, 'difficulty'),
+        tags: valueStringArray(values, 'tags'),
+        knowledge_points: valueStringArray(values, 'knowledge_points'),
+        visibility: valueNumber(values, 'visibility'),
+        body: valueJson(values, 'body'),
+        sensitive_fields: valueStringArray(values, 'sensitive_fields'),
+      })
+      return '内容已更新'
+    }),
+    pageAction('create-content-version', '创建新版本', '基于已有版本创建新草稿。', [
+      textInput('code', '内容编码', true),
+      textInput('source_version', '来源版本', true),
+      textInput('new_version', '新版本', true),
+    ], async (values) => {
+      await api.content.createNewVersion(valueText(values, 'code'), {
+        source_version: valueText(values, 'source_version'),
+        new_version: valueText(values, 'new_version'),
+      })
+      return '新版本草稿已创建'
+    }),
+    pageAction('clone-content', '克隆内容', '把已有内容克隆为独立草稿。', [
+      textInput('code', '内容编码', true),
+      textInput('version', '版本', true),
+      textInput('new_code', '新编码', true),
+      textInput('new_version', '新版本', true),
+    ], async (values) => {
+      await api.content.cloneItem(valueText(values, 'code'), valueText(values, 'version'), {
+        new_code: valueText(values, 'new_code'),
+        new_version: valueText(values, 'new_version'),
+      })
+      return '内容已克隆'
+    }),
+    pageAction('read-content-versions', '查看版本', '读取指定内容的版本列表。', [textInput('code', '内容编码', true)], async (values) => {
+      await api.content.getVersions(valueText(values, 'code'))
+      return '内容版本已读取'
+    }),
+    pageAction('issue-attachment-grant', '附件下载授权', '为题库附件签发短时下载授权。', [
+      textInput('resource_id', '资源编号', true),
+      textInput('object_ref', '对象引用', true),
+    ], async (values) => {
+      await api.content.issueAttachmentDownloadGrant({
+        resource_id: valueText(values, 'resource_id'),
+        object_ref: valueText(values, 'object_ref'),
+      })
+      return '附件下载授权已生成'
+    }),
+    pageAction('upload-content-attachment', '上传附件', '上传题库附件并绑定到指定资源。', [
+      fileInput('file', '附件文件', true),
+      textInput('resource_id', '资源编号'),
+    ], async (values) => {
+      await api.content.uploadAttachment(valueFile(values, 'file'), optionalText(values, 'resource_id'))
+      return '附件已上传'
+    }),
+    pageAction('create-category', '创建分类', '创建题库分类。', [
+      numberInput('parent_id', '上级分类编号', true),
+      textInput('name', '分类名称', true),
+      numberInput('sort', '顺序', true),
+    ], async (values) => {
+      await api.content.createCategory({
+        parent_id: valueNumber(values, 'parent_id'),
+        name: valueText(values, 'name'),
+        sort: valueNumber(values, 'sort'),
+      })
+      return '分类已创建'
+    }),
+    pageAction('read-item-face', '读取题面', '读取学生可见的脱敏题面。', [
+      textInput('code', '内容编码', true),
+      textInput('version', '版本', true),
+    ], async (values) => {
+      await api.content.getItemFace(valueText(values, 'code'), valueText(values, 'version'))
+      return '题面已读取'
+    }),
+    pageAction('read-item-full', '读取全量内容', '教师侧读取完整内容，学生端不可使用。', [
+      textInput('code', '内容编码', true),
+      textInput('version', '版本', true),
+    ], async (values) => {
+      await api.content.getItemFull(valueText(values, 'code'), valueText(values, 'version'))
+      return '完整内容已读取'
+    }),
   ]
 }
 
@@ -192,6 +415,14 @@ export function paperActions(api: ChaimirApi): PageAction[] {
         items: valueJsonArray(values, 'items') as never,
       })
       return '试卷已保存'
+    }),
+    pageAction('read-paper', '查看试卷详情', '读取试卷题目和组卷条件。', [textInput('paper_id', '试卷编号', true)], async (values) => {
+      await api.content.getPaper(valueText(values, 'paper_id'))
+      return '试卷详情已读取'
+    }),
+    pageAction('regenerate-paper', '重新组卷', '按当前组卷条件重新生成试卷题目。', [textInput('paper_id', '试卷编号', true)], async (values) => {
+      await api.content.regeneratePaper(valueText(values, 'paper_id'))
+      return '试卷已重新生成'
     }),
   ]
 }
@@ -240,6 +471,35 @@ export function appealReviewActions(api: ChaimirApi): PageAction[] {
 
 export function gradeConfigActions(api: ChaimirApi): PageAction[] {
   return [
+    pageAction('create-level-config', '创建等级配置', '创建成绩等级映射和预警规则。', [
+      textInput('name', '配置名称', true),
+      textareaInput('mapping', '等级映射', true),
+      textareaInput('warning_rules', '预警规则', true),
+      numberInput('is_default', '是否默认', true),
+    ], async (values) => {
+      await api.grade.createLevelConfig({
+        name: valueText(values, 'name'),
+        mapping: valueJsonArray(values, 'mapping') as never,
+        warning_rules: valueJson(values, 'warning_rules') as never,
+        is_default: valueFlag(values, 'is_default'),
+      })
+      return '等级配置已创建'
+    }),
+    pageAction('update-level-config', '更新等级配置', '更新成绩等级映射和预警规则。', [
+      textInput('config_id', '配置编号', true),
+      textInput('name', '配置名称', true),
+      textareaInput('mapping', '等级映射', true),
+      textareaInput('warning_rules', '预警规则', true),
+      numberInput('is_default', '是否默认', true),
+    ], async (values) => {
+      await api.grade.updateLevelConfig(valueText(values, 'config_id'), {
+        name: valueText(values, 'name'),
+        mapping: valueJsonArray(values, 'mapping') as never,
+        warning_rules: valueJson(values, 'warning_rules') as never,
+        is_default: valueFlag(values, 'is_default'),
+      })
+      return '等级配置已更新'
+    }),
     pageAction('create-semester', '创建学期', '创建成绩归档学期。', [
       textInput('name', '学期名称', true),
       textInput('start_date', '开始日期', true),
@@ -250,7 +510,7 @@ export function gradeConfigActions(api: ChaimirApi): PageAction[] {
         name: valueText(values, 'name'),
         start_date: valueText(values, 'start_date'),
         end_date: valueText(values, 'end_date'),
-        is_current: valueNumber(values, 'is_current') === 1,
+        is_current: valueFlag(values, 'is_current'),
       })
       return '学期已创建'
     }),
@@ -263,6 +523,40 @@ export function gradeConfigActions(api: ChaimirApi): PageAction[] {
         min_gpa: valueNumber(values, 'min_gpa'),
       })
       return '预警规则已更新'
+    }),
+    pageAction('list-semesters', '读取学期', '读取成绩中心学期列表。', [], async () => {
+      await api.grade.listSemesters()
+      return '学期列表已读取'
+    }),
+    pageAction('read-warning-rules', '读取预警规则', '读取当前学校学业预警规则。', [], async () => {
+      await api.grade.getWarningRules()
+      return '预警规则已读取'
+    }),
+    pageAction('read-student-grades', '读取学生成绩', '按学生编号读取成绩聚合结果。', [
+      textInput('student_id', '学生编号', true),
+      textInput('semester_id', '学期编号'),
+    ], async (values) => {
+      await api.grade.studentGrades(valueText(values, 'student_id'), optionalText(values, 'semester_id'))
+      return '学生成绩已读取'
+    }),
+    pageAction('recompute-student-grade', '重算学生成绩', '按学生和学期重算成绩聚合。', [
+      textInput('student_id', '学生编号', true),
+      textInput('semester_id', '学期编号', true),
+    ], async (values) => {
+      await api.grade.recomputeStudentGrade(valueText(values, 'student_id'), { semester_id: valueText(values, 'semester_id') })
+      return '学生成绩已重算'
+    }),
+    pageAction('generate-transcript-batch', '批量生成成绩单', '按学生列表批量生成成绩单。', [
+      textInput('student_ids', '学生编号', true, '多个编号用英文逗号分隔。'),
+      numberInput('scope', '成绩单范围', true),
+      textInput('semester_id', '学期编号'),
+    ], async (values) => {
+      await api.grade.generateTranscriptBatch({
+        student_ids: valueStringArray(values, 'student_ids'),
+        scope: valueNumber(values, 'scope'),
+        semester_id: optionalText(values, 'semester_id'),
+      })
+      return '批量成绩单已生成'
     }),
   ]
 }
@@ -340,6 +634,82 @@ export function contestManagementActions(api: ChaimirApi): PageAction[] {
       })
       return '竞赛题目已保存'
     }),
+    pageAction('update-contest', '更新竞赛', '更新竞赛基础配置。', [
+      textInput('contest_id', '竞赛编号', true),
+      textInput('name', '竞赛名称', true),
+      numberInput('mode', '赛制', true),
+      numberInput('match_mode', '对抗模式'),
+      numberInput('team_mode', '组队模式', true),
+      datetimeInput('signup_start', '报名开始', true),
+      datetimeInput('signup_end', '报名结束', true),
+      datetimeInput('start_at', '比赛开始', true),
+      datetimeInput('end_at', '比赛结束', true),
+      numberInput('freeze_minutes', '封榜分钟数', true),
+      textareaInput('rules', '赛事规则', true),
+    ], async (values) => {
+      await api.contest.updateContest(valueText(values, 'contest_id'), {
+        name: valueText(values, 'name'),
+        mode: valueNumber(values, 'mode'),
+        match_mode: optionalNumber(values, 'match_mode'),
+        team_mode: valueNumber(values, 'team_mode'),
+        signup_start: valueText(values, 'signup_start'),
+        signup_end: valueText(values, 'signup_end'),
+        start_at: valueText(values, 'start_at'),
+        end_at: valueText(values, 'end_at'),
+        freeze_minutes: valueNumber(values, 'freeze_minutes'),
+        rules: valueJson(values, 'rules'),
+      })
+      return '竞赛已更新'
+    }),
+    pageAction('freeze-contest', '冻结榜单', '冻结竞赛榜单展示。', [textInput('contest_id', '竞赛编号', true)], async (values) => {
+      await api.contest.freezeContest(valueText(values, 'contest_id'))
+      return '竞赛榜单已冻结'
+    }),
+    pageAction('archive-contest', '归档竞赛', '归档竞赛并生成结果快照。', [textInput('contest_id', '竞赛编号', true)], async (values) => {
+      await api.contest.archiveContest(valueText(values, 'contest_id'))
+      return '竞赛已归档'
+    }),
+    pageAction('read-result-snapshot', '读取结果快照', '读取竞赛归档结果快照。', [textInput('contest_id', '竞赛编号', true)], async (values) => {
+      await api.contest.getResultSnapshot(valueText(values, 'contest_id'))
+      return '竞赛结果快照已读取'
+    }),
+    pageAction('read-team', '读取队伍', '按队伍编号读取队伍详情。', [textInput('team_id', '队伍编号', true)], async (values) => {
+      await api.contest.getTeam(valueText(values, 'team_id'))
+      return '队伍详情已读取'
+    }),
+    pageAction('read-cheat-suspects', '读取可疑线索', '读取竞赛防作弊可疑线索。', [
+      textInput('contest_id', '竞赛编号', true),
+      numberInput('problem_id', '题目编号', true),
+      textInput('code_hash', '代码哈希'),
+      textInput('exclude_source_ref', '排除来源引用'),
+      numberInput('threshold', '相似阈值'),
+    ], async (values) => {
+      await api.contest.listCheatSuspects(valueText(values, 'contest_id'), {
+        problem_id: valueNumber(values, 'problem_id'),
+        code_hash: optionalText(values, 'code_hash'),
+        exclude_source_ref: optionalText(values, 'exclude_source_ref'),
+        threshold: optionalNumber(values, 'threshold'),
+      })
+      return '可疑线索已读取'
+    }),
+    pageAction('import-vuln-source-problem', '导入漏洞源题', '从漏洞源导入题目素材。', [
+      numberInput('source_id', '漏洞源编号'),
+      textInput('external_ref', '外部引用'),
+      textInput('title', '标题', true),
+      numberInput('level', '等级', true),
+      numberInput('runtime_mode', '运行模式', true),
+      textareaInput('draft_body', '草稿正文', true),
+    ], async (values) => {
+      await api.contest.importVulnSourceProblem({
+        source_id: optionalNumber(values, 'source_id'),
+        external_ref: optionalText(values, 'external_ref'),
+        title: valueText(values, 'title'),
+        level: valueNumber(values, 'level'),
+        runtime_mode: valueNumber(values, 'runtime_mode'),
+        draft_body: valueJson(values, 'draft_body'),
+      })
+      return '漏洞源题目已导入'
+    }),
   ]
 }
 
@@ -363,6 +733,35 @@ export function simGovernanceActions(api: ChaimirApi): PageAction[] {
     pageAction('republish-sim-package', '重新上架', '重新上架已下架仿真包。', [textInput('package_id', '仿真包编号', true)], async (values) => {
       await api.sim.republishPackage(valueText(values, 'package_id'))
       return '仿真包已重新上架'
+    }),
+    pageAction('update-sim-package', '更新仿真包', '更新草稿或退回后的仿真包文件和元数据。', [
+      textInput('package_id', '仿真包编号', true),
+      fileInput('bundle', '仿真包文件', true),
+      textInput('code', '仿真包编码', true),
+      textInput('version', '版本', true),
+      textInput('name', '名称', true),
+      textInput('category', '分类', true),
+      textInput('compute', '执行方式', true, '填写 frontend 或 backend。'),
+      textareaInput('scale_limit', '规模限制'),
+      textInput('backend_adapter', '后端适配器'),
+      textareaInput('backend_config', '后端配置'),
+    ], async (values) => {
+      await api.sim.updatePackage(valueText(values, 'package_id'), {
+        bundle: valueFile(values, 'bundle'),
+        code: valueText(values, 'code'),
+        version: valueText(values, 'version'),
+        name: valueText(values, 'name'),
+        category: valueText(values, 'category'),
+        compute: valueText(values, 'compute') === 'backend' ? 'backend' : 'frontend',
+        scale_limit: valueJson(values, 'scale_limit'),
+        backend_adapter: optionalText(values, 'backend_adapter'),
+        backend_config: valueJson(values, 'backend_config'),
+      })
+      return '仿真包已更新'
+    }),
+    pageAction('preview-sim-package', '预览仿真包', '读取仿真包预览和校验报告。', [textInput('package_id', '仿真包编号', true)], async (values) => {
+      await api.sim.previewPackage(valueText(values, 'package_id'))
+      return '仿真包预览已读取'
     }),
   ]
 }
@@ -423,6 +822,10 @@ export function optionalText(values: ActionValues, key: string): string | undefi
 export function valueNumber(values: ActionValues, key: string): number {
   const parsed = Number(valueText(values, key))
   return Number.isFinite(parsed) ? parsed : 0
+}
+
+export function valueFlag(values: ActionValues, key: string): boolean {
+  return valueNumber(values, key) === 1
 }
 
 export function optionalNumber(values: ActionValues, key: string): number | undefined {

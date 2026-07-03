@@ -2,6 +2,7 @@
 
 export * from './actions'
 export * from './columns'
+export * from './pagination'
 export * from './results'
 export * from './shared'
 export * from './support'

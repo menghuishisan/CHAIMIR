@@ -1,6 +1,6 @@
 // 四端共享应用壳：统一 API 装配、角色导航、顶栏通知、错误边界和响应式侧栏。
 
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { createApi } from '@chaimir/api-client'
 import type { ChaimirApi } from '@chaimir/api-client'
 import { AlertCircle, Bell, CheckCircle2, ChevronLeft, LogOut, Menu, PanelLeftClose, PanelLeftOpen, RefreshCw, Search } from 'lucide-react'
@@ -10,7 +10,7 @@ import { clearSession, getAccessToken, getTraceId } from './storage'
 import { parseHashRoute, routeHref } from './router'
 import { readFrontendConfig } from './config'
 import { toUserFacingError, UserFacingError } from './errors'
-import type { ActionValues, AppDefinition, AppRoute, DataRow, PageAction, ResourceResult, RowAction, WorkspaceResult } from './types'
+import type { ActionValues, AppDefinition, AppRoute, DataRow, PageAction, ResourceResult, RowAction, WorkspaceResult, WorkspaceTool } from './types'
 import './ChaimirApp.css'
 
 export interface ChaimirAppProps {
@@ -83,6 +83,10 @@ function AppShell({
   const [search, setSearch] = useState('')
   const [unread, setUnread] = useState<number | null>(null)
   const [noticeError, setNoticeError] = useState<string | null>(null)
+  const [logoutError, setLogoutError] = useState<string | null>(null)
+  const drawerPanelRef = useRef<HTMLDivElement>(null)
+  const mobileMenuRef = useRef<HTMLButtonElement>(null)
+  const wasDrawerOpenRef = useRef(false)
 
   useEffect(() => {
     let active = true
@@ -114,11 +118,24 @@ function AppShell({
     return () => window.removeEventListener('keydown', closeOnEscape)
   }, [])
 
+  useEffect(() => {
+    if (!drawerOpen) {
+      if (wasDrawerOpenRef.current) {
+        mobileMenuRef.current?.focus()
+      }
+      wasDrawerOpenRef.current = false
+      return
+    }
+
+    wasDrawerOpenRef.current = true
+    drawerPanelRef.current?.querySelector<HTMLElement>('a, button')?.focus()
+  }, [drawerOpen])
+
   return (
     <div className={`chaimir-app ${collapsed ? 'is-collapsed' : ''}`}>
       <a className="skip-link" href="#main-content">跳到主要内容</a>
       <header className="chaimir-app__topbar">
-        <button className="chaimir-app__icon-button chaimir-app__mobile-menu" type="button" aria-label="打开导航" onClick={() => setDrawerOpen(true)}>
+        <button ref={mobileMenuRef} className="chaimir-app__icon-button chaimir-app__mobile-menu" type="button" aria-label="打开导航" onClick={() => setDrawerOpen(true)}>
           <Menu size={20} aria-hidden="true" />
         </button>
         <a className="chaimir-app__brand" href={routeHref(app.homePath)}>
@@ -153,16 +170,18 @@ function AppShell({
             {collapsed ? <PanelLeftOpen size={18} aria-hidden="true" /> : <PanelLeftClose size={18} aria-hidden="true" />}
             <span>收起侧栏</span>
           </button>
-          <button className="chaimir-app__nav-item is-muted" type="button" onClick={() => clearSession()}>
+          <button className="chaimir-app__nav-item is-muted" type="button" onClick={() => logout(api, setLogoutError)}>
             <LogOut size={18} aria-hidden="true" />
             <span>退出登录</span>
           </button>
+          {logoutError && <div className="chaimir-app__nav-empty" role="alert">{logoutError}</div>}
         </div>
       </aside>
       {drawerOpen && (
         <div className="chaimir-app__drawer" role="dialog" aria-modal="true" aria-label="移动端导航">
           <button className="chaimir-app__drawer-scrim" type="button" aria-label="关闭导航" onClick={() => setDrawerOpen(false)} />
-          <div className="chaimir-app__drawer-panel">
+          <div className="chaimir-app__drawer-panel" ref={drawerPanelRef} onKeyDown={(event) => trapDialogFocus(event, drawerPanelRef.current)}>
+            <button className="chaimir-app__drawer-close" type="button" onClick={() => setDrawerOpen(false)}>关闭导航</button>
             <Sidebar app={app} activePath={activePath} collapsed={false} search={search} onNavigate={() => setDrawerOpen(false)} />
           </div>
         </div>
@@ -194,25 +213,41 @@ function Sidebar({
   const visibleRoutes = app.routes
     .filter((route) => !route.hidden)
     .filter((route) => !normalizedSearch || `${route.label} ${route.description}`.toLowerCase().includes(normalizedSearch))
+  const groupedRoutes = visibleRoutes.reduce<Array<{ group: string; routes: AppRoute[] }>>((groups, route) => {
+    const group = route.group || '功能'
+    const existing = groups.find((item) => item.group === group)
+    if (existing) {
+      existing.routes.push(route)
+    } else {
+      groups.push({ group, routes: [route] })
+    }
+    return groups
+  }, [])
 
   return (
     <nav className="chaimir-app__nav" aria-label={`${app.title}功能`}>
       <div className="chaimir-app__nav-heading">{collapsed ? app.title.slice(0, 2) : app.subtitle}</div>
-      {visibleRoutes.map((route) => {
-        const Icon = route.icon
-        return (
-          <a
-            key={route.path}
-            className={`chaimir-app__nav-item ${activePath === route.path ? 'is-active' : ''}`}
-            href={routeHref(route.path)}
-            title={route.label}
-            onClick={onNavigate}
-          >
-            <Icon size={18} aria-hidden="true" />
-            <span>{route.label}</span>
-          </a>
-        )
-      })}
+      {groupedRoutes.map((group) => (
+        <div className="chaimir-app__nav-group" key={group.group}>
+          {!collapsed && <div className="chaimir-app__nav-group-title">{group.group}</div>}
+          {group.routes.map((route) => {
+            const Icon = route.icon
+            return (
+              <a
+                key={route.path}
+                className={`chaimir-app__nav-item ${activePath === route.path ? 'is-active' : ''}`}
+                href={routeHref(route.path)}
+                title={route.label}
+                aria-current={activePath === route.path ? 'page' : undefined}
+                onClick={onNavigate}
+              >
+                <Icon size={18} aria-hidden="true" />
+                <span>{route.label}</span>
+              </a>
+            )
+          })}
+        </div>
+      ))}
       {visibleRoutes.length === 0 && !collapsed && (
         <div className="chaimir-app__nav-empty" role="status">没有找到匹配的功能</div>
       )}
@@ -258,7 +293,7 @@ function RoutePage({
   const refresh = () => setState((current) => ({ ...current, refreshKey: current.refreshKey + 1 }))
 
   if (route.immersive) {
-    return <ImmersivePage route={route} state={state} onRefresh={refresh} />
+    return <ImmersivePage app={app} route={route} state={state} onRefresh={refresh} />
   }
 
   return (
@@ -486,13 +521,16 @@ async function runRowAction(
 /**
  * ImmersivePage 渲染深色全屏工作台，窄屏自动堆叠。
  */
-function ImmersivePage({ route, state, onRefresh }: { route: AppRoute; state: PageState; onRefresh: () => void }): React.ReactElement {
+function ImmersivePage({ app, route, state, onRefresh }: { app: AppDefinition; route: AppRoute; state: PageState; onRefresh: () => void }): React.ReactElement {
+  const [operation, setOperation] = useState<OperationState>({ loading: false })
+  const result = state.result && 'panels' in state.result ? state.result : undefined
+
   return (
     <section className="chaimir-immersive" aria-labelledby="immersive-title">
       <header className="chaimir-immersive__bar">
-        <a className="chaimir-immersive__back" href={routeHref('experiments')}>
+        <a className="chaimir-immersive__back" href={routeHref(app.homePath)}>
           <ChevronLeft size={18} aria-hidden="true" />
-          返回实验
+          返回{app.title}
         </a>
         <div>
           <h1 id="immersive-title">{route.label}</h1>
@@ -502,24 +540,25 @@ function ImmersivePage({ route, state, onRefresh }: { route: AppRoute; state: Pa
       </header>
       {state.loading && <LoadingState onDark />}
       {state.error && <ErrorState error={state.error} onDark />}
-      {state.result && 'panels' in state.result && (
+      {result && (
         <div className="chaimir-immersive__grid">
           <aside className="chaimir-immersive__panel">
-            <h2>{state.result.title}</h2>
-            <p>{state.result.description}</p>
+            <h2>{result.title}</h2>
+            <p>{result.description}</p>
             <div className="chaimir-immersive__metrics">
-              {state.result.details.map((item) => (
+              {result.details.map((item) => (
                 <Badge key={item.label} variant={badgeTone(item.tone)}>{item.label}: {item.value}</Badge>
               ))}
             </div>
+            {result.tools && result.tools.length > 0 && <WorkspaceTools tools={result.tools} />}
           </aside>
           <section className="chaimir-immersive__stage" aria-label="工作台主区域">
             <div className="chaimir-immersive__terminal">
               <span>工作台状态</span>
-              <strong>{state.result.title}</strong>
-              <p>{state.result.description}</p>
+              <strong>{result.title}</strong>
+              <p>{result.description}</p>
               <dl>
-                {state.result.details.map((item) => (
+                {result.details.map((item) => (
                   <div key={item.label}>
                     <dt>{item.label}</dt>
                     <dd>{item.value}</dd>
@@ -529,7 +568,32 @@ function ImmersivePage({ route, state, onRefresh }: { route: AppRoute; state: Pa
             </div>
           </section>
           <aside className="chaimir-immersive__panel">
-            {state.result.panels.map((panel) => (
+            {result.actions && result.actions.length > 0 && (
+              <div className="chaimir-immersive__actions">
+                {result.actions.map((action) => (
+                  <ActionCard
+                    key={action.key}
+                    action={action}
+                    operation={operation}
+                    setOperation={setOperation}
+                    onRefresh={onRefresh}
+                  />
+                ))}
+              </div>
+            )}
+            {operation.message && (
+              <div className="chaimir-operation is-success" role="status">
+                <CheckCircle2 size={18} aria-hidden="true" />
+                <span>{operation.message}</span>
+              </div>
+            )}
+            {operation.error && (
+              <div className="chaimir-operation is-error" role="alert">
+                <AlertCircle size={18} aria-hidden="true" />
+                <span>{operation.error.traceId ? `${operation.error.message} 如需帮助，请提供编号 ${operation.error.traceId}。` : operation.error.message}</span>
+              </div>
+            )}
+            {result.panels.map((panel) => (
               <Card key={panel.title} className="chaimir-immersive__card">
                 <CardHeader>{panel.title}</CardHeader>
                 <CardBody>{panel.body}</CardBody>
@@ -542,6 +606,33 @@ function ImmersivePage({ route, state, onRefresh }: { route: AppRoute; state: Pa
   )
 }
 
+/**
+ * WorkspaceTools 渲染由后端沙箱/仿真声明的动态工具入口。
+ */
+function WorkspaceTools({ tools }: { tools: WorkspaceTool[] }): React.ReactElement {
+  return (
+    <div className="chaimir-immersive__tools" aria-label="可用工具">
+      {tools.map((tool) => {
+        const content = (
+          <>
+            <strong>{tool.label}</strong>
+            <span>{tool.description}</span>
+          </>
+        )
+        return tool.href ? (
+          <a key={tool.key} className={`chaimir-immersive__tool is-${tool.kind}`} href={tool.href} target="_blank" rel="noreferrer">
+            {content}
+          </a>
+        ) : (
+          <div key={tool.key} className={`chaimir-immersive__tool is-${tool.kind}`} role="group">
+            {content}
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
 class AppErrorBoundary extends React.Component<{ children: React.ReactNode }, { error?: UserFacingError }> {
   state: { error?: UserFacingError } = {}
 
@@ -549,7 +640,7 @@ class AppErrorBoundary extends React.Component<{ children: React.ReactNode }, { 
    * getDerivedStateFromError 把渲染异常转换为用户向错误，避免白屏和技术细节外露。
    */
   static getDerivedStateFromError(error: unknown): { error: UserFacingError } {
-    return { error: toUserFacingError(error) }
+    return { error: toUserFacingError(error, { allowPlainMessage: false }) }
   }
 
   /**
@@ -617,4 +708,61 @@ function metricDescription(tone: string | undefined): string | undefined {
 function normalizeRoute(app: AppDefinition, parsed: ReturnType<typeof parseHashRoute>): { route: AppRoute; params: URLSearchParams } {
   const route = app.routes.find((item) => item.path === parsed.path) ?? app.routes.find((item) => item.path === app.homePath) ?? app.routes[0]
   return { route, params: parsed.params }
+}
+
+/**
+ * logout 先吊销服务端会话，再清理本地登录态；吊销失败时给出用户向提示。
+ */
+async function logout(api: ChaimirApi, setLogoutError: (message: string | null) => void): Promise<void> {
+  setLogoutError(null)
+  try {
+    await api.identity.logout()
+  } catch (error) {
+    const userError = toUserFacingError(error)
+    setLogoutError(`${userError.message}${userError.traceId ? ` 如需帮助，请提供编号 ${userError.traceId}。` : ''}`)
+  } finally {
+    clearSession()
+  }
+}
+
+/**
+ * trapDialogFocus 让自定义移动端抽屉符合模态窗口的键盘焦点闭环。
+ */
+function trapDialogFocus(event: React.KeyboardEvent<HTMLElement>, container: HTMLElement | null): void {
+  if (event.key !== 'Tab' || !container) {
+    return
+  }
+  const focusable = getFocusableElements(container)
+  if (focusable.length === 0) {
+    event.preventDefault()
+    container.focus()
+    return
+  }
+
+  const first = focusable[0]
+  const last = focusable[focusable.length - 1]
+  if (event.shiftKey && document.activeElement === first) {
+    event.preventDefault()
+    last.focus()
+    return
+  }
+  if (!event.shiftKey && document.activeElement === last) {
+    event.preventDefault()
+    first.focus()
+  }
+}
+
+/**
+ * getFocusableElements 收集当前可见且可交互的焦点目标。
+ */
+function getFocusableElements(container: HTMLElement): HTMLElement[] {
+  const selector = [
+    'a[href]',
+    'button:not([disabled])',
+    'input:not([disabled])',
+    'select:not([disabled])',
+    'textarea:not([disabled])',
+    '[tabindex]:not([tabindex="-1"])',
+  ].join(',')
+  return Array.from(container.querySelectorAll<HTMLElement>(selector)).filter((element) => element.offsetParent !== null)
 }
