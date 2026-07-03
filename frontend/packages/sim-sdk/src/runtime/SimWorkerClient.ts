@@ -7,6 +7,7 @@ import type {
   SimInitParams,
   SimPackageDescriptor,
 } from '../types';
+import { fnv1aHex } from './deterministic';
 
 type WorkerRequest =
   | { type: 'init'; requestId: number; moduleUrl: string; initParams: SimInitParams; seed: number }
@@ -37,7 +38,9 @@ interface PendingRequest {
   timeoutId: ReturnType<typeof setTimeout>;
 }
 
-// SimWorkerClient 负责创建隔离 Worker、发送命令并维护自动播放计时器。
+/**
+ * SimWorkerClient 负责创建隔离 Worker、发送命令并维护自动播放计时器。
+ */
 export class SimWorkerClient {
   private readonly worker: Worker;
   private readonly options: SimWorkerClientOptions;
@@ -47,15 +50,20 @@ export class SimWorkerClient {
   private stepDurationMs: number;
   private failed = false;
 
+  /**
+   * constructor 创建模块 Worker 并绑定主线程消息处理器。
+   */
   constructor(options: SimWorkerClientOptions) {
     this.options = options;
     this.stepDurationMs = options.stepDurationMs ?? 1200;
     this.worker = new Worker(new URL('./sim.worker.ts', import.meta.url), { type: 'module' });
     this.worker.onmessage = (event: MessageEvent<WorkerResponse>) => this.handleMessage(event.data);
-    this.worker.onerror = () => this.failAll('仿真运行环境异常,请刷新后重试');
+    this.worker.onerror = (event) => this.failAll(this.userMessage('仿真运行环境异常,请刷新后重试', event.message));
   }
 
-  // init 加载仿真包模块并生成初始快照。
+  /**
+   * init 加载仿真包模块并生成初始快照。
+   */
   async init(): Promise<void> {
     await this.post({
       type: 'init',
@@ -66,17 +74,23 @@ export class SimWorkerClient {
     });
   }
 
-  // start 按当前步长自动发送 tick。
+  /**
+   * start 按当前步长自动发送 tick,自动播放错误会显式进入失败路径。
+   */
   start(): void {
     if (this.intervalId) {
       return;
     }
     this.intervalId = setInterval(() => {
-      void this.step().catch(() => undefined);
+      void this.step().catch((error: unknown) => {
+        this.failAll(this.userMessage('仿真播放中断,请刷新后重试', error));
+      });
     }, this.stepDurationMs);
   }
 
-  // pause 暂停自动 tick。
+  /**
+   * pause 暂停自动 tick。
+   */
   pause(): void {
     if (this.intervalId) {
       clearInterval(this.intervalId);
@@ -84,7 +98,9 @@ export class SimWorkerClient {
     }
   }
 
-  // setStepDuration 更新自动播放间隔。
+  /**
+   * setStepDuration 更新自动播放间隔。
+   */
   setStepDuration(durationMs: number): void {
     this.stepDurationMs = Math.max(250, Math.min(durationMs, 8000));
     if (this.intervalId) {
@@ -93,28 +109,38 @@ export class SimWorkerClient {
     }
   }
 
-  // step 推进一个 tick。
+  /**
+   * step 推进一个 tick。
+   */
   async step(): Promise<void> {
     await this.post({ type: 'step', requestId: 0 });
   }
 
-  // inject 注入用户交互事件。
+  /**
+   * inject 注入用户交互事件。
+   */
   async inject(eventType: string, payload: JsonObject = {}, target?: string): Promise<void> {
     await this.post({ type: 'inject', requestId: 0, eventType, payload, target });
   }
 
-  // back 回退最近一次事件。
+  /**
+   * back 回退最近一次事件。
+   */
   async back(): Promise<void> {
     await this.post({ type: 'back', requestId: 0 });
   }
 
-  // reset 重置到初始状态。
+  /**
+   * reset 重置到初始状态。
+   */
   async reset(): Promise<void> {
     this.pause();
     await this.post({ type: 'reset', requestId: 0 });
   }
 
-  // destroy 终止 Worker。
+  /**
+   * destroy 终止 Worker。
+   */
   destroy(): void {
     this.pause();
     for (const pending of this.pending.values()) {
@@ -124,15 +150,18 @@ export class SimWorkerClient {
     this.worker.terminate();
   }
 
+  /**
+   * post 发送带超时保护的 Worker 命令,并把响应关联回调用方。
+   */
   private post(message: WorkerRequest): Promise<void> {
     if (this.failed) {
-      return Promise.reject(new Error('仿真运行环境异常,请刷新后重试'));
+      return Promise.reject(new Error(this.userMessage('仿真运行环境异常,请刷新后重试')));
     }
     const requestId = this.requestId++;
     return new Promise((resolve, reject) => {
       const timeoutId = setTimeout(() => {
         this.pending.delete(requestId);
-        reject(this.failAll('仿真运行超时,请刷新后重试'));
+        reject(this.failAll(this.userMessage('仿真运行超时,请刷新后重试')));
       }, this.options.commandTimeoutMs);
       this.pending.set(requestId, {
         timeoutId,
@@ -152,6 +181,9 @@ export class SimWorkerClient {
     });
   }
 
+  /**
+   * handleMessage 处理 Worker 响应并触发 ready、snapshot 或 error 回调。
+   */
   private handleMessage(response: WorkerResponse): void {
     const pending = this.pending.get(response.requestId);
     if (pending) {
@@ -175,6 +207,9 @@ export class SimWorkerClient {
     this.failAll(response.message);
   }
 
+  /**
+   * failAll 进入失败态,终止 Worker 并拒绝所有等待中的命令。
+   */
   private failAll(message: string): Error {
     this.failed = true;
     this.pause();
@@ -187,5 +222,19 @@ export class SimWorkerClient {
     }
     this.options.onError?.(message);
     return error;
+  }
+
+  /**
+   * userMessage 生成带追踪编号的用户向错误文案,内部错误只进结构化控制台日志。
+   */
+  private userMessage(message: string, cause?: unknown): string {
+    const traceId = fnv1aHex(`sim-client:${message}:${cause instanceof Error ? cause.message : String(cause ?? '')}`, 12);
+    console.error('sim_client_error', {
+      trace_id: traceId,
+      tenant_id: 'frontend-local',
+      operation: 'worker-command',
+      error: cause instanceof Error ? cause.message : String(cause ?? ''),
+    });
+    return `${message}。如需帮助,请提供编号 ${traceId}`;
   }
 }

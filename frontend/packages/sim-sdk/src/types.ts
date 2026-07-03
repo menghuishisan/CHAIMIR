@@ -3,10 +3,12 @@
 export type SimComputeMode = 'frontend' | 'backend';
 export type SimCategory =
   | 'consensus'
-  | 'crypto'
+  | 'cryptography'
   | 'network'
   | 'data-structure'
-  | 'attack-defense';
+  | 'contract-security'
+  | 'transaction-runtime'
+  | 'cross-chain-system';
 
 export type InteractionKind = 'button' | 'slider' | 'hold' | 'select-element' | 'drag' | 'form';
 export type InteractionTag = 'normal' | 'perturb' | 'attack';
@@ -19,9 +21,9 @@ export interface SimPackage<TState extends SimState = SimState> {
   reducer: (state: TState, event: SimEvent, context: ReducerContext) => TState;
   interactions: InteractionDef[];
   render: (state: TState) => ViewSpec;
-  narrative?: NarrativeStep[];
-  codeTrace?: CodeTraceDef;
-  checkpoints?: CheckpointDef[];
+  narrative: NarrativeStep[];
+  codeTrace: CodeTraceDef;
+  checkpoints: CheckpointDef[];
 }
 
 export interface SimMeta {
@@ -162,6 +164,8 @@ export interface GraphEdge {
   to: string;
   label: string;
   status: 'pending' | 'active' | 'success' | 'failed';
+  process?: ProcessSpan;
+  detail?: string;
 }
 
 export interface ChainPattern
@@ -216,6 +220,7 @@ export interface PipelineStep {
   label: string;
   status: 'pending' | 'running' | 'complete' | 'failed';
   detail: string;
+  process?: ProcessSpan;
 }
 
 export interface LanePattern
@@ -228,6 +233,16 @@ export interface LaneMessage {
   at: number;
   label: string;
   status: 'sent' | 'delivered' | 'dropped';
+  endAt?: number;
+  process?: ProcessSpan;
+  detail?: string;
+}
+
+export interface ProcessSpan {
+  startedAt: number;
+  endedAt: number;
+  progress: number;
+  label: string;
 }
 
 export interface ChartPattern

@@ -19,8 +19,9 @@ interface SimPackage {
   reducer: (state, event, tick) => State;    // 纯函数,确定性演化
   interactions: InteractionDef[];            // 声明式交互
   render: (state) => ViewSpec;               // 用 SDK 描述画面
-  narrative?: NarrativeStep[];               // 可选教学叙事
-  codeTrace?: CodeTraceDef;                  // 可选代码追踪配置
+  narrative: NarrativeStep[];                // 教学叙事
+  codeTrace: CodeTraceDef;                   // 代码追踪配置
+  checkpoints: CheckpointDef[];              // 判题检查点
 }
 
 interface SimMeta {
@@ -29,7 +30,7 @@ interface SimMeta {
   category: string;        // 领域分类(仅用于检索/配色)
   version: string;         // semver
   compute: "frontend" | "backend";  // 默认 frontend
-  scale_limit?: { nodes?: number; max_tick?: number };  // 性能边界
+  scaleLimit: { nodes: number; maxTick: number; maxEvents: number };  // 性能边界
 }
 ```
 
@@ -37,8 +38,8 @@ interface SimMeta {
 - `reducer` 必须纯函数:`reducer(s,e,t)` 同输入必同输出,禁用 `Date.now()`/`Math.random()`(随机走种子 PRNG)。
 - `render` 只能用 SDK 能力,不得自行操作 DOM。
 - `interactions` 必须完整声明,运行时据此自动渲染控件。
-- `sim-package.json` 只描述 `meta`、`interactions`、`render.patterns`、`narrative` 与 `codeTrace`;
-  后端不执行其中任何函数,只校验封闭模式、交互事件和代码追踪摘要。
+- `sim-package.json` 只描述 `meta`、`interactions`、`render.patterns`、`narrative`、`codeTrace` 与 `checkpoints`;
+  后端不执行其中任何函数,只校验封闭模式、交互事件、代码追踪配置和检查点锚点。
 
 ### 1.1 `sim-package.json` 协议入口
 
@@ -50,7 +51,7 @@ interface SimMeta {
     "category": "consensus",
     "version": "1.0.0",
     "compute": "frontend",
-    "scale_limit": { "nodes": 50, "max_tick": 5000 }
+    "scale_limit": { "nodes": 50, "max_tick": 5000, "max_events": 10000 }
   },
   "interactions": [
     {
@@ -67,7 +68,20 @@ interface SimMeta {
       { "mode": "graph", "region": "main", "config": { "layout": "force" } },
       { "mode": "chain", "region": "bottom" }
     ]
-  }
+  },
+  "narrative": [
+    { "id": "normal", "title": "观察挖矿传播", "highlight": ["pow-graph"], "explain": "先观察诚实节点如何扩展链。", "defaultDurationMs": 1200 }
+  ],
+  "codeTrace": {
+    "sourceCode": "function mineStep(state) {\n  return validateAndAppend(state);\n}",
+    "language": "pseudocode",
+    "lineMapping": [
+      { "line": 1, "triggerCondition": "tick", "annotation": "进入挖矿步骤" },
+      { "line": 2, "triggerCondition": "append", "annotation": "校验并追加区块", "highlightStyle": "success" }
+    ],
+    "variableWatch": [{ "name": "height", "extract": "state.height", "format": "number" }]
+  },
+  "checkpoints": [{ "id": "cp-51-success", "label": "识别 51% 攻击结果" }]
 }
 ```
 
@@ -76,7 +90,30 @@ interface SimMeta {
 - `interactions[].emits` 生成 `sim_package.interaction_schema`,运行时只接受 manifest 声明过的事件和参数。
 - `render.patterns` 必须是 1~3 个封闭模式,`mode` 只能取 `graph|chain|tree|matrix|pipeline|lane|chart`。
 - `codeTrace` 使用 camelCase,与前端 TypeScript 协议一致;数据库字段 `code_trace` 只存不含源码正文的审核摘要。
+- `checkpoints` 必须声明检查点 ID 与名称,受控预览和后续 `/sessions/{id}/checkpoints` 上报均以这些锚点派生结果。
 - manifest JSON 拒绝未知字段和尾随内容,避免同一协议出现兼容别名或灰色扩展。
+
+### 1.2 官方前端 SDK 使用入口
+
+前端官方 SDK 包为 `@chaimir/sim-sdk`,开发者新增仿真包必须从公开 API 开始,不得复制内置包、Worker 或渲染器实现。主入口导出:
+
+- `SimPackage`、`SimState`、`SimEvent`、`ViewSpec` 等协议类型。
+- `defineSimPackage(simPackage)`:定义仿真包并执行开发期协议校验。
+- `createDeveloperTemplate(code)`:生成最小完整模板。
+- `validateSimPackageManifest(simPackage)`:上传前检查协议完整性。
+- `createManifestSummary(simPackage)`:生成审核摘要。
+- `createSimPackageManifest(simPackage)`:生成上传归档中的 `sim-package.json` 内容。
+- `SimulationWorkbench`、`SimWorkerClient`、`PatternRenderer`:仅供平台页面装配,仿真包作者不应直接复刻运行时。
+
+内置仿真包 registry 不从 `@chaimir/sim-sdk` 主入口导出。内置包由平台内部装配,第三方/教师包与内置包使用同一套 `SimPackage` 协议。
+
+最小开发流程:
+
+1. 使用 `createDeveloperTemplate(code)` 或 `defineSimPackage({...})` 创建包。
+2. 完整实现 `meta`、`initState`、`reducer`、`interactions`、`render`、`narrative`、`codeTrace`、`checkpoints`。
+3. 本地执行 `validateSimPackageManifest(simPackage)`,确认无协议问题。
+4. 使用 `createSimPackageManifest(simPackage)` 生成 `sim-package.json`。
+5. 将 `sim-package.json` 与 bundle 一起提交后端 M4 审核。
 
 ---
 
@@ -225,7 +262,7 @@ interface NarrativeStep {
 const PoWSim: SimPackage = {
   meta: { code: "builtin__pow-mining", name: "PoW 挖矿与51%攻击",
           category: "consensus", version: "1.0.0", compute: "frontend",
-          scale_limit: { nodes: 50, max_tick: 5000 } },
+          scaleLimit: { nodes: 50, maxTick: 5000, maxEvents: 10000 } },
   initState: (p, seed) => ({ miners: mkMiners(p.minerCount, seed), chain: [genesis], ... }),
   reducer: (s, e, t) => {
     switch (e.type) {

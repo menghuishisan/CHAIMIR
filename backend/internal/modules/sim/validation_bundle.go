@@ -28,6 +28,9 @@ func validateBundleManifestMatchesRequest(manifest bundleManifest, req SubmitPac
 	if err != nil || manifestCompute != compute {
 		return apperr.ErrSimPackageValidationFailed
 	}
+	if !scaleLimitMatchesRequest(manifest.Meta.ScaleLimit, req.ScaleLimit) {
+		return apperr.ErrSimPackageValidationFailed
+	}
 	if len(manifest.InteractionSchema.Events) == 0 {
 		return apperr.ErrSimPackageValidationFailed
 	}
@@ -68,14 +71,17 @@ type bundleManifest struct {
 	CodeTrace         CodeTraceAudit
 }
 
+// simPackageManifest 是 sim-package.json 的严格解析结构,只包含后端审核允许的顶层字段。
 type simPackageManifest struct {
 	Meta         simManifestMeta       `json:"meta"`
 	Interactions []simInteractionDef   `json:"interactions"`
 	Render       simRenderManifest     `json:"render"`
 	Narrative    []map[string]any      `json:"narrative,omitempty"`
 	CodeTrace    *simCodeTraceManifest `json:"codeTrace,omitempty"`
+	Checkpoints  []simCheckpointDef    `json:"checkpoints"`
 }
 
+// simManifestMeta 保存包元信息和规模上限,需要与上传表单保持完全一致。
 type simManifestMeta struct {
 	Code       string         `json:"code"`
 	Name       string         `json:"name"`
@@ -85,6 +91,7 @@ type simManifestMeta struct {
 	ScaleLimit map[string]any `json:"scale_limit,omitempty"`
 }
 
+// simInteractionDef 描述一个可由通用工作台发出的受控交互。
 type simInteractionDef struct {
 	ID            string         `json:"id"`
 	Kind          string         `json:"kind"`
@@ -98,6 +105,7 @@ type simInteractionDef struct {
 	CooldownMS    int64          `json:"cooldown_ms,omitempty"`
 }
 
+// simFieldDef 描述交互 payload 中单个参数的可校验约束。
 type simFieldDef struct {
 	Name     string           `json:"name"`
 	Type     string           `json:"type"`
@@ -109,21 +117,25 @@ type simFieldDef struct {
 	Required bool             `json:"required,omitempty"`
 }
 
+// simFieldOption 描述 select 参数允许的枚举值。
 type simFieldOption struct {
 	Label string `json:"label"`
 	Value any    `json:"value"`
 }
 
+// simRenderManifest 只保留封闭可视化模式声明,不包含执行期渲染函数。
 type simRenderManifest struct {
 	Patterns []simPatternBinding `json:"patterns"`
 }
 
+// simPatternBinding 声明一个受控渲染模式和布局区域。
 type simPatternBinding struct {
 	Mode   string         `json:"mode"`
 	Region string         `json:"region,omitempty"`
 	Config map[string]any `json:"config,omitempty"`
 }
 
+// simCodeTraceManifest 保存代码追踪配置,后端只提取审核摘要不保存源码正文。
 type simCodeTraceManifest struct {
 	SourceCode    string             `json:"sourceCode"`
 	Language      string             `json:"language"`
@@ -131,6 +143,7 @@ type simCodeTraceManifest struct {
 	VariableWatch []simVariableWatch `json:"variableWatch,omitempty"`
 }
 
+// simLineMapping 描述源码行与仿真阶段或事件的对应关系。
 type simLineMapping struct {
 	Line             int    `json:"line"`
 	TriggerCondition string `json:"triggerCondition"`
@@ -138,10 +151,17 @@ type simLineMapping struct {
 	HighlightStyle   string `json:"highlightStyle,omitempty"`
 }
 
+// simVariableWatch 描述代码追踪面板允许观察的状态变量。
 type simVariableWatch struct {
 	Name    string `json:"name"`
 	Extract string `json:"extract"`
 	Format  string `json:"format,omitempty"`
+}
+
+// simCheckpointDef 声明仿真检查点锚点,判分逻辑仍由受控评测链路处理。
+type simCheckpointDef struct {
+	ID    string `json:"id"`
+	Label string `json:"label"`
 }
 
 // analyzeBundle 校验归档结构、计算 SHA-256 并执行危险调用静态扫描。
@@ -245,6 +265,9 @@ func buildBundleManifest(doc simPackageManifest) (bundleManifest, []string) {
 	if !simCodePattern.MatchString(strings.TrimSpace(doc.Meta.Code)) || !semverPattern.MatchString(strings.TrimSpace(doc.Meta.Version)) || strings.TrimSpace(doc.Meta.Name) == "" || !categoryPattern.MatchString(strings.TrimSpace(doc.Meta.Category)) {
 		findings = append(findings, "manifest:meta-invalid")
 	}
+	if !validManifestScaleLimit(doc.Meta.ScaleLimit) {
+		findings = append(findings, "manifest:scale-limit-invalid")
+	}
 	compute, err := computeFromString(doc.Meta.Compute)
 	if err != nil || (compute != ComputeFrontend && compute != ComputeBackend) {
 		findings = append(findings, "manifest:compute-invalid")
@@ -276,6 +299,7 @@ func buildBundleManifest(doc simPackageManifest) (bundleManifest, []string) {
 	}
 	trace, traceFindings := codeTraceAuditFromManifest(doc.CodeTrace)
 	findings = append(findings, traceFindings...)
+	findings = append(findings, checkpointFindingsFromManifest(doc.Checkpoints)...)
 	return bundleManifest{Meta: doc.Meta, InteractionSchema: normalizeInteractionSchema(schema), CodeTrace: trace}, findings
 }
 
@@ -333,7 +357,7 @@ func interactionParamFromManifest(in simFieldDef) (InteractionParam, bool) {
 // codeTraceAuditFromManifest 校验代码追踪声明并生成不含源码正文的审核摘要。
 func codeTraceAuditFromManifest(in *simCodeTraceManifest) (CodeTraceAudit, []string) {
 	if in == nil {
-		return CodeTraceAudit{}, nil
+		return CodeTraceAudit{}, []string{"manifest:code-trace-missing"}
 	}
 	source := strings.TrimSpace(in.SourceCode)
 	if source == "" || len(source) > 100000 || !validCodeTraceLanguage(in.Language) || len(in.LineMapping) == 0 || len(in.LineMapping) > 500 || len(in.VariableWatch) > 100 {
@@ -351,6 +375,48 @@ func codeTraceAuditFromManifest(in *simCodeTraceManifest) (CodeTraceAudit, []str
 		}
 	}
 	return CodeTraceAudit{Enabled: true, Language: strings.TrimSpace(in.Language), LineCount: lineCount, MappingCount: len(in.LineMapping), VariableCount: len(in.VariableWatch)}, nil
+}
+
+// checkpointFindingsFromManifest 校验检查点声明,确保后续检查点上报有受控锚点。
+func checkpointFindingsFromManifest(in []simCheckpointDef) []string {
+	if len(in) == 0 || len(in) > 64 {
+		return []string{"manifest:checkpoint-invalid"}
+	}
+	seen := map[string]struct{}{}
+	for _, checkpoint := range in {
+		id := strings.TrimSpace(checkpoint.ID)
+		if !checkpointIDPattern.MatchString(id) || strings.TrimSpace(checkpoint.Label) == "" || len(checkpoint.Label) > 128 {
+			return []string{"manifest:checkpoint-invalid"}
+		}
+		if _, exists := seen[id]; exists {
+			return []string{"manifest:checkpoint-duplicate"}
+		}
+		seen[id] = struct{}{}
+	}
+	return nil
+}
+
+// validManifestScaleLimit 校验 manifest 中的规模上限字段,与前端 Worker 强制项保持一致。
+func validManifestScaleLimit(value map[string]any) bool {
+	nodes, nodesOK := positiveJSONInt(value["nodes"])
+	maxTick, tickOK := positiveJSONInt(value["max_tick"])
+	maxEvents, eventsOK := positiveJSONInt(value["max_events"])
+	return nodesOK && tickOK && eventsOK && nodes <= 10000 && maxTick <= 100000 && maxEvents <= 100000
+}
+
+// scaleLimitMatchesRequest 确认 manifest 与上传表单中的规模上限同源。
+func scaleLimitMatchesRequest(manifest map[string]any, raw []byte) bool {
+	request, err := jsonx.ObjectMapStrict(raw)
+	if err != nil {
+		return false
+	}
+	return jsonx.Equal(manifest, request)
+}
+
+// positiveJSONInt 从 JSON 数字或数字字符串读取正整数。
+func positiveJSONInt(value any) (int, bool) {
+	out := jsonx.IntFromAny(value)
+	return out, out > 0
 }
 
 // validInteractionKind 校验交互声明类型是否落在受控封闭集。

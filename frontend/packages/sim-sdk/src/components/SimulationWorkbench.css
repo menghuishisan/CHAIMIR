@@ -127,6 +127,7 @@
   list-style: none;
 }
 
+.sim-timeline,
 .sim-step-list li,
 .sim-explain,
 .sim-question,
@@ -134,6 +135,67 @@
   border: 0.0625rem solid var(--color-dark-border);
   border-radius: var(--radius-sm);
   background: var(--color-dark-elevated);
+}
+
+.sim-timeline {
+  display: grid;
+  gap: var(--space-3);
+  padding: var(--space-4);
+}
+
+.sim-timeline header {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: var(--space-2);
+  align-items: center;
+}
+
+.sim-timeline header svg {
+  color: var(--color-on-dark-accent);
+}
+
+.sim-timeline header span {
+  color: var(--color-dark-text-sub);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+}
+
+.sim-timeline__track {
+  overflow: hidden;
+  block-size: 0.5rem;
+  border-radius: var(--radius-xs);
+  background: var(--color-dark-surface);
+}
+
+.sim-timeline__track span {
+  display: block;
+  block-size: 100%;
+  background: var(--color-on-dark-accent);
+  transition: inline-size 180ms ease;
+}
+
+.sim-timeline dl {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+}
+
+.sim-timeline dl div {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.sim-timeline dt {
+  color: var(--color-dark-text-sub);
+}
+
+.sim-timeline dd {
+  max-inline-size: 11rem;
+  margin: 0;
+  overflow-wrap: anywhere;
+  font-family: var(--font-mono);
+  text-align: right;
 }
 
 .sim-step-list li {

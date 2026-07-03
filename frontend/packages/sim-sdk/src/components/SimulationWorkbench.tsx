@@ -1,7 +1,7 @@
 // 本文件实现仿真可视化沉浸式工作台,主线程只渲染 Worker 返回的纯数据快照。
 
 import React, { useEffect, useRef, useState } from 'react';
-import { AlertTriangle, CheckCircle2, Pause, Play, RotateCcw, ShieldAlert, SkipBack, StepForward } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, Clock3, Pause, Play, RotateCcw, ShieldAlert, SkipBack, StepForward } from 'lucide-react';
 import { Button } from '@chaimir/ui';
 import type {
   CodeTraceDef,
@@ -10,6 +10,7 @@ import type {
   JsonObject,
   JsonValue,
   NarrativeStepDescriptor,
+  PlaybackSpeed,
   RuntimeSnapshot,
   SimEvent,
   SimInitParams,
@@ -28,7 +29,7 @@ export interface SimulationWorkbenchProps {
   onCheckpoint?: (checkpointId: string, result: RuntimeSnapshot['checkpointResults'][string]) => void;
 }
 
-const speedOptions = [
+const speedOptions: PlaybackSpeed[] = [
   { label: '0.5x', multiplier: 0.5 },
   { label: '1x', multiplier: 1 },
   { label: '1.5x', multiplier: 1.5 },
@@ -110,11 +111,17 @@ export function SimulationWorkbench({
   const activeElementId = snapshot?.state.selectedElementId ?? selectedElementId;
   const currentStep = snapshot?.currentStep;
 
+  /**
+   * handleRuntimeError 把命令错误转为工作台可见提示并停止播放。
+   */
   function handleRuntimeError(error: unknown): void {
     setRuntimeMessage(error instanceof Error ? error.message : '仿真运行失败,请刷新后重试');
     setPlaying(false);
   }
 
+  /**
+   * togglePlay 在自动播放和暂停之间切换,不让未初始化工作台发送命令。
+   */
   function togglePlay(): void {
     const client = clientRef.current;
     if (!client || !snapshot) {
@@ -129,14 +136,23 @@ export function SimulationWorkbench({
     setPlaying(true);
   }
 
+  /**
+   * stepForward 手动推进一个事件周期。
+   */
   function stepForward(): void {
     void clientRef.current?.step().catch(handleRuntimeError);
   }
 
+  /**
+   * stepBack 回退最近一次事件并由 Worker 重放状态。
+   */
   function stepBack(): void {
     void clientRef.current?.back().catch(handleRuntimeError);
   }
 
+  /**
+   * reset 重置 Worker 状态和本地选择状态。
+   */
   function reset(): void {
     void clientRef.current?.reset().catch(handleRuntimeError);
     setPlaying(false);
@@ -144,6 +160,9 @@ export function SimulationWorkbench({
     setSelectedElementType(undefined);
   }
 
+  /**
+   * submitCheckpoint 把当前叙事问题对应的检查点结果交给上层记录。
+   */
   function submitCheckpoint(step: NarrativeStepDescriptor): void {
     const checkpointId = step.question?.checkpointId;
     if (!checkpointId || !snapshot?.checkpointResults[checkpointId]) {
@@ -183,6 +202,7 @@ export function SimulationWorkbench({
 
       <section className="sim-workbench__layout">
         <aside className="sim-workbench__panel sim-workbench__panel--left">
+          <TimelinePanel descriptor={descriptor} snapshot={snapshot} stepDuration={stepDuration} speed={speed} />
           <StepList steps={descriptor.narrative} currentStep={currentStep} />
           <article className="sim-explain">
             <h2>{snapshot.state.explanation.title}</h2>
@@ -298,6 +318,65 @@ export function SimulationWorkbench({
 }
 
 /**
+ * TimelinePanel 展示所有仿真共享的逻辑时间、事件进度和播放参数。
+ */
+function TimelinePanel({
+  descriptor,
+  snapshot,
+  stepDuration,
+  speed,
+}: {
+  descriptor: SimPackageDescriptor;
+  snapshot: RuntimeSnapshot;
+  stepDuration: number;
+  speed: number;
+}): React.ReactElement {
+  const maxTick = Math.max(1, descriptor.meta.scaleLimit.maxTick);
+  const progress = Math.min(100, Math.round((snapshot.tick / maxTick) * 100));
+  const latestEvent = snapshot.events[snapshot.events.length - 1];
+  return (
+    <section className="sim-timeline" aria-label="仿真时间轴">
+      <header>
+        <Clock3 size={16} />
+        <strong>时间轴</strong>
+        <span>{progress}%</span>
+      </header>
+      <div className="sim-timeline__track" aria-hidden="true">
+        <span style={{ inlineSize: `${progress}%` }} />
+      </div>
+      <dl>
+        <div>
+          <dt>当前步进</dt>
+          <dd>
+            {snapshot.tick}/{maxTick}
+          </dd>
+        </div>
+        <div>
+          <dt>当前阶段</dt>
+          <dd>{snapshot.state.phase}</dd>
+        </div>
+        <div>
+          <dt>事件数量</dt>
+          <dd>
+            {snapshot.events.length}/{descriptor.meta.scaleLimit.maxEvents}
+          </dd>
+        </div>
+        <div>
+          <dt>最近事件</dt>
+          <dd>{latestEvent ? latestEvent.type : '等待开始'}</dd>
+        </div>
+        <div>
+          <dt>播放参数</dt>
+          <dd>
+            {stepDuration}ms / {speed}x
+          </dd>
+        </div>
+      </dl>
+    </section>
+  );
+}
+
+/**
  * 展示叙事步骤列表,帮助学生知道当前处于哪一个教学阶段。
  */
 function StepList({ steps, currentStep }: { steps: NarrativeStepDescriptor[]; currentStep?: NarrativeStepDescriptor }): React.ReactElement {
@@ -335,6 +414,9 @@ function InteractionPanel({
   const [lastEmittedAt, setLastEmittedAt] = useState<Record<string, number>>({});
   const [pendingAttackId, setPendingAttackId] = useState<string | undefined>();
 
+  /**
+   * updateValue 保存交互字段当前值,作为下一次注入事件的载荷。
+   */
   function updateValue(interaction: InteractionDescriptor, field: FieldDef, value: JsonValue): void {
     setValues((current) => ({
       ...current,
@@ -346,6 +428,9 @@ function InteractionPanel({
     }));
   }
 
+  /**
+   * handleFieldChange 处理字段变化,滑块类交互会立即注入参数变更。
+   */
   function handleFieldChange(interaction: InteractionDescriptor, field: FieldDef, value: JsonValue): void {
     updateValue(interaction, field, value);
     if (interaction.kind === 'slider' && field.type === 'range') {
@@ -353,10 +438,16 @@ function InteractionPanel({
     }
   }
 
+  /**
+   * valueFor 读取字段当前值,没有本地值时回退到声明的默认值。
+   */
   function valueFor(interaction: InteractionDescriptor, field: FieldDef): JsonValue {
     return values[interaction.id]?.[field.name] ?? field.default;
   }
 
+  /**
+   * emitInteraction 统一执行冷却、目标、确认和 payload 合成后再发给 Worker。
+   */
   function emitInteraction(interaction: InteractionDescriptor, extra: JsonObject = {}): void {
     const bypassCooldown = extra.active === false || extra.phase === 'end';
     if (!canEmit(interaction, bypassCooldown)) {
@@ -373,6 +464,9 @@ function InteractionPanel({
     setLastEmittedAt((current) => ({ ...current, [interaction.id]: eventSeq }));
   }
 
+  /**
+   * canEmit 判断交互在当前状态下是否可执行。
+   */
   function canEmit(interaction: InteractionDescriptor, bypassCooldown = false): boolean {
     if (availability[interaction.id] === false) {
       return false;
@@ -555,6 +649,9 @@ function InteractionCommand({
   const dragStartRef = useRef<{ x: number; y: number } | null>(null);
   const holdIntervalRef = useRef<number | null>(null);
 
+  /**
+   * stopHold 停止按住类交互并补发结束载荷。
+   */
   function stopHold(): void {
     if (holdIntervalRef.current !== null) {
       window.clearInterval(holdIntervalRef.current);

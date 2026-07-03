@@ -1,0 +1,35 @@
+// 本文件把 HotStuff 内核状态映射为封闭可视化模式。
+
+import type { ChainBlock, ViewSpec } from '../../../types';
+import { chainPattern, graphPattern, lanePattern } from '../../packageTools';
+import { graphEdges, graphNodes, laneMessages, type ViewNode } from '../consensusView';
+import type { HotStuffBlock, HotStuffState } from './model';
+import { labelHotStuffReplica } from './kernel';
+
+/**
+ * renderHotStuffView 输出 QC 链、副本网络和消息泳道。
+ */
+export function renderHotStuffView(state: HotStuffState): ViewSpec {
+  return {
+    summary: `视图 ${state.view},领导者 ${labelHotStuffReplica(state, state.leaderId)},high QC ${state.highQcBlock},锁定块 ${state.lockedBlock},提交块 ${state.committedBlock ?? '未提交'}。`,
+    patterns: [
+      chainPattern('hotstuff-chain', 'HotStuff QC 链', hotstuffBlocks(state.blocks), [], 'main'),
+      graphPattern('hotstuff-graph', 'HotStuff 副本网络', replicaNodes(state), graphEdges(state.messages), 'side'),
+      lanePattern('hotstuff-lane', 'HotStuff 消息时序', state.replicas.map((replica) => replica.label), laneMessages(state.messages, (id) => labelHotStuffReplica(state, id)), state.tick, 'side'),
+    ],
+  };
+}
+
+/**
+ * replicaNodes 把 HotStuff 副本状态映射为图节点。
+ */
+function replicaNodes(state: HotStuffState): ViewNode[] {
+  return graphNodes(state.replicas.map((replica) => ({ id: replica.id, label: replica.label, role: 'hotstuff-replica', status: replica.faulty ? 'danger' : replica.leader ? 'active' : replica.voted ? 'success' : replica.timeout ? 'warning' : 'idle', value: replica.leader ? '领导者' : `锁 ${replica.lockedBlock}` })));
+}
+
+/**
+ * hotstuffBlocks 将 HotStuff 区块转换成链式 QC 可视化结构。
+ */
+function hotstuffBlocks(blocks: HotStuffBlock[]): ChainBlock[] {
+  return blocks.map((block, index) => ({ id: block.id, height: index, hash: block.hash, parentHash: block.parentId ?? '', label: block.view === 0 ? '创世块' : `视图 ${block.view}`, status: block.committed ? 'canonical' : block.qc ? 'pending' : 'orphaned' }));
+}

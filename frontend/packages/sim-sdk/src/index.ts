@@ -5,3 +5,5 @@ export * from './runtime/deterministic';
 export * from './runtime/SimWorkerClient';
 export * from './components/SimulationWorkbench';
 export * from './renderers/PatternRenderer';
+export * from './authoring/manifest';
+export * from './authoring/templates';

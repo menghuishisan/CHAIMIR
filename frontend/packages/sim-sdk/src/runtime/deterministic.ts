@@ -8,6 +8,9 @@ const UINT32_MAX = 0xffffffff;
 export class XorShiftRandom implements DeterministicRandom {
   private state: number;
 
+  /**
+   * constructor 使用给定种子初始化确定性随机状态。
+   */
   constructor(seed: number) {
     this.state = seed >>> 0 || 0x9e3779b9;
   }
