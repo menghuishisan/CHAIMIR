@@ -198,7 +198,6 @@ func (s *Service) snapshotExpectationForJudger(typ int16, expectation map[string
 		}
 		return out, nil
 	}
-	return out, nil
 }
 
 // executionExpectationForJudger 只在 worker 执行期恢复 J2/J5 所需的 M5 全量配置,不写回数据库快照。

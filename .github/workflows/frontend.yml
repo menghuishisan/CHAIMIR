@@ -8,11 +8,13 @@ on:
     branches: [main]
     paths:
       - "frontend/**"
+      - "images/service/frontend/**"
       - ".github/workflows/frontend.yml"
       - "deploy/ci/**"
   pull_request:
     paths:
       - "frontend/**"
+      - "images/service/frontend/**"
       - ".github/workflows/frontend.yml"
 
 permissions:
@@ -57,8 +59,10 @@ jobs:
         with:
           image: ${{ secrets.HARBOR_REGISTRY }}/service/frontend
           tag: ${{ github.sha }}
-          context: frontend
-          dockerfile: frontend/Dockerfile
+          context: .
+          dockerfile: images/service/frontend/Dockerfile
+          build-args: |
+            NODE_BUILDER_IMAGE=${{ secrets.HARBOR_REGISTRY }}/base/node-builder@sha256:756ec7bd7306ea9038422dece9c70806e2b75201c7ac0097146d4fa11f0b9c7b
           registry: ${{ secrets.HARBOR_REGISTRY }}
           registry-username: ${{ secrets.HARBOR_USERNAME }}
           registry-password: ${{ secrets.HARBOR_PASSWORD }}

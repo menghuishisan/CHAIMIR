@@ -8,11 +8,15 @@ on:
     branches: [main]
     paths:
       - "backend/**"
+      - "images/service/backend/**"
+      - "images/service/migrate/**"
       - ".github/workflows/backend.yml"
       - "deploy/ci/**"
   pull_request:
     paths:
       - "backend/**"
+      - "images/service/backend/**"
+      - "images/service/migrate/**"
       - ".github/workflows/backend.yml"
 
 permissions:
@@ -50,8 +54,10 @@ jobs:
         with:
           image: ${{ secrets.HARBOR_REGISTRY }}/service/backend
           tag: ${{ github.sha }}
-          context: backend
-          dockerfile: backend/Dockerfile
+          context: .
+          dockerfile: images/service/backend/Dockerfile
+          build-args: |
+            GO_BUILDER_IMAGE=${{ secrets.HARBOR_REGISTRY }}/base/go-builder@sha256:105f43fec2ca24f7df1ed966814de4391b323eadb074cc72de31fcfba60aa43a
           registry: ${{ secrets.HARBOR_REGISTRY }}
           registry-username: ${{ secrets.HARBOR_USERNAME }}
           registry-password: ${{ secrets.HARBOR_PASSWORD }}
@@ -62,8 +68,10 @@ jobs:
         with:
           image: ${{ secrets.HARBOR_REGISTRY }}/service/migrate
           tag: ${{ github.sha }}
-          context: backend
-          dockerfile: backend/Dockerfile.migrate
+          context: .
+          dockerfile: images/service/migrate/Dockerfile
+          build-args: |
+            GO_BUILDER_IMAGE=${{ secrets.HARBOR_REGISTRY }}/base/go-builder@sha256:105f43fec2ca24f7df1ed966814de4391b323eadb074cc72de31fcfba60aa43a
           registry: ${{ secrets.HARBOR_REGISTRY }}
           registry-username: ${{ secrets.HARBOR_USERNAME }}
           registry-password: ${{ secrets.HARBOR_PASSWORD }}

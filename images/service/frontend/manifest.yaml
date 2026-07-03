@@ -13,13 +13,14 @@ labels:
   chaimir.io/student-access: "false"
   chaimir.io/sensitivity: control-plane
   chaimir.io/scope: platform
-  chaimir.io/source: thin-wrapper
+  chaimir.io/source: platform-built
 description: 前端静态资源服务镜像。
 source:
-  type: thin-wrapper
+  type: platform-built
 upstream:
-  image: nginx:1.27-alpine
-  reuse_policy: thin-wrapper
+  builder: node:20-alpine
+  runtime: nginx:1.27-alpine
+  reuse_policy: multi-stage-build
 data_driven: false
 capabilities:
   - platform-service
@@ -64,8 +65,7 @@ selftest:
         - nginx
         - -v
 supply_chain:
-  deployable: false
-  block_reason: frontend/dist 静态产物尚未由真实前端应用构建生成,不得把源码目录作为发布镜像内容。
+  deployable: true
   sbom: true
   trivy_required: true
   cosign_required: true

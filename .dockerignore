@@ -1,22 +1,41 @@
-# 本文件限制 Docker 构建上下文,避免本地缓存、密钥和临时测试产物进入镜像构建。
+# Chaimir Docker 构建上下文忽略清单。
+# 密钥、本地缓存、构建产物和 VCS 元数据不得进入镜像构建上下文。
+
 .git
-.gitignore
+.github
+.tmp
+.agents
+.codex
+.claude
 .codegraph
 .understand-anything
-.tmp
-.gocache
+.mcp.json
 
-**/.cache
-**/node_modules
-**/dist
-!frontend/dist
+**/.env
+**/secret.env
+**/*.secret.env
+**/*.pem
+**/*.key
+deploy/config/cosign/
+deploy/config/docker-auth/
+deploy/config/harbor-tls/
 
-backend/.env
-deploy/config/*.env
-deploy/config/secret.env
-deploy/config/supply-chain.secret.env
-deploy/config/docker-auth
+**/node_modules/
+**/dist/
+**/build/
+**/.turbo/
+**/.vite/
+**/.cache/
+**/*.tsbuildinfo
+
+backend/bin/
+backend/vendor/
+backend/.gocache/
+.gocache/
+.testcache/
 
 *.log
-*.tmp
-*.bak
+*.tar
+images/vendor/**/*.tar.gz
+images/vendor/**/*.zip
+images/**/build/
