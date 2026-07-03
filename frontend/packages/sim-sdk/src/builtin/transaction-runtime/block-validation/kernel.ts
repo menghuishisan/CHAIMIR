@@ -1,6 +1,7 @@
 // 本文件实现区块头、交易根、收据根、状态根校验和无效区块拒绝内核。
 
 import type { CheckpointResult, ReducerContext, SimEvent, SimInitParams } from '../../../types';
+import { integerParam, stringArrayParam } from '../../initParams';
 import { blockHeaderDigest, blockValidationDigest, invalidValidationDigest } from '../runtimePrimitives';
 import { blockValidationPhases, type BlockValidationState } from './model';
 import { traceLinesForBlockValidation } from './trace';
@@ -8,9 +9,10 @@ import { traceLinesForBlockValidation } from './trace';
 /**
  * createInitialBlockValidationState 创建区块验证项。
  */
-export function createInitialBlockValidationState(_params: SimInitParams, _seed: number): BlockValidationState {
-  const items = ['父哈希', '交易根', '收据根', '状态根'].map((label) => {
-    const hash = blockValidationDigest(label, 128);
+export function createInitialBlockValidationState(params: SimInitParams, _seed: number): BlockValidationState {
+  const difficulty = integerParam(params, 'difficulty', 128, 1, 1_000_000);
+  const items = stringArrayParam(params, 'validationItems', ['父哈希', '交易根', '收据根', '状态根'], 2, 12, 32).map((label) => {
+    const hash = blockValidationDigest(label, difficulty);
     return { id: `validation-${label}`, label, expected: hash, actual: hash, valid: true };
   });
   return finalizeBlockValidationState({ tick: 0, phase: blockValidationPhases[0].label, phaseIndex: 0, blockHash: blockHeaderDigest(items), items, accepted: false, lastTransition: 'header', explanation: explain(0), metrics: {}, checkpointValues: {} });
@@ -54,7 +56,9 @@ export function blockAccepted(state: BlockValidationState): CheckpointResult {
  * corruptStateRoot 篡改状态根。
  */
 function corruptStateRoot(state: BlockValidationState): BlockValidationState {
-  return { ...state, phaseIndex: 3, lastTransition: 'state-root', accepted: false, items: state.items.map((item) => (item.label === '状态根' ? { ...item, actual: invalidValidationDigest(item.label), valid: false } : item)) };
+  const selected = state.items.find((item) => item.id === state.selectedElementId);
+  const target = selected?.label ?? state.items.find((item) => item.label.includes('状态'))?.label ?? state.items[state.items.length - 1]?.label;
+  return { ...state, phaseIndex: 3, lastTransition: 'state-root', accepted: false, items: state.items.map((item) => (item.label === target ? { ...item, actual: invalidValidationDigest(item.label), valid: false } : item)) };
 }
 
 /**

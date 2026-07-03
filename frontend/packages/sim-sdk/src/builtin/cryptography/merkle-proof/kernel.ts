@@ -1,23 +1,27 @@
 // 本文件实现 Merkle 证明叶子哈希、兄弟路径、根重建、校验和篡改定位内核。
 
 import type { CheckpointResult, ReducerContext, SimEvent, SimInitParams } from '../../../types';
+import { integerParam, stringArrayParam } from '../../initParams';
 import { foldMerkleProof, merkleLeafHash, merkleParentHash, type MerkleProofStep } from '../cryptoPrimitives';
 import { merkleProofPhases, type MerkleLeaf, type MerkleProofState } from './model';
 import { traceLinesForMerkleProof } from './trace';
 
 /**
- * createInitialMerkleProofState 创建四叶子 Merkle 树和默认证明路径。
+ * createInitialMerkleProofState 创建参数化 Merkle 树并为目标叶子生成完整兄弟证明路径。
  */
-export function createInitialMerkleProofState(_params: SimInitParams, _seed: number): MerkleProofState {
-  const leaves = ['tx:mint', 'tx:transfer', 'tx:stake', 'tx:vote'].map<MerkleLeaf>((value, index) => ({ id: `merkle-leaf-${index + 1}`, label: `叶子 ${index + 1}`, canonicalValue: value, value, hash: merkleLeafHash(index + 1, value), inPath: index === 1, tampered: false }));
+export function createInitialMerkleProofState(params: SimInitParams, _seed: number): MerkleProofState {
+  const leafValues = stringArrayParam(params, 'leaves', ['tx:mint', 'tx:transfer', 'tx:stake', 'tx:vote'], 2, 16, 96);
+  const targetIndex = integerParam(params, 'targetIndex', 2, 1, leafValues.length) - 1;
+  const targetLeafId = `merkle-leaf-${targetIndex + 1}`;
+  const leaves = leafValues.map<MerkleLeaf>((value, index) => ({ id: `merkle-leaf-${index + 1}`, label: `叶子 ${index + 1}`, canonicalValue: value, value, hash: merkleLeafHash(index + 1, value), inPath: index === targetIndex, tampered: false }));
   const root = rootHash(leaves);
-  const proof = buildProof(leaves, 'merkle-leaf-2');
+  const proof = buildProof(leaves, targetLeafId);
   return finalizeMerkleProofState({
     tick: 0,
     phase: merkleProofPhases[0].label,
     phaseIndex: 0,
     leaves,
-    targetLeafId: 'merkle-leaf-2',
+    targetLeafId,
     proofPath: proof.path,
     proofSiblings: proof.siblings,
     proofSteps: proof.steps,
@@ -108,31 +112,55 @@ function rebuildProof(state: MerkleProofState, transition: string): MerkleProofS
 }
 
 /**
- * rootHash 计算四叶子树的根摘要。
+ * rootHash 按标准成对合并规则计算任意叶子数量的 Merkle 根,奇数层复制末尾摘要。
  */
 export function rootHash(leaves: MerkleLeaf[]): string {
-  const left = merkleParentHash(leaves[0].hash, leaves[1].hash);
-  const right = merkleParentHash(leaves[2].hash, leaves[3].hash);
-  return merkleParentHash(left, right);
+  return merkleRootFromHashes(leaves.map((leaf) => leaf.hash));
 }
 
 /**
  * buildProof 只用目标叶子和兄弟摘要重建根,模拟真实 Merkle 证明验证。
  */
 function buildProof(leaves: MerkleLeaf[], targetLeafId: string): { path: string[]; siblings: string[]; steps: MerkleProofStep[]; root: string } {
-  const targetIndex = Math.max(0, leaves.findIndex((leaf) => leaf.id === targetLeafId));
-  const siblingIndex = targetIndex % 2 === 0 ? targetIndex + 1 : targetIndex - 1;
-  const targetPairStart = targetIndex < 2 ? 0 : 2;
-  const otherPairStart = targetIndex < 2 ? 2 : 0;
-  const sibling = leaves[siblingIndex];
-  const otherPairHash = merkleParentHash(leaves[otherPairStart].hash, leaves[otherPairStart + 1].hash);
-  const branch = targetPairStart === 0 ? 'merkle-root-left' : 'merkle-root-right';
-  const opposite = targetPairStart === 0 ? 'merkle-root-right' : 'merkle-root-left';
-  const steps: MerkleProofStep[] = [
-    { siblingId: sibling.id, siblingHash: sibling.hash, siblingSide: targetIndex % 2 === 0 ? 'right' : 'left' },
-    { siblingId: opposite, siblingHash: otherPairHash, siblingSide: targetPairStart === 0 ? 'right' : 'left' },
-  ];
-  return { path: [targetLeafId, branch, 'merkle-root'], siblings: steps.map((step) => `${step.siblingSide}:${step.siblingId}`), steps, root: foldMerkleProof(leaves[targetIndex].hash, steps) };
+  let targetIndex = Math.max(0, leaves.findIndex((leaf) => leaf.id === targetLeafId));
+  const path = [leaves[targetIndex]?.id ?? targetLeafId];
+  const steps: MerkleProofStep[] = [];
+  let level = leaves.map((leaf) => ({ id: leaf.id, hash: leaf.hash }));
+  let depth = 0;
+  while (level.length > 1) {
+    const padded = level.length % 2 === 0 ? level : level.concat({ ...level[level.length - 1], id: `${level[level.length - 1].id}-dup-l${depth}` });
+    const siblingIndex = targetIndex % 2 === 0 ? targetIndex + 1 : targetIndex - 1;
+    const sibling = padded[Math.min(siblingIndex, padded.length - 1)];
+    steps.push({ siblingId: sibling.id, siblingHash: sibling.hash, siblingSide: targetIndex % 2 === 0 ? 'right' : 'left' });
+    const next = [];
+    for (let index = 0; index < padded.length; index += 2) {
+      next.push({ id: Math.ceil(padded.length / 2) === 1 ? 'merkle-root' : `merkle-root-level-${depth + 1}-${index / 2}`, hash: merkleParentHash(padded[index].hash, padded[index + 1].hash) });
+    }
+    targetIndex = Math.floor(targetIndex / 2);
+    path.push(next[targetIndex].id);
+    level = next;
+    depth += 1;
+  }
+  return { path, siblings: steps.map((step) => `${step.siblingSide}:${step.siblingId}`), steps, root: foldMerkleProof(leaves[Math.max(0, leaves.findIndex((leaf) => leaf.id === targetLeafId))].hash, steps) };
+}
+
+/**
+ * merkleRootFromHashes 折叠一层层哈希,作为根计算和证明构造的统一规则。
+ */
+function merkleRootFromHashes(hashes: string[]): string {
+  if (hashes.length === 0) {
+    return '';
+  }
+  let level = hashes;
+  while (level.length > 1) {
+    const padded = level.length % 2 === 0 ? level : level.concat(level[level.length - 1]);
+    const next: string[] = [];
+    for (let index = 0; index < padded.length; index += 2) {
+      next.push(merkleParentHash(padded[index], padded[index + 1]));
+    }
+    level = next;
+  }
+  return level[0];
 }
 
 /**

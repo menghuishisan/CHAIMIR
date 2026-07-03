@@ -1,6 +1,7 @@
 // 本文件实现跨链消息域分离、nonce、已执行集合、重放拒绝和版本轮换内核。
 
 import type { CheckpointResult, ReducerContext, SimEvent, SimInitParams } from '../../../types';
+import { integerParam, stringParam } from '../../initParams';
 import { replayProtectionHash } from '../crossChainPrimitives';
 import { replayPhases, type ReplayState } from './model';
 import { traceLinesForReplay } from './trace';
@@ -8,9 +9,9 @@ import { traceLinesForReplay } from './trace';
 /**
  * createInitialReplayState 创建跨链消息重放防护状态。
  */
-export function createInitialReplayState(_params: SimInitParams, _seed: number): ReplayState {
-  const domain = 'chainA:chainB:v1';
-  const nonce = 17;
+export function createInitialReplayState(params: SimInitParams, _seed: number): ReplayState {
+  const domain = stringParam(params, 'domain', 'chainA:chainB:v1', 64);
+  const nonce = integerParam(params, 'nonce', 17, 0, 1_000_000);
   return finalizeReplayState({ tick: 0, phase: replayPhases[0].label, phaseIndex: 0, domain, nonce, messageHash: hash(domain, nonce), executedNonces: [], replayAttempt: false, accepted: false, lastTransition: 'domain', explanation: explain(0), metrics: {}, checkpointValues: {} });
 }
 
@@ -61,8 +62,19 @@ function replay(state: ReplayState): ReplayState {
  * rotate 更新 domain 版本并保持旧 nonce 记录。
  */
 function rotate(state: ReplayState): ReplayState {
-  const domain = 'chainA:chainB:v2';
+  const domain = nextDomainVersion(state.domain);
   return { ...state, phaseIndex: 4, lastTransition: 'rotate', domain, nonce: state.nonce + 1, messageHash: hash(domain, state.nonce + 1), replayAttempt: false, accepted: false };
+}
+
+/**
+ * nextDomainVersion 递增 domain 末尾版本号,没有版本号时追加 v2。
+ */
+function nextDomainVersion(domain: string): string {
+  const match = domain.match(/^(.*:v)(\d+)$/);
+  if (!match) {
+    return `${domain}:v2`;
+  }
+  return `${match[1]}${Number(match[2]) + 1}`;
 }
 
 /**

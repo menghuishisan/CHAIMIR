@@ -2,20 +2,24 @@
 
 import type { CheckpointResult, ReducerContext, SimEvent, SimInitParams } from '../../../types';
 import { deterministicId } from '../../../runtime/deterministic';
+import { integerParam, stringParam } from '../../initParams';
 import { processNetworkMessage, refreshNetworkMessages, type NetworkMessageView } from '../networkView';
 import { discoveryPhases, type DiscoveryAddress, type DiscoveryPeer, type DiscoveryState } from './model';
 import { traceLinesForDiscovery } from './trace';
 
 /**
- * createInitialDiscoveryState 创建引导节点、候选节点和本地网络约束。
+ * createInitialDiscoveryState 根据参数创建引导节点、候选节点和本地网络约束。
  */
-export function createInitialDiscoveryState(_params: SimInitParams, _seed: number): DiscoveryState {
-  const localNetworkId = 'chaimir-main';
-  const peers = ['Boot', 'A', 'B', 'C', 'D'].map<DiscoveryPeer>((label, index) => {
-    const peerId = `p2p-${label.toLowerCase()}`;
+export function createInitialDiscoveryState(params: SimInitParams, _seed: number): DiscoveryState {
+  const localNetworkId = stringParam(params, 'networkId', 'chaimir-main', 64);
+  const peerCount = integerParam(params, 'peerCount', 5, 4, 12);
+  const minProtocolVersion = integerParam(params, 'minProtocolVersion', 2, 1, 10);
+  const incompatibleIndex = integerParam(params, 'incompatiblePeerIndex', Math.min(4, peerCount), 2, peerCount) - 1;
+  const peers = Array.from({ length: peerCount }, (_, index): DiscoveryPeer => {
+    const peerId = index === 0 ? 'p2p-boot' : `p2p-${String.fromCharCode(96 + index)}`;
     return {
       id: peerId,
-      label: index === 0 ? '引导节点' : `节点 ${label}`,
+      label: index === 0 ? '引导节点' : `节点 ${String.fromCharCode(64 + index)}`,
       role: 'p2p-peer',
       status: index === 0 ? 'active' : 'idle',
       value: index === 0 ? '入口' : '候选',
@@ -24,7 +28,7 @@ export function createInitialDiscoveryState(_params: SimInitParams, _seed: numbe
       healthy: true,
       malicious: false,
       banned: false,
-      protocolVersion: index === 3 ? 1 : 2,
+      protocolVersion: index === incompatibleIndex ? minProtocolVersion - 1 : minProtocolVersion,
       networkId: localNetworkId,
     };
   });
@@ -33,7 +37,7 @@ export function createInitialDiscoveryState(_params: SimInitParams, _seed: numbe
     phase: discoveryPhases[0].label,
     phaseIndex: 0,
     localNetworkId,
-    minProtocolVersion: 2,
+    minProtocolVersion,
     peers,
     messages: [],
     addressBook: [],
@@ -132,8 +136,9 @@ function probePeers(state: DiscoveryState): DiscoveryState {
  * poisonAddressBook 注入错误网络和高分地址,模拟地址投毒。
  */
 function poisonAddressBook(state: DiscoveryState): DiscoveryState {
-  const poisoned = state.peers.map((peer) => (peer.id === 'p2p-d' ? { ...peer, malicious: true, networkId: 'evil-net', protocolVersion: 99 } : peer));
-  const poisonAddress: DiscoveryAddress = { peerId: 'p2p-d', networkId: 'evil-net', protocolVersion: 99, score: 95, source: 'unknown' };
+  const poisonTarget = state.peers.find((peer) => peer.id !== 'p2p-boot' && !peer.connected)?.id ?? state.peers[state.peers.length - 1]?.id ?? 'p2p-boot';
+  const poisoned = state.peers.map((peer) => (peer.id === poisonTarget ? { ...peer, malicious: true, networkId: 'evil-net', protocolVersion: state.minProtocolVersion + 97 } : peer));
+  const poisonAddress: DiscoveryAddress = { peerId: poisonTarget, networkId: 'evil-net', protocolVersion: state.minProtocolVersion + 97, score: 95, source: 'unknown' };
   return { ...state, lastTransition: 'poison', peers: poisoned, addressBook: dedupeAddresses(state.addressBook.concat(poisonAddress)) };
 }
 

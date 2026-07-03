@@ -20,6 +20,7 @@ export interface SnapshotPoint {
 export interface SnapshotState extends SimState {
   phaseIndex: number;
   accounts: AccountState[];
+  snapshotAccounts: AccountState[];
   snapshotRoot: string;
   currentRoot: string;
   rollbackRoot: string;

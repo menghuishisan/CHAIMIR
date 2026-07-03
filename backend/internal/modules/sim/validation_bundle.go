@@ -315,12 +315,22 @@ func interactionSchemaFromManifest(in simInteractionDef) (InteractionEventSchema
 	if id == "" || strings.TrimSpace(in.Label) == "" || !eventTypePattern.MatchString(strings.TrimSpace(in.Emits)) || !validInteractionKind(kind) || (target != "global" && target != "element") {
 		return InteractionEventSchema{}, []string{"manifest:interaction-invalid"}
 	}
+	if kind == "select-element" && target != "element" {
+		return InteractionEventSchema{}, []string{"manifest:interaction-invalid"}
+	}
+	if target == "element" && strings.TrimSpace(in.ElementFilter) == "" {
+		return InteractionEventSchema{}, []string{"manifest:interaction-invalid"}
+	}
 	params := make([]InteractionParam, 0, len(in.Params))
 	seen := map[string]struct{}{}
 	for _, field := range in.Params {
 		param, ok := interactionParamFromManifest(field)
 		if !ok {
 			findings = append(findings, "manifest:interaction-param-invalid")
+			continue
+		}
+		if reservedInteractionPayloadParam(param.Name) {
+			findings = append(findings, "manifest:interaction-param-reserved")
 			continue
 		}
 		if _, exists := seen[param.Name]; exists {
@@ -333,11 +343,21 @@ func interactionSchemaFromManifest(in simInteractionDef) (InteractionEventSchema
 	return InteractionEventSchema{InteractionID: id, Kind: kind, Target: target, Params: params}, findings
 }
 
+// reservedInteractionPayloadParam 保留平台通用控件字段,防止仿真包把系统字段声明为算法参数。
+func reservedInteractionPayloadParam(name string) bool {
+	switch strings.TrimSpace(name) {
+	case "target", "active", "phase", "startX", "startY", "currentX", "currentY", "deltaX", "deltaY":
+		return true
+	default:
+		return false
+	}
+}
+
 // interactionParamFromManifest 转换字段定义为后端可校验的参数摘要。
 func interactionParamFromManifest(in simFieldDef) (InteractionParam, bool) {
 	name := strings.TrimSpace(in.Name)
 	typ := strings.TrimSpace(in.Type)
-	if name == "" || !validFieldType(typ) {
+	if name == "" || !payloadKeyPattern.MatchString(name) || !validFieldType(typ) {
 		return InteractionParam{}, false
 	}
 	out := InteractionParam{Name: name, Type: typ, Required: in.Required, Min: in.Min, Max: in.Max}

@@ -11,7 +11,7 @@ import type { PosState } from './model';
  */
 export function renderPosView(state: PosState): ViewSpec {
   return {
-    summary: `slot ${state.slot},epoch ${state.epoch},见证权益 ${attestedStake(state)}/${activeStake(state)},最终确定 epoch ${state.finalizedEpoch}。`,
+    summary: `Slot ${state.slot},Epoch ${state.epoch},见证权益 ${attestedStake(state)}/${activeStake(state)},最终确定 Epoch ${state.finalizedEpoch}。`,
     patterns: [
       graphPattern('pos-graph', '验证者权益网络', validatorNodes(state), graphEdges(state.messages), 'main'),
       matrixPattern('pos-matrix', '权益见证矩阵', state.validators.map((validator) => validator.label), ['权益', '职责', '见证', '罚没'], posCells(state), 'side'),
@@ -40,7 +40,17 @@ function posCells(state: PosState): MatrixCell[][] {
       if (column === '权益') return { label: String(validator.stake), status: validator.slashed ? 'fault' : 'yes' };
       if (column === '职责') return { label: validator.proposer ? '提议' : state.committee.includes(validator.id) ? '委员会' : '等待', status: validator.proposer || state.committee.includes(validator.id) ? 'yes' : 'empty' };
       if (column === '见证') return { label: validator.attested ? '已签' : '等待', status: validator.attested ? 'yes' : 'pending' };
-      return { label: validator.slashed ? '已罚没' : '正常', status: validator.slashed ? 'fault' : 'yes' };
+      const slashing = state.slashings.find((item) => item.validatorId === validator.id);
+      return { label: validator.slashed ? slashingReasonLabel(slashing?.reason) : '正常', status: validator.slashed ? 'fault' : 'yes' };
     }
   );
+}
+
+/**
+ * slashingReasonLabel 把罚没证据类型转换为面向学习者的简短标签。
+ */
+function slashingReasonLabel(reason?: string): string {
+  if (reason === 'surround-vote') return '包围投票';
+  if (reason === 'double-vote') return '双签';
+  return '已罚没';
 }

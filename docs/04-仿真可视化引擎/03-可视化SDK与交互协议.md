@@ -173,7 +173,25 @@ interface FieldDef {
 | `drag` | 拖拽手柄 | 拖拽产生 emit(含起止) |
 | `form` | 字段表单 | 填字段 → 提交 emit |
 
-### 3.2 label_tag 的视觉差异(机制统一)
+### 3.2 平台保留 payload 字段
+
+`params` 只声明仿真算法自定义参数。通用交互渲染器会为部分 `kind`
+自动生成平台字段,这些字段不得在 `params` 中重复声明:
+
+| 字段 | 来源 | 说明 |
+| --- | --- | --- |
+| `target` | `target:"element"` / `select-element` | 选中元素 ID,用于后端操作日志白名单校验;Worker 内部事件也保留顶层 `target` 供 reducer 使用。 |
+| `active` | `hold` | 按住开始/持续为 `true`,释放为 `false`。 |
+| `phase` | `drag` | 拖拽阶段:`start` / `move` / `end`。 |
+| `startX` / `startY` | `drag` | 拖拽起点坐标。 |
+| `currentX` / `currentY` | `drag` | 当前或结束坐标。 |
+| `deltaX` / `deltaY` | `drag` | 相对起点的位移。 |
+
+后端 `interaction_schema` 只接受 manifest `params` 与上述平台保留字段;
+未声明字段一律拒绝。字段名必须满足操作日志 key 规则
+`[A-Za-z][A-Za-z0-9_.:-]{0,63}`,不得使用下划线字段名。
+
+### 3.3 label_tag 的视觉差异(机制统一)
 
 | tag | 视觉 | 机制 |
 | --- | --- | --- |

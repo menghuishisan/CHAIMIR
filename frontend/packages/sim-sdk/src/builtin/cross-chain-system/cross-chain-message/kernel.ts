@@ -2,6 +2,7 @@
 
 import type { CheckpointResult, ReducerContext, SimEvent, SimInitParams } from '../../../types';
 import { deterministicId } from '../../../runtime/deterministic';
+import { integerParam, stringParam } from '../../initParams';
 import { crossChainMessageHash } from '../crossChainPrimitives';
 import { processCrossMessage, type CrossActor, type CrossMessage } from '../crossChainView';
 import { crossMessagePhases, type CrossChainMessageState } from './model';
@@ -10,9 +11,12 @@ import { traceLinesForCrossMessage } from './trace';
 /**
  * createInitialCrossMessageState 创建源链、中继和目标链。
  */
-export function createInitialCrossMessageState(_params: SimInitParams, _seed: number): CrossChainMessageState {
+export function createInitialCrossMessageState(params: SimInitParams, _seed: number): CrossChainMessageState {
   const actors: CrossActor[] = [{ id: 'source', label: '源链', role: 'cross-actor', status: 'active' }, { id: 'relayer', label: '中继者', role: 'cross-actor', status: 'idle' }, { id: 'target', label: '目标链', role: 'cross-actor', status: 'idle' }];
-  return finalizeCrossMessageState({ tick: 0, phase: crossMessagePhases[0].label, phaseIndex: 0, messageId: crossChainMessageHash('chainA:chainB:v1', 17, 'transfer-asset-10'), locked: false, relayed: false, verified: false, executed: false, actors, messages: [], lastTransition: 'lock', explanation: explain(0), metrics: {}, checkpointValues: {} });
+  const domain = stringParam(params, 'domain', 'chainA:chainB:v1', 64);
+  const nonce = integerParam(params, 'nonce', 17, 0, 1_000_000);
+  const payload = stringParam(params, 'payload', 'transfer-asset-10', 96);
+  return finalizeCrossMessageState({ tick: 0, phase: crossMessagePhases[0].label, phaseIndex: 0, messageId: crossChainMessageHash(domain, nonce, payload), locked: false, relayed: false, verified: false, executed: false, actors, messages: [], lastTransition: 'lock', explanation: explain(0), metrics: {}, checkpointValues: {} });
 }
 
 /**
@@ -65,7 +69,7 @@ function dropRelay(state: CrossChainMessageState): CrossChainMessageState {
  * resubmit 重新提交中继消息并完成验证。
  */
 function resubmit(state: CrossChainMessageState): CrossChainMessageState {
-  return { ...state, lastTransition: 'verify', relayed: true, verified: true, executed: true, messages: state.messages.concat(message('relayer', 'target', '重新提交', state.tick, false, '重新提交后目标链独立验证并执行。')) };
+  return { ...state, phaseIndex: 2, lastTransition: 'relay', relayed: true, verified: false, executed: false, messages: state.messages.concat(message('relayer', 'target', '重新提交', state.tick, false, '中继者重新提交消息和源链证明。')) };
 }
 
 /**

@@ -2,36 +2,46 @@
 
 import type { CheckpointResult, ReducerContext, SimEvent, SimInitParams } from '../../../types';
 import { deterministicId } from '../../../runtime/deterministic';
+import { indexFromSeed, integerParam, weightedShares } from '../../initParams';
 import { canonicalConsensusDigest } from '../consensusPrimitives';
 import { processViewMessage, refreshViewMessages, type ViewMessage } from '../consensusView';
 import { powPhases, type PowAttempt, type PowBlock, type PowState } from './model';
 import { traceLinesForPow } from './trace';
 
 /**
- * createInitialPowState 构造三矿工 PoW 场景,包含创世块和空私有分叉。
+ * createInitialPowState 根据参数构造矿工集合、难度、内存池和确定性候选区块。
  */
-export function createInitialPowState(_params: SimInitParams, _seed: number): PowState {
-  const genesis = createPowBlock({ id: 'pow-genesis', height: 0, minerId: 'network', parentHash: 'genesis', difficulty: 0, nonce: 0, hash: '0000000000000000', attacker: false, canonical: true });
+export function createInitialPowState(params: SimInitParams, seed: number): PowState {
+  const difficulty = integerParam(params, 'difficulty', 4, 2, 5);
+  const mempoolSize = integerParam(params, 'mempoolSize', 42, 1, 5000);
+  const hashWindowSize = integerParam(params, 'hashWindowSize', 2048, 128, 8192);
+  const privateForkTargetDepth = integerParam(params, 'privateForkTargetDepth', 2, 1, 6);
+  const targetSpacing = integerParam(params, 'targetSpacing', 6, 2, 60);
+  const minerCount = integerParam(params, 'minerCount', 3, 3, 8);
+  const genesis = createPowBlock({ id: 'pow-genesis', height: 0, minerId: 'network', parentHash: 'genesis', difficulty: 0, nonce: 0, mempoolSize: 0, hash: '0000000000000000', attacker: false, canonical: true });
+  const miners = createPowMiners(params, minerCount, genesis.hash);
+  const initialMiner = miners[indexFromSeed(seed, miners.length)] ?? miners[0];
   return finalizePowState({
     tick: 0,
     phase: powPhases[0].label,
     phaseIndex: 0,
-    difficulty: 4,
-    targetPrefix: targetPrefix(4),
-    mempoolSize: 42,
+    difficulty,
+    targetPrefix: targetPrefix(difficulty),
+    mempoolSize,
+    hashWindowSize,
     candidateNonce: 0,
-    candidateHash: hashPowCandidate(genesis.hash, 1, 'pow-miner-a', 0, 42),
+    candidateHash: hashPowCandidate(genesis.hash, 1, initialMiner.id, 0, mempoolSize),
+    candidateReady: false,
     candidateParentHash: genesis.hash,
-    candidateMinerId: 'pow-miner-a',
+    candidateMinerId: initialMiner.id,
     hashAttempts: [],
-    targetSpacing: 6,
-    miners: [
-      { id: 'pow-miner-a', label: '矿工 A', hashPower: 42, validTip: genesis.hash, accepted: true, attacker: false },
-      { id: 'pow-miner-b', label: '矿工 B', hashPower: 33, validTip: genesis.hash, accepted: true, attacker: false },
-      { id: 'pow-miner-c', label: '矿工 C', hashPower: 25, validTip: genesis.hash, accepted: true, attacker: false },
-    ],
+    targetSpacing,
+    miners,
     blocks: [genesis],
     privateFork: [],
+    privateForkTargetDepth,
+    privateMiningCursor: 0,
+    privateMiningTargetDepth: 0,
     messages: [],
     samples: [{ x: 0, quorum: 30, risk: 12, finality: 15 }],
     selfishMining: false,
@@ -57,6 +67,12 @@ export function reducePowEvent(state: PowState, event: SimEvent, _context: Reduc
  * advancePow 按 PoW 协议顺序推进一个内核过程单元。
  */
 export function advancePow(state: PowState): PowState {
+  if (state.selfishMining && state.privateFork.length < state.privateMiningTargetDepth) {
+    return continueSelfishMining({ ...state, tick: state.tick + 1 });
+  }
+  if (state.phaseIndex === 2 && state.lastTransition === 'hash-search' && !state.candidateReady) {
+    return searchNonce({ ...state, phaseIndex: 2, tick: state.tick + 1 });
+  }
   const phaseIndex = Math.min(powPhases.length - 1, state.phaseIndex + (state.lastTransition === powPhases[state.phaseIndex].id ? 1 : 0));
   const base = { ...state, phaseIndex, tick: state.tick + 1 };
   if (phaseIndex === 1) return assembleCandidate(base);
@@ -81,7 +97,7 @@ export function powWorkValid(state: PowState): CheckpointResult {
  */
 export function powForkChoiceValid(state: PowState): CheckpointResult {
   const achieved = Boolean(state.checkpointValues.forkChoice);
-  return { achieved, answer: { canonicalWork: chainWork(state.blocks), forkWork: chainWork(state.privateFork) }, explanation: achieved ? '节点选择了累计工作量最高的链。' : '私有分叉工作量更高,需要处理重组。' };
+  return { achieved, answer: { canonicalWork: chainWork(state.blocks), forkWork: forkChainWork(state) }, explanation: achieved ? '节点选择了累计工作量最高的链。' : '私有分叉工作量更高,需要处理重组。' };
 }
 
 /**
@@ -91,16 +107,16 @@ export function finalizePowState(state: PowState): PowState {
   const risk = state.selfishMining ? 72 : state.privateFork.length > 0 ? 48 : 14;
   const finality = Math.min(96, state.blocks.length * 18 - (state.selfishMining ? 20 : 0));
   const samples = state.samples.concat({ x: state.tick + state.phaseIndex, quorum: Math.min(100, chainWork(state.blocks) * 8), risk, finality }).slice(-24);
-  const nonGenesisBlocks = state.blocks.filter((item) => item.height > 0);
+  const nonGenesisBlocks = state.blocks.concat(state.privateFork).filter((item) => item.height > 0);
   return {
     ...state,
     phase: powPhases[state.phaseIndex].label,
     explanation: explainPowPhase(state.phaseIndex),
     messages: refreshViewMessages(state.messages, state.tick, (message) => message.detail ?? `${message.label} 从矿工传播到对端节点。`),
     samples,
-    metrics: { result: state.selfishMining ? '存在私有分叉' : '按累计工作量收敛', risk, finality, work: chainWork(state.blocks), difficulty: state.difficulty },
-    checkpointValues: { workValid: nonGenesisBlocks.every((item) => blockMeetsDifficulty(item, state.difficulty)), forkChoice: chainWork(state.blocks) >= chainWork(state.privateFork) },
-    _trace: { triggeredLines: traceLinesForPow(state.lastTransition), variables: { difficulty: state.difficulty, target: state.targetPrefix, nonce: state.candidateNonce, candidateHash: state.candidateHash, attempts: state.hashAttempts.length }, executionPath: `pow/${state.lastTransition}` },
+    metrics: { result: state.selfishMining && state.privateFork.length < state.privateMiningTargetDepth ? '私有分叉继续挖矿' : state.selfishMining ? '存在私有分叉' : state.phaseIndex === 2 && !state.candidateReady ? '继续搜索 nonce' : '按累计工作量收敛', risk, finality, work: chainWork(state.blocks), difficulty: state.difficulty },
+    checkpointValues: { workValid: nonGenesisBlocks.every((item) => blockValid(item)), forkChoice: chainWork(state.blocks) >= forkChainWork(state) },
+    _trace: { triggeredLines: traceLinesForPow(state.lastTransition), variables: { difficulty: state.difficulty, target: state.targetPrefix, nonce: state.candidateNonce, candidateHash: state.candidateHash, attempts: state.hashAttempts.length, candidateReady: state.candidateReady, privateDepth: state.privateFork.length, hashWindowSize: state.hashWindowSize }, executionPath: `pow/${state.lastTransition}` },
   };
 }
 
@@ -112,16 +128,17 @@ function assembleCandidate(state: PowState): PowState {
   const miner = selectMiner(state);
   const candidateNonce = state.candidateNonce + 1;
   const candidateHash = hashPowCandidate(parent.hash, parent.height + 1, miner.id, candidateNonce, state.mempoolSize);
-  return { ...state, lastTransition: 'assemble', candidateParentHash: parent.hash, candidateMinerId: miner.id, candidateNonce, candidateHash, hashAttempts: [{ nonce: candidateNonce, hash: candidateHash, score: leadingZeroNibbles(candidateHash), valid: blockHashValid(candidateHash, state.difficulty) }] };
+  const attempt = { nonce: candidateNonce, hash: candidateHash, score: leadingZeroNibbles(candidateHash), valid: blockHashValid(candidateHash, state.difficulty) };
+  return { ...state, lastTransition: 'assemble', candidateParentHash: parent.hash, candidateMinerId: miner.id, candidateNonce, candidateHash, candidateReady: attempt.valid, hashAttempts: [attempt] };
 }
 
 /**
- * searchNonce 模拟 nonce 枚举,直到当前教学难度下产生有效哈希。
+ * searchNonce 按配置窗口枚举 nonce,未命中时停留在哈希搜索阶段等待下一次推进。
  */
 function searchNonce(state: PowState): PowState {
   const parent = state.blocks[state.blocks.length - 1];
-  const search = mineCandidate(parent, state.candidateMinerId, state.mempoolSize, state.difficulty, state.candidateNonce);
-  return { ...state, lastTransition: 'hash-search', candidateNonce: search.nonce, candidateHash: search.hash, hashAttempts: search.attempts };
+  const search = mineCandidateWindow(parent, state.candidateMinerId, state.mempoolSize, state.difficulty, state.candidateNonce + 1, state.hashWindowSize);
+  return { ...state, phaseIndex: search.found ? state.phaseIndex : 2, lastTransition: 'hash-search', candidateNonce: search.nonce, candidateHash: search.hash, candidateReady: search.found, hashAttempts: search.attempts };
 }
 
 /**
@@ -129,8 +146,12 @@ function searchNonce(state: PowState): PowState {
  */
 function broadcastBlock(state: PowState): PowState {
   const parent = state.blocks[state.blocks.length - 1];
-  const mined = createPowBlock({ id: `pow-block-${state.blocks.length}`, height: parent.height + 1, minerId: state.candidateMinerId, parentHash: parent.hash, difficulty: state.difficulty, nonce: state.candidateNonce, hash: state.candidateHash, attacker: false, canonical: true });
-  return { ...state, lastTransition: 'broadcast', blocks: state.blocks.concat(mined), messages: state.messages.concat(broadcast(state, state.candidateMinerId, '新区块')) };
+  const expectedHash = hashPowCandidate(parent.hash, parent.height + 1, state.candidateMinerId, state.candidateNonce, state.mempoolSize);
+  if (!state.candidateReady || state.candidateHash !== expectedHash || !blockHashValid(state.candidateHash, state.difficulty)) {
+    return searchNonce({ ...state, phaseIndex: 2 });
+  }
+  const mined = createPowBlock({ id: `pow-block-${state.blocks.length}`, height: parent.height + 1, minerId: state.candidateMinerId, parentHash: parent.hash, difficulty: state.difficulty, nonce: state.candidateNonce, mempoolSize: state.mempoolSize, hash: state.candidateHash, attacker: false, canonical: true });
+  return { ...state, lastTransition: 'broadcast', candidateReady: false, blocks: state.blocks.concat(mined), messages: state.messages.concat(broadcast(state, state.candidateMinerId, '新区块')) };
 }
 
 /**
@@ -139,7 +160,7 @@ function broadcastBlock(state: PowState): PowState {
 function validateBlock(state: PowState): PowState {
   const tip = state.blocks[state.blocks.length - 1];
   const parentKnown = state.blocks.some((block) => block.hash === tip.parentHash) || tip.height === 0;
-  const validWork = blockMeetsDifficulty(tip, state.difficulty);
+  const validWork = blockValid(tip);
   return { ...state, lastTransition: 'validate', miners: state.miners.map((miner) => ({ ...miner, validTip: parentKnown && validWork ? tip.hash : miner.validTip, accepted: parentKnown && validWork })) };
 }
 
@@ -147,10 +168,10 @@ function validateBlock(state: PowState): PowState {
  * chooseLongestChain 比较规范链与私有分叉的累计工作量并选择高工作量链。
  */
 function chooseLongestChain(state: PowState): PowState {
-  if (chainWork(state.privateFork) > chainWork(state.blocks)) {
-    return { ...state, lastTransition: 'longest-chain', blocks: state.privateFork.map((item) => ({ ...item, canonical: true })), privateFork: [], selfishMining: false };
+  if (forkChainWork(state) > chainWork(state.blocks)) {
+    return { ...state, lastTransition: 'longest-chain', blocks: adoptPrivateFork(state), privateFork: [], privateMiningTargetDepth: 0, selfishMining: false };
   }
-  return { ...state, lastTransition: 'longest-chain' };
+  return { ...state, lastTransition: 'longest-chain', privateMiningTargetDepth: state.privateFork.length >= state.privateMiningTargetDepth ? 0 : state.privateMiningTargetDepth };
 }
 
 /**
@@ -159,35 +180,41 @@ function chooseLongestChain(state: PowState): PowState {
 function adjustDifficulty(state: PowState): PowState {
   const window = state.blocks.filter((block) => block.height > 0).slice(-4);
   const observedSpacing = window.length > 1 ? Math.max(1, state.tick / window.length) : state.targetSpacing;
-  const nextDifficulty = observedSpacing < state.targetSpacing * 0.75 ? Math.min(4, state.difficulty + 1) : observedSpacing > state.targetSpacing * 1.5 ? Math.max(2, state.difficulty - 1) : state.difficulty;
+  const nextDifficulty = observedSpacing < state.targetSpacing * 0.75 ? Math.min(5, state.difficulty + 1) : observedSpacing > state.targetSpacing * 1.5 ? Math.max(2, state.difficulty - 1) : state.difficulty;
   return { ...state, lastTransition: 'adjust', difficulty: nextDifficulty, targetPrefix: targetPrefix(nextDifficulty) };
 }
 
 /**
- * startSelfishMining 创建攻击者私有分叉但暂不发布。
+ * startSelfishMining 进入私有挖矿模式,分叉区块仍必须通过真实 PoW 搜索产生。
  */
 function startSelfishMining(state: PowState): PowState {
-  const parent = state.blocks[state.blocks.length - 1];
-  const first = mineCandidate(parent, 'pow-miner-c', state.mempoolSize, state.difficulty, state.candidateNonce + 31);
-  const privateOne = createPowBlock({ id: 'pow-private-1', height: parent.height + 1, minerId: 'pow-miner-c', parentHash: parent.hash, difficulty: state.difficulty, nonce: first.nonce, hash: first.hash, attacker: true, canonical: false });
-  const secondSearch = mineCandidate(privateOne, 'pow-miner-c', state.mempoolSize, state.difficulty, first.nonce + 31);
-  const privateTwo = createPowBlock({ id: 'pow-private-2', height: parent.height + 2, minerId: 'pow-miner-c', parentHash: privateOne.hash, difficulty: state.difficulty, nonce: secondSearch.nonce, hash: secondSearch.hash, attacker: true, canonical: false });
-  const fork = [privateOne, privateTwo];
-  return { ...state, tick: state.tick + 1, lastTransition: 'selfish-mining', selfishMining: true, privateFork: fork, miners: state.miners.map((miner) => (miner.id === 'pow-miner-c' ? { ...miner, attacker: true } : miner)) };
+  const attacker = attackerMiner(state);
+  return continueSelfishMining({
+    ...state,
+    tick: state.tick + 1,
+    lastTransition: 'selfish-mining',
+    selfishMining: true,
+    privateMiningCursor: Math.max(state.privateMiningCursor, state.candidateNonce + 31),
+    privateMiningTargetDepth: Math.max(state.privateForkTargetDepth, state.privateMiningTargetDepth),
+    miners: state.miners.map((miner) => (miner.id === attacker.id ? { ...miner, attacker: true } : miner)),
+  });
 }
 
 /**
  * publishPrivateFork 发布私有分叉,让最长链规则显式处理重组。
  */
 function publishPrivateFork(state: PowState): PowState {
-  return chooseLongestChain({ ...state, tick: state.tick + 1, messages: state.messages.concat(broadcast(state, 'pow-miner-c', '发布私有分叉')) });
+  if (state.privateFork.length === 0) {
+    return continueSelfishMining({ ...state, tick: state.tick + 1 });
+  }
+  return chooseLongestChain({ ...state, tick: state.tick + 1, messages: state.messages.concat(broadcast(state, attackerMiner(state).id, '发布私有分叉')) });
 }
 
 /**
  * createPowBlock 创建确定性 PoW 区块。
  */
-export function createPowBlock(input: { id: string; height: number; minerId: string; parentHash: string; difficulty: number; nonce: number; hash: string; attacker: boolean; canonical: boolean }): PowBlock {
-  return { id: input.id, height: input.height, minerId: input.minerId, parentHash: input.parentHash, hash: input.hash, nonce: input.nonce, work: workForDifficulty(input.difficulty), canonical: input.canonical, attacker: input.attacker };
+export function createPowBlock(input: { id: string; height: number; minerId: string; parentHash: string; difficulty: number; nonce: number; mempoolSize: number; hash: string; attacker: boolean; canonical: boolean }): PowBlock {
+  return { id: input.id, height: input.height, minerId: input.minerId, parentHash: input.parentHash, hash: input.hash, nonce: input.nonce, mempoolSize: input.mempoolSize, difficulty: input.difficulty, work: workForDifficulty(input.difficulty), canonical: input.canonical, attacker: input.attacker };
 }
 
 /**
@@ -206,6 +233,32 @@ function broadcast(state: PowState, from: string, label: string): ViewMessage[] 
  */
 export function chainWork(blocks: PowBlock[]): number {
   return blocks.reduce((sum, item) => sum + item.work, 0);
+}
+
+/**
+ * forkChainWork 计算私有分叉加共同祖先后的累计工作量。
+ */
+function forkChainWork(state: PowState): number {
+  if (state.privateFork.length === 0) return 0;
+  return chainWork(commonPrefixForFork(state).concat(state.privateFork));
+}
+
+/**
+ * adoptPrivateFork 保留共同祖先并把有效私有分支切换为规范链。
+ */
+function adoptPrivateFork(state: PowState): PowBlock[] {
+  return commonPrefixForFork(state)
+    .concat(state.privateFork)
+    .map((item) => ({ ...item, canonical: true }));
+}
+
+/**
+ * commonPrefixForFork 找到私有分叉的共同祖先前缀。
+ */
+function commonPrefixForFork(state: PowState): PowBlock[] {
+  const baseHash = state.privateFork[0]?.parentHash;
+  const baseIndex = state.blocks.findIndex((block) => block.hash === baseHash);
+  return baseIndex >= 0 ? state.blocks.slice(0, baseIndex + 1) : [];
 }
 
 /**
@@ -237,20 +290,42 @@ function selectMiner(state: PowState) {
 }
 
 /**
- * mineCandidate 枚举 nonce 直到哈希满足目标前缀,并保留最近尝试供过程化可视化展示。
+ * createPowMiners 按初始化权重生成矿工集合,最后一个矿工作为潜在攻击者。
  */
-function mineCandidate(parent: PowBlock, minerId: string, mempoolSize: number, difficulty: number, startNonce: number): { nonce: number; hash: string; attempts: PowAttempt[] } {
+function createPowMiners(params: SimInitParams, minerCount: number, validTip: string) {
+  const shares = weightedShares(params, 'hashPower', [42, 33, 25], minerCount);
+  return shares.map((hashPower, index) => ({
+    id: `pow-miner-${String.fromCharCode(97 + index)}`,
+    label: `矿工 ${String.fromCharCode(65 + index)}`,
+    hashPower,
+    validTip,
+    accepted: true,
+    attacker: false,
+  }));
+}
+
+/**
+ * attackerMiner 返回当前私有分叉攻击者,未标记时使用最后一个矿工作为攻击发起者。
+ */
+function attackerMiner(state: PowState) {
+  return state.miners.find((miner) => miner.attacker) ?? state.miners[state.miners.length - 1] ?? state.miners[0];
+}
+
+/**
+ * mineCandidateWindow 枚举一个 nonce 窗口,让哈希搜索能被可视化为连续过程。
+ */
+function mineCandidateWindow(parent: PowBlock, minerId: string, mempoolSize: number, difficulty: number, startNonce: number, windowSize: number): { nonce: number; hash: string; attempts: PowAttempt[]; found: boolean } {
   const attempts: PowAttempt[] = [];
-  for (let offset = 0; offset < 500000; offset += 1) {
+  for (let offset = 0; offset < windowSize; offset += 1) {
     const nonce = startNonce + offset;
     const hash = hashPowCandidate(parent.hash, parent.height + 1, minerId, nonce, mempoolSize);
     const attempt = { nonce, hash, score: leadingZeroNibbles(hash), valid: blockHashValid(hash, difficulty) };
     if (attempts.length >= 8) attempts.shift();
     attempts.push(attempt);
-    if (attempt.valid) return { nonce, hash, attempts };
+    if (attempt.valid) return { nonce, hash, attempts, found: true };
   }
   const last = attempts[attempts.length - 1] ?? { nonce: startNonce, hash: hashPowCandidate(parent.hash, parent.height + 1, minerId, startNonce, mempoolSize), score: 0, valid: false };
-  return { nonce: last.nonce, hash: last.hash, attempts };
+  return { nonce: last.nonce, hash: last.hash, attempts, found: false };
 }
 
 /**
@@ -261,10 +336,14 @@ function hashPowCandidate(parentHash: string, height: number, minerId: string, n
 }
 
 /**
- * blockMeetsDifficulty 校验区块哈希是否满足当前目标。
+ * blockValid 复算区块头并校验哈希是否满足当前目标。
  */
-function blockMeetsDifficulty(block: PowBlock, difficulty: number): boolean {
-  return blockHashValid(block.hash, difficulty);
+function blockValid(block: PowBlock): boolean {
+  if (block.height === 0) {
+    return true;
+  }
+  const recomputed = hashPowCandidate(block.parentHash, block.height, block.minerId, block.nonce, block.mempoolSize);
+  return block.hash === recomputed && blockHashValid(block.hash, block.difficulty);
 }
 
 /**
@@ -298,4 +377,43 @@ function targetPrefix(difficulty: number): string {
  */
 function workForDifficulty(difficulty: number): number {
   return difficulty <= 0 ? 0 : 16 ** Math.min(6, difficulty);
+}
+
+/**
+ * continueSelfishMining 按窗口推进攻击者私有分叉搜索,命中后才追加私有块。
+ */
+function continueSelfishMining(state: PowState): PowState {
+  const parent = state.privateFork[state.privateFork.length - 1] ?? state.blocks[state.blocks.length - 1];
+  const attacker = attackerMiner(state);
+  const cursor = Math.max(1, state.privateMiningCursor);
+  const search = mineCandidateWindow(parent, attacker.id, state.mempoolSize, state.difficulty, cursor, state.hashWindowSize);
+  const candidateBase = {
+    ...state,
+    lastTransition: 'selfish-mining',
+    selfishMining: true,
+    candidateParentHash: parent.hash,
+    candidateMinerId: attacker.id,
+    candidateNonce: search.nonce,
+    candidateHash: search.hash,
+    candidateReady: search.found,
+    hashAttempts: search.attempts,
+    privateMiningCursor: search.nonce + 1,
+    privateMiningTargetDepth: Math.max(state.privateForkTargetDepth, state.privateMiningTargetDepth),
+  };
+  if (!search.found) {
+    return candidateBase;
+  }
+  const mined = createPowBlock({
+    id: `pow-private-${state.privateFork.length + 1}`,
+    height: parent.height + 1,
+    minerId: attacker.id,
+    parentHash: parent.hash,
+    difficulty: state.difficulty,
+    nonce: search.nonce,
+    mempoolSize: state.mempoolSize,
+    hash: search.hash,
+    attacker: true,
+    canonical: false,
+  });
+  return { ...candidateBase, candidateReady: false, privateFork: state.privateFork.concat(mined) };
 }

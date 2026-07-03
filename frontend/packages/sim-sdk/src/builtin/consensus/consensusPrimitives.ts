@@ -24,11 +24,11 @@ export function canonicalConsensusDigest(domain: string, fields: Record<string, 
 }
 
 /**
- * bftQuorumThreshold 计算 n=3f+1 系统中的 2f+1 安全阈值。
+ * bftQuorumThreshold 计算 BFT 安全阈值;当 n=3f+1 时等价于 2f+1,更大副本集使用 n-f 保证任意两个法定集合至少交叠 f+1。
  */
 export function bftQuorumThreshold(replicaCount: number): number {
   const faultTolerance = Math.floor((replicaCount - 1) / 3);
-  return 2 * faultTolerance + 1;
+  return replicaCount - faultTolerance;
 }
 
 /**

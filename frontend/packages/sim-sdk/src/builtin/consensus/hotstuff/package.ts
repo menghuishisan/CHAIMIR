@@ -18,7 +18,7 @@ export const hotstuffSimulation: SimPackage<HotStuffState> = {
     version: '1.0.0',
     compute: 'frontend',
     summary: '完整推演 HotStuff 新视图、高 QC 提案、安全投票、QC 聚合、三链提交和 pacemaker 超时换主。',
-    learningObjectives: ['理解 high QC 与锁规则', '掌握 2f+1 投票聚合成 QC', '观察三链提交和超时换主如何保证安全与活性'],
+    learningObjectives: ['理解 high QC 与锁规则', '掌握 BFT 法定人数投票聚合成 QC', '观察三链提交和超时换主如何保证安全与活性'],
     scaleLimit: { nodes: 96, maxTick: 160, maxEvents: 300 },
   },
   initState: createInitialHotStuffState,
@@ -32,4 +32,3 @@ export const hotstuffSimulation: SimPackage<HotStuffState> = {
     { id: 'hotstuff-timeout-recovery', label: '超时换主恢复', evaluate: (state) => hotstuffTimeoutRecovered(state as HotStuffState) },
   ],
 };
-

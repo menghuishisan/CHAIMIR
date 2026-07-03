@@ -30,7 +30,7 @@ export function traceLinesForPow(transition: string): number[] {
     validate: [9],
     'longest-chain': [10],
     adjust: [11],
-    'selfish-mining': [10],
+    'selfish-mining': [4, 5, 6, 7, 10],
   };
   return mapping[transition] ?? [1];
 }
@@ -53,6 +53,8 @@ export const powCodeTrace: CodeTraceDef = {
     { name: 'target', extract: 'state.targetPrefix', format: 'string' },
     { name: 'nonce', extract: 'state.candidateNonce', format: 'number' },
     { name: 'candidateHash', extract: 'state.candidateHash', format: 'hex' },
+    { name: 'privateDepth', extract: 'state.privateFork.length', format: 'number' },
+    { name: 'hashWindowSize', extract: 'state.hashWindowSize', format: 'number' },
   ],
 };
 

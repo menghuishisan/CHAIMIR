@@ -1,14 +1,19 @@
 // 本文件实现账户 nonce 读取、缺口阻塞、替换交易和按序打包内核。
 
 import type { CheckpointResult, ReducerContext, SimEvent, SimInitParams } from '../../../types';
+import { integerArrayParam, integerParam } from '../../initParams';
 import { noncePhases, type NonceState } from './model';
 import { traceLinesForNonce } from './trace';
 
 /**
  * createInitialNonceState 创建连续 nonce 交易。
  */
-export function createInitialNonceState(_params: SimInitParams, _seed: number): NonceState {
-  return finalizeNonceState({ tick: 0, phase: noncePhases[0].label, phaseIndex: 0, accountNonce: 5, txs: [{ id: 'tx-5', nonce: 5, fee: 10, status: 'pending' }, { id: 'tx-6', nonce: 6, fee: 9, status: 'pending' }, { id: 'tx-7', nonce: 7, fee: 8, status: 'pending' }], gapDetected: false, lastTransition: 'read', explanation: explain(0), metrics: {}, checkpointValues: {} });
+export function createInitialNonceState(params: SimInitParams, _seed: number): NonceState {
+  const accountNonce = integerParam(params, 'accountNonce', 5, 0, 1_000_000);
+  const txCount = integerParam(params, 'txCount', 3, 2, 12);
+  const fees = integerArrayParam(params, 'fees', [10, 9, 8], txCount, txCount, 1, 1_000_000);
+  const txs = Array.from({ length: txCount }, (_, index) => ({ id: `tx-${accountNonce + index}`, nonce: accountNonce + index, fee: fees[index] ?? fees[0] ?? 1, status: 'pending' as const }));
+  return finalizeNonceState({ tick: 0, phase: noncePhases[0].label, phaseIndex: 0, accountNonce, txs, gapDetected: false, lastTransition: 'read', explanation: explain(0), metrics: {}, checkpointValues: {} });
 }
 
 /**
@@ -26,9 +31,12 @@ export function reduceNonceEvent(state: NonceState, event: SimEvent, _context: R
  * advanceNonce 按 nonce 排序流程推进。
  */
 export function advanceNonce(state: NonceState, event: SimEvent): NonceState {
+  if (state.phaseIndex === 4 && !state.gapDetected && state.txs.some((tx) => tx.status !== 'included')) {
+    return includeNextOrdered({ ...state, tick: event.source === 'tick' ? state.tick + 1 : state.tick, lastTransition: 'include' });
+  }
   const phaseIndex = Math.min(noncePhases.length - 1, state.phaseIndex + 1);
   const next = { ...state, phaseIndex, tick: event.source === 'tick' ? state.tick + 1 : state.tick, lastTransition: noncePhases[phaseIndex].id };
-  return phaseIndex === 4 && !state.gapDetected ? includeOrdered(next) : next;
+  return phaseIndex === 4 && !state.gapDetected ? includeNextOrdered(next) : next;
 }
 
 /**
@@ -36,7 +44,7 @@ export function advanceNonce(state: NonceState, event: SimEvent): NonceState {
  */
 export function finalizeNonceState(state: NonceState): NonceState {
   const valid = !state.gapDetected && state.txs.every((tx) => tx.status !== 'blocked');
-  return { ...state, phase: noncePhases[state.phaseIndex].label, explanation: explain(state.phaseIndex), metrics: { result: valid ? '顺序有效' : 'nonce 缺口阻塞', risk: valid ? 8 : 70, accountNonce: state.accountNonce }, checkpointValues: { valid: valid && state.accountNonce >= 8 }, _trace: { triggeredLines: traceLinesForNonce(state.lastTransition), variables: { accountNonce: state.accountNonce, gapDetected: state.gapDetected }, executionPath: `nonce/${state.lastTransition}` } };
+  return { ...state, phase: noncePhases[state.phaseIndex].label, explanation: explain(state.phaseIndex), metrics: { result: valid ? '顺序有效' : 'nonce 缺口阻塞', risk: valid ? 8 : 70, accountNonce: state.accountNonce }, checkpointValues: { valid: valid && state.txs.every((tx) => tx.status === 'included') }, _trace: { triggeredLines: traceLinesForNonce(state.lastTransition), variables: { accountNonce: state.accountNonce, gapDetected: state.gapDetected }, executionPath: `nonce/${state.lastTransition}` } };
 }
 
 /**
@@ -50,21 +58,28 @@ export function nonceValid(state: NonceState): CheckpointResult {
  * createGap 删除前序交易造成阻塞。
  */
 function createGap(state: NonceState): NonceState {
-  return { ...state, phaseIndex: 2, lastTransition: 'gap', gapDetected: true, txs: state.txs.map((tx) => (tx.nonce >= 5 ? { ...tx, status: 'blocked' } : tx)) };
+  const blockedFrom = Math.min(...state.txs.map((tx) => tx.nonce));
+  return { ...state, phaseIndex: 2, lastTransition: 'gap', gapDetected: true, txs: state.txs.map((tx) => (tx.nonce >= blockedFrom ? { ...tx, status: 'blocked' } : tx)) };
 }
 
 /**
  * replaceNonce 使用高费交易补齐 nonce 缺口。
  */
 function replaceNonce(state: NonceState): NonceState {
-  return { ...state, phaseIndex: 3, lastTransition: 'replace', gapDetected: false, txs: state.txs.map((tx) => (tx.nonce === 5 ? { id: 'tx-5b', nonce: 5, fee: 20, status: 'pending' } : { ...tx, status: 'pending' })) };
+  const replacementNonce = Math.min(...state.txs.map((tx) => tx.nonce));
+  const highestFee = Math.max(...state.txs.map((tx) => tx.fee));
+  return { ...state, phaseIndex: 3, lastTransition: 'replace', gapDetected: false, txs: state.txs.map((tx) => (tx.nonce === replacementNonce ? { id: `tx-${replacementNonce}-replacement`, nonce: replacementNonce, fee: highestFee + 1, status: 'pending' } : { ...tx, status: 'pending' })) };
 }
 
 /**
- * includeOrdered 按顺序打包交易并推进账户 nonce。
+ * includeNextOrdered 每次只打包当前账户 nonce 对应交易,让顺序执行可以逐步可视化。
  */
-function includeOrdered(state: NonceState): NonceState {
-  return { ...state, accountNonce: 8, txs: state.txs.map((tx) => ({ ...tx, status: 'included' })) };
+function includeNextOrdered(state: NonceState): NonceState {
+  const nextTx = [...state.txs].filter((tx) => tx.status !== 'included').sort((left, right) => left.nonce - right.nonce || right.fee - left.fee)[0];
+  if (!nextTx || nextTx.nonce !== state.accountNonce) {
+    return { ...state, gapDetected: true, txs: state.txs.map((tx) => (tx.status === 'included' ? tx : { ...tx, status: 'blocked' })) };
+  }
+  return { ...state, accountNonce: state.accountNonce + 1, txs: state.txs.map((tx) => (tx.id === nextTx.id ? { ...tx, status: 'included' } : tx)) };
 }
 
 /**

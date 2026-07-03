@@ -2,6 +2,7 @@
 
 import type { CheckpointResult, ReducerContext, SimEvent, SimInitParams } from '../../../types';
 import { deterministicId } from '../../../runtime/deterministic';
+import { integerParam } from '../../initParams';
 import { processSecurityCall, type SecurityActor, type SecurityCall } from '../securityView';
 import { oraclePhases, type OracleState } from './model';
 import { traceLinesForOracle } from './trace';
@@ -9,9 +10,10 @@ import { traceLinesForOracle } from './trace';
 /**
  * createInitialOracleState 创建预言机参与方和价格基线。
  */
-export function createInitialOracleState(_params: SimInitParams, _seed: number): OracleState {
+export function createInitialOracleState(params: SimInitParams, _seed: number): OracleState {
   const actors: SecurityActor[] = [{ id: 'amm', label: 'AMM 池', role: 'security-actor', status: 'active' }, { id: 'lending', label: '借贷合约', role: 'security-actor', status: 'idle' }, { id: 'attacker', label: '攻击者', role: 'security-actor', status: 'idle' }];
-  return finalizeOracleState({ tick: 0, phase: oraclePhases[0].label, phaseIndex: 0, spotPrice: 100, twapPrice: 100, referencePrice: 100, manipulationActive: false, actors, calls: [], lastTransition: 'read', explanation: explain(0), metrics: {}, checkpointValues: {} });
+  const referencePrice = integerParam(params, 'referencePrice', 100, 1, 1_000_000);
+  return finalizeOracleState({ tick: 0, phase: oraclePhases[0].label, phaseIndex: 0, spotPrice: referencePrice, twapPrice: referencePrice, referencePrice, manipulationActive: false, actors, calls: [], lastTransition: 'read', explanation: explain(0), metrics: {}, checkpointValues: {} });
 }
 
 /**
@@ -56,14 +58,21 @@ export function oracleSafe(state: OracleState): CheckpointResult {
  * manipulate 推偏现货价格并记录价格调用。
  */
 function manipulate(state: OracleState): OracleState {
-  return { ...state, lastTransition: state.lastTransition === 'read' ? 'swap' : state.lastTransition, spotPrice: 168, manipulationActive: true, calls: state.calls.concat(call('attacker', 'amm', '大额兑换', state.tick, '攻击者用低流动性池推偏现货价。'), call('amm', 'lending', '偏移价格', state.tick, '借贷合约读取被操纵的现货价。')) };
+  return { ...state, lastTransition: state.lastTransition === 'read' ? 'swap' : state.lastTransition, spotPrice: manipulatedPrice(state), manipulationActive: true, calls: state.calls.concat(call('attacker', 'amm', '大额兑换', state.tick, '攻击者用低流动性池推偏现货价。'), call('amm', 'lending', '偏移价格', state.tick, '借贷合约读取被操纵的现货价。')) };
 }
 
 /**
  * aggregate 启用 TWAP 与多源聚合恢复可信价格。
  */
 function aggregate(state: OracleState): OracleState {
-  return { ...state, phaseIndex: 4, lastTransition: 'aggregate', spotPrice: 102, twapPrice: 101, manipulationActive: false };
+  return { ...state, phaseIndex: 4, lastTransition: 'aggregate', spotPrice: state.referencePrice, twapPrice: state.referencePrice, manipulationActive: false };
+}
+
+/**
+ * manipulatedPrice 根据基准价计算现货操纵后的异常价格。
+ */
+function manipulatedPrice(state: OracleState): number {
+  return Math.round(state.referencePrice * 1.68);
 }
 
 /**

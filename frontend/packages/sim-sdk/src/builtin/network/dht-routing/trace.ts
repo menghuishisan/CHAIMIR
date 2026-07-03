@@ -43,6 +43,7 @@ export const dhtCodeTrace: CodeTraceDef = {
     { name: 'lookupKey', extract: 'state.lookupKey', format: 'number' },
     { name: 'hops', extract: 'state.hops', format: 'number' },
     { name: 'shortlistSize', extract: 'state.metrics.shortlistSize', format: 'number' },
+    { name: 'bucketSize', extract: 'state.bucketSize', format: 'number' },
   ],
 };
 

@@ -1,16 +1,19 @@
 // 本文件实现 Patricia Trie 的路径编码、压缩路径、局部更新、根哈希和缺失证明内核。
 
 import type { CheckpointResult, ReducerContext, SimEvent, SimInitParams } from '../../../types';
+import { stringArrayParam, stringParam } from '../../initParams';
 import { trieLeafHash, trieRootHash } from '../dataPrimitives';
 import { patriciaTriePhases, type PatriciaTrieState, type TrieEntry } from './model';
 import { traceLinesForPatriciaTrie } from './trace';
 
 /**
- * createInitialPatriciaTrieState 创建三条账户路径和一个缺失证明 key。
+ * createInitialPatriciaTrieState 根据参数创建账户路径和缺失证明 key。
  */
-export function createInitialPatriciaTrieState(_params: SimInitParams, _seed: number): PatriciaTrieState {
-  const entries = ['alice', 'alina', 'bob'].map<TrieEntry>((key, index) => ({ key, path: encodeTrieKey(key), value: String((index + 1) * 10), hash: leafHash(key, String((index + 1) * 10)), updated: false, missing: false }));
-  return finalizePatriciaTrieState({ tick: 0, phase: patriciaTriePhases[0].label, phaseIndex: 0, entries, rootHash: computeTrieRoot(entries), proofKey: 'alex', proofValid: true, lastTransition: 'encode', explanation: explain(0), metrics: {}, checkpointValues: {} });
+export function createInitialPatriciaTrieState(params: SimInitParams, _seed: number): PatriciaTrieState {
+  const keys = stringArrayParam(params, 'keys', ['alice', 'alina', 'bob'], 2, 16, 32);
+  const values = stringArrayParam(params, 'values', keys.map((_, index) => String((index + 1) * 10)), keys.length, keys.length, 48);
+  const entries = keys.map<TrieEntry>((key, index) => ({ key, path: encodeTrieKey(key), value: values[index] ?? String((index + 1) * 10), hash: leafHash(key, values[index] ?? String((index + 1) * 10)), updated: false, missing: false }));
+  return finalizePatriciaTrieState({ tick: 0, phase: patriciaTriePhases[0].label, phaseIndex: 0, entries, rootHash: computeTrieRoot(entries), proofKey: stringParam(params, 'proofKey', missingProofKey(keys), 32), proofValid: true, lastTransition: 'encode', explanation: explain(0), metrics: {}, checkpointValues: {} });
 }
 
 /**
@@ -73,7 +76,20 @@ export function computeTrieRoot(entries: TrieEntry[]): string {
  * updateWrongLeaf 修改叶子但暂不更新根哈希。
  */
 function updateWrongLeaf(state: PatriciaTrieState): PatriciaTrieState {
-  return { ...state, phaseIndex: 2, lastTransition: 'insert', entries: state.entries.map((entry) => (entry.key === 'alice' ? { ...entry, value: '99', hash: leafHash(entry.key, '99'), updated: true } : entry)), proofValid: false };
+  const targetKey = state.entries.find((entry) => entry.key === state.selectedElementId)?.key ?? state.entries[0]?.key;
+  return { ...state, phaseIndex: 2, lastTransition: 'insert', entries: state.entries.map((entry) => (entry.key === targetKey ? { ...entry, value: `${entry.value}-updated`, hash: leafHash(entry.key, `${entry.value}-updated`), updated: true } : entry)), proofValid: false };
+}
+
+/**
+ * missingProofKey 生成不与现有键冲突的默认缺失证明 key。
+ */
+function missingProofKey(keys: string[]): string {
+  const prefix = keys[0]?.slice(0, 2) || 'aa';
+  let candidate = `${prefix}x`;
+  while (keys.includes(candidate)) {
+    candidate = `${candidate}x`;
+  }
+  return candidate;
 }
 
 /**

@@ -18,6 +18,7 @@ export interface DhtState extends SimState {
   phaseIndex: number;
   lookupKey: number;
   alpha: number;
+  bucketSize: number;
   peers: DhtPeer[];
   shortlist: string[];
   messages: NetworkMessageView[];

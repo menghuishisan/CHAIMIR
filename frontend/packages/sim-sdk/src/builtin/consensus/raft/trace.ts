@@ -49,6 +49,7 @@ export const raftCodeTrace: CodeTraceDef = {
     { name: 'commitIndex', extract: 'state.commitIndex', format: 'number' },
     { name: 'leaderId', extract: 'state.leaderId', format: 'string' },
     { name: 'lastLogIndex', extract: 'state.log.length', format: 'number' },
+    { name: 'appliedNodes', extract: 'state.nodes.filter(node => node.appliedIndex >= state.commitIndex).length', format: 'number' },
   ],
 };
 

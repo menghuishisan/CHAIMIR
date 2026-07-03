@@ -91,6 +91,9 @@ export interface SimManifestValidationResult {
   issues: SimManifestValidationIssue[];
 }
 
+const payloadKeyPattern = /^[A-Za-z][A-Za-z0-9_.:-]{0,63}$/;
+const reservedPayloadParams = new Set(['target', 'active', 'phase', 'startX', 'startY', 'currentX', 'currentY', 'deltaX', 'deltaY']);
+
 /**
  * defineSimPackage 是官方仿真包定义入口,会在开发期执行协议校验并返回原包对象。
  */
@@ -211,12 +214,18 @@ function validateInteractions<TState extends SimState>(simPackage: SimPackage<TS
     if (!interaction.id || !interaction.kind || !interaction.emits || !interaction.label) {
       issues.push({ path: `interactions.${index}`, message: '交互必须包含 id、kind、emits 和 label。' });
     }
-    if (interaction.target === 'element' && !interaction.elementFilter) {
+    if (interaction.kind === 'select-element' && interaction.target !== 'element') {
+      issues.push({ path: `interactions.${index}.target`, message: '选择元素交互必须声明 target 为 element。' });
+    }
+    if ((interaction.target === 'element' || interaction.kind === 'select-element') && !interaction.elementFilter) {
       issues.push({ path: `interactions.${index}.elementFilter`, message: '元素交互必须声明 elementFilter。' });
     }
     for (const [fieldIndex, field] of (interaction.params ?? []).entries()) {
       if (!field.name || !field.label || !field.type) {
         issues.push({ path: `interactions.${index}.params.${fieldIndex}`, message: '交互参数必须包含 name、label 和 type。' });
+      }
+      if (!payloadKeyPattern.test(field.name) || reservedPayloadParams.has(field.name)) {
+        issues.push({ path: `interactions.${index}.params.${fieldIndex}.name`, message: '交互参数名必须符合后端操作日志规则,且不能使用平台保留字段。' });
       }
     }
   }

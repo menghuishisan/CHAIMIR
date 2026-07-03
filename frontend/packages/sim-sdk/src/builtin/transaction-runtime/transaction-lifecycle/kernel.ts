@@ -2,6 +2,7 @@
 
 import type { CheckpointResult, ReducerContext, SimEvent, SimInitParams } from '../../../types';
 import { deterministicId } from '../../../runtime/deterministic';
+import { integerParam, stringParam } from '../../initParams';
 import { signedTransactionHash, transactionIntentHash } from '../runtimePrimitives';
 import { processRuntimeMessage, type RuntimeActor, type RuntimeMessage } from '../runtimeView';
 import { txLifecyclePhases, type TxLifecycleState } from './model';
@@ -10,10 +11,14 @@ import { traceLinesForTxLifecycle } from './trace';
 /**
  * createInitialTxLifecycleState 创建交易生命周期参与方。
  */
-export function createInitialTxLifecycleState(_params: SimInitParams, _seed: number): TxLifecycleState {
+export function createInitialTxLifecycleState(params: SimInitParams, _seed: number): TxLifecycleState {
   const actors: RuntimeActor[] = [{ id: 'wallet', label: '钱包', role: 'runtime-actor', status: 'active' }, { id: 'node', label: '节点', role: 'runtime-actor', status: 'idle' }, { id: 'block', label: '区块', role: 'runtime-actor', status: 'idle' }, { id: 'vm', label: '执行器', role: 'runtime-actor', status: 'idle' }];
-  const intentHash = transactionIntentHash('Alice', 'Bob', 10, 7);
-  return finalizeTxLifecycleState({ tick: 0, phase: txLifecyclePhases[0].label, phaseIndex: 0, txHash: signedTransactionHash(intentHash, 'Alice'), signed: false, inMempool: false, included: false, executed: false, receipt: '', dropped: false, actors, messages: [], lastTransition: 'build', explanation: explain(0), metrics: {}, checkpointValues: {} });
+  const from = stringParam(params, 'from', 'Alice', 48);
+  const to = stringParam(params, 'to', 'Bob', 48);
+  const amount = integerParam(params, 'amount', 10, 1, 1_000_000);
+  const nonce = integerParam(params, 'nonce', 7, 0, 1_000_000);
+  const intentHash = transactionIntentHash(from, to, amount, nonce);
+  return finalizeTxLifecycleState({ tick: 0, phase: txLifecyclePhases[0].label, phaseIndex: 0, txHash: signedTransactionHash(intentHash, from), signed: false, inMempool: false, included: false, executed: false, receipt: '', dropped: false, actors, messages: [], lastTransition: 'build', explanation: explain(0), metrics: {}, checkpointValues: {} });
 }
 
 /**

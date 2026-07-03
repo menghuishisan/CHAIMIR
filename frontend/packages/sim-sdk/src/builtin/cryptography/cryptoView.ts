@@ -77,19 +77,29 @@ export function metricSeries(points: Array<{ x: number; correctness: number; ris
 }
 
 /**
- * binaryTree 用叶子和合并函数构造二叉证明树。
+ * binaryTree 按 Merkle 成对合并规则构造任意叶子数量的二叉证明树,奇数层复制末尾节点。
  */
 export function binaryTree(rootId: string, leaves: Array<{ id: string; label: string; hash: string }>, merge: (left: string, right: string) => string): TreeNode {
-  const leafNodes = leaves.map<TreeNode>((leaf) => ({ id: leaf.id, label: leaf.label, hash: leaf.hash }));
-  const leftHash = merge(leafNodes[0].hash, leafNodes[1].hash);
-  const rightHash = merge(leafNodes[2].hash, leafNodes[3].hash);
-  return {
-    id: rootId,
-    label: '根摘要',
-    hash: merge(leftHash, rightHash),
-    children: [
-      { id: `${rootId}-left`, label: '左分支', hash: leftHash, children: leafNodes.slice(0, 2) },
-      { id: `${rootId}-right`, label: '右分支', hash: rightHash, children: leafNodes.slice(2) },
-    ],
-  };
+  let level = leaves.map<TreeNode>((leaf) => ({ id: leaf.id, label: leaf.label, hash: leaf.hash }));
+  if (level.length === 0) {
+    return { id: rootId, label: '根摘要', hash: '' };
+  }
+  let depth = 0;
+  while (level.length > 1) {
+    const padded = level.length % 2 === 0 ? level : level.concat({ ...level[level.length - 1], id: `${level[level.length - 1].id}-dup-l${depth}`, label: `${level[level.length - 1].label} 复制` });
+    const next: TreeNode[] = [];
+    for (let index = 0; index < padded.length; index += 2) {
+      const pairIndex = index / 2;
+      const nextLength = Math.ceil(padded.length / 2);
+      next.push({
+        id: nextLength === 1 ? rootId : `${rootId}-level-${depth + 1}-${pairIndex}`,
+        label: nextLength === 1 ? '根摘要' : `第 ${depth + 1} 层节点 ${pairIndex + 1}`,
+        hash: merge(padded[index].hash, padded[index + 1].hash),
+        children: [padded[index], padded[index + 1]],
+      });
+    }
+    level = next;
+    depth += 1;
+  }
+  return level[0];
 }

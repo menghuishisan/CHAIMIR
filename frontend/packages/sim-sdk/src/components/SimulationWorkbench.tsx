@@ -4,6 +4,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { AlertTriangle, CheckCircle2, Clock3, Pause, Play, RotateCcw, ShieldAlert, SkipBack, StepForward } from 'lucide-react';
 import { Button } from '@chaimir/ui';
 import type {
+  CheckpointResult,
   CodeTraceDef,
   FieldDef,
   InteractionDescriptor,
@@ -56,6 +57,7 @@ export function SimulationWorkbench({
   const [stepDuration, setStepDuration] = useState<number | undefined>();
   const [selectedElementId, setSelectedElementId] = useState<string | undefined>();
   const [selectedElementType, setSelectedElementType] = useState<string | undefined>();
+  const [questionAnswers, setQuestionAnswers] = useState<Record<string, string>>({});
 
   useEffect(() => {
     setDescriptor(undefined);
@@ -65,6 +67,7 @@ export function SimulationWorkbench({
     setStepDuration(undefined);
     setSelectedElementId(undefined);
     setSelectedElementType(undefined);
+    setQuestionAnswers({});
 
     const client = new SimWorkerClient({
       moduleUrl,
@@ -158,17 +161,30 @@ export function SimulationWorkbench({
     setPlaying(false);
     setSelectedElementId(undefined);
     setSelectedElementType(undefined);
+    setQuestionAnswers({});
   }
 
   /**
-   * submitCheckpoint 把当前叙事问题对应的检查点结果交给上层记录。
+   * submitCheckpoint 把学习者的实际选择转为检查点结果,避免答案按钮只提交 Worker 既有状态。
    */
-  function submitCheckpoint(step: NarrativeStepDescriptor): void {
-    const checkpointId = step.question?.checkpointId;
-    if (!checkpointId || !snapshot?.checkpointResults[checkpointId]) {
+  function submitCheckpoint(step: NarrativeStepDescriptor, selectedAnswer: string): void {
+    const question = step.question;
+    if (!question) {
       return;
     }
-    onCheckpoint?.(checkpointId, snapshot.checkpointResults[checkpointId]);
+    const achieved = selectedAnswer === question.answer;
+    const result: CheckpointResult = {
+      achieved,
+      answer: {
+        selected: selectedAnswer,
+        expected: question.answer,
+        checkpointId: question.checkpointId,
+        stateCheckpoint: snapshot?.checkpointResults[question.checkpointId]?.answer ?? null,
+      },
+      explanation: achieved ? '选择正确,已记录本次设问结果。' : '当前选择不正确,请结合仿真状态重新判断。',
+    };
+    setQuestionAnswers((current) => ({ ...current, [question.checkpointId]: selectedAnswer }));
+    onCheckpoint?.(question.checkpointId, result);
   }
 
   if (!descriptor || !snapshot || stepDuration === undefined) {
@@ -214,11 +230,14 @@ export function SimulationWorkbench({
             <article className="sim-question">
               <h2>{currentStep.question.prompt}</h2>
               <div className="sim-question__options">
-                {currentStep.question.options.map((option) => (
-                  <button type="button" key={option} onClick={() => submitCheckpoint(currentStep)}>
-                    {option}
-                  </button>
-                ))}
+                {currentStep.question.options.map((option) => {
+                  const selected = questionAnswers[currentStep.question.checkpointId] === option;
+                  return (
+                    <button aria-pressed={selected} className={selected ? 'is-selected' : undefined} key={option} type="button" onClick={() => submitCheckpoint(currentStep, option)}>
+                      {option}
+                    </button>
+                  );
+                })}
               </div>
             </article>
           )}
@@ -449,13 +468,16 @@ function InteractionPanel({
    * emitInteraction 统一执行冷却、目标、确认和 payload 合成后再发给 Worker。
    */
   function emitInteraction(interaction: InteractionDescriptor, extra: JsonObject = {}): void {
-    const bypassCooldown = extra.active === false || extra.phase === 'end';
+    const payloadExtra: JsonObject = { ...extra };
+    const confirmed = payloadExtra.confirmed === true;
+    delete payloadExtra.confirmed;
+    const bypassCooldown = payloadExtra.active === false || payloadExtra.phase === 'end';
     if (!canEmit(interaction, bypassCooldown)) {
       return;
     }
     const target = interaction.target === 'element' || interaction.kind === 'select-element' ? selectedElementId : undefined;
-    const payload = { ...defaultPayload(interaction), ...(values[interaction.id] ?? {}), ...extra };
-    if (interaction.labelTag === 'attack' && extra.confirmed !== true) {
+    const payload = { ...defaultPayload(interaction), ...(values[interaction.id] ?? {}), ...payloadExtra };
+    if (interaction.labelTag === 'attack' && !confirmed) {
       setPendingAttackId(interaction.id);
       return;
     }
@@ -686,7 +708,7 @@ function InteractionCommand({
         onPointerDown={(event) => {
           dragStartRef.current = { x: event.clientX, y: event.clientY };
           event.currentTarget.setPointerCapture(event.pointerId);
-          emitInteraction(interaction, { phase: 'start', start_x: event.clientX, start_y: event.clientY });
+          emitInteraction(interaction, { phase: 'start', startX: event.clientX, startY: event.clientY });
         }}
         onPointerMove={(event) => {
           if (!dragStartRef.current || disabled) {
@@ -694,12 +716,12 @@ function InteractionCommand({
           }
           emitInteraction(interaction, {
             phase: 'move',
-            start_x: dragStartRef.current.x,
-            start_y: dragStartRef.current.y,
-            current_x: event.clientX,
-            current_y: event.clientY,
-            delta_x: event.clientX - dragStartRef.current.x,
-            delta_y: event.clientY - dragStartRef.current.y,
+            startX: dragStartRef.current.x,
+            startY: dragStartRef.current.y,
+            currentX: event.clientX,
+            currentY: event.clientY,
+            deltaX: event.clientX - dragStartRef.current.x,
+            deltaY: event.clientY - dragStartRef.current.y,
           });
         }}
         onPointerUp={(event) => {
@@ -708,12 +730,12 @@ function InteractionCommand({
           }
           emitInteraction(interaction, {
             phase: 'end',
-            start_x: dragStartRef.current.x,
-            start_y: dragStartRef.current.y,
-            current_x: event.clientX,
-            current_y: event.clientY,
-            delta_x: event.clientX - dragStartRef.current.x,
-            delta_y: event.clientY - dragStartRef.current.y,
+            startX: dragStartRef.current.x,
+            startY: dragStartRef.current.y,
+            currentX: event.clientX,
+            currentY: event.clientY,
+            deltaX: event.clientX - dragStartRef.current.x,
+            deltaY: event.clientY - dragStartRef.current.y,
           });
           dragStartRef.current = null;
         }}

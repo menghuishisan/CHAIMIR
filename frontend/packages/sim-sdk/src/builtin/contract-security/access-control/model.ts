@@ -8,6 +8,7 @@ export interface AccessState extends SimState {
   roles: Record<string, string>;
   protectedFunction: boolean;
   unauthorizedExecuted: boolean;
+  unauthorizedBlocked: boolean;
   auditLogged: boolean;
   actors: SecurityActor[];
   calls: SecurityCall[];

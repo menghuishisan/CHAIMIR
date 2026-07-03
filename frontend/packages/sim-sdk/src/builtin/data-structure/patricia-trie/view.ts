@@ -17,14 +17,28 @@ export function renderPatriciaTrieView(state: PatriciaTrieState): ViewSpec {
  * trieRoot 构造压缩路径树。
  */
 function trieRoot(state: PatriciaTrieState): TreeNode {
-  return { id: 'trie-root', label: 'root', hash: state.rootHash, children: [{ id: 'trie-a', label: 'al*', hash: fnv1aHex('al', 8), children: state.entries.filter((entry) => entry.key.startsWith('ali')).map((entry) => ({ id: entry.key, label: entry.key, hash: entry.hash })) }, { id: 'trie-b', label: 'bo*', hash: fnv1aHex('bo', 8), children: state.entries.filter((entry) => entry.key.startsWith('bo')).map((entry) => ({ id: entry.key, label: entry.key, hash: entry.hash })) }] };
+  const groups = prefixGroups(state.entries.map((entry) => entry.key));
+  return {
+    id: 'trie-root',
+    label: 'root',
+    hash: state.rootHash,
+    children: groups.map((prefix) => ({ id: `trie-${prefix}`, label: `${prefix}*`, hash: fnv1aHex(prefix, 8), children: state.entries.filter((entry) => entry.key.startsWith(prefix)).map((entry) => ({ id: entry.key, label: entry.key, hash: entry.hash })) })),
+  };
 }
 
 /**
  * highlightedPath 返回缺失证明路径。
  */
 function highlightedPath(state: PatriciaTrieState): string[] {
-  return state.proofKey.startsWith('al') ? ['trie-root', 'trie-a'] : ['trie-root'];
+  const prefix = prefixGroups(state.entries.map((entry) => entry.key)).find((item) => state.proofKey.startsWith(item));
+  return prefix ? ['trie-root', `trie-${prefix}`] : ['trie-root'];
+}
+
+/**
+ * prefixGroups 根据键集合计算压缩路径的首段分组。
+ */
+function prefixGroups(keys: string[]): string[] {
+  return Array.from(new Set(keys.map((key) => key.slice(0, Math.min(2, key.length)) || 'key'))).sort();
 }
 
 /**

@@ -26,6 +26,8 @@ export interface PowBlock {
   parentHash: string;
   hash: string;
   nonce: number;
+  mempoolSize: number;
+  difficulty: number;
   work: number;
   canonical: boolean;
   attacker: boolean;
@@ -36,8 +38,10 @@ export interface PowState extends SimState {
   difficulty: number;
   targetPrefix: string;
   mempoolSize: number;
+  hashWindowSize: number;
   candidateNonce: number;
   candidateHash: string;
+  candidateReady: boolean;
   candidateParentHash: string;
   candidateMinerId: string;
   hashAttempts: PowAttempt[];
@@ -45,6 +49,9 @@ export interface PowState extends SimState {
   miners: PowMiner[];
   blocks: PowBlock[];
   privateFork: PowBlock[];
+  privateForkTargetDepth: number;
+  privateMiningCursor: number;
+  privateMiningTargetDepth: number;
   messages: ViewMessage[];
   samples: Array<{ x: number; quorum: number; risk: number; finality: number }>;
   selfishMining: boolean;

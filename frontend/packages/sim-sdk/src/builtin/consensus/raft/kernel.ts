@@ -2,25 +2,35 @@
 
 import type { CheckpointResult, ReducerContext, SimEvent, SimInitParams } from '../../../types';
 import { deterministicId } from '../../../runtime/deterministic';
+import { indexFromSeed, integerParam, stringParam } from '../../initParams';
 import { majorityThreshold } from '../consensusPrimitives';
 import { processViewMessage, refreshViewMessages, type ViewMessage } from '../consensusView';
 import { raftPhases, type RaftNode, type RaftState } from './model';
 import { traceLinesForRaft } from './trace';
 
 /**
- * createInitialRaftState 创建五节点 Raft 集群,初始领导者为 N1。
+ * createInitialRaftState 根据初始化参数创建 Raft 集群、任期和首条日志。
  */
-export function createInitialRaftState(_params: SimInitParams, _seed: number): RaftState {
-  const nodes = ['N1', 'N2', 'N3', 'N4', 'N5'].map<RaftNode>((label, index) => ({ id: `raft-${label.toLowerCase()}`, label, role: index === 0 ? 'leader' : 'follower', term: 1, votedFor: index === 0 ? undefined : 'raft-n1', logLength: 1, lastLogTerm: 1, matchIndex: index === 0 ? 1 : 0, nextIndex: 2, partitioned: false }));
+export function createInitialRaftState(params: SimInitParams, seed: number): RaftState {
+  const nodeCount = integerParam(params, 'nodeCount', 5, 3, 9);
+  const term = integerParam(params, 'term', 1, 1, 1000);
+  const leaderIndex = integerParam(params, 'leaderIndex', indexFromSeed(seed, nodeCount) + 1, 1, nodeCount) - 1;
+  const command = stringParam(params, 'command', 'set course=consensus', 96);
+  const nodes = Array.from({ length: nodeCount }, (_, index): RaftNode => {
+    const label = `N${index + 1}`;
+    const leaderId = `raft-n${leaderIndex + 1}`;
+    return { id: `raft-n${index + 1}`, label, role: index === leaderIndex ? 'leader' : 'follower', term, votedFor: index === leaderIndex ? undefined : leaderId, logLength: 1, lastLogTerm: term, matchIndex: index === leaderIndex ? 1 : 0, nextIndex: 2, commitIndex: 0, appliedIndex: 0, partitioned: false };
+  });
+  const leaderId = nodes[leaderIndex].id;
   return finalizeRaftState({
     tick: 0,
     phase: raftPhases[0].label,
     phaseIndex: 0,
-    term: 1,
+    term,
     commitIndex: 0,
-    leaderId: 'raft-n1',
+    leaderId,
     nodes,
-    log: [{ index: 1, term: 1, command: 'set course=consensus', committed: false }],
+    log: [{ index: 1, term, command, committed: false }],
     messages: [],
     votes: {},
     partitionActive: false,
@@ -83,7 +93,7 @@ export function finalizeRaftState(state: RaftState): RaftState {
     messages: refreshViewMessages(state.messages, state.tick, (message) => message.detail ?? `${message.label} RPC 正在传播或等待确认。`),
     metrics: { result: state.commitIndex === state.log.length ? '日志已提交' : '等待多数派', risk: state.partitionActive ? 70 : 12, term: state.term, commitIndex: state.commitIndex },
     checkpointValues: { majorityCommit: state.commitIndex === state.log.length && replicatedCount(state) >= quorum(state), singleLeader: state.nodes.filter((node) => node.role === 'leader').length === 1 },
-    _trace: { triggeredLines: traceLinesForRaft(state.lastTransition), variables: { term: state.term, commitIndex: state.commitIndex, leaderId: state.leaderId, lastLogIndex: state.log.length }, executionPath: `raft/${state.lastTransition}` },
+    _trace: { triggeredLines: traceLinesForRaft(state.lastTransition), variables: { term: state.term, commitIndex: state.commitIndex, leaderId: state.leaderId, lastLogIndex: state.log.length, appliedNodes: state.nodes.filter((node) => node.appliedIndex >= state.commitIndex && state.commitIndex > 0).length }, executionPath: `raft/${state.lastTransition}` },
   };
 }
 
@@ -91,7 +101,7 @@ export function finalizeRaftState(state: RaftState): RaftState {
  * startElection 将一个跟随者提升为候选者并广播 RequestVote。
  */
 function startElection(state: RaftState): RaftState {
-  const candidate = state.nodes.find((node) => !node.partitioned && node.id !== state.leaderId && nodeLogUpToDate(node, lastEntry(state).index, lastEntry(state).term)) ?? state.nodes[1];
+  const candidate = state.nodes.find((node) => !node.partitioned && node.id !== state.leaderId && nodeLogUpToDate(node, lastEntry(state).index, lastEntry(state).term)) ?? state.nodes.find((node) => !node.partitioned) ?? state.nodes[0];
   const term = state.term + 1;
   return { ...state, lastTransition: 'request-vote', term, candidateId: candidate.id, votes: { [candidate.id]: true }, nodes: state.nodes.map((node) => (node.id === candidate.id ? { ...node, role: 'candidate', term, votedFor: candidate.id } : { ...node, term, votedFor: undefined })), messages: state.messages.concat(rpcFrom(state, candidate.id, 'RequestVote')) };
 }
@@ -156,7 +166,16 @@ function replicateEntry(state: RaftState): RaftState {
  */
 function commitEntry(state: RaftState): RaftState {
   const commitIndex = replicatedCount(state) >= quorum(state) ? state.log.length : state.commitIndex;
-  return { ...state, lastTransition: 'commit', commitIndex, log: state.log.map((entry) => ({ ...entry, committed: entry.index <= commitIndex })) };
+  return {
+    ...state,
+    lastTransition: 'commit',
+    commitIndex,
+    log: state.log.map((entry) => ({ ...entry, committed: entry.index <= commitIndex })),
+    nodes: state.nodes.map((node) => {
+      if (node.partitioned || node.matchIndex < commitIndex) return node;
+      return { ...node, commitIndex, appliedIndex: commitIndex };
+    }),
+  };
 }
 
 /**
@@ -172,7 +191,7 @@ function partitionLeader(state: RaftState): RaftState {
 function recoverPartition(state: RaftState): RaftState {
   const leaderId = state.candidateId ?? state.nodes.find((node) => !node.partitioned)?.id ?? state.leaderId;
   const leaderLastTerm = lastEntry(state).term;
-  return { ...state, tick: state.tick + 1, lastTransition: 'recover', partitionActive: false, leaderId, nodes: state.nodes.map((node) => ({ ...node, partitioned: false, role: node.id === leaderId ? 'leader' : 'follower', logLength: state.log.length, lastLogTerm: leaderLastTerm, matchIndex: state.log.length, nextIndex: state.log.length + 1 })) };
+  return { ...state, tick: state.tick + 1, lastTransition: 'recover', partitionActive: false, leaderId, nodes: state.nodes.map((node) => ({ ...node, partitioned: false, role: node.id === leaderId ? 'leader' : 'follower', logLength: state.log.length, lastLogTerm: leaderLastTerm, matchIndex: state.log.length, nextIndex: state.log.length + 1, commitIndex: state.commitIndex, appliedIndex: state.commitIndex })) };
 }
 
 /**

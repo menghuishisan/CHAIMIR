@@ -6,6 +6,7 @@ export interface FinalityState extends SimState {
   phaseIndex: number;
   confirmations: number;
   requiredConfirmations: number;
+  confirmationStep: number;
   finalityProof: boolean;
   reorgDetected: boolean;
   released: boolean;

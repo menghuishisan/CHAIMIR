@@ -1,6 +1,7 @@
 // 本文件实现 DHT ID 空间、K 桶、异或距离、迭代查询和污染路由修复内核。
 
 import type { CheckpointResult, ReducerContext, SimEvent, SimInitParams } from '../../../types';
+import { indexFromSeed, integerParam } from '../../initParams';
 import { networkMessageId } from '../networkPrimitives';
 import { processNetworkMessage, refreshNetworkMessages, type NetworkMessageView } from '../networkView';
 import { dhtPhases, type DhtPeer, type DhtState } from './model';
@@ -9,11 +10,18 @@ import { traceLinesForDht } from './trace';
 /**
  * createInitialDhtState 创建 DHT 节点、目标 key 和初始短名单。
  */
-export function createInitialDhtState(_params: SimInitParams, _seed: number): DhtState {
-  const lookupKey = 173;
-  const nodeIds = [12, 45, 91, 160, 176, 225];
-  const peers = nodeIds.map<DhtPeer>((nodeId, index) => ({ id: `dht-${index + 1}`, label: `节点 ${index + 1}`, role: 'dht-peer', status: 'idle', value: `ID ${nodeId}`, nodeId, bucket: bucketFor(nodeId, lookupKey), queried: index === 0, inShortlist: index < 3, closest: false, polluted: false, hasValue: index === 4, returnedPeers: nodeIds.filter((id) => id !== nodeId).slice(index % 3, index % 3 + 3) }));
-  return finalizeDhtState({ tick: 0, phase: dhtPhases[0].label, phaseIndex: 0, lookupKey, alpha: 2, peers, shortlist: nearest(peers, lookupKey, 3).map((peer) => peer.id), messages: [], hops: 0, foundValue: false, lastTransition: 'id-space', explanation: explainDhtPhase(0), metrics: {}, checkpointValues: {} });
+export function createInitialDhtState(params: SimInitParams, seed: number): DhtState {
+  const lookupKey = integerParam(params, 'lookupKey', 173, 0, 255);
+  const nodeCount = integerParam(params, 'nodeCount', 6, 4, 24);
+  const alpha = integerParam(params, 'alpha', 2, 1, Math.min(6, nodeCount));
+  const bucketSize = integerParam(params, 'bucketSize', Math.min(4, nodeCount), Math.max(2, alpha), Math.min(8, nodeCount));
+  const nodeIds = createDhtNodeIds(lookupKey, nodeCount, seed);
+  const valueIndex = integerParam(params, 'valuePeerIndex', indexFromSeed(seed + 3, nodeCount) + 1, 1, nodeCount) - 1;
+  const peers = nodeIds.map<DhtPeer>((nodeId, index) => {
+    const returnedPeers = nearestNodeIds(nodeIds.filter((id) => id !== nodeId), nodeId, Math.min(bucketSize, nodeCount - 1));
+    return { id: `dht-${index + 1}`, label: `节点 ${index + 1}`, role: 'dht-peer', status: 'idle', value: `ID ${nodeId}`, nodeId, bucket: bucketFor(nodeId, lookupKey), queried: index === 0, inShortlist: false, closest: false, polluted: false, hasValue: index === valueIndex, returnedPeers };
+  });
+  return finalizeDhtState({ tick: 0, phase: dhtPhases[0].label, phaseIndex: 0, lookupKey, alpha, bucketSize, peers, shortlist: nearest(peers, lookupKey, Math.min(bucketSize, peers.length)).map((peer) => peer.id), messages: [], hops: 0, foundValue: false, lastTransition: 'id-space', explanation: explainDhtPhase(0), metrics: {}, checkpointValues: {} });
 }
 
 /**
@@ -62,7 +70,7 @@ export function finalizeDhtState(state: DhtState): DhtState {
     explanation: explainDhtPhase(state.phaseIndex),
     metrics: { result: state.foundValue && !polluted ? '已找到值' : '继续查找', risk: polluted ? 78 : 15, hops: state.hops, shortlistSize: state.shortlist.length },
     checkpointValues: { found: state.foundValue && !polluted },
-    _trace: { triggeredLines: traceLinesForDht(state.lastTransition), variables: { lookupKey: state.lookupKey, hops: state.hops, shortlistSize: state.shortlist.length }, executionPath: `dht/${state.lastTransition}` },
+    _trace: { triggeredLines: traceLinesForDht(state.lastTransition), variables: { lookupKey: state.lookupKey, hops: state.hops, shortlistSize: state.shortlist.length, bucketSize: state.bucketSize }, executionPath: `dht/${state.lastTransition}` },
   };
 }
 
@@ -77,7 +85,7 @@ function refreshBuckets(state: DhtState): DhtState {
  * refreshShortlist 根据异或距离刷新短名单。
  */
 function refreshShortlist(state: DhtState, transition: string): DhtState {
-  return { ...state, lastTransition: transition, shortlist: nearest(state.peers.filter((peer) => !peer.polluted), state.lookupKey, 4).map((peer) => peer.id) };
+  return { ...state, lastTransition: transition, shortlist: nearest(state.peers.filter((peer) => !peer.polluted), state.lookupKey, state.bucketSize).map((peer) => peer.id) };
 }
 
 /**
@@ -93,14 +101,16 @@ function queryClosest(state: DhtState): DhtState {
   const shortlist = Array.from(new Set(state.shortlist.concat(returnedIds)));
   const queriedIds = new Set(candidates.map((peer) => peer.id));
   const foundValue = state.foundValue || candidates.some((peer) => peer.hasValue);
-  return { ...state, lastTransition: 'query', hops: state.hops + candidates.length, foundValue, shortlist: sortShortlist(state.peers, shortlist, state.lookupKey).slice(0, 4), peers: state.peers.map((peer) => ({ ...peer, queried: peer.queried || queriedIds.has(peer.id), closest: foundValue && peer.hasValue })), messages: state.messages.concat(candidates.map((peer) => message(state.tick, 'local-node', peer.id, 'FIND_VALUE', 'delivered', '查询最近未访问候选并合并返回节点。'))) };
+  return { ...state, lastTransition: 'query', hops: state.hops + candidates.length, foundValue, shortlist: sortShortlist(state.peers, shortlist, state.lookupKey).slice(0, state.bucketSize), peers: state.peers.map((peer) => ({ ...peer, queried: peer.queried || queriedIds.has(peer.id), closest: foundValue && peer.hasValue })), messages: state.messages.concat(candidates.map((peer) => message(state.tick, 'local-node', peer.id, 'FIND_VALUE', 'delivered', '查询最近未访问候选并合并返回节点。'))) };
 }
 
 /**
  * polluteRoute 注入一个看似更近但返回错误候选的污染节点。
  */
 function polluteRoute(state: DhtState): DhtState {
-  return { ...state, lastTransition: 'pollute', foundValue: false, shortlist: Array.from(new Set(['dht-4'].concat(state.shortlist))), peers: state.peers.map((peer) => (peer.id === 'dht-4' ? { ...peer, polluted: true, closest: true, returnedPeers: [12, 45] } : peer)) };
+  const pollutedId = pollutedPeerId(state);
+  const misleadingPeers = farthest(state.peers.filter((peer) => peer.id !== pollutedId), state.lookupKey, Math.min(state.alpha, state.peers.length - 1)).map((peer) => peer.nodeId);
+  return { ...state, lastTransition: 'pollute', foundValue: false, shortlist: Array.from(new Set([pollutedId].concat(state.shortlist))), peers: state.peers.map((peer) => (peer.id === pollutedId ? { ...peer, polluted: true, closest: true, returnedPeers: misleadingPeers } : peer)) };
 }
 
 /**
@@ -109,7 +119,7 @@ function polluteRoute(state: DhtState): DhtState {
 function repairRoute(state: DhtState): DhtState {
   const peers = state.peers.map((peer) => (peer.polluted ? { ...peer, closest: false, inShortlist: false } : peer));
   const repaired = refreshShortlist({ ...state, peers, shortlist: state.shortlist.filter((id) => !peers.find((peer) => peer.id === id)?.polluted), foundValue: peers.some((peer) => peer.hasValue && peer.queried) }, 'repair');
-  return { ...repaired, foundValue: repaired.foundValue || nearest(peers.filter((peer) => !peer.polluted), state.lookupKey, 1)[0]?.hasValue === true };
+  return queryClosest({ ...repaired, lastTransition: 'repair' });
 }
 
 /**
@@ -117,6 +127,13 @@ function repairRoute(state: DhtState): DhtState {
  */
 function nearest(peers: DhtPeer[], key: number, count: number): DhtPeer[] {
   return [...peers].sort((left, right) => distance(left, key) - distance(right, key)).slice(0, count);
+}
+
+/**
+ * farthest 返回按 XOR 距离由远到近排序的节点,用于构造污染路由。
+ */
+function farthest(peers: DhtPeer[], key: number, count: number): DhtPeer[] {
+  return [...peers].sort((left, right) => distance(right, key) - distance(left, key)).slice(0, count);
 }
 
 /**
@@ -131,6 +148,35 @@ function sortShortlist(peers: DhtPeer[], ids: string[], key: number): string[] {
  */
 function bucketFor(nodeId: number, key: number): number {
   return Math.floor(Math.log2(nodeId ^ key || 1));
+}
+
+/**
+ * createDhtNodeIds 根据 key、节点数和 seed 生成稳定且唯一的 8 位节点 ID。
+ */
+function createDhtNodeIds(lookupKey: number, count: number, seed: number): number[] {
+  const ids = new Set<number>();
+  const salt = Math.abs(Math.trunc(seed)) + lookupKey * 31 + count * 17;
+  for (let index = 0; ids.size < count && index < 512; index += 1) {
+    ids.add((salt + index * 37 + index * index * 11) % 256);
+  }
+  for (let candidate = 0; ids.size < count && candidate < 256; candidate += 1) {
+    ids.add(candidate);
+  }
+  return [...ids].slice(0, count);
+}
+
+/**
+ * nearestNodeIds 计算相对某个节点 ID 最近的返回候选。
+ */
+function nearestNodeIds(nodeIds: number[], key: number, count: number): number[] {
+  return [...nodeIds].sort((left, right) => (left ^ key) - (right ^ key)).slice(0, count);
+}
+
+/**
+ * pollutedPeerId 选择不会直接持有目标值的近距离节点作为污染目标。
+ */
+function pollutedPeerId(state: DhtState): string {
+  return nearest(state.peers.filter((peer) => !peer.hasValue), state.lookupKey, 1)[0]?.id ?? state.peers[0]?.id ?? 'dht-1';
 }
 
 /**

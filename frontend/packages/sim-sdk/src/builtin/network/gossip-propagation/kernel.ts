@@ -1,18 +1,23 @@
 // 本文件实现 Gossip 种子、扇出、逐轮传播、去重、覆盖收敛和污染隔离内核。
 
 import type { CheckpointResult, ReducerContext, SimEvent, SimInitParams } from '../../../types';
+import { indexFromSeed, integerParam, stringParam } from '../../initParams';
 import { networkMessageId, pollutedMessageId } from '../networkPrimitives';
 import { processNetworkMessage, refreshNetworkMessages, type NetworkMessageView } from '../networkView';
 import { gossipPhases, type GossipPeer, type GossipState } from './model';
 import { traceLinesForGossip } from './trace';
 
 /**
- * createInitialGossipState 创建六节点 Gossip 网络。
+ * createInitialGossipState 根据参数创建 Gossip 网络、种子节点、扇出和消息标识。
  */
-export function createInitialGossipState(_params: SimInitParams, _seed: number): GossipState {
-  const ids = ['A', 'B', 'C', 'D', 'E', 'F'].map((label) => `gossip-${label.toLowerCase()}`);
-  const peers = ids.map<GossipPeer>((id, index) => ({ id, label: `节点 ${String.fromCharCode(65 + index)}`, role: 'gossip-peer', status: index === 0 ? 'active' : 'idle', value: index === 0 ? '种子' : '等待', informed: index === 0, duplicateCount: 0, polluted: false, seenMessageIds: index === 0 ? ['msg-main'] : [], neighbors: [ids[(index + 1) % ids.length], ids[(index + 2) % ids.length], ids[(index + ids.length - 1) % ids.length]], activeSender: index === 0 }));
-  return finalizeGossipState({ tick: 0, phase: gossipPhases[0].label, phaseIndex: 0, fanout: 2, messageId: 'msg-main', round: 0, frontier: [ids[0]], peers, messages: [], samples: [{ x: 0, coverage: 17, risk: 8, latency: 5 }], lastTransition: 'seed', explanation: explainGossipPhase(0), metrics: {}, checkpointValues: {} });
+export function createInitialGossipState(params: SimInitParams, seed: number): GossipState {
+  const peerCount = integerParam(params, 'peerCount', 6, 4, 12);
+  const fanout = integerParam(params, 'fanout', 2, 1, Math.min(4, peerCount - 1));
+  const seedIndex = integerParam(params, 'seedIndex', indexFromSeed(seed, peerCount) + 1, 1, peerCount) - 1;
+  const messageId = stringParam(params, 'messageId', 'msg-main', 64);
+  const ids = Array.from({ length: peerCount }, (_, index) => `gossip-${String.fromCharCode(97 + index)}`);
+  const peers = ids.map<GossipPeer>((id, index) => ({ id, label: `节点 ${String.fromCharCode(65 + index)}`, role: 'gossip-peer', status: index === seedIndex ? 'active' : 'idle', value: index === seedIndex ? '种子' : '等待', informed: index === seedIndex, duplicateCount: 0, polluted: false, seenMessageIds: index === seedIndex ? [messageId] : [], neighbors: gossipNeighbors(ids, index, fanout), activeSender: index === seedIndex }));
+  return finalizeGossipState({ tick: 0, phase: gossipPhases[0].label, phaseIndex: 0, fanout, messageId, round: 0, frontier: [ids[seedIndex]], peers, messages: [], samples: [{ x: 0, coverage: Math.round(100 / peerCount), risk: 8, latency: 5 }], lastTransition: 'seed', explanation: explainGossipPhase(0), metrics: {}, checkpointValues: {} });
 }
 
 /**
@@ -30,6 +35,9 @@ export function reduceGossipEvent(state: GossipState, event: SimEvent, _context:
  * advanceGossip 按 Gossip 传播流程推进一个过程单元。
  */
 export function advanceGossip(state: GossipState, event: SimEvent): GossipState {
+  if (state.phaseIndex === 2 && state.frontier.length > 0 && coverage(state) < 80) {
+    return spreadRound({ ...state, tick: event.source === 'tick' ? state.tick + 1 : state.tick, lastTransition: 'spread' });
+  }
   const phaseIndex = Math.min(gossipPhases.length - 1, state.phaseIndex + 1);
   const base = { ...state, phaseIndex, tick: event.source === 'tick' ? state.tick + 1 : state.tick, lastTransition: gossipPhases[phaseIndex].id };
   if (phaseIndex === 1 || phaseIndex === 2) return spreadRound(base);
@@ -111,7 +119,8 @@ function converge(state: GossipState): GossipState {
  * polluteGossip 注入污染消息源。
  */
 function polluteGossip(state: GossipState): GossipState {
-  return { ...state, lastTransition: 'pollute', peers: state.peers.map((peer) => (peer.id === 'gossip-c' ? { ...peer, polluted: true, informed: true, seenMessageIds: peer.seenMessageIds.concat(pollutedMessageId(state.tick)) } : peer)) };
+  const targetId = state.peers.find((peer) => !peer.informed)?.id ?? state.peers[Math.min(2, state.peers.length - 1)]?.id;
+  return { ...state, lastTransition: 'pollute', peers: state.peers.map((peer) => (peer.id === targetId ? { ...peer, polluted: true, informed: true, seenMessageIds: peer.seenMessageIds.concat(pollutedMessageId(state.tick)) } : peer)) };
 }
 
 /**
@@ -133,6 +142,19 @@ export function coverage(state: GossipState): number {
  */
 function message(at: number, from: string, to: string, label: string, status: NetworkMessageView['status'], detail: string): NetworkMessageView {
   return processNetworkMessage(at, { id: networkMessageId('gossip-msg', { from, to, label, at, status }), from, to, label, at, status }, detail);
+}
+
+/**
+ * gossipNeighbors 生成环形邻居集合,根据扇出扩大前向传播范围并保留一个反向邻居用于去重。
+ */
+function gossipNeighbors(ids: string[], index: number, fanout: number): string[] {
+  const out = new Set<string>();
+  for (let offset = 1; offset <= fanout; offset += 1) {
+    out.add(ids[(index + offset) % ids.length]);
+  }
+  out.add(ids[(index + ids.length - 1) % ids.length]);
+  out.delete(ids[index]);
+  return Array.from(out);
 }
 
 /**

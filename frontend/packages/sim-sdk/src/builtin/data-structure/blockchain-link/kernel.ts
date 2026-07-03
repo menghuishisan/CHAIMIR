@@ -1,18 +1,19 @@
 // 本文件实现区块链父哈希结构的创世块、追加、分叉识别和规范链重组内核。
 
 import type { ChainBlock, CheckpointResult, ReducerContext, SimEvent, SimInitParams } from '../../../types';
+import { stringArrayParam } from '../../initParams';
 import { blockHeaderHash, dataDigest } from '../dataPrimitives';
 import { blockchainPhases, type BlockchainLinkState, type BlockLink } from './model';
 import { blockchainSource, traceLinesForBlockchainLink } from './trace';
 
 /**
- * createInitialBlockchainLinkState 创建一条三块规范链。
+ * createInitialBlockchainLinkState 根据参数创建规范链。
  */
-export function createInitialBlockchainLinkState(_params: SimInitParams, _seed: number): BlockchainLinkState {
+export function createInitialBlockchainLinkState(params: SimInitParams, _seed: number): BlockchainLinkState {
+  const payloads = stringArrayParam(params, 'payloads', ['交易批次 A', '交易批次 B'], 1, 12, 48);
   const genesis = makeBlock(0, 'genesis', '创世块', true, false);
-  const b1 = makeBlock(1, genesis.hash, '交易批次 A', true, false);
-  const b2 = makeBlock(2, b1.hash, '交易批次 B', true, false);
-  return finalizeBlockchainLinkState({ tick: 0, phase: blockchainPhases[0].label, phaseIndex: 0, blocks: [genesis, b1, b2], fork: [], reorganized: false, lastTransition: 'genesis', explanation: explain(0), metrics: {}, checkpointValues: {} });
+  const blocks = payloads.reduce<BlockLink[]>((chain, payload, index) => chain.concat(makeBlock(index + 1, chain[chain.length - 1].hash, payload, true, false)), [genesis]);
+  return finalizeBlockchainLinkState({ tick: 0, phase: blockchainPhases[0].label, phaseIndex: 0, blocks, fork: [], reorganized: false, lastTransition: 'genesis', explanation: explain(0), metrics: {}, checkpointValues: {} });
 }
 
 /**
@@ -61,9 +62,10 @@ export function toChainBlocks(blocks: BlockLink[]): ChainBlock[] {
  * createFork 在同一父块上创建竞争分支。
  */
 function createFork(state: BlockchainLinkState): BlockchainLinkState {
-  const parent = state.blocks[1];
-  const forkHead = makeBlock(2, parent.hash, '竞争批次 X', false, true);
-  return { ...state, phaseIndex: 3, lastTransition: 'fork', fork: [forkHead, makeBlock(3, forkHead.hash, '竞争批次 Y', false, true)], reorganized: false };
+  const parentIndex = Math.max(0, state.blocks.length - 2);
+  const parent = state.blocks[parentIndex] ?? state.blocks[0];
+  const forkHead = makeBlock(parent.height + 1, parent.hash, `竞争批次 ${parent.height + 1}`, false, true);
+  return { ...state, phaseIndex: 3, lastTransition: 'fork', fork: [forkHead, makeBlock(forkHead.height + 1, forkHead.hash, `竞争批次 ${forkHead.height + 1}`, false, true)], reorganized: false };
 }
 
 /**
@@ -71,7 +73,8 @@ function createFork(state: BlockchainLinkState): BlockchainLinkState {
  */
 function reorg(state: BlockchainLinkState): BlockchainLinkState {
   if (state.fork.length <= 1) return { ...state, lastTransition: 'reorg' };
-  return { ...state, phaseIndex: 4, lastTransition: 'reorg', blocks: state.blocks.slice(0, 2).concat(state.fork.map((block) => ({ ...block, canonical: true, forked: false }))), fork: [], reorganized: true };
+  const forkParentHeight = state.fork[0].height - 1;
+  return { ...state, phaseIndex: 4, lastTransition: 'reorg', blocks: state.blocks.slice(0, forkParentHeight + 1).concat(state.fork.map((block) => ({ ...block, canonical: true, forked: false }))), fork: [], reorganized: true };
 }
 
 /**

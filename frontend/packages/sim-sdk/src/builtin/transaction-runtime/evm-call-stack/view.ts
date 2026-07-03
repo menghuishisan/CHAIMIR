@@ -9,14 +9,14 @@ import type { CallStackState } from './model';
  * renderCallStackView 基于内核状态生成 EVM 调用栈可视化。
  */
 export function renderCallStackView(state: CallStackState): ViewSpec {
-  return { summary: `栈深 ${state.frames.length}/${state.maxDepth},revert 帧 ${state.frames.filter((frame) => frame.reverted).length}。`, patterns: [graphPattern('call-stack-graph', '合约调用图', graphNodes(state.actors), graphEdges(state.messages), 'main'), lanePattern('call-stack-lane', '调用栈时序', state.actors.map((actor) => actor.label), laneMessages(state.messages, (id) => labelOf(state, id)), state.tick, 'side'), matrixPattern('call-stack-matrix', '栈帧状态', state.frames.map((frame) => frame.id), ['合约', '深度', '返回', 'revert'], stackCells(state), 'bottom')] };
+  return { summary: `活跃栈深 ${state.frames.filter((frame) => !frame.returned).length}/${state.maxDepth},回滚失败帧 ${state.frames.filter((frame) => frame.reverted).length}。`, patterns: [graphPattern('call-stack-graph', '合约调用图', graphNodes(state.actors), graphEdges(state.messages), 'main'), lanePattern('call-stack-lane', '调用栈时序', state.actors.map((actor) => actor.label), laneMessages(state.messages, (id) => labelOf(state, id)), state.tick, 'side'), matrixPattern('call-stack-matrix', '栈帧状态', state.frames.map((frame) => frame.id), ['合约', '深度', '返回', '回滚失败'], stackCells(state), 'bottom')] };
 }
 
 /**
  * stackCells 展示栈帧状态。
  */
 function stackCells(state: CallStackState): MatrixCell[][] {
-  return matrixCells(state.frames.map((frame) => frame.id), ['合约', '深度', '返回', 'revert'], (row, column) => {
+  return matrixCells(state.frames.map((frame) => frame.id), ['合约', '深度', '返回', '回滚失败'], (row, column) => {
     const frame = state.frames.find((item) => item.id === row);
     if (!frame) return { label: '无', status: 'empty' };
     if (column === '合约') return { label: frame.contract, status: 'yes' };

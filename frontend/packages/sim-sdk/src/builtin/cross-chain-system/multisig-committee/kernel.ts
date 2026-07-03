@@ -1,22 +1,29 @@
 // 本文件实现委员会轮换、成员签名、门限聚合、恶意签名剔除和执行授权内核。
 
 import type { CheckpointResult, ReducerContext, SimEvent, SimInitParams } from '../../../types';
+import { integerParam, stringArrayParam, stringParam } from '../../initParams';
 import { aggregateCommitteeSignature, committeeMemberSignature, crossChainMessageHash } from '../crossChainPrimitives';
 import { committeePhases, type CommitteeState } from './model';
 import { traceLinesForCommittee } from './trace';
 
 /**
- * createInitialCommitteeState 创建 3-of-5 跨链委员会。
+ * createInitialCommitteeState 根据参数创建跨链委员会。
  */
-export function createInitialCommitteeState(_params: SimInitParams, _seed: number): CommitteeState {
-  const messageHash = crossChainMessageHash('committee:chainA:chainB:v1', 21, 'mint-voucher-10');
-  return finalizeCommitteeState({ tick: 0, phase: committeePhases[0].label, phaseIndex: 0, threshold: 3, messageHash, aggregateSignature: '', aggregateReady: false, authorized: false, members: ['A', 'B', 'C', 'D', 'E'].map((label) => ({ id: `member-${label}`, label: `成员 ${label}`, signed: false, malicious: false, active: true })), lastTransition: 'rotate', explanation: explain(0), metrics: {}, checkpointValues: {} });
+export function createInitialCommitteeState(params: SimInitParams, _seed: number): CommitteeState {
+  const labels = stringArrayParam(params, 'members', ['A', 'B', 'C', 'D', 'E'], 3, 21, 24);
+  const threshold = integerParam(params, 'threshold', 3, 2, labels.length);
+  const domain = stringParam(params, 'domain', 'committee:chainA:chainB:v1', 64);
+  const nonce = integerParam(params, 'nonce', 21, 0, 1_000_000);
+  const payload = stringParam(params, 'payload', 'mint-voucher-10', 96);
+  const messageHash = crossChainMessageHash(domain, nonce, payload);
+  return finalizeCommitteeState({ tick: 0, phase: committeePhases[0].label, phaseIndex: 0, threshold, messageHash, aggregateSignature: '', aggregateReady: false, authorized: false, members: labels.map((label, index) => ({ id: `member-${index + 1}`, label: `成员 ${label}`, signed: false, malicious: false, active: true })), lastTransition: 'rotate', explanation: explain(0), metrics: {}, checkpointValues: {} });
 }
 
 /**
  * reduceCommitteeEvent 是多签委员会仿真的唯一事件入口。
  */
 export function reduceCommitteeEvent(state: CommitteeState, event: SimEvent, _context: ReducerContext): CommitteeState {
+  if (event.type === 'select') return finalizeCommitteeState({ ...state, selectedElementId: event.target });
   if (event.type === 'attack') return finalizeCommitteeState(markMalicious(state));
   if (event.type === 'recover') return finalizeCommitteeState(filterMalicious(state));
   if (event.type === 'advance' || event.type === 'tick') return finalizeCommitteeState(advanceCommittee(state, event));
@@ -85,15 +92,24 @@ function aggregateCommittee(state: CommitteeState): CommitteeState {
  * markMalicious 注入恶意签名成员。
  */
 function markMalicious(state: CommitteeState): CommitteeState {
-  return { ...state, phaseIndex: 3, lastTransition: 'filter', members: state.members.map((member, index) => (index === 1 ? { ...member, malicious: true, signed: true, signature: committeeMemberSignature('forged-member', state.messageHash) } : member)), aggregateReady: false, aggregateSignature: '', authorized: false };
+  const targetId = state.selectedElementId ?? state.members.find((member) => member.signed)?.id ?? state.members[0]?.id;
+  return { ...state, phaseIndex: 3, lastTransition: 'filter', members: state.members.map((member) => (member.id === targetId ? { ...member, malicious: true, signed: true, signature: committeeMemberSignature('forged-member', state.messageHash) } : member)), aggregateReady: false, aggregateSignature: '', authorized: false };
 }
 
 /**
  * filterMalicious 剔除恶意成员签名。
  */
 function filterMalicious(state: CommitteeState): CommitteeState {
-  const members = state.members.map((member) => (member.malicious ? { ...member, signed: false, active: false, signature: undefined } : member));
-  return aggregateCommittee({ ...state, lastTransition: 'filter', members });
+  let need = Math.max(0, state.threshold - validSignatures(state));
+  const members = state.members.map((member) => {
+    if (member.malicious) return { ...member, signed: false, active: false, signature: undefined };
+    if (member.active && !member.signed && need > 0) {
+      need -= 1;
+      return { ...member, signed: true, signature: committeeMemberSignature(member.id, state.messageHash) };
+    }
+    return member;
+  });
+  return aggregateCommittee({ ...state, phaseIndex: 3, lastTransition: 'filter', members, aggregateReady: false, aggregateSignature: '', authorized: false });
 }
 
 /**

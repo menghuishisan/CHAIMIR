@@ -2,6 +2,7 @@
 
 import type { CheckpointResult, ReducerContext, SimEvent, SimInitParams } from '../../../types';
 import { deterministicId } from '../../../runtime/deterministic';
+import { integerParam } from '../../initParams';
 import type { CryptoMessage } from '../cryptoView';
 import { FIELD_PRIME, groupMul, roundDigest, schnorrCommit, schnorrResponse, verifySchnorrRelation } from '../cryptoPrimitives';
 import { zkProofPhases, type ZkState } from './model';
@@ -10,11 +11,11 @@ import { traceLinesForZkProof } from './trace';
 /**
  * createInitialZkProofState 创建证明者、验证者和观察者。
  */
-export function createInitialZkProofState(_params: SimInitParams, _seed: number): ZkState {
-  const secret = 19;
-  const randomizer = 11;
+export function createInitialZkProofState(params: SimInitParams, _seed: number): ZkState {
+  const secret = integerParam(params, 'secret', 19, 1, FIELD_PRIME - 1);
+  const randomizer = integerParam(params, 'randomizer', 11, 1, FIELD_PRIME - 1);
   const publicKey = groupMul(secret);
-  const challenge = 3;
+  const challenge = integerParam(params, 'challenge', 3, 1, FIELD_PRIME - 1);
   const commitment = schnorrCommit(randomizer);
   const responseValue = schnorrResponse(randomizer, challenge, secret);
   return finalizeZkProofState({

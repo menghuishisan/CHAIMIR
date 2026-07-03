@@ -2,24 +2,27 @@
 
 import type { CheckpointResult, ReducerContext, SimEvent, SimInitParams } from '../../../types';
 import { deterministicId } from '../../../runtime/deterministic';
+import { integerArrayParam, integerParam, stringArrayParam, stringParam } from '../../initParams';
 import type { CryptoMessage } from '../cryptoView';
 import { aggregateThresholdSignature, groupMul, messageDigest, partialThresholdSignature, polynomialShare, roundDigest } from '../cryptoPrimitives';
 import { thresholdSignaturePhases, type ShareHolder, type ThresholdState } from './model';
 import { traceLinesForThresholdSignature } from './trace';
 
 /**
- * createInitialThresholdSignatureState 创建 3-of-5 门限签名场景。
+ * createInitialThresholdSignatureState 根据参数创建门限签名场景。
  */
-export function createInitialThresholdSignatureState(_params: SimInitParams, _seed: number): ThresholdState {
-  const secret = 23;
-  const polynomial = [7, 11];
-  const digest = messageDigest('threshold-signature', 'committee release', 1);
-  const holders = ['A', 'B', 'C', 'D', 'E'].map<ShareHolder>((label, index) => {
+export function createInitialThresholdSignatureState(params: SimInitParams, _seed: number): ThresholdState {
+  const labels = stringArrayParam(params, 'holders', ['A', 'B', 'C', 'D', 'E'], 3, 16, 24);
+  const threshold = integerParam(params, 'threshold', 3, 2, labels.length);
+  const secret = integerParam(params, 'secret', 23, 1, 1_000_000);
+  const polynomial = integerArrayParam(params, 'polynomial', [7, 11], Math.max(1, threshold - 1), Math.max(1, threshold - 1), 1, 1_000_000);
+  const digest = messageDigest('threshold-signature', stringParam(params, 'message', 'committee release', 96), integerParam(params, 'round', 1, 0, 1_000_000));
+  const holders = labels.map<ShareHolder>((label, index) => {
     const x = index + 1;
     const shareValue = polynomialShare(secret, polynomial, x);
     return { id: `share-${x}`, label: `签名者 ${label}`, role: 'share-holder', status: 'idle', value: `x=${x}`, share: roundDigest('threshold-share', `${x}:${shareValue}`, 10), x, shareValue, signed: false, faulty: false };
   });
-  return finalizeThresholdSignatureState({ tick: 0, phase: thresholdSignaturePhases[0].label, phaseIndex: 0, threshold: 3, messageDigest: digest, groupPublicKey: groupMul(secret), polynomial, aggregateSignature: '', holders, messages: [], aggregateValid: false, lastTransition: 'split', explanation: explainThresholdPhase(0), metrics: {}, checkpointValues: {} });
+  return finalizeThresholdSignatureState({ tick: 0, phase: thresholdSignaturePhases[0].label, phaseIndex: 0, threshold, messageDigest: digest, groupPublicKey: groupMul(secret), polynomial, aggregateSignature: '', holders, messages: [], aggregateValid: false, lastTransition: 'split', explanation: explainThresholdPhase(0), metrics: {}, checkpointValues: {} });
 }
 
 /**
@@ -107,7 +110,8 @@ function verifyAggregate(state: ThresholdState): ThresholdState {
  * markFaultyShare 标记一个已签名份额为故障。
  */
 function markFaultyShare(state: ThresholdState): ThresholdState {
-  return { ...state, phaseIndex: 5, lastTransition: 'exclude', aggregateValid: false, holders: state.holders.map((holder, index) => (index === 1 ? { ...holder, faulty: true, signed: false, partialSignature: roundDigest('faulty-threshold-share', holder.share, 12) } : holder)) };
+  const targetId = state.selectedElementId ?? state.holders.find((holder) => holder.signed)?.id ?? state.holders[0]?.id;
+  return { ...state, phaseIndex: 5, lastTransition: 'exclude', aggregateValid: false, holders: state.holders.map((holder) => (holder.id === targetId ? { ...holder, faulty: true, signed: false, partialSignature: roundDigest('faulty-threshold-share', holder.share, 12) } : holder)) };
 }
 
 /**

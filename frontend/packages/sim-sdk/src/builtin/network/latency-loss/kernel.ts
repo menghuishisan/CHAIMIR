@@ -2,16 +2,21 @@
 
 import type { CheckpointResult, ReducerContext, SimEvent, SimInitParams } from '../../../types';
 import { deterministicId } from '../../../runtime/deterministic';
+import { indexFromSeed, integerParam } from '../../initParams';
 import { processNetworkMessage, refreshNetworkMessages, type NetworkMessageView } from '../networkView';
 import { latencyLossPhases, type LatencyLossState, type Packet } from './model';
 import { traceLinesForLatencyLoss } from './trace';
 
 /**
- * createInitialLatencyLossState 创建四个待发送包和初始拥塞窗口。
+ * createInitialLatencyLossState 创建待发送包和初始拥塞窗口。
  */
-export function createInitialLatencyLossState(_params: SimInitParams, _seed: number): LatencyLossState {
-  const packets = [1, 2, 3, 4].map<Packet>((seq) => ({ id: `packet-${seq}`, seq, sent: false, delivered: false, acked: false, dropped: false, retry: 0, latencyMs: 0, timeoutAt: 0 }));
-  return finalizeLatencyLossState({ tick: 0, phase: latencyLossPhases[0].label, phaseIndex: 0, packets, messages: [], congestionWindow: 2, slowStartThreshold: 3, samples: [{ x: 0, coverage: 0, risk: 10, latency: 0 }], lossInjected: false, lastTransition: 'queue', explanation: explainLatencyLossPhase(0), metrics: {}, checkpointValues: {} });
+export function createInitialLatencyLossState(params: SimInitParams, seed: number): LatencyLossState {
+  const packetCount = integerParam(params, 'packetCount', 4, 3, 16);
+  const congestionWindow = integerParam(params, 'congestionWindow', 2, 1, Math.min(8, packetCount));
+  const slowStartThreshold = integerParam(params, 'slowStartThreshold', Math.max(2, congestionWindow + 1), 1, packetCount);
+  const lossSeq = integerParam(params, 'lossSeq', indexFromSeed(seed, packetCount) + 1, 1, packetCount);
+  const packets = Array.from({ length: packetCount }, (_, index) => index + 1).map<Packet>((seq) => ({ id: `packet-${seq}`, seq, sent: false, delivered: false, acked: false, dropped: false, retry: 0, latencyMs: 0, timeoutAt: 0 }));
+  return finalizeLatencyLossState({ tick: 0, phase: latencyLossPhases[0].label, phaseIndex: 0, packets, messages: [], congestionWindow, slowStartThreshold, lossSeq, samples: [{ x: 0, coverage: 0, risk: 10, latency: 0 }], lossInjected: false, lastTransition: 'queue', explanation: explainLatencyLossPhase(0), metrics: {}, checkpointValues: {} });
 }
 
 /**
@@ -29,6 +34,9 @@ export function reduceLatencyLossEvent(state: LatencyLossState, event: SimEvent,
  * advanceLatencyLoss 推进可靠传输阶段。
  */
 export function advanceLatencyLoss(state: LatencyLossState, event: SimEvent): LatencyLossState {
+  if (state.phaseIndex === 4 && deliveredCount(state) < state.packets.length) {
+    return recoverWindow({ ...state, tick: event.source === 'tick' ? state.tick + 1 : state.tick });
+  }
   const phaseIndex = Math.min(latencyLossPhases.length - 1, state.phaseIndex + 1);
   const next = { ...state, phaseIndex, tick: event.source === 'tick' ? state.tick + 1 : state.tick, lastTransition: latencyLossPhases[phaseIndex].id };
   if (phaseIndex === 1) return sendWindow(next);
@@ -87,7 +95,11 @@ function sendWindow(state: LatencyLossState): LatencyLossState {
  * injectLoss 注入丢包并收缩窗口。
  */
 function injectLoss(state: LatencyLossState): LatencyLossState {
-  return { ...state, lastTransition: 'loss', lossInjected: true, congestionWindow: 1, slowStartThreshold: Math.max(1, Math.floor(state.congestionWindow / 2)), packets: state.packets.map((packet) => (packet.seq === 2 ? { ...packet, delivered: false, acked: false, dropped: true } : packet)), messages: state.messages.concat(message(2, '丢包', state.tick, true, '包超时未确认,被标记为丢失。')) };
+  const target = state.packets.find((packet) => packet.seq === state.lossSeq) ?? state.packets.find((packet) => packet.sent) ?? state.packets[0];
+  if (!target) {
+    return state;
+  }
+  return { ...state, lastTransition: 'loss', lossInjected: true, congestionWindow: 1, slowStartThreshold: Math.max(1, Math.floor(state.congestionWindow / 2)), packets: state.packets.map((packet) => (packet.seq === target.seq ? { ...packet, sent: true, delivered: false, acked: false, dropped: true, timeoutAt: Math.max(packet.timeoutAt, state.tick + 1) } : packet)), messages: state.messages.concat(message(target.seq, '丢包', state.tick, true, '包超时未确认,被标记为丢失。')) };
 }
 
 /**
@@ -110,7 +122,7 @@ function retransmitLost(state: LatencyLossState): LatencyLossState {
 function recoverWindow(state: LatencyLossState): LatencyLossState {
   const allOk = deliveredCount(state) === state.packets.length;
   const nextWindow = allOk ? state.congestionWindow + 1 : Math.max(2, state.congestionWindow + 1);
-  return sendRemainingAfterBackoff({ ...state, lastTransition: 'backoff', congestionWindow: Math.min(4, nextWindow) });
+  return sendRemainingAfterBackoff({ ...state, lastTransition: 'backoff', congestionWindow: Math.min(state.packets.length, nextWindow) });
 }
 
 /**

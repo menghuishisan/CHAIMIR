@@ -1,9 +1,9 @@
 // 本文件把 Merkle Tree 状态转换为树、矩阵和流程三种语义可视化。
 
 import type { MatrixCell, TreeNode, ViewSpec } from '../../../types';
-import { fnv1aHex } from '../../../runtime/deterministic';
 import { matrixPattern, pipelinePattern, treePattern } from '../../packageTools';
 import { matrixCells, pipelineSteps } from '../dataView';
+import { merkleStructureParentHash } from '../dataPrimitives';
 import { merkleTreePhases, type MerkleTreeState } from './model';
 
 /**
@@ -17,9 +17,24 @@ export function renderMerkleTreeView(state: MerkleTreeState): ViewSpec {
  * treeRoot 构造树形数据。
  */
 function treeRoot(state: MerkleTreeState): TreeNode {
-  const leftHash = fnv1aHex(`${state.items[0].hash}:${state.items[1].hash}`, 12);
-  const rightHash = fnv1aHex(`${state.items[2].hash}:${state.items[3].hash}`, 12);
-  return { id: 'mtree-root', label: '根', hash: state.rootHash, children: [{ id: 'mtree-left', label: '左父', hash: leftHash, children: state.items.slice(0, 2).map((item) => ({ id: item.id, label: item.label, hash: item.hash })) }, { id: 'mtree-right', label: '右父', hash: rightHash, children: state.items.slice(2).map((item) => ({ id: item.id, label: item.label, hash: item.hash })) }] };
+  let level = state.items.map<TreeNode>((item) => ({ id: item.id, label: item.label, hash: item.hash }));
+  let depth = 0;
+  while (level.length > 1) {
+    const padded = level.length % 2 === 0 ? level : level.concat({ ...level[level.length - 1], id: `${level[level.length - 1].id}-dup-l${depth}`, label: `${level[level.length - 1].label} 复制` });
+    const next: TreeNode[] = [];
+    for (let index = 0; index < padded.length; index += 2) {
+      const nextLength = Math.ceil(padded.length / 2);
+      next.push({
+        id: nextLength === 1 ? 'mtree-root' : `mtree-root-level-${depth + 1}-${index / 2}`,
+        label: nextLength === 1 ? '根' : `第 ${depth + 1} 层节点 ${index / 2 + 1}`,
+        hash: merkleStructureParentHash(padded[index].hash, padded[index + 1].hash),
+        children: [padded[index], padded[index + 1]],
+      });
+    }
+    level = next;
+    depth += 1;
+  }
+  return level[0] ?? { id: 'mtree-root', label: '根', hash: state.rootHash };
 }
 
 /**

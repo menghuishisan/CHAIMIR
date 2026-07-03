@@ -5,6 +5,7 @@ import type { SimState } from '../../../types';
 export interface BridgeState extends SimState {
   phaseIndex: number;
   proofHash: string;
+  canonicalProofHash: string;
   lightClientSynced: boolean;
   minted: boolean;
   redeemed: boolean;

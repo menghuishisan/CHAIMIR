@@ -11,7 +11,7 @@ import { labelHotStuffReplica } from './kernel';
  */
 export function renderHotStuffView(state: HotStuffState): ViewSpec {
   return {
-    summary: `视图 ${state.view},领导者 ${labelHotStuffReplica(state, state.leaderId)},high QC ${state.highQcBlock},锁定块 ${state.lockedBlock},提交块 ${state.committedBlock ?? '未提交'}。`,
+    summary: `视图 ${state.view},领导者 ${labelHotStuffReplica(state, state.leaderId)},High QC ${state.highQcBlock},锁定块 ${state.lockedBlock},提交块 ${state.committedBlock ?? '未提交'}。`,
     patterns: [
       chainPattern('hotstuff-chain', 'HotStuff QC 链', hotstuffBlocks(state.blocks), [], 'main'),
       graphPattern('hotstuff-graph', 'HotStuff 副本网络', replicaNodes(state), graphEdges(state.messages), 'side'),

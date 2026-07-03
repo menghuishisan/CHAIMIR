@@ -110,14 +110,14 @@ export const pbftPhases: PbftPhaseDef[] = [
   {
     id: 'prepare-certificate',
     label: '准备证书',
-    effect: '已接受预准备的副本广播 PREPARE,并统计匹配摘要的 2f+1 票。',
-    reason: 'prepared 证书证明多数副本已经看见同一请求摘要,可阻断单个拜占庭主节点的双提议。',
+    effect: '已接受预准备的副本广播 PREPARE,并统计达到 BFT 法定人数的匹配摘要票。',
+    reason: 'prepared 证书证明足够副本已经看见同一请求摘要,可阻断单个拜占庭主节点的双提议。',
     detail: '收集准备票',
   },
   {
     id: 'commit-certificate',
     label: '提交证书',
-    effect: 'prepared 副本广播 COMMIT,达到 2f+1 后进入 committed-local。',
+    effect: 'prepared 副本广播 COMMIT,达到 BFT 法定人数后进入 committed-local。',
     reason: '提交证书把局部可执行性扩展为跨正确副本的一致提交承诺。',
     detail: '收集提交票',
   },
@@ -131,7 +131,7 @@ export const pbftPhases: PbftPhaseDef[] = [
   {
     id: 'stable-checkpoint',
     label: '稳定检查点',
-    effect: '副本对已执行序号广播 CHECKPOINT,达到 2f+1 后稳定检查点。',
+    effect: '副本对已执行序号广播 CHECKPOINT,达到 BFT 法定人数后稳定检查点。',
     reason: '稳定检查点用于日志截断,也为后续视图切换提供安全历史。',
     detail: '稳定检查点',
   },

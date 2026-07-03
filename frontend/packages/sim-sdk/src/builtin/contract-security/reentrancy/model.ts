@@ -10,6 +10,7 @@ export interface ReentrancyState extends SimState {
   attackerBalance: number;
   lockEnabled: boolean;
   reentered: boolean;
+  blockedReentry: boolean;
   actors: SecurityActor[];
   calls: SecurityCall[];
   lastTransition: string;

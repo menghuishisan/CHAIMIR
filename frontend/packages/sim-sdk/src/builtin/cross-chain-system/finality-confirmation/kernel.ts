@@ -1,14 +1,18 @@
 // 本文件实现源链确认数、最终性证明、重组风险检测和确认后释放内核。
 
 import type { CheckpointResult, ReducerContext, SimEvent, SimInitParams } from '../../../types';
+import { integerParam } from '../../initParams';
 import { finalityPhases, type FinalityState } from './model';
 import { traceLinesForFinality } from './trace';
 
 /**
  * createInitialFinalityState 创建最终性确认状态。
  */
-export function createInitialFinalityState(_params: SimInitParams, _seed: number): FinalityState {
-  return finalizeFinalityState({ tick: 0, phase: finalityPhases[0].label, phaseIndex: 0, confirmations: 0, requiredConfirmations: 6, finalityProof: false, reorgDetected: false, released: false, lastTransition: 'observe', explanation: explain(0), metrics: {}, checkpointValues: {} });
+export function createInitialFinalityState(params: SimInitParams, _seed: number): FinalityState {
+  const requiredConfirmations = integerParam(params, 'requiredConfirmations', 6, 1, 256);
+  const confirmations = integerParam(params, 'confirmations', 0, 0, requiredConfirmations);
+  const confirmationStep = integerParam(params, 'confirmationStep', 1, 1, requiredConfirmations);
+  return finalizeFinalityState({ tick: 0, phase: finalityPhases[0].label, phaseIndex: 0, confirmations, requiredConfirmations, confirmationStep, finalityProof: confirmations >= requiredConfirmations, reorgDetected: false, released: false, lastTransition: 'observe', explanation: explain(0), metrics: {}, checkpointValues: {} });
 }
 
 /**
@@ -25,10 +29,16 @@ export function reduceFinalityEvent(state: FinalityState, event: SimEvent, _cont
  * advanceFinality 增加确认数并推进最终性状态。
  */
 export function advanceFinality(state: FinalityState, event: SimEvent): FinalityState {
+  const tick = event.source === 'tick' ? state.tick + 1 : state.tick;
+  if (!state.finalityProof && state.phaseIndex >= 1) {
+    const confirmations = Math.min(state.requiredConfirmations, state.confirmations + state.confirmationStep);
+    const finalityProof = confirmations >= state.requiredConfirmations;
+    return { ...state, phaseIndex: finalityProof ? 2 : 1, tick, confirmations, finalityProof, lastTransition: finalityProof ? 'prove' : 'wait', released: false };
+  }
   const phaseIndex = Math.min(finalityPhases.length - 1, state.phaseIndex + 1);
-  const confirmations = Math.min(state.requiredConfirmations, state.confirmations + 2);
+  const confirmations = phaseIndex === 1 ? Math.min(state.requiredConfirmations, state.confirmations + state.confirmationStep) : state.confirmations;
   const finalityProof = confirmations >= state.requiredConfirmations;
-  return { ...state, phaseIndex, tick: event.source === 'tick' ? state.tick + 1 : state.tick, confirmations, finalityProof, lastTransition: finalityPhases[phaseIndex].id, released: phaseIndex >= 4 && finalityProof && !state.reorgDetected };
+  return { ...state, phaseIndex, tick, confirmations, finalityProof, lastTransition: finalityPhases[phaseIndex].id, released: phaseIndex >= 4 && finalityProof && !state.reorgDetected };
 }
 
 /**

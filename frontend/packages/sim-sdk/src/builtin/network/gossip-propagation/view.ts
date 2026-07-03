@@ -11,7 +11,7 @@ import type { GossipState } from './model';
  */
 export function renderGossipView(state: GossipState): ViewSpec {
   return {
-    summary: `覆盖率 ${coverage(state)}%,fanout ${state.fanout},轮次 ${state.round},重复消息 ${state.peers.reduce((sum, peer) => sum + peer.duplicateCount, 0)}。`,
+    summary: `覆盖率 ${coverage(state)}%,扇出 ${state.fanout},轮次 ${state.round},重复消息 ${state.peers.reduce((sum, peer) => sum + peer.duplicateCount, 0)}。`,
     patterns: [
       graphPattern('gossip-graph', 'Gossip 传播拓扑', graphNodes(state.peers), graphEdges(state.messages), 'main'),
       matrixPattern('gossip-matrix', '节点接收状态', state.peers.map((peer) => peer.label), ['收到', '重复', '污染'], gossipCells(state), 'side'),

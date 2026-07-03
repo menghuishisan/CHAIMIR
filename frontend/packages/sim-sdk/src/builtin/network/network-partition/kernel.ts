@@ -2,22 +2,20 @@
 
 import type { CheckpointResult, ReducerContext, SimEvent, SimInitParams } from '../../../types';
 import { deterministicId } from '../../../runtime/deterministic';
+import { integerParam } from '../../initParams';
 import { processNetworkMessage, refreshNetworkMessages, type NetworkMessageView } from '../networkView';
 import { partitionPhases, type PartitionLink, type PartitionNode, type PartitionState } from './model';
 import { traceLinesForPartition } from './trace';
 
 /**
- * createInitialPartitionState 创建左右两区拓扑和跨区割边。
+ * createInitialPartitionState 根据参数创建左右两区拓扑和跨区割边。
  */
-export function createInitialPartitionState(_params: SimInitParams, _seed: number): PartitionState {
-  const nodes = ['A', 'B', 'C', 'D', 'E', 'F'].map<PartitionNode>((label, index) => ({ id: `part-${label.toLowerCase()}`, label: `节点 ${label}`, role: 'partition-node', status: 'idle', value: index < 3 ? '左区' : '右区', group: index < 3 ? 'left' : 'right', reachable: true, syncedVersion: 1, localWrites: 0 }));
-  const links: PartitionLink[] = [
-    { id: 'link-a-b', from: 'part-a', to: 'part-b', crossRegion: false, cut: false },
-    { id: 'link-b-c', from: 'part-b', to: 'part-c', crossRegion: false, cut: false },
-    { id: 'link-c-d', from: 'part-c', to: 'part-d', crossRegion: true, cut: false },
-    { id: 'link-d-e', from: 'part-d', to: 'part-e', crossRegion: false, cut: false },
-    { id: 'link-e-f', from: 'part-e', to: 'part-f', crossRegion: false, cut: false },
-  ];
+export function createInitialPartitionState(params: SimInitParams, _seed: number): PartitionState {
+  const nodeCount = integerParam(params, 'nodeCount', 6, 4, 12);
+  const leftCount = integerParam(params, 'leftCount', Math.ceil(nodeCount / 2), 2, nodeCount - 2);
+  const initialVersion = integerParam(params, 'initialVersion', 1, 1, 1000);
+  const nodes = Array.from({ length: nodeCount }, (_, index): PartitionNode => ({ id: `part-${String.fromCharCode(97 + index)}`, label: `节点 ${String.fromCharCode(65 + index)}`, role: 'partition-node', status: 'idle', value: index < leftCount ? '左区' : '右区', group: index < leftCount ? 'left' : 'right', reachable: true, syncedVersion: initialVersion, localWrites: 0 }));
+  const links = createPartitionLinks(nodes, leftCount);
   return finalizePartitionState({ tick: 0, phase: partitionPhases[0].label, phaseIndex: 0, partitionActive: false, nodes, links, messages: [], samples: [{ x: 0, coverage: 100, risk: 8, latency: 12 }], lastTransition: 'topology', explanation: explainPartitionPhase(0), metrics: {}, checkpointValues: {} });
 }
 
@@ -101,6 +99,17 @@ function healPartition(state: PartitionState): PartitionState {
 function mergePartition(state: PartitionState): PartitionState {
   const targetVersion = Math.max(...state.nodes.map((node) => node.syncedVersion));
   return { ...state, lastTransition: 'merge', nodes: state.nodes.map((node) => ({ ...node, syncedVersion: targetVersion })) };
+}
+
+/**
+ * createPartitionLinks 构造线性拓扑,左右分区交界处唯一链路标记为割边。
+ */
+function createPartitionLinks(nodes: PartitionNode[], leftCount: number): PartitionLink[] {
+  const links: PartitionLink[] = [];
+  for (let index = 0; index < nodes.length - 1; index += 1) {
+    links.push({ id: `link-${nodes[index].id}-${nodes[index + 1].id}`, from: nodes[index].id, to: nodes[index + 1].id, crossRegion: index === leftCount - 1, cut: false });
+  }
+  return links;
 }
 
 /**

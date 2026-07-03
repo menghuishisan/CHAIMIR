@@ -15,6 +15,8 @@ export interface RaftNode {
   lastLogTerm: number;
   matchIndex: number;
   nextIndex: number;
+  commitIndex: number;
+  appliedIndex: number;
   partitioned: boolean;
 }
 

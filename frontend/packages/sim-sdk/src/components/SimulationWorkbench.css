@@ -253,6 +253,17 @@
   cursor: pointer;
 }
 
+.sim-question__options button:hover,
+.sim-question__options button:focus-visible,
+.sim-question__options button.is-selected {
+  border-color: var(--color-on-dark-accent);
+  box-shadow: 0 0 0 0.125rem color-mix(in srgb, var(--color-on-dark-accent) 28%, transparent);
+}
+
+.sim-question__options button.is-selected {
+  background: var(--color-dark-elevated);
+}
+
 .sim-interaction-card {
   display: grid;
   gap: var(--space-3);
@@ -464,19 +475,51 @@
 }
 
 @media (max-width: 64rem) {
-  .sim-workbench {
-    position: static;
-    min-height: 100dvh;
-  }
-
   .sim-workbench__layout {
     grid-template-columns: 1fr;
+    grid-auto-rows: max-content;
+    overflow: auto;
+  }
+
+  .sim-workbench__stage {
+    order: 1;
+  }
+
+  .sim-workbench__panel--left {
+    order: 2;
+  }
+
+  .sim-workbench__panel--right {
+    order: 3;
   }
 
   .sim-workbench__panel--left,
   .sim-workbench__panel--right {
     border: 0;
     border-bottom: 0.0625rem solid var(--color-dark-border);
+    overflow: visible;
+  }
+}
+
+@media (max-width: 40rem) {
+  .sim-workbench__bar,
+  .sim-workbench__controls {
+    align-items: flex-start;
+    padding: var(--space-3);
+  }
+
+  .sim-workbench__bar {
+    flex-direction: column;
+  }
+
+  .sim-workbench__status,
+  .sim-control-field {
+    flex-wrap: wrap;
+  }
+
+  .sim-workbench__panel,
+  .sim-workbench__stage {
+    padding: var(--space-3);
   }
 }
 

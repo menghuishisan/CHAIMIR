@@ -9,7 +9,7 @@ import type { OracleState } from './model';
  * renderOracleView 基于内核状态生成预言机风险可视化。
  */
 export function renderOracleView(state: OracleState): ViewSpec {
-  return { summary: `现货价 ${state.spotPrice},TWAP ${state.twapPrice},参考价 ${state.referencePrice}。`, patterns: [graphPattern('oracle-graph', '价格源与借贷合约', graphNodes(state.actors), graphEdges(state.calls), 'main'), matrixPattern('oracle-matrix', '价格检查', ['现货价', 'TWAP', '多源中位数'], ['价格', '状态'], oracleCells(state), 'side'), chartPattern('oracle-chart', '价格偏离', [{ label: '价格', points: [{ x: 0, y: state.referencePrice }, { x: 1, y: state.spotPrice }, { x: 2, y: state.twapPrice }] }], 'price', 'bottom')] };
+  return { summary: `现货价 ${state.spotPrice},TWAP ${state.twapPrice},参考价 ${state.referencePrice}。`, patterns: [graphPattern('oracle-graph', '价格源与借贷合约', graphNodes(state.actors), graphEdges(state.calls), 'main'), matrixPattern('oracle-matrix', '价格检查', ['现货价', 'TWAP', '多源中位数'], ['价格', '状态'], oracleCells(state), 'side'), chartPattern('oracle-chart', '价格偏离', [{ label: '价格', points: [{ x: 0, y: state.referencePrice }, { x: 1, y: state.spotPrice }, { x: 2, y: state.twapPrice }] }], '价格', 'bottom')] };
 }
 
 /**

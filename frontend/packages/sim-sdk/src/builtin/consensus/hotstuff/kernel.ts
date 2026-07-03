@@ -2,26 +2,31 @@
 
 import type { CheckpointResult, ReducerContext, SimEvent, SimInitParams } from '../../../types';
 import { deterministicId } from '../../../runtime/deterministic';
+import { indexFromSeed, integerParam } from '../../initParams';
 import { bftQuorumThreshold, canonicalConsensusDigest, makeVoteCertificate } from '../consensusPrimitives';
 import { processViewMessage, refreshViewMessages, type ViewMessage } from '../consensusView';
 import { hotstuffPhases, type HotStuffBlock, type HotStuffState } from './model';
 import { traceLinesForHotStuff } from './trace';
 
 /**
- * createInitialHotStuffState 创建四副本 HotStuff 场景和 genesis/highQC 初始块。
+ * createInitialHotStuffState 根据参数创建 HotStuff 副本集合和 genesis/highQC 初始块。
  */
-export function createInitialHotStuffState(_params: SimInitParams, _seed: number): HotStuffState {
-  const genesis = makeHotStuffBlock('hs-genesis', undefined, 0, 'hotstuff-r1', true, true);
+export function createInitialHotStuffState(params: SimInitParams, seed: number): HotStuffState {
+  const replicaCount = integerParam(params, 'replicaCount', 4, 4, 10);
+  const view = integerParam(params, 'view', 1, 1, 1000);
+  const leaderIndex = integerParam(params, 'leaderIndex', indexFromSeed(seed, replicaCount) + 1, 1, replicaCount) - 1;
+  const leaderId = `hotstuff-r${leaderIndex + 1}`;
+  const genesis = makeHotStuffBlock('hs-genesis', undefined, 0, leaderId, true, true);
   return finalizeHotStuffState({
     tick: 0,
     phase: hotstuffPhases[0].label,
     phaseIndex: 0,
-    view: 1,
-    leaderId: 'hotstuff-r1',
+    view,
+    leaderId,
     highQcBlock: genesis.id,
     proposalId: genesis.id,
     lockedBlock: genesis.id,
-    replicas: ['R1', 'R2', 'R3', 'R4'].map((label, index) => ({ id: `hotstuff-r${index + 1}`, label, leader: index === 0, voted: false, lockedBlock: genesis.id, timeout: false, faulty: false })),
+    replicas: Array.from({ length: replicaCount }, (_, index) => ({ id: `hotstuff-r${index + 1}`, label: `R${index + 1}`, leader: index === leaderIndex, voted: false, lockedBlock: genesis.id, timeout: false, faulty: false })),
     blocks: [genesis],
     votes: {},
     messages: [],
@@ -92,7 +97,7 @@ export function finalizeHotStuffState(state: HotStuffState): HotStuffState {
 }
 
 /**
- * collectNewView 收集最高 QC 并发给当前领导者。
+ * collectNewView 收集 High QC 并发给当前领导者。
  */
 function collectNewView(state: HotStuffState): HotStuffState {
   return { ...state, lastTransition: 'new-view', messages: state.messages.concat(state.replicas.map((replica) => message(state.tick, replica.id, state.leaderId, 'NewView'))) };
@@ -120,7 +125,7 @@ function vote(state: HotStuffState): HotStuffState {
 }
 
 /**
- * formQc 聚合 2f+1 投票并更新 high QC 与锁定块。
+ * formQc 聚合法定人数投票并更新 high QC 与锁定块。
  */
 function formQc(state: HotStuffState): HotStuffState {
   const signers = Object.entries(state.votes)
@@ -150,7 +155,7 @@ function injectLeaderTimeout(state: HotStuffState): HotStuffState {
 }
 
 /**
- * advanceView 执行 pacemaker 换主并继承最高 QC。
+ * advanceView 执行 pacemaker 换主并继承 High QC。
  */
 function advanceView(state: HotStuffState): HotStuffState {
   const nextLeaderIndex = (state.replicas.findIndex((replica) => replica.id === state.leaderId) + 1) % state.replicas.length;
@@ -198,7 +203,7 @@ export function voteCount(state: HotStuffState): number {
 }
 
 /**
- * quorum 计算 HotStuff 2f+1 法定人数。
+ * quorum 计算 HotStuff BFT 法定人数。
  */
 export function quorum(state: HotStuffState): number {
   return bftQuorumThreshold(state.replicas.length);

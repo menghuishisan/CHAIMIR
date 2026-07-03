@@ -21,6 +21,7 @@ export interface LatencyLossState extends SimState {
   messages: NetworkMessageView[];
   congestionWindow: number;
   slowStartThreshold: number;
+  lossSeq: number;
   samples: Array<{ x: number; coverage: number; risk: number; latency: number }>;
   lossInjected: boolean;
   lastTransition: string;

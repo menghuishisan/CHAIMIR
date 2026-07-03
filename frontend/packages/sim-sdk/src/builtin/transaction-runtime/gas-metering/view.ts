@@ -9,7 +9,7 @@ import { gasPhases, type GasState } from './model';
  * renderGasView 基于内核状态生成 Gas 计量可视化。
  */
 export function renderGasView(state: GasState): ViewSpec {
-  return { summary: `gasLimit ${state.gasLimit},gasUsed ${state.gasUsed},退款 ${state.refund},状态 ${state.outOfGas ? '失败' : '运行中'}。`, patterns: [matrixPattern('gas-matrix', '指令 gas 表', state.steps.map((step) => step.op), ['成本', '执行', '状态'], gasCells(state), 'main'), pipelinePattern('gas-pipeline', 'Gas 执行流程', pipelineSteps(gasPhases, state.phaseIndex, state.outOfGas), gasPhases[state.phaseIndex].id, 'bottom')] };
+  return { summary: `Gas 上限 ${state.gasLimit},已用 ${state.gasUsed},退款 ${state.refund},状态 ${state.outOfGas ? '失败' : '运行中'}。`, patterns: [matrixPattern('gas-matrix', '指令 Gas 表', state.steps.map((step) => step.op), ['成本', '执行', '状态'], gasCells(state), 'main'), pipelinePattern('gas-pipeline', 'Gas 执行流程', pipelineSteps(gasPhases, state.phaseIndex, state.outOfGas), gasPhases[state.phaseIndex].id, 'bottom')] };
 }
 
 /**

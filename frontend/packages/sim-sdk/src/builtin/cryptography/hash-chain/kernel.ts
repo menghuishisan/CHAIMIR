@@ -1,6 +1,7 @@
 // 本文件实现哈希链输入规范化、摘要计算、父哈希串联、篡改检测和链式修复内核。
 
 import type { CheckpointResult, ReducerContext, SimEvent, SimInitParams } from '../../../types';
+import { stringArrayParam } from '../../initParams';
 import { hashChainDigest } from '../cryptoPrimitives';
 import { hashChainPhases, type HashChainState, type HashRecord } from './model';
 import { traceLinesForHashChain } from './trace';
@@ -8,8 +9,8 @@ import { traceLinesForHashChain } from './trace';
 /**
  * createInitialHashChainState 构造四条链式记录并完成初始摘要。
  */
-export function createInitialHashChainState(_params: SimInitParams, _seed: number): HashChainState {
-  const payloads = ['Alice 转账 5', 'Bob 质押 3', 'Carol 投票 A', 'Dave 提交证明'];
+export function createInitialHashChainState(params: SimInitParams, _seed: number): HashChainState {
+  const payloads = stringArrayParam(params, 'payloads', ['Alice 转账 5', 'Bob 质押 3', 'Carol 投票 A', 'Dave 提交证明'], 2, 24, 96);
   const records = payloads.reduce<HashRecord[]>((list, payload, index) => {
     const parentHash = index === 0 ? 'genesis' : list[index - 1].hash;
     const hash = digest(index + 1, payload, parentHash);
@@ -78,18 +79,17 @@ export function finalizeHashChainState(state: HashChainState): HashChainState {
 }
 
 /**
- * tamperHashRecord 修改选中或默认记录的载荷,制造哈希不匹配。
+ * tamperHashRecord 修改选中或默认记录的载荷但保留原摘要,制造可被校验阶段发现的哈希不匹配。
  */
 function tamperHashRecord(state: HashChainState): HashChainState {
-  const targetId = state.selectedRecordId ?? 'hash-record-2';
+  const targetId = state.selectedRecordId ?? state.records[1]?.id ?? state.records[0]?.id;
   return verifyHashChain({
     ...state,
     repaired: false,
     lastTransition: 'tamper',
     records: state.records.map((record) => {
       if (record.id !== targetId) return record;
-      const payload = `${record.payload} 已改动`;
-      return { ...record, payload, hash: digest(record.index, payload, record.parentHash), tampered: true };
+      return { ...record, payload: `${record.payload} 已改动`, tampered: true };
     }),
   });
 }

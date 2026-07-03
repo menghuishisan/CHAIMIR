@@ -5,11 +5,14 @@ import type { SecurityActor, SecurityCall } from '../securityView';
 
 export interface FlashLoanState extends SimState {
   phaseIndex: number;
+  baseLoanAmount: number;
+  basePoolPrice: number;
   loanAmount: number;
   poolPrice: number;
   protocolDebt: number;
   attackerProfit: number;
   limitEnabled: boolean;
+  containedAttempt: boolean;
   actors: SecurityActor[];
   calls: SecurityCall[];
   lastTransition: string;

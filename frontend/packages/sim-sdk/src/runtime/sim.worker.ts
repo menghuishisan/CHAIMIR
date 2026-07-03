@@ -1,8 +1,10 @@
 // 本文件在 Web Worker 中执行仿真包状态机,主线程不得直接运行第三方仿真代码。
 
 import type {
+  FieldDef,
   CheckpointDescriptor,
   JsonObject,
+  JsonValue,
   NarrativeStepDescriptor,
   ReducerContext,
   RuntimeSnapshot,
@@ -54,7 +56,7 @@ async function handleRequest(request: WorkerRequest): Promise<void> {
         return;
       case 'inject':
         ensureReady();
-        applyEvent({ type: request.eventType, source: 'user', payload: request.payload, target: request.target });
+        applyEvent(userEventInput(request.eventType, request.payload, request.target));
         postSnapshot(request.requestId, events[events.length - 1]);
         return;
       case 'back':
@@ -85,6 +87,17 @@ async function init(request: Extract<WorkerRequest, { type: 'init' }>): Promise<
   descriptor = describePackage(simPackage);
   resetState();
   postToMain({ type: 'ready', requestId: request.requestId, descriptor, snapshot: snapshot() });
+}
+
+/**
+ * userEventInput 统一构造用户事件:reducer 读顶层 target,操作日志按后端契约在 payload.target 中持久化。
+ */
+function userEventInput(eventType: string, payload: JsonObject, target?: string): Omit<SimEvent, 'seq' | 'atTick'> {
+  const nextPayload: JsonObject = { ...(payload ?? {}) };
+  if (target) {
+    nextPayload.target = target;
+  }
+  return { type: eventType, source: 'user', payload: nextPayload, target };
 }
 
 /**
@@ -132,6 +145,7 @@ function applyEvent(eventInput: Omit<SimEvent, 'seq' | 'atTick'>): void {
   const pkg = readyPackage();
   const previousState = currentState();
   enforceEventLimit(eventInput);
+  enforceEventSchema(pkg, eventInput);
   const event: SimEvent = { ...eventInput, atTick: tick, seq };
   const context: ReducerContext = {
     seed,
@@ -145,6 +159,108 @@ function applyEvent(eventInput: Omit<SimEvent, 'seq' | 'atTick'>): void {
     tick += 1;
   }
   events.push(event);
+}
+
+/**
+ * enforceEventSchema 复用仿真包交互声明校验事件,避免前端可运行但后端动作日志拒绝。
+ */
+function enforceEventSchema(pkg: SimPackage, eventInput: Omit<SimEvent, 'seq' | 'atTick'>): void {
+  if (eventInput.source !== 'user') {
+    return;
+  }
+  const interaction = pkg.interactions.find((item) => item.emits === eventInput.type);
+  if (!interaction) {
+    throw new Error('sim interaction event not declared');
+  }
+  if ((interaction.target === 'element' || interaction.kind === 'select-element') && !eventInput.target) {
+    throw new Error('sim interaction target required');
+  }
+  if (interaction.target !== 'element' && interaction.kind !== 'select-element' && eventInput.target) {
+    throw new Error('sim interaction target not allowed');
+  }
+  const payload = eventInput.payload ?? {};
+  const allowed = new Map((interaction.params ?? []).map((field) => [field.name, field]));
+  for (const key of Object.keys(payload)) {
+    if (platformPayloadValueMatchesInteraction(key, payload[key], interaction)) {
+      continue;
+    }
+    const field = allowed.get(key);
+    if (!field || !payloadValueMatchesField(payload[key], field)) {
+      throw new Error('sim interaction payload invalid');
+    }
+  }
+  for (const field of interaction.params ?? []) {
+    if (field.required && payload[field.name] === undefined) {
+      throw new Error('sim interaction required payload missing');
+    }
+  }
+}
+
+/**
+ * platformPayloadValueMatchesInteraction 校验平台通用控件自动生成的固定字段,算法字段仍必须走 params。
+ */
+function platformPayloadValueMatchesInteraction(key: string, value: JsonValue | undefined, interaction: SimPackage['interactions'][number]): boolean {
+  if (key === 'target') {
+    return (interaction.target === 'element' || interaction.kind === 'select-element') && typeof value === 'string' && value.trim().length > 0 && value.length <= 128;
+  }
+  if (interaction.kind === 'hold' && key === 'active') {
+    return typeof value === 'boolean';
+  }
+  if (interaction.kind !== 'drag') {
+    return false;
+  }
+  if (key === 'phase') {
+    return value === 'start' || value === 'move' || value === 'end';
+  }
+  if (key === 'startX' || key === 'startY' || key === 'currentX' || key === 'currentY' || key === 'deltaX' || key === 'deltaY') {
+    return typeof value === 'number' && Number.isFinite(value);
+  }
+  return false;
+}
+
+/**
+ * payloadValueMatchesField 校验用户载荷是否落在字段声明范围内。
+ */
+function payloadValueMatchesField(value: JsonValue | undefined, field: FieldDef): boolean {
+  if (value === undefined) {
+    return !field.required;
+  }
+  if (field.type === 'number' || field.type === 'range') {
+    if (typeof value !== 'number' || !Number.isFinite(value)) {
+      return false;
+    }
+    if (field.min !== undefined && value < field.min) {
+      return false;
+    }
+    if (field.max !== undefined && value > field.max) {
+      return false;
+    }
+    return true;
+  }
+  if (field.type === 'boolean') {
+    return typeof value === 'boolean';
+  }
+  if (field.type === 'string') {
+    return typeof value === 'string' && value.trim().length > 0 && value.length <= 512;
+  }
+  if (field.type === 'select') {
+    const valueText = scalarPayloadString(value);
+    return valueText !== undefined && Boolean(field.options?.some((option) => scalarPayloadString(option.value) === valueText));
+  }
+  return false;
+}
+
+/**
+ * scalarPayloadString 复刻后端公开标量枚举比较规则,保证 select 参数前后端一致。
+ */
+function scalarPayloadString(value: JsonValue | undefined): string | undefined {
+  if (typeof value === 'string') {
+    return value.trim() || undefined;
+  }
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return String(value);
+  }
+  return undefined;
 }
 
 /**

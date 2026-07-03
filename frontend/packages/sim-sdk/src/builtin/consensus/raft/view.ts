@@ -15,7 +15,7 @@ export function renderRaftView(state: RaftState): ViewSpec {
     patterns: [
       graphPattern('raft-graph', 'Raft 集群角色', raftNodes(state), graphEdges(state.messages), 'main'),
       lanePattern('raft-lane', 'Raft RPC 时序', state.nodes.map((node) => node.label), laneMessages(state.messages, (id) => labelRaftNode(state, id)), state.tick, 'side'),
-      matrixPattern('raft-matrix', '日志复制矩阵', state.nodes.map((node) => node.label), ['任期', '角色', '日志', 'nextIndex', '提交'], raftCells(state), 'bottom'),
+      matrixPattern('raft-matrix', '日志复制矩阵', state.nodes.map((node) => node.label), ['任期', '角色', '日志', 'nextIndex', '提交/应用'], raftCells(state), 'bottom'),
     ],
   };
 }
@@ -33,7 +33,7 @@ function raftNodes(state: RaftState): ViewNode[] {
 function raftCells(state: RaftState): MatrixCell[][] {
   return voteCells(
     state.nodes.map((node) => node.label),
-    ['任期', '角色', '日志', 'nextIndex', '提交'],
+    ['任期', '角色', '日志', 'nextIndex', '提交/应用'],
     (row, column) => {
       const node = state.nodes.find((item) => item.label === row);
       if (!node) return { label: '无', status: 'empty' };
@@ -42,7 +42,7 @@ function raftCells(state: RaftState): MatrixCell[][] {
       if (column === '角色') return { label: node.role === 'leader' ? '领导' : node.role === 'candidate' ? '竞选' : '跟随', status: node.role === 'leader' ? 'yes' : 'pending' };
       if (column === '日志') return { label: `${node.logLength}/${node.lastLogTerm}`, status: node.logLength === state.log.length ? 'yes' : 'pending' };
       if (column === 'nextIndex') return { label: String(node.nextIndex), status: node.nextIndex === state.log.length + 1 ? 'yes' : 'pending' };
-      return { label: state.commitIndex > 0 ? '已知' : '等待', status: state.commitIndex > 0 ? 'yes' : 'empty' };
+      return { label: `${node.commitIndex}/${node.appliedIndex}`, status: node.appliedIndex >= state.commitIndex && state.commitIndex > 0 ? 'yes' : 'empty' };
     }
   );
 }

@@ -249,6 +249,9 @@ func validateActionAgainstSchema(schema InteractionSchema, req ReportActionReque
 		if !payloadKeyPattern.MatchString(strings.TrimSpace(key)) {
 			return apperr.ErrSimActionSeqInvalid
 		}
+		if platformPayloadValueMatchesInteraction(key, payload[key], event) {
+			continue
+		}
 		param, ok := event.ParamIndex[key]
 		if !ok || !payloadValueMatchesParam(payload[key], param) {
 			return apperr.ErrSimActionSeqInvalid
@@ -262,6 +265,23 @@ func validateActionAgainstSchema(schema InteractionSchema, req ReportActionReque
 		}
 	}
 	return nil
+}
+
+// platformPayloadValueMatchesInteraction 校验通用交互控件自动生成的固定字段,其余字段仍必须来自 manifest params。
+func platformPayloadValueMatchesInteraction(key string, value any, event InteractionEventSchema) bool {
+	switch key {
+	case "active":
+		_, ok := value.(bool)
+		return event.Kind == "hold" && ok
+	case "phase":
+		text, ok := stringFromPayload(value)
+		return event.Kind == "drag" && ok && (text == "start" || text == "move" || text == "end")
+	case "startX", "startY", "currentX", "currentY", "deltaX", "deltaY":
+		_, ok := jsonx.Float64FromAnyOK(value)
+		return event.Kind == "drag" && ok
+	default:
+		return false
+	}
 }
 
 // payloadValueMatchesParam 校验字段值与 manifest FieldDef 一致。
@@ -286,8 +306,8 @@ func payloadValueMatchesParam(value any, param InteractionParam) bool {
 		_, ok := value.(bool)
 		return ok
 	case "select":
-		text, ok := stringFromPayload(value)
-		if !ok {
+		text := strings.TrimSpace(jsonx.StringFromAny(value))
+		if text == "" {
 			return false
 		}
 		for _, option := range param.Options {

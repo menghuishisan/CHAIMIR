@@ -2,36 +2,37 @@
 
 import type { CheckpointResult, ReducerContext, SimEvent, SimInitParams } from '../../../types';
 import { deterministicId } from '../../../runtime/deterministic';
+import { indexFromSeed, integerParam, weightedShares } from '../../initParams';
 import { aggregateConsensusSignatures, canonicalConsensusDigest, weightedTwoThirdsThreshold } from '../consensusPrimitives';
 import { processViewMessage, refreshViewMessages, type ViewMessage } from '../consensusView';
 import { posPhases, type PosAttestation, type PosSlashing, type PosState, type PosValidator } from './model';
 import { traceLinesForPos } from './trace';
 
 /**
- * createInitialPosState 创建 PoS 验证者集合和初始 epoch。
+ * createInitialPosState 根据参数创建 PoS 验证者集合、权益分布和初始 epoch。
  */
-export function createInitialPosState(_params: SimInitParams, _seed: number): PosState {
-  const validators: PosValidator[] = [
-    { id: 'pos-v1', label: '验证者 A', stake: 32, proposer: false, attested: false, slashed: false, online: true },
-    { id: 'pos-v2', label: '验证者 B', stake: 28, proposer: false, attested: false, slashed: false, online: true },
-    { id: 'pos-v3', label: '验证者 C', stake: 24, proposer: false, attested: false, slashed: false, online: true },
-    { id: 'pos-v4', label: '验证者 D', stake: 16, proposer: false, attested: false, slashed: false, online: true },
-  ];
+export function createInitialPosState(params: SimInitParams, seed: number): PosState {
+  const validatorCount = integerParam(params, 'validatorCount', 4, 4, 12);
+  const epoch = integerParam(params, 'epoch', 8, 2, 10000);
+  const slot = integerParam(params, 'slot', epoch * 8 + indexFromSeed(seed, 8), 1, 1000000);
+  const offlineCount = integerParam(params, 'offlineCount', 0, 0, Math.max(0, validatorCount - 3));
+  const stakes = weightedShares(params, 'stakes', [32, 28, 24, 16], validatorCount, 100);
+  const validators = stakes.map<PosValidator>((stake, index) => ({ id: `pos-v${index + 1}`, label: `验证者 ${String.fromCharCode(65 + index)}`, stake, proposer: false, attested: false, slashed: false, online: index >= offlineCount }));
   return finalizePosState({
     tick: 0,
     phase: posPhases[0].label,
     phaseIndex: 0,
-    slot: 64,
-    epoch: 8,
-    randomness: canonicalConsensusDigest('pos-randao', { epoch: 8, slot: 64 }, 16),
-    blockRoot: canonicalConsensusDigest('pos-block', { epoch: 8, slot: 64 }, 16),
+    slot,
+    epoch,
+    randomness: canonicalConsensusDigest('pos-randao', { epoch, slot }, 16),
+    blockRoot: canonicalConsensusDigest('pos-block', { epoch, slot }, 16),
     committee: [],
     validators,
     attestations: [],
     slashings: [],
     messages: [],
-    justifiedEpoch: 7,
-    finalizedEpoch: 6,
+    justifiedEpoch: epoch - 1,
+    finalizedEpoch: Math.max(0, epoch - 2),
     samples: [{ x: 0, quorum: 67, risk: 10, finality: 25 }],
     lastTransition: posPhases[0].id,
     explanation: explainPosPhase(0),
@@ -79,7 +80,7 @@ export function posTwoThirdsFinality(state: PosState): CheckpointResult {
  */
 export function posSlashingHandled(state: PosState): CheckpointResult {
   const achieved = Boolean(state.checkpointValues.slashingHandled);
-  return { achieved, answer: { slashed: state.validators.filter((validator) => validator.slashed).map((validator) => validator.label) }, explanation: achieved ? '冲突见证已被罚没或当前没有冲突。' : '存在未处理的双签冲突。' };
+  return { achieved, answer: { slashed: state.validators.filter((validator) => validator.slashed).map((validator) => validator.label), evidence: state.slashings.map((slashing) => slashing.reason) }, explanation: achieved ? '冲突见证已被罚没或当前没有冲突。' : '存在未处理的冲突见证。' };
 }
 
 /**
@@ -89,6 +90,7 @@ export function finalizePosState(state: PosState): PosState {
   const risk = state.conflictingRoot ? 78 : state.validators.some((validator) => validator.slashed) ? 22 : 10;
   const finality = Math.min(100, Math.max(0, (state.finalizedEpoch - 5) * 25));
   const samples = state.samples.concat({ x: state.tick + state.phaseIndex, quorum: Math.round((attestedStake(state) / Math.max(1, activeStake(state))) * 100), risk, finality }).slice(-24);
+  const unresolvedSlashings = state.slashings.filter((slashing) => !state.validators.some((validator) => validator.id === slashing.validatorId && validator.slashed));
   return {
     ...state,
     phase: posPhases[state.phaseIndex].label,
@@ -96,8 +98,8 @@ export function finalizePosState(state: PosState): PosState {
     messages: refreshViewMessages(state.messages, state.tick, (message) => message.detail ?? `${message.label} 在验证者集合中传播。`),
     samples,
     metrics: { result: state.finalizedEpoch >= state.epoch - 1 ? '检查点已最终确定' : '等待权益见证', risk, attestedStake: attestedStake(state), activeStake: activeStake(state), finalizedEpoch: state.finalizedEpoch },
-    checkpointValues: { twoThirds: attestedStake(state) >= twoThirds(activeStake(state)), finalized: state.finalizedEpoch >= state.epoch - 1, slashingHandled: !state.conflictingRoot && state.slashings.length === 0 },
-    _trace: { triggeredLines: traceLinesForPos(state.lastTransition), variables: { slot: state.slot, epoch: state.epoch, blockRoot: state.blockRoot, committeeSize: state.committee.length, aggregateSignature: state.aggregateSignature ?? '' }, executionPath: `pos/${state.lastTransition}` },
+    checkpointValues: { twoThirds: attestedStake(state) >= twoThirds(activeStake(state)), finalized: state.finalizedEpoch >= state.epoch - 1, slashingHandled: !state.conflictingRoot && unresolvedSlashings.length === 0 },
+    _trace: { triggeredLines: traceLinesForPos(state.lastTransition), variables: { slot: state.slot, epoch: state.epoch, blockRoot: state.blockRoot, committeeSize: state.committee.length, aggregateSignature: state.aggregateSignature ?? '', slashingCount: state.slashings.length }, executionPath: `pos/${state.lastTransition}` },
   };
 }
 
@@ -166,7 +168,7 @@ function injectEquivocation(state: PosState): PosState {
 function slashEquivocators(state: PosState): PosState {
   const slashings = detectSlashings(state.attestations);
   const offenders = new Set(slashings.map((slashing) => slashing.validatorId));
-  return { ...state, tick: state.tick + 1, lastTransition: 'slash', slashings: [], validators: state.validators.map((validator) => (offenders.has(validator.id) ? { ...validator, slashed: true, online: false, proposer: false, attested: false } : validator)), conflictingRoot: offenders.size > 0 ? undefined : state.conflictingRoot };
+  return { ...state, tick: state.tick + 1, lastTransition: 'slash', slashings, validators: state.validators.map((validator) => (offenders.has(validator.id) ? { ...validator, slashed: true, online: false, proposer: false, attested: false } : validator)), conflictingRoot: offenders.size > 0 ? undefined : state.conflictingRoot };
 }
 
 /**

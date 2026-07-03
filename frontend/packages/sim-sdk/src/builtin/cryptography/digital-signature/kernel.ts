@@ -2,6 +2,7 @@
 
 import type { CheckpointResult, ReducerContext, SimEvent, SimInitParams } from '../../../types';
 import { deterministicId } from '../../../runtime/deterministic';
+import { integerParam, stringParam } from '../../initParams';
 import type { CryptoMessage } from '../cryptoView';
 import { derivePrivateKey, derivePublicKey, messageDigest, recoverRegisteredPublicKey, signDigest } from '../cryptoPrimitives';
 import { digitalSignaturePhases, type SignatureState } from './model';
@@ -12,11 +13,12 @@ const SIGNATURE_DOMAIN = 'chaimir-demo-transfer';
 /**
  * createInitialDigitalSignatureState 创建签名者、验证者和重放者场景。
  */
-export function createInitialDigitalSignatureState(_params: SimInitParams, _seed: number): SignatureState {
-  const signerKey = derivePrivateKey('signer-private');
+export function createInitialDigitalSignatureState(params: SimInitParams, _seed: number): SignatureState {
+  const signerSeed = stringParam(params, 'signerSeed', 'signer-private', 64);
+  const signerKey = derivePrivateKey(signerSeed);
   const verifierKey = derivePublicKey(signerKey);
-  const messageText = '授权转账 10';
-  const nonce = 7;
+  const messageText = stringParam(params, 'message', '授权转账 10', 96);
+  const nonce = integerParam(params, 'nonce', 7, 0, 1_000_000);
   const digest = messageDigest(SIGNATURE_DOMAIN, messageText, nonce);
   const signature = signDigest(digest, signerKey);
   const keyRegistry = { [verifierKey]: signerKey };

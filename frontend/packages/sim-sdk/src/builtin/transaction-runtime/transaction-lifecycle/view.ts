@@ -9,7 +9,7 @@ import type { TxLifecycleState } from './model';
  * renderTxLifecycleView 基于内核状态生成交易生命周期可视化。
  */
 export function renderTxLifecycleView(state: TxLifecycleState): ViewSpec {
-  return { summary: `交易 ${state.txHash.slice(0, 8)},mempool ${state.inMempool ? '已进入' : '未进入'},回执 ${state.receipt || '等待'}。`, patterns: [graphPattern('tx-life-graph', '交易生命周期参与方', graphNodes(state.actors), graphEdges(state.messages), 'main'), lanePattern('tx-life-lane', '交易时序', state.actors.map((actor) => actor.label), laneMessages(state.messages, (id) => labelOf(state, id)), state.tick, 'side'), matrixPattern('tx-life-matrix', '阶段状态', ['签名', '交易池', '区块', '执行', '回执'], ['结果'], txCells(state), 'bottom')] };
+  return { summary: `交易 ${state.txHash.slice(0, 8)},交易池${state.inMempool ? '已接收' : '未接收'},回执 ${state.receipt || '等待'}。`, patterns: [graphPattern('tx-life-graph', '交易生命周期参与方', graphNodes(state.actors), graphEdges(state.messages), 'main'), lanePattern('tx-life-lane', '交易时序', state.actors.map((actor) => actor.label), laneMessages(state.messages, (id) => labelOf(state, id)), state.tick, 'side'), matrixPattern('tx-life-matrix', '阶段状态', ['签名', '交易池', '区块', '执行', '回执'], ['结果'], txCells(state), 'bottom')] };
 }
 
 /**

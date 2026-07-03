@@ -53,6 +53,7 @@ export const posCodeTrace: CodeTraceDef = {
     { name: 'epoch', extract: 'state.epoch', format: 'number' },
     { name: 'blockRoot', extract: 'state.blockRoot', format: 'hex' },
     { name: 'aggregateSignature', extract: 'state.aggregateSignature', format: 'hex' },
+    { name: 'slashingCount', extract: 'state.slashings.length', format: 'number' },
   ],
 };
 

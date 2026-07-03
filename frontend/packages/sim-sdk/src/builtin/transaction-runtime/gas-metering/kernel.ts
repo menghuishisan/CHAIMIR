@@ -1,14 +1,18 @@
 // 本文件实现 gasLimit、逐指令扣费、out-of-gas、退款和费用结算内核。
 
 import type { CheckpointResult, ReducerContext, SimEvent, SimInitParams } from '../../../types';
+import { integerArrayParam, integerParam, stringArrayParam } from '../../initParams';
 import { gasPhases, type GasState } from './model';
 import { traceLinesForGas } from './trace';
 
 /**
  * createInitialGasState 创建指令序列和初始 gasLimit。
  */
-export function createInitialGasState(_params: SimInitParams, _seed: number): GasState {
-  return finalizeGasState({ tick: 0, phase: gasPhases[0].label, phaseIndex: 0, gasLimit: 70, gasUsed: 0, refund: 0, outOfGas: false, steps: [{ op: 'SLOAD', cost: 20, executed: false, failed: false }, { op: 'CALL', cost: 30, executed: false, failed: false }, { op: 'SSTORE_CLEAR', cost: 15, executed: false, failed: false }], lastTransition: 'limit', explanation: explain(0), metrics: {}, checkpointValues: {} });
+export function createInitialGasState(params: SimInitParams, _seed: number): GasState {
+  const ops = stringArrayParam(params, 'ops', ['SLOAD', 'CALL', 'SSTORE_CLEAR'], 2, 12, 32);
+  const costs = integerArrayParam(params, 'costs', [20, 30, 15], ops.length, ops.length, 1, 1_000_000);
+  const defaultLimit = costs.reduce((sum, cost) => sum + cost, 0) + 5;
+  return finalizeGasState({ tick: 0, phase: gasPhases[0].label, phaseIndex: 0, gasLimit: integerParam(params, 'gasLimit', defaultLimit, 1, 10_000_000), gasUsed: 0, refund: 0, outOfGas: false, steps: ops.map((op, index) => ({ op, cost: costs[index] ?? costs[0] ?? 1, executed: false, failed: false })), lastTransition: 'limit', explanation: explain(0), metrics: {}, checkpointValues: {} });
 }
 
 /**
@@ -41,27 +45,47 @@ export function gasSettled(state: GasState): CheckpointResult {
  * executeStep 执行下一条指令并扣减 gas。
  */
 function executeStep(state: GasState, event: SimEvent): GasState {
-  const phaseIndex = Math.min(gasPhases.length - 1, state.phaseIndex + 1);
+  const tick = event.source === 'tick' ? state.tick + 1 : state.tick;
+  if (state.outOfGas) {
+    return { ...state, phaseIndex: 2, tick, lastTransition: 'oog' };
+  }
   const nextIndex = state.steps.findIndex((step) => !step.executed);
-  if (nextIndex < 0) return { ...state, phaseIndex, tick: event.source === 'tick' ? state.tick + 1 : state.tick, refund: 10, lastTransition: gasPhases[phaseIndex].id };
+  if (nextIndex < 0 && state.phaseIndex < 3) {
+    return { ...state, phaseIndex: 3, tick, refund: refundFor(state), lastTransition: 'refund' };
+  }
+  if (nextIndex < 0) {
+    return { ...state, phaseIndex: 4, tick, lastTransition: 'settle' };
+  }
   const step = state.steps[nextIndex];
   const gasUsed = state.gasUsed + step.cost;
   const outOfGas = gasUsed > state.gasLimit;
-  return { ...state, phaseIndex, tick: event.source === 'tick' ? state.tick + 1 : state.tick, gasUsed, outOfGas, lastTransition: outOfGas ? 'oog' : gasPhases[phaseIndex].id, steps: state.steps.map((item, index) => (index === nextIndex ? { ...item, executed: !outOfGas, failed: outOfGas } : item)) };
+  return { ...state, phaseIndex: outOfGas ? 2 : 1, tick, gasUsed, outOfGas, lastTransition: outOfGas ? 'oog' : 'meter', steps: state.steps.map((item, index) => (index === nextIndex ? { ...item, executed: !outOfGas, failed: outOfGas } : item)) };
 }
 
 /**
  * lowerLimit 降低 gasLimit 制造执行失败。
  */
 function lowerLimit(state: GasState): GasState {
-  return { ...state, phaseIndex: 2, lastTransition: 'oog', gasLimit: 35 };
+  const executedCost = state.steps.filter((step) => step.executed).reduce((sum, step) => sum + step.cost, 0);
+  const nextCost = state.steps.find((step) => !step.executed)?.cost ?? state.steps[state.steps.length - 1]?.cost ?? 1;
+  return { ...state, phaseIndex: 2, lastTransition: 'oog', gasLimit: Math.max(1, executedCost + nextCost - 1) };
 }
 
 /**
  * raiseLimit 提高 gasLimit 并清理失败状态。
  */
 function raiseLimit(state: GasState): GasState {
-  return { ...state, phaseIndex: 4, lastTransition: 'settle', gasLimit: 90, outOfGas: false, refund: 10, steps: state.steps.map((step) => ({ ...step, executed: true, failed: false })) };
+  const totalCost = state.steps.reduce((sum, step) => sum + step.cost, 0);
+  const executedCost = state.steps.filter((step) => step.executed).reduce((sum, step) => sum + step.cost, 0);
+  return { ...state, phaseIndex: 1, lastTransition: 'meter', gasLimit: Math.max(state.gasLimit, totalCost + refundFor(state)), gasUsed: executedCost, outOfGas: false, refund: 0, steps: state.steps.map((step) => ({ ...step, failed: false })) };
+}
+
+/**
+ * refundFor 根据释放存储类指令计算有限退款。
+ */
+function refundFor(state: GasState): number {
+  const refundable = state.steps.filter((step) => step.op.includes('CLEAR') || step.op.includes('REFUND')).reduce((sum, step) => sum + Math.floor(step.cost / 2), 0);
+  return Math.min(Math.floor(state.gasUsed / 5), refundable);
 }
 
 /**

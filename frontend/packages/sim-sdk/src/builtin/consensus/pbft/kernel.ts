@@ -2,32 +2,41 @@
 
 import type { CheckpointResult, ReducerContext, SimEvent, SimInitParams } from '../../../types';
 import { deterministicId } from '../../../runtime/deterministic';
+import { indexFromSeed, integerParam, stringParam } from '../../initParams';
 import { bftQuorumThreshold, canonicalConsensusDigest, makeVoteCertificate } from '../consensusPrimitives';
 import { pbftPhases, type PbftCertificate, type PbftMessage, type PbftMessageType, type PbftReplica, type PbftState, type PbftTransition, type PbftViewChange } from './model';
 
-const replicaLabels = ['R1', 'R2', 'R3', 'R4'];
-
 /**
- * createInitialPbftState 构造 f=1 的四副本 PBFT 场景,请求摘要由确定性哈希生成。
+ * createInitialPbftState 根据初始参数构造完整 PBFT 副本集合、请求摘要和水位窗口。
  */
-export function createInitialPbftState(_params: SimInitParams, _seed: number): PbftState {
-  const digest = canonicalConsensusDigest('pbft-request', { amount: 10, from: 'alice', to: 'bob' }, 12);
-  const replicas = replicaLabels.map<PbftReplica>((label, index) => ({
+export function createInitialPbftState(params: SimInitParams, seed: number): PbftState {
+  const replicaCount = integerParam(params, 'replicaCount', 4, 4, 10);
+  const f = Math.max(1, Math.floor((replicaCount - 1) / 3));
+  const from = stringParam(params, 'from', 'alice', 40);
+  const to = stringParam(params, 'to', 'bob', 40);
+  const amount = integerParam(params, 'amount', 10, 1, 1000000);
+  const sequence = integerParam(params, 'sequence', 40 + indexFromSeed(seed, 17), 1, 1000000);
+  const watermarkLow = integerParam(params, 'watermarkLow', 0, 0, sequence - 1);
+  const watermarkHigh = integerParam(params, 'watermarkHigh', Math.max(sequence + 20, 100), sequence, 1000000);
+  const clientId = stringParam(params, 'clientId', 'pbft-client', 64);
+  const operation = `transfer(${from},${to},${amount})`;
+  const digest = canonicalConsensusDigest('pbft-request', { amount, from, sequence, to }, 12);
+  const replicas = Array.from({ length: replicaCount }, (_, index): PbftReplica => ({
     id: `pbft-r${index + 1}`,
-    label,
+    label: `R${index + 1}`,
     index,
     primary: index === 0,
     faulty: false,
-    watermarks: { low: 0, high: 100 },
+    watermarks: { low: watermarkLow, high: watermarkHigh },
   }));
   return finalizePbftState({
     tick: 0,
     phase: pbftPhases[0].label,
     view: 0,
-    sequence: 42,
-    f: 1,
+    sequence,
+    f,
     phaseIndex: 0,
-    request: { clientId: 'pbft-client', operation: 'transfer(alice,bob,10)', digest, resultDigest: canonicalConsensusDigest('pbft-result', { digest, status: 'ok' }, 12) },
+    request: { clientId, operation, digest, resultDigest: canonicalConsensusDigest('pbft-result', { digest, status: 'ok' }, 12) },
     replicas,
     messages: [],
     certificates: [],
@@ -98,7 +107,7 @@ export function injectByzantinePrimary(state: PbftState, context: ReducerContext
 }
 
 /**
- * performViewChange 收集 VIEW-CHANGE 证据并由新主节点安装 NEW-VIEW。
+ * performViewChange 收集达到法定人数的 VIEW-CHANGE 证据并由新主节点安装 NEW-VIEW。
  */
 export function performViewChange(state: PbftState): PbftState {
   const tick = state.tick + 1;
@@ -132,7 +141,7 @@ export function performViewChange(state: PbftState): PbftState {
     to: 'all',
     digest: safestDigest(state, viewChanges),
     accepted: viewChanges.length >= quorum(state),
-    detail: '新主节点聚合 2f+1 个视图切换消息并继承安全摘要。',
+    detail: '新主节点聚合法定人数视图切换消息并继承安全摘要。',
   });
   return {
     ...state,
@@ -153,7 +162,7 @@ export function performViewChange(state: PbftState): PbftState {
 }
 
 /**
- * pbftSafetyCheckpoint 检查 committed-local 是否满足 2f+1 匹配提交票。
+ * pbftSafetyCheckpoint 检查 committed-local 是否满足法定人数匹配提交票。
  */
 export function pbftSafetyCheckpoint(state: PbftState): CheckpointResult {
   const certificate = findCertificate(state, 'committed');
@@ -161,24 +170,24 @@ export function pbftSafetyCheckpoint(state: PbftState): CheckpointResult {
   return {
     achieved,
     answer: { commitSigners: certificate?.signers.length ?? 0, quorum: quorum(state), digest: state.request.digest },
-    explanation: achieved ? '提交证书达到 2f+1,正确副本不会为同一序号提交不同摘要。' : '提交证书尚未达到 2f+1,还不能执行请求。',
+    explanation: achieved ? '提交证书达到法定人数,正确副本不会为同一序号提交不同摘要。' : '提交证书尚未达到法定人数,还不能执行请求。',
   };
 }
 
 /**
- * pbftViewChangeCheckpoint 检查异常主节点是否已被 2f+1 视图切换消息替换。
+ * pbftViewChangeCheckpoint 检查异常主节点是否已被法定人数视图切换消息替换。
  */
 export function pbftViewChangeCheckpoint(state: PbftState): CheckpointResult {
   const achieved = state.viewChanges.length >= quorum(state) || !state.conflictingDigest;
   return {
     achieved,
     answer: { view: state.view, viewChangeMessages: state.viewChanges.length, quorum: quorum(state) },
-    explanation: state.viewChanges.length >= quorum(state) ? '视图切换消息达到 2f+1,新主节点已经安装安全视图。' : '当前还没有收集足够视图切换消息。',
+    explanation: state.viewChanges.length >= quorum(state) ? '视图切换消息达到法定人数,新主节点已经安装安全视图。' : '当前还没有收集足够视图切换消息。',
   };
 }
 
 /**
- * pbftCheckpointStability 检查稳定检查点是否由 2f+1 副本确认。
+ * pbftCheckpointStability 检查稳定检查点是否由法定人数副本确认。
  */
 export function pbftCheckpointStability(state: PbftState): CheckpointResult {
   const certificate = findCertificate(state, 'checkpoint');
@@ -186,7 +195,7 @@ export function pbftCheckpointStability(state: PbftState): CheckpointResult {
   return {
     achieved,
     answer: { checkpointSigners: certificate?.signers.length ?? 0, sequence: state.sequence },
-    explanation: achieved ? '稳定检查点达到 2f+1,日志可以安全截断。' : '检查点票数不足,日志仍需保留。',
+    explanation: achieved ? '稳定检查点达到法定人数,日志可以安全截断。' : '检查点票数不足,日志仍需保留。',
   };
 }
 
@@ -238,7 +247,7 @@ function broadcastPrePrepare(state: PbftState): PbftState {
 }
 
 /**
- * collectPrepareCertificate 广播准备票并把 2f+1 匹配票固化为 prepared 证书。
+ * collectPrepareCertificate 广播准备票并把达到 BFT 法定人数的匹配票固化为 prepared 证书。
  */
 function collectPrepareCertificate(state: PbftState): PbftState {
   const prepareSenders = state.replicas.filter((replica) => replica.primary || replica.acceptedPrePrepare === state.request.digest);
@@ -454,7 +463,7 @@ export function findCertificate(state: PbftState, type: PbftCertificate['type'])
 }
 
 /**
- * quorum 返回 PBFT 2f+1 法定人数。
+ * quorum 返回 PBFT 当前副本集下的 BFT 法定人数。
  */
 export function quorum(state: PbftState): number {
   return bftQuorumThreshold(state.replicas.length);

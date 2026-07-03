@@ -16,6 +16,9 @@ export interface UtxoState extends SimState {
   utxos: Utxo[];
   inputs: string[];
   outputs: Utxo[];
+  recipient: string;
+  payAmount: number;
+  fee: number;
   txValid: boolean;
   lastTransition: string;
 }

@@ -22,6 +22,8 @@
 }
 
 .sim-pattern__header small {
+  max-inline-size: min(18rem, 45vw);
+  overflow-wrap: anywhere;
   color: var(--color-dark-text-sub);
   font-family: var(--font-mono);
   font-size: var(--text-xs);
@@ -175,7 +177,7 @@
 
 .sim-chain-row {
   display: grid;
-  grid-template-columns: 4.25rem max-content;
+  grid-template-columns: minmax(3.75rem, 4.25rem) minmax(18rem, max-content);
   gap: var(--space-3);
   align-items: center;
 }
@@ -210,7 +212,7 @@
 .sim-chain__block {
   display: grid;
   gap: var(--space-1);
-  min-width: 6.75rem;
+  min-width: clamp(5.75rem, 18vw, 6.75rem);
   padding: var(--space-3);
   border: 0.0625rem solid var(--color-dark-border);
   border-radius: var(--radius-xs);
@@ -244,6 +246,7 @@
 
 .sim-chain__label {
   font-size: var(--text-sm);
+  overflow-wrap: anywhere;
 }
 
 .sim-chain__hash,
@@ -269,10 +272,12 @@
   display: grid;
   gap: var(--space-1);
   min-width: 7rem;
+  max-width: 12rem;
   padding: var(--space-2) var(--space-3);
   border: 0.0625rem solid var(--color-dark-border);
   border-radius: var(--radius-xs);
   text-align: center;
+  overflow-wrap: anywhere;
   cursor: pointer;
 }
 
@@ -284,6 +289,7 @@
   position: relative;
   display: flex;
   gap: var(--space-4);
+  min-width: max-content;
   padding-top: var(--space-4);
 }
 
@@ -311,6 +317,7 @@
 }
 
 .sim-matrix {
+  min-width: max-content;
   width: 100%;
   border-collapse: collapse;
   font-size: var(--text-sm);
@@ -321,6 +328,8 @@
   padding: var(--space-2);
   border: 0.0625rem solid var(--color-dark-border);
   text-align: center;
+  max-width: 14rem;
+  overflow-wrap: anywhere;
 }
 
 .sim-matrix__cell.is-yes {
@@ -425,7 +434,7 @@
 
 .sim-lane__row {
   display: grid;
-  grid-template-columns: 6rem minmax(34rem, 1fr);
+  grid-template-columns: minmax(4.5rem, 6rem) minmax(18rem, 1fr);
   gap: var(--space-3);
   align-items: center;
 }
@@ -447,7 +456,7 @@
   display: inline-flex;
   align-items: center;
   gap: var(--space-1);
-  max-width: 9rem;
+  max-width: clamp(6.5rem, 18vw, 9rem);
   padding: var(--space-1) var(--space-2);
   border: 0.0625rem solid var(--color-dark-border);
   border-radius: var(--radius-xs);
@@ -456,7 +465,36 @@
   cursor: pointer;
   transform: translateX(-50%);
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
   transition: inset-inline-start 180ms ease;
+}
+
+@media (max-width: 40rem) {
+  .sim-pattern__header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .sim-chain-row {
+    grid-template-columns: minmax(18rem, max-content);
+  }
+
+  .sim-chain-row__label {
+    text-align: left;
+  }
+
+  .sim-tree__children {
+    gap: var(--space-2);
+  }
+
+  .sim-lane__row {
+    grid-template-columns: minmax(3.75rem, 4.5rem) minmax(16rem, 1fr);
+  }
+
+  .sim-lane__message {
+    white-space: normal;
+  }
 }
 
 .sim-lane__message b {
