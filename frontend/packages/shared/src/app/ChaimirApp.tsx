@@ -4,7 +4,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { createApi } from '@chaimir/api-client'
 import type { ChaimirApi } from '@chaimir/api-client'
 import { AlertCircle, Bell, CheckCircle2, ChevronLeft, LogOut, Menu, PanelLeftClose, PanelLeftOpen, RefreshCw, Search } from 'lucide-react'
-import { Badge, Button, Card, CardBody, CardHeader, Empty, FormField, Input, Spinner, Stat, Table, Textarea } from '@chaimir/ui'
+import { Badge, Button, Card, CardBody, CardHeader, Empty, FormField, Input, Skeleton, Spinner, Stat, Table, Textarea } from '@chaimir/ui'
 import type { TableColumn } from '@chaimir/ui'
 import { clearSession, getAccessToken, getTraceId } from './storage'
 import { parseHashRoute, routeHref } from './router'
@@ -311,7 +311,7 @@ function RoutePage({
   }
 
   return (
-    <section className="chaimir-page" aria-labelledby="page-title">
+    <section className={`chaimir-page ${pageClassNames(app, route)}`} aria-labelledby="page-title">
       <PageHeading app={app} route={route} />
       {state.loading && <LoadingState />}
       {state.error && <ErrorState error={state.error} />}
@@ -348,6 +348,7 @@ function PageHeading({ app, route }: { app: AppDefinition; route: AppRoute }): R
  */
 function ResourceView({ result, onRefresh }: { result: ResourceResult; onRefresh: () => void }): React.ReactElement {
   const [operation, setOperation] = useState<OperationState>({ loading: false })
+  const hasActions = Boolean(result.actions && result.actions.length > 0)
   const columns: TableColumn<DataRow>[] = result.columns.map((column) => ({
     key: column.key,
     title: column.title,
@@ -368,19 +369,6 @@ function ResourceView({ result, onRefresh }: { result: ResourceResult; onRefresh
           ))}
         </div>
       )}
-      {result.actions && result.actions.length > 0 && (
-        <div className="chaimir-page__actions" aria-label="页面操作">
-          {result.actions.map((action) => (
-            <ActionCard
-              key={action.key}
-              action={action}
-              operation={operation}
-              setOperation={setOperation}
-              onRefresh={onRefresh}
-            />
-          ))}
-        </div>
-      )}
       {operation.message && (
         <div className="chaimir-operation is-success" role="status">
           <CheckCircle2 size={18} aria-hidden="true" />
@@ -393,13 +381,45 @@ function ResourceView({ result, onRefresh }: { result: ResourceResult; onRefresh
           <span>{operation.error.traceId ? `${operation.error.message} 如需帮助，请提供编号 ${operation.error.traceId}。` : operation.error.message}</span>
         </div>
       )}
-      <Table
-        columns={tableColumns}
-        rows={result.rows}
-        rowKey="id"
-        emptyTitle={result.emptyTitle}
-        emptyDescription={result.emptyDescription}
-      />
+      <div className={`chaimir-page__workspace ${hasActions ? 'has-actions' : ''}`}>
+        <section className="chaimir-resource-panel" aria-label="数据列表">
+          <div className="chaimir-resource-panel__head">
+            <div>
+              <span className="chaimir-resource-panel__eyebrow">本页数据</span>
+              <strong>数据列表</strong>
+              <span>{result.rows.length > 0 ? `当前显示 ${result.rows.length} 条记录` : result.emptyTitle}</span>
+            </div>
+            <Button type="button" variant="outline" size="sm" icon={<RefreshCw size={16} />} onClick={onRefresh}>刷新</Button>
+          </div>
+          <Table
+            columns={tableColumns}
+            rows={result.rows}
+            rowKey="id"
+            emptyTitle={result.emptyTitle}
+            emptyDescription={result.emptyDescription}
+          />
+        </section>
+        {result.actions && result.actions.length > 0 && (
+          <aside className="chaimir-action-rail" aria-label="页面操作">
+            <div className="chaimir-action-rail__head">
+              <span>可执行操作</span>
+              <p>按当前页面上下文提交，完成后自动刷新列表。</p>
+            </div>
+            <div className="chaimir-page__actions">
+              {result.actions.map((action, index) => (
+                <ActionCard
+                  key={action.key}
+                  action={action}
+                  index={index}
+                  operation={operation}
+                  setOperation={setOperation}
+                  onRefresh={onRefresh}
+                />
+              ))}
+            </div>
+          </aside>
+        )}
+      </div>
     </div>
   )
 }
@@ -409,11 +429,13 @@ function ResourceView({ result, onRefresh }: { result: ResourceResult; onRefresh
  */
 function ActionCard({
   action,
+  index,
   operation,
   setOperation,
   onRefresh,
 }: {
   action: PageAction
+  index?: number
   operation: OperationState
   setOperation: React.Dispatch<React.SetStateAction<OperationState>>
   onRefresh: () => void
@@ -437,9 +459,12 @@ function ActionCard({
   return (
     <Card className="chaimir-action-card">
       <CardHeader>
-        <div>
-          <strong>{action.label}</strong>
-          <p>{action.description}</p>
+        <div className="chaimir-action-card__head">
+          {typeof index === 'number' && <span aria-hidden="true">{String(index + 1).padStart(2, '0')}</span>}
+          <div>
+            <strong>{action.label}</strong>
+            <p>{action.description}</p>
+          </div>
         </div>
       </CardHeader>
       <CardBody>
@@ -567,18 +592,25 @@ function ImmersivePage({ app, route, state, onRefresh }: { app: AppDefinition; r
             {result.tools && result.tools.length > 0 && <WorkspaceTools tools={result.tools} />}
           </aside>
           <section className="chaimir-immersive__stage" aria-label="工作台主区域">
-            <div className="chaimir-immersive__terminal">
-              <span>工作台状态</span>
-              <strong>{result.title}</strong>
-              <p>{result.description}</p>
-              <dl>
-                {result.details.map((item) => (
-                  <div key={item.label}>
-                    <dt>{item.label}</dt>
-                    <dd>{item.value}</dd>
-                  </div>
-                ))}
-              </dl>
+            <div className="chaimir-immersive__stage-inner">
+              <div className="chaimir-immersive__process" aria-label="当前流程概览">
+                <span>读取状态</span>
+                <span>准备工具</span>
+                <span>执行与复盘</span>
+              </div>
+              <div className="chaimir-immersive__terminal">
+                <span>工作台状态</span>
+                <strong>{result.title}</strong>
+                <p>{result.description}</p>
+                <dl>
+                  {result.details.map((item) => (
+                    <div key={item.label}>
+                      <dt>{item.label}</dt>
+                      <dd>{item.value}</dd>
+                    </div>
+                  ))}
+                </dl>
+              </div>
             </div>
           </section>
           <aside className="chaimir-immersive__panel">
@@ -682,8 +714,25 @@ class AppErrorBoundary extends React.Component<{ children: React.ReactNode }, { 
  * LoadingState 使用统一加载态，避免页面空白。
  */
 function LoadingState({ onDark = false }: { onDark?: boolean }): React.ReactElement {
+  if (!onDark) {
+    return (
+      <div className="chaimir-loading" role="status" aria-live="polite">
+        <div className="chaimir-loading__stats" aria-hidden="true">
+          <Skeleton variant="block" height={92} />
+          <Skeleton variant="block" height={92} />
+          <Skeleton variant="block" height={92} />
+        </div>
+        <div className="chaimir-loading__body" aria-hidden="true">
+          <Skeleton variant="block" height={320} />
+          <Skeleton variant="block" height={220} />
+        </div>
+        <span className="sr-only">正在加载，请稍候</span>
+      </div>
+    )
+  }
+
   return (
-    <div className={`chaimir-state ${onDark ? 'is-on-dark' : ''}`} role="status" aria-live="polite">
+    <div className="chaimir-state is-on-dark" role="status" aria-live="polite">
       <Spinner size="lg" />
       <span>正在加载，请稍候</span>
     </div>
@@ -717,6 +766,24 @@ function metricDescription(tone: string | undefined): string | undefined {
   if (tone === 'danger') return '需要处理'
   if (tone === 'success') return '状态正常'
   return undefined
+}
+
+/**
+ * pageClassNames 将角色和功能分组转成稳定类名，用于全端一致的视觉分层。
+ */
+function pageClassNames(app: AppDefinition, route: AppRoute): string {
+  const role = `is-role-${sanitizeClassName(app.role)}`
+  const group = route.group ? `is-group-${sanitizeClassName(route.group)}` : 'is-group-default'
+  const path = `is-path-${sanitizeClassName(route.path)}`
+  return `${role} ${group} ${path}`
+}
+
+/**
+ * sanitizeClassName 仅保留 CSS 类名安全字符，避免业务文案进入选择器时破坏样式。
+ */
+function sanitizeClassName(value: string): string {
+  const normalized = value.trim().toLowerCase().replace(/[^a-z0-9\u4e00-\u9fa5]+/g, '-')
+  return normalized.replace(/^-+|-+$/g, '') || 'default'
 }
 
 function normalizeRoute(app: AppDefinition, parsed: ReturnType<typeof parseHashRoute>): { route: AppRoute; params: URLSearchParams } {

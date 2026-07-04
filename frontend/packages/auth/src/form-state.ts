@@ -65,6 +65,21 @@ export function numberOf(values: FormValues, key: string): number {
 }
 
 /**
+ * optionalNumberOf 将可选编号转换为数字；空值表示让后端按默认登录流程判断。
+ */
+export function optionalNumberOf(values: FormValues, key: string): number | undefined {
+  const value = values[key]?.trim()
+  if (!value) {
+    return undefined
+  }
+  const parsed = Number(value)
+  if (!Number.isFinite(parsed)) {
+    throw new Error('编号格式不正确，请检查后重试')
+  }
+  return parsed
+}
+
+/**
  * safeParseTenants 解析后端返回的学校候选，不影响主登录流程。
  */
 export function safeParseTenants(raw: string): Array<{ tenant_id: string; name: string; code: string }> {

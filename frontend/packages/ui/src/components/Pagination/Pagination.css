@@ -31,7 +31,7 @@
   color: var(--color-text);
   font-size: var(--text-sm);
   cursor: pointer;
-  transition: all var(--t-fast) var(--ease);
+  transition: background var(--t-fast) var(--ease), border-color var(--t-fast) var(--ease), color var(--t-fast) var(--ease), opacity var(--t-fast) var(--ease);
 }
 
 .chaimir-pagination__btn:hover:not(:disabled),

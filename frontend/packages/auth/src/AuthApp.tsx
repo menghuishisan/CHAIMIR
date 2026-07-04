@@ -59,7 +59,7 @@ export function AuthApp(): React.ReactElement {
         </div>
       </section>
       <section className="public-panel" aria-label="账号入口">
-        {page !== 'login' && page !== 'platform-login' && (
+        {page !== 'login' && (
           <a className="public-back" href="#login">
             <ArrowLeft size={16} aria-hidden="true" />
             返回登录

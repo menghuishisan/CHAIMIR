@@ -33,7 +33,7 @@
   display: inline-block;
   border-radius: var(--radius-full);
   background: var(--color-border-strong);
-  transition: all var(--t) var(--ease);
+  transition: background var(--t) var(--ease), opacity var(--t-fast) var(--ease);
   flex-shrink: 0;
 }
 
@@ -56,7 +56,7 @@
   background: var(--color-white);
   border-radius: var(--radius-full);
   box-shadow: 0 1px 3px var(--color-switch-thumb-shadow);
-  transition: all var(--t) var(--ease);
+  transition: inset-inline-start var(--t) var(--ease), left var(--t) var(--ease), box-shadow var(--t) var(--ease), transform var(--t-fast) var(--ease);
 }
 
 .chaimir-switch--sm .chaimir-switch__thumb {

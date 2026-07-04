@@ -63,8 +63,8 @@ export const platformAdminApp: AppDefinition = {
       load: async (api) => ({
         ...arrayResult(await api.admin.listTenants(), tenantColumns(), '暂无学校租户', '学校通过入驻审核后会在这里显示。'),
         actions: [
-          pageAction('update-tenant-status', '更新租户状态', '更新学校租户状态和到期时间。', [
-            textInput('tenant_id', '租户编号', true),
+          pageAction('update-tenant-status', '更新学校状态', '更新学校状态和到期时间。', [
+            textInput('tenant_id', '学校编号', true),
             numberInput('status', '状态', true),
             datetimeInput('expire_at', '到期时间'),
           ], async (values) => {
@@ -72,7 +72,7 @@ export const platformAdminApp: AppDefinition = {
               status: valueNumber(values, 'status'),
               expire_at: optionalText(values, 'expire_at'),
             })
-            return '租户状态已更新'
+            return '学校状态已更新'
           }),
           pageAction('read-identity-tenants', '读取租户原始列表', '从身份模块读取租户原始分页数据。', [], async () => {
             await api.identity.getTenants(defaultPageParams())
@@ -256,7 +256,7 @@ export const platformAdminApp: AppDefinition = {
             numberInput('type', '类型', true),
             textInput('executor_ref', '执行器引用', true),
             numberInput('runtime_required', '需要运行时', true),
-            numberInput('default_timeout_sec', '默认超时秒数', true),
+            numberInput('default_timeout_sec', '默认等待秒数', true),
             textareaInput('resource_spec', '资源规格', true),
             numberInput('status', '状态', true),
           ], async (values) => {
@@ -279,7 +279,7 @@ export const platformAdminApp: AppDefinition = {
             numberInput('type', '类型', true),
             textInput('executor_ref', '执行器引用', true),
             numberInput('runtime_required', '需要运行时', true),
-            numberInput('default_timeout_sec', '默认超时秒数', true),
+            numberInput('default_timeout_sec', '默认等待秒数', true),
             textareaInput('resource_spec', '资源规格', true),
             numberInput('status', '状态', true),
           ], async (values) => {
@@ -595,11 +595,11 @@ function platformEngineDeepRoutes(): AppDefinition['routes'] {
       ...objectResult(await api.sandbox.getQuota(), quotaColumns(), '沙箱配额'),
       actions: [
         pageAction('update-quota', '更新配额', '调整沙箱资源上限。', [
-          textInput('tenant_id', '租户编号', true),
+          textInput('tenant_id', '学校编号', true),
           numberInput('max_concurrent_sandbox', '并发沙箱上限', true),
           numberInput('max_cpu', 'CPU 上限', true),
           numberInput('max_memory_mb', '内存上限', true),
-          numberInput('idle_timeout_min', '空闲超时分钟', true),
+          numberInput('idle_timeout_min', '空闲等待分钟', true),
           numberInput('max_lifetime_min', '最长运行分钟', true),
           numberInput('max_keepalive_min', '保活分钟', true),
           numberInput('max_snapshot_retention_min', '快照保留分钟', true),

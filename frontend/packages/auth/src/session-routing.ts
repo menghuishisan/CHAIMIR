@@ -3,7 +3,7 @@
 import type { ChaimirApi, LoginResponse } from '@chaimir/api-client'
 import { readFrontendConfig, saveSession, saveStoredUser } from '@chaimir/shared'
 import type { FormValues, LoginMode } from './types'
-import { numberOf, valueOf } from './form-state'
+import { optionalNumberOf, valueOf } from './form-state'
 
 /**
  * loginByMode 将三种学校用户登录方式映射到后端已有接口。
@@ -20,13 +20,13 @@ export async function loginByMode(api: ChaimirApi, mode: LoginMode, values: Form
     return api.identity.loginSMS({
       phone: valueOf(values, 'phone'),
       code: valueOf(values, 'code'),
-      tenant_id: numberOf(values, 'tenant_id'),
+      tenant_id: optionalNumberOf(values, 'tenant_id'),
     })
   }
   return api.identity.loginPhone({
     phone: valueOf(values, 'phone'),
     password: valueOf(values, 'password'),
-    tenant_id: numberOf(values, 'tenant_id'),
+    tenant_id: optionalNumberOf(values, 'tenant_id'),
   })
 }
 

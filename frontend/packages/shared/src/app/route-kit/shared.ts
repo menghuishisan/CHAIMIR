@@ -84,7 +84,7 @@ export function sharedProfileRoute(): AppDefinition['routes'][number] {
         emptyTitle: '暂无会话',
         emptyDescription: '登录会话会在这里显示。',
         actions: [
-          pageAction('change-password', '修改密码', '修改当前账号密码，提交后由后端更新登录凭据。', [
+          pageAction('change-password', '修改密码', '修改当前账号密码，提交后更新登录凭据。', [
             passwordInput('old_password', '当前密码', true),
             passwordInput('new_password', '新密码', true),
           ], async (values) => {
@@ -134,7 +134,7 @@ export function sharedAnnouncementRoute(): AppDefinition['routes'][number] {
     load: async (api) => ({
       ...listResult(await api.notify.getAnnouncements(defaultPageParams()), announcementColumns(), '暂无公告', '有公告发布后会在这里显示。'),
       actions: [
-        pageAction('create-announcement', '发布系统公告', '发布平台或学校公告，范围由后端权限控制。', [
+        pageAction('create-announcement', '发布系统公告', '发布平台或学校公告，发布范围按当前账号权限生效。', [
           textInput('title', '公告标题', true),
           textareaInput('content', '公告内容', true),
           numberInput('scope', '公告范围', true),
@@ -177,7 +177,7 @@ export function simWorkspaceRoute(): AppDefinition['routes'][number] {
       if (code && version) {
         await api.sim.getBundleGrant(code, version)
       }
-      return workspaceInfo('仿真工作台', '仿真包加载授权由后端签发，前端只运行已发布或已审核通过的 bundle。', [
+      return workspaceInfo('仿真工作台', '仿真包加载授权由平台签发，页面只运行已发布或已审核通过的仿真包。', [
         { label: '播放控制', value: '单步与回放', tone: 'primary' },
         { label: '状态来源', value: code || '未选择', tone: 'secondary' },
         { label: '无障碍', value: '支持减少动态', tone: 'success' },
@@ -188,7 +188,7 @@ export function simWorkspaceRoute(): AppDefinition['routes'][number] {
         kind: 'status',
         href: api.sim.getStreamWsUrl(sessionId),
       }] : undefined, [
-        pageAction('report-sim-action', '上报仿真操作', '将一次仿真交互操作上报到服务端会话。', [
+        pageAction('report-sim-action', '记录仿真操作', '将一次仿真交互操作记录到当前会话。', [
           textInput('session_id', '仿真会话编号', true),
           numberInput('seq', '操作序号', true),
           numberInput('at_tick', '仿真时刻', true),
@@ -256,7 +256,7 @@ export function solveWorkspaceRoute(): AppDefinition['routes'][number] {
           })
           return '答题环境已创建'
         }),
-        pageAction('submit-contest-solve', '提交答案', '提交解题内容并等待服务端判定。', [
+        pageAction('submit-contest-solve', '提交答案', '提交解题内容并等待判定结果。', [
           textInput('contest_id', '竞赛编号', true),
           textInput('problem_id', '题目编号', true),
           textareaInput('content_ref', '答案引用', true),
@@ -288,7 +288,7 @@ export function solveWorkspaceRoute(): AppDefinition['routes'][number] {
           return '天梯榜已读取'
         }),
         pageAction('prepare-leaderboard-realtime', '准备榜单实时更新', '准备指定竞赛的榜单实时更新信息。', [
-          textInput('tenant_id', '租户编号', true),
+          textInput('tenant_id', '学校编号', true),
           textInput('contest_id', '竞赛编号', true),
         ], async (values) => {
           api.contest.getLeaderboardTopic(valueText(values, 'tenant_id'), valueText(values, 'contest_id'))
@@ -315,7 +315,7 @@ export function battleReplayRoute(): AppDefinition['routes'][number] {
       if (matchId) {
         await api.contest.getBattleReplay(matchId)
       }
-      return workspaceInfo('对抗回放', '回放入口读取后端对局录制引用，按真实执行轨迹复盘。', [
+      return workspaceInfo('对抗回放', '回放入口读取对局录制内容，按真实执行轨迹复盘。', [
         { label: '对局', value: matchId || '未选择', tone: 'primary' },
         { label: '时间轴', value: '真实录制', tone: 'secondary' },
         { label: '复盘', value: '可暂停', tone: 'success' },

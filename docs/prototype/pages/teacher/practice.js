@@ -145,7 +145,7 @@
 function withdraw() public {
     uint amt = balances[msg.sender];
     (bool ok,) = msg.sender.call{value: amt}("");
-    balances[msg.sender] = 0;   // TODO(学生): 调整为先更新状态
+    balances[msg.sender] = 0;   // 练习:调整为先更新状态
 }</div>
           <button class="btn btn-outline btn-sm mt-3" onclick="Chaimir.demo('上传脚手架压缩包')">${C.icon('upload')} 上传脚手架</button></div>`;
     } else if (step === 3) {

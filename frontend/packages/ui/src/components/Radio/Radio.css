@@ -43,7 +43,7 @@
   border: 2px solid var(--color-border-strong);
   border-radius: var(--radius-full);
   background: var(--color-bg);
-  transition: all var(--t-fast) var(--ease);
+  transition: background var(--t-fast) var(--ease), border-color var(--t-fast) var(--ease), opacity var(--t-fast) var(--ease);
   flex-shrink: 0;
 }
 
@@ -89,4 +89,11 @@
   font-size: var(--text-base);
   color: var(--color-text);
   line-height: var(--leading-normal);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chaimir-radio__circle,
+  .chaimir-radio__dot {
+    transition: none;
+  }
 }

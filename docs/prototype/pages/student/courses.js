@@ -109,7 +109,7 @@
       <div class="grid" style="grid-template-columns:1fr 300px">
         <div class="card" style="overflow:hidden">
           <div style="aspect-ratio:16/9;background:var(--slate-900);display:grid;place-items:center;color:var(--color-dark-text-sub)">
-            <div style="text-align:center">${C.icon('play-circle')}<div class="mt-2 text-sm">课程视频(原型占位)· 24:10</div></div></div>
+            <div style="text-align:center">${C.icon('play-circle')}<div class="mt-2 text-sm">课程视频预览 · 24:10</div></div></div>
           <div class="card-pad"><div class="section-title mb-2">本节要点</div>
             <p class="text-sm muted" style="line-height:var(--leading-relaxed)">对比工作量证明(PoW)与实用拜占庭容错(PBFT)在安全假设、性能与适用场景上的差异。完成视频后,进入 3.2 仿真亲手注入拜占庭节点观察共识。</p></div>
         </div>

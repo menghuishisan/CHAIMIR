@@ -2,7 +2,7 @@
 
 import React, { useState } from 'react'
 import type { ChaimirApi } from '@chaimir/api-client'
-import { Building2, LockKeyhole, Phone, UserRound } from 'lucide-react'
+import { Building2, Info, LockKeyhole, Phone, UserRound } from 'lucide-react'
 import { Button } from '@chaimir/ui'
 import { readFrontendConfig } from '@chaimir/shared'
 import type { LoginMode } from '../types'
@@ -49,7 +49,7 @@ export function LoginPage({ api, config }: { api: ChaimirApi; config: ReturnType
   return (
     <AuthBlock
       title="登录 Chaimir"
-      description="使用学校开通的账号进入对应角色功能页。"
+      description="使用学校开通的账号登录。系统会根据账号权限进入对应功能页。"
       state={state}
     >
       <div className="public-tabs" role="tablist" aria-label="登录方式">
@@ -65,10 +65,26 @@ export function LoginPage({ api, config }: { api: ChaimirApi; config: ReturnType
           </Button>
         ))}
       </div>
-      {state.values.need_select_tenant === '1' && <TenantPicker tenants={state.values.tenants} onSelect={(tenantId) => setState((current) => ({ ...current, values: { ...current.values, tenant_id: tenantId, need_select_tenant: '' } }))} />}
+      {state.values.need_select_tenant === '1' && (
+        <TenantPicker
+          tenants={state.values.tenants}
+          onSelect={(tenantId, tenantName) => setState((current) => ({ ...current, values: { ...current.values, tenant_id: tenantId, tenant_name: tenantName, need_select_tenant: '' } }))}
+        />
+      )}
       <form className="public-form" onSubmit={submit}>
         {mode === 'phone' && <TextField icon={<Phone size={17} />} name="phone" label="手机号" value={state.values.phone} onChange={setState} autoComplete="tel" required />}
-        {mode === 'phone' && <TextField icon={<Building2 size={17} />} name="tenant_id" label="学校编号" value={state.values.tenant_id} onChange={setState} required />}
+        {mode === 'phone' && state.values.tenant_name && (
+          <div className="public-inline-note is-selected" role="status">
+            <Building2 size={16} aria-hidden="true" />
+            <span>将进入：{state.values.tenant_name}</span>
+          </div>
+        )}
+        {mode === 'phone' && (
+          <div className="public-inline-note" role="note">
+            <Info size={16} aria-hidden="true" />
+            <span>若同一手机号关联多个学校，登录后再选择本次进入的学校。</span>
+          </div>
+        )}
         {mode === 'no' && <TextField icon={<Building2 size={17} />} name="tenant_code" label="学校短码" value={state.values.tenant_code} onChange={setState} required />}
         {mode === 'no' && <TextField icon={<UserRound size={17} />} name="no" label="学号或工号" value={state.values.no} onChange={setState} required />}
         {mode === 'sms' && <TextField icon={<Phone size={17} />} name="phone" label="手机号" value={state.values.phone} onChange={setState} autoComplete="tel" required />}
@@ -82,7 +98,6 @@ export function LoginPage({ api, config }: { api: ChaimirApi; config: ReturnType
         <a href="#activate">激活账号</a>
         <a href="#sso">统一认证</a>
         <a href="#apply">学校入驻申请</a>
-        <a href="#platform-login">平台管理员入口</a>
       </div>
     </AuthBlock>
   )

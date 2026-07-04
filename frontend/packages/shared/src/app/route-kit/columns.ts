@@ -447,7 +447,7 @@ export function quotaColumns(): DataColumn[] {
     { key: 'max_concurrent_sandbox', title: '并发沙箱', align: 'end' },
     { key: 'max_cpu', title: 'CPU', align: 'end' },
     { key: 'max_memory_mb', title: '内存', align: 'end' },
-    { key: 'idle_timeout_min', title: '空闲超时', align: 'end' },
+    { key: 'idle_timeout_min', title: '空闲等待', align: 'end' },
   ]
 }
 

@@ -14,7 +14,7 @@
   border: 1px solid var(--color-border);
   border-radius: var(--radius-sm);
   background: var(--color-bg);
-  transition: all var(--t) var(--ease);
+  transition: background var(--t) var(--ease), border-color var(--t) var(--ease), box-shadow var(--t) var(--ease), opacity var(--t-fast) var(--ease);
 }
 
 .chaimir-input-wrapper--full {

@@ -22,7 +22,7 @@
   color: var(--color-text);
   font-family: var(--font-sans);
   cursor: pointer;
-  transition: all var(--t) var(--ease);
+  transition: background var(--t) var(--ease), border-color var(--t) var(--ease), box-shadow var(--t) var(--ease), color var(--t) var(--ease), opacity var(--t-fast) var(--ease);
   text-align: left;
 }
 
@@ -145,4 +145,14 @@
 .chaimir-select__check {
   flex-shrink: 0;
   color: var(--color-primary);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chaimir-select__trigger,
+  .chaimir-select__icon,
+  .chaimir-select__dropdown,
+  .chaimir-select__option {
+    animation: none;
+    transition: none;
+  }
 }

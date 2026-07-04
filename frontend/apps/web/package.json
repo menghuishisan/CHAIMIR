@@ -1,15 +1,16 @@
 {
-  "name": "@chaimir/app-school-admin",
+  "name": "@chaimir/app-web",
   "version": "0.1.0",
   "private": true,
-  "description": "Chaimir 学校管理端",
+  "description": "Chaimir 单入口前端应用",
   "scripts": {
-    "dev": "vite --host 0.0.0.0 --port 5175",
+    "dev": "vite --host 0.0.0.0 --port 5173",
     "build": "vite build",
     "lint": "eslint src --ext .ts,.tsx",
     "type-check": "tsc --noEmit"
   },
   "dependencies": {
+    "@chaimir/api-client": "workspace:*",
     "@chaimir/auth": "workspace:*",
     "@chaimir/shared": "workspace:*",
     "@chaimir/ui": "workspace:*",

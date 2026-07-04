@@ -36,7 +36,7 @@
   border: 2px solid var(--color-border-strong);
   border-radius: var(--radius-xs);
   background: var(--color-bg);
-  transition: all var(--t-fast) var(--ease);
+  transition: background var(--t-fast) var(--ease), border-color var(--t-fast) var(--ease), opacity var(--t-fast) var(--ease);
   flex-shrink: 0;
 }
 
@@ -44,7 +44,7 @@
   color: var(--color-primary-fg);
   opacity: 0;
   transform: scale(0.5);
-  transition: all var(--t-fast) var(--ease);
+  transition: opacity var(--t-fast) var(--ease), transform var(--t-fast) var(--ease);
 }
 
 /* === 状态 === */
@@ -82,4 +82,11 @@
   font-size: var(--text-base);
   color: var(--color-text);
   line-height: var(--leading-normal);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chaimir-checkbox__box,
+  .chaimir-checkbox__icon {
+    transition: none;
+  }
 }

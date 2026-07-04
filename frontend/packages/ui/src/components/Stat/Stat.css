@@ -6,8 +6,14 @@
   padding: var(--card-pad);
   border: 1px solid var(--color-border);
   border-radius: var(--radius);
-  background: var(--color-bg);
+  background: linear-gradient(180deg, var(--color-bg), var(--color-surface));
   box-shadow: var(--shadow-xs);
+  transition: border-color var(--t) var(--ease), box-shadow var(--t) var(--ease);
+}
+
+.chaimir-stat:hover {
+  border-color: var(--color-border-strong);
+  box-shadow: var(--shadow);
 }
 
 .chaimir-stat header,

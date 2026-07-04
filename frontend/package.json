@@ -4,7 +4,7 @@
   "private": true,
   "description": "Chaimir 区块链教学平台前端 Monorepo",
   "scripts": {
-    "dev": "turbo run dev",
+    "dev": "pnpm --filter @chaimir/app-web dev",
     "build": "turbo run build",
     "lint": "turbo run lint",
     "type-check": "turbo run type-check",

@@ -401,7 +401,7 @@ function TimelinePanel({
         <span>{progress}%</span>
       </header>
       <div className="sim-timeline__track" aria-hidden="true">
-        <span style={{ inlineSize: `${progress}%` }} />
+        <span style={{ transform: `scaleX(${progress / 100})` }} />
       </div>
       <dl>
         <div>

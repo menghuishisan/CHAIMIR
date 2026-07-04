@@ -7,6 +7,7 @@
   background: var(--color-dark-surface);
   color: var(--color-dark-text);
   overflow: hidden;
+  animation: sim-pattern-enter var(--t-slow) var(--ease-out) both;
 }
 
 .sim-pattern__header {
@@ -109,12 +110,13 @@
 
 .sim-graph__pulse {
   fill: var(--color-dark-border);
-  transition: cx 180ms ease, cy 180ms ease;
+  transition: cx var(--t) var(--ease), cy var(--t) var(--ease), r var(--t-fast) var(--ease);
 }
 
 .sim-graph__pulse.is-active,
 .sim-graph__pulse.is-success {
   fill: var(--color-on-dark-accent);
+  r: 1.7;
 }
 
 .sim-graph__pulse.is-failed {
@@ -218,6 +220,12 @@
   border-radius: var(--radius-xs);
   background: var(--color-dark-elevated);
   cursor: pointer;
+  transition: border-color var(--t) var(--ease), box-shadow var(--t) var(--ease), transform var(--t-fast) var(--ease);
+}
+
+.sim-chain__block:hover,
+.sim-chain__block:focus-visible {
+  transform: translateY(calc(-1 * var(--space-1)));
 }
 
 .sim-chain__block small {
@@ -376,6 +384,13 @@
   border-left: 0.1875rem solid var(--color-dark-border);
   background: var(--color-dark-elevated);
   cursor: pointer;
+  transition: border-color var(--t) var(--ease), background var(--t) var(--ease), transform var(--t-fast) var(--ease);
+}
+
+.sim-pipeline__step:hover,
+.sim-pipeline__step:focus-visible {
+  background: var(--color-dark-surface);
+  transform: translateX(var(--space-1));
 }
 
 .sim-pipeline__step i {
@@ -422,7 +437,7 @@
   display: block;
   block-size: 100%;
   background: var(--color-on-dark-accent);
-  transition: inline-size 180ms ease;
+  transition: inline-size var(--t) var(--ease);
 }
 
 .sim-lane {
@@ -467,7 +482,13 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  transition: inset-inline-start 180ms ease;
+  transition: inset-inline-start var(--t) var(--ease), border-color var(--t-fast) var(--ease), background var(--t-fast) var(--ease), transform var(--t-fast) var(--ease);
+}
+
+.sim-lane__message:hover,
+.sim-lane__message:focus-visible {
+  background: var(--color-dark-surface);
+  transform: translateX(-50%) translateY(calc(-1 * var(--space-1)));
 }
 
 @media (max-width: 40rem) {
@@ -612,6 +633,18 @@
   width: 0.75rem;
   height: 0.1875rem;
   border-radius: 999px;
+}
+
+@keyframes sim-pattern-enter {
+  from {
+    opacity: 0;
+    transform: translateY(var(--space-3));
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

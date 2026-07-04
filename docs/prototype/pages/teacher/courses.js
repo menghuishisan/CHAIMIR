@@ -161,7 +161,7 @@
         </div>
         <div>
           <div class="card card-pad mb-3"><div class="section-title mb-2">课程封面</div>
-            <div style="aspect-ratio:16/9;border:2px dashed var(--color-border-strong);border-radius:var(--radius);display:grid;place-items:center;color:var(--color-text-faint);cursor:pointer" onclick="Chaimir.demo('封面上传(原型占位)')">
+            <div style="aspect-ratio:16/9;border:2px dashed var(--color-border-strong);border-radius:var(--radius);display:grid;place-items:center;color:var(--color-text-faint);cursor:pointer" onclick="Chaimir.demo('封面上传')">
               <div style="text-align:center">${C.icon('image-plus')}<div class="text-sm mt-2">点击上传封面</div><div class="text-xs">建议 16:9,JPG/PNG ≤ 2MB</div></div></div>
           </div>
           <div class="card card-pad mb-3"><div class="section-title mb-2">下一步</div>

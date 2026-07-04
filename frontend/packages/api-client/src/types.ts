@@ -19,7 +19,7 @@ export interface LoginPlatformRequest {
 export interface LoginPhoneRequest {
   phone: string
   password: string
-  tenant_id: number
+  tenant_id?: number
 }
 
 export interface LoginNoRequest {
@@ -31,13 +31,13 @@ export interface LoginNoRequest {
 export interface LoginSMSRequest {
   phone: string
   code: string
-  tenant_id: number
+  tenant_id?: number
 }
 
 export interface SendSMSRequest {
   phone: string
   scene: number
-  tenant_id: number
+  tenant_id?: number
 }
 
 export interface RefreshRequest {

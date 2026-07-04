@@ -414,7 +414,7 @@ function withdraw() public { /* ... */ }</textarea></div>
       ${list.map(a => `<div class="card card-pad mb-3">
         <div class="flex justify-between items-center wrap gap-2"><div class="fw-600 flex items-center gap-2">${a.pin ? C.badge('置顶', 'amber') : ''}${C.badge(a.tag, 'blue')} ${a.title}</div>
           <span class="muted text-xs">${a.time}</span></div>
-        <div class="muted text-sm mt-2">点击查看公告详情(原型占位)。重要变更会同时通过站内信提醒。</div></div>`).join('')}`;
+        <div class="muted text-sm mt-2">点击查看公告详情。重要变更会同时通过站内信提醒。</div></div>`).join('')}`;
   }
   function profile() {
     return `${C.head('个人中心', '账户')}

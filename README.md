@@ -92,7 +92,7 @@ pnpm type-check
 ```bash
 # 前端四端与共享包开发
 cd frontend
-pnpm dev
+pnpm run dev
 ```
 
 需要完整沙箱、数据库、对象存储、病毒扫描与镜像供应链时，请按 [deploy/README](deploy/README.md) 使用 `deploy/` 下的 Kustomize 清单与 Makefile。日常本地进程联调不需要先应用完整 Kubernetes overlay。

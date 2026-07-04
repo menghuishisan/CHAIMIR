@@ -66,7 +66,7 @@ export const studentApp: AppDefinition = {
       load: async (api) => ({
         ...listResult(await api.teaching.getCourses({ role: 'student', ...defaultPageParams() }), courseColumns(), '暂无课程', '加入课程后会在这里显示学习安排。'),
         actions: [
-          pageAction('join-course', '加入课程', '输入教师提供的邀请码加入课程，加入状态由服务端保存。', [textInput('invite_code', '课程邀请码', true)], async (values) => {
+          pageAction('join-course', '加入课程', '输入教师提供的邀请码加入课程，加入状态会自动保存。', [textInput('invite_code', '课程邀请码', true)], async (values) => {
             await api.teaching.joinCourse({ invite_code: valueText(values, 'invite_code') })
             return '已提交加入课程请求'
           }),
@@ -88,7 +88,7 @@ export const studentApp: AppDefinition = {
       load: async (api) => ({
         ...listResult(await api.experiment.getExperiments({ status: ExperimentStatus.PUBLISHED, ...defaultPageParams() }), experimentColumns(), '暂无实验', '课程发布实验后会在这里显示。'),
         actions: [
-          pageAction('start-experiment', '创建实验实例', '输入实验编号创建个人或小组实例，实例资源由后端编排。', [
+          pageAction('start-experiment', '创建实验实例', '输入实验编号创建个人或小组实例，平台会准备所需实验资源。', [
             textInput('experiment_id', '实验编号', true),
             numberInput('group_id', '小组编号'),
           ], async (values) => {
@@ -115,7 +115,7 @@ export const studentApp: AppDefinition = {
       load: async (api) => ({
         ...listResult(await api.contest.getContests(defaultPageParams()), contestColumns(), '暂无竞赛', '有可报名或进行中的竞赛时会在这里显示。'),
         actions: [
-          pageAction('contest-signup', '报名竞赛', '输入竞赛编号和队伍名称完成报名，队伍状态由后端保存。', [
+          pageAction('contest-signup', '报名竞赛', '输入竞赛编号和队伍名称完成报名，队伍状态会自动保存。', [
             textInput('contest_id', '竞赛编号', true),
             textInput('team_name', '队伍名称', true),
           ], async (values) => {
@@ -158,7 +158,7 @@ export const studentApp: AppDefinition = {
               await api.grade.submitAppeal({ course_id: valueText(values, 'course_id'), reason: valueText(values, 'reason') })
               return '成绩申诉已提交'
             }),
-            pageAction('generate-transcript', '生成成绩单', '生成个人成绩单记录，文件下载授权由后端签发。', [
+            pageAction('generate-transcript', '生成成绩单', '生成个人成绩单记录，并获取下载授权。', [
               numberInput('scope', '成绩单范围', true),
               textInput('semester_id', '学期编号'),
             ], async (values) => {
@@ -214,7 +214,7 @@ function studentWorkspaceRoute(): AppDefinition['routes'][number] {
       if (!instanceId) {
         return workspaceInfo('实验工作台', '从实验列表进入具体实例后，可在这里查看沙箱、仿真和检查点状态。', [
           { label: '资源创建', value: '由实验实例触发', tone: 'primary' },
-          { label: '进度推送', value: '使用后端订阅信息', tone: 'secondary' },
+          { label: '进度推送', value: '实时同步', tone: 'secondary' },
           { label: '安全边界', value: '不在前端暴露答案', tone: 'success' },
         ])
       }
@@ -293,7 +293,7 @@ function studentWorkspaceRoute(): AppDefinition['routes'][number] {
           textInput('sandbox_id', '沙箱编号', true),
           textInput('tool_code', '工具编码', true),
           textInput('command', '命令参数', true, '多个参数用英文逗号分隔，例如 forge,test。'),
-          numberInput('timeout_sec', '超时秒数'),
+          numberInput('timeout_sec', '等待秒数'),
         ], async (values) => {
           await api.sandbox.runCommandTool(valueText(values, 'sandbox_id'), valueText(values, 'tool_code'), {
             command: valueStringArray(values, 'command'),
@@ -322,20 +322,20 @@ function studentWorkspaceRoute(): AppDefinition['routes'][number] {
           await api.sandbox.chainSendTx(valueText(values, 'sandbox_id'), { payload: valueJson(values, 'payload') })
           return '链上交易已提交'
         }),
-        pageAction('activate-stage', '激活实验阶段', '按阶段创建后续资源，阶段状态由服务端保存。', [
+        pageAction('activate-stage', '激活实验阶段', '按阶段创建后续资源，阶段状态会自动保存。', [
           numberInput('stage', '阶段序号', true),
         ], async (values) => {
           await api.experiment.activateStage(instance.instance_id, valueNumber(values, 'stage'))
           return '实验阶段已激活'
         }),
-        pageAction('judge-checkpoint', '判定检查点', '提交检查点判分，答案和判题配置仍由服务端黑盒处理。', [
+        pageAction('judge-checkpoint', '判定检查点', '提交检查点判分，答案和判题规则对学生不可见。', [
           textInput('checkpoint_id', '检查点编号', true),
           textareaInput('payload', '判分参数'),
         ], async (values) => {
           await api.experiment.judgeCheckpoint(instance.instance_id, valueText(values, 'checkpoint_id'), valueJson(values, 'payload'))
           return '检查点判分已提交'
         }),
-        pageAction('submit-report', '提交实验报告', '提交实验报告引用，文件授权由服务端管理。', [
+        pageAction('submit-report', '提交实验报告', '提交实验报告引用，报告文件由平台管理。', [
           textareaInput('content_ref', '报告引用', true),
         ], async (values) => {
           await api.experiment.submitReport(instance.instance_id, { content_ref: JSON.stringify(valueJson(values, 'content_ref')) })
@@ -401,7 +401,7 @@ function studentDeepRoutes(): AppDefinition['routes'] {
       return {
         ...result,
         actions: [
-          pageAction('report-progress', '保存学习进度', '向服务端保存当前课时学习进度，刷新或换设备后不丢失。', [
+          pageAction('report-progress', '保存学习进度', '保存当前课时学习进度，刷新或换设备后不丢失。', [
             textInput('lesson_id', '课时编号', true),
             numberInput('video_pos', '学习位置秒数', true),
             numberInput('duration_sec', '总时长秒数', true),
@@ -425,7 +425,7 @@ function studentDeepRoutes(): AppDefinition['routes'] {
       return {
         ...result,
         actions: [
-          pageAction('save-draft', '保存作答草稿', '草稿保存到服务端，刷新或换设备后可继续作答。', [
+          pageAction('save-draft', '保存作答草稿', '草稿会自动保存，刷新或换设备后可继续作答。', [
             textInput('assignment_id', '作业编号', true),
             textareaInput('content', '作答内容', true),
           ], async (values) => {
@@ -439,7 +439,7 @@ function studentDeepRoutes(): AppDefinition['routes'] {
             await api.teaching.submitAssignment(valueText(values, 'assignment_id'), { content_ref: valueJson(values, 'content_ref') })
             return '作业已提交'
           }),
-          pageAction('read-assignment-draft', '读取作答草稿', '从服务端读取作答草稿。', [textInput('assignment_id', '作业编号', true)], async (values) => {
+          pageAction('read-assignment-draft', '读取作答草稿', '读取已保存的作答草稿。', [textInput('assignment_id', '作业编号', true)], async (values) => {
             await api.teaching.getDraft(valueText(values, 'assignment_id'))
             return '作答草稿已读取'
           }),
@@ -472,7 +472,7 @@ function studentDeepRoutes(): AppDefinition['routes'] {
         ? arrayResult(await api.contest.getProblems(contestId), contestProblemColumns(), '暂无赛题', '竞赛发布赛题后会显示题目列表。')
         : listResult(await api.contest.getContests(defaultPageParams()), contestColumns(), '暂无竞赛', '有可报名或进行中的竞赛时会显示。')
     }),
-    hiddenResourceRoute('contest-signup', '竞赛报名', '完成个人或团队报名，队伍状态由服务端保存', UserCog, async (api) => ({
+    hiddenResourceRoute('contest-signup', '竞赛报名', '完成个人或团队报名，队伍状态会自动保存', UserCog, async (api) => ({
       ...listResult(await api.contest.getContests(defaultPageParams()), contestColumns(), '暂无可报名竞赛', '报名开放后会在这里显示。'),
       actions: [
         pageAction('signup', '报名竞赛', '创建队伍或个人报名记录。', [

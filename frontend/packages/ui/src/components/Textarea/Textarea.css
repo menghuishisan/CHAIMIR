@@ -9,7 +9,7 @@
   font-family: var(--font-sans);
   font-size: var(--text-base);
   line-height: var(--leading-normal);
-  transition: all var(--t) var(--ease);
+  transition: background var(--t) var(--ease), border-color var(--t) var(--ease), box-shadow var(--t) var(--ease), opacity var(--t-fast) var(--ease);
   min-height: 5rem; /* 80px */
 }
 

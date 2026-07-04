@@ -129,7 +129,7 @@ export function assignmentActions(api: ChaimirApi): PageAction[] {
 
 export function experimentAuthorActions(api: ChaimirApi): PageAction[] {
   return [
-    pageAction('save-experiment', '保存实验草稿', '保存实验编排草稿，步骤状态由服务端持久化。', [
+    pageAction('save-experiment', '保存实验草稿', '保存实验编排草稿，步骤状态由平台保存。', [
       textInput('course_id', '课程编号', true),
       textInput('template_ref', '模板引用', true),
       textInput('template_version', '模板版本', true),
@@ -154,7 +154,7 @@ export function experimentAuthorActions(api: ChaimirApi): PageAction[] {
       })
       return '实验草稿已保存'
     }),
-    pageAction('validate-experiment', '校验实验', '触发服务端编排校验。', [textInput('experiment_id', '实验编号', true)], async (values) => {
+    pageAction('validate-experiment', '校验实验', '执行实验编排校验。', [textInput('experiment_id', '实验编号', true)], async (values) => {
       await api.experiment.validateExperiment(valueText(values, 'experiment_id'))
       return '实验校验已完成'
     }),
@@ -575,7 +575,7 @@ export function alertActions(api: ChaimirApi): PageAction[] {
 
 export function contestManagementActions(api: ChaimirApi): PageAction[] {
   return [
-    pageAction('create-contest', '创建竞赛', '创建竞赛草稿，赛制规则由后端统一校验。', [
+    pageAction('create-contest', '创建竞赛', '创建竞赛草稿，赛制规则会统一校验。', [
       textInput('name', '竞赛名称', true),
       numberInput('mode', '赛制', true),
       numberInput('match_mode', '对抗模式'),
@@ -743,8 +743,8 @@ export function simGovernanceActions(api: ChaimirApi): PageAction[] {
       textInput('category', '分类', true),
       textInput('compute', '执行方式', true, '填写 frontend 或 backend。'),
       textareaInput('scale_limit', '规模限制'),
-      textInput('backend_adapter', '后端适配器'),
-      textareaInput('backend_config', '后端配置'),
+      textInput('backend_adapter', '平台适配器'),
+      textareaInput('backend_config', '平台计算配置'),
     ], async (values) => {
       await api.sim.updatePackage(valueText(values, 'package_id'), {
         bundle: valueFile(values, 'bundle'),

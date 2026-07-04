@@ -70,7 +70,7 @@ export const schoolAdminApp: AppDefinition = {
       load: async (api) => ({
         ...listResult(await api.identity.getAccounts(defaultPageParams()), accountColumns(), '暂无账号', '导入或创建师生账号后会在这里显示。'),
         actions: [
-          pageAction('create-account', '创建账号', '创建单个教师或学生账号，激活码由后端按策略返回。', [
+          pageAction('create-account', '创建账号', '创建单个教师或学生账号，创建后会生成激活信息。', [
             textInput('phone', '手机号', true),
             textInput('name', '姓名', true),
             textInput('no', '学工号', true),
@@ -94,7 +94,7 @@ export const schoolAdminApp: AppDefinition = {
             })
             return '账号已创建'
           }),
-          pageAction('preview-account-import', '预览账号导入', '上传教师或学生导入文件，预览结果由服务端持久化。', [
+          pageAction('preview-account-import', '预览账号导入', '上传教师或学生导入文件，预览结果会自动保存。', [
             textInput('target_type', '账号类型', true, '可填写教师或学生。'),
             fileInput('file', '导入文件', true),
           ], async (values) => {
@@ -217,7 +217,7 @@ export const schoolAdminApp: AppDefinition = {
             })
             return '班级已创建'
           }),
-          pageAction('preview-org-import', '预览组织导入', '上传组织架构文件并生成服务端预览。', [fileInput('file', '导入文件', true)], async (values) => {
+          pageAction('preview-org-import', '预览组织导入', '上传组织架构文件并生成导入预览。', [fileInput('file', '导入文件', true)], async (values) => {
             await api.identity.previewOrgImport(valueFile(values, 'file'))
             return '组织导入预览已生成'
           }),
@@ -440,7 +440,7 @@ function schoolAdminDeepRoutes(): AppDefinition['routes'] {
           await api.identity.previewAccountImport(accountTarget(values), valueFile(values, 'file'))
           return '导入预览已生成'
         }),
-        pageAction('commit-import', '确认导入', '确认服务端预览批次并写入账号。', [textInput('preview_id', '预览编号', true)], async (values) => {
+        pageAction('commit-import', '确认导入', '确认导入预览批次并写入账号。', [textInput('preview_id', '预览编号', true)], async (values) => {
           await api.identity.commitAccountImport({ preview_id: valueText(values, 'preview_id') })
           return '账号导入已提交'
         }),

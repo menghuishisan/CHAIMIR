@@ -101,7 +101,7 @@
   color: var(--color-text-sub);
   border-radius: var(--radius-sm);
   cursor: pointer;
-  transition: all var(--t-fast) var(--ease);
+  transition: background var(--t-fast) var(--ease), color var(--t-fast) var(--ease), transform var(--t-fast) var(--ease);
 }
 
 .chaimir-modal__close:hover {
@@ -153,5 +153,14 @@
     to {
       transform: translateY(0);
     }
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chaimir-modal-overlay,
+  .chaimir-modal,
+  .chaimir-modal__close {
+    animation: none;
+    transition: none;
   }
 }

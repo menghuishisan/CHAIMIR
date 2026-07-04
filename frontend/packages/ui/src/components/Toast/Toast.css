@@ -154,7 +154,7 @@
   color: var(--color-text-sub);
   border-radius: var(--radius-xs);
   cursor: pointer;
-  transition: all var(--t-fast) var(--ease);
+  transition: background var(--t-fast) var(--ease), color var(--t-fast) var(--ease), transform var(--t-fast) var(--ease);
 }
 
 .chaimir-toast__close:hover {
@@ -175,5 +175,13 @@
   .chaimir-toast-container--top-center,
   .chaimir-toast-container--bottom-center {
     transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chaimir-toast,
+  .chaimir-toast__close {
+    animation: none;
+    transition: none;
   }
 }

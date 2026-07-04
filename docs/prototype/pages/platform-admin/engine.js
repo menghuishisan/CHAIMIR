@@ -4,7 +4,7 @@
    覆盖:运行时(链)管理 + 运行时详情(三层适配器 / 自检可视化 / 镜像 / 预拉取)、
         工具管理、判题器管理(J1~J6)、仿真包审核(静态扫描+确定性双绿才可上架)、
         配额管理、系统配置(乐观锁版本冲突 + 变更历史/回退)、告警(规则/事件)、
-        审计中心、基础监控(外接 Grafana iframe 占位)、备份记录、个人中心。
+        审计中心、基础监控(外接 Grafana 面板预览)、备份记录、个人中心。
    说明:遵循 courses.js 范式;子页登记 C.parentRoute;接入/自检/预拉取均以
         进度可视化呈现;危险/不可逆操作经 C.confirm + C.toast;无外部库,无裸 hex。
    ============================================================ */
@@ -286,7 +286,7 @@
       title: '沙箱预览 · ' + name,
       body: `<div class="callout info mb-3">${C.icon('shield')}<div>预览运行于隔离沙箱(deny-all 网络),仅用于审核,不接触生产数据。</div></div>
         <div style="aspect-ratio:4/3;background:var(--color-dark-bg);border-radius:var(--radius);display:grid;place-items:center;color:var(--color-dark-text-sub);margin-bottom:14px">
-          <div style="text-align:center">${C.icon('activity')}<div class="mt-2 text-sm">仿真渲染预览(原型占位)</div></div></div>
+          <div style="text-align:center">${C.icon('activity')}<div class="mt-2 text-sm">仿真渲染预览</div></div></div>
         <dl class="dl"><dt>渲染类型</dt><dd>图网络 + 时序泳道</dd><dt>初始节点</dt><dd>7</dd><dt>可注入故障</dt><dd>拜占庭节点 / 网络分区</dd><dt>确定性种子</dt><dd class="mono">0x7f3a…</dd></dl>`,
       foot: `<button class="btn btn-outline" onclick="document.querySelector('.overlay').remove()">关闭</button>`,
     });
@@ -352,7 +352,7 @@
         ${C.stat('memory-stick', '80 Gi', '内存已分配', 'blue')}
       </div>
       <div class="table-wrap"><table class="table"><thead><tr>
-        <th>租户</th><th>并发沙箱(用量/上限)</th><th>CPU</th><th>内存</th><th>空闲超时</th><th>最大存活</th><th>快照保留</th><th></th>
+        <th>租户</th><th>并发沙箱(用量/上限)</th><th>CPU</th><th>内存</th><th>空闲等待</th><th>最大存活</th><th>快照保留</th><th></th>
       </tr></thead><tbody>${rows}</tbody></table></div>`;
   }
   C.paEditQuota = function (name, maxBox) {
@@ -362,7 +362,7 @@
           <div class="field"><label>最大并发沙箱</label><input class="input mono" value="${maxBox}"></div>
           <div class="field"><label>CPU 上限(核)</label><input class="input mono" value="20"></div>
           <div class="field"><label>内存上限(Gi)</label><input class="input mono" value="40"></div>
-          <div class="field"><label>空闲超时(分)</label><input class="input mono" value="15"></div>
+          <div class="field"><label>空闲等待(分)</label><input class="input mono" value="15"></div>
           <div class="field"><label>最大存活(分)</label><input class="input mono" value="120"></div>
           <div class="field"><label>快照保留(天)</label><input class="input mono" value="7"></div>
         </div>
@@ -533,7 +533,7 @@
   }
 
   /* ============================================================
-     10) 基础监控(外接 Grafana iframe 占位)
+     10) 基础监控(外接 Grafana 面板预览)
      ============================================================ */
   function monitoring(ctx) {
     const panel = ctx.query.p || 'health';
@@ -544,7 +544,7 @@
       <div class="card" style="overflow:hidden">
         <div class="card-head"><div class="section-title">${panels.find(x => x[0] === panel)[1]} · Grafana 面板</div><span class="badge badge-green">${C.icon('dot')} 数据源在线</span></div>
         <div style="height:420px;background:var(--color-dark-bg);display:grid;place-items:center;color:var(--color-dark-text-sub);position:relative">
-          <div style="text-align:center">${C.icon('line-chart')}<div class="mt-2 text-sm">外接 Grafana 面板(iframe 占位)</div>
+          <div style="text-align:center">${C.icon('line-chart')}<div class="mt-2 text-sm">外接 Grafana 面板预览</div>
             <div class="muted text-xs mt-2" style="color:var(--color-dark-text-sub)">/d/${panel}/${panel}-overview · refresh 30s</div></div>
           <span class="badge badge-gray" style="position:absolute;top:12px;left:12px">iframe</span>
         </div>

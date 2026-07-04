@@ -34,7 +34,7 @@
           <div style="width:64px;height:64px;border-radius:16px;background:linear-gradient(135deg,var(--amber-400),var(--amber-600));display:inline-grid;place-items:center;color:#1a1206;margin-bottom:16px">${C.icon('link-2', '')}</div>
           <h1 style="font-size:var(--text-4xl);font-weight:800;letter-spacing:-.02em">Chaimir</h1>
           <div style="color:var(--color-primary-text);font-weight:700;font-size:var(--text-xl);letter-spacing:.1em;margin-top:8px">构建 · 验证 · 对抗</div>
-          <p class="muted" style="max-width:560px;margin:12px auto 0">区块链教学·实验·竞赛三位一体平台 — 四端高保真交互原型。选择角色进入,或体验登录前页面与全屏沉浸式工作台。</p>
+          <p class="muted" style="max-width:560px;margin:12px auto 0">区块链教学·实验·竞赛三位一体平台 — 四端高保真交互参考。可按角色端查看功能结构,也可查看登录前页面与全屏沉浸式工作台。</p>
         </div>
 
         <div class="flex items-center gap-2 mb-3"><span class="badge badge-amber">${C.icon('layout-grid')} 四个角色端</span></div>
@@ -57,7 +57,7 @@
             <div>· <b>文案面向用户</b>:错误分层(用户向提示 + 报障编号),不暴露技术细节</div>
           </div>
         </div>
-        <p class="muted text-xs" style="text-align:center;margin-top:24px">Chaimir 高保真原型 · 假数据驱动 · 仅用于设计评审与交互验证</p>
+        <p class="muted text-xs" style="text-align:center;margin-top:24px">Chaimir 高保真设计参考 · 示例数据驱动 · 用于设计评审与交互验证</p>
       </div>`,
   });
 })();

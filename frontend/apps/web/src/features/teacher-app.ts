@@ -122,7 +122,7 @@ export const teacherApp: AppDefinition = {
       load: async (api) => ({
         ...listResult(await api.experiment.getExperiments(defaultPageParams()), experimentColumns(), '暂无实验', '新建实验后会在这里显示。'),
         actions: [
-          pageAction('create-experiment', '创建实验', '创建实验编排草稿，组件配置由后端统一校验。', [
+          pageAction('create-experiment', '创建实验', '创建实验编排草稿，组件配置会统一校验。', [
             textInput('course_id', '课程编号', true),
             textInput('template_ref', '模板引用', true),
             textInput('template_version', '模板版本', true),
@@ -146,7 +146,7 @@ export const teacherApp: AppDefinition = {
             })
             return '实验草稿已创建'
           }),
-          pageAction('publish-experiment', '发布实验', '先触发后端校验，通过后发布实验。', [textInput('experiment_id', '实验编号', true)], async (values) => {
+          pageAction('publish-experiment', '发布实验', '校验通过后发布实验。', [textInput('experiment_id', '实验编号', true)], async (values) => {
             const id = valueText(values, 'experiment_id')
             await api.experiment.validateExperiment(id)
             await api.experiment.publishExperiment(id)
@@ -164,7 +164,7 @@ export const teacherApp: AppDefinition = {
       load: async (api) => ({
         ...listResult(await api.content.getItems(defaultPageParams()), contentColumns(), '暂无内容', '创建题目或模板后会在这里显示。'),
         actions: [
-          pageAction('create-content', '创建内容', '创建题目或模板草稿，答案等敏感字段由后端按题面/full接口隔离。', [
+          pageAction('create-content', '创建内容', '创建题目或模板草稿，答案等敏感内容只在授权场景可见。', [
             textInput('code', '内容编码', true),
             textInput('version', '版本', true),
             numberInput('type', '内容类型', true),
@@ -331,16 +331,16 @@ export const teacherApp: AppDefinition = {
       load: async (api) => ({
         ...listResult(await api.sim.getReviews(defaultPageParams()), simReviewColumns(), '暂无审核任务', '有仿真包提交后会在这里显示。'),
         actions: [
-          pageAction('submit-sim-package', '提交仿真包', '上传仿真 bundle 并提交后端静态扫描和预览校验。', [
-            fileInput('bundle', '仿真 bundle', true),
+          pageAction('submit-sim-package', '提交仿真包', '上传仿真包文件并提交静态扫描和预览校验。', [
+            fileInput('bundle', '仿真包文件', true),
             textInput('code', '仿真编码', true),
             textInput('version', '版本', true),
             textInput('name', '名称', true),
             textInput('category', '分类', true),
-            textInput('compute', '计算方式', true, 'frontend 或 backend。'),
+            textInput('compute', '计算方式', true, '按仿真包规范填写运行方式。'),
             textareaInput('scale_limit', '规模限制'),
-            textInput('backend_adapter', '后端适配器'),
-            textareaInput('backend_config', '后端配置'),
+            textInput('backend_adapter', '平台适配器'),
+            textareaInput('backend_config', '平台计算配置'),
           ], async (values) => {
             await api.sim.submitPackage({
               bundle: valueFile(values, 'bundle'),
@@ -555,7 +555,7 @@ function teacherDeepRoutes(): AppDefinition['routes'] {
         : emptyResult(assignmentColumns(), '请选择课程作业', '从课程详情进入作业管理。')
     }),
     hiddenResourceRoute('assignment-edit', '作业编辑', '创建、更新和发布课程作业', FilePenLine, async (api) => ({
-      ...emptyResult(assignmentColumns(), '作业编辑', '填写表单后由服务端保存作业。'),
+      ...emptyResult(assignmentColumns(), '作业编辑', '填写表单后保存作业。'),
       actions: assignmentActions(api),
     })),
     resourceRoute('grading', '批改中心', '查看提交、人工评分和查重线索', ShieldCheck, async (api, params) => {
