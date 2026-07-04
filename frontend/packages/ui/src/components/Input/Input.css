@@ -95,6 +95,14 @@
   opacity: 0.6;
 }
 
+.chaimir-input-wrapper--readonly {
+  background: var(--color-surface);
+}
+
+.chaimir-input-wrapper--loading {
+  cursor: wait;
+}
+
 .chaimir-input:disabled {
   cursor: not-allowed;
 }
@@ -116,6 +124,10 @@
 .chaimir-input__icon--right {
   margin-right: var(--space-3);
   margin-left: calc(-1 * var(--space-2));
+}
+
+.chaimir-input__spinner {
+  animation: chaimir-spin 1s linear infinite;
 }
 
 /* 有图标时调整输入框内边距 */
@@ -141,4 +153,22 @@
 
 .chaimir-input-wrapper--lg:has(.chaimir-input__icon--right) .chaimir-input {
   padding-right: var(--space-12);
+}
+
+@keyframes chaimir-spin {
+  from {
+    transform: rotate(0deg);
+  }
+
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chaimir-input-wrapper,
+  .chaimir-input__spinner {
+    animation: none;
+    transition: none;
+  }
 }

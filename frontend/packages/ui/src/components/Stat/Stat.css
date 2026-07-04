@@ -5,7 +5,7 @@
   gap: var(--space-3);
   padding: var(--card-pad);
   border: 1px solid var(--color-border);
-  border-radius: var(--radius);
+  border-radius: var(--radius-sm);
   background: linear-gradient(180deg, var(--color-bg), var(--color-surface));
   box-shadow: var(--shadow-xs);
   transition: border-color var(--t) var(--ease), box-shadow var(--t) var(--ease);
@@ -71,4 +71,10 @@
 
 .chaimir-stat__delta.is-flat {
   color: var(--color-text-sub);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chaimir-stat {
+    transition: none;
+  }
 }

@@ -52,6 +52,12 @@
   border-color: var(--color-border-strong);
 }
 
+.chaimir-select__trigger:focus-visible {
+  outline: none;
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 3px var(--color-primary-soft);
+}
+
 .chaimir-select--open .chaimir-select__trigger {
   border-color: var(--color-primary);
   box-shadow: 0 0 0 3px var(--color-primary-soft);
@@ -129,6 +135,10 @@
 }
 
 .chaimir-select__option:hover:not(.chaimir-select__option--disabled) {
+  background: var(--color-surface-hover);
+}
+
+.chaimir-select__option--active:not(.chaimir-select__option--disabled) {
   background: var(--color-surface-hover);
 }
 

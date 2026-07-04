@@ -182,12 +182,25 @@
   width: 100%;
 }
 
-/* === 无障碍：FE-2 焦点环 ===
- *
- * 全局焦点环已在 global.css 定义，这里无需额外处理
- */
+.chaimir-btn:not(:has(.chaimir-btn__text)) {
+  inline-size: 2.5rem;
+  padding-inline: 0;
+}
 
-/* === Reduced Motion ===
- *
- * 全局已处理，这里无需额外处理
- */
+@media (pointer: coarse) {
+  .chaimir-btn {
+    min-block-size: 2.75rem;
+  }
+
+  .chaimir-btn:not(:has(.chaimir-btn__text)) {
+    min-inline-size: 2.75rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chaimir-btn,
+  .chaimir-btn__spinner {
+    animation: none;
+    transition: none;
+  }
+}

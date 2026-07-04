@@ -43,6 +43,10 @@
   opacity: 0.6;
 }
 
+.chaimir-textarea--readonly {
+  background: var(--color-surface);
+}
+
 /* === 宽度 === */
 
 .chaimir-textarea--full {
@@ -65,4 +69,10 @@
 
 .chaimir-textarea--resize-both {
   resize: both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chaimir-textarea {
+    transition: none;
+  }
 }

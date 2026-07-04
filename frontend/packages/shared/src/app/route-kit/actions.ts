@@ -131,7 +131,7 @@ export function experimentAuthorActions(api: ChaimirApi): PageAction[] {
   return [
     pageAction('save-experiment', '保存实验草稿', '保存实验编排草稿，步骤状态由平台保存。', [
       textInput('course_id', '课程编号', true),
-      textInput('template_ref', '模板引用', true),
+      textInput('template_ref', '模板来源', true),
       textInput('template_version', '模板版本', true),
       textInput('name', '实验名称', true),
       textareaInput('description', '实验说明', true),
@@ -161,7 +161,7 @@ export function experimentAuthorActions(api: ChaimirApi): PageAction[] {
     pageAction('update-experiment', '更新实验草稿', '更新实验编排草稿。', [
       textInput('experiment_id', '实验编号', true),
       textInput('course_id', '课程编号', true),
-      textInput('template_ref', '模板引用', true),
+      textInput('template_ref', '模板来源', true),
       textInput('template_version', '模板版本', true),
       textInput('name', '实验名称', true),
       textareaInput('description', '实验说明', true),
@@ -258,8 +258,8 @@ export function vulnProblemActions(api: ChaimirApi): PageAction[] {
       textInput('runtime_code', '运行时编码', true),
       textInput('runtime_image_version', '运行时镜像版本', true),
       textInput('tool_codes', '工具编码', true, '多个编码用英文逗号分隔。'),
-      textInput('init_code_ref', '初始化代码引用'),
-      textInput('init_script_ref', '初始化脚本引用'),
+      textInput('init_code_ref', '初始化代码来源'),
+      textInput('init_script_ref', '初始化脚本来源'),
     ], async (values) => {
       await api.contest.prevalidateVulnProblem(valueText(values, 'problem_id'), {
         runtime_code: valueText(values, 'runtime_code'),
@@ -313,7 +313,7 @@ export function contentActions(api: ChaimirApi): PageAction[] {
       textInput('knowledge_points', '知识点', false, '多个知识点用英文逗号分隔。'),
       numberInput('visibility', '可见性', true),
       textareaInput('body', '内容正文', true),
-      textInput('sensitive_fields', '敏感字段', false, '多个字段用英文逗号分隔。'),
+      textInput('sensitive_fields', '需保护信息', false, '多个项目用英文逗号分隔。'),
     ], async (values) => {
       await api.content.updateItem(valueText(values, 'item_id'), {
         title: valueText(values, 'title'),
@@ -356,7 +356,7 @@ export function contentActions(api: ChaimirApi): PageAction[] {
     }),
     pageAction('issue-attachment-grant', '附件下载授权', '为题库附件签发短时下载授权。', [
       textInput('resource_id', '资源编号', true),
-      textInput('object_ref', '对象引用', true),
+      textInput('object_ref', '文件位置', true),
     ], async (values) => {
       await api.content.issueAttachmentDownloadGrant({
         resource_id: valueText(values, 'resource_id'),
@@ -680,8 +680,8 @@ export function contestManagementActions(api: ChaimirApi): PageAction[] {
     pageAction('read-cheat-suspects', '读取可疑线索', '读取竞赛防作弊可疑线索。', [
       textInput('contest_id', '竞赛编号', true),
       numberInput('problem_id', '题目编号', true),
-      textInput('code_hash', '代码哈希'),
-      textInput('exclude_source_ref', '排除来源引用'),
+      textInput('code_hash', '代码校验值'),
+      textInput('exclude_source_ref', '排除来源'),
       numberInput('threshold', '相似阈值'),
     ], async (values) => {
       await api.contest.listCheatSuspects(valueText(values, 'contest_id'), {
@@ -694,7 +694,7 @@ export function contestManagementActions(api: ChaimirApi): PageAction[] {
     }),
     pageAction('import-vuln-source-problem', '导入漏洞源题', '从漏洞源导入题目素材。', [
       numberInput('source_id', '漏洞源编号'),
-      textInput('external_ref', '外部引用'),
+      textInput('external_ref', '外部来源'),
       textInput('title', '标题', true),
       numberInput('level', '等级', true),
       numberInput('runtime_mode', '运行模式', true),

@@ -1,7 +1,7 @@
 // Checkbox 组件：复选框
 // 符合 FE-2（无障碍）、FE-4（label 显式关联）
 
-import React from 'react'
+import React, { useEffect, useImperativeHandle, useRef } from 'react'
 import { Check } from 'lucide-react'
 import { clsx } from 'clsx'
 import './Checkbox.css'
@@ -28,6 +28,16 @@ export const Checkbox = React.forwardRef<HTMLInputElement, CheckboxProps>(
     },
     ref
   ) => {
+    const inputRef = useRef<HTMLInputElement>(null)
+
+    useImperativeHandle(ref, () => inputRef.current as HTMLInputElement)
+
+    useEffect(() => {
+      if (inputRef.current) {
+        inputRef.current.indeterminate = indeterminate
+      }
+    }, [indeterminate])
+
     const wrapperClasses = clsx(
       'chaimir-checkbox-wrapper',
       disabled && 'chaimir-checkbox-wrapper--disabled',
@@ -43,16 +53,19 @@ export const Checkbox = React.forwardRef<HTMLInputElement, CheckboxProps>(
     return (
       <label className={wrapperClasses}>
         <input
-          ref={ref}
+          ref={inputRef}
           type="checkbox"
           className="chaimir-checkbox__input"
           disabled={disabled}
           checked={checked}
+          aria-checked={indeterminate ? 'mixed' : checked}
           aria-invalid={error}
           {...props}
         />
         <span className={boxClasses} aria-hidden="true">
-          {(checked || indeterminate) && (
+          {indeterminate ? (
+            <span className="chaimir-checkbox__dash" />
+          ) : (
             <Check size={14} strokeWidth={3} className="chaimir-checkbox__icon" />
           )}
         </span>

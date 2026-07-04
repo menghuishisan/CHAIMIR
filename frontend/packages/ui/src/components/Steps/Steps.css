@@ -73,3 +73,10 @@
   background: var(--color-danger-solid);
   border-color: var(--color-danger-solid);
 }
+
+@media (prefers-reduced-motion: reduce) {
+  .chaimir-steps__marker,
+  .chaimir-steps__dot {
+    transition: none;
+  }
+}

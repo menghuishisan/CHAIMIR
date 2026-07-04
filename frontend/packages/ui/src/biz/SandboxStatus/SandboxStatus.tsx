@@ -33,11 +33,11 @@ export function SandboxStatus({ status, detail, traceId, onOpenReason, className
       <span>
         <strong>{meta.label}</strong>
         {detail && <small>{detail}</small>}
-        {traceId && <small>如需帮助,请提供编号 {traceId}</small>}
+        {traceId && <small>如需帮助，请提供编号 {traceId}</small>}
       </span>
       {status === 'failed' && onOpenReason && (
         <button type="button" onClick={onOpenReason}>
-          <AlertTriangle size={14} />
+          <AlertTriangle size={14} aria-hidden="true" />
           查看原因
         </button>
       )}

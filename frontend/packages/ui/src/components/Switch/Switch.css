@@ -73,7 +73,11 @@
 
 /* Hover */
 .chaimir-switch-wrapper:hover:not(.chaimir-switch-wrapper--disabled) .chaimir-switch {
-  background: var(--color-border-strong);
+  box-shadow: inset 0 0 0 1px var(--color-primary-soft);
+}
+
+.chaimir-switch-wrapper:active:not(.chaimir-switch-wrapper--disabled) .chaimir-switch__thumb {
+  transform: scale(0.92);
 }
 
 /* Focus */
@@ -87,11 +91,23 @@
   background: var(--color-primary);
 }
 
+.chaimir-switch__input:checked + .chaimir-switch {
+  background: var(--color-primary);
+}
+
 .chaimir-switch--sm.chaimir-switch--checked .chaimir-switch__thumb {
   left: 1.125rem; /* 18px */
 }
 
+.chaimir-switch__input:checked + .chaimir-switch--sm .chaimir-switch__thumb {
+  left: 1.125rem; /* 18px */
+}
+
 .chaimir-switch--md.chaimir-switch--checked .chaimir-switch__thumb {
+  left: 1.375rem; /* 22px */
+}
+
+.chaimir-switch__input:checked + .chaimir-switch--md .chaimir-switch__thumb {
   left: 1.375rem; /* 22px */
 }
 
@@ -106,4 +122,11 @@
   font-size: var(--text-base);
   color: var(--color-text);
   line-height: var(--leading-normal);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chaimir-switch,
+  .chaimir-switch__thumb {
+    transition: none;
+  }
 }

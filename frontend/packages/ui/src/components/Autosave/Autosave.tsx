@@ -23,9 +23,12 @@ export function Autosave({ status, savedAt, traceId, className, ...props }: Auto
   )
 }
 
+/**
+ * statusLabel 把保存状态转换为用户可理解的短文案。
+ */
 function statusLabel(status: AutosaveStatus, savedAt?: string, traceId?: string): string {
   if (status === 'saving') return '正在保存草稿'
-  if (status === 'error') return traceId ? `草稿保存失败,请稍后重试。编号 ${traceId}` : '草稿保存失败,请稍后重试'
+  if (status === 'error') return traceId ? `草稿保存失败，请稍后重试。编号 ${traceId}` : '草稿保存失败，请稍后重试'
   if (status === 'saved') return savedAt ? `草稿已保存 ${savedAt}` : '草稿已保存'
   return '草稿会自动保存'
 }

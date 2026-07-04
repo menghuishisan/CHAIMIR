@@ -30,3 +30,9 @@
     transform: rotate(360deg);
   }
 }
+
+@media (prefers-reduced-motion: reduce) {
+  .chaimir-autosave__spin {
+    animation: none;
+  }
+}

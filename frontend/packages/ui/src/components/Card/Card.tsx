@@ -1,5 +1,4 @@
-// Card 组件：卡片容器
-// 用于：内容分组、列表项、仪表盘面板
+// Card 组件：内容分组、列表项和仪表盘面板的共享容器。
 
 import React from 'react'
 import { clsx } from 'clsx'
@@ -42,11 +41,13 @@ export const Card = React.forwardRef<HTMLDivElement, CardProps>(
 
 Card.displayName = 'Card'
 
-// CardHeader 子组件
 export interface CardHeaderProps extends React.HTMLAttributes<HTMLDivElement> {
   children?: React.ReactNode
 }
 
+/**
+ * CardHeader 渲染卡片标题区域，保持卡片头部间距和分隔线一致。
+ */
 export const CardHeader = React.forwardRef<HTMLDivElement, CardHeaderProps>(
   ({ children, className, ...props }, ref) => {
     const classes = clsx('chaimir-card__header', className)
@@ -60,11 +61,13 @@ export const CardHeader = React.forwardRef<HTMLDivElement, CardHeaderProps>(
 
 CardHeader.displayName = 'CardHeader'
 
-// CardBody 子组件
 export interface CardBodyProps extends React.HTMLAttributes<HTMLDivElement> {
   children?: React.ReactNode
 }
 
+/**
+ * CardBody 渲染卡片主体内容，不额外限制内容布局。
+ */
 export const CardBody = React.forwardRef<HTMLDivElement, CardBodyProps>(
   ({ children, className, ...props }, ref) => {
     const classes = clsx('chaimir-card__body', className)
@@ -78,11 +81,13 @@ export const CardBody = React.forwardRef<HTMLDivElement, CardBodyProps>(
 
 CardBody.displayName = 'CardBody'
 
-// CardFooter 子组件
 export interface CardFooterProps extends React.HTMLAttributes<HTMLDivElement> {
   children?: React.ReactNode
 }
 
+/**
+ * CardFooter 渲染卡片底部动作区，统一上分隔线与按钮间距。
+ */
 export const CardFooter = React.forwardRef<HTMLDivElement, CardFooterProps>(
   ({ children, className, ...props }, ref) => {
     const classes = clsx('chaimir-card__footer', className)

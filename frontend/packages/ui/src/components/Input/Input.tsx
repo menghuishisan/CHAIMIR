@@ -2,6 +2,7 @@
 // 符合 FE-2（无障碍）、FE-4（文案面向用户）
 
 import React from 'react'
+import { Loader2 } from 'lucide-react'
 import { clsx } from 'clsx'
 import './Input.css'
 
@@ -14,6 +15,8 @@ export interface InputProps extends Omit<React.InputHTMLAttributes<HTMLInputElem
   leftIcon?: React.ReactNode
   /** 右侧图标 */
   rightIcon?: React.ReactNode
+  /** 加载状态，用于异步校验或远程搜索 */
+  loading?: boolean
   /** 完整宽度 */
   fullWidth?: boolean
 }
@@ -25,9 +28,11 @@ export const Input = React.forwardRef<HTMLInputElement, InputProps>(
       error = false,
       leftIcon,
       rightIcon,
+      loading = false,
       fullWidth = false,
       className,
       disabled,
+      readOnly,
       ...props
     },
     ref
@@ -37,6 +42,8 @@ export const Input = React.forwardRef<HTMLInputElement, InputProps>(
       `chaimir-input-wrapper--${size}`,
       error && 'chaimir-input-wrapper--error',
       disabled && 'chaimir-input-wrapper--disabled',
+      readOnly && 'chaimir-input-wrapper--readonly',
+      loading && 'chaimir-input-wrapper--loading',
       fullWidth && 'chaimir-input-wrapper--full',
       className
     )
@@ -52,10 +59,17 @@ export const Input = React.forwardRef<HTMLInputElement, InputProps>(
           ref={ref}
           className="chaimir-input"
           disabled={disabled}
+          readOnly={readOnly}
           aria-invalid={error}
+          aria-busy={loading || undefined}
           {...props}
         />
-        {rightIcon && (
+        {loading && (
+          <span className="chaimir-input__icon chaimir-input__icon--right" aria-hidden="true">
+            <Loader2 className="chaimir-input__spinner" size={16} />
+          </span>
+        )}
+        {!loading && rightIcon && (
           <span className="chaimir-input__icon chaimir-input__icon--right" aria-hidden="true">
             {rightIcon}
           </span>

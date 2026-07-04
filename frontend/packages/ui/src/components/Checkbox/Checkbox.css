@@ -40,11 +40,19 @@
   flex-shrink: 0;
 }
 
-.chaimir-checkbox__icon {
+.chaimir-checkbox__icon,
+.chaimir-checkbox__dash {
   color: var(--color-primary-fg);
   opacity: 0;
   transform: scale(0.5);
   transition: opacity var(--t-fast) var(--ease), transform var(--t-fast) var(--ease);
+}
+
+.chaimir-checkbox__dash {
+  inline-size: 0.625rem;
+  block-size: 2px;
+  border-radius: var(--radius-full);
+  background: var(--color-primary-fg);
 }
 
 /* === 状态 === */
@@ -66,7 +74,14 @@
   border-color: var(--color-primary);
 }
 
-.chaimir-checkbox__box--checked .chaimir-checkbox__icon {
+.chaimir-checkbox__input:checked + .chaimir-checkbox__box {
+  background: var(--color-primary);
+  border-color: var(--color-primary);
+}
+
+.chaimir-checkbox__box--checked .chaimir-checkbox__icon,
+.chaimir-checkbox__box--checked .chaimir-checkbox__dash,
+.chaimir-checkbox__input:checked + .chaimir-checkbox__box .chaimir-checkbox__icon {
   opacity: 1;
   transform: scale(1);
 }
@@ -86,7 +101,8 @@
 
 @media (prefers-reduced-motion: reduce) {
   .chaimir-checkbox__box,
-  .chaimir-checkbox__icon {
+  .chaimir-checkbox__icon,
+  .chaimir-checkbox__dash {
     transition: none;
   }
 }

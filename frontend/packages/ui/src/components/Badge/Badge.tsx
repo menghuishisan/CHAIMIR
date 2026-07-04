@@ -28,6 +28,7 @@ export const Badge = React.forwardRef<HTMLSpanElement, BadgeProps>(
     },
     ref
   ) => {
+    const ariaLabel = props['aria-label']
     const classes = clsx(
       'chaimir-badge',
       `chaimir-badge--${variant}`,
@@ -37,9 +38,9 @@ export const Badge = React.forwardRef<HTMLSpanElement, BadgeProps>(
     )
 
     // FE-2: 状态点必配文字（颜色非唯一信息）
-    // 如果是纯圆点且有 aria-label，满足无障碍要求
+    // 纯圆点提供默认 aria-label，避免状态只靠颜色表达。
     return (
-      <span ref={ref} className={classes} role="status" {...props}>
+      <span ref={ref} className={classes} role="status" {...props} aria-label={dot ? ariaLabel ?? '状态' : ariaLabel}>
         {!dot && children}
       </span>
     )

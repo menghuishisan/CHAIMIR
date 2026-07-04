@@ -244,8 +244,8 @@ export function solveWorkspaceRoute(): AppDefinition['routes'][number] {
           textInput('runtime_code', '运行时编码', true),
           textInput('runtime_image_version', '运行时镜像版本', true),
           textInput('tool_codes', '工具编码', true, '多个编码用英文逗号分隔。'),
-          textInput('init_code_ref', '初始化代码引用'),
-          textInput('init_script_ref', '初始化脚本引用'),
+          textInput('init_code_ref', '初始化代码来源'),
+          textInput('init_script_ref', '初始化脚本来源'),
         ], async (values) => {
           await api.contest.createEnv(valueText(values, 'contest_id'), valueText(values, 'problem_id'), {
             runtime_code: valueText(values, 'runtime_code'),
@@ -259,7 +259,7 @@ export function solveWorkspaceRoute(): AppDefinition['routes'][number] {
         pageAction('submit-contest-solve', '提交答案', '提交解题内容并等待判定结果。', [
           textInput('contest_id', '竞赛编号', true),
           textInput('problem_id', '题目编号', true),
-          textareaInput('content_ref', '答案引用', true),
+          textareaInput('content_ref', '答案材料', true),
         ], async (values) => {
           await api.contest.submitSolve(valueText(values, 'contest_id'), valueText(values, 'problem_id'), { content_ref: valueJson(values, 'content_ref') })
           return '答案已提交'
@@ -268,12 +268,12 @@ export function solveWorkspaceRoute(): AppDefinition['routes'][number] {
           await api.contest.getSubmission(valueText(values, 'submission_id'))
           return '提交结果已读取'
         }),
-        pageAction('submit-battle-entry', '提交对抗作品', '提交对抗赛参战作品引用。', [
+        pageAction('submit-battle-entry', '提交对抗作品', '提交对抗赛参战作品材料。', [
           textInput('contest_id', '竞赛编号', true),
           numberInput('problem_id', '题目编号', true),
           numberInput('role', '参战角色', true),
-          textInput('artifact_ref', '作品引用', true),
-          textInput('code_hash', '代码哈希', true),
+          textInput('artifact_ref', '作品材料', true),
+          textInput('code_hash', '代码校验值', true),
         ], async (values) => {
           await api.contest.submitBattleEntry(valueText(values, 'contest_id'), {
             problem_id: valueNumber(values, 'problem_id'),
@@ -288,7 +288,7 @@ export function solveWorkspaceRoute(): AppDefinition['routes'][number] {
           return '天梯榜已读取'
         }),
         pageAction('prepare-leaderboard-realtime', '准备榜单实时更新', '准备指定竞赛的榜单实时更新信息。', [
-          textInput('tenant_id', '学校编号', true),
+          textInput('tenant_id', '学校', true),
           textInput('contest_id', '竞赛编号', true),
         ], async (values) => {
           api.contest.getLeaderboardTopic(valueText(values, 'tenant_id'), valueText(values, 'contest_id'))

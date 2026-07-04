@@ -5,7 +5,7 @@ import type { ChaimirApi } from '@chaimir/api-client'
 import { KeyRound } from 'lucide-react'
 import { Button } from '@chaimir/ui'
 import type { FormState } from '../types'
-import { numberOf, runSubmit, valueOf } from '../form-state'
+import { optionalNumberOf, runSubmit, valueOf } from '../form-state'
 import { TextField } from './TextField'
 
 /**
@@ -26,7 +26,7 @@ export function SmsField({
     await runSubmit(setState, async (values) => {
       await api.identity.sendSMS({
         phone: valueOf(values, 'phone'),
-        tenant_id: numberOf(values, 'tenant_id'),
+        tenant_id: optionalNumberOf(values, 'tenant_id'),
         scene,
       })
       return '验证码已发送，请查看短信'

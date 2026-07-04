@@ -12,6 +12,7 @@
   background: var(--color-scrim);
   border: 0;
   cursor: pointer;
+  animation: chaimir-drawer-scrim-in var(--t) var(--ease-out);
 }
 
 .chaimir-drawer__panel {
@@ -22,14 +23,17 @@
   inline-size: min(26rem, 92vw);
   background: var(--color-bg);
   box-shadow: var(--shadow-lg);
+  animation: chaimir-drawer-in var(--t-slow) var(--ease-out);
 }
 
 .chaimir-drawer__panel.is-left {
   inset-inline-start: 0;
+  --drawer-x: -100%;
 }
 
 .chaimir-drawer__panel.is-right {
   inset-inline-end: 0;
+  --drawer-x: 100%;
 }
 
 .chaimir-drawer__header {
@@ -52,4 +56,42 @@
   min-block-size: 0;
   overflow: auto;
   padding: var(--space-5);
+}
+
+@keyframes chaimir-drawer-scrim-in {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes chaimir-drawer-in {
+  from {
+    transform: translateX(var(--drawer-x));
+  }
+
+  to {
+    transform: translateX(0);
+  }
+}
+
+@media (max-width: 640px) {
+  .chaimir-drawer__panel {
+    inline-size: min(24rem, 100vw);
+  }
+
+  .chaimir-drawer__header,
+  .chaimir-drawer__body {
+    padding-inline: var(--space-4);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chaimir-drawer__scrim,
+  .chaimir-drawer__panel {
+    animation: none;
+  }
 }

@@ -318,7 +318,7 @@
   color: var(--page-accent-text);
   background: var(--page-accent-soft);
   border: 1px solid var(--color-border);
-  border-radius: var(--radius);
+  border-radius: var(--radius-sm);
   box-shadow: var(--shadow-xs);
   isolation: isolate;
 }
@@ -370,7 +370,7 @@
   padding: var(--space-3) var(--space-4);
   background: linear-gradient(135deg, var(--color-bg), var(--page-accent-soft));
   border: 1px solid var(--color-border);
-  border-radius: var(--radius);
+  border-radius: var(--radius-sm);
 }
 
 .chaimir-action-rail__head span {
@@ -429,7 +429,7 @@
   padding: var(--space-5);
   background: var(--color-bg);
   border: 1px solid var(--color-border);
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-sm);
   box-shadow: var(--shadow-xs);
   overflow: hidden;
 }
@@ -489,6 +489,30 @@
   border: 1px solid;
   border-radius: var(--radius-sm);
   animation: chaimir-feedback-enter var(--t) var(--ease-out) both;
+}
+
+.chaimir-error-copy {
+  display: grid;
+  gap: var(--space-1);
+}
+
+.chaimir-trace-id {
+  color: var(--color-text-sub);
+  font-size: var(--text-sm);
+}
+
+.chaimir-state.is-on-dark .chaimir-trace-id {
+  color: var(--color-dark-text-sub);
+}
+
+.chaimir-trace-id.is-compact {
+  font-size: var(--text-xs);
+}
+
+.chaimir-trace-id code {
+  color: inherit;
+  font-family: var(--font-mono);
+  font-size: inherit;
 }
 
 .chaimir-operation.is-success {
@@ -589,7 +613,7 @@
   overflow: auto;
   background: var(--color-dark-surface);
   border: 1px solid var(--color-dark-border);
-  border-radius: var(--radius);
+  border-radius: var(--radius-sm);
 }
 
 .chaimir-immersive__panel {
@@ -679,7 +703,7 @@
   color: var(--color-dark-text);
   background: var(--color-terminal-bg);
   border: 1px solid var(--color-dark-border);
-  border-radius: var(--radius);
+  border-radius: var(--radius-sm);
   font-family: var(--font-mono);
 }
 
@@ -805,6 +829,7 @@
     block-size: 100%;
     background: var(--color-scrim);
     border: 0;
+    animation: chaimir-feedback-enter var(--t) var(--ease-out) both;
   }
 
   .chaimir-app__drawer-panel {
@@ -815,6 +840,7 @@
     color: var(--color-dark-text);
     background: var(--color-dark-bg);
     overflow-y: auto;
+    animation: chaimir-mobile-drawer-in var(--t-slow) var(--ease-out) both;
   }
 
   .chaimir-app__drawer-close {
@@ -842,6 +868,16 @@
   .chaimir-immersive__grid {
     grid-template-columns: 1fr;
     overflow: auto;
+  }
+}
+
+@keyframes chaimir-mobile-drawer-in {
+  from {
+    transform: translateX(-100%);
+  }
+
+  to {
+    transform: translateX(0);
   }
 }
 
@@ -886,6 +922,8 @@
   .chaimir-page__heading::before,
   .chaimir-immersive__grid,
   .chaimir-operation,
+  .chaimir-app__drawer-scrim,
+  .chaimir-app__drawer-panel,
   .chaimir-immersive__process span::before,
   .chaimir-immersive *,
   .chaimir-immersive *::before,

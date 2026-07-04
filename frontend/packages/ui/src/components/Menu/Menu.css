@@ -25,10 +25,16 @@
   border: 0;
   border-radius: var(--radius-xs);
   cursor: pointer;
+  transition: background var(--t-fast) var(--ease), color var(--t-fast) var(--ease), transform var(--t-fast) var(--ease);
 }
 
-.chaimir-menu__item:hover:not(:disabled) {
+.chaimir-menu__item:hover:not(:disabled),
+.chaimir-menu__item:focus-visible {
   background: var(--color-surface-hover);
+}
+
+.chaimir-menu__item:active:not(:disabled) {
+  transform: translateY(1px);
 }
 
 .chaimir-menu__item:disabled {
@@ -49,4 +55,10 @@
   margin-top: var(--space-1);
   color: var(--color-text-sub);
   line-height: var(--leading-normal);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chaimir-menu__item {
+    transition: none;
+  }
 }

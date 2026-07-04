@@ -81,3 +81,11 @@
   color: var(--color-text-sub);
   font-variant-numeric: tabular-nums;
 }
+
+@media (prefers-reduced-motion: reduce) {
+  .chaimir-progress__bar,
+  .chaimir-progress__bar--striped {
+    animation: none;
+    transition: none;
+  }
+}

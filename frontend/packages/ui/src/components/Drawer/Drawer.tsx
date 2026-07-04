@@ -1,6 +1,6 @@
 // Drawer 组件：侧栏抽屉和窄屏导航容器，提供 Esc 关闭和无障碍标题。
 
-import React, { useEffect, useRef } from 'react'
+import React, { useEffect, useId, useRef } from 'react'
 import { clsx } from 'clsx'
 import { X } from 'lucide-react'
 import { Button } from '../Button'
@@ -17,6 +17,7 @@ export interface DrawerProps extends React.HTMLAttributes<HTMLDivElement> {
 export function Drawer({ open, title, side = 'right', onClose, children, className, ...props }: DrawerProps): React.ReactElement | null {
   const panelRef = useRef<HTMLElement>(null)
   const previousActiveElement = useRef<HTMLElement | null>(null)
+  const titleId = useId()
 
   useEffect(() => {
     if (!open) {
@@ -56,9 +57,9 @@ export function Drawer({ open, title, side = 'right', onClose, children, classNa
   return (
     <div className="chaimir-drawer" role="presentation">
       <button className="chaimir-drawer__scrim" type="button" aria-label="关闭抽屉" onClick={onClose} />
-      <aside ref={panelRef} className={clsx('chaimir-drawer__panel', `is-${side}`, className)} role="dialog" aria-modal="true" aria-labelledby="chaimir-drawer-title" tabIndex={-1} {...props}>
+      <aside ref={panelRef} className={clsx('chaimir-drawer__panel', `is-${side}`, className)} role="dialog" aria-modal="true" aria-labelledby={titleId} tabIndex={-1} {...props}>
         <header className="chaimir-drawer__header">
-          <h2 id="chaimir-drawer-title">{title}</h2>
+          <h2 id={titleId}>{title}</h2>
           <Button variant="ghost" size="sm" icon={<X size={16} />} aria-label="关闭抽屉" onClick={onClose} />
         </header>
         <div className="chaimir-drawer__body">{children}</div>

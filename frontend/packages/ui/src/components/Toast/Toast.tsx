@@ -40,6 +40,7 @@ export const Toast: React.FC<ToastProps> = ({
   onClose,
 }) => {
   const Icon = variantIcons[variant]
+  const isError = variant === 'error'
 
   useEffect(() => {
     if (duration > 0) {
@@ -56,8 +57,8 @@ export const Toast: React.FC<ToastProps> = ({
   return (
     <div
       className={classes}
-      role="status"
-      aria-live="polite"
+      role={isError ? 'alert' : 'status'}
+      aria-live={isError ? 'assertive' : 'polite'}
       aria-atomic="true"
     >
       <div className="chaimir-toast__icon" aria-hidden="true">
@@ -105,7 +106,7 @@ export const ToastContainer: React.FC<ToastContainerProps> = ({
   const classes = clsx('chaimir-toast-container', `chaimir-toast-container--${position}`)
 
   return (
-    <div className={classes}>
+    <div className={classes} aria-live="polite" aria-relevant="additions removals">
       {toasts.map((toast) => (
         <Toast key={toast.id} {...toast} onClose={() => onRemove(toast.id)} />
       ))}

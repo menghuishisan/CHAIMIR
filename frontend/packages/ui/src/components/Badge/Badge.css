@@ -124,3 +124,9 @@
 .chaimir-badge--dot.chaimir-badge--purple {
   background: var(--color-purple-border);
 }
+
+@media (prefers-reduced-motion: reduce) {
+  .chaimir-badge {
+    transition: none;
+  }
+}

@@ -53,9 +53,9 @@ export function SsoPage({ api, config }: { api: ChaimirApi; config: ReturnType<t
   }
 
   return (
-    <AuthBlock title="学校统一认证" description="CAS 跳转或 LDAP 登录只验证身份，平台仍按已导入名单放行。" state={state}>
+    <AuthBlock title="学校统一认证" description="使用学校已启用的 CAS 或 LDAP 认证。账号仍需已由学校导入平台。" state={state}>
       <form className="public-form" onSubmit={ldapSubmit}>
-        <TextField icon={<Building2 size={17} />} name="tenant_code" label="学校短码" value={state.values.tenant_code} onChange={setState} required />
+        <TextField icon={<Building2 size={17} />} name="tenant_code" label="学校短码" value={state.values.tenant_code} onChange={setState} placeholder="由学校统一告知" required />
         <TextField icon={<UserRound size={17} />} name="username" label="统一认证账号" value={state.values.username} onChange={setState} autoComplete="username" required />
         <TextField icon={<LockKeyhole size={17} />} name="password" label="统一认证密码" type="password" value={state.values.password} onChange={setState} autoComplete="current-password" required />
         <div className="public-button-row">

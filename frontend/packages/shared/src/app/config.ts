@@ -5,6 +5,7 @@ import { API_BASE_PATH } from '@chaimir/api-client'
 export interface FrontendRuntimeConfig {
   apiBaseUrl: string
   wsBaseUrl?: string
+  deployMode: 'saas' | 'school'
   requestTimeoutMs: number
   simWorkerCommandTimeoutMs: number
   roleAppUrls: {
@@ -24,6 +25,7 @@ export function readFrontendConfig(env: EnvMap = readImportMetaEnv()): FrontendR
   return {
     apiBaseUrl: env.VITE_API_BASE_URL || API_BASE_PATH,
     wsBaseUrl: env.VITE_WS_BASE_URL,
+    deployMode: readDeployMode(env.VITE_DEPLOY_MODE),
     requestTimeoutMs: readNumber(env.VITE_API_TIMEOUT_MS, 30000),
     simWorkerCommandTimeoutMs: readNumber(env.VITE_SIM_WORKER_COMMAND_TIMEOUT_MS, 2000),
     roleAppUrls: {
@@ -33,6 +35,13 @@ export function readFrontendConfig(env: EnvMap = readImportMetaEnv()): FrontendR
       platformAdmin: env.VITE_PLATFORM_ADMIN_APP_URL || '/platform-admin/',
     },
   }
+}
+
+/**
+ * readDeployMode 读取前端部署形态，私有化部署用于关闭平台层公共入口。
+ */
+function readDeployMode(value: string | undefined): FrontendRuntimeConfig['deployMode'] {
+  return value === 'school' ? 'school' : 'saas'
 }
 
 /**

@@ -21,6 +21,7 @@ export const Textarea = React.forwardRef<HTMLTextAreaElement, TextareaProps>(
       resize = 'vertical',
       className,
       disabled,
+      readOnly,
       ...props
     },
     ref
@@ -31,6 +32,7 @@ export const Textarea = React.forwardRef<HTMLTextAreaElement, TextareaProps>(
       fullWidth && 'chaimir-textarea--full',
       `chaimir-textarea--resize-${resize}`,
       disabled && 'chaimir-textarea--disabled',
+      readOnly && 'chaimir-textarea--readonly',
       className
     )
 
@@ -39,6 +41,7 @@ export const Textarea = React.forwardRef<HTMLTextAreaElement, TextareaProps>(
         ref={ref}
         className={classes}
         disabled={disabled}
+        readOnly={readOnly}
         aria-invalid={error}
         {...props}
       />

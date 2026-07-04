@@ -3,7 +3,7 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import { createApi } from '@chaimir/api-client'
 import type { ChaimirApi } from '@chaimir/api-client'
-import { ArrowLeft } from 'lucide-react'
+import { ArrowLeft, BookOpenCheck, FlaskConical, Trophy } from 'lucide-react'
 import { getTraceId, readFrontendConfig } from '@chaimir/shared'
 import type { AuthPage } from './types'
 import { ActivatePage } from './pages/ActivatePage'
@@ -21,6 +21,7 @@ import './AuthApp.css'
 export function AuthApp(): React.ReactElement {
   const [page, setPage] = useState<AuthPage>(() => parsePage(window.location.hash))
   const config = useMemo(() => readFrontendConfig(), [])
+  const effectivePage: AuthPage = config.deployMode === 'school' && page === 'platform-login' ? 'login' : page
   const api = useMemo<ChaimirApi>(() => createApi({
     baseURL: config.apiBaseUrl,
     timeout: config.requestTimeoutMs,
@@ -36,6 +37,12 @@ export function AuthApp(): React.ReactElement {
     return () => window.removeEventListener('hashchange', onHashChange)
   }, [])
 
+  useEffect(() => {
+    if (config.deployMode === 'school' && page === 'platform-login') {
+      window.location.hash = '#login'
+    }
+  }, [config.deployMode, page])
+
   return (
     <main className="public-app">
       <section className="public-hero" aria-label="平台能力概览">
@@ -47,31 +54,42 @@ export function AuthApp(): React.ReactElement {
           </span>
         </a>
         <div className="public-hero__content">
-          <p className="public-kicker">统一身份入口</p>
-          <h1>进入你的教学、实验或管理空间</h1>
-          <p>师生账号由学校统一开通；学校入驻申请经平台审核后开通首个学校管理员账号。</p>
+          <p className="public-kicker">教学 · 实验 · 竞赛</p>
+          <h1>进入你的区块链学习与实践空间</h1>
+          <p>师生账号由学校统一开通。登录后，系统会按账号权限进入对应的功能页。</p>
         </div>
-        <div className="public-hero__grid" aria-hidden="true">
-          <span />
-          <span />
-          <span />
-          <span />
+        <div className="public-hero__flow" aria-hidden="true">
+          <svg className="public-flow-map" viewBox="0 0 320 220" focusable="false">
+            <line className="public-flow-path is-teaching-lab" x1="48" y1="62" x2="160" y2="152" />
+            <line className="public-flow-path is-lab-contest" x1="160" y1="152" x2="272" y2="82" />
+            <line className="public-flow-path is-teaching-contest" x1="48" y1="62" x2="272" y2="82" />
+          </svg>
+          <span className="public-flow-node is-teaching"><BookOpenCheck size={18} /></span>
+          <span className="public-flow-node is-lab"><FlaskConical size={18} /></span>
+          <span className="public-flow-node is-contest"><Trophy size={18} /></span>
+        </div>
+        <div className="public-hero__signals" aria-label="平台范围">
+          <span>课程学习</span>
+          <span>沙箱实验</span>
+          <span>竞赛训练</span>
         </div>
       </section>
       <section className="public-panel" aria-label="账号入口">
-        {page !== 'login' && (
-          <a className="public-back" href="#login">
-            <ArrowLeft size={16} aria-hidden="true" />
-            返回登录
-          </a>
-        )}
-        {page === 'login' && <LoginPage api={api} config={config} />}
-        {page === 'forgot' && <ForgotPage api={api} />}
-        {page === 'sso' && <SsoPage api={api} config={config} />}
-        {page === 'apply' && <ApplyPage api={api} />}
-        {page === 'activate' && <ActivatePage api={api} />}
-        {page === 'platform-login' && <PlatformLoginPage api={api} config={config} />}
-        {page === 'change-pwd' && <ChangePasswordGate />}
+        <div className="public-panel__surface">
+          {effectivePage !== 'login' && (
+            <a className="public-back" href="#login">
+              <ArrowLeft size={16} aria-hidden="true" />
+              返回登录
+            </a>
+          )}
+          {effectivePage === 'login' && <LoginPage api={api} config={config} />}
+          {effectivePage === 'forgot' && <ForgotPage api={api} />}
+          {effectivePage === 'sso' && <SsoPage api={api} config={config} />}
+          {effectivePage === 'apply' && <ApplyPage api={api} />}
+          {effectivePage === 'activate' && <ActivatePage api={api} />}
+          {effectivePage === 'platform-login' && <PlatformLoginPage api={api} config={config} />}
+          {effectivePage === 'change-pwd' && <ChangePasswordGate />}
+        </div>
       </section>
     </main>
   )

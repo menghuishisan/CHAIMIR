@@ -102,7 +102,7 @@ function AppShell({
       .catch((error: unknown) => {
         if (active) {
           const userError = toUserFacingError(error)
-          setNoticeError(userError.message)
+          setNoticeError(formatErrorMessage(userError))
         }
       })
     return () => {
@@ -122,6 +122,7 @@ function AppShell({
 
   useEffect(() => {
     if (!drawerOpen) {
+      document.body.style.overflow = ''
       if (wasDrawerOpenRef.current) {
         mobileMenuRef.current?.focus()
       }
@@ -130,7 +131,11 @@ function AppShell({
     }
 
     wasDrawerOpenRef.current = true
+    document.body.style.overflow = 'hidden'
     drawerPanelRef.current?.querySelector<HTMLElement>('a, button')?.focus()
+    return () => {
+      document.body.style.overflow = ''
+    }
   }, [drawerOpen])
 
   useEffect(() => {
@@ -378,7 +383,7 @@ function ResourceView({ result, onRefresh }: { result: ResourceResult; onRefresh
       {operation.error && (
         <div className="chaimir-operation is-error" role="alert">
           <AlertCircle size={18} aria-hidden="true" />
-          <span>{operation.error.traceId ? `${operation.error.message} 如需帮助，请提供编号 ${operation.error.traceId}。` : operation.error.message}</span>
+          <ErrorDescription error={operation.error} />
         </div>
       )}
       <div className={`chaimir-page__workspace ${hasActions ? 'has-actions' : ''}`}>
@@ -468,7 +473,7 @@ function ActionCard({
         </div>
       </CardHeader>
       <CardBody>
-        <form className="chaimir-action-form" onSubmit={submit}>
+        <form className="chaimir-action-form" onSubmit={submit} onInvalidCapture={focusInvalidControl}>
           {action.fields.map((field) => {
             const fieldId = `action-${action.key}-${field.name}`
             const value = typeof values[field.name] === 'string' ? values[field.name] as string : ''
@@ -515,6 +520,9 @@ function ActionCard({
   )
 }
 
+/**
+ * actionColumn 为数据表追加行级操作列，操作结果由共享状态统一反馈。
+ */
 function actionColumn(
   actions: RowAction[],
   setOperation: React.Dispatch<React.SetStateAction<OperationState>>,
@@ -541,6 +549,9 @@ function actionColumn(
   }
 }
 
+/**
+ * runRowAction 执行行级动作，成功后刷新列表，失败时只展示用户向错误。
+ */
 async function runRowAction(
   action: RowAction,
   row: DataRow,
@@ -636,7 +647,7 @@ function ImmersivePage({ app, route, state, onRefresh }: { app: AppDefinition; r
             {operation.error && (
               <div className="chaimir-operation is-error" role="alert">
                 <AlertCircle size={18} aria-hidden="true" />
-                <span>{operation.error.traceId ? `${operation.error.message} 如需帮助，请提供编号 ${operation.error.traceId}。` : operation.error.message}</span>
+                <ErrorDescription error={operation.error} />
               </div>
             )}
             {result.panels.map((panel) => (
@@ -699,8 +710,9 @@ class AppErrorBoundary extends React.Component<{ children: React.ReactNode }, { 
           <Empty
             icon={<AlertCircle size={30} />}
             title={this.state.error.title}
-            description={this.state.error.traceId ? `${this.state.error.message} 如需帮助，请提供编号 ${this.state.error.traceId}。` : this.state.error.message}
+            description={this.state.error.message}
           />
+          {this.state.error.traceId && <TraceId traceId={this.state.error.traceId} />}
           <Button type="button" onClick={() => window.location.reload()}>重新加载</Button>
         </main>
       )
@@ -748,12 +760,56 @@ function ErrorState({ error, onDark = false }: { error: UserFacingError; onDark?
       <Empty
         icon={<AlertCircle size={28} />}
         title={error.title}
-        description={error.traceId ? `${error.message} 如需帮助，请提供编号 ${error.traceId}。` : error.message}
+        description={error.message}
       />
+      {error.traceId && <TraceId traceId={error.traceId} />}
     </div>
   )
 }
 
+/**
+ * ErrorDescription 输出用户向错误文案和独立报障编号，避免拼出内部错误结构。
+ */
+function ErrorDescription({ error }: { error: UserFacingError }): React.ReactElement {
+  return (
+    <span className="chaimir-error-copy">
+      <span>{error.message}</span>
+      {error.traceId && <TraceId traceId={error.traceId} compact />}
+    </span>
+  )
+}
+
+/**
+ * TraceId 只展示报障编号，不暴露后端错误结构。
+ */
+function TraceId({ traceId, compact = false }: { traceId: string; compact?: boolean }): React.ReactElement {
+  return (
+    <span className={`chaimir-trace-id ${compact ? 'is-compact' : ''}`}>
+      如需帮助，请提供编号 <code>{traceId}</code>
+    </span>
+  )
+}
+
+/**
+ * formatErrorMessage 将错误整理为控件 aria-label 可读的一句话。
+ */
+function formatErrorMessage(error: UserFacingError): string {
+  return error.traceId ? `${error.message} 如需帮助，请提供编号 ${error.traceId}。` : error.message
+}
+
+/**
+ * focusInvalidControl 让浏览器校验失败时焦点停在第一个无效字段。
+ */
+function focusInvalidControl(event: React.InvalidEvent<HTMLFormElement>): void {
+  const target = event.target
+  if (target instanceof HTMLElement) {
+    target.focus()
+  }
+}
+
+/**
+ * badgeTone 将业务色调映射到共享 Badge 变体，避免页面自造颜色。
+ */
 function badgeTone(tone: string | undefined): 'primary' | 'secondary' | 'success' | 'warning' | 'danger' {
   if (tone === 'success' || tone === 'warning' || tone === 'danger' || tone === 'secondary') {
     return tone
@@ -786,6 +842,9 @@ function sanitizeClassName(value: string): string {
   return normalized.replace(/^-+|-+$/g, '') || 'default'
 }
 
+/**
+ * normalizeRoute 根据 hash 定位当前路由，缺省时回到角色首页。
+ */
 function normalizeRoute(app: AppDefinition, parsed: ReturnType<typeof parseHashRoute>): { route: AppRoute; params: URLSearchParams } {
   const route = app.routes.find((item) => item.path === parsed.path) ?? app.routes.find((item) => item.path === app.homePath) ?? app.routes[0]
   return { route, params: parsed.params }
@@ -800,7 +859,7 @@ async function logout(api: ChaimirApi, setLogoutError: (message: string | null) 
     await api.identity.logout()
   } catch (error) {
     const userError = toUserFacingError(error)
-    setLogoutError(`${userError.message}${userError.traceId ? ` 如需帮助，请提供编号 ${userError.traceId}。` : ''}`)
+    setLogoutError(formatErrorMessage(userError))
   } finally {
     clearSession()
   }

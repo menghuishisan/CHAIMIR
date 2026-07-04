@@ -22,6 +22,8 @@ export interface PaginationProps {
   showTotal?: boolean
   /** 自定义类名 */
   className?: string
+  /** 分页导航说明 */
+  ariaLabel?: string
 }
 
 export const Pagination: React.FC<PaginationProps> = ({
@@ -32,6 +34,7 @@ export const Pagination: React.FC<PaginationProps> = ({
   onChange,
   showQuickJumper = false,
   showTotal = true,
+  ariaLabel = '分页',
   className,
 }) => {
   const [jumpValue, setJumpValue] = React.useState('')
@@ -49,6 +52,9 @@ export const Pagination: React.FC<PaginationProps> = ({
     }
   }
 
+  /**
+   * renderPageNumbers 根据当前页折叠页码，避免分页在窄屏挤压内容。
+   */
   const renderPageNumbers = () => {
     const pages: (number | string)[] = []
     const showPages = 7 // 最多显示7个页码
@@ -87,7 +93,7 @@ export const Pagination: React.FC<PaginationProps> = ({
   const classes = clsx('chaimir-pagination', className)
 
   return (
-    <div className={classes}>
+    <nav className={classes} aria-label={ariaLabel}>
       {showTotal && totalItems && (
         <div className="chaimir-pagination__total">
           共 {totalItems} 条
@@ -120,7 +126,8 @@ export const Pagination: React.FC<PaginationProps> = ({
               type="button"
               className={clsx(
                 'chaimir-pagination__item',
-                page === current && 'chaimir-pagination__item--active'
+                page === current && 'chaimir-pagination__item--active',
+                !isCompactVisible(page as number, current, total) && 'chaimir-pagination__item--compact-hidden'
               )}
               aria-current={page === current ? 'page' : undefined}
               aria-label={`第 ${page} 页`}
@@ -158,8 +165,15 @@ export const Pagination: React.FC<PaginationProps> = ({
           页
         </div>
       )}
-    </div>
+    </nav>
   )
 }
 
 Pagination.displayName = 'Pagination'
+
+/**
+ * isCompactVisible 保留首页、尾页、当前页和相邻页，小屏隐藏其余页码。
+ */
+function isCompactVisible(page: number, current: number, total: number): boolean {
+  return page === 1 || page === total || Math.abs(page - current) <= 1
+}

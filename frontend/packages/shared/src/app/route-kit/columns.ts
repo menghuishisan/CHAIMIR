@@ -159,7 +159,7 @@ export function warningColumns(): DataColumn[] {
 export function tenantConfigColumns(): DataColumn[] {
   return [
     { key: 'name', title: '学校名称', priority: 'primary' },
-    { key: 'code', title: '租户编码' },
+    { key: 'code', title: '学校短码' },
     { key: 'status', title: '状态' },
     { key: 'auth_mode', title: '认证方式' },
     { key: 'enable_activation_code', title: '启用激活码' },
@@ -305,7 +305,7 @@ export function lessonColumns(): DataColumn[] {
   return [
     { key: 'title', title: '课时标题', priority: 'primary' },
     { key: 'content_type', title: '内容类型' },
-    { key: 'content_ref', title: '内容引用' },
+    { key: 'content_ref', title: '内容来源' },
     { key: 'updated_at', title: '更新时间' },
   ]
 }
@@ -419,7 +419,7 @@ export function levelConfigColumns(): DataColumn[] {
 export function ssoColumns(): DataColumn[] {
   return [
     { key: 'type', title: '认证类型', priority: 'primary' },
-    { key: 'match_field', title: '匹配字段' },
+    { key: 'match_field', title: '匹配信息' },
     { key: 'enabled', title: '启用' },
   ]
 }
@@ -443,7 +443,7 @@ export function runtimeImageColumns(): DataColumn[] {
 
 export function quotaColumns(): DataColumn[] {
   return [
-    { key: 'tenant_id', title: '租户', priority: 'primary' },
+    { key: 'tenant_id', title: '学校', priority: 'primary' },
     { key: 'max_concurrent_sandbox', title: '并发沙箱', align: 'end' },
     { key: 'max_cpu', title: 'CPU', align: 'end' },
     { key: 'max_memory_mb', title: '内存', align: 'end' },

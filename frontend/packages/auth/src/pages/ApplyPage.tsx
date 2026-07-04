@@ -2,11 +2,19 @@
 
 import React from 'react'
 import type { ChaimirApi } from '@chaimir/api-client'
-import { Building2, Landmark, Mail, Phone, UserRound } from 'lucide-react'
+import { Landmark, Mail, Phone, UserRound } from 'lucide-react'
 import { Button } from '@chaimir/ui'
 import { numberOf, runSubmit, useFormState, valueOf } from '../form-state'
 import { AuthBlock } from '../components/AuthBlock'
+import { SelectField } from '../components/SelectField'
 import { TextField } from '../components/TextField'
+
+const schoolTypeOptions = [
+  { value: '1', label: '博士培养单位' },
+  { value: '2', label: '硕士培养单位' },
+  { value: '3', label: '本科院校' },
+  { value: '4', label: '高职高专院校' },
+]
 
 /**
  * ApplyPage 提交公开学校入驻申请，申请状态由后端持久化。
@@ -30,10 +38,10 @@ export function ApplyPage({ api }: { api: ChaimirApi }): React.ReactElement {
   return (
     <AuthBlock title="学校入驻申请" description="这是学校开通申请，不是个人账号注册。" state={state}>
       <form className="public-form" onSubmit={submit}>
-        <TextField icon={<Landmark size={17} />} name="school_name" label="学校名称" value={state.values.school_name} onChange={setState} required />
-        <TextField icon={<Building2 size={17} />} name="school_type" label="学校类型编号" value={state.values.school_type} onChange={setState} required />
+        <TextField icon={<Landmark size={17} />} name="school_name" label="学校名称" value={state.values.school_name} onChange={setState} autoComplete="organization" required />
+        <SelectField name="school_type" label="学校类型" value={state.values.school_type} options={schoolTypeOptions} onChange={setState} placeholder="选择学校类型" required />
         <TextField icon={<UserRound size={17} />} name="contact_name" label="联系人姓名" value={state.values.contact_name} onChange={setState} required />
-        <TextField icon={<Phone size={17} />} name="contact_phone" label="联系人手机号" value={state.values.contact_phone} onChange={setState} autoComplete="tel" required />
+        <TextField icon={<Phone size={17} />} name="contact_phone" label="联系人手机号" value={state.values.contact_phone} onChange={setState} autoComplete="tel" inputMode="tel" required />
         <TextField icon={<Mail size={17} />} name="contact_email" label="联系人邮箱" type="email" value={state.values.contact_email} onChange={setState} autoComplete="email" required />
         <Button type="submit" size="lg" block loading={state.loading}>提交申请</Button>
       </form>

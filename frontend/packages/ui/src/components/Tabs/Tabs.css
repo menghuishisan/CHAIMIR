@@ -8,24 +8,34 @@
 .chaimir-tabs__nav {
   position: relative;
   display: flex;
+  gap: var(--space-1);
+  overflow-x: auto;
   border-bottom: 1px solid var(--color-border);
+  scrollbar-width: thin;
 }
 
 .chaimir-tabs__tab {
   position: relative;
+  min-block-size: 2.75rem;
   padding: var(--space-3) var(--space-4);
   font-size: var(--text-base);
   font-weight: var(--font-medium);
   color: var(--color-text-sub);
   background: transparent;
   border: none;
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
   cursor: pointer;
-  transition: color var(--t) var(--ease);
+  transition: background var(--t-fast) var(--ease), color var(--t-fast) var(--ease), transform var(--t-fast) var(--ease);
   white-space: nowrap;
 }
 
 .chaimir-tabs__tab:hover:not(.chaimir-tabs__tab--disabled) {
+  background: var(--color-surface-hover);
   color: var(--color-text);
+}
+
+.chaimir-tabs__tab:active:not(.chaimir-tabs__tab--disabled) {
+  transform: translateY(1px);
 }
 
 .chaimir-tabs__tab--active {
@@ -33,24 +43,29 @@
   font-weight: var(--font-semibold);
 }
 
+.chaimir-tabs__tab--active::after {
+  position: absolute;
+  inset-inline: var(--space-3);
+  inset-block-end: -1px;
+  block-size: 2px;
+  background: var(--color-primary);
+  border-radius: var(--radius-full);
+  content: '';
+  transform: scaleX(1);
+  transform-origin: center;
+}
+
 .chaimir-tabs__tab--disabled {
   color: var(--color-text-faint);
   cursor: not-allowed;
 }
 
-/* 滑入下划线（需要 JS 计算位置） */
-.chaimir-tabs__indicator {
-  position: absolute;
-  bottom: -1px;
-  left: 0;
-  height: 2px;
-  background: var(--color-primary);
-  transition: inline-size 0.25s var(--ease), transform 0.25s var(--ease), inset-inline-start 0.25s var(--ease), left 0.25s var(--ease);
+.chaimir-tabs__panel {
+  padding-block-start: var(--space-4);
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .chaimir-tabs__tab,
-  .chaimir-tabs__indicator {
+  .chaimir-tabs__tab {
     transition: none;
   }
 }

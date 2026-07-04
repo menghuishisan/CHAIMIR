@@ -2,9 +2,9 @@
 
 import React from 'react'
 import type { ChaimirApi } from '@chaimir/api-client'
-import { Building2, LockKeyhole, Phone } from 'lucide-react'
+import { LockKeyhole, MessageSquareText, Phone } from 'lucide-react'
 import { Button } from '@chaimir/ui'
-import { numberOf, runSubmit, useFormState, valueOf } from '../form-state'
+import { optionalNumberOf, runSubmit, useFormState, valueOf } from '../form-state'
 import { AuthBlock } from '../components/AuthBlock'
 import { SmsField } from '../components/SmsField'
 import { TextField } from '../components/TextField'
@@ -21,7 +21,7 @@ export function ForgotPage({ api }: { api: ChaimirApi }): React.ReactElement {
         phone: valueOf(values, 'phone'),
         code: valueOf(values, 'code'),
         new_password: valueOf(values, 'new_password'),
-        tenant_id: numberOf(values, 'tenant_id'),
+        tenant_id: optionalNumberOf(values, 'tenant_id') ?? 0,
       })
       return '密码已重置，请使用新密码登录'
     })
@@ -30,8 +30,11 @@ export function ForgotPage({ api }: { api: ChaimirApi }): React.ReactElement {
   return (
     <AuthBlock title="找回密码" description="通过已绑定手机号接收验证码并设置新密码。" state={state}>
       <form className="public-form" onSubmit={submit}>
-        <TextField icon={<Phone size={17} />} name="phone" label="手机号" value={state.values.phone} onChange={setState} autoComplete="tel" required />
-        <TextField icon={<Building2 size={17} />} name="tenant_id" label="学校编号" value={state.values.tenant_id} onChange={setState} required />
+        <TextField icon={<Phone size={17} />} name="phone" label="手机号" value={state.values.phone} onChange={setState} autoComplete="tel" inputMode="tel" required />
+        <div className="public-inline-note" role="note">
+          <MessageSquareText size={16} aria-hidden="true" />
+          <span>如果手机号关联多个学校，请联系学校管理员协助重置密码。</span>
+        </div>
         <SmsField api={api} state={state} setState={setState} scene={2} />
         <TextField icon={<LockKeyhole size={17} />} name="new_password" label="新密码" type="password" value={state.values.new_password} onChange={setState} autoComplete="new-password" required />
         <Button type="submit" size="lg" block loading={state.loading}>重置密码</Button>

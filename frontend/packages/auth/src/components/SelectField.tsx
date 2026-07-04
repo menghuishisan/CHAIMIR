@@ -1,54 +1,45 @@
-// TextField：公共认证表单的带图标受控输入框。
+// SelectField：公共认证表单的受控选择控件。
 
 import React from 'react'
-import { FormField, Input } from '@chaimir/ui'
+import { FormField, Select } from '@chaimir/ui'
+import type { SelectOption } from '@chaimir/ui'
 import type { FormState } from '../types'
 import { updateField } from '../form-state'
 
 /**
- * TextField 渲染带 Lucide 图标的受控输入框。
+ * SelectField 渲染公共认证页的语义选择项，避免把后端编号直接暴露给用户。
  */
-export function TextField({
-  icon,
+export function SelectField({
   name,
   label,
   value,
+  options,
   onChange,
-  type = 'text',
-  autoComplete,
   placeholder,
   helperText,
-  inputMode,
   required,
 }: {
-  icon: React.ReactNode
   name: string
   label: string
   value?: string
+  options: SelectOption[]
   onChange: React.Dispatch<React.SetStateAction<FormState>>
-  type?: string
-  autoComplete?: string
   placeholder?: string
   helperText?: string
-  inputMode?: React.HTMLAttributes<HTMLInputElement>['inputMode']
   required?: boolean
 }): React.ReactElement {
   const fieldId = `auth-${name}`
 
   return (
     <FormField className="public-field" label={label} htmlFor={fieldId} helperText={helperText} required={required}>
-      <Input
+      <Select
         id={fieldId}
-        name={name}
-        type={type}
-        value={value ?? ''}
-        required={required}
-        autoComplete={autoComplete}
+        className="public-select"
+        value={value}
+        options={options}
         placeholder={placeholder}
-        inputMode={inputMode}
-        leftIcon={icon}
         fullWidth
-        onChange={(event) => updateField(onChange, name, event.target.value)}
+        onChange={(nextValue) => updateField(onChange, name, nextValue)}
       />
     </FormField>
   )

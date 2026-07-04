@@ -12,7 +12,7 @@
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
-  max-width: 24rem; /* 384px */
+  inline-size: min(24rem, 100vw);
   padding: var(--space-4);
   pointer-events: none;
 }
@@ -49,7 +49,7 @@
   gap: var(--space-3);
   padding: var(--space-4);
   background: var(--color-bg);
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-sm);
   box-shadow: var(--shadow-lg);
   border: 1px solid var(--color-border);
   pointer-events: auto;
@@ -129,7 +129,7 @@
 
 .chaimir-toast__trace {
   font-size: var(--text-xs);
-  color: var(--color-text-faint);
+  color: var(--color-text-sub);
   margin-top: var(--space-2);
 }
 
@@ -162,11 +162,15 @@
   color: var(--color-text);
 }
 
+.chaimir-toast__close:active {
+  transform: scale(0.96);
+}
+
 /* === 响应式 === */
 
 @media (max-width: 640px) {
   .chaimir-toast-container {
-    max-width: 100%;
+    inline-size: 100%;
     left: 0;
     right: 0;
     padding: var(--space-3);
@@ -175,6 +179,10 @@
   .chaimir-toast-container--top-center,
   .chaimir-toast-container--bottom-center {
     transform: none;
+  }
+
+  .chaimir-toast {
+    inline-size: 100%;
   }
 }
 

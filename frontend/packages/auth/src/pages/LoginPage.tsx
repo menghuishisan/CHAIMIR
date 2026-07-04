@@ -1,8 +1,8 @@
-// LoginPage：学校用户统一登录页，支持手机号、学工号和短信验证码。
+// LoginPage：租户账号统一登录页，支持手机号、学工号和短信验证码。
 
 import React, { useState } from 'react'
 import type { ChaimirApi } from '@chaimir/api-client'
-import { Building2, Info, LockKeyhole, Phone, UserRound } from 'lucide-react'
+import { Building2, Info, LockKeyhole, MessageSquareText, Phone, UserRound } from 'lucide-react'
 import { Button } from '@chaimir/ui'
 import { readFrontendConfig } from '@chaimir/shared'
 import type { LoginMode } from '../types'
@@ -20,7 +20,7 @@ const loginModes: Array<{ key: LoginMode; label: string }> = [
 ]
 
 /**
- * LoginPage 提供手机号密码、学工号密码和短信验证码三种学校用户登录方式。
+ * LoginPage 提供手机号密码、学工号密码和短信验证码三种租户账号登录方式。
  */
 export function LoginPage({ api, config }: { api: ChaimirApi; config: ReturnType<typeof readFrontendConfig> }): React.ReactElement {
   const [mode, setMode] = useState<LoginMode>('phone')
@@ -72,7 +72,7 @@ export function LoginPage({ api, config }: { api: ChaimirApi; config: ReturnType
         />
       )}
       <form className="public-form" onSubmit={submit}>
-        {mode === 'phone' && <TextField icon={<Phone size={17} />} name="phone" label="手机号" value={state.values.phone} onChange={setState} autoComplete="tel" required />}
+        {mode === 'phone' && <TextField icon={<Phone size={17} />} name="phone" label="手机号" value={state.values.phone} onChange={setState} autoComplete="tel" inputMode="tel" required />}
         {mode === 'phone' && state.values.tenant_name && (
           <div className="public-inline-note is-selected" role="status">
             <Building2 size={16} aria-hidden="true" />
@@ -85,10 +85,21 @@ export function LoginPage({ api, config }: { api: ChaimirApi; config: ReturnType
             <span>若同一手机号关联多个学校，登录后再选择本次进入的学校。</span>
           </div>
         )}
-        {mode === 'no' && <TextField icon={<Building2 size={17} />} name="tenant_code" label="学校短码" value={state.values.tenant_code} onChange={setState} required />}
-        {mode === 'no' && <TextField icon={<UserRound size={17} />} name="no" label="学号或工号" value={state.values.no} onChange={setState} required />}
-        {mode === 'sms' && <TextField icon={<Phone size={17} />} name="phone" label="手机号" value={state.values.phone} onChange={setState} autoComplete="tel" required />}
-        {mode === 'sms' && <TextField icon={<Building2 size={17} />} name="tenant_id" label="学校编号" value={state.values.tenant_id} onChange={setState} required />}
+        {mode === 'no' && <TextField icon={<Building2 size={17} />} name="tenant_code" label="学校短码" value={state.values.tenant_code} onChange={setState} placeholder="由学校统一告知" required />}
+        {mode === 'no' && <TextField icon={<UserRound size={17} />} name="no" label="学号或工号" value={state.values.no} onChange={setState} autoComplete="username" required />}
+        {mode === 'sms' && <TextField icon={<Phone size={17} />} name="phone" label="手机号" value={state.values.phone} onChange={setState} autoComplete="tel" inputMode="tel" required />}
+        {mode === 'sms' && state.values.tenant_name && (
+          <div className="public-inline-note is-selected" role="status">
+            <Building2 size={16} aria-hidden="true" />
+            <span>将进入：{state.values.tenant_name}</span>
+          </div>
+        )}
+        {mode === 'sms' && !state.values.tenant_name && (
+          <div className="public-inline-note" role="note">
+            <MessageSquareText size={16} aria-hidden="true" />
+            <span>若手机号关联多个学校，请先使用手机号密码登录并选择学校。</span>
+          </div>
+        )}
         {mode === 'sms' && <SmsField api={api} state={state} setState={setState} scene={1} />}
         {mode !== 'sms' && <TextField icon={<LockKeyhole size={17} />} name="password" label="密码" type="password" value={state.values.password} onChange={setState} autoComplete="current-password" required />}
         <Button type="submit" size="lg" block loading={state.loading}>登录</Button>

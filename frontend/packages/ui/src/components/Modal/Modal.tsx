@@ -1,7 +1,7 @@
 // Modal 组件：模态对话框
 // 符合 FE-2（焦点陷阱、Esc 关闭、scrim 遮罩）
 
-import React, { useEffect, useRef } from 'react'
+import React, { useEffect, useId, useRef } from 'react'
 import { X } from 'lucide-react'
 import { clsx } from 'clsx'
 import './Modal.css'
@@ -13,6 +13,8 @@ export interface ModalProps {
   onClose: () => void
   /** 标题 */
   title?: React.ReactNode
+  /** 无标题时的对话框说明 */
+  ariaLabel?: string
   /** 尺寸 */
   size?: 'sm' | 'md' | 'lg' | 'xl'
   /** 是否显示关闭按钮 */
@@ -31,6 +33,7 @@ export const Modal: React.FC<ModalProps> = ({
   open,
   onClose,
   title,
+  ariaLabel,
   size = 'md',
   showClose = true,
   closeOnOverlayClick = true,
@@ -40,6 +43,7 @@ export const Modal: React.FC<ModalProps> = ({
 }) => {
   const modalRef = useRef<HTMLDivElement>(null)
   const previousActiveElement = useRef<HTMLElement | null>(null)
+  const titleId = useId()
 
   // FE-2: 焦点陷阱
   useEffect(() => {
@@ -47,8 +51,12 @@ export const Modal: React.FC<ModalProps> = ({
       // 保存之前的焦点元素
       previousActiveElement.current = document.activeElement as HTMLElement
 
-      // 聚焦到 modal
-      modalRef.current?.focus()
+      // 优先聚焦第一个可操作元素；纯展示弹窗再聚焦容器。
+      const firstFocusable = modalRef.current ? getFocusableElements(modalRef.current)[0] : undefined
+      firstFocusable?.focus()
+      if (!firstFocusable) {
+        modalRef.current?.focus()
+      }
 
       // 禁用 body 滚动
       document.body.style.overflow = 'hidden'
@@ -104,12 +112,13 @@ export const Modal: React.FC<ModalProps> = ({
         className={modalClasses}
         role="dialog"
         aria-modal="true"
-        aria-labelledby={title ? 'modal-title' : undefined}
+        aria-labelledby={title ? titleId : undefined}
+        aria-label={!title ? ariaLabel ?? '对话框' : undefined}
         tabIndex={-1}
       >
         {(title || showClose) && (
           <div className="chaimir-modal__header">
-            {title && <h2 id="modal-title" className="chaimir-modal__title">{title}</h2>}
+            {title && <h2 id={titleId} className="chaimir-modal__title">{title}</h2>}
             {showClose && (
               <button
                 type="button"

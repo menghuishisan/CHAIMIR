@@ -36,6 +36,10 @@
   color: var(--color-primary-text);
 }
 
+.chaimir-breadcrumb__link:active {
+  color: var(--color-primary-hover);
+}
+
 .chaimir-breadcrumb__current {
   color: var(--color-text);
   font-weight: var(--font-medium);
@@ -44,4 +48,10 @@
 .chaimir-breadcrumb__separator {
   display: inline-flex;
   color: var(--color-text-faint);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chaimir-breadcrumb__link {
+    transition: none;
+  }
 }

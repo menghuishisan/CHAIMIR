@@ -14,6 +14,8 @@ export interface SkeletonProps extends React.HTMLAttributes<HTMLDivElement> {
   height?: string | number
   /** 是否显示动画 */
   animate?: boolean
+  /** 是否作为纯视觉占位，不向读屏重复播报 */
+  decorative?: boolean
 }
 
 export const Skeleton = React.forwardRef<HTMLDivElement, SkeletonProps>(
@@ -23,6 +25,7 @@ export const Skeleton = React.forwardRef<HTMLDivElement, SkeletonProps>(
       width,
       height,
       animate = true,
+      decorative = true,
       className,
       style,
       ...props
@@ -47,8 +50,8 @@ export const Skeleton = React.forwardRef<HTMLDivElement, SkeletonProps>(
         ref={ref}
         className={classes}
         style={inlineStyle}
-        aria-busy="true"
-        aria-live="polite"
+        aria-hidden={decorative || undefined}
+        aria-busy={!decorative || undefined}
         {...props}
       />
     )

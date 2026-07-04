@@ -7,14 +7,14 @@
 .chaimir-table__desktop {
   overflow-x: auto;
   border: 1px solid var(--color-border);
-  border-radius: var(--radius);
+  border-radius: var(--radius-sm);
   background: var(--color-bg);
   box-shadow: var(--shadow-xs);
 }
 
 .chaimir-table table {
   inline-size: 100%;
-  min-inline-size: 44rem;
+  min-inline-size: 40rem;
   border-collapse: collapse;
 }
 
@@ -50,6 +50,10 @@
   background: var(--color-primary-soft);
 }
 
+.chaimir-table tbody tr:focus-within {
+  background: var(--color-primary-soft);
+}
+
 .chaimir-table .is-center {
   text-align: center;
 }
@@ -78,6 +82,10 @@
   color: var(--color-primary-text);
 }
 
+.chaimir-table__sort:active {
+  transform: translateY(1px);
+}
+
 .chaimir-table__mobile {
   display: none;
   gap: var(--space-3);
@@ -88,10 +96,16 @@
   gap: var(--space-3);
   padding: var(--space-4);
   border: 1px solid var(--color-border);
-  border-radius: var(--radius);
+  border-radius: var(--radius-sm);
   background: var(--color-bg);
   box-shadow: var(--shadow-xs);
   box-shadow: inset 3px 0 0 var(--color-primary), var(--shadow-xs);
+}
+
+.chaimir-table-card dl {
+  display: grid;
+  gap: var(--space-3);
+  margin: 0;
 }
 
 .chaimir-table-card div {
@@ -125,5 +139,22 @@
 
   .chaimir-table__mobile {
     display: grid;
+  }
+}
+
+@media (min-width: 768px) and (max-width: 1023px) {
+  .chaimir-table .is-priority-optional {
+    display: none;
+  }
+
+  .chaimir-table table {
+    min-inline-size: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chaimir-table tbody tr,
+  .chaimir-table__sort {
+    transition: none;
   }
 }

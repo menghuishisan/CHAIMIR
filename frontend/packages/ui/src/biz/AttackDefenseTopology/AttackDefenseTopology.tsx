@@ -98,6 +98,9 @@ export function AttackDefenseTopology({ title, summary, nodes, edges, className,
   )
 }
 
+/**
+ * layoutNodes 按椭圆轨道分配节点位置，保持拓扑在任意节点数下可读。
+ */
 function layoutNodes(nodes: TopologyNode[]): Map<string, { x: number; y: number }> {
   const centerX = 180
   const centerY = 110

@@ -44,11 +44,6 @@
   margin-top: calc(-1 * var(--space-1)); /* 就近显示 */
 }
 
-.chaimir-form-field__error::before {
-  content: '!';
-  font-size: var(--text-base);
-}
-
 /* === 帮助文本 === */
 
 .chaimir-form-field__helper {

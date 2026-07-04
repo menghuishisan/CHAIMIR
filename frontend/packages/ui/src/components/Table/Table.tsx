@@ -28,6 +28,7 @@ export interface TableProps<T extends Record<string, unknown>> extends React.HTM
   emptyTitle?: string
   emptyDescription?: string
   onSort?: (column: TableColumn<T>) => void
+  ariaLabel?: string
 }
 
 /**
@@ -41,21 +42,22 @@ export function Table<T extends Record<string, unknown>>({
   emptyTitle = '暂无数据',
   emptyDescription = '当前没有可展示的记录',
   onSort,
+  ariaLabel = '数据表格',
   className,
   ...props
 }: TableProps<T>): React.ReactElement {
   const visibleColumns = columns.filter((column) => column.priority !== 'optional')
 
   return (
-    <div className={clsx('chaimir-table', className)} {...props}>
-      <div className="chaimir-table__desktop" role="region" aria-label="数据表格">
+    <div className={clsx('chaimir-table', className)} aria-busy={loading} {...props}>
+      <div className="chaimir-table__desktop" role="region" aria-label={ariaLabel}>
         <table>
           <thead>
             <tr>
               {columns.map((column) => (
-                <th key={column.key} scope="col" aria-sort={sortAria(column)} className={column.align ? `is-${column.align}` : undefined}>
+                <th key={column.key} scope="col" aria-sort={sortAria(column)} className={columnClass(column)}>
                   {column.sortable ? (
-                    <button type="button" className="chaimir-table__sort" onClick={() => onSort?.(column)}>
+                    <button type="button" className="chaimir-table__sort" onClick={() => onSort?.(column)} aria-label={`${readableTitle(column.title)}排序`}>
                       <span>{column.title}</span>
                       {sortIcon(column)}
                     </button>
@@ -69,16 +71,17 @@ export function Table<T extends Record<string, unknown>>({
           <tbody>{loading ? skeletonRows(columns.length) : rows.map((row, rowIndex) => renderDesktopRow(row, rowIndex, columns, rowKey))}</tbody>
         </table>
       </div>
-      <div className="chaimir-table__mobile">
+      <div className="chaimir-table__mobile" role="list" aria-label={`${ariaLabel}列表`}>
         {loading
           ? Array.from({ length: 3 }, (_, index) => <Skeleton key={index} variant="block" height={96} />)
           : rows.map((row, rowIndex) => renderMobileRow(row, rowIndex, visibleColumns, rowKey))}
       </div>
       {!loading && rows.length === 0 && (
-        <div className="chaimir-table__empty">
+        <div className="chaimir-table__empty" role="status">
           <Empty title={emptyTitle} description={emptyDescription} />
         </div>
       )}
+      {loading && <span className="sr-only" role="status">正在加载数据</span>}
     </div>
   )
 }
@@ -95,7 +98,7 @@ function renderDesktopRow<T extends Record<string, unknown>>(
   return (
     <tr key={resolveRowKey(row, rowIndex, rowKey)}>
       {columns.map((column) => (
-        <td key={column.key} className={column.align ? `is-${column.align}` : undefined}>
+        <td key={column.key} className={columnClass(column)}>
           {cellValue(row, rowIndex, column)}
         </td>
       ))}
@@ -113,17 +116,22 @@ function renderMobileRow<T extends Record<string, unknown>>(
   rowKey: TableProps<T>['rowKey']
 ): React.ReactElement {
   return (
-    <article className="chaimir-table-card" key={resolveRowKey(row, rowIndex, rowKey)}>
-      {columns.map((column) => (
-        <div key={column.key}>
-          <dt>{column.title}</dt>
-          <dd>{cellValue(row, rowIndex, column)}</dd>
-        </div>
-      ))}
+    <article className="chaimir-table-card" key={resolveRowKey(row, rowIndex, rowKey)} role="listitem">
+      <dl>
+        {columns.map((column) => (
+          <div key={column.key}>
+            <dt>{column.title}</dt>
+            <dd>{cellValue(row, rowIndex, column)}</dd>
+          </div>
+        ))}
+      </dl>
     </article>
   )
 }
 
+/**
+ * cellValue 根据列定义取值，避免空值把内部语义暴露给用户。
+ */
 function cellValue<T extends Record<string, unknown>>(row: T, rowIndex: number, column: TableColumn<T>): React.ReactNode {
   if (column.render) {
     return column.render(row, rowIndex)
@@ -135,6 +143,9 @@ function cellValue<T extends Record<string, unknown>>(row: T, rowIndex: number, 
   return value === null || value === undefined ? '' : String(value)
 }
 
+/**
+ * resolveRowKey 统一解析行 key，支持字段名或调用方自定义函数。
+ */
 function resolveRowKey<T extends Record<string, unknown>>(row: T, rowIndex: number, rowKey: TableProps<T>['rowKey']): string {
   if (typeof rowKey === 'function') {
     return rowKey(row, rowIndex)
@@ -142,6 +153,9 @@ function resolveRowKey<T extends Record<string, unknown>>(row: T, rowIndex: numb
   return String(row[rowKey])
 }
 
+/**
+ * skeletonRows 生成桌面表格骨架行，加载时预留稳定高度。
+ */
 function skeletonRows(columnCount: number): React.ReactElement[] {
   return Array.from({ length: 5 }, (_, rowIndex) => (
     <tr key={rowIndex}>
@@ -154,14 +168,34 @@ function skeletonRows(columnCount: number): React.ReactElement[] {
   ))
 }
 
+/**
+ * sortAria 把排序状态转成表头 aria-sort 语义。
+ */
 function sortAria<T extends Record<string, unknown>>(column: TableColumn<T>): 'ascending' | 'descending' | 'none' {
   if (column.sortDirection === 'asc') return 'ascending'
   if (column.sortDirection === 'desc') return 'descending'
   return 'none'
 }
 
+/**
+ * sortIcon 返回当前排序方向对应的 Lucide 图标。
+ */
 function sortIcon<T extends Record<string, unknown>>(column: TableColumn<T>): React.ReactElement {
   if (column.sortDirection === 'asc') return <ArrowUp size={14} aria-hidden="true" />
   if (column.sortDirection === 'desc') return <ArrowDown size={14} aria-hidden="true" />
   return <ArrowUpDown size={14} aria-hidden="true" />
+}
+
+/**
+ * columnClass 合并列优先级与对齐方式，供响应式隐藏次级列。
+ */
+function columnClass<T extends Record<string, unknown>>(column: TableColumn<T>): string {
+  return clsx(column.align && `is-${column.align}`, column.priority && `is-priority-${column.priority}`)
+}
+
+/**
+ * readableTitle 将简单文本标题用于 aria-label，复杂节点回退成通用名称。
+ */
+function readableTitle(title: React.ReactNode): string {
+  return typeof title === 'string' || typeof title === 'number' ? `${title}` : '当前列'
 }
