@@ -55,14 +55,6 @@ export const schoolAdminApp: AppDefinition = {
   homePath: 'accounts',
   routes: [
     {
-      path: 'dashboard',
-      label: '学校看板',
-      description: '查看学校课程、实验、竞赛和沙箱运行概览',
-      icon: Gauge,
-      group: '概览',
-      load: async (api) => dashboardResult(await api.admin.getSchoolDashboard()),
-    },
-    {
       path: 'accounts',
       label: '账号管理',
       description: '管理教师、学生、启停用、导入批次和激活码',
@@ -294,6 +286,14 @@ export const schoolAdminApp: AppDefinition = {
       }),
     },
     {
+      path: 'dashboard',
+      label: '学校看板',
+      description: '查看学校课程、实验、竞赛和沙箱运行概览',
+      icon: Gauge,
+      group: '概览',
+      load: async (api) => dashboardResult(await api.admin.getSchoolDashboard()),
+    },
+    {
       path: 'grade-reviews',
       label: '成绩审核',
       description: '审核课程成绩归档、解锁和驳回申请',
@@ -430,7 +430,7 @@ export const schoolAdminApp: AppDefinition = {
  */
 function schoolAdminDeepRoutes(): AppDefinition['routes'] {
   return [
-    resourceRoute('statistics', '运营统计', '查看本校趋势统计和资源使用变化', LineChart, async (api) => arrayResult(await api.admin.getSchoolStatistics(defaultRange()), statisticsColumns(), '暂无统计', '业务运行后会生成趋势统计。'), '概览'),
+    hiddenResourceRoute('statistics', '运营统计', '查看本校趋势统计和资源使用变化', LineChart, async (api) => arrayResult(await api.admin.getSchoolStatistics(defaultRange()), statisticsColumns(), '暂无统计', '业务运行后会生成趋势统计。'), '概览'),
     hiddenResourceRoute('account-import', '账号导入', '预览并提交师生导入批次', Upload, async (api) => ({
       ...arrayResult(await api.identity.listAccountImportBatches(), importBatchColumns(), '暂无导入记录', '上传导入文件并预览后会显示。'),
       actions: [
@@ -448,7 +448,7 @@ function schoolAdminDeepRoutes(): AppDefinition['routes'] {
       ],
     })),
     hiddenResourceRoute('account-edit', '账号编辑', '新增、启停、归档和重置账号', UserCog, async (api) => listResult(await api.identity.getAccounts(defaultPageParams()), accountColumns(), '暂无账号', '账号创建后会显示。')),
-    resourceRoute('import-batches', '导入记录', '查看账号与组织导入批次', History, async (api) => arrayResult(await api.identity.listAccountImportBatches(), importBatchColumns(), '暂无导入记录', '导入批次提交后会显示。'), '用户与组织'),
+    hiddenResourceRoute('import-batches', '导入记录', '查看账号与组织导入批次', History, async (api) => arrayResult(await api.identity.listAccountImportBatches(), importBatchColumns(), '暂无导入记录', '导入批次提交后会显示。'), '用户与组织'),
     resourceRoute('appeals', '申诉处理', '处理学生成绩申诉', Gavel, async (api) => ({
       ...listResult(await api.grade.listAppeals(defaultPageParams()), appealColumns(), '暂无申诉', '学生提交成绩申诉后会显示。'),
       actions: appealReviewActions(api),

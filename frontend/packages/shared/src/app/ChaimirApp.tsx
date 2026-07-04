@@ -3,7 +3,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { createApi } from '@chaimir/api-client'
 import type { ChaimirApi } from '@chaimir/api-client'
-import { AlertCircle, Bell, CheckCircle2, ChevronLeft, LogOut, Menu, PanelLeftClose, PanelLeftOpen, RefreshCw, Search } from 'lucide-react'
+import { AlertCircle, Bell, CheckCircle2, ChevronLeft, Download, LogOut, Menu, PanelLeftClose, PanelLeftOpen, RefreshCw, Search, UserCircle } from 'lucide-react'
 import { Badge, Button, Card, CardBody, CardHeader, Empty, FormField, Input, Skeleton, Spinner, Stat, Table, Textarea } from '@chaimir/ui'
 import type { TableColumn } from '@chaimir/ui'
 import { clearSession, getAccessToken, getTraceId } from './storage'
@@ -14,6 +14,13 @@ import type { ActionValues, AppDefinition, AppRoute, DataRow, PageAction, Resour
 import './ChaimirApp.css'
 
 const SIDEBAR_COLLAPSED_STORAGE_PREFIX = 'chaimir.sidebar.collapsed'
+
+const NAV_ROUTE_ORDER: Record<AppDefinition['role'], string[]> = {
+  student: ['courses', 'experiments', 'sim-lib', 'contests', 'contest-records', 'grades', 'warnings'],
+  teacher: ['courses', 'experiments', 'contests', 'monitor', 'grading', 'content', 'papers', 'sim-packages', 'shared-lib', 'grade-submit', 'org'],
+  'school-admin': ['accounts', 'org', 'dashboard', 'grade-reviews', 'appeals', 'warnings', 'grade-config', 'sso', 'config', 'audit', 'alerts'],
+  'platform-admin': ['tenants', 'applications', 'dashboard', 'runtimes', 'tools', 'judgers', 'sim-review', 'vulnerability', 'alerts', 'config', 'monitoring', 'backups', 'audit'],
+}
 
 export interface ChaimirAppProps {
   /** 当前四端入口提供的应用定义，业务页面定义归属各端 features 目录。 */
@@ -179,6 +186,12 @@ function AppShell({
             <Bell size={19} aria-hidden="true" />
             {unread !== null && unread > 0 && <span className="chaimir-app__badge">{unread > 99 ? '99+' : unread}</span>}
           </a>
+          <a className="chaimir-app__icon-button" href={routeHref('transfer-tasks')} aria-label="查看任务与下载">
+            <Download size={18} aria-hidden="true" />
+          </a>
+          <a className="chaimir-app__icon-button" href={routeHref('profile')} aria-label="进入个人中心">
+            <UserCircle size={19} aria-hidden="true" />
+          </a>
           <span className="chaimir-app__role-pill">{app.title}</span>
         </div>
       </header>
@@ -232,6 +245,7 @@ function Sidebar({
   const visibleRoutes = app.routes
     .filter((route) => !route.hidden)
     .filter((route) => !normalizedSearch || `${route.label} ${route.description}`.toLowerCase().includes(normalizedSearch))
+    .sort((left, right) => navRouteIndex(app, left) - navRouteIndex(app, right))
   const groupedRoutes = visibleRoutes.reduce<Array<{ group: string; routes: AppRoute[] }>>((groups, route) => {
     const group = route.group || '功能'
     const existing = groups.find((item) => item.group === group)
@@ -272,6 +286,15 @@ function Sidebar({
       )}
     </nav>
   )
+}
+
+/**
+ * navRouteIndex 按功能对齐清单稳定排序四端主导航，未列入的路由排在末尾。
+ */
+function navRouteIndex(app: AppDefinition, route: AppRoute): number {
+  const order = NAV_ROUTE_ORDER[app.role] ?? []
+  const index = order.indexOf(route.path)
+  return index === -1 ? Number.MAX_SAFE_INTEGER : index
 }
 
 /**

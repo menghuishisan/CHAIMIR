@@ -62,7 +62,7 @@ export function sharedProfileRoute(): AppDefinition['routes'][number] {
     label: '个人中心',
     description: '查看个人资料和当前登录会话',
     icon: UserCog,
-    group: '账户',
+    hidden: true,
     load: async (api) => {
       const me = await api.identity.getMe()
       const sessions = await api.identity.getSessions()
@@ -342,7 +342,7 @@ export function sharedTransferRoute(): AppDefinition['routes'][number] {
     label: '任务与下载',
     description: '查看导入导出任务，并为已完成任务签发下载授权',
     icon: Download,
-    group: '账户',
+    hidden: true,
     load: async (api) => {
       const response = await api.transfer.listTasks(defaultPageParams())
       return {

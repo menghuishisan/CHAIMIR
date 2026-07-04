@@ -4,7 +4,6 @@ import { BarChart3, Boxes, ClipboardCheck, Flag, Gauge, Landmark, ListChecks, Mo
 import type { AppDefinition } from '@chaimir/shared'
 import {
   alertColumns,
-  alertRuleColumns,
   applicationColumns,
   arrayResult,
   auditColumns,
@@ -23,10 +22,8 @@ import {
   objectResult,
   optionalText,
   pageAction,
-  quotaColumns,
   routeParam,
   rowAction,
-  resourceRoute,
   runtimeColumns,
   runtimeImageColumns,
   sharedAnnouncementRoute,
@@ -397,18 +394,10 @@ export const platformAdminApp: AppDefinition = {
             await api.admin.handleAlertEvent(valueText(values, 'event_id'), { status: valueNumber(values, 'status') })
             return '告警事件已处理'
           }),
-        ],
-      }),
-    },
-    {
-      path: 'alert-rules',
-      label: '告警规则',
-      description: '维护平台和学校业务告警规则',
-      icon: ShieldAlert,
-      group: '运维',
-      load: async (api) => ({
-        ...arrayResult(await api.admin.listAlertRules(), alertRuleColumns(), '暂无告警规则', '创建规则后会在这里显示。'),
-        actions: [
+          pageAction('read-alert-rules', '查看告警规则', '读取当前可见的业务告警规则。', [], async () => {
+            await api.admin.listAlertRules()
+            return '告警规则已读取'
+          }),
           pageAction('update-alert-rule', '更新告警规则', '更新业务告警规则。', [
             textInput('rule_id', '规则编号', true),
             numberInput('scope', '作用范围', true),
@@ -516,11 +505,43 @@ function platformTenantDeepRoutes(): AppDefinition['routes'] {
   return [
     hiddenResourceRoute('tenant-detail', '学校详情', '查看租户配置、状态和资源配额', Landmark, async (api, params) => {
       const tenantId = routeParam(params, 'tenant_id', 'id')
-      return tenantId
+      const result = tenantId
         ? objectResult(await api.identity.getTenant(tenantId), tenantColumns(), '学校详情')
         : arrayResult(await api.admin.listTenants(), tenantColumns(), '暂无学校租户', '学校入驻后会显示。')
+      return {
+        ...result,
+        actions: [
+          pageAction('read-sandbox-quota', '查看沙箱配额', '读取当前学校或平台默认沙箱资源配额。', [], async () => {
+            await api.sandbox.getQuota()
+            return '沙箱配额已读取'
+          }),
+          pageAction('update-sandbox-quota', '更新沙箱配额', '按学校调整沙箱资源上限。', [
+            numberInput('tenant_id', '学校编号', true),
+            numberInput('max_concurrent_sandbox', '并发沙箱上限', true),
+            numberInput('max_cpu', 'CPU 上限', true),
+            numberInput('max_memory_mb', '内存上限', true),
+            numberInput('idle_timeout_min', '空闲等待分钟', true),
+            numberInput('max_lifetime_min', '最长运行分钟', true),
+            numberInput('max_keepalive_min', '保活分钟', true),
+            numberInput('max_snapshot_retention_min', '快照保留分钟', true),
+          ], async (values) => {
+            await api.sandbox.updateQuota({
+              tenant_id: valueNumber(values, 'tenant_id'),
+              active_sandbox_count: undefined,
+              max_concurrent_sandbox: valueNumber(values, 'max_concurrent_sandbox'),
+              max_cpu: valueNumber(values, 'max_cpu'),
+              max_memory_mb: valueNumber(values, 'max_memory_mb'),
+              idle_timeout_min: valueNumber(values, 'idle_timeout_min'),
+              max_lifetime_min: valueNumber(values, 'max_lifetime_min'),
+              max_keepalive_min: valueNumber(values, 'max_keepalive_min'),
+              max_snapshot_retention_min: valueNumber(values, 'max_snapshot_retention_min'),
+            })
+            return '沙箱配额已更新'
+          }),
+        ],
+      }
     }),
-    resourceRoute('statistics', '平台统计', '查看平台运营趋势和租户增长', BarChart3, async (api) => arrayResult(await api.admin.getPlatformStatistics(defaultRange()), statisticsColumns(), '暂无统计', '平台产生业务数据后会显示。'), '概览'),
+    hiddenResourceRoute('statistics', '平台统计', '查看平台运营趋势和租户增长', BarChart3, async (api) => arrayResult(await api.admin.getPlatformStatistics(defaultRange()), statisticsColumns(), '暂无统计', '平台产生业务数据后会显示。'), '概览'),
   ]
 }
 
@@ -591,33 +612,5 @@ function platformEngineDeepRoutes(): AppDefinition['routes'] {
         ],
       }
     }),
-    resourceRoute('quota', '配额管理', '查看并调整沙箱资源配额', Gauge, async (api) => ({
-      ...objectResult(await api.sandbox.getQuota(), quotaColumns(), '沙箱配额'),
-      actions: [
-        pageAction('update-quota', '更新配额', '调整沙箱资源上限。', [
-          numberInput('tenant_id', '学校编号', true),
-          numberInput('max_concurrent_sandbox', '并发沙箱上限', true),
-          numberInput('max_cpu', 'CPU 上限', true),
-          numberInput('max_memory_mb', '内存上限', true),
-          numberInput('idle_timeout_min', '空闲等待分钟', true),
-          numberInput('max_lifetime_min', '最长运行分钟', true),
-          numberInput('max_keepalive_min', '保活分钟', true),
-          numberInput('max_snapshot_retention_min', '快照保留分钟', true),
-        ], async (values) => {
-          await api.sandbox.updateQuota({
-            tenant_id: valueNumber(values, 'tenant_id'),
-            active_sandbox_count: undefined,
-            max_concurrent_sandbox: valueNumber(values, 'max_concurrent_sandbox'),
-            max_cpu: valueNumber(values, 'max_cpu'),
-            max_memory_mb: valueNumber(values, 'max_memory_mb'),
-            idle_timeout_min: valueNumber(values, 'idle_timeout_min'),
-            max_lifetime_min: valueNumber(values, 'max_lifetime_min'),
-            max_keepalive_min: valueNumber(values, 'max_keepalive_min'),
-            max_snapshot_retention_min: valueNumber(values, 'max_snapshot_retention_min'),
-          })
-          return '沙箱配额已更新'
-        }),
-      ],
-    }), '引擎'),
   ]
 }

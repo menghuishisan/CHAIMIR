@@ -27,7 +27,6 @@ import {
   outlineColumns,
   pageAction,
   reportColumns,
-  resourceRoute,
   routeHref,
   routeParam,
   rowAction,
@@ -102,6 +101,32 @@ export const studentApp: AppDefinition = {
             const instance = await api.experiment.createInstance(row.id, {})
             window.location.hash = routeHref('experiment-workspace', { instance_id: instance.instance_id }).slice(1)
             return '实验实例已创建'
+          }),
+        ],
+      }),
+    },
+    {
+      path: 'sim-lib',
+      label: '仿真实验室',
+      description: '检索仿真包、读取回放并进入仿真工作台',
+      icon: Network,
+      group: '学习',
+      load: async (api) => ({
+        ...listResult(await api.sim.getPackages({ status: 'published', ...defaultPageParams() }), simPackageColumns(), '暂无仿真包', '有仿真包发布后会显示。'),
+        actions: [
+          pageAction('read-shared-replay', '读取分享回放', '输入分享码读取可复现实验回放。', [textInput('code', '分享码', true)], async (values) => {
+            await api.sim.getSharedReplay(valueText(values, 'code'))
+            return '分享回放已读取'
+          }),
+        ],
+        rowActions: [
+          rowAction('package-versions', '查看版本', '读取该仿真包的可用版本。', async (row) => {
+            await api.sim.getPackageVersions(valueFromRow(row, 'code'))
+            return '仿真包版本已读取'
+          }),
+          rowAction('open-sim', '进入仿真', '打开沉浸式仿真工作台。', async (row) => {
+            window.location.hash = routeHref('sim-workspace', { code: valueFromRow(row, 'code'), version: valueFromRow(row, 'version') }).slice(1)
+            return '正在进入仿真工作台'
           }),
         ],
       }),
@@ -209,6 +234,7 @@ function studentWorkspaceRoute(): AppDefinition['routes'][number] {
     description: '沉浸式查看实验实例、检查点和资源状态',
     icon: Activity,
     immersive: true,
+    hidden: true,
     load: async (api, params) => {
       const instanceId = params.get('instance_id')
       if (!instanceId) {
@@ -488,25 +514,6 @@ function studentDeepRoutes(): AppDefinition['routes'] {
         }),
       ],
     })),
-    resourceRoute('sim-lib', '仿真实验室', '检索仿真包、读取回放并进入仿真工作台', Network, async (api) => ({
-      ...listResult(await api.sim.getPackages({ status: 'published', ...defaultPageParams() }), simPackageColumns(), '暂无仿真包', '有仿真包发布后会显示。'),
-      actions: [
-        pageAction('read-shared-replay', '读取分享回放', '输入分享码读取可复现实验回放。', [textInput('code', '分享码', true)], async (values) => {
-          await api.sim.getSharedReplay(valueText(values, 'code'))
-          return '分享回放已读取'
-        }),
-      ],
-      rowActions: [
-        rowAction('package-versions', '查看版本', '读取该仿真包的可用版本。', async (row) => {
-          await api.sim.getPackageVersions(valueFromRow(row, 'code'))
-          return '仿真包版本已读取'
-        }),
-        rowAction('open-sim', '进入仿真', '打开沉浸式仿真工作台。', async (row) => {
-          window.location.hash = routeHref('sim-workspace', { code: valueFromRow(row, 'code'), version: valueFromRow(row, 'version') }).slice(1)
-          return '正在进入仿真工作台'
-        }),
-      ],
-    }), '学习'),
     hiddenResourceRoute('my-records', '我的战绩', '查看跨竞赛名次、得分和历史记录', Award, async (api) => arrayResult(await api.contest.getMyContestRecords(), contestRecordColumns(), '暂无竞赛战绩', '完成竞赛后会显示战绩。')),
     hiddenResourceRoute('appeals', '成绩申诉', '提交成绩申诉并查看处理进度', Gavel, async (api) => ({
       ...listResult(await api.grade.listAppeals(defaultPageParams()), appealColumns(), '暂无申诉', '提交申诉后会显示处理进度。'),

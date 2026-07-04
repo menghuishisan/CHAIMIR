@@ -248,6 +248,7 @@ export const teacherApp: AppDefinition = {
       description: '查看判题进度、人工评分和重判状态',
       icon: ClipboardCheck,
       group: '教学',
+      hidden: true,
       load: async (api) => ({
         ...listResult(await api.judge.getTasks(defaultPageParams()), judgeTaskColumns(), '暂无判题任务', '学生提交需要判题的作业后会在这里显示。'),
         actions: [
@@ -289,6 +290,7 @@ export const teacherApp: AppDefinition = {
       description: '处理学生成绩申诉与反馈',
       icon: ShieldAlert,
       group: '成绩',
+      hidden: true,
       load: async (api) => ({
         ...listResult(await api.grade.listAppeals(defaultPageParams()), appealColumns(), '暂无申诉', '有学生提交申诉后会在这里显示。'),
         actions: [
@@ -445,7 +447,7 @@ function teacherDeepRoutes(): AppDefinition['routes'] {
         ],
       }
     }),
-    resourceRoute('course-community', '课程讨论', '维护课程讨论、公告和课程评价', FileText, async (api) => ({
+    hiddenResourceRoute('course-community', '课程讨论', '维护课程讨论、公告和课程评价', FileText, async (api) => ({
       ...emptyResult(teachingPostColumns(), '请选择课程', '输入课程编号后可读取讨论并发布公告。'),
       actions: [
         pageAction('list-posts', '读取讨论', '读取课程讨论列表。', [textInput('course_id', '课程编号', true)], async (values) => {
@@ -526,6 +528,35 @@ function teacherDeepRoutes(): AppDefinition['routes'] {
             })
             return '人工批改已保存'
           }),
+          pageAction('manual-score', '人工评分', '为需要人工评分的判题任务提交分数和评语。', [
+            textInput('task_id', '判题任务编号', true),
+            numberInput('score', '得分', true),
+            numberInput('max_score', '满分', true),
+            numberInput('passed', '是否通过', true, '1 表示通过，0 表示未通过。'),
+            textareaInput('comment', '评语', true),
+          ], async (values) => {
+            await api.judge.manualScore(valueText(values, 'task_id'), {
+              score: valueNumber(values, 'score'),
+              max_score: valueNumber(values, 'max_score'),
+              passed: valueFlag(values, 'passed'),
+              comment: valueText(values, 'comment'),
+            })
+            return '人工评分已提交'
+          }),
+          pageAction('read-judge-task', '查看判题任务', '按任务编号读取判题进度和结果。', [textInput('task_id', '判题任务编号', true)], async (values) => {
+            await api.judge.getTask(valueText(values, 'task_id'))
+            return '判题任务已读取'
+          }),
+          pageAction('prepare-judge-progress', '准备判题进度', '准备指定判题任务的实时进度信息。', [textInput('task_id', '判题任务编号', true)], async (values) => {
+            api.judge.getProgressWsUrl(valueText(values, 'task_id'))
+            return '判题进度已准备'
+          }),
+        ],
+        rowActions: [
+          rowAction('rejudge-task', '重判', '按原始快照触发重判。', async (row) => {
+            await api.judge.rejudgeTask(row.id)
+            return '重判任务已提交'
+          }),
         ],
       }
     }, '教学'),
@@ -597,7 +628,7 @@ function teacherDeepRoutes(): AppDefinition['routes'] {
       actions: simPackageActions(api),
     }), '资源'),
     resourceRoute('shared-lib', '共享资源库', '查看跨课程共享内容和复用素材', Library, async (api) => listResult(await api.content.listShared(defaultPageParams()), contentColumns(), '暂无共享资源', '共享题库内容后会显示。'), '资源'),
-    resourceRoute('content-categories', '题库分类', '维护题库分类树和展示顺序', Library, async (api) => ({
+    hiddenResourceRoute('content-categories', '题库分类', '维护题库分类树和展示顺序', Library, async (api) => ({
       ...arrayResult(await api.content.listCategories(), contentCategoryColumns(), '暂无分类', '创建分类后会显示。'),
       actions: [
         pageAction('update-category', '更新分类', '更新题库分类名称和顺序。', [
@@ -638,7 +669,7 @@ function teacherDeepRoutes(): AppDefinition['routes'] {
         }),
       ],
     }), '成绩'),
-    resourceRoute('course-grades', '课程成绩', '维护课程成绩权重、计算结果和成绩导出', ScrollText, async (api) => ({
+    hiddenResourceRoute('course-grades', '课程成绩', '维护课程成绩权重、计算结果和成绩导出', ScrollText, async (api) => ({
       ...emptyResult(teachingGradeColumns(), '请选择课程', '输入课程编号后可读取课程成绩。'),
       actions: [
         pageAction('list-course-grades', '读取课程成绩', '读取课程成绩列表。', [textInput('course_id', '课程编号', true)], async (values) => {
