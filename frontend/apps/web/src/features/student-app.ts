@@ -149,7 +149,7 @@ export const studentApp: AppDefinition = {
       load: async (api) => {
         const me = await api.identity.getMe()
         return {
-          ...arrayResult(await api.grade.studentGPA(me.id), gradeSummaryColumns(), '暂无成绩', '课程成绩完成归档后会在这里显示。'),
+          ...arrayResult(await api.grade.studentGPA(me.account.id), gradeSummaryColumns(), '暂无成绩', '课程成绩完成归档后会在这里显示。'),
           actions: [
             pageAction('submit-grade-appeal', '提交成绩申诉', '对课程成绩有疑问时提交申诉，处理结果由教师或管理员反馈。', [
               textInput('course_id', '课程编号', true),
@@ -231,21 +231,21 @@ function studentWorkspaceRoute(): AppDefinition['routes'][number] {
             label: `${sandbox.runtime_code} 终端`,
             description: '打开当前实验沙箱终端。',
             kind: 'terminal' as const,
-            href: api.sandbox.getTerminalWsUrl(sandbox.sandbox_id),
+            href: api.sandbox.getTerminalWsUrl(String(sandbox.sandbox_id)),
           },
           {
             key: `progress-${sandbox.sandbox_id}`,
             label: `${sandbox.runtime_code} 状态`,
             description: '查看当前实验沙箱准备和运行状态。',
             kind: 'status' as const,
-            href: api.sandbox.getProgressWsUrl(sandbox.sandbox_id),
+            href: api.sandbox.getProgressWsUrl(String(sandbox.sandbox_id)),
           },
           ...sandbox.tools.map((tool) => ({
             key: `${sandbox.sandbox_id}-${tool.code}`,
             label: toolLabel(tool.code, tool.kind),
             description: toolDescription(tool.code, tool.kind),
             kind: toolKind(tool.kind),
-            href: tool.kind === 3 ? api.sandbox.getToolProxyUrl(sandbox.sandbox_id, tool.code) : undefined,
+            href: tool.kind === 3 ? api.sandbox.getToolProxyUrl(String(sandbox.sandbox_id), tool.code) : undefined,
           })),
         ]),
         ...instance.sims.map((sim) => ({
@@ -257,7 +257,7 @@ function studentWorkspaceRoute(): AppDefinition['routes'][number] {
         })),
       ], primarySandbox ? [
         pageAction('save-workspace-files', '保存工作区', '立即持久化当前实验沙箱工作区。', [], async () => {
-          await api.sandbox.saveFiles(primarySandbox.sandbox_id)
+          await api.sandbox.saveFiles(String(primarySandbox.sandbox_id))
           return '工作区已保存'
         }),
         pageAction('read-sandbox-detail', '读取沙箱详情', '读取指定实验沙箱资源状态和工具入口。', [textInput('sandbox_id', '沙箱编号', true)], async (values) => {

@@ -68,8 +68,8 @@ export function sharedProfileRoute(): AppDefinition['routes'][number] {
       const sessions = await api.identity.getSessions()
       return {
         metrics: [
-          { label: '姓名', value: text(me.name), tone: 'primary' },
-          { label: '账号状态', value: accountStatusText(me.status), tone: 'success' },
+          { label: '姓名', value: text(me.account.name), tone: 'primary' },
+          { label: '账号状态', value: accountStatusText(me.account.status), tone: 'success' },
           { label: '登录会话', value: String(sessions.length), tone: 'secondary' },
         ],
         columns: sessionColumns(),

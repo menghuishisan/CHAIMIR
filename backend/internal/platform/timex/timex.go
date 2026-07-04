@@ -20,6 +20,14 @@ func UTC(t time.Time) time.Time {
 	return t.UTC()
 }
 
+// RFC3339OrEmpty 将 API 可选时间输出为 UTC RFC3339 字符串;零值保持空字符串。
+func RFC3339OrEmpty(t time.Time) string {
+	if t.IsZero() {
+		return ""
+	}
+	return UTC(t).Format(time.RFC3339)
+}
+
 // Timestamptz 构造可空 PostgreSQL timestamptz,写库前统一剥离本地时区影响。
 func Timestamptz(t time.Time) pgtype.Timestamptz {
 	return pgtype.Timestamptz{Time: UTC(t), Valid: !t.IsZero()}

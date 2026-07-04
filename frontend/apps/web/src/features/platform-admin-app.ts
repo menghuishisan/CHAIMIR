@@ -595,7 +595,7 @@ function platformEngineDeepRoutes(): AppDefinition['routes'] {
       ...objectResult(await api.sandbox.getQuota(), quotaColumns(), '沙箱配额'),
       actions: [
         pageAction('update-quota', '更新配额', '调整沙箱资源上限。', [
-          textInput('tenant_id', '学校编号', true),
+          numberInput('tenant_id', '学校编号', true),
           numberInput('max_concurrent_sandbox', '并发沙箱上限', true),
           numberInput('max_cpu', 'CPU 上限', true),
           numberInput('max_memory_mb', '内存上限', true),
@@ -605,7 +605,7 @@ function platformEngineDeepRoutes(): AppDefinition['routes'] {
           numberInput('max_snapshot_retention_min', '快照保留分钟', true),
         ], async (values) => {
           await api.sandbox.updateQuota({
-            tenant_id: valueText(values, 'tenant_id'),
+            tenant_id: valueNumber(values, 'tenant_id'),
             active_sandbox_count: undefined,
             max_concurrent_sandbox: valueNumber(values, 'max_concurrent_sandbox'),
             max_cpu: valueNumber(values, 'max_cpu'),

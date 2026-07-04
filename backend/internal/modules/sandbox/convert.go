@@ -6,6 +6,7 @@ import (
 
 	"chaimir/internal/contracts"
 	"chaimir/internal/platform/jsonx"
+	"chaimir/internal/platform/timex"
 	"chaimir/internal/platform/workload"
 	"chaimir/pkg/apperr"
 )
@@ -54,6 +55,80 @@ func sandboxResponseFromInfo(info contracts.SandboxInfo) SandboxResponse {
 		ToolAccess:          info.ToolAccess,
 		ResourceUsage:       info.ResourceUsage,
 	}
+}
+
+// runtimeResponseFromModel 将运行时内部模型转换为 HTTP 稳定字段名。
+func runtimeResponseFromModel(item Runtime) RuntimeResponse {
+	return RuntimeResponse{
+		ID:             item.ID,
+		Code:           item.Code,
+		Name:           item.Name,
+		Eco:            item.Eco,
+		AdapterLevel:   item.AdapterLevel,
+		AdapterSpec:    item.AdapterSpec,
+		CapabilityImpl: item.CapabilityImpl,
+		PluginRef:      item.PluginRef,
+		SelftestStatus: item.SelftestStatus,
+		SelftestDetail: item.SelftestDetail,
+		Status:         item.Status,
+	}
+}
+
+// runtimeResponsesFromModels 批量转换运行时列表。
+func runtimeResponsesFromModels(items []Runtime) []RuntimeResponse {
+	out := make([]RuntimeResponse, 0, len(items))
+	for _, item := range items {
+		out = append(out, runtimeResponseFromModel(item))
+	}
+	return out
+}
+
+// runtimeImageResponseFromModel 将运行时镜像内部模型转换为 HTTP 稳定字段名。
+func runtimeImageResponseFromModel(item RuntimeImage) RuntimeImageResponse {
+	return RuntimeImageResponse{
+		ID:            item.ID,
+		RuntimeID:     item.RuntimeID,
+		ImageURL:      item.ImageURL,
+		Version:       item.Version,
+		Status:        item.Status,
+		Prepulled:     item.Prepulled,
+		PrepullStatus: item.PrepullStatus,
+		PrepullDetail: item.PrepullDetail,
+		PrepulledAt:   timex.RFC3339OrEmpty(item.PrepulledAt),
+		GenesisBaked:  item.GenesisBaked,
+		IsDefault:     item.IsDefault,
+	}
+}
+
+// runtimeImageResponsesFromModels 批量转换运行时镜像列表。
+func runtimeImageResponsesFromModels(items []RuntimeImage) []RuntimeImageResponse {
+	out := make([]RuntimeImageResponse, 0, len(items))
+	for _, item := range items {
+		out = append(out, runtimeImageResponseFromModel(item))
+	}
+	return out
+}
+
+// toolResponseFromModel 将工具内部模型转换为 HTTP 稳定字段名。
+func toolResponseFromModel(item Tool) ToolResponse {
+	return ToolResponse{
+		ID:           item.ID,
+		Code:         item.Code,
+		Name:         item.Name,
+		Kind:         item.Kind,
+		EcoTags:      item.EcoTags,
+		ResourceSpec: item.ResourceSpec,
+		Status:       item.Status,
+	}
+}
+
+// toolResponsesFromModels 批量转换沙箱工具列表。
+func toolResponsesFromModels(items []Tool) []ToolResponse {
+	out := make([]ToolResponse, 0, len(items))
+	for _, item := range items {
+		out = append(out, toolResponseFromModel(item))
+	}
+	return out
 }
 
 // contractCreateFromDTO 把内部 HTTP 创建请求转换为跨模块创建契约。

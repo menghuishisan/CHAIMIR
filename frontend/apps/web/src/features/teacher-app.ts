@@ -1,6 +1,6 @@
 ﻿// 教师端路由：教学、实践、资源、成绩报送、组织与账户页面定义。
 
-import { BookOpen, Building2, ClipboardCheck, ClipboardList, FilePenLine, FileText, Flag, Layers, Library, ListChecks, MonitorCog, Network, PackageCheck, Pencil, ScrollText, ShieldAlert, ShieldCheck, Swords, Users } from 'lucide-react'
+import { BookOpen, Building2, ClipboardCheck, ClipboardList, FilePenLine, FileText, Flag, Layers, Library, ListChecks, MonitorCog, Network, Pencil, ScrollText, ShieldAlert, ShieldCheck, Swords, Users } from 'lucide-react'
 import type { AppDefinition } from '@chaimir/shared'
 import {
   appealColumns,
@@ -21,7 +21,6 @@ import {
   emptyResult,
   experimentAuthorActions,
   experimentColumns,
-  fileInput,
   gradeReviewColumns,
   hiddenResourceRoute,
   judgeTaskColumns,
@@ -29,6 +28,7 @@ import {
   memberColumns,
   numberInput,
   objectResult,
+  optionalNumber,
   optionalText,
   orgColumns,
   pageAction,
@@ -43,19 +43,18 @@ import {
   sharedTransferRoute,
   simPackageActions,
   simPackageColumns,
-  simReviewColumns,
   submissionColumns,
   teacherCourseActions,
   teachingGradeColumns,
   teachingPostColumns,
   textInput,
   textareaInput,
-  valueFile,
   valueFlag,
   valueFromRow,
   valueJson,
   valueJsonArray,
   valueNumber,
+  valueNumberArray,
   valueStringArray,
   valueText,
   vulnProblemActions,
@@ -322,53 +321,6 @@ export const teacherApp: AppDefinition = {
       }),
     },
     ...teacherDeepRoutes(),
-    {
-      path: 'simulation-review',
-      label: '仿真审核',
-      description: '预览仿真包校验报告并完成审核',
-      icon: PackageCheck,
-      group: '资源',
-      load: async (api) => ({
-        ...listResult(await api.sim.getReviews(defaultPageParams()), simReviewColumns(), '暂无审核任务', '有仿真包提交后会在这里显示。'),
-        actions: [
-          pageAction('submit-sim-package', '提交仿真包', '上传仿真包文件并提交静态扫描和预览校验。', [
-            fileInput('bundle', '仿真包文件', true),
-            textInput('code', '仿真编码', true),
-            textInput('version', '版本', true),
-            textInput('name', '名称', true),
-            textInput('category', '分类', true),
-            textInput('compute', '计算方式', true, '按仿真包规范填写运行方式。'),
-            textareaInput('scale_limit', '规模限制'),
-            textInput('backend_adapter', '平台适配器'),
-            textareaInput('backend_config', '平台计算配置'),
-          ], async (values) => {
-            await api.sim.submitPackage({
-              bundle: valueFile(values, 'bundle'),
-              code: valueText(values, 'code'),
-              version: valueText(values, 'version'),
-              name: valueText(values, 'name'),
-              category: valueText(values, 'category'),
-              compute: valueText(values, 'compute') === 'backend' ? 'backend' : 'frontend',
-              scale_limit: valueJson(values, 'scale_limit'),
-              backend_adapter: optionalText(values, 'backend_adapter'),
-              backend_config: valueJson(values, 'backend_config'),
-            })
-            return '仿真包已提交审核'
-          }),
-          pageAction('approve-sim-review', '通过审核', '通过指定仿真包审核。', [textInput('review_id', '审核编号', true)], async (values) => {
-            await api.sim.approveReview(valueText(values, 'review_id'))
-            return '仿真审核已通过'
-          }),
-          pageAction('reject-sim-review', '退回审核', '退回仿真包并写入修改意见。', [
-            textInput('review_id', '审核编号', true),
-            textareaInput('comment', '退回原因', true),
-          ], async (values) => {
-            await api.sim.rejectReview(valueText(values, 'review_id'), valueText(values, 'comment'))
-            return '仿真审核已退回'
-          }),
-        ],
-      }),
-    },
     sharedNotificationRoute(),
     sharedAnnouncementRoute(),
     sharedTransferRoute(),
@@ -481,7 +433,7 @@ function teacherDeepRoutes(): AppDefinition['routes'] {
             textInput('course_id', '课程编号', true),
             textInput('student_ids', '学生编号', true, '多个编号用英文逗号分隔。'),
           ], async (values) => {
-            await api.teaching.addMembers(valueText(values, 'course_id'), { student_ids: valueStringArray(values, 'student_ids') })
+            await api.teaching.addMembers(valueText(values, 'course_id'), { student_ids: valueNumberArray(values, 'student_ids') })
             return '课程成员已添加'
           }),
         ],
@@ -502,11 +454,11 @@ function teacherDeepRoutes(): AppDefinition['routes'] {
         }),
         pageAction('create-post', '发布讨论', '发布课程讨论内容。', [
           textInput('course_id', '课程编号', true),
-          textInput('parent_id', '回复对象编号'),
+          numberInput('parent_id', '回复对象编号'),
           textareaInput('content', '讨论内容', true),
         ], async (values) => {
           await api.teaching.createPost(valueText(values, 'course_id'), {
-            parent_id: optionalText(values, 'parent_id'),
+            parent_id: optionalNumber(values, 'parent_id'),
             content: valueText(values, 'content'),
           })
           return '讨论已发布'

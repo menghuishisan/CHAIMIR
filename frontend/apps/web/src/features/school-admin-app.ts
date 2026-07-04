@@ -43,6 +43,7 @@ import {
   valueFlag,
   valueJson,
   valueNumber,
+  valueNumberArray,
   valueText,
   warningColumns,
 } from '@chaimir/shared'
@@ -51,7 +52,7 @@ export const schoolAdminApp: AppDefinition = {
   role: 'school-admin',
   title: '学校管理端',
   subtitle: '学校租户内账号、组织、成绩、审计与运行配置',
-  homePath: 'dashboard',
+  homePath: 'accounts',
   routes: [
     {
       path: 'dashboard',
@@ -132,11 +133,11 @@ export const schoolAdminApp: AppDefinition = {
             return '账号导入模板已获取'
           }),
           pageAction('batch-disable-accounts', '批量停用账号', '按账号编号批量停用账号。', [textInput('account_ids', '账号编号', true, '多个编号用英文逗号分隔。')], async (values) => {
-            await api.identity.batchDisableAccounts({ account_ids: valueText(values, 'account_ids').split(',').map((item) => item.trim()).filter(Boolean) })
+            await api.identity.batchDisableAccounts({ account_ids: valueNumberArray(values, 'account_ids') })
             return '账号批量停用已提交'
           }),
           pageAction('batch-restore-accounts', '批量恢复账号', '按账号编号批量恢复账号。', [textInput('account_ids', '账号编号', true, '多个编号用英文逗号分隔。')], async (values) => {
-            await api.identity.batchRestoreAccounts({ account_ids: valueText(values, 'account_ids').split(',').map((item) => item.trim()).filter(Boolean) })
+            await api.identity.batchRestoreAccounts({ account_ids: valueNumberArray(values, 'account_ids') })
             return '账号批量恢复已提交'
           }),
           pageAction('batch-archive-accounts', '按年级归档账号', '按入学年份批量归档学生账号和班级。', [numberInput('enrollment_year', '入学年份', true)], async (values) => {

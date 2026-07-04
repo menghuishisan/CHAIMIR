@@ -123,7 +123,7 @@ func (a sandboxAPI) registerQuotaRoutes(g gin.IRouter, authn *auth.Manager, role
 // listRuntimes 返回运行时列表。
 func (a sandboxAPI) listRuntimes(c *gin.Context) {
 	out, err := a.svc.ListRuntimes(c.Request.Context())
-	httpx.Write(c, out, err)
+	httpx.Write(c, runtimeResponsesFromModels(out), err)
 }
 
 // registerRuntime 绑定运行时注册或更新请求。
@@ -133,7 +133,7 @@ func (a sandboxAPI) registerRuntime(c *gin.Context) {
 		return
 	}
 	out, err := a.svc.RegisterRuntime(c.Request.Context(), req)
-	httpx.Write(c, out, err)
+	httpx.Write(c, runtimeResponseFromModel(out), err)
 }
 
 // updateRuntime 绑定运行时更新请求并校验路径 ID。
@@ -147,7 +147,7 @@ func (a sandboxAPI) updateRuntime(c *gin.Context) {
 		return
 	}
 	out, err := a.svc.UpdateRuntime(c.Request.Context(), runtimeID, req)
-	httpx.Write(c, out, err)
+	httpx.Write(c, runtimeResponseFromModel(out), err)
 }
 
 // registerRuntimeImage 绑定运行时镜像登记请求。
@@ -161,7 +161,7 @@ func (a sandboxAPI) registerRuntimeImage(c *gin.Context) {
 		return
 	}
 	out, err := a.svc.RegisterRuntimeImage(c.Request.Context(), runtimeID, req)
-	httpx.Write(c, out, err)
+	httpx.Write(c, runtimeImageResponseFromModel(out), err)
 }
 
 // listRuntimeImages 返回指定运行时的镜像版本。
@@ -171,7 +171,7 @@ func (a sandboxAPI) listRuntimeImages(c *gin.Context) {
 		return
 	}
 	out, err := a.svc.ListRuntimeImages(c.Request.Context(), runtimeID)
-	httpx.Write(c, out, err)
+	httpx.Write(c, runtimeImageResponsesFromModels(out), err)
 }
 
 // disableRuntimeImage 绑定镜像停用请求,停用前由 service 清理预拉取 DaemonSet。
@@ -185,7 +185,7 @@ func (a sandboxAPI) disableRuntimeImage(c *gin.Context) {
 		return
 	}
 	out, err := a.svc.DisableRuntimeImage(c.Request.Context(), runtimeID, imageID)
-	httpx.Write(c, out, err)
+	httpx.Write(c, runtimeImageResponseFromModel(out), err)
 }
 
 // prepullRuntimeImage 触发镜像预拉取。
@@ -219,7 +219,7 @@ func (a sandboxAPI) getRuntimeImagePrepull(c *gin.Context) {
 // listTools 返回平台工具列表。
 func (a sandboxAPI) listTools(c *gin.Context) {
 	out, err := a.svc.ListTools(c.Request.Context())
-	httpx.Write(c, out, err)
+	httpx.Write(c, toolResponsesFromModels(out), err)
 }
 
 // registerTool 绑定工具注册请求。
@@ -229,7 +229,7 @@ func (a sandboxAPI) registerTool(c *gin.Context) {
 		return
 	}
 	out, err := a.svc.RegisterTool(c.Request.Context(), req)
-	httpx.Write(c, out, err)
+	httpx.Write(c, toolResponseFromModel(out), err)
 }
 
 // createSandbox 绑定内部创建沙箱请求。

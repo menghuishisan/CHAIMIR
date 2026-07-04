@@ -13,6 +13,7 @@ import type {
   ActivateRequest,
   LoginResponse,
   Account,
+  MeResponse,
   ChangePasswordRequest,
   ChangePhoneRequest,
   Session,
@@ -108,7 +109,7 @@ export class IdentityApi {
   /**
    * 激活账号
    */
-  async activate(data: ActivateRequest): Promise<LoginResponse> {
+  async activate(data: ActivateRequest): Promise<void> {
     return this.client.post('/auth/activate', data)
   }
 
@@ -145,7 +146,7 @@ export class IdentityApi {
   /**
    * 获取当前用户信息
    */
-  async getMe(): Promise<Account> {
+  async getMe(): Promise<MeResponse> {
     return this.client.get('/me')
   }
 

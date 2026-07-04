@@ -195,7 +195,7 @@ export class GradeApi {
   /**
    * 批量生成成绩单记录。
    */
-  async generateTranscriptBatch(data: { student_ids: string[]; scope: number; semester_id?: string }): Promise<GradeTranscript[]> {
+  async generateTranscriptBatch(data: { student_ids: number[]; scope: number; semester_id?: string }): Promise<GradeTranscript[]> {
     return this.client.post('/grade-center/transcripts/batch', data)
   }
 

@@ -84,6 +84,10 @@ export interface Account {
   created_at?: string
 }
 
+export interface MeResponse {
+  account: Account
+}
+
 export interface ChangePasswordRequest {
   old_password: string
   new_password: string
@@ -266,7 +270,7 @@ export interface AdminResetPasswordRequest {
 }
 
 export interface BatchAccountIDsRequest {
-  account_ids: string[]
+  account_ids: number[]
 }
 
 export interface ImportPreviewResponse {
@@ -314,8 +318,8 @@ export interface AccountImportCommitResponse {
 // ===== M5 Content 模块 =====
 
 export interface ContentItem {
-  id: string
-  tenant_id: string
+  id: number
+  tenant_id: number
   code: string
   version: string
   type: number
@@ -324,7 +328,7 @@ export interface ContentItem {
   difficulty: number
   tags: string[]
   knowledge_points: string[]
-  author_id: string
+  author_id: number
   author_type: number
   visibility: number
   status: number
@@ -375,8 +379,8 @@ export interface CloneItemRequest {
 }
 
 export interface ContentCategory {
-  id: string
-  parent_id?: string
+  id: number
+  parent_id?: number
   name: string
   sort: number
   created_at: string
@@ -427,9 +431,9 @@ export interface CreatePaperRequest {
 }
 
 export interface Paper {
-  id: string
+  id: number
   name: string
-  author_id: string
+  author_id: number
   gen_mode: number
   gen_criteria: PaperCriteria
   created_at: string
@@ -437,7 +441,7 @@ export interface Paper {
 }
 
 export interface PaperItemFace {
-  id: string
+  id: number
   code: string
   version: string
   score: number
@@ -454,9 +458,9 @@ export interface PaperDetail {
 // ===== M6 Teaching 模块 =====
 
 export interface Course {
-  id: string
-  tenant_id: string
-  teacher_id: string
+  id: number
+  tenant_id: number
+  teacher_id: number
   name: string
   description: string
   type: number
@@ -488,8 +492,8 @@ export interface CourseRequest {
 }
 
 export interface Chapter {
-  id: string
-  course_id: string
+  id: number
+  course_id: number
   title: string
   sort: number
   created_at: string
@@ -502,8 +506,8 @@ export interface ChapterRequest {
 }
 
 export interface Lesson {
-  id: string
-  chapter_id: string
+  id: number
+  chapter_id: number
   title: string
   content_type: number
   content_ref: Record<string, unknown>
@@ -527,8 +531,8 @@ export interface CourseOutline {
 }
 
 export interface Progress {
-  lesson_id: string
-  student_id: string
+  lesson_id: number
+  student_id: number
   status: number
   video_pos: number
   duration_sec: number
@@ -546,10 +550,10 @@ export interface JoinCourseRequest {
 }
 
 export interface Assignment {
-  id: string
-  course_id: string
+  id: number
+  course_id: number
   title: string
-  chapter_id?: string
+  chapter_id?: number
   due_at: string
   max_attempts: number
   late_policy: number
@@ -561,7 +565,7 @@ export interface Assignment {
 
 export interface AssignmentRequest {
   title: string
-  chapter_id: string
+  chapter_id: number
   due_at: string
   max_attempts: number
   late_policy: number
@@ -579,7 +583,7 @@ export interface AssignmentItemInput {
 }
 
 export interface AssignmentItem {
-  id: string
+  id: number
   item_code: string
   item_version: string
   score: number
@@ -598,17 +602,17 @@ export interface AssignmentDetail {
 }
 
 export interface Draft {
-  assignment_id: string
-  student_id: string
+  assignment_id: number
+  student_id: number
   content: Record<string, unknown>
   updated_at: string
   exists: boolean
 }
 
 export interface Submission {
-  id: string
-  assignment_id: string
-  student_id: string
+  id: number
+  assignment_id: number
+  student_id: number
   attempt_no: number
   content: Record<string, unknown>
   judge_task_ref?: string
@@ -716,9 +720,9 @@ export interface SandboxRuntimeRequest {
 }
 
 export interface SandboxRuntime extends SandboxRuntimeRequest {
-  id: string
-  created_at?: string
-  updated_at?: string
+  id: number
+  selftest_status: number
+  selftest_detail?: Record<string, unknown>
 }
 
 export interface SandboxRuntimeImageRequest {
@@ -730,9 +734,13 @@ export interface SandboxRuntimeImageRequest {
 }
 
 export interface SandboxRuntimeImage extends SandboxRuntimeImageRequest {
-  id: string
-  runtime_id: string
+  id: number
+  runtime_id: number
   status: number
+  prepulled: boolean
+  prepull_status: number
+  prepull_detail?: Record<string, unknown>
+  prepulled_at?: string
 }
 
 export interface SandboxToolRequest {
@@ -745,11 +753,11 @@ export interface SandboxToolRequest {
 }
 
 export interface SandboxToolDefinition extends SandboxToolRequest {
-  id: string
+  id: number
 }
 
 export interface SandboxQuota {
-  tenant_id: string
+  tenant_id: number
   active_sandbox_count?: number
   max_concurrent_sandbox: number
   max_cpu: number
@@ -761,7 +769,7 @@ export interface SandboxQuota {
 }
 
 export interface SandboxPrepullStatus {
-  image_id: string
+  image_id: number
   prepull_status: number
   desired_nodes: number
   ready_nodes: number
@@ -771,7 +779,7 @@ export interface SandboxPrepullStatus {
 }
 
 export interface SandboxRuntimeSelftestStatus {
-  runtime_id: string
+  runtime_id: number
   selftest_status: number
   runtime_status: number
   detail: Record<string, unknown>
@@ -1046,7 +1054,7 @@ export interface ExperimentGroupRequest {
 }
 
 export interface ExperimentGroupMemberRequest {
-  student_id: string
+  student_id: number
   role: string
 }
 
@@ -1068,27 +1076,27 @@ export interface ExperimentGroupMember {
 }
 
 export interface CourseMember {
-  id: string
-  course_id: string
-  student_id: string
+  id: number
+  course_id: number
+  student_id: number
   join_mode: number
   joined_at: string
 }
 
 export interface BatchMembersRequest {
-  student_ids: string[]
+  student_ids: number[]
 }
 
 export interface TeachingPostRequest {
-  parent_id?: string
+  parent_id?: number
   content: string
 }
 
 export interface TeachingPost {
-  id: string
-  course_id: string
-  parent_id?: string
-  author_id: string
+  id: number
+  course_id: number
+  parent_id?: number
+  author_id: number
   content: string
   is_pinned: boolean
   like_count: number
@@ -1102,8 +1110,8 @@ export interface TeachingAnnouncementRequest {
 }
 
 export interface TeachingAnnouncement {
-  id: string
-  course_id: string
+  id: number
+  course_id: number
   title: string
   content: string
   is_pinned: boolean
@@ -1116,16 +1124,16 @@ export interface TeachingReviewRequest {
 }
 
 export interface TeachingReview {
-  id: string
-  course_id: string
-  student_id: string
+  id: number
+  course_id: number
+  student_id: number
   rating: number
   comment: string
   created_at: string
 }
 
 export interface ProgressStats {
-  course_id: string
+  course_id: number
   member_count: number
   lesson_count: number
   completed_count: number
@@ -1143,7 +1151,7 @@ export interface GradeWeightInput {
 }
 
 export interface GradeWeight {
-  id: string
+  id: number
   source_type: number
   source_ref: string
   weight: number
@@ -1154,8 +1162,8 @@ export interface OverrideGradeRequest {
 }
 
 export interface TeachingCourseGrade {
-  course_id: string
-  student_id: string
+  course_id: number
+  student_id: number
   auto_total: number
   override_total?: number
   final_total: number

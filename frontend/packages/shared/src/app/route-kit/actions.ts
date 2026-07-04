@@ -81,7 +81,7 @@ export function assignmentActions(api: ChaimirApi): PageAction[] {
     pageAction('create-assignment', '创建作业', '创建课程作业并保存题目列表。', [
       textInput('course_id', '课程编号', true),
       textInput('title', '作业标题', true),
-      textInput('chapter_id', '章节编号', true),
+      numberInput('chapter_id', '章节编号', true),
       datetimeInput('due_at', '截止时间', true),
       numberInput('max_attempts', '提交次数', true),
       numberInput('late_policy', '迟交策略', true),
@@ -90,7 +90,7 @@ export function assignmentActions(api: ChaimirApi): PageAction[] {
     ], async (values) => {
       await api.teaching.createAssignment(valueText(values, 'course_id'), {
         title: valueText(values, 'title'),
-        chapter_id: valueText(values, 'chapter_id'),
+        chapter_id: valueNumber(values, 'chapter_id'),
         due_at: valueText(values, 'due_at'),
         max_attempts: valueNumber(values, 'max_attempts'),
         late_policy: valueNumber(values, 'late_policy'),
@@ -106,7 +106,7 @@ export function assignmentActions(api: ChaimirApi): PageAction[] {
     pageAction('update-assignment', '更新作业', '更新课程作业配置。', [
       textInput('assignment_id', '作业编号', true),
       textInput('title', '作业标题', true),
-      textInput('chapter_id', '章节编号', true),
+      numberInput('chapter_id', '章节编号', true),
       datetimeInput('due_at', '截止时间', true),
       numberInput('max_attempts', '提交次数', true),
       numberInput('late_policy', '迟交策略', true),
@@ -115,7 +115,7 @@ export function assignmentActions(api: ChaimirApi): PageAction[] {
     ], async (values) => {
       await api.teaching.updateAssignment(valueText(values, 'assignment_id'), {
         title: valueText(values, 'title'),
-        chapter_id: valueText(values, 'chapter_id'),
+        chapter_id: valueNumber(values, 'chapter_id'),
         due_at: valueText(values, 'due_at'),
         max_attempts: valueNumber(values, 'max_attempts'),
         late_policy: valueNumber(values, 'late_policy'),
@@ -210,11 +210,11 @@ export function experimentAuthorActions(api: ChaimirApi): PageAction[] {
     }),
     pageAction('upsert-group-member', '维护小组成员', '添加或更新实验小组成员。', [
       textInput('group_id', '小组编号', true),
-      textInput('student_id', '学生编号', true),
+      numberInput('student_id', '学生编号', true),
       textInput('role', '成员角色', true),
     ], async (values) => {
       await api.experiment.upsertGroupMember(valueText(values, 'group_id'), {
-        student_id: valueText(values, 'student_id'),
+        student_id: valueNumber(values, 'student_id'),
         role: valueText(values, 'role'),
       })
       return '小组成员已保存'
@@ -552,7 +552,7 @@ export function gradeConfigActions(api: ChaimirApi): PageAction[] {
       textInput('semester_id', '学期编号'),
     ], async (values) => {
       await api.grade.generateTranscriptBatch({
-        student_ids: valueStringArray(values, 'student_ids'),
+        student_ids: valueNumberArray(values, 'student_ids'),
         scope: valueNumber(values, 'scope'),
         semester_id: optionalText(values, 'semester_id'),
       })
@@ -879,6 +879,12 @@ export function valueJsonArray(values: ActionValues, key: string): Record<string
 export function valueStringArray(values: ActionValues, key: string): string[] {
   const raw = valueText(values, key)
   return raw ? raw.split(',').map((item) => item.trim()).filter(Boolean) : []
+}
+
+export function valueNumberArray(values: ActionValues, key: string): number[] {
+  return valueStringArray(values, key)
+    .map((item) => Number(item))
+    .filter((item) => Number.isFinite(item))
 }
 
 export function valueFromRow(row: DataRow, key: string): string {

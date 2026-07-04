@@ -38,6 +38,47 @@ type ToolRequest struct {
 	Status       int16           `json:"status"`
 }
 
+// RuntimeResponse 是运行时管理接口的稳定输出 DTO,避免内部模型字段名泄漏到 HTTP。
+type RuntimeResponse struct {
+	ID             int64           `json:"id"`
+	Code           string          `json:"code"`
+	Name           string          `json:"name"`
+	Eco            string          `json:"eco"`
+	AdapterLevel   int16           `json:"adapter_level"`
+	AdapterSpec    AdapterSpec     `json:"adapter_spec"`
+	CapabilityImpl string          `json:"capability_impl"`
+	PluginRef      string          `json:"plugin_ref"`
+	SelftestStatus int16           `json:"selftest_status"`
+	SelftestDetail json.RawMessage `json:"selftest_detail,omitempty"`
+	Status         int16           `json:"status"`
+}
+
+// RuntimeImageResponse 是运行时镜像接口的稳定输出 DTO。
+type RuntimeImageResponse struct {
+	ID            int64           `json:"id"`
+	RuntimeID     int64           `json:"runtime_id"`
+	ImageURL      string          `json:"image_url"`
+	Version       string          `json:"version"`
+	Status        int16           `json:"status"`
+	Prepulled     bool            `json:"prepulled"`
+	PrepullStatus int16           `json:"prepull_status"`
+	PrepullDetail json.RawMessage `json:"prepull_detail,omitempty"`
+	PrepulledAt   string          `json:"prepulled_at,omitempty"`
+	GenesisBaked  bool            `json:"genesis_baked"`
+	IsDefault     bool            `json:"is_default"`
+}
+
+// ToolResponse 是沙箱工具管理接口的稳定输出 DTO。
+type ToolResponse struct {
+	ID           int64            `json:"id"`
+	Code         string           `json:"code"`
+	Name         string           `json:"name"`
+	Kind         int16            `json:"kind"`
+	EcoTags      []string         `json:"eco_tags"`
+	ResourceSpec ToolResourceSpec `json:"resource_spec"`
+	Status       int16            `json:"status"`
+}
+
 // CreateSandboxRequest 是内部 HTTP 创建沙箱请求。
 type CreateSandboxRequest struct {
 	TenantID                 int64    `json:"tenant_id"`

@@ -69,7 +69,7 @@ export function AuthApp(): React.ReactElement {
         {page === 'forgot' && <ForgotPage api={api} />}
         {page === 'sso' && <SsoPage api={api} config={config} />}
         {page === 'apply' && <ApplyPage api={api} />}
-        {page === 'activate' && <ActivatePage api={api} config={config} />}
+        {page === 'activate' && <ActivatePage api={api} />}
         {page === 'platform-login' && <PlatformLoginPage api={api} config={config} />}
         {page === 'change-pwd' && <ChangePasswordGate />}
       </section>
