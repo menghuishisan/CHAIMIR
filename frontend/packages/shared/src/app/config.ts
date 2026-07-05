@@ -1,4 +1,4 @@
-// 前端应用配置：集中读取四端构建期环境变量，避免各端重复解析。
+// 前端应用配置：集中读取单入口应用的构建期环境变量。
 
 import { API_BASE_PATH } from '@chaimir/api-client'
 
@@ -29,10 +29,10 @@ export function readFrontendConfig(env: EnvMap = readImportMetaEnv()): FrontendR
     requestTimeoutMs: readNumber(env.VITE_API_TIMEOUT_MS, 30000),
     simWorkerCommandTimeoutMs: readNumber(env.VITE_SIM_WORKER_COMMAND_TIMEOUT_MS, 2000),
     roleAppUrls: {
-      student: env.VITE_STUDENT_APP_URL || '/student/',
-      teacher: env.VITE_TEACHER_APP_URL || '/teacher/',
-      schoolAdmin: env.VITE_SCHOOL_ADMIN_APP_URL || '/school-admin/',
-      platformAdmin: env.VITE_PLATFORM_ADMIN_APP_URL || '/platform-admin/',
+      student: '/student/',
+      teacher: '/teacher/',
+      schoolAdmin: '/school-admin/',
+      platformAdmin: '/platform-admin/',
     },
   }
 }
