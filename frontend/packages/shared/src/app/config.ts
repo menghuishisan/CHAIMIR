@@ -8,7 +8,7 @@ export interface FrontendRuntimeConfig {
   deployMode: 'saas' | 'school'
   requestTimeoutMs: number
   simWorkerCommandTimeoutMs: number
-  roleAppUrls: {
+  roleEntryPaths: {
     student: string
     teacher: string
     schoolAdmin: string
@@ -28,7 +28,7 @@ export function readFrontendConfig(env: EnvMap = readImportMetaEnv()): FrontendR
     deployMode: readDeployMode(env.VITE_DEPLOY_MODE),
     requestTimeoutMs: readNumber(env.VITE_API_TIMEOUT_MS, 30000),
     simWorkerCommandTimeoutMs: readNumber(env.VITE_SIM_WORKER_COMMAND_TIMEOUT_MS, 2000),
-    roleAppUrls: {
+    roleEntryPaths: {
       student: '/student/',
       teacher: '/teacher/',
       schoolAdmin: '/school-admin/',

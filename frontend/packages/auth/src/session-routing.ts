@@ -1,4 +1,4 @@
-// 会话路由：统一认证成功后的登录态保存和四端跳转规则。
+// 会话路由：统一认证成功后的登录态保存和单入口角色路径跳转规则。
 
 import type { ChaimirApi, LoginResponse } from '@chaimir/api-client'
 import { readFrontendConfig, saveSession, saveStoredUser } from '@chaimir/shared'
@@ -45,18 +45,18 @@ export function handleLoginResponse(response: LoginResponse, config: ReturnType<
     window.location.hash = '#change-pwd'
     return
   }
-  const target = resolveRoleUrl(response, config)
+  const target = resolveRoleEntryPath(response, config)
   window.location.assign(target)
 }
 
 /**
- * resolveRoleUrl 根据 M1 角色编码选择四端入口，平台管理员优先进入平台管理端。
+ * resolveRoleEntryPath 根据 M1 角色编码选择单入口下的角色路径。
  */
-function resolveRoleUrl(response: LoginResponse, config: ReturnType<typeof readFrontendConfig>): string {
+function resolveRoleEntryPath(response: LoginResponse, config: ReturnType<typeof readFrontendConfig>): string {
   const roles = response.account?.roles ?? []
   const identity = response.account?.base_identity
-  if (roles.includes(1) || identity === 1) return config.roleAppUrls.platformAdmin
-  if (roles.includes(2) || identity === 2) return config.roleAppUrls.schoolAdmin
-  if (roles.includes(3) || identity === 3) return config.roleAppUrls.teacher
-  return config.roleAppUrls.student
+  if (roles.includes(1) || identity === 1) return config.roleEntryPaths.platformAdmin
+  if (roles.includes(2) || identity === 2) return config.roleEntryPaths.schoolAdmin
+  if (roles.includes(3) || identity === 3) return config.roleEntryPaths.teacher
+  return config.roleEntryPaths.student
 }
