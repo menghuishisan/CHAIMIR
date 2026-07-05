@@ -2,6 +2,7 @@
 
 import axios, { AxiosInstance, AxiosError, InternalAxiosRequestConfig } from 'axios'
 import { API_BASE_PATH } from './constants'
+import type { WebSocketTicketResponse } from './types'
 
 export interface ApiConfig {
   baseURL: string
@@ -176,7 +177,7 @@ export class ApiClient {
    */
   public wsURL(path: string, query?: Record<string, string | undefined>): string {
     const wsBaseURL = toWebSocketBaseURL(this.baseURL())
-    return `${wsBaseURL}${normalizePath(path)}${this.browserTokenQuery(query)}`
+    return `${wsBaseURL}${normalizePath(path)}${queryString(query)}`
   }
 
   /**
@@ -187,7 +188,7 @@ export class ApiClient {
     const apiRoot = API_BASE_PATH
     const originBase = baseURL.endsWith(apiRoot) ? baseURL.slice(0, -apiRoot.length) : baseURL
     const wsBaseURL = toWebSocketBaseURL(originBase)
-    return `${wsBaseURL}${normalizePath(path)}${this.browserTokenQuery(query)}`
+    return `${wsBaseURL}${normalizePath(path)}${queryString(query)}`
   }
 
   /**
@@ -198,7 +199,14 @@ export class ApiClient {
   }
 
   /**
-   * 构造浏览器无法设置 Authorization 头时使用的一次性 token 查询参数。
+   * issueWebSocketTicket 为指定 WebSocket URL 换取短时连接票据。
+   */
+  public async issueWebSocketTicket(wsUrl: string): Promise<WebSocketTicketResponse> {
+    return this.post('/auth/ws-ticket', { path: webSocketPath(wsUrl) })
+  }
+
+  /**
+   * 构造浏览器工具代理入口使用的一次性 token 查询参数。
    */
   public browserTokenQuery(extra?: Record<string, string | undefined>): string {
     const params = new URLSearchParams()
@@ -332,6 +340,30 @@ function normalizePath(path: string): string {
     return ''
   }
   return trimmed.startsWith('/') ? trimmed : `/${trimmed}`
+}
+
+/**
+ * queryString 把调用方显式传入的查询参数拼接到 URL,不自动携带登录凭证。
+ */
+function queryString(extra?: Record<string, string | undefined>): string {
+  const params = new URLSearchParams()
+  for (const [key, value] of Object.entries(extra || {})) {
+    if (value) {
+      params.set(key, value)
+    }
+  }
+  const query = params.toString()
+  return query ? `?${query}` : ''
+}
+
+/**
+ * webSocketPath 从完整 WS URL 中提取后端票据绑定所需路径。
+ */
+function webSocketPath(wsUrl: string): string {
+  if (typeof window !== 'undefined') {
+    return new URL(wsUrl, window.location.href).pathname
+  }
+  return new URL(wsUrl, 'http://chaimir.local').pathname
 }
 
 /**

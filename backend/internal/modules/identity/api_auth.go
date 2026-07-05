@@ -2,8 +2,12 @@
 package identity
 
 import (
+	"time"
+
 	"chaimir/internal/platform/auth"
 	"chaimir/internal/platform/httpx"
+	"chaimir/internal/platform/tenant"
+	"chaimir/pkg/apperr"
 
 	"github.com/gin-gonic/gin"
 )
@@ -24,6 +28,7 @@ func registerAuthRoutes(r gin.IRouter, svc *Service, authn *auth.Manager) {
 	g.POST("/login/sms", api.loginSMS)
 	g.POST("/sms/send", api.sendSMS)
 	g.POST("/refresh", api.refreshToken)
+	g.POST("/ws-ticket", authn.Middleware(), api.issueWebSocketTicket)
 	g.POST("/password/reset", api.resetPassword)
 	g.POST("/activate", api.activate)
 	g.POST("/logout", authn.Middleware(), api.logout)
@@ -116,6 +121,35 @@ func (a authAPI) refreshToken(c *gin.Context) {
 		return
 	}
 	httpx.Write(c, out, nil)
+}
+
+// issueWebSocketTicket 用当前服务端会话为指定实时通道签发短时连接票据。
+func (a authAPI) issueWebSocketTicket(c *gin.Context) {
+	var req WebSocketTicketRequest
+	if !httpx.BindJSON(c, &req) {
+		return
+	}
+	id, ok := tenant.FromContext(c.Request.Context())
+	if !ok {
+		httpx.Write(c, gin.H{}, apperr.ErrIdentitySessionContextMissing)
+		return
+	}
+	sessionID, ok := currentSessionID(c)
+	if !ok {
+		return
+	}
+	ticket, expiresAt, err := a.authn.IssueWebSocketTicket(auth.SessionIdentity{
+		TenantID:   id.TenantID,
+		AccountID:  id.AccountID,
+		SessionID:  sessionID,
+		IsPlatform: id.IsPlatform,
+		Path:       req.Path,
+	})
+	if err != nil {
+		httpx.Write(c, gin.H{}, apperr.ErrUnauthorized.WithCause(err))
+		return
+	}
+	httpx.Write(c, WebSocketTicketResponse{Ticket: ticket, ExpiresAt: expiresAt.Format(time.RFC3339)}, nil)
 }
 
 // resetPassword 绑定找回密码请求,短信校验和密码更新由 service 原子处理。

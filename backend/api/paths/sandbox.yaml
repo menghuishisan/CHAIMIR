@@ -168,8 +168,8 @@
     operationId: sandboxProgress
     x-chaimir-audience: user
     x-chaimir-websocket: true
-    security: [{ bearerAuth: [] }]
-    parameters: [{ $ref: "#/components/parameters/IDPath" }, { name: token, in: query, required: false, schema: { type: string }, description: 浏览器 WebSocket 无法设置 Authorization 头时使用的一次性 access token }]
+    security: [{ wsTicketAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }, { name: ticket, in: query, required: true, schema: { type: string }, description: 通过 /api/v1/auth/ws-ticket 换取的短时路径绑定连接票据 }]
     responses: { "101": { description: WebSocket 升级成功 }, default: { $ref: "#/components/responses/Error" } }
 /api/v1/sandbox/sandboxes/{id}/terminal:
   get:
@@ -178,8 +178,8 @@
     operationId: sandboxTerminal
     x-chaimir-audience: user
     x-chaimir-websocket: true
-    security: [{ bearerAuth: [] }]
-    parameters: [{ $ref: "#/components/parameters/IDPath" }, { name: container, in: query, schema: { type: string } }, { name: token, in: query, required: false, schema: { type: string }, description: 浏览器 WebSocket 无法设置 Authorization 头时使用的一次性 access token }]
+    security: [{ wsTicketAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }, { name: container, in: query, schema: { type: string } }, { name: ticket, in: query, required: true, schema: { type: string }, description: 通过 /api/v1/auth/ws-ticket 换取的短时路径绑定连接票据 }]
     responses: { "101": { description: WebSocket 升级成功 }, default: { $ref: "#/components/responses/Error" } }
 /api/v1/sandbox/sandboxes/{id}/files:
   get:

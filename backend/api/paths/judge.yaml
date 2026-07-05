@@ -64,7 +64,7 @@
     operationId: judgeGetTask
     x-chaimir-audience: teacher
     security: [{ bearerAuth: [] }]
-    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }, { name: ticket, in: query, required: true, schema: { type: string }, description: 通过 /api/v1/auth/ws-ticket 换取的短时路径绑定连接票据 }]
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
 /api/v1/judge/internal/tasks/{id}:
   delete:
@@ -83,7 +83,7 @@
     operationId: judgeTaskProgress
     x-chaimir-audience: teacher
     x-chaimir-websocket: true
-    security: [{ bearerAuth: [] }]
+    security: [{ wsTicketAuth: [] }]
     parameters: [{ $ref: "#/components/parameters/IDPath" }]
     responses: { "101": { description: WebSocket 升级成功 }, default: { $ref: "#/components/responses/Error" } }
 /api/v1/judge/tasks/{id}/rejudge:

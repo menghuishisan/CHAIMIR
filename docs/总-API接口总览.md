@@ -24,7 +24,8 @@
 - JWT 双 Token(M1):`Authorization: Bearer <access_token>`。
 - 登录前定位租户:`X-Tenant-Code`(学校短码)。
 - Access 15min,Refresh 7d 轮转;单端登录。
-- 浏览器原生 WebSocket/iframe 工具入口不能设置 `Authorization` 头时,仅 sandbox 交互入口允许一次性 `?token=<access_token>` 进入;后端校验后写路径受限 HttpOnly Cookie 并清除 query,不得把 token 透传给工具容器。
+- 浏览器原生 WebSocket 不能设置 `Authorization` 头时,前端先通过 `POST /api/v1/auth/ws-ticket` 使用当前登录态为目标 WS path 换取短时路径绑定票据,再以 `?ticket=<ws_ticket>` 建连;后端校验票据路径和服务端会话,不得在普通 WS URL 中携带 access token。
+- iframe/Web 工具入口不能设置 `Authorization` 头时,仅 sandbox Web 工具代理允许一次性 `?token=<access_token>` 进入;后端校验后写路径受限 HttpOnly Cookie 并清除 query,不得把 token 透传给工具容器。
 
 ### 4. 接口分类
 - **`[用户]`**:前端调用,JWT + 角色鉴权。
@@ -61,6 +62,7 @@
 
 ### M1 身份与租户 `/api/v1`
 - `/auth/*`:登录(手机号/学号/短信)、刷新、登出、找回、SSO。
+- `/auth/ws-ticket`:为浏览器 WebSocket 签发短时路径绑定连接票据。
 - `/platform/applications`、`/platform/tenants`:入驻审核、租户管理 `[平台管理员]`。
 - `/tenant/config`、`/tenant/sso`:租户配置。
 - `/org/*`:院系/专业/班级。

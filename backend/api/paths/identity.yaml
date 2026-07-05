@@ -79,6 +79,21 @@
         $ref: "#/components/responses/Standard"
       default:
         $ref: "#/components/responses/Error"
+/api/v1/auth/ws-ticket:
+  post:
+    tags: [identity]
+    summary: 签发 WebSocket 短时连接票据
+    operationId: identityIssueWebSocketTicket
+    x-chaimir-audience: user
+    security:
+      - bearerAuth: []
+    requestBody:
+      $ref: "#/components/requestBodies/ObjectBody"
+    responses:
+      "200":
+        $ref: "#/components/responses/Standard"
+      default:
+        $ref: "#/components/responses/Error"
 /api/v1/auth/password/reset:
   post:
     tags: [identity]

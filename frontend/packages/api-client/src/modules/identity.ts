@@ -9,6 +9,7 @@ import type {
   LoginSMSRequest,
   SendSMSRequest,
   RefreshRequest,
+  WebSocketTicketResponse,
   PasswordResetRequest,
   ActivateRequest,
   LoginResponse,
@@ -97,6 +98,13 @@ export class IdentityApi {
    */
   async refreshToken(data: RefreshRequest): Promise<LoginResponse> {
     return this.client.post('/auth/refresh', data)
+  }
+
+  /**
+   * 为指定实时通道换取短时连接票据。
+   */
+  async issueWebSocketTicket(path: string): Promise<WebSocketTicketResponse> {
+    return this.client.post('/auth/ws-ticket', { path })
   }
 
   /**

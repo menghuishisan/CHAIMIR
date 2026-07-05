@@ -37,7 +37,7 @@ export function useWebSocket(
     reconnectInterval,
     maxReconnectAttempts,
     heartbeatInterval,
-    getToken,
+    getTicket,
     onClientError,
   } = options
 
@@ -69,7 +69,7 @@ export function useWebSocket(
         reconnectInterval,
         maxReconnectAttempts,
         heartbeatInterval,
-        getToken,
+        getTicket,
         onClientError: reportHookError,
       })
     },
@@ -79,7 +79,7 @@ export function useWebSocket(
       reconnectInterval,
       maxReconnectAttempts,
       heartbeatInterval,
-      getToken,
+      getTicket,
       reportHookError,
     ]
   )

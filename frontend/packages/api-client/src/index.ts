@@ -49,6 +49,7 @@ export interface ChaimirApi {
   grade: GradeApi
   sim: SimApi
   transfer: TransferApi
+  webSocketTicketProvider: (url: string) => Promise<string | null>
 }
 
 /**
@@ -56,9 +57,10 @@ export interface ChaimirApi {
  */
 export function createApi(config: ApiConfig): ChaimirApi {
   const client = new ApiClient(config)
+  const identity = new IdentityApi(client)
 
   return {
-    identity: new IdentityApi(client),
+    identity,
     content: new ContentApi(client),
     teaching: new TeachingApi(client),
     sandbox: new SandboxApi(client),
@@ -70,5 +72,9 @@ export function createApi(config: ApiConfig): ChaimirApi {
     grade: new GradeApi(client),
     sim: new SimApi(client),
     transfer: new TransferApi(client),
+    webSocketTicketProvider: async (url: string) => {
+      const response = await client.issueWebSocketTicket(url)
+      return response.ticket
+    },
   }
 }

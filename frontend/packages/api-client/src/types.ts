@@ -44,6 +44,15 @@ export interface RefreshRequest {
   refresh_token: string
 }
 
+export interface WebSocketTicketRequest {
+  path: string
+}
+
+export interface WebSocketTicketResponse {
+  ticket: string
+  expires_at: string
+}
+
 export interface PasswordResetRequest {
   phone: string
   code: string

@@ -104,7 +104,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({
   }, [onAuthError, revokeSession])
 
   /**
-   * getToken 返回当前 access token,供 API 和 WebSocket 客户端注入鉴权。
+   * getToken 返回当前 access token,供 API 客户端注入 Authorization 头。
    */
   const getToken = useCallback((): string | null => {
     return getAccessToken()

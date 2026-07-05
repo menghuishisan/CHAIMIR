@@ -109,7 +109,7 @@
     operationId: simApproveReview
     x-chaimir-audience: platform-admin
     security: [{ bearerAuth: [] }]
-    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }, { name: ticket, in: query, required: true, schema: { type: string }, description: 通过 /api/v1/auth/ws-ticket 换取的短时路径绑定连接票据 }]
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
 /api/v1/sim/reviews/{id}/reject:
   post:
@@ -186,7 +186,7 @@
     operationId: simStreamSession
     x-chaimir-audience: user
     x-chaimir-websocket: true
-    security: [{ bearerAuth: [] }]
+    security: [{ wsTicketAuth: [] }]
     parameters: [{ $ref: "#/components/parameters/IDPath" }]
     responses: { "101": { description: WebSocket 升级成功 }, default: { $ref: "#/components/responses/Error" } }
 /api/v1/sim/internal/sessions/{id}/checkpoints:

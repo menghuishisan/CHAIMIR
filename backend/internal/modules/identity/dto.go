@@ -36,6 +36,15 @@ type RefreshRequest struct {
 	RefreshToken string `json:"refresh_token"`
 }
 
+type WebSocketTicketRequest struct {
+	Path string `json:"path"`
+}
+
+type WebSocketTicketResponse struct {
+	Ticket    string `json:"ticket"`
+	ExpiresAt string `json:"expires_at"`
+}
+
 type PasswordResetRequest struct {
 	Phone       string `json:"phone"`
 	Code        string `json:"code"`

@@ -35,7 +35,8 @@ func RegisterRoutes(r gin.IRouter, svc *Service, authn *auth.Manager, roles cont
 	api.registerInternalRoutes(g.Group("/internal", authn.ServiceMiddleware()))
 	api.registerChainRoutes(g.Group("", authn.ServiceOrTenantAnyRoleMiddleware(roles, contracts.RoleStudent, contracts.RoleTeacher, contracts.RoleSchoolAdmin)))
 	api.registerUserRoutes(g.Group("", authn.Middleware(), auth.RequireTenantAnyRole(roles, contracts.RoleStudent, contracts.RoleTeacher, contracts.RoleSchoolAdmin)))
-	api.registerInteractiveRoutes(g.Group("", authn.BrowserAccessMiddleware(), auth.RequireTenantAnyRole(roles, contracts.RoleStudent, contracts.RoleTeacher, contracts.RoleSchoolAdmin)))
+	api.registerInteractiveSocketRoutes(g.Group("", authn.WebSocketMiddleware(), auth.RequireTenantAnyRole(roles, contracts.RoleStudent, contracts.RoleTeacher, contracts.RoleSchoolAdmin)))
+	api.registerToolProxyRoutes(g.Group("", authn.BrowserAccessMiddleware(), auth.RequireTenantAnyRole(roles, contracts.RoleStudent, contracts.RoleTeacher, contracts.RoleSchoolAdmin)))
 	api.registerQuotaRoutes(g, authn, roles)
 	return nil
 }
@@ -107,10 +108,14 @@ func (a sandboxAPI) registerUserRoutes(g gin.IRouter) {
 	g.POST("/sandboxes/:id/command-tools/:tool_code/run", a.runCommandTool)
 }
 
-// registerInteractiveRoutes 注册浏览器工具、终端和进度流入口,允许路径受限 Cookie 支撑工具资源加载。
-func (a sandboxAPI) registerInteractiveRoutes(g gin.IRouter) {
+// registerInteractiveSocketRoutes 注册终端和进度 WebSocket 入口,统一使用短时连接票据。
+func (a sandboxAPI) registerInteractiveSocketRoutes(g gin.IRouter) {
 	g.GET("/sandboxes/:id/progress", a.progress)
 	g.GET("/sandboxes/:id/terminal", a.terminal)
+}
+
+// registerToolProxyRoutes 注册浏览器工具代理入口,允许路径受限 Cookie 支撑工具资源加载。
+func (a sandboxAPI) registerToolProxyRoutes(g gin.IRouter) {
 	g.Match([]string{http.MethodGet, http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete, http.MethodHead, http.MethodOptions}, "/sandboxes/:id/tools/:tool_code/*proxy_path", a.toolProxy)
 }
 

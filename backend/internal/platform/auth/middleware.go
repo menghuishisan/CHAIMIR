@@ -109,10 +109,10 @@ func (m *Manager) AuthenticateAccess(c *gin.Context) bool {
 	return true
 }
 
-// WebSocketMiddleware 校验 WebSocket 文档约定的 query token 并注入租户身份上下文。
+// WebSocketMiddleware 校验短时 WebSocket 票据并注入租户身份上下文。
 func (m *Manager) WebSocketMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		claims, ok := m.queryAccessClaims(c, "token")
+		claims, ok := m.webSocketTicketClaims(c)
 		if !ok {
 			return
 		}
@@ -408,15 +408,15 @@ func browserCookieSecure(c *gin.Context) bool {
 	return c.Request.TLS != nil || strings.EqualFold(strings.TrimSpace(c.GetHeader("X-Forwarded-Proto")), "https")
 }
 
-// queryAccessClaims 提取并校验查询参数中的 access token,用于浏览器 WebSocket 连接。
-func (m *Manager) queryAccessClaims(c *gin.Context, key string) (*Claims, bool) {
-	token := strings.TrimSpace(c.Query(key))
-	if token == "" {
+// webSocketTicketClaims 提取并校验查询参数中的短时连接票据。
+func (m *Manager) webSocketTicketClaims(c *gin.Context) (*Claims, bool) {
+	ticket := strings.TrimSpace(c.Query("ticket"))
+	if ticket == "" {
 		response.Fail(c, apperr.ErrUnauthorized)
 		c.Abort()
 		return nil, false
 	}
-	claims, err := m.VerifyAccess(token)
+	claims, err := m.VerifyWebSocketTicket(ticket, c.Request.URL.Path)
 	if err != nil {
 		response.Fail(c, apperr.ErrUnauthorized.WithCause(err))
 		c.Abort()

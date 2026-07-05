@@ -1,4 +1,4 @@
-// WebSocket 客户端封装：统一处理后端 query token 鉴权、重连、心跳和事件分发。
+// WebSocket 客户端封装：统一处理短时连接票据、重连、心跳和事件分发。
 
 export interface WsClientConfig {
   url: string
@@ -7,7 +7,7 @@ export interface WsClientConfig {
   reconnectInterval?: number
   maxReconnectAttempts?: number
   heartbeatInterval?: number
-  getToken?: () => string | null
+  getTicket?: (url: string) => Promise<string | null>
   onClientError?: (error: unknown, context: string) => void
 }
 
@@ -27,6 +27,7 @@ export class WsClient {
   private heartbeatTimer: ReturnType<typeof setInterval> | null = null
   private eventHandlers = new Map<string, Set<StoredWsEventHandler>>()
   private isManualClose = false
+  private connectionAttempt = 0
 
   /**
    * constructor 创建一个可重连的 WebSocket 客户端实例。
@@ -38,26 +39,35 @@ export class WsClient {
       reconnectInterval: config.reconnectInterval || 3000,
       maxReconnectAttempts: config.maxReconnectAttempts || 5,
       heartbeatInterval: config.heartbeatInterval || 30000,
-      getToken: config.getToken || (() => null),
+      getTicket: config.getTicket || (async () => null),
       onClientError: config.onClientError || (() => undefined),
       url: config.url,
     }
   }
 
   /**
-   * 连接 WebSocket
+   * 连接 WebSocket。
    */
   connect(): void {
-    if (this.ws?.readyState === WebSocket.OPEN) {
+    if (this.ws?.readyState === WebSocket.OPEN || this.ws?.readyState === WebSocket.CONNECTING) {
       return
     }
 
     this.isManualClose = false
+    this.connectionAttempt += 1
+    void this.openSocket(this.connectionAttempt)
+  }
 
-    // 后端 WebSocket 中间件要求通过 query token 鉴权，保留调用方已有查询参数。
-    const url = appendTokenQuery(this.config.url, this.config.getToken())
-
+  /**
+   * openSocket 获取短时连接票据后建立 WebSocket,重连时会重新取票。
+   */
+  private async openSocket(attempt: number): Promise<void> {
     try {
+      const ticket = await this.config.getTicket(this.config.url)
+      if (this.isManualClose || attempt !== this.connectionAttempt) {
+        return
+      }
+      const url = appendTicketQuery(this.config.url, ticket)
       this.ws = new WebSocket(url, this.config.protocols)
       this.setupEventListeners()
     } catch (error) {
@@ -71,6 +81,7 @@ export class WsClient {
    */
   disconnect(): void {
     this.isManualClose = true
+    this.connectionAttempt += 1
     this.clearHeartbeat()
 
     if (this.ws) {
@@ -239,15 +250,15 @@ export class WsClient {
 }
 
 /**
- * appendTokenQuery 为 WebSocket URL 附加后端要求的 query token,并避免重复追加。
+ * appendTicketQuery 为 WebSocket URL 附加后端要求的短时连接票据,并避免重复追加。
  */
-function appendTokenQuery(url: string, token: string | null): string {
-  if (!token) {
+function appendTicketQuery(url: string, ticket: string | null): string {
+  if (!ticket) {
     return url
   }
-  if (/[?&]token=/.test(url)) {
+  if (/[?&]ticket=/.test(url)) {
     return url
   }
   const separator = url.includes('?') ? '&' : '?'
-  return `${url}${separator}token=${encodeURIComponent(token)}`
+  return `${url}${separator}ticket=${encodeURIComponent(ticket)}`
 }
