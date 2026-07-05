@@ -98,6 +98,8 @@ export const breakpoints = {
 } as const
 
 export const zIndex = {
+  below: -1,
+  ground: 0,
   base: 1,
   sticky: 50,
   dropdown: 60,

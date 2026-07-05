@@ -1,8 +1,8 @@
 ﻿// 共享路由：通知、个人中心、公告和沉浸式工作台入口。
 
 import { Bell, Download, Flag, Megaphone, PlayCircle, Swords, UserCog } from 'lucide-react'
-import type { AppDefinition } from '../types'
-import { getRefreshToken, saveSession, saveStoredUser } from '../storage'
+import { getRefreshToken, saveSession, saveStoredUser } from '@chaimir/shared'
+import type { AppDefinition } from '@chaimir/shared'
 import { accountStatusText, dateText, idOf, listResult, sessionStatusText, text, toRows, workspaceInfo } from './results'
 import { announcementColumns, notificationColumns, sessionColumns, transferTaskColumns } from './columns'
 import { defaultPageParams } from './pagination'
@@ -211,6 +211,10 @@ export function simWorkspaceRoute(): AppDefinition['routes'][number] {
           await api.sim.shareSession(valueText(values, 'session_id'))
           return '仿真分享码已生成'
         }),
+      ], [
+        { title: '阶段说明', body: '左侧固定展示当前仿真阶段、状态来源和授权边界，避免把仿真包内部实现暴露给学习者。' },
+        { title: '事件舞台', body: '中间舞台承载仿真包提供的图、链、树、矩阵、流水线、泳道或趋势图视图，状态变化由真实事件驱动。' },
+        { title: '回放控制', body: '右侧操作只记录当前会话动作、读取回放和生成分享码；减少动态模式下保持同一状态文字和数据。' },
       ])
     },
   }
@@ -294,6 +298,10 @@ export function solveWorkspaceRoute(): AppDefinition['routes'][number] {
           api.contest.getLeaderboardTopic(valueText(values, 'tenant_id'), valueText(values, 'contest_id'))
           return '榜单实时更新已准备'
         }),
+      ], [
+        { title: '题面区域', body: '页面只读取竞赛题面和可提交材料，不读取答案、判题配置或受保护内容。' },
+        { title: '答题环境', body: '答题环境由指定竞赛和题目创建，运行时、工具和初始化材料由后端授权后进入沙箱。' },
+        { title: '提交反馈', body: '提交后只展示判定结果、天梯或提交记录，失败时展示用户向信息和报障编号。' },
       ])
     },
   }
@@ -328,6 +336,10 @@ export function battleReplayRoute(): AppDefinition['routes'][number] {
           await api.contest.listBattleEntries(valueText(values, 'contest_id'))
           return '参战作品已读取'
         }),
+      ], [
+        { title: '对局轨迹', body: '回放依据后端录制的对局和执行轨迹，不使用无来源的装饰动画代替真实复盘。' },
+        { title: '时间轴', body: '时间轴可暂停、回看和重新读取，减少动态模式下以静态状态和列表信息表达当前节点。' },
+        { title: '参战作品', body: '可按竞赛读取对局列表和参战作品，用于定位攻防双方、结果和复盘材料。' },
       ])
     },
   }

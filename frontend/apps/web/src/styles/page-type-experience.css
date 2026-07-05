@@ -1,0 +1,282 @@
+/* 页面类型体验层：补齐深页、流程页、治理页和沉浸页的通用交互结构。 */
+
+.chaimir-page:is(
+  .is-path-course-detail,
+  .is-path-lesson,
+  .is-path-assignment,
+  .is-path-submission,
+  .is-path-experiment-detail,
+  .is-path-contest-detail,
+  .is-path-my-records,
+  .is-path-tenant-detail,
+  .is-path-runtime-detail,
+  .is-path-statistics,
+  .is-path-import-batches
+) .chaimir-page__heading {
+  border-inline-start: var(--space-1) solid var(--page-accent);
+}
+
+.chaimir-page:is(
+  .is-path-course-detail,
+  .is-path-lesson,
+  .is-path-assignment,
+  .is-path-submission,
+  .is-path-experiment-detail,
+  .is-path-contest-detail,
+  .is-path-my-records,
+  .is-path-tenant-detail,
+  .is-path-runtime-detail,
+  .is-path-statistics,
+  .is-path-import-batches
+) .chaimir-resource-panel {
+  min-block-size: 22rem;
+}
+
+.chaimir-page:is(
+  .is-path-course-edit,
+  .is-path-chapters,
+  .is-path-members,
+  .is-path-course-community,
+  .is-path-assignments,
+  .is-path-assignment-edit,
+  .is-path-exp-wizard,
+  .is-path-contest-edit,
+  .is-path-contest-problems,
+  .is-path-content-edit,
+  .is-path-paper-edit,
+  .is-path-content-categories,
+  .is-path-account-import,
+  .is-path-account-edit,
+  .is-path-application-review,
+  .is-path-contest-signup,
+  .is-path-transcripts
+) .chaimir-page__workspace.has-actions {
+  grid-template-columns: minmax(0, 0.95fr) minmax(22rem, 30rem);
+}
+
+.chaimir-page:is(
+  .is-path-course-edit,
+  .is-path-chapters,
+  .is-path-members,
+  .is-path-course-community,
+  .is-path-assignments,
+  .is-path-assignment-edit,
+  .is-path-exp-wizard,
+  .is-path-contest-edit,
+  .is-path-contest-problems,
+  .is-path-content-edit,
+  .is-path-paper-edit,
+  .is-path-content-categories,
+  .is-path-account-import,
+  .is-path-account-edit,
+  .is-path-application-review,
+  .is-path-contest-signup,
+  .is-path-transcripts
+) .chaimir-action-rail__head {
+  border-inline-start: 3px solid var(--page-accent);
+}
+
+.chaimir-page:is(
+  .is-path-course-edit,
+  .is-path-chapters,
+  .is-path-members,
+  .is-path-course-community,
+  .is-path-assignments,
+  .is-path-assignment-edit,
+  .is-path-exp-wizard,
+  .is-path-contest-edit,
+  .is-path-contest-problems,
+  .is-path-content-edit,
+  .is-path-paper-edit,
+  .is-path-content-categories,
+  .is-path-account-import,
+  .is-path-account-edit,
+  .is-path-application-review,
+  .is-path-contest-signup,
+  .is-path-transcripts
+) .chaimir-page__actions {
+  gap: var(--space-3);
+}
+
+.chaimir-page:is(
+  .is-path-course-edit,
+  .is-path-chapters,
+  .is-path-members,
+  .is-path-course-community,
+  .is-path-assignments,
+  .is-path-assignment-edit,
+  .is-path-exp-wizard,
+  .is-path-contest-edit,
+  .is-path-contest-problems,
+  .is-path-content-edit,
+  .is-path-paper-edit,
+  .is-path-account-import,
+  .is-path-account-edit,
+  .is-path-application-review,
+  .is-path-contest-signup,
+  .is-path-transcripts
+) .chaimir-action-card {
+  border-inline-start: 3px solid var(--page-accent);
+}
+
+.chaimir-page:is(
+  .is-path-grade-reviews,
+  .is-path-appeals,
+  .is-path-warnings,
+  .is-path-grade-config,
+  .is-path-sso,
+  .is-path-alerts,
+  .is-path-audit,
+  .is-path-config,
+  .is-path-monitoring,
+  .is-path-backups,
+  .is-path-sim-review,
+  .is-path-vulnerability,
+  .is-path-cheat-review,
+  .is-path-vuln-sources,
+  .is-path-vuln-transform,
+  .is-path-course-grades,
+  .is-path-grade-submit,
+  .is-path-notifications,
+  .is-path-announcements,
+  .is-path-transfer-tasks,
+  .is-path-profile
+) .chaimir-resource-panel {
+  box-shadow: inset 0 3px 0 var(--page-accent), var(--shadow-xs);
+}
+
+.chaimir-page:is(
+  .is-path-grade-reviews,
+  .is-path-appeals,
+  .is-path-warnings,
+  .is-path-grade-config,
+  .is-path-sso,
+  .is-path-alerts,
+  .is-path-audit,
+  .is-path-config,
+  .is-path-monitoring,
+  .is-path-backups,
+  .is-path-sim-review,
+  .is-path-vulnerability,
+  .is-path-cheat-review,
+  .is-path-vuln-sources,
+  .is-path-vuln-transform,
+  .is-path-course-grades,
+  .is-path-grade-submit,
+  .is-path-notifications,
+  .is-path-announcements,
+  .is-path-transfer-tasks,
+  .is-path-profile
+) .chaimir-page__stats {
+  grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
+}
+
+.chaimir-immersive {
+  --immersive-stage-min: 24rem;
+}
+
+.chaimir-immersive__bar {
+  background:
+    linear-gradient(90deg, var(--color-dark-bg), var(--color-dark-surface)),
+    linear-gradient(90deg, var(--color-dark-elevated), transparent);
+}
+
+.chaimir-immersive__grid {
+  grid-template-columns: minmax(15rem, 19rem) minmax(0, 1.35fr) minmax(16rem, 22rem);
+}
+
+.chaimir-immersive__stage {
+  min-block-size: var(--immersive-stage-min);
+  background:
+    linear-gradient(180deg, var(--color-dark-bg), var(--color-terminal-bg)),
+    linear-gradient(90deg, var(--color-dark-elevated), transparent);
+}
+
+.chaimir-immersive__terminal {
+  inline-size: 100%;
+  min-block-size: 18rem;
+}
+
+.chaimir-immersive__terminal dl {
+  display: grid;
+  gap: var(--space-2);
+  margin: var(--space-3) 0 0;
+}
+
+.chaimir-immersive__terminal dl div {
+  display: grid;
+  grid-template-columns: minmax(6rem, 32%) 1fr;
+  gap: var(--space-3);
+  padding-block: var(--space-2);
+  border-block-start: 1px solid var(--color-dark-border);
+}
+
+.chaimir-immersive__terminal dt {
+  color: var(--color-dark-text-sub);
+}
+
+.chaimir-immersive__terminal dd {
+  margin: 0;
+  color: var(--color-dark-text);
+}
+
+.chaimir-immersive__card {
+  border-color: var(--color-dark-border);
+}
+
+@media (max-width: 1023px) {
+  .chaimir-page:is(
+    .is-path-course-edit,
+    .is-path-chapters,
+    .is-path-members,
+    .is-path-course-community,
+    .is-path-assignments,
+    .is-path-assignment-edit,
+    .is-path-exp-wizard,
+    .is-path-contest-edit,
+    .is-path-contest-problems,
+    .is-path-content-edit,
+    .is-path-paper-edit,
+    .is-path-content-categories,
+    .is-path-account-import,
+    .is-path-account-edit,
+    .is-path-application-review,
+    .is-path-contest-signup,
+    .is-path-transcripts
+  ) .chaimir-page__workspace.has-actions {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .chaimir-immersive__grid {
+    grid-template-columns: minmax(0, 1fr);
+    overflow: auto;
+  }
+
+  .chaimir-immersive__panel,
+  .chaimir-immersive__stage {
+    min-block-size: auto;
+    overflow: visible;
+  }
+}
+
+@media (max-width: 767px) {
+  .chaimir-immersive__bar {
+    grid-template-columns: minmax(0, 1fr);
+    align-items: start;
+  }
+
+  .chaimir-immersive__process {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .chaimir-immersive__terminal dl div {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chaimir-immersive__grid,
+  .chaimir-immersive__process span::before {
+    animation: none;
+  }
+}

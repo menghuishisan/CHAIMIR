@@ -2,6 +2,7 @@
 
 .sim-pattern {
   min-width: 0;
+  inline-size: 100%;
   border: 0.0625rem solid var(--color-dark-border);
   border-radius: var(--radius-sm);
   background: var(--color-dark-surface);
@@ -72,6 +73,7 @@
 
 .sim-graph {
   width: 100%;
+  max-block-size: min(42rem, 68vh);
   aspect-ratio: 16 / 10;
   display: block;
 }
@@ -104,13 +106,14 @@
 .sim-graph__node text {
   fill: var(--color-dark-text);
   font-size: var(--text-xs);
+  pointer-events: none;
   text-anchor: middle;
   dominant-baseline: middle;
 }
 
 .sim-graph__pulse {
   fill: var(--color-dark-border);
-  transition: cx var(--t) var(--ease), cy var(--t) var(--ease), r var(--t-fast) var(--ease);
+  transition: fill var(--t-fast) var(--ease), opacity var(--t-fast) var(--ease);
 }
 
 .sim-graph__pulse.is-active,
@@ -174,7 +177,7 @@
   display: grid;
   gap: var(--space-3);
   padding: var(--space-4);
-  overflow-x: auto;
+  overflow: auto;
 }
 
 .sim-chain-row {
@@ -266,7 +269,7 @@
 
 .sim-tree {
   padding: var(--space-4);
-  overflow-x: auto;
+  overflow: auto;
 }
 
 .sim-tree__node {
@@ -322,6 +325,7 @@
 
 .sim-matrix-wrap {
   overflow: auto;
+  max-block-size: min(34rem, 70vh);
 }
 
 .sim-matrix {
@@ -444,7 +448,7 @@
   display: grid;
   gap: var(--space-2);
   padding: var(--space-4);
-  overflow-x: auto;
+  overflow: auto;
 }
 
 .sim-lane__row {
@@ -482,7 +486,7 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  transition: inset-inline-start var(--t) var(--ease), border-color var(--t-fast) var(--ease), background var(--t-fast) var(--ease), transform var(--t-fast) var(--ease);
+  transition: border-color var(--t-fast) var(--ease), background var(--t-fast) var(--ease), transform var(--t-fast) var(--ease);
 }
 
 .sim-lane__message:hover,
@@ -498,7 +502,7 @@
   }
 
   .sim-chain-row {
-    grid-template-columns: minmax(18rem, max-content);
+    grid-template-columns: minmax(0, max-content);
   }
 
   .sim-chain-row__label {
@@ -510,7 +514,7 @@
   }
 
   .sim-lane__row {
-    grid-template-columns: minmax(3.75rem, 4.5rem) minmax(16rem, 1fr);
+    grid-template-columns: minmax(3.75rem, 4.5rem) minmax(15rem, 1fr);
   }
 
   .sim-lane__message {
@@ -633,6 +637,30 @@
   width: 0.75rem;
   height: 0.1875rem;
   border-radius: 999px;
+}
+
+.sim-chart__table {
+  inline-size: 100%;
+  border-collapse: collapse;
+  color: var(--color-dark-text-sub);
+  font-size: var(--text-xs);
+}
+
+.sim-chart__table caption {
+  margin-block-end: var(--space-2);
+  color: var(--color-dark-text-sub);
+  text-align: left;
+}
+
+.sim-chart__table th,
+.sim-chart__table td {
+  padding: var(--space-2);
+  border-block-start: 1px solid var(--color-dark-border);
+  text-align: left;
+}
+
+.sim-chart__table td {
+  font-family: var(--font-mono);
 }
 
 @keyframes sim-pattern-enter {

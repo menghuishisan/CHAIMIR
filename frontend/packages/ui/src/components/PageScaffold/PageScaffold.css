@@ -1,0 +1,199 @@
+/* PageScaffold 样式：日常白底页面的结构原语、响应式栅格和标题层级。 */
+
+.chaimir-page-scaffold {
+  display: grid;
+  gap: var(--space-6);
+  inline-size: 100%;
+  max-inline-size: var(--content-max);
+  margin-inline: auto;
+  padding: var(--space-6);
+  color: var(--color-text);
+  background: var(--color-bg);
+}
+
+.chaimir-page-scaffold.is-accent {
+  --page-scaffold-accent: var(--color-primary);
+  --page-scaffold-accent-soft: var(--color-primary-soft);
+}
+
+.chaimir-page-scaffold.is-amber {
+  --page-scaffold-accent: var(--color-secondary);
+  --page-scaffold-accent-soft: var(--color-secondary-soft);
+}
+
+.chaimir-page-scaffold.is-default {
+  --page-scaffold-accent: var(--color-primary);
+  --page-scaffold-accent-soft: var(--color-surface-sunken);
+}
+
+.chaimir-page-header {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding-block-end: var(--space-5);
+  border-block-end: 1px solid var(--color-border);
+}
+
+.chaimir-page-header::after {
+  position: absolute;
+  inset-inline-start: 0;
+  inset-block-end: -1px;
+  inline-size: min(12rem, 48%);
+  block-size: 3px;
+  content: "";
+  background: var(--page-scaffold-accent);
+}
+
+.chaimir-page-header__main {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: var(--space-3);
+  min-inline-size: 0;
+}
+
+.chaimir-page-header__icon {
+  display: grid;
+  place-items: center;
+  inline-size: 3rem;
+  block-size: 3rem;
+  color: var(--color-primary-text);
+  background: var(--page-scaffold-accent-soft);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+}
+
+.chaimir-page-header__eyebrow {
+  margin: 0 0 var(--space-1);
+  color: var(--color-primary-text);
+  font-size: var(--text-xs);
+  font-weight: var(--font-bold);
+}
+
+.chaimir-page-header h1 {
+  margin: 0;
+  color: var(--color-text-strong);
+  font-size: var(--text-3xl);
+  line-height: var(--leading-tight);
+}
+
+.chaimir-page-header__description {
+  max-inline-size: 46rem;
+  margin: var(--space-2) 0 0;
+  color: var(--color-text-sub);
+  line-height: var(--leading-normal);
+}
+
+.chaimir-page-header__actions,
+.chaimir-page-section__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  justify-content: flex-end;
+}
+
+.chaimir-page-body {
+  display: grid;
+  gap: var(--space-5);
+  min-inline-size: 0;
+}
+
+.chaimir-page-body.has-rail {
+  grid-template-columns: minmax(0, 1fr) minmax(17rem, 22rem);
+  align-items: start;
+}
+
+.chaimir-page-body.is-compact {
+  gap: var(--space-4);
+}
+
+.chaimir-page-body__main,
+.chaimir-page-body__rail {
+  display: grid;
+  gap: var(--space-4);
+  min-inline-size: 0;
+}
+
+.chaimir-page-body__rail {
+  position: sticky;
+  top: calc(var(--topnav-h) + var(--space-4));
+}
+
+.chaimir-page-section {
+  min-inline-size: 0;
+}
+
+.chaimir-page-section__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-block-end: var(--space-3);
+}
+
+.chaimir-page-section__header h2 {
+  margin: 0;
+  color: var(--color-text-strong);
+  font-size: var(--text-xl);
+  line-height: var(--leading-tight);
+}
+
+.chaimir-page-section__header p {
+  margin: var(--space-1) 0 0;
+  color: var(--color-text-sub);
+  font-size: var(--text-sm);
+  line-height: var(--leading-normal);
+}
+
+.chaimir-page-section__content {
+  min-inline-size: 0;
+}
+
+@media (max-width: 1023px) {
+  .chaimir-page-scaffold {
+    padding: var(--space-5);
+  }
+
+  .chaimir-page-body.has-rail {
+    grid-template-columns: 1fr;
+  }
+
+  .chaimir-page-body__rail {
+    position: static;
+  }
+}
+
+@media (max-width: 639px) {
+  .chaimir-page-scaffold {
+    gap: var(--space-4);
+    padding: var(--space-4);
+  }
+
+  .chaimir-page-header,
+  .chaimir-page-section__header {
+    display: grid;
+  }
+
+  .chaimir-page-header__main {
+    grid-template-columns: 1fr;
+  }
+
+  .chaimir-page-header h1 {
+    font-size: var(--text-2xl);
+  }
+
+  .chaimir-page-header__actions,
+  .chaimir-page-section__actions {
+    justify-content: flex-start;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chaimir-page-scaffold *,
+  .chaimir-page-scaffold *::before,
+  .chaimir-page-scaffold *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+}

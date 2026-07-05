@@ -1,7 +1,7 @@
 ﻿// 路由动作定义：集中维护页面动作、行操作、字段构造和提交值转换。
 
 import type { ChaimirApi } from '@chaimir/api-client'
-import type { ActionField, ActionValues, DataRow, PageAction, RowAction } from '../types'
+import { routeHref, type ActionField, type ActionValues, type DataRow, type PageAction, type RowAction } from '@chaimir/shared'
 
 export function teacherCourseActions(api: ChaimirApi): PageAction[] {
   return [
@@ -783,6 +783,33 @@ export function rowAction(
   execute: (row: DataRow) => Promise<string>
 ): RowAction {
   return { key, label, description, execute }
+}
+
+/**
+ * navigateRowAction 将列表行连接到对应深页或流程页，避免用户手动复制资源编号。
+ */
+export function navigateRowAction(
+  key: string,
+  label: string,
+  description: string,
+  path: string,
+  paramName = 'id',
+  valueKey = 'id'
+): RowAction {
+  return rowAction(key, label, description, async (row) => {
+    window.location.hash = routeHref(path, { [paramName]: valueFromRow(row, valueKey) }).slice(1)
+    return `正在进入${label}`
+  })
+}
+
+/**
+ * navigatePageAction 为无行上下文的流程页提供明确入口，避免把深页藏成手输地址。
+ */
+export function navigatePageAction(key: string, label: string, description: string, path: string): PageAction {
+  return pageAction(key, label, description, [], async () => {
+    window.location.hash = routeHref(path).slice(1)
+    return `正在进入${label}`
+  })
 }
 
 export function textInput(name: string, label: string, required = false, helper?: string): ActionField {

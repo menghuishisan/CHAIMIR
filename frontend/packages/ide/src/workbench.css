@@ -1,0 +1,204 @@
+/* IDE 工作台样式：文件列表、编辑器舞台、终端和工具状态的沉浸式布局。 */
+
+.chaimir-ide-workbench {
+  display: grid;
+  grid-template-rows: auto minmax(18rem, 1fr) minmax(10rem, 32%);
+  min-block-size: 100%;
+  min-inline-size: 0;
+  background: var(--color-terminal-bg);
+}
+
+.chaimir-ide-workbench__editor-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  min-inline-size: 0;
+  padding: var(--space-3) var(--space-4);
+  border-block-end: 1px solid var(--color-dark-border);
+  background: var(--color-dark-surface);
+}
+
+.chaimir-ide-workbench__editor-head span,
+.chaimir-ide-workbench__terminal small,
+.chaimir-ide-file-panel small,
+.chaimir-ide-tool-panel small,
+.chaimir-ide-tool p {
+  color: var(--color-dark-text-sub);
+  font-size: var(--text-xs);
+}
+
+.chaimir-ide-workbench__editor-head strong {
+  display: block;
+  color: var(--color-dark-text);
+  font-size: var(--text-sm);
+}
+
+.chaimir-ide-workbench__editor-head code {
+  min-inline-size: 0;
+  overflow: hidden;
+  color: var(--color-dark-text-sub);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chaimir-ide-workbench__editor,
+.chaimir-ide-workbench__terminal > div {
+  min-block-size: 0;
+  min-inline-size: 0;
+  overflow: hidden;
+}
+
+.chaimir-ide-workbench__terminal {
+  display: grid;
+  grid-template-rows: auto 1fr;
+  min-block-size: 0;
+  border-block-start: 1px solid var(--color-dark-border);
+  background: var(--color-terminal-bg);
+}
+
+.chaimir-ide-workbench__terminal header,
+.chaimir-ide-file-panel header,
+.chaimir-ide-tool-panel header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border-block-end: 1px solid var(--color-dark-border);
+}
+
+.chaimir-ide-workbench__terminal header span,
+.chaimir-ide-file-panel header span,
+.chaimir-ide-tool-panel header span {
+  color: var(--color-dark-text);
+  font-weight: var(--font-semibold);
+}
+
+.chaimir-ide-file-panel,
+.chaimir-ide-tool-panel {
+  display: grid;
+  align-content: start;
+  gap: var(--space-3);
+  min-block-size: 100%;
+  color: var(--color-dark-text);
+}
+
+.chaimir-ide-file-panel__list,
+.chaimir-ide-tool-panel__list {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-3);
+}
+
+.chaimir-ide-file {
+  display: grid;
+  gap: var(--space-1);
+  inline-size: 100%;
+  padding: var(--space-3);
+  border: 1px solid var(--color-dark-border);
+  border-radius: var(--radius-xs);
+  background: var(--color-dark-elevated);
+  color: var(--color-dark-text);
+  text-align: left;
+  cursor: pointer;
+  transition: border-color var(--t-fast) var(--ease), background var(--t-fast) var(--ease), transform var(--t-fast) var(--ease);
+}
+
+.chaimir-ide-file:hover,
+.chaimir-ide-file:focus-visible,
+.chaimir-ide-file.is-selected {
+  border-color: var(--color-on-dark-accent);
+  background: var(--color-dark-surface);
+}
+
+.chaimir-ide-file:active {
+  transform: scale(0.99);
+}
+
+.chaimir-ide-file span {
+  overflow: hidden;
+  font-weight: var(--font-semibold);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chaimir-ide-tool {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--space-2);
+  align-items: start;
+  padding: var(--space-3);
+  border: 1px solid var(--color-dark-border);
+  border-radius: var(--radius-xs);
+  background: var(--color-dark-elevated);
+}
+
+.chaimir-ide-tool strong {
+  color: var(--color-dark-text);
+}
+
+.chaimir-ide-tool p,
+.chaimir-ide-tool-panel__empty {
+  margin: var(--space-1) 0 0;
+  line-height: var(--leading-normal);
+}
+
+.chaimir-ide-tool > span {
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--color-dark-border);
+  border-radius: var(--radius-full);
+  color: var(--color-dark-text-sub);
+  font-size: var(--text-xs);
+}
+
+.chaimir-ide-tool.is-running > span,
+.chaimir-ide-tool.is-idle > span {
+  color: var(--color-secondary-accent);
+  border-color: var(--color-secondary-accent);
+}
+
+.chaimir-ide-tool.is-ready > span {
+  color: var(--color-success);
+  border-color: var(--color-success);
+}
+
+.chaimir-ide-tool.is-failed > span {
+  color: var(--color-danger);
+  border-color: var(--color-danger);
+}
+
+.chaimir-ide-tool__action {
+  grid-column: 1 / -1;
+}
+
+.chaimir-ide-tool-panel__inspector {
+  padding: 0 var(--space-3) var(--space-3);
+}
+
+@media (max-width: 1023px) {
+  .chaimir-ide-workbench {
+    min-block-size: 42rem;
+  }
+}
+
+@media (max-width: 639px) {
+  .chaimir-ide-workbench {
+    grid-template-rows: auto minmax(18rem, 52vh) minmax(9rem, 28vh);
+  }
+
+  .chaimir-ide-workbench__editor-head {
+    display: grid;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chaimir-ide-workbench *,
+  .chaimir-ide-workbench *::before,
+  .chaimir-ide-workbench *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+}

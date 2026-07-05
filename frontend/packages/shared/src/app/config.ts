@@ -19,7 +19,7 @@ export interface FrontendRuntimeConfig {
 type EnvMap = Record<string, string | undefined>
 
 /**
- * readFrontendConfig 从 Vite 暴露的环境变量读取运行配置，并给本地开发提供同源默认值。
+ * readFrontendConfig 从构建期环境变量读取运行配置，并提供同源默认值。
  */
 export function readFrontendConfig(env: EnvMap = readImportMetaEnv()): FrontendRuntimeConfig {
   return {
@@ -45,7 +45,7 @@ function readDeployMode(value: string | undefined): FrontendRuntimeConfig['deplo
 }
 
 /**
- * readImportMetaEnv 兼容 Vite 与普通 TypeScript 编译环境。
+ * readImportMetaEnv 兼容浏览器构建环境与普通 TypeScript 编译环境。
  */
 function readImportMetaEnv(): EnvMap {
   const meta = import.meta as ImportMeta & { env?: EnvMap }

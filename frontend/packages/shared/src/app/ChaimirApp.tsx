@@ -15,13 +15,6 @@ import './ChaimirApp.css'
 
 const SIDEBAR_COLLAPSED_STORAGE_PREFIX = 'chaimir.sidebar.collapsed'
 
-const NAV_ROUTE_ORDER: Record<AppDefinition['role'], string[]> = {
-  student: ['courses', 'experiments', 'sim-lib', 'contests', 'contest-records', 'grades', 'warnings'],
-  teacher: ['courses', 'experiments', 'contests', 'monitor', 'grading', 'content', 'papers', 'sim-packages', 'shared-lib', 'grade-submit', 'org'],
-  'school-admin': ['accounts', 'org', 'dashboard', 'grade-reviews', 'appeals', 'warnings', 'grade-config', 'sso', 'config', 'audit', 'alerts'],
-  'platform-admin': ['tenants', 'applications', 'dashboard', 'runtimes', 'tools', 'judgers', 'sim-review', 'vulnerability', 'alerts', 'config', 'monitoring', 'backups', 'audit'],
-}
-
 export interface ChaimirAppProps {
   /** 当前四端入口提供的应用定义，业务页面定义归属各端 features 目录。 */
   definition: AppDefinition
@@ -158,7 +151,7 @@ function AppShell({
   }
 
   return (
-    <div className={`chaimir-app ${collapsed ? 'is-collapsed' : ''}`}>
+    <div className={`chaimir-app is-app-${sanitizeClassName(app.role)} ${collapsed ? 'is-collapsed' : ''}`}>
       <a className="skip-link" href="#main-content">跳到主要内容</a>
       <header className="chaimir-app__topbar">
         <button ref={mobileMenuRef} className="chaimir-app__icon-button chaimir-app__mobile-menu" type="button" aria-label="打开导航" onClick={() => setDrawerOpen(true)}>
@@ -245,7 +238,6 @@ function Sidebar({
   const visibleRoutes = app.routes
     .filter((route) => !route.hidden)
     .filter((route) => !normalizedSearch || `${route.label} ${route.description}`.toLowerCase().includes(normalizedSearch))
-    .sort((left, right) => navRouteIndex(app, left) - navRouteIndex(app, right))
   const groupedRoutes = visibleRoutes.reduce<Array<{ group: string; routes: AppRoute[] }>>((groups, route) => {
     const group = route.group || '功能'
     const existing = groups.find((item) => item.group === group)
@@ -286,15 +278,6 @@ function Sidebar({
       )}
     </nav>
   )
-}
-
-/**
- * navRouteIndex 按功能对齐清单稳定排序四端主导航，未列入的路由排在末尾。
- */
-function navRouteIndex(app: AppDefinition, route: AppRoute): number {
-  const order = NAV_ROUTE_ORDER[app.role] ?? []
-  const index = order.indexOf(route.path)
-  return index === -1 ? Number.MAX_SAFE_INTEGER : index
 }
 
 /**

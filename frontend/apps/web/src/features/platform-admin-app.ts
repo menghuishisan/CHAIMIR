@@ -1,7 +1,7 @@
 ﻿// 平台管理端路由：租户、运营、引擎治理和系统页面定义。
 
 import { BarChart3, Boxes, ClipboardCheck, Flag, Gauge, Landmark, ListChecks, MonitorCog, PackageCheck, ServerCog, Settings, ShieldAlert, Wrench } from 'lucide-react'
-import type { AppDefinition } from '@chaimir/shared'
+import type { AppDefinition, MetricItem, ResourceResult } from '@chaimir/shared'
 import {
   alertColumns,
   applicationColumns,
@@ -17,6 +17,8 @@ import {
   judgerColumns,
   listResult,
   monitoringColumns,
+  navigatePageAction,
+  navigateRowAction,
   normalizeBackupSize,
   numberInput,
   objectResult,
@@ -43,7 +45,7 @@ import {
   valueStringArray,
   valueText,
   vulnProblemColumns,
-} from '@chaimir/shared'
+} from '../route-kit'
 
 export const platformAdminApp: AppDefinition = {
   role: 'platform-admin',
@@ -58,7 +60,7 @@ export const platformAdminApp: AppDefinition = {
       icon: Landmark,
       group: '租户',
       load: async (api) => ({
-        ...arrayResult(await api.admin.listTenants(), tenantColumns(), '暂无学校租户', '学校通过入驻审核后会在这里显示。'),
+        ...platformMetrics(arrayResult(await api.admin.listTenants(), tenantColumns(), '暂无学校租户', '学校通过入驻审核后会在这里显示。'), '学校租户', '状态治理', '配额详情'),
         actions: [
           pageAction('update-tenant-status', '更新学校状态', '更新学校状态和到期时间。', [
             textInput('tenant_id', '学校编号', true),
@@ -76,6 +78,9 @@ export const platformAdminApp: AppDefinition = {
             return '租户原始列表已读取'
           }),
         ],
+        rowActions: [
+          navigateRowAction('open-tenant-detail', '学校详情', '进入学校配置和资源配额页面。', 'tenant-detail', 'tenant_id'),
+        ],
       }),
     },
     ...platformTenantDeepRoutes(),
@@ -86,7 +91,7 @@ export const platformAdminApp: AppDefinition = {
       icon: ClipboardCheck,
       group: '租户',
       load: async (api) => ({
-        ...arrayResult(await api.admin.listApplications(), applicationColumns(), '暂无入驻申请', '学校提交入驻申请后会在这里显示。'),
+        ...platformMetrics(arrayResult(await api.admin.listApplications(), applicationColumns(), '暂无入驻申请', '学校提交入驻申请后会在这里显示。'), '申请记录', '审核流转', '开通租户'),
         actions: [
           pageAction('approve-application', '通过申请', '通过学校入驻申请并创建租户。', [
             textInput('application_id', '申请编号', true),
@@ -113,6 +118,9 @@ export const platformAdminApp: AppDefinition = {
             return '入驻申请原始列表已读取'
           }),
         ],
+        rowActions: [
+          navigateRowAction('open-application-review', '审核详情', '进入入驻资料核对和审核页面。', 'application-review', 'application_id'),
+        ],
       }),
     },
     ...platformApplicationDeepRoutes(),
@@ -122,7 +130,12 @@ export const platformAdminApp: AppDefinition = {
       description: '查看平台租户、账号、课程、竞赛和沙箱概览',
       icon: Gauge,
       group: '概览',
-      load: async (api) => dashboardResult(await api.admin.getPlatformDashboard()),
+      load: async (api) => ({
+        ...platformMetrics(dashboardResult(await api.admin.getPlatformDashboard()), '平台概览', '跨校汇总', '运营统计'),
+        actions: [
+          navigatePageAction('open-platform-statistics-page', '运营统计', '进入平台运营趋势和租户增长页面。', 'statistics'),
+        ],
+      }),
     },
     {
       path: 'runtimes',
@@ -131,7 +144,7 @@ export const platformAdminApp: AppDefinition = {
       icon: ServerCog,
       group: '引擎',
       load: async (api) => ({
-        ...arrayResult(await api.sandbox.listRuntimes(), runtimeColumns(), '暂无运行时', '登记链运行时后会在这里显示。'),
+        ...platformMetrics(arrayResult(await api.sandbox.listRuntimes(), runtimeColumns(), '暂无运行时', '登记链运行时后会在这里显示。'), '运行时', '镜像自测', '预拉取'),
         actions: [
           pageAction('register-runtime', '登记运行时', '登记新的链运行时声明。', [
             textInput('code', '运行时编码', true),
@@ -201,6 +214,7 @@ export const platformAdminApp: AppDefinition = {
           }),
         ],
         rowActions: [
+          navigateRowAction('open-runtime-detail', '运行时详情', '进入镜像版本、自测和预拉取页面。', 'runtime-detail', 'runtime_id'),
           rowAction('runtime-selftest', '接入自测', '触发运行时接入自测。', async (row) => {
             await api.sandbox.runRuntimeSelftest(row.id)
             return '运行时自测已触发'
@@ -215,7 +229,7 @@ export const platformAdminApp: AppDefinition = {
       icon: Wrench,
       group: '引擎',
       load: async (api) => ({
-        ...arrayResult(await api.sandbox.listTools(), toolColumns(), '暂无工具', '登记沙箱工具后会在这里显示。'),
+        ...platformMetrics(arrayResult(await api.sandbox.listTools(), toolColumns(), '暂无工具', '登记沙箱工具后会在这里显示。'), '沙箱工具', '工具定义', '资源规格'),
         actions: [
           pageAction('register-tool', '登记工具', '登记沙箱工具定义。', [
             textInput('code', '工具编码', true),
@@ -245,7 +259,7 @@ export const platformAdminApp: AppDefinition = {
       icon: ClipboardCheck,
       group: '引擎',
       load: async (api) => ({
-        ...arrayResult(await api.judge.listJudgers(), judgerColumns(), '暂无判题器', '登记判题器后会在这里显示。'),
+        ...platformMetrics(arrayResult(await api.judge.listJudgers(), judgerColumns(), '暂无判题器', '登记判题器后会在这里显示。'), '判题器', '执行约束', '接入自测'),
         actions: [
           pageAction('create-judger', '登记判题器', '登记判题器执行器和资源约束。', [
             textInput('code', '判题器编码', true),
@@ -308,7 +322,7 @@ export const platformAdminApp: AppDefinition = {
       icon: PackageCheck,
       group: '引擎',
       load: async (api) => ({
-        ...listResult(await api.sim.getReviews(defaultPageParams()), simReviewColumns(), '暂无审核任务', '有仿真包提交后会在这里显示。'),
+        ...platformMetrics(listResult(await api.sim.getReviews(defaultPageParams()), simReviewColumns(), '暂无审核任务', '有仿真包提交后会在这里显示。'), '仿真审核', '确定性校验', '归档重发'),
         actions: simGovernanceActions(api),
       }),
     },
@@ -319,7 +333,7 @@ export const platformAdminApp: AppDefinition = {
       icon: Flag,
       group: '引擎',
       load: async (api) => ({
-        ...listResult(await api.contest.listVulnProblems(defaultPageParams()), vulnProblemColumns(), '暂无漏洞题草稿', '同步或导入漏洞题后会在这里显示。'),
+        ...platformMetrics(listResult(await api.contest.listVulnProblems(defaultPageParams()), vulnProblemColumns(), '暂无漏洞题草稿', '同步或导入漏洞题后会在这里显示。'), '漏洞题草稿', '来源同步', '预验证'),
         actions: [
           pageAction('upsert-vuln-source', '保存漏洞源', '创建或更新漏洞来源配置。', [
             numberInput('type', '来源类型', true),
@@ -367,7 +381,7 @@ export const platformAdminApp: AppDefinition = {
       icon: ShieldAlert,
       group: '运维',
       load: async (api) => ({
-        ...listResult(await api.admin.listAlertEvents(defaultPageParams()), alertColumns(), '暂无告警', '触发告警规则后会在这里显示。'),
+        ...platformMetrics(listResult(await api.admin.listAlertEvents(defaultPageParams()), alertColumns(), '暂无告警', '触发告警规则后会在这里显示。'), '告警事件', '规则维护', '处理闭环'),
         actions: [
           pageAction('create-alert-rule', '创建告警规则', '创建业务告警规则。', [
             numberInput('scope', '作用范围', true),
@@ -428,7 +442,7 @@ export const platformAdminApp: AppDefinition = {
       icon: Settings,
       group: '运维',
       load: async (api) => ({
-        ...arrayResult(await api.admin.listConfigs(), configColumns(), '暂无配置', '创建或同步配置后会在这里显示。'),
+        ...platformMetrics(arrayResult(await api.admin.listConfigs(), configColumns(), '暂无配置', '创建或同步配置后会在这里显示。'), '配置项', '历史回滚', '变更记录'),
         actions: [
           pageAction('update-config', '更新配置', '按配置 key 和版本号更新配置。', [
             textInput('key', '配置键', true),
@@ -471,7 +485,7 @@ export const platformAdminApp: AppDefinition = {
       description: '进入受控外部监控入口',
       icon: MonitorCog,
       group: '运维',
-      load: async (api) => arrayResult(await api.admin.monitoringPanels(), monitoringColumns(), '暂无监控面板', '配置监控入口后会在这里显示。'),
+      load: async (api) => platformMetrics(arrayResult(await api.admin.monitoringPanels(), monitoringColumns(), '暂无监控面板', '配置监控入口后会在这里显示。'), '监控入口', '受控跳转', '运维巡检'),
     },
     {
       path: 'backups',
@@ -481,7 +495,7 @@ export const platformAdminApp: AppDefinition = {
       group: '运维',
       load: async (api) => {
         const result = listResult(await api.admin.listBackups(defaultPageParams()), backupColumns(), '暂无备份记录', '备份任务执行后会在这里显示。')
-        return { ...result, rows: result.rows.map(normalizeBackupSize) }
+        return platformMetrics({ ...result, rows: result.rows.map(normalizeBackupSize) }, '备份记录', '执行状态', '恢复依据')
       },
     },
     {
@@ -490,13 +504,25 @@ export const platformAdminApp: AppDefinition = {
       description: '查询平台级敏感操作审计记录',
       icon: ListChecks,
       group: '运维',
-      load: async (api) => listResult(await api.admin.queryAudit(defaultPageParams()), auditColumns(), '暂无审计记录', '用户完成敏感操作后会在这里显示。'),
+      load: async (api) => platformMetrics(listResult(await api.admin.queryAudit(defaultPageParams()), auditColumns(), '暂无审计记录', '用户完成敏感操作后会在这里显示。'), '审计记录', '敏感操作', '导出核查'),
     },
     sharedNotificationRoute(),
     sharedAnnouncementRoute(),
     sharedTransferRoute(),
     sharedProfileRoute(),
   ],
+}
+
+/**
+ * platformMetrics 为平台治理页提供跨租户和引擎治理指标，数值只来自当前资源结果。
+ */
+function platformMetrics(result: ResourceResult, primaryLabel: string, domainLabel: string, actionLabel: string): ResourceResult {
+  const metrics: MetricItem[] = [
+    { label: primaryLabel, value: String(result.rows.length), tone: 'primary' },
+    { label: domainLabel, value: result.rows.length > 0 ? '可治理' : '暂无记录', tone: result.rows.length > 0 ? 'success' : 'secondary' },
+    { label: '平台动作', value: actionLabel, tone: 'warning' },
+  ]
+  return { ...result, metrics }
 }
 /**
  * platformTenantDeepRoutes 补齐平台租户详情和平台统计页。

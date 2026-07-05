@@ -27,9 +27,11 @@
 }
 
 .chaimir-progress__bar {
+  width: 100%;
   height: 100%;
   border-radius: var(--radius-full);
-  transition: width 0.3s var(--ease);
+  transform-origin: left center;
+  transition: transform var(--t-slow) var(--ease);
 }
 
 /* 颜色变体 */
@@ -49,7 +51,7 @@
   background: var(--color-danger-border);
 }
 
-/* 条纹动画 */
+/* 条纹状态 */
 .chaimir-progress__bar--striped {
   background-image: linear-gradient(
     45deg,
@@ -62,16 +64,6 @@
     transparent
   );
   background-size: 1rem 1rem;
-  animation: chaimir-progress-stripes 1s linear infinite;
-}
-
-@keyframes chaimir-progress-stripes {
-  from {
-    background-position: 1rem 0;
-  }
-  to {
-    background-position: 0 0;
-  }
 }
 
 .chaimir-progress__text {
@@ -85,7 +77,6 @@
 @media (prefers-reduced-motion: reduce) {
   .chaimir-progress__bar,
   .chaimir-progress__bar--striped {
-    animation: none;
     transition: none;
   }
 }

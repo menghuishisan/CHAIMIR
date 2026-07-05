@@ -27,7 +27,7 @@
 .public-hero::before,
 .public-hero::after {
   position: absolute;
-  z-index: 0;
+  z-index: var(--z-ground);
   content: "";
   pointer-events: none;
 }

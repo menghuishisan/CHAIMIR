@@ -5,7 +5,7 @@ import { raftPhases } from './model';
 
 export const raftSource = [
   'function raft(command) {',
-  '  candidate = onElectionTimeout();',
+  '  candidate = onElectionDelay();',
   '  votes = requestVote(candidate.term, candidate.lastLogIndex, candidate.lastLogTerm);',
   '  require(votes.majority() && candidate.logAtLeastAsNew());',
   '  leader.append(command);',

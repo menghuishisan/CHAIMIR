@@ -47,5 +47,5 @@ export const hotstuffPhases = [
   { id: 'vote', label: '副本投票', detail: '校验锁与父 QC', effect: '副本验证提案是否扩展锁定块或携带更高 QC,满足后签名投票。', reason: '锁规则防止正确副本为冲突分支形成 QC。' },
   { id: 'qc', label: '形成 Quorum Certificate', detail: '聚合法定人数投票', effect: '领导者收集达到 BFT 法定人数的签名形成新区块 QC。', reason: 'QC 是 HotStuff 的安全证书,驱动下一视图和提交判断。' },
   { id: 'chain-commit', label: '三链提交', detail: '检查连续 QC', effect: '当祖父、父、子形成连续 QC 三链时提交祖父块。', reason: '链式提交把 prepare/pre-commit/commit 合并为流水线。' },
-  { id: 'pacemaker', label: '超时换主', detail: '推进视图', effect: '超时副本发送 timeout,下一领导者继承 High QC。', reason: 'Pacemaker 在领导者失效时恢复活性。' },
+  { id: 'pacemaker', label: '超时换主', detail: '推进视图', effect: '超时副本发送换主凭证,下一领导者继承 High QC。', reason: 'Pacemaker 在领导者失效时恢复活性。' },
 ] as const;

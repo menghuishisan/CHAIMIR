@@ -44,3 +44,9 @@
 .chaimir-spinner--white .chaimir-spinner__label {
   color: var(--color-on-dark-muted);
 }
+
+@media (prefers-reduced-motion: reduce) {
+  .chaimir-spinner__icon {
+    animation: none;
+  }
+}

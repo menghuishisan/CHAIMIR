@@ -1,7 +1,7 @@
 ﻿// 教师端路由：教学、实践、资源、成绩报送、组织与账户页面定义。
 
 import { BookOpen, Building2, ClipboardCheck, ClipboardList, FilePenLine, FileText, Flag, Layers, Library, ListChecks, MonitorCog, Network, Pencil, ScrollText, ShieldAlert, ShieldCheck, Swords, Users } from 'lucide-react'
-import type { AppDefinition } from '@chaimir/shared'
+import { routeHref, type AppDefinition, type MetricItem, type ResourceResult } from '@chaimir/shared'
 import {
   appealColumns,
   arrayResult,
@@ -26,6 +26,8 @@ import {
   judgeTaskColumns,
   listResult,
   memberColumns,
+  navigatePageAction,
+  navigateRowAction,
   numberInput,
   objectResult,
   optionalNumber,
@@ -61,7 +63,7 @@ import {
   vulnProblemColumns,
   vulnSourceActions,
   vulnSourceColumns,
-} from '@chaimir/shared'
+} from '../route-kit'
 
 export const teacherApp: AppDefinition = {
   role: 'teacher',
@@ -76,8 +78,11 @@ export const teacherApp: AppDefinition = {
       icon: BookOpen,
       group: '教学',
       load: async (api) => ({
-        ...listResult(await api.teaching.getCourses({ role: 'teacher', ...defaultPageParams() }), courseColumns(), '暂无课程', '创建课程后会在这里显示。'),
+        ...teacherMetrics(listResult(await api.teaching.getCourses({ role: 'teacher', ...defaultPageParams() }), courseColumns(), '暂无课程', '创建课程后会在这里显示。'), '授课课程', '章节成员', '发布归档'),
         actions: [
+          navigatePageAction('open-assignments-page', '作业管理', '进入课程作业、提交和批改入口。', 'assignments'),
+          navigatePageAction('open-assignment-edit-page', '作业编辑', '进入作业创建、更新和发布页面。', 'assignment-edit'),
+          navigatePageAction('open-judge-page', '判题任务', '进入判题进度、人工评分和重判页面。', 'judge'),
           pageAction('create-course', '创建课程', '创建课程基础信息，章节和课时在课程详情中继续维护。', [
             textInput('name', '课程名称', true),
             textareaInput('description', '课程说明', true),
@@ -110,6 +115,13 @@ export const teacherApp: AppDefinition = {
             return '课程已归档'
           }),
         ],
+        rowActions: [
+          navigateRowAction('open-course-edit', '编辑课程', '进入课程基础信息编辑页。', 'course-edit'),
+          navigateRowAction('open-chapters', '章节课时', '进入章节和课时维护页。', 'chapters', 'course_id'),
+          navigateRowAction('open-members', '选课成员', '进入课程成员管理页。', 'members', 'course_id'),
+          navigateRowAction('open-community', '课程讨论', '进入课程讨论和公告页。', 'course-community', 'course_id'),
+          navigateRowAction('open-course-grades', '课程成绩', '进入成绩权重、计算和导出页。', 'course-grades', 'course_id'),
+        ],
       }),
     },
     {
@@ -119,7 +131,7 @@ export const teacherApp: AppDefinition = {
       icon: Layers,
       group: '实践',
       load: async (api) => ({
-        ...listResult(await api.experiment.getExperiments(defaultPageParams()), experimentColumns(), '暂无实验', '新建实验后会在这里显示。'),
+        ...teacherMetrics(listResult(await api.experiment.getExperiments(defaultPageParams()), experimentColumns(), '暂无实验', '新建实验后会在这里显示。'), '实验草稿', '编排校验', '发布实验'),
         actions: [
           pageAction('create-experiment', '创建实验', '创建实验编排草稿，组件配置会统一校验。', [
             textInput('course_id', '课程编号', true),
@@ -152,6 +164,9 @@ export const teacherApp: AppDefinition = {
             return '实验已校验并发布'
           }),
         ],
+        rowActions: [
+          navigateRowAction('open-exp-wizard', '继续编排', '进入实验编排向导。', 'exp-wizard', 'experiment_id'),
+        ],
       }),
     },
     {
@@ -161,8 +176,9 @@ export const teacherApp: AppDefinition = {
       icon: Library,
       group: '资源',
       load: async (api) => ({
-        ...listResult(await api.content.getItems(defaultPageParams()), contentColumns(), '暂无内容', '创建题目或模板后会在这里显示。'),
+        ...teacherMetrics(listResult(await api.content.getItems(defaultPageParams()), contentColumns(), '暂无内容', '创建题目或模板后会在这里显示。'), '题库内容', '版本发布', '共享复用'),
         actions: [
+          navigatePageAction('open-content-categories-page', '题库分类', '进入分类树和展示顺序维护页面。', 'content-categories'),
           pageAction('create-content', '创建内容', '创建题目或模板草稿，答案等敏感内容只在授权场景可见。', [
             textInput('code', '内容编码', true),
             textInput('version', '版本', true),
@@ -197,6 +213,7 @@ export const teacherApp: AppDefinition = {
           }),
         ],
         rowActions: [
+          navigateRowAction('open-content-edit', '编辑内容', '进入内容版本和附件维护页。', 'content-edit'),
           rowAction('share-content', '共享', '设为共享资源库可见。', async (row) => {
             await api.content.shareItem(row.id)
             return '内容已共享'
@@ -223,7 +240,7 @@ export const teacherApp: AppDefinition = {
       icon: FileText,
       group: '资源',
       load: async (api) => ({
-        ...listResult(await api.content.listPapers(defaultPageParams()), paperColumns(), '暂无试卷', '创建试卷后会在这里显示。'),
+        ...teacherMetrics(listResult(await api.content.listPapers(defaultPageParams()), paperColumns(), '暂无试卷', '创建试卷后会在这里显示。'), '试卷数量', '组卷条件', '重生成'),
         actions: [
           pageAction('create-paper', '创建试卷', '按手工题目列表或组卷条件创建试卷。', [
             textInput('name', '试卷名称', true),
@@ -239,6 +256,9 @@ export const teacherApp: AppDefinition = {
             })
             return '试卷已创建'
           }),
+        ],
+        rowActions: [
+          navigateRowAction('open-paper-edit', '编辑试卷', '进入组卷条件和题目维护页。', 'paper-edit', 'paper_id'),
         ],
       }),
     },
@@ -318,8 +338,17 @@ export const teacherApp: AppDefinition = {
       icon: Swords,
       group: '实践',
       load: async (api) => ({
-        ...listResult(await api.contest.getContests(defaultPageParams()), contestColumns(), '暂无竞赛', '创建竞赛后会在这里显示。'),
-        actions: contestManagementActions(api),
+        ...teacherMetrics(listResult(await api.contest.getContests(defaultPageParams()), contestColumns(), '暂无竞赛', '创建竞赛后会在这里显示。'), '赛事数量', '赛题配置', '状态流转'),
+        actions: [
+          navigatePageAction('open-vuln-sources-page', '漏洞源管理', '进入漏洞来源、同步和素材入库页面。', 'vuln-sources'),
+          navigatePageAction('open-vuln-transform-page', '漏洞题转化', '进入漏洞素材转题和预验证页面。', 'vuln-transform'),
+          ...contestManagementActions(api),
+        ],
+        rowActions: [
+          navigateRowAction('open-contest-edit', '配置竞赛', '进入竞赛基础信息和赛制配置页。', 'contest-edit', 'contest_id'),
+          navigateRowAction('open-contest-problems', '竞赛出题', '进入竞赛题目和对抗配置页。', 'contest-problems', 'contest_id'),
+          navigateRowAction('open-cheat-review', '防作弊', '进入防作弊线索处理页。', 'cheat-review', 'contest_id'),
+        ],
       }),
     },
     ...teacherDeepRoutes(),
@@ -447,61 +476,66 @@ function teacherDeepRoutes(): AppDefinition['routes'] {
         ],
       }
     }),
-    hiddenResourceRoute('course-community', '课程讨论', '维护课程讨论、公告和课程评价', FileText, async (api) => ({
-      ...emptyResult(teachingPostColumns(), '请选择课程', '输入课程编号后可读取讨论并发布公告。'),
-      actions: [
-        pageAction('list-posts', '读取讨论', '读取课程讨论列表。', [textInput('course_id', '课程编号', true)], async (values) => {
-          await api.teaching.listPosts(valueText(values, 'course_id'), defaultPageParams())
-          return '课程讨论已读取'
-        }),
-        pageAction('create-post', '发布讨论', '发布课程讨论内容。', [
-          textInput('course_id', '课程编号', true),
-          numberInput('parent_id', '回复对象编号'),
-          textareaInput('content', '讨论内容', true),
-        ], async (values) => {
-          await api.teaching.createPost(valueText(values, 'course_id'), {
-            parent_id: optionalNumber(values, 'parent_id'),
-            content: valueText(values, 'content'),
-          })
-          return '讨论已发布'
-        }),
-        pageAction('create-course-announcement', '发布课程公告', '发布课程内公告。', [
-          textInput('course_id', '课程编号', true),
-          textInput('title', '公告标题', true),
-          textareaInput('content', '公告内容', true),
-          numberInput('is_pinned', '是否置顶', true),
-        ], async (values) => {
-          await api.teaching.createAnnouncement(valueText(values, 'course_id'), {
-            title: valueText(values, 'title'),
-            content: valueText(values, 'content'),
-            is_pinned: valueFlag(values, 'is_pinned'),
-          })
-          return '课程公告已发布'
-        }),
-        pageAction('list-course-announcements', '读取课程公告', '读取课程公告列表。', [textInput('course_id', '课程编号', true)], async (values) => {
-          await api.teaching.listAnnouncements(valueText(values, 'course_id'))
-          return '课程公告已读取'
-        }),
-        pageAction('pin-course-announcement', '置顶课程公告', '按公告编号置顶课程公告。', [textInput('announcement_id', '公告编号', true)], async (values) => {
-          await api.teaching.pinAnnouncement(valueText(values, 'announcement_id'))
-          return '课程公告已置顶'
-        }),
-      ],
-      rowActions: [
-        rowAction('like-post', '点赞', '为讨论点赞。', async (row) => {
-          await api.teaching.likePost(row.id)
-          return '讨论已点赞'
-        }),
-        rowAction('pin-post', '置顶', '置顶课程讨论。', async (row) => {
-          await api.teaching.pinPost(row.id)
-          return '讨论已置顶'
-        }),
-        rowAction('delete-post', '删除', '删除课程讨论。', async (row) => {
-          await api.teaching.deletePost(row.id)
-          return '讨论已删除'
-        }),
-      ],
-    }), '教学'),
+    hiddenResourceRoute('course-community', '课程讨论', '维护课程讨论、公告和课程评价', FileText, async (api, params) => {
+      const courseId = routeParam(params, 'course_id', 'id')
+      return {
+        ...(courseId
+          ? listResult(await api.teaching.listPosts(courseId, defaultPageParams()), teachingPostColumns(), '暂无讨论', '发布讨论或公告后会显示课程互动。')
+          : emptyResult(teachingPostColumns(), '请选择课程', '从课程管理进入具体课程后可维护讨论和公告。')),
+        actions: [
+          pageAction('list-posts', '读取讨论', '读取课程讨论列表。', [textInput('course_id', '课程编号', true)], async (values) => {
+            await api.teaching.listPosts(valueText(values, 'course_id'), defaultPageParams())
+            return '课程讨论已读取'
+          }),
+          pageAction('create-post', '发布讨论', '发布课程讨论内容。', [
+            textInput('course_id', '课程编号', true),
+            numberInput('parent_id', '回复对象编号'),
+            textareaInput('content', '讨论内容', true),
+          ], async (values) => {
+            await api.teaching.createPost(valueText(values, 'course_id'), {
+              parent_id: optionalNumber(values, 'parent_id'),
+              content: valueText(values, 'content'),
+            })
+            return '讨论已发布'
+          }),
+          pageAction('create-course-announcement', '发布课程公告', '发布课程内公告。', [
+            textInput('course_id', '课程编号', true),
+            textInput('title', '公告标题', true),
+            textareaInput('content', '公告内容', true),
+            numberInput('is_pinned', '是否置顶', true),
+          ], async (values) => {
+            await api.teaching.createAnnouncement(valueText(values, 'course_id'), {
+              title: valueText(values, 'title'),
+              content: valueText(values, 'content'),
+              is_pinned: valueFlag(values, 'is_pinned'),
+            })
+            return '课程公告已发布'
+          }),
+          pageAction('list-course-announcements', '读取课程公告', '读取课程公告列表。', [textInput('course_id', '课程编号', true)], async (values) => {
+            await api.teaching.listAnnouncements(valueText(values, 'course_id'))
+            return '课程公告已读取'
+          }),
+          pageAction('pin-course-announcement', '置顶课程公告', '按公告编号置顶课程公告。', [textInput('announcement_id', '公告编号', true)], async (values) => {
+            await api.teaching.pinAnnouncement(valueText(values, 'announcement_id'))
+            return '课程公告已置顶'
+          }),
+        ],
+        rowActions: [
+          rowAction('like-post', '点赞', '为讨论点赞。', async (row) => {
+            await api.teaching.likePost(row.id)
+            return '讨论已点赞'
+          }),
+          rowAction('pin-post', '置顶', '置顶课程讨论。', async (row) => {
+            await api.teaching.pinPost(row.id)
+            return '讨论已置顶'
+          }),
+          rowAction('delete-post', '删除', '删除课程讨论。', async (row) => {
+            await api.teaching.deletePost(row.id)
+            return '讨论已删除'
+          }),
+        ],
+      }
+    }, '教学'),
     hiddenResourceRoute('assignments', '作业管理', '管理课程作业、提交和批改入口', ClipboardCheck, async (api, params) => {
       const assignmentId = routeParam(params, 'assignment_id')
       return assignmentId
@@ -515,7 +549,7 @@ function teacherDeepRoutes(): AppDefinition['routes'] {
     resourceRoute('grading', '批改中心', '查看提交、人工评分和查重线索', ShieldCheck, async (api, params) => {
       const assignmentId = routeParam(params, 'assignment_id', 'aid')
       return {
-        ...(assignmentId ? listResult(await api.teaching.getSubmissions(assignmentId, defaultPageParams()), submissionColumns(), '暂无提交', '学生提交作业后会显示。') : listResult(await api.judge.getTasks(defaultPageParams()), judgeTaskColumns(), '暂无批改任务', '作业提交或判题任务会显示。')),
+        ...teacherMetrics(assignmentId ? listResult(await api.teaching.getSubmissions(assignmentId, defaultPageParams()), submissionColumns(), '暂无提交', '学生提交作业后会显示。') : listResult(await api.judge.getTasks(defaultPageParams()), judgeTaskColumns(), '暂无批改任务', '作业提交或判题任务会显示。'), '待处理项', '人工评分', '重判进度'),
         actions: [
           pageAction('grade-submission', '人工批改', '为提交记录写入分数和评语。', [
             textInput('submission_id', '提交编号', true),
@@ -576,7 +610,7 @@ function teacherDeepRoutes(): AppDefinition['routes'] {
       }
     }),
     resourceRoute('monitor', '实时监控', '查看实验运行、竞赛对抗和异常学生状态', MonitorCog, async (api) => ({
-      ...listResult(await api.judge.getTasks(defaultPageParams()), judgeTaskColumns(), '暂无运行任务', '实验或竞赛运行后会显示实时状态。'),
+      ...teacherMetrics(listResult(await api.judge.getTasks(defaultPageParams()), judgeTaskColumns(), '暂无运行任务', '实验或竞赛运行后会显示实时状态。'), '运行任务', '学习统计', '异常处理'),
       actions: [
         pageAction('read-progress-stats', '读取学习统计', '按课程编号读取学习进度统计。', [textInput('course_id', '课程编号', true)], async (values) => {
           await api.teaching.getProgressStats(valueText(values, 'course_id'))
@@ -619,15 +653,26 @@ function teacherDeepRoutes(): AppDefinition['routes'] {
       ...listResult(await api.content.getItems(defaultPageParams()), contentColumns(), '暂无内容', '创建内容后会显示。'),
       actions: contentActions(api),
     })),
-    hiddenResourceRoute('paper-edit', '组卷编辑', '创建试卷并维护题目列表', FileText, async (api) => ({
-      ...listResult(await api.content.listPapers(defaultPageParams()), paperColumns(), '暂无试卷', '创建试卷后会显示。'),
-      actions: paperActions(api),
-    })),
+    hiddenResourceRoute('paper-edit', '组卷编辑', '创建试卷并维护题目列表', FileText, async (api, params) => {
+      const paperId = routeParam(params, 'paper_id', 'id')
+      return {
+        ...(paperId
+          ? objectResult(await api.content.getPaper(paperId), paperColumns(), '试卷详情')
+          : listResult(await api.content.listPapers(defaultPageParams()), paperColumns(), '暂无试卷', '创建试卷后会显示。')),
+        actions: paperActions(api),
+      }
+    }),
     resourceRoute('sim-packages', '仿真场景', '上传、预览和提交仿真包审核', Network, async (api) => ({
-      ...listResult(await api.sim.getPackages(defaultPageParams()), simPackageColumns(), '暂无仿真包', '上传仿真包后会显示。'),
+      ...teacherMetrics(listResult(await api.sim.getPackages(defaultPageParams()), simPackageColumns(), '暂无仿真包', '上传仿真包后会显示。'), '仿真包', '预览校验', '提交审核'),
       actions: simPackageActions(api),
+      rowActions: [
+        rowAction('open-sim-workspace', '预览工作台', '进入仿真工作台查看包状态。', async (row) => {
+          window.location.hash = routeHref('sim-workspace', { code: valueFromRow(row, 'code'), version: valueFromRow(row, 'version') }).slice(1)
+          return '正在进入仿真工作台'
+        }),
+      ],
     }), '资源'),
-    resourceRoute('shared-lib', '共享资源库', '查看跨课程共享内容和复用素材', Library, async (api) => listResult(await api.content.listShared(defaultPageParams()), contentColumns(), '暂无共享资源', '共享题库内容后会显示。'), '资源'),
+    resourceRoute('shared-lib', '共享资源库', '查看跨课程共享内容和复用素材', Library, async (api) => teacherMetrics(listResult(await api.content.listShared(defaultPageParams()), contentColumns(), '暂无共享资源', '共享题库内容后会显示。'), '共享资源', '跨课复用', '题库引用'), '资源'),
     hiddenResourceRoute('content-categories', '题库分类', '维护题库分类树和展示顺序', Library, async (api) => ({
       ...arrayResult(await api.content.listCategories(), contentCategoryColumns(), '暂无分类', '创建分类后会显示。'),
       actions: [
@@ -653,8 +698,9 @@ function teacherDeepRoutes(): AppDefinition['routes'] {
       ],
     }), '资源'),
     resourceRoute('grade-submit', '成绩报送', '计算课程成绩并提交学校审核', ScrollText, async (api) => ({
-      ...listResult(await api.grade.listReviews(defaultPageParams()), gradeReviewColumns(), '暂无报送记录', '提交成绩审核后会显示。'),
+      ...teacherMetrics(listResult(await api.grade.listReviews(defaultPageParams()), gradeReviewColumns(), '暂无报送记录', '提交成绩审核后会显示。'), '报送记录', '学校审核', '成绩锁定'),
       actions: [
+        navigatePageAction('open-grade-appeals-page', '成绩申诉', '进入学生成绩申诉处理页面。', 'grade-appeals'),
         pageAction('submit-grade-review', '提交成绩审核', '将课程成绩提交学校管理员审核锁定。', [
           textInput('course_id', '课程编号', true),
           textInput('semester_id', '学期编号'),
@@ -669,44 +715,61 @@ function teacherDeepRoutes(): AppDefinition['routes'] {
         }),
       ],
     }), '成绩'),
-    hiddenResourceRoute('course-grades', '课程成绩', '维护课程成绩权重、计算结果和成绩导出', ScrollText, async (api) => ({
-      ...emptyResult(teachingGradeColumns(), '请选择课程', '输入课程编号后可读取课程成绩。'),
-      actions: [
-        pageAction('list-course-grades', '读取课程成绩', '读取课程成绩列表。', [textInput('course_id', '课程编号', true)], async (values) => {
-          await api.teaching.listGrades(valueText(values, 'course_id'), defaultPageParams())
-          return '课程成绩已读取'
-        }),
-        pageAction('compute-course-grades', '计算课程成绩', '按当前成绩权重重新计算课程成绩。', [textInput('course_id', '课程编号', true)], async (values) => {
-          await api.teaching.computeGrades(valueText(values, 'course_id'))
-          return '课程成绩已计算'
-        }),
-        pageAction('set-grade-weights', '设置成绩权重', '设置课程成绩来源和权重。', [
-          textInput('course_id', '课程编号', true),
-          textareaInput('items', '权重列表', true),
-        ], async (values) => {
-          await api.teaching.setGradeWeights(valueText(values, 'course_id'), {
-            items: valueJsonArray(values, 'items') as never,
-          })
-          return '成绩权重已保存'
-        }),
-        pageAction('list-grade-weights', '读取成绩权重', '读取课程成绩权重配置。', [textInput('course_id', '课程编号', true)], async (values) => {
-          await api.teaching.listGradeWeights(valueText(values, 'course_id'))
-          return '成绩权重已读取'
-        }),
-        pageAction('override-course-grade', '调整课程成绩', '按学生编号调整课程最终成绩。', [
-          textInput('course_id', '课程编号', true),
-          textInput('student_id', '学生编号', true),
-          numberInput('total', '调整后总分', true),
-        ], async (values) => {
-          await api.teaching.overrideGrade(valueText(values, 'course_id'), valueText(values, 'student_id'), { total: valueNumber(values, 'total') })
-          return '课程成绩已调整'
-        }),
-        pageAction('export-course-grades', '导出课程成绩', '创建课程成绩导出任务，下载走任务与下载页。', [textInput('course_id', '课程编号', true)], async (values) => {
-          await api.teaching.exportGrades(valueText(values, 'course_id'))
-          return '成绩导出任务已创建'
-        }),
-      ],
-    }), '成绩'),
-    resourceRoute('org', '组织查看', '查看学校组织结构，教师侧只读', Building2, async (api) => arrayResult(await api.identity.listDepartments(), orgColumns(), '暂无组织', '学校管理员维护组织后会显示。'), '组织'),
+    hiddenResourceRoute('course-grades', '课程成绩', '维护课程成绩权重、计算结果和成绩导出', ScrollText, async (api, params) => {
+      const courseId = routeParam(params, 'course_id', 'id')
+      return {
+        ...(courseId
+          ? listResult(await api.teaching.listGrades(courseId, defaultPageParams()), teachingGradeColumns(), '暂无课程成绩', '计算或调整成绩后会显示。')
+          : emptyResult(teachingGradeColumns(), '请选择课程', '从成绩报送或课程管理进入具体课程后维护成绩。')),
+        actions: [
+          pageAction('list-course-grades', '读取课程成绩', '读取课程成绩列表。', [textInput('course_id', '课程编号', true)], async (values) => {
+            await api.teaching.listGrades(valueText(values, 'course_id'), defaultPageParams())
+            return '课程成绩已读取'
+          }),
+          pageAction('compute-course-grades', '计算课程成绩', '按当前成绩权重重新计算课程成绩。', [textInput('course_id', '课程编号', true)], async (values) => {
+            await api.teaching.computeGrades(valueText(values, 'course_id'))
+            return '课程成绩已计算'
+          }),
+          pageAction('set-grade-weights', '设置成绩权重', '设置课程成绩来源和权重。', [
+            textInput('course_id', '课程编号', true),
+            textareaInput('items', '权重列表', true),
+          ], async (values) => {
+            await api.teaching.setGradeWeights(valueText(values, 'course_id'), {
+              items: valueJsonArray(values, 'items') as never,
+            })
+            return '成绩权重已保存'
+          }),
+          pageAction('list-grade-weights', '读取成绩权重', '读取课程成绩权重配置。', [textInput('course_id', '课程编号', true)], async (values) => {
+            await api.teaching.listGradeWeights(valueText(values, 'course_id'))
+            return '成绩权重已读取'
+          }),
+          pageAction('override-course-grade', '调整课程成绩', '按学生编号调整课程最终成绩。', [
+            textInput('course_id', '课程编号', true),
+            textInput('student_id', '学生编号', true),
+            numberInput('total', '调整后总分', true),
+          ], async (values) => {
+            await api.teaching.overrideGrade(valueText(values, 'course_id'), valueText(values, 'student_id'), { total: valueNumber(values, 'total') })
+            return '课程成绩已调整'
+          }),
+          pageAction('export-course-grades', '导出课程成绩', '创建课程成绩导出任务，下载走任务与下载页。', [textInput('course_id', '课程编号', true)], async (values) => {
+            await api.teaching.exportGrades(valueText(values, 'course_id'))
+            return '成绩导出任务已创建'
+          }),
+        ],
+      }
+    }, '成绩'),
+    resourceRoute('org', '组织查看', '查看学校组织结构，教师侧只读', Building2, async (api) => teacherMetrics(arrayResult(await api.identity.listDepartments(), orgColumns(), '暂无组织', '学校管理员维护组织后会显示。'), '组织节点', '只读查看', '课程成员'), '组织'),
   ]
+}
+
+/**
+ * teacherMetrics 为教师主任务页提供生产状态指标，数值只来自当前资源结果。
+ */
+function teacherMetrics(result: ResourceResult, primaryLabel: string, processLabel: string, actionLabel: string): ResourceResult {
+  const metrics: MetricItem[] = [
+    { label: primaryLabel, value: String(result.rows.length), tone: 'primary' },
+    { label: processLabel, value: result.rows.length > 0 ? '可继续处理' : '等待创建', tone: result.rows.length > 0 ? 'success' : 'secondary' },
+    { label: '下一步', value: actionLabel, tone: 'warning' },
+  ]
+  return { ...result, metrics }
 }

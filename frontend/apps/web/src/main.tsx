@@ -10,6 +10,11 @@ import { platformAdminApp } from './features/platform-admin-app'
 import { schoolAdminApp } from './features/school-admin-app'
 import { studentApp } from './features/student-app'
 import { teacherApp } from './features/teacher-app'
+import './styles/student-experience.css'
+import './styles/teacher-experience.css'
+import './styles/school-admin-experience.css'
+import './styles/platform-admin-experience.css'
+import './styles/page-type-experience.css'
 
 interface RoleEntry {
   path: string

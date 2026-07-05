@@ -2,7 +2,7 @@
 
 import { Activity, Award, BookOpen, FileCheck2, FileClock, FilePenLine, FileText, Flag, Gavel, GraduationCap, Network, ShieldAlert, TerminalSquare, Trophy, UserCog } from 'lucide-react'
 import { ExperimentStatus } from '@chaimir/api-client'
-import type { AppDefinition } from '@chaimir/shared'
+import { routeHref, type AppDefinition, type MetricItem, type ResourceResult } from '@chaimir/shared'
 import {
   appealColumns,
   arrayResult,
@@ -19,6 +19,8 @@ import {
   hiddenResourceRoute,
   lessonColumns,
   listResult,
+  navigatePageAction,
+  navigateRowAction,
   numberInput,
   optionalNumber,
   objectResult,
@@ -27,7 +29,6 @@ import {
   outlineColumns,
   pageAction,
   reportColumns,
-  routeHref,
   routeParam,
   rowAction,
   sharedAnnouncementRoute,
@@ -48,7 +49,7 @@ import {
   valueText,
   warningColumns,
   workspaceInfo,
-} from '@chaimir/shared'
+} from '../route-kit'
 
 export const studentApp: AppDefinition = {
   role: 'student',
@@ -63,14 +64,18 @@ export const studentApp: AppDefinition = {
       icon: BookOpen,
       group: '学习',
       load: async (api) => ({
-        ...listResult(await api.teaching.getCourses({ role: 'student', ...defaultPageParams() }), courseColumns(), '暂无课程', '加入课程后会在这里显示学习安排。'),
+        ...studentMetrics(listResult(await api.teaching.getCourses({ role: 'student', ...defaultPageParams() }), courseColumns(), '暂无课程', '加入课程后会在这里显示学习安排。'), '已加入课程', '课程大纲', '邀请码加入'),
         actions: [
+          navigatePageAction('open-lesson-page', '课时学习', '进入课时内容和学习进度页面。', 'lesson'),
+          navigatePageAction('open-assignment-page', '作业作答', '进入作业题目、草稿和提交页面。', 'assignment'),
+          navigatePageAction('open-submission-page', '作业结果', '进入提交结果和教师反馈页面。', 'submission'),
           pageAction('join-course', '加入课程', '输入教师提供的邀请码加入课程，加入状态会自动保存。', [textInput('invite_code', '课程邀请码', true)], async (values) => {
             await api.teaching.joinCourse({ invite_code: valueText(values, 'invite_code') })
             return '已提交加入课程请求'
           }),
         ],
         rowActions: [
+          navigateRowAction('open-course-detail', '课程详情', '进入课程详情、课时和作业入口。', 'course-detail'),
           rowAction('course-outline', '读取大纲', '读取课程章节、课时和学习进度。', async (row) => {
             await api.teaching.getCourseOutline(row.id)
             return '课程大纲已读取'
@@ -85,7 +90,7 @@ export const studentApp: AppDefinition = {
       icon: TerminalSquare,
       group: '学习',
       load: async (api) => ({
-        ...listResult(await api.experiment.getExperiments({ status: ExperimentStatus.PUBLISHED, ...defaultPageParams() }), experimentColumns(), '暂无实验', '课程发布实验后会在这里显示。'),
+        ...studentMetrics(listResult(await api.experiment.getExperiments({ status: ExperimentStatus.PUBLISHED, ...defaultPageParams() }), experimentColumns(), '暂无实验', '课程发布实验后会在这里显示。'), '可做实验', '实验工作台', '实例创建'),
         actions: [
           pageAction('start-experiment', '创建实验实例', '输入实验编号创建个人或小组实例，平台会准备所需实验资源。', [
             textInput('experiment_id', '实验编号', true),
@@ -97,6 +102,7 @@ export const studentApp: AppDefinition = {
           }),
         ],
         rowActions: [
+          navigateRowAction('open-experiment-detail', '实验详情', '进入实验详情和报告入口。', 'experiment-detail'),
           rowAction('start-row-experiment', '进入实验', '为当前实验创建实例并进入工作台。', async (row) => {
             const instance = await api.experiment.createInstance(row.id, {})
             window.location.hash = routeHref('experiment-workspace', { instance_id: instance.instance_id }).slice(1)
@@ -112,7 +118,7 @@ export const studentApp: AppDefinition = {
       icon: Network,
       group: '学习',
       load: async (api) => ({
-        ...listResult(await api.sim.getPackages({ status: 'published', ...defaultPageParams() }), simPackageColumns(), '暂无仿真包', '有仿真包发布后会显示。'),
+        ...studentMetrics(listResult(await api.sim.getPackages({ status: 'published', ...defaultPageParams() }), simPackageColumns(), '暂无仿真包', '有仿真包发布后会显示。'), '可用仿真', '单步回放', '分享码读取'),
         actions: [
           pageAction('read-shared-replay', '读取分享回放', '输入分享码读取可复现实验回放。', [textInput('code', '分享码', true)], async (values) => {
             await api.sim.getSharedReplay(valueText(values, 'code'))
@@ -138,8 +144,10 @@ export const studentApp: AppDefinition = {
       icon: Trophy,
       group: '学习',
       load: async (api) => ({
-        ...listResult(await api.contest.getContests(defaultPageParams()), contestColumns(), '暂无竞赛', '有可报名或进行中的竞赛时会在这里显示。'),
+        ...studentMetrics(listResult(await api.contest.getContests(defaultPageParams()), contestColumns(), '暂无竞赛', '有可报名或进行中的竞赛时会在这里显示。'), '可见赛事', '报名组队', '答题环境'),
         actions: [
+          navigatePageAction('open-contest-signup-page', '报名页面', '进入竞赛报名和队伍确认页面。', 'contest-signup'),
+          navigatePageAction('open-my-records-page', '我的战绩', '进入竞赛名次、得分和历史记录页面。', 'my-records'),
           pageAction('contest-signup', '报名竞赛', '输入竞赛编号和队伍名称完成报名，队伍状态会自动保存。', [
             textInput('contest_id', '竞赛编号', true),
             textInput('team_name', '队伍名称', true),
@@ -155,6 +163,10 @@ export const studentApp: AppDefinition = {
             return '已提交加入队伍请求'
           }),
         ],
+        rowActions: [
+          navigateRowAction('open-contest-detail', '竞赛详情', '进入竞赛赛题、榜单和结果入口。', 'contest-detail'),
+          navigateRowAction('open-contest-signup', '报名入口', '进入竞赛报名和队伍确认页面。', 'contest-signup', 'contest_id'),
+        ],
       }),
     },
     {
@@ -163,7 +175,7 @@ export const studentApp: AppDefinition = {
       description: '查看个人历史竞赛成绩和排名',
       icon: Flag,
       group: '学习',
-      load: async (api) => arrayResult(await api.contest.getMyContestRecords(), contestRecordColumns(), '暂无竞赛战绩', '完成竞赛后会在这里显示成绩。'),
+      load: async (api) => studentMetrics(arrayResult(await api.contest.getMyContestRecords(), contestRecordColumns(), '暂无竞赛战绩', '完成竞赛后会在这里显示成绩。'), '历史记录', '排名结果', '复盘入口'),
     },
     {
       path: 'grades',
@@ -174,8 +186,10 @@ export const studentApp: AppDefinition = {
       load: async (api) => {
         const me = await api.identity.getMe()
         return {
-          ...arrayResult(await api.grade.studentGPA(me.account.id), gradeSummaryColumns(), '暂无成绩', '课程成绩完成归档后会在这里显示。'),
+          ...studentMetrics(arrayResult(await api.grade.studentGPA(me.account.id), gradeSummaryColumns(), '暂无成绩', '课程成绩完成归档后会在这里显示。'), '成绩记录', '申诉入口', '成绩单'),
           actions: [
+            navigatePageAction('open-appeals-page', '申诉记录', '进入成绩申诉提交和处理进度页面。', 'appeals'),
+            navigatePageAction('open-transcripts-page', '成绩单', '进入成绩单生成和下载授权页面。', 'transcripts'),
             pageAction('submit-grade-appeal', '提交成绩申诉', '对课程成绩有疑问时提交申诉，处理结果由教师或管理员反馈。', [
               textInput('course_id', '课程编号', true),
               textareaInput('reason', '申诉说明', true),
@@ -205,7 +219,7 @@ export const studentApp: AppDefinition = {
       icon: ShieldAlert,
       group: '成绩',
       load: async (api) => ({
-        ...listResult(await api.grade.listWarnings(defaultPageParams()), warningColumns(), '暂无学业预警', '有需要关注的学业状态时会在这里显示。'),
+        ...studentMetrics(listResult(await api.grade.listWarnings(defaultPageParams()), warningColumns(), '暂无学业预警', '有需要关注的学业状态时会在这里显示。'), '预警记录', '确认状态', '学习支持'),
         rowActions: [
           rowAction('ack-warning', '确认预警', '确认已知晓这条学业预警。', async (row) => {
             await api.grade.ackWarning(row.id)
@@ -226,7 +240,21 @@ export const studentApp: AppDefinition = {
   ],
 }
 
+/**
+ * studentMetrics 为学生主入口提供任务语义指标，数值只来自当前资源结果。
+ */
+function studentMetrics(result: ResourceResult, primaryLabel: string, flowLabel: string, actionLabel: string): ResourceResult {
+  const metrics: MetricItem[] = [
+    { label: primaryLabel, value: String(result.rows.length), tone: 'primary' },
+    { label: '当前视图', value: result.rows.length > 0 ? '有记录' : '暂无记录', tone: result.rows.length > 0 ? 'success' : 'secondary' },
+    { label: flowLabel, value: actionLabel, tone: 'secondary' },
+  ]
+  return { ...result, metrics }
+}
 
+/**
+ * studentWorkspaceRoute 渲染学生实验实例的沉浸式工作台，只展示后端授权的实例资源。
+ */
 function studentWorkspaceRoute(): AppDefinition['routes'][number] {
   return {
     path: 'experiment-workspace',
@@ -242,6 +270,10 @@ function studentWorkspaceRoute(): AppDefinition['routes'][number] {
           { label: '资源创建', value: '由实验实例触发', tone: 'primary' },
           { label: '进度推送', value: '实时同步', tone: 'secondary' },
           { label: '安全边界', value: '不在前端暴露答案', tone: 'success' },
+        ], undefined, undefined, [
+          { title: '进入方式', body: '请先从实验列表创建或进入具体实验实例，页面只展示该实例已授权的沙箱、工具和检查点。' },
+          { title: '资源状态', body: '实验资源由实例触发创建，准备、运行和回收状态以平台同步结果为准。' },
+          { title: '安全边界', body: '学生侧只操作自己的实验实例，不显示答案、判题规则或受保护配置。' },
         ])
       }
       const instance = await api.experiment.getInstance(instanceId)
@@ -304,7 +336,7 @@ function studentWorkspaceRoute(): AppDefinition['routes'][number] {
           await api.sandbox.readFile(valueText(values, 'sandbox_id'), valueText(values, 'path'))
           return '文件内容已读取'
         }),
-        pageAction('write-workspace-file', '写入文件', '写入沙箱工作区文件，内容使用 Base64。', [
+        pageAction('write-workspace-file', '写入文件', '写入沙箱工作区文件内容。', [
           textInput('sandbox_id', '沙箱编号', true),
           textInput('relative_path', '文件路径', true),
           textareaInput('content_base64', '文件内容', true),
@@ -383,7 +415,11 @@ function studentWorkspaceRoute(): AppDefinition['routes'][number] {
           await api.experiment.recycleInstance(instance.instance_id)
           return '实验资源已回收'
         }),
-      ] : [])
+      ] : [], [
+        { title: '实验资源', body: '左侧列出当前实例授权的终端、工具、链操作和仿真入口，资源数量来自实验实例。' },
+        { title: '工作区', body: '中间区域用于确认实例状态、沙箱数量、仿真会话和当前得分，文件与链操作通过受控动作完成。' },
+        { title: '检查点与报告', body: '右侧操作覆盖保存工作区、检查点判分、报告提交、暂停恢复、完成和资源回收。' },
+      ])
     },
   }
 }
@@ -479,19 +515,24 @@ function studentDeepRoutes(): AppDefinition['routes'] {
       if (assignmentId) return listResult(await api.teaching.getSubmissions(assignmentId, defaultPageParams()), submissionColumns(), '暂无提交', '提交作业后会显示结果。')
       return emptyResult(submissionColumns(), '请选择提交记录', '从作业或提交列表进入后会显示结果。')
     }),
-    hiddenResourceRoute('experiment-detail', '实验详情', '查看实验组件、协作配置、报告和实例入口', TerminalSquare, async (api, params) => ({
-      ...listResult(await api.experiment.listReports(routeParam(params, 'id', 'experiment_id') || '0', defaultPageParams()), reportColumns(), '暂无实验报告', '进入实验并提交报告后会显示记录。'),
-      actions: [
-        pageAction('create-instance', '进入实验工作台', '创建个人或小组实验实例并进入沉浸工作台。', [
-          textInput('experiment_id', '实验编号', true),
-          numberInput('group_id', '小组编号'),
-        ], async (values) => {
-          const instance = await api.experiment.createInstance(valueText(values, 'experiment_id'), optionalNumberPayload(values, 'group_id'))
-          window.location.hash = routeHref('experiment-workspace', { instance_id: instance.instance_id }).slice(1)
-          return '实验实例已创建'
-        }),
-      ],
-    })),
+    hiddenResourceRoute('experiment-detail', '实验详情', '查看实验组件、协作配置、报告和实例入口', TerminalSquare, async (api, params) => {
+      const experimentId = routeParam(params, 'id', 'experiment_id')
+      return {
+        ...(experimentId
+          ? listResult(await api.experiment.listReports(experimentId, defaultPageParams()), reportColumns(), '暂无实验报告', '进入实验并提交报告后会显示记录。')
+          : emptyResult(reportColumns(), '请选择实验', '从实验实训进入具体实验后会显示报告和实例入口。')),
+        actions: [
+          pageAction('create-instance', '进入实验工作台', '创建个人或小组实验实例并进入沉浸工作台。', [
+            textInput('experiment_id', '实验编号', true),
+            numberInput('group_id', '小组编号'),
+          ], async (values) => {
+            const instance = await api.experiment.createInstance(valueText(values, 'experiment_id'), optionalNumberPayload(values, 'group_id'))
+            window.location.hash = routeHref('experiment-workspace', { instance_id: instance.instance_id }).slice(1)
+            return '实验实例已创建'
+          }),
+        ],
+      }
+    }),
     hiddenResourceRoute('contest-detail', '竞赛详情', '查看赛题、榜单、赛程和结果快照', Trophy, async (api, params) => {
       const contestId = routeParam(params, 'id', 'contest_id')
       return contestId

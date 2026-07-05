@@ -32,6 +32,7 @@ export const Progress = React.forwardRef<HTMLDivElement, ProgressProps>(
     ref
   ) => {
     const safePercent = Math.min(100, Math.max(0, percent))
+    const scale = safePercent / 100
 
     const classes = clsx(
       'chaimir-progress',
@@ -50,7 +51,7 @@ export const Progress = React.forwardRef<HTMLDivElement, ProgressProps>(
         <div className="chaimir-progress__track">
           <div
             className={barClasses}
-            style={{ width: `${safePercent}%` }}
+            style={{ transform: `scaleX(${scale})` }}
           />
         </div>
         {showPercent && (

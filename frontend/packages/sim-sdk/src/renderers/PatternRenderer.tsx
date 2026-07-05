@@ -65,6 +65,7 @@ function GraphRenderer({
   const nodes = layoutGraphNodes(pattern.data.nodes, pattern.data.layout);
   const nodeById = new Map(nodes.map((node) => [node.id, node]));
   const activeEdges = pattern.data.edges.filter((edge) => edge.status === 'active' || edge.status === 'success').length;
+  const showEdgeLabels = pattern.data.edges.length <= 14;
 
   return (
     <section className="sim-pattern" aria-label={pattern.title}>
@@ -89,9 +90,11 @@ function GraphRenderer({
               <circle className={clsx('sim-graph__pulse', `is-${edge.status}`)} cx={pulse.x} cy={pulse.y} r="1.3">
                 <title>{edge.process?.label ?? edge.detail ?? edge.label}</title>
               </circle>
-              <text className="sim-graph__edge-label" x={(from.x + to.x) / 2} y={(from.y + to.y) / 2}>
-                {edge.label}
-              </text>
+              {showEdgeLabels && (
+                <text className="sim-graph__edge-label" x={(from.x + to.x) / 2} y={(from.y + to.y) / 2}>
+                  {edge.label}
+                </text>
+              )}
             </g>
           );
         })}
@@ -412,6 +415,28 @@ function ChartRenderer({
             </span>
           ))}
         </div>
+        <table className="sim-chart__table">
+          <caption>趋势数据</caption>
+          <thead>
+            <tr>
+              <th scope="col">系列</th>
+              <th scope="col">最新时间</th>
+              <th scope="col">最新数值</th>
+            </tr>
+          </thead>
+          <tbody>
+            {pattern.data.series.map((series) => {
+              const lastPoint = series.points[series.points.length - 1];
+              return (
+                <tr key={series.label}>
+                  <th scope="row">{series.label}</th>
+                  <td>{lastPoint?.x ?? 0}</td>
+                  <td>{lastPoint ? `${lastPoint.y}${pattern.data.unit}` : `0${pattern.data.unit}`}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
       </div>
     </section>
   );
@@ -612,6 +637,7 @@ function selectableElementProps(elementId: string, onSelectElement?: (elementId:
   return {
     role: 'button',
     tabIndex: 0,
+    'aria-label': `选择${elementType ?? '元素'} ${elementId}`,
     onClick: () => onSelectElement(elementId, elementType),
     onKeyDown: (event: React.KeyboardEvent) => {
       if (event.key === 'Enter' || event.key === ' ') {

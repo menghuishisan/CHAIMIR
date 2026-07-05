@@ -1,0 +1,262 @@
+/* 学生端体验层：把学习、实验、仿真、竞赛和成绩页面组织为独立的学生任务流。 */
+
+.chaimir-app.is-app-student {
+  --student-flow: var(--color-primary);
+  --student-flow-soft: var(--color-primary-soft);
+  --student-energy: var(--color-secondary);
+  --student-energy-soft: var(--color-secondary-soft);
+}
+
+.chaimir-page.is-role-student {
+  --page-accent: var(--student-flow);
+  --page-accent-text: var(--color-primary-text);
+  --page-accent-soft: var(--student-flow-soft);
+  gap: var(--space-5);
+}
+
+.chaimir-page.is-role-student.is-path-grades,
+.chaimir-page.is-role-student.is-path-warnings {
+  --page-accent: var(--student-energy);
+  --page-accent-text: var(--color-secondary-text);
+  --page-accent-soft: var(--student-energy-soft);
+}
+
+.chaimir-page.is-role-student .chaimir-page__heading {
+  align-items: stretch;
+  min-block-size: 11rem;
+  padding: var(--space-6);
+  color: var(--color-dark-text);
+  background:
+    linear-gradient(120deg, var(--color-dark-bg), var(--color-dark-surface)),
+    linear-gradient(90deg, var(--page-accent-soft), transparent);
+  border: 1px solid var(--color-dark-border);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-md);
+  overflow: hidden;
+}
+
+.chaimir-page.is-role-student .chaimir-page__heading::before {
+  inset-inline: var(--space-6);
+  inset-block-end: 0;
+  inline-size: auto;
+  block-size: 3px;
+  background: linear-gradient(90deg, var(--page-accent), var(--student-energy), transparent);
+}
+
+.chaimir-page.is-role-student .chaimir-page__heading::after {
+  position: absolute;
+  inset-block: 0;
+  inset-inline-end: 0;
+  inline-size: min(24rem, 44%);
+  content: "";
+  background:
+    linear-gradient(135deg, transparent 0 28%, var(--color-dark-elevated) 28% 34%, transparent 34% 48%, var(--color-dark-elevated) 48% 54%, transparent 54%),
+    repeating-linear-gradient(90deg, transparent 0 var(--space-5), var(--color-dark-border) var(--space-5) calc(var(--space-5) + 1px));
+  opacity: 0.72;
+  clip-path: polygon(18% 0, 100% 0, 100% 100%, 0 100%);
+}
+
+.chaimir-page.is-role-student .chaimir-page__heading > div:first-child {
+  position: relative;
+  z-index: var(--z-base);
+  max-inline-size: 46rem;
+}
+
+.chaimir-page.is-role-student .chaimir-page__breadcrumb,
+.chaimir-page.is-role-student .chaimir-page__breadcrumb a {
+  color: var(--color-on-dark-accent);
+}
+
+.chaimir-page.is-role-student .chaimir-page__breadcrumb span:last-child,
+.chaimir-page.is-role-student .chaimir-page__heading p:last-child {
+  color: var(--color-dark-text-sub);
+}
+
+.chaimir-page.is-role-student .chaimir-page__heading h1 {
+  max-inline-size: 12ch;
+  color: var(--color-dark-text);
+  font-size: var(--text-4xl);
+}
+
+.chaimir-page.is-role-student .chaimir-page__heading-icon {
+  z-index: var(--z-base);
+  align-self: start;
+  color: var(--color-on-dark-accent);
+  background: var(--color-dark-elevated);
+  border-color: var(--color-dark-border);
+  box-shadow: inset 0 0 0 1px var(--color-dark-border);
+}
+
+.chaimir-page.is-role-student .chaimir-page__stats {
+  position: relative;
+  grid-template-columns: repeat(auto-fit, minmax(12.5rem, 1fr));
+  padding-block-start: var(--space-2);
+}
+
+.chaimir-page.is-role-student .chaimir-page__stats::before {
+  position: absolute;
+  inset-inline: var(--space-4);
+  inset-block-start: 2.35rem;
+  block-size: 2px;
+  content: "";
+  background: linear-gradient(90deg, var(--page-accent), var(--student-energy), transparent);
+  opacity: 0.5;
+}
+
+.chaimir-page.is-role-student .chaimir-stat {
+  position: relative;
+  z-index: var(--z-base);
+  min-block-size: 8rem;
+  background: var(--color-bg);
+  box-shadow: var(--shadow-xs);
+}
+
+.chaimir-page.is-role-student .chaimir-stat::before {
+  position: absolute;
+  inset-block-start: calc(0px - var(--space-2));
+  inset-inline-start: var(--space-4);
+  inline-size: var(--space-3);
+  block-size: var(--space-3);
+  content: "";
+  background: var(--page-accent);
+  border: 2px solid var(--color-bg);
+  border-radius: var(--radius-full);
+  box-shadow: 0 0 0 3px var(--page-accent-soft);
+}
+
+.chaimir-page.is-role-student .chaimir-page__workspace.has-actions {
+  grid-template-columns: minmax(0, 1.45fr) minmax(18rem, 22rem);
+}
+
+.chaimir-page.is-role-student .chaimir-resource-panel {
+  padding: var(--space-6);
+  border-color: var(--color-border-subtle);
+  box-shadow: var(--shadow-xs);
+}
+
+.chaimir-page.is-role-student .chaimir-resource-panel::before {
+  inline-size: 4px;
+  background: linear-gradient(180deg, var(--page-accent), var(--student-energy));
+}
+
+.chaimir-page.is-role-student .chaimir-resource-panel__head {
+  align-items: end;
+  padding-block-end: var(--space-4);
+  border-block-end: 1px solid var(--color-border-subtle);
+}
+
+.chaimir-page.is-role-student .chaimir-resource-panel__eyebrow {
+  color: var(--page-accent-text);
+}
+
+.chaimir-page.is-role-student .chaimir-action-rail__head {
+  background:
+    linear-gradient(135deg, var(--color-bg), var(--page-accent-soft)),
+    linear-gradient(90deg, transparent, var(--student-energy-soft));
+}
+
+.chaimir-page.is-role-student .chaimir-action-card {
+  box-shadow: none;
+}
+
+.chaimir-page.is-role-student .chaimir-action-card:hover,
+.chaimir-page.is-role-student .chaimir-action-card:focus-within {
+  transform: translateY(calc(0px - var(--space-1)));
+}
+
+.chaimir-page.is-role-student.is-path-courses .chaimir-resource-panel,
+.chaimir-page.is-role-student.is-path-experiments .chaimir-resource-panel,
+.chaimir-page.is-role-student.is-path-sim-lib .chaimir-resource-panel,
+.chaimir-page.is-role-student.is-path-contests .chaimir-resource-panel {
+  min-block-size: 28rem;
+}
+
+.chaimir-page.is-role-student.is-path-courses .chaimir-table-card,
+.chaimir-page.is-role-student.is-path-experiments .chaimir-table-card,
+.chaimir-page.is-role-student.is-path-sim-lib .chaimir-table-card,
+.chaimir-page.is-role-student.is-path-contests .chaimir-table-card {
+  box-shadow: inset 4px 0 0 var(--page-accent), var(--shadow-xs);
+}
+
+.chaimir-page.is-role-student.is-path-sim-lib .chaimir-page__heading,
+.chaimir-page.is-role-student.is-path-experiments .chaimir-page__heading {
+  min-block-size: 12rem;
+}
+
+.chaimir-page.is-role-student.is-path-sim-lib .chaimir-page__heading::after,
+.chaimir-page.is-role-student.is-path-experiments .chaimir-page__heading::after {
+  background:
+    linear-gradient(135deg, transparent 0 22%, var(--color-dark-elevated) 22% 27%, transparent 27% 42%, var(--color-dark-elevated) 42% 47%, transparent 47%),
+    radial-gradient(circle at 22% 22%, var(--color-on-dark-accent), transparent var(--space-2)),
+    radial-gradient(circle at 48% 45%, var(--student-energy), transparent var(--space-2)),
+    radial-gradient(circle at 70% 30%, var(--color-on-dark-accent), transparent var(--space-2));
+}
+
+.chaimir-page.is-role-student.is-path-contests .chaimir-page__heading,
+.chaimir-page.is-role-student.is-path-contest-records .chaimir-page__heading {
+  --page-accent: var(--student-energy);
+  --page-accent-text: var(--color-secondary-text);
+  --page-accent-soft: var(--student-energy-soft);
+}
+
+.chaimir-page.is-role-student.is-path-grades .chaimir-page__workspace,
+.chaimir-page.is-role-student.is-path-warnings .chaimir-page__workspace {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.chaimir-page.is-role-student.is-path-grades .chaimir-resource-panel,
+.chaimir-page.is-role-student.is-path-warnings .chaimir-resource-panel {
+  min-block-size: 20rem;
+}
+
+@media (max-width: 1023px) {
+  .chaimir-page.is-role-student .chaimir-page__heading {
+    min-block-size: auto;
+  }
+
+  .chaimir-page.is-role-student .chaimir-page__heading::after {
+    inline-size: 36%;
+    opacity: 0.46;
+  }
+
+  .chaimir-page.is-role-student .chaimir-page__workspace.has-actions {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .chaimir-page.is-role-student .chaimir-action-rail {
+    position: static;
+  }
+}
+
+@media (max-width: 767px) {
+  .chaimir-page.is-role-student {
+    gap: var(--space-4);
+  }
+
+  .chaimir-page.is-role-student .chaimir-page__heading {
+    padding: var(--space-5);
+  }
+
+  .chaimir-page.is-role-student .chaimir-page__heading h1 {
+    font-size: var(--text-2xl);
+  }
+
+  .chaimir-page.is-role-student .chaimir-page__heading::after {
+    display: none;
+  }
+
+  .chaimir-page.is-role-student .chaimir-page__stats::before {
+    display: none;
+  }
+
+  .chaimir-page.is-role-student .chaimir-resource-panel {
+    padding: var(--space-4);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chaimir-page.is-role-student .chaimir-action-card:hover,
+  .chaimir-page.is-role-student .chaimir-action-card:focus-within {
+    transform: none;
+  }
+}

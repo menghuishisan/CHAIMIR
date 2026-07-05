@@ -266,11 +266,18 @@ export function SimulationWorkbench({
               </div>
             </article>
           )}
-          {runtimeMessage && <p className="sim-runtime-message">{runtimeMessage}</p>}
+          {runtimeMessage && <p className="sim-runtime-message" role="alert">{runtimeMessage}</p>}
         </aside>
 
         <section className="sim-workbench__stage" aria-label="仿真可视化舞台">
-          <p className="sim-workbench__summary">{snapshot.view.summary}</p>
+          <header className="sim-workbench__stage-head">
+            <p className="sim-workbench__summary">{snapshot.view.summary}</p>
+            {activeElementId && (
+              <p className="sim-workbench__selection">
+                已选择 {selectedElementType ?? '对象'} <code>{activeElementId}</code>
+              </p>
+            )}
+          </header>
           <div className="sim-pattern-grid">
             {snapshot.view.patterns
               .filter((pattern) => pattern.region === 'main')
@@ -322,42 +329,46 @@ export function SimulationWorkbench({
       </section>
 
       <footer className="sim-workbench__controls">
-        <Button variant="on-dark" size="sm" icon={<SkipBack size={16} />} onClick={stepBack} disabled={snapshot.tick === 0 || playing}>
-          回退一步
-        </Button>
-        <Button variant="primary" size="sm" icon={playing ? <Pause size={16} /> : <Play size={16} />} onClick={togglePlay} disabled={reducedMotion} title={reducedMotion ? '已开启减少动态，请使用单步推进' : undefined}>
-          {playing ? '暂停' : '播放'}
-        </Button>
-        <Button variant="on-dark" size="sm" icon={<StepForward size={16} />} onClick={stepForward} disabled={playing}>
-          单步推进
-        </Button>
-        <Button variant="on-dark" size="sm" icon={<RotateCcw size={16} />} onClick={reset}>
-          重置
-        </Button>
+        <div className="sim-workbench__control-group" aria-label="播放控制">
+          <Button variant="on-dark" size="sm" icon={<SkipBack size={16} />} onClick={stepBack} disabled={snapshot.tick === 0 || playing}>
+            回退一步
+          </Button>
+          <Button variant="primary" size="sm" icon={playing ? <Pause size={16} /> : <Play size={16} />} onClick={togglePlay} disabled={reducedMotion} title={reducedMotion ? '已开启减少动态，请使用单步推进' : undefined}>
+            {playing ? '暂停' : '播放'}
+          </Button>
+          <Button variant="on-dark" size="sm" icon={<StepForward size={16} />} onClick={stepForward} disabled={playing}>
+            单步推进
+          </Button>
+          <Button variant="on-dark" size="sm" icon={<RotateCcw size={16} />} onClick={reset}>
+            重置
+          </Button>
+        </div>
 
-        <label className="sim-control-field">
-          <span>步骤时长</span>
-          <input
-            type="range"
-            min={500}
-            max={5000}
-            step={100}
-            value={stepDuration}
-            onChange={(event) => setStepDuration(Number(event.currentTarget.value))}
-          />
-          <strong>{stepDuration}ms</strong>
-        </label>
+        <div className="sim-workbench__control-group" aria-label="节奏控制">
+          <label className="sim-control-field">
+            <span>步骤时长</span>
+            <input
+              type="range"
+              min={500}
+              max={5000}
+              step={100}
+              value={stepDuration}
+              onChange={(event) => setStepDuration(Number(event.currentTarget.value))}
+            />
+            <strong>{stepDuration}ms</strong>
+          </label>
 
-        <label className="sim-control-field">
-          <span>播放速度</span>
-          <select value={speed} onChange={(event) => setSpeed(Number(event.currentTarget.value))}>
-            {speedOptions.map((option) => (
-              <option key={option.label} value={option.multiplier}>
-                {option.label}
-              </option>
-            ))}
-          </select>
-        </label>
+          <label className="sim-control-field">
+            <span>播放速度</span>
+            <select value={speed} onChange={(event) => setSpeed(Number(event.currentTarget.value))}>
+              {speedOptions.map((option) => (
+                <option key={option.label} value={option.multiplier}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
       </footer>
     </main>
   );

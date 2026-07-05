@@ -11,7 +11,7 @@ export const hotstuffSource = [
   '  qc = aggregate(votes, quorum(n, f));',
   '  lock(qc.block);',
   '  if (threeChain(qc.block.parent.parent, qc.block.parent, qc.block)) commit(grandparent(qc.block));',
-  '  onTimeout() moveToNextView(highQC);',
+  '  onLeaderDelay() moveToNextView(highQC);',
   '}',
 ];
 

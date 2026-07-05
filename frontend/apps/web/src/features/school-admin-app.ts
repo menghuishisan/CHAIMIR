@@ -1,7 +1,7 @@
 ﻿// 学校管理端路由：看板、用户组织、成绩治理、配置和审计页面定义。
 
 import { Building2, Gauge, Gavel, History, KeyRound, LineChart, ListChecks, ScrollText, Settings, ShieldAlert, UserCog, Users, Upload } from 'lucide-react'
-import type { AppDefinition } from '@chaimir/shared'
+import type { AppDefinition, MetricItem, ResourceResult } from '@chaimir/shared'
 import {
   accountColumns,
   accountTarget,
@@ -21,6 +21,8 @@ import {
   importBatchColumns,
   levelConfigColumns,
   listResult,
+  navigatePageAction,
+  navigateRowAction,
   numberInput,
   objectResult,
   optionalNumber,
@@ -46,7 +48,7 @@ import {
   valueNumberArray,
   valueText,
   warningColumns,
-} from '@chaimir/shared'
+} from '../route-kit'
 
 export const schoolAdminApp: AppDefinition = {
   role: 'school-admin',
@@ -61,8 +63,10 @@ export const schoolAdminApp: AppDefinition = {
       icon: Users,
       group: '用户与组织',
       load: async (api) => ({
-        ...listResult(await api.identity.getAccounts(defaultPageParams()), accountColumns(), '暂无账号', '导入或创建师生账号后会在这里显示。'),
+        ...schoolMetrics(listResult(await api.identity.getAccounts(defaultPageParams()), accountColumns(), '暂无账号', '导入或创建师生账号后会在这里显示。'), '账号记录', '启停归档', '导入预览'),
         actions: [
+          navigatePageAction('open-account-import-page', '账号导入', '进入账号导入预览和提交页面。', 'account-import'),
+          navigatePageAction('open-import-batches-page', '导入记录', '进入账号与组织导入批次页面。', 'import-batches'),
           pageAction('create-account', '创建账号', '创建单个教师或学生账号，创建后会生成激活信息。', [
             textInput('phone', '手机号', true),
             textInput('name', '姓名', true),
@@ -138,6 +142,7 @@ export const schoolAdminApp: AppDefinition = {
           }),
         ],
         rowActions: [
+          navigateRowAction('open-account-edit', '编辑账号', '进入账号编辑和重置页面。', 'account-edit', 'account_id'),
           rowAction('disable-account', '停用', '停用账号并吊销相关会话。', async (row) => {
             await api.identity.disableAccount(row.id)
             return '账号已停用'
@@ -180,7 +185,7 @@ export const schoolAdminApp: AppDefinition = {
       icon: Building2,
       group: '用户与组织',
       load: async (api) => ({
-        ...arrayResult(await api.identity.listDepartments(), orgColumns(), '暂无院系', '创建院系后会在这里显示。'),
+        ...schoolMetrics(arrayResult(await api.identity.listDepartments(), orgColumns(), '暂无院系', '创建院系后会在这里显示。'), '组织节点', '院系专业', '班级升届'),
         actions: [
           pageAction('create-department', '创建院系', '创建院系基础信息。', [
             textInput('name', '院系名称', true),
@@ -291,7 +296,12 @@ export const schoolAdminApp: AppDefinition = {
       description: '查看学校课程、实验、竞赛和沙箱运行概览',
       icon: Gauge,
       group: '概览',
-      load: async (api) => dashboardResult(await api.admin.getSchoolDashboard()),
+      load: async (api) => ({
+        ...schoolMetrics(dashboardResult(await api.admin.getSchoolDashboard()), '学校概览', '运行数据', '趋势统计'),
+        actions: [
+          navigatePageAction('open-school-statistics-page', '趋势统计', '进入本校趋势统计和资源使用页面。', 'statistics'),
+        ],
+      }),
     },
     {
       path: 'grade-reviews',
@@ -300,7 +310,7 @@ export const schoolAdminApp: AppDefinition = {
       icon: ScrollText,
       group: '成绩',
       load: async (api) => ({
-        ...listResult(await api.grade.listReviews(defaultPageParams()), gradeReviewColumns(), '暂无审核申请', '教师提交课程成绩审核后会在这里显示。'),
+        ...schoolMetrics(listResult(await api.grade.listReviews(defaultPageParams()), gradeReviewColumns(), '暂无审核申请', '教师提交课程成绩审核后会在这里显示。'), '审核申请', '通过驳回', '成绩锁定'),
         actions: [
           pageAction('approve-grade-review', '通过审核', '通过课程成绩审核并锁定结果。', [
             textInput('review_id', '审核编号', true),
@@ -337,7 +347,7 @@ export const schoolAdminApp: AppDefinition = {
       icon: ShieldAlert,
       group: '成绩',
       load: async (api) => ({
-        ...listResult(await api.grade.listWarnings(defaultPageParams()), warningColumns(), '暂无预警', '触发学业预警后会在这里显示。'),
+        ...schoolMetrics(listResult(await api.grade.listWarnings(defaultPageParams()), warningColumns(), '暂无预警', '触发学业预警后会在这里显示。'), '预警记录', '扫描规则', '干预确认'),
         actions: [
           pageAction('scan-warnings', '扫描预警', '按学生或学期触发学业预警扫描。', [
             textInput('student_id', '学生编号'),
@@ -359,7 +369,7 @@ export const schoolAdminApp: AppDefinition = {
       icon: Settings,
       group: '系统',
       load: async (api) => ({
-        ...objectResult(await api.identity.getTenantConfig(), tenantConfigColumns(), '租户配置'),
+        ...schoolMetrics(objectResult(await api.identity.getTenantConfig(), tenantConfigColumns(), '租户配置'), '配置状态', '认证方式', '功能开关'),
         actions: [
           pageAction('update-tenant-config', '更新租户配置', '更新学校展示、认证方式和功能开关配置。', [
             textInput('logo_url', '标识地址', true),
@@ -388,7 +398,7 @@ export const schoolAdminApp: AppDefinition = {
       icon: ListChecks,
       group: '系统',
       load: async (api) => ({
-        ...listResult(await api.admin.queryAudit(defaultPageParams()), auditColumns(), '暂无审计记录', '用户完成敏感操作后会在这里显示。'),
+        ...schoolMetrics(listResult(await api.admin.queryAudit(defaultPageParams()), auditColumns(), '暂无审计记录', '用户完成敏感操作后会在这里显示。'), '审计记录', '敏感操作', '导出任务'),
         actions: [
           pageAction('export-audit', '导出审计', '创建审计日志导出任务。', [
             textInput('actor_id', '操作者编号'),
@@ -450,15 +460,15 @@ function schoolAdminDeepRoutes(): AppDefinition['routes'] {
     hiddenResourceRoute('account-edit', '账号编辑', '新增、启停、归档和重置账号', UserCog, async (api) => listResult(await api.identity.getAccounts(defaultPageParams()), accountColumns(), '暂无账号', '账号创建后会显示。')),
     hiddenResourceRoute('import-batches', '导入记录', '查看账号与组织导入批次', History, async (api) => arrayResult(await api.identity.listAccountImportBatches(), importBatchColumns(), '暂无导入记录', '导入批次提交后会显示。'), '用户与组织'),
     resourceRoute('appeals', '申诉处理', '处理学生成绩申诉', Gavel, async (api) => ({
-      ...listResult(await api.grade.listAppeals(defaultPageParams()), appealColumns(), '暂无申诉', '学生提交成绩申诉后会显示。'),
+      ...schoolMetrics(listResult(await api.grade.listAppeals(defaultPageParams()), appealColumns(), '暂无申诉', '学生提交成绩申诉后会显示。'), '申诉记录', '受理驳回', '处理反馈'),
       actions: appealReviewActions(api),
     }), '成绩'),
     resourceRoute('grade-config', '成绩配置', '维护等级映射、学期和预警规则', Settings, async (api) => ({
-      ...arrayResult(await api.grade.listLevelConfigs(), levelConfigColumns(), '暂无成绩配置', '创建等级配置后会显示。'),
+      ...schoolMetrics(arrayResult(await api.grade.listLevelConfigs(), levelConfigColumns(), '暂无成绩配置', '创建等级配置后会显示。'), '等级规则', '学期规则', '预警阈值'),
       actions: gradeConfigActions(api),
     }), '成绩'),
     resourceRoute('sso', '认证配置', '维护 CAS 或 LDAP 认证配置', KeyRound, async (api) => ({
-      ...arrayResult(await api.identity.listSSOConfigs(), ssoColumns(), '暂无认证配置', '保存 CAS 或 LDAP 配置后会显示。'),
+      ...schoolMetrics(arrayResult(await api.identity.listSSOConfigs(), ssoColumns(), '暂无认证配置', '保存 CAS 或 LDAP 配置后会显示。'), '认证配置', 'CAS/LDAP', '启用状态'),
       actions: [
         pageAction('upsert-sso', '保存认证配置', '保存学校统一认证配置。', [
           numberInput('type', '认证类型', true),
@@ -477,8 +487,20 @@ function schoolAdminDeepRoutes(): AppDefinition['routes'] {
       ],
     }), '系统'),
     resourceRoute('alerts', '学校告警', '查看本校告警事件和规则', ShieldAlert, async (api) => ({
-      ...listResult(await api.admin.listAlertEvents(defaultPageParams()), alertColumns(), '暂无告警', '触发告警规则后会显示。'),
+      ...schoolMetrics(listResult(await api.admin.listAlertEvents(defaultPageParams()), alertColumns(), '暂无告警', '触发告警规则后会显示。'), '告警事件', '规则维护', '处理闭环'),
       actions: alertActions(api),
     }), '系统'),
   ]
+}
+
+/**
+ * schoolMetrics 为学校管理端提供校内治理指标，数值只来自当前资源结果。
+ */
+function schoolMetrics(result: ResourceResult, primaryLabel: string, governanceLabel: string, actionLabel: string): ResourceResult {
+  const metrics: MetricItem[] = [
+    { label: primaryLabel, value: String(result.rows.length), tone: 'primary' },
+    { label: governanceLabel, value: result.rows.length > 0 ? '可处理' : '暂无待办', tone: result.rows.length > 0 ? 'warning' : 'secondary' },
+    { label: '治理动作', value: actionLabel, tone: 'success' },
+  ]
+  return { ...result, metrics }
 }

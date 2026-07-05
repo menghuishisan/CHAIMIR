@@ -249,13 +249,6 @@
   animation: chaimir-page-enter var(--t-slow) var(--ease-out) both;
 }
 
-.chaimir-page.is-role-school-admin,
-.chaimir-page.is-role-platform-admin {
-  --page-accent: var(--color-secondary);
-  --page-accent-text: var(--color-secondary-text);
-  --page-accent-soft: var(--color-secondary-soft);
-}
-
 .chaimir-page__heading {
   position: relative;
   display: flex;
@@ -326,7 +319,7 @@
 .chaimir-page__heading-icon::after {
   position: absolute;
   inset: var(--space-1);
-  z-index: -1;
+  z-index: var(--z-below);
   content: "";
   border: 1px solid var(--color-bg);
   border-radius: var(--radius-sm);
@@ -530,7 +523,19 @@
 .chaimir-row-actions {
   display: flex;
   flex-wrap: wrap;
+  justify-content: flex-end;
+  align-items: center;
   gap: var(--space-2);
+  max-inline-size: 100%;
+}
+
+.chaimir-row-actions .chaimir-button {
+  min-inline-size: 5.5rem;
+  max-inline-size: 100%;
+}
+
+.chaimir-table-card .chaimir-row-actions {
+  justify-content: flex-start;
 }
 
 .chaimir-state {

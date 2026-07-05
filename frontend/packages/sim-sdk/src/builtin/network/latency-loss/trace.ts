@@ -6,8 +6,8 @@ import { latencyLossPhases } from './model';
 export const latencyLossSource = [
   'function reliableSend(packets) {',
   '  sendUpTo(congestionWindow);',
-  '  waitForAckOrTimeout();',
-  '  if timeout: markLost(packet);',
+  '  waitForAckOrDeadline();',
+  '  if deadlineExceeded: markLost(packet);',
   '  retransmit(lostPackets);',
   '  congestionWindow = backoffOrGrow();',
   '  require(allDelivered());',

@@ -44,7 +44,8 @@ export function getStoredUser<T>(): T | null {
   }
   try {
     return JSON.parse(raw) as T
-  } catch {
+  } catch (error) {
+    console.warn('用户缓存已损坏，已清理本地缓存', error)
     safeRemove(USER_INFO_KEY)
     return null
   }
@@ -91,7 +92,8 @@ function safeRead(key: string): string | null {
   }
   try {
     return window.localStorage.getItem(key)
-  } catch {
+  } catch (error) {
+    reportStorageError('读取浏览器存储失败', error)
     return null
   }
 }
@@ -105,10 +107,12 @@ function safeWrite(key: string, value: string): void {
   }
   try {
     window.localStorage.setItem(key, value)
-  } catch {
+  } catch (error) {
+    reportStorageError('写入本地存储失败，尝试写入会话存储', error)
     try {
       window.sessionStorage.setItem(key, value)
-    } catch {
+    } catch (sessionError) {
+      reportStorageError('写入会话存储失败', sessionError)
       return
     }
   }
@@ -124,7 +128,15 @@ function safeRemove(key: string): void {
   try {
     window.localStorage.removeItem(key)
     window.sessionStorage.removeItem(key)
-  } catch {
+  } catch (error) {
+    reportStorageError('清理浏览器存储失败', error)
     return
   }
+}
+
+/**
+ * reportStorageError 仅向开发控制台记录浏览器存储异常，页面不展示内部细节。
+ */
+function reportStorageError(message: string, error: unknown): void {
+  console.warn(message, error)
 }

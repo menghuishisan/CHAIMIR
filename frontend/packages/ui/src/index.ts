@@ -9,6 +9,8 @@ export * from './components/Button'
 export * from './components/Badge'
 export * from './components/Spinner'
 export * from './components/Card'
+export * from './components/PageScaffold'
+export * from './components/WorkbenchShell'
 
 // 表单组件
 export * from './components/Input'
