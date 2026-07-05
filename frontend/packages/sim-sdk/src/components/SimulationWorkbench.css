@@ -7,7 +7,7 @@
   display: grid;
   grid-template-rows: auto 1fr auto;
   min-width: 0;
-  background: linear-gradient(135deg, var(--color-dark-bg), var(--color-terminal-bg));
+  background: var(--color-dark-bg);
   color: var(--color-dark-text);
 }
 
@@ -19,7 +19,7 @@
   gap: var(--space-4);
   padding: var(--space-4) var(--space-6);
   border-bottom: 0.0625rem solid var(--color-dark-border);
-  background: linear-gradient(135deg, var(--color-dark-surface), var(--color-dark-bg));
+  background: var(--color-dark-surface);
 }
 
 .sim-workbench__controls {
@@ -91,8 +91,7 @@
   display: grid;
   align-content: start;
   gap: var(--space-4);
-  background:
-    linear-gradient(180deg, var(--color-dark-bg), var(--color-terminal-bg));
+  background: var(--color-terminal-bg);
 }
 
 .sim-workbench__stage-head {
@@ -286,6 +285,61 @@
 .sim-side-section p {
   color: var(--color-dark-text-sub);
   line-height: var(--leading-normal);
+}
+
+.sim-learning ul {
+  display: grid;
+  gap: var(--space-2);
+  padding: 0;
+  margin: var(--space-3) 0 0;
+  list-style: none;
+}
+
+.sim-learning li {
+  position: relative;
+  padding-inline-start: var(--space-4);
+  color: var(--color-dark-text);
+  line-height: var(--leading-normal);
+}
+
+.sim-learning li::before {
+  content: "";
+  position: absolute;
+  inset-inline-start: 0;
+  inset-block-start: 0.55em;
+  inline-size: 0.45rem;
+  block-size: 0.45rem;
+  border-radius: 50%;
+  background: var(--color-secondary-accent);
+}
+
+.sim-metrics dl {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-2);
+  margin: 0;
+}
+
+.sim-metrics div {
+  min-width: 0;
+  padding: var(--space-2);
+  border: 0.0625rem solid var(--color-dark-border);
+  border-radius: var(--radius-xs);
+  background: var(--color-dark-surface);
+}
+
+.sim-metrics dt {
+  color: var(--color-dark-text-sub);
+  font-size: var(--text-xs);
+}
+
+.sim-metrics dd {
+  margin: var(--space-1) 0 0;
+  overflow-wrap: anywhere;
+  color: var(--color-dark-text);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  font-weight: 700;
 }
 
 .sim-question__options,

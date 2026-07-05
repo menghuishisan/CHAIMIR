@@ -10,7 +10,7 @@ import type {
 import { fnv1aHex } from './deterministic';
 
 type WorkerRequest =
-  | { type: 'init'; requestId: number; moduleUrl: string; initParams: SimInitParams; seed: number }
+  | { type: 'init'; requestId: number; moduleUrl?: string; builtinCode?: string; initParams: SimInitParams; seed: number }
   | { type: 'step'; requestId: number }
   | { type: 'inject'; requestId: number; eventType: string; payload: JsonObject; target?: string }
   | { type: 'back'; requestId: number }
@@ -22,7 +22,8 @@ type WorkerResponse =
   | { type: 'error'; requestId: number; message: string };
 
 export interface SimWorkerClientOptions {
-  moduleUrl: string;
+  moduleUrl?: string;
+  builtinCode?: string;
   initParams: SimInitParams;
   seed: number;
   commandTimeoutMs: number;
@@ -69,6 +70,7 @@ export class SimWorkerClient {
       type: 'init',
       requestId: 0,
       moduleUrl: this.options.moduleUrl,
+      builtinCode: this.options.builtinCode,
       initParams: this.options.initParams,
       seed: this.options.seed,
     });

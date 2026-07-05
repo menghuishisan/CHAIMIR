@@ -17,9 +17,10 @@ import type {
   ViewSpec,
 } from '../types';
 import { fnv1aHex, hashSeed, XorShiftRandom } from './deterministic';
+import { getBuiltinSimulation } from '../registry/builtinRegistry';
 
 type WorkerRequest =
-  | { type: 'init'; requestId: number; moduleUrl: string; initParams: SimInitParams; seed: number }
+  | { type: 'init'; requestId: number; moduleUrl?: string; builtinCode?: string; initParams: SimInitParams; seed: number }
   | { type: 'step'; requestId: number }
   | { type: 'inject'; requestId: number; eventType: string; payload: JsonObject; target?: string }
   | { type: 'back'; requestId: number }
@@ -79,14 +80,35 @@ async function handleRequest(request: WorkerRequest): Promise<void> {
  * init 动态加载仿真包,校验协议结构并生成首个运行快照。
  */
 async function init(request: Extract<WorkerRequest, { type: 'init' }>): Promise<void> {
-  const loaded = (await import(/* @vite-ignore */ request.moduleUrl)) as { default?: SimPackage; simPackage?: SimPackage };
-  simPackage = loaded.default ?? loaded.simPackage;
+  simPackage = await loadPackage(request);
   assertPackage(simPackage);
   initParams = request.initParams;
   seed = request.seed;
   descriptor = describePackage(simPackage);
   resetState();
   postToMain({ type: 'ready', requestId: request.requestId, descriptor, snapshot: snapshot() });
+}
+
+/**
+ * loadPackage 统一装配平台内置包和外部 bundle 包；内置包只在 SDK Worker 内部解析,业务页面不复制包清单。
+ */
+async function loadPackage(request: Extract<WorkerRequest, { type: 'init' }>): Promise<SimPackage> {
+  if (request.builtinCode) {
+    const builtinPackage = getBuiltinSimulation(request.builtinCode);
+    if (!builtinPackage) {
+      throw new Error('当前内置仿真包尚未完成平台装配');
+    }
+    return builtinPackage;
+  }
+  if (!request.moduleUrl) {
+    throw new Error('当前仿真包缺少可运行模块地址');
+  }
+  const loaded = (await import(/* @vite-ignore */ request.moduleUrl)) as { default?: SimPackage; simPackage?: SimPackage };
+  const modulePackage = loaded.default ?? loaded.simPackage;
+  if (!modulePackage) {
+    throw new Error('当前仿真包无法运行,请联系管理员检查包配置');
+  }
+  return modulePackage;
 }
 
 /**
@@ -368,20 +390,50 @@ function installRuntimeGuards(): void {
   };
   Math.random = blocked;
   Date.now = blocked;
-  scope.fetch = () => Promise.reject(new Error('仿真包网络访问不被允许'));
-  scope.XMLHttpRequest = undefined;
-  scope.WebSocket = undefined;
-  scope.EventSource = undefined;
-  scope.Worker = undefined;
-  scope.SharedWorker = undefined;
-  scope.BroadcastChannel = undefined;
-  scope.indexedDB = undefined;
-  scope.caches = undefined;
-  scope.importScripts = blocked;
-  scope.eval = blocked;
-  scope.Function = blocked;
-  scope.postMessage = blocked;
-  scope.addEventListener = blocked;
+  blockWorkerGlobal(scope, 'fetch', () => Promise.reject(new Error('仿真包网络访问不被允许')));
+  blockWorkerGlobal(scope, 'XMLHttpRequest', undefined);
+  blockWorkerGlobal(scope, 'WebSocket', undefined);
+  blockWorkerGlobal(scope, 'EventSource', undefined);
+  blockWorkerGlobal(scope, 'Worker', undefined);
+  blockWorkerGlobal(scope, 'SharedWorker', undefined);
+  blockWorkerGlobal(scope, 'BroadcastChannel', undefined);
+  blockWorkerGlobal(scope, 'indexedDB', undefined);
+  blockWorkerGlobal(scope, 'caches', undefined);
+  blockWorkerGlobal(scope, 'importScripts', blocked);
+  blockWorkerGlobal(scope, 'eval', blocked);
+  blockWorkerGlobal(scope, 'Function', blocked);
+  blockWorkerGlobal(scope, 'postMessage', blocked);
+  blockWorkerGlobal(scope, 'addEventListener', blocked);
+}
+
+/**
+ * blockWorkerGlobal 覆盖 Worker 全局能力,只接受可重新定义的属性。
+ */
+function blockWorkerGlobal(scope: Record<string, unknown>, key: string, value: unknown): void {
+  const descriptor = findPropertyDescriptor(scope, key);
+  if (descriptor && descriptor.configurable === false) {
+    throw new Error('仿真运行环境无法封锁必要浏览器能力');
+  }
+  Object.defineProperty(scope, key, {
+    value,
+    configurable: true,
+    writable: false,
+  });
+}
+
+/**
+ * findPropertyDescriptor 沿原型链查找 Worker 全局属性描述符。
+ */
+function findPropertyDescriptor(scope: Record<string, unknown>, key: string): PropertyDescriptor | undefined {
+  let cursor: object | null = scope;
+  while (cursor) {
+    const descriptor = Object.getOwnPropertyDescriptor(cursor, key);
+    if (descriptor) {
+      return descriptor;
+    }
+    cursor = Object.getPrototypeOf(cursor);
+  }
+  return undefined;
 }
 
 /**

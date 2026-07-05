@@ -1,7 +1,7 @@
 // 本文件实现仿真可视化沉浸式工作台,主线程只渲染 Worker 返回的纯数据快照。
 
 import React, { useEffect, useRef, useState } from 'react';
-import { AlertTriangle, CheckCircle2, Clock3, Pause, Play, RotateCcw, ShieldAlert, SkipBack, StepForward } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, CheckCircle2, Clock3, Pause, Play, RotateCcw, ShieldAlert, SkipBack, StepForward } from 'lucide-react';
 import { Button, SandboxStatus } from '@chaimir/ui';
 import type { SandboxStatusKind } from '@chaimir/ui';
 import type {
@@ -24,12 +24,14 @@ import { usePrefersReducedMotion } from '../hooks/usePrefersReducedMotion';
 import './SimulationWorkbench.css';
 
 export interface SimulationWorkbenchProps {
-  moduleUrl: string;
+  moduleUrl?: string;
+  builtinCode?: string;
   initParams: SimInitParams;
   seed: number;
   workerCommandTimeoutMs: number;
   onActionLog?: (event: SimEvent) => void;
   onCheckpoint?: (checkpointId: string, result: RuntimeSnapshot['checkpointResults'][string]) => void;
+  onExit?: () => void;
 }
 
 const speedOptions: PlaybackSpeed[] = [
@@ -44,11 +46,13 @@ const speedOptions: PlaybackSpeed[] = [
  */
 export function SimulationWorkbench({
   moduleUrl,
+  builtinCode,
   initParams,
   seed,
   workerCommandTimeoutMs,
   onActionLog,
   onCheckpoint,
+  onExit,
 }: SimulationWorkbenchProps): React.ReactElement {
   const clientRef = useRef<SimWorkerClient | null>(null);
   const [descriptor, setDescriptor] = useState<SimPackageDescriptor | undefined>();
@@ -74,6 +78,7 @@ export function SimulationWorkbench({
 
     const client = new SimWorkerClient({
       moduleUrl,
+      builtinCode,
       initParams,
       seed,
       commandTimeoutMs: workerCommandTimeoutMs,
@@ -105,7 +110,7 @@ export function SimulationWorkbench({
       client.destroy();
       clientRef.current = null;
     };
-  }, [moduleUrl, initParams, seed, workerCommandTimeoutMs, onActionLog]);
+  }, [moduleUrl, builtinCode, initParams, seed, workerCommandTimeoutMs, onActionLog]);
 
   useEffect(() => {
     if (stepDuration === undefined) {
@@ -211,6 +216,11 @@ export function SimulationWorkbench({
             <p className="sim-workbench__kicker">仿真可视化引擎</p>
             <h1>仿真正在准备</h1>
           </div>
+          {onExit && (
+            <Button variant="on-dark" size="sm" icon={<ArrowLeft size={16} />} onClick={onExit}>
+              返回仿真实验室
+            </Button>
+          )}
         </header>
         <section className="sim-workbench__empty">
           {runtimeMessage ? <p>{runtimeMessage}</p> : <p>正在加载仿真环境,请稍候</p>}
@@ -231,6 +241,11 @@ export function SimulationWorkbench({
           <span>{snapshot.state.phase}</span>
           {reducedMotion && <span>减少动态</span>}
         </div>
+        {onExit && (
+          <Button variant="on-dark" size="sm" icon={<ArrowLeft size={16} />} onClick={onExit}>
+            返回仿真实验室
+          </Button>
+        )}
       </header>
 
       <section className="sim-workbench__layout">
@@ -239,6 +254,7 @@ export function SimulationWorkbench({
             status={sandboxStatusFromSnapshot(snapshot, runtimeMessage)}
             detail={`当前阶段：${snapshot.state.phase}`}
           />
+          <LearningGoalPanel descriptor={descriptor} />
           <TimelinePanel descriptor={descriptor} snapshot={snapshot} stepDuration={stepDuration} speed={speed} />
           <StepList steps={descriptor.narrative} currentStep={currentStep} />
           <article className="sim-explain">
@@ -313,6 +329,7 @@ export function SimulationWorkbench({
         </section>
 
         <aside className="sim-workbench__panel sim-workbench__panel--right">
+          <MetricPanel metrics={snapshot.state.metrics} />
           <InteractionPanel
             interactions={descriptor.interactions}
             availability={snapshot.interactionAvailability}
@@ -385,6 +402,100 @@ function sandboxStatusFromSnapshot(snapshot: RuntimeSnapshot, runtimeMessage?: s
   if (/mine|mining|pow|挖矿|出块/.test(phase)) return 'mining';
   if (/seal|commit|final|封块|提交|最终/.test(phase)) return 'sealing';
   return 'ready';
+}
+
+/**
+ * LearningGoalPanel 展示当前仿真包自己的教学目标,避免所有工作台只呈现统一壳层。
+ */
+function LearningGoalPanel({ descriptor }: { descriptor: SimPackageDescriptor }): React.ReactElement {
+  return (
+    <section className="sim-side-section sim-learning">
+      <h2>学习目标</h2>
+      <p>{descriptor.meta.summary}</p>
+      <ul>
+        {descriptor.meta.learningObjectives.map((objective) => (
+          <li key={objective}>{objective}</li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+/**
+ * MetricPanel 把仿真状态中的关键指标显式展示,让不同机制的运行差异可扫描。
+ */
+function MetricPanel({ metrics }: { metrics: RuntimeSnapshot['state']['metrics'] }): React.ReactElement | null {
+  const entries = Object.entries(metrics).slice(0, 12);
+  if (!entries.length) {
+    return null;
+  }
+  return (
+    <section className="sim-side-section sim-metrics">
+      <h2>状态指标</h2>
+      <dl>
+        {entries.map(([key, value]) => (
+          <div key={key}>
+            <dt>{metricLabel(key)}</dt>
+            <dd>{String(value)}</dd>
+          </div>
+        ))}
+      </dl>
+    </section>
+  );
+}
+
+/**
+ * metricLabel 将常见内部指标名转成用户向文案,未知指标只做安全格式化。
+ */
+function metricLabel(key: string): string {
+  const labels: Record<string, string> = {
+    accountNonce: '账户 Nonce',
+    activeStake: '活跃权益',
+    attackerProfit: '攻击收益',
+    attestedStake: '见证权益',
+    challenge: '挑战值',
+    commitIndex: '提交位置',
+    coverage: '覆盖率',
+    difficulty: '难度',
+    dirty: '变更账户',
+    entries: '条目数',
+    failedCases: '失败用例',
+    finalizedEpoch: '最终周期',
+    progress: '进度',
+    height: '高度',
+    hops: '跳数',
+    invalidCount: '异常数量',
+    leaves: '叶子数量',
+    latency: '延迟',
+    nonce: 'Nonce',
+    pathLength: '路径长度',
+    quorum: '法定人数',
+    result: '结果',
+    risk: '风险',
+    round: '轮次',
+    shortlistSize: '候选列表',
+    term: '任期',
+    throughput: '吞吐',
+    ts: '时间',
+    validShares: '有效份额',
+    validSignatures: '有效签名',
+    vaultBalance: '金库余额',
+    versionGap: '版本差距',
+    view: '视图',
+    votes: '投票数',
+    work: '工作量',
+    finalized: '已最终确认',
+    committed: '已提交',
+    failed: '失败次数',
+    gasLeft: '剩余 Gas',
+    gasUsed: '已用 Gas',
+    balance: '余额',
+    confirmations: '确认数',
+  };
+  if (labels[key]) {
+    return labels[key];
+  }
+  return '指标';
 }
 
 /**

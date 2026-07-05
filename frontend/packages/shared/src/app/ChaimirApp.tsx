@@ -2,11 +2,11 @@
 
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { createApi } from '@chaimir/api-client'
-import type { ChaimirApi } from '@chaimir/api-client'
-import { AlertCircle, Bell, CheckCircle2, ChevronLeft, Download, LogOut, Menu, PanelLeftClose, PanelLeftOpen, RefreshCw, Search, UserCircle } from 'lucide-react'
-import { Badge, Button, Card, CardBody, CardHeader, Empty, FormField, Input, Skeleton, Spinner, Stat, Table, Textarea } from '@chaimir/ui'
+import type { Account, ChaimirApi } from '@chaimir/api-client'
+import { AlertCircle, Bell, CheckCircle2, ChevronDown, ChevronLeft, Download, LogOut, Menu, PanelLeftClose, PanelLeftOpen, RefreshCw, UserCircle } from 'lucide-react'
+import { Badge, Button, Card, CardBody, CardHeader, Empty, FormField, Input, Pagination, Skeleton, Spinner, Stat, Table, Textarea } from '@chaimir/ui'
 import type { TableColumn } from '@chaimir/ui'
-import { clearSession, getAccessToken, getTraceId } from './storage'
+import { clearSession, getAccessToken, getStoredUser, getTraceId } from './storage'
 import { parseHashRoute, routeHref } from './router'
 import { readFrontendConfig } from './config'
 import { toUserFacingError, UserFacingError } from './errors'
@@ -82,13 +82,15 @@ function AppShell({
 }): React.ReactElement {
   const [collapsed, setCollapsed] = useState(() => readSidebarCollapsed(app))
   const [drawerOpen, setDrawerOpen] = useState(false)
-  const [search, setSearch] = useState('')
+  const [accountMenuOpen, setAccountMenuOpen] = useState(false)
   const [unread, setUnread] = useState<number | null>(null)
   const [noticeError, setNoticeError] = useState<string | null>(null)
   const [logoutError, setLogoutError] = useState<string | null>(null)
   const drawerPanelRef = useRef<HTMLDivElement>(null)
   const mobileMenuRef = useRef<HTMLButtonElement>(null)
+  const accountMenuRef = useRef<HTMLDivElement>(null)
   const wasDrawerOpenRef = useRef(false)
+  const currentUser = getStoredUser<Account>()
 
   useEffect(() => {
     let active = true
@@ -114,10 +116,21 @@ function AppShell({
     const closeOnEscape = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         setDrawerOpen(false)
+        setAccountMenuOpen(false)
       }
     }
     window.addEventListener('keydown', closeOnEscape)
     return () => window.removeEventListener('keydown', closeOnEscape)
+  }, [])
+
+  useEffect(() => {
+    const closeOnOutsideClick = (event: MouseEvent) => {
+      if (!accountMenuRef.current?.contains(event.target as Node)) {
+        setAccountMenuOpen(false)
+      }
+    }
+    window.addEventListener('mousedown', closeOnOutsideClick)
+    return () => window.removeEventListener('mousedown', closeOnOutsideClick)
   }, [])
 
   useEffect(() => {
@@ -150,6 +163,11 @@ function AppShell({
     })
   }
 
+  const handleLogout = () => {
+    setAccountMenuOpen(false)
+    void logout(api, setLogoutError)
+  }
+
   return (
     <div className={`chaimir-app is-app-${sanitizeClassName(app.role)} ${collapsed ? 'is-collapsed' : ''}`}>
       <a className="skip-link" href="#main-content">跳到主要内容</a>
@@ -164,16 +182,6 @@ function AppShell({
             <span>{app.title}</span>
           </span>
         </a>
-        <Input
-          className="chaimir-app__search"
-          type="search"
-          placeholder="搜索当前功能"
-          aria-label="搜索当前功能"
-          leftIcon={<Search size={16} />}
-          value={search}
-          fullWidth
-          onChange={(event) => setSearch(event.target.value)}
-        />
         <div className="chaimir-app__top-actions">
           <a className="chaimir-app__icon-button" href={routeHref('notifications')} aria-label={noticeError ?? '查看通知'}>
             <Bell size={19} aria-hidden="true" />
@@ -182,22 +190,51 @@ function AppShell({
           <a className="chaimir-app__icon-button" href={routeHref('transfer-tasks')} aria-label="查看任务与下载">
             <Download size={18} aria-hidden="true" />
           </a>
-          <a className="chaimir-app__icon-button" href={routeHref('profile')} aria-label="进入个人中心">
-            <UserCircle size={19} aria-hidden="true" />
-          </a>
-          <span className="chaimir-app__role-pill">{app.title}</span>
+          <div className="chaimir-app__account-menu" ref={accountMenuRef}>
+            <button
+              className="chaimir-app__account-button"
+              type="button"
+              aria-label="打开账号菜单"
+              aria-haspopup="menu"
+              aria-expanded={accountMenuOpen}
+              onClick={() => setAccountMenuOpen((open) => !open)}
+            >
+              <UserCircle size={20} aria-hidden="true" />
+              <span className="chaimir-app__account-copy">
+                <strong>{currentUser?.name ?? '当前账号'}</strong>
+                <span>{currentUser?.no || app.title}</span>
+              </span>
+              <ChevronDown size={16} aria-hidden="true" />
+            </button>
+            {accountMenuOpen && (
+              <div className="chaimir-app__account-popover" role="menu">
+                <div className="chaimir-app__account-card">
+                  <strong>{currentUser?.name ?? '当前账号'}</strong>
+                  <span>{currentUser?.no || app.title}</span>
+                </div>
+                <a href={routeHref('profile')} role="menuitem" onClick={() => setAccountMenuOpen(false)}>
+                  <UserCircle size={17} aria-hidden="true" />
+                  <span>个人中心</span>
+                </a>
+                <a href={routeHref('notifications')} role="menuitem" onClick={() => setAccountMenuOpen(false)}>
+                  <Bell size={17} aria-hidden="true" />
+                  <span>消息中心</span>
+                </a>
+                <button type="button" role="menuitem" onClick={handleLogout}>
+                  <LogOut size={17} aria-hidden="true" />
+                  <span>退出登录</span>
+                </button>
+              </div>
+            )}
+          </div>
         </div>
       </header>
       <aside className="chaimir-app__sidebar" aria-label={`${app.title}导航`}>
-        <Sidebar app={app} activePath={activePath} collapsed={collapsed} search={search} />
+        <Sidebar app={app} activePath={activePath} collapsed={collapsed} />
         <div className="chaimir-app__sidebar-footer">
           <button className="chaimir-app__nav-item" type="button" onClick={toggleCollapsed} aria-label={collapsed ? '展开侧栏' : '收起侧栏'}>
             {collapsed ? <PanelLeftOpen size={18} aria-hidden="true" /> : <PanelLeftClose size={18} aria-hidden="true" />}
             <span>收起侧栏</span>
-          </button>
-          <button className="chaimir-app__nav-item is-muted" type="button" onClick={() => logout(api, setLogoutError)}>
-            <LogOut size={18} aria-hidden="true" />
-            <span>退出登录</span>
           </button>
           {logoutError && <div className="chaimir-app__nav-empty" role="alert">{logoutError}</div>}
         </div>
@@ -207,7 +244,7 @@ function AppShell({
           <button className="chaimir-app__drawer-scrim" type="button" aria-label="关闭导航" onClick={() => setDrawerOpen(false)} />
           <div className="chaimir-app__drawer-panel" ref={drawerPanelRef} onKeyDown={(event) => trapDialogFocus(event, drawerPanelRef.current)}>
             <button className="chaimir-app__drawer-close" type="button" onClick={() => setDrawerOpen(false)}>关闭导航</button>
-            <Sidebar app={app} activePath={activePath} collapsed={false} search={search} onNavigate={() => setDrawerOpen(false)} />
+            <Sidebar app={app} activePath={activePath} collapsed={false} onNavigate={() => setDrawerOpen(false)} />
           </div>
         </div>
       )}
@@ -225,19 +262,15 @@ function Sidebar({
   app,
   activePath,
   collapsed,
-  search,
   onNavigate,
 }: {
   app: AppDefinition
   activePath: string
   collapsed: boolean
-  search: string
   onNavigate?: () => void
 }): React.ReactElement {
-  const normalizedSearch = search.trim().toLowerCase()
   const visibleRoutes = app.routes
     .filter((route) => !route.hidden)
-    .filter((route) => !normalizedSearch || `${route.label} ${route.description}`.toLowerCase().includes(normalizedSearch))
   const groupedRoutes = visibleRoutes.reduce<Array<{ group: string; routes: AppRoute[] }>>((groups, route) => {
     const group = route.group || '功能'
     const existing = groups.find((item) => item.group === group)
@@ -298,6 +331,12 @@ function RoutePage({
 
   useEffect(() => {
     let active = true
+    if (route.render) {
+      setState((current) => ({ loading: false, refreshKey: current.refreshKey }))
+      return () => {
+        active = false
+      }
+    }
     setState((current) => ({ loading: true, refreshKey: current.refreshKey }))
     route.load(api, params)
       .then((result) => {
@@ -317,6 +356,10 @@ function RoutePage({
 
   const refresh = () => setState((current) => ({ ...current, refreshKey: current.refreshKey + 1 }))
 
+  if (route.render) {
+    return route.render({ api, params, route, app, refresh })
+  }
+
   if (route.immersive) {
     return <ImmersivePage app={app} route={route} state={state} onRefresh={refresh} />
   }
@@ -326,7 +369,7 @@ function RoutePage({
       <PageHeading app={app} route={route} />
       {state.loading && <LoadingState />}
       {state.error && <ErrorState error={state.error} />}
-      {state.result && 'columns' in state.result && <ResourceView result={state.result} onRefresh={refresh} />}
+      {state.result && 'columns' in state.result && <ResourceView result={state.result} route={route} params={params} onRefresh={refresh} />}
     </section>
   )
 }
@@ -357,7 +400,17 @@ function PageHeading({ app, route }: { app: AppDefinition; route: AppRoute }): R
 /**
  * ResourceView 渲染后端资源页的指标和数据表格。
  */
-function ResourceView({ result, onRefresh }: { result: ResourceResult; onRefresh: () => void }): React.ReactElement {
+function ResourceView({
+  result,
+  route,
+  params,
+  onRefresh,
+}: {
+  result: ResourceResult
+  route: AppRoute
+  params: URLSearchParams
+  onRefresh: () => void
+}): React.ReactElement {
   const [operation, setOperation] = useState<OperationState>({ loading: false })
   const hasActions = Boolean(result.actions && result.actions.length > 0)
   const columns: TableColumn<DataRow>[] = result.columns.map((column) => ({
@@ -409,6 +462,17 @@ function ResourceView({ result, onRefresh }: { result: ResourceResult; onRefresh
             emptyTitle={result.emptyTitle}
             emptyDescription={result.emptyDescription}
           />
+          {result.pagination && result.pagination.totalPages > 1 && (
+            <Pagination
+              className="chaimir-resource-panel__pagination"
+              current={result.pagination.page}
+              total={result.pagination.totalPages}
+              pageSize={result.pagination.size}
+              totalItems={result.pagination.total}
+              onChange={(page) => navigateResourcePage(route, params, page)}
+              ariaLabel="数据列表分页"
+            />
+          )}
         </section>
         {result.actions && result.actions.length > 0 && (
           <aside className="chaimir-action-rail" aria-label="页面操作">
@@ -433,6 +497,26 @@ function ResourceView({ result, onRefresh }: { result: ResourceResult; onRefresh
       </div>
     </div>
   )
+}
+
+/**
+ * navigateResourcePage 保留当前资源页查询条件，只替换分页页码。
+ */
+function navigateResourcePage(route: AppRoute, params: URLSearchParams, page: number): void {
+  const nextParams = new URLSearchParams(params.toString())
+  nextParams.set('page', String(page))
+  window.location.hash = routeHref(route.path, paramsToRecord(nextParams)).slice(1)
+}
+
+/**
+ * paramsToRecord 将 URLSearchParams 转成 routeHref 可接收的查询对象。
+ */
+function paramsToRecord(params: URLSearchParams): Record<string, string> {
+  const record: Record<string, string> = {}
+  params.forEach((value, key) => {
+    record[key] = value
+  })
+  return record
 }
 
 /**
@@ -868,6 +952,7 @@ async function logout(api: ChaimirApi, setLogoutError: (message: string | null) 
     setLogoutError(formatErrorMessage(userError))
   } finally {
     clearSession()
+    window.location.assign('/#login')
   }
 }
 

@@ -1,5 +1,6 @@
 // 会话路由：统一认证成功后的登录态保存和单入口角色路径跳转规则。
 
+import { UserRole } from '@chaimir/api-client'
 import type { ChaimirApi, LoginResponse } from '@chaimir/api-client'
 import { readFrontendConfig, saveSession, saveStoredUser } from '@chaimir/shared'
 import type { FormValues, LoginMode } from './types'
@@ -37,15 +38,19 @@ export function handleLoginResponse(response: LoginResponse, config: ReturnType<
   if (response.need_select_tenant) {
     return
   }
-  saveSession(response.access_token, response.refresh_token)
-  if (response.account) {
-    saveStoredUser(response.account)
-  }
   if (response.must_change_pwd) {
+    saveSession(response.access_token, response.refresh_token)
+    if (response.account) {
+      saveStoredUser(response.account)
+    }
     window.location.hash = '#change-pwd'
     return
   }
   const target = resolveRoleEntryPath(response, config)
+  saveSession(response.access_token, response.refresh_token)
+  if (response.account) {
+    saveStoredUser(response.account)
+  }
   window.location.assign(target)
 }
 
@@ -54,9 +59,9 @@ export function handleLoginResponse(response: LoginResponse, config: ReturnType<
  */
 function resolveRoleEntryPath(response: LoginResponse, config: ReturnType<typeof readFrontendConfig>): string {
   const roles = response.account?.roles ?? []
-  const identity = response.account?.base_identity
-  if (roles.includes(1) || identity === 1) return config.roleEntryPaths.platformAdmin
-  if (roles.includes(2) || identity === 2) return config.roleEntryPaths.schoolAdmin
-  if (roles.includes(3) || identity === 3) return config.roleEntryPaths.teacher
-  return config.roleEntryPaths.student
+  if (roles.includes(UserRole.PLATFORM_ADMIN)) return config.roleEntryPaths.platformAdmin
+  if (roles.includes(UserRole.SCHOOL_ADMIN)) return config.roleEntryPaths.schoolAdmin
+  if (roles.includes(UserRole.TEACHER)) return config.roleEntryPaths.teacher
+  if (roles.includes(UserRole.STUDENT)) return config.roleEntryPaths.student
+  throw new Error('账号权限配置不完整，请联系学校管理员处理')
 }

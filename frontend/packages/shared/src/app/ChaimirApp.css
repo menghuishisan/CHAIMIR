@@ -11,7 +11,7 @@
   inset-block-start: 0;
   z-index: var(--z-sticky);
   display: grid;
-  grid-template-columns: auto minmax(13rem, max-content) minmax(12rem, 1fr) auto;
+  grid-template-columns: auto minmax(13rem, max-content) minmax(0, 1fr) auto;
   gap: var(--space-4);
   align-items: center;
   min-block-size: var(--topnav-h);
@@ -50,28 +50,13 @@
 }
 
 .chaimir-app__brand-copy span,
-.chaimir-app__nav-heading,
-.chaimir-app__search .chaimir-input::placeholder {
+.chaimir-app__nav-heading {
   color: var(--color-dark-text-sub);
-}
-
-.chaimir-app__search {
-  color: var(--color-dark-text-sub);
-  background: var(--color-dark-surface);
-  border: 1px solid var(--color-dark-border);
-}
-
-.chaimir-app__search .chaimir-input,
-.chaimir-app__search .chaimir-input__icon {
-  color: var(--color-dark-text);
-}
-
-.chaimir-app__search:has(.chaimir-input:focus) {
-  border-color: var(--color-on-dark-accent);
-  box-shadow: 0 0 0 3px var(--color-dark-border);
 }
 
 .chaimir-app__top-actions {
+  grid-column: 4;
+  justify-self: end;
   display: inline-flex;
   align-items: center;
   gap: var(--space-3);
@@ -114,13 +99,106 @@
   border-radius: var(--radius-full);
 }
 
-.chaimir-app__role-pill {
-  padding: var(--space-1) var(--space-3);
+.chaimir-app__account-menu {
+  position: relative;
+}
+
+.chaimir-app__account-button {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-block-size: 2.75rem;
+  max-inline-size: 16rem;
+  padding: 0 var(--space-3);
   color: var(--color-dark-text);
   background: var(--color-dark-surface);
   border: 1px solid var(--color-dark-border);
-  border-radius: var(--radius-full);
+  border-radius: var(--radius-sm);
+  transition: background var(--t-fast) var(--ease), border-color var(--t-fast) var(--ease), color var(--t-fast) var(--ease);
+}
+
+.chaimir-app__account-button:hover,
+.chaimir-app__account-button:focus-visible {
+  color: var(--color-on-dark-accent);
+  border-color: var(--color-on-dark-accent);
+}
+
+.chaimir-app__account-copy {
+  display: grid;
+  min-inline-size: 0;
+  text-align: start;
+  line-height: var(--leading-tight);
+}
+
+.chaimir-app__account-copy strong,
+.chaimir-app__account-copy span {
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.chaimir-app__account-copy strong {
+  color: inherit;
+  font-size: var(--text-sm);
+}
+
+.chaimir-app__account-copy span {
+  color: var(--color-dark-text-sub);
+  font-size: var(--text-xs);
+}
+
+.chaimir-app__account-popover {
+  position: absolute;
+  inset-block-start: calc(100% + var(--space-2));
+  inset-inline-end: 0;
+  z-index: var(--z-popover);
+  display: grid;
+  gap: var(--space-1);
+  min-inline-size: 14rem;
+  padding: var(--space-2);
+  color: var(--color-text);
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-lg);
+}
+
+.chaimir-app__account-card {
+  display: grid;
+  gap: var(--space-1);
+  padding: var(--space-3);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.chaimir-app__account-card strong {
+  color: var(--color-text-strong);
+}
+
+.chaimir-app__account-card span {
+  color: var(--color-text-sub);
+  font-size: var(--text-sm);
+}
+
+.chaimir-app__account-popover a,
+.chaimir-app__account-popover button {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-block-size: 2.5rem;
+  padding: 0 var(--space-3);
+  color: var(--color-text);
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-xs);
+  text-align: start;
+}
+
+.chaimir-app__account-popover a:hover,
+.chaimir-app__account-popover button:hover,
+.chaimir-app__account-popover a:focus-visible,
+.chaimir-app__account-popover button:focus-visible {
+  color: var(--color-primary-text);
+  background: var(--color-primary-soft);
 }
 
 .chaimir-app__sidebar {
@@ -463,6 +541,12 @@
 .chaimir-resource-panel__head span {
   color: var(--color-text-sub);
   font-size: var(--text-sm);
+}
+
+.chaimir-resource-panel__pagination {
+  justify-content: flex-end;
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--color-border-subtle);
 }
 
 .chaimir-action-form {
@@ -809,10 +893,12 @@
     display: inline-grid;
   }
 
-  .chaimir-app__search,
-  .chaimir-app__sidebar,
-  .chaimir-app__role-pill {
+  .chaimir-app__sidebar {
     display: none;
+  }
+
+  .chaimir-app__top-actions {
+    grid-column: 3;
   }
 
   .chaimir-app__main,
@@ -893,6 +979,18 @@
 
   .chaimir-app__topbar {
     gap: var(--space-2);
+  }
+
+  .chaimir-app__top-actions {
+    gap: var(--space-2);
+  }
+
+  .chaimir-app__account-copy {
+    display: none;
+  }
+
+  .chaimir-app__account-button {
+    padding: 0 var(--space-2);
   }
 
   .chaimir-app__main,

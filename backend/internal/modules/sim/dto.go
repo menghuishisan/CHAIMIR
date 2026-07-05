@@ -68,7 +68,9 @@ type CreateShareRequest struct {
 
 // BundleDownloadGrantDTO 是仿真包短时下载授权响应。
 type BundleDownloadGrantDTO struct {
-	Token      string `json:"token"`
-	BundleHash string `json:"bundle_hash"`
-	ExpiresAt  string `json:"expires_at"`
+	Token       string `json:"token,omitempty"`
+	BundleHash  string `json:"bundle_hash"`
+	ExpiresAt   string `json:"expires_at"`
+	ModuleURL   string `json:"module_url,omitempty"`
+	BuiltinCode string `json:"builtin_code,omitempty"`
 }

@@ -11,16 +11,18 @@ type ObjectItem = Record<string, unknown>
  * listResult 将后端分页响应转换为共享资源页可渲染的表格结果。
  */
 export function listResult<T extends object>(
-  response: { list: T[]; total?: number },
+  response: { list: T[]; total?: number; page?: number; size?: number },
   columns: DataColumn[],
   emptyTitle: string,
   emptyDescription: string
 ): ResourceResult {
   const rows = toRows(response.list, (item, index) => normalizeObject(item, index, columns))
+  const pagination = paginationFrom(response)
   return {
     metrics: [{ label: '记录总数', value: String(response.total ?? rows.length), tone: 'primary' }],
     columns,
     rows,
+    pagination,
     emptyTitle,
     emptyDescription,
   }
@@ -119,6 +121,28 @@ function normalizeObject(item: object, index: number, columns: DataColumn[]): Da
     row[column.key] = displayValue(record[column.key])
   }
   return row
+}
+
+/**
+ * paginationFrom 将后端分页字段转换为共享页面分页状态。
+ */
+function paginationFrom(response: { total?: number; page?: number; size?: number }): ResourceResult['pagination'] {
+  if (!isPositiveInteger(response.total) || !isPositiveInteger(response.page) || !isPositiveInteger(response.size)) {
+    return undefined
+  }
+  return {
+    page: response.page,
+    size: response.size,
+    total: response.total,
+    totalPages: Math.max(1, Math.ceil(response.total / response.size)),
+  }
+}
+
+/**
+ * isPositiveInteger 判断分页字段是否为可用正整数。
+ */
+function isPositiveInteger(value: unknown): value is number {
+  return typeof value === 'number' && Number.isInteger(value) && value > 0
 }
 
 /**

@@ -4,11 +4,31 @@
   min-width: 0;
   inline-size: 100%;
   border: 0.0625rem solid var(--color-dark-border);
+  border-block-start-width: 0.1875rem;
   border-radius: var(--radius-sm);
   background: var(--color-dark-surface);
   color: var(--color-dark-text);
   overflow: hidden;
   animation: sim-pattern-enter var(--t-slow) var(--ease-out) both;
+}
+
+.sim-pattern--graph {
+  border-block-start-color: var(--color-on-dark-accent);
+}
+
+.sim-pattern--chain,
+.sim-pattern--pipeline {
+  border-block-start-color: var(--color-secondary-accent);
+}
+
+.sim-pattern--tree,
+.sim-pattern--matrix {
+  border-block-start-color: var(--color-success);
+}
+
+.sim-pattern--lane,
+.sim-pattern--chart {
+  border-block-start-color: var(--color-danger);
 }
 
 .sim-pattern__header {
@@ -21,6 +41,18 @@
   color: var(--color-dark-text-sub);
   font-size: var(--text-sm);
   font-weight: 600;
+}
+
+.sim-pattern__header > span {
+  display: inline-flex;
+  align-items: center;
+  min-inline-size: 0;
+  gap: var(--space-2);
+}
+
+.sim-pattern__header svg {
+  flex: 0 0 auto;
+  color: var(--color-on-dark-accent);
 }
 
 .sim-pattern__header small {
@@ -148,8 +180,8 @@
 .sim-pipeline__step.is-selected,
 .sim-lane__message:focus-visible,
 .sim-lane__message.is-selected,
-.sim-chart__bars i:focus-visible,
-.sim-chart__bars i.is-selected {
+.sim-chart__series-line circle:focus-visible,
+.sim-chart__series-line circle.is-selected {
   outline: 0.125rem solid var(--color-on-dark-accent);
   outline-offset: 0.125rem;
   border-color: var(--color-on-dark-accent);
@@ -211,7 +243,8 @@
 }
 
 .sim-chain__link.is-fork {
-  background: repeating-linear-gradient(90deg, var(--color-danger) 0 0.375rem, transparent 0.375rem 0.625rem);
+  background: var(--color-danger);
+  opacity: 0.7;
 }
 
 .sim-chain__block {
@@ -655,7 +688,7 @@
 .sim-chart__table th,
 .sim-chart__table td {
   padding: var(--space-2);
-  border-block-start: 1px solid var(--color-dark-border);
+  border-block-start: 0.0625rem solid var(--color-dark-border);
   text-align: left;
 }
 

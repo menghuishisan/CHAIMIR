@@ -1,6 +1,7 @@
 // 四端应用类型：定义角色、导航、页面和后端资源渲染契约。
 
 import type { ChaimirApi } from '@chaimir/api-client'
+import type { ReactElement } from 'react'
 import type { LucideIcon } from 'lucide-react'
 
 export type AppRole = 'student' | 'teacher' | 'school-admin' | 'platform-admin'
@@ -55,6 +56,12 @@ export interface ResourceResult {
   metrics?: MetricItem[]
   columns: DataColumn[]
   rows: DataRow[]
+  pagination?: {
+    page: number
+    size: number
+    total: number
+    totalPages: number
+  }
   actions?: PageAction[]
   rowActions?: RowAction[]
   emptyTitle: string
@@ -81,6 +88,14 @@ export interface WorkspaceTool {
   href?: string
 }
 
+export interface AppRouteRenderContext {
+  api: ChaimirApi
+  params: URLSearchParams
+  route: AppRoute
+  app: AppDefinition
+  refresh: () => void
+}
+
 export interface AppRoute {
   path: string
   label: string
@@ -90,6 +105,7 @@ export interface AppRoute {
   immersive?: boolean
   hidden?: boolean
   load: (api: ChaimirApi, params: URLSearchParams) => Promise<ResourceResult | WorkspaceResult>
+  render?: (context: AppRouteRenderContext) => ReactElement
 }
 
 export interface AppDefinition {

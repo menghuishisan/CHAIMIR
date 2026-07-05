@@ -728,12 +728,12 @@ ON CONFLICT (tenant_id, group_id, student_id) DO UPDATE SET role=EXCLUDED.role`,
 		}},
 	}})
 	simRefs, _ := jsonb([]map[string]any{{
-		"component_id": "gas-market",
+		"component_id": "gas-metering",
 		"stage":        1,
 		"session_id":   acceptanceIDs.SimSession,
-		"package_code": "builtin__gas-market",
+		"package_code": "builtin__runtime-gas-metering",
 		"version":      "1.0.0",
-		"bundle_ref":   "sim/builtin/gas-market-1.0.0.zip",
+		"bundle_ref":   "builtin://sim-sdk/builtin__runtime-gas-metering@1.0.0",
 	}})
 	if err := execJSON(ctx, tx, `
 INSERT INTO experiment_instance (id, tenant_id, experiment_id, owner_account_id, group_id, source_ref, sandbox_refs, sim_session_refs, status, score, finished_at)
@@ -757,55 +757,99 @@ ON CONFLICT (tenant_id, instance_id, student_id) DO UPDATE SET content_ref=EXCLU
 		acceptanceIDs.ExperimentReport, acceptanceIDs.TenantID, acceptanceIDs.ExperimentInstance, acceptanceIDs.StudentA)
 }
 
+type acceptanceBuiltinSimPackage struct {
+	Code     string
+	Name     string
+	Category string
+	Version  string
+}
+
+var acceptanceBuiltinSimPackages = []acceptanceBuiltinSimPackage{
+	{Code: "builtin__runtime-gas-metering", Name: "Gas 计量与回滚推演", Category: "transaction-runtime", Version: "1.0.0"},
+	{Code: "builtin__cross-bridge-validation", Name: "跨链桥证明验证推演", Category: "cross-chain-system", Version: "1.0.0"},
+	{Code: "builtin__cross-finality-confirmation", Name: "跨链最终性确认推演", Category: "cross-chain-system", Version: "1.0.0"},
+	{Code: "builtin__cross-message-lifecycle", Name: "跨链消息生命周期推演", Category: "cross-chain-system", Version: "1.0.0"},
+	{Code: "builtin__cross-multisig-committee", Name: "跨链多签委员会推演", Category: "cross-chain-system", Version: "1.0.0"},
+	{Code: "builtin__cross-replay-protection", Name: "跨链消息重放防护推演", Category: "cross-chain-system", Version: "1.0.0"},
+	{Code: "builtin__crypto-digital-signature", Name: "数字签名与重放防护推演", Category: "cryptography", Version: "1.0.0"},
+	{Code: "builtin__crypto-hash-chain", Name: "哈希链篡改扩散推演", Category: "cryptography", Version: "1.0.0"},
+	{Code: "builtin__crypto-merkle-proof", Name: "Merkle 证明路径推演", Category: "cryptography", Version: "1.0.0"},
+	{Code: "builtin__crypto-threshold-signature", Name: "门限签名聚合推演", Category: "cryptography", Version: "1.0.0"},
+	{Code: "builtin__crypto-zk-proof", Name: "零知识证明交互流程推演", Category: "cryptography", Version: "1.0.0"},
+	{Code: "builtin__data-blockchain-link", Name: "区块链父哈希结构推演", Category: "data-structure", Version: "1.0.0"},
+	{Code: "builtin__data-merkle-tree-structure", Name: "Merkle Tree 构建更新推演", Category: "data-structure", Version: "1.0.0"},
+	{Code: "builtin__data-patricia-trie", Name: "Patricia Trie 状态树推演", Category: "data-structure", Version: "1.0.0"},
+	{Code: "builtin__data-state-snapshot", Name: "状态快照与回滚推演", Category: "data-structure", Version: "1.0.0"},
+	{Code: "builtin__data-utxo-set", Name: "UTXO 集合更新推演", Category: "data-structure", Version: "1.0.0"},
+	{Code: "builtin__hotstuff-chained-bft", Name: "HotStuff 链式 BFT 推演", Category: "consensus", Version: "1.0.0"},
+	{Code: "builtin__network-dht-routing", Name: "DHT 异或路由推演", Category: "network", Version: "1.0.0"},
+	{Code: "builtin__network-gossip-propagation", Name: "Gossip 消息传播推演", Category: "network", Version: "1.0.0"},
+	{Code: "builtin__network-latency-loss", Name: "延迟丢包与重传推演", Category: "network", Version: "1.0.0"},
+	{Code: "builtin__network-p2p-discovery", Name: "P2P 节点发现推演", Category: "network", Version: "1.0.0"},
+	{Code: "builtin__network-partition-recovery", Name: "网络分区与恢复推演", Category: "network", Version: "1.0.0"},
+	{Code: "builtin__pbft-consensus", Name: "PBFT 三阶段共识推演", Category: "consensus", Version: "1.0.0"},
+	{Code: "builtin__pos-finality", Name: "PoS 权益证明与最终性推演", Category: "consensus", Version: "1.0.0"},
+	{Code: "builtin__pow-longest-chain", Name: "PoW 最长链共识推演", Category: "consensus", Version: "1.0.0"},
+	{Code: "builtin__raft-log-replication", Name: "Raft 选举与日志复制推演", Category: "consensus", Version: "1.0.0"},
+	{Code: "builtin__runtime-block-validation", Name: "区块验证与拒绝推演", Category: "transaction-runtime", Version: "1.0.0"},
+	{Code: "builtin__runtime-evm-call-stack", Name: "EVM 调用栈与 revert 推演", Category: "transaction-runtime", Version: "1.0.0"},
+	{Code: "builtin__runtime-nonce-ordering", Name: "Nonce 顺序与替换交易推演", Category: "transaction-runtime", Version: "1.0.0"},
+	{Code: "builtin__runtime-transaction-lifecycle", Name: "交易生命周期推演", Category: "transaction-runtime", Version: "1.0.0"},
+	{Code: "builtin__security-access-control", Name: "授权缺陷与最小权限推演", Category: "contract-security", Version: "1.0.0"},
+	{Code: "builtin__security-flash-loan", Name: "闪电贷组合攻击推演", Category: "contract-security", Version: "1.0.0"},
+	{Code: "builtin__security-integer-boundary", Name: "整数边界与 checked 运算推演", Category: "contract-security", Version: "1.0.0"},
+	{Code: "builtin__security-oracle-manipulation", Name: "预言机操纵防护推演", Category: "contract-security", Version: "1.0.0"},
+	{Code: "builtin__security-reentrancy", Name: "重入攻击与防护推演", Category: "contract-security", Version: "1.0.0"},
+}
+
 // seedSimRows 写入仿真包、会话、动作、检查点和分享码。
 func seedSimRows(ctx context.Context, tx pgx.Tx) error {
-	scale, _ := jsonb(map[string]any{"max_nodes": 32, "max_ticks": 1000})
-	priorityMin := 0.0
-	priorityMax := 10.0
-	schema, _ := jsonb(map[string]any{"events": map[string]any{"submit_tx": map[string]any{
-		"interaction_id": "submit-tx",
-		"kind":           "form",
-		"target":         "global",
-		"params": []map[string]any{
-			{"name": "from", "type": "string", "required": true},
-			{"name": "max_fee", "type": "number", "required": true, "min": 0.0},
-			{"name": "priority_fee", "type": "number", "required": true, "min": priorityMin, "max": priorityMax},
-		},
-	}}})
-	if err := execJSON(ctx, tx, `
+	scale, _ := jsonb(map[string]any{"max_nodes": 96, "max_ticks": 140, "max_events": 240})
+	schema, _ := jsonb(map[string]any{"events": map[string]any{
+		"select":  map[string]any{"interaction_id": "select", "kind": "select-element", "target": "element", "params": []map[string]any{}},
+		"advance": map[string]any{"interaction_id": "advance", "kind": "button", "target": "global", "params": []map[string]any{}},
+		"attack":  map[string]any{"interaction_id": "attack", "kind": "button", "target": "global", "params": []map[string]any{}},
+		"recover": map[string]any{"interaction_id": "recover", "kind": "button", "target": "global", "params": []map[string]any{}},
+	}})
+	for index, pkg := range acceptanceBuiltinSimPackages {
+		packageID := acceptanceIDs.SimPackage + int64(index)
+		bundleKey := fmt.Sprintf("builtin://sim-sdk/%s@%s", pkg.Code, pkg.Version)
+		bundleHash := fmt.Sprintf("%064x", packageID)
+		if err := execJSON(ctx, tx, `
 INSERT INTO sim_package (id, code, version, name, category, compute, scale_limit, bundle_key, bundle_hash, interaction_schema, author_type, status)
-VALUES ($1,'builtin__gas-market','1.0.0','EIP-1559 Gas 市场仿真','consensus',1,$2,'minio://chaimir-code/910000000000000001/sim/package-bundle/910000000000003001/gas-market-1.0.0.zip','b3c6d8f1e6a9f2d4c5b6a7e8f90123456789abcd1234567890abcdef12345678',$3,1,3)
+VALUES ($1,$2,$3,$4,$5,1,$6,$7,$8,$9,1,3)
 ON CONFLICT (code, version) DO UPDATE SET name=EXCLUDED.name, category=EXCLUDED.category, compute=EXCLUDED.compute, scale_limit=EXCLUDED.scale_limit, bundle_key=EXCLUDED.bundle_key, bundle_hash=EXCLUDED.bundle_hash, interaction_schema=EXCLUDED.interaction_schema, author_type=EXCLUDED.author_type, status=EXCLUDED.status, updated_at=now()`,
-		acceptanceIDs.SimPackage, scale, schema); err != nil {
-		return err
+			packageID, pkg.Code, pkg.Version, pkg.Name, pkg.Category, scale, bundleKey, bundleHash, schema); err != nil {
+			return err
+		}
 	}
-	params, _ := jsonb(map[string]any{"base_fee": 30, "demand_profile": "classroom-demo"})
+	params, _ := jsonb(map[string]any{"gas_limit": 42_000, "scenario": "classroom-demo"})
 	if err := execJSON(ctx, tx, `
 INSERT INTO sim_session (id, tenant_id, package_id, source_ref, owner_account_id, seed, init_params, compute, status)
-VALUES ($1,$2,$3,'sim:2026:gas-market:session-a',$4,2026061901,$5,1,4)
+VALUES ($1,$2,$3,'sim:2026:gas-metering:session-a',$4,2026061901,$5,1,4)
 ON CONFLICT (id) DO UPDATE SET package_id=EXCLUDED.package_id, source_ref=EXCLUDED.source_ref, owner_account_id=EXCLUDED.owner_account_id, seed=EXCLUDED.seed, init_params=EXCLUDED.init_params, compute=EXCLUDED.compute, status=EXCLUDED.status, updated_at=now()`,
 		acceptanceIDs.SimSession, acceptanceIDs.TenantID, acceptanceIDs.SimPackage, acceptanceIDs.StudentA, params); err != nil {
 		return err
 	}
-	payload, _ := jsonb(map[string]any{"from": "student-wallet-a", "max_fee": 45, "priority_fee": 2})
+	payload, _ := jsonb(map[string]any{})
 	if err := execJSON(ctx, tx, `
 INSERT INTO sim_action_log (id, tenant_id, session_id, seq, at_tick, event_type, payload)
-VALUES ($1,$2,$3,1,12,'submit_tx',$4)
+VALUES ($1,$2,$3,1,1,'advance',$4)
 ON CONFLICT (tenant_id, session_id, seq) DO UPDATE SET at_tick=EXCLUDED.at_tick, event_type=EXCLUDED.event_type, payload=EXCLUDED.payload`,
 		acceptanceIDs.SimAction, acceptanceIDs.TenantID, acceptanceIDs.SimSession, payload); err != nil {
 		return err
 	}
-	answer, _ := jsonb(map[string]any{"base_fee_trend": "stable", "included_tx_count": 14})
+	answer, _ := jsonb(map[string]any{"phase": "gas-deducted", "rollback_observed": true})
 	if err := execJSON(ctx, tx, `
 INSERT INTO sim_checkpoint (id, tenant_id, session_id, checkpoint_id, answer, achieved)
-VALUES ($1,$2,$3,'gas-fee-stability',$4,true)
+VALUES ($1,$2,$3,'gas-metering-rollback',$4,true)
 ON CONFLICT (tenant_id, session_id, checkpoint_id) DO UPDATE SET answer=EXCLUDED.answer, achieved=EXCLUDED.achieved`,
 		acceptanceIDs.SimCheckpoint, acceptanceIDs.TenantID, acceptanceIDs.SimSession, answer); err != nil {
 		return err
 	}
 	return execJSON(ctx, tx, `
 INSERT INTO sim_share (id, tenant_id, session_id, code, created_by, status, expire_at)
-VALUES ($1,$2,$3,'GASMARKET26',$4,1,now() + interval '30 days')
+VALUES ($1,$2,$3,'GASMETER26',$4,1,now() + interval '30 days')
 ON CONFLICT (code) DO UPDATE SET session_id=EXCLUDED.session_id, created_by=EXCLUDED.created_by, status=EXCLUDED.status, expire_at=EXCLUDED.expire_at, updated_at=now()`,
 		acceptanceIDs.SimShare, acceptanceIDs.TenantID, acceptanceIDs.SimSession, acceptanceIDs.StudentA)
 }

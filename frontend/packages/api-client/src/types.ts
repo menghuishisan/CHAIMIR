@@ -1864,9 +1864,11 @@ export interface SimPackageSubmit {
 }
 
 export interface SimBundleDownloadGrant {
-  token: string
+  token?: string
   bundle_hash: string
   expires_at: string
+  module_url?: string
+  builtin_code?: string
 }
 
 export interface SimPackageSubmissionResult extends SimPackageMeta {

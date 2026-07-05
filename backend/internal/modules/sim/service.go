@@ -108,7 +108,7 @@ func NewService(deps ServiceDeps) (*Service, error) {
 	return &Service{store: deps.Store, ids: deps.IDs, upload: deps.Upload, storage: deps.Storage, files: deps.FileService, audit: deps.Audit, identity: deps.Identity, wsHub: deps.WSHub, backends: deps.BackendAdapters}, nil
 }
 
-// IssueBundleDownloadGrant 为已上架仿真包签发短时下载授权,让对象下载走统一文件服务边界。
+// IssueBundleDownloadGrant 为已上架仿真包签发短时运行授权；内置包由平台 SDK 装配,外部包走统一文件服务边界。
 func (s *Service) IssueBundleDownloadGrant(ctx context.Context, accountID int64, code, version string) (BundleDownloadGrantDTO, error) {
 	if accountID <= 0 {
 		return BundleDownloadGrantDTO{}, apperr.ErrUnauthorized
@@ -119,6 +119,13 @@ func (s *Service) IssueBundleDownloadGrant(ctx context.Context, accountID int64,
 	}
 	if pkg.Status != PackageStatusPublished {
 		return BundleDownloadGrantDTO{}, apperr.ErrSimPackageUnavailable
+	}
+	if pkg.AuthorType == AuthorPlatformBuiltIn && pkg.Compute == ComputeFrontend && strings.HasPrefix(pkg.Code, "builtin__") {
+		return BundleDownloadGrantDTO{
+			BundleHash:  pkg.BundleHash,
+			ExpiresAt:   time.Now().Add(5 * time.Minute).Format(time.RFC3339),
+			BuiltinCode: pkg.Code,
+		}, nil
 	}
 	ref, err := storage.ParseObjectRef(pkg.BundleKey)
 	if err != nil {

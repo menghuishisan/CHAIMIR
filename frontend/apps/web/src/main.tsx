@@ -2,6 +2,7 @@
 
 import React, { useEffect, useState } from 'react'
 import { createRoot } from 'react-dom/client'
+import { UserRole } from '@chaimir/api-client'
 import type { Account } from '@chaimir/api-client'
 import { AuthApp, AuthGate } from '@chaimir/auth'
 import { ChaimirApp, getAccessToken, getStoredUser } from '@chaimir/shared'
@@ -81,10 +82,11 @@ function resolveStoredRolePath(account: Account | null): string | null {
     return null
   }
   const roles = account.roles ?? []
-  if (roles.includes(1) || account.base_identity === 1) return '/platform-admin/'
-  if (roles.includes(2) || account.base_identity === 2) return '/school-admin/'
-  if (roles.includes(3) || account.base_identity === 3) return '/teacher/'
-  return '/student/'
+  if (roles.includes(UserRole.PLATFORM_ADMIN)) return '/platform-admin/'
+  if (roles.includes(UserRole.SCHOOL_ADMIN)) return '/school-admin/'
+  if (roles.includes(UserRole.TEACHER)) return '/teacher/'
+  if (roles.includes(UserRole.STUDENT)) return '/student/'
+  return null
 }
 
 const root = document.getElementById('root')

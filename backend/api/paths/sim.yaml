@@ -49,7 +49,7 @@
 /api/v1/sim/packages/{key}/{version}/bundle:
   get:
     tags: [sim]
-    summary: 获取仿真包正文
+    summary: 获取仿真包运行授权
     operationId: simGetBundle
     x-chaimir-audience: user
     security: [{ bearerAuth: [] }]

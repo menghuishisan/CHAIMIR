@@ -1,5 +1,6 @@
 ﻿// 共享路由：通知、个人中心、公告和沉浸式工作台入口。
 
+import { createElement } from 'react'
 import { Bell, Download, Flag, Megaphone, PlayCircle, Swords, UserCog } from 'lucide-react'
 import { getRefreshToken, saveSession, saveStoredUser } from '@chaimir/shared'
 import type { AppDefinition } from '@chaimir/shared'
@@ -8,6 +9,7 @@ import { announcementColumns, notificationColumns, sessionColumns, transferTaskC
 import { defaultPageParams } from './pagination'
 import { routeParam } from './support'
 import { numberInput, pageAction, passwordInput, rowAction, textInput, textareaInput, valueFlag, valueJson, valueNumber, valueText } from './actions'
+import { SimWorkspacePage } from '../features/sim/SimWorkspacePage'
 
 export function sharedNotificationRoute(): AppDefinition['routes'][number] {
   return {
@@ -170,6 +172,7 @@ export function simWorkspaceRoute(): AppDefinition['routes'][number] {
     icon: PlayCircle,
     immersive: true,
     hidden: true,
+    render: ({ api, params }) => createElement(SimWorkspacePage, { api, params }),
     load: async (api, params) => {
       const code = routeParam(params, 'code')
       const version = routeParam(params, 'version')

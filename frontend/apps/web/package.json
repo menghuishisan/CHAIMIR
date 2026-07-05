@@ -13,6 +13,7 @@
     "@chaimir/api-client": "workspace:*",
     "@chaimir/auth": "workspace:*",
     "@chaimir/shared": "workspace:*",
+    "@chaimir/sim-sdk": "workspace:*",
     "@chaimir/ui": "workspace:*",
     "lucide-react": "^0.460.0",
     "react": "^18.3.1",

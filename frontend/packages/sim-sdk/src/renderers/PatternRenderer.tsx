@@ -2,6 +2,8 @@
 
 import React from 'react';
 import { clsx } from 'clsx';
+import { BarChart3, GitBranch, Layers3, Network, Rows3, Table2, Workflow } from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
 import type {
   ChainPattern,
   ChartSeries,
@@ -68,8 +70,8 @@ function GraphRenderer({
   const showEdgeLabels = pattern.data.edges.length <= 14;
 
   return (
-    <section className="sim-pattern" aria-label={pattern.title}>
-      <PatternHeader title={pattern.title} meta={`${pattern.data.nodes.length} 个节点 / ${activeEdges} 条活跃消息`} />
+    <section className="sim-pattern sim-pattern--graph" aria-label={pattern.title}>
+      <PatternHeader mode="graph" title={pattern.title} meta={`${pattern.data.nodes.length} 个节点 / ${activeEdges} 条活跃消息`} />
       <svg className="sim-graph" viewBox="0 0 100 100" role="img" aria-label={`${pattern.title}图网络`}>
         {pattern.data.edges.map((edge) => {
           const from = nodeById.get(edge.from);
@@ -136,8 +138,8 @@ function ChainRenderer({
   const canonical = pattern.data.blocks;
   const forkBlocks = pattern.data.forks.flat();
   return (
-    <section className="sim-pattern" aria-label={pattern.title}>
-      <PatternHeader title={pattern.title} meta={`${canonical.length} 个主链块 / ${forkBlocks.length} 个分叉块`} />
+    <section className="sim-pattern sim-pattern--chain" aria-label={pattern.title}>
+      <PatternHeader mode="chain" title={pattern.title} meta={`${canonical.length} 个主链块 / ${forkBlocks.length} 个分叉块`} />
       <div className="sim-chain-board" role="list" aria-label="主链与分叉">
         <div className="sim-chain-row">
           <span className="sim-chain-row__label">主链</span>
@@ -181,8 +183,8 @@ function TreeRenderer({
   onSelectElement?: (elementId: string, elementType?: string) => void;
 }): React.ReactElement {
   return (
-    <section className="sim-pattern" aria-label={pattern.title}>
-      <PatternHeader title={pattern.title} meta={`证明路径 ${pattern.data.highlightedPath.length} 层`} />
+    <section className="sim-pattern sim-pattern--tree" aria-label={pattern.title}>
+      <PatternHeader mode="tree" title={pattern.title} meta={`证明路径 ${pattern.data.highlightedPath.length} 层`} />
       <div className="sim-tree">{renderTreeNode(pattern.data.root, pattern.data.highlightedPath, selectedElementId, onSelectElement, true)}</div>
     </section>
   );
@@ -230,8 +232,8 @@ function MatrixRenderer({
     return counts;
   }, {});
   return (
-    <section className="sim-pattern" aria-label={pattern.title}>
-      <PatternHeader title={pattern.title} meta={`通过 ${statusCounts.yes ?? 0} / 异常 ${statusCounts.fault ?? 0}`} />
+    <section className="sim-pattern sim-pattern--matrix" aria-label={pattern.title}>
+      <PatternHeader mode="matrix" title={pattern.title} meta={`通过 ${statusCounts.yes ?? 0} / 异常 ${statusCounts.fault ?? 0}`} />
       <div className="sim-matrix-wrap">
         <table className="sim-matrix">
           <thead>
@@ -287,8 +289,8 @@ function PipelineRenderer({
 }): React.ReactElement {
   const complete = pattern.data.steps.filter((step) => step.status === 'complete').length;
   return (
-    <section className="sim-pattern" aria-label={pattern.title}>
-      <PatternHeader title={pattern.title} meta={`${complete}/${pattern.data.steps.length} 步完成`} />
+    <section className="sim-pattern sim-pattern--pipeline" aria-label={pattern.title}>
+      <PatternHeader mode="pipeline" title={pattern.title} meta={`${complete}/${pattern.data.steps.length} 步完成`} />
       <ol className="sim-pipeline">
         {pattern.data.steps.map((step, index) => (
           <li
@@ -327,8 +329,8 @@ function LaneRenderer({
 }): React.ReactElement {
   const maxTime = Math.max(1, pattern.data.currentTime, ...pattern.data.messages.map((message) => message.endAt ?? message.at));
   return (
-    <section className="sim-pattern" aria-label={pattern.title}>
-      <PatternHeader title={pattern.title} meta={`当前时间 ${pattern.data.currentTime} / 消息 ${pattern.data.messages.length}`} />
+    <section className="sim-pattern sim-pattern--lane" aria-label={pattern.title}>
+      <PatternHeader mode="lane" title={pattern.title} meta={`当前时间 ${pattern.data.currentTime} / 消息 ${pattern.data.messages.length}`} />
       <div className="sim-lane">
         {pattern.data.actors.map((actor) => (
           <div className="sim-lane__row" key={actor}>
@@ -375,17 +377,18 @@ function ChartRenderer({
   const maxY = Math.max(1, ...pattern.data.series.flatMap((series) => series.points.map((point) => point.y)));
   const minX = Math.min(0, ...pattern.data.series.flatMap((series) => series.points.map((point) => point.x)));
   const maxX = Math.max(1, ...pattern.data.series.flatMap((series) => series.points.map((point) => point.x)));
+  const ticks = chartTicks(maxY);
   return (
-    <section className="sim-pattern" aria-label={pattern.title}>
-      <PatternHeader title={pattern.title} meta={`最大值 ${maxY}${pattern.data.unit}`} />
+    <section className="sim-pattern sim-pattern--chart" aria-label={pattern.title}>
+      <PatternHeader mode="chart" title={pattern.title} meta={`最大值 ${maxY}${pattern.data.unit}`} />
       <div className="sim-chart">
         <svg className="sim-chart__plot" viewBox="0 0 100 60" role="img" aria-label={`${pattern.title}趋势图`}>
           <line className="sim-chart__axis" x1="8" y1="52" x2="96" y2="52" />
           <line className="sim-chart__axis" x1="8" y1="4" x2="8" y2="52" />
-          {[25, 50, 75, 100].map((tick) => (
+          {ticks.map((tick) => (
             <g key={tick}>
-              <line className="sim-chart__grid" x1="8" x2="96" y1={52 - tick * 0.48} y2={52 - tick * 0.48} />
-              <text className="sim-chart__tick" x="2" y={54 - tick * 0.48}>{tick}</text>
+              <line className="sim-chart__grid" x1="8" x2="96" y1={chartY(tick, maxY)} y2={chartY(tick, maxY)} />
+              <text className="sim-chart__tick" x="2" y={chartY(tick, maxY) + 2}>{tick}</text>
             </g>
           ))}
           {pattern.data.series.map((series, index) => (
@@ -445,13 +448,33 @@ function ChartRenderer({
 /**
  * 渲染统一模式标题和当前数据摘要。
  */
-function PatternHeader({ title, meta }: { title: string; meta: string }): React.ReactElement {
+function PatternHeader({ mode, title, meta }: { mode: PatternBinding['mode']; title: string; meta: string }): React.ReactElement {
+  const Icon = patternModeIcon(mode);
   return (
     <header className="sim-pattern__header">
-      <span>{title}</span>
+      <span>
+        <Icon size={15} aria-hidden="true" />
+        {title}
+      </span>
       <small>{meta}</small>
     </header>
   );
+}
+
+/**
+ * patternModeIcon 为封闭模式提供稳定图标,让不同仿真视图的语义差异先于颜色被识别。
+ */
+function patternModeIcon(mode: PatternBinding['mode']): LucideIcon {
+  const icons: Record<PatternBinding['mode'], LucideIcon> = {
+    graph: Network,
+    chain: GitBranch,
+    tree: Layers3,
+    matrix: Table2,
+    pipeline: Workflow,
+    lane: Rows3,
+    chart: BarChart3,
+  };
+  return icons[mode];
 }
 
 /**
@@ -623,8 +646,23 @@ function chartPolyline(series: ChartSeries, minX: number, maxX: number, maxY: nu
  */
 function chartPoint(point: { x: number; y: number }, minX: number, maxX: number, maxY: number): { x: number; y: number } {
   const x = 8 + ((point.x - minX) / Math.max(1, maxX - minX)) * 88;
-  const y = 52 - (point.y / Math.max(1, maxY)) * 46;
+  const y = chartY(point.y, maxY);
   return { x, y };
+}
+
+/**
+ * chartTicks 根据真实最大值生成刻度,避免所有趋势图都显示固定 100 的误导性标尺。
+ */
+function chartTicks(maxY: number): number[] {
+  const ceiling = Math.max(1, Math.ceil(maxY));
+  return [0.25, 0.5, 0.75, 1].map((ratio) => Math.round(ceiling * ratio));
+}
+
+/**
+ * chartY 将数值映射到图表坐标,所有趋势线和网格使用同一标尺。
+ */
+function chartY(value: number, maxY: number): number {
+  return 52 - (value / Math.max(1, maxY)) * 46;
 }
 
 /**

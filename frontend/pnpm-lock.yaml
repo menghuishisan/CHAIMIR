@@ -56,6 +56,9 @@ importers:
       '@chaimir/shared':
         specifier: workspace:*
         version: link:../../packages/shared
+      '@chaimir/sim-sdk':
+        specifier: workspace:*
+        version: link:../../packages/sim-sdk
       '@chaimir/ui':
         specifier: workspace:*
         version: link:../../packages/ui
