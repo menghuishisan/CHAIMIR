@@ -145,31 +145,75 @@
   font-weight: 700;
 }
 
-.sim-graph {
+.sim-graph-container {
   margin: var(--space-2) var(--space-4) var(--space-3);
   width: calc(100% - var(--space-4) * 2);
   max-block-size: min(42rem, 68vh);
   aspect-ratio: 16 / 10;
-  display: block;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
   border: 0.0625rem solid var(--color-dark-border);
   border-radius: var(--radius-sm);
   background:
-    radial-gradient(circle at 20% 18%, var(--sim-pattern-accent-soft), transparent 18rem),
-    linear-gradient(color-mix(in srgb, var(--color-dark-border) 42%, transparent) 0.0625rem, transparent 0.0625rem),
-    linear-gradient(90deg, color-mix(in srgb, var(--color-dark-border) 42%, transparent) 0.0625rem, transparent 0.0625rem),
+    radial-gradient(circle at 20% 18%, var(--sim-pattern-accent-soft), transparent 28rem),
     var(--color-terminal-bg);
-  background-size: auto, 10% 10%, 10% 10%, auto;
+  background-size: auto, auto;
 }
 
-.sim-pattern-grid--primary .sim-graph {
+.sim-pattern-grid--primary {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.sim-pattern-grid--primary .sim-pattern {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border: none;
+  background: transparent;
+}
+
+.sim-pattern-grid--primary .sim-graph-container {
+  flex: 1;
+  margin: 0;
+  width: 100%;
   max-block-size: none;
-  min-block-size: clamp(24rem, 50vh, 36rem);
-  aspect-ratio: 16 / 9;
+  min-block-size: 0;
+  aspect-ratio: auto;
+  border: none;
+  background: transparent;
 }
 
-.sim-pattern-grid--support .sim-graph,
+.sim-pattern-grid--support .sim-graph-container,
 .sim-pattern-grid--support .sim-chart__plot {
   max-block-size: 16rem;
+}
+
+.sim-graph__canvas {
+  position: relative;
+  height: 100%;
+  aspect-ratio: 1 / 1;
+  max-width: 100%;
+  max-height: 100%;
+}
+
+.sim-graph__svg-layer,
+.sim-graph__nodes-layer {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.sim-graph__edge-group {
+  pointer-events: auto;
+  cursor: pointer;
 }
 
 .sim-graph__edge {
@@ -177,10 +221,6 @@
   stroke-width: 0.9;
   stroke-linecap: round;
   transition: stroke var(--t-fast) var(--ease), stroke-width var(--t-fast) var(--ease), opacity var(--t-fast) var(--ease);
-}
-
-.sim-graph__edge-group {
-  cursor: pointer;
 }
 
 .sim-graph__edge-group:focus-visible .sim-graph__edge {
@@ -205,16 +245,12 @@
   stroke-dasharray: 2 2;
 }
 
-.sim-graph__edge-label,
-.sim-graph__node text {
+.sim-graph__edge-label {
   fill: var(--color-dark-text);
   font-size: 0.3125rem;
   pointer-events: none;
   text-anchor: middle;
   dominant-baseline: middle;
-}
-
-.sim-graph__edge-label {
   paint-order: stroke;
   stroke: color-mix(in srgb, var(--color-terminal-bg) 88%, transparent);
   stroke-width: 0.65;
@@ -248,19 +284,83 @@
   fill: var(--color-danger);
 }
 
-.sim-graph__node circle {
-  fill: var(--color-dark-elevated);
-  stroke: var(--color-dark-border);
-  stroke-width: 0.9;
-  filter: drop-shadow(0 0.1875rem 0.1875rem rgb(0 0 0 / 0.24));
-}
-
 .sim-graph__node {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  pointer-events: auto;
   cursor: pointer;
+  z-index: 10;
+  display: grid;
+  place-items: center;
 }
 
-.sim-graph__node:focus-visible circle,
-.sim-graph__node.is-selected circle,
+.sim-graph__node-glass {
+  display: grid;
+  place-items: center;
+  width: 3.5rem;
+  height: 3.5rem;
+  border-radius: 50%;
+  border: 0.0625rem solid var(--color-dark-border);
+  background: color-mix(in srgb, var(--color-dark-elevated) 65%, transparent);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--color-dark-border) 80%, transparent), 0 0.25rem 0.5rem rgb(0 0 0 / 0.3);
+  transition:
+    background var(--t) var(--ease-spring-bouncy, cubic-bezier(0.175, 0.885, 0.32, 1.275)),
+    border-color var(--t) var(--ease-spring-bouncy, cubic-bezier(0.175, 0.885, 0.32, 1.275)),
+    box-shadow var(--t) var(--ease-spring-bouncy, cubic-bezier(0.175, 0.885, 0.32, 1.275)),
+    transform var(--t) var(--ease-spring-bouncy, cubic-bezier(0.175, 0.885, 0.32, 1.275));
+  color: var(--color-dark-text);
+}
+
+.sim-graph__node-glass span {
+  font-size: var(--text-sm);
+  font-weight: 500;
+  line-height: 1.1;
+  text-align: center;
+}
+
+.sim-graph__node-glass strong {
+  font-family: var(--font-mono);
+  font-size: 0.625rem;
+  color: var(--color-dark-text-sub);
+  position: absolute;
+  bottom: -1.25rem;
+  white-space: nowrap;
+}
+
+.sim-graph__node.is-active .sim-graph__node-glass,
+.sim-graph__node.is-success .sim-graph__node-glass {
+  background: color-mix(in srgb, var(--sim-pattern-accent) 18%, var(--color-dark-elevated));
+  border-color: var(--sim-pattern-accent);
+  box-shadow: 0 0 16px 0 color-mix(in srgb, var(--sim-pattern-accent) 40%, transparent), inset 0 0 8px 0 color-mix(in srgb, var(--sim-pattern-accent) 20%, transparent);
+}
+
+.sim-graph__node.is-warning .sim-graph__node-glass {
+  border-color: var(--color-secondary-accent);
+  box-shadow: 0 0 12px 0 color-mix(in srgb, var(--color-secondary-accent) 30%, transparent);
+}
+
+.sim-graph__node.is-danger .sim-graph__node-glass {
+  border-color: var(--color-danger);
+  box-shadow: 0 0 12px 0 color-mix(in srgb, var(--color-danger) 30%, transparent);
+}
+
+.sim-graph__node:hover .sim-graph__node-glass,
+.sim-graph__node:focus-visible .sim-graph__node-glass {
+  transform: translateY(-0.125rem) scale(1.05);
+}
+
+.sim-graph__node.is-selected .sim-graph__node-glass {
+  outline: 0.125rem solid var(--color-on-dark-accent);
+  outline-offset: 0.125rem;
+  border-color: var(--color-on-dark-accent);
+}
+
+.sim-graph__node:active .sim-graph__node-glass {
+  transform: scale(0.96);
+}
+
 .sim-chain__block:focus-visible,
 .sim-chain__block.is-selected,
 .sim-tree__box:focus-visible,
@@ -278,7 +378,6 @@
   border-color: var(--color-on-dark-accent);
 }
 
-.sim-graph__node:active circle,
 .sim-chain__block:active,
 .sim-tree__box:active,
 .sim-matrix__cell:active,
@@ -287,25 +386,6 @@
 .sim-chart__series-line circle:active {
   transform: scale(0.96);
   transition: transform var(--t-fast) var(--ease-spring-bouncy, cubic-bezier(0.175, 0.885, 0.32, 1.275));
-}
-
-.sim-graph__node.is-active circle,
-.sim-graph__node.is-success circle {
-  fill: color-mix(in srgb, var(--sim-pattern-accent) 18%, var(--color-dark-elevated));
-  stroke: var(--sim-pattern-accent);
-}
-
-.sim-graph__node.is-warning circle {
-  stroke: var(--color-secondary-accent);
-}
-
-.sim-graph__node.is-danger circle {
-  stroke: var(--color-danger);
-}
-
-.sim-graph__node-value {
-  fill: var(--color-dark-text-sub);
-  font-size: 0.25rem;
 }
 
 .sim-chain-board {

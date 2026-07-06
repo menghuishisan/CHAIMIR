@@ -4,41 +4,79 @@
   position: fixed;
   inset: 0;
   z-index: var(--z-immersive);
-  display: grid;
-  grid-template-rows: auto 1fr auto;
+  display: flex;
+  flex-direction: column;
   min-width: 0;
-  background:
-    radial-gradient(circle at 48% 0, color-mix(in srgb, var(--color-on-dark-accent) 15%, transparent), transparent 40rem),
-    var(--color-terminal-bg);
+  background: var(--color-terminal-bg);
   color: var(--color-dark-text);
+  overflow: hidden;
 }
 
-.sim-workbench__bar,
-.sim-workbench__controls {
+.sim-workbench__bar {
+  flex: 0 0 auto;
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: var(--space-4);
-  padding: var(--space-3) var(--space-5);
-  border-bottom: 0.0625rem solid var(--color-dark-border);
-  background: color-mix(in srgb, var(--color-dark-surface) 65%, transparent);
-  backdrop-filter: blur(24px);
-  -webkit-backdrop-filter: blur(24px);
+  justify-content: flex-start;
+  gap: var(--space-6);
+  padding: var(--space-2) var(--space-5);
+  border-bottom: 0.0625rem solid color-mix(in srgb, var(--color-dark-border) 30%, transparent);
+  background: transparent;
+  z-index: 10;
 }
 
 .sim-workbench__controls {
-  display: grid;
-  grid-template-columns: minmax(24rem, 1fr) auto auto;
-  justify-content: stretch;
+  flex: 0 0 auto;
+  display: flex;
   align-items: center;
-  border-top: 0.0625rem solid color-mix(in srgb, var(--color-dark-border) 80%, transparent);
-  border-bottom: 0;
-  box-shadow: 0 -4px 24px rgb(0 0 0 / 0.3);
+  justify-content: center;
+  gap: var(--space-6);
+  padding: var(--space-3) var(--space-6);
+  background: transparent;
+  border-top: 0.0625rem solid color-mix(in srgb, var(--color-dark-border) 30%, transparent);
+  z-index: 100;
+}
+
+.sim-workbench__control-group {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.sim-control-field {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--color-dark-text-sub);
+  font-size: var(--text-xs);
+}
+
+.sim-control-field span {
+  font-weight: 500;
+}
+
+.sim-control-field strong {
+  color: var(--color-dark-text);
+  font-family: var(--font-mono);
+  width: 3.5rem;
+  text-align: right;
+}
+
+.sim-control-field select {
+  background: transparent;
+  color: var(--color-dark-text);
+  border: none;
+  outline: none;
+  cursor: pointer;
+  font-family: var(--font-mono);
+}
+
+.sim-workbench__title {
+  flex: 1;
 }
 
 .sim-workbench__bar h1 {
   margin: var(--space-1) 0 0;
-  font-size: var(--text-lg);
+  font-size: var(--text-md);
   line-height: var(--leading-tight);
 }
 
@@ -52,7 +90,10 @@
 .sim-workbench__status {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
   gap: var(--space-2);
+  margin-left: auto;
   font-family: var(--font-mono);
   font-size: var(--text-sm);
   color: var(--color-dark-text-sub);
@@ -60,59 +101,90 @@
 
 .sim-workbench__status span {
   padding: var(--space-1) var(--space-2);
-  border: 1px solid var(--color-dark-border);
+  border: 1px solid color-mix(in srgb, var(--color-dark-border) 50%, transparent);
   border-radius: var(--radius-full);
-  background: var(--color-dark-elevated);
+  background: color-mix(in srgb, var(--color-dark-elevated) 40%, transparent);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
 }
 
 .sim-workbench__layout {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(21rem, 26rem);
+  flex: 1;
+  display: flex;
+  position: relative;
   min-height: 0;
+  overflow: hidden;
 }
 
-.sim-workbench.is-inspector-collapsed .sim-workbench__layout {
-  grid-template-columns: minmax(0, 1fr);
-}
-
-.sim-workbench__panel,
 .sim-workbench__stage {
+  flex: 1;
   min-width: 0;
   min-height: 0;
   overflow: auto;
-  padding: var(--space-3);
+  padding: var(--space-4) 28rem var(--space-4) var(--space-4);
+  display: flex;
+  flex-direction: column;
+  background: radial-gradient(circle at 50% 0, color-mix(in srgb, var(--color-on-dark-accent) 8%, transparent), transparent 50rem);
+  transition: padding-right 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+
+.sim-workbench.is-inspector-collapsed .sim-workbench__stage {
+  padding-right: var(--space-4);
+}
+
+.sim-workbench__drawer-toggle {
+  position: absolute;
+  top: 50%;
+  right: 0;
+  transform: translateY(-50%);
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.5rem;
+  height: 4rem;
+  background: color-mix(in srgb, var(--color-dark-surface) 60%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-dark-border) 40%, transparent);
+  border-right: none;
+  border-radius: var(--radius-sm) 0 0 var(--radius-sm);
+  color: var(--color-dark-text-sub);
+  cursor: pointer;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  transition: right 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275), background 0.2s, color 0.2s;
+}
+
+.sim-workbench__drawer-toggle:hover {
+  background: color-mix(in srgb, var(--color-dark-surface) 80%, transparent);
+  color: var(--color-dark-text);
+}
+
+.sim-workbench:not(.is-inspector-collapsed) .sim-workbench__drawer-toggle {
+  right: 26rem;
 }
 
 .sim-workbench__panel {
-  display: grid;
-  align-content: start;
+  display: flex;
+  flex-direction: column;
   gap: var(--space-3);
-  overflow-x: hidden;
-  background: color-mix(in srgb, var(--color-dark-surface) 85%, transparent);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
+  padding: var(--space-4);
+  background: color-mix(in srgb, var(--color-dark-surface) 70%, transparent);
+  backdrop-filter: blur(30px);
+  -webkit-backdrop-filter: blur(30px);
+  border-left: 0.0625rem solid color-mix(in srgb, var(--color-dark-border) 30%, transparent);
 }
 
 .sim-workbench__panel--rail {
-  border-left: 0.0625rem solid var(--color-dark-border);
-}
-
-.sim-workbench.is-inspector-collapsed .sim-workbench__panel--rail {
-  display: none;
-}
-
-.sim-workbench__stage {
-  display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
-  gap: var(--space-4);
-  padding: var(--space-4);
-  overflow: hidden;
-  background:
-    linear-gradient(180deg, color-mix(in srgb, var(--color-terminal-bg) 94%, var(--color-on-dark-accent) 6%), var(--color-terminal-bg) 16rem),
-    linear-gradient(color-mix(in srgb, var(--color-dark-border) 20%, transparent) 1px, transparent 1px),
-    linear-gradient(90deg, color-mix(in srgb, var(--color-dark-border) 20%, transparent) 1px, transparent 1px),
-    var(--color-terminal-bg);
-  background-size: auto, 2rem 2rem, 2rem 2rem, auto;
+  position: absolute;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  width: 26rem;
+  z-index: 20;
+  transform: translateX(0);
+  transition: transform 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+  box-shadow: -8px 0 32px rgb(0 0 0 / 0.4);
+  overflow-y: auto;
 }
 
 .sim-workbench__stage-head {
@@ -269,8 +341,12 @@
 }
 
 .sim-workbench__controls .sim-timeline {
-  min-width: min(32rem, 100%);
-  padding: var(--space-3);
+  min-width: 28rem;
+  padding: 0 var(--space-4) 0 0;
+  border: none;
+  background: transparent;
+  border-right: 0.0625rem solid color-mix(in srgb, var(--color-dark-border) 40%, transparent);
+  border-radius: 0;
 }
 
 .sim-workbench__controls .sim-timeline dl {
@@ -848,16 +924,16 @@
     overflow: visible;
   }
 
-  .sim-workbench.is-inspector-collapsed .sim-workbench__panel--rail {
-    display: none;
-  }
-
   .sim-workbench__controls {
-    grid-template-columns: 1fr;
+    flex-wrap: wrap;
   }
 
   .sim-workbench__controls .sim-timeline dl {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .sim-workbench__stage {
+    padding-right: var(--space-4);
   }
 }
 
@@ -865,11 +941,20 @@
   .sim-workbench__bar,
   .sim-workbench__controls {
     align-items: flex-start;
-    padding: var(--space-3);
+    padding: var(--space-2);
   }
 
   .sim-workbench__bar {
     flex-direction: column;
+    gap: var(--space-2);
+  }
+
+  .sim-workbench__bar h1 {
+    font-size: var(--text-sm);
+  }
+
+  .sim-workbench__kicker {
+    display: none;
   }
 
   .sim-workbench__status,
@@ -882,17 +967,23 @@
   }
 
   .sim-workbench__controls .sim-timeline {
-    padding: var(--space-2);
+    padding: 0;
+    min-width: 100%;
+    border-right: none;
   }
 
   .sim-workbench__controls {
-    gap: var(--space-2);
-    max-block-size: 10rem;
+    flex-direction: column;
+    align-items: stretch;
+    gap: var(--space-3);
+    max-block-size: 16rem;
     overflow: auto;
   }
 
   .sim-workbench__control-group {
-    gap: var(--space-1);
+    justify-content: center;
+    flex-wrap: wrap;
+    gap: var(--space-2);
   }
 
   .sim-control-field {

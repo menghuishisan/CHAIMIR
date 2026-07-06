@@ -77,64 +77,68 @@ function GraphRenderer({
     <section className="sim-pattern sim-pattern--graph" aria-label={pattern.title}>
       <PatternHeader mode="graph" title={pattern.title} meta={`${pattern.data.nodes.length} 节点 / ${activeEdges} 活跃 / ${failedEdges} 异常`} />
       <PatternInsight items={[['风险节点', riskyNodes], ['消息总数', pattern.data.edges.length]]} />
-      <svg className="sim-graph" viewBox="0 0 100 100" role="img" aria-label={`${pattern.title}图网络`}>
-        <defs>
-          <marker className="sim-graph__marker is-muted" id={`${markerBaseId}-muted`} markerHeight="5" markerUnits="strokeWidth" markerWidth="5" orient="auto" refX="4.5" refY="2.5">
-            <path d="M0,0 L5,2.5 L0,5 Z" />
-          </marker>
-          <marker className="sim-graph__marker is-accent" id={`${markerBaseId}-accent`} markerHeight="5" markerUnits="strokeWidth" markerWidth="5" orient="auto" refX="4.5" refY="2.5">
-            <path d="M0,0 L5,2.5 L0,5 Z" />
-          </marker>
-          <marker className="sim-graph__marker is-danger" id={`${markerBaseId}-danger`} markerHeight="5" markerUnits="strokeWidth" markerWidth="5" orient="auto" refX="4.5" refY="2.5">
-            <path d="M0,0 L5,2.5 L0,5 Z" />
-          </marker>
-        </defs>
-        {pattern.data.edges.map((edge) => {
-          const from = nodeById.get(edge.from);
-          const to = nodeById.get(edge.to);
-          if (!from || !to) return null;
-          const line = shortenLine(from, to, 6.5);
-          const progress = processProgress(edge, reducedMotion);
-          const pulse = pointOnLine(line, progress);
-          return (
-            <g className={clsx('sim-graph__edge-group', selectedElementId === edge.id && 'is-selected')} key={edge.id} {...selectableElementProps(edge.id, onSelectElement, 'edge')}>
-              <line
-                className={clsx('sim-graph__edge', `is-${edge.status}`)}
-                x1={line.x1}
-                y1={line.y1}
-                x2={line.x2}
-                y2={line.y2}
-                markerEnd={`url(#${markerBaseId}-${graphMarkerTone(edge.status)})`}
-              />
-              <circle className={clsx('sim-graph__pulse', `is-${edge.status}`)} cx={pulse.x} cy={pulse.y} r="1.3">
-                <title>{edge.process?.label ?? edge.detail ?? edge.label}</title>
-              </circle>
-              {showEdgeLabels && (
-                <text className="sim-graph__edge-label" x={(from.x + to.x) / 2} y={(from.y + to.y) / 2}>
-                  {edge.label}
-                </text>
-              )}
-            </g>
-          );
-        })}
-        {nodes.map((node) => (
-          <g
-            key={node.id}
-            className={clsx('sim-graph__node', `is-${node.status}`, selectedElementId === node.id && 'is-selected')}
-            {...selectableElementProps(node.id, onSelectElement, node.role)}
-          >
-            <circle cx={node.x} cy={node.y} r="5.8" />
-            <text x={node.x} y={node.y + 0.8}>
-              {node.label}
-            </text>
-            {node.value && (
-              <text className="sim-graph__node-value" x={node.x} y={node.y + 8.4}>
-                {node.value}
-              </text>
-            )}
-          </g>
-        ))}
-      </svg>
+
+      <div className="sim-graph-container" role="figure" aria-label={`${pattern.title}图网络`}>
+        <div className="sim-graph__canvas">
+          <svg className="sim-graph__svg-layer" viewBox="0 0 100 100">
+            <defs>
+              <marker className="sim-graph__marker is-muted" id={`${markerBaseId}-muted`} markerHeight="5" markerUnits="strokeWidth" markerWidth="5" orient="auto" refX="4.5" refY="2.5">
+                <path d="M0,0 L5,2.5 L0,5 Z" />
+              </marker>
+              <marker className="sim-graph__marker is-accent" id={`${markerBaseId}-accent`} markerHeight="5" markerUnits="strokeWidth" markerWidth="5" orient="auto" refX="4.5" refY="2.5">
+                <path d="M0,0 L5,2.5 L0,5 Z" />
+              </marker>
+              <marker className="sim-graph__marker is-danger" id={`${markerBaseId}-danger`} markerHeight="5" markerUnits="strokeWidth" markerWidth="5" orient="auto" refX="4.5" refY="2.5">
+                <path d="M0,0 L5,2.5 L0,5 Z" />
+              </marker>
+            </defs>
+            {pattern.data.edges.map((edge) => {
+              const from = nodeById.get(edge.from);
+              const to = nodeById.get(edge.to);
+              if (!from || !to) return null;
+              const line = shortenLine(from, to, 6.5);
+              const progress = processProgress(edge, reducedMotion);
+              const pulse = pointOnLine(line, progress);
+              return (
+                <g className={clsx('sim-graph__edge-group', selectedElementId === edge.id && 'is-selected')} key={edge.id} {...selectableElementProps(edge.id, onSelectElement, 'edge')}>
+                  <line
+                    className={clsx('sim-graph__edge', `is-${edge.status}`)}
+                    x1={line.x1}
+                    y1={line.y1}
+                    x2={line.x2}
+                    y2={line.y2}
+                    markerEnd={`url(#${markerBaseId}-${graphMarkerTone(edge.status)})`}
+                  />
+                  <circle className={clsx('sim-graph__pulse', `is-${edge.status}`)} cx={pulse.x} cy={pulse.y} r="1.3">
+                    <title>{edge.process?.label ?? edge.detail ?? edge.label}</title>
+                  </circle>
+                  {showEdgeLabels && (
+                    <text className="sim-graph__edge-label" x={(from.x + to.x) / 2} y={(from.y + to.y) / 2}>
+                      {edge.label}
+                    </text>
+                  )}
+                </g>
+              );
+            })}
+          </svg>
+
+          <div className="sim-graph__nodes-layer">
+            {nodes.map((node) => (
+              <div
+                key={node.id}
+                className={clsx('sim-graph__node', `is-${node.status}`, selectedElementId === node.id && 'is-selected')}
+                style={{ left: `${node.x}%`, top: `${node.y}%` }}
+                {...selectableElementProps(node.id, onSelectElement, node.role)}
+              >
+                <div className="sim-graph__node-glass">
+                  <span>{node.label}</span>
+                  {node.value && <strong>{node.value}</strong>}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
       <PatternLegend items={[['活跃/成功', 'accent'], ['待处理', 'muted'], ['失败/丢弃', 'danger']]} />
     </section>
   );

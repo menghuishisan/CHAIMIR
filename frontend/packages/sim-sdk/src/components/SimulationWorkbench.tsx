@@ -1,7 +1,7 @@
 // 本文件实现仿真可视化沉浸式工作台,主线程只渲染 Worker 返回的纯数据快照。
 
 import React, { useEffect, useRef, useState } from 'react';
-import { AlertTriangle, ArrowLeft, CheckCircle2, Clock3, Pause, Play, RotateCcw, ShieldAlert, SkipBack, StepForward } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, CheckCircle2, ChevronLeft, ChevronRight, Clock3, Pause, Play, RotateCcw, ShieldAlert, SkipBack, StepForward } from 'lucide-react';
 import { Button, SandboxStatus, triggerHaptic } from '@chaimir/ui';
 import type { SandboxStatusKind } from '@chaimir/ui';
 import type {
@@ -221,15 +221,16 @@ export function SimulationWorkbench({
     return (
       <main className="sim-workbench" aria-label="仿真工作台">
         <header className="sim-workbench__bar">
-          <div>
-            <p className="sim-workbench__kicker">仿真可视化引擎</p>
-            <h1>仿真正在准备</h1>
-          </div>
           {onExit && (
             <Button variant="on-dark" size="sm" icon={<ArrowLeft size={16} />} onClick={onExit}>
               返回仿真实验室
             </Button>
           )}
+          <div>
+            <p className="sim-workbench__kicker">仿真可视化引擎</p>
+            <h1>仿真正在准备</h1>
+          </div>
+          <div className="sim-workbench__status" />
         </header>
         <section className="sim-workbench__empty">
           {runtimeMessage ? <p>{runtimeMessage}</p> : <p>正在加载仿真环境,请稍候</p>}
@@ -241,7 +242,12 @@ export function SimulationWorkbench({
   return (
     <main className={`sim-workbench ${inspectorCollapsed ? 'is-inspector-collapsed' : ''}`} aria-label={`${descriptor.meta.name}仿真工作台`}>
       <header className="sim-workbench__bar">
-        <div>
+        {onExit && (
+          <Button variant="on-dark" size="sm" icon={<ArrowLeft size={16} />} onClick={onExit}>
+            返回仿真实验室
+          </Button>
+        )}
+        <div className="sim-workbench__title">
           <p className="sim-workbench__kicker">仿真可视化引擎</p>
           <h1>{descriptor.meta.name}</h1>
         </div>
@@ -250,14 +256,6 @@ export function SimulationWorkbench({
           <span>{snapshot.state.phase}</span>
           {reducedMotion && <span>减少动态</span>}
         </div>
-        <Button variant="on-dark" size="sm" onClick={() => setInspectorCollapsed((current) => !current)}>
-          {inspectorCollapsed ? '展开说明' : '收起说明'}
-        </Button>
-        {onExit && (
-          <Button variant="on-dark" size="sm" icon={<ArrowLeft size={16} />} onClick={onExit}>
-            返回仿真实验室
-          </Button>
-        )}
       </header>
 
       <section className="sim-workbench__layout">
@@ -292,90 +290,102 @@ export function SimulationWorkbench({
           </div>
         </section>
 
-        <aside className="sim-workbench__panel sim-workbench__panel--rail" aria-label="当前阶段和操作" aria-hidden={inspectorCollapsed}>
-          <SandboxStatus
-            status={sandboxStatusFromSnapshot(snapshot, runtimeMessage)}
-            detail={`当前阶段：${snapshot.state.phase}`}
-          />
-          <article className="sim-explain sim-explain--focus">
-            <p className="sim-workbench__stage-kicker">当前阶段</p>
-            <h2>{snapshot.state.explanation.title}</h2>
-            <p>{snapshot.state.explanation.effect}</p>
-            <strong>为什么重要</strong>
-            <p>{snapshot.state.explanation.reason}</p>
-          </article>
-          <InteractionPanel
-            interactions={descriptor.interactions}
-            availability={snapshot.interactionAvailability}
-            selectedElementId={activeElementId}
-            selectedElementType={selectedElementType}
-            eventSeq={snapshot.events.length}
-            onEmit={(type, payload, target) => {
-              void clientRef.current?.inject(type, payload, target).catch(handleRuntimeError);
-            }}
-          />
-          {arrangedPatterns.support.length > 0 && (
-            <InspectorSection title="过程记录" summary={`${arrangedPatterns.support.length} 组记录`}>
-              <div className="sim-pattern-grid sim-pattern-grid--support" aria-label="过程记录">
-                {arrangedPatterns.support.map((pattern) => (
-                  <PatternRenderer
-                    key={pattern.id}
-                    pattern={pattern}
-                    selectedElementId={activeElementId}
-                    reducedMotion={reducedMotion}
-                    onSelectElement={(elementId, elementType) => {
-                      setSelectedElementId(elementId);
-                      setSelectedElementType(elementType);
-                    }}
-                  />
-                ))}
-              </div>
-            </InspectorSection>
-          )}
-          {currentStep?.question && (
-            <InspectorSection title="设问检查点" summary="预测当前结果">
-              <article className="sim-question">
-                <h2>{currentStep.question.prompt}</h2>
-                <div className="sim-question__options">
-                  {currentStep.question.options.map((option) => {
-                    const question = currentStep.question;
-                    if (!question) {
-                      return null;
-                    }
-                    const selected = questionAnswers[question.checkpointId] === option;
-                    return (
-                      <button aria-pressed={selected} className={selected ? 'is-selected' : undefined} key={option} type="button" onClick={() => submitCheckpoint(currentStep, option)}>
-                        {option}
-                      </button>
-                    );
-                  })}
+        <button
+          aria-expanded={!inspectorCollapsed}
+          className="sim-workbench__drawer-toggle"
+          onClick={() => setInspectorCollapsed((c) => !c)}
+          aria-label={inspectorCollapsed ? '展开说明' : '收起说明'}
+          type="button"
+        >
+          {inspectorCollapsed ? <ChevronLeft size={20} /> : <ChevronRight size={20} />}
+        </button>
+
+        {!inspectorCollapsed && (
+          <aside className="sim-workbench__panel sim-workbench__panel--rail" aria-label="当前阶段和操作">
+            <SandboxStatus
+              status={sandboxStatusFromSnapshot(snapshot, runtimeMessage)}
+              detail={`当前阶段：${snapshot.state.phase}`}
+            />
+            <article className="sim-explain sim-explain--focus">
+              <p className="sim-workbench__stage-kicker">当前阶段</p>
+              <h2>{snapshot.state.explanation.title}</h2>
+              <p>{snapshot.state.explanation.effect}</p>
+              <strong>为什么重要</strong>
+              <p>{snapshot.state.explanation.reason}</p>
+            </article>
+            <InteractionPanel
+              interactions={descriptor.interactions}
+              availability={snapshot.interactionAvailability}
+              selectedElementId={activeElementId}
+              selectedElementType={selectedElementType}
+              eventSeq={snapshot.events.length}
+              onEmit={(type, payload, target) => {
+                void clientRef.current?.inject(type, payload, target).catch(handleRuntimeError);
+              }}
+            />
+            {arrangedPatterns.support.length > 0 && (
+              <InspectorSection title="过程记录" summary={`${arrangedPatterns.support.length} 组记录`}>
+                <div className="sim-pattern-grid sim-pattern-grid--support" aria-label="过程记录">
+                  {arrangedPatterns.support.map((pattern) => (
+                    <PatternRenderer
+                      key={pattern.id}
+                      pattern={pattern}
+                      selectedElementId={activeElementId}
+                      reducedMotion={reducedMotion}
+                      onSelectElement={(elementId, elementType) => {
+                        setSelectedElementId(elementId);
+                        setSelectedElementType(elementType);
+                      }}
+                    />
+                  ))}
                 </div>
-              </article>
+              </InspectorSection>
+            )}
+            {currentStep?.question && (
+              <InspectorSection title="设问检查点" summary="预测当前结果">
+                <article className="sim-question">
+                  <h2>{currentStep.question.prompt}</h2>
+                  <div className="sim-question__options">
+                    {currentStep.question.options.map((option) => {
+                      const question = currentStep.question;
+                      if (!question) {
+                        return null;
+                      }
+                      const selected = questionAnswers[question.checkpointId] === option;
+                      return (
+                        <button aria-pressed={selected} className={selected ? 'is-selected' : undefined} key={option} type="button" onClick={() => submitCheckpoint(currentStep, option)}>
+                          {option}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </article>
+              </InspectorSection>
+            )}
+            {runtimeMessage && <p className="sim-runtime-message" role="alert">{runtimeMessage}</p>}
+            {Object.keys(snapshot.state.metrics).length > 0 && (
+              <InspectorSection title="状态指标" summary={`${Object.keys(snapshot.state.metrics).length} 项`}>
+                <MetricPanel metrics={snapshot.state.metrics} />
+              </InspectorSection>
+            )}
+            {descriptor.codeTrace && (
+              <InspectorSection title="代码追踪" summary="代码行与变量">
+                <CodeTracePanel codeTrace={descriptor.codeTrace} snapshot={snapshot} />
+              </InspectorSection>
+            )}
+            {descriptor.checkpoints.length ? (
+              <InspectorSection title="检查点结果" summary={`${descriptor.checkpoints.length} 个检查点`}>
+                <CheckpointPanel descriptor={descriptor} snapshot={snapshot} />
+              </InspectorSection>
+            ) : null}
+            <InspectorSection title="学习目标" summary={`${descriptor.meta.learningObjectives.length} 项目标`}>
+              <LearningGoalPanel descriptor={descriptor} />
             </InspectorSection>
-          )}
-          {runtimeMessage && <p className="sim-runtime-message" role="alert">{runtimeMessage}</p>}
-          {Object.keys(snapshot.state.metrics).length > 0 && (
-            <InspectorSection title="状态指标" summary={`${Object.keys(snapshot.state.metrics).length} 项`}>
-              <MetricPanel metrics={snapshot.state.metrics} />
+            <InspectorSection title="教学步骤" summary={`${descriptor.narrative.length} 个阶段`}>
+              <StepList steps={descriptor.narrative} currentStep={currentStep} />
             </InspectorSection>
-          )}
-          {descriptor.codeTrace && (
-            <InspectorSection title="代码追踪" summary="代码行与变量">
-              <CodeTracePanel codeTrace={descriptor.codeTrace} snapshot={snapshot} />
-            </InspectorSection>
-          )}
-          {descriptor.checkpoints.length ? (
-            <InspectorSection title="检查点结果" summary={`${descriptor.checkpoints.length} 个检查点`}>
-              <CheckpointPanel descriptor={descriptor} snapshot={snapshot} />
-            </InspectorSection>
-          ) : null}
-          <InspectorSection title="学习目标" summary={`${descriptor.meta.learningObjectives.length} 项目标`}>
-            <LearningGoalPanel descriptor={descriptor} />
-          </InspectorSection>
-          <InspectorSection title="教学步骤" summary={`${descriptor.narrative.length} 个阶段`}>
-            <StepList steps={descriptor.narrative} currentStep={currentStep} />
-          </InspectorSection>
-        </aside>
+          </aside>
+        )}
       </section>
 
       <footer className="sim-workbench__controls">
