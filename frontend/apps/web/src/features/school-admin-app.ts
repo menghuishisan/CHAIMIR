@@ -1,7 +1,10 @@
 ﻿// 学校管理端路由：看板、用户组织、成绩治理、配置和审计页面定义。
 
+import { IMPORT_TEMPLATE_FORMAT } from '@chaimir/api-client'
 import { Building2, Gauge, Gavel, History, KeyRound, LineChart, ListChecks, ScrollText, Settings, ShieldAlert, UserCog, Users, Upload } from 'lucide-react'
-import type { AppDefinition, MetricItem, ResourceResult } from '@chaimir/shared'
+import type { AppDefinition, MetricItem, ResourceResult } from '../app/types'
+import { accountImportTemplateFilename, DOWNLOAD_FILENAMES } from '../copy/downloads'
+import { downloadBlob } from '../lib/browser'
 import {
   accountColumns,
   accountTarget,
@@ -125,8 +128,10 @@ export const schoolAdminApp: AppDefinition = {
             return '账号密码已重置'
           }),
           pageAction('download-account-template', '获取导入模板', '读取账号导入模板文件授权。', [textInput('target_type', '账号类型', true, '可填写教师或学生。')], async (values) => {
-            await api.identity.downloadAccountImportTemplate({ type: accountTarget(values) })
-            return '账号导入模板已获取'
+            const target = accountTarget(values)
+            const blob = await api.identity.downloadAccountImportTemplate({ type: target, format: IMPORT_TEMPLATE_FORMAT.XLSX })
+            downloadBlob(blob, accountImportTemplateFilename(target))
+            return '账号导入模板已开始下载'
           }),
           pageAction('batch-disable-accounts', '批量停用账号', '按账号编号批量停用账号。', [textInput('account_ids', '账号编号', true, '多个编号用英文逗号分隔。')], async (values) => {
             await api.identity.batchDisableAccounts({ account_ids: valueNumberArray(values, 'account_ids') })
@@ -224,8 +229,9 @@ export const schoolAdminApp: AppDefinition = {
             return '组织导入已提交'
           }),
           pageAction('download-org-template', '获取组织模板', '读取组织导入模板文件授权。', [], async () => {
-            await api.identity.downloadOrgImportTemplate()
-            return '组织导入模板已获取'
+            const blob = await api.identity.downloadOrgImportTemplate({ format: IMPORT_TEMPLATE_FORMAT.XLSX })
+            downloadBlob(blob, DOWNLOAD_FILENAMES.ORG_IMPORT_TEMPLATE)
+            return '组织导入模板已开始下载'
           }),
           pageAction('list-majors', '查看专业', '按院系编号读取专业列表。', [textInput('department_id', '院系编号', true)], async (values) => {
             await api.identity.listMajors({ department_id: valueText(values, 'department_id') })

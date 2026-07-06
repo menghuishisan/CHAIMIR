@@ -3,6 +3,7 @@
 import React from 'react'
 import { ChevronLeft, ChevronRight } from 'lucide-react'
 import { clsx } from 'clsx'
+import { triggerHaptic } from '../../utils/haptics'
 import './Pagination.css'
 
 export interface PaginationProps {
@@ -104,7 +105,10 @@ export const Pagination: React.FC<PaginationProps> = ({
         <button
           type="button"
           className="chaimir-pagination__btn"
-          onClick={() => handlePageChange(current - 1)}
+          onClick={() => {
+            triggerHaptic(10)
+            handlePageChange(current - 1)
+          }}
           disabled={current === 1}
           aria-label="上一页"
         >
@@ -131,7 +135,10 @@ export const Pagination: React.FC<PaginationProps> = ({
               )}
               aria-current={page === current ? 'page' : undefined}
               aria-label={`第 ${page} 页`}
-              onClick={() => handlePageChange(page as number)}
+              onClick={() => {
+                triggerHaptic(10)
+                handlePageChange(page as number)
+              }}
             >
               {page}
             </button>
@@ -141,7 +148,10 @@ export const Pagination: React.FC<PaginationProps> = ({
         <button
           type="button"
           className="chaimir-pagination__btn"
-          onClick={() => handlePageChange(current + 1)}
+          onClick={() => {
+            triggerHaptic(10)
+            handlePageChange(current + 1)
+          }}
           disabled={current === total}
           aria-label="下一页"
         >

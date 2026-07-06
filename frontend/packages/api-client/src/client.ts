@@ -1,11 +1,12 @@
 // API 客户端核心：封装后端统一信封、鉴权头、trace_id 透传和用户向错误。
 
 import axios, { AxiosInstance, AxiosError, InternalAxiosRequestConfig } from 'axios'
-import { API_BASE_PATH } from './constants'
-import type { WebSocketTicketResponse } from './types'
+import { API_BASE_PATH, API_ERROR_MESSAGES } from './constants'
+import type { WebSocketTicketResponse } from './types/identity'
 
 export interface ApiConfig {
   baseURL: string
+  wsBaseURL?: string
   timeout?: number
   getToken?: () => string | null
   onUnauthorized?: () => void
@@ -31,12 +32,13 @@ export class ApiClient {
   private config: ApiConfig
 
   /**
-   * constructor 创建绑定后端 /api/v1 根路径的 Axios 客户端。
+   * constructor 创建绑定后端统一 API 根路径的 Axios 客户端。
    */
   constructor(config: ApiConfig) {
     this.config = {
       ...config,
       baseURL: normalizeBaseURL(config.baseURL),
+      wsBaseURL: config.wsBaseURL ? normalizeBaseURL(config.wsBaseURL) : undefined,
     }
     this.client = axios.create({
       baseURL: this.config.baseURL,
@@ -101,9 +103,7 @@ export class ApiClient {
   private transformError(error: AxiosError): ApiError {
     const response = error.response?.data as ApiResponse | undefined
     const status = error.response?.status
-    const fallbackMessage = status
-      ? '当前操作暂时没有完成，请稍后重试'
-      : '网络连接暂时不可用，请检查网络后重试'
+    const fallbackMessage = status ? API_ERROR_MESSAGES.HTTP_FALLBACK : API_ERROR_MESSAGES.NETWORK_FALLBACK
 
     // FE-8: 只暴露用户友好的 message + trace_id
     return {
@@ -119,7 +119,7 @@ export class ApiClient {
    */
   private transformApiError(response: ApiResponse, status: number): ApiError {
     return {
-      message: response.message || '操作失败',
+      message: response.message || API_ERROR_MESSAGES.BUSINESS_FALLBACK,
       code: response.code,
       traceId: response.trace_id,
       status,
@@ -176,7 +176,7 @@ export class ApiClient {
    * 基于后端 HTTP 根地址生成同源 WebSocket 入口地址。
    */
   public wsURL(path: string, query?: Record<string, string | undefined>): string {
-    const wsBaseURL = toWebSocketBaseURL(this.baseURL())
+    const wsBaseURL = toWebSocketBaseURL(this.config.wsBaseURL || this.baseURL())
     return `${wsBaseURL}${normalizePath(path)}${queryString(query)}`
   }
 
@@ -184,7 +184,7 @@ export class ApiClient {
    * 基于 API 根地址推导同源根路径 WebSocket,用于后端 M10 的 /api/ws。
    */
   public rootWsURL(path: string, query?: Record<string, string | undefined>): string {
-    const baseURL = this.baseURL()
+    const baseURL = this.config.wsBaseURL || this.baseURL()
     const apiRoot = API_BASE_PATH
     const originBase = baseURL.endsWith(apiRoot) ? baseURL.slice(0, -apiRoot.length) : baseURL
     const wsBaseURL = toWebSocketBaseURL(originBase)
@@ -297,24 +297,6 @@ export class ApiClient {
     })
   }
 
-  // === 文件下载 ===
-
-  /**
-   * download 获取二进制响应并触发浏览器下载。
-   */
-  async download(url: string, filename: string): Promise<void> {
-    const blob = await this.client.get<unknown, Blob>(url, {
-      responseType: 'blob',
-    })
-
-    const link = document.createElement('a')
-    link.href = window.URL.createObjectURL(blob)
-    link.download = filename
-    document.body.appendChild(link)
-    link.click()
-    document.body.removeChild(link)
-    window.URL.revokeObjectURL(link.href)
-  }
 }
 
 /**
@@ -370,6 +352,10 @@ function webSocketPath(wsUrl: string): string {
  * toWebSocketBaseURL 把 HTTP API 根地址转换为浏览器可直接连接的 WebSocket 根地址。
  */
 function toWebSocketBaseURL(baseURL: string): string {
+  if (!baseURL && typeof window !== 'undefined') {
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+    return `${protocol}//${window.location.host}`
+  }
   if (/^http:\/\//.test(baseURL)) {
     return baseURL.replace(/^http:/, 'ws:')
   }

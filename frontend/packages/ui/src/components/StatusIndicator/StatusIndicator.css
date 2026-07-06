@@ -1,0 +1,117 @@
+/* StatusIndicator 组件样式：状态色配图标和文字，满足色非唯一信息。 */
+
+.chaimir-status-indicator {
+  --status-color: var(--color-muted-text);
+  --status-bg: var(--color-muted-bg);
+  --status-border: var(--color-border);
+
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-block-size: 1.625rem;
+  max-inline-size: 100%;
+  color: var(--status-color);
+  font-size: var(--text-xs);
+  font-weight: var(--font-bold);
+  line-height: 1;
+  vertical-align: middle;
+}
+
+.chaimir-status-indicator--primary {
+  --status-color: var(--color-primary-text);
+  --status-bg: var(--color-primary-soft);
+  --status-border: var(--color-primary);
+}
+
+.chaimir-status-indicator--success {
+  --status-color: var(--color-success);
+  --status-bg: var(--color-success-bg);
+  --status-border: var(--color-success-border);
+}
+
+.chaimir-status-indicator--warning {
+  --status-color: var(--color-warning);
+  --status-bg: var(--color-warning-bg);
+  --status-border: var(--color-warning-border);
+}
+
+.chaimir-status-indicator--danger {
+  --status-color: var(--color-danger);
+  --status-bg: var(--color-danger-bg);
+  --status-border: var(--color-danger-border);
+}
+
+.chaimir-status-indicator--info {
+  --status-color: var(--color-info);
+  --status-bg: var(--color-info-bg);
+  --status-border: var(--color-info-border);
+}
+
+.chaimir-status-indicator--soft,
+.chaimir-status-indicator--solid {
+  padding: 0 var(--space-2);
+  background: var(--status-bg);
+  border: 1px solid var(--status-border);
+  border-radius: var(--radius-full);
+}
+
+.chaimir-status-indicator--solid {
+  color: var(--color-primary-fg);
+  background: var(--status-color);
+}
+
+.chaimir-status-indicator--text {
+  min-block-size: 0;
+}
+
+.chaimir-status-indicator__icon,
+.chaimir-status-indicator__dot {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+}
+
+.chaimir-status-indicator__dot {
+  inline-size: 0.5rem;
+  block-size: 0.5rem;
+  background: var(--status-color);
+  border-radius: var(--radius-full);
+  box-shadow: 0 0 0 3px var(--status-bg);
+}
+
+.chaimir-status-indicator__label {
+  min-inline-size: 0;
+  overflow-wrap: anywhere;
+}
+
+.chaimir-status-indicator__spinner {
+  animation: chaimir-status-spin 1s linear infinite;
+}
+
+.chaimir-status-indicator.is-pulsing .chaimir-status-indicator__dot {
+  animation: chaimir-status-pulse 1.4s var(--ease-out) infinite;
+}
+
+@keyframes chaimir-status-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes chaimir-status-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 3px var(--status-bg);
+  }
+  50% {
+    box-shadow: 0 0 0 6px var(--status-bg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chaimir-status-indicator__spinner,
+  .chaimir-status-indicator.is-pulsing .chaimir-status-indicator__dot {
+    animation: none;
+  }
+}

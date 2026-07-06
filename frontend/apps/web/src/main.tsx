@@ -1,12 +1,14 @@
-// 单入口前端应用：统一承载登录页和四个角色路径。
+﻿// 单入口前端应用：统一承载登录页和四个角色路径。
 
 import React, { useEffect, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { UserRole } from '@chaimir/api-client'
 import type { Account } from '@chaimir/api-client'
-import { AuthApp, AuthGate } from '@chaimir/auth'
-import { ChaimirApp, getAccessToken, getStoredUser } from '@chaimir/shared'
-import type { AppDefinition } from '@chaimir/shared'
+import { AuthApp, AuthGate } from './features/auth'
+import { ChaimirApp } from './app/ChaimirApp'
+import { AUTH_CHANGE_EVENT, getAccessToken, getStoredUser } from './lib/storage'
+import { ERROR_MESSAGES } from './copy/errors'
+import type { AppDefinition } from './app/types'
 import { platformAdminApp } from './features/platform-admin-app'
 import { schoolAdminApp } from './features/school-admin-app'
 import { studentApp } from './features/student-app'
@@ -39,10 +41,10 @@ function ChaimirWebApp(): React.ReactElement {
   useEffect(() => {
     const syncPathname = () => setPathname(window.location.pathname)
     window.addEventListener('popstate', syncPathname)
-    window.addEventListener('chaimir-auth-change', syncPathname)
+    window.addEventListener(AUTH_CHANGE_EVENT, syncPathname)
     return () => {
       window.removeEventListener('popstate', syncPathname)
-      window.removeEventListener('chaimir-auth-change', syncPathname)
+      window.removeEventListener(AUTH_CHANGE_EVENT, syncPathname)
     }
   }, [])
 
@@ -92,7 +94,7 @@ function resolveStoredRolePath(account: Account | null): string | null {
 const root = document.getElementById('root')
 
 if (!root) {
-  document.body.textContent = '页面加载失败，请刷新后重试'
+  document.body.textContent = ERROR_MESSAGES.BOOTSTRAP_CRASH
 } else {
   createRoot(root).render(
     <React.StrictMode>

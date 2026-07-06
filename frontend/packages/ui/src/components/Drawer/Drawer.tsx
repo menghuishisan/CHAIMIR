@@ -18,6 +18,9 @@ export function Drawer({ open, title, side = 'right', onClose, children, classNa
   const panelRef = useRef<HTMLElement>(null)
   const previousActiveElement = useRef<HTMLElement | null>(null)
   const titleId = useId()
+  const touchStartX = useRef(0)
+  const currentTranslateX = useRef(0)
+  const [swipeStyle, setSwipeStyle] = React.useState<React.CSSProperties>({})
 
   useEffect(() => {
     if (!open) {
@@ -32,6 +35,7 @@ export function Drawer({ open, title, side = 'right', onClose, children, classNa
 
     return () => {
       document.body.style.overflow = ''
+      setSwipeStyle({})
     }
   }, [open])
 
@@ -54,10 +58,43 @@ export function Drawer({ open, title, side = 'right', onClose, children, classNa
     return null
   }
 
+  const handleTouchStart = (e: React.TouchEvent) => {
+    touchStartX.current = e.touches[0].clientX
+  }
+
+  const handleTouchMove = (e: React.TouchEvent) => {
+    const deltaX = e.touches[0].clientX - touchStartX.current
+    if ((side === 'right' && deltaX > 0) || (side === 'left' && deltaX < 0)) {
+      currentTranslateX.current = deltaX
+      setSwipeStyle({ transform: `translateX(${deltaX}px)`, transition: 'none' })
+    }
+  }
+
+  const handleTouchEnd = () => {
+    if (Math.abs(currentTranslateX.current) > 80) {
+      onClose()
+    } else {
+      setSwipeStyle({ transform: `translateX(0)`, transition: 'transform 0.4s var(--ease-spring-bouncy)' })
+    }
+    currentTranslateX.current = 0
+  }
+
   return (
     <div className="chaimir-drawer" role="presentation">
       <button className="chaimir-drawer__scrim" type="button" aria-label="关闭抽屉" onClick={onClose} />
-      <aside ref={panelRef} className={clsx('chaimir-drawer__panel', `is-${side}`, className)} role="dialog" aria-modal="true" aria-labelledby={titleId} tabIndex={-1} {...props}>
+      <aside
+        ref={panelRef}
+        className={clsx('chaimir-drawer__panel', `is-${side}`, className)}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        tabIndex={-1}
+        style={swipeStyle}
+        onTouchStart={handleTouchStart}
+        onTouchMove={handleTouchMove}
+        onTouchEnd={handleTouchEnd}
+        {...props}
+      >
         <header className="chaimir-drawer__header">
           <h2 id={titleId}>{title}</h2>
           <Button variant="ghost" size="sm" icon={<X size={16} />} aria-label="关闭抽屉" onClick={onClose} />

@@ -1,6 +1,8 @@
 // Content API：题库与模板中心,对应后端 M5 模块。
 
 import { ApiClient } from '../client'
+import type { ContentAuthorType, ContentDifficulty, ContentStatus, ContentType, ContentVisibility } from '../constants/content'
+import type { PaginatedResponse } from '../types/common'
 import type {
   CloneItemRequest,
   ContentAttachmentDownloadGrant,
@@ -13,11 +15,10 @@ import type {
   CreateItemRequest,
   CreatePaperRequest,
   NewVersionRequest,
-  PaginatedResponse,
   Paper,
   PaperDetail,
   UpdateItemRequest,
-} from '../types'
+} from '../types/content'
 
 /**
  * ContentApi 封装 M5 内容中心的前端调用。
@@ -30,15 +31,15 @@ export class ContentApi {
 
   // getItems 查询内容列表。
   async getItems(params?: {
-    type?: number
+    type?: ContentType
     category?: number
-    difficulty?: number
+    difficulty?: ContentDifficulty
     tag?: string
     kp?: string
     keyword?: string
-    visibility?: number
-    status?: number
-    author?: number
+    visibility?: ContentVisibility
+    status?: ContentStatus
+    author?: ContentAuthorType
     page?: number
     size?: number
   }): Promise<PaginatedResponse<ContentItem>> {
@@ -107,7 +108,7 @@ export class ContentApi {
 
   // listShared 浏览共享库。
   async listShared(params?: {
-    type?: number
+    type?: ContentType
     keyword?: string
     page?: number
     size?: number

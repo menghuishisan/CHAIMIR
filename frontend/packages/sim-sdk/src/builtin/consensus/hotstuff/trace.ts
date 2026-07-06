@@ -1,6 +1,7 @@
 // 本文件定义 HotStuff 仿真的代码追踪和教学叙事。
 
-import type { CodeTraceDef, NarrativeStep } from '../../../types';
+import type { CodeTraceDef } from '../../../types';
+import { phaseNarrative } from '../../packageTools';
 import { hotstuffPhases } from './model';
 
 export const hotstuffSource = [
@@ -50,20 +51,4 @@ export const hotstuffCodeTrace: CodeTraceDef = {
   ],
 };
 
-export const hotstuffNarrative: NarrativeStep[] = hotstuffPhases.map((phase, index) => ({
-  id: phase.id,
-  title: phase.label,
-  trigger: (state) => state.phase === phase.label,
-  highlight: [phase.id],
-  explain: `${phase.effect} ${phase.reason}`,
-  defaultDurationMs: 1200,
-  question:
-    index === hotstuffPhases.length - 2
-      ? {
-          prompt: 'HotStuff 三链提交是否依赖连续 QC?',
-          options: ['依赖', '不依赖'],
-          answer: '依赖',
-          checkpointId: 'hotstuff-three-chain',
-        }
-      : undefined,
-}));
+export const hotstuffNarrative = phaseNarrative(hotstuffPhases, 'hotstuff-three-chain');

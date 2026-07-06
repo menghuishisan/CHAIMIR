@@ -1,0 +1,126 @@
+/* IconButton 组件样式：稳定触达区、可见状态和工具栏级精细反馈。 */
+
+.chaimir-icon-button {
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  flex: 0 0 auto;
+  color: var(--color-text-sub);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition:
+    background var(--t) var(--ease),
+    border-color var(--t) var(--ease),
+    color var(--t) var(--ease),
+    box-shadow var(--t) var(--ease),
+    transform var(--t-fast) var(--ease-press);
+}
+
+.chaimir-icon-button--sm {
+  inline-size: 2rem;
+  block-size: 2rem;
+}
+
+.chaimir-icon-button--md {
+  inline-size: 2.5rem;
+  block-size: 2.5rem;
+}
+
+.chaimir-icon-button--lg {
+  inline-size: 3rem;
+  block-size: 3rem;
+}
+
+.chaimir-icon-button__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 0;
+}
+
+.chaimir-icon-button--ghost:hover:not(:disabled),
+.chaimir-icon-button--ghost.is-selected {
+  color: var(--color-primary-text);
+  background: var(--color-primary-soft);
+  border-color: var(--color-border);
+}
+
+.chaimir-icon-button--outline {
+  color: var(--color-text);
+  background: var(--color-bg);
+  border-color: var(--color-border);
+  box-shadow: var(--shadow-xs);
+}
+
+.chaimir-icon-button--outline:hover:not(:disabled),
+.chaimir-icon-button--outline.is-selected {
+  color: var(--color-primary-text);
+  border-color: var(--color-primary);
+  box-shadow: var(--shadow);
+}
+
+.chaimir-icon-button--primary {
+  color: var(--color-primary-fg);
+  background: var(--color-primary);
+  box-shadow: inset 0 1px 0 var(--color-highlight), 0 1px 2px var(--color-primary-shadow);
+}
+
+.chaimir-icon-button--primary:hover:not(:disabled) {
+  background: var(--color-primary-hover);
+  box-shadow: inset 0 1px 0 var(--color-highlight), 0 4px 8px var(--color-primary-shadow-strong);
+}
+
+.chaimir-icon-button--danger {
+  color: var(--color-danger);
+  background: var(--color-danger-bg);
+  border-color: var(--color-danger-border);
+}
+
+.chaimir-icon-button--danger:hover:not(:disabled) {
+  color: var(--color-primary-fg);
+  background: var(--color-danger-solid);
+}
+
+.chaimir-icon-button--on-dark {
+  color: var(--color-dark-text-sub);
+  background: transparent;
+  border-color: transparent;
+}
+
+.chaimir-icon-button--on-dark:hover:not(:disabled),
+.chaimir-icon-button--on-dark.is-selected {
+  color: var(--color-on-dark-accent);
+  background: var(--color-dark-elevated);
+  border-color: var(--color-dark-border);
+}
+
+.chaimir-icon-button:hover:not(:disabled) {
+  transform: translateY(-1px);
+}
+
+.chaimir-icon-button:active:not(:disabled) {
+  transform: scale(0.96);
+  filter: brightness(0.9);
+}
+
+.chaimir-icon-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+  transform: none;
+}
+
+@media (pointer: coarse) {
+  .chaimir-icon-button--sm,
+  .chaimir-icon-button--md {
+    inline-size: 2.75rem;
+    block-size: 2.75rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chaimir-icon-button {
+    transition: none;
+  }
+}

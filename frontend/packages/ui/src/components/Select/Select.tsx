@@ -4,6 +4,7 @@
 import React, { useState, useRef, useEffect, useId } from 'react'
 import { ChevronDown, Check } from 'lucide-react'
 import { clsx } from 'clsx'
+import { triggerHaptic } from '../../utils/haptics'
 import './Select.css'
 
 export interface SelectOption {
@@ -176,7 +177,10 @@ export const Select = React.forwardRef<HTMLDivElement, SelectProps>(
           id={triggerId}
           type="button"
           className="chaimir-select__trigger"
-          onClick={handleToggle}
+          onClick={() => {
+            triggerHaptic(10)
+            handleToggle()
+          }}
           onKeyDown={handleKeyDown}
           disabled={disabled}
           aria-haspopup="listbox"
@@ -210,7 +214,12 @@ export const Select = React.forwardRef<HTMLDivElement, SelectProps>(
                 aria-selected={option.value === selectedValue}
                 aria-disabled={option.disabled || undefined}
                 onMouseEnter={() => !option.disabled && setActiveIndex(index)}
-                onClick={() => !option.disabled && handleSelect(option.value)}
+                onClick={() => {
+                  if (!option.disabled) {
+                    triggerHaptic(10)
+                    handleSelect(option.value)
+                  }
+                }}
               >
                 {option.label}
                 {option.value === selectedValue && (

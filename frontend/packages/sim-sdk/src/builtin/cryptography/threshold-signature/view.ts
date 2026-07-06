@@ -10,12 +10,13 @@ import { thresholdSignaturePhases, type ThresholdState } from './model';
  * renderThresholdSignatureView 输出份额签名网络、份额矩阵和门限流程。
  */
 export function renderThresholdSignatureView(state: ThresholdState): ViewSpec {
+  const valid = validShares(state);
   return {
-    summary: `门限 ${state.threshold}/${state.holders.length},有效部分签名 ${validShares(state)},聚合${state.aggregateValid ? '通过' : '等待'}。`,
+    summary: `门限 ${state.threshold}/${state.holders.length},有效部分签名 ${valid},还差 ${Math.max(0, state.threshold - valid)},聚合${state.aggregateValid ? '通过' : '等待'}。`,
     patterns: [
-      graphPattern('threshold-graph', '份额签名网络', graphNodes(state.holders), graphEdges(state.messages), 'main'),
-      matrixPattern('threshold-matrix', '份额状态', state.holders.map((holder) => holder.label), ['份额', '部分签名', '有效性'], shareCells(state), 'side'),
-      pipelinePattern('threshold-pipeline', '门限签名流程', pipelineSteps([...thresholdSignaturePhases], state.phaseIndex, validShares(state) < state.threshold && state.phaseIndex >= 4), thresholdSignaturePhases[state.phaseIndex].id, 'bottom'),
+      graphPattern('threshold-graph', `份额签名收集网络,有效 ${valid}/${state.threshold}`, graphNodes(state.holders), graphEdges(state.messages), 'main'),
+      matrixPattern('threshold-matrix', '门限份额与部分签名矩阵', state.holders.map((holder) => holder.label), ['份额', '部分签名', '有效性'], shareCells(state), 'side'),
+      pipelinePattern('threshold-pipeline', '分发份额 -> 收集部分签名 -> 聚合验证流程', pipelineSteps([...thresholdSignaturePhases], state.phaseIndex, valid < state.threshold && state.phaseIndex >= 4), thresholdSignaturePhases[state.phaseIndex].id, 'bottom'),
     ],
   };
 }

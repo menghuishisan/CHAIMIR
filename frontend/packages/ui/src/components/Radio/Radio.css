@@ -10,6 +10,7 @@
   display: inline-flex;
   align-items: center;
   gap: var(--space-2);
+  min-block-size: 2rem;
   cursor: pointer;
   user-select: none;
 }
@@ -43,7 +44,13 @@
   border: 2px solid var(--color-border-strong);
   border-radius: var(--radius-full);
   background: var(--color-bg);
-  transition: background var(--t-fast) var(--ease), border-color var(--t-fast) var(--ease), opacity var(--t-fast) var(--ease);
+  box-shadow: inset 0 1px 0 var(--color-highlight);
+  transition:
+    background var(--t-fast) var(--ease),
+    border-color var(--t-fast) var(--ease),
+    box-shadow var(--t-fast) var(--ease),
+    opacity var(--t-fast) var(--ease),
+    transform var(--t-fast) var(--ease-press);
   flex-shrink: 0;
 }
 
@@ -53,32 +60,37 @@
   border-radius: var(--radius-full);
   background: var(--color-primary);
   transform: scale(0);
-  transition: transform var(--t-fast) var(--ease);
+  transition: transform 0.4s var(--ease-spring-bouncy);
 }
 
 /* === 状态 === */
 
-/* Hover */
+/* 悬浮态 */
 .chaimir-radio:hover:not(.chaimir-radio--disabled) .chaimir-radio__circle {
   border-color: var(--color-primary);
 }
 
-/* Focus */
+.chaimir-radio:active:not(.chaimir-radio--disabled) .chaimir-radio__circle {
+  transform: scale(0.92);
+}
+
+/* 焦点态 */
 .chaimir-radio__input:focus-visible + .chaimir-radio__circle {
   outline: 2px solid var(--color-focus-ring);
   outline-offset: 2px;
 }
 
-/* Checked */
+/* 选中态 */
 .chaimir-radio__circle--checked {
   border-color: var(--color-primary);
+  box-shadow: 0 0 0 3px var(--color-primary-soft);
 }
 
 .chaimir-radio__circle--checked .chaimir-radio__dot {
   transform: scale(1);
 }
 
-/* Error */
+/* 错误态 */
 .chaimir-radio__circle--error {
   border-color: var(--color-danger-border);
 }
@@ -95,5 +107,11 @@
   .chaimir-radio__circle,
   .chaimir-radio__dot {
     transition: none;
+  }
+}
+
+@media (pointer: coarse) {
+  .chaimir-radio {
+    min-block-size: 2.75rem;
   }
 }

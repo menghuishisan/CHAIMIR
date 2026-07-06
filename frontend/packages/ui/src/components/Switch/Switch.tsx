@@ -2,6 +2,7 @@
 
 import React from 'react'
 import { clsx } from 'clsx'
+import { triggerHaptic } from '../../utils/haptics'
 import './Switch.css'
 
 export interface SwitchProps extends Omit<React.InputHTMLAttributes<HTMLInputElement>, 'type' | 'size'> {
@@ -39,6 +40,13 @@ export const Switch = React.forwardRef<HTMLInputElement, SwitchProps>(
       checked && 'chaimir-switch--checked'
     )
 
+    const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+      triggerHaptic(10)
+      if (props.onChange) {
+        props.onChange(e)
+      }
+    }
+
     return (
       <label className={wrapperClasses}>
         <input
@@ -48,6 +56,7 @@ export const Switch = React.forwardRef<HTMLInputElement, SwitchProps>(
           disabled={disabled}
           checked={checked}
           aria-invalid={error}
+          onChange={handleChange}
           {...props}
         />
         <span className={switchClasses} aria-hidden="true">

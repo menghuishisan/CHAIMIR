@@ -1,6 +1,6 @@
 ﻿// 路由支撑工具：隐藏资源页、空态、查询参数和默认时间范围。
 
-import type { AppDefinition, DataColumn, ResourceResult } from '@chaimir/shared'
+import type { AppDefinition, DataColumn, ResourceResult } from '../app/types'
 
 /**
  * hiddenResourceRoute 创建不进入侧栏的详情、流程或工作台入口。

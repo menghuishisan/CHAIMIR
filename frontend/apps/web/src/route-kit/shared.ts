@@ -2,8 +2,8 @@
 
 import { createElement } from 'react'
 import { Bell, Download, Flag, Megaphone, PlayCircle, Swords, UserCog } from 'lucide-react'
-import { getRefreshToken, saveSession, saveStoredUser } from '@chaimir/shared'
-import type { AppDefinition } from '@chaimir/shared'
+import { getRefreshToken, saveSession, saveStoredUser } from '../lib/storage'
+import type { AppDefinition } from '../app/types'
 import { accountStatusText, dateText, idOf, listResult, sessionStatusText, text, toRows, workspaceInfo } from './results'
 import { announcementColumns, notificationColumns, sessionColumns, transferTaskColumns } from './columns'
 import { defaultPageParams } from './pagination'

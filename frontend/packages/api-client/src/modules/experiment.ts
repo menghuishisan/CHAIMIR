@@ -2,6 +2,8 @@
 // 对应后端 M7 模块
 
 import { ApiClient } from '../client'
+import type { ExperimentStatus } from '../constants/experiment'
+import type { PaginatedResponse } from '../types/common'
 import type {
   Experiment,
   ExperimentRequest,
@@ -10,14 +12,13 @@ import type {
   ValidationResult,
   CheckpointJudgeRequest,
   ProgressDTO,
-  PaginatedResponse,
   CheckpointResult,
   ReportDTO,
   ExperimentGroup,
   ExperimentGroupMemberRequest,
   ExperimentGroupRequest,
   GradeReportRequest,
-} from '../types'
+} from '../types/experiment'
 
 /**
  * ExperimentApi 封装后端 M7 实验编排、实例、报告和协作小组接口。
@@ -33,7 +34,7 @@ export class ExperimentApi {
    */
   async getExperiments(params?: {
     course_id?: string
-    status?: number
+    status?: ExperimentStatus
     page?: number
     size?: number
   }): Promise<PaginatedResponse<Experiment>> {

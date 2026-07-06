@@ -10,12 +10,13 @@ import { labelHotStuffReplica } from './kernel';
  * renderHotStuffView 输出 QC 链、副本网络和消息泳道。
  */
 export function renderHotStuffView(state: HotStuffState): ViewSpec {
+  const liveVotes = state.replicas.filter((replica) => replica.voted && !replica.faulty).length;
   return {
-    summary: `视图 ${state.view},领导者 ${labelHotStuffReplica(state, state.leaderId)},High QC ${state.highQcBlock},锁定块 ${state.lockedBlock},提交块 ${state.committedBlock ?? '未提交'}。`,
+    summary: `视图 ${state.view},领导者 ${labelHotStuffReplica(state, state.leaderId)},有效投票 ${liveVotes}/${state.replicas.length},High QC ${state.highQcBlock},锁定块 ${state.lockedBlock},提交块 ${state.committedBlock ?? '未提交'}。`,
     patterns: [
-      chainPattern('hotstuff-chain', 'HotStuff QC 链', hotstuffBlocks(state.blocks), [], 'main'),
-      graphPattern('hotstuff-graph', 'HotStuff 副本网络', replicaNodes(state), graphEdges(state.messages), 'side'),
-      lanePattern('hotstuff-lane', 'HotStuff 消息时序', state.replicas.map((replica) => replica.label), laneMessages(state.messages, (id) => labelHotStuffReplica(state, id)), state.tick, 'side'),
+      chainPattern('hotstuff-chain', `HotStuff 三链提交视图,High QC ${state.highQcBlock}`, hotstuffBlocks(state.blocks), [], 'main'),
+      graphPattern('hotstuff-graph', `HotStuff 领导者提案与投票网络,投票 ${liveVotes}`, replicaNodes(state), graphEdges(state.messages), 'side'),
+      lanePattern('hotstuff-lane', 'HotStuff propose / vote / QC 时序', state.replicas.map((replica) => replica.label), laneMessages(state.messages, (id) => labelHotStuffReplica(state, id)), state.tick, 'side'),
     ],
   };
 }
@@ -31,5 +32,5 @@ function replicaNodes(state: HotStuffState): ViewNode[] {
  * hotstuffBlocks 将 HotStuff 区块转换成链式 QC 可视化结构。
  */
 function hotstuffBlocks(blocks: HotStuffBlock[]): ChainBlock[] {
-  return blocks.map((block, index) => ({ id: block.id, height: index, hash: block.hash, parentHash: block.parentId ?? '', label: block.view === 0 ? '创世块' : `视图 ${block.view}`, status: block.committed ? 'canonical' : block.qc ? 'pending' : 'orphaned' }));
+  return blocks.map((block, index) => ({ id: block.id, height: index, hash: block.hash, parentHash: block.parentId ?? '', label: block.view === 0 ? '创世块' : block.committed ? `提交 v${block.view}` : block.qc ? `QC v${block.view}` : `提案 v${block.view}`, status: block.committed ? 'canonical' : block.qc ? 'pending' : 'orphaned' }));
 }

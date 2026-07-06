@@ -1,6 +1,7 @@
 // 本文件定义延迟丢包与可靠重传仿真的代码追踪和教学叙事。
 
-import type { CodeTraceDef, NarrativeStep } from '../../../types';
+import type { CodeTraceDef } from '../../../types';
+import { phaseNarrative } from '../../packageTools';
 import { latencyLossPhases } from './model';
 
 export const latencyLossSource = [
@@ -45,20 +46,4 @@ export const latencyLossCodeTrace: CodeTraceDef = {
   ],
 };
 
-export const latencyLossNarrative: NarrativeStep[] = latencyLossPhases.map((phase, index) => ({
-  id: phase.id,
-  title: phase.label,
-  trigger: (state) => state.phase === phase.label,
-  highlight: [phase.id],
-  explain: `${phase.effect} ${phase.reason}`,
-  defaultDurationMs: 1200,
-  question:
-    index === latencyLossPhases.length - 1
-      ? {
-          prompt: '当前丢失的数据包是否已经可靠重传并完成窗口恢复?',
-          options: ['已经完成', '还没有'],
-          answer: '已经完成',
-          checkpointId: 'latency-loss-delivered',
-        }
-      : undefined,
-}));
+export const latencyLossNarrative = phaseNarrative(latencyLossPhases, 'latency-loss-delivered');

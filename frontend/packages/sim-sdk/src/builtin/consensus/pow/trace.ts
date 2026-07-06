@@ -1,6 +1,7 @@
 // 本文件定义 PoW 最长链仿真的代码追踪和叙事说明。
 
-import type { CodeTraceDef, NarrativeStep } from '../../../types';
+import type { CodeTraceDef } from '../../../types';
+import { phaseNarrative } from '../../packageTools';
 import { powPhases } from './model';
 
 export const powSource = [
@@ -58,20 +59,4 @@ export const powCodeTrace: CodeTraceDef = {
   ],
 };
 
-export const powNarrative: NarrativeStep[] = powPhases.map((phase, index) => ({
-  id: phase.id,
-  title: phase.label,
-  trigger: (state) => state.phase === phase.label,
-  highlight: [phase.id],
-  explain: `${phase.effect} ${phase.reason}`,
-  defaultDurationMs: 1200,
-  question:
-    index === powPhases.length - 1
-      ? {
-          prompt: '当前规范链是否由最高累计工作量决定?',
-          options: ['是', '否'],
-          answer: '是',
-          checkpointId: 'pow-fork-choice',
-        }
-      : undefined,
-}));
+export const powNarrative = phaseNarrative(powPhases, 'pow-fork-choice');

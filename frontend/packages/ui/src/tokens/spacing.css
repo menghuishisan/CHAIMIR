@@ -24,9 +24,9 @@
 
   --radius-xs: 0.375rem;  /* 6px */
   --radius-sm: 0.5rem;    /* 8px */
-  --radius: 0.75rem;      /* 12px - 默认 */
+  --radius: 0.75rem;      /* 12px - 新默认 */
   --radius-lg: 1rem;      /* 16px */
-  --radius-xl: 1.25rem;   /* 20px */
+  --radius-xl: 1.5rem;    /* 24px - 弹窗使用 */
   --radius-full: 999px;   /* 完全圆角 */
 
   /* === 阴影（柔和分层） ===

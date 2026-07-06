@@ -1,6 +1,7 @@
 // 本文件定义数字签名仿真的代码追踪和教学叙事。
 
-import type { CodeTraceDef, NarrativeStep } from '../../../types';
+import type { CodeTraceDef } from '../../../types';
+import { phaseNarrative } from '../../packageTools';
 import { digitalSignaturePhases } from './model';
 
 export const digitalSignatureSource = [
@@ -46,20 +47,4 @@ export const digitalSignatureCodeTrace: CodeTraceDef = {
   ],
 };
 
-export const digitalSignatureNarrative: NarrativeStep[] = digitalSignaturePhases.map((phase, index) => ({
-  id: phase.id,
-  title: phase.label,
-  trigger: (state) => state.phase === phase.label,
-  highlight: [phase.id],
-  explain: `${phase.effect} ${phase.reason}`,
-  defaultDurationMs: 1200,
-  question:
-    index === digitalSignaturePhases.length - 1
-      ? {
-          prompt: '当前签名是否同时满足来源可信和 nonce 新鲜?',
-          options: ['满足', '不满足'],
-          answer: '满足',
-          checkpointId: 'signature-valid',
-        }
-      : undefined,
-}));
+export const digitalSignatureNarrative = phaseNarrative(digitalSignaturePhases, 'signature-valid');

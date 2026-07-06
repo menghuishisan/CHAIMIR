@@ -9,6 +9,7 @@ import (
 	"chaimir/internal/platform/auth"
 	"chaimir/internal/platform/httpx"
 	"chaimir/internal/platform/response"
+	"chaimir/internal/platform/timex"
 	"chaimir/pkg/apperr"
 
 	"github.com/gin-gonic/gin"
@@ -75,7 +76,7 @@ func (a adminAPI) schoolStatistics(c *gin.Context) {
 // listTenants 返回租户列表。
 func (a adminAPI) listTenants(c *gin.Context) {
 	out, err := a.svc.ListTenants(c.Request.Context())
-	httpx.Write(c, out, err)
+	httpx.Write(c, tenantSummaryDTOs(out), err)
 }
 
 // listApplications 返回入驻申请列表。
@@ -85,7 +86,7 @@ func (a adminAPI) listApplications(c *gin.Context) {
 		return
 	}
 	out1, err := a.svc.ListApplications(c.Request.Context(), int16(status))
-	httpx.Write(c, out1, err)
+	httpx.Write(c, tenantApplicationSummaryDTOs(out1), err)
 }
 
 // queryAudit 查询审计。
@@ -99,7 +100,7 @@ func (a adminAPI) queryAudit(c *gin.Context) {
 		return
 	}
 	result, err := a.svc.QueryAudit(c.Request.Context(), query)
-	httpx.WritePage(c, result.List, result.Total, int(result.Page), int(result.Size), err)
+	httpx.WritePage(c, auditLogEntryDTOs(result.List), result.Total, int(result.Page), int(result.Size), err)
 }
 
 // exportAudit 导出审计 CSV。
@@ -271,4 +272,67 @@ func queryRFC3339(c *gin.Context, key string) (time.Time, bool) {
 		return time.Time{}, false
 	}
 	return value, true
+}
+
+func tenantSummaryDTOs(items []contracts.TenantSummary) []TenantSummaryDTO {
+	out := make([]TenantSummaryDTO, 0, len(items))
+	for _, item := range items {
+		out = append(out, TenantSummaryDTO{
+			TenantID:   item.TenantID,
+			Code:       item.Code,
+			Name:       item.Name,
+			Type:       item.Type,
+			Status:     item.Status,
+			DeployMode: item.DeployMode,
+			ExpireAt:   timex.RFC3339OrEmpty(valueTime(item.ExpireAt)),
+			CreatedAt:  timex.RFC3339OrEmpty(item.CreatedAt),
+			UpdatedAt:  timex.RFC3339OrEmpty(item.UpdatedAt),
+		})
+	}
+	return out
+}
+
+func tenantApplicationSummaryDTOs(items []contracts.TenantApplicationSummary) []TenantApplicationSummaryDTO {
+	out := make([]TenantApplicationSummaryDTO, 0, len(items))
+	for _, item := range items {
+		out = append(out, TenantApplicationSummaryDTO{
+			ApplicationID: item.ApplicationID,
+			SchoolName:    item.SchoolName,
+			SchoolType:    item.SchoolType,
+			ContactName:   item.ContactName,
+			ContactPhone:  item.ContactPhone,
+			ContactEmail:  item.ContactEmail,
+			Status:        item.Status,
+			SubmittedAt:   timex.RFC3339OrEmpty(item.SubmittedAt),
+			ReviewedAt:    timex.RFC3339OrEmpty(valueTime(item.ReviewedAt)),
+		})
+	}
+	return out
+}
+
+func auditLogEntryDTOs(items []contracts.AuditLogEntry) []AuditLogEntryDTO {
+	out := make([]AuditLogEntryDTO, 0, len(items))
+	for _, item := range items {
+		out = append(out, AuditLogEntryDTO{
+			ID:         item.ID,
+			TenantID:   item.TenantID,
+			ActorID:    item.ActorID,
+			ActorRole:  item.ActorRole,
+			Action:     item.Action,
+			TargetType: item.TargetType,
+			TargetID:   item.TargetID,
+			Detail:     item.Detail,
+			IP:         item.IP,
+			TraceID:    item.TraceID,
+			CreatedAt:  timex.RFC3339OrEmpty(item.CreatedAt),
+		})
+	}
+	return out
+}
+
+func valueTime(value *time.Time) time.Time {
+	if value == nil {
+		return time.Time{}
+	}
+	return *value
 }

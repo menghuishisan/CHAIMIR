@@ -1,6 +1,7 @@
 // 本文件定义 Raft 仿真的代码追踪和教学叙事。
 
-import type { CodeTraceDef, NarrativeStep } from '../../../types';
+import type { CodeTraceDef } from '../../../types';
+import { phaseNarrative } from '../../packageTools';
 import { raftPhases } from './model';
 
 export const raftSource = [
@@ -53,20 +54,4 @@ export const raftCodeTrace: CodeTraceDef = {
   ],
 };
 
-export const raftNarrative: NarrativeStep[] = raftPhases.map((phase, index) => ({
-  id: phase.id,
-  title: phase.label,
-  trigger: (state) => state.phase === phase.label,
-  highlight: [phase.id],
-  explain: `${phase.effect} ${phase.reason}`,
-  defaultDurationMs: 1200,
-  question:
-    index === raftPhases.length - 2
-      ? {
-          prompt: 'Raft 日志提交是否必须由多数派复制支撑?',
-          options: ['必须', '不需要'],
-          answer: '必须',
-          checkpointId: 'raft-majority-commit',
-        }
-      : undefined,
-}));
+export const raftNarrative = phaseNarrative(raftPhases, 'raft-majority-commit');

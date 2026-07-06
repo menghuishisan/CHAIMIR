@@ -10,7 +10,8 @@ import { patriciaTriePhases, type PatriciaTrieState } from './model';
  * renderPatriciaTrieView 基于内核状态生成 Patricia Trie 可视化。
  */
 export function renderPatriciaTrieView(state: PatriciaTrieState): ViewSpec {
-  return { summary: `根哈希 ${state.rootHash.slice(0, 8)},证明 key ${state.proofKey},缺失证明${state.proofValid ? '通过' : '等待'}。`, patterns: [treePattern('trie-tree', 'Patricia Trie', trieRoot(state), highlightedPath(state), 'main'), matrixPattern('trie-matrix', '路径校验', state.entries.map((entry) => entry.key), ['路径', '值', '哈希'], trieCells(state), 'side'), pipelinePattern('trie-pipeline', 'Trie 更新流程', pipelineSteps(patriciaTriePhases, state.phaseIndex, !state.proofValid && state.phaseIndex >= 4), patriciaTriePhases[state.phaseIndex].id, 'bottom')] };
+  const path = highlightedPath(state);
+  return { summary: `根哈希 ${state.rootHash.slice(0, 8)},证明 key ${state.proofKey},压缩路径 ${path.join(' -> ')},缺失证明${state.proofValid ? '通过' : '等待'}。`, patterns: [treePattern('trie-tree', 'Patricia Trie 压缩路径证明', trieRoot(state), path, 'main'), matrixPattern('trie-matrix', 'Key Nibble 路径与节点哈希矩阵', state.entries.map((entry) => entry.key), ['压缩路径', '值', '节点哈希'], trieCells(state), 'side'), pipelinePattern('trie-pipeline', 'Key 拆分 -> 路径查找 -> 根哈希验证流程', pipelineSteps(patriciaTriePhases, state.phaseIndex, !state.proofValid && state.phaseIndex >= 4), patriciaTriePhases[state.phaseIndex].id, 'bottom')] };
 }
 
 /**
@@ -48,7 +49,7 @@ function trieCells(state: PatriciaTrieState): MatrixCell[][] {
   return matrixCells(state.entries.map((entry) => entry.key), ['路径', '值', '哈希'], (row, column) => {
     const entry = state.entries.find((item) => item.key === row);
     if (!entry) return { label: '无', status: 'empty' };
-    if (column === '路径') return { label: entry.path, status: 'yes' };
+    if (column === '压缩路径') return { label: entry.path, status: 'yes' };
     if (column === '值') return { label: entry.value, status: entry.updated ? 'pending' : 'yes' };
     return { label: entry.hash.slice(0, 6), status: state.proofValid ? 'yes' : 'fault' };
   });

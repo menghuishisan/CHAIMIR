@@ -4,6 +4,7 @@ import React from 'react';
 import { clsx } from 'clsx';
 import { BarChart3, GitBranch, Layers3, Network, Rows3, Table2, Workflow } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
+import { triggerHaptic } from '@chaimir/ui';
 import type {
   ChainPattern,
   ChartSeries,
@@ -67,12 +68,27 @@ function GraphRenderer({
   const nodes = layoutGraphNodes(pattern.data.nodes, pattern.data.layout);
   const nodeById = new Map(nodes.map((node) => [node.id, node]));
   const activeEdges = pattern.data.edges.filter((edge) => edge.status === 'active' || edge.status === 'success').length;
-  const showEdgeLabels = pattern.data.edges.length <= 14;
+  const failedEdges = pattern.data.edges.filter((edge) => edge.status === 'failed').length;
+  const riskyNodes = pattern.data.nodes.filter((node) => node.status === 'danger' || node.status === 'warning').length;
+  const showEdgeLabels = pattern.data.edges.length <= 10;
+  const markerBaseId = makeSvgId(pattern.id, 'edge-marker');
 
   return (
     <section className="sim-pattern sim-pattern--graph" aria-label={pattern.title}>
-      <PatternHeader mode="graph" title={pattern.title} meta={`${pattern.data.nodes.length} 个节点 / ${activeEdges} 条活跃消息`} />
+      <PatternHeader mode="graph" title={pattern.title} meta={`${pattern.data.nodes.length} 节点 / ${activeEdges} 活跃 / ${failedEdges} 异常`} />
+      <PatternInsight items={[['风险节点', riskyNodes], ['消息总数', pattern.data.edges.length]]} />
       <svg className="sim-graph" viewBox="0 0 100 100" role="img" aria-label={`${pattern.title}图网络`}>
+        <defs>
+          <marker className="sim-graph__marker is-muted" id={`${markerBaseId}-muted`} markerHeight="5" markerUnits="strokeWidth" markerWidth="5" orient="auto" refX="4.5" refY="2.5">
+            <path d="M0,0 L5,2.5 L0,5 Z" />
+          </marker>
+          <marker className="sim-graph__marker is-accent" id={`${markerBaseId}-accent`} markerHeight="5" markerUnits="strokeWidth" markerWidth="5" orient="auto" refX="4.5" refY="2.5">
+            <path d="M0,0 L5,2.5 L0,5 Z" />
+          </marker>
+          <marker className="sim-graph__marker is-danger" id={`${markerBaseId}-danger`} markerHeight="5" markerUnits="strokeWidth" markerWidth="5" orient="auto" refX="4.5" refY="2.5">
+            <path d="M0,0 L5,2.5 L0,5 Z" />
+          </marker>
+        </defs>
         {pattern.data.edges.map((edge) => {
           const from = nodeById.get(edge.from);
           const to = nodeById.get(edge.to);
@@ -81,13 +97,14 @@ function GraphRenderer({
           const progress = processProgress(edge, reducedMotion);
           const pulse = pointOnLine(line, progress);
           return (
-            <g className="sim-graph__edge-group" key={edge.id} {...selectableElementProps(edge.id, onSelectElement, 'edge')}>
+            <g className={clsx('sim-graph__edge-group', selectedElementId === edge.id && 'is-selected')} key={edge.id} {...selectableElementProps(edge.id, onSelectElement, 'edge')}>
               <line
                 className={clsx('sim-graph__edge', `is-${edge.status}`)}
                 x1={line.x1}
                 y1={line.y1}
                 x2={line.x2}
                 y2={line.y2}
+                markerEnd={`url(#${markerBaseId}-${graphMarkerTone(edge.status)})`}
               />
               <circle className={clsx('sim-graph__pulse', `is-${edge.status}`)} cx={pulse.x} cy={pulse.y} r="1.3">
                 <title>{edge.process?.label ?? edge.detail ?? edge.label}</title>
@@ -137,9 +154,11 @@ function ChainRenderer({
 }): React.ReactElement {
   const canonical = pattern.data.blocks;
   const forkBlocks = pattern.data.forks.flat();
+  const attackerBlocks = forkBlocks.concat(canonical).filter((block) => block.status === 'attacker').length;
   return (
     <section className="sim-pattern sim-pattern--chain" aria-label={pattern.title}>
       <PatternHeader mode="chain" title={pattern.title} meta={`${canonical.length} 个主链块 / ${forkBlocks.length} 个分叉块`} />
+      <PatternInsight items={[['规范链尖', pattern.data.canonicalTip ?? '等待'], ['攻击块', attackerBlocks]]} />
       <div className="sim-chain-board" role="list" aria-label="主链与分叉">
         <div className="sim-chain-row">
           <span className="sim-chain-row__label">主链</span>
@@ -182,9 +201,10 @@ function TreeRenderer({
   selectedElementId?: string;
   onSelectElement?: (elementId: string, elementType?: string) => void;
 }): React.ReactElement {
+  const nodeCount = countTreeNodes(pattern.data.root);
   return (
     <section className="sim-pattern sim-pattern--tree" aria-label={pattern.title}>
-      <PatternHeader mode="tree" title={pattern.title} meta={`证明路径 ${pattern.data.highlightedPath.length} 层`} />
+      <PatternHeader mode="tree" title={pattern.title} meta={`${nodeCount} 节点 / 路径 ${pattern.data.highlightedPath.length} 层`} />
       <div className="sim-tree">{renderTreeNode(pattern.data.root, pattern.data.highlightedPath, selectedElementId, onSelectElement, true)}</div>
     </section>
   );
@@ -200,8 +220,9 @@ function renderTreeNode(
   onSelectElement?: (elementId: string, elementType?: string) => void,
   isRoot = false
 ): React.ReactElement {
+  const pathParent = node.children?.some((child) => treeContainsPath(child, path)) ?? false;
   return (
-    <div className={clsx('sim-tree__node', isRoot && 'is-root', path.includes(node.id) && 'is-highlighted', selectedElementId === node.id && 'is-selected')}>
+    <div className={clsx('sim-tree__node', isRoot && 'is-root', path.includes(node.id) && 'is-highlighted', pathParent && 'is-path-parent', selectedElementId === node.id && 'is-selected')}>
       <div className="sim-tree__box" {...selectableElementProps(node.id, onSelectElement, 'tree-node')}>
         <span>{node.label}</span>
         <code>{node.hash.slice(0, 10)}</code>
@@ -233,7 +254,8 @@ function MatrixRenderer({
   }, {});
   return (
     <section className="sim-pattern sim-pattern--matrix" aria-label={pattern.title}>
-      <PatternHeader mode="matrix" title={pattern.title} meta={`通过 ${statusCounts.yes ?? 0} / 异常 ${statusCounts.fault ?? 0}`} />
+      <PatternHeader mode="matrix" title={pattern.title} meta={`通过 ${statusCounts.yes ?? 0} / 处理中 ${statusCounts.pending ?? 0} / 异常 ${statusCounts.fault ?? 0}`} />
+      <PatternInsight items={[['拒绝', statusCounts.no ?? 0], ['等待', statusCounts.empty ?? 0]]} />
       <div className="sim-matrix-wrap">
         <table className="sim-matrix">
           <thead>
@@ -288,14 +310,17 @@ function PipelineRenderer({
   onSelectElement?: (elementId: string, elementType?: string) => void;
 }): React.ReactElement {
   const complete = pattern.data.steps.filter((step) => step.status === 'complete').length;
+  const running = pattern.data.steps.find((step) => step.status === 'running');
   return (
     <section className="sim-pattern sim-pattern--pipeline" aria-label={pattern.title}>
       <PatternHeader mode="pipeline" title={pattern.title} meta={`${complete}/${pattern.data.steps.length} 步完成`} />
+      {running && <PatternInsight items={[['当前步骤', running.label], ['状态', pipelineStatusLabel(running.status)]]} />}
       <ol className="sim-pipeline">
         {pattern.data.steps.map((step, index) => (
           <li
             className={clsx('sim-pipeline__step', `is-${step.status}`, selectedElementId === step.id && 'is-selected')}
             key={step.id}
+            aria-current={step.status === 'running' ? 'step' : undefined}
             {...selectableElementProps(step.id, onSelectElement, 'step')}
           >
             <i>{index + 1}</i>
@@ -304,6 +329,7 @@ function PipelineRenderer({
             {step.process && (
               <span className="sim-pipeline__progress" aria-label={`${step.process.label}${Math.round(step.process.progress * 100)}%`}>
                 <span style={{ inlineSize: `${Math.round(processSpanProgress(step.process, reducedMotion) * 100)}%` }} />
+                <em>{Math.round(processSpanProgress(step.process, reducedMotion) * 100)}%</em>
               </span>
             )}
           </li>
@@ -328,10 +354,23 @@ function LaneRenderer({
   onSelectElement?: (elementId: string, elementType?: string) => void;
 }): React.ReactElement {
   const maxTime = Math.max(1, pattern.data.currentTime, ...pattern.data.messages.map((message) => message.endAt ?? message.at));
+  const dropped = pattern.data.messages.filter((message) => message.status === 'dropped').length;
+  const timeTicks = [0, Math.round(maxTime / 2), maxTime];
   return (
     <section className="sim-pattern sim-pattern--lane" aria-label={pattern.title}>
       <PatternHeader mode="lane" title={pattern.title} meta={`当前时间 ${pattern.data.currentTime} / 消息 ${pattern.data.messages.length}`} />
+      <PatternInsight items={[['参与方', pattern.data.actors.length], ['丢弃', dropped]]} />
       <div className="sim-lane">
+        <div className="sim-lane__axis" aria-hidden="true">
+          <span />
+          <div>
+            {timeTicks.map((tick, index) => (
+              <small key={`${tick}-${index}`} style={{ insetInlineStart: `${index === 0 ? 0 : index === 1 ? 50 : 100}%` }}>
+                t{tick}
+              </small>
+            ))}
+          </div>
+        </div>
         {pattern.data.actors.map((actor) => (
           <div className="sim-lane__row" key={actor}>
             <span className="sim-lane__actor">{actor}</span>
@@ -378,9 +417,11 @@ function ChartRenderer({
   const minX = Math.min(0, ...pattern.data.series.flatMap((series) => series.points.map((point) => point.x)));
   const maxX = Math.max(1, ...pattern.data.series.flatMap((series) => series.points.map((point) => point.x)));
   const ticks = chartTicks(maxY);
+  const latest = pattern.data.series.map((series) => series.points[series.points.length - 1]?.y ?? 0);
   return (
     <section className="sim-pattern sim-pattern--chart" aria-label={pattern.title}>
       <PatternHeader mode="chart" title={pattern.title} meta={`最大值 ${maxY}${pattern.data.unit}`} />
+      <PatternInsight items={[['序列', pattern.data.series.length], ['最新合计', latest.reduce((sum, value) => sum + value, 0)]]} />
       <div className="sim-chart">
         <svg className="sim-chart__plot" viewBox="0 0 100 60" role="img" aria-label={`${pattern.title}趋势图`}>
           <line className="sim-chart__axis" x1="8" y1="52" x2="96" y2="52" />
@@ -391,25 +432,29 @@ function ChartRenderer({
               <text className="sim-chart__tick" x="2" y={chartY(tick, maxY) + 2}>{tick}</text>
             </g>
           ))}
-          {pattern.data.series.map((series, index) => (
-            <g className={`sim-chart__series-line is-${index % 4}`} key={series.label}>
-              <polyline points={chartPolyline(series, minX, maxX, maxY)} />
-              {series.points.slice(-16).map((point) => {
-                const pointId = `${pattern.id}:${series.label}:${point.x}`;
-                const plotted = chartPoint(point, minX, maxX, maxY);
-                return (
-                  <circle
-                    className={clsx(selectedElementId === pointId && 'is-selected')}
-                    cx={plotted.x}
-                    cy={plotted.y}
-                    key={`${series.label}-${point.x}`}
-                    r="1.7"
-                    {...selectableElementProps(pointId, onSelectElement, 'point')}
-                  />
-                );
-              })}
-            </g>
-          ))}
+          <line className="sim-chart__current-marker" x1={chartPoint({ x: maxX, y: 0 }, minX, maxX, maxY).x} y1="4" x2={chartPoint({ x: maxX, y: 0 }, minX, maxX, maxY).x} y2="52" />
+          {pattern.data.series.map((series, index) => {
+            const visiblePoints = series.points.slice(-16);
+            return (
+              <g className={`sim-chart__series-line is-${index % 4}`} key={series.label}>
+                <polyline points={chartPolyline(series, minX, maxX, maxY)} />
+                {visiblePoints.map((point, pointIndex) => {
+                  const pointId = `${pattern.id}:${series.label}:${point.x}`;
+                  const plotted = chartPoint(point, minX, maxX, maxY);
+                  return (
+                    <circle
+                      className={clsx(pointIndex === visiblePoints.length - 1 && 'is-latest', selectedElementId === pointId && 'is-selected')}
+                      cx={plotted.x}
+                      cy={plotted.y}
+                      key={`${series.label}-${point.x}`}
+                      r="1.7"
+                      {...selectableElementProps(pointId, onSelectElement, 'point')}
+                    />
+                  );
+                })}
+              </g>
+            );
+          })}
         </svg>
         <div className="sim-chart__legend">
           {pattern.data.series.map((series, index) => (
@@ -458,6 +503,22 @@ function PatternHeader({ mode, title, meta }: { mode: PatternBinding['mode']; ti
       </span>
       <small>{meta}</small>
     </header>
+  );
+}
+
+/**
+ * PatternInsight 用紧凑键值对补充每种模式的过程指标,避免把关键信息塞进图形内部。
+ */
+function PatternInsight({ items }: { items: Array<[string, string | number]> }): React.ReactElement {
+  return (
+    <dl className="sim-pattern__insight">
+      {items.map(([label, value]) => (
+        <div key={label}>
+          <dt>{label}</dt>
+          <dd>{value}</dd>
+        </div>
+      ))}
+    </dl>
   );
 }
 
@@ -562,6 +623,20 @@ function pointOnLine(line: ReturnType<typeof shortenLine>, progress: number): { 
 }
 
 /**
+ * countTreeNodes 统计树节点数量,用于 Merkle/Trie 类结构给出规模感。
+ */
+function countTreeNodes(node: TreeNode): number {
+  return 1 + (node.children?.reduce((sum, child) => sum + countTreeNodes(child), 0) ?? 0);
+}
+
+/**
+ * treeContainsPath 判断当前子树是否包含高亮路径节点,用于标出 proof path 的父链。
+ */
+function treeContainsPath(node: TreeNode, path: string[]): boolean {
+  return path.includes(node.id) || Boolean(node.children?.some((child) => treeContainsPath(child, path)));
+}
+
+/**
  * messageTimePosition 将消息发送、到达和过程进度映射为泳道中的连续位置。
  */
 function messageTimePosition(message: LaneMessage, maxTime: number, reducedMotion: boolean): number {
@@ -629,6 +704,30 @@ function matrixStatusLabel(status: MatrixPattern['data']['cells'][number][number
 }
 
 /**
+ * pipelineStatusLabel 返回流水线步骤的用户向状态名。
+ */
+function pipelineStatusLabel(status: PipelinePattern['data']['steps'][number]['status']): string {
+  const labels = { pending: '等待', running: '运行中', complete: '完成', failed: '失败' };
+  return labels[status];
+}
+
+/**
+ * graphMarkerTone 将边状态映射到箭头标记,让消息方向与状态同时可见。
+ */
+function graphMarkerTone(status: GraphEdge['status']): 'accent' | 'danger' | 'muted' {
+  if (status === 'failed') return 'danger';
+  if (status === 'active' || status === 'success') return 'accent';
+  return 'muted';
+}
+
+/**
+ * makeSvgId 生成局部 SVG id,避免仿真包 id 中的特殊字符影响 marker 引用。
+ */
+function makeSvgId(...parts: string[]): string {
+  return parts.join('-').replace(/[^a-zA-Z0-9_-]/g, '-');
+}
+
+/**
  * 将图表序列转换为 SVG polyline 点串。
  */
 function chartPolyline(series: ChartSeries, minX: number, maxX: number, maxY: number): string {
@@ -676,10 +775,14 @@ function selectableElementProps(elementId: string, onSelectElement?: (elementId:
     role: 'button',
     tabIndex: 0,
     'aria-label': `选择${elementType ?? '元素'} ${elementId}`,
-    onClick: () => onSelectElement(elementId, elementType),
+    onClick: () => {
+      triggerHaptic();
+      onSelectElement(elementId, elementType);
+    },
     onKeyDown: (event: React.KeyboardEvent) => {
       if (event.key === 'Enter' || event.key === ' ') {
         event.preventDefault();
+        triggerHaptic();
         onSelectElement(elementId, elementType);
       }
     },

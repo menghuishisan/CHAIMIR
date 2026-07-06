@@ -1,7 +1,7 @@
 ﻿// 路由列定义：集中维护四端资源页表格列、列优先级和用户向标题。
 
-import { formatFileSize } from '@chaimir/shared'
-import type { DataColumn, DataRow } from '@chaimir/shared'
+import { formatFileSize } from '../lib/format'
+import type { DataColumn, DataRow } from '../app/types'
 
 export function courseColumns(): DataColumn[] {
   return [

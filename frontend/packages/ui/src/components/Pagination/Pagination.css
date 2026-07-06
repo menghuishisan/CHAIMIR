@@ -33,7 +33,14 @@
   color: var(--color-text);
   font-size: var(--text-sm);
   cursor: pointer;
-  transition: background var(--t-fast) var(--ease), border-color var(--t-fast) var(--ease), color var(--t-fast) var(--ease), opacity var(--t-fast) var(--ease);
+  box-shadow: var(--shadow-xs);
+  transition:
+    background var(--t-fast) var(--ease),
+    border-color var(--t-fast) var(--ease),
+    color var(--t-fast) var(--ease),
+    box-shadow var(--t-fast) var(--ease),
+    opacity var(--t-fast) var(--ease),
+    transform var(--t-fast) var(--ease-press);
 }
 
 .chaimir-pagination__btn:hover:not(:disabled),
@@ -56,7 +63,7 @@
 
 .chaimir-pagination__item:active,
 .chaimir-pagination__btn:active:not(:disabled) {
-  transform: translateY(1px);
+  transform: scale(0.96);
 }
 
 .chaimir-pagination__ellipsis {
@@ -84,11 +91,11 @@
   border-radius: var(--radius-xs);
   text-align: center;
   font-size: var(--text-sm);
-  transition: border-color var(--t) var(--ease);
+  transition: border-color var(--t) var(--ease), box-shadow 0.4s var(--ease-spring-bouncy);
 }
 
 .chaimir-pagination__input:focus {
-  outline: none;
+  outline: 2px solid transparent;
   border-color: var(--color-primary);
   box-shadow: 0 0 0 3px var(--color-primary-soft);
 }
@@ -96,11 +103,13 @@
 /* 隐藏数字输入的上下箭头 */
 .chaimir-pagination__input::-webkit-inner-spin-button,
 .chaimir-pagination__input::-webkit-outer-spin-button {
+  appearance: none;
   -webkit-appearance: none;
   margin: 0;
 }
 
 .chaimir-pagination__input[type='number'] {
+  appearance: textfield;
   -moz-appearance: textfield;
 }
 
@@ -120,6 +129,14 @@
 
   .chaimir-pagination__jumper {
     inline-size: 100%;
+  }
+}
+
+@media (pointer: coarse) {
+  .chaimir-pagination__btn,
+  .chaimir-pagination__item {
+    min-inline-size: 2.75rem;
+    min-block-size: 2.75rem;
   }
 }
 

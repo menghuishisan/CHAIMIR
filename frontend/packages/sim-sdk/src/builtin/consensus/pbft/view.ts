@@ -9,12 +9,15 @@ import type { PbftMessage, PbftReplica, PbftState } from './model';
  * renderPbftView 输出 PBFT 的网络图、过程流水线、时序泳道和证书矩阵。
  */
 export function renderPbftView(state: PbftState): ViewSpec {
+  const preparedCount = state.replicas.filter((replica) => replica.preparedDigest === state.request.digest).length;
+  const committedCount = state.replicas.filter((replica) => replica.committedDigest === state.request.digest).length;
+  const threshold = quorum(state);
   return {
-    summary: `视图 ${state.view},序号 ${state.sequence},法定人数 ${quorum(state)},当前过程 ${state.phase},风险 ${state.metrics.risk}。`,
+    summary: `视图 ${state.view},序号 ${state.sequence},准备证书 ${preparedCount}/${threshold},提交证书 ${committedCount}/${threshold},当前过程 ${state.phase},风险 ${state.metrics.risk}。`,
     patterns: [
-      graphPattern('pbft-graph', 'PBFT 副本消息网络', pbftNodes(state), pbftEdges(state), 'main'),
-      lanePattern('pbft-lane', 'PBFT 消息飞行过程', actorLabels(state), pbftLaneMessages(state), state.tick, 'bottom'),
-      matrixPattern('pbft-matrix', '证书与副本状态', state.replicas.map((replica) => replica.label), ['预准备', '准备', '提交', '回复', '检查点'], pbftCells(state), 'bottom'),
+      graphPattern('pbft-graph', 'PBFT 主节点广播与副本投票网络', pbftNodes(state), pbftEdges(state), 'main'),
+      lanePattern('pbft-lane', 'PBFT pre-prepare / prepare / commit 时序', actorLabels(state), pbftLaneMessages(state), state.tick, 'bottom'),
+      matrixPattern('pbft-matrix', `2f+1 证书矩阵,还差准备 ${Math.max(0, threshold - preparedCount)},提交 ${Math.max(0, threshold - committedCount)}`, state.replicas.map((replica) => replica.label), ['预准备', '准备证书', '提交证书', '客户端回复', '稳定检查点'], pbftCells(state), 'bottom'),
     ],
   };
 }

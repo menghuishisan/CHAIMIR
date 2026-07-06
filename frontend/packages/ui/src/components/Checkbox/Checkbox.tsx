@@ -4,6 +4,7 @@
 import React, { useEffect, useImperativeHandle, useRef } from 'react'
 import { Check } from 'lucide-react'
 import { clsx } from 'clsx'
+import { triggerHaptic } from '../../utils/haptics'
 import './Checkbox.css'
 
 export interface CheckboxProps extends Omit<React.InputHTMLAttributes<HTMLInputElement>, 'type'> {
@@ -50,6 +51,13 @@ export const Checkbox = React.forwardRef<HTMLInputElement, CheckboxProps>(
       (checked || indeterminate) && 'chaimir-checkbox__box--checked'
     )
 
+    const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+      triggerHaptic(10)
+      if (props.onChange) {
+        props.onChange(e)
+      }
+    }
+
     return (
       <label className={wrapperClasses}>
         <input
@@ -60,6 +68,7 @@ export const Checkbox = React.forwardRef<HTMLInputElement, CheckboxProps>(
           checked={checked}
           aria-checked={indeterminate ? 'mixed' : checked}
           aria-invalid={error}
+          onChange={handleChange}
           {...props}
         />
         <span className={boxClasses} aria-hidden="true">

@@ -4,6 +4,7 @@
 import React, { useEffect } from 'react'
 import { CheckCircle, XCircle, Info, AlertCircle, X } from 'lucide-react'
 import { clsx } from 'clsx'
+import { triggerHaptic } from '../../utils/haptics'
 import './Toast.css'
 
 export interface ToastProps {
@@ -79,7 +80,10 @@ export const Toast: React.FC<ToastProps> = ({
         <button
           type="button"
           className="chaimir-toast__close"
-          onClick={onClose}
+          onClick={() => {
+            triggerHaptic(10)
+            onClose()
+          }}
           aria-label="关闭通知"
         >
           <X size={16} />

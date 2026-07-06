@@ -1,6 +1,7 @@
 // 本文件定义 P2P 节点发现仿真的代码追踪和教学叙事。
 
-import type { CodeTraceDef, NarrativeStep } from '../../../types';
+import type { CodeTraceDef } from '../../../types';
+import { phaseNarrative } from '../../packageTools';
 import { discoveryPhases } from './model';
 
 export const discoverySource = [
@@ -48,20 +49,4 @@ export const discoveryCodeTrace: CodeTraceDef = {
   ],
 };
 
-export const discoveryNarrative: NarrativeStep[] = discoveryPhases.map((phase, index) => ({
-  id: phase.id,
-  title: phase.label,
-  trigger: (state) => state.phase === phase.label,
-  highlight: [phase.id],
-  explain: `${phase.effect} ${phase.reason}`,
-  defaultDurationMs: 1200,
-  question:
-    index === discoveryPhases.length - 1
-      ? {
-          prompt: '当前节点发现拓扑是否已过滤异常地址并保持可用?',
-          options: ['已经可用', '仍有风险'],
-          answer: '已经可用',
-          checkpointId: 'p2p-discovery-healthy',
-        }
-      : undefined,
-}));
+export const discoveryNarrative = phaseNarrative(discoveryPhases, 'p2p-discovery-healthy');

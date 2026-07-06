@@ -4,9 +4,10 @@
  */
 
 .chaimir-skeleton {
-  background: var(--color-surface);
-  border-radius: var(--radius-xs);
+  background: linear-gradient(180deg, var(--color-surface), var(--color-surface-sunken));
+  border-radius: var(--radius-sm);
   display: block;
+  border: 1px solid var(--color-border-subtle);
 }
 
 /* === 变体 === */
@@ -59,7 +60,7 @@
   }
 }
 
-/* === Reduced Motion === */
+/* === 减少动态 === */
 
 @media (prefers-reduced-motion: reduce) {
   .chaimir-skeleton--animate::after {

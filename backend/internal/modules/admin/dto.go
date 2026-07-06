@@ -90,6 +90,44 @@ type BackupRecordDTO struct {
 	FinishedAt string `json:"finished_at,omitempty"`
 }
 
+type TenantSummaryDTO struct {
+	TenantID   int64  `json:"tenant_id,string"`
+	Code       string `json:"code"`
+	Name       string `json:"name"`
+	Type       int16  `json:"type"`
+	Status     int16  `json:"status"`
+	DeployMode int16  `json:"deploy_mode"`
+	ExpireAt   string `json:"expire_at,omitempty"`
+	CreatedAt  string `json:"created_at"`
+	UpdatedAt  string `json:"updated_at"`
+}
+
+type TenantApplicationSummaryDTO struct {
+	ApplicationID int64  `json:"application_id,string"`
+	SchoolName    string `json:"school_name"`
+	SchoolType    int16  `json:"school_type"`
+	ContactName   string `json:"contact_name"`
+	ContactPhone  string `json:"contact_phone"`
+	ContactEmail  string `json:"contact_email"`
+	Status        int16  `json:"status"`
+	SubmittedAt   string `json:"submitted_at"`
+	ReviewedAt    string `json:"reviewed_at,omitempty"`
+}
+
+type AuditLogEntryDTO struct {
+	ID         int64  `json:"id,string"`
+	TenantID   int64  `json:"tenant_id,string,omitempty"`
+	ActorID    int64  `json:"actor_id,string"`
+	ActorRole  int16  `json:"actor_role"`
+	Action     string `json:"action"`
+	TargetType string `json:"target_type"`
+	TargetID   int64  `json:"target_id,string,omitempty"`
+	Detail     string `json:"detail,omitempty"`
+	IP         string `json:"ip,omitempty"`
+	TraceID    string `json:"trace_id,omitempty"`
+	CreatedAt  string `json:"created_at"`
+}
+
 // BackupRecordCreate 是受控运维任务写入备份记录的内部请求。
 type BackupRecordCreate struct {
 	Type       int16

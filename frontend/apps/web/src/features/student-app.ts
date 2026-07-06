@@ -1,8 +1,9 @@
-﻿// 学生端路由：课程、实验、竞赛、仿真、成绩与账户页面定义。
+// 学生端路由：课程、实验、竞赛、仿真、成绩与账户页面定义。
 
 import { Activity, Award, BookOpen, FileCheck2, FileClock, FilePenLine, FileText, Flag, Gavel, GraduationCap, Network, ShieldAlert, TerminalSquare, Trophy, UserCog } from 'lucide-react'
-import { ExperimentStatus } from '@chaimir/api-client'
-import { routeHref, type AppDefinition, type MetricItem, type ResourceResult } from '@chaimir/shared'
+import { ExperimentStatus, SIM_PACKAGE_STATUS } from '@chaimir/api-client'
+import { routeHref } from '../app/router'
+import type { AppDefinition, MetricItem, ResourceResult } from '../app/types'
 import {
   appealColumns,
   arrayResult,
@@ -118,7 +119,7 @@ export const studentApp: AppDefinition = {
       icon: Network,
       group: '学习',
       load: async (api) => ({
-        ...studentMetrics(listResult(await api.sim.getPackages({ status: 'published', ...defaultPageParams() }), simPackageColumns(), '暂无仿真包', '有仿真包发布后会显示。'), '可用仿真', '单步回放', '分享码读取'),
+        ...studentMetrics(listResult(await api.sim.getPackages({ status: SIM_PACKAGE_STATUS.PUBLISHED, ...defaultPageParams() }), simPackageColumns(), '暂无仿真包', '有仿真包发布后会显示。'), '可用仿真', '单步回放', '分享码读取'),
         actions: [
           pageAction('read-shared-replay', '读取分享回放', '输入分享码读取可复现实验回放。', [textInput('code', '分享码', true)], async (values) => {
             await api.sim.getSharedReplay(valueText(values, 'code'))

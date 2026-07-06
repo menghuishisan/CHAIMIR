@@ -1,6 +1,7 @@
 // 本文件定义 Gossip 传播仿真的代码追踪和教学叙事。
 
-import type { CodeTraceDef, NarrativeStep } from '../../../types';
+import type { CodeTraceDef } from '../../../types';
+import { phaseNarrative } from '../../packageTools';
 import { gossipPhases } from './model';
 
 export const gossipSource = [
@@ -45,20 +46,4 @@ export const gossipCodeTrace: CodeTraceDef = {
   ],
 };
 
-export const gossipNarrative: NarrativeStep[] = gossipPhases.map((phase, index) => ({
-  id: phase.id,
-  title: phase.label,
-  trigger: (state) => state.phase === phase.label,
-  highlight: [phase.id],
-  explain: `${phase.effect} ${phase.reason}`,
-  defaultDurationMs: 1200,
-  question:
-    index === gossipPhases.length - 1
-      ? {
-          prompt: '当前 Gossip 是否已覆盖大多数节点且隔离污染消息?',
-          options: ['已经收敛', '还没有'],
-          answer: '已经收敛',
-          checkpointId: 'gossip-coverage',
-        }
-      : undefined,
-}));
+export const gossipNarrative = phaseNarrative(gossipPhases, 'gossip-coverage');

@@ -2,6 +2,7 @@
 
 import React from 'react'
 import { clsx } from 'clsx'
+import { triggerHaptic } from '../../utils/haptics'
 import './Menu.css'
 
 export interface MenuItem {
@@ -50,7 +51,10 @@ export function Menu({ items, label = '操作菜单', className, ...props }: Men
           aria-disabled={item.disabled || undefined}
           tabIndex={index === firstEnabled ? 0 : -1}
           className={clsx('chaimir-menu__item', item.danger && 'is-danger')}
-          onClick={item.onSelect}
+          onClick={() => {
+            triggerHaptic(10)
+            item.onSelect?.()
+          }}
         >
           {item.icon && <span aria-hidden="true">{item.icon}</span>}
           <span>

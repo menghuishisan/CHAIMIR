@@ -15,7 +15,7 @@
   justify-content: center;
   padding: var(--space-4);
   background: var(--color-scrim); /* 遮罩 50% */
-  animation: chaimir-modal-overlay-in var(--t-slow) var(--ease-out);
+  animation: chaimir-modal-overlay-in var(--t-normal) var(--ease-out);
 }
 
 @keyframes chaimir-modal-overlay-in {
@@ -33,20 +33,23 @@
   position: relative;
   width: 100%;
   max-height: 88vh;
-  background: var(--color-bg);
-  border-radius: var(--radius-sm);
-  box-shadow: var(--shadow-lg);
+  background: var(--color-panel-glass);
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  border: 1px solid var(--color-glass-border);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-glass-panel);
   display: flex;
   flex-direction: column;
-  outline: none;
+  outline: 2px solid transparent;
   /* 入场动画：translateY + scale + 淡入 */
-  animation: chaimir-modal-in 0.22s var(--ease-out);
+  animation: chaimir-modal-in 0.3s var(--ease-spring);
 }
 
 @keyframes chaimir-modal-in {
   from {
     opacity: 0;
-    transform: translateY(12px) scale(0.97);
+    transform: translateY(20px) scale(0.95);
   }
   to {
     opacity: 1;
@@ -79,7 +82,8 @@
   align-items: center;
   justify-content: space-between;
   padding: var(--space-6) var(--space-6) var(--space-4);
-  border-bottom: 1px solid var(--color-border);
+  border-bottom: 1px solid var(--color-glass-border-subtle);
+  background: transparent;
 }
 
 .chaimir-modal__title {
@@ -132,7 +136,8 @@
   justify-content: flex-end;
   gap: var(--space-3);
   padding: var(--space-4) var(--space-6) var(--space-6);
-  border-top: 1px solid var(--color-border);
+  border-top: 1px solid var(--color-glass-border-subtle);
+  background: transparent;
 }
 
 /* === 响应式 === */
@@ -149,7 +154,7 @@
     border-bottom-left-radius: 0;
     border-bottom-right-radius: 0;
     /* 移动端从底部弹出 */
-    animation: chaimir-modal-in-mobile 0.22s var(--ease-out);
+    animation: chaimir-modal-in-mobile 0.3s var(--ease-spring);
   }
 
   .chaimir-modal__header,

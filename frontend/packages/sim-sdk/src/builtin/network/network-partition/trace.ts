@@ -1,6 +1,7 @@
 // 本文件定义网络分区与恢复仿真的代码追踪和教学叙事。
 
-import type { CodeTraceDef, NarrativeStep } from '../../../types';
+import type { CodeTraceDef } from '../../../types';
+import { phaseNarrative } from '../../packageTools';
 import { partitionPhases } from './model';
 
 export const partitionSource = [
@@ -44,20 +45,4 @@ export const partitionCodeTrace: CodeTraceDef = {
   ],
 };
 
-export const partitionNarrative: NarrativeStep[] = partitionPhases.map((phase, index) => ({
-  id: phase.id,
-  title: phase.label,
-  trigger: (state) => state.phase === phase.label,
-  highlight: [phase.id],
-  explain: `${phase.effect} ${phase.reason}`,
-  defaultDurationMs: 1200,
-  question:
-    index === partitionPhases.length - 1
-      ? {
-          prompt: '当前网络是否已恢复连通并完成状态合并?',
-          options: ['已经完成', '还没有'],
-          answer: '已经完成',
-          checkpointId: 'partition-merged',
-        }
-      : undefined,
-}));
+export const partitionNarrative = phaseNarrative(partitionPhases, 'partition-merged');

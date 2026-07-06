@@ -10,7 +10,9 @@ import { blockchainPhases, type BlockchainLinkState } from './model';
  * renderBlockchainLinkView 基于内核状态生成父哈希结构可视化。
  */
 export function renderBlockchainLinkView(state: BlockchainLinkState): ViewSpec {
-  return { summary: `高度 ${state.blocks.length - 1},分叉 ${state.fork.length} 块,重组${state.reorganized ? '已完成' : '未发生'}。`, patterns: [chainPattern('blockchain-chain', '区块链与分叉', toChainBlocks(state.blocks), state.fork.length > 0 ? [toChainBlocks(state.fork)] : [], 'main'), matrixPattern('blockchain-matrix', '链接校验', state.blocks.map((block) => `高度 ${block.height}`), ['父哈希', '规范链', '分叉'], blockCells(state), 'side'), pipelinePattern('blockchain-pipeline', '结构校验流程', pipelineSteps(blockchainPhases, state.phaseIndex, state.fork.length > 0 && !state.reorganized), blockchainPhases[state.phaseIndex].id, 'bottom')] };
+  const canonicalTip = state.blocks[state.blocks.length - 1];
+  const forkTip = state.fork[state.fork.length - 1];
+  return { summary: `规范高度 ${canonicalTip?.height ?? 0},分叉高度 ${forkTip?.height ?? 0},分叉 ${state.fork.length} 块,重组${state.reorganized ? '已完成' : '未发生'}。`, patterns: [chainPattern('blockchain-chain', '父哈希链接、分叉与重组路径', toChainBlocks(state.blocks), state.fork.length > 0 ? [toChainBlocks(state.fork)] : [], 'main'), matrixPattern('blockchain-matrix', '父哈希连续性与规范链选择', state.blocks.map((block) => `高度 ${block.height}`), ['父哈希', '规范链', '分叉'], blockCells(state), 'side'), pipelinePattern('blockchain-pipeline', '父哈希校验 -> 分叉检测 -> 重组流程', pipelineSteps(blockchainPhases, state.phaseIndex, state.fork.length > 0 && !state.reorganized), blockchainPhases[state.phaseIndex].id, 'bottom')] };
 }
 
 /**

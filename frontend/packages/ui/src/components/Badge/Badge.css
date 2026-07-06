@@ -9,12 +9,18 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  gap: var(--space-1);
   font-family: var(--font-sans);
   font-weight: var(--font-semibold);
   border-radius: var(--radius-full);
+  border: 1px solid transparent;
+  box-shadow: inset 0 1px 0 var(--color-glass-highlight);
   white-space: nowrap;
   vertical-align: middle;
-  transition: background var(--t-fast) var(--ease);
+  transition:
+    background var(--t-fast) var(--ease),
+    border-color var(--t-fast) var(--ease),
+    color var(--t-fast) var(--ease);
 }
 
 /* === 尺寸 === */
@@ -47,48 +53,56 @@
 .chaimir-badge--default {
   background: var(--color-muted-bg);
   color: var(--color-muted-text);
+  border-color: var(--color-border);
 }
 
 /* Primary - 主色（青电） */
 .chaimir-badge--primary {
   background: var(--color-primary-soft);
   color: var(--color-primary-text);
+  border-color: var(--color-border);
 }
 
 /* Secondary - 副色（琥珀） */
 .chaimir-badge--secondary {
   background: var(--color-secondary-soft);
   color: var(--color-secondary-text);
+  border-color: var(--color-warning-border);
 }
 
 /* Success - 成功（绿色） */
 .chaimir-badge--success {
   background: var(--color-success-bg);
   color: var(--color-success);
+  border-color: var(--color-success-border);
 }
 
 /* Warning - 警告（琥珀） */
 .chaimir-badge--warning {
   background: var(--color-warning-bg);
   color: var(--color-warning);
+  border-color: var(--color-warning-border);
 }
 
 /* Danger - 危险（红色） */
 .chaimir-badge--danger {
   background: var(--color-danger-bg);
   color: var(--color-danger);
+  border-color: var(--color-danger-border);
 }
 
 /* Info - 信息（蓝色） */
 .chaimir-badge--info {
   background: var(--color-info-bg);
   color: var(--color-info);
+  border-color: var(--color-info-border);
 }
 
 /* Purple - 特殊（紫色） */
 .chaimir-badge--purple {
   background: var(--color-purple-bg);
   color: var(--color-purple);
+  border-color: var(--color-purple-border);
 }
 
 /* === 圆点颜色（实心） === */

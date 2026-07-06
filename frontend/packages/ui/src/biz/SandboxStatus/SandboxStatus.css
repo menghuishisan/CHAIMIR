@@ -10,6 +10,11 @@
   border-radius: var(--radius-sm);
   background: var(--color-bg);
   color: var(--color-text);
+  box-shadow: var(--shadow-xs);
+  transition:
+    border-color var(--t) var(--ease),
+    box-shadow var(--t) var(--ease),
+    background var(--t) var(--ease);
 }
 
 .chaimir-sandbox-status__icon {
@@ -20,6 +25,8 @@
   border-radius: var(--radius-full);
   color: var(--color-primary-text);
   background: var(--color-primary-soft);
+  border: 1px solid var(--color-border);
+  box-shadow: inset 0 1px 0 var(--color-highlight);
 }
 
 .chaimir-sandbox-status strong,
@@ -41,12 +48,28 @@
   font-weight: var(--font-semibold);
   background: transparent;
   border: 0;
+  border-radius: var(--radius-xs);
   cursor: pointer;
+  transition:
+    background var(--t-fast) var(--ease),
+    color var(--t-fast) var(--ease);
+}
+
+.chaimir-sandbox-status button:hover,
+.chaimir-sandbox-status button:focus-visible {
+  background: var(--color-danger-bg);
 }
 
 .chaimir-sandbox-status.is-ready .chaimir-sandbox-status__icon {
   color: var(--color-primary-fg);
   background: var(--color-success-solid);
+}
+
+.chaimir-sandbox-status.is-compiling,
+.chaimir-sandbox-status.is-mining,
+.chaimir-sandbox-status.is-sealing {
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 3px var(--color-primary-soft), var(--shadow-xs);
 }
 
 .chaimir-sandbox-status.is-failed {
@@ -62,4 +85,15 @@
 .chaimir-sandbox-status.is-released .chaimir-sandbox-status__icon {
   color: var(--color-text-sub);
   background: var(--color-surface-sunken);
+}
+
+@media (max-width: 479px) {
+  .chaimir-sandbox-status {
+    grid-template-columns: auto 1fr;
+  }
+
+  .chaimir-sandbox-status button {
+    grid-column: 2;
+    justify-self: start;
+  }
 }

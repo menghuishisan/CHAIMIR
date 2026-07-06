@@ -4,6 +4,7 @@
   display: inline-flex;
   align-items: center;
   gap: var(--space-2);
+  min-block-size: 2rem;
   cursor: pointer;
   user-select: none;
 }
@@ -34,7 +35,12 @@
   border-radius: var(--radius-full);
   background: var(--color-border-strong);
   --switch-thumb-x: 0;
-  transition: background var(--t) var(--ease), box-shadow var(--t-fast) var(--ease), opacity var(--t-fast) var(--ease);
+  border: 1px solid var(--color-border-strong);
+  transition:
+    background var(--t) var(--ease),
+    border-color var(--t) var(--ease),
+    box-shadow var(--t-fast) var(--ease),
+    opacity var(--t-fast) var(--ease);
   flex-shrink: 0;
 }
 
@@ -58,7 +64,7 @@
   border-radius: var(--radius-full);
   box-shadow: 0 1px 3px var(--color-switch-thumb-shadow);
   transform: translateX(var(--switch-thumb-x));
-  transition: box-shadow var(--t) var(--ease), transform var(--t) var(--ease);
+  transition: box-shadow var(--t) var(--ease), transform 0.4s var(--ease-spring-bouncy);
 }
 
 .chaimir-switch--sm .chaimir-switch__thumb {
@@ -73,24 +79,25 @@
 
 /* === 状态 === */
 
-/* Hover */
+/* 悬浮态 */
 .chaimir-switch-wrapper:hover:not(.chaimir-switch-wrapper--disabled) .chaimir-switch {
   box-shadow: inset 0 0 0 1px var(--color-primary-soft);
 }
 
 .chaimir-switch-wrapper:active:not(.chaimir-switch-wrapper--disabled) .chaimir-switch__thumb {
-  transform: translateX(var(--switch-thumb-x)) scale(0.92);
+  transform: translateX(var(--switch-thumb-x)) scaleX(1.2);
 }
 
-/* Focus */
+/* 焦点态 */
 .chaimir-switch__input:focus-visible + .chaimir-switch {
   outline: 2px solid var(--color-focus-ring);
   outline-offset: 2px;
 }
 
-/* Checked */
+/* 选中态 */
 .chaimir-switch--checked {
   background: var(--color-primary);
+  border-color: var(--color-primary);
 }
 
 .chaimir-switch__input:checked + .chaimir-switch {
@@ -113,7 +120,7 @@
   --switch-thumb-x: 1.375rem; /* 22px */
 }
 
-/* Error */
+/* 错误态 */
 .chaimir-switch--error {
   background: var(--color-danger-border);
 }
@@ -130,5 +137,11 @@
   .chaimir-switch,
   .chaimir-switch__thumb {
     transition: none;
+  }
+}
+
+@media (pointer: coarse) {
+  .chaimir-switch-wrapper {
+    min-block-size: 2.75rem;
   }
 }

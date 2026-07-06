@@ -37,7 +37,7 @@ func (a platformAPI) createApplication(c *gin.Context) {
 		httpx.Write(c, gin.H{}, err)
 		return
 	}
-	httpx.Write(c, out, nil)
+	httpx.Write(c, ToTenantApplicationDTO(out), nil)
 }
 
 // listApplications 读取平台入驻申请列表,状态过滤仅在 service/repo 中使用。
@@ -51,7 +51,7 @@ func (a platformAPI) listApplications(c *gin.Context) {
 		httpx.Write(c, gin.H{}, err)
 		return
 	}
-	httpx.Write(c, out, nil)
+	httpx.Write(c, ToTenantApplicationDTOs(out), nil)
 }
 
 // approveApplication 绑定平台审核通过请求,创建租户和首个学校管理员由 service 原子编排。

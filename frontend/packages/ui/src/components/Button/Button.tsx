@@ -4,11 +4,12 @@
 import React from 'react'
 import { Loader2 } from 'lucide-react'
 import { clsx } from 'clsx'
+import { triggerHaptic } from '../../utils/haptics'
 import './Button.css'
 
 export interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
   /** 按钮变体 */
-  variant?: 'primary' | 'outline' | 'ghost' | 'danger' | 'on-dark'
+  variant?: 'primary' | 'secondary' | 'outline' | 'ghost' | 'danger' | 'on-dark'
   /** 按钮尺寸 */
   size?: 'sm' | 'md' | 'lg'
   /** 加载状态 */
@@ -49,6 +50,15 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
       className
     )
 
+    const handleClick = (e: React.MouseEvent<HTMLButtonElement>) => {
+      if (!disabled && !loading) {
+        triggerHaptic(10)
+      }
+      if (props.onClick) {
+        props.onClick(e)
+      }
+    }
+
     return (
       <button
         ref={ref}
@@ -56,6 +66,7 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
         className={classes}
         disabled={disabled || loading}
         aria-busy={loading}
+        onClick={handleClick}
         {...props}
       >
         {loading && (

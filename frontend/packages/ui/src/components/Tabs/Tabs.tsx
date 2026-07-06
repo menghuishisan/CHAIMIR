@@ -37,14 +37,46 @@ export const Tabs: React.FC<TabsProps> = ({
   className,
 }) => {
   const [active, setActive] = useState(activeKey || defaultActiveKey || items[firstEnabledIndex(items)]?.key || '')
+  const [indicatorStyle, setIndicatorStyle] = useState<React.CSSProperties>({})
   const generatedId = useId()
   const tabRefs = useRef<Array<HTMLButtonElement | null>>([])
+  const navRef = useRef<HTMLDivElement>(null)
 
   React.useEffect(() => {
     if (activeKey !== undefined) {
       setActive(activeKey)
     }
   }, [activeKey])
+
+  React.useEffect(() => {
+    const activeIndex = items.findIndex((item) => item.key === active)
+    const activeTab = tabRefs.current[activeIndex]
+    const nav = navRef.current
+
+    if (!activeTab || !nav) return
+
+    const updateIndicator = () => {
+      // 导航容器是相对定位，指示条直接使用 tab 的 offsetLeft。
+      // 12px 对应 var(--space-3)。
+      const left = activeTab.offsetLeft + 12
+      const width = activeTab.offsetWidth - 24
+
+      setIndicatorStyle({
+        transform: `translateX(${left}px)`,
+        width: `${width}px`,
+        opacity: 1,
+      })
+    }
+
+    updateIndicator()
+
+    // 监听容器和当前标签尺寸变化，保持指示条位置正确。
+    const observer = new ResizeObserver(updateIndicator)
+    observer.observe(nav)
+    observer.observe(activeTab)
+
+    return () => observer.disconnect()
+  }, [active, items])
 
   /**
    * handleClick 切换当前标签，受控场景由外部 activeKey 回写状态。
@@ -74,7 +106,7 @@ export const Tabs: React.FC<TabsProps> = ({
 
   return (
     <div className={classes}>
-      <div className="chaimir-tabs__nav" role="tablist" aria-label={ariaLabel}>
+      <div ref={navRef} className="chaimir-tabs__nav" role="tablist" aria-label={ariaLabel}>
         {items.map((item, index) => {
           const isActive = item.key === active
           const tabId = `${generatedId}-tab-${item.key}`
@@ -107,6 +139,7 @@ export const Tabs: React.FC<TabsProps> = ({
             </button>
           )
         })}
+        <div className="chaimir-tabs__indicator" style={indicatorStyle} aria-hidden="true" />
       </div>
       {children && (
         <div id={activePanelId} className="chaimir-tabs__panel" role="tabpanel" aria-labelledby={`${generatedId}-tab-${active}`}>

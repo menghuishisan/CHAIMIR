@@ -12,7 +12,7 @@ type MonitoringPanel struct {
 // DashboardDTO 是平台和学校看板聚合输出。
 type DashboardDTO struct {
 	Scope                 int16          `json:"scope"`
-	TenantID              int64          `json:"tenant_id,omitempty"`
+	TenantID              int64          `json:"tenant_id,omitempty,string"`
 	TenantCount           int64          `json:"tenant_count,omitempty"`
 	AccountCount          int64          `json:"account_count"`
 	TeacherCount          int64          `json:"teacher_count"`

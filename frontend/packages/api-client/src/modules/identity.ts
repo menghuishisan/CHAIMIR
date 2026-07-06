@@ -2,6 +2,8 @@
 // 对应后端 M1 模块
 
 import { ApiClient } from '../client'
+import type { AccountStatus, ApplicationStatus, ImportTemplateFormat, UserRole } from '../constants/identity'
+import type { PaginatedResponse } from '../types/common'
 import type {
   LoginPlatformRequest,
   LoginPhoneRequest,
@@ -19,7 +21,6 @@ import type {
   ChangePhoneRequest,
   Session,
   AuditLog,
-  PaginatedResponse,
   CreateApplicationRequest,
   TenantApplication,
   Tenant,
@@ -45,7 +46,7 @@ import type {
   ImportCommitRequest,
   AccountImportCommitResponse,
   ImportBatch,
-} from '../types'
+} from '../types/identity'
 
 /**
  * IdentityApi 封装后端 M1 身份、租户、组织和账号管理接口。
@@ -185,8 +186,8 @@ export class IdentityApi {
    * 查询当前租户账号列表，供学校管理员按状态、角色、班级和关键词筛选。
    */
   async getAccounts(params?: {
-    status?: number
-    role?: number
+    status?: AccountStatus
+    role?: UserRole
     class_id?: string
     keyword?: string
     page?: number
@@ -313,7 +314,7 @@ export class IdentityApi {
   /**
    * 下载教师或学生导入模板。
    */
-  async downloadAccountImportTemplate(params: { type: 'teacher' | 'student'; format?: string }): Promise<Blob> {
+  async downloadAccountImportTemplate(params: { type: 'teacher' | 'student'; format?: ImportTemplateFormat }): Promise<Blob> {
     return this.client.getBlob('/accounts/import/template', params)
   }
 
@@ -429,7 +430,7 @@ export class IdentityApi {
   /**
    * 下载组织架构导入模板。
    */
-  async downloadOrgImportTemplate(params?: { format?: string }): Promise<Blob> {
+  async downloadOrgImportTemplate(params?: { format?: ImportTemplateFormat }): Promise<Blob> {
     return this.client.getBlob('/org/import/template', params)
   }
 
@@ -499,14 +500,14 @@ export class IdentityApi {
   /**
    * 创建入驻申请
    */
-  async createApplication(data: CreateApplicationRequest): Promise<{ application_id: string }> {
+  async createApplication(data: CreateApplicationRequest): Promise<TenantApplication> {
     return this.client.post('/platform/applications', data)
   }
 
   /**
    * 获取入驻申请列表
    */
-  async getApplications(params?: { status?: number }): Promise<TenantApplication[]> {
+  async getApplications(params?: { status?: ApplicationStatus }): Promise<TenantApplication[]> {
     return this.client.get('/platform/applications', params)
   }
 

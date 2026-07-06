@@ -10,7 +10,8 @@ import { merkleTreePhases, type MerkleTreeState } from './model';
  * renderMerkleTreeView 基于内核状态生成 Merkle Tree 可视化。
  */
 export function renderMerkleTreeView(state: MerkleTreeState): ViewSpec {
-  return { summary: `根摘要 ${state.rootHash.slice(0, 8)},更新路径 ${state.proofPath.length} 层。`, patterns: [treePattern('merkle-structure-tree', 'Merkle Tree 结构', treeRoot(state), state.proofPath, 'main'), matrixPattern('merkle-structure-matrix', '叶子状态', state.items.map((item) => item.label), ['值', '哈希', '更新'], merkleCells(state), 'side'), pipelinePattern('merkle-structure-pipeline', '树构建流程', pipelineSteps(merkleTreePhases, state.phaseIndex, Boolean(state.dirtyLeafId)), merkleTreePhases[state.phaseIndex].id, 'bottom')] };
+  const dirtyLeaf = state.items.find((item) => item.id === state.dirtyLeafId);
+  return { summary: `根摘要 ${state.rootHash.slice(0, 8)},叶子 ${state.items.length} 个,更新叶子 ${dirtyLeaf?.label ?? '无'},重算路径 ${state.proofPath.length} 层。`, patterns: [treePattern('merkle-structure-tree', 'Merkle Tree 自底向上重算路径', treeRoot(state), state.proofPath, 'main'), matrixPattern('merkle-structure-matrix', '叶子哈希与脏写传播矩阵', state.items.map((item) => item.label), ['值', '叶子哈希', '是否触发重算'], merkleCells(state), 'side'), pipelinePattern('merkle-structure-pipeline', '叶子更新 -> 父节点重算 -> 根摘要更新流程', pipelineSteps(merkleTreePhases, state.phaseIndex, Boolean(state.dirtyLeafId)), merkleTreePhases[state.phaseIndex].id, 'bottom')] };
 }
 
 /**
@@ -45,7 +46,7 @@ function merkleCells(state: MerkleTreeState): MatrixCell[][] {
     const item = state.items.find((entry) => entry.label === row);
     if (!item) return { label: '无', status: 'empty' };
     if (column === '值') return { label: item.value, status: item.updated ? 'pending' : 'yes' };
-    if (column === '哈希') return { label: item.hash.slice(0, 6), status: 'yes' };
+    if (column === '叶子哈希') return { label: item.hash.slice(0, 6), status: 'yes' };
     return { label: item.updated ? '已改' : '未改', status: item.updated ? 'pending' : 'empty' };
   });
 }

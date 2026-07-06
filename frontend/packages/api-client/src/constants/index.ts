@@ -1,5 +1,15 @@
 // API 契约常量出口：按后端模块拆分后在这里统一导出。
 
 export * from './identity'
+export * from './content'
 export * from './experiment'
+export * from './teaching'
+export * from './sandbox'
+export * from './judge'
+export * from './sim'
+export * from './transfer'
+export * from './contest'
+export * from './grade'
+export * from './admin'
+export * from './notify'
 export * from './http'

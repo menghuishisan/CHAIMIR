@@ -10,12 +10,13 @@ import { hashChainPhases, type HashChainState } from './model';
  */
 export function renderHashChainView(state: HashChainState): ViewSpec {
   const failed = state.records.some((record) => !record.valid);
+  const firstInvalid = state.records.find((record) => !record.valid);
   return {
-    summary: `当前阶段 ${state.phase},无效记录 ${state.records.filter((record) => !record.valid).length} 条。`,
+    summary: `当前阶段 ${state.phase},链长 ${state.records.length},无效记录 ${state.records.filter((record) => !record.valid).length} 条,首个断点 ${firstInvalid ? `记录 ${firstInvalid.index}` : '无'}。`,
     patterns: [
-      chainPattern('hash-chain', '哈希链', chainBlocks(state), [], 'main'),
-      matrixPattern('hash-matrix', '校验矩阵', state.records.map((record) => `记录 ${record.index}`), ['载荷', '父哈希', '摘要'], hashCells(state), 'side'),
-      pipelinePattern('hash-pipeline', '哈希验证流程', pipelineSteps([...hashChainPhases], state.phaseIndex, failed), hashChainPhases[state.phaseIndex].id, 'bottom'),
+      chainPattern('hash-chain', '哈希链父摘要连续性', chainBlocks(state), [], 'main'),
+      matrixPattern('hash-matrix', '逐记录父哈希与摘要校验矩阵', state.records.map((record) => `记录 ${record.index}`), ['载荷', '父哈希', '摘要'], hashCells(state), 'side'),
+      pipelinePattern('hash-pipeline', '重算摘要 -> 比对父哈希 -> 定位篡改流程', pipelineSteps([...hashChainPhases], state.phaseIndex, failed), hashChainPhases[state.phaseIndex].id, 'bottom'),
     ],
   };
 }
@@ -37,8 +38,9 @@ function hashCells(state: HashChainState): MatrixCell[][] {
     (row, column) => {
       const record = state.records.find((item) => row.endsWith(String(item.index)));
       if (!record) return { label: '无', status: 'empty' };
-      if (record.tampered && column === '载荷') return { label: '被改动', status: 'fault' };
-      if (!record.valid && column !== '载荷') return { label: '不匹配', status: 'fault' };
+      if (record.tampered && column === '载荷') return { label: '载荷被改', status: 'fault' };
+      if (!record.valid && column === '父哈希') return { label: record.parentHash.slice(0, 6), status: 'fault' };
+      if (!record.valid && column === '摘要') return { label: '重算不匹配', status: 'fault' };
       return { label: column === '载荷' ? '已规范' : '通过', status: 'yes' };
     }
   );

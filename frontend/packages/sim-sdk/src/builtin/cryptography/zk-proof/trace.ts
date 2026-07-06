@@ -1,6 +1,7 @@
 // 本文件定义零知识证明仿真的代码追踪和教学叙事。
 
-import type { CodeTraceDef, NarrativeStep } from '../../../types';
+import type { CodeTraceDef } from '../../../types';
+import { phaseNarrative } from '../../packageTools';
 import { zkProofPhases } from './model';
 
 export const zkProofSource = [
@@ -44,20 +45,4 @@ export const zkProofCodeTrace: CodeTraceDef = {
   ],
 };
 
-export const zkProofNarrative: NarrativeStep[] = zkProofPhases.map((phase, index) => ({
-  id: phase.id,
-  title: phase.label,
-  trigger: (state) => state.phase === phase.label,
-  highlight: [phase.id],
-  explain: `${phase.effect} ${phase.reason}`,
-  defaultDurationMs: 1200,
-  question:
-    index === zkProofPhases.length - 1
-      ? {
-          prompt: '当前响应是否满足承诺关系且没有泄露秘密?',
-          options: ['满足', '不满足'],
-          answer: '满足',
-          checkpointId: 'zk-proof-valid',
-        }
-      : undefined,
-}));
+export const zkProofNarrative = phaseNarrative(zkProofPhases, 'zk-proof-valid');

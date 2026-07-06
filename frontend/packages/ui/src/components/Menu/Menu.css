@@ -5,10 +5,13 @@
   gap: var(--space-1);
   min-inline-size: 12rem;
   padding: var(--space-2);
-  border: 1px solid var(--color-border);
+  border: 1px solid var(--color-glass-border);
   border-radius: var(--radius-sm);
-  background: var(--color-bg);
-  box-shadow: var(--shadow-md);
+  background: var(--color-panel-glass);
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  box-shadow: var(--shadow-glass-elevated);
+  transform-origin: top right;
 }
 
 .chaimir-menu__item {
@@ -25,16 +28,17 @@
   border: 0;
   border-radius: var(--radius-xs);
   cursor: pointer;
-  transition: background var(--t-fast) var(--ease), color var(--t-fast) var(--ease), transform var(--t-fast) var(--ease);
+  transition: background var(--t-fast) var(--ease), color var(--t-fast) var(--ease), transform var(--t-fast) var(--ease-press);
 }
 
 .chaimir-menu__item:hover:not(:disabled),
 .chaimir-menu__item:focus-visible {
   background: var(--color-surface-hover);
+  outline: 2px solid transparent;
 }
 
 .chaimir-menu__item:active:not(:disabled) {
-  transform: translateY(1px);
+  transform: scale(0.96);
 }
 
 .chaimir-menu__item:disabled {
@@ -44,6 +48,11 @@
 
 .chaimir-menu__item.is-danger {
   color: var(--color-danger);
+}
+
+.chaimir-menu__item.is-danger:hover:not(:disabled),
+.chaimir-menu__item.is-danger:focus-visible {
+  background: var(--color-danger-bg);
 }
 
 .chaimir-menu__item strong,

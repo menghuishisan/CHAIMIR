@@ -1,6 +1,9 @@
 // Admin API 文件定义 M9 管理后台前端唯一调用入口。
 
 import { ApiClient } from '../client'
+import type { AdminScope, AlertStatus } from '../constants/admin'
+import type { ApplicationStatus } from '../constants/identity'
+import type { PaginatedResponse } from '../types/common'
 import type {
   AlertEvent,
   AlertEventRequest,
@@ -14,13 +17,12 @@ import type {
   ConfigUpdateRequest,
   Dashboard,
   MonitoringPanel,
-  PaginatedResponse,
   Statistics,
   SystemConfig,
   TenantApplicationSummary,
   TenantSummary,
-  TransferTask,
-} from '../types'
+} from '../types/admin'
+import type { TransferTask } from '../types/transfer'
 
 /**
  * AdminApi 封装 M9 文档定义的管理后台 HTTP API,不保留旧路径或过渡别名。
@@ -57,7 +59,7 @@ export class AdminApi {
   }
 
   // listApplications 读取学校入驻申请摘要列表。
-  async listApplications(params?: { status?: number }): Promise<TenantApplicationSummary[]> {
+  async listApplications(params?: { status?: ApplicationStatus }): Promise<TenantApplicationSummary[]> {
     return this.client.get('/admin/platform/applications', params)
   }
 
@@ -72,7 +74,7 @@ export class AdminApi {
   }
 
   // listConfigs 查询系统配置列表。
-  async listConfigs(params?: { scope?: number }): Promise<SystemConfig[]> {
+  async listConfigs(params?: { scope?: AdminScope }): Promise<SystemConfig[]> {
     return this.client.get('/admin/configs', params)
   }
 
@@ -84,7 +86,7 @@ export class AdminApi {
   // listConfigHistory 查询配置变更历史。
   async listConfigHistory(
     key: string,
-    params?: { scope?: number; tenant_id?: string; page?: number; size?: number },
+    params?: { scope?: AdminScope; tenant_id?: string; page?: number; size?: number },
   ): Promise<PaginatedResponse<ConfigChangeLog>> {
     return this.client.get(`/admin/configs/${encodeURIComponent(key)}/history`, params)
   }
@@ -95,7 +97,7 @@ export class AdminApi {
   }
 
   // listAlertRules 查询业务级告警规则。
-  async listAlertRules(params?: { scope?: number }): Promise<AlertRule[]> {
+  async listAlertRules(params?: { scope?: AdminScope }): Promise<AlertRule[]> {
     return this.client.get('/admin/alert-rules', params)
   }
 
@@ -110,7 +112,7 @@ export class AdminApi {
   }
 
   // listAlertEvents 查询业务级告警事件。
-  async listAlertEvents(params?: { status?: number; page?: number; size?: number }): Promise<PaginatedResponse<AlertEvent>> {
+  async listAlertEvents(params?: { status?: AlertStatus; page?: number; size?: number }): Promise<PaginatedResponse<AlertEvent>> {
     return this.client.get('/admin/alert-events', params)
   }
 

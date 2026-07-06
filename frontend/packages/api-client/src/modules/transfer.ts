@@ -1,7 +1,8 @@
 // Transfer API 文件定义统一导入导出任务中心前端调用入口。
 
 import { ApiClient } from '../client'
-import type { TransferDownloadGrant, TransferTask, TransferTaskListResponse } from '../types'
+import type { TransferChannel, TransferStatus } from '../constants/transfer'
+import type { TransferDownloadGrant, TransferTask, TransferTaskListResponse } from '../types/transfer'
 
 /**
  * TransferApi 封装后端 platform/transfer 统一任务查询和下载授权接口。
@@ -16,8 +17,8 @@ export class TransferApi {
    * listTasks 查询当前账号可见的导入导出任务。
    */
   async listTasks(params?: {
-    channel?: string
-    status?: 'pending' | 'running' | 'retrying' | 'succeeded' | 'failed'
+    channel?: TransferChannel
+    status?: TransferStatus
     page?: number
     size?: number
   }): Promise<TransferTaskListResponse> {

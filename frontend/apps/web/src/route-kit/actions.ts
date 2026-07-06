@@ -1,7 +1,8 @@
 ﻿// 路由动作定义：集中维护页面动作、行操作、字段构造和提交值转换。
 
 import type { ChaimirApi } from '@chaimir/api-client'
-import { routeHref, type ActionField, type ActionValues, type DataRow, type PageAction, type RowAction } from '@chaimir/shared'
+import { routeHref } from '../app/router'
+import type { ActionField, ActionValues, DataRow, PageAction, RowAction } from '../app/types'
 
 export function teacherCourseActions(api: ChaimirApi): PageAction[] {
   return [

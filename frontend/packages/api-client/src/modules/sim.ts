@@ -2,6 +2,8 @@
 // 对应后端 M4 模块
 
 import { ApiClient } from '../client'
+import type { SimPackageStatus, SimReviewResult } from '../constants/sim'
+import type { PaginatedResponse } from '../types/common'
 import type {
   SimPackageMeta,
   SimPackageReview,
@@ -13,8 +15,7 @@ import type {
   SimReplay,
   SimShareCreate,
   SimShareResult,
-  PaginatedResponse,
-} from '../types'
+} from '../types/sim'
 
 /**
  * SimApi 封装后端 M4 仿真包、审核、回放、分享和实时流接口。
@@ -33,7 +34,7 @@ export class SimApi {
   async getPackages(params?: {
     category?: string
     keyword?: string
-    status?: 'published'
+    status?: SimPackageStatus
     page?: number
     size?: number
   }): Promise<PaginatedResponse<SimPackageMeta>> {
@@ -88,7 +89,7 @@ export class SimApi {
    * 获取审核列表（审核员）
    */
   async getReviews(params?: {
-    result?: 'pending' | 'approved' | 'rejected'
+    result?: SimReviewResult
     page?: number
     size?: number
   }): Promise<PaginatedResponse<SimPackageReview>> {

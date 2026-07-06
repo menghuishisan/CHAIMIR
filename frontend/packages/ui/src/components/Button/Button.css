@@ -18,7 +18,7 @@
   border-radius: var(--radius-sm);
   border: none;
   cursor: pointer;
-  transition: background var(--t) var(--ease), border-color var(--t) var(--ease), color var(--t) var(--ease), box-shadow var(--t) var(--ease), opacity var(--t-fast) var(--ease), transform var(--t-fast) var(--ease);
+  transition: background var(--t) var(--ease), border-color var(--t) var(--ease), color var(--t) var(--ease), box-shadow var(--t) var(--ease), opacity var(--t-fast) var(--ease), transform var(--t-fast) var(--ease-press);
   white-space: nowrap;
   user-select: none;
   position: relative;
@@ -65,9 +65,30 @@
 
 .chaimir-btn--primary:active:not(:disabled) {
   /* 按压回落微缩 */
-  transform: scale(0.985);
+  transform: scale(0.96);
+  filter: brightness(0.9);
   box-shadow: inset 0 1px 0 var(--color-highlight),
               0 1px 2px var(--color-primary-shadow);
+}
+
+/* Secondary - 琥珀副动作按钮 */
+.chaimir-btn--secondary {
+  background: var(--color-secondary);
+  color: var(--color-secondary-fg);
+  box-shadow: inset 0 1px 0 var(--color-highlight),
+              0 1px 2px var(--color-primary-shadow);
+}
+
+.chaimir-btn--secondary:hover:not(:disabled) {
+  background: var(--color-secondary-hover);
+  transform: translateY(-1px);
+  box-shadow: inset 0 1px 0 var(--color-highlight),
+              0 4px 8px var(--color-primary-shadow-strong);
+}
+
+.chaimir-btn--secondary:active:not(:disabled) {
+  transform: scale(0.96);
+  filter: brightness(0.9);
 }
 
 /* Outline - 描边按钮 */
@@ -86,7 +107,7 @@
 
 .chaimir-btn--outline:active:not(:disabled) {
   background: var(--color-primary-soft);
-  transform: scale(0.98);
+  transform: scale(0.96);
 }
 
 /* Ghost - 幽灵按钮 */
@@ -103,6 +124,7 @@
 
 .chaimir-btn--ghost:active:not(:disabled) {
   background: var(--color-surface-sunken);
+  transform: scale(0.96);
 }
 
 /* Danger - 危险按钮 */
@@ -121,7 +143,8 @@
 }
 
 .chaimir-btn--danger:active:not(:disabled) {
-  transform: scale(0.985);
+  transform: scale(0.96);
+  filter: brightness(0.9);
 }
 
 /* On Dark - 深色背景上的按钮 */
@@ -185,6 +208,14 @@
 .chaimir-btn:not(:has(.chaimir-btn__text)) {
   inline-size: 2.5rem;
   padding-inline: 0;
+}
+
+.chaimir-btn--sm:not(:has(.chaimir-btn__text)) {
+  inline-size: 2rem;
+}
+
+.chaimir-btn--lg:not(:has(.chaimir-btn__text)) {
+  inline-size: 3rem;
 }
 
 @media (pointer: coarse) {

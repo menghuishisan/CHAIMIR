@@ -21,6 +21,7 @@ import type {
   TreeNode,
   ViewSpec,
 } from '../types';
+import { narrativeQuestions, type PhaseNarrativeQuestion } from './narrativeQuestions';
 
 export interface AlgorithmPackageSpec<TState extends SimState> {
   meta: SimPackage<TState>['meta'];
@@ -63,7 +64,7 @@ export function createAlgorithmPackage<TState extends SimState>(spec: AlgorithmP
  */
 export function commonAlgorithmInteractions(targetFilter: string): InteractionDef[] {
   return [
-    { id: 'select', kind: 'select-element', label: '选择对象', description: '选择舞台中的对象,查看它在当前算法流程中的状态。', emits: 'select', target: 'element', elementFilter: targetFilter },
+    { id: 'select', kind: 'select-element', label: '选择对象', description: '选择画面中的对象,查看它在当前算法流程中的状态。', emits: 'select', target: 'element', elementFilter: targetFilter },
     { id: 'advance', kind: 'button', label: '推进阶段', description: '按当前算法规则推进一个阶段。', emits: 'advance', labelTag: 'normal' },
     { id: 'attack', kind: 'button', label: '注入异常', description: '注入该算法需要处理的异常输入或攻击路径。', emits: 'attack', labelTag: 'attack' },
     { id: 'recover', kind: 'button', label: '执行修复', description: '按该算法的恢复或防护规则处理异常。', emits: 'recover', labelTag: 'perturb' },
@@ -71,13 +72,20 @@ export function commonAlgorithmInteractions(targetFilter: string): InteractionDe
 }
 
 /**
- * phaseNarrative 从阶段说明生成教学叙事。
+ * phaseNarrative 从阶段说明生成教学叙事,并按检查点生成算法专属判断题。
  */
 export function phaseNarrative(
-  phases: Array<{ id: string; label: string; effect: string; reason: string }>,
-  checkpointId: string
+  phases: ReadonlyArray<{ id: string; label: string; effect: string; reason: string }>,
+  checkpointId: string,
+  question: PhaseNarrativeQuestion = narrativeQuestions[checkpointId] ?? {
+    prompt: '当前流程是否已经满足该算法的关键正确性条件?',
+    options: ['满足', '不满足'],
+    answer: '满足',
+  }
 ): NarrativeStep[] {
-  return phases.map((phase, index) => ({
+  const { phaseId, ...questionPayload } = question;
+  const questionPhaseId = phaseId ?? phases[phases.length - 1]?.id;
+  return phases.map((phase) => ({
     id: phase.id,
     title: phase.label,
     trigger: (state) => state.phase === phase.label,
@@ -85,11 +93,9 @@ export function phaseNarrative(
     explain: `${phase.effect} ${phase.reason}`,
     defaultDurationMs: 1200,
     question:
-      index === phases.length - 1
+      phase.id === questionPhaseId
         ? {
-            prompt: '当前流程是否已经满足该算法的关键正确性条件?',
-            options: ['满足', '不满足'],
-            answer: '满足',
+            ...questionPayload,
             checkpointId,
           }
         : undefined,

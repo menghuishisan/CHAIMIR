@@ -50,12 +50,6 @@ importers:
       '@chaimir/api-client':
         specifier: workspace:*
         version: link:../../packages/api-client
-      '@chaimir/auth':
-        specifier: workspace:*
-        version: link:../../packages/auth
-      '@chaimir/shared':
-        specifier: workspace:*
-        version: link:../../packages/shared
       '@chaimir/sim-sdk':
         specifier: workspace:*
         version: link:../../packages/sim-sdk
@@ -92,83 +86,23 @@ importers:
         specifier: ^5.4.5
         version: 5.9.3
 
-  packages/auth:
-    dependencies:
-      '@chaimir/api-client':
-        specifier: workspace:*
-        version: link:../api-client
-      '@chaimir/shared':
-        specifier: workspace:*
-        version: link:../shared
-      '@chaimir/ui':
-        specifier: workspace:*
-        version: link:../ui
-      lucide-react:
-        specifier: ^0.468.0
-        version: 0.468.0(react@18.3.1)
-      react:
-        specifier: ^18.3.1
-        version: 18.3.1
-    devDependencies:
-      '@types/react':
-        specifier: ^18.3.3
-        version: 18.3.31
-      typescript:
-        specifier: ^5.4.5
-        version: 5.9.3
-
-  packages/charts:
-    dependencies:
-      clsx:
-        specifier: ^2.1.1
-        version: 2.1.1
-      lucide-react:
-        specifier: ^0.460.0
-        version: 0.460.0(react@18.3.1)
-      react:
-        specifier: ^18.3.1
-        version: 18.3.1
-    devDependencies:
-      '@types/react':
-        specifier: ^18.3.3
-        version: 18.3.31
-      typescript:
-        specifier: ^5.4.5
-        version: 5.9.3
-
   packages/ide:
     dependencies:
       '@chaimir/ui':
         specifier: workspace:*
         version: link:../ui
+      '@xterm/addon-fit':
+        specifier: ^0.11.0
+        version: 0.11.0
+      '@xterm/addon-webgl':
+        specifier: ^0.19.0
+        version: 0.19.0
       '@xterm/xterm':
         specifier: ^5.5.0
         version: 5.5.0
       monaco-editor:
         specifier: ^0.52.2
         version: 0.52.2
-      react:
-        specifier: ^18.3.1
-        version: 18.3.1
-    devDependencies:
-      '@types/react':
-        specifier: ^18.3.3
-        version: 18.3.31
-      typescript:
-        specifier: ^5.4.5
-        version: 5.9.3
-
-  packages/shared:
-    dependencies:
-      '@chaimir/api-client':
-        specifier: workspace:*
-        version: link:../api-client
-      '@chaimir/ui':
-        specifier: workspace:*
-        version: link:../ui
-      lucide-react:
-        specifier: ^0.460.0
-        version: 0.460.0(react@18.3.1)
       react:
         specifier: ^18.3.1
         version: 18.3.1
@@ -204,9 +138,6 @@ importers:
 
   packages/ui:
     dependencies:
-      '@chaimir/charts':
-        specifier: workspace:*
-        version: link:../charts
       clsx:
         specifier: ^2.1.1
         version: 2.1.1
@@ -226,19 +157,6 @@ importers:
       '@types/react-dom':
         specifier: ^18.3.0
         version: 18.3.7(@types/react@18.3.31)
-      typescript:
-        specifier: ^5.4.5
-        version: 5.9.3
-
-  packages/ws-client:
-    dependencies:
-      react:
-        specifier: ^18.3.1
-        version: 18.3.1
-    devDependencies:
-      '@types/react':
-        specifier: ^18.3.3
-        version: 18.3.31
       typescript:
         specifier: ^5.4.5
         version: 5.9.3
@@ -786,6 +704,12 @@ packages:
     engines: {node: ^14.18.0 || >=16.0.0}
     peerDependencies:
       vite: ^4.2.0 || ^5.0.0 || ^6.0.0 || ^7.0.0
+
+  '@xterm/addon-fit@0.11.0':
+    resolution: {integrity: sha512-jYcgT6xtVYhnhgxh3QgYDnnNMYTcf8ElbxxFzX0IZo+vabQqSPAjC3c1wJrKB5E19VwQei89QCiZZP86DCPF7g==}
+
+  '@xterm/addon-webgl@0.19.0':
+    resolution: {integrity: sha512-b3fMOsyLVuCeNJWxolACEUED0vm7qC0cy4wRvf3oURSzDTYVQiGPhTnhWZwIHdvC48Y+oLhvYXnY4XDXPoJo6A==}
 
   '@xterm/xterm@5.5.0':
     resolution: {integrity: sha512-hqJHYaQb5OptNunnyAnkHyM8aCjZ1MEIDTQu1iIbbTD/xops91NB5yq1ZK/dC2JDbVWtF23zUtl9JE2NqwT87A==}
@@ -1466,11 +1390,6 @@ packages:
 
   lucide-react@0.460.0:
     resolution: {integrity: sha512-BVtq/DykVeIvRTJvRAgCsOwaGL8Un3Bxh8MbDxMhEWlZay3T4IpEKDEpwt5KZ0KJMHzgm6jrltxlT5eXOWXDHg==}
-    peerDependencies:
-      react: ^16.5.1 || ^17.0.0 || ^18.0.0 || ^19.0.0-rc
-
-  lucide-react@0.468.0:
-    resolution: {integrity: sha512-6koYRhnM2N0GGZIdXzSeiNwguv1gt/FAjZOiPl76roBi3xKEXa4WmfpxgQwTTL4KipXjefrnf3oV4IsYhi4JFA==}
     peerDependencies:
       react: ^16.5.1 || ^17.0.0 || ^18.0.0 || ^19.0.0-rc
 
@@ -2444,6 +2363,10 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
+  '@xterm/addon-fit@0.11.0': {}
+
+  '@xterm/addon-webgl@0.19.0': {}
+
   '@xterm/xterm@5.5.0': {}
 
   acorn-jsx@5.3.2(acorn@8.17.0):
@@ -3308,10 +3231,6 @@ snapshots:
       yallist: 3.1.1
 
   lucide-react@0.460.0(react@18.3.1):
-    dependencies:
-      react: 18.3.1
-
-  lucide-react@0.468.0(react@18.3.1):
     dependencies:
       react: 18.3.1
 

@@ -1,8 +1,8 @@
 ﻿// 路由结果工具：把后端列表、对象和工作台状态转换为四端统一页面数据。
 
 import { AccountStatus, SessionStatus } from '@chaimir/api-client'
-import { formatDate } from '@chaimir/shared'
-import type { DataColumn, DataRow, MetricItem, PageAction, ResourceResult, WorkspaceResult, WorkspaceTool } from '@chaimir/shared'
+import { formatDate } from '../lib/format'
+import type { DataColumn, DataRow, MetricItem, PageAction, ResourceResult, WorkspaceResult, WorkspaceTool } from '../app/types'
 import { dashboardColumns } from './columns'
 
 type ObjectItem = Record<string, unknown>

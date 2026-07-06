@@ -12,6 +12,7 @@
   overflow-x: auto;
   border-bottom: 1px solid var(--color-border);
   scrollbar-width: thin;
+  scroll-padding-inline: var(--space-2);
 }
 
 .chaimir-tabs__tab {
@@ -25,7 +26,11 @@
   border: none;
   border-radius: var(--radius-sm) var(--radius-sm) 0 0;
   cursor: pointer;
-  transition: background var(--t-fast) var(--ease), color var(--t-fast) var(--ease), transform var(--t-fast) var(--ease);
+  transition:
+    background var(--t-fast) var(--ease),
+    color var(--t-fast) var(--ease),
+    transform var(--t-fast) var(--ease-press),
+    box-shadow var(--t-fast) var(--ease);
   white-space: nowrap;
 }
 
@@ -35,24 +40,28 @@
 }
 
 .chaimir-tabs__tab:active:not(.chaimir-tabs__tab--disabled) {
-  transform: translateY(1px);
+  transform: scale(0.96);
 }
 
 .chaimir-tabs__tab--active {
   color: var(--color-primary-text);
-  font-weight: var(--font-semibold);
+  background: var(--color-primary-soft);
+  font-weight: var(--font-bold);
 }
 
-.chaimir-tabs__tab--active::after {
+.chaimir-tabs__indicator {
   position: absolute;
-  inset-inline: var(--space-3);
   inset-block-end: -1px;
   block-size: 2px;
   background: var(--color-primary);
   border-radius: var(--radius-full);
-  content: '';
-  transform: scaleX(1);
-  transform-origin: center;
+  transition:
+    transform 0.5s var(--ease-spring-bouncy),
+    width 0.5s var(--ease-spring-bouncy),
+    opacity 0.2s var(--ease);
+  pointer-events: none;
+  opacity: 0; /* 测量完成后由 JS 设为 1 */
+  z-index: 1;
 }
 
 .chaimir-tabs__tab--disabled {
@@ -65,7 +74,8 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .chaimir-tabs__tab {
+  .chaimir-tabs__tab,
+  .chaimir-tabs__indicator {
     transition: none;
   }
 }

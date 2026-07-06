@@ -1,8 +1,9 @@
-// 本文件承接 M4 仿真工作台页面,只做授权装配和会话日志上报,可视化运行交给 sim-sdk。
+﻿// 本文件承接 M4 仿真工作台页面,只做授权装配和会话日志上报,可视化运行交给 sim-sdk。
 
 import React, { useEffect, useMemo, useState } from 'react'
 import type { ChaimirApi, SimBundleDownloadGrant } from '@chaimir/api-client'
-import { readFrontendConfig, routeHref } from '@chaimir/shared'
+import { routeHref } from '../../app/router'
+import { readFrontendConfig } from '../../lib/config'
 import { Button } from '@chaimir/ui'
 import { SimulationWorkbench } from '@chaimir/sim-sdk'
 import type { SimEvent, SimInitParams } from '@chaimir/sim-sdk'

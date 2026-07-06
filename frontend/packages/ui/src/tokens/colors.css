@@ -178,6 +178,16 @@
   --color-dark-bg: var(--slate-900);          /* 深色背景 */
   --color-dark-surface: var(--slate-800);     /* 深色表面 */
   --color-dark-elevated: var(--slate-700);    /* 深色抬升 */
+
+  /* iOS 质感半透明材质 */
+  --color-dark-glass: rgba(15, 23, 42, 0.75); /* --slate-900 的 75% 不透明度 */
+  --color-panel-glass: rgba(30, 41, 59, 0.85); /* --slate-800 的 85% 不透明度 */
+  --color-glass-border: rgba(255, 255, 255, 0.1);
+  --color-glass-border-subtle: rgba(255, 255, 255, 0.05);
+  --color-glass-highlight: rgba(255, 255, 255, 0.05);
+  --shadow-glass-panel: 0 8px 32px rgba(0, 0, 0, 0.4), inset 0 1px 0 var(--color-glass-border);
+  --shadow-glass-elevated: 0 4px 16px rgba(0, 0, 0, 0.5), inset 0 1px 0 var(--color-glass-highlight);
+
   --color-dark-text: var(--slate-50);         /* 深底主文字，对深底约 15:1 */
   --color-dark-text-sub: var(--slate-300);    /* 深底次要文字，对深底约 7:1 */
   --color-dark-border: var(--slate-700);      /* 深色边框 */
@@ -193,6 +203,11 @@
   /* 终端与编辑器专用 */
   --color-terminal-bg: #0a0e14;               /* 终端背景 */
   --color-editor-bg: #1e1e1e;                 /* 编辑器背景 */
+  --color-editor-line-highlight: #1a2233;
+  --color-editor-line-number: #4f5c77;
+  --color-editor-indent-guide: #1e283c;
+  --color-editor-suggest-bg: #121824;
+  --color-editor-suggest-border: #2a354a;
 
   /* 组件动效辅助色 */
   --color-progress-shine: rgba(255, 255, 255, 0.15);

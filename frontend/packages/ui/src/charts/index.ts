@@ -1,2 +1,2 @@
-// 图表组件兼容出口：实现归属独立 @chaimir/charts 包，UI 主包统一再导出。
-export * from '@chaimir/charts'
+// 图表组件出口：图形、状态处理和数据表降级归属 UI 包。
+export * from './AccessibleChart'

@@ -2,6 +2,8 @@
 // 对应后端 M11 模块的当前接口。
 
 import { ApiClient } from '../client'
+import type { GradeAppealStatus, GradeReviewStatus, TranscriptScope } from '../constants/grade'
+import type { PaginatedResponse } from '../types/common'
 import type {
   GradeAppeal,
   GradeAppealRequest,
@@ -12,7 +14,6 @@ import type {
   GradeWarning,
   LevelConfig,
   LevelConfigRequest,
-  PaginatedResponse,
   ReviewDecision,
   Semester,
   SemesterRequest,
@@ -20,7 +21,7 @@ import type {
   TranscriptRequest,
   WarningRules,
   WarningScanResult,
-} from '../types'
+} from '../types/grade'
 
 /**
  * GradeApi 封装 M11 成绩中心的前端 HTTP 契约。
@@ -76,7 +77,7 @@ export class GradeApi {
   /**
    * 查询成绩审核列表。
    */
-  async listReviews(params?: { status?: number; page?: number; size?: number }): Promise<PaginatedResponse<GradeReview>> {
+  async listReviews(params?: { status?: GradeReviewStatus; page?: number; size?: number }): Promise<PaginatedResponse<GradeReview>> {
     return this.client.get('/grade-center/reviews', params)
   }
 
@@ -132,7 +133,7 @@ export class GradeApi {
   /**
    * 教师或管理员查询成绩申诉列表。
    */
-  async listAppeals(params?: { status?: number; page?: number; size?: number }): Promise<PaginatedResponse<GradeAppeal>> {
+  async listAppeals(params?: { status?: GradeAppealStatus; page?: number; size?: number }): Promise<PaginatedResponse<GradeAppeal>> {
     return this.client.get('/grade-center/appeals', params)
   }
 
@@ -195,7 +196,7 @@ export class GradeApi {
   /**
    * 批量生成成绩单记录。
    */
-  async generateTranscriptBatch(data: { student_ids: number[]; scope: number; semester_id?: string }): Promise<GradeTranscript[]> {
+  async generateTranscriptBatch(data: { student_ids: number[]; scope: TranscriptScope; semester_id?: string }): Promise<GradeTranscript[]> {
     return this.client.post('/grade-center/transcripts/batch', data)
   }
 

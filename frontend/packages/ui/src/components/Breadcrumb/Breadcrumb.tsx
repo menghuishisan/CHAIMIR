@@ -3,6 +3,7 @@
 import React from 'react'
 import { ChevronRight } from 'lucide-react'
 import { clsx } from 'clsx'
+import { triggerHaptic } from '../../utils/haptics'
 import './Breadcrumb.css'
 
 export interface BreadcrumbItem {
@@ -48,7 +49,10 @@ export const Breadcrumb: React.FC<BreadcrumbProps> = ({
                 <button
                   type="button"
                   className="chaimir-breadcrumb__link"
-                  onClick={item.onClick}
+                  onClick={() => {
+                    triggerHaptic(10)
+                    if (item.onClick) item.onClick()
+                  }}
                 >
                   {item.label}
                 </button>

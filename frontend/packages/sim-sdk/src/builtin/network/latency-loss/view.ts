@@ -10,12 +10,13 @@ import type { LatencyLossState } from './model';
  * renderLatencyLossView 输出数据包时序、包状态矩阵和传输趋势。
  */
 export function renderLatencyLossView(state: LatencyLossState): ViewSpec {
+  const dropped = state.packets.filter((packet) => packet.dropped).length;
   return {
-    summary: `窗口 ${state.congestionWindow},已送达 ${deliveredCount(state)}/${state.packets.length},平均延迟 ${averageLatency(state)}ms。`,
+    summary: `拥塞窗口 ${state.congestionWindow},已送达 ${deliveredCount(state)}/${state.packets.length},丢包 ${dropped},平均延迟 ${averageLatency(state)}ms。`,
     patterns: [
-      lanePattern('loss-lane', '数据包时序', ['发送端', '接收端'], laneMessages(state.messages, labelOf), state.tick, 'main'),
-      matrixPattern('loss-matrix', '数据包状态', state.packets.map((packet) => `包 ${packet.seq}`), ['发送', 'ACK', '丢包', '重试'], packetCells(state), 'side'),
-      chartPattern('loss-chart', '传输趋势', metricSeries(state.samples), '%', 'bottom'),
+      lanePattern('loss-lane', '数据包发送、ACK 与重传时序', ['发送端', '接收端'], laneMessages(state.messages, labelOf), state.tick, 'main'),
+      matrixPattern('loss-matrix', '包级 ACK / 丢包 / 重试矩阵', state.packets.map((packet) => `包 ${packet.seq}`), ['发送', 'ACK', '丢包', '重试'], packetCells(state), 'side'),
+      chartPattern('loss-chart', '吞吐覆盖率 / 风险 / 延迟趋势', metricSeries(state.samples), '%', 'bottom'),
     ],
   };
 }

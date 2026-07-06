@@ -1,0 +1,113 @@
+/* SegmentedControl 组件样式：紧凑模式切换、稳定触达区和选中态。 */
+
+.chaimir-segmented-control {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  max-inline-size: 100%;
+  padding: var(--space-1);
+  background: var(--color-surface-sunken);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  position: relative;
+  z-index: 0;
+}
+
+.chaimir-segmented-control__item {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-1);
+  min-block-size: 2rem;
+  min-inline-size: 2.5rem;
+  padding: 0 var(--space-3);
+  color: var(--color-text-sub);
+  font-size: var(--text-sm);
+  font-weight: var(--font-bold);
+  white-space: nowrap;
+  cursor: pointer;
+  border-radius: var(--radius-xs);
+  transition:
+    color var(--t) var(--ease),
+    background var(--t) var(--ease),
+    box-shadow var(--t) var(--ease),
+    transform var(--t-fast) var(--ease-press);
+  z-index: 1;
+}
+
+.chaimir-segmented-control--sm .chaimir-segmented-control__item {
+  min-block-size: 1.75rem;
+  padding-inline: var(--space-2);
+  font-size: var(--text-xs);
+}
+
+.chaimir-segmented-control__item input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: inherit;
+}
+
+.chaimir-segmented-control__item:hover:not(.is-disabled) {
+  color: var(--color-text);
+  background: var(--color-bg);
+}
+
+.chaimir-segmented-control__item.is-selected {
+  color: var(--color-primary-text);
+}
+
+.chaimir-segmented-control__slider {
+  position: absolute;
+  top: var(--space-1);
+  bottom: var(--space-1);
+  background: var(--color-bg);
+  box-shadow: var(--shadow-xs), inset 0 -2px 0 var(--color-accent);
+  border-radius: var(--radius-xs);
+  transition:
+    transform 0.5s var(--ease-spring-bouncy),
+    width 0.5s var(--ease-spring-bouncy),
+    opacity 0.2s var(--ease);
+  pointer-events: none;
+  z-index: 0;
+  opacity: 0; /* 测量完成后由 JS 设为 1 */
+}
+
+.chaimir-segmented-control__item:has(input:focus-visible) {
+  outline: 2px solid var(--color-focus-ring);
+  outline-offset: 2px;
+}
+
+.chaimir-segmented-control__item:active:not(.is-disabled) {
+  transform: scale(0.96);
+}
+
+.chaimir-segmented-control__item.is-disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.chaimir-segmented-control__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+@media (max-width: 479px) {
+  .chaimir-segmented-control {
+    inline-size: 100%;
+    overflow-x: auto;
+  }
+
+  .chaimir-segmented-control__item {
+    flex: 1 0 auto;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chaimir-segmented-control__item,
+  .chaimir-segmented-control__slider {
+    transition: none;
+  }
+}

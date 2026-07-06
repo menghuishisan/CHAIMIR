@@ -10,12 +10,15 @@ import type { PowBlock, PowState } from './model';
  * renderPowView 输出规范链、矿工网络和 nonce 搜索过程。
  */
 export function renderPowView(state: PowState): ViewSpec {
+  const privateWork = chainWork(state.privateFork);
+  const publicWork = chainWork(state.blocks);
+  const winningAttempts = state.hashAttempts.filter((attempt) => attempt.valid).length;
   return {
-    summary: `高度 ${canonicalHeight(state)},难度 ${state.difficulty},候选 nonce ${state.candidateNonce},规范链累计工作量 ${chainWork(state.blocks)}。`,
+    summary: `高度 ${canonicalHeight(state)},目标 ${state.targetPrefix},候选 nonce ${state.candidateNonce},命中 ${winningAttempts} 次,规范链工作量 ${publicWork},私有分叉工作量 ${privateWork}。`,
     patterns: [
-      chainPattern('pow-chain', 'PoW 规范链与分叉', chainBlocks(state.blocks), state.privateFork.length > 0 ? [chainBlocks(state.privateFork)] : [], 'main'),
-      graphPattern('pow-graph', '矿工广播网络', minerNodes(state), graphEdges(state.messages), 'side'),
-      matrixPattern('pow-attempts', '哈希搜索窗口', state.hashAttempts.map((attempt) => String(attempt.nonce)), ['哈希', '前导零', '目标'], powAttemptCells(state), 'bottom'),
+      chainPattern('pow-chain', `PoW 最长工作量链,公开 ${publicWork} / 私有 ${privateWork}`, chainBlocks(state.blocks), state.privateFork.length > 0 ? [chainBlocks(state.privateFork)] : [], 'main'),
+      graphPattern('pow-graph', '矿工算力与区块广播网络', minerNodes(state), graphEdges(state.messages), 'side'),
+      matrixPattern('pow-attempts', `Nonce 搜索窗口,难度 ${state.difficulty} 个前导零`, state.hashAttempts.map((attempt) => String(attempt.nonce)), ['哈希前缀', '前导零得分', '是否达标'], powAttemptCells(state), 'bottom'),
     ],
   };
 }
@@ -40,12 +43,12 @@ function chainBlocks(blocks: PowBlock[]): ChainBlock[] {
 function powAttemptCells(state: PowState): MatrixCell[][] {
   return voteCells(
     state.hashAttempts.map((attempt) => String(attempt.nonce)),
-    ['哈希', '前导零', '目标'],
+    ['哈希前缀', '前导零得分', '是否达标'],
     (row, column) => {
       const attempt = state.hashAttempts.find((item) => String(item.nonce) === row);
       if (!attempt) return { label: '无', status: 'empty' };
-      if (column === '哈希') return { label: attempt.hash.slice(0, 8), status: attempt.valid ? 'yes' : 'pending' };
-      if (column === '前导零') return { label: String(attempt.score), status: attempt.score >= state.difficulty ? 'yes' : 'pending' };
+      if (column === '哈希前缀') return { label: attempt.hash.slice(0, 8), status: attempt.valid ? 'yes' : 'pending' };
+      if (column === '前导零得分') return { label: `${attempt.score}/${state.difficulty}`, status: attempt.score >= state.difficulty ? 'yes' : 'pending' };
       return { label: state.targetPrefix, status: attempt.valid ? 'yes' : 'fault' };
     }
   );

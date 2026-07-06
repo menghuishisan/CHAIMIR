@@ -9,12 +9,13 @@ import type { SignatureState } from './model';
  * renderDigitalSignatureView 输出参与方图、消息时序和验签条件矩阵。
  */
 export function renderDigitalSignatureView(state: SignatureState): ViewSpec {
+  const replayState = state.replayDetected ? 'Nonce 重放' : 'Nonce 新鲜';
   return {
-    summary: `签名 ${state.signature.slice(0, 8)},Nonce ${state.nonce},验签${state.verified ? '通过' : '未通过'},重放${state.replayDetected ? '已发现' : '未发现'}。`,
+    summary: `签名 ${state.signature.slice(0, 8)},Nonce ${state.nonce},${replayState},恢复公钥 ${state.recoveredKey ? state.recoveredKey.slice(0, 6) : '等待'},验签${state.verified ? '通过' : '未通过'}。`,
     patterns: [
-      graphPattern('signature-graph', '签名参与方', graphNodes(state.actors), graphEdges(state.messages), 'main'),
-      lanePattern('signature-lane', '签名与验签时序', state.actors.map((actor) => actor.label), laneMessages(state.messages, (id) => labelOf(state, id)), state.tick, 'side'),
-      matrixPattern('signature-matrix', '验签条件', ['恢复公钥', '消息完整', 'Nonce 未重放'], ['结果'], signatureCells(state), 'bottom'),
+      graphPattern('signature-graph', '签名者 -> 验证者信任链路', graphNodes(state.actors), graphEdges(state.messages), 'main'),
+      lanePattern('signature-lane', '签名生成 / 公钥恢复 / Nonce 检查时序', state.actors.map((actor) => actor.label), laneMessages(state.messages, (id) => labelOf(state, id)), state.tick, 'side'),
+      matrixPattern('signature-matrix', 'ECDSA 验签条件矩阵', ['恢复公钥', '消息完整', 'Nonce 未重放'], ['结果'], signatureCells(state), 'bottom'),
     ],
   };
 }

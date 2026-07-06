@@ -1,6 +1,7 @@
 // 本文件定义 PBFT 内置仿真包的伪代码追踪和叙事内容。
 
-import type { CodeTraceDef, NarrativeStep } from '../../../types';
+import type { CodeTraceDef } from '../../../types';
+import { phaseNarrative } from '../../packageTools';
 import { pbftPhases } from './model';
 
 export const pbftSourceCode = [
@@ -48,20 +49,4 @@ export const pbftCodeTrace: CodeTraceDef = {
   ],
 };
 
-export const pbftNarrative: NarrativeStep[] = pbftPhases.map((phase, index) => ({
-  id: phase.id,
-  title: phase.label,
-  trigger: (state) => state.phase === phase.label,
-  highlight: [phase.id],
-  explain: `${phase.effect} ${phase.reason}`,
-  defaultDurationMs: 1200,
-  question:
-    index === pbftPhases.length - 1
-      ? {
-          prompt: 'PBFT 在本轮提交后是否已经满足安全执行条件?',
-          options: ['满足', '不满足'],
-          answer: '满足',
-          checkpointId: 'pbft-safety',
-        }
-      : undefined,
-}));
+export const pbftNarrative = phaseNarrative(pbftPhases, 'pbft-safety');

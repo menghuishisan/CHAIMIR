@@ -10,18 +10,39 @@
   border-radius: var(--radius-sm);
   background: var(--color-bg);
   box-shadow: var(--shadow-xs);
+  transition:
+    border-color var(--t) var(--ease),
+    box-shadow var(--t) var(--ease),
+    transform var(--t) var(--ease);
+}
+
+.chaimir-checkpoint-card:hover {
+  transform: translateY(-2px);
+  border-color: var(--color-border-strong);
+  box-shadow: var(--shadow);
 }
 
 .chaimir-checkpoint-card__icon {
+  display: inline-grid;
+  place-items: center;
+  inline-size: 2rem;
+  block-size: 2rem;
   color: var(--color-text-sub);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-full);
 }
 
 .chaimir-checkpoint-card.is-passed .chaimir-checkpoint-card__icon {
   color: var(--color-success);
+  background: var(--color-success-bg);
+  border-color: var(--color-success-border);
 }
 
 .chaimir-checkpoint-card.is-failed .chaimir-checkpoint-card__icon {
   color: var(--color-danger);
+  background: var(--color-danger-bg);
+  border-color: var(--color-danger-border);
 }
 
 .chaimir-checkpoint-card strong {
@@ -42,4 +63,14 @@
 
 .chaimir-checkpoint-card__action {
   grid-column: 2 / -1;
+}
+
+@media (max-width: 479px) {
+  .chaimir-checkpoint-card {
+    grid-template-columns: auto 1fr;
+  }
+
+  .chaimir-checkpoint-card b {
+    grid-column: 2;
+  }
 }

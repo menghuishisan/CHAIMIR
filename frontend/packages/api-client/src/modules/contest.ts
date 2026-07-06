@@ -1,6 +1,8 @@
 // Contest API：对齐后端 M8 竞赛模块唯一 HTTP 契约。
 
 import { ApiClient } from '../client'
+import type { ContestStatus, VulnProblemStatus } from '../constants/contest'
+import type { PaginatedResponse } from '../types/common'
 import type {
   BattleEntryRequest,
   BattleEntry,
@@ -20,7 +22,6 @@ import type {
   EnvSummary,
   JoinTeamRequest,
   LadderRank,
-  PaginatedResponse,
   ResultSnapshot,
   SignupRequest,
   ContestTeam,
@@ -29,7 +30,7 @@ import type {
   VulnSource,
   VulnSourceRequest,
   VulnPrevalidateRequest,
-} from '../types'
+} from '../types/contest'
 
 /**
  * ContestApi 封装 M8 竞赛模块的前端 HTTP 契约。
@@ -43,7 +44,7 @@ export class ContestApi {
   /**
    * 获取竞赛列表。
    */
-  async getContests(params?: { status?: number; page?: number; size?: number }): Promise<PaginatedResponse<Contest>> {
+  async getContests(params?: { status?: ContestStatus; page?: number; size?: number }): Promise<PaginatedResponse<Contest>> {
     return this.client.get('/contest/contests', params)
   }
 
@@ -263,7 +264,7 @@ export class ContestApi {
   /**
    * 查询漏洞题草稿。
    */
-  async listVulnProblems(params?: { source_id?: number; status?: number; page?: number; size?: number }): Promise<PaginatedResponse<VulnProblem>> {
+  async listVulnProblems(params?: { source_id?: number; status?: VulnProblemStatus; page?: number; size?: number }): Promise<PaginatedResponse<VulnProblem>> {
     return this.client.get('/contest/vuln-problems', params)
   }
 

@@ -9,7 +9,8 @@ import { accessPhases, type AccessState } from './model';
  * renderAccessView 基于内核状态生成授权缺陷可视化。
  */
 export function renderAccessView(state: AccessState): ViewSpec {
-  return { summary: `敏感函数${state.protectedFunction ? '已保护' : '未保护'},越权${state.unauthorizedExecuted ? '已发生' : '未发生'},审计${state.auditLogged ? '已记录' : '未记录'}。`, patterns: [graphPattern('access-graph', '账户与合约权限', graphNodes(state.actors), graphEdges(state.calls), 'main'), matrixPattern('access-matrix', '权限矩阵', state.actors.map((actor) => actor.label), ['角色', '可调用', '审计'], accessCells(state), 'side'), pipelinePattern('access-pipeline', '授权防护流程', pipelineSteps(accessPhases, state.phaseIndex, state.unauthorizedExecuted), accessPhases[state.phaseIndex].id, 'bottom')] };
+  const exposedActors = state.actors.filter((actor) => actor.id !== 'admin' && !state.protectedFunction).length;
+  return { summary: `敏感函数${state.protectedFunction ? '已保护' : '未保护'},越权面 ${exposedActors} 个账户,越权${state.unauthorizedExecuted ? '已发生' : '未发生'},审计${state.auditLogged ? '已记录' : '未记录'}。`, patterns: [graphPattern('access-graph', '账户角色到敏感函数的调用边界', graphNodes(state.actors), graphEdges(state.calls), 'main'), matrixPattern('access-matrix', 'RBAC 权限矩阵与审计闭环', state.actors.map((actor) => actor.label), ['角色', '敏感函数可调用', '审计记录'], accessCells(state), 'side'), pipelinePattern('access-pipeline', '授权检查 -> 执行 -> 审计流程', pipelineSteps(accessPhases, state.phaseIndex, state.unauthorizedExecuted), accessPhases[state.phaseIndex].id, 'bottom')] };
 }
 
 /**
@@ -20,7 +21,7 @@ function accessCells(state: AccessState): MatrixCell[][] {
     const actor = state.actors.find((item) => item.label === row);
     if (!actor) return { label: '无', status: 'empty' };
     if (column === '角色') return { label: actor.value ?? '', status: 'yes' };
-    if (column === '可调用') return { label: actor.id === 'admin' || !state.protectedFunction ? '是' : '否', status: actor.id === 'user' && !state.protectedFunction ? 'fault' : 'yes' };
+    if (column === '敏感函数可调用') return { label: actor.id === 'admin' || !state.protectedFunction ? '是' : '否', status: actor.id === 'user' && !state.protectedFunction ? 'fault' : 'yes' };
     return { label: state.auditLogged ? '已记' : '未记', status: state.auditLogged ? 'yes' : 'pending' };
   });
 }

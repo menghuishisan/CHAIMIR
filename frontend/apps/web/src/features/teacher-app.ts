@@ -1,7 +1,8 @@
 ﻿// 教师端路由：教学、实践、资源、成绩报送、组织与账户页面定义。
 
 import { BookOpen, Building2, ClipboardCheck, ClipboardList, FilePenLine, FileText, Flag, Layers, Library, ListChecks, MonitorCog, Network, Pencil, ScrollText, ShieldAlert, ShieldCheck, Swords, Users } from 'lucide-react'
-import { routeHref, type AppDefinition, type MetricItem, type ResourceResult } from '@chaimir/shared'
+import { routeHref } from '../app/router'
+import type { AppDefinition, MetricItem, ResourceResult } from '../app/types'
 import {
   appealColumns,
   arrayResult,

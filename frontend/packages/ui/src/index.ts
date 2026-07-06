@@ -6,9 +6,14 @@ export * from './tokens'
 
 // 基础组件
 export * from './components/Button'
+export * from './components/IconButton'
+export * from './components/Tooltip'
 export * from './components/Badge'
+export * from './components/StatusIndicator'
 export * from './components/Spinner'
 export * from './components/Card'
+export * from './components/PanelHeader'
+export * from './components/DescriptionList'
 export * from './components/PageScaffold'
 export * from './components/WorkbenchShell'
 
@@ -35,6 +40,7 @@ export * from './components/Drawer'
 export * from './components/Menu'
 export * from './components/Steps'
 export * from './components/Autosave'
+export * from './components/SegmentedControl'
 
 // 展示组件
 export * from './components/Progress'
@@ -45,3 +51,6 @@ export * from './components/Callout'
 // 图表与业务组件
 export * from './charts'
 export * from './biz'
+
+// 工具函数
+export * from './utils/haptics'

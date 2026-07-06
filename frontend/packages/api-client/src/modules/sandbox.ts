@@ -21,7 +21,7 @@ import type {
   SandboxRuntimeSelftestStatus,
   SandboxToolDefinition,
   SandboxToolRequest,
-} from '../types'
+} from '../types/sandbox'
 
 /**
  * SandboxApi 封装后端 M2 沙箱、运行时、文件、工具和链交互接口。

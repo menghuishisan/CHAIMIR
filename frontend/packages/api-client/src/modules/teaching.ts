@@ -2,6 +2,8 @@
 // 对应后端 M6 模块
 
 import { ApiClient } from '../client'
+import type { CourseStatus, LessonContentType } from '../constants/teaching'
+import type { PaginatedResponse } from '../types/common'
 import type {
   Course,
   CourseRequest,
@@ -19,7 +21,6 @@ import type {
   Draft,
   Submission,
   SubmitRequest,
-  PaginatedResponse,
   BatchMembersRequest,
   CourseMember,
   GradeWeight,
@@ -33,8 +34,8 @@ import type {
   TeachingPostRequest,
   TeachingReview,
   TeachingReviewRequest,
-  TransferTask,
-} from '../types'
+} from '../types/teaching'
+import type { TransferTask } from '../types/transfer'
 
 /**
  * TeachingApi 封装后端 M6 课程、课时、成员、作业和成绩接口。
@@ -52,7 +53,7 @@ export class TeachingApi {
    */
   async getCourses(params?: {
     role?: 'teacher' | 'student'
-    status?: number
+    status?: CourseStatus
     page?: number
     size?: number
   }): Promise<PaginatedResponse<Course>> {
@@ -201,7 +202,7 @@ export class TeachingApi {
    */
   async setLessonContent(
     lessonId: string,
-    data: { content_type: number; content_ref: Record<string, unknown> }
+    data: { content_type: LessonContentType; content_ref: Record<string, unknown> }
   ): Promise<Lesson> {
     return this.client.post(`/teaching/lessons/${lessonId}/content`, data)
   }

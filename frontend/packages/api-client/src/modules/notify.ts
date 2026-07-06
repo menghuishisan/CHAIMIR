@@ -2,13 +2,13 @@
 // 对应后端 M10 模块
 
 import { ApiClient } from '../client'
+import type { PaginatedResponse } from '../types/common'
 import type {
   Notification,
   NotificationPreference,
   Announcement,
   AnnouncementRequest,
-  PaginatedResponse,
-} from '../types'
+} from '../types/notify'
 
 /**
  * NotifyApi 封装后端 M10 通知、偏好、公告和实时推送入口。

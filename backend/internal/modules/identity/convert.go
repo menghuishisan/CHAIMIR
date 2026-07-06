@@ -5,6 +5,7 @@ import (
 	"chaimir/internal/contracts"
 	"chaimir/internal/platform/jsonx"
 	"chaimir/internal/platform/secretmap"
+	"chaimir/internal/platform/timex"
 	"chaimir/pkg/apperr"
 )
 
@@ -85,6 +86,35 @@ func ToAuditLogDTO(row contracts.AuditLogEntry) AuditLogDTO {
 		TraceID:    row.TraceID,
 		CreatedAt:  row.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
 	}
+}
+
+func ToTenantApplicationDTO(app TenantApplication) TenantApplicationDTO {
+	reviewedAt := ""
+	if app.Status == ApplicationStatusApproved || app.Status == ApplicationStatusRejected || app.ReviewedBy > 0 {
+		reviewedAt = timex.RFC3339OrEmpty(app.UpdatedAt)
+	}
+	return TenantApplicationDTO{
+		ApplicationID: app.ID,
+		SchoolName:    app.SchoolName,
+		SchoolType:    app.SchoolType,
+		ContactName:   app.ContactName,
+		ContactPhone:  app.ContactPhone,
+		ContactEmail:  app.ContactEmail,
+		Status:        app.Status,
+		RejectReason:  app.RejectReason,
+		ReviewedBy:    app.ReviewedBy,
+		TenantID:      app.TenantID,
+		SubmittedAt:   timex.RFC3339OrEmpty(app.CreatedAt),
+		ReviewedAt:    reviewedAt,
+	}
+}
+
+func ToTenantApplicationDTOs(apps []TenantApplication) []TenantApplicationDTO {
+	out := make([]TenantApplicationDTO, 0, len(apps))
+	for _, app := range apps {
+		out = append(out, ToTenantApplicationDTO(app))
+	}
+	return out
 }
 
 // ToContractAccount 把账号领域快照转换为跨模块最小账号摘要。

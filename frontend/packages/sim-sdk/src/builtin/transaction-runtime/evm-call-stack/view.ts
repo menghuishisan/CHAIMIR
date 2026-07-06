@@ -9,7 +9,9 @@ import type { CallStackState } from './model';
  * renderCallStackView 基于内核状态生成 EVM 调用栈可视化。
  */
 export function renderCallStackView(state: CallStackState): ViewSpec {
-  return { summary: `活跃栈深 ${state.frames.filter((frame) => !frame.returned).length}/${state.maxDepth},回滚失败帧 ${state.frames.filter((frame) => frame.reverted).length}。`, patterns: [graphPattern('call-stack-graph', '合约调用图', graphNodes(state.actors), graphEdges(state.messages), 'main'), lanePattern('call-stack-lane', '调用栈时序', state.actors.map((actor) => actor.label), laneMessages(state.messages, (id) => labelOf(state, id)), state.tick, 'side'), matrixPattern('call-stack-matrix', '栈帧状态', state.frames.map((frame) => frame.id), ['合约', '深度', '返回', '回滚失败'], stackCells(state), 'bottom')] };
+  const activeDepth = state.frames.filter((frame) => !frame.returned).length;
+  const reverted = state.frames.filter((frame) => frame.reverted).length;
+  return { summary: `活跃栈深 ${activeDepth}/${state.maxDepth},栈帧 ${state.frames.length},回滚失败帧 ${reverted}。`, patterns: [graphPattern('call-stack-graph', 'EVM 合约调用依赖图', graphNodes(state.actors), graphEdges(state.messages), 'main'), lanePattern('call-stack-lane', 'CALL / RETURN / REVERT 栈时序', state.actors.map((actor) => actor.label), laneMessages(state.messages, (id) => labelOf(state, id)), state.tick, 'side'), matrixPattern('call-stack-matrix', '调用栈帧深度与回滚矩阵', state.frames.map((frame) => frame.id), ['合约', '深度', '返回', '回滚失败'], stackCells(state), 'bottom')] };
 }
 
 /**

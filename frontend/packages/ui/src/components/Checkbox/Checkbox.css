@@ -4,6 +4,7 @@
   display: inline-flex;
   align-items: center;
   gap: var(--space-2);
+  min-block-size: 2rem;
   cursor: pointer;
   user-select: none;
 }
@@ -36,7 +37,13 @@
   border: 2px solid var(--color-border-strong);
   border-radius: var(--radius-xs);
   background: var(--color-bg);
-  transition: background var(--t-fast) var(--ease), border-color var(--t-fast) var(--ease), opacity var(--t-fast) var(--ease);
+  box-shadow: inset 0 1px 0 var(--color-highlight);
+  transition:
+    background var(--t-fast) var(--ease),
+    border-color var(--t-fast) var(--ease),
+    box-shadow var(--t-fast) var(--ease),
+    opacity var(--t-fast) var(--ease),
+    transform var(--t-fast) var(--ease-press);
   flex-shrink: 0;
 }
 
@@ -45,7 +52,7 @@
   color: var(--color-primary-fg);
   opacity: 0;
   transform: scale(0.5);
-  transition: opacity var(--t-fast) var(--ease), transform var(--t-fast) var(--ease);
+  transition: opacity var(--t-fast) var(--ease), transform 0.4s var(--ease-spring-bouncy);
 }
 
 .chaimir-checkbox__dash {
@@ -57,21 +64,26 @@
 
 /* === 状态 === */
 
-/* Hover */
+/* 悬浮态 */
 .chaimir-checkbox-wrapper:hover:not(.chaimir-checkbox-wrapper--disabled) .chaimir-checkbox__box {
   border-color: var(--color-primary);
 }
 
-/* Focus */
+.chaimir-checkbox-wrapper:active:not(.chaimir-checkbox-wrapper--disabled) .chaimir-checkbox__box {
+  transform: scale(0.92);
+}
+
+/* 焦点态 */
 .chaimir-checkbox__input:focus-visible + .chaimir-checkbox__box {
   outline: 2px solid var(--color-focus-ring);
   outline-offset: 2px;
 }
 
-/* Checked */
+/* 选中态 */
 .chaimir-checkbox__box--checked {
   background: var(--color-primary);
   border-color: var(--color-primary);
+  box-shadow: inset 0 1px 0 var(--color-highlight), 0 0 0 3px var(--color-primary-soft);
 }
 
 .chaimir-checkbox__input:checked + .chaimir-checkbox__box {
@@ -86,7 +98,7 @@
   transform: scale(1);
 }
 
-/* Error */
+/* 错误态 */
 .chaimir-checkbox__box--error {
   border-color: var(--color-danger-border);
 }
@@ -104,5 +116,11 @@
   .chaimir-checkbox__icon,
   .chaimir-checkbox__dash {
     transition: none;
+  }
+}
+
+@media (pointer: coarse) {
+  .chaimir-checkbox-wrapper {
+    min-block-size: 2.75rem;
   }
 }

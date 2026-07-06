@@ -7,7 +7,7 @@
 .chaimir-table__desktop {
   overflow-x: auto;
   border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius);
   background: var(--color-bg);
   box-shadow: var(--shadow-xs);
 }
@@ -43,7 +43,7 @@
 }
 
 .chaimir-table tbody tr {
-  transition: background var(--t-fast) var(--ease);
+  transition: background var(--t-fast) var(--ease-press);
 }
 
 .chaimir-table tbody tr:hover {
@@ -83,7 +83,7 @@
 }
 
 .chaimir-table__sort:active {
-  transform: translateY(1px);
+  transform: scale(0.96);
 }
 
 .chaimir-table__mobile {
@@ -96,7 +96,7 @@
   gap: var(--space-3);
   padding: var(--space-4);
   border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius);
   background: var(--color-bg);
   box-shadow: var(--shadow-xs);
   box-shadow: inset 3px 0 0 var(--color-primary), var(--shadow-xs);

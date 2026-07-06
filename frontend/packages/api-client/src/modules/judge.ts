@@ -2,7 +2,8 @@
 // 对应后端 M3 模块
 
 import { ApiClient } from '../client'
-import type { JudgeTask, JudgeManualScoreRequest, Judger, JudgerRequest, PaginatedResponse } from '../types'
+import type { PaginatedResponse } from '../types/common'
+import type { JudgeTask, JudgeManualScoreRequest, Judger, JudgerRequest } from '../types/judge'
 
 /**
  * JudgeApi 封装后端 M3 判题器、判题任务和人工评分接口。

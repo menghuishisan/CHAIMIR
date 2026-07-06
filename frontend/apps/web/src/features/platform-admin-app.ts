@@ -1,7 +1,7 @@
 ﻿// 平台管理端路由：租户、运营、引擎治理和系统页面定义。
 
 import { BarChart3, Boxes, ClipboardCheck, Flag, Gauge, Landmark, ListChecks, MonitorCog, PackageCheck, ServerCog, Settings, ShieldAlert, Wrench } from 'lucide-react'
-import type { AppDefinition, MetricItem, ResourceResult } from '@chaimir/shared'
+import type { AppDefinition, MetricItem, ResourceResult } from '../app/types'
 import {
   alertColumns,
   applicationColumns,

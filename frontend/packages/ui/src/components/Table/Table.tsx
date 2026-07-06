@@ -2,6 +2,7 @@
 
 import React from 'react'
 import { clsx } from 'clsx'
+import { triggerHaptic } from '../../utils/haptics'
 import { ArrowDown, ArrowUp, ArrowUpDown } from 'lucide-react'
 import { Empty } from '../Empty'
 import { Skeleton } from '../Skeleton'
@@ -57,7 +58,15 @@ export function Table<T extends Record<string, unknown>>({
               {columns.map((column) => (
                 <th key={column.key} scope="col" aria-sort={sortAria(column)} className={columnClass(column)}>
                   {column.sortable ? (
-                    <button type="button" className="chaimir-table__sort" onClick={() => onSort?.(column)} aria-label={`${readableTitle(column.title)}排序`}>
+                    <button
+                      type="button"
+                      className="chaimir-table__sort"
+                      onClick={() => {
+                        triggerHaptic(10)
+                        onSort?.(column)
+                      }}
+                      aria-label={`${readableTitle(column.title)}排序`}
+                    >
                       <span>{column.title}</span>
                       {sortIcon(column)}
                     </button>

@@ -1,6 +1,7 @@
 // 本文件定义 PoS 仿真的代码追踪和教学叙事。
 
-import type { CodeTraceDef, NarrativeStep } from '../../../types';
+import type { CodeTraceDef } from '../../../types';
+import { phaseNarrative } from '../../packageTools';
 import { posPhases } from './model';
 
 export const posSource = [
@@ -57,20 +58,4 @@ export const posCodeTrace: CodeTraceDef = {
   ],
 };
 
-export const posNarrative: NarrativeStep[] = posPhases.map((phase, index) => ({
-  id: phase.id,
-  title: phase.label,
-  trigger: (state) => state.phase === phase.label,
-  highlight: [phase.id],
-  explain: `${phase.effect} ${phase.reason}`,
-  defaultDurationMs: 1200,
-  question:
-    index === posPhases.length - 2
-      ? {
-          prompt: 'PoS 检查点最终确定是否需要足够权益见证?',
-          options: ['需要', '不需要'],
-          answer: '需要',
-          checkpointId: 'pos-two-thirds-finality',
-        }
-      : undefined,
-}));
+export const posNarrative = phaseNarrative(posPhases, 'pos-two-thirds-finality');

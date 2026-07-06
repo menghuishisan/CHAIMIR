@@ -1,6 +1,7 @@
 // 本文件定义门限签名仿真的代码追踪和教学叙事。
 
-import type { CodeTraceDef, NarrativeStep } from '../../../types';
+import type { CodeTraceDef } from '../../../types';
+import { phaseNarrative } from '../../packageTools';
 import { thresholdSignaturePhases } from './model';
 
 export const thresholdSignatureSource = [
@@ -45,20 +46,4 @@ export const thresholdSignatureCodeTrace: CodeTraceDef = {
   ],
 };
 
-export const thresholdSignatureNarrative: NarrativeStep[] = thresholdSignaturePhases.map((phase, index) => ({
-  id: phase.id,
-  title: phase.label,
-  trigger: (state) => state.phase === phase.label,
-  highlight: [phase.id],
-  explain: `${phase.effect} ${phase.reason}`,
-  defaultDurationMs: 1200,
-  question:
-    index === thresholdSignaturePhases.length - 1
-      ? {
-          prompt: '当前有效份额是否足以形成可验证的聚合签名?',
-          options: ['足够', '不足'],
-          answer: '足够',
-          checkpointId: 'threshold-signature-valid',
-        }
-      : undefined,
-}));
+export const thresholdSignatureNarrative = phaseNarrative(thresholdSignaturePhases, 'threshold-signature-valid');

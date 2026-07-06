@@ -1,6 +1,7 @@
 // 本文件定义 Merkle 证明仿真的代码追踪和教学叙事。
 
-import type { CodeTraceDef, NarrativeStep } from '../../../types';
+import type { CodeTraceDef } from '../../../types';
+import { phaseNarrative } from '../../packageTools';
 import { merkleProofPhases } from './model';
 
 export const merkleProofSource = [
@@ -45,20 +46,4 @@ export const merkleProofCodeTrace: CodeTraceDef = {
   ],
 };
 
-export const merkleProofNarrative: NarrativeStep[] = merkleProofPhases.map((phase, index) => ({
-  id: phase.id,
-  title: phase.label,
-  trigger: (state) => state.phase === phase.label,
-  highlight: [phase.id],
-  explain: `${phase.effect} ${phase.reason}`,
-  defaultDurationMs: 1200,
-  question:
-    index === merkleProofPhases.length - 1
-      ? {
-          prompt: '当前 Merkle 证明是否能被可信根接受?',
-          options: ['可以接受', '不能接受'],
-          answer: '可以接受',
-          checkpointId: 'merkle-proof-valid',
-        }
-      : undefined,
-}));
+export const merkleProofNarrative = phaseNarrative(merkleProofPhases, 'merkle-proof-valid');

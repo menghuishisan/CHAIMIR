@@ -4,6 +4,8 @@
   display: inline-grid;
   gap: var(--space-1);
   min-inline-size: 4.5rem;
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-xs);
 }
 
 .chaimir-grade-cell strong {
@@ -23,4 +25,8 @@
 
 .chaimir-grade-cell.is-locked span {
   color: var(--color-warning);
+}
+
+.chaimir-grade-cell.is-locked {
+  background: var(--color-warning-bg);
 }

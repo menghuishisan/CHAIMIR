@@ -6,11 +6,18 @@
  */
 
 .chaimir-card {
+  position: relative;
+  min-inline-size: 0;
   background: var(--color-bg);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm);
-  box-shadow: var(--shadow-xs);
-  transition: border-color var(--t) var(--ease), box-shadow var(--t) var(--ease), transform var(--t) var(--ease), background var(--t) var(--ease);
+  border: none;
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-xs), inset 0 1px 0 var(--color-glass-highlight), inset 0 0 0 1px var(--color-border);
+  overflow: hidden;
+  transition:
+    border-color var(--t) var(--ease),
+    box-shadow var(--t) var(--ease),
+    transform var(--t) var(--ease),
+    background var(--t) var(--ease);
 }
 
 /* 有内边距的卡片 */
@@ -26,8 +33,7 @@
 .chaimir-card--hoverable:hover {
   /* §4.2 交互微动效：抬升 + 阴影升 + 边框转主色 */
   transform: translateY(-3px);
-  box-shadow: var(--shadow);
-  border-color: var(--color-primary);
+  box-shadow: var(--shadow-md), inset 0 1px 0 var(--color-glass-highlight), inset 0 0 0 1px var(--color-accent);
 }
 
 .chaimir-card--hoverable:focus-visible {
@@ -42,10 +48,15 @@
 /* === 子组件 === */
 
 .chaimir-card__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
   padding: var(--card-header-pad);
   border-bottom: 1px solid var(--color-border);
   font-weight: var(--font-semibold);
   color: var(--color-text-strong);
+  background: linear-gradient(180deg, var(--color-bg), var(--color-surface));
 }
 
 /* 当卡片本身有 padding 时，header 需要负边距扩展到边缘 */
@@ -54,17 +65,16 @@
   padding: var(--space-4) var(--card-pad);
 }
 
-.chaimir-card__body {
-  /* body 默认无额外样式，由内容自行控制 */
-}
-
 .chaimir-card__footer {
   margin-top: var(--space-4);
   padding-top: var(--space-4);
   border-top: 1px solid var(--color-border);
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
+  justify-content: flex-end;
   gap: var(--space-3);
+  background: var(--color-bg);
 }
 
 /* 当卡片本身有 padding 时，footer 需要负边距扩展到边缘 */
@@ -76,5 +86,21 @@
 @media (prefers-reduced-motion: reduce) {
   .chaimir-card {
     transition: none;
+  }
+}
+
+@media (max-width: 479px) {
+  .chaimir-card--padded {
+    padding: var(--space-4);
+  }
+
+  .chaimir-card--padded .chaimir-card__header {
+    margin: calc(-1 * var(--space-4)) calc(-1 * var(--space-4)) var(--space-4);
+    padding: var(--space-4);
+  }
+
+  .chaimir-card--padded .chaimir-card__footer {
+    margin: var(--space-4) calc(-1 * var(--space-4)) calc(-1 * var(--space-4));
+    padding: var(--space-4);
   }
 }

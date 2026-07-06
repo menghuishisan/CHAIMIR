@@ -10,12 +10,14 @@ import type { PartitionState } from './model';
  * renderPartitionView 输出分区拓扑、可达性矩阵和风险趋势。
  */
 export function renderPartitionView(state: PartitionState): ViewSpec {
+  const leftReachable = state.nodes.filter((node) => node.group === 'left' && node.reachable).length;
+  const rightReachable = state.nodes.filter((node) => node.group === 'right' && node.reachable).length;
   return {
-    summary: `分区${state.partitionActive ? '生效' : '未生效'},可达节点 ${state.nodes.filter((node) => node.reachable).length}/${state.nodes.length},版本差 ${versionGap(state)}。`,
+    summary: `分区${state.partitionActive ? '生效' : '未生效'},左区可达 ${leftReachable},右区可达 ${rightReachable},总可达 ${state.nodes.filter((node) => node.reachable).length}/${state.nodes.length},版本差 ${versionGap(state)}。`,
     patterns: [
-      graphPattern('partition-graph', '分区拓扑', graphNodes(state.nodes), graphEdges(state.messages), 'main'),
-      matrixPattern('partition-matrix', '可达性矩阵', state.nodes.map((node) => node.label), ['区域', '可达', '版本'], partitionCells(state), 'side'),
-      chartPattern('partition-chart', '分区风险趋势', metricSeries(state.samples), '%', 'bottom'),
+      graphPattern('partition-graph', '左右分区拓扑与阻断消息边', graphNodes(state.nodes), graphEdges(state.messages), 'main'),
+      matrixPattern('partition-matrix', '分区可达性与版本漂移矩阵', state.nodes.map((node) => node.label), ['区域', '可达', '版本'], partitionCells(state), 'side'),
+      chartPattern('partition-chart', '分区风险与同步恢复趋势', metricSeries(state.samples), '%', 'bottom'),
     ],
   };
 }

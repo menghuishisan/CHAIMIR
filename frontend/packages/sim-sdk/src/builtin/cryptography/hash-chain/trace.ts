@@ -1,6 +1,7 @@
 // 本文件定义哈希链仿真的代码追踪和教学叙事。
 
-import type { CodeTraceDef, NarrativeStep } from '../../../types';
+import type { CodeTraceDef } from '../../../types';
+import { phaseNarrative } from '../../packageTools';
 import { hashChainPhases } from './model';
 
 export const hashChainSource = [
@@ -45,20 +46,4 @@ export const hashChainCodeTrace: CodeTraceDef = {
   ],
 };
 
-export const hashChainNarrative: NarrativeStep[] = hashChainPhases.map((phase, index) => ({
-  id: phase.id,
-  title: phase.label,
-  trigger: (state) => state.phase === phase.label,
-  highlight: [phase.id],
-  explain: `${phase.effect} ${phase.reason}`,
-  defaultDurationMs: 1200,
-  question:
-    index === hashChainPhases.length - 1
-      ? {
-          prompt: '当前哈希链是否已经恢复到可验证状态?',
-          options: ['已经恢复', '还没有'],
-          answer: '已经恢复',
-          checkpointId: 'hash-chain-valid',
-        }
-      : undefined,
-}));
+export const hashChainNarrative = phaseNarrative(hashChainPhases, 'hash-chain-valid');

@@ -10,6 +10,17 @@
 @import './spacing.css';
 @import './breakpoints.css';
 
+/* ===== 动效令牌 (Motion & Spring) ===== */
+:root {
+  /* iOS 风格弹簧曲线 */
+  --ease-spring: cubic-bezier(0.32, 0.72, 0, 1);
+  --ease-spring-bouncy: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --ease-press: cubic-bezier(0.2, 0, 0, 1);
+  --t-fast: 0.15s;
+  --t-normal: 0.3s;
+  --t-slow: 0.5s;
+}
+
 /* ===== 全局重置 ===== */
 
 *,
@@ -195,6 +206,7 @@ hr {
   display: -webkit-box;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
+  line-clamp: 2;
   overflow: hidden;
 }
 
@@ -202,5 +214,6 @@ hr {
   display: -webkit-box;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 3;
+  line-clamp: 3;
   overflow: hidden;
 }

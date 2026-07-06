@@ -26,4 +26,5 @@ export interface MountedTerminal extends DisposableHandle {
   write: (data: string) => void
   clear: () => void
   focus: () => void
+  resize: () => void
 }

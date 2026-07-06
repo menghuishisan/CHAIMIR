@@ -8,6 +8,14 @@
   border-radius: var(--radius-sm);
   background: var(--color-bg);
   box-shadow: var(--shadow-xs);
+  transition:
+    border-color var(--t) var(--ease),
+    box-shadow var(--t) var(--ease);
+}
+
+.chaimir-topology:hover {
+  border-color: var(--color-border-strong);
+  box-shadow: var(--shadow);
 }
 
 .chaimir-topology__header h3,
@@ -62,13 +70,14 @@
 }
 
 .chaimir-topology__node {
-  outline: none;
+  outline: 2px solid transparent;
 }
 
 .chaimir-topology__node circle {
   fill: var(--color-bg);
   stroke: var(--color-border-strong);
   stroke-width: 2;
+  filter: drop-shadow(0 1px 2px var(--color-border));
 }
 
 .chaimir-topology__node text {
@@ -117,6 +126,14 @@
   border: 1px solid var(--color-border);
   border-radius: var(--radius-sm);
   background: var(--color-surface);
+  transition:
+    border-color var(--t-fast) var(--ease),
+    background var(--t-fast) var(--ease),
+    transform var(--t-fast) var(--ease);
+}
+
+.chaimir-topology__list article:hover {
+  transform: translateY(-1px);
 }
 
 .chaimir-topology__list article.is-healthy {

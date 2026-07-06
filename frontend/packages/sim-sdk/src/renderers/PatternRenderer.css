@@ -1,33 +1,42 @@
 /* 本文件定义七种封闭可视化模式的统一深色沉浸式渲染样式。 */
 
 .sim-pattern {
+  --sim-pattern-accent: var(--color-on-dark-accent);
+  --sim-pattern-accent-soft: color-mix(in srgb, var(--sim-pattern-accent) 18%, transparent);
+  --sim-pattern-danger-soft: color-mix(in srgb, var(--color-danger) 18%, transparent);
   min-width: 0;
   inline-size: 100%;
   border: 0.0625rem solid var(--color-dark-border);
   border-block-start-width: 0.1875rem;
   border-radius: var(--radius-sm);
-  background: var(--color-dark-surface);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--color-dark-surface) 92%, var(--sim-pattern-accent) 8%), var(--color-dark-surface) 11rem),
+    var(--color-dark-surface);
   color: var(--color-dark-text);
   overflow: hidden;
   animation: sim-pattern-enter var(--t-slow) var(--ease-out) both;
 }
 
 .sim-pattern--graph {
+  --sim-pattern-accent: var(--color-on-dark-accent);
   border-block-start-color: var(--color-on-dark-accent);
 }
 
 .sim-pattern--chain,
 .sim-pattern--pipeline {
+  --sim-pattern-accent: var(--color-secondary-accent);
   border-block-start-color: var(--color-secondary-accent);
 }
 
 .sim-pattern--tree,
 .sim-pattern--matrix {
+  --sim-pattern-accent: var(--color-success);
   border-block-start-color: var(--color-success);
 }
 
 .sim-pattern--lane,
 .sim-pattern--chart {
+  --sim-pattern-accent: var(--color-danger);
   border-block-start-color: var(--color-danger);
 }
 
@@ -36,7 +45,7 @@
   align-items: center;
   justify-content: space-between;
   gap: var(--space-3);
-  padding: var(--space-3) var(--space-4);
+  padding: var(--space-3) var(--space-4) var(--space-2);
   border-bottom: 0.0625rem solid var(--color-dark-border);
   color: var(--color-dark-text-sub);
   font-size: var(--text-sm);
@@ -52,7 +61,7 @@
 
 .sim-pattern__header svg {
   flex: 0 0 auto;
-  color: var(--color-on-dark-accent);
+  color: var(--sim-pattern-accent);
 }
 
 .sim-pattern__header small {
@@ -103,16 +112,71 @@
   background: var(--color-danger);
 }
 
+.sim-pattern__insight {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-4) 0;
+  margin: 0;
+}
+
+.sim-pattern__insight div {
+  display: inline-grid;
+  grid-template-columns: auto auto;
+  align-items: baseline;
+  gap: var(--space-1);
+  min-inline-size: 0;
+  padding: 0.1875rem var(--space-2);
+  border: 0.0625rem solid var(--color-dark-border);
+  border-radius: var(--radius-full);
+  background: color-mix(in srgb, var(--color-dark-elevated) 70%, transparent);
+}
+
+.sim-pattern__insight dt {
+  color: var(--color-dark-text-sub);
+  font-size: var(--text-xs);
+}
+
+.sim-pattern__insight dd {
+  margin: 0;
+  color: var(--color-dark-text);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  font-weight: 700;
+}
+
 .sim-graph {
-  width: 100%;
+  margin: var(--space-2) var(--space-4) var(--space-3);
+  width: calc(100% - var(--space-4) * 2);
   max-block-size: min(42rem, 68vh);
   aspect-ratio: 16 / 10;
   display: block;
+  border: 0.0625rem solid var(--color-dark-border);
+  border-radius: var(--radius-sm);
+  background:
+    radial-gradient(circle at 20% 18%, var(--sim-pattern-accent-soft), transparent 18rem),
+    linear-gradient(color-mix(in srgb, var(--color-dark-border) 42%, transparent) 0.0625rem, transparent 0.0625rem),
+    linear-gradient(90deg, color-mix(in srgb, var(--color-dark-border) 42%, transparent) 0.0625rem, transparent 0.0625rem),
+    var(--color-terminal-bg);
+  background-size: auto, 10% 10%, 10% 10%, auto;
+}
+
+.sim-pattern-grid--primary .sim-graph {
+  max-block-size: none;
+  min-block-size: clamp(24rem, 50vh, 36rem);
+  aspect-ratio: 16 / 9;
+}
+
+.sim-pattern-grid--support .sim-graph,
+.sim-pattern-grid--support .sim-chart__plot {
+  max-block-size: 16rem;
 }
 
 .sim-graph__edge {
   stroke: var(--color-dark-border);
-  stroke-width: 0.7;
+  stroke-width: 0.9;
+  stroke-linecap: round;
+  transition: stroke var(--t-fast) var(--ease), stroke-width var(--t-fast) var(--ease), opacity var(--t-fast) var(--ease);
 }
 
 .sim-graph__edge-group {
@@ -124,9 +188,16 @@
   outline: none;
 }
 
+.sim-graph__edge-group.is-selected .sim-graph__edge {
+  stroke-width: 1.5;
+  stroke: var(--color-on-dark-accent);
+}
+
 .sim-graph__edge.is-active,
 .sim-graph__edge.is-success {
-  stroke: var(--color-on-dark-accent);
+  stroke: var(--sim-pattern-accent);
+  stroke-width: 1.2;
+  filter: drop-shadow(0 0 4px color-mix(in srgb, var(--sim-pattern-accent) 60%, transparent));
 }
 
 .sim-graph__edge.is-failed {
@@ -137,10 +208,28 @@
 .sim-graph__edge-label,
 .sim-graph__node text {
   fill: var(--color-dark-text);
-  font-size: var(--text-xs);
+  font-size: 0.3125rem;
   pointer-events: none;
   text-anchor: middle;
   dominant-baseline: middle;
+}
+
+.sim-graph__edge-label {
+  paint-order: stroke;
+  stroke: color-mix(in srgb, var(--color-terminal-bg) 88%, transparent);
+  stroke-width: 0.65;
+}
+
+.sim-graph__marker path {
+  fill: var(--color-dark-border);
+}
+
+.sim-graph__marker.is-accent path {
+  fill: var(--sim-pattern-accent);
+}
+
+.sim-graph__marker.is-danger path {
+  fill: var(--color-danger);
 }
 
 .sim-graph__pulse {
@@ -150,8 +239,9 @@
 
 .sim-graph__pulse.is-active,
 .sim-graph__pulse.is-success {
-  fill: var(--color-on-dark-accent);
-  r: 1.7;
+  fill: var(--sim-pattern-accent);
+  filter: drop-shadow(0 0 6px var(--sim-pattern-accent));
+  r: 1.8;
 }
 
 .sim-graph__pulse.is-failed {
@@ -161,7 +251,8 @@
 .sim-graph__node circle {
   fill: var(--color-dark-elevated);
   stroke: var(--color-dark-border);
-  stroke-width: 0.8;
+  stroke-width: 0.9;
+  filter: drop-shadow(0 0.1875rem 0.1875rem rgb(0 0 0 / 0.24));
 }
 
 .sim-graph__node {
@@ -187,9 +278,21 @@
   border-color: var(--color-on-dark-accent);
 }
 
+.sim-graph__node:active circle,
+.sim-chain__block:active,
+.sim-tree__box:active,
+.sim-matrix__cell:active,
+.sim-pipeline__step:active,
+.sim-lane__message:active,
+.sim-chart__series-line circle:active {
+  transform: scale(0.96);
+  transition: transform var(--t-fast) var(--ease-spring-bouncy, cubic-bezier(0.175, 0.885, 0.32, 1.275));
+}
+
 .sim-graph__node.is-active circle,
 .sim-graph__node.is-success circle {
-  stroke: var(--color-on-dark-accent);
+  fill: color-mix(in srgb, var(--sim-pattern-accent) 18%, var(--color-dark-elevated));
+  stroke: var(--sim-pattern-accent);
 }
 
 .sim-graph__node.is-warning circle {
@@ -202,13 +305,33 @@
 
 .sim-graph__node-value {
   fill: var(--color-dark-text-sub);
-  font-size: var(--text-xs);
+  font-size: 0.25rem;
 }
 
 .sim-chain-board {
+  position: relative;
   display: grid;
   gap: var(--space-3);
   padding: var(--space-4);
+  overflow: auto;
+  background:
+    linear-gradient(90deg, transparent, color-mix(in srgb, var(--color-dark-border) 32%, transparent), transparent) 0 50% / 100% 0.0625rem no-repeat;
+}
+
+.sim-pattern-grid--primary .sim-chain-board,
+.sim-pattern-grid--primary .sim-tree,
+.sim-pattern-grid--primary .sim-matrix-wrap,
+.sim-pattern-grid--primary .sim-lane,
+.sim-pattern-grid--primary .sim-chart {
+  min-block-size: clamp(26rem, 58vh, 42rem);
+}
+
+.sim-pattern-grid--support .sim-chain-board,
+.sim-pattern-grid--support .sim-tree,
+.sim-pattern-grid--support .sim-matrix-wrap,
+.sim-pattern-grid--support .sim-lane,
+.sim-pattern-grid--support .sim-chart {
+  max-block-size: 20rem;
   overflow: auto;
 }
 
@@ -224,6 +347,13 @@
 }
 
 .sim-chain-row__label {
+  position: sticky;
+  inset-inline-start: 0;
+  z-index: 1;
+  padding: var(--space-1) var(--space-2);
+  border: 0.0625rem solid var(--color-dark-border);
+  border-radius: var(--radius-full);
+  background: var(--color-dark-surface);
   color: var(--color-dark-text-sub);
   font-size: var(--text-xs);
   font-weight: 600;
@@ -237,13 +367,30 @@
 }
 
 .sim-chain__link {
-  width: 2rem;
+  position: relative;
+  width: 2.25rem;
   height: 0.125rem;
-  background: var(--color-on-dark-accent);
+  border-radius: var(--radius-full);
+  background: var(--sim-pattern-accent);
+  color: var(--sim-pattern-accent);
+}
+
+.sim-chain__link::after {
+  content: "";
+  position: absolute;
+  inset-block-start: 50%;
+  inset-inline-end: -0.1875rem;
+  width: 0.375rem;
+  height: 0.375rem;
+  border-block-start: 0.125rem solid currentColor;
+  border-inline-end: 0.125rem solid currentColor;
+  color: inherit;
+  transform: translateY(-50%) rotate(45deg);
 }
 
 .sim-chain__link.is-fork {
   background: var(--color-danger);
+  color: var(--color-danger);
   opacity: 0.7;
 }
 
@@ -254,7 +401,10 @@
   padding: var(--space-3);
   border: 0.0625rem solid var(--color-dark-border);
   border-radius: var(--radius-xs);
-  background: var(--color-dark-elevated);
+  background: color-mix(in srgb, var(--color-dark-elevated) 65%, transparent);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--color-dark-border) 80%, transparent);
   cursor: pointer;
   transition: border-color var(--t) var(--ease), box-shadow var(--t) var(--ease), transform var(--t-fast) var(--ease);
 }
@@ -271,11 +421,11 @@
 }
 
 .sim-chain__block.is-canonical {
-  border-color: var(--color-on-dark-accent);
+  border-color: var(--sim-pattern-accent);
 }
 
 .sim-chain__block.is-tip {
-  box-shadow: 0 0 0 0.125rem color-mix(in srgb, var(--color-on-dark-accent) 35%, transparent);
+  box-shadow: 0 0 0 0.125rem color-mix(in srgb, var(--sim-pattern-accent) 35%, transparent), 0 0.5rem 1rem rgb(0 0 0 / 0.18);
 }
 
 .sim-chain__block.is-attacker,
@@ -301,8 +451,11 @@
 }
 
 .sim-tree {
-  padding: var(--space-4);
+  padding: var(--space-5) var(--space-4) var(--space-4);
   overflow: auto;
+  background:
+    radial-gradient(circle at 50% 0, color-mix(in srgb, var(--color-success) 16%, transparent), transparent 18rem),
+    var(--color-dark-surface);
 }
 
 .sim-tree__node {
@@ -320,13 +473,28 @@
   padding: var(--space-2) var(--space-3);
   border: 0.0625rem solid var(--color-dark-border);
   border-radius: var(--radius-xs);
+  background: color-mix(in srgb, var(--color-dark-elevated) 70%, transparent);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--color-dark-border) 80%, transparent);
   text-align: center;
   overflow-wrap: anywhere;
   cursor: pointer;
+  transition: border-color var(--t-fast) var(--ease), box-shadow var(--t-fast) var(--ease), transform var(--t-fast) var(--ease);
+}
+
+.sim-tree__box:hover,
+.sim-tree__box:focus-visible {
+  transform: translateY(calc(-1 * var(--space-1)));
 }
 
 .sim-tree__node.is-highlighted > .sim-tree__box {
-  border-color: var(--color-on-dark-accent);
+  border-color: var(--sim-pattern-accent);
+  box-shadow: 0 0 16px 0 color-mix(in srgb, var(--sim-pattern-accent) 40%, transparent), inset 0 0 8px 0 color-mix(in srgb, var(--sim-pattern-accent) 20%, transparent);
+}
+
+.sim-tree__node.is-path-parent > .sim-tree__box {
+  border-color: color-mix(in srgb, var(--sim-pattern-accent) 62%, var(--color-dark-border));
 }
 
 .sim-tree__children {
@@ -343,7 +511,7 @@
   inset-block-start: 0;
   inset-inline: 12%;
   height: 0.0625rem;
-  background: var(--color-dark-border);
+  background: linear-gradient(90deg, transparent, var(--color-dark-border), transparent);
 }
 
 .sim-tree__children > .sim-tree__node::before {
@@ -356,9 +524,20 @@
   background: var(--color-dark-border);
 }
 
+.sim-tree__node.is-path-parent > .sim-tree__children::before,
+.sim-tree__node.is-path-parent > .sim-tree__children > .sim-tree__node::before {
+  background: color-mix(in srgb, var(--sim-pattern-accent) 60%, var(--color-dark-border));
+}
+
 .sim-matrix-wrap {
+  margin: var(--space-3) var(--space-4);
   overflow: auto;
   max-block-size: min(34rem, 70vh);
+  border: 0.0625rem solid var(--color-dark-border);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--color-terminal-bg) 80%, transparent);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
 }
 
 .sim-matrix {
@@ -377,16 +556,36 @@
   overflow-wrap: anywhere;
 }
 
+.sim-matrix thead th,
+.sim-matrix tbody th {
+  position: sticky;
+  z-index: 1;
+  background: color-mix(in srgb, var(--color-dark-surface) 92%, transparent);
+}
+
+.sim-matrix thead th {
+  inset-block-start: 0;
+}
+
+.sim-matrix tbody th {
+  inset-inline-start: 0;
+  text-align: left;
+}
+
 .sim-matrix__cell.is-yes {
+  background: color-mix(in srgb, var(--color-success) 16%, transparent);
   color: var(--color-success);
+  box-shadow: inset 0 0 12px color-mix(in srgb, var(--color-success) 18%, transparent);
 }
 
 .sim-matrix__cell.is-no,
 .sim-matrix__cell.is-fault {
+  background: var(--sim-pattern-danger-soft);
   color: var(--color-danger);
 }
 
 .sim-matrix__cell.is-pending {
+  background: color-mix(in srgb, var(--color-secondary-accent) 12%, transparent);
   color: var(--color-secondary-accent);
 }
 
@@ -408,29 +607,77 @@
 .sim-pipeline {
   display: grid;
   gap: var(--space-3);
+  position: relative;
   padding: var(--space-4);
   margin: 0;
   list-style: none;
 }
 
+.sim-pattern-grid--primary .sim-pipeline {
+  grid-template-columns: repeat(auto-fit, minmax(min(13rem, 100%), 1fr));
+  align-items: stretch;
+  min-block-size: clamp(24rem, 52vh, 38rem);
+}
+
+.sim-pattern-grid--primary .sim-pipeline::before {
+  display: none;
+}
+
+.sim-pattern-grid--primary .sim-pipeline__step {
+  grid-template-columns: 2rem 1fr;
+  align-content: start;
+  border-block-start: 0.1875rem solid var(--color-dark-border);
+  border-left-width: 0.0625rem;
+}
+
+.sim-pattern-grid--primary .sim-pipeline__step.is-running {
+  border-block-start-color: var(--sim-pattern-accent);
+}
+
+.sim-pattern-grid--primary .sim-pipeline__step.is-complete {
+  border-block-start-color: var(--color-success);
+}
+
+.sim-pattern-grid--primary .sim-pipeline__step.is-failed {
+  border-block-start-color: var(--color-danger);
+}
+
+.sim-pipeline::before {
+  content: "";
+  position: absolute;
+  inset-block: calc(var(--space-4) + 1.25rem);
+  inset-inline-start: calc(var(--space-4) + 0.8125rem);
+  width: 0.125rem;
+  border-radius: var(--radius-full);
+  background: linear-gradient(180deg, var(--sim-pattern-accent), var(--color-dark-border));
+}
+
 .sim-pipeline__step {
+  position: relative;
   display: grid;
   grid-template-columns: 2rem 1fr;
   gap: var(--space-1);
   padding: var(--space-3);
+  border: 0.0625rem solid var(--color-dark-border);
   border-left: 0.1875rem solid var(--color-dark-border);
-  background: var(--color-dark-elevated);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--color-dark-elevated) 65%, transparent);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
   cursor: pointer;
   transition: border-color var(--t) var(--ease), background var(--t) var(--ease), transform var(--t-fast) var(--ease);
 }
 
 .sim-pipeline__step:hover,
 .sim-pipeline__step:focus-visible {
-  background: var(--color-dark-surface);
+  background: color-mix(in srgb, var(--color-dark-surface) 80%, transparent);
   transform: translateX(var(--space-1));
+  box-shadow: 0 4px 12px rgb(0 0 0 / 0.15);
 }
 
 .sim-pipeline__step i {
+  position: relative;
+  z-index: 1;
   grid-row: span 2;
   display: grid;
   place-items: center;
@@ -446,7 +693,8 @@
 }
 
 .sim-pipeline__step.is-running {
-  border-left-color: var(--color-on-dark-accent);
+  border-left-color: var(--sim-pattern-accent);
+  background: color-mix(in srgb, var(--color-dark-elevated) 78%, var(--sim-pattern-accent) 12%);
 }
 
 .sim-pipeline__step.is-complete {
@@ -462,19 +710,34 @@
 }
 
 .sim-pipeline__progress {
+  position: relative;
   grid-column: 2;
   width: min(14rem, 100%);
-  height: 0.25rem;
+  height: 0.75rem;
   overflow: hidden;
   border-radius: 999px;
+  border: 0.0625rem solid color-mix(in srgb, var(--sim-pattern-accent) 24%, var(--color-dark-border));
   background: var(--color-dark-border);
 }
 
 .sim-pipeline__progress span {
   display: block;
   block-size: 100%;
-  background: var(--color-on-dark-accent);
+  background: linear-gradient(90deg, var(--sim-pattern-accent), var(--color-success));
   transition: inline-size var(--t) var(--ease);
+}
+
+.sim-pipeline__progress em {
+  position: absolute;
+  inset-block: 0;
+  inset-inline-end: var(--space-2);
+  display: grid;
+  place-items: center;
+  color: var(--color-dark-text);
+  font-family: var(--font-mono);
+  font-size: 0.625rem;
+  font-style: normal;
+  line-height: 1;
 }
 
 .sim-lane {
@@ -482,6 +745,39 @@
   gap: var(--space-2);
   padding: var(--space-4);
   overflow: auto;
+  background:
+    linear-gradient(90deg, transparent 0 8rem, color-mix(in srgb, var(--color-dark-border) 34%, transparent) 8rem 8.0625rem, transparent 8.0625rem),
+    var(--color-dark-surface);
+}
+
+.sim-lane__axis {
+  display: grid;
+  grid-template-columns: minmax(4.5rem, 6rem) minmax(18rem, 1fr);
+  gap: var(--space-3);
+  align-items: center;
+  color: var(--color-dark-text-sub);
+}
+
+.sim-lane__axis > div {
+  position: relative;
+  min-height: 1.25rem;
+  border-bottom: 0.0625rem solid color-mix(in srgb, var(--color-dark-border) 72%, transparent);
+}
+
+.sim-lane__axis small {
+  position: absolute;
+  inset-block-end: 0.25rem;
+  font-family: var(--font-mono);
+  font-size: 0.625rem;
+  transform: translateX(-50%);
+}
+
+.sim-lane__axis small:first-child {
+  transform: none;
+}
+
+.sim-lane__axis small:last-child {
+  transform: translateX(-100%);
 }
 
 .sim-lane__row {
@@ -492,6 +788,10 @@
 }
 
 .sim-lane__actor {
+  padding: var(--space-1) var(--space-2);
+  border: 0.0625rem solid var(--color-dark-border);
+  border-radius: var(--radius-full);
+  background: var(--color-dark-elevated);
   color: var(--color-dark-text-sub);
   font-size: var(--text-sm);
 }
@@ -500,6 +800,8 @@
   position: relative;
   min-height: 2.75rem;
   border-bottom: 0.0625rem solid var(--color-dark-border);
+  background:
+    repeating-linear-gradient(90deg, transparent 0 16%, color-mix(in srgb, var(--color-dark-border) 34%, transparent) 16% calc(16% + 0.0625rem), transparent calc(16% + 0.0625rem) 32%);
 }
 
 .sim-lane__message {
@@ -512,7 +814,10 @@
   padding: var(--space-1) var(--space-2);
   border: 0.0625rem solid var(--color-dark-border);
   border-radius: var(--radius-xs);
-  background: var(--color-dark-elevated);
+  background: color-mix(in srgb, var(--color-dark-elevated) 70%, transparent);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  box-shadow: 0 2px 6px rgb(0 0 0 / 0.4);
   font-size: var(--text-xs);
   cursor: pointer;
   transform: translateX(-50%);
@@ -550,8 +855,25 @@
     grid-template-columns: minmax(3.75rem, 4.5rem) minmax(15rem, 1fr);
   }
 
+  .sim-lane__axis {
+    grid-template-columns: minmax(3.75rem, 4.5rem) minmax(15rem, 1fr);
+  }
+
   .sim-lane__message {
     white-space: normal;
+  }
+
+  .sim-pattern-grid--primary .sim-graph {
+    min-block-size: clamp(20rem, 42vh, 28rem);
+  }
+
+  .sim-pattern-grid--primary .sim-chain-board,
+  .sim-pattern-grid--primary .sim-tree,
+  .sim-pattern-grid--primary .sim-matrix-wrap,
+  .sim-pattern-grid--primary .sim-lane,
+  .sim-pattern-grid--primary .sim-chart,
+  .sim-pattern-grid--primary .sim-pipeline {
+    min-block-size: clamp(18rem, 40vh, 26rem);
   }
 }
 
@@ -570,11 +892,13 @@
 }
 
 .sim-lane__message.is-delivered {
-  border-color: var(--color-on-dark-accent);
+  border-color: var(--sim-pattern-accent);
+  background: color-mix(in srgb, var(--color-dark-elevated) 78%, var(--sim-pattern-accent) 14%);
 }
 
 .sim-lane__message.is-dropped {
   border-color: var(--color-danger);
+  background: color-mix(in srgb, var(--color-dark-elevated) 82%, var(--color-danger) 18%);
 }
 
 .sim-chart {
@@ -587,6 +911,11 @@
   width: 100%;
   aspect-ratio: 16 / 8;
   display: block;
+  border: 0.0625rem solid var(--color-dark-border);
+  border-radius: var(--radius-sm);
+  background:
+    radial-gradient(circle at 82% 18%, color-mix(in srgb, var(--color-danger) 14%, transparent), transparent 15rem),
+    var(--color-terminal-bg);
 }
 
 .sim-chart__axis,
@@ -599,6 +928,12 @@
   opacity: 0.45;
 }
 
+.sim-chart__current-marker {
+  stroke: color-mix(in srgb, var(--color-dark-text-sub) 70%, transparent);
+  stroke-dasharray: 1 1;
+  stroke-width: 0.35;
+}
+
 .sim-chart__tick {
   fill: var(--color-dark-text-sub);
   font-family: var(--font-mono);
@@ -607,11 +942,21 @@
 
 .sim-chart__series-line polyline {
   fill: none;
-  stroke-width: 1.2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.35;
+  filter: drop-shadow(0 0.0625rem 0.1875rem color-mix(in srgb, currentColor 50%, transparent));
 }
 
 .sim-chart__series-line circle {
   cursor: pointer;
+  transition: r var(--t-fast) var(--ease), stroke-width var(--t-fast) var(--ease);
+}
+
+.sim-chart__series-line circle.is-latest {
+  r: 2.25;
+  stroke: var(--color-dark-text);
+  stroke-width: 0.45;
 }
 
 .sim-chart__series-line.is-0 polyline,
@@ -677,6 +1022,9 @@
   border-collapse: collapse;
   color: var(--color-dark-text-sub);
   font-size: var(--text-xs);
+  border: 0.0625rem solid var(--color-dark-border);
+  border-radius: var(--radius-xs);
+  overflow: hidden;
 }
 
 .sim-chart__table caption {

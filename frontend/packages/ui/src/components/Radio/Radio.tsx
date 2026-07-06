@@ -2,6 +2,7 @@
 
 import React from 'react'
 import { clsx } from 'clsx'
+import { triggerHaptic } from '../../utils/haptics'
 import './Radio.css'
 
 export interface RadioOption {
@@ -49,6 +50,7 @@ export const Radio: React.FC<RadioProps> = ({
 
   const handleChange = (optionValue: string) => {
     if (disabled) return
+    triggerHaptic(10)
     setSelectedValue(optionValue)
     onChange?.(optionValue)
   }

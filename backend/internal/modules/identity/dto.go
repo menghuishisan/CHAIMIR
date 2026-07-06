@@ -148,6 +148,21 @@ type ReviewApplicationRequest struct {
 	Reason     string `json:"reason"`
 }
 
+type TenantApplicationDTO struct {
+	ApplicationID int64  `json:"application_id,string"`
+	SchoolName    string `json:"school_name"`
+	SchoolType    int16  `json:"school_type"`
+	ContactName   string `json:"contact_name"`
+	ContactPhone  string `json:"contact_phone"`
+	ContactEmail  string `json:"contact_email"`
+	Status        int16  `json:"status"`
+	RejectReason  string `json:"reject_reason,omitempty"`
+	ReviewedBy    int64  `json:"reviewed_by,string,omitempty"`
+	TenantID      int64  `json:"tenant_id,string,omitempty"`
+	SubmittedAt   string `json:"submitted_at"`
+	ReviewedAt    string `json:"reviewed_at,omitempty"`
+}
+
 type UpdateTenantStatusRequest struct {
 	Status   int16      `json:"status"`
 	ExpireAt *time.Time `json:"expire_at"`

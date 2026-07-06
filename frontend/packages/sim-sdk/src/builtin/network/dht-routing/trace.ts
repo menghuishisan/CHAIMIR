@@ -1,6 +1,7 @@
 // 本文件定义 DHT 异或路由仿真的代码追踪和教学叙事。
 
-import type { CodeTraceDef, NarrativeStep } from '../../../types';
+import type { CodeTraceDef } from '../../../types';
+import { phaseNarrative } from '../../packageTools';
 import { dhtPhases } from './model';
 
 export const dhtSource = [
@@ -47,20 +48,4 @@ export const dhtCodeTrace: CodeTraceDef = {
   ],
 };
 
-export const dhtNarrative: NarrativeStep[] = dhtPhases.map((phase, index) => ({
-  id: phase.id,
-  title: phase.label,
-  trigger: (state) => state.phase === phase.label,
-  highlight: [phase.id],
-  explain: `${phase.effect} ${phase.reason}`,
-  defaultDurationMs: 1200,
-  question:
-    index === dhtPhases.length - 1
-      ? {
-          prompt: '当前 DHT 查找是否已避开污染路由并找到目标?',
-          options: ['已经找到', '还没有'],
-          answer: '已经找到',
-          checkpointId: 'dht-lookup-found',
-        }
-      : undefined,
-}));
+export const dhtNarrative = phaseNarrative(dhtPhases, 'dht-lookup-found');

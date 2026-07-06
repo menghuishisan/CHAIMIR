@@ -44,6 +44,9 @@ export const Modal: React.FC<ModalProps> = ({
   const modalRef = useRef<HTMLDivElement>(null)
   const previousActiveElement = useRef<HTMLElement | null>(null)
   const titleId = useId()
+  const touchStartY = useRef(0)
+  const currentTranslateY = useRef(0)
+  const [swipeStyle, setSwipeStyle] = React.useState<React.CSSProperties>({})
 
   // FE-2: 焦点陷阱
   useEffect(() => {
@@ -70,6 +73,7 @@ export const Modal: React.FC<ModalProps> = ({
 
     return () => {
       document.body.style.overflow = ''
+      setSwipeStyle({})
     }
   }, [open])
 
@@ -99,6 +103,27 @@ export const Modal: React.FC<ModalProps> = ({
     }
   }
 
+  const handleTouchStart = (e: React.TouchEvent) => {
+    touchStartY.current = e.touches[0].clientY
+  }
+
+  const handleTouchMove = (e: React.TouchEvent) => {
+    const deltaY = e.touches[0].clientY - touchStartY.current
+    if (deltaY > 0) {
+      currentTranslateY.current = deltaY
+      setSwipeStyle({ transform: `translateY(${deltaY}px)`, transition: 'none' })
+    }
+  }
+
+  const handleTouchEnd = () => {
+    if (currentTranslateY.current > 80) {
+      onClose()
+    } else {
+      setSwipeStyle({ transform: `translateY(0)`, transition: 'transform 0.4s var(--ease-spring-bouncy)' })
+    }
+    currentTranslateY.current = 0
+  }
+
   const modalClasses = clsx(
     'chaimir-modal',
     `chaimir-modal--${size}`,
@@ -115,6 +140,10 @@ export const Modal: React.FC<ModalProps> = ({
         aria-labelledby={title ? titleId : undefined}
         aria-label={!title ? ariaLabel ?? '对话框' : undefined}
         tabIndex={-1}
+        style={swipeStyle}
+        onTouchStart={handleTouchStart}
+        onTouchMove={handleTouchMove}
+        onTouchEnd={handleTouchEnd}
       >
         {(title || showClose) && (
           <div className="chaimir-modal__header">
