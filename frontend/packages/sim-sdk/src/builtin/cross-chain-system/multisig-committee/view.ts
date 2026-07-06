@@ -1,7 +1,7 @@
 // 本文件把跨链多签委员会状态转换为签名矩阵和授权流程。
 
-import type { MatrixCell, ViewSpec } from '../../../types';
-import { matrixPattern, pipelinePattern } from '../../packageTools';
+import type { MatrixCell, TeachingFrame } from '../../../types';
+import { teachingFrame, matrixPattern, pipelinePattern, selectedOrFrameFocus } from '../../packageTools';
 import { matrixCells, pipelineSteps } from '../crossChainView';
 import { validSignatures } from './kernel';
 import { committeePhases, type CommitteeState } from './model';
@@ -9,9 +9,30 @@ import { committeePhases, type CommitteeState } from './model';
 /**
  * renderCommitteeView 基于内核状态生成多签委员会可视化。
  */
-export function renderCommitteeView(state: CommitteeState): ViewSpec {
+export function renderCommitteeView(state: CommitteeState): TeachingFrame {
   const valid = validSignatures(state);
-  return { summary: `门限 ${state.threshold}/${state.members.length},有效签名 ${valid},还差 ${Math.max(0, state.threshold - valid)},授权${state.authorized ? '通过' : '等待'}。`, patterns: [matrixPattern('committee-matrix', '多签委员会门限达成矩阵', state.members.map((member) => member.label), ['活跃成员', '签名份额', '有效性'], committeeCells(state), 'main'), pipelinePattern('committee-pipeline', '收集签名 -> 过滤恶意 -> 达成门限流程', pipelineSteps(committeePhases, state.phaseIndex, state.members.some((member) => member.malicious)), committeePhases[state.phaseIndex].id, 'bottom')] };
+    const summary = `门限 ${state.threshold}/${state.members.length},有效签名 ${valid},还差 ${Math.max(0, state.threshold - valid)},授权${state.authorized ? '通过' : '等待'}。`;
+  const patterns = [matrixPattern('committee-matrix', '多签委员会门限达成矩阵', state.members.map((member) => member.label), ['活跃成员', '签名份额', '有效性'], committeeCells(state)), pipelinePattern('committee-pipeline', '收集签名 -> 过滤恶意 -> 达成门限流程', pipelineSteps(committeePhases, state.phaseIndex, state.members.some((member) => member.malicious)), committeePhases[state.phaseIndex].id)];
+  return teachingFrame({
+    summary,
+    phase: {
+      id: state.phase,
+      title: state.explanation.title,
+      intent: 'observe',
+      what: state.explanation.effect,
+      why: state.explanation.reason,
+      watch: summary,
+    },
+    focus: {
+      primary: selectedOrFrameFocus(state.selectedElementId, ['committee-pipeline']),
+      secondary: ['committee-matrix'],
+    },
+    layout: {
+      primary: 'committee-pipeline',
+      evidence: ['committee-matrix'],
+    },
+    patterns,
+  });
 }
 
 /**

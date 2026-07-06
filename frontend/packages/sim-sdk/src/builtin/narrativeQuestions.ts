@@ -37,6 +37,18 @@ export const narrativeQuestions: Record<string, PhaseNarrativeQuestion> = {
     options: ['授权有效', '签名仍不可信'],
     answer: '授权有效',
   },
+  'eip1559-fee-split': {
+    prompt: '当前区块费用是否已经完成 base fee 销毁、小费支付和下一块 base fee 计算?',
+    options: ['已经完成', '仍未完成'],
+    answer: '已经完成',
+    phaseId: 'adjust',
+  },
+  'eth-pos-finalized': {
+    prompt: '当前 PoS 流程是否已经区分链头选择、justified checkpoint 和 finalized checkpoint?',
+    options: ['已经区分', '仍然混淆'],
+    answer: '已经区分',
+    phaseId: 'finalize',
+  },
   'cross-message-executed': {
     prompt: '跨链消息是否已经完成锁定、中继、证明验证和目标链执行?',
     options: ['已经执行', '仍未闭环'],
@@ -98,6 +110,12 @@ export const narrativeQuestions: Record<string, PhaseNarrativeQuestion> = {
     options: ['可以接受', '不能接受'],
     answer: '可以接受',
   },
+  'mempool-replacement-valid': {
+    prompt: '同 nonce 替换交易是否满足加价阈值,并且后续 queued 交易只在前序 nonce 入块后释放?',
+    options: ['规则满足', '仍有违例'],
+    answer: '规则满足',
+    phaseId: 'release',
+  },
   'nonce-order-valid': {
     prompt: '账户交易是否已经按连续 nonce 顺序打包并修复缺口?',
     options: ['顺序有效', '仍有缺口'],
@@ -150,6 +168,12 @@ export const narrativeQuestions: Record<string, PhaseNarrativeQuestion> = {
     options: ['重放已拒绝', '仍可重放'],
     answer: '重放已拒绝',
   },
+  'optimistic-rollup-verdict': {
+    prompt: '欺诈证明是否已经通过二分定位和 L1 单步验证得到明确裁决?',
+    options: ['已有裁决', '仍在争议中'],
+    answer: '已有裁决',
+    phaseId: 'verdict',
+  },
   'snapshot-root-valid': {
     prompt: '异常写入后是否已经回滚快照并恢复到可信状态根?',
     options: ['快照一致', '仍有脏状态'],
@@ -164,6 +188,12 @@ export const narrativeQuestions: Record<string, PhaseNarrativeQuestion> = {
     prompt: '当前有效份额是否足以形成可验证的聚合签名?',
     options: ['足够', '不足'],
     answer: '足够',
+  },
+  'tendermint-commit': {
+    prompt: '当前值是否已经获得超过三分之二 precommit,并受到 lock 约束保护?',
+    options: ['可以提交', '不能提交'],
+    answer: '可以提交',
+    phaseId: 'commit',
   },
   'trie-root-valid': {
     prompt: 'Patricia Trie 是否已经重算路径哈希并给出有效根或缺失证明?',
@@ -184,5 +214,11 @@ export const narrativeQuestions: Record<string, PhaseNarrativeQuestion> = {
     prompt: '当前响应是否满足承诺关系且没有泄露秘密?',
     options: ['满足', '不满足'],
     answer: '满足',
+  },
+  'zk-rollup-verifier': {
+    prompt: 'L1 verifier 是否只在 proof 与 public inputs 绑定一致时更新 newRoot?',
+    options: ['只在一致时更新', '不需要一致'],
+    answer: '只在一致时更新',
+    phaseId: 'verify',
   },
 };

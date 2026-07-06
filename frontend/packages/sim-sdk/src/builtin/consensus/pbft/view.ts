@@ -1,25 +1,44 @@
 // 本文件把 PBFT 协议内核状态映射为封闭可视化模式,不改变协议状态。
 
-import type { GraphEdge, GraphNode, LaneMessage, MatrixCell, ViewSpec } from '../../../types';
-import { graphPattern, lanePattern, matrixPattern } from '../../packageTools';
+import type { GraphEdge, GraphNode, LaneMessage, MatrixCell, TeachingFrame } from '../../../types';
+import { teachingFrame, graphPattern, lanePattern, matrixPattern, selectedOrFrameFocus } from '../../packageTools';
 import { quorum } from './kernel';
 import type { PbftMessage, PbftReplica, PbftState } from './model';
 
 /**
  * renderPbftView 输出 PBFT 的网络图、过程流水线、时序泳道和证书矩阵。
  */
-export function renderPbftView(state: PbftState): ViewSpec {
+export function renderPbftView(state: PbftState): TeachingFrame {
   const preparedCount = state.replicas.filter((replica) => replica.preparedDigest === state.request.digest).length;
   const committedCount = state.replicas.filter((replica) => replica.committedDigest === state.request.digest).length;
   const threshold = quorum(state);
-  return {
-    summary: `视图 ${state.view},序号 ${state.sequence},准备证书 ${preparedCount}/${threshold},提交证书 ${committedCount}/${threshold},当前过程 ${state.phase},风险 ${state.metrics.risk}。`,
-    patterns: [
-      graphPattern('pbft-graph', 'PBFT 主节点广播与副本投票网络', pbftNodes(state), pbftEdges(state), 'main'),
-      lanePattern('pbft-lane', 'PBFT pre-prepare / prepare / commit 时序', actorLabels(state), pbftLaneMessages(state), state.tick, 'bottom'),
-      matrixPattern('pbft-matrix', `2f+1 证书矩阵,还差准备 ${Math.max(0, threshold - preparedCount)},提交 ${Math.max(0, threshold - committedCount)}`, state.replicas.map((replica) => replica.label), ['预准备', '准备证书', '提交证书', '客户端回复', '稳定检查点'], pbftCells(state), 'bottom'),
-    ],
-  };
+    const summary = `视图 ${state.view},序号 ${state.sequence},准备证书 ${preparedCount}/${threshold},提交证书 ${committedCount}/${threshold},当前过程 ${state.phase},风险 ${state.metrics.risk}。`;
+  const patterns = [
+      graphPattern('pbft-graph', 'PBFT 主节点广播与副本投票网络', pbftNodes(state), pbftEdges(state)),
+      lanePattern('pbft-lane', 'PBFT pre-prepare / prepare / commit 时序', actorLabels(state), pbftLaneMessages(state), state.tick),
+      matrixPattern('pbft-matrix', `2f+1 证书矩阵,还差准备 ${Math.max(0, threshold - preparedCount)},提交 ${Math.max(0, threshold - committedCount)}`, state.replicas.map((replica) => replica.label), ['预准备', '准备证书', '提交证书', '客户端回复', '稳定检查点'], pbftCells(state)),
+    ];
+  return teachingFrame({
+    summary,
+    phase: {
+      id: state.phase,
+      title: state.explanation.title,
+      intent: 'observe',
+      what: state.explanation.effect,
+      why: state.explanation.reason,
+      watch: summary,
+    },
+    focus: {
+      primary: selectedOrFrameFocus(state.selectedElementId, ['pbft-graph']),
+      secondary: ['pbft-lane', 'pbft-matrix'],
+    },
+    layout: {
+      primary: 'pbft-graph',
+      evidence: ['pbft-matrix'],
+      timeline: 'pbft-lane',
+    },
+    patterns,
+  });
 }
 
 /**

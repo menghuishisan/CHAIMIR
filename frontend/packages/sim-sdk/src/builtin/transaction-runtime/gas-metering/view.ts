@@ -1,17 +1,38 @@
 // 本文件把 Gas 计量状态转换为指令矩阵和执行流程。
 
-import type { MatrixCell, ViewSpec } from '../../../types';
-import { matrixPattern, pipelinePattern } from '../../packageTools';
+import type { MatrixCell, TeachingFrame } from '../../../types';
+import { teachingFrame, matrixPattern, pipelinePattern, selectedOrFrameFocus } from '../../packageTools';
 import { matrixCells, pipelineSteps } from '../runtimeView';
 import { gasPhases, type GasState } from './model';
 
 /**
  * renderGasView 基于内核状态生成 Gas 计量可视化。
  */
-export function renderGasView(state: GasState): ViewSpec {
+export function renderGasView(state: GasState): TeachingFrame {
   const remaining = Math.max(0, state.gasLimit - state.gasUsed);
   const executed = state.steps.filter((step) => step.executed).length;
-  return { summary: `Gas 上限 ${state.gasLimit},已用 ${state.gasUsed},剩余 ${remaining},退款 ${state.refund},已执行 ${executed}/${state.steps.length},状态 ${state.outOfGas ? '失败' : '运行中'}。`, patterns: [matrixPattern('gas-matrix', 'EVM 指令逐步扣 Gas 矩阵', state.steps.map((step) => step.op), ['成本', '执行', '剩余预算影响'], gasCells(state), 'main'), pipelinePattern('gas-pipeline', '设置上限 -> 逐指令扣费 -> 退款/结算流程', pipelineSteps(gasPhases, state.phaseIndex, state.outOfGas), gasPhases[state.phaseIndex].id, 'bottom')] };
+    const summary = `Gas 上限 ${state.gasLimit},已用 ${state.gasUsed},剩余 ${remaining},退款 ${state.refund},已执行 ${executed}/${state.steps.length},状态 ${state.outOfGas ? '失败' : '运行中'}。`;
+  const patterns = [matrixPattern('gas-matrix', 'EVM 指令逐步扣 Gas 矩阵', state.steps.map((step) => step.op), ['成本', '执行', '剩余预算影响'], gasCells(state)), pipelinePattern('gas-pipeline', '设置上限 -> 逐指令扣费 -> 退款/结算流程', pipelineSteps(gasPhases, state.phaseIndex, state.outOfGas), gasPhases[state.phaseIndex].id)];
+  return teachingFrame({
+    summary,
+    phase: {
+      id: state.phase,
+      title: state.explanation.title,
+      intent: 'observe',
+      what: state.explanation.effect,
+      why: state.explanation.reason,
+      watch: summary,
+    },
+    focus: {
+      primary: selectedOrFrameFocus(state.selectedElementId, ['gas-pipeline']),
+      secondary: ['gas-matrix'],
+    },
+    layout: {
+      primary: 'gas-pipeline',
+      evidence: ['gas-matrix'],
+    },
+    patterns,
+  });
 }
 
 /**

@@ -9,6 +9,7 @@ import type {
   ChainPattern,
   ChartSeries,
   ChartPattern,
+  FrameFocus,
   GraphEdge,
   GraphNode,
   GraphPattern,
@@ -24,6 +25,7 @@ import './PatternRenderer.css';
 
 export interface PatternRendererProps {
   pattern: PatternBinding;
+  focus?: FrameFocus;
   selectedElementId?: string;
   reducedMotion?: boolean;
   onSelectElement?: (elementId: string, elementType?: string) => void;
@@ -32,20 +34,20 @@ export interface PatternRendererProps {
 /**
  * 按模式类型分发到平台维护的统一渲染器。
  */
-export function PatternRenderer({ pattern, selectedElementId, reducedMotion = false, onSelectElement }: PatternRendererProps): React.ReactElement {
+export function PatternRenderer({ pattern, focus, selectedElementId, reducedMotion = false, onSelectElement }: PatternRendererProps): React.ReactElement {
   switch (pattern.mode) {
     case 'graph':
-      return <GraphRenderer pattern={pattern} selectedElementId={selectedElementId} reducedMotion={reducedMotion} onSelectElement={onSelectElement} />;
+      return <GraphRenderer pattern={pattern} focus={focus} selectedElementId={selectedElementId} reducedMotion={reducedMotion} onSelectElement={onSelectElement} />;
     case 'chain':
-      return <ChainRenderer pattern={pattern} selectedElementId={selectedElementId} onSelectElement={onSelectElement} />;
+      return <ChainRenderer pattern={pattern} focus={focus} selectedElementId={selectedElementId} onSelectElement={onSelectElement} />;
     case 'tree':
-      return <TreeRenderer pattern={pattern} selectedElementId={selectedElementId} onSelectElement={onSelectElement} />;
+      return <TreeRenderer pattern={pattern} focus={focus} selectedElementId={selectedElementId} onSelectElement={onSelectElement} />;
     case 'matrix':
-      return <MatrixRenderer pattern={pattern} selectedElementId={selectedElementId} onSelectElement={onSelectElement} />;
+      return <MatrixRenderer pattern={pattern} focus={focus} selectedElementId={selectedElementId} onSelectElement={onSelectElement} />;
     case 'pipeline':
-      return <PipelineRenderer pattern={pattern} selectedElementId={selectedElementId} reducedMotion={reducedMotion} onSelectElement={onSelectElement} />;
+      return <PipelineRenderer pattern={pattern} focus={focus} selectedElementId={selectedElementId} reducedMotion={reducedMotion} onSelectElement={onSelectElement} />;
     case 'lane':
-      return <LaneRenderer pattern={pattern} selectedElementId={selectedElementId} reducedMotion={reducedMotion} onSelectElement={onSelectElement} />;
+      return <LaneRenderer pattern={pattern} focus={focus} selectedElementId={selectedElementId} reducedMotion={reducedMotion} onSelectElement={onSelectElement} />;
     case 'chart':
       return <ChartRenderer pattern={pattern} selectedElementId={selectedElementId} onSelectElement={onSelectElement} />;
   }
@@ -56,11 +58,13 @@ export function PatternRenderer({ pattern, selectedElementId, reducedMotion = fa
  */
 function GraphRenderer({
   pattern,
+  focus,
   selectedElementId,
   reducedMotion,
   onSelectElement,
 }: {
   pattern: GraphPattern;
+  focus?: FrameFocus;
   selectedElementId?: string;
   reducedMotion: boolean;
   onSelectElement?: (elementId: string, elementType?: string) => void;
@@ -100,7 +104,7 @@ function GraphRenderer({
               const progress = processProgress(edge, reducedMotion);
               const pulse = pointOnLine(line, progress);
               return (
-                <g className={clsx('sim-graph__edge-group', selectedElementId === edge.id && 'is-selected')} key={edge.id} {...selectableElementProps(edge.id, onSelectElement, 'edge')}>
+                <g className={clsx('sim-graph__edge-group', elementVisualClasses(edge, focus), selectedElementId === edge.id && 'is-selected')} key={edge.id} {...selectableElementProps(edge.id, onSelectElement, 'edge')}>
                   <line
                     className={clsx('sim-graph__edge', `is-${edge.status}`)}
                     x1={line.x1}
@@ -126,7 +130,7 @@ function GraphRenderer({
             {nodes.map((node) => (
               <div
                 key={node.id}
-                className={clsx('sim-graph__node', `is-${node.status}`, selectedElementId === node.id && 'is-selected')}
+                className={clsx('sim-graph__node', `is-${node.status}`, elementVisualClasses(node, focus), selectedElementId === node.id && 'is-selected')}
                 style={{ left: `${node.x}%`, top: `${node.y}%` }}
                 {...selectableElementProps(node.id, onSelectElement, node.role)}
               >
@@ -149,10 +153,12 @@ function GraphRenderer({
  */
 function ChainRenderer({
   pattern,
+  focus,
   selectedElementId,
   onSelectElement,
 }: {
   pattern: ChainPattern;
+  focus?: FrameFocus;
   selectedElementId?: string;
   onSelectElement?: (elementId: string, elementType?: string) => void;
 }): React.ReactElement {
@@ -170,7 +176,7 @@ function ChainRenderer({
             {canonical.map((block, index) => (
               <React.Fragment key={block.id}>
                 {index > 0 && <span className="sim-chain__link" aria-hidden="true" />}
-                <ChainBlockCard block={block} selectedElementId={selectedElementId} onSelectElement={onSelectElement} canonicalTip={pattern.data.canonicalTip} />
+                <ChainBlockCard block={block} focus={focus} selectedElementId={selectedElementId} onSelectElement={onSelectElement} canonicalTip={pattern.data.canonicalTip} />
               </React.Fragment>
             ))}
           </div>
@@ -182,7 +188,7 @@ function ChainRenderer({
               {fork.map((block, index) => (
                 <React.Fragment key={`${forkIndex}-${block.id}`}>
                   {index > 0 && <span className="sim-chain__link is-fork" aria-hidden="true" />}
-                  <ChainBlockCard block={block} selectedElementId={selectedElementId} onSelectElement={onSelectElement} canonicalTip={pattern.data.canonicalTip} />
+                  <ChainBlockCard block={block} focus={focus} selectedElementId={selectedElementId} onSelectElement={onSelectElement} canonicalTip={pattern.data.canonicalTip} />
                 </React.Fragment>
               ))}
             </div>
@@ -198,10 +204,12 @@ function ChainRenderer({
  */
 function TreeRenderer({
   pattern,
+  focus,
   selectedElementId,
   onSelectElement,
 }: {
   pattern: TreePattern;
+  focus?: FrameFocus;
   selectedElementId?: string;
   onSelectElement?: (elementId: string, elementType?: string) => void;
 }): React.ReactElement {
@@ -209,7 +217,7 @@ function TreeRenderer({
   return (
     <section className="sim-pattern sim-pattern--tree" aria-label={pattern.title}>
       <PatternHeader mode="tree" title={pattern.title} meta={`${nodeCount} 节点 / 路径 ${pattern.data.highlightedPath.length} 层`} />
-      <div className="sim-tree">{renderTreeNode(pattern.data.root, pattern.data.highlightedPath, selectedElementId, onSelectElement, true)}</div>
+      <div className="sim-tree">{renderTreeNode(pattern.data.root, pattern.data.highlightedPath, selectedElementId, onSelectElement, focus, true)}</div>
     </section>
   );
 }
@@ -222,18 +230,19 @@ function renderTreeNode(
   path: string[],
   selectedElementId?: string,
   onSelectElement?: (elementId: string, elementType?: string) => void,
+  focus?: FrameFocus,
   isRoot = false
 ): React.ReactElement {
   const pathParent = node.children?.some((child) => treeContainsPath(child, path)) ?? false;
   return (
-    <div className={clsx('sim-tree__node', isRoot && 'is-root', path.includes(node.id) && 'is-highlighted', pathParent && 'is-path-parent', selectedElementId === node.id && 'is-selected')}>
+    <div className={clsx('sim-tree__node', isRoot && 'is-root', path.includes(node.id) && 'is-highlighted', pathParent && 'is-path-parent', elementVisualClasses(node, focus), selectedElementId === node.id && 'is-selected')}>
       <div className="sim-tree__box" {...selectableElementProps(node.id, onSelectElement, 'tree-node')}>
         <span>{node.label}</span>
         <code>{node.hash.slice(0, 10)}</code>
       </div>
       {node.children && node.children.length > 0 && (
         <div className="sim-tree__children">
-          {node.children.map((child) => renderTreeNode(child, path, selectedElementId, onSelectElement))}
+          {node.children.map((child) => renderTreeNode(child, path, selectedElementId, onSelectElement, focus))}
         </div>
       )}
     </div>
@@ -245,10 +254,12 @@ function renderTreeNode(
  */
 function MatrixRenderer({
   pattern,
+  focus,
   selectedElementId,
   onSelectElement,
 }: {
   pattern: MatrixPattern;
+  focus?: FrameFocus;
   selectedElementId?: string;
   onSelectElement?: (elementId: string, elementType?: string) => void;
 }): React.ReactElement {
@@ -280,7 +291,7 @@ function MatrixRenderer({
                   const cellId = `${pattern.id}:${row}:${pattern.data.columns[columnIndex]}`;
                   return (
                     <td
-                      className={clsx('sim-matrix__cell', `is-${cell.status}`, selectedElementId === cellId && 'is-selected')}
+                      className={clsx('sim-matrix__cell', `is-${cell.status}`, elementVisualClasses({ id: cellId, meta: cell.meta }, focus), selectedElementId === cellId && 'is-selected')}
                       key={`${row}-${columnIndex}`}
                       {...selectableElementProps(cellId, onSelectElement, 'cell')}
                     >
@@ -304,11 +315,13 @@ function MatrixRenderer({
  */
 function PipelineRenderer({
   pattern,
+  focus,
   selectedElementId,
   reducedMotion,
   onSelectElement,
 }: {
   pattern: PipelinePattern;
+  focus?: FrameFocus;
   selectedElementId?: string;
   reducedMotion: boolean;
   onSelectElement?: (elementId: string, elementType?: string) => void;
@@ -322,7 +335,7 @@ function PipelineRenderer({
       <ol className="sim-pipeline">
         {pattern.data.steps.map((step, index) => (
           <li
-            className={clsx('sim-pipeline__step', `is-${step.status}`, selectedElementId === step.id && 'is-selected')}
+            className={clsx('sim-pipeline__step', `is-${step.status}`, elementVisualClasses(step, focus), selectedElementId === step.id && 'is-selected')}
             key={step.id}
             aria-current={step.status === 'running' ? 'step' : undefined}
             {...selectableElementProps(step.id, onSelectElement, 'step')}
@@ -348,11 +361,13 @@ function PipelineRenderer({
  */
 function LaneRenderer({
   pattern,
+  focus,
   selectedElementId,
   reducedMotion,
   onSelectElement,
 }: {
   pattern: LanePattern;
+  focus?: FrameFocus;
   selectedElementId?: string;
   reducedMotion: boolean;
   onSelectElement?: (elementId: string, elementType?: string) => void;
@@ -385,7 +400,7 @@ function LaneRenderer({
                   const position = messageTimePosition(message, maxTime, reducedMotion);
                   return (
                     <span
-                      className={clsx('sim-lane__message', `is-${message.status}`, selectedElementId === message.id && 'is-selected')}
+                      className={clsx('sim-lane__message', `is-${message.status}`, elementVisualClasses(message, focus), selectedElementId === message.id && 'is-selected')}
                       key={`${actor}-${message.id}`}
                       style={{ insetInlineStart: `${position}%` }}
                       title={message.process?.label ?? message.detail}
@@ -672,22 +687,47 @@ function clamp01(value: number): number {
 }
 
 /**
+ * elementVisualClasses 按 TeachingFrame 焦点和元素生命周期生成跨模式通用视觉状态。
+ */
+function elementVisualClasses(element: { id: string; meta?: { lifecycle?: { state: string }; emphasis?: string } }, focus?: FrameFocus): string[] {
+  const classes: string[] = [];
+  if (focus?.primary.includes(element.id)) {
+    classes.push('is-focus');
+  }
+  if (focus?.secondary?.includes(element.id)) {
+    classes.push('is-context');
+  }
+  if (focus?.muted?.includes(element.id)) {
+    classes.push('is-muted');
+  }
+  if (element.meta?.lifecycle?.state) {
+    classes.push(`is-${element.meta.lifecycle.state}`);
+  }
+  if (element.meta?.emphasis) {
+    classes.push(`is-${element.meta.emphasis}`);
+  }
+  return classes;
+}
+
+/**
  * 渲染单个区块卡片,用于主链和分叉复用。
  */
 function ChainBlockCard({
   block,
+  focus,
   selectedElementId,
   onSelectElement,
   canonicalTip,
 }: {
   block: ChainPattern['data']['blocks'][number];
+  focus?: FrameFocus;
   selectedElementId?: string;
   onSelectElement?: (elementId: string, elementType?: string) => void;
   canonicalTip?: string;
 }): React.ReactElement {
   return (
     <article
-      className={clsx('sim-chain__block', `is-${block.status}`, selectedElementId === block.id && 'is-selected', canonicalTip === block.id && 'is-tip')}
+      className={clsx('sim-chain__block', `is-${block.status}`, elementVisualClasses(block, focus), selectedElementId === block.id && 'is-selected', canonicalTip === block.id && 'is-tip')}
       role="listitem"
       {...selectableElementProps(block.id, onSelectElement, 'block')}
     >

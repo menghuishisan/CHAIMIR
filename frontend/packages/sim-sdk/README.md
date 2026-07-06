@@ -4,7 +4,7 @@
 
 ## 公开能力
 
-- `SimPackage`、`SimState`、`SimEvent`、`ViewSpec` 等协议类型。
+- `SimPackage`、`SimState`、`SimEvent`、`TeachingFrame` 等协议类型。
 - `defineSimPackage` 用于定义并校验仿真包。
 - `createDeveloperTemplate` 用于生成最小完整示例。
 - `createSimPackageManifest` 用于生成上传审核使用的 `sim-package.json` 内容。
@@ -13,12 +13,23 @@
 
 内置仿真包 registry 不从主入口导出。内置包只由平台内部装配,开发者新增仿真应使用同一套公开协议,不依赖内置实现。
 
+## 内置标准库口径
+
+当前平台内置标准库为 7 类共 41 个仿真包。新增的主流区块链机制包括:
+
+- `transaction-runtime`:EIP-1559 费用市场、Mempool 替换交易与 Nonce 队列。
+- `consensus`:Ethereum PoS 链头选择与最终性、Tendermint 轮次锁定与提交。
+- `cross-chain-system`:Optimistic Rollup 欺诈证明、ZK Rollup 批次证明与验证。
+
+这些内置包仍然只通过 `SimPackage`、`TeachingFrame`、封闭模式和 Worker 运行时装配,不得绕过开发者包需要遵守的协议。
+
 ## 最小仿真包
 
 ```typescript
 import {
   defineSimPackage,
   createSimPackageManifest,
+  type TeachingFrame,
   type SimPackage,
   type SimState,
 } from '@chaimir/sim-sdk';
@@ -74,14 +85,29 @@ export const simPackage: SimPackage<DemoState> = defineSimPackage({
       labelTag: 'normal',
     },
   ],
-  render: (state) => ({
+  render: (state): TeachingFrame => ({
     summary: `当前阶段:${state.phase}`,
+    phase: {
+      id: state.phaseIndex === 1 ? 'done' : 'ready',
+      title: state.explanation.title,
+      intent: 'observe',
+      explanation: {
+        what: state.explanation.effect,
+        why: state.explanation.reason,
+        watch: '观察流水线当前步骤与状态推进结果。',
+      },
+    },
+    focus: {
+      primary: [state.phaseIndex === 1 ? 'done' : 'ready'],
+    },
+    layout: {
+      primary: 'demo-pipeline',
+    },
     patterns: [
       {
         id: 'demo-pipeline',
         mode: 'pipeline',
         title: '演示流程',
-        region: 'main',
         data: {
           currentStepId: state.phaseIndex === 1 ? 'done' : 'ready',
           steps: [
@@ -127,14 +153,14 @@ export const simPackage: SimPackage<DemoState> = defineSimPackage({
 export const manifest = createSimPackageManifest(simPackage);
 ```
 
-`createSimPackageManifest` 输出的是后端 M4 上传审核读取的 `sim-package.json`:其中 `meta` 只包含 `code`、`name`、`category`、`version`、`compute`、`scale_limit`,交互参数不包含前端控件文案,`codeTrace` 保留源码和行映射供后端生成不含源码正文的审核摘要。
+`createSimPackageManifest` 输出的是后端 M4 上传审核读取的 `sim-package.json`:其中 `meta` 只包含 `code`、`name`、`category`、`version`、`compute`、`scale_limit`,交互参数不包含前端控件文案,`render.protocol` 固定为 `teaching-frame`,`render.patterns` 只声明稳定 `id`、封闭 `mode` 和可审核 `roles`,`codeTrace` 保留源码和行映射供后端生成不含源码正文的审核摘要。
 
 ## 开发流程
 
 1. 用 `createDeveloperTemplate(code)` 生成最小包,或按上面的结构从 `defineSimPackage` 开始。
 2. 只实现 `initState`、`reducer`、`render`、`narrative`、`codeTrace`、`checkpoints`。
 3. `reducer` 必须是纯函数,不能使用真实时间、网络、DOM、全局随机源或外部副作用。
-4. `render` 只能返回 `graph`、`chain`、`tree`、`matrix`、`pipeline`、`lane`、`chart` 中的 1 到 3 个模式。
+4. `render` 必须返回 `TeachingFrame`,显式声明 `phase`、`focus`、`layout`,并只包含 `graph`、`chain`、`tree`、`matrix`、`pipeline`、`lane`、`chart` 中的 1 到 3 个模式。
 5. 运行 `validateSimPackageManifest(simPackage)` 检查协议字段。
 6. 用 `createSimPackageManifest(simPackage)` 生成 `sim-package.json` 内容,和 bundle 一起提交审核。
 

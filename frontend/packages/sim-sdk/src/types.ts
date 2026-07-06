@@ -13,14 +13,14 @@ export type SimCategory =
 export type InteractionKind = 'button' | 'slider' | 'hold' | 'select-element' | 'drag' | 'form';
 export type InteractionTag = 'normal' | 'perturb' | 'attack';
 export type PatternMode = 'graph' | 'chain' | 'tree' | 'matrix' | 'pipeline' | 'lane' | 'chart';
-export type PatternRegion = 'main' | 'side' | 'bottom';
+export type FrameIntent = 'observe' | 'compare' | 'verify' | 'debug' | 'attack' | 'recover' | 'replay';
 
 export interface SimPackage<TState extends SimState = SimState> {
   meta: SimMeta;
   initState: (params: SimInitParams, seed: number) => TState;
   reducer: (state: TState, event: SimEvent, context: ReducerContext) => TState;
   interactions: InteractionDef[];
-  render: (state: TState) => ViewSpec;
+  render: (state: TState) => TeachingFrame;
   narrative: NarrativeStep[];
   codeTrace: CodeTraceDef;
   checkpoints: CheckpointDef[];
@@ -118,9 +118,46 @@ export interface FieldDef {
   required?: boolean;
 }
 
-export interface ViewSpec {
-  patterns: PatternBinding[];
+export interface TeachingFrame {
   summary: string;
+  phase: FramePhase;
+  focus: FrameFocus;
+  layout: FrameLayout;
+  patterns: PatternBinding[];
+  annotations?: FrameAnnotation[];
+}
+
+export interface FramePhase {
+  id: string;
+  title: string;
+  intent: FrameIntent;
+  explanation: {
+    what: string;
+    why: string;
+    watch: string;
+  };
+}
+
+export interface FrameFocus {
+  primary: string[];
+  secondary?: string[];
+  muted?: string[];
+}
+
+export interface FrameLayout {
+  primary: string;
+  evidence?: string[];
+  timeline?: string;
+  metrics?: string[];
+  trace?: string;
+  checkpoints?: string[];
+}
+
+export interface FrameAnnotation {
+  id: string;
+  target: string;
+  tone: 'info' | 'success' | 'warning' | 'danger';
+  text: string;
 }
 
 export type PatternBinding =
@@ -136,7 +173,6 @@ export interface PatternBase<TMode extends PatternMode, TData> {
   id: string;
   mode: TMode;
   title: string;
-  region: PatternRegion;
   data: TData;
 }
 
@@ -156,6 +192,7 @@ export interface GraphNode {
   role: string;
   status: 'idle' | 'active' | 'success' | 'warning' | 'danger';
   value?: string;
+  meta?: VisualElementMeta;
 }
 
 export interface GraphEdge {
@@ -166,6 +203,7 @@ export interface GraphEdge {
   status: 'pending' | 'active' | 'success' | 'failed';
   process?: ProcessSpan;
   detail?: string;
+  meta?: VisualElementMeta;
 }
 
 export interface ChainPattern
@@ -185,6 +223,7 @@ export interface ChainBlock {
   parentHash: string;
   label: string;
   status: 'genesis' | 'pending' | 'canonical' | 'orphaned' | 'attacker';
+  meta?: VisualElementMeta;
 }
 
 export interface TreePattern
@@ -195,6 +234,7 @@ export interface TreeNode {
   label: string;
   hash: string;
   children?: TreeNode[];
+  meta?: VisualElementMeta;
 }
 
 export interface MatrixPattern
@@ -210,6 +250,7 @@ export interface MatrixPattern
 export interface MatrixCell {
   label: string;
   status: 'empty' | 'pending' | 'yes' | 'no' | 'fault';
+  meta?: VisualElementMeta;
 }
 
 export interface PipelinePattern
@@ -221,6 +262,7 @@ export interface PipelineStep {
   status: 'pending' | 'running' | 'complete' | 'failed';
   detail: string;
   process?: ProcessSpan;
+  meta?: VisualElementMeta;
 }
 
 export interface LanePattern
@@ -236,6 +278,7 @@ export interface LaneMessage {
   endAt?: number;
   process?: ProcessSpan;
   detail?: string;
+  meta?: VisualElementMeta;
 }
 
 export interface ProcessSpan {
@@ -243,6 +286,19 @@ export interface ProcessSpan {
   endedAt: number;
   progress: number;
   label: string;
+}
+
+export interface VisualElementMeta {
+  id: string;
+  label: string;
+  role?: string;
+  lifecycle: {
+    state: 'entering' | 'active' | 'settled' | 'leaving' | 'archived';
+    fromTick: number;
+    toTick?: number;
+  };
+  emphasis: 'focus' | 'context' | 'history' | 'ghost';
+  explanation?: string;
 }
 
 export interface ChartPattern
@@ -301,7 +357,7 @@ export interface RuntimeSnapshot {
   state: SimState;
   tick: number;
   events: SimEvent[];
-  view: ViewSpec;
+  view: TeachingFrame;
   currentStep?: NarrativeStepDescriptor;
   interactionAvailability: Record<string, boolean>;
   checkpointResults: Record<string, CheckpointResult>;

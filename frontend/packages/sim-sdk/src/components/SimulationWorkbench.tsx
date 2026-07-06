@@ -132,7 +132,7 @@ export function SimulationWorkbench({
 
   const activeElementId = snapshot?.state.selectedElementId ?? selectedElementId;
   const currentStep = snapshot?.currentStep;
-  const arrangedPatterns = snapshot ? splitViewPatterns(snapshot.view.patterns) : { main: [], support: [] };
+  const arrangedPatterns = snapshot ? arrangeTeachingFrame(snapshot.view) : { primary: undefined, support: [] };
 
   /**
    * handleRuntimeError 把命令错误转为工作台可见提示并停止播放。
@@ -253,7 +253,7 @@ export function SimulationWorkbench({
         </div>
         <div className="sim-workbench__status">
           <span>步进 {snapshot.tick}</span>
-          <span>{snapshot.state.phase}</span>
+          <span>{snapshot.view.phase.title}</span>
           {reducedMotion && <span>减少动态</span>}
         </div>
       </header>
@@ -263,6 +263,7 @@ export function SimulationWorkbench({
           <header className="sim-workbench__stage-head">
             <div>
               <p className="sim-workbench__summary">{snapshot.view.summary}</p>
+              <p className="sim-workbench__watch">{snapshot.view.phase.explanation.watch}</p>
             </div>
             {activeElementId && (
               <p className="sim-workbench__selection">
@@ -271,19 +272,18 @@ export function SimulationWorkbench({
             )}
           </header>
           <div className="sim-pattern-grid sim-pattern-grid--primary">
-            {arrangedPatterns.main.length > 0 ? (
-              arrangedPatterns.main.map((pattern) => (
-                <PatternRenderer
-                  key={pattern.id}
-                  pattern={pattern}
-                  selectedElementId={activeElementId}
-                  reducedMotion={reducedMotion}
-                  onSelectElement={(elementId, elementType) => {
-                    setSelectedElementId(elementId);
-                    setSelectedElementType(elementType);
-                  }}
-                />
-              ))
+            {arrangedPatterns.primary ? (
+              <PatternRenderer
+                key={arrangedPatterns.primary.id}
+                pattern={arrangedPatterns.primary}
+                focus={snapshot.view.focus}
+                selectedElementId={activeElementId}
+                reducedMotion={reducedMotion}
+                onSelectElement={(elementId, elementType) => {
+                  setSelectedElementId(elementId);
+                  setSelectedElementType(elementType);
+                }}
+              />
             ) : (
               <ProtocolIssuePanel />
             )}
@@ -304,14 +304,14 @@ export function SimulationWorkbench({
           <aside className="sim-workbench__panel sim-workbench__panel--rail" aria-label="当前阶段和操作">
             <SandboxStatus
               status={sandboxStatusFromSnapshot(snapshot, runtimeMessage)}
-              detail={`当前阶段：${snapshot.state.phase}`}
+              detail={`当前阶段：${snapshot.view.phase.title}`}
             />
             <article className="sim-explain sim-explain--focus">
               <p className="sim-workbench__stage-kicker">当前阶段</p>
-              <h2>{snapshot.state.explanation.title}</h2>
-              <p>{snapshot.state.explanation.effect}</p>
+              <h2>{snapshot.view.phase.title}</h2>
+              <p>{snapshot.view.phase.explanation.what}</p>
               <strong>为什么重要</strong>
-              <p>{snapshot.state.explanation.reason}</p>
+              <p>{snapshot.view.phase.explanation.why}</p>
             </article>
             <InteractionPanel
               interactions={descriptor.interactions}
@@ -330,6 +330,7 @@ export function SimulationWorkbench({
                     <PatternRenderer
                       key={pattern.id}
                       pattern={pattern}
+                      focus={snapshot.view.focus}
                       selectedElementId={activeElementId}
                       reducedMotion={reducedMotion}
                       onSelectElement={(elementId, elementType) => {
@@ -449,12 +450,32 @@ function sandboxStatusFromSnapshot(snapshot: RuntimeSnapshot, runtimeMessage?: s
 }
 
 /**
- * splitViewPatterns 严格按仿真包声明的 region 组织主画面和补充视图,不替仿真包猜测主视图。
+ * arrangeTeachingFrame 严格按教学画面声明组织主舞台和辅助证据,不从模式顺序推断布局。
  */
-function splitViewPatterns(patterns: PatternBinding[]): { main: PatternBinding[]; support: PatternBinding[] } {
+function arrangeTeachingFrame(view: RuntimeSnapshot['view']): { primary?: PatternBinding; support: PatternBinding[] } {
+  const byId = new Map(view.patterns.map((pattern) => [pattern.id, pattern]));
+  const primary = byId.get(view.layout.primary);
+  const supportIds = [
+    ...(view.layout.evidence ?? []),
+    ...(view.layout.timeline ? [view.layout.timeline] : []),
+    ...(view.layout.metrics ?? []),
+    ...(view.layout.trace ? [view.layout.trace] : []),
+    ...(view.layout.checkpoints ?? []),
+  ];
+  const seen = new Set<string>(primary ? [primary.id] : []);
+  const support = supportIds
+    .map((id) => byId.get(id))
+    .filter((pattern): pattern is PatternBinding => Boolean(pattern))
+    .filter((pattern) => {
+      if (seen.has(pattern.id)) {
+        return false;
+      }
+      seen.add(pattern.id);
+      return true;
+    });
   return {
-    main: patterns.filter((pattern) => pattern.region === 'main'),
-    support: patterns.filter((pattern) => pattern.region !== 'main'),
+    primary,
+    support,
   };
 }
 

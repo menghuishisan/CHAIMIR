@@ -63,6 +63,7 @@ var dangerousBundlePatterns = []struct {
 const simPackageManifestName = "sim-package.json"
 
 var allowedPatternModes = map[string]struct{}{"graph": {}, "chain": {}, "tree": {}, "matrix": {}, "pipeline": {}, "lane": {}, "chart": {}}
+var allowedRenderPatternRoles = map[string]struct{}{"primary": {}, "evidence": {}, "timeline": {}, "metrics": {}, "trace": {}, "checkpoints": {}}
 
 // bundleManifest 保存后端可审核的自描述协议摘要,不承载可执行函数正文。
 type bundleManifest struct {
@@ -123,16 +124,17 @@ type simFieldOption struct {
 	Value any    `json:"value"`
 }
 
-// simRenderManifest 只保留封闭可视化模式声明,不包含执行期渲染函数。
+// simRenderManifest 只保留 TeachingFrame 静态审核声明,不包含执行期渲染函数。
 type simRenderManifest struct {
+	Protocol string              `json:"protocol"`
 	Patterns []simPatternBinding `json:"patterns"`
 }
 
-// simPatternBinding 声明一个受控渲染模式和布局区域。
+// simPatternBinding 声明一个受控渲染模式及其可承担的教学职责。
 type simPatternBinding struct {
-	Mode   string         `json:"mode"`
-	Region string         `json:"region,omitempty"`
-	Config map[string]any `json:"config,omitempty"`
+	ID    string   `json:"id"`
+	Mode  string   `json:"mode"`
+	Roles []string `json:"roles,omitempty"`
 }
 
 // simCodeTraceManifest 保存代码追踪配置,后端只提取审核摘要不保存源码正文。
@@ -289,18 +291,46 @@ func buildBundleManifest(doc simPackageManifest) (bundleManifest, []string) {
 		}
 		schema.Events[emits] = event
 	}
-	if len(doc.Render.Patterns) == 0 || len(doc.Render.Patterns) > 3 {
-		findings = append(findings, "manifest:render-pattern-count")
-	}
-	for _, pattern := range doc.Render.Patterns {
-		if _, ok := allowedPatternModes[strings.TrimSpace(pattern.Mode)]; !ok {
-			findings = append(findings, "manifest:render-mode-invalid")
-		}
-	}
+	findings = append(findings, renderManifestFindings(doc.Render)...)
 	trace, traceFindings := codeTraceAuditFromManifest(doc.CodeTrace)
 	findings = append(findings, traceFindings...)
 	findings = append(findings, checkpointFindingsFromManifest(doc.Checkpoints)...)
 	return bundleManifest{Meta: doc.Meta, InteractionSchema: normalizeInteractionSchema(schema), CodeTrace: trace}, findings
+}
+
+// renderManifestFindings 校验 TeachingFrame 的静态渲染声明。
+func renderManifestFindings(render simRenderManifest) []string {
+	findings := []string{}
+	if strings.TrimSpace(render.Protocol) != "teaching-frame" {
+		findings = append(findings, "manifest:render-protocol-invalid")
+	}
+	if len(render.Patterns) == 0 || len(render.Patterns) > 3 {
+		findings = append(findings, "manifest:render-pattern-count")
+		return findings
+	}
+	seen := map[string]struct{}{}
+	for _, pattern := range render.Patterns {
+		id := strings.TrimSpace(pattern.ID)
+		if !payloadKeyPattern.MatchString(id) {
+			findings = append(findings, "manifest:render-pattern-id-invalid")
+		}
+		if _, exists := seen[id]; exists {
+			findings = append(findings, "manifest:render-pattern-duplicate")
+		}
+		seen[id] = struct{}{}
+		if _, ok := allowedPatternModes[strings.TrimSpace(pattern.Mode)]; !ok {
+			findings = append(findings, "manifest:render-mode-invalid")
+		}
+		if len(pattern.Roles) == 0 {
+			findings = append(findings, "manifest:render-pattern-role-empty")
+		}
+		for _, role := range pattern.Roles {
+			if _, ok := allowedRenderPatternRoles[strings.TrimSpace(role)]; !ok {
+				findings = append(findings, "manifest:render-pattern-role-invalid")
+			}
+		}
+	}
+	return findings
 }
 
 // interactionSchemaFromManifest 校验单个交互声明并生成事件白名单。

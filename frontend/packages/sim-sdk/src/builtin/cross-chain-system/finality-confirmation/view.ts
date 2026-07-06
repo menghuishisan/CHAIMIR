@@ -1,16 +1,37 @@
 // 本文件把跨链最终性状态转换为检查矩阵和最终性流程。
 
-import type { MatrixCell, ViewSpec } from '../../../types';
-import { matrixPattern, pipelinePattern } from '../../packageTools';
+import type { MatrixCell, TeachingFrame } from '../../../types';
+import { teachingFrame, matrixPattern, pipelinePattern, selectedOrFrameFocus } from '../../packageTools';
 import { matrixCells, pipelineSteps } from '../crossChainView';
 import { finalityPhases, type FinalityState } from './model';
 
 /**
  * renderFinalityView 基于内核状态生成最终性确认可视化。
  */
-export function renderFinalityView(state: FinalityState): ViewSpec {
+export function renderFinalityView(state: FinalityState): TeachingFrame {
   const remaining = Math.max(0, state.requiredConfirmations - state.confirmations);
-  return { summary: `确认数 ${state.confirmations}/${state.requiredConfirmations},还差 ${remaining},最终性证明${state.finalityProof ? '已提交' : '等待'},重组风险${state.reorgDetected ? '已触发' : '未触发'},释放${state.released ? '完成' : '未完成'}。`, patterns: [matrixPattern('finality-matrix', '最终性阈值与重组风险检查', ['确认阈值', '最终性证明', '重组风险', '释放动作'], ['结果'], finalityCells(state), 'main'), pipelinePattern('finality-pipeline', '确认累积 -> 最终性证明 -> 释放流程', pipelineSteps(finalityPhases, state.phaseIndex, state.reorgDetected), finalityPhases[state.phaseIndex].id, 'bottom')] };
+    const summary = `确认数 ${state.confirmations}/${state.requiredConfirmations},还差 ${remaining},最终性证明${state.finalityProof ? '已提交' : '等待'},重组风险${state.reorgDetected ? '已触发' : '未触发'},释放${state.released ? '完成' : '未完成'}。`;
+  const patterns = [matrixPattern('finality-matrix', '最终性阈值与重组风险检查', ['确认阈值', '最终性证明', '重组风险', '释放动作'], ['结果'], finalityCells(state)), pipelinePattern('finality-pipeline', '确认累积 -> 最终性证明 -> 释放流程', pipelineSteps(finalityPhases, state.phaseIndex, state.reorgDetected), finalityPhases[state.phaseIndex].id)];
+  return teachingFrame({
+    summary,
+    phase: {
+      id: state.phase,
+      title: state.explanation.title,
+      intent: 'observe',
+      what: state.explanation.effect,
+      why: state.explanation.reason,
+      watch: summary,
+    },
+    focus: {
+      primary: selectedOrFrameFocus(state.selectedElementId, ['finality-pipeline']),
+      secondary: ['finality-matrix'],
+    },
+    layout: {
+      primary: 'finality-pipeline',
+      evidence: ['finality-matrix'],
+    },
+    patterns,
+  });
 }
 
 /**

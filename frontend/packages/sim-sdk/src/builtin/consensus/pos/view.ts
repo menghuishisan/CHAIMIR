@@ -1,7 +1,7 @@
 // 本文件把 PoS 内核状态映射为封闭可视化模式。
 
-import type { MatrixCell, ViewSpec } from '../../../types';
-import { graphPattern, lanePattern, matrixPattern } from '../../packageTools';
+import type { MatrixCell, TeachingFrame } from '../../../types';
+import { teachingFrame, graphPattern, lanePattern, matrixPattern, selectedOrFrameFocus } from '../../packageTools';
 import { graphEdges, graphNodes, laneMessages, voteCells, type ViewNode } from '../consensusView';
 import { activeStake, attestedStake, labelPosValidator } from './kernel';
 import type { PosState } from './model';
@@ -9,18 +9,37 @@ import type { PosState } from './model';
 /**
  * renderPosView 输出验证者网络、权益见证矩阵和消息泳道。
  */
-export function renderPosView(state: PosState): ViewSpec {
+export function renderPosView(state: PosState): TeachingFrame {
   const totalStake = activeStake(state);
   const signedStake = attestedStake(state);
   const slashed = state.validators.filter((validator) => validator.slashed).length;
-  return {
-    summary: `Slot ${state.slot},Epoch ${state.epoch},见证权益 ${signedStake}/${totalStake},委员会 ${state.committee.length} 人,罚没 ${slashed} 人,最终确定 Epoch ${state.finalizedEpoch}。`,
-    patterns: [
-      graphPattern('pos-graph', `验证者权益网络,已见证 ${signedStake}/${totalStake}`, validatorNodes(state), graphEdges(state.messages), 'main'),
-      matrixPattern('pos-matrix', '权益加权见证矩阵', state.validators.map((validator) => validator.label), ['权益权重', '职责', '见证签名', '罚没证据'], posCells(state), 'side'),
-      lanePattern('pos-lane', 'PoS 提议与见证消息时序', state.validators.map((validator) => validator.label), laneMessages(state.messages, (id) => labelPosValidator(state, id)), state.tick, 'bottom'),
-    ],
-  };
+    const summary = `Slot ${state.slot},Epoch ${state.epoch},见证权益 ${signedStake}/${totalStake},委员会 ${state.committee.length} 人,罚没 ${slashed} 人,最终确定 Epoch ${state.finalizedEpoch}。`;
+  const patterns = [
+      graphPattern('pos-graph', `验证者权益网络,已见证 ${signedStake}/${totalStake}`, validatorNodes(state), graphEdges(state.messages)),
+      matrixPattern('pos-matrix', '权益加权见证矩阵', state.validators.map((validator) => validator.label), ['权益权重', '职责', '见证签名', '罚没证据'], posCells(state)),
+      lanePattern('pos-lane', 'PoS 提议与见证消息时序', state.validators.map((validator) => validator.label), laneMessages(state.messages, (id) => labelPosValidator(state, id)), state.tick),
+    ];
+  return teachingFrame({
+    summary,
+    phase: {
+      id: state.phase,
+      title: state.explanation.title,
+      intent: 'observe',
+      what: state.explanation.effect,
+      why: state.explanation.reason,
+      watch: summary,
+    },
+    focus: {
+      primary: selectedOrFrameFocus(state.selectedElementId, ['pos-matrix']),
+      secondary: ['pos-graph', 'pos-lane'],
+    },
+    layout: {
+      primary: 'pos-matrix',
+      evidence: ['pos-graph'],
+      timeline: 'pos-lane',
+    },
+    patterns,
+  });
 }
 
 /**

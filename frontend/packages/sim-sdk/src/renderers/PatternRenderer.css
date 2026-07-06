@@ -145,6 +145,42 @@
   font-weight: 700;
 }
 
+.is-focus {
+  z-index: 12;
+}
+
+.is-focus:is(.sim-graph__node, .sim-chain__block, .sim-tree__node, .sim-matrix__cell, .sim-pipeline__step, .sim-lane__message),
+.sim-graph__edge-group.is-focus .sim-graph__edge {
+  filter: drop-shadow(0 0 0.75rem color-mix(in srgb, var(--sim-pattern-accent) 58%, transparent));
+}
+
+.is-context:is(.sim-graph__node, .sim-chain__block, .sim-tree__node, .sim-matrix__cell, .sim-pipeline__step, .sim-lane__message),
+.sim-graph__edge-group.is-context .sim-graph__edge {
+  opacity: 0.88;
+}
+
+.is-muted:is(.sim-graph__node, .sim-chain__block, .sim-tree__node, .sim-matrix__cell, .sim-pipeline__step, .sim-lane__message),
+.is-history:is(.sim-graph__node, .sim-chain__block, .sim-tree__node, .sim-matrix__cell, .sim-pipeline__step, .sim-lane__message),
+.is-archived:is(.sim-graph__node, .sim-chain__block, .sim-tree__node, .sim-matrix__cell, .sim-pipeline__step, .sim-lane__message),
+.sim-graph__edge-group.is-muted,
+.sim-graph__edge-group.is-history,
+.sim-graph__edge-group.is-archived {
+  opacity: 0.42;
+}
+
+.is-ghost:is(.sim-graph__node, .sim-chain__block, .sim-tree__node, .sim-matrix__cell, .sim-pipeline__step, .sim-lane__message),
+.is-leaving:is(.sim-graph__node, .sim-chain__block, .sim-tree__node, .sim-matrix__cell, .sim-pipeline__step, .sim-lane__message),
+.sim-graph__edge-group.is-ghost,
+.sim-graph__edge-group.is-leaving {
+  opacity: 0.24;
+  filter: grayscale(0.35);
+}
+
+.is-entering:is(.sim-graph__node, .sim-chain__block, .sim-tree__node, .sim-matrix__cell, .sim-pipeline__step, .sim-lane__message),
+.sim-graph__edge-group.is-entering {
+  animation: sim-pattern-enter var(--t-slow) var(--ease-out) both;
+}
+
 .sim-graph-container {
   margin: var(--space-2) var(--space-4) var(--space-3);
   width: calc(100% - var(--space-4) * 2);

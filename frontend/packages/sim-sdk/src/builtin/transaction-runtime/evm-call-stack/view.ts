@@ -1,17 +1,39 @@
 // 本文件把 EVM 调用栈状态转换为调用图、调用时序和栈帧矩阵。
 
-import type { MatrixCell, ViewSpec } from '../../../types';
-import { graphPattern, lanePattern, matrixPattern } from '../../packageTools';
+import type { MatrixCell, TeachingFrame } from '../../../types';
+import { teachingFrame, graphPattern, lanePattern, matrixPattern, selectedOrFrameFocus } from '../../packageTools';
 import { graphEdges, graphNodes, laneMessages, matrixCells } from '../runtimeView';
 import type { CallStackState } from './model';
 
 /**
  * renderCallStackView 基于内核状态生成 EVM 调用栈可视化。
  */
-export function renderCallStackView(state: CallStackState): ViewSpec {
+export function renderCallStackView(state: CallStackState): TeachingFrame {
   const activeDepth = state.frames.filter((frame) => !frame.returned).length;
   const reverted = state.frames.filter((frame) => frame.reverted).length;
-  return { summary: `活跃栈深 ${activeDepth}/${state.maxDepth},栈帧 ${state.frames.length},回滚失败帧 ${reverted}。`, patterns: [graphPattern('call-stack-graph', 'EVM 合约调用依赖图', graphNodes(state.actors), graphEdges(state.messages), 'main'), lanePattern('call-stack-lane', 'CALL / RETURN / REVERT 栈时序', state.actors.map((actor) => actor.label), laneMessages(state.messages, (id) => labelOf(state, id)), state.tick, 'side'), matrixPattern('call-stack-matrix', '调用栈帧深度与回滚矩阵', state.frames.map((frame) => frame.id), ['合约', '深度', '返回', '回滚失败'], stackCells(state), 'bottom')] };
+    const summary = `活跃栈深 ${activeDepth}/${state.maxDepth},栈帧 ${state.frames.length},回滚失败帧 ${reverted}。`;
+  const patterns = [graphPattern('call-stack-graph', 'EVM 合约调用依赖图', graphNodes(state.actors), graphEdges(state.messages)), lanePattern('call-stack-lane', 'CALL / RETURN / REVERT 栈时序', state.actors.map((actor) => actor.label), laneMessages(state.messages, (id) => labelOf(state, id)), state.tick), matrixPattern('call-stack-matrix', '调用栈帧深度与回滚矩阵', state.frames.map((frame) => frame.id), ['合约', '深度', '返回', '回滚失败'], stackCells(state))];
+  return teachingFrame({
+    summary,
+    phase: {
+      id: state.phase,
+      title: state.explanation.title,
+      intent: 'observe',
+      what: state.explanation.effect,
+      why: state.explanation.reason,
+      watch: summary,
+    },
+    focus: {
+      primary: selectedOrFrameFocus(state.selectedElementId, ['call-stack-graph']),
+      secondary: ['call-stack-lane', 'call-stack-matrix'],
+    },
+    layout: {
+      primary: 'call-stack-graph',
+      evidence: ['call-stack-matrix'],
+      timeline: 'call-stack-lane',
+    },
+    patterns,
+  });
 }
 
 /**

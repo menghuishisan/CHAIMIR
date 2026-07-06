@@ -1,16 +1,37 @@
 // 本文件把跨链重放防护状态转换为字段矩阵和防护流程。
 
-import type { MatrixCell, ViewSpec } from '../../../types';
-import { matrixPattern, pipelinePattern } from '../../packageTools';
+import type { MatrixCell, TeachingFrame } from '../../../types';
+import { teachingFrame, matrixPattern, pipelinePattern, selectedOrFrameFocus } from '../../packageTools';
 import { matrixCells, pipelineSteps } from '../crossChainView';
 import { replayPhases, type ReplayState } from './model';
 
 /**
  * renderReplayView 基于内核状态生成重放防护可视化。
  */
-export function renderReplayView(state: ReplayState): ViewSpec {
+export function renderReplayView(state: ReplayState): TeachingFrame {
   const nonceSeen = state.executedNonces.includes(state.nonce);
-  return { summary: `Domain ${state.domain},Nonce ${state.nonce},历史命中${nonceSeen ? '是' : '否'},状态 ${state.accepted ? '接受' : state.replayAttempt ? '拒绝重放' : '等待'}。`, patterns: [matrixPattern('replay-matrix', 'Domain + Nonce + MessageHash 防重放键', ['Domain', 'Nonce', '已执行集合', '消息哈希'], ['结果'], replayCells(state), 'main'), pipelinePattern('replay-pipeline', '构造唯一键 -> 查重 -> 记录执行流程', pipelineSteps(replayPhases, state.phaseIndex, state.replayAttempt), replayPhases[state.phaseIndex].id, 'bottom')] };
+    const summary = `Domain ${state.domain},Nonce ${state.nonce},历史命中${nonceSeen ? '是' : '否'},状态 ${state.accepted ? '接受' : state.replayAttempt ? '拒绝重放' : '等待'}。`;
+  const patterns = [matrixPattern('replay-matrix', 'Domain + Nonce + MessageHash 防重放键', ['Domain', 'Nonce', '已执行集合', '消息哈希'], ['结果'], replayCells(state)), pipelinePattern('replay-pipeline', '构造唯一键 -> 查重 -> 记录执行流程', pipelineSteps(replayPhases, state.phaseIndex, state.replayAttempt), replayPhases[state.phaseIndex].id)];
+  return teachingFrame({
+    summary,
+    phase: {
+      id: state.phase,
+      title: state.explanation.title,
+      intent: 'observe',
+      what: state.explanation.effect,
+      why: state.explanation.reason,
+      watch: summary,
+    },
+    focus: {
+      primary: selectedOrFrameFocus(state.selectedElementId, ['replay-pipeline']),
+      secondary: ['replay-matrix'],
+    },
+    layout: {
+      primary: 'replay-pipeline',
+      evidence: ['replay-matrix'],
+    },
+    patterns,
+  });
 }
 
 /**

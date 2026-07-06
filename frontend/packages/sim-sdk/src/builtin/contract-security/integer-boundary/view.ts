@@ -1,16 +1,37 @@
 // 本文件把整数边界状态转换为边界用例矩阵和安全流程。
 
-import type { MatrixCell, ViewSpec } from '../../../types';
-import { matrixPattern, pipelinePattern } from '../../packageTools';
+import type { MatrixCell, TeachingFrame } from '../../../types';
+import { teachingFrame, matrixPattern, pipelinePattern, selectedOrFrameFocus } from '../../packageTools';
 import { matrixCells, pipelineSteps } from '../securityView';
 import { integerPhases, type IntegerBoundaryState } from './model';
 
 /**
  * renderIntegerView 基于内核状态生成整数边界可视化。
  */
-export function renderIntegerView(state: IntegerBoundaryState): ViewSpec {
+export function renderIntegerView(state: IntegerBoundaryState): TeachingFrame {
   const overflowCases = state.cases.filter((item) => item.input > state.maxValue).length;
-  return { summary: `最大值 ${state.maxValue},越界输入 ${overflowCases} 个,溢出检查${state.checkedMath ? '已启用' : '未启用'},失败用例 ${state.cases.filter((item) => item.failed).length} 个。`, patterns: [matrixPattern('integer-matrix', '整数边界与溢出结果矩阵', state.cases.map((item) => item.label), ['输入范围', '计算结果', 'checked math', '执行状态'], integerCells(state), 'main'), pipelinePattern('integer-pipeline', '边界检查 -> 计算 -> 回滚流程', pipelineSteps(integerPhases, state.phaseIndex, state.cases.some((item) => item.failed)), integerPhases[state.phaseIndex].id, 'bottom')] };
+    const summary = `最大值 ${state.maxValue},越界输入 ${overflowCases} 个,溢出检查${state.checkedMath ? '已启用' : '未启用'},失败用例 ${state.cases.filter((item) => item.failed).length} 个。`;
+  const patterns = [matrixPattern('integer-matrix', '整数边界与溢出结果矩阵', state.cases.map((item) => item.label), ['输入范围', '计算结果', 'checked math', '执行状态'], integerCells(state)), pipelinePattern('integer-pipeline', '边界检查 -> 计算 -> 回滚流程', pipelineSteps(integerPhases, state.phaseIndex, state.cases.some((item) => item.failed)), integerPhases[state.phaseIndex].id)];
+  return teachingFrame({
+    summary,
+    phase: {
+      id: state.phase,
+      title: state.explanation.title,
+      intent: 'observe',
+      what: state.explanation.effect,
+      why: state.explanation.reason,
+      watch: summary,
+    },
+    focus: {
+      primary: selectedOrFrameFocus(state.selectedElementId, ['integer-pipeline']),
+      secondary: ['integer-matrix'],
+    },
+    layout: {
+      primary: 'integer-pipeline',
+      evidence: ['integer-matrix'],
+    },
+    patterns,
+  });
 }
 
 /**

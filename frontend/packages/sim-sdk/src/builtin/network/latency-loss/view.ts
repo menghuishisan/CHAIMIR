@@ -1,7 +1,7 @@
 // 本文件把延迟丢包内核状态映射为封闭可视化模式。
 
-import type { MatrixCell, ViewSpec } from '../../../types';
-import { chartPattern, lanePattern, matrixPattern } from '../../packageTools';
+import type { MatrixCell, TeachingFrame } from '../../../types';
+import { teachingFrame, chartPattern, lanePattern, matrixPattern, selectedOrFrameFocus } from '../../packageTools';
 import { laneMessages, matrixCells, metricSeries } from '../networkView';
 import { averageLatency, deliveredCount } from './kernel';
 import type { LatencyLossState } from './model';
@@ -9,16 +9,35 @@ import type { LatencyLossState } from './model';
 /**
  * renderLatencyLossView 输出数据包时序、包状态矩阵和传输趋势。
  */
-export function renderLatencyLossView(state: LatencyLossState): ViewSpec {
+export function renderLatencyLossView(state: LatencyLossState): TeachingFrame {
   const dropped = state.packets.filter((packet) => packet.dropped).length;
-  return {
-    summary: `拥塞窗口 ${state.congestionWindow},已送达 ${deliveredCount(state)}/${state.packets.length},丢包 ${dropped},平均延迟 ${averageLatency(state)}ms。`,
-    patterns: [
-      lanePattern('loss-lane', '数据包发送、ACK 与重传时序', ['发送端', '接收端'], laneMessages(state.messages, labelOf), state.tick, 'main'),
-      matrixPattern('loss-matrix', '包级 ACK / 丢包 / 重试矩阵', state.packets.map((packet) => `包 ${packet.seq}`), ['发送', 'ACK', '丢包', '重试'], packetCells(state), 'side'),
-      chartPattern('loss-chart', '吞吐覆盖率 / 风险 / 延迟趋势', metricSeries(state.samples), '%', 'bottom'),
-    ],
-  };
+    const summary = `拥塞窗口 ${state.congestionWindow},已送达 ${deliveredCount(state)}/${state.packets.length},丢包 ${dropped},平均延迟 ${averageLatency(state)}ms。`;
+  const patterns = [
+      lanePattern('loss-lane', '数据包发送、ACK 与重传时序', ['发送端', '接收端'], laneMessages(state.messages, labelOf), state.tick),
+      matrixPattern('loss-matrix', '包级 ACK / 丢包 / 重试矩阵', state.packets.map((packet) => `包 ${packet.seq}`), ['发送', 'ACK', '丢包', '重试'], packetCells(state)),
+      chartPattern('loss-chart', '吞吐覆盖率 / 风险 / 延迟趋势', metricSeries(state.samples), '%'),
+    ];
+  return teachingFrame({
+    summary,
+    phase: {
+      id: state.phase,
+      title: state.explanation.title,
+      intent: 'observe',
+      what: state.explanation.effect,
+      why: state.explanation.reason,
+      watch: summary,
+    },
+    focus: {
+      primary: selectedOrFrameFocus(state.selectedElementId, ['loss-lane']),
+      secondary: ['loss-matrix', 'loss-chart'],
+    },
+    layout: {
+      primary: 'loss-lane',
+      evidence: ['loss-matrix'],
+      metrics: ['loss-chart'],
+    },
+    patterns,
+  });
 }
 
 /**

@@ -1,16 +1,37 @@
 // 本文件把授权缺陷状态转换为权限图、权限矩阵和流程可视化。
 
-import type { MatrixCell, ViewSpec } from '../../../types';
-import { graphPattern, matrixPattern, pipelinePattern } from '../../packageTools';
+import type { MatrixCell, TeachingFrame } from '../../../types';
+import { teachingFrame, graphPattern, matrixPattern, pipelinePattern, selectedOrFrameFocus } from '../../packageTools';
 import { graphEdges, graphNodes, matrixCells, pipelineSteps } from '../securityView';
 import { accessPhases, type AccessState } from './model';
 
 /**
  * renderAccessView 基于内核状态生成授权缺陷可视化。
  */
-export function renderAccessView(state: AccessState): ViewSpec {
+export function renderAccessView(state: AccessState): TeachingFrame {
   const exposedActors = state.actors.filter((actor) => actor.id !== 'admin' && !state.protectedFunction).length;
-  return { summary: `敏感函数${state.protectedFunction ? '已保护' : '未保护'},越权面 ${exposedActors} 个账户,越权${state.unauthorizedExecuted ? '已发生' : '未发生'},审计${state.auditLogged ? '已记录' : '未记录'}。`, patterns: [graphPattern('access-graph', '账户角色到敏感函数的调用边界', graphNodes(state.actors), graphEdges(state.calls), 'main'), matrixPattern('access-matrix', 'RBAC 权限矩阵与审计闭环', state.actors.map((actor) => actor.label), ['角色', '敏感函数可调用', '审计记录'], accessCells(state), 'side'), pipelinePattern('access-pipeline', '授权检查 -> 执行 -> 审计流程', pipelineSteps(accessPhases, state.phaseIndex, state.unauthorizedExecuted), accessPhases[state.phaseIndex].id, 'bottom')] };
+    const summary = `敏感函数${state.protectedFunction ? '已保护' : '未保护'},越权面 ${exposedActors} 个账户,越权${state.unauthorizedExecuted ? '已发生' : '未发生'},审计${state.auditLogged ? '已记录' : '未记录'}。`;
+  const patterns = [graphPattern('access-graph', '账户角色到敏感函数的调用边界', graphNodes(state.actors), graphEdges(state.calls)), matrixPattern('access-matrix', 'RBAC 权限矩阵与审计闭环', state.actors.map((actor) => actor.label), ['角色', '敏感函数可调用', '审计记录'], accessCells(state)), pipelinePattern('access-pipeline', '授权检查 -> 执行 -> 审计流程', pipelineSteps(accessPhases, state.phaseIndex, state.unauthorizedExecuted), accessPhases[state.phaseIndex].id)];
+  return teachingFrame({
+    summary,
+    phase: {
+      id: state.phase,
+      title: state.explanation.title,
+      intent: 'observe',
+      what: state.explanation.effect,
+      why: state.explanation.reason,
+      watch: summary,
+    },
+    focus: {
+      primary: selectedOrFrameFocus(state.selectedElementId, ['access-graph']),
+      secondary: ['access-matrix', 'access-pipeline'],
+    },
+    layout: {
+      primary: 'access-graph',
+      evidence: ['access-matrix', 'access-pipeline'],
+    },
+    patterns,
+  });
 }
 
 /**

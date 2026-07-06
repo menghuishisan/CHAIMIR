@@ -13,8 +13,8 @@ import type {
   SimPackage,
   SimPackageDescriptor,
   SimState,
+  TeachingFrame,
   TreeNode,
-  ViewSpec,
 } from '../types';
 import { fnv1aHex, hashSeed, XorShiftRandom } from './deterministic';
 import { getBuiltinSimulation } from '../registry/builtinRegistry';
@@ -468,10 +468,31 @@ function enforceEventLimit(eventInput: Omit<SimEvent, 'seq' | 'atTick'>): void {
 /**
  * enforceViewLimit 执行封闭模式数量和节点规模约束,防止仿真包撑破渲染器。
  */
-function enforceViewLimit(view: ViewSpec): void {
+function enforceViewLimit(view: TeachingFrame): void {
   const pkg = readyPackage();
   if (view.patterns.length < 1 || view.patterns.length > 3) {
     throw new Error('仿真视图数量超过限制，请调整场景规模');
+  }
+  if (!view.summary || !view.phase?.id || !view.phase.title || !view.layout?.primary || !view.focus?.primary?.length) {
+    throw new Error('仿真教学画面缺少阶段、焦点或主视图声明');
+  }
+  const patternIds = new Set<string>();
+  for (const pattern of view.patterns) {
+    if (patternIds.has(pattern.id)) {
+      throw new Error('仿真教学画面包含重复视图');
+    }
+    patternIds.add(pattern.id);
+  }
+  const layoutIds = layoutPatternIds(view);
+  for (const id of layoutIds) {
+    if (!patternIds.has(id)) {
+      throw new Error('仿真教学画面引用了不存在的视图');
+    }
+  }
+  for (const pattern of view.patterns) {
+    if (!layoutIds.has(pattern.id)) {
+      throw new Error('仿真教学画面存在未声明职责的视图');
+    }
   }
   if (countRenderableNodes(view) > pkg.meta.scaleLimit.nodes) {
     throw new Error('仿真节点数量超过限制，请调整场景规模');
@@ -479,9 +500,25 @@ function enforceViewLimit(view: ViewSpec): void {
 }
 
 /**
+ * layoutPatternIds 汇总 TeachingFrame 布局显式引用的模式 ID。
+ */
+function layoutPatternIds(view: TeachingFrame): Set<string> {
+  return new Set(
+    [
+      view.layout.primary,
+      ...(view.layout.evidence ?? []),
+      ...(view.layout.timeline ? [view.layout.timeline] : []),
+      ...(view.layout.metrics ?? []),
+      ...(view.layout.trace ? [view.layout.trace] : []),
+      ...(view.layout.checkpoints ?? []),
+    ].filter(Boolean)
+  );
+}
+
+/**
  * countRenderableNodes 统计所有封闭模式中的可渲染元素数量。
  */
-function countRenderableNodes(view: ViewSpec): number {
+function countRenderableNodes(view: TeachingFrame): number {
   return view.patterns.reduce((total, pattern) => {
     if (pattern.mode === 'graph') {
       return total + pattern.data.nodes.length;

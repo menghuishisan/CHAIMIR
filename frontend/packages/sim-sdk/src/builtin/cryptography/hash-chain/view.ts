@@ -1,24 +1,42 @@
 // 本文件把哈希链内核状态映射为封闭可视化模式,不包含状态迁移逻辑。
 
-import type { ChainBlock, MatrixCell, ViewSpec } from '../../../types';
-import { chainPattern, matrixPattern, pipelinePattern } from '../../packageTools';
+import type { ChainBlock, MatrixCell, TeachingFrame } from '../../../types';
+import { teachingFrame, chainPattern, matrixPattern, pipelinePattern, selectedOrFrameFocus } from '../../packageTools';
 import { matrixCells, pipelineSteps } from '../cryptoView';
 import { hashChainPhases, type HashChainState } from './model';
 
 /**
  * renderHashChainView 输出哈希链、校验矩阵和验证流程。
  */
-export function renderHashChainView(state: HashChainState): ViewSpec {
+export function renderHashChainView(state: HashChainState): TeachingFrame {
   const failed = state.records.some((record) => !record.valid);
   const firstInvalid = state.records.find((record) => !record.valid);
-  return {
-    summary: `当前阶段 ${state.phase},链长 ${state.records.length},无效记录 ${state.records.filter((record) => !record.valid).length} 条,首个断点 ${firstInvalid ? `记录 ${firstInvalid.index}` : '无'}。`,
-    patterns: [
-      chainPattern('hash-chain', '哈希链父摘要连续性', chainBlocks(state), [], 'main'),
-      matrixPattern('hash-matrix', '逐记录父哈希与摘要校验矩阵', state.records.map((record) => `记录 ${record.index}`), ['载荷', '父哈希', '摘要'], hashCells(state), 'side'),
-      pipelinePattern('hash-pipeline', '重算摘要 -> 比对父哈希 -> 定位篡改流程', pipelineSteps([...hashChainPhases], state.phaseIndex, failed), hashChainPhases[state.phaseIndex].id, 'bottom'),
-    ],
-  };
+    const summary = `当前阶段 ${state.phase},链长 ${state.records.length},无效记录 ${state.records.filter((record) => !record.valid).length} 条,首个断点 ${firstInvalid ? `记录 ${firstInvalid.index}` : '无'}。`;
+  const patterns = [
+      chainPattern('hash-chain', '哈希链父摘要连续性', chainBlocks(state), []),
+      matrixPattern('hash-matrix', '逐记录父哈希与摘要校验矩阵', state.records.map((record) => `记录 ${record.index}`), ['载荷', '父哈希', '摘要'], hashCells(state)),
+      pipelinePattern('hash-pipeline', '重算摘要 -> 比对父哈希 -> 定位篡改流程', pipelineSteps([...hashChainPhases], state.phaseIndex, failed), hashChainPhases[state.phaseIndex].id),
+    ];
+  return teachingFrame({
+    summary,
+    phase: {
+      id: state.phase,
+      title: state.explanation.title,
+      intent: 'observe',
+      what: state.explanation.effect,
+      why: state.explanation.reason,
+      watch: summary,
+    },
+    focus: {
+      primary: selectedOrFrameFocus(state.selectedElementId, ['hash-chain']),
+      secondary: ['hash-matrix', 'hash-pipeline'],
+    },
+    layout: {
+      primary: 'hash-chain',
+      evidence: ['hash-matrix', 'hash-pipeline'],
+    },
+    patterns,
+  });
 }
 
 /**

@@ -1,7 +1,7 @@
 // 本文件把 Merkle Tree 状态转换为树、矩阵和流程三种语义可视化。
 
-import type { MatrixCell, TreeNode, ViewSpec } from '../../../types';
-import { matrixPattern, pipelinePattern, treePattern } from '../../packageTools';
+import type { MatrixCell, TreeNode, TeachingFrame } from '../../../types';
+import { teachingFrame, matrixPattern, pipelinePattern, treePattern, selectedOrFrameFocus } from '../../packageTools';
 import { matrixCells, pipelineSteps } from '../dataView';
 import { merkleStructureParentHash } from '../dataPrimitives';
 import { merkleTreePhases, type MerkleTreeState } from './model';
@@ -9,9 +9,30 @@ import { merkleTreePhases, type MerkleTreeState } from './model';
 /**
  * renderMerkleTreeView 基于内核状态生成 Merkle Tree 可视化。
  */
-export function renderMerkleTreeView(state: MerkleTreeState): ViewSpec {
+export function renderMerkleTreeView(state: MerkleTreeState): TeachingFrame {
   const dirtyLeaf = state.items.find((item) => item.id === state.dirtyLeafId);
-  return { summary: `根摘要 ${state.rootHash.slice(0, 8)},叶子 ${state.items.length} 个,更新叶子 ${dirtyLeaf?.label ?? '无'},重算路径 ${state.proofPath.length} 层。`, patterns: [treePattern('merkle-structure-tree', 'Merkle Tree 自底向上重算路径', treeRoot(state), state.proofPath, 'main'), matrixPattern('merkle-structure-matrix', '叶子哈希与脏写传播矩阵', state.items.map((item) => item.label), ['值', '叶子哈希', '是否触发重算'], merkleCells(state), 'side'), pipelinePattern('merkle-structure-pipeline', '叶子更新 -> 父节点重算 -> 根摘要更新流程', pipelineSteps(merkleTreePhases, state.phaseIndex, Boolean(state.dirtyLeafId)), merkleTreePhases[state.phaseIndex].id, 'bottom')] };
+    const summary = `根摘要 ${state.rootHash.slice(0, 8)},叶子 ${state.items.length} 个,更新叶子 ${dirtyLeaf?.label ?? '无'},重算路径 ${state.proofPath.length} 层。`;
+  const patterns = [treePattern('merkle-structure-tree', 'Merkle Tree 自底向上重算路径', treeRoot(state), state.proofPath), matrixPattern('merkle-structure-matrix', '叶子哈希与脏写传播矩阵', state.items.map((item) => item.label), ['值', '叶子哈希', '是否触发重算'], merkleCells(state)), pipelinePattern('merkle-structure-pipeline', '叶子更新 -> 父节点重算 -> 根摘要更新流程', pipelineSteps(merkleTreePhases, state.phaseIndex, Boolean(state.dirtyLeafId)), merkleTreePhases[state.phaseIndex].id)];
+  return teachingFrame({
+    summary,
+    phase: {
+      id: state.phase,
+      title: state.explanation.title,
+      intent: 'observe',
+      what: state.explanation.effect,
+      why: state.explanation.reason,
+      watch: summary,
+    },
+    focus: {
+      primary: selectedOrFrameFocus(state.selectedElementId, ['merkle-structure-tree']),
+      secondary: ['merkle-structure-matrix', 'merkle-structure-pipeline'],
+    },
+    layout: {
+      primary: 'merkle-structure-tree',
+      evidence: ['merkle-structure-matrix', 'merkle-structure-pipeline'],
+    },
+    patterns,
+  });
 }
 
 /**

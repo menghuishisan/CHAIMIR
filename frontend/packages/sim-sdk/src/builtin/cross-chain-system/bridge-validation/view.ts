@@ -1,16 +1,37 @@
 // 本文件把跨链桥验证状态转换为检查矩阵和验证流程。
 
-import type { MatrixCell, ViewSpec } from '../../../types';
-import { matrixPattern, pipelinePattern } from '../../packageTools';
+import type { MatrixCell, TeachingFrame } from '../../../types';
+import { teachingFrame, matrixPattern, pipelinePattern, selectedOrFrameFocus } from '../../packageTools';
 import { matrixCells, pipelineSteps } from '../crossChainView';
 import { bridgePhases, type BridgeState } from './model';
 
 /**
  * renderBridgeView 基于内核状态生成跨链桥验证可视化。
  */
-export function renderBridgeView(state: BridgeState): ViewSpec {
+export function renderBridgeView(state: BridgeState): TeachingFrame {
   const proofMatched = state.proofHash === state.canonicalProofHash && !state.invalidProof;
-  return { summary: `提交证明 ${state.proofHash.slice(0, 8)},规范证明 ${state.canonicalProofHash.slice(0, 8)},证明${proofMatched ? '匹配' : '不匹配'},轻客户端${state.lightClientSynced ? '已同步' : '未同步'},铸造${state.minted ? '完成' : '等待'}。`, patterns: [matrixPattern('bridge-matrix', '跨链桥信任根与包含证明矩阵', ['轻客户端信任根', '锁仓包含证明', '目标链铸造', '反向赎回'], ['结果'], bridgeCells(state), 'main'), pipelinePattern('bridge-pipeline', '锁仓 -> 轻客户端同步 -> 证明验证 -> 铸造/赎回', pipelineSteps(bridgePhases, state.phaseIndex, state.invalidProof), bridgePhases[state.phaseIndex].id, 'bottom')] };
+    const summary = `提交证明 ${state.proofHash.slice(0, 8)},规范证明 ${state.canonicalProofHash.slice(0, 8)},证明${proofMatched ? '匹配' : '不匹配'},轻客户端${state.lightClientSynced ? '已同步' : '未同步'},铸造${state.minted ? '完成' : '等待'}。`;
+  const patterns = [matrixPattern('bridge-matrix', '跨链桥信任根与包含证明矩阵', ['轻客户端信任根', '锁仓包含证明', '目标链铸造', '反向赎回'], ['结果'], bridgeCells(state)), pipelinePattern('bridge-pipeline', '锁仓 -> 轻客户端同步 -> 证明验证 -> 铸造/赎回', pipelineSteps(bridgePhases, state.phaseIndex, state.invalidProof), bridgePhases[state.phaseIndex].id)];
+  return teachingFrame({
+    summary,
+    phase: {
+      id: state.phase,
+      title: state.explanation.title,
+      intent: 'observe',
+      what: state.explanation.effect,
+      why: state.explanation.reason,
+      watch: summary,
+    },
+    focus: {
+      primary: selectedOrFrameFocus(state.selectedElementId, ['bridge-pipeline']),
+      secondary: ['bridge-matrix'],
+    },
+    layout: {
+      primary: 'bridge-pipeline',
+      evidence: ['bridge-matrix'],
+    },
+    patterns,
+  });
 }
 
 /**

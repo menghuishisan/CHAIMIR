@@ -5,11 +5,15 @@ import { bridgeValidationSimulation } from './bridge-validation/package';
 import { crossChainMessageSimulation } from './cross-chain-message/package';
 import { finalityConfirmationSimulation } from './finality-confirmation/package';
 import { multisigCommitteeSimulation } from './multisig-committee/package';
+import { optimisticRollupFraudProofSimulation } from './optimistic-rollup-fraud-proof/package';
 import { replayProtectionSimulation } from './replay-protection/package';
+import { zkRollupProofVerificationSimulation } from './zk-rollup-proof-verification/package';
 
 export const crossChainSystemSimulations: SimPackage[] = [
   crossChainMessageSimulation as unknown as SimPackage,
   bridgeValidationSimulation as unknown as SimPackage,
+  optimisticRollupFraudProofSimulation as unknown as SimPackage,
+  zkRollupProofVerificationSimulation as unknown as SimPackage,
   multisigCommitteeSimulation as unknown as SimPackage,
   finalityConfirmationSimulation as unknown as SimPackage,
   replayProtectionSimulation as unknown as SimPackage,

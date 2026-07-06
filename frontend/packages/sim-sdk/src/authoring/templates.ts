@@ -1,6 +1,6 @@
 // 本文件提供开发者创建自定义仿真包的最小完整模板,避免绕过 M4 协议自行实现运行时。
 
-import type { CheckpointResult, SimEvent, SimPackage, SimState, ViewSpec } from '../types';
+import type { CheckpointResult, SimEvent, SimPackage, SimState, TeachingFrame } from '../types';
 import { defineSimPackage } from './manifest';
 
 interface DeveloperTemplateState extends SimState {
@@ -102,24 +102,38 @@ function reduceTemplateState(state: DeveloperTemplateState, event: SimEvent): De
 /**
  * renderTemplateView 把模板状态映射为单一 pipeline 封闭模式。
  */
-function renderTemplateView(state: DeveloperTemplateState): ViewSpec {
+function renderTemplateView(state: DeveloperTemplateState): TeachingFrame {
+  const pattern = {
+    id: 'template-pipeline',
+    mode: 'pipeline' as const,
+    title: '模板流程',
+    data: {
+      currentStepId: state.phase === '完成' ? 'done' : 'ready',
+      steps: [
+        { id: 'ready', label: '准备', status: state.phase === '完成' ? 'complete' as const : 'running' as const, detail: '生成初始状态' },
+        { id: 'done', label: '完成', status: state.phase === '完成' ? 'complete' as const : 'pending' as const, detail: '响应用户事件' },
+      ],
+    },
+  };
   return {
     summary: `当前阶段:${state.phase}`,
-    patterns: [
-      {
-        id: 'template-pipeline',
-        mode: 'pipeline',
-        title: '模板流程',
-        region: 'main',
-        data: {
-          currentStepId: state.phase === '完成' ? 'done' : 'ready',
-          steps: [
-            { id: 'ready', label: '准备', status: state.phase === '完成' ? 'complete' : 'running', detail: '生成初始状态' },
-            { id: 'done', label: '完成', status: state.phase === '完成' ? 'complete' : 'pending', detail: '响应用户事件' },
-          ],
-        },
+    phase: {
+      id: state.phase === '完成' ? 'done' : 'ready',
+      title: state.explanation.title,
+      intent: 'observe',
+      explanation: {
+        what: state.explanation.effect,
+        why: state.explanation.reason,
+        watch: '观察流水线当前步骤和完成状态。',
       },
-    ],
+    },
+    focus: {
+      primary: [state.phase === '完成' ? 'done' : 'ready'],
+    },
+    layout: {
+      primary: pattern.id,
+    },
+    patterns: [pattern],
   };
 }
 

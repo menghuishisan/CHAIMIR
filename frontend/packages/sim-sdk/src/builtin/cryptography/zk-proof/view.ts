@@ -1,22 +1,40 @@
 // 本文件把零知识证明内核状态映射为封闭可视化模式。
 
-import type { MatrixCell, ViewSpec } from '../../../types';
-import { graphPattern, matrixPattern, pipelinePattern } from '../../packageTools';
+import type { MatrixCell, TeachingFrame } from '../../../types';
+import { teachingFrame, graphPattern, matrixPattern, pipelinePattern, selectedOrFrameFocus } from '../../packageTools';
 import { graphEdges, graphNodes, matrixCells, pipelineSteps } from '../cryptoView';
 import { zkProofPhases, type ZkState } from './model';
 
 /**
  * renderZkProofView 输出证明者网络、约束矩阵和交互流程。
  */
-export function renderZkProofView(state: ZkState): ViewSpec {
-  return {
-    summary: `承诺 ${state.commitment.slice(0, 8)},挑战 ${state.challenge},响应 ${state.response.slice(0, 8)},作弊${state.cheating ? '尝试' : '无'},验证${state.verifierResult ? '通过' : '未通过'}。`,
-    patterns: [
-      graphPattern('zk-graph', '承诺-挑战-响应交互网络', graphNodes(state.actors), graphEdges(state.messages), 'main'),
-      matrixPattern('zk-matrix', '零知识证明约束矩阵', ['承诺绑定', '挑战随机', '响应一致', '秘密隐藏'], ['结果'], zkCells(state), 'side'),
-      pipelinePattern('zk-pipeline', 'Commit -> Challenge -> Response -> Verify 流程', pipelineSteps([...zkProofPhases], state.phaseIndex, state.cheating && state.phaseIndex >= 4), zkProofPhases[state.phaseIndex].id, 'bottom'),
-    ],
-  };
+export function renderZkProofView(state: ZkState): TeachingFrame {
+    const summary = `承诺 ${state.commitment.slice(0, 8)},挑战 ${state.challenge},响应 ${state.response.slice(0, 8)},作弊${state.cheating ? '尝试' : '无'},验证${state.verifierResult ? '通过' : '未通过'}。`;
+  const patterns = [
+      graphPattern('zk-graph', '承诺-挑战-响应交互网络', graphNodes(state.actors), graphEdges(state.messages)),
+      matrixPattern('zk-matrix', '零知识证明约束矩阵', ['承诺绑定', '挑战随机', '响应一致', '秘密隐藏'], ['结果'], zkCells(state)),
+      pipelinePattern('zk-pipeline', 'Commit -> Challenge -> Response -> Verify 流程', pipelineSteps([...zkProofPhases], state.phaseIndex, state.cheating && state.phaseIndex >= 4), zkProofPhases[state.phaseIndex].id),
+    ];
+  return teachingFrame({
+    summary,
+    phase: {
+      id: state.phase,
+      title: state.explanation.title,
+      intent: 'observe',
+      what: state.explanation.effect,
+      why: state.explanation.reason,
+      watch: summary,
+    },
+    focus: {
+      primary: selectedOrFrameFocus(state.selectedElementId, ['zk-graph']),
+      secondary: ['zk-matrix', 'zk-pipeline'],
+    },
+    layout: {
+      primary: 'zk-graph',
+      evidence: ['zk-matrix', 'zk-pipeline'],
+    },
+    patterns,
+  });
 }
 
 /**

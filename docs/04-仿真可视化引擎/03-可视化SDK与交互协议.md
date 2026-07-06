@@ -2,7 +2,7 @@
 
 > 本文是仿真包作者的开发契约 SSOT:仿真包怎么写、SDK 怎么用、交互怎么声明。
 > 面向第三方/教师扩展开发者。
-> 最后更新:2026-05-29
+> 最后更新:2026-07-06
 
 ---
 
@@ -18,7 +18,7 @@ interface SimPackage {
   initState: (params, seed) => State;        // 构造初始状态
   reducer: (state, event, tick) => State;    // 纯函数,确定性演化
   interactions: InteractionDef[];            // 声明式交互
-  render: (state) => ViewSpec;               // 用 SDK 描述画面
+  render: (state) => TeachingFrame;          // 声明当前教学画面
   narrative: NarrativeStep[];                // 教学叙事
   codeTrace: CodeTraceDef;                   // 代码追踪配置
   checkpoints: CheckpointDef[];              // 判题检查点
@@ -36,10 +36,10 @@ interface SimMeta {
 
 **硬约束**:
 - `reducer` 必须纯函数:`reducer(s,e,t)` 同输入必同输出,禁用 `Date.now()`/`Math.random()`(随机走种子 PRNG)。
-- `render` 只能用 SDK 能力,不得自行操作 DOM。
+- `render` 只能返回 `TeachingFrame` 纯数据,不得自行操作 DOM、Canvas、网络或浏览器全局状态。
 - `interactions` 必须完整声明,运行时据此自动渲染控件。
-- `sim-package.json` 只描述 `meta`、`interactions`、`render.patterns`、`narrative`、`codeTrace` 与 `checkpoints`;
-  后端不执行其中任何函数,只校验封闭模式、交互事件、代码追踪配置和检查点锚点。
+- `sim-package.json` 只描述 `meta`、`interactions`、`render.protocol`、`render.patterns`、`narrative`、`codeTrace` 与 `checkpoints`;
+  后端不执行其中任何函数,只校验 TeachingFrame 协议版本、封闭模式、交互事件、代码追踪配置和检查点锚点。
 
 ### 1.1 `sim-package.json` 协议入口
 
@@ -64,9 +64,10 @@ interface SimMeta {
     }
   ],
   "render": {
+    "protocol": "teaching-frame",
     "patterns": [
-      { "mode": "graph", "region": "main", "config": { "layout": "force" } },
-      { "mode": "chain", "region": "bottom" }
+      { "id": "pow-network", "mode": "graph", "roles": ["primary", "evidence"] },
+      { "id": "pow-chain", "mode": "chain", "roles": ["primary", "timeline"] }
     ]
   },
   "narrative": [
@@ -88,7 +89,9 @@ interface SimMeta {
 后端校验规则:
 - `meta` 必须与上传表单一致,防止 bundle 自描述与入库元数据分裂。
 - `interactions[].emits` 生成 `sim_package.interaction_schema`,运行时只接受 manifest 声明过的事件和参数。
-- `render.patterns` 必须是 1~3 个封闭模式,`mode` 只能取 `graph|chain|tree|matrix|pipeline|lane|chart`。
+- `render.protocol` 必须是 `teaching-frame`。
+- `render.patterns` 必须是 1~3 个封闭模式声明,每项必须有稳定 `id` 和 `mode`,`mode` 只能取 `graph|chain|tree|matrix|pipeline|lane|chart`。
+- `render.patterns[].roles` 只能用于审核该模式可承担的教学区域,取值为 `primary|evidence|timeline|metrics|trace|checkpoints`,不得再使用旧版区域字段。
 - `codeTrace` 使用 camelCase,与前端 TypeScript 协议一致;数据库字段 `code_trace` 只存不含源码正文的审核摘要。
 - `checkpoints` 必须声明检查点 ID 与名称,受控预览和后续 `/sessions/{id}/checkpoints` 上报均以这些锚点派生结果。
 - manifest JSON 拒绝未知字段和尾随内容,避免同一协议出现兼容别名或灰色扩展。
@@ -97,7 +100,7 @@ interface SimMeta {
 
 前端官方 SDK 包为 `@chaimir/sim-sdk`,开发者新增仿真包必须从公开 API 开始,不得复制内置包、Worker 或渲染器实现。主入口导出:
 
-- `SimPackage`、`SimState`、`SimEvent`、`ViewSpec` 等协议类型。
+- `SimPackage`、`SimState`、`SimEvent`、`TeachingFrame`、`VisualPattern` 等协议类型。
 - `defineSimPackage(simPackage)`:定义仿真包并执行开发期协议校验。
 - `createDeveloperTemplate(code)`:生成最小完整模板。
 - `validateSimPackageManifest(simPackage)`:上传前检查协议完整性。
@@ -219,23 +222,81 @@ interface FieldDef {
 | 时序泳道 | `lane` | stages[]、current、各方消息 | 阶段进度、消息时序 |
 | 图表 | `chart` | 数据序列、类型(line/bar/pie) | 坐标轴、曲线、动态更新 |
 
-### 4.2 模式映射(作者声明,非绘制)
+### 4.2 TeachingFrame 映射(作者声明,非绘制)
 
 ```typescript
-interface ViewSpec {
-  patterns: PatternBinding[];   // 一个仿真组合 1~3 个模式
+interface TeachingFrame {
+  summary: string;
+  phase: FramePhase;
+  focus: FrameFocus;
+  layout: FrameLayout;
+  patterns: VisualPattern[];    // 一个教学画面组合 1~3 个封闭模式
+  annotations?: FrameAnnotation[];
 }
-interface PatternBinding {
+
+interface FramePhase {
+  id: string;
+  title: string;
+  intent: "observe" | "compare" | "verify" | "debug" | "attack" | "recover" | "replay";
+  explanation: {
+    what: string;
+    why: string;
+    watch: string;
+  };
+}
+
+interface FrameFocus {
+  primary: string[];
+  secondary?: string[];
+  muted?: string[];
+}
+
+interface FrameLayout {
+  primary: string;
+  evidence?: string[];
+  timeline?: string;
+  metrics?: string[];
+  trace?: string;
+  checkpoints?: string[];
+}
+
+interface VisualPattern {
+  id: string;
   mode: "graph"|"chain"|"tree"|"matrix"|"pipeline"|"lane"|"chart";
-  region?: "main"|"side"|"bottom";   // 放主画布/侧栏/底部
-  bind: (state) => PatternData;      // 把仿真状态映射为该模式的语义数据
-  config?: object;                    // 模式参数(如 graph 的 layout:'ring')
+  title: string;
+  data: PatternData;      // 把仿真状态映射为该模式的语义数据
 }
 ```
 
-作者只实现 `bind`(状态 → 语义数据),**绝不接触坐标/canvas/DOM**。
+作者只实现 `render(state)` 中的状态到教学语义映射,**绝不接触坐标/canvas/DOM**。`layout.primary` 必须指向 `patterns` 中存在的模式 ID;右侧证据、时间线、指标等也只能引用同一帧内的模式 ID。
 
-### 4.3 新增模式的闸门(防碎片化)
+### 4.3 元素生命周期与焦点
+
+封闭模式内部的节点、边、区块、树节点、矩阵单元、流水线步骤、泳道消息都可以携带统一 `meta`:
+
+```typescript
+interface VisualElementMeta {
+  id: string;
+  label: string;
+  role?: string;
+  lifecycle: {
+    state: "entering" | "active" | "settled" | "leaving" | "archived";
+    fromTick: number;
+    toTick?: number;
+  };
+  emphasis: "focus" | "context" | "history" | "ghost";
+  explanation?: string;
+}
+```
+
+规则:
+
+- 当前阶段关键元素必须出现在 `focus.primary` 或元素 `meta.emphasis="focus"` 中。
+- 历史元素必须显式标为 `history` 或 `ghost`,由平台统一淡化、折叠或只保留摘要。
+- 算法不得把无限增长的历史消息全部作为普通活跃边/消息输出。
+- 选择、键盘焦点、读屏文本都以元素 `id/label/role` 为准。
+
+### 4.4 新增模式的闸门(防碎片化)
 
 - 仿真作者**不能自带渲染器**。现有 7 种模式无法表达的全新隐喻(罕见),提交**平台级模式评审**。
 - 评审通过 → 新模式进入封闭集,成为**所有仿真的公共资产**,后续复用。
@@ -298,12 +359,37 @@ const PoWSim: SimPackage = {
       label_tag: "attack",
       params: [{ name: "blocks", type: "number", default: 6 }] },
   ],
-  render: (s) => ({ patterns: [
-    { mode: "graph", region: "main", config: { layout: "force" },
-      bind: st => ({ nodes: st.miners, edges: st.gossip }) },     // 矿工网络
-    { mode: "chain", region: "bottom",
-      bind: st => ({ blocks: st.chain, forks: st.forks, longest: st.mainChain }) }, // 链+分叉
-  ]}),
+  render: (s) => ({
+    summary: `当前高度 ${s.height},主链候选 ${s.mainChainTip}`,
+    phase: {
+      id: s.attackActive ? "fork-race" : "honest-mining",
+      title: s.attackActive ? "分叉竞争" : "诚实出块",
+      intent: s.attackActive ? "attack" : "observe",
+      explanation: {
+        what: s.attackActive ? "攻击者私链正在追赶公开链。" : "矿工按算力竞争新区块。",
+        why: "最长链选择决定节点最终接受哪条历史。",
+        watch: "观察主舞台链尖是否被攻击者分叉赶上。"
+      }
+    },
+    focus: {
+      primary: [s.mainChainTip, s.attackerTip].filter(Boolean),
+      secondary: s.miners.filter(m => m.active).map(m => m.id),
+      muted: s.gossip.filter(msg => msg.settled).map(msg => msg.id)
+    },
+    layout: {
+      primary: "pow-chain",
+      evidence: ["pow-network"],
+      metrics: ["pow-hashrate"]
+    },
+    patterns: [
+      { id: "pow-chain", mode: "chain", title: "主链与攻击分叉",
+        data: { blocks: s.chain, forks: s.forks, canonicalTip: s.mainChainTip } },
+      { id: "pow-network", mode: "graph", title: "矿工传播网络",
+        data: { layout: "ring", nodes: s.miners, edges: s.gossip } },
+      { id: "pow-hashrate", mode: "chart", title: "算力占比趋势",
+        data: { series: s.hashrateSeries, unit: "%" } }
+    ]
+  }),
   narrative: [
     { id: "s1", trigger: { at_tick: 0 }, explain: "正常情况下最长链由诚实算力主导" },
     { id: "s2", trigger: { on_event: "launch-51" },

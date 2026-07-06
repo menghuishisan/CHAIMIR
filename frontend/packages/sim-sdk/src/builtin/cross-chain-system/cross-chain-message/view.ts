@@ -1,16 +1,38 @@
 // 本文件把跨链消息状态转换为路径图、跨链时序和状态矩阵。
 
-import type { MatrixCell, ViewSpec } from '../../../types';
-import { graphPattern, lanePattern, matrixPattern } from '../../packageTools';
+import type { MatrixCell, TeachingFrame } from '../../../types';
+import { teachingFrame, graphPattern, lanePattern, matrixPattern, selectedOrFrameFocus } from '../../packageTools';
 import { graphEdges, graphNodes, laneMessages, matrixCells } from '../crossChainView';
 import type { CrossChainMessageState } from './model';
 
 /**
  * renderCrossMessageView 基于内核状态生成跨链消息生命周期可视化。
  */
-export function renderCrossMessageView(state: CrossChainMessageState): ViewSpec {
+export function renderCrossMessageView(state: CrossChainMessageState): TeachingFrame {
   const completed = [state.locked, state.relayed, state.verified, state.executed].filter(Boolean).length;
-  return { summary: `消息 ${state.messageId.slice(0, 8)},生命周期 ${completed}/4,验证${state.verified ? '通过' : '等待'},执行${state.executed ? '完成' : '未完成'}。`, patterns: [graphPattern('cross-message-graph', '源链锁定到目标链执行路径', graphNodes(state.actors), graphEdges(state.messages), 'main'), lanePattern('cross-message-lane', '跨链消息锁定 / 中继 / 验证 / 执行时序', state.actors.map((actor) => actor.label), laneMessages(state.messages, (id) => labelOf(state, id)), state.tick, 'side'), matrixPattern('cross-message-matrix', '跨链消息生命周期状态', ['源链锁定', '中继提交', '目标链验证', '目标链执行'], ['结果'], messageCells(state), 'bottom')] };
+    const summary = `消息 ${state.messageId.slice(0, 8)},生命周期 ${completed}/4,验证${state.verified ? '通过' : '等待'},执行${state.executed ? '完成' : '未完成'}。`;
+  const patterns = [graphPattern('cross-message-graph', '源链锁定到目标链执行路径', graphNodes(state.actors), graphEdges(state.messages)), lanePattern('cross-message-lane', '跨链消息锁定 / 中继 / 验证 / 执行时序', state.actors.map((actor) => actor.label), laneMessages(state.messages, (id) => labelOf(state, id)), state.tick), matrixPattern('cross-message-matrix', '跨链消息生命周期状态', ['源链锁定', '中继提交', '目标链验证', '目标链执行'], ['结果'], messageCells(state))];
+  return teachingFrame({
+    summary,
+    phase: {
+      id: state.phase,
+      title: state.explanation.title,
+      intent: 'observe',
+      what: state.explanation.effect,
+      why: state.explanation.reason,
+      watch: summary,
+    },
+    focus: {
+      primary: selectedOrFrameFocus(state.selectedElementId, ['cross-message-graph']),
+      secondary: ['cross-message-lane', 'cross-message-matrix'],
+    },
+    layout: {
+      primary: 'cross-message-graph',
+      evidence: ['cross-message-matrix'],
+      timeline: 'cross-message-lane',
+    },
+    patterns,
+  });
 }
 
 /**

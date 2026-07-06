@@ -1,16 +1,38 @@
 // 本文件把交易生命周期状态转换为参与方图、时序泳道和阶段矩阵。
 
-import type { MatrixCell, ViewSpec } from '../../../types';
-import { graphPattern, lanePattern, matrixPattern } from '../../packageTools';
+import type { MatrixCell, TeachingFrame } from '../../../types';
+import { teachingFrame, graphPattern, lanePattern, matrixPattern, selectedOrFrameFocus } from '../../packageTools';
 import { graphEdges, graphNodes, laneMessages, matrixCells } from '../runtimeView';
 import type { TxLifecycleState } from './model';
 
 /**
  * renderTxLifecycleView 基于内核状态生成交易生命周期可视化。
  */
-export function renderTxLifecycleView(state: TxLifecycleState): ViewSpec {
+export function renderTxLifecycleView(state: TxLifecycleState): TeachingFrame {
   const completed = [state.signed, state.inMempool, state.included, state.executed, state.receipt === '成功'].filter(Boolean).length;
-  return { summary: `交易 ${state.txHash.slice(0, 8)},生命周期 ${completed}/5,交易池${state.inMempool ? '已接收' : '未接收'},回执 ${state.receipt || '等待'},丢弃${state.dropped ? '是' : '否'}。`, patterns: [graphPattern('tx-life-graph', '钱包 -> 节点 -> 交易池 -> 区块 -> 执行参与方', graphNodes(state.actors), graphEdges(state.messages), 'main'), lanePattern('tx-life-lane', '签名、广播、入池、打包、执行时序', state.actors.map((actor) => actor.label), laneMessages(state.messages, (id) => labelOf(state, id)), state.tick, 'side'), matrixPattern('tx-life-matrix', '交易生命周期阶段矩阵', ['签名', '交易池', '区块', '执行', '回执'], ['结果'], txCells(state), 'bottom')] };
+    const summary = `交易 ${state.txHash.slice(0, 8)},生命周期 ${completed}/5,交易池${state.inMempool ? '已接收' : '未接收'},回执 ${state.receipt || '等待'},丢弃${state.dropped ? '是' : '否'}。`;
+  const patterns = [graphPattern('tx-life-graph', '钱包 -> 节点 -> 交易池 -> 区块 -> 执行参与方', graphNodes(state.actors), graphEdges(state.messages)), lanePattern('tx-life-lane', '签名、广播、入池、打包、执行时序', state.actors.map((actor) => actor.label), laneMessages(state.messages, (id) => labelOf(state, id)), state.tick), matrixPattern('tx-life-matrix', '交易生命周期阶段矩阵', ['签名', '交易池', '区块', '执行', '回执'], ['结果'], txCells(state))];
+  return teachingFrame({
+    summary,
+    phase: {
+      id: state.phase,
+      title: state.explanation.title,
+      intent: 'observe',
+      what: state.explanation.effect,
+      why: state.explanation.reason,
+      watch: summary,
+    },
+    focus: {
+      primary: selectedOrFrameFocus(state.selectedElementId, ['tx-life-graph']),
+      secondary: ['tx-life-lane', 'tx-life-matrix'],
+    },
+    layout: {
+      primary: 'tx-life-graph',
+      evidence: ['tx-life-matrix'],
+      timeline: 'tx-life-lane',
+    },
+    patterns,
+  });
 }
 
 /**

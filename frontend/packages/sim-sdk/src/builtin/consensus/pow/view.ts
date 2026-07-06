@@ -1,7 +1,7 @@
 // 本文件把 PoW 内核状态映射为封闭可视化模式,不包含协议状态迁移。
 
-import type { ChainBlock, MatrixCell, ViewSpec } from '../../../types';
-import { chainPattern, graphPattern, matrixPattern } from '../../packageTools';
+import type { ChainBlock, MatrixCell, TeachingFrame } from '../../../types';
+import { teachingFrame, chainPattern, graphPattern, matrixPattern, selectedOrFrameFocus } from '../../packageTools';
 import { graphEdges, graphNodes, voteCells, type ViewNode } from '../consensusView';
 import { canonicalHeight, chainWork } from './kernel';
 import type { PowBlock, PowState } from './model';
@@ -9,18 +9,36 @@ import type { PowBlock, PowState } from './model';
 /**
  * renderPowView 输出规范链、矿工网络和 nonce 搜索过程。
  */
-export function renderPowView(state: PowState): ViewSpec {
+export function renderPowView(state: PowState): TeachingFrame {
   const privateWork = chainWork(state.privateFork);
   const publicWork = chainWork(state.blocks);
   const winningAttempts = state.hashAttempts.filter((attempt) => attempt.valid).length;
-  return {
-    summary: `高度 ${canonicalHeight(state)},目标 ${state.targetPrefix},候选 nonce ${state.candidateNonce},命中 ${winningAttempts} 次,规范链工作量 ${publicWork},私有分叉工作量 ${privateWork}。`,
-    patterns: [
-      chainPattern('pow-chain', `PoW 最长工作量链,公开 ${publicWork} / 私有 ${privateWork}`, chainBlocks(state.blocks), state.privateFork.length > 0 ? [chainBlocks(state.privateFork)] : [], 'main'),
-      graphPattern('pow-graph', '矿工算力与区块广播网络', minerNodes(state), graphEdges(state.messages), 'side'),
-      matrixPattern('pow-attempts', `Nonce 搜索窗口,难度 ${state.difficulty} 个前导零`, state.hashAttempts.map((attempt) => String(attempt.nonce)), ['哈希前缀', '前导零得分', '是否达标'], powAttemptCells(state), 'bottom'),
-    ],
-  };
+    const summary = `高度 ${canonicalHeight(state)},目标 ${state.targetPrefix},候选 nonce ${state.candidateNonce},命中 ${winningAttempts} 次,规范链工作量 ${publicWork},私有分叉工作量 ${privateWork}。`;
+  const patterns = [
+      chainPattern('pow-chain', `PoW 最长工作量链,公开 ${publicWork} / 私有 ${privateWork}`, chainBlocks(state.blocks), state.privateFork.length > 0 ? [chainBlocks(state.privateFork)] : []),
+      graphPattern('pow-graph', '矿工算力与区块广播网络', minerNodes(state), graphEdges(state.messages)),
+      matrixPattern('pow-attempts', `Nonce 搜索窗口,难度 ${state.difficulty} 个前导零`, state.hashAttempts.map((attempt) => String(attempt.nonce)), ['哈希前缀', '前导零得分', '是否达标'], powAttemptCells(state)),
+    ];
+  return teachingFrame({
+    summary,
+    phase: {
+      id: state.phase,
+      title: state.explanation.title,
+      intent: 'observe',
+      what: state.explanation.effect,
+      why: state.explanation.reason,
+      watch: summary,
+    },
+    focus: {
+      primary: selectedOrFrameFocus(state.selectedElementId, ['pow-graph']),
+      secondary: ['pow-chain', 'pow-attempts'],
+    },
+    layout: {
+      primary: 'pow-graph',
+      evidence: ['pow-chain', 'pow-attempts'],
+    },
+    patterns,
+  });
 }
 
 /**

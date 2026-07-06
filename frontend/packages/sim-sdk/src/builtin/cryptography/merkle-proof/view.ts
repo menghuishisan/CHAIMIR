@@ -1,7 +1,7 @@
 // 本文件把 Merkle 证明内核状态映射为封闭可视化模式。
 
-import type { MatrixCell, TreeNode, ViewSpec } from '../../../types';
-import { matrixPattern, pipelinePattern, treePattern } from '../../packageTools';
+import type { MatrixCell, TreeNode, TeachingFrame } from '../../../types';
+import { teachingFrame, matrixPattern, pipelinePattern, treePattern, selectedOrFrameFocus } from '../../packageTools';
 import { binaryTree, matrixCells, pipelineSteps } from '../cryptoView';
 import { merkleParentHash } from '../cryptoPrimitives';
 import { labelMerkleLeaf, rootHash } from './kernel';
@@ -10,16 +10,34 @@ import { merkleProofPhases, type MerkleProofState } from './model';
 /**
  * renderMerkleProofView 输出证明树、证明材料矩阵和验证流程。
  */
-export function renderMerkleProofView(state: MerkleProofState): ViewSpec {
+export function renderMerkleProofView(state: MerkleProofState): TeachingFrame {
   const targetLabel = labelMerkleLeaf(state, state.targetLeafId);
-  return {
-    summary: `目标叶子 ${targetLabel},兄弟摘要 ${state.proofSiblings.length} 个,证明路径 ${state.proofPath.length} 层,根 ${rootHash(state.leaves).slice(0, 8)},校验${state.proofValid ? '通过' : '未通过'}。`,
-    patterns: [
-      treePattern('merkle-tree', `Merkle 证明路径: ${targetLabel} 到根`, merkleRoot(state), state.proofPath, 'main'),
-      matrixPattern('merkle-matrix', '兄弟摘要逐层重算材料', proofRows(state), ['摘要', '层级状态'], proofCells(state), 'side'),
-      pipelinePattern('merkle-pipeline', '叶子哈希 -> 兄弟拼接 -> 根比较流程', pipelineSteps([...merkleProofPhases], state.phaseIndex, !state.proofValid && state.phaseIndex >= 3), merkleProofPhases[state.phaseIndex].id, 'bottom'),
-    ],
-  };
+    const summary = `目标叶子 ${targetLabel},兄弟摘要 ${state.proofSiblings.length} 个,证明路径 ${state.proofPath.length} 层,根 ${rootHash(state.leaves).slice(0, 8)},校验${state.proofValid ? '通过' : '未通过'}。`;
+  const patterns = [
+      treePattern('merkle-tree', `Merkle 证明路径: ${targetLabel} 到根`, merkleRoot(state), state.proofPath),
+      matrixPattern('merkle-matrix', '兄弟摘要逐层重算材料', proofRows(state), ['摘要', '层级状态'], proofCells(state)),
+      pipelinePattern('merkle-pipeline', '叶子哈希 -> 兄弟拼接 -> 根比较流程', pipelineSteps([...merkleProofPhases], state.phaseIndex, !state.proofValid && state.phaseIndex >= 3), merkleProofPhases[state.phaseIndex].id),
+    ];
+  return teachingFrame({
+    summary,
+    phase: {
+      id: state.phase,
+      title: state.explanation.title,
+      intent: 'observe',
+      what: state.explanation.effect,
+      why: state.explanation.reason,
+      watch: summary,
+    },
+    focus: {
+      primary: selectedOrFrameFocus(state.selectedElementId, ['merkle-pipeline']),
+      secondary: ['merkle-tree', 'merkle-matrix'],
+    },
+    layout: {
+      primary: 'merkle-pipeline',
+      evidence: ['merkle-tree', 'merkle-matrix'],
+    },
+    patterns,
+  });
 }
 
 /**

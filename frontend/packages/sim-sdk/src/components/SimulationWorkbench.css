@@ -205,6 +205,13 @@
   line-height: var(--leading-normal);
 }
 
+.sim-workbench__watch {
+  margin: var(--space-1) 0 0;
+  color: var(--color-dark-text);
+  font-size: var(--text-sm);
+  line-height: var(--leading-normal);
+}
+
 .sim-workbench__stage-kicker {
   margin: 0 0 var(--space-1);
   color: var(--color-on-dark-accent);

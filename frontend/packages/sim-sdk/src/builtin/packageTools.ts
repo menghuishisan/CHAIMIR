@@ -18,8 +18,8 @@ import type {
   SimInitParams,
   SimPackage,
   SimState,
+  TeachingFrame,
   TreeNode,
-  ViewSpec,
 } from '../types';
 import { narrativeQuestions, type PhaseNarrativeQuestion } from './narrativeQuestions';
 
@@ -30,11 +30,27 @@ export interface AlgorithmPackageSpec<TState extends SimState> {
   attack: (state: TState, event: SimEvent, context: ReducerContext) => TState;
   recover: (state: TState, event: SimEvent, context: ReducerContext) => TState;
   select?: (state: TState, event: SimEvent) => TState;
-  render: (state: TState) => ViewSpec;
+  render: (state: TState) => TeachingFrame;
   interactions: InteractionDef[];
   narrative: NarrativeStep[];
   codeTrace: CodeTraceDef;
   checkpoints: CheckpointDef[];
+}
+
+export interface TeachingFrameInput {
+  summary: string;
+  phase: {
+    id: string;
+    title: string;
+    intent?: TeachingFrame['phase']['intent'];
+    what: string;
+    why: string;
+    watch: string;
+  };
+  patterns: PatternBinding[];
+  focus: TeachingFrame['focus'];
+  layout: TeachingFrame['layout'];
+  annotations?: TeachingFrame['annotations'];
 }
 
 /**
@@ -119,50 +135,80 @@ export function codeTrace(sourceCode: string[], phases: Array<{ label: string; r
 }
 
 /**
+ * teachingFrame 把算法状态映射为教学画面,由 frame 显式声明主舞台、辅助证据和当前关注对象。
+ */
+export function teachingFrame(input: TeachingFrameInput): TeachingFrame {
+  return {
+    summary: input.summary,
+    phase: {
+      id: input.phase.id,
+      title: input.phase.title,
+      intent: input.phase.intent ?? 'observe',
+      explanation: {
+        what: input.phase.what,
+        why: input.phase.why,
+        watch: input.phase.watch,
+      },
+    },
+    focus: input.focus,
+    layout: input.layout,
+    patterns: input.patterns,
+    annotations: input.annotations,
+  };
+}
+
+/**
+ * selectedOrFrameFocus 只处理交互选中优先级,默认关注对象必须由算法 view 显式传入。
+ */
+export function selectedOrFrameFocus(selectedElementId: string | undefined, fallbackIds: string[]): string[] {
+  return selectedElementId ? [selectedElementId] : fallbackIds;
+}
+
+/**
  * graphPattern 创建图网络封闭模式绑定。
  */
-export function graphPattern(id: string, title: string, nodes: GraphNode[], edges: GraphEdge[], region: PatternBinding['region'] = 'main'): PatternBinding {
-  return { id, mode: 'graph', title, region, data: { layout: 'ring', nodes, edges } };
+export function graphPattern(id: string, title: string, nodes: GraphNode[], edges: GraphEdge[]): PatternBinding {
+  return { id, mode: 'graph', title, data: { layout: 'ring', nodes, edges } };
 }
 
 /**
  * pipelinePattern 创建阶段流水线封闭模式绑定。
  */
-export function pipelinePattern(id: string, title: string, steps: PipelineStep[], currentStepId: string, region: PatternBinding['region'] = 'main'): PatternBinding {
-  return { id, mode: 'pipeline', title, region, data: { steps, currentStepId } };
+export function pipelinePattern(id: string, title: string, steps: PipelineStep[], currentStepId: string): PatternBinding {
+  return { id, mode: 'pipeline', title, data: { steps, currentStepId } };
 }
 
 /**
  * matrixPattern 创建矩阵封闭模式绑定。
  */
-export function matrixPattern(id: string, title: string, rows: string[], columns: string[], cells: MatrixCell[][], region: PatternBinding['region'] = 'side'): PatternBinding {
-  return { id, mode: 'matrix', title, region, data: { rows, columns, cells } };
+export function matrixPattern(id: string, title: string, rows: string[], columns: string[], cells: MatrixCell[][]): PatternBinding {
+  return { id, mode: 'matrix', title, data: { rows, columns, cells } };
 }
 
 /**
  * lanePattern 创建参与方时序泳道封闭模式绑定。
  */
-export function lanePattern(id: string, title: string, actors: string[], messages: LaneMessage[], currentTime: number, region: PatternBinding['region'] = 'bottom'): PatternBinding {
-  return { id, mode: 'lane', title, region, data: { actors, messages, currentTime } };
+export function lanePattern(id: string, title: string, actors: string[], messages: LaneMessage[], currentTime: number): PatternBinding {
+  return { id, mode: 'lane', title, data: { actors, messages, currentTime } };
 }
 
 /**
  * chartPattern 创建轻量趋势图封闭模式绑定。
  */
-export function chartPattern(id: string, title: string, series: ChartSeries[], unit = '%', region: PatternBinding['region'] = 'bottom'): PatternBinding {
-  return { id, mode: 'chart', title, region, data: { series, unit } };
+export function chartPattern(id: string, title: string, series: ChartSeries[], unit = '%'): PatternBinding {
+  return { id, mode: 'chart', title, data: { series, unit } };
 }
 
 /**
  * chainPattern 创建主链和分叉封闭模式绑定。
  */
-export function chainPattern(id: string, title: string, blocks: ChainBlock[], forks: ChainBlock[][] = [], region: PatternBinding['region'] = 'main'): PatternBinding {
-  return { id, mode: 'chain', title, region, data: { blocks, forks, canonicalTip: blocks[blocks.length - 1]?.id } };
+export function chainPattern(id: string, title: string, blocks: ChainBlock[], forks: ChainBlock[][] = []): PatternBinding {
+  return { id, mode: 'chain', title, data: { blocks, forks, canonicalTip: blocks[blocks.length - 1]?.id } };
 }
 
 /**
  * treePattern 创建树结构和高亮路径封闭模式绑定。
  */
-export function treePattern(id: string, title: string, root: TreeNode, highlightedPath: string[], region: PatternBinding['region'] = 'main'): PatternBinding {
-  return { id, mode: 'tree', title, region, data: { root, highlightedPath } };
+export function treePattern(id: string, title: string, root: TreeNode, highlightedPath: string[]): PatternBinding {
+  return { id, mode: 'tree', title, data: { root, highlightedPath } };
 }

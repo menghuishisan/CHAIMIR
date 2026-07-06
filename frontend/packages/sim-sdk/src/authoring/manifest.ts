@@ -2,6 +2,8 @@
 
 import type { CodeTraceDef, FieldDef, InteractionDef, NarrativeStep, PatternMode, SimPackage, SimState } from '../types';
 
+type RenderPatternRole = 'primary' | 'evidence' | 'timeline' | 'metrics' | 'trace' | 'checkpoints';
+
 export interface SimPackageManifest {
   meta: {
     code: string;
@@ -17,9 +19,11 @@ export interface SimPackageManifest {
   };
   interactions: SimManifestInteraction[];
   render: {
+    protocol: 'teaching-frame';
     patterns: Array<{
+      id: string;
       mode: PatternMode;
-      region: string;
+      roles: RenderPatternRole[];
     }>;
   };
   narrative: SimManifestNarrativeStep[];
@@ -63,9 +67,11 @@ export interface SimManifestSummary {
     paramNames: string[];
   }>;
   render: {
+    protocol: 'teaching-frame';
     patterns: Array<{
+      id: string;
       mode: PatternMode;
-      region: string;
+      roles: RenderPatternRole[];
     }>;
   };
   narrative: Array<{
@@ -148,9 +154,11 @@ export function createManifestSummary<TState extends SimState>(simPackage: SimPa
       paramNames: (interaction.params ?? []).map((field) => field.name),
     })),
     render: {
+      protocol: 'teaching-frame',
       patterns: view.patterns.map((pattern) => ({
+        id: pattern.id,
         mode: pattern.mode,
-        region: pattern.region,
+        roles: patternRoles(view, pattern.id),
       })),
     },
     narrative: (simPackage.narrative ?? []).map((step) => ({
@@ -281,12 +289,62 @@ function validateInitialRender<TState extends SimState>(simPackage: SimPackage<T
   try {
     const initialState = simPackage.initState({}, 1);
     const view = simPackage.render(initialState);
-    if (!view.summary || view.patterns.length < 1 || view.patterns.length > 3) {
-      issues.push({ path: 'render.patterns', message: '渲染结果必须包含摘要和 1 到 3 个封闭可视化模式。' });
+    if (!view.summary || !view.phase?.id || !view.phase.title || !view.layout?.primary || !view.focus?.primary?.length || view.patterns.length < 1 || view.patterns.length > 3) {
+      issues.push({ path: 'render', message: '渲染结果必须包含 TeachingFrame 的摘要、阶段、焦点、布局和 1 到 3 个封闭可视化模式。' });
+      return;
+    }
+    const ids = new Set<string>();
+    for (const pattern of view.patterns) {
+      if (ids.has(pattern.id)) {
+        issues.push({ path: 'render.patterns', message: '封闭模式 ID 不能重复。' });
+      }
+      ids.add(pattern.id);
+    }
+    const layoutIds = layoutPatternIds(view);
+    for (const id of layoutIds) {
+      if (!ids.has(id)) {
+        issues.push({ path: 'render.layout', message: '布局只能引用当前帧中存在的模式。' });
+        return;
+      }
+    }
+    for (const pattern of view.patterns) {
+      if (!layoutIds.has(pattern.id)) {
+        issues.push({ path: `render.patterns.${pattern.id}`, message: '每个封闭模式都必须通过 layout 声明教学职责。' });
+      }
     }
   } catch {
     issues.push({ path: 'render', message: '初始渲染失败，请检查初始状态和渲染声明。' });
   }
+}
+
+/**
+ * patternRoles 从 TeachingFrame 布局中提取 manifest 可审核的模式职责。
+ */
+function patternRoles(view: ReturnType<SimPackage['render']>, patternId: string): RenderPatternRole[] {
+  const roles = new Set<RenderPatternRole>();
+  if (view.layout.primary === patternId) roles.add('primary');
+  if (view.layout.evidence?.includes(patternId)) roles.add('evidence');
+  if (view.layout.timeline === patternId) roles.add('timeline');
+  if (view.layout.metrics?.includes(patternId)) roles.add('metrics');
+  if (view.layout.trace === patternId) roles.add('trace');
+  if (view.layout.checkpoints?.includes(patternId)) roles.add('checkpoints');
+  return [...roles];
+}
+
+/**
+ * layoutPatternIds 汇总 TeachingFrame 布局显式引用的模式 ID。
+ */
+function layoutPatternIds(view: ReturnType<SimPackage['render']>): Set<string> {
+  return new Set(
+    [
+      view.layout.primary,
+      ...(view.layout.evidence ?? []),
+      ...(view.layout.timeline ? [view.layout.timeline] : []),
+      ...(view.layout.metrics ?? []),
+      ...(view.layout.trace ? [view.layout.trace] : []),
+      ...(view.layout.checkpoints ?? []),
+    ].filter(Boolean)
+  );
 }
 
 /**
