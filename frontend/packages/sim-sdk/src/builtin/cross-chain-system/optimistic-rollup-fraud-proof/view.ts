@@ -6,6 +6,7 @@ import { pipelineSteps } from '../crossChainView';
 import { disputeTree, optimisticRollupChain } from './kernel';
 import { optimisticRollupPhases, type OptimisticRollupState } from './model';
 
+/** renderOptimisticRollupView 生成当前内置仿真的可视化视图模型。 */
 export function renderOptimisticRollupView(state: OptimisticRollupState): TeachingFrame {
   const summary = `${state.batchId} claimedRoot=${state.claimedRoot},expectedRoot=${state.expectedRoot},挑战${state.challenged ? '已开启' : '未开启'},欺诈${state.fraudProven ? '成立' : '未裁决'}。`;
   const primary = state.phaseIndex >= 3 && state.phaseIndex <= 4 ? 'op-rollup-dispute' : 'op-rollup-pipeline';
@@ -33,10 +34,12 @@ export function renderOptimisticRollupView(state: OptimisticRollupState): Teachi
   });
 }
 
+/** steps 生成当前内置仿真的可视化视图模型。 */
 function steps(state: OptimisticRollupState): PipelineStep[] {
   return pipelineSteps([...optimisticRollupPhases], state.phaseIndex, state.fraudProven && state.phaseIndex === 5).map((step) => ({ ...step, meta: meta(step.id, step.label, step.id === optimisticRollupPhases[state.phaseIndex].id ? 'focus' : step.status === 'complete' ? 'history' : 'context', state.tick) }));
 }
 
+/** meta 生成当前内置仿真的可视化视图模型。 */
 function meta(id: string, label: string, emphasis: VisualElementMeta['emphasis'], tick: number): VisualElementMeta {
   return { id, label, lifecycle: { state: emphasis === 'history' ? 'settled' : 'active', fromTick: Math.max(0, tick - 1) }, emphasis, explanation: label };
 }

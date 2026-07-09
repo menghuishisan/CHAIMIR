@@ -1,0 +1,5 @@
+/* App.module.css 提供应用组合根使用的轻量状态样式,避免路由层出现内联样式。 */
+.pageFallback {
+  padding: var(--space-6);
+  color: var(--color-text-sub);
+}

@@ -26,6 +26,7 @@ export const optimisticRollupCodeTrace = {
   ],
 };
 
+/** traceLinesForOptimisticRollup 根据当前阶段返回欺诈证明伪代码高亮行。 */
 export function traceLinesForOptimisticRollup(transition: string): number[] {
   const index = optimisticRollupPhases.findIndex((phase) => phase.id === transition);
   return [Math.min((index < 0 ? 0 : index) + 1, optimisticRollupSource.length)];

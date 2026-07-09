@@ -14,6 +14,9 @@ export interface PanelHeaderProps extends Omit<React.HTMLAttributes<HTMLElement>
   compact?: boolean
 }
 
+/**
+ * PanelHeader 统一面板标题、说明、图标和操作区布局，避免业务面板重复搭结构。
+ */
 export function PanelHeader({
   eyebrow,
   title,

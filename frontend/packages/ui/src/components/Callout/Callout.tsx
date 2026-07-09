@@ -20,6 +20,9 @@ const icons: Record<CalloutVariant, React.ReactElement> = {
   danger: <ShieldAlert size={18} />,
 }
 
+/**
+ * Callout 把提示语义映射为图标、状态角色和统一提示结构。
+ */
 export function Callout({ variant = 'info', title, children, className, ...props }: CalloutProps): React.ReactElement {
   return (
     <section className={clsx('chaimir-callout', `is-${variant}`, className)} role={variant === 'danger' ? 'alert' : 'status'} {...props}>

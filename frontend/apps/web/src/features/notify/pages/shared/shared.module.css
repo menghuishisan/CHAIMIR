@@ -1,0 +1,158 @@
+/* shared.module.css 定义通知共享页面的列表、筛选和详情展示样式。 */
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+}
+
+.breadcrumb {
+  font-size: var(--text-xs);
+  color: var(--color-text-faint);
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+}
+
+.title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0;
+  font-size: var(--text-2xl);
+  font-weight: var(--font-semibold);
+  color: var(--color-text-strong);
+}
+
+.titleIcon {
+  color: var(--color-primary);
+}
+
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding: var(--space-5);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface);
+}
+
+.cardMain {
+  min-width: 0;
+}
+
+.cardTitle {
+  margin: 0;
+  font-size: var(--text-md);
+  font-weight: var(--font-semibold);
+  color: var(--color-text);
+}
+
+.meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+  font-size: var(--text-sm);
+  color: var(--color-text-sub);
+}
+
+.status {
+  font-weight: var(--font-semibold);
+  color: var(--color-primary-text);
+}
+
+.progressTrack {
+  width: min(320px, 100%);
+  height: 6px;
+  margin-top: var(--space-3);
+  overflow: hidden;
+  border-radius: var(--radius-full);
+  background: var(--color-surface-sunken);
+}
+
+.progressFill {
+  height: 100%;
+  border-radius: inherit;
+  background: var(--color-primary);
+}
+
+.progressPending {
+  width: 15%;
+}
+
+.progressRetrying {
+  width: 35%;
+}
+
+.progressRunning {
+  width: 55%;
+}
+
+.progressDone {
+  width: 100%;
+}
+
+.grant {
+  margin-top: var(--space-2);
+  font-size: var(--text-xs);
+  color: var(--color-text-faint);
+}
+
+.tabs {
+  display: flex;
+  align-items: center;
+  gap: var(--space-5);
+  border-bottom: 1px solid var(--color-border-subtle);
+}
+
+.tab {
+  padding: 0 0 var(--space-2);
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--color-text-sub);
+  font: inherit;
+  cursor: pointer;
+}
+
+.tabActive {
+  border-color: var(--color-primary);
+  color: var(--color-primary-text);
+  font-weight: var(--font-semibold);
+}
+
+.notification {
+  align-items: flex-start;
+  border-left: 3px solid var(--color-primary);
+}
+
+.notificationUnread {
+  border-left-color: var(--color-accent);
+  background: var(--color-surface-hover);
+}
+
+.content {
+  margin: var(--space-2) 0 0;
+  font-size: var(--text-base);
+  color: var(--color-text-sub);
+}
+
+@media (max-width: 760px) {
+  .header,
+  .card {
+    align-items: stretch;
+    flex-direction: column;
+  }
+}

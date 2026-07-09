@@ -29,43 +29,54 @@
   --radius-xl: 1.5rem;    /* 24px - 弹窗使用 */
   --radius-full: 999px;   /* 完全圆角 */
 
-  /* === 阴影（柔和分层） ===
+  /* === 阴影（柔和分层 & iOS 质感深度） ===
    *
    * 四档阴影对应四种海拔：
-   * - xs: 卡片静置
-   * - base: 卡片浮起
+   * - xs: 卡片静置 (微微浮起)
+   * - base: 卡片悬浮
    * - md: 下拉/悬浮卡/Popover
-   * - lg: 模态/抽屉/Toast
+   * - lg: 模态/抽屉/Toast (极深远阴影)
    *
-   * 使用低透明度多层叠加，杜绝硬黑影。
-   * 海拔与阴影一一对应，禁止随机阴影值。
+   * 采用多重柔和层叠，增加环境光模拟。
    */
 
-  --shadow-xs: 0 1px 2px rgba(15, 23, 42, 0.05);
+  --shadow-xs: 0 1px 2px rgba(15, 23, 42, 0.04),
+               0 2px 4px rgba(15, 23, 42, 0.02);
 
-  --shadow: 0 1px 2px rgba(15, 23, 42, 0.04),
-            0 2px 8px rgba(15, 23, 42, 0.05);
+  --shadow: 0 1px 3px rgba(15, 23, 42, 0.05),
+            0 4px 12px rgba(15, 23, 42, 0.05);
 
   --shadow-md: 0 4px 14px rgba(15, 23, 42, 0.08),
-               0 2px 6px rgba(15, 23, 42, 0.04);
+               0 8px 24px rgba(15, 23, 42, 0.04);
 
-  --shadow-lg: 0 12px 32px rgba(15, 23, 42, 0.12),
-               0 4px 12px rgba(15, 23, 42, 0.06);
+  --shadow-lg: 0 12px 32px rgba(15, 23, 42, 0.1),
+               0 24px 64px rgba(15, 23, 42, 0.06);
+
+  --shadow-glass-panel: 0 8px 32px rgba(0, 0, 0, 0.4), inset 0 1px 0 var(--color-glass-border);
+  --shadow-glass-elevated: 0 4px 16px rgba(0, 0, 0, 0.5), inset 0 1px 0 var(--color-glass-highlight);
 
   /* === 过渡时长 === */
 
   --t-fast: 0.12s;   /* 快速：按压反馈 */
   --t: 0.18s;        /* 常规：大多数交互 */
-  --t-slow: 0.3s;    /* 慢速：页面进入/复杂动画 */
+  --t-normal: 0.3s;  /* 中速：中等复杂度动画 */
+  --t-slow: 0.5s;    /* 慢速：页面进入/复杂动画 */
 
-  /* === 缓动曲线（签名缓动） ===
+  /* === 缓动曲线（弹簧与物理感知） ===
    *
    * 全局共用统一缓动，所有动效同一节奏感。
+   * 增加 iOS 级别的物理阻尼与弹性反馈。
    */
 
-  --ease: cubic-bezier(0.22, 0.61, 0.36, 1);      /* 标准缓动 */
-  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);      /* 入场缓动 */
+  --ease: cubic-bezier(0.25, 0.8, 0.25, 1);       /* 标准平滑缓动 */
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);      /* 丝滑入场 */
   --ease-in: cubic-bezier(0.4, 0, 0.6, 1);        /* 出场缓动 */
+
+  /* 高级质感缓动 */
+  --ease-spring: cubic-bezier(0.175, 0.885, 0.32, 1.15); /* 柔和弹簧（带有轻微 overshoot） */
+  --ease-spring-bouncy: cubic-bezier(0.34, 1.56, 0.64, 1); /* 原组件库自带强力弹簧 */
+  --ease-press: cubic-bezier(0.2, 0.9, 0.4, 1);          /* 按压回弹专用，不飘逸 */
+  --ease-ios: cubic-bezier(0.32, 0.72, 0, 1);            /* iOS 原生级丝滑 */
 
   /* === z-index 层级 ===
    *

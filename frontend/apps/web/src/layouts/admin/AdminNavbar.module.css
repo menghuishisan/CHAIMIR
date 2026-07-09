@@ -1,0 +1,142 @@
+/* AdminNavbar.module.css 定义学校管理员端顶栏的品牌、通知和用户区样式。 */
+.header {
+  height: 64px;
+  background-color: var(--color-dark-bg);
+  border-bottom: 1px solid var(--color-glass-border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 24px;
+  color: var(--color-dark-text-sub);
+  flex-shrink: 0;
+  z-index: var(--z-sticky);
+}
+
+.left, .right {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  cursor: pointer;
+}
+
+.menuBtn {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  padding: 8px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--color-dark-text-sub);
+  cursor: pointer;
+}
+
+.menuBtn:hover {
+  background: var(--color-glass-highlight);
+  color: var(--color-dark-text);
+}
+
+.logoIcon {
+  color: var(--color-on-dark-accent);
+}
+
+.brandName {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--color-dark-text);
+  letter-spacing: 0.5px;
+}
+
+.iconBtn {
+  background: transparent;
+  border: none;
+  color: var(--color-dark-text-sub);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px;
+  border-radius: 8px;
+  position: relative;
+  transition: all 0.2s;
+}
+
+.iconBtn:hover {
+  background: var(--color-glass-highlight);
+  color: var(--color-dark-text);
+}
+
+.logoutBtn {
+  color: var(--color-danger);
+}
+
+.badge {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  background-color: var(--color-danger-solid);
+  color: var(--color-danger-bg);
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 6px;
+  border-radius: 10px;
+  border: 2px solid var(--color-dark-bg);
+}
+
+.divider {
+  width: 1px;
+  height: 24px;
+  background-color: var(--color-glass-border);
+  margin: 0 8px;
+}
+
+.profile {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: var(--color-primary);
+  color: var(--color-primary-fg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.userInfo {
+  display: flex;
+  flex-direction: column;
+}
+
+.userName {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--color-dark-text);
+}
+
+.userRole {
+  font-size: 12px;
+  color: var(--color-dark-text-sub);
+}
+
+@media (max-width: 768px) {
+  .menuBtn {
+    display: flex;
+  }
+
+  .userInfo {
+    display: none;
+  }
+}

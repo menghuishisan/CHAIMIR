@@ -1,0 +1,45 @@
+/* PlatformLayout.module.css 定义平台管理员端布局外壳和移动抽屉遮罩。 */
+.layout {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  background-color: var(--color-surface);
+}
+
+.mainContainer {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+  position: relative;
+}
+
+.content {
+  flex: 1;
+  overflow-y: auto;
+  position: relative;
+}
+
+.pageWrapper {
+  padding: 24px;
+  max-width: 1440px;
+  margin: 0 auto;
+  width: 100%;
+}
+
+.backdrop {
+  display: none;
+  position: absolute;
+  inset: 0;
+  background-color: var(--color-scrim);
+  backdrop-filter: blur(4px);
+    z-index: var(--z-drawer);
+}
+
+@media (max-width: 768px) {
+  .backdrop {
+    display: block;
+  }
+  .pageWrapper {
+    padding: 16px;
+  }
+}

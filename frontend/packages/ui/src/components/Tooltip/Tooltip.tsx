@@ -1,6 +1,8 @@
 // Tooltip 组件：为图标按钮、状态点和紧凑控件提供可访问提示。
 
-import React from 'react'
+import React, { useState } from 'react'
+import { createPortal } from 'react-dom'
+import { useFloating, offset, flip, shift, autoUpdate } from '@floating-ui/react'
 import { clsx } from 'clsx'
 import './Tooltip.css'
 
@@ -15,18 +17,62 @@ export interface TooltipProps {
   className?: string
 }
 
+/**
+ * Tooltip 在悬停和键盘聚焦时通过 portal 展示短提示，不占用原布局空间。
+ */
 export function Tooltip({ children, content, side = 'top', className }: TooltipProps): React.ReactElement {
+  const [isOpen, setIsOpen] = useState(false)
   const id = React.useId()
   const child = React.Children.only(children)
 
+  const { refs, floatingStyles } = useFloating({
+    open: isOpen,
+    onOpenChange: setIsOpen,
+    placement: side,
+    whileElementsMounted: autoUpdate,
+    middleware: [
+      offset(8),
+      flip({ fallbackAxisSideDirection: 'start' }),
+      shift({ padding: 8 }),
+    ],
+  })
+
   return (
-    <span className={clsx('chaimir-tooltip', `chaimir-tooltip--${side}`, className)}>
+    <>
       {React.cloneElement(child, {
-        'aria-describedby': [child.props['aria-describedby'], id].filter(Boolean).join(' ') || id,
+        ref: refs.setReference,
+        'aria-describedby': [child.props['aria-describedby'], isOpen ? id : undefined].filter(Boolean).join(' ') || undefined,
+        onMouseEnter: (e: React.MouseEvent) => {
+          setIsOpen(true)
+          child.props.onMouseEnter?.(e)
+        },
+        onMouseLeave: (e: React.MouseEvent) => {
+          setIsOpen(false)
+          child.props.onMouseLeave?.(e)
+        },
+        onFocus: (e: React.FocusEvent) => {
+          setIsOpen(true)
+          child.props.onFocus?.(e)
+        },
+        onBlur: (e: React.FocusEvent) => {
+          setIsOpen(false)
+          child.props.onBlur?.(e)
+        },
       })}
-      <span id={id} role="tooltip" className="chaimir-tooltip__content">
-        {content}
-      </span>
-    </span>
+      {isOpen &&
+        typeof document !== 'undefined' &&
+        createPortal(
+          <span
+            ref={refs.setFloating}
+            id={id}
+            role="tooltip"
+            className={clsx('chaimir-tooltip__content', className)}
+            style={floatingStyles}
+          >
+            {content}
+          </span>,
+          document.body
+        )}
+    </>
   )
 }

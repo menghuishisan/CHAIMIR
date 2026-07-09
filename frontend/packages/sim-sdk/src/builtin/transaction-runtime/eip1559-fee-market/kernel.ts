@@ -5,6 +5,7 @@ import { integerParam } from '../../initParams';
 import { feeMarketPhases, type FeeMarketState, type FeeMarketTx } from './model';
 import { traceLinesForFeeMarket } from './trace';
 
+/** createInitialFeeMarketState 执行当前内置仿真的状态推进、事件计算或校验逻辑。 */
 export function createInitialFeeMarketState(params: SimInitParams, seed: number): FeeMarketState {
   const baseFee = integerParam(params, 'baseFee', 30 + (Math.abs(seed) % 8), 1, 500);
   const targetGas = integerParam(params, 'targetGas', 90_000, 21_000, 1_000_000);
@@ -27,6 +28,7 @@ export function createInitialFeeMarketState(params: SimInitParams, seed: number)
   });
 }
 
+/** reduceFeeMarketEvent 执行当前内置仿真的状态推进、事件计算或校验逻辑。 */
 export function reduceFeeMarketEvent(state: FeeMarketState, event: SimEvent, _context: ReducerContext): FeeMarketState {
   if (event.type === 'select') return finalizeFeeMarketState({ ...state, selectedElementId: event.target });
   if (event.type === 'attack') return finalizeFeeMarketState(addCongestion(state));
@@ -35,6 +37,7 @@ export function reduceFeeMarketEvent(state: FeeMarketState, event: SimEvent, _co
   return state;
 }
 
+/** finalizeFeeMarketState 执行当前内置仿真的状态推进、事件计算或校验逻辑。 */
 export function finalizeFeeMarketState(state: FeeMarketState): FeeMarketState {
   const included = state.transactions.filter((tx) => tx.included);
   const accepted = included.length > 0 && state.phaseIndex >= 4;
@@ -62,6 +65,7 @@ export function finalizeFeeMarketState(state: FeeMarketState): FeeMarketState {
   };
 }
 
+/** feeMarketCheckpoint 执行当前内置仿真的状态推进、事件计算或校验逻辑。 */
 export function feeMarketCheckpoint(state: FeeMarketState): CheckpointResult {
   const rises = Boolean(state.checkpointValues.baseFeeRises);
   return {
@@ -71,6 +75,7 @@ export function feeMarketCheckpoint(state: FeeMarketState): CheckpointResult {
   };
 }
 
+/** advanceFeeMarket 执行当前内置仿真的状态推进、事件计算或校验逻辑。 */
 function advanceFeeMarket(state: FeeMarketState, event: SimEvent): FeeMarketState {
   const tick = event.source === 'tick' ? state.tick + 1 : state.tick;
   if (state.phaseIndex === 0) return { ...state, tick, phaseIndex: 1, lastTransition: 'select', transactions: selectTransactions(state) };
@@ -81,6 +86,7 @@ function advanceFeeMarket(state: FeeMarketState, event: SimEvent): FeeMarketStat
   return { ...state, tick, phaseIndex: 0, lastTransition: 'quote', transactions: resetWaiting(state.transactions), gasUsed: 0 };
 }
 
+/** selectTransactions 执行当前内置仿真的状态推进、事件计算或校验逻辑。 */
 function selectTransactions(state: FeeMarketState): FeeMarketTx[] {
   let capacity = state.targetGas * 2;
   return [...state.transactions]
@@ -93,6 +99,7 @@ function selectTransactions(state: FeeMarketState): FeeMarketTx[] {
     .sort((a, b) => a.id.localeCompare(b.id));
 }
 
+/** splitFees 执行当前内置仿真的状态推进、事件计算或校验逻辑。 */
 function splitFees(state: FeeMarketState): FeeMarketTx[] {
   return state.transactions.map((tx) => {
     if (!tx.included) return tx;
@@ -102,6 +109,7 @@ function splitFees(state: FeeMarketState): FeeMarketTx[] {
   });
 }
 
+/** adjustBaseFee 执行当前内置仿真的状态推进、事件计算或校验逻辑。 */
 function adjustBaseFee(state: FeeMarketState): FeeMarketState {
   const delta = state.gasUsed - state.targetGas;
   const change = Math.trunc((state.baseFee * delta) / state.targetGas / 8);
@@ -109,19 +117,23 @@ function adjustBaseFee(state: FeeMarketState): FeeMarketState {
   return { ...state, nextBaseFee, history: [...state.history, { x: state.blockNumber, baseFee: state.baseFee, gasUsed: state.gasUsed, tip: totalTip(state.transactions) }] };
 }
 
+/** enterNextBlock 执行当前内置仿真的状态推进、事件计算或校验逻辑。 */
 function enterNextBlock(state: FeeMarketState): FeeMarketState {
   return { ...state, blockNumber: state.blockNumber + 1, baseFee: state.nextBaseFee };
 }
 
+/** addCongestion 执行当前内置仿真的状态推进、事件计算或校验逻辑。 */
 function addCongestion(state: FeeMarketState): FeeMarketState {
   const id = `tx${state.transactions.length + 1}`;
   return { ...state, congested: true, phaseIndex: 0, lastTransition: 'quote', transactions: [...state.transactions, { id, sender: '套利者', gasLimit: state.targetGas, maxFeePerGas: state.baseFee + 80, maxPriorityFeePerGas: 12, included: false, dropped: false, paid: 0, burned: 0, tip: 0, refunded: 0 }] };
 }
 
+/** addPatientBid 执行当前内置仿真的状态推进、事件计算或校验逻辑。 */
 function addPatientBid(state: FeeMarketState): FeeMarketState {
   return { ...state, congested: false, phaseIndex: 0, lastTransition: 'quote', transactions: state.transactions.map((tx) => (tx.dropped ? { ...tx, maxFeePerGas: state.baseFee + 15, dropped: false } : tx)) };
 }
 
+/** seedTransactions 执行当前内置仿真的状态推进、事件计算或校验逻辑。 */
 function seedTransactions(baseFee: number): FeeMarketTx[] {
   return [
     { id: 'tx1', sender: 'Alice', gasLimit: 21_000, maxFeePerGas: baseFee + 8, maxPriorityFeePerGas: 2, included: false, dropped: false, paid: 0, burned: 0, tip: 0, refunded: 0 },
@@ -130,22 +142,27 @@ function seedTransactions(baseFee: number): FeeMarketTx[] {
   ];
 }
 
+/** resetWaiting 执行当前内置仿真的状态推进、事件计算或校验逻辑。 */
 function resetWaiting(txs: FeeMarketTx[]): FeeMarketTx[] {
   return txs.filter((tx) => !tx.included).map((tx) => ({ ...tx, included: false, dropped: false, paid: 0, burned: 0, tip: 0, refunded: 0 }));
 }
 
+/** effectiveTip 执行当前内置仿真的状态推进、事件计算或校验逻辑。 */
 function effectiveTip(tx: FeeMarketTx, baseFee: number): number {
   return Math.max(0, Math.min(tx.maxPriorityFeePerGas, tx.maxFeePerGas - baseFee));
 }
 
+/** selectedGas 执行当前内置仿真的状态推进、事件计算或校验逻辑。 */
 function selectedGas(txs: FeeMarketTx[]): number {
   return txs.filter((tx) => tx.included).reduce((sum, tx) => sum + tx.gasLimit, 0);
 }
 
+/** totalTip 执行当前内置仿真的状态推进、事件计算或校验逻辑。 */
 function totalTip(txs: FeeMarketTx[]): number {
   return txs.reduce((sum, tx) => sum + tx.tip, 0);
 }
 
+/** explain 执行当前内置仿真的状态推进、事件计算或校验逻辑。 */
 function explain(index: number) {
   const phase = feeMarketPhases[index] ?? feeMarketPhases[0];
   return { title: phase.label, effect: phase.effect, reason: phase.reason, defaultDurationMs: 1200 };

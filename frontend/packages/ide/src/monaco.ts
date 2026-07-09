@@ -65,6 +65,7 @@ export async function mountMonacoEditor(container: HTMLElement, options: EditorM
   }
 }
 
+/** cssColor 读取设计令牌的计算值，供 Monaco 主题配置使用。 */
 function cssColor(token: string): string {
   const value = getComputedStyle(document.documentElement).getPropertyValue(token).trim()
   if (!value) {
@@ -73,6 +74,7 @@ function cssColor(token: string): string {
   return value
 }
 
+/** colorWithoutHash 把 CSS 颜色转换为 Monaco 需要的不带井号格式。 */
 function colorWithoutHash(color: string): string {
   return color.startsWith('#') ? color.slice(1) : color
 }

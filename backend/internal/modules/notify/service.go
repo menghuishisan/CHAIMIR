@@ -301,13 +301,24 @@ func (s *Service) CreateAnnouncement(ctx context.Context, req AnnouncementReques
 
 // ListAnnouncements 查询可见公告分页。
 func (s *Service) ListAnnouncements(ctx context.Context, page, size int) ([]AnnouncementDTO, int64, int, int, error) {
-	id, err := currentIdentity(ctx)
+	id, err := currentIdentityAllowPlatform(ctx)
 	if err != nil {
 		return nil, 0, page, size, err
 	}
 	page, size = pagex.Normalize(page, size)
 	var out []AnnouncementDTO
 	var total int64
+	if id.IsPlatform {
+		err = s.store.PlatformTx(ctx, func(ctx context.Context, tx TxStore) error {
+			var err error
+			out, total, err = tx.ListAnnouncements(ctx, 0, id.AccountID, []int16{contracts.RoleNumPlatformAdmin}, page, size)
+			return err
+		})
+		if err != nil {
+			return nil, 0, page, size, err
+		}
+		return out, total, page, size, nil
+	}
 	roleNumbers, err := s.currentRoleNumbers(ctx, id.AccountID)
 	if err != nil {
 		return nil, 0, page, size, err

@@ -1,0 +1,156 @@
+/* TopNavbar.module.css 定义学生端和教师端共用顶栏的深色导航样式。 */
+.navbar {
+  height: var(--topnav-h);
+  background-color: var(--color-dark-bg);
+  color: var(--color-dark-text);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 var(--space-4);
+  position: sticky;
+  top: 0;
+  z-index: var(--z-sticky);
+  box-shadow: var(--shadow-xs);
+}
+
+.leftSection {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+}
+
+.menuButton {
+  display: none;
+  background: none;
+  border: none;
+  color: inherit;
+  padding: var(--space-2);
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+}
+
+.menuButton:hover {
+  background-color: var(--color-glass-highlight);
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.brandIcon {
+  color: var(--color-on-dark-accent);
+}
+
+.brandName {
+  font-weight: var(--font-bold);
+  font-size: var(--text-lg);
+  letter-spacing: 0;
+}
+
+.rightSection {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+}
+
+.iconButton {
+  background: none;
+  border: none;
+  color: var(--color-dark-text-sub);
+  padding: var(--space-2);
+  cursor: pointer;
+  border-radius: var(--radius-full);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all var(--t) var(--ease);
+}
+
+.iconButton:hover {
+  color: var(--color-dark-text);
+  background-color: var(--color-glass-highlight);
+}
+
+.bellWrapper {
+  position: relative;
+}
+
+.badge {
+  position: absolute;
+  top: -2px;
+  right: -2px;
+  width: 8px;
+  height: 8px;
+  background-color: var(--color-secondary-accent);
+  border-radius: 50%;
+  border: 2px solid var(--color-dark-bg);
+}
+
+.userProfile {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding-left: var(--space-4);
+  border-left: 1px solid var(--color-glass-border);
+  border-top: 0;
+  border-right: 0;
+  border-bottom: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+.userProfile:hover {
+  color: var(--color-dark-text);
+}
+
+.avatar {
+  width: 32px;
+  height: 32px;
+  background-color: var(--color-primary-soft);
+  color: var(--color-primary);
+  border-radius: var(--radius-full);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: var(--font-semibold);
+  font-size: var(--text-sm);
+  border: 1px solid var(--color-primary-shadow);
+}
+
+.userInfo {
+  display: flex;
+  flex-direction: column;
+}
+
+.userName {
+  font-size: var(--text-sm);
+  font-weight: var(--font-medium);
+  line-height: 1.2;
+}
+
+.userPhone {
+  font-size: var(--text-xs);
+  color: var(--color-dark-text-sub);
+}
+
+.dropdownIcon {
+  color: var(--color-dark-text-sub);
+}
+
+@media (max-width: 768px) {
+  .menuButton {
+    display: flex;
+  }
+
+  .userInfo, .dropdownIcon {
+    display: none;
+  }
+
+  .userProfile {
+    padding-left: 0;
+    border-left: none;
+  }
+}

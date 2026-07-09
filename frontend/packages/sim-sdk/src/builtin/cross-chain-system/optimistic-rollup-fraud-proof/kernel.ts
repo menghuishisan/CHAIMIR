@@ -4,6 +4,7 @@ import type { ChainBlock, CheckpointResult, ReducerContext, SimEvent, SimInitPar
 import { optimisticRollupPhases, type DisputeSegment, type OptimisticRollupState } from './model';
 import { traceLinesForOptimisticRollup } from './trace';
 
+/** createInitialOptimisticRollupState 执行当前内置仿真的状态推进、事件计算或校验逻辑。 */
 export function createInitialOptimisticRollupState(_params: SimInitParams, _seed: number): OptimisticRollupState {
   return finalizeOptimisticRollupState({
     tick: 0,
@@ -32,6 +33,7 @@ export function createInitialOptimisticRollupState(_params: SimInitParams, _seed
   });
 }
 
+/** reduceOptimisticRollupEvent 执行当前内置仿真的状态推进、事件计算或校验逻辑。 */
 export function reduceOptimisticRollupEvent(state: OptimisticRollupState, event: SimEvent, _context: ReducerContext): OptimisticRollupState {
   if (event.type === 'select') return finalizeOptimisticRollupState({ ...state, selectedElementId: event.target });
   if (event.type === 'attack') return finalizeOptimisticRollupState({ ...state, phaseIndex: 2, challenged: true, claimedRoot: '0xclaim-bad', lastTransition: 'challenge' });
@@ -40,6 +42,7 @@ export function reduceOptimisticRollupEvent(state: OptimisticRollupState, event:
   return state;
 }
 
+/** finalizeOptimisticRollupState 执行当前内置仿真的状态推进、事件计算或校验逻辑。 */
 export function finalizeOptimisticRollupState(state: OptimisticRollupState): OptimisticRollupState {
   return {
     ...state,
@@ -55,6 +58,7 @@ export function finalizeOptimisticRollupState(state: OptimisticRollupState): Opt
   };
 }
 
+/** optimisticRollupCheckpoint 执行当前内置仿真的状态推进、事件计算或校验逻辑。 */
 export function optimisticRollupCheckpoint(state: OptimisticRollupState): CheckpointResult {
   return {
     achieved: state.fraudProven || state.finalized,
@@ -63,6 +67,7 @@ export function optimisticRollupCheckpoint(state: OptimisticRollupState): Checkp
   };
 }
 
+/** optimisticRollupChain 执行当前内置仿真的状态推进、事件计算或校验逻辑。 */
 export function optimisticRollupChain(state: OptimisticRollupState): ChainBlock[] {
   return [
     { id: 'l1-prev', height: state.l1Height - 1, hash: 'l1-prev', parentHash: '', label: 'L1 previous', status: 'canonical' },
@@ -70,11 +75,13 @@ export function optimisticRollupChain(state: OptimisticRollupState): ChainBlock[
   ];
 }
 
+/** disputeTree 执行当前内置仿真的状态推进、事件计算或校验逻辑。 */
 export function disputeTree(state: OptimisticRollupState): TreeNode {
   const leaves = state.transactions.map((tx, index) => ({ id: tx.id, label: `${index}: ${tx.action}`, hash: tx.valid ? 'ok' : 'bad', meta: { id: tx.id, label: tx.action, lifecycle: { state: state.phaseIndex >= 3 ? 'active' as const : 'entering' as const, fromTick: Math.max(0, state.tick - 1) }, emphasis: tx.valid ? 'context' as const : 'focus' as const, explanation: tx.valid ? '状态转换匹配' : '争议状态转换' } }));
   return { id: 'trace-root', label: '执行 trace', hash: state.claimedRoot, children: [{ id: 'left-half', label: 'steps 0-1', hash: 'left', children: leaves.slice(0, 2) }, { id: 'right-half', label: 'steps 2-3', hash: 'right', children: leaves.slice(2) }] };
 }
 
+/** advanceOptimisticRollup 执行当前内置仿真的状态推进、事件计算或校验逻辑。 */
 function advanceOptimisticRollup(state: OptimisticRollupState, event: SimEvent): OptimisticRollupState {
   const tick = event.source === 'tick' ? state.tick + 1 : state.tick;
   if (state.phaseIndex === 0) return { ...state, tick, phaseIndex: 1, lastTransition: 'submit' };
@@ -85,16 +92,19 @@ function advanceOptimisticRollup(state: OptimisticRollupState, event: SimEvent):
   return { ...state, tick, phaseIndex: 0, lastTransition: 'sequence' };
 }
 
+/** splitDispute 执行当前内置仿真的状态推进、事件计算或校验逻辑。 */
 function splitDispute(segments: DisputeSegment[]): DisputeSegment[] {
   const active = segments.find((segment) => segment.status === 'open') ?? segments[0];
   const mid = Math.floor((active.fromStep + active.toStep) / 2);
   return [{ ...active, status: 'split' }, { id: `seg-${active.fromStep}-${mid}`, fromStep: active.fromStep, toStep: mid, status: 'resolved' }, { id: `seg-${mid + 1}-${active.toStep}`, fromStep: mid + 1, toStep: active.toStep, status: 'open' }];
 }
 
+/** disputedStep 执行当前内置仿真的状态推进、事件计算或校验逻辑。 */
 function disputedStep(state: OptimisticRollupState): number {
   return state.transactions.findIndex((tx) => !tx.valid);
 }
 
+/** explain 执行当前内置仿真的状态推进、事件计算或校验逻辑。 */
 function explain(index: number) {
   const phase = optimisticRollupPhases[index] ?? optimisticRollupPhases[0];
   return { title: phase.label, effect: phase.effect, reason: phase.reason, defaultDurationMs: 1200 };

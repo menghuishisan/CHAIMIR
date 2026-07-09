@@ -6,6 +6,7 @@ import { graphEdges, laneMessages, matrixCells } from '../runtimeView';
 import { labelPoolActor } from './kernel';
 import { mempoolReplacementPhases, type MempoolReplacementState, type PoolStatus } from './model';
 
+/** renderMempoolReplacementView 生成当前内置仿真的可视化视图模型。 */
 export function renderMempoolReplacementView(state: MempoolReplacementState): TeachingFrame {
   const pending = state.transactions.filter((tx) => tx.status === 'pending').length;
   const queued = state.transactions.filter((tx) => tx.status === 'queued').length;
@@ -35,6 +36,7 @@ export function renderMempoolReplacementView(state: MempoolReplacementState): Te
   });
 }
 
+/** poolCells 生成当前内置仿真的可视化视图模型。 */
 function poolCells(state: MempoolReplacementState): MatrixCell[][] {
   return matrixCells(state.transactions.map((tx) => tx.id), ['账户/nonce', '费用', '状态', '原因'], (row, column) => {
     const tx = state.transactions.find((item) => item.id === row);
@@ -47,6 +49,7 @@ function poolCells(state: MempoolReplacementState): MatrixCell[][] {
   });
 }
 
+/** graphNodes 生成当前内置仿真的可视化视图模型。 */
 function graphNodes(state: MempoolReplacementState): GraphNode[] {
   const seenByNode = new Map(state.nodeViews.map((nodeView) => [nodeView.node, nodeView.seen.length]));
   return ['user', 'local', 'peer', 'builder', 'block'].map((id) => ({
@@ -59,15 +62,18 @@ function graphNodes(state: MempoolReplacementState): GraphNode[] {
   }));
 }
 
+/** focusIds 生成当前内置仿真的可视化视图模型。 */
 function focusIds(state: MempoolReplacementState): string[] {
   const active = state.transactions.find((tx) => tx.status === 'pending') ?? state.transactions[0];
   return [active?.id ?? 'mempool-matrix'];
 }
 
+/** statusLabel 生成当前内置仿真的可视化视图模型。 */
 function statusLabel(status: PoolStatus): string {
   return ({ pending: 'pending', queued: 'queued', replaced: '已替换', rejected: '已拒绝', included: '已入块' })[status];
 }
 
+/** statusCell 生成当前内置仿真的可视化视图模型。 */
 function statusCell(status: PoolStatus): MatrixCell['status'] {
   if (status === 'pending' || status === 'included') return 'yes';
   if (status === 'rejected') return 'fault';
@@ -75,12 +81,14 @@ function statusCell(status: PoolStatus): MatrixCell['status'] {
   return 'pending';
 }
 
+/** emphasisFor 生成当前内置仿真的可视化视图模型。 */
 function emphasisFor(status: PoolStatus): VisualElementMeta['emphasis'] {
   if (status === 'pending' || status === 'included') return 'focus';
   if (status === 'replaced' || status === 'rejected') return 'ghost';
   return 'context';
 }
 
+/** meta 生成当前内置仿真的可视化视图模型。 */
 function meta(id: string, label: string, emphasis: VisualElementMeta['emphasis'], tick: number): VisualElementMeta {
   return { id, label, lifecycle: { state: emphasis === 'ghost' ? 'archived' : emphasis === 'focus' ? 'active' : 'settled', fromTick: Math.max(0, tick - 1) }, emphasis, explanation: label };
 }

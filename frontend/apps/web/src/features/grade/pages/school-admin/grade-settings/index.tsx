@@ -1,0 +1,123 @@
+// GradeSettingsPage 管理成绩等级映射、学期和学业预警规则。
+
+import React, { useCallback, useState } from 'react'
+import type { ApiError } from '@chaimir/api-client'
+import { Button, Callout, Input, Switch, Textarea } from '@chaimir/ui'
+import { Plus, RefreshCw, Settings2 } from 'lucide-react'
+import { api } from '../../../../../app/api'
+import { ErrorState, LoadingState } from '../../../../../components/ResourceState'
+import { useAsyncResource } from '../../../../../hooks'
+import styles from '../../grade.module.css'
+import { parseJsonArray } from '../../../../../utils/index'
+
+const GradeSettingsPage: React.FC = () => {
+  const levels = useAsyncResource(() => api.grade.listLevelConfigs(), [])
+  const semesters = useAsyncResource(() => api.grade.listSemesters(), [])
+  const warningRules = useAsyncResource(() => api.grade.getWarningRules(), [])
+  const [levelName, setLevelName] = useState('')
+  const [mapping, setMapping] = useState('[\n  { "min": 90, "grade": "A", "gpa": 4.0 }\n]')
+  const [failCount, setFailCount] = useState('2')
+  const [minGpa, setMinGpa] = useState('2.0')
+  const [isDefault, setIsDefault] = useState(true)
+  const [semesterName, setSemesterName] = useState('')
+  const [startDate, setStartDate] = useState('')
+  const [endDate, setEndDate] = useState('')
+  const [submitting, setSubmitting] = useState<string | null>(null)
+  const [message, setMessage] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  const reloadAll = useCallback(() => {
+    levels.reload()
+    semesters.reload()
+    warningRules.reload()
+  }, [levels, semesters, warningRules])
+
+  const runAction = useCallback(async (key: string, action: () => Promise<unknown>, successMessage: string) => {
+    setSubmitting(key)
+    setError(null)
+    setMessage(null)
+    try {
+      await action()
+      setMessage(successMessage)
+      reloadAll()
+    } catch (actionError) {
+      setError((actionError as ApiError).message || (actionError as Error).message || '配置保存失败，请检查内容。')
+    } finally {
+      setSubmitting(null)
+    }
+  }, [reloadAll])
+
+  return (
+    <div className={styles.page}>
+      <div className={styles.header}>
+        <div>
+          <h1 className={styles.title}><Settings2 size={28} />成绩规则定义</h1>
+          <p className={styles.subtitle}>维护 GPA 映射、学期和预警规则。</p>
+        </div>
+        <Button variant="outline" icon={<RefreshCw size={16} />} onClick={reloadAll}>刷新</Button>
+      </div>
+      {error && <div className={styles.error}>{error}</div>}
+      {message && <Callout variant="success" title="保存成功">{message}</Callout>}
+      {(levels.error || semesters.error || warningRules.error) && (
+        <ErrorState error={levels.error || semesters.error || warningRules.error} onRetry={reloadAll} />
+      )}
+      {(levels.status === 'loading' || semesters.status === 'loading' || warningRules.status === 'loading') && <LoadingState title="正在获取成绩配置" />}
+
+      <div className={styles.grid}>
+        <section className={styles.panel}>
+          <h2>新增等级映射</h2>
+          <label className={styles.field}>规则名称<Input fullWidth value={levelName} onChange={(event) => setLevelName(event.target.value)} /></label>
+          <label className={styles.field}>映射 JSON<Textarea value={mapping} onChange={(event) => setMapping(event.target.value)} /></label>
+          <Switch checked={isDefault} label="设为默认规则" onChange={(event) => setIsDefault(event.target.checked)} />
+          <Button
+            loading={submitting === 'level'}
+            icon={<Plus size={16} />}
+            onClick={() => runAction('level', () => api.grade.createLevelConfig({
+              name: levelName,
+              mapping: parseJsonArray(mapping, '等级映射必须是数组。'),
+              warning_rules: { fail_count: Number(failCount), min_gpa: Number(minGpa) },
+              is_default: isDefault,
+            }), '等级映射已创建。')}
+          >
+            保存等级规则
+          </Button>
+        </section>
+
+        <section className={styles.panel}>
+          <h2>新增学期</h2>
+          <label className={styles.field}>学期名称<Input fullWidth value={semesterName} onChange={(event) => setSemesterName(event.target.value)} /></label>
+          <label className={styles.field}>开始日期<Input fullWidth type="date" value={startDate} onChange={(event) => setStartDate(event.target.value)} /></label>
+          <label className={styles.field}>结束日期<Input fullWidth type="date" value={endDate} onChange={(event) => setEndDate(event.target.value)} /></label>
+          <Button
+            loading={submitting === 'semester'}
+            icon={<Plus size={16} />}
+            onClick={() => runAction('semester', () => api.grade.createSemester({ name: semesterName, start_date: startDate, end_date: endDate, is_current: true }), '学期已创建。')}
+          >
+            保存学期
+          </Button>
+        </section>
+
+        <section className={styles.panel}>
+          <h2>预警规则</h2>
+          <label className={styles.field}>挂科门数<Input fullWidth value={failCount} onChange={(event) => setFailCount(event.target.value)} /></label>
+          <label className={styles.field}>最低 GPA<Input fullWidth value={minGpa} onChange={(event) => setMinGpa(event.target.value)} /></label>
+          <Button
+            loading={submitting === 'warning'}
+            onClick={() => runAction('warning', () => api.grade.updateWarningRules({ fail_count: Number(failCount), min_gpa: Number(minGpa) }), '预警规则已保存。')}
+          >
+            保存预警规则
+          </Button>
+        </section>
+
+        <section className={styles.panel}>
+          <h2>当前配置</h2>
+          <span className={styles.status}>等级规则 {levels.data?.length || 0} 条</span>
+          <span className={styles.status}>学期 {semesters.data?.length || 0} 个</span>
+          <span className={styles.status}>预警: {warningRules.data ? `${warningRules.data.fail_count} 门 / GPA ${warningRules.data.min_gpa}` : '未配置'}</span>
+        </section>
+      </div>
+    </div>
+  )
+}
+
+export default GradeSettingsPage

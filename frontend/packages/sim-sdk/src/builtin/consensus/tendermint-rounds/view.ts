@@ -6,6 +6,7 @@ import { graphEdges, laneMessages, voteCells } from '../consensusView';
 import { labelTendermintActor } from './kernel';
 import { tendermintRoundPhases, type TendermintRoundsState } from './model';
 
+/** renderTendermintRoundsView 生成当前内置仿真的可视化视图模型。 */
 export function renderTendermintRoundsView(state: TendermintRoundsState): TeachingFrame {
   const summary = `高度 ${state.height},Round ${state.round},提议 ${state.proposal?.value ?? '等待'},已提交 ${state.committedValue ?? '未提交'},超时 ${state.timeout ? '是' : '否'}。`;
   const primary = state.phaseIndex <= 3 ? 'tendermint-lane' : 'tendermint-matrix';
@@ -33,6 +34,7 @@ export function renderTendermintRoundsView(state: TendermintRoundsState): Teachi
   });
 }
 
+/** voteMatrix 生成当前内置仿真的可视化视图模型。 */
 function voteMatrix(state: TendermintRoundsState): MatrixCell[][] {
   return voteCells(state.validators.map((validator) => validator.label), ['权重', 'Prevote', 'Precommit', 'Lock'], (row, column) => {
     const validator = state.validators.find((item) => item.label === row);
@@ -45,11 +47,13 @@ function voteMatrix(state: TendermintRoundsState): MatrixCell[][] {
   });
 }
 
+/** graphNodes 生成当前内置仿真的可视化视图模型。 */
 function graphNodes(state: TendermintRoundsState): GraphNode[] {
   const validatorNodes: GraphNode[] = state.validators.map((validator) => ({ id: validator.id, label: validator.label, role: 'validator', status: validator.lockedValue ? 'success' : validator.online ? 'active' : 'warning', value: `power ${validator.power}`, meta: meta(validator.id, validator.label, validator.lockedValue ? 'focus' : 'context', state.tick) }));
   return validatorNodes.concat({ id: 'network', label: '网络', role: 'broadcast', status: state.timeout ? 'warning' : 'active', meta: meta('network', '网络', 'context', state.tick) });
 }
 
+/** meta 生成当前内置仿真的可视化视图模型。 */
 function meta(id: string, label: string, emphasis: VisualElementMeta['emphasis'], tick: number): VisualElementMeta {
   return { id, label, lifecycle: { state: emphasis === 'ghost' ? 'archived' : emphasis === 'focus' ? 'active' : 'settled', fromTick: Math.max(0, tick - 1) }, emphasis, explanation: label };
 }

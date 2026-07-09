@@ -56,6 +56,7 @@ export async function mountTerminal(container: HTMLElement, options: TerminalMou
   }
 }
 
+/** cssColor 读取设计令牌的计算值，供 xterm 主题配置使用。 */
 function cssColor(token: string): string {
   const value = getComputedStyle(document.documentElement).getPropertyValue(token).trim()
   if (!value) {

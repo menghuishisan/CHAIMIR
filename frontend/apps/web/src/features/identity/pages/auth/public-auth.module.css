@@ -1,0 +1,192 @@
+/* Public auth styles define shared full-page layouts for unauthenticated flows. */
+
+.publicPage {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: var(--space-6);
+  background: var(--color-surface);
+}
+
+.publicCard {
+  width: min(920px, 100%);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+  padding: var(--space-8);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-xl);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-lg);
+}
+
+.centerHeader {
+  text-align: center;
+}
+
+.centerHeader h1,
+.platformForm h1,
+.successPanel h2 {
+  margin: 0;
+  color: var(--color-text-strong);
+  font-weight: var(--font-semibold);
+}
+
+.centerHeader h1,
+.platformForm h1 {
+  font-size: var(--text-3xl);
+}
+
+.centerHeader p,
+.platformForm p,
+.successPanel p {
+  margin: var(--space-2) 0 0;
+  color: var(--color-text-sub);
+}
+
+.formGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-4);
+}
+
+.field,
+.fieldFull {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  color: var(--color-text-strong);
+  font-size: var(--text-sm);
+  font-weight: var(--font-medium);
+}
+
+.fieldFull {
+  grid-column: 1 / -1;
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+}
+
+.actions a,
+.successPanel a {
+  color: var(--color-primary-text);
+  font-size: var(--text-sm);
+  font-weight: var(--font-medium);
+  text-decoration: none;
+}
+
+.successPanel {
+  display: grid;
+  place-items: center;
+  gap: var(--space-4);
+  padding: var(--space-7) 0;
+  text-align: center;
+}
+
+.successPanel svg {
+  color: var(--color-success);
+}
+
+.error {
+  padding: var(--space-3);
+  border: 1px solid var(--color-danger-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-danger-bg);
+  color: var(--color-danger);
+  font-size: var(--text-sm);
+}
+
+.platformPage {
+  min-height: 100vh;
+  display: grid;
+  grid-template-columns: minmax(0, 3fr) minmax(420px, 2fr);
+  background: var(--color-dark-bg);
+  color: var(--color-dark-text);
+}
+
+.platformVisual {
+  position: relative;
+  overflow: hidden;
+  border-right: 1px solid var(--color-glass-border);
+}
+
+.grid {
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(to right, var(--color-glass-border-subtle) 1px, transparent 1px),
+    linear-gradient(to bottom, var(--color-glass-border-subtle) 1px, transparent 1px);
+  background-size: 40px 40px;
+}
+
+.symbol {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: var(--color-warning);
+  opacity: 0.35;
+}
+
+.platformForm {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: var(--space-5);
+  padding: var(--space-9);
+}
+
+.brand {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin-bottom: var(--space-5);
+  color: var(--color-dark-text-sub);
+  font-size: var(--text-lg);
+  font-weight: var(--font-semibold);
+  letter-spacing: 0.08em;
+}
+
+.brand svg {
+  color: var(--color-warning);
+}
+
+.darkFields {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+}
+
+.platformForm .field {
+  color: var(--color-dark-text-sub);
+}
+
+@media (max-width: 760px) {
+  .publicCard {
+    padding: var(--space-5);
+  }
+
+  .formGrid,
+  .platformPage {
+    grid-template-columns: 1fr;
+  }
+
+  .platformVisual {
+    min-height: 220px;
+    border-right: 0;
+    border-bottom: 1px solid var(--color-glass-border);
+  }
+
+  .platformForm {
+    padding: var(--space-6);
+  }
+
+  .actions {
+    align-items: stretch;
+    flex-direction: column-reverse;
+  }
+}

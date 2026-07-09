@@ -11,6 +11,9 @@ export interface GradeCellProps extends React.HTMLAttributes<HTMLDivElement> {
   label?: string
 }
 
+/**
+ * GradeCell 以一致格式展示成绩、锁定状态和辅助说明，适合表格与详情场景复用。
+ */
 export function GradeCell({ score, locked = false, label, className, ...props }: GradeCellProps): React.ReactElement {
   return (
     <div className={clsx('chaimir-grade-cell', locked && 'is-locked', className)} {...props}>

@@ -13,6 +13,9 @@ export interface AutosaveProps extends React.HTMLAttributes<HTMLDivElement> {
   traceId?: string
 }
 
+/**
+ * Autosave 展示服务端草稿保存状态，并在失败时保留可报障编号。
+ */
 export function Autosave({ status, savedAt, traceId, className, ...props }: AutosaveProps): React.ReactElement {
   const label = statusLabel(status, savedAt, traceId)
   return (

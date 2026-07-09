@@ -18,6 +18,9 @@ export interface StepsProps extends React.HTMLAttributes<HTMLOListElement> {
   steps: StepItem[]
 }
 
+/**
+ * Steps 渲染向导流程状态，并通过 aria-current 标记当前步骤。
+ */
 export function Steps({ steps, className, ...props }: StepsProps): React.ReactElement {
   return (
     <ol className={clsx('chaimir-steps', className)} {...props}>

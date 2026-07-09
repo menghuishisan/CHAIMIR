@@ -361,6 +361,7 @@ function classNames(...items: Array<string | false | undefined>): string {
   return items.filter(Boolean).join(' ')
 }
 
+/** maxTerminalHeight 根据窗口高度限制终端拖拽上限，避免挤掉编辑区。 */
 function maxTerminalHeight(): number {
   if (typeof window === 'undefined') {
     return 720
@@ -368,10 +369,12 @@ function maxTerminalHeight(): number {
   return Math.max(MIN_TERMINAL_HEIGHT, window.innerHeight * 0.7)
 }
 
+/** clampTerminalHeight 把终端高度限制在可用范围内。 */
 function clampTerminalHeight(height: number): number {
   return Math.min(Math.max(height, MIN_TERMINAL_HEIGHT), maxTerminalHeight())
 }
 
+/** notifyWorkbenchResize 通知 Monaco 与 xterm 在面板尺寸变化后重新测量。 */
 function notifyWorkbenchResize(): void {
   if (typeof window !== 'undefined') {
     window.dispatchEvent(new Event('resize'))

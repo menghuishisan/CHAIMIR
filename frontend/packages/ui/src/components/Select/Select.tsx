@@ -1,10 +1,13 @@
 // Select 组件：下拉选择
 // 符合 FE-2（无障碍）、FE-4（文案面向用户）
 
-import React, { useState, useRef, useEffect, useId } from 'react'
+import React, { useState, useEffect, useId } from 'react'
+import { createPortal } from 'react-dom'
+import { useFloating, offset, flip, shift, autoUpdate, size } from '@floating-ui/react'
 import { ChevronDown, Check } from 'lucide-react'
 import { clsx } from 'clsx'
 import { triggerHaptic } from '../../utils/haptics'
+import { useClickOutside, useEscapeKey } from '../../hooks'
 import './Select.css'
 
 export interface SelectOption {
@@ -14,27 +17,16 @@ export interface SelectOption {
 }
 
 export interface SelectProps {
-  /** 触发按钮 ID，用于 label 关联 */
   id?: string
-  /** 选项列表 */
   options: SelectOption[]
-  /** 当前值 */
   value?: string
-  /** 默认值 */
   defaultValue?: string
-  /** 提示文字 */
   placeholder?: string
-  /** 尺寸 */
   size?: 'sm' | 'md' | 'lg'
-  /** 禁用 */
   disabled?: boolean
-  /** 错误状态 */
   error?: boolean
-  /** 完整宽度 */
   fullWidth?: boolean
-  /** 变化回调 */
   onChange?: (value: string) => void
-  /** 自定义类名 */
   className?: string
 }
 
@@ -46,22 +38,40 @@ export const Select = React.forwardRef<HTMLDivElement, SelectProps>(
       value,
       defaultValue,
       placeholder = '请选择',
-      size = 'md',
+      size: selectSize = 'md',
       disabled = false,
       error = false,
       fullWidth = false,
       onChange,
       className,
     },
-    _ref
+    ref
   ) => {
     const [isOpen, setIsOpen] = useState(false)
     const [selectedValue, setSelectedValue] = useState(value || defaultValue || '')
     const [activeIndex, setActiveIndex] = useState(0)
-    const containerRef = useRef<HTMLDivElement>(null)
     const generatedId = useId()
     const triggerId = id ?? `chaimir-select-${generatedId}`
     const listboxId = `${triggerId}-listbox`
+
+    const { refs, floatingStyles } = useFloating<HTMLDivElement>({
+      open: isOpen,
+      onOpenChange: setIsOpen,
+      placement: 'bottom-start',
+      whileElementsMounted: autoUpdate,
+      middleware: [
+        offset(4),
+        flip({ padding: 8 }),
+        shift({ padding: 8 }),
+        size({
+          apply({ rects, elements }) {
+            Object.assign(elements.floating.style, {
+              width: `${rects.reference.width}px`,
+            })
+          },
+        }),
+      ],
+    })
 
     // 监听 value 变化
     useEffect(() => {
@@ -70,40 +80,18 @@ export const Select = React.forwardRef<HTMLDivElement, SelectProps>(
       }
     }, [value])
 
-    // 点击外部关闭下拉
-    useEffect(() => {
-      if (!isOpen) return
-
-      const handleClickOutside = (event: MouseEvent | TouchEvent) => {
-        const el = containerRef.current
-        if (!el || el.contains(event.target as Node)) {
+    useClickOutside(
+      refs.floating as React.RefObject<HTMLDivElement>,
+      (e) => {
+        if (refs.domReference.current && refs.domReference.current.contains(e.target as Node)) {
           return
         }
         setIsOpen(false)
-      }
+      },
+      isOpen
+    )
 
-      document.addEventListener('mousedown', handleClickOutside)
-      document.addEventListener('touchstart', handleClickOutside)
-
-      return () => {
-        document.removeEventListener('mousedown', handleClickOutside)
-        document.removeEventListener('touchstart', handleClickOutside)
-      }
-    }, [isOpen])
-
-    // Esc 键关闭
-    useEffect(() => {
-      if (!isOpen) return
-
-      const handleEscape = (event: KeyboardEvent) => {
-        if (event.key === 'Escape') {
-          setIsOpen(false)
-        }
-      }
-
-      document.addEventListener('keydown', handleEscape)
-      return () => document.removeEventListener('keydown', handleEscape)
-    }, [isOpen])
+    useEscapeKey(() => setIsOpen(false), isOpen)
 
     const selectedOption = options.find((opt) => opt.value === selectedValue)
     const selectedIndex = options.findIndex((opt) => opt.value === selectedValue && !opt.disabled)
@@ -124,9 +112,6 @@ export const Select = React.forwardRef<HTMLDivElement, SelectProps>(
       }
     }
 
-    /**
-     * handleKeyDown 提供选择器键盘操作，避免下拉项只能通过鼠标点击。
-     */
     const handleKeyDown = (event: React.KeyboardEvent<HTMLButtonElement>) => {
       if (disabled) return
       if (event.key === 'ArrowDown') {
@@ -163,7 +148,7 @@ export const Select = React.forwardRef<HTMLDivElement, SelectProps>(
 
     const classes = clsx(
       'chaimir-select',
-      `chaimir-select--${size}`,
+      `chaimir-select--${selectSize}`,
       error && 'chaimir-select--error',
       disabled && 'chaimir-select--disabled',
       fullWidth && 'chaimir-select--full',
@@ -171,8 +156,17 @@ export const Select = React.forwardRef<HTMLDivElement, SelectProps>(
       className
     )
 
+    const handleRef = (node: HTMLDivElement | null) => {
+      refs.setReference(node)
+      if (typeof ref === 'function') {
+        ref(node)
+      } else if (ref) {
+        ref.current = node
+      }
+    }
+
     return (
-      <div ref={containerRef} className={classes}>
+      <div ref={handleRef} className={classes}>
         <button
           id={triggerId}
           type="button"
@@ -198,37 +192,46 @@ export const Select = React.forwardRef<HTMLDivElement, SelectProps>(
           />
         </button>
 
-        {isOpen && (
-          <div id={listboxId} className="chaimir-select__dropdown" role="listbox">
-            {options.map((option, index) => (
-              <div
-                key={option.value}
-                id={`${listboxId}-${option.value}`}
-                className={clsx(
-                  'chaimir-select__option',
-                  option.value === selectedValue && 'chaimir-select__option--selected',
-                  index === activeIndex && 'chaimir-select__option--active',
-                  option.disabled && 'chaimir-select__option--disabled'
-                )}
-                role="option"
-                aria-selected={option.value === selectedValue}
-                aria-disabled={option.disabled || undefined}
-                onMouseEnter={() => !option.disabled && setActiveIndex(index)}
-                onClick={() => {
-                  if (!option.disabled) {
-                    triggerHaptic(10)
-                    handleSelect(option.value)
-                  }
-                }}
-              >
-                {option.label}
-                {option.value === selectedValue && (
-                  <Check size={16} className="chaimir-select__check" />
-                )}
-              </div>
-            ))}
-          </div>
-        )}
+        {isOpen &&
+          typeof document !== 'undefined' &&
+          createPortal(
+            <div
+              ref={refs.setFloating}
+              style={floatingStyles}
+              id={listboxId}
+              className="chaimir-select__dropdown"
+              role="listbox"
+            >
+              {options.map((option, index) => (
+                <div
+                  key={option.value}
+                  id={`${listboxId}-${option.value}`}
+                  className={clsx(
+                    'chaimir-select__option',
+                    option.value === selectedValue && 'chaimir-select__option--selected',
+                    index === activeIndex && 'chaimir-select__option--active',
+                    option.disabled && 'chaimir-select__option--disabled'
+                  )}
+                  role="option"
+                  aria-selected={option.value === selectedValue}
+                  aria-disabled={option.disabled || undefined}
+                  onMouseEnter={() => !option.disabled && setActiveIndex(index)}
+                  onClick={() => {
+                    if (!option.disabled) {
+                      triggerHaptic(10)
+                      handleSelect(option.value)
+                    }
+                  }}
+                >
+                  {option.label}
+                  {option.value === selectedValue && (
+                    <Check size={16} className="chaimir-select__check" />
+                  )}
+                </div>
+              ))}
+            </div>,
+            document.body
+          )}
       </div>
     )
   }
@@ -257,7 +260,7 @@ function lastEnabledIndex(options: SelectOption[]): number {
 }
 
 /**
- * nextEnabledIndex 按方向寻找下一个可选项，支持首尾循环。
+ * nextEnabledIndex 按方向寻找下一个可选项，支持首尾循环和禁用项跳过。
  */
 function nextEnabledIndex(options: SelectOption[], current: number, direction: 1 | -1): number {
   if (options.length === 0) {

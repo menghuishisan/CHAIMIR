@@ -1,9 +1,11 @@
 // Drawer 组件：侧栏抽屉和窄屏导航容器，提供 Esc 关闭和无障碍标题。
 
 import React, { useEffect, useId, useRef } from 'react'
+import { createPortal } from 'react-dom'
 import { clsx } from 'clsx'
 import { X } from 'lucide-react'
 import { Button } from '../Button'
+import { useEscapeKey, useFocusTrap } from '../../hooks'
 import './Drawer.css'
 
 export interface DrawerProps extends React.HTMLAttributes<HTMLDivElement> {
@@ -14,45 +16,35 @@ export interface DrawerProps extends React.HTMLAttributes<HTMLDivElement> {
   children?: React.ReactNode
 }
 
+/**
+ * Drawer 通过 portal 渲染侧向浮层，统一遮罩关闭、Esc 关闭、焦点陷阱和触屏滑动关闭。
+ */
 export function Drawer({ open, title, side = 'right', onClose, children, className, ...props }: DrawerProps): React.ReactElement | null {
   const panelRef = useRef<HTMLElement>(null)
-  const previousActiveElement = useRef<HTMLElement | null>(null)
   const titleId = useId()
   const touchStartX = useRef(0)
   const currentTranslateX = useRef(0)
   const [swipeStyle, setSwipeStyle] = React.useState<React.CSSProperties>({})
 
+  // 快捷键与焦点陷阱
+  useFocusTrap(panelRef as React.RefObject<HTMLElement>, open)
+  useEscapeKey(() => {
+    if (open) onClose()
+  }, open)
+
   useEffect(() => {
     if (!open) {
-      previousActiveElement.current?.focus()
       document.body.style.overflow = ''
       return
     }
 
-    previousActiveElement.current = document.activeElement as HTMLElement
     document.body.style.overflow = 'hidden'
-    panelRef.current?.querySelector<HTMLElement>('button, a[href], input, select, textarea, [tabindex]:not([tabindex="-1"])')?.focus()
 
     return () => {
       document.body.style.overflow = ''
       setSwipeStyle({})
     }
   }, [open])
-
-  useEffect(() => {
-    if (!open) return
-    function handleKeyDown(event: KeyboardEvent): void {
-      if (event.key === 'Escape') {
-        onClose()
-        return
-      }
-      if (event.key === 'Tab') {
-        trapFocus(event, panelRef.current)
-      }
-    }
-    document.addEventListener('keydown', handleKeyDown)
-    return () => document.removeEventListener('keydown', handleKeyDown)
-  }, [open, onClose])
 
   if (!open) {
     return null
@@ -74,12 +66,12 @@ export function Drawer({ open, title, side = 'right', onClose, children, classNa
     if (Math.abs(currentTranslateX.current) > 80) {
       onClose()
     } else {
-      setSwipeStyle({ transform: `translateX(0)`, transition: 'transform 0.4s var(--ease-spring-bouncy)' })
+      setSwipeStyle({ transform: `translateX(0)`, transition: 'transform 0.4s var(--ease-spring)' })
     }
     currentTranslateX.current = 0
   }
 
-  return (
+  const content = (
     <div className="chaimir-drawer" role="presentation">
       <button className="chaimir-drawer__scrim" type="button" aria-label="关闭抽屉" onClick={onClose} />
       <aside
@@ -103,46 +95,6 @@ export function Drawer({ open, title, side = 'right', onClose, children, classNa
       </aside>
     </div>
   )
-}
 
-/**
- * trapFocus 让抽屉打开时键盘焦点保持在抽屉内部。
- */
-function trapFocus(event: KeyboardEvent, container: HTMLElement | null): void {
-  if (!container) {
-    return
-  }
-  const focusable = getFocusableElements(container)
-  if (focusable.length === 0) {
-    event.preventDefault()
-    container.focus()
-    return
-  }
-
-  const first = focusable[0]
-  const last = focusable[focusable.length - 1]
-  if (event.shiftKey && document.activeElement === first) {
-    event.preventDefault()
-    last.focus()
-    return
-  }
-  if (!event.shiftKey && document.activeElement === last) {
-    event.preventDefault()
-    first.focus()
-  }
-}
-
-/**
- * getFocusableElements 返回当前抽屉内可见可操作的元素。
- */
-function getFocusableElements(container: HTMLElement): HTMLElement[] {
-  const selector = [
-    'a[href]',
-    'button:not([disabled])',
-    'input:not([disabled])',
-    'select:not([disabled])',
-    'textarea:not([disabled])',
-    '[tabindex]:not([tabindex="-1"])',
-  ].join(',')
-  return Array.from(container.querySelectorAll<HTMLElement>(selector)).filter((element) => element.offsetParent !== null)
+  return typeof document !== 'undefined' ? createPortal(content, document.body) : null
 }

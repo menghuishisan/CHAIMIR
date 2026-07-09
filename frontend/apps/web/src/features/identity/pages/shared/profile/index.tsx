@@ -1,0 +1,126 @@
+// ProfilePage 展示当前登录账号资料、会话列表，并提供密码修改入口。
+
+import React, { useCallback, useMemo, useState } from 'react'
+import type { ApiError, Session } from '@chaimir/api-client'
+import type { TableColumn } from '@chaimir/ui'
+import { Button, Callout, DescriptionList, Input, Table } from '@chaimir/ui'
+import { Save, User } from 'lucide-react'
+import { api } from '../../../../../app/api'
+import { ErrorState, LoadingState } from '../../../../../components/ResourceState'
+import { useAsyncResource } from '../../../../../hooks'
+import styles from '../../identity-admin.module.css'
+import { accountStatusLabel, formatDateTime, sessionStatusLabel } from '../../../../../utils/index'
+
+
+const ProfilePage: React.FC = () => {
+  const me = useAsyncResource(() => api.identity.getMe(), [])
+  const sessions = useAsyncResource(() => api.identity.getSessions(), [])
+  const [oldPassword, setOldPassword] = useState('')
+  const [newPassword, setNewPassword] = useState('')
+  const [submitting, setSubmitting] = useState(false)
+  const [message, setMessage] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  /**
+   * handleChangePassword 调用当前用户修改密码接口。
+   */
+  const handleChangePassword = useCallback(async () => {
+    setSubmitting(true)
+    setError(null)
+    setMessage(null)
+    try {
+      await api.identity.changePassword({ old_password: oldPassword, new_password: newPassword })
+      setOldPassword('')
+      setNewPassword('')
+      setMessage('密码已修改，请使用新密码登录。')
+    } catch (changeError) {
+      setError((changeError as ApiError).message || '密码修改失败，请检查原密码后重试。')
+    } finally {
+      setSubmitting(false)
+    }
+  }, [newPassword, oldPassword])
+
+  const columns = useMemo<TableColumn<Session>[]>(() => [
+    { key: 'device', title: '设备', render: (row) => row.device_info || '未知设备', priority: 'primary' },
+    { key: 'ip', title: 'IP 地址', render: (row) => row.ip || '暂无', priority: 'secondary' },
+    { key: 'status', title: '状态', render: (row) => <span className={styles.status}>{sessionStatusLabel(row.status)}</span> },
+    { key: 'expire', title: '过期时间', render: (row) => <span className={styles.muted}>{formatDateTime(row.expire_at)}</span> },
+  ], [])
+
+  if (me.status === 'loading') {
+    return <LoadingState title="正在获取账号资料" />
+  }
+  if (me.status === 'error') {
+    return <ErrorState error={me.error} onRetry={me.reload} />
+  }
+
+  const account = me.data?.account
+
+  return (
+    <div className={styles.page}>
+      <div className={styles.header}>
+        <div>
+          <h1 className={styles.title}>
+            <User size={28} />
+            个人中心
+          </h1>
+          <p className={styles.subtitle}>查看当前账号资料，管理密码和登录会话。</p>
+        </div>
+      </div>
+
+      {error && <div className={styles.error}>{error}</div>}
+      {message && (
+        <Callout variant="success" title="保存成功">
+          {message}
+        </Callout>
+      )}
+
+      <div className={styles.grid}>
+        <section className={styles.panel}>
+          <h2>账号资料</h2>
+          <DescriptionList
+            items={[
+              { key: 'name', label: '姓名', value: account?.name || '暂无' },
+              { key: 'no', label: '学号工号', value: account?.no || '暂无' },
+              { key: 'phone', label: '手机号', value: account?.phone_masked || '未绑定' },
+              { key: 'status', label: '账号状态', value: account ? accountStatusLabel(account.status) : '暂无' },
+            ]}
+          />
+        </section>
+
+        <section className={styles.panel}>
+          <h2>修改密码</h2>
+          <label className={styles.field}>
+            原密码
+            <Input fullWidth type="password" value={oldPassword} onChange={(event) => setOldPassword(event.target.value)} />
+          </label>
+          <label className={styles.field}>
+            新密码
+            <Input fullWidth type="password" value={newPassword} onChange={(event) => setNewPassword(event.target.value)} />
+          </label>
+          <Button loading={submitting} icon={<Save size={16} />} onClick={handleChangePassword}>
+            保存密码
+          </Button>
+        </section>
+
+        <section className={`${styles.panel} ${styles.wide}`}>
+          <h2>登录会话</h2>
+          {sessions.status === 'error' && <ErrorState error={sessions.error} onRetry={sessions.reload} />}
+          {sessions.status === 'loading' && <LoadingState title="正在获取会话列表" />}
+          {(sessions.status === 'success' || sessions.status === 'empty') && (
+            <Table
+              columns={columns}
+              rows={sessions.data || []}
+              rowKey="id"
+              emptyTitle="暂无会话"
+              emptyDescription="当前没有可展示的登录会话。"
+              ariaLabel="登录会话列表"
+            />
+          )}
+        </section>
+      </div>
+    </div>
+  )
+}
+
+export default ProfilePage

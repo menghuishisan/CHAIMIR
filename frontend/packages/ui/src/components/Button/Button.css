@@ -18,7 +18,12 @@
   border-radius: var(--radius-sm);
   border: none;
   cursor: pointer;
-  transition: background var(--t) var(--ease), border-color var(--t) var(--ease), color var(--t) var(--ease), box-shadow var(--t) var(--ease), opacity var(--t-fast) var(--ease), transform var(--t-fast) var(--ease-press);
+  transition: background var(--t) var(--ease),
+              border-color var(--t) var(--ease),
+              color var(--t) var(--ease),
+              box-shadow var(--t) var(--ease),
+              opacity var(--t-fast) var(--ease),
+              transform 0.4s var(--ease-spring); /* 增加阻尼回弹的缩放 */
   white-space: nowrap;
   user-select: none;
   position: relative;
@@ -50,25 +55,27 @@
 .chaimir-btn--primary {
   background: var(--color-primary);
   color: var(--color-primary-fg);
-  /* 内高光 + 主色投影（质感打磨 §4.3） */
+  /* 内高光 + 主色发光投影（质感打磨 §4.3） */
   box-shadow: inset 0 1px 0 var(--color-highlight),
-              0 1px 2px var(--color-primary-shadow);
+              0 2px 4px var(--color-primary-shadow),
+              0 0 0 0 var(--color-primary-shadow); /* Glow 预留 */
 }
 
 .chaimir-btn--primary:hover:not(:disabled) {
   background: var(--color-primary-hover);
-  /* 悬浮升投影 */
+  /* 悬浮升投影 + 发光 (Glow) */
   transform: translateY(-1px);
   box-shadow: inset 0 1px 0 var(--color-highlight),
-              0 4px 8px var(--color-primary-shadow-strong);
+              0 6px 12px var(--color-primary-shadow-strong),
+              0 0 16px var(--color-primary-shadow); /* Glow */
 }
 
 .chaimir-btn--primary:active:not(:disabled) {
-  /* 按压回落微缩 */
-  transform: scale(0.96);
+  /* 按压柔和微缩 (配合 ease-spring) */
+  transform: scale(0.97);
   filter: brightness(0.9);
   box-shadow: inset 0 1px 0 var(--color-highlight),
-              0 1px 2px var(--color-primary-shadow);
+              0 2px 4px var(--color-primary-shadow);
 }
 
 /* Secondary - 琥珀副动作按钮 */
@@ -87,7 +94,7 @@
 }
 
 .chaimir-btn--secondary:active:not(:disabled) {
-  transform: scale(0.96);
+  transform: scale(0.97);
   filter: brightness(0.9);
 }
 
@@ -107,7 +114,7 @@
 
 .chaimir-btn--outline:active:not(:disabled) {
   background: var(--color-primary-soft);
-  transform: scale(0.96);
+  transform: scale(0.97);
 }
 
 /* Ghost - 幽灵按钮 */
@@ -124,7 +131,7 @@
 
 .chaimir-btn--ghost:active:not(:disabled) {
   background: var(--color-surface-sunken);
-  transform: scale(0.96);
+  transform: scale(0.97);
 }
 
 /* Danger - 危险按钮 */
@@ -143,7 +150,7 @@
 }
 
 .chaimir-btn--danger:active:not(:disabled) {
-  transform: scale(0.96);
+  transform: scale(0.97);
   filter: brightness(0.9);
 }
 

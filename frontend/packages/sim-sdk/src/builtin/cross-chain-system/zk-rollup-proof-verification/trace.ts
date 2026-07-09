@@ -26,6 +26,7 @@ export const zkRollupCodeTrace = {
   ],
 };
 
+/** traceLinesForZkRollup 根据当前阶段返回零知识汇总验证伪代码高亮行。 */
 export function traceLinesForZkRollup(transition: string): number[] {
   const index = zkRollupPhases.findIndex((phase) => phase.id === transition);
   return [Math.min((index < 0 ? 0 : index) + 1, zkRollupSource.length)];

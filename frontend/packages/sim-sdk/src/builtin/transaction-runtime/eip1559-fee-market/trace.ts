@@ -26,6 +26,7 @@ export const feeMarketCodeTrace = {
   ],
 };
 
+/** traceLinesForFeeMarket 根据当前阶段返回 EIP-1559 伪代码高亮行。 */
 export function traceLinesForFeeMarket(transition: string): number[] {
   const index = feeMarketPhases.findIndex((phase) => phase.id === transition);
   return [Math.min((index < 0 ? 0 : index) + 1, feeMarketSource.length)];

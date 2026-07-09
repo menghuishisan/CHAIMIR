@@ -1,13 +1,13 @@
 {
-  "name": "@chaimir/app-web",
+  "name": "@chaimir/web",
   "version": "0.1.0",
   "private": true,
-  "description": "Chaimir 单入口前端应用",
+  "type": "module",
   "scripts": {
-    "dev": "vite --host 0.0.0.0 --port 5173",
-    "build": "vite build",
-    "lint": "eslint src --ext .ts,.tsx",
-    "type-check": "tsc --noEmit"
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
+    "preview": "vite preview"
   },
   "dependencies": {
     "@chaimir/api-client": "workspace:*",
@@ -15,10 +15,19 @@
     "@chaimir/ui": "workspace:*",
     "lucide-react": "^0.460.0",
     "react": "^18.3.1",
-    "react-dom": "^18.3.1"
+    "react-dom": "^18.3.1",
+    "react-router-dom": "^6.23.1"
   },
   "devDependencies": {
     "@types/react": "^18.3.3",
-    "@types/react-dom": "^18.3.0"
+    "@types/react-dom": "^18.3.0",
+    "@typescript-eslint/eslint-plugin": "^7.13.0",
+    "@typescript-eslint/parser": "^7.13.0",
+    "@vitejs/plugin-react": "^4.3.1",
+    "eslint": "^8.57.0",
+    "eslint-plugin-react-hooks": "^4.6.2",
+    "eslint-plugin-react-refresh": "^0.4.7",
+    "typescript": "^5.4.5",
+    "vite": "^5.3.1"
   }
 }

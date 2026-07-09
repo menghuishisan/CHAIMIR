@@ -1,0 +1,94 @@
+/* AuthLayout.module.css 定义认证页品牌视觉区与表单区的响应式布局。 */
+.container {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  background: radial-gradient(circle at 30% 50%, var(--color-dark-surface), var(--color-dark-bg));
+  color: var(--color-dark-text);
+  overflow: hidden;
+  position: relative;
+}
+
+@media (min-width: 1024px) {
+  .container {
+    flex-direction: row;
+  }
+}
+
+.visualArea {
+  display: none;
+  flex: 0 0 60%;
+  position: relative;
+  flex-direction: column;
+  justify-content: center;
+  padding: var(--space-12);
+  z-index: var(--z-base);
+}
+
+@media (min-width: 1024px) {
+  .visualArea {
+    display: flex;
+  }
+}
+
+.brandInfo {
+  margin-bottom: var(--space-8);
+  z-index: var(--z-sticky);
+}
+
+.title {
+  font-size: var(--text-4xl);
+  font-weight: var(--font-bold);
+  margin-bottom: var(--space-4);
+  letter-spacing: 0;
+  color: var(--color-on-dark-accent);
+}
+
+.subtitle {
+  font-size: var(--text-lg);
+  color: var(--color-dark-text-sub);
+  line-height: var(--leading-relaxed);
+}
+
+.animationWrapper {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: var(--z-ground);
+  pointer-events: none;
+}
+
+.formArea {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-6);
+  z-index: var(--z-sticky);
+}
+
+.formContainer {
+  width: 100%;
+  max-width: 420px;
+  padding: var(--space-8);
+  background: var(--color-dark-glass);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border-radius: var(--radius-lg);
+}
+
+.logo {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-8);
+  font-size: var(--text-xl);
+  font-weight: var(--font-semibold);
+  color: var(--color-dark-text);
+}
+
+.logoIcon {
+  color: var(--color-on-dark-accent);
+}

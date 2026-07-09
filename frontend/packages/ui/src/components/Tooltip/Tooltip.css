@@ -1,10 +1,5 @@
 /* Tooltip 组件样式：短提示、键盘焦点可见、无布局抖动。 */
 
-.chaimir-tooltip {
-  position: relative;
-  display: inline-flex;
-}
-
 .chaimir-tooltip__content {
   position: absolute;
   z-index: var(--z-dropdown);
@@ -17,72 +12,28 @@
   line-height: var(--leading-normal);
   overflow-wrap: anywhere;
   pointer-events: none;
-  visibility: hidden;
   background: var(--color-panel-glass);
   backdrop-filter: blur(20px) saturate(180%);
   -webkit-backdrop-filter: blur(20px) saturate(180%);
   border: 1px solid var(--color-glass-border);
   border-radius: var(--radius-sm);
   box-shadow: var(--shadow-glass-elevated);
-  opacity: 0;
-  transition:
-    opacity var(--t-fast) var(--ease),
-    transform 0.4s var(--ease-spring),
-    visibility 0.4s var(--ease);
+  animation: chaimir-tooltip-in 0.3s var(--ease-spring) forwards;
 }
 
-.chaimir-tooltip:hover .chaimir-tooltip__content,
-.chaimir-tooltip:focus-within .chaimir-tooltip__content {
-  visibility: visible;
-  opacity: 1;
-}
-
-.chaimir-tooltip--top .chaimir-tooltip__content {
-  inset-block-end: calc(100% + var(--space-2));
-  inset-inline-start: 50%;
-  transform: translate(-50%, var(--space-1));
-}
-
-.chaimir-tooltip--top:hover .chaimir-tooltip__content,
-.chaimir-tooltip--top:focus-within .chaimir-tooltip__content {
-  transform: translate(-50%, 0);
-}
-
-.chaimir-tooltip--bottom .chaimir-tooltip__content {
-  inset-block-start: calc(100% + var(--space-2));
-  inset-inline-start: 50%;
-  transform: translate(-50%, calc(var(--space-1) * -1));
-}
-
-.chaimir-tooltip--bottom:hover .chaimir-tooltip__content,
-.chaimir-tooltip--bottom:focus-within .chaimir-tooltip__content {
-  transform: translate(-50%, 0);
-}
-
-.chaimir-tooltip--left .chaimir-tooltip__content {
-  inset-inline-end: calc(100% + var(--space-2));
-  inset-block-start: 50%;
-  transform: translate(var(--space-1), -50%);
-}
-
-.chaimir-tooltip--left:hover .chaimir-tooltip__content,
-.chaimir-tooltip--left:focus-within .chaimir-tooltip__content {
-  transform: translate(0, -50%);
-}
-
-.chaimir-tooltip--right .chaimir-tooltip__content {
-  inset-inline-start: calc(100% + var(--space-2));
-  inset-block-start: 50%;
-  transform: translate(calc(var(--space-1) * -1), -50%);
-}
-
-.chaimir-tooltip--right:hover .chaimir-tooltip__content,
-.chaimir-tooltip--right:focus-within .chaimir-tooltip__content {
-  transform: translate(0, -50%);
+@keyframes chaimir-tooltip-in {
+  from {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .chaimir-tooltip__content {
-    transition: none;
+    animation: none;
   }
 }

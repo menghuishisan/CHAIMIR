@@ -26,6 +26,7 @@ export const ethPosFinalityCodeTrace = {
   ],
 };
 
+/** traceLinesForEthPosFinality 根据当前阶段返回 PoS 最终性伪代码高亮行。 */
 export function traceLinesForEthPosFinality(transition: string): number[] {
   const index = ethPosFinalityPhases.findIndex((phase) => phase.id === transition);
   return [Math.min((index < 0 ? 0 : index) + 1, ethPosFinalitySource.length)];

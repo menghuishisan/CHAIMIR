@@ -20,6 +20,9 @@ export interface MenuProps extends React.HTMLAttributes<HTMLDivElement> {
   label?: string
 }
 
+/**
+ * Menu 提供键盘可达的垂直操作列表，支持上下键移动和 Enter/Space 触发。
+ */
 export function Menu({ items, label = '操作菜单', className, ...props }: MenuProps): React.ReactElement {
   const itemRefs = React.useRef<Array<HTMLButtonElement | null>>([])
   const firstEnabled = firstEnabledIndex(items)

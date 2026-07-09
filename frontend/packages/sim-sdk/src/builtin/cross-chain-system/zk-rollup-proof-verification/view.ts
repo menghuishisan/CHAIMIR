@@ -5,6 +5,7 @@ import { chartPattern, matrixPattern, pipelinePattern, selectedOrFrameFocus, tea
 import { matrixCells, pipelineSteps } from '../crossChainView';
 import { zkRollupPhases, type ZkRollupState } from './model';
 
+/** renderZkRollupView 生成当前内置仿真的可视化视图模型。 */
 export function renderZkRollupView(state: ZkRollupState): TeachingFrame {
   const summary = `${state.batchId} batchSize=${state.batchSize},proof=${state.proofGenerated ? '已生成' : '等待'},verifier=${state.verifierAccepted ? '接受' : state.phaseIndex === 5 ? '拒绝' : '待验证'}。`;
   const primary = state.phaseIndex === 3 || state.phaseIndex === 5 ? 'zk-rollup-matrix' : 'zk-rollup-pipeline';
@@ -36,10 +37,12 @@ export function renderZkRollupView(state: ZkRollupState): TeachingFrame {
   });
 }
 
+/** steps 生成当前内置仿真的可视化视图模型。 */
 function steps(state: ZkRollupState): PipelineStep[] {
   return pipelineSteps([...zkRollupPhases], state.phaseIndex, state.phaseIndex === 5).map((step) => ({ ...step, meta: meta(step.id, step.label, step.id === zkRollupPhases[state.phaseIndex].id ? 'focus' : step.status === 'complete' ? 'history' : 'context', state.tick) }));
 }
 
+/** inputCells 生成当前内置仿真的可视化视图模型。 */
 function inputCells(state: ZkRollupState): MatrixCell[][] {
   return matrixCells(state.inputs.map((input) => input.id), ['类型', '值', '一致性'], (row, column) => {
     const input = state.inputs.find((item) => item.id === row);
@@ -51,6 +54,7 @@ function inputCells(state: ZkRollupState): MatrixCell[][] {
   });
 }
 
+/** meta 生成当前内置仿真的可视化视图模型。 */
 function meta(id: string, label: string, emphasis: VisualElementMeta['emphasis'], tick: number): VisualElementMeta {
   return { id, label, lifecycle: { state: emphasis === 'ghost' ? 'archived' : emphasis === 'history' ? 'settled' : 'active', fromTick: Math.max(0, tick - 1) }, emphasis, explanation: label };
 }

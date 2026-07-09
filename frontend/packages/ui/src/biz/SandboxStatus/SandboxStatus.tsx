@@ -23,6 +23,9 @@ const statusMeta: Record<SandboxStatusKind, { label: string; icon: React.ReactEl
   released: { label: '环境已释放', icon: <Clock3 size={16} /> },
 }
 
+/**
+ * SandboxStatus 展示沙箱生命周期状态，失败时提供查看原因入口和报障编号。
+ */
 export function SandboxStatus({ status, detail, traceId, onOpenReason, className, ...props }: SandboxStatusProps): React.ReactElement {
   const meta = statusMeta[status]
   return (

@@ -1,0 +1,124 @@
+/* dashboard.module.css 定义管理聚合看板的指标、面板和列表样式。 */
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+}
+
+.title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0;
+  font-size: var(--text-2xl);
+  font-weight: var(--font-semibold);
+  color: var(--color-text-strong);
+}
+
+.icon {
+  color: var(--color-primary);
+}
+
+.updatedAt {
+  font-size: var(--text-sm);
+  color: var(--color-text-faint);
+}
+
+.statsGrid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--space-4);
+}
+
+.statCard,
+.panel {
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface);
+}
+
+.statCard {
+  padding: var(--space-5);
+}
+
+.statLabel {
+  font-size: var(--text-sm);
+  color: var(--color-text-sub);
+}
+
+.statValue {
+  margin-top: var(--space-2);
+  font-size: var(--text-3xl);
+  font-weight: var(--font-semibold);
+  line-height: var(--leading-tight);
+  color: var(--color-text-strong);
+  font-variant-numeric: tabular-nums;
+}
+
+.statDanger {
+  color: var(--color-danger);
+}
+
+.panel {
+  padding: var(--space-5);
+}
+
+.panelTitle {
+  margin: 0 0 var(--space-4);
+  font-size: var(--text-md);
+  font-weight: var(--font-semibold);
+  color: var(--color-text);
+}
+
+.metricsList {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-3);
+}
+
+.metricItem {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding: var(--space-3);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-sunken);
+  font-size: var(--text-sm);
+}
+
+.metricLabel {
+  color: var(--color-text-sub);
+}
+
+.metricValue {
+  color: var(--color-text);
+  font-weight: var(--font-semibold);
+  font-variant-numeric: tabular-nums;
+}
+
+@media (max-width: 1024px) {
+  .statsGrid,
+  .metricsList {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 640px) {
+  .header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .statsGrid,
+  .metricsList {
+    grid-template-columns: 1fr;
+  }
+}

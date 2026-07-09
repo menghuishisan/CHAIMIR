@@ -25,6 +25,7 @@ export const tendermintRoundsCodeTrace = {
   ],
 };
 
+/** traceLinesForTendermintRounds 根据当前阶段返回 Tendermint 轮次伪代码高亮行。 */
 export function traceLinesForTendermintRounds(transition: string): number[] {
   const index = tendermintRoundPhases.findIndex((phase) => phase.id === transition);
   return [Math.min((index < 0 ? 0 : index) + 1, tendermintRoundsSource.length)];

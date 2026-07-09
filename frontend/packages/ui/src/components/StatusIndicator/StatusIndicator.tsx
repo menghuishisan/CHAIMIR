@@ -21,6 +21,9 @@ export interface StatusIndicatorProps extends React.HTMLAttributes<HTMLSpanEleme
   pulse?: boolean
 }
 
+/**
+ * StatusIndicator 以图标和文字共同表达状态，避免只依赖颜色传达含义。
+ */
 export function StatusIndicator({
   label,
   tone = 'neutral',

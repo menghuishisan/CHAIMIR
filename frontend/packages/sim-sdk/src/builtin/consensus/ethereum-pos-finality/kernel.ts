@@ -4,6 +4,7 @@ import type { ChainBlock, CheckpointResult, ReducerContext, SimEvent, SimInitPar
 import { ethPosFinalityPhases, type EthPosAttestation, type EthPosFinalityState } from './model';
 import { traceLinesForEthPosFinality } from './trace';
 
+/** createInitialEthPosFinalityState 执行当前内置仿真的状态推进、事件计算或校验逻辑。 */
 export function createInitialEthPosFinalityState(_params: SimInitParams, _seed: number): EthPosFinalityState {
   const validators = [
     { id: 'v1', label: 'V1', weight: 32, online: true },
@@ -31,6 +32,7 @@ export function createInitialEthPosFinalityState(_params: SimInitParams, _seed: 
   });
 }
 
+/** reduceEthPosFinalityEvent 执行当前内置仿真的状态推进、事件计算或校验逻辑。 */
 export function reduceEthPosFinalityEvent(state: EthPosFinalityState, event: SimEvent, _context: ReducerContext): EthPosFinalityState {
   if (event.type === 'select') return finalizeEthPosFinalityState({ ...state, selectedElementId: event.target });
   if (event.type === 'attack') return finalizeEthPosFinalityState(delayVote(state));
@@ -39,6 +41,7 @@ export function reduceEthPosFinalityEvent(state: EthPosFinalityState, event: Sim
   return state;
 }
 
+/** finalizeEthPosFinalityState 执行当前内置仿真的状态推进、事件计算或校验逻辑。 */
 export function finalizeEthPosFinalityState(state: EthPosFinalityState): EthPosFinalityState {
   const total = totalWeight(state);
   const headWeight = blockWeight(state, state.head);
@@ -57,6 +60,7 @@ export function finalizeEthPosFinalityState(state: EthPosFinalityState): EthPosF
   };
 }
 
+/** ethPosFinalityCheckpoint 执行当前内置仿真的状态推进、事件计算或校验逻辑。 */
 export function ethPosFinalityCheckpoint(state: EthPosFinalityState): CheckpointResult {
   return {
     achieved: state.finalized !== 'genesis',
@@ -65,6 +69,7 @@ export function ethPosFinalityCheckpoint(state: EthPosFinalityState): Checkpoint
   };
 }
 
+/** ethPosChainBlocks 执行当前内置仿真的状态推进、事件计算或校验逻辑。 */
 export function ethPosChainBlocks(state: EthPosFinalityState): ChainBlock[] {
   return state.blocks.filter((block) => block.parent !== 'b0' || block.id === state.head).map((block) => ({
     id: block.id,
@@ -76,6 +81,7 @@ export function ethPosChainBlocks(state: EthPosFinalityState): ChainBlock[] {
   }));
 }
 
+/** advanceEthPos 执行当前内置仿真的状态推进、事件计算或校验逻辑。 */
 function advanceEthPos(state: EthPosFinalityState, event: SimEvent): EthPosFinalityState {
   const tick = event.source === 'tick' ? state.tick + 1 : state.tick;
   if (state.phaseIndex === 0) return proposeBlock({ ...state, tick });
@@ -86,17 +92,20 @@ function advanceEthPos(state: EthPosFinalityState, event: SimEvent): EthPosFinal
   return { ...state, tick, phaseIndex: 0, slot: state.slot + 1, lastTransition: 'propose' };
 }
 
+/** proposeBlock 执行当前内置仿真的状态推进、事件计算或校验逻辑。 */
 function proposeBlock(state: EthPosFinalityState): EthPosFinalityState {
   const id = `b${state.slot + 1}`;
   return { ...state, phaseIndex: 1, lastTransition: 'attest', blocks: [...state.blocks, { id, slot: state.slot + 1, epoch: state.epoch, parent: state.head, weight: 0, status: 'candidate' }] };
 }
 
+/** attestHead 执行当前内置仿真的状态推进、事件计算或校验逻辑。 */
 function attestHead(state: EthPosFinalityState): EthPosFinalityState {
   const target = state.blocks[state.blocks.length - 1]?.id ?? state.head;
   const attestations: EthPosAttestation[] = state.validators.filter((validator) => validator.online).map((validator) => ({ id: `${validator.id}-${target}`, validatorId: validator.id, blockId: target, epoch: state.epoch, delivered: true }));
   return { ...state, phaseIndex: 2, lastTransition: 'ghost', attestations: [...state.attestations, ...attestations], validators: state.validators.map((validator) => (validator.online ? { ...validator, latestVote: target } : validator)) };
 }
 
+/** chooseHead 执行当前内置仿真的状态推进、事件计算或校验逻辑。 */
 function chooseHead(state: EthPosFinalityState): EthPosFinalityState {
   const weights = new Map<string, number>();
   for (const validator of state.validators) {
@@ -106,33 +115,40 @@ function chooseHead(state: EthPosFinalityState): EthPosFinalityState {
   return { ...state, phaseIndex: 3, head, lastTransition: 'justify', blocks: state.blocks.map((block) => ({ ...block, weight: weights.get(block.id) ?? block.weight, status: block.id === head ? 'head' : block.status })) };
 }
 
+/** justifyHead 执行当前内置仿真的状态推进、事件计算或校验逻辑。 */
 function justifyHead(state: EthPosFinalityState): EthPosFinalityState {
   const justified = blockWeight(state, state.head) >= Math.ceil(totalWeight(state) * 2 / 3) ? state.head : state.justified;
   return { ...state, phaseIndex: 4, justified, lastTransition: 'finalize', blocks: state.blocks.map((block) => (block.id === justified ? { ...block, status: 'justified' } : block)) };
 }
 
+/** finalizeCheckpoint 执行当前内置仿真的状态推进、事件计算或校验逻辑。 */
 function finalizeCheckpoint(state: EthPosFinalityState): EthPosFinalityState {
   const justifiedBlock = state.blocks.find((block) => block.id === state.justified);
   const finalized = justifiedBlock?.parent && justifiedBlock.parent !== '' ? justifiedBlock.parent : state.finalized;
   return { ...state, phaseIndex: 5, finalized, lastTransition: 'delay', participationHistory: [...state.participationHistory, { x: state.epoch, quorum: blockWeight(state, state.head), risk: blockWeight(state, state.head) >= 67 ? 5 : 32, finality: finalized !== state.finalized ? 100 : 75 }] };
 }
 
+/** delayVote 执行当前内置仿真的状态推进、事件计算或校验逻辑。 */
 function delayVote(state: EthPosFinalityState): EthPosFinalityState {
   return { ...state, phaseIndex: 5, lastTransition: 'delay', validators: state.validators.map((validator) => (validator.id === 'v4' ? { ...validator, online: false } : validator)) };
 }
 
+/** restoreVote 执行当前内置仿真的状态推进、事件计算或校验逻辑。 */
 function restoreVote(state: EthPosFinalityState): EthPosFinalityState {
   return { ...state, phaseIndex: 1, lastTransition: 'attest', validators: state.validators.map((validator) => ({ ...validator, online: true })) };
 }
 
+/** blockWeight 执行当前内置仿真的状态推进、事件计算或校验逻辑。 */
 function blockWeight(state: EthPosFinalityState, blockId: string): number {
   return state.validators.filter((validator) => validator.latestVote === blockId).reduce((sum, validator) => sum + validator.weight, 0) || state.blocks.find((block) => block.id === blockId)?.weight || 0;
 }
 
+/** totalWeight 执行当前内置仿真的状态推进、事件计算或校验逻辑。 */
 function totalWeight(state: EthPosFinalityState): number {
   return state.validators.reduce((sum, validator) => sum + validator.weight, 0);
 }
 
+/** explain 执行当前内置仿真的状态推进、事件计算或校验逻辑。 */
 function explain(index: number) {
   const phase = ethPosFinalityPhases[index] ?? ethPosFinalityPhases[0];
   return { title: phase.label, effect: phase.effect, reason: phase.reason, defaultDurationMs: 1200 };

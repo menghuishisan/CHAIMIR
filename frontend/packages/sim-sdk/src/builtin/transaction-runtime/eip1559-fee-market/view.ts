@@ -5,6 +5,7 @@ import { chartPattern, matrixPattern, pipelinePattern, selectedOrFrameFocus, tea
 import { matrixCells, pipelineSteps } from '../runtimeView';
 import { feeMarketPhases, type FeeMarketState } from './model';
 
+/** renderFeeMarketView 生成当前内置仿真的可视化视图模型。 */
 export function renderFeeMarketView(state: FeeMarketState): TeachingFrame {
   const included = state.transactions.filter((tx) => tx.included).length;
   const summary = `第 ${state.blockNumber} 块 base fee ${state.baseFee},已选 ${included} 笔交易,gasUsed ${state.gasUsed}/${state.targetGas},下一块 base fee ${state.nextBaseFee}。`;
@@ -40,10 +41,12 @@ export function renderFeeMarketView(state: FeeMarketState): TeachingFrame {
   });
 }
 
+/** steps 生成当前内置仿真的可视化视图模型。 */
 function steps(state: FeeMarketState): PipelineStep[] {
   return pipelineSteps([...feeMarketPhases], state.phaseIndex, false).map((step) => ({ ...step, meta: meta(step.id, step.label, step.id === feeMarketPhases[state.phaseIndex].id ? 'focus' : step.status === 'complete' ? 'history' : 'context', state.tick) }));
 }
 
+/** txCells 生成当前内置仿真的可视化视图模型。 */
 function txCells(state: FeeMarketState): MatrixCell[][] {
   return matrixCells(state.transactions.map((tx) => tx.id), ['报价', '小费', '入块', '销毁/退款'], (row, column) => {
     const tx = state.transactions.find((item) => item.id === row);
@@ -56,12 +59,14 @@ function txCells(state: FeeMarketState): MatrixCell[][] {
   });
 }
 
+/** focusIds 生成当前内置仿真的可视化视图模型。 */
 function focusIds(state: FeeMarketState): string[] {
   if (state.phaseIndex === 4 || state.phaseIndex === 5) return ['eip1559-chart'];
   const tx = state.transactions.find((item) => item.included) ?? state.transactions[0];
   return [tx?.id ?? 'eip1559-pipeline'];
 }
 
+/** meta 生成当前内置仿真的可视化视图模型。 */
 function meta(id: string, label: string, emphasis: VisualElementMeta['emphasis'], tick: number): VisualElementMeta {
   return { id, label, lifecycle: { state: emphasis === 'history' ? 'settled' : emphasis === 'ghost' ? 'archived' : 'active', fromTick: Math.max(0, tick - 1) }, emphasis, explanation: label };
 }

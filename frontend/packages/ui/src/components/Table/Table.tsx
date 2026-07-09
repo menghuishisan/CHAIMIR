@@ -10,7 +10,7 @@ import './Table.css'
 
 export type TableSortDirection = 'asc' | 'desc'
 
-export interface TableColumn<T extends Record<string, unknown>> {
+export interface TableColumn<T extends object> {
   key: string
   title: React.ReactNode
   render?: (row: T, rowIndex: number) => React.ReactNode
@@ -21,7 +21,7 @@ export interface TableColumn<T extends Record<string, unknown>> {
   align?: 'start' | 'center' | 'end'
 }
 
-export interface TableProps<T extends Record<string, unknown>> extends React.HTMLAttributes<HTMLDivElement> {
+export interface TableProps<T extends object> extends React.HTMLAttributes<HTMLDivElement> {
   columns: TableColumn<T>[]
   rows: T[]
   rowKey: keyof T | ((row: T, rowIndex: number) => string)
@@ -35,7 +35,7 @@ export interface TableProps<T extends Record<string, unknown>> extends React.HTM
 /**
  * Table 渲染同一份数据的桌面表格和移动键值卡片，避免小屏整页横向滚动。
  */
-export function Table<T extends Record<string, unknown>>({
+export function Table<T extends object>({
   columns,
   rows,
   rowKey,
@@ -98,7 +98,7 @@ export function Table<T extends Record<string, unknown>>({
 /**
  * renderDesktopRow 输出常规表格行，数字/成绩列可由调用方在 render 中自行格式化。
  */
-function renderDesktopRow<T extends Record<string, unknown>>(
+function renderDesktopRow<T extends object>(
   row: T,
   rowIndex: number,
   columns: TableColumn<T>[],
@@ -118,7 +118,7 @@ function renderDesktopRow<T extends Record<string, unknown>>(
 /**
  * renderMobileRow 把一行数据转成键值卡片，小屏优先展示 primary/secondary 列。
  */
-function renderMobileRow<T extends Record<string, unknown>>(
+function renderMobileRow<T extends object>(
   row: T,
   rowIndex: number,
   columns: TableColumn<T>[],
@@ -141,7 +141,7 @@ function renderMobileRow<T extends Record<string, unknown>>(
 /**
  * cellValue 根据列定义取值，避免空值把内部语义暴露给用户。
  */
-function cellValue<T extends Record<string, unknown>>(row: T, rowIndex: number, column: TableColumn<T>): React.ReactNode {
+function cellValue<T extends object>(row: T, rowIndex: number, column: TableColumn<T>): React.ReactNode {
   if (column.render) {
     return column.render(row, rowIndex)
   }
@@ -155,7 +155,7 @@ function cellValue<T extends Record<string, unknown>>(row: T, rowIndex: number, 
 /**
  * resolveRowKey 统一解析行 key，支持字段名或调用方自定义函数。
  */
-function resolveRowKey<T extends Record<string, unknown>>(row: T, rowIndex: number, rowKey: TableProps<T>['rowKey']): string {
+function resolveRowKey<T extends object>(row: T, rowIndex: number, rowKey: TableProps<T>['rowKey']): string {
   if (typeof rowKey === 'function') {
     return rowKey(row, rowIndex)
   }
@@ -180,7 +180,7 @@ function skeletonRows(columnCount: number): React.ReactElement[] {
 /**
  * sortAria 把排序状态转成表头 aria-sort 语义。
  */
-function sortAria<T extends Record<string, unknown>>(column: TableColumn<T>): 'ascending' | 'descending' | 'none' {
+function sortAria<T extends object>(column: TableColumn<T>): 'ascending' | 'descending' | 'none' {
   if (column.sortDirection === 'asc') return 'ascending'
   if (column.sortDirection === 'desc') return 'descending'
   return 'none'
@@ -189,7 +189,7 @@ function sortAria<T extends Record<string, unknown>>(column: TableColumn<T>): 'a
 /**
  * sortIcon 返回当前排序方向对应的 Lucide 图标。
  */
-function sortIcon<T extends Record<string, unknown>>(column: TableColumn<T>): React.ReactElement {
+function sortIcon<T extends object>(column: TableColumn<T>): React.ReactElement {
   if (column.sortDirection === 'asc') return <ArrowUp size={14} aria-hidden="true" />
   if (column.sortDirection === 'desc') return <ArrowDown size={14} aria-hidden="true" />
   return <ArrowUpDown size={14} aria-hidden="true" />
@@ -198,7 +198,7 @@ function sortIcon<T extends Record<string, unknown>>(column: TableColumn<T>): Re
 /**
  * columnClass 合并列优先级与对齐方式，供响应式隐藏次级列。
  */
-function columnClass<T extends Record<string, unknown>>(column: TableColumn<T>): string {
+function columnClass<T extends object>(column: TableColumn<T>): string {
   return clsx(column.align && `is-${column.align}`, column.priority && `is-priority-${column.priority}`)
 }
 

@@ -14,6 +14,9 @@ export interface StatProps extends React.HTMLAttributes<HTMLDivElement> {
   icon?: React.ReactNode
 }
 
+/**
+ * Stat 渲染带等宽数字和变化说明的指标卡，保证状态不只靠颜色表达。
+ */
 export function Stat({ label, value, description, delta, trend = 'flat', icon, className, ...props }: StatProps): React.ReactElement {
   return (
     <section className={clsx('chaimir-stat', className)} {...props}>

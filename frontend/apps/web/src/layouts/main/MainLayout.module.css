@@ -1,0 +1,50 @@
+/* MainLayout.module.css 定义学生端和教师端日常布局外壳样式。 */
+.layoutContainer {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  background-color: var(--color-surface);
+}
+
+.mainWrapper {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+  position: relative;
+}
+
+.contentArea {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  overflow-x: hidden;
+  position: relative;
+}
+
+.contentInner {
+  flex: 1;
+  padding: var(--space-6) var(--space-8);
+  max-width: var(--content-max);
+  margin: 0 auto;
+  width: 100%;
+}
+
+.mobileOverlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: var(--color-scrim);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+    z-index: var(--z-drawer);
+}
+
+/* 小屏降低页面内边距，给表格和工作流留出可用宽度。 */
+@media (max-width: 768px) {
+  .contentInner {
+    padding: var(--space-4);
+  }
+}

@@ -11,12 +11,14 @@
   background: var(--color-bg);
   border: none;
   border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-xs), inset 0 1px 0 var(--color-glass-highlight), inset 0 0 0 1px var(--color-border);
+  box-shadow: var(--shadow-xs),
+              inset 0 1px 0 var(--color-glass-highlight),
+              inset 0 0 0 1px var(--color-border);
   overflow: hidden;
   transition:
     border-color var(--t) var(--ease),
     box-shadow var(--t) var(--ease),
-    transform var(--t) var(--ease),
+    transform 0.4s var(--ease-spring),
     background var(--t) var(--ease);
 }
 
@@ -31,9 +33,12 @@
 }
 
 .chaimir-card--hoverable:hover {
-  /* §4.2 交互微动效：抬升 + 阴影升 + 边框转主色 */
-  transform: translateY(-3px);
-  box-shadow: var(--shadow-md), inset 0 1px 0 var(--color-glass-highlight), inset 0 0 0 1px var(--color-accent);
+  /* §4.2 交互微动效：抬升 + 多层阴影升 + 玻璃边缘主色高亮 */
+  transform: translateY(-4px);
+  box-shadow: var(--shadow-md),
+              inset 0 1px 0 var(--color-glass-highlight),
+              inset 0 0 0 1px var(--color-accent),
+              0 4px 16px var(--color-primary-shadow); /* 弥散光晕 */
 }
 
 .chaimir-card--hoverable:focus-visible {
@@ -42,7 +47,7 @@
 }
 
 .chaimir-card--hoverable:active {
-  transform: translateY(-1px);
+  transform: scale(0.98); /* 卡片压感微缩 */
 }
 
 /* === 子组件 === */

@@ -87,6 +87,8 @@ export const shadow = {
   base: 'var(--shadow)',
   md: 'var(--shadow-md)',
   lg: 'var(--shadow-lg)',
+  glassPanel: 'var(--shadow-glass-panel)',
+  glassElevated: 'var(--shadow-glass-elevated)',
 } as const
 
 export const breakpoints = {

@@ -15,6 +15,9 @@ export interface CheckpointCardProps extends React.HTMLAttributes<HTMLElement> {
   action?: React.ReactNode
 }
 
+/**
+ * CheckpointCard 展示检查点判定结果、得分和反馈，供实验与判题结果复用。
+ */
 export function CheckpointCard({ title, status, score, description, action, className, ...props }: CheckpointCardProps): React.ReactElement {
   return (
     <article className={clsx('chaimir-checkpoint-card', `is-${status}`, className)} {...props}>

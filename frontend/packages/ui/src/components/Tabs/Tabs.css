@@ -61,7 +61,7 @@
     opacity 0.2s var(--ease);
   pointer-events: none;
   opacity: 0; /* 测量完成后由 JS 设为 1 */
-  z-index: 1;
+  z-index: var(--z-base);
 }
 
 .chaimir-tabs__tab--disabled {

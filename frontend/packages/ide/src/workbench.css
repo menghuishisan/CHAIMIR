@@ -60,7 +60,7 @@
   background: var(--color-dark-border);
   cursor: row-resize;
   transition: background var(--t-fast) var(--ease);
-  z-index: 10;
+  z-index: var(--z-base);
 }
 
 .chaimir-ide-workbench__resizer:hover,

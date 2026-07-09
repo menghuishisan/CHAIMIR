@@ -6,6 +6,7 @@ import { trendSeries, voteCells } from '../consensusView';
 import { ethPosChainBlocks } from './kernel';
 import { ethPosFinalityPhases, type EthPosFinalityState } from './model';
 
+/** renderEthPosFinalityView 生成当前内置仿真的可视化视图模型。 */
 export function renderEthPosFinalityView(state: EthPosFinalityState): TeachingFrame {
   const summary = `Slot ${state.slot},head=${state.head},justified=${state.justified},finalized=${state.finalized},在线验证者 ${state.validators.filter((v) => v.online).length}/${state.validators.length}。`;
   const primary = state.phaseIndex <= 2 ? 'eth-pos-chain' : state.phaseIndex <= 4 ? 'eth-pos-votes' : 'eth-pos-chart';
@@ -33,6 +34,7 @@ export function renderEthPosFinalityView(state: EthPosFinalityState): TeachingFr
   });
 }
 
+/** voteMatrix 生成当前内置仿真的可视化视图模型。 */
 function voteMatrix(state: EthPosFinalityState): MatrixCell[][] {
   return voteCells(state.validators.map((validator) => validator.label), ['权重', '在线', 'latest vote', 'finality'], (row, column) => {
     const validator = state.validators.find((item) => item.label === row);
@@ -45,6 +47,7 @@ function voteMatrix(state: EthPosFinalityState): MatrixCell[][] {
   });
 }
 
+/** meta 生成当前内置仿真的可视化视图模型。 */
 function meta(id: string, label: string, emphasis: VisualElementMeta['emphasis'], tick: number): VisualElementMeta {
   return { id, label, lifecycle: { state: emphasis === 'focus' ? 'active' : 'settled', fromTick: Math.max(0, tick - 1) }, emphasis, explanation: label };
 }

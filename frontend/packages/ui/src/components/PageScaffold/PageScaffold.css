@@ -8,8 +8,21 @@
   margin-inline: auto;
   padding: var(--space-6);
   color: var(--color-text);
-  background:
-    linear-gradient(180deg, var(--color-bg), var(--color-surface) 72%, var(--color-bg));
+  background: var(--color-surface);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-xs), 0 0 0 1px var(--color-border-subtle);
+  animation: page-scaffold-enter var(--t-normal) var(--ease-out) both;
+}
+
+@keyframes page-scaffold-enter {
+  from {
+    opacity: 0;
+    transform: translateY(var(--space-5));
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .chaimir-page-scaffold.is-accent {
@@ -32,38 +45,33 @@
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: var(--space-4);
-  padding: var(--space-1) 0 var(--space-5);
+  gap: var(--space-6);
+  padding: 0 0 var(--space-6);
   border-block-end: 1px solid var(--color-border);
 }
 
 .chaimir-page-header::after {
-  position: absolute;
-  inset-inline-start: 0;
-  inset-block-end: -1px;
-  inline-size: min(12rem, 48%);
-  block-size: 3px;
-  content: "";
-  background: var(--page-scaffold-accent);
+  display: none; /* 移除旧的生硬强调线 */
 }
 
 .chaimir-page-header__main {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
-  gap: var(--space-3);
+  gap: var(--space-4);
   min-inline-size: 0;
+  align-items: center;
 }
 
 .chaimir-page-header__icon {
   display: grid;
   place-items: center;
-  inline-size: 3rem;
-  block-size: 3rem;
+  inline-size: 3.5rem;
+  block-size: 3.5rem;
   color: var(--color-primary-text);
-  background: var(--page-scaffold-accent-soft);
-  border: 1px solid var(--color-border);
+  background: linear-gradient(135deg, var(--page-scaffold-accent-soft), var(--color-surface));
+  border: 1px solid var(--color-border-subtle);
   border-radius: var(--radius);
-  box-shadow: inset 0 1px 0 var(--color-highlight), var(--shadow-xs);
+  box-shadow: var(--shadow-xs);
 }
 
 .chaimir-page-header__eyebrow {
@@ -125,11 +133,18 @@
 
 .chaimir-page-section {
   min-inline-size: 0;
-  padding: var(--space-5);
+  padding: var(--space-6);
   background: var(--color-bg);
   border: 1px solid var(--color-border);
-  border-radius: var(--radius);
+  border-radius: var(--radius-lg);
   box-shadow: var(--shadow-xs);
+  transition: border-color var(--t-fast) var(--ease-out), box-shadow var(--t-fast) var(--ease-out), transform var(--t-fast) var(--ease-out);
+}
+
+.chaimir-page-section:hover {
+  border-color: var(--color-primary);
+  box-shadow: var(--shadow);
+  transform: translateY(calc(var(--space-1) * -1));
 }
 
 .chaimir-page-section__header {

@@ -1,0 +1,160 @@
+/* auth-form.module.css 定义认证表单的字段、按钮和辅助信息样式。 */
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+}
+
+.title {
+  margin: 0 0 var(--space-2);
+  font-size: var(--text-2xl);
+  font-weight: var(--font-semibold);
+  color: var(--color-text-strong);
+}
+
+.description {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--color-text-sub);
+}
+
+.tabs {
+  display: flex;
+  gap: var(--space-4);
+  border-bottom: 1px solid var(--color-border-subtle);
+}
+
+.tab {
+  padding: 0 0 var(--space-2);
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--color-text-sub);
+  font: inherit;
+  cursor: pointer;
+}
+
+.tabActive {
+  border-color: var(--color-primary);
+  color: var(--color-primary-text);
+  font-weight: var(--font-semibold);
+}
+
+.fields {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.inline {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--space-2);
+}
+
+.progress {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-2);
+}
+
+.progressActive,
+.progressIdle {
+  height: 4px;
+  border-radius: var(--radius-full);
+}
+
+.progressActive {
+  background: var(--color-primary);
+}
+
+.progressIdle {
+  background: var(--color-border-subtle);
+}
+
+.options {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  font-size: var(--text-sm);
+  color: var(--color-text-sub);
+}
+
+.checkbox {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.linkButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  border: 0;
+  background: transparent;
+  color: var(--color-primary-text);
+  font: inherit;
+  cursor: pointer;
+}
+
+.error {
+  padding: var(--space-3);
+  border: 1px solid var(--color-danger-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-danger-bg);
+  color: var(--color-danger);
+  font-size: var(--text-sm);
+}
+
+.footerLinks {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+  text-align: center;
+  font-size: var(--text-sm);
+  color: var(--color-text-sub);
+}
+
+.tenantList {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.tenantButton {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  padding: var(--space-4);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface);
+  text-align: left;
+  cursor: pointer;
+}
+
+.tenantIcon {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  flex: 0 0 auto;
+  border-radius: var(--radius-sm);
+  background: var(--color-primary-soft);
+  color: var(--color-primary);
+}
+
+.tenantName {
+  font-size: var(--text-lg);
+  font-weight: var(--font-semibold);
+  color: var(--color-text-strong);
+}
+
+.tenantCode {
+  margin-top: var(--space-1);
+  font-size: var(--text-sm);
+  color: var(--color-text-sub);
+}

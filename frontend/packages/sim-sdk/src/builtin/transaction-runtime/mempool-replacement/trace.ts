@@ -25,6 +25,7 @@ export const mempoolReplacementCodeTrace = {
   ],
 };
 
+/** traceLinesForMempoolReplacement 根据当前阶段返回伪代码高亮行。 */
 export function traceLinesForMempoolReplacement(transition: string): number[] {
   const index = mempoolReplacementPhases.findIndex((phase) => phase.id === transition);
   return [Math.min((index < 0 ? 0 : index) + 1, mempoolReplacementSource.length)];

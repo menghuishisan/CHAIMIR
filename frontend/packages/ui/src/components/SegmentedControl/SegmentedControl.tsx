@@ -19,6 +19,9 @@ export interface SegmentedControlProps extends Omit<React.HTMLAttributes<HTMLDiv
   onChange: (value: string) => void
 }
 
+/**
+ * SegmentedControl 使用 radio 语义实现视图或模式切换，并用滑块表达当前选项。
+ */
 export function SegmentedControl({
   options,
   value,

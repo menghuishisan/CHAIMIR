@@ -4,6 +4,7 @@ import type { CheckpointResult, ReducerContext, SimEvent, SimInitParams } from '
 import { tendermintRoundPhases, type TendermintRoundsState } from './model';
 import { traceLinesForTendermintRounds } from './trace';
 
+/** createInitialTendermintRoundsState 执行当前内置仿真的状态推进、事件计算或校验逻辑。 */
 export function createInitialTendermintRoundsState(_params: SimInitParams, _seed: number): TendermintRoundsState {
   return finalizeTendermintRoundsState({
     tick: 0,
@@ -26,6 +27,7 @@ export function createInitialTendermintRoundsState(_params: SimInitParams, _seed
   });
 }
 
+/** reduceTendermintRoundsEvent 执行当前内置仿真的状态推进、事件计算或校验逻辑。 */
 export function reduceTendermintRoundsEvent(state: TendermintRoundsState, event: SimEvent, _context: ReducerContext): TendermintRoundsState {
   if (event.type === 'select') return finalizeTendermintRoundsState({ ...state, selectedElementId: event.target });
   if (event.type === 'attack') return finalizeTendermintRoundsState(forceTimeout(state));
@@ -34,6 +36,7 @@ export function reduceTendermintRoundsEvent(state: TendermintRoundsState, event:
   return state;
 }
 
+/** finalizeTendermintRoundsState 执行当前内置仿真的状态推进、事件计算或校验逻辑。 */
 export function finalizeTendermintRoundsState(state: TendermintRoundsState): TendermintRoundsState {
   const prevotePower = votePower(state, 'prevote');
   const precommitPower = votePower(state, 'precommit');
@@ -51,6 +54,7 @@ export function finalizeTendermintRoundsState(state: TendermintRoundsState): Ten
   };
 }
 
+/** tendermintRoundsCheckpoint 执行当前内置仿真的状态推进、事件计算或校验逻辑。 */
 export function tendermintRoundsCheckpoint(state: TendermintRoundsState): CheckpointResult {
   return {
     achieved: Boolean(state.committedValue),
@@ -59,10 +63,12 @@ export function tendermintRoundsCheckpoint(state: TendermintRoundsState): Checkp
   };
 }
 
+/** labelTendermintActor 执行当前内置仿真的状态推进、事件计算或校验逻辑。 */
 export function labelTendermintActor(state: TendermintRoundsState, id: string): string {
   return state.validators.find((validator) => validator.id === id)?.label ?? (id === 'network' ? '网络' : id);
 }
 
+/** advanceTendermint 执行当前内置仿真的状态推进、事件计算或校验逻辑。 */
 function advanceTendermint(state: TendermintRoundsState, event: SimEvent): TendermintRoundsState {
   const tick = event.source === 'tick' ? state.tick + 1 : state.tick;
   if (state.phaseIndex === 0) return propose({ ...state, tick });
@@ -73,6 +79,7 @@ function advanceTendermint(state: TendermintRoundsState, event: SimEvent): Tende
   return { ...state, tick, phaseIndex: 0, lastTransition: 'proposal' };
 }
 
+/** propose 执行当前内置仿真的状态推进、事件计算或校验逻辑。 */
 function propose(state: TendermintRoundsState): TendermintRoundsState {
   const proposer = state.validators[state.round % state.validators.length];
   const value = state.validators.find((validator) => validator.lockedValue)?.lockedValue ?? `block-${state.height}-${state.round}`;
@@ -85,6 +92,7 @@ function propose(state: TendermintRoundsState): TendermintRoundsState {
   };
 }
 
+/** prevote 执行当前内置仿真的状态推进、事件计算或校验逻辑。 */
 function prevote(state: TendermintRoundsState): TendermintRoundsState {
   const value = state.proposal?.value;
   return {
@@ -96,6 +104,7 @@ function prevote(state: TendermintRoundsState): TendermintRoundsState {
   };
 }
 
+/** precommit 执行当前内置仿真的状态推进、事件计算或校验逻辑。 */
 function precommit(state: TendermintRoundsState): TendermintRoundsState {
   const canLock = votePower(state, 'prevote') >= 67;
   const value = state.proposal?.value;
@@ -108,28 +117,34 @@ function precommit(state: TendermintRoundsState): TendermintRoundsState {
   };
 }
 
+/** commit 执行当前内置仿真的状态推进、事件计算或校验逻辑。 */
 function commit(state: TendermintRoundsState): TendermintRoundsState {
   const committedValue = votePower(state, 'precommit') >= 67 ? state.proposal?.value : undefined;
   return { ...state, phaseIndex: committedValue ? 5 : 4, lastTransition: committedValue ? 'lock' : 'timeout', committedValue, timeout: !committedValue };
 }
 
+/** nextRound 执行当前内置仿真的状态推进、事件计算或校验逻辑。 */
 function nextRound(state: TendermintRoundsState): TendermintRoundsState {
   return { ...state, phaseIndex: 0, round: state.round + 1, timeout: false, lastTransition: 'proposal', validators: state.validators.map((validator) => ({ ...validator, prevote: undefined, precommit: undefined })) };
 }
 
+/** forceTimeout 执行当前内置仿真的状态推进、事件计算或校验逻辑。 */
 function forceTimeout(state: TendermintRoundsState): TendermintRoundsState {
   return { ...state, phaseIndex: 4, timeout: true, lastTransition: 'timeout', validators: state.validators.map((validator) => (validator.id === 'd' ? { ...validator, online: false } : validator)) };
 }
 
+/** rebroadcastValidValue 执行当前内置仿真的状态推进、事件计算或校验逻辑。 */
 function rebroadcastValidValue(state: TendermintRoundsState): TendermintRoundsState {
   return { ...state, phaseIndex: 0, timeout: false, lastTransition: 'proposal', validators: state.validators.map((validator) => ({ ...validator, online: true })) };
 }
 
+/** votePower 执行当前内置仿真的状态推进、事件计算或校验逻辑。 */
 function votePower(state: TendermintRoundsState, kind: 'prevote' | 'precommit'): number {
   const value = state.proposal?.value;
   return state.validators.filter((validator) => validator[kind] === value).reduce((sum, validator) => sum + validator.power, 0);
 }
 
+/** explain 执行当前内置仿真的状态推进、事件计算或校验逻辑。 */
 function explain(index: number) {
   const phase = tendermintRoundPhases[index] ?? tendermintRoundPhases[0];
   return { title: phase.label, effect: phase.effect, reason: phase.reason, defaultDurationMs: 1200 };

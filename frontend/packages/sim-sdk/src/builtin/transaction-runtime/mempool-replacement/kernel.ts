@@ -5,6 +5,7 @@ import { integerParam } from '../../initParams';
 import { mempoolReplacementPhases, type MempoolReplacementState, type PoolTx } from './model';
 import { traceLinesForMempoolReplacement } from './trace';
 
+/** createInitialMempoolReplacementState 执行当前内置仿真的状态推进、事件计算或校验逻辑。 */
 export function createInitialMempoolReplacementState(params: SimInitParams, _seed: number): MempoolReplacementState {
   const bump = integerParam(params, 'replacementBump', 10, 1, 100);
   return finalizeMempoolReplacementState({
@@ -27,6 +28,7 @@ export function createInitialMempoolReplacementState(params: SimInitParams, _see
   });
 }
 
+/** reduceMempoolReplacementEvent 执行当前内置仿真的状态推进、事件计算或校验逻辑。 */
 export function reduceMempoolReplacementEvent(state: MempoolReplacementState, event: SimEvent, _context: ReducerContext): MempoolReplacementState {
   if (event.type === 'select') return finalizeMempoolReplacementState({ ...state, selectedElementId: event.target });
   if (event.type === 'attack') return finalizeMempoolReplacementState(tryWeakReplacement(state));
@@ -35,6 +37,7 @@ export function reduceMempoolReplacementEvent(state: MempoolReplacementState, ev
   return state;
 }
 
+/** finalizeMempoolReplacementState 执行当前内置仿真的状态推进、事件计算或校验逻辑。 */
 export function finalizeMempoolReplacementState(state: MempoolReplacementState): MempoolReplacementState {
   const included = state.transactions.filter((tx) => tx.status === 'included').length;
   const rejected = state.transactions.filter((tx) => tx.status === 'rejected').length;
@@ -56,6 +59,7 @@ export function finalizeMempoolReplacementState(state: MempoolReplacementState):
   };
 }
 
+/** mempoolReplacementCheckpoint 执行当前内置仿真的状态推进、事件计算或校验逻辑。 */
 export function mempoolReplacementCheckpoint(state: MempoolReplacementState): CheckpointResult {
   return {
     achieved: Boolean(state.checkpointValues.replacementAccepted || state.checkpointValues.queueReleased),
@@ -64,11 +68,13 @@ export function mempoolReplacementCheckpoint(state: MempoolReplacementState): Ch
   };
 }
 
+/** labelPoolActor 执行当前内置仿真的状态推进、事件计算或校验逻辑。 */
 export function labelPoolActor(id: string): string {
   const labels: Record<string, string> = { user: '用户', local: '本地节点', peer: '对等节点', builder: '构建器', block: '区块' };
   return labels[id] ?? id;
 }
 
+/** advanceMempool 执行当前内置仿真的状态推进、事件计算或校验逻辑。 */
 function advanceMempool(state: MempoolReplacementState, event: SimEvent): MempoolReplacementState {
   const tick = event.source === 'tick' ? state.tick + 1 : state.tick;
   if (state.phaseIndex === 0) return { ...state, tick, phaseIndex: 1, lastTransition: 'queue', transactions: classifyByNonce(state) };
@@ -79,6 +85,7 @@ function advanceMempool(state: MempoolReplacementState, event: SimEvent): Mempoo
   return { ...state, tick, phaseIndex: 1, lastTransition: 'queue', transactions: classifyByNonce(state) };
 }
 
+/** classifyByNonce 执行当前内置仿真的状态推进、事件计算或校验逻辑。 */
 function classifyByNonce(state: MempoolReplacementState): PoolTx[] {
   return state.transactions.map((tx) => {
     if (tx.status === 'included' || tx.status === 'replaced' || tx.status === 'rejected') return tx;
@@ -89,6 +96,7 @@ function classifyByNonce(state: MempoolReplacementState): PoolTx[] {
   });
 }
 
+/** tryWeakReplacement 执行当前内置仿真的状态推进、事件计算或校验逻辑。 */
 function tryWeakReplacement(state: MempoolReplacementState): MempoolReplacementState {
   const base = state.transactions.find((tx) => tx.account === 'Alice' && tx.nonce === 7 && tx.status === 'pending');
   if (!base) return state;
@@ -101,6 +109,7 @@ function tryWeakReplacement(state: MempoolReplacementState): MempoolReplacementS
   };
 }
 
+/** tryValidReplacement 执行当前内置仿真的状态推进、事件计算或校验逻辑。 */
 function tryValidReplacement(state: MempoolReplacementState): MempoolReplacementState {
   const base = state.transactions.find((tx) => tx.account === 'Alice' && tx.nonce === 7 && tx.status === 'pending');
   if (!base) return state;
@@ -113,6 +122,7 @@ function tryValidReplacement(state: MempoolReplacementState): MempoolReplacement
   };
 }
 
+/** propagateMessages 执行当前内置仿真的状态推进、事件计算或校验逻辑。 */
 function propagateMessages(tick: number) {
   return [
     { id: 'pool-msg-1', from: 'user', to: 'local', at: tick, endAt: tick + 1, label: 'submit tx', status: 'delivered' as const, detail: '用户提交交易到本地节点', process: { startedAt: tick, endedAt: tick + 1, progress: 1, label: '提交' } },
@@ -121,15 +131,18 @@ function propagateMessages(tick: number) {
   ];
 }
 
+/** includePending 执行当前内置仿真的状态推进、事件计算或校验逻辑。 */
 function includePending(state: MempoolReplacementState): PoolTx[] {
   return state.transactions.map((tx) => (tx.account === 'Alice' && tx.nonce === state.expectedNonce.Alice && tx.status === 'pending' ? { ...tx, status: 'included', reason: '连续 nonce 被打包' } : tx));
 }
 
+/** releaseQueued 执行当前内置仿真的状态推进、事件计算或校验逻辑。 */
 function releaseQueued(state: MempoolReplacementState): PoolTx[] {
   const nextNonce = state.expectedNonce.Alice + 1;
   return state.transactions.map((tx) => (tx.account === 'Alice' && tx.nonce === nextNonce && tx.status === 'queued' ? { ...tx, status: 'pending', reason: '前序 nonce 入块后释放' } : tx));
 }
 
+/** explain 执行当前内置仿真的状态推进、事件计算或校验逻辑。 */
 function explain(index: number) {
   const phase = mempoolReplacementPhases[index] ?? mempoolReplacementPhases[0];
   return { title: phase.label, effect: phase.effect, reason: phase.reason, defaultDurationMs: 1200 };

@@ -20,6 +20,7 @@ func RegisterRoutes(r gin.IRouter, svc *Service, authn *auth.Manager, roles cont
 	api := notifyAPI{svc: svc}
 	g := r.Group("/api/v1/notify")
 	user := g.Group("", authn.Middleware(), auth.RequireTenantAnyRole(roles, contracts.RoleStudent, contracts.RoleTeacher, contracts.RoleSchoolAdmin))
+	announcementReader := g.Group("", authn.Middleware(), auth.RequirePlatformOrAnyRole(roles, contracts.RoleStudent, contracts.RoleTeacher, contracts.RoleSchoolAdmin))
 	admin := g.Group("", authn.Middleware(), auth.RequirePlatformOrAnyRole(roles, contracts.RoleSchoolAdmin))
 	internal := g.Group("/internal", authn.ServiceMiddleware())
 	user.GET("/inbox", api.inbox)
@@ -29,7 +30,7 @@ func RegisterRoutes(r gin.IRouter, svc *Service, authn *auth.Manager, roles cont
 	user.DELETE("/inbox/:id", api.deleteNotification)
 	user.GET("/preferences", api.listPreferences)
 	user.PUT("/preferences", api.upsertPreference)
-	user.GET("/announcements", api.listAnnouncements)
+	announcementReader.GET("/announcements", api.listAnnouncements)
 	user.POST("/announcements/:id/read", api.markAnnouncementRead)
 	r.GET("/api/ws", authn.WebSocketMiddleware(), auth.RequireTenantAnyRole(roles, contracts.RoleStudent, contracts.RoleTeacher, contracts.RoleSchoolAdmin), api.websocket)
 	admin.POST("/announcements", api.createAnnouncement)

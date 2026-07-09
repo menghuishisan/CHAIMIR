@@ -2,8 +2,10 @@
 // 符合 FE-2（焦点陷阱、Esc 关闭、scrim 遮罩）
 
 import React, { useEffect, useId, useRef } from 'react'
+import { createPortal } from 'react-dom'
 import { X } from 'lucide-react'
 import { clsx } from 'clsx'
+import { useEscapeKey, useFocusTrap } from '../../hooks'
 import './Modal.css'
 
 export interface ModalProps {
@@ -42,32 +44,22 @@ export const Modal: React.FC<ModalProps> = ({
   className,
 }) => {
   const modalRef = useRef<HTMLDivElement>(null)
-  const previousActiveElement = useRef<HTMLElement | null>(null)
   const titleId = useId()
   const touchStartY = useRef(0)
   const currentTranslateY = useRef(0)
   const [swipeStyle, setSwipeStyle] = React.useState<React.CSSProperties>({})
 
-  // FE-2: 焦点陷阱
+  // 快捷键与焦点陷阱
+  useFocusTrap(modalRef, open)
+  useEscapeKey(() => {
+    if (open) onClose()
+  }, open)
+
+  // 禁用 body 滚动
   useEffect(() => {
     if (open) {
-      // 保存之前的焦点元素
-      previousActiveElement.current = document.activeElement as HTMLElement
-
-      // 优先聚焦第一个可操作元素；纯展示弹窗再聚焦容器。
-      const firstFocusable = modalRef.current ? getFocusableElements(modalRef.current)[0] : undefined
-      firstFocusable?.focus()
-      if (!firstFocusable) {
-        modalRef.current?.focus()
-      }
-
-      // 禁用 body 滚动
       document.body.style.overflow = 'hidden'
     } else {
-      // 恢复之前的焦点
-      previousActiveElement.current?.focus()
-
-      // 恢复 body 滚动
       document.body.style.overflow = ''
     }
 
@@ -76,24 +68,6 @@ export const Modal: React.FC<ModalProps> = ({
       setSwipeStyle({})
     }
   }, [open])
-
-  // FE-2: Esc 关闭
-  useEffect(() => {
-    if (!open) return
-
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        onClose()
-        return
-      }
-      if (e.key === 'Tab') {
-        trapFocus(e, modalRef.current)
-      }
-    }
-
-    document.addEventListener('keydown', handleKeyDown)
-    return () => document.removeEventListener('keydown', handleKeyDown)
-  }, [open, onClose])
 
   if (!open) return null
 
@@ -119,7 +93,7 @@ export const Modal: React.FC<ModalProps> = ({
     if (currentTranslateY.current > 80) {
       onClose()
     } else {
-      setSwipeStyle({ transform: `translateY(0)`, transition: 'transform 0.4s var(--ease-spring-bouncy)' })
+      setSwipeStyle({ transform: `translateY(0)`, transition: 'transform 0.4s var(--ease-spring)' })
     }
     currentTranslateY.current = 0
   }
@@ -130,7 +104,7 @@ export const Modal: React.FC<ModalProps> = ({
     className
   )
 
-  return (
+  const content = (
     <div className="chaimir-modal-overlay" onClick={handleOverlayClick}>
       <div
         ref={modalRef}
@@ -173,48 +147,8 @@ export const Modal: React.FC<ModalProps> = ({
       </div>
     </div>
   )
+
+  return typeof document !== 'undefined' ? createPortal(content, document.body) : null
 }
 
 Modal.displayName = 'Modal'
-
-/**
- * trapFocus 让 Tab/Shift+Tab 在当前模态框内循环，避免焦点逃逸到页面底层。
- */
-function trapFocus(event: KeyboardEvent, container: HTMLElement | null): void {
-  if (!container) {
-    return
-  }
-  const focusable = getFocusableElements(container)
-  if (focusable.length === 0) {
-    event.preventDefault()
-    container.focus()
-    return
-  }
-
-  const first = focusable[0]
-  const last = focusable[focusable.length - 1]
-  if (event.shiftKey && document.activeElement === first) {
-    event.preventDefault()
-    last.focus()
-    return
-  }
-  if (!event.shiftKey && document.activeElement === last) {
-    event.preventDefault()
-    first.focus()
-  }
-}
-
-/**
- * getFocusableElements 获取模态框内可见的交互元素。
- */
-function getFocusableElements(container: HTMLElement): HTMLElement[] {
-  const selector = [
-    'a[href]',
-    'button:not([disabled])',
-    'input:not([disabled])',
-    'select:not([disabled])',
-    'textarea:not([disabled])',
-    '[tabindex]:not([tabindex="-1"])',
-  ].join(',')
-  return Array.from(container.querySelectorAll<HTMLElement>(selector)).filter((element) => element.offsetParent !== null)
-}

@@ -21,7 +21,7 @@
   padding: var(--space-2) var(--space-5);
   border-bottom: 0.0625rem solid color-mix(in srgb, var(--color-dark-border) 30%, transparent);
   background: transparent;
-  z-index: 10;
+  z-index: var(--z-sticky);
 }
 
 .sim-workbench__controls {
@@ -33,7 +33,7 @@
   padding: var(--space-3) var(--space-6);
   background: transparent;
   border-top: 0.0625rem solid color-mix(in srgb, var(--color-dark-border) 30%, transparent);
-  z-index: 100;
+  z-index: var(--z-modal);
 }
 
 .sim-workbench__control-group {
@@ -137,7 +137,7 @@
   top: 50%;
   right: 0;
   transform: translateY(-50%);
-  z-index: 30;
+  z-index: var(--z-dropdown);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -180,10 +180,10 @@
   top: 0;
   bottom: 0;
   width: 26rem;
-  z-index: 20;
+  z-index: var(--z-sticky);
   transform: translateX(0);
   transition: transform 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
-  box-shadow: -8px 0 32px rgb(0 0 0 / 0.4);
+  box-shadow: -0.5rem 0 2rem var(--color-on-dark-shadow-strong);
   overflow-y: auto;
 }
 

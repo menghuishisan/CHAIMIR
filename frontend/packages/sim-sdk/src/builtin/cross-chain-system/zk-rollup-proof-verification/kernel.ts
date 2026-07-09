@@ -5,6 +5,7 @@ import { integerParam } from '../../initParams';
 import { traceLinesForZkRollup } from './trace';
 import { zkRollupPhases, type ZkRollupState } from './model';
 
+/** createInitialZkRollupState 执行当前内置仿真的状态推进、事件计算或校验逻辑。 */
 export function createInitialZkRollupState(params: SimInitParams, _seed: number): ZkRollupState {
   const batchSize = integerParam(params, 'batchSize', 128, 4, 4096);
   return finalizeZkRollupState({
@@ -34,6 +35,7 @@ export function createInitialZkRollupState(params: SimInitParams, _seed: number)
   });
 }
 
+/** reduceZkRollupEvent 执行当前内置仿真的状态推进、事件计算或校验逻辑。 */
 export function reduceZkRollupEvent(state: ZkRollupState, event: SimEvent, _context: ReducerContext): ZkRollupState {
   if (event.type === 'select') return finalizeZkRollupState({ ...state, selectedElementId: event.target });
   if (event.type === 'attack') return finalizeZkRollupState({ ...state, phaseIndex: 3, publicInputRoot: '0xwrong', proofGenerated: true, proofValid: false, verifierAccepted: false, lastTransition: 'verify', inputs: markProof({ ...state, publicInputRoot: '0xwrong' }, false) });
@@ -42,6 +44,7 @@ export function reduceZkRollupEvent(state: ZkRollupState, event: SimEvent, _cont
   return state;
 }
 
+/** finalizeZkRollupState 执行当前内置仿真的状态推进、事件计算或校验逻辑。 */
 export function finalizeZkRollupState(state: ZkRollupState): ZkRollupState {
   return {
     ...state,
@@ -57,6 +60,7 @@ export function finalizeZkRollupState(state: ZkRollupState): ZkRollupState {
   };
 }
 
+/** zkRollupCheckpoint 执行当前内置仿真的状态推进、事件计算或校验逻辑。 */
 export function zkRollupCheckpoint(state: ZkRollupState): CheckpointResult {
   return {
     achieved: state.verifierAccepted || state.phaseIndex === 5,
@@ -65,6 +69,7 @@ export function zkRollupCheckpoint(state: ZkRollupState): CheckpointResult {
   };
 }
 
+/** advanceZkRollup 执行当前内置仿真的状态推进、事件计算或校验逻辑。 */
 function advanceZkRollup(state: ZkRollupState, event: SimEvent): ZkRollupState {
   const tick = event.source === 'tick' ? state.tick + 1 : state.tick;
   if (state.phaseIndex === 0) return { ...state, tick, phaseIndex: 1, lastTransition: 'trace' };
@@ -74,10 +79,12 @@ function advanceZkRollup(state: ZkRollupState, event: SimEvent): ZkRollupState {
   return { ...state, tick, phaseIndex: 0, lastTransition: 'aggregate' };
 }
 
+/** markProof 执行当前内置仿真的状态推进、事件计算或校验逻辑。 */
 function markProof(state: ZkRollupState, valid: boolean) {
   return state.inputs.map((input) => (input.id === 'proof' ? { ...input, value: valid ? 'valid proof' : 'generated proof', valid } : input.id === 'new-root' ? { ...input, valid: state.publicInputRoot === state.newRoot } : input));
 }
 
+/** explain 执行当前内置仿真的状态推进、事件计算或校验逻辑。 */
 function explain(index: number) {
   const phase = zkRollupPhases[index] ?? zkRollupPhases[0];
   return { title: phase.label, effect: phase.effect, reason: phase.reason, defaultDurationMs: 1200 };

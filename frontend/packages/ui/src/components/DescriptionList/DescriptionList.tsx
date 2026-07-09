@@ -17,6 +17,9 @@ export interface DescriptionListProps extends React.HTMLAttributes<HTMLDListElem
   density?: 'comfortable' | 'compact'
 }
 
+/**
+ * DescriptionList 用 dl/dt/dd 渲染键值详情，适合审计、状态和移动端表格卡片。
+ */
 export function DescriptionList({
   items,
   columns = 1,

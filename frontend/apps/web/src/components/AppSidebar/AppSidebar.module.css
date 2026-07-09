@@ -1,0 +1,138 @@
+/* AppSidebar.module.css 定义学生端和教师端共用侧栏的布局、状态和响应式样式。 */
+.sidebar {
+  width: var(--sidebar-w);
+  background-color: var(--color-bg);
+  border-right: 1px solid var(--color-border-subtle);
+  display: flex;
+  flex-direction: column;
+  transition: width var(--t) var(--ease);
+  z-index: var(--z-sticky);
+  height: calc(100vh - var(--topnav-h));
+}
+
+.sidebar.collapsed {
+  width: var(--sidebar-w-collapsed);
+}
+
+.scrollArea {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: var(--space-4) 0;
+}
+
+.menuGroup {
+  margin-bottom: var(--space-6);
+}
+
+.groupTitle {
+  padding: 0 var(--space-6);
+  font-size: 11px;
+  font-weight: var(--font-semibold);
+  color: var(--color-text-sub);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: var(--space-2);
+}
+
+.nav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 0 var(--space-3);
+}
+
+.navItem {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  color: var(--color-text-strong);
+  text-decoration: none;
+  border-radius: var(--radius-sm);
+  transition: all var(--t-fast) var(--ease);
+  position: relative;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.navIcon {
+  color: var(--color-text-sub);
+  flex-shrink: 0;
+}
+
+.navText {
+  font-size: var(--text-sm);
+  font-weight: var(--font-medium);
+}
+
+.navItem:hover {
+  background: linear-gradient(90deg, var(--color-primary-soft) 0%, transparent 100%);
+}
+
+.navItem.active {
+  background-color: var(--color-primary-soft);
+  color: var(--color-primary-text);
+  font-weight: var(--font-semibold);
+}
+
+.navItem.active .navIcon {
+  color: var(--color-primary);
+}
+
+/* 激活项左侧指示条用主色令牌提示当前功能位置。 */
+.navItem.active::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 10%;
+  bottom: 10%;
+  width: 3px;
+  background-color: var(--color-primary);
+  border-radius: 0 4px 4px 0;
+}
+
+.footer {
+  padding: var(--space-3);
+  border-top: 1px solid var(--color-border-subtle);
+  display: flex;
+  justify-content: center;
+}
+
+.toggleBtn {
+  background: none;
+  border: none;
+  color: var(--color-text-sub);
+  padding: var(--space-2);
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all var(--t) var(--ease);
+  width: 100%;
+}
+
+.toggleBtn:hover {
+  background-color: var(--color-surface-hover);
+  color: var(--color-text-strong);
+}
+
+@media (max-width: 768px) {
+  .sidebar {
+    position: fixed;
+    top: var(--topnav-h);
+    left: calc(-1 * var(--sidebar-w));
+    width: var(--sidebar-w);
+    height: calc(100vh - var(--topnav-h));
+    transition: transform var(--t-normal) var(--ease);
+  }
+
+  .sidebar.mobileOpen {
+    transform: translateX(var(--sidebar-w));
+  }
+
+  .footer {
+    display: none;
+  }
+}

@@ -146,7 +146,7 @@
 }
 
 .is-focus {
-  z-index: 12;
+  z-index: var(--z-sticky);
 }
 
 .is-focus:is(.sim-graph__node, .sim-chain__block, .sim-tree__node, .sim-matrix__cell, .sim-pipeline__step, .sim-lane__message),
@@ -325,7 +325,7 @@
   transform: translate(-50%, -50%);
   pointer-events: auto;
   cursor: pointer;
-  z-index: 10;
+  z-index: var(--z-base);
   display: grid;
   place-items: center;
 }
@@ -340,7 +340,7 @@
   background: color-mix(in srgb, var(--color-dark-elevated) 65%, transparent);
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
-  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--color-dark-border) 80%, transparent), 0 0.25rem 0.5rem rgb(0 0 0 / 0.3);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--color-dark-border) 80%, transparent), 0 0.25rem 0.5rem var(--color-on-dark-shadow);
   transition:
     background var(--t) var(--ease-spring-bouncy, cubic-bezier(0.175, 0.885, 0.32, 1.275)),
     border-color var(--t) var(--ease-spring-bouncy, cubic-bezier(0.175, 0.885, 0.32, 1.275)),
@@ -465,7 +465,7 @@
 .sim-chain-row__label {
   position: sticky;
   inset-inline-start: 0;
-  z-index: 1;
+  z-index: var(--z-base);
   padding: var(--space-1) var(--space-2);
   border: 0.0625rem solid var(--color-dark-border);
   border-radius: var(--radius-full);
@@ -541,7 +541,7 @@
 }
 
 .sim-chain__block.is-tip {
-  box-shadow: 0 0 0 0.125rem color-mix(in srgb, var(--sim-pattern-accent) 35%, transparent), 0 0.5rem 1rem rgb(0 0 0 / 0.18);
+  box-shadow: 0 0 0 0.125rem color-mix(in srgb, var(--sim-pattern-accent) 35%, transparent), 0 0.5rem 1rem var(--color-primary-shadow);
 }
 
 .sim-chain__block.is-attacker,
@@ -675,7 +675,7 @@
 .sim-matrix thead th,
 .sim-matrix tbody th {
   position: sticky;
-  z-index: 1;
+  z-index: var(--z-base);
   background: color-mix(in srgb, var(--color-dark-surface) 92%, transparent);
 }
 
@@ -788,12 +788,12 @@
 .sim-pipeline__step:focus-visible {
   background: color-mix(in srgb, var(--color-dark-surface) 80%, transparent);
   transform: translateX(var(--space-1));
-  box-shadow: 0 4px 12px rgb(0 0 0 / 0.15);
+  box-shadow: 0 0.25rem 0.75rem var(--color-primary-shadow);
 }
 
 .sim-pipeline__step i {
   position: relative;
-  z-index: 1;
+  z-index: var(--z-base);
   grid-row: span 2;
   display: grid;
   place-items: center;
@@ -933,7 +933,7 @@
   background: color-mix(in srgb, var(--color-dark-elevated) 70%, transparent);
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
-  box-shadow: 0 2px 6px rgb(0 0 0 / 0.4);
+  box-shadow: 0 0.125rem 0.375rem var(--color-on-dark-shadow-strong);
   font-size: var(--text-xs);
   cursor: pointer;
   transform: translateX(-50%);

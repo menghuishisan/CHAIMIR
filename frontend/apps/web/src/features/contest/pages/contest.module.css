@@ -1,0 +1,195 @@
+/* 竞赛页面样式：统一报名、参赛工作台、题目配置、战绩和漏洞题管理布局。 */
+
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+}
+
+.breadcrumb {
+  color: var(--color-text-faint);
+  font-size: var(--text-xs);
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+}
+
+.title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0;
+  color: var(--color-text);
+  font-size: var(--text-2xl);
+  font-weight: var(--font-semibold);
+}
+
+.titleIcon {
+  color: var(--color-primary);
+}
+
+.panel {
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface);
+  padding: var(--space-5);
+}
+
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.sectionTitle {
+  margin: 0;
+  color: var(--color-text);
+  font-size: var(--text-lg);
+  font-weight: var(--font-semibold);
+}
+
+.muted {
+  color: var(--color-text-sub);
+  line-height: var(--leading-relaxed);
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: var(--space-4);
+}
+
+.split {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(320px, 1fr);
+  gap: var(--space-5);
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.label {
+  color: var(--color-text-sub);
+  font-size: var(--text-sm);
+  font-weight: var(--font-medium);
+}
+
+.stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: var(--space-4);
+}
+
+.stat {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.statLabel {
+  color: var(--color-text-faint);
+  font-size: var(--text-sm);
+}
+
+.statValue {
+  color: var(--color-text);
+  font-size: var(--text-xl);
+  font-weight: var(--font-semibold);
+}
+
+.list {
+  display: grid;
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.listItem {
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-sunken);
+  padding: var(--space-4);
+}
+
+.jsonEditor {
+  min-height: 180px;
+  font-family: var(--font-mono);
+}
+
+.workspace {
+  display: grid;
+  grid-template-columns: 340px minmax(0, 1fr);
+  min-height: calc(100vh - 96px);
+  background: var(--color-dark-bg);
+  color: var(--color-dark-text);
+}
+
+.workspacePanel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  border-right: 1px solid var(--color-glass-border);
+  background: var(--color-dark-surface);
+  padding: var(--space-5);
+}
+
+.workspaceTitle {
+  margin: 0;
+  color: var(--color-dark-text);
+  font-size: var(--text-lg);
+  font-weight: var(--font-semibold);
+}
+
+.workspaceMeta {
+  color: var(--color-dark-text-sub);
+  font-size: var(--text-sm);
+}
+
+.stage {
+  padding: var(--space-5);
+  min-width: 0;
+}
+
+.darkCard {
+  border: 1px solid var(--color-glass-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-glass-highlight);
+  padding: var(--space-4);
+}
+
+.darkInput {
+  color: var(--color-dark-bg);
+}
+
+.message {
+  color: var(--color-text-sub);
+  font-size: var(--text-sm);
+}
+
+.darkMessage {
+  color: var(--color-dark-text-sub);
+  font-size: var(--text-sm);
+}
+
+@media (max-width: 900px) {
+  .split,
+  .workspace {
+    grid-template-columns: 1fr;
+  }
+}

@@ -1,0 +1,116 @@
+/* ImmersiveLayout.module.css 定义实验、仿真和竞赛沉浸式工作台外壳样式。 */
+.immersiveContainer {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  width: 100vw;
+  overflow: hidden;
+  background-color: var(--color-dark-bg);
+  color: var(--color-dark-text);
+}
+
+.topbar {
+  height: 48px;
+  background-color: var(--color-dark-bg);
+  border-bottom: 1px solid var(--color-glass-border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 var(--space-4);
+  flex-shrink: 0;
+  z-index: var(--z-immersive);
+}
+
+.left {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+}
+
+.exitBtn {
+  background: none;
+  border: none;
+  color: var(--color-dark-text-sub);
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-sm);
+  cursor: pointer;
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-sm);
+  transition: all var(--t) var(--ease);
+}
+
+.exitBtn:hover {
+  background-color: var(--color-glass-highlight);
+  color: var(--color-dark-text);
+}
+
+.divider {
+  width: 1px;
+  height: 16px;
+  background-color: var(--color-glass-border);
+}
+
+.title {
+  font-size: var(--text-base);
+  font-weight: var(--font-semibold);
+  margin: 0;
+}
+
+.right {
+  display: flex;
+  align-items: center;
+}
+
+.statusPill {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  background-color: var(--color-glass-highlight);
+  border: 1px solid var(--color-glass-border);
+  padding: 4px 12px;
+  border-radius: var(--radius-full);
+  font-size: var(--text-xs);
+  color: var(--color-dark-text-sub);
+}
+
+.statusDot {
+  width: 6px;
+  height: 6px;
+  background-color: var(--color-success);
+  border-radius: 50%;
+  box-shadow: 0 0 8px var(--color-success);
+}
+
+.focusEscapeBtn {
+  position: fixed;
+  top: 60px;
+  right: 16px;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background-color: var(--color-dark-glass);
+  backdrop-filter: blur(4px);
+  border: 1px solid var(--color-glass-border);
+  color: var(--color-dark-text-sub);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  z-index: var(--z-immersive);
+  transition: all var(--t) var(--ease);
+}
+
+.focusEscapeBtn:hover {
+  background-color: var(--color-panel-glass);
+  color: var(--color-dark-text);
+  border-color: var(--color-glass-border);
+}
+
+.workspaceArea {
+  flex: 1;
+  display: flex;
+  overflow: hidden;
+  position: relative;
+}

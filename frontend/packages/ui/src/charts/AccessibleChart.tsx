@@ -122,6 +122,9 @@ export function AccessibleChart({
   )
 }
 
+/**
+ * renderBars 用可聚焦 SVG 分组渲染柱状图，并给每个数据点提供可读标签。
+ */
 function renderBars(data: ChartPoint[], max: number, valueFormatter: (value: number) => string): React.ReactNode {
   const gap = 8
   const width = Math.max(12, (288 - gap * Math.max(0, data.length - 1)) / Math.max(1, data.length))
@@ -138,6 +141,9 @@ function renderBars(data: ChartPoint[], max: number, valueFormatter: (value: num
   })
 }
 
+/**
+ * renderLine 用折线和点位渲染趋势图，并保留数据点键盘访问能力。
+ */
 function renderLine(data: ChartPoint[], max: number, valueFormatter: (value: number) => string): React.ReactNode {
   const points = data.map((point, index) => {
     const x = 16 + (index / Math.max(1, data.length - 1)) * 288
@@ -160,6 +166,9 @@ function renderLine(data: ChartPoint[], max: number, valueFormatter: (value: num
   )
 }
 
+/**
+ * ChartError 呈现图表加载失败状态，并在调用方提供时展示重试动作。
+ */
 function ChartError({ message, onRetry }: { message: string; onRetry?: () => void }): React.ReactElement {
   return (
     <div className="chaimir-chart__state is-error" role="alert">
@@ -176,6 +185,9 @@ function ChartError({ message, onRetry }: { message: string; onRetry?: () => voi
   )
 }
 
+/**
+ * ChartState 呈现加载或空数据状态，避免图表区域出现空白。
+ */
 function ChartState({ tone, title, description }: { tone: 'loading' | 'empty'; title: string; description: string }): React.ReactElement {
   return (
     <div className={`chaimir-chart__state is-${tone}`} role="status" aria-live="polite">
@@ -186,10 +198,16 @@ function ChartState({ tone, title, description }: { tone: 'loading' | 'empty'; t
   )
 }
 
+/**
+ * defaultValueFormatter 使用中文数字格式化，避免图表默认输出原始数字。
+ */
 function defaultValueFormatter(value: number): string {
   return new Intl.NumberFormat('zh-CN').format(value)
 }
 
+/**
+ * useStableId 去掉 React useId 中不适合拼接 SVG aria id 的分隔符。
+ */
 function useStableId(prefix: string): string {
   const id = React.useId()
   return `${prefix}-${id.replace(/:/g, '')}`

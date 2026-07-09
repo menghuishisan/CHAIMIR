@@ -58,11 +58,11 @@
 
   /* === 字距 === */
 
-  --tracking-tight: -0.02em;  /* 紧缩：大标题 */
-  --tracking-normal: 0;       /* 常规 */
-  --tracking-wide: 0.01em;    /* 稍宽：按钮 */
-  --tracking-wider: 0.05em;   /* 更宽：表头 */
-  --tracking-widest: 0.09em;  /* 最宽：kicker 小标签 */
+  --tracking-tight: 0;   /* 当前工程约束：字距不使用负值 */
+  --tracking-normal: 0;  /* 常规 */
+  --tracking-wide: 0;    /* 按钮 */
+  --tracking-wider: 0;   /* 表头 */
+  --tracking-widest: 0;  /* kicker 小标签 */
 }
 
 /* ===== 工具类：等宽数字 =====

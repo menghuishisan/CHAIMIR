@@ -103,8 +103,13 @@
   --color-surface: var(--slate-50);           /* 表面 */
   --color-surface-sunken: var(--slate-100);   /* 凹陷表面 */
   --color-surface-hover: var(--slate-100);    /* 悬浮态背景 */
-  --color-scrim: rgba(15, 23, 42, 0.5);       /* 弹层遮罩 */
-  --color-highlight: rgba(255, 255, 255, 0.12); /* 深色按钮内高光 */
+  --color-scrim: rgba(15, 23, 42, 0.4);       /* 弹层遮罩 (变透以支持后面高斯模糊) */
+  --color-highlight: rgba(255, 255, 255, 0.4); /* 按钮高光，增加通透感 */
+
+  /* 浅色毛玻璃材质 (Glassmorphism) */
+  --color-glass-surface: rgba(255, 255, 255, 0.75);
+  --color-glass-border-light: rgba(255, 255, 255, 0.6);
+  --color-glass-border-subtle-light: rgba(0, 0, 0, 0.05);
 
   /* 文字 */
   --color-text: var(--slate-900);             /* 主文字，对白底约 12:1 */
@@ -185,8 +190,6 @@
   --color-glass-border: rgba(255, 255, 255, 0.1);
   --color-glass-border-subtle: rgba(255, 255, 255, 0.05);
   --color-glass-highlight: rgba(255, 255, 255, 0.05);
-  --shadow-glass-panel: 0 8px 32px rgba(0, 0, 0, 0.4), inset 0 1px 0 var(--color-glass-border);
-  --shadow-glass-elevated: 0 4px 16px rgba(0, 0, 0, 0.5), inset 0 1px 0 var(--color-glass-highlight);
 
   --color-dark-text: var(--slate-50);         /* 深底主文字，对深底约 15:1 */
   --color-dark-text-sub: var(--slate-300);    /* 深底次要文字，对深底约 7:1 */

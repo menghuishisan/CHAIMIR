@@ -1,0 +1,73 @@
+/* NotFoundPage.module.css 定义未知路由兜底页的全令牌化深色布局。 */
+.page {
+  display: flex;
+  min-height: 100vh;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-6);
+  background: radial-gradient(circle at 50% 50%, var(--color-dark-surface), var(--color-dark-bg));
+  color: var(--color-dark-text);
+  text-align: center;
+}
+
+.panel {
+  width: 100%;
+  max-width: 500px;
+  padding: var(--space-10);
+  border: 1px solid var(--color-glass-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-dark-glass);
+  box-shadow: var(--shadow-glass-panel);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+.iconWrap {
+  display: flex;
+  justify-content: center;
+  margin-bottom: var(--space-6);
+}
+
+.alertIcon {
+  color: var(--color-secondary-accent);
+}
+
+.code {
+  margin: 0 0 var(--space-2);
+  color: var(--color-on-dark-accent);
+  font-size: 64px;
+  font-weight: var(--font-extrabold);
+  line-height: 1;
+}
+
+.title {
+  margin: 0 0 var(--space-4);
+  color: var(--color-dark-text);
+  font-size: var(--text-xl);
+  font-weight: var(--font-semibold);
+}
+
+.description {
+  margin: 0 0 var(--space-8);
+  color: var(--color-dark-text-sub);
+  font-size: var(--text-base);
+  line-height: var(--leading-relaxed);
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: var(--space-4);
+}
+
+@media (max-width: 480px) {
+  .panel {
+    padding: var(--space-6);
+  }
+
+  .actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+}
