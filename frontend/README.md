@@ -12,8 +12,8 @@ frontend/
 │   └── web/                    # 唯一的单体前端 SPA，采用 FSD 架构
 │       └── src/
 │           ├── app/            # 驱动层: 全局 Provider, 路由实例化
+│           ├── routes/         # 路由边界层: 懒加载入口、路由清单和权限装配
 │           ├── layouts/        # 布局层: AuthLayout, MainLayout, ImmersiveLayout
-│           ├── pages/          # 路由层: 按四端角色懒加载隔离 (auth, student, teacher, etc.)
 │           ├── features/       # 领域层: 1:1 映射后端模块, 包含业务组件与逻辑
 │           ├── components/     # 应用组件层: 跨业务组装 UI
 │           ├── hooks/          # 通用 Hooks
@@ -34,9 +34,9 @@ frontend/
 
 - `apps/web`: 统一的单体前端 SPA 入口。采用 **FSD (Feature-Sliced Design)** 架构，其内部 `src/` 目录的严格职责划分如下：
   - `src/app/`: **驱动层**。负责路由树初始化、全局 Provider 挂载、鉴权守卫 (RoleGuard) 与全局样式引入。
+  - `src/routes/`: **路由边界层 (极其重要)**。维护路由清单、懒加载页面入口和权限装配。这里可以引用 `features/*/pages` 页面实现，但不得编写业务逻辑、状态机或页面样式。
   - `src/layouts/`: **布局层**。维护三大外壳：`AuthLayout` (登录/空旷页)、`MainLayout` (侧栏+顶栏的标准工作台)、`ImmersiveLayout` (无侧栏的深色全屏工作台)。
-  - `src/pages/`: **路由边界层 (极其重要)**。严格按 `auth/`、`student/`、`teacher/`、`school-admin/`、`platform-admin/` 和 `shared/` 划分。这里的组件**必须懒加载**，且禁止编写重度业务，只负责引用 `features/` 中的模块并下发权限。
-  - `src/features/`: **业务领域层 (核心)**。**1:1 强映射后端 11 个业务模块**（如 `identity`, `teaching`, `experiment`, `contest`）。同一功能在不同端的展示（如“提交作业”与“批改作业”）收敛于此，杜绝代码重复。
+  - `src/features/`: **业务领域层 (核心)**。**1:1 强映射后端 11 个业务模块**（如 `identity`, `teaching`, `experiment`, `contest`）。页面实现统一放在各模块的 `pages/` 子目录，同一功能在不同端的展示（如“提交作业”与“批改作业”）收敛于此，杜绝代码重复。
   - `src/components/`: **应用级组件**。仅存放跨业务领域的 UI 拼装（如 `AppSidebar`, `NotificationBell`）。注意：基础和通用业务组件应沉淀至 `packages/ui`。
   - `src/hooks/`: 应用级通用 Hooks（如 `useAuth`, `useWebSocket`）。
   - `src/store/`: 极轻量的全局状态（如 `currentUser`, `currentTenant`）。
@@ -56,7 +56,7 @@ pnpm install
 
 启动开发服务器：
 ```bash
-cd apps/web && pnpm dev
+pnpm run dev
 ```
 
 ## 常用命令
