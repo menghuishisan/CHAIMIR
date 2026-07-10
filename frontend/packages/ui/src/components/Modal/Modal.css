@@ -14,7 +14,7 @@
   align-items: center;
   justify-content: center;
   padding: var(--space-4);
-  background: var(--color-scrim); /* 遮罩 50% */
+  background: var(--color-scrim); /* 遮罩 40-60% */
   animation: chaimir-modal-overlay-in var(--t-normal) var(--ease-out);
 }
 
@@ -33,17 +33,15 @@
   position: relative;
   width: 100%;
   max-height: 88vh;
-  background: var(--color-panel-glass);
-  backdrop-filter: blur(20px) saturate(180%);
-  -webkit-backdrop-filter: blur(20px) saturate(180%);
-  border: 1px solid var(--color-glass-border);
-  border-radius: var(--radius-xl);
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
   box-shadow: var(--shadow-glass-panel);
   display: flex;
   flex-direction: column;
   outline: 2px solid transparent;
   /* 入场动画：translateY + scale + 淡入 */
-  animation: chaimir-modal-in 0.3s var(--ease-spring);
+  animation: chaimir-modal-in 0.4s var(--ease-spring-ios);
 }
 
 @keyframes chaimir-modal-in {
@@ -82,7 +80,7 @@
   align-items: center;
   justify-content: space-between;
   padding: var(--space-6) var(--space-6) var(--space-4);
-  border-bottom: 1px solid var(--color-glass-border-subtle);
+  border-bottom: 1px solid var(--color-border);
   background: transparent;
 }
 
@@ -136,7 +134,7 @@
   justify-content: flex-end;
   gap: var(--space-3);
   padding: var(--space-4) var(--space-6) var(--space-6);
-  border-top: 1px solid var(--color-glass-border-subtle);
+  border-top: 1px solid var(--color-border);
   background: transparent;
 }
 
@@ -154,7 +152,7 @@
     border-bottom-left-radius: 0;
     border-bottom-right-radius: 0;
     /* 移动端从底部弹出 */
-    animation: chaimir-modal-in-mobile 0.3s var(--ease-spring);
+    animation: chaimir-modal-in-mobile 0.4s var(--ease-spring-ios);
   }
 
   .chaimir-modal__header,

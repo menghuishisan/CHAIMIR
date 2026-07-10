@@ -43,7 +43,7 @@
   font-weight: var(--font-medium);
   color: var(--color-danger);
   margin-top: calc(-1 * var(--space-1)); /* 就近显示 */
-  animation: form-error-in 0.4s var(--ease-spring);
+  animation: form-error-in 0.4s var(--ease-spring-ios);
 }
 
 @keyframes form-error-in {

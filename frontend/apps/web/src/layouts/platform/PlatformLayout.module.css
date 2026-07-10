@@ -20,8 +20,8 @@
 }
 
 .pageWrapper {
-  padding: 24px;
-  max-width: 1440px;
+  padding: var(--space-6);
+  max-width: var(--content-max);
   margin: 0 auto;
   width: 100%;
 }
@@ -31,8 +31,7 @@
   position: absolute;
   inset: 0;
   background-color: var(--color-scrim);
-  backdrop-filter: blur(4px);
-    z-index: var(--z-drawer);
+  z-index: var(--z-drawer);
 }
 
 @media (max-width: 768px) {
@@ -40,6 +39,6 @@
     display: block;
   }
   .pageWrapper {
-    padding: 16px;
+    padding: var(--space-4);
   }
 }

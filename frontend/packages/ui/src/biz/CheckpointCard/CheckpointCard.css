@@ -13,7 +13,7 @@
   transition:
     border-color var(--t) var(--ease),
     box-shadow var(--t) var(--ease),
-    transform var(--t) var(--ease);
+    transform var(--t) var(--ease-spring-ios);
 }
 
 .chaimir-checkpoint-card:hover {

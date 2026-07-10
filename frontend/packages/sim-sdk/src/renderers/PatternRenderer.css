@@ -338,14 +338,14 @@
   border-radius: 50%;
   border: 0.0625rem solid var(--color-dark-border);
   background: color-mix(in srgb, var(--color-dark-elevated) 65%, transparent);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
   box-shadow: inset 0 1px 0 color-mix(in srgb, var(--color-dark-border) 80%, transparent), 0 0.25rem 0.5rem var(--color-on-dark-shadow);
   transition:
-    background var(--t) var(--ease-spring-bouncy, cubic-bezier(0.175, 0.885, 0.32, 1.275)),
-    border-color var(--t) var(--ease-spring-bouncy, cubic-bezier(0.175, 0.885, 0.32, 1.275)),
-    box-shadow var(--t) var(--ease-spring-bouncy, cubic-bezier(0.175, 0.885, 0.32, 1.275)),
-    transform var(--t) var(--ease-spring-bouncy, cubic-bezier(0.175, 0.885, 0.32, 1.275));
+    background var(--t) var(--ease-spring-ios),
+    border-color var(--t) var(--ease-spring-ios),
+    box-shadow var(--t) var(--ease-spring-ios),
+    transform var(--t) var(--ease-spring-ios);
   color: var(--color-dark-text);
 }
 
@@ -421,7 +421,7 @@
 .sim-lane__message:active,
 .sim-chart__series-line circle:active {
   transform: scale(0.96);
-  transition: transform var(--t-fast) var(--ease-spring-bouncy, cubic-bezier(0.175, 0.885, 0.32, 1.275));
+  transition: transform var(--t-fast) var(--ease-spring-ios);
 }
 
 .sim-chain-board {
@@ -518,11 +518,11 @@
   border: 0.0625rem solid var(--color-dark-border);
   border-radius: var(--radius-xs);
   background: color-mix(in srgb, var(--color-dark-elevated) 65%, transparent);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
   box-shadow: inset 0 1px 0 color-mix(in srgb, var(--color-dark-border) 80%, transparent);
   cursor: pointer;
-  transition: border-color var(--t) var(--ease), box-shadow var(--t) var(--ease), transform var(--t-fast) var(--ease);
+  transition: border-color var(--t) var(--ease), box-shadow var(--t) var(--ease), transform var(--t-fast) var(--ease-spring-ios);
 }
 
 .sim-chain__block:hover,
@@ -596,7 +596,7 @@
   text-align: center;
   overflow-wrap: anywhere;
   cursor: pointer;
-  transition: border-color var(--t-fast) var(--ease), box-shadow var(--t-fast) var(--ease), transform var(--t-fast) var(--ease);
+  transition: border-color var(--t-fast) var(--ease), box-shadow var(--t-fast) var(--ease), transform var(--t-fast) var(--ease-spring-ios);
 }
 
 .sim-tree__box:hover,
@@ -652,8 +652,8 @@
   border: 0.0625rem solid var(--color-dark-border);
   border-radius: var(--radius-sm);
   background: color-mix(in srgb, var(--color-terminal-bg) 80%, transparent);
-  backdrop-filter: blur(24px);
-  -webkit-backdrop-filter: blur(24px);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
 }
 
 .sim-matrix {
@@ -781,7 +781,7 @@
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
   cursor: pointer;
-  transition: border-color var(--t) var(--ease), background var(--t) var(--ease), transform var(--t-fast) var(--ease);
+  transition: border-color var(--t) var(--ease), background var(--t) var(--ease), transform var(--t-fast) var(--ease-spring-ios);
 }
 
 .sim-pipeline__step:hover,
@@ -940,7 +940,7 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  transition: border-color var(--t-fast) var(--ease), background var(--t-fast) var(--ease), transform var(--t-fast) var(--ease);
+  transition: border-color var(--t-fast) var(--ease), background var(--t-fast) var(--ease), transform var(--t-fast) var(--ease-spring-ios);
 }
 
 .sim-lane__message:hover,

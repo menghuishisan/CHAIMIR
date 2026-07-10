@@ -91,7 +91,7 @@
   border-radius: var(--radius-xs);
   text-align: center;
   font-size: var(--text-sm);
-  transition: border-color var(--t) var(--ease), box-shadow 0.4s var(--ease-spring-bouncy);
+  transition: border-color var(--t) var(--ease), box-shadow 0.4s var(--ease-spring-ios);
 }
 
 .chaimir-pagination__input:focus {

@@ -1,20 +1,25 @@
 // CoursesPage 展示学生可见课程列表，数据来自 teaching 课程接口。
 
-import React, { useState } from 'react'
+import React, { useCallback, useState } from 'react'
 import { CourseStatus } from '@chaimir/api-client'
-import { Button, Input, Select } from '@chaimir/ui'
-import { BookOpen, RefreshCw } from 'lucide-react'
+import { Button, Callout, FormField, Input, Select } from '@chaimir/ui'
+import { BookOpen, RefreshCw, UserPlus } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../../../../../app/api'
 import { ErrorState, LoadingState } from '../../../../../components/ResourceState'
 import { useAsyncResource } from '../../../../../hooks'
 import styles from '../../teaching.module.css'
 import { studentCourseStatusFilterOptions } from '../../../../../utils/index'
+import { userFacingErrorMessage } from '../../../../../utils/userFacingError'
 
 const CoursesPage: React.FC = () => {
   const navigate = useNavigate()
   const [keyword, setKeyword] = useState('')
   const [status, setStatus] = useState('')
+  const [inviteCode, setInviteCode] = useState('')
+  const [joining, setJoining] = useState(false)
+  const [message, setMessage] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
   const resource = useAsyncResource(() => api.teaching.getCourses({
     status: status ? Number(status) as CourseStatus : undefined,
     page: 1,
@@ -23,6 +28,31 @@ const CoursesPage: React.FC = () => {
   const rows = (resource.data?.list || []).filter((course) => (
     !keyword || course.name.includes(keyword) || course.description.includes(keyword)
   ))
+
+  /**
+   * handleJoinCourse 使用课程邀请码加入课程，并以服务端列表确认最终结果。
+   */
+  const handleJoinCourse = useCallback(async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    const normalizedCode = inviteCode.trim()
+    if (!normalizedCode) {
+      setError('请输入课程邀请码。')
+      return
+    }
+    setJoining(true)
+    setMessage(null)
+    setError(null)
+    try {
+      await api.teaching.joinCourse({ invite_code: normalizedCode })
+      setInviteCode('')
+      setMessage('已加入课程，课程列表已刷新。')
+      resource.reload()
+    } catch (joinError) {
+      setError(userFacingErrorMessage(joinError, '暂时无法加入课程，请检查邀请码后重试。'))
+    } finally {
+      setJoining(false)
+    }
+  }, [inviteCode, resource])
 
   return (
     <div className={styles.page}>
@@ -37,9 +67,23 @@ const CoursesPage: React.FC = () => {
         <Button variant="outline" icon={<RefreshCw size={16} />} onClick={resource.reload}>刷新</Button>
       </div>
 
+      <form className={styles.joinBar} onSubmit={handleJoinCourse}>
+        <FormField label="课程邀请码" htmlFor="course-invite-code" helperText="由任课教师提供">
+          <Input id="course-invite-code" fullWidth value={inviteCode} onChange={(event) => setInviteCode(event.target.value)} />
+        </FormField>
+        <Button type="submit" icon={<UserPlus size={16} />} loading={joining}>加入课程</Button>
+      </form>
+
+      {message && <Callout variant="success" title="加入成功">{message}</Callout>}
+      {error && <div className={styles.error} role="alert">{error}</div>}
+
       <div className={styles.toolbar}>
-        <Input placeholder="搜索课程" value={keyword} onChange={(event) => setKeyword(event.target.value)} />
-        <Select value={status} options={studentCourseStatusFilterOptions} onChange={setStatus} />
+        <FormField label="搜索课程" htmlFor="course-keyword">
+          <Input id="course-keyword" placeholder="输入课程名称" value={keyword} onChange={(event) => setKeyword(event.target.value)} />
+        </FormField>
+        <FormField label="课程状态" htmlFor="course-status">
+          <Select id="course-status" value={status} options={studentCourseStatusFilterOptions} onChange={setStatus} />
+        </FormField>
       </div>
 
       {resource.status === 'error' && <ErrorState error={resource.error} onRetry={resource.reload} />}

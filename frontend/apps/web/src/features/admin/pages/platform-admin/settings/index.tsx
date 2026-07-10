@@ -19,11 +19,12 @@ const SettingsPage: React.FC = () => {
   const [message, setMessage] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 
-  const configs = resource.data || []
+  const configs = useMemo(() => resource.data || [], [resource.data])
   const maintenanceConfig = useMemo(
     () => configs.find((config) => config.key === 'maintenance_mode'),
     [configs],
   )
+  const maintenanceEnabled = maintenanceConfig?.value?.enabled === true
 
   /**
    * valueFor 返回当前编辑态内容，首次编辑时使用后端值。
@@ -103,8 +104,8 @@ const SettingsPage: React.FC = () => {
             <h2>维护模式</h2>
             <p>开启后，平台会按后端策略限制普通用户访问。</p>
             <Switch
-              checked={Boolean(maintenanceConfig?.value?.enabled)}
-              label={Boolean(maintenanceConfig?.value?.enabled) ? '已开启' : '已关闭'}
+              checked={maintenanceEnabled}
+              label={maintenanceEnabled ? '已开启' : '已关闭'}
               disabled={!maintenanceConfig || submittingKey === maintenanceConfig.key}
               onChange={(event) => handleMaintenanceToggle(event.target.checked)}
             />

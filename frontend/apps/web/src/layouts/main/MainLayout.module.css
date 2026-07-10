@@ -37,9 +37,7 @@
   right: 0;
   bottom: 0;
   background-color: var(--color-scrim);
-  backdrop-filter: blur(4px);
-  -webkit-backdrop-filter: blur(4px);
-    z-index: var(--z-drawer);
+  z-index: var(--z-drawer);
 }
 
 /* 小屏降低页面内边距，给表格和工作流留出可用宽度。 */

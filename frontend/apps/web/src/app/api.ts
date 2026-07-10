@@ -2,6 +2,7 @@
 
 import { createApi } from '@chaimir/api-client'
 import { ACCESS_TOKEN_KEY } from '../utils/authSession'
+import { appConfig } from './config'
 
 const TRACE_ID_KEY = 'chaimir.trace_id'
 
@@ -19,8 +20,9 @@ function getBrowserItem(key: string): string | null {
  * api 是 apps/web 调用后端的唯一 SDK 实例。
  */
 export const api = createApi({
-  baseURL: import.meta.env.VITE_API_BASE_URL || window.location.origin,
-  wsBaseURL: import.meta.env.VITE_WS_BASE_URL,
+  baseURL: appConfig.apiBaseURL,
+  wsBaseURL: appConfig.wsBaseURL,
+  timeout: appConfig.apiTimeoutMs,
   getToken: () => getBrowserItem(ACCESS_TOKEN_KEY),
   getTraceId: () => getBrowserItem(TRACE_ID_KEY),
   onUnauthorized: () => {

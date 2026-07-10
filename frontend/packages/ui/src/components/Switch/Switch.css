@@ -64,7 +64,7 @@
   border-radius: var(--radius-full);
   box-shadow: 0 1px 3px var(--color-switch-thumb-shadow);
   transform: translateX(var(--switch-thumb-x));
-  transition: box-shadow var(--t) var(--ease), transform 0.4s var(--ease-spring-bouncy);
+  transition: box-shadow var(--t) var(--ease), transform 0.4s var(--ease-spring-ios);
 }
 
 .chaimir-switch--sm .chaimir-switch__thumb {

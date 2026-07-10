@@ -1,7 +1,8 @@
 // AlertsPage 展示当前学生可见的学业预警，并调用后端确认预警。
 
 import React, { useCallback, useMemo, useState } from 'react'
-import type { ApiError, GradeWarning } from '@chaimir/api-client'
+import type { GradeWarning } from '@chaimir/api-client'
+import { GradeWarningStatus } from '@chaimir/api-client'
 import type { TableColumn } from '@chaimir/ui'
 import { Button, Callout, Table } from '@chaimir/ui'
 import { AlertTriangle, CheckCircle, RefreshCw } from 'lucide-react'
@@ -10,6 +11,7 @@ import { ErrorState, LoadingState } from '../../../../../components/ResourceStat
 import { useAsyncResource } from '../../../../../hooks'
 import styles from '../../grade.module.css'
 import { formatDateTime, gradeWarningDetailLabel, gradeWarningStatusLabel, gradeWarningTypeLabel } from '../../../../../utils/index'
+import { userFacingErrorMessage } from '../../../../../utils/userFacingError'
 
 
 const AlertsPage: React.FC = () => {
@@ -31,7 +33,7 @@ const AlertsPage: React.FC = () => {
       setMessage('预警已确认。')
       resource.reload()
     } catch (actionError) {
-      setError((actionError as ApiError).message || '预警确认失败，请稍后重试。')
+      setError(userFacingErrorMessage(actionError, '预警确认失败，请稍后重试。'))
     }
   }, [resource])
 
@@ -45,7 +47,7 @@ const AlertsPage: React.FC = () => {
       key: 'actions',
       title: '操作',
       render: (row) => (
-        <Button variant="outline" size="sm" icon={<CheckCircle size={14} />} onClick={() => ackWarning(row.id)} disabled={row.status !== 1}>
+        <Button variant="outline" size="sm" icon={<CheckCircle size={14} />} onClick={() => ackWarning(row.id)} disabled={row.status !== GradeWarningStatus.PENDING}>
           确认
         </Button>
       ),
@@ -63,7 +65,7 @@ const AlertsPage: React.FC = () => {
         </div>
         <Button variant="outline" icon={<RefreshCw size={16} />} onClick={resource.reload}>刷新</Button>
       </div>
-      {error && <div className={styles.error}>{error}</div>}
+      {error && <div className={styles.error} role="alert">{error}</div>}
       {message && <Callout variant="success" title="操作成功">{message}</Callout>}
       {resource.status === 'error' && <ErrorState error={resource.error} onRetry={resource.reload} />}
       {resource.status === 'loading' && <LoadingState title="正在获取学业预警" />}

@@ -14,6 +14,7 @@ import {
   LoginPage,
   ForgotPasswordPage,
   ActivatePage,
+  ChangePasswordPage,
   TenantSelectPage,
   ApplyPage,
   SSOPage,
@@ -88,7 +89,9 @@ import {
   PlatformApplicationsPage,
   PlatformApplicationDetailPage,
   PlatformDashboardPage,
+  PlatformStatisticsPage,
   PlatformRuntimesPage,
+  PlatformRuntimeDetailPage,
   PlatformSandboxToolsPage,
   PlatformJudgesPage,
   PlatformSimulationsPage,
@@ -104,6 +107,7 @@ import {
   ProfilePage,
   NotFoundPage
 } from '../routes/lazy-pages'
+import { platformLayerEnabled } from './config'
 
 // PageFallback 为懒加载页面提供轻量反馈,避免首屏或切页时出现空白区域。
 const PageFallback: React.FC = () => (
@@ -120,17 +124,18 @@ const App: React.FC = () => {
         <Routes>
           <Route path="/" element={<Navigate to="/auth/login" replace />} />
           <Route path="/admin/*" element={<Navigate to="/school-admin" replace />} />
-          <Route path="/platform/*" element={<Navigate to="/platform-admin" replace />} />
+          {platformLayerEnabled ? <Route path="/platform/*" element={<Navigate to="/platform-admin" replace />} /> : null}
 
           <Route path="/auth" element={<AuthLayout />}>
             <Route path="login" element={<LoginPage />} />
             <Route path="forgot" element={<ForgotPasswordPage />} />
             <Route path="activate" element={<ActivatePage />} />
+            <Route path="change-pwd" element={<ChangePasswordPage />} />
             <Route path="tenant-select" element={<TenantSelectPage />} />
           </Route>
           <Route path="/auth/apply" element={<ApplyPage />} />
           <Route path="/auth/sso" element={<SSOPage />} />
-          <Route path="/auth/platform-login" element={<PlatformLoginPage />} />
+          {platformLayerEnabled ? <Route path="/auth/platform-login" element={<PlatformLoginPage />} /> : null}
 
           <Route element={<RoleGuard allowedRoles={[UserRole.SCHOOL_ADMIN]} />}>
             <Route path="/school-admin" element={<AdminLayout />}>
@@ -157,31 +162,35 @@ const App: React.FC = () => {
             </Route>
           </Route>
 
-          <Route element={<RoleGuard allowedRoles={[UserRole.PLATFORM_ADMIN]} />}>
-            <Route path="/platform-admin" element={<PlatformLayout />}>
-              <Route index element={<Navigate to="schools" replace />} />
-              <Route path="schools" element={<PlatformSchoolsPage />} />
-              <Route path="schools/:id" element={<PlatformSchoolDetailPage />} />
-              <Route path="schools/:id/quotas" element={<PlatformSchoolQuotasPage />} />
-              <Route path="applications" element={<PlatformApplicationsPage />} />
-              <Route path="applications/:id" element={<PlatformApplicationDetailPage />} />
-              <Route path="dashboard" element={<PlatformDashboardPage />} />
-              <Route path="runtimes" element={<PlatformRuntimesPage />} />
-              <Route path="sandbox-tools" element={<PlatformSandboxToolsPage />} />
-              <Route path="judges" element={<PlatformJudgesPage />} />
-              <Route path="simulations" element={<PlatformSimulationsPage />} />
-              <Route path="vulnerabilities" element={<PlatformVulnerabilitiesPage />} />
-              <Route path="alerts" element={<PlatformAlertsPage />} />
-              <Route path="alerts/rules" element={<PlatformAlertRulesPage />} />
-              <Route path="settings" element={<PlatformSettingsPage />} />
-              <Route path="monitoring" element={<PlatformMonitoringPage />} />
-              <Route path="backups" element={<PlatformBackupsPage />} />
-              <Route path="audit" element={<PlatformAuditPage />} />
-              <Route path="notifications" element={<NotificationsPage />} />
-              <Route path="tasks" element={<TasksPage />} />
-              <Route path="profile" element={<ProfilePage />} />
+          {platformLayerEnabled ? (
+            <Route element={<RoleGuard allowedRoles={[UserRole.PLATFORM_ADMIN]} />}>
+              <Route path="/platform-admin" element={<PlatformLayout />}>
+                <Route index element={<Navigate to="schools" replace />} />
+                <Route path="schools" element={<PlatformSchoolsPage />} />
+                <Route path="schools/:id" element={<PlatformSchoolDetailPage />} />
+                <Route path="schools/:id/quotas" element={<PlatformSchoolQuotasPage />} />
+                <Route path="applications" element={<PlatformApplicationsPage />} />
+                <Route path="applications/:id" element={<PlatformApplicationDetailPage />} />
+                <Route path="dashboard" element={<PlatformDashboardPage />} />
+                <Route path="dashboard/statistics" element={<PlatformStatisticsPage />} />
+                <Route path="runtimes" element={<PlatformRuntimesPage />} />
+                <Route path="runtimes/:id" element={<PlatformRuntimeDetailPage />} />
+                <Route path="sandbox-tools" element={<PlatformSandboxToolsPage />} />
+                <Route path="judges" element={<PlatformJudgesPage />} />
+                <Route path="simulations" element={<PlatformSimulationsPage />} />
+                <Route path="vulnerabilities" element={<PlatformVulnerabilitiesPage />} />
+                <Route path="alerts" element={<PlatformAlertsPage />} />
+                <Route path="alerts/rules" element={<PlatformAlertRulesPage />} />
+                <Route path="settings" element={<PlatformSettingsPage />} />
+                <Route path="monitoring" element={<PlatformMonitoringPage />} />
+                <Route path="backups" element={<PlatformBackupsPage />} />
+                <Route path="audit" element={<PlatformAuditPage />} />
+                <Route path="notifications" element={<NotificationsPage />} />
+                <Route path="tasks" element={<TasksPage />} />
+                <Route path="profile" element={<ProfilePage />} />
+              </Route>
             </Route>
-          </Route>
+          ) : null}
 
           <Route element={<RoleGuard allowedRoles={[UserRole.STUDENT]} />}>
             <Route path="/student" element={<MainLayout />}>

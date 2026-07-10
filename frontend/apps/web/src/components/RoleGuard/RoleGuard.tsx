@@ -6,6 +6,7 @@ import type { UserRole } from '@chaimir/api-client'
 import { api } from '../../app/api'
 import { ErrorState, LoadingState } from '../ResourceState'
 import { useAsyncResource } from '../../hooks'
+import { isPasswordChangeRequired } from '../../utils/authSession'
 
 export interface RoleGuardProps {
   allowedRoles: UserRole[]
@@ -15,6 +16,17 @@ export interface RoleGuardProps {
  * RoleGuard 每次进入受保护路由时读取当前账号角色并执行服务端会话校验。
  */
 export const RoleGuard: React.FC<RoleGuardProps> = ({ allowedRoles }) => {
+  if (isPasswordChangeRequired()) {
+    return <Navigate to="/auth/change-pwd" replace />
+  }
+
+  return <VerifiedRoleGuard allowedRoles={allowedRoles} />
+}
+
+/**
+ * VerifiedRoleGuard 向服务端读取当前账号，校验角色与会话仍然有效。
+ */
+const VerifiedRoleGuard: React.FC<RoleGuardProps> = ({ allowedRoles }) => {
   const location = useLocation()
   const resource = useAsyncResource(() => api.identity.getMe(), [])
   const roles = resource.data?.account.roles || []

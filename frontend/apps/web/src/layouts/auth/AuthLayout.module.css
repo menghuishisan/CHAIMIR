@@ -3,7 +3,8 @@
   display: flex;
   flex-direction: column;
   min-height: 100vh;
-  background: radial-gradient(circle at 30% 50%, var(--color-dark-surface), var(--color-dark-bg));
+  /* Deep space gradient with teal-cyan glow */
+  background: radial-gradient(circle at 20% 30%, color-mix(in srgb, var(--color-primary) 15%, var(--color-dark-surface)), var(--color-dark-bg) 70%);
   color: var(--color-dark-text);
   overflow: hidden;
   position: relative;
@@ -73,10 +74,23 @@
   width: 100%;
   max-width: 420px;
   padding: var(--space-8);
-  background: var(--color-dark-glass);
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  box-shadow: var(--shadow-xl);
   border-radius: var(--radius-lg);
+  animation: chaimir-auth-form-in var(--t-normal) var(--ease-spring-ios) both;
+}
+
+@keyframes chaimir-auth-form-in {
+  0% {
+    opacity: 0;
+    transform: translateY(24px) scale(0.96);
+  }
+
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
 }
 
 .logo {
@@ -86,9 +100,19 @@
   margin-bottom: var(--space-8);
   font-size: var(--text-xl);
   font-weight: var(--font-semibold);
-  color: var(--color-dark-text);
+  color: var(--color-text-strong);
 }
 
 .logoIcon {
-  color: var(--color-on-dark-accent);
+  color: var(--color-primary);
+}
+
+@media (max-width: 480px) {
+  .formArea {
+    padding: var(--space-3);
+  }
+
+  .formContainer {
+    padding: var(--space-5);
+  }
 }

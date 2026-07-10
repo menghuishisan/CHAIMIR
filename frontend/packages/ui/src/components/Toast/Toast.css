@@ -48,16 +48,14 @@
   align-items: flex-start;
   gap: var(--space-3);
   padding: var(--space-4);
-  background: var(--color-panel-glass);
-  backdrop-filter: blur(20px) saturate(180%);
-  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  background: var(--color-bg);
   border-radius: var(--radius);
   box-shadow: var(--shadow-glass-elevated);
-  border: 1px solid var(--color-glass-border);
+  border: 1px solid var(--color-border);
   border-inline-start-width: 3px;
   pointer-events: auto;
   /* 入场动画：从右侧滑入 + 淡入 */
-  animation: chaimir-toast-in 0.4s var(--ease-spring);
+  animation: chaimir-toast-in 0.4s var(--ease-spring-ios);
 }
 
 @keyframes chaimir-toast-in {

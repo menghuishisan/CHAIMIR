@@ -18,6 +18,11 @@ export enum GradeWarningType {
   LOW_GPA = 2,
 }
 
+export enum GradeWarningStatus {
+  PENDING = 1,
+  ACKNOWLEDGED = 2,
+}
+
 export enum TranscriptScope {
   SEMESTER = 1,
   FULL = 2,

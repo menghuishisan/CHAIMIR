@@ -51,56 +51,56 @@
 
 /* Default - 默认灰色 */
 .chaimir-badge--default {
-  background: var(--color-muted-bg);
+  background: color-mix(in srgb, var(--color-muted-bg) 75%, transparent);
   color: var(--color-muted-text);
   border-color: var(--color-border);
 }
 
 /* Primary - 主色（青电） */
 .chaimir-badge--primary {
-  background: var(--color-primary-soft);
+  background: color-mix(in srgb, var(--color-primary-soft) 75%, transparent);
   color: var(--color-primary-text);
   border-color: var(--color-border);
 }
 
 /* Secondary - 副色（琥珀） */
 .chaimir-badge--secondary {
-  background: var(--color-secondary-soft);
+  background: color-mix(in srgb, var(--color-secondary-soft) 75%, transparent);
   color: var(--color-secondary-text);
   border-color: var(--color-warning-border);
 }
 
 /* Success - 成功（绿色） */
 .chaimir-badge--success {
-  background: var(--color-success-bg);
+  background: color-mix(in srgb, var(--color-success-bg) 75%, transparent);
   color: var(--color-success);
   border-color: var(--color-success-border);
 }
 
 /* Warning - 警告（琥珀） */
 .chaimir-badge--warning {
-  background: var(--color-warning-bg);
+  background: color-mix(in srgb, var(--color-warning-bg) 75%, transparent);
   color: var(--color-warning);
   border-color: var(--color-warning-border);
 }
 
 /* Danger - 危险（红色） */
 .chaimir-badge--danger {
-  background: var(--color-danger-bg);
+  background: color-mix(in srgb, var(--color-danger-bg) 75%, transparent);
   color: var(--color-danger);
   border-color: var(--color-danger-border);
 }
 
 /* Info - 信息（蓝色） */
 .chaimir-badge--info {
-  background: var(--color-info-bg);
+  background: color-mix(in srgb, var(--color-info-bg) 75%, transparent);
   color: var(--color-info);
   border-color: var(--color-info-border);
 }
 
 /* Purple - 特殊（紫色） */
 .chaimir-badge--purple {
-  background: var(--color-purple-bg);
+  background: color-mix(in srgb, var(--color-purple-bg) 75%, transparent);
   color: var(--color-purple);
   border-color: var(--color-purple-border);
 }

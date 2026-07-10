@@ -11,7 +11,7 @@
   transition:
     border-color var(--t) var(--ease),
     box-shadow var(--t) var(--ease),
-    transform 0.4s var(--ease-spring-bouncy);
+    transform 0.4s var(--ease-spring-ios);
 }
 
 .chaimir-stat:hover {

@@ -55,9 +55,10 @@
   block-size: 2px;
   background: var(--color-primary);
   border-radius: var(--radius-full);
+  box-shadow: 0 -1px 4px var(--color-primary-shadow); /* 指示条微辉光 */
   transition:
-    transform 0.5s var(--ease-spring-bouncy),
-    width 0.5s var(--ease-spring-bouncy),
+    transform 0.4s var(--ease-spring-ios),
+    width 0.4s var(--ease-spring-ios),
     opacity 0.2s var(--ease);
   pointer-events: none;
   opacity: 0; /* 测量完成后由 JS 设为 1 */

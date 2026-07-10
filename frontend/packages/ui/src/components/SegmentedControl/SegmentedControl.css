@@ -66,8 +66,8 @@
   box-shadow: var(--shadow-xs), inset 0 -2px 0 var(--color-accent);
   border-radius: var(--radius-xs);
   transition:
-    transform 0.5s var(--ease-spring-bouncy),
-    width 0.5s var(--ease-spring-bouncy),
+    transform 0.4s var(--ease-spring-ios),
+    width 0.4s var(--ease-spring-ios),
     opacity 0.2s var(--ease);
   pointer-events: none;
   z-index: var(--z-ground);
@@ -102,6 +102,12 @@
 
   .chaimir-segmented-control__item {
     flex: 1 0 auto;
+  }
+}
+
+@media (pointer: coarse) {
+  .chaimir-segmented-control__item {
+    min-block-size: 2.75rem;
   }
 }
 

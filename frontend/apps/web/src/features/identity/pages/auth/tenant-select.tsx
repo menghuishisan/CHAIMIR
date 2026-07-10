@@ -1,12 +1,12 @@
 // TenantSelectPage 处理手机号登录返回的多租户选择，不展示静态学校数据。
 
 import React, { useCallback, useMemo, useState } from 'react'
-import type { ApiError } from '@chaimir/api-client'
 import { Button } from '@chaimir/ui'
 import { ArrowLeft, Building } from 'lucide-react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { api } from '../../../../app/api'
-import { persistLoginTokens, roleEntryPath } from '../../../../utils/authSession'
+import { loginEntryPath, persistLoginTokens } from '../../../../utils/authSession'
+import { userFacingErrorMessage } from '../../../../utils/userFacingError'
 import type { TenantSelectLoginState } from './login'
 import styles from './auth-form.module.css'
 
@@ -42,9 +42,9 @@ const TenantSelectPage: React.FC = () => {
             tenant_id: numericTenantId,
           })
       persistLoginTokens(response, state.remember)
-      navigate(roleEntryPath(response), { replace: true })
+      navigate(loginEntryPath(response), { replace: true })
     } catch (selectError) {
-      setError((selectError as ApiError).message || '无法进入所选学校，请稍后重试')
+      setError(userFacingErrorMessage(selectError, '无法进入所选学校，请稍后重试。'))
     } finally {
       setSubmittingTenantId(null)
     }
@@ -71,7 +71,7 @@ const TenantSelectPage: React.FC = () => {
         <p className={styles.description}>您的手机号绑定了多个学校，请选择本次要进入的学校系统。</p>
       </div>
 
-      {error && <div className={styles.error}>{error}</div>}
+      {error && <div className={styles.error} role="alert">{error}</div>}
 
       <div className={styles.tenantList}>
         {tenants.map((tenant) => (

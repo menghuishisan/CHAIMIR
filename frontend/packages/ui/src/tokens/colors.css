@@ -53,6 +53,7 @@
   /* 状态色 - 绿色（成功） */
   --green-50: #f0fdf4;
   --green-100: #dcfce7;
+  --green-400: #4ade80;
   --green-600: #16a34a;
   --green-700: #15803d;
   --green-800: #166534;
@@ -60,6 +61,7 @@
   /* 状态色 - 红色（危险/错误） */
   --red-50: #fef2f2;
   --red-100: #fee2e2;
+  --red-400: #f87171;
   --red-600: #dc2626;
   --red-700: #b91c1c;
   --red-800: #991b1b;
@@ -67,6 +69,7 @@
   /* 状态色 - 蓝色（信息） */
   --blue-50: #eff6ff;
   --blue-100: #dbeafe;
+  --blue-400: #60a5fa;
   --blue-600: #2563eb;
   --blue-700: #1d4ed8;
   --blue-800: #1e40af;
@@ -74,6 +77,7 @@
   /* 状态色 - 紫色（特殊） */
   --purple-50: #faf5ff;
   --purple-100: #f3e8ff;
+  --purple-400: #c084fc;
   --purple-600: #9333ea;
   --purple-700: #7e22ce;
   --purple-800: #6b21a8;
@@ -103,12 +107,12 @@
   --color-surface: var(--slate-50);           /* 表面 */
   --color-surface-sunken: var(--slate-100);   /* 凹陷表面 */
   --color-surface-hover: var(--slate-100);    /* 悬浮态背景 */
-  --color-scrim: rgba(15, 23, 42, 0.4);       /* 弹层遮罩 (变透以支持后面高斯模糊) */
+  --color-scrim: rgba(15, 23, 42, 0.55);      /* 弹层遮罩 */
   --color-highlight: rgba(255, 255, 255, 0.4); /* 按钮高光，增加通透感 */
 
   /* 浅色毛玻璃材质 (Glassmorphism) */
-  --color-glass-surface: rgba(255, 255, 255, 0.75);
-  --color-glass-border-light: rgba(255, 255, 255, 0.6);
+  --color-glass-surface: rgba(255, 255, 255, 0.65); /* 降低透明度以配合 backdrop-blur */
+  --color-glass-border-light: rgba(255, 255, 255, 0.4);
   --color-glass-border-subtle-light: rgba(0, 0, 0, 0.05);
 
   /* 文字 */
@@ -185,10 +189,10 @@
   --color-dark-elevated: var(--slate-700);    /* 深色抬升 */
 
   /* iOS 质感半透明材质 */
-  --color-dark-glass: rgba(15, 23, 42, 0.75); /* --slate-900 的 75% 不透明度 */
-  --color-panel-glass: rgba(30, 41, 59, 0.85); /* --slate-800 的 85% 不透明度 */
-  --color-glass-border: rgba(255, 255, 255, 0.1);
-  --color-glass-border-subtle: rgba(255, 255, 255, 0.05);
+  --color-dark-glass: rgba(15, 23, 42, 0.65); /* --slate-900 配合高斯模糊 */
+  --color-panel-glass: rgba(30, 41, 59, 0.75); /* --slate-800 配合高斯模糊 */
+  --color-glass-border: rgba(255, 255, 255, 0.15); /* 加强边缘光 */
+  --color-glass-border-subtle: rgba(255, 255, 255, 0.08);
   --color-glass-highlight: rgba(255, 255, 255, 0.05);
 
   --color-dark-text: var(--slate-50);         /* 深底主文字，对深底约 15:1 */
@@ -239,3 +243,41 @@
  * - 亮琥珀 (amber-400/500) 只用于深色面板上的点睛与非文字装饰
  * - 禁止用亮琥珀承载浅底上的正文
  */
+
+/* ===== 受控深色表面覆盖 (Dark Surface Overrides) =====
+ * 仅供平台登录等明确的深色表面使用，不代表全站暗色主题。
+ * 普通内容区不得挂载本作用域，沉浸工作台继续直接使用 dark-* 令牌。
+ */
+.chaimir-dark-surface,
+[data-surface="dark"] {
+  --color-bg: var(--slate-800);
+  --color-surface: var(--slate-900);
+  --color-surface-sunken: var(--slate-950);
+  --color-surface-hover: rgba(255, 255, 255, 0.08);
+  --color-text: var(--color-dark-text);
+  --color-text-strong: var(--color-dark-text);
+  --color-text-sub: var(--color-dark-text-sub);
+  --color-text-faint: var(--slate-400);
+  --color-border: var(--slate-700);
+  --color-border-strong: var(--slate-600);
+  --color-border-subtle: rgba(255, 255, 255, 0.08);
+  --color-primary-soft: rgba(34, 211, 238, 0.14);
+  --color-primary-text: var(--cyan-300);
+  --color-secondary-soft: rgba(251, 191, 36, 0.14);
+  --color-secondary-text: var(--amber-300);
+  --color-focus-ring: var(--cyan-400);
+  --color-muted-bg: rgba(148, 163, 184, 0.14);
+  --color-muted-text: var(--slate-300);
+  --color-success-bg: rgba(21, 128, 61, 0.2);
+  --color-success: var(--green-400);
+  --color-warning-bg: rgba(180, 83, 9, 0.2);
+  --color-warning: var(--amber-300);
+  --color-danger-bg: rgba(153, 27, 27, 0.2);
+  --color-danger: var(--red-400);
+  --color-danger-border: var(--red-600);
+  --color-info-bg: rgba(37, 99, 235, 0.2);
+  --color-info: var(--blue-400);
+  --color-purple-bg: rgba(147, 51, 234, 0.2);
+  --color-purple: var(--purple-400);
+  --color-highlight: rgba(255, 255, 255, 0.05);
+}

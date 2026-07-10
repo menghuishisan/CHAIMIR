@@ -93,7 +93,9 @@ export function useAsyncResource<T>(
     return () => {
       active = false
     }
-  }, [...deps, version])
+    // 调用方显式传入依赖列表，语义与 useEffect 的依赖参数一致。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [version, ...deps])
 
   return useMemo(() => ({ ...state, reload }), [reload, state])
 }

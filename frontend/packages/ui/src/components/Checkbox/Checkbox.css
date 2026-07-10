@@ -52,7 +52,7 @@
   color: var(--color-primary-fg);
   opacity: 0;
   transform: scale(0.5);
-  transition: opacity var(--t-fast) var(--ease), transform 0.4s var(--ease-spring-bouncy);
+  transition: opacity var(--t-fast) var(--ease), transform 0.4s var(--ease-spring-ios);
 }
 
 .chaimir-checkbox__dash {

@@ -13,7 +13,7 @@
   transition:
     background var(--t) var(--ease),
     border-color var(--t) var(--ease),
-    box-shadow 0.4s var(--ease-spring-bouncy),
+    box-shadow 0.4s var(--ease-spring-ios),
     opacity var(--t-fast) var(--ease);
   min-height: 5rem; /* 80px */
 }

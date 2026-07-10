@@ -5,13 +5,23 @@
   gap: var(--space-1);
   min-inline-size: 12rem;
   padding: var(--space-2);
-  border: 1px solid var(--color-glass-border);
+  border: 1px solid var(--color-border);
   border-radius: var(--radius-sm);
-  background: var(--color-panel-glass);
-  backdrop-filter: blur(20px) saturate(180%);
-  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  background: var(--color-bg);
   box-shadow: var(--shadow-glass-elevated);
   transform-origin: top right;
+  animation: chaimir-menu-in 0.4s var(--ease-spring-ios);
+}
+
+@keyframes chaimir-menu-in {
+  from {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
 }
 
 .chaimir-menu__item {

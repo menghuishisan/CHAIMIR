@@ -67,7 +67,7 @@
   background: var(--color-primary);
   border-color: var(--color-primary);
   box-shadow: 0 0 0 4px var(--color-primary-soft);
-  animation: chaimir-step-active 0.5s var(--ease-spring-bouncy);
+  animation: chaimir-step-active 0.5s var(--ease-spring-ios);
 }
 
 @keyframes chaimir-step-active {

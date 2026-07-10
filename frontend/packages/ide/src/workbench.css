@@ -177,7 +177,7 @@
     border-color var(--t-fast) var(--ease),
     background var(--t-fast) var(--ease),
     box-shadow var(--t-fast) var(--ease),
-    transform var(--t-fast) var(--ease);
+    transform var(--t-fast) var(--ease-spring-ios);
 }
 
 .chaimir-ide-file:hover,

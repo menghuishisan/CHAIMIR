@@ -3,7 +3,8 @@
 import React from 'react'
 import type { Dashboard } from '@chaimir/api-client'
 import { Button } from '@chaimir/ui'
-import { LayoutDashboard, RefreshCw } from 'lucide-react'
+import { BarChart3, LayoutDashboard, RefreshCw } from 'lucide-react'
+import { useNavigate } from 'react-router-dom'
 import { api } from '../../../../../app/api'
 import { EmptyState, ErrorState, LoadingState } from '../../../../../components/ResourceState'
 import { useAsyncResource } from '../../../../../hooks'
@@ -32,6 +33,7 @@ const StatCard: React.FC<{ label: string; value?: number; danger?: boolean }> = 
  * PlatformDashboardPage 读取平台管理概览。
  */
 const PlatformDashboardPage: React.FC = () => {
+  const navigate = useNavigate()
   const resource = useAsyncResource<Dashboard>(() => api.admin.getPlatformDashboard(), [])
   const dashboard = resource.data
 
@@ -42,9 +44,10 @@ const PlatformDashboardPage: React.FC = () => {
           <LayoutDashboard className={styles.icon} size={28} />
           平台宏观大盘
         </h1>
-        <Button variant="outline" icon={<RefreshCw size={16} />} onClick={resource.reload}>
-          刷新
-        </Button>
+        <div className={styles.headerActions}>
+          <Button variant="outline" icon={<BarChart3 size={16} />} onClick={() => navigate('/platform-admin/dashboard/statistics')}>查看统计</Button>
+          <Button variant="outline" icon={<RefreshCw size={16} />} onClick={resource.reload}>刷新</Button>
+        </div>
       </div>
 
       {resource.status === 'loading' && <LoadingState title="正在获取平台概览" />}

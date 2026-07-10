@@ -25,7 +25,7 @@
   border: 1px solid var(--color-border);
   border-radius: var(--radius-lg);
   box-shadow: inset 0 1px 0 var(--color-highlight);
-  animation: empty-icon-in 0.5s var(--ease-spring-bouncy);
+  animation: empty-icon-in 0.5s var(--ease-spring-ios);
 }
 
 @keyframes empty-icon-in {

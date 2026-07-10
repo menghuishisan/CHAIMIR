@@ -12,13 +12,11 @@
   line-height: var(--leading-normal);
   overflow-wrap: anywhere;
   pointer-events: none;
-  background: var(--color-panel-glass);
-  backdrop-filter: blur(20px) saturate(180%);
-  -webkit-backdrop-filter: blur(20px) saturate(180%);
-  border: 1px solid var(--color-glass-border);
+  background: var(--color-dark-surface);
+  border: 1px solid var(--color-dark-border);
   border-radius: var(--radius-sm);
   box-shadow: var(--shadow-glass-elevated);
-  animation: chaimir-tooltip-in 0.3s var(--ease-spring) forwards;
+  animation: chaimir-tooltip-in 0.4s var(--ease-spring-ios) forwards;
 }
 
 @keyframes chaimir-tooltip-in {

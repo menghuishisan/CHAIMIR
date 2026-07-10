@@ -23,7 +23,7 @@
               color var(--t) var(--ease),
               box-shadow var(--t) var(--ease),
               opacity var(--t-fast) var(--ease),
-              transform 0.4s var(--ease-spring); /* 增加阻尼回弹的缩放 */
+              transform 0.4s var(--ease-spring-ios); /* 增加阻尼回弹的缩放 */
   white-space: nowrap;
   user-select: none;
   position: relative;
@@ -71,9 +71,10 @@
 }
 
 .chaimir-btn--primary:active:not(:disabled) {
-  /* 按压柔和微缩 (配合 ease-spring) */
+  /* 按压物理微缩 (配合 ease-press) */
   transform: scale(0.97);
-  filter: brightness(0.9);
+  transition: transform 0.15s var(--ease-press);
+  filter: brightness(0.95);
   box-shadow: inset 0 1px 0 var(--color-highlight),
               0 2px 4px var(--color-primary-shadow);
 }
@@ -95,7 +96,8 @@
 
 .chaimir-btn--secondary:active:not(:disabled) {
   transform: scale(0.97);
-  filter: brightness(0.9);
+  transition: transform 0.15s var(--ease-press);
+  filter: brightness(0.95);
 }
 
 /* Outline - 描边按钮 */
@@ -115,6 +117,7 @@
 .chaimir-btn--outline:active:not(:disabled) {
   background: var(--color-primary-soft);
   transform: scale(0.97);
+  transition: transform 0.15s var(--ease-press);
 }
 
 /* Ghost - 幽灵按钮 */
@@ -132,6 +135,7 @@
 .chaimir-btn--ghost:active:not(:disabled) {
   background: var(--color-surface-sunken);
   transform: scale(0.97);
+  transition: transform 0.15s var(--ease-press);
 }
 
 /* Danger - 危险按钮 */
@@ -151,7 +155,8 @@
 
 .chaimir-btn--danger:active:not(:disabled) {
   transform: scale(0.97);
-  filter: brightness(0.9);
+  transition: transform 0.15s var(--ease-press);
+  filter: brightness(0.95);
 }
 
 /* On Dark - 深色背景上的按钮 */
@@ -165,6 +170,12 @@
   background: var(--color-on-dark-accent-hover);
   transform: translateY(-1px);
   box-shadow: 0 4px 8px var(--color-on-dark-shadow-strong);
+}
+
+.chaimir-btn--on-dark:active:not(:disabled) {
+  background: var(--color-on-dark-accent);
+  transform: scale(0.97);
+  transition: transform 0.15s var(--ease-press);
 }
 
 /* === 状态 === */

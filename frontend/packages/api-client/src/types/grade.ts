@@ -1,6 +1,6 @@
 // ===== M11 Grade 模块 =====
 
-import type { GradeAppealStatus, GradeReviewStatus, GradeWarningType, TranscriptScope } from '../constants/grade'
+import type { GradeAppealStatus, GradeReviewStatus, GradeWarningStatus, GradeWarningType, TranscriptScope } from '../constants/grade'
 
 export interface LevelRule {
   min: number
@@ -114,7 +114,7 @@ export interface GradeWarning {
   semester_id: string
   type: GradeWarningType
   detail: Record<string, unknown>
-  status: number
+  status: GradeWarningStatus
   created_at: string
 }
 

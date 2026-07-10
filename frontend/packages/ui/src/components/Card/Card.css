@@ -18,7 +18,7 @@
   transition:
     border-color var(--t) var(--ease),
     box-shadow var(--t) var(--ease),
-    transform 0.4s var(--ease-spring),
+    transform 0.4s var(--ease-spring-ios),
     background var(--t) var(--ease);
 }
 
@@ -48,6 +48,7 @@
 
 .chaimir-card--hoverable:active {
   transform: scale(0.98); /* 卡片压感微缩 */
+  transition: transform 0.15s var(--ease-press);
 }
 
 /* === 子组件 === */

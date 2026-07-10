@@ -1,11 +1,11 @@
 // ActivatePage 处理首次账号激活，直接提交 identity 后端激活接口。
 
 import React, { useCallback, useState } from 'react'
-import type { ApiError } from '@chaimir/api-client'
-import { Button, Callout, Input } from '@chaimir/ui'
+import { Button, Callout, FormField, Input } from '@chaimir/ui'
 import { ArrowLeft } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../../../../app/api'
+import { userFacingErrorMessage } from '../../../../utils/userFacingError'
 import styles from './auth-form.module.css'
 
 const ActivatePage: React.FC = () => {
@@ -31,6 +31,10 @@ const ActivatePage: React.FC = () => {
       setError('两次输入的密码不一致，请重新确认。')
       return
     }
+    if (password.length < 8 || !/[A-Za-z]/.test(password) || !/\d/.test(password)) {
+      setError('新密码至少 8 位，并同时包含字母和数字。')
+      return
+    }
 
     setSubmitting(true)
     try {
@@ -40,20 +44,23 @@ const ActivatePage: React.FC = () => {
       })
       setMessage('账号已激活，请返回登录页使用新密码登录。')
     } catch (activateError) {
-      setError((activateError as ApiError).message || '账号激活失败，请检查激活码后重试。')
+      setError(userFacingErrorMessage(activateError, '账号激活失败，请检查激活码后重试。'))
     } finally {
       setSubmitting(false)
     }
   }, [activationCode, confirmPassword, password])
 
   return (
-    <div className={styles.form}>
+    <form className={styles.form} onSubmit={(event) => {
+      event.preventDefault()
+      void handleActivate()
+    }}>
       <div>
-        <h2 className={styles.title}>激活账号</h2>
+        <h1 className={styles.title}>激活账号</h1>
         <p className={styles.description}>首次登录请使用管理员下发的激活码完成账号激活。</p>
       </div>
 
-      {error && <div className={styles.error}>{error}</div>}
+      {error && <div className={styles.error} role="alert">{error}</div>}
       {message && (
         <Callout variant="success" title="激活完成">
           {message}
@@ -61,27 +68,16 @@ const ActivatePage: React.FC = () => {
       )}
 
       <div className={styles.fields}>
-        <Input
-          fullWidth
-          placeholder="激活码"
-          value={activationCode}
-          onChange={(event) => setActivationCode(event.target.value)}
-        />
-        <Input
-          fullWidth
-          type="password"
-          placeholder="设置新密码"
-          value={password}
-          onChange={(event) => setPassword(event.target.value)}
-        />
-        <Input
-          fullWidth
-          type="password"
-          placeholder="确认新密码"
-          value={confirmPassword}
-          onChange={(event) => setConfirmPassword(event.target.value)}
-        />
-        <Button block loading={submitting} onClick={handleActivate}>
+        <FormField label="激活码" htmlFor="activation-code" required>
+          <Input id="activation-code" fullWidth autoComplete="one-time-code" value={activationCode} onChange={(event) => setActivationCode(event.target.value)} />
+        </FormField>
+        <FormField label="新密码" htmlFor="activation-password" helperText="至少 8 位，并同时包含字母和数字" required>
+          <Input id="activation-password" fullWidth type="password" autoComplete="new-password" value={password} onChange={(event) => setPassword(event.target.value)} />
+        </FormField>
+        <FormField label="确认新密码" htmlFor="activation-confirm-password" required>
+          <Input id="activation-confirm-password" fullWidth type="password" autoComplete="new-password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} />
+        </FormField>
+        <Button block type="submit" loading={submitting}>
           立即激活
         </Button>
       </div>
@@ -91,7 +87,7 @@ const ActivatePage: React.FC = () => {
           <ArrowLeft size={16} /> 返回登录
         </button>
       </div>
-    </div>
+    </form>
   )
 }
 

@@ -26,7 +26,7 @@
   transition:
     background var(--t) var(--ease),
     border-color var(--t) var(--ease),
-    box-shadow 0.4s var(--ease-spring-bouncy),
+    box-shadow 0.4s var(--ease-spring-ios),
     color var(--t) var(--ease),
     opacity var(--t-fast) var(--ease),
     transform var(--t-fast) var(--ease-press);
@@ -114,14 +114,12 @@
   z-index: var(--z-dropdown);
   max-height: 16rem; /* 256px */
   overflow-y: auto;
-  background: var(--color-panel-glass);
-  backdrop-filter: blur(20px) saturate(180%);
-  -webkit-backdrop-filter: blur(20px) saturate(180%);
-  border: 1px solid var(--color-glass-border);
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
   border-radius: var(--radius-sm);
   box-shadow: var(--shadow-glass-elevated);
   transform-origin: top center;
-  animation: chaimir-select-dropdown-in 0.4s var(--ease-spring);
+  animation: chaimir-select-dropdown-in 0.4s var(--ease-spring-ios);
 }
 
 @keyframes chaimir-select-dropdown-in {

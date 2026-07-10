@@ -23,6 +23,7 @@ import {
   GradingMode,
   GradeAppealStatus,
   GradeReviewStatus,
+  GradeWarningStatus,
   GradeWarningType,
   ImagePrepullStatus,
   ImportBatchStatus,
@@ -54,6 +55,37 @@ import {
   type SimReviewResult,
   type TransferTask,
 } from '@chaimir/api-client'
+
+const ADMIN_METRIC_LABELS: Record<string, string> = {
+  tenant_count: '入驻学校',
+  account_count: '账号总数',
+  teacher_count: '教师账号',
+  student_count: '学生账号',
+  active_account_count: '活跃账号',
+  pending_apply_count: '待审核申请',
+  course_count: '课程总数',
+  active_course_count: '活跃课程',
+  learning_duration_sec: '学习时长',
+  experiment_count: '实验总数',
+  active_instance_count: '活跃实验',
+  contest_count: '竞赛总数',
+  active_contest_count: '进行中竞赛',
+  participant_count: '参赛人数',
+  active_sandbox_count: '运行中沙箱',
+  max_concurrent_sandbox: '沙箱并发上限',
+  max_cpu: 'CPU 上限',
+  max_memory_mb: '内存上限',
+  result: '结果',
+  stage: '阶段',
+  trace_id: '报障编号',
+}
+
+/**
+ * adminMetricLabel 返回管理统计和自检详情的用户向指标名称。
+ */
+export function adminMetricLabel(key: string): string {
+  return ADMIN_METRIC_LABELS[key] || '其他指标'
+}
 
 /**
  * labelFromMap 按字符串键读取文案，缺省时暴露未识别值，避免掩盖前后端枚举不一致。
@@ -252,10 +284,10 @@ export function gradeWarningTypeLabel(type: GradeWarningType): string {
 /**
  * gradeWarningStatusLabel 返回学业预警确认状态文案。
  */
-export function gradeWarningStatusLabel(status: number): string {
+export function gradeWarningStatusLabel(status: GradeWarningStatus): string {
   return labelFromMap(status, {
-    1: '待确认',
-    2: '已确认',
+    [GradeWarningStatus.PENDING]: '待确认',
+    [GradeWarningStatus.ACKNOWLEDGED]: '已确认',
   }, '未知')
 }
 

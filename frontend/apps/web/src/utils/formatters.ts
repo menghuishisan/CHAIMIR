@@ -1,5 +1,7 @@
 // formatters.ts 提供 apps/web 内跨页面复用的日期、数字和容量展示工具。
 
+import { adminMetricLabel } from './labels'
+
 const DATE_TIME_FORMAT = new Intl.DateTimeFormat('zh-CN', {
   year: 'numeric',
   month: '2-digit',
@@ -130,6 +132,25 @@ export function formatMetricsSummary(metrics: Record<string, unknown>): string {
     return '暂无指标'
   }
   return entries
-    .map(([key, value]) => `${key}: ${typeof value === 'object' ? '详情' : String(value)}`)
+    .map(([key, value]) => `${adminMetricLabel(key)}: ${formatMetricValue(key, value)}`)
     .join('；')
+}
+
+/**
+ * formatMetricValue 按已知指标单位转换后端快照值，未知复合值只提示可查看详情。
+ */
+function formatMetricValue(key: string, value: unknown): string {
+  if (key === 'learning_duration_sec' && typeof value === 'number') {
+    return formatSeconds(value)
+  }
+  if (key === 'max_memory_mb' && typeof value === 'number') {
+    return `${formatNumber(value)} MB`
+  }
+  if (typeof value === 'number') {
+    return formatNumber(value)
+  }
+  if (typeof value === 'string' || typeof value === 'boolean') {
+    return String(value)
+  }
+  return '可查看详情'
 }

@@ -4,7 +4,8 @@ import React, { useMemo } from 'react'
 import type { SandboxRuntime } from '@chaimir/api-client'
 import type { TableColumn } from '@chaimir/ui'
 import { Button, Table } from '@chaimir/ui'
-import { RefreshCw, Server } from 'lucide-react'
+import { Eye, RefreshCw, Server } from 'lucide-react'
+import { useNavigate } from 'react-router-dom'
 import { api } from '../../../../../app/api'
 import { ErrorState, LoadingState } from '../../../../../components/ResourceState'
 import { useAsyncResource } from '../../../../../hooks'
@@ -15,6 +16,7 @@ import { runtimeSelftestStatusLabel, runtimeStatusLabel } from '../../../../../u
  * RuntimesPage 读取链运行时声明和自检状态。
  */
 const RuntimesPage: React.FC = () => {
+  const navigate = useNavigate()
   const resource = useAsyncResource(() => api.sandbox.listRuntimes(), [])
   const rows = resource.data || []
 
@@ -37,7 +39,16 @@ const RuntimesPage: React.FC = () => {
       title: '自检状态',
       render: (row) => <span className={styles.muted}>{runtimeSelftestStatusLabel(row.selftest_status)}</span>,
     },
-  ], [])
+    {
+      key: 'action',
+      title: '操作',
+      render: (row) => (
+        <Button size="sm" variant="outline" icon={<Eye size={14} />} onClick={() => navigate(`/platform-admin/runtimes/${row.id}`)}>
+          查看详情
+        </Button>
+      ),
+    },
+  ], [navigate])
 
   return (
     <div className={styles.page}>

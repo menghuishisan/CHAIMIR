@@ -27,9 +27,12 @@ const TeacherExperimentGradingPage: React.FC = () => {
     },
     [id]
   )
-  const rows = resource.data?.list ?? []
+  const rows = useMemo(() => resource.data?.list ?? [], [resource.data?.list])
   const selected = useMemo(() => rows.find((row) => row.id === selectedId) ?? rows[0], [rows, selectedId])
 
+  /**
+   * grade 提交当前选中报告的人工评分，并刷新服务端列表。
+   */
   const grade = async () => {
     const target = selectedId || selected?.id
     if (!target) return
