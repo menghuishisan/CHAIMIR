@@ -32,7 +32,11 @@ runtime/evm-hardhat sha256:<64位hex>
 service/backend sha256:<64位hex>
 ```
 
-CI 的 images 流水线在推送 Harbor 后解析真实 digest,先上传 `image-digest-*` 锁片段,再由同一流水线合并并校验为完整 `image-digests.lock` artifact。发布或离线包制作时必须使用这份完整锁文件作为 `images/image-digests.lock`,再执行:
+CI 的后端、前端和通用镜像流水线在 Trivy 扫描、推送 Harbor、Cosign 签名与验签完成后,分别上传职责内 `image-digest-*` 锁片段。唯一的 `image-metadata-promotion` 工作流串行消费片段,用 `images/sync-image-metadata.ps1` 合并当前权威锁并同步 local-dev 部署 digest 与配置中的受控镜像引用;首次收到某个服务镜像时,同步器会把对应 `newTag` 原位替换为 digest。随后工作流创建机器人 PR 并启用自动合并。`images/image-digests.lock` 本身不触发镜像重建,避免供应链回环。
+
+仓库必须启用 GitHub Auto-merge,并配置具有 contents/pull requests 权限的 GitHub App 或细粒度 PAT Secret `IMAGE_METADATA_BOT_TOKEN`;不能使用受递归保护、无法触发后续 PR 检查的默认 `GITHUB_TOKEN` 代替。Harbor 与 Cosign 凭据继续只由独立 GitHub Secrets 注入。任一权限、检查、扫描、签名、验签或自动合并步骤失败时,新 digest 不得晋升,旧权威文件也不得被静默覆盖。
+
+机器人 PR 合并后,`images/image-digests.lock` 就是对应源码提交的最新已验证构建结果。发布或离线包制作直接执行:
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File images/pull-images.ps1 -Scope all -Registry harbor.chaimir:30080
@@ -66,3 +70,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File images/pull-images.ps1 `
 ```
 
 拉回后的镜像必须经过 Trivy HIGH/CRITICAL 阻断扫描和 Cosign 签名/验签。只有全部非前端镜像通过后,候选锁才能晋升为正式 `images/image-digests.lock` 或生成 `SANDBOX_IMAGE_ATTESTATIONS_JSON`。平台构建镜像只允许通过 `images/build-images.ps1 -Push` 推送并生成候选锁,拉取脚本不承担构建产物发布职责。
+
+`SANDBOX_IMAGE_ATTESTATIONS_JSON` 是环境相关的准入证明,由 `deploy/scripts/image-attestations-generate.ps1` 在目标 registry 完成扫描、签名和验签后写入运行环境或 Secret,不能仅凭新 digest 在仓库中伪造。仓库自动同步只更新可审计的 digest 权威文件与静态引用。
+
+部署工作流不消费可变 tag:权威锁合入 `main` 后,staging 从该锁一次读取全部服务 digest;生产发布从 tag 所指提交读取同一组 digest。两者都通过 `deploy/scripts/render-locked-overlay.ps1` 生成临时 Kustomize overlay 后应用。仓库中的 staging/production tag 只保留为环境模板默认值,不能当作产物存在性证明。

@@ -1,9 +1,9 @@
-# 可复用 composite action:构建 → Trivy 扫描(高危阻断)→ Cosign 签名 → 推 Harbor。
+# 可复用 composite action:构建 → Trivy 扫描(高危阻断)→ 推 Harbor → Cosign 签名与验签。
 # 依据 docs/总-部署架构设计.md §六 + docs/总-镜像与容器设计.md §九:
-#   多阶段构建 → Trivy 漏洞扫描(高危阻断)→ Cosign 签名(未签名不得部署)→ 推 Harbor。
+#   多阶段构建 → Trivy 漏洞扫描(高危阻断)→ 推 Harbor并解析 digest → Cosign 签名与验签。
 # 全平台镜像流水线统一调用此 action(CLAUDE.md §4:同类问题统一一种方案)。
 name: build-scan-sign-push
-description: 构建镜像、Trivy 扫描高危阻断、Cosign 签名并推送到 Harbor
+description: 构建镜像、Trivy 扫描、推送 Harbor、Cosign 签名并验签
 
 inputs:
   image:
@@ -67,6 +67,7 @@ runs:
           fi
         done <<< "$BUILD_ARGS"
         docker build \
+          --pull \
           -f "${{ inputs.dockerfile }}" \
           "${build_args[@]}" \
           -t "${{ inputs.image }}:${{ inputs.tag }}" \
@@ -141,12 +142,16 @@ runs:
         echo "digest=$digest" >> "$GITHUB_OUTPUT"
         echo "digest_ref=${{ inputs.image }}@$digest" >> "$GITHUB_OUTPUT"
 
-    - name: Cosign 签名(未签名不得部署)
+    - name: Cosign 签名并验签(未验证不得晋升)
       shell: bash
       env:
         COSIGN_PASSWORD: ${{ inputs.cosign-password }}
       run: |
+        set -euo pipefail
         key_file=$(mktemp)
-        trap 'rm -f "$key_file"' EXIT
+        public_key_file=$(mktemp)
+        trap 'rm -f "$key_file" "$public_key_file"' EXIT
         echo "${{ inputs.cosign-key }}" > "$key_file"
+        cosign public-key --key "$key_file" > "$public_key_file"
         cosign sign --yes --key "$key_file" "${{ steps.digest.outputs.digest_ref }}"
+        cosign verify --key "$public_key_file" "${{ steps.digest.outputs.digest_ref }}"

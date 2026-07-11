@@ -14,6 +14,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+Import-Module (Join-Path $PSScriptRoot "lib\ImageMetadata.psm1") -Force
 
 if ([string]::IsNullOrWhiteSpace($Registry)) {
     $Registry = $env:SUPPLY_CHAIN_REGISTRY
@@ -37,70 +38,15 @@ if ($PrintBuildArgs -and $Scope -eq "upstream-pinned") {
     throw "PrintBuildArgs 只能与 Scope=all 或 Scope=built 一起使用"
 }
 
-function Read-YamlValue {
-    param(
-        [string[]]$Lines,
-        [string]$Key
-    )
-    foreach ($line in $Lines) {
-        if ($line -match "^\s*$([regex]::Escape($Key)):\s*(.+?)\s*$") {
-            return $Matches[1].Trim().Trim('"').Trim("'")
-        }
-    }
-    return $null
-}
-
-function Read-TopLevelYamlValue {
-    param(
-        [string[]]$Lines,
-        [string]$Key
-    )
-    foreach ($line in $Lines) {
-        if ($line -match "^$([regex]::Escape($Key)):\s*(.+?)\s*$") {
-            return $Matches[1].Trim().Trim('"').Trim("'")
-        }
-    }
-    return $null
-}
-
-function Read-YamlBlock {
-    param(
-        [string]$Path,
-        [string]$BlockName
-    )
-    $lines = Get-Content $Path
-    $block = New-Object System.Collections.Generic.List[string]
-    $inside = $false
-    foreach ($line in $lines) {
-        if ($line -match "^$([regex]::Escape($BlockName)):\s*$") {
-            $inside = $true
-            continue
-        }
-        if ($inside -and $line -match "^[A-Za-z_][A-Za-z0-9_]*:\s*") {
-            break
-        }
-        if ($inside) {
-            $block.Add($line)
-        }
-    }
-    return ,$block.ToArray()
-}
-
-function Read-SourceType {
-    param([string]$Path)
-    $source = Read-YamlBlock -Path $Path -BlockName "source"
-    return Read-YamlValue -Lines $source -Key "type"
-}
-
 # Test-DeployableManifest 判断 manifest 是否允许进入拉取、扫描和准入流程。
 function Test-DeployableManifest {
     param([string]$Path)
-    $supplyChain = Read-YamlBlock -Path $Path -BlockName "supply_chain"
-    $deployable = Read-YamlValue -Lines $supplyChain -Key "deployable"
+    $supplyChain = Get-ChaimirYamlBlock -Path $Path -BlockName "supply_chain"
+    $deployable = Get-ChaimirYamlValue -Lines $supplyChain -Key "deployable"
     if ($deployable -ne "false") {
         return $true
     }
-    $reason = Read-YamlValue -Lines $supplyChain -Key "block_reason"
+    $reason = Get-ChaimirYamlValue -Lines $supplyChain -Key "block_reason"
     if ([string]::IsNullOrWhiteSpace($reason)) {
         throw "${Path}: supply_chain.deployable=false 必须声明 block_reason"
     }
@@ -138,26 +84,6 @@ function Read-Components {
     return $components
 }
 
-function Read-DigestLock {
-    param([string]$Path)
-    $items = @{}
-    if (-not (Test-Path -LiteralPath $Path)) {
-        return $items
-    }
-    foreach ($line in Get-Content -LiteralPath $Path) {
-        $trimmed = $line.Trim()
-        if ($trimmed -eq "" -or $trimmed.StartsWith("#")) {
-            continue
-        }
-        if ($trimmed -match "^([^:\s]+/[^:\s]+)\s*[:= ]\s*(sha256:[0-9a-f]{64})$") {
-            $items[$Matches[1]] = $Matches[2]
-            continue
-        }
-        throw "digest 锁格式非法: $Path -> $line"
-    }
-    return $items
-}
-
 function Get-BuildArgRef {
     param(
         [hashtable]$DigestLockItems,
@@ -193,10 +119,10 @@ function Add-UpstreamRefs {
         [hashtable]$Seen,
         [System.Collections.Generic.List[string]]$Missing
     )
-    $upstream = Read-YamlBlock -Path $ManifestPath -BlockName "upstream"
-    $registry = Read-YamlValue -Lines $upstream -Key "registry"
-    $image = Read-YamlValue -Lines $upstream -Key "image"
-    $digest = Read-YamlValue -Lines $upstream -Key "digest"
+    $upstream = Get-ChaimirYamlBlock -Path $ManifestPath -BlockName "upstream"
+    $registry = Get-ChaimirYamlValue -Lines $upstream -Key "registry"
+    $image = Get-ChaimirYamlValue -Lines $upstream -Key "image"
+    $digest = Get-ChaimirYamlValue -Lines $upstream -Key "digest"
     $components = Read-Components -Upstream $upstream
 
     if ($components.Count -gt 0) {
@@ -233,7 +159,7 @@ function Add-BuiltRef {
         [System.Collections.Generic.List[string]]$Missing
     )
     $lines = Get-Content $ManifestPath
-    $image = Read-TopLevelYamlValue -Lines $lines -Key "image"
+    $image = Get-ChaimirTopLevelYamlValue -Lines $lines -Key "image"
     if ([string]::IsNullOrWhiteSpace($image)) {
         $Missing.Add(("{0}: image 缺失" -f $ManifestPath))
         return
@@ -340,7 +266,7 @@ function Test-LocalImageRef {
 
 $rootPath = (Resolve-Path -LiteralPath $Root).Path
 $manifests = Get-ChildItem -Path $rootPath -Recurse -Filter manifest.yaml | Sort-Object FullName
-$digestLockItems = Read-DigestLock -Path $DigestLock
+$digestLockItems = Read-ChaimirDigestLock -Path $DigestLock
 if ($PrintBuildArgs) {
     Write-Output (Get-BuildArgRef -DigestLockItems $digestLockItems -ImageName "base/go-builder" -ArgName "GO_BUILDER_IMAGE")
     Write-Output (Get-BuildArgRef -DigestLockItems $digestLockItems -ImageName "base/judge-min" -ArgName "JUDGE_MIN_IMAGE")
@@ -354,7 +280,7 @@ foreach ($manifest in $manifests) {
     if (-not (Test-DeployableManifest -Path $manifest.FullName)) {
         continue
     }
-    $sourceType = Read-SourceType -Path $manifest.FullName
+    $sourceType = Get-ChaimirImageSourceType -Path $manifest.FullName
     switch ($sourceType) {
         "upstream-pinned" {
             if ($Scope -in @("all", "upstream-pinned")) {

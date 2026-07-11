@@ -17,6 +17,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+Import-Module (Join-Path $PSScriptRoot "lib\ImageMetadata.psm1") -Force
 
 if ([string]::IsNullOrWhiteSpace($Registry)) {
     $Registry = $env:SUPPLY_CHAIN_REGISTRY
@@ -41,86 +42,6 @@ if ($Push -and [string]::IsNullOrWhiteSpace($Platform)) {
 }
 if ($MaxAttempts -lt 1) {
     throw "MaxAttempts 必须大于等于 1"
-}
-
-# Read-YamlValue 从简单 YAML 行集合读取 key:value。
-function Read-YamlValue {
-    param(
-        [string[]]$Lines,
-        [string]$Key
-    )
-    foreach ($line in $Lines) {
-        if ($line -match "^\s*$([regex]::Escape($Key)):\s*(.+?)\s*$") {
-            return $Matches[1].Trim().Trim('"').Trim("'")
-        }
-    }
-    return $null
-}
-
-# Read-TopLevelYamlValue 只读取顶层 key:value。
-function Read-TopLevelYamlValue {
-    param(
-        [string[]]$Lines,
-        [string]$Key
-    )
-    foreach ($line in $Lines) {
-        if ($line -match "^$([regex]::Escape($Key)):\s*(.+?)\s*$") {
-            return $Matches[1].Trim().Trim('"').Trim("'")
-        }
-    }
-    return $null
-}
-
-# Read-YamlBlock 读取指定顶层 YAML 块的原始行。
-function Read-YamlBlock {
-    param(
-        [string]$Path,
-        [string]$BlockName
-    )
-    $lines = Get-Content -LiteralPath $Path
-    $block = New-Object System.Collections.Generic.List[string]
-    $inside = $false
-    foreach ($line in $lines) {
-        if ($line -match "^$([regex]::Escape($BlockName)):\s*$") {
-            $inside = $true
-            continue
-        }
-        if ($inside -and $line -match "^[A-Za-z_][A-Za-z0-9_]*:\s*") {
-            break
-        }
-        if ($inside) {
-            $block.Add($line)
-        }
-    }
-    return ,$block.ToArray()
-}
-
-# Read-SourceType 读取 manifest 的 source.type。
-function Read-SourceType {
-    param([string]$Path)
-    $source = Read-YamlBlock -Path $Path -BlockName "source"
-    return Read-YamlValue -Lines $source -Key "type"
-}
-
-# Read-DigestLock 读取构建依赖 digest 锁。
-function Read-DigestLock {
-    param([string]$Path)
-    $items = @{}
-    if (-not (Test-Path -LiteralPath $Path)) {
-        return $items
-    }
-    foreach ($line in Get-Content -LiteralPath $Path) {
-        $trimmed = $line.Trim()
-        if ($trimmed -eq "" -or $trimmed.StartsWith("#")) {
-            continue
-        }
-        if ($trimmed -match "^([^:\s]+/[^:\s]+)\s*[:= ]\s*(sha256:[0-9a-f]{64})$") {
-            $items[$Matches[1]] = $Matches[2]
-            continue
-        }
-        throw "digest 锁格式非法: $Path -> $line"
-    }
-    return $items
 }
 
 # Resolve-BuildPath 将 manifest build 路径解析为绝对路径。
@@ -150,23 +71,6 @@ function Get-LockedRef {
         throw "digest 锁缺少 $Image,无法构建依赖它的镜像"
     }
     return "$Registry/$Image@$digest"
-}
-
-# Write-DigestLock 按镜像名排序写候选 digest 锁。
-function Write-DigestLock {
-    param(
-        [string]$Path,
-        [hashtable]$Items
-    )
-    $parent = Split-Path -Parent $Path
-    if (-not [string]::IsNullOrWhiteSpace($parent) -and -not (Test-Path -LiteralPath $parent)) {
-        New-Item -ItemType Directory -Path $parent | Out-Null
-    }
-    $lines = New-Object System.Collections.Generic.List[string]
-    foreach ($key in ($Items.Keys | Sort-Object)) {
-        $lines.Add("$key $($Items[$key])")
-    }
-    Set-Content -LiteralPath $Path -Value $lines -Encoding ascii
 }
 
 # Invoke-DockerCli 统一注入 Docker registry auth config。
@@ -289,26 +193,26 @@ function Invoke-DockerBuildWithRetry {
 
 $rootPath = (Resolve-Path -LiteralPath $Root).Path
 $repoRoot = [System.IO.Path]::GetFullPath((Join-Path $rootPath ".."))
-$digestLockItems = Read-DigestLock -Path $DigestLock
+$digestLockItems = Read-ChaimirDigestLock -Path $DigestLock
 $manifests = Get-ChildItem -Path $rootPath -Recurse -Filter manifest.yaml | Sort-Object FullName
 $selected = New-Object System.Collections.Generic.List[object]
 
 foreach ($manifest in $manifests) {
-    $sourceType = Read-SourceType -Path $manifest.FullName
+    $sourceType = Get-ChaimirImageSourceType -Path $manifest.FullName
     if ($sourceType -notin @("platform-built", "thin-wrapper", "build-base")) {
         continue
     }
     $lines = Get-Content -LiteralPath $manifest.FullName
-    $image = Read-TopLevelYamlValue -Lines $lines -Key "image"
+    $image = Get-ChaimirTopLevelYamlValue -Lines $lines -Key "image"
     if ([string]::IsNullOrWhiteSpace($image)) {
         throw "$($manifest.FullName): image 缺失"
     }
     if ($Images.Count -gt 0 -and $image -notin $Images) {
         continue
     }
-    $build = Read-YamlBlock -Path $manifest.FullName -BlockName "build"
-    $contextValue = Read-YamlValue -Lines $build -Key "context"
-    $dockerfileValue = Read-YamlValue -Lines $build -Key "dockerfile"
+    $build = Get-ChaimirYamlBlock -Path $manifest.FullName -BlockName "build"
+    $contextValue = Get-ChaimirYamlValue -Lines $build -Key "context"
+    $dockerfileValue = Get-ChaimirYamlValue -Lines $build -Key "dockerfile"
     if ([string]::IsNullOrWhiteSpace($dockerfileValue)) {
         $dockerfileValue = "Dockerfile"
     }
@@ -370,7 +274,7 @@ foreach ($item in $selected) {
     Invoke-DockerBuildWithRetry -Arguments $args -Image $item.Image
     if ($Push) {
         $digestLockItems[$item.Image] = Get-RegistryDigest -Ref $item.Ref
-        Write-DigestLock -Path $DigestLockOut -Items $digestLockItems
+        Write-ChaimirDigestLock -Path $DigestLockOut -Items $digestLockItems
         Write-Host "Locked $($item.Image) $($digestLockItems[$item.Image])"
     }
 }

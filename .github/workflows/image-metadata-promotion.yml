@@ -1,0 +1,120 @@
+# 镜像元数据晋升流水线:消费已扫描、签名并验签的 digest 片段,通过机器人 PR 同步权威文件。
+name: image-metadata-promotion
+
+on:
+  workflow_run:
+    workflows: [backend, frontend, images]
+    types: [completed]
+
+permissions:
+  actions: read
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: image-metadata-promotion
+  cancel-in-progress: false
+
+jobs:
+  promote:
+    if: github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main'
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.IMAGE_METADATA_BOT_TOKEN }}
+      AUTOMATION_BRANCH: automation/image-metadata
+    steps:
+      - id: artifacts
+        name: 检查触发流水线的 digest 产物
+        shell: bash
+        run: |
+          set -euo pipefail
+          count=$(gh api \
+            "repos/${{ github.repository }}/actions/runs/${{ github.event.workflow_run.id }}/artifacts" \
+            --jq '[.artifacts[] | select(.expired == false and (.name | startswith("image-digest-")))] | length')
+          if [[ "$count" -gt 0 ]]; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/checkout@v4
+        if: steps.artifacts.outputs.available == 'true'
+        with:
+          fetch-depth: 0
+          ref: main
+          token: ${{ secrets.IMAGE_METADATA_BOT_TOKEN }}
+
+      - name: 准备串行元数据分支
+        if: steps.artifacts.outputs.available == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if git ls-remote --exit-code --heads origin "$AUTOMATION_BRANCH" >/dev/null 2>&1; then
+            open_pr=$(gh pr list --state open --head "$AUTOMATION_BRANCH" --json number --jq '.[0].number // empty')
+            if [[ -n "$open_pr" ]]; then
+              git fetch origin "$AUTOMATION_BRANCH"
+              git checkout -B "$AUTOMATION_BRANCH" "origin/$AUTOMATION_BRANCH"
+              git rebase origin/main
+            else
+              git push origin --delete "$AUTOMATION_BRANCH"
+              git checkout -b "$AUTOMATION_BRANCH" origin/main
+            fi
+          else
+            git checkout -b "$AUTOMATION_BRANCH" origin/main
+          fi
+
+      - name: 下载 digest 片段
+        if: steps.artifacts.outputs.available == 'true'
+        uses: actions/download-artifact@v4
+        with:
+          pattern: image-digest-*
+          path: image-digest-artifacts
+          merge-multiple: true
+          github-token: ${{ secrets.IMAGE_METADATA_BOT_TOKEN }}
+          run-id: ${{ github.event.workflow_run.id }}
+
+      - name: 合并并同步镜像元数据
+        if: steps.artifacts.outputs.available == 'true'
+        shell: pwsh
+        run: |
+          ./images/sync-image-metadata.ps1 -FragmentsPath ./image-digest-artifacts
+
+      - id: changes
+        name: 检查权威文件是否变化
+        if: steps.artifacts.outputs.available == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git diff --quiet -- images/image-digests.lock deploy/overlays/local-dev/kustomization.yaml backend/.env.example deploy/config/chaimir.env; then
+            echo "present=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: 提交并推送自动化分支
+        if: steps.changes.outputs.present == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          git add images/image-digests.lock deploy/overlays/local-dev/kustomization.yaml backend/.env.example deploy/config/chaimir.env
+          git diff --cached --check
+          git commit -m "chore(images): promote verified image digests"
+          git push --force-with-lease origin "$AUTOMATION_BRANCH"
+
+      - name: 创建或更新自动合并 PR
+        if: steps.changes.outputs.present == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          pr_number=$(gh pr list --state open --head "$AUTOMATION_BRANCH" --json number --jq '.[0].number // empty')
+          if [[ -z "$pr_number" ]]; then
+            pr_url=$(gh pr create \
+              --base main \
+              --head "$AUTOMATION_BRANCH" \
+              --title "chore(images): promote verified image digests" \
+              --body "由镜像供应链自动更新已通过 Trivy、Harbor、Cosign 签名与验签的不可变 digest 及其静态引用。")
+            pr_number="${pr_url##*/}"
+          fi
+          gh pr merge "$pr_number" --auto --squash

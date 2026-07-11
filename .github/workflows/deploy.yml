@@ -1,42 +1,47 @@
-# 部署流水线:backend 镜像流水线成功后自动部署 staging;打 tag→人工审批→部署 prod-saas。
+# 部署流水线:消费已验证 digest 自动部署 staging;打 tag→人工审批→按权威锁部署 prod-saas。
 # 依据 docs/总-部署架构设计.md §六:
-#   main 分支 backend 镜像流水线成功 → 自动部署 staging;打 tag → 人工审批 → 部署 prod-saas;
+#   已验证 digest 的机器人 PR 合入 main → 按权威锁自动部署 staging;
+#   打 tag → 按发布提交权威锁中的 digest 人工审批后部署 prod-saas;
 #   私有化 → 生成离线镜像包 + 部署清单交付(见 deploy/Makefile / scripts,目录5)。
 name: deploy
 
 on:
-  workflow_run:
-    workflows: ["backend"]
-    branches: [main]
-    types: [completed]
   push:
+    branches: [main]
     tags: ["v*"]
+    paths:
+      - "images/image-digests.lock"
 
 permissions:
   contents: read
 
 jobs:
-  # main 分支:后端镜像完成构建、扫描、签名并推送后自动部署 staging。
+  # main 分支:权威锁变更后一次部署同一批已验证服务 digest。
   deploy-staging:
-    if: github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success'
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     environment: staging  # GitHub Environment(可配审批/保护规则)。
     steps:
       - uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.workflow_run.head_sha }}
       - name: 配置 kubeconfig(staging)
         run: |
           mkdir -p ~/.kube
           echo "${{ secrets.KUBECONFIG_STAGING }}" > ~/.kube/config
-      - name: 应用 staging overlay
+      - name: 从权威锁生成 staging digest overlay
+        shell: pwsh
+        env:
+          HARBOR_REGISTRY: ${{ secrets.HARBOR_REGISTRY }}
         run: |
-          # 用触发 backend 流水线的提交 SHA 作为镜像 tag,确保部署与构建一致。
-          cd deploy/overlays/staging
-          kubectl apply -k .
-          kubectl -n chaimir-system set image deployment/chaimir-backend \
-            server=${{ secrets.HARBOR_REGISTRY }}/service/backend:${{ github.event.workflow_run.head_sha }}
+          ./deploy/scripts/render-locked-overlay.ps1 `
+            -OverlayPath ./deploy/overlays/staging `
+            -Registry $env:HARBOR_REGISTRY `
+            -OutputPath "$env:RUNNER_TEMP/staging/kustomization.yaml"
+      - name: 应用 staging digest overlay
+        run: |
+          set -euo pipefail
+          kubectl kustomize "$RUNNER_TEMP/staging" --load-restrictor LoadRestrictionsNone | kubectl apply -f -
           kubectl -n chaimir-system rollout status deployment/chaimir-backend --timeout=300s
+          kubectl -n chaimir-system rollout status deployment/chaimir-frontend --timeout=300s
 
   # 打 tag:人工审批后部署 prod-saas。
   deploy-prod-saas:
@@ -49,11 +54,18 @@ jobs:
         run: |
           mkdir -p ~/.kube
           echo "${{ secrets.KUBECONFIG_PROD_SAAS }}" > ~/.kube/config
-      - name: 应用 prod-saas overlay(按 tag 版本)
+      - name: 从发布提交权威锁生成 prod-saas digest overlay
+        shell: pwsh
+        env:
+          HARBOR_REGISTRY: ${{ secrets.HARBOR_REGISTRY }}
         run: |
-          version="${GITHUB_REF_NAME#v}"
-          cd deploy/overlays/prod-saas
-          kubectl apply -k .
-          kubectl -n chaimir-system set image deployment/chaimir-backend \
-            server=${{ secrets.HARBOR_REGISTRY }}/service/backend:${version}
+          ./deploy/scripts/render-locked-overlay.ps1 `
+            -OverlayPath ./deploy/overlays/prod-saas `
+            -Registry $env:HARBOR_REGISTRY `
+            -OutputPath "$env:RUNNER_TEMP/prod-saas/kustomization.yaml"
+      - name: 应用 prod-saas digest overlay
+        run: |
+          set -euo pipefail
+          kubectl kustomize "$RUNNER_TEMP/prod-saas" --load-restrictor LoadRestrictionsNone | kubectl apply -f -
           kubectl -n chaimir-system rollout status deployment/chaimir-backend --timeout=600s
+          kubectl -n chaimir-system rollout status deployment/chaimir-frontend --timeout=600s

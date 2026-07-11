@@ -30,7 +30,7 @@ images:
     newName: harbor.chaimir:30080/service/backend
     digest: sha256:01bec1df5a9e87628e024d63a5522eb8d06d68be96b7b415bec5aa3a7d7b89a7
   - name: chaimir/frontend
-    newName: chaimir/frontend
+    newName: harbor.chaimir:30080/service/frontend
     newTag: dev
   - name: chaimir/migrate
     newName: harbor.chaimir:30080/service/migrate
