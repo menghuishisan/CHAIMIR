@@ -1,7 +1,6 @@
 // TeacherExamsEditPage 创建试卷组卷规则，并查看已有试卷详情。
 
 import React, { useCallback, useEffect, useState } from 'react'
-import type { ApiError } from '@chaimir/api-client'
 import { PaperMode } from '@chaimir/api-client'
 import { Button, Callout, Input, Select, Textarea } from '@chaimir/ui'
 import { FilePlus, RefreshCw, Save } from 'lucide-react'
@@ -11,6 +10,7 @@ import { ErrorState, LoadingState } from '../../../../../components/ResourceStat
 import { useAsyncResource } from '../../../../../hooks'
 import styles from '../../content.module.css'
 import { paperModeOptions, parseJsonArray } from '../../../../../utils/index'
+import { userFacingErrorMessage } from '../../../../../utils/userFacingError'
 
 const TeacherExamsEditPage: React.FC = () => {
   const [searchParams] = useSearchParams()
@@ -56,7 +56,7 @@ const TeacherExamsEditPage: React.FC = () => {
       })
       setMessage('试卷规则已创建。')
     } catch (actionError) {
-      setError((actionError as ApiError).message || (actionError as Error).message || '试卷规则保存失败，请检查内容后重试。')
+      setError(userFacingErrorMessage(actionError, '试卷规则保存失败，请检查内容后重试。'))
     } finally {
       setSaving(false)
     }
@@ -71,7 +71,7 @@ const TeacherExamsEditPage: React.FC = () => {
       setMessage('试卷已重新组卷。')
       paper.reload()
     } catch (actionError) {
-      setError((actionError as ApiError).message || '重新组卷失败，请稍后重试。')
+      setError(userFacingErrorMessage(actionError, '重新组卷失败，请稍后重试。'))
     }
   }, [paper, paperId])
 

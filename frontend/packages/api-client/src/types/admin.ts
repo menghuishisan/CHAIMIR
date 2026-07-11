@@ -1,7 +1,7 @@
 // ===== M9 Admin 模块 =====
 
 import type { AdminScope, AlertStatus, BackupStatus, BackupType } from '../constants/admin'
-import type { ApplicationStatus, AuditActorRole, DeployMode, TenantStatus } from '../constants/identity'
+import type { ApplicationStatus, AuditActorRole } from '../constants/identity'
 
 export interface SystemConfig {
   id: string
@@ -117,18 +117,6 @@ export interface Dashboard {
 export interface MonitoringPanel {
   name: string
   url: string
-}
-
-export interface TenantSummary {
-  tenant_id: string
-  code: string
-  name: string
-  type: number
-  status: TenantStatus
-  deploy_mode: DeployMode
-  expire_at?: string
-  created_at: string
-  updated_at: string
 }
 
 export interface TenantApplicationSummary {

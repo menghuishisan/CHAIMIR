@@ -4,7 +4,7 @@ import React, { useCallback, useMemo, useState } from 'react'
 import { SIM_PACKAGE_STATUS, type SimPackageMeta } from '@chaimir/api-client'
 import type { TableColumn } from '@chaimir/ui'
 import { Button, FormField, Input, Modal, Select, Table } from '@chaimir/ui'
-import { Network, Play, RefreshCw } from 'lucide-react'
+import { History, Network, Play, RefreshCw } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../../../../../app/api'
 import { ErrorState, LoadingState } from '../../../../../components/ResourceState'
@@ -15,6 +15,7 @@ import { userFacingErrorMessage } from '../../../../../utils/userFacingError'
 const SimulationsPage: React.FC = () => {
   const navigate = useNavigate()
   const [keyword, setKeyword] = useState('')
+  const [shareCode, setShareCode] = useState('')
   const [selectedPackage, setSelectedPackage] = useState<SimPackageMeta | null>(null)
   const [versions, setVersions] = useState<SimPackageMeta[]>([])
   const [selectedVersion, setSelectedVersion] = useState('')
@@ -87,6 +88,17 @@ const SimulationsPage: React.FC = () => {
         <FormField label="搜索仿真包" htmlFor="simulation-keyword">
           <Input id="simulation-keyword" placeholder="输入名称或分类" value={keyword} onChange={(event) => setKeyword(event.target.value)} />
         </FormField>
+        <FormField label="打开分享回放" htmlFor="simulation-share-code">
+          <Input id="simulation-share-code" placeholder="输入分享码" value={shareCode} onChange={(event) => setShareCode(event.target.value)} />
+        </FormField>
+        <Button
+          variant="outline"
+          icon={<History size={16} />}
+          disabled={!shareCode.trim()}
+          onClick={() => navigate(`/sim/shared/${encodeURIComponent(shareCode.trim())}`)}
+        >
+          打开回放
+        </Button>
       </div>
       {error && <div className={styles.error} role="alert">{error}</div>}
       {resource.status === 'error' && <ErrorState error={resource.error} onRetry={resource.reload} />}

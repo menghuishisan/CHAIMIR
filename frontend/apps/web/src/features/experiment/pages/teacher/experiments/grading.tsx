@@ -11,6 +11,7 @@ import { ErrorState, LoadingState } from '../../../../../components/ResourceStat
 import { useAsyncResource } from '../../../../../hooks/useAsyncResource'
 import styles from '../../experiment.module.css'
 import { formatDateTime } from '../../../../../utils/index'
+import { userFacingErrorMessage } from '../../../../../utils/userFacingError'
 
 const TeacherExperimentGradingPage: React.FC = () => {
   const { id } = useParams()
@@ -42,7 +43,7 @@ const TeacherExperimentGradingPage: React.FC = () => {
       setMessage('评分已保存。')
       resource.reload()
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : '暂时无法保存评分。')
+      setMessage(userFacingErrorMessage(error, '暂时无法保存评分。'))
     }
   }
 

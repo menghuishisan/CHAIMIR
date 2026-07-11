@@ -132,23 +132,6 @@
   font-family: var(--font-mono);
 }
 
-.workspace {
-  display: grid;
-  grid-template-columns: 340px minmax(0, 1fr);
-  min-height: calc(100vh - 96px);
-  background: var(--color-dark-bg);
-  color: var(--color-dark-text);
-}
-
-.workspacePanel {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-4);
-  border-right: 1px solid var(--color-glass-border);
-  background: var(--color-dark-surface);
-  padding: var(--space-5);
-}
-
 .workspaceTitle {
   margin: 0;
   color: var(--color-dark-text);
@@ -159,11 +142,6 @@
 .workspaceMeta {
   color: var(--color-dark-text-sub);
   font-size: var(--text-sm);
-}
-
-.stage {
-  padding: var(--space-5);
-  min-width: 0;
 }
 
 .darkCard {
@@ -188,8 +166,7 @@
 }
 
 @media (max-width: 900px) {
-  .split,
-  .workspace {
+  .split {
     grid-template-columns: 1fr;
   }
 }

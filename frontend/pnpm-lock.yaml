@@ -57,6 +57,9 @@ importers:
       '@chaimir/api-client':
         specifier: workspace:*
         version: link:../../packages/api-client
+      '@chaimir/ide':
+        specifier: workspace:*
+        version: link:../../packages/ide
       '@chaimir/sim-sdk':
         specifier: workspace:*
         version: link:../../packages/sim-sdk

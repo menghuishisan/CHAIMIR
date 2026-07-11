@@ -1,7 +1,6 @@
 // AdminSettingsPage 管理当前学校租户配置，读取并更新 identity 租户配置接口。
 
 import React, { useCallback, useMemo, useState } from 'react'
-import type { ApiError } from '@chaimir/api-client'
 import { AuthMode } from '@chaimir/api-client'
 import { Button, Callout, Input, Select, Switch, Textarea } from '@chaimir/ui'
 import { Save, Settings } from 'lucide-react'
@@ -10,6 +9,7 @@ import { ErrorState, LoadingState } from '../../../../../components/ResourceStat
 import { useAsyncResource } from '../../../../../hooks'
 import styles from '../../identity-admin.module.css'
 import { authModeOptions, parseJsonObject } from '../../../../../utils/index'
+import { userFacingErrorMessage } from '../../../../../utils/userFacingError'
 
 
 const AdminSettingsPage: React.FC = () => {
@@ -63,7 +63,7 @@ const AdminSettingsPage: React.FC = () => {
       setMessage('学校配置已保存。')
       resource.reload()
     } catch (saveError) {
-      setError((saveError as ApiError).message || (saveError as Error).message || '配置保存失败，请检查内容后重试。')
+      setError(userFacingErrorMessage(saveError, '配置保存失败，请检查内容后重试。'))
     } finally {
       setSubmitting(false)
     }

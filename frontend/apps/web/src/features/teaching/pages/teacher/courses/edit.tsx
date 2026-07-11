@@ -1,7 +1,6 @@
 // TeacherCourseEditPage 创建或更新课程基础信息，复用 teaching 后端课程接口。
 
 import React, { useCallback, useEffect, useState } from 'react'
-import type { ApiError } from '@chaimir/api-client'
 import { CourseType, TeachingDifficulty } from '@chaimir/api-client'
 import { Button, Callout, Input, Select, Textarea } from '@chaimir/ui'
 import { Edit, Save, Send } from 'lucide-react'
@@ -11,6 +10,7 @@ import { ErrorState, LoadingState } from '../../../../../components/ResourceStat
 import { useAsyncResource } from '../../../../../hooks'
 import styles from '../../teaching.module.css'
 import { courseTypeOptions, formatDateTimeLocalInput, parseDateTimeLocalInput, teachingDifficultyOptions } from '../../../../../utils/index'
+import { userFacingErrorMessage } from '../../../../../utils/userFacingError'
 
 const TeacherCourseEditPage: React.FC = () => {
   const [searchParams] = useSearchParams()
@@ -69,7 +69,7 @@ const TeacherCourseEditPage: React.FC = () => {
       setMessage(publish ? '课程已保存并发布。' : '课程已保存。')
       courses.reload()
     } catch (actionError) {
-      setError((actionError as ApiError).message || '课程保存失败，请检查内容后重试。')
+      setError(userFacingErrorMessage(actionError, '课程保存失败，请检查内容后重试。'))
     } finally {
       setSaving(false)
       setPublishing(false)

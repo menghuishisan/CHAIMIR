@@ -2,7 +2,6 @@
 
 import axios, { AxiosInstance, AxiosError, InternalAxiosRequestConfig } from 'axios'
 import { API_BASE_PATH, API_ERROR_MESSAGES } from './constants'
-import type { WebSocketTicketResponse } from './types/identity'
 
 export interface ApiConfig {
   baseURL: string
@@ -199,13 +198,6 @@ export class ApiClient {
   }
 
   /**
-   * issueWebSocketTicket 为指定 WebSocket URL 换取短时连接票据。
-   */
-  public async issueWebSocketTicket(wsUrl: string): Promise<WebSocketTicketResponse> {
-    return this.post('/auth/ws-ticket', { path: webSocketPath(wsUrl) })
-  }
-
-  /**
    * 构造浏览器工具代理入口使用的一次性 token 查询参数。
    */
   public browserTokenQuery(extra?: Record<string, string | undefined>): string {
@@ -336,16 +328,6 @@ function queryString(extra?: Record<string, string | undefined>): string {
   }
   const query = params.toString()
   return query ? `?${query}` : ''
-}
-
-/**
- * webSocketPath 从完整 WS URL 中提取后端票据绑定所需路径。
- */
-function webSocketPath(wsUrl: string): string {
-  if (typeof window !== 'undefined') {
-    return new URL(wsUrl, window.location.href).pathname
-  }
-  return new URL(wsUrl, 'http://chaimir.local').pathname
 }
 
 /**

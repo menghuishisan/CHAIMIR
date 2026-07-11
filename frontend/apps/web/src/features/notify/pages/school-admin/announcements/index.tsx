@@ -1,7 +1,7 @@
 // AnnouncementsPage 发布学校公告，并展示后端公告列表。
 
 import React, { useCallback, useMemo, useState } from 'react'
-import type { Announcement, ApiError } from '@chaimir/api-client'
+import type { Announcement } from '@chaimir/api-client'
 import { AnnouncementScope, UserRole } from '@chaimir/api-client'
 import type { TableColumn } from '@chaimir/ui'
 import { Button, Callout, Input, Select, Table, Textarea } from '@chaimir/ui'
@@ -11,6 +11,7 @@ import { ErrorState, LoadingState } from '../../../../../components/ResourceStat
 import { useAsyncResource } from '../../../../../hooks'
 import styles from './announcements.module.css'
 import { announcementScopeLabel, announcementScopeOptions, announcementTargetRoleOptions, formatDateTime } from '../../../../../utils/index'
+import { userFacingErrorMessage } from '../../../../../utils/userFacingError'
 
 
 const AnnouncementsPage: React.FC = () => {
@@ -49,7 +50,7 @@ const AnnouncementsPage: React.FC = () => {
       setMessage('公告已发布。')
       resource.reload()
     } catch (submitError) {
-      setError((submitError as ApiError).message || '公告发布失败，请稍后重试。')
+      setError(userFacingErrorMessage(submitError, '公告发布失败，请稍后重试。'))
     } finally {
       setSubmitting(false)
     }

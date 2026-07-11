@@ -2,8 +2,8 @@
 
 import React, { useCallback, useMemo, useState } from 'react'
 import type { ApiError, TransferTask } from '@chaimir/api-client'
-import { Button } from '@chaimir/ui'
-import { Download, Loader, RefreshCw } from 'lucide-react'
+import { Button, DescriptionList, Modal } from '@chaimir/ui'
+import { Download, Eye, Loader, RefreshCw } from 'lucide-react'
 import { api } from '../../../../../app/api'
 import { EmptyState, ErrorState, LoadingState } from '../../../../../components/ResourceState'
 import { useAsyncResource } from '../../../../../hooks'
@@ -44,6 +44,8 @@ const TasksPage: React.FC = () => {
   const [grantByTask, setGrantByTask] = useState<Record<string, string>>({})
   const [grantError, setGrantError] = useState<ApiError | null>(null)
   const [grantingTaskId, setGrantingTaskId] = useState<string | null>(null)
+  const [detail, setDetail] = useState<TransferTask | null>(null)
+  const [loadingDetailId, setLoadingDetailId] = useState<string | null>(null)
 
   const tasks = useMemo(() => resource.data?.items || [], [resource.data])
 
@@ -60,6 +62,19 @@ const TasksPage: React.FC = () => {
       setGrantError(error as ApiError)
     } finally {
       setGrantingTaskId(null)
+    }
+  }, [])
+
+  /** handleOpenDetail 从后端重新读取单任务状态，避免只展示列表缓存。 */
+  const handleOpenDetail = useCallback(async (taskId: string) => {
+    setLoadingDetailId(taskId)
+    setGrantError(null)
+    try {
+      setDetail(await api.transfer.getTask(taskId))
+    } catch (error) {
+      setGrantError(error as ApiError)
+    } finally {
+      setLoadingDetailId(null)
     }
   }, [])
 
@@ -107,19 +122,27 @@ const TasksPage: React.FC = () => {
                   <div className={styles.grant}>{grantByTask[task.task_id]}</div>
                 )}
               </div>
-              <Button
-                variant="primary"
-                icon={<Download size={16} />}
-                loading={grantingTaskId === task.task_id}
-                disabled={task.status !== 'succeeded'}
-                onClick={() => handleGrant(task)}
-              >
-                获取下载授权
-              </Button>
+              <div className={styles.cardActions}>
+                <Button variant="outline" icon={<Eye size={16} />} loading={loadingDetailId === task.task_id} onClick={() => void handleOpenDetail(task.task_id)}>查看详情</Button>
+                <Button variant="primary" icon={<Download size={16} />} loading={grantingTaskId === task.task_id} disabled={task.status !== 'succeeded'} onClick={() => handleGrant(task)}>获取下载授权</Button>
+              </div>
             </article>
           ))}
         </div>
       )}
+      <Modal open={detail !== null} title="任务详情" onClose={() => setDetail(null)}>
+        {detail && (
+          <DescriptionList items={[
+            { key: 'subject', label: '任务', value: detail.subject },
+            { key: 'status', label: '状态', value: transferTaskStatusLabel(detail.status) },
+            { key: 'attempt', label: '执行次数', value: `${detail.attempt_count}/${detail.max_attempts}` },
+            { key: 'created', label: '创建时间', value: formatDateTime(detail.created_at) },
+            { key: 'updated', label: '更新时间', value: formatDateTime(detail.updated_at) },
+            { key: 'completed', label: '完成时间', value: formatDateTime(detail.completed_at) },
+            { key: 'file', label: '结果文件', value: detail.artifact_file_name || '暂无' },
+          ]} />
+        )}
+      </Modal>
     </div>
   )
 }

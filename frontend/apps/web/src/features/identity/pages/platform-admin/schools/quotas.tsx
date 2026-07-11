@@ -1,13 +1,14 @@
 // QuotasPage 为指定租户提交沙箱配额，复用 sandbox 后端配额接口。
 
 import React, { useCallback, useState } from 'react'
-import type { ApiError, SandboxQuota } from '@chaimir/api-client'
+import type { SandboxQuota } from '@chaimir/api-client'
 import { Button, Input } from '@chaimir/ui'
 import { PieChart, Save } from 'lucide-react'
 import { useParams } from 'react-router-dom'
 import { api } from '../../../../../app/api'
 import styles from '../../../../admin/pages/list.module.css'
 import { sandboxQuotaFieldLabels } from '../../../../../utils/index'
+import { userFacingErrorMessage } from '../../../../../utils/userFacingError'
 
 type QuotaForm = Record<keyof Omit<SandboxQuota, 'tenant_id' | 'active_sandbox_count'>, string>
 
@@ -59,7 +60,7 @@ const QuotasPage: React.FC = () => {
       await api.sandbox.updateQuota(toQuotaRequest(id, form))
       setMessage('资源配额已提交')
     } catch (submitError) {
-      setError((submitError as ApiError).message || '资源配额提交失败，请稍后重试')
+      setError(userFacingErrorMessage(submitError, '资源配额提交失败，请稍后重试。'))
     } finally {
       setSaving(false)
     }

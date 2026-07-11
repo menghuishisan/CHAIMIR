@@ -1,7 +1,7 @@
 // TeacherGradingPage 按作业编号查询提交记录，并调用 teaching 后端批改接口。
 
 import React, { useCallback, useMemo, useState } from 'react'
-import type { ApiError, Submission } from '@chaimir/api-client'
+import type { Submission } from '@chaimir/api-client'
 import type { TableColumn } from '@chaimir/ui'
 import { Button, Callout, Input, Table, Textarea } from '@chaimir/ui'
 import { Check, CheckSquare, RefreshCw } from 'lucide-react'
@@ -10,14 +10,18 @@ import { ErrorState, LoadingState } from '../../../../../components/ResourceStat
 import { useAsyncResource } from '../../../../../hooks'
 import styles from '../../teaching.module.css'
 import { formatDateTime } from '../../../../../utils/index'
+import { userFacingErrorMessage } from '../../../../../utils/userFacingError'
+import { CourseGradebookPanel } from './CourseGradebookPanel'
 
 const TeacherGradingPage: React.FC = () => {
   const [assignmentId, setAssignmentId] = useState('')
+  const [courseId, setCourseId] = useState('')
   const [submissionId, setSubmissionId] = useState('')
   const [score, setScore] = useState('')
   const [comment, setComment] = useState('')
   const [message, setMessage] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [selectedSubmission, setSelectedSubmission] = useState<Submission>()
   const resource = useAsyncResource(() => (assignmentId ? api.teaching.getSubmissions(assignmentId, { page: 1, size: 20 }) : Promise.resolve({ list: [], total: 0, page: 1, size: 20 })), [assignmentId])
 
   /**
@@ -31,9 +35,23 @@ const TeacherGradingPage: React.FC = () => {
       setMessage('批改结果已保存。')
       resource.reload()
     } catch (actionError) {
-      setError((actionError as ApiError).message || '批改保存失败，请稍后重试。')
+      setError(userFacingErrorMessage(actionError, '批改保存失败，请稍后重试。'))
     }
   }, [comment, resource, score, submissionId])
+
+  /** selectSubmission 读取完整提交内容并载入批改表单。 */
+  const selectSubmission = async (id: number) => {
+    setError(null)
+    try {
+      const detail = await api.teaching.getSubmission(String(id))
+      setSelectedSubmission(detail)
+      setSubmissionId(String(detail.id))
+      setScore(String(detail.final_score ?? detail.auto_score ?? 0))
+      setComment(detail.comment || '')
+    } catch (actionError) {
+      setError(userFacingErrorMessage(actionError, '提交详情读取失败，请稍后重试。'))
+    }
+  }
 
   const columns = useMemo<TableColumn<Submission>[]>(() => [
     { key: 'student', title: '学生编号', dataIndex: 'student_id', priority: 'primary' },
@@ -44,7 +62,7 @@ const TeacherGradingPage: React.FC = () => {
     {
       key: 'actions',
       title: '操作',
-      render: (row) => <Button variant="outline" size="sm" icon={<Check size={14} />} onClick={() => setSubmissionId(String(row.id))}>选择批改</Button>,
+      render: (row) => <Button variant="outline" size="sm" icon={<Check size={14} />} onClick={() => void selectSubmission(row.id)}>选择批改</Button>,
     },
   ], [])
 
@@ -65,12 +83,15 @@ const TeacherGradingPage: React.FC = () => {
         <h2>作业筛选</h2>
         <div className={styles.formGrid}>
           <label className={styles.field}>作业编号<Input fullWidth value={assignmentId} onChange={(event) => setAssignmentId(event.target.value)} /></label>
+          <label className={styles.field}>课程编号<Input fullWidth value={courseId} onChange={(event) => setCourseId(event.target.value)} /></label>
           <label className={styles.field}>提交编号<Input fullWidth value={submissionId} onChange={(event) => setSubmissionId(event.target.value)} /></label>
           <label className={styles.field}>分数<Input fullWidth value={score} onChange={(event) => setScore(event.target.value)} /></label>
           <label className={styles.fieldFull}>评语<Textarea value={comment} onChange={(event) => setComment(event.target.value)} /></label>
         </div>
         <Button icon={<Check size={16} />} onClick={gradeSubmission}>保存批改结果</Button>
+        {selectedSubmission && <p className={styles.muted}>当前提交包含 {Object.keys(selectedSubmission.content).length} 个答题部分。</p>}
       </section>
+      <CourseGradebookPanel courseId={courseId} />
       {resource.status === 'error' && <ErrorState error={resource.error} onRetry={resource.reload} />}
       {resource.status === 'loading' && <LoadingState title="正在获取提交记录" />}
       {(resource.status === 'success' || resource.status === 'empty') && (

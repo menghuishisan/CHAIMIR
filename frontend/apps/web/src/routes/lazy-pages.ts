@@ -19,6 +19,7 @@ export const StudentExperimentDetailPage = lazy(() => import('../features/experi
 export const StudentExperimentWorkspacePage = lazy(() => import('../features/experiment/pages/student/experiments/workspace'))
 export const StudentSimulationsPage = lazy(() => import('../features/sim/pages/student/simulations'))
 export const StudentSimulationWorkspacePage = lazy(() => import('../features/sim/pages/student/simulations/workspace'))
+export const SharedSimulationWorkspacePage = lazy(() => import('../features/sim/pages/student/simulations/workspace'))
 export const StudentContestsPage = lazy(() => import('../features/contest/pages/student/contests'))
 export const StudentContestDetailPage = lazy(() => import('../features/contest/pages/student/contests/detail'))
 export const StudentContestApplyPage = lazy(() => import('../features/contest/pages/student/contests/apply'))

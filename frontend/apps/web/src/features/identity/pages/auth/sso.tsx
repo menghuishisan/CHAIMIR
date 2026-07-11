@@ -30,6 +30,7 @@ const SSOPage: React.FC = () => {
   const [remember, setRemember] = useState(searchParams.get('remember') === '1')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const returnPath = searchParams.get('return_to') || undefined
 
   useEffect(() => {
     const ticket = searchParams.get('ticket')
@@ -49,7 +50,7 @@ const SSOPage: React.FC = () => {
           return
         }
         persistLoginTokens(response, searchParams.get('remember') === '1')
-        navigate(loginEntryPath(response), { replace: true })
+        navigate(loginEntryPath(response, returnPath), { replace: true })
       })
       .catch((callbackError) => {
         if (active) {
@@ -65,7 +66,7 @@ const SSOPage: React.FC = () => {
     return () => {
       active = false
     }
-  }, [navigate, searchParams])
+  }, [navigate, returnPath, searchParams])
 
   /**
    * handleStartCAS 从后端获取学校认证地址，再交给浏览器完成跳转。
@@ -85,13 +86,14 @@ const SSOPage: React.FC = () => {
       if (remember) {
         serviceURL.searchParams.set('remember', '1')
       }
+      if (returnPath) serviceURL.searchParams.set('return_to', returnPath)
       const response = await api.identity.getCASLoginUrl(normalizedTenantCode, serviceURL.toString())
       window.location.assign(response.redirect_url)
     } catch (ssoError) {
       setError(userFacingErrorMessage(ssoError, '暂时无法连接学校统一认证，请稍后重试。'))
       setLoading(false)
     }
-  }, [remember, tenantCode])
+  }, [remember, returnPath, tenantCode])
 
   /**
    * handleLDAPLogin 把学校账号凭证提交给后端 LDAP 认证入口。
@@ -111,13 +113,13 @@ const SSOPage: React.FC = () => {
         password,
       })
       persistLoginTokens(response, remember)
-      navigate(loginEntryPath(response), { replace: true })
+      navigate(loginEntryPath(response, returnPath), { replace: true })
     } catch (ldapError) {
       setError(userFacingErrorMessage(ldapError, '学校账号认证失败，请检查账号信息后重试。'))
     } finally {
       setLoading(false)
     }
-  }, [navigate, password, remember, tenantCode, username])
+  }, [navigate, password, remember, returnPath, tenantCode, username])
 
   return (
     <main className={publicStyles.publicPage}>
@@ -161,7 +163,7 @@ const SSOPage: React.FC = () => {
           <div className={styles.options}>
             <Checkbox checked={remember} label="保持登录" onChange={(event) => setRemember(event.target.checked)} />
           </div>
-          <Button variant="ghost" icon={<ArrowLeft size={16} />} onClick={() => navigate('/auth/login')}>返回登录</Button>
+          <Button variant="ghost" icon={<ArrowLeft size={16} />} onClick={() => navigate('/auth/login', { state: { from: returnPath } })}>返回登录</Button>
         </div>
       </section>
     </main>

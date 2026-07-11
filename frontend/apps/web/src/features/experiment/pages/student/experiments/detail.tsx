@@ -9,6 +9,7 @@ import { api } from '../../../../../app/api'
 import { EmptyState, ErrorState, LoadingState } from '../../../../../components/ResourceState'
 import { useAsyncResource } from '../../../../../hooks/useAsyncResource'
 import styles from '../../experiment.module.css'
+import { userFacingErrorMessage } from '../../../../../utils/userFacingError'
 
 const ExperimentDetailPage: React.FC = () => {
   const { id } = useParams()
@@ -31,7 +32,7 @@ const ExperimentDetailPage: React.FC = () => {
       const instance = await api.experiment.createInstance(experiment.id, {})
       navigate(`/student/experiments/${experiment.id}/workspace?instanceId=${instance.instance_id}`)
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : '暂时无法创建实验实例，请稍后重试。')
+      setMessage(userFacingErrorMessage(error, '暂时无法创建实验实例，请稍后重试。'))
     } finally {
       setStarting(false)
     }

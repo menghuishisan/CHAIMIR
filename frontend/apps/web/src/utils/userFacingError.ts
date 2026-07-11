@@ -7,7 +7,8 @@ import type { ApiError } from '@chaimir/api-client'
  */
 export function userFacingErrorMessage(error: unknown, fallback: string): string {
   const apiError = error as Partial<ApiError> | null
-  const message = apiError?.message?.trim() || fallback
+  const isSdkError = Boolean(apiError && typeof apiError === 'object' && ('code' in apiError || 'status' in apiError || 'traceId' in apiError))
+  const message = isSdkError ? apiError?.message?.trim() || fallback : fallback
   const traceId = apiError?.traceId?.trim()
   return traceId ? `${message} 如需帮助，请提供编号 ${traceId}。` : message
 }

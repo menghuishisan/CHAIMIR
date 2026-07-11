@@ -6,6 +6,7 @@ import type {
   SimEvent,
   SimInitParams,
   SimPackageDescriptor,
+  SimState,
 } from '../types';
 import { fnv1aHex } from './deterministic';
 
@@ -13,6 +14,7 @@ type WorkerRequest =
   | { type: 'init'; requestId: number; moduleUrl?: string; builtinCode?: string; initParams: SimInitParams; seed: number }
   | { type: 'step'; requestId: number }
   | { type: 'inject'; requestId: number; eventType: string; payload: JsonObject; target?: string }
+  | { type: 'sync-state'; requestId: number; tick: number; state: SimState }
   | { type: 'back'; requestId: number }
   | { type: 'reset'; requestId: number };
 
@@ -123,6 +125,13 @@ export class SimWorkerClient {
    */
   async inject(eventType: string, payload: JsonObject = {}, target?: string): Promise<void> {
     await this.post({ type: 'inject', requestId: 0, eventType, payload, target });
+  }
+
+  /**
+   * syncState 把受信任后端适配器返回的模型状态交给 Worker 生成统一渲染快照。
+   */
+  async syncState(tick: number, state: SimState): Promise<void> {
+    await this.post({ type: 'sync-state', requestId: 0, tick, state });
   }
 
   /**

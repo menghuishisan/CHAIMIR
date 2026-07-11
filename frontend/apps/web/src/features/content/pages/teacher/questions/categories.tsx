@@ -1,14 +1,15 @@
 // TeacherQuestionCategoriesPage 维护内容中心分类树，调用 content 分类接口。
 
 import React, { useCallback, useMemo, useState } from 'react'
-import type { ApiError, ContentCategory } from '@chaimir/api-client'
+import type { ContentCategory } from '@chaimir/api-client'
 import type { TableColumn } from '@chaimir/ui'
 import { Button, Callout, Input, Select, Table } from '@chaimir/ui'
-import { FolderTree, Plus, RefreshCw } from 'lucide-react'
+import { FolderTree, Pencil, Plus, RefreshCw, Trash2 } from 'lucide-react'
 import { api } from '../../../../../app/api'
 import { ErrorState, LoadingState } from '../../../../../components/ResourceState'
 import { useAsyncResource } from '../../../../../hooks'
 import styles from '../../content.module.css'
+import { userFacingErrorMessage } from '../../../../../utils/userFacingError'
 
 const TeacherQuestionCategoriesPage: React.FC = () => {
   const resource = useAsyncResource(() => api.content.listCategories(), [])
@@ -18,6 +19,7 @@ const TeacherQuestionCategoriesPage: React.FC = () => {
   const [submitting, setSubmitting] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [editingId, setEditingId] = useState('')
 
   const parentOptions = useMemo(() => [
     { value: '0', label: '顶级分类' },
@@ -25,33 +27,50 @@ const TeacherQuestionCategoriesPage: React.FC = () => {
   ], [resource.data])
 
   /**
-   * handleCreate 创建新分类。
+   * handleSave 创建或更新分类。
    */
-  const handleCreate = useCallback(async () => {
+  const handleSave = useCallback(async () => {
     setSubmitting(true)
     setError(null)
     setMessage(null)
     try {
-      await api.content.createCategory({
+      const payload = {
         parent_id: Number(parentId),
         name: name.trim(),
         sort: Number(sort),
-      })
+      }
+      if (editingId) await api.content.updateCategory(editingId, payload)
+      else await api.content.createCategory(payload)
       setName('')
-      setMessage('分类已创建。')
+      setEditingId('')
+      setMessage(editingId ? '分类已更新。' : '分类已创建。')
       resource.reload()
     } catch (createError) {
-      setError((createError as ApiError).message || '分类创建失败，请稍后重试。')
+      setError(userFacingErrorMessage(createError, '分类保存失败，请稍后重试。'))
     } finally {
       setSubmitting(false)
     }
-  }, [name, parentId, resource, sort])
+  }, [editingId, name, parentId, resource, sort])
+
+  /** deleteCategory 删除未被资源或子分类引用的分类。 */
+  const deleteCategory = useCallback(async (category: ContentCategory) => {
+    if (!window.confirm(`确定删除分类“${category.name}”吗？`)) return
+    setError(null)
+    try {
+      await api.content.deleteCategory(String(category.id))
+      setMessage('分类已删除。')
+      resource.reload()
+    } catch (actionError) {
+      setError(userFacingErrorMessage(actionError, '分类删除失败，请先处理其下资源。'))
+    }
+  }, [resource])
 
   const columns = useMemo<TableColumn<ContentCategory>[]>(() => [
     { key: 'name', title: '分类名称', dataIndex: 'name', priority: 'primary' },
     { key: 'parent', title: '上级分类', render: (row) => row.parent_id ? String(row.parent_id) : '顶级' },
     { key: 'sort', title: '排序', dataIndex: 'sort' },
-  ], [])
+    { key: 'actions', title: '操作', render: (row) => <div className={styles.actions}><Button variant="outline" size="sm" icon={<Pencil size={14} />} onClick={() => { setEditingId(String(row.id)); setName(row.name); setParentId(String(row.parent_id || 0)); setSort(String(row.sort)) }}>编辑</Button><Button variant="ghost" size="sm" icon={<Trash2 size={14} />} onClick={() => void deleteCategory(row)}>删除</Button></div> },
+  ], [deleteCategory])
 
   const rows = resource.data || []
 
@@ -72,7 +91,7 @@ const TeacherQuestionCategoriesPage: React.FC = () => {
       {message && <Callout variant="success" title="保存成功">{message}</Callout>}
 
       <section className={styles.panel}>
-        <h2>新建分类</h2>
+        <h2>{editingId ? '编辑分类' : '新建分类'}</h2>
         <div className={styles.formGrid}>
           <label className={styles.field}>
             上级分类
@@ -87,7 +106,7 @@ const TeacherQuestionCategoriesPage: React.FC = () => {
             <Input fullWidth value={sort} onChange={(event) => setSort(event.target.value)} />
           </label>
         </div>
-        <Button loading={submitting} icon={<Plus size={16} />} onClick={handleCreate}>创建分类</Button>
+        <Button loading={submitting} icon={<Plus size={16} />} onClick={handleSave}>{editingId ? '保存分类' : '创建分类'}</Button>
       </section>
 
       {resource.status === 'error' && <ErrorState error={resource.error} onRetry={resource.reload} />}

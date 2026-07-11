@@ -1,16 +1,17 @@
 // ApprovalsPage 展示成绩审核列表，并调用 grade 后端审批接口。
 
 import React, { useCallback, useMemo, useState } from 'react'
-import type { ApiError, GradeReview } from '@chaimir/api-client'
+import type { GradeReview } from '@chaimir/api-client'
 import { GradeReviewStatus } from '@chaimir/api-client'
 import type { TableColumn } from '@chaimir/ui'
 import { Button, Callout, Select, Table } from '@chaimir/ui'
-import { CheckCircle, RefreshCw, XCircle } from 'lucide-react'
+import { CheckCircle, LockOpen, RefreshCw, XCircle } from 'lucide-react'
 import { api } from '../../../../../app/api'
 import { ErrorState, LoadingState } from '../../../../../components/ResourceState'
 import { useAsyncResource } from '../../../../../hooks'
 import styles from '../../grade.module.css'
 import { gradeReviewStatusFilterOptions, gradeReviewStatusLabel } from '../../../../../utils/index'
+import { userFacingErrorMessage } from '../../../../../utils/userFacingError'
 
 
 const ApprovalsPage: React.FC = () => {
@@ -31,7 +32,7 @@ const ApprovalsPage: React.FC = () => {
       setMessage(successMessage)
       resource.reload()
     } catch (actionError) {
-      setError((actionError as ApiError).message || '审核操作失败，请稍后重试。')
+      setError(userFacingErrorMessage(actionError, '审核操作失败，请稍后重试。'))
     }
   }, [resource])
 
@@ -47,6 +48,7 @@ const ApprovalsPage: React.FC = () => {
         <div className={styles.actions}>
           <Button variant="outline" size="sm" icon={<CheckCircle size={14} />} onClick={() => reviewAction(() => api.grade.approveReview(row.id, {}), '成绩审核已通过。')}>通过</Button>
           <Button variant="outline" size="sm" icon={<XCircle size={14} />} onClick={() => reviewAction(() => api.grade.rejectReview(row.id, { comment: '请教师修正后重新提交。' }), '成绩审核已驳回。')}>驳回</Button>
+          {row.is_locked && <Button variant="ghost" size="sm" icon={<LockOpen size={14} />} onClick={() => reviewAction(() => api.grade.unlockReview(row.id, { semester_id: row.semester_id, comment: '学校管理员解锁后重新核验。' }), '成绩审核已解锁。')}>解锁</Button>}
         </div>
       ),
     },

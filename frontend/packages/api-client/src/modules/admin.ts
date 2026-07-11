@@ -20,7 +20,6 @@ import type {
   Statistics,
   SystemConfig,
   TenantApplicationSummary,
-  TenantSummary,
 } from '../types/admin'
 import type { TransferTask } from '../types/transfer'
 
@@ -51,11 +50,6 @@ export class AdminApi {
   // getSchoolStatistics 读取当前学校统计快照。
   async getSchoolStatistics(params: { from: string; to: string }): Promise<Statistics[]> {
     return this.client.get('/admin/school/statistics', params)
-  }
-
-  // listTenants 读取平台租户摘要列表。
-  async listTenants(): Promise<TenantSummary[]> {
-    return this.client.get('/admin/platform/tenants')
   }
 
   // listApplications 读取学校入驻申请摘要列表。

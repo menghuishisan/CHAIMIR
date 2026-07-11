@@ -1,10 +1,10 @@
 // 教师实验编排页：把向导状态保存到后端实验定义，保证刷新和跨设备不丢失。
 
 import React, { useEffect, useMemo, useState } from 'react'
-import type { ComponentConfig, Experiment, ExperimentRequest, GroupConfig } from '@chaimir/api-client'
+import type { ComponentConfig, Experiment, ExperimentGroup, ExperimentRequest, GroupConfig } from '@chaimir/api-client'
 import { ExperimentCollabMode } from '@chaimir/api-client'
 import { Button, Checkbox, Input, Select, Textarea } from '@chaimir/ui'
-import { Compass, Save, Send } from 'lucide-react'
+import { Compass, Save, Send, Users } from 'lucide-react'
 import { useSearchParams } from 'react-router-dom'
 import { api } from '../../../../../app/api'
 import { EmptyState, ErrorState, LoadingState } from '../../../../../components/ResourceState'
@@ -12,6 +12,7 @@ import { useAsyncResource } from '../../../../../hooks/useAsyncResource'
 import { emptyExperimentComponents, defaultExperimentGroup } from '../../../config/orchestration'
 import styles from '../../experiment.module.css'
 import { experimentCollabModeOptions, parseJsonObject, stringifyJsonObject } from '../../../../../utils/index'
+import { userFacingErrorMessage } from '../../../../../utils/userFacingError'
 
 const TeacherExperimentOrchestrationPage: React.FC = () => {
   const [searchParams, setSearchParams] = useSearchParams()
@@ -31,6 +32,11 @@ const TeacherExperimentOrchestrationPage: React.FC = () => {
   const [componentsText, setComponentsText] = useState(stringifyJsonObject(emptyExperimentComponents))
   const [groupText, setGroupText] = useState(stringifyJsonObject(defaultExperimentGroup))
   const [message, setMessage] = useState('')
+  const [groupName, setGroupName] = useState('')
+  const [groupId, setGroupId] = useState('')
+  const [studentId, setStudentId] = useState('')
+  const [memberRole, setMemberRole] = useState('member')
+  const [group, setGroup] = useState<ExperimentGroup>()
 
   const resource = useAsyncResource(
     async () => {
@@ -74,7 +80,7 @@ const TeacherExperimentOrchestrationPage: React.FC = () => {
       setSearchParams({ id: saved.id }, { replace: true })
       setMessage('实验编排已保存到服务端。')
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : '暂时无法保存实验编排。')
+      setMessage(userFacingErrorMessage(error, '暂时无法保存实验编排。'))
     }
   }
 
@@ -94,7 +100,34 @@ const TeacherExperimentOrchestrationPage: React.FC = () => {
       setMessage('实验已发布，学生端可进入。')
       resource.reload()
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : '暂时无法发布实验。')
+      setMessage(userFacingErrorMessage(error, '暂时无法发布实验。'))
+    }
+  }
+
+  /** createGroup 为协作实验创建服务端小组并读取完整小组状态。 */
+  const createGroup = async () => {
+    if (!id || !groupName.trim()) return
+    setMessage('')
+    try {
+      const created = await api.experiment.createGroup(id, { name: groupName.trim() })
+      setGroupId(created.id)
+      setGroup(await api.experiment.getGroup(created.id))
+      setMessage('实验小组已创建。')
+    } catch (error) {
+      setMessage(userFacingErrorMessage(error, '实验小组创建失败，请稍后重试。'))
+    }
+  }
+
+  /** addGroupMember 把学生加入小组并刷新服务端权威成员列表。 */
+  const addGroupMember = async () => {
+    if (!groupId.trim() || !studentId.trim()) return
+    setMessage('')
+    try {
+      await api.experiment.upsertGroupMember(groupId.trim(), { student_id: Number(studentId), role: memberRole.trim() || 'member' })
+      setGroup(await api.experiment.getGroup(groupId.trim()))
+      setMessage('小组成员已保存。')
+    } catch (error) {
+      setMessage(userFacingErrorMessage(error, '小组成员保存失败，请检查学生编号后重试。'))
     }
   }
 
@@ -182,6 +215,23 @@ const TeacherExperimentOrchestrationPage: React.FC = () => {
           <p className={styles.muted}>组件配置会原样保存到后端实验定义，用于实例创建、阶段解锁、检查点判分和仿真会话绑定。</p>
         </aside>
       </div>
+      {id && form.collab_mode !== ExperimentCollabMode.SOLO && (
+        <section className={`${styles.panel} ${styles.section}`}>
+          <h2 className={styles.sectionTitle}><Users size={18} />协作小组</h2>
+          <div className={styles.formGrid}>
+            <label className={styles.field}>小组名称<Input fullWidth value={groupName} onChange={(event) => setGroupName(event.target.value)} /></label>
+            <label className={styles.field}>小组编号<Input fullWidth value={groupId} onChange={(event) => setGroupId(event.target.value)} /></label>
+            <label className={styles.field}>学生编号<Input fullWidth value={studentId} onChange={(event) => setStudentId(event.target.value)} /></label>
+            <label className={styles.field}>小组角色<Input fullWidth value={memberRole} onChange={(event) => setMemberRole(event.target.value)} /></label>
+          </div>
+          <div className={styles.actions}>
+            <Button variant="outline" onClick={() => void createGroup()}>创建小组</Button>
+            <Button onClick={() => void addGroupMember()}>保存成员</Button>
+            <Button variant="ghost" disabled={!groupId.trim()} onClick={() => void api.experiment.getGroup(groupId.trim()).then(setGroup).catch((error) => setMessage(userFacingErrorMessage(error, '暂时无法读取小组。')))}>刷新小组</Button>
+          </div>
+          {group && <p className={styles.muted}>{group.name}，当前 {group.members.length} 名成员。</p>}
+        </section>
+      )}
     </div>
   )
 }

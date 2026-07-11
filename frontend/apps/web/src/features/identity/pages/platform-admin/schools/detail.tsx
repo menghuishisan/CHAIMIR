@@ -1,15 +1,17 @@
 // SchoolDetailPage 展示平台租户详情，数据来自 identity 平台租户接口。
 
-import React from 'react'
+import React, { useEffect, useState } from 'react'
 import type { Tenant } from '@chaimir/api-client'
-import { Button } from '@chaimir/ui'
-import { Info, RefreshCw } from 'lucide-react'
+import { TenantStatus } from '@chaimir/api-client'
+import { Button, Callout, Input, Select } from '@chaimir/ui'
+import { Info, RefreshCw, Save } from 'lucide-react'
 import { useParams } from 'react-router-dom'
 import { api } from '../../../../../app/api'
 import { EmptyState, ErrorState, LoadingState } from '../../../../../components/ResourceState'
 import { useAsyncResource } from '../../../../../hooks'
 import styles from '../../../../admin/pages/dashboard.module.css'
 import { authModeLabel, deployModeLabel, formatDateTime, tenantStatusLabel } from '../../../../../utils/index'
+import { userFacingErrorMessage } from '../../../../../utils/userFacingError'
 
 
 /**
@@ -23,6 +25,29 @@ const SchoolDetailPage: React.FC = () => {
     () => !id
   )
   const tenant = resource.data
+  const [status, setStatus] = useState(String(TenantStatus.ACTIVE))
+  const [expireAt, setExpireAt] = useState('')
+  const [message, setMessage] = useState('')
+  const [error, setError] = useState('')
+
+  useEffect(() => {
+    if (!tenant) return
+    setStatus(String(tenant.status))
+    setExpireAt(tenant.expire_at?.slice(0, 10) || '')
+  }, [tenant])
+
+  /** updateTenant 保存平台控制的租户状态和到期时间。 */
+  const updateTenant = async () => {
+    if (!id) return
+    setError('')
+    try {
+      await api.identity.updateTenant(id, { status: Number(status) as TenantStatus, expire_at: expireAt || undefined })
+      setMessage('租户状态已更新。')
+      resource.reload()
+    } catch (actionError) {
+      setError(userFacingErrorMessage(actionError, '租户状态更新失败，请稍后重试。'))
+    }
+  }
 
   return (
     <div className={styles.page}>
@@ -35,6 +60,9 @@ const SchoolDetailPage: React.FC = () => {
           刷新
         </Button>
       </div>
+
+      {message && <Callout variant="success" title="操作完成">{message}</Callout>}
+      {error && <Callout variant="danger" title="操作未完成">{error}</Callout>}
 
       {resource.status === 'loading' && <LoadingState title="正在获取租户详情" />}
       {resource.status === 'error' && (
@@ -83,6 +111,14 @@ const SchoolDetailPage: React.FC = () => {
                 <span className={styles.metricLabel}>租户编号</span>
                 <span className={styles.metricValue}>{tenant.id}</span>
               </div>
+            </div>
+          </section>
+          <section className={styles.panel}>
+            <h2 className={styles.panelTitle}>状态维护</h2>
+            <div className={styles.metricsList}>
+              <Select value={status} onChange={setStatus} options={[{ value: '1', label: '正常' }, { value: '2', label: '停用' }, { value: '3', label: '已到期' }]} />
+              <Input type="date" value={expireAt} onChange={(event) => setExpireAt(event.target.value)} />
+              <Button icon={<Save size={15} />} onClick={() => void updateTenant()}>保存状态</Button>
             </div>
           </section>
         </>

@@ -1,7 +1,7 @@
 // SchoolsPage 展示平台租户列表，数据来自 admin 平台租户接口。
 
 import React, { useMemo } from 'react'
-import type { TenantSummary } from '@chaimir/api-client'
+import type { Tenant } from '@chaimir/api-client'
 import type { TableColumn } from '@chaimir/ui'
 import { Button, Table } from '@chaimir/ui'
 import { Building, Eye, Gauge, RefreshCw } from 'lucide-react'
@@ -19,10 +19,10 @@ import { deployModeLabel, formatDateTime, tenantStatusLabel } from '../../../../
  */
 const SchoolsPage: React.FC = () => {
   const navigate = useNavigate()
-  const resource = useAsyncResource(() => api.admin.listTenants(), [])
-  const rows = resource.data || []
+  const resource = useAsyncResource(() => api.identity.getTenants({ page: 1, size: 100 }), [])
+  const rows = resource.data?.list || []
 
-  const columns = useMemo<TableColumn<TenantSummary>[]>(() => [
+  const columns = useMemo<TableColumn<Tenant>[]>(() => [
     { key: 'name', title: '学校名称', dataIndex: 'name', priority: 'primary' },
     { key: 'code', title: '代号', dataIndex: 'code', priority: 'secondary' },
     {
@@ -49,7 +49,7 @@ const SchoolsPage: React.FC = () => {
             variant="outline"
             size="sm"
             icon={<Gauge size={14} />}
-            onClick={() => navigate(`/platform-admin/schools/${row.tenant_id}/quotas`)}
+            onClick={() => navigate(`/platform-admin/schools/${row.id}/quotas`)}
           >
             配额
           </Button>
@@ -57,7 +57,7 @@ const SchoolsPage: React.FC = () => {
             variant="secondary"
             size="sm"
             icon={<Eye size={14} />}
-            onClick={() => navigate(`/platform-admin/schools/${row.tenant_id}`)}
+            onClick={() => navigate(`/platform-admin/schools/${row.id}`)}
           >
             详情
           </Button>
@@ -90,7 +90,7 @@ const SchoolsPage: React.FC = () => {
           <Table
             columns={columns}
             rows={rows}
-            rowKey="tenant_id"
+            rowKey="id"
             emptyTitle="暂无学校"
             emptyDescription="当前还没有已入驻的学校租户。"
             ariaLabel="平台学校租户列表"

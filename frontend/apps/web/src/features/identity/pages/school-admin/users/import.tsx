@@ -1,7 +1,7 @@
 // UserImportPage 处理账号批量导入，预览与提交状态以后端 preview_id 为准。
 
 import React, { useCallback, useMemo, useState } from 'react'
-import type { ApiError, ImportRowResult } from '@chaimir/api-client'
+import type { ImportRowResult } from '@chaimir/api-client'
 import { IMPORT_TEMPLATE_FORMAT } from '@chaimir/api-client'
 import type { TableColumn } from '@chaimir/ui'
 import { Button, Callout, Select, Table } from '@chaimir/ui'
@@ -9,6 +9,7 @@ import { Download, Upload } from 'lucide-react'
 import { api } from '../../../../../app/api'
 import styles from '../../identity-admin.module.css'
 import { accountImportTargetOptions } from '../../../../../utils/index'
+import { userFacingErrorMessage } from '../../../../../utils/userFacingError'
 
 const UserImportPage: React.FC = () => {
   const [targetType, setTargetType] = useState<'student' | 'teacher'>('student')
@@ -35,7 +36,7 @@ const UserImportPage: React.FC = () => {
       anchor.click()
       URL.revokeObjectURL(url)
     } catch (templateError) {
-      setError((templateError as ApiError).message || '模板下载失败，请稍后重试。')
+      setError(userFacingErrorMessage(templateError, '模板下载失败，请稍后重试。'))
     } finally {
       setSubmitting(null)
     }
@@ -58,7 +59,7 @@ const UserImportPage: React.FC = () => {
       setSummary({ total: preview.total, valid: preview.valid, invalid: preview.invalid })
       setRows(preview.rows)
     } catch (previewError) {
-      setError((previewError as ApiError).message || '导入预览失败，请检查文件内容。')
+      setError(userFacingErrorMessage(previewError, '导入预览失败，请检查文件内容。'))
     } finally {
       setSubmitting(null)
     }
@@ -79,7 +80,7 @@ const UserImportPage: React.FC = () => {
       setActivationCodes((result.activation_codes || []).map((item) => `${item.no} ${item.name} ${item.activation_code}`))
       setSummary({ total: result.batch.total, valid: result.batch.success, invalid: result.batch.failed })
     } catch (commitError) {
-      setError((commitError as ApiError).message || '提交导入失败，请稍后重试。')
+      setError(userFacingErrorMessage(commitError, '提交导入失败，请稍后重试。'))
     } finally {
       setSubmitting(null)
     }

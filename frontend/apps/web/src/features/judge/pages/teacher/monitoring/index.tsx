@@ -1,24 +1,38 @@
 // TeacherMonitoringPage 展示判题任务队列，并提供重判入口。
 
 import React, { useCallback, useMemo, useState } from 'react'
-import type { ApiError, JudgeTask } from '@chaimir/api-client'
+import type { JudgeTask } from '@chaimir/api-client'
 import type { TableColumn } from '@chaimir/ui'
-import { Button, Callout, Input, Table } from '@chaimir/ui'
-import { Activity, RefreshCw, RotateCw } from 'lucide-react'
+import { Button, Callout, Checkbox, Input, Modal, Table, Textarea } from '@chaimir/ui'
+import { Activity, Eye, RefreshCw, RotateCw, Save } from 'lucide-react'
 import { api } from '../../../../../app/api'
 import { ErrorState, LoadingState } from '../../../../../components/ResourceState'
-import { useAsyncResource } from '../../../../../hooks'
+import { useAsyncResource, useTicketedWebSocket } from '../../../../../hooks'
 import styles from '../../judge.module.css'
+import { userFacingErrorMessage } from '../../../../../utils/userFacingError'
 
 const TeacherMonitoringPage: React.FC = () => {
   const [sourceRef, setSourceRef] = useState('')
   const [message, setMessage] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [selectedTask, setSelectedTask] = useState<JudgeTask | null>(null)
+  const [score, setScore] = useState('0')
+  const [maxScore, setMaxScore] = useState('100')
+  const [passed, setPassed] = useState(false)
+  const [comment, setComment] = useState('')
   const resource = useAsyncResource(() => api.judge.getTasks({
     source_ref: sourceRef || undefined,
     page: 1,
     size: 20,
   }), [sourceRef])
+  const progressUrl = selectedTask ? api.judge.getProgressWsUrl(selectedTask.task_id) : null
+  const progress = useTicketedWebSocket({
+    url: progressUrl,
+    onMessage: useCallback(() => {
+      if (!selectedTask) return
+      void api.judge.getTask(selectedTask.task_id).then(setSelectedTask).catch((taskError) => setError(userFacingErrorMessage(taskError, '判题进度刷新失败，请稍后重试。')))
+    }, [selectedTask]),
+  })
 
   /**
    * rejudgeTask 按原始快照触发后端重判。
@@ -31,9 +45,32 @@ const TeacherMonitoringPage: React.FC = () => {
       setMessage('重判任务已提交。')
       resource.reload()
     } catch (actionError) {
-      setError((actionError as ApiError).message || '重判任务提交失败，请稍后重试。')
+      setError(userFacingErrorMessage(actionError, '重判任务提交失败，请稍后重试。'))
     }
   }, [resource])
+
+  /** openTask 读取判题任务完整结果并开启实时进度订阅。 */
+  const openTask = useCallback(async (taskId: string) => {
+    setError(null)
+    try {
+      setSelectedTask(await api.judge.getTask(taskId))
+    } catch (taskError) {
+      setError(userFacingErrorMessage(taskError, '判题任务读取失败，请稍后重试。'))
+    }
+  }, [])
+
+  /** submitManualScore 提交教师人工评分并刷新任务详情。 */
+  const submitManualScore = async () => {
+    if (!selectedTask || !comment.trim()) return
+    setError(null)
+    try {
+      setSelectedTask(await api.judge.manualScore(selectedTask.task_id, { score: Number(score), max_score: Number(maxScore), passed, comment: comment.trim() }))
+      setMessage('人工评分已保存。')
+      resource.reload()
+    } catch (scoreError) {
+      setError(userFacingErrorMessage(scoreError, '人工评分保存失败，请检查分数后重试。'))
+    }
+  }
 
   const columns = useMemo<TableColumn<JudgeTask>[]>(() => [
     { key: 'task', title: '任务编号', dataIndex: 'task_id', priority: 'primary' },
@@ -44,9 +81,9 @@ const TeacherMonitoringPage: React.FC = () => {
     {
       key: 'actions',
       title: '操作',
-      render: (row) => <Button variant="outline" size="sm" icon={<RotateCw size={14} />} onClick={() => rejudgeTask(row.task_id)}>重判</Button>,
+      render: (row) => <div className={styles.actions}><Button variant="outline" size="sm" icon={<Eye size={14} />} onClick={() => void openTask(row.task_id)}>查看</Button><Button variant="ghost" size="sm" icon={<RotateCw size={14} />} onClick={() => rejudgeTask(row.task_id)}>重判</Button></div>,
     },
-  ], [rejudgeTask])
+  ], [openTask, rejudgeTask])
 
   const rows = resource.data?.list || []
 
@@ -71,6 +108,22 @@ const TeacherMonitoringPage: React.FC = () => {
           <Table columns={columns} rows={rows} rowKey="task_id" emptyTitle="暂无判题任务" emptyDescription="当前筛选范围内没有判题任务。" ariaLabel="判题任务监控列表" />
         </div>
       )}
+      <Modal open={selectedTask !== null} title="判题任务详情" size="lg" onClose={() => setSelectedTask(null)}>
+        {selectedTask && (
+          <div className={styles.panel}>
+            <span className={styles.status}>{progress.status === 'open' ? '实时进度已连接' : selectedTask.status}</span>
+            <p>任务 {selectedTask.task_id}</p>
+            <p>{selectedTask.result ? `当前得分 ${selectedTask.result.score}/${selectedTask.result.max_score}` : '正在等待判题结果。'}</p>
+            <div className={styles.formGrid}>
+              <label className={styles.field}>得分<Input fullWidth type="number" value={score} onChange={(event) => setScore(event.target.value)} /></label>
+              <label className={styles.field}>满分<Input fullWidth type="number" value={maxScore} onChange={(event) => setMaxScore(event.target.value)} /></label>
+              <Checkbox checked={passed} onChange={(event) => setPassed(event.target.checked)}>判定通过</Checkbox>
+            </div>
+            <label className={styles.field}>评分说明<Textarea fullWidth value={comment} onChange={(event) => setComment(event.target.value)} /></label>
+            <Button icon={<Save size={14} />} onClick={() => void submitManualScore()}>保存人工评分</Button>
+          </div>
+        )}
+      </Modal>
     </div>
   )
 }

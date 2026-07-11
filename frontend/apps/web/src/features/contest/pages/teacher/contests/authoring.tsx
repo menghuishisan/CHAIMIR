@@ -10,6 +10,7 @@ import { ErrorState, LoadingState } from '../../../../../components/ResourceStat
 import { useAsyncResource } from '../../../../../hooks/useAsyncResource'
 import styles from '../../contest.module.css'
 import { parseJsonObject } from '../../../../../utils/index'
+import { userFacingErrorMessage } from '../../../../../utils/userFacingError'
 
 const TeacherContestAuthoringPage: React.FC = () => {
   const { id } = useParams()
@@ -43,7 +44,7 @@ const TeacherContestAuthoringPage: React.FC = () => {
       setMessage('题目已保存。')
       resource.reload()
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : '暂时无法保存题目，请检查配置格式。')
+      setMessage(userFacingErrorMessage(error, '暂时无法保存题目，请检查配置格式。'))
     }
   }
 

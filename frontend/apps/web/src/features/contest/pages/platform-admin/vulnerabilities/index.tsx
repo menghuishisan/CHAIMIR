@@ -10,6 +10,7 @@ import { ErrorState, LoadingState } from '../../../../../components/ResourceStat
 import { useAsyncResource } from '../../../../../hooks/useAsyncResource'
 import styles from '../../contest.module.css'
 import { parseJsonObject, vulnLevelOptions } from '../../../../../utils/index'
+import { userFacingErrorMessage } from '../../../../../utils/userFacingError'
 
 const PlatformVulnerabilitiesPage: React.FC = () => {
   const [sourceId, setSourceId] = useState('')
@@ -37,7 +38,7 @@ const PlatformVulnerabilitiesPage: React.FC = () => {
       setMessage('漏洞源配置已保存。')
       resource.reload()
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : '暂时无法保存漏洞源，请检查配置格式。')
+      setMessage(userFacingErrorMessage(error, '暂时无法保存漏洞源，请检查配置格式。'))
     }
   }
 
@@ -49,7 +50,7 @@ const PlatformVulnerabilitiesPage: React.FC = () => {
       setMessage(`同步完成，返回 ${problems.length} 条漏洞题草稿。`)
       resource.reload()
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : '暂时无法同步漏洞源。')
+      setMessage(userFacingErrorMessage(error, '暂时无法同步漏洞源。'))
     }
   }
 

@@ -1,7 +1,7 @@
 // TeacherGradesPage 展示教师成绩报送记录，并通过后端提交新的成绩审核。
 
 import React, { useCallback, useMemo, useState } from 'react'
-import type { ApiError, GradeReview } from '@chaimir/api-client'
+import type { GradeReview } from '@chaimir/api-client'
 import type { TableColumn } from '@chaimir/ui'
 import { Button, Callout, Input, Table, Textarea } from '@chaimir/ui'
 import { Calculator, HelpCircle, RefreshCw, Send } from 'lucide-react'
@@ -11,6 +11,7 @@ import { ErrorState, LoadingState } from '../../../../../components/ResourceStat
 import { useAsyncResource } from '../../../../../hooks'
 import styles from '../../grade.module.css'
 import { formatDateTime, gradeReviewStatusLabel } from '../../../../../utils/index'
+import { userFacingErrorMessage } from '../../../../../utils/userFacingError'
 
 
 const TeacherGradesPage: React.FC = () => {
@@ -42,7 +43,7 @@ const TeacherGradesPage: React.FC = () => {
       setMessage('成绩审核已提交。')
       resource.reload()
     } catch (actionError) {
-      setError((actionError as ApiError).message || '成绩审核提交失败，请稍后重试。')
+      setError(userFacingErrorMessage(actionError, '成绩审核提交失败，请稍后重试。'))
     } finally {
       setSubmitting(false)
     }

@@ -10,6 +10,7 @@ import { ErrorState, LoadingState } from '../../../../../components/ResourceStat
 import { useAsyncResource } from '../../../../../hooks'
 import styles from '../../teaching.module.css'
 import { courseStatusLabel, courseStatusOptions, withAllOption } from '../../../../../utils/index'
+import { CourseLifecycleActions } from './CourseLifecycleActions'
 
 
 const TeacherCoursesPage: React.FC = () => {
@@ -59,6 +60,7 @@ const TeacherCoursesPage: React.FC = () => {
                 <Button variant="outline" size="sm" icon={<Edit size={14} />} onClick={() => navigate(`/teacher/courses/${course.id}/outline`)}>大纲</Button>
                 <Button variant="outline" size="sm" icon={<Users size={14} />} onClick={() => navigate(`/teacher/courses/${course.id}/members`)}>成员</Button>
                 <Button variant="ghost" size="sm" onClick={() => navigate(`/teacher/courses/edit?id=${course.id}`)}>编辑</Button>
+                <CourseLifecycleActions course={course} onChanged={resource.reload} />
               </div>
             </article>
           ))}

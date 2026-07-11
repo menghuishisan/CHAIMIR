@@ -10,6 +10,7 @@ import { api } from '../../../../../app/api'
 import { ErrorState, LoadingState } from '../../../../../components/ResourceState'
 import { useAsyncResource } from '../../../../../hooks/useAsyncResource'
 import styles from '../../contest.module.css'
+import { userFacingErrorMessage } from '../../../../../utils/userFacingError'
 
 const TeacherVulnerabilitiesPage: React.FC = () => {
   const navigate = useNavigate()
@@ -34,7 +35,7 @@ const TeacherVulnerabilitiesPage: React.FC = () => {
       setMessage('预验证已提交。')
       resource.reload()
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : '暂时无法提交预验证。')
+      setMessage(userFacingErrorMessage(error, '暂时无法提交预验证。'))
     }
   }
 
@@ -45,7 +46,7 @@ const TeacherVulnerabilitiesPage: React.FC = () => {
       setMessage('漏洞题已固化到题库。')
       resource.reload()
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : '暂时无法固化漏洞题。')
+      setMessage(userFacingErrorMessage(error, '暂时无法固化漏洞题。'))
     }
   }
 

@@ -1,7 +1,6 @@
 // AssignmentPage 展示学生作业详情，保存服务端草稿并提交作答。
 
 import React, { useCallback, useEffect, useState } from 'react'
-import type { ApiError } from '@chaimir/api-client'
 import { Button, Callout, Textarea } from '@chaimir/ui'
 import { Save, Send } from 'lucide-react'
 import { useNavigate, useParams } from 'react-router-dom'
@@ -10,6 +9,7 @@ import { ErrorState, LoadingState } from '../../../../../components/ResourceStat
 import { useAsyncResource } from '../../../../../hooks'
 import styles from '../../teaching.module.css'
 import { formatDateTime } from '../../../../../utils/index'
+import { userFacingErrorMessage } from '../../../../../utils/userFacingError'
 
 const AssignmentPage: React.FC = () => {
   const navigate = useNavigate()
@@ -44,7 +44,7 @@ const AssignmentPage: React.FC = () => {
       setMessage('草稿已保存。')
       resource.reload()
     } catch (actionError) {
-      setError((actionError as ApiError).message || '草稿保存失败，请稍后重试。')
+      setError(userFacingErrorMessage(actionError, '草稿保存失败，请稍后重试。'))
     }
   }, [assignmentId, content, resource])
 
@@ -58,7 +58,7 @@ const AssignmentPage: React.FC = () => {
       await api.teaching.submitAssignment(assignmentId, { content_ref: { answer: content } })
       navigate(`/student/courses/assignment/${assignmentId}/result`)
     } catch (actionError) {
-      setError((actionError as ApiError).message || '作业提交失败，请稍后重试。')
+      setError(userFacingErrorMessage(actionError, '作业提交失败，请稍后重试。'))
     }
   }, [assignmentId, content, navigate])
 

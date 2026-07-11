@@ -1,16 +1,17 @@
 // TeacherCourseMembersPage 展示课程成员，并调用后端成员管理接口移除学生。
 
 import React, { useCallback, useMemo, useState } from 'react'
-import type { ApiError, CourseMember } from '@chaimir/api-client'
+import type { CourseMember } from '@chaimir/api-client'
 import type { TableColumn } from '@chaimir/ui'
-import { Button, Callout, Table } from '@chaimir/ui'
-import { RefreshCw, Trash2, Users } from 'lucide-react'
+import { Button, Callout, Input, Table } from '@chaimir/ui'
+import { Plus, RefreshCw, Trash2, Users } from 'lucide-react'
 import { useParams } from 'react-router-dom'
 import { api } from '../../../../../app/api'
 import { EmptyState, ErrorState, LoadingState } from '../../../../../components/ResourceState'
 import { useAsyncResource } from '../../../../../hooks'
 import styles from '../../teaching.module.css'
 import { formatDateTime, joinModeLabel } from '../../../../../utils/index'
+import { userFacingErrorMessage } from '../../../../../utils/userFacingError'
 
 
 const TeacherCourseMembersPage: React.FC = () => {
@@ -18,6 +19,7 @@ const TeacherCourseMembersPage: React.FC = () => {
   const resource = useAsyncResource(() => api.teaching.listMembers(String(id), { page: 1, size: 50 }), [id])
   const [message, setMessage] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [studentIds, setStudentIds] = useState('')
 
   /**
    * removeMember 移除课程成员。
@@ -31,9 +33,28 @@ const TeacherCourseMembersPage: React.FC = () => {
       setMessage('成员已移除。')
       resource.reload()
     } catch (removeError) {
-      setError((removeError as ApiError).message || '成员移除失败，请稍后重试。')
+      setError(userFacingErrorMessage(removeError, '成员移除失败，请稍后重试。'))
     }
   }, [id, resource])
+
+  /** addMembers 批量添加输入的学生编号并刷新名册。 */
+  const addMembers = async () => {
+    if (!id) return
+    const ids = Array.from(new Set(studentIds.split(',').map((value) => Number(value.trim())).filter((value) => Number.isInteger(value) && value > 0)))
+    if (!ids.length) {
+      setError('请填写有效的学生编号。')
+      return
+    }
+    setError(null)
+    try {
+      await api.teaching.addMembers(id, { student_ids: ids })
+      setStudentIds('')
+      setMessage('成员已添加。')
+      resource.reload()
+    } catch (actionError) {
+      setError(userFacingErrorMessage(actionError, '成员添加失败，请检查学生编号。'))
+    }
+  }
 
   const columns = useMemo<TableColumn<CourseMember>[]>(() => [
     { key: 'student', title: '学生编号', render: (row) => String(row.student_id), priority: 'primary' },
@@ -69,6 +90,14 @@ const TeacherCourseMembersPage: React.FC = () => {
 
       {error && <div className={styles.error}>{error}</div>}
       {message && <Callout variant="success" title="操作成功">{message}</Callout>}
+
+      <section className={styles.panel}>
+        <h2>添加学生</h2>
+        <div className={styles.actions}>
+          <Input value={studentIds} onChange={(event) => setStudentIds(event.target.value)} placeholder="多个学生编号用逗号分隔" />
+          <Button icon={<Plus size={15} />} onClick={() => void addMembers()}>添加成员</Button>
+        </div>
+      </section>
 
       {resource.status === 'error' && <ErrorState error={resource.error} onRetry={resource.reload} />}
       {resource.status === 'loading' && <LoadingState title="正在获取课程成员" />}

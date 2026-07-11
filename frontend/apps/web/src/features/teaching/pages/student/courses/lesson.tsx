@@ -1,7 +1,6 @@
 // LessonPage 展示单个课时内容，并把学习完成状态上报到 teaching 后端。
 
 import React, { useCallback, useMemo, useState } from 'react'
-import type { ApiError } from '@chaimir/api-client'
 import { ProgressStatus } from '@chaimir/api-client'
 import { Button, Callout } from '@chaimir/ui'
 import { CheckCircle, RefreshCw } from 'lucide-react'
@@ -10,6 +9,7 @@ import { api } from '../../../../../app/api'
 import { EmptyState, ErrorState, LoadingState } from '../../../../../components/ResourceState'
 import { useAsyncResource } from '../../../../../hooks'
 import styles from '../../teaching.module.css'
+import { userFacingErrorMessage } from '../../../../../utils/userFacingError'
 
 const LessonPage: React.FC = () => {
   const { lessonId } = useParams()
@@ -38,7 +38,7 @@ const LessonPage: React.FC = () => {
       })
       setMessage('学习进度已同步。')
     } catch (progressError) {
-      setError((progressError as ApiError).message || '进度同步失败，请稍后重试。')
+      setError(userFacingErrorMessage(progressError, '进度同步失败，请稍后重试。'))
     } finally {
       setSubmitting(false)
     }

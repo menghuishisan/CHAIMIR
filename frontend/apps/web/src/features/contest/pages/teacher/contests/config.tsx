@@ -12,6 +12,7 @@ import { useAsyncResource } from '../../../../../hooks/useAsyncResource'
 import { defaultContestRequest } from '../../../config/contest'
 import styles from '../../contest.module.css'
 import { contestModeOptions, formatDateTimeLocalInput, matchModeOptions, parseDateTimeLocalInput, parseJsonObject, teamModeOptions } from '../../../../../utils/index'
+import { userFacingErrorMessage } from '../../../../../utils/userFacingError'
 
 const TeacherContestConfigPage: React.FC = () => {
   const { id } = useParams()
@@ -56,7 +57,7 @@ const TeacherContestConfigPage: React.FC = () => {
       setMessage('竞赛配置已保存。')
       if (!id) navigate(`/teacher/contests/${saved.id}/config`, { replace: true })
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : '暂时无法保存竞赛配置。')
+      setMessage(userFacingErrorMessage(error, '暂时无法保存竞赛配置。'))
     }
   }
 

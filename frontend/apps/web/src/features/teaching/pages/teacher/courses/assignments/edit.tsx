@@ -1,7 +1,6 @@
 // TeacherCourseAssignmentEditPage 创建或更新课程作业，所有字段按 teaching 后端契约提交。
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
-import type { ApiError } from '@chaimir/api-client'
 import { GradingMode, LatePolicy } from '@chaimir/api-client'
 import { Button, Callout, Input, Select } from '@chaimir/ui'
 import { Edit3, Save, Send } from 'lucide-react'
@@ -11,6 +10,7 @@ import { ErrorState, LoadingState } from '../../../../../../components/ResourceS
 import { useAsyncResource } from '../../../../../../hooks'
 import styles from '../../../teaching.module.css'
 import { formatDateTimeLocalInput, gradingModeOptions, latePolicyOptions, parseDateTimeLocalInput } from '../../../../../../utils/index'
+import { userFacingErrorMessage } from '../../../../../../utils/userFacingError'
 
 const TeacherCourseAssignmentEditPage: React.FC = () => {
   const [searchParams] = useSearchParams()
@@ -87,7 +87,7 @@ const TeacherCourseAssignmentEditPage: React.FC = () => {
       setMessage(publish ? '作业已保存并发布。' : '作业已保存。')
       assignment.reload()
     } catch (actionError) {
-      setError((actionError as ApiError).message || '作业保存失败，请检查内容后重试。')
+      setError(userFacingErrorMessage(actionError, '作业保存失败，请检查内容后重试。'))
     } finally {
       setSaving(false)
       setPublishing(false)

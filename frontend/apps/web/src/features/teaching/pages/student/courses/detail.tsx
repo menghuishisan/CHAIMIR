@@ -1,22 +1,62 @@
 // CourseDetailPage 展示课程章节课时，数据来自 teaching 课程大纲接口。
 
-import React, { useMemo } from 'react'
+import React, { useCallback, useMemo, useState } from 'react'
 import { ProgressStatus } from '@chaimir/api-client'
-import { Button } from '@chaimir/ui'
-import { CheckCircle, FileText, Info, Play } from 'lucide-react'
+import { Button, Callout, FormField, Select, Textarea } from '@chaimir/ui'
+import { CheckCircle, FileText, Info, Play, Star } from 'lucide-react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { api } from '../../../../../app/api'
 import { EmptyState, ErrorState, LoadingState } from '../../../../../components/ResourceState'
 import { useAsyncResource } from '../../../../../hooks'
 import styles from '../../teaching.module.css'
+import { userFacingErrorMessage } from '../../../../../utils/userFacingError'
+
+const ratingOptions = [1, 2, 3, 4, 5].map((rating) => ({ value: String(rating), label: `${rating} 分` }))
 
 const CourseDetailPage: React.FC = () => {
   const navigate = useNavigate()
   const { id } = useParams()
-  const resource = useAsyncResource(() => api.teaching.getCourseOutline(String(id)), [id])
-  const outline = resource.data
+  const [rating, setRating] = useState('5')
+  const [comment, setComment] = useState('')
+  const [reviewing, setReviewing] = useState(false)
+  const [message, setMessage] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const resource = useAsyncResource(async () => {
+    const courseId = String(id || '')
+    if (!courseId) throw new Error('缺少课程编号。')
+    const [outline, progress] = await Promise.all([
+      api.teaching.getCourseOutline(courseId),
+      api.teaching.getMyProgress(courseId),
+    ])
+    return { outline, progress }
+  }, [id])
+  const outline = resource.data?.outline
 
-  const progressMap = useMemo(() => new Map((outline?.progress || []).map((item) => [item.lesson_id, item.status])), [outline])
+  const progressMap = useMemo(() => new Map((resource.data?.progress || []).map((item) => [item.lesson_id, item.status])), [resource.data?.progress])
+  const completedLessons = useMemo(
+    () => Array.from(progressMap.values()).filter((status) => status === ProgressStatus.DONE).length,
+    [progressMap],
+  )
+
+  /** handleReview 提交当前学生对课程的评价。 */
+  const handleReview = useCallback(async () => {
+    if (!id || !comment.trim()) {
+      setError('请填写课程评价内容。')
+      return
+    }
+    setReviewing(true)
+    setMessage(null)
+    setError(null)
+    try {
+      await api.teaching.reviewCourse(String(id), { rating: Number(rating), comment: comment.trim() })
+      setComment('')
+      setMessage('课程评价已提交。')
+    } catch (reviewError) {
+      setError(userFacingErrorMessage(reviewError, '课程评价提交失败，请稍后重试。'))
+    } finally {
+      setReviewing(false)
+    }
+  }, [comment, id, rating])
 
   if (!id) {
     return <EmptyState title="缺少课程信息" description="当前链接没有课程编号。" />
@@ -41,8 +81,23 @@ const CourseDetailPage: React.FC = () => {
           </h1>
           <p className={styles.subtitle}>{outline.course.description || '暂无课程简介'}</p>
         </div>
-        <Button onClick={() => navigate('/student/courses/assignment/1')}>查看课程作业</Button>
+        <span className={styles.muted}>已完成 {completedLessons}/{outline.lessons.length} 个课时</span>
       </div>
+
+      <section className={styles.panel}>
+        <h2><Star size={18} /> 课程评价</h2>
+        {error && <div className={styles.error} role="alert">{error}</div>}
+        {message && <Callout variant="success" title="提交成功">{message}</Callout>}
+        <div className={styles.toolbar}>
+          <FormField label="课程评分" htmlFor="course-rating" required>
+            <Select id="course-rating" value={rating} options={ratingOptions} onChange={setRating} />
+          </FormField>
+          <FormField label="评价内容" htmlFor="course-review" required>
+            <Textarea id="course-review" value={comment} rows={3} onChange={(event) => setComment(event.target.value)} />
+          </FormField>
+        </div>
+        <Button icon={<Star size={16} />} loading={reviewing} onClick={handleReview}>提交评价</Button>
+      </section>
 
       <div className={styles.outline}>
         {outline.chapters.map((chapter) => (

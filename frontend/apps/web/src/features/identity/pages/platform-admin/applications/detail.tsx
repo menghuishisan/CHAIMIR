@@ -1,7 +1,6 @@
 // ApplicationDetailPage 展示平台入驻申请详情，并调用后端完成通过或驳回。
 
 import React, { useCallback, useMemo, useState } from 'react'
-import type { ApiError } from '@chaimir/api-client'
 import { Button, Callout, DescriptionList, Input, Textarea } from '@chaimir/ui'
 import { CheckCircle2, FileCheck, RefreshCw, XCircle } from 'lucide-react'
 import { useParams } from 'react-router-dom'
@@ -10,6 +9,7 @@ import { EmptyState, ErrorState, LoadingState } from '../../../../../components/
 import { useAsyncResource } from '../../../../../hooks'
 import styles from './review.module.css'
 import { formatDateTime, tenantApplicationStatusLabel } from '../../../../../utils/index'
+import { userFacingErrorMessage } from '../../../../../utils/userFacingError'
 
 
 
@@ -51,7 +51,7 @@ const ApplicationDetailPage: React.FC = () => {
       setMessage(`已通过申请，租户 ${result.tenant.name} 已开通。${result.activation_code ? `激活码 ${result.activation_code}` : ''}`)
       resource.reload()
     } catch (approveError) {
-      setError((approveError as ApiError).message || '审核通过失败，请稍后重试。')
+      setError(userFacingErrorMessage(approveError, '审核通过失败，请稍后重试。'))
     } finally {
       setSubmitting(null)
     }
@@ -76,7 +76,7 @@ const ApplicationDetailPage: React.FC = () => {
       setMessage('申请已驳回，申请方可根据说明重新提交。')
       resource.reload()
     } catch (rejectError) {
-      setError((rejectError as ApiError).message || '驳回申请失败，请稍后重试。')
+      setError(userFacingErrorMessage(rejectError, '驳回申请失败，请稍后重试。'))
     } finally {
       setSubmitting(null)
     }

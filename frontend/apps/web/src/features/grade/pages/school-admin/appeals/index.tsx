@@ -1,7 +1,7 @@
 // AppealsPage 展示成绩申诉列表，并调用 grade 后端处理接口。
 
 import React, { useCallback, useMemo, useState } from 'react'
-import type { ApiError, GradeAppeal } from '@chaimir/api-client'
+import type { GradeAppeal } from '@chaimir/api-client'
 import { GradeAppealStatus } from '@chaimir/api-client'
 import type { TableColumn } from '@chaimir/ui'
 import { Button, Callout, Select, Table } from '@chaimir/ui'
@@ -11,6 +11,7 @@ import { ErrorState, LoadingState } from '../../../../../components/ResourceStat
 import { useAsyncResource } from '../../../../../hooks'
 import styles from '../../grade.module.css'
 import { gradeAppealStatusFilterOptions, gradeAppealStatusLabel } from '../../../../../utils/index'
+import { userFacingErrorMessage } from '../../../../../utils/userFacingError'
 
 const AppealsPage: React.FC = () => {
   const [status, setStatus] = useState('')
@@ -30,7 +31,7 @@ const AppealsPage: React.FC = () => {
       setMessage(successMessage)
       resource.reload()
     } catch (actionError) {
-      setError((actionError as ApiError).message || '申诉处理失败，请稍后重试。')
+      setError(userFacingErrorMessage(actionError, '申诉处理失败，请稍后重试。'))
     }
   }, [resource])
 

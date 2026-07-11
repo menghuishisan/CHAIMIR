@@ -1,7 +1,7 @@
 // TeacherExamsPage 展示内容中心试卷列表，并提供重新组卷入口。
 
 import React, { useCallback, useMemo, useState } from 'react'
-import type { ApiError, Paper } from '@chaimir/api-client'
+import type { Paper } from '@chaimir/api-client'
 import type { TableColumn } from '@chaimir/ui'
 import { Button, Callout, Table } from '@chaimir/ui'
 import { File, RefreshCw } from 'lucide-react'
@@ -11,6 +11,7 @@ import { ErrorState, LoadingState } from '../../../../../components/ResourceStat
 import { useAsyncResource } from '../../../../../hooks'
 import styles from '../../content.module.css'
 import { formatDateTime, paperModeLabel } from '../../../../../utils/index'
+import { userFacingErrorMessage } from '../../../../../utils/userFacingError'
 
 
 
@@ -31,7 +32,7 @@ const TeacherExamsPage: React.FC = () => {
       setMessage('试卷已重新组卷。')
       resource.reload()
     } catch (regenerateError) {
-      setError((regenerateError as ApiError).message || '重新组卷失败，请稍后重试。')
+      setError(userFacingErrorMessage(regenerateError, '重新组卷失败，请稍后重试。'))
     }
   }, [resource])
 

@@ -6,6 +6,7 @@ import { Button, Input } from '@chaimir/ui'
 import { Lock, UserPlus, Users } from 'lucide-react'
 import { useParams } from 'react-router-dom'
 import { api } from '../../../../../app/api'
+import { userFacingErrorMessage } from '../../../../../utils/userFacingError'
 import styles from '../../contest.module.css'
 
 const StudentContestApplyPage: React.FC = () => {
@@ -15,41 +16,57 @@ const StudentContestApplyPage: React.FC = () => {
   const [inviteCode, setInviteCode] = useState('')
   const [team, setTeam] = useState<ContestTeam | null>(null)
   const [message, setMessage] = useState('')
+  const [error, setError] = useState('')
 
   const signup = async () => {
     if (!id || !teamName.trim()) return
     setMessage('')
+    setError('')
     try {
       const result = await api.contest.signup(id, { team_name: teamName.trim() })
-      setTeam(result)
+      setTeam(await api.contest.getTeam(result.id))
       setTeamId(result.id)
       setMessage('报名已提交。')
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : '暂时无法提交报名。')
+    } catch (actionError) {
+      setError(userFacingErrorMessage(actionError, '暂时无法提交报名。'))
     }
   }
 
   const join = async () => {
     if (!teamId.trim() || !inviteCode.trim()) return
     setMessage('')
+    setError('')
     try {
       const result = await api.contest.joinTeam(teamId.trim(), { invite_code: inviteCode.trim() })
-      setTeam(result)
+      setTeam(await api.contest.getTeam(result.id))
       setMessage('已加入队伍。')
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : '暂时无法加入队伍。')
+    } catch (actionError) {
+      setError(userFacingErrorMessage(actionError, '暂时无法加入队伍。'))
     }
   }
 
   const lock = async () => {
     if (!teamId.trim()) return
     setMessage('')
+    setError('')
     try {
       const result = await api.contest.lockTeam(teamId.trim())
       setTeam(result)
       setMessage('队伍名单已锁定。')
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : '暂时无法锁定队伍。')
+    } catch (actionError) {
+      setError(userFacingErrorMessage(actionError, '暂时无法锁定队伍。'))
+    }
+  }
+
+  /** refreshTeam 按队伍编号读取服务端最新成员和锁定状态。 */
+  const refreshTeam = async () => {
+    if (!teamId.trim()) return
+    setError('')
+    try {
+      setTeam(await api.contest.getTeam(teamId.trim()))
+      setMessage('队伍信息已更新。')
+    } catch (actionError) {
+      setError(userFacingErrorMessage(actionError, '暂时无法读取队伍信息。'))
     }
   }
 
@@ -63,6 +80,7 @@ const StudentContestApplyPage: React.FC = () => {
         </h1>
       </div>
       {message && <p className={styles.message} role="status">{message}</p>}
+      {error && <p className={styles.message} role="alert">{error}</p>}
 
       <div className={styles.split}>
         <section className={`${styles.panel} ${styles.section}`}>
@@ -86,6 +104,7 @@ const StudentContestApplyPage: React.FC = () => {
           <div className={styles.actions}>
             <Button variant="outline" onClick={join}>加入队伍</Button>
             <Button variant="outline" icon={<Lock size={16} />} onClick={lock}>锁定名单</Button>
+            <Button variant="ghost" onClick={() => void refreshTeam()}>刷新队伍</Button>
           </div>
         </aside>
       </div>

@@ -1,7 +1,7 @@
 // AlertsPage 展示学业预警并触发后端预警扫描。
 
 import React, { useCallback, useMemo, useState } from 'react'
-import type { ApiError, GradeWarning } from '@chaimir/api-client'
+import type { GradeWarning } from '@chaimir/api-client'
 import type { TableColumn } from '@chaimir/ui'
 import { Button, Callout, Input, Table } from '@chaimir/ui'
 import { AlertTriangle, RefreshCw, Send } from 'lucide-react'
@@ -10,6 +10,7 @@ import { ErrorState, LoadingState } from '../../../../../components/ResourceStat
 import { useAsyncResource } from '../../../../../hooks'
 import styles from '../../grade.module.css'
 import { gradeWarningDetailLabel, gradeWarningStatusLabel, gradeWarningTypeLabel } from '../../../../../utils/index'
+import { userFacingErrorMessage } from '../../../../../utils/userFacingError'
 
 const AlertsPage: React.FC = () => {
   const [studentId, setStudentId] = useState('')
@@ -32,7 +33,7 @@ const AlertsPage: React.FC = () => {
       setMessage(`已扫描 ${result.scanned} 条记录，新增 ${result.created} 条预警。`)
       resource.reload()
     } catch (scanError) {
-      setError((scanError as ApiError).message || '预警扫描失败，请稍后重试。')
+      setError(userFacingErrorMessage(scanError, '预警扫描失败，请稍后重试。'))
     }
   }, [resource, studentId])
 

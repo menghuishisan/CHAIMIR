@@ -55,10 +55,41 @@ export function clearLoginTokens(): void {
 }
 
 /**
+ * getStoredRefreshToken 读取当前会话所在存储中的刷新令牌。
+ */
+export function getStoredRefreshToken(): string | null {
+  return window.localStorage.getItem(REFRESH_TOKEN_KEY)
+    || window.sessionStorage.getItem(REFRESH_TOKEN_KEY)
+}
+
+/**
+ * getStoredAccessToken 读取当前浏览器会话的访问令牌，仅用于决定是否进入受保护流程。
+ */
+export function getStoredAccessToken(): string | null {
+  return window.localStorage.getItem(ACCESS_TOKEN_KEY)
+    || window.sessionStorage.getItem(ACCESS_TOKEN_KEY)
+}
+
+/**
+ * persistRefreshedTokens 保持原有“保持登录”选择并替换后端签发的新令牌。
+ */
+export function persistRefreshedTokens(response: LoginResponse): void {
+  const remembered = window.localStorage.getItem(REFRESH_TOKEN_KEY) !== null
+  persistLoginTokens(response, remembered)
+}
+
+/**
  * loginEntryPath 把必须改密账号引导到安全拦截页，其余账号进入角色首个功能页。
  */
-export function loginEntryPath(response: LoginResponse): string {
-  return response.must_change_pwd ? '/auth/change-pwd' : roleEntryPath(response)
+export function loginEntryPath(response: LoginResponse, requestedPath?: unknown): string {
+  if (response.must_change_pwd) return '/auth/change-pwd'
+  return safeInternalPath(requestedPath) || roleEntryPath(response)
+}
+
+/** safeInternalPath 只接受站内绝对路径，阻止登录回跳被构造成外部地址。 */
+function safeInternalPath(value: unknown): string | null {
+  if (typeof value !== 'string' || !value.startsWith('/') || value.startsWith('//') || value.includes('\\')) return null
+  return value
 }
 
 /**

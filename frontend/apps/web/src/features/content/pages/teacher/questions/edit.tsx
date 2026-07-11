@@ -1,16 +1,17 @@
 // TeacherQuestionEditPage 创建、更新并发布内容中心题目全量版本。
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
-import type { ApiError } from '@chaimir/api-client'
+import type { ContentAttachmentUpload } from '@chaimir/api-client'
 import { ContentDifficulty, ContentType, ContentVisibility } from '@chaimir/api-client'
 import { Button, Callout, Input, Select, Textarea } from '@chaimir/ui'
-import { Edit2, EyeOff, Save, Send } from 'lucide-react'
+import { Download, Edit2, EyeOff, Paperclip, Save, Send } from 'lucide-react'
 import { useSearchParams } from 'react-router-dom'
 import { api } from '../../../../../app/api'
 import { ErrorState, LoadingState } from '../../../../../components/ResourceState'
 import { useAsyncResource } from '../../../../../hooks'
 import styles from '../../content.module.css'
 import { contentDifficultyOptions, contentTypeOptions, contentVisibilityOptions, parseJsonObject } from '../../../../../utils/index'
+import { userFacingErrorMessage } from '../../../../../utils/userFacingError'
 
 
 const TeacherQuestionEditPage: React.FC = () => {
@@ -38,6 +39,9 @@ const TeacherQuestionEditPage: React.FC = () => {
   const [publishing, setPublishing] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [attachmentFile, setAttachmentFile] = useState<File | null>(null)
+  const [attachment, setAttachment] = useState<ContentAttachmentUpload>()
+  const [attachmentBusy, setAttachmentBusy] = useState(false)
 
   useEffect(() => {
     if (!item.data) return
@@ -88,12 +92,42 @@ const TeacherQuestionEditPage: React.FC = () => {
       setMessage(publish ? '题目已保存并发布。' : '题目草稿已保存。')
       item.reload()
     } catch (actionError) {
-      setError((actionError as ApiError).message || (actionError as Error).message || '题目保存失败，请检查内容后重试。')
+      setError(userFacingErrorMessage(actionError, '题目保存失败，请检查内容后重试。'))
     } finally {
       setSaving(false)
       setPublishing(false)
     }
   }, [body, categoryId, code, difficulty, item, itemId, knowledgePoints, sensitiveFields, tags, title, type, version, visibility])
+
+  /** uploadAttachment 上传当前资源附件并保存对象引用。 */
+  const uploadAttachment = async () => {
+    if (!itemId || !attachmentFile) return
+    setAttachmentBusy(true)
+    setError(null)
+    try {
+      setAttachment(await api.content.uploadAttachment(attachmentFile, itemId))
+      setMessage('附件已上传。')
+    } catch (actionError) {
+      setError(userFacingErrorMessage(actionError, '附件上传失败，请检查文件后重试。'))
+    } finally {
+      setAttachmentBusy(false)
+    }
+  }
+
+  /** issueAttachmentGrant 为已上传附件签发短时下载授权。 */
+  const issueAttachmentGrant = async () => {
+    if (!itemId || !attachment) return
+    setAttachmentBusy(true)
+    setError(null)
+    try {
+      const grant = await api.content.issueAttachmentDownloadGrant({ resource_id: itemId, object_ref: attachment.object_ref })
+      setMessage(`附件下载授权有效至 ${grant.expires_at}。`)
+    } catch (actionError) {
+      setError(userFacingErrorMessage(actionError, '附件下载授权创建失败，请稍后重试。'))
+    } finally {
+      setAttachmentBusy(false)
+    }
+  }
 
   const loading = categories.status === 'loading' || item.status === 'loading'
   const firstError = categories.error || item.error
@@ -125,6 +159,16 @@ const TeacherQuestionEditPage: React.FC = () => {
           <label className={styles.field}>标签<Input fullWidth value={tags} onChange={(event) => setTags(event.target.value)} /></label>
           <label className={styles.field}>知识点<Input fullWidth value={knowledgePoints} onChange={(event) => setKnowledgePoints(event.target.value)} /></label>
         </div>
+      </section>
+      <section className={styles.panel}>
+        <h2><Paperclip size={18} />题目附件</h2>
+        {!itemId && <Callout variant="info" title="请先保存题目">题目保存后即可上传附件。</Callout>}
+        <input type="file" disabled={!itemId} onChange={(event) => setAttachmentFile(event.target.files?.[0] || null)} />
+        <div className={styles.actions}>
+          <Button variant="outline" icon={<Paperclip size={15} />} disabled={!itemId || !attachmentFile} loading={attachmentBusy} onClick={() => void uploadAttachment()}>上传附件</Button>
+          <Button variant="outline" icon={<Download size={15} />} disabled={!attachment} loading={attachmentBusy} onClick={() => void issueAttachmentGrant()}>创建下载授权</Button>
+        </div>
+        {attachment && <p className={styles.muted}>{attachment.file_name}，{attachment.size} 字节</p>}
       </section>
 
       <section className={styles.panel}>

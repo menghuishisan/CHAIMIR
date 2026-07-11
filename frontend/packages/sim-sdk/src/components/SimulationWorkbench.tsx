@@ -18,6 +18,7 @@ import type {
   SimEvent,
   SimInitParams,
   SimPackageDescriptor,
+  SimState,
 } from '../types';
 import { SimWorkerClient } from '../runtime/SimWorkerClient';
 import { PatternRenderer } from '../renderers/PatternRenderer';
@@ -30,10 +31,30 @@ export interface SimulationWorkbenchProps {
   initParams: SimInitParams;
   seed: number;
   workerCommandTimeoutMs: number;
+  initialActions?: SimulationInitialAction[];
+  actions?: React.ReactNode;
+  computeMode?: 'frontend' | 'backend';
+  backendState?: SimulationBackendState;
+  onBackendInteraction?: (eventType: string, payload: JsonObject, target?: string) => void;
   onActionLog?: (event: SimEvent) => void;
   onCheckpoint?: (checkpointId: string, result: RuntimeSnapshot['checkpointResults'][string]) => void;
   onExit?: () => void;
+  exitLabel?: string;
 }
+
+export interface SimulationInitialAction {
+  eventType: string;
+  payload: JsonObject;
+  target?: string;
+  atTick?: number;
+}
+
+export interface SimulationBackendState {
+  tick: number;
+  state: SimState;
+}
+
+const emptyInitialActions: SimulationInitialAction[] = [];
 
 const speedOptions: PlaybackSpeed[] = [
   { label: '0.5x', multiplier: 0.5 },
@@ -51,9 +72,15 @@ export function SimulationWorkbench({
   initParams,
   seed,
   workerCommandTimeoutMs,
+  initialActions = emptyInitialActions,
+  actions,
+  computeMode = 'frontend',
+  backendState,
+  onBackendInteraction,
   onActionLog,
   onCheckpoint,
   onExit,
+  exitLabel = '返回仿真实验室',
 }: SimulationWorkbenchProps): React.ReactElement {
   const clientRef = useRef<SimWorkerClient | null>(null);
   const [descriptor, setDescriptor] = useState<SimPackageDescriptor | undefined>();
@@ -69,6 +96,7 @@ export function SimulationWorkbench({
   const reducedMotion = usePrefersReducedMotion();
 
   useEffect(() => {
+    let hydrating = true;
     setDescriptor(undefined);
     setSnapshot(undefined);
     setRuntimeMessage(undefined);
@@ -95,7 +123,7 @@ export function SimulationWorkbench({
         if (nextSnapshot.state.selectedElementId) {
           setSelectedElementId(nextSnapshot.state.selectedElementId);
         }
-        if (event) {
+        if (!hydrating && event?.source === 'user') {
           onActionLog?.(event);
         }
       },
@@ -105,15 +133,41 @@ export function SimulationWorkbench({
       },
     });
     clientRef.current = client;
-    void client.init().catch((error: Error) => {
-      setRuntimeMessage(userRuntimeMessage(error));
-      setPlaying(false);
-    });
+    void client.init()
+      .then(async () => {
+        let replayTick = 0;
+        for (const action of initialActions) {
+          const actionTick = action.atTick ?? replayTick;
+          if (!Number.isSafeInteger(actionTick) || actionTick < replayTick) {
+            throw new Error('回放操作顺序不完整，请重新打开仿真。');
+          }
+          while (replayTick < actionTick) {
+            await client.step();
+            replayTick += 1;
+          }
+          await client.inject(action.eventType, action.payload, action.target);
+        }
+        hydrating = false;
+      })
+      .catch((error: Error) => {
+        setRuntimeMessage(userRuntimeMessage(error));
+        setPlaying(false);
+      });
     return () => {
       client.destroy();
       clientRef.current = null;
     };
-  }, [moduleUrl, builtinCode, initParams, seed, workerCommandTimeoutMs, onActionLog]);
+  }, [moduleUrl, builtinCode, initParams, seed, workerCommandTimeoutMs, initialActions, onActionLog]);
+
+  useEffect(() => {
+    if (computeMode !== 'backend' || !backendState || !descriptor) {
+      return;
+    }
+    void clientRef.current?.syncState(backendState.tick, backendState.state).catch((error: unknown) => {
+      setRuntimeMessage(userRuntimeMessage(error));
+      setPlaying(false);
+    });
+  }, [backendState, computeMode, descriptor]);
 
   useEffect(() => {
     if (stepDuration === undefined) {
@@ -223,7 +277,7 @@ export function SimulationWorkbench({
         <header className="sim-workbench__bar">
           {onExit && (
             <Button variant="on-dark" size="sm" icon={<ArrowLeft size={16} />} onClick={onExit}>
-              返回仿真实验室
+              {exitLabel}
             </Button>
           )}
           <div>
@@ -231,6 +285,7 @@ export function SimulationWorkbench({
             <h1>仿真正在准备</h1>
           </div>
           <div className="sim-workbench__status" />
+          {actions && <div className="sim-workbench__actions">{actions}</div>}
         </header>
         <section className="sim-workbench__empty">
           {runtimeMessage ? <p>{runtimeMessage}</p> : <p>正在加载仿真环境,请稍候</p>}
@@ -244,7 +299,7 @@ export function SimulationWorkbench({
       <header className="sim-workbench__bar">
         {onExit && (
           <Button variant="on-dark" size="sm" icon={<ArrowLeft size={16} />} onClick={onExit}>
-            返回仿真实验室
+            {exitLabel}
           </Button>
         )}
         <div className="sim-workbench__title">
@@ -256,6 +311,7 @@ export function SimulationWorkbench({
           <span>{snapshot.view.phase.title}</span>
           {reducedMotion && <span>减少动态</span>}
         </div>
+        {actions && <div className="sim-workbench__actions">{actions}</div>}
       </header>
 
       <section className="sim-workbench__layout">
@@ -320,6 +376,10 @@ export function SimulationWorkbench({
               selectedElementType={selectedElementType}
               eventSeq={snapshot.events.length}
               onEmit={(type, payload, target) => {
+                if (computeMode === 'backend') {
+                  onBackendInteraction?.(type, payload, target);
+                  return;
+                }
                 void clientRef.current?.inject(type, payload, target).catch(handleRuntimeError);
               }}
             />
@@ -392,16 +452,16 @@ export function SimulationWorkbench({
       <footer className="sim-workbench__controls">
         <TimelinePanel descriptor={descriptor} snapshot={snapshot} stepDuration={stepDuration} speed={speed} />
         <div className="sim-workbench__control-group" aria-label="播放控制">
-          <Button variant="on-dark" size="sm" icon={<SkipBack size={16} />} onClick={stepBack} disabled={snapshot.tick === 0 || playing}>
+          <Button variant="on-dark" size="sm" icon={<SkipBack size={16} />} onClick={stepBack} disabled={computeMode === 'backend' || snapshot.tick === 0 || playing}>
             回退一步
           </Button>
-          <Button variant="primary" size="sm" icon={playing ? <Pause size={16} /> : <Play size={16} />} onClick={togglePlay} disabled={reducedMotion} title={reducedMotion ? '已开启减少动态，请使用单步推进' : undefined}>
+          <Button variant="primary" size="sm" icon={playing ? <Pause size={16} /> : <Play size={16} />} onClick={togglePlay} disabled={computeMode === 'backend' || reducedMotion} title={computeMode === 'backend' ? '后端仿真由计算服务推进' : reducedMotion ? '已开启减少动态，请使用单步推进' : undefined}>
             {playing ? '暂停' : '播放'}
           </Button>
-          <Button variant="on-dark" size="sm" icon={<StepForward size={16} />} onClick={stepForward} disabled={playing}>
+          <Button variant="on-dark" size="sm" icon={<StepForward size={16} />} onClick={stepForward} disabled={computeMode === 'backend' || playing}>
             单步推进
           </Button>
-          <Button variant="on-dark" size="sm" icon={<RotateCcw size={16} />} onClick={reset}>
+          <Button variant="on-dark" size="sm" icon={<RotateCcw size={16} />} onClick={reset} disabled={computeMode === 'backend'}>
             重置
           </Button>
         </div>

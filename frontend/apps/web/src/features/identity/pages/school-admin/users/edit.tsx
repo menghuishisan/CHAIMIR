@@ -1,7 +1,7 @@
 // UserEditPage 新建或编辑租户账号，复用 identity 后端账号与组织接口。
 
 import React, { useCallback, useMemo, useState } from 'react'
-import type { Account, ApiError } from '@chaimir/api-client'
+import type { Account } from '@chaimir/api-client'
 import { BaseIdentity, ClassStatus } from '@chaimir/api-client'
 import { Button, Callout, Input, Select, Switch } from '@chaimir/ui'
 import { Edit, Save, ShieldCheck } from 'lucide-react'
@@ -11,6 +11,7 @@ import { ErrorState, LoadingState } from '../../../../../components/ResourceStat
 import { useAsyncResource } from '../../../../../hooks'
 import styles from '../../identity-admin.module.css'
 import { baseIdentityOptions } from '../../../../../utils/index'
+import { userFacingErrorMessage } from '../../../../../utils/userFacingError'
 
 /**
  * firstRoleIdentity 根据账号角色推断基础身份。
@@ -48,6 +49,8 @@ const UserEditPage: React.FC = () => {
   const [submitting, setSubmitting] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [resetPassword, setResetPassword] = useState('')
+  const [mustChangePassword, setMustChangePassword] = useState(true)
 
   const loadedIdentity = firstRoleIdentity(account)
   const effectiveName = name || account?.name || ''
@@ -115,11 +118,23 @@ const UserEditPage: React.FC = () => {
         setMessage(result.activation_code ? `账号已创建，激活码 ${result.activation_code}` : '账号已创建。')
       }
     } catch (submitError) {
-      setError((submitError as ApiError).message || '账号保存失败，请检查信息后重试。')
+      setError(userFacingErrorMessage(submitError, '账号保存失败，请检查信息后重试。'))
     } finally {
       setSubmitting(false)
     }
   }, [accountId, effectiveBaseIdentity, effectiveName, effectiveNo, effectiveTitle, enrollmentYear, initialPassword, orgId, phone, useActivation])
+
+  /** runAccountAdminAction 执行账号权限或密码动作并统一展示结果。 */
+  const runAccountAdminAction = async (action: () => Promise<void>, success: string) => {
+    setError(null)
+    setMessage(null)
+    try {
+      await action()
+      setMessage(success)
+    } catch (actionError) {
+      setError(userFacingErrorMessage(actionError, '账号操作失败，请稍后重试。'))
+    }
+  }
 
   if (accountId && accountsResource.status === 'loading') {
     return <LoadingState title="正在获取账号资料" />
@@ -223,12 +238,15 @@ const UserEditPage: React.FC = () => {
         {accountId && (
           <section className={styles.panel}>
             <h2>权限动作</h2>
-            <Button variant="outline" icon={<ShieldCheck size={16} />} onClick={() => api.identity.grantSchoolAdmin(accountId)}>
+            <Button variant="outline" icon={<ShieldCheck size={16} />} onClick={() => void runAccountAdminAction(() => api.identity.grantSchoolAdmin(accountId), '已授予学校管理员权限。')}>
               授权为学校管理员
             </Button>
-            <Button variant="outline" onClick={() => api.identity.revokeSchoolAdmin(accountId)}>
+            <Button variant="outline" onClick={() => void runAccountAdminAction(() => api.identity.revokeSchoolAdmin(accountId), '已撤销学校管理员权限。')}>
               撤销学校管理员
             </Button>
+            <label className={styles.field}>新密码<Input fullWidth type="password" value={resetPassword} onChange={(event) => setResetPassword(event.target.value)} /></label>
+            <Switch checked={mustChangePassword} label="下次登录必须修改密码" onChange={(event) => setMustChangePassword(event.target.checked)} />
+            <Button variant="outline" disabled={!resetPassword} onClick={() => void runAccountAdminAction(() => api.identity.resetAccountPassword(accountId, { new_password: resetPassword, must_change_pwd: mustChangePassword }), '账号密码已重置。')}>重置密码</Button>
           </section>
         )}
       </div>

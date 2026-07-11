@@ -1,7 +1,7 @@
 // GradeSettingsPage 管理成绩等级映射、学期和学业预警规则。
 
 import React, { useCallback, useState } from 'react'
-import type { ApiError } from '@chaimir/api-client'
+import { TranscriptScope } from '@chaimir/api-client'
 import { Button, Callout, Input, Switch, Textarea } from '@chaimir/ui'
 import { Plus, RefreshCw, Settings2 } from 'lucide-react'
 import { api } from '../../../../../app/api'
@@ -9,6 +9,7 @@ import { ErrorState, LoadingState } from '../../../../../components/ResourceStat
 import { useAsyncResource } from '../../../../../hooks'
 import styles from '../../grade.module.css'
 import { parseJsonArray } from '../../../../../utils/index'
+import { userFacingErrorMessage } from '../../../../../utils/userFacingError'
 
 const GradeSettingsPage: React.FC = () => {
   const levels = useAsyncResource(() => api.grade.listLevelConfigs(), [])
@@ -22,6 +23,8 @@ const GradeSettingsPage: React.FC = () => {
   const [semesterName, setSemesterName] = useState('')
   const [startDate, setStartDate] = useState('')
   const [endDate, setEndDate] = useState('')
+  const [studentIds, setStudentIds] = useState('')
+  const [maintenanceSemesterId, setMaintenanceSemesterId] = useState('')
   const [submitting, setSubmitting] = useState<string | null>(null)
   const [message, setMessage] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -41,7 +44,7 @@ const GradeSettingsPage: React.FC = () => {
       setMessage(successMessage)
       reloadAll()
     } catch (actionError) {
-      setError((actionError as ApiError).message || (actionError as Error).message || '配置保存失败，请检查内容。')
+      setError(userFacingErrorMessage(actionError, '配置保存失败，请检查内容。'))
     } finally {
       setSubmitting(null)
     }
@@ -111,9 +114,33 @@ const GradeSettingsPage: React.FC = () => {
 
         <section className={styles.panel}>
           <h2>当前配置</h2>
-          <span className={styles.status}>等级规则 {levels.data?.length || 0} 条</span>
+          {(levels.data || []).map((level) => (
+            <div className={styles.actions} key={level.id}>
+              <span className={styles.status}>{level.name}{level.is_default ? '（默认）' : ''}</span>
+              {!level.is_default && (
+                <Button variant="outline" size="sm" onClick={() => runAction(`level-${level.id}`, () => api.grade.updateLevelConfig(level.id, { name: level.name, mapping: level.mapping, warning_rules: level.warning_rules, is_default: true }), '默认等级规则已更新。')}>设为默认</Button>
+              )}
+            </div>
+          ))}
           <span className={styles.status}>学期 {semesters.data?.length || 0} 个</span>
           <span className={styles.status}>预警: {warningRules.data ? `${warningRules.data.fail_count} 门 / GPA ${warningRules.data.min_gpa}` : '未配置'}</span>
+        </section>
+
+        <section className={styles.panel}>
+          <h2>成绩维护</h2>
+          <label className={styles.field}>学生编号<Input fullWidth value={studentIds} onChange={(event) => setStudentIds(event.target.value)} placeholder="多个编号用逗号分隔" /></label>
+          <label className={styles.field}>学期编号<Input fullWidth value={maintenanceSemesterId} onChange={(event) => setMaintenanceSemesterId(event.target.value)} /></label>
+          <div className={styles.actions}>
+            <Button
+              variant="outline"
+              disabled={parseStudentIds(studentIds).length !== 1 || !maintenanceSemesterId}
+              onClick={() => runAction('recompute', () => api.grade.recomputeStudentGrade(String(parseStudentIds(studentIds)[0]), { semester_id: maintenanceSemesterId }), '学生成绩已重新计算。')}
+            >重新计算</Button>
+            <Button
+              disabled={parseStudentIds(studentIds).length === 0}
+              onClick={() => runAction('transcript-batch', () => api.grade.generateTranscriptBatch({ student_ids: parseStudentIds(studentIds), scope: maintenanceSemesterId ? TranscriptScope.SEMESTER : TranscriptScope.FULL, semester_id: maintenanceSemesterId || undefined }), '批量成绩单已生成。')}
+            >批量生成成绩单</Button>
+          </div>
         </section>
       </div>
     </div>
@@ -121,3 +148,8 @@ const GradeSettingsPage: React.FC = () => {
 }
 
 export default GradeSettingsPage
+
+/** parseStudentIds 解析并去重学校管理员输入的学生编号。 */
+function parseStudentIds(value: string): number[] {
+  return Array.from(new Set(value.split(',').map((item) => Number(item.trim())).filter((item) => Number.isInteger(item) && item > 0)))
+}

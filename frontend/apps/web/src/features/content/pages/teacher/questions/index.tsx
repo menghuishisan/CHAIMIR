@@ -1,17 +1,18 @@
 // TeacherQuestionsPage 展示内容中心题库资源，数据来自 content 后端接口。
 
 import React, { useCallback, useMemo, useState } from 'react'
-import type { ApiError, ContentCategory, ContentItem } from '@chaimir/api-client'
+import type { ContentCategory, ContentItem } from '@chaimir/api-client'
 import { ContentType } from '@chaimir/api-client'
 import type { TableColumn } from '@chaimir/ui'
-import { Button, Callout, Input, Select, Table } from '@chaimir/ui'
-import { Database, Edit2, FolderTree, RefreshCw, Share2 } from 'lucide-react'
+import { Button, Input, Select, Table } from '@chaimir/ui'
+import { Database, Edit2, FolderTree, RefreshCw } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../../../../../app/api'
 import { ErrorState, LoadingState } from '../../../../../components/ResourceState'
 import { useAsyncResource } from '../../../../../hooks'
 import styles from '../../content.module.css'
 import { contentDifficultyLabel, contentStatusLabel, contentTypeLabel, contentTypeOptions, withAllOption } from '../../../../../utils/index'
+import { ContentItemActions } from './ContentItemActions'
 
 
 
@@ -19,8 +20,6 @@ const TeacherQuestionsPage: React.FC = () => {
   const navigate = useNavigate()
   const [keyword, setKeyword] = useState('')
   const [type, setType] = useState('')
-  const [message, setMessage] = useState<string | null>(null)
-  const [error, setError] = useState<string | null>(null)
   const items = useAsyncResource(() => api.content.getItems({
     keyword: keyword || undefined,
     type: type ? Number(type) as ContentType : undefined,
@@ -28,21 +27,6 @@ const TeacherQuestionsPage: React.FC = () => {
     size: 20,
   }), [keyword, type])
   const categories = useAsyncResource(() => api.content.listCategories(), [])
-
-  /**
-   * shareItem 调用后端共享接口，把资源加入共享库。
-   */
-  const shareItem = useCallback(async (item: ContentItem) => {
-    setError(null)
-    setMessage(null)
-    try {
-      await api.content.shareItem(String(item.id))
-      setMessage('资源已加入共享库。')
-      items.reload()
-    } catch (shareError) {
-      setError((shareError as ApiError).message || '共享资源失败，请稍后重试。')
-    }
-  }, [items])
 
   const categoryName = useCallback((categoryId?: number) => {
     return (categories.data || []).find((category: ContentCategory) => category.id === categoryId)?.name || '未分类'
@@ -62,13 +46,11 @@ const TeacherQuestionsPage: React.FC = () => {
           <Button variant="ghost" size="sm" icon={<Edit2 size={14} />} onClick={() => navigate(`/teacher/questions/edit?id=${row.id}`)}>
             编辑
           </Button>
-          <Button variant="outline" size="sm" icon={<Share2 size={14} />} onClick={() => shareItem(row)}>
-            共享
-          </Button>
+          <ContentItemActions item={row} onChanged={items.reload} />
         </div>
       ),
     },
-  ], [categoryName, navigate, shareItem])
+  ], [categoryName, items.reload, navigate])
 
   const rows = items.data?.list || []
 
@@ -89,13 +71,6 @@ const TeacherQuestionsPage: React.FC = () => {
           <Button onClick={() => navigate('/teacher/questions/edit')}>新建题目</Button>
         </div>
       </div>
-
-      {error && <div className={styles.error}>{error}</div>}
-      {message && (
-        <Callout variant="success" title="操作成功">
-          {message}
-        </Callout>
-      )}
 
       <div className={styles.toolbar}>
         <Input placeholder="搜索资源名称" value={keyword} onChange={(event) => setKeyword(event.target.value)} />

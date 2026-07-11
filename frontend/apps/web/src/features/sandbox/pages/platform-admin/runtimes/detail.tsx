@@ -1,11 +1,11 @@
 // RuntimeDetailPage 展示平台运行时、自检详情和镜像预拉取状态。
 
-import React, { useCallback, useMemo, useState } from 'react'
+import React, { useCallback, useState } from 'react'
 import { ImagePrepullStatus, RuntimeImageStatus } from '@chaimir/api-client'
 import type { SandboxRuntimeImage } from '@chaimir/api-client'
 import type { TableColumn } from '@chaimir/ui'
-import { Button, DescriptionList, Table } from '@chaimir/ui'
-import { ArrowLeft, HardDrive, Play, RefreshCw } from 'lucide-react'
+import { Button, Checkbox, DescriptionList, Input, Table } from '@chaimir/ui'
+import { ArrowLeft, HardDrive, Play, Plus, Power, RefreshCw } from 'lucide-react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { api } from '../../../../../app/api'
 import { ErrorState, LoadingState } from '../../../../../components/ResourceState'
@@ -31,19 +31,25 @@ const RuntimeDetailPage: React.FC = () => {
   const [prepullingImageId, setPrepullingImageId] = useState<number | null>(null)
   const [message, setMessage] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [imageUrl, setImageUrl] = useState('')
+  const [imageVersion, setImageVersion] = useState('')
+  const [imageDigest, setImageDigest] = useState('')
+  const [genesisBaked, setGenesisBaked] = useState(false)
+  const [isDefault, setIsDefault] = useState(false)
   const resource = useAsyncResource(async () => {
     if (!id) {
       throw new Error('缺少运行时编号，无法读取详情。')
     }
-    const [runtimes, images] = await Promise.all([
+    const [runtimes, images, selftest] = await Promise.all([
       api.sandbox.listRuntimes(),
       api.sandbox.listRuntimeImages(id),
+      api.sandbox.getRuntimeSelftest(id),
     ])
     const runtime = runtimes.find((item) => String(item.id) === id)
     if (!runtime) {
       throw new Error('未找到该运行时，请返回列表刷新后重试。')
     }
-    return { runtime, images }
+    return { runtime, images, selftest }
   }, [id])
 
   /**
@@ -56,7 +62,8 @@ const RuntimeDetailPage: React.FC = () => {
     setError(null)
     try {
       await api.sandbox.runRuntimeSelftest(id)
-      setMessage('运行时自检已完成，状态已刷新。')
+      const result = await api.sandbox.getRuntimeSelftest(id)
+      setMessage(`运行时自检已完成，当前状态：${runtimeSelftestStatusLabel(result.selftest_status)}。`)
       resource.reload()
     } catch (selftestError) {
       setError(userFacingErrorMessage(selftestError, '运行时自检失败，请稍后重试。'))
@@ -75,7 +82,8 @@ const RuntimeDetailPage: React.FC = () => {
     setError(null)
     try {
       await api.sandbox.prepullRuntimeImage(id, String(imageId))
-      setMessage('镜像预拉取已执行，状态已刷新。')
+      const status = await api.sandbox.getRuntimeImagePrepull(id, String(imageId))
+      setMessage(`镜像预拉取已执行，${status.ready_nodes}/${status.desired_nodes} 个节点已就绪。`)
       resource.reload()
     } catch (prepullError) {
       setError(userFacingErrorMessage(prepullError, '镜像预拉取失败，请稍后重试。'))
@@ -84,7 +92,33 @@ const RuntimeDetailPage: React.FC = () => {
     }
   }, [id, resource])
 
-  const columns = useMemo<TableColumn<SandboxRuntimeImage>[]>(() => [
+  /** registerImage 为当前运行时登记不可变镜像版本。 */
+  const registerImage = async () => {
+    if (!id || !imageUrl.trim() || !imageVersion.trim() || !imageDigest.trim()) return
+    setError(null)
+    try {
+      await api.sandbox.registerRuntimeImage(id, { image_url: imageUrl.trim(), version: imageVersion.trim(), digest: imageDigest.trim(), genesis_baked: genesisBaked, is_default: isDefault })
+      setMessage('镜像版本已登记。')
+      resource.reload()
+    } catch (actionError) {
+      setError(userFacingErrorMessage(actionError, '镜像版本登记失败，请检查地址和摘要。'))
+    }
+  }
+
+  /** disableImage 停用镜像版本并刷新运行时详情。 */
+  const disableImage = async (imageId: number) => {
+    if (!id || !window.confirm('确定停用这个镜像版本吗？')) return
+    setError(null)
+    try {
+      await api.sandbox.disableRuntimeImage(id, String(imageId))
+      setMessage('镜像版本已停用。')
+      resource.reload()
+    } catch (actionError) {
+      setError(userFacingErrorMessage(actionError, '镜像停用失败，请稍后重试。'))
+    }
+  }
+
+  const columns: TableColumn<SandboxRuntimeImage>[] = [
     { key: 'image', title: '镜像地址', dataIndex: 'image_url', priority: 'primary' },
     { key: 'version', title: '版本', dataIndex: 'version', priority: 'secondary' },
     { key: 'default', title: '默认镜像', render: (row) => (row.is_default ? '是' : '否') },
@@ -95,7 +129,7 @@ const RuntimeDetailPage: React.FC = () => {
       key: 'action',
       title: '操作',
       render: (row) => (
-        <Button
+        <div className={listStyles.actions}><Button
           size="sm"
           variant="outline"
           icon={<Play size={14} />}
@@ -104,10 +138,10 @@ const RuntimeDetailPage: React.FC = () => {
           onClick={() => void handlePrepull(row.id)}
         >
           预拉取
-        </Button>
+        </Button><Button size="sm" variant="ghost" icon={<Power size={14} />} disabled={row.status !== RuntimeImageStatus.AVAILABLE} onClick={() => void disableImage(row.id)}>停用</Button></div>
       ),
     },
-  ], [handlePrepull, prepullingImageId])
+  ]
 
   const runtime = resource.data?.runtime
   const images = resource.data?.images || []
@@ -160,6 +194,17 @@ const RuntimeDetailPage: React.FC = () => {
               emptyDescription="该运行时还没有登记可用镜像。"
               ariaLabel="运行时镜像版本列表"
             />
+          </section>
+          <section className={styles.summary}>
+            <h2 className={styles.sectionTitle}>登记镜像版本</h2>
+            <div className={listStyles.formGrid}>
+              <Input value={imageUrl} onChange={(event) => setImageUrl(event.target.value)} placeholder="镜像地址" fullWidth />
+              <Input value={imageVersion} onChange={(event) => setImageVersion(event.target.value)} placeholder="版本" fullWidth />
+              <Input value={imageDigest} onChange={(event) => setImageDigest(event.target.value)} placeholder="镜像摘要" fullWidth />
+              <Checkbox checked={genesisBaked} onChange={(event) => setGenesisBaked(event.target.checked)}>已内置创世配置</Checkbox>
+              <Checkbox checked={isDefault} onChange={(event) => setIsDefault(event.target.checked)}>设为默认版本</Checkbox>
+              <Button icon={<Plus size={15} />} onClick={() => void registerImage()}>登记镜像</Button>
+            </div>
           </section>
         </>
       )}

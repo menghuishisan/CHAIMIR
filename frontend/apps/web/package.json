@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@chaimir/api-client": "workspace:*",
+    "@chaimir/ide": "workspace:*",
     "@chaimir/sim-sdk": "workspace:*",
     "@chaimir/ui": "workspace:*",
     "lucide-react": "^0.460.0",

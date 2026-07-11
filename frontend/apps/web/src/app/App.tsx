@@ -29,6 +29,7 @@ import {
   StudentExperimentWorkspacePage,
   StudentSimulationsPage,
   StudentSimulationWorkspacePage,
+  SharedSimulationWorkspacePage,
   StudentContestsPage,
   StudentContestDetailPage,
   StudentContestApplyPage,
@@ -136,6 +137,7 @@ const App: React.FC = () => {
           <Route path="/auth/apply" element={<ApplyPage />} />
           <Route path="/auth/sso" element={<SSOPage />} />
           {platformLayerEnabled ? <Route path="/auth/platform-login" element={<PlatformLoginPage />} /> : null}
+          <Route path="/sim/shared/:shareCode" element={<SharedSimulationWorkspacePage />} />
 
           <Route element={<RoleGuard allowedRoles={[UserRole.SCHOOL_ADMIN]} />}>
             <Route path="/school-admin" element={<AdminLayout />}>

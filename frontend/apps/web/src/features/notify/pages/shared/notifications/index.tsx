@@ -2,16 +2,18 @@
 
 import React, { useCallback, useMemo, useState } from 'react'
 import type { Announcement, ApiError, Notification, PaginatedResponse } from '@chaimir/api-client'
-import { Button } from '@chaimir/ui'
-import { Bell, CheckCheck, Megaphone, RefreshCw } from 'lucide-react'
+import { Button, Callout } from '@chaimir/ui'
+import { Bell, Check, CheckCheck, Megaphone, RefreshCw, Settings, Trash2 } from 'lucide-react'
 import { useLocation } from 'react-router-dom'
 import { api } from '../../../../../app/api'
 import { EmptyState, ErrorState, LoadingState } from '../../../../../components/ResourceState'
-import { useAsyncResource } from '../../../../../hooks'
+import { useAsyncResource, useTicketedWebSocket } from '../../../../../hooks'
 import styles from '../shared.module.css'
 import { formatDateTime } from '../../../../../utils/index'
+import { userFacingErrorMessage } from '../../../../../utils/userFacingError'
+import { NotificationPreferences } from './NotificationPreferences'
 
-type NotificationTab = 'notifications' | 'announcements'
+type NotificationTab = 'notifications' | 'announcements' | 'preferences'
 
 const PAGE_SIZE = 20
 
@@ -92,7 +94,9 @@ const PlatformAnnouncementsPage: React.FC = () => {
 const TenantNotificationsPage: React.FC = () => {
   const [activeTab, setActiveTab] = useState<NotificationTab>('notifications')
   const [actionError, setActionError] = useState<ApiError | null>(null)
+  const [actionMessage, setActionMessage] = useState<string | null>(null)
   const [markingAll, setMarkingAll] = useState(false)
+  const [busyItemId, setBusyItemId] = useState<string | null>(null)
 
   const notifications = useAsyncResource(
     () => api.notify.getNotifications({ page: 1, size: PAGE_SIZE }),
@@ -104,6 +108,22 @@ const TenantNotificationsPage: React.FC = () => {
     [],
     isAnnouncementResponseEmpty
   )
+  const me = useAsyncResource(() => api.identity.getMe(), [])
+  const realtimeTopic = me.data
+    ? `tenant:${me.data.account.tenant_id}:notify:${me.data.account.id}`
+    : null
+  const realtimeSubscription = useMemo(
+    () => realtimeTopic ? { action: 'subscribe', topics: [realtimeTopic] } : undefined,
+    [realtimeTopic],
+  )
+  const handleRealtimeMessage = useCallback(() => {
+    notifications.reload()
+  }, [notifications])
+  const realtime = useTicketedWebSocket({
+    url: realtimeTopic ? api.eventWebSocketUrl() : null,
+    subscribeMessage: realtimeSubscription,
+    onMessage: handleRealtimeMessage,
+  })
 
   const currentStatus = activeTab === 'notifications' ? notifications.status : announcements.status
   const currentError = activeTab === 'notifications' ? notifications.error : announcements.error
@@ -113,9 +133,11 @@ const TenantNotificationsPage: React.FC = () => {
 
   const handleMarkAllRead = useCallback(async () => {
     setActionError(null)
+    setActionMessage(null)
     setMarkingAll(true)
     try {
       await api.notify.markAllAsRead()
+      setActionMessage('全部通知已标记为已读。')
       notifications.reload()
     } catch (error) {
       setActionError(error as ApiError)
@@ -123,6 +145,22 @@ const TenantNotificationsPage: React.FC = () => {
       setMarkingAll(false)
     }
   }, [notifications])
+
+  /** runItemAction 执行单条通知或公告动作并刷新对应列表。 */
+  const runItemAction = useCallback(async (id: string, action: () => Promise<unknown>, success: string, reload: () => void) => {
+    setBusyItemId(id)
+    setActionError(null)
+    setActionMessage(null)
+    try {
+      await action()
+      setActionMessage(success)
+      reload()
+    } catch (actionFailure) {
+      setActionError({ message: userFacingErrorMessage(actionFailure, '操作未完成，请稍后重试。') })
+    } finally {
+      setBusyItemId(null)
+    }
+  }, [])
 
   return (
     <div className={styles.page}>
@@ -133,9 +171,10 @@ const TenantNotificationsPage: React.FC = () => {
           <Bell className={styles.titleIcon} size={28} />
           站内信件与系统公告
         </h1>
-        <Button variant="outline" icon={<RefreshCw size={16} />} onClick={currentReload}>
-          刷新
-        </Button>
+        <div className={styles.cardActions}>
+          <span className={styles.connectionStatus} role="status">实时连接：{realtime.status === 'open' ? '已连接' : realtime.status === 'reconnecting' ? '正在重连' : '未连接'}</span>
+          <Button variant="outline" icon={<RefreshCw size={16} />} onClick={currentReload}>刷新</Button>
+        </div>
       </div>
 
       <div className={styles.tabs} role="tablist" aria-label="通知公告类型">
@@ -157,6 +196,15 @@ const TenantNotificationsPage: React.FC = () => {
         >
           系统公告
         </button>
+        <button
+          className={`${styles.tab} ${activeTab === 'preferences' ? styles.tabActive : ''}`}
+          type="button"
+          role="tab"
+          aria-selected={activeTab === 'preferences'}
+          onClick={() => setActiveTab('preferences')}
+        >
+          <Settings size={15} /> 通知偏好
+        </button>
         {activeTab === 'notifications' && (
           <Button
             variant="ghost"
@@ -173,12 +221,13 @@ const TenantNotificationsPage: React.FC = () => {
       {actionError && (
         <ErrorState error={actionError} onRetry={() => setActionError(null)} title="操作未完成" />
       )}
+      {actionMessage && <Callout variant="success" title="操作完成">{actionMessage}</Callout>}
 
-      {currentStatus === 'loading' && <LoadingState title="正在获取消息" />}
-      {currentStatus === 'error' && (
+      {activeTab !== 'preferences' && currentStatus === 'loading' && <LoadingState title="正在获取消息" />}
+      {activeTab !== 'preferences' && currentStatus === 'error' && (
         <ErrorState error={currentError} onRetry={currentReload} />
       )}
-      {currentStatus === 'empty' && (
+      {activeTab !== 'preferences' && currentStatus === 'empty' && (
         <EmptyState title="暂无消息" description="当前没有需要查看的通知或公告。" />
       )}
       {currentStatus === 'success' && activeTab === 'notifications' && (
@@ -196,6 +245,12 @@ const TenantNotificationsPage: React.FC = () => {
                   <span>{formatDateTime(item.created_at)}</span>
                 </div>
                 <p className={styles.content}>{item.content}</p>
+              </div>
+              <div className={styles.cardActions}>
+                {!item.is_read && (
+                  <Button size="sm" variant="outline" icon={<Check size={14} />} loading={busyItemId === item.id} onClick={() => void runItemAction(item.id, () => api.notify.markAsRead(item.id), '通知已标记为已读。', notifications.reload)}>标记已读</Button>
+                )}
+                <Button size="sm" variant="ghost" icon={<Trash2 size={14} />} loading={busyItemId === item.id} onClick={() => void runItemAction(item.id, () => api.notify.deleteNotification(item.id), '通知已删除。', notifications.reload)}>删除</Button>
               </div>
             </article>
           ))}
@@ -218,10 +273,14 @@ const TenantNotificationsPage: React.FC = () => {
                 </div>
                 <p className={styles.content}>{item.content}</p>
               </div>
+              {!item.is_read && (
+                <Button size="sm" variant="outline" icon={<Check size={14} />} loading={busyItemId === item.id} onClick={() => void runItemAction(item.id, () => api.notify.markAnnouncementRead(item.id), '公告已标记为已读。', announcements.reload)}>标记已读</Button>
+              )}
             </article>
           ))}
         </div>
       )}
+      {activeTab === 'preferences' && <NotificationPreferences />}
     </div>
   )
 }

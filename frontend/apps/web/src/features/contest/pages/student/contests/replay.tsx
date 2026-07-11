@@ -10,6 +10,7 @@ import { ErrorState, LoadingState } from '../../../../../components/ResourceStat
 import { useAsyncResource } from '../../../../../hooks/useAsyncResource'
 import styles from '../../contest.module.css'
 import { formatDateTime } from '../../../../../utils/index'
+import { userFacingErrorMessage } from '../../../../../utils/userFacingError'
 
 const StudentContestReplayPage: React.FC = () => {
   const { id } = useParams()
@@ -32,7 +33,7 @@ const StudentContestReplayPage: React.FC = () => {
       setReplayRef(result.replay_ref)
       setMatchId(result.match_id)
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : '暂时无法读取回放。')
+      setMessage(userFacingErrorMessage(error, '暂时无法读取回放。'))
     }
   }
 

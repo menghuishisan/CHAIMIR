@@ -23,6 +23,7 @@ type WorkerRequest =
   | { type: 'init'; requestId: number; moduleUrl?: string; builtinCode?: string; initParams: SimInitParams; seed: number }
   | { type: 'step'; requestId: number }
   | { type: 'inject'; requestId: number; eventType: string; payload: JsonObject; target?: string }
+  | { type: 'sync-state'; requestId: number; tick: number; state: SimState }
   | { type: 'back'; requestId: number }
   | { type: 'reset'; requestId: number };
 
@@ -60,6 +61,11 @@ async function handleRequest(request: WorkerRequest): Promise<void> {
         applyEvent(userEventInput(request.eventType, request.payload, request.target));
         postSnapshot(request.requestId, events[events.length - 1]);
         return;
+      case 'sync-state':
+        ensureReady();
+        syncBackendState(request.tick, request.state);
+        postSnapshot(request.requestId);
+        return;
       case 'back':
         ensureReady();
         replay(events.slice(0, -1));
@@ -74,6 +80,17 @@ async function handleRequest(request: WorkerRequest): Promise<void> {
   } catch (error) {
     reportRuntimeError(request, error);
   }
+}
+
+/**
+ * syncBackendState 接收 M4 受控适配器状态，并继续复用包内 render、叙事和检查点函数。
+ */
+function syncBackendState(nextTick: number, nextState: SimState): void {
+  if (!Number.isSafeInteger(nextTick) || nextTick < 0 || !nextState || typeof nextState !== 'object') {
+    throw new Error('后端仿真状态不完整，请稍后重试');
+  }
+  tick = nextTick;
+  state = nextState;
 }
 
 /**

@@ -42,7 +42,7 @@ const TenantSelectPage: React.FC = () => {
             tenant_id: numericTenantId,
           })
       persistLoginTokens(response, state.remember)
-      navigate(loginEntryPath(response), { replace: true })
+      navigate(loginEntryPath(response, state.returnPath), { replace: true })
     } catch (selectError) {
       setError(userFacingErrorMessage(selectError, '无法进入所选学校，请稍后重试。'))
     } finally {

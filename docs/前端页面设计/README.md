@@ -48,3 +48,10 @@
 - 页面业务代码放在 `frontend/apps/web/src/features/<module>/pages/`；应用装配放 `app/`、`routes/`、`layouts/`。
 - HTTP/WS 契约统一经 `@chaimir/api-client`，页面不得散落硬编码接口路径。
 - 通用视觉和交互原语统一来自 `@chaimir/ui`，图标统一使用 Lucide，组件样式只引用设计令牌。
+
+## 7. 已实现共享工作台边界
+
+- 实验与竞赛答题页只组合 `SandboxIdeWorkspace`，由它连接 M2 沙箱并复用 `@chaimir/ide`。角色草图不得再设计另一套文件树、编辑器、终端或三栏工作台壳。
+- 仿真页只组合 `@chaimir/sim-sdk` 的 `SimulationWorkbench`，页面草图可以定义分享、回放和退出入口，但不得重新实现仿真画布、时间线、播放控制或检查器。分享结果使用无角色守卫的公共沉浸深链；前端计算、后端计算和只读回放仍由同一工作台按服务端 `compute` 与会话状态切换，不派生第二套布局。
+- `@chaimir/ui/WorkbenchShell` 是沉浸式结构原语，不是完整业务页面。业务步骤、检查点、提交、排行和实例生命周期由各 feature 页面通过插槽注入。
+- 日常页面与沉浸式页面不得保留同一能力的两套旧布局 CSS；迁移到共享层后同步删除不再被组件引用的页面级工作台样式。

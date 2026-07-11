@@ -11,6 +11,7 @@ import { ErrorState, LoadingState } from '../../../../../components/ResourceStat
 import { useAsyncResource } from '../../../../../hooks/useAsyncResource'
 import styles from '../../experiment.module.css'
 import { experimentStatusLabel } from '../../../../../utils/index'
+import { userFacingErrorMessage } from '../../../../../utils/userFacingError'
 
 const TeacherExperimentsPage: React.FC = () => {
   const navigate = useNavigate()
@@ -24,7 +25,7 @@ const TeacherExperimentsPage: React.FC = () => {
       setMessage(success)
       resource.reload()
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : '操作没有完成，请稍后重试。')
+      setMessage(userFacingErrorMessage(error, '操作没有完成，请稍后重试。'))
     }
   }
 

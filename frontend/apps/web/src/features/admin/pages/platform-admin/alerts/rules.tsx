@@ -1,7 +1,7 @@
 // AlertRulesPage 管理平台告警规则，读取并更新 admin 告警规则接口。
 
 import React, { useCallback, useMemo, useState } from 'react'
-import type { AlertRule, ApiError } from '@chaimir/api-client'
+import type { AlertRule } from '@chaimir/api-client'
 import { AdminScope } from '@chaimir/api-client'
 import type { TableColumn } from '@chaimir/ui'
 import { Button, Callout, Input, Select, Switch, Table, Textarea } from '@chaimir/ui'
@@ -12,6 +12,7 @@ import { useAsyncResource } from '../../../../../hooks'
 import styles from '../../list.module.css'
 import formStyles from './rules.module.css'
 import { alertLevelOptions, parseJsonObject } from '../../../../../utils/index'
+import { userFacingErrorMessage } from '../../../../../utils/userFacingError'
 
 const AlertRulesPage: React.FC = () => {
   const resource = useAsyncResource(() => api.admin.listAlertRules({ scope: AdminScope.GLOBAL }), [])
@@ -69,7 +70,7 @@ const AlertRulesPage: React.FC = () => {
       }
       resource.reload()
     } catch (submitError) {
-      setError((submitError as ApiError).message || (submitError as Error).message || '告警规则保存失败，请检查配置。')
+      setError(userFacingErrorMessage(submitError, '告警规则保存失败，请检查配置。'))
     } finally {
       setSubmitting(false)
     }

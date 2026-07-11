@@ -10,6 +10,7 @@ import { ErrorState, LoadingState } from '../../../../../components/ResourceStat
 import { useAsyncResource } from '../../../../../hooks/useAsyncResource'
 import styles from '../../contest.module.css'
 import { parseJsonObject, vulnLevelOptions, vulnRuntimeModeOptions } from '../../../../../utils/index'
+import { userFacingErrorMessage } from '../../../../../utils/userFacingError'
 
 const TeacherVulnerabilityWizardPage: React.FC = () => {
   const [sourceId, setSourceId] = useState('')
@@ -38,7 +39,7 @@ const TeacherVulnerabilityWizardPage: React.FC = () => {
       setProblem(result)
       setMessage('漏洞题草稿已导入。')
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : '暂时无法导入漏洞题，请检查草稿内容格式。')
+      setMessage(userFacingErrorMessage(error, '暂时无法导入漏洞题，请检查草稿内容格式。'))
     }
   }
 

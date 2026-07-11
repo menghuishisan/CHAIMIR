@@ -49,6 +49,7 @@ export interface ChaimirApi {
   grade: GradeApi
   sim: SimApi
   transfer: TransferApi
+  eventWebSocketUrl: () => string
   webSocketTicketProvider: (url: string) => Promise<string | null>
 }
 
@@ -72,9 +73,16 @@ export function createApi(config: ApiConfig): ChaimirApi {
     grade: new GradeApi(client),
     sim: new SimApi(client),
     transfer: new TransferApi(client),
+    eventWebSocketUrl: () => client.rootWsURL('/api/ws'),
     webSocketTicketProvider: async (url: string) => {
-      const response = await client.issueWebSocketTicket(url)
+      const response = await identity.issueWebSocketTicket(webSocketPath(url))
       return response.ticket
     },
   }
+}
+
+/** webSocketPath 提取后端票据需要绑定的 WebSocket 路径。 */
+function webSocketPath(url: string): string {
+  const base = typeof window === 'undefined' ? 'http://chaimir.local' : window.location.href
+  return new URL(url, base).pathname
 }

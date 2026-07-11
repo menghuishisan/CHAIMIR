@@ -14,6 +14,7 @@ export interface ResourceStateProps {
 export interface ResourceErrorStateProps extends ResourceStateProps {
   error: ApiError | null
   onRetry: () => void
+  actionLabel?: string
 }
 
 /**
@@ -52,6 +53,7 @@ export const ErrorState: React.FC<ResourceErrorStateProps> = ({
   onRetry,
   title = '暂时无法获取数据',
   description,
+  actionLabel = '重试',
 }) => (
   <div className={styles.errorCard} role="alert">
     <div className={styles.errorIcon} aria-hidden="true">
@@ -65,7 +67,7 @@ export const ErrorState: React.FC<ResourceErrorStateProps> = ({
       )}
     </div>
     <Button variant="outline" size="sm" icon={<RefreshCw size={16} />} onClick={onRetry}>
-      重试
+      {actionLabel}
     </Button>
   </div>
 )

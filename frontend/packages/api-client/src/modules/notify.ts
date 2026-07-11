@@ -100,12 +100,4 @@ export class NotifyApi {
     return this.client.post(`/notify/announcements/${announcementId}/read`)
   }
 
-  // ===== WebSocket =====
-
-  /**
-   * 获取 WebSocket URL
-   */
-  getWebSocketUrl(): string {
-    return this.client.rootWsURL('/api/ws')
-  }
 }

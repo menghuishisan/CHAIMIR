@@ -1,7 +1,7 @@
 // AuthConfigPage 管理当前租户 SSO 配置，敏感字段由后端脱敏和保存。
 
 import React, { useCallback, useMemo, useState } from 'react'
-import type { ApiError, SSOConfig } from '@chaimir/api-client'
+import type { SSOConfig } from '@chaimir/api-client'
 import { SsoMatchField, SsoType } from '@chaimir/api-client'
 import type { TableColumn } from '@chaimir/ui'
 import { Button, Callout, Select, Switch, Table, Textarea } from '@chaimir/ui'
@@ -11,6 +11,7 @@ import { ErrorState, LoadingState } from '../../../../../components/ResourceStat
 import { useAsyncResource } from '../../../../../hooks'
 import styles from '../../identity-admin.module.css'
 import { parseJsonObject, ssoMatchFieldLabel, ssoMatchFieldOptions, ssoTypeLabel, ssoTypeOptions } from '../../../../../utils/index'
+import { userFacingErrorMessage } from '../../../../../utils/userFacingError'
 
 
 
@@ -51,7 +52,7 @@ const AuthConfigPage: React.FC = () => {
       setMessage('认证配置已保存。')
       resource.reload()
     } catch (saveError) {
-      setError((saveError as ApiError).message || (saveError as Error).message || '认证配置保存失败，请检查内容。')
+      setError(userFacingErrorMessage(saveError, '认证配置保存失败，请检查内容。'))
     } finally {
       setSubmitting(false)
     }

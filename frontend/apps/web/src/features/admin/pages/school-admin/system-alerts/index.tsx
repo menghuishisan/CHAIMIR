@@ -1,7 +1,7 @@
 // SystemAlertsPage 展示学校管理员可见的系统告警事件，并调用 admin 后端处理接口。
 
 import React, { useCallback, useMemo, useState } from 'react'
-import type { AlertEvent, ApiError } from '@chaimir/api-client'
+import type { AlertEvent } from '@chaimir/api-client'
 import { AlertStatus } from '@chaimir/api-client'
 import type { TableColumn } from '@chaimir/ui'
 import { Button, Callout, Select, Table } from '@chaimir/ui'
@@ -11,6 +11,7 @@ import { ErrorState, LoadingState } from '../../../../../components/ResourceStat
 import { useAsyncResource } from '../../../../../hooks'
 import styles from '../../list.module.css'
 import { alertStatusFilterOptions, formatDateTime, alertStatusLabel } from '../../../../../utils/index'
+import { userFacingErrorMessage } from '../../../../../utils/userFacingError'
 
 const SystemAlertsPage: React.FC = () => {
   const [status, setStatus] = useState('')
@@ -33,7 +34,7 @@ const SystemAlertsPage: React.FC = () => {
       setMessage(successMessage)
       resource.reload()
     } catch (actionError) {
-      setError((actionError as ApiError).message || '告警处理失败，请稍后重试。')
+      setError(userFacingErrorMessage(actionError, '告警处理失败，请稍后重试。'))
     }
   }, [resource])
 

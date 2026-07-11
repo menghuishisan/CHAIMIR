@@ -1,15 +1,17 @@
 // PlatformSimulationsPage 审核仿真包预览报告，并调用 M4 审核接口。
 
 import React, { useCallback, useMemo, useState } from 'react'
-import type { ApiError, SimPackageReview, SimReviewResult } from '@chaimir/api-client'
+import type { SimPackageReview, SimReviewResult } from '@chaimir/api-client'
+import { SIM_PACKAGE_STATUS, SIM_REVIEW_RESULT } from '@chaimir/api-client'
 import type { TableColumn } from '@chaimir/ui'
 import { Button, Callout, Input, Select, Table } from '@chaimir/ui'
-import { CheckCircle, RefreshCw, Shield, XCircle } from 'lucide-react'
+import { Archive, CheckCircle, RefreshCw, RotateCcw, Shield, XCircle } from 'lucide-react'
 import { api } from '../../../../../app/api'
 import { ErrorState, LoadingState } from '../../../../../components/ResourceState'
 import { useAsyncResource } from '../../../../../hooks'
 import styles from '../../sim.module.css'
 import { simReviewResultOptions } from '../../../../../utils/index'
+import { userFacingErrorMessage } from '../../../../../utils/userFacingError'
 
 const PlatformSimulationsPage: React.FC = () => {
   const [result, setResult] = useState('')
@@ -33,7 +35,7 @@ const PlatformSimulationsPage: React.FC = () => {
       setMessage(successMessage)
       resource.reload()
     } catch (actionError) {
-      setError((actionError as ApiError).message || '审核操作失败，请稍后重试。')
+      setError(userFacingErrorMessage(actionError, '审核操作失败，请稍后重试。'))
     }
   }, [resource])
 
@@ -46,12 +48,20 @@ const PlatformSimulationsPage: React.FC = () => {
     {
       key: 'actions',
       title: '操作',
-      render: (row) => (
-        <div className={styles.actions}>
-          <Button variant="outline" size="sm" icon={<CheckCircle size={14} />} onClick={() => reviewAction(() => api.sim.approveReview(row.id), '仿真包已通过审核。')}>通过</Button>
-          <Button variant="ghost" size="sm" icon={<XCircle size={14} />} onClick={() => reviewAction(() => api.sim.rejectReview(row.id, rejectComment), '仿真包已退回。')}>退回</Button>
-        </div>
-      ),
+      render: (row) => {
+        const reviewPending = row.result === SIM_REVIEW_RESULT.PENDING && row.package?.status === SIM_PACKAGE_STATUS.REVIEWING
+        const canArchive = row.package?.status === SIM_PACKAGE_STATUS.PUBLISHED
+        const canRepublish = row.package?.status === SIM_PACKAGE_STATUS.ARCHIVED
+        return (
+          <div className={styles.actions}>
+            {reviewPending && <Button variant="outline" size="sm" icon={<CheckCircle size={14} />} onClick={() => reviewAction(() => api.sim.approveReview(row.id), '仿真包已通过审核。')}>通过</Button>}
+            {reviewPending && <Button variant="ghost" size="sm" icon={<XCircle size={14} />} onClick={() => reviewAction(() => api.sim.rejectReview(row.id, rejectComment), '仿真包已退回。')}>退回</Button>}
+            {canArchive && <Button variant="ghost" size="sm" icon={<Archive size={14} />} onClick={() => reviewAction(() => api.sim.archivePackage(row.package_id), '仿真包已下架。')}>下架</Button>}
+            {canRepublish && <Button variant="ghost" size="sm" icon={<RotateCcw size={14} />} onClick={() => reviewAction(() => api.sim.republishPackage(row.package_id), '仿真包已重新上架。')}>重新上架</Button>}
+            {!reviewPending && !canArchive && !canRepublish && <span className={styles.status}>暂无可用操作</span>}
+          </div>
+        )
+      },
     },
   ], [rejectComment, reviewAction])
 

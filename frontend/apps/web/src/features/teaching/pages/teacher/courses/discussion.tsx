@@ -1,16 +1,17 @@
 // TeacherCourseDiscussionPage 维护课程公告和讨论帖，所有动作调用 teaching 后端。
 
 import React, { useCallback, useMemo, useState } from 'react'
-import type { ApiError, TeachingAnnouncement, TeachingPost } from '@chaimir/api-client'
+import type { TeachingAnnouncement, TeachingPost } from '@chaimir/api-client'
 import type { TableColumn } from '@chaimir/ui'
 import { Button, Callout, Input, Table, Textarea } from '@chaimir/ui'
-import { MessageSquare, Pin, RefreshCw, Send, Trash2 } from 'lucide-react'
+import { Heart, MessageSquare, Pin, RefreshCw, Send, Trash2 } from 'lucide-react'
 import { useParams } from 'react-router-dom'
 import { api } from '../../../../../app/api'
 import { ErrorState, LoadingState } from '../../../../../components/ResourceState'
 import { useAsyncResource } from '../../../../../hooks'
 import styles from '../../teaching.module.css'
 import { formatDateTime } from '../../../../../utils/index'
+import { userFacingErrorMessage } from '../../../../../utils/userFacingError'
 
 const TeacherCourseDiscussionPage: React.FC = () => {
   const { id } = useParams()
@@ -38,7 +39,7 @@ const TeacherCourseDiscussionPage: React.FC = () => {
       setMessage('课程公告已发布。')
       announcements.reload()
     } catch (actionError) {
-      setError((actionError as ApiError).message || '课程公告发布失败，请稍后重试。')
+      setError(userFacingErrorMessage(actionError, '课程公告发布失败，请稍后重试。'))
     }
   }, [announcementContent, announcements, courseId, title])
 
@@ -51,7 +52,7 @@ const TeacherCourseDiscussionPage: React.FC = () => {
       setMessage('讨论帖已发布。')
       posts.reload()
     } catch (actionError) {
-      setError((actionError as ApiError).message || '讨论帖发布失败，请稍后重试。')
+      setError(userFacingErrorMessage(actionError, '讨论帖发布失败，请稍后重试。'))
     }
   }, [courseId, postContent, posts])
 
@@ -63,7 +64,7 @@ const TeacherCourseDiscussionPage: React.FC = () => {
       setMessage(successMessage)
       posts.reload()
     } catch (actionError) {
-      setError((actionError as ApiError).message || '讨论帖操作失败，请稍后重试。')
+      setError(userFacingErrorMessage(actionError, '讨论帖操作失败，请稍后重试。'))
     }
   }, [posts])
 
@@ -78,7 +79,7 @@ const TeacherCourseDiscussionPage: React.FC = () => {
       setMessage(successMessage)
       announcements.reload()
     } catch (actionError) {
-      setError((actionError as ApiError).message || '公告操作失败，请稍后重试。')
+      setError(userFacingErrorMessage(actionError, '公告操作失败，请稍后重试。'))
     }
   }, [announcements])
 
@@ -101,6 +102,7 @@ const TeacherCourseDiscussionPage: React.FC = () => {
       render: (row) => (
         <div className={styles.actions}>
           <Button variant="outline" size="sm" icon={<Pin size={14} />} onClick={() => postAction(() => api.teaching.pinPost(String(row.id)), '讨论帖已置顶。')}>置顶</Button>
+          <Button variant="ghost" size="sm" icon={<Heart size={14} />} onClick={() => postAction(() => api.teaching.likePost(String(row.id)), '已点赞讨论帖。')}>点赞</Button>
           <Button variant="ghost" size="sm" icon={<Trash2 size={14} />} onClick={() => postAction(() => api.teaching.deletePost(String(row.id)), '讨论帖已删除。')}>删除</Button>
         </div>
       ),

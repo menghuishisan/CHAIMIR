@@ -5,7 +5,7 @@ import type { LoginResponse, TenantOption } from '@chaimir/api-client'
 import { SmsScene } from '@chaimir/api-client'
 import { Button, Checkbox, FormField, Input, SegmentedControl } from '@chaimir/ui'
 import { ArrowLeft, Building2, IdCard } from 'lucide-react'
-import { useNavigate } from 'react-router-dom'
+import { useLocation, useNavigate } from 'react-router-dom'
 import { api } from '../../../../app/api'
 import { platformLayerEnabled } from '../../../../app/config'
 import { loginEntryPath, persistLoginTokens } from '../../../../utils/authSession'
@@ -18,6 +18,7 @@ type PhoneLoginMethod = 'password' | 'sms'
 export interface TenantSelectLoginState {
   tenants: TenantOption[]
   remember: boolean
+  returnPath?: string
   method:
     | { type: 'phone'; phone: string; password: string }
     | { type: 'sms'; phone: string; code: string }
@@ -44,14 +45,16 @@ const LoginPage: React.FC = () => {
   const [sendingSms, setSendingSms] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const navigate = useNavigate()
+  const location = useLocation()
+  const returnPath = (location.state as { from?: string } | null)?.from
 
   /**
    * completeLogin 持久化会话，并按服务端改密要求或账号角色决定落点。
    */
   const completeLogin = useCallback((response: LoginResponse) => {
     persistLoginTokens(response, remember)
-    navigate(loginEntryPath(response), { replace: true })
-  }, [navigate, remember])
+    navigate(loginEntryPath(response, returnPath), { replace: true })
+  }, [navigate, remember, returnPath])
 
   /**
    * openLoginView 切换手机号与校内账号表单，并清除上一种方式的错误提示。
@@ -79,6 +82,7 @@ const LoginPage: React.FC = () => {
           state: {
             tenants: response.tenants,
             remember,
+            returnPath,
             method: { type: 'phone', phone: phone.trim(), password },
           } satisfies TenantSelectLoginState,
         })
@@ -90,7 +94,7 @@ const LoginPage: React.FC = () => {
     } finally {
       setSubmitting(false)
     }
-  }, [completeLogin, navigate, password, phone, remember])
+  }, [completeLogin, navigate, password, phone, remember, returnPath])
 
   /**
    * handleAccountLogin 使用学校代号和校内账号完成登录。
@@ -135,6 +139,7 @@ const LoginPage: React.FC = () => {
           state: {
             tenants: response.tenants,
             remember,
+            returnPath,
             method: { type: 'sms', phone: phone.trim(), code: smsCode.trim() },
           } satisfies TenantSelectLoginState,
         })
@@ -146,7 +151,7 @@ const LoginPage: React.FC = () => {
     } finally {
       setSubmitting(false)
     }
-  }, [completeLogin, navigate, phone, remember, smsCode])
+  }, [completeLogin, navigate, phone, remember, returnPath, smsCode])
 
   /**
    * handleSendSms 请求登录验证码，并将服务端失败原因转换为用户向提示。
@@ -242,7 +247,7 @@ const LoginPage: React.FC = () => {
           <span className={styles.otherLoginLabel}>其他登录方式</span>
           <div className={styles.otherLoginActions}>
             <Button block variant="outline" icon={<IdCard size={16} />} onClick={() => openLoginView('account')}>学号或工号</Button>
-            <Button block variant="outline" icon={<Building2 size={16} />} onClick={() => navigate('/auth/sso')}>学校统一认证</Button>
+            <Button block variant="outline" icon={<Building2 size={16} />} onClick={() => navigate(returnPath ? `/auth/sso?return_to=${encodeURIComponent(returnPath)}` : '/auth/sso')}>学校统一认证</Button>
           </div>
         </div>
       ) : null}

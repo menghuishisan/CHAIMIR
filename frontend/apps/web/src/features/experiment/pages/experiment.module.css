@@ -141,23 +141,6 @@
   flex-wrap: wrap;
 }
 
-.workspace {
-  display: grid;
-  grid-template-columns: 320px minmax(0, 1fr);
-  min-height: calc(100vh - 96px);
-  background: var(--color-dark-bg);
-  color: var(--color-dark-text);
-}
-
-.workspacePanel {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-4);
-  border-right: 1px solid var(--color-glass-border);
-  background: var(--color-dark-surface);
-  padding: var(--space-5);
-}
-
 .workspaceTitle {
   margin: 0;
   color: var(--color-dark-text);
@@ -188,29 +171,6 @@
 .stageButtonActive {
   border-color: var(--color-primary);
   background: var(--color-primary-shadow);
-}
-
-.embedStage {
-  display: flex;
-  min-width: 0;
-  flex-direction: column;
-  background: var(--color-dark-bg);
-}
-
-.embedTopbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-3);
-  border-bottom: 1px solid var(--color-glass-border);
-  padding: var(--space-4);
-}
-
-.embedFrame {
-  flex: 1;
-  min-height: 560px;
-  border: 0;
-  background: var(--color-dark-bg);
 }
 
 .darkCard {
@@ -253,17 +213,9 @@
 
 @media (max-width: 900px) {
   .layout,
-  .workspace,
   .orchestration,
   .reportGrid {
     grid-template-columns: 1fr;
   }
 
-  .workspace {
-    min-height: auto;
-  }
-
-  .embedFrame {
-    min-height: 420px;
-  }
 }
