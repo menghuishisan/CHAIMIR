@@ -171,6 +171,7 @@ type SandboxResponse struct {
 	Phase               int16                          `json:"phase"`
 	Status              int16                          `json:"status"`
 	ToolAccess          []contracts.SandboxToolAccess  `json:"tool_access"`
+	Capabilities        contracts.SandboxCapabilities  `json:"capabilities"`
 	ResourceUsage       contracts.SandboxResourceUsage `json:"resource_usage"`
 }
 

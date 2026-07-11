@@ -22,7 +22,17 @@ export interface SandboxInstance {
   phase: SandboxPhase
   status: SandboxStatus
   tool_access: SandboxToolAccess[]
+  capabilities: SandboxCapabilities
   resource_usage: SandboxResourceUsage
+}
+
+export type SandboxChainOperation = 'deploy' | 'transaction' | 'query'
+
+export interface SandboxCapabilities {
+  file_workspace: boolean
+  terminal: boolean
+  command_tools: boolean
+  chain_operations: SandboxChainOperation[]
 }
 
 export interface SandboxToolAccess {

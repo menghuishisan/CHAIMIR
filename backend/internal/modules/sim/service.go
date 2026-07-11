@@ -41,6 +41,10 @@ type fileService interface {
 
 // BackendAdapter 是 M4 自有后端计算适配器,不得调用 M2 模块内部实现。
 type BackendAdapter interface {
+	// Descriptor 返回前端可安全展示的适配器能力,不得暴露镜像或集群细节。
+	Descriptor() BackendAdapterDescriptor
+	// ValidateConfig 在包进入审核前校验适配器专属配置。
+	ValidateConfig(config map[string]any) error
 	// Serve 在已鉴权的 WebSocket 上执行后端计算协议。
 	Serve(ctx context.Context, session SessionWithPackage, conn BackendConn) error
 	// Release 回收指定后端计算会话占用的适配器资源。
@@ -103,7 +107,16 @@ func NewService(deps ServiceDeps) (*Service, error) {
 		return nil, fmt.Errorf("sim service 缺少身份读取契约")
 	}
 	if deps.BackendAdapters == nil {
-		deps.BackendAdapters = BackendRegistry{}
+		return nil, fmt.Errorf("sim service 缺少后端计算适配器注册表")
+	}
+	for code, adapter := range deps.BackendAdapters {
+		if adapter == nil {
+			return nil, fmt.Errorf("sim backend adapter %q 不能为空", code)
+		}
+		descriptor := adapter.Descriptor()
+		if strings.TrimSpace(code) == "" || strings.TrimSpace(descriptor.Code) != strings.TrimSpace(code) || strings.TrimSpace(descriptor.Name) == "" || strings.TrimSpace(descriptor.Protocol) == "" {
+			return nil, fmt.Errorf("sim backend adapter %q 描述无效", code)
+		}
 	}
 	return &Service{store: deps.Store, ids: deps.IDs, upload: deps.Upload, storage: deps.Storage, files: deps.FileService, audit: deps.Audit, identity: deps.Identity, wsHub: deps.WSHub, backends: deps.BackendAdapters}, nil
 }

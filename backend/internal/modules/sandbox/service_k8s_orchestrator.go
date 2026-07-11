@@ -54,7 +54,7 @@ func (o *K8sOrchestrator) CreateSandboxResources(ctx context.Context, plan Creat
 	if _, err := cs.CoreV1().Namespaces().Create(ctx, ns, metav1.CreateOptions{}); err != nil && !apierrors.IsAlreadyExists(err) {
 		return fmt.Errorf("创建沙箱 Namespace 失败: %w", err)
 	}
-	if err := o.ensureImagePullSecrets(ctx, cs, plan.Sandbox.Namespace); err != nil {
+	if err := o.ensureImagePullSecrets(ctx, plan.Sandbox.Namespace); err != nil {
 		return err
 	}
 	if err := o.applySandboxServiceAccount(ctx, cs, plan); err != nil {
@@ -193,7 +193,7 @@ func (o *K8sOrchestrator) RestoreSnapshotResources(ctx context.Context, plan Cre
 	if _, err := cs.CoreV1().Namespaces().Create(ctx, ns, metav1.CreateOptions{}); err != nil && !apierrors.IsAlreadyExists(err) {
 		return fmt.Errorf("创建快照恢复 Namespace 失败: %w", err)
 	}
-	if err := o.ensureImagePullSecrets(ctx, cs, plan.Sandbox.Namespace); err != nil {
+	if err := o.ensureImagePullSecrets(ctx, plan.Sandbox.Namespace); err != nil {
 		return err
 	}
 	if err := o.applySandboxServiceAccount(ctx, cs, plan); err != nil {
@@ -319,7 +319,7 @@ func (o *K8sOrchestrator) PrepullImage(ctx context.Context, image RuntimeImage, 
 	imageURLs := prepullSpecImageURLs(specs)
 	ds := o.prepullDaemonSet(image, specs)
 	cs := o.client.Clientset()
-	if err := o.ensureImagePullSecrets(ctx, cs, o.cfg.PrepullNamespace); err != nil {
+	if err := o.ensureImagePullSecrets(ctx, o.cfg.PrepullNamespace); err != nil {
 		return PrepullResult{DaemonSet: ds.Name}, err
 	}
 	client := cs.AppsV1().DaemonSets(o.cfg.PrepullNamespace)
@@ -732,106 +732,9 @@ func (o *K8sOrchestrator) applySandboxServiceAccount(ctx context.Context, cs kub
 	return nil
 }
 
-// ensureImagePullSecrets 将控制命名空间的镜像拉取 Secret 同步到目标命名空间。
-func (o *K8sOrchestrator) ensureImagePullSecrets(ctx context.Context, cs kubernetes.Interface, namespace string) error {
-	refs := imagePullSecrets(o.cfg.ImagePullSecretNames)
-	if len(refs) == 0 {
-		return nil
-	}
-	sourceNamespace := strings.TrimSpace(o.cfg.ControlNamespace)
-	if sourceNamespace == "" {
-		return fmt.Errorf("SANDBOX_CONTROL_NAMESPACE 不能为空")
-	}
-	if namespace == sourceNamespace {
-		return nil
-	}
-	sourceClient := cs.CoreV1().Secrets(sourceNamespace)
-	targetClient := cs.CoreV1().Secrets(namespace)
-	for _, ref := range refs {
-		source, err := sourceClient.Get(ctx, ref.Name, metav1.GetOptions{})
-		if err != nil {
-			return fmt.Errorf("查询镜像拉取 Secret %s/%s 失败: %w", sourceNamespace, ref.Name, err)
-		}
-		if !isImagePullSecretType(source.Type) {
-			return fmt.Errorf("镜像拉取 Secret %s/%s 类型不符合 imagePullSecret 要求", sourceNamespace, ref.Name)
-		}
-		desired := imagePullSecretForNamespace(source, namespace)
-		existing, err := targetClient.Get(ctx, desired.Name, metav1.GetOptions{})
-		if apierrors.IsNotFound(err) {
-			if _, err := targetClient.Create(ctx, desired, metav1.CreateOptions{}); err != nil {
-				return fmt.Errorf("创建镜像拉取 Secret %s/%s 失败: %w", namespace, desired.Name, err)
-			}
-			continue
-		}
-		if err != nil {
-			return fmt.Errorf("查询镜像拉取 Secret %s/%s 失败: %w", namespace, desired.Name, err)
-		}
-		if sameSecretTypeAndData(existing, desired) {
-			continue
-		}
-		updated := existing.DeepCopy()
-		updated.Type = desired.Type
-		updated.Data = desired.Data
-		if updated.Labels == nil {
-			updated.Labels = map[string]string{}
-		}
-		for key, value := range desired.Labels {
-			updated.Labels[key] = value
-		}
-		if _, err := targetClient.Update(ctx, updated, metav1.UpdateOptions{}); err != nil {
-			return fmt.Errorf("更新镜像拉取 Secret %s/%s 失败: %w", namespace, desired.Name, err)
-		}
-	}
-	return nil
-}
-
-// isImagePullSecretType 限定复制范围,避免把普通业务 Secret 当作镜像凭据传播。
-func isImagePullSecretType(secretType corev1.SecretType) bool {
-	return secretType == corev1.SecretTypeDockerConfigJson || secretType == corev1.SecretTypeDockercfg
-}
-
-// imagePullSecretForNamespace 构造目标命名空间内的最小镜像拉取 Secret。
-func imagePullSecretForNamespace(source *corev1.Secret, namespace string) *corev1.Secret {
-	return &corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      source.Name,
-			Namespace: namespace,
-			Labels: map[string]string{
-				"app":                   "chaimir",
-				"module":                "sandbox",
-				"chaimir.io/managed-by": "chaimir-backend",
-				"chaimir.io/purpose":    "image-pull",
-			},
-		},
-		Type: source.Type,
-		Data: copySecretData(source.Data),
-	}
-}
-
-// sameSecretTypeAndData 判断目标 Secret 是否已与源 Secret 同步,避免无意义更新。
-func sameSecretTypeAndData(current, desired *corev1.Secret) bool {
-	if current.Type != desired.Type || len(current.Data) != len(desired.Data) {
-		return false
-	}
-	for key, desiredValue := range desired.Data {
-		currentValue, ok := current.Data[key]
-		if !ok || !bytes.Equal(currentValue, desiredValue) {
-			return false
-		}
-	}
-	return true
-}
-
-// copySecretData 深拷贝 Secret 数据,避免复用 informer/client 对象底层切片。
-func copySecretData(in map[string][]byte) map[string][]byte {
-	if len(in) == 0 {
-		return nil
-	}
-	out := make(map[string][]byte, len(in))
-	for key, value := range in {
-		out[key] = append([]byte(nil), value...)
-	}
-	return out
+// ensureImagePullSecrets 复用平台层能力同步动态命名空间所需的最小镜像凭据。
+func (o *K8sOrchestrator) ensureImagePullSecrets(ctx context.Context, namespace string) error {
+	return o.client.SyncImagePullSecrets(ctx, o.cfg.ControlNamespace, namespace, "sandbox", o.cfg.ImagePullSecretNames)
 }
 
 // sameLocalObjectReferences 比较 ServiceAccount 镜像拉取引用是否已经是期望值。

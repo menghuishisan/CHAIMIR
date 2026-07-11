@@ -233,6 +233,8 @@ paths:
     $ref: './paths/sim.yaml#/api/v1/sim/shared/{code}'
   /api/v1/sim/packages:
     $ref: './paths/sim.yaml#/api/v1/sim/packages'
+  /api/v1/sim/backend-capabilities:
+    $ref: './paths/sim.yaml#/api/v1/sim/backend-capabilities'
   /api/v1/sim/packages/{key}:
     $ref: './paths/sim.yaml#/api/v1/sim/packages/{key}'
   /api/v1/sim/packages/{key}/versions:

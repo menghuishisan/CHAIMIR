@@ -1,5 +1,5 @@
-# 动态沙箱命名空间准入策略。
-# 依据 docs/总-部署架构设计.md §二/§九:后端 ServiceAccount 只能操作 sbx-*/judge-*/battle-* 动态命名空间。
+# 动态运行工作负载命名空间准入策略。
+# 依据 docs/总-部署架构设计.md §二/§九:后端 ServiceAccount 只能操作 sbx-*/judge-*/battle-*/sim-* 动态命名空间。
 # Kubernetes RBAC 无法用通配符限制 namespace 名称,因此用 ValidatingAdmissionPolicy 在准入层强制约束。
 ---
 apiVersion: admissionregistration.k8s.io/v1
@@ -24,9 +24,10 @@ spec:
         (
           request.name.startsWith('sbx-') ||
           request.name.startsWith('judge-') ||
-          request.name.startsWith('battle-')
+          request.name.startsWith('battle-') ||
+          request.name.startsWith('sim-')
         )
-      message: "Chaimir 后端只能管理 sbx-/judge-/battle- 前缀的动态沙箱命名空间。"
+      message: "Chaimir 后端只能管理 sbx-/judge-/battle-/sim- 前缀的动态运行命名空间。"
     - expression: >
         !(
           request.userInfo.username == 'system:serviceaccount:chaimir-system:chaimir-backend' &&
@@ -35,10 +36,25 @@ spec:
         (
           has(object.metadata.labels) &&
           object.metadata.labels['app.kubernetes.io/part-of'] == 'chaimir' &&
-          object.metadata.labels['chaimir.io/sandbox'] == 'true' &&
-          object.metadata.labels['chaimir.io/managed-by'] == 'chaimir-backend'
+          object.metadata.labels['chaimir.io/managed-by'] == 'chaimir-backend' &&
+          (
+            (
+              (
+                request.name.startsWith('sbx-') ||
+                request.name.startsWith('judge-') ||
+                request.name.startsWith('battle-')
+              ) &&
+              'chaimir.io/sandbox' in object.metadata.labels &&
+              object.metadata.labels['chaimir.io/sandbox'] == 'true'
+            ) ||
+            (
+              request.name.startsWith('sim-') &&
+              'chaimir.io/sim' in object.metadata.labels &&
+              object.metadata.labels['chaimir.io/sim'] == 'true'
+            )
+          )
         )
-      message: "Chaimir 动态沙箱命名空间必须带平台所有权标签。"
+      message: "Chaimir 动态运行命名空间必须带对应引擎的平台所有权标签。"
 ---
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicyBinding

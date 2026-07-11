@@ -22,7 +22,7 @@ deploy/
 │   └── kustomization.yaml   config component:生成两命名空间 ConfigMap
 ├── base/                    通用资源(命名空间/RBAC/应用/入口/策略/定时任务)
 │   ├── namespaces/          chaimir-system / chaimir-data / monitoring + PodSecurity
-│   ├── rbac/                后端 SA + 最小 ClusterRole(动态沙箱命名空间管理)
+│   ├── rbac/                后端 SA + 最小 ClusterRole(动态运行命名空间管理)
 │   ├── backend/             后端单体 Deployment + Service
 │   ├── frontend/            前端 Nginx Deployment + Service
 │   ├── migrate/             迁移 + RLS 初始化 + seed Job
@@ -208,8 +208,8 @@ README、docs 或仅前端资源变更不创建 staging Deployment。staging 只
 ## 安全基线
 
 - NetworkPolicy 默认 deny-all,精确放行(系统↔数据严格隔离;动态沙箱完全隔离模板)。
-- 后端 ServiceAccount 最小 RBAC,仅能管理动态沙箱命名空间/Pod,绝不集群管理员。
-- ValidatingAdmissionPolicy 约束后端 ServiceAccount 只能管理带平台所有权标签的 `sbx-*`/`judge-*`/`battle-*` 命名空间。
+- 后端 ServiceAccount 最小 RBAC,仅能管理动态沙箱/仿真计算命名空间与 Pod,绝不集群管理员。
+- ValidatingAdmissionPolicy 约束后端 ServiceAccount 只能管理带对应引擎所有权标签的 `sbx-*`/`judge-*`/`battle-*`/`sim-*` 命名空间。
 - 所有工作负载 PodSecurity restricted:non-root、禁特权、只读根、drop ALL capabilities、seccomp RuntimeDefault。
 - 密钥经 Secret/KMS 注入,不入镜像/不入仓库。
 - 镜像签名校验门禁(`base/admission/image-signature-policy.yaml`,集群侧 Sigstore policy-controller 执行)。

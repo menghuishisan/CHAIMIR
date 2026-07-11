@@ -3,12 +3,27 @@ package sim
 
 import (
 	"context"
+	"sort"
 	"strings"
 
 	"chaimir/internal/platform/jsonx"
 	"chaimir/internal/platform/ws"
 	"chaimir/pkg/apperr"
 )
+
+// BackendCapabilities 返回当前组合根真实注册的后端计算适配器。
+func (s *Service) BackendCapabilities() BackendCapabilitiesDTO {
+	items := make([]BackendAdapterDescriptor, 0, len(s.backends))
+	for _, adapter := range s.backends {
+		if adapter == nil {
+			continue
+		}
+		descriptor := adapter.Descriptor()
+		items = append(items, descriptor)
+	}
+	sort.Slice(items, func(i, j int) bool { return items[i].Code < items[j].Code })
+	return BackendCapabilitiesDTO{BackendCompute: len(items) > 0, Adapters: items}
+}
 
 // validateBackendAdapterAvailable 确保 compute=backend 包只能使用已装配的 M4 自有适配器。
 func validateBackendAdapterAvailable(compute int16, adapterCode string, registry BackendRegistry) error {
@@ -18,6 +33,20 @@ func validateBackendAdapterAvailable(compute int16, adapterCode string, registry
 	adapterCode = strings.TrimSpace(adapterCode)
 	if adapterCode == "" || registry == nil || registry[adapterCode] == nil {
 		return apperr.ErrSimBackendComputeUnavailable
+	}
+	return nil
+}
+
+// validateBackendAdapterConfig 在 M4 边界统一校验适配器存在性和包配置。
+func validateBackendAdapterConfig(compute int16, adapterCode string, backendConfig map[string]any, registry BackendRegistry) error {
+	if err := validateBackendAdapterAvailable(compute, adapterCode, registry); err != nil {
+		return err
+	}
+	if compute != ComputeBackend {
+		return nil
+	}
+	if err := registry[strings.TrimSpace(adapterCode)].ValidateConfig(backendConfig); err != nil {
+		return apperr.ErrSimPackageInvalid.WithCause(err)
 	}
 	return nil
 }
@@ -41,7 +70,7 @@ func (s *Service) ServeBackendStream(ctx context.Context, conn *ws.Conn, tenantI
 	if session.Compute != ComputeBackend || session.Status == SessionArchived || session.Status == SessionFailed || strings.TrimSpace(session.BackendAdapter) == "" {
 		return apperr.ErrSimBackendComputeUnavailable
 	}
-	if err := validateBackendAdapterAvailable(session.Compute, session.BackendAdapter, s.backends); err != nil {
+	if err := validateBackendAdapterConfig(session.Compute, session.BackendAdapter, session.BackendConfig, s.backends); err != nil {
 		return err
 	}
 	adapter := s.backends[strings.TrimSpace(session.BackendAdapter)]

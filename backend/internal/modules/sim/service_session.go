@@ -33,7 +33,7 @@ func (s *Service) CreateSession(ctx context.Context, req contracts.SimCreateSess
 	if pkg.Status != PackageStatusPublished {
 		return contracts.SimSessionInfo{}, apperr.ErrSimPackageUnavailable
 	}
-	if err := validateBackendAdapterAvailable(pkg.Compute, pkg.BackendAdapter, s.backends); err != nil {
+	if err := validateBackendAdapterConfig(pkg.Compute, pkg.BackendAdapter, pkg.BackendConfig, s.backends); err != nil {
 		return contracts.SimSessionInfo{}, err
 	}
 	session := Session{ID: s.ids.Generate(), TenantID: req.TenantID, PackageID: pkg.ID, SourceRef: req.SourceRef, OwnerAccountID: req.OwnerAccountID, Seed: req.Seed, InitParams: initParams, Compute: pkg.Compute, Status: SessionCreating}
@@ -385,7 +385,7 @@ func (s *Service) releaseBackendSessions(ctx context.Context, tenantID int64, se
 			return err
 		}
 		adapter := s.backends[strings.TrimSpace(session.BackendAdapter)]
-		if err := validateBackendAdapterAvailable(session.Compute, session.BackendAdapter, s.backends); err != nil {
+		if err := validateBackendAdapterConfig(session.Compute, session.BackendAdapter, session.BackendConfig, s.backends); err != nil {
 			return err
 		}
 		if err := adapter.Release(ctx, session); err != nil {

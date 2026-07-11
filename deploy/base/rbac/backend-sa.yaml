@@ -1,12 +1,12 @@
 # 后端单体的 ServiceAccount 与最小 RBAC。
 # 依据 docs/总-部署架构设计.md §二/§九:
-#   后端 ServiceAccount 通过 client-go 创建/销毁动态沙箱命名空间(sbx-*/judge-*/battle-*)
+#   后端 ServiceAccount 通过 client-go 创建/销毁动态运行命名空间(sbx-*/judge-*/battle-*/sim-*)
 #   及其中的 Pod;权限取最小集,绝不授予集群管理员。
 #
 # K8s RBAC 局限说明(重要):
-#   RBAC 的 resourceNames 不支持通配,无法限定"仅能操作名为 sbx-*/judge-*/battle-* 的命名空间"。
+#   RBAC 的 resourceNames 不支持通配,无法限定"仅能操作指定前缀动态命名空间"。
 #   因此 namespace 的 create/delete 是集群级动词。名称模式与"仅删除自己创建的命名空间"
-#   这一约束由 M2 沙箱控制面代码强制(创建时打平台所有权标签,删除前校验),并由
+#   这一约束由运行引擎代码强制(创建时打平台所有权标签,删除前校验),并由
 #   base/admission/sandbox-namespace-policy.yaml 的 ValidatingAdmissionPolicy 在准入层兜底。
 ---
 apiVersion: v1
@@ -29,7 +29,7 @@ metadata:
   labels:
     app.kubernetes.io/part-of: chaimir
 rules:
-  # 动态沙箱命名空间的创建/销毁(名称模式由代码 + ValidatingAdmissionPolicy 约束)。
+  # 动态运行命名空间的创建/销毁(名称模式由代码 + ValidatingAdmissionPolicy 约束)。
   - apiGroups: [""]
     resources: ["namespaces"]
     verbs: ["create", "delete", "get", "list", "watch"]
@@ -42,7 +42,7 @@ rules:
     resources: ["storageclasses"]
     verbs: ["get", "list", "watch"]
 ---
-# 命名空间内工作负载管理权限,经下方 ClusterRoleBinding 绑定后,
+# 命名空间内运行工作负载管理权限,经下方 ClusterRoleBinding 绑定后,
 # 在后端创建的每个动态命名空间内由 client-go 套用(此处定义为可复用 ClusterRole,
 # 实际作用域受动态命名空间存在性约束;沙箱命名空间用后即毁,权限随之失效)。
 apiVersion: rbac.authorization.k8s.io/v1
@@ -52,7 +52,7 @@ metadata:
   labels:
     app.kubernetes.io/part-of: chaimir
 rules:
-  # 沙箱 Pod 组的编排(每沙箱 = Namespace + Pod(s),见 docs/镜像 §三之二)。
+  # 沙箱与 M4 后端仿真 Pod 的编排。
   - apiGroups: [""]
     resources: ["pods", "pods/log", "pods/exec", "pods/status"]
     verbs: ["create", "delete", "get", "list", "watch"]
@@ -64,7 +64,7 @@ rules:
   - apiGroups: [""]
     resources: ["services", "configmaps"]
     verbs: ["create", "delete", "get", "list", "watch"]
-  # 动态沙箱命名空间内只同步 imagePullSecret,用于 Harbor 私有 digest 镜像拉取。
+  # 动态运行命名空间内只同步 imagePullSecret,用于 Harbor 私有 digest 镜像拉取。
   - apiGroups: [""]
     resources: ["secrets"]
     verbs: ["create", "delete", "get", "list", "watch", "update"]
@@ -72,7 +72,7 @@ rules:
   - apiGroups: [""]
     resources: ["persistentvolumeclaims"]
     verbs: ["create", "delete", "get", "list", "watch"]
-  # 沙箱命名空间的 deny-all NetworkPolicy 由后端套用(SSOT 模板见 networkpolicy)。
+  # 动态运行命名空间的 deny-all NetworkPolicy 由后端套用。
   - apiGroups: ["networking.k8s.io"]
     resources: ["networkpolicies"]
     verbs: ["create", "delete", "get", "list", "watch"]

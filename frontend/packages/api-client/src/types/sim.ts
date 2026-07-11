@@ -29,6 +29,18 @@ export interface SimPackageSubmit {
   backend_config?: Record<string, unknown>
 }
 
+export interface SimBackendAdapterDescriptor {
+  code: string
+  name: string
+  protocol: string
+  description: string
+}
+
+export interface SimBackendCapabilities {
+  backend_compute: boolean
+  adapters: SimBackendAdapterDescriptor[]
+}
+
 export interface SimBundleDownloadGrant {
   token?: string
   bundle_hash: string

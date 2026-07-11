@@ -4,7 +4,7 @@
 #   chaimir-data    PostgreSQL / Redis / MinIO / NATS / ClamAV(或外接托管)
 #   chaimir-prepull M2 镜像预拉取 DaemonSet
 #   monitoring      Prometheus / Grafana(外接,M9 嵌入)
-# 动态命名空间 sbx-* / judge-* / battle-* 由后端 ServiceAccount 运行时按需创建/销毁,
+# 动态命名空间 sbx-* / judge-* / battle-* / sim-* 由后端 ServiceAccount 运行时按需创建/销毁,
 # 不在此处静态声明(见 base/rbac 与 base/networkpolicy 的动态模板)。
 #
 # PodSecurity Admission:

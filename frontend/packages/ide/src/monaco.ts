@@ -15,7 +15,8 @@ const monacoThemeTokens = {
  * mountMonacoEditor 动态加载 monaco-editor 并挂载到指定容器，避免四端首屏强制加载编辑器资源。
  */
 export async function mountMonacoEditor(container: HTMLElement, options: EditorMountOptions): Promise<MountedEditor> {
-  const monaco = await import('monaco-editor')
+  const { monaco, prepareMonacoLanguage } = await import('./monaco-runtime')
+  await prepareMonacoLanguage(options.language)
   const editorBackground = cssColor(monacoThemeTokens.background)
 
   monaco.editor.defineTheme('chaimir-dark', {

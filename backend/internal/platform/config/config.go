@@ -25,6 +25,7 @@ type Config struct {
 	Identity   IdentityConfig
 	SMS        SMSConfig
 	Upload     UploadConfig
+	SimBackend SimBackendConfig
 	Transfer   TransferConfig
 	Contest    ContestConfig
 	Notify     NotifyConfig
@@ -181,6 +182,23 @@ type UploadConfig struct {
 	VirusScanAddress            string
 	VirusScanTimeoutSeconds     int
 	VirusScanMaxBytes           int64
+}
+
+// SimBackendConfig 描述 M4 后端计算仿真的隔离工作负载边界。
+type SimBackendConfig struct {
+	NamespacePrefix        string
+	GraphLayoutImage       string
+	CPURequest             string
+	CPULimit               string
+	MemoryRequest          string
+	MemoryLimit            string
+	EphemeralStorageLimit  string
+	PodReadyTimeoutSeconds int
+	ExecTimeoutSeconds     int
+	MaxInputBytes          int64
+	MaxOutputBytes         int64
+	MaxGraphNodes          int
+	MaxGraphEdges          int
 }
 
 // TransferConfig 描述统一导入导出中心的任务重试与下载中心边界。
@@ -552,6 +570,21 @@ func Load() (*Config, error) {
 		VirusScanTimeoutSeconds:     reqInt("UPLOAD_VIRUS_SCAN_TIMEOUT_SECONDS"),
 		VirusScanMaxBytes:           reqInt64("UPLOAD_VIRUS_SCAN_MAX_BYTES"),
 	}
+	c.SimBackend = SimBackendConfig{
+		NamespacePrefix:        req("SIM_BACKEND_NAMESPACE_PREFIX"),
+		GraphLayoutImage:       req("SIM_BACKEND_GRAPH_LAYOUT_IMAGE"),
+		CPURequest:             req("SIM_BACKEND_CPU_REQUEST"),
+		CPULimit:               req("SIM_BACKEND_CPU_LIMIT"),
+		MemoryRequest:          req("SIM_BACKEND_MEMORY_REQUEST"),
+		MemoryLimit:            req("SIM_BACKEND_MEMORY_LIMIT"),
+		EphemeralStorageLimit:  req("SIM_BACKEND_EPHEMERAL_STORAGE_LIMIT"),
+		PodReadyTimeoutSeconds: reqInt("SIM_BACKEND_POD_READY_TIMEOUT_SECONDS"),
+		ExecTimeoutSeconds:     reqInt("SIM_BACKEND_EXEC_TIMEOUT_SECONDS"),
+		MaxInputBytes:          reqInt64("SIM_BACKEND_MAX_INPUT_BYTES"),
+		MaxOutputBytes:         reqInt64("SIM_BACKEND_MAX_OUTPUT_BYTES"),
+		MaxGraphNodes:          reqInt("SIM_BACKEND_MAX_GRAPH_NODES"),
+		MaxGraphEdges:          reqInt("SIM_BACKEND_MAX_GRAPH_EDGES"),
+	}
 	c.Transfer = TransferConfig{
 		TaskMaxAttempts:        reqInt("TRANSFER_TASK_MAX_ATTEMPTS"),
 		TaskRetryDelayMs:       reqInt("TRANSFER_TASK_RETRY_DELAY_MS"),
@@ -762,6 +795,32 @@ func Load() (*Config, error) {
 	}
 	if c.Upload.SimValidationReportMaxBytes <= 0 {
 		errs = append(errs, "UPLOAD_SIM_VALIDATION_REPORT_MAX_BYTES 必须大于 0")
+	}
+	if c.SimBackend.PodReadyTimeoutSeconds <= 0 || c.SimBackend.ExecTimeoutSeconds <= 0 {
+		errs = append(errs, "SIM_BACKEND_POD_READY_TIMEOUT_SECONDS 和 SIM_BACKEND_EXEC_TIMEOUT_SECONDS 必须大于 0")
+	}
+	if c.SimBackend.MaxInputBytes <= 0 || c.SimBackend.MaxOutputBytes <= 0 {
+		errs = append(errs, "SIM_BACKEND_MAX_INPUT_BYTES 和 SIM_BACKEND_MAX_OUTPUT_BYTES 必须大于 0")
+	}
+	if c.SimBackend.MaxGraphNodes <= 0 || c.SimBackend.MaxGraphEdges <= 0 {
+		errs = append(errs, "SIM_BACKEND_MAX_GRAPH_NODES 和 SIM_BACKEND_MAX_GRAPH_EDGES 必须大于 0")
+	}
+	if !validKubernetesNamePrefix(c.SimBackend.NamespacePrefix) {
+		errs = append(errs, "SIM_BACKEND_NAMESPACE_PREFIX 必须以 sim- 开头、以连字符结尾且只含小写字母数字或连字符")
+	}
+	for key, value := range map[string]string{
+		"SIM_BACKEND_CPU_REQUEST":             c.SimBackend.CPURequest,
+		"SIM_BACKEND_CPU_LIMIT":               c.SimBackend.CPULimit,
+		"SIM_BACKEND_MEMORY_REQUEST":          c.SimBackend.MemoryRequest,
+		"SIM_BACKEND_MEMORY_LIMIT":            c.SimBackend.MemoryLimit,
+		"SIM_BACKEND_EPHEMERAL_STORAGE_LIMIT": c.SimBackend.EphemeralStorageLimit,
+	} {
+		if _, err := resource.ParseQuantity(value); err != nil {
+			errs = append(errs, fmt.Sprintf("环境变量 %s 需为 Kubernetes quantity,实际=%q", key, value))
+		}
+	}
+	if !imageAttestationAllows(c.Sandbox.ImageAttestations, c.SimBackend.GraphLayoutImage, c.Sandbox.ImageRegistry) {
+		errs = append(errs, "SIM_BACKEND_GRAPH_LAYOUT_IMAGE 必须命中已签名且扫描通过的镜像证明")
 	}
 	if c.Upload.VirusScanRequired && strings.TrimSpace(c.Upload.VirusScanAddress) == "" {
 		errs = append(errs, "UPLOAD_VIRUS_SCAN_REQUIRED=true 时必须设置 UPLOAD_VIRUS_SCAN_ADDRESS")
@@ -1062,6 +1121,37 @@ func isLocalLikeEnv(appEnv string) bool {
 	default:
 		return false
 	}
+}
+
+// validKubernetesNamePrefix 校验 M4 动态命名空间前缀可安全拼接十进制会话编号。
+func validKubernetesNamePrefix(prefix string) bool {
+	prefix = strings.TrimSpace(prefix)
+	if len(prefix) < 5 || len(prefix) > 40 || !strings.HasPrefix(prefix, "sim-") || !strings.HasSuffix(prefix, "-") {
+		return false
+	}
+	for _, char := range prefix[:len(prefix)-1] {
+		if (char < 'a' || char > 'z') && (char < '0' || char > '9') && char != '-' {
+			return false
+		}
+	}
+	return prefix[0] >= 'a' && prefix[0] <= 'z'
+}
+
+// imageAttestationAllows 确保 M4 只执行供应链证明中已签名且扫描通过的精确 digest 镜像。
+func imageAttestationAllows(items []SandboxImageAttestation, imageURL, registry string) bool {
+	imageURL = strings.TrimSpace(imageURL)
+	registry = strings.Trim(strings.TrimSpace(strings.TrimPrefix(strings.TrimPrefix(registry, "https://"), "http://")), "/")
+	digestIndex := strings.LastIndex(imageURL, "@sha256:")
+	if imageURL == "" || registry == "" || digestIndex <= 0 || !strings.HasPrefix(imageURL, registry+"/") {
+		return false
+	}
+	digest := imageURL[digestIndex+1:]
+	for _, item := range items {
+		if strings.TrimSpace(item.ImageURL) == imageURL && strings.TrimSpace(item.Digest) == digest && item.CosignVerified && strings.EqualFold(strings.TrimSpace(item.TrivyStatus), "passed") {
+			return true
+		}
+	}
+	return false
 }
 
 // readSandboxImageAttestations 解析镜像证明 JSON 数组,并校验证明字段完整性。

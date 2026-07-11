@@ -27,6 +27,14 @@
     security: [{ bearerAuth: [] }]
     requestBody: { $ref: "#/components/requestBodies/MultipartBody" }
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/sim/backend-capabilities:
+  get:
+    tags: [sim]
+    summary: 查询当前部署可用的后端计算适配器
+    operationId: simGetBackendCapabilities
+    x-chaimir-audience: teacher
+    security: [{ bearerAuth: [] }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
 /api/v1/sim/packages/{key}:
   patch:
     tags: [sim]

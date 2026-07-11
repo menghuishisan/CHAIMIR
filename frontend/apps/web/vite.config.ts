@@ -22,4 +22,8 @@ export default defineConfig({
     port: 5173,
     host: true,
   },
+  build: {
+    // Monaco 核心仅在打开编辑器时加载;语言与 Worker 已独立分块,告警线按可选核心资产校准。
+    chunkSizeWarningLimit: 3000,
+  },
 })

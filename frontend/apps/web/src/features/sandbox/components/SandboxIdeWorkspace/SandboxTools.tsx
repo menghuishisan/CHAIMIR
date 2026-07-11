@@ -1,6 +1,6 @@
 // SandboxTools 映射沙箱工具状态，并提供命令与统一链操作面板。
 
-import React, { useState } from 'react'
+import React, { useMemo, useState } from 'react'
 import type { IdeWorkbenchTool } from '@chaimir/ide'
 import type { SandboxInstance } from '@chaimir/api-client'
 import { SandboxToolKind, SandboxToolStatus } from '@chaimir/api-client'
@@ -14,12 +14,24 @@ import styles from './SandboxIdeWorkspace.module.css'
 /** SandboxOperations 提供后端声明的命令工具和统一链操作入口。 */
 export function SandboxOperations({ sandboxId, instance }: { sandboxId: string; instance: SandboxInstance }): React.ReactElement {
   const commandTools = instance.tool_access.filter((tool) => tool.kind === SandboxToolKind.COMMAND)
-  const [mode, setMode] = useState('command')
+  const modeOptions = useMemo(() => {
+    const options: Array<{ value: string; label: string }> = []
+    if (instance.capabilities.command_tools && commandTools.length > 0) options.push({ value: 'command', label: '运行命令工具' })
+    if (instance.capabilities.chain_operations.includes('deploy')) options.push({ value: 'deploy', label: '部署到实验链' })
+    if (instance.capabilities.chain_operations.includes('transaction')) options.push({ value: 'transaction', label: '发送实验链交易' })
+    if (instance.capabilities.chain_operations.includes('query')) options.push({ value: 'query', label: '查询实验链状态' })
+    return options
+  }, [commandTools.length, instance.capabilities.chain_operations, instance.capabilities.command_tools])
+  const [mode, setMode] = useState(modeOptions[0]?.value || '')
   const [toolCode, setToolCode] = useState(commandTools[0]?.tool_code || '')
   const [input, setInput] = useState('')
   const [result, setResult] = useState('')
   const [error, setError] = useState<string>()
   const [running, setRunning] = useState(false)
+
+  if (modeOptions.length === 0) {
+    return <section className={styles.operations} aria-label="沙箱工具"><h2>沙箱工具</h2><p>当前实验环境没有可执行的附加操作。</p></section>
+  }
 
   /** runOperation 校验输入后调用命令或链能力，并把结构化结果展示给用户。 */
   const runOperation = async () => {
@@ -53,12 +65,7 @@ export function SandboxOperations({ sandboxId, instance }: { sandboxId: string; 
   return (
     <section className={styles.operations} aria-label="沙箱工具">
       <h2>沙箱工具</h2>
-      <Select value={mode} onChange={setMode} options={[
-        { value: 'command', label: '运行命令工具' },
-        { value: 'deploy', label: '部署到实验链' },
-        { value: 'transaction', label: '发送实验链交易' },
-        { value: 'query', label: '查询实验链状态' },
-      ]} />
+      <Select value={mode} onChange={setMode} options={modeOptions} />
       {mode === 'command' && <Select value={toolCode} onChange={setToolCode} options={commandTools.map((tool) => ({ value: tool.tool_code, label: tool.tool_code }))} placeholder="选择命令工具" />}
       {mode === 'query' ? <Input value={input} onChange={(event) => setInput(event.target.value)} placeholder="查询目标" fullWidth /> : <Textarea value={input} onChange={(event) => setInput(event.target.value)} placeholder={mode === 'command' ? '输入受控命令' : '输入 JSON 参数'} rows={4} fullWidth />}
       <Button size="sm" icon={<Play size={14} />} loading={running} onClick={() => void runOperation()}>执行</Button>

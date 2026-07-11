@@ -754,6 +754,7 @@ func (s *Service) info(ctx context.Context, tenantID, sandboxID int64) (contract
 		return contracts.SandboxInfo{}, apperr.ErrSandboxRuntimeNotFound.WithCause(err)
 	}
 	out := sandboxInfoFromModel(sb, runtime, image, tools)
+	out.Capabilities = sandboxCapabilitiesFromModel(runtime, tools, s.capabilities)
 	if s.orchestrator != nil && shouldLoadLiveResourceUsage(sb) {
 		usage, err := s.orchestrator.ResourceUsage(ctx, sb)
 		if err != nil {

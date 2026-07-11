@@ -53,8 +53,42 @@ func sandboxResponseFromInfo(info contracts.SandboxInfo) SandboxResponse {
 		Phase:               info.Phase,
 		Status:              info.Status,
 		ToolAccess:          info.ToolAccess,
+		Capabilities:        info.Capabilities,
 		ResourceUsage:       info.ResourceUsage,
 	}
+}
+
+// sandboxCapabilitiesFromModel 根据运行时命令清单和组合根注册表生成权威工作台能力。
+func sandboxCapabilitiesFromModel(runtime Runtime, tools []SandboxTool, registered map[string]ChainCapability) contracts.SandboxCapabilities {
+	ops := runtime.AdapterSpec.WorkspaceOps
+	out := contracts.SandboxCapabilities{
+		FileWorkspace:   len(ops.ReadFile) > 0 && len(ops.WriteFile) > 0 && len(ops.ListFiles) > 0 && len(ops.PackTar) > 0,
+		Terminal:        len(ops.Terminal) > 0,
+		ChainOperations: []string{},
+	}
+	for _, tool := range tools {
+		if tool.Kind == SandboxToolKindCommand {
+			out.CommandTools = true
+			break
+		}
+	}
+	key := strings.TrimSpace(runtime.CapabilityImpl)
+	if runtime.AdapterLevel == 3 {
+		key = strings.TrimSpace(runtime.PluginRef)
+	}
+	if registered[key] == nil {
+		return out
+	}
+	if runtime.AdapterLevel == 3 || len(runtime.AdapterSpec.CapabilityCommands.Deploy.Command) > 0 {
+		out.ChainOperations = append(out.ChainOperations, "deploy")
+	}
+	if runtime.AdapterLevel == 3 || len(runtime.AdapterSpec.CapabilityCommands.Tx.Command) > 0 {
+		out.ChainOperations = append(out.ChainOperations, "transaction")
+	}
+	if runtime.AdapterLevel == 3 || len(runtime.AdapterSpec.CapabilityCommands.Query.Command) > 0 {
+		out.ChainOperations = append(out.ChainOperations, "query")
+	}
+	return out
 }
 
 // runtimeResponseFromModel 将运行时内部模型转换为 HTTP 稳定字段名。

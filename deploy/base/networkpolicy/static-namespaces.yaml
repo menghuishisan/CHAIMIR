@@ -3,7 +3,8 @@
 #   最小权限,系统与数据命名空间严格隔离。
 #
 # 说明:NetworkPolicy 为命名空间级。本文件覆盖 chaimir-system 与 chaimir-data。
-# 动态沙箱命名空间(sbx-*/judge-*/battle-*)的 deny-all 模板见 sandbox-template.yaml,
+# 动态沙箱命名空间(sbx-*/judge-*/battle-*)的 deny-all 模板见 sandbox-template.yaml;
+# M4 sim-* 命名空间由适配器直接创建 deny-all NetworkPolicy,
 # 由后端创建沙箱时套用(deploy 提供 SSOT 模板)。
 
 # ===== chaimir-system:默认拒绝所有进出 =====

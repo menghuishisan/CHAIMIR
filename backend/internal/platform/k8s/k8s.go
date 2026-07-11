@@ -1,4 +1,4 @@
-// k8s 封装 client-go,供 M2 沙箱编排创建/销毁动态命名空间与 Pod。
+// k8s 封装 client-go,供运行引擎创建受控 Kubernetes 资源并执行容器命令。
 package k8s
 
 import (
@@ -65,7 +65,7 @@ func buildRestConfig(kubeconfigPath string) (*rest.Config, error) {
 	return cfg, nil
 }
 
-// Clientset 暴露底层客户端集供 M2 编排使用。
+// Clientset 暴露底层客户端集供各运行引擎按自身模块边界编排资源。
 func (c *Client) Clientset() *kubernetes.Clientset { return c.clientset }
 
 // Dynamic 暴露 dynamic client,供模块操作已安装的标准 CRD。
@@ -88,7 +88,7 @@ func (c *Client) Healthz(ctx context.Context) error {
 	return nil
 }
 
-// Exec 在目标容器中执行命令并透传输入输出流,供 M2 终端/文件/初始化脚本复用。
+// Exec 在目标容器中执行命令并透传输入输出流,供受控运行引擎复用。
 func (c *Client) Exec(
 	ctx context.Context,
 	namespace, podName, container string,

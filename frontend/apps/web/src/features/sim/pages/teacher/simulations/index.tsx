@@ -4,17 +4,23 @@ import React, { useCallback, useMemo, useState } from 'react'
 import type { SimCompute, SimPackageMeta } from '@chaimir/api-client'
 import { SIM_COMPUTE } from '@chaimir/api-client'
 import type { TableColumn } from '@chaimir/ui'
-import { Button, Callout, Input, Select, Table, Textarea } from '@chaimir/ui'
+import { Button, Callout, Input, Select, Table } from '@chaimir/ui'
 import { Eye, Network, Pencil, RefreshCw, Upload } from 'lucide-react'
 import { api } from '../../../../../app/api'
 import { ErrorState, LoadingState } from '../../../../../components/ResourceState'
 import { useAsyncResource } from '../../../../../hooks'
 import styles from '../../sim.module.css'
-import { formatDateTime, parseJsonObject, simComputeOptions } from '../../../../../utils/index'
+import { formatDateTime, simComputeOptions } from '../../../../../utils/index'
 import { userFacingErrorMessage } from '../../../../../utils/userFacingError'
 
 const TeacherSimulationsPage: React.FC = () => {
-  const resource = useAsyncResource(() => api.sim.getPackages({ page: 1, size: 20 }), [])
+  const resource = useAsyncResource(async () => {
+    const [packages, capabilities] = await Promise.all([
+      api.sim.getPackages({ page: 1, size: 20 }),
+      api.sim.getBackendCapabilities(),
+    ])
+    return { packages, capabilities }
+  }, [])
   const [file, setFile] = useState<File | null>(null)
   const [code, setCode] = useState('')
   const [version, setVersion] = useState('v1')
@@ -22,7 +28,6 @@ const TeacherSimulationsPage: React.FC = () => {
   const [category, setCategory] = useState('')
   const [compute, setCompute] = useState<SimCompute>(SIM_COMPUTE.FRONTEND)
   const [backendAdapter, setBackendAdapter] = useState('')
-  const [backendConfig, setBackendConfig] = useState('{}')
   const [submitting, setSubmitting] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -36,8 +41,8 @@ const TeacherSimulationsPage: React.FC = () => {
       setError('请选择仿真包文件后再提交。')
       return
     }
-    if (compute === SIM_COMPUTE.BACKEND && !backendAdapter.trim()) {
-      setError('后端运行方式需要填写平台已注册的计算适配器编号。')
+    if (compute === SIM_COMPUTE.BACKEND && !resource.data?.capabilities.adapters.some((adapter) => adapter.code === backendAdapter)) {
+      setError('请选择当前可用的后端计算方式。')
       return
     }
     setSubmitting(true)
@@ -53,7 +58,7 @@ const TeacherSimulationsPage: React.FC = () => {
         compute,
         scale_limit: {},
         backend_adapter: compute === SIM_COMPUTE.BACKEND ? backendAdapter.trim() : undefined,
-        backend_config: compute === SIM_COMPUTE.BACKEND ? parseJsonObject(backendConfig) : {},
+        backend_config: {},
       }
       if (editingPackage) await api.sim.updatePackage(editingPackage.id, payload)
       else await api.sim.submitPackage(payload)
@@ -65,7 +70,7 @@ const TeacherSimulationsPage: React.FC = () => {
     } finally {
       setSubmitting(false)
     }
-  }, [backendAdapter, backendConfig, category, code, compute, editingPackage, file, name, resource, version])
+  }, [backendAdapter, category, code, compute, editingPackage, file, name, resource, version])
 
   /** editPackage 把已提交包载入表单，更新时仍要求重新选择完整 bundle。 */
   const editPackage = useCallback((item: SimPackageMeta) => {
@@ -76,7 +81,6 @@ const TeacherSimulationsPage: React.FC = () => {
     setCategory(item.category)
     setCompute(item.compute)
     setBackendAdapter(item.backend_adapter || '')
-    setBackendConfig('{}')
     setFile(null)
     setMessage('请重新选择完整仿真包文件后提交更新。')
   }, [])
@@ -101,7 +105,19 @@ const TeacherSimulationsPage: React.FC = () => {
     { key: 'actions', title: '操作', render: (row) => <div className={styles.actions}><Button variant="outline" size="sm" icon={<Pencil size={14} />} onClick={() => editPackage(row)}>更新</Button><Button variant="ghost" size="sm" icon={<Eye size={14} />} onClick={() => void previewPackage(row)}>预览报告</Button></div> },
   ], [editPackage, previewPackage])
 
-  const rows = resource.data?.list || []
+  const rows = resource.data?.packages.list || []
+  const backendAdapters = useMemo(() => resource.data?.capabilities.adapters || [], [resource.data?.capabilities.adapters])
+  const computeOptions = useMemo(() => resource.data?.capabilities.backend_compute
+    ? simComputeOptions
+    : simComputeOptions.filter((option) => option.value !== SIM_COMPUTE.BACKEND), [resource.data?.capabilities.backend_compute])
+
+  /** changeCompute 同步运行方式与后端已注册适配器,不保留自由输入入口。 */
+  const changeCompute = useCallback((value: string) => {
+    const next = value as SimCompute
+    setCompute(next)
+    if (next === SIM_COMPUTE.BACKEND) setBackendAdapter((current) => current || backendAdapters[0]?.code || '')
+    else setBackendAdapter('')
+  }, [backendAdapters])
 
   return (
     <div className={styles.page}>
@@ -120,11 +136,11 @@ const TeacherSimulationsPage: React.FC = () => {
           <label className={styles.field}>版本<Input fullWidth value={version} onChange={(event) => setVersion(event.target.value)} /></label>
           <label className={styles.field}>名称<Input fullWidth value={name} onChange={(event) => setName(event.target.value)} /></label>
           <label className={styles.field}>分类<Input fullWidth value={category} onChange={(event) => setCategory(event.target.value)} /></label>
-          <label className={styles.field}>运行方式<Select fullWidth value={compute} options={simComputeOptions} onChange={(value) => setCompute(value as SimCompute)} /></label>
-          {compute === SIM_COMPUTE.BACKEND && <label className={styles.field}>计算适配器编号<Input fullWidth value={backendAdapter} onChange={(event) => setBackendAdapter(event.target.value)} /></label>}
+          <label className={styles.field}>运行方式<Select fullWidth value={compute} options={computeOptions} onChange={changeCompute} /></label>
+          {compute === SIM_COMPUTE.BACKEND && <label className={styles.field}>后端计算方式<Select fullWidth value={backendAdapter} options={backendAdapters.map((adapter) => ({ value: adapter.code, label: adapter.name }))} onChange={setBackendAdapter} /></label>}
           <label className={styles.field}>Bundle 文件<input type="file" onChange={(event) => setFile(event.target.files?.[0] || null)} /></label>
         </div>
-        {compute === SIM_COMPUTE.BACKEND && <label className={styles.field}>后端计算配置<Textarea fullWidth rows={5} value={backendConfig} onChange={(event) => setBackendConfig(event.target.value)} /></label>}
+        {compute === SIM_COMPUTE.BACKEND && backendAdapters.find((adapter) => adapter.code === backendAdapter)?.description && <p className={styles.subtitle}>{backendAdapters.find((adapter) => adapter.code === backendAdapter)?.description}</p>}
         <Button icon={<Upload size={16} />} loading={submitting} onClick={submitPackage}>{editingPackage ? '提交更新' : '提交审核'}</Button>
       </section>
       {resource.status === 'error' && <ErrorState error={resource.error} onRetry={resource.reload} />}

@@ -24,7 +24,7 @@ spec:
         app.kubernetes.io/component: control-plane
         app.kubernetes.io/part-of: chaimir
     spec:
-      serviceAccountName: chaimir-backend  # 最小 RBAC,管理动态沙箱命名空间。
+      serviceAccountName: chaimir-backend  # 最小 RBAC,管理动态运行命名空间。
       securityContext:
         runAsNonRoot: true
         runAsUser: 65532

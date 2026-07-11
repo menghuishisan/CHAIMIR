@@ -74,7 +74,11 @@ func (s *Service) SubmitPackage(ctx context.Context, tenantID, accountID int64, 
 	if err := validatePackageRequest(req, compute, accountID); err != nil {
 		return nil, err
 	}
-	if err := validateBackendAdapterAvailable(compute, req.BackendAdapter, s.backends); err != nil {
+	backend, err := decodeObject(req.BackendConfig)
+	if err != nil {
+		return nil, err
+	}
+	if err := validateBackendAdapterConfig(compute, req.BackendAdapter, backend, s.backends); err != nil {
 		return nil, err
 	}
 	if err := s.ensurePackageVersionAvailable(ctx, req.Code, req.Version); err != nil {
@@ -86,10 +90,6 @@ func (s *Service) SubmitPackage(ctx context.Context, tenantID, accountID int64, 
 		return nil, err
 	}
 	scale, err := decodeObject(req.ScaleLimit)
-	if err != nil {
-		return nil, err
-	}
-	backend, err := decodeObject(req.BackendConfig)
 	if err != nil {
 		return nil, err
 	}
@@ -145,7 +145,11 @@ func (s *Service) UpdatePackage(ctx context.Context, tenantID, accountID, packag
 	if err := validatePackageRequest(req, compute, accountID); err != nil {
 		return nil, err
 	}
-	if err := validateBackendAdapterAvailable(compute, req.BackendAdapter, s.backends); err != nil {
+	backend, err := decodeObject(req.BackendConfig)
+	if err != nil {
+		return nil, err
+	}
+	if err := validateBackendAdapterConfig(compute, req.BackendAdapter, backend, s.backends); err != nil {
 		return nil, err
 	}
 	if err := s.ensurePackageEditable(ctx, accountID, packageID, req.Code, req.Version); err != nil {
@@ -156,10 +160,6 @@ func (s *Service) UpdatePackage(ctx context.Context, tenantID, accountID, packag
 		return nil, err
 	}
 	scale, err := decodeObject(req.ScaleLimit)
-	if err != nil {
-		return nil, err
-	}
-	backend, err := decodeObject(req.BackendConfig)
 	if err != nil {
 		return nil, err
 	}
@@ -368,7 +368,7 @@ func (s *Service) ApproveReview(ctx context.Context, reviewerID, reviewID int64)
 		if err := validateApprovalReport(review.PreviewReport, pkg); err != nil {
 			return err
 		}
-		if err := validateBackendAdapterAvailable(pkg.Compute, pkg.BackendAdapter, s.backends); err != nil {
+		if err := validateBackendAdapterConfig(pkg.Compute, pkg.BackendAdapter, pkg.BackendConfig, s.backends); err != nil {
 			return err
 		}
 		review, err = tx.CompleteReview(ctx, reviewID, ReviewApproved, reviewerID, "")
@@ -478,6 +478,9 @@ func (s *Service) RepublishPackage(ctx context.Context, packageID int64) (map[st
 		}
 		if existing.Status != PackageStatusArchived {
 			return apperr.ErrSimPackageUnavailable
+		}
+		if err := validateBackendAdapterConfig(existing.Compute, existing.BackendAdapter, existing.BackendConfig, s.backends); err != nil {
+			return err
 		}
 		pkg, err = tx.UpdatePackageStatus(ctx, packageID, PackageStatusPublished)
 		if err != nil {

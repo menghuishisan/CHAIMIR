@@ -81,6 +81,7 @@
 - `/runtimes`、`/tools`:运行时/工具管理 + 接入即测 `[平台管理员]`;镜像预拉取提供触发与状态查询,完成以全目标节点真实拉取成功为准。
 - `/sandboxes`:创建/查询/销毁/回收 `[内部]`;`WS /sandboxes/{id}/progress`、`/terminal`。
 - `/sandboxes/{id}/files`、`/tools/{code}/*`、`/command-tools/{code}/run`:文件、Web 工具代理和受控命令工具 `[用户]`;Web 工具代理支持浏览器一次性 `token` 入口并换成路径受限 Cookie。
+- `GET /sandboxes/{id}` 响应中的 `capabilities` 由运行时命令清单与服务端注册表计算,是前端文件、终端、命令工具和链操作入口的权威能力声明。
 - `/sandboxes/{id}/chain/deploy|tx|query`:链上部署、交易和查询`[用户/内部]`;用户路径按沙箱 owner 校验,内部服务路径按签名 `source_ref` 校验。
 - `/sandboxes/{id}/chain/reset`:链恢复创世就绪态`[内部]`。
 - `/quota`:配额。
@@ -94,6 +95,7 @@
 
 ### M4 仿真可视化引擎 `/api/v1/sim`
 - `/packages/*`:仿真包查询/获取 bundle/扩展接入。
+- `/backend-capabilities`:当前部署真实注册的后端计算适配器 `[教师/学校管理员]`。
 - `/reviews/*`:仿真包审核 `[平台管理员]`。
 - `/sessions`:创建/操作上报/回放/分享;`/sessions/recycle` 回收 `[内部]`;`WS /sessions/{id}/stream`(后端计算)。
 - `/sessions/{id}/checkpoints`:检查点上报 `[内部]`。

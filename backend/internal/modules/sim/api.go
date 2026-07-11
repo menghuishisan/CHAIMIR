@@ -82,9 +82,15 @@ func (a simAPI) registerStreamRoutes(g gin.IRouter) {
 
 // registerTeacherRoutes 注册教师/学校管理员仿真包扩展接入接口。
 func (a simAPI) registerTeacherRoutes(g gin.IRouter) {
+	g.GET("/backend-capabilities", a.backendCapabilities)
 	g.POST("/packages", a.submitPackage)
 	g.PATCH("/packages/:key", a.updatePackage)
 	g.GET("/packages/:key/preview", a.previewPackage)
+}
+
+// backendCapabilities 返回当前部署真实可用的 M4 后端计算方式。
+func (a simAPI) backendCapabilities(c *gin.Context) {
+	httpx.Write(c, a.svc.BackendCapabilities(), nil)
 }
 
 // registerInternalRoutes 注册内部服务会话和检查点接口。

@@ -4,7 +4,7 @@
 # ConfigMap/Secret 由 generator 生成(带哈希后缀,变更自动触发滚动更新)。
 #
 # 注:networkpolicy/sandbox-template.yaml 为后端运行时模板,故意不列入资源
-#   (sbx-*/judge-*/battle-* 命名空间部署期不存在)。
+#   (sbx-*/judge-*/battle-*/sim-* 命名空间部署期不存在)。
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 

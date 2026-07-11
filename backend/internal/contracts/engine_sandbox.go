@@ -113,6 +113,14 @@ type SandboxToolAccess struct {
 	Status   int16  `json:"status"`
 }
 
+// SandboxCapabilities 是后端按实际运行时和已注册实现计算出的前端工作台能力。
+type SandboxCapabilities struct {
+	FileWorkspace   bool     `json:"file_workspace"`
+	Terminal        bool     `json:"terminal"`
+	CommandTools    bool     `json:"command_tools"`
+	ChainOperations []string `json:"chain_operations"`
+}
+
 // SandboxResourceUsage 是单个沙箱实时用量和已申请资源摘要,用于状态查询和配额可视化。
 type SandboxResourceUsage struct {
 	CPUUsageMilli    int64 `json:"cpu_usage_milli"`
@@ -137,6 +145,7 @@ type SandboxInfo struct {
 	Phase               int16                `json:"phase"`
 	Status              int16                `json:"status"`
 	ToolAccess          []SandboxToolAccess  `json:"tool_access"`
+	Capabilities        SandboxCapabilities  `json:"capabilities"`
 	ResourceUsage       SandboxResourceUsage `json:"resource_usage"`
 }
 

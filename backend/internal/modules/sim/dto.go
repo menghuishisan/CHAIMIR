@@ -74,3 +74,17 @@ type BundleDownloadGrantDTO struct {
 	ModuleURL   string `json:"module_url,omitempty"`
 	BuiltinCode string `json:"builtin_code,omitempty"`
 }
+
+// BackendAdapterDescriptor 描述当前部署已装配的后端计算能力。
+type BackendAdapterDescriptor struct {
+	Code        string `json:"code"`
+	Name        string `json:"name"`
+	Protocol    string `json:"protocol"`
+	Description string `json:"description"`
+}
+
+// BackendCapabilitiesDTO 是教师端选择计算方式时的权威能力响应。
+type BackendCapabilitiesDTO struct {
+	BackendCompute bool                       `json:"backend_compute"`
+	Adapters       []BackendAdapterDescriptor `json:"adapters"`
+}

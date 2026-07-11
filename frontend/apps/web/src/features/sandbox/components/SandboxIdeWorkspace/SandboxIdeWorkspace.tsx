@@ -43,10 +43,8 @@ export function SandboxIdeWorkspace({
   const [saving, setSaving] = useState(false)
   const resource = useAsyncResource(
     async () => {
-      const [instance, entries] = await Promise.all([
-        api.sandbox.getInstance(sandboxId),
-        listWorkspaceFiles(sandboxId),
-      ])
+      const instance = await api.sandbox.getInstance(sandboxId)
+      const entries = instance.capabilities.file_workspace ? await listWorkspaceFiles(sandboxId) : []
       return { instance, files: entries.map(toWorkspaceFile) }
     },
     [sandboxId],
@@ -134,7 +132,7 @@ export function SandboxIdeWorkspace({
           ? <LoadingState title="正在读取文件" />
           : <MonacoPane key={activeFile.path} file={activeFile} value={contents[activeFile.path]} onChange={updateActiveContent} />
       ) : <p className={styles.empty}>当前工作区没有可编辑文件。</p>}
-      terminal={<SandboxTerminal sandboxId={sandboxId} />}
+      terminal={resource.data.instance.capabilities.terminal ? <SandboxTerminal sandboxId={sandboxId} /> : undefined}
       tools={toolItems}
       inspector={(
         <div className={styles.inspector}>
@@ -149,7 +147,7 @@ export function SandboxIdeWorkspace({
         <div className={styles.actions}>
           {actions}
           <Button variant="on-dark" size="sm" icon={<RefreshCw size={15} />} onClick={resource.reload}>刷新环境</Button>
-          <Button variant="primary" size="sm" icon={<Save size={15} />} loading={saving} onClick={() => void saveWorkspace()}>保存代码</Button>
+          {resource.data.instance.capabilities.file_workspace && <Button variant="primary" size="sm" icon={<Save size={15} />} loading={saving} onClick={() => void saveWorkspace()}>保存代码</Button>}
         </div>
       )}
     />

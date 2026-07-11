@@ -12,6 +12,7 @@ import type {
   SimReviewDecision,
   SimActionLog,
   SimPackageSubmit,
+  SimBackendCapabilities,
   SimReplay,
   SimShareCreate,
   SimShareResult,
@@ -27,6 +28,13 @@ export class SimApi {
   constructor(private client: ApiClient) {}
 
   // ===== 仿真包管理 =====
+
+  /**
+   * 获取当前部署真实装配的后端计算能力。
+   */
+  async getBackendCapabilities(): Promise<SimBackendCapabilities> {
+    return this.client.get('/sim/backend-capabilities')
+  }
 
   /**
    * 获取仿真包列表

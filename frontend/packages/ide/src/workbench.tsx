@@ -57,7 +57,7 @@ export interface IdeWorkbenchProps extends Omit<React.HTMLAttributes<HTMLElement
   files: IdeWorkbenchFile[]
   activeFileId?: string
   editor: React.ReactNode
-  terminal: React.ReactNode
+  terminal?: React.ReactNode
   tools?: IdeWorkbenchTool[]
   inspector?: React.ReactNode
   controls?: React.ReactNode
@@ -202,29 +202,30 @@ export function IdeWorkbench({
         </header>
         <div className="chaimir-ide-workbench__editor">{editor}</div>
 
-        {/* 终端高度调整手柄 */}
-        <div
-          className={classNames('chaimir-ide-workbench__resizer', isDragging && 'is-dragging')}
-          role="separator"
-          aria-label="调整终端高度"
-          aria-orientation="horizontal"
-          aria-valuemin={MIN_TERMINAL_HEIGHT}
-          aria-valuemax={terminalMaxHeight}
-          aria-valuenow={Math.round(terminalHeight)}
-          tabIndex={0}
-          onPointerDown={handlePointerDown}
-          onPointerMove={handlePointerMove}
-          onPointerUp={handlePointerUp}
-          onPointerCancel={handlePointerUp}
-          onKeyDown={handleResizerKeyDown}
-        />
+        {terminal && <>
+          <div
+            className={classNames('chaimir-ide-workbench__resizer', isDragging && 'is-dragging')}
+            role="separator"
+            aria-label="调整终端高度"
+            aria-orientation="horizontal"
+            aria-valuemin={MIN_TERMINAL_HEIGHT}
+            aria-valuemax={terminalMaxHeight}
+            aria-valuenow={Math.round(terminalHeight)}
+            tabIndex={0}
+            onPointerDown={handlePointerDown}
+            onPointerMove={handlePointerMove}
+            onPointerUp={handlePointerUp}
+            onPointerCancel={handlePointerUp}
+            onKeyDown={handleResizerKeyDown}
+          />
 
-        <section className="chaimir-ide-workbench__terminal" aria-label={resolvedLabels.terminal} style={{ height: `${terminalHeight}px` }}>
-          <header>
-            <PanelHeader compact title={resolvedLabels.terminal} description={resolvedLabels.terminalDetail} />
-          </header>
-          <div>{terminal}</div>
-        </section>
+          <section className="chaimir-ide-workbench__terminal" aria-label={resolvedLabels.terminal} style={{ height: `${terminalHeight}px` }}>
+            <header>
+              <PanelHeader compact title={resolvedLabels.terminal} description={resolvedLabels.terminalDetail} />
+            </header>
+            <div>{terminal}</div>
+          </section>
+        </>}
       </section>
     </WorkbenchShell>
   )
