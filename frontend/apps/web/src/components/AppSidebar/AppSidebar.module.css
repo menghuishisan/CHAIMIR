@@ -1,4 +1,4 @@
-/* AppSidebar.module.css 定义学生端和教师端共用侧栏的布局、状态和响应式样式。 */
+/* AppSidebar.module.css 定义四类角色共用侧栏的布局、状态和响应式样式。 */
 .sidebar {
   width: var(--sidebar-w);
   background-color: var(--color-bg);
@@ -50,7 +50,7 @@
   color: var(--color-text-strong);
   text-decoration: none;
   border-radius: var(--radius-sm);
-  transition: all var(--t-fast) var(--ease);
+  transition: background var(--t-fast) var(--ease), color var(--t-fast) var(--ease);
   position: relative;
   overflow: hidden;
   white-space: nowrap;
@@ -109,7 +109,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: all var(--t) var(--ease);
+  transition: background var(--t) var(--ease), color var(--t) var(--ease);
   width: 100%;
 }
 

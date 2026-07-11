@@ -1,6 +1,6 @@
-# 前端 Deployment + Service(React 四端静态资源,Nginx 托管)。
+# 前端 Deployment + Service(四角色共用的 React 单 SPA,Nginx 托管)。
 # 依据 docs/总-镜像与容器设计.md §二:chaimir/frontend 为 Nginx 托管的静态构建产物。
-# 四端(student/teacher/school-admin/platform-admin)由同一镜像按路由/子域分发;
+# 四角色(student/teacher/school-admin/platform-admin)由同一 SPA 的路径路由分发;
 # prod-school overlay 关闭 platform-admin 入口(Ingress patch + 形态开关)。
 ---
 apiVersion: apps/v1

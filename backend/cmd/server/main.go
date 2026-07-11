@@ -264,12 +264,11 @@ func assembleModules(ctx context.Context, router gin.IRouter, cfg *config.Config
 	if err != nil {
 		return err
 	}
-	graphLayoutAdapter, err := sim.NewGraphLayoutAdapter(infra.k8s, cfg.SimBackend, cfg.Sandbox)
+	stdioJSONAdapters, err := sim.NewStdioJSONBackendRegistry(infra.k8s, cfg.SimBackend, cfg.Sandbox)
 	if err != nil {
-		return fmt.Errorf("装配 M4 graph-layout-stdio 适配器失败: %w", err)
+		return fmt.Errorf("装配 M4 stdio-json 后端计算能力失败: %w", err)
 	}
-	graphLayoutDescriptor := graphLayoutAdapter.Descriptor()
-	simSvc, err := RegisterSimModule(SimModuleDeps{Router: router, Database: infra.database, IDs: infra.ids, Upload: cfg.Upload, MinIO: cfg.MinIO, AuthConfig: cfg.Auth, Storage: infra.storage, Audit: auditWriter, WSHub: infra.wsHub, Auth: infra.auth, Roles: identitySvc, BackendAdapters: sim.BackendRegistry{graphLayoutDescriptor.Code: graphLayoutAdapter}})
+	simSvc, err := RegisterSimModule(SimModuleDeps{Router: router, Database: infra.database, IDs: infra.ids, Upload: cfg.Upload, MinIO: cfg.MinIO, AuthConfig: cfg.Auth, Storage: infra.storage, Audit: auditWriter, WSHub: infra.wsHub, Auth: infra.auth, Roles: identitySvc, BackendAdapters: stdioJSONAdapters})
 	if err != nil {
 		return err
 	}

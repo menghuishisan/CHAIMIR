@@ -199,7 +199,7 @@ func (s *Service) validateExperimentComponents(ctx context.Context, item Experim
 		add(ValidationLevelError, "实验环境服务暂时不可用")
 	}
 	if s.sandbox != nil {
-		for _, env := range normalizedEnvComponents(item.Components.Envs) {
+		for _, env := range item.Components.Envs {
 			req := contracts.SandboxCreateRequest{
 				TenantID:                 item.TenantID,
 				RuntimeCode:              env.RuntimeCode,

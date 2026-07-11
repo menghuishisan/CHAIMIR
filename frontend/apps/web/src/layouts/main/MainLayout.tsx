@@ -1,4 +1,4 @@
-// MainLayout 提供学生端和教师端共用的日常导航外壳。
+// MainLayout 提供四类角色共用的日常导航外壳。
 import React, { useState } from 'react'
 import { Outlet } from 'react-router-dom'
 import TopNavbar from '../../components/TopNavbar/TopNavbar'
@@ -10,8 +10,11 @@ const MainLayout: React.FC = () => {
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false)
   const [isMobileDrawerOpen, setIsMobileDrawerOpen] = useState(false)
 
-  const toggleSidebar = () => setIsSidebarCollapsed(!isSidebarCollapsed)
-  const toggleMobileDrawer = () => setIsMobileDrawerOpen(!isMobileDrawerOpen)
+  // toggleSidebar 切换桌面侧栏的展开状态。
+  const toggleSidebar = () => setIsSidebarCollapsed((current) => !current)
+  // toggleMobileDrawer 切换窄屏导航抽屉。
+  const toggleMobileDrawer = () => setIsMobileDrawerOpen((current) => !current)
+  // closeMobileDrawer 在导航或遮罩触发后关闭抽屉。
   const closeMobileDrawer = () => setIsMobileDrawerOpen(false)
 
   return (
@@ -26,7 +29,7 @@ const MainLayout: React.FC = () => {
           onToggleCollapse={toggleSidebar}
         />
 
-        {/* 子路由内容区承载学生端与教师端功能页面。 */}
+        {/* 子路由内容区承载四角色的日常功能页面。 */}
         <main className={styles.contentArea}>
           <div className={styles.contentInner}>
             <Outlet />
@@ -36,7 +39,7 @@ const MainLayout: React.FC = () => {
 
       {/* 移动端遮罩用于关闭侧栏抽屉并保持焦点路径清晰。 */}
       {isMobileDrawerOpen && (
-        <div className={styles.mobileOverlay} onClick={closeMobileDrawer} />
+        <button type="button" className={styles.mobileOverlay} onClick={closeMobileDrawer} aria-label="关闭导航菜单" />
       )}
     </div>
   )

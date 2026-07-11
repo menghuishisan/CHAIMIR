@@ -1,19 +1,12 @@
-// authSession 管理前端登录会话落点，统一 token 存储键名和角色入口跳转。
+// authSession 管理前端登录会话存储和经过角色边界校验的入口恢复。
 
-import { UserRole } from '@chaimir/api-client'
 import type { LoginResponse } from '@chaimir/api-client'
+import { isRoleHomePath, roleRouteForRoles } from './roleRouting'
 
 export const ACCESS_TOKEN_KEY = 'chaimir.access_token'
 export const REFRESH_TOKEN_KEY = 'chaimir.refresh_token'
 const MUST_CHANGE_PASSWORD_KEY = 'chaimir.must_change_password'
 const PENDING_ENTRY_PATH_KEY = 'chaimir.pending_entry_path'
-
-const ROLE_ENTRY_PATHS = new Set([
-  '/platform-admin/schools',
-  '/school-admin/users',
-  '/teacher/courses',
-  '/student/courses',
-])
 
 /**
  * persistLoginTokens 按用户选择把登录令牌写入同一种键名。
@@ -83,12 +76,14 @@ export function persistRefreshedTokens(response: LoginResponse): void {
  */
 export function loginEntryPath(response: LoginResponse, requestedPath?: unknown): string {
   if (response.must_change_pwd) return '/auth/change-pwd'
-  return safeInternalPath(requestedPath) || roleEntryPath(response)
+  const roleRoute = roleRouteForRoles(response.account?.roles || [])
+  if (!roleRoute) return '/auth/login'
+  return safeInternalPath(requestedPath, roleRoute.pathPrefix) || roleRoute.homePath
 }
 
 /** safeInternalPath 只接受站内绝对路径，阻止登录回跳被构造成外部地址。 */
-function safeInternalPath(value: unknown): string | null {
-  if (typeof value !== 'string' || !value.startsWith('/') || value.startsWith('//') || value.includes('\\')) return null
+function safeInternalPath(value: unknown, rolePrefix: string): string | null {
+  if (typeof value !== 'string' || !value.startsWith(`${rolePrefix}/`) || value.startsWith('//') || value.includes('\\')) return null
   return value
 }
 
@@ -110,22 +105,12 @@ export function completeRequiredPasswordChange(): string {
   window.localStorage.removeItem(PENDING_ENTRY_PATH_KEY)
   window.sessionStorage.removeItem(MUST_CHANGE_PASSWORD_KEY)
   window.sessionStorage.removeItem(PENDING_ENTRY_PATH_KEY)
-  return pendingPath && ROLE_ENTRY_PATHS.has(pendingPath) ? pendingPath : '/auth/login'
+  return pendingPath && isRoleHomePath(pendingPath) ? pendingPath : '/auth/login'
 }
 
 /**
  * roleEntryPath 根据服务端账号角色决定登录后的第一个功能页。
  */
 export function roleEntryPath(response: LoginResponse): string {
-  const roles = response.account?.roles || []
-  if (roles.includes(UserRole.PLATFORM_ADMIN)) {
-    return '/platform-admin/schools'
-  }
-  if (roles.includes(UserRole.SCHOOL_ADMIN)) {
-    return '/school-admin/users'
-  }
-  if (roles.includes(UserRole.TEACHER)) {
-    return '/teacher/courses'
-  }
-  return '/student/courses'
+  return roleRouteForRoles(response.account?.roles || [])?.homePath || '/auth/login'
 }

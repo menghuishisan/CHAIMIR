@@ -1,12 +1,10 @@
-﻿// App.tsx 是单体前端应用的路由组合根,负责按角色懒加载页面并挂载对应布局。
+// App.tsx 是单体前端应用的路由组合根,负责按角色懒加载页面并挂载对应布局。
 import React, { Suspense } from 'react'
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import { UserRole } from '@chaimir/api-client'
 import AuthLayout from '../layouts/auth/AuthLayout'
 import ImmersiveLayout from '../layouts/immersive/ImmersiveLayout'
-import AdminLayout from '../layouts/admin/AdminLayout'
 import MainLayout from '../layouts/main/MainLayout'
-import PlatformLayout from '../layouts/platform/PlatformLayout'
 import { RoleGuard } from '../components/RoleGuard'
 import styles from './App.module.css'
 
@@ -117,15 +115,13 @@ const PageFallback: React.FC = () => (
   </div>
 )
 
-// App 挂载浏览器路由,并把旧角色路径重定向到当前规范路径。
+// App 挂载公共页面、四角色功能路由和沉浸式工作台。
 const App: React.FC = () => {
   return (
     <BrowserRouter>
       <Suspense fallback={<PageFallback />}>
         <Routes>
           <Route path="/" element={<Navigate to="/auth/login" replace />} />
-          <Route path="/admin/*" element={<Navigate to="/school-admin" replace />} />
-          {platformLayerEnabled ? <Route path="/platform/*" element={<Navigate to="/platform-admin" replace />} /> : null}
 
           <Route path="/auth" element={<AuthLayout />}>
             <Route path="login" element={<LoginPage />} />
@@ -140,7 +136,7 @@ const App: React.FC = () => {
           <Route path="/sim/shared/:shareCode" element={<SharedSimulationWorkspacePage />} />
 
           <Route element={<RoleGuard allowedRoles={[UserRole.SCHOOL_ADMIN]} />}>
-            <Route path="/school-admin" element={<AdminLayout />}>
+            <Route path="/school-admin" element={<MainLayout />}>
               <Route index element={<Navigate to="users" replace />} />
               <Route path="users" element={<SchoolAdminUsersPage />} />
               <Route path="users/edit" element={<SchoolAdminUserEditPage />} />
@@ -166,7 +162,7 @@ const App: React.FC = () => {
 
           {platformLayerEnabled ? (
             <Route element={<RoleGuard allowedRoles={[UserRole.PLATFORM_ADMIN]} />}>
-              <Route path="/platform-admin" element={<PlatformLayout />}>
+              <Route path="/platform-admin" element={<MainLayout />}>
                 <Route index element={<Navigate to="schools" replace />} />
                 <Route path="schools" element={<PlatformSchoolsPage />} />
                 <Route path="schools/:id" element={<PlatformSchoolDetailPage />} />

@@ -13,8 +13,7 @@ param(
     [int]$RetryDelaySeconds = 10,
     [switch]$Push,
     [switch]$NoCache,
-    [switch]$Pull,
-    [switch]$LegacyDockerBuilder
+    [switch]$Pull
 )
 
 $ErrorActionPreference = "Stop"
@@ -37,7 +36,7 @@ if ([string]::IsNullOrWhiteSpace($DigestLockOut)) {
 if ([string]::IsNullOrWhiteSpace($Tag)) {
     throw "Tag 不能为空;本地和生产构建都必须显式声明不可混淆的发布标签"
 }
-if ($Push -and [string]::IsNullOrWhiteSpace($Platform) -and -not $LegacyDockerBuilder) {
+if ($Push -and [string]::IsNullOrWhiteSpace($Platform)) {
     throw "启用 Push 时必须显式声明 Platform"
 }
 if ($MaxAttempts -lt 1) {
@@ -336,7 +335,7 @@ foreach ($manifest in $manifests) {
 }
 
 foreach ($item in $selected) {
-    if ($Push -and -not $LegacyDockerBuilder) {
+    if ($Push) {
         $args = @("buildx", "build")
         if (-not [string]::IsNullOrWhiteSpace($BuildxBuilder)) {
             $args += @("--builder", $BuildxBuilder)
@@ -368,28 +367,8 @@ foreach ($item in $selected) {
     }
     $args += $item.Context
     Write-Host "Building $($item.Image) -> $($item.Ref)"
-    if ($LegacyDockerBuilder) {
-        $previousBuildKit = $env:DOCKER_BUILDKIT
-        try {
-            $env:DOCKER_BUILDKIT = "0"
-            Invoke-DockerBuildWithRetry -Arguments $args -Image $item.Image
-        } finally {
-            if ($null -eq $previousBuildKit) {
-                Remove-Item Env:\DOCKER_BUILDKIT -ErrorAction SilentlyContinue
-            } else {
-                $env:DOCKER_BUILDKIT = $previousBuildKit
-            }
-        }
-    } else {
-        Invoke-DockerBuildWithRetry -Arguments $args -Image $item.Image
-    }
+    Invoke-DockerBuildWithRetry -Arguments $args -Image $item.Image
     if ($Push) {
-        if ($LegacyDockerBuilder) {
-            Invoke-DockerCli -Arguments @("push", $item.Ref)
-            if ($LASTEXITCODE -ne 0) {
-                throw "docker push 失败: $($item.Ref)"
-            }
-        }
         $digestLockItems[$item.Image] = Get-RegistryDigest -Ref $item.Ref
         Write-DigestLock -Path $DigestLockOut -Items $digestLockItems
         Write-Host "Locked $($item.Image) $($digestLockItems[$item.Image])"

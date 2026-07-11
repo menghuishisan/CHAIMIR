@@ -620,7 +620,7 @@ function shortenLine(from: PositionedGraphNode, to: PositionedGraphNode, offset:
 }
 
 /**
- * processProgress 读取协议消息的过程进度,没有过程数据时保持旧的静态位置。
+ * processProgress 读取协议消息的过程进度,没有连续过程数据时按离散状态定位。
  */
 function processProgress(edge: GraphEdge, reducedMotion: boolean): number {
   if (reducedMotion) {

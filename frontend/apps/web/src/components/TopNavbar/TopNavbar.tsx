@@ -1,8 +1,9 @@
-// TopNavbar 渲染学生端与教师端共用顶栏,根据当前角色路径生成共享入口。
+// TopNavbar 渲染四类角色共用顶栏,根据当前角色路径生成品牌和共享入口。
 import React from 'react'
 import { Hexagon, Menu } from 'lucide-react'
-import { useLocation } from 'react-router-dom'
+import { Link, useLocation } from 'react-router-dom'
 import { RoleTopbarActions } from '../RoleTopbarActions/RoleTopbarActions'
+import { roleNavigationForPath } from '../../app/roleNavigation'
 import styles from './TopNavbar.module.css'
 
 interface TopNavbarProps {
@@ -11,28 +12,27 @@ interface TopNavbarProps {
 
 const TopNavbar: React.FC<TopNavbarProps> = ({ onMenuClick }) => {
   const location = useLocation()
-  const isTeacher = location.pathname.startsWith('/teacher')
-  const roleBasePath = isTeacher ? '/teacher' : '/student'
-  const brandName = isTeacher ? 'Chaimir 教学端' : 'Chaimir 学台'
+  const navigation = roleNavigationForPath(location.pathname)
 
   return (
     <header className={styles.navbar}>
       <div className={styles.leftSection}>
         <button
+          type="button"
           className={styles.menuButton}
           onClick={onMenuClick}
-          aria-label="Toggle Menu"
+          aria-label="打开导航菜单"
         >
           <Menu size={20} />
         </button>
-        <div className={styles.brand}>
+        <Link className={styles.brand} to={navigation.homePath} aria-label={navigation.brandName}>
           <Hexagon className={styles.brandIcon} size={24} />
-          <span className={styles.brandName}>{brandName}</span>
-        </div>
+          <span className={styles.brandName}>{navigation.brandName}</span>
+        </Link>
       </div>
 
       <div className={styles.rightSection}>
-        <RoleTopbarActions basePath={roleBasePath} loginPath="/auth/login" />
+        <RoleTopbarActions basePath={navigation.pathPrefix} loginPath={navigation.loginPath} loadUnread={navigation.loadUnread} />
       </div>
     </header>
   )

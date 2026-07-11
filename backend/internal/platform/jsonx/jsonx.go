@@ -99,7 +99,7 @@ func DecodeStrict(data []byte, out any) error {
 	if len(data) == 0 {
 		return nil
 	}
-	return decodeStrict(data, out, false)
+	return decodeStrict(data, out, false, false)
 }
 
 // DecodeStrictKnownFields 解析 JSON 到指定目标,并拒绝结构体中未声明的字段。
@@ -107,7 +107,15 @@ func DecodeStrictKnownFields(data []byte, out any) error {
 	if len(data) == 0 {
 		return nil
 	}
-	return decodeStrict(data, out, true)
+	return decodeStrict(data, out, true, false)
+}
+
+// DecodeStrictUseNumber 严格解析任意 JSON,并用 json.Number 保留输入数字精度。
+func DecodeStrictUseNumber(data []byte, out any) error {
+	if len(data) == 0 {
+		return nil
+	}
+	return decodeStrict(data, out, false, true)
 }
 
 // Valid 判断输入是否为合法 JSON,用于只需要结构合法性、不需要落地解析的边界校验。
@@ -351,10 +359,13 @@ func normalize(v any) any {
 }
 
 // decodeStrict 使用标准 decoder 统一强校验 JSON,拒绝未知字段可选,并拒绝尾随非空 JSON token。
-func decodeStrict(data []byte, out any, knownFields bool) error {
+func decodeStrict(data []byte, out any, knownFields, useNumber bool) error {
 	dec := json.NewDecoder(bytes.NewReader(data))
 	if knownFields {
 		dec.DisallowUnknownFields()
+	}
+	if useNumber {
+		dec.UseNumber()
 	}
 	if err := dec.Decode(out); err != nil {
 		return err

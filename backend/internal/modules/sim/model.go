@@ -74,6 +74,7 @@ type SessionWithPackage struct {
 	PackageVersion    string
 	PackageName       string
 	Category          string
+	ScaleLimit        map[string]any
 	BundleKey         string
 	BundleHash        string
 	BackendAdapter    string

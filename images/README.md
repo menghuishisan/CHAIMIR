@@ -65,4 +65,4 @@ powershell -NoProfile -ExecutionPolicy Bypass -File images/pull-images.ps1 `
   -DigestLock .tmp/backend-functional-test/evidence/candidate-image-digests.lock
 ```
 
-拉回后的镜像必须经过 Trivy HIGH/CRITICAL 阻断扫描和 Cosign 签名/验签。只有全部非前端镜像通过后,候选锁才能晋升为正式 `images/image-digests.lock` 或生成 `SANDBOX_IMAGE_ATTESTATIONS_JSON`。`-PublishLocalBuilt` 仅用于旧证据重放或诊断,不得作为新验收默认路径。
+拉回后的镜像必须经过 Trivy HIGH/CRITICAL 阻断扫描和 Cosign 签名/验签。只有全部非前端镜像通过后,候选锁才能晋升为正式 `images/image-digests.lock` 或生成 `SANDBOX_IMAGE_ATTESTATIONS_JSON`。平台构建镜像只允许通过 `images/build-images.ps1 -Push` 推送并生成候选锁,拉取脚本不承担构建产物发布职责。

@@ -127,7 +127,7 @@ WHERE tenant_id = $1 AND id = $2;
 
 -- name: GetSimSessionWithPackage :one
 SELECT s.id, s.tenant_id, s.package_id, s.source_ref, s.owner_account_id, s.seed, s.init_params, s.compute, s.status, s.created_at, s.updated_at,
-       p.code, p.version, p.name, p.category, p.bundle_key, p.bundle_hash, p.backend_adapter, p.backend_config,
+       p.code, p.version, p.name, p.category, p.scale_limit, p.bundle_key, p.bundle_hash, p.backend_adapter, p.backend_config,
        p.interaction_schema, p.status AS package_status
 FROM sim_session s
 JOIN sim_package p ON p.id = s.package_id

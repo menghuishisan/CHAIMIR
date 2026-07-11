@@ -7,6 +7,7 @@ import { SandboxToolKind, SandboxToolStatus } from '@chaimir/api-client'
 import { Button, Input, Select, Textarea } from '@chaimir/ui'
 import { ExternalLink, Play } from 'lucide-react'
 import { api } from '../../../../app/api'
+import { parseJsonObject } from '../../../../utils/json'
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
 import { decodeBase64 } from './workspaceFiles'
 import styles from './SandboxIdeWorkspace.module.css'
@@ -49,7 +50,7 @@ export function SandboxOperations({ sandboxId, instance }: { sandboxId: string; 
         if (!input.trim()) throw new Error('请填写要查询的链上目标。')
         setResult(JSON.stringify(await api.sandbox.chainQuery(sandboxId, input.trim()), null, 2))
       } else {
-        const payload = parseObject(input)
+        const payload = parseJsonObject(input || '{}')
         const response = mode === 'deploy'
           ? await api.sandbox.chainDeploy(sandboxId, { payload })
           : await api.sandbox.chainSendTx(sandboxId, { payload })
@@ -92,11 +93,4 @@ function toolKind(kind: SandboxToolKind): IdeWorkbenchTool['kind'] {
   if (kind === SandboxToolKind.WEB_EMBED) return 'web-embed'
   if (kind === SandboxToolKind.COMMAND) return 'command-tool'
   return 'platform-builtin'
-}
-
-/** parseObject 校验链操作参数必须是 JSON 对象。 */
-function parseObject(value: string): Record<string, unknown> {
-  const parsed: unknown = JSON.parse(value || '{}')
-  if (!parsed || Array.isArray(parsed) || typeof parsed !== 'object') throw new Error('链操作参数必须是 JSON 对象。')
-  return parsed as Record<string, unknown>
 }

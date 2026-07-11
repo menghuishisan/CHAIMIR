@@ -116,6 +116,10 @@ func sessionWithPackageFromRow(row sqlcgen.GetSimSessionWithPackageRow) (Session
 	if err != nil {
 		return SessionWithPackage{}, err
 	}
+	scaleLimit, err := decodeMap(row.ScaleLimit)
+	if err != nil {
+		return SessionWithPackage{}, apperr.ErrSimPackageDataCorrupt.WithCause(fmt.Errorf("仿真包 %d 的 scale_limit 数据异常: %w", row.PackageID, err))
+	}
 	backendConfig, err := decodeMap(row.BackendConfig)
 	if err != nil {
 		return SessionWithPackage{}, apperr.ErrSimPackageDataCorrupt.WithCause(fmt.Errorf("仿真包 %d 的 backend_config 数据异常: %w", row.PackageID, err))
@@ -124,7 +128,7 @@ func sessionWithPackageFromRow(row sqlcgen.GetSimSessionWithPackageRow) (Session
 	if err != nil {
 		return SessionWithPackage{}, apperr.ErrSimPackageDataCorrupt.WithCause(fmt.Errorf("仿真包 %d 的 interaction_schema 数据异常: %w", row.PackageID, err))
 	}
-	return SessionWithPackage{Session: session, PackageCode: row.Code, PackageVersion: row.Version, PackageName: row.Name, Category: row.Category, BundleKey: row.BundleKey, BundleHash: row.BundleHash, BackendAdapter: pgtypex.TextValue(row.BackendAdapter), BackendConfig: backendConfig, InteractionSchema: interactionSchema, PackageStatus: row.PackageStatus}, nil
+	return SessionWithPackage{Session: session, PackageCode: row.Code, PackageVersion: row.Version, PackageName: row.Name, Category: row.Category, ScaleLimit: scaleLimit, BundleKey: row.BundleKey, BundleHash: row.BundleHash, BackendAdapter: pgtypex.TextValue(row.BackendAdapter), BackendConfig: backendConfig, InteractionSchema: interactionSchema, PackageStatus: row.PackageStatus}, nil
 }
 
 // actionFromRow 转换操作序列行。

@@ -1,12 +1,6 @@
 // Monaco 运行时文件装配编辑器核心、必要交互贡献、Worker 与按语言加载边界。
 
 import * as monaco from 'monaco-editor/esm/vs/editor/editor.api'
-import 'monaco-editor/esm/vs/editor/contrib/bracketMatching/browser/bracketMatching'
-import 'monaco-editor/esm/vs/editor/contrib/find/browser/findController'
-import 'monaco-editor/esm/vs/editor/contrib/folding/browser/folding'
-import 'monaco-editor/esm/vs/editor/contrib/format/browser/formatActions'
-import 'monaco-editor/esm/vs/editor/contrib/hover/browser/hoverContribution'
-import 'monaco-editor/esm/vs/editor/contrib/suggest/browser/suggestController'
 import EditorWorker from 'monaco-editor/esm/vs/editor/editor.worker?worker'
 import CSSWorker from 'monaco-editor/esm/vs/language/css/css.worker?worker'
 import HTMLWorker from 'monaco-editor/esm/vs/language/html/html.worker?worker'
@@ -20,6 +14,7 @@ type MonacoWorkerEnvironment = typeof globalThis & {
 }
 
 const loadedLanguages = new Map<string, Promise<unknown>>()
+let editorContributions: Promise<unknown[]> | undefined
 
 ;(globalThis as MonacoWorkerEnvironment).MonacoEnvironment = {
   getWorker: (_moduleId, label) => {
@@ -33,6 +28,7 @@ const loadedLanguages = new Map<string, Promise<unknown>>()
 
 /** prepareMonacoLanguage 只加载当前文件需要的语言贡献,同一语言在页面生命周期内只加载一次。 */
 export async function prepareMonacoLanguage(language: string): Promise<void> {
+  await prepareEditorContributions()
   const normalized = supportedLanguage(language)
   if (normalized === 'plaintext') return
   let pending = loadedLanguages.get(normalized)
@@ -41,6 +37,21 @@ export async function prepareMonacoLanguage(language: string): Promise<void> {
     loadedLanguages.set(normalized, pending)
   }
   await pending
+}
+
+/** prepareEditorContributions 按需并行加载 IDE 使用的编辑、查找、提示和格式化能力。 */
+function prepareEditorContributions(): Promise<unknown[]> {
+  if (!editorContributions) {
+    editorContributions = Promise.all([
+      import('monaco-editor/esm/vs/editor/contrib/bracketMatching/browser/bracketMatching'),
+      import('monaco-editor/esm/vs/editor/contrib/find/browser/findController'),
+      import('monaco-editor/esm/vs/editor/contrib/folding/browser/folding'),
+      import('monaco-editor/esm/vs/editor/contrib/format/browser/formatActions'),
+      import('monaco-editor/esm/vs/editor/contrib/hover/browser/hoverContribution'),
+      import('monaco-editor/esm/vs/editor/contrib/suggest/browser/suggestController'),
+    ])
+  }
+  return editorContributions
 }
 
 /** supportedLanguage 把未知语言收敛为纯文本,避免动态拼接模块路径。 */

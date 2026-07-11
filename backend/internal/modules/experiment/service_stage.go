@@ -179,7 +179,7 @@ func (s *Service) createEngineResourcesForStage(ctx context.Context, inst Experi
 // createInitialEngineResources 创建实例启动时应立即可用的资源。
 func (s *Service) createInitialEngineResources(ctx context.Context, exp Experiment, inst ExperimentInstance) ([]SandboxRef, []SimSessionRef, error) {
 	if len(exp.Components.Stages) == 0 {
-		return s.createEngineResourcesForStage(ctx, inst, 0, normalizedEnvComponents(exp.Components.Envs), normalizedSimComponents(exp.Components.Sims))
+		return s.createEngineResourcesForStage(ctx, inst, 0, exp.Components.Envs, exp.Components.Sims)
 	}
 	sandboxes := []SandboxRef{}
 	sims := []SimSessionRef{}
@@ -371,44 +371,20 @@ func checkpointResultByID(items []CheckpointResult) map[string]CheckpointResult 
 	return out
 }
 
-// envComponentsByID 生成环境组件索引并补齐派生 ID。
+// envComponentsByID 按显式稳定 ID 生成环境组件索引。
 func envComponentsByID(items []EnvComponent) map[string]EnvComponent {
 	out := map[string]EnvComponent{}
-	for idx, item := range items {
-		id := componentID(item.ID, "env", idx)
-		item.ID = id
-		out[id] = item
+	for _, item := range items {
+		out[strings.TrimSpace(item.ID)] = item
 	}
 	return out
 }
 
-// simComponentsByID 生成仿真组件索引并补齐派生 ID。
+// simComponentsByID 按显式稳定 ID 生成仿真组件索引。
 func simComponentsByID(items []SimComponent) map[string]SimComponent {
 	out := map[string]SimComponent{}
-	for idx, item := range items {
-		id := componentID(item.ID, "sim", idx)
-		item.ID = id
-		out[id] = item
-	}
-	return out
-}
-
-// normalizedEnvComponents 补齐旧式无阶段环境组件的稳定 ID。
-func normalizedEnvComponents(items []EnvComponent) []EnvComponent {
-	out := make([]EnvComponent, 0, len(items))
-	for idx, item := range items {
-		item.ID = componentID(item.ID, "env", idx)
-		out = append(out, item)
-	}
-	return out
-}
-
-// normalizedSimComponents 补齐旧式无阶段仿真组件的稳定 ID。
-func normalizedSimComponents(items []SimComponent) []SimComponent {
-	out := make([]SimComponent, 0, len(items))
-	for idx, item := range items {
-		item.ID = componentID(item.ID, "sim", idx)
-		out = append(out, item)
+	for _, item := range items {
+		out[strings.TrimSpace(item.ID)] = item
 	}
 	return out
 }

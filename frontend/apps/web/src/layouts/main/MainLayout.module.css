@@ -1,4 +1,4 @@
-/* MainLayout.module.css 定义学生端和教师端日常布局外壳样式。 */
+/* MainLayout.module.css 定义四类角色共用的日常布局外壳样式。 */
 .layoutContainer {
   display: flex;
   flex-direction: column;
@@ -37,6 +37,9 @@
   right: 0;
   bottom: 0;
   background-color: var(--color-scrim);
+  border: 0;
+  padding: 0;
+  cursor: pointer;
   z-index: var(--z-drawer);
 }
 

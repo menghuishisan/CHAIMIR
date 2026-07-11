@@ -3,6 +3,7 @@ package experiment
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 
@@ -13,6 +14,8 @@ import (
 )
 
 const maxCheckpointBindingOutputBytes = 16 * 1024
+
+var componentIDPattern = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$`)
 
 // validateExperimentRequest 校验教师向导草稿的边界字段和组件结构。
 func validateExperimentRequest(req ExperimentRequest) (ExperimentRequest, error) {
@@ -44,6 +47,7 @@ func validateExperimentRequest(req ExperimentRequest) (ExperimentRequest, error)
 	if req.Components.Stages == nil {
 		req.Components.Stages = []StageConfig{}
 	}
+	req.Components = normalizeComponentConfig(req.Components)
 	if err := validateComponentConfig(req.Components, req.CollabMode, req.GroupConfig); err != nil {
 		return ExperimentRequest{}, err
 	}
@@ -55,9 +59,9 @@ func validateComponentConfig(cfg ComponentConfig, collabMode int16, group GroupC
 	ids := map[string]bool{}
 	envIDs := map[string]bool{}
 	simIDs := map[string]bool{}
-	for idx, env := range cfg.Envs {
-		id := componentID(env.ID, "env", idx)
-		if ids[id] || strings.TrimSpace(env.RuntimeCode) == "" {
+	for _, env := range cfg.Envs {
+		id := strings.TrimSpace(env.ID)
+		if !componentIDPattern.MatchString(id) || ids[id] || strings.TrimSpace(env.RuntimeCode) == "" {
 			return apperr.ErrExperimentInvalid
 		}
 		if err := validateEnvComponentSandboxContract(env); err != nil {
@@ -66,9 +70,9 @@ func validateComponentConfig(cfg ComponentConfig, collabMode int16, group GroupC
 		ids[id] = true
 		envIDs[id] = true
 	}
-	for idx, sim := range cfg.Sims {
-		id := componentID(sim.ID, "sim", idx)
-		if ids[id] || strings.TrimSpace(sim.PackageCode) == "" || strings.TrimSpace(sim.Version) == "" {
+	for _, sim := range cfg.Sims {
+		id := strings.TrimSpace(sim.ID)
+		if !componentIDPattern.MatchString(id) || ids[id] || strings.TrimSpace(sim.PackageCode) == "" || strings.TrimSpace(sim.Version) == "" {
 			return apperr.ErrExperimentInvalid
 		}
 		ids[id] = true
@@ -76,7 +80,7 @@ func validateComponentConfig(cfg ComponentConfig, collabMode int16, group GroupC
 	}
 	checkpointIDs := map[string]bool{}
 	for _, cp := range cfg.Checkpoints {
-		if strings.TrimSpace(cp.ID) == "" || checkpointIDs[cp.ID] || strings.TrimSpace(cp.ItemCode) == "" || strings.TrimSpace(cp.ItemVersion) == "" || strings.TrimSpace(cp.JudgerCode) == "" || cp.Score <= 0 {
+		if !componentIDPattern.MatchString(cp.ID) || checkpointIDs[cp.ID] || strings.TrimSpace(cp.ItemCode) == "" || strings.TrimSpace(cp.ItemVersion) == "" || strings.TrimSpace(cp.JudgerCode) == "" || cp.Score <= 0 {
 			return apperr.ErrExperimentCheckpointInvalid
 		}
 		if cp.Mode != "" && cp.Mode != contracts.JudgeSandboxModeFresh && cp.Mode != contracts.JudgeSandboxModeReuse {
@@ -99,6 +103,52 @@ func validateComponentConfig(cfg ComponentConfig, collabMode int16, group GroupC
 		}
 	}
 	return nil
+}
+
+// normalizeComponentConfig 统一清理当前组件契约中的标识和引用,保证持久化值与校验值一致。
+func normalizeComponentConfig(cfg ComponentConfig) ComponentConfig {
+	for idx := range cfg.Envs {
+		cfg.Envs[idx].ID = strings.TrimSpace(cfg.Envs[idx].ID)
+		cfg.Envs[idx].RuntimeCode = strings.TrimSpace(cfg.Envs[idx].RuntimeCode)
+		cfg.Envs[idx].RuntimeImageVersion = strings.TrimSpace(cfg.Envs[idx].RuntimeImageVersion)
+	}
+	for idx := range cfg.Sims {
+		cfg.Sims[idx].ID = strings.TrimSpace(cfg.Sims[idx].ID)
+		cfg.Sims[idx].PackageCode = strings.TrimSpace(cfg.Sims[idx].PackageCode)
+		cfg.Sims[idx].Version = strings.TrimSpace(cfg.Sims[idx].Version)
+	}
+	for idx := range cfg.Checkpoints {
+		cfg.Checkpoints[idx].ID = strings.TrimSpace(cfg.Checkpoints[idx].ID)
+		cfg.Checkpoints[idx].JudgerCode = strings.TrimSpace(cfg.Checkpoints[idx].JudgerCode)
+		cfg.Checkpoints[idx].ItemCode = strings.TrimSpace(cfg.Checkpoints[idx].ItemCode)
+		cfg.Checkpoints[idx].ItemVersion = strings.TrimSpace(cfg.Checkpoints[idx].ItemVersion)
+		cfg.Checkpoints[idx].Mode = strings.TrimSpace(cfg.Checkpoints[idx].Mode)
+		cfg.Checkpoints[idx].EnvID = strings.TrimSpace(cfg.Checkpoints[idx].EnvID)
+		cfg.Checkpoints[idx].SimID = strings.TrimSpace(cfg.Checkpoints[idx].SimID)
+	}
+	for stageIdx := range cfg.Stages {
+		stage := &cfg.Stages[stageIdx]
+		stage.Title = strings.TrimSpace(stage.Title)
+		for idx := range stage.Components.Envs {
+			stage.Components.Envs[idx] = strings.TrimSpace(stage.Components.Envs[idx])
+		}
+		for idx := range stage.Components.Sims {
+			stage.Components.Sims[idx] = strings.TrimSpace(stage.Components.Sims[idx])
+		}
+		if stage.UnlockCondition != nil {
+			stage.UnlockCondition.Type = strings.TrimSpace(stage.UnlockCondition.Type)
+			stage.UnlockCondition.CheckpointID = strings.TrimSpace(stage.UnlockCondition.CheckpointID)
+		}
+		for idx := range stage.ParamBindings {
+			binding := &stage.ParamBindings[idx]
+			binding.TargetComponent = strings.TrimSpace(binding.TargetComponent)
+			binding.TargetParam = strings.TrimSpace(binding.TargetParam)
+			binding.SourceType = strings.TrimSpace(binding.SourceType)
+			binding.SourceRef = strings.TrimSpace(binding.SourceRef)
+			binding.SourcePath = strings.TrimSpace(binding.SourcePath)
+		}
+	}
+	return cfg
 }
 
 // validateEnvComponentSandboxContract 在 M7 输入边界落实 M2 沙箱配置合同,避免保存无法启动的实验定义。
@@ -312,14 +362,6 @@ func validateManualScore(score float64) error {
 // sourceRefForInstance 按全局 source_ref 规范生成实验实例来源引用。
 func sourceRefForInstance(id int64, now time.Time) string {
 	return fmt.Sprintf("experiment:%04d:instance:%d", now.Year(), id)
-}
-
-// componentID 返回显式组件 ID 或稳定派生 ID,避免存储空组件键。
-func componentID(raw, prefix string, idx int) string {
-	if strings.TrimSpace(raw) != "" {
-		return strings.TrimSpace(raw)
-	}
-	return fmt.Sprintf("%s%d", prefix, idx+1)
 }
 
 // validExperimentSourceRef 校验事件来源确属 M7 实例。

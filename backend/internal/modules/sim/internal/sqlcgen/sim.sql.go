@@ -569,7 +569,7 @@ func (q *Queries) GetSimSession(ctx context.Context, arg GetSimSessionParams) (S
 
 const getSimSessionWithPackage = `-- name: GetSimSessionWithPackage :one
 SELECT s.id, s.tenant_id, s.package_id, s.source_ref, s.owner_account_id, s.seed, s.init_params, s.compute, s.status, s.created_at, s.updated_at,
-       p.code, p.version, p.name, p.category, p.bundle_key, p.bundle_hash, p.backend_adapter, p.backend_config,
+       p.code, p.version, p.name, p.category, p.scale_limit, p.bundle_key, p.bundle_hash, p.backend_adapter, p.backend_config,
        p.interaction_schema, p.status AS package_status
 FROM sim_session s
 JOIN sim_package p ON p.id = s.package_id
@@ -597,6 +597,7 @@ type GetSimSessionWithPackageRow struct {
 	Version           string             `json:"version"`
 	Name              string             `json:"name"`
 	Category          string             `json:"category"`
+	ScaleLimit        []byte             `json:"scale_limit"`
 	BundleKey         string             `json:"bundle_key"`
 	BundleHash        string             `json:"bundle_hash"`
 	BackendAdapter    pgtype.Text        `json:"backend_adapter"`
@@ -624,6 +625,7 @@ func (q *Queries) GetSimSessionWithPackage(ctx context.Context, arg GetSimSessio
 		&i.Version,
 		&i.Name,
 		&i.Category,
+		&i.ScaleLimit,
 		&i.BundleKey,
 		&i.BundleHash,
 		&i.BackendAdapter,

@@ -3,7 +3,7 @@
 import type { JsonObject, JsonValue, SimInitParams, StageInjectedParam } from '../types';
 
 /**
- * paramValue 从初始化参数中读取原始值,并兼容 M7 阶段编排注入的 {_source,_value} 包装。
+ * paramValue 从初始化参数中读取原始值,并解析 M7 阶段编排注入的 {_source,_value} 契约。
  */
 export function paramValue(params: SimInitParams, name: string): JsonValue | undefined {
   const value = params[name];
