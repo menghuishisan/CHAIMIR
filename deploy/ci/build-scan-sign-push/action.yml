@@ -49,6 +49,34 @@ outputs:
 runs:
   using: composite
   steps:
+    - name: 校验镜像供应链输入
+      shell: bash
+      env:
+        INPUT_REGISTRY: ${{ inputs.registry }}
+        INPUT_REGISTRY_USERNAME: ${{ inputs.registry-username }}
+        INPUT_REGISTRY_PASSWORD: ${{ inputs.registry-password }}
+        INPUT_COSIGN_KEY: ${{ inputs.cosign-key }}
+        INPUT_COSIGN_PASSWORD: ${{ inputs.cosign-password }}
+      run: |
+        set -euo pipefail
+        required=(
+          INPUT_REGISTRY
+          INPUT_REGISTRY_USERNAME
+          INPUT_REGISTRY_PASSWORD
+          INPUT_COSIGN_KEY
+          INPUT_COSIGN_PASSWORD
+        )
+        for variable in "${required[@]}"; do
+          if [[ -z "${!variable}" ]]; then
+            echo "::error title=镜像供应链配置缺失::$variable 未由 GitHub Secret 注入"
+            exit 1
+          fi
+        done
+        if [[ ! "$INPUT_REGISTRY" =~ ^[A-Za-z0-9.-]+(:[0-9]+)?$ ]]; then
+          echo "::error title=Harbor 地址非法::HARBOR_REGISTRY 只能填写 host 或 host:port,不能包含协议、路径或空白"
+          exit 1
+        fi
+
     - name: 登录 Harbor
       shell: bash
       run: |
