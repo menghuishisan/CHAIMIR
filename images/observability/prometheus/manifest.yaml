@@ -14,16 +14,26 @@ labels:
   chaimir.io/sensitivity: observability
   chaimir.io/scope: observability
   chaimir.io/source: platform-built
-description: Prometheus 指标采集平台 Wolfi 安全运行镜像。
+description: Prometheus 指标采集平台官方源码安全重建镜像。
 source:
   type: platform-built
 upstream:
-  registry: cgr.dev
-  image: chainguard/wolfi-base
-  version: "latest"
-  packages:
-    - prometheus-3.12=3.12.0
-  reuse_policy: wolfi-package-build
+  source_repository: https://github.com/prometheus/prometheus
+  version: v3.12.0
+  source_commit: 9f27dffc1f93ca23287972f632025879f2d1c658
+  source_archive: https://github.com/prometheus/prometheus/archive/refs/tags/v3.12.0.tar.gz
+  source_sha256: ca7a8dd2c57048bb952a493a2957811c6f380089c2b158c2def484b874c3b6d7
+  builder_arg: GO_BUILDER_IMAGE
+  assets_builder_arg: NODE_BUILDER_IMAGE
+  runtime_image: cgr.dev/chainguard/wolfi-base
+  runtime_version: "2026-07-07"
+  runtime_digest: sha256:02dab76bd852a70556b5b2002195c8a5fdab77d323c433bf6642aab080489795
+  runtime_packages:
+    - ca-certificates=20260413-r0
+    - tzdata=2026c-r0
+  security_overrides:
+    golang.org/x/crypto: v0.52.0
+  reuse_policy: rebuild-official-release-source
   license: Apache-2.0
 private_delivery:
   offline_bundle: true

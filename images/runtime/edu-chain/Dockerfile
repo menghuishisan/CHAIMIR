@@ -1,5 +1,5 @@
 # 本文件定义 Chaimir 自研教学链运行时镜像。
-ARG GO_BUILDER_IMAGE
+ARG GO_BUILDER_IMAGE=invalid.invalid/base/go-builder:required
 
 FROM ${GO_BUILDER_IMAGE} AS build
 WORKDIR /src/edu-chain

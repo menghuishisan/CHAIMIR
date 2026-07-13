@@ -1,5 +1,7 @@
 # 本文件定义前端单 SPA 静态资源服务镜像,在构建阶段产出四角色共用的 React 应用。
-ARG NODE_BUILDER_IMAGE=node:20-alpine
+# 构建与运行基座都由 images/build-images.ps1 注入不可变引用,禁止裸 tag 构建。
+ARG NODE_BUILDER_IMAGE=invalid.invalid/base/node-builder:required
+ARG NGINX_RUNTIME_IMAGE=invalid.invalid/runtime/nginx:required
 FROM ${NODE_BUILDER_IMAGE} AS builder
 
 USER root
@@ -19,7 +21,7 @@ RUN pnpm build && \
     mkdir -p /out && \
     cp -a apps/web/dist/. /out/
 
-FROM nginx:1.27-alpine
+FROM ${NGINX_RUNTIME_IMAGE}
 
 LABEL org.opencontainers.image.title="service/frontend"
 LABEL org.opencontainers.image.description="Chaimir frontend static asset service"

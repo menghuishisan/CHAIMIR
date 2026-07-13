@@ -18,7 +18,15 @@ description: VS Code Web 编辑器镜像。
 source:
   type: thin-wrapper
 upstream:
-  image: ghcr.io/coder/code-server:4.126.0
+  image: ghcr.io/coder/code-server
+  version: 4.126.0
+  digest: sha256:e1f03b5faaefd63ba6c7173a5290c6ec0526ac907f23acfe6bc949dd965279e4
+  runtime_image: cgr.dev/chainguard/wolfi-base
+  runtime_version: "2026-07-07"
+  runtime_digest: sha256:02dab76bd852a70556b5b2002195c8a5fdab77d323c433bf6642aab080489795
+  node_image: node:22-trixie-slim
+  node_version: 22-trixie-slim
+  node_digest: sha256:4228fca437e45714a3ebd1d4ecd1dcc583cf79f5a940aa025e286b472d93b67c
   reuse_policy: thin-wrapper
 data_driven: true
 capabilities:
@@ -109,6 +117,6 @@ supply_chain:
   trivy_required: true
   trivy_skip_files:
     - /usr/lib/code-server/lib/vscode/extensions/npm/package.json
-  trivy_skip_reason: "VS Code 内置 npm 扩展的 package.json 声明 publisher=vscode、private=true、version=1.0.1,不是容器内 npm CLI 或可执行包;真实 npm CLI 由 Wolfi npm 11.17.0 提供并纳入扫描。不得修改该扩展元数据或删除扩展来规避扫描。"
+  trivy_skip_reason: "VS Code 内置 npm 扩展的 package.json 声明 publisher=vscode、private=true、version=1.0.1,不是容器内 npm CLI 或可执行包;真实 npm CLI 由 Wolfi npm 包提供并纳入扫描。不得修改该扩展元数据或删除扩展来规避扫描。"
   cosign_required: true
   pull_by_digest_in_production: true

@@ -19,6 +19,9 @@ source:
   type: thin-wrapper
 upstream:
   image: remixproject/remix-ide:remix_live
+  digest: sha256:0dc2f0c50a7e34d8d57bd49c38a6f557be8823f2869bd7891da75be6bf9dbbe0
+  runtime_image: gcr.io/distroless/static-debian12:nonroot
+  runtime_digest: sha256:b7bb25d9f7c31d2bdd1982feb4dafcaf137703c7075dbe2febb41c24212b946f
   reuse_policy: thin-wrapper
 data_driven: true
 capabilities:
@@ -85,4 +88,3 @@ supply_chain:
   trivy_required: true
   cosign_required: true
   pull_by_digest_in_production: true
-

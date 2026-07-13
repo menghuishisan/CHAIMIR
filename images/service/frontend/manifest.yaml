@@ -18,8 +18,9 @@ description: 前端静态资源服务镜像。
 source:
   type: platform-built
 upstream:
-  builder: node:20-alpine
-  runtime: nginx:1.27-alpine
+  builder: base/node-builder
+  runtime: nginx:1.31.2-alpine
+  runtime_digest: sha256:54f2a904c251d5a34adf545a72d32515a15e08418dae0266e23be2e18c66fefa
   reuse_policy: multi-stage-build
 data_driven: false
 capabilities:
@@ -70,5 +71,3 @@ supply_chain:
   trivy_required: true
   cosign_required: true
   pull_by_digest_in_production: true
-
-

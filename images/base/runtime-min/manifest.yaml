@@ -19,6 +19,7 @@ source:
   type: build-base
 upstream:
   image: gcr.io/distroless/static-debian12:nonroot
+  digest: sha256:b7bb25d9f7c31d2bdd1982feb4dafcaf137703c7075dbe2febb41c24212b946f
   reuse_policy: direct-base
 data_driven: false
 capabilities:
@@ -56,5 +57,4 @@ supply_chain:
   trivy_required: true
   cosign_required: true
   pull_by_digest_in_production: true
-
 

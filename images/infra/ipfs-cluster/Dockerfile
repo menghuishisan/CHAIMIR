@@ -1,5 +1,5 @@
 # 本文件定义 IPFS Cluster 镜像,固定上游 release 源码并用加固 Go 工具链重建。
-ARG GO_BUILDER_IMAGE
+ARG GO_BUILDER_IMAGE=invalid.invalid/base/go-builder:required
 
 FROM ${GO_BUILDER_IMAGE} AS cluster-build
 
@@ -16,7 +16,7 @@ RUN test "$(git rev-parse HEAD)" = "${IPFS_CLUSTER_COMMIT}" \
     && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o /out/ipfs-cluster-service ./cmd/ipfs-cluster-service \
     && mkdir -p /tmp/chaimir-ipfs-cluster/runtime-state/ipfs-cluster /tmp/chaimir-ipfs-cluster/workspace
 
-FROM gcr.io/distroless/base-debian12:nonroot
+FROM gcr.io/distroless/base-debian12:nonroot@sha256:4b5196599229a5cf312a676cfe1ee8587ecf2371dcc22620f8c7a66d77d125c8
 
 LABEL org.opencontainers.image.title="infra/ipfs-cluster"
 LABEL org.opencontainers.image.description="Chaimir IPFS Cluster coordination image"

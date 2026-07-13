@@ -1,5 +1,5 @@
 # 本文件构建 gas 消耗分析工具镜像。
-FROM python:3.13-alpine
+FROM python:3.13-alpine@sha256:399babc8b49529dabfd9c922f2b5eea81d611e4512e3ed250d75bd2e7683f4b0
 
 LABEL org.opencontainers.image.title="tool/gas-profiler"
 LABEL org.opencontainers.image.description="Chaimir gas profiler command line tool"

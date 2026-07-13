@@ -18,7 +18,8 @@ description: Foundry/Anvil EVM 运行时镜像。
 source:
   type: thin-wrapper
 upstream:
-  image: ghcr.io/foundry-rs/foundry:v1.0.0
+  image: ghcr.io/foundry-rs/foundry:v1.7.1
+  digest: sha256:bdc584033cefab8be282c7f57c263cda42f04700cd1ec88d64bebe2f645aba72
   reuse_policy: thin-wrapper
 env_keys:
   config:

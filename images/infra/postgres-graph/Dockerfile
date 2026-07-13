@@ -1,5 +1,5 @@
 # 本文件定义 The Graph 专用 PostgreSQL 镜像,复用官方 PostgreSQL。
-FROM postgres:16-alpine
+FROM postgres:16-alpine@sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777
 
 LABEL org.opencontainers.image.title="infra/postgres-graph"
 LABEL org.opencontainers.image.description="Chaimir PostgreSQL instance for The Graph indexing"

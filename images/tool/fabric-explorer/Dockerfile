@@ -1,5 +1,5 @@
 # 本文件定义 Fabric Explorer 工具镜像。
-FROM hyperledger/explorer:1.1.8
+FROM hyperledger/explorer:1.1.8@sha256:c64d328c6be4c03655dd1f7835937547752e4fe41b1e26fcb5e233cd327b96c1
 
 LABEL org.opencontainers.image.title="tool/fabric-explorer"
 LABEL org.opencontainers.image.description="Chaimir Hyperledger Fabric explorer image"

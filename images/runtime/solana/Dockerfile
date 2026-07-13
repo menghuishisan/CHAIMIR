@@ -1,12 +1,12 @@
 # 本文件定义 Solana 本地测试链运行时镜像。
-FROM solanalabs/solana:v1.18.26 AS solana-tools
+FROM solanalabs/solana:v1.18.26@sha256:098806e64d44bccdbedbf07c2edabd1c850b92c8a4a0f81eba9c789034813db6 AS solana-tools
 
 FROM debian:13.5-slim@sha256:28de0877c2189802884ccd20f15ee41c203573bd87bb6b883f5f46362d24c5c2 AS runtime-libs
 RUN apt-get -o Acquire::Retries=3 update \
     && apt-get -o Acquire::Retries=3 -y install --no-install-recommends ca-certificates libstdc++6 libudev1 \
     && rm -rf /var/lib/apt/lists/*
 
-FROM alpine:3.23 AS runtime-dirs
+FROM alpine:3.23@sha256:fd791d74b68913cbb027c6546007b3f0d3bc45125f797758156952bc2d6daf40 AS runtime-dirs
 RUN mkdir -p /workspace /runtime-state/solana/ledger \
     && chown -R 1000:1000 /workspace /runtime-state
 

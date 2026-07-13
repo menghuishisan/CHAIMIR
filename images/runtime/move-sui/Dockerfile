@@ -1,12 +1,12 @@
 # 本文件定义 Sui Move 本地网运行时镜像。
-FROM mysten/sui-tools:086c222823a48f5136eedf969e9d489dc265e714 AS sui-tools
+FROM mysten/sui-tools:086c222823a48f5136eedf969e9d489dc265e714@sha256:d1e192fbe98813eeed37ac3ac994497e3b3efd173c814ea67ff81096097ec035 AS sui-tools
 
 FROM debian:13.5-slim@sha256:28de0877c2189802884ccd20f15ee41c203573bd87bb6b883f5f46362d24c5c2 AS runtime-libs
 RUN apt-get -o Acquire::Retries=3 update \
     && apt-get -o Acquire::Retries=3 -y install --no-install-recommends ca-certificates libstdc++6 \
     && rm -rf /var/lib/apt/lists/*
 
-FROM alpine:3.23 AS runtime-dirs
+FROM alpine:3.23@sha256:fd791d74b68913cbb027c6546007b3f0d3bc45125f797758156952bc2d6daf40 AS runtime-dirs
 RUN mkdir -p /workspace /runtime-state/sui \
     && chown -R 1000:1000 /workspace /runtime-state
 

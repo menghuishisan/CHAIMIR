@@ -19,7 +19,7 @@ source:
   type: build-base
 upstream:
   image: node:24-alpine3.23
-  digest: sha256:7c70d1235c0b4c2bc9eeed5393d19f1bbdde6885ba0d58ba62bb385d7b0f3ff1
+  digest: sha256:595398b0081eacda8e1c4c5b97b76cd1020e4d58a8ebcb4843b9bca1e79e7436
   reuse_policy: thin-wrapper
 data_driven: false
 capabilities:
@@ -60,5 +60,4 @@ supply_chain:
   trivy_required: true
   cosign_required: true
   pull_by_digest_in_production: true
-
 

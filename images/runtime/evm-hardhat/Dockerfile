@@ -1,6 +1,6 @@
 # 本文件定义 Hardhat 教学运行时镜像,用于 Solidity 开发体验类实验。
-ARG NODE_BUILDER_IMAGE
-FROM ghcr.io/foundry-rs/foundry:v1.0.0@sha256:d12a373ec950de170d5461014ef9320ba0fb6e0db6f87835999d0fcf3820370e AS foundry
+ARG NODE_BUILDER_IMAGE=invalid.invalid/base/node-builder:required
+FROM ghcr.io/foundry-rs/foundry:v1.7.1@sha256:bdc584033cefab8be282c7f57c263cda42f04700cd1ec88d64bebe2f645aba72 AS foundry
 
 FROM ${NODE_BUILDER_IMAGE}
 

@@ -21,6 +21,7 @@ upstream:
   registry: docker.io
   image: library/postgres
   version: "18-alpine"
+  digest: sha256:9a8afca54e7861fd90fab5fdf4c42477a6b1cb7d293595148e674e0a3181de15
   reuse_policy: security-thin-wrapper
   license: PostgreSQL
 private_delivery:

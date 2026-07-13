@@ -1,5 +1,5 @@
 # 本文件定义 Bitcoin regtest 教学运行时镜像。
-FROM ruimarinho/bitcoin-core:24-alpine
+FROM ruimarinho/bitcoin-core:24-alpine@sha256:258f763357e610f7d87c4898211878fc78d2452edcd5897f65843cbcd2940d5f
 
 LABEL org.opencontainers.image.title="runtime/bitcoin"
 LABEL org.opencontainers.image.description="Chaimir Bitcoin regtest runtime"

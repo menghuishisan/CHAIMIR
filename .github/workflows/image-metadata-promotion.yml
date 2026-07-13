@@ -1,4 +1,4 @@
-# 镜像元数据晋升流水线:消费已扫描、签名并验签的 digest 片段,通过机器人 PR 同步权威文件。
+# 镜像元数据晋升流水线:消费已扫描、生成 SBOM、签名/证明并验证的 digest 片段,通过机器人 PR 同步权威文件。
 name: image-metadata-promotion
 
 on:
@@ -114,7 +114,7 @@ jobs:
               --base main \
               --head "$AUTOMATION_BRANCH" \
               --title "chore(images): promote verified image digests" \
-              --body "由镜像供应链自动更新已通过 Trivy、Harbor、Cosign 签名与验签的不可变 digest 及其静态引用。")
+              --body "由镜像供应链自动更新已通过 Trivy、CycloneDX SBOM、Harbor、Cosign 镜像签名与 SBOM 证明验证的不可变 digest 及其静态引用。")
             pr_number="${pr_url##*/}"
           fi
           gh pr merge "$pr_number" --auto --squash

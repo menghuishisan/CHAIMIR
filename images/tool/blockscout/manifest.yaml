@@ -19,6 +19,7 @@ source:
   type: thin-wrapper
 upstream:
   image: blockscout/blockscout:6.9.2
+  digest: sha256:1d3f8fc81c5719e5b1ce37427ebb04082d9d6a57f8c49d0c693a21fbcfecc34d
   reuse_policy: thin-wrapper
 data_driven: true
 capabilities:
@@ -198,4 +199,3 @@ supply_chain:
   trivy_required: true
   cosign_required: true
   pull_by_digest_in_production: true
-

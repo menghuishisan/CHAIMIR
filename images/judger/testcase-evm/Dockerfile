@@ -1,8 +1,8 @@
 # 本文件定义 EVM 测试用例判题镜像。
-ARG NODE_BUILDER_IMAGE
-ARG JUDGE_MIN_IMAGE
+ARG NODE_BUILDER_IMAGE=invalid.invalid/base/node-builder:required
+ARG JUDGE_MIN_IMAGE=invalid.invalid/base/judge-min:required
 
-FROM ghcr.io/foundry-rs/foundry:v1.0.0@sha256:d12a373ec950de170d5461014ef9320ba0fb6e0db6f87835999d0fcf3820370e AS foundry
+FROM ghcr.io/foundry-rs/foundry:v1.7.1@sha256:bdc584033cefab8be282c7f57c263cda42f04700cd1ec88d64bebe2f645aba72 AS foundry
 FROM ${JUDGE_MIN_IMAGE} AS judge-base
 
 FROM ${NODE_BUILDER_IMAGE}

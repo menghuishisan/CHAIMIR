@@ -1,7 +1,7 @@
 # 本文件定义 The Graph 索引节点镜像,复用官方 graph-node 二进制并收紧运行层。
-FROM graphprotocol/graph-node:latest AS upstream
+FROM graphprotocol/graph-node:0.44.0@sha256:c14c6d8e2b2b1ed89f6a89babf48d807b18a43e372fda7fb495d3a9050b65b8b AS upstream
 
-FROM cgr.dev/chainguard/wolfi-base:latest
+FROM cgr.dev/chainguard/wolfi-base@sha256:02dab76bd852a70556b5b2002195c8a5fdab77d323c433bf6642aab080489795
 
 LABEL org.opencontainers.image.title="infra/thegraph-node"
 LABEL org.opencontainers.image.description="Chaimir The Graph indexing node image"

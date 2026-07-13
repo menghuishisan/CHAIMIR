@@ -19,6 +19,7 @@ source:
   type: platform-built
 upstream:
   image: fiscoorg/fiscobcos:v3.12.1
+  digest: sha256:93db5277a5c896fde402f2165d133cc3d346effef4165ec417ef098eb2ede74b
   reuse_policy: official-static-binary-on-supported-base
 data_driven: true
 capabilities:
@@ -71,4 +72,3 @@ supply_chain:
   trivy_required: true
   cosign_required: true
   pull_by_digest_in_production: true
-

@@ -1,4 +1,4 @@
-﻿# local-dev overlay:现有 Kubernetes 集群,中间件单实例,本地镜像,dev 密钥。
+﻿# local-dev overlay:现有 Kubernetes 集群,中间件单实例,Harbor digest 镜像,dev 密钥。
 # 依据 docs/总-部署架构设计.md §四/§五:local-dev 使用当前 kubeconfig 指向的集群 + 单实例中间件。
 # 一键拉起见 deploy/Makefile(dev-up:装 ingress/metrics → apply 本 overlay → 跑 migrate)。
 apiVersion: kustomize.config.k8s.io/v1beta1
@@ -28,31 +28,31 @@ secretGenerator:
 images:
   - name: chaimir/backend
     newName: harbor.chaimir:30080/service/backend
-    digest: sha256:01bec1df5a9e87628e024d63a5522eb8d06d68be96b7b415bec5aa3a7d7b89a7
+    digest: sha256:9032642fc103d8a3c8b4562cab6fec0697f577c50afb26d5028abe6cd589313e
   - name: chaimir/frontend
     newName: harbor.chaimir:30080/service/frontend
-    newTag: dev
+    digest: sha256:db060f0d6607edef65c439cfc18c2309982b997d47f72f8c5d95d02bda0385c1
   - name: chaimir/migrate
     newName: harbor.chaimir:30080/service/migrate
-    digest: sha256:e686bce806c20391f51bc4288264051af8b5b6128179d190b061d5a3d714ab57
+    digest: sha256:eab732aa1038268823a7f9ce474292a3a7cc53922ec1dfcf6c51c1cfa88bfb8c
   - name: chaimir/cron
     newName: harbor.chaimir:30080/service/cron
-    digest: sha256:67ef95de11ddd238b0e0e75aa58fbaa30314eb856e211485bb449b7209a1aac6
+    digest: sha256:1c57c2407db6cbe728bdb0081164f16c8150e98bb1daba1e52d7e798d51d4f3a
   - name: chaimir/middleware/clamav
     newName: harbor.chaimir:30080/middleware/clamav
-    digest: sha256:833c257e088e8480f825bf03dc5c37d907747acb2c371c51a07034a38cc24143
+    digest: sha256:8e1af8fa21a9954abc87aa4c59993a82ec6984ee89bc09097ab9828efddc399a
   - name: chaimir/middleware/minio
     newName: harbor.chaimir:30080/middleware/minio
-    digest: sha256:5d4553bf53b4981ca52343d86271c71a1e6d20859133561f01ac645b389755b6
+    digest: sha256:572a6ab846e59cf2e0b56645c955136107aecef09a365afa237ff127c4646cab
   - name: chaimir/middleware/nats
     newName: harbor.chaimir:30080/middleware/nats
-    digest: sha256:9524c61e8791a6417ff875878adb8229865bf99d00fe1b6bf5192ece77adde95
+    digest: sha256:502f6b38e93402ba6049abb388fb86ddb6a3ae1739ac71f1a935e0b5be1f8528
   - name: chaimir/middleware/postgres
     newName: harbor.chaimir:30080/middleware/postgres
-    digest: sha256:ef20d46eba750371f6710e18cae1502e7dc538afd4aab4a0d8937712f2aefc31
+    digest: sha256:8a08cd59bcab2c21965dd8826440e5be1c93a3754de9a7a543a33286b2d2edbe
   - name: chaimir/middleware/redis
     newName: harbor.chaimir:30080/middleware/redis
-    digest: sha256:0ba43c28f35d08b10f4a4b56ce249aee7bd3541ec8215b30682cffb59d84a37d
+    digest: sha256:3f7c4af1c5509dace732614ed08b168d436d8a5c39a1001c3fbb7c1a1290f975
 
 # 本地形态:SaaS 多租户 + 平台层开(便于本地验证全功能)。
 configMapGenerator:

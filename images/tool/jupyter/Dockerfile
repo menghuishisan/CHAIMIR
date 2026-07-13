@@ -1,5 +1,5 @@
 # 本文件定义 Jupyter Notebook 工具镜像。
-FROM quay.io/jupyter/minimal-notebook:python-3.12
+FROM quay.io/jupyter/minimal-notebook:python-3.12@sha256:5b868d38f2b454cb22abb077052d341d3d7aeec2315c296c44de3b1278425782
 
 LABEL org.opencontainers.image.title="tool/jupyter"
 LABEL org.opencontainers.image.description="Chaimir Jupyter notebook tool image"
@@ -21,6 +21,7 @@ RUN apt-get -o Acquire::Retries=3 update \
         "Mako>=1.3.10" \
         "Brotli>=1.2.0" \
         "cryptography>=46.0.0" \
+        "soupsieve>=2.8.4" \
     && /opt/conda/bin/python -m pip uninstall -y nbclassic \
     && rm -rf /var/lib/apt/lists/* /root/.cache/pip \
     && groupadd --gid 1000 chaimir \

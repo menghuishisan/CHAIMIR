@@ -18,9 +18,12 @@ description: 合约 ABI 交互面板工具镜像。
 source:
   type: platform-built
 upstream:
-  image: cgr.dev/chainguard/wolfi-base:latest
+  image: cgr.dev/chainguard/wolfi-base
+  version: "2026-07-07"
+  digest: sha256:02dab76bd852a70556b5b2002195c8a5fdab77d323c433bf6642aab080489795
   packages:
-    - python-3.13
+    - python-3.13=3.13.14-r1
+    - py3.13-pip=26.1.2-r1
     - eth-abi==5.2.0
     - eth-utils==5.3.1
     - eth-hash[pycryptodome]==0.8.0

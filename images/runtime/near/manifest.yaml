@@ -18,7 +18,9 @@ description: NEAR 本地网教学运行时镜像。
 source:
   type: thin-wrapper
 upstream:
-  image: nearprotocol/nearcore:2.2.1
+  image: nearprotocol/nearcore
+  version: 2.2.1
+  digest: sha256:66c87335fb18b7311e5f619c45b544743336d993bdc4c077430d6541743ae8a8
   reuse_policy: thin-wrapper
 data_driven: true
 capabilities:

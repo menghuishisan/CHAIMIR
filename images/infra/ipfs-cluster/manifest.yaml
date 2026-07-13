@@ -21,6 +21,8 @@ upstream:
   source_repo: https://github.com/ipfs-cluster/ipfs-cluster
   source_ref: v1.1.6
   version: v1.1.6
+  runtime_image: gcr.io/distroless/base-debian12:nonroot
+  runtime_digest: sha256:4b5196599229a5cf312a676cfe1ee8587ecf2371dcc22620f8c7a66d77d125c8
   reuse_policy: rebuild-official-release-source
 data_driven: true
 capabilities:

@@ -6,6 +6,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+# Get-EnvValue 读取必填 env 键,缺失时立即终止 Harbor 初始化。
 function Get-EnvValue {
     param(
         [string]$Path,
@@ -36,6 +37,7 @@ function Get-OptionalEnvValue {
     return $value
 }
 
+# Get-BasicAuthHeader 为 Harbor API 请求生成 Basic Authorization 值。
 function Get-BasicAuthHeader {
     param(
         [string]$User,

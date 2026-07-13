@@ -19,6 +19,11 @@ source:
   type: thin-wrapper
 upstream:
   image: mysten/sui-tools:086c222823a48f5136eedf969e9d489dc265e714
+  digest: sha256:d1e192fbe98813eeed37ac3ac994497e3b3efd173c814ea67ff81096097ec035
+  runtime_libs_image: debian:13.5-slim
+  runtime_libs_digest: sha256:28de0877c2189802884ccd20f15ee41c203573bd87bb6b883f5f46362d24c5c2
+  runtime_dirs_image: alpine:3.23
+  runtime_dirs_digest: sha256:fd791d74b68913cbb027c6546007b3f0d3bc45125f797758156952bc2d6daf40
   reuse_policy: thin-wrapper
 data_driven: true
 capabilities:

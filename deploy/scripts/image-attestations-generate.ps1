@@ -7,16 +7,12 @@ param(
     [string]$BackendEnvPath = "",
     [string]$DeployEnvPath = "",
     [string]$EvidenceDir = "",
-    [string]$Severity = "HIGH,CRITICAL",
-    [string]$TrivyStatusPassed = "passed",
     [switch]$GenerateKeyIfMissing,
-    [switch]$SkipScan,
-    [switch]$SkipSign,
-    [switch]$SkipVerify,
     [switch]$NoEnvWrite
 )
 
 $ErrorActionPreference = "Stop"
+Import-Module (Join-Path $RepoRoot "images\lib\ImageMetadata.psm1") -Force
 
 if ([string]::IsNullOrWhiteSpace($ConfigPath)) {
     $ConfigPath = Join-Path $RepoRoot "deploy\config\chaimir.env"
@@ -36,6 +32,13 @@ if ([string]::IsNullOrWhiteSpace($DeployEnvPath)) {
 if ([string]::IsNullOrWhiteSpace($EvidenceDir)) {
     $EvidenceDir = Join-Path $RepoRoot ".tmp\backend-functional-test\evidence"
 }
+$EvidenceDir = if ([System.IO.Path]::IsPathRooted($EvidenceDir)) {
+    [System.IO.Path]::GetFullPath($EvidenceDir)
+} else {
+    [System.IO.Path]::GetFullPath((Join-Path $RepoRoot $EvidenceDir))
+}
+New-Item -ItemType Directory -Force -Path $EvidenceDir | Out-Null
+$script:evidenceHostDir = $EvidenceDir
 
 # Read-EnvFile 读取简单 KEY=VALUE 文件;只返回键值,不输出密钥内容。
 function Read-EnvFile {
@@ -108,85 +111,13 @@ function Resolve-DeployPath {
     return (Join-Path (Join-Path $RepoRoot "deploy") $Value)
 }
 
-# Read-DigestLock 读取 category/name sha256:digest 格式的镜像锁。
-function Read-DigestLock {
-    param([string]$Path)
-    if (-not (Test-Path -LiteralPath $Path)) {
-        throw "缺少 digest lock: $Path"
-    }
-    $items = [System.Collections.Generic.List[object]]::new()
-    foreach ($line in Get-Content -LiteralPath $Path) {
-        $trimmed = $line.Trim()
-        if ($trimmed -eq "" -or $trimmed.StartsWith("#")) {
-            continue
-        }
-        if ($trimmed -notmatch "^([^:\s]+/[^:\s]+)\s*[:= ]\s*(sha256:[0-9a-f]{64})$") {
-            throw "digest lock 行格式非法: $line"
-        }
-        $items.Add([pscustomobject]@{ Image = $Matches[1]; Digest = $Matches[2] })
-    }
-    if ($items.Count -eq 0) {
-        throw "digest lock 中没有可证明镜像: $Path"
-    }
-    return $items
-}
-
-# Read-YamlBlock 读取顶层 YAML 块,用于解析 manifest 的供应链准入状态。
-function Read-YamlBlock {
-    param(
-        [string]$Path,
-        [string]$BlockName
-    )
-    $lines = Get-Content -LiteralPath $Path
-    $block = [System.Collections.Generic.List[string]]::new()
-    $inside = $false
-    foreach ($line in $lines) {
-        if ($line -match "^$([regex]::Escape($BlockName)):\s*$") {
-            $inside = $true
-            continue
-        }
-        if ($inside -and $line -match "^[A-Za-z_][A-Za-z0-9_]*:\s*") {
-            break
-        }
-        if ($inside) {
-            $block.Add($line)
-        }
-    }
-    return ,$block.ToArray()
-}
-
-# Read-YamlValue 从顶层或块内读取简单 key:value 字段。
-function Read-YamlValue {
-    param(
-        [string[]]$Lines,
-        [string]$Key
-    )
-    foreach ($line in $Lines) {
-        if ($line -match "^\s*$([regex]::Escape($Key)):\s*(.+?)\s*$") {
-            return $Matches[1].Trim().Trim('"').Trim("'")
-        }
-    }
-    return $null
-}
-
 # Read-ManifestAdmissionMap 返回镜像层声明的准入阻断清单;阻断镜像不会进入沙箱证明。
 function Read-ManifestAdmissionMap {
     param([string]$ImagesRoot)
     $blocked = @{}
-    foreach ($manifest in Get-ChildItem -Path $ImagesRoot -Recurse -Filter manifest.yaml) {
-        $lines = Get-Content -LiteralPath $manifest.FullName
-        $image = Read-YamlValue -Lines $lines -Key "image"
-        if ([string]::IsNullOrWhiteSpace($image)) {
-            continue
-        }
-        $supplyChain = Read-YamlBlock -Path $manifest.FullName -BlockName "supply_chain"
-        $deployable = Read-YamlValue -Lines $supplyChain -Key "deployable"
-        if ($deployable -eq "false") {
-            $reason = Read-YamlValue -Lines $supplyChain -Key "block_reason"
-            if ([string]::IsNullOrWhiteSpace($reason)) {
-                $reason = "manifest marks image as not deployable"
-            }
-            $blocked[$image] = [pscustomobject]@{ Image = $image; Reason = $reason; Manifest = $manifest.FullName }
+    foreach ($entry in (Get-ChaimirImageCatalog -ImagesRoot $ImagesRoot).Values) {
+        if (-not $entry.Deployable) {
+            $blocked[$entry.Image] = [pscustomobject]@{ Image = $entry.Image; Reason = $entry.BlockReason; Manifest = $entry.Manifest }
         }
     }
     return $blocked
@@ -198,12 +129,12 @@ function Read-ManifestTrivySkipMap {
     $items = @{}
     foreach ($manifest in Get-ChildItem -Path $ImagesRoot -Recurse -Filter manifest.yaml) {
         $lines = Get-Content -LiteralPath $manifest.FullName
-        $image = Read-YamlValue -Lines $lines -Key "image"
+        $image = Get-ChaimirTopLevelYamlValue -Lines $lines -Key "image"
         if ([string]::IsNullOrWhiteSpace($image)) {
             continue
         }
-        $supplyChain = Read-YamlBlock -Path $manifest.FullName -BlockName "supply_chain"
-        $reason = Read-YamlValue -Lines $supplyChain -Key "trivy_skip_reason"
+        $supplyChain = Get-ChaimirYamlBlock -Path $manifest.FullName -BlockName "supply_chain"
+        $reason = Get-ChaimirYamlValue -Lines $supplyChain -Key "trivy_skip_reason"
         $skipFiles = [System.Collections.Generic.List[string]]::new()
         $insideSkipFiles = $false
         foreach ($line in $supplyChain) {
@@ -246,18 +177,21 @@ function Invoke-ComposeTool {
             "run", "--rm", $Tool
         ) + $ToolArgs
         $previousCosignPassword = $env:COSIGN_PRIVATE_KEY_PASSWORD
-        $previousHarborAdminPassword = $env:HARBOR_ADMIN_PASSWORD
-        $env:COSIGN_PRIVATE_KEY_PASSWORD = $script:cosignPrivateKeyPassword
-        $env:HARBOR_ADMIN_PASSWORD = $script:harborAdminPassword
+        $previousEvidenceHostDir = $env:SUPPLY_CHAIN_EVIDENCE_HOST_DIR
         $previousErrorActionPreference = $ErrorActionPreference
-        $ErrorActionPreference = "Continue"
-        & docker @args
-        $exitCode = $LASTEXITCODE
-        $ErrorActionPreference = $previousErrorActionPreference
-        $env:COSIGN_PRIVATE_KEY_PASSWORD = $previousCosignPassword
-        $env:HARBOR_ADMIN_PASSWORD = $previousHarborAdminPassword
-        if ($exitCode -ne 0) {
-            throw "$Context 失败, exit=$exitCode"
+        try {
+            $env:COSIGN_PRIVATE_KEY_PASSWORD = $script:cosignPrivateKeyPassword
+            $env:SUPPLY_CHAIN_EVIDENCE_HOST_DIR = $script:evidenceHostDir
+            $ErrorActionPreference = "Continue"
+            & docker @args
+            $exitCode = $LASTEXITCODE
+            if ($exitCode -ne 0) {
+                throw "$Context 失败, exit=$exitCode"
+            }
+        } finally {
+            $ErrorActionPreference = $previousErrorActionPreference
+            $env:COSIGN_PRIVATE_KEY_PASSWORD = $previousCosignPassword
+            $env:SUPPLY_CHAIN_EVIDENCE_HOST_DIR = $previousEvidenceHostDir
         }
     } finally {
         Pop-Location
@@ -273,13 +207,9 @@ if ([string]::IsNullOrWhiteSpace($registry)) {
 if ([string]::IsNullOrWhiteSpace($registry)) {
     throw "缺少 SUPPLY_CHAIN_REGISTRY 或 IMAGE_REGISTRY"
 }
-$registryUser = $secret["HARBOR_ROBOT_USERNAME"]
-$registryPassword = $secret["HARBOR_ROBOT_PASSWORD"]
-if ([string]::IsNullOrWhiteSpace($registryUser) -or [string]::IsNullOrWhiteSpace($registryPassword)) {
-    throw "缺少 HARBOR_ROBOT_USERNAME/HARBOR_ROBOT_PASSWORD"
-}
+$registryExternalUrl = [string]$config["SUPPLY_CHAIN_HARBOR_EXTERNAL_URL"]
+$allowHttpRegistry = $registryExternalUrl.StartsWith("http://", [System.StringComparison]::OrdinalIgnoreCase)
 $script:cosignPrivateKeyPassword = $secret["COSIGN_PRIVATE_KEY_PASSWORD"]
-$script:harborAdminPassword = $secret["HARBOR_ADMIN_PASSWORD"]
 
 $cosignDirValue = $config["SUPPLY_CHAIN_COSIGN_KEY_HOST_DIR"]
 if ([string]::IsNullOrWhiteSpace($cosignDirValue)) {
@@ -293,7 +223,7 @@ $cosignKey = Join-Path $cosignDir "cosign.key"
 $cosignPub = Join-Path $cosignDir "cosign.pub"
 if ((-not (Test-Path -LiteralPath $cosignKey)) -or (-not (Test-Path -LiteralPath $cosignPub))) {
     if (-not $GenerateKeyIfMissing) {
-        throw "缺少 Cosign 私钥或公钥: $cosignDir; 如需本地生成请加 -GenerateKeyIfMissing"
+        throw "缺少 Cosign 私钥或公钥: $cosignDir; 如需首次初始化请加 -GenerateKeyIfMissing"
     }
     Invoke-ComposeTool -Tool "cosign" -ToolArgs @("generate-key-pair", "--output-key-prefix", "/cosign/cosign") -Context "生成 Cosign 密钥"
 }
@@ -306,14 +236,21 @@ if (-not [string]::IsNullOrWhiteSpace($dockerConfigDir)) {
     }
 }
 
-New-Item -ItemType Directory -Force -Path $EvidenceDir | Out-Null
 $scanLog = Join-Path $EvidenceDir "image-attestations-trivy.log"
 $signLog = Join-Path $EvidenceDir "image-attestations-cosign.log"
+$sbomDir = Join-Path $EvidenceDir "sbom"
+New-Item -ItemType Directory -Force -Path $sbomDir | Out-Null
 $jsonPath = Join-Path $EvidenceDir "sandbox-image-attestations.json"
 $summaryPath = Join-Path $EvidenceDir "image-attestations-summary.txt"
 Remove-Item -LiteralPath $scanLog, $signLog -ErrorAction SilentlyContinue
 
-$items = Read-DigestLock -Path $DigestLock
+$digestItems = Read-ChaimirDigestLock -Path $DigestLock -Required
+if ($digestItems.Count -eq 0) {
+    throw "digest lock 中没有可证明镜像: $DigestLock"
+}
+$items = @($digestItems.Keys | Sort-Object | ForEach-Object {
+    [pscustomobject]@{ Image = $_; Digest = $digestItems[$_] }
+})
 $blockedByManifest = Read-ManifestAdmissionMap -ImagesRoot (Join-Path $RepoRoot "images")
 $trivySkipByManifest = Read-ManifestTrivySkipMap -ImagesRoot (Join-Path $RepoRoot "images")
 $blockedItems = [System.Collections.Generic.List[object]]::new()
@@ -332,71 +269,109 @@ foreach ($item in $items) {
     }
     $ref = "$registry/$($item.Image)@$($item.Digest)"
     Write-Host "Attesting $ref"
-    if (-not $SkipScan) {
-        try {
-            $trivyArgs = @(
-                "image", "--exit-code", "1", "--severity", $Severity,
-                "--scanners", "vuln,secret", "--ignore-unfixed=false",
-                "--username", $registryUser, "--password", $registryPassword, "--insecure"
-            )
-            if ($trivySkipByManifest.ContainsKey($item.Image)) {
-                foreach ($skipFile in @($trivySkipByManifest[$item.Image])) {
-                    $trivyArgs += @("--skip-files", $skipFile)
-                }
+    try {
+        $trivyArgs = @("image", "--config", "/workspace/deploy/ci/trivy.yaml")
+        if ($allowHttpRegistry) {
+            $trivyArgs += "--insecure"
+        }
+        if ($trivySkipByManifest.ContainsKey($item.Image)) {
+            foreach ($skipFile in @($trivySkipByManifest[$item.Image])) {
+                $trivyArgs += @("--skip-files", $skipFile)
             }
-            $trivyArgs += $ref
-            Invoke-ComposeTool -Tool "trivy" -ToolArgs $trivyArgs -Context "Trivy 扫描 $ref" *>> $scanLog
-        } catch {
-            $blockedItems.Add([pscustomobject]@{
-                image    = $item.Image
-                digest   = $item.Digest
-                reason   = "Trivy 扫描未通过: $($_.Exception.Message)"
-                manifest = ""
-            })
-            Write-Warning "Blocking attestation ${ref}: Trivy 扫描未通过"
-            continue
         }
+        $trivyArgs += $ref
+        Invoke-ComposeTool -Tool "trivy" -ToolArgs $trivyArgs -Context "Trivy 扫描 $ref" *>> $scanLog
+    } catch {
+        $blockedItems.Add([pscustomobject]@{
+            image    = $item.Image
+            digest   = $item.Digest
+            reason   = "Trivy 扫描未通过: $($_.Exception.Message)"
+            manifest = ""
+        })
+        Write-Warning "Blocking attestation ${ref}: Trivy 扫描未通过"
+        continue
     }
-    if (-not $SkipSign) {
-        try {
-            Invoke-ComposeTool -Tool "cosign" -ToolArgs @(
-                "sign", "--yes", "--key", "/cosign/cosign.key", "--tlog-upload=false",
-                "--use-signing-config=false", "--allow-http-registry", "--registry-username", $registryUser,
-                "--registry-password", $registryPassword, $ref
-            ) -Context "Cosign 签名 $ref" *>> $signLog
-        } catch {
-            $blockedItems.Add([pscustomobject]@{
-                image    = $item.Image
-                digest   = $item.Digest
-                reason   = "Cosign 签名失败: $($_.Exception.Message)"
-                manifest = ""
-            })
-            Write-Warning "Blocking attestation ${ref}: Cosign 签名失败"
-            continue
+    $sbomName = $item.Image.Replace("/", "-") + ".cdx.json"
+    $sbomContainerPath = "/evidence/sbom/$sbomName"
+    try {
+        $sbomArgs = @("image", "--format", "cyclonedx", "--output", $sbomContainerPath)
+        if ($allowHttpRegistry) {
+            $sbomArgs += "--insecure"
         }
+        $sbomArgs += $ref
+        Invoke-ComposeTool -Tool "trivy" -ToolArgs $sbomArgs -Context "生成 SBOM $ref" *>> $scanLog
+    } catch {
+        $blockedItems.Add([pscustomobject]@{
+            image    = $item.Image
+            digest   = $item.Digest
+            reason   = "SBOM 生成失败: $($_.Exception.Message)"
+            manifest = ""
+        })
+        Write-Warning "Blocking attestation ${ref}: SBOM 生成失败"
+        continue
     }
-    if (-not $SkipVerify) {
-        try {
-            Invoke-ComposeTool -Tool "cosign" -ToolArgs @(
-                "verify", "--key", "/cosign/cosign.pub", "--insecure-ignore-tlog=true",
-                "--allow-http-registry", "--registry-username", $registryUser, "--registry-password", $registryPassword, $ref
-            ) -Context "Cosign 验签 $ref" *>> $signLog
-        } catch {
-            $blockedItems.Add([pscustomobject]@{
-                image    = $item.Image
-                digest   = $item.Digest
-                reason   = "Cosign 验签失败: $($_.Exception.Message)"
-                manifest = ""
-            })
-            Write-Warning "Blocking attestation ${ref}: Cosign 验签失败"
-            continue
+    try {
+        $cosignSignArgs = @(
+            "sign", "--yes", "--key", "/cosign/cosign.key", "--tlog-upload=false",
+            "--use-signing-config=false"
+        )
+        if ($allowHttpRegistry) {
+            $cosignSignArgs += "--allow-http-registry"
         }
+        $cosignSignArgs += $ref
+        Invoke-ComposeTool -Tool "cosign" -ToolArgs $cosignSignArgs -Context "Cosign 签名 $ref" *>> $signLog
+
+        $cosignAttestArgs = @(
+            "attest", "--yes", "--key", "/cosign/cosign.key", "--type", "cyclonedx",
+            "--predicate", $sbomContainerPath, "--use-signing-config=false"
+        )
+        if ($allowHttpRegistry) {
+            $cosignAttestArgs += "--allow-http-registry"
+        }
+        $cosignAttestArgs += $ref
+        Invoke-ComposeTool -Tool "cosign" -ToolArgs $cosignAttestArgs -Context "Cosign SBOM 证明 $ref" *>> $signLog
+    } catch {
+        $blockedItems.Add([pscustomobject]@{
+            image    = $item.Image
+            digest   = $item.Digest
+            reason   = "Cosign 签名或 SBOM 证明失败: $($_.Exception.Message)"
+            manifest = ""
+        })
+        Write-Warning "Blocking attestation ${ref}: Cosign 签名或 SBOM 证明失败"
+        continue
+    }
+    try {
+        $cosignVerifyArgs = @("verify", "--key", "/cosign/cosign.pub", "--insecure-ignore-tlog=true")
+        if ($allowHttpRegistry) {
+            $cosignVerifyArgs += "--allow-http-registry"
+        }
+        $cosignVerifyArgs += $ref
+        Invoke-ComposeTool -Tool "cosign" -ToolArgs $cosignVerifyArgs -Context "Cosign 验签 $ref" *>> $signLog
+
+        $cosignVerifyAttestationArgs = @(
+            "verify-attestation", "--key", "/cosign/cosign.pub", "--type", "cyclonedx",
+            "--insecure-ignore-tlog=true"
+        )
+        if ($allowHttpRegistry) {
+            $cosignVerifyAttestationArgs += "--allow-http-registry"
+        }
+        $cosignVerifyAttestationArgs += $ref
+        Invoke-ComposeTool -Tool "cosign" -ToolArgs $cosignVerifyAttestationArgs -Context "Cosign SBOM 验证 $ref" *>> $signLog
+    } catch {
+        $blockedItems.Add([pscustomobject]@{
+            image    = $item.Image
+            digest   = $item.Digest
+            reason   = "Cosign 签名或 SBOM 验证失败: $($_.Exception.Message)"
+            manifest = ""
+        })
+        Write-Warning "Blocking attestation ${ref}: Cosign 签名或 SBOM 验证失败"
+        continue
     }
     $attestations.Add([pscustomobject]@{
         image_url       = $ref
         digest          = $item.Digest
         cosign_verified = $true
-        trivy_status    = $TrivyStatusPassed
+        trivy_status    = "passed"
     })
 }
 
@@ -420,7 +395,8 @@ $summary = @(
     "deploy_env=$DeployEnvPath",
     "backend_env=$BackendEnvPath",
     "scan_log=$scanLog",
-    "sign_log=$signLog"
+    "sign_log=$signLog",
+    "sbom_dir=$sbomDir"
 )
 Write-TextFile -Path $summaryPath -Lines $summary
 Write-Output ($summary -join "`n")

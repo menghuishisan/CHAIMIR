@@ -7,7 +7,7 @@
 - 一个镜像一个目录,目录内至少维护 `manifest.yaml` 和 `README.md`。`source.type=platform-built`、`thin-wrapper`、`build-base` 必须维护 Dockerfile;`source.type=upstream-pinned` 不重打包,不得维护 Dockerfile。
 - 成熟官方镜像能满足需求时优先复用官方镜像,只做安全基线、元数据和必要薄封装;平台确有特殊教学、判题、初始化或安全隔离需求时才自研。
 - 纯上游固定镜像也必须在 manifest 中声明 registry、image、version、license、digest 锁、离线导入、`deploy/config/chaimir.env` 环境变量键、端口、卷、备份、网络策略、学生权限和供应链门禁。
-- 平台自建、薄封装和构建基座镜像的生产 digest 统一来自 CI 推送后的 `image-digests.lock` 锁文件;不得在 manifest 中维护第二套构建产物 digest 来源。
+- 平台自建、薄封装和构建基座镜像的生产 digest 统一来自 CI 推送后的 `image-digests.lock` 锁文件;不得在 manifest 中维护第二套构建产物 digest 来源。`base/chain-tools` 只承载通用 CLI,`base/fabric-tools` 只承载从固定 Fabric 源码构建的专用二进制,不得合并成所有消费者共同承担的大镜像。
 - 镜像拉取必须使用不可变 digest。`images/pull-images.ps1` 会拒绝任何缺少 `upstream.digest`、组件 `digest` 或构建产物锁文件条目的镜像,不得退回 tag 拉取。
 - 镜像只负责自身进程、依赖和默认容器端口;一个或多个镜像如何组成容器组,由 M2 沙箱控制面和部署层按 manifest 编排。
 - 本目录不得维护固定组合矩阵、固定 bundle 或镜像到镜像白名单。`manifest.yaml` 只声明本镜像能力、生态标签、端口、安全域和资源约束;具体容器组由 `runtime.adapter_spec`、实验/题目配置与 M2 编排器动态校验后生成。
@@ -32,7 +32,7 @@ runtime/evm-hardhat sha256:<64位hex>
 service/backend sha256:<64位hex>
 ```
 
-CI 的后端、前端和通用镜像流水线在 Trivy 扫描、推送 Harbor、Cosign 签名与验签完成后,分别上传职责内 `image-digest-*` 锁片段。唯一的 `image-metadata-promotion` 工作流串行消费片段,用 `images/sync-image-metadata.ps1` 合并当前权威锁并同步 local-dev 部署 digest 与配置中的受控镜像引用;首次收到某个服务镜像时,同步器会把对应 `newTag` 原位替换为 digest。随后工作流创建机器人 PR 并启用自动合并。`images/image-digests.lock` 本身不触发镜像重建,避免供应链回环。
+CI 的后端、前端和通用镜像流水线在 Trivy 扫描、SBOM、推送 Harbor、Cosign 签名/证明与验证完成后,分别上传职责内 `image-digest-*` 锁片段。唯一的 `image-metadata-promotion` 工作流串行消费片段,用 `images/sync-image-metadata.ps1` 合并当前权威锁并同步 local-dev 部署 digest、受控仿真引用和 `deploy/config/chaimir.env` 的本地/私有化准入列表;首次收到某个服务镜像时,同步器会把对应 `newTag` 原位替换为 digest,并删除已离开正式锁的旧证明。`backend/.env.example` 不写入环境证明,生产由 Secret/KMS 注入。随后工作流创建机器人 PR并启用自动合并。同一服务自己的 lock 变化不会触发重建;只有明确的共享基座 digest 变化会触发其消费者重建一次,避免供应链回环。
 
 仓库必须启用 GitHub Auto-merge,并配置具有 contents/pull requests 权限的 GitHub App 或细粒度 PAT Secret `IMAGE_METADATA_BOT_TOKEN`;不能使用受递归保护、无法触发后续 PR 检查的默认 `GITHUB_TOKEN` 代替。Harbor 与 Cosign 凭据继续只由独立 GitHub Secrets 注入。任一权限、检查、扫描、签名、验签或自动合并步骤失败时,新 digest 不得晋升,旧权威文件也不得被静默覆盖。
 
@@ -42,7 +42,7 @@ CI 的后端、前端和通用镜像流水线在 Trivy 扫描、推送 Harbor、
 powershell -NoProfile -ExecutionPolicy Bypass -File images/pull-images.ps1 -Scope all -Registry harbor.chaimir:30080
 ```
 
-脚本默认每个镜像最多尝试 3 次。单次 `docker pull` 失败后,若本地原本没有该 digest 引用,会执行 `docker image rm <ref>` 清理失败残留后重试;若本地已存在该 digest,则保留本地可用镜像,避免瞬时 registry 错误破坏已预热结果。当前镜像全部重试失败后立即停止并返回非 0,不得继续拉取后续镜像。生产不应启用 `-NoCleanupFailedPull`,该开关仅用于诊断 Docker 本地状态。
+脚本会先一次性读取本机全部 digest 引用;本地已经存在目标不可变 digest 时直接复用,不会再次访问 registry。缺失镜像默认最多尝试 3 次。单次 `docker pull` 失败后,若本地原本没有该 digest 引用,会执行 `docker image rm <ref>` 清理失败残留后重试;若本地已存在该 digest,则保留本地可用镜像,避免瞬时 registry 错误破坏已预热结果。当前镜像全部重试失败后立即停止并返回非 0,不得继续拉取后续镜像。生产不应启用 `-NoCleanupFailedPull`,该开关仅用于诊断 Docker 本地状态。
 
 ## 构建与候选锁
 
@@ -60,6 +60,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File images/build-images.ps1 `
 
 `-Push` 使用 `docker buildx build --push` 将镜像直接推入 Harbor,并把 Harbor 解析出的 digest 写入 `-DigestLockOut`。`-DigestLock` 同时作为构建依赖输入:例如 `base/judge-min` 依赖 `base/go-builder` 时,必须先让 `base/go-builder` 写入同一候选锁,后续镜像才能按 `harbor.chaimir:30080/base/go-builder@sha256:...` 构建。
 
+构建脚本会根据 Dockerfile 中的受控镜像参数做内部依赖拓扑排序;本机已有同一基础镜像 digest 时不会重复拉取。网络代理或 registry mirror 只能配置在 Docker Desktop、BuildKit 或 CI runner 传输层,脚本和仓库配置不维护本地专用镜像源。
+
 候选锁只能用于回拉和安全校验,不能直接作为正式发布锁。完成构建后必须用同一拉取脚本按 digest 拉回:
 
 ```powershell
@@ -69,7 +71,11 @@ powershell -NoProfile -ExecutionPolicy Bypass -File images/pull-images.ps1 `
   -DigestLock .tmp/backend-functional-test/evidence/candidate-image-digests.lock
 ```
 
-拉回后的镜像必须经过 Trivy HIGH/CRITICAL 阻断扫描和 Cosign 签名/验签。只有全部非前端镜像通过后,候选锁才能晋升为正式 `images/image-digests.lock` 或生成 `SANDBOX_IMAGE_ATTESTATIONS_JSON`。平台构建镜像只允许通过 `images/build-images.ps1 -Push` 推送并生成候选锁,拉取脚本不承担构建产物发布职责。
+拉回后的镜像必须经过统一 Trivy 配置的 HIGH/CRITICAL 阻断扫描、CycloneDX SBOM 生成、Cosign 镜像签名、SBOM 证明和双重验证。只有全部镜像通过后,候选锁才能晋升为正式 `images/image-digests.lock` 或生成 `SANDBOX_IMAGE_ATTESTATIONS_JSON`。平台构建镜像只允许通过 `images/build-images.ps1 -Push` 推送并生成候选锁,拉取脚本不承担构建产物发布职责。
+
+无需密钥的静态门禁统一运行 `images/validate-image-metadata.ps1`:它校验目录/category/name、Dockerfile/构建路径、不可变基础镜像和正式锁现有条目,但不会把尚待流水线首次晋升的新镜像误判为失败。
+
+项目清理只按 `docs/总-镜像与容器设计.md` 的“项目级 Docker 清理边界”执行。常规清理不得删除正式锁在本机的最后 digest 引用、Harbor PVC、Trivy 缓存、认证、Cosign 密钥或尚未晋升的证据,也不得对整台宿主机执行全局 prune。
 
 `SANDBOX_IMAGE_ATTESTATIONS_JSON` 是环境相关的准入证明,由 `deploy/scripts/image-attestations-generate.ps1` 在目标 registry 完成扫描、签名和验签后写入运行环境或 Secret,不能仅凭新 digest 在仓库中伪造。仓库自动同步只更新可审计的 digest 权威文件与静态引用。
 

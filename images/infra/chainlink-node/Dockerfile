@@ -1,5 +1,5 @@
 # 本文件定义 Chainlink 预言机节点镜像,复用 Chainlink 官方节点镜像并固定上游 digest。
-FROM smartcontract/chainlink@sha256:2400c0d06aa974cb0d3aa32b9370440517e5f61458f9b0b8d5c2160eea63441c
+FROM smartcontract/chainlink@sha256:77a78d4e427c39b3810bf740ba7582240c4c6538d31d0e1069ba0852acb58bc5
 
 LABEL org.opencontainers.image.title="infra/chainlink-node"
 LABEL org.opencontainers.image.description="Chaimir Chainlink oracle node image"

@@ -23,6 +23,7 @@ upstream:
   binaries:
     - solc 0.8.26
   runtime: alpine:3.23
+  runtime_digest: sha256:fd791d74b68913cbb027c6546007b3f0d3bc45125f797758156952bc2d6daf40
   reuse_policy: minimal-official-package-build
 data_driven: true
 capabilities:
@@ -86,5 +87,4 @@ supply_chain:
   trivy_required: true
   cosign_required: true
   pull_by_digest_in_production: true
-
 

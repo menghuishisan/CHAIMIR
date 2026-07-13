@@ -1,5 +1,5 @@
 # 本文件定义 Blockscout 区块链浏览器工具镜像。
-FROM blockscout/blockscout:6.9.2
+FROM blockscout/blockscout:6.9.2@sha256:1d3f8fc81c5719e5b1ce37427ebb04082d9d6a57f8c49d0c693a21fbcfecc34d
 
 LABEL org.opencontainers.image.title="tool/blockscout"
 LABEL org.opencontainers.image.description="Chaimir Blockscout EVM explorer image"

@@ -1,6 +1,6 @@
 # 本文件定义 geth 私链运行时镜像,从 go-ethereum 官方源码构建安全二进制。
-ARG GO_BUILDER_IMAGE
-ARG CHAIN_TOOLS_IMAGE
+ARG GO_BUILDER_IMAGE=invalid.invalid/base/go-builder:required
+ARG CHAIN_TOOLS_IMAGE=invalid.invalid/base/chain-tools:required
 FROM ${GO_BUILDER_IMAGE} AS build
 
 ARG GETH_VERSION=v1.17.4

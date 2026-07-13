@@ -20,11 +20,14 @@ source:
 upstream:
   registry: cgr.dev
   image: chainguard/wolfi-base
-  version: "latest"
+  version: "2026-07-07"
+  digest: sha256:02dab76bd852a70556b5b2002195c8a5fdab77d323c433bf6642aab080489795
   packages:
-    - clamav-1.5-daemon=1.5.2
-    - clamav-1.5-scanner=1.5.2
-    - clamav-1.5-freshclam=1.5.2
+    - clamav-1.5-daemon=1.5.2-r7
+    - clamav-1.5-scanner=1.5.2-r7
+    - clamav-1.5-freshclam=1.5.2-r7
+    - clamav-1.5-db=1.5.2-r7
+    - su-exec=0.3-r1
   reuse_policy: wolfi-package-build
   license: GPL-2.0-only
 private_delivery:

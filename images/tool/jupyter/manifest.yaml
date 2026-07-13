@@ -19,6 +19,7 @@ source:
   type: thin-wrapper
 upstream:
   image: quay.io/jupyter/minimal-notebook:python-3.12
+  digest: sha256:5b868d38f2b454cb22abb077052d341d3d7aeec2315c296c44de3b1278425782
   reuse_policy: thin-wrapper
 data_driven: true
 capabilities:

@@ -1,9 +1,9 @@
 # 本文件定义静态安全扫描判题镜像,使用 Slither 与官方 solc 进行 Solidity 安全判题。
-ARG JUDGE_MIN_IMAGE
+ARG JUDGE_MIN_IMAGE=invalid.invalid/base/judge-min:required
 
 FROM ${JUDGE_MIN_IMAGE} AS judge-base
 
-FROM alpine:3.23
+FROM alpine:3.23@sha256:fd791d74b68913cbb027c6546007b3f0d3bc45125f797758156952bc2d6daf40
 
 ARG SOLC_VERSION=0.8.26
 ARG SOLC_PATH=solc-linux-amd64-v0.8.26+commit.8a97fa7a

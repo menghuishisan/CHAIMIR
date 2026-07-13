@@ -1,6 +1,6 @@
 # 本文件定义 FISCO BCOS 运行时镜像,复用官方节点镜像能力。
-ARG CHAIN_TOOLS_IMAGE
-FROM fiscoorg/fiscobcos:v3.12.1 AS fisco-upstream
+ARG CHAIN_TOOLS_IMAGE=invalid.invalid/base/chain-tools:required
+FROM fiscoorg/fiscobcos:v3.12.1@sha256:93db5277a5c896fde402f2165d133cc3d346effef4165ec417ef098eb2ede74b AS fisco-upstream
 
 FROM ${CHAIN_TOOLS_IMAGE}
 

@@ -6,7 +6,10 @@ param(
     [string]$DigestLockPath = "",
     [string]$LocalOverlayPath = "",
     [string[]]$EnvPaths = @(),
-    [string]$SimAdapterEnvKey = "SIM_BACKEND_STDIO_ADAPTERS_JSON"
+    [string]$SimAdapterEnvKey = "SIM_BACKEND_STDIO_ADAPTERS_JSON",
+    [string[]]$AttestationEnvPaths = @(),
+    [string]$AttestationEnvKey = "SANDBOX_IMAGE_ATTESTATIONS_JSON",
+    [string]$RegistryEnvKey = "SUPPLY_CHAIN_REGISTRY"
 )
 
 $ErrorActionPreference = "Stop"
@@ -26,6 +29,9 @@ if ($EnvPaths.Count -eq 0) {
         (Join-Path $RepoRoot "backend\.env.example"),
         (Join-Path $RepoRoot "deploy\config\chaimir.env")
     )
+}
+if ($AttestationEnvPaths.Count -eq 0) {
+    $AttestationEnvPaths = @((Join-Path $RepoRoot "deploy\config\chaimir.env"))
 }
 
 # Read-VerifiedFragments 读取当前流水线产出的锁片段,同一镜像出现不同 digest 时拒绝晋升。
@@ -49,37 +55,6 @@ function Read-VerifiedFragments {
         }
     }
     return $items
-}
-
-# Read-ManifestCatalog 返回逻辑镜像名到 manifest 与来源类型的映射。
-function Read-ManifestCatalog {
-    param([string]$ImagesRoot)
-    $catalog = @{}
-    foreach ($manifest in Get-ChildItem -LiteralPath $ImagesRoot -Recurse -File -Filter "manifest.yaml") {
-        $lines = Get-Content -LiteralPath $manifest.FullName
-        $image = Get-ChaimirTopLevelYamlValue -Lines $lines -Key "image"
-        if ([string]::IsNullOrWhiteSpace($image)) {
-            throw "manifest 缺少顶层 image: $($manifest.FullName)"
-        }
-        if ($catalog.ContainsKey($image)) {
-            throw "逻辑镜像名重复: $image"
-        }
-        $supplyChain = Get-ChaimirYamlBlock -Path $manifest.FullName -BlockName "supply_chain"
-        $deployableValue = Get-ChaimirYamlValue -Lines $supplyChain -Key "deployable"
-        $deployable = $deployableValue -ne "false"
-        if (-not $deployable) {
-            $blockReason = Get-ChaimirYamlValue -Lines $supplyChain -Key "block_reason"
-            if ([string]::IsNullOrWhiteSpace($blockReason)) {
-                throw "$($manifest.FullName): supply_chain.deployable=false 必须声明 block_reason"
-            }
-        }
-        $catalog[$image] = [pscustomobject]@{
-            Path       = $manifest.FullName
-            SourceType = Get-ChaimirImageSourceType -Path $manifest.FullName
-            Deployable = $deployable
-        }
-    }
-    return $catalog
 }
 
 # Write-TextLinesPreservingEncoding 保留目标文件的 UTF-8 BOM、换行符和末尾换行约定。
@@ -233,8 +208,91 @@ function Update-SimAdapterDigests {
     Write-TextLinesPreservingEncoding -Path $Path -Lines $lines
 }
 
+# Update-ImageAttestations 只用已验证片段更新证明,并清除已离开权威锁的旧项。
+function Update-ImageAttestations {
+    param(
+        [string]$Path,
+        [string]$Key,
+        [string]$RegistryKey,
+        [hashtable]$Digests,
+        [hashtable]$VerifiedDigests
+    )
+    if (-not (Test-Path -LiteralPath $Path)) {
+        throw "缺少配置文件: $Path"
+    }
+    $lines = [System.Collections.Generic.List[string]]::new()
+    foreach ($line in Get-Content -LiteralPath $Path) {
+        $lines.Add($line)
+    }
+    $keyIndex = -1
+    $registry = ""
+    for ($index = 0; $index -lt $lines.Count; $index++) {
+        if ($lines[$index] -match "^$([regex]::Escape($Key))=(.*)$") {
+            if ($keyIndex -ge 0) {
+                throw "$Path 中 $Key 重复"
+            }
+            $keyIndex = $index
+            $jsonValue = $Matches[1]
+        }
+        if ($lines[$index] -match "^$([regex]::Escape($RegistryKey))=(.+)$") {
+            $registry = $Matches[1].Trim().TrimEnd("/")
+        }
+    }
+    if ($keyIndex -lt 0) {
+        throw "$Path 缺少 $Key"
+    }
+    if ([string]::IsNullOrWhiteSpace($registry) -or $registry.Contains("://") -or $registry.Contains("/")) {
+        throw "$Path 中 $RegistryKey 必须是 registry host 或 host:port"
+    }
+
+    $byLogical = @{}
+    $parsedAttestations = ConvertFrom-Json -InputObject $jsonValue
+    foreach ($item in $parsedAttestations) {
+        $imageURL = [string]$item.image_url
+        if ($imageURL -notmatch "^(.+/)([^/]+/[^/@]+)@(sha256:[0-9a-f]{64})$") {
+            throw "$Path 中 $Key 包含非法镜像引用"
+        }
+        $prefix = $Matches[1]
+        $logical = $Matches[2]
+        $digest = $Matches[3]
+        if ($byLogical.ContainsKey($logical)) {
+            throw "$Path 中 $Key 重复登记 $logical"
+        }
+        if (-not $Digests.ContainsKey($logical)) {
+            continue
+        }
+        if ($VerifiedDigests.ContainsKey($logical)) {
+            $digest = $VerifiedDigests[$logical]
+            $item.image_url = "$prefix$logical@$digest"
+            $item.digest = $digest
+            $item.cosign_verified = $true
+            $item.trivy_status = "passed"
+        }
+        elseif ($digest -ne $Digests[$logical] -or -not ([bool]$item.cosign_verified) -or -not [string]::Equals(([string]$item.trivy_status), "passed", [System.StringComparison]::OrdinalIgnoreCase)) {
+            continue
+        }
+        $byLogical[$logical] = $item
+    }
+
+    foreach ($logical in $VerifiedDigests.Keys) {
+        if ($byLogical.ContainsKey($logical)) {
+            continue
+        }
+        $digest = $VerifiedDigests[$logical]
+        $byLogical[$logical] = [pscustomobject][ordered]@{
+            image_url       = "$registry/$logical@$digest"
+            digest          = $digest
+            cosign_verified = $true
+            trivy_status    = "passed"
+        }
+    }
+    $attestations = @($byLogical.Values | Sort-Object image_url)
+    $lines[$keyIndex] = "$Key=$(ConvertTo-Json -InputObject $attestations -Compress -Depth 8)"
+    Write-TextLinesPreservingEncoding -Path $Path -Lines $lines
+}
+
 $fragments = Read-VerifiedFragments -Path $FragmentsPath
-$catalog = Read-ManifestCatalog -ImagesRoot (Join-Path $RepoRoot "images")
+$catalog = Get-ChaimirImageCatalog -ImagesRoot (Join-Path $RepoRoot "images")
 foreach ($image in $fragments.Keys) {
     if (-not $catalog.ContainsKey($image)) {
         throw "digest 片段引用未登记镜像: $image"
@@ -248,6 +306,12 @@ foreach ($image in $fragments.Keys) {
 }
 
 $merged = Read-ChaimirDigestLock -Path $DigestLockPath -Required
+# 正式锁只保留当前 catalog 中仍允许部署的镜像,避免旧 manifest 状态与部署引用并存。
+foreach ($image in @($merged.Keys)) {
+    if (-not $catalog.ContainsKey($image) -or -not $catalog[$image].Deployable) {
+        $merged.Remove($image)
+    }
+}
 foreach ($image in $fragments.Keys) {
     $merged[$image] = $fragments[$image]
 }
@@ -256,6 +320,9 @@ Write-ChaimirDigestLock -Path $DigestLockPath -Items $merged
 Update-KustomizeDigests -Path $LocalOverlayPath -Digests $merged
 foreach ($envPath in $EnvPaths) {
     Update-SimAdapterDigests -Path $envPath -Key $SimAdapterEnvKey -Digests $merged
+}
+foreach ($envPath in $AttestationEnvPaths) {
+    Update-ImageAttestations -Path $envPath -Key $AttestationEnvKey -RegistryKey $RegistryEnvKey -Digests $merged -VerifiedDigests $fragments
 }
 
 Write-Host "Promoted $($fragments.Count) verified image digests; authoritative lock contains $($merged.Count) entries."

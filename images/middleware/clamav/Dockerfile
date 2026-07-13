@@ -1,11 +1,17 @@
 # 本文件定义 ClamAV clamd 的安全运行镜像,基于 Wolfi 包保留 INSTREAM 扫描能力。
-FROM cgr.dev/chainguard/wolfi-base:latest
+FROM cgr.dev/chainguard/wolfi-base@sha256:02dab76bd852a70556b5b2002195c8a5fdab77d323c433bf6642aab080489795
 
 LABEL org.opencontainers.image.title="middleware/clamav"
 LABEL org.opencontainers.image.description="Chaimir ClamAV middleware on Wolfi"
 
 COPY entrypoint.sh /usr/local/bin/chaimir-clamav-entrypoint
-RUN apk add --no-cache clamav-1.5-daemon clamav-1.5-scanner clamav-1.5-freshclam clamav-1.5-db su-exec \
+RUN --mount=type=cache,target=/var/cache/apk,sharing=locked \
+    packages='clamav-1.5-daemon=1.5.2-r7 clamav-1.5-scanner=1.5.2-r7 clamav-1.5-freshclam=1.5.2-r7 clamav-1.5-db=1.5.2-r7 su-exec=0.3-r1' \
+    && for attempt in 1 2 3 4 5 6 7 8; do \
+        apk add --cache-dir /var/cache/apk --update-cache ${packages} && break; \
+        if [ "${attempt}" -eq 8 ]; then exit 1; fi; \
+        sleep $((attempt * 3)); \
+    done \
     && addgroup -g 1000 chaimir \
     && adduser -D -H -u 1000 -G chaimir chaimir \
     && mkdir -p /var/lib/clamav /run/clamav /tmp/clamav \

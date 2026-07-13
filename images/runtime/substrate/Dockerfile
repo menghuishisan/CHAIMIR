@@ -1,5 +1,5 @@
 # 本文件定义 Substrate/Polkadot 开发链运行时镜像,复用 Polkadot SDK 官方节点镜像。
-FROM parity/polkadot:stable2603-3
+FROM parity/polkadot:stable2603-3@sha256:0bbcce4a417ad8c2c88af08b96bd27113f1fd33427ae4d02b6c64b8c126f1997
 
 LABEL org.opencontainers.image.title="runtime/substrate"
 LABEL org.opencontainers.image.description="Chaimir Polkadot SDK development chain runtime"

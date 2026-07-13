@@ -19,6 +19,7 @@ source:
   type: thin-wrapper
 upstream:
   image: envoyproxy/envoy:v1.32.3
+  digest: sha256:127e33c48c60be9a148cf9256d52e734ceda28aa344145023933116c7e524beb
   reuse_policy: thin-wrapper
 data_driven: true
 capabilities:

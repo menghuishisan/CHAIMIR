@@ -1,62 +1,90 @@
 # 容器化镜像供应链工具入口,避免在宿主机安装 Trivy/Cosign/Helm。
+
 services:
   trivy:
     image: ${SUPPLY_CHAIN_TRIVY_IMAGE:?SUPPLY_CHAIN_TRIVY_IMAGE is required}
     entrypoint: ["trivy"]
-    env_file:
-      - config/chaimir.env
     extra_hosts:
       - "${SUPPLY_CHAIN_REGISTRY_HOST_ALIAS:-harbor.chaimir}:host-gateway"
+    environment:
+      DOCKER_CONFIG: /docker-config
+      HTTP_PROXY: ${HTTP_PROXY:-}
+      HTTPS_PROXY: ${HTTPS_PROXY:-}
+      NO_PROXY: ${NO_PROXY:-}
     volumes:
+      - type: bind
+        source: ${SUPPLY_CHAIN_REPO_HOST_PATH:?SUPPLY_CHAIN_REPO_HOST_PATH is required}
+        target: /workspace
+        read_only: true
       - type: bind
         source: ${SUPPLY_CHAIN_DOCKER_SOCKET:-/var/run/docker.sock}
         target: /var/run/docker.sock
       - type: bind
         source: ${SUPPLY_CHAIN_DOCKER_CONFIG_HOST_DIR:-config/docker-auth}
-        target: /root/.docker
+        target: /docker-config
         read_only: true
       - type: volume
         source: trivy-cache
         target: /root/.cache/trivy
+      - type: bind
+        source: ${SUPPLY_CHAIN_EVIDENCE_HOST_DIR:-../.tmp/image-supply-chain/evidence}
+        target: /evidence
+        bind:
+          create_host_path: true
 
   cosign:
     image: ${SUPPLY_CHAIN_COSIGN_IMAGE:?SUPPLY_CHAIN_COSIGN_IMAGE is required}
     entrypoint: ["cosign"]
     working_dir: /workspace
-    env_file:
-      - config/chaimir.env
     extra_hosts:
       - "${SUPPLY_CHAIN_REGISTRY_HOST_ALIAS:-harbor.chaimir}:host-gateway"
     environment:
       COSIGN_PASSWORD: ${COSIGN_PRIVATE_KEY_PASSWORD:-}
-      DOCKER_CONFIG: /root/.docker
+      DOCKER_CONFIG: /docker-config
+      HTTP_PROXY: ${HTTP_PROXY:-}
+      HTTPS_PROXY: ${HTTPS_PROXY:-}
+      NO_PROXY: ${NO_PROXY:-}
     volumes:
       - type: bind
         source: ${SUPPLY_CHAIN_REPO_HOST_PATH:?SUPPLY_CHAIN_REPO_HOST_PATH is required}
         target: /workspace
+        read_only: true
       - type: bind
         source: ${SUPPLY_CHAIN_COSIGN_KEY_HOST_DIR:?SUPPLY_CHAIN_COSIGN_KEY_HOST_DIR is required}
         target: /cosign
       - type: bind
         source: ${SUPPLY_CHAIN_DOCKER_CONFIG_HOST_DIR:-config/docker-auth}
-        target: /root/.docker
+        target: /docker-config
         read_only: true
+      - type: bind
+        source: ${SUPPLY_CHAIN_EVIDENCE_HOST_DIR:-../.tmp/image-supply-chain/evidence}
+        target: /evidence
+        read_only: true
+        bind:
+          create_host_path: true
 
   helm:
     image: ${SUPPLY_CHAIN_HELM_IMAGE:?SUPPLY_CHAIN_HELM_IMAGE is required}
     entrypoint: ["helm"]
     working_dir: /workspace
-    env_file:
-      - config/chaimir.env
     extra_hosts:
       - "${SUPPLY_CHAIN_REGISTRY_HOST_ALIAS:-harbor.chaimir}:host-gateway"
     environment:
       KUBECONFIG: /kubeconfig
       HARBOR_ADMIN_PASSWORD: ${HARBOR_ADMIN_PASSWORD:-}
+      SUPPLY_CHAIN_HARBOR_CHART_REPOSITORY: ${SUPPLY_CHAIN_HARBOR_CHART_REPOSITORY:?SUPPLY_CHAIN_HARBOR_CHART_REPOSITORY is required}
+      SUPPLY_CHAIN_HARBOR_RELEASE_NAME: ${SUPPLY_CHAIN_HARBOR_RELEASE_NAME:?SUPPLY_CHAIN_HARBOR_RELEASE_NAME is required}
+      SUPPLY_CHAIN_HARBOR_NAMESPACE: ${SUPPLY_CHAIN_HARBOR_NAMESPACE:?SUPPLY_CHAIN_HARBOR_NAMESPACE is required}
+      SUPPLY_CHAIN_HARBOR_VALUES_PATH: ${SUPPLY_CHAIN_HARBOR_VALUES_PATH:?SUPPLY_CHAIN_HARBOR_VALUES_PATH is required}
+      SUPPLY_CHAIN_HARBOR_EXTERNAL_URL: ${SUPPLY_CHAIN_HARBOR_EXTERNAL_URL:?SUPPLY_CHAIN_HARBOR_EXTERNAL_URL is required}
+      HTTP_PROXY: ${HTTP_PROXY:-}
+      HTTPS_PROXY: ${HTTPS_PROXY:-}
+      NO_PROXY: ${NO_PROXY:-}
     volumes:
       - type: bind
         source: ${SUPPLY_CHAIN_REPO_HOST_PATH:?SUPPLY_CHAIN_REPO_HOST_PATH is required}
         target: /workspace
+        read_only: true
       - type: bind
         source: ${SUPPLY_CHAIN_KUBECONFIG_HOST_PATH:-config/supply-chain.kubeconfig}
         target: /kubeconfig

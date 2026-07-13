@@ -1,11 +1,12 @@
 # 本文件定义 Fabric 链码测试判题镜像。
-ARG JUDGE_MIN_IMAGE
+ARG JUDGE_MIN_IMAGE=invalid.invalid/base/judge-min:required
+ARG FABRIC_TOOLS_IMAGE=invalid.invalid/base/fabric-tools:required
 
 FROM ${JUDGE_MIN_IMAGE} AS judge-base
 
-FROM hyperledger/fabric-tools:2.5.16 AS fabric-tools
+FROM ${FABRIC_TOOLS_IMAGE} AS fabric-tools
 
-FROM ubuntu:22.04
+FROM ubuntu:22.04@sha256:0e0a0fc6d18feda9db1590da249ac93e8d5abfea8f4c3c0c849ce512b5ef8982
 
 LABEL org.opencontainers.image.title="judger/testcase-fabric"
 LABEL org.opencontainers.image.description="Chaimir Fabric chaincode testcase judger image"

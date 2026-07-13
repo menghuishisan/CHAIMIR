@@ -19,7 +19,8 @@ source:
   type: thin-wrapper
 upstream:
   image: ghcr.io/hyperlane-xyz/hyperlane-agent
-  version: latest
+  version: 2.2.0
+  commit: 4da9c4419ad89783fd005e0b776f1fdcd7b59c12
   digest: sha256:ed2a0dcc7ebe7accd2bec88f82ce196bb455f4cf9a4d84d7a9192052b1911551
   reuse_policy: official-thin-wrapper
 data_driven: true

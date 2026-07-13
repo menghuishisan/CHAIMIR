@@ -1,12 +1,18 @@
 # 本文件定义 Besu 企业 EVM 运行时镜像,复用官方 Besu 应用并使用 Wolfi 运行层。
-FROM hyperledger/besu:26.6.1 AS upstream
+FROM hyperledger/besu:26.6.1@sha256:ac85d23b4250308ce5f6d004fff7fa6779f82932d1ba32fd3d4811531d43d0bc AS upstream
 
-FROM cgr.dev/chainguard/wolfi-base:latest AS patched-besu
+FROM cgr.dev/chainguard/wolfi-base@sha256:02dab76bd852a70556b5b2002195c8a5fdab77d323c433bf6642aab080489795 AS patched-besu
 
 ARG NETTY_VERSION=4.2.15.Final
 ARG JACKSON_VERSION=2.21.4
 
-RUN apk add --no-cache ca-certificates curl
+RUN --mount=type=cache,target=/var/cache/apk,sharing=locked \
+    packages='ca-certificates=20260413-r0 curl=8.21.0-r1' \
+    && for attempt in 1 2 3 4 5 6 7 8; do \
+        apk add --cache-dir /var/cache/apk --update-cache ${packages} && break; \
+        if [ "${attempt}" -eq 8 ]; then exit 1; fi; \
+        sleep $((attempt * 3)); \
+    done
 
 COPY --from=upstream /opt/besu /opt/besu
 
@@ -36,19 +42,22 @@ RUN set -eux; \
         -o "jackson-datatype-jdk8-2.21.1.jar.patched"; \
     mv "jackson-datatype-jdk8-2.21.1.jar.patched" "jackson-datatype-jdk8-2.21.1.jar"
 
-FROM cgr.dev/chainguard/wolfi-base:latest
+FROM cgr.dev/chainguard/wolfi-base@sha256:02dab76bd852a70556b5b2002195c8a5fdab77d323c433bf6642aab080489795
 
 LABEL org.opencontainers.image.title="runtime/evm-besu"
 LABEL org.opencontainers.image.description="Chaimir Hyperledger Besu enterprise EVM runtime"
 
-RUN apk add --no-cache bash ca-certificates openjdk-25-jre \
+RUN --mount=type=cache,target=/var/cache/apk,sharing=locked \
+    packages='bash=5.3-r12 ca-certificates=20260413-r0 openjdk-25-jre=25.0.3-r5 libstdc++=16.1.0-r4' \
+    && for attempt in 1 2 3 4 5 6 7 8; do \
+        apk add --cache-dir /var/cache/apk --update-cache ${packages} && break; \
+        if [ "${attempt}" -eq 8 ]; then exit 1; fi; \
+        sleep $((attempt * 3)); \
+    done \
     && addgroup -g 1000 besu \
     && adduser -D -u 1000 -G besu -h /workspace -s /sbin/nologin besu \
     && mkdir -p /workspace /runtime-state/besu \
     && chown -R 1000:1000 /workspace /runtime-state
-
-# RocksDB JNI 需要 C++ 运行库;单独一层安装以复用 OpenJDK 基础层缓存。
-RUN apk add --no-cache libstdc++
 
 COPY --from=patched-besu /opt/besu /opt/besu
 

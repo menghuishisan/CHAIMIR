@@ -1,6 +1,6 @@
-# 后端镜像流水线:lint + 单测 → 构建 → Trivy 扫描 → Cosign 签名 → 推 Harbor。
+# 后端镜像流水线:lint + 单测 → 构建 → Trivy/SBOM → 推 Harbor → Cosign 签名/证明/验证。
 # 依据 docs/总-部署架构设计.md §六:路径触发,backend 各自流水线。
-# 路径触发:backend/ 变更才跑(目录2 产出代码后激活)。
+# 路径触发:后端源码/服务镜像或其正式基座 digest 变化时运行;服务自身 digest 晋升不回环构建。
 name: backend
 
 on:
@@ -10,6 +10,7 @@ on:
       - "backend/**"
       - "images/service/backend/**"
       - "images/service/migrate/**"
+      - "images/service/cron/**"
       - "images/image-digests.lock"
       - ".github/workflows/backend.yml"
       - "deploy/ci/**"
@@ -18,6 +19,7 @@ on:
       - "backend/**"
       - "images/service/backend/**"
       - "images/service/migrate/**"
+      - "images/service/cron/**"
       - "images/image-digests.lock"
       - ".github/workflows/backend.yml"
 
@@ -47,34 +49,43 @@ jobs:
             base="$(git rev-parse HEAD^)"
           fi
           source_changed=false
-          if git diff --name-only "$base" HEAD | grep -Eq '^(backend/|images/service/(backend|migrate)/|\.github/workflows/backend\.yml$|deploy/ci/)'; then
+          if git diff --name-only "$base" HEAD | grep -Eq '^(backend/|images/service/(backend|migrate|cron)/|\.github/workflows/backend\.yml$|deploy/ci/)'; then
             source_changed=true
           fi
-          previous_digest="$(git show "$base:images/image-digests.lock" 2>/dev/null | awk '$1 == "base/go-builder" { print $2 }')"
-          current_digest="$(awk '$1 == "base/go-builder" { print $2 }' images/image-digests.lock)"
-          if [[ -z "$current_digest" ]]; then
-            echo "images/image-digests.lock 缺少 base/go-builder" >&2
-            exit 1
-          fi
+          dependencies=(base/go-builder base/runtime-min middleware/postgres)
+          dependency_changed=false
+          for dependency in "${dependencies[@]}"; do
+            previous_digest="$(git show "$base:images/image-digests.lock" 2>/dev/null | awk -v image="$dependency" '$1 == image { print $2 }')"
+            current_digest="$(awk -v image="$dependency" '$1 == image { print $2 }' images/image-digests.lock)"
+            if [[ ! "$current_digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+              echo "images/image-digests.lock 缺少有效 $dependency digest" >&2
+              exit 1
+            fi
+            if [[ "$previous_digest" != "$current_digest" ]]; then
+              dependency_changed=true
+            fi
+          done
           required=false
-          if [[ "$source_changed" == "true" || "$previous_digest" != "$current_digest" ]]; then
+          if [[ "$source_changed" == "true" || "$dependency_changed" == "true" ]]; then
             required=true
           fi
           echo "required=$required" >> "$GITHUB_OUTPUT"
 
   lint-test:
+    needs: detect-image-build
+    if: needs.detect-image-build.outputs.required == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6.5.0
         with:
-          go-version-file: backend/go.mod
+          go-version: 1.26.5
           cache-dependency-path: backend/go.sum
       - name: 静态检查(go vet + golangci-lint)
         working-directory: backend
         run: |
           go vet ./...
-          go run github.com/golangci/golangci-lint/cmd/golangci-lint@latest run ./... || true
+          go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.12.2 run ./...
       - name: 单元测试(含 RLS 越权用例)
         working-directory: backend
         run: go test ./... -race -count=1
@@ -87,18 +98,27 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: 安装 Cosign
-        uses: sigstore/cosign-installer@v3
-      - id: build-base
-        name: 读取 Go 构建基座 digest
+        uses: sigstore/cosign-installer@v4.1.2
+        with:
+          cosign-release: v3.1.1
+      - id: build-dependencies
+        name: 读取后端服务不可变依赖
         shell: bash
         run: |
           set -euo pipefail
-          digest="$(awk '$1 == "base/go-builder" { print $2 }' images/image-digests.lock)"
-          if [[ ! "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
-            echo "images/image-digests.lock 缺少有效 base/go-builder digest" >&2
-            exit 1
-          fi
-          echo "ref=${{ secrets.HARBOR_REGISTRY }}/base/go-builder@$digest" >> "$GITHUB_OUTPUT"
+          read_digest() {
+            local logical="$1"
+            local digest
+            digest="$(awk -v image="$logical" '$1 == image { print $2 }' images/image-digests.lock)"
+            if [[ ! "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+              echo "images/image-digests.lock 缺少有效 $logical digest" >&2
+              exit 1
+            fi
+            printf '%s' "$digest"
+          }
+          echo "go_builder=${{ secrets.HARBOR_REGISTRY }}/base/go-builder@$(read_digest base/go-builder)" >> "$GITHUB_OUTPUT"
+          echo "runtime=${{ secrets.HARBOR_REGISTRY }}/base/runtime-min@$(read_digest base/runtime-min)" >> "$GITHUB_OUTPUT"
+          echo "postgres=${{ secrets.HARBOR_REGISTRY }}/middleware/postgres@$(read_digest middleware/postgres)" >> "$GITHUB_OUTPUT"
       - name: 构建+扫描+签名+推送(backend)
         id: backend-image
         uses: ./deploy/ci/build-scan-sign-push
@@ -108,7 +128,8 @@ jobs:
           context: .
           dockerfile: images/service/backend/Dockerfile
           build-args: |
-            GO_BUILDER_IMAGE=${{ steps.build-base.outputs.ref }}
+            GO_BUILDER_IMAGE=${{ steps.build-dependencies.outputs.go_builder }}
+            RUNTIME_IMAGE=${{ steps.build-dependencies.outputs.runtime }}
           registry: ${{ secrets.HARBOR_REGISTRY }}
           registry-username: ${{ secrets.HARBOR_USERNAME }}
           registry-password: ${{ secrets.HARBOR_PASSWORD }}
@@ -123,7 +144,24 @@ jobs:
           context: .
           dockerfile: images/service/migrate/Dockerfile
           build-args: |
-            GO_BUILDER_IMAGE=${{ steps.build-base.outputs.ref }}
+            GO_BUILDER_IMAGE=${{ steps.build-dependencies.outputs.go_builder }}
+            RUNTIME_IMAGE=${{ steps.build-dependencies.outputs.runtime }}
+          registry: ${{ secrets.HARBOR_REGISTRY }}
+          registry-username: ${{ secrets.HARBOR_USERNAME }}
+          registry-password: ${{ secrets.HARBOR_PASSWORD }}
+          cosign-key: ${{ secrets.COSIGN_KEY }}
+          cosign-password: ${{ secrets.COSIGN_PASSWORD }}
+      - name: 构建+扫描+签名+推送(cron)
+        id: cron-image
+        uses: ./deploy/ci/build-scan-sign-push
+        with:
+          image: ${{ secrets.HARBOR_REGISTRY }}/service/cron
+          tag: ${{ github.sha }}
+          context: .
+          dockerfile: images/service/cron/Dockerfile
+          build-args: |
+            GO_BUILDER_IMAGE=${{ steps.build-dependencies.outputs.go_builder }}
+            PG_CLIENT_IMAGE=${{ steps.build-dependencies.outputs.postgres }}
           registry: ${{ secrets.HARBOR_REGISTRY }}
           registry-username: ${{ secrets.HARBOR_USERNAME }}
           registry-password: ${{ secrets.HARBOR_PASSWORD }}
@@ -136,6 +174,7 @@ jobs:
           mkdir -p image-digest-artifacts
           printf '%s %s\n' 'service/backend' '${{ steps.backend-image.outputs.digest }}' > image-digest-artifacts/service-backend.lock
           printf '%s %s\n' 'service/migrate' '${{ steps.migrate-image.outputs.digest }}' > image-digest-artifacts/service-migrate.lock
+          printf '%s %s\n' 'service/cron' '${{ steps.cron-image.outputs.digest }}' > image-digest-artifacts/service-cron.lock
       - name: 上传后端服务 digest 片段
         uses: actions/upload-artifact@v4
         with:

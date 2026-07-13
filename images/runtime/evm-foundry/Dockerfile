@@ -1,5 +1,5 @@
 # 本文件定义 Foundry/Anvil 运行时镜像,复用成熟官方 Foundry 镜像能力。
-FROM ghcr.io/foundry-rs/foundry:v1.0.0@sha256:d12a373ec950de170d5461014ef9320ba0fb6e0db6f87835999d0fcf3820370e
+FROM ghcr.io/foundry-rs/foundry:v1.7.1@sha256:bdc584033cefab8be282c7f57c263cda42f04700cd1ec88d64bebe2f645aba72
 
 LABEL org.opencontainers.image.title="runtime/evm-foundry"
 LABEL org.opencontainers.image.description="Chaimir Foundry and Anvil EVM runtime"

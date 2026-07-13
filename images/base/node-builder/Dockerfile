@@ -1,5 +1,5 @@
 # 本文件定义 Node 构建基座镜像,供前端和 Node 工具链镜像多阶段构建复用。
-FROM node:24-alpine3.23
+FROM node:24-alpine3.23@sha256:595398b0081eacda8e1c4c5b97b76cd1020e4d58a8ebcb4843b9bca1e79e7436
 
 LABEL org.opencontainers.image.title="base/node-builder"
 LABEL org.opencontainers.image.description="Chaimir Node builder base image"

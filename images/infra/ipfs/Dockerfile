@@ -1,5 +1,5 @@
 # 本文件定义 IPFS/Kubo 节点镜像,固定官方 Kubo release 源码并最小化运行时层。
-ARG GO_BUILDER_IMAGE
+ARG GO_BUILDER_IMAGE=invalid.invalid/base/go-builder:required
 
 FROM ${GO_BUILDER_IMAGE} AS kubo-build
 
@@ -21,10 +21,10 @@ WORKDIR /src
 COPY entrypoint.go .
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o ./chaimir-ipfs-entrypoint ./entrypoint.go
 
-FROM alpine:3.23 AS dirs
+FROM alpine:3.23@sha256:fd791d74b68913cbb027c6546007b3f0d3bc45125f797758156952bc2d6daf40 AS dirs
 RUN mkdir -p /out/runtime-state/ipfs /out/workspace
 
-FROM gcr.io/distroless/base-debian12:nonroot
+FROM gcr.io/distroless/base-debian12:nonroot@sha256:4b5196599229a5cf312a676cfe1ee8587ecf2371dcc22620f8c7a66d77d125c8
 
 LABEL org.opencontainers.image.title="infra/ipfs"
 LABEL org.opencontainers.image.description="Chaimir IPFS Kubo node image"

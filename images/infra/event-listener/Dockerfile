@@ -1,5 +1,5 @@
 # 本文件构建链上事件监听服务镜像。
-FROM node:24-alpine3.23
+FROM node:24-alpine3.23@sha256:595398b0081eacda8e1c4c5b97b76cd1020e4d58a8ebcb4843b9bca1e79e7436
 
 LABEL org.opencontainers.image.title="infra/event-listener"
 LABEL org.opencontainers.image.description="Chaimir blockchain event listener service"

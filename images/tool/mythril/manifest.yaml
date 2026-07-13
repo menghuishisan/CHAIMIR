@@ -22,6 +22,8 @@ upstream:
   version: "0.24.8"
   source_repository: https://github.com/ConsenSysDiligence/mythril
   runtime: cgr.dev/chainguard/wolfi-base
+  runtime_version: "2026-07-07"
+  runtime_digest: sha256:02dab76bd852a70556b5b2002195c8a5fdab77d323c433bf6642aab080489795
   reuse_policy: pypi-source-build
 data_driven: true
 capabilities:
@@ -87,4 +89,3 @@ supply_chain:
   trivy_required: true
   cosign_required: true
   pull_by_digest_in_production: true
-

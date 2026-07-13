@@ -18,9 +18,11 @@ description: The Graph subgraph 索引节点镜像。
 source:
   type: thin-wrapper
 upstream:
-  image: graphprotocol/graph-node:latest
+  image: graphprotocol/graph-node:0.44.0
   version: "0.44.0"
-  runtime: cgr.dev/chainguard/wolfi-base:latest
+  digest: sha256:c14c6d8e2b2b1ed89f6a89babf48d807b18a43e372fda7fb495d3a9050b65b8b
+  runtime: cgr.dev/chainguard/wolfi-base
+  runtime_digest: sha256:02dab76bd852a70556b5b2002195c8a5fdab77d323c433bf6642aab080489795
   reuse_policy: thin-wrapper
 data_driven: true
 capabilities:
@@ -86,4 +88,3 @@ supply_chain:
   trivy_required: true
   cosign_required: true
   pull_by_digest_in_production: true
-

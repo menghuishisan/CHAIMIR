@@ -1,11 +1,11 @@
 # 本文件定义 ZK 证明器镜像,提供 circom/snarkjs 证明工具链。
-FROM node:24-alpine3.23 AS deps
+FROM node:24-alpine3.23@sha256:595398b0081eacda8e1c4c5b97b76cd1020e4d58a8ebcb4843b9bca1e79e7436 AS deps
 
 WORKDIR /opt/chaimir/zk-prover
 COPY package.json package-lock.json /opt/chaimir/zk-prover/
 RUN npm ci --omit=dev --ignore-scripts --no-audit --no-fund
 
-FROM node:24-alpine3.23
+FROM node:24-alpine3.23@sha256:595398b0081eacda8e1c4c5b97b76cd1020e4d58a8ebcb4843b9bca1e79e7436
 
 LABEL org.opencontainers.image.title="infra/zk-prover"
 LABEL org.opencontainers.image.description="Chaimir ZK prover toolchain image"

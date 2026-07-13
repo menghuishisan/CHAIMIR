@@ -54,6 +54,7 @@ function Test-DeployableManifest {
     return $false
 }
 
+# Read-Components 解析 manifest upstream.components 列表,供多组件上游按 digest 拉取。
 function Read-Components {
     param([string[]]$Upstream)
     $components = @()
@@ -84,6 +85,7 @@ function Read-Components {
     return $components
 }
 
+# Get-BuildArgRef 从正式锁生成内部基础镜像的不可变构建参数。
 function Get-BuildArgRef {
     param(
         [hashtable]$DigestLockItems,
@@ -97,6 +99,7 @@ function Get-BuildArgRef {
     return "$ArgName=$Registry/$ImageName@$digest"
 }
 
+# Add-ImageRef 将去重后的镜像引用加入待处理集合。
 function Add-ImageRef {
     param(
         [System.Collections.Generic.List[object]]$Items,
@@ -112,6 +115,7 @@ function Add-ImageRef {
     $Items.Add([pscustomobject]@{ Ref = $Ref; Kind = $Kind; Manifest = $Manifest })
 }
 
+# Add-UpstreamRefs 收集单一或多组件上游的不可变镜像引用并记录缺失项。
 function Add-UpstreamRefs {
     param(
         [string]$ManifestPath,
@@ -150,6 +154,7 @@ function Add-UpstreamRefs {
     Add-ImageRef -Items $Items -Seen $Seen -Ref "$registry/$image@$digest" -Kind "upstream-pinned" -Manifest $ManifestPath
 }
 
+# Add-BuiltRef 将平台构建镜像按正式 digest lock 加入待处理集合。
 function Add-BuiltRef {
     param(
         [string]$ManifestPath,
@@ -172,6 +177,7 @@ function Add-BuiltRef {
     Add-ImageRef -Items $Items -Seen $Seen -Ref "$Registry/$image@$digest" -Kind "built" -Manifest $ManifestPath
 }
 
+# Invoke-CheckedDocker 执行 Docker 命令并在失败时保留完整输出和退出码。
 function Invoke-CheckedDocker {
     param(
         [string[]]$Arguments,
@@ -197,6 +203,7 @@ function Invoke-CheckedDocker {
     return ,$output
 }
 
+# Invoke-DockerCli 统一注入可选 Docker 凭据目录后调用 Docker CLI。
 function Invoke-DockerCli {
     param([string[]]$Arguments)
     $baseArguments = @()
@@ -206,6 +213,47 @@ function Invoke-DockerCli {
     & docker @baseArguments @Arguments
 }
 
+# Get-LocalImageRefSet 一次性读取本地不可变引用,避免为每个镜像重复启动 Docker CLI。
+function Get-LocalImageRefSet {
+    $previousErrorActionPreference = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try {
+        $output = Invoke-DockerCli -Arguments @("image", "ls", "--digests", "--no-trunc", "--format", "{{.Repository}}|{{.Digest}}") 2>&1
+        $exitCode = $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $previousErrorActionPreference
+    }
+    if ($exitCode -ne 0) {
+        foreach ($line in $output) {
+            Write-Warning $line
+        }
+        throw "读取本地镜像 digest 集合失败, exit=$exitCode"
+    }
+
+    $refs = @{}
+    foreach ($line in $output) {
+        $parts = ([string]$line).Split("|", 2)
+        if ($parts.Count -ne 2) {
+            continue
+        }
+        $repository = $parts[0].Trim()
+        $digest = $parts[1].Trim()
+        if ($repository -eq "<none>" -or $digest -notmatch "^sha256:[0-9a-f]{64}$") {
+            continue
+        }
+
+        $refs["$repository@$digest"] = $true
+        $firstSegment = $repository.Split("/", 2)[0]
+        if (-not $repository.Contains("/")) {
+            $refs["docker.io/library/$repository@$digest"] = $true
+        } elseif (-not $firstSegment.Contains(".") -and -not $firstSegment.Contains(":") -and $firstSegment -ne "localhost") {
+            $refs["docker.io/$repository@$digest"] = $true
+        }
+    }
+    return $refs
+}
+
+# Invoke-DockerPullWithRetry 按配置重试拉取,并只清理由本次失败产生的新引用。
 function Invoke-DockerPullWithRetry {
     param([object]$Item)
     for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
@@ -223,6 +271,7 @@ function Invoke-DockerPullWithRetry {
             foreach ($line in $pullOutput) {
                 Write-Host $line
             }
+            $script:LocalImageRefs[$Item.Ref] = $true
             return $true
         }
 
@@ -252,16 +301,13 @@ function Invoke-DockerPullWithRetry {
     return $false
 }
 
+# Test-LocalImageRef 根据本地 digest 快照判断引用是否已存在,不触发网络拉取。
 function Test-LocalImageRef {
     param([string]$Ref)
-    $previousErrorActionPreference = $ErrorActionPreference
-    $ErrorActionPreference = "Continue"
-    try {
-        Invoke-DockerCli -Arguments @("image", "inspect", $Ref) 1>$null 2>$null
-        return ($LASTEXITCODE -eq 0)
-    } finally {
-        $ErrorActionPreference = $previousErrorActionPreference
+    if ($null -eq $script:LocalImageRefs) {
+        $script:LocalImageRefs = Get-LocalImageRefSet
     }
+    return $script:LocalImageRefs.ContainsKey($Ref)
 }
 
 $rootPath = (Resolve-Path -LiteralPath $Root).Path
@@ -303,16 +349,21 @@ if ($missing.Count -gt 0) {
     exit 1
 }
 
+$script:LocalImageRefs = Get-LocalImageRefSet
 $failures = New-Object System.Collections.Generic.List[string]
+$existingCount = 0
+$pulledCount = 0
 foreach ($item in $items) {
     if (Test-LocalImageRef -Ref $item.Ref) {
         Write-Host "Skipping existing image $($item.Ref)"
+        $existingCount++
         continue
     }
     if (-not (Invoke-DockerPullWithRetry -Item $item)) {
         $failures.Add("$($item.Ref) ($($item.Manifest))")
         break
     }
+    $pulledCount++
 }
 
 if ($failures.Count -gt 0) {
@@ -320,4 +371,4 @@ if ($failures.Count -gt 0) {
     exit 1
 }
 
-Write-Host "Pulled $($items.Count) image references successfully. scope=$Scope registry=$Registry"
+Write-Host "Prepared $($items.Count) image references successfully. existing=$existingCount pulled=$pulledCount scope=$Scope registry=$Registry"

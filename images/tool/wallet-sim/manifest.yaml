@@ -18,7 +18,9 @@ description: 钱包模拟器工具镜像。
 source:
   type: platform-built
 upstream:
-  image: cgr.dev/chainguard/wolfi-base:latest
+  image: cgr.dev/chainguard/wolfi-base
+  version: "2026-07-07"
+  digest: sha256:02dab76bd852a70556b5b2002195c8a5fdab77d323c433bf6642aab080489795
   packages:
     - python-3.13
     - eth-account==0.13.7

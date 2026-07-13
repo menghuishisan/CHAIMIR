@@ -129,11 +129,6 @@ migrate: ## 运行迁移 + RLS 初始化 + seed(删旧 Job 后重建)
 	kubectl kustomize --load-restrictor=LoadRestrictionsNone $(OVERLAY) | kubectl apply -f -
 	@echo "migrate Job 已提交(镜像就绪后执行;目录2/3 产出 chaimir/migrate 镜像后生效)"
 
-# ---- 本地镜像加载(目录2/3 产出镜像后)----
-.PHONY: load-images
-load-images: ## 将本地构建的 chaimir 镜像导入当前集群;Docker Desktop 通常无需额外导入
-	@echo "Docker Desktop Kubernetes 直接复用本机 Docker 镜像;其他集群请推送到 overlay 配置的 registry。"
-
 # ---- 镜像供应链工具与 Harbor(可选,本地/私有化私有仓)----
 .PHONY: supply-chain-tools-pull
 supply-chain-tools-pull: ## 拉取容器化 Trivy/Cosign/Helm 工具镜像
@@ -149,7 +144,7 @@ supply-chain-tools-check: ## 通过 Docker 容器检查 Trivy/Cosign/Helm 可执
 harbor-up: supply-chain-secret-check ## 经容器化 Helm 安装 Harbor 到当前集群(官方 chart,非我方平台清单)
 	@test -n "$$(sed -n 's/^SUPPLY_CHAIN_KUBECONFIG_HOST_PATH=//p' $(SUPPLY_CHAIN_CONFIG))" || { echo "请先在 $(SUPPLY_CHAIN_CONFIG) 填写 SUPPLY_CHAIN_KUBECONFIG_HOST_PATH"; exit 1; }
 	@test -n "$$(sed -n 's/^HARBOR_ADMIN_PASSWORD=//p' $(SUPPLY_CHAIN_SECRET_FILE))" || { echo "请先在 $(SUPPLY_CHAIN_SECRET_FILE) 填写 HARBOR_ADMIN_PASSWORD"; exit 1; }
-	docker compose --project-name $(SUPPLY_CHAIN_PROJECT) --env-file $(SUPPLY_CHAIN_CONFIG) -f $(SUPPLY_CHAIN_COMPOSE) run --rm --env-from-file $(SUPPLY_CHAIN_SECRET_FILE) --entrypoint sh helm -lc 'set -eu; helm repo add harbor "$$SUPPLY_CHAIN_HARBOR_CHART_REPOSITORY"; helm repo update; helm upgrade --install "$$SUPPLY_CHAIN_HARBOR_RELEASE_NAME" harbor/harbor --namespace "$$SUPPLY_CHAIN_HARBOR_NAMESPACE" --create-namespace -f "$$SUPPLY_CHAIN_HARBOR_VALUES_PATH" --set-string externalURL="$$SUPPLY_CHAIN_HARBOR_EXTERNAL_URL" --set-string harborAdminPassword="$$HARBOR_ADMIN_PASSWORD"'
+	HARBOR_ADMIN_PASSWORD="$$(sed -n 's/^HARBOR_ADMIN_PASSWORD=//p' $(SUPPLY_CHAIN_SECRET_FILE))" docker compose --project-name $(SUPPLY_CHAIN_PROJECT) --env-file $(SUPPLY_CHAIN_CONFIG) -f $(SUPPLY_CHAIN_COMPOSE) run --rm --entrypoint sh helm -lc 'set -eu; helm repo add harbor "$$SUPPLY_CHAIN_HARBOR_CHART_REPOSITORY"; helm repo update; helm upgrade --install "$$SUPPLY_CHAIN_HARBOR_RELEASE_NAME" harbor/harbor --namespace "$$SUPPLY_CHAIN_HARBOR_NAMESPACE" --create-namespace -f "$$SUPPLY_CHAIN_HARBOR_VALUES_PATH" --set-string externalURL="$$SUPPLY_CHAIN_HARBOR_EXTERNAL_URL" --set-string harborAdminPassword="$$HARBOR_ADMIN_PASSWORD"'
 
 .PHONY: harbor-projects-ensure
 harbor-projects-ensure: supply-chain-secret-check ## 按镜像分类创建 Harbor project 和供应链 robot

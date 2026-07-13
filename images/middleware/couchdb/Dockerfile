@@ -1,10 +1,10 @@
 # 本文件定义 CouchDB 的安全运行镜像,基于 Wolfi 包保留 Fabric 富查询所需 HTTP API。
-FROM cgr.dev/chainguard/wolfi-base:latest
+FROM cgr.dev/chainguard/wolfi-base@sha256:02dab76bd852a70556b5b2002195c8a5fdab77d323c433bf6642aab080489795
 
 LABEL org.opencontainers.image.title="middleware/couchdb"
 LABEL org.opencontainers.image.description="Chaimir CouchDB middleware on Wolfi"
 
-RUN apk add --no-cache couchdb-3.3 couchdb-3.3-compat
+RUN apk add --no-cache couchdb-3.3=3.3.3-r16 couchdb-3.3-compat=3.3.3-r16
 COPY entrypoint.sh /usr/local/bin/chaimir-couchdb-entrypoint
 RUN addgroup -g 5984 couchdb || true \
     && adduser -D -H -u 5984 -G couchdb couchdb || true \

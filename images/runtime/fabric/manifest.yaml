@@ -19,6 +19,10 @@ source:
   type: thin-wrapper
 upstream:
   image: hyperledger/fabric-tools:2.5.16
+  digest: sha256:760022c3eed97e83dd7a2e1a04b68d04ece3675988063e9dbdc7b0b993a8d95a
+  rebuild_image: base/fabric-tools
+  runtime_image: ubuntu:22.04
+  runtime_digest: sha256:0e0a0fc6d18feda9db1590da249ac93e8d5abfea8f4c3c0c849ce512b5ef8982
   reuse_policy: thin-wrapper
 data_driven: true
 capabilities:

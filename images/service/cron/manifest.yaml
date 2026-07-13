@@ -18,8 +18,9 @@ description: 受控定时任务镜像,用于真实执行平台备份并写入 M9
 source:
   type: platform-built
 upstream:
-  builder: golang:1.25-bookworm
-  runtime: postgres:16-bookworm
+  builder: base/go-builder
+  builder_version: go1.26.5
+  runtime: middleware/postgres
   reuse_policy: multi-stage-build
 data_driven: false
 capabilities:

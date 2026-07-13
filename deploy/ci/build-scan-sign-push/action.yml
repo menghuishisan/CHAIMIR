@@ -1,9 +1,9 @@
-# 可复用 composite action:构建 → Trivy 扫描(高危阻断)→ 推 Harbor → Cosign 签名与验签。
+# 可复用 composite action:构建 → Trivy 扫描(高危阻断)→ SBOM → 推 Harbor → Cosign 签名/证明/验证。
 # 依据 docs/总-部署架构设计.md §六 + docs/总-镜像与容器设计.md §九:
 #   多阶段构建 → Trivy 漏洞扫描(高危阻断)→ 推 Harbor并解析 digest → Cosign 签名与验签。
 # 全平台镜像流水线统一调用此 action(CLAUDE.md §4:同类问题统一一种方案)。
 name: build-scan-sign-push
-description: 构建镜像、Trivy 扫描、推送 Harbor、Cosign 签名并验签
+description: 构建镜像、Trivy 扫描与 SBOM、推送 Harbor、Cosign 签名和证明验证
 
 inputs:
   image:
@@ -79,9 +79,13 @@ runs:
 
     - name: 登录 Harbor
       shell: bash
+      env:
+        REGISTRY: ${{ inputs.registry }}
+        REGISTRY_USERNAME: ${{ inputs.registry-username }}
+        REGISTRY_PASSWORD: ${{ inputs.registry-password }}
       run: |
-        echo "${{ inputs.registry-password }}" | \
-          docker login "${{ inputs.registry }}" -u "${{ inputs.registry-username }}" --password-stdin
+        printf '%s' "$REGISTRY_PASSWORD" | \
+          docker login "$REGISTRY" -u "$REGISTRY_USERNAME" --password-stdin
 
     - name: 多阶段构建镜像
       shell: bash
@@ -105,6 +109,12 @@ runs:
       shell: bash
       run: |
         set -euo pipefail
+
+        trivy_image="$(awk -F= '$1 == "SUPPLY_CHAIN_TRIVY_IMAGE" { print $2 }' deploy/config/chaimir.env)"
+        if [[ ! "$trivy_image" =~ @sha256:[0-9a-f]{64}$ ]]; then
+          echo "deploy/config/chaimir.env 缺少 digest 固定的 SUPPLY_CHAIN_TRIVY_IMAGE" >&2
+          exit 1
+        fi
 
         logical="${{ inputs.image }}"
         logical="${logical#${{ inputs.registry }}/}"
@@ -144,14 +154,21 @@ runs:
 
         docker run --rm \
           -v /var/run/docker.sock:/var/run/docker.sock \
+          -v "$GITHUB_WORKSPACE:/workspace:ro" \
           -e TRIVY_DB_REPOSITORY=ghcr.io/aquasecurity/trivy-db:2 \
-          aquasec/trivy:0.71.2 image \
+          "$trivy_image" image \
+            --config /workspace/deploy/ci/trivy.yaml \
             --format table \
-            --exit-code 1 \
-            --severity HIGH,CRITICAL \
-            --scanners vuln,secret \
-            --ignore-unfixed=false \
             "${skip_args[@]}" \
+            "${{ inputs.image }}:${{ inputs.tag }}"
+
+        docker run --rm \
+          -v /var/run/docker.sock:/var/run/docker.sock \
+          -v "$RUNNER_TEMP:/output" \
+          -e TRIVY_DB_REPOSITORY=ghcr.io/aquasecurity/trivy-db:2 \
+          "$trivy_image" image \
+            --format cyclonedx \
+            --output /output/chaimir-image-sbom.cdx.json \
             "${{ inputs.image }}:${{ inputs.tag }}"
 
     - name: 推送镜像到 Harbor
@@ -174,12 +191,20 @@ runs:
       shell: bash
       env:
         COSIGN_PASSWORD: ${{ inputs.cosign-password }}
+        COSIGN_PRIVATE_KEY: ${{ inputs.cosign-key }}
       run: |
         set -euo pipefail
         key_file=$(mktemp)
         public_key_file=$(mktemp)
         trap 'rm -f "$key_file" "$public_key_file"' EXIT
-        echo "${{ inputs.cosign-key }}" > "$key_file"
+        printf '%s\n' "$COSIGN_PRIVATE_KEY" > "$key_file"
         cosign public-key --key "$key_file" > "$public_key_file"
-        cosign sign --yes --key "$key_file" "${{ steps.digest.outputs.digest_ref }}"
-        cosign verify --key "$public_key_file" "${{ steps.digest.outputs.digest_ref }}"
+        cosign sign --yes --key "$key_file" --tlog-upload=false --use-signing-config=false \
+          "${{ steps.digest.outputs.digest_ref }}"
+        cosign verify --key "$public_key_file" --insecure-ignore-tlog=true \
+          "${{ steps.digest.outputs.digest_ref }}"
+        cosign attest --yes --key "$key_file" --type cyclonedx --use-signing-config=false \
+          --predicate "$RUNNER_TEMP/chaimir-image-sbom.cdx.json" \
+          "${{ steps.digest.outputs.digest_ref }}"
+        cosign verify-attestation --key "$public_key_file" --type cyclonedx --insecure-ignore-tlog=true \
+          "${{ steps.digest.outputs.digest_ref }}"

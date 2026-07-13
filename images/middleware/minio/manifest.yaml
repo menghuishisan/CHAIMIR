@@ -23,6 +23,7 @@ upstream:
   version: "RELEASE.2026-06-27T00-00-00Z.chaimir.7aac2a2c5b7c"
   builder_arg: GO_BUILDER_IMAGE
   runtime: gcr.io/distroless/static-debian12:nonroot
+  runtime_digest: sha256:b7bb25d9f7c31d2bdd1982feb4dafcaf137703c7075dbe2febb41c24212b946f
   reuse_policy: source-build
   license: AGPL-3.0
 private_delivery:

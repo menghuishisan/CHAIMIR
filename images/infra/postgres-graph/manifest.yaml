@@ -19,6 +19,7 @@ source:
   type: thin-wrapper
 upstream:
   image: postgres:16-alpine
+  digest: sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777
   reuse_policy: thin-wrapper
 data_driven: true
 capabilities:
@@ -79,4 +80,3 @@ supply_chain:
   trivy_required: true
   cosign_required: true
   pull_by_digest_in_production: true
-

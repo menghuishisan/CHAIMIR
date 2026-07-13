@@ -19,6 +19,7 @@ source:
   type: thin-wrapper
 upstream:
   image: ruimarinho/bitcoin-core:24-alpine
+  digest: sha256:258f763357e610f7d87c4898211878fc78d2452edcd5897f65843cbcd2940d5f
   reuse_policy: thin-wrapper
 data_driven: true
 capabilities:

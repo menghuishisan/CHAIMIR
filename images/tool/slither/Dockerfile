@@ -1,5 +1,5 @@
 # 本文件定义 Slither 工具镜像,使用官方 Python 包和 Solidity 官方编译器构建命令工具。
-FROM alpine:3.23
+FROM alpine:3.23@sha256:fd791d74b68913cbb027c6546007b3f0d3bc45125f797758156952bc2d6daf40
 
 ARG SOLC_VERSION=0.8.26
 ARG SOLC_PATH=solc-linux-amd64-v0.8.26+commit.8a97fa7a

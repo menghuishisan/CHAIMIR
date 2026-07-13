@@ -19,9 +19,11 @@ source:
   type: platform-built
 upstream:
   source_repository: https://github.com/nats-io/nats-server
-  version: "v2.14.2"
+  version: "v2.14.3"
+  source_commit: 9b17a586be69c9ff36e4c84a421ca47da410b561
   builder_arg: GO_BUILDER_IMAGE
   runtime: alpine:3.23
+  runtime_digest: sha256:fd791d74b68913cbb027c6546007b3f0d3bc45125f797758156952bc2d6daf40
   reuse_policy: source-build
   license: Apache-2.0
 private_delivery:

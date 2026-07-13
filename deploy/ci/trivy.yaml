@@ -1,6 +1,6 @@
 # Trivy 扫描配置(全平台镜像统一基线)。
 # 依据 docs/总-镜像与容器设计.md §九:高危漏洞阻断。
-# CI 中经 build-scan-sign-push action 调用;本文件为可被 `trivy --config` 引用的统一基线。
+# CI composite action、本地容器化 Trivy 与交付环境共同引用本文件。
 severity:
   - HIGH
   - CRITICAL

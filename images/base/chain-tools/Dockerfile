@@ -1,5 +1,5 @@
 # 本文件定义链工具公共基座,供需要通用 CLI 工具的 runtime/infra 镜像继承。
-FROM alpine:3.23
+FROM alpine:3.23@sha256:fd791d74b68913cbb027c6546007b3f0d3bc45125f797758156952bc2d6daf40
 
 LABEL org.opencontainers.image.title="base/chain-tools"
 LABEL org.opencontainers.image.description="Chaimir blockchain toolchain base image"

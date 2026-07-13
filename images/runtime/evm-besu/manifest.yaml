@@ -18,7 +18,18 @@ description: Hyperledger Besu 企业 EVM 教学运行时镜像。
 source:
   type: thin-wrapper
 upstream:
-  image: hyperledger/besu:26.6.1
+  image: hyperledger/besu
+  version: 26.6.1
+  digest: sha256:ac85d23b4250308ce5f6d004fff7fa6779f82932d1ba32fd3d4811531d43d0bc
+  runtime_image: cgr.dev/chainguard/wolfi-base
+  runtime_version: "2026-07-07"
+  runtime_digest: sha256:02dab76bd852a70556b5b2002195c8a5fdab77d323c433bf6642aab080489795
+  packages:
+    - bash=5.3-r12
+    - ca-certificates=20260413-r0
+    - curl=8.21.0-r1
+    - openjdk-25-jre=25.0.3-r5
+    - libstdc++=16.1.0-r4
   reuse_policy: thin-wrapper
 data_driven: true
 capabilities:

@@ -20,7 +20,7 @@ source:
 upstream:
   image: node:24-alpine3.23
   components:
-    - image: ghcr.io/foundry-rs/foundry:v1.0.0
+    - image: ghcr.io/foundry-rs/foundry:v1.7.1@sha256:bdc584033cefab8be282c7f57c263cda42f04700cd1ec88d64bebe2f645aba72
       role: foundry-toolchain
     - image: node:24-alpine3.23
       role: node-runtime

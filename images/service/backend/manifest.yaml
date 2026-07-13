@@ -18,8 +18,9 @@ description: 后端模块化单体 API 与控制面服务镜像。
 source:
   type: platform-built
 upstream:
-  builder: golang:1.25-bookworm
-  runtime: gcr.io/distroless/static-debian12:nonroot
+  builder: base/go-builder
+  builder_version: go1.26.5
+  runtime: base/runtime-min
   reuse_policy: multi-stage-build
 data_driven: false
 capabilities:
@@ -70,5 +71,4 @@ supply_chain:
   trivy_required: true
   cosign_required: true
   pull_by_digest_in_production: true
-
 

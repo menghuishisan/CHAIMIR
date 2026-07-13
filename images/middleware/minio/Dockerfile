@@ -1,5 +1,5 @@
 # 本文件从 MinIO 官方源码构建对象存储服务镜像,避免依赖已停止更新的社区 Docker tag。
-ARG GO_BUILDER_IMAGE
+ARG GO_BUILDER_IMAGE=invalid.invalid/base/go-builder:required
 FROM ${GO_BUILDER_IMAGE} AS build
 
 ARG MINIO_COMMIT=7aac2a2c5b7c882e68c1ce017d8256be2feea27f
@@ -29,7 +29,7 @@ RUN if [ -n "${GO_MODULE_PROXY}" ]; then go env -w GOPROXY="${GO_MODULE_PROXY}";
         -ldflags "-s -w -X github.com/minio/minio/cmd.Version=${MINIO_VERSION} -X github.com/minio/minio/cmd.ReleaseTag=${MINIO_VERSION} -X github.com/minio/minio/cmd.CommitID=${MINIO_COMMIT} -X github.com/minio/minio/cmd.ShortCommitID=7aac2a2c5b7c" \
         -o /out/minio .
 
-FROM gcr.io/distroless/static-debian12:nonroot
+FROM gcr.io/distroless/static-debian12:nonroot@sha256:b7bb25d9f7c31d2bdd1982feb4dafcaf137703c7075dbe2febb41c24212b946f
 
 LABEL org.opencontainers.image.title="middleware/minio"
 LABEL org.opencontainers.image.description="Chaimir MinIO object storage built from official source"

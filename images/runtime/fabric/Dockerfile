@@ -1,7 +1,8 @@
 # 本文件定义 Fabric 工具运行时镜像,从官方 tools 镜像提取必要二进制并放入干净运行层。
-FROM hyperledger/fabric-tools:2.5.16 AS fabric-tools
+ARG FABRIC_TOOLS_IMAGE=invalid.invalid/base/fabric-tools:required
+FROM ${FABRIC_TOOLS_IMAGE} AS fabric-tools
 
-FROM ubuntu:22.04
+FROM ubuntu:22.04@sha256:0e0a0fc6d18feda9db1590da249ac93e8d5abfea8f4c3c0c849ce512b5ef8982
 
 LABEL org.opencontainers.image.title="runtime/fabric"
 LABEL org.opencontainers.image.description="Chaimir Hyperledger Fabric runtime tools image"

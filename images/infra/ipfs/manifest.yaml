@@ -22,6 +22,10 @@ upstream:
   image: ipfs/kubo
   version: v0.42.0
   digest: sha256:6a99314a4fae81abc50a73ccccc0dc4cd49da672a08aca84d25c38c5aa3a8bb3
+  dirs_image: alpine:3.23
+  dirs_digest: sha256:fd791d74b68913cbb027c6546007b3f0d3bc45125f797758156952bc2d6daf40
+  runtime_image: gcr.io/distroless/base-debian12:nonroot
+  runtime_digest: sha256:4b5196599229a5cf312a676cfe1ee8587ecf2371dcc22620f8c7a66d77d125c8
   reuse_policy: official-image-binary
 data_driven: true
 capabilities:

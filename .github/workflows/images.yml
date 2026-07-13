@@ -1,7 +1,7 @@
-# 镜像流水线:链运行时/工具/判题器/仿真/基础镜像(数据驱动,目录3 产出)。
+# 镜像流水线:除四个服务镜像外的运行时/工具/判题器/仿真/基础镜像。
 # 依据 docs/总-部署架构设计.md §六 + docs/总-镜像与容器设计.md:
-#   images/ 各镜像含 Dockerfile + manifest.yaml;矩阵构建 → 扫描 → 签名 → 推 Harbor。
-# 路径触发:images/ 变更才跑(目录3 产出后激活)。
+#   构建型镜像含 Dockerfile + manifest.yaml;矩阵构建 → Trivy/SBOM → 推 Harbor → Cosign 签名/证明/验证。
+# 路径触发:通用镜像源码、manifest 或共享供应链实现变化时运行。
 name: images
 
 on:
@@ -13,6 +13,7 @@ on:
       - "!images/service/backend/**"
       - "!images/service/frontend/**"
       - "!images/service/migrate/**"
+      - "!images/service/cron/**"
       - ".github/workflows/images.yml"
       - "deploy/ci/**"
   pull_request:
@@ -22,6 +23,7 @@ on:
       - "!images/service/backend/**"
       - "!images/service/frontend/**"
       - "!images/service/migrate/**"
+      - "!images/service/cron/**"
       - ".github/workflows/images.yml"
 
 permissions:
@@ -37,6 +39,9 @@ jobs:
       main_matrix: ${{ steps.set.outputs.main_matrix }}
     steps:
       - uses: actions/checkout@v4
+      - name: 校验 manifest、Dockerfile 与 digest lock 契约
+        shell: pwsh
+        run: ./images/validate-image-metadata.ps1 -RepoRoot .
       - id: set
         name: 收集 images/ 下含 Dockerfile 的镜像目录
         run: |
@@ -107,7 +112,7 @@ jobs:
               fi
               continue
             fi
-            if [[ "$logical" == "service/backend" || "$logical" == "service/frontend" || "$logical" == "service/migrate" ]]; then
+            if [[ "$logical" == "service/backend" || "$logical" == "service/frontend" || "$logical" == "service/migrate" || "$logical" == "service/cron" ]]; then
               continue
             fi
             if [[ -z "$context_value" ]]; then
@@ -163,7 +168,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: 安装 Cosign
-        uses: sigstore/cosign-installer@v3
+        uses: sigstore/cosign-installer@v4.1.2
+        with:
+          cosign-release: v3.1.1
       - name: 构建+扫描+签名+推送
         id: build
         uses: ./deploy/ci/build-scan-sign-push
@@ -197,7 +204,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: 安装 Cosign
-        uses: sigstore/cosign-installer@v3
+        uses: sigstore/cosign-installer@v4.1.2
+        with:
+          cosign-release: v3.1.1
       - name: 构建+扫描+签名+推送
         id: build
         uses: ./deploy/ci/build-scan-sign-push
@@ -233,7 +242,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: 安装 Cosign
-        uses: sigstore/cosign-installer@v3
+        uses: sigstore/cosign-installer@v4.1.2
+        with:
+          cosign-release: v3.1.1
       - name: 下载基础镜像 digest 片段
         uses: actions/download-artifact@v4
         with:
@@ -259,12 +270,16 @@ jobs:
           judge_min=$(read_digest base/judge-min)
           node_builder=$(read_digest base/node-builder)
           chain_tools=$(read_digest base/chain-tools)
+          fabric_tools=$(read_digest base/fabric-tools)
+          runtime_min=$(read_digest base/runtime-min)
           {
             echo 'args<<EOF'
             echo "GO_BUILDER_IMAGE=${{ secrets.HARBOR_REGISTRY }}/base/go-builder@$go_builder"
             echo "JUDGE_MIN_IMAGE=${{ secrets.HARBOR_REGISTRY }}/base/judge-min@$judge_min"
             echo "NODE_BUILDER_IMAGE=${{ secrets.HARBOR_REGISTRY }}/base/node-builder@$node_builder"
             echo "CHAIN_TOOLS_IMAGE=${{ secrets.HARBOR_REGISTRY }}/base/chain-tools@$chain_tools"
+            echo "FABRIC_TOOLS_IMAGE=${{ secrets.HARBOR_REGISTRY }}/base/fabric-tools@$fabric_tools"
+            echo "RUNTIME_IMAGE=${{ secrets.HARBOR_REGISTRY }}/base/runtime-min@$runtime_min"
             echo 'EOF'
           } >> "$GITHUB_OUTPUT"
       - name: 构建+扫描+签名+推送

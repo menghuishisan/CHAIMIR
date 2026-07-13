@@ -1,5 +1,5 @@
 # 本文件定义 noVNC 图形桌面工具镜像。
-FROM alpine:3.23
+FROM alpine:3.23@sha256:fd791d74b68913cbb027c6546007b3f0d3bc45125f797758156952bc2d6daf40
 
 LABEL org.opencontainers.image.title="tool/novnc-desktop"
 LABEL org.opencontainers.image.description="Chaimir noVNC desktop tool image"

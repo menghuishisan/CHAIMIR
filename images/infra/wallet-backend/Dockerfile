@@ -1,5 +1,5 @@
 # 本文件构建 DApp 钱包后端服务镜像,最终运行层只保留 Node 服务所需文件。
-FROM node:24-alpine3.23 AS deps
+FROM node:24-alpine3.23@sha256:595398b0081eacda8e1c4c5b97b76cd1020e4d58a8ebcb4843b9bca1e79e7436 AS deps
 
 LABEL org.opencontainers.image.title="infra/wallet-backend"
 LABEL org.opencontainers.image.description="Chaimir wallet backend service"
@@ -9,7 +9,7 @@ COPY package.json package-lock.json /app/
 RUN npm ci --omit=dev --ignore-scripts --no-audit --no-fund
 COPY wallet-backend.mjs /app/wallet-backend.mjs
 
-FROM node:24-alpine3.23
+FROM node:24-alpine3.23@sha256:595398b0081eacda8e1c4c5b97b76cd1020e4d58a8ebcb4843b9bca1e79e7436
 
 LABEL org.opencontainers.image.title="infra/wallet-backend"
 LABEL org.opencontainers.image.description="Chaimir wallet backend service"
