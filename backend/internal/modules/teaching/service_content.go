@@ -243,7 +243,7 @@ func (s *Service) SetLessonContent(ctx context.Context, lessonID int64, req Less
 	if err != nil {
 		return LessonDTO{}, err
 	}
-	req, err = validateLessonRequest(req)
+	req, err = validateLessonContentRequest(req)
 	if err != nil {
 		return LessonDTO{}, err
 	}

@@ -8,6 +8,7 @@ import (
 
 	"chaimir/internal/contracts"
 	"chaimir/internal/platform/ids"
+	"chaimir/internal/platform/jsonx"
 	"chaimir/internal/platform/pagex"
 	"chaimir/pkg/apperr"
 )
@@ -39,7 +40,7 @@ func (s *Service) CreateCheatRecord(ctx context.Context, contestID int64, req Ch
 			return err
 		}
 		if item.Action == CheatActionPenalty {
-			if err := s.applyCheatPenalty(ctx, tx, id.TenantID, contestID, item.TeamID, float64FromMap(item.Evidence, "penalty_score", 0)); err != nil {
+			if err := s.applyCheatPenalty(ctx, tx, id.TenantID, contestID, item.TeamID, jsonx.Float64FromAny(item.Evidence["penalty_score"])); err != nil {
 				return err
 			}
 		}

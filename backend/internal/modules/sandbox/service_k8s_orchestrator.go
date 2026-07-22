@@ -150,13 +150,20 @@ func (o *K8sOrchestrator) waitVolumeSnapshotReady(ctx context.Context, gvr schem
 		if err != nil {
 			return fmt.Errorf("查询 VolumeSnapshot 状态失败: %w", err)
 		}
-		contentName, _, _ := unstructured.NestedString(current.Object, "status", "boundVolumeSnapshotContentName")
+		contentName, _, err := unstructured.NestedString(current.Object, "status", "boundVolumeSnapshotContentName")
+		if err != nil {
+			return fmt.Errorf("解析 VolumeSnapshot 绑定内容失败: %w", err)
+		}
 		if contentName != "" {
 			content, err := o.client.Dynamic().Resource(contentGVR).Get(ctx, contentName, metav1.GetOptions{})
 			if err != nil {
 				return fmt.Errorf("查询 VolumeSnapshotContent 状态失败: %w", err)
 			}
-			if volumeSnapshotReadyAndBound(current, content, namespace, name) {
+			ready, err := volumeSnapshotReadyAndBound(current, content, namespace, name)
+			if err != nil {
+				return fmt.Errorf("解析 VolumeSnapshot 就绪状态失败: %w", err)
+			}
+			if ready {
 				return nil
 			}
 		}
@@ -169,21 +176,33 @@ func (o *K8sOrchestrator) waitVolumeSnapshotReady(ctx context.Context, gvr schem
 }
 
 // volumeSnapshotReadyAndBound 校验快照 ready 且 VolumeSnapshotContent 双向反指当前快照。
-func volumeSnapshotReadyAndBound(snapshot, content *unstructured.Unstructured, namespace, name string) bool {
+func volumeSnapshotReadyAndBound(snapshot, content *unstructured.Unstructured, namespace, name string) (bool, error) {
 	if snapshot == nil || content == nil {
-		return false
+		return false, nil
 	}
-	ready, _, _ := unstructured.NestedBool(snapshot.Object, "status", "readyToUse")
+	ready, _, err := unstructured.NestedBool(snapshot.Object, "status", "readyToUse")
+	if err != nil {
+		return false, err
+	}
 	if !ready {
-		return false
+		return false, nil
 	}
-	contentName, _, _ := unstructured.NestedString(snapshot.Object, "status", "boundVolumeSnapshotContentName")
+	contentName, _, err := unstructured.NestedString(snapshot.Object, "status", "boundVolumeSnapshotContentName")
+	if err != nil {
+		return false, err
+	}
 	if strings.TrimSpace(contentName) == "" || content.GetName() != contentName {
-		return false
+		return false, nil
 	}
-	refName, _, _ := unstructured.NestedString(content.Object, "spec", "volumeSnapshotRef", "name")
-	refNamespace, _, _ := unstructured.NestedString(content.Object, "spec", "volumeSnapshotRef", "namespace")
-	return refName == name && refNamespace == namespace
+	refName, _, err := unstructured.NestedString(content.Object, "spec", "volumeSnapshotRef", "name")
+	if err != nil {
+		return false, err
+	}
+	refNamespace, _, err := unstructured.NestedString(content.Object, "spec", "volumeSnapshotRef", "namespace")
+	if err != nil {
+		return false, err
+	}
+	return refName == name && refNamespace == namespace, nil
 }
 
 // RestoreSnapshotResources 基于保留 PVC 或同命名空间 VolumeSnapshot 恢复沙箱运行资源。
@@ -316,7 +335,7 @@ func (o *K8sOrchestrator) ExecStream(ctx context.Context, namespace, container s
 
 // PrepullImage 创建或更新预拉取 DaemonSet 并等待工作负载镜像集合在真实节点 Ready。
 func (o *K8sOrchestrator) PrepullImage(ctx context.Context, image RuntimeImage, specs []PrepullImageSpec) (PrepullResult, error) {
-	imageURLs := prepullSpecImageURLs(specs)
+	imageURLs := prepullImageURLs(specs)
 	ds := o.prepullDaemonSet(image, specs)
 	cs := o.client.Clientset()
 	if err := o.ensureImagePullSecrets(ctx, o.cfg.PrepullNamespace); err != nil {
@@ -598,16 +617,19 @@ func (o *K8sOrchestrator) SnapshotSupported(ctx context.Context) (bool, error) {
 	} else if err != nil {
 		return false, err
 	}
-	return volumeSnapshotClassAllowsDeletion(class), nil
+	return volumeSnapshotClassAllowsDeletion(class)
 }
 
 // volumeSnapshotClassAllowsDeletion 要求快照类删除策略为 Delete,避免到期清理后底层快照继续占用存储。
-func volumeSnapshotClassAllowsDeletion(class *unstructured.Unstructured) bool {
+func volumeSnapshotClassAllowsDeletion(class *unstructured.Unstructured) (bool, error) {
 	if class == nil {
-		return false
+		return false, nil
 	}
-	policy, _, _ := unstructured.NestedString(class.Object, "deletionPolicy")
-	return strings.EqualFold(strings.TrimSpace(policy), "Delete")
+	policy, _, err := unstructured.NestedString(class.Object, "deletionPolicy")
+	if err != nil {
+		return false, err
+	}
+	return strings.EqualFold(strings.TrimSpace(policy), "Delete"), nil
 }
 
 // waitNamespaceDeleted 等待动态沙箱 Namespace 真正消失,避免数据库状态先行标记 destroyed 后存储仍残留。
@@ -1073,7 +1095,7 @@ func validateSnapshotRefForNamespace(sb Sandbox) error {
 	return nil
 }
 
-// podForPlan 构造主运行时容器和工具 sidecar Pod。
+// podsForPlan 构造主运行时容器和工具 sidecar Pod。
 func (o *K8sOrchestrator) podsForPlan(plan CreateSandboxPlan) []*corev1.Pod {
 	pods := podGroupForPlan(plan)
 	out := make([]*corev1.Pod, 0, len(pods)+len(plan.Tools))
@@ -1767,24 +1789,6 @@ func prepullHoldSpec(specs []PrepullImageSpec) PrepullImageSpec {
 		}
 	}
 	return PrepullImageSpec{}
-}
-
-// prepullSpecImageURLs 提取预拉取状态响应中的镜像 URL 列表。
-func prepullSpecImageURLs(specs []PrepullImageSpec) []string {
-	out := make([]string, 0, len(specs))
-	seen := map[string]struct{}{}
-	for _, spec := range specs {
-		imageURL := strings.TrimSpace(spec.ImageURL)
-		if imageURL == "" {
-			continue
-		}
-		if _, exists := seen[imageURL]; exists {
-			continue
-		}
-		seen[imageURL] = struct{}{}
-		out = append(out, imageURL)
-	}
-	return out
 }
 
 // prepullContainerName 基于镜像位置生成稳定容器名,避免多镜像预拉取时名称冲突。

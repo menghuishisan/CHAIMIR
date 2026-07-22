@@ -5,7 +5,6 @@ import (
 	"context"
 
 	"chaimir/internal/platform/audit"
-	"chaimir/internal/platform/response"
 	"chaimir/pkg/apperr"
 )
 
@@ -33,17 +32,9 @@ func (s *Service) writeAudit(ctx context.Context, tenantID, actorID int64, actor
 	if s.audit == nil {
 		return apperr.ErrAuditWriterMissing
 	}
-	if detail == nil {
-		detail = map[string]any{}
-	}
-	detailText, err := audit.DetailString(detail)
+	entry, err := audit.BuildEntry(ctx, tenantID, actorID, actorRole, action, targetType, targetID, detail)
 	if err != nil {
 		return apperr.ErrInternal.WithCause(err)
 	}
-	req := audit.RequestContextFrom(ctx)
-	traceID := req.TraceID
-	if traceID == "" {
-		traceID = response.TraceFromContext(ctx)
-	}
-	return s.audit.Write(ctx, audit.Entry{TenantID: tenantID, ActorID: actorID, ActorRole: actorRole, Action: action, TargetType: targetType, TargetID: targetID, Detail: detailText, IP: req.IP, TraceID: traceID})
+	return s.audit.Write(ctx, entry)
 }

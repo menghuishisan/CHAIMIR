@@ -46,6 +46,7 @@ type contestAPI struct{ svc *Service }
 // registerTeacherRoutes 注册教师/管理员竞赛管理接口。
 func (a contestAPI) registerTeacherRoutes(g gin.IRouter) {
 	g.GET("/contests", a.listContests)
+	g.GET("/contests/:id", a.getContest)
 	g.POST("/contests", a.createContest)
 	g.PATCH("/contests/:id", a.updateContest)
 	g.POST("/contests/:id/problems", a.addProblem)
@@ -141,6 +142,16 @@ func (a contestAPI) listContests(c *gin.Context) {
 	}
 	out, total, p, s, err := a.svc.ListContests(c.Request.Context(), int16(status), page, size)
 	httpx.WritePage(c, out, total, p, s, err)
+}
+
+// getContest 读取教师有权管理的单条竞赛。
+func (a contestAPI) getContest(c *gin.Context) {
+	id, ok := httpx.PathID(c, "id")
+	if !ok {
+		return
+	}
+	out, err := a.svc.GetContest(c.Request.Context(), id)
+	httpx.Write(c, out, err)
 }
 
 // createContest 绑定创建竞赛请求。

@@ -55,6 +55,7 @@ type ProblemRequest struct {
 type ProblemDTO struct {
 	ID           ids.ID         `json:"id"`
 	ContestID    ids.ID         `json:"contest_id"`
+	Title        string         `json:"title"`
 	ItemCode     string         `json:"item_code"`
 	ItemVersion  string         `json:"item_version"`
 	Score        int32          `json:"score"`

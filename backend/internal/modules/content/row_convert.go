@@ -35,7 +35,7 @@ func itemFromRow(row sqlcgen.ContentItem) Item {
 
 // itemWithBodyFromRefRow 转换按引用读取的内容快照。
 func itemWithBodyFromRefRow(row sqlcgen.GetContentItemWithBodyByRefRow) (ItemWithBody, error) {
-	body, err := decodeMap(row.Body)
+	body, err := jsonx.ObjectMapStrict(row.Body)
 	if err != nil {
 		return ItemWithBody{}, err
 	}
@@ -44,7 +44,7 @@ func itemWithBodyFromRefRow(row sqlcgen.GetContentItemWithBodyByRefRow) (ItemWit
 
 // itemWithBodyFromIDRow 转换按 ID 读取的内容快照。
 func itemWithBodyFromIDRow(row sqlcgen.GetContentItemWithBodyByIDRow) (ItemWithBody, error) {
-	body, err := decodeMap(row.Body)
+	body, err := jsonx.ObjectMapStrict(row.Body)
 	if err != nil {
 		return ItemWithBody{}, err
 	}
@@ -91,14 +91,6 @@ func criteriaFromJSON(raw []byte) (PaperCriteria, error) {
 		return PaperCriteria{}, err
 	}
 	return out, nil
-}
-
-// decodeMap 解码 JSONB 对象为空 map。
-func decodeMap(raw []byte) (map[string]any, error) {
-	if len(raw) == 0 {
-		return map[string]any{}, nil
-	}
-	return jsonx.ObjectMapStrict(raw)
 }
 
 // encodeMap 编码 JSONB 对象。

@@ -264,7 +264,7 @@ func (a sandboxAPI) getSandbox(c *gin.Context) {
 	if !ok {
 		return
 	}
-	current, ok := currentTenantIdentity(c)
+	current, ok := httpx.CurrentTenantIdentity(c)
 	if !ok {
 		return
 	}
@@ -282,7 +282,7 @@ func (a sandboxAPI) pauseSandbox(c *gin.Context) {
 	if !ok {
 		return
 	}
-	tenantID, ok := currentServiceTenantID(c)
+	tenantID, ok := httpx.CurrentServiceTenantID(c)
 	if !ok {
 		return
 	}
@@ -299,7 +299,7 @@ func (a sandboxAPI) resumeSandbox(c *gin.Context) {
 	if !ok {
 		return
 	}
-	tenantID, ok := currentServiceTenantID(c)
+	tenantID, ok := httpx.CurrentServiceTenantID(c)
 	if !ok {
 		return
 	}
@@ -316,7 +316,7 @@ func (a sandboxAPI) destroySandbox(c *gin.Context) {
 	if !ok {
 		return
 	}
-	tenantID, ok := currentServiceTenantID(c)
+	tenantID, ok := httpx.CurrentServiceTenantID(c)
 	if !ok {
 		return
 	}
@@ -352,7 +352,7 @@ func (a sandboxAPI) getFiles(c *gin.Context) {
 	if !ok {
 		return
 	}
-	current, ok := currentTenantIdentity(c)
+	current, ok := httpx.CurrentTenantIdentity(c)
 	if !ok {
 		return
 	}
@@ -371,7 +371,7 @@ func (a sandboxAPI) writeFile(c *gin.Context) {
 	if !ok {
 		return
 	}
-	current, ok := currentTenantIdentity(c)
+	current, ok := httpx.CurrentTenantIdentity(c)
 	if !ok {
 		return
 	}
@@ -392,7 +392,7 @@ func (a sandboxAPI) saveFiles(c *gin.Context) {
 	if !ok {
 		return
 	}
-	current, ok := currentTenantIdentity(c)
+	current, ok := httpx.CurrentTenantIdentity(c)
 	if !ok {
 		return
 	}
@@ -406,7 +406,7 @@ func (a sandboxAPI) progress(c *gin.Context) {
 	if !ok {
 		return
 	}
-	current, ok := currentTenantIdentity(c)
+	current, ok := httpx.CurrentTenantIdentity(c)
 	if !ok {
 		return
 	}
@@ -437,7 +437,7 @@ func (a sandboxAPI) terminal(c *gin.Context) {
 	if !ok {
 		return
 	}
-	current, ok := currentTenantIdentity(c)
+	current, ok := httpx.CurrentTenantIdentity(c)
 	if !ok {
 		return
 	}
@@ -467,7 +467,7 @@ func (a sandboxAPI) toolProxy(c *gin.Context) {
 	if !ok {
 		return
 	}
-	current, ok := currentTenantIdentity(c)
+	current, ok := httpx.CurrentTenantIdentity(c)
 	if !ok {
 		return
 	}
@@ -513,7 +513,7 @@ func (a sandboxAPI) runCommandTool(c *gin.Context) {
 	if !ok {
 		return
 	}
-	current, ok := currentTenantIdentity(c)
+	current, ok := httpx.CurrentTenantIdentity(c)
 	if !ok {
 		return
 	}
@@ -614,7 +614,7 @@ func (a sandboxAPI) chainReset(c *gin.Context) {
 
 // quotaStats 查询当前租户配额和活跃数量。
 func (a sandboxAPI) quotaStats(c *gin.Context) {
-	current, ok := currentTenantIdentity(c)
+	current, ok := httpx.CurrentTenantIdentity(c)
 	if !ok {
 		return
 	}
@@ -638,16 +638,6 @@ func (a sandboxAPI) upsertQuota(c *gin.Context) {
 	}
 	out, err := a.svc.UpsertQuota(c.Request.Context(), TenantQuota{TenantID: req.TenantID.Int64(), MaxConcurrentSandbox: req.MaxConcurrentSandbox, MaxCPU: req.MaxCPU, MaxMemoryMB: req.MaxMemoryMB, IdleTimeoutMin: req.IdleTimeoutMin, MaxLifetimeMin: req.MaxLifetimeMin, MaxKeepaliveMin: req.MaxKeepaliveMin, MaxSnapshotRetentionMin: req.MaxSnapshotRetentionMin})
 	httpx.Write(c, out, err)
-}
-
-// currentTenantIdentity 从服务端鉴权上下文读取租户身份。
-func currentTenantIdentity(c *gin.Context) (tenant.Identity, bool) {
-	id, ok := tenant.FromContext(c.Request.Context())
-	if !ok || id.TenantID <= 0 || id.AccountID <= 0 {
-		response.Fail(c, apperr.ErrUnauthorized)
-		return tenant.Identity{}, false
-	}
-	return id, true
 }
 
 // serviceTenantID 从内部服务签名上下文读取租户边界。
@@ -685,16 +675,6 @@ func currentChainIdentity(c *gin.Context) (chainRequestIdentity, bool) {
 		return chainRequestIdentity{}, false
 	}
 	return chainRequestIdentity{TenantID: id.TenantID, AccountID: id.AccountID}, true
-}
-
-// currentServiceTenantID 读取内部服务租户边界,缺失时立即返回统一鉴权错误。
-func currentServiceTenantID(c *gin.Context) (int64, bool) {
-	tenantID := serviceTenantID(c)
-	if tenantID <= 0 {
-		response.Fail(c, apperr.ErrServiceUnauthorized)
-		return 0, false
-	}
-	return tenantID, true
 }
 
 // serviceSourceRef 读取服务签名已校验来源,防止调用方伪造请求体来源。

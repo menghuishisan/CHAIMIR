@@ -8,7 +8,6 @@ import (
 
 	"chaimir/internal/contracts"
 	"chaimir/pkg/apperr"
-	"chaimir/pkg/privacy"
 )
 
 var (
@@ -23,11 +22,6 @@ func ValidatePhone(phone string) error {
 		return apperr.ErrIdentityInvalidPhone
 	}
 	return nil
-}
-
-// MaskPhone 按安全规范对手机号做用户向掩码展示。
-func MaskPhone(phone string) string {
-	return privacy.MaskPhone(phone)
 }
 
 // ValidatePassword 校验本地密码强度,避免弱口令进入哈希流程。

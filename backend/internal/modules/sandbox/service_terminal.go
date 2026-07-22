@@ -60,34 +60,14 @@ func (s *Service) AttachTerminal(ctx context.Context, target TerminalTarget, std
 
 // ToolProxyTargetForOwner 校验用户归属并解析 Web 工具代理目标。
 func (s *Service) ToolProxyTargetForOwner(ctx context.Context, tenantID, accountID, sandboxID int64, toolCode string) (Sandbox, SandboxTool, error) {
-	var sb Sandbox
-	var tools []SandboxTool
-	if err := s.store.TenantTx(ctx, tenantID, func(ctx context.Context, tx TxStore) error {
-		var err error
-		sb, err = tx.GetSandbox(ctx, tenantID, sandboxID)
-		if err != nil {
-			return apperr.ErrSandboxNotFound.WithCause(err)
-		}
-		if sb.OwnerAccountID != accountID {
-			return apperr.ErrSandboxOwnershipInvalid
-		}
-		tools, err = tx.ListSandboxTools(ctx, tenantID, sandboxID)
-		if err != nil {
-			return apperr.ErrSandboxToolNotFound.WithCause(err)
-		}
-		return nil
-	}); err != nil {
+	sb, tool, err := s.toolTargetForOwner(ctx, tenantID, accountID, sandboxID, toolCode, SandboxToolKindWebEmbed)
+	if err != nil {
 		return Sandbox{}, SandboxTool{}, err
 	}
-	for _, tool := range tools {
-		if tool.Kind == SandboxToolKindWebEmbed && tool.Status == SandboxToolStatusReady && strings.EqualFold(tool.ToolCode, strings.TrimSpace(toolCode)) {
-			if err := s.markSandboxExecutionActive(ctx, sb); err != nil {
-				return Sandbox{}, SandboxTool{}, err
-			}
-			return sb, tool, nil
-		}
+	if err := s.markSandboxExecutionActive(ctx, sb); err != nil {
+		return Sandbox{}, SandboxTool{}, err
 	}
-	return Sandbox{}, SandboxTool{}, apperr.ErrSandboxToolNotFound
+	return sb, tool, nil
 }
 
 // RunCommandToolForOwner 在命令工具容器中执行一次受控 argv 命令。
@@ -154,6 +134,11 @@ func commandToolExitCode(err error) (int, bool) {
 
 // commandToolTargetForOwner 校验用户归属并解析已挂载的命令工具。
 func (s *Service) commandToolTargetForOwner(ctx context.Context, tenantID, accountID, sandboxID int64, toolCode string) (Sandbox, SandboxTool, error) {
+	return s.toolTargetForOwner(ctx, tenantID, accountID, sandboxID, toolCode, SandboxToolKindCommand)
+}
+
+// toolTargetForOwner 校验沙箱归属并解析指定类型的已就绪工具。
+func (s *Service) toolTargetForOwner(ctx context.Context, tenantID, accountID, sandboxID int64, toolCode string, kind int16) (Sandbox, SandboxTool, error) {
 	var sb Sandbox
 	var tools []SandboxTool
 	if err := s.store.TenantTx(ctx, tenantID, func(ctx context.Context, tx TxStore) error {
@@ -174,7 +159,7 @@ func (s *Service) commandToolTargetForOwner(ctx context.Context, tenantID, accou
 		return Sandbox{}, SandboxTool{}, err
 	}
 	for _, tool := range tools {
-		if tool.Kind == SandboxToolKindCommand && tool.Status == SandboxToolStatusReady && strings.EqualFold(tool.ToolCode, strings.TrimSpace(toolCode)) {
+		if tool.Kind == kind && tool.Status == SandboxToolStatusReady && strings.EqualFold(tool.ToolCode, strings.TrimSpace(toolCode)) {
 			return sb, tool, nil
 		}
 	}

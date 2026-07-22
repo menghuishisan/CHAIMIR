@@ -143,30 +143,6 @@ func LoopbackHTTPTransport(base *http.Transport) *http.Transport {
 	return base
 }
 
-// PublicResolvedURL 把已校验的外部 URL 解析到公网地址,返回拨号 URL 与原始主机名。
-// TLS 客户端应继续使用原始主机名做 ServerName,避免解析到 IP 后破坏证书校验。
-func PublicResolvedURL(ctx context.Context, raw, defaultPort string) (resolvedURL string, serverName string, err error) {
-	parsed, err := url.Parse(strings.TrimSpace(raw))
-	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
-		return "", "", fmt.Errorf("外部端点 URL 格式非法")
-	}
-	parsed.Scheme = strings.ToLower(parsed.Scheme)
-	host := parsed.Hostname()
-	port := parsed.Port()
-	if port == "" {
-		port = strings.TrimSpace(defaultPort)
-	}
-	if port == "" {
-		return "", "", fmt.Errorf("外部端点缺少端口")
-	}
-	dialAddress, err := publicDialAddress(ctx, host, port)
-	if err != nil {
-		return "", "", err
-	}
-	parsed.Host = dialAddress
-	return parsed.String(), host, nil
-}
-
 // PrivateResolvedURL 把允许私网的受控 URL 解析为拨号地址,用于学校自有 LDAPS 目录服务。
 func PrivateResolvedURL(ctx context.Context, raw, defaultPort string) (resolvedURL string, serverName string, err error) {
 	parsed, err := url.Parse(strings.TrimSpace(raw))

@@ -97,23 +97,6 @@ func (s *Storage) EnsureBuckets(ctx context.Context) error {
 	return nil
 }
 
-// AllowUpload 根据租户文件数和总字节数配额判断一次上传是否允许进入后续链路。
-func (q TenantQuota) AllowUpload(fileCount, totalBytes int64) error {
-	if fileCount <= 0 {
-		return fmt.Errorf("上传文件数必须大于 0")
-	}
-	if totalBytes <= 0 {
-		return fmt.Errorf("上传字节数必须大于 0")
-	}
-	if q.MaxFiles > 0 && q.UsedFiles+fileCount > q.MaxFiles {
-		return fmt.Errorf("租户文件数量超出配额")
-	}
-	if q.MaxBytes > 0 && q.UsedBytes+totalBytes > q.MaxBytes {
-		return fmt.Errorf("租户文件总字节数超出配额")
-	}
-	return nil
-}
-
 // ObjectKey 按统一约定生成对象 key:{tenant_id}/{module}/{resourceType}/{parts...}。
 func ObjectKey(tenantID int64, module, resourceType string, parts ...string) (string, error) {
 	if tenantID < 0 {

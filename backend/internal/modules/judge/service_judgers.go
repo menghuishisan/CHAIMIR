@@ -160,7 +160,7 @@ func (s *Service) snapshotExpectationForJudger(typ int16, expectation map[string
 	switch typ {
 	case JudgerTypeFlag:
 		hash := stringValue(out["flag_hash"])
-		if !isSHA256Hex(hash) {
+		if !pkgcrypto.ValidSHA256Hex(hash) {
 			return nil, apperr.ErrJudgerConfigInvalid
 		}
 		inputKey := stringValue(out["flag_input_key"])

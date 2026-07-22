@@ -8,6 +8,7 @@ import (
 	"chaimir/internal/platform/secretmap"
 	"chaimir/internal/platform/timex"
 	"chaimir/pkg/apperr"
+	"chaimir/pkg/privacy"
 )
 
 // ToTenantDTO 把租户领域快照转换为 HTTP 响应 DTO。
@@ -44,7 +45,7 @@ func ToAccountDTO(a Account, phonePlain string) AccountDTO {
 		dto.CreatedAt = a.CreatedAt.Format("2006-01-02T15:04:05Z07:00")
 	}
 	if phonePlain != "" {
-		dto.PhoneMasked = MaskPhone(phonePlain)
+		dto.PhoneMasked = privacy.MaskPhone(phonePlain)
 	}
 	return dto
 }
@@ -131,7 +132,7 @@ func ToContractAccount(a Account, phonePlain string) contracts.AccountInfo {
 		AccountID:    a.ID,
 		TenantID:     a.TenantID,
 		Name:         a.Name,
-		PhoneMasked:  MaskPhone(phonePlain),
+		PhoneMasked:  privacy.MaskPhone(phonePlain),
 		No:           a.No,
 		BaseIdentity: a.BaseIdentity,
 		Roles:        roles,

@@ -4,7 +4,6 @@ package main
 import (
 	"context"
 	"encoding/base64"
-	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
@@ -367,16 +366,7 @@ func nullInt16(value int16) any {
 	return value
 }
 
-// jsonb 把结构化 seed 数据编码为 JSONB 入参。
-func jsonb(value any) ([]byte, error) {
-	raw, err := json.Marshal(value)
-	if err != nil {
-		return nil, err
-	}
-	return raw, nil
-}
-
-// execJSON 执行带 JSONB 参数的 SQL,集中包装编码错误。
+// execJSON 执行带 JSONB 参数的 SQL,结构化参数由 pgx 在执行边界统一编码。
 func execJSON(ctx context.Context, tx pgx.Tx, sqlText string, args ...any) error {
 	_, err := tx.Exec(ctx, sqlText, args...)
 	return err

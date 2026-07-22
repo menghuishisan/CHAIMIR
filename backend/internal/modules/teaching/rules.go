@@ -10,6 +10,7 @@ import (
 
 	"chaimir/internal/platform/ids"
 	"chaimir/internal/platform/jsonx"
+	"chaimir/internal/platform/storage"
 	"chaimir/pkg/apperr"
 )
 
@@ -51,10 +52,27 @@ func validateLessonRequest(req LessonRequest) (LessonRequest, error) {
 		return LessonRequest{}, apperr.ErrTeachingLessonInvalid
 	}
 	if req.ContentRef == nil {
-		req.ContentRef = map[string]any{}
+		return LessonRequest{}, apperr.ErrTeachingLessonInvalid
 	}
 	if req.ContentType == LessonContentMarkdown {
 		req.ContentRef = sanitizeStringMap(req.ContentRef)
+	}
+	if !validLessonContentRef(req.ContentType, req.ContentRef) {
+		return LessonRequest{}, apperr.ErrTeachingLessonInvalid
+	}
+	return req, nil
+}
+
+// validateLessonContentRequest 校验只更新内容绑定的请求，不要求重复提交课时标题和排序。
+func validateLessonContentRequest(req LessonRequest) (LessonRequest, error) {
+	if !validLessonContentType(req.ContentType) || req.ContentRef == nil {
+		return LessonRequest{}, apperr.ErrTeachingLessonInvalid
+	}
+	if req.ContentType == LessonContentMarkdown {
+		req.ContentRef = sanitizeStringMap(req.ContentRef)
+	}
+	if !validLessonContentRef(req.ContentType, req.ContentRef) {
+		return LessonRequest{}, apperr.ErrTeachingLessonInvalid
 	}
 	return req, nil
 }
@@ -320,6 +338,53 @@ func validDifficulty(value int16) bool {
 // validLessonContentType 校验课时内容形态。
 func validLessonContentType(value int16) bool {
 	return value >= LessonContentVideo && value <= LessonContentSimulation
+}
+
+// validLessonContentRef 按课时类型校验唯一内容引用结构，拒绝未知字段和旧对象形态。
+func validLessonContentRef(contentType int16, ref map[string]any) bool {
+	keys := func(allowed ...string) bool {
+		if len(ref) != len(allowed) {
+			return false
+		}
+		for key := range ref {
+			found := false
+			for _, candidate := range allowed {
+				if key == candidate {
+					found = true
+					break
+				}
+			}
+			if !found {
+				return false
+			}
+		}
+		return true
+	}
+	nonEmpty := func(key string) bool {
+		value, ok := ref[key].(string)
+		return ok && strings.TrimSpace(value) != ""
+	}
+	switch contentType {
+	case LessonContentVideo:
+		objectRef, _ := ref["object_ref"].(string)
+		_, refErr := storage.ParseObjectRef(strings.TrimSpace(objectRef))
+		duration, durationOK := jsonx.Int32FromNumberOK(ref["duration_sec"])
+		return keys("object_ref", "file_name", "duration_sec") && refErr == nil && nonEmpty("file_name") && durationOK && duration >= 0
+	case LessonContentMarkdown:
+		return keys("markdown") && nonEmpty("markdown")
+	case LessonContentAttachment:
+		objectRef, _ := ref["object_ref"].(string)
+		_, refErr := storage.ParseObjectRef(strings.TrimSpace(objectRef))
+		return keys("object_ref", "file_name") && refErr == nil && nonEmpty("file_name")
+	case LessonContentExperiment:
+		experimentID, ok := ref["experiment_id"].(string)
+		_, validID := ids.Parse(strings.TrimSpace(experimentID))
+		return keys("experiment_id") && ok && validID
+	case LessonContentSimulation:
+		return keys("package_code", "version") && nonEmpty("package_code") && nonEmpty("version")
+	default:
+		return false
+	}
 }
 
 // validLatePolicy 校验迟交策略。

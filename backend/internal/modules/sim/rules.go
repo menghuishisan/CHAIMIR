@@ -2,7 +2,6 @@
 package sim
 
 import (
-	"encoding/hex"
 	"fmt"
 	"regexp"
 	"strconv"
@@ -12,6 +11,7 @@ import (
 	"chaimir/internal/platform/auth"
 	"chaimir/internal/platform/jsonx"
 	"chaimir/pkg/apperr"
+	"chaimir/pkg/crypto"
 	"chaimir/pkg/privacy"
 )
 
@@ -209,7 +209,7 @@ func validateApprovalReport(report ValidationReport, pkg Package) error {
 	if report.MetadataValidation.Status != validationPassed || report.StaticScan.Status != validationPassed || report.DeterminismCheck.Status != validationPassed || report.WorkerPreview.Status != validationPassed {
 		return apperr.ErrSimPackageValidationFailed
 	}
-	if !isSHA256Hex(report.BundleHash) || report.BundleHash != pkg.BundleHash {
+	if !crypto.ValidSHA256Hex(report.BundleHash) || report.BundleHash != pkg.BundleHash {
 		return apperr.ErrSimPackageValidationFailed
 	}
 	return nil
@@ -426,14 +426,4 @@ func jsonObject(raw []byte) bool {
 func jsonObjectEmpty(raw []byte) bool {
 	var value map[string]any
 	return len(raw) > 0 && jsonx.DecodeStrict(raw, &value) == nil && len(value) == 0
-}
-
-// isSHA256Hex 校验内容哈希格式。
-func isSHA256Hex(value string) bool {
-	value = strings.TrimSpace(value)
-	if len(value) != 64 {
-		return false
-	}
-	_, err := hex.DecodeString(value)
-	return err == nil
 }

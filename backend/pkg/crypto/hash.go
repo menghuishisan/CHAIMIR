@@ -63,6 +63,16 @@ func SHA256Hex(data []byte) string {
 	return hex.EncodeToString(sum[:])
 }
 
+// ValidSHA256Hex 判断字符串是否为规范的 64 位十六进制 SHA-256 摘要。
+func ValidSHA256Hex(value string) bool {
+	value = strings.TrimSpace(value)
+	if len(value) != sha256.Size*2 {
+		return false
+	}
+	_, err := hex.DecodeString(value)
+	return err == nil
+}
+
 // HMACSHA256Hex 计算十六进制 HMAC-SHA256。
 func HMACSHA256Hex(key []byte, message string) (string, error) {
 	if len(key) == 0 {

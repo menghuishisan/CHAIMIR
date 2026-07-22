@@ -3,8 +3,10 @@ package content
 
 import (
 	"regexp"
+	"slices"
 	"strings"
 
+	"chaimir/internal/platform/jsonx"
 	"chaimir/internal/platform/storage"
 	"chaimir/pkg/apperr"
 )
@@ -27,6 +29,14 @@ func validateCreateRequest(req CreateItemRequest) (CreateItemRequest, error) {
 	if !validCode(req.Code) || !validVersion(req.Version) || !validType(req.Type) || req.Title == "" || !validDifficulty(req.Difficulty) || !validDraftVisibility(req.Visibility) || req.Body == nil {
 		return CreateItemRequest{}, apperr.ErrContentInvalid
 	}
+	body, err := jsonx.CloneObjectStrict(req.Body)
+	if err != nil {
+		return CreateItemRequest{}, apperr.ErrContentBodyInvalid.WithCause(err)
+	}
+	req.Body = body
+	if err := validateContentBody(req.Type, req.Body); err != nil {
+		return CreateItemRequest{}, err
+	}
 	if err := validateContentBodyRefs(req.Body); err != nil {
 		return CreateItemRequest{}, err
 	}
@@ -42,6 +52,11 @@ func validateUpdateRequest(req UpdateItemRequest) (UpdateItemRequest, error) {
 	if req.Title == "" || !validDifficulty(req.Difficulty) || !validDraftVisibility(req.Visibility) || req.Body == nil {
 		return UpdateItemRequest{}, apperr.ErrContentInvalid
 	}
+	body, err := jsonx.CloneObjectStrict(req.Body)
+	if err != nil {
+		return UpdateItemRequest{}, apperr.ErrContentBodyInvalid.WithCause(err)
+	}
+	req.Body = body
 	if err := validateContentBodyRefs(req.Body); err != nil {
 		return UpdateItemRequest{}, err
 	}
@@ -145,6 +160,115 @@ func validDifficulty(value int16) bool {
 // validDraftVisibility 校验草稿可见性,跨租户共享只能在发布后通过 share 状态流转进入。
 func validDraftVisibility(value int16) bool {
 	return value == VisibilityPrivate || value == VisibilityTenant
+}
+
+// validateContentBody 按内容类型校验当前唯一结构，旧字段和未知顶层字段一律拒绝。
+func validateContentBody(contentType int16, body map[string]any) error {
+	var valid bool
+	switch contentType {
+	case TypeExperimentTemplate:
+		valid = validateExperimentTemplateBody(body)
+	case TypeContestProblem:
+		valid = validateContestProblemBody(body)
+	case TypeTheoryQuestion:
+		valid = validateTheoryQuestionBody(body)
+	}
+	if !valid {
+		return apperr.ErrContentBodyInvalid
+	}
+	return nil
+}
+
+// validateExperimentTemplateBody 校验实验模板专有字段。
+func validateExperimentTemplateBody(body map[string]any) bool {
+	if !jsonx.HasOnlyKeys(body, "runtime_code", "tools", "init_code_ref", "sim_package_ref", "judge_config", "description", "init_script") {
+		return false
+	}
+	return nonEmptyString(body["runtime_code"]) && nonEmptyString(body["description"]) && stringValue(body["init_code_ref"]) && stringValue(body["sim_package_ref"]) && stringValue(body["init_script"]) && stringArray(body["tools"]) && validateJudgeConfig(jsonx.ObjectFromAny(body["judge_config"]))
+}
+
+// validateContestProblemBody 校验竞赛题专有字段。
+func validateContestProblemBody(body map[string]any) bool {
+	if !jsonx.HasOnlyKeys(body, "statement", "judge_config", "init_contracts", "ad_config") || !nonEmptyString(body["statement"]) || !stringArray(body["init_contracts"]) || !validateJudgeConfig(jsonx.ObjectFromAny(body["judge_config"])) {
+		return false
+	}
+	if raw, exists := body["ad_config"]; exists && raw != nil {
+		config := jsonx.ObjectFromAny(raw)
+		return jsonx.HasOnlyKeys(config, "runtime_code", "runtime_image_version", "tool_codes") && nonEmptyString(config["runtime_code"]) && nonEmptyString(config["runtime_image_version"]) && stringArray(config["tool_codes"])
+	}
+	return true
+}
+
+// validateTheoryQuestionBody 校验理论题专有字段和题型答案结构。
+func validateTheoryQuestionBody(body map[string]any) bool {
+	if !jsonx.HasOnlyKeys(body, "statement", "q_type", "options", "answer", "explanation") || !nonEmptyString(body["statement"]) || !stringValue(body["explanation"]) {
+		return false
+	}
+	qType, ok := body["q_type"].(string)
+	if !ok || !slices.Contains([]string{"single_choice", "multiple_choice", "true_false", "fill_blank", "short_answer"}, qType) {
+		return false
+	}
+	options, ok := body["options"].([]any)
+	if !ok {
+		return false
+	}
+	if (qType == "single_choice" || qType == "multiple_choice") && (len(options) < 2 || !stringArray(options)) {
+		return false
+	}
+	if qType != "single_choice" && qType != "multiple_choice" && len(options) != 0 {
+		return false
+	}
+	switch qType {
+	case "multiple_choice":
+		return stringArray(body["answer"])
+	case "true_false":
+		_, ok := body["answer"].(bool)
+		return ok
+	default:
+		return nonEmptyString(body["answer"])
+	}
+}
+
+// validateJudgeConfig 校验所有内容类型共用的判题配置外壳和受控 expectation 字段。
+func validateJudgeConfig(config map[string]any) bool {
+	maxScore, maxScoreOK := jsonx.Int32FromNumberOK(config["max_score"])
+	if !jsonx.HasOnlyKeys(config, "judger_code", "suite_ref", "max_score", "expectation") || !nonEmptyString(config["judger_code"]) || !optionalString(config, "suite_ref") || !maxScoreOK || maxScore <= 0 {
+		return false
+	}
+	expectation, ok := config["expectation"].(map[string]any)
+	return ok && expectation != nil
+}
+
+// stringValue 判断值是否为字符串，允许当前契约中的空可选文本。
+func stringValue(value any) bool {
+	_, ok := value.(string)
+	return ok
+}
+
+// nonEmptyString 判断值是否为非空字符串。
+func nonEmptyString(value any) bool {
+	text, ok := value.(string)
+	return ok && strings.TrimSpace(text) != ""
+}
+
+// optionalString 校验可省略字符串字段。
+func optionalString(value map[string]any, key string) bool {
+	raw, exists := value[key]
+	return !exists || raw == nil || stringValue(raw)
+}
+
+// stringArray 校验已归一化 JSON 字符串数组。
+func stringArray(value any) bool {
+	items, ok := value.([]any)
+	if !ok {
+		return false
+	}
+	for _, item := range items {
+		if !nonEmptyString(item) {
+			return false
+		}
+	}
+	return true
 }
 
 // validateContentBodyRefs 拒绝正文内联大文件、data URL 和外部直链,附件必须走统一文件服务对象引用。

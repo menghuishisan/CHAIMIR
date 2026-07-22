@@ -533,3 +533,21 @@ func (s *Service) drainExperimentScoreOutboxBestEffort(ctx context.Context) {
 		logging.ErrorContext(ctx, "experiment score outbox drain failed", err.Error())
 	}
 }
+
+// HandleSandboxRecycled 消费 M2 回收事件并将仍在进行的实例标记为环境已释放。
+func (s *Service) HandleSandboxRecycled(ctx context.Context, event contracts.SandboxRecycledEvent) error {
+	if event.TenantID <= 0 || !validExperimentSourceRef(event.SourceRef) {
+		return apperr.ErrExperimentSourceRefInvalid
+	}
+	return s.store.TenantTx(ctx, event.TenantID, func(ctx context.Context, tx TxStore) error {
+		inst, err := tx.GetInstanceBySourceRef(ctx, event.TenantID, event.SourceRef)
+		if err != nil {
+			return err
+		}
+		if inst.Status == InstanceStatusRunning || inst.Status == InstanceStatusPaused || inst.Status == InstanceStatusCreating {
+			_, err = tx.SetInstanceStatus(ctx, event.TenantID, inst.ID, InstanceStatusReleased)
+			return err
+		}
+		return nil
+	})
+}

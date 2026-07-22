@@ -10,6 +10,7 @@ import (
 	"chaimir/internal/platform/jsonx"
 	"chaimir/internal/platform/workload"
 	"chaimir/pkg/apperr"
+	pkgcrypto "chaimir/pkg/crypto"
 )
 
 // JudgerResourceSpec 描述判题器固定执行环境、自检样例和命令策略。
@@ -85,7 +86,7 @@ func validateSubmitRequest(req contracts.JudgeSubmitRequest) error {
 		!auth.ValidSourceRef(req.SourceRef) {
 		return apperr.ErrJudgeSubmitInvalid
 	}
-	if strings.TrimSpace(req.CodeHash) != "" && !isSHA256Hex(req.CodeHash) {
+	if strings.TrimSpace(req.CodeHash) != "" && !pkgcrypto.ValidSHA256Hex(req.CodeHash) {
 		return apperr.ErrJudgeSubmitInvalid
 	}
 	mode, err := normalizedSandboxMode(req.SandboxMode)
