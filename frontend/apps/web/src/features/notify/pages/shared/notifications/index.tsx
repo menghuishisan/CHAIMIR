@@ -6,6 +6,7 @@ import { Button, Callout } from '@chaimir/ui'
 import { Bell, Check, CheckCheck, Megaphone, RefreshCw, Settings, Trash2 } from 'lucide-react'
 import { useLocation } from 'react-router-dom'
 import { api } from '../../../../../app/api'
+import { invalidateAppResource } from '../../../../../app/resourceInvalidation'
 import { EmptyState, ErrorState, LoadingState } from '../../../../../components/ResourceState'
 import { useAsyncResource, useTicketedWebSocket } from '../../../../../hooks'
 import styles from '../shared.module.css'
@@ -138,6 +139,7 @@ const TenantNotificationsPage: React.FC = () => {
     try {
       await api.notify.markAllAsRead()
       setActionMessage('全部通知已标记为已读。')
+      invalidateAppResource('notification-unread')
       notifications.reload()
     } catch (error) {
       setActionError(error as ApiError)
@@ -154,6 +156,7 @@ const TenantNotificationsPage: React.FC = () => {
     try {
       await action()
       setActionMessage(success)
+      invalidateAppResource('notification-unread')
       reload()
     } catch (actionFailure) {
       setActionError({ message: userFacingErrorMessage(actionFailure, '操作未完成，请稍后重试。') })

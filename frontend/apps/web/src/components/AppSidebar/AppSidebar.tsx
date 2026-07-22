@@ -13,17 +13,17 @@ interface AppSidebarProps {
 }
 
 // AppSidebar 根据当前角色路径切换菜单，并负责桌面折叠与移动抽屉关闭。
-const AppSidebar: React.FC<AppSidebarProps> = ({
+const AppSidebar = React.forwardRef<HTMLElement, AppSidebarProps>(({
   isCollapsed,
   isMobileDrawerOpen,
   onCloseMobileDrawer,
   onToggleCollapse
-}) => {
+}, ref) => {
   const location = useLocation()
   const navigation = roleNavigationForPath(location.pathname)
 
   return (
-    <aside aria-label="功能导航" className={`
+    <aside ref={ref} aria-label="功能导航" className={`
       ${styles.sidebar}
       ${isCollapsed ? styles.collapsed : ''}
       ${isMobileDrawerOpen ? styles.mobileOpen : ''}
@@ -66,6 +66,8 @@ const AppSidebar: React.FC<AppSidebarProps> = ({
       </div>
     </aside>
   )
-}
+})
+
+AppSidebar.displayName = 'AppSidebar'
 
 export default AppSidebar

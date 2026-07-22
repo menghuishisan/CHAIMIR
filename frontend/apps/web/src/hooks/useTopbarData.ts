@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import { api } from '../app/api'
+import { subscribeAppResource } from '../app/resourceInvalidation'
 import { accountRoleLabel } from '../utils/labels'
 
 export interface TopbarDataOptions {
@@ -105,8 +106,12 @@ export function useTopbarData(options: TopbarDataOptions): TopbarData {
     }
 
     void loadTopbarData()
+    const unsubscribeProfile = subscribeAppResource('profile', () => void loadTopbarData())
+    const unsubscribeUnread = subscribeAppResource('notification-unread', () => void loadTopbarData())
     return () => {
       active = false
+      unsubscribeProfile()
+      unsubscribeUnread()
     }
   }, [emptyProfile, options.loadUnread])
 

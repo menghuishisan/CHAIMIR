@@ -63,7 +63,7 @@ const SystemAlertsPage: React.FC = () => {
       <div className={styles.header}>
         <div>
           <h1 className={styles.title}><BellRing className={styles.icon} />系统级告警</h1>
-          <p className={styles.subtitle}>监控本校资源和平台运行状态，按后端告警事件处理。</p>
+          <p className={styles.subtitle}>监控本校资源和平台运行状态，及时处理待办告警。</p>
         </div>
         <Button variant="outline" icon={<RefreshCw size={16} />} onClick={resource.reload}>刷新</Button>
       </div>

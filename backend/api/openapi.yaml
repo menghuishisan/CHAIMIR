@@ -1,4 +1,5 @@
-﻿openapi: 3.0.3
+﻿# openapi 汇总 Chaimir 后端公开 HTTP 契约及各领域路径定义。
+openapi: 3.0.3
 info:
   title: Chaimir 后端 API 契约
   version: 0.1.0
@@ -155,6 +156,8 @@ paths:
     $ref: './paths/transfer.yaml#/api/v1/transfer/tasks/{id}'
   /api/v1/transfer/tasks/{id}/download-grant:
     $ref: './paths/transfer.yaml#/api/v1/transfer/tasks/{id}/download-grant'
+  /api/v1/storage/download:
+    $ref: './paths/storage.yaml#/api/v1/storage/download'
   /api/v1/sandbox/runtimes:
     $ref: './paths/sandbox.yaml#/api/v1/sandbox/runtimes'
   /api/v1/sandbox/runtimes/{id}:
@@ -627,22 +630,22 @@ components:
       name: id
       in: path
       required: true
-      schema: { type: integer, format: int64 }
+      schema: { $ref: "#/components/schemas/SnowflakeID" }
     CIDPath:
       name: cid
       in: path
       required: true
-      schema: { type: integer, format: int64 }
+      schema: { $ref: "#/components/schemas/SnowflakeID" }
     LIDPath:
       name: lid
       in: path
       required: true
-      schema: { type: integer, format: int64 }
+      schema: { $ref: "#/components/schemas/SnowflakeID" }
     SIDPath:
       name: sid
       in: path
       required: true
-      schema: { type: integer, format: int64 }
+      schema: { $ref: "#/components/schemas/SnowflakeID" }
     CPPath:
       name: cp
       in: path
@@ -657,7 +660,7 @@ components:
       name: problem_id
       in: path
       required: true
-      schema: { type: integer, format: int64 }
+      schema: { $ref: "#/components/schemas/SnowflakeID" }
     ItemPath:
       name: item
       in: path
@@ -787,6 +790,11 @@ components:
           schema:
             type: string
   schemas:
+    SnowflakeID:
+      type: string
+      pattern: '^[1-9][0-9]*$'
+      description: 公开 HTTP/WS 契约中的雪花 ID，使用十进制字符串避免浏览器数值精度损失。
+      example: "910000000000000001"
     ObjectPayload:
       type: object
       additionalProperties: true

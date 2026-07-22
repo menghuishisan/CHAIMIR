@@ -81,7 +81,7 @@ const StudentContestReplayPage: React.FC = () => {
             <Input id="match-id" value={matchId} onChange={(event) => setMatchId(event.target.value)} fullWidth />
           </div>
           <Button icon={<Search size={16} />} onClick={() => loadReplay()}>读取回放</Button>
-          {replayRef ? <p className={styles.muted}>回放引用：{replayRef}</p> : <p className={styles.muted}>选择对局后会显示后端返回的回放引用。</p>}
+          {replayRef ? <p className={styles.muted}>回放记录已准备：{replayRef}</p> : <p className={styles.muted}>从对局列表中选择一场比赛读取回放。</p>}
         </aside>
       </div>
     </div>

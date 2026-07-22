@@ -9,7 +9,7 @@ import { api } from '../../../../../app/api'
 import { ErrorState, LoadingState } from '../../../../../components/ResourceState'
 import { useAsyncResource } from '../../../../../hooks'
 import styles from '../../list.module.css'
-import { formatDateTime } from '../../../../../utils/index'
+import { formatDateTime, saveBlob } from '../../../../../utils/index'
 
 const PAGE_SIZE = 20
 
@@ -33,7 +33,9 @@ const AuditPage: React.FC = () => {
     setExporting(true)
     try {
       const task = await api.admin.exportAudit({ page: 1, size: PAGE_SIZE })
-      setExportMessage(`导出任务已创建：${task.subject}`)
+      const artifact = await api.transfer.downloadArtifact(task.task_id)
+      saveBlob(artifact.blob, artifact.fileName)
+      setExportMessage('审计记录已导出。')
     } catch (error) {
       setExportError(error as ApiError)
     } finally {

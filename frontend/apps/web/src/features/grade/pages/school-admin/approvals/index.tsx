@@ -46,9 +46,10 @@ const ApprovalsPage: React.FC = () => {
       title: '操作',
       render: (row) => (
         <div className={styles.actions}>
-          <Button variant="outline" size="sm" icon={<CheckCircle size={14} />} onClick={() => reviewAction(() => api.grade.approveReview(row.id, {}), '成绩审核已通过。')}>通过</Button>
-          <Button variant="outline" size="sm" icon={<XCircle size={14} />} onClick={() => reviewAction(() => api.grade.rejectReview(row.id, { comment: '请教师修正后重新提交。' }), '成绩审核已驳回。')}>驳回</Button>
-          {row.is_locked && <Button variant="ghost" size="sm" icon={<LockOpen size={14} />} onClick={() => reviewAction(() => api.grade.unlockReview(row.id, { semester_id: row.semester_id, comment: '学校管理员解锁后重新核验。' }), '成绩审核已解锁。')}>解锁</Button>}
+          {row.status === GradeReviewStatus.PENDING && <Button variant="outline" size="sm" icon={<CheckCircle size={14} />} disabled={!row.semester_id} onClick={() => reviewAction(() => api.grade.approveReview(row.id, { semester_id: row.semester_id }), '成绩审核已通过。')}>通过</Button>}
+          {row.status === GradeReviewStatus.PENDING && <Button variant="outline" size="sm" icon={<XCircle size={14} />} onClick={() => reviewAction(() => api.grade.rejectReview(row.id, { semester_id: row.semester_id, comment: '请教师修正后重新提交。' }), '成绩审核已驳回。')}>驳回</Button>}
+          {row.status === GradeReviewStatus.APPROVED && row.is_locked && <Button variant="ghost" size="sm" icon={<LockOpen size={14} />} onClick={() => reviewAction(() => api.grade.unlockReview(row.id, { semester_id: row.semester_id, comment: '学校管理员解锁后重新核验。' }), '成绩审核已解锁。')}>解锁</Button>}
+          {row.status === GradeReviewStatus.REJECTED && <span className={styles.muted}>无需操作</span>}
         </div>
       ),
     },

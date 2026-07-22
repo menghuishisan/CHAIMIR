@@ -114,11 +114,13 @@ export function SimulationWorkbench({
       seed,
       commandTimeoutMs: workerCommandTimeoutMs,
       onReady: (nextDescriptor, nextSnapshot) => {
+        setRuntimeMessage(undefined);
         setDescriptor(nextDescriptor);
         setSnapshot(nextSnapshot);
         setStepDuration(nextSnapshot.state.explanation.defaultDurationMs);
       },
       onSnapshot: (nextSnapshot, event) => {
+        setRuntimeMessage(undefined);
         setSnapshot(nextSnapshot);
         if (nextSnapshot.state.selectedElementId) {
           setSelectedElementId(nextSnapshot.state.selectedElementId);
@@ -240,6 +242,7 @@ export function SimulationWorkbench({
    */
   function reset(): void {
     triggerHaptic();
+    setRuntimeMessage(undefined);
     void clientRef.current?.reset().catch(handleRuntimeError);
     setPlaying(false);
     setSelectedElementId(undefined);
@@ -327,6 +330,7 @@ export function SimulationWorkbench({
               </p>
             )}
           </header>
+          {runtimeMessage && <p className="sim-runtime-message" role="alert">{runtimeMessage}</p>}
           <div className="sim-pattern-grid sim-pattern-grid--primary">
             {arrangedPatterns.primary ? (
               <PatternRenderer
@@ -423,7 +427,6 @@ export function SimulationWorkbench({
                 </article>
               </InspectorSection>
             )}
-            {runtimeMessage && <p className="sim-runtime-message" role="alert">{runtimeMessage}</p>}
             {Object.keys(snapshot.state.metrics).length > 0 && (
               <InspectorSection title="状态指标" summary={`${Object.keys(snapshot.state.metrics).length} 项`}>
                 <MetricPanel metrics={snapshot.state.metrics} />

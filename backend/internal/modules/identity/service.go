@@ -8,6 +8,7 @@ import (
 
 	"chaimir/internal/platform/auth"
 	"chaimir/internal/platform/config"
+	"chaimir/internal/platform/eventbus"
 	"chaimir/internal/platform/redis"
 	"chaimir/internal/platform/timex"
 	"chaimir/internal/platform/upload"
@@ -30,6 +31,7 @@ type Service struct {
 	authCfg     config.AuthConfig
 	sms         SMSSender
 	auditWriter *AuditWriter
+	bus         eventbus.Bus
 }
 
 // NewService 构造 identity 服务,不接收数据库连接,由装配层传入 Store。
@@ -64,6 +66,7 @@ func NewService(deps ServiceDeps) (*Service, error) {
 		deploy:    deps.DeployConfig,
 		authCfg:   deps.AuthConfig,
 		sms:       deps.SMSSender,
+		bus:       deps.EventBus,
 	}
 	if s.sms == nil {
 		return nil, fmt.Errorf("identity service 缺少短信发送器")
@@ -85,6 +88,7 @@ type ServiceDeps struct {
 	Scanner        upload.Scanner
 	DeployConfig   config.DeployConfig
 	SMSSender      SMSSender
+	EventBus       eventbus.Bus
 }
 
 // AuditWriter 返回写入全平台唯一 audit_log 的审计实现。

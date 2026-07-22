@@ -1,9 +1,10 @@
 // ===== Platform Transfer 模块 =====
 
 import type { TransferChannel, TransferStatus } from '../constants/transfer'
+import type { SnowflakeID } from './common'
 
 export interface TransferTask {
-  task_id: string
+  task_id: SnowflakeID
   channel: TransferChannel
   subject: string
   status: TransferStatus

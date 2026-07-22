@@ -66,7 +66,7 @@ const TeacherCourseAssignmentEditPage: React.FC = () => {
     try {
       const payload = {
         title,
-        chapter_id: Number(chapterId),
+        chapter_id: chapterId,
         due_at: parseDateTimeLocalInput(dueAt),
         max_attempts: Number(maxAttempts),
         late_policy: Number(latePolicy) as LatePolicy,

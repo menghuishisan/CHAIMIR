@@ -40,10 +40,10 @@ const TeacherGradingPage: React.FC = () => {
   }, [comment, resource, score, submissionId])
 
   /** selectSubmission 读取完整提交内容并载入批改表单。 */
-  const selectSubmission = async (id: number) => {
+  const selectSubmission = async (id: string) => {
     setError(null)
     try {
-      const detail = await api.teaching.getSubmission(String(id))
+      const detail = await api.teaching.getSubmission(id)
       setSelectedSubmission(detail)
       setSubmissionId(String(detail.id))
       setScore(String(detail.final_score ?? detail.auto_score ?? 0))

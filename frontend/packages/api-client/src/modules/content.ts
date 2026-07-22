@@ -2,7 +2,7 @@
 
 import { ApiClient } from '../client'
 import type { ContentAuthorType, ContentDifficulty, ContentStatus, ContentType, ContentVisibility } from '../constants/content'
-import type { PaginatedResponse } from '../types/common'
+import type { PaginatedResponse, SnowflakeID } from '../types/common'
 import type {
   CloneItemRequest,
   ContentAttachmentDownloadGrant,
@@ -32,7 +32,7 @@ export class ContentApi {
   // getItems 查询内容列表。
   async getItems(params?: {
     type?: ContentType
-    category?: number
+    category?: SnowflakeID
     difficulty?: ContentDifficulty
     tag?: string
     kp?: string

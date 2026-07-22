@@ -193,3 +193,16 @@ type TenantApplication struct {
 	CreatedAt    pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
 }
+
+type TenantProvisionOutbox struct {
+	ID            int64              `json:"id"`
+	TenantID      int64              `json:"tenant_id"`
+	DeployMode    int16              `json:"deploy_mode"`
+	TraceID       string             `json:"trace_id"`
+	ProvisionedAt pgtype.Timestamptz `json:"provisioned_at"`
+	Status        int16              `json:"status"`
+	RetryCount    int32              `json:"retry_count"`
+	LastError     pgtype.Text        `json:"last_error"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
+}

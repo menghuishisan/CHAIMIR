@@ -8,6 +8,7 @@ import (
 
 	"chaimir/internal/contracts"
 	"chaimir/internal/platform/auth"
+	"chaimir/internal/platform/ids"
 	"chaimir/internal/platform/timex"
 	"chaimir/pkg/apperr"
 )
@@ -19,7 +20,7 @@ func (s *Service) CreateSession(ctx context.Context, req contracts.SimCreateSess
 	if initParams == nil {
 		initParams = map[string]any{}
 	}
-	create := CreateSessionRequest{PackageCode: req.PackageCode, Version: req.Version, Seed: req.Seed, InitParams: initParams, OwnerAccountID: req.OwnerAccountID, SourceRef: req.SourceRef}
+	create := CreateSessionRequest{PackageCode: req.PackageCode, Version: req.Version, Seed: req.Seed, InitParams: initParams, OwnerAccountID: ids.ID(req.OwnerAccountID), SourceRef: req.SourceRef}
 	if err := validateCreateSession(create, req.TenantID); err != nil {
 		return contracts.SimSessionInfo{}, err
 	}
@@ -59,11 +60,11 @@ func (s *Service) CreateSession(ctx context.Context, req contracts.SimCreateSess
 
 // CreateSessionFromHTTP 转换内部 HTTP 请求为跨模块契约调用。
 func (s *Service) CreateSessionFromHTTP(ctx context.Context, tenantID int64, req CreateSessionRequest) (map[string]any, error) {
-	info, err := s.CreateSession(ctx, contracts.SimCreateSessionRequest{TenantID: tenantID, PackageCode: req.PackageCode, Version: req.Version, Seed: req.Seed, InitParams: req.InitParams, OwnerAccountID: req.OwnerAccountID, SourceRef: req.SourceRef})
+	info, err := s.CreateSession(ctx, contracts.SimCreateSessionRequest{TenantID: tenantID, PackageCode: req.PackageCode, Version: req.Version, Seed: req.Seed, InitParams: req.InitParams, OwnerAccountID: req.OwnerAccountID.Int64(), SourceRef: req.SourceRef})
 	if err != nil {
 		return nil, err
 	}
-	return map[string]any{"session_id": info.SessionID, "compute": info.Compute, "bundle_ref": info.BundleRef}, nil
+	return map[string]any{"session_id": ids.Format(info.SessionID), "compute": info.Compute, "bundle_ref": info.BundleRef}, nil
 }
 
 // ReportAction 保存用户操作序列,同 seq 同内容幂等,同 seq 不同内容拒绝。

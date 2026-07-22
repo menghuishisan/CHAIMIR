@@ -25,7 +25,7 @@ export function Tooltip({ children, content, side = 'top', className }: TooltipP
   const id = React.useId()
   const child = React.Children.only(children)
 
-  const { refs, floatingStyles } = useFloating({
+  const { refs, floatingStyles, placement, isPositioned } = useFloating({
     open: isOpen,
     onOpenChange: setIsOpen,
     placement: side,
@@ -64,12 +64,17 @@ export function Tooltip({ children, content, side = 'top', className }: TooltipP
         createPortal(
           <span
             ref={refs.setFloating}
-            id={id}
-            role="tooltip"
-            className={clsx('chaimir-tooltip__content', className)}
-            style={floatingStyles}
+            className="chaimir-tooltip__positioner"
+            data-placement={placement}
+            style={{
+              ...floatingStyles,
+              visibility: isPositioned ? 'visible' : 'hidden',
+              pointerEvents: 'none',
+            }}
           >
-            {content}
+            <span id={id} role="tooltip" className={clsx('chaimir-tooltip__content', className)}>
+              {content}
+            </span>
           </span>,
           document.body
         )}

@@ -1,7 +1,7 @@
 // 学生实验详情页：从后端实验定义展示指导、阶段和检查点，并创建实验实例。
 
 import React, { useState } from 'react'
-import type { Experiment } from '@chaimir/api-client'
+import type { StudentExperiment } from '@chaimir/api-client'
 import { Button } from '@chaimir/ui'
 import { FileText, Play } from 'lucide-react'
 import { useNavigate, useParams } from 'react-router-dom'
@@ -18,14 +18,14 @@ const ExperimentDetailPage: React.FC = () => {
   const [message, setMessage] = useState('')
   const resource = useAsyncResource(
     async () => {
-      const response = await api.experiment.getExperiments({ page: 1, size: 100 })
+      const response = await api.experiment.getPublishedExperiments({ page: 1, size: 100 })
       return response.list.find((item) => item.id === id) ?? null
     },
     [id],
     (value) => value === null
   )
 
-  const startExperiment = async (experiment: Experiment) => {
+  const startExperiment = async (experiment: StudentExperiment) => {
     setStarting(true)
     setMessage('')
     try {
@@ -113,7 +113,6 @@ const ExperimentDetailPage: React.FC = () => {
               <li className={styles.listItem} key={checkpoint.id}>
                 <strong>{checkpoint.id}</strong>
                 <div className={styles.itemMeta}>
-                  <span>{checkpoint.judger}</span>
                   <span>{checkpoint.score} 分</span>
                 </div>
               </li>

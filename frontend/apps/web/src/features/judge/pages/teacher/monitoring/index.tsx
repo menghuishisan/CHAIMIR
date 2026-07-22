@@ -10,6 +10,7 @@ import { ErrorState, LoadingState } from '../../../../../components/ResourceStat
 import { useAsyncResource, useTicketedWebSocket } from '../../../../../hooks'
 import styles from '../../judge.module.css'
 import { userFacingErrorMessage } from '../../../../../utils/userFacingError'
+import { judgeTaskStatusLabel, sourceReferenceLabel } from '../../../../../utils'
 
 const TeacherMonitoringPage: React.FC = () => {
   const [sourceRef, setSourceRef] = useState('')
@@ -75,8 +76,8 @@ const TeacherMonitoringPage: React.FC = () => {
   const columns = useMemo<TableColumn<JudgeTask>[]>(() => [
     { key: 'task', title: '任务编号', dataIndex: 'task_id', priority: 'primary' },
     { key: 'submitter', title: '提交人', dataIndex: 'submitter_id' },
-    { key: 'source', title: '来源引用', dataIndex: 'source_ref' },
-    { key: 'status', title: '状态', render: (row) => <span className={styles.status}>{row.status}</span> },
+    { key: 'source', title: '来源', render: (row) => sourceReferenceLabel(row.source_ref) },
+    { key: 'status', title: '状态', render: (row) => <span className={styles.status}>{judgeTaskStatusLabel(row.status)}</span> },
     { key: 'score', title: '得分', render: (row) => row.result ? `${row.result.score}/${row.result.max_score}` : '待出分' },
     {
       key: 'actions',
@@ -92,7 +93,7 @@ const TeacherMonitoringPage: React.FC = () => {
       <div className={styles.header}>
         <div>
           <h1 className={styles.title}><Activity size={28} />实时判题与任务监控</h1>
-          <p className={styles.subtitle}>查看判题任务状态，并按后端快照发起重判。</p>
+          <p className={styles.subtitle}>查看判题进度，并按原提交内容发起重判。</p>
         </div>
         <Button variant="outline" icon={<RefreshCw size={16} />} onClick={resource.reload}>刷新</Button>
       </div>
@@ -111,13 +112,13 @@ const TeacherMonitoringPage: React.FC = () => {
       <Modal open={selectedTask !== null} title="判题任务详情" size="lg" onClose={() => setSelectedTask(null)}>
         {selectedTask && (
           <div className={styles.panel}>
-            <span className={styles.status}>{progress.status === 'open' ? '实时进度已连接' : selectedTask.status}</span>
+            <span className={styles.status}>{progress.status === 'open' ? '实时进度已连接' : judgeTaskStatusLabel(selectedTask.status)}</span>
             <p>任务 {selectedTask.task_id}</p>
             <p>{selectedTask.result ? `当前得分 ${selectedTask.result.score}/${selectedTask.result.max_score}` : '正在等待判题结果。'}</p>
             <div className={styles.formGrid}>
               <label className={styles.field}>得分<Input fullWidth type="number" value={score} onChange={(event) => setScore(event.target.value)} /></label>
               <label className={styles.field}>满分<Input fullWidth type="number" value={maxScore} onChange={(event) => setMaxScore(event.target.value)} /></label>
-              <Checkbox checked={passed} onChange={(event) => setPassed(event.target.checked)}>判定通过</Checkbox>
+              <Checkbox checked={passed} label="判定通过" onChange={(event) => setPassed(event.target.checked)} />
             </div>
             <label className={styles.field}>评分说明<Textarea fullWidth value={comment} onChange={(event) => setComment(event.target.value)} /></label>
             <Button icon={<Save size={14} />} onClick={() => void submitManualScore()}>保存人工评分</Button>

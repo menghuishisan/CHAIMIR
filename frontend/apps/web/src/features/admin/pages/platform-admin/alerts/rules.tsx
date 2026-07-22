@@ -110,7 +110,7 @@ const AlertRulesPage: React.FC = () => {
             <ListChecks className={styles.icon} size={28} />
             告警规则
           </h1>
-          <p className={styles.subtitle}>维护平台级告警触发条件，规则条件按后端 JSON 契约保存。</p>
+          <p className={styles.subtitle}>维护平台级告警触发条件和通知级别。</p>
         </div>
         <Button variant="outline" icon={<RefreshCw size={16} />} onClick={resource.reload}>
           刷新

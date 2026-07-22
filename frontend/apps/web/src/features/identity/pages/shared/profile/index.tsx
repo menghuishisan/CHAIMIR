@@ -1,11 +1,12 @@
 // ProfilePage 展示当前登录账号资料、会话列表，并提供密码修改入口。
 
-import React, { useMemo } from 'react'
+import React, { useEffect, useMemo } from 'react'
 import type { Session } from '@chaimir/api-client'
 import type { TableColumn } from '@chaimir/ui'
 import { DescriptionList, Table } from '@chaimir/ui'
 import { User } from 'lucide-react'
 import { api } from '../../../../../app/api'
+import { subscribeAppResource } from '../../../../../app/resourceInvalidation'
 import { ErrorState, LoadingState } from '../../../../../components/ResourceState'
 import { useAsyncResource } from '../../../../../hooks'
 import styles from '../../identity-admin.module.css'
@@ -16,6 +17,7 @@ import { SecuritySettings } from './SecuritySettings'
 const ProfilePage: React.FC = () => {
   const me = useAsyncResource(() => api.identity.getMe(), [])
   const sessions = useAsyncResource(() => api.identity.getSessions(), [])
+  useEffect(() => subscribeAppResource('profile', me.reload), [me.reload])
   const columns = useMemo<TableColumn<Session>[]>(() => [
     { key: 'device', title: '设备', render: (row) => row.device_info || '未知设备', priority: 'primary' },
     { key: 'ip', title: 'IP 地址', render: (row) => row.ip || '暂无', priority: 'secondary' },

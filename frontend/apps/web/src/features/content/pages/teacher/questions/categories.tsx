@@ -14,7 +14,7 @@ import { userFacingErrorMessage } from '../../../../../utils/userFacingError'
 const TeacherQuestionCategoriesPage: React.FC = () => {
   const resource = useAsyncResource(() => api.content.listCategories(), [])
   const [name, setName] = useState('')
-  const [parentId, setParentId] = useState('0')
+  const [parentId, setParentId] = useState('')
   const [sort, setSort] = useState('0')
   const [submitting, setSubmitting] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
@@ -22,7 +22,7 @@ const TeacherQuestionCategoriesPage: React.FC = () => {
   const [editingId, setEditingId] = useState('')
 
   const parentOptions = useMemo(() => [
-    { value: '0', label: '顶级分类' },
+    { value: '', label: '顶级分类' },
     ...(resource.data || []).map((category) => ({ value: String(category.id), label: category.name })),
   ], [resource.data])
 
@@ -35,7 +35,7 @@ const TeacherQuestionCategoriesPage: React.FC = () => {
     setMessage(null)
     try {
       const payload = {
-        parent_id: Number(parentId),
+        parent_id: parentId || undefined,
         name: name.trim(),
         sort: Number(sort),
       }
@@ -69,7 +69,7 @@ const TeacherQuestionCategoriesPage: React.FC = () => {
     { key: 'name', title: '分类名称', dataIndex: 'name', priority: 'primary' },
     { key: 'parent', title: '上级分类', render: (row) => row.parent_id ? String(row.parent_id) : '顶级' },
     { key: 'sort', title: '排序', dataIndex: 'sort' },
-    { key: 'actions', title: '操作', render: (row) => <div className={styles.actions}><Button variant="outline" size="sm" icon={<Pencil size={14} />} onClick={() => { setEditingId(String(row.id)); setName(row.name); setParentId(String(row.parent_id || 0)); setSort(String(row.sort)) }}>编辑</Button><Button variant="ghost" size="sm" icon={<Trash2 size={14} />} onClick={() => void deleteCategory(row)}>删除</Button></div> },
+    { key: 'actions', title: '操作', render: (row) => <div className={styles.actions}><Button variant="outline" size="sm" icon={<Pencil size={14} />} onClick={() => { setEditingId(String(row.id)); setName(row.name); setParentId(row.parent_id || ''); setSort(String(row.sort)) }}>编辑</Button><Button variant="ghost" size="sm" icon={<Trash2 size={14} />} onClick={() => void deleteCategory(row)}>删除</Button></div> },
   ], [deleteCategory])
 
   const rows = resource.data || []
@@ -82,7 +82,7 @@ const TeacherQuestionCategoriesPage: React.FC = () => {
             <FolderTree size={28} />
             分类层级维护
           </h1>
-          <p className={styles.subtitle}>分类由后端统一维护，题目创建和筛选复用同一分类 ID。</p>
+          <p className={styles.subtitle}>统一维护题目分类，创建题目和筛选时使用同一套分类。</p>
         </div>
         <Button variant="outline" icon={<RefreshCw size={16} />} onClick={resource.reload}>刷新</Button>
       </div>

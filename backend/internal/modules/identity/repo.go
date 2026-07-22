@@ -32,6 +32,10 @@ type TxStore interface {
 	ListAllTenants(ctx context.Context) ([]Tenant, error)
 	ListTenants(ctx context.Context, page, size int) ([]Tenant, int64, error)
 	CreateTenant(ctx context.Context, input CreateTenantInput) (Tenant, error)
+	CreateTenantProvisionOutbox(ctx context.Context, item TenantProvisionOutbox) (TenantProvisionOutbox, error)
+	ClaimTenantProvisionOutbox(ctx context.Context, limit int32, staleBefore time.Time) ([]TenantProvisionOutbox, error)
+	MarkTenantProvisionOutboxPublished(ctx context.Context, id int64) (TenantProvisionOutbox, error)
+	MarkTenantProvisionOutboxFailed(ctx context.Context, id int64, lastError string) (TenantProvisionOutbox, error)
 	UpdateTenantConfig(ctx context.Context, input UpdateTenantConfigInput) (Tenant, error)
 	UpdateTenantStatus(ctx context.Context, input UpdateTenantStatusInput) (Tenant, error)
 	CreateTenantApplication(ctx context.Context, input CreateApplicationRequest, id int64) (TenantApplication, error)
@@ -107,7 +111,8 @@ type TxStore interface {
 	ArchiveClassesByEnrollmentYear(ctx context.Context, tenantID int64, enrollmentYear int16) error
 	ArchiveStudentAccountsByEnrollmentYear(ctx context.Context, tenantID int64, enrollmentYear int16) error
 	RevokeStudentSessionsByEnrollmentYear(ctx context.Context, tenantID int64, enrollmentYear int16) error
-	PromoteClasses(ctx context.Context, tenantID int64) error
+	PromoteClasses(ctx context.Context, tenantID int64, classIDs []int64, targetYear int16) (int64, error)
+	PromoteClassStudentProfiles(ctx context.Context, tenantID int64, classIDs []int64, targetYear int16) error
 }
 
 // store 使用 platform/db 统一事务入口实现 identity 自有表访问。

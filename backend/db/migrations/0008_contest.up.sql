@@ -146,14 +146,15 @@ CREATE TABLE IF NOT EXISTS ladder_rank (
     FOREIGN KEY (tenant_id, team_id) REFERENCES team(tenant_id, id)
 );
 
-CREATE TABLE IF NOT EXISTS contest_result_snapshot (
+CREATE TABLE IF NOT EXISTS contest_ladder_snapshot (
     id BIGINT PRIMARY KEY,
     tenant_id BIGINT NOT NULL REFERENCES tenant(id),
     contest_id BIGINT NOT NULL,
-    final_ranking JSONB NOT NULL DEFAULT '[]'::jsonb,
+    snapshot_status SMALLINT NOT NULL CHECK (snapshot_status IN (4, 6)),
+    ranking JSONB NOT NULL DEFAULT '[]'::jsonb,
     generated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     UNIQUE (tenant_id, id),
-    UNIQUE (tenant_id, contest_id),
+    UNIQUE (tenant_id, contest_id, snapshot_status),
     FOREIGN KEY (tenant_id, contest_id) REFERENCES contest(tenant_id, id)
 );
 
@@ -228,7 +229,7 @@ ALTER TABLE solve_submission ENABLE ROW LEVEL SECURITY;
 ALTER TABLE battle_entry ENABLE ROW LEVEL SECURITY;
 ALTER TABLE battle_match ENABLE ROW LEVEL SECURITY;
 ALTER TABLE ladder_rank ENABLE ROW LEVEL SECURITY;
-ALTER TABLE contest_result_snapshot ENABLE ROW LEVEL SECURITY;
+ALTER TABLE contest_ladder_snapshot ENABLE ROW LEVEL SECURITY;
 ALTER TABLE cheat_record ENABLE ROW LEVEL SECURITY;
 ALTER TABLE vuln_source ENABLE ROW LEVEL SECURITY;
 ALTER TABLE vuln_problem ENABLE ROW LEVEL SECURITY;
@@ -241,7 +242,7 @@ CREATE POLICY solve_submission_tenant_rls ON solve_submission USING (tenant_id =
 CREATE POLICY battle_entry_tenant_rls ON battle_entry USING (tenant_id = current_setting('app.tenant_id')::BIGINT) WITH CHECK (tenant_id = current_setting('app.tenant_id')::BIGINT);
 CREATE POLICY battle_match_tenant_rls ON battle_match USING (tenant_id = current_setting('app.tenant_id')::BIGINT) WITH CHECK (tenant_id = current_setting('app.tenant_id')::BIGINT);
 CREATE POLICY ladder_rank_tenant_rls ON ladder_rank USING (tenant_id = current_setting('app.tenant_id')::BIGINT) WITH CHECK (tenant_id = current_setting('app.tenant_id')::BIGINT);
-CREATE POLICY contest_result_snapshot_tenant_rls ON contest_result_snapshot USING (tenant_id = current_setting('app.tenant_id')::BIGINT) WITH CHECK (tenant_id = current_setting('app.tenant_id')::BIGINT);
+CREATE POLICY contest_ladder_snapshot_tenant_rls ON contest_ladder_snapshot USING (tenant_id = current_setting('app.tenant_id')::BIGINT) WITH CHECK (tenant_id = current_setting('app.tenant_id')::BIGINT);
 CREATE POLICY cheat_record_tenant_rls ON cheat_record USING (tenant_id = current_setting('app.tenant_id')::BIGINT) WITH CHECK (tenant_id = current_setting('app.tenant_id')::BIGINT);
 CREATE POLICY vuln_source_tenant_rls ON vuln_source USING (tenant_id IS NULL OR tenant_id = current_setting('app.tenant_id')::BIGINT) WITH CHECK (tenant_id = current_setting('app.tenant_id')::BIGINT);
 CREATE POLICY vuln_problem_tenant_rls ON vuln_problem USING (tenant_id = current_setting('app.tenant_id')::BIGINT) WITH CHECK (tenant_id = current_setting('app.tenant_id')::BIGINT);

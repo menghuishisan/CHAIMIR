@@ -2,7 +2,7 @@
 
 import { ApiClient } from '../client'
 import type { ContestStatus, VulnProblemStatus } from '../constants/contest'
-import type { PaginatedResponse } from '../types/common'
+import type { PaginatedResponse, SnowflakeID } from '../types/common'
 import type {
   BattleEntryRequest,
   BattleEntry,
@@ -46,6 +46,11 @@ export class ContestApi {
    */
   async getContests(params?: { status?: ContestStatus; page?: number; size?: number }): Promise<PaginatedResponse<Contest>> {
     return this.client.get('/contest/contests', params)
+  }
+
+  /** getStudentContests 查询学生可发现的非草稿竞赛。 */
+  async getStudentContests(params?: { page?: number; size?: number }): Promise<PaginatedResponse<Contest>> {
+    return this.client.get('/contest/student/contests', params)
   }
 
   /**
@@ -221,7 +226,7 @@ export class ContestApi {
    */
   async listCheatSuspects(
     contestId: string,
-    params: { problem_id: number; code_hash?: string; exclude_source_ref?: string; threshold?: number }
+    params: { problem_id: SnowflakeID; code_hash?: string; exclude_source_ref?: string; threshold?: number }
   ): Promise<CheatSuspect[]> {
     return this.client.get(`/contest/contests/${contestId}/cheat-suspects`, params)
   }
@@ -247,11 +252,21 @@ export class ContestApi {
     return this.client.get('/contest/vuln-sources')
   }
 
+  /** listPlatformVulnSources 查询平台维护的全局漏洞源。 */
+  async listPlatformVulnSources(): Promise<VulnSource[]> {
+    return this.client.get('/contest/platform/vuln-sources')
+  }
+
   /**
    * 创建或更新漏洞源配置。
    */
   async upsertVulnSource(data: VulnSourceRequest): Promise<VulnSource> {
     return this.client.post('/contest/vuln-sources', data)
+  }
+
+  /** upsertPlatformVulnSource 创建或更新平台全局漏洞源。 */
+  async upsertPlatformVulnSource(data: VulnSourceRequest): Promise<VulnSource> {
+    return this.client.post('/contest/platform/vuln-sources', data)
   }
 
   /**
@@ -264,7 +279,7 @@ export class ContestApi {
   /**
    * 查询漏洞题草稿。
    */
-  async listVulnProblems(params?: { source_id?: number; status?: VulnProblemStatus; page?: number; size?: number }): Promise<PaginatedResponse<VulnProblem>> {
+  async listVulnProblems(params?: { source_id?: SnowflakeID; status?: VulnProblemStatus; page?: number; size?: number }): Promise<PaginatedResponse<VulnProblem>> {
     return this.client.get('/contest/vuln-problems', params)
   }
 

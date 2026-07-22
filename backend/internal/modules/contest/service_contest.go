@@ -9,6 +9,7 @@ import (
 
 	"chaimir/internal/contracts"
 	"chaimir/internal/platform/audit"
+	"chaimir/internal/platform/ids"
 	"chaimir/internal/platform/pagex"
 	"chaimir/internal/platform/timex"
 	"chaimir/pkg/apperr"
@@ -26,6 +27,29 @@ func (s *Service) ListContests(ctx context.Context, status int16, page, size int
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
 		var err error
 		items, total, err = tx.ListContests(ctx, id.TenantID, status, page, size)
+		return err
+	}); err != nil {
+		return nil, 0, 0, 0, err
+	}
+	out := make([]ContestDTO, 0, len(items))
+	for _, item := range items {
+		out = append(out, contestDTOFromModel(item))
+	}
+	return out, total, page, size, nil
+}
+
+// ListStudentContests 查询学生可发现的报名中、进行中和已结束竞赛。
+func (s *Service) ListStudentContests(ctx context.Context, page, size int) ([]ContestDTO, int64, int, int, error) {
+	id, err := currentIdentity(ctx)
+	if err != nil {
+		return nil, 0, 0, 0, err
+	}
+	page, size = pagex.Normalize(page, size)
+	var items []Contest
+	var total int64
+	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
+		var err error
+		items, total, err = tx.ListStudentContests(ctx, id.TenantID, page, size)
 		return err
 	}); err != nil {
 		return nil, 0, 0, 0, err
@@ -143,7 +167,7 @@ func (s *Service) ListProblems(ctx context.Context, contestID int64) ([]ProblemD
 	}
 	var items []ContestProblem
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
-		if _, err := tx.GetContest(ctx, id.TenantID, contestID); err != nil {
+		if _, err := s.loadContestForRead(ctx, tx, id.TenantID, id.AccountID, contestID); err != nil {
 			return err
 		}
 		var err error
@@ -186,10 +210,10 @@ func (s *Service) FreezeContest(ctx context.Context, contestID int64) (ContestDT
 }
 
 // ArchiveContest 生成最终榜单快照,归档竞赛并回收竞赛关联沙箱资源。
-func (s *Service) ArchiveContest(ctx context.Context, contestID int64) (ResultSnapshot, error) {
+func (s *Service) ArchiveContest(ctx context.Context, contestID int64) (ResultSnapshotDTO, error) {
 	id, err := currentIdentity(ctx)
 	if err != nil {
-		return ResultSnapshot{}, err
+		return ResultSnapshotDTO{}, err
 	}
 	var contest Contest
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
@@ -200,34 +224,30 @@ func (s *Service) ArchiveContest(ctx context.Context, contestID int64) (ResultSn
 		}
 		return validateContestTransition(contest.Status, ContestStatusArchived)
 	}); err != nil {
-		return ResultSnapshot{}, err
+		return ResultSnapshotDTO{}, err
 	}
 	if err := s.recycleContestSandboxes(ctx, id.TenantID, contest.ID, contest.CreatedAt, "contest_archive"); err != nil {
-		return ResultSnapshot{}, apperr.ErrContestSandboxUnavailable.WithCause(err)
+		return ResultSnapshotDTO{}, apperr.ErrContestSandboxUnavailable.WithCause(err)
 	}
-	var snapshot ResultSnapshot
+	var snapshot LadderSnapshot
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
 		ranks, _, err := tx.ListLadder(ctx, id.TenantID, contestID, 1, 1000)
 		if err != nil {
 			return err
 		}
-		final := make([]map[string]any, 0, len(ranks))
-		for _, rank := range ranks {
-			final = append(final, map[string]any{"team_id": rank.TeamID, "score": rank.Score, "solved_count": rank.SolvedCount, "rank": rank.Rank})
-		}
-		snapshot, err = tx.CreateResultSnapshot(ctx, ResultSnapshot{ID: s.ids.Generate(), TenantID: id.TenantID, ContestID: contestID, FinalRanking: final})
+		snapshot, err = s.saveLadderSnapshot(ctx, tx, id.TenantID, contestID, ContestStatusArchived, ranks)
 		if err != nil {
 			return err
 		}
 		_, err = tx.SetContestStatus(ctx, id.TenantID, contestID, ContestStatusArchived)
 		return err
 	}); err != nil {
-		return ResultSnapshot{}, err
+		return ResultSnapshotDTO{}, err
 	}
 	if err := s.writeAudit(ctx, id.TenantID, id.AccountID, contracts.RoleNumTeacher, "contest.archive", auditTargetContest, contestID, map[string]any{"snapshot_id": snapshot.ID}); err != nil {
-		return ResultSnapshot{}, err
+		return ResultSnapshotDTO{}, err
 	}
-	return snapshot, nil
+	return resultSnapshotDTOFromModel(snapshot), nil
 }
 
 // RunAutoArchiveOnce 执行一次竞赛自动收尾扫描,供统一 background runner 调用。
@@ -249,31 +269,27 @@ func (s *Service) RunAutoArchiveOnce(ctx context.Context) error {
 }
 
 // archiveContestSystem 执行后台归档,复用人工归档的快照与回收规则。
-func (s *Service) archiveContestSystem(ctx context.Context, item Contest) (ResultSnapshot, error) {
+func (s *Service) archiveContestSystem(ctx context.Context, item Contest) (LadderSnapshot, error) {
 	if err := s.recycleContestSandboxes(ctx, item.TenantID, item.ID, item.CreatedAt, "contest_auto_archive"); err != nil {
-		return ResultSnapshot{}, apperr.ErrContestSandboxUnavailable.WithCause(err)
+		return LadderSnapshot{}, apperr.ErrContestSandboxUnavailable.WithCause(err)
 	}
-	var snapshot ResultSnapshot
+	var snapshot LadderSnapshot
 	if err := s.store.TenantTx(ctx, item.TenantID, func(ctx context.Context, tx TxStore) error {
 		ranks, _, err := tx.ListLadder(ctx, item.TenantID, item.ID, 1, 1000)
 		if err != nil {
 			return err
 		}
-		final := make([]map[string]any, 0, len(ranks))
-		for _, rank := range ranks {
-			final = append(final, map[string]any{"team_id": rank.TeamID, "score": rank.Score, "solved_count": rank.SolvedCount, "rank": rank.Rank})
-		}
-		snapshot, err = tx.CreateResultSnapshot(ctx, ResultSnapshot{ID: s.ids.Generate(), TenantID: item.TenantID, ContestID: item.ID, FinalRanking: final})
+		snapshot, err = s.saveLadderSnapshot(ctx, tx, item.TenantID, item.ID, ContestStatusArchived, ranks)
 		if err != nil {
 			return err
 		}
 		_, err = tx.SetContestStatus(ctx, item.TenantID, item.ID, ContestStatusArchived)
 		return err
 	}); err != nil {
-		return ResultSnapshot{}, err
+		return LadderSnapshot{}, err
 	}
 	if err := s.writeAudit(ctx, item.TenantID, 0, audit.ActorRoleSystem, "contest.archive.auto", auditTargetContest, item.ID, map[string]any{"snapshot_id": snapshot.ID}); err != nil {
-		return ResultSnapshot{}, err
+		return LadderSnapshot{}, err
 	}
 	return snapshot, nil
 }
@@ -312,20 +328,20 @@ func contestArchiveSourceRefs(contestID int64, contestCreatedAt time.Time, battl
 }
 
 // GetSnapshot 读取归档最终榜单快照。
-func (s *Service) GetSnapshot(ctx context.Context, contestID int64) (ResultSnapshot, error) {
+func (s *Service) GetSnapshot(ctx context.Context, contestID int64) (ResultSnapshotDTO, error) {
 	id, err := currentIdentity(ctx)
 	if err != nil {
-		return ResultSnapshot{}, err
+		return ResultSnapshotDTO{}, err
 	}
-	var snapshot ResultSnapshot
+	var snapshot LadderSnapshot
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
 		var err error
-		snapshot, err = tx.GetResultSnapshot(ctx, id.TenantID, contestID)
+		snapshot, err = tx.GetLadderSnapshot(ctx, id.TenantID, contestID, ContestStatusArchived)
 		return err
 	}); err != nil {
-		return ResultSnapshot{}, err
+		return ResultSnapshotDTO{}, err
 	}
-	return snapshot, nil
+	return resultSnapshotDTOFromModel(snapshot), nil
 }
 
 // transitionContest 封装竞赛状态流转、内容引用登记和审计。
@@ -368,12 +384,40 @@ func (s *Service) transitionContest(ctx context.Context, contestID int64, next i
 	}
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
 		var err error
+		if next == ContestStatusFrozen {
+			ranks, _, err := tx.ListLadder(ctx, id.TenantID, contestID, 1, 1000)
+			if err != nil {
+				return err
+			}
+			if _, err := s.saveLadderSnapshot(ctx, tx, id.TenantID, contestID, ContestStatusFrozen, ranks); err != nil {
+				return err
+			}
+		}
 		item, err = tx.SetContestStatus(ctx, id.TenantID, contestID, next)
 		return err
 	}); err != nil {
 		return ContestDTO{}, err
 	}
 	return contestDTOFromModel(item), s.writeAudit(ctx, id.TenantID, id.AccountID, contracts.RoleNumTeacher, action, auditTargetContest, item.ID, nil)
+}
+
+// saveLadderSnapshot 把当前榜单固化为封榜或归档阶段的单一权威快照。
+func (s *Service) saveLadderSnapshot(ctx context.Context, tx TxStore, tenantID, contestID int64, snapshotStatus int16, ranks []LadderRank) (LadderSnapshot, error) {
+	if snapshotStatus != ContestStatusFrozen && snapshotStatus != ContestStatusArchived {
+		return LadderSnapshot{}, apperr.ErrContestInvalid
+	}
+	ranking := make([]map[string]any, 0, len(ranks))
+	for _, rank := range ranks {
+		ranking = append(ranking, map[string]any{
+			"team_id":       ids.Format(rank.TeamID),
+			"score":         rank.Score,
+			"solved_count":  rank.SolvedCount,
+			"last_solve_at": rank.LastSolveAt,
+			"rank":          rank.Rank,
+			"updated_at":    rank.UpdatedAt,
+		})
+	}
+	return tx.UpsertLadderSnapshot(ctx, LadderSnapshot{ID: s.ids.Generate(), TenantID: tenantID, ContestID: contestID, SnapshotStatus: snapshotStatus, Ranking: ranking})
 }
 
 // refreshProblemUsageRefs 在发布时登记 M5 内容引用,用于删除保护和复用统计。

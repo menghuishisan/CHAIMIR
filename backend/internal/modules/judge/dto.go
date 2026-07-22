@@ -1,7 +1,11 @@
 // judge dto 文件定义 M3 HTTP 请求和响应结构,不承载业务编排逻辑。
 package judge
 
-import "encoding/json"
+import (
+	"encoding/json"
+
+	"chaimir/internal/platform/ids"
+)
 
 // JudgerRequest 是平台管理员创建或更新判题器配置的请求。
 type JudgerRequest struct {
@@ -22,9 +26,9 @@ type SubmitTaskRequest struct {
 	ItemVersion      string         `json:"item_version"`
 	CodeStorageKey   string         `json:"code_storage_key"`
 	CodeHash         string         `json:"code_hash"`
-	SubmitterID      int64          `json:"submitter_id"`
-	SourceOwnerID    int64          `json:"source_owner_id"`
-	SourceCourseID   int64          `json:"source_course_id"`
+	SubmitterID      ids.ID         `json:"submitter_id"`
+	SourceOwnerID    ids.ID         `json:"source_owner_id"`
+	SourceCourseID   ids.ID         `json:"source_course_id"`
 	SourceScope      string         `json:"source_scope"`
 	SandboxMode      string         `json:"sandbox_mode"`
 	TargetSandboxRef string         `json:"target_sandbox_ref"`

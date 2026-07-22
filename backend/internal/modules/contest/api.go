@@ -31,10 +31,12 @@ func RegisterRoutes(r gin.IRouter, svc *Service, authn *auth.Manager, roles cont
 	teacher := g.Group("", authn.Middleware(), auth.RequireTenantAnyRole(roles, contracts.RoleTeacher, contracts.RoleSchoolAdmin))
 	student := g.Group("", authn.Middleware(), auth.RequireTenantAnyRole(roles, contracts.RoleStudent))
 	all := g.Group("", authn.Middleware(), auth.RequireTenantAnyRole(roles, contracts.RoleStudent, contracts.RoleTeacher, contracts.RoleSchoolAdmin))
+	platform := g.Group("/platform", authn.Middleware(), auth.RequirePlatformIdentity())
 	internal := g.Group("/internal", authn.ServiceMiddleware())
 	api.registerTeacherRoutes(teacher)
 	api.registerStudentRoutes(student)
 	api.registerSharedRoutes(all)
+	api.registerPlatformRoutes(platform)
 	api.registerInternalRoutes(internal)
 	return nil
 }
@@ -68,6 +70,7 @@ func (a contestAPI) registerTeacherRoutes(g gin.IRouter) {
 
 // registerStudentRoutes 注册学生参赛接口。
 func (a contestAPI) registerStudentRoutes(g gin.IRouter) {
+	g.GET("/student/contests", a.listStudentContests)
 	g.POST("/contests/:id/signup", a.signup)
 	g.POST("/teams/:id/join", a.joinTeamByTeamID)
 	g.POST("/teams/:id/lock", a.lockTeam)
@@ -79,6 +82,38 @@ func (a contestAPI) registerStudentRoutes(g gin.IRouter) {
 	g.GET("/contests/:id/battle/matches", a.listBattleMatches)
 	g.GET("/matches/:id/replay", a.getBattleReplay)
 	g.GET("/my/contest-records", a.myRecords)
+}
+
+// registerPlatformRoutes 注册平台级漏洞源治理接口，不暴露租户漏洞题写入能力。
+func (a contestAPI) registerPlatformRoutes(g gin.IRouter) {
+	g.GET("/vuln-sources", a.listPlatformVulnSources)
+	g.POST("/vuln-sources", a.upsertPlatformVulnSource)
+}
+
+// listStudentContests 返回学生可发现的非草稿竞赛。
+func (a contestAPI) listStudentContests(c *gin.Context) {
+	page, size, ok := httpx.Page(c)
+	if !ok {
+		return
+	}
+	out, total, p, s, err := a.svc.ListStudentContests(c.Request.Context(), page, size)
+	httpx.WritePage(c, out, total, p, s, err)
+}
+
+// listPlatformVulnSources 返回平台维护的全局漏洞源。
+func (a contestAPI) listPlatformVulnSources(c *gin.Context) {
+	out, err := a.svc.ListPlatformVulnSources(c.Request.Context())
+	httpx.Write(c, out, err)
+}
+
+// upsertPlatformVulnSource 创建或更新平台全局漏洞源。
+func (a contestAPI) upsertPlatformVulnSource(c *gin.Context) {
+	var req VulnSourceRequest
+	if !httpx.BindJSONWithError(c, &req, apperr.ErrContestVulnSourceInvalid) {
+		return
+	}
+	out, err := a.svc.UpsertPlatformVulnSource(c.Request.Context(), req)
+	httpx.Write(c, out, err)
 }
 
 // registerSharedRoutes 注册师生共享读取接口。

@@ -1,5 +1,7 @@
 // ===== M2 Sandbox 模块 =====
 
+import type { SnowflakeID } from './common'
+import type { WorkloadComponent, WorkloadNetworkRule, WorkloadRoute, WorkloadService } from './workload'
 import type {
   ImagePrepullStatus,
   RuntimeImageStatus,
@@ -13,9 +15,9 @@ import type {
 } from '../constants/sandbox'
 
 export interface SandboxInstance {
-  sandbox_id: number
-  tenant_id: number
-  owner_account_id: number
+  sandbox_id: SnowflakeID
+  tenant_id: SnowflakeID
+  owner_account_id: SnowflakeID
   runtime_code: string
   runtime_image_version: string
   source_ref: string
@@ -104,14 +106,44 @@ export interface SandboxRuntimeRequest {
   name: string
   eco: string
   adapter_level: number
-  adapter_spec: Record<string, unknown>
+  adapter_spec: SandboxAdapterSpec
   capability_impl: string
   plugin_ref: string
-  status: RuntimeStatus
+  status?: RuntimeStatus
 }
 
-export interface SandboxRuntime extends SandboxRuntimeRequest {
-  id: number
+export interface SandboxAdapterSpec {
+  workspace_dir: string
+  volume_domains?: Array<{
+    name: string
+    mount_path: string
+    student_access: 'none' | 'read_only' | 'read_write'
+    persistence: 'ephemeral' | 'minio_code'
+    snapshot_scope: 'never' | 'always' | 'snapshot_enabled'
+  }>
+  runtime_container: WorkloadComponent
+  infra_sidecars?: WorkloadComponent[]
+  services?: WorkloadService[]
+  routes?: WorkloadRoute[]
+  network_rules?: WorkloadNetworkRule[]
+  default_tool_codes?: string[]
+  selftest?: Record<string, unknown>
+  workspace_ops: {
+    read_file: string[]
+    write_file: string[]
+    list_files: string[]
+    pack_tar: string[]
+    unpack_tar: string[]
+    run_script: string[]
+    terminal: string[]
+    selftest: string[]
+  }
+  capability_commands?: Record<'deploy' | 'tx' | 'query' | 'reset', { command: string[]; timeout_seconds: number }>
+}
+
+export interface SandboxRuntime extends Omit<SandboxRuntimeRequest, 'status'> {
+  id: SnowflakeID
+  status: RuntimeStatus
   selftest_status: RuntimeSelftestStatus
   selftest_detail?: Record<string, unknown>
 }
@@ -125,8 +157,8 @@ export interface SandboxRuntimeImageRequest {
 }
 
 export interface SandboxRuntimeImage extends SandboxRuntimeImageRequest {
-  id: number
-  runtime_id: number
+  id: SnowflakeID
+  runtime_id: SnowflakeID
   status: RuntimeImageStatus
   prepulled: boolean
   prepull_status: ImagePrepullStatus
@@ -139,16 +171,30 @@ export interface SandboxToolRequest {
   name: string
   kind: SandboxToolKind
   eco_tags: string[]
-  resource_spec: Record<string, unknown>
+  resource_spec: SandboxToolResourceSpec
   status: ToolStatus
 }
 
+export interface SandboxToolResourceSpec {
+  builtin_endpoint?: string
+  components?: WorkloadComponent[]
+  services?: WorkloadService[]
+  routes?: WorkloadRoute[]
+  network_rules?: WorkloadNetworkRule[]
+  command_policy?: {
+    allowed_commands: string[]
+    default_timeout_seconds: number
+    max_timeout_seconds: number
+  }
+  prepull_command?: string[]
+}
+
 export interface SandboxToolDefinition extends SandboxToolRequest {
-  id: number
+  id: SnowflakeID
 }
 
 export interface SandboxQuota {
-  tenant_id: number
+  tenant_id: SnowflakeID
   active_sandbox_count?: number
   max_concurrent_sandbox: number
   max_cpu: number
@@ -160,7 +206,7 @@ export interface SandboxQuota {
 }
 
 export interface SandboxPrepullStatus {
-  image_id: number
+  image_id: SnowflakeID
   prepull_status: ImagePrepullStatus
   desired_nodes: number
   ready_nodes: number
@@ -170,7 +216,7 @@ export interface SandboxPrepullStatus {
 }
 
 export interface SandboxRuntimeSelftestStatus {
-  runtime_id: number
+  runtime_id: SnowflakeID
   selftest_status: RuntimeSelftestStatus
   runtime_status: RuntimeStatus
   detail: Record<string, unknown>

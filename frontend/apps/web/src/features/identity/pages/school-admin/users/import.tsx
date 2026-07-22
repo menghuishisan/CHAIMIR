@@ -8,7 +8,7 @@ import { Button, Callout, Select, Table } from '@chaimir/ui'
 import { Download, Upload } from 'lucide-react'
 import { api } from '../../../../../app/api'
 import styles from '../../identity-admin.module.css'
-import { accountImportTargetOptions } from '../../../../../utils/index'
+import { accountImportTargetOptions, saveBlob } from '../../../../../utils/index'
 import { userFacingErrorMessage } from '../../../../../utils/userFacingError'
 
 const UserImportPage: React.FC = () => {
@@ -20,6 +20,18 @@ const UserImportPage: React.FC = () => {
   const [activationCodes, setActivationCodes] = useState<string[]>([])
   const [submitting, setSubmitting] = useState<'preview' | 'commit' | 'template' | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [completed, setCompleted] = useState(false)
+
+  /** handleFileChange 废弃旧预览和完成态，确保提交对象与当前文件一致。 */
+  const handleFileChange = useCallback((nextFile: File | null) => {
+    setFile(nextFile)
+    setPreviewId('')
+    setRows([])
+    setSummary(null)
+    setActivationCodes([])
+    setCompleted(false)
+    setError(null)
+  }, [])
 
   /**
    * handleTemplate 通过后端模板接口下载导入模板。
@@ -29,12 +41,7 @@ const UserImportPage: React.FC = () => {
     setError(null)
     try {
       const blob = await api.identity.downloadAccountImportTemplate({ type: targetType, format: IMPORT_TEMPLATE_FORMAT.XLSX })
-      const url = URL.createObjectURL(blob)
-      const anchor = document.createElement('a')
-      anchor.href = url
-      anchor.download = `${targetType}-accounts-template.xlsx`
-      anchor.click()
-      URL.revokeObjectURL(url)
+      saveBlob(blob, `${targetType}-accounts-template.xlsx`)
     } catch (templateError) {
       setError(userFacingErrorMessage(templateError, '模板下载失败，请稍后重试。'))
     } finally {
@@ -55,6 +62,7 @@ const UserImportPage: React.FC = () => {
     setActivationCodes([])
     try {
       const preview = await api.identity.previewAccountImport(targetType, file)
+      setCompleted(false)
       setPreviewId(preview.preview_id)
       setSummary({ total: preview.total, valid: preview.valid, invalid: preview.invalid })
       setRows(preview.rows)
@@ -79,6 +87,8 @@ const UserImportPage: React.FC = () => {
       const result = await api.identity.commitAccountImport({ preview_id: previewId })
       setActivationCodes((result.activation_codes || []).map((item) => `${item.no} ${item.name} ${item.activation_code}`))
       setSummary({ total: result.batch.total, valid: result.batch.success, invalid: result.batch.failed })
+      setPreviewId('')
+      setCompleted(true)
     } catch (commitError) {
       setError(userFacingErrorMessage(commitError, '提交导入失败，请稍后重试。'))
     } finally {
@@ -99,7 +109,7 @@ const UserImportPage: React.FC = () => {
             <Upload size={28} />
             账号导入向导
           </h1>
-          <p className={styles.subtitle}>模板下载、导入预览和提交批次都通过后端接口完成。</p>
+          <p className={styles.subtitle}>下载标准模板，预览数据并提交可导入账号。</p>
         </div>
         <Button variant="outline" loading={submitting === 'template'} icon={<Download size={16} />} onClick={handleTemplate}>
           下载模板
@@ -108,8 +118,8 @@ const UserImportPage: React.FC = () => {
 
       {error && <div className={styles.error}>{error}</div>}
       {summary && (
-        <Callout variant={summary.invalid > 0 ? 'warning' : 'success'} title="预览结果">
-          共 {summary.total} 行，可导入 {summary.valid} 行，需修正 {summary.invalid} 行。
+        <Callout variant={completed ? 'success' : summary.invalid > 0 ? 'warning' : 'success'} title={completed ? '导入完成' : '预览结果'}>
+          {completed ? `已成功导入 ${summary.valid} 行，未导入 ${summary.invalid} 行。` : `共 ${summary.total} 行，可导入 ${summary.valid} 行，需修正 ${summary.invalid} 行。`}
         </Callout>
       )}
 
@@ -122,15 +132,15 @@ const UserImportPage: React.FC = () => {
           </label>
           <label className={styles.field}>
             导入文件
-            <input type="file" accept=".xlsx,.csv" onChange={(event) => setFile(event.target.files?.[0] || null)} />
+            <input type="file" accept=".xlsx,.csv" onChange={(event) => handleFileChange(event.target.files?.[0] || null)} />
           </label>
         </div>
-        <div className={styles.dropzone}>{file ? file.name : '请选择后端模板格式的 Excel 或 CSV 文件'}</div>
+        <div className={styles.dropzone}>{file ? file.name : '请选择按标准模板填写的 Excel 或 CSV 文件'}</div>
         <div className={styles.actions}>
           <Button loading={submitting === 'preview'} onClick={handlePreview}>
             生成预览
           </Button>
-          <Button loading={submitting === 'commit'} disabled={!previewId || Boolean(summary?.invalid)} onClick={handleCommit}>
+          <Button loading={submitting === 'commit'} disabled={!previewId || !summary?.valid || completed} onClick={handleCommit}>
             提交可导入数据
           </Button>
         </div>
@@ -143,7 +153,7 @@ const UserImportPage: React.FC = () => {
           rows={rows}
           rowKey={(row) => String(row.line)}
           emptyTitle="暂无预览"
-          emptyDescription="上传文件并生成预览后，会展示后端校验结果。"
+          emptyDescription="上传文件并生成预览后，会展示逐行校验结果。"
           ariaLabel="账号导入校验明细"
         />
       </section>

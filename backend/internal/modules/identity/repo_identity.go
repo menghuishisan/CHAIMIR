@@ -22,6 +22,49 @@ func (t *txStore) GetPlatformAdminByUsername(ctx context.Context, username strin
 	return platformAdminFromRow(row), nil
 }
 
+// CreateTenantProvisionOutbox 在租户创建事务内保存初始化事件。
+func (t *txStore) CreateTenantProvisionOutbox(ctx context.Context, item TenantProvisionOutbox) (TenantProvisionOutbox, error) {
+	row, err := t.q.CreateTenantProvisionOutbox(ctx, sqlcgen.CreateTenantProvisionOutboxParams{
+		ID: item.ID, TenantID: item.TenantID, DeployMode: item.DeployMode, TraceID: item.TraceID,
+		ProvisionedAt: timex.RequiredTimestamptz(item.ProvisionedAt),
+	})
+	if err != nil {
+		return TenantProvisionOutbox{}, err
+	}
+	return tenantProvisionOutboxFromRow(row), nil
+}
+
+// ClaimTenantProvisionOutbox 跨租户领取待发布或超时的初始化事件。
+func (t *txStore) ClaimTenantProvisionOutbox(ctx context.Context, limit int32, staleBefore time.Time) ([]TenantProvisionOutbox, error) {
+	rows, err := t.q.ClaimTenantProvisionOutbox(ctx, sqlcgen.ClaimTenantProvisionOutboxParams{StaleBefore: timex.RequiredTimestamptz(staleBefore), PageLimit: limit})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]TenantProvisionOutbox, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, tenantProvisionOutboxFromRow(row))
+	}
+	return out, nil
+}
+
+// MarkTenantProvisionOutboxPublished 标记初始化事件已经发布。
+func (t *txStore) MarkTenantProvisionOutboxPublished(ctx context.Context, id int64) (TenantProvisionOutbox, error) {
+	row, err := t.q.MarkTenantProvisionOutboxPublished(ctx, id)
+	if err != nil {
+		return TenantProvisionOutbox{}, err
+	}
+	return tenantProvisionOutboxFromRow(row), nil
+}
+
+// MarkTenantProvisionOutboxFailed 记录初始化事件发布失败原因供后续重试。
+func (t *txStore) MarkTenantProvisionOutboxFailed(ctx context.Context, id int64, lastError string) (TenantProvisionOutbox, error) {
+	row, err := t.q.MarkTenantProvisionOutboxFailed(ctx, sqlcgen.MarkTenantProvisionOutboxFailedParams{ID: id, LastError: pgtypex.Text(lastError)})
+	if err != nil {
+		return TenantProvisionOutbox{}, err
+	}
+	return tenantProvisionOutboxFromRow(row), nil
+}
+
 // GetPlatformAdminByID 按 ID 读取平台管理员账号。
 func (t *txStore) GetPlatformAdminByID(ctx context.Context, id int64) (PlatformAdmin, error) {
 	row, err := t.q.GetPlatformAdminByID(ctx, id)
@@ -433,7 +476,7 @@ func (t *txStore) UpdateAccountEditable(ctx context.Context, tenantID, accountID
 	if err := t.q.UpdateAccountBasic(ctx, sqlcgen.UpdateAccountBasicParams{ID: accountID, TenantID: tenantID, Name: req.Name}); err != nil {
 		return Account{}, err
 	}
-	if err := t.q.UpdateAccountProfileEditable(ctx, sqlcgen.UpdateAccountProfileEditableParams{AccountID: accountID, TenantID: tenantID, OrgID: req.OrgID, EnrollmentYear: pgtypex.Int2(req.EnrollmentYear), Title: pgtypex.Text(req.Title)}); err != nil {
+	if err := t.q.UpdateAccountProfileEditable(ctx, sqlcgen.UpdateAccountProfileEditableParams{AccountID: accountID, TenantID: tenantID, OrgID: req.OrgID.Int64(), EnrollmentYear: pgtypex.Int2(req.EnrollmentYear), Title: pgtypex.Text(req.Title)}); err != nil {
 		return Account{}, err
 	}
 	return t.GetAccount(ctx, accountID)

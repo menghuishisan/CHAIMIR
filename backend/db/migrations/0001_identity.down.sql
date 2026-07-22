@@ -1,3 +1,4 @@
+-- identity 回滚迁移按依赖逆序删除身份与租户模块数据结构。
 DROP TABLE IF EXISTS audit_log;
 DROP TABLE IF EXISTS import_batch;
 DROP TABLE IF EXISTS import_preview;
@@ -12,6 +13,7 @@ DROP TABLE IF EXISTS class;
 DROP TABLE IF EXISTS major;
 DROP TABLE IF EXISTS department;
 DROP TABLE IF EXISTS tenant_application;
+DROP TABLE IF EXISTS tenant_provision_outbox;
 DROP TABLE IF EXISTS tenant;
 DROP TABLE IF EXISTS platform_auth_session;
 DROP TABLE IF EXISTS platform_admin;

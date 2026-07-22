@@ -22,7 +22,7 @@ const TeacherGradesPage: React.FC = () => {
   const [submitting, setSubmitting] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const resource = useAsyncResource(() => api.grade.listReviews({ page: 1, size: 20 }), [])
+  const resource = useAsyncResource(() => api.grade.listOwnReviews({ page: 1, size: 20 }), [])
 
   /**
    * submitReview 把课程成绩提交到学校管理员审核流程。

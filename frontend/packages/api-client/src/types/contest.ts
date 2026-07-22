@@ -1,5 +1,6 @@
 // ===== M8 Contest 模块 =====
 
+import type { SnowflakeID } from './common'
 import type {
   BattleMatchStatus,
   BattleResult,
@@ -20,8 +21,8 @@ import type {
 import type { SandboxStatus } from '../constants/sandbox'
 
 export interface Contest {
-  id: string
-  organizer_id: string
+  id: SnowflakeID
+  organizer_id: SnowflakeID
   name: string
   mode: ContestMode
   match_mode?: MatchMode
@@ -51,8 +52,8 @@ export interface ContestRequest {
 }
 
 export interface ContestProblem {
-  id: string
-  contest_id: string
+  id: SnowflakeID
+  contest_id: SnowflakeID
   item_code: string
   item_version: string
   score: number
@@ -74,8 +75,8 @@ export interface ContestProblemRequest {
 }
 
 export interface ContestTeam {
-  id: string
-  contest_id: string
+  id: SnowflakeID
+  contest_id: SnowflakeID
   name: string
   invite_code?: string
   status: TeamStatus
@@ -84,10 +85,10 @@ export interface ContestTeam {
 }
 
 export interface TeamMember {
-  id: string
-  team_id: string
-  account_id: string
-  member_tenant_id: string
+  id: SnowflakeID
+  team_id: SnowflakeID
+  account_id: SnowflakeID
+  member_tenant_id: SnowflakeID
   is_leader: boolean
   joined_at: string
 }
@@ -101,11 +102,11 @@ export interface JoinTeamRequest {
 }
 
 export interface ContestSubmission {
-  id: string
-  contest_id: string
-  problem_id: string
-  team_id: string
-  submitter_id: string
+  id: SnowflakeID
+  contest_id: SnowflakeID
+  problem_id: SnowflakeID
+  team_id: SnowflakeID
+  submitter_id: SnowflakeID
   content_ref: Record<string, unknown>
   source_ref: string
   judge_task_ref?: string
@@ -131,23 +132,23 @@ export interface EnvRequest {
 }
 
 export interface EnvSummary {
-  sandbox_id: string
+  sandbox_id: SnowflakeID
   source_ref: string
   status: SandboxStatus
 }
 
 export interface BattleEntryRequest {
-  problem_id: number
+  problem_id: SnowflakeID
   role: BattleRole
   artifact_ref: string
   code_hash: string
 }
 
 export interface BattleEntry {
-  id: string
-  contest_id: string
-  problem_id: string
-  team_id: string
+  id: SnowflakeID
+  contest_id: SnowflakeID
+  problem_id: SnowflakeID
+  team_id: SnowflakeID
   role: BattleRole
   artifact_ref: string
   code_hash: string
@@ -157,11 +158,11 @@ export interface BattleEntry {
 }
 
 export interface BattleMatch {
-  id: string
-  contest_id: string
-  problem_id: string
-  entry_a_id: string
-  entry_b_id: string
+  id: SnowflakeID
+  contest_id: SnowflakeID
+  problem_id: SnowflakeID
+  entry_a_id: SnowflakeID
+  entry_b_id: SnowflakeID
   source_ref: string
   sandbox_ref?: string
   judge_task_ref?: string
@@ -174,12 +175,12 @@ export interface BattleMatch {
 }
 
 export interface BattleReplayRef {
-  match_id: string
+  match_id: SnowflakeID
   replay_ref: string
 }
 
 export interface LadderRank {
-  team_id: string
+  team_id: SnowflakeID
   score: number
   solved_count: number
   last_solve_at?: string
@@ -188,41 +189,41 @@ export interface LadderRank {
 }
 
 export interface ResultSnapshot {
-  id: string
-  tenant_id?: string
-  contest_id: string
+  id: SnowflakeID
+  tenant_id?: SnowflakeID
+  contest_id: SnowflakeID
   final_ranking: Record<string, unknown>[]
   generated_at: string
 }
 
 export interface CheatRecordRequest {
-  team_id: number
+  team_id: SnowflakeID
   type: CheatType
   evidence: Record<string, unknown>
   action: CheatAction
 }
 
 export interface CheatRecord {
-  id: string
-  contest_id: string
-  team_id: string
+  id: SnowflakeID
+  contest_id: SnowflakeID
+  team_id: SnowflakeID
   type: CheatType
   evidence: Record<string, unknown>
   action: CheatAction
-  operator_id?: string
+  operator_id?: SnowflakeID
   created_at: string
 }
 
 export interface CheatSuspect {
   source_ref: string
-  submitter_id: string
+  submitter_id: SnowflakeID
   score: number
   code_hash?: string
 }
 
 export interface ContestRecord {
-  contest_id: string
-  team_id: string
+  contest_id: SnowflakeID
+  team_id: SnowflakeID
   score: number
   rank: number
   contest_name: string
@@ -230,7 +231,7 @@ export interface ContestRecord {
 }
 
 export interface VulnSourceRequest {
-  id?: number
+  id?: SnowflakeID
   type: number
   name: string
   config: Record<string, unknown>
@@ -239,7 +240,7 @@ export interface VulnSourceRequest {
 }
 
 export interface VulnSource {
-  id: string
+  id: SnowflakeID
   type: number
   name: string
   config: Record<string, unknown>
@@ -249,7 +250,7 @@ export interface VulnSource {
 }
 
 export interface VulnProblemImportRequest {
-  source_id?: number
+  source_id?: SnowflakeID
   external_ref?: string
   title: string
   level: VulnLevel
@@ -266,8 +267,8 @@ export interface VulnPrevalidateRequest {
 }
 
 export interface VulnProblem {
-  id: string
-  source_id?: string
+  id: SnowflakeID
+  source_id?: SnowflakeID
   external_ref?: string
   title: string
   level: VulnLevel

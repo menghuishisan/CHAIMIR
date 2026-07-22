@@ -21,6 +21,18 @@ SELECT COUNT(*)::bigint
 FROM contest
 WHERE tenant_id = $1 AND deleted_at IS NULL AND ($2::smallint = 0 OR status = $2);
 
+-- name: ListStudentContests :many
+SELECT id, tenant_id, organizer_id, name, mode, match_mode, team_mode, signup_start, signup_end, start_at, end_at, freeze_minutes, rules, status, created_at, updated_at, deleted_at
+FROM contest
+WHERE tenant_id = $1 AND deleted_at IS NULL AND status BETWEEN 2 AND 6
+ORDER BY updated_at DESC, id DESC
+LIMIT $2 OFFSET $3;
+
+-- name: CountStudentContests :one
+SELECT COUNT(*)::bigint
+FROM contest
+WHERE tenant_id = $1 AND deleted_at IS NULL AND status BETWEEN 2 AND 6;
+
 -- name: UpdateContest :one
 UPDATE contest
 SET name = $3,
@@ -345,18 +357,18 @@ SET status = 4, finished_at = now()
 WHERE tenant_id = $1 AND id = $2
 RETURNING id, tenant_id, contest_id, problem_id, entry_a_id, entry_b_id, source_ref, sandbox_ref, judge_task_ref, result, score_delta, replay_ref, status, matched_at, finished_at;
 
--- name: CreateResultSnapshot :one
-INSERT INTO contest_result_snapshot (id, tenant_id, contest_id, final_ranking, generated_at)
-VALUES ($1, $2, $3, $4, now())
-ON CONFLICT (tenant_id, contest_id) DO UPDATE
-SET final_ranking = EXCLUDED.final_ranking,
+-- name: UpsertLadderSnapshot :one
+INSERT INTO contest_ladder_snapshot (id, tenant_id, contest_id, snapshot_status, ranking, generated_at)
+VALUES ($1, $2, $3, $4, $5, now())
+ON CONFLICT (tenant_id, contest_id, snapshot_status) DO UPDATE
+SET ranking = EXCLUDED.ranking,
     generated_at = now()
-RETURNING id, tenant_id, contest_id, final_ranking, generated_at;
+RETURNING id, tenant_id, contest_id, snapshot_status, ranking, generated_at;
 
--- name: GetResultSnapshot :one
-SELECT id, tenant_id, contest_id, final_ranking, generated_at
-FROM contest_result_snapshot
-WHERE tenant_id = $1 AND contest_id = $2;
+-- name: GetLadderSnapshot :one
+SELECT id, tenant_id, contest_id, snapshot_status, ranking, generated_at
+FROM contest_ladder_snapshot
+WHERE tenant_id = $1 AND contest_id = $2 AND snapshot_status = $3;
 
 -- name: ListStudentContestRecords :many
 SELECT c.id AS contest_id, t.id AS team_id, COALESCE(l.score::float8, 0)::float8 AS score, COALESCE(l.rank, 0)::int AS rank, c.name AS contest_name, c.status AS contest_status

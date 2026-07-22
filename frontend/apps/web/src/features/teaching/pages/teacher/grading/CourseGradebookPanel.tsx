@@ -81,7 +81,7 @@ export function CourseGradebookPanel({ courseId }: { courseId: string }): React.
       </div>
       {weights.map((item, index) => (
         <div className={styles.actions} key={`${item.source_type}-${item.source_ref}-${index}`}>
-          <span>{item.source_ref} · {(item.weight * 100).toFixed(0)}%</span>
+          <span>{item.source_ref} · {item.weight.toFixed(0)}%</span>
           <Button variant="ghost" size="sm" icon={<Trash2 size={13} />} aria-label="移除权重" onClick={() => setWeights((current) => current.filter((_, currentIndex) => currentIndex !== index))} />
         </div>
       ))}

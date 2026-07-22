@@ -66,7 +66,7 @@ func (s *Service) saveCategory(ctx context.Context, categoryID int64, req Catego
 	if err != nil {
 		return CategoryDTO{}, err
 	}
-	category := Category{ID: categoryID, TenantID: id.TenantID, ParentID: req.ParentID, Name: req.Name, Sort: req.Sort}
+	category := Category{ID: categoryID, TenantID: id.TenantID, ParentID: req.ParentID.Int64(), Name: req.Name, Sort: req.Sort}
 	if create {
 		category.ID = s.ids.Generate()
 	}

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"chaimir/internal/platform/ids"
 	"chaimir/internal/platform/jsonx"
 	"chaimir/pkg/apperr"
 )
@@ -155,7 +156,7 @@ func validateGradeWeightRequest(req GradeWeightRequest) (GradeWeightRequest, err
 	seen := map[string]struct{}{}
 	for i := range req.Items {
 		req.Items[i].SourceRef = strings.TrimSpace(req.Items[i].SourceRef)
-		if !validGradeSource(req.Items[i].SourceType) || req.Items[i].SourceRef == "" || req.Items[i].Weight <= 0 {
+		if _, ok := ids.Parse(req.Items[i].SourceRef); !validGradeSource(req.Items[i].SourceType) || !ok || req.Items[i].Weight <= 0 {
 			return GradeWeightRequest{}, apperr.ErrTeachingGradeWeightInvalid
 		}
 		key := fmt.Sprintf("%d:%s", req.Items[i].SourceType, req.Items[i].SourceRef)

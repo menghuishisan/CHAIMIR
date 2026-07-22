@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"chaimir/internal/contracts"
+	"chaimir/internal/platform/ids"
 	"chaimir/internal/platform/pagex"
 	"chaimir/internal/platform/response"
 	"chaimir/internal/platform/storage"
@@ -81,7 +82,7 @@ func (s *Service) CourseProgressStats(ctx context.Context, courseID int64) (Prog
 		if err != nil {
 			return err
 		}
-		stats.CourseID = courseID
+		stats.CourseID = ids.ID(courseID)
 		stats.MemberCount = memberTotal
 		stats.LessonCount = int64(len(lessons))
 		for _, progress := range progresses {
@@ -136,7 +137,7 @@ func (s *Service) CreatePost(ctx context.Context, courseID int64, req PostReques
 		if err := s.ensureCourseReadable(ctx, tx, id.TenantID, courseID, id.AccountID); err != nil {
 			return err
 		}
-		post, err = tx.CreatePost(ctx, DiscussionPost{ID: s.ids.Generate(), TenantID: id.TenantID, CourseID: courseID, ParentID: req.ParentID, AuthorID: id.AccountID, Content: req.Content})
+		post, err = tx.CreatePost(ctx, DiscussionPost{ID: s.ids.Generate(), TenantID: id.TenantID, CourseID: courseID, ParentID: req.ParentID.Int64(), AuthorID: id.AccountID, Content: req.Content})
 		return err
 	}); err != nil {
 		return PostDTO{}, mapCourseError(err)

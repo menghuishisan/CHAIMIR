@@ -1,7 +1,11 @@
 // grade model 文件定义 M11 成绩中心领域模型和响应视图。
 package grade
 
-import "time"
+import (
+	"time"
+
+	"chaimir/internal/platform/ids"
+)
 
 // LevelRule 是分数到等级和绩点的映射规则。
 type LevelRule struct {
@@ -18,16 +22,16 @@ type WarningRules struct {
 
 // CourseGradeInput 是 GPA 计算所需的单课程成绩输入。
 type CourseGradeInput struct {
-	CourseID   int64   `json:"course_id,string"`
-	StudentID  int64   `json:"student_id,string"`
+	CourseID   ids.ID  `json:"course_id"`
+	StudentID  ids.ID  `json:"student_id"`
 	FinalTotal float64 `json:"final_total"`
 	Credits    float64 `json:"credits"`
 }
 
 // GradeSummaryDTO 是学生成绩聚合响应。
 type GradeSummaryDTO struct {
-	StudentID     int64              `json:"student_id,string"`
-	SemesterID    int64              `json:"semester_id,omitempty,string"`
+	StudentID     ids.ID             `json:"student_id"`
+	SemesterID    ids.ID             `json:"semester_id,omitempty"`
 	TotalCredits  float64            `json:"total_credits"`
 	GPA           float64            `json:"gpa"`
 	CumulativeGPA float64            `json:"cumulative_gpa"`

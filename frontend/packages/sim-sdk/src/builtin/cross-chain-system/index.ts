@@ -10,11 +10,11 @@ import { replayProtectionSimulation } from './replay-protection/package';
 import { zkRollupProofVerificationSimulation } from './zk-rollup-proof-verification/package';
 
 export const crossChainSystemSimulations: SimPackage[] = [
-  crossChainMessageSimulation as unknown as SimPackage,
-  bridgeValidationSimulation as unknown as SimPackage,
-  optimisticRollupFraudProofSimulation as unknown as SimPackage,
-  zkRollupProofVerificationSimulation as unknown as SimPackage,
-  multisigCommitteeSimulation as unknown as SimPackage,
-  finalityConfirmationSimulation as unknown as SimPackage,
-  replayProtectionSimulation as unknown as SimPackage,
+  crossChainMessageSimulation,
+  bridgeValidationSimulation,
+  optimisticRollupFraudProofSimulation,
+  zkRollupProofVerificationSimulation,
+  multisigCommitteeSimulation,
+  finalityConfirmationSimulation,
+  replayProtectionSimulation,
 ];

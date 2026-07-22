@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"chaimir/internal/contracts"
+	"chaimir/internal/platform/ids"
 	"chaimir/internal/platform/jsonx"
 	"chaimir/pkg/apperr"
 	"chaimir/pkg/crypto"
@@ -14,17 +15,17 @@ import (
 // itemDTO 转换内容外壳为 HTTP DTO。
 func itemDTO(item Item) ItemDTO {
 	return ItemDTO{
-		ID:              item.ID,
-		TenantID:        item.TenantID,
+		ID:              ids.ID(item.ID),
+		TenantID:        ids.ID(item.TenantID),
 		Code:            item.Code,
 		Version:         item.Version,
 		Type:            item.Type,
 		Title:           item.Title,
-		CategoryID:      item.CategoryID,
+		CategoryID:      ids.ID(item.CategoryID),
 		Difficulty:      item.Difficulty,
 		Tags:            cloneStrings(item.Tags),
 		KnowledgePoints: cloneStrings(item.KnowledgePoints),
-		AuthorID:        item.AuthorID,
+		AuthorID:        ids.ID(item.AuthorID),
 		AuthorType:      item.AuthorType,
 		Visibility:      item.Visibility,
 		Status:          item.Status,
@@ -71,12 +72,12 @@ func contractSnapshot(item ItemWithBody) (contracts.ContentItemSnapshot, error) 
 
 // categoryDTO 转换分类响应。
 func categoryDTO(category Category) CategoryDTO {
-	return CategoryDTO{ID: category.ID, ParentID: category.ParentID, Name: category.Name, Sort: category.Sort, CreatedAt: formatTime(category.CreatedAt), UpdatedAt: formatTime(category.UpdatedAt)}
+	return CategoryDTO{ID: ids.ID(category.ID), ParentID: ids.ID(category.ParentID), Name: category.Name, Sort: category.Sort, CreatedAt: formatTime(category.CreatedAt), UpdatedAt: formatTime(category.UpdatedAt)}
 }
 
 // paperDTO 转换试卷响应。
 func paperDTO(paper Paper) PaperDTO {
-	return PaperDTO{ID: paper.ID, Name: paper.Name, AuthorID: paper.AuthorID, GenMode: paper.GenMode, GenCriteria: paper.GenCriteria, CreatedAt: formatTime(paper.CreatedAt), UpdatedAt: formatTime(paper.UpdatedAt)}
+	return PaperDTO{ID: ids.ID(paper.ID), Name: paper.Name, AuthorID: ids.ID(paper.AuthorID), GenMode: paper.GenMode, GenCriteria: paper.GenCriteria, CreatedAt: formatTime(paper.CreatedAt), UpdatedAt: formatTime(paper.UpdatedAt)}
 }
 
 // paperDetailDTO 转换试卷详情响应。
@@ -88,7 +89,7 @@ func paperDetailDTO(detail PaperWithItems) (PaperDetailDTO, error) {
 			return PaperDetailDTO{}, err
 		}
 		items = append(items, PaperItemFaceDTO{
-			ID:      item.ID,
+			ID:      ids.ID(item.ID),
 			Code:    item.ItemCode,
 			Version: item.ItemVersion,
 			Score:   item.Score,

@@ -21,6 +21,7 @@ import (
 	"chaimir/pkg/apperr"
 	"chaimir/pkg/logging"
 
+	"chaimir/internal/platform/ids"
 	"github.com/xuri/excelize/v2"
 )
 
@@ -30,16 +31,16 @@ type orgImportRow struct {
 	Kind           string `json:"kind"`
 	Name           string `json:"name"`
 	Code           string `json:"code,omitempty"`
-	ParentID       int64  `json:"parent_id,omitempty"`
+	ParentID       ids.ID `json:"parent_id,omitempty"`
 	EnrollmentYear int16  `json:"enrollment_year,omitempty"`
 	Error          string `json:"error,omitempty"`
 }
 
 const importSheetOrg = "org"
 
-// ListDepartmentsByAdmin 读取当前租户院系列表。
-func (s *Service) ListDepartmentsByAdmin(ctx context.Context) ([]DepartmentDTO, error) {
-	id, err := requireTenantRole(ctx, s, contracts.RoleSchoolAdmin)
+// ListDepartmentsForViewer 为教师和学校管理员读取当前租户院系列表。
+func (s *Service) ListDepartmentsForViewer(ctx context.Context) ([]DepartmentDTO, error) {
+	id, err := requireTenantAnyRole(ctx, s, contracts.RoleTeacher, contracts.RoleSchoolAdmin)
 	if err != nil {
 		return nil, err
 	}
@@ -124,9 +125,9 @@ func (s *Service) DeleteDepartmentByAdmin(ctx context.Context, departmentID int6
 	return nil
 }
 
-// ListMajorsByAdmin 读取专业列表,可按院系过滤。
-func (s *Service) ListMajorsByAdmin(ctx context.Context, departmentID int64) ([]MajorDTO, error) {
-	id, err := requireTenantRole(ctx, s, contracts.RoleSchoolAdmin)
+// ListMajorsForViewer 为教师和学校管理员读取专业列表,可按院系过滤。
+func (s *Service) ListMajorsForViewer(ctx context.Context, departmentID int64) ([]MajorDTO, error) {
+	id, err := requireTenantAnyRole(ctx, s, contracts.RoleTeacher, contracts.RoleSchoolAdmin)
 	if err != nil {
 		return nil, err
 	}
@@ -159,7 +160,7 @@ func (s *Service) CreateMajorByAdmin(ctx context.Context, req MajorRequest) (Maj
 	}
 	var row Major
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
-		if err := validateMajorParent(ctx, tx, id.TenantID, req.DepartmentID); err != nil {
+		if err := validateMajorParent(ctx, tx, id.TenantID, req.DepartmentID.Int64()); err != nil {
 			return err
 		}
 		item, err := tx.CreateMajor(ctx, id.TenantID, s.ids.Generate(), normalizeMajorRequest(req))
@@ -185,7 +186,7 @@ func (s *Service) UpdateMajorByAdmin(ctx context.Context, majorID int64, req Maj
 	}
 	var row Major
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
-		if err := validateMajorParent(ctx, tx, id.TenantID, req.DepartmentID); err != nil {
+		if err := validateMajorParent(ctx, tx, id.TenantID, req.DepartmentID.Int64()); err != nil {
 			return err
 		}
 		item, err := tx.UpdateMajor(ctx, id.TenantID, majorID, normalizeMajorRequest(req))
@@ -217,9 +218,9 @@ func (s *Service) DeleteMajorByAdmin(ctx context.Context, majorID int64) error {
 	return nil
 }
 
-// ListClassesByAdmin 读取班级列表,可按专业过滤。
-func (s *Service) ListClassesByAdmin(ctx context.Context, majorID int64) ([]ClassDTO, error) {
-	id, err := requireTenantRole(ctx, s, contracts.RoleSchoolAdmin)
+// ListClassesForViewer 为教师和学校管理员读取班级列表,可按专业过滤。
+func (s *Service) ListClassesForViewer(ctx context.Context, majorID int64) ([]ClassDTO, error) {
+	id, err := requireTenantAnyRole(ctx, s, contracts.RoleTeacher, contracts.RoleSchoolAdmin)
 	if err != nil {
 		return nil, err
 	}
@@ -252,7 +253,7 @@ func (s *Service) CreateClassByAdmin(ctx context.Context, req ClassRequest) (Cla
 	}
 	var row Class
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
-		if err := validateClassParent(ctx, tx, id.TenantID, req.MajorID); err != nil {
+		if err := validateClassParent(ctx, tx, id.TenantID, req.MajorID.Int64()); err != nil {
 			return err
 		}
 		item, err := tx.CreateClass(ctx, id.TenantID, s.ids.Generate(), normalizeClassRequest(req))
@@ -278,7 +279,7 @@ func (s *Service) UpdateClassByAdmin(ctx context.Context, classID int64, req Cla
 	}
 	var row Class
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
-		if err := validateClassParent(ctx, tx, id.TenantID, req.MajorID); err != nil {
+		if err := validateClassParent(ctx, tx, id.TenantID, req.MajorID.Int64()); err != nil {
 			return err
 		}
 		item, err := tx.UpdateClass(ctx, id.TenantID, classID, normalizeClassRequest(req))
@@ -388,18 +389,18 @@ func (s *Service) PreviewOrgImportByAdmin(ctx context.Context, req ImportPreview
 			valid++
 		}
 	}
-	return ImportPreviewResponse{PreviewID: previewID, Total: len(rows), Valid: valid, Invalid: len(rows) - valid, Rows: results}, nil
+	return ImportPreviewResponse{PreviewID: ids.ID(previewID), Total: len(rows), Valid: valid, Invalid: len(rows) - valid, Rows: results}, nil
 }
 
 // CommitOrgImportByAdmin 读取服务端预览并仅提交校验通过的组织结构行。
-func (s *Service) CommitOrgImportByAdmin(ctx context.Context, req ImportCommitRequest) (ImportBatchDTO, error) {
+func (s *Service) CommitOrgImportByAdmin(ctx context.Context, req ImportCommitRequest) (AccountImportCommitResponse, error) {
 	id, err := requireTenantRole(ctx, s, contracts.RoleSchoolAdmin)
 	if err != nil {
-		return ImportBatchDTO{}, err
+		return AccountImportCommitResponse{}, err
 	}
 	var batch ImportBatch
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
-		preview, err := tx.GetImportPreview(ctx, id.TenantID, id.AccountID, req.PreviewID)
+		preview, err := tx.GetImportPreview(ctx, id.TenantID, id.AccountID, req.PreviewID.Int64())
 		if err != nil {
 			return err
 		}
@@ -428,7 +429,7 @@ func (s *Service) CommitOrgImportByAdmin(ctx context.Context, req ImportCommitRe
 			success++
 		}
 		// 提交状态和批次记录在同一事务内完成,保证导入中心历史与预览消费状态一致。
-		if err := tx.MarkImportPreviewSubmitted(ctx, id.TenantID, id.AccountID, req.PreviewID); err != nil {
+		if err := tx.MarkImportPreviewSubmitted(ctx, id.TenantID, id.AccountID, req.PreviewID.Int64()); err != nil {
 			return err
 		}
 		errorDetail, err := jsonx.AnyBytes(rows, apperr.ErrInternal)
@@ -468,9 +469,9 @@ func (s *Service) CommitOrgImportByAdmin(ctx context.Context, req ImportCommitRe
 			TraceID:    entry.TraceID,
 		})
 	}); err != nil {
-		return ImportBatchDTO{}, apperr.AsAppError(err)
+		return AccountImportCommitResponse{}, apperr.AsAppError(err)
 	}
-	return ToImportBatchDTO(batch), nil
+	return AccountImportCommitResponse{Batch: ToImportBatchDTO(batch), ActivationCodes: []ImportActivationCodeDTO{}}, nil
 }
 
 // createOrgImportRow 按导入行类型创建组织结构记录。
@@ -630,7 +631,7 @@ func parseOrgImportRecords(records [][]string) ([]orgImportRow, []ImportRowResul
 		} else {
 			// 专业和班级第三列都是上级 ID,后续按 kind 区分院系或专业。
 			parentID, err := strconv.ParseInt(strings.TrimSpace(record[2]), 10, 64)
-			row.ParentID = parentID
+			row.ParentID = ids.ID(parentID)
 			if err != nil || row.ParentID <= 0 {
 				result.Error = "上级组织 ID 不正确"
 			}
@@ -686,18 +687,55 @@ func encodeNamedXLSX(sheetName string, records [][]string) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-// PromoteClassesByAdmin 批量升级当前租户正常班级。
-func (s *Service) PromoteClassesByAdmin(ctx context.Context) error {
+// PromoteClassesByAdmin 将管理员明确选择的班级和学生档案更新到目标学年。
+func (s *Service) PromoteClassesByAdmin(ctx context.Context, req PromoteClassesRequest) error {
 	id, err := requireTenantRole(ctx, s, contracts.RoleSchoolAdmin)
 	if err != nil {
 		return err
 	}
+	if len(req.ClassIDs) == 0 || req.TargetYear <= 0 {
+		return apperr.ErrIdentityOrgInvalidInput
+	}
+	classIDs := make([]int64, 0, len(req.ClassIDs))
+	seen := make(map[int64]struct{}, len(req.ClassIDs))
+	for _, classID := range req.ClassIDs {
+		value := classID.Int64()
+		if value <= 0 {
+			return apperr.ErrIdentityOrgInvalidInput
+		}
+		if _, exists := seen[value]; exists {
+			continue
+		}
+		seen[value] = struct{}{}
+		classIDs = append(classIDs, value)
+	}
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
-		if err := tx.PromoteClasses(ctx, id.TenantID); err != nil {
+		classes, err := tx.ListClasses(ctx, 0)
+		if err != nil {
+			return err
+		}
+		available := make(map[int64]Class, len(classes))
+		for _, item := range classes {
+			available[item.ID] = item
+		}
+		for _, classID := range classIDs {
+			item, exists := available[classID]
+			if !exists || item.Status != ClassStatusActive || req.TargetYear <= item.EnrollmentYear {
+				return apperr.ErrIdentityOrgInvalidInput
+			}
+		}
+		affected, err := tx.PromoteClasses(ctx, id.TenantID, classIDs, req.TargetYear)
+		if err != nil {
+			return err
+		}
+		if affected != int64(len(classIDs)) {
+			return apperr.ErrIdentityOrgInvalidInput
+		}
+		if err := tx.PromoteClassStudentProfiles(ctx, id.TenantID, classIDs, req.TargetYear); err != nil {
 			return err
 		}
 		// 班级升级会批量改变组织口径,必须与变更一起写审计,避免后续无法追踪批量来源。
-		return s.writeOrgAuditInTx(ctx, tx, id, "org.class.promote", "identity.class", 0, map[string]any{})
+		return s.writeOrgAuditInTx(ctx, tx, id, "org.class.promote", "identity.class", 0, map[string]any{"class_ids": classIDs, "target_year": req.TargetYear})
 	}); err != nil {
 		return apperr.ErrInternal.WithCause(err)
 	}
@@ -712,7 +750,7 @@ func (s *Service) validateOrgImportParents(ctx context.Context, tx TxStore, tena
 		}
 		switch rows[i].Kind {
 		case "major":
-			ok, err := tx.DepartmentExists(ctx, tenantID, rows[i].ParentID)
+			ok, err := tx.DepartmentExists(ctx, tenantID, rows[i].ParentID.Int64())
 			if err != nil {
 				return err
 			}
@@ -721,7 +759,7 @@ func (s *Service) validateOrgImportParents(ctx context.Context, tx TxStore, tena
 				results[i].Error = rows[i].Error
 			}
 		case "class":
-			ok, err := tx.MajorExists(ctx, tenantID, rows[i].ParentID)
+			ok, err := tx.MajorExists(ctx, tenantID, rows[i].ParentID.Int64())
 			if err != nil {
 				return err
 			}

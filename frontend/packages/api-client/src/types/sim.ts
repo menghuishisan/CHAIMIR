@@ -1,9 +1,10 @@
 // ===== M4 Sim 模块 =====
 
 import type { SimCompute, SimPackageStatus, SimReviewResult, SimShareStatus } from '../constants/sim'
+import type { SnowflakeID } from './common'
 
 export interface SimPackageMeta {
-  id: string
+  id: SnowflakeID
   code: string
   version: string
   name: string
@@ -84,11 +85,11 @@ export interface SimValidationReportRequest {
 }
 
 export interface SimPackageReview {
-  id: string
-  package_id: string
-  submitter_id: string
+  id: SnowflakeID
+  package_id: SnowflakeID
+  submitter_id: SnowflakeID
   preview_report: SimValidationReport
-  reviewer_id?: string
+  reviewer_id?: SnowflakeID
   result: SimReviewResult
   comment?: string
   created_at: string

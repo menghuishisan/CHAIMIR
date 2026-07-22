@@ -2,7 +2,7 @@
 
 import React, { useCallback, useMemo, useState } from 'react'
 import { ClassStatus } from '@chaimir/api-client'
-import { Button, Callout, Input, Select } from '@chaimir/ui'
+import { Button, Callout, Checkbox, Input, Select } from '@chaimir/ui'
 import { Archive, Network, Pencil, Plus, RefreshCw, Trash2, TrendingUp } from 'lucide-react'
 import { api } from '../../../../../app/api'
 import { ErrorState, LoadingState } from '../../../../../components/ResourceState'
@@ -28,6 +28,8 @@ const OrganizationPage: React.FC = () => {
   const [editingMajorId, setEditingMajorId] = useState('')
   const [editingClassId, setEditingClassId] = useState('')
   const [archiveYear, setArchiveYear] = useState('')
+  const [promotionYear, setPromotionYear] = useState('')
+  const [selectedClassIds, setSelectedClassIds] = useState<Set<string>>(new Set())
   const [submitting, setSubmitting] = useState<string | null>(null)
   const [message, setMessage] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -69,6 +71,26 @@ const OrganizationPage: React.FC = () => {
     }
   }, [reloadAll])
 
+  /** promoteSelectedClasses 仅升级管理员明确勾选且目标学年有效的班级。 */
+  const promoteSelectedClasses = useCallback(() => {
+    const targetYear = Number(promotionYear)
+    if (selectedClassIds.size === 0 || !Number.isInteger(targetYear) || targetYear <= 0) {
+      setError('请选择需要升级的班级并填写目标学年。')
+      return
+    }
+    if (!window.confirm(`确定将选中的 ${selectedClassIds.size} 个班级升级到 ${targetYear} 学年吗？`)) return
+    void submitOrgAction('promote', async () => {
+      await api.identity.promoteClasses({ class_ids: Array.from(selectedClassIds), target_year: targetYear })
+      setSelectedClassIds(new Set())
+      setPromotionYear('')
+      setEditingClassId('')
+      setClassName('')
+      setClassMajorId('')
+      setEnrollmentYear('')
+      setClassStatus(String(ClassStatus.ACTIVE))
+    }, '所选班级已升级。')
+  }, [promotionYear, selectedClassIds, submitOrgAction])
+
   const isLoading = departments.status === 'loading' || majors.status === 'loading' || classes.status === 'loading'
   const firstError = departments.error || majors.error || classes.error
 
@@ -80,7 +102,7 @@ const OrganizationPage: React.FC = () => {
             <Network size={28} />
             院系专业管理
           </h1>
-          <p className={styles.subtitle}>组织结构数据来自后端，账号绑定时复用同一套组织 ID。</p>
+          <p className={styles.subtitle}>统一维护院系、专业和班级，供账号归属选择使用。</p>
         </div>
         <Button variant="outline" icon={<RefreshCw size={16} />} onClick={reloadAll}>
           刷新
@@ -113,6 +135,7 @@ const OrganizationPage: React.FC = () => {
                       <div className={styles.treeChildren}>
                         {(classes.data || []).filter((classItem) => classItem.major_id === major.id).map((classItem) => (
                           <span className={styles.status} key={classItem.id}>
+                            {classItem.status === ClassStatus.ACTIVE && <Checkbox checked={selectedClassIds.has(classItem.id)} aria-label={`选择${classItem.name}`} onChange={(event) => setSelectedClassIds((current) => { const next = new Set(current); if (event.target.checked) next.add(classItem.id); else next.delete(classItem.id); return next })} />}
                             {classItem.name} · {classItem.enrollment_year}级
                             <Button variant="ghost" size="sm" icon={<Pencil size={13} />} onClick={() => { setEditingClassId(classItem.id); setClassName(classItem.name); setClassMajorId(classItem.major_id); setEnrollmentYear(String(classItem.enrollment_year)); setClassStatus(String(classItem.status)) }}>编辑</Button>
                             <Button variant="ghost" size="sm" icon={<Trash2 size={13} />} onClick={() => submitOrgAction(`delete-class-${classItem.id}`, () => api.identity.deleteClass(classItem.id), '班级已删除。')}>删除</Button>
@@ -204,12 +227,13 @@ const OrganizationPage: React.FC = () => {
         <section className={styles.panel}>
           <h2>年级流转</h2>
           <label className={styles.field}>入学年份<Input fullWidth value={archiveYear} onChange={(event) => setArchiveYear(event.target.value)} /></label>
+          <label className={styles.field}>升级目标学年<Input fullWidth value={promotionYear} onChange={(event) => setPromotionYear(event.target.value)} /></label>
           <div className={styles.actions}>
             <Button variant="outline" icon={<Archive size={15} />} disabled={!Number(archiveYear)} onClick={() => submitOrgAction('archive', () => api.identity.archiveClasses({ enrollment_year: Number(archiveYear) }), '对应年级班级已归档。')}>归档年级</Button>
-            <Button variant="outline" icon={<TrendingUp size={15} />} onClick={() => submitOrgAction('promote', () => api.identity.promoteClasses(), '班级已批量升级。')}>执行升年级</Button>
+            <Button variant="outline" icon={<TrendingUp size={15} />} disabled={selectedClassIds.size === 0 || !Number(promotionYear)} onClick={promoteSelectedClasses}>升级所选班级</Button>
           </div>
         </section>
-        <OrganizationImportPanel />
+        <OrganizationImportPanel onCompleted={reloadAll} />
       </div>
     </div>
   )

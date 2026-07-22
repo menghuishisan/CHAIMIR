@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"chaimir/internal/contracts"
+	"chaimir/internal/platform/ids"
 	"chaimir/internal/platform/jsonx"
 	"chaimir/internal/platform/transfer"
 )
@@ -15,12 +16,12 @@ func courseDTO(c Course) (CourseDTO, error) {
 	if err != nil {
 		return CourseDTO{}, err
 	}
-	return CourseDTO{ID: c.ID, TenantID: c.TenantID, TeacherID: c.TeacherID, Name: c.Name, Description: c.Description, Type: c.Type, Difficulty: c.Difficulty, CoverURL: c.CoverURL, Semester: c.Semester, Credits: c.Credits, Schedule: schedule, StartAt: formatTime(c.StartAt), EndAt: formatTime(c.EndAt), InviteCode: c.InviteCode, Status: c.Status, Visibility: c.Visibility, CreatedAt: formatTime(c.CreatedAt), UpdatedAt: formatTime(c.UpdatedAt)}, nil
+	return CourseDTO{ID: ids.ID(c.ID), TenantID: ids.ID(c.TenantID), TeacherID: ids.ID(c.TeacherID), Name: c.Name, Description: c.Description, Type: c.Type, Difficulty: c.Difficulty, CoverURL: c.CoverURL, Semester: c.Semester, Credits: c.Credits, Schedule: schedule, StartAt: formatTime(c.StartAt), EndAt: formatTime(c.EndAt), InviteCode: c.InviteCode, Status: c.Status, Visibility: c.Visibility, CreatedAt: formatTime(c.CreatedAt), UpdatedAt: formatTime(c.UpdatedAt)}, nil
 }
 
 // chapterDTO 将章节领域模型转换为 HTTP 响应结构。
 func chapterDTO(c Chapter) ChapterDTO {
-	return ChapterDTO{ID: c.ID, CourseID: c.CourseID, Title: c.Title, Sort: c.Sort, CreatedAt: formatTime(c.CreatedAt), UpdatedAt: formatTime(c.UpdatedAt)}
+	return ChapterDTO{ID: ids.ID(c.ID), CourseID: ids.ID(c.CourseID), Title: c.Title, Sort: c.Sort, CreatedAt: formatTime(c.CreatedAt), UpdatedAt: formatTime(c.UpdatedAt)}
 }
 
 // lessonDTO 将课时领域模型转换为 HTTP 响应结构。
@@ -29,12 +30,12 @@ func lessonDTO(l Lesson) (LessonDTO, error) {
 	if err != nil {
 		return LessonDTO{}, err
 	}
-	return LessonDTO{ID: l.ID, ChapterID: l.ChapterID, Title: l.Title, ContentType: l.ContentType, ContentRef: contentRef, Sort: l.Sort, CreatedAt: formatTime(l.CreatedAt), UpdatedAt: formatTime(l.UpdatedAt)}, nil
+	return LessonDTO{ID: ids.ID(l.ID), ChapterID: ids.ID(l.ChapterID), Title: l.Title, ContentType: l.ContentType, ContentRef: contentRef, Sort: l.Sort, CreatedAt: formatTime(l.CreatedAt), UpdatedAt: formatTime(l.UpdatedAt)}, nil
 }
 
 // memberDTO 将课程成员关系转换为 HTTP 响应结构。
 func memberDTO(m CourseMember) MemberDTO {
-	return MemberDTO{ID: m.ID, CourseID: m.CourseID, StudentID: m.StudentID, JoinMode: m.JoinMode, JoinedAt: formatTime(m.JoinedAt)}
+	return MemberDTO{ID: ids.ID(m.ID), CourseID: ids.ID(m.CourseID), StudentID: ids.ID(m.StudentID), JoinMode: m.JoinMode, JoinedAt: formatTime(m.JoinedAt)}
 }
 
 // assignmentDTO 将作业外壳转换为 HTTP 响应结构。
@@ -43,7 +44,7 @@ func assignmentDTO(a Assignment) (AssignmentDTO, error) {
 	if err != nil {
 		return AssignmentDTO{}, err
 	}
-	return AssignmentDTO{ID: a.ID, CourseID: a.CourseID, Title: a.Title, ChapterID: a.ChapterID, DueAt: formatTime(a.DueAt), MaxAttempts: a.MaxAttempts, LatePolicy: a.LatePolicy, LatePenalty: latePenalty, Status: a.Status, CreatedAt: formatTime(a.CreatedAt), UpdatedAt: formatTime(a.UpdatedAt)}, nil
+	return AssignmentDTO{ID: ids.ID(a.ID), CourseID: ids.ID(a.CourseID), Title: a.Title, ChapterID: ids.ID(a.ChapterID), DueAt: formatTime(a.DueAt), MaxAttempts: a.MaxAttempts, LatePolicy: a.LatePolicy, LatePenalty: latePenalty, Status: a.Status, CreatedAt: formatTime(a.CreatedAt), UpdatedAt: formatTime(a.UpdatedAt)}, nil
 }
 
 // assignmentItemDTO 将作业题目引用和 M5 题面快照组合为响应结构。
@@ -52,7 +53,7 @@ func assignmentItemDTO(item AssignmentItemFace) (AssignmentItemDTO, error) {
 	if err != nil {
 		return AssignmentItemDTO{}, err
 	}
-	return AssignmentItemDTO{ID: item.ID, ItemCode: item.ItemCode, ItemVersion: item.ItemVersion, Score: item.Score, Seq: item.Seq, GradingMode: item.GradingMode, JudgerCode: item.JudgerCode, Title: item.Title, Type: item.Type, Difficulty: item.Difficulty, Body: body}, nil
+	return AssignmentItemDTO{ID: ids.ID(item.ID), ItemCode: item.ItemCode, ItemVersion: item.ItemVersion, Score: item.Score, Seq: item.Seq, GradingMode: item.GradingMode, JudgerCode: item.JudgerCode, Title: item.Title, Type: item.Type, Difficulty: item.Difficulty, Body: body}, nil
 }
 
 // assignmentDetailDTO 将作业详情转换为学生或教师读取的完整响应。
@@ -87,7 +88,7 @@ func submissionDTO(s Submission) (SubmissionDTO, error) {
 	if err != nil {
 		return SubmissionDTO{}, err
 	}
-	return SubmissionDTO{ID: s.ID, AssignmentID: s.AssignmentID, StudentID: s.StudentID, AttemptNo: s.AttemptNo, Content: content, JudgeTaskRef: s.JudgeTaskRef, AutoScore: s.AutoScore, ManualScore: s.ManualScore, FinalScore: s.FinalScore, Comment: s.Comment, IsLate: s.IsLate, Status: s.Status, SubmittedAt: formatTime(s.SubmittedAt)}, nil
+	return SubmissionDTO{ID: ids.ID(s.ID), AssignmentID: ids.ID(s.AssignmentID), StudentID: ids.ID(s.StudentID), AttemptNo: s.AttemptNo, Content: content, JudgeTaskRef: s.JudgeTaskRef, AutoScore: s.AutoScore, ManualScore: s.ManualScore, FinalScore: s.FinalScore, Comment: s.Comment, IsLate: s.IsLate, Status: s.Status, SubmittedAt: formatTime(s.SubmittedAt)}, nil
 }
 
 // draftDTO 将服务端权威作答草稿转换为 HTTP 响应结构。
@@ -96,37 +97,37 @@ func draftDTO(d SubmissionDraft) (DraftDTO, error) {
 	if err != nil {
 		return DraftDTO{}, err
 	}
-	return DraftDTO{AssignmentID: d.AssignmentID, StudentID: d.StudentID, Content: content, UpdatedAt: formatTime(d.UpdatedAt), Exists: true}, nil
+	return DraftDTO{AssignmentID: ids.ID(d.AssignmentID), StudentID: ids.ID(d.StudentID), Content: content, UpdatedAt: formatTime(d.UpdatedAt), Exists: true}, nil
 }
 
 // progressDTO 将学习进度转换为 HTTP 响应结构。
 func progressDTO(p LessonProgress) ProgressDTO {
-	return ProgressDTO{LessonID: p.LessonID, StudentID: p.StudentID, Status: p.Status, VideoPos: p.VideoPos, DurationSec: p.DurationSec, UpdatedAt: formatTime(p.UpdatedAt)}
+	return ProgressDTO{LessonID: ids.ID(p.LessonID), StudentID: ids.ID(p.StudentID), Status: p.Status, VideoPos: p.VideoPos, DurationSec: p.DurationSec, UpdatedAt: formatTime(p.UpdatedAt)}
 }
 
 // postDTO 将讨论帖或回复转换为 HTTP 响应结构。
 func postDTO(p DiscussionPost) PostDTO {
-	return PostDTO{ID: p.ID, CourseID: p.CourseID, ParentID: p.ParentID, AuthorID: p.AuthorID, Content: p.Content, IsPinned: p.IsPinned, LikeCount: p.LikeCount, CreatedAt: formatTime(p.CreatedAt)}
+	return PostDTO{ID: ids.ID(p.ID), CourseID: ids.ID(p.CourseID), ParentID: ids.ID(p.ParentID), AuthorID: ids.ID(p.AuthorID), Content: p.Content, IsPinned: p.IsPinned, LikeCount: p.LikeCount, CreatedAt: formatTime(p.CreatedAt)}
 }
 
 // announcementDTO 将课程公告转换为 HTTP 响应结构。
 func announcementDTO(a Announcement) AnnouncementDTO {
-	return AnnouncementDTO{ID: a.ID, CourseID: a.CourseID, Title: a.Title, Content: a.Content, IsPinned: a.IsPinned, CreatedAt: formatTime(a.CreatedAt)}
+	return AnnouncementDTO{ID: ids.ID(a.ID), CourseID: ids.ID(a.CourseID), Title: a.Title, Content: a.Content, IsPinned: a.IsPinned, CreatedAt: formatTime(a.CreatedAt)}
 }
 
 // reviewDTO 将课程评价转换为 HTTP 响应结构。
 func reviewDTO(r CourseReview) ReviewDTO {
-	return ReviewDTO{ID: r.ID, CourseID: r.CourseID, StudentID: r.StudentID, Rating: r.Rating, Comment: r.Comment, CreatedAt: formatTime(r.CreatedAt)}
+	return ReviewDTO{ID: ids.ID(r.ID), CourseID: ids.ID(r.CourseID), StudentID: ids.ID(r.StudentID), Rating: r.Rating, Comment: r.Comment, CreatedAt: formatTime(r.CreatedAt)}
 }
 
 // gradeWeightDTO 将成绩权重配置转换为 HTTP 响应结构。
 func gradeWeightDTO(w GradeWeight) GradeWeightDTO {
-	return GradeWeightDTO{ID: w.ID, SourceType: w.SourceType, SourceRef: w.SourceRef, Weight: w.Weight}
+	return GradeWeightDTO{ID: ids.ID(w.ID), SourceType: w.SourceType, SourceRef: w.SourceRef, Weight: w.Weight}
 }
 
 // gradeDTO 将单课程成绩转换为 HTTP 响应结构。
 func gradeDTO(g CourseGrade) GradeDTO {
-	return GradeDTO{CourseID: g.CourseID, StudentID: g.StudentID, AutoTotal: g.AutoTotal, OverrideTotal: g.OverrideTotal, FinalTotal: finalTotal(g), IsOverridden: g.IsOverridden, IsLocked: g.IsLocked, Credits: g.Credits, UpdatedAt: formatTime(g.UpdatedAt)}
+	return GradeDTO{CourseID: ids.ID(g.CourseID), StudentID: ids.ID(g.StudentID), AutoTotal: g.AutoTotal, OverrideTotal: g.OverrideTotal, FinalTotal: finalTotal(g), IsOverridden: g.IsOverridden, IsLocked: g.IsLocked, Credits: g.Credits, UpdatedAt: formatTime(g.UpdatedAt)}
 }
 
 // exportTaskDTO 将统一导入导出中心任务快照转换为课程成绩导出响应。

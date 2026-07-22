@@ -12,9 +12,12 @@ type Querier interface {
 	AckAcademicWarning(ctx context.Context, arg AckAcademicWarningParams) (AcademicWarning, error)
 	ApproveGradeReview(ctx context.Context, arg ApproveGradeReviewParams) (GradeReview, error)
 	ClaimPendingGradeLockOutbox(ctx context.Context, arg ClaimPendingGradeLockOutboxParams) ([]GradeLockOutbox, error)
+	ClearCurrentSemesters(ctx context.Context) error
+	ClearDefaultLevelConfigs(ctx context.Context) error
 	CountAcademicWarnings(ctx context.Context, studentID int64) (int64, error)
 	CountGradeAppeals(ctx context.Context, status int16) (int64, error)
 	CountGradeReviews(ctx context.Context, status int16) (int64, error)
+	CountOwnGradeReviews(ctx context.Context, arg CountOwnGradeReviewsParams) (int64, error)
 	CreateAcademicWarning(ctx context.Context, arg CreateAcademicWarningParams) (AcademicWarning, error)
 	CreateGradeAppeal(ctx context.Context, arg CreateGradeAppealParams) (GradeAppeal, error)
 	CreateGradeLockOutbox(ctx context.Context, arg CreateGradeLockOutboxParams) (GradeLockOutbox, error)
@@ -36,9 +39,12 @@ type Querier interface {
 	ListGradeReviews(ctx context.Context, arg ListGradeReviewsParams) ([]GradeReview, error)
 	ListKnownStudentSemesterGrades(ctx context.Context, studentID int64) ([]StudentSemesterGrade, error)
 	ListLevelConfigs(ctx context.Context) ([]GradeLevelConfig, error)
+	ListOwnGradeReviews(ctx context.Context, arg ListOwnGradeReviewsParams) ([]GradeReview, error)
 	ListSemesters(ctx context.Context) ([]Semester, error)
 	ListStudentSemesterGrades(ctx context.Context, studentID int64) ([]StudentSemesterGrade, error)
 	ListTranscriptRecords(ctx context.Context, arg ListTranscriptRecordsParams) ([]TranscriptRecord, error)
+	LockGradeLevelDefaultScope(ctx context.Context, lockKey int64) error
+	LockSemesterCurrentScope(ctx context.Context, lockKey int64) error
 	MarkGradeLockOutboxFailed(ctx context.Context, arg MarkGradeLockOutboxFailedParams) (GradeLockOutbox, error)
 	MarkGradeLockOutboxPublished(ctx context.Context, arg MarkGradeLockOutboxPublishedParams) (GradeLockOutbox, error)
 	RejectGradeReview(ctx context.Context, arg RejectGradeReviewParams) (GradeReview, error)

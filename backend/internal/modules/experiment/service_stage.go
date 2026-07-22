@@ -445,7 +445,7 @@ func (s *Service) destroyCreatedStageResources(ctx context.Context, inst Experim
 		if s.sandbox == nil {
 			return apperr.ErrExperimentRecycleFailed
 		}
-		if err := s.sandbox.DestroySandbox(ctx, contracts.SandboxControlRequest{TenantID: inst.TenantID, SandboxID: ref.SandboxID, SourceRef: inst.SourceRef}); err != nil {
+		if err := s.sandbox.DestroySandbox(ctx, contracts.SandboxControlRequest{TenantID: inst.TenantID, SandboxID: ref.SandboxID.Int64(), SourceRef: inst.SourceRef}); err != nil {
 			return apperr.ErrExperimentRecycleFailed.WithCause(err)
 		}
 	}
@@ -453,7 +453,7 @@ func (s *Service) destroyCreatedStageResources(ctx context.Context, inst Experim
 		if s.sim == nil {
 			return apperr.ErrExperimentRecycleFailed
 		}
-		req := contracts.SimDestroySessionRequest{TenantID: inst.TenantID, SessionID: ref.SessionID, SourceRef: inst.SourceRef}
+		req := contracts.SimDestroySessionRequest{TenantID: inst.TenantID, SessionID: ref.SessionID.Int64(), SourceRef: inst.SourceRef}
 		if err := s.sim.DestroySession(ctx, req); err != nil {
 			return apperr.ErrExperimentRecycleFailed.WithCause(err)
 		}

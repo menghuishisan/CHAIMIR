@@ -31,3 +31,8 @@ export function parseJsonArray<T = unknown>(value: string, errorMessage: string,
 export function stringifyJsonObject<T = Record<string, unknown>>(value?: T | null): string {
   return JSON.stringify(value || {}, null, 2)
 }
+
+/** parseDelimitedList 把逗号或换行分隔的表单值转换为去重有序列表。 */
+export function parseDelimitedList(value: string): string[] {
+  return Array.from(new Set(value.split(/[,，\n]/).map((item) => item.trim()).filter(Boolean)))
+}

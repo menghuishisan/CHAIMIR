@@ -644,7 +644,7 @@ ON CONFLICT (tenant_id, course_id, student_id) DO UPDATE SET rating=EXCLUDED.rat
 	}
 	if err := execJSON(ctx, tx, `
 INSERT INTO grade_weight (id, tenant_id, course_id, source_type, source_ref, weight)
-VALUES ($1,$2,$3,1,$4,40.00)
+VALUES ($1,$2,$3,1,$4,100.00)
 ON CONFLICT (tenant_id, course_id, source_type, source_ref) DO UPDATE SET weight=EXCLUDED.weight, updated_at=now()`,
 		acceptanceIDs.GradeWeight, acceptanceIDs.TenantID, acceptanceIDs.Course, "assignment:910000000000005031"); err != nil {
 		return err
@@ -904,11 +904,12 @@ ON CONFLICT (tenant_id, contest_id, team_id) DO UPDATE SET score=EXCLUDED.score,
 		acceptanceIDs.LadderRank, acceptanceIDs.TenantID, acceptanceIDs.Contest, acceptanceIDs.TeamA); err != nil {
 		return err
 	}
-	ranking, _ := jsonb([]map[string]any{{"rank": 1, "team": "赵一航个人队", "score": 500}})
+	snapshotAt := end
+	ranking, _ := jsonb([]map[string]any{{"rank": 1, "team_id": fmt.Sprintf("%d", acceptanceIDs.TeamA), "score": 500, "solved_count": 1, "last_solve_at": snapshotAt, "updated_at": snapshotAt}})
 	if err := execJSON(ctx, tx, `
-INSERT INTO contest_result_snapshot (id, tenant_id, contest_id, final_ranking)
-VALUES ($1,$2,$3,$4)
-ON CONFLICT (tenant_id, contest_id) DO UPDATE SET final_ranking=EXCLUDED.final_ranking, generated_at=now()`,
+INSERT INTO contest_ladder_snapshot (id, tenant_id, contest_id, snapshot_status, ranking)
+VALUES ($1,$2,$3,6,$4)
+ON CONFLICT (tenant_id, contest_id, snapshot_status) DO UPDATE SET ranking=EXCLUDED.ranking, generated_at=now()`,
 		acceptanceIDs.ResultSnapshot, acceptanceIDs.TenantID, acceptanceIDs.Contest, ranking); err != nil {
 		return err
 	}
@@ -960,8 +961,8 @@ ON CONFLICT (tenant_id, announcement_id, account_id) DO UPDATE SET read_at=now()
 
 // seedGradeRows 写入成绩中心等级、学期、审核、申诉、预警和成绩单。
 func seedGradeRows(ctx context.Context, tx pgx.Tx) error {
-	mapping, _ := jsonb([]map[string]any{{"min": 90, "grade": "A"}, {"min": 80, "grade": "B"}, {"min": 60, "grade": "C"}})
-	warningRules, _ := jsonb(map[string]any{"low_gpa": 2.0, "failed_courses": 1})
+	mapping, _ := jsonb([]map[string]any{{"min": 90, "grade": "A", "gpa": 4.0}, {"min": 80, "grade": "B", "gpa": 3.0}, {"min": 60, "grade": "C", "gpa": 2.0}, {"min": 0, "grade": "F", "gpa": 0.0}})
+	warningRules, _ := jsonb(map[string]any{"min_gpa": 2.0, "fail_count": 1})
 	if err := execJSON(ctx, tx, `
 INSERT INTO grade_level_config (id, tenant_id, name, mapping, warning_rules, is_default)
 VALUES ($1,$2,'四分制等级换算',$3,$4,true)

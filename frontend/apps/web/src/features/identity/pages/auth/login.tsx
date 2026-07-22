@@ -1,6 +1,6 @@
 // LoginPage 以手机号登录为主流程，并提供校内账号和学校统一认证次级入口。
 
-import React, { useCallback, useState } from 'react'
+import React, { useCallback, useEffect, useState } from 'react'
 import type { LoginResponse, TenantOption } from '@chaimir/api-client'
 import { SmsScene } from '@chaimir/api-client'
 import { Button, Checkbox, FormField, Input, SegmentedControl } from '@chaimir/ui'
@@ -43,10 +43,18 @@ const LoginPage: React.FC = () => {
   const [remember, setRemember] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [sendingSms, setSendingSms] = useState(false)
+  const [smsCountdown, setSmsCountdown] = useState(0)
+  const [smsMessage, setSmsMessage] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const navigate = useNavigate()
   const location = useLocation()
   const returnPath = (location.state as { from?: string } | null)?.from
+
+  useEffect(() => {
+    if (smsCountdown <= 0) return
+    const timer = window.setTimeout(() => setSmsCountdown((current) => Math.max(0, current - 1)), 1000)
+    return () => window.clearTimeout(timer)
+  }, [smsCountdown])
 
   /**
    * completeLogin 持久化会话，并按服务端改密要求或账号角色决定落点。
@@ -157,20 +165,24 @@ const LoginPage: React.FC = () => {
    * handleSendSms 请求登录验证码，并将服务端失败原因转换为用户向提示。
    */
   const handleSendSms = useCallback(async () => {
+    if (smsCountdown > 0) return
     if (!phone.trim()) {
       setError('请先输入手机号。')
       return
     }
     setSendingSms(true)
     setError(null)
+    setSmsMessage(null)
     try {
       await api.identity.sendSMS({ phone: phone.trim(), scene: SmsScene.LOGIN })
+      setSmsCountdown(60)
+      setSmsMessage('验证码已发送，请查看手机短信。')
     } catch (smsError) {
       setError(userFacingErrorMessage(smsError, '验证码发送失败，请稍后重试。'))
     } finally {
       setSendingSms(false)
     }
-  }, [phone])
+  }, [phone, smsCountdown])
 
   return (
     <div className={styles.form}>
@@ -182,6 +194,7 @@ const LoginPage: React.FC = () => {
       </div>
 
       {error && <div className={styles.error} role="alert">{error}</div>}
+      {smsMessage && <div className={styles.success} role="status">{smsMessage}</div>}
 
       {view === 'phone' ? (
         <>
@@ -213,9 +226,9 @@ const LoginPage: React.FC = () => {
               </FormField>
               <div className={styles.inline}>
                 <FormField label="短信验证码" htmlFor="login-sms-code" required>
-                  <Input id="login-sms-code" fullWidth inputMode="numeric" autoComplete="one-time-code" value={smsCode} onChange={(event) => setSmsCode(event.target.value)} />
+                  <Input id="login-sms-code" fullWidth autoCapitalize="characters" autoComplete="one-time-code" value={smsCode} onChange={(event) => setSmsCode(event.target.value)} />
                 </FormField>
-                <Button className={styles.inlineButton} variant="outline" loading={sendingSms} onClick={handleSendSms}>获取验证码</Button>
+                <Button className={styles.inlineButton} variant="outline" loading={sendingSms} disabled={smsCountdown > 0} onClick={handleSendSms}>{smsCountdown > 0 ? `${smsCountdown} 秒后可重发` : '获取验证码'}</Button>
               </div>
               <Button block type="submit" loading={submitting}>登录</Button>
             </form>

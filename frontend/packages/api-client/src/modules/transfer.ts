@@ -38,4 +38,16 @@ export class TransferApi {
   async downloadGrant(taskId: string): Promise<TransferDownloadGrant> {
     return this.client.post(`/transfer/tasks/${taskId}/download-grant`)
   }
+
+  /**
+   * downloadArtifact 签发并立即消费一次性授权，返回可由浏览器保存的文件内容。
+   */
+  async downloadArtifact(taskId: string): Promise<{ blob: Blob; fileName: string }> {
+    const grant = await this.downloadGrant(taskId)
+    const blob = await this.client.getBlob('/storage/download', { token: grant.token })
+    return {
+      blob,
+      fileName: grant.task.artifact_file_name || grant.task.file_name || 'download',
+    }
+  }
 }

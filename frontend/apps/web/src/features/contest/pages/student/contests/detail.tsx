@@ -27,11 +27,14 @@ const StudentContestDetailPage: React.FC = () => {
     async () => {
       if (!id) throw new Error('缺少竞赛编号，无法读取竞赛详情。')
       const [contests, problems, ladder, me] = await Promise.all([
-        api.contest.getContests({ page: 1, size: 100 }),
+        api.contest.getStudentContests({ page: 1, size: 100 }),
         api.contest.getProblems(id),
         api.contest.getLadder(id, { page: 1, size: 10 }),
         api.identity.getMe(),
       ])
+      if (!me.account.tenant_id) {
+        throw new Error('当前账号未关联学校，暂时无法订阅竞赛排行榜。')
+      }
       const contest = contests.list.find((item) => item.id === id) ?? null
       const snapshot = contest?.status === ContestStatus.ARCHIVED ? await api.contest.getResultSnapshot(id) : undefined
       return {

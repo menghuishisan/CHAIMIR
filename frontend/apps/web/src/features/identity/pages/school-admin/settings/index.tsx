@@ -1,6 +1,6 @@
 // AdminSettingsPage 管理当前学校租户配置，读取并更新 identity 租户配置接口。
 
-import React, { useCallback, useMemo, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { AuthMode } from '@chaimir/api-client'
 import { Button, Callout, Input, Select, Switch, Textarea } from '@chaimir/ui'
 import { Save, Settings } from 'lucide-react'
@@ -18,18 +18,27 @@ const AdminSettingsPage: React.FC = () => {
   const [displayName, setDisplayName] = useState('')
   const [logoUrl, setLogoUrl] = useState('')
   const [authMode, setAuthMode] = useState(String(AuthMode.LOCAL))
-  const [enableActivationCode, setEnableActivationCode] = useState(true)
+  const [enableActivationCode, setEnableActivationCode] = useState(false)
   const [featureFlags, setFeatureFlags] = useState('{}')
   const [submitting, setSubmitting] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 
-  const effectiveDisplayName = displayName || tenant?.display_name || tenant?.name || ''
-  const effectiveLogoUrl = logoUrl || tenant?.logo_url || ''
-  const effectiveAuthMode = authMode || String(tenant?.auth_mode || AuthMode.LOCAL)
-  const effectiveEnableActivationCode = enableActivationCode ?? Boolean(tenant?.enable_activation_code)
+  const effectiveDisplayName = displayName
+  const effectiveLogoUrl = logoUrl
+  const effectiveAuthMode = authMode
+  const effectiveEnableActivationCode = enableActivationCode
   const defaultFlags = useMemo(() => JSON.stringify({}, null, 2), [])
-  const effectiveFeatureFlags = featureFlags === '{}' && tenant ? JSON.stringify({}, null, 2) : featureFlags || defaultFlags
+  const effectiveFeatureFlags = featureFlags || defaultFlags
+
+  useEffect(() => {
+    if (!tenant) return
+    setDisplayName(tenant.display_name || tenant.name)
+    setLogoUrl(tenant.logo_url || '')
+    setAuthMode(String(tenant.auth_mode))
+    setEnableActivationCode(tenant.enable_activation_code)
+    setFeatureFlags(JSON.stringify(tenant.feature_flags || {}, null, 2))
+  }, [tenant])
 
   /**
    * hydrateForm 把后端租户配置填入编辑态。
@@ -42,7 +51,7 @@ const AdminSettingsPage: React.FC = () => {
     setLogoUrl(tenant.logo_url || '')
     setAuthMode(String(tenant.auth_mode))
     setEnableActivationCode(tenant.enable_activation_code)
-    setFeatureFlags(JSON.stringify({}, null, 2))
+    setFeatureFlags(JSON.stringify(tenant.feature_flags || {}, null, 2))
   }, [tenant])
 
   /**

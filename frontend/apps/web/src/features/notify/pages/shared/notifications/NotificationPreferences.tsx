@@ -7,6 +7,7 @@ import { api } from '../../../../../app/api'
 import { ErrorState, LoadingState } from '../../../../../components/ResourceState'
 import { useAsyncResource } from '../../../../../hooks'
 import { userFacingErrorMessage } from '../../../../../utils/userFacingError'
+import { notificationPreferenceLabel } from '../../../../../utils'
 import styles from '../shared.module.css'
 
 /** NotificationPreferences 使用后端偏好列表作为开关状态权威。 */
@@ -49,7 +50,7 @@ export function NotificationPreferences(): React.ReactElement {
             key={preference.type}
             checked={preference.enabled}
             disabled={updatingType === preference.type}
-            label={preference.type}
+            label={notificationPreferenceLabel(preference.type)}
             onChange={(event) => void handleToggle(preference, event.target.checked)}
           />
         ))}

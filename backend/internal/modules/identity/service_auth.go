@@ -11,6 +11,7 @@ import (
 
 	"chaimir/internal/contracts"
 	"chaimir/internal/platform/audit"
+	"chaimir/internal/platform/ids"
 	"chaimir/internal/platform/tenant"
 	"chaimir/internal/platform/timex"
 	"chaimir/pkg/apperr"
@@ -84,7 +85,7 @@ func (s *Service) LoginPlatform(ctx context.Context, req LoginPlatformRequest, d
 	if err := s.auditLogin(ctx, 0, admin.ID, contracts.RoleNumPlatformAdmin); err != nil {
 		return LoginResponse{}, err
 	}
-	return LoginResponse{AccessToken: access, RefreshToken: refresh, Account: &AccountDTO{ID: admin.ID, Name: admin.Name, Roles: []int16{contracts.RoleNumPlatformAdmin}, Status: admin.Status}}, nil
+	return LoginResponse{AccessToken: access, RefreshToken: refresh, Account: &AccountDTO{ID: ids.ID(admin.ID), Name: admin.Name, Roles: []int16{contracts.RoleNumPlatformAdmin}, Status: admin.Status}}, nil
 }
 
 // LoginPhone 用手机号密码登录,一号多校时返回租户选择列表。
@@ -115,7 +116,7 @@ func (s *Service) LoginPhone(ctx context.Context, req LoginPhoneRequest, device,
 		// 一号多校不能默认选租户,必须让前端展示候选学校后再带 tenant_id 登录。
 		opts := make([]TenantOptionDTO, 0, len(candidates))
 		for _, c := range candidates {
-			opts = append(opts, TenantOptionDTO{TenantID: c.TenantID, Name: c.TenantName, Code: c.TenantCode})
+			opts = append(opts, TenantOptionDTO{TenantID: ids.ID(c.TenantID), Name: c.TenantName, Code: c.TenantCode})
 		}
 		return LoginResponse{NeedSelectTenant: true, Tenants: opts}, nil
 	}
@@ -123,7 +124,7 @@ func (s *Service) LoginPhone(ctx context.Context, req LoginPhoneRequest, device,
 	if req.TenantID > 0 {
 		found := false
 		for _, c := range candidates {
-			if c.TenantID == req.TenantID {
+			if c.TenantID == req.TenantID.Int64() {
 				candidate = c
 				found = true
 				break
@@ -172,7 +173,7 @@ func (s *Service) LoginSMS(ctx context.Context, req LoginSMSRequest, device, ip 
 		return LoginResponse{}, err
 	}
 	phone := strings.TrimSpace(req.Phone)
-	tenantID, err := s.resolveSMSCredentialTenant(ctx, req.Phone, req.TenantID, apperr.ErrIdentitySMSNeedsTenant, apperr.ErrIdentitySMSNeedsTenant)
+	tenantID, err := s.resolveSMSCredentialTenant(ctx, req.Phone, req.TenantID.Int64(), apperr.ErrIdentitySMSNeedsTenant, apperr.ErrIdentitySMSNeedsTenant)
 	if err != nil {
 		return LoginResponse{}, err
 	}
@@ -317,7 +318,7 @@ func (s *Service) ResetPassword(ctx context.Context, req PasswordResetRequest) e
 		return err
 	}
 	phone := strings.TrimSpace(req.Phone)
-	tenantID, err := s.resolveSMSCredentialTenant(ctx, req.Phone, req.TenantID, apperr.ErrIdentityResetPasswordTenantInvalid, apperr.ErrIdentityResetPasswordTenantInvalid)
+	tenantID, err := s.resolveSMSCredentialTenant(ctx, req.Phone, req.TenantID.Int64(), apperr.ErrIdentityResetPasswordTenantInvalid, apperr.ErrIdentityResetPasswordTenantInvalid)
 	if err != nil {
 		return err
 	}

@@ -28,7 +28,7 @@ const TeacherQuestionsPage: React.FC = () => {
   }), [keyword, type])
   const categories = useAsyncResource(() => api.content.listCategories(), [])
 
-  const categoryName = useCallback((categoryId?: number) => {
+  const categoryName = useCallback((categoryId?: string) => {
     return (categories.data || []).find((category: ContentCategory) => category.id === categoryId)?.name || '未分类'
   }, [categories.data])
 

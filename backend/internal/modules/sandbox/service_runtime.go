@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"chaimir/internal/platform/ids"
 	"chaimir/internal/platform/jsonx"
 	"chaimir/internal/platform/timex"
 	"chaimir/internal/platform/workload"
@@ -257,7 +258,7 @@ func (s *Service) RunRuntimeSelftest(ctx context.Context, runtimeID int64) (Runt
 	if auditErr := s.writeAuditFromContext(ctx, 0, "sandbox.runtime.selftest", "runtime", runtimeID, map[string]any{"status": status}); auditErr != nil {
 		return RuntimeSelftestResponse{}, auditErr
 	}
-	resp := RuntimeSelftestResponse{RuntimeID: runtimeID, SelftestStatus: updated.SelftestStatus, RuntimeStatus: updated.Status, Detail: updated.SelftestDetail}
+	resp := RuntimeSelftestResponse{RuntimeID: ids.ID(runtimeID), SelftestStatus: updated.SelftestStatus, RuntimeStatus: updated.Status, Detail: updated.SelftestDetail}
 	if err != nil {
 		return resp, apperr.ErrSandboxSelftestFailed.WithCause(err)
 	}
@@ -324,7 +325,7 @@ func (s *Service) GetRuntimeSelftest(ctx context.Context, runtimeID int64) (Runt
 	}); err != nil {
 		return RuntimeSelftestResponse{}, err
 	}
-	return RuntimeSelftestResponse{RuntimeID: runtime.ID, SelftestStatus: runtime.SelftestStatus, RuntimeStatus: runtime.Status, Detail: runtime.SelftestDetail}, nil
+	return RuntimeSelftestResponse{RuntimeID: ids.ID(runtime.ID), SelftestStatus: runtime.SelftestStatus, RuntimeStatus: runtime.Status, Detail: runtime.SelftestDetail}, nil
 }
 
 // PrepullRuntimeImage 触发 DaemonSet 全节点预拉取并以真实节点状态更新数据库。
@@ -409,7 +410,7 @@ func (s *Service) PrepullRuntimeImage(ctx context.Context, runtimeID, imageID in
 	if err != nil {
 		return PrepullResponse{}, apperr.ErrSandboxImagePrepullFailed.WithCause(err)
 	}
-	return PrepullResponse{ImageID: imageID, PrepullStatus: status, DesiredNodes: result.DesiredNodes, ReadyNodes: result.ReadyNodes, DaemonSet: result.DaemonSet, ImageCount: len(imageURLs), Images: imageURLs}, nil
+	return PrepullResponse{ImageID: ids.ID(imageID), PrepullStatus: status, DesiredNodes: result.DesiredNodes, ReadyNodes: result.ReadyNodes, DaemonSet: result.DaemonSet, ImageCount: len(imageURLs), Images: imageURLs}, nil
 }
 
 // prepullImageSpecsForRuntime 汇总运行时默认工作负载会用到的不可变镜像和最小自检命令。
@@ -558,7 +559,7 @@ func (s *Service) GetRuntimeImagePrepull(ctx context.Context, runtimeID, imageID
 	}); err != nil {
 		return PrepullResponse{}, err
 	}
-	resp := PrepullResponse{ImageID: image.ID, PrepullStatus: image.PrepullStatus}
+	resp := PrepullResponse{ImageID: ids.ID(image.ID), PrepullStatus: image.PrepullStatus}
 	if len(image.PrepullDetail) == 0 {
 		return resp, nil
 	}

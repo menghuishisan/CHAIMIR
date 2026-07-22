@@ -29,7 +29,7 @@ const TeacherAntiCheatPage: React.FC = () => {
     if (!contestId) return { suspects: [] as CheatSuspect[], records: [] as CheatRecord[] }
     const [suspects, records] = await Promise.all([
       problemId ? api.contest.listCheatSuspects(contestId, {
-        problem_id: Number(problemId),
+        problem_id: problemId,
         threshold: Number(threshold),
         code_hash: codeHash || undefined,
         exclude_source_ref: excludeSourceRef || undefined,
@@ -46,7 +46,7 @@ const TeacherAntiCheatPage: React.FC = () => {
     setMessage('')
     try {
       await api.contest.createCheatRecord(contestId, {
-        team_id: Number(teamId),
+        team_id: teamId,
         type: Number(cheatType) as CheatType,
         action: Number(cheatAction) as CheatAction,
         evidence: parseJsonObject(evidence),
@@ -70,7 +70,7 @@ const TeacherAntiCheatPage: React.FC = () => {
       <div className={styles.header}>
         <div>
           <h1 className={styles.title}><ShieldAlert size={28} />代码相似度告警</h1>
-          <p className={styles.subtitle}>按竞赛和题目查询后端识别的相似度线索。</p>
+          <p className={styles.subtitle}>按竞赛和题目查询提交内容的相似度线索。</p>
         </div>
         <Button variant="outline" icon={<RefreshCw size={16} />} onClick={resource.reload}>刷新</Button>
       </div>

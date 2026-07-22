@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"chaimir/internal/contracts"
+	"chaimir/internal/platform/ids"
 	"chaimir/internal/platform/pagex"
 	"chaimir/pkg/apperr"
 )
@@ -21,12 +22,12 @@ func (s *Service) CreateCheatRecord(ctx context.Context, contestID int64, req Ch
 	if err != nil {
 		return CheatRecordDTO{}, err
 	}
-	item := CheatRecord{ID: s.ids.Generate(), TenantID: id.TenantID, ContestID: contestID, TeamID: req.TeamID, Type: req.Type, Evidence: req.Evidence, Action: req.Action, OperatorID: id.AccountID}
+	item := CheatRecord{ID: s.ids.Generate(), TenantID: id.TenantID, ContestID: contestID, TeamID: req.TeamID.Int64(), Type: req.Type, Evidence: req.Evidence, Action: req.Action, OperatorID: id.AccountID}
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
 		if _, err := s.loadContestForManage(ctx, tx, id.TenantID, id.AccountID, contestID); err != nil {
 			return err
 		}
-		team, err := tx.GetTeam(ctx, id.TenantID, req.TeamID)
+		team, err := tx.GetTeam(ctx, id.TenantID, req.TeamID.Int64())
 		if err != nil {
 			return err
 		}
@@ -110,7 +111,7 @@ func (s *Service) ListCheatSuspects(ctx context.Context, contestID, problemID in
 	}
 	out := make([]CheatSuspectDTO, 0, len(matches))
 	for _, item := range matches {
-		out = append(out, CheatSuspectDTO{SourceRef: item.SourceRef, SubmitterID: item.SubmitterID, Score: item.Score, CodeHash: item.CodeHash})
+		out = append(out, CheatSuspectDTO{SourceRef: item.SourceRef, SubmitterID: ids.ID(item.SubmitterID), Score: item.Score, CodeHash: item.CodeHash})
 	}
 	return out, nil
 }

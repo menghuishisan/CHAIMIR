@@ -21,6 +21,7 @@ type Querier interface {
 	CountContests(ctx context.Context, arg CountContestsParams) (int64, error)
 	CountLadder(ctx context.Context, arg CountLadderParams) (int64, error)
 	CountProblemSolvedTeams(ctx context.Context, arg CountProblemSolvedTeamsParams) (int64, error)
+	CountStudentContests(ctx context.Context, tenantID int64) (int64, error)
 	CountVulnProblems(ctx context.Context, arg CountVulnProblemsParams) (int64, error)
 	CreateBattleEntry(ctx context.Context, arg CreateBattleEntryParams) (BattleEntry, error)
 	CreateBattleMatch(ctx context.Context, arg CreateBattleMatchParams) (BattleMatch, error)
@@ -28,7 +29,6 @@ type Querier interface {
 	// contest.sql 定义 M8 竞赛模块的 sqlc 查询,仅访问竞赛模块自有表。
 	CreateContest(ctx context.Context, arg CreateContestParams) (Contest, error)
 	CreateOrUpdateLadderRank(ctx context.Context, arg CreateOrUpdateLadderRankParams) (CreateOrUpdateLadderRankRow, error)
-	CreateResultSnapshot(ctx context.Context, arg CreateResultSnapshotParams) (ContestResultSnapshot, error)
 	CreateSolveSubmission(ctx context.Context, arg CreateSolveSubmissionParams) (SolveSubmission, error)
 	CreateTeam(ctx context.Context, arg CreateTeamParams) (Team, error)
 	DeactivateBattleEntries(ctx context.Context, arg DeactivateBattleEntriesParams) error
@@ -41,7 +41,7 @@ type Querier interface {
 	GetContest(ctx context.Context, arg GetContestParams) (Contest, error)
 	GetContestProblem(ctx context.Context, arg GetContestProblemParams) (ContestProblem, error)
 	GetLadderByTeam(ctx context.Context, arg GetLadderByTeamParams) (GetLadderByTeamRow, error)
-	GetResultSnapshot(ctx context.Context, arg GetResultSnapshotParams) (ContestResultSnapshot, error)
+	GetLadderSnapshot(ctx context.Context, arg GetLadderSnapshotParams) (ContestLadderSnapshot, error)
 	GetSolveSubmission(ctx context.Context, arg GetSolveSubmissionParams) (SolveSubmission, error)
 	GetSolveSubmissionByJudgeTask(ctx context.Context, arg GetSolveSubmissionByJudgeTaskParams) (SolveSubmission, error)
 	GetTeam(ctx context.Context, arg GetTeamParams) (Team, error)
@@ -59,6 +59,7 @@ type Querier interface {
 	ListLadder(ctx context.Context, arg ListLadderParams) ([]ListLadderRow, error)
 	ListRunningBattleMatchesWithJudgeTask(ctx context.Context, limit int32) ([]BattleMatch, error)
 	ListStudentContestRecords(ctx context.Context, arg ListStudentContestRecordsParams) ([]ListStudentContestRecordsRow, error)
+	ListStudentContests(ctx context.Context, arg ListStudentContestsParams) ([]Contest, error)
 	ListTeamMembers(ctx context.Context, arg ListTeamMembersParams) ([]TeamMember, error)
 	ListVulnProblems(ctx context.Context, arg ListVulnProblemsParams) ([]VulnProblem, error)
 	ListVulnSources(ctx context.Context, tenantID pgtype.Int8) ([]VulnSource, error)
@@ -76,6 +77,7 @@ type Querier interface {
 	UpdateContest(ctx context.Context, arg UpdateContestParams) (Contest, error)
 	UpdateSolveSubmissionResult(ctx context.Context, arg UpdateSolveSubmissionResultParams) (SolveSubmission, error)
 	UpsertContestProblem(ctx context.Context, arg UpsertContestProblemParams) (ContestProblem, error)
+	UpsertLadderSnapshot(ctx context.Context, arg UpsertLadderSnapshotParams) (ContestLadderSnapshot, error)
 	UpsertVulnProblem(ctx context.Context, arg UpsertVulnProblemParams) (VulnProblem, error)
 	UpsertVulnSource(ctx context.Context, arg UpsertVulnSourceParams) (VulnSource, error)
 }

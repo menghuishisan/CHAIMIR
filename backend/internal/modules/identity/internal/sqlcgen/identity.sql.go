@@ -200,6 +200,56 @@ func (q *Queries) BatchGetAccounts(ctx context.Context, dollar_1 []int64) ([]Bat
 	return items, nil
 }
 
+const claimTenantProvisionOutbox = `-- name: ClaimTenantProvisionOutbox :many
+UPDATE tenant_provision_outbox
+SET status = 4, retry_count = retry_count + 1, updated_at = now()
+WHERE id IN (
+    SELECT id
+    FROM tenant_provision_outbox
+    WHERE status IN (1, 3) OR (status = 4 AND updated_at <= $1::timestamptz)
+    ORDER BY created_at ASC, id ASC
+    LIMIT $2
+    FOR UPDATE SKIP LOCKED
+)
+RETURNING id, tenant_id, deploy_mode, trace_id, provisioned_at, status, retry_count, last_error, created_at, updated_at
+`
+
+type ClaimTenantProvisionOutboxParams struct {
+	StaleBefore pgtype.Timestamptz `json:"stale_before"`
+	PageLimit   int32              `json:"page_limit"`
+}
+
+func (q *Queries) ClaimTenantProvisionOutbox(ctx context.Context, arg ClaimTenantProvisionOutboxParams) ([]TenantProvisionOutbox, error) {
+	rows, err := q.db.Query(ctx, claimTenantProvisionOutbox, arg.StaleBefore, arg.PageLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []TenantProvisionOutbox{}
+	for rows.Next() {
+		var i TenantProvisionOutbox
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.DeployMode,
+			&i.TraceID,
+			&i.ProvisionedAt,
+			&i.Status,
+			&i.RetryCount,
+			&i.LastError,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const classExists = `-- name: ClassExists :one
 SELECT EXISTS(SELECT 1 FROM class WHERE id = $1 AND tenant_id = $2 AND deleted_at IS NULL)
 `
@@ -881,6 +931,44 @@ func (q *Queries) CreateTenantApplication(ctx context.Context, arg CreateTenantA
 		&i.RejectReason,
 		&i.ReviewedBy,
 		&i.TenantID,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const createTenantProvisionOutbox = `-- name: CreateTenantProvisionOutbox :one
+INSERT INTO tenant_provision_outbox (id, tenant_id, deploy_mode, trace_id, provisioned_at, status, retry_count, last_error, created_at, updated_at)
+VALUES ($1, $2, $3, $4, $5, 1, 0, NULL, now(), now())
+RETURNING id, tenant_id, deploy_mode, trace_id, provisioned_at, status, retry_count, last_error, created_at, updated_at
+`
+
+type CreateTenantProvisionOutboxParams struct {
+	ID            int64              `json:"id"`
+	TenantID      int64              `json:"tenant_id"`
+	DeployMode    int16              `json:"deploy_mode"`
+	TraceID       string             `json:"trace_id"`
+	ProvisionedAt pgtype.Timestamptz `json:"provisioned_at"`
+}
+
+func (q *Queries) CreateTenantProvisionOutbox(ctx context.Context, arg CreateTenantProvisionOutboxParams) (TenantProvisionOutbox, error) {
+	row := q.db.QueryRow(ctx, createTenantProvisionOutbox,
+		arg.ID,
+		arg.TenantID,
+		arg.DeployMode,
+		arg.TraceID,
+		arg.ProvisionedAt,
+	)
+	var i TenantProvisionOutbox
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.DeployMode,
+		&i.TraceID,
+		&i.ProvisionedAt,
+		&i.Status,
+		&i.RetryCount,
+		&i.LastError,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -2080,6 +2168,61 @@ func (q *Queries) MarkSMSCodeUsed(ctx context.Context, arg MarkSMSCodeUsedParams
 	return err
 }
 
+const markTenantProvisionOutboxFailed = `-- name: MarkTenantProvisionOutboxFailed :one
+UPDATE tenant_provision_outbox
+SET status = 3, last_error = $2, updated_at = now()
+WHERE id = $1
+RETURNING id, tenant_id, deploy_mode, trace_id, provisioned_at, status, retry_count, last_error, created_at, updated_at
+`
+
+type MarkTenantProvisionOutboxFailedParams struct {
+	ID        int64       `json:"id"`
+	LastError pgtype.Text `json:"last_error"`
+}
+
+func (q *Queries) MarkTenantProvisionOutboxFailed(ctx context.Context, arg MarkTenantProvisionOutboxFailedParams) (TenantProvisionOutbox, error) {
+	row := q.db.QueryRow(ctx, markTenantProvisionOutboxFailed, arg.ID, arg.LastError)
+	var i TenantProvisionOutbox
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.DeployMode,
+		&i.TraceID,
+		&i.ProvisionedAt,
+		&i.Status,
+		&i.RetryCount,
+		&i.LastError,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const markTenantProvisionOutboxPublished = `-- name: MarkTenantProvisionOutboxPublished :one
+UPDATE tenant_provision_outbox
+SET status = 2, last_error = NULL, updated_at = now()
+WHERE id = $1
+RETURNING id, tenant_id, deploy_mode, trace_id, provisioned_at, status, retry_count, last_error, created_at, updated_at
+`
+
+func (q *Queries) MarkTenantProvisionOutboxPublished(ctx context.Context, id int64) (TenantProvisionOutbox, error) {
+	row := q.db.QueryRow(ctx, markTenantProvisionOutboxPublished, id)
+	var i TenantProvisionOutbox
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.DeployMode,
+		&i.TraceID,
+		&i.ProvisionedAt,
+		&i.Status,
+		&i.RetryCount,
+		&i.LastError,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const platformStats = `-- name: PlatformStats :one
 SELECT
   (SELECT COUNT(*) FROM tenant) AS tenant_count,
@@ -2125,15 +2268,46 @@ func (q *Queries) PlatformStats(ctx context.Context) (PlatformStatsRow, error) {
 	return i, err
 }
 
-const promoteClasses = `-- name: PromoteClasses :exec
-UPDATE class
-SET enrollment_year = enrollment_year + 1
-WHERE tenant_id = $1 AND status = 1 AND deleted_at IS NULL
+const promoteClassStudentProfiles = `-- name: PromoteClassStudentProfiles :exec
+UPDATE account_profile
+SET enrollment_year = $1
+WHERE tenant_id = $2
+  AND org_id = ANY($3::bigint[])
 `
 
-func (q *Queries) PromoteClasses(ctx context.Context, tenantID int64) error {
-	_, err := q.db.Exec(ctx, promoteClasses, tenantID)
+type PromoteClassStudentProfilesParams struct {
+	TargetYear pgtype.Int2 `json:"target_year"`
+	TenantID   int64       `json:"tenant_id"`
+	ClassIds   []int64     `json:"class_ids"`
+}
+
+func (q *Queries) PromoteClassStudentProfiles(ctx context.Context, arg PromoteClassStudentProfilesParams) error {
+	_, err := q.db.Exec(ctx, promoteClassStudentProfiles, arg.TargetYear, arg.TenantID, arg.ClassIds)
 	return err
+}
+
+const promoteClasses = `-- name: PromoteClasses :execrows
+UPDATE class
+SET name = regexp_replace(name, enrollment_year::text, $1::text, 'g'),
+    enrollment_year = $1
+WHERE tenant_id = $2
+  AND id = ANY($3::bigint[])
+  AND status = 1
+  AND deleted_at IS NULL
+`
+
+type PromoteClassesParams struct {
+	TargetYear int16   `json:"target_year"`
+	TenantID   int64   `json:"tenant_id"`
+	ClassIds   []int64 `json:"class_ids"`
+}
+
+func (q *Queries) PromoteClasses(ctx context.Context, arg PromoteClassesParams) (int64, error) {
+	result, err := q.db.Exec(ctx, promoteClasses, arg.TargetYear, arg.TenantID, arg.ClassIds)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const queryAuditLogs = `-- name: QueryAuditLogs :many

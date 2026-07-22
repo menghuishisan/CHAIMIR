@@ -8,7 +8,7 @@ import { api } from '../../../../../app/api'
 import { EmptyState, ErrorState, LoadingState } from '../../../../../components/ResourceState'
 import { useAsyncResource } from '../../../../../hooks'
 import styles from '../shared.module.css'
-import { formatDateTime, transferTaskStatusLabel } from '../../../../../utils/index'
+import { formatDateTime, saveBlob, transferTaskStatusLabel, transferTaskSubjectLabel } from '../../../../../utils/index'
 
 const PAGE_SIZE = 20
 
@@ -41,7 +41,6 @@ const TasksPage: React.FC = () => {
     () => api.transfer.listTasks({ page: 1, size: PAGE_SIZE }),
     []
   )
-  const [grantByTask, setGrantByTask] = useState<Record<string, string>>({})
   const [grantError, setGrantError] = useState<ApiError | null>(null)
   const [grantingTaskId, setGrantingTaskId] = useState<string | null>(null)
   const [detail, setDetail] = useState<TransferTask | null>(null)
@@ -53,11 +52,8 @@ const TasksPage: React.FC = () => {
     setGrantError(null)
     setGrantingTaskId(task.task_id)
     try {
-      const grant = await api.transfer.downloadGrant(task.task_id)
-      setGrantByTask((current) => ({
-        ...current,
-        [task.task_id]: `下载授权已签发，有效期至 ${formatDateTime(grant.expires_at)}`,
-      }))
+      const artifact = await api.transfer.downloadArtifact(task.task_id)
+      saveBlob(artifact.blob, artifact.fileName)
     } catch (error) {
       setGrantError(error as ApiError)
     } finally {
@@ -108,7 +104,7 @@ const TasksPage: React.FC = () => {
           {tasks.map((task) => (
             <article className={styles.card} key={task.task_id}>
               <div className={styles.cardMain}>
-                <h2 className={styles.cardTitle}>{task.subject}</h2>
+                <h2 className={styles.cardTitle}>{transferTaskSubjectLabel(task.subject)}</h2>
                 <div className={styles.meta}>
                   <span className={styles.status}>{transferTaskStatusLabel(task.status)}</span>
                   <span>{task.channel === 'export' ? '导出任务' : '导入任务'}</span>
@@ -118,13 +114,10 @@ const TasksPage: React.FC = () => {
                 <div className={styles.progressTrack} aria-hidden="true">
                   <div className={`${styles.progressFill} ${taskProgressClass(task.status)}`} />
                 </div>
-                {grantByTask[task.task_id] && (
-                  <div className={styles.grant}>{grantByTask[task.task_id]}</div>
-                )}
               </div>
               <div className={styles.cardActions}>
                 <Button variant="outline" icon={<Eye size={16} />} loading={loadingDetailId === task.task_id} onClick={() => void handleOpenDetail(task.task_id)}>查看详情</Button>
-                <Button variant="primary" icon={<Download size={16} />} loading={grantingTaskId === task.task_id} disabled={task.status !== 'succeeded'} onClick={() => handleGrant(task)}>获取下载授权</Button>
+                <Button variant="primary" icon={<Download size={16} />} loading={grantingTaskId === task.task_id} disabled={task.status !== 'succeeded'} onClick={() => handleGrant(task)}>下载文件</Button>
               </div>
             </article>
           ))}
@@ -133,7 +126,7 @@ const TasksPage: React.FC = () => {
       <Modal open={detail !== null} title="任务详情" onClose={() => setDetail(null)}>
         {detail && (
           <DescriptionList items={[
-            { key: 'subject', label: '任务', value: detail.subject },
+            { key: 'subject', label: '任务', value: transferTaskSubjectLabel(detail.subject) },
             { key: 'status', label: '状态', value: transferTaskStatusLabel(detail.status) },
             { key: 'attempt', label: '执行次数', value: `${detail.attempt_count}/${detail.max_attempts}` },
             { key: 'created', label: '创建时间', value: formatDateTime(detail.created_at) },

@@ -91,10 +91,10 @@ const TeacherCourseOutlinePage: React.FC = () => {
   }, [contentRef, editingLessonId, lessonChapterId, lessonSort, lessonTitle, lessonType, resource])
 
   /** deleteChapter 删除后端确认未被课时依赖的章节。 */
-  const deleteChapter = async (chapterId: number) => {
+  const deleteChapter = async (chapterId: string) => {
     if (!id || !window.confirm('确定删除这个章节吗？')) return
     try {
-      await api.teaching.deleteChapter(id, String(chapterId))
+      await api.teaching.deleteChapter(id, chapterId)
       setMessage('章节已删除。')
       resource.reload()
     } catch (actionError) {
@@ -103,10 +103,10 @@ const TeacherCourseOutlinePage: React.FC = () => {
   }
 
   /** deleteLesson 删除指定课时并刷新课程大纲。 */
-  const deleteLesson = async (chapterId: number, lessonId: number) => {
+  const deleteLesson = async (chapterId: string, lessonId: string) => {
     if (!window.confirm('确定删除这个课时吗？')) return
     try {
-      await api.teaching.deleteLesson(String(chapterId), String(lessonId))
+      await api.teaching.deleteLesson(chapterId, lessonId)
       setMessage('课时已删除。')
       resource.reload()
     } catch (actionError) {

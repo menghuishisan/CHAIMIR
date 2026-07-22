@@ -52,7 +52,7 @@ const AlertsPage: React.FC = () => {
       <div className={styles.header}>
         <div>
           <h1 className={styles.title}><AlertTriangle size={28} />学业预警干预</h1>
-          <p className={styles.subtitle}>查看学业预警，并按后端规则触发重新扫描。</p>
+          <p className={styles.subtitle}>查看学业预警，并按当前规则重新检查学生成绩。</p>
         </div>
         <Button icon={<Send size={16} />} onClick={handleScan}>触发预警扫描</Button>
       </div>

@@ -10,7 +10,7 @@ import { api } from '../../../../../app/api'
 import { ErrorState, LoadingState } from '../../../../../components/ResourceState'
 import { useAsyncResource } from '../../../../../hooks'
 import styles from '../../sim.module.css'
-import { formatDateTime, simComputeOptions } from '../../../../../utils/index'
+import { formatDateTime, simComputeOptions, simPackageStatusLabel } from '../../../../../utils/index'
 import { userFacingErrorMessage } from '../../../../../utils/userFacingError'
 
 const TeacherSimulationsPage: React.FC = () => {
@@ -42,7 +42,7 @@ const TeacherSimulationsPage: React.FC = () => {
       return
     }
     if (compute === SIM_COMPUTE.BACKEND && !resource.data?.capabilities.adapters.some((adapter) => adapter.code === backendAdapter)) {
-      setError('请选择当前可用的后端计算方式。')
+      setError('请选择当前可用的云端计算方式。')
       return
     }
     setSubmitting(true)
@@ -100,7 +100,7 @@ const TeacherSimulationsPage: React.FC = () => {
     { key: 'name', title: '仿真包', dataIndex: 'name', priority: 'primary' },
     { key: 'code', title: '编号', dataIndex: 'code' },
     { key: 'version', title: '版本', dataIndex: 'version' },
-    { key: 'status', title: '状态', render: (row) => <span className={styles.status}>{row.status}</span> },
+    { key: 'status', title: '状态', render: (row) => <span className={styles.status}>{simPackageStatusLabel(row.status)}</span> },
     { key: 'updated', title: '更新时间', render: (row) => formatDateTime(row.updated_at) },
     { key: 'actions', title: '操作', render: (row) => <div className={styles.actions}><Button variant="outline" size="sm" icon={<Pencil size={14} />} onClick={() => editPackage(row)}>更新</Button><Button variant="ghost" size="sm" icon={<Eye size={14} />} onClick={() => void previewPackage(row)}>预览报告</Button></div> },
   ], [editPackage, previewPackage])
@@ -137,8 +137,8 @@ const TeacherSimulationsPage: React.FC = () => {
           <label className={styles.field}>名称<Input fullWidth value={name} onChange={(event) => setName(event.target.value)} /></label>
           <label className={styles.field}>分类<Input fullWidth value={category} onChange={(event) => setCategory(event.target.value)} /></label>
           <label className={styles.field}>运行方式<Select fullWidth value={compute} options={computeOptions} onChange={changeCompute} /></label>
-          {compute === SIM_COMPUTE.BACKEND && <label className={styles.field}>后端计算方式<Select fullWidth value={backendAdapter} options={backendAdapters.map((adapter) => ({ value: adapter.code, label: adapter.name }))} onChange={setBackendAdapter} /></label>}
-          <label className={styles.field}>Bundle 文件<input type="file" onChange={(event) => setFile(event.target.files?.[0] || null)} /></label>
+          {compute === SIM_COMPUTE.BACKEND && <label className={styles.field}>云端计算方式<Select fullWidth value={backendAdapter} options={backendAdapters.map((adapter) => ({ value: adapter.code, label: adapter.name }))} onChange={setBackendAdapter} /></label>}
+          <label className={styles.field}>仿真包文件<input type="file" onChange={(event) => setFile(event.target.files?.[0] || null)} /></label>
         </div>
         {compute === SIM_COMPUTE.BACKEND && backendAdapters.find((adapter) => adapter.code === backendAdapter)?.description && <p className={styles.subtitle}>{backendAdapters.find((adapter) => adapter.code === backendAdapter)?.description}</p>}
         <Button icon={<Upload size={16} />} loading={submitting} onClick={submitPackage}>{editingPackage ? '提交更新' : '提交审核'}</Button>

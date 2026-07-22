@@ -8,6 +8,7 @@ import (
 	"chaimir/internal/contracts"
 	"chaimir/internal/platform/auth"
 	"chaimir/internal/platform/httpx"
+	"chaimir/internal/platform/ids"
 	"chaimir/internal/platform/response"
 	"chaimir/internal/platform/timex"
 	"chaimir/pkg/apperr"
@@ -274,11 +275,12 @@ func queryRFC3339(c *gin.Context, key string) (time.Time, bool) {
 	return value, true
 }
 
+// tenantSummaryDTOs 将跨模块租户摘要转换为管理端 HTTP DTO。
 func tenantSummaryDTOs(items []contracts.TenantSummary) []TenantSummaryDTO {
 	out := make([]TenantSummaryDTO, 0, len(items))
 	for _, item := range items {
 		out = append(out, TenantSummaryDTO{
-			TenantID:   item.TenantID,
+			TenantID:   ids.ID(item.TenantID),
 			Code:       item.Code,
 			Name:       item.Name,
 			Type:       item.Type,
@@ -292,11 +294,12 @@ func tenantSummaryDTOs(items []contracts.TenantSummary) []TenantSummaryDTO {
 	return out
 }
 
+// tenantApplicationSummaryDTOs 将入驻申请摘要转换为管理端 HTTP DTO。
 func tenantApplicationSummaryDTOs(items []contracts.TenantApplicationSummary) []TenantApplicationSummaryDTO {
 	out := make([]TenantApplicationSummaryDTO, 0, len(items))
 	for _, item := range items {
 		out = append(out, TenantApplicationSummaryDTO{
-			ApplicationID: item.ApplicationID,
+			ApplicationID: ids.ID(item.ApplicationID),
 			SchoolName:    item.SchoolName,
 			SchoolType:    item.SchoolType,
 			ContactName:   item.ContactName,
@@ -310,17 +313,18 @@ func tenantApplicationSummaryDTOs(items []contracts.TenantApplicationSummary) []
 	return out
 }
 
+// auditLogEntryDTOs 将统一审计契约转换为管理端 HTTP DTO。
 func auditLogEntryDTOs(items []contracts.AuditLogEntry) []AuditLogEntryDTO {
 	out := make([]AuditLogEntryDTO, 0, len(items))
 	for _, item := range items {
 		out = append(out, AuditLogEntryDTO{
-			ID:         item.ID,
-			TenantID:   item.TenantID,
-			ActorID:    item.ActorID,
+			ID:         ids.ID(item.ID),
+			TenantID:   ids.ID(item.TenantID),
+			ActorID:    ids.ID(item.ActorID),
 			ActorRole:  item.ActorRole,
 			Action:     item.Action,
 			TargetType: item.TargetType,
-			TargetID:   item.TargetID,
+			TargetID:   ids.ID(item.TargetID),
 			Detail:     item.Detail,
 			IP:         item.IP,
 			TraceID:    item.TraceID,
@@ -330,6 +334,7 @@ func auditLogEntryDTOs(items []contracts.AuditLogEntry) []AuditLogEntryDTO {
 	return out
 }
 
+// valueTime 将可空时间转换为统一零值，供时间格式化函数处理。
 func valueTime(value *time.Time) time.Time {
 	if value == nil {
 		return time.Time{}

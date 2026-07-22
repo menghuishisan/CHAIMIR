@@ -14,6 +14,22 @@ func tenantFromRow(row sqlcgen.Tenant) Tenant {
 	return tenantFields(row.ID, row.Code, row.Name, row.Type, row.Status, row.DeployMode, row.ExpireAt, row.LogoUrl, row.DisplayName, row.FeatureFlags, row.AuthMode, row.EnableActivationCode, row.CreatedAt, row.UpdatedAt)
 }
 
+// tenantProvisionOutboxFromRow 转换新租户初始化 outbox 行。
+func tenantProvisionOutboxFromRow(row sqlcgen.TenantProvisionOutbox) TenantProvisionOutbox {
+	return TenantProvisionOutbox{
+		ID:            row.ID,
+		TenantID:      row.TenantID,
+		DeployMode:    row.DeployMode,
+		TraceID:       row.TraceID,
+		ProvisionedAt: timex.FromTimestamptz(row.ProvisionedAt),
+		Status:        row.Status,
+		RetryCount:    row.RetryCount,
+		LastError:     pgtypex.TextValue(row.LastError),
+		CreatedAt:     timex.FromTimestamptz(row.CreatedAt),
+		UpdatedAt:     timex.FromTimestamptz(row.UpdatedAt),
+	}
+}
+
 // tenantFromPagedRow 转换分页租户查询行,忽略 repo 单独处理的窗口计数字段。
 func tenantFromPagedRow(row sqlcgen.ListTenantsPagedRow) Tenant {
 	return tenantFields(row.ID, row.Code, row.Name, row.Type, row.Status, row.DeployMode, row.ExpireAt, row.LogoUrl, row.DisplayName, row.FeatureFlags, row.AuthMode, row.EnableActivationCode, row.CreatedAt, row.UpdatedAt)

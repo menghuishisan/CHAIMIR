@@ -5,6 +5,7 @@ import { SmsScene } from '@chaimir/api-client'
 import { Button, Callout, FormField, Input } from '@chaimir/ui'
 import { KeyRound, RefreshCw, Smartphone } from 'lucide-react'
 import { api } from '../../../../../app/api'
+import { invalidateAppResource } from '../../../../../app/resourceInvalidation'
 import {
   getStoredRefreshToken,
   persistRefreshedTokens,
@@ -76,6 +77,7 @@ export function SecuritySettings(): React.ReactElement {
     }
     void runAction('phone', async () => {
       await api.identity.changePhone({ phone: phone.trim(), code: smsCode.trim() })
+      invalidateAppResource('profile')
       setPhone('')
       setSmsCode('')
     }, '绑定手机号已更新。')
@@ -90,7 +92,10 @@ export function SecuritySettings(): React.ReactElement {
     }
     void runAction('refresh', async () => {
       const response = await api.identity.refreshToken({ refresh_token: refreshToken })
-      persistRefreshedTokens(response)
+      if (!response.access_token || !response.refresh_token) {
+        throw new Error('登录状态刷新响应不完整')
+      }
+      persistRefreshedTokens({ access_token: response.access_token, refresh_token: response.refresh_token, must_change_pwd: response.must_change_pwd })
     }, '登录状态已刷新。')
   }, [runAction])
 
@@ -116,7 +121,7 @@ export function SecuritySettings(): React.ReactElement {
           <Input id="profile-phone" fullWidth inputMode="tel" autoComplete="tel" value={phone} onChange={(event) => setPhone(event.target.value)} />
         </FormField>
         <FormField label="短信验证码" htmlFor="profile-phone-code" required>
-          <Input id="profile-phone-code" fullWidth inputMode="numeric" autoComplete="one-time-code" value={smsCode} onChange={(event) => setSmsCode(event.target.value)} />
+          <Input id="profile-phone-code" fullWidth autoCapitalize="characters" autoComplete="one-time-code" value={smsCode} onChange={(event) => setSmsCode(event.target.value)} />
         </FormField>
         <div className={styles.actions}>
           <Button variant="outline" loading={pendingAction === 'sms'} onClick={handleSendPhoneCode}>获取验证码</Button>

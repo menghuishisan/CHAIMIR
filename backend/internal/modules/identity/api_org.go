@@ -19,21 +19,27 @@ type orgAPI struct {
 // registerOrgRoutes 注册学校管理员组织架构维护路由。
 func registerOrgRoutes(r gin.IRouter, svc *Service, authn *auth.Manager) {
 	api := orgAPI{svc: svc}
-	g := r.Group("/org", authn.Middleware(), auth.RequireTenantAnyRole(svc, contracts.RoleSchoolAdmin))
-	api.register(g)
+	read := r.Group("/org", authn.Middleware(), auth.RequireTenantAnyRole(svc, contracts.RoleTeacher, contracts.RoleSchoolAdmin))
+	write := r.Group("/org", authn.Middleware(), auth.RequireTenantAnyRole(svc, contracts.RoleSchoolAdmin))
+	api.registerRead(read)
+	api.registerWrite(write)
 }
 
-// register 把组织架构各资源路由绑定到具名 handler。
-func (a orgAPI) register(g gin.IRouter) {
+// registerRead 注册教师与学校管理员共用的组织只读接口。
+func (a orgAPI) registerRead(g gin.IRouter) {
 	g.GET("/departments", a.listDepartments)
+	g.GET("/majors", a.listMajors)
+	g.GET("/classes", a.listClasses)
+}
+
+// registerWrite 注册学校管理员组织写入、导入和批量状态接口。
+func (a orgAPI) registerWrite(g gin.IRouter) {
 	g.POST("/departments", a.createDepartment)
 	g.PATCH("/departments/:id", a.updateDepartment)
 	g.DELETE("/departments/:id", a.deleteDepartment)
-	g.GET("/majors", a.listMajors)
 	g.POST("/majors", a.createMajor)
 	g.PATCH("/majors/:id", a.updateMajor)
 	g.DELETE("/majors/:id", a.deleteMajor)
-	g.GET("/classes", a.listClasses)
 	g.POST("/classes", a.createClass)
 	g.PATCH("/classes/:id", a.updateClass)
 	g.DELETE("/classes/:id", a.deleteClass)
@@ -46,7 +52,7 @@ func (a orgAPI) register(g gin.IRouter) {
 
 // listDepartments 返回当前租户院系列表。
 func (a orgAPI) listDepartments(c *gin.Context) {
-	out, err := a.svc.ListDepartmentsByAdmin(c.Request.Context())
+	out, err := a.svc.ListDepartmentsForViewer(c.Request.Context())
 	if err != nil {
 		httpx.Write(c, gin.H{}, err)
 		return
@@ -105,7 +111,7 @@ func (a orgAPI) listMajors(c *gin.Context) {
 	if !ok {
 		return
 	}
-	out, err := a.svc.ListMajorsByAdmin(c.Request.Context(), departmentID)
+	out, err := a.svc.ListMajorsForViewer(c.Request.Context(), departmentID)
 	if err != nil {
 		httpx.Write(c, gin.H{}, err)
 		return
@@ -164,7 +170,7 @@ func (a orgAPI) listClasses(c *gin.Context) {
 	if !ok {
 		return
 	}
-	out, err := a.svc.ListClassesByAdmin(c.Request.Context(), majorID)
+	out, err := a.svc.ListClassesForViewer(c.Request.Context(), majorID)
 	if err != nil {
 		httpx.Write(c, gin.H{}, err)
 		return
@@ -303,7 +309,11 @@ func (a orgAPI) archiveClasses(c *gin.Context) {
 
 // promoteClasses 绑定班级批量升级请求。
 func (a orgAPI) promoteClasses(c *gin.Context) {
-	if err := a.svc.PromoteClassesByAdmin(c.Request.Context()); err != nil {
+	var req PromoteClassesRequest
+	if !httpx.BindJSON(c, &req) {
+		return
+	}
+	if err := a.svc.PromoteClassesByAdmin(c.Request.Context(), req); err != nil {
 		httpx.Write(c, gin.H{}, err)
 		return
 	}

@@ -27,7 +27,7 @@ func (s *Service) SendSMS(ctx context.Context, req SendSMSRequest) error {
 		return apperr.ErrInternal.WithCause(fmt.Errorf("短信限频依赖 Redis 未初始化"))
 	}
 	phone := strings.TrimSpace(req.Phone)
-	tenantID, err := s.resolveSMSSendTenant(ctx, phone, req.Scene, req.TenantID)
+	tenantID, err := s.resolveSMSSendTenant(ctx, phone, req.Scene, req.TenantID.Int64())
 	if err != nil {
 		return err
 	}

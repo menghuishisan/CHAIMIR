@@ -75,7 +75,7 @@ const TeacherExamsPage: React.FC = () => {
             <File size={28} />
             试卷库管理
           </h1>
-          <p className={styles.subtitle}>试卷和组卷规则来自内容中心后端。</p>
+          <p className={styles.subtitle}>统一维护试卷与抽题规则，并可随时重新组卷。</p>
         </div>
         <div className={styles.toolbar}>
           <Button variant="outline" icon={<RefreshCw size={16} />} onClick={resource.reload}>刷新</Button>

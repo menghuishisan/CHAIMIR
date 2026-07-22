@@ -3,6 +3,7 @@ package httpx
 
 import (
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
@@ -76,6 +77,16 @@ func WriteAttachment(c *gin.Context, fileName, contentType string, data []byte) 
 	c.Header("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, safeAttachmentName(fileName)))
 	c.Header("X-Content-Type-Options", "nosniff")
 	c.Data(http.StatusOK, contentType, data)
+}
+
+// WriteAttachmentStream 统一输出对象存储文件流,复用安全文件名与防嗅探响应头。
+func WriteAttachmentStream(c *gin.Context, fileName, contentType string, size int64, reader io.Reader) {
+	if strings.TrimSpace(contentType) == "" {
+		contentType = "application/octet-stream"
+	}
+	c.Header("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, safeAttachmentName(fileName)))
+	c.Header("X-Content-Type-Options", "nosniff")
+	c.DataFromReader(http.StatusOK, size, contentType, reader, nil)
 }
 
 // PrefixReverseProxyConfig 描述挂在平台代理前缀下的内部 Web 服务。

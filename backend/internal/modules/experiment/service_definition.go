@@ -33,6 +33,29 @@ func (s *Service) ListExperiments(ctx context.Context, courseID int64, status in
 	return out, total, page, size, nil
 }
 
+// ListPublishedExperiments 查询学生可发现的已发布实验，并返回最小安全投影。
+func (s *Service) ListPublishedExperiments(ctx context.Context, courseID int64, page, size int) ([]StudentExperimentDTO, int64, int, int, error) {
+	id, err := currentIdentity(ctx)
+	if err != nil {
+		return nil, 0, 0, 0, err
+	}
+	page, size = pagex.Normalize(page, size)
+	items := []Experiment{}
+	var total int64
+	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
+		var err error
+		items, total, err = tx.ListExperiments(ctx, id.TenantID, courseID, ExperimentStatusPublished, page, size)
+		return err
+	}); err != nil {
+		return nil, 0, 0, 0, err
+	}
+	out := make([]StudentExperimentDTO, 0, len(items))
+	for _, item := range items {
+		out = append(out, studentExperimentDTOFromModel(item))
+	}
+	return out, total, page, size, nil
+}
+
 // CreateExperiment 创建服务端持久化的实验编排向导草稿。
 func (s *Service) CreateExperiment(ctx context.Context, req ExperimentRequest) (ExperimentDTO, error) {
 	id, err := currentIdentity(ctx)
@@ -43,7 +66,7 @@ func (s *Service) CreateExperiment(ctx context.Context, req ExperimentRequest) (
 	if err != nil {
 		return ExperimentDTO{}, err
 	}
-	item := Experiment{ID: s.ids.Generate(), TenantID: id.TenantID, CourseID: req.CourseID, AuthorID: id.AccountID, TemplateRef: req.TemplateRef, TemplateVersion: req.TemplateVersion, Name: req.Name, Description: req.Description, Components: req.Components, CollabMode: req.CollabMode, GroupConfig: req.GroupConfig, RequireReport: req.RequireReport, WizardStep: req.WizardStep}
+	item := Experiment{ID: s.ids.Generate(), TenantID: id.TenantID, CourseID: req.CourseID.Int64(), AuthorID: id.AccountID, TemplateRef: req.TemplateRef, TemplateVersion: req.TemplateVersion, Name: req.Name, Description: req.Description, Components: req.Components, CollabMode: req.CollabMode, GroupConfig: req.GroupConfig, RequireReport: req.RequireReport, WizardStep: req.WizardStep}
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
 		var err error
 		item, err = tx.CreateExperiment(ctx, item)
@@ -76,7 +99,7 @@ func (s *Service) UpdateExperiment(ctx context.Context, experimentID int64, req 
 		if err := ensureTeacherCanManage(id.AccountID, s.isSchoolAdmin(ctx, id.AccountID), current); err != nil {
 			return err
 		}
-		current.CourseID = req.CourseID
+		current.CourseID = req.CourseID.Int64()
 		current.TemplateRef = req.TemplateRef
 		current.TemplateVersion = req.TemplateVersion
 		current.Name = req.Name

@@ -40,7 +40,7 @@ const TeacherCourseAssignmentsPage: React.FC = () => {
       <div className={styles.header}>
         <div>
           <h1 className={styles.title}><FileText size={28} />作业发布与管理</h1>
-          <p className={styles.subtitle}>选择课程后创建作业，作业明细由课程大纲和后端作业接口维护。</p>
+          <p className={styles.subtitle}>选择课程后创建作业，并维护作业内容和提交要求。</p>
         </div>
         <Button variant="outline" icon={<RefreshCw size={16} />} onClick={resource.reload}>刷新</Button>
       </div>

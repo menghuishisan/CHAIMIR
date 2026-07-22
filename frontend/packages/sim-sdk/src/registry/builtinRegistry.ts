@@ -4,6 +4,8 @@ import type { SimCategory } from '../types';
 import type { SimPackage } from '../types';
 import { builtinSimulations } from '../builtin/catalog';
 
+const builtinSimulationByCode = indexBuiltinSimulations();
+
 export const SIM_CATEGORY_ORDER: SimCategory[] = [
   'consensus',
   'cryptography',
@@ -50,7 +52,22 @@ export function listBuiltinSimulationsByCategory(category: SimCategory): Builtin
  * 按包 code 查找内置仿真,供平台内部把目录条目装配为 Worker 可运行包。
  */
 export function getBuiltinSimulation(code: string): SimPackage | undefined {
-  return builtinSimulations.find((simPackage) => simPackage.meta.code === code);
+  return builtinSimulationByCode.get(code);
+}
+
+/**
+ * indexBuiltinSimulations 建立内置包唯一索引，重复或空 code 在装配阶段立即失败。
+ */
+function indexBuiltinSimulations(): ReadonlyMap<string, SimPackage> {
+  const index = new Map<string, SimPackage>();
+  for (const simPackage of builtinSimulations) {
+    const code = simPackage.meta.code.trim();
+    if (!code || index.has(code)) {
+      throw new Error('内置仿真包 code 为空或重复');
+    }
+    index.set(code, simPackage);
+  }
+  return index;
 }
 
 /**

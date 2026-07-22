@@ -28,6 +28,7 @@ type TxStore interface {
 	CreateContest(context.Context, Contest) (Contest, error)
 	GetContest(context.Context, int64, int64) (Contest, error)
 	ListContests(context.Context, int64, int16, int, int) ([]Contest, int64, error)
+	ListStudentContests(context.Context, int64, int, int) ([]Contest, int64, error)
 	UpdateContest(context.Context, Contest) (Contest, error)
 	SetContestStatus(context.Context, int64, int64, int16) (Contest, error)
 	UpsertContestProblem(context.Context, ContestProblem) (ContestProblem, error)
@@ -70,8 +71,8 @@ type TxStore interface {
 	ListActiveBattleSourceRefsForArchive(context.Context, int64, int64) ([]string, error)
 	FinishBattleMatch(context.Context, BattleMatch) (BattleMatch, error)
 	FailBattleMatch(context.Context, int64, int64) (BattleMatch, error)
-	CreateResultSnapshot(context.Context, ResultSnapshot) (ResultSnapshot, error)
-	GetResultSnapshot(context.Context, int64, int64) (ResultSnapshot, error)
+	UpsertLadderSnapshot(context.Context, LadderSnapshot) (LadderSnapshot, error)
+	GetLadderSnapshot(context.Context, int64, int64, int16) (LadderSnapshot, error)
 	CreateCheatRecord(context.Context, CheatRecord) (CheatRecord, error)
 	ListCheatRecords(context.Context, int64, int64, int, int) ([]CheatRecord, int64, error)
 	UpsertVulnSource(context.Context, VulnSource) (VulnSource, error)
@@ -158,6 +159,24 @@ func (tx *txStore) ListContests(ctx context.Context, tenantID int64, status int1
 		out = append(out, item)
 	}
 	return out, total, nil
+}
+
+// ListStudentContests 查询学生可发现的非草稿竞赛分页。
+func (tx *txStore) ListStudentContests(ctx context.Context, tenantID int64, page, size int) ([]Contest, int64, error) {
+	rows, err := tx.q.ListStudentContests(ctx, sqlcgen.ListStudentContestsParams{TenantID: tenantID, Limit: int32(size), Offset: int32((page - 1) * size)})
+	if err != nil {
+		return nil, 0, err
+	}
+	items := make([]Contest, 0, len(rows))
+	for _, row := range rows {
+		item, err := contestFromRow(row)
+		if err != nil {
+			return nil, 0, err
+		}
+		items = append(items, item)
+	}
+	total, err := tx.q.CountStudentContests(ctx, tenantID)
+	return items, total, err
 }
 
 // UpdateContest 更新草稿竞赛。
@@ -615,26 +634,26 @@ func (tx *txStore) FailBattleMatch(ctx context.Context, tenantID, id int64) (Bat
 	return battleMatchFromRow(row)
 }
 
-// CreateResultSnapshot 保存归档榜单快照。
-func (tx *txStore) CreateResultSnapshot(ctx context.Context, item ResultSnapshot) (ResultSnapshot, error) {
-	raw, err := encodeJSON(item.FinalRanking, apperr.ErrContestInvalid)
+// UpsertLadderSnapshot 保存封榜或归档阶段的权威榜单快照。
+func (tx *txStore) UpsertLadderSnapshot(ctx context.Context, item LadderSnapshot) (LadderSnapshot, error) {
+	raw, err := encodeJSON(item.Ranking, apperr.ErrContestInvalid)
 	if err != nil {
-		return ResultSnapshot{}, err
+		return LadderSnapshot{}, err
 	}
-	row, err := tx.q.CreateResultSnapshot(ctx, sqlcgen.CreateResultSnapshotParams{ID: item.ID, TenantID: item.TenantID, ContestID: item.ContestID, FinalRanking: raw})
+	row, err := tx.q.UpsertLadderSnapshot(ctx, sqlcgen.UpsertLadderSnapshotParams{ID: item.ID, TenantID: item.TenantID, ContestID: item.ContestID, SnapshotStatus: item.SnapshotStatus, Ranking: raw})
 	if err != nil {
-		return ResultSnapshot{}, apperr.ErrContestInvalid.WithCause(err)
+		return LadderSnapshot{}, apperr.ErrContestInvalid.WithCause(err)
 	}
-	return snapshotFromRow(row)
+	return ladderSnapshotFromRow(row)
 }
 
-// GetResultSnapshot 读取归档榜单快照。
-func (tx *txStore) GetResultSnapshot(ctx context.Context, tenantID, contestID int64) (ResultSnapshot, error) {
-	row, err := tx.q.GetResultSnapshot(ctx, sqlcgen.GetResultSnapshotParams{TenantID: tenantID, ContestID: contestID})
+// GetLadderSnapshot 按竞赛状态读取封榜或归档榜单快照。
+func (tx *txStore) GetLadderSnapshot(ctx context.Context, tenantID, contestID int64, snapshotStatus int16) (LadderSnapshot, error) {
+	row, err := tx.q.GetLadderSnapshot(ctx, sqlcgen.GetLadderSnapshotParams{TenantID: tenantID, ContestID: contestID, SnapshotStatus: snapshotStatus})
 	if err != nil {
-		return ResultSnapshot{}, apperr.ErrContestNotFound.WithCause(err)
+		return LadderSnapshot{}, apperr.ErrContestNotFound.WithCause(err)
 	}
-	return snapshotFromRow(row)
+	return ladderSnapshotFromRow(row)
 }
 
 // CreateCheatRecord 创建违规处理记录。

@@ -1,8 +1,7 @@
 // 学生实验列表页：读取后端已发布实验，并进入详情或沉浸式实验工作台。
 
 import React from 'react'
-import type { Experiment } from '@chaimir/api-client'
-import { ExperimentStatus } from '@chaimir/api-client'
+import type { StudentExperiment } from '@chaimir/api-client'
 import { Button, Table } from '@chaimir/ui'
 import { ExternalLink, FileText, FlaskConical } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
@@ -14,7 +13,7 @@ import styles from '../../experiment.module.css'
 const ExperimentsPage: React.FC = () => {
   const navigate = useNavigate()
   const experiments = useAsyncResource(
-    () => api.experiment.getExperiments({ status: ExperimentStatus.PUBLISHED, page: 1, size: 20 }),
+    () => api.experiment.getPublishedExperiments({ page: 1, size: 20 }),
     []
   )
 
@@ -39,7 +38,7 @@ const ExperimentsPage: React.FC = () => {
         </h1>
       </div>
 
-      <Table<Experiment>
+      <Table<StudentExperiment>
         rows={rows}
         rowKey="id"
         ariaLabel="可进入实验"

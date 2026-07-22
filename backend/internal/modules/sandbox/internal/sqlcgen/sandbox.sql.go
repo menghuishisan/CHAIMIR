@@ -366,6 +366,71 @@ func (q *Queries) DisableRuntimeImage(ctx context.Context, arg DisableRuntimeIma
 	return i, err
 }
 
+const ensureTenantQuota = `-- name: EnsureTenantQuota :one
+WITH inserted AS (
+    INSERT INTO tenant_quota (tenant_id, max_concurrent_sandbox, max_cpu, max_memory_mb, idle_timeout_min, max_lifetime_min, max_keepalive_min, max_snapshot_retention_min, updated_at)
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, now())
+    ON CONFLICT (tenant_id) DO NOTHING
+    RETURNING tenant_id, max_concurrent_sandbox, max_cpu, max_memory_mb, idle_timeout_min, max_lifetime_min, max_keepalive_min, max_snapshot_retention_min, updated_at
+)
+SELECT tenant_id, max_concurrent_sandbox, max_cpu, max_memory_mb, idle_timeout_min, max_lifetime_min, max_keepalive_min, max_snapshot_retention_min, updated_at
+FROM inserted
+UNION ALL
+SELECT tenant_id, max_concurrent_sandbox, max_cpu, max_memory_mb, idle_timeout_min, max_lifetime_min, max_keepalive_min, max_snapshot_retention_min, updated_at
+FROM tenant_quota
+WHERE tenant_id = $1
+LIMIT 1
+`
+
+type EnsureTenantQuotaParams struct {
+	TenantID                int64 `json:"tenant_id"`
+	MaxConcurrentSandbox    int32 `json:"max_concurrent_sandbox"`
+	MaxCpu                  int32 `json:"max_cpu"`
+	MaxMemoryMb             int32 `json:"max_memory_mb"`
+	IdleTimeoutMin          int32 `json:"idle_timeout_min"`
+	MaxLifetimeMin          int32 `json:"max_lifetime_min"`
+	MaxKeepaliveMin         int32 `json:"max_keepalive_min"`
+	MaxSnapshotRetentionMin int32 `json:"max_snapshot_retention_min"`
+}
+
+type EnsureTenantQuotaRow struct {
+	TenantID                int64              `json:"tenant_id"`
+	MaxConcurrentSandbox    int32              `json:"max_concurrent_sandbox"`
+	MaxCpu                  int32              `json:"max_cpu"`
+	MaxMemoryMb             int32              `json:"max_memory_mb"`
+	IdleTimeoutMin          int32              `json:"idle_timeout_min"`
+	MaxLifetimeMin          int32              `json:"max_lifetime_min"`
+	MaxKeepaliveMin         int32              `json:"max_keepalive_min"`
+	MaxSnapshotRetentionMin int32              `json:"max_snapshot_retention_min"`
+	UpdatedAt               pgtype.Timestamptz `json:"updated_at"`
+}
+
+func (q *Queries) EnsureTenantQuota(ctx context.Context, arg EnsureTenantQuotaParams) (EnsureTenantQuotaRow, error) {
+	row := q.db.QueryRow(ctx, ensureTenantQuota,
+		arg.TenantID,
+		arg.MaxConcurrentSandbox,
+		arg.MaxCpu,
+		arg.MaxMemoryMb,
+		arg.IdleTimeoutMin,
+		arg.MaxLifetimeMin,
+		arg.MaxKeepaliveMin,
+		arg.MaxSnapshotRetentionMin,
+	)
+	var i EnsureTenantQuotaRow
+	err := row.Scan(
+		&i.TenantID,
+		&i.MaxConcurrentSandbox,
+		&i.MaxCpu,
+		&i.MaxMemoryMb,
+		&i.IdleTimeoutMin,
+		&i.MaxLifetimeMin,
+		&i.MaxKeepaliveMin,
+		&i.MaxSnapshotRetentionMin,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const getDefaultRuntimeImage = `-- name: GetDefaultRuntimeImage :one
 SELECT id, runtime_id, image_url, version, status, prepulled, prepull_status, prepull_detail, prepulled_at, genesis_baked, is_default, created_at
 FROM runtime_image

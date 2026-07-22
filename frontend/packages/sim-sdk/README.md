@@ -8,7 +8,7 @@
 - `defineSimPackage` 用于定义并校验仿真包。
 - `createDeveloperTemplate` 用于生成最小完整示例。
 - `createSimPackageManifest` 用于生成上传审核使用的 `sim-package.json` 内容。
-- `createManifestSummary` 和 `validateSimPackageManifest` 用于本地检查协议字段。
+- `createManifestSummary` 和 `validateSimPackage` 用于本地检查协议字段。
 - `SimWorkerClient`、`SimulationWorkbench`、`PatternRenderer` 供平台页面装配使用。
 
 内置仿真包 registry 不从主入口导出。内置包只由平台内部装配,开发者新增仿真应使用同一套公开协议,不依赖内置实现。
@@ -161,7 +161,7 @@ export const manifest = createSimPackageManifest(simPackage);
 2. 只实现 `initState`、`reducer`、`render`、`narrative`、`codeTrace`、`checkpoints`。
 3. `reducer` 必须是纯函数,不能使用真实时间、网络、DOM、全局随机源或外部副作用。
 4. `render` 必须返回 `TeachingFrame`,显式声明 `phase`、`focus`、`layout`,并只包含 `graph`、`chain`、`tree`、`matrix`、`pipeline`、`lane`、`chart` 中的 1 到 3 个模式。
-5. 运行 `validateSimPackageManifest(simPackage)` 检查协议字段。
+5. 运行 `validateSimPackage(simPackage)` 检查协议字段。
 6. 用 `createSimPackageManifest(simPackage)` 生成 `sim-package.json` 内容,和 bundle 一起提交审核。
 
 ## 运行边界

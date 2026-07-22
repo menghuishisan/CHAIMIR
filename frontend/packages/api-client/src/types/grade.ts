@@ -1,6 +1,7 @@
 // ===== M11 Grade 模块 =====
 
 import type { GradeAppealStatus, GradeReviewStatus, GradeWarningStatus, GradeWarningType, TranscriptScope } from '../constants/grade'
+import type { SnowflakeID } from './common'
 
 export interface LevelRule {
   min: number
@@ -14,8 +15,8 @@ export interface WarningRules {
 }
 
 export interface LevelConfig {
-  id: string
-  tenant_id: string
+  id: SnowflakeID
+  tenant_id: SnowflakeID
   name: string
   mapping: LevelRule[]
   warning_rules: WarningRules
@@ -32,8 +33,8 @@ export interface LevelConfigRequest {
 }
 
 export interface Semester {
-  id: string
-  tenant_id: string
+  id: SnowflakeID
+  tenant_id: SnowflakeID
   name: string
   start_date: string
   end_date: string
@@ -48,12 +49,12 @@ export interface SemesterRequest {
 }
 
 export interface GradeReview {
-  id: string
-  tenant_id: string
-  course_id: string
-  semester_id?: string
-  submitter_id: string
-  reviewer_id?: string
+  id: SnowflakeID
+  tenant_id: SnowflakeID
+  course_id: SnowflakeID
+  semester_id?: SnowflakeID
+  submitter_id: SnowflakeID
+  reviewer_id?: SnowflakeID
   status: GradeReviewStatus
   is_locked: boolean
   comment?: string
@@ -62,26 +63,26 @@ export interface GradeReview {
 }
 
 export interface GradeReviewRequest {
-  course_id: string
-  semester_id?: string
+  course_id: SnowflakeID
+  semester_id?: SnowflakeID
   comment?: string
 }
 
 export interface ReviewDecision {
-  semester_id?: string
+  semester_id?: SnowflakeID
   comment?: string
 }
 
 export interface CourseGrade {
-  course_id: string
-  student_id: string
+  course_id: SnowflakeID
+  student_id: SnowflakeID
   final_total: number
   credits: number
 }
 
 export interface GradeSummary {
-  student_id: string
-  semester_id?: string
+  student_id: SnowflakeID
+  semester_id?: SnowflakeID
   total_credits: number
   gpa: number
   cumulative_gpa: number
@@ -90,28 +91,28 @@ export interface GradeSummary {
 }
 
 export interface GradeAppeal {
-  id: string
-  tenant_id: string
-  student_id: string
-  course_id: string
+  id: SnowflakeID
+  tenant_id: SnowflakeID
+  student_id: SnowflakeID
+  course_id: SnowflakeID
   reason: string
   status: GradeAppealStatus
-  handler_id?: string
+  handler_id?: SnowflakeID
   result_comment?: string
   created_at: string
   handled_at?: string
 }
 
 export interface GradeAppealRequest {
-  course_id: string
+  course_id: SnowflakeID
   reason: string
 }
 
 export interface GradeWarning {
-  id: string
-  tenant_id: string
-  student_id: string
-  semester_id: string
+  id: SnowflakeID
+  tenant_id: SnowflakeID
+  student_id: SnowflakeID
+  semester_id: SnowflakeID
   type: GradeWarningType
   detail: Record<string, unknown>
   status: GradeWarningStatus
@@ -124,18 +125,18 @@ export interface WarningScanResult {
 }
 
 export interface GradeTranscript {
-  id: string
-  tenant_id: string
-  student_id: string
+  id: SnowflakeID
+  tenant_id: SnowflakeID
+  student_id: SnowflakeID
   scope: TranscriptScope
-  semester_id?: string
+  semester_id?: SnowflakeID
   generated_at: string
 }
 
 export interface TranscriptRequest {
-  student_id?: string
+  student_id?: SnowflakeID
   scope: TranscriptScope
-  semester_id?: string
+  semester_id?: SnowflakeID
 }
 
 export interface TranscriptDownloadGrant {

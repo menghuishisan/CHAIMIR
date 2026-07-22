@@ -6,6 +6,7 @@ import type { ExperimentStatus } from '../constants/experiment'
 import type { PaginatedResponse } from '../types/common'
 import type {
   Experiment,
+  StudentExperiment,
   ExperimentRequest,
   CreateInstanceRequest,
   ExperimentInstance,
@@ -39,6 +40,11 @@ export class ExperimentApi {
     size?: number
   }): Promise<PaginatedResponse<Experiment>> {
     return this.client.get('/experiment/experiments', params)
+  }
+
+  /** getPublishedExperiments 查询学生可进入的已发布实验。 */
+  async getPublishedExperiments(params?: { course_id?: string; page?: number; size?: number }): Promise<PaginatedResponse<StudentExperiment>> {
+    return this.client.get('/experiment/student/experiments', params)
   }
 
   /**

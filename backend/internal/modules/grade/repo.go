@@ -32,12 +32,17 @@ type TxStore interface {
 	CreateLevelConfig(context.Context, int64, int64, LevelConfigRequest) (LevelConfigDTO, error)
 	ListLevelConfigs(context.Context) ([]LevelConfigDTO, error)
 	GetDefaultLevelConfig(context.Context) (LevelConfigDTO, error)
+	LockGradeLevelDefaultScope(context.Context, int64) error
+	ClearDefaultLevelConfigs(context.Context) error
 	UpdateLevelConfig(context.Context, int64, LevelConfigRequest) (LevelConfigDTO, error)
 	CreateSemester(context.Context, int64, int64, SemesterRequest) (SemesterDTO, error)
 	ListSemesters(context.Context) ([]SemesterDTO, error)
 	GetCurrentSemester(context.Context) (SemesterDTO, error)
+	LockSemesterCurrentScope(context.Context, int64) error
+	ClearCurrentSemesters(context.Context) error
 	CreateGradeReview(context.Context, int64, int64, int64, ReviewRequest) (ReviewDTO, error)
 	ListGradeReviews(context.Context, int16, int, int) ([]ReviewDTO, int64, error)
+	ListOwnGradeReviews(context.Context, int64, int16, int, int) ([]ReviewDTO, int64, error)
 	GetGradeReview(context.Context, int64) (ReviewDTO, error)
 	GetLatestApprovedReviewByCourse(context.Context, int64) (ReviewDTO, error)
 	GetLatestReviewByCourse(context.Context, int64) (ReviewDTO, error)

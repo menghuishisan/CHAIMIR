@@ -1,6 +1,7 @@
 // ApplicationDetailPage 展示平台入驻申请详情，并调用后端完成通过或驳回。
 
 import React, { useCallback, useMemo, useState } from 'react'
+import { ApplicationStatus } from '@chaimir/api-client'
 import { Button, Callout, DescriptionList, Input, Textarea } from '@chaimir/ui'
 import { CheckCircle2, FileCheck, RefreshCw, XCircle } from 'lucide-react'
 import { useParams } from 'react-router-dom'
@@ -8,7 +9,7 @@ import { api } from '../../../../../app/api'
 import { EmptyState, ErrorState, LoadingState } from '../../../../../components/ResourceState'
 import { useAsyncResource } from '../../../../../hooks'
 import styles from './review.module.css'
-import { formatDateTime, tenantApplicationStatusLabel } from '../../../../../utils/index'
+import { formatDateTime, tenantApplicationSchoolTypeLabel, tenantApplicationStatusLabel } from '../../../../../utils/index'
 import { userFacingErrorMessage } from '../../../../../utils/userFacingError'
 
 
@@ -100,7 +101,7 @@ const ApplicationDetailPage: React.FC = () => {
             <FileCheck size={28} />
             入驻审核详情
           </h1>
-          <p className={styles.subtitle}>核对学校入驻申请，并通过后端完成租户开通或驳回。</p>
+          <p className={styles.subtitle}>核对学校入驻申请，并完成学校开通或驳回。</p>
         </div>
         <Button variant="outline" icon={<RefreshCw size={16} />} onClick={resource.reload}>
           刷新
@@ -120,7 +121,7 @@ const ApplicationDetailPage: React.FC = () => {
           <DescriptionList
             items={[
               { key: 'schoolName', label: '学校名称', value: application.school_name },
-              { key: 'schoolType', label: '机构类型', value: String(application.school_type) },
+              { key: 'schoolType', label: '机构类型', value: tenantApplicationSchoolTypeLabel(application.school_type) },
               { key: 'contactName', label: '联系人', value: application.contact_name },
               { key: 'contactPhone', label: '联系电话', value: application.contact_phone },
               { key: 'contactEmail', label: '联系邮箱', value: application.contact_email },
@@ -134,7 +135,7 @@ const ApplicationDetailPage: React.FC = () => {
 
         <section className={styles.panel}>
           <h2>审核动作</h2>
-          <div className={styles.form}>
+          {application.status === ApplicationStatus.PENDING ? <div className={styles.form}>
             <label>
               租户代号
               <Input fullWidth value={tenantCode} placeholder="请输入开通后的租户代号" onChange={(event) => setTenantCode(event.target.value)} />
@@ -157,7 +158,7 @@ const ApplicationDetailPage: React.FC = () => {
             <Button variant="outline" loading={submitting === 'reject'} icon={<XCircle size={16} />} onClick={handleReject}>
               驳回申请
             </Button>
-          </div>
+          </div> : <Callout variant="info" title="审核已完成">该申请已进入终态，无需再次处理。</Callout>}
         </section>
       </div>
     </div>

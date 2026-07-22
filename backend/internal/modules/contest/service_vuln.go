@@ -13,16 +13,71 @@ import (
 
 	"chaimir/internal/contracts"
 	"chaimir/internal/platform/auth"
+	"chaimir/internal/platform/ids"
 	"chaimir/internal/platform/jsonx"
 	"chaimir/internal/platform/netx"
 	"chaimir/internal/platform/pagex"
 	"chaimir/internal/platform/secretmap"
+	"chaimir/internal/platform/tenant"
 	"chaimir/internal/platform/timex"
 	"chaimir/internal/platform/upload"
 	"chaimir/pkg/apperr"
 	"chaimir/pkg/chainassert"
 	"chaimir/pkg/logging"
 )
+
+// UpsertPlatformVulnSource 创建或更新平台全局漏洞源，不产生租户漏洞题草稿。
+func (s *Service) UpsertPlatformVulnSource(ctx context.Context, req VulnSourceRequest) (VulnSourceDTO, error) {
+	id, ok := tenant.FromContext(ctx)
+	if !ok || !id.IsPlatform || id.AccountID <= 0 {
+		return VulnSourceDTO{}, apperr.ErrUnauthorized
+	}
+	item, err := vulnSourceFromRequest(req, 0, s.ids.Generate())
+	if err != nil {
+		return VulnSourceDTO{}, err
+	}
+	if err := validateVulnSourceConfig(item.Config, s.cfg.VulnSourceTimeoutSeconds); err != nil {
+		return VulnSourceDTO{}, err
+	}
+	item.Config, err = secretmap.Protect(s.cipher, item.Config, "漏洞源配置")
+	if err != nil {
+		return VulnSourceDTO{}, apperr.ErrContestVulnSourceInvalid.WithCause(err)
+	}
+	if err := s.store.PrivilegedTx(ctx, func(ctx context.Context, tx TxStore) error {
+		var err error
+		item, err = tx.UpsertVulnSource(ctx, item)
+		return err
+	}); err != nil {
+		return VulnSourceDTO{}, err
+	}
+	if err := s.writeAudit(ctx, 0, id.AccountID, contracts.RoleNumPlatformAdmin, "contest.vuln_source.upsert", auditTargetVulnSource, item.ID, nil); err != nil {
+		return VulnSourceDTO{}, err
+	}
+	return vulnSourceDTOFromModel(item), nil
+}
+
+// ListPlatformVulnSources 查询平台全局漏洞源，不返回学校自建配置。
+func (s *Service) ListPlatformVulnSources(ctx context.Context) ([]VulnSourceDTO, error) {
+	id, ok := tenant.FromContext(ctx)
+	if !ok || !id.IsPlatform || id.AccountID <= 0 {
+		return nil, apperr.ErrUnauthorized
+	}
+	var items []VulnSource
+	if err := s.store.PrivilegedTx(ctx, func(ctx context.Context, tx TxStore) error {
+		var err error
+		items, err = tx.ListVulnSources(ctx, 0)
+		return err
+	}); err != nil {
+		return nil, err
+	}
+	out := make([]VulnSourceDTO, 0, len(items))
+	for _, item := range items {
+		if item.TenantID == 0 {
+			out = append(out, vulnSourceDTOFromModel(item))
+		}
+	}
+	return out, nil
+}
 
 // UpsertVulnSource 创建或更新本租户漏洞源。
 func (s *Service) UpsertVulnSource(ctx context.Context, req VulnSourceRequest) (VulnSourceDTO, error) {
@@ -139,10 +194,10 @@ func (s *Service) ImportVulnProblem(ctx context.Context, req ImportVulnProblemRe
 	if err != nil {
 		return VulnProblemDTO{}, err
 	}
-	item := VulnProblem{ID: s.ids.Generate(), TenantID: id.TenantID, SourceID: req.SourceID, ExternalRef: req.ExternalRef, Title: req.Title, Level: req.Level, RuntimeMode: req.RuntimeMode, DraftBody: req.DraftBody}
+	item := VulnProblem{ID: s.ids.Generate(), TenantID: id.TenantID, SourceID: req.SourceID.Int64(), ExternalRef: req.ExternalRef, Title: req.Title, Level: req.Level, RuntimeMode: req.RuntimeMode, DraftBody: req.DraftBody}
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
 		if req.SourceID > 0 {
-			if _, err := tx.GetVulnSource(ctx, id.TenantID, req.SourceID); err != nil {
+			if _, err := tx.GetVulnSource(ctx, id.TenantID, req.SourceID.Int64()); err != nil {
 				return err
 			}
 		}
@@ -471,12 +526,12 @@ func safeDetailError(err error) string {
 func vulnSourceFromRequest(req VulnSourceRequest, tenantID, generatedID int64) (VulnSource, error) {
 	req.Name = strings.TrimSpace(req.Name)
 	if req.ID <= 0 {
-		req.ID = generatedID
+		req.ID = ids.ID(generatedID)
 	}
 	if req.Type <= 0 || req.Name == "" || len(req.Name) > 128 || req.Config == nil || (req.DefaultLevel != VulnLevelA && req.DefaultLevel != VulnLevelB && req.DefaultLevel != VulnLevelC) {
 		return VulnSource{}, apperr.ErrContestVulnSourceInvalid
 	}
-	return VulnSource{ID: req.ID, TenantID: tenantID, Type: req.Type, Name: req.Name, Config: req.Config, DefaultLevel: req.DefaultLevel, Enabled: req.Enabled}, nil
+	return VulnSource{ID: req.ID.Int64(), TenantID: tenantID, Type: req.Type, Name: req.Name, Config: req.Config, DefaultLevel: req.DefaultLevel, Enabled: req.Enabled}, nil
 }
 
 // validateVulnSourceConfig 校验 HTTP 源配置边界。

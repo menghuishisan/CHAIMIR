@@ -8,6 +8,7 @@ import (
 
 	"chaimir/internal/contracts"
 	"chaimir/internal/platform/audit"
+	"chaimir/internal/platform/ids"
 	"chaimir/internal/platform/storage"
 	"chaimir/internal/platform/tenant"
 	"chaimir/internal/platform/upload"
@@ -135,11 +136,11 @@ func toContractImport(req contracts.ContentSystemImportRequest) SystemImportRequ
 		Version:          req.Version,
 		Type:             req.Type,
 		Title:            req.Title,
-		CategoryID:       req.CategoryID,
+		CategoryID:       ids.ID(req.CategoryID),
 		Difficulty:       req.Difficulty,
 		Tags:             req.Tags,
 		KnowledgePoints:  req.KnowledgePoints,
-		AuthorID:         req.AuthorID,
+		AuthorID:         ids.ID(req.AuthorID),
 		AuthorType:       req.AuthorType,
 		Visibility:       req.Visibility,
 		Body:             req.Body,

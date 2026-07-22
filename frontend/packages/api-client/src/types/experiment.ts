@@ -1,5 +1,6 @@
 // ===== M7 Experiment 模块 =====
 
+import type { SnowflakeID } from './common'
 import type {
   ExperimentCollabMode,
   ExperimentInstanceStatus,
@@ -10,9 +11,9 @@ import type {
 import type { SandboxToolKind, SandboxToolStatus } from '../constants/sandbox'
 
 export interface Experiment {
-  id: string
-  course_id?: string
-  author_id: string
+  id: SnowflakeID
+  course_id?: SnowflakeID
+  author_id: SnowflakeID
   template_ref?: string
   template_version?: string
   name: string
@@ -25,6 +26,53 @@ export interface Experiment {
   status: ExperimentStatus
   created_at: string
   updated_at: string
+}
+
+export interface StudentExperiment {
+  id: SnowflakeID
+  course_id?: SnowflakeID
+  name: string
+  description: string
+  components: StudentComponentConfig
+  collab_mode: ExperimentCollabMode
+  group_config: GroupConfig
+  require_report: boolean
+  status: ExperimentStatus
+  created_at: string
+  updated_at: string
+}
+
+export interface StudentComponentConfig {
+  envs: StudentEnvComponent[]
+  sims: StudentSimComponent[]
+  checkpoints: StudentCheckpointConfig[]
+  stages: StudentStageConfig[]
+}
+
+export interface StudentEnvComponent {
+  id: string
+  runtime_code: string
+  tools: string[]
+}
+
+export interface StudentSimComponent {
+  id: string
+  package_code: string
+  version: string
+}
+
+export interface StudentCheckpointConfig {
+  id: string
+  score: number
+  mode?: string
+}
+
+export interface StudentStageConfig {
+  stage: number
+  title: string
+  description?: string
+  components: StageComponents
+  unlock_condition?: UnlockCondition
 }
 
 export interface ComponentConfig {
@@ -102,7 +150,7 @@ export interface GroupConfig {
 }
 
 export interface ExperimentRequest {
-  course_id: number
+  course_id: SnowflakeID
   template_ref: string
   template_version: string
   name: string
@@ -125,14 +173,14 @@ export interface ValidationIssue {
 }
 
 export interface CreateInstanceRequest {
-  group_id?: number
+  group_id?: SnowflakeID
 }
 
 export interface ExperimentInstance {
-  instance_id: string
-  experiment_id: string
-  owner_account_id: string
-  group_id?: string
+  instance_id: SnowflakeID
+  experiment_id: SnowflakeID
+  owner_account_id: SnowflakeID
+  group_id?: SnowflakeID
   source_ref: string
   sandboxes: SandboxRef[]
   sims: SimSessionRef[]
@@ -148,7 +196,7 @@ export interface ExperimentInstance {
 export interface SandboxRef {
   component_id: string
   stage: number
-  sandbox_id: string
+  sandbox_id: SnowflakeID
   runtime_code: string
   tools: SandboxTool[]
 }
@@ -163,7 +211,7 @@ export interface SandboxTool {
 export interface SimSessionRef {
   component_id: string
   stage: number
-  session_id: string
+  session_id: SnowflakeID
   package_code: string
   version: string
   bundle_ref: string
@@ -200,9 +248,9 @@ export interface CheckpointJudgeRequest {
 }
 
 export interface ReportDTO {
-  id: string
-  instance_id: string
-  student_id: string
+  id: SnowflakeID
+  instance_id: SnowflakeID
+  student_id: SnowflakeID
   content_ref: string
   manual_score: number
   comment?: string
@@ -220,13 +268,13 @@ export interface ExperimentGroupRequest {
 }
 
 export interface ExperimentGroupMemberRequest {
-  student_id: number
+  student_id: SnowflakeID
   role: string
 }
 
 export interface ExperimentGroup {
-  id: string
-  experiment_id: string
+  id: SnowflakeID
+  experiment_id: SnowflakeID
   name: string
   members: ExperimentGroupMember[]
   shared_instance?: ExperimentInstance
@@ -234,9 +282,9 @@ export interface ExperimentGroup {
 }
 
 export interface ExperimentGroupMember {
-  id: string
-  group_id: string
-  student_id: string
+  id: SnowflakeID
+  group_id: SnowflakeID
+  student_id: SnowflakeID
   role: string
   created_at: string
 }

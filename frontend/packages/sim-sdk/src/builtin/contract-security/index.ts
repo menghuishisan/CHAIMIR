@@ -8,9 +8,9 @@ import { oracleManipulationSimulation } from './oracle-manipulation/package';
 import { reentrancySimulation } from './reentrancy/package';
 
 export const contractSecuritySimulations: SimPackage[] = [
-  reentrancySimulation as unknown as SimPackage,
-  accessControlSimulation as unknown as SimPackage,
-  oracleManipulationSimulation as unknown as SimPackage,
-  flashLoanSimulation as unknown as SimPackage,
-  integerBoundarySimulation as unknown as SimPackage,
+  reentrancySimulation,
+  accessControlSimulation,
+  oracleManipulationSimulation,
+  flashLoanSimulation,
+  integerBoundarySimulation,
 ];

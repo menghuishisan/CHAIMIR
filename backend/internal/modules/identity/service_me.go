@@ -8,6 +8,7 @@ import (
 
 	"chaimir/internal/contracts"
 	"chaimir/internal/platform/audit"
+	"chaimir/internal/platform/ids"
 	"chaimir/internal/platform/tenant"
 	"chaimir/internal/platform/timex"
 	"chaimir/pkg/apperr"
@@ -184,7 +185,7 @@ func (s *Service) getPlatformMe(ctx context.Context, accountID int64) (MeRespons
 	}); err != nil {
 		return MeResponse{}, apperr.ErrIdentitySessionInvalid.WithCause(err)
 	}
-	return MeResponse{Account: AccountDTO{ID: admin.ID, Name: admin.Name, Roles: []int16{contracts.RoleNumPlatformAdmin}, Status: admin.Status}}, nil
+	return MeResponse{Account: AccountDTO{ID: ids.ID(admin.ID), Name: admin.Name, Roles: []int16{contracts.RoleNumPlatformAdmin}, Status: admin.Status}}, nil
 }
 
 // changePlatformPassword 校验平台管理员旧密码并保留当前会话、吊销其他会话。

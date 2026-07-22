@@ -129,6 +129,26 @@ func (q *Queries) ClaimPendingGradeLockOutbox(ctx context.Context, arg ClaimPend
 	return items, nil
 }
 
+const clearCurrentSemesters = `-- name: ClearCurrentSemesters :exec
+UPDATE semester SET is_current = false WHERE is_current = true
+`
+
+func (q *Queries) ClearCurrentSemesters(ctx context.Context) error {
+	_, err := q.db.Exec(ctx, clearCurrentSemesters)
+	return err
+}
+
+const clearDefaultLevelConfigs = `-- name: ClearDefaultLevelConfigs :exec
+UPDATE grade_level_config
+SET is_default = false, updated_at = now()
+WHERE is_default = true
+`
+
+func (q *Queries) ClearDefaultLevelConfigs(ctx context.Context) error {
+	_, err := q.db.Exec(ctx, clearDefaultLevelConfigs)
+	return err
+}
+
 const countAcademicWarnings = `-- name: CountAcademicWarnings :one
 SELECT count(*)::bigint
 FROM academic_warning
@@ -163,6 +183,25 @@ WHERE ($1::smallint = 0 OR status = $1::smallint)
 
 func (q *Queries) CountGradeReviews(ctx context.Context, status int16) (int64, error) {
 	row := q.db.QueryRow(ctx, countGradeReviews, status)
+	var column_1 int64
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
+const countOwnGradeReviews = `-- name: CountOwnGradeReviews :one
+SELECT count(*)::bigint
+FROM grade_review
+WHERE submitter_id = $1
+  AND ($2::smallint = 0 OR status = $2::smallint)
+`
+
+type CountOwnGradeReviewsParams struct {
+	SubmitterID int64 `json:"submitter_id"`
+	Status      int16 `json:"status"`
+}
+
+func (q *Queries) CountOwnGradeReviews(ctx context.Context, arg CountOwnGradeReviewsParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countOwnGradeReviews, arg.SubmitterID, arg.Status)
 	var column_1 int64
 	err := row.Scan(&column_1)
 	return column_1, err
@@ -876,6 +915,59 @@ func (q *Queries) ListLevelConfigs(ctx context.Context) ([]GradeLevelConfig, err
 	return items, nil
 }
 
+const listOwnGradeReviews = `-- name: ListOwnGradeReviews :many
+SELECT id, tenant_id, course_id, semester_id, submitter_id, reviewer_id, status, is_locked, comment, submitted_at, reviewed_at
+FROM grade_review
+WHERE submitter_id = $1
+  AND ($2::smallint = 0 OR status = $2::smallint)
+ORDER BY submitted_at DESC
+LIMIT $4::int OFFSET $3::int
+`
+
+type ListOwnGradeReviewsParams struct {
+	SubmitterID int64 `json:"submitter_id"`
+	Status      int16 `json:"status"`
+	PageOffset  int32 `json:"page_offset"`
+	PageLimit   int32 `json:"page_limit"`
+}
+
+func (q *Queries) ListOwnGradeReviews(ctx context.Context, arg ListOwnGradeReviewsParams) ([]GradeReview, error) {
+	rows, err := q.db.Query(ctx, listOwnGradeReviews,
+		arg.SubmitterID,
+		arg.Status,
+		arg.PageOffset,
+		arg.PageLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []GradeReview{}
+	for rows.Next() {
+		var i GradeReview
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.CourseID,
+			&i.SemesterID,
+			&i.SubmitterID,
+			&i.ReviewerID,
+			&i.Status,
+			&i.IsLocked,
+			&i.Comment,
+			&i.SubmittedAt,
+			&i.ReviewedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listSemesters = `-- name: ListSemesters :many
 SELECT id, tenant_id, name, start_date, end_date, is_current
 FROM semester
@@ -985,6 +1077,24 @@ func (q *Queries) ListTranscriptRecords(ctx context.Context, arg ListTranscriptR
 		return nil, err
 	}
 	return items, nil
+}
+
+const lockGradeLevelDefaultScope = `-- name: LockGradeLevelDefaultScope :exec
+SELECT pg_advisory_xact_lock($1::bigint)
+`
+
+func (q *Queries) LockGradeLevelDefaultScope(ctx context.Context, lockKey int64) error {
+	_, err := q.db.Exec(ctx, lockGradeLevelDefaultScope, lockKey)
+	return err
+}
+
+const lockSemesterCurrentScope = `-- name: LockSemesterCurrentScope :exec
+SELECT pg_advisory_xact_lock($1::bigint)
+`
+
+func (q *Queries) LockSemesterCurrentScope(ctx context.Context, lockKey int64) error {
+	_, err := q.db.Exec(ctx, lockSemesterCurrentScope, lockKey)
+	return err
 }
 
 const markGradeLockOutboxFailed = `-- name: MarkGradeLockOutboxFailed :one

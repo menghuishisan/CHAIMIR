@@ -8,9 +8,9 @@ import { networkPartitionSimulation } from './network-partition/package';
 import { p2pDiscoverySimulation } from './p2p-discovery/package';
 
 export const networkSimulations: SimPackage[] = [
-  p2pDiscoverySimulation as unknown as SimPackage,
-  gossipPropagationSimulation as unknown as SimPackage,
-  dhtRoutingSimulation as unknown as SimPackage,
-  networkPartitionSimulation as unknown as SimPackage,
-  latencyLossSimulation as unknown as SimPackage,
+  p2pDiscoverySimulation,
+  gossipPropagationSimulation,
+  dhtRoutingSimulation,
+  networkPartitionSimulation,
+  latencyLossSimulation,
 ];

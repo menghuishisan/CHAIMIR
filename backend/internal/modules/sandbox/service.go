@@ -232,6 +232,9 @@ func (s *Service) resolveSandboxCreateDependencies(ctx context.Context, tx TxSto
 	if !image.Prepulled || image.PrepullStatus != ImagePrepullSucceeded || !image.GenesisBaked {
 		return resolvedSandboxCreateDependencies{}, apperr.ErrSandboxRuntimeUnavailable
 	}
+	if _, err := tx.EnsureTenantQuota(ctx, s.defaultTenantQuota(input.TenantID)); err != nil {
+		return resolvedSandboxCreateDependencies{}, apperr.ErrSandboxQuotaInvalid.WithCause(err)
+	}
 	quota, err := tx.GetTenantQuotaForUpdate(ctx, input.TenantID)
 	if err != nil {
 		return resolvedSandboxCreateDependencies{}, apperr.ErrSandboxQuotaInvalid.WithCause(err)
@@ -603,6 +606,9 @@ func (s *Service) Stats(ctx context.Context, tenantID int64) (contracts.SandboxQ
 	var quota TenantQuota
 	var active int64
 	if err := s.store.TenantTx(ctx, tenantID, func(ctx context.Context, tx TxStore) error {
+		if _, err := tx.EnsureTenantQuota(ctx, s.defaultTenantQuota(tenantID)); err != nil {
+			return apperr.ErrSandboxQuotaInvalid.WithCause(err)
+		}
 		var err error
 		quota, active, err = tx.StatsByTenant(ctx, tenantID)
 		if err != nil {
@@ -623,6 +629,38 @@ func (s *Service) Stats(ctx context.Context, tenantID int64) (contracts.SandboxQ
 		MaxKeepaliveMin:         quota.MaxKeepaliveMin,
 		MaxSnapshotRetentionMin: quota.MaxSnapshotRetentionMin,
 	}, nil
+}
+
+// EnsureTenantQuota 建立租户配额基线且不覆盖管理员已有配置。
+func (s *Service) EnsureTenantQuota(ctx context.Context, tenantID int64) error {
+	if tenantID <= 0 {
+		return apperr.ErrSandboxQuotaInvalid
+	}
+	quota := s.defaultTenantQuota(tenantID)
+	if err := validateQuota(quota); err != nil {
+		return err
+	}
+	return s.store.TenantTx(ctx, tenantID, func(ctx context.Context, tx TxStore) error {
+		_, err := tx.EnsureTenantQuota(ctx, quota)
+		if err != nil {
+			return apperr.ErrSandboxQuotaPersistFailed.WithCause(err)
+		}
+		return nil
+	})
+}
+
+// defaultTenantQuota 从唯一配置源构造新租户配额。
+func (s *Service) defaultTenantQuota(tenantID int64) TenantQuota {
+	return TenantQuota{
+		TenantID:                tenantID,
+		MaxConcurrentSandbox:    s.cfg.TenantDefaultMaxConcurrent,
+		MaxCPU:                  s.cfg.TenantDefaultMaxCPU,
+		MaxMemoryMB:             s.cfg.TenantDefaultMaxMemoryMB,
+		IdleTimeoutMin:          s.cfg.TenantDefaultIdleTimeoutMin,
+		MaxLifetimeMin:          s.cfg.TenantDefaultMaxLifetimeMin,
+		MaxKeepaliveMin:         s.cfg.TenantDefaultMaxKeepaliveMin,
+		MaxSnapshotRetentionMin: s.cfg.TenantDefaultSnapshotMin,
+	}
 }
 
 // resolveTools 按显式工具或运行时默认工具解析工具定义并校验运行时适配性。

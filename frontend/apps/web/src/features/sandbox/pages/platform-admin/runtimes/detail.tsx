@@ -28,7 +28,7 @@ const RuntimeDetailPage: React.FC = () => {
   const { id } = useParams()
   const navigate = useNavigate()
   const [runningSelftest, setRunningSelftest] = useState(false)
-  const [prepullingImageId, setPrepullingImageId] = useState<number | null>(null)
+  const [prepullingImageId, setPrepullingImageId] = useState<string | null>(null)
   const [message, setMessage] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [imageUrl, setImageUrl] = useState('')
@@ -75,14 +75,14 @@ const RuntimeDetailPage: React.FC = () => {
   /**
    * handlePrepull 对指定镜像触发后端预拉取，并刷新镜像状态。
    */
-  const handlePrepull = useCallback(async (imageId: number) => {
+  const handlePrepull = useCallback(async (imageId: string) => {
     if (!id) return
     setPrepullingImageId(imageId)
     setMessage(null)
     setError(null)
     try {
-      await api.sandbox.prepullRuntimeImage(id, String(imageId))
-      const status = await api.sandbox.getRuntimeImagePrepull(id, String(imageId))
+      await api.sandbox.prepullRuntimeImage(id, imageId)
+      const status = await api.sandbox.getRuntimeImagePrepull(id, imageId)
       setMessage(`镜像预拉取已执行，${status.ready_nodes}/${status.desired_nodes} 个节点已就绪。`)
       resource.reload()
     } catch (prepullError) {
@@ -106,11 +106,11 @@ const RuntimeDetailPage: React.FC = () => {
   }
 
   /** disableImage 停用镜像版本并刷新运行时详情。 */
-  const disableImage = async (imageId: number) => {
+  const disableImage = async (imageId: string) => {
     if (!id || !window.confirm('确定停用这个镜像版本吗？')) return
     setError(null)
     try {
-      await api.sandbox.disableRuntimeImage(id, String(imageId))
+      await api.sandbox.disableRuntimeImage(id, imageId)
       setMessage('镜像版本已停用。')
       resource.reload()
     } catch (actionError) {
@@ -201,8 +201,8 @@ const RuntimeDetailPage: React.FC = () => {
               <Input value={imageUrl} onChange={(event) => setImageUrl(event.target.value)} placeholder="镜像地址" fullWidth />
               <Input value={imageVersion} onChange={(event) => setImageVersion(event.target.value)} placeholder="版本" fullWidth />
               <Input value={imageDigest} onChange={(event) => setImageDigest(event.target.value)} placeholder="镜像摘要" fullWidth />
-              <Checkbox checked={genesisBaked} onChange={(event) => setGenesisBaked(event.target.checked)}>已内置创世配置</Checkbox>
-              <Checkbox checked={isDefault} onChange={(event) => setIsDefault(event.target.checked)}>设为默认版本</Checkbox>
+              <Checkbox checked={genesisBaked} label="已内置创世配置" onChange={(event) => setGenesisBaked(event.target.checked)} />
+              <Checkbox checked={isDefault} label="设为默认版本" onChange={(event) => setIsDefault(event.target.checked)} />
               <Button icon={<Plus size={15} />} onClick={() => void registerImage()}>登记镜像</Button>
             </div>
           </section>

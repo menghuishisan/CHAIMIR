@@ -1,19 +1,21 @@
 // content dto 文件定义 M5 HTTP 请求与响应结构。
 package content
 
+import "chaimir/internal/platform/ids"
+
 // ItemDTO 是内容外壳响应。
 type ItemDTO struct {
-	ID              int64    `json:"id"`
-	TenantID        int64    `json:"tenant_id"`
+	ID              ids.ID   `json:"id"`
+	TenantID        ids.ID   `json:"tenant_id"`
 	Code            string   `json:"code"`
 	Version         string   `json:"version"`
 	Type            int16    `json:"type"`
 	Title           string   `json:"title"`
-	CategoryID      int64    `json:"category_id,omitempty"`
+	CategoryID      ids.ID   `json:"category_id,omitempty"`
 	Difficulty      int16    `json:"difficulty"`
 	Tags            []string `json:"tags"`
 	KnowledgePoints []string `json:"knowledge_points"`
-	AuthorID        int64    `json:"author_id"`
+	AuthorID        ids.ID   `json:"author_id"`
 	AuthorType      int16    `json:"author_type"`
 	Visibility      int16    `json:"visibility"`
 	Status          int16    `json:"status"`
@@ -36,7 +38,7 @@ type CreateItemRequest struct {
 	Version         string         `json:"version"`
 	Type            int16          `json:"type"`
 	Title           string         `json:"title"`
-	CategoryID      int64          `json:"category_id"`
+	CategoryID      ids.ID         `json:"category_id"`
 	Difficulty      int16          `json:"difficulty"`
 	Tags            []string       `json:"tags"`
 	KnowledgePoints []string       `json:"knowledge_points"`
@@ -48,7 +50,7 @@ type CreateItemRequest struct {
 // UpdateItemRequest 是草稿编辑请求。
 type UpdateItemRequest struct {
 	Title           string         `json:"title"`
-	CategoryID      int64          `json:"category_id"`
+	CategoryID      ids.ID         `json:"category_id"`
 	Difficulty      int16          `json:"difficulty"`
 	Tags            []string       `json:"tags"`
 	KnowledgePoints []string       `json:"knowledge_points"`
@@ -92,11 +94,11 @@ type SystemImportRequest struct {
 	Version          string         `json:"version"`
 	Type             int16          `json:"type"`
 	Title            string         `json:"title"`
-	CategoryID       int64          `json:"category_id"`
+	CategoryID       ids.ID         `json:"category_id"`
 	Difficulty       int16          `json:"difficulty"`
 	Tags             []string       `json:"tags"`
 	KnowledgePoints  []string       `json:"knowledge_points"`
-	AuthorID         int64          `json:"author_id"`
+	AuthorID         ids.ID         `json:"author_id"`
 	AuthorType       int16          `json:"author_type"`
 	Visibility       int16          `json:"visibility"`
 	Body             map[string]any `json:"body"`
@@ -107,15 +109,15 @@ type SystemImportRequest struct {
 
 // CategoryRequest 是分类创建和更新请求。
 type CategoryRequest struct {
-	ParentID int64  `json:"parent_id"`
+	ParentID ids.ID `json:"parent_id,omitempty"`
 	Name     string `json:"name"`
 	Sort     int32  `json:"sort"`
 }
 
 // CategoryDTO 是分类响应。
 type CategoryDTO struct {
-	ID        int64  `json:"id"`
-	ParentID  int64  `json:"parent_id,omitempty"`
+	ID        ids.ID `json:"id"`
+	ParentID  ids.ID `json:"parent_id,omitempty"`
 	Name      string `json:"name"`
 	Sort      int32  `json:"sort"`
 	CreatedAt string `json:"created_at"`
@@ -139,9 +141,9 @@ type PaperItemInputDTO struct {
 
 // PaperDTO 是组卷元信息响应。
 type PaperDTO struct {
-	ID          int64         `json:"id"`
+	ID          ids.ID        `json:"id"`
 	Name        string        `json:"name"`
-	AuthorID    int64         `json:"author_id"`
+	AuthorID    ids.ID        `json:"author_id"`
 	GenMode     int16         `json:"gen_mode"`
 	GenCriteria PaperCriteria `json:"gen_criteria"`
 	CreatedAt   string        `json:"created_at"`
@@ -156,7 +158,7 @@ type PaperDetailDTO struct {
 
 // PaperItemFaceDTO 是试卷题目题面响应。
 type PaperItemFaceDTO struct {
-	ID      int64          `json:"id"`
+	ID      ids.ID         `json:"id"`
 	Code    string         `json:"code"`
 	Version string         `json:"version"`
 	Score   int32          `json:"score"`

@@ -51,7 +51,7 @@ func (t *txStore) DeleteDepartment(ctx context.Context, tenantID, id int64) erro
 
 // CreateMajor 创建专业记录。
 func (t *txStore) CreateMajor(ctx context.Context, tenantID, id int64, req MajorRequest) (Major, error) {
-	row, err := t.q.CreateMajor(ctx, sqlcgen.CreateMajorParams{ID: id, TenantID: tenantID, DepartmentID: req.DepartmentID, Name: req.Name})
+	row, err := t.q.CreateMajor(ctx, sqlcgen.CreateMajorParams{ID: id, TenantID: tenantID, DepartmentID: req.DepartmentID.Int64(), Name: req.Name})
 	if err != nil {
 		return Major{}, err
 	}
@@ -78,7 +78,7 @@ func (t *txStore) MajorExists(ctx context.Context, tenantID, id int64) (bool, er
 
 // UpdateMajor 更新专业所属院系和名称。
 func (t *txStore) UpdateMajor(ctx context.Context, tenantID, id int64, req MajorRequest) (Major, error) {
-	row, err := t.q.UpdateMajor(ctx, sqlcgen.UpdateMajorParams{ID: id, TenantID: tenantID, DepartmentID: req.DepartmentID, Name: req.Name})
+	row, err := t.q.UpdateMajor(ctx, sqlcgen.UpdateMajorParams{ID: id, TenantID: tenantID, DepartmentID: req.DepartmentID.Int64(), Name: req.Name})
 	if err != nil {
 		return Major{}, err
 	}
@@ -92,7 +92,7 @@ func (t *txStore) DeleteMajor(ctx context.Context, tenantID, id int64) error {
 
 // CreateClass 创建班级记录。
 func (t *txStore) CreateClass(ctx context.Context, tenantID, id int64, req ClassRequest) (Class, error) {
-	row, err := t.q.CreateClass(ctx, sqlcgen.CreateClassParams{ID: id, TenantID: tenantID, MajorID: req.MajorID, Name: req.Name, EnrollmentYear: req.EnrollmentYear, Status: req.Status})
+	row, err := t.q.CreateClass(ctx, sqlcgen.CreateClassParams{ID: id, TenantID: tenantID, MajorID: req.MajorID.Int64(), Name: req.Name, EnrollmentYear: req.EnrollmentYear, Status: req.Status})
 	if err != nil {
 		return Class{}, err
 	}
@@ -119,7 +119,7 @@ func (t *txStore) ClassExists(ctx context.Context, tenantID, id int64) (bool, er
 
 // UpdateClass 更新班级所属专业、名称、入学年份和状态。
 func (t *txStore) UpdateClass(ctx context.Context, tenantID, id int64, req ClassRequest) (Class, error) {
-	row, err := t.q.UpdateClass(ctx, sqlcgen.UpdateClassParams{ID: id, TenantID: tenantID, MajorID: req.MajorID, Name: req.Name, EnrollmentYear: req.EnrollmentYear, Status: req.Status})
+	row, err := t.q.UpdateClass(ctx, sqlcgen.UpdateClassParams{ID: id, TenantID: tenantID, MajorID: req.MajorID.Int64(), Name: req.Name, EnrollmentYear: req.EnrollmentYear, Status: req.Status})
 	if err != nil {
 		return Class{}, err
 	}
@@ -146,7 +146,12 @@ func (t *txStore) RevokeStudentSessionsByEnrollmentYear(ctx context.Context, ten
 	return t.q.RevokeStudentSessionsByEnrollmentYear(ctx, sqlcgen.RevokeStudentSessionsByEnrollmentYearParams{TenantID: tenantID, EnrollmentYear: pgtypex.Int2(enrollmentYear)})
 }
 
-// PromoteClasses 批量升级当前租户正常班级的入学年份。
-func (t *txStore) PromoteClasses(ctx context.Context, tenantID int64) error {
-	return t.q.PromoteClasses(ctx, tenantID)
+// PromoteClasses 把明确选择的正常班级更新到目标学年并同步名称中的年份。
+func (t *txStore) PromoteClasses(ctx context.Context, tenantID int64, classIDs []int64, targetYear int16) (int64, error) {
+	return t.q.PromoteClasses(ctx, sqlcgen.PromoteClassesParams{TenantID: tenantID, ClassIds: classIDs, TargetYear: targetYear})
+}
+
+// PromoteClassStudentProfiles 同步所选班级学生档案的入学年份。
+func (t *txStore) PromoteClassStudentProfiles(ctx context.Context, tenantID int64, classIDs []int64, targetYear int16) error {
+	return t.q.PromoteClassStudentProfiles(ctx, sqlcgen.PromoteClassStudentProfilesParams{TenantID: tenantID, ClassIds: classIDs, TargetYear: pgtypex.Int2(targetYear)})
 }

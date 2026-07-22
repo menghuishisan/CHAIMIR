@@ -74,7 +74,7 @@
     x-chaimir-audience: platform-or-school-admin
     security: [{ bearerAuth: [] }]
     parameters:
-      - { name: actor_id, in: query, schema: { type: integer, format: int64 } }
+      - { name: actor_id, in: query, schema: { $ref: "#/components/schemas/SnowflakeID" } }
       - { name: action, in: query, schema: { type: string } }
       - { name: target_type, in: query, schema: { type: string } }
       - { $ref: "#/components/parameters/FromQuery" }

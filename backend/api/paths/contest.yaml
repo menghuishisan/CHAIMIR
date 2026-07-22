@@ -288,7 +288,7 @@
     x-chaimir-audience: teacher
     security: [{ bearerAuth: [] }]
     parameters:
-      - { name: source_id, in: query, schema: { type: integer, format: int64 } }
+      - { name: source_id, in: query, schema: { $ref: "#/components/schemas/SnowflakeID" } }
       - { $ref: "#/components/parameters/StatusQuery" }
       - { $ref: "#/components/parameters/PageQuery" }
       - { $ref: "#/components/parameters/SizeQuery" }
@@ -327,7 +327,7 @@
     x-chaimir-audience: internal
     x-chaimir-internal: true
     security: [{ serviceAuth: [] }]
-    parameters: [{ name: tenant_id, in: query, schema: { type: integer, format: int64 } }]
+    parameters: [{ name: tenant_id, in: query, schema: { $ref: "#/components/schemas/SnowflakeID" } }]
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
 /api/v1/contest/internal/students/{id}/contest-achievements:
   get:

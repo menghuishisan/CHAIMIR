@@ -44,6 +44,7 @@ import type {
   BatchAccountIDsRequest,
   ImportPreviewResponse,
   ImportCommitRequest,
+  PromoteClassesRequest,
   AccountImportCommitResponse,
   ImportBatch,
 } from '../types/identity'
@@ -444,8 +445,8 @@ export class IdentityApi {
   /**
    * 执行班级批量升级。
    */
-  async promoteClasses(): Promise<void> {
-    return this.client.post('/org/classes/promote')
+  async promoteClasses(data: PromoteClassesRequest): Promise<void> {
+    return this.client.post('/org/classes/promote', data)
   }
 
   // ===== 租户配置（学校管理员） =====

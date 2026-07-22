@@ -10,7 +10,7 @@ import { api } from '../../../../../app/api'
 import { ErrorState, LoadingState } from '../../../../../components/ResourceState'
 import { useAsyncResource } from '../../../../../hooks'
 import styles from '../../sim.module.css'
-import { simReviewResultOptions } from '../../../../../utils/index'
+import { simReviewResultLabel, simReviewResultOptions } from '../../../../../utils/index'
 import { userFacingErrorMessage } from '../../../../../utils/userFacingError'
 
 const PlatformSimulationsPage: React.FC = () => {
@@ -42,7 +42,7 @@ const PlatformSimulationsPage: React.FC = () => {
   const columns = useMemo<TableColumn<SimPackageReview>[]>(() => [
     { key: 'package', title: '仿真包', render: (row) => row.package?.name || row.package_id, priority: 'primary' },
     { key: 'submitter', title: '提交人', dataIndex: 'submitter_id' },
-    { key: 'result', title: '审核结果', render: (row) => <span className={styles.status}>{row.result}</span> },
+    { key: 'result', title: '审核结果', render: (row) => <span className={styles.status}>{simReviewResultLabel(row.result)}</span> },
     { key: 'scan', title: '静态扫描', render: (row) => row.preview_report.static_scan?.status || '未返回' },
     { key: 'preview', title: 'Worker 预览', render: (row) => row.preview_report.worker_preview?.status || '未返回' },
     {
@@ -72,7 +72,7 @@ const PlatformSimulationsPage: React.FC = () => {
       <div className={styles.header}>
         <div>
           <h1 className={styles.title}><Shield size={28} />大型仿真靶机审核与发布</h1>
-          <p className={styles.subtitle}>基于后端预览报告审核仿真包。</p>
+          <p className={styles.subtitle}>核对安全扫描与运行预览结果，完成仿真包审核。</p>
         </div>
         <Button variant="outline" icon={<RefreshCw size={16} />} onClick={resource.reload}>刷新</Button>
       </div>

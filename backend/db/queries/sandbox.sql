@@ -110,6 +110,21 @@ SELECT tenant_id, max_concurrent_sandbox, max_cpu, max_memory_mb, idle_timeout_m
 FROM tenant_quota
 WHERE tenant_id = $1;
 
+-- name: EnsureTenantQuota :one
+WITH inserted AS (
+    INSERT INTO tenant_quota (tenant_id, max_concurrent_sandbox, max_cpu, max_memory_mb, idle_timeout_min, max_lifetime_min, max_keepalive_min, max_snapshot_retention_min, updated_at)
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, now())
+    ON CONFLICT (tenant_id) DO NOTHING
+    RETURNING tenant_id, max_concurrent_sandbox, max_cpu, max_memory_mb, idle_timeout_min, max_lifetime_min, max_keepalive_min, max_snapshot_retention_min, updated_at
+)
+SELECT tenant_id, max_concurrent_sandbox, max_cpu, max_memory_mb, idle_timeout_min, max_lifetime_min, max_keepalive_min, max_snapshot_retention_min, updated_at
+FROM inserted
+UNION ALL
+SELECT tenant_id, max_concurrent_sandbox, max_cpu, max_memory_mb, idle_timeout_min, max_lifetime_min, max_keepalive_min, max_snapshot_retention_min, updated_at
+FROM tenant_quota
+WHERE tenant_id = $1
+LIMIT 1;
+
 -- name: GetTenantQuotaForUpdate :one
 SELECT tenant_id, max_concurrent_sandbox, max_cpu, max_memory_mb, idle_timeout_min, max_lifetime_min, max_keepalive_min, max_snapshot_retention_min, updated_at
 FROM tenant_quota

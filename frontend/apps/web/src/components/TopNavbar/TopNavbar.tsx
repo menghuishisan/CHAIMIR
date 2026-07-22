@@ -8,9 +8,11 @@ import styles from './TopNavbar.module.css'
 
 interface TopNavbarProps {
   onMenuClick: () => void
+  menuButtonRef?: React.Ref<HTMLButtonElement>
+  isMenuOpen?: boolean
 }
 
-const TopNavbar: React.FC<TopNavbarProps> = ({ onMenuClick }) => {
+const TopNavbar: React.FC<TopNavbarProps> = ({ onMenuClick, menuButtonRef, isMenuOpen = false }) => {
   const location = useLocation()
   const navigation = roleNavigationForPath(location.pathname)
 
@@ -18,10 +20,12 @@ const TopNavbar: React.FC<TopNavbarProps> = ({ onMenuClick }) => {
     <header className={styles.navbar}>
       <div className={styles.leftSection}>
         <button
+          ref={menuButtonRef}
           type="button"
           className={styles.menuButton}
           onClick={onMenuClick}
           aria-label="打开导航菜单"
+          aria-expanded={isMenuOpen}
         >
           <Menu size={20} />
         </button>

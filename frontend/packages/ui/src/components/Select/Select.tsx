@@ -50,11 +50,12 @@ export const Select = React.forwardRef<HTMLDivElement, SelectProps>(
     const [isOpen, setIsOpen] = useState(false)
     const [selectedValue, setSelectedValue] = useState(value || defaultValue || '')
     const [activeIndex, setActiveIndex] = useState(0)
+    const [animateDropdown, setAnimateDropdown] = useState(false)
     const generatedId = useId()
     const triggerId = id ?? `chaimir-select-${generatedId}`
     const listboxId = `${triggerId}-listbox`
 
-    const { refs, floatingStyles } = useFloating<HTMLDivElement>({
+    const { refs, floatingStyles, placement, isPositioned } = useFloating<HTMLDivElement>({
       open: isOpen,
       onOpenChange: setIsOpen,
       placement: 'bottom-start',
@@ -114,6 +115,7 @@ export const Select = React.forwardRef<HTMLDivElement, SelectProps>(
 
     const handleKeyDown = (event: React.KeyboardEvent<HTMLButtonElement>) => {
       if (disabled) return
+      setAnimateDropdown(false)
       if (event.key === 'ArrowDown') {
         event.preventDefault()
         setIsOpen(true)
@@ -175,6 +177,7 @@ export const Select = React.forwardRef<HTMLDivElement, SelectProps>(
             triggerHaptic(10)
             handleToggle()
           }}
+          onPointerDown={() => setAnimateDropdown(true)}
           onKeyDown={handleKeyDown}
           disabled={disabled}
           aria-haspopup="listbox"
@@ -197,38 +200,47 @@ export const Select = React.forwardRef<HTMLDivElement, SelectProps>(
           createPortal(
             <div
               ref={refs.setFloating}
-              style={floatingStyles}
-              id={listboxId}
-              className="chaimir-select__dropdown"
-              role="listbox"
+              style={{
+                ...floatingStyles,
+                visibility: isPositioned ? 'visible' : 'hidden',
+                pointerEvents: isPositioned ? 'auto' : 'none',
+              }}
+              className="chaimir-select__positioner"
+              data-placement={placement}
             >
-              {options.map((option, index) => (
-                <div
-                  key={option.value}
-                  id={`${listboxId}-${option.value}`}
-                  className={clsx(
-                    'chaimir-select__option',
-                    option.value === selectedValue && 'chaimir-select__option--selected',
-                    index === activeIndex && 'chaimir-select__option--active',
-                    option.disabled && 'chaimir-select__option--disabled'
-                  )}
-                  role="option"
-                  aria-selected={option.value === selectedValue}
-                  aria-disabled={option.disabled || undefined}
-                  onMouseEnter={() => !option.disabled && setActiveIndex(index)}
-                  onClick={() => {
-                    if (!option.disabled) {
-                      triggerHaptic(10)
-                      handleSelect(option.value)
-                    }
-                  }}
-                >
-                  {option.label}
-                  {option.value === selectedValue && (
-                    <Check size={16} className="chaimir-select__check" />
-                  )}
-                </div>
-              ))}
+              <div
+                id={listboxId}
+                className={clsx('chaimir-select__dropdown', animateDropdown && 'chaimir-select__dropdown--animated')}
+                role="listbox"
+              >
+                {options.map((option, index) => (
+                  <div
+                    key={option.value}
+                    id={`${listboxId}-${option.value}`}
+                    className={clsx(
+                      'chaimir-select__option',
+                      option.value === selectedValue && 'chaimir-select__option--selected',
+                      index === activeIndex && 'chaimir-select__option--active',
+                      option.disabled && 'chaimir-select__option--disabled'
+                    )}
+                    role="option"
+                    aria-selected={option.value === selectedValue}
+                    aria-disabled={option.disabled || undefined}
+                    onMouseEnter={() => !option.disabled && setActiveIndex(index)}
+                    onClick={() => {
+                      if (!option.disabled) {
+                        triggerHaptic(10)
+                        handleSelect(option.value)
+                      }
+                    }}
+                  >
+                    {option.label}
+                    {option.value === selectedValue && (
+                      <Check size={16} className="chaimir-select__check" />
+                    )}
+                  </div>
+                ))}
+              </div>
             </div>,
             document.body
           )}

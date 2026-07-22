@@ -128,3 +128,18 @@ func (s *Service) loadContestForManage(ctx context.Context, tx TxStore, tenantID
 	}
 	return item, nil
 }
+
+// loadContestForRead 允许读取已发布竞赛，并把草稿严格限制为组织者或学校管理员。
+func (s *Service) loadContestForRead(ctx context.Context, tx TxStore, tenantID, accountID, contestID int64) (Contest, error) {
+	item, err := tx.GetContest(ctx, tenantID, contestID)
+	if err != nil {
+		return Contest{}, err
+	}
+	if item.Status != ContestStatusDraft {
+		return item, nil
+	}
+	if err := canManageContest(accountID, s.isSchoolAdmin(ctx, accountID), item); err != nil {
+		return Contest{}, err
+	}
+	return item, nil
+}

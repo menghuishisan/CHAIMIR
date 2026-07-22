@@ -2,6 +2,7 @@
 package sim
 
 import (
+	"chaimir/internal/platform/ids"
 	"encoding/json"
 	"time"
 )
@@ -36,7 +37,7 @@ type CreateSessionRequest struct {
 	Version        string         `json:"version"`
 	Seed           int64          `json:"seed"`
 	InitParams     map[string]any `json:"init_params"`
-	OwnerAccountID int64          `json:"owner_account_id"`
+	OwnerAccountID ids.ID         `json:"owner_account_id"`
 	SourceRef      string         `json:"source_ref"`
 }
 

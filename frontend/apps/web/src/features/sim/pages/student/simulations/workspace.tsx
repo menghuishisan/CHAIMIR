@@ -86,9 +86,9 @@ const SimulationWorkspacePage: React.FC = () => {
     try {
       const state = parseBackendState(event.data)
       setBackendState(state)
-      setActionMessage(`后端仿真已推进到第 ${state.tick} 步。`)
+      setActionMessage(`云端仿真已推进到第 ${state.tick} 步。`)
     } catch (error) {
-      setActionError(userFacingErrorMessage(error, '后端仿真返回了无法识别的状态，请稍后重试。'))
+      setActionError(userFacingErrorMessage(error, '云端仿真状态暂时无法读取，请稍后重试。'))
     }
   }, [])
   const stream = useTicketedWebSocket({ url: streamUrl, onMessage: handleStreamMessage })
@@ -137,7 +137,7 @@ const SimulationWorkspacePage: React.FC = () => {
       event_type: eventType,
       payload: target ? { ...payload, target } : payload,
     }))
-    if (!sent) setActionError('后端仿真仍在连接，请稍后再试。')
+    if (!sent) setActionError('云端仿真仍在连接，请稍后再试。')
   }, [stream])
 
   /** shareSession 创建服务端分享码，公开回放不允许再次分享。 */
@@ -190,7 +190,7 @@ const SimulationWorkspacePage: React.FC = () => {
       {sessionId && !sharedCode && <Button variant="on-dark" size="sm" icon={<History size={15} />} onClick={switchReplay}>{replayMode ? '返回实时仿真' : '查看会话回放'}</Button>}
       {sessionId && !replayMode && <Button variant="on-dark" size="sm" icon={<Share2 size={15} />} onClick={() => void shareSession()}>创建分享地址</Button>}
       {share && <Button variant="on-dark" size="sm" icon={<Copy size={15} />} onClick={() => void copyShareCode()}>复制分享地址</Button>}
-      {streamUrl && <span title={actionError || actionMessage}><Radio size={15} /> {stream.status === 'open' ? '后端计算已连接' : '后端计算连接中'}</span>}
+      {streamUrl && <span title={actionError || actionMessage}><Radio size={15} /> {stream.status === 'open' ? '云端计算已连接' : '云端计算连接中'}</span>}
       {actionError && <span role="alert">{actionError}</span>}
     </>
   )

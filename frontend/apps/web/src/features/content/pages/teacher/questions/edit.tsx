@@ -71,11 +71,17 @@ const TeacherQuestionEditPage: React.FC = () => {
     setPublishing(publish)
     setError(null)
     setMessage(null)
+    if (!categoryId) {
+      setError('请选择题目分类。')
+      setSaving(false)
+      setPublishing(false)
+      return
+    }
     try {
       const payload = {
         type: Number(type) as ContentType,
         title,
-        category_id: Number(categoryId),
+        category_id: categoryId,
         difficulty: Number(difficulty) as ContentDifficulty,
         tags: tags.split(',').map((value) => value.trim()).filter(Boolean),
         knowledge_points: knowledgePoints.split(',').map((value) => value.trim()).filter(Boolean),

@@ -13,7 +13,7 @@ import { formatDateTime, gradeReviewStatusLabel } from '../../../../../utils/ind
 
 
 const TeacherGradesDetailsPage: React.FC = () => {
-  const resource = useAsyncResource(() => api.grade.listReviews({ page: 1, size: 20 }), [])
+  const resource = useAsyncResource(() => api.grade.listOwnReviews({ page: 1, size: 20 }), [])
 
   const columns = useMemo<TableColumn<GradeReview>[]>(() => [
     { key: 'course', title: '课程编号', dataIndex: 'course_id', priority: 'primary' },
@@ -31,7 +31,7 @@ const TeacherGradesDetailsPage: React.FC = () => {
       <div className={styles.header}>
         <div>
           <h1 className={styles.title}><Calculator size={28} />成绩报送明细</h1>
-          <p className={styles.subtitle}>当前页面展示后端已记录的报送、审核和锁定状态。</p>
+          <p className={styles.subtitle}>查看成绩报送、审核和锁定进度。</p>
         </div>
         <Button variant="outline" icon={<RefreshCw size={16} />} onClick={resource.reload}>刷新</Button>
       </div>

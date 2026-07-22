@@ -8,9 +8,9 @@ import { thresholdSignatureSimulation } from './threshold-signature/package';
 import { zkProofSimulation } from './zk-proof/package';
 
 export const cryptographySimulations: SimPackage[] = [
-  hashChainSimulation as unknown as SimPackage,
-  digitalSignatureSimulation as unknown as SimPackage,
-  merkleProofSimulation as unknown as SimPackage,
-  zkProofSimulation as unknown as SimPackage,
-  thresholdSignatureSimulation as unknown as SimPackage,
+  hashChainSimulation,
+  digitalSignatureSimulation,
+  merkleProofSimulation,
+  zkProofSimulation,
+  thresholdSignatureSimulation,
 ];

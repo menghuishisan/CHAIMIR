@@ -1,6 +1,7 @@
 // 本文件提供仿真包作者使用的 manifest、审核摘要和校验工具,保持前端包描述与后端 M4 审核入口一致。
 
 import type { CodeTraceDef, FieldDef, InteractionDef, NarrativeStep, PatternMode, SimPackage, SimState } from '../types';
+import { validateSimPackage } from '../validation';
 
 type RenderPatternRole = 'primary' | 'evidence' | 'timeline' | 'metrics' | 'trace' | 'checkpoints';
 
@@ -87,24 +88,11 @@ export interface SimManifestSummary {
   };
 }
 
-export interface SimManifestValidationIssue {
-  path: string;
-  message: string;
-}
-
-export interface SimManifestValidationResult {
-  ok: boolean;
-  issues: SimManifestValidationIssue[];
-}
-
-const payloadKeyPattern = /^[A-Za-z][A-Za-z0-9_.:-]{0,63}$/;
-const reservedPayloadParams = new Set(['target', 'active', 'phase', 'startX', 'startY', 'currentX', 'currentY', 'deltaX', 'deltaY']);
-
 /**
  * defineSimPackage 是官方仿真包定义入口,会在开发期执行协议校验并返回原包对象。
  */
 export function defineSimPackage<TState extends SimState>(simPackage: SimPackage<TState>): SimPackage<TState> {
-  const result = validateSimPackageManifest(simPackage);
+  const result = validateSimPackage(simPackage);
   if (!result.ok) {
     throw new Error(`仿真包协议不完整:${result.issues.map((issue) => `${issue.path}:${issue.message}`).join(';')}`);
   }
@@ -178,146 +166,6 @@ export function createManifestSummary<TState extends SimState>(simPackage: SimPa
 }
 
 /**
- * validateSimPackageManifest 在上传前校验仿真包是否满足 M4 前端协议的关键硬约束。
- */
-export function validateSimPackageManifest<TState extends SimState>(simPackage: SimPackage<TState>): SimManifestValidationResult {
-  const issues: SimManifestValidationIssue[] = [];
-  validateMeta(simPackage, issues);
-  validateInteractions(simPackage, issues);
-  validateNarrative(simPackage, issues);
-  validateCodeTrace(simPackage, issues);
-  validateCheckpoints(simPackage, issues);
-  validateInitialRender(simPackage, issues);
-  return { ok: issues.length === 0, issues };
-}
-
-/**
- * validateMeta 校验包元数据和规模限制是否完整。
- */
-function validateMeta<TState extends SimState>(simPackage: SimPackage<TState>, issues: SimManifestValidationIssue[]): void {
-  const meta = simPackage.meta;
-  if (!meta?.code || !meta.name || !meta.category || !meta.version) {
-    issues.push({ path: 'meta', message: '仿真包元数据不完整。' });
-  }
-  if (meta?.compute !== 'frontend' && meta?.compute !== 'backend') {
-    issues.push({ path: 'meta.compute', message: '计算模式必须声明为 frontend 或 backend。' });
-  }
-  if (!meta?.scaleLimit || meta.scaleLimit.nodes <= 0 || meta.scaleLimit.maxTick <= 0 || meta.scaleLimit.maxEvents <= 0) {
-    issues.push({ path: 'meta.scaleLimit', message: '必须声明正数规模上限。' });
-  }
-}
-
-/**
- * validateInteractions 校验交互声明是否可由通用工作台渲染和注入。
- */
-function validateInteractions<TState extends SimState>(simPackage: SimPackage<TState>, issues: SimManifestValidationIssue[]): void {
-  if (!Array.isArray(simPackage.interactions)) {
-    issues.push({ path: 'interactions', message: '交互声明必须是数组。' });
-    return;
-  }
-  if (simPackage.interactions.length === 0) {
-    issues.push({ path: 'interactions', message: '至少声明一个可操作交互。' });
-  }
-  for (const [index, interaction] of simPackage.interactions.entries()) {
-    if (!interaction.id || !interaction.kind || !interaction.emits || !interaction.label) {
-      issues.push({ path: `interactions.${index}`, message: '交互必须包含 id、kind、emits 和 label。' });
-    }
-    if (interaction.kind === 'select-element' && interaction.target !== 'element') {
-      issues.push({ path: `interactions.${index}.target`, message: '选择元素交互必须声明 target 为 element。' });
-    }
-    if ((interaction.target === 'element' || interaction.kind === 'select-element') && !interaction.elementFilter) {
-      issues.push({ path: `interactions.${index}.elementFilter`, message: '元素交互必须声明 elementFilter。' });
-    }
-    for (const [fieldIndex, field] of (interaction.params ?? []).entries()) {
-      if (!field.name || !field.label || !field.type) {
-        issues.push({ path: `interactions.${index}.params.${fieldIndex}`, message: '交互参数必须包含 name、label 和 type。' });
-      }
-      if (!payloadKeyPattern.test(field.name) || reservedPayloadParams.has(field.name)) {
-        issues.push({ path: `interactions.${index}.params.${fieldIndex}.name`, message: '交互参数名必须符合后端操作日志规则,且不能使用平台保留字段。' });
-      }
-    }
-  }
-}
-
-/**
- * validateNarrative 校验教学叙事步骤是否可以被工作台展示。
- */
-function validateNarrative<TState extends SimState>(simPackage: SimPackage<TState>, issues: SimManifestValidationIssue[]): void {
-  if (!simPackage.narrative?.length) {
-    issues.push({ path: 'narrative', message: '仿真包必须提供教学叙事步骤。' });
-    return;
-  }
-  for (const [index, step] of (simPackage.narrative ?? []).entries()) {
-    if (!step.id || !step.title || typeof step.trigger !== 'function') {
-      issues.push({ path: `narrative.${index}`, message: '叙事步骤必须包含 id、title 和 trigger。' });
-    }
-  }
-}
-
-/**
- * validateCodeTrace 校验代码追踪是否有源码、行映射和可选变量观察声明。
- */
-function validateCodeTrace<TState extends SimState>(simPackage: SimPackage<TState>, issues: SimManifestValidationIssue[]): void {
-  if (!simPackage.codeTrace) {
-    issues.push({ path: 'codeTrace', message: '仿真包必须提供代码追踪配置。' });
-    return;
-  }
-  if (!simPackage.codeTrace.sourceCode || simPackage.codeTrace.lineMapping.length === 0) {
-    issues.push({ path: 'codeTrace.lineMapping', message: '代码追踪必须包含源码和行映射。' });
-  }
-}
-
-/**
- * validateCheckpoints 校验仿真包是否提供可判题的检查点。
- */
-function validateCheckpoints<TState extends SimState>(simPackage: SimPackage<TState>, issues: SimManifestValidationIssue[]): void {
-  if (!simPackage.checkpoints?.length) {
-    issues.push({ path: 'checkpoints', message: '仿真包必须提供至少一个检查点。' });
-    return;
-  }
-  for (const [index, checkpoint] of simPackage.checkpoints.entries()) {
-    if (!checkpoint.id || !checkpoint.label || typeof checkpoint.evaluate !== 'function') {
-      issues.push({ path: `checkpoints.${index}`, message: '检查点必须包含 id、label 和 evaluate。' });
-    }
-  }
-}
-
-/**
- * validateInitialRender 执行初始渲染并校验封闭模式数量。
- */
-function validateInitialRender<TState extends SimState>(simPackage: SimPackage<TState>, issues: SimManifestValidationIssue[]): void {
-  try {
-    const initialState = simPackage.initState({}, 1);
-    const view = simPackage.render(initialState);
-    if (!view.summary || !view.phase?.id || !view.phase.title || !view.layout?.primary || !view.focus?.primary?.length || view.patterns.length < 1 || view.patterns.length > 3) {
-      issues.push({ path: 'render', message: '渲染结果必须包含 TeachingFrame 的摘要、阶段、焦点、布局和 1 到 3 个封闭可视化模式。' });
-      return;
-    }
-    const ids = new Set<string>();
-    for (const pattern of view.patterns) {
-      if (ids.has(pattern.id)) {
-        issues.push({ path: 'render.patterns', message: '封闭模式 ID 不能重复。' });
-      }
-      ids.add(pattern.id);
-    }
-    const layoutIds = layoutPatternIds(view);
-    for (const id of layoutIds) {
-      if (!ids.has(id)) {
-        issues.push({ path: 'render.layout', message: '布局只能引用当前帧中存在的模式。' });
-        return;
-      }
-    }
-    for (const pattern of view.patterns) {
-      if (!layoutIds.has(pattern.id)) {
-        issues.push({ path: `render.patterns.${pattern.id}`, message: '每个封闭模式都必须通过 layout 声明教学职责。' });
-      }
-    }
-  } catch {
-    issues.push({ path: 'render', message: '初始渲染失败，请检查初始状态和渲染声明。' });
-  }
-}
-
-/**
  * patternRoles 从 TeachingFrame 布局中提取 manifest 可审核的模式职责。
  */
 function patternRoles(view: ReturnType<SimPackage['render']>, patternId: string): RenderPatternRole[] {
@@ -329,22 +177,6 @@ function patternRoles(view: ReturnType<SimPackage['render']>, patternId: string)
   if (view.layout.trace === patternId) roles.add('trace');
   if (view.layout.checkpoints?.includes(patternId)) roles.add('checkpoints');
   return [...roles];
-}
-
-/**
- * layoutPatternIds 汇总 TeachingFrame 布局显式引用的模式 ID。
- */
-function layoutPatternIds(view: ReturnType<SimPackage['render']>): Set<string> {
-  return new Set(
-    [
-      view.layout.primary,
-      ...(view.layout.evidence ?? []),
-      ...(view.layout.timeline ? [view.layout.timeline] : []),
-      ...(view.layout.metrics ?? []),
-      ...(view.layout.trace ? [view.layout.trace] : []),
-      ...(view.layout.checkpoints ?? []),
-    ].filter(Boolean)
-  );
 }
 
 /**

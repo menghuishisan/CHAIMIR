@@ -95,6 +95,9 @@ func (s *Service) ApproveApplication(ctx context.Context, appID int64, req Revie
 		// 首管账号创建失败会回滚租户和申请状态,激活码明文只在审核结果中返回一次。
 		activation = code
 		created = t
+		if err := s.enqueueTenantProvision(ctx, tx, created); err != nil {
+			return err
+		}
 		entry, err := audit.BuildEntry(ctx, 0, id.AccountID, contracts.RoleNumPlatformAdmin, "tenant.application.approve", "identity.tenant_application", appID, map[string]any{"tenant_id": created.ID})
 		if err != nil {
 			return err
@@ -114,6 +117,7 @@ func (s *Service) ApproveApplication(ctx context.Context, appID int64, req Revie
 	}); err != nil {
 		return TenantDTO{}, "", apperr.ErrInternal.WithCause(err)
 	}
+	s.drainTenantProvisionOutboxBestEffort(ctx)
 	return ToTenantDTO(created), activation, nil
 }
 
@@ -282,7 +286,7 @@ func (s *Service) BootstrapSchoolTenant(ctx context.Context, cfg config.Bootstra
 			return err
 		}
 		created = row
-		return nil
+		return s.enqueueTenantProvision(ctx, tx, created)
 	}); err != nil {
 		return TenantDTO{}, apperr.ErrInternal.WithCause(err)
 	}
@@ -327,6 +331,7 @@ func (s *Service) BootstrapSchoolTenant(ctx context.Context, cfg config.Bootstra
 	}); err != nil {
 		return TenantDTO{}, apperr.AsAppError(err)
 	}
+	s.drainTenantProvisionOutboxBestEffort(ctx)
 	return ToTenantDTO(created), nil
 }
 

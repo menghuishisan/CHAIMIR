@@ -56,6 +56,12 @@ const (
 	CodeTransferTaskForbidden = "11603"
 	// CodeTransferTaskNotDownloadable 表示任务尚未产生可下载产物。
 	CodeTransferTaskNotDownloadable = "11604"
+	// CodeDownloadGrantInvalid 表示统一文件下载授权无效或已过期。
+	CodeDownloadGrantInvalid = "11701"
+	// CodeDownloadGrantConsumed 表示统一文件下载授权已被使用。
+	CodeDownloadGrantConsumed = "11702"
+	// CodeDownloadObjectUnavailable 表示授权对应文件暂时无法读取。
+	CodeDownloadObjectUnavailable = "11703"
 )
 
 const (
@@ -118,4 +124,10 @@ var (
 	ErrTransferTaskForbidden = New(CodeTransferTaskForbidden, "无法访问该导入导出任务")
 	// ErrTransferTaskNotDownloadable 表示任务尚未产生可下载产物。
 	ErrTransferTaskNotDownloadable = New(CodeTransferTaskNotDownloadable, "文件尚未准备完成,请稍后再试")
+	// ErrDownloadGrantInvalid 表示下载授权无效或已过期。
+	ErrDownloadGrantInvalid = New(CodeDownloadGrantInvalid, "下载授权已失效,请重新获取")
+	// ErrDownloadGrantConsumed 表示下载授权已经使用过。
+	ErrDownloadGrantConsumed = New(CodeDownloadGrantConsumed, "下载授权已使用,请重新获取")
+	// ErrDownloadObjectUnavailable 表示授权文件暂时无法读取。
+	ErrDownloadObjectUnavailable = New(CodeDownloadObjectUnavailable, "文件暂时无法下载,请稍后重试")
 )

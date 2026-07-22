@@ -26,7 +26,7 @@ const MonitoringPage: React.FC = () => {
             <Monitor className={styles.icon} size={28} />
             平台监控看板
           </h1>
-          <p className={styles.subtitle}>查看后端授权返回的外接监控面板。</p>
+          <p className={styles.subtitle}>查看已授权接入的平台监控面板。</p>
         </div>
         <Button variant="outline" icon={<RefreshCw size={16} />} onClick={resource.reload}>
           刷新

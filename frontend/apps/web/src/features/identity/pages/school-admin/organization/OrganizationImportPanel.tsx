@@ -7,17 +7,19 @@ import type { TableColumn } from '@chaimir/ui'
 import { Button, Callout, Table } from '@chaimir/ui'
 import { Download, Upload } from 'lucide-react'
 import { api } from '../../../../../app/api'
+import { saveBlob } from '../../../../../utils'
 import { userFacingErrorMessage } from '../../../../../utils/userFacingError'
 import styles from '../../identity-admin.module.css'
 
 /** OrganizationImportPanel 以服务端 preview_id 为导入权威状态。 */
-export function OrganizationImportPanel(): React.ReactElement {
+export function OrganizationImportPanel({ onCompleted }: { onCompleted: () => void }): React.ReactElement {
   const [file, setFile] = useState<File | null>(null)
   const [previewId, setPreviewId] = useState('')
   const [rows, setRows] = useState<ImportRowResult[]>([])
   const [summary, setSummary] = useState<{ total: number; valid: number; invalid: number }>()
   const [busy, setBusy] = useState('')
   const [error, setError] = useState('')
+  const [completed, setCompleted] = useState(false)
   const selectionVersionRef = useRef(0)
 
   /** selectFile 切换源文件时立即废弃旧预览，防止提交与当前文件不一致的批次。 */
@@ -29,6 +31,7 @@ export function OrganizationImportPanel(): React.ReactElement {
     setSummary(undefined)
     setError('')
     setBusy('')
+    setCompleted(false)
   }
 
   /** downloadTemplate 下载后端当前版本的组织导入模板。 */
@@ -37,12 +40,7 @@ export function OrganizationImportPanel(): React.ReactElement {
     setError('')
     try {
       const blob = await api.identity.downloadOrgImportTemplate({ format: IMPORT_TEMPLATE_FORMAT.XLSX })
-      const url = URL.createObjectURL(blob)
-      const anchor = document.createElement('a')
-      anchor.href = url
-      anchor.download = 'organization-template.xlsx'
-      anchor.click()
-      URL.revokeObjectURL(url)
+      saveBlob(blob, 'organization-template.xlsx')
     } catch (actionError) {
       setError(userFacingErrorMessage(actionError, '组织模板下载失败，请稍后重试。'))
     } finally {
@@ -80,6 +78,9 @@ export function OrganizationImportPanel(): React.ReactElement {
       setPreviewId('')
       setFile(null)
       setSummary({ total: result.batch.total, valid: result.batch.success, invalid: result.batch.failed })
+      setCompleted(true)
+      setRows([])
+      onCompleted()
     } catch (actionError) {
       setError(userFacingErrorMessage(actionError, '组织导入提交失败，请稍后重试。'))
     } finally {
@@ -96,12 +97,12 @@ export function OrganizationImportPanel(): React.ReactElement {
     <section className={styles.panel}>
       <h2>批量导入组织</h2>
       {error && <Callout variant="danger" title="导入未完成">{error}</Callout>}
-      {summary && <Callout variant={summary.invalid ? 'warning' : 'success'} title="导入状态">共 {summary.total} 行，可导入 {summary.valid} 行，需修正 {summary.invalid} 行。</Callout>}
+      {summary && <Callout variant={completed ? 'success' : summary.invalid ? 'warning' : 'success'} title={completed ? '导入完成' : '导入预览'}>{completed ? `已成功导入 ${summary.valid} 行，未导入 ${summary.invalid} 行。` : `共 ${summary.total} 行，可导入 ${summary.valid} 行，需修正 ${summary.invalid} 行。`}</Callout>}
       <input type="file" accept=".xlsx,.csv" onChange={(event) => selectFile(event.target.files?.[0] || null)} />
       <div className={styles.actions}>
         <Button variant="outline" icon={<Download size={15} />} loading={busy === 'template'} onClick={() => void downloadTemplate()}>下载模板</Button>
         <Button variant="outline" icon={<Upload size={15} />} disabled={!file} loading={busy === 'preview'} onClick={() => void previewImport()}>生成预览</Button>
-        <Button disabled={!previewId || Boolean(summary?.invalid)} loading={busy === 'commit'} onClick={() => void commitImport()}>提交导入</Button>
+        <Button disabled={!previewId || !summary?.valid || completed} loading={busy === 'commit'} onClick={() => void commitImport()}>提交导入</Button>
       </div>
       <Table columns={columns} rows={rows} rowKey={(row) => String(row.line)} emptyTitle="暂无预览" emptyDescription="选择文件并生成预览后显示校验结果。" ariaLabel="组织导入预览" />
     </section>

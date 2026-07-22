@@ -30,6 +30,7 @@ func RegisterRoutes(r gin.IRouter, svc *Service, authn *auth.Manager, roles cont
 	all.GET("/semesters", api.listSemesters)
 	admin.POST("/semesters", api.createSemester)
 	teacher.POST("/reviews", api.submitReview)
+	teacher.GET("/reviews/mine", api.listOwnReviews)
 	admin.GET("/reviews", api.listReviews)
 	admin.POST("/reviews/:id/approve", api.approveReview)
 	admin.POST("/reviews/:id/reject", api.rejectReview)
@@ -50,6 +51,20 @@ func RegisterRoutes(r gin.IRouter, svc *Service, authn *auth.Manager, roles cont
 	admin.POST("/transcripts/batch", api.generateTranscriptBatch)
 	all.GET("/transcripts/:id", api.downloadTranscript)
 	return nil
+}
+
+// listOwnReviews 查询当前教师本人提交的成绩审核记录。
+func (a gradeAPI) listOwnReviews(c *gin.Context) {
+	page, size, ok := httpx.Page(c)
+	if !ok {
+		return
+	}
+	status, ok := httpx.QueryInt(c, "status", httpx.QueryIntRule{Default: 0, Min: 0, Max: 3, HasMax: true})
+	if !ok {
+		return
+	}
+	out, total, p, s, err := a.svc.ListOwnReviews(c.Request.Context(), int16(status), page, size)
+	httpx.WritePage(c, out, total, p, s, err)
 }
 
 type gradeAPI struct{ svc *Service }

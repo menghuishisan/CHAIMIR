@@ -63,7 +63,7 @@ const TeacherGradesAppealsPage: React.FC = () => {
       <div className={styles.header}>
         <div>
           <h1 className={styles.title}><HelpCircle size={28} />成绩申诉工单复核</h1>
-          <p className={styles.subtitle}>按后端申诉状态受理或驳回学生成绩申诉。</p>
+          <p className={styles.subtitle}>查看学生申诉进度，并受理或驳回待处理申请。</p>
         </div>
         <Button variant="outline" icon={<RefreshCw size={16} />} onClick={resource.reload}>刷新</Button>
       </div>

@@ -1,7 +1,7 @@
 // @chaimir/api-client 主入口：集中导出后端模块 API、共享类型和统一客户端工厂。
 
 export { ApiClient } from './client'
-export type { ApiConfig, ApiError, ApiResponse } from './client'
+export type { ApiConfig, ApiError, ApiResponse, TokenRefreshResponse } from './client'
 export * from './constants'
 
 // API 模块

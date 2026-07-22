@@ -45,6 +45,36 @@ INSERT INTO tenant (id, code, name, type, status, deploy_mode, expire_at, logo_u
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, now(), now())
 RETURNING id, code, name, type, status, deploy_mode, expire_at, logo_url, display_name, feature_flags, auth_mode, enable_activation_code, created_at, updated_at;
 
+-- name: CreateTenantProvisionOutbox :one
+INSERT INTO tenant_provision_outbox (id, tenant_id, deploy_mode, trace_id, provisioned_at, status, retry_count, last_error, created_at, updated_at)
+VALUES ($1, $2, $3, $4, $5, 1, 0, NULL, now(), now())
+RETURNING id, tenant_id, deploy_mode, trace_id, provisioned_at, status, retry_count, last_error, created_at, updated_at;
+
+-- name: ClaimTenantProvisionOutbox :many
+UPDATE tenant_provision_outbox
+SET status = 4, retry_count = retry_count + 1, updated_at = now()
+WHERE id IN (
+    SELECT id
+    FROM tenant_provision_outbox
+    WHERE status IN (1, 3) OR (status = 4 AND updated_at <= @stale_before::timestamptz)
+    ORDER BY created_at ASC, id ASC
+    LIMIT @page_limit
+    FOR UPDATE SKIP LOCKED
+)
+RETURNING id, tenant_id, deploy_mode, trace_id, provisioned_at, status, retry_count, last_error, created_at, updated_at;
+
+-- name: MarkTenantProvisionOutboxPublished :one
+UPDATE tenant_provision_outbox
+SET status = 2, last_error = NULL, updated_at = now()
+WHERE id = $1
+RETURNING id, tenant_id, deploy_mode, trace_id, provisioned_at, status, retry_count, last_error, created_at, updated_at;
+
+-- name: MarkTenantProvisionOutboxFailed :one
+UPDATE tenant_provision_outbox
+SET status = 3, last_error = $2, updated_at = now()
+WHERE id = $1
+RETURNING id, tenant_id, deploy_mode, trace_id, provisioned_at, status, retry_count, last_error, created_at, updated_at;
+
 -- name: UpdateTenantConfig :one
 UPDATE tenant
 SET logo_url = $2, display_name = $3, feature_flags = $4, auth_mode = $5, enable_activation_code = $6, updated_at = now()
@@ -187,10 +217,20 @@ WHERE auth_session.account_id = account.id
   AND account.status = 4
   AND auth_session.status = 1;
 
--- name: PromoteClasses :exec
+-- name: PromoteClasses :execrows
 UPDATE class
-SET enrollment_year = enrollment_year + 1
-WHERE tenant_id = $1 AND status = 1 AND deleted_at IS NULL;
+SET name = regexp_replace(name, enrollment_year::text, sqlc.arg(target_year)::text, 'g'),
+    enrollment_year = sqlc.arg(target_year)
+WHERE tenant_id = sqlc.arg(tenant_id)
+  AND id = ANY(sqlc.arg(class_ids)::bigint[])
+  AND status = 1
+  AND deleted_at IS NULL;
+
+-- name: PromoteClassStudentProfiles :exec
+UPDATE account_profile
+SET enrollment_year = sqlc.arg(target_year)
+WHERE tenant_id = sqlc.arg(tenant_id)
+  AND org_id = ANY(sqlc.arg(class_ids)::bigint[]);
 
 -- name: CreateAccount :one
 INSERT INTO account (id, tenant_id, phone_enc, phone_hash, password_hash, name, base_identity, status, must_change_pwd, activated_at, created_at, updated_at)

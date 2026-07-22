@@ -2,9 +2,10 @@
 
 import type { UserRole } from '../constants/identity'
 import type { AnnouncementScope } from '../constants/notify'
+import type { SnowflakeID } from './common'
 
 export interface Notification {
-  id: string
+  id: SnowflakeID
   type: string
   title: string
   content: string
@@ -20,13 +21,13 @@ export interface NotificationPreference {
 }
 
 export interface Announcement {
-  id: string
-  tenant_id?: string
+  id: SnowflakeID
+  tenant_id?: SnowflakeID
   title: string
   content: string
   scope: AnnouncementScope
   target_roles?: UserRole[]
-  publisher_id: string
+  publisher_id: SnowflakeID
   published_at: string
   expire_at?: string
   is_read: boolean

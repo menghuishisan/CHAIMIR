@@ -1,7 +1,10 @@
 // teaching model 文件定义 M6 service 与 repo 之间传递的领域模型。
 package teaching
 
-import "time"
+import (
+	"chaimir/internal/platform/ids"
+	"time"
+)
 
 type Course struct {
 	ID          int64
@@ -239,9 +242,9 @@ type CourseListFilter struct {
 }
 
 type ProgressStats struct {
-	CourseID            int64 `json:"course_id"`
-	LessonCount         int64 `json:"lesson_count"`
-	CompletedCount      int64 `json:"completed_count"`
-	ProgressRecordCount int64 `json:"progress_record_count"`
-	DurationSec         int64 `json:"duration_sec"`
+	CourseID            ids.ID `json:"course_id"`
+	LessonCount         int64  `json:"lesson_count"`
+	CompletedCount      int64  `json:"completed_count"`
+	ProgressRecordCount int64  `json:"progress_record_count"`
+	DurationSec         int64  `json:"duration_sec"`
 }

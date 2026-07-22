@@ -11,6 +11,7 @@ import (
 	"chaimir/internal/contracts"
 	"chaimir/internal/platform/audit"
 	"chaimir/internal/platform/config"
+	"chaimir/internal/platform/ids"
 	"chaimir/internal/platform/jsonx"
 	"chaimir/internal/platform/pagex"
 	"chaimir/internal/platform/tenant"
@@ -69,12 +70,12 @@ func NewService(deps ServiceDeps) (*Service, error) {
 
 // Send 渲染模板并按接收人偏好写入站内信。
 func (s *Service) Send(ctx context.Context, req contracts.NotifySendRequest) error {
-	input, err := validateSendRequest(SendRequest{TenantID: req.TenantID, Type: req.Type, Receivers: req.Receivers, Params: req.Params, Link: req.Link})
+	input, err := validateSendRequest(SendRequest{TenantID: ids.ID(req.TenantID), Type: req.Type, Receivers: req.Receivers, Params: req.Params, Link: req.Link})
 	if err != nil {
 		return err
 	}
 	delivered := make([]int64, 0, len(input.Receivers))
-	err = s.store.TenantTx(ctx, input.TenantID, func(ctx context.Context, tx TxStore) error {
+	err = s.store.TenantTx(ctx, input.TenantID.Int64(), func(ctx context.Context, tx TxStore) error {
 		tpl, err := tx.GetNotificationTemplate(ctx, input.Type)
 		if err != nil {
 			return apperr.ErrNotifyTemplateUnavailable.WithCause(err)
@@ -87,7 +88,7 @@ func (s *Service) Send(ctx context.Context, req contracts.NotifySendRequest) err
 		for _, receiverID := range input.Receivers {
 			enabled := true
 			if !tpl.Force {
-				enabled, err = tx.PreferenceEnabled(ctx, input.TenantID, receiverID, input.Type)
+				enabled, err = tx.PreferenceEnabled(ctx, input.TenantID.Int64(), receiverID, input.Type)
 				if err != nil {
 					return apperr.ErrNotifySendFailed.WithCause(err)
 				}
@@ -95,13 +96,13 @@ func (s *Service) Send(ctx context.Context, req contracts.NotifySendRequest) err
 			if !enabled {
 				continue
 			}
-			rows = append(rows, notificationRecord{ID: s.ids.Generate(), TenantID: input.TenantID, ReceiverID: receiverID, Type: input.Type, Title: title, Content: content, Link: input.Link})
+			rows = append(rows, notificationRecord{ID: s.ids.Generate(), TenantID: input.TenantID.Int64(), ReceiverID: receiverID, Type: input.Type, Title: title, Content: content, Link: input.Link})
 			delivered = append(delivered, receiverID)
 		}
 		if len(rows) == 0 {
 			return nil
 		}
-		if err := s.checkRateLimit(ctx, input.TenantID, input.Type); err != nil {
+		if err := s.checkRateLimit(ctx, input.TenantID.Int64(), input.Type); err != nil {
 			return err
 		}
 		return tx.CreateNotifications(ctx, rows)
@@ -110,8 +111,8 @@ func (s *Service) Send(ctx context.Context, req contracts.NotifySendRequest) err
 		return err
 	}
 	for _, receiverID := range delivered {
-		if err := s.refreshUnread(ctx, input.TenantID, receiverID); err != nil {
-			logging.ErrorContext(ctx, "刷新通知未读数失败", err.Error(), slog.Int64("tenant_id", input.TenantID), slog.Int64("receiver_id", receiverID))
+		if err := s.refreshUnread(ctx, input.TenantID.Int64(), receiverID); err != nil {
+			logging.ErrorContext(ctx, "刷新通知未读数失败", err.Error(), slog.Int64("tenant_id", input.TenantID.Int64()), slog.Int64("receiver_id", receiverID))
 		}
 	}
 	return nil
@@ -292,7 +293,7 @@ func (s *Service) CreateAnnouncement(ctx context.Context, req AnnouncementReques
 	if err != nil {
 		return AnnouncementDTO{}, err
 	}
-	if err := s.writeAudit(ctx, tenantID, id.AccountID, auditRoleForIdentity(id), "notify.announcement.publish", auditTargetAnnouncement, out.ID, map[string]any{"scope": out.Scope, "tenant_id": out.TenantID}); err != nil {
+	if err := s.writeAudit(ctx, tenantID, id.AccountID, auditRoleForIdentity(id), "notify.announcement.publish", auditTargetAnnouncement, out.ID.Int64(), map[string]any{"scope": out.Scope, "tenant_id": out.TenantID.String()}); err != nil {
 		return AnnouncementDTO{}, err
 	}
 	s.broadcastAnnouncement(ctx, out)
@@ -402,10 +403,10 @@ func (s *Service) broadcastAnnouncement(ctx context.Context, ann AnnouncementDTO
 	}
 	data, err := jsonx.AnyBytes(map[string]any{"type": "announcement", "announcement_id": fmt.Sprintf("%d", ann.ID), "scope": ann.Scope}, apperr.ErrNotifyPushFailed)
 	if err != nil {
-		logging.ErrorContext(ctx, "公告实时提醒序列化失败", err.Error(), slog.Int64("tenant_id", ann.TenantID), slog.Int64("announcement_id", ann.ID))
+		logging.ErrorContext(ctx, "公告实时提醒序列化失败", err.Error(), slog.Int64("tenant_id", ann.TenantID.Int64()), slog.Int64("announcement_id", ann.ID.Int64()))
 		return
 	}
-	s.hub.Broadcast(tenantAlertTopic(ann.TenantID), data)
+	s.hub.Broadcast(tenantAlertTopic(ann.TenantID.Int64()), data)
 }
 
 // RunCleanupOnce 执行一次站内信过期清理任务。

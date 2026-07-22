@@ -96,7 +96,7 @@ func (s *Service) CreateAccountByAdmin(ctx context.Context, req CreateAccountReq
 			return apperr.ErrIdentityActivationDisabled
 		}
 		// 教师只能挂真实院系,学生只能挂真实班级;account_profile 没有外键,必须在 service 层显式防脏数据。
-		if err := validateAccountOrgForProfile(ctx, tx, id.TenantID, req.BaseIdentity, req.OrgID, req.EnrollmentYear); err != nil {
+		if err := validateAccountOrgForProfile(ctx, tx, id.TenantID, req.BaseIdentity, req.OrgID.Int64(), req.EnrollmentYear); err != nil {
 			return err
 		}
 		row, err := tx.CreateAccount(ctx, CreateAccountInput{
@@ -110,7 +110,7 @@ func (s *Service) CreateAccountByAdmin(ctx context.Context, req CreateAccountReq
 			Status:        status,
 			MustChangePwd: mustChange,
 			Roles:         []RoleCreateInput{{ID: s.ids.Generate(), Role: role}},
-			Profile:       &CreateProfileInput{No: strings.TrimSpace(req.No), OrgID: req.OrgID, EnrollmentYear: req.EnrollmentYear, Title: strings.TrimSpace(req.Title)},
+			Profile:       &CreateProfileInput{No: strings.TrimSpace(req.No), OrgID: req.OrgID.Int64(), EnrollmentYear: req.EnrollmentYear, Title: strings.TrimSpace(req.Title)},
 		})
 		if err != nil {
 			return err
@@ -156,7 +156,7 @@ func (s *Service) UpdateAccountByAdmin(ctx context.Context, accountID int64, req
 			return err
 		}
 		// 账号基础身份不可编辑,因此组织类型校验必须以数据库中的身份为准,不能信任前端字段。
-		if err := validateAccountOrgForProfile(ctx, tx, id.TenantID, current.BaseIdentity, req.OrgID, req.EnrollmentYear); err != nil {
+		if err := validateAccountOrgForProfile(ctx, tx, id.TenantID, current.BaseIdentity, req.OrgID.Int64(), req.EnrollmentYear); err != nil {
 			return err
 		}
 		row, err := tx.UpdateAccountEditable(ctx, id.TenantID, accountID, UpdateAccountRequest{Name: strings.TrimSpace(req.Name), OrgID: req.OrgID, EnrollmentYear: req.EnrollmentYear, Title: strings.TrimSpace(req.Title)})
@@ -315,7 +315,8 @@ func (s *Service) BatchUpdateAccountStatusByAdmin(ctx context.Context, req Batch
 	if len(req.AccountIDs) == 0 {
 		return apperr.ErrIdentityAccountBatchEmpty
 	}
-	for _, accountID := range req.AccountIDs {
+	for _, publicAccountID := range req.AccountIDs {
+		accountID := publicAccountID.Int64()
 		if accountID <= 0 {
 			return apperr.ErrIdentityAccountBatchInvalid
 		}
@@ -364,6 +365,24 @@ func requireTenantRole(ctx context.Context, s *Service, role string) (tenant.Ide
 		return tenant.Identity{}, apperr.ErrForbidden
 	}
 	return id, nil
+}
+
+// requireTenantAnyRole 校验当前租户账号至少具备一个允许角色。
+func requireTenantAnyRole(ctx context.Context, s *Service, roles ...string) (tenant.Identity, error) {
+	id, ok := tenant.FromContext(ctx)
+	if !ok || id.IsPlatform || id.TenantID <= 0 || id.AccountID <= 0 {
+		return tenant.Identity{}, apperr.ErrUnauthorized
+	}
+	for _, role := range roles {
+		has, err := s.HasRole(ctx, id.AccountID, role)
+		if err != nil {
+			return tenant.Identity{}, err
+		}
+		if has {
+			return id, nil
+		}
+	}
+	return tenant.Identity{}, apperr.ErrForbidden
 }
 
 // hasRoleNumber 判断账号角色快照是否包含目标数字角色,用于状态变更前的服务端约束。

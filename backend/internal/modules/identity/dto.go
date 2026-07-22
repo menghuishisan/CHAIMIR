@@ -1,7 +1,11 @@
 // identity DTO 定义 HTTP 请求与响应结构,不承载业务编排逻辑。
 package identity
 
-import "time"
+import (
+	"time"
+
+	"chaimir/internal/platform/ids"
+)
 
 type LoginPlatformRequest struct {
 	Username string `json:"username"`
@@ -11,7 +15,7 @@ type LoginPlatformRequest struct {
 type LoginPhoneRequest struct {
 	Phone    string `json:"phone"`
 	Password string `json:"password"`
-	TenantID int64  `json:"tenant_id"`
+	TenantID ids.ID `json:"tenant_id"`
 }
 
 type LoginNoRequest struct {
@@ -23,13 +27,13 @@ type LoginNoRequest struct {
 type LoginSMSRequest struct {
 	Phone    string `json:"phone"`
 	Code     string `json:"code"`
-	TenantID int64  `json:"tenant_id"`
+	TenantID ids.ID `json:"tenant_id"`
 }
 
 type SendSMSRequest struct {
 	Phone    string `json:"phone"`
 	Scene    int16  `json:"scene"`
-	TenantID int64  `json:"tenant_id"`
+	TenantID ids.ID `json:"tenant_id"`
 }
 
 type RefreshRequest struct {
@@ -49,7 +53,7 @@ type PasswordResetRequest struct {
 	Phone       string `json:"phone"`
 	Code        string `json:"code"`
 	NewPassword string `json:"new_password"`
-	TenantID    int64  `json:"tenant_id"`
+	TenantID    ids.ID `json:"tenant_id"`
 }
 
 type ActivateRequest struct {
@@ -67,14 +71,14 @@ type LoginResponse struct {
 }
 
 type TenantOptionDTO struct {
-	TenantID int64  `json:"tenant_id,string"`
+	TenantID ids.ID `json:"tenant_id"`
 	Name     string `json:"name"`
 	Code     string `json:"code"`
 }
 
 type AccountDTO struct {
-	ID           int64   `json:"id,string"`
-	TenantID     int64   `json:"tenant_id,string"`
+	ID           ids.ID  `json:"id"`
+	TenantID     ids.ID  `json:"tenant_id,omitempty"`
 	Name         string  `json:"name"`
 	PhoneMasked  string  `json:"phone_masked,omitempty"`
 	No           string  `json:"no,omitempty"`
@@ -100,7 +104,7 @@ type ChangePhoneRequest struct {
 }
 
 type SessionDTO struct {
-	ID         int64  `json:"id,string"`
+	ID         ids.ID `json:"id"`
 	DeviceInfo string `json:"device_info,omitempty"`
 	IP         string `json:"ip,omitempty"`
 	Status     int16  `json:"status"`
@@ -120,13 +124,13 @@ type AuditQueryRequest struct {
 }
 
 type AuditLogDTO struct {
-	ID         int64  `json:"id,string"`
-	TenantID   int64  `json:"tenant_id,string,omitempty"`
-	ActorID    int64  `json:"actor_id,string"`
+	ID         ids.ID `json:"id"`
+	TenantID   ids.ID `json:"tenant_id,omitempty"`
+	ActorID    ids.ID `json:"actor_id"`
 	ActorRole  int16  `json:"actor_role"`
 	Action     string `json:"action"`
 	TargetType string `json:"target_type"`
-	TargetID   int64  `json:"target_id,string,omitempty"`
+	TargetID   ids.ID `json:"target_id,omitempty"`
 	Detail     string `json:"detail,omitempty"`
 	IP         string `json:"ip,omitempty"`
 	TraceID    string `json:"trace_id,omitempty"`
@@ -149,7 +153,7 @@ type ReviewApplicationRequest struct {
 }
 
 type TenantApplicationDTO struct {
-	ApplicationID int64  `json:"application_id,string"`
+	ApplicationID ids.ID `json:"application_id"`
 	SchoolName    string `json:"school_name"`
 	SchoolType    int16  `json:"school_type"`
 	ContactName   string `json:"contact_name"`
@@ -157,8 +161,8 @@ type TenantApplicationDTO struct {
 	ContactEmail  string `json:"contact_email"`
 	Status        int16  `json:"status"`
 	RejectReason  string `json:"reject_reason,omitempty"`
-	ReviewedBy    int64  `json:"reviewed_by,string,omitempty"`
-	TenantID      int64  `json:"tenant_id,string,omitempty"`
+	ReviewedBy    ids.ID `json:"reviewed_by,omitempty"`
+	TenantID      ids.ID `json:"tenant_id,omitempty"`
 	SubmittedAt   string `json:"submitted_at"`
 	ReviewedAt    string `json:"reviewed_at,omitempty"`
 }
@@ -169,17 +173,18 @@ type UpdateTenantStatusRequest struct {
 }
 
 type TenantDTO struct {
-	ID                   int64      `json:"id,string"`
-	Code                 string     `json:"code"`
-	Name                 string     `json:"name"`
-	Type                 int16      `json:"type"`
-	Status               int16      `json:"status"`
-	DeployMode           int16      `json:"deploy_mode"`
-	ExpireAt             *time.Time `json:"expire_at,omitempty"`
-	LogoURL              string     `json:"logo_url,omitempty"`
-	DisplayName          string     `json:"display_name,omitempty"`
-	AuthMode             int16      `json:"auth_mode"`
-	EnableActivationCode bool       `json:"enable_activation_code"`
+	ID                   ids.ID         `json:"id"`
+	Code                 string         `json:"code"`
+	Name                 string         `json:"name"`
+	Type                 int16          `json:"type"`
+	Status               int16          `json:"status"`
+	DeployMode           int16          `json:"deploy_mode"`
+	ExpireAt             *time.Time     `json:"expire_at,omitempty"`
+	LogoURL              string         `json:"logo_url,omitempty"`
+	DisplayName          string         `json:"display_name,omitempty"`
+	FeatureFlags         map[string]any `json:"feature_flags"`
+	AuthMode             int16          `json:"auth_mode"`
+	EnableActivationCode bool           `json:"enable_activation_code"`
 }
 
 type TenantConfigRequest struct {
@@ -191,8 +196,8 @@ type TenantConfigRequest struct {
 }
 
 type SSOConfigDTO struct {
-	ID         int64          `json:"id,string"`
-	TenantID   int64          `json:"tenant_id,string"`
+	ID         ids.ID         `json:"id"`
+	TenantID   ids.ID         `json:"tenant_id"`
 	Type       int16          `json:"type"`
 	Config     map[string]any `json:"config"`
 	MatchField int16          `json:"match_field"`
@@ -205,35 +210,35 @@ type DepartmentRequest struct {
 }
 
 type DepartmentDTO struct {
-	ID       int64  `json:"id,string"`
-	TenantID int64  `json:"tenant_id,string"`
+	ID       ids.ID `json:"id"`
+	TenantID ids.ID `json:"tenant_id"`
 	Name     string `json:"name"`
 	Code     string `json:"code"`
 }
 
 type MajorRequest struct {
-	DepartmentID int64  `json:"department_id,string"`
+	DepartmentID ids.ID `json:"department_id"`
 	Name         string `json:"name"`
 }
 
 type MajorDTO struct {
-	ID           int64  `json:"id,string"`
-	TenantID     int64  `json:"tenant_id,string"`
-	DepartmentID int64  `json:"department_id,string"`
+	ID           ids.ID `json:"id"`
+	TenantID     ids.ID `json:"tenant_id"`
+	DepartmentID ids.ID `json:"department_id"`
 	Name         string `json:"name"`
 }
 
 type ClassRequest struct {
-	MajorID        int64  `json:"major_id,string"`
+	MajorID        ids.ID `json:"major_id"`
 	Name           string `json:"name"`
 	EnrollmentYear int16  `json:"enrollment_year"`
 	Status         int16  `json:"status"`
 }
 
 type ClassDTO struct {
-	ID             int64  `json:"id,string"`
-	TenantID       int64  `json:"tenant_id,string"`
-	MajorID        int64  `json:"major_id,string"`
+	ID             ids.ID `json:"id"`
+	TenantID       ids.ID `json:"tenant_id"`
+	MajorID        ids.ID `json:"major_id"`
 	Name           string `json:"name"`
 	EnrollmentYear int16  `json:"enrollment_year"`
 	Status         int16  `json:"status"`
@@ -243,12 +248,17 @@ type ArchiveClassesRequest struct {
 	EnrollmentYear int16 `json:"enrollment_year"`
 }
 
+type PromoteClassesRequest struct {
+	ClassIDs   []ids.ID `json:"class_ids"`
+	TargetYear int16    `json:"target_year"`
+}
+
 type CreateAccountRequest struct {
 	Phone           string `json:"phone"`
 	Name            string `json:"name"`
 	No              string `json:"no"`
 	BaseIdentity    int16  `json:"base_identity"`
-	OrgID           int64  `json:"org_id,string"`
+	OrgID           ids.ID `json:"org_id"`
 	EnrollmentYear  int16  `json:"enrollment_year,omitempty"`
 	Title           string `json:"title,omitempty"`
 	InitialPassword string `json:"initial_password,omitempty"`
@@ -257,7 +267,7 @@ type CreateAccountRequest struct {
 
 type UpdateAccountRequest struct {
 	Name           string `json:"name"`
-	OrgID          int64  `json:"org_id,string"`
+	OrgID          ids.ID `json:"org_id"`
 	EnrollmentYear int16  `json:"enrollment_year,omitempty"`
 	Title          string `json:"title,omitempty"`
 }
@@ -268,7 +278,7 @@ type AdminResetPasswordRequest struct {
 }
 
 type BatchAccountIDsRequest struct {
-	AccountIDs []int64 `json:"account_ids"`
+	AccountIDs []ids.ID `json:"account_ids"`
 }
 
 type ImportPreviewRequest struct {
@@ -279,7 +289,7 @@ type ImportPreviewRequest struct {
 }
 
 type ImportCommitRequest struct {
-	PreviewID int64 `json:"preview_id,string"`
+	PreviewID ids.ID `json:"preview_id"`
 }
 
 type AccountImportCommitResponse struct {
@@ -288,9 +298,9 @@ type AccountImportCommitResponse struct {
 }
 
 type ImportBatchDTO struct {
-	ID         int64  `json:"id,string"`
-	TenantID   int64  `json:"tenant_id,string"`
-	OperatorID int64  `json:"operator_id,string"`
+	ID         ids.ID `json:"id"`
+	TenantID   ids.ID `json:"tenant_id"`
+	OperatorID ids.ID `json:"operator_id"`
 	TargetType int16  `json:"target_type"`
 	FileName   string `json:"file_name"`
 	Total      int32  `json:"total"`
@@ -301,14 +311,14 @@ type ImportBatchDTO struct {
 }
 
 type ImportActivationCodeDTO struct {
-	AccountID      int64  `json:"account_id,string"`
+	AccountID      ids.ID `json:"account_id"`
 	No             string `json:"no"`
 	Name           string `json:"name"`
 	ActivationCode string `json:"activation_code"`
 }
 
 type ImportPreviewResponse struct {
-	PreviewID int64             `json:"preview_id,string"`
+	PreviewID ids.ID            `json:"preview_id"`
 	Total     int               `json:"total"`
 	Valid     int               `json:"valid"`
 	Invalid   int               `json:"invalid"`

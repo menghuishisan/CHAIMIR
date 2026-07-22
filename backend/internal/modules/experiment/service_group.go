@@ -69,10 +69,10 @@ func (s *Service) UpsertGroupMember(ctx context.Context, groupID int64, req Upse
 		if err != nil {
 			return err
 		}
-		if exp.GroupConfig.Size > 0 && !memberAlreadyExists(members, req.StudentID) && len(members) >= exp.GroupConfig.Size {
+		if exp.GroupConfig.Size > 0 && !memberAlreadyExists(members, req.StudentID.Int64()) && len(members) >= exp.GroupConfig.Size {
 			return apperr.ErrExperimentGroupFull
 		}
-		if _, err := tx.UpsertGroupMember(ctx, GroupMember{ID: s.ids.Generate(), TenantID: id.TenantID, GroupID: groupID, StudentID: req.StudentID, Role: req.Role}); err != nil {
+		if _, err := tx.UpsertGroupMember(ctx, GroupMember{ID: s.ids.Generate(), TenantID: id.TenantID, GroupID: groupID, StudentID: req.StudentID.Int64(), Role: req.Role}); err != nil {
 			return err
 		}
 		group, err = tx.GetGroup(ctx, id.TenantID, groupID)

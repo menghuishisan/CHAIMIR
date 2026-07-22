@@ -22,6 +22,7 @@ import (
 	"chaimir/pkg/crypto"
 	"chaimir/pkg/logging"
 
+	"chaimir/internal/platform/ids"
 	"github.com/jackc/pgx/v5"
 	"github.com/xuri/excelize/v2"
 )
@@ -120,7 +121,7 @@ type importRow struct {
 	Phone           string `json:"phone"`
 	Name            string `json:"name"`
 	No              string `json:"no"`
-	OrgID           int64  `json:"org_id"`
+	OrgID           ids.ID `json:"org_id"`
 	BaseIdentity    int16  `json:"base_identity"`
 	EnrollmentYear  int16  `json:"enrollment_year,omitempty"`
 	Title           string `json:"title,omitempty"`
@@ -179,7 +180,7 @@ func (s *Service) PreviewAccountImport(ctx context.Context, req ImportPreviewReq
 			valid++
 		}
 	}
-	return ImportPreviewResponse{PreviewID: previewID, Total: len(rows), Valid: valid, Invalid: len(rows) - valid, Rows: results}, nil
+	return ImportPreviewResponse{PreviewID: ids.ID(previewID), Total: len(rows), Valid: valid, Invalid: len(rows) - valid, Rows: results}, nil
 }
 
 // CommitAccountImport 读取服务端预览并仅提交校验通过的行,激活码明文只在本次响应返回。
@@ -191,7 +192,7 @@ func (s *Service) CommitAccountImport(ctx context.Context, req ImportCommitReque
 	var batch ImportBatch
 	activationCodes := make([]ImportActivationCodeDTO, 0)
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
-		preview, err := tx.GetImportPreview(ctx, id.TenantID, id.AccountID, req.PreviewID)
+		preview, err := tx.GetImportPreview(ctx, id.TenantID, id.AccountID, req.PreviewID.Int64())
 		if err != nil {
 			return err
 		}
@@ -243,7 +244,7 @@ func (s *Service) CommitAccountImport(ctx context.Context, req ImportCommitReque
 				Status:        AccountStatusPending,
 				MustChangePwd: mustChange,
 				Roles:         []RoleCreateInput{{ID: s.ids.Generate(), Role: role}},
-				Profile:       &CreateProfileInput{No: row.No, OrgID: row.OrgID, EnrollmentYear: row.EnrollmentYear, Title: row.Title},
+				Profile:       &CreateProfileInput{No: row.No, OrgID: row.OrgID.Int64(), EnrollmentYear: row.EnrollmentYear, Title: row.Title},
 			})
 			if err != nil {
 				failed++
@@ -266,12 +267,12 @@ func (s *Service) CommitAccountImport(ctx context.Context, req ImportCommitReque
 					return err
 				}
 				// 激活码明文只在本次响应返回,落库只保存哈希,后续无法从数据库恢复明文。
-				activationCodes = append(activationCodes, ImportActivationCodeDTO{AccountID: accountID, No: row.No, Name: row.Name, ActivationCode: code})
+				activationCodes = append(activationCodes, ImportActivationCodeDTO{AccountID: ids.ID(accountID), No: row.No, Name: row.Name, ActivationCode: code})
 			}
 			success++
 		}
 		// 标记预览已提交后再写批次,防止同一个 preview_id 被重复消费。
-		if err := tx.MarkImportPreviewSubmitted(ctx, id.TenantID, id.AccountID, req.PreviewID); err != nil {
+		if err := tx.MarkImportPreviewSubmitted(ctx, id.TenantID, id.AccountID, req.PreviewID.Int64()); err != nil {
 			return err
 		}
 		errorDetail, err := jsonx.AnyBytes(rows, apperr.ErrInternal)
@@ -385,7 +386,7 @@ func (s *Service) applyAccountImportOpeningRules(ctx context.Context, tenantID i
 
 // accountImportOrgExists 校验导入账号挂靠的组织类型,教师挂院系,学生挂班级。
 func accountImportOrgExists(ctx context.Context, tx TxStore, tenantID int64, row importRow) (bool, error) {
-	err := validateAccountOrgForProfile(ctx, tx, tenantID, row.BaseIdentity, row.OrgID, row.EnrollmentYear)
+	err := validateAccountOrgForProfile(ctx, tx, tenantID, row.BaseIdentity, row.OrgID.Int64(), row.EnrollmentYear)
 	if err == nil {
 		return true, nil
 	}
@@ -482,7 +483,7 @@ func (s *Service) parseImportRecords(records [][]string, targetType int16) ([]im
 			row.Name = strings.TrimSpace(record[1])
 			row.No = strings.TrimSpace(record[2])
 			orgID, scanErr := strconv.ParseInt(strings.TrimSpace(record[3]), 10, 64)
-			row.OrgID = orgID
+			row.OrgID = ids.ID(orgID)
 			if scanErr != nil || row.OrgID <= 0 {
 				row.Error = "组织 ID 不正确"
 			}

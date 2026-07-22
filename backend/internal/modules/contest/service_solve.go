@@ -8,6 +8,7 @@ import (
 
 	"chaimir/internal/contracts"
 	"chaimir/internal/platform/ids"
+	"chaimir/internal/platform/jsonx"
 	"chaimir/internal/platform/pagex"
 	"chaimir/internal/platform/timex"
 	"chaimir/pkg/apperr"
@@ -47,7 +48,7 @@ func (s *Service) CreateEnv(ctx context.Context, contestID, problemID int64, req
 	if err != nil {
 		return EnvDTO{}, apperr.ErrContestSandboxUnavailable.WithCause(err)
 	}
-	return EnvDTO{SandboxID: info.SandboxID, SourceRef: info.SourceRef, Status: info.Status}, nil
+	return EnvDTO{SandboxID: ids.ID(info.SandboxID), SourceRef: info.SourceRef, Status: info.Status}, nil
 }
 
 // SubmitSolve 提交解题赛答案或代码引用并创建 M3 判题任务。
@@ -253,20 +254,59 @@ func (s *Service) ListLadder(ctx context.Context, contestID int64, page, size in
 		return nil, 0, 0, 0, err
 	}
 	page, size = pagex.Normalize(page, size)
-	var ranks []LadderRank
+	var out []LadderDTO
 	var total int64
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
-		var err error
-		ranks, total, err = tx.ListLadder(ctx, id.TenantID, contestID, page, size)
-		return err
+		contest, err := s.loadContestForRead(ctx, tx, id.TenantID, id.AccountID, contestID)
+		if err != nil {
+			return err
+		}
+		if contest.Status == ContestStatusFrozen || contest.Status == ContestStatusArchived {
+			snapshot, err := tx.GetLadderSnapshot(ctx, id.TenantID, contestID, contest.Status)
+			if err != nil {
+				return err
+			}
+			all, err := ladderDTOsFromSnapshot(snapshot)
+			if err != nil {
+				return err
+			}
+			total = int64(len(all))
+			start := (page - 1) * size
+			if start >= len(all) {
+				out = []LadderDTO{}
+				return nil
+			}
+			end := min(start+size, len(all))
+			out = all[start:end]
+			return nil
+		}
+		ranks, count, err := tx.ListLadder(ctx, id.TenantID, contestID, page, size)
+		if err != nil {
+			return err
+		}
+		total = count
+		out = make([]LadderDTO, 0, len(ranks))
+		for _, rank := range ranks {
+			out = append(out, ladderDTOFromModel(rank))
+		}
+		return nil
 	}); err != nil {
 		return nil, 0, 0, 0, err
 	}
-	out := make([]LadderDTO, 0, len(ranks))
-	for _, rank := range ranks {
-		out = append(out, ladderDTOFromModel(rank))
-	}
 	return out, total, page, size, nil
+}
+
+// ladderDTOsFromSnapshot 通过严格 DTO 契约解析冻结榜单，拒绝数字雪花 ID 和损坏快照。
+func ladderDTOsFromSnapshot(snapshot LadderSnapshot) ([]LadderDTO, error) {
+	raw, err := jsonx.AnyBytes(snapshot.Ranking, apperr.ErrContestInvalid)
+	if err != nil {
+		return nil, err
+	}
+	var out []LadderDTO
+	if err := jsonx.DecodeStrictKnownFields(raw, &out); err != nil {
+		return nil, apperr.ErrContestInvalid.WithCause(err)
+	}
+	return out, nil
 }
 
 // refreshTeamRank 依据已通过提交重算单队成绩并刷新全榜排名。
@@ -303,7 +343,11 @@ func (s *Service) pushLeaderboard(ctx context.Context, tenantID, contestID int64
 	if !shouldPush {
 		return nil
 	}
-	payload := map[string]any{"contest_id": contestID, "items": ranks}
+	items := make([]LadderDTO, 0, len(ranks))
+	for _, rank := range ranks {
+		items = append(items, ladderDTOFromModel(rank))
+	}
+	payload := map[string]any{"contest_id": ids.Format(contestID), "items": items}
 	if err := s.notify.Push(ctx, contracts.NotifyPushRequest{TenantID: tenantID, Topic: fmt.Sprintf("tenant:%d:contest:%d:leaderboard", tenantID, contestID), Payload: payload}); err != nil {
 		return apperr.ErrContestNotifyFailed.WithCause(err)
 	}

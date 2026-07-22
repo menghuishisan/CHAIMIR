@@ -10,11 +10,11 @@ import { raftSimulation } from './raft/package';
 import { tendermintRoundsSimulation } from './tendermint-rounds/package';
 
 export const consensusSimulations: SimPackage[] = [
-  pbftSimulation as unknown as SimPackage,
-  powSimulation as unknown as SimPackage,
-  raftSimulation as unknown as SimPackage,
-  posSimulation as unknown as SimPackage,
-  ethereumPosFinalitySimulation as unknown as SimPackage,
-  tendermintRoundsSimulation as unknown as SimPackage,
-  hotstuffSimulation as unknown as SimPackage,
+  pbftSimulation,
+  powSimulation,
+  raftSimulation,
+  posSimulation,
+  ethereumPosFinalitySimulation,
+  tendermintRoundsSimulation,
+  hotstuffSimulation,
 ];

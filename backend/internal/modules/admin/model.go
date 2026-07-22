@@ -1,7 +1,11 @@
 // admin model 文件定义 M9 管理后台内部模型和响应视图。
 package admin
 
-import "time"
+import (
+	"time"
+
+	"chaimir/internal/platform/ids"
+)
 
 // MonitoringPanel 是外接监控系统的安全嵌入入口。
 type MonitoringPanel struct {
@@ -12,7 +16,7 @@ type MonitoringPanel struct {
 // DashboardDTO 是平台和学校看板聚合输出。
 type DashboardDTO struct {
 	Scope                 int16          `json:"scope"`
-	TenantID              int64          `json:"tenant_id,omitempty,string"`
+	TenantID              ids.ID         `json:"tenant_id,omitempty"`
 	TenantCount           int64          `json:"tenant_count,omitempty"`
 	AccountCount          int64          `json:"account_count"`
 	TeacherCount          int64          `json:"teacher_count"`
@@ -32,12 +36,12 @@ type DashboardDTO struct {
 
 // ConfigDTO 表示系统配置响应。
 type ConfigDTO struct {
-	ID        int64          `json:"id,string"`
+	ID        ids.ID         `json:"id"`
 	Scope     int16          `json:"scope"`
-	TenantID  int64          `json:"tenant_id,omitempty,string"`
+	TenantID  ids.ID         `json:"tenant_id,omitempty"`
 	Key       string         `json:"key"`
 	Value     map[string]any `json:"value"`
 	Version   int32          `json:"version"`
-	UpdatedBy int64          `json:"updated_by,string"`
+	UpdatedBy ids.ID         `json:"updated_by"`
 	UpdatedAt time.Time      `json:"updated_at"`
 }

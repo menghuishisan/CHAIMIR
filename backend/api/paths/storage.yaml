@@ -1,0 +1,20 @@
+# 本文件维护全平台唯一的短时授权文件下载路径。
+/api/v1/storage/download:
+  get:
+    tags: [storage]
+    summary: 使用一次性短时授权下载文件
+    operationId: storageDownload
+    x-chaimir-audience: platform_or_user
+    security:
+      - bearerAuth: []
+    parameters:
+      - name: token
+        in: query
+        required: true
+        description: 业务模块签发且绑定当前租户、账号和对象引用的一次性短时授权。
+        schema: { type: string, minLength: 1 }
+    responses:
+      "200":
+        $ref: "#/components/responses/Binary"
+      default:
+        $ref: "#/components/responses/Error"

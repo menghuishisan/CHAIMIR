@@ -14,6 +14,7 @@ type Querier interface {
 	ArchiveClassesByEnrollmentYear(ctx context.Context, arg ArchiveClassesByEnrollmentYearParams) error
 	ArchiveStudentAccountsByEnrollmentYear(ctx context.Context, arg ArchiveStudentAccountsByEnrollmentYearParams) error
 	BatchGetAccounts(ctx context.Context, dollar_1 []int64) ([]BatchGetAccountsRow, error)
+	ClaimTenantProvisionOutbox(ctx context.Context, arg ClaimTenantProvisionOutboxParams) ([]TenantProvisionOutbox, error)
 	ClassExists(ctx context.Context, arg ClassExistsParams) (bool, error)
 	ClearPasswordFailure(ctx context.Context, arg ClearPasswordFailureParams) error
 	CountActiveRoleAccounts(ctx context.Context, arg CountActiveRoleAccountsParams) (int64, error)
@@ -33,6 +34,7 @@ type Querier interface {
 	CreateSMSCode(ctx context.Context, arg CreateSMSCodeParams) (SmsCode, error)
 	CreateTenant(ctx context.Context, arg CreateTenantParams) (Tenant, error)
 	CreateTenantApplication(ctx context.Context, arg CreateTenantApplicationParams) (TenantApplication, error)
+	CreateTenantProvisionOutbox(ctx context.Context, arg CreateTenantProvisionOutboxParams) (TenantProvisionOutbox, error)
 	DeleteAccountRole(ctx context.Context, arg DeleteAccountRoleParams) error
 	DepartmentExists(ctx context.Context, arg DepartmentExistsParams) (bool, error)
 	GetAccountByID(ctx context.Context, id int64) (GetAccountByIDRow, error)
@@ -67,8 +69,11 @@ type Querier interface {
 	MajorExists(ctx context.Context, arg MajorExistsParams) (bool, error)
 	MarkImportPreviewSubmitted(ctx context.Context, arg MarkImportPreviewSubmittedParams) (int64, error)
 	MarkSMSCodeUsed(ctx context.Context, arg MarkSMSCodeUsedParams) error
+	MarkTenantProvisionOutboxFailed(ctx context.Context, arg MarkTenantProvisionOutboxFailedParams) (TenantProvisionOutbox, error)
+	MarkTenantProvisionOutboxPublished(ctx context.Context, id int64) (TenantProvisionOutbox, error)
 	PlatformStats(ctx context.Context) (PlatformStatsRow, error)
-	PromoteClasses(ctx context.Context, tenantID int64) error
+	PromoteClassStudentProfiles(ctx context.Context, arg PromoteClassStudentProfilesParams) error
+	PromoteClasses(ctx context.Context, arg PromoteClassesParams) (int64, error)
 	QueryAuditLogs(ctx context.Context, arg QueryAuditLogsParams) ([]QueryAuditLogsRow, error)
 	RecordPasswordFailure(ctx context.Context, arg RecordPasswordFailureParams) (Account, error)
 	RejectTenantApplication(ctx context.Context, arg RejectTenantApplicationParams) (TenantApplication, error)

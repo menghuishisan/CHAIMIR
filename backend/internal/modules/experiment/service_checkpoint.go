@@ -193,7 +193,7 @@ func (s *Service) resolveJudgeCodeSnapshot(ctx context.Context, inst ExperimentI
 		if s.sandbox == nil {
 			return "", "", apperr.ErrExperimentSandboxUnavailable
 		}
-		codeKey, codeHash, err := s.sandbox.SaveSandboxFiles(ctx, contracts.SandboxSaveRequest{TenantID: inst.TenantID, SandboxID: inst.SandboxRefs[0].SandboxID, SourceRef: inst.SourceRef})
+		codeKey, codeHash, err := s.sandbox.SaveSandboxFiles(ctx, contracts.SandboxSaveRequest{TenantID: inst.TenantID, SandboxID: inst.SandboxRefs[0].SandboxID.Int64(), SourceRef: inst.SourceRef})
 		if err != nil {
 			return "", "", apperr.ErrExperimentSandboxUnavailable.WithCause(err)
 		}

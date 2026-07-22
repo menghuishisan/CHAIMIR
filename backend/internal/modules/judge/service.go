@@ -770,7 +770,7 @@ func (s *Service) publishProgress(ctx context.Context, tenantID, taskID int64, s
 	if s.wsHub == nil {
 		return
 	}
-	raw, err := jsonx.AnyBytes(ProgressMessage{TaskID: taskID, Status: statusText(status), Stage: stage, Message: message}, apperr.ErrInternal)
+	raw, err := jsonx.AnyBytes(ProgressMessage{TaskID: ids.ID(taskID), Status: statusText(status), Stage: stage, Message: message}, apperr.ErrInternal)
 	if err != nil {
 		logging.ErrorContext(ctx, "judge progress serialization failed", err.Error(), slog.Int64("tenant_id", tenantID), slog.Int64("task_id", taskID), slog.String("stage", stage))
 		return

@@ -124,13 +124,14 @@ type LadderRank struct {
 	UpdatedAt   time.Time
 }
 
-// ResultSnapshot 是竞赛归档后的最终榜单快照。
-type ResultSnapshot struct {
-	ID           int64
-	TenantID     int64
-	ContestID    int64
-	FinalRanking []map[string]any
-	GeneratedAt  time.Time
+// LadderSnapshot 是封榜或归档时固化的排行榜快照。
+type LadderSnapshot struct {
+	ID             int64
+	TenantID       int64
+	ContestID      int64
+	SnapshotStatus int16
+	Ranking        []map[string]any
+	GeneratedAt    time.Time
 }
 
 // CheatRecord 是教师或管理员确认后的违规处理记录。

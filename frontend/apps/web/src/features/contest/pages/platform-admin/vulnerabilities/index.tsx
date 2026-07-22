@@ -1,10 +1,10 @@
 // 平台漏洞源管理页：维护后端漏洞源配置并触发同步。
 
 import React, { useState } from 'react'
-import type { VulnProblem, VulnSource } from '@chaimir/api-client'
+import type { VulnSource } from '@chaimir/api-client'
 import { VulnLevel } from '@chaimir/api-client'
 import { Button, Checkbox, Input, Select, Table, Textarea } from '@chaimir/ui'
-import { DatabaseZap, RefreshCw, Save } from 'lucide-react'
+import { DatabaseZap, Save } from 'lucide-react'
 import { api } from '../../../../../app/api'
 import { ErrorState, LoadingState } from '../../../../../components/ResourceState'
 import { useAsyncResource } from '../../../../../hooks/useAsyncResource'
@@ -19,16 +19,15 @@ const PlatformVulnerabilitiesPage: React.FC = () => {
   const [configText, setConfigText] = useState('{}')
   const [defaultLevel, setDefaultLevel] = useState(String(VulnLevel.B))
   const [enabled, setEnabled] = useState(true)
-  const [synced, setSynced] = useState<VulnProblem[]>([])
   const [message, setMessage] = useState('')
-  const resource = useAsyncResource(() => api.contest.listVulnSources(), [])
+  const resource = useAsyncResource(() => api.contest.listPlatformVulnSources(), [])
 
   const save = async () => {
     if (!name.trim()) return
     setMessage('')
     try {
-      await api.contest.upsertVulnSource({
-        id: sourceId ? Number(sourceId) : undefined,
+      await api.contest.upsertPlatformVulnSource({
+        id: sourceId || undefined,
         type,
         name: name.trim(),
         config: parseJsonObject(configText),
@@ -39,18 +38,6 @@ const PlatformVulnerabilitiesPage: React.FC = () => {
       resource.reload()
     } catch (error) {
       setMessage(userFacingErrorMessage(error, '暂时无法保存漏洞源，请检查配置格式。'))
-    }
-  }
-
-  const sync = async (id: string) => {
-    setMessage('')
-    try {
-      const problems = await api.contest.syncVulnSource(id)
-      setSynced(problems)
-      setMessage(`同步完成，返回 ${problems.length} 条漏洞题草稿。`)
-      resource.reload()
-    } catch (error) {
-      setMessage(userFacingErrorMessage(error, '暂时无法同步漏洞源。'))
     }
   }
 
@@ -102,7 +89,6 @@ const PlatformVulnerabilitiesPage: React.FC = () => {
                 render: (row) => (
                   <div className={styles.actions}>
                     <Button size="sm" variant="outline" onClick={() => edit(row)}>编辑</Button>
-                    <Button size="sm" icon={<RefreshCw size={15} />} onClick={() => sync(row.id)}>同步</Button>
                   </div>
                 ),
               },
@@ -122,26 +108,11 @@ const PlatformVulnerabilitiesPage: React.FC = () => {
             </div>
           </div>
           <div className={styles.field}><label className={styles.label} htmlFor="source-config">配置</label><Textarea id="source-config" className={styles.jsonEditor} value={configText} onChange={(event) => setConfigText(event.target.value)} fullWidth /></div>
-          <Checkbox checked={enabled} onChange={(event) => setEnabled(event.target.checked)}>启用漏洞源</Checkbox>
+          <Checkbox checked={enabled} label="启用漏洞源" onChange={(event) => setEnabled(event.target.checked)} />
           <Button icon={<Save size={16} />} onClick={save}>保存漏洞源</Button>
         </aside>
       </div>
 
-      {synced.length > 0 && (
-        <section className={`${styles.panel} ${styles.section}`}>
-          <h2 className={styles.sectionTitle}>最近同步结果</h2>
-          <Table<VulnProblem>
-            rows={synced}
-            rowKey="id"
-            ariaLabel="同步漏洞题"
-            columns={[
-              { key: 'title', title: '标题', dataIndex: 'title', priority: 'primary' },
-              { key: 'level', title: '等级', dataIndex: 'level' },
-              { key: 'status', title: '状态', dataIndex: 'status' },
-            ]}
-          />
-        </section>
-      )}
     </div>
   )
 }

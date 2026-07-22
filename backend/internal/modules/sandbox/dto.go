@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 
 	"chaimir/internal/contracts"
+	"chaimir/internal/platform/ids"
 )
 
 // RuntimeRequest 是平台管理员注册或更新运行时的请求。
@@ -40,7 +41,7 @@ type ToolRequest struct {
 
 // RuntimeResponse 是运行时管理接口的稳定输出 DTO,避免内部模型字段名泄漏到 HTTP。
 type RuntimeResponse struct {
-	ID             int64           `json:"id"`
+	ID             ids.ID          `json:"id"`
 	Code           string          `json:"code"`
 	Name           string          `json:"name"`
 	Eco            string          `json:"eco"`
@@ -55,8 +56,8 @@ type RuntimeResponse struct {
 
 // RuntimeImageResponse 是运行时镜像接口的稳定输出 DTO。
 type RuntimeImageResponse struct {
-	ID            int64           `json:"id"`
-	RuntimeID     int64           `json:"runtime_id"`
+	ID            ids.ID          `json:"id"`
+	RuntimeID     ids.ID          `json:"runtime_id"`
 	ImageURL      string          `json:"image_url"`
 	Version       string          `json:"version"`
 	Status        int16           `json:"status"`
@@ -70,7 +71,7 @@ type RuntimeImageResponse struct {
 
 // ToolResponse 是沙箱工具管理接口的稳定输出 DTO。
 type ToolResponse struct {
-	ID           int64            `json:"id"`
+	ID           ids.ID           `json:"id"`
 	Code         string           `json:"code"`
 	Name         string           `json:"name"`
 	Kind         int16            `json:"kind"`
@@ -81,13 +82,13 @@ type ToolResponse struct {
 
 // CreateSandboxRequest 是内部 HTTP 创建沙箱请求。
 type CreateSandboxRequest struct {
-	TenantID                 int64    `json:"tenant_id"`
+	TenantID                 ids.ID   `json:"tenant_id"`
 	RuntimeCode              string   `json:"runtime_code"`
 	RuntimeImageVersion      string   `json:"runtime_image_version"`
 	Tools                    []string `json:"tools"`
 	InitCodeRef              string   `json:"init_code_ref"`
 	InitScriptRef            string   `json:"init_script_ref"`
-	OwnerAccountID           int64    `json:"owner_account_id"`
+	OwnerAccountID           ids.ID   `json:"owner_account_id"`
 	SourceRef                string   `json:"source_ref"`
 	KeepAlive                bool     `json:"keep_alive"`
 	SnapshotEnabled          bool     `json:"snapshot_enabled"`
@@ -97,21 +98,21 @@ type CreateSandboxRequest struct {
 
 // RecycleRequest 是内部 HTTP 来源级联回收请求。
 type RecycleRequest struct {
-	TenantID  int64  `json:"tenant_id"`
+	TenantID  ids.ID `json:"tenant_id"`
 	SourceRef string `json:"source_ref"`
 	Reason    string `json:"reason"`
 }
 
 // FileWriteRequest 是用户或内部服务写入工作区文件的请求。
 type FileWriteRequest struct {
-	TenantID      int64  `json:"tenant_id"`
+	TenantID      ids.ID `json:"tenant_id"`
 	RelativePath  string `json:"relative_path"`
 	ContentBase64 string `json:"content_base64"`
 }
 
 // ChainRequest 是链部署或交易的统一请求体。
 type ChainRequest struct {
-	TenantID int64          `json:"tenant_id"`
+	TenantID ids.ID         `json:"tenant_id"`
 	Payload  map[string]any `json:"payload"`
 }
 
@@ -131,19 +132,19 @@ type ToolRunResponse struct {
 
 // QuotaRequest 是配额调整请求。
 type QuotaRequest struct {
-	TenantID                int64 `json:"tenant_id"`
-	MaxConcurrentSandbox    int32 `json:"max_concurrent_sandbox"`
-	MaxCPU                  int32 `json:"max_cpu"`
-	MaxMemoryMB             int32 `json:"max_memory_mb"`
-	IdleTimeoutMin          int32 `json:"idle_timeout_min"`
-	MaxLifetimeMin          int32 `json:"max_lifetime_min"`
-	MaxKeepaliveMin         int32 `json:"max_keepalive_min"`
-	MaxSnapshotRetentionMin int32 `json:"max_snapshot_retention_min"`
+	TenantID                ids.ID `json:"tenant_id"`
+	MaxConcurrentSandbox    int32  `json:"max_concurrent_sandbox"`
+	MaxCPU                  int32  `json:"max_cpu"`
+	MaxMemoryMB             int32  `json:"max_memory_mb"`
+	IdleTimeoutMin          int32  `json:"idle_timeout_min"`
+	MaxLifetimeMin          int32  `json:"max_lifetime_min"`
+	MaxKeepaliveMin         int32  `json:"max_keepalive_min"`
+	MaxSnapshotRetentionMin int32  `json:"max_snapshot_retention_min"`
 }
 
 // PrepullResponse 描述镜像预拉取状态响应。
 type PrepullResponse struct {
-	ImageID       int64    `json:"image_id"`
+	ImageID       ids.ID   `json:"image_id"`
 	PrepullStatus int16    `json:"prepull_status"`
 	DesiredNodes  int32    `json:"desired_nodes"`
 	ReadyNodes    int32    `json:"ready_nodes"`
@@ -154,7 +155,7 @@ type PrepullResponse struct {
 
 // RuntimeSelftestResponse 描述运行时接入即测的当前结果。
 type RuntimeSelftestResponse struct {
-	RuntimeID      int64           `json:"runtime_id"`
+	RuntimeID      ids.ID          `json:"runtime_id"`
 	SelftestStatus int16           `json:"selftest_status"`
 	RuntimeStatus  int16           `json:"runtime_status"`
 	Detail         json.RawMessage `json:"detail"`
@@ -162,10 +163,10 @@ type RuntimeSelftestResponse struct {
 
 // SandboxResponse 描述用户侧可见的沙箱状态,不暴露 Kubernetes Namespace 等内部资源名。
 type SandboxResponse struct {
-	SandboxID           int64                          `json:"sandbox_id"`
-	TenantID            int64                          `json:"tenant_id"`
+	SandboxID           ids.ID                         `json:"sandbox_id"`
+	TenantID            ids.ID                         `json:"tenant_id"`
 	SourceRef           string                         `json:"source_ref"`
-	OwnerAccountID      int64                          `json:"owner_account_id"`
+	OwnerAccountID      ids.ID                         `json:"owner_account_id"`
 	RuntimeCode         string                         `json:"runtime_code"`
 	RuntimeImageVersion string                         `json:"runtime_image_version"`
 	Phase               int16                          `json:"phase"`

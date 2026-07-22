@@ -7,7 +7,7 @@ import { clsx } from 'clsx'
 import { triggerHaptic } from '../../utils/haptics'
 import './Checkbox.css'
 
-export interface CheckboxProps extends Omit<React.InputHTMLAttributes<HTMLInputElement>, 'type'> {
+export interface CheckboxProps extends Omit<React.InputHTMLAttributes<HTMLInputElement>, 'type' | 'children'> {
   /** 标签文字 */
   label?: React.ReactNode
   /** 错误状态 */

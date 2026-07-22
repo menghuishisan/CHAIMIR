@@ -84,13 +84,13 @@ func ladderFromUpsertRow(row sqlcgen.CreateOrUpdateLadderRankRow) LadderRank {
 	return LadderRank{ID: row.ID, TenantID: row.TenantID, ContestID: row.ContestID, TeamID: row.TeamID, Score: row.Score, SolvedCount: row.SolvedCount, LastSolveAt: timex.FromTimestamptz(row.LastSolveAt), Rank: row.Rank, UpdatedAt: timex.FromTimestamptz(row.UpdatedAt)}
 }
 
-// snapshotFromRow 转换成绩快照行。
-func snapshotFromRow(row sqlcgen.ContestResultSnapshot) (ResultSnapshot, error) {
-	items, err := decodeMapSlice(row.FinalRanking, apperr.ErrContestInvalid)
+// ladderSnapshotFromRow 转换封榜或归档排行榜快照行。
+func ladderSnapshotFromRow(row sqlcgen.ContestLadderSnapshot) (LadderSnapshot, error) {
+	items, err := decodeMapSlice(row.Ranking, apperr.ErrContestInvalid)
 	if err != nil {
-		return ResultSnapshot{}, err
+		return LadderSnapshot{}, err
 	}
-	return ResultSnapshot{ID: row.ID, TenantID: row.TenantID, ContestID: row.ContestID, FinalRanking: items, GeneratedAt: timex.FromTimestamptz(row.GeneratedAt)}, nil
+	return LadderSnapshot{ID: row.ID, TenantID: row.TenantID, ContestID: row.ContestID, SnapshotStatus: row.SnapshotStatus, Ranking: items, GeneratedAt: timex.FromTimestamptz(row.GeneratedAt)}, nil
 }
 
 // cheatFromRow 转换违规记录行。

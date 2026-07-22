@@ -81,7 +81,7 @@ const TeacherCourseEditPage: React.FC = () => {
       <div className={styles.header}>
         <div>
           <h1 className={styles.title}><Edit size={28} />编辑基础信息</h1>
-          <p className={styles.subtitle}>课程基础信息保存到 teaching 后端，发布后学生可见。</p>
+          <p className={styles.subtitle}>保存后可继续完善课程，发布后学生即可查看。</p>
         </div>
       </div>
 

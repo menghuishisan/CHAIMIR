@@ -135,10 +135,10 @@ func (a notifyAPI) send(c *gin.Context) {
 	if !httpx.BindJSONWithError(c, &req, apperr.ErrNotifyRequestInvalid) {
 		return
 	}
-	if !serviceTenantMatches(c, req.TenantID) {
+	if !serviceTenantMatches(c, req.TenantID.Int64()) {
 		return
 	}
-	httpx.Write(c, gin.H{}, a.svc.Send(c.Request.Context(), contracts.NotifySendRequest{TenantID: req.TenantID, Type: req.Type, Receivers: req.Receivers, Params: req.Params, Link: req.Link}))
+	httpx.Write(c, gin.H{}, a.svc.Send(c.Request.Context(), contracts.NotifySendRequest{TenantID: req.TenantID.Int64(), Type: req.Type, Receivers: req.Receivers, Params: req.Params, Link: req.Link}))
 }
 
 // push 绑定内部服务实时推送请求。
@@ -147,10 +147,10 @@ func (a notifyAPI) push(c *gin.Context) {
 	if !httpx.BindJSONWithError(c, &req, apperr.ErrNotifySubscribeInvalid) {
 		return
 	}
-	if !serviceTenantMatches(c, req.TenantID) {
+	if !serviceTenantMatches(c, req.TenantID.Int64()) {
 		return
 	}
-	httpx.Write(c, gin.H{}, a.svc.Push(c.Request.Context(), contracts.NotifyPushRequest{TenantID: req.TenantID, Topic: req.Topic, Payload: req.Payload}))
+	httpx.Write(c, gin.H{}, a.svc.Push(c.Request.Context(), contracts.NotifyPushRequest{TenantID: req.TenantID.Int64(), Topic: req.Topic, Payload: req.Payload}))
 }
 
 // serviceTenantMatches 确保内部通知请求正文的租户与已验签服务租户一致。

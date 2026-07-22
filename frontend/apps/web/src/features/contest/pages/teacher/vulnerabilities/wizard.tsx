@@ -28,7 +28,7 @@ const TeacherVulnerabilityWizardPage: React.FC = () => {
     setMessage('')
     try {
       const payload = {
-        source_id: sourceId ? Number(sourceId) : undefined,
+        source_id: sourceId || undefined,
         external_ref: externalRef.trim() || undefined,
         title: title.trim(),
         level: Number(level) as VulnLevel,

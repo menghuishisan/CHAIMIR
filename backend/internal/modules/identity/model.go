@@ -21,6 +21,20 @@ type Tenant struct {
 	UpdatedAt            time.Time
 }
 
+// TenantProvisionOutbox 是新租户跨模块初始化事件的可靠投递记录。
+type TenantProvisionOutbox struct {
+	ID            int64
+	TenantID      int64
+	DeployMode    int16
+	TraceID       string
+	ProvisionedAt time.Time
+	Status        int16
+	RetryCount    int32
+	LastError     string
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
+}
+
 // TenantApplication 是学校入驻申请的领域快照。
 type TenantApplication struct {
 	ID           int64

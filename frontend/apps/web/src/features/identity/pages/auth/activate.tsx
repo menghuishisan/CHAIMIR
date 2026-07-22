@@ -16,6 +16,7 @@ const ActivatePage: React.FC = () => {
   const [submitting, setSubmitting] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [completed, setCompleted] = useState(false)
 
   /**
    * handleActivate 校验两次密码一致后调用后端激活账号。
@@ -43,6 +44,7 @@ const ActivatePage: React.FC = () => {
         password,
       })
       setMessage('账号已激活，请返回登录页使用新密码登录。')
+      setCompleted(true)
     } catch (activateError) {
       setError(userFacingErrorMessage(activateError, '账号激活失败，请检查激活码后重试。'))
     } finally {
@@ -67,7 +69,7 @@ const ActivatePage: React.FC = () => {
         </Callout>
       )}
 
-      <div className={styles.fields}>
+      {!completed && <div className={styles.fields}>
         <FormField label="激活码" htmlFor="activation-code" required>
           <Input id="activation-code" fullWidth autoComplete="one-time-code" value={activationCode} onChange={(event) => setActivationCode(event.target.value)} />
         </FormField>
@@ -80,11 +82,11 @@ const ActivatePage: React.FC = () => {
         <Button block type="submit" loading={submitting}>
           立即激活
         </Button>
-      </div>
+      </div>}
 
       <div className={styles.footerLinks}>
         <button className={styles.linkButton} type="button" onClick={() => navigate('/auth/login')}>
-          <ArrowLeft size={16} /> 返回登录
+          <ArrowLeft size={16} /> {completed ? '前往登录' : '返回登录'}
         </button>
       </div>
     </form>

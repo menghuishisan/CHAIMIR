@@ -180,7 +180,7 @@
     x-chaimir-audience: student-or-school-admin
     security: [{ bearerAuth: [] }]
     parameters:
-      - { name: student_id, in: query, schema: { type: integer, format: int64 } }
+      - { name: student_id, in: query, schema: { $ref: "#/components/schemas/SnowflakeID" } }
       - { $ref: "#/components/parameters/PageQuery" }
       - { $ref: "#/components/parameters/SizeQuery" }
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }

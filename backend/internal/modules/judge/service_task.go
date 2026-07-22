@@ -8,6 +8,7 @@ import (
 
 	"chaimir/internal/contracts"
 	"chaimir/internal/platform/auth"
+	"chaimir/internal/platform/ids"
 	"chaimir/internal/platform/pagex"
 	"chaimir/internal/platform/response"
 	"chaimir/internal/platform/ws"
@@ -233,7 +234,7 @@ func (s *Service) ProgressSubscription(ctx context.Context, tenantID, accountID,
 	if err := ensureAccountCanAccessTask(info.Task, accountID); err != nil {
 		return "", ProgressMessage{}, err
 	}
-	return judgeProgressTopic(tenantID, taskID), ProgressMessage{TaskID: taskID, Status: statusText(info.Task.Status), Stage: progressStage(info.Task.Status), Message: progressMessage(info.Task.Status)}, nil
+	return judgeProgressTopic(tenantID, taskID), ProgressMessage{TaskID: ids.ID(taskID), Status: statusText(info.Task.Status), Stage: progressStage(info.Task.Status), Message: progressMessage(info.Task.Status)}, nil
 }
 
 // GetTaskInfoForUser 校验用户态来源归属后返回任务与结果。

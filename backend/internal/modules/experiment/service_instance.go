@@ -29,21 +29,21 @@ func (s *Service) CreateInstance(ctx context.Context, experimentID int64, req Cr
 		if err != nil {
 			return err
 		}
-		if err := validateInstanceStart(exp, req.GroupID); err != nil {
+		if err := validateInstanceStart(exp, req.GroupID.Int64()); err != nil {
 			return err
 		}
 		if req.GroupID > 0 {
-			group, err := tx.GetGroup(ctx, id.TenantID, req.GroupID)
+			group, err := tx.GetGroup(ctx, id.TenantID, req.GroupID.Int64())
 			if err != nil {
 				return err
 			}
 			if group.ExperimentID != experimentID {
 				return apperr.ErrExperimentGroupInvalid
 			}
-			if _, err := tx.GetGroupMember(ctx, id.TenantID, req.GroupID, id.AccountID); err != nil {
+			if _, err := tx.GetGroupMember(ctx, id.TenantID, req.GroupID.Int64(), id.AccountID); err != nil {
 				return err
 			}
-			existing, err := tx.GetActiveGroupInstance(ctx, id.TenantID, experimentID, req.GroupID)
+			existing, err := tx.GetActiveGroupInstance(ctx, id.TenantID, experimentID, req.GroupID.Int64())
 			if err == nil {
 				inst = existing
 				return nil
@@ -53,7 +53,7 @@ func (s *Service) CreateInstance(ctx context.Context, experimentID int64, req Cr
 			}
 		}
 		instanceID := s.ids.Generate()
-		inst, err = tx.CreateInstance(ctx, ExperimentInstance{ID: instanceID, TenantID: id.TenantID, ExperimentID: experimentID, OwnerAccountID: id.AccountID, GroupID: req.GroupID, SourceRef: sourceRefForInstance(instanceID, timex.Now())})
+		inst, err = tx.CreateInstance(ctx, ExperimentInstance{ID: instanceID, TenantID: id.TenantID, ExperimentID: experimentID, OwnerAccountID: id.AccountID, GroupID: req.GroupID.Int64(), SourceRef: sourceRefForInstance(instanceID, timex.Now())})
 		return err
 	}); err != nil {
 		return InstanceDTO{}, err
@@ -151,7 +151,7 @@ func (s *Service) PauseInstance(ctx context.Context, instanceID int64) (Instance
 			return apperr.ErrExperimentSandboxUnavailable
 		}
 		for _, ref := range inst.SandboxRefs {
-			if err := s.sandbox.PauseSandbox(ctx, contracts.SandboxControlRequest{TenantID: inst.TenantID, SandboxID: ref.SandboxID, SourceRef: inst.SourceRef}); err != nil {
+			if err := s.sandbox.PauseSandbox(ctx, contracts.SandboxControlRequest{TenantID: inst.TenantID, SandboxID: ref.SandboxID.Int64(), SourceRef: inst.SourceRef}); err != nil {
 				return apperr.ErrExperimentSandboxUnavailable.WithCause(err)
 			}
 		}
@@ -189,7 +189,7 @@ func (s *Service) ResumeInstance(ctx context.Context, instanceID int64) (Instanc
 			return apperr.ErrExperimentSandboxUnavailable
 		}
 		for _, ref := range inst.SandboxRefs {
-			if err := s.sandbox.ResumeSandbox(ctx, contracts.SandboxControlRequest{TenantID: inst.TenantID, SandboxID: ref.SandboxID, SourceRef: inst.SourceRef}); err != nil {
+			if err := s.sandbox.ResumeSandbox(ctx, contracts.SandboxControlRequest{TenantID: inst.TenantID, SandboxID: ref.SandboxID.Int64(), SourceRef: inst.SourceRef}); err != nil {
 				return apperr.ErrExperimentResumeFailed.WithCause(err)
 			}
 		}

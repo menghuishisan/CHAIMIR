@@ -142,18 +142,21 @@ type BootstrapConfig struct {
 
 // IdentityConfig 描述身份模块的安全和网络运行边界。
 type IdentityConfig struct {
-	ActivationCodeTTLHours   int
-	SSONetworkTimeoutSeconds int
-	SSOCASResponseMaxBytes   int64
-	SSOAllowedServiceOrigins []string
-	PasswordMaxFailedCount   int
-	PasswordLockMinutes      int
-	SMSResendSeconds         int
-	SMSDailyLimit            int
-	SMSCodeTTLMinutes        int
-	SMSVerifyMaxAttempts     int
-	ImportMaxRows            int
-	ImportPreviewTTLHours    int
+	ActivationCodeTTLHours       int
+	SSONetworkTimeoutSeconds     int
+	SSOCASResponseMaxBytes       int64
+	SSOAllowedServiceOrigins     []string
+	PasswordMaxFailedCount       int
+	PasswordLockMinutes          int
+	SMSResendSeconds             int
+	SMSDailyLimit                int
+	SMSCodeTTLMinutes            int
+	SMSVerifyMaxAttempts         int
+	ImportMaxRows                int
+	ImportPreviewTTLHours        int
+	TenantProvisionOutboxPollMs  int
+	TenantProvisionOutboxBatch   int
+	TenantProvisionOutboxStaleMs int
 }
 
 // SMSConfig 描述短信网关接入边界。
@@ -301,6 +304,13 @@ type SandboxConfig struct {
 	RecycleOutboxBatchSize        int
 	RecycleOutboxPollMs           int
 	RecycleOutboxStaleMs          int
+	TenantDefaultMaxConcurrent    int32
+	TenantDefaultMaxCPU           int32
+	TenantDefaultMaxMemoryMB      int32
+	TenantDefaultIdleTimeoutMin   int32
+	TenantDefaultMaxLifetimeMin   int32
+	TenantDefaultMaxKeepaliveMin  int32
+	TenantDefaultSnapshotMin      int32
 	ReadyIdleTimeoutSeconds       int
 	SelftestRecycleTimeoutSeconds int
 	ControlNamespace              string
@@ -516,18 +526,21 @@ func Load() (*Config, error) {
 		PlatformAdminPassword: os.Getenv("BOOTSTRAP_PLATFORM_ADMIN_PASSWORD"),
 	}
 	c.Identity = IdentityConfig{
-		ActivationCodeTTLHours:   reqInt("IDENTITY_ACTIVATION_CODE_TTL_HOURS"),
-		SSONetworkTimeoutSeconds: reqInt("IDENTITY_SSO_NETWORK_TIMEOUT_SECONDS"),
-		SSOCASResponseMaxBytes:   reqInt64("IDENTITY_SSO_CAS_RESPONSE_MAX_BYTES"),
-		SSOAllowedServiceOrigins: getCSV("IDENTITY_SSO_ALLOWED_SERVICE_ORIGINS"),
-		PasswordMaxFailedCount:   reqInt("IDENTITY_PASSWORD_MAX_FAILED_COUNT"),
-		PasswordLockMinutes:      reqInt("IDENTITY_PASSWORD_LOCK_MINUTES"),
-		SMSResendSeconds:         reqInt("IDENTITY_SMS_RESEND_SECONDS"),
-		SMSDailyLimit:            reqInt("IDENTITY_SMS_DAILY_LIMIT"),
-		SMSCodeTTLMinutes:        reqInt("IDENTITY_SMS_CODE_TTL_MINUTES"),
-		SMSVerifyMaxAttempts:     reqInt("IDENTITY_SMS_VERIFY_MAX_ATTEMPTS"),
-		ImportMaxRows:            reqInt("IDENTITY_IMPORT_MAX_ROWS"),
-		ImportPreviewTTLHours:    reqInt("IDENTITY_IMPORT_PREVIEW_TTL_HOURS"),
+		ActivationCodeTTLHours:       reqInt("IDENTITY_ACTIVATION_CODE_TTL_HOURS"),
+		SSONetworkTimeoutSeconds:     reqInt("IDENTITY_SSO_NETWORK_TIMEOUT_SECONDS"),
+		SSOCASResponseMaxBytes:       reqInt64("IDENTITY_SSO_CAS_RESPONSE_MAX_BYTES"),
+		SSOAllowedServiceOrigins:     getCSV("IDENTITY_SSO_ALLOWED_SERVICE_ORIGINS"),
+		PasswordMaxFailedCount:       reqInt("IDENTITY_PASSWORD_MAX_FAILED_COUNT"),
+		PasswordLockMinutes:          reqInt("IDENTITY_PASSWORD_LOCK_MINUTES"),
+		SMSResendSeconds:             reqInt("IDENTITY_SMS_RESEND_SECONDS"),
+		SMSDailyLimit:                reqInt("IDENTITY_SMS_DAILY_LIMIT"),
+		SMSCodeTTLMinutes:            reqInt("IDENTITY_SMS_CODE_TTL_MINUTES"),
+		SMSVerifyMaxAttempts:         reqInt("IDENTITY_SMS_VERIFY_MAX_ATTEMPTS"),
+		ImportMaxRows:                reqInt("IDENTITY_IMPORT_MAX_ROWS"),
+		ImportPreviewTTLHours:        reqInt("IDENTITY_IMPORT_PREVIEW_TTL_HOURS"),
+		TenantProvisionOutboxPollMs:  reqInt("IDENTITY_TENANT_PROVISION_OUTBOX_POLL_INTERVAL_MS"),
+		TenantProvisionOutboxBatch:   reqInt("IDENTITY_TENANT_PROVISION_OUTBOX_BATCH_SIZE"),
+		TenantProvisionOutboxStaleMs: reqInt("IDENTITY_TENANT_PROVISION_OUTBOX_STALE_INTERVAL_MS"),
 	}
 	c.SMS = SMSConfig{
 		Provider:              req("SMS_PROVIDER"),
@@ -660,6 +673,13 @@ func Load() (*Config, error) {
 		RecycleOutboxBatchSize:        reqInt("SANDBOX_RECYCLE_OUTBOX_BATCH_SIZE"),
 		RecycleOutboxPollMs:           reqInt("SANDBOX_RECYCLE_OUTBOX_POLL_INTERVAL_MS"),
 		RecycleOutboxStaleMs:          reqInt("SANDBOX_RECYCLE_OUTBOX_STALE_INTERVAL_MS"),
+		TenantDefaultMaxConcurrent:    int32(reqInt("SANDBOX_TENANT_DEFAULT_MAX_CONCURRENT")),
+		TenantDefaultMaxCPU:           int32(reqInt("SANDBOX_TENANT_DEFAULT_MAX_CPU")),
+		TenantDefaultMaxMemoryMB:      int32(reqInt("SANDBOX_TENANT_DEFAULT_MAX_MEMORY_MB")),
+		TenantDefaultIdleTimeoutMin:   int32(reqInt("SANDBOX_TENANT_DEFAULT_IDLE_TIMEOUT_MIN")),
+		TenantDefaultMaxLifetimeMin:   int32(reqInt("SANDBOX_TENANT_DEFAULT_MAX_LIFETIME_MIN")),
+		TenantDefaultMaxKeepaliveMin:  int32(reqInt("SANDBOX_TENANT_DEFAULT_MAX_KEEPALIVE_MIN")),
+		TenantDefaultSnapshotMin:      int32(reqInt("SANDBOX_TENANT_DEFAULT_MAX_SNAPSHOT_RETENTION_MIN")),
 		ReadyIdleTimeoutSeconds:       reqInt("SANDBOX_READY_IDLE_TIMEOUT_SECONDS"),
 		SelftestRecycleTimeoutSeconds: reqInt("SANDBOX_SELFTEST_RECYCLE_TIMEOUT_SECONDS"),
 		ControlNamespace:              req("SANDBOX_CONTROL_NAMESPACE"),
@@ -998,6 +1018,9 @@ func Load() (*Config, error) {
 	if c.Sandbox.RecycleOutboxStaleMs <= 0 {
 		errs = append(errs, "SANDBOX_RECYCLE_OUTBOX_STALE_INTERVAL_MS 必须大于 0")
 	}
+	if c.Sandbox.TenantDefaultMaxConcurrent <= 0 || c.Sandbox.TenantDefaultMaxCPU <= 0 || c.Sandbox.TenantDefaultMaxMemoryMB <= 0 || c.Sandbox.TenantDefaultIdleTimeoutMin <= 0 || c.Sandbox.TenantDefaultMaxLifetimeMin <= 0 || c.Sandbox.TenantDefaultMaxKeepaliveMin < 0 || c.Sandbox.TenantDefaultSnapshotMin < 0 {
+		errs = append(errs, "SANDBOX_TENANT_DEFAULT_* 配额必须满足数据库正数与非负约束")
+	}
 	if c.Sandbox.ReadyIdleTimeoutSeconds <= 0 {
 		errs = append(errs, "SANDBOX_READY_IDLE_TIMEOUT_SECONDS 必须大于 0")
 	}
@@ -1028,6 +1051,9 @@ func Load() (*Config, error) {
 	}
 	if c.Identity.SSOCASResponseMaxBytes <= 0 {
 		errs = append(errs, "IDENTITY_SSO_CAS_RESPONSE_MAX_BYTES 必须大于 0")
+	}
+	if c.Identity.TenantProvisionOutboxPollMs <= 0 || c.Identity.TenantProvisionOutboxBatch <= 0 || c.Identity.TenantProvisionOutboxStaleMs <= 0 {
+		errs = append(errs, "IDENTITY_TENANT_PROVISION_OUTBOX_* 必须全部大于 0")
 	}
 	if c.SMS.TimeoutSeconds <= 0 {
 		errs = append(errs, "SMS_TIMEOUT_SECONDS 必须大于 0")

@@ -129,8 +129,8 @@ const UsersPage: React.FC = () => {
         <Button variant="outline" icon={<RefreshCw size={16} />} onClick={resource.reload}>
           刷新
         </Button>
-        <Button variant="outline" disabled={selectedIds.size === 0} onClick={() => runAccountAction(() => api.identity.batchDisableAccounts({ account_ids: Array.from(selectedIds, Number) }), '所选账号已停用。')}>批量停用</Button>
-        <Button variant="outline" disabled={selectedIds.size === 0} onClick={() => runAccountAction(() => api.identity.batchRestoreAccounts({ account_ids: Array.from(selectedIds, Number) }), '所选账号已恢复。')}>批量恢复</Button>
+        <Button variant="outline" disabled={selectedIds.size === 0} onClick={() => runAccountAction(() => api.identity.batchDisableAccounts({ account_ids: Array.from(selectedIds) }), '所选账号已停用。')}>批量停用</Button>
+        <Button variant="outline" disabled={selectedIds.size === 0} onClick={() => runAccountAction(() => api.identity.batchRestoreAccounts({ account_ids: Array.from(selectedIds) }), '所选账号已恢复。')}>批量恢复</Button>
       </div>
       <div className={styles.toolbar}>
         <Input placeholder="输入入学年份" value={archiveYear} onChange={(event) => setArchiveYear(event.target.value)} />

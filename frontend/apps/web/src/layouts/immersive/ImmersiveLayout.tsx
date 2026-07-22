@@ -2,6 +2,7 @@
 import React from 'react'
 import { Outlet, useNavigate, useLocation } from 'react-router-dom'
 import { ArrowLeft, Maximize } from 'lucide-react'
+import { RouteErrorBoundary } from '../../components/RouteErrorBoundary/RouteErrorBoundary'
 import styles from './ImmersiveLayout.module.css'
 
 const ImmersiveLayout: React.FC = () => {
@@ -58,7 +59,9 @@ const ImmersiveLayout: React.FC = () => {
 
       {/* 子路由渲染实验、仿真或竞赛的主体工作区。 */}
       <div className={styles.workspaceArea}>
-        <Outlet />
+        <RouteErrorBoundary variant="immersive">
+          <Outlet />
+        </RouteErrorBoundary>
       </div>
     </div>
   )

@@ -13,7 +13,7 @@ import { formatDateTime, contestStatusLabel } from '../../../../../utils/index'
 
 const StudentContestsPage: React.FC = () => {
   const navigate = useNavigate()
-  const resource = useAsyncResource(() => api.contest.getContests({ page: 1, size: 20 }), [])
+  const resource = useAsyncResource(() => api.contest.getStudentContests({ page: 1, size: 20 }), [])
 
   if (resource.status === 'loading') {
     return <LoadingState title="正在读取竞赛" description="系统正在同步可报名和可参赛的竞赛。" />

@@ -59,9 +59,24 @@ func (a experimentAPI) registerTeacherRoutes(g gin.IRouter) {
 
 // registerStudentRoutes 注册学生发起实例、判分和报告接口。
 func (a experimentAPI) registerStudentRoutes(g gin.IRouter) {
+	g.GET("/student/experiments", a.listPublishedExperiments)
 	g.POST("/experiments/:id/instances", a.createInstance)
 	g.POST("/instances/:id/checkpoints/:cp/judge", a.judgeCheckpoint)
 	g.POST("/instances/:id/report", a.submitReport)
+}
+
+// listPublishedExperiments 仅向学生返回当前租户已发布实验。
+func (a experimentAPI) listPublishedExperiments(c *gin.Context) {
+	courseID, ok := httpx.QueryInt(c, "course_id", httpx.QueryIntRule{Default: 0, Min: 0})
+	if !ok {
+		return
+	}
+	page, size, ok := httpx.Page(c)
+	if !ok {
+		return
+	}
+	out, total, p, s, err := a.svc.ListPublishedExperiments(c.Request.Context(), courseID, page, size)
+	httpx.WritePage(c, out, total, p, s, err)
 }
 
 // registerSharedRoutes 注册师生共享的实例工作台和控制接口。

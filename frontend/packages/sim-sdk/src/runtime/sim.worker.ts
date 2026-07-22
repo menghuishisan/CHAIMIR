@@ -13,11 +13,10 @@ import type {
   SimPackage,
   SimPackageDescriptor,
   SimState,
-  TeachingFrame,
-  TreeNode,
 } from '../types';
 import { fnv1aHex, hashSeed, XorShiftRandom } from './deterministic';
 import { getBuiltinSimulation } from '../registry/builtinRegistry';
+import { assertValidSimPackage, assertValidTeachingFrame } from '../validation';
 
 type WorkerRequest =
   | { type: 'init'; requestId: number; moduleUrl?: string; builtinCode?: string; initParams: SimInitParams; seed: number }
@@ -87,7 +86,7 @@ async function handleRequest(request: WorkerRequest): Promise<void> {
  */
 function syncBackendState(nextTick: number, nextState: SimState): void {
   if (!Number.isSafeInteger(nextTick) || nextTick < 0 || !nextState || typeof nextState !== 'object') {
-    throw new Error('后端仿真状态不完整，请稍后重试');
+    throw new Error('云端仿真状态不完整，请稍后重试');
   }
   tick = nextTick;
   state = nextState;
@@ -98,7 +97,7 @@ function syncBackendState(nextTick: number, nextState: SimState): void {
  */
 async function init(request: Extract<WorkerRequest, { type: 'init' }>): Promise<void> {
   simPackage = await loadPackage(request);
-  assertPackage(simPackage);
+  assertValidSimPackage(simPackage);
   initParams = request.initParams;
   seed = request.seed;
   descriptor = describePackage(simPackage);
@@ -334,7 +333,7 @@ function snapshot(): RuntimeSnapshot {
   const current = currentState();
   const currentStep = currentNarrativeStep();
   const view = pkg.render(current);
-  enforceViewLimit(view);
+  assertValidTeachingFrame(view, readyPackage().meta.scaleLimit);
   const checkpointResults: RuntimeSnapshot['checkpointResults'] = {};
   for (const checkpoint of pkg.checkpoints ?? []) {
     checkpointResults[checkpoint.id] = checkpoint.evaluate(current);
@@ -369,7 +368,7 @@ function currentNarrativeStep(): NarrativeStepDescriptor | undefined {
   const current = currentState();
   const steps = pkg.narrative ?? [];
   const matched = steps.find((step) => step.trigger(current));
-  return stripNarrativeStep(matched ?? steps[0]);
+  return stripNarrativeStep(matched);
 }
 
 /**
@@ -401,7 +400,7 @@ function stripNarrativeStep(step?: NonNullable<SimPackage['narrative']>[number])
  * installRuntimeGuards 禁止仿真包访问网络、嵌套 Worker、真实时间和非确定性随机源。
  */
 function installRuntimeGuards(): void {
-  const scope = self as unknown as Record<string, unknown>;
+  const scope = self;
   const blocked = (): never => {
     throw new Error('仿真包能力不被允许');
   };
@@ -426,7 +425,7 @@ function installRuntimeGuards(): void {
 /**
  * blockWorkerGlobal 覆盖 Worker 全局能力,只接受可重新定义的属性。
  */
-function blockWorkerGlobal(scope: Record<string, unknown>, key: string, value: unknown): void {
+function blockWorkerGlobal(scope: object, key: string, value: unknown): void {
   const descriptor = findPropertyDescriptor(scope, key);
   if (descriptor && descriptor.configurable === false) {
     throw new Error('仿真运行环境无法封锁必要浏览器能力');
@@ -441,7 +440,7 @@ function blockWorkerGlobal(scope: Record<string, unknown>, key: string, value: u
 /**
  * findPropertyDescriptor 沿原型链查找 Worker 全局属性描述符。
  */
-function findPropertyDescriptor(scope: Record<string, unknown>, key: string): PropertyDescriptor | undefined {
+function findPropertyDescriptor(scope: object, key: string): PropertyDescriptor | undefined {
   let cursor: object | null = scope;
   while (cursor) {
     const descriptor = Object.getOwnPropertyDescriptor(cursor, key);
@@ -451,22 +450,6 @@ function findPropertyDescriptor(scope: Record<string, unknown>, key: string): Pr
     cursor = Object.getPrototypeOf(cursor);
   }
   return undefined;
-}
-
-/**
- * assertPackage 校验加载模块是否满足最小 SimPackage 协议。
- */
-function assertPackage(pkg: SimPackage | undefined): asserts pkg is SimPackage {
-  if (
-    !pkg ||
-    typeof pkg.initState !== 'function' ||
-    typeof pkg.reducer !== 'function' ||
-    typeof pkg.render !== 'function' ||
-    !pkg.meta ||
-    !Array.isArray(pkg.interactions)
-  ) {
-    throw new Error('仿真包内容不完整，请联系发布者处理');
-  }
 }
 
 /**
@@ -480,90 +463,6 @@ function enforceEventLimit(eventInput: Omit<SimEvent, 'seq' | 'atTick'>): void {
   if (events.length >= pkg.meta.scaleLimit.maxEvents) {
     throw new Error('仿真事件数量超过限制，请调整场景规模');
   }
-}
-
-/**
- * enforceViewLimit 执行封闭模式数量和节点规模约束,防止仿真包撑破渲染器。
- */
-function enforceViewLimit(view: TeachingFrame): void {
-  const pkg = readyPackage();
-  if (view.patterns.length < 1 || view.patterns.length > 3) {
-    throw new Error('仿真视图数量超过限制，请调整场景规模');
-  }
-  if (!view.summary || !view.phase?.id || !view.phase.title || !view.layout?.primary || !view.focus?.primary?.length) {
-    throw new Error('仿真教学画面缺少阶段、焦点或主视图声明');
-  }
-  const patternIds = new Set<string>();
-  for (const pattern of view.patterns) {
-    if (patternIds.has(pattern.id)) {
-      throw new Error('仿真教学画面包含重复视图');
-    }
-    patternIds.add(pattern.id);
-  }
-  const layoutIds = layoutPatternIds(view);
-  for (const id of layoutIds) {
-    if (!patternIds.has(id)) {
-      throw new Error('仿真教学画面引用了不存在的视图');
-    }
-  }
-  for (const pattern of view.patterns) {
-    if (!layoutIds.has(pattern.id)) {
-      throw new Error('仿真教学画面存在未声明职责的视图');
-    }
-  }
-  if (countRenderableNodes(view) > pkg.meta.scaleLimit.nodes) {
-    throw new Error('仿真节点数量超过限制，请调整场景规模');
-  }
-}
-
-/**
- * layoutPatternIds 汇总 TeachingFrame 布局显式引用的模式 ID。
- */
-function layoutPatternIds(view: TeachingFrame): Set<string> {
-  return new Set(
-    [
-      view.layout.primary,
-      ...(view.layout.evidence ?? []),
-      ...(view.layout.timeline ? [view.layout.timeline] : []),
-      ...(view.layout.metrics ?? []),
-      ...(view.layout.trace ? [view.layout.trace] : []),
-      ...(view.layout.checkpoints ?? []),
-    ].filter(Boolean)
-  );
-}
-
-/**
- * countRenderableNodes 统计所有封闭模式中的可渲染元素数量。
- */
-function countRenderableNodes(view: TeachingFrame): number {
-  return view.patterns.reduce((total, pattern) => {
-    if (pattern.mode === 'graph') {
-      return total + pattern.data.nodes.length;
-    }
-    if (pattern.mode === 'chain') {
-      return total + pattern.data.blocks.length + pattern.data.forks.reduce((sum, fork) => sum + fork.length, 0);
-    }
-    if (pattern.mode === 'tree') {
-      return total + countTreeNodes(pattern.data.root);
-    }
-    if (pattern.mode === 'matrix') {
-      return total + pattern.data.rows.length * pattern.data.columns.length;
-    }
-    if (pattern.mode === 'pipeline') {
-      return total + pattern.data.steps.length;
-    }
-    if (pattern.mode === 'lane') {
-      return total + pattern.data.actors.length + pattern.data.messages.length;
-    }
-    return total + pattern.data.series.reduce((sum, series) => sum + series.points.length, 0);
-  }, 0);
-}
-
-/**
- * countTreeNodes 递归统计树模式节点数。
- */
-function countTreeNodes(node: TreeNode): number {
-  return 1 + (node.children ?? []).reduce((total, child) => total + countTreeNodes(child), 0);
 }
 
 /**

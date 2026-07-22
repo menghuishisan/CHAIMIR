@@ -10,6 +10,7 @@ import (
 	"chaimir/internal/contracts"
 	"chaimir/internal/platform/auth"
 	"chaimir/internal/platform/httpx"
+	"chaimir/internal/platform/ids"
 	"chaimir/internal/platform/response"
 	"chaimir/internal/platform/tenant"
 	"chaimir/internal/platform/ws"
@@ -243,7 +244,7 @@ func (a sandboxAPI) createSandbox(c *gin.Context) {
 	if !httpx.BindJSONWithError(c, &req, apperr.ErrSandboxCreateRequestInvalid) {
 		return
 	}
-	req.TenantID = serviceTenantID(c)
+	req.TenantID = ids.ID(serviceTenantID(c))
 	if req.TenantID <= 0 {
 		response.Fail(c, apperr.ErrServiceUnauthorized)
 		return
@@ -332,7 +333,7 @@ func (a sandboxAPI) recycleBySourceRef(c *gin.Context) {
 	if !httpx.BindJSONWithError(c, &req, apperr.ErrSandboxRecycleRequestInvalid) {
 		return
 	}
-	req.TenantID = serviceTenantID(c)
+	req.TenantID = ids.ID(serviceTenantID(c))
 	if req.TenantID <= 0 {
 		response.Fail(c, apperr.ErrServiceUnauthorized)
 		return
@@ -342,7 +343,7 @@ func (a sandboxAPI) recycleBySourceRef(c *gin.Context) {
 		return
 	}
 	req.SourceRef = sourceRef
-	httpx.Write(c, gin.H{}, a.svc.RecycleBySourceRef(c.Request.Context(), contracts.SandboxRecycleRequest(req)))
+	httpx.Write(c, gin.H{}, a.svc.RecycleBySourceRef(c.Request.Context(), contracts.SandboxRecycleRequest{TenantID: req.TenantID.Int64(), SourceRef: req.SourceRef, Reason: req.Reason}))
 }
 
 // getFiles 绑定工作区文件读取或目录列表请求。
@@ -378,7 +379,7 @@ func (a sandboxAPI) writeFile(c *gin.Context) {
 	if !httpx.BindJSONWithError(c, &req, apperr.ErrSandboxFileWriteRequestInvalid) {
 		return
 	}
-	req.TenantID = current.TenantID
+	req.TenantID = ids.ID(current.TenantID)
 	if strings.TrimSpace(req.RelativePath) == "" {
 		req.RelativePath = c.Query("path")
 	}
@@ -633,9 +634,9 @@ func (a sandboxAPI) upsertQuota(c *gin.Context) {
 		return
 	}
 	if !current.IsPlatform {
-		req.TenantID = current.TenantID
+		req.TenantID = ids.ID(current.TenantID)
 	}
-	out, err := a.svc.UpsertQuota(c.Request.Context(), TenantQuota(req))
+	out, err := a.svc.UpsertQuota(c.Request.Context(), TenantQuota{TenantID: req.TenantID.Int64(), MaxConcurrentSandbox: req.MaxConcurrentSandbox, MaxCPU: req.MaxCPU, MaxMemoryMB: req.MaxMemoryMB, IdleTimeoutMin: req.IdleTimeoutMin, MaxLifetimeMin: req.MaxLifetimeMin, MaxKeepaliveMin: req.MaxKeepaliveMin, MaxSnapshotRetentionMin: req.MaxSnapshotRetentionMin})
 	httpx.Write(c, out, err)
 }
 

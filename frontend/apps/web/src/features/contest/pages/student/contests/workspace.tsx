@@ -97,7 +97,7 @@ const StudentContestWorkspacePage: React.FC = () => {
     setError('')
     try {
       await api.contest.submitBattleEntry(id, {
-        problem_id: Number(selectedProblem.id),
+        problem_id: selectedProblem.id,
         role: Number(battleRole) as BattleRole,
         artifact_ref: codeStorageKey,
         code_hash: codeHash,

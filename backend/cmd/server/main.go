@@ -230,6 +230,7 @@ func assembleModules(ctx context.Context, router gin.IRouter, cfg *config.Config
 		Redis:    infra.redis,
 		IDs:      infra.ids,
 		Config:   *cfg,
+		EventBus: infra.bus,
 	})
 	if err != nil {
 		return err
@@ -237,6 +238,9 @@ func assembleModules(ctx context.Context, router gin.IRouter, cfg *config.Config
 	auditWriter := identitySvc.AuditWriter()
 	transferSvc, err := RegisterTransfer(TransferDeps{Router: router, Database: infra.database, IDs: infra.ids, Config: cfg.Transfer, AuthConfig: cfg.Auth, Auth: infra.auth, Roles: identitySvc})
 	if err != nil {
+		return err
+	}
+	if err := storage.RegisterDownloadRoutes(router, infra.storage, infra.redis, cfg.Auth.HMACKey, infra.auth); err != nil {
 		return err
 	}
 	contentSvc, err := RegisterContentModule(ContentModuleDeps{Router: router, Database: infra.database, IDs: infra.ids, Upload: cfg.Upload, MinIO: cfg.MinIO, AuthCfg: cfg.Auth, Storage: infra.storage, Audit: auditWriter, Auth: infra.auth, Roles: identitySvc})
@@ -258,6 +262,9 @@ func assembleModules(ctx context.Context, router gin.IRouter, cfg *config.Config
 		Capabilities: map[string]sandbox.ChainCapability{},
 	})
 	if err != nil {
+		return err
+	}
+	if err := StartIdentityBackgroundTasks(ctx, cfg.Identity, identitySvc); err != nil {
 		return err
 	}
 	judgeSvc, err := RegisterJudgeModule(ctx, JudgeModuleDeps{Router: router, Database: infra.database, IDs: infra.ids, Config: cfg.Judge, AuthCfg: cfg.Auth, Storage: infra.storage, Sandbox: sandboxSvc, Content: contentSvc, Audit: auditWriter, EventBus: infra.bus, WSHub: infra.wsHub, Auth: infra.auth, Roles: identitySvc})

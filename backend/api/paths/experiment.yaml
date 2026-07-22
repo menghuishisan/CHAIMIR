@@ -7,7 +7,7 @@
     x-chaimir-audience: teacher
     security: [{ bearerAuth: [] }]
     parameters:
-      - { name: course_id, in: query, schema: { type: integer, format: int64 } }
+      - { name: course_id, in: query, schema: { $ref: "#/components/schemas/SnowflakeID" } }
       - { $ref: "#/components/parameters/StatusQuery" }
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
   post:
@@ -214,5 +214,5 @@
     x-chaimir-internal: true
     security: [{ serviceAuth: [] }]
     parameters:
-      - { name: course_id, in: query, schema: { type: integer, format: int64 } }
+      - { name: course_id, in: query, schema: { $ref: "#/components/schemas/SnowflakeID" } }
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }

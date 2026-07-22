@@ -45,8 +45,9 @@ const AppealsPage: React.FC = () => {
       title: '操作',
       render: (row) => (
         <div className={styles.actions}>
-          <Button variant="outline" size="sm" onClick={() => handleAppeal(() => api.grade.acceptAppeal(row.id, { comment: '申诉已进入复核流程。' }), '申诉已受理。')}>受理</Button>
-          <Button variant="ghost" size="sm" onClick={() => handleAppeal(() => api.grade.rejectAppeal(row.id, { comment: '申诉材料不足。' }), '申诉已驳回。')}>驳回</Button>
+          {row.status === GradeAppealStatus.PENDING && <Button variant="outline" size="sm" onClick={() => handleAppeal(() => api.grade.acceptAppeal(row.id, { comment: '申诉已进入复核流程。' }), '申诉已受理。')}>受理</Button>}
+          {row.status === GradeAppealStatus.PENDING && <Button variant="ghost" size="sm" onClick={() => handleAppeal(() => api.grade.rejectAppeal(row.id, { comment: '申诉材料不足。' }), '申诉已驳回。')}>驳回</Button>}
+          {row.status !== GradeAppealStatus.PENDING && <span className={styles.muted}>无需操作</span>}
         </div>
       ),
     },
@@ -59,7 +60,7 @@ const AppealsPage: React.FC = () => {
       <div className={styles.header}>
         <div>
           <h1 className={styles.title}><Scale size={28} />学生申诉工单</h1>
-          <p className={styles.subtitle}>按后端申诉状态受理或驳回成绩申诉。</p>
+          <p className={styles.subtitle}>查看申诉进度，并受理或驳回待处理申请。</p>
         </div>
         <Button variant="outline" icon={<RefreshCw size={16} />} onClick={resource.reload}>刷新</Button>
       </div>

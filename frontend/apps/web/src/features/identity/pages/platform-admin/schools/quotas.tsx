@@ -27,7 +27,7 @@ const initialForm: QuotaForm = {
  */
 function toQuotaRequest(tenantId: string, form: QuotaForm): SandboxQuota {
   return {
-    tenant_id: Number(tenantId),
+    tenant_id: tenantId,
     max_concurrent_sandbox: Number(form.max_concurrent_sandbox),
     max_cpu: Number(form.max_cpu),
     max_memory_mb: Number(form.max_memory_mb),

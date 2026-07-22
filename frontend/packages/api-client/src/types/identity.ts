@@ -1,5 +1,6 @@
 // ===== M1 Identity 模块 =====
 
+import type { SnowflakeID } from './common'
 import type {
   AccountStatus,
   ApplicationStatus,
@@ -26,7 +27,7 @@ export interface LoginPlatformRequest {
 export interface LoginPhoneRequest {
   phone: string
   password: string
-  tenant_id?: number
+  tenant_id?: SnowflakeID
 }
 
 export interface LoginNoRequest {
@@ -38,13 +39,13 @@ export interface LoginNoRequest {
 export interface LoginSMSRequest {
   phone: string
   code: string
-  tenant_id?: number
+  tenant_id?: SnowflakeID
 }
 
 export interface SendSMSRequest {
   phone: string
   scene: SmsScene
-  tenant_id?: number
+  tenant_id?: SnowflakeID
 }
 
 export interface RefreshRequest {
@@ -64,7 +65,7 @@ export interface PasswordResetRequest {
   phone: string
   code: string
   new_password: string
-  tenant_id: number
+  tenant_id: SnowflakeID
 }
 
 export interface ActivateRequest {
@@ -82,14 +83,14 @@ export interface LoginResponse {
 }
 
 export interface TenantOption {
-  tenant_id: string
+  tenant_id: SnowflakeID
   name: string
   code: string
 }
 
 export interface Account {
-  id: string
-  tenant_id: string
+  id: SnowflakeID
+  tenant_id?: SnowflakeID
   name: string
   phone_masked?: string
   no?: string
@@ -115,7 +116,7 @@ export interface ChangePhoneRequest {
 }
 
 export interface Session {
-  id: string
+  id: SnowflakeID
   device_info?: string
   ip?: string
   status: SessionStatus
@@ -124,13 +125,13 @@ export interface Session {
 }
 
 export interface AuditLog {
-  id: string
-  tenant_id?: string
-  actor_id: string
+  id: SnowflakeID
+  tenant_id?: SnowflakeID
+  actor_id: SnowflakeID
   actor_role: AuditActorRole
   action: string
   target_type: string
-  target_id?: string
+  target_id?: SnowflakeID
   detail?: string
   ip?: string
   trace_id?: string
@@ -146,7 +147,7 @@ export interface CreateApplicationRequest {
 }
 
 export interface Tenant {
-  id: string
+  id: SnowflakeID
   code: string
   name: string
   type: number
@@ -155,12 +156,13 @@ export interface Tenant {
   expire_at?: string
   logo_url?: string
   display_name?: string
+  feature_flags: Record<string, unknown>
   auth_mode: AuthMode
   enable_activation_code: boolean
 }
 
 export interface TenantApplication {
-  application_id: string
+  application_id: SnowflakeID
   school_name: string
   school_type: number
   contact_name: string
@@ -168,8 +170,8 @@ export interface TenantApplication {
   contact_email: string
   status: ApplicationStatus
   reject_reason?: string
-  reviewed_by?: string
-  tenant_id?: string
+  reviewed_by?: SnowflakeID
+  tenant_id?: SnowflakeID
   submitted_at: string
   reviewed_at?: string
 }
@@ -195,8 +197,8 @@ export interface TenantConfigRequest {
 }
 
 export interface SSOConfig {
-  id: string
-  tenant_id: string
+  id: SnowflakeID
+  tenant_id: SnowflakeID
   type: SsoType
   config: Record<string, unknown>
   match_field: SsoMatchField
@@ -221,35 +223,35 @@ export interface DepartmentRequest {
 }
 
 export interface Department {
-  id: string
-  tenant_id: string
+  id: SnowflakeID
+  tenant_id: SnowflakeID
   name: string
   code: string
 }
 
 export interface MajorRequest {
-  department_id: string
+  department_id: SnowflakeID
   name: string
 }
 
 export interface Major {
-  id: string
-  tenant_id: string
-  department_id: string
+  id: SnowflakeID
+  tenant_id: SnowflakeID
+  department_id: SnowflakeID
   name: string
 }
 
 export interface ClassRequest {
-  major_id: string
+  major_id: SnowflakeID
   name: string
   enrollment_year: number
   status: ClassStatus
 }
 
 export interface Class {
-  id: string
-  tenant_id: string
-  major_id: string
+  id: SnowflakeID
+  tenant_id: SnowflakeID
+  major_id: SnowflakeID
   name: string
   enrollment_year: number
   status: ClassStatus
@@ -259,12 +261,17 @@ export interface ArchiveClassesRequest {
   enrollment_year: number
 }
 
+export interface PromoteClassesRequest {
+  class_ids: SnowflakeID[]
+  target_year: number
+}
+
 export interface CreateAccountRequest {
   phone: string
   name: string
   no: string
   base_identity: BaseIdentity
-  org_id: string
+  org_id: SnowflakeID
   enrollment_year?: number
   title?: string
   initial_password?: string
@@ -273,7 +280,7 @@ export interface CreateAccountRequest {
 
 export interface UpdateAccountRequest {
   name: string
-  org_id: string
+  org_id: SnowflakeID
   enrollment_year?: number
   title?: string
 }
@@ -289,11 +296,11 @@ export interface AdminResetPasswordRequest {
 }
 
 export interface BatchAccountIDsRequest {
-  account_ids: number[]
+  account_ids: SnowflakeID[]
 }
 
 export interface ImportPreviewResponse {
-  preview_id: string
+  preview_id: SnowflakeID
   total: number
   valid: number
   invalid: number
@@ -306,13 +313,13 @@ export interface ImportRowResult {
 }
 
 export interface ImportCommitRequest {
-  preview_id: string
+  preview_id: SnowflakeID
 }
 
 export interface ImportBatch {
-  id: string
-  tenant_id: string
-  operator_id: string
+  id: SnowflakeID
+  tenant_id: SnowflakeID
+  operator_id: SnowflakeID
   target_type: ImportTarget
   file_name: string
   total: number
@@ -323,7 +330,7 @@ export interface ImportBatch {
 }
 
 export interface ImportActivationCode {
-  account_id: string
+  account_id: SnowflakeID
   no: string
   name: string
   activation_code: string

@@ -1,0 +1,36 @@
+/* RouteErrorBoundary.module.css 定义日常页面与沉浸页面的可恢复错误状态。 */
+
+.page,
+.immersive {
+  display: grid;
+  align-content: center;
+  justify-items: start;
+  min-block-size: 18rem;
+  gap: var(--space-3);
+  padding: var(--space-8);
+  color: var(--color-text);
+  background: var(--color-bg);
+}
+
+.immersive {
+  min-block-size: 100vh;
+}
+
+.page h1,
+.immersive h1,
+.page p,
+.immersive p {
+  margin: 0;
+}
+
+.page p,
+.immersive p {
+  color: var(--color-text-sub);
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  margin-top: var(--space-2);
+}

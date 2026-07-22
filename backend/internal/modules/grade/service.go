@@ -15,6 +15,7 @@ import (
 	"chaimir/internal/platform/audit"
 	"chaimir/internal/platform/config"
 	"chaimir/internal/platform/eventbus"
+	"chaimir/internal/platform/ids"
 	"chaimir/internal/platform/jsonx"
 	"chaimir/internal/platform/pagex"
 	"chaimir/internal/platform/response"
@@ -116,6 +117,14 @@ func (s *Service) CreateLevelConfig(ctx context.Context, req LevelConfigRequest)
 	}
 	var out LevelConfigDTO
 	err = s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
+		if req.IsDefault {
+			if err := tx.LockGradeLevelDefaultScope(ctx, gradeConfigLockKey(id.TenantID, 1)); err != nil {
+				return err
+			}
+			if err := tx.ClearDefaultLevelConfigs(ctx); err != nil {
+				return err
+			}
+		}
 		var err error
 		out, err = tx.CreateLevelConfig(ctx, s.ids.Generate(), id.TenantID, req)
 		return err
@@ -149,11 +158,24 @@ func (s *Service) UpdateLevelConfig(ctx context.Context, configID int64, req Lev
 	}
 	var out LevelConfigDTO
 	err = s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
+		if req.IsDefault {
+			if err := tx.LockGradeLevelDefaultScope(ctx, gradeConfigLockKey(id.TenantID, 1)); err != nil {
+				return err
+			}
+			if err := tx.ClearDefaultLevelConfigs(ctx); err != nil {
+				return err
+			}
+		}
 		var err error
 		out, err = tx.UpdateLevelConfig(ctx, configID, req)
 		return err
 	})
 	return out, mapGradeConfigErr(err)
+}
+
+// gradeConfigLockKey 为同租户的默认等级与当前学期生成互不冲突的事务锁键。
+func gradeConfigLockKey(tenantID int64, scope int64) int64 {
+	return tenantID*10 + scope
 }
 
 // CreateSemester 创建学期。
@@ -167,6 +189,14 @@ func (s *Service) CreateSemester(ctx context.Context, req SemesterRequest) (Seme
 	}
 	var out SemesterDTO
 	err = s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
+		if req.IsCurrent {
+			if err := tx.LockSemesterCurrentScope(ctx, gradeConfigLockKey(id.TenantID, 2)); err != nil {
+				return err
+			}
+			if err := tx.ClearCurrentSemesters(ctx); err != nil {
+				return err
+			}
+		}
 		var err error
 		out, err = tx.CreateSemester(ctx, s.ids.Generate(), id.TenantID, req)
 		return err
@@ -219,7 +249,7 @@ func (s *Service) UpdateWarningRules(ctx context.Context, rules WarningRules) (W
 	var out LevelConfigDTO
 	err = s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
 		var err error
-		out, err = tx.UpdateLevelConfig(ctx, cfg.ID, req)
+		out, err = tx.UpdateLevelConfig(ctx, cfg.ID.Int64(), req)
 		return err
 	})
 	if err != nil {
@@ -241,7 +271,7 @@ func (s *Service) SubmitReview(ctx context.Context, req ReviewRequest) (ReviewDT
 	if err != nil {
 		return ReviewDTO{}, err
 	}
-	course, err := s.validateReviewCourse(ctx, id, req.CourseID, req.SemesterID)
+	course, err := s.validateReviewCourse(ctx, id, req.CourseID.Int64(), req.SemesterID.Int64())
 	if err != nil {
 		return ReviewDTO{}, err
 	}
@@ -254,7 +284,7 @@ func (s *Service) SubmitReview(ctx context.Context, req ReviewRequest) (ReviewDT
 	if err != nil {
 		return ReviewDTO{}, mapGradeReviewErr(err)
 	}
-	if err := s.writeAudit(ctx, id.TenantID, id.AccountID, actorRole, "grade.review.submit", auditTargetGradeReview, out.ID, map[string]any{"course_id": course.CourseID, "semester": course.Semester}); err != nil {
+	if err := s.writeAudit(ctx, id.TenantID, id.AccountID, actorRole, "grade.review.submit", auditTargetGradeReview, out.ID.Int64(), map[string]any{"course_id": course.CourseID, "semester": course.Semester}); err != nil {
 		return ReviewDTO{}, err
 	}
 	return out, nil
@@ -277,6 +307,23 @@ func (s *Service) ListReviews(ctx context.Context, status int16, page, size int)
 	return out, total, page, size, mapGradeReviewErr(err)
 }
 
+// ListOwnReviews 查询当前教师本人提交的成绩审核记录。
+func (s *Service) ListOwnReviews(ctx context.Context, status int16, page, size int) ([]ReviewDTO, int64, int, int, error) {
+	id, err := s.requireTeacherAdmin(ctx)
+	if err != nil {
+		return nil, 0, page, size, err
+	}
+	page, size = pagex.Normalize(page, size)
+	var out []ReviewDTO
+	var total int64
+	err = s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
+		var err error
+		out, total, err = tx.ListOwnGradeReviews(ctx, id.AccountID, status, page, size)
+		return err
+	})
+	return out, total, page, size, mapGradeReviewErr(err)
+}
+
 // ApproveReview 通过审核、锁定 M6 单课程成绩并重算 GPA。
 func (s *Service) ApproveReview(ctx context.Context, reviewID int64, req ReviewDecisionRequest) (ReviewDTO, error) {
 	id, err := s.requireSchoolAdmin(ctx)
@@ -286,20 +333,20 @@ func (s *Service) ApproveReview(ctx context.Context, reviewID int64, req ReviewD
 	if req.SemesterID <= 0 {
 		return ReviewDTO{}, apperr.ErrGradeReviewInvalid
 	}
-	if _, err := s.getSemester(ctx, id.TenantID, req.SemesterID); err != nil {
+	if _, err := s.getSemester(ctx, id.TenantID, req.SemesterID.Int64()); err != nil {
 		return ReviewDTO{}, err
 	}
 	review, err := s.getReview(ctx, id.TenantID, reviewID)
 	if err != nil {
 		return ReviewDTO{}, err
 	}
-	if err := s.validateReviewCourseMatchesSemester(ctx, id.TenantID, review.CourseID, req.SemesterID); err != nil {
+	if err := s.validateReviewCourseMatchesSemester(ctx, id.TenantID, review.CourseID.Int64(), req.SemesterID.Int64()); err != nil {
 		return ReviewDTO{}, err
 	}
 	var out ReviewDTO
 	err = s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
 		var err error
-		out, err = tx.ApproveGradeReview(ctx, reviewID, id.AccountID, req.SemesterID, req.Comment)
+		out, err = tx.ApproveGradeReview(ctx, reviewID, id.AccountID, req.SemesterID.Int64(), req.Comment)
 		if err != nil {
 			return err
 		}
@@ -309,10 +356,10 @@ func (s *Service) ApproveReview(ctx context.Context, reviewID int64, req ReviewD
 		return ReviewDTO{}, mapGradeReviewErr(err)
 	}
 	s.drainLockOutboxBestEffort(ctx)
-	if err := s.recomputeCourse(ctx, id.TenantID, out.CourseID, out.SemesterID); err != nil {
+	if err := s.recomputeCourse(ctx, id.TenantID, out.CourseID.Int64(), out.SemesterID.Int64()); err != nil {
 		return ReviewDTO{}, err
 	}
-	if err := s.writeAudit(ctx, id.TenantID, id.AccountID, contracts.RoleNumSchoolAdmin, "grade.review.approve", auditTargetGradeReview, out.ID, map[string]any{"course_id": out.CourseID, "semester_id": out.SemesterID}); err != nil {
+	if err := s.writeAudit(ctx, id.TenantID, id.AccountID, contracts.RoleNumSchoolAdmin, "grade.review.approve", auditTargetGradeReview, out.ID.Int64(), map[string]any{"course_id": out.CourseID.String(), "semester_id": out.SemesterID.String()}); err != nil {
 		return ReviewDTO{}, err
 	}
 	return out, nil
@@ -333,14 +380,14 @@ func (s *Service) RejectReview(ctx context.Context, reviewID int64, req ReviewDe
 	if err != nil {
 		return ReviewDTO{}, mapGradeReviewErr(err)
 	}
-	if _, err := s.teaching.GetCourse(ctx, id.TenantID, out.CourseID); err != nil {
+	if _, err := s.teaching.GetCourse(ctx, id.TenantID, out.CourseID.Int64()); err != nil {
 		return ReviewDTO{}, apperr.ErrGradeReviewInvalid.WithCause(err)
 	}
-	if err := s.writeAudit(ctx, id.TenantID, id.AccountID, contracts.RoleNumSchoolAdmin, "grade.review.reject", auditTargetGradeReview, out.ID, map[string]any{"course_id": out.CourseID}); err != nil {
+	if err := s.writeAudit(ctx, id.TenantID, id.AccountID, contracts.RoleNumSchoolAdmin, "grade.review.reject", auditTargetGradeReview, out.ID.Int64(), map[string]any{"course_id": out.CourseID.String()}); err != nil {
 		return ReviewDTO{}, err
 	}
 	if out.SemesterID > 0 {
-		s.invalidateCourseSummaryCache(ctx, id.TenantID, out.CourseID, out.SemesterID)
+		s.invalidateCourseSummaryCache(ctx, id.TenantID, out.CourseID.Int64(), out.SemesterID.Int64())
 	}
 	return out, nil
 }
@@ -363,15 +410,15 @@ func (s *Service) UnlockReview(ctx context.Context, reviewID int64, req ReviewDe
 	if err != nil {
 		return ReviewDTO{}, mapGradeReviewErr(err)
 	}
-	if _, err := s.teaching.GetCourse(ctx, id.TenantID, out.CourseID); err != nil {
+	if _, err := s.teaching.GetCourse(ctx, id.TenantID, out.CourseID.Int64()); err != nil {
 		return ReviewDTO{}, apperr.ErrGradeReviewInvalid.WithCause(err)
 	}
 	s.drainLockOutboxBestEffort(ctx)
-	if err := s.writeAudit(ctx, id.TenantID, id.AccountID, contracts.RoleNumSchoolAdmin, "grade.review.unlock", auditTargetGradeReview, out.ID, map[string]any{"course_id": out.CourseID}); err != nil {
+	if err := s.writeAudit(ctx, id.TenantID, id.AccountID, contracts.RoleNumSchoolAdmin, "grade.review.unlock", auditTargetGradeReview, out.ID.Int64(), map[string]any{"course_id": out.CourseID.String()}); err != nil {
 		return ReviewDTO{}, err
 	}
 	if out.SemesterID > 0 {
-		s.invalidateCourseSummaryCache(ctx, id.TenantID, out.CourseID, out.SemesterID)
+		s.invalidateCourseSummaryCache(ctx, id.TenantID, out.CourseID.Int64(), out.SemesterID.Int64())
 	}
 	return out, nil
 }
@@ -399,7 +446,7 @@ func (s *Service) StudentSummary(ctx context.Context, studentID int64) (GradeSum
 	if err != nil {
 		return GradeSummaryDTO{}, err
 	}
-	out := GradeSummaryDTO{StudentID: studentID, GPA: gpa, CumulativeGPA: gpa, TotalCredits: credits, CourseGrades: inputs, ComputedAt: timex.Now()}
+	out := GradeSummaryDTO{StudentID: ids.ID(studentID), GPA: gpa, CumulativeGPA: gpa, TotalCredits: credits, CourseGrades: inputs, ComputedAt: timex.Now()}
 	s.writeSummaryCache(ctx, cacheKey, out)
 	return out, nil
 }
@@ -434,7 +481,7 @@ func (s *Service) StudentGrades(ctx context.Context, studentID, semesterID int64
 	if err != nil {
 		return GradeSummaryDTO{}, err
 	}
-	out := GradeSummaryDTO{StudentID: studentID, SemesterID: semesterID, GPA: gpa, CumulativeGPA: gpa, TotalCredits: credits, CourseGrades: inputs, ComputedAt: timex.Now()}
+	out := GradeSummaryDTO{StudentID: ids.ID(studentID), SemesterID: ids.ID(semesterID), GPA: gpa, CumulativeGPA: gpa, TotalCredits: credits, CourseGrades: inputs, ComputedAt: timex.Now()}
 	s.writeSummaryCache(ctx, cacheKey, out)
 	return out, nil
 }
@@ -466,10 +513,10 @@ func (s *Service) RecomputeStudentGrade(ctx context.Context, studentID int64, re
 	if studentID <= 0 || req.SemesterID <= 0 {
 		return GradeSummaryDTO{}, apperr.ErrGradeAggregationFailed
 	}
-	if err := s.recomputeStudent(ctx, id.TenantID, studentID, req.SemesterID); err != nil {
+	if err := s.recomputeStudent(ctx, id.TenantID, studentID, req.SemesterID.Int64()); err != nil {
 		return GradeSummaryDTO{}, err
 	}
-	s.invalidateSummaryCache(ctx, id.TenantID, studentID, req.SemesterID)
+	s.invalidateSummaryCache(ctx, id.TenantID, studentID, req.SemesterID.Int64())
 	var summaries []GradeSummaryDTO
 	err = s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
 		var err error
@@ -496,17 +543,17 @@ func (s *Service) CreateAppeal(ctx context.Context, req AppealRequest) (AppealDT
 	if req.CourseID <= 0 || strings.TrimSpace(req.Reason) == "" {
 		return AppealDTO{}, apperr.ErrGradeAppealInvalid
 	}
-	if err := s.validateAppealCourse(ctx, id.TenantID, req.CourseID, id.AccountID); err != nil {
+	if err := s.validateAppealCourse(ctx, id.TenantID, req.CourseID.Int64(), id.AccountID); err != nil {
 		return AppealDTO{}, err
 	}
 	var out AppealDTO
 	var appealSemesterID int64
 	err = s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
-		review, err := tx.GetLatestApprovedReviewByCourse(ctx, req.CourseID)
+		review, err := tx.GetLatestApprovedReviewByCourse(ctx, req.CourseID.Int64())
 		if err != nil {
 			return apperr.ErrGradeAppealInvalid.WithCause(err)
 		}
-		appealSemesterID = review.SemesterID
+		appealSemesterID = review.SemesterID.Int64()
 		reviewedAt, err := time.Parse(time.RFC3339, review.ReviewedAt)
 		if err != nil {
 			return apperr.ErrGradeAppealInvalid.WithCause(err)
@@ -514,7 +561,7 @@ func (s *Service) CreateAppeal(ctx context.Context, req AppealRequest) (AppealDT
 		if err := EnsureAppealWithinWindow(reviewedAt, timex.Now(), s.cfg.AppealWindowDays); err != nil {
 			return err
 		}
-		hasOpen, err := tx.HasOpenGradeAppeal(ctx, req.CourseID, id.AccountID)
+		hasOpen, err := tx.HasOpenGradeAppeal(ctx, req.CourseID.Int64(), id.AccountID)
 		if err != nil {
 			return apperr.ErrGradeAppealInvalid.WithCause(err)
 		}
@@ -527,7 +574,7 @@ func (s *Service) CreateAppeal(ctx context.Context, req AppealRequest) (AppealDT
 	if err != nil {
 		return AppealDTO{}, mapGradeAppealErr(err)
 	}
-	if err := s.writeAudit(ctx, id.TenantID, id.AccountID, contracts.RoleNumStudent, "grade.appeal.create", auditTargetAppeal, out.ID, map[string]any{"course_id": req.CourseID}); err != nil {
+	if err := s.writeAudit(ctx, id.TenantID, id.AccountID, contracts.RoleNumStudent, "grade.appeal.create", auditTargetAppeal, out.ID.Int64(), map[string]any{"course_id": req.CourseID.String()}); err != nil {
 		return AppealDTO{}, err
 	}
 	s.invalidateSummaryCache(ctx, id.TenantID, id.AccountID, appealSemesterID)
@@ -622,14 +669,14 @@ func (s *Service) ScanWarnings(ctx context.Context, req WarningScanRequest) (War
 		return WarningScanResultDTO{}, apperr.ErrGradeWarningInvalid
 	}
 	if req.SemesterID > 0 {
-		if _, err := s.getSemester(ctx, id.TenantID, req.SemesterID); err != nil {
+		if _, err := s.getSemester(ctx, id.TenantID, req.SemesterID.Int64()); err != nil {
 			return WarningScanResultDTO{}, err
 		}
 	}
 	var targets []GradeSummaryDTO
 	err = s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
 		var err error
-		targets, err = tx.ListKnownStudentSemesterGrades(ctx, req.StudentID)
+		targets, err = tx.ListKnownStudentSemesterGrades(ctx, req.StudentID.Int64())
 		return err
 	})
 	if err != nil {
@@ -641,12 +688,12 @@ func (s *Service) ScanWarnings(ctx context.Context, req WarningScanRequest) (War
 		if req.SemesterID > 0 && target.SemesterID != req.SemesterID {
 			continue
 		}
-		key := [2]int64{target.StudentID, target.SemesterID}
+		key := [2]int64{target.StudentID.Int64(), target.SemesterID.Int64()}
 		if _, ok := seen[key]; ok {
 			continue
 		}
 		seen[key] = struct{}{}
-		created, err := s.recomputeStudentWarnings(ctx, id.TenantID, target.StudentID, target.SemesterID)
+		created, err := s.recomputeStudentWarnings(ctx, id.TenantID, target.StudentID.Int64(), target.SemesterID.Int64())
 		if err != nil {
 			return WarningScanResultDTO{}, err
 		}
@@ -658,7 +705,7 @@ func (s *Service) ScanWarnings(ctx context.Context, req WarningScanRequest) (War
 
 // GenerateTranscript 生成成绩单 PDF 并保存元数据。
 func (s *Service) GenerateTranscript(ctx context.Context, req TranscriptRequest) (TranscriptDTO, error) {
-	id, err := s.normalizeStudentOrSchoolAdmin(ctx, req.StudentID)
+	id, err := s.normalizeStudentOrSchoolAdmin(ctx, req.StudentID.Int64())
 	if err != nil {
 		return TranscriptDTO{}, err
 	}
@@ -668,7 +715,7 @@ func (s *Service) GenerateTranscript(ctx context.Context, req TranscriptRequest)
 	if req.Scope == TranscriptScopeSemester && req.SemesterID <= 0 {
 		return TranscriptDTO{}, apperr.ErrGradeTranscriptFailed
 	}
-	summary, err := s.transcriptSummary(ctx, req.StudentID, req.Scope, req.SemesterID)
+	summary, err := s.transcriptSummary(ctx, req.StudentID.Int64(), req.Scope, req.SemesterID.Int64())
 	if err != nil {
 		return TranscriptDTO{}, err
 	}
@@ -682,7 +729,7 @@ func (s *Service) GenerateTranscript(ctx context.Context, req TranscriptRequest)
 		AccountID:       id.AccountID,
 		Module:          gradeModuleName,
 		ResourceType:    gradeTranscriptResourceType,
-		ResourceID:      fmt.Sprintf("%d", summary.StudentID),
+		ResourceID:      summary.StudentID.String(),
 		FileName:        fileName,
 		ContentType:     transcriptPDFContentType,
 		Size:            int64(len(pdf)),
@@ -707,7 +754,7 @@ func (s *Service) GenerateTranscript(ctx context.Context, req TranscriptRequest)
 	if err != nil {
 		return TranscriptDTO{}, mapGradeTranscriptErr(err)
 	}
-	if err := s.writeAudit(ctx, id.TenantID, id.AccountID, s.transcriptActorRole(ctx, id.AccountID, summary.StudentID), "grade.transcript.generate", auditTargetTranscript, out.ID, map[string]any{"student_id": summary.StudentID, "scope": req.Scope, "semester_id": req.SemesterID}); err != nil {
+	if err := s.writeAudit(ctx, id.TenantID, id.AccountID, s.transcriptActorRole(ctx, id.AccountID, summary.StudentID.Int64()), "grade.transcript.generate", auditTargetTranscript, out.ID.Int64(), map[string]any{"student_id": summary.StudentID.String(), "scope": req.Scope, "semester_id": req.SemesterID.String()}); err != nil {
 		return TranscriptDTO{}, err
 	}
 	return out, nil
@@ -726,7 +773,8 @@ func (s *Service) GenerateTranscriptBatch(ctx context.Context, req TranscriptBat
 	}
 	out := make([]TranscriptDTO, 0, len(req.StudentIDs))
 	seen := map[int64]struct{}{}
-	for _, studentID := range req.StudentIDs {
+	for _, publicStudentID := range req.StudentIDs {
+		studentID := publicStudentID.Int64()
 		if studentID <= 0 {
 			return nil, apperr.ErrGradeTranscriptFailed
 		}
@@ -734,7 +782,7 @@ func (s *Service) GenerateTranscriptBatch(ctx context.Context, req TranscriptBat
 			continue
 		}
 		seen[studentID] = struct{}{}
-		item, err := s.GenerateTranscript(ctx, TranscriptRequest{StudentID: studentID, Scope: req.Scope, SemesterID: req.SemesterID})
+		item, err := s.GenerateTranscript(ctx, TranscriptRequest{StudentID: ids.ID(studentID), Scope: req.Scope, SemesterID: req.SemesterID})
 		if err != nil {
 			return nil, err
 		}
@@ -758,7 +806,7 @@ func (s *Service) DownloadTranscript(ctx context.Context, transcriptID int64) (T
 	if err != nil {
 		return TranscriptDownloadGrantDTO{}, apperr.ErrGradeTranscriptFailed.WithCause(err)
 	}
-	if record.StudentID != id.AccountID {
+	if record.StudentID.Int64() != id.AccountID {
 		allowed, err := s.isSchoolAdmin(ctx, id.AccountID)
 		if err != nil {
 			return TranscriptDownloadGrantDTO{}, err
@@ -773,13 +821,13 @@ func (s *Service) DownloadTranscript(ctx context.Context, transcriptID int64) (T
 		ObjectRef:    record.PDFRef,
 		Module:       gradeModuleName,
 		ResourceType: gradeTranscriptResourceType,
-		ResourceID:   fmt.Sprintf("%d", record.StudentID),
+		ResourceID:   record.StudentID.String(),
 		ExpiresAt:    time.Time{},
 	})
 	if err != nil {
 		return TranscriptDownloadGrantDTO{}, apperr.ErrGradeTranscriptFailed.WithCause(err)
 	}
-	if err := s.writeAudit(ctx, id.TenantID, id.AccountID, s.transcriptActorRole(ctx, id.AccountID, record.StudentID), "grade.transcript.download", auditTargetTranscript, record.ID, map[string]any{"student_id": record.StudentID}); err != nil {
+	if err := s.writeAudit(ctx, id.TenantID, id.AccountID, s.transcriptActorRole(ctx, id.AccountID, record.StudentID.Int64()), "grade.transcript.download", auditTargetTranscript, record.ID.Int64(), map[string]any{"student_id": record.StudentID.String()}); err != nil {
 		return TranscriptDownloadGrantDTO{}, err
 	}
 	return TranscriptDownloadGrantDTO{Token: token, Transcript: record, ExpiresAt: grant.ExpiresAt.Format(time.RFC3339)}, nil
@@ -810,20 +858,20 @@ func (s *Service) HandleGradeUpdated(ctx context.Context, evt contracts.Teaching
 	}); err != nil {
 		return apperr.ErrGradeAggregationFailed.WithCause(err)
 	}
-	if err := s.recomputeStudent(ctx, evt.TenantID, evt.StudentID, review.SemesterID); err != nil {
+	if err := s.recomputeStudent(ctx, evt.TenantID, evt.StudentID, review.SemesterID.Int64()); err != nil {
 		return err
 	}
-	s.invalidateSummaryCache(ctx, evt.TenantID, evt.StudentID, review.SemesterID)
+	s.invalidateSummaryCache(ctx, evt.TenantID, evt.StudentID, review.SemesterID.Int64())
 	if len(acceptedAppeals) == 0 {
 		return nil
 	}
 	if err := s.store.TenantTx(ctx, evt.TenantID, func(ctx context.Context, tx TxStore) error {
 		for _, appeal := range acceptedAppeals {
-			if _, err := tx.UpdateGradeAppealStatus(ctx, appeal.ID, AppealStatusAccepted, AppealStatusCompleted, appeal.HandlerID, "成绩已更新"); err != nil {
+			if _, err := tx.UpdateGradeAppealStatus(ctx, appeal.ID.Int64(), AppealStatusAccepted, AppealStatusCompleted, appeal.HandlerID.Int64(), "成绩已更新"); err != nil {
 				return err
 			}
 		}
-		relocked, err := tx.RelockGradeReview(ctx, review.ID, review.ReviewerID, "成绩已更新并完成复核")
+		relocked, err := tx.RelockGradeReview(ctx, review.ID.Int64(), review.ReviewerID.Int64(), "成绩已更新并完成复核")
 		if err != nil {
 			return err
 		}
@@ -853,7 +901,7 @@ func (s *Service) decideAppeal(ctx context.Context, appealID int64, status int16
 	}); err != nil {
 		return AppealDTO{}, mapGradeAppealErr(err)
 	}
-	if err := s.ensureAppealHandlerCanAccessCourse(ctx, id, actorRole, existing.CourseID); err != nil {
+	if err := s.ensureAppealHandlerCanAccessCourse(ctx, id, actorRole, existing.CourseID.Int64()); err != nil {
 		return AppealDTO{}, err
 	}
 	var out AppealDTO
@@ -869,12 +917,12 @@ func (s *Service) decideAppeal(ctx context.Context, appealID int64, status int16
 			return err
 		}
 		if status == AppealStatusAccepted {
-			review, err := tx.GetLatestApprovedReviewByCourse(ctx, out.CourseID)
+			review, err := tx.GetLatestApprovedReviewByCourse(ctx, out.CourseID.Int64())
 			if err != nil {
 				return err
 			}
-			affectedSemesterID = review.SemesterID
-			review, err = tx.UnlockGradeReview(ctx, review.ID, id.AccountID, comment)
+			affectedSemesterID = review.SemesterID.Int64()
+			review, err = tx.UnlockGradeReview(ctx, review.ID.Int64(), id.AccountID, comment)
 			if err != nil {
 				return err
 			}
@@ -888,10 +936,10 @@ func (s *Service) decideAppeal(ctx context.Context, appealID int64, status int16
 	if status == AppealStatusAccepted {
 		s.drainLockOutboxBestEffort(ctx)
 	}
-	if err := s.writeAudit(ctx, id.TenantID, id.AccountID, actorRole, action, auditTargetAppeal, out.ID, map[string]any{"course_id": out.CourseID}); err != nil {
+	if err := s.writeAudit(ctx, id.TenantID, id.AccountID, actorRole, action, auditTargetAppeal, out.ID.Int64(), map[string]any{"course_id": out.CourseID.String()}); err != nil {
 		return AppealDTO{}, err
 	}
-	s.invalidateSummaryCache(ctx, id.TenantID, out.StudentID, affectedSemesterID)
+	s.invalidateSummaryCache(ctx, id.TenantID, out.StudentID.Int64(), affectedSemesterID)
 	return out, nil
 }
 
@@ -1081,7 +1129,7 @@ func (s *Service) getSemester(ctx context.Context, tenantID, semesterID int64) (
 		return SemesterDTO{}, apperr.ErrGradeConfigInvalid.WithCause(err)
 	}
 	for _, semester := range semesters {
-		if semester.ID == semesterID {
+		if semester.ID.Int64() == semesterID {
 			return semester, nil
 		}
 	}
@@ -1383,7 +1431,7 @@ func (s *Service) normalizeReadableStudent(ctx context.Context, studentID int64)
 func courseInputs(rows []contracts.TeachingCourseGrade) []CourseGradeInput {
 	out := make([]CourseGradeInput, 0, len(rows))
 	for _, row := range rows {
-		out = append(out, CourseGradeInput{CourseID: row.CourseID, StudentID: row.StudentID, FinalTotal: row.FinalTotal, Credits: row.Credits})
+		out = append(out, CourseGradeInput{CourseID: ids.ID(row.CourseID), StudentID: ids.ID(row.StudentID), FinalTotal: row.FinalTotal, Credits: row.Credits})
 	}
 	return out
 }
@@ -1480,6 +1528,9 @@ func mapGradeReviewErr(err error) error {
 func mapGradeAppealErr(err error) error {
 	if err == nil {
 		return nil
+	}
+	if isNoRows(err) {
+		return apperr.ErrGradeAppealInvalid.WithCause(err)
 	}
 	return apperr.AsAppError(err)
 }

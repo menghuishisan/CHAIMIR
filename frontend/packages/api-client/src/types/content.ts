@@ -1,5 +1,6 @@
 // ===== M5 Content 模块 =====
 
+import type { SnowflakeID } from './common'
 import type {
   ContentAuthorType,
   ContentDifficulty,
@@ -10,17 +11,17 @@ import type {
 } from '../constants/content'
 
 export interface ContentItem {
-  id: number
-  tenant_id: number
+  id: SnowflakeID
+  tenant_id: SnowflakeID
   code: string
   version: string
   type: ContentType
   title: string
-  category_id?: number
+  category_id?: SnowflakeID
   difficulty: ContentDifficulty
   tags: string[]
   knowledge_points: string[]
-  author_id: number
+  author_id: SnowflakeID
   author_type: ContentAuthorType
   visibility: ContentVisibility
   status: ContentStatus
@@ -40,7 +41,7 @@ export interface CreateItemRequest {
   version: string
   type: ContentType
   title: string
-  category_id: number
+  category_id: SnowflakeID
   difficulty: ContentDifficulty
   tags: string[]
   knowledge_points: string[]
@@ -51,7 +52,7 @@ export interface CreateItemRequest {
 
 export interface UpdateItemRequest {
   title: string
-  category_id: number
+  category_id: SnowflakeID
   difficulty: ContentDifficulty
   tags: string[]
   knowledge_points: string[]
@@ -71,8 +72,8 @@ export interface CloneItemRequest {
 }
 
 export interface ContentCategory {
-  id: number
-  parent_id?: number
+  id: SnowflakeID
+  parent_id?: SnowflakeID
   name: string
   sort: number
   created_at: string
@@ -80,7 +81,7 @@ export interface ContentCategory {
 }
 
 export interface ContentCategoryRequest {
-  parent_id: number
+  parent_id?: SnowflakeID
   name: string
   sort: number
 }
@@ -92,7 +93,7 @@ export interface ContentAttachmentUpload {
 }
 
 export interface ContentAttachmentDownloadGrantRequest {
-  resource_id: string
+  resource_id: SnowflakeID
   object_ref: string
 }
 
@@ -123,9 +124,9 @@ export interface CreatePaperRequest {
 }
 
 export interface Paper {
-  id: number
+  id: SnowflakeID
   name: string
-  author_id: number
+  author_id: SnowflakeID
   gen_mode: PaperMode
   gen_criteria: PaperCriteria
   created_at: string
@@ -133,7 +134,7 @@ export interface Paper {
 }
 
 export interface PaperItemFace {
-  id: number
+  id: SnowflakeID
   code: string
   version: string
   score: number

@@ -43,7 +43,7 @@ const UserHistoryPage: React.FC = () => {
             <History size={28} />
             历史导入批次
           </h1>
-          <p className={styles.subtitle}>查看后端持久化的账号导入批次和执行结果。</p>
+          <p className={styles.subtitle}>查看账号导入批次、处理进度和结果。</p>
         </div>
         <Button variant="outline" icon={<RefreshCw size={16} />} onClick={resource.reload}>
           刷新

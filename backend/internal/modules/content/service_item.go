@@ -56,7 +56,7 @@ func (s *Service) CreateItem(ctx context.Context, req CreateItemRequest) (ItemSn
 	if err != nil {
 		return ItemSnapshotDTO{}, apperr.ErrContentBodyInvalid.WithCause(err)
 	}
-	item := ItemWithBody{Item: Item{ID: s.ids.Generate(), TenantID: id.TenantID, Code: req.Code, Version: req.Version, Type: req.Type, Title: req.Title, CategoryID: req.CategoryID, Difficulty: req.Difficulty, Tags: req.Tags, KnowledgePoints: req.KnowledgePoints, AuthorID: id.AccountID, AuthorType: AuthorTeacher, Visibility: req.Visibility, Status: StatusDraft}, Body: body, SensitiveFields: req.SensitiveFields}
+	item := ItemWithBody{Item: Item{ID: s.ids.Generate(), TenantID: id.TenantID, Code: req.Code, Version: req.Version, Type: req.Type, Title: req.Title, CategoryID: req.CategoryID.Int64(), Difficulty: req.Difficulty, Tags: req.Tags, KnowledgePoints: req.KnowledgePoints, AuthorID: id.AccountID, AuthorType: AuthorTeacher, Visibility: req.Visibility, Status: StatusDraft}, Body: body, SensitiveFields: req.SensitiveFields}
 	item.VersionHash, err = versionHash(item.Item, item.Body, item.SensitiveFields)
 	if err != nil {
 		return ItemSnapshotDTO{}, apperr.ErrContentBodyInvalid.WithCause(err)
@@ -137,7 +137,7 @@ func (s *Service) UpdateDraftItem(ctx context.Context, itemID int64, req UpdateI
 			return apperr.ErrContentVersionImmutable
 		}
 		current.Title = req.Title
-		current.CategoryID = req.CategoryID
+		current.CategoryID = req.CategoryID.Int64()
 		current.Difficulty = req.Difficulty
 		current.Tags = req.Tags
 		current.KnowledgePoints = req.KnowledgePoints

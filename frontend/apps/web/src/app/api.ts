@@ -1,7 +1,7 @@
 // 应用级 API 入口：集中创建后端 SDK 实例，统一鉴权、trace id 和未登录处理。
 
 import { createApi } from '@chaimir/api-client'
-import { getStoredAccessToken } from '../utils/authSession'
+import { clearLoginTokens, getStoredAccessToken, getStoredRefreshToken, persistRefreshedTokens } from '../utils/authSession'
 import { appConfig } from './config'
 
 const TRACE_ID_KEY = 'chaimir.trace_id'
@@ -22,8 +22,14 @@ export const api = createApi({
   wsBaseURL: appConfig.wsBaseURL,
   timeout: appConfig.apiTimeoutMs,
   getToken: getStoredAccessToken,
+  getRefreshToken: getStoredRefreshToken,
+  onTokensRefreshed: persistRefreshedTokens,
   getTraceId: getStoredTraceId,
   onUnauthorized: () => {
+    clearLoginTokens()
     window.dispatchEvent(new CustomEvent('chaimir:unauthorized'))
+    if (!window.location.pathname.startsWith('/auth/')) {
+      window.location.assign('/auth/login')
+    }
   },
 })

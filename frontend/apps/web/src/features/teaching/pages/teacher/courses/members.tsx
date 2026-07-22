@@ -40,7 +40,7 @@ const TeacherCourseMembersPage: React.FC = () => {
   /** addMembers 批量添加输入的学生编号并刷新名册。 */
   const addMembers = async () => {
     if (!id) return
-    const ids = Array.from(new Set(studentIds.split(',').map((value) => Number(value.trim())).filter((value) => Number.isInteger(value) && value > 0)))
+    const ids = Array.from(new Set(studentIds.split(',').map((value) => value.trim()).filter((value) => /^[1-9]\d*$/.test(value))))
     if (!ids.length) {
       setError('请填写有效的学生编号。')
       return
@@ -83,7 +83,7 @@ const TeacherCourseMembersPage: React.FC = () => {
             <Users size={28} />
             学生名册
           </h1>
-          <p className={styles.subtitle}>课程成员列表以后端选课记录为准。</p>
+          <p className={styles.subtitle}>查看课程成员，并维护学生选课关系。</p>
         </div>
         <Button variant="outline" icon={<RefreshCw size={16} />} onClick={resource.reload}>刷新</Button>
       </div>

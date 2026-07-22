@@ -3,6 +3,7 @@ package identity
 
 import (
 	"chaimir/internal/contracts"
+	"chaimir/internal/platform/ids"
 	"chaimir/internal/platform/jsonx"
 	"chaimir/internal/platform/secretmap"
 	"chaimir/internal/platform/timex"
@@ -12,7 +13,7 @@ import (
 // ToTenantDTO 把租户领域快照转换为 HTTP 响应 DTO。
 func ToTenantDTO(t Tenant) TenantDTO {
 	return TenantDTO{
-		ID:                   t.ID,
+		ID:                   ids.ID(t.ID),
 		Code:                 t.Code,
 		Name:                 t.Name,
 		Type:                 t.Type,
@@ -21,6 +22,7 @@ func ToTenantDTO(t Tenant) TenantDTO {
 		ExpireAt:             t.ExpireAt,
 		LogoURL:              t.LogoURL,
 		DisplayName:          t.DisplayName,
+		FeatureFlags:         jsonx.ObjectMap(t.FeatureFlags),
 		AuthMode:             t.AuthMode,
 		EnableActivationCode: t.EnableActivationCode,
 	}
@@ -29,8 +31,8 @@ func ToTenantDTO(t Tenant) TenantDTO {
 // ToAccountDTO 把账号领域快照转换为 HTTP 响应 DTO。
 func ToAccountDTO(a Account, phonePlain string) AccountDTO {
 	dto := AccountDTO{
-		ID:           a.ID,
-		TenantID:     a.TenantID,
+		ID:           ids.ID(a.ID),
+		TenantID:     ids.ID(a.TenantID),
 		Name:         a.Name,
 		No:           a.No,
 		BaseIdentity: a.BaseIdentity,
@@ -50,7 +52,7 @@ func ToAccountDTO(a Account, phonePlain string) AccountDTO {
 // ToSessionDTO 把服务端会话快照转换为个人中心响应,不暴露 Refresh 哈希。
 func ToSessionDTO(session AuthSession) SessionDTO {
 	return SessionDTO{
-		ID:         session.ID,
+		ID:         ids.ID(session.ID),
 		DeviceInfo: session.DeviceInfo,
 		IP:         session.IP,
 		Status:     session.Status,
@@ -62,7 +64,7 @@ func ToSessionDTO(session AuthSession) SessionDTO {
 // ToPlatformSessionDTO 把平台管理员会话转换为个人中心响应,不暴露 Refresh 哈希。
 func ToPlatformSessionDTO(session PlatformAuthSession) SessionDTO {
 	return SessionDTO{
-		ID:         session.ID,
+		ID:         ids.ID(session.ID),
 		DeviceInfo: session.DeviceInfo,
 		IP:         session.IP,
 		Status:     session.Status,
@@ -74,13 +76,13 @@ func ToPlatformSessionDTO(session PlatformAuthSession) SessionDTO {
 // ToAuditLogDTO 把审计契约视图转换为 HTTP 响应 DTO。
 func ToAuditLogDTO(row contracts.AuditLogEntry) AuditLogDTO {
 	return AuditLogDTO{
-		ID:         row.ID,
-		TenantID:   row.TenantID,
-		ActorID:    row.ActorID,
+		ID:         ids.ID(row.ID),
+		TenantID:   ids.ID(row.TenantID),
+		ActorID:    ids.ID(row.ActorID),
 		ActorRole:  row.ActorRole,
 		Action:     row.Action,
 		TargetType: row.TargetType,
-		TargetID:   row.TargetID,
+		TargetID:   ids.ID(row.TargetID),
 		Detail:     row.Detail,
 		IP:         row.IP,
 		TraceID:    row.TraceID,
@@ -88,13 +90,14 @@ func ToAuditLogDTO(row contracts.AuditLogEntry) AuditLogDTO {
 	}
 }
 
+// ToTenantApplicationDTO 将入驻申请领域模型转换为对外 DTO。
 func ToTenantApplicationDTO(app TenantApplication) TenantApplicationDTO {
 	reviewedAt := ""
 	if app.Status == ApplicationStatusApproved || app.Status == ApplicationStatusRejected || app.ReviewedBy > 0 {
 		reviewedAt = timex.RFC3339OrEmpty(app.UpdatedAt)
 	}
 	return TenantApplicationDTO{
-		ApplicationID: app.ID,
+		ApplicationID: ids.ID(app.ID),
 		SchoolName:    app.SchoolName,
 		SchoolType:    app.SchoolType,
 		ContactName:   app.ContactName,
@@ -102,13 +105,14 @@ func ToTenantApplicationDTO(app TenantApplication) TenantApplicationDTO {
 		ContactEmail:  app.ContactEmail,
 		Status:        app.Status,
 		RejectReason:  app.RejectReason,
-		ReviewedBy:    app.ReviewedBy,
-		TenantID:      app.TenantID,
+		ReviewedBy:    ids.ID(app.ReviewedBy),
+		TenantID:      ids.ID(app.TenantID),
 		SubmittedAt:   timex.RFC3339OrEmpty(app.CreatedAt),
 		ReviewedAt:    reviewedAt,
 	}
 }
 
+// ToTenantApplicationDTOs 批量转换入驻申请并保持原有顺序。
 func ToTenantApplicationDTOs(apps []TenantApplication) []TenantApplicationDTO {
 	out := make([]TenantApplicationDTO, 0, len(apps))
 	for _, app := range apps {
@@ -142,8 +146,8 @@ func ToSSOConfigDTO(cfg SSOConfig) (SSOConfigDTO, error) {
 		return SSOConfigDTO{}, apperr.ErrIdentitySSOConfigInvalid.WithCause(err)
 	}
 	return SSOConfigDTO{
-		ID:         cfg.ID,
-		TenantID:   cfg.TenantID,
+		ID:         ids.ID(cfg.ID),
+		TenantID:   ids.ID(cfg.TenantID),
 		Type:       cfg.Type,
 		Config:     secretmap.Mask(data),
 		MatchField: cfg.MatchField,
@@ -153,25 +157,25 @@ func ToSSOConfigDTO(cfg SSOConfig) (SSOConfigDTO, error) {
 
 // ToDepartmentDTO 把院系领域快照转换为 HTTP DTO。
 func ToDepartmentDTO(dep Department) DepartmentDTO {
-	return DepartmentDTO{ID: dep.ID, TenantID: dep.TenantID, Name: dep.Name, Code: dep.Code}
+	return DepartmentDTO{ID: ids.ID(dep.ID), TenantID: ids.ID(dep.TenantID), Name: dep.Name, Code: dep.Code}
 }
 
 // ToMajorDTO 把专业领域快照转换为 HTTP DTO。
 func ToMajorDTO(major Major) MajorDTO {
-	return MajorDTO{ID: major.ID, TenantID: major.TenantID, DepartmentID: major.DepartmentID, Name: major.Name}
+	return MajorDTO{ID: ids.ID(major.ID), TenantID: ids.ID(major.TenantID), DepartmentID: ids.ID(major.DepartmentID), Name: major.Name}
 }
 
 // ToClassDTO 把班级领域快照转换为 HTTP DTO。
 func ToClassDTO(class Class) ClassDTO {
-	return ClassDTO{ID: class.ID, TenantID: class.TenantID, MajorID: class.MajorID, Name: class.Name, EnrollmentYear: class.EnrollmentYear, Status: class.Status}
+	return ClassDTO{ID: ids.ID(class.ID), TenantID: ids.ID(class.TenantID), MajorID: ids.ID(class.MajorID), Name: class.Name, EnrollmentYear: class.EnrollmentYear, Status: class.Status}
 }
 
 // ToImportBatchDTO 把导入批次领域快照转换为稳定 HTTP DTO,避免响应暴露 Go 内部字段名。
 func ToImportBatchDTO(batch ImportBatch) ImportBatchDTO {
 	return ImportBatchDTO{
-		ID:         batch.ID,
-		TenantID:   batch.TenantID,
-		OperatorID: batch.OperatorID,
+		ID:         ids.ID(batch.ID),
+		TenantID:   ids.ID(batch.TenantID),
+		OperatorID: ids.ID(batch.OperatorID),
 		TargetType: batch.TargetType,
 		FileName:   batch.FileName,
 		Total:      batch.Total,

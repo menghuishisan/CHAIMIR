@@ -3,7 +3,7 @@
 
 import { ApiClient } from '../client'
 import type { GradeAppealStatus, GradeReviewStatus, TranscriptScope } from '../constants/grade'
-import type { PaginatedResponse } from '../types/common'
+import type { PaginatedResponse, SnowflakeID } from '../types/common'
 import type {
   GradeAppeal,
   GradeAppealRequest,
@@ -79,6 +79,11 @@ export class GradeApi {
    */
   async listReviews(params?: { status?: GradeReviewStatus; page?: number; size?: number }): Promise<PaginatedResponse<GradeReview>> {
     return this.client.get('/grade-center/reviews', params)
+  }
+
+  /** listOwnReviews 查询当前教师本人提交的成绩审核记录。 */
+  async listOwnReviews(params?: { status?: GradeReviewStatus; page?: number; size?: number }): Promise<PaginatedResponse<GradeReview>> {
+    return this.client.get('/grade-center/reviews/mine', params)
   }
 
   /**
@@ -196,7 +201,7 @@ export class GradeApi {
   /**
    * 批量生成成绩单记录。
    */
-  async generateTranscriptBatch(data: { student_ids: number[]; scope: TranscriptScope; semester_id?: string }): Promise<GradeTranscript[]> {
+  async generateTranscriptBatch(data: { student_ids: SnowflakeID[]; scope: TranscriptScope; semester_id?: SnowflakeID }): Promise<GradeTranscript[]> {
     return this.client.post('/grade-center/transcripts/batch', data)
   }
 

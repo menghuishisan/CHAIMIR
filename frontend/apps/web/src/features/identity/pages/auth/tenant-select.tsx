@@ -29,17 +29,16 @@ const TenantSelectPage: React.FC = () => {
     setSubmittingTenantId(tenantId)
     setError(null)
     try {
-      const numericTenantId = Number(tenantId)
       const response = state.method.type === 'phone'
         ? await api.identity.loginPhone({
             phone: state.method.phone,
             password: state.method.password,
-            tenant_id: numericTenantId,
+            tenant_id: tenantId,
           })
         : await api.identity.loginSMS({
             phone: state.method.phone,
             code: state.method.code,
-            tenant_id: numericTenantId,
+            tenant_id: tenantId,
           })
       persistLoginTokens(response, state.remember)
       navigate(loginEntryPath(response, state.returnPath), { replace: true })

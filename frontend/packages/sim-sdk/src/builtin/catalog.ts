@@ -13,11 +13,11 @@ import { transactionRuntimeSimulations } from './transaction-runtime';
  * builtinSimulations 只聚合已经完成独立算法建模的内置仿真包。
  */
 export const builtinSimulations: SimPackage[] = [
-  ...(consensusSimulations as unknown as SimPackage[]),
-  ...(cryptographySimulations as unknown as SimPackage[]),
-  ...(networkSimulations as unknown as SimPackage[]),
-  ...(dataStructureSimulations as unknown as SimPackage[]),
-  ...(contractSecuritySimulations as unknown as SimPackage[]),
-  ...(transactionRuntimeSimulations as unknown as SimPackage[]),
-  ...(crossChainSystemSimulations as unknown as SimPackage[]),
+  ...consensusSimulations,
+  ...cryptographySimulations,
+  ...networkSimulations,
+  ...dataStructureSimulations,
+  ...contractSecuritySimulations,
+  ...transactionRuntimeSimulations,
+  ...crossChainSystemSimulations,
 ];

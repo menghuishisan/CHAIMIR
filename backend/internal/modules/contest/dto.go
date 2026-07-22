@@ -1,7 +1,11 @@
 // contest dto 文件定义 M8 HTTP 请求和响应结构,不承载业务逻辑。
 package contest
 
-import "time"
+import (
+	"time"
+
+	"chaimir/internal/platform/ids"
+)
 
 // ContestRequest 是创建或编辑竞赛的请求。
 type ContestRequest struct {
@@ -19,8 +23,8 @@ type ContestRequest struct {
 
 // ContestDTO 是竞赛定义输出。
 type ContestDTO struct {
-	ID            int64          `json:"id,string"`
-	OrganizerID   int64          `json:"organizer_id,string"`
+	ID            ids.ID         `json:"id"`
+	OrganizerID   ids.ID         `json:"organizer_id"`
 	Name          string         `json:"name"`
 	Mode          int16          `json:"mode"`
 	MatchMode     int16          `json:"match_mode,omitempty"`
@@ -49,8 +53,8 @@ type ProblemRequest struct {
 
 // ProblemDTO 是竞赛题目引用输出。
 type ProblemDTO struct {
-	ID           int64          `json:"id,string"`
-	ContestID    int64          `json:"contest_id,string"`
+	ID           ids.ID         `json:"id"`
+	ContestID    ids.ID         `json:"contest_id"`
 	ItemCode     string         `json:"item_code"`
 	ItemVersion  string         `json:"item_version"`
 	Score        int32          `json:"score"`
@@ -73,8 +77,8 @@ type JoinTeamRequest struct {
 
 // TeamDTO 是参赛队伍输出。
 type TeamDTO struct {
-	ID         int64           `json:"id,string"`
-	ContestID  int64           `json:"contest_id,string"`
+	ID         ids.ID          `json:"id"`
+	ContestID  ids.ID          `json:"contest_id"`
 	Name       string          `json:"name"`
 	InviteCode string          `json:"invite_code,omitempty"`
 	Status     int16           `json:"status"`
@@ -84,10 +88,10 @@ type TeamDTO struct {
 
 // TeamMemberDTO 是队员输出。
 type TeamMemberDTO struct {
-	ID             int64     `json:"id,string"`
-	TeamID         int64     `json:"team_id,string"`
-	AccountID      int64     `json:"account_id,string"`
-	MemberTenantID int64     `json:"member_tenant_id,string"`
+	ID             ids.ID    `json:"id"`
+	TeamID         ids.ID    `json:"team_id"`
+	AccountID      ids.ID    `json:"account_id"`
+	MemberTenantID ids.ID    `json:"member_tenant_id"`
 	IsLeader       bool      `json:"is_leader"`
 	JoinedAt       time.Time `json:"joined_at"`
 }
@@ -103,7 +107,7 @@ type EnvRequest struct {
 
 // EnvDTO 是 M2 沙箱环境摘要。
 type EnvDTO struct {
-	SandboxID int64  `json:"sandbox_id,string"`
+	SandboxID ids.ID `json:"sandbox_id"`
 	SourceRef string `json:"source_ref"`
 	Status    int16  `json:"status"`
 }
@@ -118,11 +122,11 @@ type SubmitRequest struct {
 
 // SubmissionDTO 是解题赛提交输出。
 type SubmissionDTO struct {
-	ID           int64          `json:"id,string"`
-	ContestID    int64          `json:"contest_id,string"`
-	ProblemID    int64          `json:"problem_id,string"`
-	TeamID       int64          `json:"team_id,string"`
-	SubmitterID  int64          `json:"submitter_id,string"`
+	ID           ids.ID         `json:"id"`
+	ContestID    ids.ID         `json:"contest_id"`
+	ProblemID    ids.ID         `json:"problem_id"`
+	TeamID       ids.ID         `json:"team_id"`
+	SubmitterID  ids.ID         `json:"submitter_id"`
 	ContentRef   map[string]any `json:"content_ref"`
 	SourceRef    string         `json:"source_ref"`
 	JudgeTaskRef string         `json:"judge_task_ref,omitempty"`
@@ -134,7 +138,7 @@ type SubmissionDTO struct {
 
 // BattleEntryRequest 是提交参战物请求。
 type BattleEntryRequest struct {
-	ProblemID   int64  `json:"problem_id"`
+	ProblemID   ids.ID `json:"problem_id"`
 	Role        int16  `json:"role"`
 	ArtifactRef string `json:"artifact_ref"`
 	CodeHash    string `json:"code_hash"`
@@ -142,10 +146,10 @@ type BattleEntryRequest struct {
 
 // BattleEntryDTO 是参战物输出。
 type BattleEntryDTO struct {
-	ID          int64     `json:"id,string"`
-	ContestID   int64     `json:"contest_id,string"`
-	ProblemID   int64     `json:"problem_id,string"`
-	TeamID      int64     `json:"team_id,string"`
+	ID          ids.ID    `json:"id"`
+	ContestID   ids.ID    `json:"contest_id"`
+	ProblemID   ids.ID    `json:"problem_id"`
+	TeamID      ids.ID    `json:"team_id"`
 	Role        int16     `json:"role"`
 	ArtifactRef string    `json:"artifact_ref"`
 	CodeHash    string    `json:"code_hash"`
@@ -156,11 +160,11 @@ type BattleEntryDTO struct {
 
 // BattleMatchDTO 是对局输出。
 type BattleMatchDTO struct {
-	ID           int64          `json:"id,string"`
-	ContestID    int64          `json:"contest_id,string"`
-	ProblemID    int64          `json:"problem_id,string"`
-	EntryAID     int64          `json:"entry_a_id,string"`
-	EntryBID     int64          `json:"entry_b_id,string"`
+	ID           ids.ID         `json:"id"`
+	ContestID    ids.ID         `json:"contest_id"`
+	ProblemID    ids.ID         `json:"problem_id"`
+	EntryAID     ids.ID         `json:"entry_a_id"`
+	EntryBID     ids.ID         `json:"entry_b_id"`
 	SourceRef    string         `json:"source_ref"`
 	SandboxRef   string         `json:"sandbox_ref,omitempty"`
 	JudgeTaskRef string         `json:"judge_task_ref,omitempty"`
@@ -174,7 +178,7 @@ type BattleMatchDTO struct {
 
 // LadderDTO 是排行榜输出。
 type LadderDTO struct {
-	TeamID      int64     `json:"team_id,string"`
+	TeamID      ids.ID    `json:"team_id"`
 	Score       float64   `json:"score"`
 	SolvedCount int32     `json:"solved_count"`
 	LastSolveAt time.Time `json:"last_solve_at,omitempty"`
@@ -182,9 +186,18 @@ type LadderDTO struct {
 	UpdatedAt   time.Time `json:"updated_at"`
 }
 
+// ResultSnapshotDTO 是竞赛归档后的最终榜单快照输出。
+type ResultSnapshotDTO struct {
+	ID           ids.ID           `json:"id"`
+	TenantID     ids.ID           `json:"tenant_id,omitempty"`
+	ContestID    ids.ID           `json:"contest_id"`
+	FinalRanking []map[string]any `json:"final_ranking"`
+	GeneratedAt  time.Time        `json:"generated_at"`
+}
+
 // CheatRecordRequest 是违规判定请求。
 type CheatRecordRequest struct {
-	TeamID   int64          `json:"team_id"`
+	TeamID   ids.ID         `json:"team_id"`
 	Type     int16          `json:"type"`
 	Evidence map[string]any `json:"evidence"`
 	Action   int16          `json:"action"`
@@ -192,27 +205,27 @@ type CheatRecordRequest struct {
 
 // CheatRecordDTO 是违规记录输出。
 type CheatRecordDTO struct {
-	ID         int64          `json:"id,string"`
-	ContestID  int64          `json:"contest_id,string"`
-	TeamID     int64          `json:"team_id,string"`
+	ID         ids.ID         `json:"id"`
+	ContestID  ids.ID         `json:"contest_id"`
+	TeamID     ids.ID         `json:"team_id"`
 	Type       int16          `json:"type"`
 	Evidence   map[string]any `json:"evidence"`
 	Action     int16          `json:"action"`
-	OperatorID int64          `json:"operator_id,string,omitempty"`
+	OperatorID ids.ID         `json:"operator_id,omitempty"`
 	CreatedAt  time.Time      `json:"created_at"`
 }
 
 // CheatSuspectDTO 是查重服务返回的疑似违规线索。
 type CheatSuspectDTO struct {
 	SourceRef   string  `json:"source_ref"`
-	SubmitterID int64   `json:"submitter_id,string"`
+	SubmitterID ids.ID  `json:"submitter_id"`
 	Score       float64 `json:"score"`
 	CodeHash    string  `json:"code_hash,omitempty"`
 }
 
 // VulnSourceRequest 是漏洞源配置请求。
 type VulnSourceRequest struct {
-	ID           int64          `json:"id"`
+	ID           ids.ID         `json:"id"`
 	Type         int16          `json:"type"`
 	Name         string         `json:"name"`
 	Config       map[string]any `json:"config"`
@@ -222,7 +235,7 @@ type VulnSourceRequest struct {
 
 // VulnSourceDTO 是漏洞源输出。
 type VulnSourceDTO struct {
-	ID           int64          `json:"id,string"`
+	ID           ids.ID         `json:"id"`
 	Type         int16          `json:"type"`
 	Name         string         `json:"name"`
 	Config       map[string]any `json:"config"`
@@ -233,7 +246,7 @@ type VulnSourceDTO struct {
 
 // ImportVulnProblemRequest 是手动导入漏洞案例请求。
 type ImportVulnProblemRequest struct {
-	SourceID    int64          `json:"source_id"`
+	SourceID    ids.ID         `json:"source_id"`
 	ExternalRef string         `json:"external_ref"`
 	Title       string         `json:"title"`
 	Level       int16          `json:"level"`
@@ -252,8 +265,8 @@ type PrevalidateRequest struct {
 
 // VulnProblemDTO 是漏洞题草稿输出。
 type VulnProblemDTO struct {
-	ID                 int64          `json:"id,string"`
-	SourceID           int64          `json:"source_id,string,omitempty"`
+	ID                 ids.ID         `json:"id"`
+	SourceID           ids.ID         `json:"source_id,omitempty"`
 	ExternalRef        string         `json:"external_ref,omitempty"`
 	Title              string         `json:"title"`
 	Level              int16          `json:"level"`
@@ -268,8 +281,8 @@ type VulnProblemDTO struct {
 
 // ContestRecordDTO 是学生个人竞赛战绩输出。
 type ContestRecordDTO struct {
-	ContestID     int64   `json:"contest_id,string"`
-	TeamID        int64   `json:"team_id,string"`
+	ContestID     ids.ID  `json:"contest_id"`
+	TeamID        ids.ID  `json:"team_id"`
 	Score         float64 `json:"score"`
 	Rank          int32   `json:"rank"`
 	ContestName   string  `json:"contest_name"`

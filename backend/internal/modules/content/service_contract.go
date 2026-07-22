@@ -69,7 +69,7 @@ func (s *Service) SystemImportContent(ctx context.Context, req contracts.Content
 	if err != nil {
 		return contracts.ContentItemSnapshot{}, apperr.ErrContentBodyInvalid.WithCause(err)
 	}
-	item := ItemWithBody{Item: Item{ID: s.ids.Generate(), TenantID: tenantID, Code: httpReq.Code, Version: httpReq.Version, Type: httpReq.Type, Title: httpReq.Title, CategoryID: httpReq.CategoryID, Difficulty: httpReq.Difficulty, Tags: httpReq.Tags, KnowledgePoints: httpReq.KnowledgePoints, AuthorID: httpReq.AuthorID, AuthorType: httpReq.AuthorType, Visibility: httpReq.Visibility, Status: StatusDraft}, Body: body, SensitiveFields: httpReq.SensitiveFields}
+	item := ItemWithBody{Item: Item{ID: s.ids.Generate(), TenantID: tenantID, Code: httpReq.Code, Version: httpReq.Version, Type: httpReq.Type, Title: httpReq.Title, CategoryID: httpReq.CategoryID.Int64(), Difficulty: httpReq.Difficulty, Tags: httpReq.Tags, KnowledgePoints: httpReq.KnowledgePoints, AuthorID: httpReq.AuthorID.Int64(), AuthorType: httpReq.AuthorType, Visibility: httpReq.Visibility, Status: StatusDraft}, Body: body, SensitiveFields: httpReq.SensitiveFields}
 	if httpReq.AutoPublish {
 		item.Status = StatusPublished
 	}
@@ -101,7 +101,7 @@ func (s *Service) SystemImportContentFromHTTP(ctx context.Context, req SystemImp
 	if err != nil {
 		return ItemSnapshotDTO{}, err
 	}
-	snapshot, err := s.SystemImportContent(ctx, contracts.ContentSystemImportRequest{TenantID: tenantID, Code: req.Code, Version: req.Version, Type: req.Type, Title: req.Title, CategoryID: req.CategoryID, Difficulty: req.Difficulty, Tags: req.Tags, KnowledgePoints: req.KnowledgePoints, AuthorID: req.AuthorID, AuthorType: req.AuthorType, Visibility: req.Visibility, Body: req.Body, SensitiveFields: req.SensitiveFields, AutoPublish: req.AutoPublish, SystemImportNote: req.SystemImportNote})
+	snapshot, err := s.SystemImportContent(ctx, contracts.ContentSystemImportRequest{TenantID: tenantID, Code: req.Code, Version: req.Version, Type: req.Type, Title: req.Title, CategoryID: req.CategoryID.Int64(), Difficulty: req.Difficulty, Tags: req.Tags, KnowledgePoints: req.KnowledgePoints, AuthorID: req.AuthorID.Int64(), AuthorType: req.AuthorType, Visibility: req.Visibility, Body: req.Body, SensitiveFields: req.SensitiveFields, AutoPublish: req.AutoPublish, SystemImportNote: req.SystemImportNote})
 	if err != nil {
 		return ItemSnapshotDTO{}, err
 	}

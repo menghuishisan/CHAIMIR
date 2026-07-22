@@ -1,6 +1,6 @@
 // authSession 管理前端登录会话存储和经过角色边界校验的入口恢复。
 
-import type { LoginResponse } from '@chaimir/api-client'
+import type { LoginResponse, TokenRefreshResponse } from '@chaimir/api-client'
 import { isRoleHomePath, roleRouteForRoles } from './roleRouting'
 
 export const ACCESS_TOKEN_KEY = 'chaimir.access_token'
@@ -8,22 +8,29 @@ export const REFRESH_TOKEN_KEY = 'chaimir.refresh_token'
 const MUST_CHANGE_PASSWORD_KEY = 'chaimir.must_change_password'
 const PENDING_ENTRY_PATH_KEY = 'chaimir.pending_entry_path'
 
-/**
- * persistLoginTokens 按用户选择把登录令牌写入同一种键名。
- */
-export function persistLoginTokens(response: LoginResponse, remember: boolean): void {
+type TokenStoragePair = {
+  storage: Storage
+  otherStorage: Storage
+}
+
+/** persistTokenPair 统一按登录选择切换两种浏览器存储中的令牌。 */
+function persistTokenPair(accessToken: string | undefined, refreshToken: string | undefined, remember: boolean): TokenStoragePair {
   const storage = remember ? window.localStorage : window.sessionStorage
   const otherStorage = remember ? window.sessionStorage : window.localStorage
   otherStorage.removeItem(ACCESS_TOKEN_KEY)
   otherStorage.removeItem(REFRESH_TOKEN_KEY)
+  if (accessToken) storage.setItem(ACCESS_TOKEN_KEY, accessToken)
+  if (refreshToken) storage.setItem(REFRESH_TOKEN_KEY, refreshToken)
+  return { storage, otherStorage }
+}
+
+/**
+ * persistLoginTokens 按用户选择把登录令牌写入同一种键名。
+ */
+export function persistLoginTokens(response: LoginResponse, remember: boolean): void {
+  const { storage, otherStorage } = persistTokenPair(response.access_token, response.refresh_token, remember)
   otherStorage.removeItem(MUST_CHANGE_PASSWORD_KEY)
   otherStorage.removeItem(PENDING_ENTRY_PATH_KEY)
-  if (response.access_token) {
-    storage.setItem(ACCESS_TOKEN_KEY, response.access_token)
-  }
-  if (response.refresh_token) {
-    storage.setItem(REFRESH_TOKEN_KEY, response.refresh_token)
-  }
   if (response.must_change_pwd) {
     storage.setItem(MUST_CHANGE_PASSWORD_KEY, 'true')
     storage.setItem(PENDING_ENTRY_PATH_KEY, roleEntryPath(response))
@@ -66,9 +73,9 @@ export function getStoredAccessToken(): string | null {
 /**
  * persistRefreshedTokens 保持原有“保持登录”选择并替换后端签发的新令牌。
  */
-export function persistRefreshedTokens(response: LoginResponse): void {
+export function persistRefreshedTokens(response: TokenRefreshResponse): void {
   const remembered = window.localStorage.getItem(REFRESH_TOKEN_KEY) !== null
-  persistLoginTokens(response, remembered)
+  persistTokenPair(response.access_token, response.refresh_token, remembered)
 }
 
 /**

@@ -103,7 +103,7 @@ interface SimMeta {
 - `SimPackage`、`SimState`、`SimEvent`、`TeachingFrame`、`VisualPattern` 等协议类型。
 - `defineSimPackage(simPackage)`:定义仿真包并执行开发期协议校验。
 - `createDeveloperTemplate(code)`:生成最小完整模板。
-- `validateSimPackageManifest(simPackage)`:上传前检查协议完整性。
+- `validateSimPackage(simPackage)`:上传前检查协议完整性。
 - `createManifestSummary(simPackage)`:生成审核摘要。
 - `createSimPackageManifest(simPackage)`:生成上传归档中的 `sim-package.json` 内容。
 - `SimulationWorkbench`、`SimWorkerClient`、`PatternRenderer`:仅供平台页面装配,仿真包作者不应直接复刻运行时。
@@ -114,7 +114,7 @@ interface SimMeta {
 
 1. 使用 `createDeveloperTemplate(code)` 或 `defineSimPackage({...})` 创建包。
 2. 完整实现 `meta`、`initState`、`reducer`、`interactions`、`render`、`narrative`、`codeTrace`、`checkpoints`。
-3. 本地执行 `validateSimPackageManifest(simPackage)`,确认无协议问题。
+3. 本地执行 `validateSimPackage(simPackage)`,确认无协议问题。
 4. 使用 `createSimPackageManifest(simPackage)` 生成 `sim-package.json`。
 5. 将 `sim-package.json` 与 bundle 一起提交后端 M4 审核。
 

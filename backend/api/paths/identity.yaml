@@ -414,7 +414,7 @@
     parameters:
       - name: department_id
         in: query
-        schema: { type: integer, format: int64 }
+        schema: { $ref: "#/components/schemas/SnowflakeID" }
     responses:
       "200":
         $ref: "#/components/responses/Standard"
@@ -476,7 +476,7 @@
     parameters:
       - name: major_id
         in: query
-        schema: { type: integer, format: int64 }
+        schema: { $ref: "#/components/schemas/SnowflakeID" }
     responses:
       "200":
         $ref: "#/components/responses/Standard"
@@ -617,7 +617,7 @@
         schema: { type: string }
       - name: class_id
         in: query
-        schema: { type: integer, format: int64 }
+        schema: { $ref: "#/components/schemas/SnowflakeID" }
       - $ref: "#/components/parameters/StatusQuery"
       - $ref: "#/components/parameters/KeywordQuery"
       - $ref: "#/components/parameters/PageQuery"
@@ -974,7 +974,7 @@
     parameters:
       - name: actor_id
         in: query
-        schema: { type: integer, format: int64 }
+        schema: { $ref: "#/components/schemas/SnowflakeID" }
       - name: action
         in: query
         schema: { type: string }

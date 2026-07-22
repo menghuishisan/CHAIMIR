@@ -17,6 +17,7 @@ type Querier interface {
 	CreateSandboxRecycleOutbox(ctx context.Context, arg CreateSandboxRecycleOutboxParams) (SandboxRecycleOutbox, error)
 	CreateSandboxTool(ctx context.Context, arg CreateSandboxToolParams) (SandboxTool, error)
 	DisableRuntimeImage(ctx context.Context, arg DisableRuntimeImageParams) (RuntimeImage, error)
+	EnsureTenantQuota(ctx context.Context, arg EnsureTenantQuotaParams) (EnsureTenantQuotaRow, error)
 	GetDefaultRuntimeImage(ctx context.Context, runtimeID int64) (RuntimeImage, error)
 	GetRuntimeByCode(ctx context.Context, code string) (Runtime, error)
 	GetRuntimeByID(ctx context.Context, id int64) (Runtime, error)

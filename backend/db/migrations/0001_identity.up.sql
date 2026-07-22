@@ -1,3 +1,4 @@
+-- identity 基线迁移创建身份、租户、组织、会话、导入与审计数据结构。
 CREATE TABLE IF NOT EXISTS platform_admin (
     id BIGINT PRIMARY KEY,
     username VARCHAR(64) NOT NULL UNIQUE,
@@ -34,6 +35,20 @@ CREATE TABLE IF NOT EXISTS tenant (
     enable_activation_code BOOLEAN NOT NULL DEFAULT true,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS tenant_provision_outbox (
+    id BIGINT PRIMARY KEY,
+    tenant_id BIGINT NOT NULL REFERENCES tenant(id),
+    deploy_mode SMALLINT NOT NULL,
+    trace_id VARCHAR(128) NOT NULL,
+    provisioned_at TIMESTAMPTZ NOT NULL,
+    status SMALLINT NOT NULL DEFAULT 1 CHECK (status IN (1, 2, 3, 4)),
+    retry_count INT NOT NULL DEFAULT 0 CHECK (retry_count >= 0),
+    last_error VARCHAR(255),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (tenant_id)
 );
 
 CREATE TABLE IF NOT EXISTS tenant_application (
@@ -232,6 +247,7 @@ CREATE INDEX IF NOT EXISTS idx_audit_log_tenant_created ON audit_log(tenant_id, 
 CREATE INDEX IF NOT EXISTS idx_audit_log_actor_created ON audit_log(actor_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_import_preview_operator ON import_preview(tenant_id, operator_id, status);
 CREATE INDEX IF NOT EXISTS idx_import_batch_tenant_operator ON import_batch(tenant_id, operator_id);
+CREATE INDEX IF NOT EXISTS idx_tenant_provision_outbox_status ON tenant_provision_outbox(status, created_at ASC);
 
 CREATE OR REPLACE FUNCTION validate_account_profile_org()
 RETURNS TRIGGER AS $$
@@ -296,6 +312,7 @@ ALTER TABLE sso_config ENABLE ROW LEVEL SECURITY;
 ALTER TABLE import_preview ENABLE ROW LEVEL SECURITY;
 ALTER TABLE import_batch ENABLE ROW LEVEL SECURITY;
 ALTER TABLE audit_log ENABLE ROW LEVEL SECURITY;
+ALTER TABLE tenant_provision_outbox ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY department_tenant_rls ON department USING (tenant_id = current_setting('app.tenant_id')::BIGINT) WITH CHECK (tenant_id = current_setting('app.tenant_id')::BIGINT);
 CREATE POLICY major_tenant_rls ON major USING (tenant_id = current_setting('app.tenant_id')::BIGINT) WITH CHECK (tenant_id = current_setting('app.tenant_id')::BIGINT);
@@ -309,6 +326,7 @@ CREATE POLICY activation_code_tenant_rls ON activation_code USING (tenant_id = c
 CREATE POLICY sso_config_tenant_rls ON sso_config USING (tenant_id = current_setting('app.tenant_id')::BIGINT) WITH CHECK (tenant_id = current_setting('app.tenant_id')::BIGINT);
 CREATE POLICY import_preview_tenant_rls ON import_preview USING (tenant_id = current_setting('app.tenant_id')::BIGINT) WITH CHECK (tenant_id = current_setting('app.tenant_id')::BIGINT);
 CREATE POLICY import_batch_tenant_rls ON import_batch USING (tenant_id = current_setting('app.tenant_id')::BIGINT) WITH CHECK (tenant_id = current_setting('app.tenant_id')::BIGINT);
+CREATE POLICY tenant_provision_outbox_tenant_rls ON tenant_provision_outbox USING (tenant_id = current_setting('app.tenant_id')::BIGINT) WITH CHECK (tenant_id = current_setting('app.tenant_id')::BIGINT);
 CREATE POLICY audit_log_tenant_rls ON audit_log
     USING (tenant_id IS NULL OR tenant_id = NULLIF(current_setting('app.tenant_id', true), '')::BIGINT)
     WITH CHECK (tenant_id IS NULL OR tenant_id = NULLIF(current_setting('app.tenant_id', true), '')::BIGINT);

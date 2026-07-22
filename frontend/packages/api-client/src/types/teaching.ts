@@ -1,5 +1,6 @@
 // ===== M6 Teaching 模块 =====
 
+import type { SnowflakeID } from './common'
 import type {
   AssignmentStatus,
   CourseStatus,
@@ -16,9 +17,9 @@ import type {
 } from '../constants/teaching'
 
 export interface Course {
-  id: number
-  tenant_id: number
-  teacher_id: number
+  id: SnowflakeID
+  tenant_id: SnowflakeID
+  teacher_id: SnowflakeID
   name: string
   description: string
   type: CourseType
@@ -50,8 +51,8 @@ export interface CourseRequest {
 }
 
 export interface Chapter {
-  id: number
-  course_id: number
+  id: SnowflakeID
+  course_id: SnowflakeID
   title: string
   sort: number
   created_at: string
@@ -64,8 +65,8 @@ export interface ChapterRequest {
 }
 
 export interface Lesson {
-  id: number
-  chapter_id: number
+  id: SnowflakeID
+  chapter_id: SnowflakeID
   title: string
   content_type: LessonContentType
   content_ref: Record<string, unknown>
@@ -89,8 +90,8 @@ export interface CourseOutline {
 }
 
 export interface Progress {
-  lesson_id: number
-  student_id: number
+  lesson_id: SnowflakeID
+  student_id: SnowflakeID
   status: ProgressStatus
   video_pos: number
   duration_sec: number
@@ -108,10 +109,10 @@ export interface JoinCourseRequest {
 }
 
 export interface Assignment {
-  id: number
-  course_id: number
+  id: SnowflakeID
+  course_id: SnowflakeID
   title: string
-  chapter_id?: number
+  chapter_id?: SnowflakeID
   due_at: string
   max_attempts: number
   late_policy: LatePolicy
@@ -123,7 +124,7 @@ export interface Assignment {
 
 export interface AssignmentRequest {
   title: string
-  chapter_id: number
+  chapter_id: SnowflakeID
   due_at: string
   max_attempts: number
   late_policy: LatePolicy
@@ -141,7 +142,7 @@ export interface AssignmentItemInput {
 }
 
 export interface AssignmentItem {
-  id: number
+  id: SnowflakeID
   item_code: string
   item_version: string
   score: number
@@ -160,17 +161,17 @@ export interface AssignmentDetail {
 }
 
 export interface Draft {
-  assignment_id: number
-  student_id: number
+  assignment_id: SnowflakeID
+  student_id: SnowflakeID
   content: Record<string, unknown>
   updated_at: string
   exists: boolean
 }
 
 export interface Submission {
-  id: number
-  assignment_id: number
-  student_id: number
+  id: SnowflakeID
+  assignment_id: SnowflakeID
+  student_id: SnowflakeID
   attempt_no: number
   content: Record<string, unknown>
   judge_task_ref?: string
@@ -188,27 +189,27 @@ export interface SubmitRequest {
 }
 
 export interface CourseMember {
-  id: number
-  course_id: number
-  student_id: number
+  id: SnowflakeID
+  course_id: SnowflakeID
+  student_id: SnowflakeID
   join_mode: JoinMode
   joined_at: string
 }
 
 export interface BatchMembersRequest {
-  student_ids: number[]
+  student_ids: SnowflakeID[]
 }
 
 export interface TeachingPostRequest {
-  parent_id?: number
+  parent_id?: SnowflakeID
   content: string
 }
 
 export interface TeachingPost {
-  id: number
-  course_id: number
-  parent_id?: number
-  author_id: number
+  id: SnowflakeID
+  course_id: SnowflakeID
+  parent_id?: SnowflakeID
+  author_id: SnowflakeID
   content: string
   is_pinned: boolean
   like_count: number
@@ -222,8 +223,8 @@ export interface TeachingAnnouncementRequest {
 }
 
 export interface TeachingAnnouncement {
-  id: number
-  course_id: number
+  id: SnowflakeID
+  course_id: SnowflakeID
   title: string
   content: string
   is_pinned: boolean
@@ -236,16 +237,16 @@ export interface TeachingReviewRequest {
 }
 
 export interface TeachingReview {
-  id: number
-  course_id: number
-  student_id: number
+  id: SnowflakeID
+  course_id: SnowflakeID
+  student_id: SnowflakeID
   rating: number
   comment: string
   created_at: string
 }
 
 export interface ProgressStats {
-  course_id: number
+  course_id: SnowflakeID
   member_count: number
   lesson_count: number
   completed_count: number
@@ -263,7 +264,7 @@ export interface GradeWeightInput {
 }
 
 export interface GradeWeight {
-  id: number
+  id: SnowflakeID
   source_type: GradeSource
   source_ref: string
   weight: number
@@ -274,8 +275,8 @@ export interface OverrideGradeRequest {
 }
 
 export interface TeachingCourseGrade {
-  course_id: number
-  student_id: number
+  course_id: SnowflakeID
+  student_id: SnowflakeID
   auto_total: number
   override_total?: number
   final_total: number

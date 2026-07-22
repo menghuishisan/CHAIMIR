@@ -160,6 +160,28 @@ func (s *Storage) Get(ctx context.Context, bucket, key string) (io.ReadCloser, e
 	return obj, nil
 }
 
+// OpenDownload 打开下载对象并读取可信长度和内容类型,供统一下载入口流式响应。
+func (s *Storage) OpenDownload(ctx context.Context, bucket, key string) (io.ReadCloser, int64, string, error) {
+	if s == nil || s.client == nil {
+		return nil, 0, "", fmt.Errorf("对象存储客户端未初始化")
+	}
+	if !safeObjectRefBucket(bucket) || !safeObjectRefKey(key) {
+		return nil, 0, "", ErrObjectRefInvalid
+	}
+	obj, err := s.client.GetObject(ctx, bucket, key, minio.GetObjectOptions{})
+	if err != nil {
+		return nil, 0, "", fmt.Errorf("打开下载对象 %s/%s 失败: %w", bucket, key, err)
+	}
+	info, err := obj.Stat()
+	if err != nil {
+		if closeErr := obj.Close(); closeErr != nil {
+			return nil, 0, "", fmt.Errorf("读取下载对象 %s/%s 信息失败: %w; 关闭对象失败: %v", bucket, key, err, closeErr)
+		}
+		return nil, 0, "", fmt.Errorf("读取下载对象 %s/%s 信息失败: %w", bucket, key, err)
+	}
+	return obj, info.Size, info.ContentType, nil
+}
+
 // Delete 删除指定 bucket/key 对象,供业务在跨资源事务失败时清理已写对象。
 func (s *Storage) Delete(ctx context.Context, bucket, key string) error {
 	if s == nil || s.client == nil {

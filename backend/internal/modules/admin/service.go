@@ -13,6 +13,7 @@ import (
 	"chaimir/internal/contracts"
 	"chaimir/internal/platform/audit"
 	"chaimir/internal/platform/config"
+	"chaimir/internal/platform/ids"
 	"chaimir/internal/platform/pagex"
 	"chaimir/internal/platform/secretmap"
 	"chaimir/internal/platform/storage"
@@ -129,7 +130,7 @@ func (s *Service) SchoolDashboard(ctx context.Context) (DashboardDTO, error) {
 	if err != nil {
 		return DashboardDTO{}, apperr.ErrAdminDashboardIdentityFailed.WithCause(err)
 	}
-	out := DashboardDTO{Scope: ScopeTenant, TenantID: id.TenantID, AccountCount: stats.AccountCount, TeacherCount: stats.TeacherCount, StudentCount: stats.StudentCount, ActiveAccountCount: stats.ActiveAccountCount, GeneratedAt: timex.Now()}
+	out := DashboardDTO{Scope: ScopeTenant, TenantID: ids.ID(id.TenantID), AccountCount: stats.AccountCount, TeacherCount: stats.TeacherCount, StudentCount: stats.StudentCount, ActiveAccountCount: stats.ActiveAccountCount, GeneratedAt: timex.Now()}
 	t, err := s.teaching.Stats(ctx, id.TenantID)
 	if err != nil {
 		return DashboardDTO{}, apperr.ErrAdminDashboardTeachingFailed.WithCause(err)
@@ -386,7 +387,7 @@ func (s *Service) UpdateConfig(ctx context.Context, key string, req ConfigUpdate
 	}
 	if !id.IsPlatform {
 		req.Scope = ScopeTenant
-		req.TenantID = id.TenantID
+		req.TenantID = ids.ID(id.TenantID)
 	}
 	if id.IsPlatform && req.Scope == ScopeTenant {
 		return ConfigDTO{}, apperr.ErrAdminConfigInvalid
@@ -396,34 +397,34 @@ func (s *Service) UpdateConfig(ctx context.Context, key string, req ConfigUpdate
 		return ConfigDTO{}, apperr.ErrAdminConfigInvalid.WithCause(err)
 	}
 	req.Value = protected
-	if err := validateScopeTenant(req.Scope, req.TenantID); err != nil {
+	if err := validateScopeTenant(req.Scope, req.TenantID.Int64()); err != nil {
 		return ConfigDTO{}, err
 	}
 	var out ConfigDTO
-	err = s.runWrite(ctx, req.TenantID, func(ctx context.Context, tx TxStore) error {
-		old, err := tx.GetSystemConfig(ctx, req.Scope, req.TenantID, key)
+	err = s.runWrite(ctx, req.TenantID.Int64(), func(ctx context.Context, tx TxStore) error {
+		old, err := tx.GetSystemConfig(ctx, req.Scope, req.TenantID.Int64(), key)
 		if err != nil && !isNoRows(err) {
 			return apperr.ErrAdminConfigInvalid.WithCause(err)
 		}
 		if isNoRows(err) {
-			out, err = tx.CreateSystemConfig(ctx, s.ids.Generate(), req.Scope, req.TenantID, key, req.Value, id.AccountID)
+			out, err = tx.CreateSystemConfig(ctx, s.ids.Generate(), req.Scope, req.TenantID.Int64(), key, req.Value, id.AccountID)
 			if err != nil {
 				return apperr.ErrAdminConfigInvalid.WithCause(err)
 			}
-			_, err = tx.CreateConfigChangeLog(ctx, s.ids.Generate(), out.ID, req.TenantID, map[string]any{}, out.Value, id.AccountID)
+			_, err = tx.CreateConfigChangeLog(ctx, s.ids.Generate(), out.ID.Int64(), req.TenantID.Int64(), map[string]any{}, out.Value, id.AccountID)
 			return err
 		}
-		out, err = tx.UpdateSystemConfig(ctx, req.Scope, req.TenantID, key, req.Value, id.AccountID, req.Version)
+		out, err = tx.UpdateSystemConfig(ctx, req.Scope, req.TenantID.Int64(), key, req.Value, id.AccountID, req.Version)
 		if err != nil {
 			return apperr.ErrAdminConfigConflict.WithCause(err)
 		}
-		_, err = tx.CreateConfigChangeLog(ctx, s.ids.Generate(), out.ID, req.TenantID, old.Value, out.Value, id.AccountID)
+		_, err = tx.CreateConfigChangeLog(ctx, s.ids.Generate(), out.ID.Int64(), req.TenantID.Int64(), old.Value, out.Value, id.AccountID)
 		return err
 	})
 	if err != nil {
 		return ConfigDTO{}, err
 	}
-	if err := s.writeAudit(ctx, id, "admin.config.update", "system_config", out.ID, map[string]any{"key": key}); err != nil {
+	if err := s.writeAudit(ctx, id, "admin.config.update", "system_config", out.ID.Int64(), map[string]any{"key": key}); err != nil {
 		return ConfigDTO{}, apperr.ErrAdminAuditWriteFailed.WithCause(err)
 	}
 	out.Value = secretmap.Mask(out.Value)
@@ -449,7 +450,7 @@ func (s *Service) ListConfigHistory(ctx context.Context, scope int16, tenantID i
 		if err != nil {
 			return nil, apperr.ErrAdminConfigNotFound.WithCause(err)
 		}
-		rows, count, err := tx.ListConfigChangeLogs(ctx, cfg.ID, page, size)
+		rows, count, err := tx.ListConfigChangeLogs(ctx, cfg.ID.Int64(), page, size)
 		if err != nil {
 			return nil, err
 		}
@@ -471,35 +472,35 @@ func (s *Service) RollbackConfig(ctx context.Context, key string, req ConfigRoll
 	}
 	if !id.IsPlatform {
 		req.Scope = ScopeTenant
-		req.TenantID = id.TenantID
+		req.TenantID = ids.ID(id.TenantID)
 	}
 	if id.IsPlatform && req.Scope == ScopeTenant {
 		return ConfigDTO{}, apperr.ErrAdminConfigInvalid
 	}
-	if err := validateScopeTenant(req.Scope, req.TenantID); err != nil {
+	if err := validateScopeTenant(req.Scope, req.TenantID.Int64()); err != nil {
 		return ConfigDTO{}, err
 	}
 	var out ConfigDTO
-	err = s.runWrite(ctx, req.TenantID, func(ctx context.Context, tx TxStore) error {
-		current, err := tx.GetSystemConfig(ctx, req.Scope, req.TenantID, key)
+	err = s.runWrite(ctx, req.TenantID.Int64(), func(ctx context.Context, tx TxStore) error {
+		current, err := tx.GetSystemConfig(ctx, req.Scope, req.TenantID.Int64(), key)
 		if err != nil {
 			return apperr.ErrAdminConfigNotFound.WithCause(err)
 		}
-		history, err := tx.GetConfigChangeLog(ctx, req.ChangeLogID, current.ID)
+		history, err := tx.GetConfigChangeLog(ctx, req.ChangeLogID.Int64(), current.ID.Int64())
 		if err != nil {
 			return apperr.ErrAdminConfigNotFound.WithCause(err)
 		}
-		out, err = tx.UpdateSystemConfig(ctx, req.Scope, req.TenantID, key, history.OldValue, id.AccountID, req.Version)
+		out, err = tx.UpdateSystemConfig(ctx, req.Scope, req.TenantID.Int64(), key, history.OldValue, id.AccountID, req.Version)
 		if err != nil {
 			return apperr.ErrAdminConfigConflict.WithCause(err)
 		}
-		_, err = tx.CreateConfigChangeLog(ctx, s.ids.Generate(), out.ID, req.TenantID, current.Value, out.Value, id.AccountID)
+		_, err = tx.CreateConfigChangeLog(ctx, s.ids.Generate(), out.ID.Int64(), req.TenantID.Int64(), current.Value, out.Value, id.AccountID)
 		return err
 	})
 	if err != nil {
 		return ConfigDTO{}, err
 	}
-	if err := s.writeAudit(ctx, id, "admin.config.rollback", "system_config", out.ID, map[string]any{"key": key, "change_log_id": req.ChangeLogID}); err != nil {
+	if err := s.writeAudit(ctx, id, "admin.config.rollback", "system_config", out.ID.Int64(), map[string]any{"key": key, "change_log_id": req.ChangeLogID.String()}); err != nil {
 		return ConfigDTO{}, apperr.ErrAdminAuditWriteFailed.WithCause(err)
 	}
 	out.Value = secretmap.Mask(out.Value)
@@ -537,7 +538,7 @@ func (s *Service) CreateAlertRule(ctx context.Context, req AlertRuleRequest) (Al
 	}
 	if !id.IsPlatform {
 		req.Scope = ScopeTenant
-		req.TenantID = id.TenantID
+		req.TenantID = ids.ID(id.TenantID)
 	}
 	if id.IsPlatform && req.Scope == ScopeTenant {
 		return AlertRuleDTO{}, apperr.ErrAdminAlertInvalid
@@ -546,7 +547,7 @@ func (s *Service) CreateAlertRule(ctx context.Context, req AlertRuleRequest) (Al
 		return AlertRuleDTO{}, err
 	}
 	var out AlertRuleDTO
-	err = s.runWrite(ctx, req.TenantID, func(ctx context.Context, tx TxStore) error {
+	err = s.runWrite(ctx, req.TenantID.Int64(), func(ctx context.Context, tx TxStore) error {
 		var err error
 		out, err = tx.CreateAlertRule(ctx, s.ids.Generate(), req)
 		return err
@@ -554,7 +555,7 @@ func (s *Service) CreateAlertRule(ctx context.Context, req AlertRuleRequest) (Al
 	if err != nil {
 		return AlertRuleDTO{}, apperr.ErrAdminAlertInvalid.WithCause(err)
 	}
-	if err := s.writeAudit(ctx, id, "admin.alert_rule.create", "alert_rule", out.ID, map[string]any{"scope": out.Scope, "tenant_id": out.TenantID, "metric": out.Metric, "level": out.Level}); err != nil {
+	if err := s.writeAudit(ctx, id, "admin.alert_rule.create", "alert_rule", out.ID.Int64(), map[string]any{"scope": out.Scope, "tenant_id": out.TenantID.String(), "metric": out.Metric, "level": out.Level}); err != nil {
 		return AlertRuleDTO{}, apperr.ErrAdminAuditWriteFailed.WithCause(err)
 	}
 	return out, nil
@@ -568,7 +569,7 @@ func (s *Service) UpdateAlertRule(ctx context.Context, ruleID int64, req AlertRu
 	}
 	if !id.IsPlatform {
 		req.Scope = ScopeTenant
-		req.TenantID = id.TenantID
+		req.TenantID = ids.ID(id.TenantID)
 	}
 	if id.IsPlatform && req.Scope == ScopeTenant {
 		return AlertRuleDTO{}, apperr.ErrAdminAlertInvalid
@@ -577,7 +578,7 @@ func (s *Service) UpdateAlertRule(ctx context.Context, ruleID int64, req AlertRu
 		return AlertRuleDTO{}, err
 	}
 	var out AlertRuleDTO
-	err = s.runWrite(ctx, req.TenantID, func(ctx context.Context, tx TxStore) error {
+	err = s.runWrite(ctx, req.TenantID.Int64(), func(ctx context.Context, tx TxStore) error {
 		var err error
 		out, err = tx.UpdateAlertRule(ctx, ruleID, req)
 		return err
@@ -585,7 +586,7 @@ func (s *Service) UpdateAlertRule(ctx context.Context, ruleID int64, req AlertRu
 	if err != nil {
 		return AlertRuleDTO{}, apperr.ErrAdminAlertNotFound.WithCause(err)
 	}
-	if err := s.writeAudit(ctx, id, "admin.alert_rule.update", "alert_rule", out.ID, map[string]any{"scope": out.Scope, "tenant_id": out.TenantID, "metric": out.Metric, "level": out.Level}); err != nil {
+	if err := s.writeAudit(ctx, id, "admin.alert_rule.update", "alert_rule", out.ID.Int64(), map[string]any{"scope": out.Scope, "tenant_id": out.TenantID.String(), "metric": out.Metric, "level": out.Level}); err != nil {
 		return AlertRuleDTO{}, apperr.ErrAdminAuditWriteFailed.WithCause(err)
 	}
 	return out, nil
@@ -631,7 +632,7 @@ func (s *Service) HandleAlertEvent(ctx context.Context, eventID int64, req Alert
 	}
 	if out.TenantID > 0 {
 		if err := s.notify.Push(ctx, contracts.NotifyPushRequest{
-			TenantID: out.TenantID,
+			TenantID: out.TenantID.Int64(),
 			Topic:    fmt.Sprintf("tenant:%d:alert", out.TenantID),
 			Payload: map[string]any{
 				"event_id":   out.ID,
@@ -644,7 +645,7 @@ func (s *Service) HandleAlertEvent(ctx context.Context, eventID int64, req Alert
 			return AlertEventDTO{}, apperr.ErrAdminAlertInvalid.WithCause(err)
 		}
 	}
-	if err := s.writeAudit(ctx, id, "admin.alert.handle", "alert_event", out.ID, map[string]any{"status": out.Status}); err != nil {
+	if err := s.writeAudit(ctx, id, "admin.alert.handle", "alert_event", out.ID.Int64(), map[string]any{"status": out.Status}); err != nil {
 		return AlertEventDTO{}, apperr.ErrAdminAuditWriteFailed.WithCause(err)
 	}
 	return out, nil
@@ -739,7 +740,7 @@ func (s *Service) requireTenantAdmin(ctx context.Context) (tenant.Identity, erro
 
 // validateAlertRule 校验告警规则范围、指标和等级。
 func validateAlertRule(req AlertRuleRequest) error {
-	if err := validateScopeTenant(req.Scope, req.TenantID); err != nil {
+	if err := validateScopeTenant(req.Scope, req.TenantID.Int64()); err != nil {
 		return apperr.ErrAdminAlertInvalid
 	}
 	if strings.TrimSpace(req.Name) == "" || strings.TrimSpace(req.Metric) == "" || req.Level < 1 || req.Level > 4 {

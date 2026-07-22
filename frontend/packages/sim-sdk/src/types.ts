@@ -17,10 +17,10 @@ export type FrameIntent = 'observe' | 'compare' | 'verify' | 'debug' | 'attack' 
 
 export interface SimPackage<TState extends SimState = SimState> {
   meta: SimMeta;
-  initState: (params: SimInitParams, seed: number) => TState;
-  reducer: (state: TState, event: SimEvent, context: ReducerContext) => TState;
+  initState(params: SimInitParams, seed: number): TState;
+  reducer(state: TState, event: SimEvent, context: ReducerContext): TState;
   interactions: InteractionDef[];
-  render: (state: TState) => TeachingFrame;
+  render(state: TState): TeachingFrame;
   narrative: NarrativeStep[];
   codeTrace: CodeTraceDef;
   checkpoints: CheckpointDef[];

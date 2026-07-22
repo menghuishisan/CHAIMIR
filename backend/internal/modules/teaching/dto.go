@@ -1,10 +1,12 @@
 // teaching dto 文件定义 M6 HTTP 请求与响应结构。
 package teaching
 
+import "chaimir/internal/platform/ids"
+
 type CourseDTO struct {
-	ID          int64          `json:"id"`
-	TenantID    int64          `json:"tenant_id"`
-	TeacherID   int64          `json:"teacher_id"`
+	ID          ids.ID         `json:"id"`
+	TenantID    ids.ID         `json:"tenant_id"`
+	TeacherID   ids.ID         `json:"teacher_id"`
 	Name        string         `json:"name"`
 	Description string         `json:"description"`
 	Type        int16          `json:"type"`
@@ -45,8 +47,8 @@ type ChapterRequest struct {
 }
 
 type ChapterDTO struct {
-	ID        int64  `json:"id"`
-	CourseID  int64  `json:"course_id"`
+	ID        ids.ID `json:"id"`
+	CourseID  ids.ID `json:"course_id"`
 	Title     string `json:"title"`
 	Sort      int32  `json:"sort"`
 	CreatedAt string `json:"created_at"`
@@ -61,8 +63,8 @@ type LessonRequest struct {
 }
 
 type LessonDTO struct {
-	ID          int64          `json:"id"`
-	ChapterID   int64          `json:"chapter_id"`
+	ID          ids.ID         `json:"id"`
+	ChapterID   ids.ID         `json:"chapter_id"`
 	Title       string         `json:"title"`
 	ContentType int16          `json:"content_type"`
 	ContentRef  map[string]any `json:"content_ref"`
@@ -83,20 +85,20 @@ type JoinCourseRequest struct {
 }
 
 type BatchMembersRequest struct {
-	StudentIDs []int64 `json:"student_ids"`
+	StudentIDs []ids.ID `json:"student_ids"`
 }
 
 type MemberDTO struct {
-	ID        int64  `json:"id"`
-	CourseID  int64  `json:"course_id"`
-	StudentID int64  `json:"student_id"`
+	ID        ids.ID `json:"id"`
+	CourseID  ids.ID `json:"course_id"`
+	StudentID ids.ID `json:"student_id"`
 	JoinMode  int16  `json:"join_mode"`
 	JoinedAt  string `json:"joined_at"`
 }
 
 type AssignmentRequest struct {
 	Title       string                `json:"title"`
-	ChapterID   int64                 `json:"chapter_id"`
+	ChapterID   ids.ID                `json:"chapter_id"`
 	DueAt       string                `json:"due_at"`
 	MaxAttempts int32                 `json:"max_attempts"`
 	LatePolicy  int16                 `json:"late_policy"`
@@ -114,10 +116,10 @@ type AssignmentItemInput struct {
 }
 
 type AssignmentDTO struct {
-	ID          int64          `json:"id"`
-	CourseID    int64          `json:"course_id"`
+	ID          ids.ID         `json:"id"`
+	CourseID    ids.ID         `json:"course_id"`
 	Title       string         `json:"title"`
-	ChapterID   int64          `json:"chapter_id,omitempty"`
+	ChapterID   ids.ID         `json:"chapter_id,omitempty"`
 	DueAt       string         `json:"due_at"`
 	MaxAttempts int32          `json:"max_attempts"`
 	LatePolicy  int16          `json:"late_policy"`
@@ -128,7 +130,7 @@ type AssignmentDTO struct {
 }
 
 type AssignmentItemDTO struct {
-	ID          int64          `json:"id"`
+	ID          ids.ID         `json:"id"`
 	ItemCode    string         `json:"item_code"`
 	ItemVersion string         `json:"item_version"`
 	Score       int32          `json:"score"`
@@ -151,8 +153,8 @@ type DraftRequest struct {
 }
 
 type DraftDTO struct {
-	AssignmentID int64          `json:"assignment_id"`
-	StudentID    int64          `json:"student_id"`
+	AssignmentID ids.ID         `json:"assignment_id"`
+	StudentID    ids.ID         `json:"student_id"`
 	Content      map[string]any `json:"content"`
 	UpdatedAt    string         `json:"updated_at"`
 	Exists       bool           `json:"exists"`
@@ -168,9 +170,9 @@ type GradeSubmissionRequest struct {
 }
 
 type SubmissionDTO struct {
-	ID           int64          `json:"id"`
-	AssignmentID int64          `json:"assignment_id"`
-	StudentID    int64          `json:"student_id"`
+	ID           ids.ID         `json:"id"`
+	AssignmentID ids.ID         `json:"assignment_id"`
+	StudentID    ids.ID         `json:"student_id"`
 	AttemptNo    int32          `json:"attempt_no"`
 	Content      map[string]any `json:"content"`
 	JudgeTaskRef string         `json:"judge_task_ref,omitempty"`
@@ -190,8 +192,8 @@ type ProgressRequest struct {
 }
 
 type ProgressDTO struct {
-	LessonID    int64  `json:"lesson_id"`
-	StudentID   int64  `json:"student_id"`
+	LessonID    ids.ID `json:"lesson_id"`
+	StudentID   ids.ID `json:"student_id"`
 	Status      int16  `json:"status"`
 	VideoPos    int32  `json:"video_pos"`
 	DurationSec int32  `json:"duration_sec"`
@@ -199,23 +201,23 @@ type ProgressDTO struct {
 }
 
 type ProgressStatsDTO struct {
-	CourseID            int64 `json:"course_id"`
-	MemberCount         int64 `json:"member_count"`
-	LessonCount         int64 `json:"lesson_count"`
-	CompletedCount      int64 `json:"completed_count"`
-	LearningDurationSec int64 `json:"learning_duration_sec"`
+	CourseID            ids.ID `json:"course_id"`
+	MemberCount         int64  `json:"member_count"`
+	LessonCount         int64  `json:"lesson_count"`
+	CompletedCount      int64  `json:"completed_count"`
+	LearningDurationSec int64  `json:"learning_duration_sec"`
 }
 
 type PostRequest struct {
-	ParentID int64  `json:"parent_id"`
+	ParentID ids.ID `json:"parent_id"`
 	Content  string `json:"content"`
 }
 
 type PostDTO struct {
-	ID        int64  `json:"id"`
-	CourseID  int64  `json:"course_id"`
-	ParentID  int64  `json:"parent_id,omitempty"`
-	AuthorID  int64  `json:"author_id"`
+	ID        ids.ID `json:"id"`
+	CourseID  ids.ID `json:"course_id"`
+	ParentID  ids.ID `json:"parent_id,omitempty"`
+	AuthorID  ids.ID `json:"author_id"`
 	Content   string `json:"content"`
 	IsPinned  bool   `json:"is_pinned"`
 	LikeCount int32  `json:"like_count"`
@@ -229,8 +231,8 @@ type AnnouncementRequest struct {
 }
 
 type AnnouncementDTO struct {
-	ID        int64  `json:"id"`
-	CourseID  int64  `json:"course_id"`
+	ID        ids.ID `json:"id"`
+	CourseID  ids.ID `json:"course_id"`
 	Title     string `json:"title"`
 	Content   string `json:"content"`
 	IsPinned  bool   `json:"is_pinned"`
@@ -243,9 +245,9 @@ type ReviewRequest struct {
 }
 
 type ReviewDTO struct {
-	ID        int64  `json:"id"`
-	CourseID  int64  `json:"course_id"`
-	StudentID int64  `json:"student_id"`
+	ID        ids.ID `json:"id"`
+	CourseID  ids.ID `json:"course_id"`
+	StudentID ids.ID `json:"student_id"`
 	Rating    int16  `json:"rating"`
 	Comment   string `json:"comment"`
 	CreatedAt string `json:"created_at"`
@@ -262,7 +264,7 @@ type GradeWeightInput struct {
 }
 
 type GradeWeightDTO struct {
-	ID         int64   `json:"id"`
+	ID         ids.ID  `json:"id"`
 	SourceType int16   `json:"source_type"`
 	SourceRef  string  `json:"source_ref"`
 	Weight     float64 `json:"weight"`
@@ -273,8 +275,8 @@ type OverrideGradeRequest struct {
 }
 
 type GradeDTO struct {
-	CourseID      int64   `json:"course_id"`
-	StudentID     int64   `json:"student_id"`
+	CourseID      ids.ID  `json:"course_id"`
+	StudentID     ids.ID  `json:"student_id"`
 	AutoTotal     float64 `json:"auto_total"`
 	OverrideTotal float64 `json:"override_total,omitempty"`
 	FinalTotal    float64 `json:"final_total"`

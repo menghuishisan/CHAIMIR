@@ -10,11 +10,11 @@ import { nonceOrderingSimulation } from './nonce-ordering/package';
 import { transactionLifecycleSimulation } from './transaction-lifecycle/package';
 
 export const transactionRuntimeSimulations: SimPackage[] = [
-  transactionLifecycleSimulation as unknown as SimPackage,
-  nonceOrderingSimulation as unknown as SimPackage,
-  mempoolReplacementSimulation as unknown as SimPackage,
-  gasMeteringSimulation as unknown as SimPackage,
-  eip1559FeeMarketSimulation as unknown as SimPackage,
-  evmCallStackSimulation as unknown as SimPackage,
-  blockValidationSimulation as unknown as SimPackage,
+  transactionLifecycleSimulation,
+  nonceOrderingSimulation,
+  mempoolReplacementSimulation,
+  gasMeteringSimulation,
+  eip1559FeeMarketSimulation,
+  evmCallStackSimulation,
+  blockValidationSimulation,
 ];

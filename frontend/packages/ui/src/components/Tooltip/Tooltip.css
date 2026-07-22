@@ -1,8 +1,11 @@
 /* Tooltip 组件样式：短提示、键盘焦点可见、无布局抖动。 */
 
-.chaimir-tooltip__content {
-  position: absolute;
+.chaimir-tooltip__positioner {
   z-index: var(--z-dropdown);
+}
+
+.chaimir-tooltip__content {
+  display: block;
   inline-size: max-content;
   max-inline-size: min(18rem, 80vw);
   padding: var(--space-2) var(--space-3);
@@ -17,6 +20,22 @@
   border-radius: var(--radius-sm);
   box-shadow: var(--shadow-glass-elevated);
   animation: chaimir-tooltip-in 0.4s var(--ease-spring-ios) forwards;
+}
+
+.chaimir-tooltip__positioner[data-placement^='top'] .chaimir-tooltip__content {
+  transform-origin: bottom center;
+}
+
+.chaimir-tooltip__positioner[data-placement^='bottom'] .chaimir-tooltip__content {
+  transform-origin: top center;
+}
+
+.chaimir-tooltip__positioner[data-placement^='left'] .chaimir-tooltip__content {
+  transform-origin: right center;
+}
+
+.chaimir-tooltip__positioner[data-placement^='right'] .chaimir-tooltip__content {
+  transform-origin: left center;
 }
 
 @keyframes chaimir-tooltip-in {

@@ -39,6 +39,7 @@ type TxStore interface {
 	ListTools(ctx context.Context) ([]Tool, error)
 	UpsertTool(ctx context.Context, id int64, req ToolRequest, spec ToolResourceSpec) (Tool, error)
 	GetTenantQuota(ctx context.Context, tenantID int64) (TenantQuota, error)
+	EnsureTenantQuota(ctx context.Context, quota TenantQuota) (TenantQuota, error)
 	GetTenantQuotaForUpdate(ctx context.Context, tenantID int64) (TenantQuota, error)
 	UpsertTenantQuota(ctx context.Context, quota TenantQuota) (TenantQuota, error)
 	CountActiveSandboxes(ctx context.Context, tenantID int64) (int64, error)
@@ -349,6 +350,33 @@ func (s *txStore) GetTenantQuota(ctx context.Context, tenantID int64) (TenantQuo
 		return TenantQuota{}, err
 	}
 	return quotaFromRow(row), nil
+}
+
+// EnsureTenantQuota 只在缺失时写入默认配额,冲突时返回现有管理员配置。
+func (s *txStore) EnsureTenantQuota(ctx context.Context, quota TenantQuota) (TenantQuota, error) {
+	row, err := s.q.EnsureTenantQuota(ctx, sqlcgen.EnsureTenantQuotaParams{
+		TenantID:                quota.TenantID,
+		MaxConcurrentSandbox:    quota.MaxConcurrentSandbox,
+		MaxCpu:                  quota.MaxCPU,
+		MaxMemoryMb:             quota.MaxMemoryMB,
+		IdleTimeoutMin:          quota.IdleTimeoutMin,
+		MaxLifetimeMin:          quota.MaxLifetimeMin,
+		MaxKeepaliveMin:         quota.MaxKeepaliveMin,
+		MaxSnapshotRetentionMin: quota.MaxSnapshotRetentionMin,
+	})
+	if err != nil {
+		return TenantQuota{}, err
+	}
+	return TenantQuota{
+		TenantID:                row.TenantID,
+		MaxConcurrentSandbox:    row.MaxConcurrentSandbox,
+		MaxCPU:                  row.MaxCpu,
+		MaxMemoryMB:             row.MaxMemoryMb,
+		IdleTimeoutMin:          row.IdleTimeoutMin,
+		MaxLifetimeMin:          row.MaxLifetimeMin,
+		MaxKeepaliveMin:         row.MaxKeepaliveMin,
+		MaxSnapshotRetentionMin: row.MaxSnapshotRetentionMin,
+	}, nil
 }
 
 // GetTenantQuotaForUpdate 查询租户资源配额并加锁,防止创建并发竞态。

@@ -311,6 +311,19 @@ func (q *Queries) CountProblemSolvedTeams(ctx context.Context, arg CountProblemS
 	return column_1, err
 }
 
+const countStudentContests = `-- name: CountStudentContests :one
+SELECT COUNT(*)::bigint
+FROM contest
+WHERE tenant_id = $1 AND deleted_at IS NULL AND status BETWEEN 2 AND 6
+`
+
+func (q *Queries) CountStudentContests(ctx context.Context, tenantID int64) (int64, error) {
+	row := q.db.QueryRow(ctx, countStudentContests, tenantID)
+	var column_1 int64
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
 const countVulnProblems = `-- name: CountVulnProblems :one
 SELECT count(*)::bigint
 FROM vuln_problem
@@ -583,40 +596,6 @@ func (q *Queries) CreateOrUpdateLadderRank(ctx context.Context, arg CreateOrUpda
 		&i.LastSolveAt,
 		&i.Rank,
 		&i.UpdatedAt,
-	)
-	return i, err
-}
-
-const createResultSnapshot = `-- name: CreateResultSnapshot :one
-INSERT INTO contest_result_snapshot (id, tenant_id, contest_id, final_ranking, generated_at)
-VALUES ($1, $2, $3, $4, now())
-ON CONFLICT (tenant_id, contest_id) DO UPDATE
-SET final_ranking = EXCLUDED.final_ranking,
-    generated_at = now()
-RETURNING id, tenant_id, contest_id, final_ranking, generated_at
-`
-
-type CreateResultSnapshotParams struct {
-	ID           int64  `json:"id"`
-	TenantID     int64  `json:"tenant_id"`
-	ContestID    int64  `json:"contest_id"`
-	FinalRanking []byte `json:"final_ranking"`
-}
-
-func (q *Queries) CreateResultSnapshot(ctx context.Context, arg CreateResultSnapshotParams) (ContestResultSnapshot, error) {
-	row := q.db.QueryRow(ctx, createResultSnapshot,
-		arg.ID,
-		arg.TenantID,
-		arg.ContestID,
-		arg.FinalRanking,
-	)
-	var i ContestResultSnapshot
-	err := row.Scan(
-		&i.ID,
-		&i.TenantID,
-		&i.ContestID,
-		&i.FinalRanking,
-		&i.GeneratedAt,
 	)
 	return i, err
 }
@@ -1070,25 +1049,27 @@ func (q *Queries) GetLadderByTeam(ctx context.Context, arg GetLadderByTeamParams
 	return i, err
 }
 
-const getResultSnapshot = `-- name: GetResultSnapshot :one
-SELECT id, tenant_id, contest_id, final_ranking, generated_at
-FROM contest_result_snapshot
-WHERE tenant_id = $1 AND contest_id = $2
+const getLadderSnapshot = `-- name: GetLadderSnapshot :one
+SELECT id, tenant_id, contest_id, snapshot_status, ranking, generated_at
+FROM contest_ladder_snapshot
+WHERE tenant_id = $1 AND contest_id = $2 AND snapshot_status = $3
 `
 
-type GetResultSnapshotParams struct {
-	TenantID  int64 `json:"tenant_id"`
-	ContestID int64 `json:"contest_id"`
+type GetLadderSnapshotParams struct {
+	TenantID       int64 `json:"tenant_id"`
+	ContestID      int64 `json:"contest_id"`
+	SnapshotStatus int16 `json:"snapshot_status"`
 }
 
-func (q *Queries) GetResultSnapshot(ctx context.Context, arg GetResultSnapshotParams) (ContestResultSnapshot, error) {
-	row := q.db.QueryRow(ctx, getResultSnapshot, arg.TenantID, arg.ContestID)
-	var i ContestResultSnapshot
+func (q *Queries) GetLadderSnapshot(ctx context.Context, arg GetLadderSnapshotParams) (ContestLadderSnapshot, error) {
+	row := q.db.QueryRow(ctx, getLadderSnapshot, arg.TenantID, arg.ContestID, arg.SnapshotStatus)
+	var i ContestLadderSnapshot
 	err := row.Scan(
 		&i.ID,
 		&i.TenantID,
 		&i.ContestID,
-		&i.FinalRanking,
+		&i.SnapshotStatus,
+		&i.Ranking,
 		&i.GeneratedAt,
 	)
 	return i, err
@@ -1843,6 +1824,58 @@ func (q *Queries) ListStudentContestRecords(ctx context.Context, arg ListStudent
 	return items, nil
 }
 
+const listStudentContests = `-- name: ListStudentContests :many
+SELECT id, tenant_id, organizer_id, name, mode, match_mode, team_mode, signup_start, signup_end, start_at, end_at, freeze_minutes, rules, status, created_at, updated_at, deleted_at
+FROM contest
+WHERE tenant_id = $1 AND deleted_at IS NULL AND status BETWEEN 2 AND 6
+ORDER BY updated_at DESC, id DESC
+LIMIT $2 OFFSET $3
+`
+
+type ListStudentContestsParams struct {
+	TenantID int64 `json:"tenant_id"`
+	Limit    int32 `json:"limit"`
+	Offset   int32 `json:"offset"`
+}
+
+func (q *Queries) ListStudentContests(ctx context.Context, arg ListStudentContestsParams) ([]Contest, error) {
+	rows, err := q.db.Query(ctx, listStudentContests, arg.TenantID, arg.Limit, arg.Offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Contest{}
+	for rows.Next() {
+		var i Contest
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.OrganizerID,
+			&i.Name,
+			&i.Mode,
+			&i.MatchMode,
+			&i.TeamMode,
+			&i.SignupStart,
+			&i.SignupEnd,
+			&i.StartAt,
+			&i.EndAt,
+			&i.FreezeMinutes,
+			&i.Rules,
+			&i.Status,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.DeletedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listTeamMembers = `-- name: ListTeamMembers :many
 SELECT id, tenant_id, team_id, account_id, member_tenant_id, is_leader, joined_at
 FROM team_member
@@ -2471,6 +2504,43 @@ func (q *Queries) UpsertContestProblem(ctx context.Context, arg UpsertContestPro
 		&i.BattleConfig,
 		&i.BattleRule,
 		&i.Seq,
+	)
+	return i, err
+}
+
+const upsertLadderSnapshot = `-- name: UpsertLadderSnapshot :one
+INSERT INTO contest_ladder_snapshot (id, tenant_id, contest_id, snapshot_status, ranking, generated_at)
+VALUES ($1, $2, $3, $4, $5, now())
+ON CONFLICT (tenant_id, contest_id, snapshot_status) DO UPDATE
+SET ranking = EXCLUDED.ranking,
+    generated_at = now()
+RETURNING id, tenant_id, contest_id, snapshot_status, ranking, generated_at
+`
+
+type UpsertLadderSnapshotParams struct {
+	ID             int64  `json:"id"`
+	TenantID       int64  `json:"tenant_id"`
+	ContestID      int64  `json:"contest_id"`
+	SnapshotStatus int16  `json:"snapshot_status"`
+	Ranking        []byte `json:"ranking"`
+}
+
+func (q *Queries) UpsertLadderSnapshot(ctx context.Context, arg UpsertLadderSnapshotParams) (ContestLadderSnapshot, error) {
+	row := q.db.QueryRow(ctx, upsertLadderSnapshot,
+		arg.ID,
+		arg.TenantID,
+		arg.ContestID,
+		arg.SnapshotStatus,
+		arg.Ranking,
+	)
+	var i ContestLadderSnapshot
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.ContestID,
+		&i.SnapshotStatus,
+		&i.Ranking,
+		&i.GeneratedAt,
 	)
 	return i, err
 }

@@ -2,7 +2,7 @@
 DROP POLICY IF EXISTS vuln_problem_tenant_rls ON vuln_problem;
 DROP POLICY IF EXISTS vuln_source_tenant_rls ON vuln_source;
 DROP POLICY IF EXISTS cheat_record_tenant_rls ON cheat_record;
-DROP POLICY IF EXISTS contest_result_snapshot_tenant_rls ON contest_result_snapshot;
+DROP POLICY IF EXISTS contest_ladder_snapshot_tenant_rls ON contest_ladder_snapshot;
 DROP POLICY IF EXISTS ladder_rank_tenant_rls ON ladder_rank;
 DROP POLICY IF EXISTS battle_match_tenant_rls ON battle_match;
 DROP POLICY IF EXISTS battle_entry_tenant_rls ON battle_entry;
@@ -17,7 +17,7 @@ DROP INDEX IF EXISTS uniq_vuln_problem_source_external;
 DROP TABLE IF EXISTS vuln_problem;
 DROP TABLE IF EXISTS vuln_source;
 DROP TABLE IF EXISTS cheat_record;
-DROP TABLE IF EXISTS contest_result_snapshot;
+DROP TABLE IF EXISTS contest_ladder_snapshot;
 DROP TABLE IF EXISTS ladder_rank;
 DROP TABLE IF EXISTS battle_match;
 DROP TABLE IF EXISTS battle_entry;

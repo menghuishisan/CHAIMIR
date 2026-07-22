@@ -18,7 +18,7 @@ const TeacherExperimentOrchestrationPage: React.FC = () => {
   const [searchParams, setSearchParams] = useSearchParams()
   const id = searchParams.get('id')
   const [form, setForm] = useState<ExperimentRequest>({
-    course_id: 0,
+    course_id: '',
     template_ref: '',
     template_version: '',
     name: '',
@@ -123,7 +123,7 @@ const TeacherExperimentOrchestrationPage: React.FC = () => {
     if (!groupId.trim() || !studentId.trim()) return
     setMessage('')
     try {
-      await api.experiment.upsertGroupMember(groupId.trim(), { student_id: Number(studentId), role: memberRole.trim() || 'member' })
+      await api.experiment.upsertGroupMember(groupId.trim(), { student_id: studentId.trim(), role: memberRole.trim() || 'member' })
       setGroup(await api.experiment.getGroup(groupId.trim()))
       setMessage('小组成员已保存。')
     } catch (error) {
@@ -169,7 +169,7 @@ const TeacherExperimentOrchestrationPage: React.FC = () => {
             </div>
             <div className={styles.field}>
               <label className={styles.label} htmlFor="course-id">课程编号</label>
-              <Input id="course-id" type="number" value={form.course_id} onChange={(event) => setForm((current) => ({ ...current, course_id: Number(event.target.value) }))} fullWidth />
+              <Input id="course-id" inputMode="numeric" value={form.course_id} onChange={(event) => setForm((current) => ({ ...current, course_id: event.target.value }))} fullWidth />
             </div>
             <div className={styles.field}>
               <label className={styles.label} htmlFor="template-ref">模板引用</label>
@@ -197,9 +197,7 @@ const TeacherExperimentOrchestrationPage: React.FC = () => {
             <label className={styles.label} htmlFor="description">实验说明</label>
             <Textarea id="description" rows={5} value={form.description} onChange={(event) => setForm((current) => ({ ...current, description: event.target.value }))} fullWidth />
           </div>
-          <Checkbox checked={form.require_report} onChange={(event) => setForm((current) => ({ ...current, require_report: event.target.checked }))}>
-            学生需要提交实验报告
-          </Checkbox>
+          <Checkbox label="学生需要提交实验报告" checked={form.require_report} onChange={(event) => setForm((current) => ({ ...current, require_report: event.target.checked }))} />
         </section>
 
         <aside className={`${styles.panel} ${styles.section}`}>
@@ -212,7 +210,7 @@ const TeacherExperimentOrchestrationPage: React.FC = () => {
             <label className={styles.label} htmlFor="group-config">协作配置</label>
             <Textarea id="group-config" className={styles.jsonEditor} value={groupText} onChange={(event) => setGroupText(event.target.value)} resize="vertical" fullWidth />
           </div>
-          <p className={styles.muted}>组件配置会原样保存到后端实验定义，用于实例创建、阶段解锁、检查点判分和仿真会话绑定。</p>
+          <p className={styles.muted}>组件配置将用于创建实验环境、解锁阶段、检查点判分和绑定仿真会话。</p>
         </aside>
       </div>
       {id && form.collab_mode !== ExperimentCollabMode.SOLO && (
@@ -236,9 +234,10 @@ const TeacherExperimentOrchestrationPage: React.FC = () => {
   )
 }
 
+/** toRequest 将服务端实验详情转换为编辑表单可提交的请求结构。 */
 function toRequest(experiment: Experiment): ExperimentRequest {
   return {
-    course_id: Number(experiment.course_id ?? 0),
+    course_id: experiment.course_id ?? '',
     template_ref: experiment.template_ref ?? '',
     template_version: experiment.template_version ?? '',
     name: experiment.name,

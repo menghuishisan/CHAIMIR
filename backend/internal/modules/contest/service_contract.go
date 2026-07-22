@@ -5,6 +5,7 @@ import (
 	"context"
 
 	"chaimir/internal/contracts"
+	"chaimir/internal/platform/ids"
 )
 
 // Stats 读取租户级竞赛统计,供 M9 学校看板聚合。
@@ -67,7 +68,7 @@ func (s *Service) ListMyContestRecords(ctx context.Context) ([]ContestRecordDTO,
 	}
 	out := make([]ContestRecordDTO, 0, len(records))
 	for _, item := range records {
-		out = append(out, ContestRecordDTO{ContestID: item.ContestID, TeamID: item.TeamID, Score: item.Score, Rank: item.Rank, ContestName: item.ContestName, ContestStatus: item.ContestStatus})
+		out = append(out, ContestRecordDTO{ContestID: ids.ID(item.ContestID), TeamID: ids.ID(item.TeamID), Score: item.Score, Rank: item.Rank, ContestName: item.ContestName, ContestStatus: item.ContestStatus})
 	}
 	return out, nil
 }

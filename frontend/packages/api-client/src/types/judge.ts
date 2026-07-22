@@ -1,12 +1,14 @@
 // ===== M3 Judge 模块 =====
 
 import type { JudgeTaskStatus, JudgerStatus, JudgerType } from '../constants/judge'
+import type { SnowflakeID } from './common'
+import type { WorkloadComponent } from './workload'
 
 export interface JudgeTask {
-  task_id: string
-  tenant_id: string
+  task_id: SnowflakeID
+  tenant_id: SnowflakeID
   source_ref: string
-  submitter_id: string
+  submitter_id: SnowflakeID
   status: JudgeTaskStatus
   existing?: boolean
   result?: JudgeTaskResult
@@ -46,12 +48,27 @@ export interface JudgerRequest {
   executor_ref: string
   runtime_required: boolean
   default_timeout_sec: number
-  resource_spec: Record<string, unknown>
+  resource_spec: JudgerResourceSpec
   status: JudgerStatus
 }
 
+export interface JudgerResourceSpec {
+  runtime_code?: string
+  runtime_image_version?: string
+  genesis_ref?: string
+  tool_codes?: string[]
+  init_script_ref?: string
+  command?: string[]
+  exec_target?: string
+  execution_sidecars?: WorkloadComponent[]
+  timeout_sec?: number
+  max_retries?: number
+  suite_archive_name?: string
+  selftest?: Record<string, unknown>
+}
+
 export interface Judger extends JudgerRequest {
-  id: string
+  id: SnowflakeID
   created_at?: string
   updated_at?: string
 }

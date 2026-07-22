@@ -30,6 +30,7 @@ func (s *Service) SubmitBattleEntry(ctx context.Context, contestID int64, req Ba
 	var entry BattleEntry
 	var opponents []BattleEntry
 	var problem ContestProblem
+	problemID := req.ProblemID.Int64()
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
 		contest, err := tx.GetContest(ctx, id.TenantID, contestID)
 		if err != nil {
@@ -41,7 +42,7 @@ func (s *Service) SubmitBattleEntry(ctx context.Context, contestID int64, req Ba
 		if err := validateContestRunning(contest); err != nil {
 			return err
 		}
-		problem, err = tx.GetContestProblem(ctx, id.TenantID, req.ProblemID)
+		problem, err = tx.GetContestProblem(ctx, id.TenantID, problemID)
 		if err != nil {
 			return err
 		}
@@ -52,18 +53,18 @@ func (s *Service) SubmitBattleEntry(ctx context.Context, contestID int64, req Ba
 		if err != nil {
 			return err
 		}
-		version, err := tx.NextBattleVersion(ctx, id.TenantID, contestID, req.ProblemID, team.ID, req.Role)
+		version, err := tx.NextBattleVersion(ctx, id.TenantID, contestID, problemID, team.ID, req.Role)
 		if err != nil {
 			return err
 		}
-		if err := tx.DeactivateBattleEntries(ctx, id.TenantID, contestID, req.ProblemID, team.ID, req.Role); err != nil {
+		if err := tx.DeactivateBattleEntries(ctx, id.TenantID, contestID, problemID, team.ID, req.Role); err != nil {
 			return err
 		}
-		entry, err = tx.CreateBattleEntry(ctx, BattleEntry{ID: s.ids.Generate(), TenantID: id.TenantID, ContestID: contestID, ProblemID: req.ProblemID, TeamID: team.ID, Role: req.Role, ArtifactRef: req.ArtifactRef, ArtifactHash: req.CodeHash, VersionNo: version})
+		entry, err = tx.CreateBattleEntry(ctx, BattleEntry{ID: s.ids.Generate(), TenantID: id.TenantID, ContestID: contestID, ProblemID: problemID, TeamID: team.ID, Role: req.Role, ArtifactRef: req.ArtifactRef, ArtifactHash: req.CodeHash, VersionNo: version})
 		if err != nil {
 			return err
 		}
-		opponents, err = tx.ListActiveBattleOpponents(ctx, id.TenantID, contestID, req.ProblemID, entry.ID, team.ID, contest.MatchMode, s.cfg.MatchmakerBatchSize, s.cfg.BattleELOInitialScore)
+		opponents, err = tx.ListActiveBattleOpponents(ctx, id.TenantID, contestID, problemID, entry.ID, team.ID, contest.MatchMode, s.cfg.MatchmakerBatchSize, s.cfg.BattleELOInitialScore)
 		if err != nil {
 			return err
 		}
@@ -72,7 +73,7 @@ func (s *Service) SubmitBattleEntry(ctx context.Context, contestID int64, req Ba
 				continue
 			}
 			matchID := s.ids.Generate()
-			if _, err := tx.CreateBattleMatch(ctx, BattleMatch{ID: matchID, TenantID: id.TenantID, ContestID: contestID, ProblemID: req.ProblemID, EntryAID: entry.ID, EntryBID: opponent.ID, SourceRef: battleSourceRef(matchID, timex.Now())}); err != nil {
+			if _, err := tx.CreateBattleMatch(ctx, BattleMatch{ID: matchID, TenantID: id.TenantID, ContestID: contestID, ProblemID: problemID, EntryAID: entry.ID, EntryBID: opponent.ID, SourceRef: battleSourceRef(matchID, timex.Now())}); err != nil {
 				return err
 			}
 		}
@@ -174,7 +175,7 @@ func (s *Service) GetBattleReplay(ctx context.Context, matchID int64) (map[strin
 	if match.ReplayRef == "" {
 		return nil, apperr.ErrContestReplayUnavailable
 	}
-	return map[string]any{"match_id": match.ID, "replay_ref": match.ReplayRef}, nil
+	return map[string]any{"match_id": ids.Format(match.ID), "replay_ref": match.ReplayRef}, nil
 }
 
 // RunMatchmakerOnce 执行一次待对局认领和启动,供统一 background runner 调用。

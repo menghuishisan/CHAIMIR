@@ -71,7 +71,7 @@ const SettingsPage: React.FC = () => {
    */
   const handleMaintenanceToggle = useCallback((enabled: boolean) => {
     if (!maintenanceConfig) {
-      setError('后端尚未返回维护模式配置，无法切换。')
+      setError('维护模式配置尚未就绪，暂时无法切换。')
       return
     }
     handleSave(maintenanceConfig, { ...maintenanceConfig.value, enabled })
@@ -123,7 +123,7 @@ const SettingsPage: React.FC = () => {
             <Settings className={styles.icon} size={28} />
             平台全局参数
           </h1>
-          <p className={styles.subtitle}>读取后端系统配置并按版本保存，敏感值由后端负责脱敏。</p>
+          <p className={styles.subtitle}>维护平台全局参数并查看配置变更记录。</p>
         </div>
         <Button variant="outline" icon={<RefreshCw size={16} />} onClick={resource.reload}>
           刷新
@@ -144,7 +144,7 @@ const SettingsPage: React.FC = () => {
         <div className={formStyles.grid}>
           <section className={formStyles.panel}>
             <h2>维护模式</h2>
-            <p>开启后，平台会按后端策略限制普通用户访问。</p>
+            <p>开启后，普通用户将暂时无法访问平台功能。</p>
             <Switch
               checked={maintenanceEnabled}
               label={maintenanceEnabled ? '已开启' : '已关闭'}

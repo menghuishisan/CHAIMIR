@@ -1,7 +1,11 @@
 // experiment model 文件定义 M7 领域模型和组件编排快照。
 package experiment
 
-import "time"
+import (
+	"time"
+
+	"chaimir/internal/platform/ids"
+)
 
 // Experiment 是实验定义领域模型,组件正本以锁版本引用外部引擎能力。
 type Experiment struct {
@@ -127,7 +131,7 @@ type ExperimentInstance struct {
 type SandboxRef struct {
 	ComponentID string           `json:"component_id"`
 	Stage       int32            `json:"stage"`
-	SandboxID   int64            `json:"sandbox_id"`
+	SandboxID   ids.ID           `json:"sandbox_id"`
 	RuntimeCode string           `json:"runtime_code"`
 	Tools       []SandboxToolDTO `json:"tools"`
 }
@@ -136,7 +140,7 @@ type SandboxRef struct {
 type SimSessionRef struct {
 	ComponentID string `json:"component_id"`
 	Stage       int32  `json:"stage"`
-	SessionID   int64  `json:"session_id"`
+	SessionID   ids.ID `json:"session_id"`
 	PackageCode string `json:"package_code"`
 	Version     string `json:"version"`
 	BundleRef   string `json:"bundle_ref"`

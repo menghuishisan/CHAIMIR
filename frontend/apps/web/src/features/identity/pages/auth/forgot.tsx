@@ -27,13 +27,12 @@ const ForgotPasswordPage: React.FC = () => {
   /**
    * validTenantId 校验后端要求的学校数字编号。
    */
-  const validTenantId = useCallback((): number | null => {
-    const parsedTenantId = Number(tenantId)
-    if (!Number.isInteger(parsedTenantId) || parsedTenantId <= 0) {
+  const validTenantId = useCallback((): string | null => {
+    if (!/^[1-9]\d*$/.test(tenantId)) {
       setError('请输入学校管理员提供的学校编号。')
       return null
     }
-    return parsedTenantId
+    return tenantId
   }, [tenantId])
 
   /**
@@ -119,7 +118,7 @@ const ForgotPasswordPage: React.FC = () => {
         </FormField>
         <div className={styles.inline}>
           <FormField label="短信验证码" htmlFor="reset-code" required>
-            <Input id="reset-code" fullWidth inputMode="numeric" autoComplete="one-time-code" value={code} onChange={(event) => setCode(event.target.value)} />
+            <Input id="reset-code" fullWidth autoCapitalize="characters" autoComplete="one-time-code" value={code} onChange={(event) => setCode(event.target.value)} />
           </FormField>
           <Button className={styles.inlineButton} variant="outline" loading={sendingSms} onClick={handleSendSms}>获取验证码</Button>
         </div>

@@ -351,7 +351,8 @@ func (s *Service) AddCourseMembers(ctx context.Context, courseID int64, req Batc
 			return err
 		}
 		members = make([]CourseMember, 0, len(req.StudentIDs))
-		for _, studentID := range req.StudentIDs {
+		for _, publicStudentID := range req.StudentIDs {
+			studentID := publicStudentID.Int64()
 			if studentID <= 0 {
 				return apperr.ErrTeachingMemberInvalid
 			}

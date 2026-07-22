@@ -72,6 +72,15 @@ type Contest struct {
 	DeletedAt     pgtype.Timestamptz `json:"deleted_at"`
 }
 
+type ContestLadderSnapshot struct {
+	ID             int64              `json:"id"`
+	TenantID       int64              `json:"tenant_id"`
+	ContestID      int64              `json:"contest_id"`
+	SnapshotStatus int16              `json:"snapshot_status"`
+	Ranking        []byte             `json:"ranking"`
+	GeneratedAt    pgtype.Timestamptz `json:"generated_at"`
+}
+
 type ContestProblem struct {
 	ID           int64       `json:"id"`
 	TenantID     int64       `json:"tenant_id"`
@@ -83,14 +92,6 @@ type ContestProblem struct {
 	BattleConfig []byte      `json:"battle_config"`
 	BattleRule   pgtype.Int2 `json:"battle_rule"`
 	Seq          int32       `json:"seq"`
-}
-
-type ContestResultSnapshot struct {
-	ID           int64              `json:"id"`
-	TenantID     int64              `json:"tenant_id"`
-	ContestID    int64              `json:"contest_id"`
-	FinalRanking []byte             `json:"final_ranking"`
-	GeneratedAt  pgtype.Timestamptz `json:"generated_at"`
 }
 
 type SolveSubmission struct {

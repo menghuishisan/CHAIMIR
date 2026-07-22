@@ -14,6 +14,14 @@ FROM grade_level_config
 WHERE is_default = true
 LIMIT 1;
 
+-- name: LockGradeLevelDefaultScope :exec
+SELECT pg_advisory_xact_lock(sqlc.arg(lock_key)::bigint);
+
+-- name: ClearDefaultLevelConfigs :exec
+UPDATE grade_level_config
+SET is_default = false, updated_at = now()
+WHERE is_default = true;
+
 -- name: UpdateLevelConfig :one
 UPDATE grade_level_config
 SET name = $2, mapping = $3, warning_rules = $4, is_default = $5, updated_at = now()
@@ -35,6 +43,12 @@ SELECT id, tenant_id, name, start_date, end_date, is_current
 FROM semester
 WHERE is_current = true
 LIMIT 1;
+
+-- name: LockSemesterCurrentScope :exec
+SELECT pg_advisory_xact_lock(sqlc.arg(lock_key)::bigint);
+
+-- name: ClearCurrentSemesters :exec
+UPDATE semester SET is_current = false WHERE is_current = true;
 
 -- name: CreateGradeReview :one
 INSERT INTO grade_review (id, tenant_id, course_id, semester_id, submitter_id, status, is_locked, comment, submitted_at)
@@ -77,6 +91,20 @@ LIMIT sqlc.arg(page_limit)::int OFFSET sqlc.arg(page_offset)::int;
 SELECT count(*)::bigint
 FROM grade_review
 WHERE (sqlc.arg(status)::smallint = 0 OR status = sqlc.arg(status)::smallint);
+
+-- name: ListOwnGradeReviews :many
+SELECT id, tenant_id, course_id, semester_id, submitter_id, reviewer_id, status, is_locked, comment, submitted_at, reviewed_at
+FROM grade_review
+WHERE submitter_id = sqlc.arg(submitter_id)
+  AND (sqlc.arg(status)::smallint = 0 OR status = sqlc.arg(status)::smallint)
+ORDER BY submitted_at DESC
+LIMIT sqlc.arg(page_limit)::int OFFSET sqlc.arg(page_offset)::int;
+
+-- name: CountOwnGradeReviews :one
+SELECT count(*)::bigint
+FROM grade_review
+WHERE submitter_id = sqlc.arg(submitter_id)
+  AND (sqlc.arg(status)::smallint = 0 OR status = sqlc.arg(status)::smallint);
 
 -- name: ApproveGradeReview :one
 UPDATE grade_review

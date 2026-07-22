@@ -1,9 +1,11 @@
 // notify dto 文件定义 M10 HTTP 请求结构。
 package notify
 
+import "chaimir/internal/platform/ids"
+
 // SendRequest 是内部通知发送请求。
 type SendRequest struct {
-	TenantID  int64             `json:"tenant_id,string"`
+	TenantID  ids.ID            `json:"tenant_id"`
 	Type      string            `json:"type"`
 	Receivers []int64           `json:"receivers"`
 	Params    map[string]string `json:"params"`
@@ -12,7 +14,7 @@ type SendRequest struct {
 
 // PushRequest 是内部实时推送请求。
 type PushRequest struct {
-	TenantID int64          `json:"tenant_id,string"`
+	TenantID ids.ID         `json:"tenant_id"`
 	Topic    string         `json:"topic"`
 	Payload  map[string]any `json:"payload"`
 }

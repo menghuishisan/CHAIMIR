@@ -24,7 +24,7 @@ func (s *Service) CreateAssignment(ctx context.Context, courseID int64, req Assi
 	if err != nil {
 		return AssignmentDetailDTO{}, err
 	}
-	assignment := Assignment{ID: s.ids.Generate(), TenantID: id.TenantID, CourseID: courseID, Title: req.Title, ChapterID: req.ChapterID, DueAt: due, MaxAttempts: req.MaxAttempts, LatePolicy: req.LatePolicy, LatePenalty: req.LatePenalty, Status: AssignmentStatusDraft}
+	assignment := Assignment{ID: s.ids.Generate(), TenantID: id.TenantID, CourseID: courseID, Title: req.Title, ChapterID: req.ChapterID.Int64(), DueAt: due, MaxAttempts: req.MaxAttempts, LatePolicy: req.LatePolicy, LatePenalty: req.LatePenalty, Status: AssignmentStatusDraft}
 	items := make([]AssignmentItem, 0, len(req.Items))
 	for _, item := range req.Items {
 		items = append(items, AssignmentItem{ID: s.ids.Generate(), TenantID: id.TenantID, AssignmentID: assignment.ID, ItemCode: item.ItemCode, ItemVersion: item.ItemVersion, Score: item.Score, Seq: item.Seq, GradingMode: item.GradingMode, JudgerCode: item.JudgerCode})
@@ -82,7 +82,7 @@ func (s *Service) UpdateAssignment(ctx context.Context, assignmentID int64, req 
 		if err := ensureTeacherOwned(course, id.AccountID); err != nil {
 			return err
 		}
-		current.Title, current.ChapterID, current.DueAt, current.MaxAttempts, current.LatePolicy, current.LatePenalty = req.Title, req.ChapterID, due, req.MaxAttempts, req.LatePolicy, req.LatePenalty
+		current.Title, current.ChapterID, current.DueAt, current.MaxAttempts, current.LatePolicy, current.LatePenalty = req.Title, req.ChapterID.Int64(), due, req.MaxAttempts, req.LatePolicy, req.LatePenalty
 		assignment, err = tx.UpdateAssignment(ctx, current)
 		if err != nil {
 			return err
@@ -224,7 +224,7 @@ func (s *Service) GetDraft(ctx context.Context, assignmentID int64) (DraftDTO, e
 		return DraftDTO{}, mapAssignmentError(err)
 	}
 	if draft.ID == 0 {
-		return DraftDTO{AssignmentID: assignmentID, StudentID: id.AccountID, Content: map[string]any{}, Exists: false}, nil
+		return DraftDTO{AssignmentID: ids.ID(assignmentID), StudentID: ids.ID(id.AccountID), Content: map[string]any{}, Exists: false}, nil
 	}
 	return draftDTO(draft)
 }

@@ -1,6 +1,6 @@
 // API 客户端核心：封装后端统一信封、鉴权头、trace_id 透传和用户向错误。
 
-import axios, { AxiosInstance, AxiosError, InternalAxiosRequestConfig } from 'axios'
+import axios, { AxiosInstance, AxiosError, AxiosRequestConfig, InternalAxiosRequestConfig } from 'axios'
 import { API_BASE_PATH, API_ERROR_MESSAGES } from './constants'
 
 export interface ApiConfig {
@@ -8,6 +8,8 @@ export interface ApiConfig {
   wsBaseURL?: string
   timeout?: number
   getToken?: () => string | null
+  getRefreshToken?: () => string | null
+  onTokensRefreshed?: (tokens: TokenRefreshResponse) => void
   onUnauthorized?: () => void
   getTraceId?: () => string | null
 }
@@ -26,9 +28,20 @@ export interface ApiError {
   status?: number
 }
 
+export interface TokenRefreshResponse {
+  access_token: string
+  refresh_token: string
+  must_change_pwd?: boolean
+}
+
+interface RetriableRequestConfig extends InternalAxiosRequestConfig {
+  chaimirRetried?: boolean
+}
+
 export class ApiClient {
   private client: AxiosInstance
   private config: ApiConfig
+  private refreshPromise: Promise<void> | null = null
 
   /**
    * constructor 创建绑定后端统一 API 根路径的 Axios 客户端。
@@ -86,14 +99,69 @@ export class ApiClient {
         // 返回 data 字段
         return (apiResponse.data !== undefined ? apiResponse.data : apiResponse) as never
       },
-      (error: AxiosError) => {
+      async (error: AxiosError) => {
         // HTTP 错误或网络错误
+        const requestConfig = error.config as RetriableRequestConfig | undefined
+        if (this.shouldRefresh(error, requestConfig)) {
+          requestConfig!.chaimirRetried = true
+          try {
+            await this.refreshAccessToken()
+            return this.client.request(requestConfig as AxiosRequestConfig)
+          } catch {
+            return Promise.reject(this.transformError(error))
+          }
+        }
         if (error.response?.status === 401) {
           this.config.onUnauthorized?.()
         }
         return Promise.reject(this.transformError(error))
       }
     )
+  }
+
+  /** shouldRefresh 只对后端明确的登录失效错误触发一次令牌轮转。 */
+  private shouldRefresh(error: AxiosError, requestConfig?: RetriableRequestConfig): boolean {
+    const response = error.response?.data as ApiResponse | undefined
+    return error.response?.status === 401
+      && String(response?.code) === '11001'
+      && Boolean(this.config.getRefreshToken?.())
+      && !requestConfig?.chaimirRetried
+      && !requestConfig?.url?.endsWith('/auth/refresh')
+  }
+
+  /** refreshAccessToken 单飞轮转 Refresh Token，并让并发失败请求等待同一结果。 */
+  private refreshAccessToken(): Promise<void> {
+    if (this.refreshPromise) return this.refreshPromise
+
+    this.refreshPromise = this.performTokenRefresh().finally(() => {
+      this.refreshPromise = null
+    })
+    return this.refreshPromise
+  }
+
+  /** performTokenRefresh 使用独立客户端完成轮转，避免刷新请求进入业务响应拦截器。 */
+  private async performTokenRefresh(): Promise<void> {
+    const refreshToken = this.config.getRefreshToken?.()
+    if (!refreshToken) {
+      this.config.onUnauthorized?.()
+      throw new Error('refresh token unavailable')
+    }
+
+    try {
+      const response = await axios.post<ApiResponse<TokenRefreshResponse>>(
+        `${this.config.baseURL}/auth/refresh`,
+        { refresh_token: refreshToken },
+        { timeout: this.config.timeout || 30000, headers: { 'Content-Type': 'application/json' } },
+      )
+      const envelope = response.data
+      if (!isSuccessCode(envelope.code ?? 0) || !envelope.data?.access_token || !envelope.data.refresh_token) {
+        throw new Error('refresh response invalid')
+      }
+      this.config.onTokensRefreshed?.(envelope.data)
+    } catch (error) {
+      this.config.onUnauthorized?.()
+      throw error
+    }
   }
 
   /**

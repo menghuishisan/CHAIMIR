@@ -4,6 +4,7 @@ package grade
 import (
 	"math"
 	"sort"
+	"strings"
 	"time"
 
 	"chaimir/pkg/apperr"
@@ -11,17 +12,18 @@ import (
 
 // ComputeGPA 按等级映射和学分计算学分加权 GPA。
 func ComputeGPA(grades []CourseGradeInput, mapping []LevelRule) (float64, float64, error) {
-	if len(mapping) == 0 {
+	if err := validateGPAMapping(mapping); err != nil {
 		return 0, 0, apperr.ErrGradeConfigInvalid
 	}
-	sort.Slice(mapping, func(i, j int) bool { return mapping[i].Min > mapping[j].Min })
+	ordered := append([]LevelRule(nil), mapping...)
+	sort.Slice(ordered, func(i, j int) bool { return ordered[i].Min > ordered[j].Min })
 	var weighted float64
 	var credits float64
 	for _, grade := range grades {
 		if grade.Credits <= 0 {
 			continue
 		}
-		point, ok := gpaPointForScore(grade.FinalTotal, mapping)
+		point, ok := gpaPointForScore(grade.FinalTotal, ordered)
 		if !ok {
 			return 0, 0, apperr.ErrGradeConfigInvalid
 		}
@@ -32,6 +34,32 @@ func ComputeGPA(grades []CourseGradeInput, mapping []LevelRule) (float64, float6
 		return 0, 0, nil
 	}
 	return round3(weighted / credits), credits, nil
+}
+
+// validateGPAMapping 拒绝缺档、重复阈值和非不及格档的零绩点配置。
+func validateGPAMapping(mapping []LevelRule) error {
+	if len(mapping) == 0 {
+		return apperr.ErrGradeConfigInvalid
+	}
+	seen := make(map[float64]struct{}, len(mapping))
+	hasFloor := false
+	for _, rule := range mapping {
+		if rule.Min < 0 || rule.Min > 100 || strings.TrimSpace(rule.Grade) == "" || rule.GPA < 0 || rule.GPA > 4 {
+			return apperr.ErrGradeConfigInvalid
+		}
+		if rule.Min > 0 && rule.GPA == 0 {
+			return apperr.ErrGradeConfigInvalid
+		}
+		if _, exists := seen[rule.Min]; exists {
+			return apperr.ErrGradeConfigInvalid
+		}
+		seen[rule.Min] = struct{}{}
+		hasFloor = hasFloor || rule.Min == 0
+	}
+	if !hasFloor {
+		return apperr.ErrGradeConfigInvalid
+	}
+	return nil
 }
 
 // EnsureAppealWithinWindow 校验申诉是否仍在受理期限内。

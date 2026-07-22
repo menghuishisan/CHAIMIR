@@ -106,26 +106,35 @@
 
 /* === 下拉菜单 === */
 
-.chaimir-select__dropdown {
-  position: absolute;
-  top: calc(100% + var(--space-1));
-  left: 0;
-  right: 0;
+.chaimir-select__positioner {
   z-index: var(--z-dropdown);
+}
+
+.chaimir-select__dropdown {
   max-height: 16rem; /* 256px */
   overflow-y: auto;
   background: var(--color-bg);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-sm);
   box-shadow: var(--shadow-glass-elevated);
+}
+
+.chaimir-select__positioner[data-placement^='bottom'] .chaimir-select__dropdown {
   transform-origin: top center;
-  animation: chaimir-select-dropdown-in 0.4s var(--ease-spring-ios);
+}
+
+.chaimir-select__positioner[data-placement^='top'] .chaimir-select__dropdown {
+  transform-origin: bottom center;
+}
+
+.chaimir-select__dropdown--animated {
+  animation: chaimir-select-dropdown-in var(--t) var(--ease-out) both;
 }
 
 @keyframes chaimir-select-dropdown-in {
   from {
     opacity: 0;
-    transform: translateY(-8px) scale(0.98);
+    transform: scale(0.98);
   }
   to {
     opacity: 1;
@@ -182,7 +191,7 @@
 @media (prefers-reduced-motion: reduce) {
   .chaimir-select__trigger,
   .chaimir-select__icon,
-  .chaimir-select__dropdown,
+  .chaimir-select__dropdown--animated,
   .chaimir-select__option {
     animation: none;
     transition: none;

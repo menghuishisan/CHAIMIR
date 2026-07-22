@@ -2,47 +2,48 @@
 
 import type { AdminScope, AlertStatus, BackupStatus, BackupType } from '../constants/admin'
 import type { ApplicationStatus, AuditActorRole } from '../constants/identity'
+import type { SnowflakeID } from './common'
 
 export interface SystemConfig {
-  id: string
+  id: SnowflakeID
   scope: AdminScope
-  tenant_id?: string
+  tenant_id?: SnowflakeID
   key: string
   value: Record<string, unknown>
   version: number
-  updated_by: string
+  updated_by: SnowflakeID
   updated_at: string
 }
 
 export interface ConfigUpdateRequest {
   scope: AdminScope
-  tenant_id?: string
+  tenant_id?: SnowflakeID
   value: Record<string, unknown>
   version: number
-  change_log_id?: string
+  change_log_id?: SnowflakeID
 }
 
 export interface ConfigRollbackRequest {
   scope: AdminScope
-  tenant_id?: string
+  tenant_id?: SnowflakeID
   version: number
-  change_log_id: string
+  change_log_id: SnowflakeID
 }
 
 export interface ConfigChangeLog {
-  id: string
-  config_id: string
-  tenant_id?: string
+  id: SnowflakeID
+  config_id: SnowflakeID
+  tenant_id?: SnowflakeID
   old_value: Record<string, unknown>
   new_value: Record<string, unknown>
-  operator_id: string
+  operator_id: SnowflakeID
   created_at: string
 }
 
 export interface AlertRule {
-  id: string
+  id: SnowflakeID
   scope: AdminScope
-  tenant_id?: string
+  tenant_id?: SnowflakeID
   name: string
   metric: string
   condition: Record<string, unknown>
@@ -54,7 +55,7 @@ export interface AlertRule {
 
 export interface AlertRuleRequest {
   scope: AdminScope
-  tenant_id?: string
+  tenant_id?: SnowflakeID
   name: string
   metric: string
   condition: Record<string, unknown>
@@ -63,13 +64,13 @@ export interface AlertRuleRequest {
 }
 
 export interface AlertEvent {
-  id: string
-  rule_id: string
-  tenant_id?: string
+  id: SnowflakeID
+  rule_id: SnowflakeID
+  tenant_id?: SnowflakeID
   level: number
   message: string
   status: AlertStatus
-  handler_id?: string
+  handler_id?: SnowflakeID
   triggered_at: string
   handled_at?: string
 }
@@ -80,13 +81,13 @@ export interface AlertEventRequest {
 
 export interface Statistics {
   scope: AdminScope
-  tenant_id?: string
+  tenant_id?: SnowflakeID
   date: string
   metrics: Record<string, unknown>
 }
 
 export interface BackupRecord {
-  id: string
+  id: SnowflakeID
   type: BackupType
   size_bytes: number
   status: BackupStatus
@@ -96,7 +97,7 @@ export interface BackupRecord {
 
 export interface Dashboard {
   scope: AdminScope
-  tenant_id?: string
+  tenant_id?: SnowflakeID
   tenant_count?: number
   account_count: number
   teacher_count: number
@@ -120,7 +121,7 @@ export interface MonitoringPanel {
 }
 
 export interface TenantApplicationSummary {
-  application_id: string
+  application_id: SnowflakeID
   school_name: string
   school_type: number
   contact_name: string
@@ -132,13 +133,13 @@ export interface TenantApplicationSummary {
 }
 
 export interface AuditLogEntry {
-  id: string
-  tenant_id?: string
-  actor_id: string
+  id: SnowflakeID
+  tenant_id?: SnowflakeID
+  actor_id: SnowflakeID
   actor_role: AuditActorRole
   action: string
   target_type: string
-  target_id?: string
+  target_id?: SnowflakeID
   detail?: string
   ip?: string
   trace_id?: string
@@ -146,7 +147,7 @@ export interface AuditLogEntry {
 }
 
 export interface AuditQueryParams {
-  actor_id?: string
+  actor_id?: SnowflakeID
   action?: string
   target_type?: string
   from?: string

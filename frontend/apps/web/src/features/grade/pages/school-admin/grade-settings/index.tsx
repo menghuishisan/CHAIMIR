@@ -1,6 +1,6 @@
 // GradeSettingsPage 管理成绩等级映射、学期和学业预警规则。
 
-import React, { useCallback, useState } from 'react'
+import React, { useCallback, useEffect, useState } from 'react'
 import { TranscriptScope } from '@chaimir/api-client'
 import { Button, Callout, Input, Switch, Textarea } from '@chaimir/ui'
 import { Plus, RefreshCw, Settings2 } from 'lucide-react'
@@ -19,15 +19,35 @@ const GradeSettingsPage: React.FC = () => {
   const [mapping, setMapping] = useState('[\n  { "min": 90, "grade": "A", "gpa": 4.0 }\n]')
   const [failCount, setFailCount] = useState('2')
   const [minGpa, setMinGpa] = useState('2.0')
-  const [isDefault, setIsDefault] = useState(true)
+  const [isDefault, setIsDefault] = useState(false)
   const [semesterName, setSemesterName] = useState('')
   const [startDate, setStartDate] = useState('')
   const [endDate, setEndDate] = useState('')
+  const [isCurrent, setIsCurrent] = useState(false)
   const [studentIds, setStudentIds] = useState('')
   const [maintenanceSemesterId, setMaintenanceSemesterId] = useState('')
   const [submitting, setSubmitting] = useState<string | null>(null)
   const [message, setMessage] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (warningRules.data) {
+      setFailCount(String(warningRules.data.fail_count))
+      setMinGpa(String(warningRules.data.min_gpa))
+    }
+  }, [warningRules.data])
+
+  useEffect(() => {
+    if (levels.status === 'success' || levels.status === 'empty') {
+      setIsDefault(!(levels.data || []).some((level) => level.is_default))
+    }
+  }, [levels.data, levels.status])
+
+  useEffect(() => {
+    if (semesters.status === 'success' || semesters.status === 'empty') {
+      setIsCurrent(!(semesters.data || []).some((semester) => semester.is_current))
+    }
+  }, [semesters.data, semesters.status])
 
   const reloadAll = useCallback(() => {
     levels.reload()
@@ -91,10 +111,11 @@ const GradeSettingsPage: React.FC = () => {
           <label className={styles.field}>学期名称<Input fullWidth value={semesterName} onChange={(event) => setSemesterName(event.target.value)} /></label>
           <label className={styles.field}>开始日期<Input fullWidth type="date" value={startDate} onChange={(event) => setStartDate(event.target.value)} /></label>
           <label className={styles.field}>结束日期<Input fullWidth type="date" value={endDate} onChange={(event) => setEndDate(event.target.value)} /></label>
+          <Switch checked={isCurrent} label="设为当前学期" onChange={(event) => setIsCurrent(event.target.checked)} />
           <Button
             loading={submitting === 'semester'}
             icon={<Plus size={16} />}
-            onClick={() => runAction('semester', () => api.grade.createSemester({ name: semesterName, start_date: startDate, end_date: endDate, is_current: true }), '学期已创建。')}
+            onClick={() => runAction('semester', () => api.grade.createSemester({ name: semesterName, start_date: startDate, end_date: endDate, is_current: isCurrent }), '学期已创建。')}
           >
             保存学期
           </Button>
@@ -134,7 +155,7 @@ const GradeSettingsPage: React.FC = () => {
             <Button
               variant="outline"
               disabled={parseStudentIds(studentIds).length !== 1 || !maintenanceSemesterId}
-              onClick={() => runAction('recompute', () => api.grade.recomputeStudentGrade(String(parseStudentIds(studentIds)[0]), { semester_id: maintenanceSemesterId }), '学生成绩已重新计算。')}
+              onClick={() => runAction('recompute', () => api.grade.recomputeStudentGrade(parseStudentIds(studentIds)[0]!, { semester_id: maintenanceSemesterId }), '学生成绩已重新计算。')}
             >重新计算</Button>
             <Button
               disabled={parseStudentIds(studentIds).length === 0}
@@ -150,6 +171,6 @@ const GradeSettingsPage: React.FC = () => {
 export default GradeSettingsPage
 
 /** parseStudentIds 解析并去重学校管理员输入的学生编号。 */
-function parseStudentIds(value: string): number[] {
-  return Array.from(new Set(value.split(',').map((item) => Number(item.trim())).filter((item) => Number.isInteger(item) && item > 0)))
+function parseStudentIds(value: string): string[] {
+  return Array.from(new Set(value.split(',').map((item) => item.trim()).filter((item) => /^[1-9]\d*$/.test(item))))
 }

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"time"
 
+	"chaimir/internal/platform/ids"
 	"chaimir/internal/platform/workload"
 )
 
@@ -140,7 +141,7 @@ type JudgeEventOutbox struct {
 
 // ProgressMessage 描述 WebSocket 推送给调用方的用户向进度。
 type ProgressMessage struct {
-	TaskID  int64  `json:"task_id"`
+	TaskID  ids.ID `json:"task_id"`
 	Status  string `json:"status"`
 	Stage   string `json:"stage"`
 	Message string `json:"message"`

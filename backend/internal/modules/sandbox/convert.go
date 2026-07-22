@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"chaimir/internal/contracts"
+	"chaimir/internal/platform/ids"
 	"chaimir/internal/platform/jsonx"
 	"chaimir/internal/platform/timex"
 	"chaimir/internal/platform/workload"
@@ -44,10 +45,10 @@ func sandboxToolAccessFromModel(tools []SandboxTool) []contracts.SandboxToolAcce
 // sandboxResponseFromInfo 删除仅服务端内部可用的资源定位字段后返回给前端。
 func sandboxResponseFromInfo(info contracts.SandboxInfo) SandboxResponse {
 	return SandboxResponse{
-		SandboxID:           info.SandboxID,
-		TenantID:            info.TenantID,
+		SandboxID:           ids.ID(info.SandboxID),
+		TenantID:            ids.ID(info.TenantID),
 		SourceRef:           info.SourceRef,
-		OwnerAccountID:      info.OwnerAccountID,
+		OwnerAccountID:      ids.ID(info.OwnerAccountID),
 		RuntimeCode:         info.RuntimeCode,
 		RuntimeImageVersion: info.RuntimeImageVersion,
 		Phase:               info.Phase,
@@ -94,7 +95,7 @@ func sandboxCapabilitiesFromModel(runtime Runtime, tools []SandboxTool, register
 // runtimeResponseFromModel 将运行时内部模型转换为 HTTP 稳定字段名。
 func runtimeResponseFromModel(item Runtime) RuntimeResponse {
 	return RuntimeResponse{
-		ID:             item.ID,
+		ID:             ids.ID(item.ID),
 		Code:           item.Code,
 		Name:           item.Name,
 		Eco:            item.Eco,
@@ -120,8 +121,8 @@ func runtimeResponsesFromModels(items []Runtime) []RuntimeResponse {
 // runtimeImageResponseFromModel 将运行时镜像内部模型转换为 HTTP 稳定字段名。
 func runtimeImageResponseFromModel(item RuntimeImage) RuntimeImageResponse {
 	return RuntimeImageResponse{
-		ID:            item.ID,
-		RuntimeID:     item.RuntimeID,
+		ID:            ids.ID(item.ID),
+		RuntimeID:     ids.ID(item.RuntimeID),
 		ImageURL:      item.ImageURL,
 		Version:       item.Version,
 		Status:        item.Status,
@@ -146,7 +147,7 @@ func runtimeImageResponsesFromModels(items []RuntimeImage) []RuntimeImageRespons
 // toolResponseFromModel 将工具内部模型转换为 HTTP 稳定字段名。
 func toolResponseFromModel(item Tool) ToolResponse {
 	return ToolResponse{
-		ID:           item.ID,
+		ID:           ids.ID(item.ID),
 		Code:         item.Code,
 		Name:         item.Name,
 		Kind:         item.Kind,
@@ -168,13 +169,13 @@ func toolResponsesFromModels(items []Tool) []ToolResponse {
 // contractCreateFromDTO 把内部 HTTP 创建请求转换为跨模块创建契约。
 func contractCreateFromDTO(req CreateSandboxRequest) contracts.SandboxCreateRequest {
 	return contracts.SandboxCreateRequest{
-		TenantID:                 req.TenantID,
+		TenantID:                 req.TenantID.Int64(),
 		RuntimeCode:              strings.TrimSpace(req.RuntimeCode),
 		RuntimeImageVersion:      strings.TrimSpace(req.RuntimeImageVersion),
 		ToolCodes:                req.Tools,
 		InitCodeRef:              strings.TrimSpace(req.InitCodeRef),
 		InitScriptRef:            strings.TrimSpace(req.InitScriptRef),
-		OwnerAccountID:           req.OwnerAccountID,
+		OwnerAccountID:           req.OwnerAccountID.Int64(),
 		SourceRef:                strings.TrimSpace(req.SourceRef),
 		KeepAlive:                req.KeepAlive,
 		SnapshotEnabled:          req.SnapshotEnabled,

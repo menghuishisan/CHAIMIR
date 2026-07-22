@@ -18,6 +18,8 @@ const (
 	SubjectGradeReviewLockChanged = "grade.review.lock_changed"
 	// SubjectIdentitySessionRevoked 表示账号会话被吊销,由 M1 发布供 M10 踢线联动。
 	SubjectIdentitySessionRevoked = "identity.session.revoked"
+	// SubjectTenantProvisioned 表示 M1 已完成新租户事务,供各下游模块初始化自有租户资源。
+	SubjectTenantProvisioned = "identity.tenant.provisioned"
 	// SubjectNotifySendRequested 表示异步站内信投递请求,由业务模块发布并由 M10 消费。
 	SubjectNotifySendRequested = "notify.send.requested"
 	// SubjectNotifyPushRequested 表示异步实时推送请求,由业务模块发布并由 M10 消费。
@@ -96,6 +98,14 @@ type IdentitySessionRevokedEvent struct {
 	Reason     string    `json:"reason"`
 	RevokedAt  time.Time `json:"revoked_at"`
 	IsPlatform bool      `json:"is_platform"`
+}
+
+// TenantProvisionedEvent 是新租户创建完成后发布的跨模块初始化事件。
+type TenantProvisionedEvent struct {
+	TenantID      int64     `json:"tenant_id"`
+	TraceID       string    `json:"trace_id"`
+	DeployMode    int16     `json:"deploy_mode"`
+	ProvisionedAt time.Time `json:"provisioned_at"`
 }
 
 // NotifySendRequestedEvent 是业务模块经事件总线异步请求 M10 写站内信的唯一载荷。
