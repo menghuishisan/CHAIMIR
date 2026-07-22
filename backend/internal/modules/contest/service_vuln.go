@@ -293,7 +293,7 @@ func (s *Service) FinalizeVulnProblem(ctx context.Context, problemID int64) (Vul
 	if err != nil {
 		return VulnProblemDTO{}, apperr.ErrContestVulnFinalizeFailed.WithCause(err)
 	}
-	snapshot, err := s.contentImport.SystemImportContent(importCtx, contracts.ContentSystemImportRequest{TenantID: id.TenantID, Code: stableContestCode(item), Version: "1.0.0", Type: contentTypeContestProblem, Title: item.Title, Difficulty: contentDifficultyBasic, AuthorID: id.AccountID, AuthorType: contentAuthorExternal, Visibility: contentVisibilityTenant, Body: item.DraftBody, SensitiveFields: []string{"answer", "flag", "judge"}, AutoPublish: true, SystemImportNote: map[string]any{"source": "contest_vuln_problem", "vuln_problem_id": item.ID}})
+	snapshot, err := s.contentImport.SystemImportContent(importCtx, contracts.ContentSystemImportRequest{TenantID: id.TenantID, Code: stableContestCode(item), Version: "1.0.0", Type: contentTypeContestProblem, Title: item.Title, Difficulty: contentDifficultyBasic, AuthorID: id.AccountID, AuthorType: contentAuthorExternal, Visibility: contentVisibilityTenant, Body: vulnContentBody(item.DraftBody), SensitiveFields: []string{"judge_config"}, AutoPublish: true, SystemImportNote: map[string]any{"source": "contest_vuln_problem", "vuln_problem_id": item.ID}})
 	if err != nil {
 		return VulnProblemDTO{}, apperr.ErrContestVulnFinalizeFailed.WithCause(err)
 	}
@@ -447,8 +447,9 @@ func (s *Service) runVulnChainStep(ctx context.Context, tenantID, sandboxID int6
 		return err
 	case "reset":
 		return s.sandbox.ChainReset(ctx, contracts.SandboxChainResetRequest{TenantID: tenantID, SandboxID: sandboxID, SourceRef: sourceRef})
-	case "query", "":
-		return nil
+	case "query":
+		_, err := s.sandbox.ChainQuery(ctx, contracts.SandboxChainQueryRequest{TenantID: tenantID, SandboxID: sandboxID, SourceRef: sourceRef, Target: stringFromAny(mapAny(step["payload"])["target"])})
+		return err
 	default:
 		return apperr.ErrContestVulnProblemInvalid
 	}
@@ -478,17 +479,30 @@ func (s *Service) checkVulnAssertions(ctx context.Context, tenantID, sandboxID i
 
 // validationSteps 从漏洞草稿读取链步骤或断言数组。
 func validationSteps(body map[string]any, key string) []map[string]any {
-	raw, ok := body[key].([]any)
+	raw, ok := mapSlice(body[key])
 	if !ok {
 		return nil
 	}
-	out := make([]map[string]any, 0, len(raw))
-	for _, item := range raw {
-		if m := mapAny(item); len(m) > 0 {
-			out = append(out, m)
-		}
+	return raw
+}
+
+// vulnContentBody 从预验证草稿组装 M5 唯一竞赛题正文，不带 M8 流水线字段。
+func vulnContentBody(draft map[string]any) map[string]any {
+	sourceJudge := mapAny(draft["judge_config"])
+	judge := map[string]any{"judger_code": sourceJudge["judger_code"], "max_score": sourceJudge["max_score"]}
+	if suiteRef, ok := sourceJudge["suite_ref"]; ok {
+		judge["suite_ref"] = suiteRef
 	}
-	return out
+	judge["expectation"] = map[string]any{"public": false, "assertions": draft["assertions"]}
+	body := map[string]any{
+		"statement":      strings.TrimSpace(stringFromAny(draft["statement"])),
+		"judge_config":   judge,
+		"init_contracts": draft["init_contracts"],
+	}
+	if config := mapAny(draft["ad_config"]); len(config) > 0 {
+		body["ad_config"] = config
+	}
+	return body
 }
 
 // allAssertionResults 判断断言结果是否全部通过。

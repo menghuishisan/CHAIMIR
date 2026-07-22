@@ -115,7 +115,7 @@ func (a judgeAPI) submitTask(c *gin.Context) {
 	if !httpx.BindJSONWithError(c, &req, apperr.ErrJudgeSubmitInvalid) {
 		return
 	}
-	tenantID, ok := currentServiceTenantID(c)
+	tenantID, ok := httpx.CurrentServiceTenantID(c)
 	if !ok {
 		return
 	}
@@ -133,7 +133,7 @@ func (a judgeAPI) cancelTask(c *gin.Context) {
 	if !ok {
 		return
 	}
-	tenantID, ok := currentServiceTenantID(c)
+	tenantID, ok := httpx.CurrentServiceTenantID(c)
 	if !ok {
 		return
 	}
@@ -167,7 +167,7 @@ func (a judgeAPI) rejudgeBatch(c *gin.Context) {
 	if !httpx.BindJSONWithError(c, &req, apperr.ErrJudgeSubmitInvalid) {
 		return
 	}
-	tenantID, ok := currentServiceTenantID(c)
+	tenantID, ok := httpx.CurrentServiceTenantID(c)
 	if !ok {
 		return
 	}
@@ -176,7 +176,7 @@ func (a judgeAPI) rejudgeBatch(c *gin.Context) {
 
 // exactFingerprints 绑定精确哈希查重查询。
 func (a judgeAPI) exactFingerprints(c *gin.Context) {
-	tenantID, ok := currentServiceTenantID(c)
+	tenantID, ok := httpx.CurrentServiceTenantID(c)
 	if !ok {
 		return
 	}
@@ -190,7 +190,7 @@ func (a judgeAPI) similarity(c *gin.Context) {
 	if !httpx.BindJSONWithError(c, &req, apperr.ErrFingerprintRequestInvalid) {
 		return
 	}
-	tenantID, ok := currentServiceTenantID(c)
+	tenantID, ok := httpx.CurrentServiceTenantID(c)
 	if !ok {
 		return
 	}
@@ -200,7 +200,7 @@ func (a judgeAPI) similarity(c *gin.Context) {
 
 // listTasks 查询教师可见的判题任务分页。
 func (a judgeAPI) listTasks(c *gin.Context) {
-	current, ok := currentTenantIdentity(c)
+	current, ok := httpx.CurrentTenantIdentity(c)
 	if !ok {
 		return
 	}
@@ -218,7 +218,7 @@ func (a judgeAPI) getTask(c *gin.Context) {
 	if !ok {
 		return
 	}
-	current, ok := currentTenantIdentity(c)
+	current, ok := httpx.CurrentTenantIdentity(c)
 	if !ok {
 		return
 	}
@@ -232,7 +232,7 @@ func (a judgeAPI) manualScore(c *gin.Context) {
 	if !ok {
 		return
 	}
-	current, ok := currentTenantIdentity(c)
+	current, ok := httpx.CurrentTenantIdentity(c)
 	if !ok {
 		return
 	}
@@ -250,7 +250,7 @@ func (a judgeAPI) progress(c *gin.Context) {
 	if !ok {
 		return
 	}
-	current, ok := currentTenantIdentity(c)
+	current, ok := httpx.CurrentTenantIdentity(c)
 	if !ok {
 		return
 	}
@@ -263,26 +263,6 @@ func (a judgeAPI) progress(c *gin.Context) {
 	}); err != nil {
 		response.Fail(c, apperr.ErrJudgeTaskStateInvalid.WithCause(err))
 	}
-}
-
-// currentTenantIdentity 从服务端鉴权上下文读取租户身份。
-func currentTenantIdentity(c *gin.Context) (tenant.Identity, bool) {
-	id, ok := tenant.FromContext(c.Request.Context())
-	if !ok || id.TenantID <= 0 || id.AccountID <= 0 {
-		response.Fail(c, apperr.ErrUnauthorized)
-		return tenant.Identity{}, false
-	}
-	return id, true
-}
-
-// currentServiceTenantID 读取内部服务租户边界,缺失时立即返回统一鉴权错误。
-func currentServiceTenantID(c *gin.Context) (int64, bool) {
-	id, ok := tenant.FromContext(c.Request.Context())
-	if !ok || id.TenantID <= 0 || !id.IsSystem {
-		response.Fail(c, apperr.ErrServiceUnauthorized)
-		return 0, false
-	}
-	return id.TenantID, true
 }
 
 // serviceSourceRef 读取服务签名已校验来源,防止调用方伪造请求体来源。

@@ -52,11 +52,7 @@ func (s *Service) CreateItem(ctx context.Context, req CreateItemRequest) (ItemSn
 	if err != nil {
 		return ItemSnapshotDTO{}, err
 	}
-	body, err := jsonx.CloneObjectStrict(req.Body)
-	if err != nil {
-		return ItemSnapshotDTO{}, apperr.ErrContentBodyInvalid.WithCause(err)
-	}
-	item := ItemWithBody{Item: Item{ID: s.ids.Generate(), TenantID: id.TenantID, Code: req.Code, Version: req.Version, Type: req.Type, Title: req.Title, CategoryID: req.CategoryID.Int64(), Difficulty: req.Difficulty, Tags: req.Tags, KnowledgePoints: req.KnowledgePoints, AuthorID: id.AccountID, AuthorType: AuthorTeacher, Visibility: req.Visibility, Status: StatusDraft}, Body: body, SensitiveFields: req.SensitiveFields}
+	item := ItemWithBody{Item: Item{ID: s.ids.Generate(), TenantID: id.TenantID, Code: req.Code, Version: req.Version, Type: req.Type, Title: req.Title, CategoryID: req.CategoryID.Int64(), Difficulty: req.Difficulty, Tags: req.Tags, KnowledgePoints: req.KnowledgePoints, AuthorID: id.AccountID, AuthorType: AuthorTeacher, Visibility: req.Visibility, Status: StatusDraft}, Body: req.Body, SensitiveFields: req.SensitiveFields}
 	item.VersionHash, err = versionHash(item.Item, item.Body, item.SensitiveFields)
 	if err != nil {
 		return ItemSnapshotDTO{}, apperr.ErrContentBodyInvalid.WithCause(err)
@@ -136,17 +132,16 @@ func (s *Service) UpdateDraftItem(ctx context.Context, itemID int64, req UpdateI
 		if current.Status != StatusDraft {
 			return apperr.ErrContentVersionImmutable
 		}
+		if err := validateContentBody(current.Type, req.Body); err != nil {
+			return err
+		}
 		current.Title = req.Title
 		current.CategoryID = req.CategoryID.Int64()
 		current.Difficulty = req.Difficulty
 		current.Tags = req.Tags
 		current.KnowledgePoints = req.KnowledgePoints
 		current.Visibility = req.Visibility
-		body, err := jsonx.CloneObjectStrict(req.Body)
-		if err != nil {
-			return apperr.ErrContentBodyInvalid.WithCause(err)
-		}
-		current.Body = body
+		current.Body = req.Body
 		current.SensitiveFields = req.SensitiveFields
 		current.VersionHash, err = versionHash(current.Item, current.Body, current.SensitiveFields)
 		if err != nil {

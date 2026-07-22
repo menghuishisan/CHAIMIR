@@ -104,7 +104,7 @@ func (a contentAPI) getFull(c *gin.Context) {
 		httpx.Write(c, out, err)
 		return
 	}
-	if _, ok := currentHTTPIdentity(c); !ok {
+	if _, ok := httpx.CurrentTenantIdentity(c); !ok {
 		return
 	}
 	out, err := a.svc.GetItemFullForUser(c.Request.Context(), c.Param("item"), c.Param("version"))
@@ -257,7 +257,7 @@ func (a contentAPI) batchItems(c *gin.Context) {
 	if !httpx.BindJSONWithError(c, &req, apperr.ErrContentQueryInvalid) {
 		return
 	}
-	tenantID, ok := currentServiceTenantID(c)
+	tenantID, ok := httpx.CurrentServiceTenantID(c)
 	if !ok {
 		return
 	}
@@ -390,24 +390,4 @@ func itemListFilterFromQuery(c *gin.Context) (ItemListFilter, bool) {
 		return ItemListFilter{}, false
 	}
 	return ItemListFilter{Type: int16(typeValue), CategoryID: category, Difficulty: int16(difficulty), Tag: c.Query("tag"), KnowledgePoint: c.Query("kp"), Keyword: c.Query("keyword"), Visibility: int16(visibility), Status: int16(status), AuthorID: authorID, Page: page, Size: size}, true
-}
-
-// currentHTTPIdentity 从上下文读取租户账号身份。
-func currentHTTPIdentity(c *gin.Context) (tenant.Identity, bool) {
-	id, ok := tenant.FromContext(c.Request.Context())
-	if !ok || id.TenantID <= 0 || id.AccountID <= 0 {
-		response.Fail(c, apperr.ErrUnauthorized)
-		return tenant.Identity{}, false
-	}
-	return id, true
-}
-
-// currentServiceTenantID 读取内部服务租户边界。
-func currentServiceTenantID(c *gin.Context) (int64, bool) {
-	id, ok := tenant.FromContext(c.Request.Context())
-	if !ok || id.TenantID <= 0 || !id.IsSystem {
-		response.Fail(c, apperr.ErrServiceUnauthorized)
-		return 0, false
-	}
-	return id.TenantID, true
 }

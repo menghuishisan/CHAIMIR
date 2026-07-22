@@ -4,7 +4,9 @@ package chainassert
 import (
 	"encoding/json"
 	"fmt"
+	"math/big"
 	"reflect"
+	"slices"
 	"strings"
 
 	"chaimir/pkg/privacy"
@@ -48,6 +50,18 @@ func FromMap(raw map[string]any) Assertion {
 	}
 }
 
+// Validate 校验链上断言的唯一字段集合和可执行比较符。
+func Validate(raw map[string]any) bool {
+	if len(raw) != 6 || !hasOnlyKeys(raw, "label", "target", "field", "op", "value", "expected_label") {
+		return false
+	}
+	assertion := FromMap(raw)
+	if assertion.Label == "" || assertion.Target == "" || assertion.Field == "" || assertion.ExpectedLabel == "" || raw["value"] == nil {
+		return false
+	}
+	return slices.Contains([]string{"eq", "ne", "gt", "gte", "lt", "lte", "contains"}, assertion.Op)
+}
+
 // Check 对单条链上查询结果执行断言。
 func Check(assertion Assertion, actual map[string]any) Result {
 	field := assertion.Field
@@ -61,12 +75,46 @@ func Check(assertion Assertion, actual map[string]any) Result {
 		passed = reflect.DeepEqual(actualValue, assertion.Value)
 	case "ne":
 		passed = !reflect.DeepEqual(actualValue, assertion.Value)
+	case "gt", "gte", "lt", "lte":
+		passed = compareNumbers(actualValue, assertion.Value, assertion.Op)
 	case "contains":
 		passed = strings.Contains(fmt.Sprint(actualValue), fmt.Sprint(assertion.Value))
 	case "exists":
 		_, passed = actual[field]
 	}
 	return Result{Case: assertion.Label, Passed: passed, ExpectedLabel: assertion.ExpectedLabel, Actual: ShortJSON(actual), Hint: assertion.Hint}
+}
+
+// compareNumbers 使用有理数比较避免大整数经 float64 再次丢失精度。
+func compareNumbers(actual, expected any, op string) bool {
+	left, leftOK := new(big.Rat).SetString(strings.TrimSpace(fmt.Sprint(actual)))
+	right, rightOK := new(big.Rat).SetString(strings.TrimSpace(fmt.Sprint(expected)))
+	if !leftOK || !rightOK {
+		return false
+	}
+	cmp := left.Cmp(right)
+	switch op {
+	case "gt":
+		return cmp > 0
+	case "gte":
+		return cmp >= 0
+	case "lt":
+		return cmp < 0
+	case "lte":
+		return cmp <= 0
+	default:
+		return false
+	}
+}
+
+// hasOnlyKeys 判断断言对象没有未声明字段。
+func hasOnlyKeys(value map[string]any, allowed ...string) bool {
+	for key := range value {
+		if !slices.Contains(allowed, key) {
+			return false
+		}
+	}
+	return true
 }
 
 // ShortJSON 返回脱敏短文本,避免把完整状态或期望结构传到前端。

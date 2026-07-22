@@ -133,7 +133,7 @@ func (a simAPI) listPackageVersions(c *gin.Context) {
 
 // getBundle 为已上架仿真包签发短时下载授权。
 func (a simAPI) getBundle(c *gin.Context) {
-	current, ok := currentTenantIdentity(c)
+	current, ok := httpx.CurrentTenantIdentity(c)
 	if !ok {
 		return
 	}
@@ -143,7 +143,7 @@ func (a simAPI) getBundle(c *gin.Context) {
 
 // submitPackage 绑定 multipart 仿真包上传。
 func (a simAPI) submitPackage(c *gin.Context) {
-	current, ok := currentTenantIdentity(c)
+	current, ok := httpx.CurrentTenantIdentity(c)
 	if !ok {
 		return
 	}
@@ -157,7 +157,7 @@ func (a simAPI) submitPackage(c *gin.Context) {
 
 // updatePackage 绑定包更新请求。
 func (a simAPI) updatePackage(c *gin.Context) {
-	current, ok := currentTenantIdentity(c)
+	current, ok := httpx.CurrentTenantIdentity(c)
 	if !ok {
 		return
 	}
@@ -175,7 +175,7 @@ func (a simAPI) updatePackage(c *gin.Context) {
 
 // previewPackage 返回包预览所需审核报告。
 func (a simAPI) previewPackage(c *gin.Context) {
-	current, ok := currentTenantIdentity(c)
+	current, ok := httpx.CurrentTenantIdentity(c)
 	if !ok {
 		return
 	}
@@ -284,7 +284,7 @@ func (a simAPI) createSession(c *gin.Context) {
 	if !httpx.BindJSONWithError(c, &req, apperr.ErrSimSessionInvalid) {
 		return
 	}
-	tenantID, ok := currentServiceTenantID(c)
+	tenantID, ok := httpx.CurrentServiceTenantID(c)
 	if !ok {
 		return
 	}
@@ -304,7 +304,7 @@ func (a simAPI) reportAction(c *gin.Context) {
 	if !ok {
 		return
 	}
-	current, ok := currentTenantIdentity(c)
+	current, ok := httpx.CurrentTenantIdentity(c)
 	if !ok {
 		return
 	}
@@ -322,7 +322,7 @@ func (a simAPI) getReplay(c *gin.Context) {
 	if !ok {
 		return
 	}
-	current, ok := currentTenantIdentity(c)
+	current, ok := httpx.CurrentTenantIdentity(c)
 	if !ok {
 		return
 	}
@@ -336,7 +336,7 @@ func (a simAPI) destroySession(c *gin.Context) {
 	if !ok {
 		return
 	}
-	tenantID, ok := currentServiceTenantID(c)
+	tenantID, ok := httpx.CurrentServiceTenantID(c)
 	if !ok {
 		return
 	}
@@ -355,7 +355,7 @@ func (a simAPI) recycleSessions(c *gin.Context) {
 	if !httpx.BindJSONWithError(c, &req, apperr.ErrSimSessionInvalid) {
 		return
 	}
-	tenantID, ok := currentServiceTenantID(c)
+	tenantID, ok := httpx.CurrentServiceTenantID(c)
 	if !ok {
 		return
 	}
@@ -375,7 +375,7 @@ func (a simAPI) reportCheckpoint(c *gin.Context) {
 	if !ok {
 		return
 	}
-	tenantID, ok := currentServiceTenantID(c)
+	tenantID, ok := httpx.CurrentServiceTenantID(c)
 	if !ok {
 		return
 	}
@@ -392,7 +392,7 @@ func (a simAPI) shareSession(c *gin.Context) {
 	if !ok {
 		return
 	}
-	current, ok := currentTenantIdentity(c)
+	current, ok := httpx.CurrentTenantIdentity(c)
 	if !ok {
 		return
 	}
@@ -416,7 +416,7 @@ func (a simAPI) streamSession(c *gin.Context) {
 	if !ok {
 		return
 	}
-	current, ok := currentTenantIdentity(c)
+	current, ok := httpx.CurrentTenantIdentity(c)
 	if !ok {
 		return
 	}
@@ -526,16 +526,6 @@ func readPackageMultipart(c *gin.Context, metadataMaxBytes, bundleMaxBytes int64
 	return req, header, data, true
 }
 
-// currentTenantIdentity 从服务端鉴权上下文读取租户身份。
-func currentTenantIdentity(c *gin.Context) (tenant.Identity, bool) {
-	id, ok := tenant.FromContext(c.Request.Context())
-	if !ok || id.TenantID <= 0 || id.AccountID <= 0 {
-		response.Fail(c, apperr.ErrUnauthorized)
-		return tenant.Identity{}, false
-	}
-	return id, true
-}
-
 // currentPlatformIdentity 从上下文读取平台管理员身份。
 func currentPlatformIdentity(c *gin.Context) (tenant.Identity, bool) {
 	id, ok := tenant.FromContext(c.Request.Context())
@@ -544,16 +534,6 @@ func currentPlatformIdentity(c *gin.Context) (tenant.Identity, bool) {
 		return tenant.Identity{}, false
 	}
 	return id, true
-}
-
-// currentServiceTenantID 读取内部服务租户边界。
-func currentServiceTenantID(c *gin.Context) (int64, bool) {
-	id, ok := tenant.FromContext(c.Request.Context())
-	if !ok || id.TenantID <= 0 || !id.IsSystem {
-		response.Fail(c, apperr.ErrServiceUnauthorized)
-		return 0, false
-	}
-	return id.TenantID, true
 }
 
 // defaultJSON 为空表单字段补 JSON 对象。

@@ -21,7 +21,7 @@ func (s *Service) GetJudgeSpec(ctx context.Context, tenantID int64, itemCode, it
 	if raw, ok := item.Body["judge_config"].(map[string]any); ok {
 		spec.JudgerCode = stringFromAny(raw["judger_code"])
 		spec.SuiteRef = stringFromAny(raw["suite_ref"])
-		spec.MaxScore = int32FromAny(raw["max_score"])
+		spec.MaxScore = jsonx.Int32FromAny(raw["max_score"], 0)
 		if expectation, ok := raw["expectation"].(map[string]any); ok {
 			cloned, err := cloneMapStrict(expectation)
 			if err != nil {
@@ -30,21 +30,8 @@ func (s *Service) GetJudgeSpec(ctx context.Context, tenantID int64, itemCode, it
 			spec.Expectation = cloned
 		}
 	}
-	if spec.MaxScore == 0 {
-		spec.MaxScore = int32FromAny(item.Body["max_score"])
-	}
-	if spec.SuiteRef == "" {
-		spec.SuiteRef = stringFromAny(item.Body["suite_ref"])
-	}
 	if spec.Expectation == nil {
 		spec.Expectation = map[string]any{}
-		if expectation, ok := item.Body["expectation"].(map[string]any); ok {
-			cloned, err := cloneMapStrict(expectation)
-			if err != nil {
-				return contracts.ContentJudgeSpec{}, apperr.ErrContentBodyInvalid.WithCause(err)
-			}
-			spec.Expectation = cloned
-		}
 	}
 	if spec.JudgerCode == "" || spec.MaxScore <= 0 {
 		return contracts.ContentJudgeSpec{}, apperr.ErrContentBodyInvalid
@@ -65,11 +52,7 @@ func (s *Service) SystemImportContent(ctx context.Context, req contracts.Content
 	if err != nil {
 		return contracts.ContentItemSnapshot{}, err
 	}
-	body, err := jsonx.CloneObjectStrict(httpReq.Body)
-	if err != nil {
-		return contracts.ContentItemSnapshot{}, apperr.ErrContentBodyInvalid.WithCause(err)
-	}
-	item := ItemWithBody{Item: Item{ID: s.ids.Generate(), TenantID: tenantID, Code: httpReq.Code, Version: httpReq.Version, Type: httpReq.Type, Title: httpReq.Title, CategoryID: httpReq.CategoryID.Int64(), Difficulty: httpReq.Difficulty, Tags: httpReq.Tags, KnowledgePoints: httpReq.KnowledgePoints, AuthorID: httpReq.AuthorID.Int64(), AuthorType: httpReq.AuthorType, Visibility: httpReq.Visibility, Status: StatusDraft}, Body: body, SensitiveFields: httpReq.SensitiveFields}
+	item := ItemWithBody{Item: Item{ID: s.ids.Generate(), TenantID: tenantID, Code: httpReq.Code, Version: httpReq.Version, Type: httpReq.Type, Title: httpReq.Title, CategoryID: httpReq.CategoryID.Int64(), Difficulty: httpReq.Difficulty, Tags: httpReq.Tags, KnowledgePoints: httpReq.KnowledgePoints, AuthorID: httpReq.AuthorID.Int64(), AuthorType: httpReq.AuthorType, Visibility: httpReq.Visibility, Status: StatusDraft}, Body: httpReq.Body, SensitiveFields: httpReq.SensitiveFields}
 	if httpReq.AutoPublish {
 		item.Status = StatusPublished
 	}
@@ -114,9 +97,4 @@ func stringFromAny(value any) string {
 		return s
 	}
 	return ""
-}
-
-// int32FromAny 从 JSON 动态值读取整数。
-func int32FromAny(value any) int32 {
-	return jsonx.Int32FromAny(value, 0)
 }

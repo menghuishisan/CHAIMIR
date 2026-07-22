@@ -63,7 +63,7 @@ func courseFromStudentRow(row sqlcgen.ListStudentCoursesRow) (Course, error) {
 
 // courseFromFields 统一转换 sqlc 为各课程查询生成的同构字段集合。
 func courseFromFields(id, tenantID, teacherID int64, name, description string, typ, difficulty int16, cover pgtype.Text, semester string, credits float64, scheduleRaw []byte, startAt, endAt pgtype.Timestamptz, invite string, status, visibility int16, createdAt, updatedAt pgtype.Timestamptz) (Course, error) {
-	schedule, err := decodeMap(scheduleRaw)
+	schedule, err := jsonx.ObjectMapStrict(scheduleRaw)
 	if err != nil {
 		return Course{}, err
 	}
@@ -77,7 +77,7 @@ func chapterFromRow(row sqlcgen.Chapter) Chapter {
 
 // lessonFromRow 转换课时表行并解析内容引用 JSON。
 func lessonFromRow(row sqlcgen.Lesson) (Lesson, error) {
-	ref, err := decodeMap(row.ContentRef)
+	ref, err := jsonx.ObjectMapStrict(row.ContentRef)
 	if err != nil {
 		return Lesson{}, err
 	}
@@ -91,7 +91,7 @@ func memberFromRow(row sqlcgen.CourseMember) CourseMember {
 
 // assignmentFromRow 转换作业表行并解析迟交策略 JSON。
 func assignmentFromRow(row sqlcgen.Assignment) (Assignment, error) {
-	penalty, err := decodeMap(row.LatePenalty)
+	penalty, err := jsonx.ObjectMapStrict(row.LatePenalty)
 	if err != nil {
 		return Assignment{}, err
 	}
@@ -105,7 +105,7 @@ func assignmentItemFromRow(row sqlcgen.AssignmentItem) AssignmentItem {
 
 // submissionFromRow 转换提交表行并解析提交内容引用 JSON。
 func submissionFromRow(row sqlcgen.Submission) (Submission, error) {
-	ref, err := decodeMap(row.ContentRef)
+	ref, err := jsonx.ObjectMapStrict(row.ContentRef)
 	if err != nil {
 		return Submission{}, err
 	}
@@ -114,7 +114,7 @@ func submissionFromRow(row sqlcgen.Submission) (Submission, error) {
 
 // outboxFromRow 转换自动判题 outbox 行并解析额外输入。
 func outboxFromRow(row sqlcgen.SubmissionJudgeOutbox) (JudgeOutbox, error) {
-	extra, err := decodeMap(row.ExtraInput)
+	extra, err := jsonx.ObjectMapStrict(row.ExtraInput)
 	if err != nil {
 		return JudgeOutbox{}, err
 	}
@@ -123,7 +123,7 @@ func outboxFromRow(row sqlcgen.SubmissionJudgeOutbox) (JudgeOutbox, error) {
 
 // draftFromRow 转换作答草稿行并解析草稿 JSON。
 func draftFromRow(row sqlcgen.SubmissionDraft) (SubmissionDraft, error) {
-	content, err := decodeMap(row.Content)
+	content, err := jsonx.ObjectMapStrict(row.Content)
 	if err != nil {
 		return SubmissionDraft{}, err
 	}
@@ -196,12 +196,4 @@ func encodeMap(value map[string]any) ([]byte, error) {
 		value = map[string]any{}
 	}
 	return jsonx.ObjectBytes(value, apperr.ErrTeachingLessonInvalid)
-}
-
-// decodeMap 将 JSONB 字节解析为 JSON 对象,空值按空对象处理。
-func decodeMap(raw []byte) (map[string]any, error) {
-	if len(raw) == 0 {
-		return map[string]any{}, nil
-	}
-	return jsonx.ObjectMapStrict(raw)
 }

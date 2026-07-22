@@ -175,6 +175,13 @@ func (s *Service) ShareCourse(ctx context.Context, courseID int64) (CourseDTO, e
 		if err := ensureTeacherOwned(current, id.AccountID); err != nil {
 			return err
 		}
+		hasExperiment, err := courseHasExperimentLessons(ctx, tx, current)
+		if err != nil {
+			return err
+		}
+		if hasExperiment {
+			return apperr.ErrTeachingCourseExperimentShareUnsupported
+		}
 		course, err = tx.SetCourseVisibility(ctx, id.TenantID, courseID, CourseVisibilityShared)
 		return err
 	}); err != nil {
@@ -287,6 +294,15 @@ func (s *Service) cloneCourseGraph(ctx context.Context, tx TxStore, source Cours
 	if source.TenantID != targetTenantID && source.Visibility != CourseVisibilityShared {
 		return Course{}, apperr.ErrTeachingCourseForbidden
 	}
+	if source.TenantID != targetTenantID {
+		hasExperiment, err := courseHasExperimentLessons(ctx, tx, source)
+		if err != nil {
+			return Course{}, err
+		}
+		if hasExperiment {
+			return Course{}, apperr.ErrTeachingCourseExperimentShareUnsupported
+		}
+	}
 	if name == "" {
 		name = source.Name + " 副本"
 	}
@@ -329,6 +345,26 @@ func (s *Service) cloneCourseGraph(ctx context.Context, tx TxStore, source Cours
 		return Course{}, err
 	}
 	return created, nil
+}
+
+// courseHasExperimentLessons 检查课程是否包含不能跨租户复制的 M7 实验引用。
+func courseHasExperimentLessons(ctx context.Context, tx TxStore, course Course) (bool, error) {
+	chapters, err := tx.ListChapters(ctx, course.TenantID, course.ID)
+	if err != nil {
+		return false, err
+	}
+	for _, chapter := range chapters {
+		lessons, err := tx.ListLessonsByChapter(ctx, course.TenantID, chapter.ID)
+		if err != nil {
+			return false, err
+		}
+		for _, lesson := range lessons {
+			if lesson.ContentType == LessonContentExperiment {
+				return true, nil
+			}
+		}
+	}
+	return false, nil
 }
 
 // cloneChaptersAndLessons 复制课程目录结构并返回源章节到目标章节的映射。

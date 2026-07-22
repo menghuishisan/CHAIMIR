@@ -113,6 +113,9 @@ func mapCourseError(err error) error {
 	if isNoRows(err) {
 		return apperr.ErrTeachingCourseNotFound
 	}
+	if _, ok := apperr.As(err); ok {
+		return err
+	}
 	return apperr.ErrTeachingCourseInvalid.WithCause(err)
 }
 
@@ -124,6 +127,9 @@ func mapAssignmentError(err error) error {
 	if isNoRows(err) {
 		return apperr.ErrTeachingAssignmentNotFound
 	}
+	if _, ok := apperr.As(err); ok {
+		return err
+	}
 	return apperr.ErrTeachingAssignmentInvalid.WithCause(err)
 }
 
@@ -134,6 +140,9 @@ func mapGradeError(err error) error {
 	}
 	if isNoRows(err) {
 		return apperr.ErrTeachingGradeLocked
+	}
+	if _, ok := apperr.As(err); ok {
+		return err
 	}
 	return apperr.ErrTeachingGradeInvalid.WithCause(err)
 }

@@ -2,13 +2,15 @@
 package contest
 
 import (
-	"encoding/hex"
 	"fmt"
 	"strings"
 	"time"
 
 	"chaimir/internal/platform/auth"
+	"chaimir/internal/platform/jsonx"
 	"chaimir/pkg/apperr"
+	"chaimir/pkg/chainassert"
+	"chaimir/pkg/crypto"
 )
 
 // validateContestRequest 校验赛事管理输入和时间线。
@@ -51,6 +53,17 @@ func validateProblemRequest(req ProblemRequest, mode int16) (ProblemRequest, err
 	if req.DynamicScore == nil {
 		req.DynamicScore = map[string]any{}
 	}
+	if len(req.DynamicScore) > 0 {
+		if !jsonx.HasOnlyKeys(req.DynamicScore, "min_score", "decay_per_solve") {
+			return ProblemRequest{}, apperr.ErrContestProblemInvalid
+		}
+		minScore, minOK := jsonx.Int32FromNumberOK(req.DynamicScore["min_score"])
+		decay, decayOK := jsonx.Int32FromNumberOK(req.DynamicScore["decay_per_solve"])
+		if !minOK || !decayOK || minScore <= 0 || decay <= 0 || minScore > req.Score {
+			return ProblemRequest{}, apperr.ErrContestProblemInvalid
+		}
+		req.DynamicScore = map[string]any{"min_score": minScore, "decay_per_solve": decay}
+	}
 	if mode == ContestModeBattle {
 		if !registeredBattleRule(req.BattleRule) {
 			return ProblemRequest{}, apperr.ErrContestProblemInvalid
@@ -67,7 +80,7 @@ func validateProblemRequest(req ProblemRequest, mode int16) (ProblemRequest, err
 
 // validateBattleConfig 校验对抗题执行所需的沙箱运行时配置。
 func validateBattleConfig(cfg map[string]any) error {
-	if len(cfg) == 0 {
+	if len(cfg) == 0 || !jsonx.HasOnlyKeys(cfg, "runtime_code", "runtime_image_version", "tool_codes") {
 		return apperr.ErrContestProblemInvalid
 	}
 	for _, key := range []string{"runtime_code", "runtime_image_version"} {
@@ -75,17 +88,13 @@ func validateBattleConfig(cfg map[string]any) error {
 			return apperr.ErrContestProblemInvalid
 		}
 	}
-	if raw, ok := cfg["tool_codes"]; ok {
-		items, ok := raw.([]any)
-		if !ok {
-			return apperr.ErrContestProblemInvalid
-		}
-		for _, item := range items {
-			if strings.TrimSpace(stringValue(item)) == "" {
-				return apperr.ErrContestProblemInvalid
-			}
-		}
+	tools, ok := normalizedStringSlice(cfg["tool_codes"], true)
+	if !ok {
+		return apperr.ErrContestProblemInvalid
 	}
+	cfg["runtime_code"] = strings.TrimSpace(stringValue(cfg["runtime_code"]))
+	cfg["runtime_image_version"] = strings.TrimSpace(stringValue(cfg["runtime_image_version"]))
+	cfg["tool_codes"] = tools
 	return nil
 }
 
@@ -191,16 +200,6 @@ func battleSourceRef(id int64, now time.Time) string {
 	return fmt.Sprintf("contest:%04d:battle:%d", now.Year(), id)
 }
 
-// isSHA256Hex 校验参赛提交的内容哈希格式,与 M3 判题契约保持一致。
-func isSHA256Hex(value string) bool {
-	value = strings.TrimSpace(value)
-	if len(value) != 64 {
-		return false
-	}
-	_, err := hex.DecodeString(value)
-	return err == nil
-}
-
 // validContestSourceRef 校验事件来源确属 M8。
 func validContestSourceRef(sourceRef string) bool {
 	return auth.ValidSourceRef(sourceRef) && strings.HasPrefix(strings.TrimSpace(sourceRef), "contest:")
@@ -219,7 +218,7 @@ func validateTeamName(name string) (string, error) {
 func validateBattleEntryRequest(req BattleEntryRequest) (BattleEntryRequest, error) {
 	req.ArtifactRef = strings.TrimSpace(req.ArtifactRef)
 	req.CodeHash = strings.TrimSpace(req.CodeHash)
-	if req.ProblemID <= 0 || req.ArtifactRef == "" || len(req.ArtifactRef) > 255 || !isSHA256Hex(req.CodeHash) {
+	if req.ProblemID <= 0 || req.ArtifactRef == "" || len(req.ArtifactRef) > 255 || !crypto.ValidSHA256Hex(req.CodeHash) {
 		return BattleEntryRequest{}, apperr.ErrContestBattleEntryInvalid
 	}
 	if req.Role != BattleRoleStrategy && req.Role != BattleRoleDefense && req.Role != BattleRoleAttack {
@@ -233,31 +232,26 @@ func validateCheatRequest(req CheatRecordRequest) (CheatRecordRequest, error) {
 	if req.TeamID <= 0 || (req.Type != CheatTypeSimilarity && req.Type != CheatTypeBehavior && req.Type != CheatTypeEnvironment) || (req.Action != CheatActionWarn && req.Action != CheatActionPenalty && req.Action != CheatActionDisqualify) {
 		return CheatRecordRequest{}, apperr.ErrContestCheatInvalid
 	}
-	if req.Evidence == nil {
-		req.Evidence = map[string]any{}
-	}
-	if req.Action == CheatActionPenalty && float64FromMap(req.Evidence, "penalty_score", 0) <= 0 {
+	if !jsonx.HasOnlyKeys(req.Evidence, "review_note", "source_refs", "penalty_score") {
 		return CheatRecordRequest{}, apperr.ErrContestCheatInvalid
 	}
-	return req, nil
-}
-
-// float64FromMap 从结构化 evidence 读取数值。
-func float64FromMap(m map[string]any, key string, defaultValue float64) float64 {
-	switch v := m[key].(type) {
-	case float64:
-		return v
-	case float32:
-		return float64(v)
-	case int:
-		return float64(v)
-	case int32:
-		return float64(v)
-	case int64:
-		return float64(v)
-	default:
-		return defaultValue
+	reviewNote := strings.TrimSpace(stringValue(req.Evidence["review_note"]))
+	sourceRefs, sourceRefsOK := normalizedStringSlice(req.Evidence["source_refs"], true)
+	if reviewNote == "" || len([]rune(reviewNote)) > 2000 || !sourceRefsOK {
+		return CheatRecordRequest{}, apperr.ErrContestCheatInvalid
 	}
+	evidence := map[string]any{"review_note": reviewNote, "source_refs": sourceRefs}
+	if req.Action == CheatActionPenalty {
+		penalty, ok := jsonx.Float64FromNumberOK(req.Evidence["penalty_score"])
+		if !ok || penalty <= 0 {
+			return CheatRecordRequest{}, apperr.ErrContestCheatInvalid
+		}
+		evidence["penalty_score"] = penalty
+	} else if _, exists := req.Evidence["penalty_score"]; exists {
+		return CheatRecordRequest{}, apperr.ErrContestCheatInvalid
+	}
+	req.Evidence = evidence
+	return req, nil
 }
 
 // validateVulnProblemInput 校验漏洞题草稿输入。
@@ -267,10 +261,140 @@ func validateVulnProblemInput(req ImportVulnProblemRequest) (ImportVulnProblemRe
 	if req.Title == "" || len(req.Title) > 255 || (req.Level != VulnLevelA && req.Level != VulnLevelB && req.Level != VulnLevelC) || (req.RuntimeMode != VulnRuntimeIsolated && req.RuntimeMode != VulnRuntimeForked) {
 		return ImportVulnProblemRequest{}, apperr.ErrContestVulnProblemInvalid
 	}
-	if len(req.DraftBody) == 0 {
+	if !validateVulnDraftBody(req.DraftBody) {
 		return ImportVulnProblemRequest{}, apperr.ErrContestVulnProblemInvalid
 	}
 	return req, nil
+}
+
+// validateVulnDraftBody 校验漏洞草稿唯一结构和预验证所需步骤。
+func validateVulnDraftBody(body map[string]any) bool {
+	if !jsonx.HasOnlyKeys(body, "statement", "judge_config", "init_contracts", "init_steps", "positive_steps", "assertions", "ad_config") || strings.TrimSpace(stringValue(body["statement"])) == "" {
+		return false
+	}
+	if _, ok := normalizedStringSlice(body["init_contracts"], true); !ok || !validateVulnJudgeConfig(mapAny(body["judge_config"])) {
+		return false
+	}
+	if !validateVulnSteps(body["init_steps"], false) || !validateVulnSteps(body["positive_steps"], true) || !validateVulnAssertions(body["assertions"]) {
+		return false
+	}
+	if raw, exists := body["ad_config"]; exists && raw != nil {
+		if err := validateBattleConfig(mapAny(raw)); err != nil {
+			return false
+		}
+	}
+	return true
+}
+
+// validateVulnJudgeConfig 校验漏洞草稿在固化前使用的判题器配置。
+func validateVulnJudgeConfig(config map[string]any) bool {
+	if !jsonx.HasOnlyKeys(config, "judger_code", "suite_ref", "max_score") || strings.TrimSpace(stringValue(config["judger_code"])) == "" {
+		return false
+	}
+	if suiteRef, exists := config["suite_ref"]; exists && suiteRef != nil {
+		if _, ok := suiteRef.(string); !ok {
+			return false
+		}
+	}
+	maxScore, ok := jsonx.Int32FromNumberOK(config["max_score"])
+	return ok && maxScore > 0
+}
+
+// validateVulnSteps 校验链操作集合；正向步骤至少包含一条操作。
+func validateVulnSteps(raw any, required bool) bool {
+	items, ok := mapSlice(raw)
+	if !ok || (required && len(items) == 0) {
+		return false
+	}
+	for _, step := range items {
+		if !jsonx.HasOnlyKeys(step, "op", "payload") {
+			return false
+		}
+		op := strings.ToLower(strings.TrimSpace(stringValue(step["op"])))
+		if op != "deploy" && op != "tx" && op != "query" && op != "reset" {
+			return false
+		}
+		payload := mapAny(step["payload"])
+		if (op == "deploy" || op == "tx") && len(payload) == 0 {
+			return false
+		}
+		if op == "query" && strings.TrimSpace(stringValue(payload["target"])) == "" {
+			return false
+		}
+	}
+	return true
+}
+
+// validateVulnAssertions 校验链上断言的完整字段和比较方式。
+func validateVulnAssertions(raw any) bool {
+	items, ok := mapSlice(raw)
+	if !ok || len(items) == 0 {
+		return false
+	}
+	for _, assertion := range items {
+		if !chainassert.Validate(assertion) {
+			return false
+		}
+	}
+	return true
+}
+
+// validateSubmitContent 校验学生补充答案的唯一结构。
+func validateSubmitContent(content map[string]any) bool {
+	if !jsonx.HasOnlyKeys(content, "answer") {
+		return false
+	}
+	_, ok := content["answer"].(string)
+	return ok
+}
+
+// normalizedStringSlice 读取并清理 JSON 字符串数组。
+func normalizedStringSlice(value any, allowEmpty bool) ([]string, bool) {
+	var raw []string
+	switch typed := value.(type) {
+	case []string:
+		raw = typed
+	case []any:
+		raw = make([]string, 0, len(typed))
+		for _, item := range typed {
+			text, ok := item.(string)
+			if !ok {
+				return nil, false
+			}
+			raw = append(raw, text)
+		}
+	default:
+		return nil, false
+	}
+	out := make([]string, 0, len(raw))
+	for _, item := range raw {
+		item = strings.TrimSpace(item)
+		if item == "" {
+			return nil, false
+		}
+		out = append(out, item)
+	}
+	return out, allowEmpty || len(out) > 0
+}
+
+// mapSlice 读取请求或内部构造的对象数组。
+func mapSlice(value any) ([]map[string]any, bool) {
+	switch typed := value.(type) {
+	case []map[string]any:
+		return typed, true
+	case []any:
+		out := make([]map[string]any, 0, len(typed))
+		for _, item := range typed {
+			object, ok := item.(map[string]any)
+			if !ok {
+				return nil, false
+			}
+			out = append(out, object)
+		}
+		return out, true
+	default:
+		return nil, false
+	}
 }
 
 // validatePrevalidateRequest 校验漏洞预验证运行时参数。

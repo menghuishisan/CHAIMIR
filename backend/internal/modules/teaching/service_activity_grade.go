@@ -581,22 +581,16 @@ func (s *Service) ExportGrades(ctx context.Context, courseID int64) (transfer.Ta
 	}
 	f.SetActiveSheet(index)
 	headers := []string{"course_id", "student_id", "auto_total", "override_total", "final_total", "is_overridden", "is_locked"}
-	for i, header := range headers {
-		cell, _ := excelize.CoordinatesToCellName(i+1, 1)
-		if err := f.SetCellValue(sheet, cell, header); err != nil {
-			return transfer.TaskDTO{}, apperr.ErrTeachingGradeExportFailed.WithCause(err)
-		}
+	if err := f.SetSheetRow(sheet, "A1", &headers); err != nil {
+		return transfer.TaskDTO{}, apperr.ErrTeachingGradeExportFailed.WithCause(err)
 	}
 	for r, grade := range grades {
 		values := []any{grade.CourseID, grade.StudentID, grade.AutoTotal, "", finalTotal(grade), grade.IsOverridden, grade.IsLocked}
 		if grade.IsOverridden {
 			values[3] = grade.OverrideTotal
 		}
-		for c, value := range values {
-			cell, _ := excelize.CoordinatesToCellName(c+1, r+2)
-			if err := f.SetCellValue(sheet, cell, value); err != nil {
-				return transfer.TaskDTO{}, apperr.ErrTeachingGradeExportFailed.WithCause(err)
-			}
+		if err := f.SetSheetRow(sheet, fmt.Sprintf("A%d", r+2), &values); err != nil {
+			return transfer.TaskDTO{}, apperr.ErrTeachingGradeExportFailed.WithCause(err)
 		}
 	}
 	var buf bytes.Buffer
@@ -757,19 +751,16 @@ func (s *Service) listCourseGradesForExport(ctx context.Context, tx TxStore, ten
 
 // publishGradeUpdated 在作业提交回写后持久化成绩更新事件。
 func (s *Service) publishGradeUpdated(ctx context.Context, tenantID, assignmentID, studentID int64) error {
-	var courseID int64
 	if err := s.store.TenantTx(ctx, tenantID, func(ctx context.Context, tx TxStore) error {
 		assignment, err := tx.GetAssignment(ctx, tenantID, assignmentID)
 		if err != nil {
 			return err
 		}
-		courseID = assignment.CourseID
-		return s.enqueueTeachingGradeEventOutbox(ctx, tx, tenantID, courseID, studentID)
+		return s.enqueueTeachingGradeEventOutbox(ctx, tx, tenantID, assignment.CourseID, studentID)
 	}); err != nil {
 		return mapAssignmentError(err)
 	}
 	s.drainTeachingGradeEventOutboxBestEffort(ctx)
-	_ = courseID
 	return nil
 }
 

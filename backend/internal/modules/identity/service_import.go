@@ -91,29 +91,7 @@ func encodeImportCSV(records [][]string) ([]byte, error) {
 
 // encodeImportXLSX 使用成熟 Excel 库生成真实 xlsx 模板。
 func encodeImportXLSX(records [][]string) ([]byte, error) {
-	workbook := excelize.NewFile()
-	if err := workbook.SetSheetName("Sheet1", importSheetAccounts); err != nil {
-		return nil, apperr.ErrInternal.WithCause(err)
-	}
-	for rowIndex, record := range records {
-		for colIndex, value := range record {
-			cell, err := excelize.CoordinatesToCellName(colIndex+1, rowIndex+1)
-			if err != nil {
-				return nil, apperr.ErrInternal.WithCause(err)
-			}
-			if err := workbook.SetCellValue(importSheetAccounts, cell, value); err != nil {
-				return nil, apperr.ErrInternal.WithCause(err)
-			}
-		}
-	}
-	var buf bytes.Buffer
-	if err := workbook.Write(&buf); err != nil {
-		return nil, apperr.ErrInternal.WithCause(err)
-	}
-	if err := workbook.Close(); err != nil {
-		return nil, apperr.ErrInternal.WithCause(err)
-	}
-	return buf.Bytes(), nil
+	return encodeNamedXLSX(importSheetAccounts, records)
 }
 
 type importRow struct {

@@ -8,7 +8,6 @@ import (
 	"strings"
 	"time"
 
-	"chaimir/internal/platform/ids"
 	"chaimir/internal/platform/timex"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -74,14 +73,6 @@ func Int4When(v int32, valid bool) pgtype.Int4 {
 	return pgtype.Int4{Int32: v, Valid: valid}
 }
 
-// Int4Ptr 从可选指针构造可空 int4。
-func Int4Ptr(v *int32) pgtype.Int4 {
-	if v == nil {
-		return pgtype.Int4{}
-	}
-	return Int4(*v)
-}
-
 // Int4Value 读取可空 int4,数据库 NULL 统一转为零值。
 func Int4Value(v pgtype.Int4) int32 {
 	if !v.Valid {
@@ -90,25 +81,12 @@ func Int4Value(v pgtype.Int4) int32 {
 	return v.Int32
 }
 
-// Int4PtrValue 读取可空 int4 指针值。
-func Int4PtrValue(v pgtype.Int4) *int32 {
-	if !v.Valid {
-		return nil
-	}
-	return &v.Int32
-}
-
 // BoolPtr 从可选指针构造可空 bool。
 func BoolPtr(v *bool) pgtype.Bool {
 	if v == nil {
 		return pgtype.Bool{}
 	}
 	return pgtype.Bool{Bool: *v, Valid: true}
-}
-
-// Numeric 按平台默认两位小数构造 PostgreSQL numeric。
-func Numeric(v float64) (pgtype.Numeric, error) {
-	return NumericScale(v, 2)
 }
 
 // NumericScale 按显式小数位构造 PostgreSQL numeric,非法浮点值必须显式返回错误。
@@ -123,14 +101,6 @@ func NumericScale(v float64, scale int) (pgtype.Numeric, error) {
 	return n, nil
 }
 
-// NumericPtr 从可选浮点指针构造可空 PostgreSQL numeric。
-func NumericPtr(v *float64) (pgtype.Numeric, error) {
-	if v == nil {
-		return pgtype.Numeric{}, nil
-	}
-	return Numeric(*v)
-}
-
 // NumericValue 读取 PostgreSQL numeric,数据库 NULL 或非法值统一转为零值。
 func NumericValue(v pgtype.Numeric) float64 {
 	f, err := v.Float64Value()
@@ -138,15 +108,6 @@ func NumericValue(v pgtype.Numeric) float64 {
 		return 0
 	}
 	return f.Float64
-}
-
-// NumericPtrValue 读取可空 PostgreSQL numeric 指针值。
-func NumericPtrValue(v pgtype.Numeric) *float64 {
-	f, err := v.Float64Value()
-	if err != nil || !f.Valid {
-		return nil
-	}
-	return &f.Float64
 }
 
 // Date 构造 PostgreSQL date,零值时间按 NULL 处理。
@@ -171,12 +132,4 @@ func TimestamptzPtr(v *time.Time) pgtype.Timestamptz {
 		return pgtype.Timestamptz{}
 	}
 	return timex.Timestamptz(*v)
-}
-
-// IDString 把可空 int8 雪花 ID 转为 JSON DTO 使用的字符串。
-func IDString(v pgtype.Int8) string {
-	if !v.Valid {
-		return ""
-	}
-	return ids.Format(v.Int64)
 }

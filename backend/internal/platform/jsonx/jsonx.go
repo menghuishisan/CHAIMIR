@@ -6,7 +6,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -36,14 +38,7 @@ func EncodeLineBytes(v any) ([]byte, error) {
 
 // ObjectBytes 将 JSON 对象序列化为数据库字节;nil 对象统一按空对象保存。
 func ObjectBytes(v map[string]any, marshalErr *apperr.Error) ([]byte, error) {
-	if v == nil {
-		return []byte("{}"), nil
-	}
-	data, err := json.Marshal(v)
-	if err != nil {
-		return nil, marshalErr.WithCause(err)
-	}
-	return data, nil
+	return AnyBytes(v, marshalErr)
 }
 
 // AnyBytes 将任意 JSON 结构序列化为数据库字节;nil 统一按空对象保存。
@@ -162,6 +157,24 @@ func Int32FromAny(v any, defaultValue int32) int32 {
 		return int32(n)
 	}
 	return defaultValue
+}
+
+// Int32FromNumberOK 把 JSON 数值或内部整数转换为 int32,不接受字符串兼容格式。
+func Int32FromNumberOK(v any) (int32, bool) {
+	if _, isString := v.(string); isString {
+		return 0, false
+	}
+	n, ok := int64Scalar(v, 32)
+	return int32(n), ok
+}
+
+// Float64FromNumberOK 把 JSON 数值或内部数值转换为有限 float64,不接受字符串兼容格式。
+func Float64FromNumberOK(v any) (float64, bool) {
+	if _, isString := v.(string); isString {
+		return 0, false
+	}
+	n, ok := float64Scalar(v)
+	return n, ok && !math.IsNaN(n) && !math.IsInf(n, 0)
 }
 
 // Int64FromAny 把 JSON 数字或数字字符串转换为 int64,无效值返回默认值。
@@ -302,6 +315,19 @@ func SliceFromAny(v any) []any {
 		return s
 	}
 	return []any{}
+}
+
+// HasOnlyKeys 判断对象是否只包含允许字段,用于拒绝动态 JSON 中的未知字段。
+func HasOnlyKeys(value map[string]any, allowed ...string) bool {
+	if value == nil {
+		return false
+	}
+	for key := range value {
+		if !slices.Contains(allowed, key) {
+			return false
+		}
+	}
+	return true
 }
 
 // ValueFromPath 按点路径从 JSON 对象读取值,路径不存在时返回 nil。

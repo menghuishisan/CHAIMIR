@@ -14,6 +14,7 @@ import (
 	"chaimir/internal/platform/audit"
 	"chaimir/internal/platform/config"
 	"chaimir/internal/platform/ids"
+	"chaimir/internal/platform/jsonx"
 	"chaimir/internal/platform/pagex"
 	"chaimir/internal/platform/secretmap"
 	"chaimir/internal/platform/storage"
@@ -744,6 +745,20 @@ func validateAlertRule(req AlertRuleRequest) error {
 		return apperr.ErrAdminAlertInvalid
 	}
 	if strings.TrimSpace(req.Name) == "" || strings.TrimSpace(req.Metric) == "" || req.Level < 1 || req.Level > 4 {
+		return apperr.ErrAdminAlertInvalid
+	}
+	if len(req.Condition) != 3 {
+		return apperr.ErrAdminAlertInvalid
+	}
+	operator, ok := req.Condition["operator"].(string)
+	if !ok || (operator != "gt" && operator != "gte" && operator != "lt" && operator != "lte" && operator != "eq") {
+		return apperr.ErrAdminAlertInvalid
+	}
+	if _, ok := jsonx.Float64FromNumberOK(req.Condition["threshold"]); !ok {
+		return apperr.ErrAdminAlertInvalid
+	}
+	duration, ok := jsonx.Float64FromNumberOK(req.Condition["duration_minutes"])
+	if !ok || duration < 0 {
 		return apperr.ErrAdminAlertInvalid
 	}
 	return nil

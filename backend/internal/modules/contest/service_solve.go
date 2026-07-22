@@ -12,6 +12,7 @@ import (
 	"chaimir/internal/platform/pagex"
 	"chaimir/internal/platform/timex"
 	"chaimir/pkg/apperr"
+	pkgcrypto "chaimir/pkg/crypto"
 )
 
 // CreateEnv 为竞赛题创建学生实操沙箱环境。
@@ -61,7 +62,7 @@ func (s *Service) SubmitSolve(ctx context.Context, contestID, problemID int64, r
 	req.CodeStorageKey = strings.TrimSpace(req.CodeStorageKey)
 	req.SandboxRef = strings.TrimSpace(req.SandboxRef)
 	hasCode := req.CodeStorageKey != "" || req.CodeHash != ""
-	if req.ContentRef == nil || (hasCode && (req.CodeStorageKey == "" || !isSHA256Hex(req.CodeHash))) {
+	if !validateSubmitContent(req.ContentRef) || (hasCode && (req.CodeStorageKey == "" || !pkgcrypto.ValidSHA256Hex(req.CodeHash))) {
 		return SubmissionDTO{}, apperr.ErrContestSubmissionInvalid
 	}
 	var contest Contest

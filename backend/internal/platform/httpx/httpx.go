@@ -15,6 +15,7 @@ import (
 	"chaimir/internal/platform/ids"
 	"chaimir/internal/platform/pagex"
 	"chaimir/internal/platform/response"
+	"chaimir/internal/platform/tenant"
 	"chaimir/pkg/apperr"
 
 	"github.com/gin-gonic/gin"
@@ -30,6 +31,26 @@ func AuditContextMiddleware() gin.HandlerFunc {
 		c.Request = c.Request.WithContext(ctx)
 		c.Next()
 	}
+}
+
+// CurrentTenantIdentity 读取已鉴权的租户账号身份,缺失时立即写入统一鉴权错误。
+func CurrentTenantIdentity(c *gin.Context) (tenant.Identity, bool) {
+	id, ok := tenant.FromContext(c.Request.Context())
+	if !ok || id.TenantID <= 0 || id.AccountID <= 0 {
+		response.Fail(c, apperr.ErrUnauthorized)
+		return tenant.Identity{}, false
+	}
+	return id, true
+}
+
+// CurrentServiceTenantID 读取内部服务签名携带的租户边界。
+func CurrentServiceTenantID(c *gin.Context) (int64, bool) {
+	id, ok := tenant.FromContext(c.Request.Context())
+	if !ok || id.TenantID <= 0 || !id.IsSystem {
+		response.Fail(c, apperr.ErrServiceUnauthorized)
+		return 0, false
+	}
+	return id.TenantID, true
 }
 
 // BindJSON 是 handler 层统一请求绑定入口,失败时只返回用户向 bad request 文案。

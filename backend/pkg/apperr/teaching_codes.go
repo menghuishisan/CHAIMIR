@@ -20,6 +20,8 @@ const (
 	CodeTeachingInviteInvalid = "61008"
 	// CodeTeachingDiscussionInvalid 表示讨论、公告或评价操作非法。
 	CodeTeachingDiscussionInvalid = "61009"
+	// CodeTeachingCourseExperimentShareUnsupported 表示课程含租户私有实验引用,不可跨租户共享或克隆。
+	CodeTeachingCourseExperimentShareUnsupported = "61010"
 )
 
 const (
@@ -80,6 +82,8 @@ var (
 	ErrTeachingInviteInvalid = New(CodeTeachingInviteInvalid, "邀请码无效或课程暂不可加入")
 	// ErrTeachingDiscussionInvalid 表示讨论、公告或评价信息不正确。
 	ErrTeachingDiscussionInvalid = New(CodeTeachingDiscussionInvalid, "课程互动信息不正确")
+	// ErrTeachingCourseExperimentShareUnsupported 表示课程包含无法跨学校复制的实验课时。
+	ErrTeachingCourseExperimentShareUnsupported = New(CodeTeachingCourseExperimentShareUnsupported, "该课程包含实验课时,暂不支持跨学校共享")
 )
 
 var (

@@ -38,6 +38,23 @@ func (s *Service) ListContests(ctx context.Context, status int16, page, size int
 	return out, total, page, size, nil
 }
 
+// GetContest 读取当前教师或管理员有权管理的单条竞赛。
+func (s *Service) GetContest(ctx context.Context, contestID int64) (ContestDTO, error) {
+	id, err := currentIdentity(ctx)
+	if err != nil {
+		return ContestDTO{}, err
+	}
+	var item Contest
+	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
+		var err error
+		item, err = s.loadContestForManage(ctx, tx, id.TenantID, id.AccountID, contestID)
+		return err
+	}); err != nil {
+		return ContestDTO{}, err
+	}
+	return contestDTOFromModel(item), nil
+}
+
 // ListStudentContests 查询学生可发现的报名中、进行中和已结束竞赛。
 func (s *Service) ListStudentContests(ctx context.Context, page, size int) ([]ContestDTO, int64, int, int, error) {
 	id, err := currentIdentity(ctx)
@@ -183,6 +200,7 @@ func (s *Service) ListProblems(ctx context.Context, contestID int64) ([]ProblemD
 		if err != nil {
 			return nil, apperr.ErrContestContentUnavailable.WithCause(err)
 		}
+		dto.Title = face.Title
 		dto.Face = face.Body
 		out = append(out, dto)
 	}
