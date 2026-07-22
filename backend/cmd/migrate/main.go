@@ -87,8 +87,22 @@ func migrateAndGrant(ctx context.Context, cfg *config.Config) error {
 	return nil
 }
 
+// closeSQLDatabase 关闭部署期数据库连接，并把关闭错误合并到原始返回错误中。
+func closeSQLDatabase(sqlDB *sql.DB, message string, resultErr *error) {
+	if err := sqlDB.Close(); err != nil {
+		*resultErr = errors.Join(*resultErr, fmt.Errorf("%s: %w", message, err))
+	}
+}
+
+// closeRedisClient 关闭部署期 Redis 客户端，并把关闭错误合并到原始返回错误中。
+func closeRedisClient(client *redis.Client, message string, resultErr *error) {
+	if err := client.Close(); err != nil {
+		*resultErr = errors.Join(*resultErr, fmt.Errorf("%s: %w", message, err))
+	}
+}
+
 // runMigrations 使用 golang-migrate 执行嵌入的版本化 SQL。
-func runMigrations(pg config.PostgresConfig) error {
+func runMigrations(pg config.PostgresConfig) (resultErr error) {
 	source, err := iofs.New(migrations.FS, ".")
 	if err != nil {
 		return fmt.Errorf("创建迁移源失败: %w", err)
@@ -97,7 +111,7 @@ func runMigrations(pg config.PostgresConfig) error {
 	if err != nil {
 		return fmt.Errorf("打开迁移数据库连接失败: %w", err)
 	}
-	defer sqlDB.Close()
+	defer closeSQLDatabase(sqlDB, "关闭迁移数据库连接失败", &resultErr)
 	driver, err := postgres.WithInstance(sqlDB, &postgres.Config{})
 	if err != nil {
 		return fmt.Errorf("创建迁移 driver 失败: %w", err)
@@ -113,7 +127,7 @@ func runMigrations(pg config.PostgresConfig) error {
 }
 
 // resetLocalDatabase 只允许在本地/开发连接上执行删库重建,用于验收测试前清空状态。
-func resetLocalDatabase(ctx context.Context, cfg *config.Config) error {
+func resetLocalDatabase(ctx context.Context, cfg *config.Config) (resultErr error) {
 	if err := ensureLocalResetAllowed(cfg); err != nil {
 		return err
 	}
@@ -123,7 +137,7 @@ func resetLocalDatabase(ctx context.Context, cfg *config.Config) error {
 	if err != nil {
 		return fmt.Errorf("打开本地重置数据库连接失败: %w", err)
 	}
-	defer sqlDB.Close()
+	defer closeSQLDatabase(sqlDB, "关闭本地重置数据库连接失败", &resultErr)
 	if _, err := sqlDB.ExecContext(ctx, "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = $1 AND pid <> pg_backend_pid()", cfg.Postgres.Database); err != nil {
 		return fmt.Errorf("断开目标库连接失败: %w", err)
 	}
@@ -158,7 +172,7 @@ func ensureLocalResetAllowed(cfg *config.Config) error {
 }
 
 // grantApplicationRole 幂等创建固定应用角色并授予 public schema 最小表权限。
-func grantApplicationRole(ctx context.Context, pg config.PostgresConfig) error {
+func grantApplicationRole(ctx context.Context, pg config.PostgresConfig) (resultErr error) {
 	if strings.TrimSpace(pg.User) != appRoleName {
 		return fmt.Errorf("PG_USER 必须为固定应用角色 %s,实际=%s", appRoleName, pg.User)
 	}
@@ -169,7 +183,7 @@ func grantApplicationRole(ctx context.Context, pg config.PostgresConfig) error {
 	if err != nil {
 		return fmt.Errorf("打开授权数据库连接失败: %w", err)
 	}
-	defer sqlDB.Close()
+	defer closeSQLDatabase(sqlDB, "关闭授权数据库连接失败", &resultErr)
 	grantCtx, cancel := context.WithTimeout(ctx, time.Duration(pg.GrantTimeoutSeconds)*time.Second)
 	defer cancel()
 	if _, err := sqlDB.ExecContext(grantCtx, "SELECT 1"); err != nil {
@@ -221,7 +235,7 @@ func quoteRolePasswordLiteral(ctx context.Context, db *sql.DB, password string) 
 }
 
 // seed 执行依赖业务规则的初始化动作,不在 cmd 中复制模块业务逻辑。
-func seed(ctx context.Context, cfg *config.Config) error {
+func seed(ctx context.Context, cfg *config.Config) (resultErr error) {
 	database, err := db.New(ctx, cfg.Postgres)
 	if err != nil {
 		return err
@@ -231,7 +245,7 @@ func seed(ctx context.Context, cfg *config.Config) error {
 	if err != nil {
 		return err
 	}
-	defer redisClient.Close()
+	defer closeRedisClient(redisClient, "关闭初始化 Redis 客户端失败", &resultErr)
 	objectStore, err := storage.New(ctx, cfg.MinIO)
 	if err != nil {
 		return err

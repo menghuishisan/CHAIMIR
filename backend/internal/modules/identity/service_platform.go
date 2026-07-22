@@ -364,33 +364,6 @@ func (s *Service) BootstrapPlatformAdmin(ctx context.Context, cfg config.Bootstr
 	})
 }
 
-// createBootstrapAdmin 创建首个学校管理员,允许缺失组织档案但不臆造默认院系。
-func (s *Service) createBootstrapAdmin(ctx context.Context, tenantID int64, req CreateAccountRequest) (AccountDTO, string, error) {
-	account, activation, err := s.createBootstrapAdminWithTx(ctx, tenantID, req.Name, req.Phone)
-	if err != nil {
-		return AccountDTO{}, "", err
-	}
-	return ToAccountDTO(account, req.Phone), activation, nil
-}
-
-// createBootstrapAdminWithTx 在独立租户事务内创建首个学校管理员。
-func (s *Service) createBootstrapAdminWithTx(ctx context.Context, tenantID int64, name, phone string) (Account, string, error) {
-	var account Account
-	var activation string
-	if err := s.store.TenantTx(ctx, tenantID, func(ctx context.Context, tx TxStore) error {
-		row, code, err := s.createBootstrapAdminInTx(ctx, tx, tenantID, name, phone)
-		if err != nil {
-			return err
-		}
-		account = row
-		activation = code
-		return nil
-	}); err != nil {
-		return Account{}, "", apperr.ErrInternal.WithCause(err)
-	}
-	return account, activation, nil
-}
-
 // createBootstrapAdminInTx 创建首个学校管理员账号、教师/学校管理员角色和一次性激活码。
 func (s *Service) createBootstrapAdminInTx(ctx context.Context, tx TxStore, tenantID int64, name, phone string) (Account, string, error) {
 	phoneEnc, err := s.encryptPhone(phone)

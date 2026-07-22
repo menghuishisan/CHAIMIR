@@ -143,7 +143,7 @@ func (m *Manager) VerifyAccess(tokenString string) (*Claims, error) {
 		return nil, err
 	}
 	if claims.Type != AccessToken {
-		return nil, errors.New("Token 类型不匹配")
+		return nil, errors.New("token 类型不匹配")
 	}
 	return claims, nil
 }
@@ -184,10 +184,10 @@ func (m *Manager) parseClaims(tokenString string) (*Claims, error) {
 		return nil, fmt.Errorf("JWT 校验失败: %w", err)
 	}
 	if claims.ExpiresAt == nil || claims.IssuedAt == nil {
-		return nil, errors.New("Token 缺少有效期声明")
+		return nil, errors.New("token 缺少有效期声明")
 	}
 	if claims.AccountID <= 0 || claims.SessionID <= 0 {
-		return nil, errors.New("Token 身份载荷不完整")
+		return nil, errors.New("token 身份载荷不完整")
 	}
 	if !claims.IsPlatform && claims.TenantID <= 0 {
 		return nil, errors.New("租户 Token 缺少租户边界")

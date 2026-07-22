@@ -53,11 +53,15 @@ func renderTranscriptPDF(summary GradeSummaryDTO, signingKey string) ([]byte, er
 // verificationText 生成不暴露密钥的成绩单 HMAC 校验码。
 func verificationText(summary GradeSummaryDTO, signingKey string) (string, error) {
 	var seed strings.Builder
-	seed.WriteString(fmt.Sprintf("student=%d;semester=%d;gpa=%.3f;cumulative=%.3f;credits=%.1f;",
-		summary.StudentID, summary.SemesterID, summary.GPA, summary.CumulativeGPA, summary.TotalCredits))
+	if _, err := fmt.Fprintf(&seed, "student=%d;semester=%d;gpa=%.3f;cumulative=%.3f;credits=%.1f;",
+		summary.StudentID, summary.SemesterID, summary.GPA, summary.CumulativeGPA, summary.TotalCredits); err != nil {
+		return "", fmt.Errorf("构造成绩单校验摘要失败: %w", err)
+	}
 	for _, row := range summary.CourseGrades {
-		seed.WriteString(fmt.Sprintf("course=%d,student=%d,total=%.2f,credits=%.1f;",
-			row.CourseID, row.StudentID, row.FinalTotal, row.Credits))
+		if _, err := fmt.Fprintf(&seed, "course=%d,student=%d,total=%.2f,credits=%.1f;",
+			row.CourseID, row.StudentID, row.FinalTotal, row.Credits); err != nil {
+			return "", fmt.Errorf("构造成绩单课程校验摘要失败: %w", err)
+		}
 	}
 	code, err := pkgcrypto.HMACSHA256Hex([]byte(signingKey), seed.String())
 	if err != nil {

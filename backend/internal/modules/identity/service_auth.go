@@ -3,7 +3,6 @@ package identity
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -17,8 +16,6 @@ import (
 	"chaimir/pkg/apperr"
 	"chaimir/pkg/crypto"
 	"chaimir/pkg/logging"
-
-	"github.com/jackc/pgx/v5"
 )
 
 // LoginPlatform 校验平台管理员凭证并签发平台级 Token。
@@ -611,14 +608,6 @@ func (s *Service) revokeAllTenantSessions(ctx context.Context, tenantID, account
 // ptrAccountDTO 返回账号 DTO 指针。
 func ptrAccountDTO(dto AccountDTO) *AccountDTO {
 	return &dto
-}
-
-// appErrFromNoRows 将数据库未命中统一折叠为未登录语义。
-func appErrFromNoRows(err error) error {
-	if errors.Is(err, pgx.ErrNoRows) {
-		return apperr.ErrIdentityInvalidCredentials
-	}
-	return err
 }
 
 // auditLogin 构造登录审计条目,仅在业务明确调用时写入。

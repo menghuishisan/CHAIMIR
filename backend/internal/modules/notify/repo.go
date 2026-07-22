@@ -3,7 +3,6 @@ package notify
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"time"
 
@@ -78,6 +77,3 @@ func (s *store) PrivilegedTx(ctx context.Context, fn func(context.Context, TxSto
 		return fn(ctx, &txStore{q: sqlcgen.New(tx)})
 	})
 }
-
-// isNoRows 统一识别未命中错误。
-func isNoRows(err error) bool { return errors.Is(err, pgx.ErrNoRows) }

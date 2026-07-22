@@ -285,8 +285,6 @@ func (s *Service) ExecSandboxCommand(ctx context.Context, req contracts.SandboxE
 	if err != nil {
 		return contracts.SandboxExecResult{}, err
 	}
-	execCtx := ctx
-	cancel := func() {}
 	timeoutSec := req.TimeoutSec
 	if timeoutSec <= 0 {
 		timeoutSec = int32(s.cfg.ExecTimeoutSeconds)
@@ -294,7 +292,7 @@ func (s *Service) ExecSandboxCommand(ctx context.Context, req contracts.SandboxE
 	if timeoutSec <= 0 {
 		return contracts.SandboxExecResult{}, apperr.ErrSandboxContractRequestInvalid
 	}
-	execCtx, cancel = context.WithTimeout(ctx, timeDurationSeconds(int(timeoutSec)))
+	execCtx, cancel := context.WithTimeout(ctx, timeDurationSeconds(int(timeoutSec)))
 	defer cancel()
 	if err := s.markSandboxExecutionActive(ctx, sb); err != nil {
 		return contracts.SandboxExecResult{}, err

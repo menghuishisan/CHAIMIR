@@ -683,15 +683,3 @@ func stringFromMap(m map[string]any, key string) string {
 	}
 	return ""
 }
-
-// int16FromAny 把 JSON 数字转换为枚举值。
-func int16FromAny(v any, defaultValue int16) int16 {
-	switch n := v.(type) {
-	case float64:
-		return int16(n)
-	case int:
-		return int16(n)
-	default:
-		return defaultValue
-	}
-}

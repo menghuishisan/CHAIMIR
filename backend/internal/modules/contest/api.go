@@ -247,20 +247,6 @@ func (a contestAPI) signup(c *gin.Context) {
 	httpx.Write(c, out, err)
 }
 
-// joinTeam 绑定加入队伍请求。
-func (a contestAPI) joinTeam(c *gin.Context) {
-	id, ok := httpx.PathID(c, "id")
-	if !ok {
-		return
-	}
-	var req JoinTeamRequest
-	if !httpx.BindJSONWithError(c, &req, apperr.ErrContestTeamInvalid) {
-		return
-	}
-	out, err := a.svc.JoinTeam(c.Request.Context(), id, req)
-	httpx.Write(c, out, err)
-}
-
 // joinTeamByTeamID 绑定按队伍 ID 加入队伍请求。
 func (a contestAPI) joinTeamByTeamID(c *gin.Context) {
 	id, ok := httpx.PathID(c, "id")

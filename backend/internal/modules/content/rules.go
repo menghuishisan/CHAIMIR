@@ -142,11 +142,6 @@ func validDifficulty(value int16) bool {
 	return value >= DifficultyIntro && value <= DifficultyChallenge
 }
 
-// validVisibility 校验可见性。
-func validVisibility(value int16) bool {
-	return value == VisibilityPrivate || value == VisibilityTenant || value == VisibilityShared
-}
-
 // validDraftVisibility 校验草稿可见性,跨租户共享只能在发布后通过 share 状态流转进入。
 func validDraftVisibility(value int16) bool {
 	return value == VisibilityPrivate || value == VisibilityTenant

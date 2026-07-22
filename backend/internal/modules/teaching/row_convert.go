@@ -61,11 +61,6 @@ func courseFromStudentRow(row sqlcgen.ListStudentCoursesRow) (Course, error) {
 	return courseFromFields(row.ID, row.TenantID, row.TeacherID, row.Name, row.Description, row.Type, row.Difficulty, row.CoverUrl, row.Semester, row.Credits, row.Schedule, row.StartAt, row.EndAt, row.InviteCode, row.Status, row.Visibility, row.CreatedAt, row.UpdatedAt)
 }
 
-// courseFromSoftDeleteRow 转换课程软删返回行。
-func courseFromSoftDeleteRow(row sqlcgen.SoftDeleteCourseRow) (Course, error) {
-	return courseFromFields(row.ID, row.TenantID, row.TeacherID, row.Name, row.Description, row.Type, row.Difficulty, row.CoverUrl, row.Semester, row.Credits, row.Schedule, row.StartAt, row.EndAt, row.InviteCode, row.Status, row.Visibility, row.CreatedAt, row.UpdatedAt)
-}
-
 // courseFromFields 统一转换 sqlc 为各课程查询生成的同构字段集合。
 func courseFromFields(id, tenantID, teacherID int64, name, description string, typ, difficulty int16, cover pgtype.Text, semester string, credits float64, scheduleRaw []byte, startAt, endAt pgtype.Timestamptz, invite string, status, visibility int16, createdAt, updatedAt pgtype.Timestamptz) (Course, error) {
 	schedule, err := decodeMap(scheduleRaw)

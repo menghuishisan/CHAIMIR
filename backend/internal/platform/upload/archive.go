@@ -5,6 +5,7 @@ import (
 	"archive/tar"
 	"archive/zip"
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -83,7 +84,7 @@ func TAREntryNames(r *tar.Reader, limits ArchiveLimits) ([]string, error) {
 					return fmt.Errorf("TAR 归档成员路径非法: %s", header.Name)
 				}
 				continue
-			case tar.TypeReg, tar.TypeRegA:
+			case tar.TypeReg:
 				if err := visit(header.Name, header.Size); err != nil {
 					return err
 				}
@@ -199,8 +200,7 @@ func zipToSafeTar(zr *zip.Reader, limits ArchiveLimits) ([]byte, error) {
 			return nil, err
 		}
 		if err := copyExactArchiveEntry(tw, rc, int64(file.UncompressedSize64), limits.MaxUnpackedBytes); err != nil {
-			rc.Close()
-			return nil, err
+			return nil, errors.Join(err, closeArchiveReader(rc))
 		}
 		if err := rc.Close(); err != nil {
 			return nil, err
@@ -284,7 +284,7 @@ func tarToSafeTar(tr *tar.Reader, limits ArchiveLimits) ([]byte, error) {
 		if header.Typeflag == tar.TypeDir {
 			continue
 		}
-		if header.Typeflag != tar.TypeReg && header.Typeflag != tar.TypeRegA {
+		if header.Typeflag != tar.TypeReg {
 			return nil, fmt.Errorf("TAR 归档包含不受支持的成员类型: %s", header.Name)
 		}
 		name, ok := SafeArchiveEntryName(header.Name, seen)
@@ -303,6 +303,14 @@ func tarToSafeTar(tr *tar.Reader, limits ArchiveLimits) ([]byte, error) {
 		return nil, err
 	}
 	return out.Bytes(), nil
+}
+
+// closeArchiveReader 关闭归档成员读取流，并为调用方保留可定位的错误上下文。
+func closeArchiveReader(reader io.Closer) error {
+	if err := reader.Close(); err != nil {
+		return fmt.Errorf("关闭归档成员读取流失败: %w", err)
+	}
+	return nil
 }
 
 // copyExactArchiveEntry 按归档头声明大小精确复制内容,防止重打包阶段绕过展开大小限制。

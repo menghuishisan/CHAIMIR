@@ -112,41 +112,26 @@ func newInfrastructure(ctx context.Context, cfg *config.Config) (*infrastructure
 	}
 	redisClient, err := redis.New(ctx, cfg.Redis)
 	if err != nil {
-		database.Close()
-		return nil, err
+		return nil, errors.Join(err, closeStartupInfrastructure(database, nil, nil))
 	}
 	bus, err := eventbus.New(cfg.NATS)
 	if err != nil {
-		redisClient.Close()
-		database.Close()
-		return nil, err
+		return nil, errors.Join(err, closeStartupInfrastructure(database, redisClient, nil))
 	}
 	objectStore, err := storage.New(ctx, cfg.MinIO)
 	if err != nil {
-		bus.Close()
-		redisClient.Close()
-		database.Close()
-		return nil, err
+		return nil, errors.Join(err, closeStartupInfrastructure(database, redisClient, bus))
 	}
 	if err := objectStore.EnsureBuckets(ctx); err != nil {
-		bus.Close()
-		redisClient.Close()
-		database.Close()
-		return nil, err
+		return nil, errors.Join(err, closeStartupInfrastructure(database, redisClient, bus))
 	}
 	k8sClient, err := platformk8s.New(cfg.Sandbox)
 	if err != nil {
-		bus.Close()
-		redisClient.Close()
-		database.Close()
-		return nil, err
+		return nil, errors.Join(err, closeStartupInfrastructure(database, redisClient, bus))
 	}
 	ids, err := snowflake.NewNode(cfg.Snowflake.NodeID)
 	if err != nil {
-		bus.Close()
-		redisClient.Close()
-		database.Close()
-		return nil, err
+		return nil, errors.Join(err, closeStartupInfrastructure(database, redisClient, bus))
 	}
 	hub, err := ws.NewHub(ws.NewOriginPolicy(cfg.Server.WSAllowedOrigins), ws.HubOptions{
 		ReadTimeout:  time.Duration(cfg.Server.WSReadTimeoutSeconds) * time.Second,
@@ -155,10 +140,7 @@ func newInfrastructure(ctx context.Context, cfg *config.Config) (*infrastructure
 		ReadLimit:    cfg.Server.WSReadLimitBytes,
 	})
 	if err != nil {
-		bus.Close()
-		redisClient.Close()
-		database.Close()
-		return nil, err
+		return nil, errors.Join(err, closeStartupInfrastructure(database, redisClient, bus))
 	}
 	return &infrastructure{
 		database: database,
@@ -170,6 +152,23 @@ func newInfrastructure(ctx context.Context, cfg *config.Config) (*infrastructure
 		wsHub:    hub,
 		ids:      ids,
 	}, nil
+}
+
+// closeStartupInfrastructure 释放启动阶段已创建的依赖，并返回需要向上报告的关闭错误。
+func closeStartupInfrastructure(database *db.DB, redisClient *redis.Client, bus eventbus.Bus) error {
+	if bus != nil {
+		bus.Close()
+	}
+	var closeErr error
+	if redisClient != nil {
+		if err := redisClient.Close(); err != nil {
+			closeErr = fmt.Errorf("关闭 Redis 客户端失败: %w", err)
+		}
+	}
+	if database != nil {
+		database.Close()
+	}
+	return closeErr
 }
 
 // close 释放长连接资源;HTTP server 自身由 run 的 Shutdown 管理。

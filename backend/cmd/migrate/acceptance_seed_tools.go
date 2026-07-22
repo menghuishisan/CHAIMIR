@@ -101,10 +101,6 @@ type toolManifestSelftestCommand struct {
 	Command []string `json:"command"`
 }
 
-type toolManifestSelftest struct {
-	Commands []toolManifestSelftestCommand `json:"commands"`
-}
-
 // acceptanceToolDefinitions 读取全部 tool manifest 并转换为 tool 表种子数据。
 func acceptanceToolDefinitions() ([]acceptanceToolDefinition, error) {
 	root, err := acceptanceImagesRoot()

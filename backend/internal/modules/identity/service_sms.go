@@ -92,17 +92,6 @@ func (s *Service) rollbackSMSRateLimit(ctx context.Context, resendKey, dayKey st
 	}
 }
 
-// verifySMSCode 校验短信验证码,失败次数达到上限后要求重新获取。
-func (s *Service) verifySMSCode(ctx context.Context, tenantID int64, phone string, scene int16, code string) error {
-	phoneHash, codeHash, err := s.smsCredentialHashes(phone, code)
-	if err != nil {
-		return err
-	}
-	return s.store.TenantTx(ctx, tenantID, func(ctx context.Context, tx TxStore) error {
-		return s.verifySMSCodeInTx(ctx, tx, tenantID, phoneHash, scene, codeHash)
-	})
-}
-
 // verifySMSCodeInTx 在调用方事务内完成验证码校验和一次性消费。
 func (s *Service) verifySMSCodeInTx(ctx context.Context, tx TxStore, tenantID int64, phoneHash string, scene int16, codeHash string) error {
 	row, err := tx.GetLatestSMSCode(ctx, tenantID, phoneHash, scene)

@@ -147,10 +147,10 @@ func (c *Client) validateExecTarget(namespace, podName, container string, comman
 		return fmt.Errorf("K8s 客户端未初始化")
 	}
 	if strings.TrimSpace(namespace) == "" || strings.TrimSpace(podName) == "" || strings.TrimSpace(container) == "" {
-		return fmt.Errorf("Kubernetes exec 目标不完整")
+		return fmt.Errorf("kubernetes exec 目标不完整")
 	}
 	if len(command) == 0 || strings.TrimSpace(command[0]) == "" {
-		return fmt.Errorf("Kubernetes exec 命令不能为空")
+		return fmt.Errorf("kubernetes exec 命令不能为空")
 	}
 	return nil
 }

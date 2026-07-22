@@ -111,14 +111,3 @@ func (s *Service) isSchoolAdmin(ctx context.Context, accountID int64) bool {
 	ok, err := s.roles.HasRole(ctx, accountID, contracts.RoleSchoolAdmin)
 	return err == nil && ok
 }
-
-// mapExperimentLoadError 将数据库未命中归一为实验不存在。
-func mapExperimentLoadError(err error) error {
-	if err == nil {
-		return nil
-	}
-	if isNoRows(err) {
-		return apperr.ErrExperimentNotFound
-	}
-	return err
-}

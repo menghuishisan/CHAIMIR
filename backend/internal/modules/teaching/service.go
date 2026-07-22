@@ -105,15 +105,6 @@ func currentIdentity(ctx context.Context) (tenant.Identity, error) {
 	return id, nil
 }
 
-// currentServiceTenant 读取内部服务租户边界。
-func currentServiceTenant(ctx context.Context) (int64, error) {
-	id, ok := tenant.FromContext(ctx)
-	if !ok || id.TenantID <= 0 || !id.IsSystem {
-		return 0, apperr.ErrServiceUnauthorized
-	}
-	return id.TenantID, nil
-}
-
 // mapCourseError 将数据库未命中归一为课程不存在。
 func mapCourseError(err error) error {
 	if err == nil {

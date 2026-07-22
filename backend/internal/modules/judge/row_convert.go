@@ -65,29 +65,7 @@ func taskFromRow(row sqlcgen.JudgeTask) (JudgeTask, error) {
 
 // taskFromCreateRow 转换幂等创建 CTE 返回行,集中复用任务行解析规则。
 func taskFromCreateRow(row sqlcgen.CreateJudgeTaskRow) (JudgeTask, error) {
-	return taskFromRow(sqlcgen.JudgeTask{
-		ID:               row.ID,
-		TenantID:         row.TenantID,
-		JudgerID:         row.JudgerID,
-		SourceRef:        row.SourceRef,
-		SourceOwnerID:    row.SourceOwnerID,
-		SourceCourseID:   row.SourceCourseID,
-		SourceScope:      row.SourceScope,
-		SubmitterID:      row.SubmitterID,
-		ProblemRef:       row.ProblemRef,
-		CodeStorageKey:   row.CodeStorageKey,
-		CodeHash:         row.CodeHash,
-		InputSnapshot:    row.InputSnapshot,
-		SandboxMode:      row.SandboxMode,
-		TargetSandboxRef: row.TargetSandboxRef,
-		Priority:         row.Priority,
-		Status:           row.Status,
-		RetryCount:       row.RetryCount,
-		MaxRetries:       row.MaxRetries,
-		LastError:        row.LastError,
-		CreatedAt:        row.CreatedAt,
-		UpdatedAt:        row.UpdatedAt,
-	})
+	return taskFromRow(sqlcgen.JudgeTask(row))
 }
 
 // taskInfoFromJoined 转换带可选结果的查询行。

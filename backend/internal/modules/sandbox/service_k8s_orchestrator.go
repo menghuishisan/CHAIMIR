@@ -1098,9 +1098,7 @@ func podGroupForPlan(plan CreateSandboxPlan) []workload.PodSpec {
 	}
 	specContainers := []workload.ComponentSpec{plan.Runtime.AdapterSpec.RuntimeContainer}
 	specContainers[0].ImageURL = plan.Image.ImageURL
-	for _, sidecar := range plan.Runtime.AdapterSpec.InfraSidecars {
-		specContainers = append(specContainers, sidecar)
-	}
+	specContainers = append(specContainers, plan.Runtime.AdapterSpec.InfraSidecars...)
 	specContainers = append(specContainers, plan.PrivateSidecars...)
 	return []workload.PodSpec{{Name: "sandbox", Containers: specContainers}}
 }
