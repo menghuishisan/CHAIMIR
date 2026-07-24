@@ -4,10 +4,9 @@ import React, { useCallback, useMemo, useState } from 'react'
 import type { SimCompute, SimPackageMeta } from '@chaimir/api-client'
 import { SIM_COMPUTE } from '@chaimir/api-client'
 import type { TableColumn } from '@chaimir/ui'
-import { Button, Callout, Input, Select, Table } from '@chaimir/ui'
+import { Button, Callout, Input, Select, Table, ResourceState, FormField } from '@chaimir/ui'
 import { Eye, Network, Pencil, RefreshCw, Upload } from 'lucide-react'
 import { api } from '../../../../../app/api'
-import { ErrorState, LoadingState } from '../../../../../components/ResourceState'
 import { useAsyncResource } from '../../../../../hooks'
 import styles from '../../sim.module.css'
 import { formatDateTime, simComputeOptions, simPackageStatusLabel } from '../../../../../utils/index'
@@ -132,19 +131,19 @@ const TeacherSimulationsPage: React.FC = () => {
       {message && <Callout variant="success" title="提交成功">{message}</Callout>}
       <section className={styles.panel}>
         <div className={styles.formGrid}>
-          <label className={styles.field}>包编号<Input fullWidth value={code} onChange={(event) => setCode(event.target.value)} /></label>
-          <label className={styles.field}>版本<Input fullWidth value={version} onChange={(event) => setVersion(event.target.value)} /></label>
-          <label className={styles.field}>名称<Input fullWidth value={name} onChange={(event) => setName(event.target.value)} /></label>
-          <label className={styles.field}>分类<Input fullWidth value={category} onChange={(event) => setCategory(event.target.value)} /></label>
-          <label className={styles.field}>运行方式<Select fullWidth value={compute} options={computeOptions} onChange={changeCompute} /></label>
-          {compute === SIM_COMPUTE.BACKEND && <label className={styles.field}>云端计算方式<Select fullWidth value={backendAdapter} options={backendAdapters.map((adapter) => ({ value: adapter.code, label: adapter.name }))} onChange={setBackendAdapter} /></label>}
-          <label className={styles.field}>仿真包文件<input type="file" onChange={(event) => setFile(event.target.files?.[0] || null)} /></label>
+          <FormField className={styles.field} label="包编号"><Input fullWidth value={code} onChange={(event) => setCode(event.target.value)} /></FormField>
+          <FormField className={styles.field} label="版本"><Input fullWidth value={version} onChange={(event) => setVersion(event.target.value)} /></FormField>
+          <FormField className={styles.field} label="名称"><Input fullWidth value={name} onChange={(event) => setName(event.target.value)} /></FormField>
+          <FormField className={styles.field} label="分类"><Input fullWidth value={category} onChange={(event) => setCategory(event.target.value)} /></FormField>
+          <FormField className={styles.field} label="运行方式"><Select fullWidth value={compute} options={computeOptions} onChange={changeCompute} /></FormField>
+          {compute === SIM_COMPUTE.BACKEND && <FormField className={styles.field} label="云端计算方式"><Select fullWidth value={backendAdapter} options={backendAdapters.map((adapter) => ({ value: adapter.code, label: adapter.name }))} onChange={setBackendAdapter} /></FormField>}
+          <FormField className={styles.field} label="仿真包文件"><input type="file" onChange={(event) => setFile(event.target.files?.[0] || null)} /></FormField>
         </div>
         {compute === SIM_COMPUTE.BACKEND && backendAdapters.find((adapter) => adapter.code === backendAdapter)?.description && <p className={styles.subtitle}>{backendAdapters.find((adapter) => adapter.code === backendAdapter)?.description}</p>}
         <Button icon={<Upload size={16} />} loading={submitting} onClick={submitPackage}>{editingPackage ? '提交更新' : '提交审核'}</Button>
       </section>
-      {resource.status === 'error' && <ErrorState error={resource.error} onRetry={resource.reload} />}
-      {resource.status === 'loading' && <LoadingState title="正在获取仿真包" />}
+      {resource.status === 'error' && <ResourceState status="error" error={resource.error} onRetry={resource.reload} />}
+      {resource.status === 'loading' && <ResourceState status="loading" title="正在获取仿真包" />}
       {(resource.status === 'success' || resource.status === 'empty') && (
         <div className={styles.tableWrap}>
           <Table columns={columns} rows={rows} rowKey="id" emptyTitle="暂无仿真包" emptyDescription="当前还没有仿真包记录。" ariaLabel="教师仿真包列表" />

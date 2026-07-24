@@ -1,7 +1,7 @@
 // 本文件把 mempool 替换交易状态映射为泳道、矩阵和传播图。
 
 import type { GraphNode, MatrixCell, TeachingFrame, VisualElementMeta } from '../../../types';
-import { graphPattern, lanePattern, matrixPattern, selectedOrFrameFocus, teachingFrame } from '../../packageTools';
+import { focusOrArchiveMeta as meta, graphPattern, lanePattern, matrixPattern, selectedOrFrameFocus, teachingFrame } from '../../packageTools';
 import { graphEdges, laneMessages, matrixCells } from '../runtimeView';
 import { labelPoolActor } from './kernel';
 import { mempoolReplacementPhases, type MempoolReplacementState, type PoolStatus } from './model';
@@ -86,9 +86,4 @@ function emphasisFor(status: PoolStatus): VisualElementMeta['emphasis'] {
   if (status === 'pending' || status === 'included') return 'focus';
   if (status === 'replaced' || status === 'rejected') return 'ghost';
   return 'context';
-}
-
-/** meta 生成当前内置仿真的可视化视图模型。 */
-function meta(id: string, label: string, emphasis: VisualElementMeta['emphasis'], tick: number): VisualElementMeta {
-  return { id, label, lifecycle: { state: emphasis === 'ghost' ? 'archived' : emphasis === 'focus' ? 'active' : 'settled', fromTick: Math.max(0, tick - 1) }, emphasis, explanation: label };
 }

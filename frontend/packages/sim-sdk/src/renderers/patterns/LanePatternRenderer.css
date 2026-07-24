@@ -1,0 +1,114 @@
+/* LanePatternRenderer 仅定义 Lane 模式的可视化样式。 */
+
+.sim-lane {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-4);
+  overflow: auto;
+  background:
+    linear-gradient(90deg, transparent 0 8rem, color-mix(in srgb, var(--color-dark-border) 34%, transparent) 8rem 8.0625rem, transparent 8.0625rem),
+    var(--color-dark-surface);
+}
+.sim-lane__axis {
+  display: grid;
+  grid-template-columns: minmax(4.5rem, 6rem) minmax(18rem, 1fr);
+  gap: var(--space-3);
+  align-items: center;
+  color: var(--color-dark-text-sub);
+}
+
+.sim-lane__axis > div {
+  position: relative;
+  min-height: 1.25rem;
+  border-bottom: 0.0625rem solid color-mix(in srgb, var(--color-dark-border) 72%, transparent);
+}
+
+.sim-lane__axis small {
+  position: absolute;
+  inset-block-end: 0.25rem;
+  font-family: var(--font-mono);
+  font-size: 0.625rem;
+  transform: translateX(-50%);
+}
+
+.sim-lane__axis small:first-child {
+  transform: none;
+}
+
+.sim-lane__axis small:last-child {
+  transform: translateX(-100%);
+}
+
+.sim-lane__row {
+  display: grid;
+  grid-template-columns: minmax(4.5rem, 6rem) minmax(18rem, 1fr);
+  gap: var(--space-3);
+  align-items: center;
+}
+
+.sim-lane__actor {
+  padding: var(--space-1) var(--space-2);
+  border: 0.0625rem solid var(--color-dark-border);
+  border-radius: var(--radius-full);
+  background: var(--color-dark-elevated);
+  color: var(--color-dark-text-sub);
+  font-size: var(--text-sm);
+}
+
+.sim-lane__messages {
+  position: relative;
+  min-height: 2.75rem;
+  border-bottom: 0.0625rem solid var(--color-dark-border);
+  background:
+    repeating-linear-gradient(90deg, transparent 0 16%, color-mix(in srgb, var(--color-dark-border) 34%, transparent) 16% calc(16% + 0.0625rem), transparent calc(16% + 0.0625rem) 32%);
+}
+
+.sim-lane__message {
+  position: absolute;
+  inset-block-start: 0.375rem;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  max-width: clamp(6.5rem, 18vw, 9rem);
+  padding: var(--space-1) var(--space-2);
+  border: 0.0625rem solid var(--color-dark-border);
+  border-radius: var(--radius-xs);
+  background: var(--color-dark-elevated);
+  font-size: var(--text-xs);
+  cursor: pointer;
+  transform: translateX(-50%);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: border-color var(--t-fast) var(--ease), background var(--t-fast) var(--ease), transform var(--t-fast) var(--ease-out);
+}
+
+.sim-lane__message:focus-visible {
+  background: var(--color-dark-surface);
+  outline: 0.125rem solid var(--color-on-dark-accent);
+  outline-offset: 0.125rem;
+}
+
+.sim-lane__message b {
+  color: var(--color-dark-text-sub);
+  font-size: 0.625rem;
+}
+
+.sim-lane__message i {
+  position: absolute;
+  inset-inline: 0;
+  inset-block-end: -0.25rem;
+  height: 0.125rem;
+  border-radius: 999px;
+  background: var(--color-secondary-accent);
+}
+
+.sim-lane__message.is-delivered {
+  border-color: var(--sim-pattern-accent);
+  background: color-mix(in srgb, var(--color-dark-elevated) 78%, var(--sim-pattern-accent) 14%);
+}
+
+.sim-lane__message.is-dropped {
+  border-color: var(--color-danger);
+  background: color-mix(in srgb, var(--color-dark-elevated) 82%, var(--color-danger) 18%);
+}

@@ -3,11 +3,10 @@
 import React, { useCallback, useMemo, useState } from 'react'
 import { SIM_PACKAGE_STATUS, type SimPackageMeta } from '@chaimir/api-client'
 import type { TableColumn } from '@chaimir/ui'
-import { Button, FormField, Input, Modal, Select, Table } from '@chaimir/ui'
+import { Button, FormField, Input, Modal, Select, Table, ResourceState } from '@chaimir/ui'
 import { History, Network, Play, RefreshCw } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../../../../../app/api'
-import { ErrorState, LoadingState } from '../../../../../components/ResourceState'
 import { useAsyncResource } from '../../../../../hooks'
 import styles from '../../sim.module.css'
 import { userFacingErrorMessage } from '../../../../../utils/userFacingError'
@@ -101,8 +100,8 @@ const SimulationsPage: React.FC = () => {
         </Button>
       </div>
       {error && <div className={styles.error} role="alert">{error}</div>}
-      {resource.status === 'error' && <ErrorState error={resource.error} onRetry={resource.reload} />}
-      {resource.status === 'loading' && <LoadingState title="正在获取仿真包" />}
+      {resource.status === 'error' && <ResourceState status="error" error={resource.error} onRetry={resource.reload} />}
+      {resource.status === 'loading' && <ResourceState status="loading" title="正在获取仿真包" />}
       {(resource.status === 'success' || resource.status === 'empty') && (
         <div className={styles.tableWrap}>
           <Table columns={columns} rows={rows} rowKey="id" emptyTitle="暂无仿真包" emptyDescription="当前没有已发布的仿真包。" ariaLabel="学生仿真包列表" />

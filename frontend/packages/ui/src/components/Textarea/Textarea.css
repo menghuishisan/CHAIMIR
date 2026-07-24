@@ -13,7 +13,7 @@
   transition:
     background var(--t) var(--ease),
     border-color var(--t) var(--ease),
-    box-shadow 0.4s var(--ease-spring-ios),
+    box-shadow var(--t) var(--ease),
     opacity var(--t-fast) var(--ease);
   min-height: 5rem; /* 80px */
 }
@@ -24,8 +24,10 @@
 
 /* === 状态 === */
 
-.chaimir-textarea:hover:not(:disabled) {
-  border-color: var(--color-border-strong);
+@media (hover: hover) and (pointer: fine) {
+  .chaimir-textarea:hover:not(:disabled) {
+    border-color: var(--color-border-strong);
+  }
 }
 
 .chaimir-textarea:focus {

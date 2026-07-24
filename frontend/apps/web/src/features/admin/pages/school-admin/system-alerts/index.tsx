@@ -4,13 +4,12 @@ import React, { useCallback, useMemo, useState } from 'react'
 import type { AlertEvent } from '@chaimir/api-client'
 import { AlertStatus } from '@chaimir/api-client'
 import type { TableColumn } from '@chaimir/ui'
-import { Button, Callout, Select, Table } from '@chaimir/ui'
+import { Button, Callout, Select, Table, ResourceState } from '@chaimir/ui'
 import { BellRing, CheckCircle, RefreshCw, XCircle } from 'lucide-react'
 import { api } from '../../../../../app/api'
-import { ErrorState, LoadingState } from '../../../../../components/ResourceState'
 import { useAsyncResource } from '../../../../../hooks'
 import styles from '../../list.module.css'
-import { alertStatusFilterOptions, formatDateTime, alertStatusLabel } from '../../../../../utils/index'
+import { alertLevelLabel, alertStatusFilterOptions, formatDateTime, alertStatusLabel } from '../../../../../utils/index'
 import { userFacingErrorMessage } from '../../../../../utils/userFacingError'
 
 const SystemAlertsPage: React.FC = () => {
@@ -39,8 +38,7 @@ const SystemAlertsPage: React.FC = () => {
   }, [resource])
 
   const columns = useMemo<TableColumn<AlertEvent>[]>(() => [
-    { key: 'level', title: '级别', render: (row) => <span className={styles.status}>L{row.level}</span> },
-    { key: 'rule', title: '规则编号', dataIndex: 'rule_id' },
+    { key: 'level', title: '级别', render: (row) => <span className={styles.status}>{alertLevelLabel(row.level)}</span> },
     { key: 'message', title: '告警描述', dataIndex: 'message', priority: 'primary' },
     { key: 'status', title: '状态', render: (row) => alertStatusLabel(row.status) },
     { key: 'time', title: '触发时间', render: (row) => formatDateTime(row.triggered_at) },
@@ -70,8 +68,8 @@ const SystemAlertsPage: React.FC = () => {
       {error && <div className={styles.muted}>{error}</div>}
       {message && <Callout variant="success" title="操作成功">{message}</Callout>}
       <div className={styles.toolbar}><Select value={status} options={alertStatusFilterOptions} onChange={setStatus} /></div>
-      {resource.status === 'error' && <ErrorState error={resource.error} onRetry={resource.reload} />}
-      {resource.status === 'loading' && <LoadingState title="正在获取系统告警" />}
+      {resource.status === 'error' && <ResourceState status="error" error={resource.error} onRetry={resource.reload} />}
+      {resource.status === 'loading' && <ResourceState status="loading" title="正在获取系统告警" />}
       {(resource.status === 'success' || resource.status === 'empty') && (
         <div className={styles.tableWrap}>
           <Table columns={columns} rows={rows} rowKey="id" emptyTitle="暂无告警" emptyDescription="当前没有系统级告警事件。" ariaLabel="学校系统告警列表" />

@@ -2,21 +2,22 @@
 
 import React, { useState } from 'react'
 import type { BattleMatch } from '@chaimir/api-client'
-import { Button, Input, Table } from '@chaimir/ui'
+import { Button, Input, Table, ResourceState } from '@chaimir/ui'
 import { Clapperboard, Search } from 'lucide-react'
 import { useParams } from 'react-router-dom'
 import { api } from '../../../../../app/api'
-import { ErrorState, LoadingState } from '../../../../../components/ResourceState'
+import { usePendingAction } from '../../../../../hooks'
 import { useAsyncResource } from '../../../../../hooks/useAsyncResource'
 import styles from '../../contest.module.css'
-import { formatDateTime } from '../../../../../utils/index'
+import { battleMatchStatusLabel, formatDateTime } from '../../../../../utils/index'
 import { userFacingErrorMessage } from '../../../../../utils/userFacingError'
 
 const StudentContestReplayPage: React.FC = () => {
   const { id } = useParams()
   const [matchId, setMatchId] = useState('')
-  const [replayRef, setReplayRef] = useState('')
+  const [replayReady, setReplayReady] = useState(false)
   const [message, setMessage] = useState('')
+  const { pendingAction, runPendingAction } = usePendingAction()
   const resource = useAsyncResource(
     async () => {
       if (!id) throw new Error('缺少竞赛编号，无法读取对局。')
@@ -30,7 +31,7 @@ const StudentContestReplayPage: React.FC = () => {
     setMessage('')
     try {
       const result = await api.contest.getBattleReplay(target.trim())
-      setReplayRef(result.replay_ref)
+      setReplayReady(Boolean(result.replay_ref))
       setMatchId(result.match_id)
     } catch (error) {
       setMessage(userFacingErrorMessage(error, '暂时无法读取回放。'))
@@ -38,11 +39,11 @@ const StudentContestReplayPage: React.FC = () => {
   }
 
   if (resource.status === 'loading') {
-    return <LoadingState title="正在读取对局回放" description="系统正在同步当前队伍的对局记录。" />
+    return <ResourceState status="loading" title="正在读取对局回放" description="系统正在同步当前队伍的对局记录。" />
   }
 
   if (resource.status === 'error') {
-    return <ErrorState error={resource.error} onRetry={resource.reload} />
+    return <ResourceState status="error" error={resource.error} onRetry={resource.reload} />
   }
 
   return (
@@ -66,10 +67,10 @@ const StudentContestReplayPage: React.FC = () => {
             emptyTitle="暂无对局"
             emptyDescription="对抗赛产生对局后会显示在这里。"
             columns={[
-              { key: 'problem', title: '题目', dataIndex: 'problem_id', priority: 'primary' },
-              { key: 'status', title: '状态', dataIndex: 'status' },
+              { key: 'problem', title: '题目', render: () => '竞赛题目', priority: 'primary' },
+              { key: 'status', title: '状态', render: (row) => battleMatchStatusLabel(row.status) },
               { key: 'matched', title: '匹配时间', render: (row) => formatDateTime(row.matched_at) },
-              { key: 'action', title: '操作', render: (row) => <Button size="sm" variant="outline" onClick={() => loadReplay(row.id)}>读取回放</Button> },
+              { key: 'action', title: '操作', render: (row) => <Button size="sm" variant="outline" loading={pendingAction === `replay-${row.id}`} disabled={Boolean(pendingAction)} onClick={() => void runPendingAction(`replay-${row.id}`, () => loadReplay(row.id))}>读取回放</Button> },
             ]}
           />
         </section>
@@ -80,8 +81,8 @@ const StudentContestReplayPage: React.FC = () => {
             <label className={styles.label} htmlFor="match-id">对局编号</label>
             <Input id="match-id" value={matchId} onChange={(event) => setMatchId(event.target.value)} fullWidth />
           </div>
-          <Button icon={<Search size={16} />} onClick={() => loadReplay()}>读取回放</Button>
-          {replayRef ? <p className={styles.muted}>回放记录已准备：{replayRef}</p> : <p className={styles.muted}>从对局列表中选择一场比赛读取回放。</p>}
+          <Button icon={<Search size={16} />} loading={pendingAction === 'replay'} disabled={Boolean(pendingAction) || !matchId.trim()} onClick={() => void runPendingAction('replay', () => loadReplay())}>读取回放</Button>
+          {replayReady ? <p className={styles.muted}>回放记录已准备，可按对局步骤继续查看。</p> : <p className={styles.muted}>从对局列表中选择一场比赛读取回放。</p>}
         </aside>
       </div>
     </div>

@@ -43,12 +43,16 @@
   font-weight: var(--font-medium);
   color: var(--color-danger);
   margin-top: calc(-1 * var(--space-1)); /* 就近显示 */
-  animation: form-error-in 0.4s var(--ease-spring-ios);
+  opacity: 1;
+  transform: translateY(0);
+  transition: opacity var(--t) var(--ease-out), transform var(--t) var(--ease-out);
 }
 
-@keyframes form-error-in {
-  from { opacity: 0; transform: translateY(-4px); }
-  to { opacity: 1; transform: translateY(0); }
+@starting-style {
+  .chaimir-form-field__error {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
 }
 
 /* === 帮助文本 === */

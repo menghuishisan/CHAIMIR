@@ -2,11 +2,10 @@
 
 import React from 'react'
 import type { StudentExperiment } from '@chaimir/api-client'
-import { Button, Table } from '@chaimir/ui'
+import { Button, Table, ResourceState } from '@chaimir/ui'
 import { ExternalLink, FileText, FlaskConical } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../../../../../app/api'
-import { ErrorState, LoadingState } from '../../../../../components/ResourceState'
 import { useAsyncResource } from '../../../../../hooks/useAsyncResource'
 import styles from '../../experiment.module.css'
 
@@ -18,11 +17,11 @@ const ExperimentsPage: React.FC = () => {
   )
 
   if (experiments.status === 'loading') {
-    return <LoadingState title="正在读取实验" description="系统正在同步可进入的实验列表。" />
+    return <ResourceState status="loading" title="正在读取实验" description="系统正在同步可进入的实验列表。" />
   }
 
   if (experiments.status === 'error') {
-    return <ErrorState error={experiments.error} onRetry={experiments.reload} />
+    return <ResourceState status="error" error={experiments.error} onRetry={experiments.reload} />
   }
 
   const rows = experiments.data?.list ?? []
@@ -46,7 +45,7 @@ const ExperimentsPage: React.FC = () => {
         emptyDescription="教师发布实验后会显示在这里。"
         columns={[
           { key: 'name', title: '实验名称', dataIndex: 'name', priority: 'primary' },
-          { key: 'course', title: '课程编号', render: (row) => row.course_id || '未关联', priority: 'secondary' },
+          { key: 'course', title: '所属课程', render: (row) => row.course_id ? '课程实验' : '独立实验', priority: 'secondary' },
           { key: 'envs', title: '环境', render: (row) => `${row.components.envs.length} 个环境`, priority: 'secondary' },
           { key: 'checkpoints', title: '检查点', render: (row) => `${row.components.checkpoints.length} 个` },
           {

@@ -75,6 +75,14 @@
   background: var(--color-surface);
 }
 
+.panel {
+  padding-inline: 0;
+  border: 0;
+  border-top: 1px solid var(--color-border);
+  border-radius: 0;
+  background: transparent;
+}
+
 .card h2,
 .panel h2 {
   margin: 0;
@@ -104,6 +112,25 @@
   color: var(--color-text-strong);
   font-size: var(--text-sm);
   font-weight: var(--font-medium);
+}
+
+.answerPreview {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-4);
+  border-left: 3px solid var(--color-primary);
+  background: var(--color-surface-sunken);
+}
+
+.answerPreview h3,
+.answerPreview p {
+  margin: 0;
+}
+
+.answerPreview p {
+  color: var(--color-text-sub);
+  line-height: var(--leading-relaxed);
+  white-space: pre-wrap;
 }
 
 .fieldFull {
@@ -186,10 +213,28 @@
   flex: 1;
   overflow: auto;
   padding: var(--space-5);
-  border: 1px solid var(--color-glass-border);
+  border: 1px solid var(--color-dark-border-strong);
   border-radius: var(--radius-lg);
-  background: var(--color-glass-highlight);
+  background: var(--color-dark-highlight);
   white-space: pre-wrap;
+}
+
+.resourceSummary {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: var(--space-4);
+  align-items: start;
+  padding: var(--space-5);
+  border: 1px solid var(--color-dark-border-strong);
+  background: var(--color-dark-highlight);
+}
+
+.resourceSummary :global(.chaimir-description-list) {
+  color: var(--color-dark-text);
+}
+
+.resourceSummary :global(.chaimir-description-list dt) {
+  color: var(--color-dark-text-muted);
 }
 
 .error {
@@ -201,7 +246,7 @@
   font-size: var(--text-sm);
 }
 
-@media (max-width: 860px) {
+@media not all and (--bp-lg) {
   .header,
   .toolbar,
   .joinBar {

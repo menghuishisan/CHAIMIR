@@ -66,6 +66,14 @@ export interface SandboxResourceUsage {
   storage_bytes: number
 }
 
+export interface SandboxProgressMessage {
+  phase: number
+  status: number
+  stage: string
+  message: string
+  trace_id?: string
+}
+
 export interface SandboxFileReadResponse {
   relative_path: string
   content_base64: string
@@ -204,6 +212,8 @@ export interface SandboxQuota {
   max_keepalive_min: number
   max_snapshot_retention_min: number
 }
+
+export type SandboxQuotaRequest = Omit<SandboxQuota, 'active_sandbox_count'>
 
 export interface SandboxPrepullStatus {
   image_id: SnowflakeID

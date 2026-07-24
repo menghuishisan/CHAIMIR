@@ -2,9 +2,8 @@
 
 import React, { useCallback, useState } from 'react'
 import type { NotificationPreference } from '@chaimir/api-client'
-import { Callout, Switch } from '@chaimir/ui'
+import { Callout, Switch, ResourceState } from '@chaimir/ui'
 import { api } from '../../../../../app/api'
-import { ErrorState, LoadingState } from '../../../../../components/ResourceState'
 import { useAsyncResource } from '../../../../../hooks'
 import { userFacingErrorMessage } from '../../../../../utils/userFacingError'
 import { notificationPreferenceLabel } from '../../../../../utils'
@@ -33,8 +32,8 @@ export function NotificationPreferences(): React.ReactElement {
     }
   }, [resource])
 
-  if (resource.status === 'loading') return <LoadingState title="正在获取通知偏好" />
-  if (resource.status === 'error') return <ErrorState error={resource.error} onRetry={resource.reload} />
+  if (resource.status === 'loading') return <ResourceState status="loading" title="正在获取通知偏好" />
+  if (resource.status === 'error') return <ResourceState status="error" error={resource.error} onRetry={resource.reload} />
 
   return (
     <section className={styles.preferencePanel} aria-labelledby="notification-preferences-title">

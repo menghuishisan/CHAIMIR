@@ -107,7 +107,7 @@ jobs:
             echo "images/image-digests.lock 缺少有效 base/node-builder digest" >&2
             exit 1
           fi
-          echo "ref=${{ secrets.HARBOR_REGISTRY }}/base/node-builder@$digest" >> "$GITHUB_OUTPUT"
+          echo "ref=${{ vars.HARBOR_REGISTRY }}/base/node-builder@$digest" >> "$GITHUB_OUTPUT"
           runtime="$(awk '
             /^upstream:[[:space:]]*$/ { inside=1; next }
             inside && /^[A-Za-z_][A-Za-z0-9_]*:[[:space:]]*/ { inside=0 }
@@ -135,14 +135,14 @@ jobs:
         id: frontend-image
         uses: ./deploy/ci/build-scan-sign-push
         with:
-          image: ${{ secrets.HARBOR_REGISTRY }}/service/frontend
+          image: ${{ vars.HARBOR_REGISTRY }}/service/frontend
           tag: ${{ github.sha }}
           context: .
           dockerfile: images/service/frontend/Dockerfile
           build-args: |
             NODE_BUILDER_IMAGE=${{ steps.build-base.outputs.ref }}
             NGINX_RUNTIME_IMAGE=${{ steps.build-base.outputs.runtime }}
-          registry: ${{ secrets.HARBOR_REGISTRY }}
+          registry: ${{ vars.HARBOR_REGISTRY }}
           registry-username: ${{ secrets.HARBOR_USERNAME }}
           registry-password: ${{ secrets.HARBOR_PASSWORD }}
           cosign-key: ${{ secrets.COSIGN_KEY }}

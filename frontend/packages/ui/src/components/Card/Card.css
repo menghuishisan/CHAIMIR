@@ -1,24 +1,15 @@
-/* Card 组件样式
- *
- * 符合前端设计规范 §4.1 阴影分层：
- * - 静置：--shadow-xs
- * - 悬浮：--shadow（hover）
- */
+/* Card 组件样式：仅为可复用内容单元提供稳定边界。 */
 
 .chaimir-card {
   position: relative;
   min-inline-size: 0;
   background: var(--color-bg);
-  border: none;
-  border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-xs),
-              inset 0 1px 0 var(--color-glass-highlight),
-              inset 0 0 0 1px var(--color-border);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  box-shadow: none;
   overflow: hidden;
   transition:
     border-color var(--t) var(--ease),
-    box-shadow var(--t) var(--ease),
-    transform 0.4s var(--ease-spring-ios),
     background var(--t) var(--ease);
 }
 
@@ -32,13 +23,11 @@
   cursor: pointer;
 }
 
-.chaimir-card--hoverable:hover {
-  /* §4.2 交互微动效：抬升 + 多层阴影升 + 玻璃边缘主色高亮 */
-  transform: translateY(-4px);
-  box-shadow: var(--shadow-md),
-              inset 0 1px 0 var(--color-glass-highlight),
-              inset 0 0 0 1px var(--color-accent),
-              0 4px 16px var(--color-primary-shadow); /* 弥散光晕 */
+@media (hover: hover) and (pointer: fine) {
+  .chaimir-card--hoverable:hover {
+    border-color: var(--color-primary);
+    background: var(--color-surface-hover);
+  }
 }
 
 .chaimir-card--hoverable:focus-visible {
@@ -47,8 +36,7 @@
 }
 
 .chaimir-card--hoverable:active {
-  transform: scale(0.98); /* 卡片压感微缩 */
-  transition: transform 0.15s var(--ease-press);
+  background: var(--color-surface-sunken);
 }
 
 /* === 子组件 === */
@@ -62,7 +50,7 @@
   border-bottom: 1px solid var(--color-border);
   font-weight: var(--font-semibold);
   color: var(--color-text-strong);
-  background: linear-gradient(180deg, var(--color-bg), var(--color-surface));
+  background: var(--color-surface);
 }
 
 /* 当卡片本身有 padding 时，header 需要负边距扩展到边缘 */
@@ -95,7 +83,7 @@
   }
 }
 
-@media (max-width: 479px) {
+@media not all and (--bp-sm) {
   .chaimir-card--padded {
     padding: var(--space-4);
   }

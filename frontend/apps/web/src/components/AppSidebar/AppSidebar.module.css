@@ -1,13 +1,12 @@
 /* AppSidebar.module.css 定义四类角色共用侧栏的布局、状态和响应式样式。 */
 .sidebar {
   width: var(--sidebar-w);
-  background-color: var(--color-bg);
-  border-right: 1px solid var(--color-border-subtle);
+  background-color: var(--color-dark-bg);
+  border-right: 1px solid var(--color-dark-border-subtle);
   display: flex;
   flex-direction: column;
-  transition: width var(--t) var(--ease);
   z-index: var(--z-sticky);
-  height: calc(100vh - var(--topnav-h));
+  height: calc(100dvh - var(--topnav-h));
 }
 
 .sidebar.collapsed {
@@ -29,9 +28,9 @@
   padding: 0 var(--space-6);
   font-size: 11px;
   font-weight: var(--font-semibold);
-  color: var(--color-text-sub);
+  color: var(--color-dark-text-sub);
   text-transform: uppercase;
-  letter-spacing: 0.05em;
+  letter-spacing: 0;
   margin-bottom: var(--space-2);
 }
 
@@ -47,17 +46,18 @@
   align-items: center;
   gap: var(--space-3);
   padding: var(--space-2) var(--space-3);
-  color: var(--color-text-strong);
+  color: var(--color-dark-text);
   text-decoration: none;
   border-radius: var(--radius-sm);
   transition: background var(--t-fast) var(--ease), color var(--t-fast) var(--ease);
   position: relative;
   overflow: hidden;
   white-space: nowrap;
+  min-height: 44px;
 }
 
 .navIcon {
-  color: var(--color-text-sub);
+  color: var(--color-dark-text-sub);
   flex-shrink: 0;
 }
 
@@ -66,18 +66,14 @@
   font-weight: var(--font-medium);
 }
 
-.navItem:hover {
-  background: linear-gradient(90deg, var(--color-primary-soft) 0%, transparent 100%);
-}
-
 .navItem.active {
-  background-color: var(--color-primary-soft);
-  color: var(--color-primary-text);
+  background-color: var(--color-dark-highlight);
+  color: var(--color-on-dark-accent);
   font-weight: var(--font-semibold);
 }
 
 .navItem.active .navIcon {
-  color: var(--color-primary);
+  color: var(--color-on-dark-accent);
 }
 
 /* 激活项左侧指示条用主色令牌提示当前功能位置。 */
@@ -88,13 +84,13 @@
   top: 10%;
   bottom: 10%;
   width: 3px;
-  background-color: var(--color-primary);
+  background-color: var(--color-on-dark-accent);
   border-radius: 0 4px 4px 0;
 }
 
 .footer {
   padding: var(--space-3);
-  border-top: 1px solid var(--color-border-subtle);
+  border-top: 1px solid var(--color-dark-border-subtle);
   display: flex;
   justify-content: center;
 }
@@ -102,7 +98,7 @@
 .toggleBtn {
   background: none;
   border: none;
-  color: var(--color-text-sub);
+  color: var(--color-dark-text-sub);
   padding: var(--space-2);
   cursor: pointer;
   border-radius: var(--radius-sm);
@@ -111,20 +107,27 @@
   justify-content: center;
   transition: background var(--t) var(--ease), color var(--t) var(--ease);
   width: 100%;
+  min-height: 44px;
 }
 
-.toggleBtn:hover {
-  background-color: var(--color-surface-hover);
-  color: var(--color-text-strong);
+@media (hover: hover) and (pointer: fine) {
+  .navItem:hover {
+    background: var(--color-dark-highlight);
+  }
+
+  .toggleBtn:hover {
+    background-color: var(--color-dark-highlight);
+    color: var(--color-dark-text);
+  }
 }
 
-@media (max-width: 768px) {
+@media not all and (--bp-md) {
   .sidebar {
     position: fixed;
     top: var(--topnav-h);
     left: calc(-1 * var(--sidebar-w));
     width: var(--sidebar-w);
-    height: calc(100vh - var(--topnav-h));
+    height: calc(100dvh - var(--topnav-h));
     transition: transform var(--t-normal) var(--ease);
   }
 

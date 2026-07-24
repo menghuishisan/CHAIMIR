@@ -2,12 +2,12 @@
 
 import React, { useState } from 'react'
 import type { ContentItem, ContentItemSnapshot } from '@chaimir/api-client'
-import { ContentVisibility } from '@chaimir/api-client'
-import { Button, Callout, Input, Modal, Table } from '@chaimir/ui'
+import { ContentType, ContentVisibility } from '@chaimir/api-client'
+import { Button, Callout, Input, Modal, Table, useConfirm, ResourceState } from '@chaimir/ui'
 import { Archive, Copy, Eye, GitBranch, Share2, Trash2 } from 'lucide-react'
 import { api } from '../../../../../app/api'
-import { LoadingState } from '../../../../../components/ResourceState'
 import { userFacingErrorMessage } from '../../../../../utils/userFacingError'
+import { contentStatusLabel } from '../../../../../utils'
 import styles from '../../content.module.css'
 
 export interface ContentItemActionsProps {
@@ -17,6 +17,7 @@ export interface ContentItemActionsProps {
 
 /** ContentItemActions 把资源的次级动作收敛到一个管理弹窗。 */
 export function ContentItemActions({ item, onChanged }: ContentItemActionsProps): React.ReactElement {
+  const confirm = useConfirm()
   const [open, setOpen] = useState(false)
   const [loading, setLoading] = useState(false)
   const [face, setFace] = useState<ContentItemSnapshot>()
@@ -74,13 +75,13 @@ export function ContentItemActions({ item, onChanged }: ContentItemActionsProps)
         )}
       >{item.visibility === ContentVisibility.SHARED ? '取消共享' : '共享'}</Button>
       <Modal open={open} title={`${item.title} · 资源管理`} size="lg" onClose={() => setOpen(false)}>
-        {loading && <LoadingState title="正在获取资源详情" />}
+        {loading && <ResourceState status="loading" title="正在获取资源详情" />}
         {message && <Callout variant="success" title="操作完成">{message}</Callout>}
         {error && <Callout variant="danger" title="操作未完成">{error}</Callout>}
-        {face && <Callout variant="info" title="学生可见题面">{face.title}，当前公开内容包含 {Object.keys(face.body).length} 个部分。</Callout>}
+        {face && <Callout variant="info" title="学生可见题面"><strong>{face.title}</strong><br />{contentFaceSummary(face)}</Callout>}
         <Table rows={versions} rowKey={(row) => String(row.id)} ariaLabel="内容版本历史" emptyTitle="暂无版本" emptyDescription="当前资源还没有版本记录。" columns={[
           { key: 'version', title: '版本', dataIndex: 'version', priority: 'primary' },
-          { key: 'status', title: '状态', dataIndex: 'status' },
+          { key: 'status', title: '状态', render: (row) => contentStatusLabel(row.status) },
           { key: 'time', title: '更新时间', dataIndex: 'updated_at' },
         ]} />
         <section className={styles.panel}>
@@ -95,10 +96,23 @@ export function ContentItemActions({ item, onChanged }: ContentItemActionsProps)
           <Button icon={<Copy size={14} />} disabled={!cloneCode.trim() || !cloneVersion.trim()} onClick={() => void runAction(() => api.content.cloneItem(item.code, item.version, { new_code: cloneCode.trim(), new_version: cloneVersion.trim() }), '资源副本已创建。')}>创建副本</Button>
         </section>
         <div className={styles.actions}>
-          <Button variant="outline" icon={<Archive size={14} />} onClick={() => void runAction(() => api.content.deprecateItem(String(item.id)), '资源已停用。', true)}>停用资源</Button>
-          <Button variant="danger" icon={<Trash2 size={14} />} onClick={() => { if (window.confirm('确定删除这个未被引用的资源吗？')) void runAction(() => api.content.deleteItem(String(item.id)), '资源已删除。', true) }}>删除资源</Button>
+          <Button variant="outline" icon={<Archive size={14} />} onClick={async () => {
+            const confirmed = await confirm({ title: '停用资源', description: '停用后不能再在新课程、实验或竞赛中引用该版本。', confirmLabel: '确认停用' })
+            if (confirmed) await runAction(() => api.content.deprecateItem(String(item.id)), '资源已停用。', true)
+          }}>停用资源</Button>
+          <Button variant="danger" icon={<Trash2 size={14} />} onClick={async () => {
+            const confirmed = await confirm({ title: '删除资源', description: '只有未被课程、实验或竞赛引用的资源才能删除，确定继续吗？', confirmLabel: '确认删除' })
+            if (confirmed) await runAction(() => api.content.deleteItem(String(item.id)), '资源已删除。', true)
+          }}>删除资源</Button>
         </div>
       </Modal>
     </>
   )
+}
+
+/** contentFaceSummary 从已脱敏题面中提取对教师有意义的正文摘要。 */
+function contentFaceSummary(face: ContentItemSnapshot): string {
+  if (face.type === ContentType.EXPERIMENT_TEMPLATE && 'description' in face.body) return face.body.description
+  if ((face.type === ContentType.CONTEST_PROBLEM || face.type === ContentType.THEORY_QUESTION) && 'statement' in face.body) return face.body.statement
+  return '题面已按学生视角加载，判题配置和参考答案未展示。'
 }

@@ -1,0 +1,208 @@
+/* GraphPatternRenderer 仅定义 Graph 模式的可视化样式。 */
+
+.sim-graph-container {
+  margin: var(--space-2) var(--space-4) var(--space-3);
+  width: calc(100% - var(--space-4) * 2);
+  max-block-size: min(42rem, 68vh);
+  aspect-ratio: 16 / 10;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  border: 0.0625rem solid var(--color-dark-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-terminal-bg);
+}
+.sim-pattern-grid--primary {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.sim-pattern-grid--primary .sim-pattern {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border: none;
+  background: transparent;
+}
+
+.sim-pattern-grid--primary .sim-graph-container {
+  flex: 1;
+  margin: 0;
+  width: 100%;
+  max-block-size: none;
+  min-block-size: 0;
+  aspect-ratio: auto;
+  border: none;
+  background: transparent;
+}
+
+.sim-pattern-grid--support .sim-graph-container,
+.sim-pattern-grid--support .sim-chart__plot {
+  max-block-size: 16rem;
+}
+
+.sim-graph__canvas {
+  position: relative;
+  height: 100%;
+  aspect-ratio: 1 / 1;
+  max-width: 100%;
+  max-height: 100%;
+}
+
+.sim-graph__svg-layer,
+.sim-graph__nodes-layer {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.sim-graph__edge-group {
+  pointer-events: auto;
+  cursor: pointer;
+}
+
+.sim-graph__edge {
+  stroke: var(--color-dark-border);
+  stroke-width: 0.9;
+  stroke-linecap: round;
+  transition: stroke var(--t-fast) var(--ease), opacity var(--t-fast) var(--ease);
+}
+
+.sim-graph__edge-group:focus-visible .sim-graph__edge {
+  stroke-width: 1.4;
+}
+
+.sim-graph__edge-group.is-selected .sim-graph__edge {
+  stroke-width: 1.5;
+  stroke: var(--color-on-dark-accent);
+}
+
+.sim-graph__edge.is-active,
+.sim-graph__edge.is-success {
+  stroke: var(--sim-pattern-accent);
+  stroke-width: 1.2;
+}
+
+.sim-graph__edge.is-failed {
+  stroke: var(--color-danger);
+  stroke-dasharray: 2 2;
+}
+
+.sim-graph__edge-label {
+  fill: var(--color-dark-text);
+  font-size: 0.3125rem;
+  pointer-events: none;
+  text-anchor: middle;
+  dominant-baseline: middle;
+  paint-order: stroke;
+  stroke: color-mix(in srgb, var(--color-terminal-bg) 88%, transparent);
+  stroke-width: 0.65;
+}
+
+.sim-graph__marker path {
+  fill: var(--color-dark-border);
+}
+
+.sim-graph__marker.is-accent path {
+  fill: var(--sim-pattern-accent);
+}
+
+.sim-graph__marker.is-danger path {
+  fill: var(--color-danger);
+}
+
+.sim-graph__pulse {
+  fill: var(--color-dark-border);
+  transition: fill var(--t-fast) var(--ease), opacity var(--t-fast) var(--ease);
+}
+
+.sim-graph__pulse.is-active,
+.sim-graph__pulse.is-success {
+  fill: var(--sim-pattern-accent);
+  r: 1.8;
+}
+
+.sim-graph__pulse.is-failed {
+  fill: var(--color-danger);
+}
+
+.sim-graph__node {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  pointer-events: auto;
+  cursor: pointer;
+  z-index: var(--z-base);
+  display: grid;
+  place-items: center;
+}
+
+.sim-graph__node-surface {
+  display: grid;
+  place-items: center;
+  width: 3.5rem;
+  height: 3.5rem;
+  border-radius: 50%;
+  border: 0.0625rem solid var(--color-dark-border);
+  background: var(--color-dark-elevated);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--color-dark-border) 80%, transparent);
+  transition:
+    background var(--t) var(--ease-out),
+    border-color var(--t) var(--ease-out),
+    box-shadow var(--t) var(--ease-out),
+    transform var(--t) var(--ease-out);
+  color: var(--color-dark-text);
+}
+
+.sim-graph__node-surface span {
+  font-size: var(--text-sm);
+  font-weight: 500;
+  line-height: 1.1;
+  text-align: center;
+}
+
+.sim-graph__node-surface strong {
+  font-family: var(--font-mono);
+  font-size: 0.625rem;
+  color: var(--color-dark-text-sub);
+  position: absolute;
+  bottom: -1.25rem;
+  white-space: nowrap;
+}
+
+.sim-graph__node.is-active .sim-graph__node-surface,
+.sim-graph__node.is-success .sim-graph__node-surface {
+  background: color-mix(in srgb, var(--sim-pattern-accent) 18%, var(--color-dark-elevated));
+  border-color: var(--sim-pattern-accent);
+  box-shadow: inset 3px 0 0 var(--sim-pattern-accent);
+}
+
+.sim-graph__node.is-warning .sim-graph__node-surface {
+  border-color: var(--color-secondary-accent);
+  box-shadow: inset 3px 0 0 var(--color-secondary-accent);
+}
+
+.sim-graph__node.is-danger .sim-graph__node-surface {
+  border-color: var(--color-danger);
+  box-shadow: inset 3px 0 0 var(--color-danger);
+}
+
+.sim-graph__node:focus-visible .sim-graph__node-surface {
+  outline: 0.125rem solid var(--color-on-dark-accent);
+  outline-offset: 0.125rem;
+}
+
+.sim-graph__node.is-selected .sim-graph__node-surface {
+  outline: 0.125rem solid var(--color-on-dark-accent);
+  outline-offset: 0.125rem;
+  border-color: var(--color-on-dark-accent);
+}
+
+.sim-graph__node:active .sim-graph__node-surface {
+  transform: scale(0.96);
+}

@@ -2,11 +2,10 @@
 
 import React, { useState } from 'react'
 import { CourseStatus } from '@chaimir/api-client'
-import { Button, Input, Select } from '@chaimir/ui'
+import { Button, Input, Select, ResourceState } from '@chaimir/ui'
 import { Book, Edit, Plus, RefreshCw, Users } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../../../../../app/api'
-import { ErrorState, LoadingState } from '../../../../../components/ResourceState'
 import { useAsyncResource } from '../../../../../hooks'
 import styles from '../../teaching.module.css'
 import { courseStatusLabel, courseStatusOptions, withAllOption } from '../../../../../utils/index'
@@ -44,8 +43,8 @@ const TeacherCoursesPage: React.FC = () => {
         <Button variant="outline" icon={<RefreshCw size={16} />} onClick={resource.reload}>刷新</Button>
       </div>
 
-      {resource.status === 'error' && <ErrorState error={resource.error} onRetry={resource.reload} />}
-      {resource.status === 'loading' && <LoadingState title="正在获取课程列表" />}
+      {resource.status === 'error' && <ResourceState status="error" error={resource.error} onRetry={resource.reload} />}
+      {resource.status === 'loading' && <ResourceState status="loading" title="正在获取课程列表" />}
       {(resource.status === 'success' || resource.status === 'empty') && (
         <div className={styles.cardGrid}>
           {rows.map((course) => (

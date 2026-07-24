@@ -1,6 +1,6 @@
 // contest labels 文件维护竞赛、对抗和漏洞题领域的枚举文案。
 
-import { BattleRole, ContestMode, ContestStatus, MatchMode, TeamMode, VulnLevel, VulnRuntimeMode } from '@chaimir/api-client'
+import { BattleMatchStatus, BattleRole, BattleRule, CheatAction, CheatType, ContestMode, ContestStatus, MatchMode, TeamMode, VulnLevel, VulnPrevalidateStatus, VulnProblemStatus, VulnRuntimeMode } from '@chaimir/api-client'
 import { labelFromMap } from './map'
 
 /** contestStatusLabel 返回竞赛生命周期状态文案。 */
@@ -35,6 +35,21 @@ export function battleRoleLabel(role: BattleRole): string {
   return labelFromMap(role, { [BattleRole.ATTACK]: '攻击', [BattleRole.DEFENSE]: '防守', [BattleRole.STRATEGY]: '策略' }, '未识别的参战角色')
 }
 
+/** battleRuleLabel 返回题目级对局规则文案。 */
+export function battleRuleLabel(rule: BattleRule): string {
+  return labelFromMap(rule, { [BattleRule.ATTACK_DEFENSE]: '攻防对局', [BattleRule.GAME]: '策略博弈' }, '未识别的对局规则')
+}
+
+/** cheatTypeLabel 返回违规线索类别文案。 */
+export function cheatTypeLabel(type: CheatType): string {
+  return labelFromMap(type, { [CheatType.SIMILARITY]: '代码相似', [CheatType.BEHAVIOR]: '行为异常', [CheatType.ENVIRONMENT]: '环境异常' }, '未识别的线索类型')
+}
+
+/** cheatActionLabel 返回违规处理方式文案。 */
+export function cheatActionLabel(action: CheatAction): string {
+  return labelFromMap(action, { [CheatAction.WARN]: '警告', [CheatAction.PENALTY]: '扣分', [CheatAction.DISQUALIFY]: '取消资格' }, '未识别的处理方式')
+}
+
 /** vulnLevelLabel 返回漏洞题等级文案。 */
 export function vulnLevelLabel(level: VulnLevel): string {
   return labelFromMap(level, { [VulnLevel.A]: 'A', [VulnLevel.B]: 'B', [VulnLevel.C]: 'C' }, '未识别的漏洞等级')
@@ -43,4 +58,19 @@ export function vulnLevelLabel(level: VulnLevel): string {
 /** vulnRuntimeModeLabel 返回漏洞题运行方式文案。 */
 export function vulnRuntimeModeLabel(mode: VulnRuntimeMode): string {
   return labelFromMap(mode, { [VulnRuntimeMode.ISOLATED]: '隔离环境', [VulnRuntimeMode.FORKED]: '主网分叉' }, '未识别的运行方式')
+}
+
+/** battleMatchStatusLabel 返回对抗对局状态文案。 */
+export function battleMatchStatusLabel(status: BattleMatchStatus): string {
+  return labelFromMap(status, { [BattleMatchStatus.PENDING]: '等待匹配', [BattleMatchStatus.RUNNING]: '对局进行中', [BattleMatchStatus.DONE]: '已完成', [BattleMatchStatus.FAILED]: '执行失败' }, '未识别的对局状态')
+}
+
+/** vulnPrevalidateStatusLabel 返回漏洞题双向预验证状态文案。 */
+export function vulnPrevalidateStatusLabel(status: VulnPrevalidateStatus): string {
+  return labelFromMap(status, { [VulnPrevalidateStatus.PENDING]: '待验证', [VulnPrevalidateStatus.PASSED]: '验证通过', [VulnPrevalidateStatus.FAILED]: '验证未通过' }, '未识别的验证状态')
+}
+
+/** vulnProblemStatusLabel 返回漏洞题转化状态文案。 */
+export function vulnProblemStatusLabel(status: VulnProblemStatus): string {
+  return labelFromMap(status, { [VulnProblemStatus.DRAFT]: '草稿', [VulnProblemStatus.FINALIZED]: '已固化', [VulnProblemStatus.DISCARDED]: '已废弃' }, '未识别的漏洞题状态')
 }

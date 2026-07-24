@@ -23,10 +23,13 @@ export const Switch = React.forwardRef<HTMLInputElement, SwitchProps>(
       className,
       disabled,
       checked,
+      id,
       ...props
     },
     ref
   ) => {
+    const generatedId = React.useId()
+    const inputId = id || `chaimir-switch-${generatedId}`
     const wrapperClasses = clsx(
       'chaimir-switch-wrapper',
       disabled && 'chaimir-switch-wrapper--disabled',
@@ -48,8 +51,9 @@ export const Switch = React.forwardRef<HTMLInputElement, SwitchProps>(
     }
 
     return (
-      <label className={wrapperClasses}>
+      <label className={wrapperClasses} htmlFor={inputId}>
         <input
+          id={inputId}
           ref={ref}
           type="checkbox"
           className="chaimir-switch__input"

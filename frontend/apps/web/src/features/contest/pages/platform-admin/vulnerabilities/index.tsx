@@ -1,61 +1,23 @@
-// 平台漏洞源管理页：维护后端漏洞源配置并触发同步。
+// 平台漏洞源页展示已接入的来源，不猜测动态配置字段。
 
-import React, { useState } from 'react'
+import React from 'react'
 import type { VulnSource } from '@chaimir/api-client'
-import { VulnLevel } from '@chaimir/api-client'
-import { Button, Checkbox, Input, Select, Table, Textarea } from '@chaimir/ui'
-import { DatabaseZap, Save } from 'lucide-react'
+import { Table, ResourceState } from '@chaimir/ui'
+import { DatabaseZap } from 'lucide-react'
 import { api } from '../../../../../app/api'
-import { ErrorState, LoadingState } from '../../../../../components/ResourceState'
 import { useAsyncResource } from '../../../../../hooks/useAsyncResource'
 import styles from '../../contest.module.css'
-import { parseJsonObject, vulnLevelOptions } from '../../../../../utils/index'
-import { userFacingErrorMessage } from '../../../../../utils/userFacingError'
+import { vulnLevelLabel } from '../../../../../utils/index'
 
+/** PlatformVulnerabilitiesPage 呈现后端提供的漏洞源名称、等级、状态和最近同步信息。 */
 const PlatformVulnerabilitiesPage: React.FC = () => {
-  const [sourceId, setSourceId] = useState('')
-  const [type, setType] = useState(1)
-  const [name, setName] = useState('')
-  const [configText, setConfigText] = useState('{}')
-  const [defaultLevel, setDefaultLevel] = useState(String(VulnLevel.B))
-  const [enabled, setEnabled] = useState(true)
-  const [message, setMessage] = useState('')
   const resource = useAsyncResource(() => api.contest.listPlatformVulnSources(), [])
 
-  const save = async () => {
-    if (!name.trim()) return
-    setMessage('')
-    try {
-      await api.contest.upsertPlatformVulnSource({
-        id: sourceId || undefined,
-        type,
-        name: name.trim(),
-        config: parseJsonObject(configText),
-        default_level: Number(defaultLevel) as VulnLevel,
-        enabled,
-      })
-      setMessage('漏洞源配置已保存。')
-      resource.reload()
-    } catch (error) {
-      setMessage(userFacingErrorMessage(error, '暂时无法保存漏洞源，请检查配置格式。'))
-    }
-  }
-
-  const edit = (source: VulnSource) => {
-    setSourceId(source.id)
-    setType(source.type)
-    setName(source.name)
-    setConfigText(JSON.stringify(source.config, null, 2))
-    setDefaultLevel(String(source.default_level))
-    setEnabled(source.enabled)
-  }
-
   if (resource.status === 'loading') {
-    return <LoadingState title="正在读取漏洞源" description="系统正在同步平台漏洞源配置。" />
+    return <ResourceState status="loading" title="正在读取漏洞源" description="系统正在同步平台漏洞源。" />
   }
-
   if (resource.status === 'error') {
-    return <ErrorState error={resource.error} onRetry={resource.reload} />
+    return <ResourceState status="error" error={resource.error} onRetry={resource.reload} />
   }
 
   return (
@@ -67,52 +29,21 @@ const PlatformVulnerabilitiesPage: React.FC = () => {
           漏洞题源管理
         </h1>
       </div>
-      {message && <p className={styles.message} role="status">{message}</p>}
-
-      <div className={styles.split}>
-        <section className={`${styles.panel} ${styles.section}`}>
-          <h2 className={styles.sectionTitle}>漏洞源</h2>
-          <Table<VulnSource>
-            rows={resource.data ?? []}
-            rowKey="id"
-            ariaLabel="漏洞源"
-            emptyTitle="暂无漏洞源"
-            emptyDescription="新增漏洞源后会显示在这里。"
-            columns={[
-              { key: 'name', title: '名称', dataIndex: 'name', priority: 'primary' },
-              { key: 'type', title: '类型', dataIndex: 'type' },
-              { key: 'level', title: '默认等级', dataIndex: 'default_level' },
-              { key: 'enabled', title: '状态', render: (row) => row.enabled ? '启用' : '停用' },
-              {
-                key: 'actions',
-                title: '操作',
-                render: (row) => (
-                  <div className={styles.actions}>
-                    <Button size="sm" variant="outline" onClick={() => edit(row)}>编辑</Button>
-                  </div>
-                ),
-              },
-            ]}
-          />
-        </section>
-
-        <aside className={`${styles.panel} ${styles.section}`}>
-          <h2 className={styles.sectionTitle}>源配置</h2>
-          <div className={styles.field}><label className={styles.label} htmlFor="source-id">源编号</label><Input id="source-id" value={sourceId} onChange={(event) => setSourceId(event.target.value)} placeholder="新建时留空" fullWidth /></div>
-          <div className={styles.field}><label className={styles.label} htmlFor="source-name">名称</label><Input id="source-name" value={name} onChange={(event) => setName(event.target.value)} fullWidth /></div>
-          <div className={styles.grid}>
-            <div className={styles.field}><label className={styles.label} htmlFor="source-type">类型</label><Input id="source-type" type="number" value={type} onChange={(event) => setType(Number(event.target.value))} fullWidth /></div>
-            <div className={styles.field}>
-              <label className={styles.label} htmlFor="default-level">默认等级</label>
-              <Select id="default-level" value={defaultLevel} options={vulnLevelOptions} onChange={setDefaultLevel} />
-            </div>
-          </div>
-          <div className={styles.field}><label className={styles.label} htmlFor="source-config">配置</label><Textarea id="source-config" className={styles.jsonEditor} value={configText} onChange={(event) => setConfigText(event.target.value)} fullWidth /></div>
-          <Checkbox checked={enabled} label="启用漏洞源" onChange={(event) => setEnabled(event.target.checked)} />
-          <Button icon={<Save size={16} />} onClick={save}>保存漏洞源</Button>
-        </aside>
-      </div>
-
+      <section className={styles.section}>
+        <Table<VulnSource>
+          rows={resource.data ?? []}
+          rowKey="id"
+          ariaLabel="已接入的漏洞源"
+          emptyTitle="暂无漏洞源"
+          emptyDescription="当前没有已接入的漏洞源。"
+          columns={[
+            { key: 'name', title: '名称', dataIndex: 'name', priority: 'primary' },
+            { key: 'level', title: '默认等级', render: (row) => vulnLevelLabel(row.default_level) },
+            { key: 'enabled', title: '状态', render: (row) => row.enabled ? '启用' : '停用' },
+            { key: 'sync', title: '最近同步', render: (row) => row.last_sync_at || '尚未同步' },
+          ]}
+        />
+      </section>
     </div>
   )
 }

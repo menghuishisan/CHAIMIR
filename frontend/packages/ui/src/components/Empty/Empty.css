@@ -9,8 +9,8 @@
   padding: var(--space-12) var(--space-6);
   text-align: center;
   border: 1px dashed var(--color-border);
-  border-radius: var(--radius-lg);
-  background: linear-gradient(180deg, var(--color-bg), var(--color-surface));
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
 }
 
 .chaimir-empty__icon {
@@ -24,13 +24,6 @@
   background: var(--color-primary-soft);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-lg);
-  box-shadow: inset 0 1px 0 var(--color-highlight);
-  animation: empty-icon-in 0.5s var(--ease-spring-ios);
-}
-
-@keyframes empty-icon-in {
-  from { opacity: 0; transform: scale(0.8) translateY(10px); }
-  to { opacity: 1; transform: scale(1) translateY(0); }
 }
 
 .chaimir-empty__icon svg {
@@ -57,7 +50,7 @@
   margin-top: var(--space-2);
 }
 
-@media (max-width: 479px) {
+@media not all and (--bp-sm) {
   .chaimir-empty {
     padding: var(--space-8) var(--space-4);
   }

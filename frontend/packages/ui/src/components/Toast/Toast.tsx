@@ -1,10 +1,12 @@
 // Toast 组件：轻量级通知
 // 符合 FE-2（aria-live="polite"，不抢焦点）、FE-8（显示 trace_id）
 
-import React, { useEffect } from 'react'
+import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { CheckCircle, XCircle, Info, AlertCircle, X } from 'lucide-react'
 import { clsx } from 'clsx'
 import { triggerHaptic } from '../../utils/haptics'
+import { useReducedMotion } from '../../hooks'
+import { motionDurationMs } from '../../tokens'
 import './Toast.css'
 
 export interface ToastProps {
@@ -41,25 +43,61 @@ export const Toast: React.FC<ToastProps> = ({
   onClose,
 }) => {
   const Icon = variantIcons[variant]
-  const isError = variant === 'error'
+  const reducedMotion = useReducedMotion()
+  const [closing, setClosing] = useState(false)
+  const closeTimer = useRef<number>()
+  const autoCloseTimer = useRef<number>()
+  const remainingDuration = useRef(duration)
+  const startedAt = useRef(0)
+
+  /** requestClose 先进入可中断的退场状态，再通知容器移除消息。 */
+  const requestClose = useCallback(() => {
+    if (closing) return
+    window.clearTimeout(autoCloseTimer.current)
+    if (reducedMotion) {
+      onClose?.()
+      return
+    }
+    setClosing(true)
+    closeTimer.current = window.setTimeout(() => onClose?.(), motionDurationMs.toastExit)
+  }, [closing, onClose, reducedMotion])
 
   useEffect(() => {
-    if (duration > 0) {
-      const timer = setTimeout(() => {
-        onClose?.()
-      }, duration)
+    if (duration <= 0) return
+    remainingDuration.current = duration
 
-      return () => clearTimeout(timer)
+    const schedule = (): void => {
+      if (document.hidden || remainingDuration.current <= 0) return
+      startedAt.current = Date.now()
+      autoCloseTimer.current = window.setTimeout(requestClose, remainingDuration.current)
     }
-  }, [duration, onClose])
+    const handleVisibilityChange = (): void => {
+      window.clearTimeout(autoCloseTimer.current)
+      if (document.hidden) {
+        remainingDuration.current = Math.max(0, remainingDuration.current - (Date.now() - startedAt.current))
+      } else {
+        schedule()
+      }
+    }
+
+    schedule()
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+    return () => {
+      window.clearTimeout(autoCloseTimer.current)
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
+    }
+  }, [duration, requestClose])
+
+  useEffect(() => () => window.clearTimeout(closeTimer.current), [])
 
   const classes = clsx('chaimir-toast', `chaimir-toast--${variant}`)
 
   return (
     <div
       className={classes}
-      role={isError ? 'alert' : 'status'}
-      aria-live={isError ? 'assertive' : 'polite'}
+      data-state={closing ? 'closed' : 'open'}
+      role="status"
+      aria-live="polite"
       aria-atomic="true"
     >
       <div className="chaimir-toast__icon" aria-hidden="true">
@@ -82,7 +120,7 @@ export const Toast: React.FC<ToastProps> = ({
           className="chaimir-toast__close"
           onClick={() => {
             triggerHaptic(10)
-            onClose()
+            requestClose()
           }}
           aria-label="关闭通知"
         >
@@ -110,7 +148,7 @@ export const ToastContainer: React.FC<ToastContainerProps> = ({
   const classes = clsx('chaimir-toast-container', `chaimir-toast-container--${position}`)
 
   return (
-    <div className={classes} aria-live="polite" aria-relevant="additions removals">
+    <div className={classes} aria-label="通知消息">
       {toasts.map((toast) => (
         <Toast key={toast.id} {...toast} onClose={() => onRemove(toast.id)} />
       ))}

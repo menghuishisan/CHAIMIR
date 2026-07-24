@@ -3,14 +3,13 @@
 import React, { useMemo } from 'react'
 import type { AlertEvent } from '@chaimir/api-client'
 import type { TableColumn } from '@chaimir/ui'
-import { Button, Table } from '@chaimir/ui'
+import { Button, Table, ResourceState } from '@chaimir/ui'
 import { BellRing, RefreshCw, Settings2 } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../../../../../app/api'
-import { ErrorState, LoadingState } from '../../../../../components/ResourceState'
 import { useAsyncResource } from '../../../../../hooks'
 import styles from '../../list.module.css'
-import { formatDateTime, alertStatusLabel } from '../../../../../utils/index'
+import { alertLevelLabel, formatDateTime, alertStatusLabel } from '../../../../../utils/index'
 
 const PAGE_SIZE = 20
 
@@ -31,7 +30,7 @@ const AlertsPage: React.FC = () => {
     {
       key: 'level',
       title: '级别',
-      render: (row) => <span className={styles.status}>L{row.level}</span>,
+      render: (row) => <span className={styles.status}>{alertLevelLabel(row.level)}</span>,
       priority: 'primary',
     },
     { key: 'message', title: '告警内容', dataIndex: 'message', priority: 'primary' },
@@ -42,8 +41,8 @@ const AlertsPage: React.FC = () => {
     },
     {
       key: 'tenant',
-      title: '租户',
-      render: (row) => row.tenant_id || '平台',
+      title: '告警范围',
+      render: (row) => row.tenant_id ? '学校范围' : '平台范围',
     },
     {
       key: 'triggeredAt',
@@ -77,9 +76,9 @@ const AlertsPage: React.FC = () => {
       </div>
 
       {resource.status === 'error' && (
-        <ErrorState error={resource.error} onRetry={resource.reload} />
+        <ResourceState status="error" error={resource.error} onRetry={resource.reload} />
       )}
-      {resource.status === 'loading' && <LoadingState title="正在获取告警事件" />}
+      {resource.status === 'loading' && <ResourceState status="loading" title="正在获取告警事件" />}
       {(resource.status === 'success' || resource.status === 'empty') && (
         <div className={styles.tableWrap}>
           <Table

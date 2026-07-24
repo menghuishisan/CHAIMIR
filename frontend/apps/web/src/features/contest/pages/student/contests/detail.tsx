@@ -1,13 +1,11 @@
 // 学生竞赛详情页：展示后端竞赛规则、题目和排行榜。
 
 import React, { useCallback, useMemo } from 'react'
-import type { Contest, ContestProblem, LadderRank, ResultSnapshot } from '@chaimir/api-client'
-import { ContestStatus } from '@chaimir/api-client'
-import { Button, Table } from '@chaimir/ui'
+import type { Contest, ContestProblem, LadderRank } from '@chaimir/api-client'
+import { Button, Table, ResourceState } from '@chaimir/ui'
 import { FileText, Play, UserPlus } from 'lucide-react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { api } from '../../../../../app/api'
-import { EmptyState, ErrorState, LoadingState } from '../../../../../components/ResourceState'
 import { useAsyncResource, useTicketedWebSocket } from '../../../../../hooks'
 import styles from '../../contest.module.css'
 import { formatDateTime } from '../../../../../utils/index'
@@ -16,7 +14,6 @@ interface DetailData {
   contest: Contest | null
   problems: ContestProblem[]
   ladder: LadderRank[]
-  snapshot?: ResultSnapshot
   leaderboardTopic?: string
 }
 
@@ -36,12 +33,10 @@ const StudentContestDetailPage: React.FC = () => {
         throw new Error('当前账号未关联学校，暂时无法订阅竞赛排行榜。')
       }
       const contest = contests.list.find((item) => item.id === id) ?? null
-      const snapshot = contest?.status === ContestStatus.ARCHIVED ? await api.contest.getResultSnapshot(id) : undefined
       return {
         contest,
         problems,
         ladder: ladder.list,
-        snapshot,
         leaderboardTopic: api.contest.getLeaderboardTopic(me.account.tenant_id, id),
       }
     },
@@ -53,18 +48,18 @@ const StudentContestDetailPage: React.FC = () => {
   const realtime = useTicketedWebSocket({ url: subscription ? api.eventWebSocketUrl() : null, subscribeMessage: subscription, onMessage: handleLeaderboard })
 
   if (resource.status === 'loading') {
-    return <LoadingState title="正在读取竞赛详情" description="系统正在同步赛程、题目和排行榜。" />
+    return <ResourceState status="loading" title="正在读取竞赛详情" description="系统正在同步赛程、题目和排行榜。" />
   }
 
   if (resource.status === 'error') {
-    return <ErrorState error={resource.error} onRetry={resource.reload} />
+    return <ResourceState status="error" error={resource.error} onRetry={resource.reload} />
   }
 
   if (!resource.data?.contest) {
-    return <EmptyState title="未找到竞赛" description="该竞赛可能已下架或你没有访问权限。" />
+    return <ResourceState status="empty" title="未找到竞赛" description="该竞赛可能已下架或你没有访问权限。" />
   }
 
-  const { contest, problems, ladder, snapshot } = resource.data
+  const { contest, problems, ladder } = resource.data
 
   return (
     <div className={styles.page}>
@@ -89,13 +84,6 @@ const StudentContestDetailPage: React.FC = () => {
         </div>
       </div>
 
-      {snapshot && (
-        <section className={`${styles.panel} ${styles.section}`}>
-          <h2 className={styles.sectionTitle}>最终赛果</h2>
-          <p className={styles.muted}>最终排名共 {snapshot.final_ranking.length} 支队伍，生成于 {formatDateTime(snapshot.generated_at)}。</p>
-        </section>
-      )}
-
       <div className={styles.split}>
         <section className={`${styles.panel} ${styles.section}`}>
           <h2 className={styles.sectionTitle}>竞赛题目</h2>
@@ -107,7 +95,7 @@ const StudentContestDetailPage: React.FC = () => {
             emptyDescription="教师配置题目后会显示在这里。"
             columns={[
               { key: 'seq', title: '序号', dataIndex: 'seq' },
-              { key: 'item', title: '题目编号', dataIndex: 'item_code', priority: 'primary' },
+              { key: 'item', title: '题目', render: (row) => row.title, priority: 'primary' },
               { key: 'version', title: '版本', dataIndex: 'item_version' },
               { key: 'score', title: '分值', dataIndex: 'score' },
             ]}
@@ -119,7 +107,7 @@ const StudentContestDetailPage: React.FC = () => {
             {ladder.map((rank) => (
               <li className={styles.listItem} key={rank.team_id}>
                 <strong>第 {rank.rank} 名</strong>
-                <p className={styles.muted}>队伍 {rank.team_id}，{rank.score} 分，解出 {rank.solved_count} 题</p>
+                <p className={styles.muted}>{rank.score} 分，解出 {rank.solved_count} 题</p>
               </li>
             ))}
           </ul>

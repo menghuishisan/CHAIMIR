@@ -3,29 +3,33 @@
 import React, { useCallback, useMemo, useState } from 'react'
 import type { CourseMember } from '@chaimir/api-client'
 import type { TableColumn } from '@chaimir/ui'
-import { Button, Callout, Input, Table } from '@chaimir/ui'
+import { Button, Callout, Input, Table, useConfirm, ResourceState } from '@chaimir/ui'
 import { Plus, RefreshCw, Trash2, Users } from 'lucide-react'
 import { useParams } from 'react-router-dom'
 import { api } from '../../../../../app/api'
-import { EmptyState, ErrorState, LoadingState } from '../../../../../components/ResourceState'
-import { useAsyncResource } from '../../../../../hooks'
+import { useAsyncResource, usePendingAction } from '../../../../../hooks'
 import styles from '../../teaching.module.css'
 import { formatDateTime, joinModeLabel } from '../../../../../utils/index'
 import { userFacingErrorMessage } from '../../../../../utils/userFacingError'
+import { formatStudentReference } from '../../../../../utils/formatters'
 
 
 const TeacherCourseMembersPage: React.FC = () => {
+  const confirm = useConfirm()
   const { id } = useParams()
   const resource = useAsyncResource(() => api.teaching.listMembers(String(id), { page: 1, size: 50 }), [id])
   const [message, setMessage] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [studentIds, setStudentIds] = useState('')
+  const { pendingAction, runPendingAction } = usePendingAction()
 
   /**
    * removeMember 移除课程成员。
    */
   const removeMember = useCallback(async (member: CourseMember) => {
     if (!id) return
+    const confirmed = await confirm({ title: '移除课程成员', description: `将${formatStudentReference(member.student_id)}移出本课程，之后需重新添加才能恢复选课关系。`, confirmLabel: '确认移除' })
+    if (!confirmed) return
     setError(null)
     setMessage(null)
     try {
@@ -35,7 +39,7 @@ const TeacherCourseMembersPage: React.FC = () => {
     } catch (removeError) {
       setError(userFacingErrorMessage(removeError, '成员移除失败，请稍后重试。'))
     }
-  }, [id, resource])
+  }, [confirm, id, resource])
 
   /** addMembers 批量添加输入的学生编号并刷新名册。 */
   const addMembers = async () => {
@@ -57,21 +61,21 @@ const TeacherCourseMembersPage: React.FC = () => {
   }
 
   const columns = useMemo<TableColumn<CourseMember>[]>(() => [
-    { key: 'student', title: '学生编号', render: (row) => String(row.student_id), priority: 'primary' },
+    { key: 'student', title: '学生', render: (row) => formatStudentReference(row.student_id), priority: 'primary' },
     { key: 'joinMode', title: '加入方式', render: (row) => joinModeLabel(row.join_mode) },
     { key: 'joinedAt', title: '加入时间', render: (row) => <span className={styles.muted}>{formatDateTime(row.joined_at)}</span> },
     {
       key: 'actions',
       title: '操作',
       render: (row) => (
-        <Button variant="outline" size="sm" icon={<Trash2 size={14} />} onClick={() => removeMember(row)}>
+        <Button variant="outline" size="sm" icon={<Trash2 size={14} />} loading={pendingAction === `remove-${row.id}`} disabled={Boolean(pendingAction)} onClick={() => void runPendingAction(`remove-${row.id}`, () => removeMember(row))}>
           移除
         </Button>
       ),
     },
-  ], [removeMember])
+  ], [pendingAction, removeMember, runPendingAction])
 
-  if (!id) return <EmptyState title="缺少课程编号" description="当前链接没有课程编号。" />
+  if (!id) return <ResourceState status="empty" title="缺少课程编号" description="当前链接没有课程编号。" />
 
   const rows = resource.data?.list || []
 
@@ -95,12 +99,12 @@ const TeacherCourseMembersPage: React.FC = () => {
         <h2>添加学生</h2>
         <div className={styles.actions}>
           <Input value={studentIds} onChange={(event) => setStudentIds(event.target.value)} placeholder="多个学生编号用逗号分隔" />
-          <Button icon={<Plus size={15} />} onClick={() => void addMembers()}>添加成员</Button>
+          <Button icon={<Plus size={15} />} loading={pendingAction === 'add'} disabled={Boolean(pendingAction)} onClick={() => void runPendingAction('add', addMembers)}>添加成员</Button>
         </div>
       </section>
 
-      {resource.status === 'error' && <ErrorState error={resource.error} onRetry={resource.reload} />}
-      {resource.status === 'loading' && <LoadingState title="正在获取课程成员" />}
+      {resource.status === 'error' && <ResourceState status="error" error={resource.error} onRetry={resource.reload} />}
+      {resource.status === 'loading' && <ResourceState status="loading" title="正在获取课程成员" />}
       {(resource.status === 'success' || resource.status === 'empty') && (
         <div className={styles.tableWrap}>
           <Table columns={columns} rows={rows} rowKey={(row) => String(row.id)} emptyTitle="暂无成员" emptyDescription="当前课程还没有成员。" ariaLabel="课程成员列表" />

@@ -4,7 +4,7 @@ import React, { useCallback, useMemo, useState } from 'react'
 import type { ImportRowResult } from '@chaimir/api-client'
 import { IMPORT_TEMPLATE_FORMAT } from '@chaimir/api-client'
 import type { TableColumn } from '@chaimir/ui'
-import { Button, Callout, Select, Table } from '@chaimir/ui'
+import { Button, Callout, Select, Table, FormField } from '@chaimir/ui'
 import { Download, Upload } from 'lucide-react'
 import { api } from '../../../../../app/api'
 import styles from '../../identity-admin.module.css'
@@ -126,14 +126,10 @@ const UserImportPage: React.FC = () => {
       <section className={styles.panel}>
         <h2>上传文件</h2>
         <div className={styles.formGrid}>
-          <label className={styles.field}>
-            导入对象
-            <Select fullWidth value={targetType} options={accountImportTargetOptions} onChange={(value) => setTargetType(value as 'student' | 'teacher')} />
-          </label>
-          <label className={styles.field}>
-            导入文件
+          <FormField className={styles.field} label="导入对象"><Select fullWidth value={targetType} options={accountImportTargetOptions} onChange={(value) => setTargetType(value as 'student' | 'teacher')} /></FormField>
+          <FormField className={styles.field} label="导入文件">
             <input type="file" accept=".xlsx,.csv" onChange={(event) => handleFileChange(event.target.files?.[0] || null)} />
-          </label>
+          </FormField>
         </div>
         <div className={styles.dropzone}>{file ? file.name : '请选择按标准模板填写的 Excel 或 CSV 文件'}</div>
         <div className={styles.actions}>

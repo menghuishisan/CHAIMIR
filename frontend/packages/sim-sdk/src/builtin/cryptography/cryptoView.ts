@@ -1,6 +1,8 @@
 // 本文件提供密码学仿真共享的展示数据辅助,只做语义数据转换,不包含具体密码学流程。
 
-import type { ChartSeries, GraphEdge, GraphNode, LaneMessage, MatrixCell, PipelineStep, TreeNode } from '../../types';
+import type { ChartSeries, GraphNode, TreeNode } from '../../types';
+
+export { labeledLaneMessages as laneMessages, matrixCells, messageGraphEdges as graphEdges, pipelineSteps } from '../packageTools';
 
 export interface CryptoActor {
   id: string;
@@ -27,44 +29,11 @@ export function graphNodes(actors: CryptoActor[]): GraphNode[] {
 }
 
 /**
- * graphEdges 将证明、签名或密钥消息映射为图边。
- */
-export function graphEdges(messages: CryptoMessage[]): GraphEdge[] {
-  return messages.map((message) => ({
-    id: message.id,
-    from: message.from,
-    to: message.to,
-    label: message.label,
-    status: message.status === 'dropped' ? 'failed' : message.status === 'delivered' ? 'success' : 'active',
-  }));
-}
-
-/**
- * laneMessages 把内部 ID 转成时序泳道展示名称。
- */
-export function laneMessages(messages: CryptoMessage[], labelOf: (id: string) => string): LaneMessage[] {
-  return messages.map((message) => ({ ...message, from: labelOf(message.from), to: labelOf(message.to) }));
-}
-
-/**
  * pipelineSteps 根据当前阶段构造密码学流程流水线。
  */
-export function pipelineSteps(phases: Array<{ id: string; label: string; detail: string }>, activeIndex: number, failed = false): PipelineStep[] {
-  return phases.map((phase, index) => ({
-    id: phase.id,
-    label: phase.label,
-    detail: phase.detail,
-    status: index < activeIndex ? 'complete' : index === activeIndex ? (failed ? 'failed' : 'running') : 'pending',
-  }));
-}
-
 /**
  * matrixCells 生成验证矩阵,用于展示每项约束是否通过。
  */
-export function matrixCells(rows: string[], columns: string[], read: (row: string, column: string) => MatrixCell): MatrixCell[][] {
-  return rows.map((row) => columns.map((column) => read(row, column)));
-}
-
 /**
  * metricSeries 生成密码学流程常用的正确性、风险和成本曲线。
  */

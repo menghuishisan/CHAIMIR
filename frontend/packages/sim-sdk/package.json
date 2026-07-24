@@ -11,6 +11,7 @@
     "dev": "tsc --watch --noEmit",
     "build": "tsc --noEmit",
     "lint": "eslint src --ext .ts,.tsx",
+    "lint:style": "stylelint --config ./stylelint.config.cjs \"src/**/*.css\" --allow-empty-input",
     "type-check": "tsc --noEmit"
   },
   "dependencies": {

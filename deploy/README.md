@@ -197,14 +197,17 @@ make validate    # 渲染 + kubeconform 校验(需安装 kubeconform)
 GitHub Actions(`.github/workflows/`)+ 可复用配置(`deploy/ci/`):
 
 - `backend.yml` / `frontend.yml` / `images.yml`:路径触发 → lint+测试 → 构建 →
-  Trivy 扫描(高危阻断)+ CycloneDX SBOM → 推 Harbor并解析 digest → Cosign 镜像签名、SBOM 证明和双重验证。三者共用 `ci/build-scan-sign-push` composite action;backend 独占 backend/migrate/cron,frontend 独占 frontend,通用 images 不重复构建四个服务镜像。缺少 registry/robot/Cosign Secret 时在构建前显式失败。
+  Trivy 扫描(高危阻断)+ CycloneDX SBOM → 推 Harbor并解析 digest → Cosign 镜像签名、SBOM 证明和双重验证。三者共用 `ci/build-scan-sign-push` composite action;backend 独占 backend/migrate/cron,frontend 独占 frontend,通用 images 不重复构建四个服务镜像。缺少 `HARBOR_REGISTRY` Variable、robot 或 Cosign Secret 时在构建前显式失败。
 - `image-metadata-promotion.yml`:串行消费三条产物流水线的 digest 片段,同步权威 lock、local-dev digest 和受控配置引用,再由机器人 PR 自动合并;业务流水线不直接写 `main`。
 - `deploy.yml`:`images/image-digests.lock` 合入 `main` 后,从同一权威锁按 digest 自动部署 staging;打 `v*` tag 后从该发布提交的锁按 digest 渲染,经 GitHub Environment 人工审批部署 prod-saas。
 
 README、docs 或普通应用提交不直接创建 staging Deployment。只有已完成扫描、推送、签名、验签并由机器人 PR 晋升的权威锁变更才触发部署;backend、frontend、migrate、cron 必须同时存在有效 digest,不按 SHA tag、版本 tag 或 `latest` 降级。
 
-所需 GitHub Secrets:`HARBOR_REGISTRY`、`HARBOR_USERNAME`、`HARBOR_PASSWORD`、
-`COSIGN_KEY`、`COSIGN_PASSWORD`、`IMAGE_METADATA_BOT_TOKEN`、`KUBECONFIG_STAGING`、`KUBECONFIG_PROD_SAAS`。仓库还必须启用 Auto-merge;`IMAGE_METADATA_BOT_TOKEN` 使用能触发 PR 检查的 GitHub App 或细粒度 PAT,不得用默认 `GITHUB_TOKEN` 替代。
+所需 GitHub Actions Variable:`HARBOR_REGISTRY`;所需 GitHub Secrets:`HARBOR_USERNAME`、
+`HARBOR_PASSWORD`、`COSIGN_KEY`、`COSIGN_PASSWORD`、`IMAGE_METADATA_BOT_TOKEN`、
+`KUBECONFIG_STAGING`、`KUBECONFIG_PROD_SAAS`。`HARBOR_REGISTRY` 只填写正式
+`host` 或 `host:port`,不含协议和路径。仓库还必须启用 Auto-merge;
+`IMAGE_METADATA_BOT_TOKEN` 使用能触发 PR 检查的 GitHub App 或细粒度 PAT,不得用默认 `GITHUB_TOKEN` 替代。
 
 默认 `ubuntu-latest` runner 必须能通过 HTTPS 访问 `HARBOR_REGISTRY` 与目标 staging/prod Kubernetes API。本机 `harbor.chaimir:30080` 依赖端口转发,只属于本地供应链,不能填写为 GitHub 托管 runner 的 registry。若交付环境只提供私网 Harbor/K8s,必须先在同一受控网络注册专用自托管 runner,再将镜像构建和部署 job 的 `runs-on` 收敛到该 runner 标签;不得通过暴露本机临时端口或提交本地凭据绕过网络边界。
 

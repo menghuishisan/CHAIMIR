@@ -1,0 +1,139 @@
+/* ChartPatternRenderer 仅定义 Chart 模式的可视化样式。 */
+
+.sim-chart {
+  display: grid;
+  gap: var(--space-3);
+  padding: var(--space-4);
+}
+.sim-chart__plot {
+  width: 100%;
+  aspect-ratio: 16 / 8;
+  display: block;
+  border: 0.0625rem solid var(--color-dark-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-terminal-bg);
+}
+
+.sim-chart__axis,
+.sim-chart__grid {
+  stroke: var(--color-dark-border);
+  stroke-width: 0.35;
+}
+
+.sim-chart__grid {
+  opacity: 0.45;
+}
+
+.sim-chart__current-marker {
+  stroke: color-mix(in srgb, var(--color-dark-text-sub) 70%, transparent);
+  stroke-dasharray: 1 1;
+  stroke-width: 0.35;
+}
+
+.sim-chart__tick {
+  fill: var(--color-dark-text-sub);
+  font-family: var(--font-mono);
+  font-size: 0.25rem;
+}
+
+.sim-chart__series-line polyline {
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.35;
+}
+
+.sim-chart__series-line circle {
+  cursor: pointer;
+}
+
+.sim-chart__series-line circle.is-latest {
+  r: 2.25;
+  stroke: var(--color-dark-text);
+  stroke-width: 0.45;
+}
+
+.sim-chart__series-line.is-0 polyline,
+.sim-chart__series-line.is-0 circle,
+.sim-chart__legend .is-0::before {
+  stroke: var(--color-on-dark-accent);
+  background: var(--color-on-dark-accent);
+  fill: var(--color-on-dark-accent);
+}
+
+.sim-chart__series-line.is-1 polyline,
+.sim-chart__series-line.is-1 circle,
+.sim-chart__legend .is-1::before {
+  stroke: var(--color-secondary-accent);
+  background: var(--color-secondary-accent);
+  fill: var(--color-secondary-accent);
+}
+
+.sim-chart__series-line.is-2 polyline,
+.sim-chart__series-line.is-2 circle,
+.sim-chart__legend .is-2::before {
+  stroke: var(--color-danger);
+  background: var(--color-danger);
+  fill: var(--color-danger);
+}
+
+.sim-chart__series-line.is-3 polyline,
+.sim-chart__series-line.is-3 circle,
+.sim-chart__legend .is-3::before {
+  stroke: var(--color-success);
+  background: var(--color-success);
+  fill: var(--color-success);
+}
+
+.sim-chart__series-line circle.is-selected {
+  stroke: var(--color-dark-text);
+  stroke-width: 1.4;
+}
+
+.sim-chart__legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  color: var(--color-dark-text-sub);
+  font-size: var(--text-xs);
+}
+
+.sim-chart__legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.sim-chart__legend span::before {
+  content: "";
+  width: 0.75rem;
+  height: 0.1875rem;
+  border-radius: 999px;
+}
+
+.sim-chart__table {
+  inline-size: 100%;
+  border-collapse: collapse;
+  color: var(--color-dark-text-sub);
+  font-size: var(--text-xs);
+  border: 0.0625rem solid var(--color-dark-border);
+  border-radius: var(--radius-xs);
+  overflow: hidden;
+}
+
+.sim-chart__table caption {
+  margin-block-end: var(--space-2);
+  color: var(--color-dark-text-sub);
+  text-align: left;
+}
+
+.sim-chart__table th,
+.sim-chart__table td {
+  padding: var(--space-2);
+  border-block-start: 0.0625rem solid var(--color-dark-border);
+  text-align: left;
+}
+
+.sim-chart__table td {
+  font-family: var(--font-mono);
+}

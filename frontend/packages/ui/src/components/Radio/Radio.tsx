@@ -41,6 +41,7 @@ export const Radio: React.FC<RadioProps> = ({
   className,
 }) => {
   const [selectedValue, setSelectedValue] = React.useState(value || defaultValue || '')
+  const generatedId = React.useId()
 
   React.useEffect(() => {
     if (value !== undefined) {
@@ -59,7 +60,7 @@ export const Radio: React.FC<RadioProps> = ({
 
   return (
     <div className={classes} role="radiogroup">
-      {options.map((option) => {
+      {options.map((option, index) => {
         const isChecked = option.value === selectedValue
         const isDisabled = disabled || option.disabled
 
@@ -75,8 +76,9 @@ export const Radio: React.FC<RadioProps> = ({
         )
 
         return (
-          <label key={option.value} className={optionClasses}>
+          <label key={option.value} className={optionClasses} htmlFor={`${generatedId}-${index}`}>
             <input
+              id={`${generatedId}-${index}`}
               type="radio"
               name={name}
               value={option.value}

@@ -3,14 +3,13 @@
 import React, { useCallback, useMemo, useState } from 'react'
 import type { JudgeTask } from '@chaimir/api-client'
 import type { TableColumn } from '@chaimir/ui'
-import { Button, Callout, Checkbox, Input, Modal, Table, Textarea } from '@chaimir/ui'
+import { Button, Callout, Checkbox, Input, Modal, Table, Textarea, ResourceState, FormField } from '@chaimir/ui'
 import { Activity, Eye, RefreshCw, RotateCw, Save } from 'lucide-react'
 import { api } from '../../../../../app/api'
-import { ErrorState, LoadingState } from '../../../../../components/ResourceState'
-import { useAsyncResource, useTicketedWebSocket } from '../../../../../hooks'
+import { useAsyncResource, usePendingAction, useTicketedWebSocket } from '../../../../../hooks'
 import styles from '../../judge.module.css'
 import { userFacingErrorMessage } from '../../../../../utils/userFacingError'
-import { judgeTaskStatusLabel, sourceReferenceLabel } from '../../../../../utils'
+import { formatStudentReference, judgeTaskStatusLabel, sourceReferenceLabel } from '../../../../../utils'
 
 const TeacherMonitoringPage: React.FC = () => {
   const [sourceRef, setSourceRef] = useState('')
@@ -21,6 +20,7 @@ const TeacherMonitoringPage: React.FC = () => {
   const [maxScore, setMaxScore] = useState('100')
   const [passed, setPassed] = useState(false)
   const [comment, setComment] = useState('')
+  const { pendingAction, runPendingAction } = usePendingAction()
   const resource = useAsyncResource(() => api.judge.getTasks({
     source_ref: sourceRef || undefined,
     page: 1,
@@ -74,17 +74,16 @@ const TeacherMonitoringPage: React.FC = () => {
   }
 
   const columns = useMemo<TableColumn<JudgeTask>[]>(() => [
-    { key: 'task', title: '任务编号', dataIndex: 'task_id', priority: 'primary' },
-    { key: 'submitter', title: '提交人', dataIndex: 'submitter_id' },
-    { key: 'source', title: '来源', render: (row) => sourceReferenceLabel(row.source_ref) },
+    { key: 'source', title: '来源', render: (row) => sourceReferenceLabel(row.source_ref), priority: 'primary' },
+    { key: 'submitter', title: '提交人', render: (row) => formatStudentReference(row.submitter_id) },
     { key: 'status', title: '状态', render: (row) => <span className={styles.status}>{judgeTaskStatusLabel(row.status)}</span> },
     { key: 'score', title: '得分', render: (row) => row.result ? `${row.result.score}/${row.result.max_score}` : '待出分' },
     {
       key: 'actions',
       title: '操作',
-      render: (row) => <div className={styles.actions}><Button variant="outline" size="sm" icon={<Eye size={14} />} onClick={() => void openTask(row.task_id)}>查看</Button><Button variant="ghost" size="sm" icon={<RotateCw size={14} />} onClick={() => rejudgeTask(row.task_id)}>重判</Button></div>,
+      render: (row) => <div className={styles.actions}><Button variant="outline" size="sm" icon={<Eye size={14} />} disabled={Boolean(pendingAction)} onClick={() => void openTask(row.task_id)}>查看</Button><Button variant="ghost" size="sm" icon={<RotateCw size={14} />} loading={pendingAction === `rejudge-${row.task_id}`} disabled={Boolean(pendingAction)} onClick={() => void runPendingAction(`rejudge-${row.task_id}`, () => rejudgeTask(row.task_id))}>重判</Button></div>,
     },
-  ], [openTask, rejudgeTask])
+  ], [openTask, pendingAction, rejudgeTask, runPendingAction])
 
   const rows = resource.data?.list || []
 
@@ -102,8 +101,8 @@ const TeacherMonitoringPage: React.FC = () => {
       <div className={styles.toolbar}>
         <Input placeholder="按来源引用筛选" value={sourceRef} onChange={(event) => setSourceRef(event.target.value)} />
       </div>
-      {resource.status === 'error' && <ErrorState error={resource.error} onRetry={resource.reload} />}
-      {resource.status === 'loading' && <LoadingState title="正在获取判题任务" />}
+      {resource.status === 'error' && <ResourceState status="error" error={resource.error} onRetry={resource.reload} />}
+      {resource.status === 'loading' && <ResourceState status="loading" title="正在获取判题任务" />}
       {(resource.status === 'success' || resource.status === 'empty') && (
         <div className={styles.tableWrap}>
           <Table columns={columns} rows={rows} rowKey="task_id" emptyTitle="暂无判题任务" emptyDescription="当前筛选范围内没有判题任务。" ariaLabel="判题任务监控列表" />
@@ -113,15 +112,15 @@ const TeacherMonitoringPage: React.FC = () => {
         {selectedTask && (
           <div className={styles.panel}>
             <span className={styles.status}>{progress.status === 'open' ? '实时进度已连接' : judgeTaskStatusLabel(selectedTask.status)}</span>
-            <p>任务 {selectedTask.task_id}</p>
+            <p>{sourceReferenceLabel(selectedTask.source_ref)}</p>
             <p>{selectedTask.result ? `当前得分 ${selectedTask.result.score}/${selectedTask.result.max_score}` : '正在等待判题结果。'}</p>
             <div className={styles.formGrid}>
-              <label className={styles.field}>得分<Input fullWidth type="number" value={score} onChange={(event) => setScore(event.target.value)} /></label>
-              <label className={styles.field}>满分<Input fullWidth type="number" value={maxScore} onChange={(event) => setMaxScore(event.target.value)} /></label>
+              <FormField className={styles.field} label="得分"><Input fullWidth type="number" value={score} onChange={(event) => setScore(event.target.value)} /></FormField>
+              <FormField className={styles.field} label="满分"><Input fullWidth type="number" value={maxScore} onChange={(event) => setMaxScore(event.target.value)} /></FormField>
               <Checkbox checked={passed} label="判定通过" onChange={(event) => setPassed(event.target.checked)} />
             </div>
-            <label className={styles.field}>评分说明<Textarea fullWidth value={comment} onChange={(event) => setComment(event.target.value)} /></label>
-            <Button icon={<Save size={14} />} onClick={() => void submitManualScore()}>保存人工评分</Button>
+            <FormField className={styles.field} label="评分说明"><Textarea fullWidth value={comment} onChange={(event) => setComment(event.target.value)} /></FormField>
+            <Button icon={<Save size={14} />} loading={pendingAction === 'manual-score'} disabled={Boolean(pendingAction)} onClick={() => void runPendingAction('manual-score', submitManualScore)}>保存人工评分</Button>
           </div>
         )}
       </Modal>

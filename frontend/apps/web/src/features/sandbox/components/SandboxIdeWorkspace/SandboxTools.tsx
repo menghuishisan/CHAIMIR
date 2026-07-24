@@ -1,36 +1,27 @@
 // SandboxTools 映射沙箱工具状态，并提供命令与统一链操作面板。
 
-import React, { useMemo, useState } from 'react'
+import React, { useState } from 'react'
 import type { IdeWorkbenchTool } from '@chaimir/ide'
 import type { SandboxInstance } from '@chaimir/api-client'
 import { SandboxToolKind, SandboxToolStatus } from '@chaimir/api-client'
-import { Button, Input, Select, Textarea } from '@chaimir/ui'
+import { Button, CodeBlock, Select, Textarea } from '@chaimir/ui'
 import { ExternalLink, Play } from 'lucide-react'
 import { api } from '../../../../app/api'
-import { parseJsonObject } from '../../../../utils/json'
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
 import { decodeBase64 } from './workspaceFiles'
 import styles from './SandboxIdeWorkspace.module.css'
 
-/** SandboxOperations 提供后端声明的命令工具和统一链操作入口。 */
+/** SandboxOperations 执行受控命令工具，并展示后端声明的链能力。 */
 export function SandboxOperations({ sandboxId, instance }: { sandboxId: string; instance: SandboxInstance }): React.ReactElement {
   const commandTools = instance.tool_access.filter((tool) => tool.kind === SandboxToolKind.COMMAND)
-  const modeOptions = useMemo(() => {
-    const options: Array<{ value: string; label: string }> = []
-    if (instance.capabilities.command_tools && commandTools.length > 0) options.push({ value: 'command', label: '运行命令工具' })
-    if (instance.capabilities.chain_operations.includes('deploy')) options.push({ value: 'deploy', label: '部署到实验链' })
-    if (instance.capabilities.chain_operations.includes('transaction')) options.push({ value: 'transaction', label: '发送实验链交易' })
-    if (instance.capabilities.chain_operations.includes('query')) options.push({ value: 'query', label: '查询实验链状态' })
-    return options
-  }, [commandTools.length, instance.capabilities.chain_operations, instance.capabilities.command_tools])
-  const [mode, setMode] = useState(modeOptions[0]?.value || '')
+  const chainOperations = instance.capabilities.chain_operations
   const [toolCode, setToolCode] = useState(commandTools[0]?.tool_code || '')
   const [input, setInput] = useState('')
   const [result, setResult] = useState('')
   const [error, setError] = useState<string>()
   const [running, setRunning] = useState(false)
 
-  if (modeOptions.length === 0) {
+  if ((!instance.capabilities.command_tools || commandTools.length === 0) && chainOperations.length === 0) {
     return <section className={styles.operations} aria-label="沙箱工具"><h2>沙箱工具</h2><p>当前实验环境没有可执行的附加操作。</p></section>
   }
 
@@ -40,22 +31,11 @@ export function SandboxOperations({ sandboxId, instance }: { sandboxId: string; 
     setResult('')
     setRunning(true)
     try {
-      if (mode === 'command') {
-        const command = input.trim().split(/\s+/).filter(Boolean)
-        if (!toolCode || command.length === 0) throw new Error('请选择命令工具并填写要执行的命令。')
-        const response = await api.sandbox.runCommandTool(sandboxId, toolCode, { command })
-        const output = `${decodeBase64(response.stdout_base64)}${decodeBase64(response.stderr_base64)}`.trim()
-        setResult(output || `命令已完成，退出状态为 ${response.exit_code}。`)
-      } else if (mode === 'query') {
-        if (!input.trim()) throw new Error('请填写要查询的链上目标。')
-        setResult(JSON.stringify(await api.sandbox.chainQuery(sandboxId, input.trim()), null, 2))
-      } else {
-        const payload = parseJsonObject(input || '{}')
-        const response = mode === 'deploy'
-          ? await api.sandbox.chainDeploy(sandboxId, { payload })
-          : await api.sandbox.chainSendTx(sandboxId, { payload })
-        setResult(JSON.stringify(response, null, 2))
-      }
+      const command = input.trim().split(/\s+/).filter(Boolean)
+      if (!toolCode || command.length === 0) throw new Error('请选择命令工具并填写要执行的命令。')
+      const response = await api.sandbox.runCommandTool(sandboxId, toolCode, { command })
+      const output = `${decodeBase64(response.stdout_base64)}${decodeBase64(response.stderr_base64)}`.trim()
+      setResult(output || `命令已完成，退出状态为 ${response.exit_code}。`)
     } catch (operationError) {
       setError(userFacingErrorMessage(operationError, '操作未完成，请检查输入后重试。'))
     } finally {
@@ -66,12 +46,14 @@ export function SandboxOperations({ sandboxId, instance }: { sandboxId: string; 
   return (
     <section className={styles.operations} aria-label="沙箱工具">
       <h2>沙箱工具</h2>
-      <Select value={mode} onChange={setMode} options={modeOptions} />
-      {mode === 'command' && <Select value={toolCode} onChange={setToolCode} options={commandTools.map((tool) => ({ value: tool.tool_code, label: tool.tool_code }))} placeholder="选择命令工具" />}
-      {mode === 'query' ? <Input value={input} onChange={(event) => setInput(event.target.value)} placeholder="查询目标" fullWidth /> : <Textarea value={input} onChange={(event) => setInput(event.target.value)} placeholder={mode === 'command' ? '输入受控命令' : '输入 JSON 参数'} rows={4} fullWidth />}
-      <Button size="sm" icon={<Play size={14} />} loading={running} onClick={() => void runOperation()}>执行</Button>
+      {commandTools.length > 0 && instance.capabilities.command_tools && <>
+        <Select value={toolCode} onChange={setToolCode} options={commandTools.map((tool) => ({ value: tool.tool_code, label: tool.tool_code }))} placeholder="选择命令工具" />
+        <Textarea value={input} onChange={(event) => setInput(event.target.value)} placeholder="输入当前工具允许执行的命令" rows={4} fullWidth />
+        <Button size="sm" icon={<Play size={14} />} loading={running} onClick={() => void runOperation()}>执行</Button>
+      </>}
+      {chainOperations.length > 0 && <p>链操作能力：{chainOperations.join('、')}。具体参数由实验流程提供。</p>}
       {error && <p className={styles.error} role="alert">{error}</p>}
-      {result && <pre className={styles.output}>{result}</pre>}
+      {result && <CodeBlock code={result} ariaLabel="命令输出" language="终端输出" />}
     </section>
   )
 }

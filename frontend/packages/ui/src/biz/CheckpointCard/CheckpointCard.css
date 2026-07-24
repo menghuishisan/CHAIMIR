@@ -13,13 +13,7 @@
   transition:
     border-color var(--t) var(--ease),
     box-shadow var(--t) var(--ease),
-    transform var(--t) var(--ease-spring-ios);
-}
-
-.chaimir-checkpoint-card:hover {
-  transform: translateY(-2px);
-  border-color: var(--color-border-strong);
-  box-shadow: var(--shadow);
+    transform var(--t) var(--ease-out);
 }
 
 .chaimir-checkpoint-card__icon {
@@ -65,7 +59,7 @@
   grid-column: 2 / -1;
 }
 
-@media (max-width: 479px) {
+@media not all and (--bp-sm) {
   .chaimir-checkpoint-card {
     grid-template-columns: auto 1fr;
   }

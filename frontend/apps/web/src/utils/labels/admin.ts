@@ -22,6 +22,11 @@ export function alertStatusLabel(status: AlertStatus): string {
   return labelFromMap(status, { [AlertStatus.PENDING]: '待处理', [AlertStatus.HANDLED]: '已处理', [AlertStatus.IGNORED]: '已忽略' }, String(status))
 }
 
+/** alertLevelLabel 返回告警严重程度文案。 */
+export function alertLevelLabel(level: number): string {
+  return labelFromMap(level, { 1: '一级（紧急）', 2: '二级（重要）', 3: '三级（提醒）' }, '未识别的告警级别')
+}
+
 /** systemConfigLabel 返回平台配置键的管理端文案。 */
 export function systemConfigLabel(key: string): string {
   return labelFromMap(key, { maintenance_mode: '平台维护模式', oss: '对象存储配置', smtp: '邮件发送配置' }, key)

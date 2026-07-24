@@ -33,12 +33,14 @@
   transition:
     background var(--t-fast) var(--ease),
     color var(--t-fast) var(--ease),
-    transform var(--t-fast) var(--ease-press);
+    transform var(--t-fast) var(--ease-out);
 }
 
-.chaimir-breadcrumb__link:hover {
-  background: var(--color-primary-soft);
-  color: var(--color-primary-text);
+@media (hover: hover) and (pointer: fine) {
+  .chaimir-breadcrumb__link:hover {
+    background: var(--color-primary-soft);
+    color: var(--color-primary-text);
+  }
 }
 
 .chaimir-breadcrumb__link:active {

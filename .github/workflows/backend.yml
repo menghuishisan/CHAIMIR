@@ -116,21 +116,21 @@ jobs:
             fi
             printf '%s' "$digest"
           }
-          echo "go_builder=${{ secrets.HARBOR_REGISTRY }}/base/go-builder@$(read_digest base/go-builder)" >> "$GITHUB_OUTPUT"
-          echo "runtime=${{ secrets.HARBOR_REGISTRY }}/base/runtime-min@$(read_digest base/runtime-min)" >> "$GITHUB_OUTPUT"
-          echo "postgres=${{ secrets.HARBOR_REGISTRY }}/middleware/postgres@$(read_digest middleware/postgres)" >> "$GITHUB_OUTPUT"
+          echo "go_builder=${{ vars.HARBOR_REGISTRY }}/base/go-builder@$(read_digest base/go-builder)" >> "$GITHUB_OUTPUT"
+          echo "runtime=${{ vars.HARBOR_REGISTRY }}/base/runtime-min@$(read_digest base/runtime-min)" >> "$GITHUB_OUTPUT"
+          echo "postgres=${{ vars.HARBOR_REGISTRY }}/middleware/postgres@$(read_digest middleware/postgres)" >> "$GITHUB_OUTPUT"
       - name: 构建+扫描+签名+推送(backend)
         id: backend-image
         uses: ./deploy/ci/build-scan-sign-push
         with:
-          image: ${{ secrets.HARBOR_REGISTRY }}/service/backend
+          image: ${{ vars.HARBOR_REGISTRY }}/service/backend
           tag: ${{ github.sha }}
           context: .
           dockerfile: images/service/backend/Dockerfile
           build-args: |
             GO_BUILDER_IMAGE=${{ steps.build-dependencies.outputs.go_builder }}
             RUNTIME_IMAGE=${{ steps.build-dependencies.outputs.runtime }}
-          registry: ${{ secrets.HARBOR_REGISTRY }}
+          registry: ${{ vars.HARBOR_REGISTRY }}
           registry-username: ${{ secrets.HARBOR_USERNAME }}
           registry-password: ${{ secrets.HARBOR_PASSWORD }}
           cosign-key: ${{ secrets.COSIGN_KEY }}
@@ -139,14 +139,14 @@ jobs:
         id: migrate-image
         uses: ./deploy/ci/build-scan-sign-push
         with:
-          image: ${{ secrets.HARBOR_REGISTRY }}/service/migrate
+          image: ${{ vars.HARBOR_REGISTRY }}/service/migrate
           tag: ${{ github.sha }}
           context: .
           dockerfile: images/service/migrate/Dockerfile
           build-args: |
             GO_BUILDER_IMAGE=${{ steps.build-dependencies.outputs.go_builder }}
             RUNTIME_IMAGE=${{ steps.build-dependencies.outputs.runtime }}
-          registry: ${{ secrets.HARBOR_REGISTRY }}
+          registry: ${{ vars.HARBOR_REGISTRY }}
           registry-username: ${{ secrets.HARBOR_USERNAME }}
           registry-password: ${{ secrets.HARBOR_PASSWORD }}
           cosign-key: ${{ secrets.COSIGN_KEY }}
@@ -155,14 +155,14 @@ jobs:
         id: cron-image
         uses: ./deploy/ci/build-scan-sign-push
         with:
-          image: ${{ secrets.HARBOR_REGISTRY }}/service/cron
+          image: ${{ vars.HARBOR_REGISTRY }}/service/cron
           tag: ${{ github.sha }}
           context: .
           dockerfile: images/service/cron/Dockerfile
           build-args: |
             GO_BUILDER_IMAGE=${{ steps.build-dependencies.outputs.go_builder }}
             PG_CLIENT_IMAGE=${{ steps.build-dependencies.outputs.postgres }}
-          registry: ${{ secrets.HARBOR_REGISTRY }}
+          registry: ${{ vars.HARBOR_REGISTRY }}
           registry-username: ${{ secrets.HARBOR_USERNAME }}
           registry-password: ${{ secrets.HARBOR_PASSWORD }}
           cosign-key: ${{ secrets.COSIGN_KEY }}

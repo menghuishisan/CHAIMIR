@@ -3,7 +3,7 @@
  * 符合前端铁律：
  * - FE-1: 全令牌化，零裸 hex
  * - FE-2: 无障碍达标，焦点可见
- * - FE-10: 质感打磨（内高光、悬浮投影、按压反馈）
+ * - FE-10: 通过颜色、边界和即时按压反馈表达层级
  */
 
 .chaimir-btn {
@@ -14,16 +14,15 @@
   gap: var(--space-2);
   font-family: var(--font-sans);
   font-weight: var(--font-semibold);
-  letter-spacing: var(--tracking-wide);
+  letter-spacing: 0;
   border-radius: var(--radius-sm);
   border: none;
   cursor: pointer;
   transition: background var(--t) var(--ease),
               border-color var(--t) var(--ease),
               color var(--t) var(--ease),
-              box-shadow var(--t) var(--ease),
               opacity var(--t-fast) var(--ease),
-              transform 0.4s var(--ease-spring-ios); /* 增加阻尼回弹的缩放 */
+              transform var(--t-fast) var(--ease-out);
   white-space: nowrap;
   user-select: none;
   position: relative;
@@ -55,48 +54,56 @@
 .chaimir-btn--primary {
   background: var(--color-primary);
   color: var(--color-primary-fg);
-  /* 内高光 + 主色发光投影（质感打磨 §4.3） */
-  box-shadow: inset 0 1px 0 var(--color-highlight),
-              0 2px 4px var(--color-primary-shadow),
-              0 0 0 0 var(--color-primary-shadow); /* Glow 预留 */
+  box-shadow: none;
 }
 
-.chaimir-btn--primary:hover:not(:disabled) {
-  background: var(--color-primary-hover);
-  /* 悬浮升投影 + 发光 (Glow) */
-  transform: translateY(-1px);
-  box-shadow: inset 0 1px 0 var(--color-highlight),
-              0 6px 12px var(--color-primary-shadow-strong),
-              0 0 16px var(--color-primary-shadow); /* Glow */
+@media (hover: hover) and (pointer: fine) {
+  .chaimir-btn--primary:hover:not(:disabled) {
+    background: var(--color-primary-hover);
+  }
+
+  .chaimir-btn--secondary:hover:not(:disabled) {
+    background: var(--color-secondary-hover);
+  }
+
+  .chaimir-btn--outline:hover:not(:disabled) {
+    background: var(--color-primary-soft);
+    border-color: var(--color-primary);
+    color: var(--color-primary-text);
+  }
+
+  .chaimir-btn--ghost:hover:not(:disabled) {
+    background: var(--color-surface-hover);
+    color: var(--color-text);
+  }
+
+  .chaimir-btn--danger:hover:not(:disabled) {
+    background: var(--color-danger-solid-hover);
+  }
+
+  .chaimir-btn--on-dark:hover:not(:disabled) {
+    background: var(--color-on-dark-accent-hover);
+  }
 }
 
 .chaimir-btn--primary:active:not(:disabled) {
   /* 按压物理微缩 (配合 ease-press) */
   transform: scale(0.97);
-  transition: transform 0.15s var(--ease-press);
+  transition: transform var(--t-fast) var(--ease-out);
   filter: brightness(0.95);
-  box-shadow: inset 0 1px 0 var(--color-highlight),
-              0 2px 4px var(--color-primary-shadow);
+  box-shadow: none;
 }
 
 /* Secondary - 琥珀副动作按钮 */
 .chaimir-btn--secondary {
   background: var(--color-secondary);
   color: var(--color-secondary-fg);
-  box-shadow: inset 0 1px 0 var(--color-highlight),
-              0 1px 2px var(--color-primary-shadow);
-}
-
-.chaimir-btn--secondary:hover:not(:disabled) {
-  background: var(--color-secondary-hover);
-  transform: translateY(-1px);
-  box-shadow: inset 0 1px 0 var(--color-highlight),
-              0 4px 8px var(--color-primary-shadow-strong);
+  box-shadow: none;
 }
 
 .chaimir-btn--secondary:active:not(:disabled) {
   transform: scale(0.97);
-  transition: transform 0.15s var(--ease-press);
+  transition: transform var(--t-fast) var(--ease-out);
   filter: brightness(0.95);
 }
 
@@ -108,16 +115,10 @@
   box-shadow: none;
 }
 
-.chaimir-btn--outline:hover:not(:disabled) {
-  background: var(--color-primary-soft);
-  border-color: var(--color-primary);
-  color: var(--color-primary-text);
-}
-
 .chaimir-btn--outline:active:not(:disabled) {
   background: var(--color-primary-soft);
   transform: scale(0.97);
-  transition: transform 0.15s var(--ease-press);
+  transition: transform var(--t-fast) var(--ease-out);
 }
 
 /* Ghost - 幽灵按钮 */
@@ -127,35 +128,22 @@
   box-shadow: none;
 }
 
-.chaimir-btn--ghost:hover:not(:disabled) {
-  background: var(--color-surface-hover);
-  color: var(--color-text);
-}
-
 .chaimir-btn--ghost:active:not(:disabled) {
   background: var(--color-surface-sunken);
   transform: scale(0.97);
-  transition: transform 0.15s var(--ease-press);
+  transition: transform var(--t-fast) var(--ease-out);
 }
 
 /* Danger - 危险按钮 */
 .chaimir-btn--danger {
   background: var(--color-danger-solid);
   color: var(--color-primary-fg);
-  box-shadow: inset 0 1px 0 var(--color-highlight),
-              0 1px 2px var(--color-danger-shadow);
-}
-
-.chaimir-btn--danger:hover:not(:disabled) {
-  background: var(--color-danger-solid-hover);
-  transform: translateY(-1px);
-  box-shadow: inset 0 1px 0 var(--color-highlight),
-              0 4px 8px var(--color-danger-shadow-strong);
+  box-shadow: none;
 }
 
 .chaimir-btn--danger:active:not(:disabled) {
   transform: scale(0.97);
-  transition: transform 0.15s var(--ease-press);
+  transition: transform var(--t-fast) var(--ease-out);
   filter: brightness(0.95);
 }
 
@@ -166,16 +154,10 @@
   box-shadow: 0 1px 2px var(--color-on-dark-shadow);
 }
 
-.chaimir-btn--on-dark:hover:not(:disabled) {
-  background: var(--color-on-dark-accent-hover);
-  transform: translateY(-1px);
-  box-shadow: 0 4px 8px var(--color-on-dark-shadow-strong);
-}
-
 .chaimir-btn--on-dark:active:not(:disabled) {
   background: var(--color-on-dark-accent);
   transform: scale(0.97);
-  transition: transform 0.15s var(--ease-press);
+  transition: transform var(--t-fast) var(--ease-out);
 }
 
 /* === 状态 === */
@@ -206,6 +188,7 @@
 
 /* Loading 旋转动画 */
 .chaimir-btn__spinner {
+  /* animation-budget: loader feedback may rotate continuously while submitting */
   animation: chaimir-spin 1s linear infinite;
 }
 

@@ -1,0 +1,84 @@
+/* ResourceState 样式：五态反馈使用实色语义表面，不制造额外卡片层级。 */
+
+.chaimir-resource-state {
+  display: grid;
+  justify-items: center;
+  gap: var(--space-3);
+  inline-size: 100%;
+  padding: var(--space-8) var(--space-4);
+  color: var(--color-text-sub);
+  text-align: center;
+}
+
+.chaimir-resource-state > p,
+.chaimir-resource-state__body p {
+  max-inline-size: 38rem;
+  margin: 0;
+  line-height: var(--leading-normal);
+}
+
+.chaimir-resource-state--loading {
+  background: var(--color-surface-sunken);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-sm);
+}
+
+.chaimir-resource-state--forbidden {
+  color: var(--color-warning);
+  background: var(--color-warning-bg);
+  border: 1px solid var(--color-warning-border);
+  border-radius: var(--radius-sm);
+}
+
+.chaimir-resource-state--forbidden h3,
+.chaimir-resource-state__body h3 {
+  margin: 0;
+  color: var(--color-text-strong);
+  font-size: var(--text-md);
+}
+
+.chaimir-resource-state__action {
+  display: flex;
+  justify-content: center;
+}
+
+.chaimir-resource-state--error {
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  justify-items: start;
+  padding: var(--space-4);
+  color: var(--color-danger);
+  text-align: start;
+  background: var(--color-danger-bg);
+  border: 1px solid var(--color-danger-border);
+  border-radius: var(--radius-sm);
+}
+
+.chaimir-resource-state__icon {
+  display: grid;
+  place-items: center;
+}
+
+.chaimir-resource-state__body {
+  display: grid;
+  gap: var(--space-1);
+  min-inline-size: 0;
+}
+
+.chaimir-resource-state__trace {
+  color: var(--color-text-sub);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  overflow-wrap: anywhere;
+}
+
+@media not all and (--bp-sm) {
+  .chaimir-resource-state--error {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .chaimir-resource-state--error > button {
+    grid-column: 2;
+    justify-self: start;
+  }
+}

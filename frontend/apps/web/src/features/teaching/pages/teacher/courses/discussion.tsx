@@ -3,17 +3,17 @@
 import React, { useCallback, useMemo, useState } from 'react'
 import type { TeachingAnnouncement, TeachingPost } from '@chaimir/api-client'
 import type { TableColumn } from '@chaimir/ui'
-import { Button, Callout, Input, Table, Textarea } from '@chaimir/ui'
+import { Button, Callout, Input, Table, Textarea, useConfirm, ResourceState, FormField } from '@chaimir/ui'
 import { Heart, MessageSquare, Pin, RefreshCw, Send, Trash2 } from 'lucide-react'
 import { useParams } from 'react-router-dom'
 import { api } from '../../../../../app/api'
-import { ErrorState, LoadingState } from '../../../../../components/ResourceState'
-import { useAsyncResource } from '../../../../../hooks'
+import { useAsyncResource, usePendingAction } from '../../../../../hooks'
 import styles from '../../teaching.module.css'
 import { formatDateTime } from '../../../../../utils/index'
 import { userFacingErrorMessage } from '../../../../../utils/userFacingError'
 
 const TeacherCourseDiscussionPage: React.FC = () => {
+  const confirm = useConfirm()
   const { id } = useParams()
   const courseId = String(id || '')
   const announcements = useAsyncResource(() => api.teaching.listAnnouncements(courseId), [courseId])
@@ -23,6 +23,7 @@ const TeacherCourseDiscussionPage: React.FC = () => {
   const [postContent, setPostContent] = useState('')
   const [message, setMessage] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const { pendingAction, runPendingAction } = usePendingAction()
 
   const reloadAll = useCallback(() => {
     announcements.reload()
@@ -88,8 +89,8 @@ const TeacherCourseDiscussionPage: React.FC = () => {
     { key: 'content', title: '内容', dataIndex: 'content' },
     { key: 'pinned', title: '置顶', render: (row) => (row.is_pinned ? '是' : '否') },
     { key: 'created', title: '发布时间', render: (row) => formatDateTime(row.created_at) },
-    { key: 'actions', title: '操作', render: (row) => <Button variant="outline" size="sm" icon={<Pin size={14} />} onClick={() => announcementAction(() => api.teaching.pinAnnouncement(String(row.id)), '公告已置顶。')}>置顶</Button> },
-  ], [announcementAction])
+    { key: 'actions', title: '操作', render: (row) => <Button variant="outline" size="sm" icon={<Pin size={14} />} loading={pendingAction === `announcement-${row.id}`} disabled={Boolean(pendingAction)} onClick={() => void runPendingAction(`announcement-${row.id}`, () => announcementAction(() => api.teaching.pinAnnouncement(String(row.id)), '公告已置顶。'))}>置顶</Button> },
+  ], [announcementAction, pendingAction, runPendingAction])
 
   const postColumns = useMemo<TableColumn<TeachingPost>[]>(() => [
     { key: 'content', title: '讨论内容', dataIndex: 'content', priority: 'primary' },
@@ -101,13 +102,16 @@ const TeacherCourseDiscussionPage: React.FC = () => {
       title: '操作',
       render: (row) => (
         <div className={styles.actions}>
-          <Button variant="outline" size="sm" icon={<Pin size={14} />} onClick={() => postAction(() => api.teaching.pinPost(String(row.id)), '讨论帖已置顶。')}>置顶</Button>
-          <Button variant="ghost" size="sm" icon={<Heart size={14} />} onClick={() => postAction(() => api.teaching.likePost(String(row.id)), '已点赞讨论帖。')}>点赞</Button>
-          <Button variant="ghost" size="sm" icon={<Trash2 size={14} />} onClick={() => postAction(() => api.teaching.deletePost(String(row.id)), '讨论帖已删除。')}>删除</Button>
+          <Button variant="outline" size="sm" icon={<Pin size={14} />} loading={pendingAction === `pin-${row.id}`} disabled={Boolean(pendingAction)} onClick={() => void runPendingAction(`pin-${row.id}`, () => postAction(() => api.teaching.pinPost(String(row.id)), '讨论帖已置顶。'))}>置顶</Button>
+          <Button variant="ghost" size="sm" icon={<Heart size={14} />} loading={pendingAction === `like-${row.id}`} disabled={Boolean(pendingAction)} onClick={() => void runPendingAction(`like-${row.id}`, () => postAction(() => api.teaching.likePost(String(row.id)), '已点赞讨论帖。'))}>点赞</Button>
+          <Button variant="ghost" size="sm" icon={<Trash2 size={14} />} loading={pendingAction === `delete-${row.id}`} disabled={Boolean(pendingAction)} onClick={() => void runPendingAction(`delete-${row.id}`, async () => {
+            const confirmed = await confirm({ title: '删除讨论帖', description: '删除后该讨论内容将不再对课程成员可见。', confirmLabel: '确认删除' })
+            if (confirmed) await postAction(() => api.teaching.deletePost(String(row.id)), '讨论帖已删除。')
+          })}>删除</Button>
         </div>
       ),
     },
-  ], [postAction])
+  ], [confirm, pendingAction, postAction, runPendingAction])
 
   return (
     <div className={styles.page}>
@@ -124,27 +128,27 @@ const TeacherCourseDiscussionPage: React.FC = () => {
       <div className={styles.grid}>
         <section className={styles.panel}>
           <h2>发布公告</h2>
-          <label className={styles.field}>标题<Input fullWidth value={title} onChange={(event) => setTitle(event.target.value)} /></label>
-          <label className={styles.field}>正文<Textarea value={announcementContent} onChange={(event) => setAnnouncementContent(event.target.value)} /></label>
-          <Button icon={<Send size={16} />} onClick={createAnnouncement}>发布公告</Button>
+          <FormField className={styles.field} label="标题"><Input fullWidth value={title} onChange={(event) => setTitle(event.target.value)} /></FormField>
+          <FormField className={styles.field} label="正文"><Textarea value={announcementContent} onChange={(event) => setAnnouncementContent(event.target.value)} /></FormField>
+          <Button icon={<Send size={16} />} loading={pendingAction === 'create-announcement'} disabled={Boolean(pendingAction)} onClick={() => void runPendingAction('create-announcement', createAnnouncement)}>发布公告</Button>
         </section>
         <section className={styles.panel}>
           <h2>发布讨论帖</h2>
-          <label className={styles.field}>内容<Textarea value={postContent} onChange={(event) => setPostContent(event.target.value)} /></label>
-          <Button icon={<Send size={16} />} onClick={createPost}>发布讨论帖</Button>
+          <FormField className={styles.field} label="内容"><Textarea value={postContent} onChange={(event) => setPostContent(event.target.value)} /></FormField>
+          <Button icon={<Send size={16} />} loading={pendingAction === 'create-post'} disabled={Boolean(pendingAction)} onClick={() => void runPendingAction('create-post', createPost)}>发布讨论帖</Button>
         </section>
       </div>
 
-      {announcements.status === 'error' && <ErrorState error={announcements.error} onRetry={announcements.reload} />}
-      {announcements.status === 'loading' && <LoadingState title="正在获取课程公告" />}
+      {announcements.status === 'error' && <ResourceState status="error" error={announcements.error} onRetry={announcements.reload} />}
+      {announcements.status === 'loading' && <ResourceState status="loading" title="正在获取课程公告" />}
       {(announcements.status === 'success' || announcements.status === 'empty') && (
         <div className={styles.tableWrap}>
           <Table columns={announcementColumns} rows={announcements.data || []} rowKey="id" emptyTitle="暂无公告" emptyDescription="当前课程还没有公告。" ariaLabel="课程公告列表" />
         </div>
       )}
 
-      {posts.status === 'error' && <ErrorState error={posts.error} onRetry={posts.reload} />}
-      {posts.status === 'loading' && <LoadingState title="正在获取讨论帖" />}
+      {posts.status === 'error' && <ResourceState status="error" error={posts.error} onRetry={posts.reload} />}
+      {posts.status === 'loading' && <ResourceState status="loading" title="正在获取讨论帖" />}
       {(posts.status === 'success' || posts.status === 'empty') && (
         <div className={styles.tableWrap}>
           <Table columns={postColumns} rows={posts.data?.list || []} rowKey="id" emptyTitle="暂无讨论" emptyDescription="当前课程还没有讨论帖。" ariaLabel="课程讨论帖列表" />

@@ -1,0 +1,72 @@
+/* MatrixPatternRenderer 仅定义 Matrix 模式的可视化样式。 */
+
+.sim-matrix-wrap {
+  margin: var(--space-3) var(--space-4);
+  overflow: auto;
+  max-block-size: min(34rem, 70vh);
+  border: 0.0625rem solid var(--color-dark-border);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--color-terminal-bg) 80%, transparent);
+}
+.sim-matrix {
+  min-width: max-content;
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--text-sm);
+}
+
+.sim-matrix th,
+.sim-matrix td {
+  padding: var(--space-2);
+  border: 0.0625rem solid var(--color-dark-border);
+  text-align: center;
+  max-width: 14rem;
+  overflow-wrap: anywhere;
+}
+
+.sim-matrix thead th,
+.sim-matrix tbody th {
+  position: sticky;
+  z-index: var(--z-base);
+  background: color-mix(in srgb, var(--color-dark-surface) 92%, transparent);
+}
+
+.sim-matrix thead th {
+  inset-block-start: 0;
+}
+
+.sim-matrix tbody th {
+  inset-inline-start: 0;
+  text-align: left;
+}
+
+.sim-matrix__cell.is-yes {
+  background: color-mix(in srgb, var(--color-success) 16%, transparent);
+  color: var(--color-success);
+}
+
+.sim-matrix__cell.is-no,
+.sim-matrix__cell.is-fault {
+  background: var(--sim-pattern-danger-soft);
+  color: var(--color-danger);
+}
+
+.sim-matrix__cell.is-pending {
+  background: color-mix(in srgb, var(--color-secondary-accent) 12%, transparent);
+  color: var(--color-secondary-accent);
+}
+
+.sim-matrix__cell {
+  cursor: pointer;
+}
+
+.sim-matrix__cell span,
+.sim-matrix__cell small {
+  display: block;
+}
+
+.sim-matrix__cell small {
+  margin-top: var(--space-1);
+  color: var(--color-dark-text-sub);
+  font-size: var(--text-xs);
+}

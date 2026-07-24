@@ -4,12 +4,11 @@ import React, { useMemo, useState } from 'react'
 import type { SandboxAdapterSpec, SandboxRuntime, SandboxRuntimeRequest, WorkloadComponent } from '@chaimir/api-client'
 import { RuntimeStatus } from '@chaimir/api-client'
 import type { TableColumn } from '@chaimir/ui'
-import { Button, Callout, Input, Select, Table } from '@chaimir/ui'
+import { Button, Callout, Input, Select, Table, ResourceState } from '@chaimir/ui'
 import { Eye, Pencil, Plus, RefreshCw, Server } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../../../../../app/api'
-import { ErrorState, LoadingState } from '../../../../../components/ResourceState'
-import { useAsyncResource } from '../../../../../hooks'
+import { useAsyncResource, usePendingAction } from '../../../../../hooks'
 import styles from '../../../../admin/pages/list.module.css'
 import { runtimeSelftestStatusLabel, runtimeStatusLabel } from '../../../../../utils/index'
 import { parseDelimitedList } from '../../../../../utils'
@@ -37,6 +36,7 @@ const RuntimesPage: React.FC = () => {
   const [capabilityExecutable, setCapabilityExecutable] = useState('/usr/local/bin/chaimir-chain')
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
+  const { pendingAction, runPendingAction } = usePendingAction()
   const rows = resource.data || []
 
   /** saveRuntime 创建或更新完整运行时适配声明。 */
@@ -168,14 +168,14 @@ const RuntimesPage: React.FC = () => {
           <Input value={memoryLimit} onChange={(event) => setMemoryLimit(event.target.value)} placeholder="内存上限" fullWidth />
           <Input value={defaultTools} onChange={(event) => setDefaultTools(event.target.value)} placeholder="默认工具编号，使用逗号分隔" fullWidth />
           {form.adapter_level >= 2 && !form.capability_impl && !form.plugin_ref && <Input value={capabilityExecutable} onChange={(event) => setCapabilityExecutable(event.target.value)} placeholder={editingSpec ? '标准链能力命令入口，留空保留现有声明' : '标准链能力命令入口'} fullWidth />}
-          <Button icon={<Plus size={15} />} onClick={() => void saveRuntime()}>{editingId ? '保存运行时' : '登记运行时'}</Button>
+          <Button icon={<Plus size={15} />} loading={pendingAction === 'runtime'} disabled={Boolean(pendingAction)} onClick={() => void runPendingAction('runtime', saveRuntime)}>{editingId ? '保存运行时' : '登记运行时'}</Button>
         </div>
       </section>
 
       {resource.status === 'error' && (
-        <ErrorState error={resource.error} onRetry={resource.reload} />
+        <ResourceState status="error" error={resource.error} onRetry={resource.reload} />
       )}
-      {resource.status === 'loading' && <LoadingState title="正在获取链运行时" />}
+      {resource.status === 'loading' && <ResourceState status="loading" title="正在获取链运行时" />}
       {(resource.status === 'success' || resource.status === 'empty') && (
         <div className={styles.tableWrap}>
           <Table

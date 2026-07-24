@@ -50,7 +50,7 @@
     border-color var(--t-fast) var(--ease),
     box-shadow var(--t-fast) var(--ease),
     opacity var(--t-fast) var(--ease),
-    transform var(--t-fast) var(--ease-press);
+    transform var(--t-fast) var(--ease-out);
   flex-shrink: 0;
 }
 
@@ -59,15 +59,18 @@
   height: 0.5rem;
   border-radius: var(--radius-full);
   background: var(--color-primary);
-  transform: scale(0);
-  transition: transform 0.4s var(--ease-spring-ios);
+  opacity: 0;
+  transform: scale(0.75);
+  transition: opacity var(--t-fast) var(--ease), transform var(--t-fast) var(--ease-out);
 }
 
 /* === 状态 === */
 
 /* 悬浮态 */
-.chaimir-radio:hover:not(.chaimir-radio--disabled) .chaimir-radio__circle {
-  border-color: var(--color-primary);
+@media (hover: hover) and (pointer: fine) {
+  .chaimir-radio:hover:not(.chaimir-radio--disabled) .chaimir-radio__circle {
+    border-color: var(--color-primary);
+  }
 }
 
 .chaimir-radio:active:not(.chaimir-radio--disabled) .chaimir-radio__circle {
@@ -87,6 +90,7 @@
 }
 
 .chaimir-radio__circle--checked .chaimir-radio__dot {
+  opacity: 1;
   transform: scale(1);
 }
 

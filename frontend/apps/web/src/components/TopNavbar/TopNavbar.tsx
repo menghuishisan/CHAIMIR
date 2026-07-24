@@ -24,7 +24,7 @@ const TopNavbar: React.FC<TopNavbarProps> = ({ onMenuClick, menuButtonRef, isMen
           type="button"
           className={styles.menuButton}
           onClick={onMenuClick}
-          aria-label="打开导航菜单"
+          aria-label={isMenuOpen ? '关闭导航菜单' : '打开导航菜单'}
           aria-expanded={isMenuOpen}
         >
           <Menu size={20} />
@@ -32,6 +32,7 @@ const TopNavbar: React.FC<TopNavbarProps> = ({ onMenuClick, menuButtonRef, isMen
         <Link className={styles.brand} to={navigation.homePath} aria-label={navigation.brandName}>
           <Hexagon className={styles.brandIcon} size={24} />
           <span className={styles.brandName}>{navigation.brandName}</span>
+          <span className={styles.compactBrandName} aria-hidden="true">Chaimir</span>
         </Link>
       </div>
 

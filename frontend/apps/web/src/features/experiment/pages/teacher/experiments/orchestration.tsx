@@ -1,17 +1,18 @@
 // 教师实验编排页：把向导状态保存到后端实验定义，保证刷新和跨设备不丢失。
 
-import React, { useEffect, useMemo, useState } from 'react'
-import type { ComponentConfig, Experiment, ExperimentGroup, ExperimentRequest, GroupConfig } from '@chaimir/api-client'
+import React, { useEffect, useState } from 'react'
+import type { Experiment, ExperimentGroup, ExperimentRequest } from '@chaimir/api-client'
 import { ExperimentCollabMode } from '@chaimir/api-client'
-import { Button, Checkbox, Input, Select, Textarea } from '@chaimir/ui'
+import { Button, Checkbox, Input, Select, Textarea, ResourceState, FormField } from '@chaimir/ui'
 import { Compass, Save, Send, Users } from 'lucide-react'
 import { useSearchParams } from 'react-router-dom'
 import { api } from '../../../../../app/api'
-import { EmptyState, ErrorState, LoadingState } from '../../../../../components/ResourceState'
+import { usePendingAction } from '../../../../../hooks'
 import { useAsyncResource } from '../../../../../hooks/useAsyncResource'
 import { emptyExperimentComponents, defaultExperimentGroup } from '../../../config/orchestration'
+import { ExperimentComponentsEditor } from '../../../components/ExperimentComponentsEditor'
 import styles from '../../experiment.module.css'
-import { experimentCollabModeOptions, parseJsonObject, stringifyJsonObject } from '../../../../../utils/index'
+import { experimentCollabModeOptions } from '../../../../../utils/index'
 import { userFacingErrorMessage } from '../../../../../utils/userFacingError'
 
 const TeacherExperimentOrchestrationPage: React.FC = () => {
@@ -29,14 +30,13 @@ const TeacherExperimentOrchestrationPage: React.FC = () => {
     require_report: true,
     wizard_step: 1,
   })
-  const [componentsText, setComponentsText] = useState(stringifyJsonObject(emptyExperimentComponents))
-  const [groupText, setGroupText] = useState(stringifyJsonObject(defaultExperimentGroup))
   const [message, setMessage] = useState('')
   const [groupName, setGroupName] = useState('')
   const [groupId, setGroupId] = useState('')
   const [studentId, setStudentId] = useState('')
   const [memberRole, setMemberRole] = useState('member')
   const [group, setGroup] = useState<ExperimentGroup>()
+  const { pendingAction, runPendingAction } = usePendingAction()
 
   const resource = useAsyncResource(
     async () => {
@@ -52,31 +52,12 @@ const TeacherExperimentOrchestrationPage: React.FC = () => {
     if (!resource.data) return
     const experiment = resource.data
     setForm(toRequest(experiment))
-    setComponentsText(stringifyJsonObject(experiment.components))
-    setGroupText(stringifyJsonObject(experiment.group_config))
   }, [resource.data])
 
-  const parsed = useMemo(() => {
-    try {
-      return {
-        components: parseJsonObject<ComponentConfig>(componentsText),
-        group: parseJsonObject<GroupConfig>(groupText),
-        ok: true,
-      }
-    } catch {
-      return { components: emptyExperimentComponents, group: defaultExperimentGroup, ok: false }
-    }
-  }, [componentsText, groupText])
-
   const save = async () => {
-    if (!parsed.ok) {
-      setMessage('组件配置或协作配置不是有效的结构，请检查后再保存。')
-      return
-    }
     setMessage('')
-    const payload = { ...form, components: parsed.components, group_config: parsed.group }
     try {
-      const saved = id ? await api.experiment.updateExperiment(id, payload) : await api.experiment.createExperiment(payload)
+      const saved = id ? await api.experiment.updateExperiment(id, form) : await api.experiment.createExperiment(form)
       setSearchParams({ id: saved.id }, { replace: true })
       setMessage('实验编排已保存到服务端。')
     } catch (error) {
@@ -132,15 +113,15 @@ const TeacherExperimentOrchestrationPage: React.FC = () => {
   }
 
   if (id && resource.status === 'loading') {
-    return <LoadingState title="正在读取实验编排" description="系统正在同步已保存的向导配置。" />
+    return <ResourceState status="loading" title="正在读取实验编排" description="系统正在同步已保存的向导配置。" />
   }
 
   if (resource.status === 'error') {
-    return <ErrorState error={resource.error} onRetry={resource.reload} />
+    return <ResourceState status="error" error={resource.error} onRetry={resource.reload} />
   }
 
   if (id && resource.status === 'empty') {
-    return <EmptyState title="未找到实验编排" description="该实验可能已被删除或你没有访问权限。" />
+    return <ResourceState status="empty" title="未找到实验编排" description="该实验可能已被删除或你没有访问权限。" />
   }
 
   return (
@@ -153,8 +134,8 @@ const TeacherExperimentOrchestrationPage: React.FC = () => {
           实验流编排
         </h1>
         <div className={styles.actions}>
-          <Button variant="outline" icon={<Save size={16} />} onClick={save}>保存编排</Button>
-          <Button icon={<Send size={16} />} onClick={publish}>校验并发布</Button>
+          <Button variant="outline" icon={<Save size={16} />} loading={pendingAction === 'save'} disabled={Boolean(pendingAction)} onClick={() => void runPendingAction('save', save)}>保存编排</Button>
+          <Button icon={<Send size={16} />} loading={pendingAction === 'publish'} disabled={Boolean(pendingAction)} onClick={() => void runPendingAction('publish', publish)}>校验并发布</Button>
         </div>
       </div>
       {message && <p className={styles.message} role="status">{message}</p>}
@@ -200,32 +181,24 @@ const TeacherExperimentOrchestrationPage: React.FC = () => {
           <Checkbox label="学生需要提交实验报告" checked={form.require_report} onChange={(event) => setForm((current) => ({ ...current, require_report: event.target.checked }))} />
         </section>
 
-        <aside className={`${styles.panel} ${styles.section}`}>
+        <section className={`${styles.panel} ${styles.section}`}>
           <h2 className={styles.sectionTitle}>组件与协作配置</h2>
-          <div className={styles.field}>
-            <label className={styles.label} htmlFor="components">实验组件配置</label>
-            <Textarea id="components" className={styles.jsonEditor} value={componentsText} onChange={(event) => setComponentsText(event.target.value)} resize="vertical" fullWidth />
-          </div>
-          <div className={styles.field}>
-            <label className={styles.label} htmlFor="group-config">协作配置</label>
-            <Textarea id="group-config" className={styles.jsonEditor} value={groupText} onChange={(event) => setGroupText(event.target.value)} resize="vertical" fullWidth />
-          </div>
-          <p className={styles.muted}>组件配置将用于创建实验环境、解锁阶段、检查点判分和绑定仿真会话。</p>
-        </aside>
+          <ExperimentComponentsEditor components={form.components} group={form.group_config} onComponentsChange={(components) => setForm((current) => ({ ...current, components }))} onGroupChange={(group_config) => setForm((current) => ({ ...current, group_config }))} />
+        </section>
       </div>
       {id && form.collab_mode !== ExperimentCollabMode.SOLO && (
         <section className={`${styles.panel} ${styles.section}`}>
           <h2 className={styles.sectionTitle}><Users size={18} />协作小组</h2>
           <div className={styles.formGrid}>
-            <label className={styles.field}>小组名称<Input fullWidth value={groupName} onChange={(event) => setGroupName(event.target.value)} /></label>
-            <label className={styles.field}>小组编号<Input fullWidth value={groupId} onChange={(event) => setGroupId(event.target.value)} /></label>
-            <label className={styles.field}>学生编号<Input fullWidth value={studentId} onChange={(event) => setStudentId(event.target.value)} /></label>
-            <label className={styles.field}>小组角色<Input fullWidth value={memberRole} onChange={(event) => setMemberRole(event.target.value)} /></label>
+            <FormField className={styles.field} label="小组名称"><Input fullWidth value={groupName} onChange={(event) => setGroupName(event.target.value)} /></FormField>
+            <FormField className={styles.field} label="小组编号"><Input fullWidth value={groupId} onChange={(event) => setGroupId(event.target.value)} /></FormField>
+            <FormField className={styles.field} label="学生编号"><Input fullWidth value={studentId} onChange={(event) => setStudentId(event.target.value)} /></FormField>
+            <FormField className={styles.field} label="小组角色"><Input fullWidth value={memberRole} onChange={(event) => setMemberRole(event.target.value)} /></FormField>
           </div>
           <div className={styles.actions}>
-            <Button variant="outline" onClick={() => void createGroup()}>创建小组</Button>
-            <Button onClick={() => void addGroupMember()}>保存成员</Button>
-            <Button variant="ghost" disabled={!groupId.trim()} onClick={() => void api.experiment.getGroup(groupId.trim()).then(setGroup).catch((error) => setMessage(userFacingErrorMessage(error, '暂时无法读取小组。')))}>刷新小组</Button>
+            <Button variant="outline" loading={pendingAction === 'create-group'} disabled={Boolean(pendingAction)} onClick={() => void runPendingAction('create-group', createGroup)}>创建小组</Button>
+            <Button loading={pendingAction === 'member'} disabled={Boolean(pendingAction)} onClick={() => void runPendingAction('member', addGroupMember)}>保存成员</Button>
+            <Button variant="ghost" loading={pendingAction === 'refresh-group'} disabled={Boolean(pendingAction) || !groupId.trim()} onClick={() => void runPendingAction('refresh-group', () => api.experiment.getGroup(groupId.trim()).then(setGroup).catch((error) => setMessage(userFacingErrorMessage(error, '暂时无法读取小组。'))))}>刷新小组</Button>
           </div>
           {group && <p className={styles.muted}>{group.name}，当前 {group.members.length} 名成员。</p>}
         </section>

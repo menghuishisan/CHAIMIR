@@ -3,10 +3,9 @@
 import React, { useMemo } from 'react'
 import type { ImportBatch } from '@chaimir/api-client'
 import type { TableColumn } from '@chaimir/ui'
-import { Button, Table } from '@chaimir/ui'
+import { Button, Table, ResourceState } from '@chaimir/ui'
 import { History, RefreshCw } from 'lucide-react'
 import { api } from '../../../../../app/api'
-import { ErrorState, LoadingState } from '../../../../../components/ResourceState'
 import { useAsyncResource } from '../../../../../hooks'
 import styles from '../../identity-admin.module.css'
 import { formatDateTime, importBatchStatusLabel } from '../../../../../utils/index'
@@ -16,7 +15,6 @@ const UserHistoryPage: React.FC = () => {
   const resource = useAsyncResource(() => api.identity.listAccountImportBatches(), [])
 
   const columns = useMemo<TableColumn<ImportBatch>[]>(() => [
-    { key: 'id', title: '批次编号', dataIndex: 'id', priority: 'primary' },
     { key: 'fileName', title: '文件名', dataIndex: 'file_name', priority: 'primary' },
     { key: 'total', title: '总数', dataIndex: 'total' },
     { key: 'success', title: '成功', dataIndex: 'success' },
@@ -50,8 +48,8 @@ const UserHistoryPage: React.FC = () => {
         </Button>
       </div>
 
-      {resource.status === 'error' && <ErrorState error={resource.error} onRetry={resource.reload} />}
-      {resource.status === 'loading' && <LoadingState title="正在获取导入历史" />}
+      {resource.status === 'error' && <ResourceState status="error" error={resource.error} onRetry={resource.reload} />}
+      {resource.status === 'loading' && <ResourceState status="loading" title="正在获取导入历史" />}
       {(resource.status === 'success' || resource.status === 'empty') && (
         <div className={styles.tableWrap}>
           <Table

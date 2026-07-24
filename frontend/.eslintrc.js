@@ -19,11 +19,14 @@ module.exports = {
     'plugin:react-hooks/recommended',
     'plugin:@typescript-eslint/recommended',
   ],
+  plugins: ['chaimir'],
   rules: {
     'react/react-in-jsx-scope': 'off',
     'react/prop-types': 'off',
     '@typescript-eslint/no-explicit-any': 'warn',
     '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_' }],
+    'chaimir/no-emoji': 'error',
+    'chaimir/no-json-dump': 'error',
 
     // FE-1: 禁止裸 hex 颜色（通过正则检测字符串字面量中的 hex）
     'no-restricted-syntax': [

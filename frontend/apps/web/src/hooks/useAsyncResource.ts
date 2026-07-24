@@ -35,10 +35,18 @@ function isDefaultEmpty<T>(value: T): boolean {
  * normalizeError 把未知异常转换成页面可展示的用户向错误对象。
  */
 function normalizeError(error: unknown): ApiError {
-  if (error && typeof error === 'object' && 'message' in error) {
-    return error as ApiError
+  if (error && typeof error === 'object') {
+    const candidate = error as Partial<ApiError>
+    if ('code' in candidate || 'status' in candidate || 'traceId' in candidate) {
+      return {
+        message: candidate.message?.trim() || '暂时无法获取数据，请稍后重试。',
+        code: candidate.code,
+        status: candidate.status,
+        traceId: candidate.traceId,
+      }
+    }
   }
-  return { message: '暂时无法获取数据，请稍后重试' }
+  return { message: '暂时无法获取数据，请稍后重试。' }
 }
 
 /**

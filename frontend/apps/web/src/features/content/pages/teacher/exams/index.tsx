@@ -3,12 +3,11 @@
 import React, { useCallback, useMemo, useState } from 'react'
 import type { Paper } from '@chaimir/api-client'
 import type { TableColumn } from '@chaimir/ui'
-import { Button, Callout, Table } from '@chaimir/ui'
+import { Button, Callout, Table, ResourceState } from '@chaimir/ui'
 import { File, RefreshCw } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../../../../../app/api'
-import { ErrorState, LoadingState } from '../../../../../components/ResourceState'
-import { useAsyncResource } from '../../../../../hooks'
+import { useAsyncResource, usePendingAction } from '../../../../../hooks'
 import styles from '../../content.module.css'
 import { formatDateTime, paperModeLabel } from '../../../../../utils/index'
 import { userFacingErrorMessage } from '../../../../../utils/userFacingError'
@@ -20,6 +19,7 @@ const TeacherExamsPage: React.FC = () => {
   const resource = useAsyncResource(() => api.content.listPapers({ page: 1, size: 20 }), [])
   const [message, setMessage] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const { pendingAction, runPendingAction } = usePendingAction()
 
   /**
    * handleRegenerate 调用后端重新组卷接口。
@@ -54,7 +54,7 @@ const TeacherExamsPage: React.FC = () => {
       title: '操作',
       render: (row) => (
         <div className={styles.actions}>
-          <Button variant="outline" size="sm" onClick={() => handleRegenerate(row)}>
+          <Button variant="outline" size="sm" loading={pendingAction === `regenerate-${row.id}`} disabled={Boolean(pendingAction)} onClick={() => void runPendingAction(`regenerate-${row.id}`, () => handleRegenerate(row))}>
             重新组卷
           </Button>
           <Button variant="ghost" size="sm" onClick={() => navigate(`/teacher/exams/edit?id=${row.id}`)}>
@@ -63,7 +63,7 @@ const TeacherExamsPage: React.FC = () => {
         </div>
       ),
     },
-  ], [handleRegenerate, navigate])
+  ], [handleRegenerate, navigate, pendingAction, runPendingAction])
 
   const rows = resource.data?.list || []
 
@@ -86,8 +86,8 @@ const TeacherExamsPage: React.FC = () => {
       {error && <div className={styles.error}>{error}</div>}
       {message && <Callout variant="success" title="操作成功">{message}</Callout>}
 
-      {resource.status === 'error' && <ErrorState error={resource.error} onRetry={resource.reload} />}
-      {resource.status === 'loading' && <LoadingState title="正在获取试卷列表" />}
+      {resource.status === 'error' && <ResourceState status="error" error={resource.error} onRetry={resource.reload} />}
+      {resource.status === 'loading' && <ResourceState status="loading" title="正在获取试卷列表" />}
       {(resource.status === 'success' || resource.status === 'empty') && (
         <div className={styles.tableWrap}>
           <Table columns={columns} rows={rows} rowKey={(row) => String(row.id)} emptyTitle="暂无试卷" emptyDescription="当前还没有试卷记录。" ariaLabel="试卷列表" />

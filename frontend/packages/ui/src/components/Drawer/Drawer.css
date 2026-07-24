@@ -12,7 +12,14 @@
   background: var(--color-scrim);
   border: 0;
   cursor: pointer;
-  animation: chaimir-drawer-scrim-in var(--t) var(--ease-out);
+  opacity: 1;
+  transition: opacity var(--t-drawer-enter) var(--ease-out);
+}
+
+@starting-style {
+  .chaimir-drawer__scrim {
+    opacity: 0;
+  }
 }
 
 .chaimir-drawer__panel {
@@ -23,8 +30,9 @@
   inline-size: min(26rem, 92vw);
   background: var(--color-bg);
   border-inline: 1px solid var(--color-border);
-  box-shadow: var(--shadow-glass-panel);
-  animation: chaimir-drawer-in 0.4s var(--ease-spring-ios);
+  box-shadow: var(--shadow-overlay);
+  transform: translateX(0);
+  transition: transform var(--t-drawer-enter) var(--ease-drawer);
 }
 
 .chaimir-drawer__panel.is-left {
@@ -60,40 +68,57 @@
   padding: var(--space-5);
 }
 
-@keyframes chaimir-drawer-scrim-in {
-  from {
-    opacity: 0;
-  }
-
-  to {
-    opacity: 1;
-  }
-}
-
-@keyframes chaimir-drawer-in {
-  from {
+@starting-style {
+  .chaimir-drawer__panel {
     transform: translateX(var(--drawer-x));
   }
-
-  to {
-    transform: translateX(0);
-  }
 }
 
-@media (max-width: 640px) {
+.chaimir-drawer[data-state='closed'] .chaimir-drawer__scrim {
+  opacity: 0;
+  transition-duration: var(--t-drawer-exit);
+}
+
+.chaimir-drawer[data-state='closed'] {
+  pointer-events: none;
+}
+
+.chaimir-drawer[data-state='closed'] .chaimir-drawer__panel {
+  transform: translateX(var(--drawer-x));
+  transition-duration: var(--t-drawer-exit);
+}
+
+@media not all and (--bp-md) {
   .chaimir-drawer__panel {
-    inline-size: min(24rem, 100vw);
+    inset-block: auto 0;
+    inset-inline: 0;
+    inline-size: 100%;
+    max-block-size: min(82vh, 44rem);
+    border-inline: 0;
+    border-top: 1px solid var(--color-border);
+    border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+    transform: translateY(0);
   }
 
   .chaimir-drawer__header,
   .chaimir-drawer__body {
     padding-inline: var(--space-4);
   }
+
+  @starting-style {
+    .chaimir-drawer__panel {
+      transform: translateY(100%);
+    }
+  }
+
+  .chaimir-drawer[data-state='closed'] .chaimir-drawer__panel {
+    transform: translateY(100%);
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .chaimir-drawer__scrim,
   .chaimir-drawer__panel {
-    animation: none;
+    transition: none;
   }
 }

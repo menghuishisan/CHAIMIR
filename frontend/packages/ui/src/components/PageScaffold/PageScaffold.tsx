@@ -6,7 +6,7 @@ import './PageScaffold.css'
 
 export interface PageScaffoldProps extends React.HTMLAttributes<HTMLElement> {
   children: React.ReactNode
-  tone?: 'default' | 'accent' | 'amber'
+  as?: 'main' | 'div'
 }
 
 export interface PageHeaderProps extends Omit<React.HTMLAttributes<HTMLElement>, 'title'> {
@@ -33,11 +33,11 @@ export interface PageSectionProps extends Omit<React.HTMLAttributes<HTMLElement>
 /**
  * PageScaffold 为四端日常页面提供统一外层间距和背景，不决定页面内容结构。
  */
-export function PageScaffold({ children, tone = 'default', className, ...props }: PageScaffoldProps): React.ReactElement {
+export function PageScaffold({ children, as: Component = 'main', className, ...props }: PageScaffoldProps): React.ReactElement {
   return (
-    <main className={clsx('chaimir-page-scaffold', `is-${tone}`, className)} {...props}>
+    <Component className={clsx('chaimir-page-scaffold', className)} {...props}>
       {children}
-    </main>
+    </Component>
   )
 }
 

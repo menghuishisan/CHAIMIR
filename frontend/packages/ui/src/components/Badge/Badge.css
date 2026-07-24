@@ -14,7 +14,7 @@
   font-weight: var(--font-semibold);
   border-radius: var(--radius-full);
   border: 1px solid transparent;
-  box-shadow: inset 0 1px 0 var(--color-glass-highlight);
+  box-shadow: inset 0 1px 0 var(--color-highlight);
   white-space: nowrap;
   vertical-align: middle;
   transition:
@@ -29,14 +29,14 @@
   height: 1.125rem; /* 18px */
   padding: 0 var(--space-2);
   font-size: var(--text-xs);
-  letter-spacing: var(--tracking-wide);
+  letter-spacing: 0;
 }
 
 .chaimir-badge--md {
   height: 1.375rem; /* 22px */
   padding: 0 var(--space-3);
   font-size: var(--text-sm);
-  letter-spacing: var(--tracking-wide);
+  letter-spacing: 0;
 }
 
 /* 圆点模式 */

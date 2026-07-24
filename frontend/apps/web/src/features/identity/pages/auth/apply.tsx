@@ -1,7 +1,7 @@
 // ApplyPage 提供学校入驻申请表单，字段与 identity 后端申请接口保持一致。
 
 import React, { useCallback, useState } from 'react'
-import { Button, Callout, Input, Select } from '@chaimir/ui'
+import { Button, Callout, Input, Select, FormField } from '@chaimir/ui'
 import { CheckCircle } from 'lucide-react'
 import { api } from '../../../../app/api'
 import styles from './public-auth.module.css'
@@ -69,26 +69,11 @@ const ApplyPage: React.FC = () => {
             </Callout>
             <form className={styles.applicationForm} onSubmit={handleSubmit}>
               <div className={styles.formGrid}>
-                <label className={styles.field}>
-                  机构名称
-                  <Input fullWidth autoComplete="organization" value={schoolName} placeholder="请输入学校或机构名称" onChange={(event) => setSchoolName(event.target.value)} />
-                </label>
-                <label className={styles.field}>
-                  机构类型
-                  <Select fullWidth value={schoolType} options={tenantApplicationSchoolTypeOptions} onChange={setSchoolType} />
-                </label>
-                <label className={styles.field}>
-                  联系人姓名
-                  <Input fullWidth autoComplete="name" value={contactName} placeholder="请输入联系人姓名" onChange={(event) => setContactName(event.target.value)} />
-                </label>
-                <label className={styles.field}>
-                  联系电话
-                  <Input fullWidth inputMode="tel" autoComplete="tel" value={contactPhone} placeholder="请输入联系人手机号" onChange={(event) => setContactPhone(event.target.value)} />
-                </label>
-                <label className={styles.fieldFull}>
-                  联系邮箱
-                  <Input fullWidth type="email" autoComplete="email" value={contactEmail} placeholder="请输入接收审核结果的邮箱" onChange={(event) => setContactEmail(event.target.value)} />
-                </label>
+                <FormField className={styles.field} label="机构名称"><Input fullWidth autoComplete="organization" value={schoolName} placeholder="请输入学校或机构名称" onChange={(event) => setSchoolName(event.target.value)} /></FormField>
+                <FormField className={styles.field} label="机构类型"><Select fullWidth value={schoolType} options={tenantApplicationSchoolTypeOptions} onChange={setSchoolType} /></FormField>
+                <FormField className={styles.field} label="联系人姓名"><Input fullWidth autoComplete="name" value={contactName} placeholder="请输入联系人姓名" onChange={(event) => setContactName(event.target.value)} /></FormField>
+                <FormField className={styles.field} label="联系电话"><Input fullWidth inputMode="tel" autoComplete="tel" value={contactPhone} placeholder="请输入联系人手机号" onChange={(event) => setContactPhone(event.target.value)} /></FormField>
+                <FormField className={styles.fieldFull} label="联系邮箱"><Input fullWidth type="email" autoComplete="email" value={contactEmail} placeholder="请输入接收审核结果的邮箱" onChange={(event) => setContactEmail(event.target.value)} /></FormField>
               </div>
               <div className={styles.actions}>
                 <a href="/auth/login">返回登录页</a>

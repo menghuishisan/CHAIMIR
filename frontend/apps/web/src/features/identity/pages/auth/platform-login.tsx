@@ -41,7 +41,6 @@ const PlatformLoginPage: React.FC = () => {
   return (
     <main className={styles.platformPage}>
       <section className={styles.platformVisual} aria-hidden="true">
-        <div className={styles.grid} />
         <div className={styles.symbol}>
           <Hexagon size={120} strokeWidth={1} />
         </div>

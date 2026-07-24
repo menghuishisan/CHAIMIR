@@ -3,11 +3,10 @@
 import React, { useEffect, useMemo } from 'react'
 import type { Session } from '@chaimir/api-client'
 import type { TableColumn } from '@chaimir/ui'
-import { DescriptionList, Table } from '@chaimir/ui'
+import { DescriptionList, Table, ResourceState } from '@chaimir/ui'
 import { User } from 'lucide-react'
 import { api } from '../../../../../app/api'
 import { subscribeAppResource } from '../../../../../app/resourceInvalidation'
-import { ErrorState, LoadingState } from '../../../../../components/ResourceState'
 import { useAsyncResource } from '../../../../../hooks'
 import styles from '../../identity-admin.module.css'
 import { accountStatusLabel, formatDateTime, sessionStatusLabel } from '../../../../../utils/index'
@@ -19,17 +18,17 @@ const ProfilePage: React.FC = () => {
   const sessions = useAsyncResource(() => api.identity.getSessions(), [])
   useEffect(() => subscribeAppResource('profile', me.reload), [me.reload])
   const columns = useMemo<TableColumn<Session>[]>(() => [
-    { key: 'device', title: '设备', render: (row) => row.device_info || '未知设备', priority: 'primary' },
+    { key: 'device', title: '设备', render: (row) => formatDeviceInfo(row.device_info), priority: 'primary' },
     { key: 'ip', title: 'IP 地址', render: (row) => row.ip || '暂无', priority: 'secondary' },
     { key: 'status', title: '状态', render: (row) => <span className={styles.status}>{sessionStatusLabel(row.status)}</span> },
     { key: 'expire', title: '过期时间', render: (row) => <span className={styles.muted}>{formatDateTime(row.expire_at)}</span> },
   ], [])
 
   if (me.status === 'loading') {
-    return <LoadingState title="正在获取账号资料" />
+    return <ResourceState status="loading" title="正在获取账号资料" />
   }
   if (me.status === 'error') {
-    return <ErrorState error={me.error} onRetry={me.reload} />
+    return <ResourceState status="error" error={me.error} onRetry={me.reload} />
   }
 
   const account = me.data?.account
@@ -61,8 +60,8 @@ const ProfilePage: React.FC = () => {
 
         <section className={`${styles.panel} ${styles.wide}`}>
           <h2>登录会话</h2>
-          {sessions.status === 'error' && <ErrorState error={sessions.error} onRetry={sessions.reload} />}
-          {sessions.status === 'loading' && <LoadingState title="正在获取会话列表" />}
+          {sessions.status === 'error' && <ResourceState status="error" error={sessions.error} onRetry={sessions.reload} />}
+          {sessions.status === 'loading' && <ResourceState status="loading" title="正在获取会话列表" />}
           {(sessions.status === 'success' || sessions.status === 'empty') && (
             <Table
               columns={columns}
@@ -81,3 +80,29 @@ const ProfilePage: React.FC = () => {
 }
 
 export default ProfilePage
+
+/** formatDeviceInfo 把服务端记录的 User-Agent 压缩为用户可识别的系统和浏览器。 */
+function formatDeviceInfo(deviceInfo?: string): string {
+  if (!deviceInfo) return '未知设备'
+  const platform = /android/i.test(deviceInfo)
+    ? 'Android'
+    : /iphone|ipad/i.test(deviceInfo)
+      ? 'iOS'
+      : /windows/i.test(deviceInfo)
+        ? 'Windows'
+        : /macintosh|mac os/i.test(deviceInfo)
+          ? 'macOS'
+          : /linux/i.test(deviceInfo)
+            ? 'Linux'
+            : ''
+  const browser = /edg\//i.test(deviceInfo)
+    ? 'Edge'
+    : /firefox\//i.test(deviceInfo)
+      ? 'Firefox'
+      : /chrome\//i.test(deviceInfo)
+        ? 'Chrome'
+        : /safari\//i.test(deviceInfo)
+          ? 'Safari'
+          : ''
+  return [platform, browser].filter(Boolean).join(' · ') || '其他设备'
+}

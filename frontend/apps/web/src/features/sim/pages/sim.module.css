@@ -58,6 +58,14 @@
   background: var(--color-surface);
 }
 
+.panel {
+  padding-inline: 0;
+  border: 0;
+  border-top: 1px solid var(--color-border);
+  border-radius: 0;
+  background: transparent;
+}
+
 .tableWrap {
   border: 1px solid var(--color-border-subtle);
   border-radius: var(--radius-lg);
@@ -105,7 +113,7 @@
   font-size: var(--text-sm);
 }
 
-@media (max-width: 860px) {
+@media not all and (--bp-lg) {
   .header,
   .toolbar {
     align-items: stretch;

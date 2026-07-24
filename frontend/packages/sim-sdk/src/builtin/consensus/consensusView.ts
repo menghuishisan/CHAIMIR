@@ -1,6 +1,8 @@
 // 本文件提供共识仿真共享的可视化数据构造函数,不包含任何具体共识算法状态机。
 
-import type { ChartSeries, GraphEdge, GraphNode, LaneMessage, MatrixCell, PipelineStep } from '../../types';
+import type { ChartSeries, GraphNode, MatrixCell } from '../../types';
+import { timedVisualMessage } from '../packageTools';
+export { labeledLaneMessages as laneMessages, matrixCells, messageGraphEdges as graphEdges, pipelineSteps } from '../packageTools';
 
 export interface ViewNode {
   id: string;
@@ -35,61 +37,13 @@ export function graphNodes(nodes: ViewNode[]): GraphNode[] {
 }
 
 /**
- * graphEdges 将协议消息映射为图边状态,失败消息以 failed 呈现。
- */
-export function graphEdges(messages: ViewMessage[]): GraphEdge[] {
-  return messages.map((message) => ({
-    id: message.id,
-    from: message.from,
-    to: message.to,
-    label: message.label,
-    status: message.status === 'dropped' ? 'failed' : message.status === 'delivered' ? 'success' : 'active',
-    detail: message.detail,
-    process: message.process,
-  }));
-}
-
-/**
- * laneMessages 将内部 ID 替换为用户可读泳道名称。
- */
-export function laneMessages(messages: ViewMessage[], labelOf: (id: string) => string): LaneMessage[] {
-  return messages.map((message) => ({ ...message, from: labelOf(message.from), to: labelOf(message.to) }));
-}
-
-/**
  * pipelineSteps 根据阶段序号生成流水线运行状态。
  */
-export function pipelineSteps(phases: ReadonlyArray<{ id: string; label: string; detail: string }>, activeIndex: number, failed = false): PipelineStep[] {
-  return phases.map((phase, index) => ({
-    id: phase.id,
-    label: phase.label,
-    detail: phase.detail,
-    status: index < activeIndex ? 'complete' : index === activeIndex ? (failed ? 'failed' : 'running') : 'pending',
-  }));
-}
-
-/**
- * processPipelineSteps 为共识过程流水线附加连续进度,避免各算法重复实现进度条逻辑。
- */
-export function processPipelineSteps(phases: ReadonlyArray<{ id: string; label: string; detail: string }>, activeIndex: number, currentTick: number, failed = false): PipelineStep[] {
-  return pipelineSteps(phases, activeIndex, failed).map((step, index) => ({
-    ...step,
-    process: {
-      startedAt: Math.max(0, currentTick - 1),
-      endedAt: currentTick + 1,
-      progress: index < activeIndex ? 1 : index === activeIndex ? 0.65 : 0,
-      label: step.detail,
-    },
-  }));
-}
-
 /**
  * processViewMessage 为共识消息附加发送到到达的过程片段。
  */
 export function processViewMessage(currentTick: number, message: ViewMessage, detail: string): ViewMessage {
-  const endAt = message.endAt ?? message.at + 1;
-  const progress = Math.min(1, Math.max(0, (currentTick - message.at) / Math.max(1, endAt - message.at)));
-  return { ...message, endAt, detail, process: { startedAt: message.at, endedAt: endAt, progress, label: message.label } };
+  return timedVisualMessage(currentTick, message, detail);
 }
 
 /**

@@ -69,7 +69,7 @@ export interface Lesson {
   chapter_id: SnowflakeID
   title: string
   content_type: LessonContentType
-  content_ref: Record<string, unknown>
+  content_ref: LessonContentRef
   sort: number
   created_at: string
   updated_at: string
@@ -78,9 +78,41 @@ export interface Lesson {
 export interface LessonRequest {
   title: string
   content_type: LessonContentType
-  content_ref: Record<string, unknown>
+  content_ref: LessonContentRef
   sort: number
 }
+
+/** LessonVideoRef 是视频课时的受控资源描述。 */
+export interface LessonVideoRef {
+  object_ref: string
+  file_name: string
+  duration_sec: number
+}
+
+/** LessonMarkdownRef 是图文课时的 Markdown 正文。 */
+export interface LessonMarkdownRef {
+  markdown: string
+}
+
+/** LessonAttachmentRef 是附件课时的受控资源描述。 */
+export interface LessonAttachmentRef {
+  object_ref: string
+  file_name: string
+}
+
+/** LessonExperimentRef 锁定一个已发布的实验模板。 */
+export interface LessonExperimentRef {
+  experiment_id: SnowflakeID
+}
+
+/** LessonSimulationRef 锁定仿真包版本。 */
+export interface LessonSimulationRef {
+  package_code: string
+  version: string
+}
+
+/** LessonContentRef 汇总五类互斥课时内容，不接受任意对象。 */
+export type LessonContentRef = LessonVideoRef | LessonMarkdownRef | LessonAttachmentRef | LessonExperimentRef | LessonSimulationRef
 
 export interface CourseOutline {
   course: Course

@@ -63,8 +63,8 @@ const ChangePasswordPage: React.FC = () => {
   const handleLogout = useCallback(async () => {
     try {
       await api.identity.logout()
-    } catch (logoutError) {
-      console.warn('退出请求未完成，已清除本地登录状态', logoutError)
+    } catch {
+      // 密码已修改时必须清除本地令牌，即使服务端退出请求未完成。
     } finally {
       clearLoginTokens()
       navigate('/auth/login', { replace: true })

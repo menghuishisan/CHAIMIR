@@ -188,7 +188,14 @@ export class SimWorkerClient {
         },
         reject,
       });
-      this.worker.postMessage({ ...message, requestId });
+      try {
+        this.worker.postMessage({ ...message, requestId });
+      } catch (error) {
+        this.pending.delete(requestId);
+        clearTimeout(timeoutId);
+        const runtimeError = this.failAll(this.userMessage('仿真命令发送失败,请刷新后重试', error));
+        reject(runtimeError);
+      }
     });
   }
 

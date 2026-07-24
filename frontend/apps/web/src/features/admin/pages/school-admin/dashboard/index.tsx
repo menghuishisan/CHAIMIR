@@ -2,31 +2,13 @@
 
 import React from 'react'
 import type { Dashboard } from '@chaimir/api-client'
-import { Button } from '@chaimir/ui'
+import { Button, ResourceState } from '@chaimir/ui'
 import { LayoutDashboard, RefreshCw } from 'lucide-react'
 import { api } from '../../../../../app/api'
-import { EmptyState, ErrorState, LoadingState } from '../../../../../components/ResourceState'
 import { useAsyncResource } from '../../../../../hooks'
 import styles from '../../dashboard.module.css'
 import { formatDateTime, formatNumber } from '../../../../../utils/index'
-
-
-
-/**
- * StatCard 渲染单个大盘指标。
- */
-const StatCard: React.FC<{ label: string; value?: number; danger?: boolean }> = ({
-  label,
-  value,
-  danger = false,
-}) => (
-  <div className={styles.statCard}>
-    <div className={styles.statLabel}>{label}</div>
-    <div className={`${styles.statValue} ${danger ? styles.statDanger : ''}`}>
-      {formatNumber(value)}
-    </div>
-  </div>
-)
+import { DashboardStatCard } from '../../../components/DashboardStatCard'
 
 /**
  * AdminDashboardPage 读取本校管理概览。
@@ -47,21 +29,21 @@ const AdminDashboardPage: React.FC = () => {
         </Button>
       </div>
 
-      {resource.status === 'loading' && <LoadingState title="正在获取本校概览" />}
+      {resource.status === 'loading' && <ResourceState status="loading" title="正在获取本校概览" />}
       {resource.status === 'error' && (
-        <ErrorState error={resource.error} onRetry={resource.reload} />
+        <ResourceState status="error" error={resource.error} onRetry={resource.reload} />
       )}
       {resource.status === 'empty' && (
-        <EmptyState title="暂无概览" description="当前学校还没有可展示的管理数据。" />
+        <ResourceState status="empty" title="暂无概览" description="当前学校还没有可展示的管理数据。" />
       )}
       {resource.status === 'success' && dashboard && (
         <>
           <div className={styles.updatedAt}>统计时间 {formatDateTime(dashboard.generated_at)}</div>
           <div className={styles.statsGrid}>
-            <StatCard label="学生账号" value={dashboard.student_count} />
-            <StatCard label="教师账号" value={dashboard.teacher_count} />
-            <StatCard label="活跃课程" value={dashboard.active_course_count} />
-            <StatCard label="待处理申请" value={dashboard.pending_apply_count} danger />
+            <DashboardStatCard label="学生账号" value={dashboard.student_count} />
+            <DashboardStatCard label="教师账号" value={dashboard.teacher_count} />
+            <DashboardStatCard label="活跃课程" value={dashboard.active_course_count} />
+            <DashboardStatCard label="待处理申请" value={dashboard.pending_apply_count} danger />
           </div>
 
           <section className={styles.panel}>

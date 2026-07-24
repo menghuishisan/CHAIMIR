@@ -1,6 +1,6 @@
 // teaching labels 文件维护课程、作业和课时领域文案。
 
-import { AssignmentStatus, CourseStatus, CourseType, GradingMode, JoinMode, LatePolicy, LessonContentType, TeachingDifficulty } from '@chaimir/api-client'
+import { AssignmentStatus, CourseStatus, CourseType, GradingMode, JoinMode, LatePolicy, LessonContentType, SubmissionStatus, TeachingDifficulty } from '@chaimir/api-client'
 import { labelFromMap } from './map'
 
 /** courseTypeLabel 返回课程类型文案。 */
@@ -57,4 +57,9 @@ export function latePolicyLabel(policy: LatePolicy): string {
 /** gradingModeLabel 返回作业评分方式文案。 */
 export function gradingModeLabel(mode: GradingMode): string {
   return labelFromMap(mode, { [GradingMode.AUTO]: '自动评分', [GradingMode.MANUAL]: '人工评分' }, '未识别的评分方式')
+}
+
+/** submissionStatusLabel 返回作业提交处理状态文案。 */
+export function submissionStatusLabel(status: SubmissionStatus): string {
+  return labelFromMap(status, { [SubmissionStatus.SUBMITTED]: '已提交', [SubmissionStatus.PENDING]: '评分中', [SubmissionStatus.GRADED]: '已评分' }, '未识别的提交状态')
 }

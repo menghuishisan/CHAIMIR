@@ -32,7 +32,7 @@
     color var(--t) var(--ease),
     background var(--t) var(--ease),
     box-shadow var(--t) var(--ease),
-    transform var(--t-fast) var(--ease-press);
+    transform var(--t-fast) var(--ease-out);
   z-index: var(--z-base);
 }
 
@@ -49,9 +49,11 @@
   cursor: inherit;
 }
 
-.chaimir-segmented-control__item:hover:not(.is-disabled) {
-  color: var(--color-text);
-  background: var(--color-bg);
+@media (hover: hover) and (pointer: fine) {
+  .chaimir-segmented-control__item:hover:not(.is-disabled) {
+    color: var(--color-text);
+    background: var(--color-bg);
+  }
 }
 
 .chaimir-segmented-control__item.is-selected {
@@ -63,15 +65,17 @@
   top: var(--space-1);
   bottom: var(--space-1);
   background: var(--color-bg);
-  box-shadow: var(--shadow-xs), inset 0 -2px 0 var(--color-accent);
+  box-shadow: inset 0 -2px 0 var(--color-accent);
   border-radius: var(--radius-xs);
-  transition:
-    transform 0.4s var(--ease-spring-ios),
-    width 0.4s var(--ease-spring-ios),
-    opacity 0.2s var(--ease);
   pointer-events: none;
   z-index: var(--z-ground);
   opacity: 0; /* 测量完成后由 JS 设为 1 */
+}
+
+.chaimir-segmented-control__slider--animated {
+  transition:
+    transform var(--t-normal) var(--ease-out),
+    opacity var(--t) var(--ease);
 }
 
 .chaimir-segmented-control__item:has(input:focus-visible) {
@@ -94,7 +98,7 @@
   justify-content: center;
 }
 
-@media (max-width: 479px) {
+@media not all and (--bp-sm) {
   .chaimir-segmented-control {
     inline-size: 100%;
     overflow-x: auto;

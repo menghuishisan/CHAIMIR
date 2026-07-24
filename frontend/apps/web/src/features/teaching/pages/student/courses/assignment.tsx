@@ -1,12 +1,11 @@
 // AssignmentPage 展示学生作业详情，保存服务端草稿并提交作答。
 
 import React, { useCallback, useEffect, useState } from 'react'
-import { Button, Callout, Textarea } from '@chaimir/ui'
+import { Button, Callout, Textarea, ResourceState, FormField } from '@chaimir/ui'
 import { Save, Send } from 'lucide-react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { api } from '../../../../../app/api'
-import { ErrorState, LoadingState } from '../../../../../components/ResourceState'
-import { useAsyncResource } from '../../../../../hooks'
+import { useAsyncResource, usePendingAction } from '../../../../../hooks'
 import styles from '../../teaching.module.css'
 import { formatDateTime } from '../../../../../utils/index'
 import { userFacingErrorMessage } from '../../../../../utils/userFacingError'
@@ -17,6 +16,7 @@ const AssignmentPage: React.FC = () => {
   const [content, setContent] = useState('')
   const [message, setMessage] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const { pendingAction, runPendingAction } = usePendingAction()
   const assignmentId = id || ''
   const resource = useAsyncResource(async () => {
     const [detail, draft] = await Promise.all([
@@ -55,8 +55,8 @@ const AssignmentPage: React.FC = () => {
     setError(null)
     setMessage(null)
     try {
-      await api.teaching.submitAssignment(assignmentId, { content_ref: { answer: content } })
-      navigate(`/student/courses/assignment/${assignmentId}/result`)
+      const submission = await api.teaching.submitAssignment(assignmentId, { content_ref: { answer: content } })
+      navigate(`/student/courses/assignment/${assignmentId}/result?submissionId=${encodeURIComponent(submission.id)}`)
     } catch (actionError) {
       setError(userFacingErrorMessage(actionError, '作业提交失败，请稍后重试。'))
     }
@@ -75,8 +75,8 @@ const AssignmentPage: React.FC = () => {
 
       {error && <div className={styles.error}>{error}</div>}
       {message && <Callout variant="success" title="保存成功">{message}</Callout>}
-      {resource.status === 'error' && <ErrorState error={resource.error} onRetry={resource.reload} />}
-      {resource.status === 'loading' && <LoadingState title="正在获取作业" />}
+      {resource.status === 'error' && <ResourceState status="error" error={resource.error} onRetry={resource.reload} />}
+      {resource.status === 'loading' && <ResourceState status="loading" title="正在获取作业" />}
       {detail && (
         <section className={styles.panel}>
           <h2>作业要求</h2>
@@ -88,13 +88,10 @@ const AssignmentPage: React.FC = () => {
               </div>
             ))}
           </div>
-          <label className={styles.fieldFull}>
-            作答内容
-            <Textarea value={content} onChange={(event) => setContent(event.target.value)} rows={10} />
-          </label>
+          <FormField className={styles.fieldFull} label="作答内容"><Textarea value={content} onChange={(event) => setContent(event.target.value)} rows={10} /></FormField>
           <div className={styles.actions}>
-            <Button variant="outline" icon={<Save size={16} />} onClick={saveDraft}>保存草稿</Button>
-            <Button icon={<Send size={16} />} onClick={submitAnswer}>提交作答</Button>
+            <Button variant="outline" icon={<Save size={16} />} loading={pendingAction === 'draft'} disabled={Boolean(pendingAction)} onClick={() => void runPendingAction('draft', saveDraft)}>保存草稿</Button>
+            <Button icon={<Send size={16} />} loading={pendingAction === 'submit'} disabled={Boolean(pendingAction)} onClick={() => void runPendingAction('submit', submitAnswer)}>提交作答</Button>
           </div>
         </section>
       )}

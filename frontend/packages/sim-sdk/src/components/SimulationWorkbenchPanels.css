@@ -1,0 +1,325 @@
+/* 本文件定义仿真教学说明、指标与时间轴面板样式。 */
+
+
+
+.sim-step-list {
+  display: grid;
+  gap: var(--space-2);
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
+.sim-timeline,
+.sim-step-list li,
+.sim-question,
+.sim-side-section,
+.sim-inspector-section,
+.sim-protocol-issue {
+  border: 0.0625rem solid var(--color-dark-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-dark-elevated);
+}
+
+.sim-protocol-issue {
+  display: flex;
+  gap: var(--space-3);
+  align-items: flex-start;
+  min-block-size: 18rem;
+  padding: var(--space-5);
+  color: var(--color-dark-text);
+}
+
+.sim-protocol-issue svg {
+  flex: 0 0 auto;
+  color: var(--color-secondary-accent);
+}
+
+.sim-protocol-issue h2 {
+  margin: 0 0 var(--space-2);
+  font-size: var(--text-xl);
+}
+
+.sim-protocol-issue p {
+  margin: 0;
+  color: var(--color-dark-text-sub);
+  line-height: var(--leading-normal);
+}
+
+.sim-timeline {
+  display: grid;
+  gap: var(--space-3);
+  padding: var(--space-4);
+}
+
+.sim-workbench__controls .sim-timeline {
+  min-width: 28rem;
+  padding: 0 var(--space-4) 0 0;
+  border: none;
+  background: transparent;
+  border-right: 0.0625rem solid color-mix(in srgb, var(--color-dark-border) 40%, transparent);
+  border-radius: 0;
+}
+
+.sim-workbench__controls .sim-timeline dl {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: var(--space-3);
+}
+
+.sim-workbench__controls .sim-timeline dl div {
+  display: grid;
+  gap: var(--space-1);
+}
+
+.sim-workbench__controls .sim-timeline dd {
+  max-inline-size: none;
+  text-align: left;
+}
+
+.sim-timeline header {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: var(--space-2);
+  align-items: center;
+}
+
+.sim-timeline header svg {
+  color: var(--color-on-dark-accent);
+}
+
+.sim-timeline header span {
+  color: var(--color-dark-text-sub);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+}
+
+.sim-timeline__track {
+  overflow: hidden;
+  block-size: 0.5rem;
+  border-radius: var(--radius-xs);
+  background: var(--color-dark-surface);
+}
+
+.sim-timeline__track span {
+  display: block;
+  inline-size: 100%;
+  block-size: 100%;
+  background: var(--color-on-dark-accent);
+  transform-origin: left center;
+  transition: transform var(--t) var(--ease-out);
+}
+
+.sim-timeline dl {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+}
+
+.sim-timeline dl div {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.sim-timeline dt {
+  color: var(--color-dark-text-sub);
+}
+
+.sim-timeline dd {
+  max-inline-size: 11rem;
+  margin: 0;
+  overflow-wrap: anywhere;
+  font-family: var(--font-mono);
+  text-align: right;
+}
+
+.sim-step-list li {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  transition: border-color var(--t) var(--ease), background var(--t) var(--ease), transform var(--t-fast) var(--ease-out);
+}
+
+.sim-step-list li.is-current {
+  border-color: var(--color-on-dark-accent);
+  background: color-mix(in srgb, var(--color-on-dark-accent) 15%, transparent);
+  box-shadow: inset 2px 0 0 var(--color-on-dark-accent);
+  transform: translateX(var(--space-1));
+}
+
+.sim-step-list small {
+  color: var(--color-dark-text-sub);
+  font-family: var(--font-mono);
+}
+
+.sim-question,
+.sim-side-section {
+  padding: var(--space-4);
+}
+
+.sim-explain--focus {
+  border-color: color-mix(in srgb, var(--color-on-dark-accent) 46%, var(--color-dark-border));
+  background: var(--color-dark-elevated);
+}
+
+.sim-inspector-section {
+  overflow: hidden;
+}
+
+.sim-inspector-section > summary {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: var(--space-2);
+  align-items: center;
+  min-height: 2.75rem;
+  padding: 0 var(--space-3);
+  color: var(--color-dark-text);
+  cursor: pointer;
+  list-style: none;
+}
+
+.sim-inspector-section > summary::-webkit-details-marker {
+  display: none;
+}
+
+.sim-inspector-section > summary::before {
+  content: "";
+  inline-size: 0.5rem;
+  block-size: 0.5rem;
+  border-inline-end: 0.125rem solid var(--color-dark-text-sub);
+  border-block-end: 0.125rem solid var(--color-dark-text-sub);
+  transform: rotate(-45deg);
+  transition: transform var(--t-fast) var(--ease-out);
+}
+
+.sim-inspector-section[open] > summary::before {
+  transform: rotate(45deg);
+}
+
+.sim-inspector-section > summary span {
+  grid-column: 2;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-weight: 700;
+}
+
+.sim-inspector-section > summary small {
+  grid-column: 3;
+  grid-row: 1;
+  color: var(--color-dark-text-sub);
+  font-size: var(--text-xs);
+}
+
+.sim-inspector-section__body {
+  display: grid;
+  gap: var(--space-3);
+  padding: 0 var(--space-3) var(--space-3);
+}
+
+.sim-inspector-section__body > .sim-side-section,
+.sim-inspector-section__body > .sim-question {
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.sim-question h2,
+.sim-side-section h2 {
+  margin: 0 0 var(--space-3);
+  font-size: var(--text-md);
+}
+
+.sim-question p,
+.sim-side-section p {
+  color: var(--color-dark-text-sub);
+  line-height: var(--leading-normal);
+}
+
+.sim-metrics dl {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-2);
+  margin: 0;
+}
+
+.sim-metrics div {
+  min-width: 0;
+  padding: var(--space-2);
+  border: 0.0625rem solid var(--color-dark-border);
+  border-radius: var(--radius-xs);
+  background: var(--color-dark-surface);
+}
+
+.sim-metrics dt {
+  color: var(--color-dark-text-sub);
+  font-size: var(--text-xs);
+}
+
+.sim-metrics dd {
+  margin: var(--space-1) 0 0;
+  overflow-wrap: anywhere;
+  color: var(--color-dark-text);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  font-weight: 700;
+}
+
+.sim-question__options {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.sim-question__options button {
+  display: grid;
+  gap: var(--space-1);
+  min-height: 2.75rem;
+  padding: var(--space-3);
+  border: 0.0625rem solid var(--color-dark-border);
+  border-radius: var(--radius-xs);
+  background: color-mix(in srgb, var(--color-dark-surface) 60%, transparent);
+  color: var(--color-dark-text);
+  text-align: left;
+  cursor: pointer;
+  transition: border-color var(--t-fast) var(--ease), box-shadow var(--t-fast) var(--ease), transform var(--t-fast) var(--ease-out), background var(--t-fast) var(--ease);
+}
+
+.sim-question__options button:focus-visible,
+.sim-question__options button.is-selected {
+  border-color: var(--color-on-dark-accent);
+  outline: 2px solid var(--color-on-dark-accent);
+  outline-offset: 1px;
+}
+
+.sim-question__options button.is-selected {
+  background: color-mix(in srgb, var(--color-on-dark-accent) 20%, transparent);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .sim-question__options button:hover {
+    border-color: var(--color-on-dark-accent);
+    background: var(--color-dark-surface);
+  }
+}
+
+@media not all and (--bp-lg) {
+
+  .sim-workbench__controls .sim-timeline dl {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+}
+
+@media not all and (--bp-sm) {
+
+  .sim-workbench__controls .sim-timeline dl {
+    display: none;
+  }
+
+  .sim-workbench__controls .sim-timeline {
+    padding: 0;
+    min-width: 100%;
+    border-right: none;
+  }
+}

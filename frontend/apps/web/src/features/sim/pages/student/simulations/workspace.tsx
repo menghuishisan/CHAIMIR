@@ -5,12 +5,11 @@ import type { SimShareResult } from '@chaimir/api-client'
 import { SIM_COMPUTE } from '@chaimir/api-client'
 import type { JsonObject, SimEvent, SimInitParams, SimState, SimulationBackendState, SimulationInitialAction } from '@chaimir/sim-sdk'
 import { SimulationWorkbench } from '@chaimir/sim-sdk'
-import { Button } from '@chaimir/ui'
+import { Button, ResourceState } from '@chaimir/ui'
 import { Copy, History, Radio, Share2 } from 'lucide-react'
 import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { api } from '../../../../../app/api'
-import { ErrorState, LoadingState } from '../../../../../components/ResourceState'
-import { useAsyncResource, useTicketedWebSocket } from '../../../../../hooks'
+import { useAsyncResource, usePendingAction, useTicketedWebSocket } from '../../../../../hooks'
 import { getStoredAccessToken } from '../../../../../utils/authSession'
 import { userFacingErrorMessage } from '../../../../../utils/userFacingError'
 
@@ -24,6 +23,7 @@ const SimulationWorkspacePage: React.FC = () => {
   const [backendState, setBackendState] = useState<SimulationBackendState>()
   const [actionMessage, setActionMessage] = useState('')
   const [actionError, setActionError] = useState('')
+  const { pendingAction, runPendingAction } = usePendingAction()
   const nextActionSeqRef = useRef(1)
   const actionQueueRef = useRef<Promise<void>>(Promise.resolve())
   const code = String(id || '')
@@ -172,11 +172,11 @@ const SimulationWorkspacePage: React.FC = () => {
     setSearchParams(next)
   }
 
-  if (resource.status === 'loading') return <LoadingState title="正在准备仿真工作台" />
-  if (resource.status === 'error') return <ErrorState error={resource.error} onRetry={resource.reload} />
-  if (!resource.data) return <LoadingState title="正在准备仿真工作台" />
+  if (resource.status === 'loading') return <ResourceState status="loading" title="正在准备仿真工作台" />
+  if (resource.status === 'error') return <ResourceState status="error" error={resource.error} onRetry={resource.reload} />
+  if (!resource.data) return <ResourceState status="loading" title="正在准备仿真工作台" />
   if (resource.data.requiresLogin) return (
-    <ErrorState
+    <ResourceState status="error"
       error={null}
       title="登录后查看完整回放"
       description="这个分享使用了发布者上传的仿真包，登录后可通过受保护的运行授权继续查看。"
@@ -188,7 +188,7 @@ const SimulationWorkspacePage: React.FC = () => {
   const actions = (
     <>
       {sessionId && !sharedCode && <Button variant="on-dark" size="sm" icon={<History size={15} />} onClick={switchReplay}>{replayMode ? '返回实时仿真' : '查看会话回放'}</Button>}
-      {sessionId && !replayMode && <Button variant="on-dark" size="sm" icon={<Share2 size={15} />} onClick={() => void shareSession()}>创建分享地址</Button>}
+      {sessionId && !replayMode && <Button variant="on-dark" size="sm" icon={<Share2 size={15} />} loading={pendingAction === 'share'} disabled={Boolean(pendingAction)} onClick={() => void runPendingAction('share', shareSession)}>创建分享地址</Button>}
       {share && <Button variant="on-dark" size="sm" icon={<Copy size={15} />} onClick={() => void copyShareCode()}>复制分享地址</Button>}
       {streamUrl && <span title={actionError || actionMessage}><Radio size={15} /> {stream.status === 'open' ? '云端计算已连接' : '云端计算连接中'}</span>}
       {actionError && <span role="alert">{actionError}</span>}

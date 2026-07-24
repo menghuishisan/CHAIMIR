@@ -5,7 +5,7 @@
   align-items: center;
   justify-content: center;
   padding: var(--space-6);
-  background: radial-gradient(circle at 50% 50%, color-mix(in srgb, var(--color-primary) 10%, var(--color-dark-surface)), var(--color-dark-bg) 80%);
+  background: var(--color-dark-bg);
   color: var(--color-dark-text);
   text-align: center;
 }
@@ -14,24 +14,10 @@
   width: 100%;
   max-width: 500px;
   padding: var(--space-10);
-  border: 1px solid var(--color-glass-border);
-  border-radius: var(--radius-lg);
-  background: var(--color-dark-glass);
-  box-shadow: var(--shadow-glass-panel);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  animation: chaimir-404-in var(--t-slow) var(--ease-spring-ios) both;
-}
-
-@keyframes chaimir-404-in {
-  0% {
-    opacity: 0;
-    transform: scale(0.9) translateY(24px);
-  }
-  100% {
-    opacity: 1;
-    transform: scale(1) translateY(0);
-  }
+  border: 1px solid var(--color-dark-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-dark-surface);
+  box-shadow: var(--shadow-md);
 }
 
 .iconWrap {
@@ -73,7 +59,7 @@
   gap: var(--space-4);
 }
 
-@media (max-width: 480px) {
+@media not all and (--bp-sm) {
   .panel {
     padding: var(--space-6);
   }

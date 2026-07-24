@@ -2,11 +2,10 @@
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { GradingMode, LatePolicy } from '@chaimir/api-client'
-import { Button, Callout, Input, Select } from '@chaimir/ui'
+import { Button, Callout, Input, Select, ResourceState, FormField } from '@chaimir/ui'
 import { Edit3, Save, Send } from 'lucide-react'
 import { useSearchParams } from 'react-router-dom'
 import { api } from '../../../../../../app/api'
-import { ErrorState, LoadingState } from '../../../../../../components/ResourceState'
 import { useAsyncResource } from '../../../../../../hooks'
 import styles from '../../../teaching.module.css'
 import { formatDateTimeLocalInput, gradingModeOptions, latePolicyOptions, parseDateTimeLocalInput } from '../../../../../../utils/index'
@@ -108,29 +107,29 @@ const TeacherCourseAssignmentEditPage: React.FC = () => {
 
       {error && <div className={styles.error}>{error}</div>}
       {message && <Callout variant="success" title="保存成功">{message}</Callout>}
-      {firstError && <ErrorState error={firstError} onRetry={() => { chapters.reload(); assignment.reload() }} />}
-      {loading && <LoadingState title="正在获取作业配置" />}
+      {firstError && <ResourceState status="error" error={firstError} onRetry={() => { chapters.reload(); assignment.reload() }} />}
+      {loading && <ResourceState status="loading" title="正在获取作业配置" />}
 
       <section className={styles.panel}>
         <h2>基础信息</h2>
         <div className={styles.formGrid}>
-          <label className={styles.field}>课程编号<Input fullWidth value={courseId} readOnly /></label>
-          <label className={styles.field}>作业标题<Input fullWidth value={title} onChange={(event) => setTitle(event.target.value)} /></label>
-          <label className={styles.field}>所属章节<Select fullWidth value={chapterId} options={chapterOptions} onChange={setChapterId} /></label>
-          <label className={styles.field}>截止时间<Input fullWidth type="datetime-local" value={dueAt} onChange={(event) => setDueAt(event.target.value)} /></label>
-          <label className={styles.field}>最多提交次数<Input fullWidth value={maxAttempts} onChange={(event) => setMaxAttempts(event.target.value)} /></label>
-          <label className={styles.field}>迟交策略<Select fullWidth value={latePolicy} options={latePolicyOptions} onChange={setLatePolicy} /></label>
+          <FormField className={styles.field} label="课程编号"><Input fullWidth value={courseId} readOnly /></FormField>
+          <FormField className={styles.field} label="作业标题"><Input fullWidth value={title} onChange={(event) => setTitle(event.target.value)} /></FormField>
+          <FormField className={styles.field} label="所属章节"><Select fullWidth value={chapterId} options={chapterOptions} onChange={setChapterId} /></FormField>
+          <FormField className={styles.field} label="截止时间"><Input fullWidth type="datetime-local" value={dueAt} onChange={(event) => setDueAt(event.target.value)} /></FormField>
+          <FormField className={styles.field} label="最多提交次数"><Input fullWidth value={maxAttempts} onChange={(event) => setMaxAttempts(event.target.value)} /></FormField>
+          <FormField className={styles.field} label="迟交策略"><Select fullWidth value={latePolicy} options={latePolicyOptions} onChange={setLatePolicy} /></FormField>
         </div>
       </section>
 
       <section className={styles.panel}>
         <h2>题项绑定</h2>
         <div className={styles.formGrid}>
-          <label className={styles.field}>内容编号<Input fullWidth value={itemCode} onChange={(event) => setItemCode(event.target.value)} /></label>
-          <label className={styles.field}>内容版本<Input fullWidth value={itemVersion} onChange={(event) => setItemVersion(event.target.value)} /></label>
-          <label className={styles.field}>分值<Input fullWidth value={score} onChange={(event) => setScore(event.target.value)} /></label>
-          <label className={styles.field}>评分方式<Select fullWidth value={gradingMode} options={gradingModeOptions} onChange={setGradingMode} /></label>
-          <label className={styles.fieldFull}>判题器编号<Input fullWidth value={judgerCode} onChange={(event) => setJudgerCode(event.target.value)} /></label>
+          <FormField className={styles.field} label="内容编号"><Input fullWidth value={itemCode} onChange={(event) => setItemCode(event.target.value)} /></FormField>
+          <FormField className={styles.field} label="内容版本"><Input fullWidth value={itemVersion} onChange={(event) => setItemVersion(event.target.value)} /></FormField>
+          <FormField className={styles.field} label="分值"><Input fullWidth value={score} onChange={(event) => setScore(event.target.value)} /></FormField>
+          <FormField className={styles.field} label="评分方式"><Select fullWidth value={gradingMode} options={gradingModeOptions} onChange={setGradingMode} /></FormField>
+          <FormField className={styles.fieldFull} label="判题器编号"><Input fullWidth value={judgerCode} onChange={(event) => setJudgerCode(event.target.value)} /></FormField>
         </div>
         <div className={styles.actions}>
           <Button variant="outline" icon={<Save size={16} />} loading={saving} onClick={() => saveAssignment(false)}>保存作业</Button>

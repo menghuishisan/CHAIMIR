@@ -1,8 +1,8 @@
 // QuotasPage 为指定租户提交沙箱配额，复用 sandbox 后端配额接口。
 
 import React, { useCallback, useState } from 'react'
-import type { SandboxQuota } from '@chaimir/api-client'
-import { Button, Input } from '@chaimir/ui'
+import type { SandboxQuota, SandboxQuotaRequest } from '@chaimir/api-client'
+import { Button, Callout, FormField, Input } from '@chaimir/ui'
 import { PieChart, Save } from 'lucide-react'
 import { useParams } from 'react-router-dom'
 import { api } from '../../../../../app/api'
@@ -25,7 +25,7 @@ const initialForm: QuotaForm = {
 /**
  * toQuotaRequest 把表单字符串转换为后端配额请求。
  */
-function toQuotaRequest(tenantId: string, form: QuotaForm): SandboxQuota {
+function toQuotaRequest(tenantId: string, form: QuotaForm): SandboxQuotaRequest {
   return {
     tenant_id: tenantId,
     max_concurrent_sandbox: Number(form.max_concurrent_sandbox),
@@ -74,18 +74,17 @@ const QuotasPage: React.FC = () => {
             <PieChart className={styles.icon} size={28} />
             资源配额管控
           </h1>
-          <p className={styles.subtitle}>为租户 {id || '未选择'} 提交完整沙箱资源上限。</p>
+          <p className={styles.subtitle}>为当前学校设置沙箱并发、算力和保留时长上限。</p>
         </div>
       </div>
 
-      {message && <div className={styles.status}>{message}</div>}
-      {error && <div className={styles.status}>{error}</div>}
+      {message && <Callout variant="success" title="配额已更新">{message}</Callout>}
+      {error && <Callout variant="danger" title="配额未更新">{error}</Callout>}
 
       <div className={styles.tableWrap}>
         <div className={styles.formGrid}>
           {(Object.keys(sandboxQuotaFieldLabels) as Array<keyof QuotaForm>).map((field) => (
-            <label key={field}>
-              <span className={styles.subtitle}>{sandboxQuotaFieldLabels[field]}</span>
+            <FormField key={field} label={sandboxQuotaFieldLabels[field]}>
               <Input
                 fullWidth
                 min={0}
@@ -93,7 +92,7 @@ const QuotasPage: React.FC = () => {
                 value={form[field]}
                 onChange={(event) => setForm((current) => ({ ...current, [field]: event.target.value }))}
               />
-            </label>
+            </FormField>
           ))}
           <Button icon={<Save size={16} />} loading={saving} onClick={handleSubmit}>
             提交变更

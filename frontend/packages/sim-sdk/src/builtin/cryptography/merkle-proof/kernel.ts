@@ -2,6 +2,7 @@
 
 import type { CheckpointResult, ReducerContext, SimEvent, SimInitParams } from '../../../types';
 import { integerParam, stringArrayParam } from '../../initParams';
+import { merkleRoot } from '../../merkle';
 import { foldMerkleProof, merkleLeafHash, merkleParentHash, type MerkleProofStep } from '../cryptoPrimitives';
 import { merkleProofPhases, type MerkleLeaf, type MerkleProofState } from './model';
 import { traceLinesForMerkleProof } from './trace';
@@ -115,7 +116,7 @@ function rebuildProof(state: MerkleProofState, transition: string): MerkleProofS
  * rootHash 按标准成对合并规则计算任意叶子数量的 Merkle 根,奇数层复制末尾摘要。
  */
 export function rootHash(leaves: MerkleLeaf[]): string {
-  return merkleRootFromHashes(leaves.map((leaf) => leaf.hash));
+  return merkleRoot(leaves.map((leaf) => leaf.hash), merkleParentHash);
 }
 
 /**
@@ -142,25 +143,6 @@ function buildProof(leaves: MerkleLeaf[], targetLeafId: string): { path: string[
     depth += 1;
   }
   return { path, siblings: steps.map((step) => `${step.siblingSide}:${step.siblingId}`), steps, root: foldMerkleProof(leaves[Math.max(0, leaves.findIndex((leaf) => leaf.id === targetLeafId))].hash, steps) };
-}
-
-/**
- * merkleRootFromHashes 折叠一层层哈希,作为根计算和证明构造的统一规则。
- */
-function merkleRootFromHashes(hashes: string[]): string {
-  if (hashes.length === 0) {
-    return '';
-  }
-  let level = hashes;
-  while (level.length > 1) {
-    const padded = level.length % 2 === 0 ? level : level.concat(level[level.length - 1]);
-    const next: string[] = [];
-    for (let index = 0; index < padded.length; index += 2) {
-      next.push(merkleParentHash(padded[index], padded[index + 1]));
-    }
-    level = next;
-  }
-  return level[0];
 }
 
 /**

@@ -95,6 +95,27 @@ export function formatNumber(value?: number | null): string {
   return NUMBER_FORMAT.format(value || 0)
 }
 
+/** formatReference 隐去服务端完整标识，只保留人工复核所需的末四位。 */
+function formatReference(value: string | null | undefined, label: string): string {
+  const reference = value?.trim()
+  return reference ? `${label} · 识别码尾号 ${reference.slice(-4)}` : `${label}信息未提供`
+}
+
+/** formatStudentReference 把服务端学生标识转换为隐私友好的辅助识别信息。 */
+export function formatStudentReference(value?: string | null): string {
+  return formatReference(value, '学生')
+}
+
+/** formatTeamReference 把服务端队伍标识转换为隐私友好的辅助识别信息。 */
+export function formatTeamReference(value?: string | null): string {
+  return formatReference(value, '队伍')
+}
+
+/** formatAccountReference 把服务端账号标识转换为隐私友好的辅助识别信息。 */
+export function formatAccountReference(value?: string | null): string {
+  return formatReference(value, '账号')
+}
+
 /**
  * formatBytes 把字节数转换为用户可读容量。
  */

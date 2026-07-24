@@ -23,7 +23,7 @@ inputs:
     required: false
     default: ""
   registry:
-    description: Harbor 仓库地址
+    description: Harbor 仓库地址(由 GitHub Actions Variable 注入)
     required: true
   registry-username:
     description: Harbor 登录用户(经 secrets 注入)
@@ -68,7 +68,11 @@ runs:
         )
         for variable in "${required[@]}"; do
           if [[ -z "${!variable}" ]]; then
-            echo "::error title=镜像供应链配置缺失::$variable 未由 GitHub Secret 注入"
+            if [[ "$variable" == "INPUT_REGISTRY" ]]; then
+              echo "::error title=镜像供应链配置缺失::INPUT_REGISTRY 未由 GitHub Actions Variable HARBOR_REGISTRY 注入"
+            else
+              echo "::error title=镜像供应链配置缺失::$variable 未由 GitHub Secret 注入"
+            fi
             exit 1
           fi
         done

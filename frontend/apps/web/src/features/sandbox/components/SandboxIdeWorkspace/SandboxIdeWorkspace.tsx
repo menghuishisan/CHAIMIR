@@ -2,11 +2,10 @@
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { IdeWorkbench } from '@chaimir/ide'
-import type { SandboxFileSaveResponse } from '@chaimir/api-client'
-import { Button, Callout } from '@chaimir/ui'
+import type { SandboxFileSaveResponse, SandboxProgressMessage } from '@chaimir/api-client'
+import { Button, Callout, ResourceState } from '@chaimir/ui'
 import { RefreshCw, Save } from 'lucide-react'
 import { api } from '../../../../app/api'
-import { ErrorState, LoadingState } from '../../../../components/ResourceState'
 import { useAsyncResource, useTicketedWebSocket } from '../../../../hooks'
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
 import { MonacoPane, SandboxTerminal } from './EditorTerminalPanes'
@@ -41,6 +40,7 @@ export function SandboxIdeWorkspace({
   const [message, setMessage] = useState<string>()
   const [actionError, setActionError] = useState<string>()
   const [saving, setSaving] = useState(false)
+  const [progressMessage, setProgressMessage] = useState<SandboxProgressMessage>()
   const resource = useAsyncResource(
     async () => {
       const instance = await api.sandbox.getInstance(sandboxId)
@@ -52,7 +52,11 @@ export function SandboxIdeWorkspace({
   const progressUrl = useMemo(() => api.sandbox.getProgressWsUrl(sandboxId), [sandboxId])
   const progress = useTicketedWebSocket({
     url: progressUrl,
-    onMessage: useCallback(() => resource.reload(), [resource]),
+    onMessage: useCallback((event: MessageEvent) => {
+      const next = parseProgressMessage(event.data)
+      if (next) setProgressMessage(next)
+      resource.reload()
+    }, [resource]),
   })
   const files = useMemo(() => resource.data?.files || [], [resource.data?.files])
   const activeFile = files.find((file) => file.id === activeFileId)
@@ -63,6 +67,7 @@ export function SandboxIdeWorkspace({
     setDirtyPaths(new Set())
     setMessage(undefined)
     setActionError(undefined)
+    setProgressMessage(undefined)
   }, [sandboxId])
 
   /** selectFile 按需读取选中文件，避免进入工作台时下载全部源码。 */
@@ -113,9 +118,9 @@ export function SandboxIdeWorkspace({
     }
   }, [contents, dirtyPaths, onSaved, sandboxId, saving])
 
-  if (resource.status === 'loading') return <LoadingState title="正在打开代码工作区" />
-  if (resource.status === 'error') return <ErrorState error={resource.error} onRetry={resource.reload} />
-  if (!resource.data) return <LoadingState title="正在打开代码工作区" />
+  if (resource.status === 'loading') return <ResourceState status="loading" title="正在打开代码工作区" />
+  if (resource.status === 'error') return <ResourceState status="error" error={resource.error} onRetry={resource.reload} />
+  if (!resource.data) return <ResourceState status="loading" title="正在打开代码工作区" />
 
   const workbenchFiles = files.map((file) => ({ ...file, dirty: dirtyPaths.has(file.path) }))
   const toolItems = toWorkbenchTools(resource.data.instance)
@@ -123,13 +128,13 @@ export function SandboxIdeWorkspace({
     <IdeWorkbench
       title={title}
       subtitle={subtitle}
-      status={<span role="status">实例 {sandboxId} · {progress.status === 'open' ? '实时同步' : '正在连接'}</span>}
+      status={<span role="status">{progressMessage ? `${progressMessage.message}${progressMessage.trace_id ? `（编号 ${progressMessage.trace_id}）` : ''}` : progress.status === 'open' ? '环境状态已连接' : '正在连接实验环境'}</span>}
       files={workbenchFiles}
       activeFileId={activeFileId}
       onSelectFile={(file) => void selectFile(file as WorkspaceFile)}
       editor={activeFile ? (
         contents[activeFile.path] === undefined
-          ? <LoadingState title="正在读取文件" />
+          ? <ResourceState status="loading" title="正在读取文件" />
           : <MonacoPane key={activeFile.path} file={activeFile} value={contents[activeFile.path]} onChange={updateActiveContent} />
       ) : <p className={styles.empty}>当前工作区没有可编辑文件。</p>}
       terminal={resource.data.instance.capabilities.terminal ? <SandboxTerminal sandboxId={sandboxId} /> : undefined}
@@ -152,4 +157,24 @@ export function SandboxIdeWorkspace({
       )}
     />
   )
+}
+
+/** parseProgressMessage 校验沙箱进度 WS 的用户向结构,避免把任意帧直接渲染到页面。 */
+function parseProgressMessage(data: unknown): SandboxProgressMessage | undefined {
+  if (typeof data !== 'string') return undefined
+  try {
+    const value: unknown = JSON.parse(data)
+    if (!value || typeof value !== 'object') return undefined
+    const message = value as Record<string, unknown>
+    if (typeof message.phase !== 'number' || typeof message.status !== 'number' || typeof message.stage !== 'string' || typeof message.message !== 'string') return undefined
+    return {
+      phase: message.phase,
+      status: message.status,
+      stage: message.stage,
+      message: message.message,
+      trace_id: typeof message.trace_id === 'string' ? message.trace_id : undefined,
+    }
+  } catch {
+    return undefined
+  }
 }

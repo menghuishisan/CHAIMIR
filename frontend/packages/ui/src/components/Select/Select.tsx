@@ -7,7 +7,7 @@ import { useFloating, offset, flip, shift, autoUpdate, size } from '@floating-ui
 import { ChevronDown, Check } from 'lucide-react'
 import { clsx } from 'clsx'
 import { triggerHaptic } from '../../utils/haptics'
-import { useClickOutside, useEscapeKey } from '../../hooks'
+import { useClickOutside, useEscapeKey, useTransformOrigin } from '../../hooks'
 import './Select.css'
 
 export interface SelectOption {
@@ -73,6 +73,7 @@ export const Select = React.forwardRef<HTMLDivElement, SelectProps>(
         }),
       ],
     })
+    const transformOrigin = useTransformOrigin(placement)
 
     // 监听 value 变化
     useEffect(() => {
@@ -202,9 +203,10 @@ export const Select = React.forwardRef<HTMLDivElement, SelectProps>(
               ref={refs.setFloating}
               style={{
                 ...floatingStyles,
+                '--transform-origin': transformOrigin,
                 visibility: isPositioned ? 'visible' : 'hidden',
                 pointerEvents: isPositioned ? 'auto' : 'none',
-              }}
+              } as React.CSSProperties}
               className="chaimir-select__positioner"
               data-placement={placement}
             >

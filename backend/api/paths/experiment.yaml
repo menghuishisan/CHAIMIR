@@ -1,4 +1,16 @@
 # 本文件按模块维护 experiment 路径项。
+/api/v1/experiment/student/experiments:
+  get:
+    tags: [experiment]
+    summary: 学生可进入的实验列表
+    operationId: experimentListStudentExperiments
+    x-chaimir-audience: student
+    security: [{ bearerAuth: [] }]
+    parameters:
+      - { name: course_id, in: query, schema: { $ref: "#/components/schemas/SnowflakeID" } }
+      - { $ref: "#/components/parameters/PageQuery" }
+      - { $ref: "#/components/parameters/SizeQuery" }
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
 /api/v1/experiment/experiments:
   get:
     tags: [experiment]

@@ -2,11 +2,10 @@
 
 import React, { useCallback, useMemo, useState } from 'react'
 import { ApplicationStatus } from '@chaimir/api-client'
-import { Button, Callout, DescriptionList, Input, Textarea } from '@chaimir/ui'
+import { Button, Callout, DescriptionList, Input, Textarea, ResourceState, FormField } from '@chaimir/ui'
 import { CheckCircle2, FileCheck, RefreshCw, XCircle } from 'lucide-react'
 import { useParams } from 'react-router-dom'
 import { api } from '../../../../../app/api'
-import { EmptyState, ErrorState, LoadingState } from '../../../../../components/ResourceState'
 import { useAsyncResource } from '../../../../../hooks'
 import styles from './review.module.css'
 import { formatDateTime, tenantApplicationSchoolTypeLabel, tenantApplicationStatusLabel } from '../../../../../utils/index'
@@ -84,13 +83,13 @@ const ApplicationDetailPage: React.FC = () => {
   }, [id, reason, resource])
 
   if (resource.status === 'loading') {
-    return <LoadingState title="正在获取申请详情" />
+    return <ResourceState status="loading" title="正在获取申请详情" />
   }
   if (resource.status === 'error') {
-    return <ErrorState error={resource.error} onRetry={resource.reload} />
+    return <ResourceState status="error" error={resource.error} onRetry={resource.reload} />
   }
   if (!application) {
-    return <EmptyState title="未找到申请" description="当前申请不存在，或您没有查看权限。" />
+    return <ResourceState status="empty" title="未找到申请" description="当前申请不存在，或您没有查看权限。" />
   }
 
   return (
@@ -136,25 +135,13 @@ const ApplicationDetailPage: React.FC = () => {
         <section className={styles.panel}>
           <h2>审核动作</h2>
           {application.status === ApplicationStatus.PENDING ? <div className={styles.form}>
-            <label>
-              租户代号
-              <Input fullWidth value={tenantCode} placeholder="请输入开通后的租户代号" onChange={(event) => setTenantCode(event.target.value)} />
-            </label>
-            <label>
-              初始管理员姓名
-              <Input fullWidth value={adminName} placeholder="请输入管理员姓名" onChange={(event) => setAdminName(event.target.value)} />
-            </label>
-            <label>
-              初始管理员手机号
-              <Input fullWidth value={adminPhone} placeholder="请输入管理员手机号" onChange={(event) => setAdminPhone(event.target.value)} />
-            </label>
+            <FormField label="租户代号"><Input fullWidth value={tenantCode} placeholder="请输入开通后的租户代号" onChange={(event) => setTenantCode(event.target.value)} /></FormField>
+            <FormField label="初始管理员姓名"><Input fullWidth value={adminName} placeholder="请输入管理员姓名" onChange={(event) => setAdminName(event.target.value)} /></FormField>
+            <FormField label="初始管理员手机号"><Input fullWidth value={adminPhone} placeholder="请输入管理员手机号" onChange={(event) => setAdminPhone(event.target.value)} /></FormField>
             <Button loading={submitting === 'approve'} icon={<CheckCircle2 size={16} />} onClick={handleApprove}>
               通过并开通
             </Button>
-            <label>
-              驳回原因
-              <Textarea value={reason} placeholder="请说明需要补充或修正的信息" onChange={(event) => setReason(event.target.value)} />
-            </label>
+            <FormField label="驳回原因"><Textarea value={reason} placeholder="请说明需要补充或修正的信息" onChange={(event) => setReason(event.target.value)} /></FormField>
             <Button variant="outline" loading={submitting === 'reject'} icon={<XCircle size={16} />} onClick={handleReject}>
               驳回申请
             </Button>

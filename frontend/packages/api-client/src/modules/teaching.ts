@@ -34,6 +34,7 @@ import type {
   TeachingPostRequest,
   TeachingReview,
   TeachingReviewRequest,
+  LessonContentRef,
 } from '../types/teaching'
 import type { TransferTask } from '../types/transfer'
 
@@ -202,7 +203,7 @@ export class TeachingApi {
    */
   async setLessonContent(
     lessonId: string,
-    data: { content_type: LessonContentType; content_ref: Record<string, unknown> }
+    data: { content_type: LessonContentType; content_ref: LessonContentRef }
   ): Promise<Lesson> {
     return this.client.post(`/teaching/lessons/${lessonId}/content`, data)
   }

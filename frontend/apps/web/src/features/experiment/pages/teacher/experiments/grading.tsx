@@ -1,13 +1,13 @@
-// 教师实验报告批改页：读取后端报告列表并提交人工评分。
+// 教师实验报告页：读取后端提交记录，不伪造报告内容或评分入口。
 
-import React, { useMemo, useState } from 'react'
+import React, { useCallback, useMemo, useState } from 'react'
 import type { ReportDTO } from '@chaimir/api-client'
 import { ExperimentReportStatus } from '@chaimir/api-client'
-import { Button, Input, Table, Textarea } from '@chaimir/ui'
-import { FileCheck, Save } from 'lucide-react'
+import { Button, Callout, Input, Table, Textarea, ResourceState, FormField } from '@chaimir/ui'
+import { Check, FileCheck, RefreshCw } from 'lucide-react'
 import { useParams } from 'react-router-dom'
 import { api } from '../../../../../app/api'
-import { ErrorState, LoadingState } from '../../../../../components/ResourceState'
+import { usePendingAction } from '../../../../../hooks'
 import { useAsyncResource } from '../../../../../hooks/useAsyncResource'
 import styles from '../../experiment.module.css'
 import { formatDateTime } from '../../../../../utils/index'
@@ -15,10 +15,6 @@ import { userFacingErrorMessage } from '../../../../../utils/userFacingError'
 
 const TeacherExperimentGradingPage: React.FC = () => {
   const { id } = useParams()
-  const [selectedId, setSelectedId] = useState('')
-  const [score, setScore] = useState(0)
-  const [comment, setComment] = useState('')
-  const [message, setMessage] = useState('')
   const resource = useAsyncResource(
     async () => {
       if (!id) {
@@ -29,30 +25,45 @@ const TeacherExperimentGradingPage: React.FC = () => {
     [id]
   )
   const rows = useMemo(() => resource.data?.list ?? [], [resource.data?.list])
-  const selected = useMemo(() => rows.find((row) => row.id === selectedId) ?? rows[0], [rows, selectedId])
+  const [selectedReport, setSelectedReport] = useState<ReportDTO | null>(null)
+  const [score, setScore] = useState('')
+  const [comment, setComment] = useState('')
+  const [message, setMessage] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const { pendingAction, runPendingAction } = usePendingAction()
 
-  /**
-   * grade 提交当前选中报告的人工评分，并刷新服务端列表。
-   */
-  const grade = async () => {
-    const target = selectedId || selected?.id
-    if (!target) return
-    setMessage('')
-    try {
-      await api.experiment.gradeReport(target, { manual_score: score, comment })
-      setMessage('评分已保存。')
-      resource.reload()
-    } catch (error) {
-      setMessage(userFacingErrorMessage(error, '暂时无法保存评分。'))
+  const selectReport = useCallback((report: ReportDTO) => {
+    setSelectedReport(report)
+    setScore(report.manual_score > 0 ? String(report.manual_score) : '')
+    setComment(report.comment ?? '')
+    setMessage(null)
+    setError(null)
+  }, [])
+
+  const saveGrade = useCallback(async () => {
+    if (!selectedReport) return
+    const manualScore = Number(score)
+    if (!Number.isFinite(manualScore) || manualScore < 0 || manualScore > 100) {
+      setError('请输入 0 到 100 之间的分数。')
+      return
     }
-  }
+    setError(null)
+    setMessage(null)
+    try {
+      await api.experiment.gradeReport(selectedReport.id, { manual_score: manualScore, comment: comment.trim() })
+      setMessage('报告评分已保存。')
+      resource.reload()
+    } catch (actionError) {
+      setError(userFacingErrorMessage(actionError, '报告评分保存失败，请稍后重试。'))
+    }
+  }, [comment, resource, score, selectedReport])
 
   if (resource.status === 'loading') {
-    return <LoadingState title="正在读取实验报告" description="系统正在同步学生提交记录。" />
+    return <ResourceState status="loading" title="正在读取实验报告" description="系统正在同步学生提交记录。" />
   }
 
   if (resource.status === 'error') {
-    return <ErrorState error={resource.error} onRetry={resource.reload} />
+    return <ResourceState status="error" error={resource.error} onRetry={resource.reload} />
   }
 
   return (
@@ -60,69 +71,49 @@ const TeacherExperimentGradingPage: React.FC = () => {
       <div className={styles.breadcrumb}>教师端 / 批改中心 / 批阅实验报告</div>
 
       <div className={styles.header}>
-        <h1 className={styles.title}>
-          <FileCheck className={styles.titleIcon} size={28} />
-          批阅实验报告
-        </h1>
+        <div>
+          <h1 className={styles.title}>
+            <FileCheck className={styles.titleIcon} size={28} />
+            实验报告提交
+          </h1>
+          <p className={styles.subtitle}>查看提交状态并保存人工评分。报告正文由服务端授权后提供。</p>
+        </div>
+        <Button variant="outline" icon={<RefreshCw size={16} />} onClick={resource.reload}>刷新</Button>
       </div>
-      {message && <p className={styles.message} role="status">{message}</p>}
-
-      <div className={styles.reportGrid}>
-        <section className={`${styles.panel} ${styles.section}`}>
-          <h2 className={styles.sectionTitle}>提交记录</h2>
-          <Table<ReportDTO>
-            rows={rows}
-            rowKey="id"
-            ariaLabel="实验报告"
-            emptyTitle="暂无报告"
-            emptyDescription="学生提交实验报告后会显示在这里。"
-            columns={[
-              { key: 'student', title: '学生', dataIndex: 'student_id', priority: 'primary' },
-              { key: 'content', title: '内容引用', dataIndex: 'content_ref', priority: 'secondary' },
-              { key: 'score', title: '人工评分', render: (row) => row.manual_score || '未评分' },
-              { key: 'status', title: '状态', render: (row) => row.status === ExperimentReportStatus.GRADED ? '已批改' : '待批改' },
-              {
-                key: 'action',
-                title: '操作',
-                render: (row) => (
-                  <Button size="sm" variant="outline" onClick={() => {
-                    setSelectedId(row.id)
-                    setScore(row.manual_score || 0)
-                    setComment(row.comment ?? '')
-                  }}>
-                    选择
-                  </Button>
-                ),
-              },
-            ]}
-          />
+      {error && <Callout variant="danger" title="评分未保存">{error}</Callout>}
+      {message && <Callout variant="success" title="操作完成">{message}</Callout>}
+      <section className={`${styles.panel} ${styles.section}`}>
+        <h2 className={styles.sectionTitle}>提交记录</h2>
+        <Table<ReportDTO>
+          rows={rows}
+          rowKey="id"
+          ariaLabel="实验报告提交记录"
+          emptyTitle="暂无报告"
+          emptyDescription="学生提交实验报告后会显示在这里。"
+          columns={[
+            { key: 'report', title: '报告', render: () => '实验报告', priority: 'primary' },
+            { key: 'submitted', title: '提交时间', render: (row) => formatDateTime(row.submitted_at), priority: 'secondary' },
+            { key: 'score', title: '人工评分', render: (row) => row.status === ExperimentReportStatus.GRADED ? String(row.manual_score) : '未评分' },
+            { key: 'status', title: '状态', render: (row) => row.status === ExperimentReportStatus.GRADED ? '已批改' : '待批改' },
+            { key: 'actions', title: '操作', render: (row) => <Button variant="outline" size="sm" icon={<Check size={14} />} onClick={() => selectReport(row)}>批改</Button> },
+          ]}
+        />
+        <p className={styles.muted}>当前接口只返回提交状态、评分和对象引用，不在页面展示内部对象路径。</p>
+      </section>
+      {selectedReport && (
+        <section className={`${styles.panel} ${styles.section}`} aria-labelledby="report-grading-title">
+          <h2 id="report-grading-title" className={styles.sectionTitle}>批改报告</h2>
+          <p className={styles.muted}>提交时间：{formatDateTime(selectedReport.submitted_at)}。报告正文需服务端提供授权内容后才能查看。</p>
+          <div className={styles.formGrid}>
+            <FormField className={styles.field} label="人工评分"><Input type="number" min={0} max={100} value={score} onChange={(event) => setScore(event.target.value)} /></FormField>
+            <FormField className={styles.field} label="评语"><Textarea value={comment} onChange={(event) => setComment(event.target.value)} /></FormField>
+          </div>
+          <div className={styles.actions}>
+            <Button icon={<Check size={16} />} loading={pendingAction === 'grade'} disabled={Boolean(pendingAction)} onClick={() => void runPendingAction('grade', saveGrade)}>保存评分</Button>
+            <Button variant="ghost" disabled={Boolean(pendingAction)} onClick={() => setSelectedReport(null)}>取消</Button>
+          </div>
         </section>
-
-        <aside className={`${styles.panel} ${styles.section}`}>
-          <h2 className={styles.sectionTitle}>评分面板</h2>
-          {selected ? (
-            <>
-              <div className={`${styles.panel} ${styles.reportViewer}`}>
-                <p className={styles.muted}>报告内容引用</p>
-                <strong>{selected.content_ref}</strong>
-                <p className={styles.muted}>实例 {selected.instance_id}</p>
-                <p className={styles.muted}>提交时间 {formatDateTime(selected.submitted_at)}</p>
-              </div>
-              <div className={styles.field}>
-                <label className={styles.label} htmlFor="manual-score">人工评分</label>
-                <Input id="manual-score" type="number" value={score} onChange={(event) => setScore(Number(event.target.value))} fullWidth />
-              </div>
-              <div className={styles.field}>
-                <label className={styles.label} htmlFor="grade-comment">教师评语</label>
-                <Textarea id="grade-comment" rows={6} value={comment} onChange={(event) => setComment(event.target.value)} fullWidth />
-              </div>
-              <Button icon={<Save size={16} />} onClick={grade}>保存评分</Button>
-            </>
-          ) : (
-            <p className={styles.muted}>请选择一份报告进行批改。</p>
-          )}
-        </aside>
-      </div>
+      )}
     </div>
   )
 }

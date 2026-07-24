@@ -3,7 +3,7 @@
 import type { CheckpointResult, ReducerContext, SimEvent, SimInitParams } from '../../../types';
 import { integerParam, stringArrayParam, stringParam } from '../../initParams';
 import { aggregateCommitteeSignature, committeeMemberSignature, crossChainMessageHash } from '../crossChainPrimitives';
-import { committeePhases, type CommitteeState } from './model';
+import { committeePhases, type CommitteeMember, type CommitteeState } from './model';
 import { traceLinesForCommittee } from './trace';
 
 /**
@@ -62,7 +62,12 @@ export function committeeAuthorized(state: CommitteeState): CheckpointResult {
  * validSignatures 统计有效签名数量。
  */
 export function validSignatures(state: CommitteeState): number {
-  return state.members.filter((member) => member.active && member.signed && !member.malicious && member.signature === committeeMemberSignature(member.id, state.messageHash)).length;
+  return state.members.filter((member) => isValidMemberSignature(state, member)).length;
+}
+
+/** isValidMemberSignature 校验活跃委员会成员对当前消息摘要的签名。 */
+function isValidMemberSignature(state: CommitteeState, member: CommitteeMember): boolean {
+  return member.active && member.signed && !member.malicious && member.signature === committeeMemberSignature(member.id, state.messageHash);
 }
 
 /**
@@ -84,7 +89,7 @@ function signCommitteeMessage(state: CommitteeState): CommitteeState {
  * aggregateCommittee 只聚合有效签名并生成授权摘要。
  */
 function aggregateCommittee(state: CommitteeState): CommitteeState {
-  const signatures = state.members.filter((member) => member.active && member.signed && !member.malicious && member.signature === committeeMemberSignature(member.id, state.messageHash)).map((member) => member.signature ?? '');
+  const signatures = state.members.filter((member) => isValidMemberSignature(state, member)).map((member) => member.signature ?? '');
   return { ...state, aggregateReady: signatures.length >= state.threshold, aggregateSignature: signatures.length >= state.threshold ? aggregateCommitteeSignature(state.messageHash, signatures.slice(0, state.threshold)) : '' };
 }
 

@@ -1,40 +1,34 @@
 // 教师竞赛管理页：读取竞赛列表并执行发布、开始、封榜、结束和归档。
 
-import React, { useState } from 'react'
+import React from 'react'
 import type { Contest } from '@chaimir/api-client'
 import { ContestStatus } from '@chaimir/api-client'
-import { Button, Table } from '@chaimir/ui'
+import { Button, Table, useConfirm, ResourceState } from '@chaimir/ui'
 import { Archive, Pause, Play, Settings, Square, Trophy } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../../../../../app/api'
-import { ErrorState, LoadingState } from '../../../../../components/ResourceState'
-import { useAsyncResource } from '../../../../../hooks/useAsyncResource'
+import { useActionFeedback, useAsyncResource } from '../../../../../hooks'
 import styles from '../../contest.module.css'
 import { formatDateTime, contestStatusLabel } from '../../../../../utils/index'
-import { userFacingErrorMessage } from '../../../../../utils/userFacingError'
 
 const TeacherContestsPage: React.FC = () => {
+  const confirm = useConfirm()
   const navigate = useNavigate()
-  const [message, setMessage] = useState('')
   const resource = useAsyncResource(() => api.contest.getContests({ page: 1, size: 30 }), [])
+  const { error, message, pendingAction, runAction } = useActionFeedback(resource.reload, '操作没有完成，请稍后重试。')
 
-  const run = async (operation: () => Promise<unknown>, success: string) => {
-    setMessage('')
-    try {
-      await operation()
-      setMessage(success)
-      resource.reload()
-    } catch (error) {
-      setMessage(userFacingErrorMessage(error, '操作没有完成，请稍后重试。'))
-    }
+  /** runLifecycle 在改变赛事公开性或生命周期前要求教师明确确认。 */
+  const runLifecycle = async (key: string, title: string, description: string, operation: () => Promise<unknown>, success: string, danger = false) => {
+    const confirmed = await confirm({ title, description, confirmLabel: '确认继续', confirmVariant: danger ? 'danger' : 'primary' })
+    if (confirmed) await runAction(key, operation, success)
   }
 
   if (resource.status === 'loading') {
-    return <LoadingState title="正在读取竞赛" description="系统正在同步你管理的竞赛。" />
+    return <ResourceState status="loading" title="正在读取竞赛" description="系统正在同步你管理的竞赛。" />
   }
 
   if (resource.status === 'error') {
-    return <ErrorState error={resource.error} onRetry={resource.reload} />
+    return <ResourceState status="error" error={resource.error} onRetry={resource.reload} />
   }
 
   return (
@@ -47,6 +41,7 @@ const TeacherContestsPage: React.FC = () => {
         </h1>
         <Button icon={<Settings size={16} />} onClick={() => navigate('/teacher/contests/config')}>新建竞赛</Button>
       </div>
+      {error && <p className={styles.message} role="alert">{error}</p>}
       {message && <p className={styles.message} role="status">{message}</p>}
 
       <Table<Contest>
@@ -66,10 +61,10 @@ const TeacherContestsPage: React.FC = () => {
               <div className={styles.actions}>
                 <Button size="sm" variant="outline" icon={<Settings size={15} />} onClick={() => navigate(`/teacher/contests/${row.id}/config`)}>配置</Button>
                 <Button size="sm" variant="outline" onClick={() => navigate(`/teacher/contests/${row.id}/authoring`)}>题目</Button>
-                <Button size="sm" icon={<Play size={15} />} onClick={() => run(() => row.status === ContestStatus.DRAFT ? api.contest.publishContest(row.id) : api.contest.startContest(row.id), row.status === ContestStatus.DRAFT ? '竞赛已发布。' : '竞赛已开始。')}>{row.status === ContestStatus.DRAFT ? '发布' : '开始'}</Button>
-                <Button size="sm" variant="outline" icon={<Pause size={15} />} onClick={() => run(() => api.contest.freezeContest(row.id), '竞赛已进入封榜期。')}>封榜</Button>
-                <Button size="sm" variant="outline" icon={<Square size={15} />} onClick={() => run(() => api.contest.endContest(row.id), '竞赛已结束。')}>结束</Button>
-                <Button size="sm" variant="ghost" icon={<Archive size={15} />} onClick={() => run(() => api.contest.archiveContest(row.id), '竞赛已归档。')}>归档</Button>
+                <Button size="sm" icon={<Play size={15} />} loading={pendingAction === `${row.id}-start`} disabled={Boolean(pendingAction)} onClick={() => runLifecycle(`${row.id}-start`, row.status === ContestStatus.DRAFT ? '发布竞赛' : '开始竞赛', row.status === ContestStatus.DRAFT ? `发布“${row.name}”后学生即可报名。` : `开始“${row.name}”后参赛队伍即可提交。`, () => row.status === ContestStatus.DRAFT ? api.contest.publishContest(row.id) : api.contest.startContest(row.id), row.status === ContestStatus.DRAFT ? '竞赛已发布。' : '竞赛已开始。')}>{row.status === ContestStatus.DRAFT ? '发布' : '开始'}</Button>
+                <Button size="sm" variant="outline" icon={<Pause size={15} />} loading={pendingAction === `${row.id}-freeze`} disabled={Boolean(pendingAction)} onClick={() => runLifecycle(`${row.id}-freeze`, '进入封榜期', '封榜后学生将看不到实时排名变化。', () => api.contest.freezeContest(row.id), '竞赛已进入封榜期。')}>封榜</Button>
+                <Button size="sm" variant="outline" icon={<Square size={15} />} loading={pendingAction === `${row.id}-end`} disabled={Boolean(pendingAction)} onClick={() => runLifecycle(`${row.id}-end`, '结束竞赛', '结束后将停止接收新提交和新对局。', () => api.contest.endContest(row.id), '竞赛已结束。', true)}>结束</Button>
+                <Button size="sm" variant="ghost" icon={<Archive size={15} />} loading={pendingAction === `${row.id}-archive`} disabled={Boolean(pendingAction)} onClick={() => runLifecycle(`${row.id}-archive`, '归档竞赛', '归档会生成最终榜单并回收竞赛关联环境。', () => api.contest.archiveContest(row.id), '竞赛已归档。', true)}>归档</Button>
               </div>
             ),
           },

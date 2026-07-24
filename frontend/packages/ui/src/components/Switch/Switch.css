@@ -64,7 +64,7 @@
   border-radius: var(--radius-full);
   box-shadow: 0 1px 3px var(--color-switch-thumb-shadow);
   transform: translateX(var(--switch-thumb-x));
-  transition: box-shadow var(--t) var(--ease), transform 0.4s var(--ease-spring-ios);
+  transition: box-shadow var(--t) var(--ease), transform var(--t) var(--ease-out);
 }
 
 .chaimir-switch--sm .chaimir-switch__thumb {
@@ -80,8 +80,10 @@
 /* === 状态 === */
 
 /* 悬浮态 */
-.chaimir-switch-wrapper:hover:not(.chaimir-switch-wrapper--disabled) .chaimir-switch {
-  box-shadow: inset 0 0 0 1px var(--color-primary-soft);
+@media (hover: hover) and (pointer: fine) {
+  .chaimir-switch-wrapper:hover:not(.chaimir-switch-wrapper--disabled) .chaimir-switch {
+    box-shadow: inset 0 0 0 1px var(--color-primary-soft);
+  }
 }
 
 .chaimir-switch-wrapper:active:not(.chaimir-switch-wrapper--disabled) .chaimir-switch__thumb {

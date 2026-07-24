@@ -46,7 +46,6 @@ export const TeacherContestAuthoringPage = lazy(() => import('../features/contes
 export const TeacherMonitoringPage = lazy(() => import('../features/judge/pages/teacher/monitoring'))
 export const TeacherAntiCheatPage = lazy(() => import('../features/judge/pages/teacher/monitoring/anti-cheat'))
 export const TeacherVulnerabilitiesPage = lazy(() => import('../features/contest/pages/teacher/vulnerabilities'))
-export const TeacherVulnerabilityWizardPage = lazy(() => import('../features/contest/pages/teacher/vulnerabilities/wizard'))
 export const TeacherQuestionsPage = lazy(() => import('../features/content/pages/teacher/questions'))
 export const TeacherQuestionCategoriesPage = lazy(() => import('../features/content/pages/teacher/questions/categories'))
 export const TeacherQuestionEditPage = lazy(() => import('../features/content/pages/teacher/questions/edit'))

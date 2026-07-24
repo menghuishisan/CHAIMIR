@@ -4,11 +4,10 @@ import React, { useMemo, useState } from 'react'
 import type { SandboxToolDefinition, SandboxToolRequest, SandboxToolResourceSpec, WorkloadComponent } from '@chaimir/api-client'
 import { SandboxToolKind, ToolStatus } from '@chaimir/api-client'
 import type { TableColumn } from '@chaimir/ui'
-import { Button, Callout, Input, Select, Switch, Table } from '@chaimir/ui'
+import { Button, Callout, Input, Select, Switch, Table, ResourceState } from '@chaimir/ui'
 import { Package, Plus, RefreshCw } from 'lucide-react'
 import { api } from '../../../../../app/api'
-import { ErrorState, LoadingState } from '../../../../../components/ResourceState'
-import { useAsyncResource } from '../../../../../hooks'
+import { useAsyncResource, usePendingAction } from '../../../../../hooks'
 import styles from '../../../../admin/pages/list.module.css'
 import { sandboxToolKindLabel, toolStatusLabel } from '../../../../../utils/index'
 import { parseDelimitedList } from '../../../../../utils'
@@ -40,6 +39,7 @@ const SandboxToolsPage: React.FC = () => {
   const [maxTimeout, setMaxTimeout] = useState('120')
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
+  const { pendingAction, runPendingAction } = usePendingAction()
   const rows = resource.data?.tools || []
 
   /** registerTool 登记平台统一沙箱工具声明。 */
@@ -119,14 +119,14 @@ const SandboxToolsPage: React.FC = () => {
             <Input type="number" value={defaultTimeout} onChange={(event) => setDefaultTimeout(event.target.value)} placeholder="默认超时秒数" fullWidth />
             <Input type="number" value={maxTimeout} onChange={(event) => setMaxTimeout(event.target.value)} placeholder="最大超时秒数" fullWidth />
           </>}
-          <Button icon={<Plus size={15} />} onClick={() => void registerTool()}>登记工具</Button>
+          <Button icon={<Plus size={15} />} loading={pendingAction === 'tool'} disabled={Boolean(pendingAction)} onClick={() => void runPendingAction('tool', registerTool)}>登记工具</Button>
         </div>
       </section>
 
       {resource.status === 'error' && (
-        <ErrorState error={resource.error} onRetry={resource.reload} />
+        <ResourceState status="error" error={resource.error} onRetry={resource.reload} />
       )}
-      {resource.status === 'loading' && <LoadingState title="正在获取沙箱工具" />}
+      {resource.status === 'loading' && <ResourceState status="loading" title="正在获取沙箱工具" />}
       {(resource.status === 'success' || resource.status === 'empty') && (
         <div className={styles.tableWrap}>
           <Table

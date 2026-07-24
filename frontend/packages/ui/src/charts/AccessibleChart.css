@@ -13,11 +13,6 @@
     box-shadow var(--t) var(--ease);
 }
 
-.chaimir-chart:hover {
-  border-color: var(--color-border-strong);
-  box-shadow: var(--shadow);
-}
-
 .chaimir-chart__header {
   display: flex;
   justify-content: space-between;

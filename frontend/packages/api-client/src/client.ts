@@ -3,6 +3,13 @@
 import axios, { AxiosInstance, AxiosError, AxiosRequestConfig, InternalAxiosRequestConfig } from 'axios'
 import { API_BASE_PATH, API_ERROR_MESSAGES } from './constants'
 
+/** uploadProgress 把 Axios 字节进度统一转换为页面使用的整数百分比。 */
+function uploadProgress(onProgress?: (progress: number) => void): NonNullable<AxiosRequestConfig['onUploadProgress']> {
+  return (event) => {
+    if (onProgress && event.total) onProgress(Math.round((event.loaded * 100) / event.total))
+  }
+}
+
 export interface ApiConfig {
   baseURL: string
   wsBaseURL?: string
@@ -296,12 +303,7 @@ export class ApiClient {
       headers: {
         'Content-Type': 'multipart/form-data',
       },
-      onUploadProgress: (progressEvent) => {
-        if (onProgress && progressEvent.total) {
-          const progress = Math.round((progressEvent.loaded * 100) / progressEvent.total)
-          onProgress(progress)
-        }
-      },
+      onUploadProgress: uploadProgress(onProgress),
     })
   }
 
@@ -317,12 +319,7 @@ export class ApiClient {
       headers: {
         'Content-Type': 'multipart/form-data',
       },
-      onUploadProgress: (progressEvent) => {
-        if (onProgress && progressEvent.total) {
-          const progress = Math.round((progressEvent.loaded * 100) / progressEvent.total)
-          onProgress(progress)
-        }
-      },
+      onUploadProgress: uploadProgress(onProgress),
     })
   }
 
@@ -338,12 +335,7 @@ export class ApiClient {
       headers: {
         'Content-Type': 'multipart/form-data',
       },
-      onUploadProgress: (progressEvent) => {
-        if (onProgress && progressEvent.total) {
-          const progress = Math.round((progressEvent.loaded * 100) / progressEvent.total)
-          onProgress(progress)
-        }
-      },
+      onUploadProgress: uploadProgress(onProgress),
     })
   }
 

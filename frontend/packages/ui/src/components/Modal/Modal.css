@@ -15,15 +15,13 @@
   justify-content: center;
   padding: var(--space-4);
   background: var(--color-scrim); /* 遮罩 40-60% */
-  animation: chaimir-modal-overlay-in var(--t-normal) var(--ease-out);
+  opacity: 1;
+  transition: opacity var(--t-modal-enter) var(--ease-out);
 }
 
-@keyframes chaimir-modal-overlay-in {
-  from {
+@starting-style {
+  .chaimir-modal-overlay {
     opacity: 0;
-  }
-  to {
-    opacity: 1;
   }
 }
 
@@ -36,23 +34,33 @@
   background: var(--color-bg);
   border: 1px solid var(--color-border);
   border-radius: var(--radius);
-  box-shadow: var(--shadow-glass-panel);
+  box-shadow: var(--shadow-overlay);
   display: flex;
   flex-direction: column;
   outline: 2px solid transparent;
-  /* 入场动画：translateY + scale + 淡入 */
-  animation: chaimir-modal-in 0.4s var(--ease-spring-ios);
+  opacity: 1;
+  transform: scale(1);
+  transform-origin: center;
+  transition: opacity var(--t-modal-enter) var(--ease-out), transform var(--t-modal-enter) var(--ease-out);
 }
 
-@keyframes chaimir-modal-in {
-  from {
+@starting-style {
+  .chaimir-modal {
     opacity: 0;
-    transform: translateY(20px) scale(0.95);
+    transform: scale(0.97);
   }
-  to {
-    opacity: 1;
-    transform: translateY(0) scale(1);
-  }
+}
+
+.chaimir-modal-overlay[data-state='closed'] {
+  opacity: 0;
+  pointer-events: none;
+  transition-duration: var(--t-modal-exit);
+}
+
+.chaimir-modal-overlay[data-state='closed'] .chaimir-modal {
+  opacity: 0;
+  transform: scale(0.97);
+  transition-duration: var(--t-modal-exit);
 }
 
 /* === 尺寸 === */
@@ -108,9 +116,11 @@
   transition: background var(--t-fast) var(--ease), color var(--t-fast) var(--ease), transform var(--t-fast) var(--ease);
 }
 
-.chaimir-modal__close:hover {
-  background: var(--color-surface-hover);
-  color: var(--color-text);
+@media (hover: hover) and (pointer: fine) {
+  .chaimir-modal__close:hover {
+    background: var(--color-surface-hover);
+    color: var(--color-text);
+  }
 }
 
 .chaimir-modal__close:active {
@@ -140,7 +150,7 @@
 
 /* === 响应式 === */
 
-@media (max-width: 640px) {
+@media not all and (--bp-sm) {
   .chaimir-modal-overlay {
     padding: 0;
     align-items: flex-end;
@@ -152,7 +162,19 @@
     border-bottom-left-radius: 0;
     border-bottom-right-radius: 0;
     /* 移动端从底部弹出 */
-    animation: chaimir-modal-in-mobile 0.4s var(--ease-spring-ios);
+    transform: translateY(0);
+    transition: transform var(--t-modal-enter) var(--ease-drawer), opacity var(--t-modal-enter) var(--ease-out);
+  }
+
+  .chaimir-modal-overlay[data-state='closed'] .chaimir-modal {
+    transform: translateY(100%);
+  }
+
+  @starting-style {
+    .chaimir-modal {
+      opacity: 0;
+      transform: translateY(100%);
+    }
   }
 
   .chaimir-modal__header,
@@ -161,21 +183,12 @@
     padding-inline: var(--space-4);
   }
 
-  @keyframes chaimir-modal-in-mobile {
-    from {
-      transform: translateY(100%);
-    }
-    to {
-      transform: translateY(0);
-    }
-  }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .chaimir-modal-overlay,
   .chaimir-modal,
   .chaimir-modal__close {
-    animation: none;
     transition: none;
   }
 }

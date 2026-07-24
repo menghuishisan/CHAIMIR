@@ -2,11 +2,10 @@
 
 import React, { useCallback, useMemo, useState } from 'react'
 import { ProgressStatus } from '@chaimir/api-client'
-import { Button, Callout, FormField, Select, Textarea } from '@chaimir/ui'
+import { Button, Callout, FormField, Select, Textarea, ResourceState } from '@chaimir/ui'
 import { CheckCircle, FileText, Info, Play, Star } from 'lucide-react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { api } from '../../../../../app/api'
-import { EmptyState, ErrorState, LoadingState } from '../../../../../components/ResourceState'
 import { useAsyncResource } from '../../../../../hooks'
 import styles from '../../teaching.module.css'
 import { userFacingErrorMessage } from '../../../../../utils/userFacingError'
@@ -59,16 +58,16 @@ const CourseDetailPage: React.FC = () => {
   }, [comment, id, rating])
 
   if (!id) {
-    return <EmptyState title="缺少课程信息" description="当前链接没有课程编号。" />
+    return <ResourceState status="empty" title="缺少课程信息" description="当前链接没有课程编号。" />
   }
   if (resource.status === 'loading') {
-    return <LoadingState title="正在获取课程详情" />
+    return <ResourceState status="loading" title="正在获取课程详情" />
   }
   if (resource.status === 'error') {
-    return <ErrorState error={resource.error} onRetry={resource.reload} />
+    return <ResourceState status="error" error={resource.error} onRetry={resource.reload} />
   }
   if (!outline) {
-    return <EmptyState title="暂无课程详情" description="当前课程暂未开放章节课时。" />
+    return <ResourceState status="empty" title="暂无课程详情" description="当前课程暂未开放章节课时。" />
   }
 
   return (

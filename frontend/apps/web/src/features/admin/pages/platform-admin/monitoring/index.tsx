@@ -2,10 +2,9 @@
 
 import React, { useMemo, useState } from 'react'
 import type { MonitoringPanel } from '@chaimir/api-client'
-import { Button } from '@chaimir/ui'
+import { Button, ResourceState } from '@chaimir/ui'
 import { Monitor, RefreshCw } from 'lucide-react'
 import { api } from '../../../../../app/api'
-import { EmptyState, ErrorState, LoadingState } from '../../../../../components/ResourceState'
 import { useAsyncResource } from '../../../../../hooks'
 import styles from './monitoring.module.css'
 
@@ -33,12 +32,12 @@ const MonitoringPage: React.FC = () => {
         </Button>
       </div>
 
-      {resource.status === 'loading' && <LoadingState title="正在获取监控面板" />}
+      {resource.status === 'loading' && <ResourceState status="loading" title="正在获取监控面板" />}
       {resource.status === 'error' && (
-        <ErrorState error={resource.error} onRetry={resource.reload} />
+        <ResourceState status="error" error={resource.error} onRetry={resource.reload} />
       )}
       {resource.status === 'empty' && (
-        <EmptyState title="暂无监控面板" description="当前平台没有可嵌入的监控面板。" />
+        <ResourceState status="empty" title="暂无监控面板" description="当前平台没有可嵌入的监控面板。" />
       )}
       {resource.status === 'success' && selectedPanel && (
         <>

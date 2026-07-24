@@ -2,11 +2,11 @@
 import React, { Suspense } from 'react'
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import { UserRole } from '@chaimir/api-client'
+import { ResourceState } from '@chaimir/ui'
 import AuthLayout from '../layouts/auth/AuthLayout'
 import ImmersiveLayout from '../layouts/immersive/ImmersiveLayout'
 import MainLayout from '../layouts/main/MainLayout'
 import { RoleGuard } from '../components/RoleGuard'
-import styles from './App.module.css'
 
 import {
   LoginPage,
@@ -54,7 +54,6 @@ import {
   TeacherMonitoringPage,
   TeacherAntiCheatPage,
   TeacherVulnerabilitiesPage,
-  TeacherVulnerabilityWizardPage,
   TeacherQuestionsPage,
   TeacherQuestionCategoriesPage,
   TeacherQuestionEditPage,
@@ -108,11 +107,9 @@ import {
 } from '../routes/lazy-pages'
 import { platformLayerEnabled } from './config'
 
-// PageFallback 为懒加载页面提供轻量反馈,避免首屏或切页时出现空白区域。
+// PageFallback 为懒加载页面提供统一加载反馈,避免首屏或切页时出现空白区域。
 const PageFallback: React.FC = () => (
-  <div role="status" aria-live="polite" className={styles.pageFallback}>
-    页面正在加载,请稍候
-  </div>
+  <ResourceState status="loading" title="正在打开页面" description="请稍候，系统正在准备页面内容。" />
 )
 
 // App 挂载公共页面、四角色功能路由和沉浸式工作台。
@@ -247,7 +244,6 @@ const App: React.FC = () => {
               <Route path="exams" element={<TeacherExamsPage />} />
               <Route path="exams/edit" element={<TeacherExamsEditPage />} />
               <Route path="vulnerabilities" element={<TeacherVulnerabilitiesPage />} />
-              <Route path="vulnerabilities/wizard" element={<TeacherVulnerabilityWizardPage />} />
               <Route path="simulations" element={<TeacherSimulationsPage />} />
               <Route path="shared" element={<TeacherSharedPage />} />
               <Route path="grades" element={<TeacherGradesPage />} />
