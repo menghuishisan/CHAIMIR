@@ -61,6 +61,18 @@
     security: [{ bearerAuth: [] }]
     requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/grade-center/reviews/mine:
+  get:
+    tags: [grade]
+    summary: 教师自己的成绩审核
+    operationId: gradeListOwnReviews
+    x-chaimir-audience: teacher
+    security: [{ bearerAuth: [] }]
+    parameters:
+      - { $ref: "#/components/parameters/StatusQuery" }
+      - { $ref: "#/components/parameters/PageQuery" }
+      - { $ref: "#/components/parameters/SizeQuery" }
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
 /api/v1/grade-center/reviews/{id}/approve:
   post:
     tags: [grade]

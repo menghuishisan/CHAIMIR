@@ -4,11 +4,10 @@ import React, { useCallback, useState } from 'react'
 import { ImagePrepullStatus, RuntimeImageStatus } from '@chaimir/api-client'
 import type { SandboxRuntimeImage } from '@chaimir/api-client'
 import type { TableColumn } from '@chaimir/ui'
-import { Button, Checkbox, DescriptionList, Input, Table } from '@chaimir/ui'
+import { Button, Checkbox, DescriptionList, Input, Table, useConfirm, ResourceState } from '@chaimir/ui'
 import { ArrowLeft, HardDrive, Play, Plus, Power, RefreshCw } from 'lucide-react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { api } from '../../../../../app/api'
-import { ErrorState, LoadingState } from '../../../../../components/ResourceState'
 import { useAsyncResource } from '../../../../../hooks'
 import {
   formatDateTime,
@@ -25,6 +24,7 @@ import styles from './detail.module.css'
  * RuntimeDetailPage 读取运行时和镜像列表，并提供自检与镜像预拉取动作。
  */
 const RuntimeDetailPage: React.FC = () => {
+  const confirm = useConfirm()
   const { id } = useParams()
   const navigate = useNavigate()
   const [runningSelftest, setRunningSelftest] = useState(false)
@@ -107,7 +107,9 @@ const RuntimeDetailPage: React.FC = () => {
 
   /** disableImage 停用镜像版本并刷新运行时详情。 */
   const disableImage = async (imageId: string) => {
-    if (!id || !window.confirm('确定停用这个镜像版本吗？')) return
+    if (!id) return
+    const confirmed = await confirm({ title: '停用镜像版本', description: '停用后新建环境将不能再选择这个镜像版本，确定继续吗？', confirmLabel: '确认停用' })
+    if (!confirmed) return
     setError(null)
     try {
       await api.sandbox.disableRuntimeImage(id, imageId)
@@ -165,8 +167,8 @@ const RuntimeDetailPage: React.FC = () => {
 
       {message && <p className={styles.message} role="status">{message}</p>}
       {error && <p className={styles.error} role="alert">{error}</p>}
-      {resource.status === 'error' && <ErrorState error={resource.error} onRetry={resource.reload} />}
-      {resource.status === 'loading' && <LoadingState title="正在获取运行时详情" />}
+      {resource.status === 'error' && <ResourceState status="error" error={resource.error} onRetry={resource.reload} />}
+      {resource.status === 'loading' && <ResourceState status="loading" title="正在获取运行时详情" />}
       {runtime && (
         <>
           <section className={styles.summary}>

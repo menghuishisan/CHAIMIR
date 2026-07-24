@@ -1,6 +1,7 @@
 // Monaco 封装：为实验 IDE 提供统一编辑器生命周期和只读/变更事件装配。
 
 import type { EditorMountOptions, MountedEditor } from './types'
+import { cssColor } from './theme'
 
 const monacoThemeTokens = {
   background: '--color-terminal-bg',
@@ -64,15 +65,6 @@ export async function mountMonacoEditor(container: HTMLElement, options: EditorM
       editor.dispose()
     },
   }
-}
-
-/** cssColor 读取设计令牌的计算值，供 Monaco 主题配置使用。 */
-function cssColor(token: string): string {
-  const value = getComputedStyle(document.documentElement).getPropertyValue(token).trim()
-  if (!value) {
-    throw new Error(`缺少前端颜色令牌 ${token}`)
-  }
-  return value
 }
 
 /** colorWithoutHash 把 CSS 颜色转换为 Monaco 需要的不带井号格式。 */

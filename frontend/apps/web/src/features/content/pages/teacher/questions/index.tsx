@@ -4,11 +4,10 @@ import React, { useCallback, useMemo, useState } from 'react'
 import type { ContentCategory, ContentItem } from '@chaimir/api-client'
 import { ContentType } from '@chaimir/api-client'
 import type { TableColumn } from '@chaimir/ui'
-import { Button, Input, Select, Table } from '@chaimir/ui'
+import { Button, Input, Select, Table, ResourceState } from '@chaimir/ui'
 import { Database, Edit2, FolderTree, RefreshCw } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../../../../../app/api'
-import { ErrorState, LoadingState } from '../../../../../components/ResourceState'
 import { useAsyncResource } from '../../../../../hooks'
 import styles from '../../content.module.css'
 import { contentDifficultyLabel, contentStatusLabel, contentTypeLabel, contentTypeOptions, withAllOption } from '../../../../../utils/index'
@@ -81,14 +80,14 @@ const TeacherQuestionsPage: React.FC = () => {
       <div className={styles.grid}>
         <section className={styles.panel}>
           <h2>分类</h2>
-          {categories.status === 'loading' && <LoadingState title="正在获取分类" />}
+          {categories.status === 'loading' && <ResourceState status="loading" title="正在获取分类" />}
           {(categories.data || []).map((category) => (
             <span className={styles.status} key={category.id}>{category.name}</span>
           ))}
         </section>
         <section>
-          {items.status === 'error' && <ErrorState error={items.error} onRetry={items.reload} />}
-          {items.status === 'loading' && <LoadingState title="正在获取题库资源" />}
+          {items.status === 'error' && <ResourceState status="error" error={items.error} onRetry={items.reload} />}
+          {items.status === 'loading' && <ResourceState status="loading" title="正在获取题库资源" />}
           {(items.status === 'success' || items.status === 'empty') && (
             <div className={styles.tableWrap}>
               <Table columns={columns} rows={rows} rowKey={(row) => String(row.id)} emptyTitle="暂无资源" emptyDescription="当前没有可展示的题库资源。" ariaLabel="题库资源列表" />

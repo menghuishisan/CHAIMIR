@@ -89,7 +89,7 @@ function partialSign(state: ThresholdState): ThresholdState {
  */
 function aggregate(state: ThresholdState): ThresholdState {
   const parts = state.holders
-    .filter((holder) => holder.signed && !holder.faulty && holder.partialSignature === partialSignature(state.messageDigest, holder.x, holder.shareValue))
+    .filter((holder) => isValidShare(state, holder))
     .map((holder) => ({ x: holder.x, partial: holder.partialSignature ?? '' }));
   return { ...state, aggregateSignature: validShares(state) >= state.threshold ? aggregateThresholdSignature(state.messageDigest, parts.slice(0, state.threshold)) : '' };
 }
@@ -99,7 +99,7 @@ function aggregate(state: ThresholdState): ThresholdState {
  */
 function verifyAggregate(state: ThresholdState): ThresholdState {
   const parts = state.holders
-    .filter((holder) => holder.signed && !holder.faulty && holder.partialSignature === partialSignature(state.messageDigest, holder.x, holder.shareValue))
+    .filter((holder) => isValidShare(state, holder))
     .map((holder) => ({ x: holder.x, partial: holder.partialSignature ?? '' }))
     .slice(0, state.threshold);
   const expectedAggregate = parts.length >= state.threshold ? aggregateThresholdSignature(state.messageDigest, parts) : '';
@@ -133,7 +133,12 @@ function replaceFaultyShare(state: ThresholdState): ThresholdState {
  * validShares 统计有效部分签名。
  */
 export function validShares(state: ThresholdState): number {
-  return state.holders.filter((holder) => holder.signed && !holder.faulty && holder.partialSignature === partialSignature(state.messageDigest, holder.x, holder.shareValue)).length;
+  return state.holders.filter((holder) => isValidShare(state, holder)).length;
+}
+
+/** isValidShare 校验签名份额确由当前消息摘要和持有者份额生成。 */
+function isValidShare(state: ThresholdState, holder: ShareHolder): boolean {
+  return holder.signed && !holder.faulty && holder.partialSignature === partialSignature(state.messageDigest, holder.x, holder.shareValue);
 }
 
 /**

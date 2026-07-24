@@ -4,10 +4,9 @@ import React, { useCallback, useMemo, useState } from 'react'
 import type { Announcement } from '@chaimir/api-client'
 import { AnnouncementScope, UserRole } from '@chaimir/api-client'
 import type { TableColumn } from '@chaimir/ui'
-import { Button, Callout, Input, Select, Table, Textarea } from '@chaimir/ui'
+import { Button, Callout, Input, Select, Table, Textarea, ResourceState, FormField } from '@chaimir/ui'
 import { Megaphone, RefreshCw, Send } from 'lucide-react'
 import { api } from '../../../../../app/api'
-import { ErrorState, LoadingState } from '../../../../../components/ResourceState'
 import { useAsyncResource } from '../../../../../hooks'
 import styles from './announcements.module.css'
 import { announcementScopeLabel, announcementScopeOptions, announcementTargetRoleOptions, formatDateTime } from '../../../../../utils/index'
@@ -102,28 +101,13 @@ const AnnouncementsPage: React.FC = () => {
       <div className={styles.grid}>
         <section className={styles.panel}>
           <h2>发布公告</h2>
-          <label>
-            公告标题
-            <Input fullWidth value={title} placeholder="请输入公告标题" onChange={(event) => setTitle(event.target.value)} />
-          </label>
-          <label>
-            覆盖范围
-            <Select fullWidth value={scope} options={announcementScopeOptions} onChange={setScope} />
-          </label>
+          <FormField label="公告标题"><Input fullWidth value={title} placeholder="请输入公告标题" onChange={(event) => setTitle(event.target.value)} /></FormField>
+          <FormField label="覆盖范围"><Select fullWidth value={scope} options={announcementScopeOptions} onChange={setScope} /></FormField>
           {Number(scope) === AnnouncementScope.ROLES && (
-            <label>
-              目标角色
-              <Select fullWidth value={targetRole} options={announcementTargetRoleOptions} onChange={setTargetRole} />
-            </label>
+            <FormField label="目标角色"><Select fullWidth value={targetRole} options={announcementTargetRoleOptions} onChange={setTargetRole} /></FormField>
           )}
-          <label>
-            过期时间
-            <Input fullWidth type="datetime-local" value={expireAt} onChange={(event) => setExpireAt(event.target.value)} />
-          </label>
-          <label>
-            公告正文
-            <Textarea value={content} placeholder="请输入公告正文" onChange={(event) => setContent(event.target.value)} />
-          </label>
+          <FormField label="过期时间"><Input fullWidth type="datetime-local" value={expireAt} onChange={(event) => setExpireAt(event.target.value)} /></FormField>
+          <FormField label="公告正文"><Textarea value={content} placeholder="请输入公告正文" onChange={(event) => setContent(event.target.value)} /></FormField>
           <Button loading={submitting} icon={<Send size={16} />} onClick={handleSubmit}>
             发布公告
           </Button>
@@ -131,8 +115,8 @@ const AnnouncementsPage: React.FC = () => {
 
         <section className={styles.panel}>
           <h2>公告记录</h2>
-          {resource.status === 'error' && <ErrorState error={resource.error} onRetry={resource.reload} />}
-          {resource.status === 'loading' && <LoadingState title="正在获取公告记录" />}
+          {resource.status === 'error' && <ResourceState status="error" error={resource.error} onRetry={resource.reload} />}
+          {resource.status === 'loading' && <ResourceState status="loading" title="正在获取公告记录" />}
           {(resource.status === 'success' || resource.status === 'empty') && (
             <Table
               columns={columns}

@@ -1,31 +1,27 @@
 // 教师竞赛配置页：把竞赛规则和赛程保存到后端竞赛定义。
 
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { useEffect, useState } from 'react'
 import type { Contest, ContestRequest } from '@chaimir/api-client'
 import { ContestMode, MatchMode, TeamMode } from '@chaimir/api-client'
-import { Button, Input, Select, Textarea } from '@chaimir/ui'
+import { Button, Input, Select, ResourceState } from '@chaimir/ui'
 import { Save, Settings } from 'lucide-react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { api } from '../../../../../app/api'
-import { EmptyState, ErrorState, LoadingState } from '../../../../../components/ResourceState'
+import { usePendingAction } from '../../../../../hooks'
 import { useAsyncResource } from '../../../../../hooks/useAsyncResource'
 import { defaultContestRequest } from '../../../config/contest'
 import styles from '../../contest.module.css'
-import { contestModeOptions, formatDateTimeLocalInput, matchModeOptions, parseDateTimeLocalInput, parseJsonObject, teamModeOptions } from '../../../../../utils/index'
+import { contestModeOptions, formatDateTimeLocalInput, matchModeOptions, parseDateTimeLocalInput, teamModeOptions } from '../../../../../utils/index'
 import { userFacingErrorMessage } from '../../../../../utils/userFacingError'
 
 const TeacherContestConfigPage: React.FC = () => {
   const { id } = useParams()
   const navigate = useNavigate()
   const [form, setForm] = useState<ContestRequest>(defaultContestRequest)
-  const [rulesText, setRulesText] = useState('{}')
   const [message, setMessage] = useState('')
+  const { pendingAction, runPendingAction } = usePendingAction()
   const resource = useAsyncResource(
-    async () => {
-      if (!id) return null
-      const response = await api.contest.getContests({ page: 1, size: 100 })
-      return response.list.find((item) => item.id === id) ?? null
-    },
+    () => id ? api.contest.getContest(id) : Promise.resolve(null),
     [id],
     () => false
   )
@@ -34,26 +30,12 @@ const TeacherContestConfigPage: React.FC = () => {
     if (!resource.data) return
     const request = toRequest(resource.data)
     setForm(request)
-    setRulesText(JSON.stringify(request.rules, null, 2))
   }, [resource.data])
 
-  const rules = useMemo(() => {
-    try {
-      return { ok: true, value: parseJsonObject(rulesText) }
-    } catch {
-      return { ok: false, value: {} }
-    }
-  }, [rulesText])
-
   const save = async () => {
-    if (!rules.ok) {
-      setMessage('竞赛规则不是有效的结构，请检查后再保存。')
-      return
-    }
     setMessage('')
     try {
-      const payload = { ...form, rules: rules.value }
-      const saved = id ? await api.contest.updateContest(id, payload) : await api.contest.createContest(payload)
+      const saved = id ? await api.contest.updateContest(id, form) : await api.contest.createContest(form)
       setMessage('竞赛配置已保存。')
       if (!id) navigate(`/teacher/contests/${saved.id}/config`, { replace: true })
     } catch (error) {
@@ -62,15 +44,11 @@ const TeacherContestConfigPage: React.FC = () => {
   }
 
   if (id && resource.status === 'loading') {
-    return <LoadingState title="正在读取竞赛配置" description="系统正在同步已保存的赛程和规则。" />
+    return <ResourceState status="loading" title="正在读取竞赛配置" description="系统正在同步已保存的赛程和规则。" />
   }
 
   if (resource.status === 'error') {
-    return <ErrorState error={resource.error} onRetry={resource.reload} />
-  }
-
-  if (id && resource.status === 'empty') {
-    return <EmptyState title="未找到竞赛" description="该竞赛可能已删除或你没有访问权限。" />
+    return <ResourceState status="error" error={resource.error} onRetry={resource.reload} />
   }
 
   return (
@@ -81,7 +59,7 @@ const TeacherContestConfigPage: React.FC = () => {
           <Settings className={styles.titleIcon} size={28} />
           竞赛配置
         </h1>
-        <Button icon={<Save size={16} />} onClick={save}>保存配置</Button>
+        <Button icon={<Save size={16} />} loading={pendingAction === 'save'} disabled={Boolean(pendingAction)} onClick={() => void runPendingAction('save', save)}>保存配置</Button>
       </div>
       {message && <p className={styles.message} role="status">{message}</p>}
 
@@ -105,10 +83,6 @@ const TeacherContestConfigPage: React.FC = () => {
           <div className={styles.field}><label className={styles.label} htmlFor="start-at">比赛开始</label><Input id="start-at" type="datetime-local" value={formatDateTimeLocalInput(form.start_at)} onChange={(event) => setForm((current) => ({ ...current, start_at: parseDateTimeLocalInput(event.target.value) }))} fullWidth /></div>
           <div className={styles.field}><label className={styles.label} htmlFor="end-at">比赛结束</label><Input id="end-at" type="datetime-local" value={formatDateTimeLocalInput(form.end_at)} onChange={(event) => setForm((current) => ({ ...current, end_at: parseDateTimeLocalInput(event.target.value) }))} fullWidth /></div>
           <div className={styles.field}><label className={styles.label} htmlFor="freeze">封榜时长</label><Input id="freeze" type="number" value={form.freeze_minutes} onChange={(event) => setForm((current) => ({ ...current, freeze_minutes: Number(event.target.value) }))} fullWidth /></div>
-        </div>
-        <div className={styles.field}>
-          <label className={styles.label} htmlFor="rules">竞赛规则</label>
-          <Textarea id="rules" className={styles.jsonEditor} value={rulesText} onChange={(event) => setRulesText(event.target.value)} fullWidth />
         </div>
       </section>
     </div>

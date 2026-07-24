@@ -17,57 +17,50 @@ const StudentContestApplyPage: React.FC = () => {
   const [team, setTeam] = useState<ContestTeam | null>(null)
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
+  const [pendingAction, setPendingAction] = useState('')
 
-  const signup = async () => {
-    if (!id || !teamName.trim()) return
+  /** runAction 串行执行队伍操作，避免重复提交并统一错误反馈。 */
+  const runAction = async (key: string, action: () => Promise<ContestTeam>, success: string) => {
+    if (pendingAction) return
+    setPendingAction(key)
     setMessage('')
     setError('')
     try {
-      const result = await api.contest.signup(id, { team_name: teamName.trim() })
-      setTeam(await api.contest.getTeam(result.id))
-      setTeamId(result.id)
-      setMessage('报名已提交。')
+      setTeam(await action())
+      setMessage(success)
     } catch (actionError) {
-      setError(userFacingErrorMessage(actionError, '暂时无法提交报名。'))
+      setError(userFacingErrorMessage(actionError, '队伍操作未完成，请稍后重试。'))
+    } finally {
+      setPendingAction('')
     }
+  }
+
+  const signup = async () => {
+    if (!id || !teamName.trim()) return
+    await runAction('signup', async () => {
+      const result = await api.contest.signup(id, { team_name: teamName.trim() })
+      setTeamId(result.id)
+      return api.contest.getTeam(result.id)
+    }, '报名已提交。')
   }
 
   const join = async () => {
     if (!teamId.trim() || !inviteCode.trim()) return
-    setMessage('')
-    setError('')
-    try {
+    await runAction('join', async () => {
       const result = await api.contest.joinTeam(teamId.trim(), { invite_code: inviteCode.trim() })
-      setTeam(await api.contest.getTeam(result.id))
-      setMessage('已加入队伍。')
-    } catch (actionError) {
-      setError(userFacingErrorMessage(actionError, '暂时无法加入队伍。'))
-    }
+      return api.contest.getTeam(result.id)
+    }, '已加入队伍。')
   }
 
   const lock = async () => {
     if (!teamId.trim()) return
-    setMessage('')
-    setError('')
-    try {
-      const result = await api.contest.lockTeam(teamId.trim())
-      setTeam(result)
-      setMessage('队伍名单已锁定。')
-    } catch (actionError) {
-      setError(userFacingErrorMessage(actionError, '暂时无法锁定队伍。'))
-    }
+    await runAction('lock', () => api.contest.lockTeam(teamId.trim()), '队伍名单已锁定。')
   }
 
   /** refreshTeam 按队伍编号读取服务端最新成员和锁定状态。 */
   const refreshTeam = async () => {
     if (!teamId.trim()) return
-    setError('')
-    try {
-      setTeam(await api.contest.getTeam(teamId.trim()))
-      setMessage('队伍信息已更新。')
-    } catch (actionError) {
-      setError(userFacingErrorMessage(actionError, '暂时无法读取队伍信息。'))
-    }
+    await runAction('refresh', () => api.contest.getTeam(teamId.trim()), '队伍信息已更新。')
   }
 
   return (
@@ -89,7 +82,7 @@ const StudentContestApplyPage: React.FC = () => {
             <label className={styles.label} htmlFor="team-name">队伍名称</label>
             <Input id="team-name" value={teamName} onChange={(event) => setTeamName(event.target.value)} fullWidth />
           </div>
-          <Button icon={<Users size={16} />} onClick={signup}>提交报名</Button>
+          <Button icon={<Users size={16} />} loading={pendingAction === 'signup'} disabled={Boolean(pendingAction) || !teamName.trim()} onClick={signup}>提交报名</Button>
         </section>
         <aside className={`${styles.panel} ${styles.section}`}>
           <h2 className={styles.sectionTitle}>加入已有队伍</h2>
@@ -102,9 +95,9 @@ const StudentContestApplyPage: React.FC = () => {
             <Input id="invite-code" value={inviteCode} onChange={(event) => setInviteCode(event.target.value)} fullWidth />
           </div>
           <div className={styles.actions}>
-            <Button variant="outline" onClick={join}>加入队伍</Button>
-            <Button variant="outline" icon={<Lock size={16} />} onClick={lock}>锁定名单</Button>
-            <Button variant="ghost" onClick={() => void refreshTeam()}>刷新队伍</Button>
+            <Button variant="outline" loading={pendingAction === 'join'} disabled={Boolean(pendingAction) || !teamId.trim() || !inviteCode.trim()} onClick={join}>加入队伍</Button>
+            <Button variant="outline" icon={<Lock size={16} />} loading={pendingAction === 'lock'} disabled={Boolean(pendingAction) || !teamId.trim()} onClick={lock}>锁定名单</Button>
+            <Button variant="ghost" loading={pendingAction === 'refresh'} disabled={Boolean(pendingAction) || !teamId.trim()} onClick={() => void refreshTeam()}>刷新队伍</Button>
           </div>
         </aside>
       </div>

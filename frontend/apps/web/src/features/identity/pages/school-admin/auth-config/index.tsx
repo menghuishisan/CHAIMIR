@@ -4,10 +4,9 @@ import React, { useCallback, useMemo, useState } from 'react'
 import type { SSOConfig } from '@chaimir/api-client'
 import { SsoMatchField, SsoType } from '@chaimir/api-client'
 import type { TableColumn } from '@chaimir/ui'
-import { Button, Callout, Input, Select, Switch, Table } from '@chaimir/ui'
+import { Button, Callout, Input, Select, Switch, Table, ResourceState, FormField } from '@chaimir/ui'
 import { Link, RefreshCw, Save, Shield } from 'lucide-react'
 import { api } from '../../../../../app/api'
-import { ErrorState, LoadingState } from '../../../../../components/ResourceState'
 import { useAsyncResource } from '../../../../../hooks'
 import styles from '../../identity-admin.module.css'
 import { ssoMatchFieldLabel, ssoMatchFieldOptions, ssoTypeLabel, ssoTypeOptions } from '../../../../../utils/index'
@@ -118,25 +117,19 @@ const AuthConfigPage: React.FC = () => {
       <div className={styles.grid}>
         <section className={styles.panel}>
           <h2>认证配置</h2>
-          <label className={styles.field}>
-            认证类型
-            <Select fullWidth value={type} options={ssoTypeOptions} onChange={setType} />
-          </label>
-          <label className={styles.field}>
-            匹配字段
-            <Select fullWidth value={matchField} options={ssoMatchFieldOptions} onChange={setMatchField} />
-          </label>
+          <FormField className={styles.field} label="认证类型"><Select fullWidth value={type} options={ssoTypeOptions} onChange={setType} /></FormField>
+          <FormField className={styles.field} label="匹配字段"><Select fullWidth value={matchField} options={ssoMatchFieldOptions} onChange={setMatchField} /></FormField>
           <Switch checked={enabled} label={enabled ? '已启用' : '已停用'} onChange={(event) => setEnabled(event.target.checked)} />
           {Number(type) === SsoType.CAS ? (
-            <label className={styles.field}>CAS 服务地址<Input fullWidth type="url" value={casServerUrl} placeholder="https://sso.example.edu/cas" onChange={(event) => setCasServerUrl(event.target.value)} /></label>
+            <FormField className={styles.field} label="CAS 服务地址"><Input fullWidth type="url" value={casServerUrl} placeholder="https://sso.example.edu/cas" onChange={(event) => setCasServerUrl(event.target.value)} /></FormField>
           ) : (
             <>
-              <label className={styles.field}>目录服务地址<Input fullWidth type="url" value={ldapUrl} placeholder="ldaps://directory.example.edu:636" onChange={(event) => setLdapUrl(event.target.value)} /></label>
-              <label className={styles.field}>服务账号<Input fullWidth value={bindDN} placeholder="用于查询目录的服务账号" onChange={(event) => setBindDN(event.target.value)} /></label>
-              <label className={styles.field}>服务账号密码<Input fullWidth type="password" autoComplete="new-password" value={bindPassword} placeholder="保存时需要重新填写" onChange={(event) => setBindPassword(event.target.value)} /></label>
-              <label className={styles.field}>用户查询范围<Input fullWidth value={baseDN} placeholder="例如 ou=people,dc=example,dc=edu" onChange={(event) => setBaseDN(event.target.value)} /></label>
-              <label className={styles.field}>用户查询规则<Input fullWidth value={userFilter} placeholder="例如 (uid={username})" onChange={(event) => setUserFilter(event.target.value)} /></label>
-              <label className={styles.field}>账号匹配属性<Input fullWidth value={matchAttribute} placeholder="例如 uid 或 mobile" onChange={(event) => setMatchAttribute(event.target.value)} /></label>
+              <FormField className={styles.field} label="目录服务地址"><Input fullWidth type="url" value={ldapUrl} placeholder="ldaps://directory.example.edu:636" onChange={(event) => setLdapUrl(event.target.value)} /></FormField>
+              <FormField className={styles.field} label="服务账号"><Input fullWidth value={bindDN} placeholder="用于查询目录的服务账号" onChange={(event) => setBindDN(event.target.value)} /></FormField>
+              <FormField className={styles.field} label="服务账号密码"><Input fullWidth type="password" autoComplete="new-password" value={bindPassword} placeholder="保存时需要重新填写" onChange={(event) => setBindPassword(event.target.value)} /></FormField>
+              <FormField className={styles.field} label="用户查询范围"><Input fullWidth value={baseDN} placeholder="例如 ou=people,dc=example,dc=edu" onChange={(event) => setBaseDN(event.target.value)} /></FormField>
+              <FormField className={styles.field} label="用户查询规则"><Input fullWidth value={userFilter} placeholder="例如 (uid={username})" onChange={(event) => setUserFilter(event.target.value)} /></FormField>
+              <FormField className={styles.field} label="账号匹配属性"><Input fullWidth value={matchAttribute} placeholder="例如 uid 或 mobile" onChange={(event) => setMatchAttribute(event.target.value)} /></FormField>
             </>
           )}
           <Button loading={submitting} icon={<Save size={16} />} onClick={handleSave}>
@@ -152,8 +145,8 @@ const AuthConfigPage: React.FC = () => {
             <Link size={18} />
             已配置认证
           </h2>
-          {resource.status === 'error' && <ErrorState error={resource.error} onRetry={resource.reload} />}
-          {resource.status === 'loading' && <LoadingState title="正在获取认证配置" />}
+          {resource.status === 'error' && <ResourceState status="error" error={resource.error} onRetry={resource.reload} />}
+          {resource.status === 'loading' && <ResourceState status="loading" title="正在获取认证配置" />}
           {(resource.status === 'success' || resource.status === 'empty') && (
             <Table
               columns={columns}

@@ -10,8 +10,8 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 40px;
-  height: 40px;
+  width: 44px;
+  height: 44px;
   border: 0;
   border-radius: var(--radius-sm);
   background: transparent;
@@ -20,11 +20,9 @@
   transition: background var(--t) var(--ease), color var(--t) var(--ease);
 }
 
-.iconButton:hover,
 .iconButton:focus-visible {
-  background: var(--color-glass-highlight);
+  background: var(--color-dark-highlight);
   color: var(--color-dark-text);
-  outline: none;
 }
 
 .badge {
@@ -47,7 +45,7 @@
 .divider {
   width: 1px;
   height: 24px;
-  background: var(--color-glass-border);
+  background: var(--color-dark-border-strong);
 }
 
 .profileWrap {
@@ -69,10 +67,8 @@
   transition: background var(--t) var(--ease);
 }
 
-.profileButton:hover,
 .profileButton:focus-visible {
-  background: var(--color-glass-highlight);
-  outline: none;
+  background: var(--color-dark-highlight);
 }
 
 .avatar,
@@ -174,17 +170,27 @@
   text-align: left;
 }
 
-.menuItem:hover,
 .menuItem:focus-visible {
   background: var(--color-surface-hover);
-  outline: none;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .iconButton:hover,
+  .profileButton:hover {
+    background: var(--color-dark-elevated);
+    color: var(--color-dark-text);
+  }
+
+  .menuItem:hover {
+    background: var(--color-surface-hover);
+  }
 }
 
 .logoutItem {
   color: var(--color-danger);
 }
 
-@media (max-width: 768px) {
+@media not all and (--bp-md) {
   .actions {
     gap: var(--space-2);
   }

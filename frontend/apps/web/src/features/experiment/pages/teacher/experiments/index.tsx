@@ -1,40 +1,27 @@
 // 教师实验列表页：读取后端实验编排，并执行校验、发布、下架和批改入口跳转。
 
-import React, { useState } from 'react'
+import React from 'react'
 import type { Experiment } from '@chaimir/api-client'
 import { ExperimentStatus } from '@chaimir/api-client'
-import { Button, Table } from '@chaimir/ui'
+import { Button, Table, ResourceState } from '@chaimir/ui'
 import { FileCheck, LayoutTemplate, Send, SlidersHorizontal } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../../../../../app/api'
-import { ErrorState, LoadingState } from '../../../../../components/ResourceState'
-import { useAsyncResource } from '../../../../../hooks/useAsyncResource'
+import { useActionFeedback, useAsyncResource } from '../../../../../hooks'
 import styles from '../../experiment.module.css'
 import { experimentStatusLabel } from '../../../../../utils/index'
-import { userFacingErrorMessage } from '../../../../../utils/userFacingError'
 
 const TeacherExperimentsPage: React.FC = () => {
   const navigate = useNavigate()
-  const [message, setMessage] = useState('')
   const resource = useAsyncResource(() => api.experiment.getExperiments({ page: 1, size: 20 }), [])
-
-  const run = async (operation: () => Promise<unknown>, success: string) => {
-    setMessage('')
-    try {
-      await operation()
-      setMessage(success)
-      resource.reload()
-    } catch (error) {
-      setMessage(userFacingErrorMessage(error, '操作没有完成，请稍后重试。'))
-    }
-  }
+  const { error, message, pendingAction, runAction } = useActionFeedback(resource.reload, '操作没有完成，请稍后重试。')
 
   if (resource.status === 'loading') {
-    return <LoadingState title="正在读取实验编排" description="系统正在同步你创建的实验。" />
+    return <ResourceState status="loading" title="正在读取实验编排" description="系统正在同步你创建的实验。" />
   }
 
   if (resource.status === 'error') {
-    return <ErrorState error={resource.error} onRetry={resource.reload} />
+    return <ResourceState status="error" error={resource.error} onRetry={resource.reload} />
   }
 
   const rows = resource.data?.list ?? []
@@ -52,6 +39,7 @@ const TeacherExperimentsPage: React.FC = () => {
           新建实验编排
         </Button>
       </div>
+      {error && <p className={styles.message} role="alert">{error}</p>}
       {message && <p className={styles.message} role="status">{message}</p>}
 
       <Table<Experiment>
@@ -62,7 +50,7 @@ const TeacherExperimentsPage: React.FC = () => {
         emptyDescription="新建实验编排后会显示在这里。"
         columns={[
           { key: 'name', title: '实验名称', dataIndex: 'name', priority: 'primary' },
-          { key: 'course', title: '课程编号', render: (row) => row.course_id || '未关联', priority: 'secondary' },
+          { key: 'course', title: '所属课程', render: (row) => row.course_id ? '已关联课程' : '未关联课程', priority: 'secondary' },
           { key: 'envs', title: '环境', render: (row) => `${row.components.envs.length} 个` },
           { key: 'checkpoints', title: '检查点', render: (row) => `${row.components.checkpoints.length} 个` },
           { key: 'status', title: '状态', render: (row) => experimentStatusLabel(row.status) },
@@ -72,10 +60,10 @@ const TeacherExperimentsPage: React.FC = () => {
             render: (row) => (
               <div className={styles.actions}>
                 <Button size="sm" variant="outline" icon={<SlidersHorizontal size={15} />} onClick={() => navigate(`/teacher/experiments/orchestration?id=${row.id}`)}>编排</Button>
-                <Button size="sm" variant="outline" icon={<FileCheck size={15} />} onClick={() => navigate(`/teacher/experiments/${row.id}/grading`)}>批改</Button>
-                <Button size="sm" icon={<Send size={15} />} onClick={() => run(() => api.experiment.validateExperiment(row.id).then((result) => result.ok ? api.experiment.publishExperiment(row.id) : Promise.reject(new Error(result.issues.map((issue) => issue.message).join('；') || '实验配置未通过校验。'))), '实验已发布。')}>发布</Button>
+          <Button size="sm" variant="outline" icon={<FileCheck size={15} />} onClick={() => navigate(`/teacher/experiments/${row.id}/grading`)}>查看提交</Button>
+                <Button size="sm" icon={<Send size={15} />} loading={pendingAction === `${row.id}-publish`} disabled={Boolean(pendingAction)} onClick={() => runAction(`${row.id}-publish`, () => api.experiment.validateExperiment(row.id).then((result) => result.ok ? api.experiment.publishExperiment(row.id) : Promise.reject(new Error(result.issues.map((issue) => issue.message).join('；') || '实验配置未通过校验。'))), '实验已发布。')}>发布</Button>
                 {row.status === ExperimentStatus.PUBLISHED && (
-                  <Button size="sm" variant="ghost" onClick={() => run(() => api.experiment.unpublishExperiment(row.id), '实验已下架。')}>下架</Button>
+                  <Button size="sm" variant="ghost" loading={pendingAction === `${row.id}-unpublish`} disabled={Boolean(pendingAction)} onClick={() => runAction(`${row.id}-unpublish`, () => api.experiment.unpublishExperiment(row.id), '实验已下架。')}>下架</Button>
                 )}
               </div>
             ),

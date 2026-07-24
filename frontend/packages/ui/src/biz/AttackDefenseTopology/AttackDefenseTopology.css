@@ -13,11 +13,6 @@
     box-shadow var(--t) var(--ease);
 }
 
-.chaimir-topology:hover {
-  border-color: var(--color-border-strong);
-  box-shadow: var(--shadow);
-}
-
 .chaimir-topology__header h3,
 .chaimir-topology__header p {
   margin: 0;
@@ -77,7 +72,7 @@
   fill: var(--color-bg);
   stroke: var(--color-border-strong);
   stroke-width: 2;
-  filter: drop-shadow(0 1px 2px var(--color-border));
+  filter: none;
 }
 
 .chaimir-topology__node text {
@@ -129,11 +124,7 @@
   transition:
     border-color var(--t-fast) var(--ease),
     background var(--t-fast) var(--ease),
-    transform var(--t-fast) var(--ease-spring-ios);
-}
-
-.chaimir-topology__list article:hover {
-  transform: translateY(-1px);
+    transform var(--t-fast) var(--ease-out);
 }
 
 .chaimir-topology__list article.is-healthy {
@@ -161,7 +152,7 @@
   font-size: var(--text-sm);
 }
 
-@media (max-width: 48rem) {
+@media not all and (--bp-md) {
   .chaimir-topology__body {
     grid-template-columns: 1fr;
   }

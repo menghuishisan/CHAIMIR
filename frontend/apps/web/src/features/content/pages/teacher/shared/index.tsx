@@ -3,10 +3,9 @@
 import React, { useMemo, useState } from 'react'
 import type { ContentItem } from '@chaimir/api-client'
 import { ContentType } from '@chaimir/api-client'
-import { Button, Input, Select } from '@chaimir/ui'
+import { Button, Input, Select, ResourceState } from '@chaimir/ui'
 import { RefreshCw, Share2 } from 'lucide-react'
 import { api } from '../../../../../app/api'
-import { ErrorState, LoadingState } from '../../../../../components/ResourceState'
 import { useAsyncResource } from '../../../../../hooks'
 import styles from '../../content.module.css'
 import { contentTypeLabel, contentTypeOptions, withAllOption } from '../../../../../utils/index'
@@ -42,8 +41,8 @@ const TeacherSharedPage: React.FC = () => {
         <Select value={type} options={withAllOption('全部类型', contentTypeOptions)} onChange={setType} />
       </div>
 
-      {resource.status === 'error' && <ErrorState error={resource.error} onRetry={resource.reload} />}
-      {resource.status === 'loading' && <LoadingState title="正在获取共享资源" />}
+      {resource.status === 'error' && <ResourceState status="error" error={resource.error} onRetry={resource.reload} />}
+      {resource.status === 'loading' && <ResourceState status="loading" title="正在获取共享资源" />}
       {(resource.status === 'success' || resource.status === 'empty') && (
         <div className={styles.cardGrid}>
           {rows.map((item) => (

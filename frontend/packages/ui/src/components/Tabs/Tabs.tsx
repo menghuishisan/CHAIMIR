@@ -38,6 +38,7 @@ export const Tabs: React.FC<TabsProps> = ({
 }) => {
   const [active, setActive] = useState(activeKey || defaultActiveKey || items[firstEnabledIndex(items)]?.key || '')
   const [indicatorStyle, setIndicatorStyle] = useState<React.CSSProperties>({})
+  const [animateIndicator, setAnimateIndicator] = useState(false)
   const generatedId = useId()
   const tabRefs = useRef<Array<HTMLButtonElement | null>>([])
   const navRef = useRef<HTMLDivElement>(null)
@@ -83,6 +84,7 @@ export const Tabs: React.FC<TabsProps> = ({
    */
   const handleClick = (key: string, disabled?: boolean) => {
     if (disabled) return
+    setAnimateIndicator(true)
     setActive(key)
     onChange?.(key)
   }
@@ -98,7 +100,9 @@ export const Tabs: React.FC<TabsProps> = ({
     event.preventDefault()
     const nextItem = items[nextIndex]
     tabRefs.current[nextIndex]?.focus()
-    handleClick(nextItem.key, nextItem.disabled)
+    setAnimateIndicator(false)
+    setActive(nextItem.key)
+    onChange?.(nextItem.key)
   }
 
   const classes = clsx('chaimir-tabs', className)
@@ -139,7 +143,11 @@ export const Tabs: React.FC<TabsProps> = ({
             </button>
           )
         })}
-        <div className="chaimir-tabs__indicator" style={indicatorStyle} aria-hidden="true" />
+        <div
+          className={clsx('chaimir-tabs__indicator', animateIndicator && 'chaimir-tabs__indicator--animated')}
+          style={indicatorStyle}
+          aria-hidden="true"
+        />
       </div>
       {children && (
         <div id={activePanelId} className="chaimir-tabs__panel" role="tabpanel" aria-labelledby={`${generatedId}-tab-${active}`}>

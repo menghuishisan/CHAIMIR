@@ -3,10 +3,9 @@
 import React, { useMemo, useState } from 'react'
 import type { CourseGrade, GradeSummary } from '@chaimir/api-client'
 import type { TableColumn } from '@chaimir/ui'
-import { Button, Select, Table } from '@chaimir/ui'
+import { Button, Select, Table, ResourceState } from '@chaimir/ui'
 import { GraduationCap, RefreshCw } from 'lucide-react'
 import { api } from '../../../../../app/api'
-import { ErrorState, LoadingState } from '../../../../../components/ResourceState'
 import { useAsyncResource } from '../../../../../hooks'
 import styles from '../../grade.module.css'
 import { StudentGradeActions } from './StudentGradeActions'
@@ -14,6 +13,7 @@ import { StudentGradeActions } from './StudentGradeActions'
 interface StudentGradeState {
   studentId: string
   semesters: { id: string; name: string }[]
+  courses: { id: string; name: string }[]
   summary: GradeSummary
   gpaHistory: GradeSummary[]
 }
@@ -25,13 +25,15 @@ const GradesPage: React.FC = () => {
       api.identity.getMe(),
       api.grade.listSemesters(),
     ])
-    const [summary, gpaHistory] = await Promise.all([
+    const [summary, gpaHistory, courses] = await Promise.all([
       api.grade.studentGrades(me.account.id, semesterId || undefined),
       api.grade.studentGPA(me.account.id),
+      api.teaching.getCourses({ role: 'student', page: 1, size: 100 }),
     ])
     return {
       studentId: me.account.id,
       semesters: semesters.map((semester) => ({ id: semester.id, name: semester.name })),
+      courses: courses.list,
       summary,
       gpaHistory,
     }
@@ -43,10 +45,10 @@ const GradesPage: React.FC = () => {
   ], [resource.data])
 
   const columns = useMemo<TableColumn<CourseGrade>[]>(() => [
-    { key: 'course', title: '课程编号', dataIndex: 'course_id', priority: 'primary' },
+    { key: 'course', title: '课程', render: (row) => (resource.data as StudentGradeState | undefined)?.courses.find((course) => course.id === row.course_id)?.name || '课程', priority: 'primary' },
     { key: 'score', title: '最终成绩', render: (row) => row.final_total.toFixed(1) },
     { key: 'credits', title: '获得学分', render: (row) => row.credits.toFixed(1) },
-  ], [])
+  ], [resource.data])
 
   const summary = resource.data?.summary
   const rows = summary?.course_grades || []
@@ -67,8 +69,8 @@ const GradesPage: React.FC = () => {
         <Select value={semesterId} options={semesterOptions} onChange={setSemesterId} />
       </div>
 
-      {resource.status === 'error' && <ErrorState error={resource.error} onRetry={resource.reload} />}
-      {resource.status === 'loading' && <LoadingState title="正在获取成绩" />}
+      {resource.status === 'error' && <ResourceState status="error" error={resource.error} onRetry={resource.reload} />}
+      {resource.status === 'loading' && <ResourceState status="loading" title="正在获取成绩" />}
       {(resource.status === 'success' || resource.status === 'empty') && summary && (
         <>
           <section className={styles.summary} aria-label="成绩概览">
@@ -83,7 +85,7 @@ const GradesPage: React.FC = () => {
             <h2>历史绩点</h2>
             <Table
               columns={[
-                { key: 'semester', title: '学期编号', dataIndex: 'semester_id', priority: 'primary' },
+                { key: 'semester', title: '学期', render: (row: GradeSummary) => (resource.data as StudentGradeState | undefined)?.semesters.find((semester) => semester.id === row.semester_id)?.name || '未指定', priority: 'primary' },
                 { key: 'gpa', title: '学期 GPA', render: (row: GradeSummary) => row.gpa.toFixed(2) },
                 { key: 'credits', title: '学分', render: (row: GradeSummary) => row.total_credits.toFixed(1) },
               ]}

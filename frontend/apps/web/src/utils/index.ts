@@ -2,6 +2,6 @@
 export * from './authSession'
 export * from './download'
 export * from './formatters'
-export * from './json'
+export * from './lists'
 export * from './labels'
 export * from './options'

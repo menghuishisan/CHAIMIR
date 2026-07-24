@@ -3,11 +3,10 @@
 import React, { useMemo } from 'react'
 import type { Course } from '@chaimir/api-client'
 import type { TableColumn } from '@chaimir/ui'
-import { Button, Table } from '@chaimir/ui'
+import { Button, Table, ResourceState } from '@chaimir/ui'
 import { FileText, Plus, RefreshCw } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../../../../../../app/api'
-import { ErrorState, LoadingState } from '../../../../../../components/ResourceState'
 import { useAsyncResource } from '../../../../../../hooks'
 import styles from '../../../teaching.module.css'
 import { courseStatusLabel } from '../../../../../../utils/index'
@@ -44,8 +43,8 @@ const TeacherCourseAssignmentsPage: React.FC = () => {
         </div>
         <Button variant="outline" icon={<RefreshCw size={16} />} onClick={resource.reload}>刷新</Button>
       </div>
-      {resource.status === 'error' && <ErrorState error={resource.error} onRetry={resource.reload} />}
-      {resource.status === 'loading' && <LoadingState title="正在获取课程" />}
+      {resource.status === 'error' && <ResourceState status="error" error={resource.error} onRetry={resource.reload} />}
+      {resource.status === 'loading' && <ResourceState status="loading" title="正在获取课程" />}
       {(resource.status === 'success' || resource.status === 'empty') && (
         <div className={styles.tableWrap}>
           <Table columns={columns} rows={rows} rowKey="id" emptyTitle="暂无课程" emptyDescription="当前没有可管理作业的课程。" ariaLabel="教师课程作业入口列表" />

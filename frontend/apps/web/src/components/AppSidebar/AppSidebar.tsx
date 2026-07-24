@@ -48,7 +48,7 @@ const AppSidebar = React.forwardRef<HTMLElement, AppSidebarProps>(({
                     title={isCollapsed ? item.name : undefined}
                     aria-label={isCollapsed ? item.name : undefined}
                   >
-                    <Icon size={20} className={styles.navIcon} />
+                    <Icon size={20} className={styles.navIcon} aria-hidden="true" />
                     {!isCollapsed && <span className={styles.navText}>{item.name}</span>}
                   </NavLink>
                 )

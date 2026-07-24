@@ -3,25 +3,24 @@
 import React, { useCallback, useMemo, useState } from 'react'
 import type { Submission } from '@chaimir/api-client'
 import type { TableColumn } from '@chaimir/ui'
-import { Button, Callout, Input, Table, Textarea } from '@chaimir/ui'
+import { Button, Callout, Input, Table, Textarea, ResourceState, FormField } from '@chaimir/ui'
 import { Check, CheckSquare, RefreshCw } from 'lucide-react'
 import { api } from '../../../../../app/api'
-import { ErrorState, LoadingState } from '../../../../../components/ResourceState'
-import { useAsyncResource } from '../../../../../hooks'
+import { useAsyncResource, usePendingAction } from '../../../../../hooks'
 import styles from '../../teaching.module.css'
-import { formatDateTime } from '../../../../../utils/index'
+import { formatDateTime, formatStudentReference } from '../../../../../utils/index'
 import { userFacingErrorMessage } from '../../../../../utils/userFacingError'
 import { CourseGradebookPanel } from './CourseGradebookPanel'
 
 const TeacherGradingPage: React.FC = () => {
   const [assignmentId, setAssignmentId] = useState('')
   const [courseId, setCourseId] = useState('')
-  const [submissionId, setSubmissionId] = useState('')
   const [score, setScore] = useState('')
   const [comment, setComment] = useState('')
   const [message, setMessage] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [selectedSubmission, setSelectedSubmission] = useState<Submission>()
+  const { pendingAction, runPendingAction } = usePendingAction()
   const resource = useAsyncResource(() => (assignmentId ? api.teaching.getSubmissions(assignmentId, { page: 1, size: 20 }) : Promise.resolve({ list: [], total: 0, page: 1, size: 20 })), [assignmentId])
 
   /**
@@ -31,13 +30,22 @@ const TeacherGradingPage: React.FC = () => {
     setError(null)
     setMessage(null)
     try {
-      await api.teaching.gradeSubmission(submissionId, { score: Number(score), comment })
+      if (!selectedSubmission) {
+        setError('请先选择一条提交记录。')
+        return
+      }
+      const parsedScore = Number(score)
+      if (!Number.isFinite(parsedScore) || parsedScore < 0 || parsedScore > 100) {
+        setError('请输入 0 到 100 之间的分数。')
+        return
+      }
+      await api.teaching.gradeSubmission(selectedSubmission.id, { score: parsedScore, comment: comment.trim() })
       setMessage('批改结果已保存。')
       resource.reload()
     } catch (actionError) {
       setError(userFacingErrorMessage(actionError, '批改保存失败，请稍后重试。'))
     }
-  }, [comment, resource, score, submissionId])
+  }, [comment, resource, score, selectedSubmission])
 
   /** selectSubmission 读取完整提交内容并载入批改表单。 */
   const selectSubmission = async (id: string) => {
@@ -45,7 +53,6 @@ const TeacherGradingPage: React.FC = () => {
     try {
       const detail = await api.teaching.getSubmission(id)
       setSelectedSubmission(detail)
-      setSubmissionId(String(detail.id))
       setScore(String(detail.final_score ?? detail.auto_score ?? 0))
       setComment(detail.comment || '')
     } catch (actionError) {
@@ -54,7 +61,7 @@ const TeacherGradingPage: React.FC = () => {
   }
 
   const columns = useMemo<TableColumn<Submission>[]>(() => [
-    { key: 'student', title: '学生编号', dataIndex: 'student_id', priority: 'primary' },
+    { key: 'student', title: '提交人', render: (row) => formatStudentReference(row.student_id), priority: 'primary' },
     { key: 'attempt', title: '提交次数', render: (row) => `第 ${row.attempt_no} 次` },
     { key: 'score', title: '最终得分', render: (row) => (row.final_score === undefined ? '待评分' : row.final_score.toFixed(1)) },
     { key: 'late', title: '迟交', render: (row) => (row.is_late ? '是' : '否') },
@@ -62,9 +69,9 @@ const TeacherGradingPage: React.FC = () => {
     {
       key: 'actions',
       title: '操作',
-      render: (row) => <Button variant="outline" size="sm" icon={<Check size={14} />} onClick={() => void selectSubmission(row.id)}>选择批改</Button>,
+      render: (row) => <Button variant="outline" size="sm" icon={<Check size={14} />} loading={pendingAction === `select-${row.id}`} disabled={Boolean(pendingAction)} onClick={() => void runPendingAction(`select-${row.id}`, () => selectSubmission(row.id))}>选择批改</Button>,
     },
-  ], [])
+  ], [pendingAction, runPendingAction])
 
   const rows = resource.data?.list || []
 
@@ -82,18 +89,17 @@ const TeacherGradingPage: React.FC = () => {
       <section className={styles.panel}>
         <h2>作业筛选</h2>
         <div className={styles.formGrid}>
-          <label className={styles.field}>作业编号<Input fullWidth value={assignmentId} onChange={(event) => setAssignmentId(event.target.value)} /></label>
-          <label className={styles.field}>课程编号<Input fullWidth value={courseId} onChange={(event) => setCourseId(event.target.value)} /></label>
-          <label className={styles.field}>提交编号<Input fullWidth value={submissionId} onChange={(event) => setSubmissionId(event.target.value)} /></label>
-          <label className={styles.field}>分数<Input fullWidth value={score} onChange={(event) => setScore(event.target.value)} /></label>
-          <label className={styles.fieldFull}>评语<Textarea value={comment} onChange={(event) => setComment(event.target.value)} /></label>
+          <FormField className={styles.field} label="作业编号"><Input fullWidth value={assignmentId} onChange={(event) => setAssignmentId(event.target.value)} /></FormField>
+          <FormField className={styles.field} label="课程编号"><Input fullWidth value={courseId} onChange={(event) => setCourseId(event.target.value)} /></FormField>
+          <FormField className={styles.field} label="分数"><Input fullWidth value={score} onChange={(event) => setScore(event.target.value)} /></FormField>
+          <FormField className={styles.fieldFull} label="评语"><Textarea value={comment} onChange={(event) => setComment(event.target.value)} /></FormField>
         </div>
-        <Button icon={<Check size={16} />} onClick={gradeSubmission}>保存批改结果</Button>
-        {selectedSubmission && <p className={styles.muted}>当前提交包含 {Object.keys(selectedSubmission.content).length} 个答题部分。</p>}
+        <Button loading={pendingAction === 'grade'} disabled={Boolean(pendingAction) || !selectedSubmission} icon={<Check size={16} />} onClick={() => void runPendingAction('grade', gradeSubmission)}>保存批改结果</Button>
+        {selectedSubmission && <section className={styles.answerPreview}><h3>学生作答</h3><p>{typeof selectedSubmission.content.answer === 'string' && selectedSubmission.content.answer.trim() ? selectedSubmission.content.answer : '学生未填写补充答案。'}</p></section>}
       </section>
       <CourseGradebookPanel courseId={courseId} />
-      {resource.status === 'error' && <ErrorState error={resource.error} onRetry={resource.reload} />}
-      {resource.status === 'loading' && <LoadingState title="正在获取提交记录" />}
+      {resource.status === 'error' && <ResourceState status="error" error={resource.error} onRetry={resource.reload} />}
+      {resource.status === 'loading' && <ResourceState status="loading" title="正在获取提交记录" />}
       {(resource.status === 'success' || resource.status === 'empty') && (
         <div className={styles.tableWrap}>
           <Table columns={columns} rows={rows} rowKey="id" emptyTitle="暂无提交记录" emptyDescription="输入作业编号后查看学生提交。" ariaLabel="教师批改提交列表" />

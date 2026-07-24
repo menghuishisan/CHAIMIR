@@ -18,7 +18,7 @@
   transition:
     background var(--t) var(--ease),
     border-color var(--t) var(--ease),
-    box-shadow 0.4s var(--ease-spring-ios),
+    box-shadow var(--t) var(--ease),
     opacity var(--t-fast) var(--ease);
 }
 
@@ -74,8 +74,10 @@
 /* === 状态 === */
 
 /* 悬浮态 */
-.chaimir-input-wrapper:hover:not(.chaimir-input-wrapper--disabled) {
-  border-color: var(--color-border-strong);
+@media (hover: hover) and (pointer: fine) {
+  .chaimir-input-wrapper:hover:not(.chaimir-input-wrapper--disabled) {
+    border-color: var(--color-border-strong);
+  }
 }
 
 /* Focus - 主色边框 + 3px 青电浅环 */
@@ -133,7 +135,39 @@
   margin-left: calc(-1 * var(--space-2));
 }
 
+.chaimir-input__password-toggle {
+  display: inline-grid;
+  place-items: center;
+  flex: 0 0 auto;
+  inline-size: 2.5rem;
+  block-size: 100%;
+  padding: 0;
+  color: var(--color-text-sub);
+  background: transparent;
+  border: 0;
+  border-inline-start: 1px solid var(--color-border-subtle);
+  cursor: pointer;
+  transition: background var(--t) var(--ease), color var(--t) var(--ease);
+}
+
+.chaimir-input__password-toggle:focus-visible {
+  outline: 2px solid var(--color-focus-ring);
+  outline-offset: -2px;
+}
+
+.chaimir-input__password-toggle:disabled {
+  cursor: not-allowed;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .chaimir-input__password-toggle:hover:not(:disabled) {
+    color: var(--color-primary-text);
+    background: var(--color-surface-hover);
+  }
+}
+
 .chaimir-input__spinner {
+  /* animation-budget: loader feedback may rotate continuously while validating */
   animation: chaimir-spin 1s linear infinite;
 }
 

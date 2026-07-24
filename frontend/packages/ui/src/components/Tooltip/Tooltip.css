@@ -18,39 +18,33 @@
   background: var(--color-dark-surface);
   border: 1px solid var(--color-dark-border);
   border-radius: var(--radius-sm);
-  box-shadow: var(--shadow-glass-elevated);
-  animation: chaimir-tooltip-in 0.4s var(--ease-spring-ios) forwards;
+  box-shadow: var(--shadow-popover);
+  opacity: 1;
+  transform: scale(1);
+  transform-origin: var(--transform-origin, center);
 }
 
-.chaimir-tooltip__positioner[data-placement^='top'] .chaimir-tooltip__content {
-  transform-origin: bottom center;
+.chaimir-tooltip__positioner[data-motion='pointer'] .chaimir-tooltip__content {
+  transition: opacity var(--t-tooltip) var(--ease-out), transform var(--t-tooltip) var(--ease-out);
 }
 
-.chaimir-tooltip__positioner[data-placement^='bottom'] .chaimir-tooltip__content {
-  transform-origin: top center;
+.chaimir-tooltip__positioner[data-motion='reduced'] .chaimir-tooltip__content {
+  transition: none;
 }
 
-.chaimir-tooltip__positioner[data-placement^='left'] .chaimir-tooltip__content {
-  transform-origin: right center;
+.chaimir-tooltip__positioner[data-instant] .chaimir-tooltip__content {
+  transition: none;
 }
 
-.chaimir-tooltip__positioner[data-placement^='right'] .chaimir-tooltip__content {
-  transform-origin: left center;
-}
-
-@keyframes chaimir-tooltip-in {
-  from {
+@starting-style {
+  .chaimir-tooltip__positioner[data-motion='pointer'] .chaimir-tooltip__content {
     opacity: 0;
     transform: scale(0.95);
-  }
-  to {
-    opacity: 1;
-    transform: scale(1);
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .chaimir-tooltip__content {
-    animation: none;
+    transition: none;
   }
 }

@@ -1,0 +1,162 @@
+/* StructuredFields 样式：已建模数据的紧凑键值、时间线和代码呈现。 */
+
+.chaimir-structured__empty {
+  margin: 0;
+  color: var(--color-text-muted);
+}
+
+.chaimir-key-value-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.chaimir-key-value-table th,
+.chaimir-key-value-table td {
+  padding: var(--space-3) 0;
+  vertical-align: top;
+  border-bottom: 1px solid var(--color-border-subtle);
+}
+
+.chaimir-key-value-table th {
+  width: min(36%, 14rem);
+  padding-inline-end: var(--space-4);
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+  font-weight: var(--font-medium);
+  text-align: start;
+}
+
+.chaimir-key-value-table td {
+  color: var(--color-text-strong);
+  overflow-wrap: anywhere;
+}
+
+.chaimir-key-value-table td span,
+.chaimir-key-value-table td small {
+  display: block;
+}
+
+.chaimir-key-value-table td small {
+  margin-block-start: var(--space-1);
+  color: var(--color-text-muted);
+}
+
+.chaimir-timeline {
+  display: grid;
+  gap: 0;
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
+.chaimir-timeline li {
+  position: relative;
+  display: grid;
+  grid-template-columns: var(--space-5) minmax(0, 1fr);
+  gap: var(--space-3);
+  min-width: 0;
+  padding-block-end: var(--space-5);
+}
+
+.chaimir-timeline li::before {
+  position: absolute;
+  inset-block: var(--space-4) 0;
+  inset-inline-start: calc(var(--space-5) / 2);
+  width: 1px;
+  content: '';
+  background: var(--color-border);
+}
+
+.chaimir-timeline li:last-child::before {
+  content: none;
+}
+
+.chaimir-timeline__marker {
+  z-index: var(--z-base);
+  width: var(--space-3);
+  height: var(--space-3);
+  margin: var(--space-1) auto 0;
+  background: var(--color-surface);
+  border: 2px solid var(--color-border-strong);
+  border-radius: var(--radius-full);
+}
+
+.chaimir-timeline .is-success .chaimir-timeline__marker { border-color: var(--color-success); }
+.chaimir-timeline .is-warning .chaimir-timeline__marker { border-color: var(--color-warning); }
+.chaimir-timeline .is-danger .chaimir-timeline__marker { border-color: var(--color-danger); }
+.chaimir-timeline .is-info .chaimir-timeline__marker { border-color: var(--color-info); }
+
+.chaimir-timeline__heading {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-4);
+  align-items: baseline;
+  justify-content: space-between;
+}
+
+.chaimir-timeline__heading time,
+.chaimir-timeline small {
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+}
+
+.chaimir-timeline p {
+  margin: var(--space-1) 0 0;
+  color: var(--color-text);
+}
+
+.chaimir-code-block {
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  color: var(--color-dark-text);
+  background: var(--color-terminal-bg);
+  border: 1px solid var(--color-dark-border);
+  border-radius: var(--radius-sm);
+}
+
+.chaimir-code-block figcaption {
+  display: flex;
+  gap: var(--space-3);
+  align-items: center;
+  justify-content: space-between;
+  min-height: 2.75rem;
+  padding: var(--space-2) var(--space-3);
+  color: var(--color-dark-text-sub);
+  border-bottom: 1px solid var(--color-dark-border);
+}
+
+.chaimir-code-block pre {
+  max-width: 100%;
+  padding: var(--space-4);
+  margin: 0;
+  overflow: auto;
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  line-height: var(--leading-relaxed);
+  white-space: pre;
+}
+
+.chaimir-code-block p {
+  padding: 0 var(--space-4) var(--space-3);
+  margin: 0;
+  color: var(--color-dark-danger);
+  font-size: var(--text-sm);
+}
+
+@media not all and (--bp-sm) {
+  .chaimir-key-value-table th,
+  .chaimir-key-value-table td {
+    display: block;
+    width: 100%;
+  }
+
+  .chaimir-key-value-table th {
+    padding-block-end: var(--space-1);
+    border-bottom: 0;
+  }
+
+  .chaimir-key-value-table td {
+    padding-block-start: 0;
+  }
+}

@@ -175,11 +175,11 @@ jobs:
         id: build
         uses: ./deploy/ci/build-scan-sign-push
         with:
-          image: ${{ secrets.HARBOR_REGISTRY }}/${{ matrix.logical }}
+          image: ${{ vars.HARBOR_REGISTRY }}/${{ matrix.logical }}
           tag: ${{ github.sha }}
           context: ${{ matrix.context }}
           dockerfile: ${{ matrix.dockerfile }}
-          registry: ${{ secrets.HARBOR_REGISTRY }}
+          registry: ${{ vars.HARBOR_REGISTRY }}
           registry-username: ${{ secrets.HARBOR_USERNAME }}
           registry-password: ${{ secrets.HARBOR_PASSWORD }}
           cosign-key: ${{ secrets.COSIGN_KEY }}
@@ -211,13 +211,13 @@ jobs:
         id: build
         uses: ./deploy/ci/build-scan-sign-push
         with:
-          image: ${{ secrets.HARBOR_REGISTRY }}/${{ matrix.logical }}
+          image: ${{ vars.HARBOR_REGISTRY }}/${{ matrix.logical }}
           tag: ${{ github.sha }}
           context: ${{ matrix.context }}
           dockerfile: ${{ matrix.dockerfile }}
           build-args: |
             GO_BUILDER_IMAGE=${{ needs.build-go-builder.outputs.digest_ref }}
-          registry: ${{ secrets.HARBOR_REGISTRY }}
+          registry: ${{ vars.HARBOR_REGISTRY }}
           registry-username: ${{ secrets.HARBOR_USERNAME }}
           registry-password: ${{ secrets.HARBOR_PASSWORD }}
           cosign-key: ${{ secrets.COSIGN_KEY }}
@@ -274,24 +274,24 @@ jobs:
           runtime_min=$(read_digest base/runtime-min)
           {
             echo 'args<<EOF'
-            echo "GO_BUILDER_IMAGE=${{ secrets.HARBOR_REGISTRY }}/base/go-builder@$go_builder"
-            echo "JUDGE_MIN_IMAGE=${{ secrets.HARBOR_REGISTRY }}/base/judge-min@$judge_min"
-            echo "NODE_BUILDER_IMAGE=${{ secrets.HARBOR_REGISTRY }}/base/node-builder@$node_builder"
-            echo "CHAIN_TOOLS_IMAGE=${{ secrets.HARBOR_REGISTRY }}/base/chain-tools@$chain_tools"
-            echo "FABRIC_TOOLS_IMAGE=${{ secrets.HARBOR_REGISTRY }}/base/fabric-tools@$fabric_tools"
-            echo "RUNTIME_IMAGE=${{ secrets.HARBOR_REGISTRY }}/base/runtime-min@$runtime_min"
+            echo "GO_BUILDER_IMAGE=${{ vars.HARBOR_REGISTRY }}/base/go-builder@$go_builder"
+            echo "JUDGE_MIN_IMAGE=${{ vars.HARBOR_REGISTRY }}/base/judge-min@$judge_min"
+            echo "NODE_BUILDER_IMAGE=${{ vars.HARBOR_REGISTRY }}/base/node-builder@$node_builder"
+            echo "CHAIN_TOOLS_IMAGE=${{ vars.HARBOR_REGISTRY }}/base/chain-tools@$chain_tools"
+            echo "FABRIC_TOOLS_IMAGE=${{ vars.HARBOR_REGISTRY }}/base/fabric-tools@$fabric_tools"
+            echo "RUNTIME_IMAGE=${{ vars.HARBOR_REGISTRY }}/base/runtime-min@$runtime_min"
             echo 'EOF'
           } >> "$GITHUB_OUTPUT"
       - name: 构建+扫描+签名+推送
         id: build
         uses: ./deploy/ci/build-scan-sign-push
         with:
-          image: ${{ secrets.HARBOR_REGISTRY }}/${{ matrix.logical }}
+          image: ${{ vars.HARBOR_REGISTRY }}/${{ matrix.logical }}
           tag: ${{ github.sha }}
           context: ${{ matrix.context }}
           dockerfile: ${{ matrix.dockerfile }}
           build-args: ${{ steps.build-bases.outputs.args }}
-          registry: ${{ secrets.HARBOR_REGISTRY }}
+          registry: ${{ vars.HARBOR_REGISTRY }}
           registry-username: ${{ secrets.HARBOR_USERNAME }}
           registry-password: ${{ secrets.HARBOR_PASSWORD }}
           cosign-key: ${{ secrets.COSIGN_KEY }}

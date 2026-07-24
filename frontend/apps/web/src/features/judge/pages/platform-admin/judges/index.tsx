@@ -4,11 +4,10 @@ import React, { useState } from 'react'
 import type { Judger, JudgerRequest, JudgerResourceSpec, WorkloadComponent } from '@chaimir/api-client'
 import { JudgerStatus, JudgerType } from '@chaimir/api-client'
 import type { TableColumn } from '@chaimir/ui'
-import { Button, Callout, Input, Select, Switch, Table } from '@chaimir/ui'
+import { Button, Callout, Input, Select, Switch, Table, ResourceState, FormField } from '@chaimir/ui'
 import { Cpu, Play, RefreshCw, Save } from 'lucide-react'
 import { api } from '../../../../../app/api'
-import { ErrorState, LoadingState } from '../../../../../components/ResourceState'
-import { useAsyncResource } from '../../../../../hooks'
+import { useAsyncResource, usePendingAction } from '../../../../../hooks'
 import styles from '../../judge.module.css'
 import { formatSeconds, judgerStatusLabel, judgerTypeLabel } from '../../../../../utils/index'
 import { parseDelimitedList } from '../../../../../utils'
@@ -38,6 +37,7 @@ const JudgesPage: React.FC = () => {
   const [memoryLimit, setMemoryLimit] = useState('4Gi')
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
+  const { pendingAction, runPendingAction } = usePendingAction()
   const rows = resource.data || []
 
   /** saveJudger 创建或更新完整判题器声明。 */
@@ -112,7 +112,7 @@ const JudgesPage: React.FC = () => {
       title: '状态',
       render: (row) => <span className={styles.status}>{judgerStatusLabel(row.status)}</span>,
     },
-    { key: 'actions', title: '操作', render: (row) => <div className={styles.actions}><Button variant="outline" size="sm" onClick={() => editJudger(row)}>编辑</Button><Button variant="ghost" size="sm" icon={<Play size={14} />} onClick={() => void selftestJudger(row)}>运行自测</Button></div> },
+    { key: 'actions', title: '操作', render: (row) => <div className={styles.actions}><Button variant="outline" size="sm" disabled={Boolean(pendingAction)} onClick={() => editJudger(row)}>编辑</Button><Button variant="ghost" size="sm" icon={<Play size={14} />} loading={pendingAction === `selftest-${row.id}`} disabled={Boolean(pendingAction)} onClick={() => void runPendingAction(`selftest-${row.id}`, () => selftestJudger(row))}>运行自测</Button></div> },
   ]
 
   return (
@@ -135,38 +135,38 @@ const JudgesPage: React.FC = () => {
       <section className={styles.panel}>
         <h2>{editingId ? '编辑判题器' : '登记判题器'}</h2>
         <div className={styles.formGrid}>
-          <label className={styles.field}>名称<Input fullWidth value={form.name} onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))} /></label>
-          <label className={styles.field}>编号<Input fullWidth value={form.code} onChange={(event) => setForm((current) => ({ ...current, code: event.target.value }))} /></label>
-          <label className={styles.field}>执行器地址<Input fullWidth value={form.executor_ref} onChange={(event) => setForm((current) => ({ ...current, executor_ref: event.target.value }))} /></label>
-          <label className={styles.field}>判题类型<Select fullWidth value={String(form.type)} onChange={(value) => setForm((current) => ({ ...current, type: Number(value) as JudgerType }))} options={Object.values(JudgerType).filter((value): value is number => typeof value === 'number').map((value) => ({ value: String(value), label: judgerTypeLabel(value) }))} /></label>
-          <label className={styles.field}>默认时限（秒）<Input fullWidth type="number" value={form.default_timeout_sec} onChange={(event) => setForm((current) => ({ ...current, default_timeout_sec: Number(event.target.value) }))} /></label>
-          <label className={styles.field}>状态<Select fullWidth value={String(form.status)} onChange={(value) => setForm((current) => ({ ...current, status: Number(value) as JudgerStatus }))} options={[{ value: '1', label: '可用' }, { value: '2', label: '停用' }]} /></label>
+          <FormField className={styles.field} label="名称"><Input fullWidth value={form.name} onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))} /></FormField>
+          <FormField className={styles.field} label="编号"><Input fullWidth value={form.code} onChange={(event) => setForm((current) => ({ ...current, code: event.target.value }))} /></FormField>
+          <FormField className={styles.field} label="执行器地址"><Input fullWidth value={form.executor_ref} onChange={(event) => setForm((current) => ({ ...current, executor_ref: event.target.value }))} /></FormField>
+          <FormField className={styles.field} label="判题类型"><Select fullWidth value={String(form.type)} onChange={(value) => setForm((current) => ({ ...current, type: Number(value) as JudgerType }))} options={Object.values(JudgerType).filter((value): value is number => typeof value === 'number').map((value) => ({ value: String(value), label: judgerTypeLabel(value) }))} /></FormField>
+          <FormField className={styles.field} label="默认时限（秒）"><Input fullWidth type="number" value={form.default_timeout_sec} onChange={(event) => setForm((current) => ({ ...current, default_timeout_sec: Number(event.target.value) }))} /></FormField>
+          <FormField className={styles.field} label="状态"><Select fullWidth value={String(form.status)} onChange={(value) => setForm((current) => ({ ...current, status: Number(value) as JudgerStatus }))} options={[{ value: '1', label: '可用' }, { value: '2', label: '停用' }]} /></FormField>
         </div>
         <Switch checked={form.runtime_required} label="需要运行环境" onChange={(event) => setForm((current) => ({ ...current, runtime_required: event.target.checked }))} />
         {(form.runtime_required || [JudgerType.TESTCASE, JudgerType.ONCHAIN_ASSERT, JudgerType.STATIC_SCAN].includes(form.type)) && <div className={styles.formGrid}>
-          <label className={styles.field}>运行时编号<Input fullWidth value={runtimeCode} onChange={(event) => setRuntimeCode(event.target.value)} /></label>
-          <label className={styles.field}>运行时镜像版本<Input fullWidth value={runtimeVersion} onChange={(event) => setRuntimeVersion(event.target.value)} /></label>
-          <label className={styles.field}>创世配置引用<Input fullWidth value={genesisRef} onChange={(event) => setGenesisRef(event.target.value)} /></label>
-          <label className={styles.field}>配套工具编号<Input fullWidth value={toolCodes} onChange={(event) => setToolCodes(event.target.value)} /></label>
+          <FormField className={styles.field} label="运行时编号"><Input fullWidth value={runtimeCode} onChange={(event) => setRuntimeCode(event.target.value)} /></FormField>
+          <FormField className={styles.field} label="运行时镜像版本"><Input fullWidth value={runtimeVersion} onChange={(event) => setRuntimeVersion(event.target.value)} /></FormField>
+          <FormField className={styles.field} label="创世配置引用"><Input fullWidth value={genesisRef} onChange={(event) => setGenesisRef(event.target.value)} /></FormField>
+          <FormField className={styles.field} label="配套工具编号"><Input fullWidth value={toolCodes} onChange={(event) => setToolCodes(event.target.value)} /></FormField>
         </div>}
         {[JudgerType.TESTCASE, JudgerType.STATIC_SCAN].includes(form.type) && <div className={styles.formGrid}>
-          <label className={styles.field}>判题命令<Input fullWidth value={judgeCommand} onChange={(event) => setJudgeCommand(event.target.value)} /></label>
-          <label className={styles.field}>测试包文件名<Input fullWidth value={suiteArchiveName} onChange={(event) => setSuiteArchiveName(event.target.value)} /></label>
-          <label className={styles.field}>执行容器名称<Input fullWidth value={sidecarName} onChange={(event) => setSidecarName(event.target.value)} /></label>
-          <label className={styles.field}>容器常驻命令<Input fullWidth value={sidecarCommand} onChange={(event) => setSidecarCommand(event.target.value)} /></label>
-          <label className={styles.field}>CPU 请求量<Input fullWidth value={cpuRequest} onChange={(event) => setCPURequest(event.target.value)} /></label>
-          <label className={styles.field}>内存请求量<Input fullWidth value={memoryRequest} onChange={(event) => setMemoryRequest(event.target.value)} /></label>
-          <label className={styles.field}>CPU 上限<Input fullWidth value={cpuLimit} onChange={(event) => setCPULimit(event.target.value)} /></label>
-          <label className={styles.field}>内存上限<Input fullWidth value={memoryLimit} onChange={(event) => setMemoryLimit(event.target.value)} /></label>
+          <FormField className={styles.field} label="判题命令"><Input fullWidth value={judgeCommand} onChange={(event) => setJudgeCommand(event.target.value)} /></FormField>
+          <FormField className={styles.field} label="测试包文件名"><Input fullWidth value={suiteArchiveName} onChange={(event) => setSuiteArchiveName(event.target.value)} /></FormField>
+          <FormField className={styles.field} label="执行容器名称"><Input fullWidth value={sidecarName} onChange={(event) => setSidecarName(event.target.value)} /></FormField>
+          <FormField className={styles.field} label="容器常驻命令"><Input fullWidth value={sidecarCommand} onChange={(event) => setSidecarCommand(event.target.value)} /></FormField>
+          <FormField className={styles.field} label="CPU 请求量"><Input fullWidth value={cpuRequest} onChange={(event) => setCPURequest(event.target.value)} /></FormField>
+          <FormField className={styles.field} label="内存请求量"><Input fullWidth value={memoryRequest} onChange={(event) => setMemoryRequest(event.target.value)} /></FormField>
+          <FormField className={styles.field} label="CPU 上限"><Input fullWidth value={cpuLimit} onChange={(event) => setCPULimit(event.target.value)} /></FormField>
+          <FormField className={styles.field} label="内存上限"><Input fullWidth value={memoryLimit} onChange={(event) => setMemoryLimit(event.target.value)} /></FormField>
         </div>}
-        <label className={styles.field}>最大重试次数<Input fullWidth type="number" value={maxRetries} onChange={(event) => setMaxRetries(event.target.value)} /></label>
-        <Button icon={<Save size={15} />} onClick={() => void saveJudger()}>{editingId ? '保存更新' : '创建判题器'}</Button>
+        <FormField className={styles.field} label="最大重试次数"><Input fullWidth type="number" value={maxRetries} onChange={(event) => setMaxRetries(event.target.value)} /></FormField>
+        <Button icon={<Save size={15} />} loading={pendingAction === 'save'} disabled={Boolean(pendingAction)} onClick={() => void runPendingAction('save', saveJudger)}>{editingId ? '保存更新' : '创建判题器'}</Button>
       </section>
 
       {resource.status === 'error' && (
-        <ErrorState error={resource.error} onRetry={resource.reload} />
+        <ResourceState status="error" error={resource.error} onRetry={resource.reload} />
       )}
-      {resource.status === 'loading' && <LoadingState title="正在获取判题器" />}
+      {resource.status === 'loading' && <ResourceState status="loading" title="正在获取判题器" />}
       {(resource.status === 'success' || resource.status === 'empty') && (
         <div className={styles.tableWrap}>
           <Table
@@ -215,7 +215,7 @@ function buildJudgerResourceSpec(values: JudgerSpecForm): JudgerResourceSpec {
   }
   const requiresExecutor = [JudgerType.TESTCASE, JudgerType.STATIC_SCAN].includes(values.type)
   let executionSidecars = values.base?.execution_sidecars
-  let command = values.base?.command
+  let command = values.base?.command || []
   let execTarget = values.base?.exec_target
   if (requiresExecutor) {
     command = parseDelimitedList(values.judgeCommand)

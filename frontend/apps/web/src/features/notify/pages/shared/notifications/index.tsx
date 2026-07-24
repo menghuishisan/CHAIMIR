@@ -2,15 +2,14 @@
 
 import React, { useCallback, useMemo, useState } from 'react'
 import type { Announcement, ApiError, Notification, PaginatedResponse } from '@chaimir/api-client'
-import { Button, Callout } from '@chaimir/ui'
+import { Button, Callout, useConfirm, ResourceState } from '@chaimir/ui'
 import { Bell, Check, CheckCheck, Megaphone, RefreshCw, Settings, Trash2 } from 'lucide-react'
 import { useLocation } from 'react-router-dom'
 import { api } from '../../../../../app/api'
 import { invalidateAppResource } from '../../../../../app/resourceInvalidation'
-import { EmptyState, ErrorState, LoadingState } from '../../../../../components/ResourceState'
 import { useAsyncResource, useTicketedWebSocket } from '../../../../../hooks'
 import styles from '../shared.module.css'
-import { formatDateTime } from '../../../../../utils/index'
+import { announcementScopeLabel, formatDateTime, notificationTypeLabel } from '../../../../../utils/index'
 import { userFacingErrorMessage } from '../../../../../utils/userFacingError'
 import { NotificationPreferences } from './NotificationPreferences'
 
@@ -58,12 +57,12 @@ const PlatformAnnouncementsPage: React.FC = () => {
         </Button>
       </div>
 
-      {announcements.status === 'loading' && <LoadingState title="正在获取公告" />}
+      {announcements.status === 'loading' && <ResourceState status="loading" title="正在获取公告" />}
       {announcements.status === 'error' && (
-        <ErrorState error={announcements.error} onRetry={announcements.reload} />
+        <ResourceState status="error" error={announcements.error} onRetry={announcements.reload} />
       )}
       {announcements.status === 'empty' && (
-        <EmptyState title="暂无公告" description="当前没有需要查看的系统公告。" />
+        <ResourceState status="empty" title="暂无公告" description="当前没有需要查看的系统公告。" />
       )}
       {announcements.status === 'success' && (
         <div className={styles.list}>
@@ -76,7 +75,7 @@ const PlatformAnnouncementsPage: React.FC = () => {
               <div className={styles.cardMain}>
                 <h2 className={styles.cardTitle}>{item.title}</h2>
                 <div className={styles.meta}>
-                  <span>{item.scope}</span>
+                  <span>{announcementScopeLabel(item.scope)}</span>
                   <span>{formatDateTime(item.published_at)}</span>
                 </div>
                 <p className={styles.content}>{item.content}</p>
@@ -93,6 +92,7 @@ const PlatformAnnouncementsPage: React.FC = () => {
  * TenantNotificationsPage 读取租户账号的站内通知和系统公告，并支持一键标记站内信已读。
  */
 const TenantNotificationsPage: React.FC = () => {
+  const confirm = useConfirm()
   const [activeTab, setActiveTab] = useState<NotificationTab>('notifications')
   const [actionError, setActionError] = useState<ApiError | null>(null)
   const [actionMessage, setActionMessage] = useState<string | null>(null)
@@ -142,7 +142,7 @@ const TenantNotificationsPage: React.FC = () => {
       invalidateAppResource('notification-unread')
       notifications.reload()
     } catch (error) {
-      setActionError(error as ApiError)
+      setActionError({ message: userFacingErrorMessage(error, '标记通知失败，请稍后重试。') })
     } finally {
       setMarkingAll(false)
     }
@@ -222,16 +222,16 @@ const TenantNotificationsPage: React.FC = () => {
       </div>
 
       {actionError && (
-        <ErrorState error={actionError} onRetry={() => setActionError(null)} title="操作未完成" />
+        <ResourceState status="error" error={actionError} onRetry={() => setActionError(null)} title="操作未完成" />
       )}
       {actionMessage && <Callout variant="success" title="操作完成">{actionMessage}</Callout>}
 
-      {activeTab !== 'preferences' && currentStatus === 'loading' && <LoadingState title="正在获取消息" />}
+      {activeTab !== 'preferences' && currentStatus === 'loading' && <ResourceState status="loading" title="正在获取消息" />}
       {activeTab !== 'preferences' && currentStatus === 'error' && (
-        <ErrorState error={currentError} onRetry={currentReload} />
+        <ResourceState status="error" error={currentError} onRetry={currentReload} />
       )}
       {activeTab !== 'preferences' && currentStatus === 'empty' && (
-        <EmptyState title="暂无消息" description="当前没有需要查看的通知或公告。" />
+        <ResourceState status="empty" title="暂无消息" description="当前没有需要查看的通知或公告。" />
       )}
       {currentStatus === 'success' && activeTab === 'notifications' && (
         <div className={styles.list}>
@@ -243,7 +243,7 @@ const TenantNotificationsPage: React.FC = () => {
               <div className={styles.cardMain}>
                 <h2 className={styles.cardTitle}>{item.title}</h2>
                 <div className={styles.meta}>
-                  <span>{item.type}</span>
+                  <span>{notificationTypeLabel(item.type)}</span>
                   <span>{item.is_read ? '已读' : '未读'}</span>
                   <span>{formatDateTime(item.created_at)}</span>
                 </div>
@@ -253,7 +253,10 @@ const TenantNotificationsPage: React.FC = () => {
                 {!item.is_read && (
                   <Button size="sm" variant="outline" icon={<Check size={14} />} loading={busyItemId === item.id} onClick={() => void runItemAction(item.id, () => api.notify.markAsRead(item.id), '通知已标记为已读。', notifications.reload)}>标记已读</Button>
                 )}
-                <Button size="sm" variant="ghost" icon={<Trash2 size={14} />} loading={busyItemId === item.id} onClick={() => void runItemAction(item.id, () => api.notify.deleteNotification(item.id), '通知已删除。', notifications.reload)}>删除</Button>
+                <Button size="sm" variant="ghost" icon={<Trash2 size={14} />} loading={busyItemId === item.id} onClick={async () => {
+                  const confirmed = await confirm({ title: '删除通知', description: `删除“${item.title}”后将不能再次查看。`, confirmLabel: '确认删除' })
+                  if (confirmed) await runItemAction(item.id, () => api.notify.deleteNotification(item.id), '通知已删除。', notifications.reload)
+                }}>删除</Button>
               </div>
             </article>
           ))}
@@ -270,7 +273,7 @@ const TenantNotificationsPage: React.FC = () => {
               <div className={styles.cardMain}>
                 <h2 className={styles.cardTitle}>{item.title}</h2>
                 <div className={styles.meta}>
-                  <span>{item.scope}</span>
+                  <span>{announcementScopeLabel(item.scope)}</span>
                   <span>{item.is_read ? '已读' : '未读'}</span>
                   <span>{formatDateTime(item.published_at)}</span>
                 </div>

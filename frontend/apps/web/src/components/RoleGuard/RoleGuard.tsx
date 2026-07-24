@@ -1,10 +1,11 @@
 // RoleGuard 在路由边界校验服务端会话角色，阻止越权进入其他端页面。
 
 import React from 'react'
-import { Navigate, Outlet, useLocation } from 'react-router-dom'
+import { Navigate, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import type { UserRole } from '@chaimir/api-client'
 import { api } from '../../app/api'
-import { ErrorState, LoadingState } from '../ResourceState'
+import { Button, ResourceState } from '@chaimir/ui'
+import { ArrowLeft } from 'lucide-react'
 import { useAsyncResource } from '../../hooks'
 import { isPasswordChangeRequired } from '../../utils/authSession'
 
@@ -28,23 +29,31 @@ export const RoleGuard: React.FC<RoleGuardProps> = ({ allowedRoles }) => {
  */
 const VerifiedRoleGuard: React.FC<RoleGuardProps> = ({ allowedRoles }) => {
   const location = useLocation()
+  const navigate = useNavigate()
   const resource = useAsyncResource(() => api.identity.getMe(), [])
   const roles = resource.data?.account.roles || []
   const allowed = roles.some((role) => allowedRoles.includes(role))
 
   if (resource.status === 'loading') {
-    return <LoadingState title="正在校验访问权限" />
+    return <ResourceState status="loading" title="正在校验访问权限" />
   }
 
   if (resource.status === 'error') {
     if (resource.error?.status === 401) {
       return <Navigate to="/auth/login" replace state={{ from: location.pathname }} />
     }
-    return <ErrorState error={resource.error} onRetry={resource.reload} title="暂时无法校验访问权限" />
+    return <ResourceState status="error" error={resource.error} onRetry={resource.reload} title="暂时无法校验访问权限" />
   }
 
   if (!allowed) {
-    return <Navigate to="/auth/login" replace state={{ from: location.pathname }} />
+    return (
+      <ResourceState
+        status="forbidden"
+        title="暂无访问权限"
+        description="当前账号不能访问这个功能，请返回上一页继续操作。"
+        action={<Button variant="outline" icon={<ArrowLeft size={16} />} onClick={() => navigate(-1)}>返回上一页</Button>}
+      />
+    )
   }
 
   return <Outlet />

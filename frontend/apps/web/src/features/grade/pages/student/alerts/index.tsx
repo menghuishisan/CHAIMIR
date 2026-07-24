@@ -4,10 +4,9 @@ import React, { useCallback, useMemo, useState } from 'react'
 import type { GradeWarning } from '@chaimir/api-client'
 import { GradeWarningStatus } from '@chaimir/api-client'
 import type { TableColumn } from '@chaimir/ui'
-import { Button, Callout, Table } from '@chaimir/ui'
+import { Button, Callout, Table, ResourceState } from '@chaimir/ui'
 import { AlertTriangle, CheckCircle, RefreshCw } from 'lucide-react'
 import { api } from '../../../../../app/api'
-import { ErrorState, LoadingState } from '../../../../../components/ResourceState'
 import { useAsyncResource } from '../../../../../hooks'
 import styles from '../../grade.module.css'
 import { formatDateTime, gradeWarningDetailLabel, gradeWarningStatusLabel, gradeWarningTypeLabel } from '../../../../../utils/index'
@@ -39,7 +38,7 @@ const AlertsPage: React.FC = () => {
 
   const columns = useMemo<TableColumn<GradeWarning>[]>(() => [
     { key: 'type', title: '预警类型', render: (row) => <span className={styles.status}>{gradeWarningTypeLabel(row.type)}</span>, priority: 'primary' },
-    { key: 'semester', title: '学期', dataIndex: 'semester_id' },
+    { key: 'semester', title: '学期', render: (row) => row.semester_id ? '已指定学期' : '未指定学期' },
     { key: 'detail', title: '触发说明', render: (row) => gradeWarningDetailLabel(row.detail) },
     { key: 'created', title: '下发时间', render: (row) => formatDateTime(row.created_at) },
     { key: 'status', title: '状态', render: (row) => gradeWarningStatusLabel(row.status) },
@@ -67,8 +66,8 @@ const AlertsPage: React.FC = () => {
       </div>
       {error && <div className={styles.error} role="alert">{error}</div>}
       {message && <Callout variant="success" title="操作成功">{message}</Callout>}
-      {resource.status === 'error' && <ErrorState error={resource.error} onRetry={resource.reload} />}
-      {resource.status === 'loading' && <LoadingState title="正在获取学业预警" />}
+      {resource.status === 'error' && <ResourceState status="error" error={resource.error} onRetry={resource.reload} />}
+      {resource.status === 'loading' && <ResourceState status="loading" title="正在获取学业预警" />}
       {(resource.status === 'success' || resource.status === 'empty') && (
         <div className={styles.tableWrap}>
           <Table columns={columns} rows={rows} rowKey="id" emptyTitle="暂无预警" emptyDescription="当前没有需要处理的学业预警。" ariaLabel="学生学业预警列表" />

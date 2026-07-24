@@ -1,15 +1,15 @@
 // TeacherExamsEditPage 创建试卷组卷规则，并查看已有试卷详情。
 
 import React, { useCallback, useEffect, useState } from 'react'
+import type { PaperItemInput } from '@chaimir/api-client'
 import { PaperMode } from '@chaimir/api-client'
-import { Button, Callout, Input, Select, Textarea } from '@chaimir/ui'
-import { FilePlus, RefreshCw, Save } from 'lucide-react'
+import { Button, Callout, Input, Select, ResourceState, FormField } from '@chaimir/ui'
+import { FilePlus, Plus, RefreshCw, Save, Trash2 } from 'lucide-react'
 import { useSearchParams } from 'react-router-dom'
 import { api } from '../../../../../app/api'
-import { ErrorState, LoadingState } from '../../../../../components/ResourceState'
 import { useAsyncResource } from '../../../../../hooks'
 import styles from '../../content.module.css'
-import { paperModeOptions, parseJsonArray } from '../../../../../utils/index'
+import { paperModeOptions } from '../../../../../utils/index'
 import { userFacingErrorMessage } from '../../../../../utils/userFacingError'
 
 const TeacherExamsEditPage: React.FC = () => {
@@ -21,7 +21,7 @@ const TeacherExamsEditPage: React.FC = () => {
   const [count, setCount] = useState('20')
   const [defaultScore, setDefaultScore] = useState('5')
   const [knowledgePoints, setKnowledgePoints] = useState('')
-  const [manualItems, setManualItems] = useState('[]')
+  const [manualItems, setManualItems] = useState<PaperItemInput[]>([])
   const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -33,7 +33,7 @@ const TeacherExamsEditPage: React.FC = () => {
     setCount(String(paper.data.paper.gen_criteria.count || 20))
     setDefaultScore(String(paper.data.paper.gen_criteria.default_score || 5))
     setKnowledgePoints((paper.data.paper.gen_criteria.knowledge_points || []).join(','))
-    setManualItems(JSON.stringify(paper.data.items.map((item) => ({ code: item.code, version: item.version, score: item.score })), null, 2))
+    setManualItems(paper.data.items.map((item) => ({ code: item.code, version: item.version, score: item.score })))
   }, [paper.data])
 
   /**
@@ -44,6 +44,11 @@ const TeacherExamsEditPage: React.FC = () => {
     setError(null)
     setMessage(null)
     try {
+      const normalizedItems = manualItems.map((item) => ({ code: item.code.trim(), version: item.version.trim(), score: Number(item.score) }))
+      if (Number(mode) === PaperMode.MANUAL && (normalizedItems.length === 0 || normalizedItems.some((item) => !item.code || !item.version || item.score <= 0))) {
+        setError('手动组卷需要至少添加一道题，并填写内容编号、版本和分值。')
+        return
+      }
       await api.content.createPaper({
         name,
         gen_mode: Number(mode) as PaperMode,
@@ -52,7 +57,7 @@ const TeacherExamsEditPage: React.FC = () => {
           default_score: Number(defaultScore),
           knowledge_points: knowledgePoints.split(',').map((value) => value.trim()).filter(Boolean),
         },
-        items: parseJsonArray<{ code: string; version: string; score: number }>(manualItems, '手动题目列表必须是数组。', []),
+        items: Number(mode) === PaperMode.MANUAL ? normalizedItems : [],
       })
       setMessage('试卷规则已创建。')
     } catch (actionError) {
@@ -61,6 +66,11 @@ const TeacherExamsEditPage: React.FC = () => {
       setSaving(false)
     }
   }, [count, defaultScore, knowledgePoints, manualItems, mode, name])
+
+  /** updateManualItem 更新手动组卷中的单个题目引用。 */
+  const updateManualItem = (index: number, patch: Partial<PaperItemInput>) => {
+    setManualItems((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, ...patch } : item))
+  }
 
   const regeneratePaper = useCallback(async () => {
     if (!paperId) return
@@ -87,18 +97,31 @@ const TeacherExamsEditPage: React.FC = () => {
 
       {error && <div className={styles.error}>{error}</div>}
       {message && <Callout variant="success" title="操作成功">{message}</Callout>}
-      {paper.status === 'error' && <ErrorState error={paper.error} onRetry={paper.reload} />}
-      {paper.status === 'loading' && <LoadingState title="正在获取试卷" />}
+      {paper.status === 'error' && <ResourceState status="error" error={paper.error} onRetry={paper.reload} />}
+      {paper.status === 'loading' && <ResourceState status="loading" title="正在获取试卷" />}
 
       <section className={styles.panel}>
         <h2>规则配置</h2>
         <div className={styles.formGrid}>
-          <label className={styles.field}>试卷名称<Input fullWidth value={name} onChange={(event) => setName(event.target.value)} /></label>
-          <label className={styles.field}>组卷方式<Select fullWidth value={mode} options={paperModeOptions} onChange={setMode} /></label>
-          <label className={styles.field}>抽题数量<Input fullWidth value={count} onChange={(event) => setCount(event.target.value)} /></label>
-          <label className={styles.field}>默认分值<Input fullWidth value={defaultScore} onChange={(event) => setDefaultScore(event.target.value)} /></label>
-          <label className={styles.fieldFull}>知识点<Input fullWidth value={knowledgePoints} onChange={(event) => setKnowledgePoints(event.target.value)} /></label>
-          <label className={styles.fieldFull}>手动题目列表 JSON<Textarea value={manualItems} onChange={(event) => setManualItems(event.target.value)} rows={8} /></label>
+          <FormField className={styles.field} label="试卷名称"><Input fullWidth value={name} onChange={(event) => setName(event.target.value)} /></FormField>
+          <FormField className={styles.field} label="组卷方式"><Select fullWidth value={mode} options={paperModeOptions} onChange={setMode} /></FormField>
+          <FormField className={styles.field} label="抽题数量"><Input fullWidth value={count} onChange={(event) => setCount(event.target.value)} /></FormField>
+          <FormField className={styles.field} label="默认分值"><Input fullWidth value={defaultScore} onChange={(event) => setDefaultScore(event.target.value)} /></FormField>
+          <FormField className={styles.fieldFull} label="知识点"><Input fullWidth value={knowledgePoints} onChange={(event) => setKnowledgePoints(event.target.value)} /></FormField>
+          {Number(mode) === PaperMode.MANUAL && (
+            <div className={`${styles.fieldFull} ${styles.itemEditor}`}>
+              <span>手动选择题目</span>
+              {manualItems.map((item, index) => (
+                <div className={styles.itemEditorRow} key={`${index}-${item.code}-${item.version}`}>
+                  <FormField className={styles.field} label="内容编号"><Input value={item.code} onChange={(event) => updateManualItem(index, { code: event.target.value })} /></FormField>
+                  <FormField className={styles.field} label="版本"><Input value={item.version} onChange={(event) => updateManualItem(index, { version: event.target.value })} /></FormField>
+                  <FormField className={styles.field} label="分值"><Input type="number" min={0.1} step={0.1} value={String(item.score)} onChange={(event) => updateManualItem(index, { score: Number(event.target.value) })} /></FormField>
+                  <Button variant="ghost" size="sm" icon={<Trash2 size={14} />} onClick={() => setManualItems((current) => current.filter((_, itemIndex) => itemIndex !== index))}>删除</Button>
+                </div>
+              ))}
+              <Button variant="outline" size="sm" icon={<Plus size={14} />} onClick={() => setManualItems((current) => [...current, { code: '', version: 'v1', score: Number(defaultScore) || 1 }])}>添加题目</Button>
+            </div>
+          )}
         </div>
         <Button icon={<Save size={16} />} loading={saving} onClick={createPaper}>创建试卷规则</Button>
       </section>

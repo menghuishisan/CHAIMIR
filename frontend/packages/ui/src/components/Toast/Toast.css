@@ -50,22 +50,27 @@
   padding: var(--space-4);
   background: var(--color-bg);
   border-radius: var(--radius);
-  box-shadow: var(--shadow-glass-elevated);
+  box-shadow: var(--shadow-popover);
   border: 1px solid var(--color-border);
   border-inline-start-width: 3px;
   pointer-events: auto;
-  /* 入场动画：从右侧滑入 + 淡入 */
-  animation: chaimir-toast-in 0.4s var(--ease-spring-ios);
+  /* 入场从右侧轻移，状态切换可被下一次通知打断。 */
+  opacity: 1;
+  transform: translateX(0);
+  transition: opacity var(--t-toast-enter) var(--ease-out), transform var(--t-toast-enter) var(--ease-out);
 }
 
-@keyframes chaimir-toast-in {
-  from {
+.chaimir-toast[data-state='closed'] {
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(calc(var(--space-2) * -1)) scale(0.98);
+  transition-duration: var(--t-toast-exit);
+}
+
+@starting-style {
+  .chaimir-toast {
     opacity: 0;
     transform: translateX(100%);
-  }
-  to {
-    opacity: 1;
-    transform: translateX(0);
   }
 }
 
@@ -155,12 +160,14 @@
   color: var(--color-text-sub);
   border-radius: var(--radius-xs);
   cursor: pointer;
-  transition: background var(--t-fast) var(--ease), color var(--t-fast) var(--ease), transform var(--t-fast) var(--ease-press);
+  transition: background var(--t-fast) var(--ease), color var(--t-fast) var(--ease), transform var(--t-fast) var(--ease-out);
 }
 
-.chaimir-toast__close:hover {
-  background: var(--color-surface-hover);
-  color: var(--color-text);
+@media (hover: hover) and (pointer: fine) {
+  .chaimir-toast__close:hover {
+    background: var(--color-surface-hover);
+    color: var(--color-text);
+  }
 }
 
 .chaimir-toast__close:active {
@@ -169,7 +176,7 @@
 
 /* === 响应式 === */
 
-@media (max-width: 640px) {
+@media not all and (--bp-sm) {
   .chaimir-toast-container {
     inline-size: 100%;
     left: 0;
@@ -190,7 +197,6 @@
 @media (prefers-reduced-motion: reduce) {
   .chaimir-toast,
   .chaimir-toast__close {
-    animation: none;
     transition: none;
   }
 }

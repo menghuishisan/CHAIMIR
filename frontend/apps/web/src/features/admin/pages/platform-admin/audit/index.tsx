@@ -3,13 +3,12 @@
 import React, { useCallback, useMemo, useState } from 'react'
 import type { ApiError, AuditLogEntry } from '@chaimir/api-client'
 import type { TableColumn } from '@chaimir/ui'
-import { Button, Table } from '@chaimir/ui'
+import { Button, Table, ResourceState } from '@chaimir/ui'
 import { Download, FileText, RefreshCw } from 'lucide-react'
 import { api } from '../../../../../app/api'
-import { ErrorState, LoadingState } from '../../../../../components/ResourceState'
 import { useAsyncResource } from '../../../../../hooks'
 import styles from '../../list.module.css'
-import { formatDateTime, saveBlob } from '../../../../../utils/index'
+import { auditActionLabel, auditTargetLabel, formatDateTime, saveBlob } from '../../../../../utils/index'
 
 const PAGE_SIZE = 20
 
@@ -50,9 +49,8 @@ const AuditPage: React.FC = () => {
       render: (row) => <span className={styles.muted}>{formatDateTime(row.created_at)}</span>,
       priority: 'primary',
     },
-    { key: 'actor', title: '操作人', dataIndex: 'actor_id', priority: 'secondary' },
-    { key: 'action', title: '动作', dataIndex: 'action' },
-    { key: 'target', title: '对象类型', dataIndex: 'target_type' },
+    { key: 'action', title: '动作', render: (row) => auditActionLabel(row.action) },
+    { key: 'target', title: '对象类型', render: (row) => auditTargetLabel(row.target_type) },
     {
       key: 'ip',
       title: 'IP 地址',
@@ -92,12 +90,12 @@ const AuditPage: React.FC = () => {
 
       {exportMessage && <div className={styles.status}>{exportMessage}</div>}
       {exportError && (
-        <ErrorState error={exportError} onRetry={() => setExportError(null)} title="导出任务创建失败" />
+        <ResourceState status="error" error={exportError} onRetry={() => setExportError(null)} title="导出任务创建失败" />
       )}
       {resource.status === 'error' && (
-        <ErrorState error={resource.error} onRetry={resource.reload} />
+        <ResourceState status="error" error={resource.error} onRetry={resource.reload} />
       )}
-      {resource.status === 'loading' && <LoadingState title="正在获取审计流水" />}
+      {resource.status === 'loading' && <ResourceState status="loading" title="正在获取审计流水" />}
       {(resource.status === 'success' || resource.status === 'empty') && (
         <div className={styles.tableWrap}>
           <Table

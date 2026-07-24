@@ -5,7 +5,8 @@ import React, { useEffect, useId, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { X } from 'lucide-react'
 import { clsx } from 'clsx'
-import { useEscapeKey, useFocusTrap } from '../../hooks'
+import { useDelayedUnmount, useEscapeKey, useFocusTrap } from '../../hooks'
+import { motionDurationMs } from '../../tokens'
 import './Modal.css'
 
 export interface ModalProps {
@@ -17,6 +18,8 @@ export interface ModalProps {
   title?: React.ReactNode
   /** 无标题时的对话框说明 */
   ariaLabel?: string
+  /** 描述内容元素 id */
+  ariaDescribedBy?: string
   /** 尺寸 */
   size?: 'sm' | 'md' | 'lg' | 'xl'
   /** 是否显示关闭按钮 */
@@ -36,6 +39,7 @@ export const Modal: React.FC<ModalProps> = ({
   onClose,
   title,
   ariaLabel,
+  ariaDescribedBy,
   size = 'md',
   showClose = true,
   closeOnOverlayClick = true,
@@ -48,16 +52,17 @@ export const Modal: React.FC<ModalProps> = ({
   const touchStartY = useRef(0)
   const currentTranslateY = useRef(0)
   const [swipeStyle, setSwipeStyle] = React.useState<React.CSSProperties>({})
+  const presence = useDelayedUnmount(open, motionDurationMs.modalExit)
 
   // 快捷键与焦点陷阱
-  useFocusTrap(modalRef, open)
+  useFocusTrap(modalRef, open && presence.mounted)
   useEscapeKey(() => {
     if (open) onClose()
   }, open)
 
   // 禁用 body 滚动
   useEffect(() => {
-    if (open) {
+    if (presence.mounted) {
       document.body.style.overflow = 'hidden'
     } else {
       document.body.style.overflow = ''
@@ -65,11 +70,17 @@ export const Modal: React.FC<ModalProps> = ({
 
     return () => {
       document.body.style.overflow = ''
-      setSwipeStyle({})
     }
-  }, [open])
+  }, [presence.mounted])
 
-  if (!open) return null
+  useEffect(() => {
+    const modal = modalRef.current
+    if (!modal) return
+    if (open) modal.removeAttribute('inert')
+    else modal.setAttribute('inert', '')
+  }, [open, presence.mounted])
+
+  if (!presence.mounted) return null
 
   const handleOverlayClick = (e: React.MouseEvent) => {
     if (closeOnOverlayClick && e.target === e.currentTarget) {
@@ -91,9 +102,10 @@ export const Modal: React.FC<ModalProps> = ({
 
   const handleTouchEnd = () => {
     if (currentTranslateY.current > 80) {
+      setSwipeStyle({})
       onClose()
     } else {
-      setSwipeStyle({ transform: `translateY(0)`, transition: 'transform 0.4s var(--ease-spring)' })
+      setSwipeStyle({ transform: 'translateY(0)', transition: 'transform var(--t-slow) var(--ease-drawer)' })
     }
     currentTranslateY.current = 0
   }
@@ -105,7 +117,12 @@ export const Modal: React.FC<ModalProps> = ({
   )
 
   const content = (
-    <div className="chaimir-modal-overlay" onClick={handleOverlayClick}>
+    <div
+      className="chaimir-modal-overlay"
+      data-state={presence.state}
+      aria-hidden={!open || undefined}
+      onClick={handleOverlayClick}
+    >
       <div
         ref={modalRef}
         className={modalClasses}
@@ -113,6 +130,7 @@ export const Modal: React.FC<ModalProps> = ({
         aria-modal="true"
         aria-labelledby={title ? titleId : undefined}
         aria-label={!title ? ariaLabel ?? '对话框' : undefined}
+        aria-describedby={ariaDescribedBy}
         tabIndex={-1}
         style={swipeStyle}
         onTouchStart={handleTouchStart}

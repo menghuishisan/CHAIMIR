@@ -9,6 +9,8 @@
 @import './typography.css';
 @import './spacing.css';
 @import './breakpoints.css';
+@import './motion.css';
+@import './layout.css';
 
 /* ===== 全局重置 ===== */
 
@@ -126,10 +128,6 @@ body {
   border: 2px solid var(--color-surface);
 }
 
-::-webkit-scrollbar-thumb:hover {
-  background: var(--color-text-sub);
-}
-
 /* ===== 选中文本样式 ===== */
 
 ::selection {
@@ -145,8 +143,14 @@ a {
   transition: color var(--t) var(--ease);
 }
 
-a:hover {
-  color: var(--color-primary-hover);
+@media (hover: hover) and (pointer: fine) {
+  ::-webkit-scrollbar-thumb:hover {
+    background: var(--color-text-sub);
+  }
+
+  a:hover {
+    color: var(--color-primary-hover);
+  }
 }
 
 button {

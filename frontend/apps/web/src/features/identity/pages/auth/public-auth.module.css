@@ -20,22 +20,10 @@
   border-radius: var(--radius);
   background: var(--color-bg);
   box-shadow: var(--shadow-lg);
-  animation: chaimir-auth-form-in var(--t-normal) var(--ease-spring-ios) both;
 }
 
 .compactCard {
   max-width: 440px;
-}
-
-@keyframes chaimir-auth-form-in {
-  0% {
-    opacity: 0;
-    transform: translateY(24px) scale(0.96);
-  }
-  100% {
-    opacity: 1;
-    transform: translateY(0) scale(1);
-  }
 }
 
 .centerHeader {
@@ -139,16 +127,7 @@
 .platformVisual {
   position: relative;
   overflow: hidden;
-  border-right: 1px solid var(--color-glass-border);
-}
-
-.grid {
-  position: absolute;
-  inset: 0;
-  background-image:
-    linear-gradient(to right, var(--color-glass-border-subtle) 1px, transparent 1px),
-    linear-gradient(to bottom, var(--color-glass-border-subtle) 1px, transparent 1px);
-  background-size: 40px 40px;
+  border-right: 1px solid var(--color-dark-border-strong);
 }
 
 .symbol {
@@ -166,10 +145,8 @@
   justify-content: center;
   gap: var(--space-5);
   padding: var(--space-9);
-  background: var(--color-panel-glass);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  border-left: 1px solid var(--color-glass-border);
+  background: var(--color-dark-surface);
+  border-left: 1px solid var(--color-dark-border-strong);
 }
 
 .brand {
@@ -180,7 +157,7 @@
   color: var(--color-dark-text-sub);
   font-size: var(--text-lg);
   font-weight: var(--font-semibold);
-  letter-spacing: 0.08em;
+  letter-spacing: 0;
 }
 
 .brand svg {
@@ -197,7 +174,7 @@
   color: var(--color-dark-text-sub);
 }
 
-@media (max-width: 760px) {
+@media not all and (--bp-md) {
   .publicCard {
     padding: var(--space-5);
   }
@@ -210,7 +187,7 @@
   .platformVisual {
     min-height: 160px;
     border-right: 0;
-    border-bottom: 1px solid var(--color-glass-border);
+    border-bottom: 1px solid var(--color-dark-border-strong);
   }
 
   .platformForm {
@@ -225,7 +202,7 @@
   }
 }
 
-@media (max-width: 480px) {
+@media not all and (--bp-sm) {
   .publicPage {
     padding: var(--space-3);
   }

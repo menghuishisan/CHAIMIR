@@ -1,6 +1,7 @@
 // MainLayout 提供四类角色共用的日常导航外壳。
 import React, { useEffect, useRef, useState } from 'react'
 import { Outlet } from 'react-router-dom'
+import { breakpoints, PageScaffold, useMediaQuery } from '@chaimir/ui'
 import TopNavbar from '../../components/TopNavbar/TopNavbar'
 import AppSidebar from '../../components/AppSidebar/AppSidebar'
 import { RouteErrorBoundary } from '../../components/RouteErrorBoundary/RouteErrorBoundary'
@@ -12,6 +13,7 @@ const MainLayout: React.FC = () => {
   const [isMobileDrawerOpen, setIsMobileDrawerOpen] = useState(false)
   const menuButtonRef = useRef<HTMLButtonElement>(null)
   const sidebarRef = useRef<HTMLElement>(null)
+  const isDesktop = useMediaQuery(`(min-width: ${breakpoints.md}px)`)
 
   // toggleSidebar 切换桌面侧栏的展开状态。
   const toggleSidebar = () => setIsSidebarCollapsed((current) => !current)
@@ -21,13 +23,8 @@ const MainLayout: React.FC = () => {
   const closeMobileDrawer = () => setIsMobileDrawerOpen(false)
 
   useEffect(() => {
-    const desktopQuery = window.matchMedia('(min-width: 769px)')
-    const closeAtDesktop = (event: MediaQueryListEvent): void => {
-      if (event.matches) setIsMobileDrawerOpen(false)
-    }
-    desktopQuery.addEventListener('change', closeAtDesktop)
-    return () => desktopQuery.removeEventListener('change', closeAtDesktop)
-  }, [])
+    if (isDesktop) setIsMobileDrawerOpen(false)
+  }, [isDesktop])
 
   useEffect(() => {
     if (!isMobileDrawerOpen) return
@@ -63,6 +60,7 @@ const MainLayout: React.FC = () => {
 
   return (
     <div className={styles.layoutContainer}>
+      <a className="skip-link" href="#main-content">跳到主要内容</a>
       <TopNavbar menuButtonRef={menuButtonRef} isMenuOpen={isMobileDrawerOpen} onMenuClick={toggleMobileDrawer} />
 
       <div className={`${styles.mainWrapper} ${isSidebarCollapsed ? styles.sidebarCollapsed : ''}`}>
@@ -75,11 +73,13 @@ const MainLayout: React.FC = () => {
         />
 
         {/* 子路由内容区承载四角色的日常功能页面。 */}
-        <main className={styles.contentArea}>
+        <main id="main-content" className={styles.contentArea} tabIndex={-1}>
           <div className={styles.contentInner}>
-            <RouteErrorBoundary>
-              <Outlet />
-            </RouteErrorBoundary>
+            <PageScaffold as="div">
+              <RouteErrorBoundary>
+                <Outlet />
+              </RouteErrorBoundary>
+            </PageScaffold>
           </div>
         </main>
       </div>

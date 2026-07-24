@@ -4,14 +4,13 @@ import React, { useCallback, useMemo, useState } from 'react'
 import type { AlertRule } from '@chaimir/api-client'
 import { AdminScope } from '@chaimir/api-client'
 import type { TableColumn } from '@chaimir/ui'
-import { Button, Callout, Input, Select, Switch, Table, Textarea } from '@chaimir/ui'
+import { Button, Callout, Input, Select, Switch, Table, ResourceState, FormField } from '@chaimir/ui'
 import { ListChecks, RefreshCw, Save } from 'lucide-react'
 import { api } from '../../../../../app/api'
-import { ErrorState, LoadingState } from '../../../../../components/ResourceState'
 import { useAsyncResource } from '../../../../../hooks'
 import styles from '../../list.module.css'
 import formStyles from './rules.module.css'
-import { alertLevelOptions, parseJsonObject } from '../../../../../utils/index'
+import { alertLevelLabel, alertLevelOptions } from '../../../../../utils/index'
 import { userFacingErrorMessage } from '../../../../../utils/userFacingError'
 
 const AlertRulesPage: React.FC = () => {
@@ -21,7 +20,9 @@ const AlertRulesPage: React.FC = () => {
   const [metric, setMetric] = useState('')
   const [level, setLevel] = useState('1')
   const [enabled, setEnabled] = useState(true)
-  const [condition, setCondition] = useState('{\n  "operator": "gt",\n  "threshold": 90,\n  "duration_minutes": 5\n}')
+  const [operator, setOperator] = useState('gt')
+  const [threshold, setThreshold] = useState('90')
+  const [durationMinutes, setDurationMinutes] = useState('5')
   const [submitting, setSubmitting] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -30,12 +31,15 @@ const AlertRulesPage: React.FC = () => {
    * fillForm 把后端规则填充到编辑表单。
    */
   const fillForm = useCallback((rule: AlertRule) => {
+    const condition = rule.condition
     setSelectedRuleId(rule.id)
     setName(rule.name)
     setMetric(rule.metric)
     setLevel(String(rule.level))
     setEnabled(rule.enabled)
-    setCondition(JSON.stringify(rule.condition, null, 2))
+    setOperator(typeof condition.operator === 'string' ? condition.operator : 'gt')
+    setThreshold(String(typeof condition.threshold === 'number' ? condition.threshold : 90))
+    setDurationMinutes(String(typeof condition.duration_minutes === 'number' ? condition.duration_minutes : 5))
     setError(null)
     setMessage(null)
   }, [])
@@ -57,7 +61,7 @@ const AlertRulesPage: React.FC = () => {
         scope: AdminScope.GLOBAL,
         name: name.trim(),
         metric: metric.trim(),
-        condition: parseJsonObject(condition),
+        condition: { operator: operator as 'gt' | 'gte' | 'lt' | 'lte' | 'eq', threshold: Number(threshold), duration_minutes: Number(durationMinutes) },
         level: Number(level),
         enabled,
       }
@@ -74,7 +78,7 @@ const AlertRulesPage: React.FC = () => {
     } finally {
       setSubmitting(false)
     }
-  }, [condition, enabled, level, metric, name, resource, selectedRuleId])
+  }, [durationMinutes, enabled, level, metric, name, operator, resource, selectedRuleId, threshold])
 
   const columns = useMemo<TableColumn<AlertRule>[]>(() => [
     { key: 'name', title: '规则名称', dataIndex: 'name', priority: 'primary' },
@@ -82,7 +86,7 @@ const AlertRulesPage: React.FC = () => {
     {
       key: 'level',
       title: '级别',
-      render: (row) => <span className={styles.status}>L{row.level}</span>,
+      render: (row) => <span className={styles.status}>{alertLevelLabel(row.level)}</span>,
     },
     {
       key: 'enabled',
@@ -127,23 +131,15 @@ const AlertRulesPage: React.FC = () => {
       <div className={formStyles.grid}>
         <section className={formStyles.panel}>
           <h2>{selectedRuleId ? '编辑规则' : '新建规则'}</h2>
-          <label>
-            规则名称
-            <Input fullWidth value={name} placeholder="请输入规则名称" onChange={(event) => setName(event.target.value)} />
-          </label>
-          <label>
-            指标名称
-            <Input fullWidth value={metric} placeholder="例如 sandbox.cpu_usage" onChange={(event) => setMetric(event.target.value)} />
-          </label>
-          <label>
-            告警级别
-            <Select fullWidth value={level} options={alertLevelOptions} onChange={setLevel} />
-          </label>
+          <FormField label="规则名称"><Input fullWidth value={name} placeholder="请输入规则名称" onChange={(event) => setName(event.target.value)} /></FormField>
+          <FormField label="指标名称"><Input fullWidth value={metric} placeholder="例如 sandbox.cpu_usage" onChange={(event) => setMetric(event.target.value)} /></FormField>
+          <FormField label="告警级别"><Select fullWidth value={level} options={alertLevelOptions} onChange={setLevel} /></FormField>
           <Switch checked={enabled} label={enabled ? '已启用' : '已停用'} onChange={(event) => setEnabled(event.target.checked)} />
-          <label>
-            触发条件
-            <Textarea value={condition} onChange={(event) => setCondition(event.target.value)} />
-          </label>
+          <div className={formStyles.conditionGrid}>
+            <FormField label="比较方式"><Select fullWidth value={operator} options={[{ value: 'gt', label: '大于' }, { value: 'gte', label: '大于或等于' }, { value: 'lt', label: '小于' }, { value: 'lte', label: '小于或等于' }, { value: 'eq', label: '等于' }]} onChange={setOperator} /></FormField>
+            <FormField label="触发阈值"><Input fullWidth type="number" value={threshold} onChange={(event) => setThreshold(event.target.value)} /></FormField>
+            <FormField label="持续时间（分钟）"><Input fullWidth type="number" min={0} value={durationMinutes} onChange={(event) => setDurationMinutes(event.target.value)} /></FormField>
+          </div>
           <Button loading={submitting} icon={<Save size={16} />} onClick={handleSubmit}>
             保存规则
           </Button>
@@ -151,8 +147,8 @@ const AlertRulesPage: React.FC = () => {
 
         <section className={formStyles.panel}>
           <h2>规则列表</h2>
-          {resource.status === 'error' && <ErrorState error={resource.error} onRetry={resource.reload} />}
-          {resource.status === 'loading' && <LoadingState title="正在获取告警规则" />}
+          {resource.status === 'error' && <ResourceState status="error" error={resource.error} onRetry={resource.reload} />}
+          {resource.status === 'loading' && <ResourceState status="loading" title="正在获取告警规则" />}
           {(resource.status === 'success' || resource.status === 'empty') && (
             <Table
               columns={columns}

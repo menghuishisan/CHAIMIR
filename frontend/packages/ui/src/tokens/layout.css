@@ -1,0 +1,24 @@
+/* 布局令牌：层级与壳尺寸的唯一来源。 */
+
+:root {
+  --z-below: -1;
+  --z-ground: 0;
+  --z-base: 1;
+  --z-sticky: 50;
+  --z-dropdown: 60;
+  --z-drawer: 80;
+  --z-immersive: 100;
+  --z-modal: 120;
+  --z-toast: 200;
+
+  --topnav-h: 3.5rem;
+  --sidebar-w: 15.5rem;
+  --sidebar-w-collapsed: 4rem;
+  --content-max: 75rem;
+}
+
+@media (--bp-2xl) {
+  :root {
+    --content-max: 80rem;
+  }
+}

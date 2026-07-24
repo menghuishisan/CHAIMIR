@@ -3,11 +3,11 @@
  */
 
 export function triggerHaptic(pattern: number | number[] = 10): void {
-  if (typeof window !== 'undefined' && 'vibrate' in navigator) {
-    try {
-      navigator.vibrate(pattern)
-    } catch {
-      // 忽略不支持或被浏览器策略拦截的触感反馈。
-    }
+  if (
+    typeof window !== 'undefined'
+    && 'vibrate' in navigator
+    && !window.matchMedia('(prefers-reduced-motion: reduce)').matches
+  ) {
+    navigator.vibrate(pattern)
   }
 }

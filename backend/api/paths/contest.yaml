@@ -16,7 +16,26 @@
     security: [{ bearerAuth: [] }]
     requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/contest/student/contests:
+  get:
+    tags: [contest]
+    summary: 学生可发现的竞赛列表
+    operationId: contestListStudentContests
+    x-chaimir-audience: student
+    security: [{ bearerAuth: [] }]
+    parameters:
+      - { $ref: "#/components/parameters/PageQuery" }
+      - { $ref: "#/components/parameters/SizeQuery" }
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
 /api/v1/contest/contests/{id}:
+  get:
+    tags: [contest]
+    summary: 竞赛详情
+    operationId: contestGetContest
+    x-chaimir-audience: teacher
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
   patch:
     tags: [contest]
     summary: 编辑竞赛
@@ -259,6 +278,22 @@
     summary: 创建或更新漏洞源配置
     operationId: contestUpsertVulnSource
     x-chaimir-audience: teacher
+    security: [{ bearerAuth: [] }]
+    requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/contest/platform/vuln-sources:
+  get:
+    tags: [contest]
+    summary: 平台漏洞源列表
+    operationId: contestListPlatformVulnSources
+    x-chaimir-audience: platform
+    security: [{ bearerAuth: [] }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+  post:
+    tags: [contest]
+    summary: 写入平台漏洞源
+    operationId: contestUpsertPlatformVulnSource
+    x-chaimir-audience: platform
     security: [{ bearerAuth: [] }]
     requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }

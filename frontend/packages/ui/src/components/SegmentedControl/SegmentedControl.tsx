@@ -33,6 +33,7 @@ export function SegmentedControl({
 }: SegmentedControlProps): React.ReactElement {
   const name = React.useId()
   const [sliderStyle, setSliderStyle] = React.useState<React.CSSProperties>({})
+  const [animateSlider, setAnimateSlider] = React.useState(false)
   const containerRef = React.useRef<HTMLDivElement>(null)
   const itemRefs = React.useRef<Array<HTMLLabelElement | null>>([])
 
@@ -73,13 +74,17 @@ export function SegmentedControl({
         const selected = option.value === value
         return (
           <label
+            htmlFor={`${name}-${index}`}
             className={clsx('chaimir-segmented-control__item', selected && 'is-selected', option.disabled && 'is-disabled')}
             key={option.value}
             ref={(el) => {
               itemRefs.current[index] = el
             }}
+            onPointerDown={() => setAnimateSlider(true)}
+            onKeyDown={() => setAnimateSlider(false)}
           >
             <input
+              id={`${name}-${index}`}
               type="radio"
               name={name}
               value={option.value}
@@ -92,7 +97,11 @@ export function SegmentedControl({
           </label>
         )
       })}
-      <div className="chaimir-segmented-control__slider" style={sliderStyle} aria-hidden="true" />
+      <div
+        className={clsx('chaimir-segmented-control__slider', animateSlider && 'chaimir-segmented-control__slider--animated')}
+        style={sliderStyle}
+        aria-hidden="true"
+      />
     </div>
   )
 }

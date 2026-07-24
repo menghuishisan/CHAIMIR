@@ -1,7 +1,7 @@
 // ImmersiveLayout 提供实验、仿真和竞赛工作台的深色全屏外壳。
 import React from 'react'
 import { Outlet, useNavigate, useLocation } from 'react-router-dom'
-import { ArrowLeft, Maximize } from 'lucide-react'
+import { ArrowLeft, Focus } from 'lucide-react'
 import { RouteErrorBoundary } from '../../components/RouteErrorBoundary/RouteErrorBoundary'
 import styles from './ImmersiveLayout.module.css'
 
@@ -32,7 +32,7 @@ const ImmersiveLayout: React.FC = () => {
       {/* 深色顶栏保留退出路径和运行状态提示。 */}
       <header className={styles.topbar}>
         <div className={styles.left}>
-          <button className={styles.exitBtn} onClick={handleExit} aria-label="退出工作台">
+          <button type="button" className={styles.exitBtn} onClick={handleExit} aria-label="退出工作台">
             <ArrowLeft size={18} />
             <span>退出</span>
           </button>
@@ -40,21 +40,17 @@ const ImmersiveLayout: React.FC = () => {
           <h1 className={styles.title}>{getTitle()}</h1>
         </div>
 
-        <div className={styles.right}>
-          <div className={styles.statusPill}>
-            <span className={styles.statusDot}></span>
-            <span>引擎就绪</span>
-          </div>
-        </div>
       </header>
 
       {/* 全局焦点回收按钮服务于 iframe 工具和实验终端。 */}
       <button
+        type="button"
         className={styles.focusEscapeBtn}
         onClick={handleFocusEscape}
+        aria-label="夺回焦点"
         title="夺回焦点"
       >
-        <Maximize size={16} />
+        <Focus size={18} />
       </button>
 
       {/* 子路由渲染实验、仿真或竞赛的主体工作区。 */}

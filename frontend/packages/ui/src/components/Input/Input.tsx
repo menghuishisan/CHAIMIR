@@ -1,8 +1,8 @@
 // Input 组件：文本输入框
 // 符合 FE-2（无障碍）、FE-4（文案面向用户）
 
-import React from 'react'
-import { Loader2 } from 'lucide-react'
+import React, { useState } from 'react'
+import { Eye, EyeOff, Loader2 } from 'lucide-react'
 import { clsx } from 'clsx'
 import './Input.css'
 
@@ -33,10 +33,13 @@ export const Input = React.forwardRef<HTMLInputElement, InputProps>(
       className,
       disabled,
       readOnly,
+      type,
       ...props
     },
     ref
   ) => {
+    const [passwordVisible, setPasswordVisible] = useState(false)
+    const isPassword = type === 'password'
     const wrapperClasses = clsx(
       'chaimir-input-wrapper',
       `chaimir-input-wrapper--${size}`,
@@ -62,6 +65,7 @@ export const Input = React.forwardRef<HTMLInputElement, InputProps>(
           readOnly={readOnly}
           aria-invalid={error}
           aria-busy={loading || undefined}
+          type={isPassword && passwordVisible ? 'text' : type}
           {...props}
         />
         {loading && (
@@ -73,6 +77,18 @@ export const Input = React.forwardRef<HTMLInputElement, InputProps>(
           <span className="chaimir-input__icon chaimir-input__icon--right" aria-hidden="true">
             {rightIcon}
           </span>
+        )}
+        {!loading && isPassword && (
+          <button
+            type="button"
+            className="chaimir-input__password-toggle"
+            aria-label={passwordVisible ? '隐藏密码' : '显示密码'}
+            aria-pressed={passwordVisible}
+            disabled={disabled}
+            onClick={() => setPasswordVisible((visible) => !visible)}
+          >
+            {passwordVisible ? <EyeOff size={16} /> : <Eye size={16} />}
+          </button>
         )}
       </div>
     )

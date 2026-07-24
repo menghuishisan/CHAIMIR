@@ -29,14 +29,16 @@
   transition:
     background var(--t-fast) var(--ease),
     color var(--t-fast) var(--ease),
-    transform var(--t-fast) var(--ease-press),
+    transform var(--t-fast) var(--ease-out),
     box-shadow var(--t-fast) var(--ease);
   white-space: nowrap;
 }
 
-.chaimir-tabs__tab:hover:not(.chaimir-tabs__tab--disabled) {
-  background: var(--color-surface-hover);
-  color: var(--color-text);
+@media (hover: hover) and (pointer: fine) {
+  .chaimir-tabs__tab:hover:not(.chaimir-tabs__tab--disabled) {
+    background: var(--color-surface-hover);
+    color: var(--color-text);
+  }
 }
 
 .chaimir-tabs__tab:active:not(.chaimir-tabs__tab--disabled) {
@@ -55,14 +57,14 @@
   block-size: 2px;
   background: var(--color-primary);
   border-radius: var(--radius-full);
-  box-shadow: 0 -1px 4px var(--color-primary-shadow); /* 指示条微辉光 */
-  transition:
-    transform 0.4s var(--ease-spring-ios),
-    width 0.4s var(--ease-spring-ios),
-    opacity 0.2s var(--ease);
+  box-shadow: none;
   pointer-events: none;
   opacity: 0; /* 测量完成后由 JS 设为 1 */
   z-index: var(--z-base);
+}
+
+.chaimir-tabs__indicator--animated {
+  transition: transform var(--t-normal) var(--ease-out), opacity var(--t) var(--ease);
 }
 
 .chaimir-tabs__tab--disabled {

@@ -48,6 +48,11 @@ export class ContestApi {
     return this.client.get('/contest/contests', params)
   }
 
+  /** getContest 读取单条竞赛，供编排页按赛制展示正确字段。 */
+  async getContest(contestId: string): Promise<Contest> {
+    return this.client.get(`/contest/contests/${contestId}`)
+  }
+
   /** getStudentContests 查询学生可发现的非草稿竞赛。 */
   async getStudentContests(params?: { page?: number; size?: number }): Promise<PaginatedResponse<Contest>> {
     return this.client.get('/contest/student/contests', params)

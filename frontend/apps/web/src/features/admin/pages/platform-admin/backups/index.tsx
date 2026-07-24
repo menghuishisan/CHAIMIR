@@ -3,10 +3,9 @@
 import React, { useMemo } from 'react'
 import type { BackupRecord } from '@chaimir/api-client'
 import type { TableColumn } from '@chaimir/ui'
-import { Button, Table } from '@chaimir/ui'
+import { Button, Table, ResourceState } from '@chaimir/ui'
 import { RefreshCw, Save } from 'lucide-react'
 import { api } from '../../../../../app/api'
-import { ErrorState, LoadingState } from '../../../../../components/ResourceState'
 import { useAsyncResource } from '../../../../../hooks'
 import styles from '../../list.module.css'
 import { backupStatusLabel, backupTypeLabel, formatBytes, formatDateTime } from '../../../../../utils/index'
@@ -26,8 +25,7 @@ const BackupsPage: React.FC = () => {
   const rows = resource.data?.list || []
 
   const columns = useMemo<TableColumn<BackupRecord>[]>(() => [
-    { key: 'id', title: '备份编号', dataIndex: 'id', priority: 'primary' },
-    { key: 'type', title: '触发类型', render: (row) => backupTypeLabel(row.type), priority: 'secondary' },
+    { key: 'type', title: '触发类型', render: (row) => backupTypeLabel(row.type), priority: 'primary' },
     {
       key: 'size',
       title: '体积',
@@ -66,9 +64,9 @@ const BackupsPage: React.FC = () => {
       </div>
 
       {resource.status === 'error' && (
-        <ErrorState error={resource.error} onRetry={resource.reload} />
+        <ResourceState status="error" error={resource.error} onRetry={resource.reload} />
       )}
-      {resource.status === 'loading' && <LoadingState title="正在获取备份记录" />}
+      {resource.status === 'loading' && <ResourceState status="loading" title="正在获取备份记录" />}
       {(resource.status === 'success' || resource.status === 'empty') && (
         <div className={styles.tableWrap}>
           <Table

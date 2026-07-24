@@ -31,39 +31,6 @@
   aspect-ratio: 1;
 }
 
-/* === Shimmer 动画 === */
-
 .chaimir-skeleton--animate {
-  position: relative;
-  overflow: hidden;
-}
-
-.chaimir-skeleton--animate::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  background: linear-gradient(
-    90deg,
-    transparent 0%,
-    var(--color-skeleton-shine) 50%,
-    transparent 100%
-  );
-  animation: chaimir-skeleton-shimmer 1.5s ease-in-out infinite;
-}
-
-@keyframes chaimir-skeleton-shimmer {
-  0% {
-    transform: translateX(-100%);
-  }
-  100% {
-    transform: translateX(100%);
-  }
-}
-
-/* === 减少动态 === */
-
-@media (prefers-reduced-motion: reduce) {
-  .chaimir-skeleton--animate::after {
-    animation: none;
-  }
+  background: var(--color-surface-sunken);
 }

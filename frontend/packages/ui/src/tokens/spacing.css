@@ -20,100 +20,26 @@
   --space-20: 5rem;     /* 80px */
   --space-24: 6rem;     /* 96px */
 
-  /* === 圆角 (iOS Squircle Approximation) === */
+  /* === 圆角：工作型界面保持紧凑，较大圆角仅用于浮层 === */
 
   --radius-xs: 0.375rem;  /* 6px */
   --radius-sm: 0.5rem;    /* 8px */
-  --radius: 0.75rem;      /* 12px - 新默认，原8px显得生硬 */
-  --radius-lg: 1rem;      /* 16px - 卡片外层 */
-  --radius-xl: 1.5rem;    /* 24px - 弹窗使用 */
+  --radius: 0.5rem;       /* 8px - 默认组件 */
+  --radius-lg: 0.5rem;    /* 8px - 卡片与面板 */
+  --radius-xl: 0.75rem;   /* 12px - 模态与抽屉 */
   --radius-full: 999px;   /* 完全圆角 */
 
-  /* === 阴影（柔和分层 & iOS 质感深度） ===
-   *
-   * 四档阴影对应四种海拔：
-   * - xs: 卡片静置 (微微浮起)
-   * - base: 卡片悬浮
-   * - md: 下拉/悬浮卡/Popover
-   * - lg: 模态/抽屉/Toast (极深远阴影)
-   *
-   * 采用多重柔和层叠，模拟真实的物理环境光。
-   */
+  /* === 阴影：边界优先，阴影只表达真实浮层海拔 === */
 
-  --shadow-xs: 0 1px 2px rgba(15, 23, 42, 0.04),
-               0 2px 4px rgba(15, 23, 42, 0.02);
-
-  --shadow: 0 1px 3px rgba(15, 23, 42, 0.05),
-            0 4px 12px rgba(15, 23, 42, 0.05);
-
-  --shadow-md: 0 4px 14px rgba(15, 23, 42, 0.08),
-               0 12px 28px rgba(15, 23, 42, 0.06);
-
-  --shadow-lg: 0 12px 32px rgba(15, 23, 42, 0.1),
-               0 24px 64px rgba(15, 23, 42, 0.08);
-
-  --shadow-glass-panel: 0 12px 40px rgba(0, 0, 0, 0.3), inset 0 1px 0 var(--color-glass-border);
-  --shadow-glass-elevated: 0 8px 24px rgba(0, 0, 0, 0.4), inset 0 1px 0 var(--color-glass-highlight);
-
-  /* === 过渡时长 === */
-
-  --t-fast: 0.12s;   /* 快速：按压反馈 */
-  --t: 0.18s;        /* 常规：大多数交互 */
-  --t-normal: 0.3s;  /* 中速：中等复杂度动画 */
-  --t-slow: 0.5s;    /* 慢速：页面进入/复杂动画 */
-
-  /* === 缓动曲线（弹簧与物理感知） ===
-   *
-   * 全局共用统一缓动，所有动效同一节奏感。
-   * 增加 iOS 级别的物理阻尼与弹性反馈。
-   */
-
-  --ease: cubic-bezier(0.25, 0.8, 0.25, 1);       /* 标准平滑缓动 */
-  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);      /* 丝滑入场 */
-  --ease-in: cubic-bezier(0.4, 0, 0.6, 1);        /* 出场缓动 */
-
-  /* 高级质感缓动 (iOS Feel) */
-  --ease-spring: cubic-bezier(0.175, 0.885, 0.32, 1.15); /* 柔和弹簧（带有轻微 overshoot） */
-  --ease-spring-ios: cubic-bezier(0.32, 0.72, 0, 1);     /* iOS 原生级丝滑弹簧 */
-  --ease-spring-bouncy: cubic-bezier(0.34, 1.56, 0.64, 1); /* 原组件库自带强力弹簧 */
-  --ease-press: cubic-bezier(0.2, 0.9, 0.4, 1);          /* 按压物理回弹专用 */
-
-  /* === z-index 层级 ===
-   *
-   * 统一阶梯，禁止组件里写裸数字 z-index。
-   * 新层级需求先在此新增一阶。
-   */
-
-  --z-below: -1;      /* 背景装饰层 */
-  --z-ground: 0;      /* 背景基准层 */
-  --z-base: 1;        /* 基础层 */
-  --z-sticky: 50;     /* 粘性定位（表头等） */
-  --z-dropdown: 60;   /* 下拉菜单/Popover */
-  --z-drawer: 80;     /* 侧边抽屉 */
-  --z-immersive: 100; /* 沉浸式工作台 */
-  --z-modal: 120;     /* 模态对话框 */
-  --z-toast: 200;     /* Toast 通知 */
-
-  /* === 布局尺寸 === */
-
-  --topnav-h: 3.5rem;           /* 56px - 顶栏高度 */
-  --sidebar-w: 15.5rem;         /* 248px - 侧栏宽度（展开） */
-  --sidebar-w-collapsed: 4rem;  /* 64px - 侧栏宽度（折叠） */
-  --content-max: 75rem;         /* 1200px - 内容区最大宽度 */
+  --shadow-xs: 0 1px 2px rgba(15, 23, 42, 0.05);
+  --shadow: 0 2px 6px rgba(15, 23, 42, 0.08);
+  --shadow-md: 0 8px 20px rgba(15, 23, 42, 0.12);
+  --shadow-lg: 0 16px 40px rgba(15, 23, 42, 0.16);
+  --shadow-overlay: var(--shadow-md);
+  --shadow-popover: var(--shadow-lg);
 
   /* === 卡片内边距 === */
 
   --card-pad: var(--space-5);       /* 20px - 卡片内边距 */
   --card-header-pad: var(--space-4) var(--space-5); /* 15px 20px - 卡头 */
-}
-
-/* ===== 响应式间距 =====
- *
- * 在大屏幕上适当增加间距，提升视觉呼吸感。
- */
-
-@media (min-width: 1536px) {
-  :root {
-    --content-max: 80rem; /* 1280px */
-  }
 }

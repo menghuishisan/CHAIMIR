@@ -32,9 +32,67 @@ export interface ContentItem {
 }
 
 export interface ContentItemSnapshot extends ContentItem {
-  body: Record<string, unknown>
+  body: ContentBody
   sensitive_fields?: string[]
 }
+
+/** ChainAssertion 描述链上判题的一条可读断言。 */
+export interface ChainAssertion {
+  label: string
+  target: string
+  field: string
+  op: 'eq' | 'neq' | 'gt' | 'gte' | 'lt' | 'lte' | 'contains'
+  value: string | number | boolean
+  expected_label: string
+}
+
+/** ContentJudgeConfig 是内容中心唯一的判题配置结构。 */
+export interface ContentJudgeExpectation extends Record<string, unknown> {
+  public?: boolean
+  assertions?: ChainAssertion[]
+}
+
+export interface ContentJudgeConfig {
+  judger_code: string
+  suite_ref?: string
+  max_score: number
+  expectation: ContentJudgeExpectation
+}
+
+/** ExperimentTemplateBody 是实验模板的固定内容体。 */
+export interface ExperimentTemplateBody {
+  runtime_code: string
+  tools: string[]
+  init_code_ref: string
+  sim_package_ref: string
+  judge_config: ContentJudgeConfig
+  description: string
+  init_script: string
+}
+
+/** ContestProblemBody 是竞赛题的固定内容体。 */
+export interface ContestProblemBody {
+  statement: string
+  judge_config: ContentJudgeConfig
+  init_contracts: string[]
+  ad_config?: {
+    runtime_code: string
+    runtime_image_version: string
+    tool_codes: string[]
+  }
+}
+
+/** TheoryQuestionBody 是理论题的固定内容体。 */
+export interface TheoryQuestionBody {
+  statement: string
+  q_type: 'single_choice' | 'multiple_choice' | 'true_false' | 'fill_blank' | 'short_answer'
+  options: string[]
+  answer: string | string[] | boolean
+  explanation: string
+}
+
+/** ContentBody 汇总三类互斥的内容体，不接受任意对象。 */
+export type ContentBody = ExperimentTemplateBody | ContestProblemBody | TheoryQuestionBody
 
 export interface CreateItemRequest {
   code: string
@@ -46,7 +104,7 @@ export interface CreateItemRequest {
   tags: string[]
   knowledge_points: string[]
   visibility: ContentVisibility
-  body: Record<string, unknown>
+  body: ContentBody
   sensitive_fields: string[]
 }
 
@@ -57,7 +115,7 @@ export interface UpdateItemRequest {
   tags: string[]
   knowledge_points: string[]
   visibility: ContentVisibility
-  body: Record<string, unknown>
+  body: ContentBody
   sensitive_fields: string[]
 }
 
@@ -140,7 +198,7 @@ export interface PaperItemFace {
   score: number
   seq: number
   item: ContentItem
-  body: Record<string, unknown>
+  body: ContentBody
 }
 
 export interface PaperDetail {

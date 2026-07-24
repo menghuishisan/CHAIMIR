@@ -4,11 +4,10 @@ import React, { useCallback, useMemo, useState } from 'react'
 import type { Account } from '@chaimir/api-client'
 import { AccountStatus, UserRole } from '@chaimir/api-client'
 import type { TableColumn } from '@chaimir/ui'
-import { Button, Callout, Checkbox, Input, Select, Table } from '@chaimir/ui'
+import { Button, Callout, Checkbox, Input, Select, Table, useConfirm, ResourceState } from '@chaimir/ui'
 import { Archive, RefreshCw, RotateCcw, Trash2, Upload, UserPlus, Users } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../../../../../app/api'
-import { ErrorState, LoadingState } from '../../../../../components/ResourceState'
 import { useAsyncResource } from '../../../../../hooks'
 import styles from '../../identity-admin.module.css'
 import { accountRoleFilterOptions, accountRoleLabel, accountStatusFilterOptions, accountStatusLabel } from '../../../../../utils/index'
@@ -19,6 +18,7 @@ const PAGE_SIZE = 20
 
 
 const UsersPage: React.FC = () => {
+  const confirm = useConfirm()
   const navigate = useNavigate()
   const [keyword, setKeyword] = useState('')
   const [role, setRole] = useState('')
@@ -51,6 +51,12 @@ const UsersPage: React.FC = () => {
     }
   }, [resource])
 
+  /** confirmAccountAction 在停用、下线或归档账号前说明影响范围。 */
+  const confirmAccountAction = useCallback(async (title: string, description: string, action: () => Promise<void>, successMessage: string) => {
+    const confirmed = await confirm({ title, description, confirmLabel: '确认继续' })
+    if (confirmed) await runAccountAction(action, successMessage)
+  }, [confirm, runAccountAction])
+
   const columns = useMemo<TableColumn<Account>[]>(() => [
     { key: 'select', title: '选择', render: (row) => <Checkbox checked={selectedIds.has(row.id)} aria-label={`选择${row.name}`} onChange={(event) => setSelectedIds((current) => { const next = new Set(current); if (event.target.checked) next.add(row.id); else next.delete(row.id); return next })} /> },
     { key: 'no', title: '学号/工号', render: (row) => row.no || '未设置', priority: 'primary' },
@@ -75,23 +81,26 @@ const UsersPage: React.FC = () => {
               启用
             </Button>
           ) : (
-            <Button variant="outline" size="sm" onClick={() => runAccountAction(() => api.identity.disableAccount(row.id), '账号已停用。')}>
+            <Button variant="outline" size="sm" onClick={() => confirmAccountAction('停用账号', `停用“${row.name}”后，该账号将不能登录。`, () => api.identity.disableAccount(row.id), '账号已停用。')}>
               停用
             </Button>
           )}
-          <Button variant="outline" size="sm" onClick={() => runAccountAction(() => api.identity.forceLogoutAccount(row.id), '账号会话已强制下线。')}>
+          <Button variant="outline" size="sm" onClick={() => confirmAccountAction('强制账号下线', `“${row.name}”的当前登录会话将立即失效。`, () => api.identity.forceLogoutAccount(row.id), '账号会话已强制下线。')}>
             强制下线
           </Button>
           {row.status === AccountStatus.ARCHIVED ? (
             <Button variant="ghost" size="sm" icon={<RotateCcw size={14} />} onClick={() => runAccountAction(() => api.identity.restoreAccount(row.id), '账号已恢复。')}>恢复</Button>
           ) : (
-            <Button variant="ghost" size="sm" icon={<Archive size={14} />} onClick={() => runAccountAction(() => api.identity.archiveAccount(row.id), '账号已归档。')}>归档</Button>
+            <Button variant="ghost" size="sm" icon={<Archive size={14} />} onClick={() => confirmAccountAction('归档账号', `归档“${row.name}”后，该账号将退出日常账号列表。`, () => api.identity.archiveAccount(row.id), '账号已归档。')}>归档</Button>
           )}
-          <Button variant="ghost" size="sm" icon={<Trash2 size={14} />} onClick={() => { if (window.confirm('确定注销这个账号吗？')) void runAccountAction(() => api.identity.cancelAccount(row.id), '账号已注销。') }}>注销</Button>
+          <Button variant="ghost" size="sm" icon={<Trash2 size={14} />} onClick={async () => {
+            const confirmed = await confirm({ title: '注销账号', description: `注销“${row.name}”后，该账号将不能继续登录。`, confirmLabel: '确认注销' })
+            if (confirmed) await runAccountAction(() => api.identity.cancelAccount(row.id), '账号已注销。')
+          }}>注销</Button>
         </div>
       ),
     },
-  ], [navigate, runAccountAction, selectedIds])
+  ], [confirm, confirmAccountAction, navigate, runAccountAction, selectedIds])
 
   const rows = resource.data?.list || []
 
@@ -129,16 +138,16 @@ const UsersPage: React.FC = () => {
         <Button variant="outline" icon={<RefreshCw size={16} />} onClick={resource.reload}>
           刷新
         </Button>
-        <Button variant="outline" disabled={selectedIds.size === 0} onClick={() => runAccountAction(() => api.identity.batchDisableAccounts({ account_ids: Array.from(selectedIds) }), '所选账号已停用。')}>批量停用</Button>
+        <Button variant="outline" disabled={selectedIds.size === 0} onClick={() => confirmAccountAction('批量停用账号', `将停用已选择的 ${selectedIds.size} 个账号。`, () => api.identity.batchDisableAccounts({ account_ids: Array.from(selectedIds) }), '所选账号已停用。')}>批量停用</Button>
         <Button variant="outline" disabled={selectedIds.size === 0} onClick={() => runAccountAction(() => api.identity.batchRestoreAccounts({ account_ids: Array.from(selectedIds) }), '所选账号已恢复。')}>批量恢复</Button>
       </div>
       <div className={styles.toolbar}>
         <Input placeholder="输入入学年份" value={archiveYear} onChange={(event) => setArchiveYear(event.target.value)} />
-        <Button variant="outline" icon={<Archive size={16} />} disabled={!Number(archiveYear)} onClick={() => runAccountAction(() => api.identity.batchArchiveAccounts({ enrollment_year: Number(archiveYear) }), '对应年级账号已批量归档。')}>按年级归档账号</Button>
+        <Button variant="outline" icon={<Archive size={16} />} disabled={!Number(archiveYear)} onClick={() => confirmAccountAction('按年级归档账号', `将归档 ${archiveYear} 级的全部学生账号。`, () => api.identity.batchArchiveAccounts({ enrollment_year: Number(archiveYear) }), '对应年级账号已批量归档。')}>按年级归档账号</Button>
       </div>
 
-      {resource.status === 'error' && <ErrorState error={resource.error} onRetry={resource.reload} />}
-      {resource.status === 'loading' && <LoadingState title="正在获取账号列表" />}
+      {resource.status === 'error' && <ResourceState status="error" error={resource.error} onRetry={resource.reload} />}
+      {resource.status === 'loading' && <ResourceState status="loading" title="正在获取账号列表" />}
       {(resource.status === 'success' || resource.status === 'empty') && (
         <div className={styles.tableWrap}>
           <Table

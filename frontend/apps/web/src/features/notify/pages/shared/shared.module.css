@@ -81,37 +81,6 @@
   color: var(--color-primary-text);
 }
 
-.progressTrack {
-  width: min(320px, 100%);
-  height: 6px;
-  margin-top: var(--space-3);
-  overflow: hidden;
-  border-radius: var(--radius-full);
-  background: var(--color-surface-sunken);
-}
-
-.progressFill {
-  height: 100%;
-  border-radius: inherit;
-  background: var(--color-primary);
-}
-
-.progressPending {
-  width: 15%;
-}
-
-.progressRetrying {
-  width: 35%;
-}
-
-.progressRunning {
-  width: 55%;
-}
-
-.progressDone {
-  width: 100%;
-}
-
 .grant {
   margin-top: var(--space-2);
   font-size: var(--text-xs);
@@ -142,10 +111,11 @@
   display: grid;
   gap: var(--space-5);
   max-width: 720px;
-  padding: var(--space-5);
-  border: 1px solid var(--color-border-subtle);
-  border-radius: var(--radius-lg);
-  background: var(--color-surface);
+  padding: var(--space-5) 0 0;
+  border: 0;
+  border-top: 1px solid var(--color-border);
+  border-radius: 0;
+  background: transparent;
 }
 
 .preferencePanel h2 {
@@ -190,7 +160,7 @@
   color: var(--color-text-sub);
 }
 
-@media (max-width: 760px) {
+@media not all and (--bp-md) {
   .header,
   .card {
     align-items: stretch;

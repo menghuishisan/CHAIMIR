@@ -2,11 +2,10 @@
 
 import React, { useState } from 'react'
 import type { StudentExperiment } from '@chaimir/api-client'
-import { Button } from '@chaimir/ui'
+import { Button, ResourceState } from '@chaimir/ui'
 import { FileText, Play } from 'lucide-react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { api } from '../../../../../app/api'
-import { EmptyState, ErrorState, LoadingState } from '../../../../../components/ResourceState'
 import { useAsyncResource } from '../../../../../hooks/useAsyncResource'
 import styles from '../../experiment.module.css'
 import { userFacingErrorMessage } from '../../../../../utils/userFacingError'
@@ -39,15 +38,15 @@ const ExperimentDetailPage: React.FC = () => {
   }
 
   if (resource.status === 'loading') {
-    return <LoadingState title="正在读取实验详情" description="系统正在同步实验说明和检查点配置。" />
+    return <ResourceState status="loading" title="正在读取实验详情" description="系统正在同步实验说明和检查点配置。" />
   }
 
   if (resource.status === 'error') {
-    return <ErrorState error={resource.error} onRetry={resource.reload} />
+    return <ResourceState status="error" error={resource.error} onRetry={resource.reload} />
   }
 
   if (!resource.data) {
-    return <EmptyState title="未找到实验" description="该实验可能已下架或你没有访问权限。" />
+    return <ResourceState status="empty" title="未找到实验" description="该实验可能已下架或你没有访问权限。" />
   }
 
   const experiment = resource.data

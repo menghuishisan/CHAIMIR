@@ -38,11 +38,9 @@
   color: var(--color-text-sub);
   font-size: var(--text-sm);
   font-weight: var(--font-semibold);
-  box-shadow: inset 0 1px 0 var(--color-highlight);
   transition:
     background var(--t) var(--ease),
     border-color var(--t) var(--ease),
-    box-shadow var(--t) var(--ease),
     color var(--t) var(--ease);
 }
 
@@ -66,14 +64,8 @@
   color: var(--color-primary-fg);
   background: var(--color-primary);
   border-color: var(--color-primary);
-  box-shadow: 0 0 0 4px var(--color-primary-soft);
-  animation: chaimir-step-active 0.5s var(--ease-spring-ios);
-}
-
-@keyframes chaimir-step-active {
-  0% { transform: scale(0.8); }
-  50% { transform: scale(1.1); }
-  100% { transform: scale(1); }
+  outline: 3px solid var(--color-primary-soft);
+  outline-offset: 1px;
 }
 
 .chaimir-steps li.is-active:not(:last-child)::after,

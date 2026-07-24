@@ -1,14 +1,13 @@
 // GradeSettingsPage 管理成绩等级映射、学期和学业预警规则。
 
 import React, { useCallback, useEffect, useState } from 'react'
+import type { LevelRule } from '@chaimir/api-client'
 import { TranscriptScope } from '@chaimir/api-client'
-import { Button, Callout, Input, Switch, Textarea } from '@chaimir/ui'
-import { Plus, RefreshCw, Settings2 } from 'lucide-react'
+import { Button, Callout, Input, Switch, ResourceState, FormField } from '@chaimir/ui'
+import { Plus, RefreshCw, Settings2, Trash2 } from 'lucide-react'
 import { api } from '../../../../../app/api'
-import { ErrorState, LoadingState } from '../../../../../components/ResourceState'
 import { useAsyncResource } from '../../../../../hooks'
 import styles from '../../grade.module.css'
-import { parseJsonArray } from '../../../../../utils/index'
 import { userFacingErrorMessage } from '../../../../../utils/userFacingError'
 
 const GradeSettingsPage: React.FC = () => {
@@ -16,7 +15,13 @@ const GradeSettingsPage: React.FC = () => {
   const semesters = useAsyncResource(() => api.grade.listSemesters(), [])
   const warningRules = useAsyncResource(() => api.grade.getWarningRules(), [])
   const [levelName, setLevelName] = useState('')
-  const [mapping, setMapping] = useState('[\n  { "min": 90, "grade": "A", "gpa": 4.0 }\n]')
+  const [mapping, setMapping] = useState<LevelRule[]>([
+    { min: 90, grade: 'A', gpa: 4 },
+    { min: 80, grade: 'B', gpa: 3 },
+    { min: 70, grade: 'C', gpa: 2 },
+    { min: 60, grade: 'D', gpa: 1 },
+    { min: 0, grade: 'F', gpa: 0 },
+  ])
   const [failCount, setFailCount] = useState('2')
   const [minGpa, setMinGpa] = useState('2.0')
   const [isDefault, setIsDefault] = useState(false)
@@ -70,6 +75,28 @@ const GradeSettingsPage: React.FC = () => {
     }
   }, [reloadAll])
 
+  /** updateLevelRule 更新指定等级行，保持编辑数据始终符合后端结构。 */
+  const updateLevelRule = (index: number, patch: Partial<LevelRule>) => {
+    setMapping((current) => current.map((rule, ruleIndex) => ruleIndex === index ? { ...rule, ...patch } : rule))
+  }
+
+  /** createLevelRule 校验当前表单并保存新的等级规则。 */
+  const createLevelRule = () => {
+    const normalized = mapping
+      .map((rule) => ({ min: Number(rule.min), grade: rule.grade.trim(), gpa: Number(rule.gpa) }))
+      .sort((left, right) => right.min - left.min)
+    if (!levelName.trim() || normalized.length === 0 || normalized.some((rule) => !rule.grade || rule.min < 0 || rule.min > 100 || rule.gpa < 0 || rule.gpa > 5)) {
+      setError('请填写规则名称，并检查分数下限、等级名称和绩点范围。')
+      return
+    }
+    void runAction('level', () => api.grade.createLevelConfig({
+      name: levelName.trim(),
+      mapping: normalized,
+      warning_rules: { fail_count: Number(failCount), min_gpa: Number(minGpa) },
+      is_default: isDefault,
+    }), '等级映射已创建。')
+  }
+
   return (
     <div className={styles.page}>
       <div className={styles.header}>
@@ -82,25 +109,30 @@ const GradeSettingsPage: React.FC = () => {
       {error && <div className={styles.error}>{error}</div>}
       {message && <Callout variant="success" title="保存成功">{message}</Callout>}
       {(levels.error || semesters.error || warningRules.error) && (
-        <ErrorState error={levels.error || semesters.error || warningRules.error} onRetry={reloadAll} />
+        <ResourceState status="error" error={levels.error || semesters.error || warningRules.error} onRetry={reloadAll} />
       )}
-      {(levels.status === 'loading' || semesters.status === 'loading' || warningRules.status === 'loading') && <LoadingState title="正在获取成绩配置" />}
+      {(levels.status === 'loading' || semesters.status === 'loading' || warningRules.status === 'loading') && <ResourceState status="loading" title="正在获取成绩配置" />}
 
       <div className={styles.grid}>
         <section className={styles.panel}>
           <h2>新增等级映射</h2>
-          <label className={styles.field}>规则名称<Input fullWidth value={levelName} onChange={(event) => setLevelName(event.target.value)} /></label>
-          <label className={styles.field}>映射 JSON<Textarea value={mapping} onChange={(event) => setMapping(event.target.value)} /></label>
+          <FormField className={styles.field} label="规则名称"><Input fullWidth value={levelName} onChange={(event) => setLevelName(event.target.value)} /></FormField>
+          <div className={styles.ruleEditor} aria-label="等级映射">
+            {mapping.map((rule, index) => (
+              <div className={styles.ruleRow} key={`${index}-${rule.grade}`}>
+                <FormField className={styles.field} label="最低分"><Input type="number" min={0} max={100} value={String(rule.min)} onChange={(event) => updateLevelRule(index, { min: Number(event.target.value) })} /></FormField>
+                <FormField className={styles.field} label="等级"><Input value={rule.grade} onChange={(event) => updateLevelRule(index, { grade: event.target.value })} /></FormField>
+                <FormField className={styles.field} label="绩点"><Input type="number" min={0} max={5} step={0.1} value={String(rule.gpa)} onChange={(event) => updateLevelRule(index, { gpa: Number(event.target.value) })} /></FormField>
+                <Button variant="ghost" size="sm" icon={<Trash2 size={14} />} disabled={mapping.length === 1} onClick={() => setMapping((current) => current.filter((_, ruleIndex) => ruleIndex !== index))}>删除</Button>
+              </div>
+            ))}
+            <Button variant="outline" size="sm" icon={<Plus size={14} />} onClick={() => setMapping((current) => [...current, { min: 0, grade: '', gpa: 0 }])}>添加等级</Button>
+          </div>
           <Switch checked={isDefault} label="设为默认规则" onChange={(event) => setIsDefault(event.target.checked)} />
           <Button
             loading={submitting === 'level'}
             icon={<Plus size={16} />}
-            onClick={() => runAction('level', () => api.grade.createLevelConfig({
-              name: levelName,
-              mapping: parseJsonArray(mapping, '等级映射必须是数组。'),
-              warning_rules: { fail_count: Number(failCount), min_gpa: Number(minGpa) },
-              is_default: isDefault,
-            }), '等级映射已创建。')}
+            onClick={createLevelRule}
           >
             保存等级规则
           </Button>
@@ -108,9 +140,9 @@ const GradeSettingsPage: React.FC = () => {
 
         <section className={styles.panel}>
           <h2>新增学期</h2>
-          <label className={styles.field}>学期名称<Input fullWidth value={semesterName} onChange={(event) => setSemesterName(event.target.value)} /></label>
-          <label className={styles.field}>开始日期<Input fullWidth type="date" value={startDate} onChange={(event) => setStartDate(event.target.value)} /></label>
-          <label className={styles.field}>结束日期<Input fullWidth type="date" value={endDate} onChange={(event) => setEndDate(event.target.value)} /></label>
+          <FormField className={styles.field} label="学期名称"><Input fullWidth value={semesterName} onChange={(event) => setSemesterName(event.target.value)} /></FormField>
+          <FormField className={styles.field} label="开始日期"><Input fullWidth type="date" value={startDate} onChange={(event) => setStartDate(event.target.value)} /></FormField>
+          <FormField className={styles.field} label="结束日期"><Input fullWidth type="date" value={endDate} onChange={(event) => setEndDate(event.target.value)} /></FormField>
           <Switch checked={isCurrent} label="设为当前学期" onChange={(event) => setIsCurrent(event.target.checked)} />
           <Button
             loading={submitting === 'semester'}
@@ -123,8 +155,8 @@ const GradeSettingsPage: React.FC = () => {
 
         <section className={styles.panel}>
           <h2>预警规则</h2>
-          <label className={styles.field}>挂科门数<Input fullWidth value={failCount} onChange={(event) => setFailCount(event.target.value)} /></label>
-          <label className={styles.field}>最低 GPA<Input fullWidth value={minGpa} onChange={(event) => setMinGpa(event.target.value)} /></label>
+          <FormField className={styles.field} label="挂科门数"><Input fullWidth value={failCount} onChange={(event) => setFailCount(event.target.value)} /></FormField>
+          <FormField className={styles.field} label="最低 GPA"><Input fullWidth value={minGpa} onChange={(event) => setMinGpa(event.target.value)} /></FormField>
           <Button
             loading={submitting === 'warning'}
             onClick={() => runAction('warning', () => api.grade.updateWarningRules({ fail_count: Number(failCount), min_gpa: Number(minGpa) }), '预警规则已保存。')}
@@ -149,8 +181,8 @@ const GradeSettingsPage: React.FC = () => {
 
         <section className={styles.panel}>
           <h2>成绩维护</h2>
-          <label className={styles.field}>学生编号<Input fullWidth value={studentIds} onChange={(event) => setStudentIds(event.target.value)} placeholder="多个编号用逗号分隔" /></label>
-          <label className={styles.field}>学期编号<Input fullWidth value={maintenanceSemesterId} onChange={(event) => setMaintenanceSemesterId(event.target.value)} /></label>
+          <FormField className={styles.field} label="学生编号"><Input fullWidth value={studentIds} onChange={(event) => setStudentIds(event.target.value)} placeholder="多个编号用逗号分隔" /></FormField>
+          <FormField className={styles.field} label="学期编号"><Input fullWidth value={maintenanceSemesterId} onChange={(event) => setMaintenanceSemesterId(event.target.value)} /></FormField>
           <div className={styles.actions}>
             <Button
               variant="outline"

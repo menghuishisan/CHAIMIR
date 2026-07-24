@@ -1,0 +1,98 @@
+/* 本文件定义代码追踪与检查点样式。 */
+
+
+
+.sim-code {
+  max-height: 21.25rem;
+  overflow: auto;
+  border: 0.0625rem solid var(--color-dark-border);
+  border-radius: var(--radius-xs);
+  background: color-mix(in srgb, var(--color-editor-bg) 80%, transparent);
+}
+
+.sim-code__line {
+  display: grid;
+  grid-template-columns: 2.625rem 1fr;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-2);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  transition: background var(--t-fast) var(--ease);
+}
+
+.sim-code__line span {
+  color: var(--color-dark-text-sub);
+  text-align: right;
+}
+
+.sim-code__line code {
+  white-space: pre;
+}
+
+.sim-code__line em {
+  grid-column: 2;
+  color: var(--color-secondary-accent);
+  font-style: normal;
+}
+
+.sim-code__line.is-normal,
+.sim-code__line.is-success {
+  background: color-mix(in srgb, var(--color-on-dark-accent) 15%, transparent);
+  box-shadow: inset 2px 0 0 var(--color-on-dark-accent);
+}
+
+.sim-code__line.is-error {
+  color: var(--color-danger);
+}
+
+.sim-watch {
+  display: grid;
+  gap: var(--space-2);
+  margin: var(--space-3) 0 0;
+}
+
+.sim-watch div {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.sim-watch dt {
+  color: var(--color-dark-text-sub);
+}
+
+.sim-watch dd {
+  margin: 0;
+  font-family: var(--font-mono);
+}
+
+.sim-checkpoints {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.sim-checkpoints article {
+  display: flex;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: 0.0625rem solid var(--color-dark-border);
+  border-radius: var(--radius-xs);
+  background: color-mix(in srgb, var(--color-dark-elevated) 70%, transparent);
+}
+
+.sim-checkpoints article.is-achieved {
+  border-color: var(--color-success);
+}
+
+.sim-checkpoints article.is-pending {
+  border-color: var(--color-secondary-accent);
+}
+
+.sim-checkpoints strong {
+  display: block;
+}
+
+.sim-checkpoints p {
+  margin: var(--space-1) 0 0;
+  font-size: var(--text-sm);
+}

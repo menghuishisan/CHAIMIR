@@ -33,20 +33,22 @@
   color: var(--color-text);
   font-size: var(--text-sm);
   cursor: pointer;
-  box-shadow: var(--shadow-xs);
+  box-shadow: none;
   transition:
     background var(--t-fast) var(--ease),
     border-color var(--t-fast) var(--ease),
     color var(--t-fast) var(--ease),
     box-shadow var(--t-fast) var(--ease),
     opacity var(--t-fast) var(--ease),
-    transform var(--t-fast) var(--ease-press);
+    transform var(--t-fast) var(--ease-out);
 }
 
-.chaimir-pagination__btn:hover:not(:disabled),
-.chaimir-pagination__item:hover {
-  border-color: var(--color-primary);
-  color: var(--color-primary-text);
+@media (hover: hover) and (pointer: fine) {
+  .chaimir-pagination__btn:hover:not(:disabled),
+  .chaimir-pagination__item:hover {
+    border-color: var(--color-primary);
+    color: var(--color-primary-text);
+  }
 }
 
 .chaimir-pagination__btn:disabled {
@@ -73,7 +75,7 @@
   min-width: 2rem;
   height: 2rem;
   color: var(--color-text-faint);
-  letter-spacing: 0.2em;
+  letter-spacing: 0;
 }
 
 .chaimir-pagination__jumper {
@@ -91,7 +93,7 @@
   border-radius: var(--radius-xs);
   text-align: center;
   font-size: var(--text-sm);
-  transition: border-color var(--t) var(--ease), box-shadow 0.4s var(--ease-spring-ios);
+  transition: border-color var(--t) var(--ease), box-shadow var(--t) var(--ease);
 }
 
 .chaimir-pagination__input:focus {
@@ -113,7 +115,7 @@
   -moz-appearance: textfield;
 }
 
-@media (max-width: 640px) {
+@media not all and (--bp-sm) {
   .chaimir-pagination {
     justify-content: flex-start;
     gap: var(--space-3);

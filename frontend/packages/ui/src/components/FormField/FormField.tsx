@@ -1,7 +1,7 @@
 // FormField 组件：表单字段容器（带标签和错误提示）
 // 符合 FE-2（label[for] 显式关联）、FE-4（错误文案面向用户）
 
-import React from 'react'
+import React, { useId } from 'react'
 import { clsx } from 'clsx'
 import './FormField.css'
 
@@ -35,17 +35,22 @@ export const FormField = React.forwardRef<HTMLDivElement, FormFieldProps>(
     ref
   ) => {
     const classes = clsx('chaimir-form-field', className)
+    const generatedId = `chaimir-field-${useId()}`
+    const controlId = htmlFor || generatedId
+    const control = React.isValidElement<{ id?: string }>(children)
+      ? React.cloneElement(children, { id: children.props.id || controlId })
+      : children
 
     return (
       <div ref={ref} className={classes} {...props}>
         {label && (
-          <label htmlFor={htmlFor} className="chaimir-form-field__label">
+          <label htmlFor={controlId} className="chaimir-form-field__label">
             {label}
             {required && <span className="chaimir-form-field__required" aria-label="必填">*</span>}
           </label>
         )}
         <div className="chaimir-form-field__control">
-          {children}
+          {control}
         </div>
         {error && (
           <div className="chaimir-form-field__error" role="alert">

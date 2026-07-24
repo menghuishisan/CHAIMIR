@@ -3,11 +3,10 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import type { Account } from '@chaimir/api-client'
 import { BaseIdentity, ClassStatus } from '@chaimir/api-client'
-import { Button, Callout, Input, Select, Switch } from '@chaimir/ui'
+import { Button, Callout, Input, Select, Switch, ResourceState, FormField } from '@chaimir/ui'
 import { Edit, Save, ShieldCheck } from 'lucide-react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { api } from '../../../../../app/api'
-import { ErrorState, LoadingState } from '../../../../../components/ResourceState'
 import { useAsyncResource } from '../../../../../hooks'
 import styles from '../../identity-admin.module.css'
 import { baseIdentityOptions } from '../../../../../utils/index'
@@ -144,16 +143,16 @@ const UserEditPage: React.FC = () => {
   }
 
   if (accountId && accountsResource.status === 'loading') {
-    return <LoadingState title="正在获取账号资料" />
+    return <ResourceState status="loading" title="正在获取账号资料" />
   }
   if (accountsResource.status === 'error') {
-    return <ErrorState error={accountsResource.error} onRetry={accountsResource.reload} />
+    return <ResourceState status="error" error={accountsResource.error} onRetry={accountsResource.reload} />
   }
   if (!accountId && tenantConfigResource.status === 'loading') {
-    return <LoadingState title="正在获取账号开通策略" />
+    return <ResourceState status="loading" title="正在获取账号开通策略" />
   }
   if (!accountId && tenantConfigResource.status === 'error') {
-    return <ErrorState error={tenantConfigResource.error} onRetry={tenantConfigResource.reload} />
+    return <ResourceState status="error" error={tenantConfigResource.error} onRetry={tenantConfigResource.reload} />
   }
   if (accountId && !account) {
     return (
@@ -196,36 +195,15 @@ const UserEditPage: React.FC = () => {
         <section className={styles.panel}>
           <h2>基础资料</h2>
           <div className={styles.formGrid}>
-            <label className={styles.field}>
-              姓名
-              <Input fullWidth value={effectiveName} onChange={(event) => setName(event.target.value)} />
-            </label>
-            <label className={styles.field}>
-              学号或工号
-              <Input fullWidth value={effectiveNo} onChange={(event) => setNo(event.target.value)} />
-            </label>
+            <FormField className={styles.field} label="姓名"><Input fullWidth value={effectiveName} onChange={(event) => setName(event.target.value)} /></FormField>
+            <FormField className={styles.field} label="学号或工号"><Input fullWidth value={effectiveNo} onChange={(event) => setNo(event.target.value)} /></FormField>
             {!accountId && (
-              <label className={styles.field}>
-                手机号
-                <Input fullWidth value={phone} onChange={(event) => setPhone(event.target.value)} />
-              </label>
+              <FormField className={styles.field} label="手机号"><Input fullWidth value={phone} onChange={(event) => setPhone(event.target.value)} /></FormField>
             )}
-            <label className={styles.field}>
-              基础身份
-              <Select fullWidth disabled={Boolean(accountId)} value={effectiveBaseIdentity} options={baseIdentityOptions} onChange={setBaseIdentity} />
-            </label>
-            <label className={styles.field}>
-              归属组织
-              <Select fullWidth value={orgId} options={orgOptions} onChange={setOrgId} />
-            </label>
-            <label className={styles.field}>
-              入学年份
-              <Input fullWidth value={enrollmentYear} placeholder="学生账号可填写" onChange={(event) => setEnrollmentYear(event.target.value)} />
-            </label>
-            <label className={styles.fieldFull}>
-              职称
-              <Input fullWidth value={effectiveTitle} placeholder="教师账号可填写" onChange={(event) => setTitle(event.target.value)} />
-            </label>
+            <FormField className={styles.field} label="基础身份"><Select fullWidth disabled={Boolean(accountId)} value={effectiveBaseIdentity} options={baseIdentityOptions} onChange={setBaseIdentity} /></FormField>
+            <FormField className={styles.field} label="归属组织"><Select fullWidth value={orgId} options={orgOptions} onChange={setOrgId} /></FormField>
+            <FormField className={styles.field} label="入学年份"><Input fullWidth value={enrollmentYear} placeholder="学生账号可填写" onChange={(event) => setEnrollmentYear(event.target.value)} /></FormField>
+            <FormField className={styles.fieldFull} label="职称"><Input fullWidth value={effectiveTitle} placeholder="教师账号可填写" onChange={(event) => setTitle(event.target.value)} /></FormField>
           </div>
           <Button loading={submitting} icon={<Save size={16} />} onClick={handleSubmit}>
             保存账号
@@ -237,10 +215,7 @@ const UserEditPage: React.FC = () => {
             <h2>开通方式</h2>
             <Switch checked={useActivation} disabled={!tenantConfigResource.data?.enable_activation_code} label={useActivation ? '使用激活码开通' : '使用初始密码开通'} onChange={(event) => setUseActivation(event.target.checked)} />
             {!useActivation && (
-              <label className={styles.field}>
-                初始密码
-                <Input fullWidth type="password" value={initialPassword} onChange={(event) => setInitialPassword(event.target.value)} />
-              </label>
+              <FormField className={styles.field} label="初始密码"><Input fullWidth type="password" value={initialPassword} onChange={(event) => setInitialPassword(event.target.value)} /></FormField>
             )}
             <Callout variant="info" title="开通说明">
               {useActivation ? '激活码只在创建结果中展示一次，请按学校流程安全下发。' : '账号创建后使用初始密码登录，并按学校安全要求及时修改密码。'}
@@ -257,7 +232,7 @@ const UserEditPage: React.FC = () => {
             <Button variant="outline" onClick={() => void runAccountAdminAction(() => api.identity.revokeSchoolAdmin(accountId), '已撤销学校管理员权限。')}>
               撤销学校管理员
             </Button>
-            <label className={styles.field}>新密码<Input fullWidth type="password" value={resetPassword} onChange={(event) => setResetPassword(event.target.value)} /></label>
+            <FormField className={styles.field} label="新密码"><Input fullWidth type="password" value={resetPassword} onChange={(event) => setResetPassword(event.target.value)} /></FormField>
             <Switch checked={mustChangePassword} label="下次登录必须修改密码" onChange={(event) => setMustChangePassword(event.target.checked)} />
             <Button variant="outline" disabled={!resetPassword} onClick={() => void runAccountAdminAction(() => api.identity.resetAccountPassword(accountId, { new_password: resetPassword, must_change_pwd: mustChangePassword }), '账号密码已重置。')}>重置密码</Button>
           </section>
@@ -265,7 +240,7 @@ const UserEditPage: React.FC = () => {
       </div>
 
       {majorsResource.status === 'loading' || classesResource.status === 'loading' ? (
-        <LoadingState title="正在同步组织信息" />
+        <ResourceState status="loading" title="正在同步组织信息" />
       ) : null}
       {classesResource.data?.some((item) => item.status === ClassStatus.ARCHIVED) && (
         <Callout variant="info" title="组织提示">

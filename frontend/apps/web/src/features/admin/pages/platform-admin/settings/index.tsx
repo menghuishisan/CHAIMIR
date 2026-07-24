@@ -3,19 +3,18 @@
 import React, { useCallback, useMemo, useState } from 'react'
 import type { ConfigChangeLog, SystemConfig } from '@chaimir/api-client'
 import { AdminScope } from '@chaimir/api-client'
-import { Button, Callout, Modal, Switch, Table, Textarea } from '@chaimir/ui'
-import { History, RefreshCw, RotateCcw, Save, Settings } from 'lucide-react'
+import { Button, Callout, DescriptionList, Modal, Switch, Table, useConfirm, ResourceState } from '@chaimir/ui'
+import { History, RefreshCw, RotateCcw, Settings } from 'lucide-react'
 import { api } from '../../../../../app/api'
-import { EmptyState, ErrorState, LoadingState } from '../../../../../components/ResourceState'
 import { useAsyncResource } from '../../../../../hooks'
 import styles from '../../list.module.css'
 import formStyles from './settings.module.css'
-import { parseJsonObject, stringifyJsonObject, systemConfigLabel } from '../../../../../utils/index'
+import { formatDateTime, systemConfigLabel } from '../../../../../utils/index'
 import { userFacingErrorMessage } from '../../../../../utils/userFacingError'
 
 const SettingsPage: React.FC = () => {
+  const confirm = useConfirm()
   const resource = useAsyncResource(() => api.admin.listConfigs({ scope: AdminScope.GLOBAL }), [])
-  const [editing, setEditing] = useState<Record<string, string>>({})
   const [submittingKey, setSubmittingKey] = useState<string | null>(null)
   const [message, setMessage] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -31,51 +30,31 @@ const SettingsPage: React.FC = () => {
   const maintenanceEnabled = maintenanceConfig?.value?.enabled === true
 
   /**
-   * valueFor 返回当前编辑态内容，首次编辑时使用后端值。
-   */
-  const valueFor = useCallback((config: SystemConfig): string => (
-    editing[config.key] ?? stringifyJsonObject(config.value)
-  ), [editing])
-
-  /**
-   * handleSave 按配置版本更新后端配置。
-   */
-  const handleSave = useCallback(async (config: SystemConfig, nextValue?: Record<string, unknown>) => {
-    setSubmittingKey(config.key)
-    setError(null)
-    setMessage(null)
-    try {
-      const value: Record<string, unknown> = nextValue ?? parseJsonObject<Record<string, unknown>>(valueFor(config))
-      await api.admin.updateConfig(config.key, {
-        scope: config.scope,
-        tenant_id: config.tenant_id,
-        value,
-        version: config.version,
-      })
-      setMessage(`${systemConfigLabel(config.key)}已保存。`)
-      setEditing((current) => {
-        const next = { ...current }
-        delete next[config.key]
-        return next
-      })
-      resource.reload()
-    } catch (saveError) {
-      setError(userFacingErrorMessage(saveError, '配置保存失败，请检查内容后重试。'))
-    } finally {
-      setSubmittingKey(null)
-    }
-  }, [resource, valueFor])
-
-  /**
    * handleMaintenanceToggle 通过同一配置接口切换维护模式。
    */
-  const handleMaintenanceToggle = useCallback((enabled: boolean) => {
+  const handleMaintenanceToggle = useCallback(async (enabled: boolean) => {
     if (!maintenanceConfig) {
       setError('维护模式配置尚未就绪，暂时无法切换。')
       return
     }
-    handleSave(maintenanceConfig, { ...maintenanceConfig.value, enabled })
-  }, [handleSave, maintenanceConfig])
+    setSubmittingKey(maintenanceConfig.key)
+    setError(null)
+    setMessage(null)
+    try {
+      await api.admin.updateConfig(maintenanceConfig.key, {
+        scope: maintenanceConfig.scope,
+        tenant_id: maintenanceConfig.tenant_id,
+        value: { ...maintenanceConfig.value, enabled },
+        version: maintenanceConfig.version,
+      })
+      setMessage('维护模式已更新。')
+      resource.reload()
+    } catch (saveError) {
+      setError(userFacingErrorMessage(saveError, '维护模式更新失败，请稍后重试。'))
+    } finally {
+      setSubmittingKey(null)
+    }
+  }, [maintenanceConfig, resource])
 
   /** openHistory 读取指定配置的服务端变更记录。 */
   const openHistory = async (config: SystemConfig) => {
@@ -95,7 +74,9 @@ const SettingsPage: React.FC = () => {
 
   /** rollbackConfig 按当前版本回退到所选历史记录的变更前值。 */
   const rollbackConfig = async (log: ConfigChangeLog) => {
-    if (!historyConfig || !window.confirm('确定回退到这次变更之前吗？')) return
+    if (!historyConfig) return
+    const confirmed = await confirm({ title: '回退配置', description: '回退会创建一条新的配置变更记录，并恢复到所选变更之前的值。', confirmLabel: '确认回退' })
+    if (!confirmed) return
     setSubmittingKey(historyConfig.key)
     setError(null)
     try {
@@ -137,9 +118,9 @@ const SettingsPage: React.FC = () => {
         </Callout>
       )}
 
-      {resource.status === 'error' && <ErrorState error={resource.error} onRetry={resource.reload} />}
-      {resource.status === 'loading' && <LoadingState title="正在获取系统配置" />}
-      {resource.status === 'empty' && <EmptyState title="暂无配置" description="当前没有可编辑的平台全局参数。" />}
+      {resource.status === 'error' && <ResourceState status="error" error={resource.error} onRetry={resource.reload} />}
+      {resource.status === 'loading' && <ResourceState status="loading" title="正在获取系统配置" />}
+      {resource.status === 'empty' && <ResourceState status="empty" title="暂无配置" description="当前没有可编辑的平台全局参数。" />}
       {resource.status === 'success' && (
         <div className={formStyles.grid}>
           <section className={formStyles.panel}>
@@ -153,7 +134,7 @@ const SettingsPage: React.FC = () => {
             />
           </section>
 
-          {configs.map((config) => (
+          {configs.filter((config) => config.key !== 'maintenance_mode').map((config) => (
             <section className={formStyles.panel} key={config.id}>
               <header className={formStyles.panelHeader}>
                 <div>
@@ -162,25 +143,17 @@ const SettingsPage: React.FC = () => {
                 </div>
                 <span className={styles.status}>{config.scope === AdminScope.GLOBAL ? '平台' : '租户'}</span>
               </header>
-              <Textarea
-                value={valueFor(config)}
-                resize="vertical"
-                onChange={(event) => setEditing((current) => ({ ...current, [config.key]: event.target.value }))}
-              />
-              <Button
-                icon={<Save size={16} />}
-                loading={submittingKey === config.key}
-                onClick={() => handleSave(config)}
-              >
-                保存配置
-              </Button>
+              <DescriptionList items={[
+                { key: 'version', label: '当前版本', value: config.version },
+                { key: 'updated', label: '最近更新', value: formatDateTime(config.updated_at) },
+              ]} />
               <Button variant="outline" icon={<History size={16} />} onClick={() => void openHistory(config)}>变更历史</Button>
             </section>
           ))}
         </div>
       )}
       <Modal open={historyConfig !== null} title={historyConfig ? `${systemConfigLabel(historyConfig.key)}变更历史` : '配置变更历史'} size="lg" onClose={() => setHistoryConfig(null)}>
-        {loadingHistory ? <LoadingState title="正在获取变更历史" /> : (
+        {loadingHistory ? <ResourceState status="loading" title="正在获取变更历史" /> : (
           <Table
             rows={history}
             rowKey="id"
@@ -189,7 +162,6 @@ const SettingsPage: React.FC = () => {
             emptyDescription="该配置还没有可回退的变更记录。"
             columns={[
               { key: 'time', title: '变更时间', dataIndex: 'created_at', priority: 'primary' },
-              { key: 'operator', title: '操作人', dataIndex: 'operator_id' },
               { key: 'action', title: '操作', render: (row: ConfigChangeLog) => <Button variant="outline" size="sm" icon={<RotateCcw size={14} />} onClick={() => void rollbackConfig(row)}>回退到此前</Button> },
             ]}
           />

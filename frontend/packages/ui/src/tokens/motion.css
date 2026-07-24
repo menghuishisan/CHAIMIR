@@ -1,0 +1,23 @@
+/* 动效令牌：只表达因果反馈，统一时长、缓动和按压比例。 */
+
+:root {
+  --ease: cubic-bezier(0.22, 0.61, 0.36, 1);
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
+  --ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
+
+  --t-fast: 0.12s;
+  --t: 0.18s;
+  --t-normal: 0.2s;
+  --t-slow: 0.3s;
+  --t-press: 140ms;
+  --t-tooltip: 160ms;
+  --t-menu: 200ms;
+  --t-modal-enter: 240ms;
+  --t-modal-exit: 160ms;
+  --t-drawer-enter: 260ms;
+  --t-drawer-exit: 180ms;
+  --t-toast-enter: 260ms;
+  --t-toast-exit: 180ms;
+  --press-scale: 0.97;
+}

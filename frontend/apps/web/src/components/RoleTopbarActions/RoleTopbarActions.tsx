@@ -1,8 +1,9 @@
 // RoleTopbarActions 统一四端顶栏的任务、通知、个人中心和退出入口。
 
-import { useState } from 'react'
+import { useCallback, useRef, useState } from 'react'
 import { Bell, ChevronDown, ListTodo, LogOut, User } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
+import { useClickOutside, useEscapeKey } from '@chaimir/ui'
 import { api } from '../../app/api'
 import { useTopbarData } from '../../hooks/useTopbarData'
 import { clearLoginTokens } from '../../utils/authSession'
@@ -24,9 +25,13 @@ export function RoleTopbarActions({
 }: RoleTopbarActionsProps) {
   const navigate = useNavigate()
   const [menuOpen, setMenuOpen] = useState(false)
+  const profileRef = useRef<HTMLDivElement>(null)
   const topbar = useTopbarData({
     loadUnread,
   })
+  const closeMenu = useCallback(() => setMenuOpen(false), [])
+  useClickOutside(profileRef, closeMenu, menuOpen)
+  useEscapeKey(closeMenu, menuOpen)
 
   /**
    * handleLogout 先通知后端吊销会话，再清除本地令牌并回到对应登录页。
@@ -34,21 +39,23 @@ export function RoleTopbarActions({
   async function handleLogout(): Promise<void> {
     try {
       await api.identity.logout()
-    } catch (error) {
-      console.warn('退出登录请求未完成，已清除本地登录状态', error)
+    } catch {
+      // 服务端会话吊销失败时仍清除本地令牌，避免用户被困在无效登录态。
     } finally {
       clearLoginTokens()
+      closeMenu()
       navigate(loginPath, { replace: true })
     }
   }
 
   return (
     <div className={styles.actions}>
-      <button className={styles.iconButton} onClick={() => navigate(`${basePath}/tasks`)} aria-label="任务中心">
+      <button type="button" className={styles.iconButton} onClick={() => navigate(`${basePath}/tasks`)} aria-label="任务中心">
         <ListTodo size={20} />
       </button>
 
       <button
+        type="button"
         className={styles.iconButton}
         onClick={() => navigate(`${basePath}/notifications`)}
         aria-label="消息通知"
@@ -61,12 +68,14 @@ export function RoleTopbarActions({
 
       <div className={styles.divider} />
 
-      <div className={styles.profileWrap}>
+      <div className={styles.profileWrap} ref={profileRef}>
         <button
+          type="button"
           className={styles.profileButton}
           onClick={() => setMenuOpen((open) => !open)}
           aria-label="打开个人菜单"
           aria-expanded={menuOpen}
+          aria-haspopup="menu"
         >
           <div className={styles.avatar}>{topbar.avatar}</div>
           <div className={styles.userInfo}>
@@ -77,7 +86,7 @@ export function RoleTopbarActions({
         </button>
 
         {menuOpen ? (
-          <div className={styles.profileMenu}>
+          <div className={styles.profileMenu} role="menu">
             <div className={styles.menuHeader}>
               <div className={styles.menuAvatar}>{topbar.avatar}</div>
               <div>
@@ -85,11 +94,11 @@ export function RoleTopbarActions({
                 <div className={styles.menuMeta}>{topbar.meta}</div>
               </div>
             </div>
-            <button className={styles.menuItem} onClick={() => navigate(`${basePath}/profile`)}>
+            <button type="button" className={styles.menuItem} role="menuitem" onClick={() => { closeMenu(); navigate(`${basePath}/profile`) }}>
               <User size={16} />
               <span>个人中心</span>
             </button>
-            <button className={`${styles.menuItem} ${styles.logoutItem}`} onClick={() => void handleLogout()}>
+            <button type="button" className={`${styles.menuItem} ${styles.logoutItem}`} role="menuitem" onClick={() => void handleLogout()}>
               <LogOut size={16} />
               <span>退出登录</span>
             </button>

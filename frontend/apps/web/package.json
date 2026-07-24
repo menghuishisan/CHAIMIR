@@ -8,6 +8,7 @@
     "build": "tsc && vite build",
     "type-check": "tsc --noEmit",
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
+    "lint:style": "stylelint --config ./stylelint.config.cjs \"src/**/*.css\" --allow-empty-input",
     "preview": "vite preview"
   },
   "dependencies": {

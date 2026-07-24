@@ -8,6 +8,7 @@
 }
 
 .chaimir-spinner__icon {
+  /* animation-budget: loader feedback may rotate continuously while waiting */
   animation: chaimir-spin 1s linear infinite;
 }
 

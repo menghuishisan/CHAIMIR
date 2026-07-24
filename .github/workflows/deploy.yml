@@ -30,7 +30,7 @@ jobs:
       - name: 从权威锁生成 staging digest overlay
         shell: pwsh
         env:
-          HARBOR_REGISTRY: ${{ secrets.HARBOR_REGISTRY }}
+          HARBOR_REGISTRY: ${{ vars.HARBOR_REGISTRY }}
         run: |
           ./deploy/scripts/render-locked-overlay.ps1 `
             -OverlayPath ./deploy/overlays/staging `
@@ -57,7 +57,7 @@ jobs:
       - name: 从发布提交权威锁生成 prod-saas digest overlay
         shell: pwsh
         env:
-          HARBOR_REGISTRY: ${{ secrets.HARBOR_REGISTRY }}
+          HARBOR_REGISTRY: ${{ vars.HARBOR_REGISTRY }}
         run: |
           ./deploy/scripts/render-locked-overlay.ps1 `
             -OverlayPath ./deploy/overlays/prod-saas `

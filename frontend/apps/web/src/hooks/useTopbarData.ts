@@ -1,6 +1,6 @@
 // useTopbarData 从后端读取顶栏身份与未读通知数据，避免各角色壳重复拼接展示字段。
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { api } from '../app/api'
 import { subscribeAppResource } from '../app/resourceInvalidation'
 import { accountRoleLabel } from '../utils/labels'
@@ -14,9 +14,12 @@ export interface TopbarData {
   meta: string
   avatar: string
   unreadCount: number | null
-  isLoading: boolean
-  hasProfileError: boolean
-  hasUnreadError: boolean
+}
+
+const EMPTY_PROFILE = {
+  name: '账号信息读取中',
+  meta: '正在连接服务端',
+  avatar: '用',
 }
 
 /**
@@ -28,37 +31,24 @@ function firstAvatarChar(name: string): string {
 }
 
 /**
- * useTopbarData 聚合 /me 和未读通知数，失败时显式暴露错误状态。
+ * useTopbarData 聚合 /me 和未读通知数，并把不可用数据转换为明确的用户向提示。
  */
 export function useTopbarData(options: TopbarDataOptions): TopbarData {
-  const emptyProfile = useMemo(
-    () => ({
-      name: '账号信息读取中',
-      meta: '正在连接服务端',
-      avatar: '用',
-    }),
-    [],
-  )
   const [data, setData] = useState<TopbarData>({
-    ...emptyProfile,
+    ...EMPTY_PROFILE,
     unreadCount: null,
-    isLoading: true,
-    hasProfileError: false,
-    hasUnreadError: false,
   })
 
   useEffect(() => {
     let active = true
 
     async function loadTopbarData(): Promise<void> {
-      setData((current) => ({ ...current, isLoading: true }))
       const [meResult, unreadResult] = await Promise.allSettled([
         api.identity.getMe(),
         options.loadUnread ? api.notify.getUnreadCount() : Promise.resolve({ unread: 0 }),
       ])
 
-      let nextProfile = emptyProfile
-      let hasProfileError = false
+      let nextProfile = EMPTY_PROFILE
       if (meResult.status === 'fulfilled') {
         const account = meResult.value.account
         if (account.name.trim()) {
@@ -68,7 +58,6 @@ export function useTopbarData(options: TopbarDataOptions): TopbarData {
             avatar: firstAvatarChar(account.name),
           }
         } else {
-          hasProfileError = true
           nextProfile = {
             name: '账号信息不完整',
             meta: '请联系管理员补全账号资料',
@@ -76,31 +65,22 @@ export function useTopbarData(options: TopbarDataOptions): TopbarData {
           }
         }
       } else {
-        hasProfileError = true
         nextProfile = {
           name: '账号信息不可用',
           meta: '请重新登录后查看',
           avatar: '用',
         }
-        console.warn('当前账号信息读取失败', meResult.reason)
       }
 
       let unreadCount: number | null = null
-      let hasUnreadError = false
       if (unreadResult.status === 'fulfilled') {
         unreadCount = options.loadUnread ? unreadResult.value.unread : null
-      } else {
-        hasUnreadError = true
-        console.warn('通知未读数读取失败', unreadResult.reason)
       }
 
       if (active) {
         setData({
           ...nextProfile,
           unreadCount,
-          isLoading: false,
-          hasProfileError,
-          hasUnreadError,
         })
       }
     }
@@ -113,7 +93,7 @@ export function useTopbarData(options: TopbarDataOptions): TopbarData {
       unsubscribeProfile()
       unsubscribeUnread()
     }
-  }, [emptyProfile, options.loadUnread])
+  }, [options.loadUnread])
 
   return data
 }

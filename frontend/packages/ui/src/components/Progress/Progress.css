@@ -33,8 +33,7 @@
   height: 100%;
   border-radius: var(--radius-full);
   transform-origin: left center;
-  transition: transform 0.8s var(--ease-spring-ios);
-  box-shadow: inset 0 1px 0 var(--color-highlight);
+  transition: transform var(--t-normal) var(--ease-out);
 }
 
 /* 颜色变体 */

@@ -65,7 +65,7 @@
   background: var(--color-surface);
 }
 
-@media (max-width: 640px) {
+@media not all and (--bp-sm) {
   .header {
     flex-direction: column;
   }

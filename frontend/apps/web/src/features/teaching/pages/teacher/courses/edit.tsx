@@ -2,11 +2,10 @@
 
 import React, { useCallback, useEffect, useState } from 'react'
 import { CourseType, TeachingDifficulty } from '@chaimir/api-client'
-import { Button, Callout, Input, Select, Textarea } from '@chaimir/ui'
+import { Button, Callout, Input, Select, Textarea, ResourceState, FormField } from '@chaimir/ui'
 import { Edit, Save, Send } from 'lucide-react'
 import { useSearchParams } from 'react-router-dom'
 import { api } from '../../../../../app/api'
-import { ErrorState, LoadingState } from '../../../../../components/ResourceState'
 import { useAsyncResource } from '../../../../../hooks'
 import styles from '../../teaching.module.css'
 import { courseTypeOptions, formatDateTimeLocalInput, parseDateTimeLocalInput, teachingDifficultyOptions } from '../../../../../utils/index'
@@ -15,7 +14,11 @@ import { userFacingErrorMessage } from '../../../../../utils/userFacingError'
 const TeacherCourseEditPage: React.FC = () => {
   const [searchParams] = useSearchParams()
   const courseId = searchParams.get('id') || ''
-  const courses = useAsyncResource(() => api.teaching.getCourses({ role: 'teacher', page: 1, size: 100 }), [])
+  const course = useAsyncResource(
+    () => courseId ? api.teaching.getCourseOutline(courseId).then((outline) => outline.course) : Promise.resolve(null),
+    [courseId],
+    () => false,
+  )
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
   const [type, setType] = useState(String(CourseType.MIXED))
@@ -30,7 +33,7 @@ const TeacherCourseEditPage: React.FC = () => {
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
-    const current = courses.data?.list.find((course) => String(course.id) === courseId)
+    const current = course.data
     if (!current) return
     setName(current.name)
     setDescription(current.description)
@@ -40,7 +43,7 @@ const TeacherCourseEditPage: React.FC = () => {
     setCredits(String(current.credits))
     setStartAt(formatDateTimeLocalInput(current.start_at))
     setEndAt(formatDateTimeLocalInput(current.end_at))
-  }, [courseId, courses.data])
+  }, [course.data])
 
   /**
    * saveCourse 创建或更新课程，并可立即发布。
@@ -67,14 +70,14 @@ const TeacherCourseEditPage: React.FC = () => {
         await api.teaching.publishCourse(String(saved.id))
       }
       setMessage(publish ? '课程已保存并发布。' : '课程已保存。')
-      courses.reload()
+      if (courseId) course.reload()
     } catch (actionError) {
       setError(userFacingErrorMessage(actionError, '课程保存失败，请检查内容后重试。'))
     } finally {
       setSaving(false)
       setPublishing(false)
     }
-  }, [courseId, courses, credits, description, difficulty, endAt, name, semester, startAt, type])
+  }, [course, courseId, credits, description, difficulty, endAt, name, semester, startAt, type])
 
   return (
     <div className={styles.page}>
@@ -87,19 +90,19 @@ const TeacherCourseEditPage: React.FC = () => {
 
       {error && <div className={styles.error}>{error}</div>}
       {message && <Callout variant="success" title="保存成功">{message}</Callout>}
-      {courses.status === 'error' && <ErrorState error={courses.error} onRetry={courses.reload} />}
-      {courses.status === 'loading' && <LoadingState title="正在读取课程" />}
+      {courseId && course.status === 'error' && <ResourceState status="error" error={course.error} onRetry={course.reload} />}
+      {courseId && course.status === 'loading' && <ResourceState status="loading" title="正在读取课程" />}
 
       <section className={styles.panel}>
         <div className={styles.formGrid}>
-          <label className={styles.field}>课程名称<Input fullWidth value={name} onChange={(event) => setName(event.target.value)} /></label>
-          <label className={styles.field}>学期<Input fullWidth value={semester} onChange={(event) => setSemester(event.target.value)} /></label>
-          <label className={styles.field}>课程类型<Select fullWidth value={type} options={courseTypeOptions} onChange={setType} /></label>
-          <label className={styles.field}>难度<Select fullWidth value={difficulty} options={teachingDifficultyOptions} onChange={setDifficulty} /></label>
-          <label className={styles.field}>学分<Input fullWidth value={credits} onChange={(event) => setCredits(event.target.value)} /></label>
-          <label className={styles.field}>开课时间<Input fullWidth type="datetime-local" value={startAt} onChange={(event) => setStartAt(event.target.value)} /></label>
-          <label className={styles.field}>结课时间<Input fullWidth type="datetime-local" value={endAt} onChange={(event) => setEndAt(event.target.value)} /></label>
-          <label className={styles.fieldFull}>课程简介<Textarea value={description} onChange={(event) => setDescription(event.target.value)} rows={5} /></label>
+          <FormField className={styles.field} label="课程名称"><Input fullWidth value={name} onChange={(event) => setName(event.target.value)} /></FormField>
+          <FormField className={styles.field} label="学期"><Input fullWidth value={semester} onChange={(event) => setSemester(event.target.value)} /></FormField>
+          <FormField className={styles.field} label="课程类型"><Select fullWidth value={type} options={courseTypeOptions} onChange={setType} /></FormField>
+          <FormField className={styles.field} label="难度"><Select fullWidth value={difficulty} options={teachingDifficultyOptions} onChange={setDifficulty} /></FormField>
+          <FormField className={styles.field} label="学分"><Input fullWidth value={credits} onChange={(event) => setCredits(event.target.value)} /></FormField>
+          <FormField className={styles.field} label="开课时间"><Input fullWidth type="datetime-local" value={startAt} onChange={(event) => setStartAt(event.target.value)} /></FormField>
+          <FormField className={styles.field} label="结课时间"><Input fullWidth type="datetime-local" value={endAt} onChange={(event) => setEndAt(event.target.value)} /></FormField>
+          <FormField className={styles.fieldFull} label="课程简介"><Textarea value={description} onChange={(event) => setDescription(event.target.value)} rows={5} /></FormField>
         </div>
         <div className={styles.actions}>
           <Button variant="outline" icon={<Save size={16} />} loading={saving} onClick={() => saveCourse(false)}>保存课程</Button>

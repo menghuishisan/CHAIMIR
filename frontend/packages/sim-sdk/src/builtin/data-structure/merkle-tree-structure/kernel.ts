@@ -2,6 +2,7 @@
 
 import type { CheckpointResult, ReducerContext, SimEvent, SimInitParams } from '../../../types';
 import { integerParam, stringArrayParam } from '../../initParams';
+import { merkleRoot } from '../../merkle';
 import { merkleStructureLeafHash, merkleStructureParentHash } from '../dataPrimitives';
 import { merkleTreePhases, type MerkleItem, type MerkleTreeState } from './model';
 import { traceLinesForMerkleTree } from './trace';
@@ -55,7 +56,7 @@ export function merkleTreeRootValid(state: MerkleTreeState): CheckpointResult {
  * computeMerkleRoot 计算四叶子 Merkle 根。
  */
 export function computeMerkleRoot(items: MerkleItem[]): string {
-  return merkleRootFromHashes(items.map((item) => item.hash));
+  return merkleRoot(items.map((item) => item.hash), merkleStructureParentHash);
 }
 
 /**
@@ -101,25 +102,6 @@ export function merkleProofPath(items: MerkleItem[], targetId?: string): string[
     depth += 1;
   }
   return path;
-}
-
-/**
- * merkleRootFromHashes 按成对合并规则递归计算根,奇数层复制末尾摘要。
- */
-function merkleRootFromHashes(hashes: string[]): string {
-  if (hashes.length === 0) {
-    return '';
-  }
-  let level = hashes;
-  while (level.length > 1) {
-    const padded = level.length % 2 === 0 ? level : level.concat(level[level.length - 1]);
-    const next: string[] = [];
-    for (let index = 0; index < padded.length; index += 2) {
-      next.push(merkleStructureParentHash(padded[index], padded[index + 1]));
-    }
-    level = next;
-  }
-  return level[0];
 }
 
 /**

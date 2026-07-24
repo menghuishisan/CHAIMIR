@@ -1,7 +1,7 @@
 // 本文件把 Tendermint 轮次状态映射为时序泳道、投票矩阵和消息图。
 
-import type { GraphNode, MatrixCell, TeachingFrame, VisualElementMeta } from '../../../types';
-import { graphPattern, lanePattern, matrixPattern, selectedOrFrameFocus, teachingFrame } from '../../packageTools';
+import type { GraphNode, MatrixCell, TeachingFrame } from '../../../types';
+import { focusOrArchiveMeta as meta, graphPattern, lanePattern, matrixPattern, selectedOrFrameFocus, teachingFrame } from '../../packageTools';
 import { graphEdges, laneMessages, voteCells } from '../consensusView';
 import { labelTendermintActor } from './kernel';
 import { tendermintRoundPhases, type TendermintRoundsState } from './model';
@@ -51,9 +51,4 @@ function voteMatrix(state: TendermintRoundsState): MatrixCell[][] {
 function graphNodes(state: TendermintRoundsState): GraphNode[] {
   const validatorNodes: GraphNode[] = state.validators.map((validator) => ({ id: validator.id, label: validator.label, role: 'validator', status: validator.lockedValue ? 'success' : validator.online ? 'active' : 'warning', value: `power ${validator.power}`, meta: meta(validator.id, validator.label, validator.lockedValue ? 'focus' : 'context', state.tick) }));
   return validatorNodes.concat({ id: 'network', label: '网络', role: 'broadcast', status: state.timeout ? 'warning' : 'active', meta: meta('network', '网络', 'context', state.tick) });
-}
-
-/** meta 生成当前内置仿真的可视化视图模型。 */
-function meta(id: string, label: string, emphasis: VisualElementMeta['emphasis'], tick: number): VisualElementMeta {
-  return { id, label, lifecycle: { state: emphasis === 'ghost' ? 'archived' : emphasis === 'focus' ? 'active' : 'settled', fromTick: Math.max(0, tick - 1) }, emphasis, explanation: label };
 }

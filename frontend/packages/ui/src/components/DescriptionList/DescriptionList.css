@@ -35,7 +35,7 @@
   color: var(--color-text-sub);
   font-size: var(--text-xs);
   font-weight: var(--font-bold);
-  letter-spacing: var(--tracking-wider);
+  letter-spacing: 0;
   text-transform: uppercase;
 }
 
@@ -57,14 +57,14 @@
   font-weight: var(--font-bold);
 }
 
-@media (max-width: 767px) {
+@media not all and (--bp-md) {
   .chaimir-description-list--cols-2,
   .chaimir-description-list--cols-3 {
     grid-template-columns: 1fr;
   }
 }
 
-@media (max-width: 479px) {
+@media not all and (--bp-sm) {
   .chaimir-description-list--compact .chaimir-description-list__item {
     grid-template-columns: 1fr;
   }

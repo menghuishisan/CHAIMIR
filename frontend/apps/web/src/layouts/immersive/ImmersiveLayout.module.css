@@ -2,8 +2,8 @@
 .immersiveContainer {
   display: flex;
   flex-direction: column;
-  height: 100vh;
-  width: 100vw;
+  min-height: 100dvh;
+  width: 100%;
   overflow: hidden;
   background-color: var(--color-dark-bg);
   color: var(--color-dark-text);
@@ -12,7 +12,7 @@
 .topbar {
   height: 48px;
   background-color: var(--color-dark-bg);
-  border-bottom: 1px solid var(--color-glass-border);
+  border-bottom: 1px solid var(--color-dark-border-strong);
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -38,18 +38,19 @@
   cursor: pointer;
   padding: var(--space-1) var(--space-2);
   border-radius: var(--radius-sm);
-  transition: all var(--t) var(--ease);
+  transition: background-color var(--t) var(--ease), color var(--t) var(--ease);
 }
 
-.exitBtn:hover {
-  background-color: var(--color-glass-highlight);
-  color: var(--color-dark-text);
+.exitBtn:focus-visible,
+.focusEscapeBtn:focus-visible {
+  outline: 2px solid var(--color-on-dark-accent);
+  outline-offset: 2px;
 }
 
 .divider {
   width: 1px;
   height: 16px;
-  background-color: var(--color-glass-border);
+  background-color: var(--color-dark-border-strong);
 }
 
 .title {
@@ -58,54 +59,35 @@
   margin: 0;
 }
 
-.right {
-  display: flex;
-  align-items: center;
-}
-
-.statusPill {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  background-color: var(--color-glass-highlight);
-  border: 1px solid var(--color-glass-border);
-  padding: 4px 12px;
-  border-radius: var(--radius-full);
-  font-size: var(--text-xs);
-  color: var(--color-dark-text-sub);
-}
-
-.statusDot {
-  width: 6px;
-  height: 6px;
-  background-color: var(--color-success);
-  border-radius: 50%;
-  box-shadow: 0 0 8px var(--color-success);
-}
-
 .focusEscapeBtn {
   position: fixed;
   top: 60px;
   right: 16px;
-  width: 32px;
-  height: 32px;
-  border-radius: 50%;
-  background-color: var(--color-dark-glass);
-  backdrop-filter: blur(4px);
-  border: 1px solid var(--color-glass-border);
+  width: 44px;
+  height: 44px;
+  border-radius: var(--radius-sm);
+  background-color: var(--color-dark-surface);
+  border: 1px solid var(--color-dark-border-strong);
   color: var(--color-dark-text-sub);
   display: flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
   z-index: var(--z-immersive);
-  transition: all var(--t) var(--ease);
+  transition: background-color var(--t) var(--ease), border-color var(--t) var(--ease), color var(--t) var(--ease);
 }
 
-.focusEscapeBtn:hover {
-  background-color: var(--color-panel-glass);
-  color: var(--color-dark-text);
-  border-color: var(--color-glass-border);
+@media (hover: hover) and (pointer: fine) {
+  .exitBtn:hover {
+    background-color: var(--color-dark-elevated);
+    color: var(--color-dark-text);
+  }
+
+  .focusEscapeBtn:hover {
+    background-color: var(--color-dark-elevated);
+    color: var(--color-dark-text);
+    border-color: var(--color-dark-border);
+  }
 }
 
 .workspaceArea {

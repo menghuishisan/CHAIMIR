@@ -1,7 +1,7 @@
 // Checkbox 组件：复选框
 // 符合 FE-2（无障碍）、FE-4（label 显式关联）
 
-import React, { useEffect, useImperativeHandle, useRef } from 'react'
+import React, { useEffect, useId, useImperativeHandle, useRef } from 'react'
 import { Check } from 'lucide-react'
 import { clsx } from 'clsx'
 import { triggerHaptic } from '../../utils/haptics'
@@ -25,11 +25,14 @@ export const Checkbox = React.forwardRef<HTMLInputElement, CheckboxProps>(
       className,
       disabled,
       checked,
+      id,
       ...props
     },
     ref
   ) => {
     const inputRef = useRef<HTMLInputElement>(null)
+    const generatedId = useId()
+    const inputId = id || `chaimir-checkbox-${generatedId}`
 
     useImperativeHandle(ref, () => inputRef.current as HTMLInputElement)
 
@@ -59,8 +62,9 @@ export const Checkbox = React.forwardRef<HTMLInputElement, CheckboxProps>(
     }
 
     return (
-      <label className={wrapperClasses}>
+      <label className={wrapperClasses} htmlFor={inputId}>
         <input
+          id={inputId}
           ref={inputRef}
           type="checkbox"
           className="chaimir-checkbox__input"

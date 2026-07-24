@@ -1,0 +1,17 @@
+/* ConfirmDialog.css 只定义确认说明的紧凑布局，浮层结构复用 Modal。 */
+.chaimir-confirm-dialog__content {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  gap: var(--space-3);
+  color: var(--color-text);
+}
+
+.chaimir-confirm-dialog__content > svg {
+  color: var(--color-warning);
+}
+
+.chaimir-confirm-dialog__content p {
+  margin: 0;
+  line-height: var(--leading-relaxed);
+}

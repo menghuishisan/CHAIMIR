@@ -3,12 +3,12 @@
 import React, { useEffect, useState } from 'react'
 import type { GradeWeightInput, TeachingCourseGrade } from '@chaimir/api-client'
 import { GradeSource } from '@chaimir/api-client'
-import { Button, Callout, Input, Select, Table } from '@chaimir/ui'
+import { Button, Callout, Input, Select, Table, ResourceState, FormField } from '@chaimir/ui'
 import { Calculator, Download, Plus, Save, Trash2 } from 'lucide-react'
 import { api } from '../../../../../app/api'
-import { ErrorState, LoadingState } from '../../../../../components/ResourceState'
 import { useAsyncResource } from '../../../../../hooks'
 import { userFacingErrorMessage } from '../../../../../utils/userFacingError'
+import { formatStudentReference } from '../../../../../utils/formatters'
 import styles from '../../teaching.module.css'
 
 /** CourseGradebookPanel 管理指定课程的服务端成绩册。 */
@@ -57,8 +57,8 @@ export function CourseGradebookPanel({ courseId }: { courseId: string }): React.
   }
 
   if (!courseId) return <Callout variant="info" title="填写课程编号">填写课程编号后可维护课程成绩册。</Callout>
-  if (resource.status === 'loading') return <LoadingState title="正在获取课程成绩册" />
-  if (resource.status === 'error') return <ErrorState error={resource.error} onRetry={resource.reload} />
+  if (resource.status === 'loading') return <ResourceState status="loading" title="正在获取课程成绩册" />
+  if (resource.status === 'error') return <ResourceState status="error" error={resource.error} onRetry={resource.reload} />
 
   const grades = resource.data?.grades || []
   return (
@@ -74,9 +74,9 @@ export function CourseGradebookPanel({ courseId }: { courseId: string }): React.
         </div>
       )}
       <div className={styles.formGrid}>
-        <label className={styles.field}>成绩来源<Select fullWidth value={sourceType} onChange={setSourceType} options={[{ value: '1', label: '作业' }, { value: '2', label: '实验' }, { value: '3', label: '考试' }]} /></label>
-        <label className={styles.field}>来源编号<Input fullWidth value={sourceRef} onChange={(event) => setSourceRef(event.target.value)} /></label>
-        <label className={styles.field}>权重<Input fullWidth type="number" value={weight} onChange={(event) => setWeight(event.target.value)} /></label>
+        <FormField className={styles.field} label="成绩来源"><Select fullWidth value={sourceType} onChange={setSourceType} options={[{ value: '1', label: '作业' }, { value: '2', label: '实验' }, { value: '3', label: '考试' }]} /></FormField>
+        <FormField className={styles.field} label="来源编号"><Input fullWidth value={sourceRef} onChange={(event) => setSourceRef(event.target.value)} /></FormField>
+        <FormField className={styles.field} label="权重"><Input fullWidth type="number" value={weight} onChange={(event) => setWeight(event.target.value)} /></FormField>
         <Button variant="outline" icon={<Plus size={14} />} onClick={addWeight}>添加权重</Button>
       </div>
       {weights.map((item, index) => (
@@ -91,14 +91,14 @@ export function CourseGradebookPanel({ courseId }: { courseId: string }): React.
         <Button variant="outline" icon={<Download size={14} />} onClick={() => void runAction(() => api.teaching.exportGrades(courseId), '成绩导出任务已创建。')}>导出成绩</Button>
       </div>
       <Table<TeachingCourseGrade> rows={grades} rowKey={(row) => String(row.student_id)} ariaLabel="课程成绩列表" emptyTitle="暂无成绩" emptyDescription="配置权重并计算后显示课程成绩。" columns={[
-        { key: 'student', title: '学生编号', dataIndex: 'student_id', priority: 'primary' },
+        { key: 'student', title: '学生', render: (row) => formatStudentReference(row.student_id), priority: 'primary' },
         { key: 'auto', title: '自动总分', dataIndex: 'auto_total' },
         { key: 'final', title: '最终总分', dataIndex: 'final_total' },
         { key: 'adjusted', title: '人工调整', render: (row) => row.is_overridden ? '已调整' : '未调整' },
       ]} />
       <div className={styles.formGrid}>
-        <label className={styles.field}>学生编号<Input fullWidth value={studentId} onChange={(event) => setStudentId(event.target.value)} /></label>
-        <label className={styles.field}>调整后总分<Input fullWidth type="number" value={overrideTotal} onChange={(event) => setOverrideTotal(event.target.value)} /></label>
+        <FormField className={styles.field} label="学生编号"><Input fullWidth value={studentId} onChange={(event) => setStudentId(event.target.value)} /></FormField>
+        <FormField className={styles.field} label="调整后总分"><Input fullWidth type="number" value={overrideTotal} onChange={(event) => setOverrideTotal(event.target.value)} /></FormField>
         <Button disabled={!studentId || !overrideTotal} onClick={() => void runAction(() => api.teaching.overrideGrade(courseId, studentId, { total: Number(overrideTotal) }), '学生总评已调整。')}>保存调整</Button>
       </div>
     </section>

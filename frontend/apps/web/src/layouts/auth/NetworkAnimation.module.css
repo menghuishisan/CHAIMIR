@@ -1,7 +1,0 @@
-/* NetworkAnimation.module.css 约束登录页背景 Canvas 的尺寸与透明度。 */
-.canvas {
-  display: block;
-  width: 100%;
-  height: 100%;
-  opacity: 0.6;
-}

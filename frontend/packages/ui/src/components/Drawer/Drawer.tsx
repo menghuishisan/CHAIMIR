@@ -5,7 +5,8 @@ import { createPortal } from 'react-dom'
 import { clsx } from 'clsx'
 import { X } from 'lucide-react'
 import { Button } from '../Button'
-import { useEscapeKey, useFocusTrap } from '../../hooks'
+import { useDelayedUnmount, useEscapeKey, useFocusTrap, useMediaQuery } from '../../hooks'
+import { breakpoints, motionDurationMs } from '../../tokens'
 import './Drawer.css'
 
 export interface DrawerProps extends React.HTMLAttributes<HTMLDivElement> {
@@ -22,18 +23,20 @@ export interface DrawerProps extends React.HTMLAttributes<HTMLDivElement> {
 export function Drawer({ open, title, side = 'right', onClose, children, className, ...props }: DrawerProps): React.ReactElement | null {
   const panelRef = useRef<HTMLElement>(null)
   const titleId = useId()
-  const touchStartX = useRef(0)
-  const currentTranslateX = useRef(0)
+  const touchStart = useRef({ x: 0, y: 0 })
+  const currentOffset = useRef(0)
   const [swipeStyle, setSwipeStyle] = React.useState<React.CSSProperties>({})
+  const compact = useMediaQuery(`(max-width: ${breakpoints.md - 1}px)`)
+  const presence = useDelayedUnmount(open, motionDurationMs.drawerExit)
 
   // 快捷键与焦点陷阱
-  useFocusTrap(panelRef as React.RefObject<HTMLElement>, open)
+  useFocusTrap(panelRef as React.RefObject<HTMLElement>, open && presence.mounted)
   useEscapeKey(() => {
     if (open) onClose()
   }, open)
 
   useEffect(() => {
-    if (!open) {
+    if (!presence.mounted) {
       document.body.style.overflow = ''
       return
     }
@@ -42,37 +45,58 @@ export function Drawer({ open, title, side = 'right', onClose, children, classNa
 
     return () => {
       document.body.style.overflow = ''
-      setSwipeStyle({})
     }
-  }, [open])
+  }, [presence.mounted])
 
-  if (!open) {
+  useEffect(() => {
+    const panel = panelRef.current
+    if (!panel) return
+    if (open) panel.removeAttribute('inert')
+    else panel.setAttribute('inert', '')
+  }, [open, presence.mounted])
+
+  if (!presence.mounted) {
     return null
   }
 
   const handleTouchStart = (e: React.TouchEvent) => {
-    touchStartX.current = e.touches[0].clientX
+    touchStart.current = { x: e.touches[0].clientX, y: e.touches[0].clientY }
   }
 
   const handleTouchMove = (e: React.TouchEvent) => {
-    const deltaX = e.touches[0].clientX - touchStartX.current
+    const deltaY = e.touches[0].clientY - touchStart.current.y
+    if (compact && deltaY > 0) {
+      currentOffset.current = deltaY
+      setSwipeStyle({ transform: `translateY(${deltaY}px)`, transition: 'none' })
+      return
+    }
+    const deltaX = e.touches[0].clientX - touchStart.current.x
     if ((side === 'right' && deltaX > 0) || (side === 'left' && deltaX < 0)) {
-      currentTranslateX.current = deltaX
+      currentOffset.current = deltaX
       setSwipeStyle({ transform: `translateX(${deltaX}px)`, transition: 'none' })
     }
   }
 
   const handleTouchEnd = () => {
-    if (Math.abs(currentTranslateX.current) > 80) {
+    if (Math.abs(currentOffset.current) > 80) {
+      setSwipeStyle({})
       onClose()
     } else {
-      setSwipeStyle({ transform: `translateX(0)`, transition: 'transform 0.4s var(--ease-spring)' })
+      setSwipeStyle({
+        transform: compact ? 'translateY(0)' : 'translateX(0)',
+        transition: 'transform var(--t-slow) var(--ease-drawer)',
+      })
     }
-    currentTranslateX.current = 0
+    currentOffset.current = 0
   }
 
   const content = (
-    <div className="chaimir-drawer" role="presentation">
+    <div
+      className="chaimir-drawer"
+      role="presentation"
+      data-state={presence.state}
+      aria-hidden={!open || undefined}
+    >
       <button className="chaimir-drawer__scrim" type="button" aria-label="关闭抽屉" onClick={onClose} />
       <aside
         ref={panelRef}

@@ -51,6 +51,7 @@ export const colors = {
   darkSurface: 'var(--color-dark-surface)',
   darkText: 'var(--color-dark-text)',
   darkTextSub: 'var(--color-dark-text-sub)',
+  darkDanger: 'var(--color-dark-danger)',
   onDarkAccent: 'var(--color-on-dark-accent)',
   onDarkAccentHover: 'var(--color-on-dark-accent-hover)',
   onDarkAccentFg: 'var(--color-on-dark-accent-fg)',
@@ -87,8 +88,8 @@ export const shadow = {
   base: 'var(--shadow)',
   md: 'var(--shadow-md)',
   lg: 'var(--shadow-lg)',
-  glassPanel: 'var(--shadow-glass-panel)',
-  glassElevated: 'var(--shadow-glass-elevated)',
+  overlay: 'var(--shadow-overlay)',
+  popover: 'var(--shadow-popover)',
 } as const
 
 export const breakpoints = {
@@ -127,5 +128,25 @@ export const transition = {
 export const easing = {
   base: 'var(--ease)',
   out: 'var(--ease-out)',
-  in: 'var(--ease-in)',
+  inOut: 'var(--ease-in-out)',
+  drawer: 'var(--ease-drawer)',
+} as const
+
+export const motion = {
+  press: 'var(--t-press)',
+  tooltip: 'var(--t-tooltip)',
+  menu: 'var(--t-menu)',
+  modalEnter: 'var(--t-modal-enter)',
+  modalExit: 'var(--t-modal-exit)',
+  drawerEnter: 'var(--t-drawer-enter)',
+  drawerExit: 'var(--t-drawer-exit)',
+  toastEnter: 'var(--t-toast-enter)',
+  toastExit: 'var(--t-toast-exit)',
+  pressScale: 'var(--press-scale)',
+} as const
+
+export const motionDurationMs = {
+  modalExit: 160,
+  drawerExit: 180,
+  toastExit: 180,
 } as const

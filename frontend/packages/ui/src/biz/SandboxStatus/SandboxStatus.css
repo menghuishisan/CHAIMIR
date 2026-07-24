@@ -55,9 +55,14 @@
     color var(--t-fast) var(--ease);
 }
 
-.chaimir-sandbox-status button:hover,
 .chaimir-sandbox-status button:focus-visible {
   background: var(--color-danger-bg);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .chaimir-sandbox-status button:hover {
+    background: var(--color-danger-bg);
+  }
 }
 
 .chaimir-sandbox-status.is-ready .chaimir-sandbox-status__icon {
@@ -87,7 +92,7 @@
   background: var(--color-surface-sunken);
 }
 
-@media (max-width: 479px) {
+@media not all and (--bp-sm) {
   .chaimir-sandbox-status {
     grid-template-columns: auto 1fr;
   }

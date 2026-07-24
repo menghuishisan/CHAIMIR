@@ -1,0 +1,75 @@
+/* TreePatternRenderer 仅定义 Tree 模式的可视化样式。 */
+
+.sim-tree {
+  padding: var(--space-5) var(--space-4) var(--space-4);
+  overflow: auto;
+  background: var(--color-dark-surface);
+}
+.sim-tree__node {
+  position: relative;
+  display: grid;
+  justify-items: center;
+  gap: var(--space-3);
+}
+
+.sim-tree__box {
+  display: grid;
+  gap: var(--space-1);
+  min-width: 7rem;
+  max-width: 12rem;
+  padding: var(--space-2) var(--space-3);
+  border: 0.0625rem solid var(--color-dark-border);
+  border-radius: var(--radius-xs);
+  background: var(--color-dark-elevated);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--color-dark-border) 80%, transparent);
+  text-align: center;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+  transition: border-color var(--t-fast) var(--ease), box-shadow var(--t-fast) var(--ease), transform var(--t-fast) var(--ease-out);
+}
+
+.sim-tree__box:focus-visible {
+  outline: 0.125rem solid var(--color-on-dark-accent);
+  outline-offset: 0.125rem;
+}
+
+.sim-tree__node.is-highlighted > .sim-tree__box {
+  border-color: var(--sim-pattern-accent);
+  box-shadow: inset 3px 0 0 var(--sim-pattern-accent);
+}
+
+.sim-tree__node.is-path-parent > .sim-tree__box {
+  border-color: color-mix(in srgb, var(--sim-pattern-accent) 62%, var(--color-dark-border));
+}
+
+.sim-tree__children {
+  position: relative;
+  display: flex;
+  gap: var(--space-4);
+  min-width: max-content;
+  padding-top: var(--space-4);
+}
+
+.sim-tree__children::before {
+  content: "";
+  position: absolute;
+  inset-block-start: 0;
+  inset-inline: 12%;
+  height: 0.0625rem;
+  background: var(--color-dark-border);
+}
+
+.sim-tree__children > .sim-tree__node::before {
+  content: "";
+  position: absolute;
+  inset-block-start: calc(-1 * var(--space-4));
+  inset-inline-start: 50%;
+  width: 0.0625rem;
+  height: var(--space-4);
+  background: var(--color-dark-border);
+}
+
+.sim-tree__node.is-path-parent > .sim-tree__children::before,
+.sim-tree__node.is-path-parent > .sim-tree__children > .sim-tree__node::before {
+  background: color-mix(in srgb, var(--sim-pattern-accent) 60%, var(--color-dark-border));
+}

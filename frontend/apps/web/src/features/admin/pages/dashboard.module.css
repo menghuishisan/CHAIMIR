@@ -73,7 +73,11 @@
 }
 
 .panel {
-  padding: var(--space-5);
+  padding: var(--space-5) 0 0;
+  border: 0;
+  border-top: 1px solid var(--color-border);
+  border-radius: 0;
+  background: transparent;
 }
 
 .panelTitle {
@@ -110,14 +114,14 @@
   font-variant-numeric: tabular-nums;
 }
 
-@media (max-width: 1024px) {
+@media not all and (--bp-lg) {
   .statsGrid,
   .metricsList {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
-@media (max-width: 640px) {
+@media not all and (--bp-sm) {
   .header {
     align-items: flex-start;
     flex-direction: column;

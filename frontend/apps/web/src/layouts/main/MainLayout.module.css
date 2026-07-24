@@ -12,7 +12,6 @@
   flex: 1;
   overflow: hidden;
   position: relative;
-  transition: grid-template-columns var(--t) var(--ease);
 }
 
 .mainWrapper.sidebarCollapsed {
@@ -30,9 +29,7 @@
 
 .contentInner {
   flex: 1;
-  padding: var(--space-6) var(--space-8);
-  max-width: var(--content-max);
-  margin: 0 auto;
+  min-inline-size: 0;
   width: 100%;
 }
 
@@ -50,13 +47,10 @@
 }
 
 /* 小屏降低页面内边距，给表格和工作流留出可用宽度。 */
-@media (max-width: 768px) {
+@media not all and (--bp-md) {
   .mainWrapper,
   .mainWrapper.sidebarCollapsed {
     display: block;
   }
 
-  .contentInner {
-    padding: var(--space-4);
-  }
 }

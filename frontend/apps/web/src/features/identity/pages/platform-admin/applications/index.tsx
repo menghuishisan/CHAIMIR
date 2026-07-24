@@ -3,11 +3,10 @@
 import React, { useMemo } from 'react'
 import type { TenantApplicationSummary } from '@chaimir/api-client'
 import type { TableColumn } from '@chaimir/ui'
-import { Button, Table } from '@chaimir/ui'
+import { Button, Table, ResourceState } from '@chaimir/ui'
 import { Eye, Inbox, RefreshCw } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../../../../../app/api'
-import { ErrorState, LoadingState } from '../../../../../components/ResourceState'
 import { useAsyncResource } from '../../../../../hooks'
 import styles from '../../../../admin/pages/list.module.css'
 import { formatDateTime, tenantApplicationStatusLabel } from '../../../../../utils/index'
@@ -68,9 +67,9 @@ const ApplicationsPage: React.FC = () => {
       </div>
 
       {resource.status === 'error' && (
-        <ErrorState error={resource.error} onRetry={resource.reload} />
+        <ResourceState status="error" error={resource.error} onRetry={resource.reload} />
       )}
-      {resource.status === 'loading' && <LoadingState title="正在获取入驻申请" />}
+      {resource.status === 'loading' && <ResourceState status="loading" title="正在获取入驻申请" />}
       {(resource.status === 'success' || resource.status === 'empty') && (
         <div className={styles.tableWrap}>
           <Table

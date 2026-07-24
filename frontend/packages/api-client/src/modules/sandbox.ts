@@ -14,6 +14,7 @@ import type {
   SandboxInstance,
   SandboxPrepullStatus,
   SandboxQuota,
+  SandboxQuotaRequest,
   SandboxRuntime,
   SandboxRuntimeImage,
   SandboxRuntimeImageRequest,
@@ -126,7 +127,7 @@ export class SandboxApi {
   /**
    * 更新租户沙箱配额，平台管理员可指定 tenant_id，学校管理员只更新本租户。
    */
-  async updateQuota(data: SandboxQuota): Promise<SandboxQuota> {
+  async updateQuota(data: SandboxQuotaRequest): Promise<SandboxQuota> {
     return this.client.patch('/sandbox/quota', data)
   }
 

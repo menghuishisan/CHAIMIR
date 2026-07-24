@@ -2,22 +2,21 @@
 
 import React, { useState } from 'react'
 import type { VulnProblem } from '@chaimir/api-client'
-import { VulnProblemStatus } from '@chaimir/api-client'
-import { Button, Input, Table } from '@chaimir/ui'
-import { CheckCircle, ShieldAlert, Wand2 } from 'lucide-react'
-import { useNavigate } from 'react-router-dom'
+import { Button, Input, Table, ResourceState } from '@chaimir/ui'
+import { CheckCircle, ShieldAlert } from 'lucide-react'
 import { api } from '../../../../../app/api'
-import { ErrorState, LoadingState } from '../../../../../components/ResourceState'
+import { usePendingAction } from '../../../../../hooks'
 import { useAsyncResource } from '../../../../../hooks/useAsyncResource'
 import styles from '../../contest.module.css'
 import { userFacingErrorMessage } from '../../../../../utils/userFacingError'
+import { vulnLevelLabel, vulnPrevalidateStatusLabel, vulnProblemStatusLabel, vulnRuntimeModeLabel } from '../../../../../utils'
 
 const TeacherVulnerabilitiesPage: React.FC = () => {
-  const navigate = useNavigate()
   const [runtimeCode, setRuntimeCode] = useState('')
   const [runtimeVersion, setRuntimeVersion] = useState('')
   const [toolCodes, setToolCodes] = useState('')
   const [message, setMessage] = useState('')
+  const { pendingAction, runPendingAction } = usePendingAction()
   const resource = useAsyncResource(() => api.contest.listVulnProblems({ page: 1, size: 30 }), [])
 
   const prevalidate = async (problemId: string) => {
@@ -51,11 +50,11 @@ const TeacherVulnerabilitiesPage: React.FC = () => {
   }
 
   if (resource.status === 'loading') {
-    return <LoadingState title="正在读取漏洞题" description="系统正在同步漏洞题草稿。" />
+    return <ResourceState status="loading" title="正在读取漏洞题" description="系统正在同步漏洞题草稿。" />
   }
 
   if (resource.status === 'error') {
-    return <ErrorState error={resource.error} onRetry={resource.reload} />
+    return <ResourceState status="error" error={resource.error} onRetry={resource.reload} />
   }
 
   return (
@@ -66,7 +65,6 @@ const TeacherVulnerabilitiesPage: React.FC = () => {
           <ShieldAlert className={styles.titleIcon} size={28} />
           漏洞题工坊
         </h1>
-        <Button icon={<Wand2 size={16} />} onClick={() => navigate('/teacher/vulnerabilities/wizard')}>导入漏洞题</Button>
       </div>
       {message && <p className={styles.message} role="status">{message}</p>}
 
@@ -87,17 +85,17 @@ const TeacherVulnerabilitiesPage: React.FC = () => {
         emptyDescription="导入漏洞题后会显示在这里。"
         columns={[
           { key: 'title', title: '标题', dataIndex: 'title', priority: 'primary' },
-          { key: 'level', title: '等级', dataIndex: 'level' },
-          { key: 'runtime', title: '运行方式', dataIndex: 'runtime_mode' },
-          { key: 'prevalidate', title: '预验证', dataIndex: 'prevalidate_status' },
-          { key: 'status', title: '状态', render: (row) => row.status === VulnProblemStatus.FINALIZED ? '已固化' : '草稿' },
+          { key: 'level', title: '等级', render: (row) => vulnLevelLabel(row.level) },
+          { key: 'runtime', title: '运行方式', render: (row) => vulnRuntimeModeLabel(row.runtime_mode) },
+          { key: 'prevalidate', title: '预验证', render: (row) => vulnPrevalidateStatusLabel(row.prevalidate_status) },
+          { key: 'status', title: '状态', render: (row) => vulnProblemStatusLabel(row.status) },
           {
             key: 'actions',
             title: '操作',
             render: (row) => (
               <div className={styles.actions}>
-                <Button size="sm" variant="outline" onClick={() => prevalidate(row.id)}>预验证</Button>
-                <Button size="sm" icon={<CheckCircle size={15} />} onClick={() => finalize(row.id)}>固化</Button>
+                <Button size="sm" variant="outline" loading={pendingAction === `validate-${row.id}`} disabled={Boolean(pendingAction)} onClick={() => void runPendingAction(`validate-${row.id}`, () => prevalidate(row.id))}>预验证</Button>
+                <Button size="sm" icon={<CheckCircle size={15} />} loading={pendingAction === `finalize-${row.id}`} disabled={Boolean(pendingAction)} onClick={() => void runPendingAction(`finalize-${row.id}`, () => finalize(row.id))}>固化</Button>
               </div>
             ),
           },

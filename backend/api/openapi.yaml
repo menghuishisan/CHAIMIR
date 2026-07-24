@@ -406,6 +406,8 @@ paths:
     $ref: './paths/teaching.yaml#/api/v1/teaching/internal/courses/{id}/grades'
   /api/v1/experiment/experiments:
     $ref: './paths/experiment.yaml#/api/v1/experiment/experiments'
+  /api/v1/experiment/student/experiments:
+    $ref: './paths/experiment.yaml#/api/v1/experiment/student/experiments'
   /api/v1/experiment/experiments/{id}:
     $ref: './paths/experiment.yaml#/api/v1/experiment/experiments/{id}'
   /api/v1/experiment/experiments/{id}/validate:
@@ -448,6 +450,8 @@ paths:
     $ref: './paths/experiment.yaml#/api/v1/experiment/internal/stats'
   /api/v1/contest/contests:
     $ref: './paths/contest.yaml#/api/v1/contest/contests'
+  /api/v1/contest/student/contests:
+    $ref: './paths/contest.yaml#/api/v1/contest/student/contests'
   /api/v1/contest/contests/{id}:
     $ref: './paths/contest.yaml#/api/v1/contest/contests/{id}'
   /api/v1/contest/contests/{id}/problems:
@@ -496,6 +500,8 @@ paths:
     $ref: './paths/contest.yaml#/api/v1/contest/my/contest-records'
   /api/v1/contest/vuln-sources:
     $ref: './paths/contest.yaml#/api/v1/contest/vuln-sources'
+  /api/v1/contest/platform/vuln-sources:
+    $ref: './paths/contest.yaml#/api/v1/contest/platform/vuln-sources'
   /api/v1/contest/vuln-sources/{id}/sync:
     $ref: './paths/contest.yaml#/api/v1/contest/vuln-sources/{id}/sync'
   /api/v1/contest/vuln-sources/import:
@@ -576,6 +582,8 @@ paths:
     $ref: './paths/grade.yaml#/api/v1/grade-center/semesters'
   /api/v1/grade-center/reviews:
     $ref: './paths/grade.yaml#/api/v1/grade-center/reviews'
+  /api/v1/grade-center/reviews/mine:
+    $ref: './paths/grade.yaml#/api/v1/grade-center/reviews/mine'
   /api/v1/grade-center/reviews/{id}/approve:
     $ref: './paths/grade.yaml#/api/v1/grade-center/reviews/{id}/approve'
   /api/v1/grade-center/reviews/{id}/reject:

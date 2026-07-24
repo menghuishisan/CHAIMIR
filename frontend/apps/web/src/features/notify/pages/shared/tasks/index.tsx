@@ -2,35 +2,15 @@
 
 import React, { useCallback, useMemo, useState } from 'react'
 import type { ApiError, TransferTask } from '@chaimir/api-client'
-import { Button, DescriptionList, Modal } from '@chaimir/ui'
+import { Button, DescriptionList, Modal, ResourceState } from '@chaimir/ui'
 import { Download, Eye, Loader, RefreshCw } from 'lucide-react'
 import { api } from '../../../../../app/api'
-import { EmptyState, ErrorState, LoadingState } from '../../../../../components/ResourceState'
 import { useAsyncResource } from '../../../../../hooks'
 import styles from '../shared.module.css'
 import { formatDateTime, saveBlob, transferTaskStatusLabel, transferTaskSubjectLabel } from '../../../../../utils/index'
+import { userFacingErrorMessage } from '../../../../../utils/userFacingError'
 
 const PAGE_SIZE = 20
-
-
-/**
- * taskProgress 根据任务状态给出稳定进度展示，真实完成状态仍以后端 status 为准。
- */
-function taskProgressClass(status: TransferTask['status']): string {
-  if (status === 'succeeded') {
-    return styles.progressDone
-  }
-  if (status === 'failed') {
-    return styles.progressDone
-  }
-  if (status === 'running') {
-    return styles.progressRunning
-  }
-  if (status === 'retrying') {
-    return styles.progressRetrying
-  }
-  return styles.progressPending
-}
 
 
 /**
@@ -55,7 +35,7 @@ const TasksPage: React.FC = () => {
       const artifact = await api.transfer.downloadArtifact(task.task_id)
       saveBlob(artifact.blob, artifact.fileName)
     } catch (error) {
-      setGrantError(error as ApiError)
+      setGrantError({ message: userFacingErrorMessage(error, '下载文件失败，请稍后重试。') })
     } finally {
       setGrantingTaskId(null)
     }
@@ -68,7 +48,7 @@ const TasksPage: React.FC = () => {
     try {
       setDetail(await api.transfer.getTask(taskId))
     } catch (error) {
-      setGrantError(error as ApiError)
+      setGrantError({ message: userFacingErrorMessage(error, '任务详情读取失败，请稍后重试。') })
     } finally {
       setLoadingDetailId(null)
     }
@@ -89,15 +69,15 @@ const TasksPage: React.FC = () => {
       </div>
 
       {grantError && (
-        <ErrorState error={grantError} onRetry={() => setGrantError(null)} title="下载授权签发失败" />
+        <ResourceState status="error" error={grantError} onRetry={() => setGrantError(null)} title="下载授权签发失败" />
       )}
 
-      {resource.status === 'loading' && <LoadingState title="正在获取任务" />}
+      {resource.status === 'loading' && <ResourceState status="loading" title="正在获取任务" />}
       {resource.status === 'error' && (
-        <ErrorState error={resource.error} onRetry={resource.reload} />
+        <ResourceState status="error" error={resource.error} onRetry={resource.reload} />
       )}
       {resource.status === 'empty' && (
-        <EmptyState title="暂无任务" description="当前账号还没有导入、导出或下载任务。" />
+        <ResourceState status="empty" title="暂无任务" description="当前账号还没有导入、导出或下载任务。" />
       )}
       {resource.status === 'success' && (
         <div className={styles.list}>
@@ -111,13 +91,10 @@ const TasksPage: React.FC = () => {
                   <span>更新时间 {formatDateTime(task.updated_at)}</span>
                   {task.artifact_file_name && <span>{task.artifact_file_name}</span>}
                 </div>
-                <div className={styles.progressTrack} aria-hidden="true">
-                  <div className={`${styles.progressFill} ${taskProgressClass(task.status)}`} />
-                </div>
               </div>
               <div className={styles.cardActions}>
                 <Button variant="outline" icon={<Eye size={16} />} loading={loadingDetailId === task.task_id} onClick={() => void handleOpenDetail(task.task_id)}>查看详情</Button>
-                <Button variant="primary" icon={<Download size={16} />} loading={grantingTaskId === task.task_id} disabled={task.status !== 'succeeded'} onClick={() => handleGrant(task)}>下载文件</Button>
+                <Button variant="primary" icon={<Download size={16} />} loading={grantingTaskId === task.task_id} disabled={task.status !== 'succeeded'} onClick={() => void handleGrant(task)}>下载文件</Button>
               </div>
             </article>
           ))}

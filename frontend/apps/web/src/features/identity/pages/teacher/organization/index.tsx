@@ -1,10 +1,9 @@
 // TeacherOrganizationPage 只读展示当前租户组织结构，复用 identity 后端组织数据。
 
 import React, { useCallback } from 'react'
-import { Button } from '@chaimir/ui'
+import { Button, ResourceState } from '@chaimir/ui'
 import { FolderTree, RefreshCw, Users } from 'lucide-react'
 import { api } from '../../../../../app/api'
-import { ErrorState, LoadingState } from '../../../../../components/ResourceState'
 import { useAsyncResource } from '../../../../../hooks'
 import styles from '../../identity-admin.module.css'
 
@@ -35,8 +34,8 @@ const TeacherOrganizationPage: React.FC = () => {
         <Button variant="outline" icon={<RefreshCw size={16} />} onClick={reloadAll}>刷新</Button>
       </div>
 
-      {firstError && <ErrorState error={firstError} onRetry={reloadAll} />}
-      {isLoading && <LoadingState title="正在同步组织结构" />}
+      {firstError && <ResourceState status="error" error={firstError} onRetry={reloadAll} />}
+      {isLoading && <ResourceState status="loading" title="正在同步组织结构" />}
 
       <section className={styles.panel}>
         <h2><FolderTree size={18} />组织架构</h2>

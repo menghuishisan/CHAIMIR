@@ -168,9 +168,11 @@
   cursor: pointer;
 }
 
-.tenantButton:hover {
-  border-color: var(--color-primary);
-  background: var(--color-primary-soft);
+@media (hover: hover) and (pointer: fine) {
+  .tenantButton:hover {
+    border-color: var(--color-primary);
+    background: var(--color-primary-soft);
+  }
 }
 
 .tenantButton:focus-visible {
@@ -201,7 +203,7 @@
   color: var(--color-text-sub);
 }
 
-@media (max-width: 480px) {
+@media not all and (--bp-sm) {
   .inline {
     grid-template-columns: 1fr;
   }

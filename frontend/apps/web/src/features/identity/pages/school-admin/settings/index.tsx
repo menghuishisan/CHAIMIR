@@ -1,14 +1,13 @@
 // AdminSettingsPage 管理当前学校租户配置，读取并更新 identity 租户配置接口。
 
-import React, { useCallback, useEffect, useMemo, useState } from 'react'
+import React, { useCallback, useEffect, useState } from 'react'
 import { AuthMode } from '@chaimir/api-client'
-import { Button, Callout, Input, Select, Switch, Textarea } from '@chaimir/ui'
+import { Button, Callout, Input, Select, Switch, ResourceState, FormField } from '@chaimir/ui'
 import { Save, Settings } from 'lucide-react'
 import { api } from '../../../../../app/api'
-import { ErrorState, LoadingState } from '../../../../../components/ResourceState'
 import { useAsyncResource } from '../../../../../hooks'
 import styles from '../../identity-admin.module.css'
-import { authModeOptions, parseJsonObject } from '../../../../../utils/index'
+import { authModeOptions } from '../../../../../utils/index'
 import { userFacingErrorMessage } from '../../../../../utils/userFacingError'
 
 
@@ -19,7 +18,6 @@ const AdminSettingsPage: React.FC = () => {
   const [logoUrl, setLogoUrl] = useState('')
   const [authMode, setAuthMode] = useState(String(AuthMode.LOCAL))
   const [enableActivationCode, setEnableActivationCode] = useState(false)
-  const [featureFlags, setFeatureFlags] = useState('{}')
   const [submitting, setSubmitting] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -28,8 +26,6 @@ const AdminSettingsPage: React.FC = () => {
   const effectiveLogoUrl = logoUrl
   const effectiveAuthMode = authMode
   const effectiveEnableActivationCode = enableActivationCode
-  const defaultFlags = useMemo(() => JSON.stringify({}, null, 2), [])
-  const effectiveFeatureFlags = featureFlags || defaultFlags
 
   useEffect(() => {
     if (!tenant) return
@@ -37,7 +33,6 @@ const AdminSettingsPage: React.FC = () => {
     setLogoUrl(tenant.logo_url || '')
     setAuthMode(String(tenant.auth_mode))
     setEnableActivationCode(tenant.enable_activation_code)
-    setFeatureFlags(JSON.stringify(tenant.feature_flags || {}, null, 2))
   }, [tenant])
 
   /**
@@ -51,7 +46,6 @@ const AdminSettingsPage: React.FC = () => {
     setLogoUrl(tenant.logo_url || '')
     setAuthMode(String(tenant.auth_mode))
     setEnableActivationCode(tenant.enable_activation_code)
-    setFeatureFlags(JSON.stringify(tenant.feature_flags || {}, null, 2))
   }, [tenant])
 
   /**
@@ -65,7 +59,7 @@ const AdminSettingsPage: React.FC = () => {
       await api.identity.updateTenantConfig({
         logo_url: effectiveLogoUrl,
         display_name: effectiveDisplayName,
-        feature_flags: parseJsonObject(effectiveFeatureFlags),
+        feature_flags: tenant?.feature_flags ?? {},
         auth_mode: Number(effectiveAuthMode) as AuthMode,
         enable_activation_code: effectiveEnableActivationCode,
       })
@@ -76,13 +70,13 @@ const AdminSettingsPage: React.FC = () => {
     } finally {
       setSubmitting(false)
     }
-  }, [effectiveAuthMode, effectiveDisplayName, effectiveEnableActivationCode, effectiveFeatureFlags, effectiveLogoUrl, resource])
+  }, [effectiveAuthMode, effectiveDisplayName, effectiveEnableActivationCode, effectiveLogoUrl, resource, tenant?.feature_flags])
 
   if (resource.status === 'loading') {
-    return <LoadingState title="正在获取学校配置" />
+    return <ResourceState status="loading" title="正在获取学校配置" />
   }
   if (resource.status === 'error') {
-    return <ErrorState error={resource.error} onRetry={resource.reload} />
+    return <ResourceState status="error" error={resource.error} onRetry={resource.reload} />
   }
 
   return (
@@ -91,9 +85,9 @@ const AdminSettingsPage: React.FC = () => {
         <div>
           <h1 className={styles.title}>
             <Settings size={28} />
-            本校个性化与功能开关
+            本校展示与认证
           </h1>
-          <p className={styles.subtitle}>配置当前学校展示名称、认证模式和功能开关。</p>
+          <p className={styles.subtitle}>配置当前学校的展示名称和认证方式。</p>
         </div>
         <Button variant="outline" onClick={hydrateForm}>
           使用当前配置填充
@@ -110,23 +104,10 @@ const AdminSettingsPage: React.FC = () => {
       <section className={styles.panel}>
         <h2>租户配置</h2>
         <div className={styles.formGrid}>
-          <label className={styles.field}>
-            展示名称
-            <Input fullWidth value={effectiveDisplayName} onChange={(event) => setDisplayName(event.target.value)} />
-          </label>
-          <label className={styles.field}>
-            Logo 地址
-            <Input fullWidth value={effectiveLogoUrl} onChange={(event) => setLogoUrl(event.target.value)} />
-          </label>
-          <label className={styles.field}>
-            认证模式
-            <Select fullWidth value={effectiveAuthMode} options={authModeOptions} onChange={setAuthMode} />
-          </label>
+          <FormField className={styles.field} label="展示名称"><Input fullWidth value={effectiveDisplayName} onChange={(event) => setDisplayName(event.target.value)} /></FormField>
+          <FormField className={styles.field} label="Logo 地址"><Input fullWidth value={effectiveLogoUrl} onChange={(event) => setLogoUrl(event.target.value)} /></FormField>
+          <FormField className={styles.field} label="认证模式"><Select fullWidth value={effectiveAuthMode} options={authModeOptions} onChange={setAuthMode} /></FormField>
           <Switch checked={effectiveEnableActivationCode} label="启用激活码开通" onChange={(event) => setEnableActivationCode(event.target.checked)} />
-          <label className={styles.fieldFull}>
-            功能开关
-            <Textarea value={effectiveFeatureFlags} onChange={(event) => setFeatureFlags(event.target.value)} />
-          </label>
         </div>
         <Button loading={submitting} icon={<Save size={16} />} onClick={handleSave}>
           保存配置

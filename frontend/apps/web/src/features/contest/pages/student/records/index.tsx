@@ -2,10 +2,9 @@
 
 import React from 'react'
 import type { ContestRecord } from '@chaimir/api-client'
-import { Table } from '@chaimir/ui'
+import { Table, ResourceState } from '@chaimir/ui'
 import { Medal } from 'lucide-react'
 import { api } from '../../../../../app/api'
-import { ErrorState, LoadingState } from '../../../../../components/ResourceState'
 import { useAsyncResource } from '../../../../../hooks/useAsyncResource'
 import styles from '../../contest.module.css'
 import { contestStatusLabel } from '../../../../../utils/index'
@@ -14,11 +13,11 @@ const StudentRecordsPage: React.FC = () => {
   const resource = useAsyncResource(() => api.contest.getMyContestRecords(), [])
 
   if (resource.status === 'loading') {
-    return <LoadingState title="正在读取竞赛战绩" description="系统正在同步你的竞赛记录。" />
+    return <ResourceState status="loading" title="正在读取竞赛战绩" description="系统正在同步你的竞赛记录。" />
   }
 
   if (resource.status === 'error') {
-    return <ErrorState error={resource.error} onRetry={resource.reload} />
+    return <ResourceState status="error" error={resource.error} onRetry={resource.reload} />
   }
 
   return (

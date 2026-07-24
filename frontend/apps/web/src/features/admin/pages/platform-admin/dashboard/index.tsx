@@ -2,32 +2,14 @@
 
 import React from 'react'
 import type { Dashboard } from '@chaimir/api-client'
-import { Button } from '@chaimir/ui'
+import { Button, ResourceState } from '@chaimir/ui'
 import { BarChart3, LayoutDashboard, RefreshCw } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../../../../../app/api'
-import { EmptyState, ErrorState, LoadingState } from '../../../../../components/ResourceState'
 import { useAsyncResource } from '../../../../../hooks'
 import styles from '../../dashboard.module.css'
 import { formatDateTime, formatNumber } from '../../../../../utils/index'
-
-
-
-/**
- * StatCard 渲染平台大盘指标。
- */
-const StatCard: React.FC<{ label: string; value?: number; danger?: boolean }> = ({
-  label,
-  value,
-  danger = false,
-}) => (
-  <div className={styles.statCard}>
-    <div className={styles.statLabel}>{label}</div>
-    <div className={`${styles.statValue} ${danger ? styles.statDanger : ''}`}>
-      {formatNumber(value)}
-    </div>
-  </div>
-)
+import { DashboardStatCard } from '../../../components/DashboardStatCard'
 
 /**
  * PlatformDashboardPage 读取平台管理概览。
@@ -50,21 +32,21 @@ const PlatformDashboardPage: React.FC = () => {
         </div>
       </div>
 
-      {resource.status === 'loading' && <LoadingState title="正在获取平台概览" />}
+      {resource.status === 'loading' && <ResourceState status="loading" title="正在获取平台概览" />}
       {resource.status === 'error' && (
-        <ErrorState error={resource.error} onRetry={resource.reload} />
+        <ResourceState status="error" error={resource.error} onRetry={resource.reload} />
       )}
       {resource.status === 'empty' && (
-        <EmptyState title="暂无概览" description="当前平台还没有可展示的管理数据。" />
+        <ResourceState status="empty" title="暂无概览" description="当前平台还没有可展示的管理数据。" />
       )}
       {resource.status === 'success' && dashboard && (
         <>
           <div className={styles.updatedAt}>统计时间 {formatDateTime(dashboard.generated_at)}</div>
           <div className={styles.statsGrid}>
-            <StatCard label="入驻租户" value={dashboard.tenant_count} />
-            <StatCard label="活跃账号" value={dashboard.active_account_count} />
-            <StatCard label="运行中沙箱" value={dashboard.active_sandbox_count} />
-            <StatCard label="待处理申请" value={dashboard.pending_apply_count} danger />
+            <DashboardStatCard label="入驻租户" value={dashboard.tenant_count} />
+            <DashboardStatCard label="活跃账号" value={dashboard.active_account_count} />
+            <DashboardStatCard label="运行中沙箱" value={dashboard.active_sandbox_count} />
+            <DashboardStatCard label="待处理申请" value={dashboard.pending_apply_count} danger />
           </div>
 
           <section className={styles.panel}>

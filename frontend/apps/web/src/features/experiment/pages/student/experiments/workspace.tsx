@@ -3,18 +3,18 @@
 import React, { useCallback, useMemo, useState } from 'react'
 import type { ExperimentInstance } from '@chaimir/api-client'
 import { EXPERIMENT_STAGE_STATUS } from '@chaimir/api-client'
-import { Button, Callout, Input, Select, Textarea } from '@chaimir/ui'
-import { CheckCircle, Pause, Play, Send, Trash2 } from 'lucide-react'
+import { Button, Callout, Input, Select, useConfirm, ResourceState } from '@chaimir/ui'
+import { CheckCircle, Pause, Play, Trash2 } from 'lucide-react'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { api } from '../../../../../app/api'
-import { ErrorState, LoadingState } from '../../../../../components/ResourceState'
-import { useAsyncResource, useTicketedWebSocket } from '../../../../../hooks'
+import { useAsyncResource, usePendingAction, useTicketedWebSocket } from '../../../../../hooks'
 import { userFacingErrorMessage } from '../../../../../utils/userFacingError'
 import { SandboxIdeWorkspace } from '../../../../sandbox/components/SandboxIdeWorkspace'
 import styles from '../../experiment.module.css'
 
 /** ExperimentWorkspacePage 以实验实例为业务层，把代码环境交给共享 Sandbox IDE。 */
 const ExperimentWorkspacePage: React.FC = () => {
+  const confirm = useConfirm()
   const navigate = useNavigate()
   const { id } = useParams()
   const [searchParams, setSearchParams] = useSearchParams()
@@ -23,9 +23,9 @@ const ExperimentWorkspacePage: React.FC = () => {
   const [checkpointId, setCheckpointId] = useState('')
   const [codeStorageKey, setCodeStorageKey] = useState('')
   const [codeHash, setCodeHash] = useState('')
-  const [reportRef, setReportRef] = useState('')
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
+  const { pendingAction, runPendingAction } = usePendingAction()
   const instanceId = searchParams.get('instanceId')
 
   const resource = useAsyncResource(
@@ -103,23 +103,11 @@ const ExperimentWorkspacePage: React.FC = () => {
     }
   }
 
-  /** submitReport 提交服务端报告引用，提交完成后保留实例进度。 */
-  const submitReport = async () => {
-    if (!instance || !reportRef.trim()) return
-    setMessage('')
-    setError('')
-    try {
-      await api.experiment.submitReport(instance.instance_id, { content_ref: reportRef.trim() })
-      setMessage('实验报告已提交。')
-      setReportRef('')
-    } catch (actionError) {
-      setError(userFacingErrorMessage(actionError, '暂时无法提交实验报告。'))
-    }
-  }
-
   /** recycleInstance 回收环境并返回实验列表，避免停留在已销毁工作台。 */
   const recycleInstance = async () => {
-    if (!instance || !window.confirm('确定回收当前实验资源吗？回收后将无法继续操作这个实例。')) return
+    if (!instance) return
+    const confirmed = await confirm({ title: '回收实验资源', description: '回收后当前代码环境会被销毁，且无法继续操作这个实验实例。', confirmLabel: '确认回收' })
+    if (!confirmed) return
     setError('')
     try {
       await api.experiment.recycleInstance(instance.instance_id)
@@ -129,9 +117,9 @@ const ExperimentWorkspacePage: React.FC = () => {
     }
   }
 
-  if (resource.status === 'loading') return <LoadingState title="正在准备实验工作台" description="系统正在创建或读取你的实验实例。" />
-  if (resource.status === 'error') return <ErrorState error={resource.error} onRetry={resource.reload} />
-  if (!instance) return <LoadingState title="正在准备实验工作台" />
+  if (resource.status === 'loading') return <ResourceState status="loading" title="正在准备实验工作台" description="系统正在创建或读取你的实验实例。" />
+  if (resource.status === 'error') return <ResourceState status="error" error={resource.error} onRetry={resource.reload} />
+  if (!instance) return <ResourceState status="loading" title="正在准备实验工作台" />
 
   const inspector = (
     <div className={styles.section}>
@@ -142,7 +130,7 @@ const ExperimentWorkspacePage: React.FC = () => {
         <ul className={styles.list}>
           {(instance.stages || []).map((stage) => (
             <li key={stage.stage}>
-              <button className={`${styles.stageButton} ${activeStage === stage.stage || stage.status === EXPERIMENT_STAGE_STATUS.ACTIVE ? styles.stageButtonActive : ''}`} disabled={stage.status === EXPERIMENT_STAGE_STATUS.LOCKED} onClick={() => void activateStage(stage.stage)}>
+              <button className={`${styles.stageButton} ${activeStage === stage.stage || stage.status === EXPERIMENT_STAGE_STATUS.ACTIVE ? styles.stageButtonActive : ''}`} disabled={Boolean(pendingAction) || stage.status === EXPERIMENT_STAGE_STATUS.LOCKED} aria-busy={pendingAction === `stage-${stage.stage}`} onClick={() => void runPendingAction(`stage-${stage.stage}`, () => activateStage(stage.stage))}>
                 {stage.stage}. {stage.title}<br />
                 <span>{stage.status === EXPERIMENT_STAGE_STATUS.LOCKED ? '未解锁' : stage.status === EXPERIMENT_STAGE_STATUS.ACTIVE ? '进行中' : '可进入'}</span>
               </button>
@@ -153,12 +141,7 @@ const ExperimentWorkspacePage: React.FC = () => {
       <section className={styles.darkCard}>
         <h2 className={styles.workspaceTitle}>检查点判分</h2>
         <Input value={checkpointId} onChange={(event) => setCheckpointId(event.target.value)} placeholder="检查点编号" fullWidth />
-        <Button size="sm" icon={<CheckCircle size={15} />} onClick={() => void judgeCheckpoint()}>提交判分</Button>
-      </section>
-      <section className={styles.darkCard}>
-        <h2 className={styles.workspaceTitle}>实验报告</h2>
-        <Textarea value={reportRef} onChange={(event) => setReportRef(event.target.value)} placeholder="填写已保存的实验报告地址" rows={3} fullWidth />
-        <Button size="sm" icon={<Send size={15} />} onClick={() => void submitReport()}>提交报告</Button>
+        <Button size="sm" icon={<CheckCircle size={15} />} loading={pendingAction === 'checkpoint'} disabled={Boolean(pendingAction)} onClick={() => void runPendingAction('checkpoint', judgeCheckpoint)}>提交判分</Button>
       </section>
       {instance.sims.map((sim) => (
         <Button key={sim.session_id} variant="outline" size="sm" icon={<Play size={15} />} onClick={() => navigate(`/student/simulations/${sim.package_code}?version=${encodeURIComponent(sim.version)}&sessionId=${encodeURIComponent(sim.session_id)}`)}>
@@ -170,10 +153,10 @@ const ExperimentWorkspacePage: React.FC = () => {
 
   const controls = (
     <div className={styles.toolbar}>
-      <Button variant="on-dark" size="sm" icon={<Pause size={15} />} onClick={() => void runInstanceAction(api.experiment.pauseInstance.bind(api.experiment), '实验实例已暂停。')}>暂停</Button>
-      <Button variant="on-dark" size="sm" icon={<Play size={15} />} onClick={() => void runInstanceAction(api.experiment.resumeInstance.bind(api.experiment), '实验实例已恢复。')}>恢复</Button>
-      <Button variant="on-dark" size="sm" icon={<CheckCircle size={15} />} onClick={() => void runInstanceAction(api.experiment.finishInstance.bind(api.experiment), '实验实例已完成。')}>完成</Button>
-      <Button variant="danger" size="sm" icon={<Trash2 size={15} />} onClick={() => void recycleInstance()}>回收资源</Button>
+      <Button variant="on-dark" size="sm" icon={<Pause size={15} />} loading={pendingAction === 'pause'} disabled={Boolean(pendingAction)} onClick={() => void runPendingAction('pause', () => runInstanceAction(api.experiment.pauseInstance.bind(api.experiment), '实验实例已暂停。'))}>暂停</Button>
+      <Button variant="on-dark" size="sm" icon={<Play size={15} />} loading={pendingAction === 'resume'} disabled={Boolean(pendingAction)} onClick={() => void runPendingAction('resume', () => runInstanceAction(api.experiment.resumeInstance.bind(api.experiment), '实验实例已恢复。'))}>恢复</Button>
+      <Button variant="on-dark" size="sm" icon={<CheckCircle size={15} />} loading={pendingAction === 'finish'} disabled={Boolean(pendingAction)} onClick={() => void runPendingAction('finish', () => runInstanceAction(api.experiment.finishInstance.bind(api.experiment), '实验实例已完成。'))}>完成</Button>
+      <Button variant="danger" size="sm" icon={<Trash2 size={15} />} loading={pendingAction === 'recycle'} disabled={Boolean(pendingAction)} onClick={() => void runPendingAction('recycle', recycleInstance)}>回收资源</Button>
     </div>
   )
 

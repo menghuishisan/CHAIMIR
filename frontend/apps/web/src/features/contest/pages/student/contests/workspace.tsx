@@ -3,13 +3,13 @@
 import React, { useMemo, useState } from 'react'
 import type { ContestProblem, ContestSubmission } from '@chaimir/api-client'
 import { BattleRole } from '@chaimir/api-client'
-import { Button, Callout, Input, Select, Textarea } from '@chaimir/ui'
+import { Button, Callout, Input, Select, Textarea, ResourceState, FormField } from '@chaimir/ui'
 import { Play, Send, Swords } from 'lucide-react'
 import { useParams, useSearchParams } from 'react-router-dom'
 import { api } from '../../../../../app/api'
-import { EmptyState, ErrorState, LoadingState } from '../../../../../components/ResourceState'
+import { usePendingAction } from '../../../../../hooks'
 import { useAsyncResource } from '../../../../../hooks/useAsyncResource'
-import { battleRoleOptions, parseJsonObject } from '../../../../../utils/index'
+import { battleRoleOptions } from '../../../../../utils/index'
 import { userFacingErrorMessage } from '../../../../../utils/userFacingError'
 import { SandboxIdeWorkspace } from '../../../../sandbox/components/SandboxIdeWorkspace'
 import styles from '../../contest.module.css'
@@ -22,13 +22,14 @@ const StudentContestWorkspacePage: React.FC = () => {
   const [runtimeCode, setRuntimeCode] = useState('')
   const [runtimeVersion, setRuntimeVersion] = useState('')
   const [toolCodes, setToolCodes] = useState('')
-  const [answerData, setAnswerData] = useState('{}')
+  const [answer, setAnswer] = useState('')
   const [codeStorageKey, setCodeStorageKey] = useState('')
   const [codeHash, setCodeHash] = useState('')
   const [battleRole, setBattleRole] = useState(String(BattleRole.ATTACK))
   const [submission, setSubmission] = useState<ContestSubmission>()
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
+  const { pendingAction, runPendingAction } = usePendingAction()
   const sandboxId = searchParams.get('sandboxId') || ''
 
   const resource = useAsyncResource(
@@ -73,7 +74,7 @@ const StudentContestWorkspacePage: React.FC = () => {
     setError('')
     try {
       const created = await api.contest.submitSolve(id, selectedProblem.id, {
-        content_ref: parseJsonObject(answerData),
+        content_ref: { answer: answer.trim() },
         code_storage_key: codeStorageKey || undefined,
         code_hash: codeHash || undefined,
         sandbox_ref: sandboxId || undefined,
@@ -109,9 +110,9 @@ const StudentContestWorkspacePage: React.FC = () => {
     }
   }
 
-  if (resource.status === 'loading') return <LoadingState title="正在进入赛场" description="系统正在同步题目、榜单和参战记录。" />
-  if (resource.status === 'error') return <ErrorState error={resource.error} onRetry={resource.reload} />
-  if (!selectedProblem) return <EmptyState title="赛场暂无题目" description="赛事发布题目后即可创建环境。" />
+  if (resource.status === 'loading') return <ResourceState status="loading" title="正在进入赛场" description="系统正在同步题目、榜单和参战记录。" />
+  if (resource.status === 'error') return <ResourceState status="error" error={resource.error} onRetry={resource.reload} />
+  if (!selectedProblem) return <ResourceState status="empty" title="赛场暂无题目" description="赛事发布题目后即可创建环境。" />
 
   if (!sandboxId) {
     return (
@@ -121,12 +122,12 @@ const StudentContestWorkspacePage: React.FC = () => {
         {error && <Callout variant="danger" title="环境创建失败">{error}</Callout>}
         <section className={styles.panel}>
           <div className={styles.grid}>
-            <label className={styles.field}><span className={styles.label}>竞赛题目</span><Select value={selectedProblem.id} options={(resource.data?.problems || []).map((item) => ({ label: `${item.seq}. ${problemTitle(item)}`, value: item.id }))} onChange={setProblemId} /></label>
-            <label className={styles.field}><span className={styles.label}>运行环境</span><Input value={runtimeCode} onChange={(event) => setRuntimeCode(event.target.value)} placeholder="填写赛事指定的运行环境" fullWidth /></label>
-            <label className={styles.field}><span className={styles.label}>环境版本</span><Input value={runtimeVersion} onChange={(event) => setRuntimeVersion(event.target.value)} placeholder="填写赛事指定的环境版本" fullWidth /></label>
-            <label className={styles.field}><span className={styles.label}>辅助工具</span><Input value={toolCodes} onChange={(event) => setToolCodes(event.target.value)} placeholder="多个工具用逗号分隔，可不填" fullWidth /></label>
+            <FormField className={styles.field} label="竞赛题目"><Select value={selectedProblem.id} options={(resource.data?.problems || []).map((item) => ({ label: `${item.seq}. ${problemTitle(item)}`, value: item.id }))} onChange={setProblemId} /></FormField>
+            <FormField className={styles.field} label="运行环境"><Input value={runtimeCode} onChange={(event) => setRuntimeCode(event.target.value)} placeholder="填写赛事指定的运行环境" fullWidth /></FormField>
+            <FormField className={styles.field} label="环境版本"><Input value={runtimeVersion} onChange={(event) => setRuntimeVersion(event.target.value)} placeholder="填写赛事指定的环境版本" fullWidth /></FormField>
+            <FormField className={styles.field} label="辅助工具"><Input value={toolCodes} onChange={(event) => setToolCodes(event.target.value)} placeholder="多个工具用逗号分隔，可不填" fullWidth /></FormField>
           </div>
-          <div className={styles.actions}><Button icon={<Play size={15} />} onClick={() => void createEnv()}>创建并进入环境</Button></div>
+          <div className={styles.actions}><Button icon={<Play size={15} />} loading={pendingAction === 'environment'} disabled={Boolean(pendingAction)} onClick={() => void runPendingAction('environment', createEnv)}>创建并进入环境</Button></div>
         </section>
       </div>
     )
@@ -139,14 +140,15 @@ const StudentContestWorkspacePage: React.FC = () => {
       <section className={styles.darkCard}>
         <h2 className={styles.workspaceTitle}>{problemTitle(selectedProblem)}</h2>
         <p className={styles.workspaceMeta}>分值 {selectedProblem.score}</p>
-        <Textarea value={answerData} onChange={(event) => setAnswerData(event.target.value)} placeholder="补充答案数据，可保留为空对象" rows={4} fullWidth />
-        <Button size="sm" icon={<Send size={15} />} onClick={() => void submitSolve()}>提交判分</Button>
+        {selectedProblem.face?.statement && <p className={styles.workspaceStatement}>{selectedProblem.face.statement}</p>}
+        <FormField className={styles.darkField} label="补充答案"><Textarea value={answer} onChange={(event) => setAnswer(event.target.value)} placeholder="按题目要求填写答案；仅提交代码时可留空" rows={3} fullWidth /></FormField>
+        <Button size="sm" icon={<Send size={15} />} loading={pendingAction === 'solve'} disabled={Boolean(pendingAction)} onClick={() => void runPendingAction('solve', submitSolve)}>提交判分</Button>
         {submission && <p className={styles.workspaceMeta}>最近提交：{submission.passed ? '已通过' : '未通过'}，{submission.score} 分</p>}
       </section>
       <section className={styles.darkCard}>
         <h2 className={styles.workspaceTitle}>对抗赛参战物</h2>
         <Select value={battleRole} options={battleRoleOptions} onChange={setBattleRole} />
-        <Button size="sm" icon={<Swords size={15} />} onClick={() => void submitBattleEntry()}>提交当前代码</Button>
+        <Button size="sm" icon={<Swords size={15} />} loading={pendingAction === 'battle'} disabled={Boolean(pendingAction)} onClick={() => void runPendingAction('battle', submitBattleEntry)}>提交当前代码</Button>
         <p className={styles.workspaceMeta}>已提交 {resource.data?.entries.length || 0} 个参战版本</p>
       </section>
       <section className={styles.darkCard}>
@@ -175,8 +177,7 @@ const StudentContestWorkspacePage: React.FC = () => {
 
 /** problemTitle 从公开题面提取标题，缺失时使用稳定的题目标识。 */
 function problemTitle(problem: ContestProblem): string {
-  const title = problem.face?.title
-  return typeof title === 'string' && title.trim() ? title : `题目 ${problem.seq}`
+  return problem.title.trim() || `题目 ${problem.seq}`
 }
 
 export default StudentContestWorkspacePage

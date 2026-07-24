@@ -78,6 +78,8 @@ const TenantSelectPage: React.FC = () => {
             className={styles.tenantButton}
             key={tenant.tenant_id}
             type="button"
+            disabled={submittingTenantId !== null}
+            aria-busy={submittingTenantId === tenant.tenant_id}
             onClick={() => handleSelectTenant(tenant.tenant_id)}
           >
             <span className={styles.tenantIcon} aria-hidden="true">
@@ -92,7 +94,7 @@ const TenantSelectPage: React.FC = () => {
         ))}
       </div>
 
-      <Button variant="ghost" icon={<ArrowLeft size={16} />} onClick={() => navigate('/auth/login', { replace: true })}>
+      <Button variant="ghost" icon={<ArrowLeft size={16} />} disabled={submittingTenantId !== null} onClick={() => navigate('/auth/login', { replace: true })}>
         返回重新登录
       </Button>
     </div>

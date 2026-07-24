@@ -63,7 +63,6 @@
   z-index: var(--z-base);
 }
 
-.chaimir-ide-workbench__resizer:hover,
 .chaimir-ide-workbench__resizer:focus-visible,
 .chaimir-ide-workbench__resizer.is-dragging {
   background: var(--color-on-dark-accent);
@@ -177,15 +176,26 @@
     border-color var(--t-fast) var(--ease),
     background var(--t-fast) var(--ease),
     box-shadow var(--t-fast) var(--ease),
-    transform var(--t-fast) var(--ease-spring-ios);
+    transform var(--t-fast) var(--ease-out);
 }
 
-.chaimir-ide-file:hover,
 .chaimir-ide-file:focus-visible,
 .chaimir-ide-file.is-selected {
   border-color: var(--color-on-dark-accent);
   background: var(--color-dark-surface);
   box-shadow: inset 3px 0 0 var(--color-on-dark-accent), inset 0 1px 0 var(--color-highlight);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .chaimir-ide-workbench__resizer:hover {
+    background: var(--color-on-dark-accent);
+  }
+
+  .chaimir-ide-file:hover {
+    border-color: var(--color-on-dark-accent);
+    background: var(--color-dark-surface);
+    box-shadow: inset 3px 0 0 var(--color-on-dark-accent);
+  }
 }
 
 .chaimir-ide-file:active {
@@ -264,13 +274,13 @@
   min-inline-size: 0;
 }
 
-@media (max-width: 1023px) {
+@media not all and (--bp-lg) {
   .chaimir-ide-workbench {
     min-block-size: 42rem;
   }
 }
 
-@media (max-width: 639px) {
+@media not all and (--bp-sm) {
   .chaimir-ide-workbench__editor-head {
     display: grid;
   }

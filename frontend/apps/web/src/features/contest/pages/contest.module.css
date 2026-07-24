@@ -34,10 +34,11 @@
 }
 
 .panel {
-  border: 1px solid var(--color-border-subtle);
-  border-radius: var(--radius-lg);
-  background: var(--color-surface);
-  padding: var(--space-5);
+  border: 0;
+  border-top: 1px solid var(--color-border);
+  border-radius: 0;
+  background: transparent;
+  padding: var(--space-5) 0 0;
 }
 
 .section {
@@ -81,6 +82,54 @@
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
+}
+
+.domainEditor,
+.editorSection,
+.stepRow,
+.assertionEditor {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.editorSection {
+  padding-block-start: var(--space-4);
+  border-top: 1px solid var(--color-border-subtle);
+}
+
+.editorSection h3,
+.editorSection p {
+  margin: 0;
+}
+
+.editorSection h3 {
+  color: var(--color-text);
+  font-size: var(--text-md);
+}
+
+.editorSection p {
+  color: var(--color-text-sub);
+  font-size: var(--text-sm);
+}
+
+.editorHeading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.editorHeading > div {
+  display: grid;
+  gap: var(--space-1);
+}
+
+.stepRow,
+.assertionEditor {
+  padding: var(--space-4);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-sunken);
 }
 
 .label {
@@ -127,16 +176,26 @@
   padding: var(--space-4);
 }
 
-.jsonEditor {
-  min-height: 180px;
-  font-family: var(--font-mono);
-}
-
 .workspaceTitle {
   margin: 0;
   color: var(--color-dark-text);
   font-size: var(--text-lg);
   font-weight: var(--font-semibold);
+}
+
+.workspaceStatement {
+  margin: 0;
+  color: var(--color-dark-text);
+  font-size: var(--text-sm);
+  line-height: var(--leading-relaxed);
+  white-space: pre-wrap;
+}
+
+.darkField {
+  display: grid;
+  gap: var(--space-2);
+  color: var(--color-dark-text-sub);
+  font-size: var(--text-sm);
 }
 
 .workspaceMeta {
@@ -145,9 +204,9 @@
 }
 
 .darkCard {
-  border: 1px solid var(--color-glass-border);
+  border: 1px solid var(--color-dark-border-strong);
   border-radius: var(--radius-sm);
-  background: var(--color-glass-highlight);
+  background: var(--color-dark-highlight);
   padding: var(--space-4);
 }
 
@@ -165,8 +224,13 @@
   font-size: var(--text-sm);
 }
 
-@media (max-width: 900px) {
+@media not all and (--bp-lg) {
   .split {
     grid-template-columns: 1fr;
+  }
+
+  .editorHeading {
+    align-items: stretch;
+    flex-direction: column;
   }
 }

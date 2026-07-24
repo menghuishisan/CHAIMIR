@@ -86,11 +86,12 @@
 }
 
 .chaimir-status-indicator__spinner {
+  /* animation-budget: loader feedback may rotate continuously while status is pending */
   animation: chaimir-status-spin 1s linear infinite;
 }
 
 .chaimir-status-indicator.is-pulsing .chaimir-status-indicator__dot {
-  animation: chaimir-status-pulse 1.4s var(--ease-out) infinite;
+  box-shadow: 0 0 0 3px var(--status-bg);
 }
 
 @keyframes chaimir-status-spin {
@@ -99,19 +100,8 @@
   }
 }
 
-@keyframes chaimir-status-pulse {
-  0%,
-  100% {
-    box-shadow: 0 0 0 3px var(--status-bg);
-  }
-  50% {
-    box-shadow: 0 0 0 6px var(--status-bg);
-  }
-}
-
 @media (prefers-reduced-motion: reduce) {
-  .chaimir-status-indicator__spinner,
-  .chaimir-status-indicator.is-pulsing .chaimir-status-indicator__dot {
+  .chaimir-status-indicator__spinner {
     animation: none;
   }
 }

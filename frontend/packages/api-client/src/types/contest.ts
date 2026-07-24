@@ -19,6 +19,20 @@ import type {
   VulnRuntimeMode,
 } from '../constants/contest'
 import type { SandboxStatus } from '../constants/sandbox'
+import type { ChainAssertion, ContestProblemBody } from './content'
+
+/** DynamicScoreConfig 定义解题人数增长时的唯一衰减规则。 */
+export interface DynamicScoreConfig {
+  min_score: number
+  decay_per_solve: number
+}
+
+/** BattleRuntimeConfig 定义对抗题唯一的沙箱运行配置。 */
+export interface BattleRuntimeConfig {
+  runtime_code: string
+  runtime_image_version: string
+  tool_codes: string[]
+}
 
 export interface Contest {
   id: SnowflakeID
@@ -54,22 +68,23 @@ export interface ContestRequest {
 export interface ContestProblem {
   id: SnowflakeID
   contest_id: SnowflakeID
+  title: string
   item_code: string
   item_version: string
   score: number
-  dynamic_score?: Record<string, unknown>
-  battle_config?: Record<string, unknown>
+  dynamic_score?: DynamicScoreConfig
+  battle_config?: BattleRuntimeConfig
   battle_rule?: BattleRule
   seq: number
-  face?: Record<string, unknown>
+  face?: ContestProblemBody
 }
 
 export interface ContestProblemRequest {
   item_code: string
   item_version: string
   score: number
-  dynamic_score?: Record<string, unknown>
-  battle_config?: Record<string, unknown>
+  dynamic_score?: DynamicScoreConfig
+  battle_config?: BattleRuntimeConfig
   battle_rule?: BattleRule
   seq: number
 }
@@ -107,7 +122,7 @@ export interface ContestSubmission {
   problem_id: SnowflakeID
   team_id: SnowflakeID
   submitter_id: SnowflakeID
-  content_ref: Record<string, unknown>
+  content_ref: ContestAnswerContentRef
   source_ref: string
   judge_task_ref?: string
   passed: boolean
@@ -117,10 +132,15 @@ export interface ContestSubmission {
 }
 
 export interface ContestSubmitRequest {
-  content_ref: Record<string, unknown>
+  content_ref: ContestAnswerContentRef
   code_storage_key?: string
   code_hash?: string
   sandbox_ref?: string
+}
+
+/** ContestAnswerContentRef 是学生可直接补充的唯一答案结构。 */
+export interface ContestAnswerContentRef {
+  answer: string
 }
 
 export interface EnvRequest {
@@ -199,7 +219,7 @@ export interface ResultSnapshot {
 export interface CheatRecordRequest {
   team_id: SnowflakeID
   type: CheatType
-  evidence: Record<string, unknown>
+  evidence: CheatEvidence
   action: CheatAction
 }
 
@@ -208,10 +228,17 @@ export interface CheatRecord {
   contest_id: SnowflakeID
   team_id: SnowflakeID
   type: CheatType
-  evidence: Record<string, unknown>
+  evidence: CheatEvidence
   action: CheatAction
   operator_id?: SnowflakeID
   created_at: string
+}
+
+/** CheatEvidence 是人工违规复核的唯一可读证据结构。 */
+export interface CheatEvidence {
+  review_note: string
+  source_refs: string[]
+  penalty_score?: number
 }
 
 export interface CheatSuspect {
@@ -255,7 +282,31 @@ export interface VulnProblemImportRequest {
   title: string
   level: VulnLevel
   runtime_mode: VulnRuntimeMode
-  draft_body: Record<string, unknown>
+  draft_body: VulnDraftBody
+}
+
+/** VulnChainStep 描述漏洞预验证中的一条链操作。 */
+export interface VulnChainStep {
+  op: 'deploy' | 'tx' | 'query' | 'reset'
+  payload: Record<string, unknown>
+}
+
+/** VulnJudgeConfig 是漏洞草稿在固化前使用的判题器配置。 */
+export interface VulnJudgeConfig {
+  judger_code: string
+  suite_ref?: string
+  max_score: number
+}
+
+/** VulnDraftBody 是漏洞题转化与预验证共用的唯一草稿结构。 */
+export interface VulnDraftBody {
+  statement: string
+  judge_config: VulnJudgeConfig
+  init_contracts: string[]
+  init_steps: VulnChainStep[]
+  positive_steps: VulnChainStep[]
+  assertions: ChainAssertion[]
+  ad_config?: BattleRuntimeConfig
 }
 
 export interface VulnPrevalidateRequest {
@@ -273,7 +324,7 @@ export interface VulnProblem {
   title: string
   level: VulnLevel
   runtime_mode: VulnRuntimeMode
-  draft_body: Record<string, unknown>
+  draft_body: VulnDraftBody
   prevalidate_status: VulnPrevalidateStatus
   prevalidate_detail: Record<string, unknown>
   content_item_code?: string

@@ -3,12 +3,11 @@
 import React, { useEffect, useState } from 'react'
 import type { Tenant } from '@chaimir/api-client'
 import { TenantStatus } from '@chaimir/api-client'
-import { Button, Callout, Input, Select } from '@chaimir/ui'
+import { Button, Callout, Input, Select, ResourceState } from '@chaimir/ui'
 import { Info, RefreshCw, Save } from 'lucide-react'
 import { useParams } from 'react-router-dom'
 import { api } from '../../../../../app/api'
-import { EmptyState, ErrorState, LoadingState } from '../../../../../components/ResourceState'
-import { useAsyncResource } from '../../../../../hooks'
+import { useAsyncResource, usePendingAction } from '../../../../../hooks'
 import styles from '../../../../admin/pages/dashboard.module.css'
 import { authModeLabel, deployModeLabel, formatDateTime, tenantStatusLabel } from '../../../../../utils/index'
 import { userFacingErrorMessage } from '../../../../../utils/userFacingError'
@@ -29,6 +28,7 @@ const SchoolDetailPage: React.FC = () => {
   const [expireAt, setExpireAt] = useState('')
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
+  const { pendingAction, runPendingAction } = usePendingAction()
 
   useEffect(() => {
     if (!tenant) return
@@ -64,12 +64,12 @@ const SchoolDetailPage: React.FC = () => {
       {message && <Callout variant="success" title="操作完成">{message}</Callout>}
       {error && <Callout variant="danger" title="操作未完成">{error}</Callout>}
 
-      {resource.status === 'loading' && <LoadingState title="正在获取租户详情" />}
+      {resource.status === 'loading' && <ResourceState status="loading" title="正在获取租户详情" />}
       {resource.status === 'error' && (
-        <ErrorState error={resource.error} onRetry={resource.reload} />
+        <ResourceState status="error" error={resource.error} onRetry={resource.reload} />
       )}
       {resource.status === 'empty' && (
-        <EmptyState title="缺少租户编号" description="请从租户列表进入详情页。" />
+        <ResourceState status="empty" title="缺少租户编号" description="请从租户列表进入详情页。" />
       )}
       {resource.status === 'success' && tenant && (
         <>
@@ -107,10 +107,6 @@ const SchoolDetailPage: React.FC = () => {
                 <span className={styles.metricLabel}>激活码登录</span>
                 <span className={styles.metricValue}>{tenant.enable_activation_code ? '启用' : '关闭'}</span>
               </div>
-              <div className={styles.metricItem}>
-                <span className={styles.metricLabel}>租户编号</span>
-                <span className={styles.metricValue}>{tenant.id}</span>
-              </div>
             </div>
           </section>
           <section className={styles.panel}>
@@ -118,7 +114,7 @@ const SchoolDetailPage: React.FC = () => {
             <div className={styles.metricsList}>
               <Select value={status} onChange={setStatus} options={[{ value: '1', label: '正常' }, { value: '2', label: '停用' }, { value: '3', label: '已到期' }]} />
               <Input type="date" value={expireAt} onChange={(event) => setExpireAt(event.target.value)} />
-              <Button icon={<Save size={15} />} onClick={() => void updateTenant()}>保存状态</Button>
+              <Button icon={<Save size={15} />} loading={pendingAction === 'tenant'} disabled={Boolean(pendingAction)} onClick={() => void runPendingAction('tenant', updateTenant)}>保存状态</Button>
             </div>
           </section>
         </>

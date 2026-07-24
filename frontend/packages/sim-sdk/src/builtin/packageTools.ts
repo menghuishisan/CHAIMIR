@@ -13,6 +13,7 @@ import type {
   NarrativeStep,
   PatternBinding,
   PipelineStep,
+  ProcessSpan,
   ReducerContext,
   SimEvent,
   SimInitParams,
@@ -20,6 +21,7 @@ import type {
   SimState,
   TeachingFrame,
   TreeNode,
+  VisualElementMeta,
 } from '../types';
 import { narrativeQuestions, type PhaseNarrativeQuestion } from './narrativeQuestions';
 
@@ -51,6 +53,18 @@ export interface TeachingFrameInput {
   focus: TeachingFrame['focus'];
   layout: TeachingFrame['layout'];
   annotations?: TeachingFrame['annotations'];
+}
+
+interface VisualMessage {
+  id: string;
+  from: string;
+  to: string;
+  at: number;
+  label: string;
+  status: 'sent' | 'delivered' | 'dropped';
+  endAt?: number;
+  process?: ProcessSpan;
+  detail?: string;
 }
 
 /**
@@ -179,6 +193,24 @@ export function pipelinePattern(id: string, title: string, steps: PipelineStep[]
 }
 
 /**
+ * pipelineSteps 统一生成阶段状态,让所有算法只声明自己的阶段与失败条件。
+ */
+export function pipelineSteps(phases: ReadonlyArray<{ id: string; label: string; detail: string }>, activeIndex: number, failed = false): PipelineStep[] {
+  return phases.map((phase, index) => ({
+    id: phase.id,
+    label: phase.label,
+    detail: phase.detail,
+    status: index < activeIndex ? 'complete' : index === activeIndex ? (failed ? 'failed' : 'running') : 'pending',
+    process: {
+      startedAt: index * 2,
+      endedAt: index * 2 + 2,
+      progress: index < activeIndex ? 1 : index === activeIndex ? 0.6 : 0,
+      label: phase.label,
+    },
+  }));
+}
+
+/**
  * matrixPattern 创建矩阵封闭模式绑定。
  */
 export function matrixPattern(id: string, title: string, rows: string[], columns: string[], cells: MatrixCell[][]): PatternBinding {
@@ -186,10 +218,47 @@ export function matrixPattern(id: string, title: string, rows: string[], columns
 }
 
 /**
+ * matrixCells 统一生成行列矩阵,算法只提供单元格读取规则。
+ */
+export function matrixCells(rows: string[], columns: string[], read: (row: string, column: string) => MatrixCell): MatrixCell[][] {
+  return rows.map((row) => columns.map((column) => read(row, column)));
+}
+
+/**
  * lanePattern 创建参与方时序泳道封闭模式绑定。
  */
 export function lanePattern(id: string, title: string, actors: string[], messages: LaneMessage[], currentTime: number): PatternBinding {
   return { id, mode: 'lane', title, data: { actors, messages, currentTime } };
+}
+
+/** messageGraphEdges 把各算法共用的消息语义转换为图边，不复制领域状态机。 */
+export function messageGraphEdges(messages: VisualMessage[]): GraphEdge[] {
+  return messages.map((message) => ({
+    id: message.id,
+    from: message.from,
+    to: message.to,
+    label: message.label,
+    status: message.status === 'dropped' ? 'failed' : message.status === 'delivered' ? 'success' : 'active',
+    process: message.process,
+    detail: message.detail,
+  }));
+}
+
+/** labeledLaneMessages 只把内部参与方 ID 替换为泳道展示名称。 */
+export function labeledLaneMessages(messages: VisualMessage[], labelOf: (id: string) => string): LaneMessage[] {
+  return messages.map((message) => ({ ...message, from: labelOf(message.from), to: labelOf(message.to) }));
+}
+
+/** timedVisualMessage 按当前 tick 计算消息从发送到到达的可视进度。 */
+export function timedVisualMessage<T extends VisualMessage>(currentTick: number, message: T, detail: string): T {
+  const endAt = message.endAt ?? message.at + 1;
+  const progress = Math.min(1, Math.max(0, (currentTick - message.at) / Math.max(1, endAt - message.at)));
+  return { ...message, endAt, detail, process: { startedAt: message.at, endedAt: endAt, progress, label: message.label } };
+}
+
+/** focusOrArchiveMeta 统一需区分聚焦、归档和稳定态的可视元素生命周期。 */
+export function focusOrArchiveMeta(id: string, label: string, emphasis: VisualElementMeta['emphasis'], tick: number): VisualElementMeta {
+  return { id, label, lifecycle: { state: emphasis === 'ghost' ? 'archived' : emphasis === 'focus' ? 'active' : 'settled', fromTick: Math.max(0, tick - 1) }, emphasis, explanation: label };
 }
 
 /**

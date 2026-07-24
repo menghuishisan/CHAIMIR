@@ -3,26 +3,23 @@
 import React, { useMemo, useState } from 'react'
 import type { AuditLog } from '@chaimir/api-client'
 import type { TableColumn } from '@chaimir/ui'
-import { Button, Input, Table } from '@chaimir/ui'
+import { Button, Input, Table, ResourceState } from '@chaimir/ui'
 import { FileText, RefreshCw } from 'lucide-react'
 import { api } from '../../../../../app/api'
-import { ErrorState, LoadingState } from '../../../../../components/ResourceState'
 import { useAsyncResource } from '../../../../../hooks'
 import styles from '../../identity-admin.module.css'
-import { formatDateTime } from '../../../../../utils/index'
+import { auditActionLabel, auditTargetLabel, formatDateTime } from '../../../../../utils/index'
 
 const PAGE_SIZE = 20
 
 
 const AuditPage: React.FC = () => {
   const [action, setAction] = useState('')
-  const [actorId, setActorId] = useState('')
   const resource = useAsyncResource(() => api.identity.getAuditLogs({
     action: action || undefined,
-    actor_id: actorId || undefined,
     page: 1,
     size: PAGE_SIZE,
-  }), [action, actorId])
+  }), [action])
 
   const columns = useMemo<TableColumn<AuditLog>[]>(() => [
     {
@@ -31,11 +28,10 @@ const AuditPage: React.FC = () => {
       render: (row) => <span className={styles.muted}>{formatDateTime(row.created_at)}</span>,
       priority: 'primary',
     },
-    { key: 'actor', title: '操作人', dataIndex: 'actor_id', priority: 'primary' },
-    { key: 'action', title: '操作类型', dataIndex: 'action', priority: 'secondary' },
-    { key: 'target', title: '目标', render: (row) => `${row.target_type}${row.target_id ? ` / ${row.target_id}` : ''}` },
+    { key: 'action', title: '操作类型', render: (row) => auditActionLabel(row.action), priority: 'secondary' },
+    { key: 'target', title: '目标', render: (row) => auditTargetLabel(row.target_type) },
     { key: 'ip', title: 'IP 地址', render: (row) => row.ip || '暂无' },
-    { key: 'trace', title: '编号', render: (row) => row.trace_id || '暂无' },
+    { key: 'trace', title: '追踪编号', render: (row) => row.trace_id || '暂无' },
   ], [])
 
   const rows = resource.data?.list || []
@@ -56,12 +52,11 @@ const AuditPage: React.FC = () => {
       </div>
 
       <div className={styles.toolbar}>
-        <Input placeholder="按操作人编号筛选" value={actorId} onChange={(event) => setActorId(event.target.value)} />
         <Input placeholder="按操作类型筛选" value={action} onChange={(event) => setAction(event.target.value)} />
       </div>
 
-      {resource.status === 'error' && <ErrorState error={resource.error} onRetry={resource.reload} />}
-      {resource.status === 'loading' && <LoadingState title="正在获取审计日志" />}
+      {resource.status === 'error' && <ResourceState status="error" error={resource.error} onRetry={resource.reload} />}
+      {resource.status === 'loading' && <ResourceState status="loading" title="正在获取审计日志" />}
       {(resource.status === 'success' || resource.status === 'empty') && (
         <div className={styles.tableWrap}>
           <Table

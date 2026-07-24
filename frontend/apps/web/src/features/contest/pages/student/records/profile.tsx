@@ -3,7 +3,7 @@
 import React, { useMemo } from 'react'
 import { Medal, TrendingUp } from 'lucide-react'
 import { api } from '../../../../../app/api'
-import { ErrorState, LoadingState } from '../../../../../components/ResourceState'
+import { ResourceState } from '@chaimir/ui'
 import { useAsyncResource } from '../../../../../hooks/useAsyncResource'
 import styles from '../../contest.module.css'
 
@@ -17,11 +17,11 @@ const StudentRecordProfilePage: React.FC = () => {
   }, [resource.data])
 
   if (resource.status === 'loading') {
-    return <LoadingState title="正在读取竞赛画像" description="系统正在汇总你的竞赛表现。" />
+    return <ResourceState status="loading" title="正在读取竞赛画像" description="系统正在汇总你的竞赛表现。" />
   }
 
   if (resource.status === 'error') {
-    return <ErrorState error={resource.error} onRetry={resource.reload} />
+    return <ResourceState status="error" error={resource.error} onRetry={resource.reload} />
   }
 
   return (

@@ -10,3 +10,8 @@ export function notificationPreferenceLabel(type: string): string {
     'system.announcement': '系统公告提醒',
   }, '其他业务提醒')
 }
+
+/** notificationTypeLabel 将站内通知事件键转换为用户向类别。 */
+export function notificationTypeLabel(type: string): string {
+  return notificationPreferenceLabel(type)
+}

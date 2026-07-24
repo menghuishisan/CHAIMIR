@@ -2,11 +2,10 @@
 
 import React from 'react'
 import type { Contest } from '@chaimir/api-client'
-import { Button, Table } from '@chaimir/ui'
+import { Button, Table, ResourceState } from '@chaimir/ui'
 import { Eye, Swords, Trophy, UserPlus } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../../../../../app/api'
-import { ErrorState, LoadingState } from '../../../../../components/ResourceState'
 import { useAsyncResource } from '../../../../../hooks/useAsyncResource'
 import styles from '../../contest.module.css'
 import { formatDateTime, contestStatusLabel } from '../../../../../utils/index'
@@ -16,11 +15,11 @@ const StudentContestsPage: React.FC = () => {
   const resource = useAsyncResource(() => api.contest.getStudentContests({ page: 1, size: 20 }), [])
 
   if (resource.status === 'loading') {
-    return <LoadingState title="正在读取竞赛" description="系统正在同步可报名和可参赛的竞赛。" />
+    return <ResourceState status="loading" title="正在读取竞赛" description="系统正在同步可报名和可参赛的竞赛。" />
   }
 
   if (resource.status === 'error') {
-    return <ErrorState error={resource.error} onRetry={resource.reload} />
+    return <ResourceState status="error" error={resource.error} onRetry={resource.reload} />
   }
 
   return (
