@@ -8,6 +8,12 @@ SELECT id, tenant_id, teacher_id, name, description, type, difficulty, cover_url
 FROM course
 WHERE tenant_id = $1 AND id = $2 AND deleted_at IS NULL;
 
+-- name: ListCoursesByIDs :many
+SELECT id, tenant_id, teacher_id, name, description, type, difficulty, cover_url, semester, credits::float8 AS credits, schedule, start_at, end_at, invite_code, status, visibility, created_at, updated_at, deleted_at
+FROM course
+WHERE tenant_id = $1 AND id = ANY($2::bigint[]) AND deleted_at IS NULL
+ORDER BY id;
+
 -- name: GetCloneableCourseByID :one
 SELECT id, tenant_id, teacher_id, name, description, type, difficulty, cover_url, semester, credits::float8 AS credits, schedule, start_at, end_at, invite_code, status, visibility, created_at, updated_at, deleted_at
 FROM course
@@ -394,6 +400,35 @@ FROM lesson_progress p
 JOIN lesson l ON l.tenant_id = p.tenant_id AND l.id = p.lesson_id
 JOIN chapter c ON c.tenant_id = l.tenant_id AND c.id = l.chapter_id
 WHERE p.tenant_id = $1 AND c.course_id = $2 AND p.student_id = $3 AND c.deleted_at IS NULL AND l.deleted_at IS NULL;
+
+-- name: ListStudentExperimentLessonIDs :many
+SELECT l.id
+FROM lesson l
+JOIN chapter c ON c.tenant_id = l.tenant_id AND c.id = l.chapter_id
+JOIN course_member m ON m.tenant_id = c.tenant_id AND m.course_id = c.course_id
+WHERE l.tenant_id = $1
+  AND l.content_type = 4
+  AND l.content_ref->>'experiment_id' = $2::text
+  AND m.student_id = $3
+  AND l.deleted_at IS NULL
+  AND c.deleted_at IS NULL;
+
+-- name: UpsertExperimentScoreProjection :exec
+INSERT INTO experiment_score_projection (instance_id, tenant_id, experiment_id, student_id, score, scored_at)
+VALUES ($1, $2, $3, $4, $5, $6)
+ON CONFLICT (instance_id) DO UPDATE
+SET score = EXCLUDED.score,
+    scored_at = EXCLUDED.scored_at
+WHERE experiment_score_projection.tenant_id = EXCLUDED.tenant_id
+  AND experiment_score_projection.experiment_id = EXCLUDED.experiment_id
+  AND experiment_score_projection.student_id = EXCLUDED.student_id
+  AND experiment_score_projection.scored_at <= EXCLUDED.scored_at;
+
+-- name: ListBestExperimentScores :many
+SELECT student_id, MAX(score)::float8 AS score
+FROM experiment_score_projection
+WHERE tenant_id = $1 AND experiment_id = $2
+GROUP BY student_id;
 
 -- name: CreateDiscussionPost :one
 INSERT INTO discussion_post (id, tenant_id, course_id, parent_id, author_id, content, is_pinned, like_count, created_at, deleted_at)

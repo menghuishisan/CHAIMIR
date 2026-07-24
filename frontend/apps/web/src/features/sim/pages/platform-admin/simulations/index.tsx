@@ -9,7 +9,7 @@ import { Archive, CheckCircle, RefreshCw, RotateCcw, Shield, XCircle } from 'luc
 import { api } from '../../../../../app/api'
 import { useActionFeedback, useAsyncResource } from '../../../../../hooks'
 import styles from '../../sim.module.css'
-import { formatAccountReference, simReviewResultLabel, simReviewResultOptions } from '../../../../../utils/index'
+import { simReviewResultLabel, simReviewResultOptions } from '../../../../../utils/index'
 
 const PlatformSimulationsPage: React.FC = () => {
   const confirm = useConfirm()
@@ -29,8 +29,8 @@ const PlatformSimulationsPage: React.FC = () => {
   }, [confirm, runAction])
 
   const columns = useMemo<TableColumn<SimPackageReview>[]>(() => [
-    { key: 'package', title: '仿真包', render: (row) => row.package?.name || '仿真包信息未提供', priority: 'primary' },
-    { key: 'submitter', title: '提交人', render: (row) => formatAccountReference(row.submitter_id) },
+    { key: 'package', title: '仿真包', render: (row) => row.package.name, priority: 'primary' },
+    { key: 'submitter', title: '提交人', dataIndex: 'submitter_name' },
     { key: 'result', title: '审核结果', render: (row) => <span className={styles.status}>{simReviewResultLabel(row.result)}</span> },
     { key: 'scan', title: '静态扫描', render: (row) => row.preview_report.static_scan?.status || '未返回' },
     { key: 'preview', title: 'Worker 预览', render: (row) => row.preview_report.worker_preview?.status || '未返回' },

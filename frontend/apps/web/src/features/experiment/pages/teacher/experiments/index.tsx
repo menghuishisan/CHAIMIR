@@ -13,7 +13,13 @@ import { experimentStatusLabel } from '../../../../../utils/index'
 
 const TeacherExperimentsPage: React.FC = () => {
   const navigate = useNavigate()
-  const resource = useAsyncResource(() => api.experiment.getExperiments({ page: 1, size: 20 }), [])
+  const resource = useAsyncResource(async () => {
+    const [items, courses] = await Promise.all([
+      api.experiment.getExperiments({ page: 1, size: 20 }),
+      api.teaching.getCourses({ role: 'teacher', page: 1, size: 100 }),
+    ])
+    return { items, courseNames: new Map(courses.list.map((course) => [course.id, course.name])) }
+  }, [])
   const { error, message, pendingAction, runAction } = useActionFeedback(resource.reload, '操作没有完成，请稍后重试。')
 
   if (resource.status === 'loading') {
@@ -24,7 +30,7 @@ const TeacherExperimentsPage: React.FC = () => {
     return <ResourceState status="error" error={resource.error} onRetry={resource.reload} />
   }
 
-  const rows = resource.data?.list ?? []
+  const rows = resource.data?.items.list ?? []
 
   return (
     <div className={styles.page}>
@@ -50,7 +56,7 @@ const TeacherExperimentsPage: React.FC = () => {
         emptyDescription="新建实验编排后会显示在这里。"
         columns={[
           { key: 'name', title: '实验名称', dataIndex: 'name', priority: 'primary' },
-          { key: 'course', title: '所属课程', render: (row) => row.course_id ? '已关联课程' : '未关联课程', priority: 'secondary' },
+          { key: 'course', title: '所属课程', render: (row) => row.course_id ? resource.data?.courseNames.get(row.course_id) || '课程不可用' : '独立实验', priority: 'secondary' },
           { key: 'envs', title: '环境', render: (row) => `${row.components.envs.length} 个` },
           { key: 'checkpoints', title: '检查点', render: (row) => `${row.components.checkpoints.length} 个` },
           { key: 'status', title: '状态', render: (row) => experimentStatusLabel(row.status) },

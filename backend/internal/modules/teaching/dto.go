@@ -63,14 +63,15 @@ type LessonRequest struct {
 }
 
 type LessonDTO struct {
-	ID          ids.ID         `json:"id"`
-	ChapterID   ids.ID         `json:"chapter_id"`
-	Title       string         `json:"title"`
-	ContentType int16          `json:"content_type"`
-	ContentRef  map[string]any `json:"content_ref"`
-	Sort        int32          `json:"sort"`
-	CreatedAt   string         `json:"created_at"`
-	UpdatedAt   string         `json:"updated_at"`
+	ID                    ids.ID         `json:"id"`
+	ChapterID             ids.ID         `json:"chapter_id"`
+	Title                 string         `json:"title"`
+	ContentType           int16          `json:"content_type"`
+	ContentRef            map[string]any `json:"content_ref"`
+	ExperimentLaunchGrant string         `json:"experiment_launch_grant,omitempty"`
+	Sort                  int32          `json:"sort"`
+	CreatedAt             string         `json:"created_at"`
+	UpdatedAt             string         `json:"updated_at"`
 }
 
 type OutlineDTO struct {
@@ -89,11 +90,13 @@ type BatchMembersRequest struct {
 }
 
 type MemberDTO struct {
-	ID        ids.ID `json:"id"`
-	CourseID  ids.ID `json:"course_id"`
-	StudentID ids.ID `json:"student_id"`
-	JoinMode  int16  `json:"join_mode"`
-	JoinedAt  string `json:"joined_at"`
+	ID          ids.ID `json:"id"`
+	CourseID    ids.ID `json:"course_id"`
+	StudentID   ids.ID `json:"student_id"`
+	StudentName string `json:"student_name"`
+	StudentNo   string `json:"student_no"`
+	JoinMode    int16  `json:"join_mode"`
+	JoinedAt    string `json:"joined_at"`
 }
 
 type AssignmentRequest struct {
@@ -102,7 +105,7 @@ type AssignmentRequest struct {
 	DueAt       string                `json:"due_at"`
 	MaxAttempts int32                 `json:"max_attempts"`
 	LatePolicy  int16                 `json:"late_policy"`
-	LatePenalty map[string]any        `json:"late_penalty"`
+	LatePenalty *LatePenaltyConfig    `json:"late_penalty"`
 	Items       []AssignmentItemInput `json:"items"`
 }
 
@@ -116,17 +119,17 @@ type AssignmentItemInput struct {
 }
 
 type AssignmentDTO struct {
-	ID          ids.ID         `json:"id"`
-	CourseID    ids.ID         `json:"course_id"`
-	Title       string         `json:"title"`
-	ChapterID   ids.ID         `json:"chapter_id,omitempty"`
-	DueAt       string         `json:"due_at"`
-	MaxAttempts int32          `json:"max_attempts"`
-	LatePolicy  int16          `json:"late_policy"`
-	LatePenalty map[string]any `json:"late_penalty"`
-	Status      int16          `json:"status"`
-	CreatedAt   string         `json:"created_at"`
-	UpdatedAt   string         `json:"updated_at"`
+	ID          ids.ID             `json:"id"`
+	CourseID    ids.ID             `json:"course_id"`
+	Title       string             `json:"title"`
+	ChapterID   ids.ID             `json:"chapter_id,omitempty"`
+	DueAt       string             `json:"due_at"`
+	MaxAttempts int32              `json:"max_attempts"`
+	LatePolicy  int16              `json:"late_policy"`
+	LatePenalty *LatePenaltyConfig `json:"late_penalty"`
+	Status      int16              `json:"status"`
+	CreatedAt   string             `json:"created_at"`
+	UpdatedAt   string             `json:"updated_at"`
 }
 
 type AssignmentItemDTO struct {
@@ -173,6 +176,8 @@ type SubmissionDTO struct {
 	ID           ids.ID         `json:"id"`
 	AssignmentID ids.ID         `json:"assignment_id"`
 	StudentID    ids.ID         `json:"student_id"`
+	StudentName  string         `json:"student_name"`
+	StudentNo    string         `json:"student_no"`
 	AttemptNo    int32          `json:"attempt_no"`
 	Content      map[string]any `json:"content"`
 	JudgeTaskRef string         `json:"judge_task_ref,omitempty"`
@@ -277,6 +282,8 @@ type OverrideGradeRequest struct {
 type GradeDTO struct {
 	CourseID      ids.ID  `json:"course_id"`
 	StudentID     ids.ID  `json:"student_id"`
+	StudentName   string  `json:"student_name"`
+	StudentNo     string  `json:"student_no"`
 	AutoTotal     float64 `json:"auto_total"`
 	OverrideTotal float64 `json:"override_total,omitempty"`
 	FinalTotal    float64 `json:"final_total"`

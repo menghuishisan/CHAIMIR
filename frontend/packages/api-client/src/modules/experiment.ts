@@ -19,6 +19,7 @@ import type {
   ExperimentGroupMemberRequest,
   ExperimentGroupRequest,
   GradeReportRequest,
+  ReportDownloadGrant,
 } from '../types/experiment'
 
 /**
@@ -42,9 +43,18 @@ export class ExperimentApi {
     return this.client.get('/experiment/experiments', params)
   }
 
-  /** getPublishedExperiments 查询学生可进入的已发布实验。 */
-  async getPublishedExperiments(params?: { course_id?: string; page?: number; size?: number }): Promise<PaginatedResponse<StudentExperiment>> {
+  /** getPublishedExperiments 查询学生可直接进入的独立已发布实验。 */
+  async getPublishedExperiments(params?: { page?: number; size?: number }): Promise<PaginatedResponse<StudentExperiment>> {
     return this.client.get('/experiment/student/experiments', params)
+  }
+
+  /** getPublishedExperiment 读取单条学生实验；课程入口须传 M6 签发的启动授权。 */
+  async getPublishedExperiment(experimentId: string, launchGrant?: string): Promise<StudentExperiment> {
+    return this.client.get(
+      `/experiment/student/experiments/${experimentId}`,
+      undefined,
+      launchGrant ? { 'X-Experiment-Launch-Grant': launchGrant } : undefined,
+    )
   }
 
   /**
@@ -96,6 +106,20 @@ export class ExperimentApi {
     return this.client.post(`/experiment/reports/${reportId}/grade`, data)
   }
 
+  /** issueReportDownloadGrant 在教师业务鉴权后签发一次性报告下载授权。 */
+  async issueReportDownloadGrant(reportId: string): Promise<ReportDownloadGrant> {
+    return this.client.post(`/experiment/reports/${reportId}/download-grant`)
+  }
+
+  /** downloadReport 签发并立即消费报告授权，避免页面接触对象存储引用。 */
+  async downloadReport(reportId: string): Promise<{ blob: Blob; fileName: string }> {
+    const grant = await this.issueReportDownloadGrant(reportId)
+    return {
+      blob: await this.client.getBlob('/storage/download', { token: grant.token }),
+      fileName: grant.file_name,
+    }
+  }
+
   /**
    * 创建实验协作小组。
    */
@@ -138,8 +162,10 @@ export class ExperimentApi {
   /**
    * 提交实验报告
    */
-  async submitReport(instanceId: string, data: { content_ref: string }): Promise<ReportDTO> {
-    return this.client.post(`/experiment/instances/${instanceId}/report`, data)
+  async submitReport(instanceId: string, file: File, onProgress?: (progress: number) => void): Promise<ReportDTO> {
+    const formData = new FormData()
+    formData.append('file', file)
+    return this.client.postFormData(`/experiment/instances/${instanceId}/report`, formData, onProgress)
   }
 
   /**

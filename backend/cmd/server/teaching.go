@@ -68,11 +68,13 @@ func RegisterTeachingModule(ctx context.Context, deps TeachingModuleDeps) (*teac
 		IDs:         deps.IDs,
 		Audit:       deps.Audit,
 		Content:     deps.Content,
+		Identity:    deps.Roles,
 		Judge:       deps.Judge,
 		Bus:         deps.EventBus,
 		Transfers:   deps.Transfer,
 		Storage:     deps.Storage,
 		FileService: fileService,
+		Auth:        deps.Auth,
 		Config:      deps.Config,
 	})
 	if err != nil {

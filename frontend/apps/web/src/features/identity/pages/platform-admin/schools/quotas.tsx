@@ -1,11 +1,12 @@
 // QuotasPage 为指定租户提交沙箱配额，复用 sandbox 后端配额接口。
 
-import React, { useCallback, useState } from 'react'
+import React, { useCallback, useEffect, useState } from 'react'
 import type { SandboxQuota, SandboxQuotaRequest } from '@chaimir/api-client'
-import { Button, Callout, FormField, Input } from '@chaimir/ui'
+import { Button, Callout, FormField, Input, ResourceState } from '@chaimir/ui'
 import { PieChart, Save } from 'lucide-react'
 import { useParams } from 'react-router-dom'
 import { api } from '../../../../../app/api'
+import { useAsyncResource } from '../../../../../hooks'
 import styles from '../../../../admin/pages/list.module.css'
 import { sandboxQuotaFieldLabels } from '../../../../../utils/index'
 import { userFacingErrorMessage } from '../../../../../utils/userFacingError'
@@ -20,6 +21,19 @@ const initialForm: QuotaForm = {
   max_lifetime_min: '',
   max_keepalive_min: '',
   max_snapshot_retention_min: '',
+}
+
+/** quotaToForm 把后端权威配额转换为可编辑表单。 */
+function quotaToForm(quota: SandboxQuota): QuotaForm {
+  return {
+    max_concurrent_sandbox: String(quota.max_concurrent_sandbox),
+    max_cpu: String(quota.max_cpu),
+    max_memory_mb: String(quota.max_memory_mb),
+    idle_timeout_min: String(quota.idle_timeout_min),
+    max_lifetime_min: String(quota.max_lifetime_min),
+    max_keepalive_min: String(quota.max_keepalive_min),
+    max_snapshot_retention_min: String(quota.max_snapshot_retention_min),
+  }
 }
 
 /**
@@ -47,6 +61,14 @@ const QuotasPage: React.FC = () => {
   const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const resource = useAsyncResource(async () => {
+    if (!id) throw new Error('缺少租户编号，请从租户列表进入配额页。')
+    return api.sandbox.getQuota(id)
+  }, [id])
+
+  useEffect(() => {
+    if (resource.data) setForm(quotaToForm(resource.data))
+  }, [resource.data])
 
   const handleSubmit = useCallback(async () => {
     if (!id) {
@@ -57,14 +79,23 @@ const QuotasPage: React.FC = () => {
     setError(null)
     setMessage(null)
     try {
-      await api.sandbox.updateQuota(toQuotaRequest(id, form))
-      setMessage('资源配额已提交')
+      const saved = await api.sandbox.updateQuota(toQuotaRequest(id, form))
+      setForm(quotaToForm(saved))
+      setMessage('资源配额已更新')
     } catch (submitError) {
       setError(userFacingErrorMessage(submitError, '资源配额提交失败，请稍后重试。'))
     } finally {
       setSaving(false)
     }
   }, [form, id])
+
+  if (resource.status === 'loading') {
+    return <ResourceState status="loading" title="正在读取资源配额" description="系统正在同步这所学校的当前资源上限。" />
+  }
+
+  if (resource.status === 'error') {
+    return <ResourceState status="error" error={resource.error} onRetry={resource.reload} />
+  }
 
   return (
     <div className={styles.page}>

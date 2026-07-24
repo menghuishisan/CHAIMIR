@@ -34,7 +34,7 @@ type BattleMatch struct {
 	JudgeTaskRef pgtype.Text        `json:"judge_task_ref"`
 	Result       pgtype.Int2        `json:"result"`
 	ScoreDelta   []byte             `json:"score_delta"`
-	ReplayRef    pgtype.Text        `json:"replay_ref"`
+	ReplayData   []byte             `json:"replay_data"`
 	Status       int16              `json:"status"`
 	MatchedAt    pgtype.Timestamptz `json:"matched_at"`
 	FinishedAt   pgtype.Timestamptz `json:"finished_at"`
@@ -65,7 +65,6 @@ type Contest struct {
 	StartAt       pgtype.Timestamptz `json:"start_at"`
 	EndAt         pgtype.Timestamptz `json:"end_at"`
 	FreezeMinutes int32              `json:"freeze_minutes"`
-	Rules         []byte             `json:"rules"`
 	Status        int16              `json:"status"`
 	CreatedAt     pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`

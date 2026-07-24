@@ -33,8 +33,8 @@ func (s *Service) ListExperiments(ctx context.Context, courseID int64, status in
 	return out, total, page, size, nil
 }
 
-// ListPublishedExperiments 查询学生可发现的已发布实验，并返回最小安全投影。
-func (s *Service) ListPublishedExperiments(ctx context.Context, courseID int64, page, size int) ([]StudentExperimentDTO, int64, int, int, error) {
+// ListPublishedExperiments 查询学生可直接发现的独立已发布实验，并签发启动授权。
+func (s *Service) ListPublishedExperiments(ctx context.Context, page, size int) ([]StudentExperimentDTO, int64, int, int, error) {
 	id, err := currentIdentity(ctx)
 	if err != nil {
 		return nil, 0, 0, 0, err
@@ -44,16 +44,53 @@ func (s *Service) ListPublishedExperiments(ctx context.Context, courseID int64, 
 	var total int64
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
 		var err error
-		items, total, err = tx.ListExperiments(ctx, id.TenantID, courseID, ExperimentStatusPublished, page, size)
+		items, total, err = tx.ListIndependentPublishedExperiments(ctx, id.TenantID, page, size)
 		return err
 	}); err != nil {
 		return nil, 0, 0, 0, err
 	}
 	out := make([]StudentExperimentDTO, 0, len(items))
 	for _, item := range items {
-		out = append(out, studentExperimentDTOFromModel(item))
+		dto := studentExperimentDTOFromModel(item)
+		dto.LaunchGrant, err = s.auth.IssueExperimentLaunchGrant(id.TenantID, id.AccountID, item.ID, 0)
+		if err != nil {
+			return nil, 0, 0, 0, apperr.ErrExperimentInstanceAccessDenied.WithCause(err)
+		}
+		out = append(out, dto)
 	}
 	return out, total, page, size, nil
+}
+
+// GetPublishedExperiment 返回学生可见的单条已发布实验；课程实验必须携带 M6 签发的启动授权。
+func (s *Service) GetPublishedExperiment(ctx context.Context, experimentID int64, launchGrant string) (StudentExperimentDTO, error) {
+	id, err := currentIdentity(ctx)
+	if err != nil {
+		return StudentExperimentDTO{}, err
+	}
+	var item Experiment
+	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
+		var err error
+		item, err = tx.GetExperiment(ctx, id.TenantID, experimentID)
+		return err
+	}); err != nil {
+		return StudentExperimentDTO{}, err
+	}
+	if item.Status != ExperimentStatusPublished {
+		return StudentExperimentDTO{}, apperr.ErrExperimentNotFound
+	}
+	dto := studentExperimentDTOFromModel(item)
+	if item.CourseID > 0 {
+		if err := s.auth.VerifyExperimentLaunchGrant(launchGrant, id.TenantID, id.AccountID, experimentID); err != nil {
+			return StudentExperimentDTO{}, apperr.ErrExperimentInstanceAccessDenied.WithCause(err)
+		}
+		dto.LaunchGrant = launchGrant
+		return dto, nil
+	}
+	dto.LaunchGrant, err = s.auth.IssueExperimentLaunchGrant(id.TenantID, id.AccountID, experimentID, 0)
+	if err != nil {
+		return StudentExperimentDTO{}, apperr.ErrExperimentInstanceAccessDenied.WithCause(err)
+	}
+	return dto, nil
 }
 
 // CreateExperiment 创建服务端持久化的实验编排向导草稿。

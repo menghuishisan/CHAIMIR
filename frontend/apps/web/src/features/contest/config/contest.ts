@@ -15,5 +15,4 @@ export const defaultContestRequest: ContestRequest = {
   start_at: '',
   end_at: '',
   freeze_minutes: 30,
-  rules: {},
 }

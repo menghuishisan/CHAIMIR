@@ -2,8 +2,13 @@
 package experiment
 
 import (
+	"path"
+	"strings"
+
 	"chaimir/internal/contracts"
 	"chaimir/internal/platform/ids"
+	"chaimir/internal/platform/storage"
+	"chaimir/pkg/apperr"
 )
 
 // experimentDTOFromModel 转换实验定义为 HTTP 输出。
@@ -67,9 +72,17 @@ func groupDTOWithSharedInstance(group ExperimentGroup, inst *ExperimentInstance)
 	return out
 }
 
-// reportDTOFromModel 转换报告为 HTTP 输出。
-func reportDTOFromModel(item ExperimentReport) ReportDTO {
-	return ReportDTO{ID: ids.ID(item.ID), InstanceID: ids.ID(item.InstanceID), StudentID: ids.ID(item.StudentID), ContentRef: item.ContentRef, ManualScore: item.ManualScore, Comment: item.Comment, Status: item.Status, SubmittedAt: item.SubmittedAt}
+// reportDTOFromModel 转换报告为不暴露对象存储引用的 HTTP 输出。
+func reportDTOFromModel(item ExperimentReport) (ReportDTO, error) {
+	ref, err := storage.ParseObjectRef(strings.TrimSpace(item.ContentRef))
+	if err != nil {
+		return ReportDTO{}, apperr.ErrExperimentReportInvalid.WithCause(err)
+	}
+	fileName := path.Base(ref.Key)
+	if fileName == "." || fileName == "/" || fileName == "" {
+		return ReportDTO{}, apperr.ErrExperimentReportInvalid
+	}
+	return ReportDTO{ID: ids.ID(item.ID), InstanceID: ids.ID(item.InstanceID), StudentID: ids.ID(item.StudentID), FileName: fileName, ManualScore: item.ManualScore, Comment: item.Comment, Status: item.Status, SubmittedAt: item.SubmittedAt}, nil
 }
 
 // sandboxRefFromContract 提取 M2 沙箱摘要中工作台需要的稳定字段。

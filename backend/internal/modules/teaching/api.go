@@ -47,6 +47,7 @@ func (a teachingAPI) registerSharedRoutes(g gin.IRouter) {
 	g.GET("/chapters/:id/lessons", a.listLessons)
 	g.GET("/courses/:id/outline", a.getOutline)
 	g.GET("/lessons/:id", a.getLesson)
+	g.GET("/courses/:id/assignments", a.listAssignments)
 	g.GET("/assignments/:id", a.getAssignment)
 	g.GET("/submissions/:id", a.getSubmission)
 	g.GET("/courses/:id/posts", a.listPosts)
@@ -387,6 +388,16 @@ func (a teachingAPI) createAssignment(c *gin.Context) {
 		return
 	}
 	out, err := a.svc.CreateAssignment(c.Request.Context(), courseID, req)
+	httpx.Write(c, out, err)
+}
+
+// listAssignments 读取当前账号可见的课程作业目录。
+func (a teachingAPI) listAssignments(c *gin.Context) {
+	courseID, ok := httpx.PathID(c, "id")
+	if !ok {
+		return
+	}
+	out, err := a.svc.ListCourseAssignments(c.Request.Context(), courseID)
 	httpx.Write(c, out, err)
 }
 

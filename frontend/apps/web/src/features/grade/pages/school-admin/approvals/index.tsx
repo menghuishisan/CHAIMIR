@@ -48,7 +48,8 @@ const ApprovalsPage: React.FC = () => {
   }
 
   const columns = useMemo<TableColumn<GradeReview>[]>(() => [
-    { key: 'review', title: '成绩报送', render: () => '课程成绩', priority: 'primary' },
+    { key: 'review', title: '课程', dataIndex: 'course_name', priority: 'primary' },
+    { key: 'submitter', title: '提交教师', dataIndex: 'submitter_name' },
     { key: 'semester', title: '学期', render: (row) => row.semester_id ? '已指定' : '未指定' },
     { key: 'status', title: '状态', render: (row) => <span className={styles.status}>{gradeReviewStatusLabel(row.status)}</span> },
     {

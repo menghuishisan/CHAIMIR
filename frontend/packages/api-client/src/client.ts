@@ -205,8 +205,8 @@ export class ApiClient {
   /**
    * get 发送 GET 请求并返回后端信封中的 data 字段。
    */
-  async get<T = unknown>(url: string, params?: object): Promise<T> {
-    return this.client.get<unknown, T>(url, { params })
+  async get<T = unknown>(url: string, params?: object, headers?: Record<string, string>): Promise<T> {
+    return this.client.get<unknown, T>(url, { params, headers })
   }
 
   /**

@@ -21,6 +21,11 @@ func courseFromGetRow(row sqlcgen.GetCourseByIDRow) (Course, error) {
 	return courseFromFields(row.ID, row.TenantID, row.TeacherID, row.Name, row.Description, row.Type, row.Difficulty, row.CoverUrl, row.Semester, row.Credits, row.Schedule, row.StartAt, row.EndAt, row.InviteCode, row.Status, row.Visibility, row.CreatedAt, row.UpdatedAt)
 }
 
+// courseFromBatchRow 转换批量课程读取行。
+func courseFromBatchRow(row sqlcgen.ListCoursesByIDsRow) (Course, error) {
+	return courseFromFields(row.ID, row.TenantID, row.TeacherID, row.Name, row.Description, row.Type, row.Difficulty, row.CoverUrl, row.Semester, row.Credits, row.Schedule, row.StartAt, row.EndAt, row.InviteCode, row.Status, row.Visibility, row.CreatedAt, row.UpdatedAt)
+}
+
 // courseFromCloneableRow 转换跨租户共享课程读取行。
 func courseFromCloneableRow(row sqlcgen.GetCloneableCourseByIDRow) (Course, error) {
 	return courseFromFields(row.ID, row.TenantID, row.TeacherID, row.Name, row.Description, row.Type, row.Difficulty, row.CoverUrl, row.Semester, row.Credits, row.Schedule, row.StartAt, row.EndAt, row.InviteCode, row.Status, row.Visibility, row.CreatedAt, row.UpdatedAt)
@@ -91,7 +96,8 @@ func memberFromRow(row sqlcgen.CourseMember) CourseMember {
 
 // assignmentFromRow 转换作业表行并解析迟交策略 JSON。
 func assignmentFromRow(row sqlcgen.Assignment) (Assignment, error) {
-	penalty, err := jsonx.ObjectMapStrict(row.LatePenalty)
+	var penalty *LatePenaltyConfig
+	err := jsonx.DecodeStrictKnownFields(row.LatePenalty, &penalty)
 	if err != nil {
 		return Assignment{}, err
 	}

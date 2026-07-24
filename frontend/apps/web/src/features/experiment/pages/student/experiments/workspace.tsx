@@ -2,9 +2,9 @@
 
 import React, { useCallback, useMemo, useState } from 'react'
 import type { ExperimentInstance } from '@chaimir/api-client'
-import { EXPERIMENT_STAGE_STATUS } from '@chaimir/api-client'
+import { EXPERIMENT_STAGE_STATUS, ExperimentReportStatus } from '@chaimir/api-client'
 import { Button, Callout, Input, Select, useConfirm, ResourceState } from '@chaimir/ui'
-import { CheckCircle, Pause, Play, Trash2 } from 'lucide-react'
+import { CheckCircle, FileUp, Pause, Play, Trash2 } from 'lucide-react'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { api } from '../../../../../app/api'
 import { useAsyncResource, usePendingAction, useTicketedWebSocket } from '../../../../../hooks'
@@ -23,6 +23,7 @@ const ExperimentWorkspacePage: React.FC = () => {
   const [checkpointId, setCheckpointId] = useState('')
   const [codeStorageKey, setCodeStorageKey] = useState('')
   const [codeHash, setCodeHash] = useState('')
+  const [reportFile, setReportFile] = useState<File | null>(null)
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
   const { pendingAction, runPendingAction } = usePendingAction()
@@ -35,7 +36,8 @@ const ExperimentWorkspacePage: React.FC = () => {
         instance = await api.experiment.getInstance(instanceId)
       } else {
         if (!id) throw new Error('缺少实验编号，无法创建实验实例。')
-        instance = await api.experiment.createInstance(id, {})
+        const experiment = await api.experiment.getPublishedExperiment(id)
+        instance = await api.experiment.createInstance(id, { launch_grant: experiment.launch_grant })
         setSearchParams({ instanceId: instance.instance_id }, { replace: true })
       }
       const progress = await api.experiment.getProgress(instance.instance_id)
@@ -103,6 +105,24 @@ const ExperimentWorkspacePage: React.FC = () => {
     }
   }
 
+  /** submitReport 把 Markdown 文件交给 M7 统一上传流程并刷新服务端提交状态。 */
+  const submitReport = async () => {
+    if (!instance || !reportFile) {
+      setError('请选择 Markdown 格式的实验报告。')
+      return
+    }
+    setMessage('')
+    setError('')
+    try {
+      await api.experiment.submitReport(instance.instance_id, reportFile)
+      setReportFile(null)
+      setMessage(instance.report ? '实验报告已重新提交，原评分已清空。' : '实验报告已提交。')
+      resource.reload()
+    } catch (actionError) {
+      setError(userFacingErrorMessage(actionError, '实验报告提交失败，请检查文件后重试。'))
+    }
+  }
+
   /** recycleInstance 回收环境并返回实验列表，避免停留在已销毁工作台。 */
   const recycleInstance = async () => {
     if (!instance) return
@@ -138,6 +158,21 @@ const ExperimentWorkspacePage: React.FC = () => {
           ))}
         </ul>
       </section>
+      {instance.require_report && (
+        <section className={styles.darkCard}>
+          <h2 className={styles.workspaceTitle}>实验报告</h2>
+          {instance.report && (
+            <p>
+              已提交：{instance.report.file_name}
+              {instance.report.status === ExperimentReportStatus.GRADED ? `，得分 ${instance.report.manual_score} 分${instance.report.comment ? `，评语：${instance.report.comment}` : ''}` : '，等待教师批改'}
+            </p>
+          )}
+          <input type="file" accept=".md,.markdown,text/markdown,text/plain" onChange={(event) => setReportFile(event.target.files?.[0] ?? null)} />
+          <Button size="sm" icon={<FileUp size={15} />} loading={pendingAction === 'report'} disabled={Boolean(pendingAction) || !reportFile} onClick={() => void runPendingAction('report', submitReport)}>
+            {instance.report ? '重新提交报告' : '提交报告'}
+          </Button>
+        </section>
+      )}
       <section className={styles.darkCard}>
         <h2 className={styles.workspaceTitle}>检查点判分</h2>
         <Input value={checkpointId} onChange={(event) => setCheckpointId(event.target.value)} placeholder="检查点编号" fullWidth />

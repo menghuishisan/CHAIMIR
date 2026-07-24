@@ -248,6 +248,13 @@ export class TeachingApi {
   // ===== 作业 =====
 
   /**
+   * 获取当前账号可见的课程作业目录。
+   */
+  async listAssignments(courseId: string): Promise<Assignment[]> {
+    return this.client.get(`/teaching/courses/${courseId}/assignments`)
+  }
+
+  /**
    * 获取作业详情（含题目列表）
    */
   async getAssignment(assignmentId: string): Promise<AssignmentDetail> {

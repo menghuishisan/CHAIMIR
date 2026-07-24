@@ -838,9 +838,9 @@ func (q *Queries) CreateSMSCode(ctx context.Context, arg CreateSMSCodeParams) (S
 }
 
 const createTenant = `-- name: CreateTenant :one
-INSERT INTO tenant (id, code, name, type, status, deploy_mode, expire_at, logo_url, display_name, feature_flags, auth_mode, enable_activation_code, created_at, updated_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, now(), now())
-RETURNING id, code, name, type, status, deploy_mode, expire_at, logo_url, display_name, feature_flags, auth_mode, enable_activation_code, created_at, updated_at
+INSERT INTO tenant (id, code, name, type, status, deploy_mode, expire_at, logo_url, display_name, auth_mode, enable_activation_code, created_at, updated_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, now(), now())
+RETURNING id, code, name, type, status, deploy_mode, expire_at, logo_url, display_name, auth_mode, enable_activation_code, created_at, updated_at
 `
 
 type CreateTenantParams struct {
@@ -853,7 +853,6 @@ type CreateTenantParams struct {
 	ExpireAt             pgtype.Timestamptz `json:"expire_at"`
 	LogoUrl              pgtype.Text        `json:"logo_url"`
 	DisplayName          pgtype.Text        `json:"display_name"`
-	FeatureFlags         []byte             `json:"feature_flags"`
 	AuthMode             int16              `json:"auth_mode"`
 	EnableActivationCode bool               `json:"enable_activation_code"`
 }
@@ -869,7 +868,6 @@ func (q *Queries) CreateTenant(ctx context.Context, arg CreateTenantParams) (Ten
 		arg.ExpireAt,
 		arg.LogoUrl,
 		arg.DisplayName,
-		arg.FeatureFlags,
 		arg.AuthMode,
 		arg.EnableActivationCode,
 	)
@@ -884,7 +882,6 @@ func (q *Queries) CreateTenant(ctx context.Context, arg CreateTenantParams) (Ten
 		&i.ExpireAt,
 		&i.LogoUrl,
 		&i.DisplayName,
-		&i.FeatureFlags,
 		&i.AuthMode,
 		&i.EnableActivationCode,
 		&i.CreatedAt,
@@ -1477,7 +1474,7 @@ func (q *Queries) GetTenantApplication(ctx context.Context, id int64) (TenantApp
 }
 
 const getTenantByCode = `-- name: GetTenantByCode :one
-SELECT id, code, name, type, status, deploy_mode, expire_at, logo_url, display_name, feature_flags, auth_mode, enable_activation_code, created_at, updated_at
+SELECT id, code, name, type, status, deploy_mode, expire_at, logo_url, display_name, auth_mode, enable_activation_code, created_at, updated_at
 FROM tenant
 WHERE code = $1
 `
@@ -1495,7 +1492,6 @@ func (q *Queries) GetTenantByCode(ctx context.Context, code string) (Tenant, err
 		&i.ExpireAt,
 		&i.LogoUrl,
 		&i.DisplayName,
-		&i.FeatureFlags,
 		&i.AuthMode,
 		&i.EnableActivationCode,
 		&i.CreatedAt,
@@ -1505,7 +1501,7 @@ func (q *Queries) GetTenantByCode(ctx context.Context, code string) (Tenant, err
 }
 
 const getTenantByID = `-- name: GetTenantByID :one
-SELECT id, code, name, type, status, deploy_mode, expire_at, logo_url, display_name, feature_flags, auth_mode, enable_activation_code, created_at, updated_at
+SELECT id, code, name, type, status, deploy_mode, expire_at, logo_url, display_name, auth_mode, enable_activation_code, created_at, updated_at
 FROM tenant
 WHERE id = $1
 `
@@ -1523,7 +1519,6 @@ func (q *Queries) GetTenantByID(ctx context.Context, id int64) (Tenant, error) {
 		&i.ExpireAt,
 		&i.LogoUrl,
 		&i.DisplayName,
-		&i.FeatureFlags,
 		&i.AuthMode,
 		&i.EnableActivationCode,
 		&i.CreatedAt,
@@ -2011,7 +2006,7 @@ func (q *Queries) ListTenantApplications(ctx context.Context, dollar_1 int16) ([
 }
 
 const listTenants = `-- name: ListTenants :many
-SELECT id, code, name, type, status, deploy_mode, expire_at, logo_url, display_name, feature_flags, auth_mode, enable_activation_code, created_at, updated_at
+SELECT id, code, name, type, status, deploy_mode, expire_at, logo_url, display_name, auth_mode, enable_activation_code, created_at, updated_at
 FROM tenant
 ORDER BY created_at DESC, id DESC
 `
@@ -2035,7 +2030,6 @@ func (q *Queries) ListTenants(ctx context.Context) ([]Tenant, error) {
 			&i.ExpireAt,
 			&i.LogoUrl,
 			&i.DisplayName,
-			&i.FeatureFlags,
 			&i.AuthMode,
 			&i.EnableActivationCode,
 			&i.CreatedAt,
@@ -2052,7 +2046,7 @@ func (q *Queries) ListTenants(ctx context.Context) ([]Tenant, error) {
 }
 
 const listTenantsPaged = `-- name: ListTenantsPaged :many
-SELECT id, code, name, type, status, deploy_mode, expire_at, logo_url, display_name, feature_flags, auth_mode, enable_activation_code, created_at, updated_at,
+SELECT id, code, name, type, status, deploy_mode, expire_at, logo_url, display_name, auth_mode, enable_activation_code, created_at, updated_at,
        COUNT(*) OVER() AS total_count
 FROM tenant
 ORDER BY created_at DESC, id DESC
@@ -2074,7 +2068,6 @@ type ListTenantsPagedRow struct {
 	ExpireAt             pgtype.Timestamptz `json:"expire_at"`
 	LogoUrl              pgtype.Text        `json:"logo_url"`
 	DisplayName          pgtype.Text        `json:"display_name"`
-	FeatureFlags         []byte             `json:"feature_flags"`
 	AuthMode             int16              `json:"auth_mode"`
 	EnableActivationCode bool               `json:"enable_activation_code"`
 	CreatedAt            pgtype.Timestamptz `json:"created_at"`
@@ -2101,7 +2094,6 @@ func (q *Queries) ListTenantsPaged(ctx context.Context, arg ListTenantsPagedPara
 			&i.ExpireAt,
 			&i.LogoUrl,
 			&i.DisplayName,
-			&i.FeatureFlags,
 			&i.AuthMode,
 			&i.EnableActivationCode,
 			&i.CreatedAt,
@@ -2933,16 +2925,15 @@ func (q *Queries) UpdatePlatformAdminPassword(ctx context.Context, arg UpdatePla
 
 const updateTenantConfig = `-- name: UpdateTenantConfig :one
 UPDATE tenant
-SET logo_url = $2, display_name = $3, feature_flags = $4, auth_mode = $5, enable_activation_code = $6, updated_at = now()
+SET logo_url = $2, display_name = $3, auth_mode = $4, enable_activation_code = $5, updated_at = now()
 WHERE id = $1
-RETURNING id, code, name, type, status, deploy_mode, expire_at, logo_url, display_name, feature_flags, auth_mode, enable_activation_code, created_at, updated_at
+RETURNING id, code, name, type, status, deploy_mode, expire_at, logo_url, display_name, auth_mode, enable_activation_code, created_at, updated_at
 `
 
 type UpdateTenantConfigParams struct {
 	ID                   int64       `json:"id"`
 	LogoUrl              pgtype.Text `json:"logo_url"`
 	DisplayName          pgtype.Text `json:"display_name"`
-	FeatureFlags         []byte      `json:"feature_flags"`
 	AuthMode             int16       `json:"auth_mode"`
 	EnableActivationCode bool        `json:"enable_activation_code"`
 }
@@ -2952,7 +2943,6 @@ func (q *Queries) UpdateTenantConfig(ctx context.Context, arg UpdateTenantConfig
 		arg.ID,
 		arg.LogoUrl,
 		arg.DisplayName,
-		arg.FeatureFlags,
 		arg.AuthMode,
 		arg.EnableActivationCode,
 	)
@@ -2967,7 +2957,6 @@ func (q *Queries) UpdateTenantConfig(ctx context.Context, arg UpdateTenantConfig
 		&i.ExpireAt,
 		&i.LogoUrl,
 		&i.DisplayName,
-		&i.FeatureFlags,
 		&i.AuthMode,
 		&i.EnableActivationCode,
 		&i.CreatedAt,
@@ -2980,7 +2969,7 @@ const updateTenantStatus = `-- name: UpdateTenantStatus :one
 UPDATE tenant
 SET status = $2, expire_at = $3, updated_at = now()
 WHERE id = $1
-RETURNING id, code, name, type, status, deploy_mode, expire_at, logo_url, display_name, feature_flags, auth_mode, enable_activation_code, created_at, updated_at
+RETURNING id, code, name, type, status, deploy_mode, expire_at, logo_url, display_name, auth_mode, enable_activation_code, created_at, updated_at
 `
 
 type UpdateTenantStatusParams struct {
@@ -3002,7 +2991,6 @@ func (q *Queries) UpdateTenantStatus(ctx context.Context, arg UpdateTenantStatus
 		&i.ExpireAt,
 		&i.LogoUrl,
 		&i.DisplayName,
-		&i.FeatureFlags,
 		&i.AuthMode,
 		&i.EnableActivationCode,
 		&i.CreatedAt,

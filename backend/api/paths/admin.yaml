@@ -16,14 +16,6 @@
     security: [{ bearerAuth: [] }]
     parameters: [{ $ref: "#/components/parameters/FromQuery" }, { $ref: "#/components/parameters/ToQuery" }]
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
-/api/v1/admin/platform/tenants:
-  get:
-    tags: [admin]
-    summary: 平台租户聚合列表
-    operationId: adminListTenants
-    x-chaimir-audience: platform-admin
-    security: [{ bearerAuth: [] }]
-    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
 /api/v1/admin/platform/applications:
   get:
     tags: [admin]
@@ -105,7 +97,7 @@
     x-chaimir-audience: platform-or-school-admin
     security: [{ bearerAuth: [] }]
     parameters: [{ $ref: "#/components/parameters/KeyPath" }]
-    requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
+    requestBody: { $ref: "#/components/requestBodies/AdminMaintenanceConfigUpdate" }
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
 /api/v1/admin/configs/{key}/history:
   get:
@@ -124,7 +116,7 @@
     x-chaimir-audience: platform-or-school-admin
     security: [{ bearerAuth: [] }]
     parameters: [{ $ref: "#/components/parameters/KeyPath" }]
-    requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
+    requestBody: { $ref: "#/components/requestBodies/AdminMaintenanceConfigRollback" }
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
 /api/v1/admin/alert-rules:
   get:
@@ -140,7 +132,7 @@
     operationId: adminCreateAlertRule
     x-chaimir-audience: platform-or-school-admin
     security: [{ bearerAuth: [] }]
-    requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
+    requestBody: { $ref: "#/components/requestBodies/AdminAlertRule" }
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
 /api/v1/admin/alert-rules/{id}:
   patch:
@@ -150,7 +142,7 @@
     x-chaimir-audience: platform-or-school-admin
     security: [{ bearerAuth: [] }]
     parameters: [{ $ref: "#/components/parameters/IDPath" }]
-    requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
+    requestBody: { $ref: "#/components/requestBodies/AdminAlertRule" }
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
 /api/v1/admin/alert-events:
   get:

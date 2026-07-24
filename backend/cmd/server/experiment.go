@@ -15,6 +15,7 @@ import (
 	"chaimir/internal/platform/db"
 	"chaimir/internal/platform/eventbus"
 	"chaimir/internal/platform/storage"
+	"chaimir/internal/platform/upload"
 	"chaimir/pkg/snowflake"
 
 	"github.com/gin-gonic/gin"
@@ -26,6 +27,9 @@ type ExperimentModuleDeps struct {
 	Database *db.DB
 	IDs      snowflake.Generator
 	Config   config.ExperimentConfig
+	Upload   config.UploadConfig
+	MinIO    config.MinIOConfig
+	AuthCfg  config.AuthConfig
 	Content  contracts.ContentReadService
 	Sandbox  contracts.SandboxService
 	Judge    contracts.JudgeService
@@ -48,19 +52,27 @@ func RegisterExperimentModule(ctx context.Context, deps ExperimentModuleDeps) (*
 	if deps.Database == nil {
 		return nil, fmt.Errorf("experiment module 缺少 database")
 	}
+	fileService, err := storage.NewServiceFromConfig(deps.AuthCfg, deps.MinIO, deps.Upload)
+	if err != nil {
+		return nil, err
+	}
 	store := experiment.NewStore(deps.Database)
 	svc, err := experiment.NewService(experiment.ServiceDeps{
-		Store:   store,
-		IDs:     deps.IDs,
-		Config:  deps.Config,
-		Audit:   deps.Audit,
-		Roles:   deps.Roles,
-		Content: deps.Content,
-		Sandbox: deps.Sandbox,
-		Judge:   deps.Judge,
-		Sim:     deps.Sim,
-		Bus:     deps.EventBus,
-		Storage: deps.Storage,
+		Store:            store,
+		IDs:              deps.IDs,
+		Config:           deps.Config,
+		Audit:            deps.Audit,
+		Roles:            deps.Roles,
+		Content:          deps.Content,
+		Sandbox:          deps.Sandbox,
+		Judge:            deps.Judge,
+		Sim:              deps.Sim,
+		Bus:              deps.EventBus,
+		Storage:          deps.Storage,
+		FileService:      fileService,
+		Auth:             deps.Auth,
+		ReportMaxBytes:   deps.Upload.ExperimentReportMaxBytes,
+		ReportScanPolicy: upload.ScanPolicy{Required: deps.Upload.VirusScanRequired},
 	})
 	if err != nil {
 		return nil, err

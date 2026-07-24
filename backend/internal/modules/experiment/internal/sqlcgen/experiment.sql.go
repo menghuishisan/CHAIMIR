@@ -22,7 +22,7 @@ WHERE id IN (
     LIMIT $2
     FOR UPDATE SKIP LOCKED
 )
-RETURNING id, tenant_id, experiment_id, instance_id, student_id, score, trace_id, scored_at, status, retry_count, last_error, created_at, updated_at
+RETURNING id, tenant_id, experiment_id, instance_id, student_id, score, completed, trace_id, scored_at, status, retry_count, last_error, created_at, updated_at
 `
 
 type ClaimPendingExperimentScoreOutboxParams struct {
@@ -46,6 +46,7 @@ func (q *Queries) ClaimPendingExperimentScoreOutbox(ctx context.Context, arg Cla
 			&i.InstanceID,
 			&i.StudentID,
 			&i.Score,
+			&i.Completed,
 			&i.TraceID,
 			&i.ScoredAt,
 			&i.Status,
@@ -173,6 +174,19 @@ type CountExperimentsParams struct {
 
 func (q *Queries) CountExperiments(ctx context.Context, arg CountExperimentsParams) (int64, error) {
 	row := q.db.QueryRow(ctx, countExperiments, arg.TenantID, arg.Column2, arg.Column3)
+	var column_1 int64
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
+const countIndependentPublishedExperiments = `-- name: CountIndependentPublishedExperiments :one
+SELECT COUNT(*)::bigint
+FROM experiment
+WHERE tenant_id = $1 AND course_id IS NULL AND status = 2 AND deleted_at IS NULL
+`
+
+func (q *Queries) CountIndependentPublishedExperiments(ctx context.Context, tenantID int64) (int64, error) {
+	row := q.db.QueryRow(ctx, countIndependentPublishedExperiments, tenantID)
 	var column_1 int64
 	err := row.Scan(&column_1)
 	return column_1, err
@@ -331,9 +345,9 @@ func (q *Queries) CreateExperimentInstance(ctx context.Context, arg CreateExperi
 }
 
 const createExperimentScoreOutbox = `-- name: CreateExperimentScoreOutbox :one
-INSERT INTO experiment_score_outbox (id, tenant_id, experiment_id, instance_id, student_id, score, trace_id, scored_at, status, retry_count, last_error, created_at, updated_at)
-VALUES ($1, $2, $3, $4, $5, $6::text::numeric, $7, $8, 1, 0, NULL, now(), now())
-RETURNING id, tenant_id, experiment_id, instance_id, student_id, score, trace_id, scored_at, status, retry_count, last_error, created_at, updated_at
+INSERT INTO experiment_score_outbox (id, tenant_id, experiment_id, instance_id, student_id, score, completed, trace_id, scored_at, status, retry_count, last_error, created_at, updated_at)
+VALUES ($1, $2, $3, $4, $5, $6::text::numeric, $7, $8, $9, 1, 0, NULL, now(), now())
+RETURNING id, tenant_id, experiment_id, instance_id, student_id, score, completed, trace_id, scored_at, status, retry_count, last_error, created_at, updated_at
 `
 
 type CreateExperimentScoreOutboxParams struct {
@@ -343,6 +357,7 @@ type CreateExperimentScoreOutboxParams struct {
 	InstanceID   int64              `json:"instance_id"`
 	StudentID    int64              `json:"student_id"`
 	Column6      string             `json:"column_6"`
+	Completed    bool               `json:"completed"`
 	TraceID      string             `json:"trace_id"`
 	ScoredAt     pgtype.Timestamptz `json:"scored_at"`
 }
@@ -355,6 +370,7 @@ func (q *Queries) CreateExperimentScoreOutbox(ctx context.Context, arg CreateExp
 		arg.InstanceID,
 		arg.StudentID,
 		arg.Column6,
+		arg.Completed,
 		arg.TraceID,
 		arg.ScoredAt,
 	)
@@ -366,6 +382,7 @@ func (q *Queries) CreateExperimentScoreOutbox(ctx context.Context, arg CreateExp
 		&i.InstanceID,
 		&i.StudentID,
 		&i.Score,
+		&i.Completed,
 		&i.TraceID,
 		&i.ScoredAt,
 		&i.Status,
@@ -1174,11 +1191,63 @@ func (q *Queries) ListGroupMembers(ctx context.Context, arg ListGroupMembersPara
 	return items, nil
 }
 
+const listIndependentPublishedExperiments = `-- name: ListIndependentPublishedExperiments :many
+SELECT id, tenant_id, course_id, author_id, template_ref, template_version, name, description, components, collab_mode, group_config, require_report, wizard_step, status, created_at, updated_at, deleted_at
+FROM experiment
+WHERE tenant_id = $1 AND course_id IS NULL AND status = 2 AND deleted_at IS NULL
+ORDER BY updated_at DESC, id DESC
+LIMIT $2 OFFSET $3
+`
+
+type ListIndependentPublishedExperimentsParams struct {
+	TenantID int64 `json:"tenant_id"`
+	Limit    int32 `json:"limit"`
+	Offset   int32 `json:"offset"`
+}
+
+func (q *Queries) ListIndependentPublishedExperiments(ctx context.Context, arg ListIndependentPublishedExperimentsParams) ([]Experiment, error) {
+	rows, err := q.db.Query(ctx, listIndependentPublishedExperiments, arg.TenantID, arg.Limit, arg.Offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Experiment{}
+	for rows.Next() {
+		var i Experiment
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.CourseID,
+			&i.AuthorID,
+			&i.TemplateRef,
+			&i.TemplateVersion,
+			&i.Name,
+			&i.Description,
+			&i.Components,
+			&i.CollabMode,
+			&i.GroupConfig,
+			&i.RequireReport,
+			&i.WizardStep,
+			&i.Status,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.DeletedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const markExperimentScoreOutboxFailed = `-- name: MarkExperimentScoreOutboxFailed :one
 UPDATE experiment_score_outbox
 SET status = 4, last_error = $3, updated_at = now()
 WHERE tenant_id = $1 AND id = $2
-RETURNING id, tenant_id, experiment_id, instance_id, student_id, score, trace_id, scored_at, status, retry_count, last_error, created_at, updated_at
+RETURNING id, tenant_id, experiment_id, instance_id, student_id, score, completed, trace_id, scored_at, status, retry_count, last_error, created_at, updated_at
 `
 
 type MarkExperimentScoreOutboxFailedParams struct {
@@ -1197,6 +1266,7 @@ func (q *Queries) MarkExperimentScoreOutboxFailed(ctx context.Context, arg MarkE
 		&i.InstanceID,
 		&i.StudentID,
 		&i.Score,
+		&i.Completed,
 		&i.TraceID,
 		&i.ScoredAt,
 		&i.Status,
@@ -1212,7 +1282,7 @@ const markExperimentScoreOutboxPublished = `-- name: MarkExperimentScoreOutboxPu
 UPDATE experiment_score_outbox
 SET status = 3, last_error = NULL, updated_at = now()
 WHERE tenant_id = $1 AND id = $2
-RETURNING id, tenant_id, experiment_id, instance_id, student_id, score, trace_id, scored_at, status, retry_count, last_error, created_at, updated_at
+RETURNING id, tenant_id, experiment_id, instance_id, student_id, score, completed, trace_id, scored_at, status, retry_count, last_error, created_at, updated_at
 `
 
 type MarkExperimentScoreOutboxPublishedParams struct {
@@ -1230,6 +1300,7 @@ func (q *Queries) MarkExperimentScoreOutboxPublished(ctx context.Context, arg Ma
 		&i.InstanceID,
 		&i.StudentID,
 		&i.Score,
+		&i.Completed,
 		&i.TraceID,
 		&i.ScoredAt,
 		&i.Status,
@@ -1668,6 +1739,8 @@ INSERT INTO experiment_report (id, tenant_id, instance_id, student_id, content_r
 VALUES ($1, $2, $3, $4, $5, NULL, NULL, 1, now())
 ON CONFLICT (tenant_id, instance_id, student_id) DO UPDATE
 SET content_ref = EXCLUDED.content_ref,
+	manual_score = NULL,
+	comment = NULL,
     status = 1,
     submitted_at = now()
 RETURNING id, tenant_id, instance_id, student_id, content_ref, COALESCE(manual_score::float8, 0)::float8 AS manual_score, comment, status, submitted_at

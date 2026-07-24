@@ -408,6 +408,8 @@ paths:
     $ref: './paths/experiment.yaml#/api/v1/experiment/experiments'
   /api/v1/experiment/student/experiments:
     $ref: './paths/experiment.yaml#/api/v1/experiment/student/experiments'
+  /api/v1/experiment/student/experiments/{id}:
+    $ref: './paths/experiment.yaml#/api/v1/experiment/student/experiments/{id}'
   /api/v1/experiment/experiments/{id}:
     $ref: './paths/experiment.yaml#/api/v1/experiment/experiments/{id}'
   /api/v1/experiment/experiments/{id}/validate:
@@ -436,6 +438,8 @@ paths:
     $ref: './paths/experiment.yaml#/api/v1/experiment/instances/{id}/report'
   /api/v1/experiment/experiments/{id}/reports:
     $ref: './paths/experiment.yaml#/api/v1/experiment/experiments/{id}/reports'
+  /api/v1/experiment/reports/{id}/download-grant:
+    $ref: './paths/experiment.yaml#/api/v1/experiment/reports/{id}/download-grant'
   /api/v1/experiment/reports/{id}/grade:
     $ref: './paths/experiment.yaml#/api/v1/experiment/reports/{id}/grade'
   /api/v1/experiment/experiments/{id}/groups:
@@ -452,6 +456,8 @@ paths:
     $ref: './paths/contest.yaml#/api/v1/contest/contests'
   /api/v1/contest/student/contests:
     $ref: './paths/contest.yaml#/api/v1/contest/student/contests'
+  /api/v1/contest/student/contests/{id}:
+    $ref: './paths/contest.yaml#/api/v1/contest/student/contests/{id}'
   /api/v1/contest/contests/{id}:
     $ref: './paths/contest.yaml#/api/v1/contest/contests/{id}'
   /api/v1/contest/contests/{id}/problems:
@@ -520,8 +526,6 @@ paths:
     $ref: './paths/admin.yaml#/api/v1/admin/platform/dashboard'
   /api/v1/admin/platform/statistics:
     $ref: './paths/admin.yaml#/api/v1/admin/platform/statistics'
-  /api/v1/admin/platform/tenants:
-    $ref: './paths/admin.yaml#/api/v1/admin/platform/tenants'
   /api/v1/admin/platform/applications:
     $ref: './paths/admin.yaml#/api/v1/admin/platform/applications'
   /api/v1/admin/platform/monitoring/panels:
@@ -758,6 +762,24 @@ components:
       required: false
       schema: { type: string }
   requestBodies:
+    AdminMaintenanceConfigUpdate:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/AdminMaintenanceConfigUpdate"
+    AdminMaintenanceConfigRollback:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/AdminMaintenanceConfigRollback"
+    AdminAlertRule:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/AdminAlertRule"
     ObjectBody:
       required: false
       content:
@@ -807,6 +829,48 @@ components:
       type: object
       additionalProperties: true
       description: 文档未细化字段时使用的通用 JSON 对象;具体字段以对应模块接口设计和 DTO 为准。
+    AdminMaintenanceConfigUpdate:
+      type: object
+      required: [scope, value, version]
+      additionalProperties: false
+      properties:
+        scope: { type: integer, enum: [1, 2] }
+        tenant_id: { $ref: "#/components/schemas/SnowflakeID" }
+        value:
+          type: object
+          required: [enabled]
+          additionalProperties: false
+          properties:
+            enabled: { type: boolean }
+        version: { type: integer, minimum: 0 }
+    AdminMaintenanceConfigRollback:
+      type: object
+      required: [scope, version, change_log_id]
+      additionalProperties: false
+      properties:
+        scope: { type: integer, enum: [1, 2] }
+        tenant_id: { $ref: "#/components/schemas/SnowflakeID" }
+        version: { type: integer, minimum: 1 }
+        change_log_id: { $ref: "#/components/schemas/SnowflakeID" }
+    AdminAlertRule:
+      type: object
+      required: [scope, name, metric, condition, level, enabled]
+      additionalProperties: false
+      properties:
+        scope: { type: integer, enum: [1, 2] }
+        tenant_id: { $ref: "#/components/schemas/SnowflakeID" }
+        name: { type: string }
+        metric: { type: string }
+        condition:
+          type: object
+          required: [operator, threshold, duration_minutes]
+          additionalProperties: false
+          properties:
+            operator: { type: string, enum: [gt, gte, lt, lte, eq] }
+            threshold: { type: number }
+            duration_minutes: { type: number, minimum: 0 }
+        level: { type: integer, minimum: 1, maximum: 4 }
+        enabled: { type: boolean }
     StandardResponse:
       type: object
       required: [code, message, data]

@@ -88,13 +88,15 @@ export interface SimPackageReview {
   id: SnowflakeID
   package_id: SnowflakeID
   submitter_id: SnowflakeID
+  submitter_name: string
   preview_report: SimValidationReport
   reviewer_id?: SnowflakeID
+  reviewer_name?: string
   result: SimReviewResult
   comment?: string
   created_at: string
   updated_at?: string
-  package?: {
+  package: {
     code: string
     version: string
     name: string

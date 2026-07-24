@@ -13,6 +13,7 @@ type Querier interface {
 	ClaimRecyclableInstancesAcrossTenants(ctx context.Context, arg ClaimRecyclableInstancesAcrossTenantsParams) ([]ClaimRecyclableInstancesAcrossTenantsRow, error)
 	CountExperimentReports(ctx context.Context, arg CountExperimentReportsParams) (int64, error)
 	CountExperiments(ctx context.Context, arg CountExperimentsParams) (int64, error)
+	CountIndependentPublishedExperiments(ctx context.Context, tenantID int64) (int64, error)
 	// experiment.sql 定义 M7 实验模块的 sqlc 查询,仅访问实验模块自有表。
 	CreateExperiment(ctx context.Context, arg CreateExperimentParams) (Experiment, error)
 	CreateExperimentGroup(ctx context.Context, arg CreateExperimentGroupParams) (ExperimentGroup, error)
@@ -36,6 +37,7 @@ type Querier interface {
 	ListExperimentReports(ctx context.Context, arg ListExperimentReportsParams) ([]ListExperimentReportsRow, error)
 	ListExperiments(ctx context.Context, arg ListExperimentsParams) ([]Experiment, error)
 	ListGroupMembers(ctx context.Context, arg ListGroupMembersParams) ([]GroupMember, error)
+	ListIndependentPublishedExperiments(ctx context.Context, arg ListIndependentPublishedExperimentsParams) ([]Experiment, error)
 	MarkExperimentScoreOutboxFailed(ctx context.Context, arg MarkExperimentScoreOutboxFailedParams) (ExperimentScoreOutbox, error)
 	MarkExperimentScoreOutboxPublished(ctx context.Context, arg MarkExperimentScoreOutboxPublishedParams) (ExperimentScoreOutbox, error)
 	SetExperimentStatus(ctx context.Context, arg SetExperimentStatusParams) (Experiment, error)

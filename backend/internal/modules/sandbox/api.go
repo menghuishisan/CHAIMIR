@@ -122,7 +122,7 @@ func (a sandboxAPI) registerToolProxyRoutes(g gin.IRouter) {
 
 // registerQuotaRoutes 注册配额查询和调整接口。
 func (a sandboxAPI) registerQuotaRoutes(g gin.IRouter, authn *auth.Manager, roles contracts.IdentityService) {
-	g.GET("/quota", authn.Middleware(), auth.RequireTenantAnyRole(roles, contracts.RoleSchoolAdmin), a.quotaStats)
+	g.GET("/quota", authn.Middleware(), auth.RequirePlatformOrAnyRole(roles, contracts.RoleSchoolAdmin), a.quotaStats)
 	g.PATCH("/quota", authn.Middleware(), auth.RequirePlatformOrAnyRole(roles, contracts.RoleSchoolAdmin), a.upsertQuota)
 }
 
@@ -612,13 +612,30 @@ func (a sandboxAPI) chainReset(c *gin.Context) {
 	httpx.Write(c, gin.H{}, err)
 }
 
-// quotaStats 查询当前租户配额和活跃数量。
+// quotaStats 查询学校管理员本校或平台管理员指定租户的配额和活跃数量。
 func (a sandboxAPI) quotaStats(c *gin.Context) {
-	current, ok := httpx.CurrentTenantIdentity(c)
+	current, ok := tenant.FromContext(c.Request.Context())
+	if !ok {
+		response.Fail(c, apperr.ErrUnauthorized)
+		return
+	}
+	tenantID, ok := httpx.QueryInt(c, "tenant_id", httpx.QueryIntRule{Default: 0, Min: 0})
 	if !ok {
 		return
 	}
-	out, err := a.svc.Stats(c.Request.Context(), current.TenantID)
+	if current.IsPlatform {
+		if tenantID <= 0 {
+			response.Fail(c, apperr.ErrSandboxQuotaInvalid)
+			return
+		}
+	} else {
+		if tenantID != 0 {
+			response.Fail(c, apperr.ErrForbidden)
+			return
+		}
+		tenantID = current.TenantID
+	}
+	out, err := a.svc.Stats(c.Request.Context(), tenantID)
 	httpx.Write(c, out, err)
 }
 

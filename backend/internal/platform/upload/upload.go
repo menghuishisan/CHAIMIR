@@ -114,6 +114,15 @@ func AttachmentKindValid(fileName, contentType string, content []byte) bool {
 	}
 }
 
+// MarkdownKindValid 校验实验报告等 Markdown 文档的扩展名、声明 MIME 与文本内容一致。
+func MarkdownKindValid(fileName, contentType string, content []byte) bool {
+	ext := strings.ToLower(filepath.Ext(fileName))
+	declared := baseContentType(contentType)
+	return (ext == ".md" || ext == ".markdown") &&
+		(declared == "text/markdown" || declared == "text/plain") &&
+		looksLikeText(content)
+}
+
 // AllowedCSVContentType 判断 CSV 上传允许的常见 MIME 类型。
 func AllowedCSVContentType(contentType string) bool {
 	switch baseContentType(contentType) {

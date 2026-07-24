@@ -14,7 +14,6 @@ type CreateTenantInput struct {
 	ExpireAt             *time.Time
 	LogoURL              string
 	DisplayName          string
-	FeatureFlags         []byte
 	AuthMode             int16
 	EnableActivationCode bool
 }
@@ -33,7 +32,6 @@ type UpdateTenantConfigInput struct {
 	TenantID             int64
 	LogoURL              string
 	DisplayName          string
-	FeatureFlags         []byte
 	AuthMode             int16
 	EnableActivationCode bool
 }

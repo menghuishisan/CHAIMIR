@@ -15,7 +15,7 @@ const TeacherGradesDetailsPage: React.FC = () => {
   const resource = useAsyncResource(() => api.grade.listOwnReviews({ page: 1, size: 20 }), [])
 
   const columns = useMemo<TableColumn<GradeReview>[]>(() => [
-    { key: 'course', title: '课程', render: () => '课程成绩', priority: 'primary' },
+    { key: 'course', title: '课程', dataIndex: 'course_name', priority: 'primary' },
     { key: 'semester', title: '学期', render: (row) => row.semester_id ? '已指定' : '未指定' },
     { key: 'comment', title: '提交说明', render: (row) => row.comment || '无' },
     { key: 'status', title: '审核状态', render: (row) => <span className={styles.status}>{gradeReviewStatusLabel(row.status)}</span> },

@@ -154,7 +154,7 @@ const StudentContestWorkspacePage: React.FC = () => {
       <section className={styles.darkCard}>
         <h2 className={styles.workspaceTitle}>排行榜</h2>
         <ol className={styles.list}>
-          {(resource.data?.ladder || []).map((rank) => <li className={styles.listItem} key={rank.team_id}>第 {rank.rank} 名，{rank.score} 分</li>)}
+          {(resource.data?.ladder || []).map((rank) => <li className={styles.listItem} key={rank.team_id}>第 {rank.rank} 名，{rank.team_name}，{rank.score} 分</li>)}
         </ol>
       </section>
     </div>

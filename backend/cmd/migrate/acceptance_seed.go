@@ -94,7 +94,6 @@ type acceptanceSeedIDs struct {
 	GradeAppeal        int64
 	AcademicWarning    int64
 	Transcript         int64
-	SystemConfig       int64
 	AlertRule          int64
 	AlertEvent         int64
 	Statistics         int64
@@ -123,7 +122,7 @@ var acceptanceIDs = acceptanceSeedIDs{
 	SystemAnnouncement: 910000000000010001, NotificationA: 910000000000010011, PreferenceA: 910000000000010012, AnnouncementReadA: 910000000000010013,
 	GradeLevel: 910000000000011001, Semester: 910000000000011002, GradeReview: 910000000000011003, GradeAppeal: 910000000000011004,
 	AcademicWarning: 910000000000011005, Transcript: 910000000000011006,
-	SystemConfig: 910000000000012001, AlertRule: 910000000000012002, AlertEvent: 910000000000012003, Statistics: 910000000000012004, BackupRecord: 910000000000012005,
+	AlertRule: 910000000000012002, AlertEvent: 910000000000012003, Statistics: 910000000000012004, BackupRecord: 910000000000012005,
 	TransferTask: 910000000000013001,
 	AuditEntry:   910000000000099001,
 }
@@ -182,8 +181,8 @@ func ensureAcceptanceSeedAllowed(cfg *config.Config) error {
 func seedAcceptanceTenant(ctx context.Context, database *db.DB) error {
 	return database.WithPrivilegedTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		_, err := tx.Exec(ctx, `
-INSERT INTO tenant (id, code, name, type, status, deploy_mode, display_name, feature_flags, auth_mode, enable_activation_code)
-VALUES ($1, 'acceptance-chainlab', '华东链安实验学院', 3, 1, 2, '华东链安实验学院', '{"modules":["teaching","experiment","contest"]}'::jsonb, 1, false)
+INSERT INTO tenant (id, code, name, type, status, deploy_mode, display_name, auth_mode, enable_activation_code)
+VALUES ($1, 'acceptance-chainlab', '华东链安实验学院', 3, 1, 2, '华东链安实验学院', 1, false)
 ON CONFLICT (id) DO UPDATE SET
 	code = EXCLUDED.code,
 	name = EXCLUDED.name,
@@ -191,7 +190,6 @@ ON CONFLICT (id) DO UPDATE SET
 	status = EXCLUDED.status,
 	deploy_mode = EXCLUDED.deploy_mode,
 	display_name = EXCLUDED.display_name,
-	feature_flags = EXCLUDED.feature_flags,
 	auth_mode = EXCLUDED.auth_mode,
 	enable_activation_code = EXCLUDED.enable_activation_code,
 	updated_at = now()`, acceptanceIDs.TenantID)

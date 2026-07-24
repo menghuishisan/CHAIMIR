@@ -136,7 +136,7 @@ func reportFromListRow(row sqlcgen.ListExperimentReportsRow) ExperimentReport {
 
 // experimentScoreOutbox 转换实验得分事件 outbox 行。
 func experimentScoreOutbox(row sqlcgen.ExperimentScoreOutbox) ExperimentScoreOutbox {
-	return ExperimentScoreOutbox{ID: row.ID, TenantID: row.TenantID, ExperimentID: row.ExperimentID, InstanceID: row.InstanceID, StudentID: row.StudentID, Score: pgtypex.NumericValue(row.Score), TraceID: row.TraceID, ScoredAt: timex.FromTimestamptz(row.ScoredAt), Status: row.Status, RetryCount: row.RetryCount, LastError: pgtypex.TextValue(row.LastError), CreatedAt: timex.FromTimestamptz(row.CreatedAt), UpdatedAt: timex.FromTimestamptz(row.UpdatedAt)}
+	return ExperimentScoreOutbox{ID: row.ID, TenantID: row.TenantID, ExperimentID: row.ExperimentID, InstanceID: row.InstanceID, StudentID: row.StudentID, Score: pgtypex.NumericValue(row.Score), Completed: row.Completed, TraceID: row.TraceID, ScoredAt: timex.FromTimestamptz(row.ScoredAt), Status: row.Status, RetryCount: row.RetryCount, LastError: pgtypex.TextValue(row.LastError), CreatedAt: timex.FromTimestamptz(row.CreatedAt), UpdatedAt: timex.FromTimestamptz(row.UpdatedAt)}
 }
 
 // decodeComponentConfig 解析组件 JSON,空值按空组件处理。

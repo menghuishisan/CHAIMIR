@@ -5,6 +5,7 @@ import (
 	"context"
 	"strings"
 
+	"chaimir/internal/platform/ids"
 	"chaimir/internal/platform/pagex"
 	"chaimir/pkg/apperr"
 )
@@ -143,7 +144,25 @@ func (s *Service) CreateLesson(ctx context.Context, chapterID int64, req LessonR
 	}); err != nil {
 		return LessonDTO{}, mapCourseError(err)
 	}
-	return lessonDTO(lesson)
+	out, err := lessonDTO(lesson)
+	if err != nil {
+		return LessonDTO{}, mapCourseError(err)
+	}
+	if lesson.ContentType == LessonContentExperiment {
+		experimentRef, ok := lesson.ContentRef["experiment_id"].(string)
+		if !ok {
+			return LessonDTO{}, apperr.ErrTeachingLessonInvalid
+		}
+		experimentID, valid := ids.Parse(strings.TrimSpace(experimentRef))
+		if !valid {
+			return LessonDTO{}, apperr.ErrTeachingLessonInvalid
+		}
+		out.ExperimentLaunchGrant, err = s.auth.IssueExperimentLaunchGrant(id.TenantID, id.AccountID, experimentID, lesson.ID)
+		if err != nil {
+			return LessonDTO{}, apperr.ErrTeachingLessonInvalid.WithCause(err)
+		}
+	}
+	return out, nil
 }
 
 // GetLessonForUser 读取课时内容。
@@ -326,7 +345,11 @@ func (s *Service) JoinCourseByInvite(ctx context.Context, req JoinCourseRequest)
 	}); err != nil {
 		return MemberDTO{}, err
 	}
-	return memberDTO(member), nil
+	out := []MemberDTO{memberDTO(member)}
+	if err := s.fillMemberSummaries(ctx, out); err != nil {
+		return MemberDTO{}, err
+	}
+	return out[0], nil
 }
 
 // AddCourseMembers 批量添加课程成员。
@@ -370,6 +393,9 @@ func (s *Service) AddCourseMembers(ctx context.Context, courseID int64, req Batc
 	for _, member := range members {
 		out = append(out, memberDTO(member))
 	}
+	if err := s.fillMemberSummaries(ctx, out); err != nil {
+		return nil, err
+	}
 	return out, nil
 }
 
@@ -398,6 +424,9 @@ func (s *Service) ListCourseMembers(ctx context.Context, courseID int64, page, s
 	out := make([]MemberDTO, 0, len(members))
 	for _, member := range members {
 		out = append(out, memberDTO(member))
+	}
+	if err := s.fillMemberSummaries(ctx, out); err != nil {
+		return nil, 0, 0, 0, err
 	}
 	return out, total, page, size, nil
 }

@@ -1,16 +1,16 @@
 -- contest.sql 定义 M8 竞赛模块的 sqlc 查询,仅访问竞赛模块自有表。
 -- name: CreateContest :one
-INSERT INTO contest (id, tenant_id, organizer_id, name, mode, match_mode, team_mode, signup_start, signup_end, start_at, end_at, freeze_minutes, rules, status, created_at, updated_at, deleted_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, 1, now(), now(), NULL)
-RETURNING id, tenant_id, organizer_id, name, mode, match_mode, team_mode, signup_start, signup_end, start_at, end_at, freeze_minutes, rules, status, created_at, updated_at, deleted_at;
+INSERT INTO contest (id, tenant_id, organizer_id, name, mode, match_mode, team_mode, signup_start, signup_end, start_at, end_at, freeze_minutes, status, created_at, updated_at, deleted_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 1, now(), now(), NULL)
+RETURNING id, tenant_id, organizer_id, name, mode, match_mode, team_mode, signup_start, signup_end, start_at, end_at, freeze_minutes, status, created_at, updated_at, deleted_at;
 
 -- name: GetContest :one
-SELECT id, tenant_id, organizer_id, name, mode, match_mode, team_mode, signup_start, signup_end, start_at, end_at, freeze_minutes, rules, status, created_at, updated_at, deleted_at
+SELECT id, tenant_id, organizer_id, name, mode, match_mode, team_mode, signup_start, signup_end, start_at, end_at, freeze_minutes, status, created_at, updated_at, deleted_at
 FROM contest
 WHERE tenant_id = $1 AND id = $2 AND deleted_at IS NULL;
 
 -- name: ListContests :many
-SELECT id, tenant_id, organizer_id, name, mode, match_mode, team_mode, signup_start, signup_end, start_at, end_at, freeze_minutes, rules, status, created_at, updated_at, deleted_at
+SELECT id, tenant_id, organizer_id, name, mode, match_mode, team_mode, signup_start, signup_end, start_at, end_at, freeze_minutes, status, created_at, updated_at, deleted_at
 FROM contest
 WHERE tenant_id = $1 AND deleted_at IS NULL AND ($2::smallint = 0 OR status = $2)
 ORDER BY updated_at DESC, id DESC
@@ -22,7 +22,7 @@ FROM contest
 WHERE tenant_id = $1 AND deleted_at IS NULL AND ($2::smallint = 0 OR status = $2);
 
 -- name: ListStudentContests :many
-SELECT id, tenant_id, organizer_id, name, mode, match_mode, team_mode, signup_start, signup_end, start_at, end_at, freeze_minutes, rules, status, created_at, updated_at, deleted_at
+SELECT id, tenant_id, organizer_id, name, mode, match_mode, team_mode, signup_start, signup_end, start_at, end_at, freeze_minutes, status, created_at, updated_at, deleted_at
 FROM contest
 WHERE tenant_id = $1 AND deleted_at IS NULL AND status BETWEEN 2 AND 6
 ORDER BY updated_at DESC, id DESC
@@ -44,16 +44,15 @@ SET name = $3,
     start_at = $9,
     end_at = $10,
     freeze_minutes = $11,
-    rules = $12,
     updated_at = now()
 WHERE tenant_id = $1 AND id = $2 AND status = 1 AND deleted_at IS NULL
-RETURNING id, tenant_id, organizer_id, name, mode, match_mode, team_mode, signup_start, signup_end, start_at, end_at, freeze_minutes, rules, status, created_at, updated_at, deleted_at;
+RETURNING id, tenant_id, organizer_id, name, mode, match_mode, team_mode, signup_start, signup_end, start_at, end_at, freeze_minutes, status, created_at, updated_at, deleted_at;
 
 -- name: SetContestStatus :one
 UPDATE contest
 SET status = $3, updated_at = now()
 WHERE tenant_id = $1 AND id = $2 AND deleted_at IS NULL
-RETURNING id, tenant_id, organizer_id, name, mode, match_mode, team_mode, signup_start, signup_end, start_at, end_at, freeze_minutes, rules, status, created_at, updated_at, deleted_at;
+RETURNING id, tenant_id, organizer_id, name, mode, match_mode, team_mode, signup_start, signup_end, start_at, end_at, freeze_minutes, status, created_at, updated_at, deleted_at;
 
 -- name: UpsertContestProblem :one
 INSERT INTO contest_problem (id, tenant_id, contest_id, item_code, item_version, score, dynamic_score, battle_config, battle_rule, seq)
@@ -186,8 +185,9 @@ FROM solve_submission
 WHERE tenant_id = $1 AND contest_id = $2 AND problem_id = $3 AND passed = true;
 
 -- name: ListLadder :many
-SELECT lr.id, lr.tenant_id, lr.contest_id, lr.team_id, lr.score::float8 AS score, lr.solved_count, lr.last_solve_at, lr.rank, lr.updated_at
+SELECT lr.id, lr.tenant_id, lr.contest_id, lr.team_id, t.name AS team_name, lr.score::float8 AS score, lr.solved_count, lr.last_solve_at, lr.rank, lr.updated_at
 FROM ladder_rank lr
+JOIN team t ON t.tenant_id = lr.tenant_id AND t.id = lr.team_id
 WHERE lr.tenant_id = $1 AND lr.contest_id = $2
   AND NOT EXISTS (
       SELECT 1 FROM cheat_record cr
@@ -271,9 +271,9 @@ ORDER BY
 LIMIT $7;
 
 -- name: CreateBattleMatch :one
-INSERT INTO battle_match (id, tenant_id, contest_id, problem_id, entry_a_id, entry_b_id, source_ref, sandbox_ref, judge_task_ref, result, score_delta, replay_ref, status, matched_at, finished_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7, NULL, NULL, NULL, '{}'::jsonb, NULL, 1, now(), NULL)
-RETURNING id, tenant_id, contest_id, problem_id, entry_a_id, entry_b_id, source_ref, sandbox_ref, judge_task_ref, result, score_delta, replay_ref, status, matched_at, finished_at;
+INSERT INTO battle_match (id, tenant_id, contest_id, problem_id, entry_a_id, entry_b_id, source_ref, sandbox_ref, judge_task_ref, result, score_delta, replay_data, status, matched_at, finished_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, NULL, NULL, NULL, '{}'::jsonb, '[]'::jsonb, 1, now(), NULL)
+RETURNING id, tenant_id, contest_id, problem_id, entry_a_id, entry_b_id, source_ref, sandbox_ref, judge_task_ref, result, score_delta, replay_data, status, matched_at, finished_at;
 
 -- name: ClaimPendingBattleMatchesAcrossTenants :many
 UPDATE battle_match
@@ -285,20 +285,20 @@ WHERE id IN (
     LIMIT $1
     FOR UPDATE SKIP LOCKED
 )
-RETURNING id, tenant_id, contest_id, problem_id, entry_a_id, entry_b_id, source_ref, sandbox_ref, judge_task_ref, result, score_delta, replay_ref, status, matched_at, finished_at;
+RETURNING id, tenant_id, contest_id, problem_id, entry_a_id, entry_b_id, source_ref, sandbox_ref, judge_task_ref, result, score_delta, replay_data, status, matched_at, finished_at;
 
 -- name: GetBattleMatch :one
-SELECT id, tenant_id, contest_id, problem_id, entry_a_id, entry_b_id, source_ref, sandbox_ref, judge_task_ref, result, score_delta, replay_ref, status, matched_at, finished_at
+SELECT id, tenant_id, contest_id, problem_id, entry_a_id, entry_b_id, source_ref, sandbox_ref, judge_task_ref, result, score_delta, replay_data, status, matched_at, finished_at
 FROM battle_match
 WHERE tenant_id = $1 AND id = $2;
 
 -- name: GetBattleMatchByJudgeTask :one
-SELECT id, tenant_id, contest_id, problem_id, entry_a_id, entry_b_id, source_ref, sandbox_ref, judge_task_ref, result, score_delta, replay_ref, status, matched_at, finished_at
+SELECT id, tenant_id, contest_id, problem_id, entry_a_id, entry_b_id, source_ref, sandbox_ref, judge_task_ref, result, score_delta, replay_data, status, matched_at, finished_at
 FROM battle_match
 WHERE tenant_id = $1 AND judge_task_ref = $2;
 
 -- name: ListRunningBattleMatchesWithJudgeTask :many
-SELECT id, tenant_id, contest_id, problem_id, entry_a_id, entry_b_id, source_ref, sandbox_ref, judge_task_ref, result, score_delta, replay_ref, status, matched_at, finished_at
+SELECT id, tenant_id, contest_id, problem_id, entry_a_id, entry_b_id, source_ref, sandbox_ref, judge_task_ref, result, score_delta, replay_data, status, matched_at, finished_at
 FROM battle_match
 WHERE status = 2
   AND judge_task_ref IS NOT NULL
@@ -312,10 +312,10 @@ SET sandbox_ref = $3,
     judge_task_ref = $4,
     status = 2
 WHERE tenant_id = $1 AND id = $2 AND status = 2
-RETURNING id, tenant_id, contest_id, problem_id, entry_a_id, entry_b_id, source_ref, sandbox_ref, judge_task_ref, result, score_delta, replay_ref, status, matched_at, finished_at;
+RETURNING id, tenant_id, contest_id, problem_id, entry_a_id, entry_b_id, source_ref, sandbox_ref, judge_task_ref, result, score_delta, replay_data, status, matched_at, finished_at;
 
 -- name: ListBattleMatchesForTeam :many
-SELECT m.id, m.tenant_id, m.contest_id, m.problem_id, m.entry_a_id, m.entry_b_id, m.source_ref, m.sandbox_ref, m.judge_task_ref, m.result, m.score_delta, m.replay_ref, m.status, m.matched_at, m.finished_at
+SELECT m.id, m.tenant_id, m.contest_id, m.problem_id, m.entry_a_id, m.entry_b_id, m.source_ref, m.sandbox_ref, m.judge_task_ref, m.result, m.score_delta, m.replay_data, m.status, m.matched_at, m.finished_at
 FROM battle_match m
 JOIN battle_entry a ON a.tenant_id = m.tenant_id AND a.id = m.entry_a_id
 JOIN battle_entry b ON b.tenant_id = m.tenant_id AND b.id = m.entry_b_id
@@ -345,17 +345,17 @@ SET sandbox_ref = $3,
     judge_task_ref = $4,
     result = $5,
     score_delta = $6,
-    replay_ref = $7,
+    replay_data = $7,
     status = 3,
     finished_at = now()
 WHERE tenant_id = $1 AND id = $2
-RETURNING id, tenant_id, contest_id, problem_id, entry_a_id, entry_b_id, source_ref, sandbox_ref, judge_task_ref, result, score_delta, replay_ref, status, matched_at, finished_at;
+RETURNING id, tenant_id, contest_id, problem_id, entry_a_id, entry_b_id, source_ref, sandbox_ref, judge_task_ref, result, score_delta, replay_data, status, matched_at, finished_at;
 
 -- name: FailBattleMatch :one
 UPDATE battle_match
 SET status = 4, finished_at = now()
 WHERE tenant_id = $1 AND id = $2
-RETURNING id, tenant_id, contest_id, problem_id, entry_a_id, entry_b_id, source_ref, sandbox_ref, judge_task_ref, result, score_delta, replay_ref, status, matched_at, finished_at;
+RETURNING id, tenant_id, contest_id, problem_id, entry_a_id, entry_b_id, source_ref, sandbox_ref, judge_task_ref, result, score_delta, replay_data, status, matched_at, finished_at;
 
 -- name: UpsertLadderSnapshot :one
 INSERT INTO contest_ladder_snapshot (id, tenant_id, contest_id, snapshot_status, ranking, generated_at)
@@ -495,4 +495,4 @@ WHERE id IN (
     LIMIT $1
     FOR UPDATE SKIP LOCKED
 )
-RETURNING id, tenant_id, organizer_id, name, mode, match_mode, team_mode, signup_start, signup_end, start_at, end_at, freeze_minutes, rules, status, created_at, updated_at, deleted_at;
+RETURNING id, tenant_id, organizer_id, name, mode, match_mode, team_mode, signup_start, signup_end, start_at, end_at, freeze_minutes, status, created_at, updated_at, deleted_at;

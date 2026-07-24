@@ -307,6 +307,11 @@ func ladderDTOsFromSnapshot(snapshot LadderSnapshot) ([]LadderDTO, error) {
 	if err := jsonx.DecodeStrictKnownFields(raw, &out); err != nil {
 		return nil, apperr.ErrContestInvalid.WithCause(err)
 	}
+	for _, item := range out {
+		if strings.TrimSpace(item.TeamName) == "" {
+			return nil, apperr.ErrContestInvalid.WithCause(fmt.Errorf("排行榜快照缺少队伍名称"))
+		}
+	}
 	return out, nil
 }
 
@@ -376,15 +381,15 @@ func scaledContestScore(maxScore, score, judgeMax int32) int32 {
 
 // dynamicSolveScore 按题目动态分配置计算通过提交得分。
 func (s *Service) dynamicSolveScore(ctx context.Context, tx TxStore, tenantID, contestID, problemID int64, problem ContestProblem) (int32, error) {
-	if len(problem.DynamicScore) == 0 {
+	if problem.DynamicScore == nil {
 		return problem.Score, nil
 	}
 	solved, err := tx.CountProblemSolvedTeams(ctx, tenantID, contestID, problemID)
 	if err != nil {
 		return 0, err
 	}
-	minScore := int32FromMap(problem.DynamicScore, "min_score", problem.Score)
-	decay := int32FromMap(problem.DynamicScore, "decay_per_solve", 0)
+	minScore := problem.DynamicScore.MinScore
+	decay := problem.DynamicScore.DecayPerSolve
 	score := problem.Score - int32(solved)*decay
 	if score < minScore {
 		score = minScore
@@ -393,18 +398,4 @@ func (s *Service) dynamicSolveScore(ctx context.Context, tx TxStore, tenantID, c
 		return 0, apperr.ErrContestProblemInvalid
 	}
 	return score, nil
-}
-
-// int32FromMap 从动态配置读取整数。
-func int32FromMap(m map[string]any, key string, defaultValue int32) int32 {
-	switch v := m[key].(type) {
-	case float64:
-		return int32(v)
-	case int:
-		return int32(v)
-	case int32:
-		return v
-	default:
-		return defaultValue
-	}
 }

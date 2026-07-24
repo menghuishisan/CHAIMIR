@@ -44,6 +44,8 @@ const (
 	CodeAdminMonitoringInvalid = "93004"
 	// CodeAdminBackupInvalid 表示备份记录请求不正确。
 	CodeAdminBackupInvalid = "93005"
+	// CodeAdminMaintenance 表示平台处于维护模式。
+	CodeAdminMaintenance = "93006"
 )
 
 const (
@@ -92,6 +94,8 @@ var (
 	ErrAdminMonitoringInvalid = New(CodeAdminMonitoringInvalid, "监控面板配置不正确,请联系管理员处理")
 	// ErrAdminBackupInvalid 表示备份记录请求不正确。
 	ErrAdminBackupInvalid = New(CodeAdminBackupInvalid, "备份记录信息不正确,请检查后重试")
+	// ErrAdminMaintenance 表示平台正在维护。
+	ErrAdminMaintenance = New(CodeAdminMaintenance, "平台正在维护,请稍后再试")
 	// ErrAdminAlertInvalid 表示告警信息不正确。
 	ErrAdminAlertInvalid = New(CodeAdminAlertInvalid, "告警信息不正确,请检查后重试")
 	// ErrAdminAlertNotFound 表示告警不存在。

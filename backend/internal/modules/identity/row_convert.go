@@ -11,7 +11,7 @@ import (
 
 // tenantFromRow 转换租户 sqlc 行为领域模型。
 func tenantFromRow(row sqlcgen.Tenant) Tenant {
-	return tenantFields(row.ID, row.Code, row.Name, row.Type, row.Status, row.DeployMode, row.ExpireAt, row.LogoUrl, row.DisplayName, row.FeatureFlags, row.AuthMode, row.EnableActivationCode, row.CreatedAt, row.UpdatedAt)
+	return tenantFields(row.ID, row.Code, row.Name, row.Type, row.Status, row.DeployMode, row.ExpireAt, row.LogoUrl, row.DisplayName, row.AuthMode, row.EnableActivationCode, row.CreatedAt, row.UpdatedAt)
 }
 
 // tenantProvisionOutboxFromRow 转换新租户初始化 outbox 行。
@@ -32,11 +32,11 @@ func tenantProvisionOutboxFromRow(row sqlcgen.TenantProvisionOutbox) TenantProvi
 
 // tenantFromPagedRow 转换分页租户查询行,忽略 repo 单独处理的窗口计数字段。
 func tenantFromPagedRow(row sqlcgen.ListTenantsPagedRow) Tenant {
-	return tenantFields(row.ID, row.Code, row.Name, row.Type, row.Status, row.DeployMode, row.ExpireAt, row.LogoUrl, row.DisplayName, row.FeatureFlags, row.AuthMode, row.EnableActivationCode, row.CreatedAt, row.UpdatedAt)
+	return tenantFields(row.ID, row.Code, row.Name, row.Type, row.Status, row.DeployMode, row.ExpireAt, row.LogoUrl, row.DisplayName, row.AuthMode, row.EnableActivationCode, row.CreatedAt, row.UpdatedAt)
 }
 
 // tenantFields 统一租户字段映射,避免普通查询和分页查询复制转换口径。
-func tenantFields(id int64, code, name string, typ, status, deployMode int16, expireAt pgtype.Timestamptz, logoURL, displayName pgtype.Text, featureFlags []byte, authMode int16, enableActivationCode bool, createdAt, updatedAt pgtype.Timestamptz) Tenant {
+func tenantFields(id int64, code, name string, typ, status, deployMode int16, expireAt pgtype.Timestamptz, logoURL, displayName pgtype.Text, authMode int16, enableActivationCode bool, createdAt, updatedAt pgtype.Timestamptz) Tenant {
 	return Tenant{
 		ID:                   id,
 		Code:                 code,
@@ -47,7 +47,6 @@ func tenantFields(id int64, code, name string, typ, status, deployMode int16, ex
 		ExpireAt:             timex.PtrFromTimestamptz(expireAt),
 		LogoURL:              pgtypex.TextValue(logoURL),
 		DisplayName:          pgtypex.TextValue(displayName),
-		FeatureFlags:         featureFlags,
 		AuthMode:             authMode,
 		EnableActivationCode: enableActivationCode,
 		CreatedAt:            timex.FromTimestamptz(createdAt),

@@ -5,7 +5,9 @@ import (
 	"context"
 	"time"
 
+	"chaimir/internal/contracts"
 	"chaimir/internal/modules/teaching/internal/sqlcgen"
+	"chaimir/internal/platform/ids"
 	"chaimir/internal/platform/pgtypex"
 	"chaimir/internal/platform/timex"
 )
@@ -50,6 +52,33 @@ func (s *txStore) ListStudentProgressByCourse(ctx context.Context, tenantID, cou
 	out := make([]LessonProgress, 0, len(rows))
 	for _, row := range rows {
 		out = append(out, progressFromRow(row))
+	}
+	return out, nil
+}
+
+// ListStudentExperimentLessonIDs 查询学生已加入课程中引用指定实验的课时。
+func (s *txStore) ListStudentExperimentLessonIDs(ctx context.Context, tenantID, experimentID, studentID int64) ([]int64, error) {
+	return s.q.ListStudentExperimentLessonIDs(ctx, sqlcgen.ListStudentExperimentLessonIDsParams{TenantID: tenantID, Column2: ids.Format(experimentID), StudentID: studentID})
+}
+
+// UpsertExperimentScoreProjection 幂等保存 M7 实例最后发布的成绩事件。
+func (s *txStore) UpsertExperimentScoreProjection(ctx context.Context, event contracts.ExperimentScoredEvent) error {
+	score, err := pgtypex.NumericScale(event.Score, 2)
+	if err != nil {
+		return err
+	}
+	return s.q.UpsertExperimentScoreProjection(ctx, sqlcgen.UpsertExperimentScoreProjectionParams{InstanceID: event.InstanceID, TenantID: event.TenantID, ExperimentID: event.ExperimentID, StudentID: event.StudentID, Score: score, ScoredAt: timex.RequiredTimestamptz(event.ScoredAt)})
+}
+
+// ListBestExperimentScores 返回指定实验每名学生的最高实例得分。
+func (s *txStore) ListBestExperimentScores(ctx context.Context, tenantID, experimentID int64) (map[int64]float64, error) {
+	rows, err := s.q.ListBestExperimentScores(ctx, sqlcgen.ListBestExperimentScoresParams{TenantID: tenantID, ExperimentID: experimentID})
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[int64]float64, len(rows))
+	for _, row := range rows {
+		out[row.StudentID] = row.Score
 	}
 	return out, nil
 }

@@ -38,6 +38,23 @@ func (s *txStore) GetCourse(ctx context.Context, tenantID, id int64) (Course, er
 	return courseFromGetRow(row)
 }
 
+// ListCoursesByIDs 批量读取同一租户内的课程。
+func (s *txStore) ListCoursesByIDs(ctx context.Context, tenantID int64, courseIDs []int64) ([]Course, error) {
+	rows, err := s.q.ListCoursesByIDs(ctx, sqlcgen.ListCoursesByIDsParams{TenantID: tenantID, Column2: courseIDs})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]Course, 0, len(rows))
+	for _, row := range rows {
+		course, err := courseFromBatchRow(row)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, course)
+	}
+	return out, nil
+}
+
 // GetCloneableCourse 按 ID 读取本租户课程或共享课程库课程。
 func (s *txStore) GetCloneableCourse(ctx context.Context, id, targetTenantID int64) (Course, error) {
 	row, err := s.q.GetCloneableCourseByID(ctx, sqlcgen.GetCloneableCourseByIDParams{ID: id, TenantID: targetTenantID})

@@ -8,7 +8,9 @@ CREATE TABLE IF NOT EXISTS system_config (
     updated_by BIGINT NOT NULL,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     CONSTRAINT chk_system_config_scope CHECK (scope IN (1,2)),
-    CONSTRAINT chk_system_config_tenant CHECK ((scope = 1 AND tenant_id IS NULL) OR (scope = 2 AND tenant_id IS NOT NULL))
+    CONSTRAINT chk_system_config_tenant CHECK ((scope = 1 AND tenant_id IS NULL) OR (scope = 2 AND tenant_id IS NOT NULL)),
+    CONSTRAINT chk_system_config_key CHECK (key = 'maintenance_mode'),
+    CONSTRAINT chk_system_config_value CHECK (value ? 'enabled' AND jsonb_typeof(value->'enabled') = 'boolean')
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS uk_system_config_global_key ON system_config(scope, key) WHERE tenant_id IS NULL;
@@ -18,10 +20,12 @@ CREATE TABLE IF NOT EXISTS config_change_log (
     id BIGINT PRIMARY KEY,
     config_id BIGINT NOT NULL REFERENCES system_config(id),
     tenant_id BIGINT NULL,
-    old_value JSONB NOT NULL DEFAULT '{}'::jsonb,
-    new_value JSONB NOT NULL DEFAULT '{}'::jsonb,
+    old_value JSONB NOT NULL DEFAULT '{"enabled": false}'::jsonb,
+    new_value JSONB NOT NULL DEFAULT '{"enabled": false}'::jsonb,
     operator_id BIGINT NOT NULL,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT chk_config_change_old_value CHECK (old_value ? 'enabled' AND jsonb_typeof(old_value->'enabled') = 'boolean'),
+    CONSTRAINT chk_config_change_new_value CHECK (new_value ? 'enabled' AND jsonb_typeof(new_value->'enabled') = 'boolean')
 );
 
 CREATE INDEX IF NOT EXISTS idx_config_change_log_config ON config_change_log(config_id, created_at DESC);

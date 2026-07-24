@@ -56,22 +56,24 @@ type SessionValidator interface {
 
 // Manager 负责 JWT 签发校验和服务签名时间窗口配置。
 type Manager struct {
-	signingKey     []byte
-	hmacKey        []byte
-	accessTTL      time.Duration
-	issuer         string
-	serviceMaxSkew time.Duration
-	sessions       SessionValidator
+	signingKey          []byte
+	hmacKey             []byte
+	accessTTL           time.Duration
+	experimentLaunchTTL time.Duration
+	issuer              string
+	serviceMaxSkew      time.Duration
+	sessions            SessionValidator
 }
 
 // NewManager 根据统一鉴权配置构造鉴权管理器。
 func NewManager(cfg config.AuthConfig) *Manager {
 	return &Manager{
-		signingKey:     []byte(cfg.JWTSigningKey),
-		hmacKey:        []byte(cfg.HMACKey),
-		accessTTL:      time.Duration(cfg.AccessTTLMin) * time.Minute,
-		issuer:         cfg.JWTIssuer,
-		serviceMaxSkew: time.Duration(cfg.ServiceAuthMaxSkewSeconds) * time.Second,
+		signingKey:          []byte(cfg.JWTSigningKey),
+		hmacKey:             []byte(cfg.HMACKey),
+		accessTTL:           time.Duration(cfg.AccessTTLMin) * time.Minute,
+		experimentLaunchTTL: time.Duration(cfg.ExperimentLaunchTTLSeconds) * time.Second,
+		issuer:              cfg.JWTIssuer,
+		serviceMaxSkew:      time.Duration(cfg.ServiceAuthMaxSkewSeconds) * time.Second,
 	}
 }
 

@@ -1655,6 +1655,43 @@ func (q *Queries) ListAssignmentsByCourse(ctx context.Context, arg ListAssignmen
 	return items, nil
 }
 
+const listBestExperimentScores = `-- name: ListBestExperimentScores :many
+SELECT student_id, MAX(score)::float8 AS score
+FROM experiment_score_projection
+WHERE tenant_id = $1 AND experiment_id = $2
+GROUP BY student_id
+`
+
+type ListBestExperimentScoresParams struct {
+	TenantID     int64 `json:"tenant_id"`
+	ExperimentID int64 `json:"experiment_id"`
+}
+
+type ListBestExperimentScoresRow struct {
+	StudentID int64   `json:"student_id"`
+	Score     float64 `json:"score"`
+}
+
+func (q *Queries) ListBestExperimentScores(ctx context.Context, arg ListBestExperimentScoresParams) ([]ListBestExperimentScoresRow, error) {
+	rows, err := q.db.Query(ctx, listBestExperimentScores, arg.TenantID, arg.ExperimentID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListBestExperimentScoresRow{}
+	for rows.Next() {
+		var i ListBestExperimentScoresRow
+		if err := rows.Scan(&i.StudentID, &i.Score); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listChapters = `-- name: ListChapters :many
 SELECT id, tenant_id, course_id, title, sort, created_at, updated_at, deleted_at
 FROM chapter
@@ -1799,6 +1836,80 @@ func (q *Queries) ListCourseMembers(ctx context.Context, arg ListCourseMembersPa
 			&i.StudentID,
 			&i.JoinedAt,
 			&i.JoinMode,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listCoursesByIDs = `-- name: ListCoursesByIDs :many
+SELECT id, tenant_id, teacher_id, name, description, type, difficulty, cover_url, semester, credits::float8 AS credits, schedule, start_at, end_at, invite_code, status, visibility, created_at, updated_at, deleted_at
+FROM course
+WHERE tenant_id = $1 AND id = ANY($2::bigint[]) AND deleted_at IS NULL
+ORDER BY id
+`
+
+type ListCoursesByIDsParams struct {
+	TenantID int64   `json:"tenant_id"`
+	Column2  []int64 `json:"column_2"`
+}
+
+type ListCoursesByIDsRow struct {
+	ID          int64              `json:"id"`
+	TenantID    int64              `json:"tenant_id"`
+	TeacherID   int64              `json:"teacher_id"`
+	Name        string             `json:"name"`
+	Description string             `json:"description"`
+	Type        int16              `json:"type"`
+	Difficulty  int16              `json:"difficulty"`
+	CoverUrl    pgtype.Text        `json:"cover_url"`
+	Semester    string             `json:"semester"`
+	Credits     float64            `json:"credits"`
+	Schedule    []byte             `json:"schedule"`
+	StartAt     pgtype.Timestamptz `json:"start_at"`
+	EndAt       pgtype.Timestamptz `json:"end_at"`
+	InviteCode  string             `json:"invite_code"`
+	Status      int16              `json:"status"`
+	Visibility  int16              `json:"visibility"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+	DeletedAt   pgtype.Timestamptz `json:"deleted_at"`
+}
+
+func (q *Queries) ListCoursesByIDs(ctx context.Context, arg ListCoursesByIDsParams) ([]ListCoursesByIDsRow, error) {
+	rows, err := q.db.Query(ctx, listCoursesByIDs, arg.TenantID, arg.Column2)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListCoursesByIDsRow{}
+	for rows.Next() {
+		var i ListCoursesByIDsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.TeacherID,
+			&i.Name,
+			&i.Description,
+			&i.Type,
+			&i.Difficulty,
+			&i.CoverUrl,
+			&i.Semester,
+			&i.Credits,
+			&i.Schedule,
+			&i.StartAt,
+			&i.EndAt,
+			&i.InviteCode,
+			&i.Status,
+			&i.Visibility,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.DeletedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -2314,6 +2425,45 @@ func (q *Queries) ListStudentCourses(ctx context.Context, arg ListStudentCourses
 			return nil, err
 		}
 		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listStudentExperimentLessonIDs = `-- name: ListStudentExperimentLessonIDs :many
+SELECT l.id
+FROM lesson l
+JOIN chapter c ON c.tenant_id = l.tenant_id AND c.id = l.chapter_id
+JOIN course_member m ON m.tenant_id = c.tenant_id AND m.course_id = c.course_id
+WHERE l.tenant_id = $1
+  AND l.content_type = 4
+  AND l.content_ref->>'experiment_id' = $2::text
+  AND m.student_id = $3
+  AND l.deleted_at IS NULL
+  AND c.deleted_at IS NULL
+`
+
+type ListStudentExperimentLessonIDsParams struct {
+	TenantID  int64  `json:"tenant_id"`
+	Column2   string `json:"column_2"`
+	StudentID int64  `json:"student_id"`
+}
+
+func (q *Queries) ListStudentExperimentLessonIDs(ctx context.Context, arg ListStudentExperimentLessonIDsParams) ([]int64, error) {
+	rows, err := q.db.Query(ctx, listStudentExperimentLessonIDs, arg.TenantID, arg.Column2, arg.StudentID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []int64{}
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -3753,6 +3903,39 @@ func (q *Queries) UpsertCourseReview(ctx context.Context, arg UpsertCourseReview
 		&i.CreatedAt,
 	)
 	return i, err
+}
+
+const upsertExperimentScoreProjection = `-- name: UpsertExperimentScoreProjection :exec
+INSERT INTO experiment_score_projection (instance_id, tenant_id, experiment_id, student_id, score, scored_at)
+VALUES ($1, $2, $3, $4, $5, $6)
+ON CONFLICT (instance_id) DO UPDATE
+SET score = EXCLUDED.score,
+    scored_at = EXCLUDED.scored_at
+WHERE experiment_score_projection.tenant_id = EXCLUDED.tenant_id
+  AND experiment_score_projection.experiment_id = EXCLUDED.experiment_id
+  AND experiment_score_projection.student_id = EXCLUDED.student_id
+  AND experiment_score_projection.scored_at <= EXCLUDED.scored_at
+`
+
+type UpsertExperimentScoreProjectionParams struct {
+	InstanceID   int64              `json:"instance_id"`
+	TenantID     int64              `json:"tenant_id"`
+	ExperimentID int64              `json:"experiment_id"`
+	StudentID    int64              `json:"student_id"`
+	Score        pgtype.Numeric     `json:"score"`
+	ScoredAt     pgtype.Timestamptz `json:"scored_at"`
+}
+
+func (q *Queries) UpsertExperimentScoreProjection(ctx context.Context, arg UpsertExperimentScoreProjectionParams) error {
+	_, err := q.db.Exec(ctx, upsertExperimentScoreProjection,
+		arg.InstanceID,
+		arg.TenantID,
+		arg.ExperimentID,
+		arg.StudentID,
+		arg.Score,
+		arg.ScoredAt,
+	)
+	return err
 }
 
 const upsertLessonProgress = `-- name: UpsertLessonProgress :one

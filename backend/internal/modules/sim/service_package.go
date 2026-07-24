@@ -4,6 +4,7 @@ package sim
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"strings"
 
@@ -337,11 +338,38 @@ func (s *Service) ListReviews(ctx context.Context, result int16, page, size int)
 	}); err != nil {
 		return nil, 0, page, size, lookupError(err, apperr.ErrSimReviewNotFound, apperr.ErrSimReviewQueryFailed)
 	}
+	accountIDs := make([]int64, 0, len(items)*2)
+	for _, item := range items {
+		accountIDs = append(accountIDs, item.SubmitterID)
+		if item.ReviewerID > 0 {
+			accountIDs = append(accountIDs, item.ReviewerID)
+		}
+	}
+	accounts, err := s.identity.BatchGetAccounts(ctx, accountIDs)
+	if err != nil {
+		return nil, 0, page, size, apperr.ErrSimReviewQueryFailed.WithCause(err)
+	}
+	accountNames := make(map[int64]string, len(accounts))
+	for _, account := range accounts {
+		accountNames[account.AccountID] = account.Name
+	}
 	out := make([]map[string]any, 0, len(items))
 	for _, item := range items {
 		mapped, err := reviewInfoToMap(item)
 		if err != nil {
 			return nil, 0, page, size, err
+		}
+		name, ok := accountNames[item.SubmitterID]
+		if !ok {
+			return nil, 0, page, size, apperr.ErrSimReviewDataCorrupt.WithCause(fmt.Errorf("仿真审核提交账号不存在: account_id=%d", item.SubmitterID))
+		}
+		mapped["submitter_name"] = name
+		if item.ReviewerID > 0 {
+			reviewerName, ok := accountNames[item.ReviewerID]
+			if !ok {
+				return nil, 0, page, size, apperr.ErrSimReviewDataCorrupt.WithCause(fmt.Errorf("仿真审核处理账号不存在: account_id=%d", item.ReviewerID))
+			}
+			mapped["reviewer_name"] = reviewerName
 		}
 		out = append(out, mapped)
 	}

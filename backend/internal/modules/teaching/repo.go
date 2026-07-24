@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"time"
 
+	"chaimir/internal/contracts"
 	"chaimir/internal/modules/teaching/internal/sqlcgen"
 	"chaimir/internal/platform/db"
 
@@ -25,6 +26,7 @@ type Store interface {
 type TxStore interface {
 	CreateCourse(context.Context, Course) (Course, error)
 	GetCourse(context.Context, int64, int64) (Course, error)
+	ListCoursesByIDs(context.Context, int64, []int64) ([]Course, error)
 	GetCloneableCourse(context.Context, int64, int64) (Course, error)
 	GetCourseByInviteCode(context.Context, string) (Course, error)
 	ListTeacherCourses(context.Context, int64, int64, CourseListFilter) ([]Course, int64, error)
@@ -83,6 +85,9 @@ type TxStore interface {
 	GetProgress(context.Context, int64, int64, int64) (LessonProgress, error)
 	ListProgressByCourse(context.Context, int64, int64) ([]LessonProgress, error)
 	ListStudentProgressByCourse(context.Context, int64, int64, int64) ([]LessonProgress, error)
+	ListStudentExperimentLessonIDs(context.Context, int64, int64, int64) ([]int64, error)
+	UpsertExperimentScoreProjection(context.Context, contracts.ExperimentScoredEvent) error
+	ListBestExperimentScores(context.Context, int64, int64) (map[int64]float64, error)
 	CreatePost(context.Context, DiscussionPost) (DiscussionPost, error)
 	GetPost(context.Context, int64, int64) (DiscussionPost, error)
 	ListPosts(context.Context, int64, int64, int, int) ([]DiscussionPost, int64, error)

@@ -3,7 +3,6 @@ package main
 
 import (
 	"context"
-	"encoding/base64"
 	"fmt"
 	"time"
 
@@ -16,7 +15,6 @@ import (
 	"chaimir/internal/platform/db"
 	"chaimir/internal/platform/storage"
 	"chaimir/internal/platform/transfer"
-	"chaimir/pkg/crypto"
 	"chaimir/pkg/snowflake"
 
 	"github.com/gin-gonic/gin"
@@ -64,14 +62,6 @@ func RegisterAdminModule(ctx context.Context, deps AdminModuleDeps) (*admin.Serv
 	if deps.Storage == nil {
 		return nil, fmt.Errorf("admin module 缺少统一对象存储")
 	}
-	key, err := base64.StdEncoding.DecodeString(deps.AuthConfig.EncryptionKey)
-	if err != nil {
-		return nil, fmt.Errorf("admin module 解析 APP_ENCRYPTION_KEY 失败: %w", err)
-	}
-	cipher, err := crypto.NewCipher(key)
-	if err != nil {
-		return nil, err
-	}
 	fileService, err := storage.NewServiceFromConfig(deps.AuthConfig, deps.MinIO, deps.Upload)
 	if err != nil {
 		return nil, err
@@ -91,7 +81,6 @@ func RegisterAdminModule(ctx context.Context, deps AdminModuleDeps) (*admin.Serv
 		Contest:     deps.Contest,
 		Notify:      deps.Notify,
 		Monitoring:  deps.Monitoring,
-		Cipher:      cipher,
 		Transfers:   deps.Transfer,
 		Storage:     deps.Storage,
 		FileService: fileService,

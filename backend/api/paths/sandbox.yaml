@@ -337,10 +337,11 @@
 /api/v1/sandbox/quota:
   get:
     tags: [sandbox]
-    summary: 查看本租户配额与当前用量
+    summary: 查看本校或平台指定租户的配额与当前用量
     operationId: sandboxQuotaStats
     x-chaimir-audience: school-or-platform-admin
     security: [{ bearerAuth: [] }]
+    parameters: [{ name: tenant_id, in: query, required: false, schema: { $ref: "#/components/schemas/SnowflakeID" }, description: 平台管理员必填；学校管理员不得传入 }]
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
   patch:
     tags: [sandbox]

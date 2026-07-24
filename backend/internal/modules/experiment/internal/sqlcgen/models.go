@@ -43,6 +43,7 @@ type ExperimentScoreOutbox struct {
 	InstanceID   int64              `json:"instance_id"`
 	StudentID    int64              `json:"student_id"`
 	Score        pgtype.Numeric     `json:"score"`
+	Completed    bool               `json:"completed"`
 	TraceID      string             `json:"trace_id"`
 	ScoredAt     pgtype.Timestamptz `json:"scored_at"`
 	Status       int16              `json:"status"`

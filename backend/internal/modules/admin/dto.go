@@ -5,11 +5,11 @@ import "chaimir/internal/platform/ids"
 
 // ConfigUpdateRequest 是配置更新和回滚请求。
 type ConfigUpdateRequest struct {
-	Scope       int16          `json:"scope"`
-	TenantID    ids.ID         `json:"tenant_id,omitempty"`
-	Value       map[string]any `json:"value"`
-	Version     int32          `json:"version"`
-	ChangeLogID ids.ID         `json:"change_log_id,omitempty"`
+	Scope       int16                 `json:"scope"`
+	TenantID    ids.ID                `json:"tenant_id,omitempty"`
+	Value       MaintenanceModeConfig `json:"value"`
+	Version     int32                 `json:"version"`
+	ChangeLogID ids.ID                `json:"change_log_id,omitempty"`
 }
 
 // ConfigRollbackRequest 是配置回滚请求,只携带回滚所需的历史记录和当前版本。
@@ -26,9 +26,16 @@ type AlertRuleRequest struct {
 	TenantID  ids.ID         `json:"tenant_id,omitempty"`
 	Name      string         `json:"name"`
 	Metric    string         `json:"metric"`
-	Condition map[string]any `json:"condition"`
+	Condition AlertCondition `json:"condition"`
 	Level     int16          `json:"level"`
 	Enabled   bool           `json:"enabled"`
+}
+
+// AlertCondition 定义业务告警的唯一阈值结构。
+type AlertCondition struct {
+	Operator        string  `json:"operator"`
+	Threshold       float64 `json:"threshold"`
+	DurationMinutes float64 `json:"duration_minutes"`
 }
 
 // AlertEventRequest 是告警处理请求。
@@ -38,13 +45,18 @@ type AlertEventRequest struct {
 
 // ConfigChangeLogDTO 表示配置变更历史响应。
 type ConfigChangeLogDTO struct {
-	ID         ids.ID         `json:"id"`
-	ConfigID   ids.ID         `json:"config_id"`
-	TenantID   ids.ID         `json:"tenant_id,omitempty"`
-	OldValue   map[string]any `json:"old_value"`
-	NewValue   map[string]any `json:"new_value"`
-	OperatorID ids.ID         `json:"operator_id"`
-	CreatedAt  string         `json:"created_at"`
+	ID         ids.ID                `json:"id"`
+	ConfigID   ids.ID                `json:"config_id"`
+	TenantID   ids.ID                `json:"tenant_id,omitempty"`
+	OldValue   MaintenanceModeConfig `json:"old_value"`
+	NewValue   MaintenanceModeConfig `json:"new_value"`
+	OperatorID ids.ID                `json:"operator_id"`
+	CreatedAt  string                `json:"created_at"`
+}
+
+// MaintenanceModeConfig 定义平台维护开关的唯一配置结构。
+type MaintenanceModeConfig struct {
+	Enabled bool `json:"enabled"`
 }
 
 // AlertRuleDTO 表示告警规则响应。
@@ -54,7 +66,7 @@ type AlertRuleDTO struct {
 	TenantID  ids.ID         `json:"tenant_id,omitempty"`
 	Name      string         `json:"name"`
 	Metric    string         `json:"metric"`
-	Condition map[string]any `json:"condition"`
+	Condition AlertCondition `json:"condition"`
 	Level     int16          `json:"level"`
 	Enabled   bool           `json:"enabled"`
 	CreatedAt string         `json:"created_at"`
@@ -66,6 +78,7 @@ type AlertEventDTO struct {
 	ID          ids.ID `json:"id"`
 	RuleID      ids.ID `json:"rule_id"`
 	TenantID    ids.ID `json:"tenant_id,omitempty"`
+	TenantName  string `json:"tenant_name,omitempty"`
 	Level       int16  `json:"level"`
 	Message     string `json:"message"`
 	Status      int16  `json:"status"`
@@ -90,18 +103,6 @@ type BackupRecordDTO struct {
 	Status     int16  `json:"status"`
 	StartedAt  string `json:"started_at"`
 	FinishedAt string `json:"finished_at,omitempty"`
-}
-
-type TenantSummaryDTO struct {
-	TenantID   ids.ID `json:"tenant_id"`
-	Code       string `json:"code"`
-	Name       string `json:"name"`
-	Type       int16  `json:"type"`
-	Status     int16  `json:"status"`
-	DeployMode int16  `json:"deploy_mode"`
-	ExpireAt   string `json:"expire_at,omitempty"`
-	CreatedAt  string `json:"created_at"`
-	UpdatedAt  string `json:"updated_at"`
 }
 
 type TenantApplicationSummaryDTO struct {

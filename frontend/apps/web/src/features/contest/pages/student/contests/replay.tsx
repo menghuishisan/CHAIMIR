@@ -1,21 +1,20 @@
 // 学生竞赛回放页：读取对局列表并按后端回放引用展示可追溯信息。
 
 import React, { useState } from 'react'
-import type { BattleMatch } from '@chaimir/api-client'
-import { Button, Input, Table, ResourceState } from '@chaimir/ui'
-import { Clapperboard, Search } from 'lucide-react'
+import type { BattleMatch, BattleReplay } from '@chaimir/api-client'
+import { Button, Table, ResourceState } from '@chaimir/ui'
+import { CheckCircle, Clapperboard, XCircle } from 'lucide-react'
 import { useParams } from 'react-router-dom'
 import { api } from '../../../../../app/api'
 import { usePendingAction } from '../../../../../hooks'
 import { useAsyncResource } from '../../../../../hooks/useAsyncResource'
 import styles from '../../contest.module.css'
-import { battleMatchStatusLabel, formatDateTime } from '../../../../../utils/index'
+import { battleMatchStatusLabel, battleResultLabel, formatDateTime } from '../../../../../utils/index'
 import { userFacingErrorMessage } from '../../../../../utils/userFacingError'
 
 const StudentContestReplayPage: React.FC = () => {
   const { id } = useParams()
-  const [matchId, setMatchId] = useState('')
-  const [replayReady, setReplayReady] = useState(false)
+  const [replay, setReplay] = useState<BattleReplay>()
   const [message, setMessage] = useState('')
   const { pendingAction, runPendingAction } = usePendingAction()
   const resource = useAsyncResource(
@@ -26,13 +25,11 @@ const StudentContestReplayPage: React.FC = () => {
     [id]
   )
 
-  const loadReplay = async (target = matchId) => {
-    if (!target.trim()) return
+  const loadReplay = async (target: string) => {
     setMessage('')
     try {
       const result = await api.contest.getBattleReplay(target.trim())
-      setReplayReady(Boolean(result.replay_ref))
-      setMatchId(result.match_id)
+      setReplay(result)
     } catch (error) {
       setMessage(userFacingErrorMessage(error, '暂时无法读取回放。'))
     }
@@ -67,22 +64,31 @@ const StudentContestReplayPage: React.FC = () => {
             emptyTitle="暂无对局"
             emptyDescription="对抗赛产生对局后会显示在这里。"
             columns={[
-              { key: 'problem', title: '题目', render: () => '竞赛题目', priority: 'primary' },
+              { key: 'problem', title: '题目', render: () => '对抗题目', priority: 'primary' },
               { key: 'status', title: '状态', render: (row) => battleMatchStatusLabel(row.status) },
               { key: 'matched', title: '匹配时间', render: (row) => formatDateTime(row.matched_at) },
-              { key: 'action', title: '操作', render: (row) => <Button size="sm" variant="outline" loading={pendingAction === `replay-${row.id}`} disabled={Boolean(pendingAction)} onClick={() => void runPendingAction(`replay-${row.id}`, () => loadReplay(row.id))}>读取回放</Button> },
+              { key: 'action', title: '操作', render: (row) => row.replay_available ? <Button size="sm" variant="outline" loading={pendingAction === `replay-${row.id}`} disabled={Boolean(pendingAction)} onClick={() => void runPendingAction(`replay-${row.id}`, () => loadReplay(row.id))}>查看回放</Button> : <span className={styles.muted}>尚未生成</span> },
             ]}
           />
         </section>
 
         <aside className={`${styles.panel} ${styles.section}`}>
-          <h2 className={styles.sectionTitle}>回放引用</h2>
-          <div className={styles.field}>
-            <label className={styles.label} htmlFor="match-id">对局编号</label>
-            <Input id="match-id" value={matchId} onChange={(event) => setMatchId(event.target.value)} fullWidth />
-          </div>
-          <Button icon={<Search size={16} />} loading={pendingAction === 'replay'} disabled={Boolean(pendingAction) || !matchId.trim()} onClick={() => void runPendingAction('replay', () => loadReplay())}>读取回放</Button>
-          {replayReady ? <p className={styles.muted}>回放记录已准备，可按对局步骤继续查看。</p> : <p className={styles.muted}>从对局列表中选择一场比赛读取回放。</p>}
+          <h2 className={styles.sectionTitle}>{replay?.problem_title || '回放时间轴'}</h2>
+          {replay ? (
+            <>
+              <p className={styles.muted}>{battleResultLabel(replay.result)} · {formatDateTime(replay.finished_at)}</p>
+              <ol className={styles.list}>
+                {replay.steps.map((step) => (
+                  <li className={styles.listItem} key={step.seq}>
+                    <strong>{step.passed ? <CheckCircle size={16} /> : <XCircle size={16} />} 第 {step.seq} 步 · {step.title}</strong>
+                    {(step.source || step.target) && <p className={styles.muted}>{[step.source, step.target].filter(Boolean).join(' → ')}</p>}
+                    {step.actual && <p>{step.actual}</p>}
+                    {step.hint && <p className={styles.muted}>{step.hint}</p>}
+                  </li>
+                ))}
+              </ol>
+            </>
+          ) : <p className={styles.muted}>从对局列表中选择一场已完成的比赛查看真实步骤。</p>}
         </aside>
       </div>
     </div>

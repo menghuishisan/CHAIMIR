@@ -14,7 +14,6 @@ type Tenant struct {
 	ExpireAt             *time.Time
 	LogoURL              string
 	DisplayName          string
-	FeatureFlags         []byte
 	AuthMode             int16
 	EnableActivationCode bool
 	CreatedAt            time.Time

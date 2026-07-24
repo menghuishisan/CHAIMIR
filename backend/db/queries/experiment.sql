@@ -27,6 +27,18 @@ WHERE tenant_id = $1
   AND ($2::bigint = 0 OR course_id = $2)
   AND ($3::smallint = 0 OR status = $3);
 
+-- name: ListIndependentPublishedExperiments :many
+SELECT id, tenant_id, course_id, author_id, template_ref, template_version, name, description, components, collab_mode, group_config, require_report, wizard_step, status, created_at, updated_at, deleted_at
+FROM experiment
+WHERE tenant_id = $1 AND course_id IS NULL AND status = 2 AND deleted_at IS NULL
+ORDER BY updated_at DESC, id DESC
+LIMIT $2 OFFSET $3;
+
+-- name: CountIndependentPublishedExperiments :one
+SELECT COUNT(*)::bigint
+FROM experiment
+WHERE tenant_id = $1 AND course_id IS NULL AND status = 2 AND deleted_at IS NULL;
+
 -- name: UpdateExperiment :one
 UPDATE experiment
 SET course_id = $3,
@@ -191,6 +203,8 @@ INSERT INTO experiment_report (id, tenant_id, instance_id, student_id, content_r
 VALUES ($1, $2, $3, $4, $5, NULL, NULL, 1, now())
 ON CONFLICT (tenant_id, instance_id, student_id) DO UPDATE
 SET content_ref = EXCLUDED.content_ref,
+	manual_score = NULL,
+	comment = NULL,
     status = 1,
     submitted_at = now()
 RETURNING id, tenant_id, instance_id, student_id, content_ref, COALESCE(manual_score::float8, 0)::float8 AS manual_score, comment, status, submitted_at;
@@ -245,9 +259,9 @@ FROM experiment e
 WHERE e.tenant_id = $1 AND e.deleted_at IS NULL AND ($2::bigint = 0 OR e.course_id = $2);
 
 -- name: CreateExperimentScoreOutbox :one
-INSERT INTO experiment_score_outbox (id, tenant_id, experiment_id, instance_id, student_id, score, trace_id, scored_at, status, retry_count, last_error, created_at, updated_at)
-VALUES ($1, $2, $3, $4, $5, $6::text::numeric, $7, $8, 1, 0, NULL, now(), now())
-RETURNING id, tenant_id, experiment_id, instance_id, student_id, score, trace_id, scored_at, status, retry_count, last_error, created_at, updated_at;
+INSERT INTO experiment_score_outbox (id, tenant_id, experiment_id, instance_id, student_id, score, completed, trace_id, scored_at, status, retry_count, last_error, created_at, updated_at)
+VALUES ($1, $2, $3, $4, $5, $6::text::numeric, $7, $8, $9, 1, 0, NULL, now(), now())
+RETURNING id, tenant_id, experiment_id, instance_id, student_id, score, completed, trace_id, scored_at, status, retry_count, last_error, created_at, updated_at;
 
 -- name: ClaimPendingExperimentScoreOutbox :many
 UPDATE experiment_score_outbox
@@ -260,16 +274,16 @@ WHERE id IN (
     LIMIT @page_limit
     FOR UPDATE SKIP LOCKED
 )
-RETURNING id, tenant_id, experiment_id, instance_id, student_id, score, trace_id, scored_at, status, retry_count, last_error, created_at, updated_at;
+RETURNING id, tenant_id, experiment_id, instance_id, student_id, score, completed, trace_id, scored_at, status, retry_count, last_error, created_at, updated_at;
 
 -- name: MarkExperimentScoreOutboxPublished :one
 UPDATE experiment_score_outbox
 SET status = 3, last_error = NULL, updated_at = now()
 WHERE tenant_id = $1 AND id = $2
-RETURNING id, tenant_id, experiment_id, instance_id, student_id, score, trace_id, scored_at, status, retry_count, last_error, created_at, updated_at;
+RETURNING id, tenant_id, experiment_id, instance_id, student_id, score, completed, trace_id, scored_at, status, retry_count, last_error, created_at, updated_at;
 
 -- name: MarkExperimentScoreOutboxFailed :one
 UPDATE experiment_score_outbox
 SET status = 4, last_error = $3, updated_at = now()
 WHERE tenant_id = $1 AND id = $2
-RETURNING id, tenant_id, experiment_id, instance_id, student_id, score, trace_id, scored_at, status, retry_count, last_error, created_at, updated_at;
+RETURNING id, tenant_id, experiment_id, instance_id, student_id, score, completed, trace_id, scored_at, status, retry_count, last_error, created_at, updated_at;

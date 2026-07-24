@@ -104,6 +104,7 @@ CREATE TABLE IF NOT EXISTS experiment_score_outbox (
     instance_id BIGINT NOT NULL,
     student_id BIGINT NOT NULL,
     score NUMERIC(5,2) NOT NULL,
+    completed BOOLEAN NOT NULL,
     trace_id VARCHAR(128) NOT NULL,
     scored_at TIMESTAMPTZ NOT NULL,
     status SMALLINT NOT NULL DEFAULT 1,

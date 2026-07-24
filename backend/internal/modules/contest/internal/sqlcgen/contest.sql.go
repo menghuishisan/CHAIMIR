@@ -98,7 +98,7 @@ WHERE id IN (
     LIMIT $1
     FOR UPDATE SKIP LOCKED
 )
-RETURNING id, tenant_id, organizer_id, name, mode, match_mode, team_mode, signup_start, signup_end, start_at, end_at, freeze_minutes, rules, status, created_at, updated_at, deleted_at
+RETURNING id, tenant_id, organizer_id, name, mode, match_mode, team_mode, signup_start, signup_end, start_at, end_at, freeze_minutes, status, created_at, updated_at, deleted_at
 `
 
 func (q *Queries) ClaimAutoArchiveContestsAcrossTenants(ctx context.Context, limit int32) ([]Contest, error) {
@@ -123,7 +123,6 @@ func (q *Queries) ClaimAutoArchiveContestsAcrossTenants(ctx context.Context, lim
 			&i.StartAt,
 			&i.EndAt,
 			&i.FreezeMinutes,
-			&i.Rules,
 			&i.Status,
 			&i.CreatedAt,
 			&i.UpdatedAt,
@@ -149,7 +148,7 @@ WHERE id IN (
     LIMIT $1
     FOR UPDATE SKIP LOCKED
 )
-RETURNING id, tenant_id, contest_id, problem_id, entry_a_id, entry_b_id, source_ref, sandbox_ref, judge_task_ref, result, score_delta, replay_ref, status, matched_at, finished_at
+RETURNING id, tenant_id, contest_id, problem_id, entry_a_id, entry_b_id, source_ref, sandbox_ref, judge_task_ref, result, score_delta, replay_data, status, matched_at, finished_at
 `
 
 func (q *Queries) ClaimPendingBattleMatchesAcrossTenants(ctx context.Context, limit int32) ([]BattleMatch, error) {
@@ -173,7 +172,7 @@ func (q *Queries) ClaimPendingBattleMatchesAcrossTenants(ctx context.Context, li
 			&i.JudgeTaskRef,
 			&i.Result,
 			&i.ScoreDelta,
-			&i.ReplayRef,
+			&i.ReplayData,
 			&i.Status,
 			&i.MatchedAt,
 			&i.FinishedAt,
@@ -391,9 +390,9 @@ func (q *Queries) CreateBattleEntry(ctx context.Context, arg CreateBattleEntryPa
 }
 
 const createBattleMatch = `-- name: CreateBattleMatch :one
-INSERT INTO battle_match (id, tenant_id, contest_id, problem_id, entry_a_id, entry_b_id, source_ref, sandbox_ref, judge_task_ref, result, score_delta, replay_ref, status, matched_at, finished_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7, NULL, NULL, NULL, '{}'::jsonb, NULL, 1, now(), NULL)
-RETURNING id, tenant_id, contest_id, problem_id, entry_a_id, entry_b_id, source_ref, sandbox_ref, judge_task_ref, result, score_delta, replay_ref, status, matched_at, finished_at
+INSERT INTO battle_match (id, tenant_id, contest_id, problem_id, entry_a_id, entry_b_id, source_ref, sandbox_ref, judge_task_ref, result, score_delta, replay_data, status, matched_at, finished_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, NULL, NULL, NULL, '{}'::jsonb, '[]'::jsonb, 1, now(), NULL)
+RETURNING id, tenant_id, contest_id, problem_id, entry_a_id, entry_b_id, source_ref, sandbox_ref, judge_task_ref, result, score_delta, replay_data, status, matched_at, finished_at
 `
 
 type CreateBattleMatchParams struct {
@@ -429,7 +428,7 @@ func (q *Queries) CreateBattleMatch(ctx context.Context, arg CreateBattleMatchPa
 		&i.JudgeTaskRef,
 		&i.Result,
 		&i.ScoreDelta,
-		&i.ReplayRef,
+		&i.ReplayData,
 		&i.Status,
 		&i.MatchedAt,
 		&i.FinishedAt,
@@ -481,9 +480,9 @@ func (q *Queries) CreateCheatRecord(ctx context.Context, arg CreateCheatRecordPa
 }
 
 const createContest = `-- name: CreateContest :one
-INSERT INTO contest (id, tenant_id, organizer_id, name, mode, match_mode, team_mode, signup_start, signup_end, start_at, end_at, freeze_minutes, rules, status, created_at, updated_at, deleted_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, 1, now(), now(), NULL)
-RETURNING id, tenant_id, organizer_id, name, mode, match_mode, team_mode, signup_start, signup_end, start_at, end_at, freeze_minutes, rules, status, created_at, updated_at, deleted_at
+INSERT INTO contest (id, tenant_id, organizer_id, name, mode, match_mode, team_mode, signup_start, signup_end, start_at, end_at, freeze_minutes, status, created_at, updated_at, deleted_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 1, now(), now(), NULL)
+RETURNING id, tenant_id, organizer_id, name, mode, match_mode, team_mode, signup_start, signup_end, start_at, end_at, freeze_minutes, status, created_at, updated_at, deleted_at
 `
 
 type CreateContestParams struct {
@@ -499,7 +498,6 @@ type CreateContestParams struct {
 	StartAt       pgtype.Timestamptz `json:"start_at"`
 	EndAt         pgtype.Timestamptz `json:"end_at"`
 	FreezeMinutes int32              `json:"freeze_minutes"`
-	Rules         []byte             `json:"rules"`
 }
 
 // contest.sql 定义 M8 竞赛模块的 sqlc 查询,仅访问竞赛模块自有表。
@@ -517,7 +515,6 @@ func (q *Queries) CreateContest(ctx context.Context, arg CreateContestParams) (C
 		arg.StartAt,
 		arg.EndAt,
 		arg.FreezeMinutes,
-		arg.Rules,
 	)
 	var i Contest
 	err := row.Scan(
@@ -533,7 +530,6 @@ func (q *Queries) CreateContest(ctx context.Context, arg CreateContestParams) (C
 		&i.StartAt,
 		&i.EndAt,
 		&i.FreezeMinutes,
-		&i.Rules,
 		&i.Status,
 		&i.CreatedAt,
 		&i.UpdatedAt,
@@ -715,7 +711,7 @@ const failBattleMatch = `-- name: FailBattleMatch :one
 UPDATE battle_match
 SET status = 4, finished_at = now()
 WHERE tenant_id = $1 AND id = $2
-RETURNING id, tenant_id, contest_id, problem_id, entry_a_id, entry_b_id, source_ref, sandbox_ref, judge_task_ref, result, score_delta, replay_ref, status, matched_at, finished_at
+RETURNING id, tenant_id, contest_id, problem_id, entry_a_id, entry_b_id, source_ref, sandbox_ref, judge_task_ref, result, score_delta, replay_data, status, matched_at, finished_at
 `
 
 type FailBattleMatchParams struct {
@@ -738,7 +734,7 @@ func (q *Queries) FailBattleMatch(ctx context.Context, arg FailBattleMatchParams
 		&i.JudgeTaskRef,
 		&i.Result,
 		&i.ScoreDelta,
-		&i.ReplayRef,
+		&i.ReplayData,
 		&i.Status,
 		&i.MatchedAt,
 		&i.FinishedAt,
@@ -797,11 +793,11 @@ SET sandbox_ref = $3,
     judge_task_ref = $4,
     result = $5,
     score_delta = $6,
-    replay_ref = $7,
+    replay_data = $7,
     status = 3,
     finished_at = now()
 WHERE tenant_id = $1 AND id = $2
-RETURNING id, tenant_id, contest_id, problem_id, entry_a_id, entry_b_id, source_ref, sandbox_ref, judge_task_ref, result, score_delta, replay_ref, status, matched_at, finished_at
+RETURNING id, tenant_id, contest_id, problem_id, entry_a_id, entry_b_id, source_ref, sandbox_ref, judge_task_ref, result, score_delta, replay_data, status, matched_at, finished_at
 `
 
 type FinishBattleMatchParams struct {
@@ -811,7 +807,7 @@ type FinishBattleMatchParams struct {
 	JudgeTaskRef pgtype.Text `json:"judge_task_ref"`
 	Result       pgtype.Int2 `json:"result"`
 	ScoreDelta   []byte      `json:"score_delta"`
-	ReplayRef    pgtype.Text `json:"replay_ref"`
+	ReplayData   []byte      `json:"replay_data"`
 }
 
 func (q *Queries) FinishBattleMatch(ctx context.Context, arg FinishBattleMatchParams) (BattleMatch, error) {
@@ -822,7 +818,7 @@ func (q *Queries) FinishBattleMatch(ctx context.Context, arg FinishBattleMatchPa
 		arg.JudgeTaskRef,
 		arg.Result,
 		arg.ScoreDelta,
-		arg.ReplayRef,
+		arg.ReplayData,
 	)
 	var i BattleMatch
 	err := row.Scan(
@@ -837,7 +833,7 @@ func (q *Queries) FinishBattleMatch(ctx context.Context, arg FinishBattleMatchPa
 		&i.JudgeTaskRef,
 		&i.Result,
 		&i.ScoreDelta,
-		&i.ReplayRef,
+		&i.ReplayData,
 		&i.Status,
 		&i.MatchedAt,
 		&i.FinishedAt,
@@ -876,7 +872,7 @@ func (q *Queries) GetBattleEntry(ctx context.Context, arg GetBattleEntryParams) 
 }
 
 const getBattleMatch = `-- name: GetBattleMatch :one
-SELECT id, tenant_id, contest_id, problem_id, entry_a_id, entry_b_id, source_ref, sandbox_ref, judge_task_ref, result, score_delta, replay_ref, status, matched_at, finished_at
+SELECT id, tenant_id, contest_id, problem_id, entry_a_id, entry_b_id, source_ref, sandbox_ref, judge_task_ref, result, score_delta, replay_data, status, matched_at, finished_at
 FROM battle_match
 WHERE tenant_id = $1 AND id = $2
 `
@@ -901,7 +897,7 @@ func (q *Queries) GetBattleMatch(ctx context.Context, arg GetBattleMatchParams) 
 		&i.JudgeTaskRef,
 		&i.Result,
 		&i.ScoreDelta,
-		&i.ReplayRef,
+		&i.ReplayData,
 		&i.Status,
 		&i.MatchedAt,
 		&i.FinishedAt,
@@ -910,7 +906,7 @@ func (q *Queries) GetBattleMatch(ctx context.Context, arg GetBattleMatchParams) 
 }
 
 const getBattleMatchByJudgeTask = `-- name: GetBattleMatchByJudgeTask :one
-SELECT id, tenant_id, contest_id, problem_id, entry_a_id, entry_b_id, source_ref, sandbox_ref, judge_task_ref, result, score_delta, replay_ref, status, matched_at, finished_at
+SELECT id, tenant_id, contest_id, problem_id, entry_a_id, entry_b_id, source_ref, sandbox_ref, judge_task_ref, result, score_delta, replay_data, status, matched_at, finished_at
 FROM battle_match
 WHERE tenant_id = $1 AND judge_task_ref = $2
 `
@@ -935,7 +931,7 @@ func (q *Queries) GetBattleMatchByJudgeTask(ctx context.Context, arg GetBattleMa
 		&i.JudgeTaskRef,
 		&i.Result,
 		&i.ScoreDelta,
-		&i.ReplayRef,
+		&i.ReplayData,
 		&i.Status,
 		&i.MatchedAt,
 		&i.FinishedAt,
@@ -944,7 +940,7 @@ func (q *Queries) GetBattleMatchByJudgeTask(ctx context.Context, arg GetBattleMa
 }
 
 const getContest = `-- name: GetContest :one
-SELECT id, tenant_id, organizer_id, name, mode, match_mode, team_mode, signup_start, signup_end, start_at, end_at, freeze_minutes, rules, status, created_at, updated_at, deleted_at
+SELECT id, tenant_id, organizer_id, name, mode, match_mode, team_mode, signup_start, signup_end, start_at, end_at, freeze_minutes, status, created_at, updated_at, deleted_at
 FROM contest
 WHERE tenant_id = $1 AND id = $2 AND deleted_at IS NULL
 `
@@ -970,7 +966,6 @@ func (q *Queries) GetContest(ctx context.Context, arg GetContestParams) (Contest
 		&i.StartAt,
 		&i.EndAt,
 		&i.FreezeMinutes,
-		&i.Rules,
 		&i.Status,
 		&i.CreatedAt,
 		&i.UpdatedAt,
@@ -1441,7 +1436,7 @@ func (q *Queries) ListBattleEntriesForTeam(ctx context.Context, arg ListBattleEn
 }
 
 const listBattleMatchesForTeam = `-- name: ListBattleMatchesForTeam :many
-SELECT m.id, m.tenant_id, m.contest_id, m.problem_id, m.entry_a_id, m.entry_b_id, m.source_ref, m.sandbox_ref, m.judge_task_ref, m.result, m.score_delta, m.replay_ref, m.status, m.matched_at, m.finished_at
+SELECT m.id, m.tenant_id, m.contest_id, m.problem_id, m.entry_a_id, m.entry_b_id, m.source_ref, m.sandbox_ref, m.judge_task_ref, m.result, m.score_delta, m.replay_data, m.status, m.matched_at, m.finished_at
 FROM battle_match m
 JOIN battle_entry a ON a.tenant_id = m.tenant_id AND a.id = m.entry_a_id
 JOIN battle_entry b ON b.tenant_id = m.tenant_id AND b.id = m.entry_b_id
@@ -1485,7 +1480,7 @@ func (q *Queries) ListBattleMatchesForTeam(ctx context.Context, arg ListBattleMa
 			&i.JudgeTaskRef,
 			&i.Result,
 			&i.ScoreDelta,
-			&i.ReplayRef,
+			&i.ReplayData,
 			&i.Status,
 			&i.MatchedAt,
 			&i.FinishedAt,
@@ -1594,7 +1589,7 @@ func (q *Queries) ListContestProblems(ctx context.Context, arg ListContestProble
 }
 
 const listContests = `-- name: ListContests :many
-SELECT id, tenant_id, organizer_id, name, mode, match_mode, team_mode, signup_start, signup_end, start_at, end_at, freeze_minutes, rules, status, created_at, updated_at, deleted_at
+SELECT id, tenant_id, organizer_id, name, mode, match_mode, team_mode, signup_start, signup_end, start_at, end_at, freeze_minutes, status, created_at, updated_at, deleted_at
 FROM contest
 WHERE tenant_id = $1 AND deleted_at IS NULL AND ($2::smallint = 0 OR status = $2)
 ORDER BY updated_at DESC, id DESC
@@ -1635,7 +1630,6 @@ func (q *Queries) ListContests(ctx context.Context, arg ListContestsParams) ([]C
 			&i.StartAt,
 			&i.EndAt,
 			&i.FreezeMinutes,
-			&i.Rules,
 			&i.Status,
 			&i.CreatedAt,
 			&i.UpdatedAt,
@@ -1652,8 +1646,9 @@ func (q *Queries) ListContests(ctx context.Context, arg ListContestsParams) ([]C
 }
 
 const listLadder = `-- name: ListLadder :many
-SELECT lr.id, lr.tenant_id, lr.contest_id, lr.team_id, lr.score::float8 AS score, lr.solved_count, lr.last_solve_at, lr.rank, lr.updated_at
+SELECT lr.id, lr.tenant_id, lr.contest_id, lr.team_id, t.name AS team_name, lr.score::float8 AS score, lr.solved_count, lr.last_solve_at, lr.rank, lr.updated_at
 FROM ladder_rank lr
+JOIN team t ON t.tenant_id = lr.tenant_id AND t.id = lr.team_id
 WHERE lr.tenant_id = $1 AND lr.contest_id = $2
   AND NOT EXISTS (
       SELECT 1 FROM cheat_record cr
@@ -1678,6 +1673,7 @@ type ListLadderRow struct {
 	TenantID    int64              `json:"tenant_id"`
 	ContestID   int64              `json:"contest_id"`
 	TeamID      int64              `json:"team_id"`
+	TeamName    string             `json:"team_name"`
 	Score       float64            `json:"score"`
 	SolvedCount int32              `json:"solved_count"`
 	LastSolveAt pgtype.Timestamptz `json:"last_solve_at"`
@@ -1704,6 +1700,7 @@ func (q *Queries) ListLadder(ctx context.Context, arg ListLadderParams) ([]ListL
 			&i.TenantID,
 			&i.ContestID,
 			&i.TeamID,
+			&i.TeamName,
 			&i.Score,
 			&i.SolvedCount,
 			&i.LastSolveAt,
@@ -1721,7 +1718,7 @@ func (q *Queries) ListLadder(ctx context.Context, arg ListLadderParams) ([]ListL
 }
 
 const listRunningBattleMatchesWithJudgeTask = `-- name: ListRunningBattleMatchesWithJudgeTask :many
-SELECT id, tenant_id, contest_id, problem_id, entry_a_id, entry_b_id, source_ref, sandbox_ref, judge_task_ref, result, score_delta, replay_ref, status, matched_at, finished_at
+SELECT id, tenant_id, contest_id, problem_id, entry_a_id, entry_b_id, source_ref, sandbox_ref, judge_task_ref, result, score_delta, replay_data, status, matched_at, finished_at
 FROM battle_match
 WHERE status = 2
   AND judge_task_ref IS NOT NULL
@@ -1751,7 +1748,7 @@ func (q *Queries) ListRunningBattleMatchesWithJudgeTask(ctx context.Context, lim
 			&i.JudgeTaskRef,
 			&i.Result,
 			&i.ScoreDelta,
-			&i.ReplayRef,
+			&i.ReplayData,
 			&i.Status,
 			&i.MatchedAt,
 			&i.FinishedAt,
@@ -1825,7 +1822,7 @@ func (q *Queries) ListStudentContestRecords(ctx context.Context, arg ListStudent
 }
 
 const listStudentContests = `-- name: ListStudentContests :many
-SELECT id, tenant_id, organizer_id, name, mode, match_mode, team_mode, signup_start, signup_end, start_at, end_at, freeze_minutes, rules, status, created_at, updated_at, deleted_at
+SELECT id, tenant_id, organizer_id, name, mode, match_mode, team_mode, signup_start, signup_end, start_at, end_at, freeze_minutes, status, created_at, updated_at, deleted_at
 FROM contest
 WHERE tenant_id = $1 AND deleted_at IS NULL AND status BETWEEN 2 AND 6
 ORDER BY updated_at DESC, id DESC
@@ -1860,7 +1857,6 @@ func (q *Queries) ListStudentContests(ctx context.Context, arg ListStudentContes
 			&i.StartAt,
 			&i.EndAt,
 			&i.FreezeMinutes,
-			&i.Rules,
 			&i.Status,
 			&i.CreatedAt,
 			&i.UpdatedAt,
@@ -2192,7 +2188,7 @@ const setContestStatus = `-- name: SetContestStatus :one
 UPDATE contest
 SET status = $3, updated_at = now()
 WHERE tenant_id = $1 AND id = $2 AND deleted_at IS NULL
-RETURNING id, tenant_id, organizer_id, name, mode, match_mode, team_mode, signup_start, signup_end, start_at, end_at, freeze_minutes, rules, status, created_at, updated_at, deleted_at
+RETURNING id, tenant_id, organizer_id, name, mode, match_mode, team_mode, signup_start, signup_end, start_at, end_at, freeze_minutes, status, created_at, updated_at, deleted_at
 `
 
 type SetContestStatusParams struct {
@@ -2217,7 +2213,6 @@ func (q *Queries) SetContestStatus(ctx context.Context, arg SetContestStatusPara
 		&i.StartAt,
 		&i.EndAt,
 		&i.FreezeMinutes,
-		&i.Rules,
 		&i.Status,
 		&i.CreatedAt,
 		&i.UpdatedAt,
@@ -2276,7 +2271,7 @@ SET sandbox_ref = $3,
     judge_task_ref = $4,
     status = 2
 WHERE tenant_id = $1 AND id = $2 AND status = 2
-RETURNING id, tenant_id, contest_id, problem_id, entry_a_id, entry_b_id, source_ref, sandbox_ref, judge_task_ref, result, score_delta, replay_ref, status, matched_at, finished_at
+RETURNING id, tenant_id, contest_id, problem_id, entry_a_id, entry_b_id, source_ref, sandbox_ref, judge_task_ref, result, score_delta, replay_data, status, matched_at, finished_at
 `
 
 type StartBattleMatchParams struct {
@@ -2306,7 +2301,7 @@ func (q *Queries) StartBattleMatch(ctx context.Context, arg StartBattleMatchPara
 		&i.JudgeTaskRef,
 		&i.Result,
 		&i.ScoreDelta,
-		&i.ReplayRef,
+		&i.ReplayData,
 		&i.Status,
 		&i.MatchedAt,
 		&i.FinishedAt,
@@ -2354,10 +2349,9 @@ SET name = $3,
     start_at = $9,
     end_at = $10,
     freeze_minutes = $11,
-    rules = $12,
     updated_at = now()
 WHERE tenant_id = $1 AND id = $2 AND status = 1 AND deleted_at IS NULL
-RETURNING id, tenant_id, organizer_id, name, mode, match_mode, team_mode, signup_start, signup_end, start_at, end_at, freeze_minutes, rules, status, created_at, updated_at, deleted_at
+RETURNING id, tenant_id, organizer_id, name, mode, match_mode, team_mode, signup_start, signup_end, start_at, end_at, freeze_minutes, status, created_at, updated_at, deleted_at
 `
 
 type UpdateContestParams struct {
@@ -2372,7 +2366,6 @@ type UpdateContestParams struct {
 	StartAt       pgtype.Timestamptz `json:"start_at"`
 	EndAt         pgtype.Timestamptz `json:"end_at"`
 	FreezeMinutes int32              `json:"freeze_minutes"`
-	Rules         []byte             `json:"rules"`
 }
 
 func (q *Queries) UpdateContest(ctx context.Context, arg UpdateContestParams) (Contest, error) {
@@ -2388,7 +2381,6 @@ func (q *Queries) UpdateContest(ctx context.Context, arg UpdateContestParams) (C
 		arg.StartAt,
 		arg.EndAt,
 		arg.FreezeMinutes,
-		arg.Rules,
 	)
 	var i Contest
 	err := row.Scan(
@@ -2404,7 +2396,6 @@ func (q *Queries) UpdateContest(ctx context.Context, arg UpdateContestParams) (C
 		&i.StartAt,
 		&i.EndAt,
 		&i.FreezeMinutes,
-		&i.Rules,
 		&i.Status,
 		&i.CreatedAt,
 		&i.UpdatedAt,

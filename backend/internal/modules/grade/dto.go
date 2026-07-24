@@ -98,17 +98,20 @@ type SemesterDTO struct {
 
 // ReviewDTO 表示成绩审核响应。
 type ReviewDTO struct {
-	ID          ids.ID `json:"id"`
-	TenantID    ids.ID `json:"tenant_id"`
-	CourseID    ids.ID `json:"course_id"`
-	SemesterID  ids.ID `json:"semester_id,omitempty"`
-	SubmitterID ids.ID `json:"submitter_id"`
-	ReviewerID  ids.ID `json:"reviewer_id,omitempty"`
-	Status      int16  `json:"status"`
-	IsLocked    bool   `json:"is_locked"`
-	Comment     string `json:"comment,omitempty"`
-	SubmittedAt string `json:"submitted_at"`
-	ReviewedAt  string `json:"reviewed_at,omitempty"`
+	ID            ids.ID `json:"id"`
+	TenantID      ids.ID `json:"tenant_id"`
+	CourseID      ids.ID `json:"course_id"`
+	CourseName    string `json:"course_name"`
+	SemesterID    ids.ID `json:"semester_id,omitempty"`
+	SubmitterID   ids.ID `json:"submitter_id"`
+	SubmitterName string `json:"submitter_name"`
+	ReviewerID    ids.ID `json:"reviewer_id,omitempty"`
+	ReviewerName  string `json:"reviewer_name,omitempty"`
+	Status        int16  `json:"status"`
+	IsLocked      bool   `json:"is_locked"`
+	Comment       string `json:"comment,omitempty"`
+	SubmittedAt   string `json:"submitted_at"`
+	ReviewedAt    string `json:"reviewed_at,omitempty"`
 }
 
 // AppealDTO 表示成绩申诉响应。

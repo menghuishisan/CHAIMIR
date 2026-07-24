@@ -30,9 +30,9 @@ type Store interface {
 type TxStore interface {
 	ListSystemConfigs(context.Context, int16, int64) ([]ConfigDTO, error)
 	GetSystemConfig(context.Context, int16, int64, string) (ConfigDTO, error)
-	CreateSystemConfig(context.Context, int64, int16, int64, string, map[string]any, int64) (ConfigDTO, error)
-	UpdateSystemConfig(context.Context, int16, int64, string, map[string]any, int64, int32) (ConfigDTO, error)
-	CreateConfigChangeLog(context.Context, int64, int64, int64, map[string]any, map[string]any, int64) (ConfigChangeLogDTO, error)
+	CreateSystemConfig(context.Context, int64, int16, int64, string, MaintenanceModeConfig, int64) (ConfigDTO, error)
+	UpdateSystemConfig(context.Context, int16, int64, string, MaintenanceModeConfig, int64, int32) (ConfigDTO, error)
+	CreateConfigChangeLog(context.Context, int64, int64, int64, MaintenanceModeConfig, MaintenanceModeConfig, int64) (ConfigChangeLogDTO, error)
 	GetConfigChangeLog(context.Context, int64, int64) (ConfigChangeLogDTO, error)
 	ListConfigChangeLogs(context.Context, int64, int, int) ([]ConfigChangeLogDTO, int64, error)
 	CreateAlertRule(context.Context, int64, AlertRuleRequest) (AlertRuleDTO, error)

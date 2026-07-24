@@ -19,31 +19,31 @@ SET password_hash = $2, updated_at = now()
 WHERE id = $1 AND status = 1;
 
 -- name: GetTenantByCode :one
-SELECT id, code, name, type, status, deploy_mode, expire_at, logo_url, display_name, feature_flags, auth_mode, enable_activation_code, created_at, updated_at
+SELECT id, code, name, type, status, deploy_mode, expire_at, logo_url, display_name, auth_mode, enable_activation_code, created_at, updated_at
 FROM tenant
 WHERE code = $1;
 
 -- name: GetTenantByID :one
-SELECT id, code, name, type, status, deploy_mode, expire_at, logo_url, display_name, feature_flags, auth_mode, enable_activation_code, created_at, updated_at
+SELECT id, code, name, type, status, deploy_mode, expire_at, logo_url, display_name, auth_mode, enable_activation_code, created_at, updated_at
 FROM tenant
 WHERE id = $1;
 
 -- name: ListTenantsPaged :many
-SELECT id, code, name, type, status, deploy_mode, expire_at, logo_url, display_name, feature_flags, auth_mode, enable_activation_code, created_at, updated_at,
+SELECT id, code, name, type, status, deploy_mode, expire_at, logo_url, display_name, auth_mode, enable_activation_code, created_at, updated_at,
        COUNT(*) OVER() AS total_count
 FROM tenant
 ORDER BY created_at DESC, id DESC
 LIMIT $1 OFFSET $2;
 
 -- name: ListTenants :many
-SELECT id, code, name, type, status, deploy_mode, expire_at, logo_url, display_name, feature_flags, auth_mode, enable_activation_code, created_at, updated_at
+SELECT id, code, name, type, status, deploy_mode, expire_at, logo_url, display_name, auth_mode, enable_activation_code, created_at, updated_at
 FROM tenant
 ORDER BY created_at DESC, id DESC;
 
 -- name: CreateTenant :one
-INSERT INTO tenant (id, code, name, type, status, deploy_mode, expire_at, logo_url, display_name, feature_flags, auth_mode, enable_activation_code, created_at, updated_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, now(), now())
-RETURNING id, code, name, type, status, deploy_mode, expire_at, logo_url, display_name, feature_flags, auth_mode, enable_activation_code, created_at, updated_at;
+INSERT INTO tenant (id, code, name, type, status, deploy_mode, expire_at, logo_url, display_name, auth_mode, enable_activation_code, created_at, updated_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, now(), now())
+RETURNING id, code, name, type, status, deploy_mode, expire_at, logo_url, display_name, auth_mode, enable_activation_code, created_at, updated_at;
 
 -- name: CreateTenantProvisionOutbox :one
 INSERT INTO tenant_provision_outbox (id, tenant_id, deploy_mode, trace_id, provisioned_at, status, retry_count, last_error, created_at, updated_at)
@@ -77,15 +77,15 @@ RETURNING id, tenant_id, deploy_mode, trace_id, provisioned_at, status, retry_co
 
 -- name: UpdateTenantConfig :one
 UPDATE tenant
-SET logo_url = $2, display_name = $3, feature_flags = $4, auth_mode = $5, enable_activation_code = $6, updated_at = now()
+SET logo_url = $2, display_name = $3, auth_mode = $4, enable_activation_code = $5, updated_at = now()
 WHERE id = $1
-RETURNING id, code, name, type, status, deploy_mode, expire_at, logo_url, display_name, feature_flags, auth_mode, enable_activation_code, created_at, updated_at;
+RETURNING id, code, name, type, status, deploy_mode, expire_at, logo_url, display_name, auth_mode, enable_activation_code, created_at, updated_at;
 
 -- name: UpdateTenantStatus :one
 UPDATE tenant
 SET status = $2, expire_at = $3, updated_at = now()
 WHERE id = $1
-RETURNING id, code, name, type, status, deploy_mode, expire_at, logo_url, display_name, feature_flags, auth_mode, enable_activation_code, created_at, updated_at;
+RETURNING id, code, name, type, status, deploy_mode, expire_at, logo_url, display_name, auth_mode, enable_activation_code, created_at, updated_at;
 
 -- name: CreateTenantApplication :one
 INSERT INTO tenant_application (id, school_name, school_type, contact_name, contact_phone, contact_email, status, created_at, updated_at)

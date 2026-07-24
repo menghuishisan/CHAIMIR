@@ -6,13 +6,15 @@ import (
 	"time"
 
 	"chaimir/internal/modules/teaching/internal/sqlcgen"
+	"chaimir/internal/platform/jsonx"
 	"chaimir/internal/platform/pgtypex"
 	"chaimir/internal/platform/timex"
+	"chaimir/pkg/apperr"
 )
 
 // CreateAssignment 创建作业草稿。
 func (s *txStore) CreateAssignment(ctx context.Context, assignment Assignment) (Assignment, error) {
-	penalty, err := encodeMap(assignment.LatePenalty)
+	penalty, err := jsonx.AnyBytes(assignment.LatePenalty, apperr.ErrTeachingAssignmentInvalid)
 	if err != nil {
 		return Assignment{}, err
 	}
@@ -51,7 +53,7 @@ func (s *txStore) ListAssignmentsByCourse(ctx context.Context, tenantID, courseI
 
 // UpdateAssignment 更新草稿作业。
 func (s *txStore) UpdateAssignment(ctx context.Context, assignment Assignment) (Assignment, error) {
-	penalty, err := encodeMap(assignment.LatePenalty)
+	penalty, err := jsonx.AnyBytes(assignment.LatePenalty, apperr.ErrTeachingAssignmentInvalid)
 	if err != nil {
 		return Assignment{}, err
 	}

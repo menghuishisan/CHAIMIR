@@ -117,13 +117,14 @@ type MinIOConfig struct {
 
 // AuthConfig 描述 JWT、服务签名和敏感数据加密密钥。
 type AuthConfig struct {
-	JWTSigningKey             string
-	AccessTTLMin              int
-	RefreshTTLDay             int
-	JWTIssuer                 string
-	EncryptionKey             string
-	HMACKey                   string
-	ServiceAuthMaxSkewSeconds int
+	JWTSigningKey              string
+	AccessTTLMin               int
+	RefreshTTLDay              int
+	JWTIssuer                  string
+	EncryptionKey              string
+	HMACKey                    string
+	ExperimentLaunchTTLSeconds int
+	ServiceAuthMaxSkewSeconds  int
 }
 
 // BootstrapConfig 描述 migrate/seed 所需的首个租户与管理员参数。
@@ -175,6 +176,7 @@ type SMSConfig struct {
 type UploadConfig struct {
 	ImportMaxBytes              int64
 	ContentAttachmentMaxBytes   int64
+	ExperimentReportMaxBytes    int64
 	SimBundleMaxBytes           int64
 	SimBundleMetadataMaxBytes   int64
 	SimBundleMaxFiles           int
@@ -505,13 +507,14 @@ func Load() (*Config, error) {
 		DownloadGrantTTLSeconds: reqInt("STORAGE_DOWNLOAD_GRANT_TTL_SECONDS"),
 	}
 	c.Auth = AuthConfig{
-		JWTSigningKey:             req("JWT_SIGNING_KEY"),
-		AccessTTLMin:              reqInt("JWT_ACCESS_TTL_MIN"),
-		RefreshTTLDay:             reqInt("JWT_REFRESH_TTL_DAY"),
-		JWTIssuer:                 req("JWT_ISSUER"),
-		EncryptionKey:             req("APP_ENCRYPTION_KEY"),
-		HMACKey:                   req("APP_HMAC_KEY"),
-		ServiceAuthMaxSkewSeconds: reqInt("SERVICE_AUTH_MAX_SKEW_SECONDS"),
+		JWTSigningKey:              req("JWT_SIGNING_KEY"),
+		AccessTTLMin:               reqInt("JWT_ACCESS_TTL_MIN"),
+		RefreshTTLDay:              reqInt("JWT_REFRESH_TTL_DAY"),
+		JWTIssuer:                  req("JWT_ISSUER"),
+		EncryptionKey:              req("APP_ENCRYPTION_KEY"),
+		HMACKey:                    req("APP_HMAC_KEY"),
+		ExperimentLaunchTTLSeconds: reqInt("EXPERIMENT_LAUNCH_GRANT_TTL_SECONDS"),
+		ServiceAuthMaxSkewSeconds:  reqInt("SERVICE_AUTH_MAX_SKEW_SECONDS"),
 	}
 	c.Bootstrap = BootstrapConfig{
 		SchoolTenantID:        c.Deploy.SchoolTenantID,
@@ -555,6 +558,7 @@ func Load() (*Config, error) {
 	c.Upload = UploadConfig{
 		ImportMaxBytes:              reqInt64("UPLOAD_IMPORT_MAX_BYTES"),
 		ContentAttachmentMaxBytes:   reqInt64("UPLOAD_CONTENT_ATTACHMENT_MAX_BYTES"),
+		ExperimentReportMaxBytes:    reqInt64("UPLOAD_EXPERIMENT_REPORT_MAX_BYTES"),
 		SimBundleMaxBytes:           reqInt64("UPLOAD_SIM_BUNDLE_MAX_BYTES"),
 		SimBundleMetadataMaxBytes:   reqInt64("UPLOAD_SIM_BUNDLE_METADATA_MAX_BYTES"),
 		SimBundleMaxFiles:           reqInt("UPLOAD_SIM_BUNDLE_MAX_FILES"),
@@ -717,6 +721,9 @@ func Load() (*Config, error) {
 	if c.Auth.ServiceAuthMaxSkewSeconds <= 0 {
 		errs = append(errs, "SERVICE_AUTH_MAX_SKEW_SECONDS 必须大于 0")
 	}
+	if c.Auth.ExperimentLaunchTTLSeconds <= 0 {
+		errs = append(errs, "EXPERIMENT_LAUNCH_GRANT_TTL_SECONDS 必须大于 0")
+	}
 	if c.Server.HealthTimeoutSeconds <= 0 {
 		errs = append(errs, "HEALTH_CHECK_TIMEOUT_SECONDS 必须大于 0")
 	}
@@ -773,6 +780,9 @@ func Load() (*Config, error) {
 	}
 	if c.Upload.ContentAttachmentMaxBytes <= 0 {
 		errs = append(errs, "UPLOAD_CONTENT_ATTACHMENT_MAX_BYTES 必须大于 0")
+	}
+	if c.Upload.ExperimentReportMaxBytes <= 0 {
+		errs = append(errs, "UPLOAD_EXPERIMENT_REPORT_MAX_BYTES 必须大于 0")
 	}
 	if c.Upload.SimBundleMaxBytes <= 0 {
 		errs = append(errs, "UPLOAD_SIM_BUNDLE_MAX_BYTES 必须大于 0")

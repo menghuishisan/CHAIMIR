@@ -70,6 +70,7 @@ export interface Lesson {
   title: string
   content_type: LessonContentType
   content_ref: LessonContentRef
+  experiment_launch_grant?: string
   sort: number
   created_at: string
   updated_at: string
@@ -148,7 +149,7 @@ export interface Assignment {
   due_at: string
   max_attempts: number
   late_policy: LatePolicy
-  late_penalty: Record<string, unknown>
+  late_penalty: LatePenaltyConfig | null
   status: AssignmentStatus
   created_at: string
   updated_at: string
@@ -160,8 +161,13 @@ export interface AssignmentRequest {
   due_at: string
   max_attempts: number
   late_policy: LatePolicy
-  late_penalty: Record<string, unknown>
+  late_penalty: LatePenaltyConfig | null
   items: AssignmentItemInput[]
+}
+
+export interface LatePenaltyConfig {
+  points?: number
+  percent?: number
 }
 
 export interface AssignmentItemInput {
@@ -204,6 +210,8 @@ export interface Submission {
   id: SnowflakeID
   assignment_id: SnowflakeID
   student_id: SnowflakeID
+  student_name: string
+  student_no: string
   attempt_no: number
   content: Record<string, unknown>
   judge_task_ref?: string
@@ -224,6 +232,8 @@ export interface CourseMember {
   id: SnowflakeID
   course_id: SnowflakeID
   student_id: SnowflakeID
+  student_name: string
+  student_no: string
   join_mode: JoinMode
   joined_at: string
 }
@@ -309,6 +319,8 @@ export interface OverrideGradeRequest {
 export interface TeachingCourseGrade {
   course_id: SnowflakeID
   student_id: SnowflakeID
+  student_name: string
+  student_no: string
   auto_total: number
   override_total?: number
   final_total: number

@@ -30,7 +30,6 @@ CREATE TABLE IF NOT EXISTS tenant (
     expire_at TIMESTAMPTZ,
     logo_url VARCHAR(255),
     display_name VARCHAR(128),
-    feature_flags JSONB NOT NULL DEFAULT '{}'::jsonb,
     auth_mode SMALLINT NOT NULL DEFAULT 1,
     enable_activation_code BOOLEAN NOT NULL DEFAULT true,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),

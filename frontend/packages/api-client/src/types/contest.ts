@@ -46,7 +46,6 @@ export interface Contest {
   start_at: string
   end_at: string
   freeze_minutes: number
-  rules: Record<string, unknown>
   status: ContestStatus
   created_at: string
   updated_at: string
@@ -62,7 +61,6 @@ export interface ContestRequest {
   start_at: string
   end_at: string
   freeze_minutes: number
-  rules: Record<string, unknown>
 }
 
 export interface ContestProblem {
@@ -188,19 +186,34 @@ export interface BattleMatch {
   judge_task_ref?: string
   result?: BattleResult
   score_delta: Record<string, unknown>
-  replay_ref?: string
+  replay_available: boolean
   status: BattleMatchStatus
   matched_at: string
   finished_at?: string
 }
 
-export interface BattleReplayRef {
+export interface BattleReplayStep {
+  seq: number
+  title: string
+  source?: string
+  target?: string
+  passed: boolean
+  actual?: string
+  hint?: string
+}
+
+export interface BattleReplay {
   match_id: SnowflakeID
-  replay_ref: string
+  problem_title: string
+  result: BattleResult
+  score_delta: Record<string, unknown>
+  steps: BattleReplayStep[]
+  finished_at: string
 }
 
 export interface LadderRank {
   team_id: SnowflakeID
+  team_name: string
   score: number
   solved_count: number
   last_solve_at?: string
@@ -212,7 +225,7 @@ export interface ResultSnapshot {
   id: SnowflakeID
   tenant_id?: SnowflakeID
   contest_id: SnowflakeID
-  final_ranking: Record<string, unknown>[]
+  final_ranking: LadderRank[]
   generated_at: string
 }
 
@@ -261,7 +274,7 @@ export interface VulnSourceRequest {
   id?: SnowflakeID
   type: number
   name: string
-  config: Record<string, unknown>
+  config: VulnSourceConfig
   default_level: VulnLevel
   enabled: boolean
 }
@@ -270,10 +283,28 @@ export interface VulnSource {
   id: SnowflakeID
   type: number
   name: string
-  config: Record<string, unknown>
+  config: VulnSourceConfig
   default_level: VulnLevel
   enabled: boolean
   last_sync_at?: string
+}
+
+export interface VulnSourceConfig {
+  endpoint: string
+  method: 'GET' | 'POST'
+  timeout_seconds?: number
+  headers?: Record<string, string>
+  body?: Record<string, unknown>
+  cases_path?: string
+  mapping: VulnSourceMapping
+}
+
+export interface VulnSourceMapping {
+  external_ref: string
+  title: string
+  level?: string
+  runtime_mode?: string
+  draft_body: string
 }
 
 export interface VulnProblemImportRequest {

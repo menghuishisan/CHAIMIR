@@ -23,8 +23,8 @@ const StudentContestDetailPage: React.FC = () => {
   const resource = useAsyncResource<DetailData>(
     async () => {
       if (!id) throw new Error('缺少竞赛编号，无法读取竞赛详情。')
-      const [contests, problems, ladder, me] = await Promise.all([
-        api.contest.getStudentContests({ page: 1, size: 100 }),
+      const [contest, problems, ladder, me] = await Promise.all([
+        api.contest.getStudentContest(id),
         api.contest.getProblems(id),
         api.contest.getLadder(id, { page: 1, size: 10 }),
         api.identity.getMe(),
@@ -32,7 +32,6 @@ const StudentContestDetailPage: React.FC = () => {
       if (!me.account.tenant_id) {
         throw new Error('当前账号未关联学校，暂时无法订阅竞赛排行榜。')
       }
-      const contest = contests.list.find((item) => item.id === id) ?? null
       return {
         contest,
         problems,
@@ -106,7 +105,7 @@ const StudentContestDetailPage: React.FC = () => {
           <ul className={styles.list}>
             {ladder.map((rank) => (
               <li className={styles.listItem} key={rank.team_id}>
-                <strong>第 {rank.rank} 名</strong>
+                <strong>第 {rank.rank} 名 · {rank.team_name}</strong>
                 <p className={styles.muted}>{rank.score} 分，解出 {rank.solved_count} 题</p>
               </li>
             ))}

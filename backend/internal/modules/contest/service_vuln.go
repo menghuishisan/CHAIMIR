@@ -53,7 +53,7 @@ func (s *Service) UpsertPlatformVulnSource(ctx context.Context, req VulnSourceRe
 	if err := s.writeAudit(ctx, 0, id.AccountID, contracts.RoleNumPlatformAdmin, "contest.vuln_source.upsert", auditTargetVulnSource, item.ID, nil); err != nil {
 		return VulnSourceDTO{}, err
 	}
-	return vulnSourceDTOFromModel(item), nil
+	return vulnSourceDTOFromModel(item)
 }
 
 // ListPlatformVulnSources 查询平台全局漏洞源，不返回学校自建配置。
@@ -73,7 +73,11 @@ func (s *Service) ListPlatformVulnSources(ctx context.Context) ([]VulnSourceDTO,
 	out := make([]VulnSourceDTO, 0, len(items))
 	for _, item := range items {
 		if item.TenantID == 0 {
-			out = append(out, vulnSourceDTOFromModel(item))
+			itemDTO, err := vulnSourceDTOFromModel(item)
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, itemDTO)
 		}
 	}
 	return out, nil
@@ -107,7 +111,7 @@ func (s *Service) UpsertVulnSource(ctx context.Context, req VulnSourceRequest) (
 	if err := s.writeAudit(ctx, id.TenantID, id.AccountID, contracts.RoleNumTeacher, "contest.vuln_source.upsert", auditTargetVulnSource, item.ID, nil); err != nil {
 		return VulnSourceDTO{}, err
 	}
-	return vulnSourceDTOFromModel(item), nil
+	return vulnSourceDTOFromModel(item)
 }
 
 // ListVulnSources 查询平台预置源和本租户源。
@@ -126,7 +130,11 @@ func (s *Service) ListVulnSources(ctx context.Context) ([]VulnSourceDTO, error) 
 	}
 	out := make([]VulnSourceDTO, 0, len(items))
 	for _, item := range items {
-		out = append(out, vulnSourceDTOFromModel(item))
+		itemDTO, err := vulnSourceDTOFromModel(item)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, itemDTO)
 	}
 	return out, nil
 }
@@ -542,10 +550,24 @@ func vulnSourceFromRequest(req VulnSourceRequest, tenantID, generatedID int64) (
 	if req.ID <= 0 {
 		req.ID = ids.ID(generatedID)
 	}
-	if req.Type <= 0 || req.Name == "" || len(req.Name) > 128 || req.Config == nil || (req.DefaultLevel != VulnLevelA && req.DefaultLevel != VulnLevelB && req.DefaultLevel != VulnLevelC) {
+	config, err := vulnSourceConfigMap(req.Config)
+	if err != nil || req.Type <= 0 || req.Name == "" || len(req.Name) > 128 || (req.DefaultLevel != VulnLevelA && req.DefaultLevel != VulnLevelB && req.DefaultLevel != VulnLevelC) {
 		return VulnSource{}, apperr.ErrContestVulnSourceInvalid
 	}
-	return VulnSource{ID: req.ID.Int64(), TenantID: tenantID, Type: req.Type, Name: req.Name, Config: req.Config, DefaultLevel: req.DefaultLevel, Enabled: req.Enabled}, nil
+	return VulnSource{ID: req.ID.Int64(), TenantID: tenantID, Type: req.Type, Name: req.Name, Config: config, DefaultLevel: req.DefaultLevel, Enabled: req.Enabled}, nil
+}
+
+// vulnSourceConfigMap 将固定 HTTP 配置转为内部 JSON 对象,供加密和源适配器使用。
+func vulnSourceConfigMap(config VulnSourceConfig) (map[string]any, error) {
+	raw, err := jsonx.AnyBytes(config, apperr.ErrContestVulnSourceInvalid)
+	if err != nil {
+		return nil, err
+	}
+	var out map[string]any
+	if err := jsonx.DecodeStrictKnownFields(raw, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 // validateVulnSourceConfig 校验 HTTP 源配置边界。

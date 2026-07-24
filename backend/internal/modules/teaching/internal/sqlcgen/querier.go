@@ -56,9 +56,11 @@ type Querier interface {
 	ListAnnouncements(ctx context.Context, arg ListAnnouncementsParams) ([]Announcement, error)
 	ListAssignmentItems(ctx context.Context, arg ListAssignmentItemsParams) ([]AssignmentItem, error)
 	ListAssignmentsByCourse(ctx context.Context, arg ListAssignmentsByCourseParams) ([]Assignment, error)
+	ListBestExperimentScores(ctx context.Context, arg ListBestExperimentScoresParams) ([]ListBestExperimentScoresRow, error)
 	ListChapters(ctx context.Context, arg ListChaptersParams) ([]Chapter, error)
 	ListCourseGrades(ctx context.Context, arg ListCourseGradesParams) ([]ListCourseGradesRow, error)
 	ListCourseMembers(ctx context.Context, arg ListCourseMembersParams) ([]CourseMember, error)
+	ListCoursesByIDs(ctx context.Context, arg ListCoursesByIDsParams) ([]ListCoursesByIDsRow, error)
 	ListCoursesDueToEnd(ctx context.Context, endAt pgtype.Timestamptz) ([]ListCoursesDueToEndRow, error)
 	ListCoursesDueToRun(ctx context.Context, startAt pgtype.Timestamptz) ([]ListCoursesDueToRunRow, error)
 	ListDiscussionPosts(ctx context.Context, arg ListDiscussionPostsParams) ([]DiscussionPost, error)
@@ -68,6 +70,7 @@ type Querier interface {
 	ListLessonsByCourse(ctx context.Context, arg ListLessonsByCourseParams) ([]Lesson, error)
 	ListProgressByCourse(ctx context.Context, arg ListProgressByCourseParams) ([]LessonProgress, error)
 	ListStudentCourses(ctx context.Context, arg ListStudentCoursesParams) ([]ListStudentCoursesRow, error)
+	ListStudentExperimentLessonIDs(ctx context.Context, arg ListStudentExperimentLessonIDsParams) ([]int64, error)
 	ListStudentGrades(ctx context.Context, arg ListStudentGradesParams) ([]ListStudentGradesRow, error)
 	ListStudentProgressByCourse(ctx context.Context, arg ListStudentProgressByCourseParams) ([]LessonProgress, error)
 	ListSubmissionsByAssignment(ctx context.Context, arg ListSubmissionsByAssignmentParams) ([]Submission, error)
@@ -100,6 +103,7 @@ type Querier interface {
 	UpdateSubmissionManualGrade(ctx context.Context, arg UpdateSubmissionManualGradeParams) (Submission, error)
 	UpsertCourseGrade(ctx context.Context, arg UpsertCourseGradeParams) (UpsertCourseGradeRow, error)
 	UpsertCourseReview(ctx context.Context, arg UpsertCourseReviewParams) (CourseReview, error)
+	UpsertExperimentScoreProjection(ctx context.Context, arg UpsertExperimentScoreProjectionParams) error
 	UpsertLessonProgress(ctx context.Context, arg UpsertLessonProgressParams) (LessonProgress, error)
 	UpsertSubmissionDraft(ctx context.Context, arg UpsertSubmissionDraftParams) (SubmissionDraft, error)
 }

@@ -11,9 +11,6 @@ import { useAsyncResource, usePendingAction } from '../../../../../hooks'
 import styles from '../../teaching.module.css'
 import { formatDateTime, joinModeLabel } from '../../../../../utils/index'
 import { userFacingErrorMessage } from '../../../../../utils/userFacingError'
-import { formatStudentReference } from '../../../../../utils/formatters'
-
-
 const TeacherCourseMembersPage: React.FC = () => {
   const confirm = useConfirm()
   const { id } = useParams()
@@ -28,7 +25,7 @@ const TeacherCourseMembersPage: React.FC = () => {
    */
   const removeMember = useCallback(async (member: CourseMember) => {
     if (!id) return
-    const confirmed = await confirm({ title: '移除课程成员', description: `将${formatStudentReference(member.student_id)}移出本课程，之后需重新添加才能恢复选课关系。`, confirmLabel: '确认移除' })
+    const confirmed = await confirm({ title: '移除课程成员', description: `将${member.student_name}移出本课程，之后需重新添加才能恢复选课关系。`, confirmLabel: '确认移除' })
     if (!confirmed) return
     setError(null)
     setMessage(null)
@@ -61,7 +58,8 @@ const TeacherCourseMembersPage: React.FC = () => {
   }
 
   const columns = useMemo<TableColumn<CourseMember>[]>(() => [
-    { key: 'student', title: '学生', render: (row) => formatStudentReference(row.student_id), priority: 'primary' },
+    { key: 'student', title: '学生', render: (row) => row.student_name, priority: 'primary' },
+    { key: 'studentNo', title: '学号', render: (row) => row.student_no || '未设置' },
     { key: 'joinMode', title: '加入方式', render: (row) => joinModeLabel(row.join_mode) },
     { key: 'joinedAt', title: '加入时间', render: (row) => <span className={styles.muted}>{formatDateTime(row.joined_at)}</span> },
     {

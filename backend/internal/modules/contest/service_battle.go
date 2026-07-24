@@ -137,15 +137,20 @@ func (s *Service) ListBattleMatches(ctx context.Context, contestID int64, page, 
 	return out, total, page, size, nil
 }
 
-// GetBattleReplay 读取对局回放引用,只向参赛队伍成员开放。
-func (s *Service) GetBattleReplay(ctx context.Context, matchID int64) (map[string]any, error) {
+// GetBattleReplay 读取 M8 持久化的真实回放步骤，只向参赛队伍成员开放。
+func (s *Service) GetBattleReplay(ctx context.Context, matchID int64) (BattleReplayDTO, error) {
 	id, err := currentIdentity(ctx)
 	if err != nil {
-		return nil, err
+		return BattleReplayDTO{}, err
 	}
 	var match BattleMatch
+	var problem ContestProblem
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
 		match, err = tx.GetBattleMatch(ctx, id.TenantID, matchID)
+		if err != nil {
+			return err
+		}
+		problem, err = tx.GetContestProblem(ctx, id.TenantID, match.ProblemID)
 		if err != nil {
 			return err
 		}
@@ -170,12 +175,16 @@ func (s *Service) GetBattleReplay(ctx context.Context, matchID int64) (map[strin
 		}
 		return apperr.ErrContestTeamAccessDenied
 	}); err != nil {
-		return nil, err
+		return BattleReplayDTO{}, err
 	}
-	if match.ReplayRef == "" {
-		return nil, apperr.ErrContestReplayUnavailable
+	if len(match.Replay) == 0 {
+		return BattleReplayDTO{}, apperr.ErrContestReplayUnavailable
 	}
-	return map[string]any{"match_id": ids.Format(match.ID), "replay_ref": match.ReplayRef}, nil
+	face, err := s.content.GetContentFace(ctx, id.TenantID, contracts.ContentItemRef{ItemCode: problem.ItemCode, ItemVersion: problem.ItemVersion})
+	if err != nil {
+		return BattleReplayDTO{}, apperr.ErrContestProblemInvalid.WithCause(err)
+	}
+	return BattleReplayDTO{MatchID: ids.ID(match.ID), ProblemTitle: face.Title, Result: match.Result, ScoreDelta: match.ScoreDelta, Steps: match.Replay, FinishedAt: match.FinishedAt}, nil
 }
 
 // RunMatchmakerOnce 执行一次待对局认领和启动,供统一 background runner 调用。
@@ -265,14 +274,14 @@ func (s *Service) executeBattleMatch(ctx context.Context, match BattleMatch) err
 	}); err != nil {
 		return err
 	}
-	spec, err := battleRuntimeSpecFromProblem(problem)
-	if err != nil {
+	if problem.BattleConfig == nil {
 		if failErr := s.markBattleFailed(ctx, match); failErr != nil {
-			return apperr.ErrContestBattleMatchFailed.WithCause(fmt.Errorf("对局配置无效: %w; 标记对局失败也失败: %v", err, failErr))
+			return apperr.ErrContestBattleMatchFailed.WithCause(fmt.Errorf("对局配置无效; 标记对局失败也失败: %v", failErr))
 		}
-		return err
+		return apperr.ErrContestProblemInvalid
 	}
-	info, err := s.sandbox.CreateSandbox(ctx, contracts.SandboxCreateRequest{TenantID: match.TenantID, RuntimeCode: spec.RuntimeCode, RuntimeImageVersion: spec.RuntimeImageVersion, ToolCodes: spec.ToolCodes, OwnerAccountID: ownerID, SourceRef: match.SourceRef, KeepAlive: false, SnapshotEnabled: false})
+	config := problem.BattleConfig
+	info, err := s.sandbox.CreateSandbox(ctx, contracts.SandboxCreateRequest{TenantID: match.TenantID, RuntimeCode: config.RuntimeCode, RuntimeImageVersion: config.RuntimeImageVersion, ToolCodes: config.ToolCodes, OwnerAccountID: ownerID, SourceRef: match.SourceRef, KeepAlive: false, SnapshotEnabled: false})
 	if err != nil {
 		if failErr := s.markBattleFailed(ctx, match); failErr != nil {
 			return apperr.ErrContestBattleMatchFailed.WithCause(fmt.Errorf("创建对局沙箱失败: %w; 标记对局失败也失败: %v", err, failErr))
@@ -415,7 +424,7 @@ func (s *Service) HandleBattleJudgeCompleted(ctx context.Context, event contract
 			"k_factor":        s.cfg.BattleELOKFactor,
 			"result":          result,
 		}
-		current.ReplayRef = task.Result.SnapshotRef
+		current.Replay = battleReplaySteps(task.Result.Details)
 		match, err = tx.FinishBattleMatch(ctx, current)
 		if err != nil {
 			return err
@@ -437,6 +446,25 @@ func (s *Service) HandleBattleJudgeCompleted(ctx context.Context, event contract
 		return err
 	}
 	return s.writeAudit(ctx, match.TenantID, 0, audit.ActorRoleSystem, "contest.battle.finish", auditTargetBattleMatch, match.ID, match.ScoreDelta)
+}
+
+// battleReplaySteps 把 M3 已脱敏的有序判题详情固定为 M8 对局回放事件。
+func battleReplaySteps(details []contracts.JudgeResultDetail) []BattleReplayStep {
+	out := make([]BattleReplayStep, 0, len(details))
+	for i, detail := range details {
+		title := strings.TrimSpace(detail.Case)
+		if title == "" {
+			title = strings.TrimSpace(detail.Source)
+			if target := strings.TrimSpace(detail.Target); target != "" {
+				if title != "" {
+					title += " → "
+				}
+				title += target
+			}
+		}
+		out = append(out, BattleReplayStep{Seq: int32(i + 1), Title: title, Source: detail.Source, Target: detail.Target, Passed: detail.Passed, Actual: detail.Actual, Hint: detail.Hint})
+	}
+	return out
 }
 
 // HandleBattleJudgeFailed 消费 M3 判题失败事件并标记对局失败。
@@ -502,34 +530,6 @@ func (s *Service) markBattleFailed(ctx context.Context, match BattleMatch) error
 		_, err := tx.FailBattleMatch(ctx, match.TenantID, match.ID)
 		return err
 	})
-}
-
-type battleRuntimeSpec struct {
-	RuntimeCode         string
-	RuntimeImageVersion string
-	ToolCodes           []string
-}
-
-// battleRuntimeSpecFromProblem 从题目配置读取对抗执行所需运行时,配置缺失时显式失败。
-func battleRuntimeSpecFromProblem(problem ContestProblem) (battleRuntimeSpec, error) {
-	get := func(key string) string {
-		if v, ok := problem.BattleConfig[key].(string); ok {
-			return strings.TrimSpace(v)
-		}
-		return ""
-	}
-	spec := battleRuntimeSpec{RuntimeCode: get("runtime_code"), RuntimeImageVersion: get("runtime_image_version")}
-	if raw, ok := problem.BattleConfig["tool_codes"].([]any); ok {
-		for _, item := range raw {
-			if s, ok := item.(string); ok && strings.TrimSpace(s) != "" {
-				spec.ToolCodes = append(spec.ToolCodes, strings.TrimSpace(s))
-			}
-		}
-	}
-	if spec.RuntimeCode == "" || spec.RuntimeImageVersion == "" {
-		return battleRuntimeSpec{}, apperr.ErrContestProblemInvalid
-	}
-	return spec, nil
 }
 
 // battleRolesCompatible 判断两份参战物是否可组成对局。

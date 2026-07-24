@@ -156,7 +156,6 @@ export interface Tenant {
   expire_at?: string
   logo_url?: string
   display_name?: string
-  feature_flags: Record<string, unknown>
   auth_mode: AuthMode
   enable_activation_code: boolean
 }
@@ -191,7 +190,6 @@ export interface UpdateTenantStatusRequest {
 export interface TenantConfigRequest {
   logo_url: string
   display_name: string
-  feature_flags: Record<string, unknown>
   auth_mode: AuthMode
   enable_activation_code: boolean
 }

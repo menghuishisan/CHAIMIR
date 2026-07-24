@@ -17,7 +17,6 @@ type Contest struct {
 	StartAt       time.Time
 	EndAt         time.Time
 	FreezeMinutes int32
-	Rules         map[string]any
 	Status        int16
 	CreatedAt     time.Time
 	UpdatedAt     time.Time
@@ -31,10 +30,23 @@ type ContestProblem struct {
 	ItemCode     string
 	ItemVersion  string
 	Score        int32
-	DynamicScore map[string]any
-	BattleConfig map[string]any
+	DynamicScore *DynamicScoreConfig
+	BattleConfig *BattleRuntimeConfig
 	BattleRule   int16
 	Seq          int32
+}
+
+// DynamicScoreConfig 定义解题人数增长时的唯一衰减规则。
+type DynamicScoreConfig struct {
+	MinScore      int32 `json:"min_score"`
+	DecayPerSolve int32 `json:"decay_per_solve"`
+}
+
+// BattleRuntimeConfig 定义对抗题唯一的沙箱运行配置。
+type BattleRuntimeConfig struct {
+	RuntimeCode         string   `json:"runtime_code"`
+	RuntimeImageVersion string   `json:"runtime_image_version"`
+	ToolCodes           []string `json:"tool_codes"`
 }
 
 // Team 是参赛队伍,个人赛也以单人队建模。
@@ -105,10 +117,21 @@ type BattleMatch struct {
 	JudgeTaskRef string
 	Result       int16
 	ScoreDelta   map[string]any
-	ReplayRef    string
+	Replay       []BattleReplayStep
 	Status       int16
 	MatchedAt    time.Time
 	FinishedAt   time.Time
+}
+
+// BattleReplayStep 是对局判题产生的有序脱敏步骤，不包含判题期望或内部对象引用。
+type BattleReplayStep struct {
+	Seq    int32  `json:"seq"`
+	Title  string `json:"title"`
+	Source string `json:"source,omitempty"`
+	Target string `json:"target,omitempty"`
+	Passed bool   `json:"passed"`
+	Actual string `json:"actual,omitempty"`
+	Hint   string `json:"hint,omitempty"`
 }
 
 // LadderRank 是排行榜积分投影。
@@ -117,6 +140,7 @@ type LadderRank struct {
 	TenantID    int64
 	ContestID   int64
 	TeamID      int64
+	TeamName    string
 	Score       float64
 	SolvedCount int32
 	LastSolveAt time.Time

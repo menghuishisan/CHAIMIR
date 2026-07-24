@@ -100,7 +100,6 @@ function toRequest(contest: Contest): ContestRequest {
     start_at: contest.start_at,
     end_at: contest.end_at,
     freeze_minutes: contest.freeze_minutes,
-    rules: contest.rules,
   }
 }
 

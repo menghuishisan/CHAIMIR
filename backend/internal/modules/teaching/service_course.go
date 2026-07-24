@@ -411,11 +411,7 @@ func (s *Service) cloneAssignments(ctx context.Context, tx TxStore, source Cours
 				return apperr.ErrTeachingAssignmentInvalid
 			}
 		}
-		latePenalty, err := cloneMap(assignment.LatePenalty)
-		if err != nil {
-			return err
-		}
-		clonedAssignment, err := tx.CreateAssignment(ctx, Assignment{ID: s.ids.Generate(), TenantID: targetTenantID, CourseID: targetCourseID, Title: assignment.Title, ChapterID: targetChapterID, DueAt: assignment.DueAt, MaxAttempts: assignment.MaxAttempts, LatePolicy: assignment.LatePolicy, LatePenalty: latePenalty, Status: AssignmentStatusDraft})
+		clonedAssignment, err := tx.CreateAssignment(ctx, Assignment{ID: s.ids.Generate(), TenantID: targetTenantID, CourseID: targetCourseID, Title: assignment.Title, ChapterID: targetChapterID, DueAt: assignment.DueAt, MaxAttempts: assignment.MaxAttempts, LatePolicy: assignment.LatePolicy, LatePenalty: assignment.LatePenalty, Status: AssignmentStatusDraft})
 		if err != nil {
 			return err
 		}

@@ -207,6 +207,7 @@ type ExperimentScoreOutbox struct {
 	InstanceID   int64
 	StudentID    int64
 	Score        float64
+	Completed    bool
 	TraceID      string
 	ScoredAt     time.Time
 	Status       int16

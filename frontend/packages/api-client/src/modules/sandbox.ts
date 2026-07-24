@@ -118,10 +118,10 @@ export class SandboxApi {
   }
 
   /**
-   * 查询当前租户沙箱配额与活跃数量。
+   * 查询学校管理员本校或平台管理员指定租户的沙箱配额与活跃数量。
    */
-  async getQuota(): Promise<SandboxQuota> {
-    return this.client.get('/sandbox/quota')
+  async getQuota(tenantId?: string): Promise<SandboxQuota> {
+    return this.client.get('/sandbox/quota', tenantId ? { tenant_id: tenantId } : undefined)
   }
 
   /**

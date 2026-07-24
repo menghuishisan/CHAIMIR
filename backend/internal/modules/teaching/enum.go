@@ -78,7 +78,6 @@ const (
 const (
 	GradeSourceAssignment int16 = 1
 	GradeSourceExperiment int16 = 2
-	GradeSourceExam       int16 = 3
 )
 
 const (

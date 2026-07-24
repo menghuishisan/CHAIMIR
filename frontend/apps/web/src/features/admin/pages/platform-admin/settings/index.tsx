@@ -3,13 +3,13 @@
 import React, { useCallback, useMemo, useState } from 'react'
 import type { ConfigChangeLog, SystemConfig } from '@chaimir/api-client'
 import { AdminScope } from '@chaimir/api-client'
-import { Button, Callout, DescriptionList, Modal, Switch, Table, useConfirm, ResourceState } from '@chaimir/ui'
+import { Button, Callout, Modal, Switch, Table, useConfirm, ResourceState } from '@chaimir/ui'
 import { History, RefreshCw, RotateCcw, Settings } from 'lucide-react'
 import { api } from '../../../../../app/api'
 import { useAsyncResource } from '../../../../../hooks'
 import styles from '../../list.module.css'
 import formStyles from './settings.module.css'
-import { formatDateTime, systemConfigLabel } from '../../../../../utils/index'
+import { systemConfigLabel } from '../../../../../utils/index'
 import { userFacingErrorMessage } from '../../../../../utils/userFacingError'
 
 const SettingsPage: React.FC = () => {
@@ -33,19 +33,15 @@ const SettingsPage: React.FC = () => {
    * handleMaintenanceToggle 通过同一配置接口切换维护模式。
    */
   const handleMaintenanceToggle = useCallback(async (enabled: boolean) => {
-    if (!maintenanceConfig) {
-      setError('维护模式配置尚未就绪，暂时无法切换。')
-      return
-    }
-    setSubmittingKey(maintenanceConfig.key)
+    setSubmittingKey(maintenanceConfig?.key ?? 'maintenance_mode')
     setError(null)
     setMessage(null)
     try {
-      await api.admin.updateConfig(maintenanceConfig.key, {
-        scope: maintenanceConfig.scope,
-        tenant_id: maintenanceConfig.tenant_id,
-        value: { ...maintenanceConfig.value, enabled },
-        version: maintenanceConfig.version,
+      await api.admin.updateConfig('maintenance_mode', {
+        scope: maintenanceConfig?.scope ?? AdminScope.GLOBAL,
+        tenant_id: maintenanceConfig?.tenant_id,
+        value: { enabled },
+        version: maintenanceConfig?.version ?? 0,
       })
       setMessage('维护模式已更新。')
       resource.reload()
@@ -120,8 +116,7 @@ const SettingsPage: React.FC = () => {
 
       {resource.status === 'error' && <ResourceState status="error" error={resource.error} onRetry={resource.reload} />}
       {resource.status === 'loading' && <ResourceState status="loading" title="正在获取系统配置" />}
-      {resource.status === 'empty' && <ResourceState status="empty" title="暂无配置" description="当前没有可编辑的平台全局参数。" />}
-      {resource.status === 'success' && (
+      {(resource.status === 'success' || resource.status === 'empty') && (
         <div className={formStyles.grid}>
           <section className={formStyles.panel}>
             <h2>维护模式</h2>
@@ -129,27 +124,13 @@ const SettingsPage: React.FC = () => {
             <Switch
               checked={maintenanceEnabled}
               label={maintenanceEnabled ? '已开启' : '已关闭'}
-              disabled={!maintenanceConfig || submittingKey === maintenanceConfig.key}
+              disabled={submittingKey === (maintenanceConfig?.key ?? 'maintenance_mode')}
               onChange={(event) => handleMaintenanceToggle(event.target.checked)}
             />
+            <Button variant="outline" icon={<History size={16} />} disabled={!maintenanceConfig} onClick={() => maintenanceConfig && void openHistory(maintenanceConfig)}>
+              变更历史
+            </Button>
           </section>
-
-          {configs.filter((config) => config.key !== 'maintenance_mode').map((config) => (
-            <section className={formStyles.panel} key={config.id}>
-              <header className={formStyles.panelHeader}>
-                <div>
-                  <h2>{systemConfigLabel(config.key)}</h2>
-                  <p>当前版本 {config.version}</p>
-                </div>
-                <span className={styles.status}>{config.scope === AdminScope.GLOBAL ? '平台' : '租户'}</span>
-              </header>
-              <DescriptionList items={[
-                { key: 'version', label: '当前版本', value: config.version },
-                { key: 'updated', label: '最近更新', value: formatDateTime(config.updated_at) },
-              ]} />
-              <Button variant="outline" icon={<History size={16} />} onClick={() => void openHistory(config)}>变更历史</Button>
-            </section>
-          ))}
         </div>
       )}
       <Modal open={historyConfig !== null} title={historyConfig ? `${systemConfigLabel(historyConfig.key)}变更历史` : '配置变更历史'} size="lg" onClose={() => setHistoryConfig(null)}>

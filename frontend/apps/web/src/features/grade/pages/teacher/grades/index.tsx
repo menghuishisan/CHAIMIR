@@ -3,7 +3,7 @@
 import React, { useCallback, useMemo, useState } from 'react'
 import type { GradeReview } from '@chaimir/api-client'
 import type { TableColumn } from '@chaimir/ui'
-import { Button, Callout, Input, Table, Textarea, ResourceState, FormField } from '@chaimir/ui'
+import { Button, Callout, Select, Table, Textarea, ResourceState, FormField } from '@chaimir/ui'
 import { Calculator, HelpCircle, RefreshCw, Send } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../../../../../app/api'
@@ -22,6 +22,13 @@ const TeacherGradesPage: React.FC = () => {
   const [message, setMessage] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const resource = useAsyncResource(() => api.grade.listOwnReviews({ page: 1, size: 20 }), [])
+  const formOptions = useAsyncResource(async () => {
+    const [courses, semesters] = await Promise.all([
+      api.teaching.getCourses({ role: 'teacher', page: 1, size: 100 }),
+      api.grade.listSemesters(),
+    ])
+    return { courses: courses.list, semesters }
+  }, [])
 
   /**
    * submitReview 把课程成绩提交到学校管理员审核流程。
@@ -31,6 +38,10 @@ const TeacherGradesPage: React.FC = () => {
     setError(null)
     setMessage(null)
     try {
+      if (!courseId || !semesterId) {
+        setError('请选择课程和学期。')
+        return
+      }
       await api.grade.submitReview({
         course_id: courseId,
         semester_id: semesterId || undefined,
@@ -49,7 +60,7 @@ const TeacherGradesPage: React.FC = () => {
   }, [comment, courseId, resource, semesterId])
 
   const columns = useMemo<TableColumn<GradeReview>[]>(() => [
-    { key: 'course', title: '课程', render: () => '课程成绩', priority: 'primary' },
+    { key: 'course', title: '课程', dataIndex: 'course_name', priority: 'primary' },
     { key: 'semester', title: '学期', render: (row) => row.semester_id ? '已指定' : '未指定' },
     { key: 'submitted', title: '提交时间', render: (row) => formatDateTime(row.submitted_at) },
     { key: 'status', title: '状态', render: (row) => <span className={styles.status}>{gradeReviewStatusLabel(row.status)}</span> },
@@ -85,12 +96,13 @@ const TeacherGradesPage: React.FC = () => {
 
       <section className={styles.panel}>
         <h2>提交审核</h2>
+        {formOptions.status === 'error' && <div className={styles.error} role="alert">课程或学期暂时无法读取，请刷新后重试。</div>}
         <div className={styles.grid}>
-          <FormField className={styles.field} label="课程编号"><Input fullWidth value={courseId} onChange={(event) => setCourseId(event.target.value)} /></FormField>
-          <FormField className={styles.field} label="学期编号"><Input fullWidth value={semesterId} onChange={(event) => setSemesterId(event.target.value)} /></FormField>
+          <FormField className={styles.field} label="课程"><Select fullWidth value={courseId} placeholder="请选择课程" options={(formOptions.data?.courses || []).map((course) => ({ value: course.id, label: course.name }))} onChange={setCourseId} /></FormField>
+          <FormField className={styles.field} label="学期"><Select fullWidth value={semesterId} placeholder="请选择学期" options={(formOptions.data?.semesters || []).map((semester) => ({ value: semester.id, label: semester.name }))} onChange={setSemesterId} /></FormField>
         </div>
         <FormField className={styles.field} label="提交说明"><Textarea value={comment} onChange={(event) => setComment(event.target.value)} /></FormField>
-        <Button icon={<Send size={16} />} loading={submitting} onClick={submitReview}>提交成绩审核</Button>
+        <Button icon={<Send size={16} />} loading={submitting} disabled={formOptions.status === 'loading'} onClick={submitReview}>提交成绩审核</Button>
       </section>
 
       {resource.status === 'error' && <ResourceState status="error" error={resource.error} onRetry={resource.reload} />}

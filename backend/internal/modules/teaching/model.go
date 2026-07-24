@@ -67,10 +67,16 @@ type Assignment struct {
 	DueAt       time.Time
 	MaxAttempts int32
 	LatePolicy  int16
-	LatePenalty map[string]any
+	LatePenalty *LatePenaltyConfig
 	Status      int16
 	CreatedAt   time.Time
 	UpdatedAt   time.Time
+}
+
+// LatePenaltyConfig 定义迟交作业的唯一扣分方式,分值和百分比二选一。
+type LatePenaltyConfig struct {
+	Points  *float64 `json:"points,omitempty"`
+	Percent *float64 `json:"percent,omitempty"`
 }
 
 type AssignmentItem struct {

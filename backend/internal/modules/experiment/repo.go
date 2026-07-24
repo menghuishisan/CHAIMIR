@@ -29,6 +29,7 @@ type TxStore interface {
 	CreateExperiment(context.Context, Experiment) (Experiment, error)
 	GetExperiment(context.Context, int64, int64) (Experiment, error)
 	ListExperiments(context.Context, int64, int64, int16, int, int) ([]Experiment, int64, error)
+	ListIndependentPublishedExperiments(context.Context, int64, int, int) ([]Experiment, int64, error)
 	UpdateExperiment(context.Context, Experiment) (Experiment, error)
 	SetExperimentStatus(context.Context, int64, int64, int16) (Experiment, error)
 	CreateGroup(context.Context, ExperimentGroup) (ExperimentGroup, error)
@@ -53,7 +54,7 @@ type TxStore interface {
 	UpsertReport(context.Context, ExperimentReport) (ExperimentReport, error)
 	GradeReport(context.Context, int64, int64, float64, string) (ExperimentReport, error)
 	GetReport(context.Context, int64, int64) (ExperimentReport, error)
-	GetReportByInstanceStudent(context.Context, int64, int64, int64) (ExperimentReport, error)
+	FindReportByInstanceStudent(context.Context, int64, int64, int64) (ExperimentReport, bool, error)
 	ListReports(context.Context, int64, int64, int, int) ([]ExperimentReport, int64, error)
 	SumScores(context.Context, int64, int64) (float64, error)
 	Stats(context.Context, int64, int64) (ExperimentStatsSnapshot, error)
@@ -125,6 +126,27 @@ func (tx *txStore) ListExperiments(ctx context.Context, tenantID, courseID int64
 		return nil, 0, apperr.ErrExperimentInvalid.WithCause(err)
 	}
 	total, err := tx.q.CountExperiments(ctx, sqlcgen.CountExperimentsParams{TenantID: tenantID, Column2: courseID, Column3: status})
+	if err != nil {
+		return nil, 0, apperr.ErrExperimentInvalid.WithCause(err)
+	}
+	out := make([]Experiment, 0, len(rows))
+	for _, row := range rows {
+		item, err := experimentFromRow(row)
+		if err != nil {
+			return nil, 0, err
+		}
+		out = append(out, item)
+	}
+	return out, total, nil
+}
+
+// ListIndependentPublishedExperiments 查询学生可直接发现的独立已发布实验。
+func (tx *txStore) ListIndependentPublishedExperiments(ctx context.Context, tenantID int64, page, size int) ([]Experiment, int64, error) {
+	rows, err := tx.q.ListIndependentPublishedExperiments(ctx, sqlcgen.ListIndependentPublishedExperimentsParams{TenantID: tenantID, Limit: int32(size), Offset: int32((page - 1) * size)})
+	if err != nil {
+		return nil, 0, apperr.ErrExperimentInvalid.WithCause(err)
+	}
+	total, err := tx.q.CountIndependentPublishedExperiments(ctx, tenantID)
 	if err != nil {
 		return nil, 0, apperr.ErrExperimentInvalid.WithCause(err)
 	}
@@ -402,13 +424,16 @@ func (tx *txStore) GetReport(ctx context.Context, tenantID, id int64) (Experimen
 	return ExperimentReport{ID: row.ID, TenantID: row.TenantID, InstanceID: row.InstanceID, StudentID: row.StudentID, ContentRef: row.ContentRef, ManualScore: row.ManualScore, Comment: pgtypex.TextValue(row.Comment), Status: row.Status, SubmittedAt: timex.FromTimestamptz(row.SubmittedAt)}, nil
 }
 
-// GetReportByInstanceStudent 读取当前学生在指定实例下提交的报告。
-func (tx *txStore) GetReportByInstanceStudent(ctx context.Context, tenantID, instanceID, studentID int64) (ExperimentReport, error) {
+// FindReportByInstanceStudent 读取学生已提交报告；尚未提交是正常空状态。
+func (tx *txStore) FindReportByInstanceStudent(ctx context.Context, tenantID, instanceID, studentID int64) (ExperimentReport, bool, error) {
 	row, err := tx.q.GetExperimentReportByInstanceStudent(ctx, sqlcgen.GetExperimentReportByInstanceStudentParams{TenantID: tenantID, InstanceID: instanceID, StudentID: studentID})
-	if err != nil {
-		return ExperimentReport{}, apperr.ErrExperimentReportNotFound.WithCause(err)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ExperimentReport{}, false, nil
 	}
-	return ExperimentReport{ID: row.ID, TenantID: row.TenantID, InstanceID: row.InstanceID, StudentID: row.StudentID, ContentRef: row.ContentRef, ManualScore: row.ManualScore, Comment: pgtypex.TextValue(row.Comment), Status: row.Status, SubmittedAt: timex.FromTimestamptz(row.SubmittedAt)}, nil
+	if err != nil {
+		return ExperimentReport{}, false, apperr.ErrExperimentReportInvalid.WithCause(err)
+	}
+	return ExperimentReport{ID: row.ID, TenantID: row.TenantID, InstanceID: row.InstanceID, StudentID: row.StudentID, ContentRef: row.ContentRef, ManualScore: row.ManualScore, Comment: pgtypex.TextValue(row.Comment), Status: row.Status, SubmittedAt: timex.FromTimestamptz(row.SubmittedAt)}, true, nil
 }
 
 // ListReports 查询实验报告分页。
@@ -452,7 +477,7 @@ func (tx *txStore) Stats(ctx context.Context, tenantID, courseID int64) (Experim
 
 // CreateExperimentScoreOutbox 在实例得分变更事务内保存得分事件。
 func (tx *txStore) CreateExperimentScoreOutbox(ctx context.Context, id int64, inst ExperimentInstance, traceID string, scoredAt time.Time) (ExperimentScoreOutbox, error) {
-	row, err := tx.q.CreateExperimentScoreOutbox(ctx, sqlcgen.CreateExperimentScoreOutboxParams{ID: id, TenantID: inst.TenantID, ExperimentID: inst.ExperimentID, InstanceID: inst.ID, StudentID: inst.OwnerAccountID, Column6: fmt.Sprintf("%.2f", inst.Score), TraceID: traceID, ScoredAt: timex.RequiredTimestamptz(scoredAt)})
+	row, err := tx.q.CreateExperimentScoreOutbox(ctx, sqlcgen.CreateExperimentScoreOutboxParams{ID: id, TenantID: inst.TenantID, ExperimentID: inst.ExperimentID, InstanceID: inst.ID, StudentID: inst.OwnerAccountID, Column6: fmt.Sprintf("%.2f", inst.Score), Completed: inst.Status == InstanceStatusFinished, TraceID: traceID, ScoredAt: timex.RequiredTimestamptz(scoredAt)})
 	if err != nil {
 		return ExperimentScoreOutbox{}, apperr.ErrExperimentEventFailed.WithCause(err)
 	}

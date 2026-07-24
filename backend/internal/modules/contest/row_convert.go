@@ -11,22 +11,18 @@ import (
 
 // contestFromRow 转换竞赛定义行。
 func contestFromRow(row sqlcgen.Contest) (Contest, error) {
-	rules, err := decodeMap(row.Rules, apperr.ErrContestInvalid)
-	if err != nil {
-		return Contest{}, err
-	}
-	return Contest{ID: row.ID, TenantID: row.TenantID, OrganizerID: row.OrganizerID, Name: row.Name, Mode: row.Mode, MatchMode: pgtypex.Int2Value(row.MatchMode), TeamMode: row.TeamMode, SignupStart: timex.FromTimestamptz(row.SignupStart), SignupEnd: timex.FromTimestamptz(row.SignupEnd), StartAt: timex.FromTimestamptz(row.StartAt), EndAt: timex.FromTimestamptz(row.EndAt), FreezeMinutes: row.FreezeMinutes, Rules: rules, Status: row.Status, CreatedAt: timex.FromTimestamptz(row.CreatedAt), UpdatedAt: timex.FromTimestamptz(row.UpdatedAt)}, nil
+	return Contest{ID: row.ID, TenantID: row.TenantID, OrganizerID: row.OrganizerID, Name: row.Name, Mode: row.Mode, MatchMode: pgtypex.Int2Value(row.MatchMode), TeamMode: row.TeamMode, SignupStart: timex.FromTimestamptz(row.SignupStart), SignupEnd: timex.FromTimestamptz(row.SignupEnd), StartAt: timex.FromTimestamptz(row.StartAt), EndAt: timex.FromTimestamptz(row.EndAt), FreezeMinutes: row.FreezeMinutes, Status: row.Status, CreatedAt: timex.FromTimestamptz(row.CreatedAt), UpdatedAt: timex.FromTimestamptz(row.UpdatedAt)}, nil
 }
 
 // problemFromRow 转换竞赛题目行。
 func problemFromRow(row sqlcgen.ContestProblem) (ContestProblem, error) {
-	dynamic, err := decodeMap(row.DynamicScore, apperr.ErrContestProblemInvalid)
-	if err != nil {
-		return ContestProblem{}, err
+	var dynamic *DynamicScoreConfig
+	if err := jsonx.DecodeStrictKnownFields(row.DynamicScore, &dynamic); err != nil {
+		return ContestProblem{}, apperr.ErrContestProblemInvalid.WithCause(err)
 	}
-	battleConfig, err := decodeMap(row.BattleConfig, apperr.ErrContestProblemInvalid)
-	if err != nil {
-		return ContestProblem{}, err
+	var battleConfig *BattleRuntimeConfig
+	if err := jsonx.DecodeStrictKnownFields(row.BattleConfig, &battleConfig); err != nil {
+		return ContestProblem{}, apperr.ErrContestProblemInvalid.WithCause(err)
 	}
 	return ContestProblem{ID: row.ID, TenantID: row.TenantID, ContestID: row.ContestID, ItemCode: row.ItemCode, ItemVersion: row.ItemVersion, Score: row.Score, DynamicScore: dynamic, BattleConfig: battleConfig, BattleRule: pgtypex.Int2Value(row.BattleRule), Seq: row.Seq}, nil
 }
@@ -66,12 +62,16 @@ func battleMatchFromRow(row sqlcgen.BattleMatch) (BattleMatch, error) {
 	if err != nil {
 		return BattleMatch{}, err
 	}
-	return BattleMatch{ID: row.ID, TenantID: row.TenantID, ContestID: row.ContestID, ProblemID: row.ProblemID, EntryAID: row.EntryAID, EntryBID: row.EntryBID, SourceRef: row.SourceRef, SandboxRef: pgtypex.TextValue(row.SandboxRef), JudgeTaskRef: pgtypex.TextValue(row.JudgeTaskRef), Result: pgtypex.Int2Value(row.Result), ScoreDelta: delta, ReplayRef: pgtypex.TextValue(row.ReplayRef), Status: row.Status, MatchedAt: timex.FromTimestamptz(row.MatchedAt), FinishedAt: timex.FromTimestamptz(row.FinishedAt)}, nil
+	replay, err := decodeBattleReplay(row.ReplayData)
+	if err != nil {
+		return BattleMatch{}, err
+	}
+	return BattleMatch{ID: row.ID, TenantID: row.TenantID, ContestID: row.ContestID, ProblemID: row.ProblemID, EntryAID: row.EntryAID, EntryBID: row.EntryBID, SourceRef: row.SourceRef, SandboxRef: pgtypex.TextValue(row.SandboxRef), JudgeTaskRef: pgtypex.TextValue(row.JudgeTaskRef), Result: pgtypex.Int2Value(row.Result), ScoreDelta: delta, Replay: replay, Status: row.Status, MatchedAt: timex.FromTimestamptz(row.MatchedAt), FinishedAt: timex.FromTimestamptz(row.FinishedAt)}, nil
 }
 
 // ladderFromRow 转换排行榜行。
 func ladderFromRow(row sqlcgen.ListLadderRow) LadderRank {
-	return LadderRank{ID: row.ID, TenantID: row.TenantID, ContestID: row.ContestID, TeamID: row.TeamID, Score: row.Score, SolvedCount: row.SolvedCount, LastSolveAt: timex.FromTimestamptz(row.LastSolveAt), Rank: row.Rank, UpdatedAt: timex.FromTimestamptz(row.UpdatedAt)}
+	return LadderRank{ID: row.ID, TenantID: row.TenantID, ContestID: row.ContestID, TeamID: row.TeamID, TeamName: row.TeamName, Score: row.Score, SolvedCount: row.SolvedCount, LastSolveAt: timex.FromTimestamptz(row.LastSolveAt), Rank: row.Rank, UpdatedAt: timex.FromTimestamptz(row.UpdatedAt)}
 }
 
 // ladderFromGetRow 转换按队伍读取的排行榜行。
@@ -152,6 +152,15 @@ func decodeMapSlice(raw []byte, invalid *apperr.Error) ([]map[string]any, error)
 	}
 	if out == nil {
 		return []map[string]any{}, nil
+	}
+	return out, nil
+}
+
+// decodeBattleReplay 严格解析 M8 自有的回放步骤，拒绝未知字段和损坏数据。
+func decodeBattleReplay(raw []byte) ([]BattleReplayStep, error) {
+	var out []BattleReplayStep
+	if err := jsonx.DecodeStrictKnownFields(raw, &out); err != nil {
+		return nil, apperr.ErrContestBattleMatchFailed.WithCause(err)
 	}
 	return out, nil
 }

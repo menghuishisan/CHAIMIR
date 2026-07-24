@@ -53,6 +53,7 @@ type StudentExperimentDTO struct {
 	Status        int16                  `json:"status"`
 	CreatedAt     time.Time              `json:"created_at"`
 	UpdatedAt     time.Time              `json:"updated_at"`
+	LaunchGrant   string                 `json:"launch_grant"`
 }
 
 // StudentComponentConfig 只暴露学生理解实验流程所需的组件摘要。
@@ -107,7 +108,8 @@ type ValidationResultDTO struct {
 
 // CreateInstanceRequest 是发起实验实例的请求。
 type CreateInstanceRequest struct {
-	GroupID ids.ID `json:"group_id"`
+	GroupID     ids.ID `json:"group_id"`
+	LaunchGrant string `json:"launch_grant"`
 }
 
 // InstanceDTO 是实验实例输出。
@@ -126,6 +128,8 @@ type InstanceDTO struct {
 	LastActiveAt   time.Time       `json:"last_active_at"`
 	Checkpoints    []CheckpointDTO `json:"checkpoints,omitempty"`
 	Stages         []StageDTO      `json:"stages,omitempty"`
+	RequireReport  bool            `json:"require_report"`
+	Report         *ReportDTO      `json:"report,omitempty"`
 }
 
 // SandboxToolDTO 是工作台展示的沙箱工具入口。
@@ -170,9 +174,11 @@ type JudgeCheckpointRequest struct {
 	BindingOutput  map[string]any `json:"binding_output"`
 }
 
-// SubmitReportRequest 是提交实验报告的请求。
-type SubmitReportRequest struct {
-	ContentRef string `json:"content_ref"`
+// ReportUploadRequest 是已由 HTTP 边界限量读取的 Markdown 实验报告。
+type ReportUploadRequest struct {
+	FileName    string
+	ContentType string
+	Content     []byte
 }
 
 // GradeReportRequest 是教师批改实验报告的请求。
@@ -186,11 +192,20 @@ type ReportDTO struct {
 	ID          ids.ID    `json:"id"`
 	InstanceID  ids.ID    `json:"instance_id"`
 	StudentID   ids.ID    `json:"student_id"`
-	ContentRef  string    `json:"content_ref"`
+	StudentName string    `json:"student_name,omitempty"`
+	StudentNo   string    `json:"student_no,omitempty"`
+	FileName    string    `json:"file_name"`
 	ManualScore float64   `json:"manual_score"`
 	Comment     string    `json:"comment,omitempty"`
 	Status      int16     `json:"status"`
 	SubmittedAt time.Time `json:"submitted_at"`
+}
+
+// ReportDownloadGrantDTO 是教师下载实验报告的一次性授权。
+type ReportDownloadGrantDTO struct {
+	Token     string `json:"token"`
+	FileName  string `json:"file_name"`
+	ExpiresAt string `json:"expires_at"`
 }
 
 // CreateGroupRequest 是创建协作小组的请求。

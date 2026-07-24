@@ -71,5 +71,4 @@ export enum ProgressStatus {
 export enum GradeSource {
   ASSIGNMENT = 1,
   EXPERIMENT = 2,
-  EXAM = 3,
 }

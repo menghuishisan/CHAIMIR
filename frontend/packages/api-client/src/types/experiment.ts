@@ -40,6 +40,7 @@ export interface StudentExperiment {
   status: ExperimentStatus
   created_at: string
   updated_at: string
+  launch_grant: string
 }
 
 export interface StudentComponentConfig {
@@ -174,6 +175,7 @@ export interface ValidationIssue {
 
 export interface CreateInstanceRequest {
   group_id?: SnowflakeID
+  launch_grant: string
 }
 
 export interface ExperimentInstance {
@@ -191,6 +193,8 @@ export interface ExperimentInstance {
   last_active_at: string
   checkpoints?: CheckpointResult[]
   stages?: StageState[]
+  require_report: boolean
+  report?: ReportDTO
 }
 
 export interface SandboxRef {
@@ -251,11 +255,19 @@ export interface ReportDTO {
   id: SnowflakeID
   instance_id: SnowflakeID
   student_id: SnowflakeID
-  content_ref: string
+  student_name?: string
+  student_no?: string
+  file_name: string
   manual_score: number
   comment?: string
   status: ExperimentReportStatus
   submitted_at: string
+}
+
+export interface ReportDownloadGrant {
+  token: string
+  file_name: string
+  expires_at: string
 }
 
 export interface GradeReportRequest {

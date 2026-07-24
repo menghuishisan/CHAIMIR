@@ -232,7 +232,7 @@ CREATE TABLE IF NOT EXISTS grade_weight (
     id BIGINT PRIMARY KEY,
     tenant_id BIGINT NOT NULL REFERENCES tenant(id),
     course_id BIGINT NOT NULL,
-    source_type SMALLINT NOT NULL CHECK (source_type IN (1, 2, 3)),
+    source_type SMALLINT NOT NULL CHECK (source_type IN (1, 2)),
     source_ref VARCHAR(96) NOT NULL,
     weight NUMERIC(5,2) NOT NULL CHECK (weight > 0),
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -240,6 +240,17 @@ CREATE TABLE IF NOT EXISTS grade_weight (
     UNIQUE (tenant_id, id),
     UNIQUE (tenant_id, course_id, source_type, source_ref),
     FOREIGN KEY (tenant_id, course_id) REFERENCES course(tenant_id, id)
+);
+
+CREATE TABLE IF NOT EXISTS experiment_score_projection (
+    instance_id BIGINT PRIMARY KEY,
+    tenant_id BIGINT NOT NULL REFERENCES tenant(id),
+    experiment_id BIGINT NOT NULL,
+    student_id BIGINT NOT NULL,
+    score NUMERIC(5,2) NOT NULL CHECK (score >= 0),
+    scored_at TIMESTAMPTZ NOT NULL,
+    UNIQUE (tenant_id, instance_id),
+    FOREIGN KEY (tenant_id, student_id) REFERENCES account(tenant_id, id)
 );
 
 CREATE TABLE IF NOT EXISTS course_grade (
@@ -289,6 +300,7 @@ CREATE INDEX IF NOT EXISTS idx_lesson_progress_student ON lesson_progress(tenant
 CREATE INDEX IF NOT EXISTS idx_discussion_course_parent ON discussion_post(tenant_id, course_id, parent_id) WHERE deleted_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_announcement_course ON announcement(tenant_id, course_id, is_pinned, created_at) WHERE deleted_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_course_grade_student ON course_grade(tenant_id, student_id);
+CREATE INDEX IF NOT EXISTS idx_experiment_score_student ON experiment_score_projection(tenant_id, experiment_id, student_id);
 CREATE INDEX IF NOT EXISTS idx_teaching_grade_event_outbox_status ON teaching_grade_event_outbox(status, created_at ASC);
 
 ALTER TABLE course ENABLE ROW LEVEL SECURITY;
@@ -305,6 +317,7 @@ ALTER TABLE discussion_post ENABLE ROW LEVEL SECURITY;
 ALTER TABLE announcement ENABLE ROW LEVEL SECURITY;
 ALTER TABLE course_review ENABLE ROW LEVEL SECURITY;
 ALTER TABLE grade_weight ENABLE ROW LEVEL SECURITY;
+ALTER TABLE experiment_score_projection ENABLE ROW LEVEL SECURITY;
 ALTER TABLE course_grade ENABLE ROW LEVEL SECURITY;
 ALTER TABLE teaching_grade_event_outbox ENABLE ROW LEVEL SECURITY;
 
@@ -325,5 +338,6 @@ CREATE POLICY discussion_post_tenant_rls ON discussion_post USING (tenant_id = c
 CREATE POLICY announcement_tenant_rls ON announcement USING (tenant_id = current_setting('app.tenant_id')::BIGINT);
 CREATE POLICY course_review_tenant_rls ON course_review USING (tenant_id = current_setting('app.tenant_id')::BIGINT);
 CREATE POLICY grade_weight_tenant_rls ON grade_weight USING (tenant_id = current_setting('app.tenant_id')::BIGINT);
+CREATE POLICY experiment_score_projection_tenant_rls ON experiment_score_projection USING (tenant_id = current_setting('app.tenant_id')::BIGINT);
 CREATE POLICY course_grade_tenant_rls ON course_grade USING (tenant_id = current_setting('app.tenant_id')::BIGINT);
 CREATE POLICY teaching_grade_event_outbox_tenant_rls ON teaching_grade_event_outbox USING (tenant_id = current_setting('app.tenant_id')::BIGINT);

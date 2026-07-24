@@ -21,6 +21,9 @@ func (s *Service) CreateInstance(ctx context.Context, experimentID int64, req Cr
 	if err != nil {
 		return InstanceDTO{}, err
 	}
+	if err := s.auth.VerifyExperimentLaunchGrant(strings.TrimSpace(req.LaunchGrant), id.TenantID, id.AccountID, experimentID); err != nil {
+		return InstanceDTO{}, apperr.ErrExperimentInstanceAccessDenied.WithCause(err)
+	}
 	var exp Experiment
 	var inst ExperimentInstance
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
@@ -94,6 +97,8 @@ func (s *Service) GetInstance(ctx context.Context, instanceID int64) (InstanceDT
 	var inst ExperimentInstance
 	var exp Experiment
 	var checkpoints []CheckpointResult
+	var report ExperimentReport
+	var hasReport bool
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
 		inst, err = tx.GetInstance(ctx, id.TenantID, instanceID)
 		if err != nil {
@@ -117,12 +122,25 @@ func (s *Service) GetInstance(ctx context.Context, instanceID int64) (InstanceDT
 		if err != nil {
 			return err
 		}
+		report, hasReport, err = tx.FindReportByInstanceStudent(ctx, id.TenantID, inst.ID, id.AccountID)
+		if err != nil {
+			return err
+		}
 		_, err = tx.TouchInstance(ctx, id.TenantID, inst.ID)
 		return err
 	}); err != nil {
 		return InstanceDTO{}, err
 	}
-	return instanceDTOFromModel(inst, checkpointDefaults(exp, checkpoints), stageDTOs(exp, inst, checkpoints)), nil
+	out := instanceDTOFromModel(inst, checkpointDefaults(exp, checkpoints), stageDTOs(exp, inst, checkpoints))
+	out.RequireReport = exp.RequireReport
+	if hasReport {
+		reportDTO, err := reportDTOFromModel(report)
+		if err != nil {
+			return InstanceDTO{}, err
+		}
+		out.Report = &reportDTO
+	}
+	return out, nil
 }
 
 // GetProgress 返回统一 M10 进度 topic 元信息。
@@ -220,8 +238,10 @@ func (s *Service) FinishInstance(ctx context.Context, instanceID int64) (Instanc
 			return err
 		}
 		if exp.RequireReport {
-			if _, err := tx.GetReportByInstanceStudent(ctx, id.TenantID, instanceID, id.AccountID); err != nil {
+			if _, found, err := tx.FindReportByInstanceStudent(ctx, id.TenantID, instanceID, id.AccountID); err != nil {
 				return apperr.ErrExperimentReportRequired.WithCause(err)
+			} else if !found {
+				return apperr.ErrExperimentReportRequired
 			}
 		}
 		score, err := tx.SumScores(ctx, id.TenantID, instanceID)
@@ -470,14 +490,16 @@ func (s *Service) RunExperimentScoreOutboxOnce(ctx context.Context) error {
 // publishScoreOutboxItem 发布单条得分事件并按结果回写 outbox 状态。
 func (s *Service) publishScoreOutboxItem(ctx context.Context, item ExperimentScoreOutbox) error {
 	eventCtx := response.WithTrace(ctx, item.TraceID)
-	payload := contracts.ExperimentScoredEvent{TenantID: item.TenantID, TraceID: item.TraceID, ExperimentID: item.ExperimentID, InstanceID: item.InstanceID, StudentID: item.StudentID, Score: item.Score, ScoredAt: item.ScoredAt}
+	payload := contracts.ExperimentScoredEvent{TenantID: item.TenantID, TraceID: item.TraceID, ExperimentID: item.ExperimentID, InstanceID: item.InstanceID, StudentID: item.StudentID, Score: item.Score, Completed: item.Completed, ScoredAt: item.ScoredAt}
 	if err := s.bus.Publish(eventCtx, contracts.SubjectExperimentScored, payload); err != nil {
 		s.recordExperimentScoreOutboxFailure(eventCtx, item, err)
 		return apperr.ErrExperimentEventFailed.WithCause(err)
 	}
-	if err := s.publishExperimentCompletedNotification(eventCtx, item); err != nil {
-		s.recordExperimentScoreOutboxFailure(eventCtx, item, err)
-		return apperr.ErrExperimentEventFailed.WithCause(err)
+	if item.Completed {
+		if err := s.publishExperimentCompletedNotification(eventCtx, item); err != nil {
+			s.recordExperimentScoreOutboxFailure(eventCtx, item, err)
+			return apperr.ErrExperimentEventFailed.WithCause(err)
+		}
 	}
 	return s.markExperimentScoreOutboxPublished(eventCtx, item)
 }
@@ -501,7 +523,7 @@ func (s *Service) publishExperimentCompletedNotification(ctx context.Context, it
 			"experiment": exp.Name,
 			"score":      fmt.Sprintf("%.2f", item.Score),
 		},
-		Link: fmt.Sprintf("student/experiment-detail?id=%d", item.ExperimentID),
+		Link: fmt.Sprintf("/student/experiments/%d", item.ExperimentID),
 	}
 	return s.bus.Publish(ctx, contracts.SubjectNotifySendRequested, evt)
 }

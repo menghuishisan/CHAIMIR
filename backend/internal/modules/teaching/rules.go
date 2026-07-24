@@ -84,11 +84,11 @@ func validateAssignmentRequest(req AssignmentRequest) (AssignmentRequest, time.T
 	if err != nil || req.Title == "" || req.MaxAttempts <= 0 || !validLatePolicy(req.LatePolicy) || len(req.Items) == 0 {
 		return AssignmentRequest{}, time.Time{}, apperr.ErrTeachingAssignmentInvalid
 	}
-	if req.LatePenalty == nil {
-		req.LatePenalty = map[string]any{}
-	}
-	if req.LatePolicy == LatePolicyPenalize && !hasLatePenaltyRule(req.LatePenalty) {
+	if req.LatePolicy == LatePolicyPenalize && !validLatePenalty(req.LatePenalty) {
 		return AssignmentRequest{}, time.Time{}, apperr.ErrTeachingAssignmentInvalid
+	}
+	if req.LatePolicy != LatePolicyPenalize {
+		req.LatePenalty = nil
 	}
 	for i := range req.Items {
 		req.Items[i].ItemCode = strings.TrimSpace(req.Items[i].ItemCode)
@@ -280,49 +280,28 @@ func applyLatePenalty(assignment Assignment, rawScore int32, isLate bool) (int32
 }
 
 // hasLatePenaltyRule 判断迟交扣分策略是否包含可执行规则。
-func hasLatePenaltyRule(rule map[string]any) bool {
-	_, pointsOK := numericRuleValue(rule, "points")
-	_, percentOK := numericRuleValue(rule, "percent")
-	return pointsOK || percentOK
+func validLatePenalty(rule *LatePenaltyConfig) bool {
+	if rule == nil || (rule.Points == nil) == (rule.Percent == nil) {
+		return false
+	}
+	if rule.Points != nil {
+		return *rule.Points >= 0
+	}
+	return *rule.Percent >= 0 && *rule.Percent <= 100
 }
 
 // latePenaltyAmount 从 JSON 策略解析扣分分值或百分比。
-func latePenaltyAmount(rule map[string]any, rawScore int32) (int32, error) {
-	if points, ok := numericRuleValue(rule, "points"); ok {
-		if points < 0 {
-			return 0, apperr.ErrTeachingAssignmentInvalid
-		}
-		return int32(math.Ceil(points)), nil
+func latePenaltyAmount(rule *LatePenaltyConfig, rawScore int32) (int32, error) {
+	if rule == nil {
+		return 0, apperr.ErrTeachingAssignmentInvalid
 	}
-	if percent, ok := numericRuleValue(rule, "percent"); ok {
-		if percent < 0 || percent > 100 {
-			return 0, apperr.ErrTeachingAssignmentInvalid
-		}
-		return int32(math.Ceil(float64(rawScore) * percent / 100)), nil
+	if rule.Points != nil {
+		return int32(math.Ceil(*rule.Points)), nil
+	}
+	if rule.Percent != nil {
+		return int32(math.Ceil(float64(rawScore) * *rule.Percent / 100)), nil
 	}
 	return 0, apperr.ErrTeachingAssignmentInvalid
-}
-
-// numericRuleValue 读取迟交策略中的数值字段。
-func numericRuleValue(rule map[string]any, key string) (float64, bool) {
-	value, ok := rule[key]
-	if !ok {
-		return 0, false
-	}
-	switch typed := value.(type) {
-	case float64:
-		return typed, true
-	case float32:
-		return float64(typed), true
-	case int:
-		return float64(typed), true
-	case int32:
-		return float64(typed), true
-	case int64:
-		return float64(typed), true
-	default:
-		return jsonx.Float64FromAnyOK(typed)
-	}
 }
 
 // validCourseType 校验课程类型。
@@ -399,7 +378,7 @@ func validGradingMode(value int16) bool {
 
 // validGradeSource 校验成绩来源类型。
 func validGradeSource(value int16) bool {
-	return value >= GradeSourceAssignment && value <= GradeSourceExam
+	return value == GradeSourceAssignment || value == GradeSourceExperiment
 }
 
 // sanitizeUserText 清理用户可见文本中的 HTML 控制字符,防止存储型脚本进入响应。

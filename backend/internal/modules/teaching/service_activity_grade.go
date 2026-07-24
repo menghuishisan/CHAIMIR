@@ -55,6 +55,31 @@ func (s *Service) ReportProgress(ctx context.Context, lessonID int64, req Progre
 	return progressDTO(progress), nil
 }
 
+// HandleExperimentScored 保存实验成绩投影，并在实例完成后标记学生可见的关联课时完成。
+func (s *Service) HandleExperimentScored(ctx context.Context, event contracts.ExperimentScoredEvent) error {
+	if event.TenantID <= 0 || event.ExperimentID <= 0 || event.InstanceID <= 0 || event.StudentID <= 0 || event.Score < 0 || event.ScoredAt.IsZero() {
+		return apperr.ErrTeachingGradeInvalid
+	}
+	return s.store.TenantTx(ctx, event.TenantID, func(ctx context.Context, tx TxStore) error {
+		if err := tx.UpsertExperimentScoreProjection(ctx, event); err != nil {
+			return err
+		}
+		if !event.Completed {
+			return nil
+		}
+		lessonIDs, err := tx.ListStudentExperimentLessonIDs(ctx, event.TenantID, event.ExperimentID, event.StudentID)
+		if err != nil {
+			return err
+		}
+		for _, lessonID := range lessonIDs {
+			if _, err := tx.UpsertProgress(ctx, LessonProgress{ID: s.ids.Generate(), TenantID: event.TenantID, LessonID: lessonID, StudentID: event.StudentID, Status: ProgressDone}); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
 // CourseProgressStats 统计课程进度。
 func (s *Service) CourseProgressStats(ctx context.Context, courseID int64) (ProgressStatsDTO, error) {
 	id, err := currentIdentity(ctx)
@@ -368,6 +393,35 @@ func (s *Service) SetGradeWeights(ctx context.Context, courseID int64, req Grade
 		if err := ensureTeacherOwned(course, id.AccountID); err != nil {
 			return err
 		}
+		lessons, err := tx.ListLessonsByCourse(ctx, id.TenantID, courseID)
+		if err != nil {
+			return err
+		}
+		experimentRefs := make(map[string]struct{})
+		for _, lesson := range lessons {
+			if lesson.ContentType == LessonContentExperiment {
+				if ref, ok := lesson.ContentRef["experiment_id"].(string); ok {
+					experimentRefs[strings.TrimSpace(ref)] = struct{}{}
+				}
+			}
+		}
+		for _, weight := range weights {
+			sourceID, ok := ids.Parse(weight.SourceRef)
+			if !ok {
+				return apperr.ErrTeachingGradeWeightInvalid
+			}
+			switch weight.SourceType {
+			case GradeSourceAssignment:
+				assignment, err := tx.GetAssignment(ctx, id.TenantID, sourceID)
+				if err != nil || assignment.CourseID != courseID {
+					return apperr.ErrTeachingGradeWeightInvalid
+				}
+			case GradeSourceExperiment:
+				if _, exists := experimentRefs[weight.SourceRef]; !exists {
+					return apperr.ErrTeachingGradeWeightInvalid
+				}
+			}
+		}
 		weights, err = tx.ReplaceGradeWeights(ctx, id.TenantID, courseID, weights)
 		return err
 	}); err != nil {
@@ -429,25 +483,33 @@ func (s *Service) ComputeCourseGrades(ctx context.Context, courseID int64) ([]Gr
 		}
 		scores := map[int64]float64{}
 		for _, weight := range weights {
-			if weight.SourceType != GradeSourceAssignment {
-				continue
-			}
-			assignmentID, err := strconv.ParseInt(weight.SourceRef, 10, 64)
-			if err != nil {
+			sourceID, ok := ids.Parse(weight.SourceRef)
+			if !ok {
 				return apperr.ErrTeachingGradeWeightInvalid
 			}
-			subs, _, err := tx.ListSubmissionsByAssignment(ctx, id.TenantID, assignmentID, 1, s.cfg.CourseGradesMaxRows)
-			if err != nil {
-				return err
-			}
-			best := map[int64]int32{}
-			for _, sub := range subs {
-				if sub.FinalScore > best[sub.StudentID] {
-					best[sub.StudentID] = sub.FinalScore
+			switch weight.SourceType {
+			case GradeSourceAssignment:
+				subs, _, err := tx.ListSubmissionsByAssignment(ctx, id.TenantID, sourceID, 1, s.cfg.CourseGradesMaxRows)
+				if err != nil {
+					return err
 				}
-			}
-			for studentID, score := range best {
-				scores[studentID] += float64(score) * weight.Weight / 100
+				best := map[int64]int32{}
+				for _, sub := range subs {
+					if sub.FinalScore > best[sub.StudentID] {
+						best[sub.StudentID] = sub.FinalScore
+					}
+				}
+				for studentID, score := range best {
+					scores[studentID] += float64(score) * weight.Weight / 100
+				}
+			case GradeSourceExperiment:
+				best, err := tx.ListBestExperimentScores(ctx, id.TenantID, sourceID)
+				if err != nil {
+					return err
+				}
+				for studentID, score := range best {
+					scores[studentID] += score * weight.Weight / 100
+				}
 			}
 		}
 		grades = make([]CourseGrade, 0, len(members))
@@ -469,6 +531,9 @@ func (s *Service) ComputeCourseGrades(ctx context.Context, courseID int64) ([]Gr
 	out := make([]GradeDTO, 0, len(grades))
 	for _, grade := range grades {
 		out = append(out, gradeDTO(grade))
+	}
+	if err := s.fillGradeSummaries(ctx, out); err != nil {
+		return nil, err
 	}
 	s.drainTeachingGradeEventOutboxBestEffort(ctx)
 	return out, nil
@@ -497,6 +562,9 @@ func (s *Service) ListGrades(ctx context.Context, courseID int64) ([]GradeDTO, e
 	out := make([]GradeDTO, 0, len(grades))
 	for _, grade := range grades {
 		out = append(out, gradeDTO(grade))
+	}
+	if err := s.fillGradeSummaries(ctx, out); err != nil {
+		return nil, err
 	}
 	return out, nil
 }
@@ -535,7 +603,11 @@ func (s *Service) OverrideGrade(ctx context.Context, courseID, studentID int64, 
 		return GradeDTO{}, err
 	}
 	s.drainTeachingGradeEventOutboxBestEffort(ctx)
-	return gradeDTO(grade), nil
+	out := []GradeDTO{gradeDTO(grade)}
+	if err := s.fillGradeSummaries(ctx, out); err != nil {
+		return GradeDTO{}, err
+	}
+	return out[0], nil
 }
 
 const gradeExportSubject = "teaching.course_grade_export"
@@ -638,6 +710,26 @@ func (s *Service) GetCourse(ctx context.Context, tenantID, courseID int64) (cont
 		return contracts.TeachingCourseInfo{}, mapCourseError(err)
 	}
 	return contractCourse(course), nil
+}
+
+// BatchGetCourses 实现 M6 对聚合层的批量课程摘要契约。
+func (s *Service) BatchGetCourses(ctx context.Context, tenantID int64, courseIDs []int64) ([]contracts.TeachingCourseInfo, error) {
+	if len(courseIDs) == 0 {
+		return []contracts.TeachingCourseInfo{}, nil
+	}
+	var courses []Course
+	if err := s.store.TenantTx(ctx, tenantID, func(ctx context.Context, tx TxStore) error {
+		var err error
+		courses, err = tx.ListCoursesByIDs(ctx, tenantID, courseIDs)
+		return err
+	}); err != nil {
+		return nil, mapCourseError(err)
+	}
+	out := make([]contracts.TeachingCourseInfo, 0, len(courses))
+	for _, course := range courses {
+		out = append(out, contractCourse(course))
+	}
+	return out, nil
 }
 
 // GetCourseGrade 实现 M6 对 M11 的学生单课程成绩只读契约。

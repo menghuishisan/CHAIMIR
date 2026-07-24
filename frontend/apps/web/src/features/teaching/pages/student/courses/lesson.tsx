@@ -5,7 +5,7 @@ import type { LessonContentRef, LessonExperimentRef, LessonMarkdownRef, LessonSi
 import { LessonContentType, ProgressStatus } from '@chaimir/api-client'
 import { Button, Callout, DescriptionList, ResourceState } from '@chaimir/ui'
 import { CheckCircle, FileText, FlaskConical, PlaySquare, RefreshCw } from 'lucide-react'
-import { useParams } from 'react-router-dom'
+import { useNavigate, useParams } from 'react-router-dom'
 import { api } from '../../../../../app/api'
 import { useAsyncResource } from '../../../../../hooks'
 import styles from '../../teaching.module.css'
@@ -14,8 +14,10 @@ import { lessonContentTypeLabel } from '../../../../../utils'
 
 const LessonPage: React.FC = () => {
   const { lessonId } = useParams()
+  const navigate = useNavigate()
   const resource = useAsyncResource(() => api.teaching.getLesson(String(lessonId)), [lessonId])
   const [submitting, setSubmitting] = useState(false)
+  const [launching, setLaunching] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 
@@ -42,6 +44,26 @@ const LessonPage: React.FC = () => {
       setSubmitting(false)
     }
   }, [lessonId])
+
+  /** handleLaunchExperiment 使用 M6 签发的短时授权创建课程实验实例。 */
+  const handleLaunchExperiment = useCallback(async () => {
+    const lesson = resource.data
+    const experimentRef = lesson?.content_ref as LessonExperimentRef | undefined
+    if (!lesson?.experiment_launch_grant || !experimentRef?.experiment_id) {
+      setError('当前课时没有可用的实验入口，请联系任课教师。')
+      return
+    }
+    setLaunching(true)
+    setError(null)
+    try {
+      const instance = await api.experiment.createInstance(experimentRef.experiment_id, { launch_grant: lesson.experiment_launch_grant })
+      navigate(`/student/experiments/${experimentRef.experiment_id}/workspace?instanceId=${instance.instance_id}`)
+    } catch (launchError) {
+      setError(userFacingErrorMessage(launchError, '实验环境暂时无法启动，请稍后重试。'))
+    } finally {
+      setLaunching(false)
+    }
+  }, [navigate, resource.data])
 
   if (!lessonId) {
     return <ResourceState status="empty" title="缺少课时信息" description="当前链接没有课时编号。" />
@@ -72,10 +94,12 @@ const LessonPage: React.FC = () => {
       <div className={styles.learningGrid}>
         <section className={styles.contentPanel}>
           <h2>课时内容</h2>
-          <LessonContent type={resource.data.content_type} value={resource.data.content_ref} />
-          <Button icon={<CheckCircle size={16} />} loading={submitting} onClick={handleComplete}>
-            标记完成
-          </Button>
+          <LessonContent type={resource.data.content_type} value={resource.data.content_ref} launching={launching} onLaunchExperiment={handleLaunchExperiment} />
+          {resource.data.content_type !== LessonContentType.EXPERIMENT && (
+            <Button icon={<CheckCircle size={16} />} loading={submitting} onClick={handleComplete}>
+              标记完成
+            </Button>
+          )}
         </section>
         <section className={styles.panel}>
           <h2>学习说明</h2>
@@ -90,7 +114,7 @@ const LessonPage: React.FC = () => {
 export default LessonPage
 
 /** LessonContent 按课时类型渲染可读正文或资源摘要，不暴露底层对象。 */
-function LessonContent({ type, value }: { type: LessonContentType; value: LessonContentRef }): React.ReactElement {
+function LessonContent({ type, value, launching, onLaunchExperiment }: { type: LessonContentType; value: LessonContentRef; launching: boolean; onLaunchExperiment: () => void }): React.ReactElement {
   if (type === LessonContentType.MARKDOWN) {
     return <div className={styles.contentBox}>{(value as LessonMarkdownRef).markdown}</div>
   }
@@ -103,8 +127,7 @@ function LessonContent({ type, value }: { type: LessonContentType; value: Lesson
     return <div className={styles.resourceSummary}><FileText size={22} /><DescriptionList items={[{ key: 'name', label: '附件', value: ref.file_name }]} /></div>
   }
   if (type === LessonContentType.EXPERIMENT) {
-    const ref = value as LessonExperimentRef
-    return <div className={styles.resourceSummary}><FlaskConical size={22} /><DescriptionList items={[{ key: 'experiment', label: '实验', value: ref.experiment_id }]} /></div>
+    return <div className={styles.resourceSummary}><FlaskConical size={22} /><DescriptionList items={[{ key: 'experiment', label: '实验', value: '课程实验环境' }]} /><Button icon={<FlaskConical size={16} />} loading={launching} onClick={onLaunchExperiment}>进入实验</Button></div>
   }
   const ref = value as LessonSimulationRef
   return <div className={styles.resourceSummary}><PlaySquare size={22} /><DescriptionList columns={2} items={[{ key: 'code', label: '仿真场景', value: ref.package_code }, { key: 'version', label: '版本', value: ref.version }]} /></div>

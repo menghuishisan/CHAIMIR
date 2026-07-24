@@ -19,9 +19,6 @@ func validateContestRequest(req ContestRequest) (ContestRequest, error) {
 	if req.Name == "" || len(req.Name) > 255 {
 		return ContestRequest{}, apperr.ErrContestInvalid
 	}
-	if req.Rules == nil {
-		req.Rules = map[string]any{}
-	}
 	if !registeredContestMode(req.Mode) {
 		return ContestRequest{}, apperr.ErrContestInvalid
 	}
@@ -50,19 +47,10 @@ func validateProblemRequest(req ProblemRequest, mode int16) (ProblemRequest, err
 	if req.ItemCode == "" || req.ItemVersion == "" || req.Score <= 0 {
 		return ProblemRequest{}, apperr.ErrContestProblemInvalid
 	}
-	if req.DynamicScore == nil {
-		req.DynamicScore = map[string]any{}
-	}
-	if len(req.DynamicScore) > 0 {
-		if !jsonx.HasOnlyKeys(req.DynamicScore, "min_score", "decay_per_solve") {
+	if req.DynamicScore != nil {
+		if req.DynamicScore.MinScore <= 0 || req.DynamicScore.DecayPerSolve <= 0 || req.DynamicScore.MinScore > req.Score {
 			return ProblemRequest{}, apperr.ErrContestProblemInvalid
 		}
-		minScore, minOK := jsonx.Int32FromNumberOK(req.DynamicScore["min_score"])
-		decay, decayOK := jsonx.Int32FromNumberOK(req.DynamicScore["decay_per_solve"])
-		if !minOK || !decayOK || minScore <= 0 || decay <= 0 || minScore > req.Score {
-			return ProblemRequest{}, apperr.ErrContestProblemInvalid
-		}
-		req.DynamicScore = map[string]any{"min_score": minScore, "decay_per_solve": decay}
 	}
 	if mode == ContestModeBattle {
 		if !registeredBattleRule(req.BattleRule) {
@@ -73,28 +61,27 @@ func validateProblemRequest(req ProblemRequest, mode int16) (ProblemRequest, err
 		}
 	} else {
 		req.BattleRule = 0
-		req.BattleConfig = map[string]any{}
+		req.BattleConfig = nil
 	}
 	return req, nil
 }
 
 // validateBattleConfig 校验对抗题执行所需的沙箱运行时配置。
-func validateBattleConfig(cfg map[string]any) error {
-	if len(cfg) == 0 || !jsonx.HasOnlyKeys(cfg, "runtime_code", "runtime_image_version", "tool_codes") {
+func validateBattleConfig(cfg *BattleRuntimeConfig) error {
+	if cfg == nil {
 		return apperr.ErrContestProblemInvalid
 	}
-	for _, key := range []string{"runtime_code", "runtime_image_version"} {
-		if strings.TrimSpace(stringValue(cfg[key])) == "" {
+	cfg.RuntimeCode = strings.TrimSpace(cfg.RuntimeCode)
+	cfg.RuntimeImageVersion = strings.TrimSpace(cfg.RuntimeImageVersion)
+	if cfg.RuntimeCode == "" || cfg.RuntimeImageVersion == "" {
+		return apperr.ErrContestProblemInvalid
+	}
+	for i, code := range cfg.ToolCodes {
+		cfg.ToolCodes[i] = strings.TrimSpace(code)
+		if cfg.ToolCodes[i] == "" {
 			return apperr.ErrContestProblemInvalid
 		}
 	}
-	tools, ok := normalizedStringSlice(cfg["tool_codes"], true)
-	if !ok {
-		return apperr.ErrContestProblemInvalid
-	}
-	cfg["runtime_code"] = strings.TrimSpace(stringValue(cfg["runtime_code"]))
-	cfg["runtime_image_version"] = strings.TrimSpace(stringValue(cfg["runtime_image_version"]))
-	cfg["tool_codes"] = tools
 	return nil
 }
 
@@ -279,9 +266,12 @@ func validateVulnDraftBody(body map[string]any) bool {
 		return false
 	}
 	if raw, exists := body["ad_config"]; exists && raw != nil {
-		if err := validateBattleConfig(mapAny(raw)); err != nil {
+		config := mapAny(raw)
+		tools, ok := normalizedStringSlice(config["tool_codes"], true)
+		if !jsonx.HasOnlyKeys(config, "runtime_code", "runtime_image_version", "tool_codes") || strings.TrimSpace(stringValue(config["runtime_code"])) == "" || strings.TrimSpace(stringValue(config["runtime_image_version"])) == "" || !ok {
 			return false
 		}
+		config["tool_codes"] = tools
 	}
 	return true
 }

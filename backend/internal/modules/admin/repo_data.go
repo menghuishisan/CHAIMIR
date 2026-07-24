@@ -23,7 +23,11 @@ func (t *txStore) ListSystemConfigs(ctx context.Context, scope int16, tenantID i
 	}
 	out := make([]ConfigDTO, 0, len(rows))
 	for _, row := range rows {
-		out = append(out, configDTO(row))
+		item, err := configDTO(row)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, item)
 	}
 	return out, nil
 }
@@ -34,12 +38,12 @@ func (t *txStore) GetSystemConfig(ctx context.Context, scope int16, tenantID int
 	if err != nil {
 		return ConfigDTO{}, err
 	}
-	return configDTO(row), nil
+	return configDTO(row)
 }
 
 // CreateSystemConfig 创建配置项。
-func (t *txStore) CreateSystemConfig(ctx context.Context, id int64, scope int16, tenantID int64, key string, value map[string]any, operatorID int64) (ConfigDTO, error) {
-	data, err := jsonx.ObjectBytes(value, apperr.ErrAdminConfigInvalid)
+func (t *txStore) CreateSystemConfig(ctx context.Context, id int64, scope int16, tenantID int64, key string, value MaintenanceModeConfig, operatorID int64) (ConfigDTO, error) {
+	data, err := jsonx.AnyBytes(value, apperr.ErrAdminConfigInvalid)
 	if err != nil {
 		return ConfigDTO{}, err
 	}
@@ -47,12 +51,12 @@ func (t *txStore) CreateSystemConfig(ctx context.Context, id int64, scope int16,
 	if err != nil {
 		return ConfigDTO{}, err
 	}
-	return configDTO(row), nil
+	return configDTO(row)
 }
 
 // UpdateSystemConfig 按乐观锁更新配置项。
-func (t *txStore) UpdateSystemConfig(ctx context.Context, scope int16, tenantID int64, key string, value map[string]any, operatorID int64, version int32) (ConfigDTO, error) {
-	data, err := jsonx.ObjectBytes(value, apperr.ErrAdminConfigInvalid)
+func (t *txStore) UpdateSystemConfig(ctx context.Context, scope int16, tenantID int64, key string, value MaintenanceModeConfig, operatorID int64, version int32) (ConfigDTO, error) {
+	data, err := jsonx.AnyBytes(value, apperr.ErrAdminConfigInvalid)
 	if err != nil {
 		return ConfigDTO{}, err
 	}
@@ -60,16 +64,16 @@ func (t *txStore) UpdateSystemConfig(ctx context.Context, scope int16, tenantID 
 	if err != nil {
 		return ConfigDTO{}, err
 	}
-	return configDTO(row), nil
+	return configDTO(row)
 }
 
 // CreateConfigChangeLog 写入配置变更历史。
-func (t *txStore) CreateConfigChangeLog(ctx context.Context, id, configID, tenantID int64, oldValue, newValue map[string]any, operatorID int64) (ConfigChangeLogDTO, error) {
-	oldData, err := jsonx.ObjectBytes(oldValue, apperr.ErrAdminConfigInvalid)
+func (t *txStore) CreateConfigChangeLog(ctx context.Context, id, configID, tenantID int64, oldValue, newValue MaintenanceModeConfig, operatorID int64) (ConfigChangeLogDTO, error) {
+	oldData, err := jsonx.AnyBytes(oldValue, apperr.ErrAdminConfigInvalid)
 	if err != nil {
 		return ConfigChangeLogDTO{}, err
 	}
-	newData, err := jsonx.ObjectBytes(newValue, apperr.ErrAdminConfigInvalid)
+	newData, err := jsonx.AnyBytes(newValue, apperr.ErrAdminConfigInvalid)
 	if err != nil {
 		return ConfigChangeLogDTO{}, err
 	}
@@ -77,7 +81,7 @@ func (t *txStore) CreateConfigChangeLog(ctx context.Context, id, configID, tenan
 	if err != nil {
 		return ConfigChangeLogDTO{}, err
 	}
-	return configLogDTO(row), nil
+	return configLogDTO(row)
 }
 
 // GetConfigChangeLog 查询单条配置变更历史。
@@ -86,7 +90,7 @@ func (t *txStore) GetConfigChangeLog(ctx context.Context, id, configID int64) (C
 	if err != nil {
 		return ConfigChangeLogDTO{}, err
 	}
-	return configLogDTO(row), nil
+	return configLogDTO(row)
 }
 
 // ListConfigChangeLogs 查询配置变更历史和总数。
@@ -97,7 +101,11 @@ func (t *txStore) ListConfigChangeLogs(ctx context.Context, configID int64, page
 	}
 	out := make([]ConfigChangeLogDTO, 0, len(rows))
 	for _, row := range rows {
-		out = append(out, configLogDTO(row))
+		item, err := configLogDTO(row)
+		if err != nil {
+			return nil, 0, err
+		}
+		out = append(out, item)
 	}
 	total, err := t.q.CountConfigChangeLogs(ctx, configID)
 	if err != nil {
@@ -108,7 +116,7 @@ func (t *txStore) ListConfigChangeLogs(ctx context.Context, configID int64, page
 
 // CreateAlertRule 创建告警规则。
 func (t *txStore) CreateAlertRule(ctx context.Context, id int64, req AlertRuleRequest) (AlertRuleDTO, error) {
-	condition, err := jsonx.ObjectBytes(req.Condition, apperr.ErrAdminAlertInvalid)
+	condition, err := jsonx.AnyBytes(req.Condition, apperr.ErrAdminAlertInvalid)
 	if err != nil {
 		return AlertRuleDTO{}, err
 	}
@@ -116,7 +124,7 @@ func (t *txStore) CreateAlertRule(ctx context.Context, id int64, req AlertRuleRe
 	if err != nil {
 		return AlertRuleDTO{}, err
 	}
-	return alertRuleDTO(row), nil
+	return alertRuleDTO(row)
 }
 
 // ListAlertRules 查询告警规则。
@@ -127,14 +135,18 @@ func (t *txStore) ListAlertRules(ctx context.Context, scope int16, tenantID int6
 	}
 	out := make([]AlertRuleDTO, 0, len(rows))
 	for _, row := range rows {
-		out = append(out, alertRuleDTO(row))
+		item, err := alertRuleDTO(row)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, item)
 	}
 	return out, nil
 }
 
 // UpdateAlertRule 更新告警规则。
 func (t *txStore) UpdateAlertRule(ctx context.Context, id int64, req AlertRuleRequest) (AlertRuleDTO, error) {
-	condition, err := jsonx.ObjectBytes(req.Condition, apperr.ErrAdminAlertInvalid)
+	condition, err := jsonx.AnyBytes(req.Condition, apperr.ErrAdminAlertInvalid)
 	if err != nil {
 		return AlertRuleDTO{}, err
 	}
@@ -142,7 +154,7 @@ func (t *txStore) UpdateAlertRule(ctx context.Context, id int64, req AlertRuleRe
 	if err != nil {
 		return AlertRuleDTO{}, err
 	}
-	return alertRuleDTO(row), nil
+	return alertRuleDTO(row)
 }
 
 // CreateAlertEvent 创建告警事件。
@@ -254,18 +266,33 @@ func (t *txStore) ListBackupRecords(ctx context.Context, page, size int) ([]Back
 }
 
 // configDTO 转换配置行。
-func configDTO(row sqlcgen.SystemConfig) ConfigDTO {
-	return ConfigDTO{ID: ids.ID(row.ID), Scope: row.Scope, TenantID: ids.ID(pgtypex.Int8Value(row.TenantID)), Key: row.Key, Value: jsonx.ObjectMap(row.Value), Version: row.Version, UpdatedBy: ids.ID(row.UpdatedBy), UpdatedAt: row.UpdatedAt.Time}
+func configDTO(row sqlcgen.SystemConfig) (ConfigDTO, error) {
+	var value MaintenanceModeConfig
+	if err := jsonx.DecodeStrictKnownFields(row.Value, &value); err != nil {
+		return ConfigDTO{}, apperr.ErrAdminConfigInvalid.WithCause(err)
+	}
+	return ConfigDTO{ID: ids.ID(row.ID), Scope: row.Scope, TenantID: ids.ID(pgtypex.Int8Value(row.TenantID)), Key: row.Key, Value: value, Version: row.Version, UpdatedBy: ids.ID(row.UpdatedBy), UpdatedAt: row.UpdatedAt.Time}, nil
 }
 
 // configLogDTO 转换配置历史行。
-func configLogDTO(row sqlcgen.ConfigChangeLog) ConfigChangeLogDTO {
-	return ConfigChangeLogDTO{ID: ids.ID(row.ID), ConfigID: ids.ID(row.ConfigID), TenantID: ids.ID(pgtypex.Int8Value(row.TenantID)), OldValue: jsonx.ObjectMap(row.OldValue), NewValue: jsonx.ObjectMap(row.NewValue), OperatorID: ids.ID(row.OperatorID), CreatedAt: row.CreatedAt.Time.Format(time.RFC3339)}
+func configLogDTO(row sqlcgen.ConfigChangeLog) (ConfigChangeLogDTO, error) {
+	var oldValue, newValue MaintenanceModeConfig
+	if err := jsonx.DecodeStrictKnownFields(row.OldValue, &oldValue); err != nil {
+		return ConfigChangeLogDTO{}, apperr.ErrAdminConfigInvalid.WithCause(err)
+	}
+	if err := jsonx.DecodeStrictKnownFields(row.NewValue, &newValue); err != nil {
+		return ConfigChangeLogDTO{}, apperr.ErrAdminConfigInvalid.WithCause(err)
+	}
+	return ConfigChangeLogDTO{ID: ids.ID(row.ID), ConfigID: ids.ID(row.ConfigID), TenantID: ids.ID(pgtypex.Int8Value(row.TenantID)), OldValue: oldValue, NewValue: newValue, OperatorID: ids.ID(row.OperatorID), CreatedAt: row.CreatedAt.Time.Format(time.RFC3339)}, nil
 }
 
 // alertRuleDTO 转换告警规则行。
-func alertRuleDTO(row sqlcgen.AlertRule) AlertRuleDTO {
-	return AlertRuleDTO{ID: ids.ID(row.ID), Scope: row.Scope, TenantID: ids.ID(pgtypex.Int8Value(row.TenantID)), Name: row.Name, Metric: row.Metric, Condition: jsonx.ObjectMap(row.Condition), Level: row.Level, Enabled: row.Enabled, CreatedAt: row.CreatedAt.Time.Format(time.RFC3339), UpdatedAt: row.UpdatedAt.Time.Format(time.RFC3339)}
+func alertRuleDTO(row sqlcgen.AlertRule) (AlertRuleDTO, error) {
+	var condition AlertCondition
+	if err := jsonx.DecodeStrictKnownFields(row.Condition, &condition); err != nil {
+		return AlertRuleDTO{}, apperr.ErrAdminAlertInvalid.WithCause(err)
+	}
+	return AlertRuleDTO{ID: ids.ID(row.ID), Scope: row.Scope, TenantID: ids.ID(pgtypex.Int8Value(row.TenantID)), Name: row.Name, Metric: row.Metric, Condition: condition, Level: row.Level, Enabled: row.Enabled, CreatedAt: row.CreatedAt.Time.Format(time.RFC3339), UpdatedAt: row.UpdatedAt.Time.Format(time.RFC3339)}, nil
 }
 
 // alertEventDTO 转换告警事件行。

@@ -9,7 +9,7 @@ export interface SystemConfig {
   scope: AdminScope
   tenant_id?: SnowflakeID
   key: string
-  value: Record<string, unknown>
+  value: MaintenanceModeConfig
   version: number
   updated_by: SnowflakeID
   updated_at: string
@@ -18,7 +18,7 @@ export interface SystemConfig {
 export interface ConfigUpdateRequest {
   scope: AdminScope
   tenant_id?: SnowflakeID
-  value: Record<string, unknown>
+  value: MaintenanceModeConfig
   version: number
   change_log_id?: SnowflakeID
 }
@@ -34,10 +34,14 @@ export interface ConfigChangeLog {
   id: SnowflakeID
   config_id: SnowflakeID
   tenant_id?: SnowflakeID
-  old_value: Record<string, unknown>
-  new_value: Record<string, unknown>
+  old_value: MaintenanceModeConfig
+  new_value: MaintenanceModeConfig
   operator_id: SnowflakeID
   created_at: string
+}
+
+export interface MaintenanceModeConfig {
+  enabled: boolean
 }
 
 export interface AlertRule {
@@ -46,7 +50,7 @@ export interface AlertRule {
   tenant_id?: SnowflakeID
   name: string
   metric: string
-  condition: Record<string, unknown>
+  condition: AlertCondition
   level: number
   enabled: boolean
   created_at: string
@@ -58,15 +62,22 @@ export interface AlertRuleRequest {
   tenant_id?: SnowflakeID
   name: string
   metric: string
-  condition: Record<string, unknown>
+  condition: AlertCondition
   level: number
   enabled: boolean
+}
+
+export interface AlertCondition {
+  operator: 'gt' | 'gte' | 'lt' | 'lte' | 'eq'
+  threshold: number
+  duration_minutes: number
 }
 
 export interface AlertEvent {
   id: SnowflakeID
   rule_id: SnowflakeID
   tenant_id?: SnowflakeID
+  tenant_name?: string
   level: number
   message: string
   status: AlertStatus

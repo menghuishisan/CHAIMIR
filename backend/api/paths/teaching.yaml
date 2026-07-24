@@ -251,6 +251,14 @@
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
 
 /api/v1/teaching/courses/{id}/assignments:
+  get:
+    tags: [teaching]
+    summary: 查询课程作业目录
+    operationId: teachingListAssignments
+    parameters:
+      - $ref: '../openapi.yaml#/components/parameters/PathId'
+    responses:
+      '200': { $ref: '../openapi.yaml#/components/responses/Success' }
   post:
     tags: [teaching]
     summary: 创建课程作业

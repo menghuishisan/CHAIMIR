@@ -58,6 +58,41 @@ func (s *Service) CreateAssignment(ctx context.Context, courseID int64, req Assi
 	return assignmentDetailDTO(AssignmentDetail{Assignment: assignment, Items: assignmentItemFaces(items)})
 }
 
+// ListCourseAssignments 返回课程作业目录；授课教师可见草稿，学生只接收已发布作业。
+func (s *Service) ListCourseAssignments(ctx context.Context, courseID int64) ([]AssignmentDTO, error) {
+	id, err := currentIdentity(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var assignments []Assignment
+	var teacherOwned bool
+	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
+		course, err := tx.GetCourse(ctx, id.TenantID, courseID)
+		if err != nil {
+			return err
+		}
+		if err := s.ensureCourseReadable(ctx, tx, id.TenantID, courseID, id.AccountID); err != nil {
+			return err
+		}
+		teacherOwned = course.TeacherID == id.AccountID
+		assignments, err = tx.ListAssignmentsByCourse(ctx, id.TenantID, courseID)
+		return err
+	}); err != nil {
+		return nil, mapCourseError(err)
+	}
+	out := make([]AssignmentDTO, 0, len(assignments))
+	for _, assignment := range assignments {
+		if teacherOwned || assignment.Status == AssignmentStatusPublished {
+			dto, err := assignmentDTO(assignment)
+			if err != nil {
+				return nil, mapAssignmentError(err)
+			}
+			out = append(out, dto)
+		}
+	}
+	return out, nil
+}
+
 // UpdateAssignment 更新草稿作业。
 func (s *Service) UpdateAssignment(ctx context.Context, assignmentID int64, req AssignmentRequest) (AssignmentDetailDTO, error) {
 	id, err := currentIdentity(ctx)
@@ -310,7 +345,15 @@ func (s *Service) SubmitAssignment(ctx context.Context, assignmentID int64, req 
 	if err := s.writeAudit(ctx, id.TenantID, id.AccountID, contracts.RoleNumStudent, "teaching.assignment.submit", auditTargetSubmission, sub.ID, map[string]any{"assignment_id": assignmentID}); err != nil {
 		return SubmissionDTO{}, err
 	}
-	return submissionDTO(sub)
+	out, err := submissionDTO(sub)
+	if err != nil {
+		return SubmissionDTO{}, err
+	}
+	items := []SubmissionDTO{out}
+	if err := s.fillSubmissionSummaries(ctx, items); err != nil {
+		return SubmissionDTO{}, err
+	}
+	return items[0], nil
 }
 
 // GradeSubmission 教师批改主观题或报告提交。
@@ -349,7 +392,15 @@ func (s *Service) GradeSubmission(ctx context.Context, submissionID int64, req G
 	}); err != nil {
 		return SubmissionDTO{}, mapAssignmentError(err)
 	}
-	return submissionDTO(sub)
+	out, err := submissionDTO(sub)
+	if err != nil {
+		return SubmissionDTO{}, err
+	}
+	items := []SubmissionDTO{out}
+	if err := s.fillSubmissionSummaries(ctx, items); err != nil {
+		return SubmissionDTO{}, err
+	}
+	return items[0], nil
 }
 
 // ListSubmissions 查询作业提交情况。
@@ -386,6 +437,9 @@ func (s *Service) ListSubmissions(ctx context.Context, assignmentID int64, page,
 		}
 		out = append(out, dto)
 	}
+	if err := s.fillSubmissionSummaries(ctx, out); err != nil {
+		return nil, 0, 0, 0, err
+	}
 	return out, total, page, size, nil
 }
 
@@ -419,7 +473,15 @@ func (s *Service) GetSubmissionForUser(ctx context.Context, submissionID int64) 
 	}); err != nil {
 		return SubmissionDTO{}, mapAssignmentError(err)
 	}
-	return submissionDTO(sub)
+	out, err := submissionDTO(sub)
+	if err != nil {
+		return SubmissionDTO{}, err
+	}
+	items := []SubmissionDTO{out}
+	if err := s.fillSubmissionSummaries(ctx, items); err != nil {
+		return SubmissionDTO{}, err
+	}
+	return items[0], nil
 }
 
 // RunJudgeOutboxOnce 派发一轮 M6 本地自动判题 outbox。

@@ -36,12 +36,12 @@ type DashboardDTO struct {
 
 // ConfigDTO 表示系统配置响应。
 type ConfigDTO struct {
-	ID        ids.ID         `json:"id"`
-	Scope     int16          `json:"scope"`
-	TenantID  ids.ID         `json:"tenant_id,omitempty"`
-	Key       string         `json:"key"`
-	Value     map[string]any `json:"value"`
-	Version   int32          `json:"version"`
-	UpdatedBy ids.ID         `json:"updated_by"`
-	UpdatedAt time.Time      `json:"updated_at"`
+	ID        ids.ID                `json:"id"`
+	Scope     int16                 `json:"scope"`
+	TenantID  ids.ID                `json:"tenant_id,omitempty"`
+	Key       string                `json:"key"`
+	Value     MaintenanceModeConfig `json:"value"`
+	Version   int32                 `json:"version"`
+	UpdatedBy ids.ID                `json:"updated_by"`
+	UpdatedAt time.Time             `json:"updated_at"`
 }

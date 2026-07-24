@@ -2,14 +2,24 @@
 /api/v1/experiment/student/experiments:
   get:
     tags: [experiment]
-    summary: 学生可进入的实验列表
+    summary: 学生可直接进入的独立实验列表
     operationId: experimentListStudentExperiments
     x-chaimir-audience: student
     security: [{ bearerAuth: [] }]
     parameters:
-      - { name: course_id, in: query, schema: { $ref: "#/components/schemas/SnowflakeID" } }
       - { $ref: "#/components/parameters/PageQuery" }
       - { $ref: "#/components/parameters/SizeQuery" }
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/experiment/student/experiments/{id}:
+  get:
+    tags: [experiment]
+    summary: 学生实验详情与短时启动授权
+    operationId: experimentGetStudentExperiment
+    x-chaimir-audience: student
+    security: [{ bearerAuth: [] }]
+    parameters:
+      - { $ref: "#/components/parameters/IDPath" }
+      - { name: X-Experiment-Launch-Grant, in: header, required: false, schema: { type: string }, description: 课程实验必须携带 M6 课时接口签发的短时授权 }
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
 /api/v1/experiment/experiments:
   get:
@@ -70,7 +80,7 @@
 /api/v1/experiment/experiments/{id}/instances:
   post:
     tags: [experiment]
-    summary: 发起实验实例
+    summary: 使用短时启动授权发起实验实例
     operationId: experimentCreateInstance
     x-chaimir-audience: student
     security: [{ bearerAuth: [] }]
@@ -157,13 +167,22 @@
     x-chaimir-audience: student
     security: [{ bearerAuth: [] }]
     parameters: [{ $ref: "#/components/parameters/IDPath" }]
-    requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
+    requestBody: { $ref: "#/components/requestBodies/MultipartBody" }
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
 /api/v1/experiment/experiments/{id}/reports:
   get:
     tags: [experiment]
     summary: 实验报告列表
     operationId: experimentListReports
+    x-chaimir-audience: teacher
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/experiment/reports/{id}/download-grant:
+  post:
+    tags: [experiment]
+    summary: 签发实验报告一次性下载授权
+    operationId: experimentReportDownloadGrant
     x-chaimir-audience: teacher
     security: [{ bearerAuth: [] }]
     parameters: [{ $ref: "#/components/parameters/IDPath" }]

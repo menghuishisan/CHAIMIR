@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -24,6 +25,7 @@ import (
 	"chaimir/internal/platform/response"
 	"chaimir/internal/platform/storage"
 	"chaimir/internal/platform/ws"
+	"chaimir/pkg/apperr"
 	"chaimir/pkg/logging"
 	"chaimir/pkg/snowflake"
 
@@ -56,11 +58,12 @@ func run() error {
 	}
 	defer infra.close()
 
-	router := newRouter(cfg, infra)
+	maintenance := &maintenanceGate{}
+	router := newRouter(cfg, infra, maintenance)
 	if err := router.SetTrustedProxies(cfg.Server.TrustedProxies); err != nil {
 		return fmt.Errorf("HTTP trusted proxies 配置非法: %w", err)
 	}
-	if err := assembleModules(ctx, router.Group(""), cfg, infra); err != nil {
+	if err := assembleModules(ctx, router.Group(""), cfg, infra, maintenance); err != nil {
 		return err
 	}
 
@@ -102,6 +105,35 @@ type infrastructure struct {
 	auth     *auth.Manager
 	wsHub    *ws.Hub
 	ids      snowflake.Generator
+}
+
+// maintenanceGate 在所有业务路由注册完成后接入 M9 维护配置读取器。
+type maintenanceGate struct {
+	check func(context.Context) (bool, error)
+}
+
+// Handler 在维护模式下仅放行健康、登录和维护配置路由。
+func (g *maintenanceGate) Handler() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		path := c.Request.URL.Path
+		configRoute := path == "/api/v1/admin/configs" || path == "/api/v1/admin/configs/maintenance_mode" || strings.HasPrefix(path, "/api/v1/admin/configs/maintenance_mode/")
+		if g == nil || g.check == nil || strings.HasPrefix(path, "/-/health") || strings.HasPrefix(path, "/api/healthz") || strings.HasPrefix(path, "/api/v1/auth/") || configRoute {
+			c.Next()
+			return
+		}
+		enabled, err := g.check(c.Request.Context())
+		if err != nil {
+			response.Fail(c, err)
+			c.Abort()
+			return
+		}
+		if enabled {
+			response.Fail(c, apperr.ErrAdminMaintenance)
+			c.Abort()
+			return
+		}
+		c.Next()
+	}
 }
 
 // newInfrastructure 初始化所有模块共享的基础设施,任何依赖不可用都 fail-fast。
@@ -190,9 +222,9 @@ func (i *infrastructure) close() {
 }
 
 // newRouter 创建 HTTP 路由器、统一 trace 中间件和健康探针。
-func newRouter(cfg *config.Config, infra *infrastructure) *gin.Engine {
+func newRouter(cfg *config.Config, infra *infrastructure, maintenance *maintenanceGate) *gin.Engine {
 	r := gin.New()
-	r.Use(response.TraceMiddleware(), httpx.AuditContextMiddleware(), response.RecoveryMiddleware())
+	r.Use(response.TraceMiddleware(), httpx.AuditContextMiddleware(), response.RecoveryMiddleware(), maintenance.Handler())
 	r.NoRoute(response.NoRoute)
 	r.GET("/-/healthz", func(c *gin.Context) {
 		response.OK(c, map[string]string{"status": "ok"})
@@ -221,7 +253,7 @@ func newRouter(cfg *config.Config, infra *infrastructure) *gin.Engine {
 }
 
 // assembleModules 按地基、引擎、业务、聚合顺序装配 11 个模块和基础层路由。
-func assembleModules(ctx context.Context, router gin.IRouter, cfg *config.Config, infra *infrastructure) error {
+func assembleModules(ctx context.Context, router gin.IRouter, cfg *config.Config, infra *infrastructure, maintenance *maintenanceGate) error {
 	identitySvc, err := RegisterIdentityModule(IdentityModuleDeps{
 		Router:   router,
 		Database: infra.database,
@@ -286,7 +318,7 @@ func assembleModules(ctx context.Context, router gin.IRouter, cfg *config.Config
 	if err != nil {
 		return err
 	}
-	experimentSvc, err := RegisterExperimentModule(ctx, ExperimentModuleDeps{Router: router, Database: infra.database, IDs: infra.ids, Config: cfg.Experiment, Content: contentSvc, Sandbox: sandboxSvc, Judge: judgeSvc, Sim: simSvc, Audit: auditWriter, EventBus: infra.bus, Storage: infra.storage, Auth: infra.auth, Roles: identitySvc})
+	experimentSvc, err := RegisterExperimentModule(ctx, ExperimentModuleDeps{Router: router, Database: infra.database, IDs: infra.ids, Config: cfg.Experiment, Upload: cfg.Upload, MinIO: cfg.MinIO, AuthCfg: cfg.Auth, Content: contentSvc, Sandbox: sandboxSvc, Judge: judgeSvc, Sim: simSvc, Audit: auditWriter, EventBus: infra.bus, Storage: infra.storage, Auth: infra.auth, Roles: identitySvc})
 	if err != nil {
 		return err
 	}
@@ -294,9 +326,11 @@ func assembleModules(ctx context.Context, router gin.IRouter, cfg *config.Config
 	if err != nil {
 		return err
 	}
-	if _, err := RegisterAdminModule(ctx, AdminModuleDeps{Router: router, Database: infra.database, IDs: infra.ids, Audit: auditWriter, Identity: identitySvc, Stats: identitySvc, AuditRead: identitySvc, Teaching: teachingSvc, Sandbox: sandboxSvc, Experiment: experimentSvc, Contest: contestSvc, Notify: notifySvc, Monitoring: cfg.Monitoring, Config: cfg.Admin, Upload: cfg.Upload, MinIO: cfg.MinIO, AuthConfig: cfg.Auth, Transfer: transferSvc, Storage: infra.storage, Auth: infra.auth, Roles: identitySvc}); err != nil {
+	adminSvc, err := RegisterAdminModule(ctx, AdminModuleDeps{Router: router, Database: infra.database, IDs: infra.ids, Audit: auditWriter, Identity: identitySvc, Stats: identitySvc, AuditRead: identitySvc, Teaching: teachingSvc, Sandbox: sandboxSvc, Experiment: experimentSvc, Contest: contestSvc, Notify: notifySvc, Monitoring: cfg.Monitoring, Config: cfg.Admin, Upload: cfg.Upload, MinIO: cfg.MinIO, AuthConfig: cfg.Auth, Transfer: transferSvc, Storage: infra.storage, Auth: infra.auth, Roles: identitySvc})
+	if err != nil {
 		return err
 	}
+	maintenance.check = adminSvc.MaintenanceEnabled
 	if _, err := RegisterGradeModule(ctx, GradeModuleDeps{Router: router, Database: infra.database, IDs: infra.ids, Audit: auditWriter, Teaching: teachingSvc, Notify: notifySvc, EventBus: infra.bus, Redis: infra.redis, Storage: infra.storage, Upload: cfg.Upload, MinIO: cfg.MinIO, AuthConfig: cfg.Auth, Config: cfg.Grade, Auth: infra.auth, Roles: identitySvc}); err != nil {
 		return err
 	}

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"time"
 
+	"chaimir/internal/contracts"
 	"chaimir/internal/modules/grade/internal/sqlcgen"
 	"chaimir/internal/platform/db"
 
@@ -17,6 +18,8 @@ import (
 type roleReader interface {
 	// HasRole 判断账号是否具备指定角色。
 	HasRole(ctx context.Context, accountID int64, role string) (bool, error)
+	// BatchGetAccounts 批量读取成绩审核列表所需的账号摘要。
+	BatchGetAccounts(ctx context.Context, accountIDs []int64) ([]contracts.AccountInfo, error)
 }
 
 // Store 定义 M11 service 所需事务入口。

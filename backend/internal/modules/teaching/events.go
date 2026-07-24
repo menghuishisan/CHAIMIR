@@ -22,7 +22,7 @@ func SubscribeEvents(bus eventbus.Bus, svc *Service) ([]eventbus.Subscription, e
 	if svc == nil {
 		return nil, apperr.ErrEventServiceMissing
 	}
-	subs := make([]eventbus.Subscription, 0, 3)
+	subs := make([]eventbus.Subscription, 0, 4)
 	if err := subscribeTeachingEvent(bus, &subs, contracts.SubjectJudgeCompleted, handleJudgeCompletedEvent(svc)); err != nil {
 		return nil, err
 	}
@@ -32,7 +32,21 @@ func SubscribeEvents(bus eventbus.Bus, svc *Service) ([]eventbus.Subscription, e
 	if err := subscribeTeachingEvent(bus, &subs, contracts.SubjectGradeReviewLockChanged, handleGradeLockChangedEvent(svc)); err != nil {
 		return nil, err
 	}
+	if err := subscribeTeachingEvent(bus, &subs, contracts.SubjectExperimentScored, handleExperimentScoredEvent(svc)); err != nil {
+		return nil, err
+	}
 	return subs, nil
+}
+
+// handleExperimentScoredEvent 解码 M7 得分事件并更新 M6 的最小成绩与课时进度投影。
+func handleExperimentScoredEvent(svc *Service) eventbus.Handler {
+	return func(ctx context.Context, data []byte) error {
+		var event contracts.ExperimentScoredEvent
+		if err := eventbus.Decode(data, &event, apperr.ErrTeachingGradeInvalid); err != nil {
+			return err
+		}
+		return svc.HandleExperimentScored(ctx, event)
+	}
 }
 
 // subscribeTeachingEvent 注册单个主题并保留订阅句柄。

@@ -100,7 +100,8 @@
 - `GET /sandboxes/{id}` 响应中的 `capabilities` 由运行时命令清单与服务端注册表计算,是前端文件、终端、命令工具和链操作入口的权威能力声明。
 - `/sandboxes/{id}/chain/deploy|tx|query`:链上部署、交易和查询`[用户/内部]`;用户路径按沙箱 owner 校验,内部服务路径按签名 `source_ref` 校验。
 - `/sandboxes/{id}/chain/reset`:链恢复创世就绪态`[内部]`。
-- `/quota`:配额。
+- `GET /quota`:学校管理员读取本校配额；平台管理员必须传 `tenant_id` 读取指定学校配额。
+- `PATCH /quota`:学校管理员更新本校配额；平台管理员通过请求体 `tenant_id` 更新指定学校配额。
 
 ### M3 评测引擎 `/api/v1/judge`
 - `/judgers`:判题器管理。
@@ -135,7 +136,7 @@
 - `/experiments/*`:配置/校验/发布。
 - `/experiments/{id}/instances`、`/instances/{id}`:实例创建(编排 M2/M4)/工作台/控制;`/instances/{id}/stages/{stage}/activate` 是阶段资源创建唯一写入口;`/instances/{id}/progress` 返回 M10 订阅元信息。
 - `/instances/{id}/checkpoints/{cp}/judge`:检查点判分(调 M3)。
-- `/instances/{id}/report`、`/reports/{id}/grade`:报告。
+- `/instances/{id}/report`:学生通过受限 Markdown multipart 上传并提交报告；`/reports/{id}/download-grant`、`/reports/{id}/grade`:教师在业务鉴权后下载和批改报告，接口不暴露对象存储引用。
 - `/groups/*`:多人协作。
 - `/internal/instances/{id}/score`、`/internal/stats` `[内部]`(供上层聚合/M9;M7 不直接依赖同层 M6)。
 
@@ -150,7 +151,7 @@
 - `/internal/stats`、`/students/{id}/contest-achievements` `[内部]`。
 
 ### M9 管理后台 `/api/v1/admin`
-- `/platform/dashboard`、`/platform/statistics`、`/platform/tenants`、`/platform/applications`:平台看板/审核状态聚合视图 `[平台管理员]`。
+- `/platform/dashboard`、`/platform/statistics`、`/platform/applications`:平台看板/审核状态聚合视图 `[平台管理员]`；租户列表和详情统一使用 M1 `/platform/tenants`，M9 不提供同义转发接口。
 - `/school/dashboard`、`/school/statistics`:学校看板。
 - `/audit`、`/audit/export`:统一审计查询中心(查 M1 audit_log)。
 - `/configs/*`、`/alert-rules`、`/alert-events/*`:配置/告警。

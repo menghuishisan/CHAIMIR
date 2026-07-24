@@ -40,11 +40,7 @@ func memberDTO(m CourseMember) MemberDTO {
 
 // assignmentDTO 将作业外壳转换为 HTTP 响应结构。
 func assignmentDTO(a Assignment) (AssignmentDTO, error) {
-	latePenalty, err := cloneMap(a.LatePenalty)
-	if err != nil {
-		return AssignmentDTO{}, err
-	}
-	return AssignmentDTO{ID: ids.ID(a.ID), CourseID: ids.ID(a.CourseID), Title: a.Title, ChapterID: ids.ID(a.ChapterID), DueAt: formatTime(a.DueAt), MaxAttempts: a.MaxAttempts, LatePolicy: a.LatePolicy, LatePenalty: latePenalty, Status: a.Status, CreatedAt: formatTime(a.CreatedAt), UpdatedAt: formatTime(a.UpdatedAt)}, nil
+	return AssignmentDTO{ID: ids.ID(a.ID), CourseID: ids.ID(a.CourseID), Title: a.Title, ChapterID: ids.ID(a.ChapterID), DueAt: formatTime(a.DueAt), MaxAttempts: a.MaxAttempts, LatePolicy: a.LatePolicy, LatePenalty: a.LatePenalty, Status: a.Status, CreatedAt: formatTime(a.CreatedAt), UpdatedAt: formatTime(a.UpdatedAt)}, nil
 }
 
 // assignmentItemDTO 将作业题目引用和 M5 题面快照组合为响应结构。
@@ -147,7 +143,7 @@ func contractGrade(g CourseGrade) contracts.TeachingCourseGrade {
 
 // contractCourse 将 M6 课程转换为 M11 所需的只读归属摘要。
 func contractCourse(c Course) contracts.TeachingCourseInfo {
-	return contracts.TeachingCourseInfo{TenantID: c.TenantID, CourseID: c.ID, TeacherID: c.TeacherID, Semester: c.Semester, Credits: c.Credits, Status: c.Status}
+	return contracts.TeachingCourseInfo{TenantID: c.TenantID, CourseID: c.ID, TeacherID: c.TeacherID, Name: c.Name, Semester: c.Semester, Credits: c.Credits, Status: c.Status}
 }
 
 // finalTotal 按 M6 规则选择手动覆盖成绩或自动成绩作为最终分。

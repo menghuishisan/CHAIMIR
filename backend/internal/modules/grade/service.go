@@ -287,7 +287,7 @@ func (s *Service) SubmitReview(ctx context.Context, req ReviewRequest) (ReviewDT
 	if err := s.writeAudit(ctx, id.TenantID, id.AccountID, actorRole, "grade.review.submit", auditTargetGradeReview, out.ID.Int64(), map[string]any{"course_id": course.CourseID, "semester": course.Semester}); err != nil {
 		return ReviewDTO{}, err
 	}
-	return out, nil
+	return s.fillReviewSummary(ctx, id.TenantID, out)
 }
 
 // ListReviews 查询成绩审核分页列表。
@@ -304,7 +304,13 @@ func (s *Service) ListReviews(ctx context.Context, status int16, page, size int)
 		out, total, err = tx.ListGradeReviews(ctx, status, page, size)
 		return err
 	})
-	return out, total, page, size, mapGradeReviewErr(err)
+	if err = mapGradeReviewErr(err); err != nil {
+		return nil, 0, page, size, err
+	}
+	if err := s.fillReviewSummaries(ctx, id.TenantID, out); err != nil {
+		return nil, 0, page, size, err
+	}
+	return out, total, page, size, nil
 }
 
 // ListOwnReviews 查询当前教师本人提交的成绩审核记录。
@@ -321,7 +327,69 @@ func (s *Service) ListOwnReviews(ctx context.Context, status int16, page, size i
 		out, total, err = tx.ListOwnGradeReviews(ctx, id.AccountID, status, page, size)
 		return err
 	})
-	return out, total, page, size, mapGradeReviewErr(err)
+	if err = mapGradeReviewErr(err); err != nil {
+		return nil, 0, page, size, err
+	}
+	if err := s.fillReviewSummaries(ctx, id.TenantID, out); err != nil {
+		return nil, 0, page, size, err
+	}
+	return out, total, page, size, nil
+}
+
+// fillReviewSummaries 批量补齐成绩审核所需的课程与账号展示信息。
+func (s *Service) fillReviewSummaries(ctx context.Context, tenantID int64, items []ReviewDTO) error {
+	if len(items) == 0 {
+		return nil
+	}
+	courseIDs := make([]int64, 0, len(items))
+	accountIDs := make([]int64, 0, len(items)*2)
+	for _, item := range items {
+		courseIDs = append(courseIDs, item.CourseID.Int64())
+		accountIDs = append(accountIDs, item.SubmitterID.Int64())
+		if item.ReviewerID > 0 {
+			accountIDs = append(accountIDs, item.ReviewerID.Int64())
+		}
+	}
+	courses, err := s.teaching.BatchGetCourses(ctx, tenantID, courseIDs)
+	if err != nil {
+		return apperr.ErrGradeReviewInvalid.WithCause(err)
+	}
+	accounts, err := s.roles.BatchGetAccounts(ctx, accountIDs)
+	if err != nil {
+		return apperr.ErrGradeReviewInvalid.WithCause(err)
+	}
+	courseNames := make(map[int64]string, len(courses))
+	for _, course := range courses {
+		courseNames[course.CourseID] = course.Name
+	}
+	accountNames := make(map[int64]string, len(accounts))
+	for _, account := range accounts {
+		accountNames[account.AccountID] = account.Name
+	}
+	for i := range items {
+		var ok bool
+		if items[i].CourseName, ok = courseNames[items[i].CourseID.Int64()]; !ok {
+			return apperr.ErrGradeReviewInvalid.WithCause(fmt.Errorf("成绩审核关联课程不存在: course_id=%s", items[i].CourseID.String()))
+		}
+		if items[i].SubmitterName, ok = accountNames[items[i].SubmitterID.Int64()]; !ok {
+			return apperr.ErrGradeReviewInvalid.WithCause(fmt.Errorf("成绩审核提交账号不存在: account_id=%s", items[i].SubmitterID.String()))
+		}
+		if items[i].ReviewerID > 0 {
+			if items[i].ReviewerName, ok = accountNames[items[i].ReviewerID.Int64()]; !ok {
+				return apperr.ErrGradeReviewInvalid.WithCause(fmt.Errorf("成绩审核处理账号不存在: account_id=%s", items[i].ReviewerID.String()))
+			}
+		}
+	}
+	return nil
+}
+
+// fillReviewSummary 为单条写操作响应补齐与列表一致的展示字段。
+func (s *Service) fillReviewSummary(ctx context.Context, tenantID int64, item ReviewDTO) (ReviewDTO, error) {
+	items := []ReviewDTO{item}
+	if err := s.fillReviewSummaries(ctx, tenantID, items); err != nil {
+		return ReviewDTO{}, err
+	}
+	return items[0], nil
 }
 
 // ApproveReview 通过审核、锁定 M6 单课程成绩并重算 GPA。
@@ -362,7 +430,7 @@ func (s *Service) ApproveReview(ctx context.Context, reviewID int64, req ReviewD
 	if err := s.writeAudit(ctx, id.TenantID, id.AccountID, contracts.RoleNumSchoolAdmin, "grade.review.approve", auditTargetGradeReview, out.ID.Int64(), map[string]any{"course_id": out.CourseID.String(), "semester_id": out.SemesterID.String()}); err != nil {
 		return ReviewDTO{}, err
 	}
-	return out, nil
+	return s.fillReviewSummary(ctx, id.TenantID, out)
 }
 
 // RejectReview 驳回成绩审核。
@@ -389,7 +457,7 @@ func (s *Service) RejectReview(ctx context.Context, reviewID int64, req ReviewDe
 	if out.SemesterID > 0 {
 		s.invalidateCourseSummaryCache(ctx, id.TenantID, out.CourseID.Int64(), out.SemesterID.Int64())
 	}
-	return out, nil
+	return s.fillReviewSummary(ctx, id.TenantID, out)
 }
 
 // UnlockReview 解锁课程成绩,供审核重开或申诉受理后由 M6 改分。
@@ -420,7 +488,7 @@ func (s *Service) UnlockReview(ctx context.Context, reviewID int64, req ReviewDe
 	if out.SemesterID > 0 {
 		s.invalidateCourseSummaryCache(ctx, id.TenantID, out.CourseID.Int64(), out.SemesterID.Int64())
 	}
-	return out, nil
+	return s.fillReviewSummary(ctx, id.TenantID, out)
 }
 
 // StudentSummary 查询学生 GPA 汇总。

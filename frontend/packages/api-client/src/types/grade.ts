@@ -52,9 +52,12 @@ export interface GradeReview {
   id: SnowflakeID
   tenant_id: SnowflakeID
   course_id: SnowflakeID
+  course_name: string
   semester_id?: SnowflakeID
   submitter_id: SnowflakeID
+  submitter_name: string
   reviewer_id?: SnowflakeID
+  reviewer_name?: string
   status: GradeReviewStatus
   is_locked: boolean
   comment?: string

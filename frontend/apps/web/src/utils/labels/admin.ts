@@ -29,7 +29,7 @@ export function alertLevelLabel(level: number): string {
 
 /** systemConfigLabel 返回平台配置键的管理端文案。 */
 export function systemConfigLabel(key: string): string {
-  return labelFromMap(key, { maintenance_mode: '平台维护模式', oss: '对象存储配置', smtp: '邮件发送配置' }, key)
+  return labelFromMap(key, { maintenance_mode: '平台维护模式' }, key)
 }
 
 /** backupTypeLabel 返回备份类型文案。 */

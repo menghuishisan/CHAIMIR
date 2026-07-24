@@ -148,7 +148,6 @@ func (t *txStore) CreateTenant(ctx context.Context, input CreateTenantInput) (Te
 		ExpireAt:             pgtypex.TimestamptzPtr(input.ExpireAt),
 		LogoUrl:              pgtypex.Text(input.LogoURL),
 		DisplayName:          pgtypex.Text(input.DisplayName),
-		FeatureFlags:         input.FeatureFlags,
 		AuthMode:             input.AuthMode,
 		EnableActivationCode: input.EnableActivationCode,
 	})
@@ -164,7 +163,6 @@ func (t *txStore) UpdateTenantConfig(ctx context.Context, input UpdateTenantConf
 		ID:                   input.TenantID,
 		LogoUrl:              pgtypex.Text(input.LogoURL),
 		DisplayName:          pgtypex.Text(input.DisplayName),
-		FeatureFlags:         input.FeatureFlags,
 		AuthMode:             input.AuthMode,
 		EnableActivationCode: input.EnableActivationCode,
 	})

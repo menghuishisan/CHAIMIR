@@ -47,6 +47,8 @@ type JudgeSubmitRequest struct {
 // JudgeResultDetail 是评测结果中的单条可解释详情。
 type JudgeResultDetail struct {
 	Case          string `json:"case"`
+	Source        string `json:"source"`
+	Target        string `json:"target"`
 	Passed        bool   `json:"passed"`
 	ExpectedLabel string `json:"expected_label"`
 	Actual        string `json:"actual"`

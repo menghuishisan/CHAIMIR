@@ -7,7 +7,7 @@ import type {
   BattleEntryRequest,
   BattleEntry,
   BattleMatch,
-  BattleReplayRef,
+  BattleReplay,
   CheatRecord,
   CheatRecordRequest,
   CheatSuspect,
@@ -56,6 +56,11 @@ export class ContestApi {
   /** getStudentContests 查询学生可发现的非草稿竞赛。 */
   async getStudentContests(params?: { page?: number; size?: number }): Promise<PaginatedResponse<Contest>> {
     return this.client.get('/contest/student/contests', params)
+  }
+
+  /** getStudentContest 读取单条学生可见竞赛。 */
+  async getStudentContest(contestId: string): Promise<Contest> {
+    return this.client.get(`/contest/student/contests/${contestId}`)
   }
 
   /**
@@ -199,9 +204,9 @@ export class ContestApi {
   }
 
   /**
-   * 获取对局回放引用。
+   * 获取当前队伍可见的真实对局回放。
    */
-  async getBattleReplay(matchId: string): Promise<BattleReplayRef> {
+  async getBattleReplay(matchId: string): Promise<BattleReplay> {
     return this.client.get(`/contest/matches/${matchId}/replay`)
   }
 

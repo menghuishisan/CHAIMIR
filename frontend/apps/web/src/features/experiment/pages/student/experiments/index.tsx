@@ -11,10 +11,7 @@ import styles from '../../experiment.module.css'
 
 const ExperimentsPage: React.FC = () => {
   const navigate = useNavigate()
-  const experiments = useAsyncResource(
-    () => api.experiment.getPublishedExperiments({ page: 1, size: 20 }),
-    []
-  )
+  const experiments = useAsyncResource(() => api.experiment.getPublishedExperiments({ page: 1, size: 20 }), [])
 
   if (experiments.status === 'loading') {
     return <ResourceState status="loading" title="正在读取实验" description="系统正在同步可进入的实验列表。" />
@@ -45,7 +42,7 @@ const ExperimentsPage: React.FC = () => {
         emptyDescription="教师发布实验后会显示在这里。"
         columns={[
           { key: 'name', title: '实验名称', dataIndex: 'name', priority: 'primary' },
-          { key: 'course', title: '所属课程', render: (row) => row.course_id ? '课程实验' : '独立实验', priority: 'secondary' },
+          { key: 'scope', title: '类型', render: () => '独立实验', priority: 'secondary' },
           { key: 'envs', title: '环境', render: (row) => `${row.components.envs.length} 个环境`, priority: 'secondary' },
           { key: 'checkpoints', title: '检查点', render: (row) => `${row.components.checkpoints.length} 个` },
           {

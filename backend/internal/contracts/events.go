@@ -66,6 +66,7 @@ type ExperimentScoredEvent struct {
 	InstanceID   int64     `json:"instance_id"`
 	StudentID    int64     `json:"student_id"`
 	Score        float64   `json:"score"`
+	Completed    bool      `json:"completed"`
 	ScoredAt     time.Time `json:"scored_at"`
 }
 

@@ -72,6 +72,7 @@ func (a contestAPI) registerTeacherRoutes(g gin.IRouter) {
 // registerStudentRoutes 注册学生参赛接口。
 func (a contestAPI) registerStudentRoutes(g gin.IRouter) {
 	g.GET("/student/contests", a.listStudentContests)
+	g.GET("/student/contests/:id", a.getStudentContest)
 	g.POST("/contests/:id/signup", a.signup)
 	g.POST("/teams/:id/join", a.joinTeamByTeamID)
 	g.POST("/teams/:id/lock", a.lockTeam)
@@ -83,6 +84,16 @@ func (a contestAPI) registerStudentRoutes(g gin.IRouter) {
 	g.GET("/contests/:id/battle/matches", a.listBattleMatches)
 	g.GET("/matches/:id/replay", a.getBattleReplay)
 	g.GET("/my/contest-records", a.myRecords)
+}
+
+// getStudentContest 返回学生可见的单条非草稿竞赛。
+func (a contestAPI) getStudentContest(c *gin.Context) {
+	id, ok := httpx.PathID(c, "id")
+	if !ok {
+		return
+	}
+	out, err := a.svc.GetStudentContest(c.Request.Context(), id)
+	httpx.Write(c, out, err)
 }
 
 // registerPlatformRoutes 注册平台级漏洞源治理接口，不暴露租户漏洞题写入能力。

@@ -59,7 +59,6 @@ const AdminSettingsPage: React.FC = () => {
       await api.identity.updateTenantConfig({
         logo_url: effectiveLogoUrl,
         display_name: effectiveDisplayName,
-        feature_flags: tenant?.feature_flags ?? {},
         auth_mode: Number(effectiveAuthMode) as AuthMode,
         enable_activation_code: effectiveEnableActivationCode,
       })
@@ -70,7 +69,7 @@ const AdminSettingsPage: React.FC = () => {
     } finally {
       setSubmitting(false)
     }
-  }, [effectiveAuthMode, effectiveDisplayName, effectiveEnableActivationCode, effectiveLogoUrl, resource, tenant?.feature_flags])
+  }, [effectiveAuthMode, effectiveDisplayName, effectiveEnableActivationCode, effectiveLogoUrl, resource])
 
   if (resource.status === 'loading') {
     return <ResourceState status="loading" title="正在获取学校配置" />

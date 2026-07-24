@@ -66,6 +66,8 @@ func contractResult(result *JudgeResult) contracts.JudgeTaskResult {
 	for _, detail := range result.Details {
 		details = append(details, contracts.JudgeResultDetail{
 			Case:          detail.Case,
+			Source:        detail.Source,
+			Target:        detail.Target,
 			Passed:        detail.Passed,
 			ExpectedLabel: detail.ExpectedLabel,
 			Actual:        detail.Actual,

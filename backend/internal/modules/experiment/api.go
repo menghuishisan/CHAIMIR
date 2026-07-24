@@ -10,7 +10,9 @@ import (
 	"chaimir/internal/platform/auth"
 	"chaimir/internal/platform/httpx"
 	"chaimir/internal/platform/response"
+	"chaimir/internal/platform/upload"
 	"chaimir/pkg/apperr"
+	"chaimir/pkg/logging"
 
 	"github.com/gin-gonic/gin"
 )
@@ -52,6 +54,7 @@ func (a experimentAPI) registerTeacherRoutes(g gin.IRouter) {
 	g.POST("/experiments/:id/publish", a.publishExperiment)
 	g.POST("/experiments/:id/unpublish", a.unpublishExperiment)
 	g.GET("/experiments/:id/reports", a.listReports)
+	g.POST("/reports/:id/download-grant", a.reportDownloadGrant)
 	g.POST("/reports/:id/grade", a.gradeReport)
 	g.POST("/experiments/:id/groups", a.createGroup)
 	g.POST("/groups/:id/members", a.upsertGroupMember)
@@ -60,6 +63,7 @@ func (a experimentAPI) registerTeacherRoutes(g gin.IRouter) {
 // registerStudentRoutes 注册学生发起实例、判分和报告接口。
 func (a experimentAPI) registerStudentRoutes(g gin.IRouter) {
 	g.GET("/student/experiments", a.listPublishedExperiments)
+	g.GET("/student/experiments/:id", a.getPublishedExperiment)
 	g.POST("/experiments/:id/instances", a.createInstance)
 	g.POST("/instances/:id/checkpoints/:cp/judge", a.judgeCheckpoint)
 	g.POST("/instances/:id/report", a.submitReport)
@@ -67,16 +71,22 @@ func (a experimentAPI) registerStudentRoutes(g gin.IRouter) {
 
 // listPublishedExperiments 仅向学生返回当前租户已发布实验。
 func (a experimentAPI) listPublishedExperiments(c *gin.Context) {
-	courseID, ok := httpx.QueryInt(c, "course_id", httpx.QueryIntRule{Default: 0, Min: 0})
-	if !ok {
-		return
-	}
 	page, size, ok := httpx.Page(c)
 	if !ok {
 		return
 	}
-	out, total, p, s, err := a.svc.ListPublishedExperiments(c.Request.Context(), courseID, page, size)
+	out, total, p, s, err := a.svc.ListPublishedExperiments(c.Request.Context(), page, size)
 	httpx.WritePage(c, out, total, p, s, err)
+}
+
+// getPublishedExperiment 返回单条学生实验，课程实验从请求头读取 M6 启动授权。
+func (a experimentAPI) getPublishedExperiment(c *gin.Context) {
+	id, ok := httpx.PathID(c, "id")
+	if !ok {
+		return
+	}
+	out, err := a.svc.GetPublishedExperiment(c.Request.Context(), id, strings.TrimSpace(c.GetHeader("X-Experiment-Launch-Grant")))
+	httpx.Write(c, out, err)
 }
 
 // registerSharedRoutes 注册师生共享的实例工作台和控制接口。
@@ -265,17 +275,37 @@ func (a experimentAPI) judgeCheckpoint(c *gin.Context) {
 	httpx.Write(c, out, err)
 }
 
-// submitReport 绑定实验报告提交请求。
+// submitReport 限量读取 Markdown 文件并交给服务层完成上传与提交。
 func (a experimentAPI) submitReport(c *gin.Context) {
 	id, ok := httpx.PathID(c, "id")
 	if !ok {
 		return
 	}
-	var req SubmitReportRequest
-	if !httpx.BindJSONWithError(c, &req, apperr.ErrExperimentReportInvalid) {
+	file, err := c.FormFile("file")
+	if err != nil || file.Size > a.svc.reportMaxBytes {
+		response.Fail(c, apperr.ErrExperimentReportInvalid)
 		return
 	}
-	out, err := a.svc.SubmitReport(c.Request.Context(), id, req)
+	opened, err := file.Open()
+	if err != nil {
+		response.Fail(c, apperr.ErrExperimentReportInvalid.WithCause(err))
+		return
+	}
+	defer logging.CloseContext(c.Request.Context(), "关闭实验报告上传文件失败", opened)
+	content, result, err := upload.ReadBounded(opened, a.svc.reportMaxBytes)
+	if err != nil {
+		response.Fail(c, apperr.ErrExperimentReportInvalid.WithCause(err))
+		return
+	}
+	if result != upload.SizeOK {
+		response.Fail(c, apperr.ErrExperimentReportInvalid)
+		return
+	}
+	contentType := strings.TrimSpace(file.Header.Get("Content-Type"))
+	if contentType == "" {
+		contentType = "text/markdown"
+	}
+	out, err := a.svc.SubmitReport(c.Request.Context(), id, ReportUploadRequest{FileName: file.Filename, ContentType: contentType, Content: content})
 	httpx.Write(c, out, err)
 }
 
@@ -291,6 +321,16 @@ func (a experimentAPI) listReports(c *gin.Context) {
 	}
 	out, total, p, s, err := a.svc.ListReports(c.Request.Context(), id, page, size)
 	httpx.WritePage(c, out, total, p, s, err)
+}
+
+// reportDownloadGrant 为教师已获授权的实验报告签发一次性下载授权。
+func (a experimentAPI) reportDownloadGrant(c *gin.Context) {
+	id, ok := httpx.PathID(c, "id")
+	if !ok {
+		return
+	}
+	out, err := a.svc.IssueReportDownloadGrant(c.Request.Context(), id)
+	httpx.Write(c, out, err)
 }
 
 // gradeReport 绑定教师报告批改请求。

@@ -9,6 +9,7 @@ import { api } from '../../../../../app/api'
 import { useAsyncResource } from '../../../../../hooks'
 import styles from '../../teaching.module.css'
 import { userFacingErrorMessage } from '../../../../../utils/userFacingError'
+import { formatDateTime } from '../../../../../utils'
 
 const ratingOptions = [1, 2, 3, 4, 5].map((rating) => ({ value: String(rating), label: `${rating} 分` }))
 
@@ -23,11 +24,12 @@ const CourseDetailPage: React.FC = () => {
   const resource = useAsyncResource(async () => {
     const courseId = String(id || '')
     if (!courseId) throw new Error('缺少课程编号。')
-    const [outline, progress] = await Promise.all([
+    const [outline, progress, assignments] = await Promise.all([
       api.teaching.getCourseOutline(courseId),
       api.teaching.getMyProgress(courseId),
+      api.teaching.listAssignments(courseId),
     ])
-    return { outline, progress }
+    return { outline, progress, assignments }
   }, [id])
   const outline = resource.data?.outline
 
@@ -82,6 +84,18 @@ const CourseDetailPage: React.FC = () => {
         </div>
         <span className={styles.muted}>已完成 {completedLessons}/{outline.lessons.length} 个课时</span>
       </div>
+
+      <section className={styles.panel}>
+        <h2><FileText size={18} /> 课程作业</h2>
+        {(resource.data?.assignments || []).map((assignment) => (
+          <button className={styles.lessonRow} key={assignment.id} type="button" onClick={() => navigate(`/student/courses/assignment/${assignment.id}`)}>
+            <FileText size={18} />
+            <span>{assignment.title}</span>
+            <span className={styles.muted}>{formatDateTime(assignment.due_at)}</span>
+          </button>
+        ))}
+        {resource.data?.assignments.length === 0 && <p className={styles.muted}>当前课程暂未发布作业。</p>}
+      </section>
 
       <section className={styles.panel}>
         <h2><Star size={18} /> 课程评价</h2>

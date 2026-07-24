@@ -173,26 +173,24 @@ type UpdateTenantStatusRequest struct {
 }
 
 type TenantDTO struct {
-	ID                   ids.ID         `json:"id"`
-	Code                 string         `json:"code"`
-	Name                 string         `json:"name"`
-	Type                 int16          `json:"type"`
-	Status               int16          `json:"status"`
-	DeployMode           int16          `json:"deploy_mode"`
-	ExpireAt             *time.Time     `json:"expire_at,omitempty"`
-	LogoURL              string         `json:"logo_url,omitempty"`
-	DisplayName          string         `json:"display_name,omitempty"`
-	FeatureFlags         map[string]any `json:"feature_flags"`
-	AuthMode             int16          `json:"auth_mode"`
-	EnableActivationCode bool           `json:"enable_activation_code"`
+	ID                   ids.ID     `json:"id"`
+	Code                 string     `json:"code"`
+	Name                 string     `json:"name"`
+	Type                 int16      `json:"type"`
+	Status               int16      `json:"status"`
+	DeployMode           int16      `json:"deploy_mode"`
+	ExpireAt             *time.Time `json:"expire_at,omitempty"`
+	LogoURL              string     `json:"logo_url,omitempty"`
+	DisplayName          string     `json:"display_name,omitempty"`
+	AuthMode             int16      `json:"auth_mode"`
+	EnableActivationCode bool       `json:"enable_activation_code"`
 }
 
 type TenantConfigRequest struct {
-	LogoURL              string         `json:"logo_url"`
-	DisplayName          string         `json:"display_name"`
-	FeatureFlags         map[string]any `json:"feature_flags"`
-	AuthMode             int16          `json:"auth_mode"`
-	EnableActivationCode bool           `json:"enable_activation_code"`
+	LogoURL              string `json:"logo_url"`
+	DisplayName          string `json:"display_name"`
+	AuthMode             int16  `json:"auth_mode"`
+	EnableActivationCode bool   `json:"enable_activation_code"`
 }
 
 type SSOConfigDTO struct {

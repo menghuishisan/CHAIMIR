@@ -9,61 +9,59 @@ import (
 
 // ContestRequest 是创建或编辑竞赛的请求。
 type ContestRequest struct {
-	Name          string         `json:"name"`
-	Mode          int16          `json:"mode"`
-	MatchMode     int16          `json:"match_mode"`
-	TeamMode      int16          `json:"team_mode"`
-	SignupStart   time.Time      `json:"signup_start"`
-	SignupEnd     time.Time      `json:"signup_end"`
-	StartAt       time.Time      `json:"start_at"`
-	EndAt         time.Time      `json:"end_at"`
-	FreezeMinutes int32          `json:"freeze_minutes"`
-	Rules         map[string]any `json:"rules"`
+	Name          string    `json:"name"`
+	Mode          int16     `json:"mode"`
+	MatchMode     int16     `json:"match_mode"`
+	TeamMode      int16     `json:"team_mode"`
+	SignupStart   time.Time `json:"signup_start"`
+	SignupEnd     time.Time `json:"signup_end"`
+	StartAt       time.Time `json:"start_at"`
+	EndAt         time.Time `json:"end_at"`
+	FreezeMinutes int32     `json:"freeze_minutes"`
 }
 
 // ContestDTO 是竞赛定义输出。
 type ContestDTO struct {
-	ID            ids.ID         `json:"id"`
-	OrganizerID   ids.ID         `json:"organizer_id"`
-	Name          string         `json:"name"`
-	Mode          int16          `json:"mode"`
-	MatchMode     int16          `json:"match_mode,omitempty"`
-	TeamMode      int16          `json:"team_mode"`
-	SignupStart   time.Time      `json:"signup_start"`
-	SignupEnd     time.Time      `json:"signup_end"`
-	StartAt       time.Time      `json:"start_at"`
-	EndAt         time.Time      `json:"end_at"`
-	FreezeMinutes int32          `json:"freeze_minutes"`
-	Rules         map[string]any `json:"rules"`
-	Status        int16          `json:"status"`
-	CreatedAt     time.Time      `json:"created_at"`
-	UpdatedAt     time.Time      `json:"updated_at"`
+	ID            ids.ID    `json:"id"`
+	OrganizerID   ids.ID    `json:"organizer_id"`
+	Name          string    `json:"name"`
+	Mode          int16     `json:"mode"`
+	MatchMode     int16     `json:"match_mode,omitempty"`
+	TeamMode      int16     `json:"team_mode"`
+	SignupStart   time.Time `json:"signup_start"`
+	SignupEnd     time.Time `json:"signup_end"`
+	StartAt       time.Time `json:"start_at"`
+	EndAt         time.Time `json:"end_at"`
+	FreezeMinutes int32     `json:"freeze_minutes"`
+	Status        int16     `json:"status"`
+	CreatedAt     time.Time `json:"created_at"`
+	UpdatedAt     time.Time `json:"updated_at"`
 }
 
 // ProblemRequest 是竞赛题目编排请求。
 type ProblemRequest struct {
-	ItemCode     string         `json:"item_code"`
-	ItemVersion  string         `json:"item_version"`
-	Score        int32          `json:"score"`
-	DynamicScore map[string]any `json:"dynamic_score"`
-	BattleConfig map[string]any `json:"battle_config"`
-	BattleRule   int16          `json:"battle_rule"`
-	Seq          int32          `json:"seq"`
+	ItemCode     string               `json:"item_code"`
+	ItemVersion  string               `json:"item_version"`
+	Score        int32                `json:"score"`
+	DynamicScore *DynamicScoreConfig  `json:"dynamic_score"`
+	BattleConfig *BattleRuntimeConfig `json:"battle_config"`
+	BattleRule   int16                `json:"battle_rule"`
+	Seq          int32                `json:"seq"`
 }
 
 // ProblemDTO 是竞赛题目引用输出。
 type ProblemDTO struct {
-	ID           ids.ID         `json:"id"`
-	ContestID    ids.ID         `json:"contest_id"`
-	Title        string         `json:"title"`
-	ItemCode     string         `json:"item_code"`
-	ItemVersion  string         `json:"item_version"`
-	Score        int32          `json:"score"`
-	DynamicScore map[string]any `json:"dynamic_score,omitempty"`
-	BattleConfig map[string]any `json:"battle_config,omitempty"`
-	BattleRule   int16          `json:"battle_rule,omitempty"`
-	Seq          int32          `json:"seq"`
-	Face         map[string]any `json:"face,omitempty"`
+	ID           ids.ID               `json:"id"`
+	ContestID    ids.ID               `json:"contest_id"`
+	Title        string               `json:"title"`
+	ItemCode     string               `json:"item_code"`
+	ItemVersion  string               `json:"item_version"`
+	Score        int32                `json:"score"`
+	DynamicScore *DynamicScoreConfig  `json:"dynamic_score,omitempty"`
+	BattleConfig *BattleRuntimeConfig `json:"battle_config,omitempty"`
+	BattleRule   int16                `json:"battle_rule,omitempty"`
+	Seq          int32                `json:"seq"`
+	Face         map[string]any       `json:"face,omitempty"`
 }
 
 // SignupRequest 是学生报名或创建队伍请求。
@@ -161,25 +159,36 @@ type BattleEntryDTO struct {
 
 // BattleMatchDTO 是对局输出。
 type BattleMatchDTO struct {
-	ID           ids.ID         `json:"id"`
-	ContestID    ids.ID         `json:"contest_id"`
-	ProblemID    ids.ID         `json:"problem_id"`
-	EntryAID     ids.ID         `json:"entry_a_id"`
-	EntryBID     ids.ID         `json:"entry_b_id"`
-	SourceRef    string         `json:"source_ref"`
-	SandboxRef   string         `json:"sandbox_ref,omitempty"`
-	JudgeTaskRef string         `json:"judge_task_ref,omitempty"`
-	Result       int16          `json:"result,omitempty"`
-	ScoreDelta   map[string]any `json:"score_delta"`
-	ReplayRef    string         `json:"replay_ref,omitempty"`
-	Status       int16          `json:"status"`
-	MatchedAt    time.Time      `json:"matched_at"`
-	FinishedAt   time.Time      `json:"finished_at,omitempty"`
+	ID              ids.ID         `json:"id"`
+	ContestID       ids.ID         `json:"contest_id"`
+	ProblemID       ids.ID         `json:"problem_id"`
+	EntryAID        ids.ID         `json:"entry_a_id"`
+	EntryBID        ids.ID         `json:"entry_b_id"`
+	SourceRef       string         `json:"source_ref"`
+	SandboxRef      string         `json:"sandbox_ref,omitempty"`
+	JudgeTaskRef    string         `json:"judge_task_ref,omitempty"`
+	Result          int16          `json:"result,omitempty"`
+	ScoreDelta      map[string]any `json:"score_delta"`
+	ReplayAvailable bool           `json:"replay_available"`
+	Status          int16          `json:"status"`
+	MatchedAt       time.Time      `json:"matched_at"`
+	FinishedAt      time.Time      `json:"finished_at,omitempty"`
+}
+
+// BattleReplayDTO 是参赛者可见的真实对局回放时间轴。
+type BattleReplayDTO struct {
+	MatchID      ids.ID             `json:"match_id"`
+	ProblemTitle string             `json:"problem_title"`
+	Result       int16              `json:"result"`
+	ScoreDelta   map[string]any     `json:"score_delta"`
+	Steps        []BattleReplayStep `json:"steps"`
+	FinishedAt   time.Time          `json:"finished_at"`
 }
 
 // LadderDTO 是排行榜输出。
 type LadderDTO struct {
 	TeamID      ids.ID    `json:"team_id"`
+	TeamName    string    `json:"team_name"`
 	Score       float64   `json:"score"`
 	SolvedCount int32     `json:"solved_count"`
 	LastSolveAt time.Time `json:"last_solve_at,omitempty"`
@@ -189,11 +198,11 @@ type LadderDTO struct {
 
 // ResultSnapshotDTO 是竞赛归档后的最终榜单快照输出。
 type ResultSnapshotDTO struct {
-	ID           ids.ID           `json:"id"`
-	TenantID     ids.ID           `json:"tenant_id,omitempty"`
-	ContestID    ids.ID           `json:"contest_id"`
-	FinalRanking []map[string]any `json:"final_ranking"`
-	GeneratedAt  time.Time        `json:"generated_at"`
+	ID           ids.ID      `json:"id"`
+	TenantID     ids.ID      `json:"tenant_id,omitempty"`
+	ContestID    ids.ID      `json:"contest_id"`
+	FinalRanking []LadderDTO `json:"final_ranking"`
+	GeneratedAt  time.Time   `json:"generated_at"`
 }
 
 // CheatRecordRequest 是违规判定请求。
@@ -226,23 +235,43 @@ type CheatSuspectDTO struct {
 
 // VulnSourceRequest 是漏洞源配置请求。
 type VulnSourceRequest struct {
-	ID           ids.ID         `json:"id"`
-	Type         int16          `json:"type"`
-	Name         string         `json:"name"`
-	Config       map[string]any `json:"config"`
-	DefaultLevel int16          `json:"default_level"`
-	Enabled      bool           `json:"enabled"`
+	ID           ids.ID           `json:"id"`
+	Type         int16            `json:"type"`
+	Name         string           `json:"name"`
+	Config       VulnSourceConfig `json:"config"`
+	DefaultLevel int16            `json:"default_level"`
+	Enabled      bool             `json:"enabled"`
+}
+
+// VulnSourceConfig 定义外部漏洞源的固定连接与映射配置。
+type VulnSourceConfig struct {
+	Endpoint       string            `json:"endpoint"`
+	Method         string            `json:"method"`
+	TimeoutSeconds int               `json:"timeout_seconds,omitempty"`
+	Headers        map[string]string `json:"headers,omitempty"`
+	Body           map[string]any    `json:"body,omitempty"`
+	CasesPath      string            `json:"cases_path,omitempty"`
+	Mapping        VulnSourceMapping `json:"mapping"`
+}
+
+// VulnSourceMapping 定义外部案例字段到漏洞题草稿的固定映射。
+type VulnSourceMapping struct {
+	ExternalRef string `json:"external_ref"`
+	Title       string `json:"title"`
+	Level       string `json:"level,omitempty"`
+	RuntimeMode string `json:"runtime_mode,omitempty"`
+	DraftBody   string `json:"draft_body"`
 }
 
 // VulnSourceDTO 是漏洞源输出。
 type VulnSourceDTO struct {
-	ID           ids.ID         `json:"id"`
-	Type         int16          `json:"type"`
-	Name         string         `json:"name"`
-	Config       map[string]any `json:"config"`
-	DefaultLevel int16          `json:"default_level"`
-	Enabled      bool           `json:"enabled"`
-	LastSyncAt   time.Time      `json:"last_sync_at,omitempty"`
+	ID           ids.ID           `json:"id"`
+	Type         int16            `json:"type"`
+	Name         string           `json:"name"`
+	Config       VulnSourceConfig `json:"config"`
+	DefaultLevel int16            `json:"default_level"`
+	Enabled      bool             `json:"enabled"`
+	LastSyncAt   time.Time        `json:"last_sync_at,omitempty"`
 }
 
 // ImportVulnProblemRequest 是手动导入漏洞案例请求。

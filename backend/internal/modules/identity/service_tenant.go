@@ -5,7 +5,6 @@ import (
 	"context"
 
 	"chaimir/internal/contracts"
-	"chaimir/internal/platform/jsonx"
 	"chaimir/pkg/apperr"
 )
 
@@ -29,7 +28,7 @@ func (s *Service) GetTenantConfig(ctx context.Context) (TenantDTO, error) {
 	return ToTenantDTO(row), nil
 }
 
-// UpdateTenantConfigByAdmin 更新当前租户展示、功能开关和认证模式配置。
+// UpdateTenantConfigByAdmin 更新当前租户展示和认证模式配置。
 func (s *Service) UpdateTenantConfigByAdmin(ctx context.Context, req TenantConfigRequest) (TenantDTO, error) {
 	id, err := requireTenantRole(ctx, s, contracts.RoleSchoolAdmin)
 	if err != nil {
@@ -38,17 +37,12 @@ func (s *Service) UpdateTenantConfigByAdmin(ctx context.Context, req TenantConfi
 	if err := validateTenantConfigRequest(req); err != nil {
 		return TenantDTO{}, err
 	}
-	flags, err := jsonx.ObjectBytes(req.FeatureFlags, apperr.ErrIdentityTenantConfigInvalid)
-	if err != nil {
-		return TenantDTO{}, err
-	}
 	var row Tenant
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
 		item, err := tx.UpdateTenantConfig(ctx, UpdateTenantConfigInput{
 			TenantID:             id.TenantID,
 			LogoURL:              req.LogoURL,
 			DisplayName:          req.DisplayName,
-			FeatureFlags:         flags,
 			AuthMode:             req.AuthMode,
 			EnableActivationCode: req.EnableActivationCode,
 		})

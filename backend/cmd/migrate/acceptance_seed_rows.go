@@ -866,16 +866,15 @@ ON CONFLICT (code) DO UPDATE SET session_id=EXCLUDED.session_id, created_by=EXCL
 
 // seedContestRows 写入解题赛、队伍、提交、榜单和漏洞题素材。
 func seedContestRows(ctx context.Context, tx pgx.Tx) error {
-	rules := map[string]any{"scoring": "static", "allowed_languages": []string{"solidity"}, "appeal_minutes": 20}
 	signupStart := time.Date(2026, 11, 1, 8, 0, 0, 0, time.UTC)
 	signupEnd := time.Date(2026, 11, 8, 18, 0, 0, 0, time.UTC)
 	start := time.Date(2026, 11, 10, 9, 0, 0, 0, time.UTC)
 	end := time.Date(2026, 11, 10, 17, 0, 0, 0, time.UTC)
 	if err := execJSON(ctx, tx, `
-INSERT INTO contest (id, tenant_id, organizer_id, name, mode, team_mode, signup_start, signup_end, start_at, end_at, freeze_minutes, rules, status)
-VALUES ($1,$2,$3,'2026 链安新生攻防挑战赛',1,1,$4,$5,$6,$7,30,$8,3)
-ON CONFLICT (id) DO UPDATE SET organizer_id=EXCLUDED.organizer_id, name=EXCLUDED.name, mode=EXCLUDED.mode, team_mode=EXCLUDED.team_mode, signup_start=EXCLUDED.signup_start, signup_end=EXCLUDED.signup_end, start_at=EXCLUDED.start_at, end_at=EXCLUDED.end_at, freeze_minutes=EXCLUDED.freeze_minutes, rules=EXCLUDED.rules, status=EXCLUDED.status, deleted_at=NULL, updated_at=now()`,
-		acceptanceIDs.Contest, acceptanceIDs.TenantID, acceptanceIDs.TeacherMain, signupStart, signupEnd, start, end, rules); err != nil {
+INSERT INTO contest (id, tenant_id, organizer_id, name, mode, team_mode, signup_start, signup_end, start_at, end_at, freeze_minutes, status)
+VALUES ($1,$2,$3,'2026 链安新生攻防挑战赛',1,1,$4,$5,$6,$7,30,3)
+ON CONFLICT (id) DO UPDATE SET organizer_id=EXCLUDED.organizer_id, name=EXCLUDED.name, mode=EXCLUDED.mode, team_mode=EXCLUDED.team_mode, signup_start=EXCLUDED.signup_start, signup_end=EXCLUDED.signup_end, start_at=EXCLUDED.start_at, end_at=EXCLUDED.end_at, freeze_minutes=EXCLUDED.freeze_minutes, status=EXCLUDED.status, deleted_at=NULL, updated_at=now()`,
+		acceptanceIDs.Contest, acceptanceIDs.TenantID, acceptanceIDs.TeacherMain, signupStart, signupEnd, start, end); err != nil {
 		return err
 	}
 	if err := execJSON(ctx, tx, `
@@ -1038,15 +1037,7 @@ ON CONFLICT (id) DO UPDATE SET scope=EXCLUDED.scope, semester_id=EXCLUDED.semest
 
 // seedAdminRows 写入管理后台配置、告警、统计和备份记录。
 func seedAdminRows(ctx context.Context, tx pgx.Tx) error {
-	value := map[string]any{"max_concurrent_sandbox": 30, "idle_timeout_min": 45}
-	if err := execJSON(ctx, tx, `
-INSERT INTO system_config (id, scope, tenant_id, key, value, version, updated_by)
-VALUES ($1,2,$2,'sandbox.quota.default',$3,1,$4)
-ON CONFLICT (scope, tenant_id, key) WHERE tenant_id IS NOT NULL DO UPDATE SET value=EXCLUDED.value, version=system_config.version+1, updated_by=EXCLUDED.updated_by, updated_at=now()`,
-		acceptanceIDs.SystemConfig, acceptanceIDs.TenantID, value, acceptanceIDs.SchoolAdmin); err != nil {
-		return err
-	}
-	condition := map[string]any{"metric": "sandbox_pending_seconds", "op": ">", "value": 180}
+	condition := map[string]any{"operator": "gt", "threshold": 180, "duration_minutes": 5}
 	if err := execJSON(ctx, tx, `
 INSERT INTO alert_rule (id, scope, tenant_id, name, metric, condition, level, enabled)
 VALUES ($1,2,$2,'实验环境等待时间过长','sandbox_pending_seconds',$3,2,true)

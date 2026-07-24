@@ -75,7 +75,6 @@ func (s *Service) ApproveApplication(ctx context.Context, appID int64, req Revie
 			Type:                 app.SchoolType,
 			Status:               TenantStatusActive,
 			DeployMode:           DeployModeSaaS,
-			FeatureFlags:         []byte(`{}`),
 			AuthMode:             1,
 			EnableActivationCode: true,
 		})
@@ -278,7 +277,6 @@ func (s *Service) BootstrapSchoolTenant(ctx context.Context, cfg config.Bootstra
 			Type:                 cfg.SchoolType,
 			Status:               TenantStatusActive,
 			DeployMode:           DeployModeSchool,
-			FeatureFlags:         []byte(`{}`),
 			AuthMode:             AuthModeLocal,
 			EnableActivationCode: false,
 		})

@@ -78,6 +78,26 @@ func (s *Service) ListStudentContests(ctx context.Context, page, size int) ([]Co
 	return out, total, page, size, nil
 }
 
+// GetStudentContest 读取学生可见的单条非草稿竞赛。
+func (s *Service) GetStudentContest(ctx context.Context, contestID int64) (ContestDTO, error) {
+	id, err := currentIdentity(ctx)
+	if err != nil {
+		return ContestDTO{}, err
+	}
+	var item Contest
+	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
+		var err error
+		item, err = tx.GetContest(ctx, id.TenantID, contestID)
+		return err
+	}); err != nil {
+		return ContestDTO{}, err
+	}
+	if item.Status == ContestStatusDraft {
+		return ContestDTO{}, apperr.ErrContestNotFound
+	}
+	return contestDTOFromModel(item), nil
+}
+
 // CreateContest 创建竞赛草稿并持久化完整赛程配置。
 func (s *Service) CreateContest(ctx context.Context, req ContestRequest) (ContestDTO, error) {
 	id, err := currentIdentity(ctx)
@@ -88,7 +108,7 @@ func (s *Service) CreateContest(ctx context.Context, req ContestRequest) (Contes
 	if err != nil {
 		return ContestDTO{}, err
 	}
-	item := Contest{ID: s.ids.Generate(), TenantID: id.TenantID, OrganizerID: id.AccountID, Name: req.Name, Mode: req.Mode, MatchMode: req.MatchMode, TeamMode: req.TeamMode, SignupStart: req.SignupStart, SignupEnd: req.SignupEnd, StartAt: req.StartAt, EndAt: req.EndAt, FreezeMinutes: req.FreezeMinutes, Rules: req.Rules}
+	item := Contest{ID: s.ids.Generate(), TenantID: id.TenantID, OrganizerID: id.AccountID, Name: req.Name, Mode: req.Mode, MatchMode: req.MatchMode, TeamMode: req.TeamMode, SignupStart: req.SignupStart, SignupEnd: req.SignupEnd, StartAt: req.StartAt, EndAt: req.EndAt, FreezeMinutes: req.FreezeMinutes}
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
 		var err error
 		item, err = tx.CreateContest(ctx, item)
@@ -127,7 +147,6 @@ func (s *Service) UpdateContest(ctx context.Context, contestID int64, req Contes
 		current.StartAt = req.StartAt
 		current.EndAt = req.EndAt
 		current.FreezeMinutes = req.FreezeMinutes
-		current.Rules = req.Rules
 		item, err = tx.UpdateContest(ctx, current)
 		return err
 	}); err != nil {
@@ -265,7 +284,7 @@ func (s *Service) ArchiveContest(ctx context.Context, contestID int64) (ResultSn
 	if err := s.writeAudit(ctx, id.TenantID, id.AccountID, contracts.RoleNumTeacher, "contest.archive", auditTargetContest, contestID, map[string]any{"snapshot_id": snapshot.ID}); err != nil {
 		return ResultSnapshotDTO{}, err
 	}
-	return resultSnapshotDTOFromModel(snapshot), nil
+	return resultSnapshotDTOFromModel(snapshot)
 }
 
 // RunAutoArchiveOnce 执行一次竞赛自动收尾扫描,供统一 background runner 调用。
@@ -359,7 +378,7 @@ func (s *Service) GetSnapshot(ctx context.Context, contestID int64) (ResultSnaps
 	}); err != nil {
 		return ResultSnapshotDTO{}, err
 	}
-	return resultSnapshotDTOFromModel(snapshot), nil
+	return resultSnapshotDTOFromModel(snapshot)
 }
 
 // transitionContest 封装竞赛状态流转、内容引用登记和审计。
@@ -428,6 +447,7 @@ func (s *Service) saveLadderSnapshot(ctx context.Context, tx TxStore, tenantID, 
 	for _, rank := range ranks {
 		ranking = append(ranking, map[string]any{
 			"team_id":       ids.Format(rank.TeamID),
+			"team_name":     rank.TeamName,
 			"score":         rank.Score,
 			"solved_count":  rank.SolvedCount,
 			"last_solve_at": rank.LastSolveAt,

@@ -16,10 +16,7 @@ const ExperimentDetailPage: React.FC = () => {
   const [starting, setStarting] = useState(false)
   const [message, setMessage] = useState('')
   const resource = useAsyncResource(
-    async () => {
-      const response = await api.experiment.getPublishedExperiments({ page: 1, size: 100 })
-      return response.list.find((item) => item.id === id) ?? null
-    },
+    () => id ? api.experiment.getPublishedExperiment(id) : Promise.resolve(null),
     [id],
     (value) => value === null
   )
@@ -28,7 +25,7 @@ const ExperimentDetailPage: React.FC = () => {
     setStarting(true)
     setMessage('')
     try {
-      const instance = await api.experiment.createInstance(experiment.id, {})
+      const instance = await api.experiment.createInstance(experiment.id, { launch_grant: experiment.launch_grant })
       navigate(`/student/experiments/${experiment.id}/workspace?instanceId=${instance.instance_id}`)
     } catch (error) {
       setMessage(userFacingErrorMessage(error, '暂时无法创建实验实例，请稍后重试。'))

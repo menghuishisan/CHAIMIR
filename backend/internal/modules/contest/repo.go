@@ -120,11 +120,7 @@ func isNoRows(err error) bool { return errors.Is(err, pgx.ErrNoRows) }
 
 // CreateContest 创建竞赛草稿。
 func (tx *txStore) CreateContest(ctx context.Context, item Contest) (Contest, error) {
-	rules, err := encodeJSON(item.Rules, apperr.ErrContestInvalid)
-	if err != nil {
-		return Contest{}, err
-	}
-	row, err := tx.q.CreateContest(ctx, sqlcgen.CreateContestParams{ID: item.ID, TenantID: item.TenantID, OrganizerID: item.OrganizerID, Name: item.Name, Mode: item.Mode, MatchMode: pgtypex.Int2(item.MatchMode), TeamMode: item.TeamMode, SignupStart: timex.Timestamptz(item.SignupStart), SignupEnd: timex.Timestamptz(item.SignupEnd), StartAt: timex.Timestamptz(item.StartAt), EndAt: timex.Timestamptz(item.EndAt), FreezeMinutes: item.FreezeMinutes, Rules: rules})
+	row, err := tx.q.CreateContest(ctx, sqlcgen.CreateContestParams{ID: item.ID, TenantID: item.TenantID, OrganizerID: item.OrganizerID, Name: item.Name, Mode: item.Mode, MatchMode: pgtypex.Int2(item.MatchMode), TeamMode: item.TeamMode, SignupStart: timex.Timestamptz(item.SignupStart), SignupEnd: timex.Timestamptz(item.SignupEnd), StartAt: timex.Timestamptz(item.StartAt), EndAt: timex.Timestamptz(item.EndAt), FreezeMinutes: item.FreezeMinutes})
 	if err != nil {
 		return Contest{}, apperr.ErrContestInvalid.WithCause(err)
 	}
@@ -181,11 +177,7 @@ func (tx *txStore) ListStudentContests(ctx context.Context, tenantID int64, page
 
 // UpdateContest 更新草稿竞赛。
 func (tx *txStore) UpdateContest(ctx context.Context, item Contest) (Contest, error) {
-	rules, err := encodeJSON(item.Rules, apperr.ErrContestInvalid)
-	if err != nil {
-		return Contest{}, err
-	}
-	row, err := tx.q.UpdateContest(ctx, sqlcgen.UpdateContestParams{TenantID: item.TenantID, ID: item.ID, Name: item.Name, Mode: item.Mode, MatchMode: pgtypex.Int2(item.MatchMode), TeamMode: item.TeamMode, SignupStart: timex.Timestamptz(item.SignupStart), SignupEnd: timex.Timestamptz(item.SignupEnd), StartAt: timex.Timestamptz(item.StartAt), EndAt: timex.Timestamptz(item.EndAt), FreezeMinutes: item.FreezeMinutes, Rules: rules})
+	row, err := tx.q.UpdateContest(ctx, sqlcgen.UpdateContestParams{TenantID: item.TenantID, ID: item.ID, Name: item.Name, Mode: item.Mode, MatchMode: pgtypex.Int2(item.MatchMode), TeamMode: item.TeamMode, SignupStart: timex.Timestamptz(item.SignupStart), SignupEnd: timex.Timestamptz(item.SignupEnd), StartAt: timex.Timestamptz(item.StartAt), EndAt: timex.Timestamptz(item.EndAt), FreezeMinutes: item.FreezeMinutes})
 	if err != nil {
 		return Contest{}, apperr.ErrContestStateInvalid.WithCause(err)
 	}
@@ -618,7 +610,11 @@ func (tx *txStore) FinishBattleMatch(ctx context.Context, item BattleMatch) (Bat
 	if err != nil {
 		return BattleMatch{}, err
 	}
-	row, err := tx.q.FinishBattleMatch(ctx, sqlcgen.FinishBattleMatchParams{TenantID: item.TenantID, ID: item.ID, SandboxRef: pgtypex.Text(item.SandboxRef), JudgeTaskRef: pgtypex.Text(item.JudgeTaskRef), Result: pgtypex.Int2(item.Result), ScoreDelta: delta, ReplayRef: pgtypex.Text(item.ReplayRef)})
+	replay, err := encodeJSON(item.Replay, apperr.ErrContestBattleMatchFailed)
+	if err != nil {
+		return BattleMatch{}, err
+	}
+	row, err := tx.q.FinishBattleMatch(ctx, sqlcgen.FinishBattleMatchParams{TenantID: item.TenantID, ID: item.ID, SandboxRef: pgtypex.Text(item.SandboxRef), JudgeTaskRef: pgtypex.Text(item.JudgeTaskRef), Result: pgtypex.Int2(item.Result), ScoreDelta: delta, ReplayData: replay})
 	if err != nil {
 		return BattleMatch{}, apperr.ErrContestBattleMatchFailed.WithCause(err)
 	}

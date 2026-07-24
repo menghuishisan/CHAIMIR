@@ -14,37 +14,33 @@ import (
 	"chaimir/internal/platform/audit"
 	"chaimir/internal/platform/config"
 	"chaimir/internal/platform/ids"
-	"chaimir/internal/platform/jsonx"
 	"chaimir/internal/platform/pagex"
-	"chaimir/internal/platform/secretmap"
 	"chaimir/internal/platform/storage"
 	"chaimir/internal/platform/tenant"
 	"chaimir/internal/platform/timex"
 	"chaimir/internal/platform/transfer"
 	"chaimir/pkg/apperr"
-	pkgcrypto "chaimir/pkg/crypto"
 	"chaimir/pkg/snowflake"
 )
 
 // Service 承载 M9 管理后台业务编排。
 type Service struct {
-	store        Store
-	ids          snowflake.Generator
-	audit        audit.Writer
-	roles        roleReader
-	identity     contracts.IdentityTenantReadService
-	stats        contracts.IdentityStatsService
-	auditRead    contracts.IdentityAuditReadService
-	teaching     contracts.TeachingReadService
-	sandbox      contracts.SandboxService
-	experiment   contracts.ExperimentReadService
-	contest      contracts.ContestReadService
-	notify       contracts.NotifyService
-	monitoring   config.MonitoringConfig
-	secretCipher *pkgcrypto.Cipher
-	transfers    transferService
-	storage      objectStorage
-	files        fileService
+	store      Store
+	ids        snowflake.Generator
+	audit      audit.Writer
+	roles      roleReader
+	identity   contracts.IdentityTenantReadService
+	stats      contracts.IdentityStatsService
+	auditRead  contracts.IdentityAuditReadService
+	teaching   contracts.TeachingReadService
+	sandbox    contracts.SandboxService
+	experiment contracts.ExperimentReadService
+	contest    contracts.ContestReadService
+	notify     contracts.NotifyService
+	monitoring config.MonitoringConfig
+	transfers  transferService
+	storage    objectStorage
+	files      fileService
 }
 
 // objectStorage 描述 M9 导出产物写入统一对象存储所需能力。
@@ -79,7 +75,6 @@ type ServiceDeps struct {
 	Contest     contracts.ContestReadService
 	Notify      contracts.NotifyService
 	Monitoring  config.MonitoringConfig
-	Cipher      *pkgcrypto.Cipher
 	Transfers   transferService
 	Storage     *storage.Storage
 	Objects     objectStorage
@@ -98,7 +93,7 @@ func NewService(deps ServiceDeps) (*Service, error) {
 	if deps.Transfers == nil || objects == nil || deps.FileService == nil {
 		return nil, fmt.Errorf("admin service 缺少统一导入导出或文件服务依赖")
 	}
-	return &Service{store: deps.Store, ids: deps.IDs, audit: deps.Audit, roles: deps.Roles, identity: deps.Identity, stats: deps.Stats, auditRead: deps.AuditRead, teaching: deps.Teaching, sandbox: deps.Sandbox, experiment: deps.Experiment, contest: deps.Contest, notify: deps.Notify, monitoring: deps.Monitoring, secretCipher: deps.Cipher, transfers: deps.Transfers, storage: objects, files: deps.FileService}, nil
+	return &Service{store: deps.Store, ids: deps.IDs, audit: deps.Audit, roles: deps.Roles, identity: deps.Identity, stats: deps.Stats, auditRead: deps.AuditRead, teaching: deps.Teaching, sandbox: deps.Sandbox, experiment: deps.Experiment, contest: deps.Contest, notify: deps.Notify, monitoring: deps.Monitoring, transfers: deps.Transfers, storage: objects, files: deps.FileService}, nil
 }
 
 // PlatformDashboard 聚合平台级看板。
@@ -213,14 +208,6 @@ func (s *Service) RunStatisticsSnapshotOnce(ctx context.Context) error {
 		}
 	}
 	return nil
-}
-
-// ListTenants 读取租户列表。
-func (s *Service) ListTenants(ctx context.Context) ([]contracts.TenantSummary, error) {
-	if _, err := requirePlatform(ctx); err != nil {
-		return nil, err
-	}
-	return s.identity.ListTenants(ctx)
 }
 
 // ListApplications 读取入驻申请列表。
@@ -372,8 +359,25 @@ func (s *Service) ListConfigs(ctx context.Context, scope int16) ([]ConfigDTO, er
 		if err != nil {
 			return nil, err
 		}
-		return maskConfigs(rows), nil
+		return rows, nil
 	})
+}
+
+// MaintenanceEnabled 读取平台维护开关,供组合根在所有业务路由前做统一门禁。
+func (s *Service) MaintenanceEnabled(ctx context.Context) (bool, error) {
+	var config ConfigDTO
+	err := s.store.PlatformTx(ctx, func(ctx context.Context, tx TxStore) error {
+		var err error
+		config, err = tx.GetSystemConfig(ctx, ScopeGlobal, 0, "maintenance_mode")
+		return err
+	})
+	if isNoRows(err) {
+		return false, nil
+	}
+	if err != nil {
+		return false, apperr.ErrAdminConfigInvalid.WithCause(err)
+	}
+	return config.Value.Enabled, nil
 }
 
 // UpdateConfig 更新或创建系统配置。
@@ -383,7 +387,7 @@ func (s *Service) UpdateConfig(ctx context.Context, key string, req ConfigUpdate
 		return ConfigDTO{}, err
 	}
 	key = strings.TrimSpace(key)
-	if key == "" || req.Value == nil {
+	if key != "maintenance_mode" {
 		return ConfigDTO{}, apperr.ErrAdminConfigInvalid
 	}
 	if !id.IsPlatform {
@@ -393,11 +397,6 @@ func (s *Service) UpdateConfig(ctx context.Context, key string, req ConfigUpdate
 	if id.IsPlatform && req.Scope == ScopeTenant {
 		return ConfigDTO{}, apperr.ErrAdminConfigInvalid
 	}
-	protected, err := secretmap.Protect(s.secretCipher, req.Value, "系统配置")
-	if err != nil {
-		return ConfigDTO{}, apperr.ErrAdminConfigInvalid.WithCause(err)
-	}
-	req.Value = protected
 	if err := validateScopeTenant(req.Scope, req.TenantID.Int64()); err != nil {
 		return ConfigDTO{}, err
 	}
@@ -412,7 +411,7 @@ func (s *Service) UpdateConfig(ctx context.Context, key string, req ConfigUpdate
 			if err != nil {
 				return apperr.ErrAdminConfigInvalid.WithCause(err)
 			}
-			_, err = tx.CreateConfigChangeLog(ctx, s.ids.Generate(), out.ID.Int64(), req.TenantID.Int64(), map[string]any{}, out.Value, id.AccountID)
+			_, err = tx.CreateConfigChangeLog(ctx, s.ids.Generate(), out.ID.Int64(), req.TenantID.Int64(), MaintenanceModeConfig{}, out.Value, id.AccountID)
 			return err
 		}
 		out, err = tx.UpdateSystemConfig(ctx, req.Scope, req.TenantID.Int64(), key, req.Value, id.AccountID, req.Version)
@@ -428,7 +427,6 @@ func (s *Service) UpdateConfig(ctx context.Context, key string, req ConfigUpdate
 	if err := s.writeAudit(ctx, id, "admin.config.update", "system_config", out.ID.Int64(), map[string]any{"key": key}); err != nil {
 		return ConfigDTO{}, apperr.ErrAdminAuditWriteFailed.WithCause(err)
 	}
-	out.Value = secretmap.Mask(out.Value)
 	return out, nil
 }
 
@@ -456,7 +454,7 @@ func (s *Service) ListConfigHistory(ctx context.Context, scope int16, tenantID i
 			return nil, err
 		}
 		total = count
-		return maskConfigLogs(rows), nil
+		return rows, nil
 	})
 	return rows, total, page, size, err
 }
@@ -468,7 +466,7 @@ func (s *Service) RollbackConfig(ctx context.Context, key string, req ConfigRoll
 		return ConfigDTO{}, err
 	}
 	key = strings.TrimSpace(key)
-	if key == "" || req.ChangeLogID <= 0 {
+	if key != "maintenance_mode" || req.ChangeLogID <= 0 {
 		return ConfigDTO{}, apperr.ErrAdminConfigInvalid
 	}
 	if !id.IsPlatform {
@@ -504,7 +502,6 @@ func (s *Service) RollbackConfig(ctx context.Context, key string, req ConfigRoll
 	if err := s.writeAudit(ctx, id, "admin.config.rollback", "system_config", out.ID.Int64(), map[string]any{"key": key, "change_log_id": req.ChangeLogID.String()}); err != nil {
 		return ConfigDTO{}, apperr.ErrAdminAuditWriteFailed.WithCause(err)
 	}
-	out.Value = secretmap.Mask(out.Value)
 	return out, nil
 }
 
@@ -610,7 +607,51 @@ func (s *Service) ListAlertEvents(ctx context.Context, status int16, page, size 
 		total = count
 		return out, err
 	})
-	return rows, total, page, size, err
+	if err != nil {
+		return nil, 0, page, size, err
+	}
+	if err := s.fillAlertTenantNames(ctx, rows); err != nil {
+		return nil, 0, page, size, err
+	}
+	return rows, total, page, size, nil
+}
+
+// fillAlertTenantNames 通过 M1 唯一租户契约补齐告警列表的学校名称。
+func (s *Service) fillAlertTenantNames(ctx context.Context, items []AlertEventDTO) error {
+	identity, ok := tenant.FromContext(ctx)
+	if !ok || identity.AccountID <= 0 {
+		return apperr.ErrUnauthorized
+	}
+	if !identity.IsPlatform {
+		item, err := s.identity.GetTenant(ctx, identity.TenantID)
+		if err != nil {
+			return apperr.ErrAdminAlertInvalid.WithCause(err)
+		}
+		for i := range items {
+			if items[i].TenantID == ids.ID(identity.TenantID) {
+				items[i].TenantName = item.Name
+			}
+		}
+		return nil
+	}
+	tenants, err := s.identity.ListTenants(ctx)
+	if err != nil {
+		return apperr.ErrAdminAlertInvalid.WithCause(err)
+	}
+	names := make(map[int64]string, len(tenants))
+	for _, item := range tenants {
+		names[item.TenantID] = item.Name
+	}
+	for i := range items {
+		if items[i].TenantID > 0 {
+			name, ok := names[items[i].TenantID.Int64()]
+			if !ok {
+				return apperr.ErrAdminAlertInvalid.WithCause(fmt.Errorf("告警关联学校不存在: tenant_id=%s", items[i].TenantID.String()))
+			}
+			items[i].TenantName = name
+		}
+	}
+	return nil
 }
 
 // HandleAlertEvent 处理告警事件。
@@ -649,7 +690,11 @@ func (s *Service) HandleAlertEvent(ctx context.Context, eventID int64, req Alert
 	if err := s.writeAudit(ctx, id, "admin.alert.handle", "alert_event", out.ID.Int64(), map[string]any{"status": out.Status}); err != nil {
 		return AlertEventDTO{}, apperr.ErrAdminAuditWriteFailed.WithCause(err)
 	}
-	return out, nil
+	items := []AlertEventDTO{out}
+	if err := s.fillAlertTenantNames(ctx, items); err != nil {
+		return AlertEventDTO{}, err
+	}
+	return items[0], nil
 }
 
 // MonitoringPanels 返回外部监控面板入口。
@@ -747,18 +792,11 @@ func validateAlertRule(req AlertRuleRequest) error {
 	if strings.TrimSpace(req.Name) == "" || strings.TrimSpace(req.Metric) == "" || req.Level < 1 || req.Level > 4 {
 		return apperr.ErrAdminAlertInvalid
 	}
-	if len(req.Condition) != 3 {
+	operator := req.Condition.Operator
+	if operator != "gt" && operator != "gte" && operator != "lt" && operator != "lte" && operator != "eq" {
 		return apperr.ErrAdminAlertInvalid
 	}
-	operator, ok := req.Condition["operator"].(string)
-	if !ok || (operator != "gt" && operator != "gte" && operator != "lt" && operator != "lte" && operator != "eq") {
-		return apperr.ErrAdminAlertInvalid
-	}
-	if _, ok := jsonx.Float64FromNumberOK(req.Condition["threshold"]); !ok {
-		return apperr.ErrAdminAlertInvalid
-	}
-	duration, ok := jsonx.Float64FromNumberOK(req.Condition["duration_minutes"])
-	if !ok || duration < 0 {
+	if req.Condition.DurationMinutes < 0 {
 		return apperr.ErrAdminAlertInvalid
 	}
 	return nil
@@ -871,25 +909,4 @@ func (s *Service) upsertStatistics(ctx context.Context, txTenantID int64, scope 
 		return apperr.ErrAdminStatisticsInvalid.WithCause(err)
 	}
 	return nil
-}
-
-// maskConfigs 返回配置列表前隐藏敏感字段。
-func maskConfigs(rows []ConfigDTO) []ConfigDTO {
-	out := make([]ConfigDTO, 0, len(rows))
-	for _, row := range rows {
-		row.Value = secretmap.Mask(row.Value)
-		out = append(out, row)
-	}
-	return out
-}
-
-// maskConfigLogs 返回配置历史前隐藏敏感字段。
-func maskConfigLogs(rows []ConfigChangeLogDTO) []ConfigChangeLogDTO {
-	out := make([]ConfigChangeLogDTO, 0, len(rows))
-	for _, row := range rows {
-		row.OldValue = secretmap.Mask(row.OldValue)
-		row.NewValue = secretmap.Mask(row.NewValue)
-		out = append(out, row)
-	}
-	return out
 }

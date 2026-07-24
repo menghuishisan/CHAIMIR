@@ -1,6 +1,6 @@
 // contest labels 文件维护竞赛、对抗和漏洞题领域的枚举文案。
 
-import { BattleMatchStatus, BattleRole, BattleRule, CheatAction, CheatType, ContestMode, ContestStatus, MatchMode, TeamMode, VulnLevel, VulnPrevalidateStatus, VulnProblemStatus, VulnRuntimeMode } from '@chaimir/api-client'
+import { BattleMatchStatus, BattleResult, BattleRole, BattleRule, CheatAction, CheatType, ContestMode, ContestStatus, MatchMode, TeamMode, VulnLevel, VulnPrevalidateStatus, VulnProblemStatus, VulnRuntimeMode } from '@chaimir/api-client'
 import { labelFromMap } from './map'
 
 /** contestStatusLabel 返回竞赛生命周期状态文案。 */
@@ -63,6 +63,11 @@ export function vulnRuntimeModeLabel(mode: VulnRuntimeMode): string {
 /** battleMatchStatusLabel 返回对抗对局状态文案。 */
 export function battleMatchStatusLabel(status: BattleMatchStatus): string {
   return labelFromMap(status, { [BattleMatchStatus.PENDING]: '等待匹配', [BattleMatchStatus.RUNNING]: '对局进行中', [BattleMatchStatus.DONE]: '已完成', [BattleMatchStatus.FAILED]: '执行失败' }, '未识别的对局状态')
+}
+
+/** battleResultLabel 返回对抗赛赛果文案。 */
+export function battleResultLabel(result: BattleResult): string {
+  return labelFromMap(result, { [BattleResult.A_WIN]: '甲方获胜', [BattleResult.B_WIN]: '乙方获胜', [BattleResult.DRAW]: '平局' }, '未识别的赛果')
 }
 
 /** vulnPrevalidateStatusLabel 返回漏洞题双向预验证状态文案。 */

@@ -4,12 +4,14 @@ package contest
 import (
 	"chaimir/internal/contracts"
 	"chaimir/internal/platform/ids"
+	"chaimir/internal/platform/jsonx"
 	"chaimir/internal/platform/secretmap"
+	"chaimir/pkg/apperr"
 )
 
 // contestDTOFromModel 转换竞赛定义为 HTTP 输出。
 func contestDTOFromModel(item Contest) ContestDTO {
-	return ContestDTO{ID: ids.ID(item.ID), OrganizerID: ids.ID(item.OrganizerID), Name: item.Name, Mode: item.Mode, MatchMode: item.MatchMode, TeamMode: item.TeamMode, SignupStart: item.SignupStart, SignupEnd: item.SignupEnd, StartAt: item.StartAt, EndAt: item.EndAt, FreezeMinutes: item.FreezeMinutes, Rules: item.Rules, Status: item.Status, CreatedAt: item.CreatedAt, UpdatedAt: item.UpdatedAt}
+	return ContestDTO{ID: ids.ID(item.ID), OrganizerID: ids.ID(item.OrganizerID), Name: item.Name, Mode: item.Mode, MatchMode: item.MatchMode, TeamMode: item.TeamMode, SignupStart: item.SignupStart, SignupEnd: item.SignupEnd, StartAt: item.StartAt, EndAt: item.EndAt, FreezeMinutes: item.FreezeMinutes, Status: item.Status, CreatedAt: item.CreatedAt, UpdatedAt: item.UpdatedAt}
 }
 
 // problemDTOFromModel 转换竞赛题引用为 HTTP 输出。
@@ -39,17 +41,21 @@ func battleEntryDTOFromModel(item BattleEntry) BattleEntryDTO {
 
 // battleMatchDTOFromModel 转换对局为 HTTP 输出。
 func battleMatchDTOFromModel(item BattleMatch) BattleMatchDTO {
-	return BattleMatchDTO{ID: ids.ID(item.ID), ContestID: ids.ID(item.ContestID), ProblemID: ids.ID(item.ProblemID), EntryAID: ids.ID(item.EntryAID), EntryBID: ids.ID(item.EntryBID), SourceRef: item.SourceRef, SandboxRef: item.SandboxRef, JudgeTaskRef: item.JudgeTaskRef, Result: item.Result, ScoreDelta: item.ScoreDelta, ReplayRef: item.ReplayRef, Status: item.Status, MatchedAt: item.MatchedAt, FinishedAt: item.FinishedAt}
+	return BattleMatchDTO{ID: ids.ID(item.ID), ContestID: ids.ID(item.ContestID), ProblemID: ids.ID(item.ProblemID), EntryAID: ids.ID(item.EntryAID), EntryBID: ids.ID(item.EntryBID), SourceRef: item.SourceRef, SandboxRef: item.SandboxRef, JudgeTaskRef: item.JudgeTaskRef, Result: item.Result, ScoreDelta: item.ScoreDelta, ReplayAvailable: len(item.Replay) > 0, Status: item.Status, MatchedAt: item.MatchedAt, FinishedAt: item.FinishedAt}
 }
 
 // ladderDTOFromModel 转换排行投影为 HTTP 输出。
 func ladderDTOFromModel(item LadderRank) LadderDTO {
-	return LadderDTO{TeamID: ids.ID(item.TeamID), Score: item.Score, SolvedCount: item.SolvedCount, LastSolveAt: item.LastSolveAt, Rank: item.Rank, UpdatedAt: item.UpdatedAt}
+	return LadderDTO{TeamID: ids.ID(item.TeamID), TeamName: item.TeamName, Score: item.Score, SolvedCount: item.SolvedCount, LastSolveAt: item.LastSolveAt, Rank: item.Rank, UpdatedAt: item.UpdatedAt}
 }
 
-// resultSnapshotDTOFromModel 把归档状态的排行榜快照转换为最终结果输出。
-func resultSnapshotDTOFromModel(item LadderSnapshot) ResultSnapshotDTO {
-	return ResultSnapshotDTO{ID: ids.ID(item.ID), TenantID: ids.ID(item.TenantID), ContestID: ids.ID(item.ContestID), FinalRanking: item.Ranking, GeneratedAt: item.GeneratedAt}
+// resultSnapshotDTOFromModel 严格解析归档榜单并转换为最终结果输出。
+func resultSnapshotDTOFromModel(item LadderSnapshot) (ResultSnapshotDTO, error) {
+	ranking, err := ladderDTOsFromSnapshot(item)
+	if err != nil {
+		return ResultSnapshotDTO{}, err
+	}
+	return ResultSnapshotDTO{ID: ids.ID(item.ID), TenantID: ids.ID(item.TenantID), ContestID: ids.ID(item.ContestID), FinalRanking: ranking, GeneratedAt: item.GeneratedAt}, nil
 }
 
 // cheatDTOFromModel 转换违规记录为 HTTP 输出。
@@ -58,8 +64,16 @@ func cheatDTOFromModel(item CheatRecord) CheatRecordDTO {
 }
 
 // vulnSourceDTOFromModel 转换漏洞源为 HTTP 输出。
-func vulnSourceDTOFromModel(item VulnSource) VulnSourceDTO {
-	return VulnSourceDTO{ID: ids.ID(item.ID), Type: item.Type, Name: item.Name, Config: secretmap.Mask(item.Config), DefaultLevel: item.DefaultLevel, Enabled: item.Enabled, LastSyncAt: item.LastSyncAt}
+func vulnSourceDTOFromModel(item VulnSource) (VulnSourceDTO, error) {
+	raw, err := jsonx.AnyBytes(secretmap.Mask(item.Config), apperr.ErrContestVulnSourceInvalid)
+	if err != nil {
+		return VulnSourceDTO{}, err
+	}
+	var config VulnSourceConfig
+	if err := jsonx.DecodeStrictKnownFields(raw, &config); err != nil {
+		return VulnSourceDTO{}, apperr.ErrContestVulnSourceInvalid.WithCause(err)
+	}
+	return VulnSourceDTO{ID: ids.ID(item.ID), Type: item.Type, Name: item.Name, Config: config, DefaultLevel: item.DefaultLevel, Enabled: item.Enabled, LastSyncAt: item.LastSyncAt}, nil
 }
 
 // vulnProblemDTOFromModel 转换漏洞题草稿为 HTTP 输出。

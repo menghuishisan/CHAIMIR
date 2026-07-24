@@ -42,7 +42,7 @@ const AlertsPage: React.FC = () => {
     {
       key: 'tenant',
       title: '告警范围',
-      render: (row) => row.tenant_id ? '学校范围' : '平台范围',
+      render: (row) => row.tenant_name || '平台范围',
     },
     {
       key: 'triggeredAt',
