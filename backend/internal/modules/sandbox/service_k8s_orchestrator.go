@@ -1130,6 +1130,7 @@ func (o *K8sOrchestrator) podFromSpec(plan CreateSandboxPlan, spec workload.PodS
 		containers = append(containers, o.containerFromRuntime(container, image, plan.Runtime.AdapterSpec))
 	}
 	automount := false
+	enableServiceLinks := false
 	return &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      spec.Name,
@@ -1143,6 +1144,8 @@ func (o *K8sOrchestrator) podFromSpec(plan CreateSandboxPlan, spec workload.PodS
 		},
 		Spec: corev1.PodSpec{
 			AutomountServiceAccountToken: &automount,
+			EnableServiceLinks:           &enableServiceLinks,
+			RuntimeClassName:             &o.cfg.RuntimeClass,
 			ServiceAccountName:           sandboxWorkloadServiceAccount,
 			RestartPolicy:                corev1.RestartPolicyNever,
 			SecurityContext:              podSecurityContext(),
@@ -1157,6 +1160,7 @@ func (o *K8sOrchestrator) podFromSpec(plan CreateSandboxPlan, spec workload.PodS
 // toolPodForPlan 为 web-embed 工具组件创建独立 Pod,避免动态工具影响运行时 Pod 组拓扑。
 func (o *K8sOrchestrator) toolPodForPlan(plan CreateSandboxPlan, tool Tool, component workload.ComponentSpec) *corev1.Pod {
 	automount := false
+	enableServiceLinks := false
 	podName := toolComponentPodName(tool.Code, component.Name)
 	return &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
@@ -1173,6 +1177,8 @@ func (o *K8sOrchestrator) toolPodForPlan(plan CreateSandboxPlan, tool Tool, comp
 		},
 		Spec: corev1.PodSpec{
 			AutomountServiceAccountToken: &automount,
+			EnableServiceLinks:           &enableServiceLinks,
+			RuntimeClassName:             &o.cfg.RuntimeClass,
 			ServiceAccountName:           sandboxWorkloadServiceAccount,
 			RestartPolicy:                corev1.RestartPolicyNever,
 			SecurityContext:              podSecurityContext(),

@@ -42,16 +42,24 @@ func (s *Service) ListPublishedExperiments(ctx context.Context, courseID int64, 
 	page, size = pagex.Normalize(page, size)
 	items := []Experiment{}
 	var total int64
+	groupByExperiment := map[int64]int64{}
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
-		var err error
 		items, total, err = tx.ListExperiments(ctx, id.TenantID, courseID, ExperimentStatusPublished, page, size)
+		if err != nil {
+			return err
+		}
+		experimentIDs := make([]int64, 0, len(items))
+		for _, item := range items {
+			experimentIDs = append(experimentIDs, item.ID)
+		}
+		groupByExperiment, err = tx.ListStudentGroupsForExperiments(ctx, id.TenantID, id.AccountID, experimentIDs)
 		return err
 	}); err != nil {
 		return nil, 0, 0, 0, err
 	}
 	out := make([]StudentExperimentDTO, 0, len(items))
 	for _, item := range items {
-		out = append(out, studentExperimentDTOFromModel(item))
+		out = append(out, studentExperimentDTOFromModel(item, groupByExperiment[item.ID]))
 	}
 	return out, total, page, size, nil
 }

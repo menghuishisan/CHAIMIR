@@ -261,8 +261,15 @@ type SandboxQuotaStats struct {
 	MaxSnapshotRetentionMin int32 `json:"max_snapshot_retention_min"`
 }
 
+// SandboxReadService 是 M2 面向聚合层(M9 admin)的只读契约;聚合层只读不跨写,不得持有写能力。
+type SandboxReadService interface {
+	// Stats 返回租户级沙箱资源统计,供 M9 学校看板聚合。
+	Stats(ctx context.Context, tenantID int64) (SandboxQuotaStats, error)
+}
+
 // SandboxService 是 M2 沙箱引擎对 M3/M7/M8/M9 暴露的标准能力契约。
 type SandboxService interface {
+	SandboxReadService
 	// ValidateSandboxTemplate 校验业务模块保存/发布的沙箱模板能解析到可调度运行时、镜像和工具,但不创建资源。
 	ValidateSandboxTemplate(ctx context.Context, req SandboxCreateRequest) error
 	// CreateSandbox 创建沙箱并返回控制面摘要,实际启动过程异步推进。
@@ -295,6 +302,4 @@ type SandboxService interface {
 	ChainQuery(ctx context.Context, req SandboxChainQueryRequest) (map[string]any, error)
 	// ChainReset 调用统一链重置能力。
 	ChainReset(ctx context.Context, req SandboxChainResetRequest) error
-	// Stats 返回租户级沙箱资源统计,供 M9 学校看板聚合。
-	Stats(ctx context.Context, tenantID int64) (SandboxQuotaStats, error)
 }

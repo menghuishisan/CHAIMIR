@@ -282,6 +282,8 @@ type SandboxConfig struct {
 	WorkspaceStorage              string
 	StorageClassName              string
 	VolumeSnapshotClassName       string
+	// RuntimeClass 是不可信沙箱 Pod 强制使用的隔离运行时(gVisor runsc 等)对应的 K8s RuntimeClass 名称,必填,缺失即启动失败。
+	RuntimeClass string
 	PrepullTimeoutSeconds         int
 	PrepullHoldSeconds            int
 	ReadyTimeoutSeconds           int
@@ -651,6 +653,7 @@ func Load() (*Config, error) {
 		WorkspaceStorage:              req("SANDBOX_WORKSPACE_STORAGE"),
 		StorageClassName:              os.Getenv("SANDBOX_STORAGE_CLASS_NAME"),
 		VolumeSnapshotClassName:       os.Getenv("SANDBOX_VOLUME_SNAPSHOT_CLASS_NAME"),
+		RuntimeClass:                  req("SANDBOX_RUNTIME_CLASS"),
 		PrepullTimeoutSeconds:         reqInt("SANDBOX_PREPULL_TIMEOUT_SECONDS"),
 		PrepullHoldSeconds:            reqInt("SANDBOX_PREPULL_HOLD_SECONDS"),
 		ReadyTimeoutSeconds:           reqInt("SANDBOX_READY_TIMEOUT_SECONDS"),

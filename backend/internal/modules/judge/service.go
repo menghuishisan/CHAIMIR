@@ -766,16 +766,22 @@ func (s *Service) getTaskInfo(ctx context.Context, tenantID, taskID int64) (Judg
 }
 
 // publishProgress 向任务进度 topic 广播用户向状态。
+// publishProgress 经事件总线请求 M10 统一推送判题进度,由 notify 在边界做 topic 租户校验与信封封装。
 func (s *Service) publishProgress(ctx context.Context, tenantID, taskID int64, status int16, stage, message string) {
-	if s.wsHub == nil {
-		return
-	}
 	raw, err := jsonx.AnyBytes(ProgressMessage{TaskID: ids.ID(taskID), Status: statusText(status), Stage: stage, Message: message}, apperr.ErrInternal)
 	if err != nil {
 		logging.ErrorContext(ctx, "judge progress serialization failed", err.Error(), slog.Int64("tenant_id", tenantID), slog.Int64("task_id", taskID), slog.String("stage", stage))
 		return
 	}
-	s.wsHub.Broadcast(judgeProgressTopic(tenantID, taskID), raw)
+	payload, err := jsonx.ObjectMapStrict(raw)
+	if err != nil {
+		logging.ErrorContext(ctx, "judge progress payload decode failed", err.Error(), slog.Int64("tenant_id", tenantID), slog.Int64("task_id", taskID), slog.String("stage", stage))
+		return
+	}
+	evt := contracts.NotifyPushRequestedEvent{TenantID: tenantID, TraceID: response.TraceFromContext(ctx), Topic: judgeProgressTopic(tenantID, taskID), Payload: payload}
+	if err := s.bus.Publish(ctx, contracts.SubjectNotifyPushRequested, evt); err != nil {
+		logging.ErrorContext(ctx, "judge progress publish failed", err.Error(), slog.Int64("tenant_id", tenantID), slog.Int64("task_id", taskID), slog.String("stage", stage))
+	}
 }
 
 // judgeProgressTopic 生成判题进度 WebSocket topic。

@@ -80,6 +80,7 @@ images/**/build/
 .agents/
 .codex/
 .playwright-mcp/
+.superpowers/
 
 # ---- AI/本地开发规范文件(不上传公共仓库)----
 AGENTS.md

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 
+	"chaimir/internal/contracts"
 	"chaimir/internal/platform/jsonx"
 	"chaimir/pkg/apperr"
 	"chaimir/pkg/logging"
@@ -25,17 +26,22 @@ func (s *Service) ProgressSubscription(ctx context.Context, tenantID, accountID,
 	return progressTopic(tenantID, sandboxID), progressFromState(sb.Phase, sb.Status, ""), nil
 }
 
-// broadcastProgress 向已订阅前端广播沙箱进度,广播失败不影响主状态机但必须由 Hub 统一丢弃慢连接。
+// broadcastProgress 经事件总线请求 M10 统一推送沙箱进度,由 notify 在边界做 topic 租户校验与信封封装;推送失败不影响主状态机。
 func (s *Service) broadcastProgress(ctx context.Context, tenantID, sandboxID int64, phase, status int16, traceID string) {
-	if s.wsHub == nil {
-		return
-	}
 	data, err := jsonx.AnyBytes(progressFromState(phase, status, traceID), apperr.ErrInternal)
 	if err != nil {
 		logging.ErrorContext(ctx, "sandbox progress marshal failed", err.Error(), slog.Int64("tenant_id", tenantID), slog.Int64("sandbox_id", sandboxID))
 		return
 	}
-	s.wsHub.Broadcast(progressTopic(tenantID, sandboxID), data)
+	payload, err := jsonx.ObjectMapStrict(data)
+	if err != nil {
+		logging.ErrorContext(ctx, "sandbox progress payload decode failed", err.Error(), slog.Int64("tenant_id", tenantID), slog.Int64("sandbox_id", sandboxID))
+		return
+	}
+	evt := contracts.NotifyPushRequestedEvent{TenantID: tenantID, TraceID: traceID, Topic: progressTopic(tenantID, sandboxID), Payload: payload}
+	if err := s.bus.Publish(ctx, contracts.SubjectNotifyPushRequested, evt); err != nil {
+		logging.ErrorContext(ctx, "sandbox progress publish failed", err.Error(), slog.Int64("tenant_id", tenantID), slog.Int64("sandbox_id", sandboxID))
+	}
 }
 
 // progressFromState 把内部状态转换为用户可理解的阶段文案,不暴露 Pod、Namespace 或镜像错误。

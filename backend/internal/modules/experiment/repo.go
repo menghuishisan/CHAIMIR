@@ -35,6 +35,7 @@ type TxStore interface {
 	GetGroup(context.Context, int64, int64) (ExperimentGroup, error)
 	ListGroupMembers(context.Context, int64, int64) ([]GroupMember, error)
 	GetGroupMember(context.Context, int64, int64, int64) (GroupMember, error)
+	ListStudentGroupsForExperiments(context.Context, int64, int64, []int64) (map[int64]int64, error)
 	UpsertGroupMember(context.Context, GroupMember) (GroupMember, error)
 	GetActiveGroupInstance(context.Context, int64, int64, int64) (ExperimentInstance, error)
 	CreateInstance(context.Context, ExperimentInstance) (ExperimentInstance, error)
@@ -207,6 +208,22 @@ func (tx *txStore) GetGroupMember(ctx context.Context, tenantID, groupID, studen
 		return GroupMember{}, apperr.ErrExperimentGroupMemberDenied.WithCause(err)
 	}
 	return groupMemberFromRow(row), nil
+}
+
+// ListStudentGroupsForExperiments 批量返回学生在给定实验集合中所属的小组,键为实验 ID、值为小组 ID。
+func (tx *txStore) ListStudentGroupsForExperiments(ctx context.Context, tenantID, studentID int64, experimentIDs []int64) (map[int64]int64, error) {
+	if len(experimentIDs) == 0 {
+		return map[int64]int64{}, nil
+	}
+	rows, err := tx.q.ListStudentGroupsForExperiments(ctx, sqlcgen.ListStudentGroupsForExperimentsParams{TenantID: tenantID, StudentID: studentID, ExperimentIds: experimentIDs})
+	if err != nil {
+		return nil, apperr.ErrExperimentGroupInvalid.WithCause(err)
+	}
+	out := make(map[int64]int64, len(rows))
+	for _, row := range rows {
+		out[row.ExperimentID] = row.GroupID
+	}
+	return out, nil
 }
 
 // UpsertGroupMember 新增或更新小组成员角色。

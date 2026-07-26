@@ -15,8 +15,7 @@ func ComputeGPA(grades []CourseGradeInput, mapping []LevelRule) (float64, float6
 	if err := validateGPAMapping(mapping); err != nil {
 		return 0, 0, apperr.ErrGradeConfigInvalid
 	}
-	ordered := append([]LevelRule(nil), mapping...)
-	sort.Slice(ordered, func(i, j int) bool { return ordered[i].Min > ordered[j].Min })
+	ordered := orderedMapping(mapping)
 	var weighted float64
 	var credits float64
 	for _, grade := range grades {
@@ -34,6 +33,13 @@ func ComputeGPA(grades []CourseGradeInput, mapping []LevelRule) (float64, float6
 		return 0, 0, nil
 	}
 	return round3(weighted / credits), credits, nil
+}
+
+// orderedMapping 返回按分数阈值降序排列的等级映射副本,供绩点与不及格判定共用同一套档位语义。
+func orderedMapping(mapping []LevelRule) []LevelRule {
+	ordered := append([]LevelRule(nil), mapping...)
+	sort.Slice(ordered, func(i, j int) bool { return ordered[i].Min > ordered[j].Min })
+	return ordered
 }
 
 // validateGPAMapping 拒绝缺档、重复阈值和非不及格档的零绩点配置。

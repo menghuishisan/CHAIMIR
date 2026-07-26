@@ -769,7 +769,6 @@ func (s *Service) publishGradeUpdated(ctx context.Context, tenantID, assignmentI
 		return mapAssignmentError(err)
 	}
 	s.drainTeachingGradeEventOutboxBestEffort(ctx)
-	_ = courseID
 	return nil
 }
 

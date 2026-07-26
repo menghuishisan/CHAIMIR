@@ -42,6 +42,20 @@ func (c *Cipher) Encrypt(plaintext []byte) ([]byte, error) {
 	return c.gcm.Seal(nonce, nonce, plaintext, nil), nil
 }
 
+// ProtectPhone 生成手机号持久化所需的密文与检索用 HMAC,把「加密 + 哈希」这套存储组合收敛到唯一实现,
+// 供 identity 业务路径与验收夹具种子共用,杜绝各处内联复制导致算法漂移。
+func ProtectPhone(cipher *Cipher, hmacKey []byte, phone string) (enc []byte, hash string, err error) {
+	enc, err = cipher.Encrypt([]byte(phone))
+	if err != nil {
+		return nil, "", err
+	}
+	hash, err = HMACHash(hmacKey, phone)
+	if err != nil {
+		return nil, "", err
+	}
+	return enc, hash, nil
+}
+
 // EncryptString 加密文本并编码为标准 base64,用于 JSON/文本字段安全存储。
 func (c *Cipher) EncryptString(plaintext string) (string, error) {
 	encrypted, err := c.Encrypt([]byte(plaintext))

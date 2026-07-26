@@ -121,6 +121,11 @@ func (s *Service) encryptPhone(phone string) ([]byte, error) {
 	return s.cipher.Encrypt([]byte(phone))
 }
 
+// protectPhone 生成手机号存储所需的密文与检索哈希,统一走 crypto.ProtectPhone,与验收种子共享唯一实现。
+func (s *Service) protectPhone(phone string) ([]byte, string, error) {
+	return crypto.ProtectPhone(s.cipher, s.hmacKey, phone)
+}
+
 // decryptPhone 解密手机号密文,解密失败时向上返回错误供日志记录。
 func (s *Service) decryptPhone(ciphertext []byte) (string, error) {
 	plain, err := s.cipher.Decrypt(ciphertext)

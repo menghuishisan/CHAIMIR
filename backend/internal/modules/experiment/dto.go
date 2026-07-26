@@ -49,6 +49,7 @@ type StudentExperimentDTO struct {
 	Components    StudentComponentConfig `json:"components"`
 	CollabMode    int16                  `json:"collab_mode"`
 	GroupConfig   GroupConfig            `json:"group_config"`
+	MyGroupID     ids.ID                 `json:"my_group_id,omitempty"`
 	RequireReport bool                   `json:"require_report"`
 	Status        int16                  `json:"status"`
 	CreatedAt     time.Time              `json:"created_at"`

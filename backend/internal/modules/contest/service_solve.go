@@ -10,6 +10,7 @@ import (
 	"chaimir/internal/platform/ids"
 	"chaimir/internal/platform/jsonx"
 	"chaimir/internal/platform/pagex"
+	"chaimir/internal/platform/response"
 	"chaimir/internal/platform/timex"
 	"chaimir/pkg/apperr"
 )
@@ -348,7 +349,9 @@ func (s *Service) pushLeaderboard(ctx context.Context, tenantID, contestID int64
 		items = append(items, ladderDTOFromModel(rank))
 	}
 	payload := map[string]any{"contest_id": ids.Format(contestID), "items": items}
-	if err := s.notify.Push(ctx, contracts.NotifyPushRequest{TenantID: tenantID, Topic: fmt.Sprintf("tenant:%d:contest:%d:leaderboard", tenantID, contestID), Payload: payload}); err != nil {
+	// 排行榜为即时推送,统一走异步事件由 M10 兜底投递,避免通知抖动导致已判分提交回滚。
+	evt := contracts.NotifyPushRequestedEvent{TenantID: tenantID, TraceID: response.TraceFromContext(ctx), Topic: fmt.Sprintf("tenant:%d:contest:%d:leaderboard", tenantID, contestID), Payload: payload}
+	if err := s.bus.Publish(ctx, contracts.SubjectNotifyPushRequested, evt); err != nil {
 		return apperr.ErrContestNotifyFailed.WithCause(err)
 	}
 	return nil

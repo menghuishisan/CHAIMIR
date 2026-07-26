@@ -36,6 +36,8 @@ type Querier interface {
 	ListExperimentReports(ctx context.Context, arg ListExperimentReportsParams) ([]ListExperimentReportsRow, error)
 	ListExperiments(ctx context.Context, arg ListExperimentsParams) ([]Experiment, error)
 	ListGroupMembers(ctx context.Context, arg ListGroupMembersParams) ([]GroupMember, error)
+	// 按学生视角批量解析其在给定实验集合中所属的小组,供学生实验列表/详情一次性填充 my_group_id。
+	ListStudentGroupsForExperiments(ctx context.Context, arg ListStudentGroupsForExperimentsParams) ([]ListStudentGroupsForExperimentsRow, error)
 	MarkExperimentScoreOutboxFailed(ctx context.Context, arg MarkExperimentScoreOutboxFailedParams) (ExperimentScoreOutbox, error)
 	MarkExperimentScoreOutboxPublished(ctx context.Context, arg MarkExperimentScoreOutboxPublishedParams) (ExperimentScoreOutbox, error)
 	SetExperimentStatus(ctx context.Context, arg SetExperimentStatusParams) (Experiment, error)

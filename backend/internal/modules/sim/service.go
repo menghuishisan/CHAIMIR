@@ -14,6 +14,7 @@ import (
 	"chaimir/internal/platform/config"
 	"chaimir/internal/platform/ids"
 	"chaimir/internal/platform/storage"
+	"chaimir/internal/platform/timex"
 	"chaimir/internal/platform/upload"
 	"chaimir/internal/platform/ws"
 	"chaimir/pkg/apperr"
@@ -71,6 +72,8 @@ type Service struct {
 	identity contracts.IdentityService
 	wsHub    *ws.Hub
 	backends BackendRegistry
+	// downloadGrantTTL 与统一文件服务同源,内置包与外部包共用同一套下载授权时效。
+	downloadGrantTTL time.Duration
 }
 
 // ServiceDeps 是 sim service 的装配依赖集合。
@@ -118,7 +121,7 @@ func NewService(deps ServiceDeps) (*Service, error) {
 			return nil, fmt.Errorf("sim backend adapter %q 描述无效", code)
 		}
 	}
-	return &Service{store: deps.Store, ids: deps.IDs, upload: deps.Upload, storage: deps.Storage, files: deps.FileService, audit: deps.Audit, identity: deps.Identity, wsHub: deps.WSHub, backends: deps.BackendAdapters}, nil
+	return &Service{store: deps.Store, ids: deps.IDs, upload: deps.Upload, storage: deps.Storage, files: deps.FileService, audit: deps.Audit, identity: deps.Identity, wsHub: deps.WSHub, backends: deps.BackendAdapters, downloadGrantTTL: deps.FileService.DownloadGrantTTL}, nil
 }
 
 // IssueBundleDownloadGrant 为已上架仿真包签发短时运行授权；内置包由平台 SDK 装配,外部包走统一文件服务边界。
@@ -136,7 +139,7 @@ func (s *Service) IssueBundleDownloadGrant(ctx context.Context, accountID int64,
 	if pkg.AuthorType == AuthorPlatformBuiltIn && pkg.Compute == ComputeFrontend && strings.HasPrefix(pkg.Code, "builtin__") {
 		return BundleDownloadGrantDTO{
 			BundleHash:  pkg.BundleHash,
-			ExpiresAt:   time.Now().Add(5 * time.Minute).Format(time.RFC3339),
+			ExpiresAt:   timex.Now().Add(s.downloadGrantTTL).Format(time.RFC3339),
 			BuiltinCode: pkg.Code,
 		}, nil
 	}

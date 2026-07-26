@@ -220,11 +220,7 @@ func (s *Service) CommitAccountImport(ctx context.Context, req ImportCommitReque
 				passwordHash = hash
 				mustChange = true
 			}
-			phoneEnc, err := s.encryptPhone(row.Phone)
-			if err != nil {
-				return err
-			}
-			phoneHash, err := s.phoneHash(row.Phone)
+			phoneEnc, phoneHash, err := s.protectPhone(row.Phone)
 			if err != nil {
 				return err
 			}

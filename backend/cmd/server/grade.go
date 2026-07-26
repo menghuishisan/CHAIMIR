@@ -28,7 +28,6 @@ type GradeModuleDeps struct {
 	IDs        snowflake.Generator
 	Audit      audit.Writer
 	Teaching   contracts.TeachingReadService
-	Notify     contracts.NotifyService
 	EventBus   eventbus.Bus
 	Redis      *redis.Client
 	Storage    *storage.Storage
@@ -62,7 +61,6 @@ func RegisterGradeModule(ctx context.Context, deps GradeModuleDeps) (*grade.Serv
 		Audit:       deps.Audit,
 		Roles:       deps.Roles,
 		Teaching:    deps.Teaching,
-		Notify:      deps.Notify,
 		Bus:         deps.EventBus,
 		Cache:       deps.Redis,
 		Storage:     deps.Storage,

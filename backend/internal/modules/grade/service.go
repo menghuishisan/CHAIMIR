@@ -58,7 +58,6 @@ type Service struct {
 	audit    audit.Writer
 	roles    roleReader
 	teaching contracts.TeachingReadService
-	notify   contracts.NotifyService
 	bus      eventbus.Bus
 	cache    summaryCache
 	storage  objectStorage
@@ -73,7 +72,6 @@ type ServiceDeps struct {
 	Audit       audit.Writer
 	Roles       roleReader
 	Teaching    contracts.TeachingReadService
-	Notify      contracts.NotifyService
 	Bus         eventbus.Bus
 	Cache       summaryCache
 	Storage     *storage.Storage
@@ -84,7 +82,7 @@ type ServiceDeps struct {
 
 // NewService 构造 M11 服务。
 func NewService(deps ServiceDeps) (*Service, error) {
-	if deps.Store == nil || deps.IDs == nil || deps.Audit == nil || deps.Roles == nil || deps.Teaching == nil || deps.Notify == nil || deps.Bus == nil {
+	if deps.Store == nil || deps.IDs == nil || deps.Audit == nil || deps.Roles == nil || deps.Teaching == nil || deps.Bus == nil {
 		return nil, fmt.Errorf("grade service 依赖不完整")
 	}
 	objects := deps.Objects
@@ -103,7 +101,7 @@ func NewService(deps ServiceDeps) (*Service, error) {
 	if deps.Config.AppealWindowDays <= 0 || deps.Config.SummaryCacheTTLSeconds <= 0 || strings.TrimSpace(deps.Config.TranscriptSigningKey) == "" || deps.Config.TranscriptMaxBytes <= 0 || deps.Config.LockOutboxBatchSize <= 0 || deps.Config.LockOutboxStaleMs <= 0 {
 		return nil, fmt.Errorf("grade service 配置不完整")
 	}
-	return &Service{store: deps.Store, ids: deps.IDs, audit: deps.Audit, roles: deps.Roles, teaching: deps.Teaching, notify: deps.Notify, bus: deps.Bus, cache: deps.Cache, storage: objects, files: deps.FileService, cfg: deps.Config}, nil
+	return &Service{store: deps.Store, ids: deps.IDs, audit: deps.Audit, roles: deps.Roles, teaching: deps.Teaching, bus: deps.Bus, cache: deps.Cache, storage: objects, files: deps.FileService, cfg: deps.Config}, nil
 }
 
 // CreateLevelConfig 创建等级映射配置。
@@ -991,16 +989,24 @@ func (s *Service) recomputeStudentWarnings(ctx context.Context, tenantID, studen
 		return 0, err
 	}
 	created := 0
+	notifyWarning := false
 	err = s.store.TenantTx(ctx, tenantID, func(ctx context.Context, tx TxStore) error {
 		if _, err := tx.UpsertStudentSemesterGrade(ctx, s.ids.Generate(), tenantID, studentID, semesterID, credits, gpa, gpa); err != nil {
 			return apperr.ErrGradeAggregationFailed.WithCause(err)
 		}
 		var err error
-		created, err = s.createWarnings(ctx, tx, tenantID, studentID, semesterID, inputs, gpa, cfg.WarningRules)
+		created, notifyWarning, err = s.createWarnings(ctx, tx, tenantID, studentID, semesterID, inputs, gpa, cfg.WarningRules, cfg.Mapping)
 		return err
 	})
 	if err == nil {
 		s.invalidateSummaryCache(ctx, tenantID, studentID, semesterID)
+		if notifyWarning {
+			// 学业预警通知在成绩事务提交后统一走异步事件,避免通知不可用回滚已聚合成绩。
+			evt := contracts.NotifySendRequestedEvent{TenantID: tenantID, TraceID: response.TraceFromContext(ctx), Type: "grade.warning", Receivers: []int64{studentID}, Params: map[string]string{"gpa": fmt.Sprintf("%.3f", gpa)}}
+			if pubErr := s.bus.Publish(ctx, contracts.SubjectNotifySendRequested, evt); pubErr != nil {
+				logging.ErrorContext(ctx, "grade warning notify publish failed", pubErr.Error(), slog.Int64("tenant_id", tenantID), slog.Int64("student_id", studentID), slog.Int64("semester_id", semesterID))
+			}
+		}
 	}
 	return created, err
 }
@@ -1073,34 +1079,31 @@ func (s *Service) invalidateCourseSummaryCache(ctx context.Context, tenantID, co
 	}
 }
 
-// createWarnings 根据预警规则写入学业预警并统一走通知模块提醒学生。
-func (s *Service) createWarnings(ctx context.Context, tx TxStore, tenantID, studentID, semesterID int64, grades []CourseGradeInput, gpa float64, rules WarningRules) (int, error) {
+// createWarnings 根据预警规则写入学业预警,只做本模块自有表的 DB 写入;是否需要提醒学生由返回值上抛,通知在事务提交后异步发出。
+// 是否挂科以租户等级映射的不及格档(绩点为 0)为唯一判定,不使用硬编码及格线。
+func (s *Service) createWarnings(ctx context.Context, tx TxStore, tenantID, studentID, semesterID int64, grades []CourseGradeInput, gpa float64, rules WarningRules, mapping []LevelRule) (int, bool, error) {
 	failCount := 0
+	ordered := orderedMapping(mapping)
 	for _, row := range grades {
-		if row.FinalTotal < 60 {
+		if point, ok := gpaPointForScore(row.FinalTotal, ordered); ok && point == 0 {
 			failCount++
 		}
 	}
 	created := 0
 	if rules.FailCount > 0 && failCount >= rules.FailCount {
 		if _, err := tx.CreateAcademicWarning(ctx, s.ids.Generate(), tenantID, studentID, semesterID, WarningTypeFailedCourse, map[string]any{"failed_count": failCount}); err != nil {
-			return 0, apperr.ErrGradeWarningInvalid.WithCause(err)
+			return 0, false, apperr.ErrGradeWarningInvalid.WithCause(err)
 		}
 		created++
 	}
 	if rules.MinGPA > 0 && gpa < rules.MinGPA {
 		if _, err := tx.CreateAcademicWarning(ctx, s.ids.Generate(), tenantID, studentID, semesterID, WarningTypeLowGPA, map[string]any{"gpa": gpa}); err != nil {
-			return 0, apperr.ErrGradeWarningInvalid.WithCause(err)
+			return 0, false, apperr.ErrGradeWarningInvalid.WithCause(err)
 		}
 		created++
 	}
-	if failCount > 0 || (rules.MinGPA > 0 && gpa < rules.MinGPA) {
-		if err := s.notify.Send(ctx, contracts.NotifySendRequest{TenantID: tenantID, Type: "grade.warning", Receivers: []int64{studentID}, Params: map[string]string{"gpa": fmt.Sprintf("%.3f", gpa)}}); err != nil {
-			return 0, err
-		}
-		return created, nil
-	}
-	return created, nil
+	shouldNotify := failCount > 0 || (rules.MinGPA > 0 && gpa < rules.MinGPA)
+	return created, shouldNotify, nil
 }
 
 // defaultConfig 读取租户默认等级映射配置。

@@ -260,11 +260,7 @@ func (s *Service) BootstrapSchoolTenant(ctx context.Context, cfg config.Bootstra
 	if err != nil {
 		return TenantDTO{}, apperr.ErrInternal.WithCause(err)
 	}
-	phoneEnc, err := s.encryptPhone(cfg.AdminPhone)
-	if err != nil {
-		return TenantDTO{}, apperr.ErrInternal.WithCause(err)
-	}
-	phoneHash, err := s.phoneHash(cfg.AdminPhone)
+	phoneEnc, phoneHash, err := s.protectPhone(cfg.AdminPhone)
 	if err != nil {
 		return TenantDTO{}, apperr.ErrInternal.WithCause(err)
 	}
@@ -366,11 +362,7 @@ func (s *Service) BootstrapPlatformAdmin(ctx context.Context, cfg config.Bootstr
 
 // createBootstrapAdminInTx 创建首个学校管理员账号、教师/学校管理员角色和一次性激活码。
 func (s *Service) createBootstrapAdminInTx(ctx context.Context, tx TxStore, tenantID int64, name, phone string) (Account, string, error) {
-	phoneEnc, err := s.encryptPhone(phone)
-	if err != nil {
-		return Account{}, "", err
-	}
-	phoneHash, err := s.phoneHash(phone)
+	phoneEnc, phoneHash, err := s.protectPhone(phone)
 	if err != nil {
 		return Account{}, "", err
 	}

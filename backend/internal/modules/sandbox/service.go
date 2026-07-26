@@ -416,6 +416,7 @@ func (s *Service) resumePausedSandbox(ctx context.Context, sb Sandbox) error {
 		return err
 	}
 	if err := s.orchestrator.CreateSandboxResources(ctx, plan); err != nil {
+		s.cleanupAfterResumeFailure(ctx, sb)
 		s.markStartFailed(ctx, sb, err)
 		return apperr.ErrSandboxCreateFailed.WithCause(err)
 	}
@@ -1004,6 +1005,16 @@ func (s *Service) cleanupAfterStartFailure(ctx context.Context, sb Sandbox) {
 	defer cancel()
 	if err := s.orchestrator.DestroySandboxResources(cleanupCtx, sb); err != nil {
 		logging.ErrorContext(ctx, "sandbox start cleanup failed", err.Error(), slog.Int64("tenant_id", sb.TenantID), slog.Int64("sandbox_id", sb.ID), slog.String("namespace", sb.Namespace))
+	}
+}
+
+// cleanupAfterResumeFailure 释放恢复失败时半启动的计算 Pod,但保留快照命名空间与 PVC,使沙箱仍可再次恢复或由回收链路兜底。
+func (s *Service) cleanupAfterResumeFailure(ctx context.Context, sb Sandbox) {
+	cleanupBase := logging.WithAttrs(context.WithoutCancel(ctx), logging.AttrsFromContext(ctx)...)
+	cleanupCtx, cancel := context.WithTimeout(cleanupBase, timeDurationSeconds(s.cfg.ReadyTimeoutSeconds))
+	defer cancel()
+	if err := s.orchestrator.StopComputeKeepSnapshot(cleanupCtx, sb); err != nil {
+		logging.ErrorContext(ctx, "sandbox resume cleanup failed", err.Error(), slog.Int64("tenant_id", sb.TenantID), slog.Int64("sandbox_id", sb.ID), slog.String("namespace", sb.Namespace))
 	}
 }
 

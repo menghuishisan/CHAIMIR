@@ -1174,6 +1174,45 @@ func (q *Queries) ListGroupMembers(ctx context.Context, arg ListGroupMembersPara
 	return items, nil
 }
 
+const listStudentGroupsForExperiments = `-- name: ListStudentGroupsForExperiments :many
+SELECT eg.experiment_id, gm.group_id
+FROM group_member gm
+JOIN experiment_group eg ON eg.tenant_id = gm.tenant_id AND eg.id = gm.group_id
+WHERE gm.tenant_id = $1 AND gm.student_id = $2 AND eg.experiment_id = ANY($3::bigint[])
+`
+
+type ListStudentGroupsForExperimentsParams struct {
+	TenantID      int64   `json:"tenant_id"`
+	StudentID     int64   `json:"student_id"`
+	ExperimentIds []int64 `json:"experiment_ids"`
+}
+
+type ListStudentGroupsForExperimentsRow struct {
+	ExperimentID int64 `json:"experiment_id"`
+	GroupID      int64 `json:"group_id"`
+}
+
+// 按学生视角批量解析其在给定实验集合中所属的小组,供学生实验列表/详情一次性填充 my_group_id。
+func (q *Queries) ListStudentGroupsForExperiments(ctx context.Context, arg ListStudentGroupsForExperimentsParams) ([]ListStudentGroupsForExperimentsRow, error) {
+	rows, err := q.db.Query(ctx, listStudentGroupsForExperiments, arg.TenantID, arg.StudentID, arg.ExperimentIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListStudentGroupsForExperimentsRow{}
+	for rows.Next() {
+		var i ListStudentGroupsForExperimentsRow
+		if err := rows.Scan(&i.ExperimentID, &i.GroupID); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const markExperimentScoreOutboxFailed = `-- name: MarkExperimentScoreOutboxFailed :one
 UPDATE experiment_score_outbox
 SET status = 4, last_error = $3, updated_at = now()

@@ -33,7 +33,6 @@ type ContestModuleDeps struct {
 	Sandbox       contracts.SandboxService
 	Judge         contracts.JudgeService
 	Fingerprint   contracts.FingerprintService
-	Notify        contracts.NotifyService
 	Audit         audit.Writer
 	EventBus      eventbus.Bus
 	Auth          *auth.Manager
@@ -71,7 +70,6 @@ func RegisterContestModule(ctx context.Context, deps ContestModuleDeps) (*contes
 		Sandbox:       deps.Sandbox,
 		Judge:         deps.Judge,
 		Fingerprint:   deps.Fingerprint,
-		Notify:        deps.Notify,
 		Bus:           deps.EventBus,
 		Cipher:        cipher,
 	})

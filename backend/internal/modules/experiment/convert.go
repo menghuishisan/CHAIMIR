@@ -12,7 +12,8 @@ func experimentDTOFromModel(item Experiment) ExperimentDTO {
 }
 
 // studentExperimentDTOFromModel 生成不含环境初始化与判题答案的学生实验视图。
-func studentExperimentDTOFromModel(item Experiment) StudentExperimentDTO {
+// myGroupID 为该学生在本实验所属小组(0 表示未分组或单人实验),供前端发起实例时携带。
+func studentExperimentDTOFromModel(item Experiment, myGroupID int64) StudentExperimentDTO {
 	components := StudentComponentConfig{
 		Envs:        make([]StudentEnvComponent, 0, len(item.Components.Envs)),
 		Sims:        make([]StudentSimComponent, 0, len(item.Components.Sims)),
@@ -31,7 +32,7 @@ func studentExperimentDTOFromModel(item Experiment) StudentExperimentDTO {
 	for _, stage := range item.Components.Stages {
 		components.Stages = append(components.Stages, StudentStageConfig{Stage: stage.Stage, Title: stage.Title, Description: stage.Description, Components: stage.Components, UnlockCondition: stage.UnlockCondition})
 	}
-	return StudentExperimentDTO{ID: ids.ID(item.ID), CourseID: ids.ID(item.CourseID), Name: item.Name, Description: item.Description, Components: components, CollabMode: item.CollabMode, GroupConfig: item.GroupConfig, RequireReport: item.RequireReport, Status: item.Status, CreatedAt: item.CreatedAt, UpdatedAt: item.UpdatedAt}
+	return StudentExperimentDTO{ID: ids.ID(item.ID), CourseID: ids.ID(item.CourseID), Name: item.Name, Description: item.Description, Components: components, CollabMode: item.CollabMode, GroupConfig: item.GroupConfig, MyGroupID: ids.ID(myGroupID), RequireReport: item.RequireReport, Status: item.Status, CreatedAt: item.CreatedAt, UpdatedAt: item.UpdatedAt}
 }
 
 // instanceDTOFromModel 转换实验实例为工作台输出。

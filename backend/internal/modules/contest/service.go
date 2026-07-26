@@ -27,7 +27,6 @@ type Service struct {
 	sandbox       contracts.SandboxService
 	judge         contracts.JudgeService
 	fingerprint   contracts.FingerprintService
-	notify        contracts.NotifyService
 	bus           eventbus.Bus
 	cipher        *crypto.Cipher
 }
@@ -44,7 +43,6 @@ type ServiceDeps struct {
 	Sandbox       contracts.SandboxService
 	Judge         contracts.JudgeService
 	Fingerprint   contracts.FingerprintService
-	Notify        contracts.NotifyService
 	Bus           eventbus.Bus
 	Cipher        *crypto.Cipher
 }
@@ -78,9 +76,6 @@ func NewService(deps ServiceDeps) (*Service, error) {
 	if deps.Fingerprint == nil {
 		return nil, fmt.Errorf("contest service 缺少 fingerprint 契约")
 	}
-	if deps.Notify == nil {
-		return nil, fmt.Errorf("contest service 缺少 notify 契约")
-	}
 	if deps.Bus == nil {
 		return nil, fmt.Errorf("contest service 缺少事件总线")
 	}
@@ -90,7 +85,7 @@ func NewService(deps ServiceDeps) (*Service, error) {
 	if deps.Config.VulnSourceMaxResponseBytes <= 0 || deps.Config.VulnSourceTimeoutSeconds <= 0 || deps.Config.MatchmakerPollIntervalSeconds <= 0 || deps.Config.AutoArchivePollIntervalSeconds <= 0 || deps.Config.BattleSandboxReadyTimeoutSeconds <= 0 || deps.Config.BattleSandboxReadyPollIntervalMs <= 0 || deps.Config.MatchmakerBatchSize <= 0 || deps.Config.SubmitRateLimitSeconds <= 0 || deps.Config.FailedCooldownSeconds <= 0 || deps.Config.BattleELOInitialScore <= 0 || deps.Config.BattleELOKFactor <= 0 {
 		return nil, fmt.Errorf("contest service 配置不完整")
 	}
-	return &Service{store: deps.Store, ids: deps.IDs, cfg: deps.Config, audit: deps.Audit, roles: deps.Roles, content: deps.Content, contentImport: deps.ContentImport, sandbox: deps.Sandbox, judge: deps.Judge, fingerprint: deps.Fingerprint, notify: deps.Notify, bus: deps.Bus, cipher: deps.Cipher}, nil
+	return &Service{store: deps.Store, ids: deps.IDs, cfg: deps.Config, audit: deps.Audit, roles: deps.Roles, content: deps.Content, contentImport: deps.ContentImport, sandbox: deps.Sandbox, judge: deps.Judge, fingerprint: deps.Fingerprint, bus: deps.Bus, cipher: deps.Cipher}, nil
 }
 
 // currentIdentity 读取租户账号身份。

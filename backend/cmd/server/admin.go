@@ -14,6 +14,7 @@ import (
 	"chaimir/internal/platform/background"
 	"chaimir/internal/platform/config"
 	"chaimir/internal/platform/db"
+	"chaimir/internal/platform/eventbus"
 	"chaimir/internal/platform/storage"
 	"chaimir/internal/platform/transfer"
 	"chaimir/pkg/crypto"
@@ -32,10 +33,10 @@ type AdminModuleDeps struct {
 	Stats      contracts.IdentityStatsService
 	AuditRead  contracts.IdentityAuditReadService
 	Teaching   contracts.TeachingReadService
-	Sandbox    contracts.SandboxService
+	Sandbox    contracts.SandboxReadService
 	Experiment contracts.ExperimentReadService
 	Contest    contracts.ContestReadService
-	Notify     contracts.NotifyService
+	EventBus   eventbus.Bus
 	Monitoring config.MonitoringConfig
 	Config     config.AdminConfig
 	Upload     config.UploadConfig
@@ -89,7 +90,7 @@ func RegisterAdminModule(ctx context.Context, deps AdminModuleDeps) (*admin.Serv
 		Sandbox:     deps.Sandbox,
 		Experiment:  deps.Experiment,
 		Contest:     deps.Contest,
-		Notify:      deps.Notify,
+		Bus:         deps.EventBus,
 		Monitoring:  deps.Monitoring,
 		Cipher:      cipher,
 		Transfers:   deps.Transfer,

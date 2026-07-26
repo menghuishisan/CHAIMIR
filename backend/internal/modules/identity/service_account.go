@@ -62,11 +62,7 @@ func (s *Service) CreateAccountByAdmin(ctx context.Context, req CreateAccountReq
 	if err != nil {
 		return AccountDTO{}, "", err
 	}
-	phoneEnc, err := s.encryptPhone(req.Phone)
-	if err != nil {
-		return AccountDTO{}, "", apperr.ErrInternal.WithCause(err)
-	}
-	phoneHash, err := s.phoneHash(req.Phone)
+	phoneEnc, phoneHash, err := s.protectPhone(req.Phone)
 	if err != nil {
 		return AccountDTO{}, "", apperr.ErrInternal.WithCause(err)
 	}

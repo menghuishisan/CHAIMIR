@@ -92,7 +92,7 @@ func (s *store) PrivilegedTx(ctx context.Context, fn func(context.Context, TxSto
 	if s == nil || s.database == nil {
 		return apperr.ErrInternal.WithCause(fmt.Errorf("sim store 未初始化"))
 	}
-	return s.database.WithPrivilegedTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+	return s.database.WithPrivilegedModuleTx(ctx, "sim", func(ctx context.Context, tx pgx.Tx) error {
 		return fn(ctx, &txStore{q: sqlcgen.New(tx)})
 	})
 }

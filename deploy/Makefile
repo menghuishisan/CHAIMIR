@@ -21,6 +21,8 @@ POLICY_CONTROLLER_VERSION := 0.10.6
 # CSI snapshotter 只安装 VolumeSnapshot CRD 与 snapshot-controller;
 # 真实快照能力仍取决于生产集群的 CSI 驱动和 VolumeSnapshotClass。
 SNAPSHOTTER_VERSION := v8.6.0
+# gVisor 发布源:本地节点安装 runsc + shim(生产用云厂商 gVisor 节点池,不走本目标)。
+GVISOR_RELEASE_URL := https://storage.googleapis.com/gvisor/releases/release/latest/x86_64
 
 .PHONY: help
 help: ## 显示可用目标
@@ -29,7 +31,7 @@ help: ## 显示可用目标
 
 # ---- 一键起步 ----
 .PHONY: dev-up
-dev-up: context-check ingress-up metrics-up-local policy-controller-up gen-secret middleware-wait apply-dev migrate ## 使用当前 K8s context 拉起完整本地部署(中间件+应用+迁移)
+dev-up: context-check gvisor-up-local ingress-up metrics-up-local policy-controller-up gen-secret middleware-wait apply-dev migrate ## 使用当前 K8s context 拉起完整本地部署(中间件+应用+迁移)
 	@echo "本地环境就绪。前端: http://chaimir.local (需将 chaimir.local 指向 127.0.0.1)"
 
 .PHONY: dev-down
@@ -84,6 +86,37 @@ snapshot-check: ## 检查集群是否具备 M2 快照前置能力(CRD/controller
 	kubectl get volumesnapshots.snapshot.storage.k8s.io --all-namespaces
 	kubectl get volumesnapshotcontents.snapshot.storage.k8s.io
 	kubectl get storageclass
+
+# ---- gVisor 隔离运行时(沙箱强制) ----
+# 生产/私有化用云厂商 gVisor 节点池;下述目标仅供 Docker Desktop/kind 本地集群安装 runsc(不持久,集群重建需重跑)。
+.PHONY: gvisor-up-local
+gvisor-up-local: ## 本地在各节点安装 runsc 并注册 containerd 运行时,再装 RuntimeClass(Linux/WSL 下的 kind/Docker Desktop;需 gVisor 可运行的节点)
+	@set -euo pipefail; \
+	tmp=$$(mktemp -d); \
+	echo "宿主下载 runsc 与 shim 及官方校验和(需可访问 gVisor 发布源)..."; \
+	for f in runsc runsc.sha512 containerd-shim-runsc-v1 containerd-shim-runsc-v1.sha512; do \
+		curl -fsSL -o $$tmp/$$f $(GVISOR_RELEASE_URL)/$$f; \
+	done; \
+	echo "校验下载完整性(损坏即中止,绝不安装坏二进制)..."; \
+	( cd $$tmp && sha512sum -c runsc.sha512 && sha512sum -c containerd-shim-runsc-v1.sha512 ) \
+		|| { echo "runsc/shim 校验和不匹配——下载被网络损坏或被篡改,已中止。请换可靠网络/镜像重试。"; rm -rf $$tmp; exit 1; }; \
+	chmod +x $$tmp/runsc $$tmp/containerd-shim-runsc-v1; \
+	for node in $$(kubectl get nodes -o jsonpath='{.items[*].metadata.name}'); do \
+		echo "==> 节点 $$node 安装 gVisor"; \
+		docker cp $$tmp/runsc $$node:/usr/local/bin/runsc; \
+		docker cp $$tmp/containerd-shim-runsc-v1 $$node:/usr/local/bin/containerd-shim-runsc-v1; \
+		docker exec $$node bash -c 'set -e; chmod +x /usr/local/bin/runsc /usr/local/bin/containerd-shim-runsc-v1; grep -q "containerd.runtimes.runsc" /etc/containerd/config.toml || printf "\n        [plugins.\"io.containerd.grpc.v1.cri\".containerd.runtimes.runsc]\n          runtime_type = \"io.containerd.runsc.v1\"\n" >> /etc/containerd/config.toml; systemctl restart containerd'; \
+	done; \
+	rm -rf $$tmp; \
+	kubectl apply -k components/gvisor; \
+	echo "gVisor 本地安装完成,运行 make gvisor-check 验证。"
+
+.PHONY: gvisor-check
+gvisor-check: ## 校验 RuntimeClass 就绪并起一个 gVisor 测试 Pod 验证内核隔离
+	kubectl get runtimeclass gvisor
+	kubectl run gvisor-check --rm -i --restart=Never --image=busybox:1.36 \
+		--overrides='{"spec":{"runtimeClassName":"gvisor"}}' -- dmesg | grep -i gvisor \
+		&& echo "gVisor 隔离生效" || { echo "未检测到 gVisor,请确认节点已装 runsc"; exit 1; }
 
 # ---- Sigstore policy-controller ----
 .PHONY: policy-controller-up

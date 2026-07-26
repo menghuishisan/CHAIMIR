@@ -334,15 +334,8 @@ func protectedPhone(phone string) ([]byte, string, error) {
 	if err != nil {
 		return nil, "", err
 	}
-	phoneEnc, err := cipher.Encrypt([]byte(phone))
-	if err != nil {
-		return nil, "", err
-	}
-	phoneHash, err := crypto.HMACHash([]byte(osEnv("APP_HMAC_KEY")), phone)
-	if err != nil {
-		return nil, "", err
-	}
-	return phoneEnc, phoneHash, nil
+	// 复用生产同一套加密 + HMAC 组合,种子与 identity 共享唯一实现,避免手机号保护算法漂移。
+	return crypto.ProtectPhone(cipher, []byte(osEnv("APP_HMAC_KEY")), phone)
 }
 
 // osEnv 读取已由 config 校验过的环境变量,便于 seed 内复用密钥。

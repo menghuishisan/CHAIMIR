@@ -70,6 +70,13 @@ SELECT id, tenant_id, group_id, student_id, role, created_at
 FROM group_member
 WHERE tenant_id = $1 AND group_id = $2 AND student_id = $3;
 
+-- name: ListStudentGroupsForExperiments :many
+-- 按学生视角批量解析其在给定实验集合中所属的小组,供学生实验列表/详情一次性填充 my_group_id。
+SELECT eg.experiment_id, gm.group_id
+FROM group_member gm
+JOIN experiment_group eg ON eg.tenant_id = gm.tenant_id AND eg.id = gm.group_id
+WHERE gm.tenant_id = $1 AND gm.student_id = $2 AND eg.experiment_id = ANY(sqlc.arg(experiment_ids)::bigint[]);
+
 -- name: UpsertGroupMember :one
 INSERT INTO group_member (id, tenant_id, group_id, student_id, role, created_at)
 VALUES ($1, $2, $3, $4, $5, now())

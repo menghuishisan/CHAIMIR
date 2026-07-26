@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/csv"
 	"fmt"
+	"log/slog"
 	"io"
 	"strings"
 	"time"
@@ -13,8 +14,10 @@ import (
 	"chaimir/internal/contracts"
 	"chaimir/internal/platform/audit"
 	"chaimir/internal/platform/config"
+	"chaimir/internal/platform/eventbus"
 	"chaimir/internal/platform/ids"
 	"chaimir/internal/platform/pagex"
+	"chaimir/internal/platform/response"
 	"chaimir/internal/platform/secretmap"
 	"chaimir/internal/platform/storage"
 	"chaimir/internal/platform/tenant"
@@ -22,6 +25,7 @@ import (
 	"chaimir/internal/platform/transfer"
 	"chaimir/pkg/apperr"
 	pkgcrypto "chaimir/pkg/crypto"
+	"chaimir/pkg/logging"
 	"chaimir/pkg/snowflake"
 )
 
@@ -35,10 +39,10 @@ type Service struct {
 	stats        contracts.IdentityStatsService
 	auditRead    contracts.IdentityAuditReadService
 	teaching     contracts.TeachingReadService
-	sandbox      contracts.SandboxService
+	sandbox      contracts.SandboxReadService
 	experiment   contracts.ExperimentReadService
 	contest      contracts.ContestReadService
-	notify       contracts.NotifyService
+	bus          eventbus.Bus
 	monitoring   config.MonitoringConfig
 	secretCipher *pkgcrypto.Cipher
 	transfers    transferService
@@ -73,10 +77,10 @@ type ServiceDeps struct {
 	Stats       contracts.IdentityStatsService
 	AuditRead   contracts.IdentityAuditReadService
 	Teaching    contracts.TeachingReadService
-	Sandbox     contracts.SandboxService
+	Sandbox     contracts.SandboxReadService
 	Experiment  contracts.ExperimentReadService
 	Contest     contracts.ContestReadService
-	Notify      contracts.NotifyService
+	Bus         eventbus.Bus
 	Monitoring  config.MonitoringConfig
 	Cipher      *pkgcrypto.Cipher
 	Transfers   transferService
@@ -87,7 +91,7 @@ type ServiceDeps struct {
 
 // NewService 构造 M9 服务。
 func NewService(deps ServiceDeps) (*Service, error) {
-	if deps.Store == nil || deps.IDs == nil || deps.Audit == nil || deps.Roles == nil || deps.Identity == nil || deps.Stats == nil || deps.AuditRead == nil || deps.Teaching == nil || deps.Sandbox == nil || deps.Experiment == nil || deps.Contest == nil || deps.Notify == nil {
+	if deps.Store == nil || deps.IDs == nil || deps.Audit == nil || deps.Roles == nil || deps.Identity == nil || deps.Stats == nil || deps.AuditRead == nil || deps.Teaching == nil || deps.Sandbox == nil || deps.Experiment == nil || deps.Contest == nil || deps.Bus == nil {
 		return nil, fmt.Errorf("admin service 依赖不完整")
 	}
 	objects := deps.Objects
@@ -97,7 +101,7 @@ func NewService(deps ServiceDeps) (*Service, error) {
 	if deps.Transfers == nil || objects == nil || deps.FileService == nil {
 		return nil, fmt.Errorf("admin service 缺少统一导入导出或文件服务依赖")
 	}
-	return &Service{store: deps.Store, ids: deps.IDs, audit: deps.Audit, roles: deps.Roles, identity: deps.Identity, stats: deps.Stats, auditRead: deps.AuditRead, teaching: deps.Teaching, sandbox: deps.Sandbox, experiment: deps.Experiment, contest: deps.Contest, notify: deps.Notify, monitoring: deps.Monitoring, secretCipher: deps.Cipher, transfers: deps.Transfers, storage: objects, files: deps.FileService}, nil
+	return &Service{store: deps.Store, ids: deps.IDs, audit: deps.Audit, roles: deps.Roles, identity: deps.Identity, stats: deps.Stats, auditRead: deps.AuditRead, teaching: deps.Teaching, sandbox: deps.Sandbox, experiment: deps.Experiment, contest: deps.Contest, bus: deps.Bus, monitoring: deps.Monitoring, secretCipher: deps.Cipher, transfers: deps.Transfers, storage: objects, files: deps.FileService}, nil
 }
 
 // PlatformDashboard 聚合平台级看板。
@@ -631,8 +635,10 @@ func (s *Service) HandleAlertEvent(ctx context.Context, eventID int64, req Alert
 		return AlertEventDTO{}, apperr.ErrAdminAlertNotFound.WithCause(err)
 	}
 	if out.TenantID > 0 {
-		if err := s.notify.Push(ctx, contracts.NotifyPushRequest{
+		// 告警推送为提交后即时通知,统一走异步事件由 M10 兜底投递,失败不回滚已处理的告警事件。
+		evt := contracts.NotifyPushRequestedEvent{
 			TenantID: out.TenantID.Int64(),
+			TraceID:  response.TraceFromContext(ctx),
 			Topic:    fmt.Sprintf("tenant:%d:alert", out.TenantID),
 			Payload: map[string]any{
 				"event_id":   out.ID,
@@ -641,8 +647,9 @@ func (s *Service) HandleAlertEvent(ctx context.Context, eventID int64, req Alert
 				"status":     out.Status,
 				"handler_id": out.HandlerID,
 			},
-		}); err != nil {
-			return AlertEventDTO{}, apperr.ErrAdminAlertInvalid.WithCause(err)
+		}
+		if pubErr := s.bus.Publish(ctx, contracts.SubjectNotifyPushRequested, evt); pubErr != nil {
+			logging.ErrorContext(ctx, "admin alert notify publish failed", pubErr.Error(), slog.Int64("tenant_id", out.TenantID.Int64()), slog.Int64("alert_event_id", out.ID.Int64()))
 		}
 	}
 	if err := s.writeAudit(ctx, id, "admin.alert.handle", "alert_event", out.ID.Int64(), map[string]any{"status": out.Status}); err != nil {
