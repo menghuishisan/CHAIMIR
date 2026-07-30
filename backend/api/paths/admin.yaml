@@ -16,22 +16,6 @@
     security: [{ bearerAuth: [] }]
     parameters: [{ $ref: "#/components/parameters/FromQuery" }, { $ref: "#/components/parameters/ToQuery" }]
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
-/api/v1/admin/platform/tenants:
-  get:
-    tags: [admin]
-    summary: 平台租户聚合列表
-    operationId: adminListTenants
-    x-chaimir-audience: platform-admin
-    security: [{ bearerAuth: [] }]
-    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
-/api/v1/admin/platform/applications:
-  get:
-    tags: [admin]
-    summary: 学校入驻申请聚合列表
-    operationId: adminListApplications
-    x-chaimir-audience: platform-admin
-    security: [{ bearerAuth: [] }]
-    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
 /api/v1/admin/platform/monitoring/panels:
   get:
     tags: [admin]
@@ -71,7 +55,7 @@
     tags: [admin]
     summary: 跨模块审计聚合查询
     operationId: adminQueryAudit
-    x-chaimir-audience: platform-or-school-admin
+    x-chaimir-audience: platform-admin-or-school-admin
     security: [{ bearerAuth: [] }]
     parameters:
       - { name: actor_id, in: query, schema: { $ref: "#/components/schemas/SnowflakeID" } }
@@ -85,7 +69,7 @@
     tags: [admin]
     summary: 创建审计 CSV 导出任务
     operationId: adminExportAudit
-    x-chaimir-audience: platform-or-school-admin
+    x-chaimir-audience: platform-admin-or-school-admin
     security: [{ bearerAuth: [] }]
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
 /api/v1/admin/configs:
@@ -93,7 +77,7 @@
     tags: [admin]
     summary: 配置列表
     operationId: adminListConfigs
-    x-chaimir-audience: platform-or-school-admin
+    x-chaimir-audience: platform-admin-or-school-admin
     security: [{ bearerAuth: [] }]
     parameters: [{ name: scope, in: query, schema: { type: string } }]
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
@@ -102,7 +86,7 @@
     tags: [admin]
     summary: 更新配置
     operationId: adminUpdateConfig
-    x-chaimir-audience: platform-or-school-admin
+    x-chaimir-audience: platform-admin-or-school-admin
     security: [{ bearerAuth: [] }]
     parameters: [{ $ref: "#/components/parameters/KeyPath" }]
     requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
@@ -112,7 +96,7 @@
     tags: [admin]
     summary: 配置变更历史
     operationId: adminConfigHistory
-    x-chaimir-audience: platform-or-school-admin
+    x-chaimir-audience: platform-admin-or-school-admin
     security: [{ bearerAuth: [] }]
     parameters: [{ $ref: "#/components/parameters/KeyPath" }, { $ref: "#/components/parameters/PageQuery" }, { $ref: "#/components/parameters/SizeQuery" }]
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
@@ -121,7 +105,7 @@
     tags: [admin]
     summary: 回滚配置
     operationId: adminRollbackConfig
-    x-chaimir-audience: platform-or-school-admin
+    x-chaimir-audience: platform-admin-or-school-admin
     security: [{ bearerAuth: [] }]
     parameters: [{ $ref: "#/components/parameters/KeyPath" }]
     requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
@@ -131,14 +115,14 @@
     tags: [admin]
     summary: 告警规则列表
     operationId: adminListAlertRules
-    x-chaimir-audience: platform-or-school-admin
+    x-chaimir-audience: platform-admin-or-school-admin
     security: [{ bearerAuth: [] }]
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
   post:
     tags: [admin]
     summary: 创建告警规则
     operationId: adminCreateAlertRule
-    x-chaimir-audience: platform-or-school-admin
+    x-chaimir-audience: platform-admin-or-school-admin
     security: [{ bearerAuth: [] }]
     requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
@@ -147,7 +131,7 @@
     tags: [admin]
     summary: 更新告警规则
     operationId: adminUpdateAlertRule
-    x-chaimir-audience: platform-or-school-admin
+    x-chaimir-audience: platform-admin-or-school-admin
     security: [{ bearerAuth: [] }]
     parameters: [{ $ref: "#/components/parameters/IDPath" }]
     requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
@@ -157,7 +141,7 @@
     tags: [admin]
     summary: 告警事件分页列表
     operationId: adminListAlertEvents
-    x-chaimir-audience: platform-or-school-admin
+    x-chaimir-audience: platform-admin-or-school-admin
     security: [{ bearerAuth: [] }]
     parameters: [{ $ref: "#/components/parameters/StatusQuery" }, { $ref: "#/components/parameters/PageQuery" }, { $ref: "#/components/parameters/SizeQuery" }]
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
@@ -166,7 +150,7 @@
     tags: [admin]
     summary: 处理或忽略告警事件
     operationId: adminHandleAlertEvent
-    x-chaimir-audience: platform-or-school-admin
+    x-chaimir-audience: platform-admin-or-school-admin
     security: [{ bearerAuth: [] }]
     parameters: [{ $ref: "#/components/parameters/IDPath" }]
     requestBody: { $ref: "#/components/requestBodies/ObjectBody" }

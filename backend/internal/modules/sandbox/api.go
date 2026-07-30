@@ -122,7 +122,7 @@ func (a sandboxAPI) registerToolProxyRoutes(g gin.IRouter) {
 
 // registerQuotaRoutes 注册配额查询和调整接口。
 func (a sandboxAPI) registerQuotaRoutes(g gin.IRouter, authn *auth.Manager, roles contracts.IdentityService) {
-	g.GET("/quota", authn.Middleware(), auth.RequireTenantAnyRole(roles, contracts.RoleSchoolAdmin), a.quotaStats)
+	g.GET("/quota", authn.Middleware(), auth.RequirePlatformOrAnyRole(roles, contracts.RoleSchoolAdmin), a.quotaStats)
 	g.PATCH("/quota", authn.Middleware(), auth.RequirePlatformOrAnyRole(roles, contracts.RoleSchoolAdmin), a.upsertQuota)
 }
 
@@ -612,13 +612,13 @@ func (a sandboxAPI) chainReset(c *gin.Context) {
 	httpx.Write(c, gin.H{}, err)
 }
 
-// quotaStats 查询当前租户配额和活跃数量。
+// quotaStats 查询目标租户配额和活跃数量:校管读本租户,平台管理员按 tenant_id 读指定租户。
 func (a sandboxAPI) quotaStats(c *gin.Context) {
-	current, ok := currentTenantIdentity(c)
+	tenantID, ok := quotaScopeTenantID(c)
 	if !ok {
 		return
 	}
-	out, err := a.svc.Stats(c.Request.Context(), current.TenantID)
+	out, err := a.svc.Stats(c.Request.Context(), tenantID)
 	httpx.Write(c, out, err)
 }
 
@@ -638,6 +638,27 @@ func (a sandboxAPI) upsertQuota(c *gin.Context) {
 	}
 	out, err := a.svc.UpsertQuota(c.Request.Context(), TenantQuota{TenantID: req.TenantID.Int64(), MaxConcurrentSandbox: req.MaxConcurrentSandbox, MaxCPU: req.MaxCPU, MaxMemoryMB: req.MaxMemoryMB, IdleTimeoutMin: req.IdleTimeoutMin, MaxLifetimeMin: req.MaxLifetimeMin, MaxKeepaliveMin: req.MaxKeepaliveMin, MaxSnapshotRetentionMin: req.MaxSnapshotRetentionMin})
 	httpx.Write(c, out, err)
+}
+
+// quotaScopeTenantID 解析配额查询的租户边界:租户身份一律取会话租户并忽略客户端传参,平台身份必须显式指定 tenant_id。
+func quotaScopeTenantID(c *gin.Context) (int64, bool) {
+	id, ok := tenant.FromContext(c.Request.Context())
+	if !ok {
+		response.Fail(c, apperr.ErrUnauthorized)
+		return 0, false
+	}
+	if !id.IsPlatform {
+		if id.TenantID <= 0 || id.AccountID <= 0 {
+			response.Fail(c, apperr.ErrUnauthorized)
+			return 0, false
+		}
+		return id.TenantID, true
+	}
+	if strings.TrimSpace(c.Query("tenant_id")) == "" {
+		response.Fail(c, apperr.ErrQueryParamInvalid)
+		return 0, false
+	}
+	return httpx.QueryInt(c, "tenant_id", httpx.QueryIntRule{Min: 1})
 }
 
 // currentTenantIdentity 从服务端鉴权上下文读取租户身份。

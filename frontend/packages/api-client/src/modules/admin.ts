@@ -2,7 +2,6 @@
 
 import { ApiClient } from '../client'
 import type { AdminScope, AlertStatus } from '../constants/admin'
-import type { ApplicationStatus } from '../constants/identity'
 import type { PaginatedResponse } from '../types/common'
 import type {
   AlertEvent,
@@ -19,7 +18,6 @@ import type {
   MonitoringPanel,
   Statistics,
   SystemConfig,
-  TenantApplicationSummary,
 } from '../types/admin'
 import type { TransferTask } from '../types/transfer'
 
@@ -50,11 +48,6 @@ export class AdminApi {
   // getSchoolStatistics 读取当前学校统计快照。
   async getSchoolStatistics(params: { from: string; to: string }): Promise<Statistics[]> {
     return this.client.get('/admin/school/statistics', params)
-  }
-
-  // listApplications 读取学校入驻申请摘要列表。
-  async listApplications(params?: { status?: ApplicationStatus }): Promise<TenantApplicationSummary[]> {
-    return this.client.get('/admin/platform/applications', params)
   }
 
   // queryAudit 查询共享审计日志。

@@ -1,95 +1,148 @@
-// MainLayout 提供四类角色共用的日常导航外壳。
-import React, { useEffect, useRef, useState } from 'react'
-import { Outlet } from 'react-router-dom'
-import TopNavbar from '../../components/TopNavbar/TopNavbar'
-import AppSidebar from '../../components/AppSidebar/AppSidebar'
-import { RouteErrorBoundary } from '../../components/RouteErrorBoundary/RouteErrorBoundary'
-import styles from './MainLayout.module.css'
+// MainLayout 日常页壳层(FE-6 底层曝光系统的「光面态」):
+// 侧栏与顶栏直接生长在墨色底层上,内容区是浮起的宣纸光面(四周可见底层)。
+// 断点行为(§6.4):≥lg 侧栏常驻可折叠 220↔64;<lg 侧栏抽屉化(汉堡触发,遮罩层级高于侧栏,
+// Esc 与焦点陷阱由 Radix Dialog 保证);<md 光面内距与圆角归零走全宽。
+// 路由切换只动光面内容的 opacity/translateY,底层与导航保持静止(§4.4)。
 
-// MainLayout 统一管理顶栏、侧栏、移动遮罩和子路由内容区域。
-const MainLayout: React.FC = () => {
-  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false)
-  const [isMobileDrawerOpen, setIsMobileDrawerOpen] = useState(false)
-  const menuButtonRef = useRef<HTMLButtonElement>(null)
-  const sidebarRef = useRef<HTMLElement>(null)
+import { useCallback, useEffect, useState } from 'react'
+import { Outlet, useLocation } from 'react-router-dom'
+import { Menu as MenuIcon } from 'lucide-react'
+import {
+  Drawer,
+  DrawerContent,
+  DrawerTitle,
+  IconButton,
+  cn,
+} from '@chaimir/ui'
+import { RouteErrorBoundary } from '../../components/RouteErrorBoundary'
+import { useMediaQuery } from '../../hooks'
+import type { RoleNavigationConfig } from './navigation'
+import { AppSidebar } from './AppSidebar'
+import { NotificationBell } from './NotificationBell'
+import { TaskCenterButton } from './TaskCenterButton'
+import { UserMenu } from './UserMenu'
 
-  // toggleSidebar 切换桌面侧栏的展开状态。
-  const toggleSidebar = () => setIsSidebarCollapsed((current) => !current)
-  // toggleMobileDrawer 切换窄屏导航抽屉。
-  const toggleMobileDrawer = () => setIsMobileDrawerOpen((current) => !current)
-  // closeMobileDrawer 在导航或遮罩触发后关闭抽屉。
-  const closeMobileDrawer = () => setIsMobileDrawerOpen(false)
+/** 侧栏折叠选择:仅界面偏好(非业务状态),全站一个键 —— 同一个人换端不需要重设一次 */
+const SIDEBAR_COLLAPSED_KEY = 'chaimir.sidebar_collapsed'
 
+/** 常驻侧栏断点:与 Tailwind lg(1024px)一致,禁止另造魔法断点 */
+const DESKTOP_QUERY = '(min-width: 64rem)'
+
+export interface MainLayoutProps {
+  /** 本角色区的导航配置,由 routes/ 层在该区懒加载壳内注入(铁律 2:壳层不持有全角色清单) */
+  config: RoleNavigationConfig
+}
+
+/**
+ * MainLayout 组装底层上的导航壳与光面内容区。
+ * 导航配置由所属角色区注入,壳层本身不认识其他角色 —— 这样打包时
+ * 各角色的路径清单只进各自的懒加载块,不会汇聚到入口包。
+ */
+export function MainLayout({ config }: MainLayoutProps) {
+  const location = useLocation()
+  const isDesktop = useMediaQuery(DESKTOP_QUERY)
+
+  const [collapsed, setCollapsed] = useState(
+    () => window.localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === 'true',
+  )
+  const [drawerOpen, setDrawerOpen] = useState(false)
+
+  /** 回到桌面宽度时关闭抽屉:否则抽屉遮罩会盖在已常驻的侧栏上 */
   useEffect(() => {
-    const desktopQuery = window.matchMedia('(min-width: 769px)')
-    const closeAtDesktop = (event: MediaQueryListEvent): void => {
-      if (event.matches) setIsMobileDrawerOpen(false)
-    }
-    desktopQuery.addEventListener('change', closeAtDesktop)
-    return () => desktopQuery.removeEventListener('change', closeAtDesktop)
+    if (isDesktop) setDrawerOpen(false)
+  }, [isDesktop])
+
+  /** 路由切换后关闭抽屉:窄屏点导航即离开当前页,抽屉必须让位 */
+  useEffect(() => {
+    setDrawerOpen(false)
+  }, [location.pathname])
+
+  const toggleCollapsed = useCallback(() => {
+    setCollapsed((previous) => {
+      const next = !previous
+      window.localStorage.setItem(SIDEBAR_COLLAPSED_KEY, String(next))
+      return next
+    })
   }, [])
 
-  useEffect(() => {
-    if (!isMobileDrawerOpen) return
-    const previousOverflow = document.body.style.overflow
-    document.body.style.overflow = 'hidden'
-    const focusable = sidebarRef.current?.querySelectorAll<HTMLElement>('a[href], button:not([disabled])') || []
-    focusable[0]?.focus()
-
-    const handleKeyDown = (event: KeyboardEvent): void => {
-      if (event.key === 'Escape') {
-        event.preventDefault()
-        setIsMobileDrawerOpen(false)
-        menuButtonRef.current?.focus()
-        return
-      }
-      if (event.key !== 'Tab' || focusable.length === 0) return
-      const first = focusable[0]
-      const last = focusable[focusable.length - 1]
-      if (event.shiftKey && document.activeElement === first) {
-        event.preventDefault()
-        last?.focus()
-      } else if (!event.shiftKey && document.activeElement === last) {
-        event.preventDefault()
-        first?.focus()
-      }
-    }
-    document.addEventListener('keydown', handleKeyDown)
-    return () => {
-      document.body.style.overflow = previousOverflow
-      document.removeEventListener('keydown', handleKeyDown)
-    }
-  }, [isMobileDrawerOpen])
+  const notificationsPath = `${config.pathPrefix}/notifications`
+  const tasksPath = `${config.pathPrefix}/tasks`
+  const profilePath = `${config.pathPrefix}/profile`
 
   return (
-    <div className={styles.layoutContainer}>
-      <TopNavbar menuButtonRef={menuButtonRef} isMenuOpen={isMobileDrawerOpen} onMenuClick={toggleMobileDrawer} />
+    <div className="flex min-h-screen bg-substrate">
+      <a href="#main-content" className="skip-link">
+        跳到主要内容
+      </a>
 
-      <div className={`${styles.mainWrapper} ${isSidebarCollapsed ? styles.sidebarCollapsed : ''}`}>
-        <AppSidebar
-          ref={sidebarRef}
-          isCollapsed={isSidebarCollapsed}
-          isMobileDrawerOpen={isMobileDrawerOpen}
-          onCloseMobileDrawer={closeMobileDrawer}
-          onToggleCollapse={toggleSidebar}
-        />
+      {/* 常驻侧栏(≥lg):固定宽度走令牌,折叠只改宽度不改结构 */}
+      {isDesktop ? (
+        <div
+          className="sticky top-0 h-screen shrink-0 transition-[width] duration-base ease-out"
+          style={{ width: collapsed ? 'var(--sidebar-w-collapsed)' : 'var(--sidebar-w)' }}
+        >
+          <AppSidebar config={config} collapsed={collapsed} onToggleCollapsed={toggleCollapsed} />
+        </div>
+      ) : (
+        // 抽屉侧栏(<lg):Radix Dialog 提供遮罩(z-drawer)、Esc 与焦点陷阱
+        <Drawer open={drawerOpen} onOpenChange={setDrawerOpen}>
+          <DrawerContent side="left" tone="dark" className="max-w-64 p-0">
+            <DrawerTitle className="sr-only">主导航</DrawerTitle>
+            <AppSidebar config={config} />
+          </DrawerContent>
+        </Drawer>
+      )}
 
-        {/* 子路由内容区承载四角色的日常功能页面。 */}
-        <main className={styles.contentArea}>
-          <div className={styles.contentInner}>
+      {/* 右侧:顶栏 + 光面内容区;min-w-0 防子元素撑破布局产生非预期横向滚动 */}
+      <div className="flex min-w-0 flex-1 flex-col">
+        <header
+          className="sticky top-0 z-sticky flex shrink-0 items-center gap-2 bg-substrate px-3 sm:px-4"
+          style={{ height: 'var(--topnav-h)' }}
+        >
+          {!isDesktop ? (
+            <IconButton
+              variant="on-dark"
+              icon={MenuIcon}
+              aria-label="打开主导航"
+              onClick={() => setDrawerOpen(true)}
+            />
+          ) : null}
+
+          {/* 窄屏顶栏承载端名(侧栏收进抽屉后品牌需有落点) */}
+          {!isDesktop ? (
+            <span className="min-w-0 flex-1 truncate text-sm font-semibold text-on-dark">
+              {config.brandName}
+            </span>
+          ) : (
+            <span className="flex-1" />
+          )}
+
+          <div className="flex shrink-0 items-center gap-1">
+            <TaskCenterButton tasksPath={tasksPath} />
+            {/* 铃铛只在有站内信收件箱的端出现:归属由该区导航配置声明(见 navigation.ts) */}
+            {config.hasNotificationInbox ? <NotificationBell allPath={notificationsPath} /> : null}
+            <UserMenu profilePath={profilePath} loginPath={config.loginPath} />
+          </div>
+        </header>
+
+        {/* 光面外框:内距即底层曝光量,<md 归零全宽 */}
+        <div className="pane-frame flex min-h-0 flex-1 flex-col pt-0">
+          <main
+            id="main-content"
+            /* key 绑定路径:切页时重放入场动画,只动 opacity/translateY(§4.4) */
+            key={location.pathname}
+            className={cn(
+              'flex min-h-0 flex-1 flex-col overflow-x-hidden bg-canvas',
+              'rounded-none md:rounded-pane md:shadow-pane',
+              'animate-pane-in',
+            )}
+          >
             <RouteErrorBoundary>
               <Outlet />
             </RouteErrorBoundary>
-          </div>
-        </main>
+          </main>
+        </div>
       </div>
-
-      {/* 移动端遮罩用于关闭侧栏抽屉并保持焦点路径清晰。 */}
-      {isMobileDrawerOpen && (
-        <button type="button" className={styles.mobileOverlay} onClick={() => { closeMobileDrawer(); menuButtonRef.current?.focus() }} aria-label="关闭导航菜单" />
-      )}
     </div>
   )
 }
-
-export default MainLayout

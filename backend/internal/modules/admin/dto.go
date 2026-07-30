@@ -92,30 +92,6 @@ type BackupRecordDTO struct {
 	FinishedAt string `json:"finished_at,omitempty"`
 }
 
-type TenantSummaryDTO struct {
-	TenantID   ids.ID `json:"tenant_id"`
-	Code       string `json:"code"`
-	Name       string `json:"name"`
-	Type       int16  `json:"type"`
-	Status     int16  `json:"status"`
-	DeployMode int16  `json:"deploy_mode"`
-	ExpireAt   string `json:"expire_at,omitempty"`
-	CreatedAt  string `json:"created_at"`
-	UpdatedAt  string `json:"updated_at"`
-}
-
-type TenantApplicationSummaryDTO struct {
-	ApplicationID ids.ID `json:"application_id"`
-	SchoolName    string `json:"school_name"`
-	SchoolType    int16  `json:"school_type"`
-	ContactName   string `json:"contact_name"`
-	ContactPhone  string `json:"contact_phone"`
-	ContactEmail  string `json:"contact_email"`
-	Status        int16  `json:"status"`
-	SubmittedAt   string `json:"submitted_at"`
-	ReviewedAt    string `json:"reviewed_at,omitempty"`
-}
-
 type AuditLogEntryDTO struct {
 	ID         ids.ID `json:"id"`
 	TenantID   ids.ID `json:"tenant_id,omitempty"`

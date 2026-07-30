@@ -1,0 +1,11 @@
+/**
+ * @chaimir/ui 样式入口:应用侧在全局 CSS 中必须写全三行 ——
+ *   @import "tailwindcss";
+ *   @import "@chaimir/ui/styles";
+ *   @source "../node_modules/@chaimir/ui/src";   ← 路径按应用实际相对位置调整
+ * 第三行不可省略:Tailwind v4 默认不扫描 node_modules,缺了它本包组件里的
+ * 工具类(bg-primary 等)不会被编译,整库将静默无样式。
+ */
+@import "./fonts.css";
+@import "./theme.css";
+@import "./base.css";

@@ -14,12 +14,12 @@ import type {
   SimPackageDescriptor,
   SimState,
 } from '../types';
-import { fnv1aHex, hashSeed, XorShiftRandom } from './deterministic';
+import { hashSeed, XorShiftRandom } from './deterministic';
 import { getBuiltinSimulation } from '../registry/builtinRegistry';
 import { assertValidSimPackage, assertValidTeachingFrame } from '../validation';
 
 type WorkerRequest =
-  | { type: 'init'; requestId: number; moduleUrl?: string; builtinCode?: string; initParams: SimInitParams; seed: number }
+  | { type: 'init'; requestId: number; builtinCode: string; initParams: SimInitParams; seed: number }
   | { type: 'step'; requestId: number }
   | { type: 'inject'; requestId: number; eventType: string; payload: JsonObject; target?: string }
   | { type: 'sync-state'; requestId: number; tick: number; state: SimState }
@@ -37,18 +37,18 @@ let events: SimEvent[] = [];
 const postToMain = self.postMessage.bind(self);
 
 self.addEventListener('message', (event: MessageEvent<WorkerRequest>) => {
-  void handleRequest(event.data);
+  handleRequest(event.data);
 });
 installRuntimeGuards();
 
 /**
  * handleRequest 分发主线程命令,并把所有异常统一转成用户向错误响应。
  */
-async function handleRequest(request: WorkerRequest): Promise<void> {
+function handleRequest(request: WorkerRequest): void {
   try {
     switch (request.type) {
       case 'init':
-        await init(request);
+        init(request);
         return;
       case 'step':
         ensureReady();
@@ -93,10 +93,10 @@ function syncBackendState(nextTick: number, nextState: SimState): void {
 }
 
 /**
- * init 动态加载仿真包,校验协议结构并生成首个运行快照。
+ * init 装配仿真包,校验协议结构并生成首个运行快照。
  */
-async function init(request: Extract<WorkerRequest, { type: 'init' }>): Promise<void> {
-  simPackage = await loadPackage(request);
+function init(request: Extract<WorkerRequest, { type: 'init' }>): void {
+  simPackage = loadPackage(request);
   assertValidSimPackage(simPackage);
   initParams = request.initParams;
   seed = request.seed;
@@ -106,25 +106,16 @@ async function init(request: Extract<WorkerRequest, { type: 'init' }>): Promise<
 }
 
 /**
- * loadPackage 统一装配平台内置包和外部 bundle 包；内置包只在 SDK Worker 内部解析,业务页面不复制包清单。
+ * loadPackage 按 code 装配平台内置包;内置包内核只在 Worker 内解析,业务页面不复制包清单。
+ * 扩展包(teacher_/org_ 命名空间)的 bundle 是 ZIP/TAR 归档,须由主线程带凭据取回后交 Worker 解包装配,
+ * 该路径的 manifest 入口字段与归档校验尚未定契约(见 docs/总-前端设计规范.md §9),此处不留半成品分支。
  */
-async function loadPackage(request: Extract<WorkerRequest, { type: 'init' }>): Promise<SimPackage> {
-  if (request.builtinCode) {
-    const builtinPackage = getBuiltinSimulation(request.builtinCode);
-    if (!builtinPackage) {
-      throw new Error('当前内置仿真包尚未完成平台装配');
-    }
-    return builtinPackage;
+function loadPackage(request: Extract<WorkerRequest, { type: 'init' }>): SimPackage {
+  const builtinPackage = getBuiltinSimulation(request.builtinCode);
+  if (!builtinPackage) {
+    throw new Error('当前仿真场景尚未在平台内置库中上架');
   }
-  if (!request.moduleUrl) {
-    throw new Error('当前仿真包缺少可运行模块地址');
-  }
-  const loaded = (await import(/* @vite-ignore */ request.moduleUrl)) as { default?: SimPackage; simPackage?: SimPackage };
-  const modulePackage = loaded.default ?? loaded.simPackage;
-  if (!modulePackage) {
-    throw new Error('当前仿真包无法运行,请联系管理员检查包配置');
-  }
-  return modulePackage;
+  return builtinPackage;
 }
 
 /**
@@ -466,15 +457,15 @@ function enforceEventLimit(eventInput: Omit<SimEvent, 'seq' | 'atTick'>): void {
 }
 
 /**
- * reportRuntimeError 记录可定位的运行错误,只把友好提示和追踪编号返回给前端。
+ * reportRuntimeError 记录可定位的运行错误,只把友好提示返回给主线程。
+ * 仿真在浏览器本地执行,报障编号只能由后端签发;前端自造编号在运维侧查不到,
+ * 因此技术原因只进控制台结构化日志,不进用户可见文案。
  */
 function reportRuntimeError(request: WorkerRequest, error: unknown): void {
-  const traceId = fnv1aHex(`sim-worker:${request.type}:${request.requestId}:${error instanceof Error ? error.message : String(error)}`, 12);
   console.error('sim_worker_error', {
-    trace_id: traceId,
-    tenant_id: 'frontend-local',
     operation: request.type,
+    request_id: request.requestId,
     error: error instanceof Error ? error.message : String(error),
   });
-  postToMain({ type: 'error', requestId: request.requestId, message: `仿真运行失败,请刷新后重试。如需帮助,请提供编号 ${traceId}` });
+  postToMain({ type: 'error', requestId: request.requestId, message: '仿真运行失败,请刷新后重试' });
 }

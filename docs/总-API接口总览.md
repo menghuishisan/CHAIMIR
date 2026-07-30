@@ -19,6 +19,8 @@
 - `code`:0 成功,非 0 业务错误码。
 - `message`:用户向友好文案;技术原因只进入日志,不进入响应体。
 - 分页:请求 `?page=1&size=20`;响应 `data: { list, total, page, size }`(默认 size=20,上限 100)。
+- HTTP 状态码在业务面恒为 200,交互一律按 `code` 判定;不存在"按状态码分支"的第二套判断。
+- 信封只有两类显式例外:统一文件服务 `GET /download` 流式返回附件,以及运维探针 `/-/healthz`、`/-/readyz`、`/api/healthz`(消费者是 kubelet/网关,判定信号只有状态码,详见 `docs/总-部署架构设计.md` §三 健康探针契约)。除此之外任何接口不得绕过信封。
 
 #### 2.1 资源 ID 传输契约
 
@@ -78,8 +80,8 @@
 - `/tenant/config`、`/tenant/sso`:租户配置。
 - `/org/*`:院系/专业/班级。
 - `/accounts/*`:账号导入(预览+提交)、增改停用、授予管理员。
-- `/me/*`:个人中心。
-- `/audit`:审计查询(M9 复用)。
+- `/me/*`:个人中心。`GET /me`、`POST /me/password`、`GET /me/sessions` 对租户账号与平台管理员都开放(平台身份走独立分支,只返回姓名/状态/角色);`POST /me/phone` 只对租户账号开放,平台账号无手机号字段。
+- 审计:M1 只持有并写入 `audit_log`,不注册查询路由;对外查询与导出统一在 M9 `/admin/audit`、`/admin/audit/export`。
 
 ### 基础横切 transfer `/api/v1/transfer`
 - `GET /tasks`:查询当前账号导入/导出任务,支持 `channel`、`status`、分页过滤;平台管理员只访问 `tenant_id=0` 的平台任务,租户账号只访问本租户任务。
@@ -87,6 +89,8 @@
 - `POST /tasks/{id}/download-grant`:对已完成任务签发统一文件服务短时下载授权,响应只暴露 `{ token, task, expires_at }`,平台任务和租户任务都必须走统一 storage 对象前缀校验。
 
 > transfer 只暴露通用任务状态和下载授权,不承载模块业务预览、业务结果或业务审批数据。模块导出接口应返回 transfer 任务快照,客户端下载文件需再走 download-grant,禁止模块接口直接返回对象存储直链或 base64 文件体。
+
+> 任务快照的 `file_name` 是契约必填字段(创建任务时缺失即拒绝),任务成功后原样登记为 `artifact_file_name`。客户端保存文件时只取 `artifact_file_name`,不得再按多个字段依次取值或自造默认文件名。
 
 ### 统一文件服务 `/api/v1/storage`
 - `GET /download?token=...`:登录账号消费与本人账号、租户和资源边界绑定的短时下载授权,授权经 Redis 原子标记后仅可使用一次;成功响应直接流式返回附件,不使用 JSON 信封。
@@ -100,7 +104,7 @@
 - `GET /sandboxes/{id}` 响应中的 `capabilities` 由运行时命令清单与服务端注册表计算,是前端文件、终端、命令工具和链操作入口的权威能力声明。
 - `/sandboxes/{id}/chain/deploy|tx|query`:链上部署、交易和查询`[用户/内部]`;用户路径按沙箱 owner 校验,内部服务路径按签名 `source_ref` 校验。
 - `/sandboxes/{id}/chain/reset`:链恢复创世就绪态`[内部]`。
-- `/quota`:配额。
+- `/quota`:沙箱配额查看与调整。`GET /quota` 校管读本租户(忽略客户端传入的 `tenant_id`),平台管理员必须显式传 `tenant_id` 指定目标租户;`PATCH /quota` 平台管理员在请求体传 `tenant_id`,校管由服务端覆写为会话租户。
 
 ### M3 评测引擎 `/api/v1/judge`
 - `/judgers`:判题器管理。
@@ -146,11 +150,12 @@
 - `/battle/entry`、`/battle/matches`、`/matches/{id}/replay`、`/ladder`:对抗赛/回放/天梯。
 - `/my/contest-records`、`/result-snapshot`:个人战绩。
 - `/cheat-*`:防作弊。
-- `/vuln-sources/*`、`/vuln-problems/*`:真实漏洞源(finalize 调 M5 system-import)。
+- `/vuln-sources/*`、`/vuln-problems/*`:租户漏洞源与漏洞题转化 `[出题教师/学校管理员]`(finalize 调 M5 system-import)。
+- `/platform/vuln-sources`:全局漏洞源目录(`tenant_id=0`)`[平台管理员]`,只查看与新增/更新,不代租户同步、不生成租户草稿。
 - `/internal/stats`、`/students/{id}/contest-achievements` `[内部]`。
 
 ### M9 管理后台 `/api/v1/admin`
-- `/platform/dashboard`、`/platform/statistics`、`/platform/tenants`、`/platform/applications`:平台看板/审核状态聚合视图 `[平台管理员]`。
+- `/platform/dashboard`、`/platform/statistics`:平台看板与统计聚合 `[平台管理员]`。租户列表与入驻申请审核不在 M9,统一走 M1 `/platform/tenants`、`/platform/applications`。
 - `/school/dashboard`、`/school/statistics`:学校看板。
 - `/audit`、`/audit/export`:统一审计查询中心(查 M1 audit_log)。
 - `/configs/*`、`/alert-rules`、`/alert-events/*`:配置/告警。
@@ -160,9 +165,9 @@
 ### M10 通知与实时推送 `/api/v1/notify`
 - `/send` `[内部]`:统一通知发送。
 - `/push` `[内部]`:实时推送到带租户前缀的 topic。
-- `WS /api/ws`:统一实时通道(订阅 topic)。
-- `/inbox/*`、`/preferences`:站内信/偏好 `[用户]`。
-- `/announcements/*`:系统公告。
+- `WS /api/ws`:统一实时通道(订阅 topic)`[租户用户]`;topic 以 `tenant:{tenant_id}` 为根,平台管理员不订阅。
+- `/inbox/*`、`/preferences`:站内信/偏好 `[租户用户]`;`notification`、`notification_preference` 表 `tenant_id NOT NULL`,平台管理员无收件箱。
+- `POST /announcements`:发布公告 `[平台管理员/学校管理员]`;`GET /announcements`:公告列表 `[租户用户/平台管理员]`;`POST /announcements/{id}/read`:标记已读 `[租户用户]`。
 
 ### M11 成绩中心 `/api/v1/grade-center`
 - `/level-configs`、`/semesters`:等级映射/学期。

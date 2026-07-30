@@ -21,6 +21,13 @@ RUN pnpm build && \
     mkdir -p /out && \
     cp -a apps/web/dist/. /out/
 
+# 构建期预压缩:运行期根文件系统只读(manifest security.read_only_root_filesystem),
+# Nginx 无处写压缩缓存,只能在此产出 .gz 供 gzip_static 直接发送。
+# 用最高压缩比(-9)——构建一次、分发无数次,运行期零 CPU。
+# 仅压缩文本类资源;woff2/woff 已是压缩格式,再压反而更大。
+RUN find /out -type f \( -name '*.js' -o -name '*.css' -o -name '*.html' -o -name '*.json' -o -name '*.svg' -o -name '*.map' \) \
+      -exec gzip -9 -k {} +
+
 FROM ${NGINX_RUNTIME_IMAGE}
 
 LABEL org.opencontainers.image.title="service/frontend"

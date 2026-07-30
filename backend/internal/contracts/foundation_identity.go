@@ -31,24 +31,6 @@ type TenantSummary struct {
 	UpdatedAt  time.Time  `json:"updated_at"`
 }
 
-// TenantApplicationSummary 是平台审核入口使用的入驻申请摘要。
-type TenantApplicationSummary struct {
-	ApplicationID int64      `json:"application_id"`
-	SchoolName    string     `json:"school_name"`
-	SchoolType    int16      `json:"school_type"`
-	ContactName   string     `json:"contact_name"`
-	ContactPhone  string     `json:"contact_phone"`
-	ContactEmail  string     `json:"contact_email"`
-	Status        int16      `json:"status"`
-	SubmittedAt   time.Time  `json:"submitted_at"`
-	ReviewedAt    *time.Time `json:"reviewed_at"`
-}
-
-// TenantApplicationQuery 是平台审核入口读取申请列表时使用的过滤条件。
-type TenantApplicationQuery struct {
-	Status int16 `json:"status"`
-}
-
 // AuditLogEntry 是统一审计查询中心读取的共享审计记录视图。
 type AuditLogEntry struct {
 	ID         int64     `json:"id"`
@@ -74,14 +56,12 @@ type IdentityService interface {
 	HasRole(ctx context.Context, accountID int64, role string) (bool, error)
 }
 
-// IdentityTenantReadService 是 M1 对 M9 等聚合层开放的租户与申请只读契约。
+// IdentityTenantReadService 是 M1 对 M9 等聚合层开放的租户只读契约。
 type IdentityTenantReadService interface {
-	// ListTenants 读取租户列表,供平台管理入口与平台看板聚合使用。
+	// ListTenants 读取租户列表,供平台看板聚合使用。
 	ListTenants(ctx context.Context) ([]TenantSummary, error)
-	// GetTenant 读取单个租户摘要,供平台管理页详情使用。
+	// GetTenant 读取单个租户摘要,供聚合层按租户投影使用。
 	GetTenant(ctx context.Context, tenantID int64) (TenantSummary, error)
-	// ListTenantApplications 按过滤条件读取入驻申请列表,供平台审核入口展示。
-	ListTenantApplications(ctx context.Context, query TenantApplicationQuery) ([]TenantApplicationSummary, error)
 }
 
 // IdentityStats 是 M1 提供给 M9 看板的只读统计摘要。

@@ -1,7 +1,7 @@
 // ===== M9 Admin 模块 =====
 
 import type { AdminScope, AlertStatus, BackupStatus, BackupType } from '../constants/admin'
-import type { ApplicationStatus, AuditActorRole } from '../constants/identity'
+import type { AuditActorRole } from '../constants/identity'
 import type { SnowflakeID } from './common'
 
 export interface SystemConfig {
@@ -118,18 +118,6 @@ export interface Dashboard {
 export interface MonitoringPanel {
   name: string
   url: string
-}
-
-export interface TenantApplicationSummary {
-  application_id: SnowflakeID
-  school_name: string
-  school_type: number
-  contact_name: string
-  contact_phone: string
-  contact_email: string
-  status: ApplicationStatus
-  submitted_at: string
-  reviewed_at?: string
 }
 
 export interface AuditLogEntry {

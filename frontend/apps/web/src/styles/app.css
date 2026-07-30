@@ -1,0 +1,21 @@
+/**
+ * 应用全局样式入口(规范 §10.2 三行接线):
+ * 1. Tailwind v4 引擎;
+ * 2. 设计系统令牌与基础样式(@chaimir/ui);
+ * 3. @source 让 Tailwind 扫描 ui 包源码 —— v4 默认不扫描依赖包,
+ *    缺这一行则组件库的工具类不会被编译,整库静默无样式。
+ */
+@import "tailwindcss";
+@import "@chaimir/ui/styles";
+@source "../../../../packages/ui/src";
+
+/* 认证壳点阵纹理:左密右疏(遮罩渐隐),纯装饰,色值引用令牌 */
+.auth-dots {
+  background-image: radial-gradient(
+    circle at 1px 1px,
+    color-mix(in srgb, var(--color-on-dark) 5%, transparent) 1px,
+    transparent 0
+  );
+  background-size: 28px 28px;
+  mask-image: linear-gradient(90deg, rgb(0 0 0), rgb(0 0 0 / 0.5) 55%, transparent 85%);
+}

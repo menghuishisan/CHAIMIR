@@ -46,7 +46,6 @@ export interface SimBundleDownloadGrant {
   token?: string
   bundle_hash: string
   expires_at: string
-  module_url?: string
   builtin_code?: string
 }
 

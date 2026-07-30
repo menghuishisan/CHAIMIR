@@ -25,6 +25,8 @@ func ToTenantDTO(t Tenant) TenantDTO {
 		FeatureFlags:         jsonx.ObjectMap(t.FeatureFlags),
 		AuthMode:             t.AuthMode,
 		EnableActivationCode: t.EnableActivationCode,
+		CreatedAt:            timex.RFC3339OrEmpty(t.CreatedAt),
+		UpdatedAt:            timex.RFC3339OrEmpty(t.UpdatedAt),
 	}
 }
 
@@ -70,23 +72,6 @@ func ToPlatformSessionDTO(session PlatformAuthSession) SessionDTO {
 		Status:     session.Status,
 		ExpireAt:   session.ExpireAt.Format("2006-01-02T15:04:05Z07:00"),
 		CreatedAt:  session.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
-	}
-}
-
-// ToAuditLogDTO 把审计契约视图转换为 HTTP 响应 DTO。
-func ToAuditLogDTO(row contracts.AuditLogEntry) AuditLogDTO {
-	return AuditLogDTO{
-		ID:         ids.ID(row.ID),
-		TenantID:   ids.ID(row.TenantID),
-		ActorID:    ids.ID(row.ActorID),
-		ActorRole:  row.ActorRole,
-		Action:     row.Action,
-		TargetType: row.TargetType,
-		TargetID:   ids.ID(row.TargetID),
-		Detail:     row.Detail,
-		IP:         row.IP,
-		TraceID:    row.TraceID,
-		CreatedAt:  row.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
 	}
 }
 

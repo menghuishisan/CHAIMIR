@@ -67,12 +67,12 @@ type CreateShareRequest struct {
 	ExpireAt time.Time `json:"expire_at"`
 }
 
-// BundleDownloadGrantDTO 是仿真包短时下载授权响应。
+// BundleDownloadGrantDTO 是仿真包运行授权响应。
+// 内置前端包只回 BuiltinCode(交 sim-sdk Worker 内部装配),扩展包只回 Token(交平台统一对象下载入口)。
 type BundleDownloadGrantDTO struct {
 	Token       string `json:"token,omitempty"`
 	BundleHash  string `json:"bundle_hash"`
 	ExpiresAt   string `json:"expires_at"`
-	ModuleURL   string `json:"module_url,omitempty"`
 	BuiltinCode string `json:"builtin_code,omitempty"`
 }
 

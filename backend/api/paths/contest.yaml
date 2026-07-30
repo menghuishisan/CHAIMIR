@@ -238,6 +238,15 @@
     security: [{ bearerAuth: [] }]
     parameters: [{ $ref: "#/components/parameters/IDPath" }]
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/contest/student/contests:
+  get:
+    tags: [contest]
+    summary: 学生可发现的竞赛列表
+    operationId: contestListStudentContests
+    x-chaimir-audience: student
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/PageQuery" }, { $ref: "#/components/parameters/SizeQuery" }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
 /api/v1/contest/my/contest-records:
   get:
     tags: [contest]
@@ -245,6 +254,22 @@
     operationId: contestMyRecords
     x-chaimir-audience: student
     security: [{ bearerAuth: [] }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/contest/platform/vuln-sources:
+  get:
+    tags: [contest]
+    summary: 平台级漏洞源配置列表
+    operationId: contestListPlatformVulnSources
+    x-chaimir-audience: platform-admin
+    security: [{ bearerAuth: [] }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+  post:
+    tags: [contest]
+    summary: 创建或更新平台级漏洞源配置
+    operationId: contestUpsertPlatformVulnSource
+    x-chaimir-audience: platform-admin
+    security: [{ bearerAuth: [] }]
+    requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
 /api/v1/contest/vuln-sources:
   get:

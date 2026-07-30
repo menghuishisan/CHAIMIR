@@ -8,10 +8,9 @@ import type {
   SimPackageDescriptor,
   SimState,
 } from '../types';
-import { fnv1aHex } from './deterministic';
 
 type WorkerRequest =
-  | { type: 'init'; requestId: number; moduleUrl?: string; builtinCode?: string; initParams: SimInitParams; seed: number }
+  | { type: 'init'; requestId: number; builtinCode: string; initParams: SimInitParams; seed: number }
   | { type: 'step'; requestId: number }
   | { type: 'inject'; requestId: number; eventType: string; payload: JsonObject; target?: string }
   | { type: 'sync-state'; requestId: number; tick: number; state: SimState }
@@ -24,8 +23,8 @@ type WorkerResponse =
   | { type: 'error'; requestId: number; message: string };
 
 export interface SimWorkerClientOptions {
-  moduleUrl?: string;
-  builtinCode?: string;
+  /** 平台内置包 code(带 builtin__ 前缀);扩展包运行路径见 docs/总-前端设计规范.md §9,未定契约前不接受 */
+  builtinCode: string;
   initParams: SimInitParams;
   seed: number;
   commandTimeoutMs: number;
@@ -65,13 +64,12 @@ export class SimWorkerClient {
   }
 
   /**
-   * init 加载仿真包模块并生成初始快照。
+   * init 在 Worker 内装配内置仿真包并生成初始快照。
    */
   async init(): Promise<void> {
     await this.post({
       type: 'init',
       requestId: 0,
-      moduleUrl: this.options.moduleUrl,
       builtinCode: this.options.builtinCode,
       initParams: this.options.initParams,
       seed: this.options.seed,
@@ -236,16 +234,16 @@ export class SimWorkerClient {
   }
 
   /**
-   * userMessage 生成带追踪编号的用户向错误文案,内部错误只进结构化控制台日志。
+   * userMessage 记录内部错误原因并返回纯用户向文案。
+   * 仿真在浏览器本地运行,没有后端签发的报障编号;前端不自造编号——它在运维侧查不到,
+   * 展示出来只会把用户挡在报障流程之外,所以技术原因只进控制台结构化日志。
    */
   private userMessage(message: string, cause?: unknown): string {
-    const traceId = fnv1aHex(`sim-client:${message}:${cause instanceof Error ? cause.message : String(cause ?? '')}`, 12);
     console.error('sim_client_error', {
-      trace_id: traceId,
-      tenant_id: 'frontend-local',
       operation: 'worker-command',
+      reason: message,
       error: cause instanceof Error ? cause.message : String(cause ?? ''),
     });
-    return `${message}。如需帮助,请提供编号 ${traceId}`;
+    return message;
   }
 }

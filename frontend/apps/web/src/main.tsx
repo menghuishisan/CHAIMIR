@@ -3,8 +3,8 @@ import React from 'react'
 import ReactDOM from 'react-dom/client'
 import App from './app/App'
 
-// 全局样式统一来自 @chaimir/ui，应用层不维护第二套令牌。
-import '@chaimir/ui/styles'
+// 全局样式入口:Tailwind v4 + @chaimir/ui 令牌(见 styles/app.css 三行接线说明)。
+import './styles/app.css'
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>

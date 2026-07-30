@@ -963,30 +963,3 @@
         $ref: "#/components/responses/Standard"
       default:
         $ref: "#/components/responses/Error"
-/api/v1/audit:
-  get:
-    tags: [identity]
-    summary: 审计日志查询
-    operationId: identityQueryAudit
-    x-chaimir-audience: platform-or-school-admin
-    security:
-      - bearerAuth: []
-    parameters:
-      - name: actor_id
-        in: query
-        schema: { $ref: "#/components/schemas/SnowflakeID" }
-      - name: action
-        in: query
-        schema: { type: string }
-      - name: target_type
-        in: query
-        schema: { type: string }
-      - $ref: "#/components/parameters/FromQuery"
-      - $ref: "#/components/parameters/ToQuery"
-      - $ref: "#/components/parameters/PageQuery"
-      - $ref: "#/components/parameters/SizeQuery"
-    responses:
-      "200":
-        $ref: "#/components/responses/Standard"
-      default:
-        $ref: "#/components/responses/Error"

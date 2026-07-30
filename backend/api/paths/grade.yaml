@@ -61,6 +61,18 @@
     security: [{ bearerAuth: [] }]
     requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/grade-center/reviews/mine:
+  get:
+    tags: [grade]
+    summary: 我提交的成绩审核列表
+    operationId: gradeListOwnReviews
+    x-chaimir-audience: teacher
+    security: [{ bearerAuth: [] }]
+    parameters:
+      - { $ref: "#/components/parameters/StatusQuery" }
+      - { $ref: "#/components/parameters/PageQuery" }
+      - { $ref: "#/components/parameters/SizeQuery" }
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
 /api/v1/grade-center/reviews/{id}/approve:
   post:
     tags: [grade]
@@ -177,7 +189,7 @@
     tags: [grade]
     summary: 学业预警列表
     operationId: gradeListWarnings
-    x-chaimir-audience: student-or-school-admin
+    x-chaimir-audience: school-admin-or-student
     security: [{ bearerAuth: [] }]
     parameters:
       - { name: student_id, in: query, schema: { $ref: "#/components/schemas/SnowflakeID" } }

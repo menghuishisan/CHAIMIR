@@ -1,96 +1,115 @@
-// ActivatePage 处理首次账号激活，直接提交 identity 后端激活接口。
+// ActivatePage 账号激活(公共页,底层全裸露形态):
+// 学校管理员下发激活码,首次使用者凭激活码设置自己的密码(POST auth/activate)。
+// 激活码格式与有效期由服务端校验(明文只进 service 比对,不落库),前端不复刻校验规则,
+// 只做「必填 + 密码强度」的就近校验。服务端激活接口不签发会话,成功后引导回登录页。
 
-import React, { useCallback, useState } from 'react'
-import { Button, Callout, FormField, Input } from '@chaimir/ui'
+import React, { useCallback, useId, useState } from 'react'
 import { ArrowLeft } from 'lucide-react'
-import { useNavigate } from 'react-router-dom'
 import { api } from '../../../../app/api'
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
-import styles from './auth-form.module.css'
+import { confirmPasswordError, passwordRuleError, requiredError, useFieldErrors } from './auth-form'
+import {
+  AuthFormError,
+  AuthHeading,
+  AuthPanel,
+  AuthPrimaryLink,
+  AuthQuietLink,
+  AuthSubmit,
+  AuthSuccess,
+  AuthTextField,
+} from './auth-ui'
 
-const ActivatePage: React.FC = () => {
-  const navigate = useNavigate()
+/**
+ * ActivatePage 处理激活码开通账号。
+ */
+export default function ActivatePage() {
+  const fieldId = useId()
   const [activationCode, setActivationCode] = useState('')
   const [password, setPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
+  const { errors, setError } = useFieldErrors()
+  const [formError, setFormError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
-  const [message, setMessage] = useState<string | null>(null)
-  const [error, setError] = useState<string | null>(null)
-  const [completed, setCompleted] = useState(false)
+  const [done, setDone] = useState(false)
 
-  /**
-   * handleActivate 校验两次密码一致后调用后端激活账号。
-   */
-  const handleActivate = useCallback(async () => {
-    setMessage(null)
-    setError(null)
-    if (!activationCode.trim()) {
-      setError('请输入管理员下发的激活码。')
-      return
-    }
-    if (!password || password !== confirmPassword) {
-      setError('两次输入的密码不一致，请重新确认。')
-      return
-    }
-    if (password.length < 8 || !/[A-Za-z]/.test(password) || !/\d/.test(password)) {
-      setError('新密码至少 8 位，并同时包含字母和数字。')
-      return
-    }
+  /** handleSubmit 提交激活;成功后引导登录(激活接口不签发会话) */
+  const handleSubmit = useCallback(
+    async (event: React.FormEvent<HTMLFormElement>) => {
+      event.preventDefault()
+      const codeOk = setError('code', requiredError(activationCode, '请输入激活码'))
+      const passwordOk = setError('password', passwordRuleError(password, '密码'))
+      const confirmOk = setError('confirm', confirmPasswordError(confirmPassword, password, '密码'))
+      if (!codeOk || !passwordOk || !confirmOk) return
 
-    setSubmitting(true)
-    try {
-      await api.identity.activate({
-        activation_code: activationCode.trim(),
-        password,
-      })
-      setMessage('账号已激活，请返回登录页使用新密码登录。')
-      setCompleted(true)
-    } catch (activateError) {
-      setError(userFacingErrorMessage(activateError, '账号激活失败，请检查激活码后重试。'))
-    } finally {
-      setSubmitting(false)
-    }
-  }, [activationCode, confirmPassword, password])
+      setSubmitting(true)
+      setFormError(null)
+      try {
+        await api.identity.activate({ activation_code: activationCode.trim(), password })
+        setDone(true)
+      } catch (activateError) {
+        setFormError(userFacingErrorMessage(activateError, '激活失败,请确认激活码是否正确且仍在有效期内。'))
+      } finally {
+        setSubmitting(false)
+      }
+    },
+    [activationCode, confirmPassword, password, setError],
+  )
+
+  if (done) {
+    return (
+      <AuthPanel>
+        <AuthSuccess title="账号已激活" description="现在可以用刚设置的密码登录平台。">
+          <AuthPrimaryLink to="/auth/login">前往登录</AuthPrimaryLink>
+        </AuthSuccess>
+      </AuthPanel>
+    )
+  }
 
   return (
-    <form className={styles.form} onSubmit={(event) => {
-      event.preventDefault()
-      void handleActivate()
-    }}>
-      <div>
-        <h1 className={styles.title}>激活账号</h1>
-        <p className={styles.description}>首次登录请使用管理员下发的激活码完成账号激活。</p>
-      </div>
+    <AuthPanel>
+      <form className="w-full max-w-sm" onSubmit={handleSubmit} noValidate>
+        <AuthHeading title="激活账号" description="使用学校下发的激活码开通账号并设置密码。" />
 
-      {error && <div className={styles.error} role="alert">{error}</div>}
-      {message && (
-        <Callout variant="success" title="激活完成">
-          {message}
-        </Callout>
-      )}
+        <AuthTextField
+          label="激活码"
+          id={`${fieldId}-code`}
+          autoComplete="one-time-code"
+          value={activationCode}
+          error={errors.code}
+          onValueChange={setActivationCode}
+          onBlur={() => setError('code', requiredError(activationCode, '请输入激活码'))}
+        />
 
-      {!completed && <div className={styles.fields}>
-        <FormField label="激活码" htmlFor="activation-code" required>
-          <Input id="activation-code" fullWidth autoComplete="one-time-code" value={activationCode} onChange={(event) => setActivationCode(event.target.value)} />
-        </FormField>
-        <FormField label="新密码" htmlFor="activation-password" helperText="至少 8 位，并同时包含字母和数字" required>
-          <Input id="activation-password" fullWidth type="password" autoComplete="new-password" value={password} onChange={(event) => setPassword(event.target.value)} />
-        </FormField>
-        <FormField label="确认新密码" htmlFor="activation-confirm-password" required>
-          <Input id="activation-confirm-password" fullWidth type="password" autoComplete="new-password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} />
-        </FormField>
-        <Button block type="submit" loading={submitting}>
-          立即激活
-        </Button>
-      </div>}
+        <AuthTextField
+          label="设置密码"
+          id={`${fieldId}-password`}
+          type="password"
+          autoComplete="new-password"
+          value={password}
+          error={errors.password}
+          onValueChange={setPassword}
+          onBlur={() => setError('password', passwordRuleError(password, '密码'))}
+        />
 
-      <div className={styles.footerLinks}>
-        <button className={styles.linkButton} type="button" onClick={() => navigate('/auth/login')}>
-          <ArrowLeft size={16} /> {completed ? '前往登录' : '返回登录'}
-        </button>
-      </div>
-    </form>
+        <AuthTextField
+          label="确认密码"
+          id={`${fieldId}-confirm`}
+          type="password"
+          autoComplete="new-password"
+          value={confirmPassword}
+          error={errors.confirm}
+          onValueChange={setConfirmPassword}
+          onBlur={() => setError('confirm', confirmPasswordError(confirmPassword, password, '密码'))}
+        />
+
+        <AuthFormError message={formError} />
+
+        <AuthSubmit loading={submitting}>立即激活</AuthSubmit>
+
+        <AuthQuietLink to="/auth/login" icon={ArrowLeft}>
+          返回登录
+        </AuthQuietLink>
+      </form>
+    </AuthPanel>
   )
 }
-
-export default ActivatePage

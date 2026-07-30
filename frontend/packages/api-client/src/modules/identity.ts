@@ -20,7 +20,6 @@ import type {
   ChangePasswordRequest,
   ChangePhoneRequest,
   Session,
-  AuditLog,
   CreateApplicationRequest,
   TenantApplication,
   Tenant,
@@ -477,23 +476,6 @@ export class IdentityApi {
    */
   async upsertSSOConfig(data: SSOConfigRequest): Promise<SSOConfig> {
     return this.client.put('/tenant/sso', data)
-  }
-
-  // ===== 审计日志 =====
-
-  /**
-   * 查询审计日志（管理员）
-   */
-  async getAuditLogs(params: {
-    actor_id?: string
-    action?: string
-    target_type?: string
-    from?: string
-    to?: string
-    page?: number
-    size?: number
-  }): Promise<PaginatedResponse<AuditLog>> {
-    return this.client.get('/audit', params)
   }
 
   // ===== 租户管理（平台管理员） =====

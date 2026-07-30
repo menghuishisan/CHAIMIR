@@ -41,13 +41,12 @@ export class TransferApi {
 
   /**
    * downloadArtifact 签发并立即消费一次性授权，返回可由浏览器保存的文件内容。
+   * 文件名取授权响应里的产物文件名:任务入口强制 file_name 非空、CompleteTask 把它登记为产物名，
+   * 所以这个字段是契约保证的单一来源，不做多级取值。
    */
   async downloadArtifact(taskId: string): Promise<{ blob: Blob; fileName: string }> {
     const grant = await this.downloadGrant(taskId)
     const blob = await this.client.getBlob('/storage/download', { token: grant.token })
-    return {
-      blob,
-      fileName: grant.task.artifact_file_name || grant.task.file_name || 'download',
-    }
+    return { blob, fileName: grant.task.artifact_file_name }
   }
 }

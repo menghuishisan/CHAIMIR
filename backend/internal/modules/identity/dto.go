@@ -112,31 +112,6 @@ type SessionDTO struct {
 	CreatedAt  string `json:"created_at"`
 }
 
-type AuditQueryRequest struct {
-	TenantID   int64
-	ActorID    int64
-	Action     string
-	TargetType string
-	From       time.Time
-	To         time.Time
-	Page       int32
-	Size       int32
-}
-
-type AuditLogDTO struct {
-	ID         ids.ID `json:"id"`
-	TenantID   ids.ID `json:"tenant_id,omitempty"`
-	ActorID    ids.ID `json:"actor_id"`
-	ActorRole  int16  `json:"actor_role"`
-	Action     string `json:"action"`
-	TargetType string `json:"target_type"`
-	TargetID   ids.ID `json:"target_id,omitempty"`
-	Detail     string `json:"detail,omitempty"`
-	IP         string `json:"ip,omitempty"`
-	TraceID    string `json:"trace_id,omitempty"`
-	CreatedAt  string `json:"created_at"`
-}
-
 type CreateApplicationRequest struct {
 	SchoolName   string `json:"school_name"`
 	SchoolType   int16  `json:"school_type"`
@@ -185,6 +160,8 @@ type TenantDTO struct {
 	FeatureFlags         map[string]any `json:"feature_flags"`
 	AuthMode             int16          `json:"auth_mode"`
 	EnableActivationCode bool           `json:"enable_activation_code"`
+	CreatedAt            string         `json:"created_at"`
+	UpdatedAt            string         `json:"updated_at"`
 }
 
 type TenantConfigRequest struct {

@@ -1,2 +1,3 @@
-// RoleGuard 组件出口：统一导出路由角色守卫。
-export * from './RoleGuard'
+// RoleGuard 出口
+export { RoleGuard, type RoleGuardProps } from './RoleGuard'
+export { SessionContext, useSession, type SessionValue, type SessionData } from './session'

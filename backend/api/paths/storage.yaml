@@ -4,7 +4,7 @@
     tags: [storage]
     summary: 使用一次性短时授权下载文件
     operationId: storageDownload
-    x-chaimir-audience: platform_or_user
+    x-chaimir-audience: platform-admin-or-user
     security:
       - bearerAuth: []
     parameters:

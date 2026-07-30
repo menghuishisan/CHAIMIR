@@ -9,7 +9,7 @@
 - `createDeveloperTemplate` 用于生成最小完整示例。
 - `createSimPackageManifest` 用于生成上传审核使用的 `sim-package.json` 内容。
 - `createManifestSummary` 和 `validateSimPackage` 用于本地检查协议字段。
-- `SimWorkerClient`、`SimulationWorkbench`、`PatternRenderer` 供平台页面装配使用。
+- `SimWorkerClient` 供平台页面装配 Worker 运行时使用。
 
 内置仿真包 registry 不从主入口导出。内置包只由平台内部装配,开发者新增仿真应使用同一套公开协议,不依赖内置实现。
 

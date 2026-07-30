@@ -29,6 +29,12 @@ export const appConfig = {
   wsBaseURL: import.meta.env.VITE_WS_BASE_URL || undefined,
   apiTimeoutMs: parsePositiveInteger(import.meta.env.VITE_API_TIMEOUT_MS, 'VITE_API_TIMEOUT_MS'),
   deploymentMode: parseDeploymentMode(import.meta.env.VITE_DEPLOY_MODE),
+  // 仿真 Worker 单条指令超时:阈值由部署层注入(deploy/config/chaimir.env 同名键),
+  // 由装配层读出后传给 sim-sdk 的 SimWorkerClient,不在仿真页里写死数字。
+  simWorkerCommandTimeoutMs: parsePositiveInteger(
+    import.meta.env.VITE_SIM_WORKER_COMMAND_TIMEOUT_MS,
+    'VITE_SIM_WORKER_COMMAND_TIMEOUT_MS',
+  ),
 } as const
 
 export const platformLayerEnabled = appConfig.deploymentMode === 'saas'

@@ -1,70 +1,34 @@
-// ImmersiveLayout 提供实验、仿真和竞赛工作台的深色全屏外壳。
-import React from 'react'
-import { Outlet, useNavigate, useLocation } from 'react-router-dom'
-import { ArrowLeft, Maximize } from 'lucide-react'
-import { RouteErrorBoundary } from '../../components/RouteErrorBoundary/RouteErrorBoundary'
-import styles from './ImmersiveLayout.module.css'
+// ImmersiveLayout 沉浸态壳层(FE-6 底层曝光系统的第三种状态):
+// 独占路由挂载的全屏墨色世界(WorkbenchShell 使用契约),做实验/仿真/答题时光面收拢让位。
+// 壳层只提供全屏底层与进出场;顶条、三栏与业务内容由各工作台页用 WorkbenchShell 自行装配,
+// 避免壳层与工作台争夺同一块顶条。退出目标由 immersiveRoutes 显式登记(不用 `..`,S1)。
 
-const ImmersiveLayout: React.FC = () => {
-  const navigate = useNavigate()
+import { Outlet, useLocation, useNavigate } from 'react-router-dom'
+import { RouteErrorBoundary } from '../../components/RouteErrorBoundary'
+import { immersiveRouteForPath } from './immersiveRoutes'
+import { ImmersiveContext } from './context'
+
+/**
+ * ImmersiveLayout 渲染全屏底层并向工作台下传标题与退出动作。
+ * 进场为展开、退场为收拢(§4.4),动画只作用于 opacity/transform。
+ */
+export function ImmersiveLayout() {
   const location = useLocation()
-
-  // 根据沉浸式路由语义展示工作台标题，避免各工作台重复声明壳层。
-  const getTitle = () => {
-    if (location.pathname.includes('/experiments/')) return '实验工作台'
-    if (location.pathname.includes('/simulations/')) return '仿真推演'
-    if (location.pathname.includes('/contests/')) return '竞赛沙箱'
-    return '沉浸式工作台'
-  }
-
-  const handleExit = () => {
-    // 沉浸模式退出到当前功能的上一层列表或详情页。
-    navigate('..')
-  }
-
-  // 嵌入式 iframe 抢占焦点时，提供可键盘触达的焦点回收入口。
-  const handleFocusEscape = () => {
-    window.focus()
-  }
+  const navigate = useNavigate()
+  const route = immersiveRouteForPath(location.pathname)
 
   return (
-    <div className={styles.immersiveContainer}>
-      {/* 深色顶栏保留退出路径和运行状态提示。 */}
-      <header className={styles.topbar}>
-        <div className={styles.left}>
-          <button className={styles.exitBtn} onClick={handleExit} aria-label="退出工作台">
-            <ArrowLeft size={18} />
-            <span>退出</span>
-          </button>
-          <div className={styles.divider} />
-          <h1 className={styles.title}>{getTitle()}</h1>
-        </div>
-
-        <div className={styles.right}>
-          <div className={styles.statusPill}>
-            <span className={styles.statusDot}></span>
-            <span>引擎就绪</span>
-          </div>
-        </div>
-      </header>
-
-      {/* 全局焦点回收按钮服务于 iframe 工具和实验终端。 */}
-      <button
-        className={styles.focusEscapeBtn}
-        onClick={handleFocusEscape}
-        title="夺回焦点"
-      >
-        <Maximize size={16} />
-      </button>
-
-      {/* 子路由渲染实验、仿真或竞赛的主体工作区。 */}
-      <div className={styles.workspaceArea}>
-        <RouteErrorBoundary variant="immersive">
+    <ImmersiveContext.Provider
+      value={{
+        title: route.title,
+        exit: () => navigate(route.exitPath),
+      }}
+    >
+      <div className="animate-immersive-in fixed inset-0 z-immersive flex flex-col bg-substrate text-on-dark">
+        <RouteErrorBoundary>
           <Outlet />
         </RouteErrorBoundary>
       </div>
-    </div>
+    </ImmersiveContext.Provider>
   )
 }
-
-export default ImmersiveLayout

@@ -1,98 +1,103 @@
-// PlatformLoginPage 提供平台管理员登录入口，调用 identity 平台登录接口。
+// PlatformLoginPage 平台管理员登录通道(仅 SaaS 形态注册路由,私有化部署下该路径不存在):
+// 与学校用户入口彻底分离 —— 不做「选择角色」,不与手机号登录混排(规范/对齐清单 §认证)。
+// 特权通道用落印语义强调(朱砂只用于品牌章与落印动作),其余仍是同一块墨色底层(FE-6),
+// 不另造一套暗色皮肤。会话不提供「免登录」:超管令牌不落 localStorage,只随浏览器会话存续。
 
-import React, { useCallback, useState } from 'react'
-import { Button, Input } from '@chaimir/ui'
-import { ArrowLeft, Hexagon } from 'lucide-react'
+import { useCallback, useId, useState } from 'react'
+import type { FormEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { ShieldCheck } from 'lucide-react'
+import { Icon } from '@chaimir/ui'
 import { api } from '../../../../app/api'
 import { loginEntryPath, persistLoginTokens } from '../../../../utils/authSession'
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
-import styles from './public-auth.module.css'
+import { passwordRequiredError, requiredError, useFieldErrors } from './auth-form'
+import {
+  AuthBrandMark,
+  AuthFormError,
+  AuthHeading,
+  AuthPanel,
+  AuthSubmit,
+  AuthTextField,
+} from './auth-ui'
 
-const PlatformLoginPage: React.FC = () => {
+/**
+ * PlatformLoginPage 渲染账号密码表单并在成功后进入平台管理首个功能页。
+ * 落点由服务端返回的角色决定(不接受任何客户端传入角色),改密要求同样由服务端裁决。
+ */
+export default function PlatformLoginPage() {
   const navigate = useNavigate()
+  const fieldId = useId()
+
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [submitting, setSubmitting] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const [formError, setFormError] = useState<string | null>(null)
+  const { errors, setError } = useFieldErrors()
 
-  /**
-   * handleLogin 调用平台管理员专用登录接口并落到平台端首个功能页。
-   */
-  const handleLogin = useCallback(async (event: React.FormEvent<HTMLFormElement>) => {
-    event.preventDefault()
-    if (!username.trim() || !password) {
-      setError('请输入管理员账号和密码。')
-      return
-    }
-    setSubmitting(true)
-    setError(null)
-    try {
-      const response = await api.identity.loginPlatform({ username: username.trim(), password })
-      persistLoginTokens(response, false)
-      navigate(loginEntryPath(response), { replace: true })
-    } catch (loginError) {
-      setError(userFacingErrorMessage(loginError, '登录失败，请检查管理员账号和密码。'))
-    } finally {
-      setSubmitting(false)
-    }
-  }, [navigate, password, username])
+  const handleSubmit = useCallback(
+    async (event: FormEvent<HTMLFormElement>) => {
+      event.preventDefault()
+      const usernameOk = setError('username', requiredError(username, '请输入平台管理账号'))
+      const passwordOk = setError('password', passwordRequiredError(password, '请输入密码'))
+      if (!usernameOk || !passwordOk) return
+
+      setSubmitting(true)
+      setFormError(null)
+      try {
+        const response = await api.identity.loginPlatform({ username: username.trim(), password })
+        // remember=false:特权会话只写 sessionStorage,关闭浏览器即失效
+        persistLoginTokens(response, false)
+        navigate(loginEntryPath(response), { replace: true })
+      } catch (loginError) {
+        setFormError(userFacingErrorMessage(loginError, '登录失败,请检查账号和密码后重试。'))
+      } finally {
+        setSubmitting(false)
+      }
+    },
+    [navigate, password, setError, username],
+  )
 
   return (
-    <main className={styles.platformPage}>
-      <section className={styles.platformVisual} aria-hidden="true">
-        <div className={styles.grid} />
-        <div className={styles.symbol}>
-          <Hexagon size={120} strokeWidth={1} />
-        </div>
-      </section>
+    <AuthPanel>
+      <div className="w-full max-w-sm">
+        {/* 品牌行:朱砂章标明这是落印级别的特权入口,副标题点明通道用途 */}
+        <AuthBrandMark large subtitle="平台管理通道" />
 
-      <section className={styles.platformForm} data-surface="dark" aria-labelledby="platform-login-title">
-        <div className={styles.brand}>
-          <Hexagon size={24} />
-          <span>CHAIMIR PLATFORM</span>
-        </div>
+        <form className="mt-10" onSubmit={handleSubmit} noValidate>
+          <AuthHeading title="平台管理员登录" description="仅限平台运营人员使用,操作全程记入审计" />
 
-        <h1 id="platform-login-title">平台超级管理员通道</h1>
-        <p>受限通道，仅允许已授权的平台管理员访问。</p>
-        {error && <div className={styles.error} role="alert">{error}</div>}
+          <AuthTextField
+            label="管理账号"
+            id={`${fieldId}-username`}
+            autoComplete="username"
+            value={username}
+            error={errors.username}
+            onValueChange={setUsername}
+            onBlur={() => setError('username', requiredError(username, '请输入平台管理账号'))}
+          />
 
-        <form className={styles.darkFields} onSubmit={handleLogin}>
-          <div className={styles.field}>
-            <label htmlFor="platform-username">管理员账号</label>
-            <Input
-              id="platform-username"
-              fullWidth
-              value={username}
-              autoComplete="username"
-              placeholder="请输入管理员账号"
-              onChange={(event) => setUsername(event.target.value)}
-            />
-          </div>
+          <AuthTextField
+            label="密码"
+            id={`${fieldId}-password`}
+            type="password"
+            autoComplete="current-password"
+            value={password}
+            error={errors.password}
+            onValueChange={setPassword}
+            onBlur={() => setError('password', passwordRequiredError(password, '请输入密码'))}
+          />
 
-          <div className={styles.field}>
-            <label htmlFor="platform-password">登录密码</label>
-            <Input
-              id="platform-password"
-              fullWidth
-              type="password"
-              value={password}
-              autoComplete="current-password"
-              placeholder="请输入登录密码"
-              onChange={(event) => setPassword(event.target.value)}
-            />
-          </div>
+          <AuthFormError message={formError} />
 
-          <Button type="submit" variant="secondary" loading={submitting}>
-            授权登录
-          </Button>
-          <Button variant="ghost" icon={<ArrowLeft size={16} />} onClick={() => navigate('/auth/login')}>
-            返回学校用户登录
-          </Button>
+          <AuthSubmit loading={submitting}>登录</AuthSubmit>
+
+          <p className="mt-5 flex items-start gap-2 text-xs text-on-dark-sub">
+            <Icon icon={ShieldCheck} size="sm" className="mt-px shrink-0" />
+            本通道不用于学校师生登录;学校账号请从学校登录入口进入。
+          </p>
         </form>
-      </section>
-    </main>
+      </div>
+    </AuthPanel>
   )
 }
-
-export default PlatformLoginPage

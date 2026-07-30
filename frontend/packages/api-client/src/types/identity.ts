@@ -5,7 +5,6 @@ import type {
   AccountStatus,
   ApplicationStatus,
   AuthMode,
-  AuditActorRole,
   BaseIdentity,
   ClassStatus,
   DeployMode,
@@ -65,7 +64,8 @@ export interface PasswordResetRequest {
   phone: string
   code: string
   new_password: string
-  tenant_id: SnowflakeID
+  /** 省略时由服务端按手机号归属定位学校;一号多校才需显式指定(与 SendSMSRequest 同一约定) */
+  tenant_id?: SnowflakeID
 }
 
 export interface ActivateRequest {
@@ -124,20 +124,6 @@ export interface Session {
   created_at: string
 }
 
-export interface AuditLog {
-  id: SnowflakeID
-  tenant_id?: SnowflakeID
-  actor_id: SnowflakeID
-  actor_role: AuditActorRole
-  action: string
-  target_type: string
-  target_id?: SnowflakeID
-  detail?: string
-  ip?: string
-  trace_id?: string
-  created_at: string
-}
-
 export interface CreateApplicationRequest {
   school_name: string
   school_type: number
@@ -159,6 +145,8 @@ export interface Tenant {
   feature_flags: Record<string, unknown>
   auth_mode: AuthMode
   enable_activation_code: boolean
+  created_at: string
+  updated_at: string
 }
 
 export interface TenantApplication {

@@ -228,8 +228,13 @@ function validatePatternLimit(
   } else if (pattern.mode === 'pipeline') {
     check(pattern.data.steps.length, limits.nodes, '流程步骤')
   } else if (pattern.mode === 'lane') {
-    check(pattern.data.actors.length, limits.nodes, '时序参与方')
-    check(pattern.data.messages.length, limits.maxEvents, '时序消息')
+    const { actors, messages } = pattern.data
+    // 泳道横坐标由参与方声明顺序决定，收发方不在 actors 中的消息无处落笔
+    if (messages.some((message) => !actors.includes(message.from) || !actors.includes(message.to))) {
+      issues.push({ path: `render.patterns.${pattern.id}`, message: '仿真时序图存在未声明参与方的消息，请联系发布者处理。' })
+    }
+    check(actors.length, limits.nodes, '时序参与方')
+    check(messages.length, limits.maxEvents, '时序消息')
   } else {
     check(pattern.data.series.length, limits.nodes, '图表序列')
     check(pattern.data.series.reduce((sum, series) => sum + series.points.length, 0), limits.maxEvents, '图表数据点')

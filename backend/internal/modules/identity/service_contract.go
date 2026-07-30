@@ -123,26 +123,6 @@ func (s *Service) GetTenant(ctx context.Context, tenantID int64) (contracts.Tena
 	return contracts.TenantSummary{TenantID: t.ID, Code: t.Code, Name: t.Name, Type: t.Type, Status: t.Status, DeployMode: t.DeployMode, ExpireAt: t.ExpireAt, CreatedAt: t.CreatedAt, UpdatedAt: t.UpdatedAt}, nil
 }
 
-// ListTenantApplications 读取入驻申请供平台聚合入口展示。
-func (s *Service) ListTenantApplications(ctx context.Context, query contracts.TenantApplicationQuery) ([]contracts.TenantApplicationSummary, error) {
-	var apps []TenantApplication
-	if err := s.store.PlatformTx(ctx, func(ctx context.Context, tx TxStore) error {
-		rows, err := tx.ListTenantApplications(ctx, query.Status)
-		if err != nil {
-			return err
-		}
-		apps = rows
-		return nil
-	}); err != nil {
-		return nil, apperr.ErrInternal.WithCause(err)
-	}
-	out := make([]contracts.TenantApplicationSummary, 0, len(apps))
-	for _, app := range apps {
-		out = append(out, contracts.TenantApplicationSummary{ApplicationID: app.ID, SchoolName: app.SchoolName, SchoolType: app.SchoolType, ContactName: app.ContactName, ContactPhone: app.ContactPhone, ContactEmail: app.ContactEmail, Status: app.Status, SubmittedAt: app.CreatedAt})
-	}
-	return out, nil
-}
-
 // PlatformStats 返回平台身份统计。
 func (s *Service) PlatformStats(ctx context.Context) (contracts.IdentityStats, error) {
 	var stats StatsRow

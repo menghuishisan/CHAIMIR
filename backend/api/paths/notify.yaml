@@ -72,7 +72,7 @@
     tags: [notify]
     summary: 发布系统公告
     operationId: notifyCreateAnnouncement
-    x-chaimir-audience: admin
+    x-chaimir-audience: platform-admin-or-school-admin
     security: [{ bearerAuth: [] }]
     requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }

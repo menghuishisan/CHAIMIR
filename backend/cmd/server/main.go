@@ -194,30 +194,45 @@ func newRouter(cfg *config.Config, infra *infrastructure) *gin.Engine {
 	r := gin.New()
 	r.Use(response.TraceMiddleware(), httpx.AuditContextMiddleware(), response.RecoveryMiddleware())
 	r.NoRoute(response.NoRoute)
-	r.GET("/-/healthz", func(c *gin.Context) {
-		response.OK(c, map[string]string{"status": "ok"})
-	})
-	r.GET("/api/healthz", func(c *gin.Context) {
-		response.OK(c, map[string]string{"status": "ok"})
-	})
-	r.GET("/-/readyz", func(c *gin.Context) {
+	r.GET("/-/healthz", livenessProbe)
+	r.GET("/api/healthz", livenessProbe)
+	r.GET("/-/readyz", readinessProbe(cfg, infra))
+	return r
+}
+
+// livenessProbe 回存活明文。探针消费者是 kubelet 与网关,不是终端用户,
+// 因此不套业务 JSON 信封:HTTP 状态码本身就是探针唯一可判定的信号
+// (与 storage 下载流一样,是 docs/总-API接口总览.md 声明的显式非信封出口)。
+func livenessProbe(c *gin.Context) {
+	c.String(http.StatusOK, "ok")
+}
+
+// readinessProbe 依次探测启动期强依赖,任一不可用即回 503 让 kubelet 摘掉本副本流量。
+// 失败原因(哪个依赖、原始错误链)只进结构化日志并带 trace_id;响应体不含依赖名,
+// 既不向调用者播报内部拓扑,也不吞错(§8 错误暴露分层)。
+func readinessProbe(cfg *config.Config, infra *infrastructure) gin.HandlerFunc {
+	dependencies := []struct {
+		name  string
+		check func(*infrastructure, context.Context) error
+	}{
+		{"postgres", func(i *infrastructure, ctx context.Context) error { return i.database.Ping(ctx) }},
+		{"redis", func(i *infrastructure, ctx context.Context) error { return i.redis.Ping(ctx) }},
+		{"kubernetes", func(i *infrastructure, ctx context.Context) error { return i.k8s.Healthz(ctx) }},
+	}
+	return func(c *gin.Context) {
 		ctx, cancel := context.WithTimeout(c.Request.Context(), time.Duration(cfg.Server.HealthTimeoutSeconds)*time.Second)
 		defer cancel()
-		if err := infra.database.Ping(ctx); err != nil {
-			response.Fail(c, err)
-			return
+		for _, dependency := range dependencies {
+			if err := dependency.check(infra, ctx); err != nil {
+				logging.ErrorContext(c.Request.Context(), "readiness probe failed",
+					fmt.Errorf("依赖 %s 不可用: %w", dependency.name, err).Error(),
+					slog.String("dependency", dependency.name))
+				c.String(http.StatusServiceUnavailable, "not ready")
+				return
+			}
 		}
-		if err := infra.redis.Ping(ctx); err != nil {
-			response.Fail(c, err)
-			return
-		}
-		if err := infra.k8s.Healthz(ctx); err != nil {
-			response.Fail(c, err)
-			return
-		}
-		response.OK(c, map[string]string{"status": "ready"})
-	})
-	return r
+		c.String(http.StatusOK, "ready")
+	}
 }
 
 // assembleModules 按地基、引擎、业务、聚合顺序装配 11 个模块和基础层路由。

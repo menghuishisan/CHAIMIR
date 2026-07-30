@@ -112,6 +112,11 @@ func (m Manager) NewTask(req NewTaskRequest) (Task, error) {
 	if strings.TrimSpace(req.Subject) == "" {
 		return Task{}, fmt.Errorf("导入导出任务缺少 subject")
 	}
+	// 文件名是下载中心的契约字段:CompleteTask 把它复制给产物,客户端据此命名保存的文件。
+	// 允许为空会让下载端拿到空文件名,只能靠客户端硬编码兜底,故在任务入口处拒绝。
+	if strings.TrimSpace(req.FileName) == "" {
+		return Task{}, fmt.Errorf("导入导出任务缺少 file_name")
+	}
 	now := timex.Now()
 	return Task{
 		TaskID:       req.TaskID,

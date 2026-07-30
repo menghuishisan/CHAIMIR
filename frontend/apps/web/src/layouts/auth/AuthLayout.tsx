@@ -1,43 +1,38 @@
-// AuthLayout 提供登录、激活、找回密码和入驻申请页面的品牌认证外壳。
-import React from 'react'
+// AuthLayout 公共认证壳(底层全裸露形态,FE-6):
+// 墨色底层 + 两团呼吸氛围光(玉冷/朱砂暖对置)+ 左密右疏点阵 + 横贯全宽的页脚。
+// 子页面(登录/多校选择/强制改密)直接生长在底层上,无卡片壳。
+
 import { Outlet } from 'react-router-dom'
-import { Shield } from 'lucide-react'
-import { NetworkAnimation } from './NetworkAnimation'
-import styles from './AuthLayout.module.css'
 
-// AuthLayout 将品牌视觉区与认证表单区组合成响应式双栏布局。
-const AuthLayout: React.FC = () => {
+/**
+ * AuthLayout 提供认证域的底层氛围与页脚;内容经 Outlet 渲染。
+ */
+export default function AuthLayout() {
   return (
-    <div className={styles.container}>
-      {/* 桌面端展示品牌视觉区，小屏专注认证表单。 */}
-      <div className={styles.visualArea}>
-        <div className={styles.animationWrapper}>
-          <NetworkAnimation />
-        </div>
+    <div className="relative flex min-h-dvh flex-col overflow-hidden bg-substrate text-on-dark">
+      {/* 氛围光:纯装饰,reduced-motion 下呼吸动画由全局规则关闭 */}
+      <div
+        aria-hidden
+        className="pointer-events-none absolute -left-24 top-10 h-130 w-190 bg-radial from-jade-400/10 via-transparent to-transparent"
+      />
+      <div
+        aria-hidden
+        className="pointer-events-none absolute -bottom-24 -right-16 h-95 w-115 bg-radial from-cinnabar-500/10 via-transparent to-transparent"
+      />
+      {/* 点阵纹理:左密右疏,向表单侧自然消隐(过渡即密度,非分隔线) */}
+      <div aria-hidden className="auth-dots pointer-events-none absolute inset-0 opacity-40" />
 
-        <div className={styles.brandInfo}>
-          <h1 className={styles.title}>虚实相生，铸造安全之盾</h1>
-          <p className={styles.subtitle}>
-            下一代区块链与网络安全实训靶场
-            <br />
-            PBFT 共识仿真、对抗演练与教学一站式平台
-          </p>
-        </div>
-      </div>
+      <main className="relative z-base flex flex-1">
+        <Outlet />
+      </main>
 
-      {/* 认证表单由子路由注入，避免各认证页重复壳层。 */}
-      <div className={styles.formArea}>
-        <div className={styles.formContainer}>
-          <div className={styles.logo}>
-            <Shield className={styles.logoIcon} size={28} />
-            <span>Chaimir</span>
-          </div>
-          {/* 渲染登录、激活、找回密码等具体认证页面。 */}
-          <Outlet />
+      {/* 横贯全宽的页脚把两区收进同一平面 */}
+      <footer className="relative z-base border-t border-dark-line/70">
+        <div className="flex items-center justify-between gap-6 px-8 py-4 text-xs text-on-dark-sub lg:px-14">
+          <span>遇到问题?请联系本校管理员</span>
+          <span className="font-mono">Chaimir © {new Date().getFullYear()}</span>
         </div>
-      </div>
+      </footer>
     </div>
   )
 }
-
-export default AuthLayout

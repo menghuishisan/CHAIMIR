@@ -1,14 +1,15 @@
 {
   "name": "@chaimir/ui",
-  "version": "0.1.0",
-  "description": "Chaimir 设计系统：令牌 + 组件库",
+  "version": "0.2.0",
+  "description": "Chaimir 设计系统(墨玉体系):Tailwind v4 令牌 + Radix 底座组件库",
   "main": "./src/index.ts",
   "types": "./src/index.ts",
   "exports": {
     ".": "./src/index.ts",
-    "./tokens": "./src/tokens/index.ts",
+    "./styles": "./src/tokens/index.css",
     "./components/*": "./src/components/*/index.tsx",
-    "./styles": "./src/tokens/global.css"
+    "./charts": "./src/charts/index.ts",
+    "./biz": "./src/biz/index.ts"
   },
   "scripts": {
     "dev": "tsc --watch --noEmit",
@@ -17,15 +18,30 @@
     "type-check": "tsc --noEmit"
   },
   "dependencies": {
-    "@floating-ui/react": "^0.27.19",
+    "@chaimir/sim-sdk": "workspace:*",
+    "@fontsource-variable/jetbrains-mono": "^5.3.0",
+    "@fontsource-variable/noto-sans-sc": "^5.3.0",
+    "@fontsource/zcool-qingke-huangyou": "^5.3.0",
+    "@radix-ui/react-checkbox": "^1.3.2",
+    "@radix-ui/react-dialog": "^1.1.14",
+    "@radix-ui/react-dropdown-menu": "^2.1.15",
+    "@radix-ui/react-popover": "^1.1.14",
+    "@radix-ui/react-radio-group": "^1.3.7",
+    "@radix-ui/react-select": "^2.2.5",
+    "@radix-ui/react-switch": "^1.2.5",
+    "@radix-ui/react-tabs": "^1.1.12",
+    "@radix-ui/react-tooltip": "^1.2.7",
+    "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "lucide-react": "^0.460.0",
-    "react": "^18.3.1",
-    "react-dom": "^18.3.1"
+    "recharts": "^2.15.0",
+    "sonner": "^2.0.3",
+    "tailwind-merge": "^3.3.1"
   },
   "devDependencies": {
     "@types/react": "^18.3.3",
     "@types/react-dom": "^18.3.0",
+    "tailwindcss": "^4.1.0",
     "typescript": "^5.4.5"
   },
   "peerDependencies": {

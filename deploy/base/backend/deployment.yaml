@@ -55,8 +55,10 @@ spec:
             limits:
               cpu: "1"
               memory: 512Mi
-          # 就绪探针走集群内专用路径,不经公网 /api Ingress 暴露依赖状态;
+          # 探针走集群内专用 /-/ 路径,不在任何 Ingress path 内(公网不可达);
           # /api/healthz 仅保留最小公开 liveness。
+          # 探针以 HTTP 状态码表达结果(就绪 200 / 不就绪 503),不套业务 JSON 信封 ——
+          # 否则恒 200 会让 kubelet 永远判定就绪,依赖故障时仍向本副本送流量。
           readinessProbe:
             httpGet:
               path: /-/readyz

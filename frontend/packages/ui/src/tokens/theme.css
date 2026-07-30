@@ -1,0 +1,462 @@
+/**
+ * 墨玉体系设计令牌 —— 全站唯一真相源(docs/总-前端设计规范.md §2)。
+ * Tailwind v4 @theme:此处定义的变量同时生成工具类(bg-、text-、ease- 等前缀)。
+ * 注意本文件注释内不得出现 * 与 / 相连的写法,那会提前闭合 CSS 块注释。
+ * 铁律 FE-1:组件零裸 hex、零任意值;新颜色必须先经对比度校验入本表再使用。
+ */
+
+@theme {
+  /* ---------- 字体(§2.3 三层字体栈) ---------- */
+  /* Body 与 Data 用可变字体,家族名带 Variable 后缀(@fontsource-variable 的约定) */
+  --font-display: "ZCOOL QingKe HuangYou", "Noto Sans SC Variable", "Microsoft YaHei", sans-serif;
+  --font-sans: "Noto Sans SC Variable", -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  --font-mono: "JetBrains Mono Variable", ui-monospace, SFMono-Regular, Consolas, monospace;
+
+  /* 字号阶梯:xs12/sm13/base14/md15/lg16/xl18/2xl22/3xl28/4xl38 */
+  --text-xs: 12px;
+  --text-xs--line-height: 1.5;
+  --text-sm: 13px;
+  --text-sm--line-height: 1.5;
+  --text-base: 14px;
+  --text-base--line-height: 1.5;
+  --text-md: 15px;
+  --text-md--line-height: 1.5;
+  --text-lg: 16px;
+  --text-lg--line-height: 1.5;
+  --text-xl: 18px;
+  --text-xl--line-height: 1.4;
+  --text-2xl: 22px;
+  --text-2xl--line-height: 1.35;
+  --text-3xl: 28px;
+  --text-3xl--line-height: 1.3;
+  --text-4xl: 38px;
+  --text-4xl--line-height: 1.25;
+
+  /* ---------- 原始色阶(§2.1,全部经 AA 校验) ---------- */
+  /* 墨 ink:含绿暖墨,账本底层 */
+  --color-ink-1000: #0a100e;
+  --color-ink-950: #0d1512;
+  --color-ink-900: #121b17;
+  --color-ink-850: #16211b;
+  --color-ink-800: #1a2620;
+
+  /* 玉 jade:链的生命信号 */
+  --color-jade-300: #7ee7c7;
+  --color-jade-400: #3fd2a8;
+  --color-jade-500: #23bc92;
+  --color-jade-600: #0e9873;
+  --color-jade-700: #0b7a5d;
+
+  /* 朱砂 cinnabar:落印/能量(不用于错误) */
+  --color-cinnabar-400: #e96b52;
+  --color-cinnabar-500: #df4b34;
+  --color-cinnabar-600: #c13a26;
+  --color-cinnabar-700: #a32e1d;
+
+  /* 宣纸 paper:阅读光面 */
+  --color-paper-bg: #f7f5ef;
+  --color-paper-card: #fdfcf9;
+  --color-paper-sunken: #f1eee6;
+
+  /* ---------- 语义令牌:底层与深色面板 ---------- */
+  --color-substrate: #0a100e;
+  --color-dark-bg: #0d1512;
+  --color-dark-surface: #121b17;
+  --color-dark-elevated: #16211b;
+  --color-dark-line: #1f2d26;
+  --color-terminal: #060b09;
+  --color-on-dark: #edf3ef; /* 对 dark-bg ≈15:1 */
+  --color-on-dark-sub: #96a69e; /* 对 dark-bg ≈6.8:1 */
+  --color-on-dark-faint: #51625a; /* 仅装饰,不承载信息 */
+  --color-on-dark-danger: #f2a6a8; /* 深底错误文字(crimson 亮档),对 dark-bg ≈8.9:1 */
+  --color-accent: #3fd2a8; /* jade-400:焦点环/指示条/深底点睛,对 dark-bg ≈9:1 */
+  /* 深底辅助数据色(§8.1:玉为首,琥珀/蓝/紫为辅;仅用于深色语境的图表系列与状态区分,
+     不得用于光面。对 dark-bg 依次 ≈11.4:1 / 9.7:1 / 10.0:1,对 dark-elevated 亦 ≥7.9:1) */
+  --color-on-dark-amber: #e8c877;
+  --color-on-dark-blue: #9dbdf5;
+  --color-on-dark-violet: #cbb3f5;
+
+  /* ---------- 语义令牌:光面(宣纸) ---------- */
+  --color-canvas: #f7f5ef;
+  --color-surface: #fdfcf9;
+  --color-surface-sunken: #f1eee6;
+  --color-surface-hover: #f3f0e8;
+  --color-line: #e7e3d7;
+  --color-line-strong: #d8d3c4;
+  --color-ink: #1c2420; /* 纸上正文 ≈14:1 */
+  --color-ink-sub: #5f6b64; /* ≈5.2:1 */
+  --color-ink-faint: #8b948d; /* 仅占位/禁用 */
+
+  /* ---------- 语义令牌:品牌与交互 ---------- */
+  --color-on-solid: #ffffff; /* 一切语义实底(primary/seal/danger/warning/info)上的文字;各组合均 ≥4.5:1(warning 最低 ≈5.0:1) */
+  --color-primary: #0b7a5d; /* jade-700,浅区实底按钮/文字级主色,白字 ≈5.1:1 */
+  --color-primary-hover: #096549;
+  --color-primary-soft: #e7f6f0; /* 玉浅底(激活/选中底) */
+  --color-seal: #df4b34; /* 品牌章 */
+  --color-seal-action: #c13a26; /* 落印类实底按钮,白字 ≈5.8:1 */
+  --color-seal-action-hover: #a32e1d;
+  --color-energy: #e96b52; /* 对抗/能量深底点睛 */
+
+  /* ---------- 语义令牌:反馈(danger 独立冷红,非朱砂) ---------- */
+  --color-success: #0b7a5d;
+  --color-success-bg: #e7f6f0;
+  --color-success-border: #bfe8d9;
+  --color-warning: #a16207;
+  --color-warning-bg: #fbf3e0;
+  --color-warning-border: #edd9a8;
+  --color-danger: #ce2c31;
+  --color-danger-hover: #b02428;
+  --color-danger-bg: #fdecec;
+  --color-danger-border: #f5c6c8;
+  --color-info: #2e5fcc;
+  --color-info-bg: #ebf1fc;
+  --color-info-border: #c4d4f5;
+
+  /* ---------- 圆角(§2.4) ---------- */
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 10px;
+  --radius-pane: 14px; /* 光面专用 */
+
+  /* ---------- 阴影 = 海拔(§2.4/§4.1) ---------- */
+  --shadow-xs: 0 1px 2px rgb(16 24 20 / 0.05);
+  --shadow-sm: 0 1px 2px rgb(16 24 20 / 0.04), 0 2px 8px rgb(16 24 20 / 0.05);
+  --shadow-md: 0 4px 14px rgb(16 24 20 / 0.08), 0 2px 6px rgb(16 24 20 / 0.04);
+  --shadow-lg: 0 12px 32px rgb(16 24 20 / 0.12), 0 4px 12px rgb(16 24 20 / 0.06);
+  --shadow-pane: 0 24px 60px -18px rgb(0 0 0 / 0.65); /* 光面浮于底层 */
+
+  /* ---------- 动效曲线(§2.5,覆盖 Tailwind 默认) ---------- */
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
+  --ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
+
+  /* ---------- 关键帧动画(§4.5 签名时刻 + 通用入场) ---------- */
+  --animate-rise: rise 550ms var(--ease-out) both;
+  --animate-develop: develop 600ms var(--ease-out) both;
+  --animate-shimmer: shimmer 1.6s linear infinite;
+  --animate-seal-drop: seal-drop 550ms var(--ease-out) both;
+  --animate-seal-ring: seal-ring 700ms var(--ease-out) both;
+  --animate-mint: mint 600ms var(--ease-out) 1;
+
+  /* 浮层进出场(§4.3:入 ease-out,出为入的 ~65%) */
+  --animate-pop-in: pop-in 200ms var(--ease-out) both;
+  --animate-pop-out: pop-out 130ms var(--ease-out) both;
+  --animate-fade-in: fade-in 200ms var(--ease-out) both;
+  --animate-fade-out: fade-out 130ms var(--ease-out) both;
+  --animate-modal-in: modal-in 280ms var(--ease-out) both;
+  --animate-modal-out: modal-out 180ms var(--ease-out) both;
+  --animate-slide-in-right: slide-in-right 280ms var(--ease-drawer) both;
+  --animate-slide-out-right: slide-out-right 180ms var(--ease-drawer) both;
+  --animate-slide-in-bottom: slide-in-bottom 280ms var(--ease-drawer) both;
+  --animate-slide-out-bottom: slide-out-bottom 180ms var(--ease-drawer) both;
+  --animate-slide-in-left: slide-in-left 280ms var(--ease-drawer) both;
+  --animate-slide-out-left: slide-out-left 180ms var(--ease-drawer) both;
+  /* 光面切页转场(§4.4:同壳内路由切换,只动 opacity/translate) */
+  --animate-pane-in: pane-in 200ms var(--ease-out) both;
+  /* 沉浸态进出场(§4.4:进=展开、退=收拢,方向语义相反,退为进的 ~65%) */
+  --animate-immersive-in: immersive-in 280ms var(--ease-out) both;
+  --animate-immersive-out: immersive-out 180ms var(--ease-out) both;
+
+  /* 入场:上移淡入 */
+  @keyframes rise {
+    from {
+      opacity: 0;
+      transform: translateY(12px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+  /* 显影:上移 + 失焦到清晰(低频页标题) */
+  @keyframes develop {
+    from {
+      opacity: 0;
+      transform: translateY(16px);
+      filter: blur(6px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+      filter: blur(0);
+    }
+  }
+  /* 骨架屏微光(加载指示,允许循环) */
+  @keyframes shimmer {
+    from {
+      background-position: 200% 0;
+    }
+    to {
+      background-position: -200% 0;
+    }
+  }
+  /* 落印:品牌章盖下 */
+  @keyframes seal-drop {
+    0% {
+      opacity: 0;
+      transform: scale(1.55) rotate(-5deg);
+    }
+    55% {
+      opacity: 1;
+      transform: scale(0.94) rotate(0.5deg);
+    }
+    100% {
+      transform: scale(1) rotate(0);
+    }
+  }
+  /* 落印墨晕 */
+  @keyframes seal-ring {
+    0% {
+      opacity: 0.8;
+      transform: scale(1);
+    }
+    100% {
+      opacity: 0;
+      transform: scale(1.9);
+    }
+  }
+  /* 铸块(§4.5):新区块滑入接上链尾 + 单次玉色脉冲(ChainProgress 通过时刻) */
+  @keyframes mint {
+    0% {
+      transform: translateX(6px) scale(0.85);
+      box-shadow: 0 0 0 0 rgb(63 210 168 / 0.55);
+    }
+    60% {
+      transform: none;
+    }
+    100% {
+      transform: none;
+      box-shadow: 0 0 0 10px rgb(63 210 168 / 0);
+    }
+  }
+  /* 浮层:从触发源弹入/弹出(禁 scale-0,起点 .96) */
+  @keyframes pop-in {
+    from {
+      opacity: 0;
+      transform: scale(0.96);
+    }
+    to {
+      opacity: 1;
+      transform: scale(1);
+    }
+  }
+  @keyframes pop-out {
+    from {
+      opacity: 1;
+      transform: scale(1);
+    }
+    to {
+      opacity: 0;
+      transform: scale(0.97);
+    }
+  }
+  @keyframes fade-in {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+  @keyframes fade-out {
+    from {
+      opacity: 1;
+    }
+    to {
+      opacity: 0;
+    }
+  }
+  /* 模态:居中缩放 + 轻上移;出场为入场的 ~64%(§2.5) */
+  @keyframes modal-in {
+    from {
+      opacity: 0;
+      transform: translateY(8px) scale(0.97);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0) scale(1);
+    }
+  }
+  @keyframes modal-out {
+    from {
+      opacity: 1;
+      transform: translateY(0) scale(1);
+    }
+    to {
+      opacity: 0;
+      transform: translateY(4px) scale(0.98);
+    }
+  }
+  /* 抽屉:右/底滑入滑出(百分比位移,尺寸无关) */
+  @keyframes slide-in-right {
+    from {
+      transform: translateX(100%);
+    }
+    to {
+      transform: translateX(0);
+    }
+  }
+  @keyframes slide-out-right {
+    from {
+      transform: translateX(0);
+    }
+    to {
+      transform: translateX(100%);
+    }
+  }
+  @keyframes slide-in-bottom {
+    from {
+      transform: translateY(100%);
+    }
+    to {
+      transform: translateY(0);
+    }
+  }
+  @keyframes slide-out-bottom {
+    from {
+      transform: translateY(0);
+    }
+    to {
+      transform: translateY(100%);
+    }
+  }
+  @keyframes slide-in-left {
+    from {
+      transform: translateX(-100%);
+    }
+    to {
+      transform: translateX(0);
+    }
+  }
+  @keyframes slide-out-left {
+    from {
+      transform: translateX(0);
+    }
+    to {
+      transform: translateX(-100%);
+    }
+  }
+  /* 光面切页:内容轻上移淡入 */
+  @keyframes pane-in {
+    from {
+      opacity: 0;
+      transform: translateY(8px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+  /* 沉浸态展开:自光面向四周张开到全屏 */
+  @keyframes immersive-in {
+    from {
+      opacity: 0;
+      transform: scale(0.98);
+    }
+    to {
+      opacity: 1;
+      transform: scale(1);
+    }
+  }
+  /* 沉浸态收拢:展开的反向,收回光面 */
+  @keyframes immersive-out {
+    from {
+      opacity: 1;
+      transform: scale(1);
+    }
+    to {
+      opacity: 0;
+      transform: scale(0.98);
+    }
+  }
+}
+
+/* ---------- 骨架屏微光(§5.1 Skeleton:渐变扫过,循环仅限加载指示) ---------- */
+@utility skeleton-shimmer {
+  background-image: linear-gradient(
+    100deg,
+    var(--color-surface-sunken) 40%,
+    var(--color-surface) 50%,
+    var(--color-surface-sunken) 60%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.6s linear infinite;
+}
+
+/* ---------- 语义时长工具类(§2.5:时长走令牌,禁裸毫秒) ---------- */
+@utility duration-press {
+  transition-duration: var(--t-press);
+}
+@utility duration-fast {
+  transition-duration: var(--t-fast);
+}
+@utility duration-base {
+  transition-duration: var(--t-base);
+}
+@utility duration-slow {
+  transition-duration: var(--t-slow);
+}
+
+/* ---------- 按压反馈(§4.3:scale .97,可中断 transition) ----------
+   同时接管颜色过渡:pressable 元素不再叠加 transition-colors
+   (两者都会设置 transition-property,叠加时按样式序互相覆盖,故合并声明) */
+@utility pressable {
+  transition:
+    transform var(--t-press) var(--ease-out),
+    color var(--t-fast) var(--ease-out),
+    background-color var(--t-fast) var(--ease-out),
+    border-color var(--t-fast) var(--ease-out),
+    box-shadow var(--t-fast) var(--ease-out);
+  &:active:not(:disabled) {
+    transform: scale(0.97);
+  }
+}
+
+/* ---------- 触达区扩展(§3.2:图标类按钮命中区 ≥44×44,不改视觉尺寸) ----------
+   透明伪元素向四周外扩,元素小于 44px 时 inset 为负值自动补足 */
+@utility hit-target {
+  position: relative;
+  &::after {
+    content: "";
+    position: absolute;
+    inset: calc((100% - 44px) / 2);
+  }
+}
+
+/* ---------- 光面外框(§6.4 / FE-6:日常页宣纸光面浮于墨色底层) ----------
+   内距即底层曝光量;<md 归零让位于内容空间(圆角同步由 rounded-none md:rounded-pane 承担) */
+@utility pane-frame {
+  padding: 0;
+  @media (min-width: 48rem) {
+    padding: var(--pane-inset);
+  }
+}
+
+/* ---------- 层级工具类(§2.4:z-index 只许引用令牌阶) ---------- */
+@utility z-below {
+  z-index: var(--z-below);
+}
+@utility z-ground {
+  z-index: var(--z-ground);
+}
+@utility z-base {
+  z-index: var(--z-base);
+}
+@utility z-sticky {
+  z-index: var(--z-sticky);
+}
+@utility z-dropdown {
+  z-index: var(--z-dropdown);
+}
+@utility z-drawer {
+  z-index: var(--z-drawer);
+}
+@utility z-immersive {
+  z-index: var(--z-immersive);
+}
+@utility z-modal {
+  z-index: var(--z-modal);
+}
+@utility z-toast {
+  z-index: var(--z-toast);
+}

@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { DependencyList } from 'react'
-import type { ApiError } from '@chaimir/api-client'
+import { ApiError } from '@chaimir/api-client'
+import { RESOURCE_LOAD_FAILED_MESSAGE } from '../utils/userFacingError'
 
 type ResourceStatus = 'loading' | 'success' | 'empty' | 'error'
 
@@ -32,13 +33,13 @@ function isDefaultEmpty<T>(value: T): boolean {
 }
 
 /**
- * normalizeError 把未知异常转换成页面可展示的用户向错误对象。
+ * normalizeError 在边界处把未知异常收敛成用户向错误对象。
+ * loader 内部除 API 错误外还可能抛出运行时异常(如渲染前的数据转换失败),
+ * 这类异常的原文不可展示给用户(§8 错误暴露分层),故在此换成用户向文案;
+ * 没有后端 trace_id 时不自造编号,页面据此不显示报障编号。
  */
 function normalizeError(error: unknown): ApiError {
-  if (error && typeof error === 'object' && 'message' in error) {
-    return error as ApiError
-  }
-  return { message: '暂时无法获取数据，请稍后重试' }
+  return error instanceof ApiError ? error : new ApiError(RESOURCE_LOAD_FAILED_MESSAGE)
 }
 
 /**

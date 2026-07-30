@@ -36,6 +36,7 @@ export interface StudentExperiment {
   components: StudentComponentConfig
   collab_mode: ExperimentCollabMode
   group_config: GroupConfig
+  my_group_id?: SnowflakeID
   require_report: boolean
   status: ExperimentStatus
   created_at: string
@@ -150,7 +151,7 @@ export interface GroupConfig {
 }
 
 export interface ExperimentRequest {
-  course_id: SnowflakeID
+  course_id?: SnowflakeID
   template_ref: string
   template_version: string
   name: string

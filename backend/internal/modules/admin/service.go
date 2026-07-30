@@ -218,22 +218,6 @@ func (s *Service) RunStatisticsSnapshotOnce(ctx context.Context) error {
 	return nil
 }
 
-// ListTenants 读取租户列表。
-func (s *Service) ListTenants(ctx context.Context) ([]contracts.TenantSummary, error) {
-	if _, err := requirePlatform(ctx); err != nil {
-		return nil, err
-	}
-	return s.identity.ListTenants(ctx)
-}
-
-// ListApplications 读取入驻申请列表。
-func (s *Service) ListApplications(ctx context.Context, status int16) ([]contracts.TenantApplicationSummary, error) {
-	if _, err := requirePlatform(ctx); err != nil {
-		return nil, err
-	}
-	return s.identity.ListTenantApplications(ctx, contracts.TenantApplicationQuery{Status: status})
-}
-
 // QueryAudit 查询统一审计日志。
 func (s *Service) QueryAudit(ctx context.Context, query contracts.AuditQuery) (contracts.AuditQueryResult, error) {
 	id, ok := tenant.FromContext(ctx)

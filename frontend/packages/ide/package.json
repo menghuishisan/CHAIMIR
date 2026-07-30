@@ -14,18 +14,12 @@
     "type-check": "tsc --noEmit"
   },
   "dependencies": {
-    "@chaimir/ui": "workspace:*",
     "@xterm/addon-fit": "^0.11.0",
     "@xterm/addon-webgl": "^0.19.0",
     "@xterm/xterm": "^5.5.0",
-    "monaco-editor": "^0.52.2",
-    "react": "^18.3.1"
+    "monaco-editor": "^0.52.2"
   },
   "devDependencies": {
-    "@types/react": "^18.3.3",
     "typescript": "^5.4.5"
-  },
-  "peerDependencies": {
-    "react": "^18.3.1"
   }
 }

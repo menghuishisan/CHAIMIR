@@ -1,0 +1,19 @@
+/**
+ * 字体自托管(经 @fontsource npm 包,构建期打入产物,不依赖 CDN)。
+ * 三层字体栈见 docs/总-前端设计规范.md §2.3:
+ *  - Display:站酷庆科黄油体(仅标题/大数字)
+ *  - Body:Noto Sans SC(可变字重 100–900)
+ *  - Data:JetBrains Mono(可变字重 100–800)
+ *
+ * Body 与 Data 用可变字体(@fontsource-variable):一份 @font-face 覆盖全字重,
+ * 取代原先按 400/500/700 各导一份的写法 —— 那样同一批 unicode 分片要声明三遍,
+ * 仅字体声明就占产物 CSS 约 50 万字节。可变包同时只发 woff2,没有 woff 双份产物。
+ *
+ * 三者都用分片版(带 unicode-range 的 @font-face):浏览器只下载页面实际用到的
+ * 汉字分片。整体子集版(chinese-simplified)只有一条声明,但任一汉字都会触发
+ * 1–2 MB 的整包下载,对首屏更差。
+ * @fontsource 自带 font-display: swap。
+ */
+@import "@fontsource-variable/noto-sans-sc/index.css";
+@import "@fontsource-variable/jetbrains-mono/index.css";
+@import "@fontsource/zcool-qingke-huangyou/400.css";

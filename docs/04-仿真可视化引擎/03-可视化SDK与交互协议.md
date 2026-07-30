@@ -106,7 +106,9 @@ interface SimMeta {
 - `validateSimPackage(simPackage)`:上传前检查协议完整性。
 - `createManifestSummary(simPackage)`:生成审核摘要。
 - `createSimPackageManifest(simPackage)`:生成上传归档中的 `sim-package.json` 内容。
-- `SimulationWorkbench`、`SimWorkerClient`、`PatternRenderer`:仅供平台页面装配,仿真包作者不应直接复刻运行时。
+- `SimWorkerClient`:仅供平台页面装配 Worker 运行时,仿真包作者不应直接复刻运行时。
+
+`@chaimir/sim-sdk` 不导出任何 React 视图组件(包内无 react 依赖)。`TeachingFrame` 的渲染由 `@chaimir/ui` 的 `biz/TeachingFrameStage` 负责,页面级装配在 `apps/web` 完成。
 
 内置仿真包 registry 不从 `@chaimir/sim-sdk` 主入口导出。内置包由平台内部装配,第三方/教师包与内置包使用同一套 `SimPackage` 协议。
 

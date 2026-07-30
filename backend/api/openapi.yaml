@@ -148,8 +148,6 @@ paths:
     $ref: './paths/identity.yaml#/api/v1/me/phone'
   /api/v1/me/sessions:
     $ref: './paths/identity.yaml#/api/v1/me/sessions'
-  /api/v1/audit:
-    $ref: './paths/identity.yaml#/api/v1/audit'
   /api/v1/transfer/tasks:
     $ref: './paths/transfer.yaml#/api/v1/transfer/tasks'
   /api/v1/transfer/tasks/{id}:
@@ -406,6 +404,8 @@ paths:
     $ref: './paths/teaching.yaml#/api/v1/teaching/internal/courses/{id}/grades'
   /api/v1/experiment/experiments:
     $ref: './paths/experiment.yaml#/api/v1/experiment/experiments'
+  /api/v1/experiment/student/experiments:
+    $ref: './paths/experiment.yaml#/api/v1/experiment/student/experiments'
   /api/v1/experiment/experiments/{id}:
     $ref: './paths/experiment.yaml#/api/v1/experiment/experiments/{id}'
   /api/v1/experiment/experiments/{id}/validate:
@@ -494,6 +494,10 @@ paths:
     $ref: './paths/contest.yaml#/api/v1/contest/matches/{id}/replay'
   /api/v1/contest/my/contest-records:
     $ref: './paths/contest.yaml#/api/v1/contest/my/contest-records'
+  /api/v1/contest/student/contests:
+    $ref: './paths/contest.yaml#/api/v1/contest/student/contests'
+  /api/v1/contest/platform/vuln-sources:
+    $ref: './paths/contest.yaml#/api/v1/contest/platform/vuln-sources'
   /api/v1/contest/vuln-sources:
     $ref: './paths/contest.yaml#/api/v1/contest/vuln-sources'
   /api/v1/contest/vuln-sources/{id}/sync:
@@ -514,10 +518,6 @@ paths:
     $ref: './paths/admin.yaml#/api/v1/admin/platform/dashboard'
   /api/v1/admin/platform/statistics:
     $ref: './paths/admin.yaml#/api/v1/admin/platform/statistics'
-  /api/v1/admin/platform/tenants:
-    $ref: './paths/admin.yaml#/api/v1/admin/platform/tenants'
-  /api/v1/admin/platform/applications:
-    $ref: './paths/admin.yaml#/api/v1/admin/platform/applications'
   /api/v1/admin/platform/monitoring/panels:
     $ref: './paths/admin.yaml#/api/v1/admin/platform/monitoring/panels'
   /api/v1/admin/platform/backups:
@@ -576,6 +576,8 @@ paths:
     $ref: './paths/grade.yaml#/api/v1/grade-center/semesters'
   /api/v1/grade-center/reviews:
     $ref: './paths/grade.yaml#/api/v1/grade-center/reviews'
+  /api/v1/grade-center/reviews/mine:
+    $ref: './paths/grade.yaml#/api/v1/grade-center/reviews/mine'
   /api/v1/grade-center/reviews/{id}/approve:
     $ref: './paths/grade.yaml#/api/v1/grade-center/reviews/{id}/approve'
   /api/v1/grade-center/reviews/{id}/reject:

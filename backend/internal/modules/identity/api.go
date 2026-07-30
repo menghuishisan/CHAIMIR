@@ -26,6 +26,5 @@ func RegisterRoutes(r gin.IRouter, svc *Service, authn *auth.Manager) error {
 	registerOrgRoutes(api, svc, authn)
 	registerAccountRoutes(api, svc, authn)
 	registerMeRoutes(api, svc, authn)
-	registerAuditRoutes(api, svc, authn)
 	return nil
 }

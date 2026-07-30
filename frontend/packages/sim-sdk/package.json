@@ -13,17 +13,7 @@
     "lint": "eslint src --ext .ts,.tsx",
     "type-check": "tsc --noEmit"
   },
-  "dependencies": {
-    "@chaimir/ui": "workspace:*",
-    "clsx": "^2.1.1",
-    "lucide-react": "^0.460.0",
-    "react": "^18.3.1"
-  },
   "devDependencies": {
-    "@types/react": "^18.3.3",
     "typescript": "^5.4.5"
-  },
-  "peerDependencies": {
-    "react": "^18.3.1"
   }
 }

@@ -1,0 +1,125 @@
+/**
+ * 全局基础样式:非 Tailwind 命名空间的令牌(:root)、底层世界默认值、
+ * 无障碍基线(焦点环/跳过链接/reduced-motion)与滚动条精修。
+ * 见 docs/总-前端设计规范.md §2.4/§2.5/§3。
+ */
+
+:root {
+  /* 层级阶梯(§2.4):组件经 @utility z-* 消费,禁止裸数字 */
+  --z-below: -1;
+  --z-ground: 0;
+  --z-base: 1;
+  --z-sticky: 50;
+  --z-dropdown: 60;
+  --z-drawer: 80;
+  --z-immersive: 100;
+  --z-modal: 120;
+  --z-toast: 200;
+
+  /* 布局尺寸(§2.4) */
+  --topnav-h: 56px;
+  --sidebar-w: 220px;
+  --sidebar-w-collapsed: 64px;
+  --content-max: 1240px;
+  --pane-inset: 14px;
+
+  /* 动效时长(§2.5):经 @utility duration-* 消费 */
+  --t-press: 120ms;
+  --t-fast: 160ms;
+  --t-base: 200ms;
+  --t-slow: 280ms;
+  --t-entrance: 550ms;
+  --t-stagger: 80ms; /* 入场编排阶梯步长(§4.3 列表批量入场 40-60ms、低频页 60-90ms 取中) */
+}
+
+/* 底层世界:整站根背景是墨色底层(FE-6 底层曝光系统) */
+html,
+body {
+  height: 100%;
+}
+body {
+  margin: 0;
+  background-color: var(--color-substrate);
+  color: var(--color-on-dark);
+  font-family: var(--font-sans);
+  font-size: var(--text-base);
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* 焦点可见(§3.2):全局 focus-visible 焦点环,绝不裸 outline:none */
+:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+:focus:not(:focus-visible) {
+  outline: none;
+}
+
+/* 文字选中:玉色浅底 */
+::selection {
+  background: color-mix(in srgb, var(--color-jade-400) 28%, transparent);
+}
+
+/* 读屏专用文本 */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* 跳过链接:键盘用户跳到主内容 */
+.skip-link {
+  position: absolute;
+  left: 12px;
+  top: -48px;
+  z-index: var(--z-toast);
+  padding: 8px 16px;
+  border-radius: var(--radius-md);
+  background: var(--color-primary);
+  color: var(--color-on-solid);
+  font-size: var(--text-sm);
+  transition: top var(--t-fast) var(--ease-out);
+}
+.skip-link:focus-visible {
+  top: 12px;
+}
+
+/* 滚动条精修:细、圆角、不抢视觉 */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--color-on-dark-faint) 60%, transparent) transparent;
+}
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+*::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  border: 3px solid transparent;
+  background-clip: padding-box;
+  background-color: color-mix(in srgb, var(--color-on-dark-faint) 60%, transparent);
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* reduced-motion(§3.2):位移/缩放动画归零,保留必要透明度反馈 */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

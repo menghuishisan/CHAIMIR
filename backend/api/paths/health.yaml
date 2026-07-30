@@ -4,6 +4,7 @@
     tags: [health]
     summary: 服务存活检查
     operationId: healthz
+    x-chaimir-audience: public
     responses:
       "200":
         $ref: "#/components/responses/PlainOK"

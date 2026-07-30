@@ -1,7 +1,7 @@
 // authSession 管理前端登录会话存储和经过角色边界校验的入口恢复。
 
 import type { LoginResponse, TokenRefreshResponse } from '@chaimir/api-client'
-import { isRoleHomePath, roleRouteForRoles } from './roleRouting'
+import { isRoleHomePath, roleRouteForRoles, type RoleRouteConfig } from './roleRouting'
 
 export const ACCESS_TOKEN_KEY = 'chaimir.access_token'
 export const REFRESH_TOKEN_KEY = 'chaimir.refresh_token'
@@ -83,9 +83,18 @@ export function persistRefreshedTokens(response: TokenRefreshResponse): void {
  */
 export function loginEntryPath(response: LoginResponse, requestedPath?: unknown): string {
   if (response.must_change_pwd) return '/auth/change-pwd'
-  const roleRoute = roleRouteForRoles(response.account?.roles || [])
+  const roleRoute = accountRoleRoute(response)
   if (!roleRoute) return '/auth/login'
   return safeInternalPath(requestedPath, roleRoute.pathPrefix) || roleRoute.homePath
+}
+
+/**
+ * accountRoleRoute 取登录响应对应的角色入口。
+ * 契约上 account 只在需要选择学校等未完成登录的响应里缺省，此时没有可进入的角色区。
+ */
+function accountRoleRoute(response: LoginResponse): RoleRouteConfig | undefined {
+  if (!response.account) return undefined
+  return roleRouteForRoles(response.account.roles)
 }
 
 /** safeInternalPath 只接受站内绝对路径，阻止登录回跳被构造成外部地址。 */
@@ -119,5 +128,6 @@ export function completeRequiredPasswordChange(): string {
  * roleEntryPath 根据服务端账号角色决定登录后的第一个功能页。
  */
 export function roleEntryPath(response: LoginResponse): string {
-  return roleRouteForRoles(response.account?.roles || [])?.homePath || '/auth/login'
+  const roleRoute = accountRoleRoute(response)
+  return roleRoute ? roleRoute.homePath : '/auth/login'
 }

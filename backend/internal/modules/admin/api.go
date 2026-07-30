@@ -28,8 +28,6 @@ func RegisterRoutes(r gin.IRouter, svc *Service, authn *auth.Manager, roles cont
 	mixed := g.Group("", auth.RequirePlatformOrAnyRole(roles, contracts.RoleSchoolAdmin))
 	platform.GET("/dashboard", api.platformDashboard)
 	platform.GET("/statistics", api.platformStatistics)
-	platform.GET("/tenants", api.listTenants)
-	platform.GET("/applications", api.listApplications)
 	platform.GET("/monitoring/panels", api.monitoringPanels)
 	school.GET("/dashboard", api.schoolDashboard)
 	school.GET("/statistics", api.schoolStatistics)
@@ -72,22 +70,6 @@ func (a adminAPI) platformStatistics(c *gin.Context) {
 func (a adminAPI) schoolStatistics(c *gin.Context) {
 	out, err := a.svc.SchoolStatistics(c.Request.Context(), c.Query("from"), c.Query("to"))
 	httpx.Write(c, out, err)
-}
-
-// listTenants 返回租户列表。
-func (a adminAPI) listTenants(c *gin.Context) {
-	out, err := a.svc.ListTenants(c.Request.Context())
-	httpx.Write(c, tenantSummaryDTOs(out), err)
-}
-
-// listApplications 返回入驻申请列表。
-func (a adminAPI) listApplications(c *gin.Context) {
-	status, ok := httpx.QueryInt(c, "status", httpx.QueryIntRule{Default: 0, Min: 0, Max: 5, HasMax: true})
-	if !ok {
-		return
-	}
-	out1, err := a.svc.ListApplications(c.Request.Context(), int16(status))
-	httpx.Write(c, tenantApplicationSummaryDTOs(out1), err)
 }
 
 // queryAudit 查询审计。
@@ -275,44 +257,6 @@ func queryRFC3339(c *gin.Context, key string) (time.Time, bool) {
 	return value, true
 }
 
-// tenantSummaryDTOs 将跨模块租户摘要转换为管理端 HTTP DTO。
-func tenantSummaryDTOs(items []contracts.TenantSummary) []TenantSummaryDTO {
-	out := make([]TenantSummaryDTO, 0, len(items))
-	for _, item := range items {
-		out = append(out, TenantSummaryDTO{
-			TenantID:   ids.ID(item.TenantID),
-			Code:       item.Code,
-			Name:       item.Name,
-			Type:       item.Type,
-			Status:     item.Status,
-			DeployMode: item.DeployMode,
-			ExpireAt:   timex.RFC3339OrEmpty(valueTime(item.ExpireAt)),
-			CreatedAt:  timex.RFC3339OrEmpty(item.CreatedAt),
-			UpdatedAt:  timex.RFC3339OrEmpty(item.UpdatedAt),
-		})
-	}
-	return out
-}
-
-// tenantApplicationSummaryDTOs 将入驻申请摘要转换为管理端 HTTP DTO。
-func tenantApplicationSummaryDTOs(items []contracts.TenantApplicationSummary) []TenantApplicationSummaryDTO {
-	out := make([]TenantApplicationSummaryDTO, 0, len(items))
-	for _, item := range items {
-		out = append(out, TenantApplicationSummaryDTO{
-			ApplicationID: ids.ID(item.ApplicationID),
-			SchoolName:    item.SchoolName,
-			SchoolType:    item.SchoolType,
-			ContactName:   item.ContactName,
-			ContactPhone:  item.ContactPhone,
-			ContactEmail:  item.ContactEmail,
-			Status:        item.Status,
-			SubmittedAt:   timex.RFC3339OrEmpty(item.SubmittedAt),
-			ReviewedAt:    timex.RFC3339OrEmpty(valueTime(item.ReviewedAt)),
-		})
-	}
-	return out
-}
-
 // auditLogEntryDTOs 将统一审计契约转换为管理端 HTTP DTO。
 func auditLogEntryDTOs(items []contracts.AuditLogEntry) []AuditLogEntryDTO {
 	out := make([]AuditLogEntryDTO, 0, len(items))
@@ -332,12 +276,4 @@ func auditLogEntryDTOs(items []contracts.AuditLogEntry) []AuditLogEntryDTO {
 		})
 	}
 	return out
-}
-
-// valueTime 将可空时间转换为统一零值，供时间格式化函数处理。
-func valueTime(value *time.Time) time.Time {
-	if value == nil {
-		return time.Time{}
-	}
-	return *value
 }

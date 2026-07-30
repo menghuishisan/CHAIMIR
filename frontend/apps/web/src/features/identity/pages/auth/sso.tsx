@@ -1,173 +1,178 @@
-// SSOPage 提供学校 CAS 网页认证与 LDAP 学校账号认证，并处理 CAS 回调。
+// SsoCallbackPage 统一认证中转页(公共页,路径 /auth/sso/:tenantCode):
+// 一页承担两件事 ——
+//   1) 从学校统一认证跳回时(URL 带 ticket):自动向后端验票换取会话并直达角色首页;
+//   2) 直接进入本页时:提供 CAS 跳转入口与学校目录账号(LDAP)登录两种方式。
+// service 参数固定为本页自身地址(去掉 ticket 查询串),后端按来源白名单校验,
+// 前端不拼接任何外部地址,避免开放重定向。
 
-import React, { useCallback, useEffect, useState } from 'react'
-import { Button, Checkbox, FormField, Input, Spinner, Tabs } from '@chaimir/ui'
-import { ArrowLeft, ExternalLink, LogIn } from 'lucide-react'
-import { useNavigate, useSearchParams } from 'react-router-dom'
+import React, { useCallback, useEffect, useId, useRef, useState } from 'react'
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
+import { Button, Icon } from '@chaimir/ui'
+import { ArrowLeft, LoaderCircle } from 'lucide-react'
 import { api } from '../../../../app/api'
 import { loginEntryPath, persistLoginTokens } from '../../../../utils/authSession'
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
-import styles from './auth-form.module.css'
-import publicStyles from './public-auth.module.css'
+import { passwordRequiredError, requiredError, useFieldErrors } from './auth-form'
+import {
+  AuthFormError,
+  AuthHeading,
+  AuthPanel,
+  AuthQuietLink,
+  AuthTextField,
+} from './auth-ui'
 
-type SSOLoginMethod = 'cas' | 'ldap'
-
-const SSO_METHODS = [
-  { key: 'cas', label: '网页统一认证' },
-  { key: 'ldap', label: '学校账号认证' },
-]
+/** ssoServiceUrl 返回本页自身地址(不含票据参数),作为 CAS 的 service 回跳目标 */
+function ssoServiceUrl(tenantCode: string): string {
+  return `${window.location.origin}/auth/sso/${encodeURIComponent(tenantCode)}`
+}
 
 /**
- * SSOPage 获取 CAS 登录地址、处理 CAS 回调，并支持 LDAP 账号密码登录。
+ * SsoCallbackPage 处理统一认证回跳与目录账号登录。
  */
-const SSOPage: React.FC = () => {
+export default function SsoCallbackPage() {
   const navigate = useNavigate()
+  const fieldId = useId()
+  const { tenantCode = '' } = useParams<{ tenantCode: string }>()
   const [searchParams] = useSearchParams()
-  const [method, setMethod] = useState<SSOLoginMethod>('cas')
-  const [tenantCode, setTenantCode] = useState(searchParams.get('tenant_code') || '')
+  const ticket = searchParams.get('ticket')
+
+  const [verifying, setVerifying] = useState(Boolean(ticket))
+  const [redirecting, setRedirecting] = useState(false)
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
-  const [remember, setRemember] = useState(searchParams.get('remember') === '1')
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const returnPath = searchParams.get('return_to') || undefined
+  const { errors, setError } = useFieldErrors()
+  const [formError, setFormError] = useState<string | null>(null)
+  const [submitting, setSubmitting] = useState(false)
+  // 票据一次性:严格模式下 effect 会执行两次,重复验票会因票据已消耗而失败
+  const verifiedTicket = useRef<string | null>(null)
 
+  // 带票据进入即自动验票换会话
   useEffect(() => {
-    const ticket = searchParams.get('ticket')
-    const callbackTenantCode = searchParams.get('tenant_code')
-    if (!ticket || !callbackTenantCode) {
-      return
-    }
-
+    if (!ticket || !tenantCode) return
+    if (verifiedTicket.current === ticket) return
+    verifiedTicket.current = ticket
     let active = true
-    const serviceURL = new URL(window.location.href)
-    serviceURL.searchParams.delete('ticket')
-    setLoading(true)
-    setError(null)
-    api.identity.casCallback(callbackTenantCode, { ticket, service: serviceURL.toString() })
+    setVerifying(true)
+    api.identity
+      .casCallback(tenantCode, { ticket, service: ssoServiceUrl(tenantCode) })
       .then((response) => {
-        if (!active) {
-          return
-        }
-        persistLoginTokens(response, searchParams.get('remember') === '1')
-        navigate(loginEntryPath(response, returnPath), { replace: true })
+        if (!active) return
+        persistLoginTokens(response, false)
+        navigate(loginEntryPath(response), { replace: true })
       })
       .catch((callbackError) => {
-        if (active) {
-          setError(userFacingErrorMessage(callbackError, '学校统一认证失败，请重新发起登录。'))
-        }
+        if (!active) return
+        setFormError(userFacingErrorMessage(callbackError, '统一认证登录未能完成,请返回重新发起认证。'))
       })
       .finally(() => {
-        if (active) {
-          setLoading(false)
-        }
+        if (active) setVerifying(false)
       })
-
     return () => {
       active = false
     }
-  }, [navigate, returnPath, searchParams])
+  }, [navigate, tenantCode, ticket])
 
-  /**
-   * handleStartCAS 从后端获取学校认证地址，再交给浏览器完成跳转。
-   */
-  const handleStartCAS = useCallback(async (event: React.FormEvent<HTMLFormElement>) => {
-    event.preventDefault()
-    const normalizedTenantCode = tenantCode.trim()
-    if (!normalizedTenantCode) {
-      setError('请输入学校代号。')
-      return
-    }
-    setLoading(true)
-    setError(null)
+  /** handleCasRedirect 取后端下发的跳转地址后离开本站进入学校统一认证 */
+  const handleCasRedirect = useCallback(async () => {
+    setRedirecting(true)
+    setFormError(null)
     try {
-      const serviceURL = new URL('/auth/sso', window.location.origin)
-      serviceURL.searchParams.set('tenant_code', normalizedTenantCode)
-      if (remember) {
-        serviceURL.searchParams.set('remember', '1')
+      const { redirect_url } = await api.identity.getCASLoginUrl(tenantCode, ssoServiceUrl(tenantCode))
+      window.location.assign(redirect_url)
+    } catch (redirectError) {
+      setFormError(userFacingErrorMessage(redirectError, '暂时无法前往学校统一认证,请稍后重试。'))
+      setRedirecting(false)
+    }
+  }, [tenantCode])
+
+  /** handleLdapSubmit 用学校目录账号直接登录 */
+  const handleLdapSubmit = useCallback(
+    async (event: React.FormEvent<HTMLFormElement>) => {
+      event.preventDefault()
+      const nameOk = setError('username', requiredError(username, '请输入统一认证账号'))
+      const passwordOk = setError('password', passwordRequiredError(password, '请输入统一认证密码'))
+      if (!nameOk || !passwordOk) return
+
+      setSubmitting(true)
+      setFormError(null)
+      try {
+        const response = await api.identity.ldapLogin(tenantCode, { username: username.trim(), password })
+        persistLoginTokens(response, false)
+        navigate(loginEntryPath(response), { replace: true })
+      } catch (loginError) {
+        setFormError(userFacingErrorMessage(loginError, '统一认证登录失败,请确认账号和密码后重试。'))
+      } finally {
+        setSubmitting(false)
       }
-      if (returnPath) serviceURL.searchParams.set('return_to', returnPath)
-      const response = await api.identity.getCASLoginUrl(normalizedTenantCode, serviceURL.toString())
-      window.location.assign(response.redirect_url)
-    } catch (ssoError) {
-      setError(userFacingErrorMessage(ssoError, '暂时无法连接学校统一认证，请稍后重试。'))
-      setLoading(false)
-    }
-  }, [remember, returnPath, tenantCode])
+    },
+    [navigate, password, setError, tenantCode, username],
+  )
 
-  /**
-   * handleLDAPLogin 把学校账号凭证提交给后端 LDAP 认证入口。
-   */
-  const handleLDAPLogin = useCallback(async (event: React.FormEvent<HTMLFormElement>) => {
-    event.preventDefault()
-    const normalizedTenantCode = tenantCode.trim()
-    if (!normalizedTenantCode || !username.trim() || !password) {
-      setError('请输入学校代号、统一认证账号和密码。')
-      return
-    }
-    setLoading(true)
-    setError(null)
-    try {
-      const response = await api.identity.ldapLogin(normalizedTenantCode, {
-        username: username.trim(),
-        password,
-      })
-      persistLoginTokens(response, remember)
-      navigate(loginEntryPath(response, returnPath), { replace: true })
-    } catch (ldapError) {
-      setError(userFacingErrorMessage(ldapError, '学校账号认证失败，请检查账号信息后重试。'))
-    } finally {
-      setLoading(false)
-    }
-  }, [navigate, password, remember, returnPath, tenantCode, username])
+  if (verifying) {
+    return (
+      <AuthPanel>
+        <div className="flex flex-col items-center gap-4">
+          <Icon icon={LoaderCircle} size="lg" className="animate-spin text-accent" />
+          <p className="text-sm text-on-dark-sub">正在完成学校统一认证</p>
+        </div>
+      </AuthPanel>
+    )
+  }
 
   return (
-    <main className={publicStyles.publicPage}>
-      <section className={`${publicStyles.publicCard} ${publicStyles.compactCard}`} aria-labelledby="sso-title">
-        <div className={styles.form}>
-          <div>
-            <h1 id="sso-title" className={styles.title}>学校统一身份认证</h1>
-            <p className={styles.description}>选择学校支持的认证方式登录。</p>
-          </div>
+    <AuthPanel>
+      <div className="w-full max-w-sm">
+        <AuthHeading title="学校统一认证" description={`学校代号 ${tenantCode}`} />
 
-          {loading && <Spinner label="正在连接学校认证服务" />}
-          {error && <div className={styles.error} role="alert">{error}</div>}
+        {/* 主通路是去学校的认证系统:这是一次离站导航,不是本页表单的提交 */}
+        <Button
+          type="button"
+          variant="seal"
+          size="lg"
+          loading={redirecting}
+          onClick={handleCasRedirect}
+          className="mt-7 w-full tracking-widest"
+        >
+          前往学校统一认证登录
+        </Button>
 
-          <Tabs className={styles.ssoTabs} items={SSO_METHODS} activeKey={method} ariaLabel="学校认证方式" onChange={(key) => {
-            setMethod(key as SSOLoginMethod)
-            setError(null)
-          }}>
-            {method === 'cas' ? (
-              <form className={styles.fields} onSubmit={handleStartCAS}>
-                <FormField label="学校代号" htmlFor="cas-tenant-code" helperText="由学校管理员提供" required>
-                  <Input id="cas-tenant-code" fullWidth autoComplete="organization" value={tenantCode} onChange={(event) => setTenantCode(event.target.value)} />
-                </FormField>
-                <Button type="submit" block icon={<ExternalLink size={16} />} loading={loading}>前往学校认证页面</Button>
-              </form>
-            ) : (
-              <form className={styles.fields} onSubmit={handleLDAPLogin}>
-                <FormField label="学校代号" htmlFor="ldap-tenant-code" helperText="由学校管理员提供" required>
-                  <Input id="ldap-tenant-code" fullWidth autoComplete="organization" value={tenantCode} onChange={(event) => setTenantCode(event.target.value)} />
-                </FormField>
-                <FormField label="统一认证账号" htmlFor="ldap-username" required>
-                  <Input id="ldap-username" fullWidth autoComplete="username" value={username} onChange={(event) => setUsername(event.target.value)} />
-                </FormField>
-                <FormField label="统一认证密码" htmlFor="ldap-password" required>
-                  <Input id="ldap-password" fullWidth type="password" autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} />
-                </FormField>
-                <Button type="submit" block icon={<LogIn size={16} />} loading={loading}>登录</Button>
-              </form>
-            )}
-          </Tabs>
+        {/* 两种方式的分界:文字提示即层级,不做分隔线(FE-6 过渡靠密度) */}
+        <p className="mt-8 text-xs uppercase tracking-widest text-on-dark-faint">或使用学校目录账号</p>
 
-          <div className={styles.options}>
-            <Checkbox checked={remember} label="保持登录" onChange={(event) => setRemember(event.target.checked)} />
-          </div>
-          <Button variant="ghost" icon={<ArrowLeft size={16} />} onClick={() => navigate('/auth/login', { state: { from: returnPath } })}>返回登录</Button>
-        </div>
-      </section>
-    </main>
+        <form onSubmit={handleLdapSubmit} noValidate>
+          <AuthTextField
+            label="统一认证账号"
+            id={`${fieldId}-username`}
+            autoComplete="username"
+            value={username}
+            error={errors.username}
+            onValueChange={setUsername}
+            onBlur={() => setError('username', requiredError(username, '请输入统一认证账号'))}
+          />
+
+          <AuthTextField
+            label="统一认证密码"
+            id={`${fieldId}-password`}
+            type="password"
+            autoComplete="current-password"
+            value={password}
+            error={errors.password}
+            onValueChange={setPassword}
+            onBlur={() => setError('password', passwordRequiredError(password, '请输入统一认证密码'))}
+          />
+
+          <AuthFormError message={formError} />
+
+          {/* 目录账号是次级方式,按钮压到 on-dark 级别,不与上方落印按钮争主次 */}
+          <Button type="submit" variant="on-dark" size="lg" loading={submitting} className="mt-7 w-full">
+            登录
+          </Button>
+        </form>
+
+        <AuthQuietLink to="/auth/login" icon={ArrowLeft}>
+          返回其他登录方式
+        </AuthQuietLink>
+      </div>
+    </AuthPanel>
   )
 }
-
-export default SSOPage

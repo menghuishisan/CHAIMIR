@@ -18,6 +18,18 @@
     security: [{ bearerAuth: [] }]
     requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/experiment/student/experiments:
+  get:
+    tags: [experiment]
+    summary: 学生可进入的已发布实验列表
+    operationId: experimentListStudentExperiments
+    x-chaimir-audience: student
+    security: [{ bearerAuth: [] }]
+    parameters:
+      - { name: course_id, in: query, schema: { $ref: "#/components/schemas/SnowflakeID" } }
+      - { $ref: "#/components/parameters/PageQuery" }
+      - { $ref: "#/components/parameters/SizeQuery" }
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
 /api/v1/experiment/experiments/{id}:
   patch:
     tags: [experiment]
