@@ -1,0 +1,323 @@
+// 租户配置页(校管侧栏,/school-admin/settings)。
+//
+// 学校的展示信息与开通策略:显示名、校徽、登录方式、是否用激活码开通账号。
+// 认证方式选了 CAS/LDAP 后还要在认证配置页填服务器参数 —— 两页分工明确:
+// 这里选「用哪种方式」,那里填「这种方式连哪台服务器」。
+//
+// feature_flags 是 JSONB 开放对象,承载启用哪些业务模块。按已登记的模块键渲染开关,
+// 不给裸 JSON 文本域;未登记的键原样保留不丢弃(平台侧可能写入其他开关)。
+
+import { useCallback, useMemo, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
+import { CircleCheck, KeyRound, Settings, Shield } from 'lucide-react'
+import { AuthMode, DeployMode, type Tenant } from '@chaimir/api-client'
+import {
+  Badge,
+  Breadcrumb,
+  Button,
+  Callout,
+  Card,
+  CardBody,
+  CardHeader,
+  Checkbox,
+  DescriptionList,
+  FormField,
+  Input,
+  PageHeader,
+  PageScaffold,
+  PageSection,
+  SegmentedControl,
+  Skeleton,
+  Switch,
+  toast,
+} from '@chaimir/ui'
+import { api } from '../../../../app/api'
+import { ResourceState } from '../../../../components/ResourceState'
+import { useAsyncResource } from '../../../../hooks'
+import { formatDate } from '../../../../utils/formatters'
+import { userFacingErrorMessage } from '../../../../utils/userFacingError'
+
+/** feature_flags 里承载启用模块的键(后端种子数据用 modules 数组)。 */
+const MODULES_KEY = 'modules'
+
+/** 可启用的业务模块:值与后端模块标识一致,文案在此登记。 */
+const MODULE_OPTIONS = [
+  { value: 'teaching', label: '教学', description: '课程、章节课时、作业与批改' },
+  { value: 'experiment', label: '实验', description: '实验编排与沙箱实验环境' },
+  { value: 'contest', label: '竞赛', description: '赛事组织、解题赛与对抗赛' },
+] as const
+
+/** 认证方式文案:与 identity 的 AuthMode 一一对应。 */
+const AUTH_MODE_LABELS: Record<AuthMode, string> = {
+  [AuthMode.LOCAL]: '平台账号密码',
+  [AuthMode.CAS]: '学校统一认证(CAS)',
+  [AuthMode.LDAP]: '目录服务(LDAP)',
+}
+
+/** 部署形态文案:只读展示,由平台管理员设定。 */
+const DEPLOY_MODE_LABELS: Record<DeployMode, string> = {
+  [DeployMode.SAAS]: '平台托管',
+  [DeployMode.SCHOOL]: '学校私有部署',
+}
+
+/**
+ * SchoolAdminSettingsPage 维护学校展示信息与开通策略。
+ */
+export default function SchoolAdminSettingsPage() {
+  const tenant = useAsyncResource(() => api.identity.getTenantConfig(), [], () => false)
+
+  return (
+    <PageScaffold>
+      <PageHeader
+        kicker={<Breadcrumb items={[{ label: '系统配置' }, { label: '租户配置' }]} />}
+        title="租户配置"
+        description="学校的展示信息、启用的业务模块、登录方式与账号开通策略。"
+        icon={Settings}
+      />
+
+      <ResourceState
+        resource={tenant}
+        emptyIcon={Settings}
+        emptyTitle="暂无学校配置"
+        emptyDescription="学校配置由平台开通时创建。如果这里是空的,请联系平台管理员。"
+        skeleton={
+          <div className="flex flex-col gap-4">
+            <Skeleton variant="block" />
+            <Skeleton variant="line" lines={4} />
+          </div>
+        }
+      >
+        {(data) => <SettingsContent tenant={data} onSaved={tenant.reload} />}
+      </ResourceState>
+    </PageScaffold>
+  )
+}
+
+interface SettingsContentProps {
+  tenant: Tenant
+  onSaved: () => void
+}
+
+/**
+ * SettingsContent 渲染只读档案与可编辑配置表单。
+ */
+function SettingsContent({ tenant, onSaved }: SettingsContentProps) {
+  const navigate = useNavigate()
+
+  const [displayName, setDisplayName] = useState(tenant.display_name ?? tenant.name)
+  const [logoUrl, setLogoUrl] = useState(tenant.logo_url ?? '')
+  const [authMode, setAuthMode] = useState(String(tenant.auth_mode))
+  const [enableActivation, setEnableActivation] = useState(tenant.enable_activation_code)
+  const [modules, setModules] = useState<string[]>(() => readModules(tenant.feature_flags))
+  const [formError, setFormError] = useState<string>()
+  const [working, setWorking] = useState(false)
+
+  const authModeValue = Number(authMode) as AuthMode
+  const needsSsoConfig = authModeValue !== AuthMode.LOCAL
+
+  const profileItems = useMemo(
+    () => [
+      { term: '学校名称', description: tenant.name },
+      { term: '学校短码', description: tenant.code, mono: true },
+      { term: '部署形态', description: DEPLOY_MODE_LABELS[tenant.deploy_mode] },
+      {
+        term: '服务到期',
+        description: tenant.expire_at ? formatDate(tenant.expire_at) : '长期有效',
+        mono: true,
+      },
+    ],
+    [tenant],
+  )
+
+  const submit = useCallback(
+    async (event: React.FormEvent<HTMLFormElement>) => {
+      event.preventDefault()
+      if (displayName.trim() === '') {
+        setFormError('请输入学校显示名')
+        return
+      }
+      if (logoUrl.trim() !== '' && !isHttpUrl(logoUrl)) {
+        setFormError('校徽地址要以 http:// 或 https:// 开头')
+        return
+      }
+      if (modules.length === 0) {
+        setFormError('至少启用一个业务模块,否则师生进入后没有可用功能')
+        return
+      }
+      setFormError(undefined)
+      setWorking(true)
+      try {
+        await api.identity.updateTenantConfig({
+          display_name: displayName.trim(),
+          logo_url: logoUrl.trim(),
+          // 未登记的开关原样保留:平台侧可能写入其他键,前端不该丢弃
+          feature_flags: { ...tenant.feature_flags, [MODULES_KEY]: modules },
+          auth_mode: authModeValue,
+          enable_activation_code: enableActivation,
+        })
+        toast.success('学校配置已保存')
+        onSaved()
+      } catch (error) {
+        setFormError(userFacingErrorMessage(error, '保存没有成功,请稍后重试。'))
+      } finally {
+        setWorking(false)
+      }
+    },
+    [authModeValue, displayName, enableActivation, logoUrl, modules, onSaved, tenant.feature_flags],
+  )
+
+  return (
+    <>
+      <PageSection title="学校档案" description="这些信息由平台开通时设定,校内不可修改。">
+        <DescriptionList dense columns={2} items={profileItems} />
+      </PageSection>
+
+      <PageSection title="可修改的配置">
+        <Card>
+          <CardHeader
+            title="展示与策略"
+            description="显示名与校徽出现在登录页与顶栏;开通策略影响新账号怎么首次登录。"
+          />
+          <CardBody>
+            <form onSubmit={submit} noValidate className="flex flex-col gap-4">
+              <div className="grid gap-4 sm:grid-cols-2">
+                <FormField
+                  label="学校显示名"
+                  htmlFor="tenant-display-name"
+                  required
+                  helper="登录页与顶栏显示这个名字"
+                >
+                  <Input
+                    id="tenant-display-name"
+                    value={displayName}
+                    onChange={(event) => setDisplayName(event.target.value)}
+                  />
+                </FormField>
+                <FormField
+                  label="校徽地址"
+                  htmlFor="tenant-logo"
+                  helper="填图片地址,留空则显示默认标识"
+                >
+                  <Input
+                    id="tenant-logo"
+                    value={logoUrl}
+                    placeholder="https://example.edu/logo.png"
+                    onChange={(event) => setLogoUrl(event.target.value)}
+                  />
+                </FormField>
+              </div>
+
+              <FormField
+                label="启用的业务模块"
+                required
+                helper="关掉的模块对师生不可见。已有数据不会删除,重新开启即恢复"
+              >
+                <div className="flex flex-col gap-3">
+                  {MODULE_OPTIONS.map((option) => (
+                    <div key={option.value} className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="text-base text-ink">{option.label}</div>
+                        <p className="text-xs text-ink-sub">{option.description}</p>
+                      </div>
+                      <Switch
+                        checked={modules.includes(option.value)}
+                        aria-label={`启用${option.label}模块`}
+                        onCheckedChange={(checked) =>
+                          setModules((current) =>
+                            checked
+                              ? [...current, option.value]
+                              : current.filter((item) => item !== option.value),
+                          )
+                        }
+                      />
+                    </div>
+                  ))}
+                </div>
+              </FormField>
+
+              <FormField
+                label="登录方式"
+                required
+                helper="选了统一认证或目录服务后,还要在认证配置页填服务器参数"
+              >
+                <SegmentedControl
+                  aria-label="登录方式"
+                  options={[
+                    { value: String(AuthMode.LOCAL), label: AUTH_MODE_LABELS[AuthMode.LOCAL] },
+                    { value: String(AuthMode.CAS), label: AUTH_MODE_LABELS[AuthMode.CAS] },
+                    { value: String(AuthMode.LDAP), label: AUTH_MODE_LABELS[AuthMode.LDAP] },
+                  ]}
+                  value={authMode}
+                  onValueChange={setAuthMode}
+                />
+              </FormField>
+
+              {needsSsoConfig ? (
+                <Callout tone="warning" title="别忘了填服务器参数">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span>
+                      {AUTH_MODE_LABELS[authModeValue]}需要在认证配置页填服务器地址等参数,否则师生无法登录。
+                    </span>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      leftIcon={Shield}
+                      onClick={() => navigate('/school-admin/auth-config')}
+                    >
+                      去认证配置
+                    </Button>
+                  </div>
+                </Callout>
+              ) : null}
+
+              <div className="flex flex-col gap-3 rounded-md border border-line bg-surface-sunken p-4">
+                <Checkbox
+                  checked={enableActivation}
+                  label="允许用激活码开通账号"
+                  onCheckedChange={(checked) => setEnableActivation(checked === true)}
+                />
+                <p className="text-sm text-ink-sub">
+                  开启后新增账号可以生成一次性激活码,由本人自行设置密码。关闭则必须由管理员设初始密码。
+                </p>
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <Badge tone={enableActivation ? 'success' : 'neutral'}>
+                    {enableActivation ? '激活码可用' : '激活码已关闭'}
+                  </Badge>
+                  <Badge tone="neutral">
+                    <span className="flex items-center gap-1">
+                      <KeyRound aria-hidden className="size-3" />
+                      当前 {AUTH_MODE_LABELS[tenant.auth_mode]}
+                    </span>
+                  </Badge>
+                </div>
+              </div>
+
+              {formError ? <Callout tone="danger">{formError}</Callout> : null}
+
+              <div className="flex items-center gap-2">
+                <Button type="submit" variant="seal" leftIcon={CircleCheck} loading={working}>
+                  保存配置
+                </Button>
+                <span className="text-sm text-ink-sub">修改会记入审计日志。</span>
+              </div>
+            </form>
+          </CardBody>
+        </Card>
+      </PageSection>
+    </>
+  )
+}
+
+/** readModules 从开放开关里读出启用模块;非字符串数组回默认全启用。 */
+function readModules(flags: Record<string, unknown>): string[] {
+  const raw = flags[MODULES_KEY]
+  if (!Array.isArray(raw)) return MODULE_OPTIONS.map((item) => item.value)
+  const values = raw.filter((item): item is string => typeof item === 'string')
+  return values.length > 0 ? values : MODULE_OPTIONS.map((item) => item.value)
+}
+
+/** isHttpUrl 前端先挡明显非法地址。 */
+function isHttpUrl(value: string): boolean {
+  const trimmed = value.trim()
+  return trimmed.startsWith('http://') || trimmed.startsWith('https://')
+}

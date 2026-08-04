@@ -1,7 +1,7 @@
 // @chaimir/api-client 主入口：集中导出后端模块 API、共享类型和统一客户端工厂。
 
 export { ApiClient, ApiError } from './client'
-export type { ApiConfig, ApiResponse, TokenRefreshResponse } from './client'
+export type { ApiConfig, ApiResponse, AttachmentResponse, TokenRefreshResponse } from './client'
 export * from './constants'
 
 // API 模块
@@ -16,6 +16,7 @@ export { AdminApi } from './modules/admin'
 export { NotifyApi } from './modules/notify'
 export { GradeApi } from './modules/grade'
 export { SimApi } from './modules/sim'
+export { StorageApi } from './modules/storage'
 export { TransferApi } from './modules/transfer'
 
 // 类型导出
@@ -34,6 +35,7 @@ import { AdminApi } from './modules/admin'
 import { NotifyApi } from './modules/notify'
 import { GradeApi } from './modules/grade'
 import { SimApi } from './modules/sim'
+import { StorageApi } from './modules/storage'
 import { TransferApi } from './modules/transfer'
 
 export interface ChaimirApi {
@@ -48,6 +50,8 @@ export interface ChaimirApi {
   notify: NotifyApi
   grade: GradeApi
   sim: SimApi
+  /** 统一文件服务:全平台唯一的文件投放出口,业务模块只签发授权 */
+  storage: StorageApi
   transfer: TransferApi
   eventWebSocketUrl: () => string
   webSocketTicketProvider: (url: string) => Promise<string | null>
@@ -59,6 +63,7 @@ export interface ChaimirApi {
 export function createApi(config: ApiConfig): ChaimirApi {
   const client = new ApiClient(config)
   const identity = new IdentityApi(client)
+  const storage = new StorageApi(client)
 
   return {
     identity,
@@ -72,7 +77,8 @@ export function createApi(config: ApiConfig): ChaimirApi {
     notify: new NotifyApi(client),
     grade: new GradeApi(client),
     sim: new SimApi(client),
-    transfer: new TransferApi(client),
+    storage,
+    transfer: new TransferApi(client, storage),
     eventWebSocketUrl: () => client.rootWsURL('/api/ws'),
     webSocketTicketProvider: async (url: string) => {
       const response = await identity.issueWebSocketTicket(webSocketPath(url))

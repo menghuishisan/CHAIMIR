@@ -55,13 +55,53 @@ func computeText(value int16) (string, error) {
 	}
 }
 
-// userPackageListStatus 校验用户侧包列表只能查询已上架状态。
-func userPackageListStatus(value string) (int16, error) {
-	switch strings.ToLower(strings.TrimSpace(value)) {
-	case "", "published":
+// packageStatusFromText 把接口状态字符串转换为数据库枚举,与 packageStatusText 互为逆映射。
+func packageStatusFromText(value string) (int16, error) {
+	switch value {
+	case "draft":
+		return PackageStatusDraft, nil
+	case "reviewing":
+		return PackageStatusReviewing, nil
+	case "published":
 		return PackageStatusPublished, nil
+	case "archived":
+		return PackageStatusArchived, nil
+	case "rejected":
+		return PackageStatusRejected, nil
 	default:
 		return 0, apperr.ErrQueryParamInvalid
+	}
+}
+
+// packageListStatus 校验包列表的状态过滤条件。
+// 浏览可用场景(mine=false)只能查已上架:未审核与已下架的包不对使用者开放;
+// 查询本人提交的包(mine=true)可按任一状态过滤,不传则返回本人全部状态的包(0 = 不过滤),
+// 教师需要看到退回与草稿才能继续修改。
+func packageListStatus(value string, mine bool) (int16, error) {
+	normalized := strings.ToLower(strings.TrimSpace(value))
+	if !mine {
+		switch normalized {
+		case "", "published":
+			return PackageStatusPublished, nil
+		default:
+			return 0, apperr.ErrQueryParamInvalid
+		}
+	}
+	if normalized == "" {
+		return 0, nil
+	}
+	return packageStatusFromText(normalized)
+}
+
+// mineFlagFromQuery 解析「只看我提交的」过滤开关,非法取值显式报错。
+func mineFlagFromQuery(value string) (bool, error) {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "", "false":
+		return false, nil
+	case "true":
+		return true, nil
+	default:
+		return false, apperr.ErrQueryParamInvalid
 	}
 }
 

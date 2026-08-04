@@ -19,6 +19,7 @@ import type {
   AssignmentRequest,
   AssignmentDetail,
   Draft,
+  LessonMaterialAccess,
   Submission,
   SubmitRequest,
   BatchMembersRequest,
@@ -208,6 +209,30 @@ export class TeachingApi {
   }
 
   /**
+   * 上传课时视频或附件。
+   * 服务端按文件类型置 content_type 并把对象引用写进 content_ref;
+   * 同一课时重复上传即替换(content_type 单值,课时只有一种形态)。
+   */
+  async uploadLessonMaterial(
+    lessonId: string,
+    file: File,
+    onProgress?: (progress: number) => void
+  ): Promise<Lesson> {
+    const formData = new FormData()
+    formData.append('file', file)
+    return this.client.postFormData(`/teaching/lessons/${lessonId}/material`, formData, onProgress)
+  }
+
+  /**
+   * 换取课时材料投放授权。
+   * 视频回 mode=stream(可续播),附件回 mode=download(一次性取件),由课时形态决定。
+   * 拿到 token 后:视频交给 storage.streamUrl 作播放地址,附件交给 storage.consumeGrant 取件。
+   */
+  async issueLessonMaterialAccess(lessonId: string): Promise<LessonMaterialAccess> {
+    return this.client.post(`/teaching/lessons/${lessonId}/material/access`)
+  }
+
+  /**
    * 上报课时学习进度
    */
   async reportProgress(lessonId: string, data: ProgressRequest): Promise<Progress> {
@@ -247,6 +272,15 @@ export class TeachingApi {
   // ===== 作业 =====
 
   /**
+   * 查询课程作业清单。
+   * 服务端按身份分视角：授课教师得到含草稿的全量，课程内学生只得到已发布作业。
+   * 这是学生取得作业编号的唯一入口（课程大纲只含章节课时），响应为作业外壳不含题面。
+   */
+  async listCourseAssignments(courseId: string): Promise<Assignment[]> {
+    return this.client.get(`/teaching/courses/${courseId}/assignments`)
+  }
+
+  /**
    * 获取作业详情（含题目列表）
    */
   async getAssignment(assignmentId: string): Promise<AssignmentDetail> {
@@ -277,7 +311,9 @@ export class TeachingApi {
   // ===== 提交 =====
 
   /**
-   * 获取学生提交列表
+   * 查询作业提交列表。
+   * 服务端按身份分视角：授课教师得到全班提交（批改列表），课程内学生只得到本人历次提交
+   * （学生刷新页面后据此取回提交编号）。学生编号由服务端会话决定，不接受客户端传参。
    */
   async getSubmissions(assignmentId: string, params?: {
     page?: number

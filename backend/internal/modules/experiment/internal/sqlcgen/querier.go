@@ -33,9 +33,13 @@ type Querier interface {
 	GetGroupMember(ctx context.Context, arg GetGroupMemberParams) (GroupMember, error)
 	GradeExperimentReport(ctx context.Context, arg GradeExperimentReportParams) (GradeExperimentReportRow, error)
 	ListCheckpointResults(ctx context.Context, arg ListCheckpointResultsParams) ([]ListCheckpointResultsRow, error)
+	// 按实验列出全部分组,供教师编组视角一次取齐(小组编号只在创建响应出现过一次,无列表则无法再定位)。
+	ListExperimentGroups(ctx context.Context, arg ListExperimentGroupsParams) ([]ExperimentGroup, error)
 	ListExperimentReports(ctx context.Context, arg ListExperimentReportsParams) ([]ListExperimentReportsRow, error)
 	ListExperiments(ctx context.Context, arg ListExperimentsParams) ([]Experiment, error)
 	ListGroupMembers(ctx context.Context, arg ListGroupMembersParams) ([]GroupMember, error)
+	// 按实验一次取回全部分组成员,避免教师编组页逐组调用形成 N+1。
+	ListGroupMembersByExperiment(ctx context.Context, arg ListGroupMembersByExperimentParams) ([]GroupMember, error)
 	// 按学生视角批量解析其在给定实验集合中所属的小组,供学生实验列表/详情一次性填充 my_group_id。
 	ListStudentGroupsForExperiments(ctx context.Context, arg ListStudentGroupsForExperimentsParams) ([]ListStudentGroupsForExperimentsRow, error)
 	MarkExperimentScoreOutboxFailed(ctx context.Context, arg MarkExperimentScoreOutboxFailedParams) (ExperimentScoreOutbox, error)

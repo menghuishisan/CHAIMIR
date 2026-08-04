@@ -128,8 +128,6 @@ paths:
     $ref: './paths/identity.yaml#/api/v1/accounts/{id}/revoke-admin'
   /api/v1/accounts/batch/disable:
     $ref: './paths/identity.yaml#/api/v1/accounts/batch/disable'
-  /api/v1/accounts/batch/archive:
-    $ref: './paths/identity.yaml#/api/v1/accounts/batch/archive'
   /api/v1/accounts/batch/restore:
     $ref: './paths/identity.yaml#/api/v1/accounts/batch/restore'
   /api/v1/accounts/import/preview:
@@ -344,6 +342,10 @@ paths:
     $ref: './paths/teaching.yaml#/api/v1/teaching/lessons/{id}'
   /api/v1/teaching/lessons/{id}/content:
     $ref: './paths/teaching.yaml#/api/v1/teaching/lessons/{id}/content'
+  /api/v1/teaching/lessons/{id}/material:
+    $ref: './paths/teaching.yaml#/api/v1/teaching/lessons/{id}/material'
+  /api/v1/teaching/lessons/{id}/material/access:
+    $ref: './paths/teaching.yaml#/api/v1/teaching/lessons/{id}/material/access'
   /api/v1/teaching/lessons/{id}/progress:
     $ref: './paths/teaching.yaml#/api/v1/teaching/lessons/{id}/progress'
   /api/v1/teaching/courses/{id}/members:
@@ -406,6 +408,8 @@ paths:
     $ref: './paths/experiment.yaml#/api/v1/experiment/experiments'
   /api/v1/experiment/student/experiments:
     $ref: './paths/experiment.yaml#/api/v1/experiment/student/experiments'
+  /api/v1/experiment/student/experiments/{id}:
+    $ref: './paths/experiment.yaml#/api/v1/experiment/student/experiments/{id}'
   /api/v1/experiment/experiments/{id}:
     $ref: './paths/experiment.yaml#/api/v1/experiment/experiments/{id}'
   /api/v1/experiment/experiments/{id}/validate:
@@ -484,8 +488,8 @@ paths:
     $ref: './paths/contest.yaml#/api/v1/contest/contests/{id}/cheat-records'
   /api/v1/contest/teams/{id}:
     $ref: './paths/contest.yaml#/api/v1/contest/teams/{id}'
-  /api/v1/contest/teams/{id}/join:
-    $ref: './paths/contest.yaml#/api/v1/contest/teams/{id}/join'
+  /api/v1/contest/contests/{id}/join-team:
+    $ref: './paths/contest.yaml#/api/v1/contest/contests/{id}/join-team'
   /api/v1/contest/teams/{id}/lock:
     $ref: './paths/contest.yaml#/api/v1/contest/teams/{id}/lock'
   /api/v1/contest/submissions/{id}:
@@ -496,14 +500,14 @@ paths:
     $ref: './paths/contest.yaml#/api/v1/contest/my/contest-records'
   /api/v1/contest/student/contests:
     $ref: './paths/contest.yaml#/api/v1/contest/student/contests'
+  /api/v1/contest/student/contests/{id}:
+    $ref: './paths/contest.yaml#/api/v1/contest/student/contests/{id}'
   /api/v1/contest/platform/vuln-sources:
     $ref: './paths/contest.yaml#/api/v1/contest/platform/vuln-sources'
   /api/v1/contest/vuln-sources:
     $ref: './paths/contest.yaml#/api/v1/contest/vuln-sources'
   /api/v1/contest/vuln-sources/{id}/sync:
     $ref: './paths/contest.yaml#/api/v1/contest/vuln-sources/{id}/sync'
-  /api/v1/contest/vuln-sources/import:
-    $ref: './paths/contest.yaml#/api/v1/contest/vuln-sources/import'
   /api/v1/contest/vuln-problems:
     $ref: './paths/contest.yaml#/api/v1/contest/vuln-problems'
   /api/v1/contest/vuln-problems/{id}/prevalidate:
@@ -627,6 +631,13 @@ components:
       in: query
       name: ticket
       description: M1 `/api/v1/auth/ws-ticket` 签发的短时路径绑定 WebSocket 连接票据。
+    browserAccessCookie:
+      type: apiKey
+      in: cookie
+      name: chaimir_access
+      description: >-
+        路径受限 HttpOnly access cookie,供浏览器自身发起、发不出 Authorization 头的请求复用平台鉴权
+        (内嵌工具代理资源加载、统一文件服务流式投放)。由对应业务入口按最小作用域写入。
   parameters:
     IDPath:
       name: id

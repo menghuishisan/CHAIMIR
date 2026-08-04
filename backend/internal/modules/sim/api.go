@@ -110,18 +110,33 @@ func (a simAPI) registerPlatformRoutes(g gin.IRouter) {
 	g.POST("/packages/:key/republish", a.republishPackage)
 }
 
-// listPackages 查询用户可见的已上架包列表。
+// listPackages 查询包列表。
+// 默认列出可用场景(仅已上架);带 mine=true 时列出当前账号作为作者提交的包,
+// 此时可按任一状态过滤 —— 作者边界由服务端会话的账号编号强制,不接受客户端传作者参数。
 func (a simAPI) listPackages(c *gin.Context) {
 	page, size, ok := httpx.Page(c)
 	if !ok {
 		return
 	}
-	status, err := userPackageListStatus(c.Query("status"))
+	mine, err := mineFlagFromQuery(c.Query("mine"))
 	if err != nil {
 		response.Fail(c, err)
 		return
 	}
-	items, total, p, s, err := a.svc.ListPackages(c.Request.Context(), status, c.Query("category"), c.Query("keyword"), page, size)
+	status, err := packageListStatus(c.Query("status"), mine)
+	if err != nil {
+		response.Fail(c, err)
+		return
+	}
+	var authorID int64
+	if mine {
+		current, ok := currentTenantIdentity(c)
+		if !ok {
+			return
+		}
+		authorID = current.AccountID
+	}
+	items, total, p, s, err := a.svc.ListPackages(c.Request.Context(), status, c.Query("category"), c.Query("keyword"), authorID, page, size)
 	httpx.WritePage(c, items, total, p, s, err)
 }
 

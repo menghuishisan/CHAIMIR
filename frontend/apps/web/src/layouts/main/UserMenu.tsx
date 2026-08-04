@@ -1,10 +1,9 @@
-// UserMenu 顶栏身份区(规范 §6.3):显示当前账号姓名与角色,下拉提供个人设置与退出登录。
+// UserMenu 顶栏身份区(规范 §6.3):显示当前账号姓名与角色,下拉提供个人中心与退出登录。
 // 身份数据全部来自服务端会话(RoleGuard 的 /me),不接受任何客户端传入的角色。
 
 import { useCallback, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { ChevronDown, LogOut, UserCog } from 'lucide-react'
-import { UserRole } from '@chaimir/api-client'
 import {
   Menu,
   MenuContent,
@@ -17,17 +16,10 @@ import {
 import { api } from '../../app/api'
 import { useSession } from '../../components/RoleGuard'
 import { clearLoginTokens } from '../../utils/authSession'
-
-/** 角色名称:顶栏展示用中文名,编号与后端 identity 枚举对齐 */
-const ROLE_NAMES: Record<UserRole, string> = {
-  [UserRole.PLATFORM_ADMIN]: '平台管理员',
-  [UserRole.SCHOOL_ADMIN]: '学校管理员',
-  [UserRole.TEACHER]: '教师',
-  [UserRole.STUDENT]: '学生',
-}
+import { userRolesLabel } from '../../utils/labels/identity'
 
 export interface UserMenuProps {
-  /** 个人设置页路径(角色区内) */
+  /** 个人中心页路径(角色区内) */
   profilePath: string
   /** 退出后回到的登录入口(平台管理与其余角色入口不同) */
   loginPath: string
@@ -44,7 +36,7 @@ export function UserMenu({ profilePath, loginPath }: UserMenuProps) {
   const account = me.account
 
   /** 身份副标题:优先职称,其次学号/工号,最后角色名 */
-  const roleName = account.roles.map((role) => ROLE_NAMES[role]).filter(Boolean).join(' · ')
+  const roleName = userRolesLabel(account.roles)
   const subtitle = account.title || account.no || roleName
 
   const signOut = useCallback(async () => {
@@ -92,7 +84,7 @@ export function UserMenu({ profilePath, loginPath }: UserMenuProps) {
         </MenuLabel>
         <MenuSeparator />
         <MenuItem icon={UserCog} onSelect={() => navigate(profilePath)}>
-          个人设置
+          个人中心
         </MenuItem>
         <MenuSeparator />
         <MenuItem icon={LogOut} danger disabled={signingOut} onSelect={() => void signOut()}>

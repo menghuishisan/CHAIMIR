@@ -6,6 +6,7 @@ import type { SimPackageStatus, SimReviewResult } from '../constants/sim'
 import type { PaginatedResponse } from '../types/common'
 import type {
   SimPackageMeta,
+  SimPackagePreview,
   SimPackageReview,
   SimBundleDownloadGrant,
   SimPackageSubmissionResult,
@@ -37,12 +38,15 @@ export class SimApi {
   }
 
   /**
-   * 获取仿真包列表
+   * 获取仿真包列表。
+   * 缺省只回已上架包(status 只接受 published);传 mine=true 时按服务端会话回本人提交的包,
+   * 此时 status 可取任一状态、缺省返回全部状态 —— 教师据此看到自己被退回或仍是草稿的包。
    */
   async getPackages(params?: {
     category?: string
     keyword?: string
     status?: SimPackageStatus
+    mine?: boolean
     page?: number
     size?: number
   }): Promise<PaginatedResponse<SimPackageMeta>> {
@@ -85,9 +89,9 @@ export class SimApi {
   }
 
   /**
-   * 获取审核前预览报告
+   * 获取审核前预览报告(仅包作者本人可读)。
    */
-  async previewPackage(packageId: string): Promise<SimPackageReview> {
+  async previewPackage(packageId: string): Promise<SimPackagePreview> {
     return this.client.get(`/sim/packages/${packageId}/preview`)
   }
 

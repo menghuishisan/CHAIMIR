@@ -40,7 +40,6 @@ func (a accountAPI) register(g gin.IRouter) {
 	g.POST("/:id/grant-admin", a.grantAdmin)
 	g.POST("/:id/revoke-admin", a.revokeAdmin)
 	g.POST("/batch/disable", a.batchDisable)
-	g.POST("/batch/archive", a.batchArchive)
 	g.POST("/batch/restore", a.batchRestore)
 	g.POST("/import/preview", a.importPreview)
 	g.POST("/import/commit", a.importCommit)
@@ -187,19 +186,6 @@ func (a accountAPI) revokeAdmin(c *gin.Context) {
 // batchDisable 批量停用账号。
 func (a accountAPI) batchDisable(c *gin.Context) {
 	a.batchStatus(c, AccountStatusDisabled)
-}
-
-// batchArchive 按入学年份批量归档学生账号,同时同步班级归档状态。
-func (a accountAPI) batchArchive(c *gin.Context) {
-	var req ArchiveClassesRequest
-	if !httpx.BindJSON(c, &req) {
-		return
-	}
-	if err := a.svc.ArchiveClassesByAdmin(c.Request.Context(), req); err != nil {
-		httpx.Write(c, gin.H{}, err)
-		return
-	}
-	httpx.Write(c, gin.H{}, nil)
 }
 
 // batchRestore 批量恢复账号。

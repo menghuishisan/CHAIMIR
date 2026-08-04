@@ -18,6 +18,8 @@ export interface Notification {
 export interface NotificationPreference {
   type: string
   enabled: boolean
+  /** 强制类通知不允许关闭（由后端通知模板声明），界面渲染为不可操作并说明原因。 */
+  force: boolean
 }
 
 export interface Announcement {

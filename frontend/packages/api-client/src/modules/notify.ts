@@ -64,7 +64,9 @@ export class NotifyApi {
   // ===== 通知偏好 =====
 
   /**
-   * 获取通知偏好设置
+   * 获取通知偏好设置。
+   * 返回后端通知模板的全部可配置类型 + 本人当前设置 + 是否为不可关闭的强制类型，
+   * 未设置过的类型回默认启用；前端不硬编码类型清单。
    */
   async getPreferences(): Promise<NotificationPreference[]> {
     return this.client.get('/notify/preferences')

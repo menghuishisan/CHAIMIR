@@ -54,6 +54,14 @@ export class ContestApi {
   }
 
   /**
+   * 读取单个学生可发现的竞赛（门槛与列表一致：草稿态不可见）。
+   * 竞赛详情页深链、刷新以及退出竞赛答题/对局回放后的回落都用这条。
+   */
+  async getStudentContest(contestId: string): Promise<Contest> {
+    return this.client.get(`/contest/student/contests/${contestId}`)
+  }
+
+  /**
    * 创建竞赛。
    */
   async createContest(data: ContestRequest): Promise<Contest> {
@@ -131,10 +139,11 @@ export class ContestApi {
   }
 
   /**
-   * 通过队伍 ID 和邀请码加入队伍。
+   * 用队长分享的邀请码加入本赛事队伍。
+   * 只按邀请码定位队伍:队伍编号对学生是不可知的内部标识,不要求页面先取到它。
    */
-  async joinTeam(teamId: string, data: JoinTeamRequest): Promise<ContestTeam> {
-    return this.client.post(`/contest/teams/${teamId}/join`, data)
+  async joinTeam(contestId: string, data: JoinTeamRequest): Promise<ContestTeam> {
+    return this.client.post(`/contest/contests/${contestId}/join-team`, data)
   }
 
   /**
@@ -285,16 +294,11 @@ export class ContestApi {
 
   /**
    * 导入漏洞题草稿。
+   * 手工录入与按来源案例录入是同一条路径:请求体的可选 source_id 表达来源归属
+   * (对齐清单 §6.17 已收敛掉同义的 /vuln-sources/import)。
    */
   async importVulnProblem(data: VulnProblemImportRequest): Promise<VulnProblem> {
     return this.client.post('/contest/vuln-problems', data)
-  }
-
-  /**
-   * 从漏洞源导入漏洞题草稿。
-   */
-  async importVulnSourceProblem(data: VulnProblemImportRequest): Promise<VulnProblem> {
-    return this.client.post('/contest/vuln-sources/import', data)
   }
 
   /**

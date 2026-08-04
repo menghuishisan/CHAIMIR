@@ -331,16 +331,21 @@ func (q *Queries) CountStudentCourses(ctx context.Context, arg CountStudentCours
 }
 
 const countSubmissionsByAssignment = `-- name: CountSubmissionsByAssignment :one
-SELECT COUNT(*)::bigint FROM submission WHERE tenant_id = $1 AND assignment_id = $2
+SELECT COUNT(*)::bigint
+FROM submission
+WHERE tenant_id = $1
+  AND assignment_id = $2
+  AND ($3::bigint = 0 OR submission.student_id = $3::bigint)
 `
 
 type CountSubmissionsByAssignmentParams struct {
 	TenantID     int64 `json:"tenant_id"`
 	AssignmentID int64 `json:"assignment_id"`
+	StudentID    int64 `json:"student_id"`
 }
 
 func (q *Queries) CountSubmissionsByAssignment(ctx context.Context, arg CountSubmissionsByAssignmentParams) (int64, error) {
-	row := q.db.QueryRow(ctx, countSubmissionsByAssignment, arg.TenantID, arg.AssignmentID)
+	row := q.db.QueryRow(ctx, countSubmissionsByAssignment, arg.TenantID, arg.AssignmentID, arg.StudentID)
 	var column_1 int64
 	err := row.Scan(&column_1)
 	return column_1, err
@@ -1612,17 +1617,23 @@ func (q *Queries) ListAssignmentItems(ctx context.Context, arg ListAssignmentIte
 const listAssignmentsByCourse = `-- name: ListAssignmentsByCourse :many
 SELECT id, tenant_id, course_id, title, chapter_id, due_at, max_attempts, late_policy, late_penalty, status, created_at, updated_at, deleted_at
 FROM assignment
-WHERE tenant_id = $1 AND course_id = $2 AND deleted_at IS NULL
+WHERE tenant_id = $1
+  AND course_id = $2
+  AND deleted_at IS NULL
+  AND ($3::boolean = false OR status = 2)
 ORDER BY due_at DESC, id DESC
 `
 
 type ListAssignmentsByCourseParams struct {
-	TenantID int64 `json:"tenant_id"`
-	CourseID int64 `json:"course_id"`
+	TenantID      int64 `json:"tenant_id"`
+	CourseID      int64 `json:"course_id"`
+	PublishedOnly bool  `json:"published_only"`
 }
 
+// published_only=true 只回已发布作业(学生视角),false 回全部含草稿(授课教师与课程克隆)。
+// 只返回作业外壳,题目与题面仍只经 GetAssignment 走 M5 题面接口。
 func (q *Queries) ListAssignmentsByCourse(ctx context.Context, arg ListAssignmentsByCourseParams) ([]Assignment, error) {
-	rows, err := q.db.Query(ctx, listAssignmentsByCourse, arg.TenantID, arg.CourseID)
+	rows, err := q.db.Query(ctx, listAssignmentsByCourse, arg.TenantID, arg.CourseID, arg.PublishedOnly)
 	if err != nil {
 		return nil, err
 	}
@@ -2426,7 +2437,9 @@ func (q *Queries) ListStudentProgressByCourse(ctx context.Context, arg ListStude
 const listSubmissionsByAssignment = `-- name: ListSubmissionsByAssignment :many
 SELECT id, tenant_id, assignment_id, student_id, attempt_no, content_ref, judge_task_ref, auto_score, manual_score, final_score, comment, is_late, status, submitted_at
 FROM submission
-WHERE tenant_id = $1 AND assignment_id = $2
+WHERE tenant_id = $1
+  AND assignment_id = $2
+  AND ($5::bigint = 0 OR submission.student_id = $5::bigint)
 ORDER BY submitted_at DESC, id DESC
 LIMIT $3 OFFSET $4
 `
@@ -2436,14 +2449,18 @@ type ListSubmissionsByAssignmentParams struct {
 	AssignmentID int64 `json:"assignment_id"`
 	Limit        int32 `json:"limit"`
 	Offset       int32 `json:"offset"`
+	StudentID    int64 `json:"student_id"`
 }
 
+// student_id 传 0 回该作业全部学生提交(授课教师批改视角);传具体学生只回其本人提交
+// (学生自读视角,student_id 由服务端填会话账号,不接受客户端传参)。
 func (q *Queries) ListSubmissionsByAssignment(ctx context.Context, arg ListSubmissionsByAssignmentParams) ([]Submission, error) {
 	rows, err := q.db.Query(ctx, listSubmissionsByAssignment,
 		arg.TenantID,
 		arg.AssignmentID,
 		arg.Limit,
 		arg.Offset,
+		arg.StudentID,
 	)
 	if err != nil {
 		return nil, err

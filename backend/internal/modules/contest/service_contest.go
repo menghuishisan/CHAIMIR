@@ -61,6 +61,30 @@ func (s *Service) ListStudentContests(ctx context.Context, page, size int) ([]Co
 	return out, total, page, size, nil
 }
 
+// GetStudentContest 读取单个学生可发现的竞赛。
+// 门槛与 ListStudentContests 一致(非草稿态):学生竞赛详情页需支持深链与刷新,
+// 且竞赛答题与对局回放两条沉浸路由退出后都回落到该页,不能依赖列表态。
+func (s *Service) GetStudentContest(ctx context.Context, contestID int64) (ContestDTO, error) {
+	id, err := currentIdentity(ctx)
+	if err != nil {
+		return ContestDTO{}, err
+	}
+	var item Contest
+	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
+		item, err = tx.GetContest(ctx, id.TenantID, contestID)
+		if err != nil {
+			return err
+		}
+		if item.Status == ContestStatusDraft {
+			return apperr.ErrContestNotFound
+		}
+		return nil
+	}); err != nil {
+		return ContestDTO{}, err
+	}
+	return contestDTOFromModel(item), nil
+}
+
 // CreateContest 创建竞赛草稿并持久化完整赛程配置。
 func (s *Service) CreateContest(ctx context.Context, req ContestRequest) (ContestDTO, error) {
 	id, err := currentIdentity(ctx)

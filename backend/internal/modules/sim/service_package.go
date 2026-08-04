@@ -16,13 +16,15 @@ import (
 )
 
 // ListPackages 返回仿真包分页列表。
-func (s *Service) ListPackages(ctx context.Context, status int16, category, keyword string, page, size int) ([]map[string]any, int64, int, int, error) {
+// authorID > 0 时只返回该教师作者提交的包(教师维护自己的仿真场景),
+// 为 0 时返回全部符合状态过滤的包(学生与教师浏览可用场景)。
+func (s *Service) ListPackages(ctx context.Context, status int16, category, keyword string, authorID int64, page, size int) ([]map[string]any, int64, int, int, error) {
 	page, size = pagex.Normalize(page, size)
 	var items []Package
 	var total int64
 	if err := s.store.PlatformTx(ctx, func(ctx context.Context, tx TxStore) error {
 		var err error
-		items, total, err = tx.ListPackages(ctx, status, strings.TrimSpace(category), strings.TrimSpace(keyword), int32(size), int32((page-1)*size))
+		items, total, err = tx.ListPackages(ctx, status, strings.TrimSpace(category), strings.TrimSpace(keyword), authorID, int32(size), int32((page-1)*size))
 		return err
 	}); err != nil {
 		return nil, 0, page, size, lookupError(err, apperr.ErrSimPackageNotFound, apperr.ErrSimPackageQueryFailed)

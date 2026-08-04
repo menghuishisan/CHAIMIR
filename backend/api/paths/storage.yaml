@@ -1,20 +1,42 @@
-# 本文件维护全平台唯一的短时授权文件下载路径。
+# 本文件维护全平台唯一的短时授权文件投放路径。
 /api/v1/storage/download:
   get:
     tags: [storage]
-    summary: 使用一次性短时授权下载文件
+    summary: 使用短时授权投放文件(mode=download 一次性取件 / mode=stream 流式续播)
     operationId: storageDownload
     x-chaimir-audience: platform-admin-or-user
     security:
       - bearerAuth: []
+      - browserAccessCookie: []
     parameters:
       - name: token
         in: query
         required: true
-        description: 业务模块签发且绑定当前租户、账号和对象引用的一次性短时授权。
+        description: >-
+          业务模块签发且绑定当前租户、账号和对象引用的短时授权。签名内携带 mode:
+          download 经 Redis 原子标记仅可消费一次并以 attachment 处置返回;
+          stream 在有效期内可重复消费、支持 Range 且以 inline 处置返回,用于视频续播。
+          mode 由签发模块决定,客户端篡改会导致验签失败。
         schema: { type: string, minLength: 1 }
+      - name: Range
+        in: header
+        required: false
+        description: 仅 mode=stream 授权支持;命中时返回 206 与 Content-Range。
+        schema: { type: string }
     responses:
       "200":
         $ref: "#/components/responses/Binary"
+      "206":
+        description: mode=stream 授权的分段投放响应。
+        headers:
+          Content-Range:
+            description: 本次返回的字节区间与对象总长度。
+            schema: { type: string }
+          Accept-Ranges:
+            description: 固定为 bytes,声明支持分段请求。
+            schema: { type: string }
+        content:
+          application/octet-stream:
+            schema: { type: string, format: binary }
       default:
         $ref: "#/components/responses/Error"

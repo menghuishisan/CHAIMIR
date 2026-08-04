@@ -436,7 +436,8 @@ func (s *Service) ComputeCourseGrades(ctx context.Context, courseID int64) ([]Gr
 			if err != nil {
 				return apperr.ErrTeachingGradeWeightInvalid
 			}
-			subs, _, err := tx.ListSubmissionsByAssignment(ctx, id.TenantID, assignmentID, 1, s.cfg.CourseGradesMaxRows)
+			// studentID 传 0:成绩计算要覆盖全班每个学生的提交,不限定单人
+			subs, _, err := tx.ListSubmissionsByAssignment(ctx, id.TenantID, assignmentID, 0, 1, s.cfg.CourseGradesMaxRows)
 			if err != nil {
 				return err
 			}

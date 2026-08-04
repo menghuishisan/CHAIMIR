@@ -83,6 +83,35 @@ func (s *Service) UpsertGroupMember(ctx context.Context, groupID int64, req Upse
 	return groupDTOFromModel(group), s.writeAudit(ctx, id.TenantID, id.AccountID, contracts.RoleNumTeacher, "experiment.group.member.upsert", auditTargetGroup, groupID, map[string]any{"student_id": req.StudentID, "role": req.Role})
 }
 
+// ListGroups 按实验列出全部协作小组,供教师编组视角使用。
+// 与 GetGroup 的差别:这里不附带共享实例(编组时实例尚不存在),
+// 且门槛是「能管理该实验」而不是「是本组成员」。
+func (s *Service) ListGroups(ctx context.Context, experimentID int64) ([]GroupDTO, error) {
+	id, err := currentIdentity(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var groups []ExperimentGroup
+	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
+		exp, err := tx.GetExperiment(ctx, id.TenantID, experimentID)
+		if err != nil {
+			return err
+		}
+		if err := ensureTeacherCanManage(id.AccountID, s.isSchoolAdmin(ctx, id.AccountID), exp); err != nil {
+			return err
+		}
+		groups, err = tx.ListGroupsByExperiment(ctx, id.TenantID, experimentID)
+		return err
+	}); err != nil {
+		return nil, err
+	}
+	out := make([]GroupDTO, 0, len(groups))
+	for _, group := range groups {
+		out = append(out, groupDTOFromModel(group))
+	}
+	return out, nil
+}
+
 // GetGroup 读取协作小组成员和角色。
 func (s *Service) GetGroup(ctx context.Context, groupID int64) (GroupDTO, error) {
 	id, err := currentIdentity(ctx)

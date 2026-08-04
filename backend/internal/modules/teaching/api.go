@@ -47,7 +47,9 @@ func (a teachingAPI) registerSharedRoutes(g gin.IRouter) {
 	g.GET("/chapters/:id/lessons", a.listLessons)
 	g.GET("/courses/:id/outline", a.getOutline)
 	g.GET("/lessons/:id", a.getLesson)
+	g.GET("/courses/:id/assignments", a.listCourseAssignments)
 	g.GET("/assignments/:id", a.getAssignment)
+	g.GET("/assignments/:id/submissions", a.listSubmissions)
 	g.GET("/submissions/:id", a.getSubmission)
 	g.GET("/courses/:id/posts", a.listPosts)
 	g.POST("/courses/:id/posts", a.createPost)
@@ -78,7 +80,6 @@ func (a teachingAPI) registerTeacherRoutes(g gin.IRouter) {
 	g.POST("/courses/:id/assignments", a.createAssignment)
 	g.PATCH("/assignments/:id", a.updateAssignment)
 	g.POST("/assignments/:id/publish", a.publishAssignment)
-	g.GET("/assignments/:id/submissions", a.listSubmissions)
 	g.POST("/submissions/:id/grade", a.gradeSubmission)
 	g.POST("/posts/:id/pin", a.pinPost)
 	g.DELETE("/posts/:id", a.deletePost)
@@ -411,6 +412,16 @@ func (a teachingAPI) publishAssignment(c *gin.Context) {
 		return
 	}
 	out, err := a.svc.PublishAssignment(c.Request.Context(), id)
+	httpx.Write(c, out, err)
+}
+
+// listCourseAssignments 查询课程作业清单。
+func (a teachingAPI) listCourseAssignments(c *gin.Context) {
+	id, ok := httpx.PathID(c, "id")
+	if !ok {
+		return
+	}
+	out, err := a.svc.ListCourseAssignments(c.Request.Context(), id)
 	httpx.Write(c, out, err)
 }
 

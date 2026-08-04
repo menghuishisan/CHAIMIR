@@ -59,6 +59,21 @@ SELECT id, tenant_id, experiment_id, name, created_at
 FROM experiment_group
 WHERE tenant_id = $1 AND id = $2;
 
+-- name: ListExperimentGroups :many
+-- 按实验列出全部分组,供教师编组视角一次取齐(小组编号只在创建响应出现过一次,无列表则无法再定位)。
+SELECT id, tenant_id, experiment_id, name, created_at
+FROM experiment_group
+WHERE tenant_id = $1 AND experiment_id = $2
+ORDER BY id ASC;
+
+-- name: ListGroupMembersByExperiment :many
+-- 按实验一次取回全部分组成员,避免教师编组页逐组调用形成 N+1。
+SELECT gm.id, gm.tenant_id, gm.group_id, gm.student_id, gm.role, gm.created_at
+FROM group_member gm
+JOIN experiment_group eg ON eg.tenant_id = gm.tenant_id AND eg.id = gm.group_id
+WHERE gm.tenant_id = $1 AND eg.experiment_id = $2
+ORDER BY gm.group_id ASC, gm.id ASC;
+
 -- name: ListGroupMembers :many
 SELECT id, tenant_id, group_id, student_id, role, created_at
 FROM group_member

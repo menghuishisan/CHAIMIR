@@ -54,12 +54,14 @@ func (a experimentAPI) registerTeacherRoutes(g gin.IRouter) {
 	g.GET("/experiments/:id/reports", a.listReports)
 	g.POST("/reports/:id/grade", a.gradeReport)
 	g.POST("/experiments/:id/groups", a.createGroup)
+	g.GET("/experiments/:id/groups", a.listGroups)
 	g.POST("/groups/:id/members", a.upsertGroupMember)
 }
 
 // registerStudentRoutes 注册学生发起实例、判分和报告接口。
 func (a experimentAPI) registerStudentRoutes(g gin.IRouter) {
 	g.GET("/student/experiments", a.listPublishedExperiments)
+	g.GET("/student/experiments/:id", a.getPublishedExperiment)
 	g.POST("/experiments/:id/instances", a.createInstance)
 	g.POST("/instances/:id/checkpoints/:cp/judge", a.judgeCheckpoint)
 	g.POST("/instances/:id/report", a.submitReport)
@@ -77,6 +79,16 @@ func (a experimentAPI) listPublishedExperiments(c *gin.Context) {
 	}
 	out, total, p, s, err := a.svc.ListPublishedExperiments(c.Request.Context(), courseID, page, size)
 	httpx.WritePage(c, out, total, p, s, err)
+}
+
+// getPublishedExperiment 向学生返回单个已发布实验的最小安全投影。
+func (a experimentAPI) getPublishedExperiment(c *gin.Context) {
+	id, ok := httpx.PathID(c, "id")
+	if !ok {
+		return
+	}
+	out, err := a.svc.GetPublishedExperimentForStudent(c.Request.Context(), id)
+	httpx.Write(c, out, err)
 }
 
 // registerSharedRoutes 注册师生共享的实例工作台和控制接口。
@@ -318,6 +330,16 @@ func (a experimentAPI) createGroup(c *gin.Context) {
 		return
 	}
 	out, err := a.svc.CreateGroup(c.Request.Context(), id, req)
+	httpx.Write(c, out, err)
+}
+
+// listGroups 返回本实验全部协作小组,供教师编组视角一次取齐。
+func (a experimentAPI) listGroups(c *gin.Context) {
+	id, ok := httpx.PathID(c, "id")
+	if !ok {
+		return
+	}
+	out, err := a.svc.ListGroups(c.Request.Context(), id)
 	httpx.Write(c, out, err)
 }
 

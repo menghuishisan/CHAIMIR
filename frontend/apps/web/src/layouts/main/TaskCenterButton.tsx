@@ -15,12 +15,15 @@ import {
   PopoverTrigger,
   Skeleton,
   StatusIndicator,
-  type StatusTone,
 } from '@chaimir/ui'
 import { api } from '../../app/api'
 import { useAsyncResource } from '../../hooks'
 import { formatShortDateTime } from '../../utils/formatters'
-import { transferTaskStatusLabel, transferTaskSubjectLabel } from '../../utils/labels/transfer'
+import {
+  transferTaskStatusLabel,
+  transferTaskStatusTone,
+  transferTaskSubjectLabel,
+} from '../../utils/labels/transfer'
 
 /** 下拉内展示的任务条数:面板是「最近」摘要,全量在任务中心页 */
 const RECENT_SIZE = 5
@@ -31,15 +34,6 @@ const ACTIVE_STATUSES: ReadonlySet<TransferTask['status']> = new Set([
   'running',
   'retrying',
 ])
-
-/** 任务状态对应的语义色:失败用独立冷红(danger),完成用玉(success) */
-const STATUS_TONES: Record<TransferTask['status'], StatusTone> = {
-  pending: 'neutral',
-  running: 'info',
-  retrying: 'warning',
-  succeeded: 'success',
-  failed: 'danger',
-}
 
 export interface TaskCenterButtonProps {
   /** 任务中心页路径(角色区内) */
@@ -157,7 +151,7 @@ function TaskRow({ task }: { task: TransferTask }) {
           {transferTaskSubjectLabel(task.subject)}
         </span>
         <StatusIndicator
-          tone={STATUS_TONES[task.status]}
+          tone={transferTaskStatusTone(task.status)}
           label={transferTaskStatusLabel(task.status)}
           loading={task.status === 'running'}
         />

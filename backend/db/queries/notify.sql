@@ -56,17 +56,22 @@ SET deleted_at = now()
 WHERE deleted_at IS NULL AND created_at < $1;
 
 -- name: ListPreferences :many
-SELECT id, tenant_id, account_id, type, enabled
-FROM notification_preference
-WHERE account_id = $1
-ORDER BY type;
+-- 以通知模板全表为基准左连本人偏好:未设置过的类型回默认启用,与 PreferenceEnabled 的
+-- COALESCE(..., true) 口径一致。force 类通知 Send 时直接跳过偏好判定,故此处也恒回启用,
+-- 让读到的状态与实际投递行为一致。只输出类型/开关/是否强制,不输出模板正文与投递通道。
+SELECT t.type,
+       (CASE WHEN t.force THEN true ELSE COALESCE(p.enabled, true) END)::boolean AS enabled,
+       t.force
+FROM notification_template t
+LEFT JOIN notification_preference p ON p.type = t.type AND p.account_id = $1
+ORDER BY t.type;
 
 -- name: UpsertPreference :one
 INSERT INTO notification_preference (id, tenant_id, account_id, type, enabled)
 VALUES ($1, $2, $3, $4, $5)
 ON CONFLICT (tenant_id, account_id, type)
 DO UPDATE SET enabled = EXCLUDED.enabled
-RETURNING id, tenant_id, account_id, type, enabled;
+RETURNING type, enabled, (SELECT force FROM notification_template WHERE type = notification_preference.type)::boolean AS force;
 
 -- name: PreferenceEnabled :one
 SELECT COALESCE((

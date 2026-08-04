@@ -53,6 +53,15 @@ export interface SimPackageSubmissionResult extends SimPackageMeta {
   review: SimPackageReview
 }
 
+/**
+ * 仿真包审核前预览响应:后端 PackagePreview 返回包摘要与最新审核记录两段,
+ * 不把审核记录并进包对象(与提交响应的形状不同,故单独声明)。
+ */
+export interface SimPackagePreview {
+  package: SimPackageMeta
+  review: SimPackageReview
+}
+
 export interface SimReviewDecision {
   package: SimPackageMeta
   review: SimPackageReview

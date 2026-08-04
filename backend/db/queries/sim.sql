@@ -17,6 +17,7 @@ FROM sim_package
 WHERE ($1::smallint = 0 OR status = $1)
   AND ($2::text = '' OR category = $2)
   AND ($3::text = '' OR code ILIKE '%' || $3 || '%' OR name ILIKE '%' || $3 || '%')
+  AND ($6::bigint = 0 OR (author_type = 2 AND author_id = $6))
 ORDER BY updated_at DESC, id DESC
 LIMIT $4 OFFSET $5;
 
@@ -25,7 +26,8 @@ SELECT COUNT(*)::bigint
 FROM sim_package
 WHERE ($1::smallint = 0 OR status = $1)
   AND ($2::text = '' OR category = $2)
-  AND ($3::text = '' OR code ILIKE '%' || $3 || '%' OR name ILIKE '%' || $3 || '%');
+  AND ($3::text = '' OR code ILIKE '%' || $3 || '%' OR name ILIKE '%' || $3 || '%')
+  AND ($4::bigint = 0 OR (author_type = 2 AND author_id = $4));
 
 -- name: ListSimPackageVersions :many
 SELECT id, code, version, name, category, compute, scale_limit, bundle_key, bundle_hash,

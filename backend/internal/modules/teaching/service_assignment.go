@@ -139,6 +139,36 @@ func (s *Service) PublishAssignment(ctx context.Context, assignmentID int64) (As
 	return assignmentDTO(assignment)
 }
 
+// ListCourseAssignments 查询课程作业清单。
+// 这是学生取得 assignment_id 的唯一入口:作业详情、草稿和提交都以该编号为参数,
+// 而课程大纲只含章节课时。授课教师看到含草稿的全量,课程成员只看到已发布作业。
+func (s *Service) ListCourseAssignments(ctx context.Context, courseID int64) ([]AssignmentDTO, error) {
+	id, err := currentIdentity(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var assignments []Assignment
+	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
+		isTeacher, err := s.courseReadAccess(ctx, tx, id.TenantID, courseID, id.AccountID)
+		if err != nil {
+			return err
+		}
+		assignments, err = tx.ListAssignmentsByCourse(ctx, id.TenantID, courseID, !isTeacher)
+		return err
+	}); err != nil {
+		return nil, mapAssignmentError(err)
+	}
+	out := make([]AssignmentDTO, 0, len(assignments))
+	for _, assignment := range assignments {
+		dto, err := assignmentDTO(assignment)
+		if err != nil {
+			return nil, mapAssignmentError(err)
+		}
+		out = append(out, dto)
+	}
+	return out, nil
+}
+
 // GetAssignmentForStudent 读取作业详情并从 M5 展开题面。
 func (s *Service) GetAssignmentForStudent(ctx context.Context, assignmentID int64) (AssignmentDetailDTO, error) {
 	id, err := currentIdentity(ctx)
@@ -353,6 +383,9 @@ func (s *Service) GradeSubmission(ctx context.Context, submissionID int64, req G
 }
 
 // ListSubmissions 查询作业提交情况。
+// 授课教师看到该作业全部学生提交(批改视角);课程内学生只看到本人的历次提交
+// (自读视角 —— 学生提交后刷新页面需据此取回 submission_id 再看反馈)。
+// 学生编号取自服务端会话,不接受客户端传参。
 func (s *Service) ListSubmissions(ctx context.Context, assignmentID int64, page, size int) ([]SubmissionDTO, int64, int, int, error) {
 	id, err := currentIdentity(ctx)
 	if err != nil {
@@ -366,14 +399,15 @@ func (s *Service) ListSubmissions(ctx context.Context, assignmentID int64, page,
 		if err != nil {
 			return err
 		}
-		course, err := tx.GetCourse(ctx, id.TenantID, assignment.CourseID)
+		isTeacher, err := s.courseReadAccess(ctx, tx, id.TenantID, assignment.CourseID, id.AccountID)
 		if err != nil {
 			return err
 		}
-		if err := ensureTeacherOwned(course, id.AccountID); err != nil {
-			return err
+		studentFilter := id.AccountID
+		if isTeacher {
+			studentFilter = 0
 		}
-		subs, total, err = tx.ListSubmissionsByAssignment(ctx, id.TenantID, assignmentID, page, size)
+		subs, total, err = tx.ListSubmissionsByAssignment(ctx, id.TenantID, assignmentID, studentFilter, page, size)
 		return err
 	}); err != nil {
 		return nil, 0, 0, 0, mapAssignmentError(err)

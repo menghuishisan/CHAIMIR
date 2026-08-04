@@ -93,9 +93,20 @@
 > 任务快照的 `file_name` 是契约必填字段(创建任务时缺失即拒绝),任务成功后原样登记为 `artifact_file_name`。客户端保存文件时只取 `artifact_file_name`,不得再按多个字段依次取值或自造默认文件名。
 
 ### 统一文件服务 `/api/v1/storage`
-- `GET /download?token=...`:登录账号消费与本人账号、租户和资源边界绑定的短时下载授权,授权经 Redis 原子标记后仅可使用一次;成功响应直接流式返回附件,不使用 JSON 信封。
+- `GET /download?token=...`:登录账号消费与本人账号、租户和资源边界绑定的短时授权,成功响应直接流式返回文件,不使用 JSON 信封。
 
-> 所有模块签发的下载授权都只能由本入口消费。业务模块和前端页面不得拼接 MinIO 地址、复制 token 验签逻辑或新增模块私有下载路由。
+授权在签名内携带 `mode`,决定投放方式;`mode` 由签发模块决定,客户端无法篡改(改动会导致验签失败):
+
+| mode | 消费次数 | 响应头 | Range | 用途 |
+| --- | --- | --- | --- | --- |
+| `download` | 一次(Redis 原子标记) | `Content-Disposition: attachment` | 不支持 | 导入导出产物、成绩单、题库附件、课时资料等取件场景 |
+| `stream` | 授权有效期内可重复 | `Content-Disposition: inline` + `Accept-Ranges: bytes` | 支持(`206 Partial Content`) | 课时视频等需要边下边播与拖动进度的场景 |
+
+`stream` 之所以不能沿用一次性消费:播放器为拖动进度会对同一资源发多个分段请求,首个请求就会烧掉一次性令牌。它以更短有效期(`STORAGE_STREAM_GRANT_TTL_SECONDS`)与同样的租户+账号+资源前缀绑定换取可重复性,不放宽任何一项边界校验。两种 mode 共用同一端点、同一 grant 构造器与签名器,不新增第二条投放路由。
+
+**鉴权载体**:`<video src>`、`<img src>` 这类由浏览器自身发起的请求发不出 `Authorization` 头,故本入口接受 **Bearer 头**(XHR 取件)**或路径受限 Cookie**(浏览器直连),沿用 M2 浏览器工具代理已有的 `chaimir_access` 机制。Cookie 由签发 `mode=stream` 授权的业务接口在响应中写入,作用域限定 `/api/v1/storage`、`HttpOnly`。本入口**不接受 query 形式的 access token** —— `token` 参数位已被投放授权占用,同名两义会让验签路径产生歧义。授权本身仍绑定租户与账号,`authorizeDownloadGrant` 的会话比对不因载体变化而放宽。
+
+> 所有模块签发的授权都只能由本入口消费。业务模块和前端页面不得拼接 MinIO 地址、复制 token 验签逻辑或新增模块私有下载路由。
 
 ### M2 沙箱引擎 `/api/v1/sandbox`
 - `/runtimes`、`/tools`:运行时/工具管理 + 接入即测 `[平台管理员]`;镜像预拉取提供触发与状态查询,完成以全目标节点真实拉取成功为准。
@@ -114,7 +125,7 @@
 - `/fingerprints/*`:查重能力 `[内部]`。
 
 ### M4 仿真可视化引擎 `/api/v1/sim`
-- `/packages/*`:仿真包查询/获取 bundle/扩展接入。
+- `/packages/*`:仿真包查询/获取 bundle/扩展接入。`GET /packages` 同一路由按 `mine` 分叉:缺省只回已上架包;`mine=true` 按服务端会话账号回本人提交的包(状态可选,缺省全部状态),作者边界不接受客户端传参。
 - `/backend-capabilities`:当前部署真实注册的后端计算适配器 `[教师/学校管理员]`。
 - `/reviews/*`:仿真包审核 `[平台管理员]`。
 - `/sessions`:创建/操作上报/回放/分享;`/sessions/recycle` 回收 `[内部]`;`WS /sessions/{id}/stream`(后端计算)。
@@ -129,23 +140,25 @@
 
 ### M6 教学 `/api/v1/teaching`
 - `/courses/*`:课程 CRUD/发布/克隆/共享/邀请码。
-- `/chapters`、`/lessons`:章节课时(课时关联 M7 实验/M4 仿真)。
+- `/chapters`、`/lessons`:章节课时(课时关联 M7 实验/M4 仿真)。`POST /lessons/{id}/material` 上传视频或附件、`POST /lessons/{id}/material/access` 换取投放授权(视频 `mode=stream` 可续播,附件 `mode=download` 一次性取件)。
 - `/courses/join`、`/members`:选课成员。
-- `/assignments/*`、`/submissions/*`:作业/提交/批改(判题调 M3)。
+- `/assignments/*`、`/submissions/*`:作业/提交/批改(判题调 M3)。`GET /courses/{id}/assignments` 与 `GET /assignments/{id}/submissions` 师生同路由按身份分视角:授课教师见含草稿全量与全班提交,课程内学生只见已发布作业与本人提交 —— 这两条是学生取得作业编号与提交编号的唯一入口。
 - `/posts`、`/announcements`、`/review`:讨论/公告/评价。
 - `/courses/{id}/grades/*`:单课程成绩;`/grades` 只读契约供 M11 聚合;M6 改分后发布 `teaching.grade.updated` 事件。
 
 ### M7 实验 `/api/v1/experiment`
 - `/experiments/*`:配置/校验/发布。
+- `/student/experiments`、`/student/experiments/{id}`:学生可发现的已发布实验列表与单条读取,统一走学生投影(剔除环境初始化与判题内部配置)。
 - `/experiments/{id}/instances`、`/instances/{id}`:实例创建(编排 M2/M4)/工作台/控制;`/instances/{id}/stages/{stage}/activate` 是阶段资源创建唯一写入口;`/instances/{id}/progress` 返回 M10 订阅元信息。
 - `/instances/{id}/checkpoints/{cp}/judge`:检查点判分(调 M3)。
 - `/instances/{id}/report`、`/reports/{id}/grade`:报告。
-- `/groups/*`:多人协作。
+- `/groups/*`:多人协作。`GET /experiments/{id}/groups` 是教师编组视角(全部分组 + 成员角色,不含实例),`GET /groups/{id}` 是按组读单组并附带共享实例。
 - `/internal/instances/{id}/score`、`/internal/stats` `[内部]`(供上层聚合/M9;M7 不直接依赖同层 M6)。
 
 ### M8 竞赛 `/api/v1/contest`
 - `/contests/*`:赛事管理/题目编排/发布开始结束。
-- `/signup`、`/teams/*`:报名组队。
+- `/student/contests`、`/student/contests/{id}`:学生可发现的非草稿赛事列表与单条读取(门槛与列表一致)。
+- `/signup`、`/contests/{id}/join-team`、`/teams/*`:报名组队。加入队伍只按邀请码(队伍编号对学生是内部标识,不进请求)。
 - `/problems/{pid}/env`、`/submit`:解题赛(环境调 M2、判题调 M3)。
 - `/battle/entry`、`/battle/matches`、`/matches/{id}/replay`、`/ladder`:对抗赛/回放/天梯。
 - `/my/contest-records`、`/result-snapshot`:个人战绩。
@@ -166,7 +179,7 @@
 - `/send` `[内部]`:统一通知发送。
 - `/push` `[内部]`:实时推送到带租户前缀的 topic。
 - `WS /api/ws`:统一实时通道(订阅 topic)`[租户用户]`;topic 以 `tenant:{tenant_id}` 为根,平台管理员不订阅。
-- `/inbox/*`、`/preferences`:站内信/偏好 `[租户用户]`;`notification`、`notification_preference` 表 `tenant_id NOT NULL`,平台管理员无收件箱。
+- `/inbox/*`、`/preferences`:站内信/偏好 `[租户用户]`;`notification`、`notification_preference` 表 `tenant_id NOT NULL`,平台管理员无收件箱。`GET /preferences` 返回 `notification_template` 全量类型与本人设置的合并结果(`type/enabled/force`),不返回模板正文。
 - `POST /announcements`:发布公告 `[平台管理员/学校管理员]`;`GET /announcements`:公告列表 `[租户用户/平台管理员]`;`POST /announcements/{id}/read`:标记已读 `[租户用户]`。
 
 ### M11 成绩中心 `/api/v1/grade-center`

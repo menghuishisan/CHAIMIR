@@ -1,6 +1,7 @@
 // ===== M6 Teaching 模块 =====
 
 import type { SnowflakeID } from './common'
+import type { ContentDifficulty, ContentType } from '../constants/content'
 import type {
   AssignmentStatus,
   CourseStatus,
@@ -73,6 +74,20 @@ export interface Lesson {
   sort: number
   created_at: string
   updated_at: string
+}
+
+/**
+ * LessonMaterialAccess 是课时材料的投放授权。
+ * mode 由课时 content_type 决定(视频回 stream、附件回 download),不接受客户端指定;
+ * token 交给统一文件服务 GET /storage/download 消费。
+ */
+export interface LessonMaterialAccess {
+  token: string
+  mode: 'download' | 'stream'
+  file_name: string
+  size: number
+  content_type: string
+  expires_at: string
 }
 
 export interface LessonRequest {
@@ -149,9 +164,14 @@ export interface AssignmentItem {
   seq: number
   grading_mode: GradingMode
   judger_code?: string
+  /**
+   * 以下四个字段是 M6 从 M5 题面视角展开的题目信息(见 service_assignment.go
+   * GetAssignmentForStudent),因此 type / difficulty 是 M5 的内容枚举而非教学枚举。
+   * body 已由 M5 剥离答案、判题配置与 flag。
+   */
   title?: string
-  type?: CourseType
-  difficulty?: TeachingDifficulty
+  type?: ContentType
+  difficulty?: ContentDifficulty
   body?: Record<string, unknown>
 }
 

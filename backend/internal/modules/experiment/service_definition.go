@@ -64,6 +64,36 @@ func (s *Service) ListPublishedExperiments(ctx context.Context, courseID int64, 
 	return out, total, page, size, nil
 }
 
+// GetPublishedExperimentForStudent 读取单个已发布实验的学生投影。
+// 与 ListPublishedExperiments 共用同一门槛(已发布)与同一投影函数,只是单条形态:
+// 学生实验详情页需支持深链与刷新,且沉浸式工作台退出后回落到该页,不能依赖列表态。
+func (s *Service) GetPublishedExperimentForStudent(ctx context.Context, experimentID int64) (StudentExperimentDTO, error) {
+	id, err := currentIdentity(ctx)
+	if err != nil {
+		return StudentExperimentDTO{}, err
+	}
+	var item Experiment
+	var groupID int64
+	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
+		item, err = tx.GetExperiment(ctx, id.TenantID, experimentID)
+		if err != nil {
+			return err
+		}
+		if item.Status != ExperimentStatusPublished {
+			return apperr.ErrExperimentNotFound
+		}
+		groups, err := tx.ListStudentGroupsForExperiments(ctx, id.TenantID, id.AccountID, []int64{experimentID})
+		if err != nil {
+			return err
+		}
+		groupID = groups[experimentID]
+		return nil
+	}); err != nil {
+		return StudentExperimentDTO{}, err
+	}
+	return studentExperimentDTOFromModel(item, groupID), nil
+}
+
 // CreateExperiment 创建服务端持久化的实验编排向导草稿。
 func (s *Service) CreateExperiment(ctx context.Context, req ExperimentRequest) (ExperimentDTO, error) {
 	id, err := currentIdentity(ctx)

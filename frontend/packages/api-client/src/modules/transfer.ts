@@ -1,17 +1,23 @@
 // Transfer API 文件定义统一导入导出任务中心前端调用入口。
 
 import { ApiClient } from '../client'
+import type { AttachmentResponse } from '../client'
 import type { TransferChannel, TransferStatus } from '../constants/transfer'
 import type { TransferDownloadGrant, TransferTask, TransferTaskListResponse } from '../types/transfer'
+import type { StorageApi } from './storage'
 
 /**
  * TransferApi 封装后端 platform/transfer 统一任务查询和下载授权接口。
  */
 export class TransferApi {
   /**
-   * constructor 注入统一 API 客户端，避免各业务模块重复实现导入导出任务轮询。
+   * constructor 注入统一 API 客户端与统一文件服务入口。
+   * 取件不在此重复实现:transfer 只负责签发任务产物授权,消费统一走 storage。
    */
-  constructor(private client: ApiClient) {}
+  constructor(
+    private client: ApiClient,
+    private storage: StorageApi,
+  ) {}
 
   /**
    * listTasks 查询当前账号可见的导入导出任务。
@@ -41,12 +47,10 @@ export class TransferApi {
 
   /**
    * downloadArtifact 签发并立即消费一次性授权，返回可由浏览器保存的文件内容。
-   * 文件名取授权响应里的产物文件名:任务入口强制 file_name 非空、CompleteTask 把它登记为产物名，
-   * 所以这个字段是契约保证的单一来源，不做多级取值。
+   * 取件经统一文件服务，文件名取自其响应头(后端已做单段化)，与全站其他下载同一条通道。
    */
-  async downloadArtifact(taskId: string): Promise<{ blob: Blob; fileName: string }> {
+  async downloadArtifact(taskId: string): Promise<AttachmentResponse> {
     const grant = await this.downloadGrant(taskId)
-    const blob = await this.client.getBlob('/storage/download', { token: grant.token })
-    return { blob, fileName: grant.task.artifact_file_name }
+    return this.storage.consumeGrant(grant.token)
   }
 }

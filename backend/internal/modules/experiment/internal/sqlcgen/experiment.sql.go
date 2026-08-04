@@ -1009,6 +1009,45 @@ func (q *Queries) ListCheckpointResults(ctx context.Context, arg ListCheckpointR
 	return items, nil
 }
 
+const listExperimentGroups = `-- name: ListExperimentGroups :many
+SELECT id, tenant_id, experiment_id, name, created_at
+FROM experiment_group
+WHERE tenant_id = $1 AND experiment_id = $2
+ORDER BY id ASC
+`
+
+type ListExperimentGroupsParams struct {
+	TenantID     int64 `json:"tenant_id"`
+	ExperimentID int64 `json:"experiment_id"`
+}
+
+// 按实验列出全部分组,供教师编组视角一次取齐(小组编号只在创建响应出现过一次,无列表则无法再定位)。
+func (q *Queries) ListExperimentGroups(ctx context.Context, arg ListExperimentGroupsParams) ([]ExperimentGroup, error) {
+	rows, err := q.db.Query(ctx, listExperimentGroups, arg.TenantID, arg.ExperimentID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ExperimentGroup{}
+	for rows.Next() {
+		var i ExperimentGroup
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.ExperimentID,
+			&i.Name,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listExperimentReports = `-- name: ListExperimentReports :many
 SELECT r.id, r.tenant_id, r.instance_id, r.student_id, r.content_ref, COALESCE(r.manual_score::float8, 0)::float8 AS manual_score, r.comment, r.status, r.submitted_at
 FROM experiment_report r
@@ -1149,6 +1188,47 @@ type ListGroupMembersParams struct {
 
 func (q *Queries) ListGroupMembers(ctx context.Context, arg ListGroupMembersParams) ([]GroupMember, error) {
 	rows, err := q.db.Query(ctx, listGroupMembers, arg.TenantID, arg.GroupID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []GroupMember{}
+	for rows.Next() {
+		var i GroupMember
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.GroupID,
+			&i.StudentID,
+			&i.Role,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listGroupMembersByExperiment = `-- name: ListGroupMembersByExperiment :many
+SELECT gm.id, gm.tenant_id, gm.group_id, gm.student_id, gm.role, gm.created_at
+FROM group_member gm
+JOIN experiment_group eg ON eg.tenant_id = gm.tenant_id AND eg.id = gm.group_id
+WHERE gm.tenant_id = $1 AND eg.experiment_id = $2
+ORDER BY gm.group_id ASC, gm.id ASC
+`
+
+type ListGroupMembersByExperimentParams struct {
+	TenantID     int64 `json:"tenant_id"`
+	ExperimentID int64 `json:"experiment_id"`
+}
+
+// 按实验一次取回全部分组成员,避免教师编组页逐组调用形成 N+1。
+func (q *Queries) ListGroupMembersByExperiment(ctx context.Context, arg ListGroupMembersByExperimentParams) ([]GroupMember, error) {
+	rows, err := q.db.Query(ctx, listGroupMembersByExperiment, arg.TenantID, arg.ExperimentID)
 	if err != nil {
 		return nil, err
 	}

@@ -41,9 +41,12 @@ type SubscribeMessage struct {
 }
 
 // PreferenceDTO 表示用户通知偏好响应。
+// Force 来自通知模板:强制类通知不允许关闭,前端据此渲染为不可操作并说明原因。
+// 不输出模板标题/正文/投递通道 —— 那些是服务端渲染细节,不进浏览器。
 type PreferenceDTO struct {
 	Type    string `json:"type"`
 	Enabled bool   `json:"enabled"`
+	Force   bool   `json:"force"`
 }
 
 // UnreadDTO 表示站内信未读数量响应。

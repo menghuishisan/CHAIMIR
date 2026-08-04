@@ -14,7 +14,7 @@ import { RouteErrorBoundary } from '../components/RouteErrorBoundary'
 import { NotFoundPage } from '../components/StatusPages'
 import { ImmersiveLayout } from '../layouts/immersive/ImmersiveLayout'
 import { authRoutes } from '../routes/authRoutes'
-import { immersiveRoutes } from '../routes/immersiveRoutes'
+import { PUBLIC_IMMERSIVE_ROUTES, immersiveRoutes } from '../routes/immersiveRoutes'
 import { roleRoutes } from '../routes/roleRoutes'
 import { platformLayerEnabled } from './config'
 
@@ -42,7 +42,9 @@ export default function App() {
               {roleRoutes(platformLayerEnabled)}
 
               {/* ---------- 公开沉浸深链:全屏沉浸,访客无会话不经角色守卫 ---------- */}
-              <Route element={<ImmersiveLayout />}>{immersiveRoutes()}</Route>
+              <Route element={<ImmersiveLayout routes={PUBLIC_IMMERSIVE_ROUTES} />}>
+                {immersiveRoutes()}
+              </Route>
 
               <Route path="*" element={<NotFoundPage />} />
             </Routes>

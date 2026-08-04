@@ -201,11 +201,11 @@
     security: [{ bearerAuth: [] }]
     parameters: [{ $ref: "#/components/parameters/IDPath" }]
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
-/api/v1/contest/teams/{id}/join:
+/api/v1/contest/contests/{id}/join-team:
   post:
     tags: [contest]
-    summary: 加入队伍
-    operationId: contestJoinTeamByTeamID
+    summary: 用邀请码加入本赛事队伍
+    operationId: contestJoinTeam
     x-chaimir-audience: student
     security: [{ bearerAuth: [] }]
     parameters: [{ $ref: "#/components/parameters/IDPath" }]
@@ -246,6 +246,15 @@
     x-chaimir-audience: student
     security: [{ bearerAuth: [] }]
     parameters: [{ $ref: "#/components/parameters/PageQuery" }, { $ref: "#/components/parameters/SizeQuery" }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/contest/student/contests/{id}:
+  get:
+    tags: [contest]
+    summary: 学生可发现的单个竞赛
+    operationId: contestGetStudentContest
+    x-chaimir-audience: student
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }]
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
 /api/v1/contest/my/contest-records:
   get:
@@ -295,15 +304,6 @@
     x-chaimir-audience: teacher
     security: [{ bearerAuth: [] }]
     parameters: [{ $ref: "#/components/parameters/IDPath" }]
-    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
-/api/v1/contest/vuln-sources/import:
-  post:
-    tags: [contest]
-    summary: 导入漏洞案例
-    operationId: contestImportVulnSourceProblem
-    x-chaimir-audience: teacher
-    security: [{ bearerAuth: [] }]
-    requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
 /api/v1/contest/vuln-problems:
   get:

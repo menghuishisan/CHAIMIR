@@ -32,9 +32,10 @@ func (s *txStore) GetAssignment(ctx context.Context, tenantID, id int64) (Assign
 	return assignmentFromRow(row)
 }
 
-// ListAssignmentsByCourse 查询课程作业。
-func (s *txStore) ListAssignmentsByCourse(ctx context.Context, tenantID, courseID int64) ([]Assignment, error) {
-	rows, err := s.q.ListAssignmentsByCourse(ctx, sqlcgen.ListAssignmentsByCourseParams{TenantID: tenantID, CourseID: courseID})
+// ListAssignmentsByCourse 查询课程作业外壳。
+// publishedOnly 为 true 只回已发布作业(学生视角),false 回全部含草稿(授课教师与课程克隆)。
+func (s *txStore) ListAssignmentsByCourse(ctx context.Context, tenantID, courseID int64, publishedOnly bool) ([]Assignment, error) {
+	rows, err := s.q.ListAssignmentsByCourse(ctx, sqlcgen.ListAssignmentsByCourseParams{TenantID: tenantID, CourseID: courseID, PublishedOnly: publishedOnly})
 	if err != nil {
 		return nil, err
 	}
@@ -159,12 +160,13 @@ func (s *txStore) ListJudgeOutboxBySubmission(ctx context.Context, tenantID, sub
 }
 
 // ListSubmissionsByAssignment 查询作业提交分页。
-func (s *txStore) ListSubmissionsByAssignment(ctx context.Context, tenantID, assignmentID int64, page, size int) ([]Submission, int64, error) {
-	rows, err := s.q.ListSubmissionsByAssignment(ctx, sqlcgen.ListSubmissionsByAssignmentParams{TenantID: tenantID, AssignmentID: assignmentID, Limit: int32(size), Offset: int32((page - 1) * size)})
+// studentID 传 0 回全部学生提交(授课教师批改视角),传具体学生只回其本人提交(学生自读视角)。
+func (s *txStore) ListSubmissionsByAssignment(ctx context.Context, tenantID, assignmentID, studentID int64, page, size int) ([]Submission, int64, error) {
+	rows, err := s.q.ListSubmissionsByAssignment(ctx, sqlcgen.ListSubmissionsByAssignmentParams{TenantID: tenantID, AssignmentID: assignmentID, StudentID: studentID, Limit: int32(size), Offset: int32((page - 1) * size)})
 	if err != nil {
 		return nil, 0, err
 	}
-	total, err := s.q.CountSubmissionsByAssignment(ctx, sqlcgen.CountSubmissionsByAssignmentParams{TenantID: tenantID, AssignmentID: assignmentID})
+	total, err := s.q.CountSubmissionsByAssignment(ctx, sqlcgen.CountSubmissionsByAssignmentParams{TenantID: tenantID, AssignmentID: assignmentID, StudentID: studentID})
 	if err != nil {
 		return nil, 0, err
 	}

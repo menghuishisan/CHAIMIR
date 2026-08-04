@@ -100,16 +100,23 @@ FROM sim_package
 WHERE ($1::smallint = 0 OR status = $1)
   AND ($2::text = '' OR category = $2)
   AND ($3::text = '' OR code ILIKE '%' || $3 || '%' OR name ILIKE '%' || $3 || '%')
+  AND ($4::bigint = 0 OR (author_type = 2 AND author_id = $4))
 `
 
 type CountSimPackagesParams struct {
 	Column1 int16  `json:"column_1"`
 	Column2 string `json:"column_2"`
 	Column3 string `json:"column_3"`
+	Column4 int64  `json:"column_4"`
 }
 
 func (q *Queries) CountSimPackages(ctx context.Context, arg CountSimPackagesParams) (int64, error) {
-	row := q.db.QueryRow(ctx, countSimPackages, arg.Column1, arg.Column2, arg.Column3)
+	row := q.db.QueryRow(ctx, countSimPackages,
+		arg.Column1,
+		arg.Column2,
+		arg.Column3,
+		arg.Column4,
+	)
 	var column_1 int64
 	err := row.Scan(&column_1)
 	return column_1, err
@@ -754,6 +761,7 @@ FROM sim_package
 WHERE ($1::smallint = 0 OR status = $1)
   AND ($2::text = '' OR category = $2)
   AND ($3::text = '' OR code ILIKE '%' || $3 || '%' OR name ILIKE '%' || $3 || '%')
+  AND ($6::bigint = 0 OR (author_type = 2 AND author_id = $6))
 ORDER BY updated_at DESC, id DESC
 LIMIT $4 OFFSET $5
 `
@@ -764,6 +772,7 @@ type ListSimPackagesParams struct {
 	Column3 string `json:"column_3"`
 	Limit   int32  `json:"limit"`
 	Offset  int32  `json:"offset"`
+	Column6 int64  `json:"column_6"`
 }
 
 func (q *Queries) ListSimPackages(ctx context.Context, arg ListSimPackagesParams) ([]SimPackage, error) {
@@ -773,6 +782,7 @@ func (q *Queries) ListSimPackages(ctx context.Context, arg ListSimPackagesParams
 		arg.Column3,
 		arg.Limit,
 		arg.Offset,
+		arg.Column6,
 	)
 	if err != nil {
 		return nil, err

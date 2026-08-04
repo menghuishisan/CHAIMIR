@@ -363,7 +363,8 @@ func (s *Service) cloneChaptersAndLessons(ctx context.Context, tx TxStore, sourc
 
 // cloneAssignments 复制作业壳和题目引用,不复制任何提交或成绩数据。
 func (s *Service) cloneAssignments(ctx context.Context, tx TxStore, source Course, targetTenantID, targetCourseID int64, chapterMap map[int64]int64) error {
-	assignments, err := tx.ListAssignmentsByCourse(ctx, source.TenantID, source.ID)
+	// publishedOnly 传 false:克隆要带上草稿作业,克隆结果本身也统一落草稿态
+	assignments, err := tx.ListAssignmentsByCourse(ctx, source.TenantID, source.ID, false)
 	if err != nil {
 		return err
 	}

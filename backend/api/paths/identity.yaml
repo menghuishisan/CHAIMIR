@@ -810,21 +810,6 @@
         $ref: "#/components/responses/Standard"
       default:
         $ref: "#/components/responses/Error"
-/api/v1/accounts/batch/archive:
-  post:
-    tags: [identity]
-    summary: 批量归档账号
-    operationId: identityBatchArchiveAccounts
-    x-chaimir-audience: school-admin
-    security:
-      - bearerAuth: []
-    requestBody:
-      $ref: "#/components/requestBodies/ObjectBody"
-    responses:
-      "200":
-        $ref: "#/components/responses/Standard"
-      default:
-        $ref: "#/components/responses/Error"
 /api/v1/accounts/batch/restore:
   post:
     tags: [identity]

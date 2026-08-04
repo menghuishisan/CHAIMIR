@@ -420,28 +420,33 @@ func (q *Queries) ListNotifications(ctx context.Context, arg ListNotificationsPa
 }
 
 const listPreferences = `-- name: ListPreferences :many
-SELECT id, tenant_id, account_id, type, enabled
-FROM notification_preference
-WHERE account_id = $1
-ORDER BY type
+SELECT t.type,
+       (CASE WHEN t.force THEN true ELSE COALESCE(p.enabled, true) END)::boolean AS enabled,
+       t.force
+FROM notification_template t
+LEFT JOIN notification_preference p ON p.type = t.type AND p.account_id = $1
+ORDER BY t.type
 `
 
-func (q *Queries) ListPreferences(ctx context.Context, accountID int64) ([]NotificationPreference, error) {
+type ListPreferencesRow struct {
+	Type    string `json:"type"`
+	Enabled bool   `json:"enabled"`
+	Force   bool   `json:"force"`
+}
+
+// 以通知模板全表为基准左连本人偏好:未设置过的类型回默认启用,与 PreferenceEnabled 的
+// COALESCE(..., true) 口径一致。force 类通知 Send 时直接跳过偏好判定,故此处也恒回启用,
+// 让读到的状态与实际投递行为一致。只输出类型/开关/是否强制,不输出模板正文与投递通道。
+func (q *Queries) ListPreferences(ctx context.Context, accountID int64) ([]ListPreferencesRow, error) {
 	rows, err := q.db.Query(ctx, listPreferences, accountID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []NotificationPreference{}
+	items := []ListPreferencesRow{}
 	for rows.Next() {
-		var i NotificationPreference
-		if err := rows.Scan(
-			&i.ID,
-			&i.TenantID,
-			&i.AccountID,
-			&i.Type,
-			&i.Enabled,
-		); err != nil {
+		var i ListPreferencesRow
+		if err := rows.Scan(&i.Type, &i.Enabled, &i.Force); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -551,7 +556,7 @@ INSERT INTO notification_preference (id, tenant_id, account_id, type, enabled)
 VALUES ($1, $2, $3, $4, $5)
 ON CONFLICT (tenant_id, account_id, type)
 DO UPDATE SET enabled = EXCLUDED.enabled
-RETURNING id, tenant_id, account_id, type, enabled
+RETURNING type, enabled, (SELECT force FROM notification_template WHERE type = notification_preference.type)::boolean AS force
 `
 
 type UpsertPreferenceParams struct {
@@ -562,7 +567,13 @@ type UpsertPreferenceParams struct {
 	Enabled   bool   `json:"enabled"`
 }
 
-func (q *Queries) UpsertPreference(ctx context.Context, arg UpsertPreferenceParams) (NotificationPreference, error) {
+type UpsertPreferenceRow struct {
+	Type    string `json:"type"`
+	Enabled bool   `json:"enabled"`
+	Force   bool   `json:"force"`
+}
+
+func (q *Queries) UpsertPreference(ctx context.Context, arg UpsertPreferenceParams) (UpsertPreferenceRow, error) {
 	row := q.db.QueryRow(ctx, upsertPreference,
 		arg.ID,
 		arg.TenantID,
@@ -570,13 +581,7 @@ func (q *Queries) UpsertPreference(ctx context.Context, arg UpsertPreferencePara
 		arg.Type,
 		arg.Enabled,
 	)
-	var i NotificationPreference
-	err := row.Scan(
-		&i.ID,
-		&i.TenantID,
-		&i.AccountID,
-		&i.Type,
-		&i.Enabled,
-	)
+	var i UpsertPreferenceRow
+	err := row.Scan(&i.Type, &i.Enabled, &i.Force)
 	return i, err
 }

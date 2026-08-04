@@ -125,7 +125,7 @@ func (t *txStore) DeleteExpiredNotifications(ctx context.Context, before time.Ti
 	return t.q.DeleteExpiredNotifications(ctx, timex.RequiredTimestamptz(before))
 }
 
-// ListPreferences 查询通知偏好。
+// ListPreferences 查询本人通知偏好(以模板类型目录为基准,含未设置过的类型)。
 func (t *txStore) ListPreferences(ctx context.Context, accountID int64) ([]PreferenceDTO, error) {
 	rows, err := t.q.ListPreferences(ctx, accountID)
 	if err != nil {
@@ -133,7 +133,7 @@ func (t *txStore) ListPreferences(ctx context.Context, accountID int64) ([]Prefe
 	}
 	out := make([]PreferenceDTO, 0, len(rows))
 	for _, row := range rows {
-		out = append(out, PreferenceDTO{Type: row.Type, Enabled: row.Enabled})
+		out = append(out, PreferenceDTO{Type: row.Type, Enabled: row.Enabled, Force: row.Force})
 	}
 	return out, nil
 }
@@ -149,7 +149,7 @@ func (t *txStore) UpsertPreference(ctx context.Context, id, tenantID, accountID 
 	if err != nil {
 		return PreferenceDTO{}, err
 	}
-	return PreferenceDTO{Type: row.Type, Enabled: row.Enabled}, nil
+	return PreferenceDTO{Type: row.Type, Enabled: row.Enabled, Force: row.Force}, nil
 }
 
 // CreateAnnouncement 创建系统公告。

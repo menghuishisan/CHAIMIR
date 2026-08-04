@@ -30,14 +30,6 @@ type Notification struct {
 	DeletedAt  pgtype.Timestamptz `json:"deleted_at"`
 }
 
-type NotificationPreference struct {
-	ID        int64  `json:"id"`
-	TenantID  int64  `json:"tenant_id"`
-	AccountID int64  `json:"account_id"`
-	Type      string `json:"type"`
-	Enabled   bool   `json:"enabled"`
-}
-
 type NotificationTemplate struct {
 	ID         int64              `json:"id"`
 	Type       string             `json:"type"`

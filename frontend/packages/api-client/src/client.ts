@@ -104,9 +104,11 @@ export class ApiClient {
       async (response) => {
         const requestConfig = response.config as RetriableRequestConfig
 
-        // 统一文件服务下载流不使用 JSON 信封(API 总览 §统一文件服务)，按原样透出
+        // 统一文件服务下载流不使用 JSON 信封(API 总览 §统一文件服务)，按原样透出。
+        // 同时带出 Content-Disposition：保存文件名的唯一来源是后端响应头，
+        // 拦截器是能拿到响应头的唯一位置，故在此打包给 getAttachment。
         if (requestConfig.responseType === 'blob') {
-          return response.data as never
+          return { blob: response.data, disposition: response.headers['content-disposition'] } as never
         }
 
         // 边界校验：不是平台信封的 200 响应来自网关而非后端，按传输层失败处理
@@ -250,6 +252,15 @@ export class ApiClient {
   }
 
   /**
+   * 基于后端 HTTP 根地址生成可直接交给浏览器的绝对地址。
+   * 用于 <video src> 这类由浏览器自身发起请求、拿不到 Axios 拦截器的场景;
+   * 鉴权由授权令牌承载(见统一文件服务 mode=stream),不在此拼接对象存储地址。
+   */
+  public absoluteURL(path: string, query?: Record<string, string | undefined>): string {
+    return `${this.baseURL()}${normalizePath(path)}${queryString(query)}`
+  }
+
+  /**
    * 基于后端 HTTP 根地址生成浏览器工具代理入口地址。
    */
   public browserURL(path: string, query?: Record<string, string | undefined>): string {
@@ -339,15 +350,46 @@ export class ApiClient {
   }
 
   /**
-   * 获取二进制响应体。
+   * 获取附件响应:返回文件内容与后端在 Content-Disposition 中声明的保存文件名。
+   * 全站所有文件下载共用这一条 —— 文件名的单一来源是后端响应头
+   * (`httpx.WriteAttachment*` 恒写入并已做单段化与字符白名单),
+   * 客户端不自造名字、不按多个业务字段依次取值。
    */
-  async getBlob(url: string, params?: object): Promise<Blob> {
-    return this.client.get<unknown, Blob>(url, {
+  async getAttachment(url: string, params?: object): Promise<AttachmentResponse> {
+    const response = await this.client.get<unknown, AttachmentResult>(url, {
       params,
       responseType: 'blob',
     })
+    return { blob: response.blob, fileName: attachmentFileName(response.disposition) }
   }
 
+}
+
+/**
+ * AttachmentResponse 是附件下载的对外结果。
+ */
+export interface AttachmentResponse {
+  blob: Blob
+  fileName: string
+}
+
+/** AttachmentResult 是响应拦截器为附件请求透出的内部载荷。 */
+interface AttachmentResult {
+  blob: Blob
+  disposition: unknown
+}
+
+/**
+ * attachmentFileName 从 Content-Disposition 解析保存文件名。
+ * 后端出口恒写 `attachment; filename="<单段 ASCII 名>"`,取不到即说明响应不来自后端
+ * (网关错误页等),按传输层失败处理 —— 不编造文件名掩盖这一情况。
+ */
+function attachmentFileName(disposition: unknown): string {
+  const matched = typeof disposition === 'string' ? /filename="([^"]+)"/.exec(disposition) : null
+  if (!matched) {
+    throw new ApiError(API_TRANSPORT_ERROR_MESSAGES.MALFORMED_RESPONSE)
+  }
+  return matched[1]
 }
 
 /**

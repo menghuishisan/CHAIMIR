@@ -55,6 +55,8 @@ type Querier interface {
 	LikeDiscussionPost(ctx context.Context, arg LikeDiscussionPostParams) (DiscussionPost, error)
 	ListAnnouncements(ctx context.Context, arg ListAnnouncementsParams) ([]Announcement, error)
 	ListAssignmentItems(ctx context.Context, arg ListAssignmentItemsParams) ([]AssignmentItem, error)
+	// published_only=true 只回已发布作业(学生视角),false 回全部含草稿(授课教师与课程克隆)。
+	// 只返回作业外壳,题目与题面仍只经 GetAssignment 走 M5 题面接口。
 	ListAssignmentsByCourse(ctx context.Context, arg ListAssignmentsByCourseParams) ([]Assignment, error)
 	ListChapters(ctx context.Context, arg ListChaptersParams) ([]Chapter, error)
 	ListCourseGrades(ctx context.Context, arg ListCourseGradesParams) ([]ListCourseGradesRow, error)
@@ -70,6 +72,8 @@ type Querier interface {
 	ListStudentCourses(ctx context.Context, arg ListStudentCoursesParams) ([]ListStudentCoursesRow, error)
 	ListStudentGrades(ctx context.Context, arg ListStudentGradesParams) ([]ListStudentGradesRow, error)
 	ListStudentProgressByCourse(ctx context.Context, arg ListStudentProgressByCourseParams) ([]LessonProgress, error)
+	// student_id 传 0 回该作业全部学生提交(授课教师批改视角);传具体学生只回其本人提交
+	// (学生自读视角,student_id 由服务端填会话账号,不接受客户端传参)。
 	ListSubmissionsByAssignment(ctx context.Context, arg ListSubmissionsByAssignmentParams) ([]Submission, error)
 	ListTeacherCourses(ctx context.Context, arg ListTeacherCoursesParams) ([]ListTeacherCoursesRow, error)
 	MarkJudgeOutboxFailedResult(ctx context.Context, arg MarkJudgeOutboxFailedResultParams) (SubmissionJudgeOutbox, error)

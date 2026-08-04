@@ -206,9 +206,14 @@ FROM assignment
 WHERE tenant_id = $1 AND id = $2 AND deleted_at IS NULL;
 
 -- name: ListAssignmentsByCourse :many
+-- published_only=true 只回已发布作业(学生视角),false 回全部含草稿(授课教师与课程克隆)。
+-- 只返回作业外壳,题目与题面仍只经 GetAssignment 走 M5 题面接口。
 SELECT id, tenant_id, course_id, title, chapter_id, due_at, max_attempts, late_policy, late_penalty, status, created_at, updated_at, deleted_at
 FROM assignment
-WHERE tenant_id = $1 AND course_id = $2 AND deleted_at IS NULL
+WHERE tenant_id = $1
+  AND course_id = $2
+  AND deleted_at IS NULL
+  AND (sqlc.arg(published_only)::boolean = false OR status = 2)
 ORDER BY due_at DESC, id DESC;
 
 -- name: UpdateAssignment :one
@@ -272,14 +277,22 @@ WHERE tenant_id = $1 AND submission_id = $2
 ORDER BY id ASC;
 
 -- name: ListSubmissionsByAssignment :many
+-- student_id 传 0 回该作业全部学生提交(授课教师批改视角);传具体学生只回其本人提交
+-- (学生自读视角,student_id 由服务端填会话账号,不接受客户端传参)。
 SELECT id, tenant_id, assignment_id, student_id, attempt_no, content_ref, judge_task_ref, auto_score, manual_score, final_score, comment, is_late, status, submitted_at
 FROM submission
-WHERE tenant_id = $1 AND assignment_id = $2
+WHERE tenant_id = $1
+  AND assignment_id = $2
+  AND (sqlc.arg(student_id)::bigint = 0 OR submission.student_id = sqlc.arg(student_id)::bigint)
 ORDER BY submitted_at DESC, id DESC
 LIMIT $3 OFFSET $4;
 
 -- name: CountSubmissionsByAssignment :one
-SELECT COUNT(*)::bigint FROM submission WHERE tenant_id = $1 AND assignment_id = $2;
+SELECT COUNT(*)::bigint
+FROM submission
+WHERE tenant_id = $1
+  AND assignment_id = $2
+  AND (sqlc.arg(student_id)::bigint = 0 OR submission.student_id = sqlc.arg(student_id)::bigint);
 
 -- name: UpdateSubmissionManualGrade :one
 UPDATE submission

@@ -2,6 +2,7 @@
 // 对应后端 M1 模块
 
 import { ApiClient } from '../client'
+import type { AttachmentResponse } from '../client'
 import type { AccountStatus, ApplicationStatus, ImportTemplateFormat, UserRole } from '../constants/identity'
 import type { PaginatedResponse } from '../types/common'
 import type {
@@ -281,13 +282,6 @@ export class IdentityApi {
   }
 
   /**
-   * 按入学年份批量归档学生账号和班级。
-   */
-  async batchArchiveAccounts(data: ArchiveClassesRequest): Promise<void> {
-    return this.client.post('/accounts/batch/archive', data)
-  }
-
-  /**
    * 批量恢复账号为可用状态。
    */
   async batchRestoreAccounts(data: BatchAccountIDsRequest): Promise<void> {
@@ -312,12 +306,11 @@ export class IdentityApi {
   }
 
   /**
-   * 下载教师或学生导入模板。
+   * 下载教师或学生导入模板，文件名取自后端响应头。
    */
-  async downloadAccountImportTemplate(params: { type: 'teacher' | 'student'; format?: ImportTemplateFormat }): Promise<Blob> {
-    return this.client.getBlob('/accounts/import/template', params)
+  async downloadAccountImportTemplate(params: { type: 'teacher' | 'student'; format?: ImportTemplateFormat }): Promise<AttachmentResponse> {
+    return this.client.getAttachment('/accounts/import/template', params)
   }
-
   /**
    * 查询当前租户账号导入批次历史。
    */
@@ -428,10 +421,10 @@ export class IdentityApi {
   }
 
   /**
-   * 下载组织架构导入模板。
+   * 下载组织架构导入模板，文件名取自后端响应头。
    */
-  async downloadOrgImportTemplate(params?: { format?: ImportTemplateFormat }): Promise<Blob> {
-    return this.client.getBlob('/org/import/template', params)
+  async downloadOrgImportTemplate(params?: { format?: ImportTemplateFormat }): Promise<AttachmentResponse> {
+    return this.client.getAttachment('/org/import/template', params)
   }
 
   /**

@@ -481,15 +481,22 @@ func (s *Service) GetCourseOutline(ctx context.Context, courseID int64) (Outline
 
 // ensureCourseReadable 校验账号是否为授课教师或课程成员。
 func (s *Service) ensureCourseReadable(ctx context.Context, tx TxStore, tenantID, courseID, accountID int64) error {
+	_, err := s.courseReadAccess(ctx, tx, tenantID, courseID, accountID)
+	return err
+}
+
+// courseReadAccess 校验课程可读并返回该账号是否为授课教师。
+// 同一份判定同时服务「能不能读」与「读到教师视角还是学生视角」,避免两处各写一遍成员校验。
+func (s *Service) courseReadAccess(ctx context.Context, tx TxStore, tenantID, courseID, accountID int64) (bool, error) {
 	course, err := tx.GetCourse(ctx, tenantID, courseID)
 	if err != nil {
-		return err
+		return false, err
 	}
 	if course.TeacherID == accountID {
-		return nil
+		return true, nil
 	}
 	if _, err := tx.GetCourseMember(ctx, tenantID, courseID, accountID); err != nil {
-		return apperr.ErrTeachingCourseForbidden
+		return false, apperr.ErrTeachingCourseForbidden
 	}
-	return nil
+	return false, nil
 }

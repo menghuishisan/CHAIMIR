@@ -39,7 +39,7 @@ func isUniqueViolation(err error) bool {
 type TxStore interface {
 	GetPackageByCodeVersion(ctx context.Context, code, version string) (Package, error)
 	GetPackageByID(ctx context.Context, id int64) (Package, error)
-	ListPackages(ctx context.Context, status int16, category, keyword string, limit, offset int32) ([]Package, int64, error)
+	ListPackages(ctx context.Context, status int16, category, keyword string, authorID int64, limit, offset int32) ([]Package, int64, error)
 	ListPackageVersions(ctx context.Context, code string) ([]Package, error)
 	CreatePackage(ctx context.Context, pkg Package) (Package, error)
 	UpdatePackageDraft(ctx context.Context, pkg Package) (Package, error)
@@ -125,14 +125,14 @@ func (s *txStore) GetPackageByID(ctx context.Context, id int64) (Package, error)
 	return packageFromRow(row)
 }
 
-// ListPackages 查询包分页。
-func (s *txStore) ListPackages(ctx context.Context, status int16, category, keyword string, limit, offset int32) ([]Package, int64, error) {
-	params := sqlcgen.ListSimPackagesParams{Column1: status, Column2: category, Column3: keyword, Limit: limit, Offset: offset}
+// ListPackages 查询包分页;authorID > 0 时只返回该教师作者的包。
+func (s *txStore) ListPackages(ctx context.Context, status int16, category, keyword string, authorID int64, limit, offset int32) ([]Package, int64, error) {
+	params := sqlcgen.ListSimPackagesParams{Column1: status, Column2: category, Column3: keyword, Limit: limit, Offset: offset, Column6: authorID}
 	rows, err := s.q.ListSimPackages(ctx, params)
 	if err != nil {
 		return nil, 0, err
 	}
-	total, err := s.q.CountSimPackages(ctx, sqlcgen.CountSimPackagesParams{Column1: status, Column2: category, Column3: keyword})
+	total, err := s.q.CountSimPackages(ctx, sqlcgen.CountSimPackagesParams{Column1: status, Column2: category, Column3: keyword, Column4: authorID})
 	if err != nil {
 		return nil, 0, err
 	}

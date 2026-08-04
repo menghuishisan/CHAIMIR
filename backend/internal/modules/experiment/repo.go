@@ -33,6 +33,7 @@ type TxStore interface {
 	SetExperimentStatus(context.Context, int64, int64, int16) (Experiment, error)
 	CreateGroup(context.Context, ExperimentGroup) (ExperimentGroup, error)
 	GetGroup(context.Context, int64, int64) (ExperimentGroup, error)
+	ListGroupsByExperiment(context.Context, int64, int64) ([]ExperimentGroup, error)
 	ListGroupMembers(context.Context, int64, int64) ([]GroupMember, error)
 	GetGroupMember(context.Context, int64, int64, int64) (GroupMember, error)
 	ListStudentGroupsForExperiments(context.Context, int64, int64, []int64) (map[int64]int64, error)
@@ -186,6 +187,28 @@ func (tx *txStore) GetGroup(ctx context.Context, tenantID, id int64) (Experiment
 		return ExperimentGroup{}, apperr.ErrExperimentGroupInvalid.WithCause(err)
 	}
 	return groupFromRows(row, members), nil
+}
+
+// ListGroupsByExperiment 按实验一次取齐全部分组及其成员,供教师编组视角使用。
+// 成员按实验一次查回后在内存里按 group_id 归并,不逐组查询。
+func (tx *txStore) ListGroupsByExperiment(ctx context.Context, tenantID, experimentID int64) ([]ExperimentGroup, error) {
+	rows, err := tx.q.ListExperimentGroups(ctx, sqlcgen.ListExperimentGroupsParams{TenantID: tenantID, ExperimentID: experimentID})
+	if err != nil {
+		return nil, apperr.ErrExperimentGroupInvalid.WithCause(err)
+	}
+	memberRows, err := tx.q.ListGroupMembersByExperiment(ctx, sqlcgen.ListGroupMembersByExperimentParams{TenantID: tenantID, ExperimentID: experimentID})
+	if err != nil {
+		return nil, apperr.ErrExperimentGroupInvalid.WithCause(err)
+	}
+	byGroup := make(map[int64][]sqlcgen.GroupMember, len(rows))
+	for _, member := range memberRows {
+		byGroup[member.GroupID] = append(byGroup[member.GroupID], member)
+	}
+	out := make([]ExperimentGroup, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, groupFromRows(row, byGroup[row.ID]))
+	}
+	return out, nil
 }
 
 // ListGroupMembers 查询小组成员列表。

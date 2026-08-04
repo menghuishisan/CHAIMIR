@@ -184,6 +184,25 @@
     parameters: [{ $ref: "#/components/parameters/IDPath" }]
     requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/teaching/lessons/{id}/material:
+  post:
+    tags: [teaching]
+    summary: 上传课时视频或附件
+    operationId: teachingUploadLessonMaterial
+    x-chaimir-audience: teacher
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    requestBody: { $ref: "#/components/requestBodies/MultipartBody" }
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/teaching/lessons/{id}/material/access:
+  post:
+    tags: [teaching]
+    summary: 换取课时材料投放授权(视频流式续播 / 附件一次性取件)
+    operationId: teachingIssueLessonMaterialAccess
+    x-chaimir-audience: user
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
 /api/v1/teaching/lessons/{id}/progress:
   post:
     tags: [teaching]
@@ -251,6 +270,14 @@
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
 
 /api/v1/teaching/courses/{id}/assignments:
+  get:
+    tags: [teaching]
+    summary: 课程作业清单(教师含草稿,学生只见已发布)
+    operationId: teachingListCourseAssignments
+    x-chaimir-audience: user
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
   post:
     tags: [teaching]
     summary: 创建课程作业
@@ -290,11 +317,14 @@
 /api/v1/teaching/assignments/{id}/submissions:
   get:
     tags: [teaching]
-    summary: 作业提交列表
+    summary: 作业提交列表(教师见全班,学生只见本人)
     operationId: teachingListSubmissions
-    x-chaimir-audience: teacher
+    x-chaimir-audience: user
     security: [{ bearerAuth: [] }]
-    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    parameters:
+      - { $ref: "#/components/parameters/IDPath" }
+      - { $ref: "#/components/parameters/PageQuery" }
+      - { $ref: "#/components/parameters/SizeQuery" }
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
 /api/v1/teaching/assignments/{id}/draft:
   get:

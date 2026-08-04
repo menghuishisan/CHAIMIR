@@ -48,6 +48,14 @@ export class ExperimentApi {
   }
 
   /**
+   * 读取单个已发布实验的学生视图（与列表同一投影，不含环境初始化与判题内部配置）。
+   * 实验详情页深链、刷新以及退出沉浸式工作台后的回落都用这条。
+   */
+  async getPublishedExperiment(experimentId: string): Promise<StudentExperiment> {
+    return this.client.get(`/experiment/student/experiments/${experimentId}`)
+  }
+
+  /**
    * 创建实验（教师）
    */
   async createExperiment(data: ExperimentRequest): Promise<Experiment> {
@@ -101,6 +109,14 @@ export class ExperimentApi {
    */
   async createGroup(experimentId: string, data: ExperimentGroupRequest): Promise<ExperimentGroup> {
     return this.client.post(`/experiment/experiments/${experimentId}/groups`, data)
+  }
+
+  /**
+   * 查询本实验全部协作小组(教师编组视角)。
+   * 与 getGroup 的差别:这里按实验列全部分组、不含共享实例;getGroup 按组读单组并附带实例。
+   */
+  async listGroups(experimentId: string): Promise<ExperimentGroup[]> {
+    return this.client.get(`/experiment/experiments/${experimentId}/groups`)
   }
 
   /**

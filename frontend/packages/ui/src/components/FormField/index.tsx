@@ -19,8 +19,11 @@ export interface FormFieldProps {
   required?: boolean;
   /** 辅助说明(与 error 互斥,error 优先) */
   helper?: string;
-  /** 错误文案:role="alert" 就近播报 */
-  error?: string;
+  /**
+   * 错误文案:role="alert" 就近播报。
+   * 允许 null —— 校验器以 null 表达「已通过」,调用方不必在每个字段处转成 undefined。
+   */
+  error?: string | null;
   children: ReactNode;
   className?: string;
 }
