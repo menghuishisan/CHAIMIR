@@ -93,6 +93,27 @@ SELECT id, code, name, kind, eco_tags, resource_spec, status, created_at, update
 FROM tool
 ORDER BY created_at DESC, id DESC;
 
+-- name: ListCatalogRuntimes :many
+-- 编排目录只取可编排字段:运行时本体的 code/name/eco 与其可用镜像版本。
+-- 一次 LEFT JOIN 平铺取回后由 repo 按运行时分组,既避免按运行时逐个查镜像的 N+1,
+-- 也不用 jsonb_agg —— 那会让生成的行类型退化成 interface{},把解码负担推给业务层。
+-- 停用的运行时与镜像不进可选集;没有可用镜像的运行时仍要出现(可用默认镜像起环境)。
+SELECT r.code AS runtime_code, r.name AS runtime_name, r.eco,
+       COALESCE(i.version, '')::varchar AS image_version,
+       COALESCE(i.is_default, false)::boolean AS image_is_default
+FROM runtime r
+LEFT JOIN runtime_image i
+       ON i.runtime_id = r.id AND i.status = 1
+WHERE r.status = 1
+ORDER BY r.code, i.is_default DESC NULLS LAST, i.version DESC NULLS LAST;
+
+-- name: ListCatalogTools :many
+-- 编排目录只取工具的 code/name/kind,不出 resource_spec 与镜像引用。
+SELECT code, name, kind
+FROM tool
+WHERE status = 1
+ORDER BY code;
+
 -- name: UpsertTool :one
 INSERT INTO tool (id, code, name, kind, eco_tags, resource_spec, status, created_at, updated_at)
 VALUES ($1, $2, $3, $4, $5, $6, $7, now(), now())

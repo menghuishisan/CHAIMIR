@@ -5,6 +5,7 @@ import (
 	"context"
 	"strings"
 
+	"chaimir/internal/contracts"
 	"chaimir/internal/platform/pagex"
 	"chaimir/pkg/apperr"
 )
@@ -34,30 +35,6 @@ func (s *Service) CreateChapter(ctx context.Context, courseID int64, req Chapter
 		return ChapterDTO{}, mapCourseError(err)
 	}
 	return chapterDTO(chapter), nil
-}
-
-// ListChapters 查询课程章节。
-func (s *Service) ListChapters(ctx context.Context, courseID int64) ([]ChapterDTO, error) {
-	id, err := currentIdentity(ctx)
-	if err != nil {
-		return nil, err
-	}
-	var chapters []Chapter
-	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
-		if err := s.ensureCourseReadable(ctx, tx, id.TenantID, courseID, id.AccountID); err != nil {
-			return err
-		}
-		var err error
-		chapters, err = tx.ListChapters(ctx, id.TenantID, courseID)
-		return err
-	}); err != nil {
-		return nil, mapCourseError(err)
-	}
-	out := make([]ChapterDTO, 0, len(chapters))
-	for _, chapter := range chapters {
-		out = append(out, chapterDTO(chapter))
-	}
-	return out, nil
 }
 
 // UpdateChapter 更新章节。
@@ -170,37 +147,6 @@ func (s *Service) GetLessonForUser(ctx context.Context, lessonID int64) (LessonD
 	return lessonDTO(lesson)
 }
 
-// ListLessonsByChapter 查询章节下课时列表。
-func (s *Service) ListLessonsByChapter(ctx context.Context, chapterID int64) ([]LessonDTO, error) {
-	id, err := currentIdentity(ctx)
-	if err != nil {
-		return nil, err
-	}
-	var lessons []Lesson
-	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
-		chapter, err := tx.GetChapter(ctx, id.TenantID, chapterID)
-		if err != nil {
-			return err
-		}
-		if err := s.ensureCourseReadable(ctx, tx, id.TenantID, chapter.CourseID, id.AccountID); err != nil {
-			return err
-		}
-		lessons, err = tx.ListLessonsByChapter(ctx, id.TenantID, chapterID)
-		return err
-	}); err != nil {
-		return nil, mapCourseError(err)
-	}
-	out := make([]LessonDTO, 0, len(lessons))
-	for _, lesson := range lessons {
-		dto, err := lessonDTO(lesson)
-		if err != nil {
-			return nil, mapCourseError(err)
-		}
-		out = append(out, dto)
-	}
-	return out, nil
-}
-
 // UpdateLesson 更新课时。
 func (s *Service) UpdateLesson(ctx context.Context, lessonID int64, req LessonRequest) (LessonDTO, error) {
 	id, err := currentIdentity(ctx)
@@ -230,41 +176,6 @@ func (s *Service) UpdateLesson(ctx context.Context, lessonID int64, req LessonRe
 		}
 		current.Title, current.ContentType, current.ContentRef, current.Sort = req.Title, req.ContentType, req.ContentRef, req.Sort
 		lesson, err = tx.UpdateLesson(ctx, current)
-		return err
-	}); err != nil {
-		return LessonDTO{}, mapCourseError(err)
-	}
-	return lessonDTO(lesson)
-}
-
-// SetLessonContent 更新课时绑定的内容引用。
-func (s *Service) SetLessonContent(ctx context.Context, lessonID int64, req LessonRequest) (LessonDTO, error) {
-	id, err := currentIdentity(ctx)
-	if err != nil {
-		return LessonDTO{}, err
-	}
-	req, err = validateLessonRequest(req)
-	if err != nil {
-		return LessonDTO{}, err
-	}
-	var lesson Lesson
-	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
-		current, err := tx.GetLesson(ctx, id.TenantID, lessonID)
-		if err != nil {
-			return err
-		}
-		chapter, err := tx.GetChapter(ctx, id.TenantID, current.ChapterID)
-		if err != nil {
-			return err
-		}
-		course, err := tx.GetCourse(ctx, id.TenantID, chapter.CourseID)
-		if err != nil {
-			return err
-		}
-		if err := ensureTeacherOwned(course, id.AccountID); err != nil {
-			return err
-		}
-		lesson, err = tx.SetLessonContent(ctx, id.TenantID, lessonID, req.ContentType, req.ContentRef)
 		return err
 	}); err != nil {
 		return LessonDTO{}, mapCourseError(err)
@@ -326,17 +237,36 @@ func (s *Service) JoinCourseByInvite(ctx context.Context, req JoinCourseRequest)
 	}); err != nil {
 		return MemberDTO{}, err
 	}
-	return memberDTO(member), nil
+	// 加入者就是当前学生,姓名取自其账号档案(经 M1 契约,不查 identity 的表)。
+	profile, err := s.identity.GetAccount(ctx, id.AccountID)
+	if err != nil {
+		return MemberDTO{}, apperr.ErrTeachingMemberInvalid.WithCause(err)
+	}
+	return memberDTO(member, profile), nil
 }
 
-// AddCourseMembers 批量添加课程成员。
+// AddCourseMembers 按班级批量添加课程成员。
+// 班级到学生的解析走 M1 契约(教师可读组织,但账号目录是学校管理员能力),
+// M6 不查 identity 的表、也不接受客户端回传的学生编号数组。
 func (s *Service) AddCourseMembers(ctx context.Context, courseID int64, req BatchMembersRequest) ([]MemberDTO, error) {
 	id, err := currentIdentity(ctx)
 	if err != nil {
 		return nil, err
 	}
-	if len(req.StudentIDs) == 0 {
+	classID := req.ClassID.Int64()
+	if classID <= 0 {
 		return nil, apperr.ErrTeachingMemberInvalid
+	}
+	students, err := s.identity.ListClassStudents(ctx, id.TenantID, classID)
+	if err != nil {
+		return nil, apperr.ErrTeachingMemberInvalid.WithCause(err)
+	}
+	if len(students) == 0 {
+		return nil, apperr.ErrTeachingMemberClassEmpty
+	}
+	profiles := make(map[int64]contracts.AccountInfo, len(students))
+	for _, student := range students {
+		profiles[student.AccountID] = student
 	}
 	var members []CourseMember
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
@@ -350,13 +280,9 @@ func (s *Service) AddCourseMembers(ctx context.Context, courseID int64, req Batc
 		if err := ensureCanManageMembers(course); err != nil {
 			return err
 		}
-		members = make([]CourseMember, 0, len(req.StudentIDs))
-		for _, publicStudentID := range req.StudentIDs {
-			studentID := publicStudentID.Int64()
-			if studentID <= 0 {
-				return apperr.ErrTeachingMemberInvalid
-			}
-			member, err := tx.CreateCourseMember(ctx, CourseMember{ID: s.ids.Generate(), TenantID: id.TenantID, CourseID: courseID, StudentID: studentID, JoinMode: JoinModeTeacher})
+		members = make([]CourseMember, 0, len(students))
+		for _, student := range students {
+			member, err := tx.CreateCourseMember(ctx, CourseMember{ID: s.ids.Generate(), TenantID: id.TenantID, CourseID: courseID, StudentID: student.AccountID, JoinMode: JoinModeTeacher})
 			if err != nil {
 				return err
 			}
@@ -366,11 +292,7 @@ func (s *Service) AddCourseMembers(ctx context.Context, courseID int64, req Batc
 	}); err != nil {
 		return nil, mapCourseError(err)
 	}
-	out := make([]MemberDTO, 0, len(members))
-	for _, member := range members {
-		out = append(out, memberDTO(member))
-	}
-	return out, nil
+	return memberDTOs(members, profiles), nil
 }
 
 // ListCourseMembers 查询课程成员。
@@ -395,11 +317,31 @@ func (s *Service) ListCourseMembers(ctx context.Context, courseID int64, page, s
 	}); err != nil {
 		return nil, 0, 0, 0, mapCourseError(err)
 	}
-	out := make([]MemberDTO, 0, len(members))
-	for _, member := range members {
-		out = append(out, memberDTO(member))
+	profiles, err := s.memberProfiles(ctx, members)
+	if err != nil {
+		return nil, 0, 0, 0, err
 	}
-	return out, total, page, size, nil
+	return memberDTOs(members, profiles), total, page, size, nil
+}
+
+// memberProfiles 按当前页成员一次批量解析账号档案,避免逐条查询形成 N+1。
+func (s *Service) memberProfiles(ctx context.Context, members []CourseMember) (map[int64]contracts.AccountInfo, error) {
+	if len(members) == 0 {
+		return map[int64]contracts.AccountInfo{}, nil
+	}
+	ids := make([]int64, 0, len(members))
+	for _, member := range members {
+		ids = append(ids, member.StudentID)
+	}
+	accounts, err := s.identity.BatchGetAccounts(ctx, ids)
+	if err != nil {
+		return nil, apperr.ErrTeachingMemberInvalid.WithCause(err)
+	}
+	profiles := make(map[int64]contracts.AccountInfo, len(accounts))
+	for _, account := range accounts {
+		profiles[account.AccountID] = account
+	}
+	return profiles, nil
 }
 
 // RemoveCourseMember 移除课程成员。

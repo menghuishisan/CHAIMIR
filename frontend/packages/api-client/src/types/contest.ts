@@ -168,7 +168,7 @@ export interface BattleMatch {
   judge_task_ref?: string
   result?: BattleResult
   score_delta: Record<string, unknown>
-  replay_ref?: string
+  replay_available: boolean
   status: BattleMatchStatus
   matched_at: string
   finished_at?: string
@@ -176,7 +176,14 @@ export interface BattleMatch {
 
 export interface BattleReplayRef {
   match_id: SnowflakeID
-  replay_ref: string
+  available: boolean
+}
+
+export interface BattleReplayDownloadGrant {
+  token: string
+  mode: 'download'
+  file_name: string
+  expires_at: string
 }
 
 export interface LadderRank {

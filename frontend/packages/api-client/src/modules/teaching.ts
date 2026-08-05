@@ -2,7 +2,7 @@
 // 对应后端 M6 模块
 
 import { ApiClient } from '../client'
-import type { CourseStatus, LessonContentType } from '../constants/teaching'
+import type { CourseStatus } from '../constants/teaching'
 import type { PaginatedResponse } from '../types/common'
 import type {
   Course,
@@ -132,13 +132,8 @@ export class TeachingApi {
   }
 
   // ===== 章节 =====
-
-  /**
-   * 查询课程章节列表。
-   */
-  async listChapters(courseId: string): Promise<Chapter[]> {
-    return this.client.get(`/teaching/courses/${courseId}/chapters`)
-  }
+  // 章节与课时的只读取用统一走 getCourseOutline:它一次返回课程 + 章节 + 课时 + 本人进度。
+  // 不另开「只取章节」「只取某章课时」两条方法 —— 那是同一份数据的子集形态,会变成第二套读路径。
 
   /**
    * 创建章节
@@ -162,13 +157,6 @@ export class TeachingApi {
   }
 
   // ===== 课时 =====
-
-  /**
-   * 查询章节课时列表。
-   */
-  async listLessons(chapterId: string): Promise<Lesson[]> {
-    return this.client.get(`/teaching/chapters/${chapterId}/lessons`)
-  }
 
   /**
    * 查询单个课时详情。
@@ -196,16 +184,6 @@ export class TeachingApi {
    */
   async deleteLesson(chapterId: string, lessonId: string): Promise<void> {
     return this.client.delete(`/teaching/chapters/${chapterId}/lessons/${lessonId}`)
-  }
-
-  /**
-   * 设置课时内容引用。
-   */
-  async setLessonContent(
-    lessonId: string,
-    data: { content_type: LessonContentType; content_ref: Record<string, unknown> }
-  ): Promise<Lesson> {
-    return this.client.post(`/teaching/lessons/${lessonId}/content`, data)
   }
 
   /**

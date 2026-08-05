@@ -73,11 +73,12 @@ func contractResult(result *JudgeResult) contracts.JudgeTaskResult {
 		})
 	}
 	return contracts.JudgeTaskResult{
-		Passed:      result.Passed,
-		Score:       result.Score,
-		MaxScore:    result.MaxScore,
-		Details:     details,
-		SnapshotRef: snapshotRef(result.TaskID),
+		Passed:    result.Passed,
+		Score:     result.Score,
+		MaxScore:  result.MaxScore,
+		Details:   details,
+		ResultRef: resultRef(result.TaskID),
+		Replay:    result.Replay,
 	}
 }
 
@@ -93,13 +94,13 @@ func taskInfoToMap(info JudgeTaskInfo) map[string]any {
 	}
 	if info.Result != nil {
 		out["result"] = map[string]any{
-			"passed":       info.Result.Passed,
-			"score":        info.Result.Score,
-			"max_score":    info.Result.MaxScore,
-			"version":      info.Result.Version,
-			"is_rejudge":   info.Result.IsRejudge,
-			"details":      info.Result.Details,
-			"snapshot_ref": snapshotRef(info.Task.ID),
+			"passed":     info.Result.Passed,
+			"score":      info.Result.Score,
+			"max_score":  info.Result.MaxScore,
+			"version":    info.Result.Version,
+			"is_rejudge": info.Result.IsRejudge,
+			"details":    info.Result.Details,
+			"result_ref": resultRef(info.Task.ID),
 		}
 	}
 	return out
@@ -125,12 +126,21 @@ func judgerToMap(j Judger) (map[string]any, error) {
 	}, nil
 }
 
+// judgerCatalogResponse 把判题方式目录投影转换为 HTTP 稳定字段名。
+func judgerCatalogResponse(items []CatalogJudger) JudgerCatalogResponse {
+	out := JudgerCatalogResponse{Judgers: make([]CatalogJudgerResponse, 0, len(items))}
+	for _, item := range items {
+		out.Judgers = append(out.Judgers, CatalogJudgerResponse{Code: item.Code, Name: item.Name, Type: item.Type})
+	}
+	return out
+}
+
 // fingerprintToMatch 转换查重命中为跨模块契约。
 func fingerprintToMatch(fp SubmissionFingerprint, score float64) contracts.FingerprintMatch {
 	return contracts.FingerprintMatch{SourceRef: fp.SourceRef, SubmitterID: fp.SubmitterID, Score: score, CodeHash: fp.CodeHash}
 }
 
-// snapshotRef 生成面向调用方的判题快照引用。
-func snapshotRef(taskID int64) string {
-	return "judge:2026:sub:" + ids.Format(taskID)
+// resultRef 生成面向调用方的判题结果引用,供实验记录关联判题详情。
+func resultRef(taskID int64) string {
+	return "judge:2026:result:" + ids.Format(taskID)
 }

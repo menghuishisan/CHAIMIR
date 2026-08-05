@@ -42,6 +42,8 @@ type TxStore interface {
 	ListPackages(ctx context.Context, status int16, category, keyword string, authorID int64, limit, offset int32) ([]Package, int64, error)
 	ListPackageVersions(ctx context.Context, code string) ([]Package, error)
 	CreatePackage(ctx context.Context, pkg Package) (Package, error)
+	UpsertBuiltinPackage(ctx context.Context, pkg Package) (Package, error)
+	ArchiveRetiredBuiltinPackages(ctx context.Context, liveKeys []string) ([]Package, error)
 	UpdatePackageDraft(ctx context.Context, pkg Package) (Package, error)
 	UpdatePackageStatus(ctx context.Context, id int64, status int16) (Package, error)
 	CreateReview(ctx context.Context, id, packageID, submitterID int64, report ValidationReport) (Review, error)
@@ -168,6 +170,46 @@ func (s *txStore) CreatePackage(ctx context.Context, pkg Package) (Package, erro
 		return Package{}, err
 	}
 	return packageFromRow(row)
+}
+
+// UpsertBuiltinPackage 幂等写入平台内置仿真包。
+// 内置包由平台标准库随版本交付,不经审核流程,故 author_type/status 由 SQL 固定,
+// 调用方只提供协议字段;重复部署按 (code, version) 覆盖,不新建行。
+func (s *txStore) UpsertBuiltinPackage(ctx context.Context, pkg Package) (Package, error) {
+	scale, err := jsonx.AnyBytes(pkg.ScaleLimit, apperr.ErrSimPackageInvalid)
+	if err != nil {
+		return Package{}, err
+	}
+	interactionSchema, err := jsonx.AnyBytes(pkg.InteractionSchema, apperr.ErrSimPackageInvalid)
+	if err != nil {
+		return Package{}, err
+	}
+	codeTrace, err := jsonx.AnyBytes(pkg.CodeTrace, apperr.ErrSimPackageInvalid)
+	if err != nil {
+		return Package{}, err
+	}
+	row, err := s.q.UpsertBuiltinSimPackage(ctx, sqlcgen.UpsertBuiltinSimPackageParams{ID: pkg.ID, Code: pkg.Code, Version: pkg.Version, Name: pkg.Name, Category: pkg.Category, ScaleLimit: scale, BundleKey: pkg.BundleKey, BundleHash: pkg.BundleHash, InteractionSchema: interactionSchema, CodeTrace: codeTrace})
+	if err != nil {
+		return Package{}, err
+	}
+	return packageFromRow(row)
+}
+
+// ArchiveRetiredBuiltinPackages 下架已不在标准库中的内置包,liveKeys 为 "code@version" 列表。
+func (s *txStore) ArchiveRetiredBuiltinPackages(ctx context.Context, liveKeys []string) ([]Package, error) {
+	rows, err := s.q.ArchiveRetiredBuiltinSimPackages(ctx, liveKeys)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]Package, 0, len(rows))
+	for _, row := range rows {
+		pkg, err := packageFromRow(row)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, pkg)
+	}
+	return out, nil
 }
 
 // UpdatePackageDraft 更新草稿或退回包。

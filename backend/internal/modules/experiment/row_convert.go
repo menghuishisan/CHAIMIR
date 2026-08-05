@@ -64,6 +64,11 @@ func instanceFromRecycleRow(row sqlcgen.ClaimRecyclableInstancesAcrossTenantsRow
 	return instanceFromFields(row.ID, row.TenantID, row.ExperimentID, row.OwnerAccountID, row.GroupID, row.SourceRef, row.SandboxRefs, row.SimSessionRefs, row.Status, row.Score, row.StartedAt, row.FinishedAt, row.LastActiveAt)
 }
 
+// instanceFromCourseRow 转换按课程查出的实例行,供课程结束级联回收使用。
+func instanceFromCourseRow(row sqlcgen.ListLiveInstancesByCourseRow) (ExperimentInstance, error) {
+	return instanceFromFields(row.ID, row.TenantID, row.ExperimentID, row.OwnerAccountID, row.GroupID, row.SourceRef, row.SandboxRefs, row.SimSessionRefs, row.Status, row.Score, row.StartedAt, row.FinishedAt, row.LastActiveAt)
+}
+
 // instanceFromFields 汇总实例行字段并解析资源引用 JSON。
 func instanceFromFields(id, tenantID, experimentID, ownerAccountID int64, groupID pgtype.Int8, sourceRef string, sandboxRaw, simRaw []byte, status int16, score float64, startedAt, finishedAt, lastActiveAt pgtype.Timestamptz) (ExperimentInstance, error) {
 	sandboxes, err := decodeSandboxRefs(sandboxRaw)

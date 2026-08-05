@@ -38,7 +38,9 @@ type TxStore interface {
 	GetGroupMember(context.Context, int64, int64, int64) (GroupMember, error)
 	ListStudentGroupsForExperiments(context.Context, int64, int64, []int64) (map[int64]int64, error)
 	UpsertGroupMember(context.Context, GroupMember) (GroupMember, error)
+	LockInstanceCreation(context.Context, int64) error
 	GetActiveGroupInstance(context.Context, int64, int64, int64) (ExperimentInstance, error)
+	GetActiveOwnerInstance(context.Context, int64, int64, int64) (ExperimentInstance, error)
 	CreateInstance(context.Context, ExperimentInstance) (ExperimentInstance, error)
 	GetInstance(context.Context, int64, int64) (ExperimentInstance, error)
 	GetInstanceForUpdate(context.Context, int64, int64) (ExperimentInstance, error)
@@ -49,6 +51,7 @@ type TxStore interface {
 	UpdateInstanceScore(context.Context, int64, int64, float64) (ExperimentInstance, error)
 	TouchInstance(context.Context, int64, int64) (ExperimentInstance, error)
 	ClaimRecyclableInstances(context.Context, int, int, int32) ([]ExperimentInstance, error)
+	ListLiveInstancesByCourse(context.Context, int64, int64) ([]ExperimentInstance, error)
 	UpsertCheckpoint(context.Context, CheckpointResult) (CheckpointResult, error)
 	GetCheckpointByJudgeTask(context.Context, int64, string) (CheckpointResult, error)
 	ListCheckpoints(context.Context, int64, int64) ([]CheckpointResult, error)
@@ -258,9 +261,23 @@ func (tx *txStore) UpsertGroupMember(ctx context.Context, item GroupMember) (Gro
 	return groupMemberFromRow(row), nil
 }
 
+// LockInstanceCreation 锁定同一实验实例创建键,保证幂等检查和创建处于同一事务序列。
+func (tx *txStore) LockInstanceCreation(ctx context.Context, lockKey int64) error {
+	return tx.q.LockInstanceCreation(ctx, lockKey)
+}
+
 // GetActiveGroupInstance 查询小组当前共享实例。
 func (tx *txStore) GetActiveGroupInstance(ctx context.Context, tenantID, experimentID, groupID int64) (ExperimentInstance, error) {
 	row, err := tx.q.GetActiveGroupInstance(ctx, sqlcgen.GetActiveGroupInstanceParams{TenantID: tenantID, ExperimentID: experimentID, GroupID: pgtypex.Int8(groupID)})
+	if err != nil {
+		return ExperimentInstance{}, err
+	}
+	return instanceFromFields(row.ID, row.TenantID, row.ExperimentID, row.OwnerAccountID, row.GroupID, row.SourceRef, row.SandboxRefs, row.SimSessionRefs, row.Status, row.Score, row.StartedAt, row.FinishedAt, row.LastActiveAt)
+}
+
+// GetActiveOwnerInstance 查询单人当前活跃实例。
+func (tx *txStore) GetActiveOwnerInstance(ctx context.Context, tenantID, experimentID, ownerID int64) (ExperimentInstance, error) {
+	row, err := tx.q.GetActiveOwnerInstance(ctx, sqlcgen.GetActiveOwnerInstanceParams{TenantID: tenantID, ExperimentID: experimentID, OwnerAccountID: ownerID})
 	if err != nil {
 		return ExperimentInstance{}, err
 	}
@@ -365,6 +382,23 @@ func (tx *txStore) ClaimRecyclableInstances(ctx context.Context, pausedTimeoutSe
 	out := make([]ExperimentInstance, 0, len(rows))
 	for _, row := range rows {
 		item, err := instanceFromRecycleRow(row)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, item)
+	}
+	return out, nil
+}
+
+// ListLiveInstancesByCourse 列出课程下仍占用引擎资源的实例,供课程结束级联回收。
+func (tx *txStore) ListLiveInstancesByCourse(ctx context.Context, tenantID, courseID int64) ([]ExperimentInstance, error) {
+	rows, err := tx.q.ListLiveInstancesByCourse(ctx, sqlcgen.ListLiveInstancesByCourseParams{TenantID: tenantID, CourseID: pgtypex.Int8(courseID)})
+	if err != nil {
+		return nil, apperr.ErrExperimentRecycleFailed.WithCause(err)
+	}
+	out := make([]ExperimentInstance, 0, len(rows))
+	for _, row := range rows {
+		item, err := instanceFromCourseRow(row)
 		if err != nil {
 			return nil, err
 		}

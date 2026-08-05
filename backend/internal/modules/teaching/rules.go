@@ -3,7 +3,6 @@ package teaching
 
 import (
 	"fmt"
-	"html"
 	"math"
 	"strings"
 	"time"
@@ -45,6 +44,11 @@ func validateChapterRequest(req ChapterRequest) (ChapterRequest, error) {
 }
 
 // validateLessonRequest 校验课时输入。
+//
+// 正文不做 HTML 实体转义:全站唯一的消费者是 React 文本节点(前端零
+// dangerouslySetInnerHTML,后端不产 HTML),转义反而会把学生看到的 `a < b` 变成
+// `a &lt; b` —— 区块链课程的正文与讨论必然出现代码片段与比较符号,这是可见缺陷而非防护。
+// XSS 防护由渲染层的文本节点语义 + 前端 CSP 承担(M6 安全设计 §6)。
 func validateLessonRequest(req LessonRequest) (LessonRequest, error) {
 	req.Title = strings.TrimSpace(req.Title)
 	if req.Title == "" || req.Sort < 0 || !validLessonContentType(req.ContentType) {
@@ -52,9 +56,6 @@ func validateLessonRequest(req LessonRequest) (LessonRequest, error) {
 	}
 	if req.ContentRef == nil {
 		req.ContentRef = map[string]any{}
-	}
-	if req.ContentType == LessonContentMarkdown {
-		req.ContentRef = sanitizeStringMap(req.ContentRef)
 	}
 	return req, nil
 }
@@ -119,9 +120,9 @@ func validateProgressRequest(req ProgressRequest) (ProgressRequest, error) {
 	return req, nil
 }
 
-// validatePostRequest 校验讨论输入。
+// validatePostRequest 校验讨论输入。正文原样存(不做 HTML 转义,理由见 validateLessonRequest)。
 func validatePostRequest(req PostRequest) (PostRequest, error) {
-	req.Content = sanitizeUserText(req.Content)
+	req.Content = strings.TrimSpace(req.Content)
 	if req.Content == "" || req.ParentID < 0 {
 		return PostRequest{}, apperr.ErrTeachingDiscussionInvalid
 	}
@@ -130,8 +131,8 @@ func validatePostRequest(req PostRequest) (PostRequest, error) {
 
 // validateAnnouncementRequest 校验公告输入。
 func validateAnnouncementRequest(req AnnouncementRequest) (AnnouncementRequest, error) {
-	req.Title = sanitizeUserText(req.Title)
-	req.Content = sanitizeUserText(req.Content)
+	req.Title = strings.TrimSpace(req.Title)
+	req.Content = strings.TrimSpace(req.Content)
 	if req.Title == "" || req.Content == "" {
 		return AnnouncementRequest{}, apperr.ErrTeachingDiscussionInvalid
 	}
@@ -140,7 +141,7 @@ func validateAnnouncementRequest(req AnnouncementRequest) (AnnouncementRequest, 
 
 // validateReviewRequest 校验课程评价输入。
 func validateReviewRequest(req ReviewRequest) (ReviewRequest, error) {
-	req.Comment = sanitizeUserText(req.Comment)
+	req.Comment = strings.TrimSpace(req.Comment)
 	if req.Rating < 1 || req.Rating > 5 {
 		return ReviewRequest{}, apperr.ErrTeachingDiscussionInvalid
 	}
@@ -335,36 +336,4 @@ func validGradingMode(value int16) bool {
 // validGradeSource 校验成绩来源类型。
 func validGradeSource(value int16) bool {
 	return value >= GradeSourceAssignment && value <= GradeSourceExam
-}
-
-// sanitizeUserText 清理用户可见文本中的 HTML 控制字符,防止存储型脚本进入响应。
-func sanitizeUserText(value string) string {
-	return html.EscapeString(strings.TrimSpace(value))
-}
-
-// sanitizeStringMap 递归清理 JSON 对象中的字符串值,用于 Markdown 课时内容。
-func sanitizeStringMap(in map[string]any) map[string]any {
-	out := make(map[string]any, len(in))
-	for key, value := range in {
-		out[key] = sanitizeJSONValue(value)
-	}
-	return out
-}
-
-// sanitizeJSONValue 清理 JSON 值中的字符串并保留数组与对象结构。
-func sanitizeJSONValue(value any) any {
-	switch typed := value.(type) {
-	case string:
-		return sanitizeUserText(typed)
-	case map[string]any:
-		return sanitizeStringMap(typed)
-	case []any:
-		out := make([]any, 0, len(typed))
-		for _, item := range typed {
-			out = append(out, sanitizeJSONValue(item))
-		}
-		return out
-	default:
-		return value
-	}
 }

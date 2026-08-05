@@ -166,6 +166,13 @@ func (s *Service) UpdateDraftItem(ctx context.Context, itemID int64, req UpdateI
 // PublishItem 发布草稿内容。
 func (s *Service) PublishItem(ctx context.Context, itemID int64) (ItemDTO, error) {
 	return s.itemStatusTransition(ctx, itemID, "content.publish", func(ctx context.Context, tx TxStore, tenantID, id int64) (Item, error) {
+		item, err := tx.GetItemWithBodyByID(ctx, tenantID, id)
+		if err != nil {
+			return Item{}, mapContentReadError(err)
+		}
+		if err := validateContestSubmitKey(item); err != nil {
+			return Item{}, err
+		}
 		return tx.PublishItem(ctx, tenantID, id)
 	})
 }

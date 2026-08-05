@@ -92,6 +92,12 @@ export interface ContentAttachmentUpload {
   size: number
 }
 
+/**
+ * ContentAttachment 是题目正文里保存的附件引用。
+ * 三种内容类型共用 body 的 `attachments` 数组(M5 架构设计 §2.2),形状与上传返回一致。
+ */
+export type ContentAttachment = ContentAttachmentUpload
+
 export interface ContentAttachmentDownloadGrantRequest {
   resource_id: SnowflakeID
   object_ref: string

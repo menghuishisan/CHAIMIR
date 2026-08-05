@@ -686,6 +686,89 @@ func (q *Queries) GetToolByCode(ctx context.Context, code string) (Tool, error) 
 	return i, err
 }
 
+const listCatalogRuntimes = `-- name: ListCatalogRuntimes :many
+SELECT r.code AS runtime_code, r.name AS runtime_name, r.eco,
+       COALESCE(i.version, '')::varchar AS image_version,
+       COALESCE(i.is_default, false)::boolean AS image_is_default
+FROM runtime r
+LEFT JOIN runtime_image i
+       ON i.runtime_id = r.id AND i.status = 1
+WHERE r.status = 1
+ORDER BY r.code, i.is_default DESC NULLS LAST, i.version DESC NULLS LAST
+`
+
+type ListCatalogRuntimesRow struct {
+	RuntimeCode    string `json:"runtime_code"`
+	RuntimeName    string `json:"runtime_name"`
+	Eco            string `json:"eco"`
+	ImageVersion   string `json:"image_version"`
+	ImageIsDefault bool   `json:"image_is_default"`
+}
+
+// 编排目录只取可编排字段:运行时本体的 code/name/eco 与其可用镜像版本。
+// 一次 LEFT JOIN 平铺取回后由 repo 按运行时分组,既避免按运行时逐个查镜像的 N+1,
+// 也不用 jsonb_agg —— 那会让生成的行类型退化成 interface{},把解码负担推给业务层。
+// 停用的运行时与镜像不进可选集;没有可用镜像的运行时仍要出现(可用默认镜像起环境)。
+func (q *Queries) ListCatalogRuntimes(ctx context.Context) ([]ListCatalogRuntimesRow, error) {
+	rows, err := q.db.Query(ctx, listCatalogRuntimes)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListCatalogRuntimesRow{}
+	for rows.Next() {
+		var i ListCatalogRuntimesRow
+		if err := rows.Scan(
+			&i.RuntimeCode,
+			&i.RuntimeName,
+			&i.Eco,
+			&i.ImageVersion,
+			&i.ImageIsDefault,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listCatalogTools = `-- name: ListCatalogTools :many
+SELECT code, name, kind
+FROM tool
+WHERE status = 1
+ORDER BY code
+`
+
+type ListCatalogToolsRow struct {
+	Code string `json:"code"`
+	Name string `json:"name"`
+	Kind int16  `json:"kind"`
+}
+
+// 编排目录只取工具的 code/name/kind,不出 resource_spec 与镜像引用。
+func (q *Queries) ListCatalogTools(ctx context.Context) ([]ListCatalogToolsRow, error) {
+	rows, err := q.db.Query(ctx, listCatalogTools)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListCatalogToolsRow{}
+	for rows.Next() {
+		var i ListCatalogToolsRow
+		if err := rows.Scan(&i.Code, &i.Name, &i.Kind); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listRecycleCandidates = `-- name: ListRecycleCandidates :many
 SELECT s.id, s.tenant_id, s.runtime_id, s.image_id, s.namespace, s.source_ref, s.owner_account_id, s.phase, s.status, s.keep_alive, s.snapshot_enabled, s.code_storage_key, s.code_hash, s.init_code_ref, s.init_script_ref, s.snapshot_ref, s.snapshot_domains, s.snapshot_created_at, s.snapshot_expire_at, s.keep_alive_until, s.last_active_at, s.expire_at, s.created_at, s.updated_at
 FROM sandbox s

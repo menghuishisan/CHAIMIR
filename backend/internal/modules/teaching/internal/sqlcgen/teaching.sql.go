@@ -3130,43 +3130,6 @@ func (q *Queries) SetCourseVisibility(ctx context.Context, arg SetCourseVisibili
 	return i, err
 }
 
-const setLessonContent = `-- name: SetLessonContent :one
-UPDATE lesson
-SET content_type = $3, content_ref = $4, updated_at = now()
-WHERE tenant_id = $1 AND id = $2 AND deleted_at IS NULL
-RETURNING id, tenant_id, chapter_id, title, content_type, content_ref, sort, created_at, updated_at, deleted_at
-`
-
-type SetLessonContentParams struct {
-	TenantID    int64  `json:"tenant_id"`
-	ID          int64  `json:"id"`
-	ContentType int16  `json:"content_type"`
-	ContentRef  []byte `json:"content_ref"`
-}
-
-func (q *Queries) SetLessonContent(ctx context.Context, arg SetLessonContentParams) (Lesson, error) {
-	row := q.db.QueryRow(ctx, setLessonContent,
-		arg.TenantID,
-		arg.ID,
-		arg.ContentType,
-		arg.ContentRef,
-	)
-	var i Lesson
-	err := row.Scan(
-		&i.ID,
-		&i.TenantID,
-		&i.ChapterID,
-		&i.Title,
-		&i.ContentType,
-		&i.ContentRef,
-		&i.Sort,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-		&i.DeletedAt,
-	)
-	return i, err
-}
-
 const softDeleteChapter = `-- name: SoftDeleteChapter :one
 UPDATE chapter
 SET deleted_at = now(), updated_at = now()

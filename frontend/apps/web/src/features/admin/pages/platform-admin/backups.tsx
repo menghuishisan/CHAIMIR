@@ -24,14 +24,12 @@ import {
 import { api } from '../../../../app/api'
 import { ResourceState } from '../../../../components/ResourceState'
 import { usePagedResource } from '../../../../hooks'
-import { formatDateTime, formatDuration } from '../../../../utils/formatters'
+import { formatDateTime, formatDuration, formatFileSize } from '../../../../utils/formatters'
 import {
   backupStatusLabel,
   backupStatusTone,
   backupTypeLabel,
 } from '../../../../utils/labels/admin'
-// 字节数文案与课时材料共用同一实现,不再写第二份换算
-import { formatFileSize } from '../../../../utils/labels/teaching'
 
 /**
  * PlatformBackupsPage 呈现备份任务的执行结果。

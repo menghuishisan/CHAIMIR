@@ -57,6 +57,10 @@ type Querier interface {
 	ListAccounts(ctx context.Context, arg ListAccountsParams) ([]ListAccountsRow, error)
 	ListAccountsByPhoneHashPrivileged(ctx context.Context, phoneHash string) ([]ListAccountsByPhoneHashPrivilegedRow, error)
 	ListAuthSessionsByAccount(ctx context.Context, arg ListAuthSessionsByAccountParams) ([]AuthSession, error)
+	// 按班级取在校学生摘要,供 M6 按班级批量选课。班级是 account_profile.org_id 指向的组织节点
+	// (学生的 org_id 必为同租户在用班级,由 0001 迁移的触发器保证),故按 org_id 过滤即为按班级。
+	// 只回在用学生:停用/归档/注销账号不该被加进新课程。
+	ListClassStudents(ctx context.Context, arg ListClassStudentsParams) ([]ListClassStudentsRow, error)
 	ListClasses(ctx context.Context, dollar_1 int64) ([]Class, error)
 	ListDepartments(ctx context.Context) ([]Department, error)
 	ListImportBatches(ctx context.Context, tenantID int64) ([]ImportBatch, error)

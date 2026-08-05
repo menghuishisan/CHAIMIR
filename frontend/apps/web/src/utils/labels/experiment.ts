@@ -72,14 +72,15 @@ export function experimentInstanceStatusTone(status: ExperimentInstanceStatus): 
   return INSTANCE_STATUS_TONES[status]
 }
 
-/** 实例正在占用运行资源的状态:进入工作台与释放环境的动作按此判定。 */
+/** 实例仍属于当前实验、可复用或等待恢复的状态,创建入口按此判定。 */
 const ACTIVE_INSTANCE_STATUSES: ReadonlySet<ExperimentInstanceStatus> = new Set([
   ExperimentInstanceStatus.CREATING,
   ExperimentInstanceStatus.RUNNING,
   ExperimentInstanceStatus.PAUSED,
+  ExperimentInstanceStatus.RELEASED,
 ])
 
-/** isExperimentInstanceActive 判断实例是否仍占用运行资源。 */
+/** isExperimentInstanceActive 判断实例是否仍属于当前实验的复用边界。 */
 export function isExperimentInstanceActive(status: ExperimentInstanceStatus): boolean {
   return ACTIVE_INSTANCE_STATUSES.has(status)
 }

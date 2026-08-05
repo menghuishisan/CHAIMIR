@@ -166,6 +166,25 @@ func toolResponsesFromModels(items []Tool) []ToolResponse {
 	return out
 }
 
+// orchestrationCatalogResponse 把编排目录投影转换为 HTTP 稳定字段名。
+func orchestrationCatalogResponse(runtimes []CatalogRuntime, tools []CatalogTool) OrchestrationCatalogResponse {
+	out := OrchestrationCatalogResponse{
+		Runtimes: make([]CatalogRuntimeResponse, 0, len(runtimes)),
+		Tools:    make([]CatalogToolResponse, 0, len(tools)),
+	}
+	for _, runtime := range runtimes {
+		images := make([]CatalogRuntimeImageResponse, 0, len(runtime.Images))
+		for _, image := range runtime.Images {
+			images = append(images, CatalogRuntimeImageResponse{Version: image.Version, IsDefault: image.IsDefault})
+		}
+		out.Runtimes = append(out.Runtimes, CatalogRuntimeResponse{Code: runtime.Code, Name: runtime.Name, Eco: runtime.Eco, Images: images})
+	}
+	for _, tool := range tools {
+		out.Tools = append(out.Tools, CatalogToolResponse{Code: tool.Code, Name: tool.Name, Kind: tool.Kind})
+	}
+	return out
+}
+
 // contractCreateFromDTO 把内部 HTTP 创建请求转换为跨模块创建契约。
 func contractCreateFromDTO(req CreateSandboxRequest) contracts.SandboxCreateRequest {
 	return contracts.SandboxCreateRequest{

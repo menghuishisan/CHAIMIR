@@ -1,12 +1,12 @@
 // 实验编排向导:检查点步(第 4 步)。
 //
-// 检查点是实验的判分点:每个检查点绑定一个判题器(M3)与一道题目(M5 锁版本),
-// 判题器与题目都从已注册清单里选,不让教师手填代码或题目编号。
+// 检查点是实验的判分点:每个检查点绑定一个判题方式(M3 判题器目录)与一道题目(M5 锁版本),
+// 两者都从已注册清单里选,不让教师手填代码或题目编号。
 // 检查点可以绑定到某个环境或场景 —— 判题时按该组件的产出判分。
 
 import { useCallback, useMemo, useState } from 'react'
 import { Plus, Target, Trash2 } from 'lucide-react'
-import { JudgerStatus, type CheckpointConfig, type ContentItem, type Judger } from '@chaimir/api-client'
+import type { CheckpointConfig, ContentItem } from '@chaimir/api-client'
 import {
   Badge,
   Button,
@@ -219,7 +219,7 @@ function CheckpointFormModal({
   )
   const [formError, setFormError] = useState<string>()
 
-  const judgers = useAsyncResource(() => api.judge.listJudgers(), [], () => false)
+  const judgers = useAsyncResource(() => api.judge.getJudgerCatalog(), [], (value) => value.judgers.length === 0)
   const items = useAsyncResource(
     () => api.content.getItems({ page: 1, size: ITEM_PICKER_SIZE }),
     [],
@@ -228,9 +228,10 @@ function CheckpointFormModal({
 
   const judgerOptions = useMemo(
     () =>
-      (judgers.data ?? [])
-        .filter((item: Judger) => item.status === JudgerStatus.AVAILABLE)
-        .map((item: Judger) => ({ value: item.code, label: `${item.name} · ${judgerTypeLabel(item.type)}` })),
+      (judgers.data?.judgers ?? []).map((item) => ({
+        value: item.code,
+        label: `${item.name} · ${judgerTypeLabel(item.type)}`,
+      })),
     [judgers.data],
   )
 
@@ -342,8 +343,7 @@ function CheckpointFormModal({
                   id="checkpoint-judger"
                   options={judgerOptions}
                   value={judger}
-                  placeholder={judgerOptions.length > 0 ? '选择判题方式' : '暂无可用判题器'}
-                  disabled={judgerOptions.length === 0}
+                  placeholder="选择判题方式"
                   onValueChange={setJudger}
                 />
               </FormField>

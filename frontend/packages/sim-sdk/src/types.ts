@@ -417,11 +417,6 @@ export interface VariableWatchDef {
   format?: 'hex' | 'number' | 'string' | 'bool';
 }
 
-export interface PlaybackSpeed {
-  label: string;
-  multiplier: number;
-}
-
 export type JsonPrimitive = string | number | boolean | null;
 export type JsonValue = JsonPrimitive | JsonObject | JsonValue[];
 export interface JsonObject {

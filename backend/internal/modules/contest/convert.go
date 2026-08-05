@@ -39,7 +39,7 @@ func battleEntryDTOFromModel(item BattleEntry) BattleEntryDTO {
 
 // battleMatchDTOFromModel 转换对局为 HTTP 输出。
 func battleMatchDTOFromModel(item BattleMatch) BattleMatchDTO {
-	return BattleMatchDTO{ID: ids.ID(item.ID), ContestID: ids.ID(item.ContestID), ProblemID: ids.ID(item.ProblemID), EntryAID: ids.ID(item.EntryAID), EntryBID: ids.ID(item.EntryBID), SourceRef: item.SourceRef, SandboxRef: item.SandboxRef, JudgeTaskRef: item.JudgeTaskRef, Result: item.Result, ScoreDelta: item.ScoreDelta, ReplayRef: item.ReplayRef, Status: item.Status, MatchedAt: item.MatchedAt, FinishedAt: item.FinishedAt}
+	return BattleMatchDTO{ID: ids.ID(item.ID), ContestID: ids.ID(item.ContestID), ProblemID: ids.ID(item.ProblemID), EntryAID: ids.ID(item.EntryAID), EntryBID: ids.ID(item.EntryBID), SourceRef: item.SourceRef, SandboxRef: item.SandboxRef, JudgeTaskRef: item.JudgeTaskRef, Result: item.Result, ScoreDelta: item.ScoreDelta, ReplayAvailable: item.ReplayRef != "", Status: item.Status, MatchedAt: item.MatchedAt, FinishedAt: item.FinishedAt}
 }
 
 // ladderDTOFromModel 转换排行投影为 HTTP 输出。

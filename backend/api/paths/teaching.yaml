@@ -94,14 +94,6 @@
     parameters: [{ $ref: "#/components/parameters/IDPath" }]
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
 /api/v1/teaching/courses/{id}/chapters:
-  get:
-    tags: [teaching]
-    summary: 课程章节列表
-    operationId: teachingListChapters
-    x-chaimir-audience: user
-    security: [{ bearerAuth: [] }]
-    parameters: [{ $ref: "#/components/parameters/IDPath" }]
-    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
   post:
     tags: [teaching]
     summary: 创建课程章节
@@ -130,14 +122,6 @@
     parameters: [{ $ref: "#/components/parameters/IDPath" }, { $ref: "#/components/parameters/CIDPath" }]
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
 /api/v1/teaching/chapters/{id}/lessons:
-  get:
-    tags: [teaching]
-    summary: 章节课时列表
-    operationId: teachingListLessons
-    x-chaimir-audience: user
-    security: [{ bearerAuth: [] }]
-    parameters: [{ $ref: "#/components/parameters/IDPath" }]
-    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
   post:
     tags: [teaching]
     summary: 创建课时
@@ -173,16 +157,6 @@
     x-chaimir-audience: user
     security: [{ bearerAuth: [] }]
     parameters: [{ $ref: "#/components/parameters/IDPath" }]
-    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
-/api/v1/teaching/lessons/{id}/content:
-  post:
-    tags: [teaching]
-    summary: 设置课时内容
-    operationId: teachingSetLessonContent
-    x-chaimir-audience: teacher
-    security: [{ bearerAuth: [] }]
-    parameters: [{ $ref: "#/components/parameters/IDPath" }]
-    requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
 /api/v1/teaching/lessons/{id}/material:
   post:

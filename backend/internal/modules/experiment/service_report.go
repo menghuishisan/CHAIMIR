@@ -39,7 +39,36 @@ func (s *Service) SubmitReport(ctx context.Context, instanceID int64, req Submit
 	}); err != nil {
 		return ReportDTO{}, err
 	}
-	return reportDTOFromModel(report), s.writeAudit(ctx, id.TenantID, id.AccountID, contracts.RoleNumStudent, "experiment.report.submit", auditTargetReport, report.ID, map[string]any{"instance_id": instanceID})
+	profiles, err := s.reportProfiles(ctx, []ExperimentReport{report})
+	if err != nil {
+		return ReportDTO{}, err
+	}
+	return reportDTOFromModel(report, profiles), s.writeAudit(ctx, id.TenantID, id.AccountID, contracts.RoleNumStudent, "experiment.report.submit", auditTargetReport, report.ID, map[string]any{"instance_id": instanceID})
+}
+
+// reportProfiles 把报告提交者一次批量解析为账号档案,避免逐条调用形成 N+1。
+func (s *Service) reportProfiles(ctx context.Context, reports []ExperimentReport) (map[int64]contracts.AccountInfo, error) {
+	seen := make(map[int64]struct{}, len(reports))
+	accountIDs := make([]int64, 0, len(reports))
+	for _, report := range reports {
+		if _, ok := seen[report.StudentID]; ok {
+			continue
+		}
+		seen[report.StudentID] = struct{}{}
+		accountIDs = append(accountIDs, report.StudentID)
+	}
+	if len(accountIDs) == 0 {
+		return map[int64]contracts.AccountInfo{}, nil
+	}
+	accounts, err := s.roles.BatchGetAccounts(ctx, accountIDs)
+	if err != nil {
+		return nil, apperr.ErrExperimentReportInvalid.WithCause(err)
+	}
+	profiles := make(map[int64]contracts.AccountInfo, len(accounts))
+	for _, account := range accounts {
+		profiles[account.AccountID] = account
+	}
+	return profiles, nil
 }
 
 // validateReportObjectRef 校验报告对象引用必须绑定租户、实例和学生路径。
@@ -84,9 +113,13 @@ func (s *Service) ListReports(ctx context.Context, experimentID int64, page, siz
 	}); err != nil {
 		return nil, 0, 0, 0, err
 	}
+	profiles, err := s.reportProfiles(ctx, items)
+	if err != nil {
+		return nil, 0, 0, 0, err
+	}
 	out := make([]ReportDTO, 0, len(items))
 	for _, item := range items {
-		out = append(out, reportDTOFromModel(item))
+		out = append(out, reportDTOFromModel(item, profiles))
 	}
 	return out, total, page, size, nil
 }
@@ -143,5 +176,9 @@ func (s *Service) GradeReport(ctx context.Context, reportID int64, req GradeRepo
 	if shouldPublish {
 		s.drainExperimentScoreOutboxBestEffort(ctx)
 	}
-	return reportDTOFromModel(report), s.writeAudit(ctx, id.TenantID, id.AccountID, contracts.RoleNumTeacher, "experiment.report.grade", auditTargetReport, report.ID, map[string]any{"manual_score": req.ManualScore})
+	profiles, err := s.reportProfiles(ctx, []ExperimentReport{report})
+	if err != nil {
+		return ReportDTO{}, err
+	}
+	return reportDTOFromModel(report, profiles), s.writeAudit(ctx, id.TenantID, id.AccountID, contracts.RoleNumTeacher, "experiment.report.grade", auditTargetReport, report.ID, map[string]any{"manual_score": req.ManualScore})
 }

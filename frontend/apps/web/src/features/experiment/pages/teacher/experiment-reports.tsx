@@ -19,8 +19,8 @@ import {
 import {
   ExperimentCollabMode,
   ExperimentReportStatus,
-  UserRole,
-  type Account,
+  type Class,
+  type ClassStudent,
   type Experiment,
   type ExperimentGroup,
   type ReportDTO,
@@ -70,9 +70,6 @@ import { userFacingErrorMessage } from '../../../../utils/userFacingError'
 
 /** 定位单个实验时一次取回的条数:与后端分页上限一致。 */
 const EXPERIMENT_LOOKUP_SIZE = 100
-
-/** 学生选择器一次取回的条数:后端分页上限 100。 */
-const STUDENT_PICKER_SIZE = 100
 
 /**
  * TeacherExperimentReportsPage 读取实验本体并承载报告批改与分组编排。
@@ -125,6 +122,18 @@ function ReportsContent({ experiment }: { experiment: Experiment }) {
   }, [reports.data])
 
   const columns: TableColumn<ReportDTO>[] = [
+    {
+      key: 'student_id',
+      header: '提交人',
+      render: (report) => (
+        <div className="min-w-0">
+          <div className="truncate font-medium text-ink">{report.student_name}</div>
+          {report.student_no ? (
+            <div className="truncate font-mono text-xs text-ink-sub">{report.student_no}</div>
+          ) : null}
+        </div>
+      ),
+    },
     {
       key: 'submitted_at',
       header: '提交时间',
@@ -368,18 +377,6 @@ function GroupsPanel({ experiment }: { experiment: Experiment }) {
     (value) => value.length === 0,
   )
 
-  // 成员姓名需要账号档案:小组成员只回 student_id
-  const accounts = useAsyncResource(
-    () => api.identity.getAccounts({ role: UserRole.STUDENT, page: 1, size: STUDENT_PICKER_SIZE }),
-    [],
-    () => false,
-  )
-
-  const accountById = useMemo(
-    () => new Map((accounts.data?.list ?? []).map((account: Account) => [account.id, account])),
-    [accounts.data],
-  )
-
   return (
     <Card>
       <CardHeader
@@ -442,9 +439,7 @@ function GroupsPanel({ experiment }: { experiment: Experiment }) {
                     <ul className="flex flex-col gap-1">
                       {group.members.map((member) => (
                         <li key={member.id} className="flex items-center justify-between gap-2 text-sm">
-                          <span className="min-w-0 truncate text-ink">
-                            {accountById.get(member.student_id)?.name ?? '已离校学生'}
-                          </span>
+                          <span className="min-w-0 truncate text-ink">{member.student_name}</span>
                           <Badge tone="neutral">{member.role}</Badge>
                         </li>
                       ))}
@@ -571,24 +566,34 @@ interface AddMemberModalProps {
 /**
  * AddMemberModal 把学生加入小组并分配角色。
  * 已在组内的学生再提交即为调整角色(后端按 (组, 学生) 唯一约束做 upsert)。
+ * 学生从班内名录里选:组织结构对教师只读开放,而账号目录是学校管理员能力,
+ * 故先选班级再选人,不让教师端取全校账号(§安全边界)。
  */
 function AddMemberModal({ group, roles, onClose, onSaved }: AddMemberModalProps) {
+  const [classId, setClassId] = useState('')
   const [studentId, setStudentId] = useState('')
   const [role, setRole] = useState(roles[0] ?? '')
   const [formError, setFormError] = useState<string>()
   const [working, setWorking] = useState(false)
 
+  const classes = useAsyncResource(() => api.identity.listClasses(), [], () => false)
+
   const students = useAsyncResource(
-    () => api.identity.getAccounts({ role: UserRole.STUDENT, page: 1, size: STUDENT_PICKER_SIZE }),
-    [],
-    (value) => value.list.length === 0,
+    () => (classId === '' ? Promise.resolve<ClassStudent[]>([]) : api.identity.listClassStudents(classId)),
+    [classId],
+    (value) => value.length === 0,
+  )
+
+  const classOptions = useMemo(
+    () => (classes.data ?? []).map((item: Class) => ({ value: item.id, label: item.name })),
+    [classes.data],
   )
 
   const studentOptions = useMemo(
     () =>
-      (students.data?.list ?? []).map((account: Account) => ({
-        value: account.id,
-        label: account.no ? `${account.name} · ${account.no}` : account.name,
+      (students.data ?? []).map((student) => ({
+        value: student.id,
+        label: student.no ? `${student.name} · ${student.no}` : student.name,
       })),
     [students.data],
   )
@@ -634,23 +639,49 @@ function AddMemberModal({ group, roles, onClose, onSaved }: AddMemberModalProps)
         <form onSubmit={submit} noValidate>
           <ModalBody className="flex flex-col gap-4">
             <ResourceState
-              resource={students}
+              resource={classes}
               emptyIcon={Users}
-              emptyTitle="还没有学生账号"
-              emptyDescription="请联系学校管理员创建学生账号。"
+              emptyTitle="学校还没有建班级"
+              emptyDescription="请联系学校管理员在组织架构里创建班级。"
             >
               {() => (
-                <FormField label="学生" htmlFor="member-student" required>
+                <FormField label="班级" htmlFor="member-class" required>
                   <Select
-                    id="member-student"
-                    options={studentOptions}
-                    value={studentId}
-                    placeholder="选择学生"
-                    onValueChange={setStudentId}
+                    id="member-class"
+                    options={classOptions}
+                    value={classId}
+                    placeholder="选择班级"
+                    onValueChange={(value) => {
+                      setClassId(value)
+                      setStudentId('')
+                    }}
                   />
                 </FormField>
               )}
             </ResourceState>
+
+            {classId === '' ? (
+              <p className="text-sm text-ink-sub">先选班级,再从班里挑要加入的学生。</p>
+            ) : (
+              <ResourceState
+                resource={students}
+                emptyIcon={Users}
+                emptyTitle="这个班级没有在校学生"
+                emptyDescription="换一个班级,或联系学校管理员核对班级名单。"
+              >
+                {() => (
+                  <FormField label="学生" htmlFor="member-student" required>
+                    <Select
+                      id="member-student"
+                      options={studentOptions}
+                      value={studentId}
+                      placeholder="选择学生"
+                      onValueChange={setStudentId}
+                    />
+                  </FormField>
+                )}
+              </ResourceState>
+            )}
 
             {roles.length > 0 ? (
               <FormField label="组内角色" htmlFor="member-role" required helper="只能选实验定义的角色">

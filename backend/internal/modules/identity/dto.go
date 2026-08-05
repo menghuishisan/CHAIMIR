@@ -221,6 +221,15 @@ type ClassDTO struct {
 	Status         int16  `json:"status"`
 }
 
+// ClassStudentDTO 是班内学生名录的最小输出:只有编号、姓名与学号。
+// 刻意不复用 AccountDTO —— 那带手机号掩码、账号状态与角色,是学校管理员的账号目录字段,
+// 而本入口面向教师挑人(如给小组分配成员),不该经此扩大可见面。
+type ClassStudentDTO struct {
+	ID   ids.ID `json:"id"`
+	Name string `json:"name"`
+	No   string `json:"no,omitempty"`
+}
+
 type ArchiveClassesRequest struct {
 	EnrollmentYear int16 `json:"enrollment_year"`
 }

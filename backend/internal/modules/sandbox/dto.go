@@ -80,6 +80,33 @@ type ToolResponse struct {
 	Status       int16            `json:"status"`
 }
 
+// OrchestrationCatalogResponse 是编排目录接口的输出,只含业务模块选运行时与工具所需字段。
+type OrchestrationCatalogResponse struct {
+	Runtimes []CatalogRuntimeResponse `json:"runtimes"`
+	Tools    []CatalogToolResponse    `json:"tools"`
+}
+
+// CatalogRuntimeResponse 是编排目录里的单个运行时,镜像版本内联返回避免调用方 N+1。
+type CatalogRuntimeResponse struct {
+	Code   string                        `json:"code"`
+	Name   string                        `json:"name"`
+	Eco    string                        `json:"eco"`
+	Images []CatalogRuntimeImageResponse `json:"images"`
+}
+
+// CatalogRuntimeImageResponse 是编排目录里的镜像版本,不含镜像地址与预拉取状态。
+type CatalogRuntimeImageResponse struct {
+	Version   string `json:"version"`
+	IsDefault bool   `json:"is_default"`
+}
+
+// CatalogToolResponse 是编排目录里的单个工具,不含资源清单。
+type CatalogToolResponse struct {
+	Code string `json:"code"`
+	Name string `json:"name"`
+	Kind int16  `json:"kind"`
+}
+
 // CreateSandboxRequest 是内部 HTTP 创建沙箱请求。
 type CreateSandboxRequest struct {
 	TenantID                 ids.ID   `json:"tenant_id"`

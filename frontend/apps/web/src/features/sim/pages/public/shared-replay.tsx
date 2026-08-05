@@ -9,10 +9,11 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useParams } from 'react-router-dom'
-import { Info, LoaderCircle, Lock, Pause, Play, RotateCcw, StepBack, StepForward, TriangleAlert } from 'lucide-react'
+import { Info, LoaderCircle, Lock, TriangleAlert } from 'lucide-react'
 import {
   Button,
   ChainProgress,
+  CodeTracePanel,
   TeachingFrameAside,
   TeachingFrameBrief,
   TeachingFrameStage,
@@ -30,23 +31,13 @@ import { AppStatusScreen } from '../../../../components/AppStatusScreen'
 import { useAsyncResource } from '../../../../hooks/useAsyncResource'
 import { useImmersive } from '../../../../layouts/immersive/context'
 import { moveCommand, replayMoves } from '../../replayMoves'
-
-/**
- * narrativeProgress 把当前叙事步骤换成链式进度的完成数:讲到第几步,前面几步就都讲过了。
- * 叙事步骤由状态断言命中(见 sim.worker.ts currentNarrativeStep),尚未命中任何一步时进度为 0。
- */
-function narrativeProgress(descriptor: SimPackageDescriptor, snapshot: RuntimeSnapshot): number {
-  const currentId = snapshot.currentStep?.id
-  return descriptor.narrative.findIndex((step) => step.id === currentId) + 1
-}
+import { narrativeProgress, useSimPlayback } from '../../playback'
+import { SimPlaybackControls } from '../../SimPlaybackControls'
 
 /** injectedActionCount 数出快照里已复现的记录动作数(记录动作在 Worker 内是 user 事件)。 */
 function injectedActionCount(snapshot: RuntimeSnapshot): number {
   return snapshot.events.reduce((total, event) => total + (event.source === 'user' ? 1 : 0), 0)
 }
-
-/** 复现节奏:每 1200ms 走一个推演时刻或注入一条动作,与仿真工作台的教学步长同频。 */
-const REPLAY_STEP_INTERVAL_MS = 1200
 
 /**
  * PublicReplayPage 取回分享记录并判定可回放边界,自身不接触仿真运行时。
@@ -135,8 +126,6 @@ function ReplayRuntime({ replay }: ReplayRuntimeProps) {
   const [descriptor, setDescriptor] = useState<SimPackageDescriptor>()
   const [snapshot, setSnapshot] = useState<RuntimeSnapshot>()
   const [error, setError] = useState<string>()
-  // 减弱动效偏好下不自动播放(规范 §7.3:冻结并保留当前态文字),单步复现仍然可用
-  const [playing, setPlaying] = useState(!reducedMotion)
 
   /**
    * sendCommand 发出一条 Worker 命令并把失败原因记为页面错误态。
@@ -181,33 +170,39 @@ function ReplayRuntime({ replay }: ReplayRuntimeProps) {
   const cursor = snapshot ? snapshot.events.length : 0
   const finished = cursor >= moves.length
 
-  // 自动复现:每一步都在上一步的快照回来之后再排,命令不会在慢帧上堆积。
-  useEffect(() => {
-    if (!playing || !client || error || finished) return
-    const timer = setTimeout(() => sendCommand(moveCommand(client, moves[cursor])), REPLAY_STEP_INTERVAL_MS)
-    return () => clearTimeout(timer)
-  }, [client, cursor, error, finished, moves, playing, sendCommand])
+  /** advance 复现下一条记录命令(推进时刻或注入动作)。 */
+  const advance = useCallback(() => {
+    if (!client || finished) return
+    sendCommand(moveCommand(client, moves[cursor]))
+  }, [client, cursor, finished, moves, sendCommand])
+
+  // 减弱动效偏好下不自动播放(规范 §7.3:冻结并保留当前态文字),单步复现仍然可用
+  const playback = useSimPlayback({
+    advance,
+    canAdvance: Boolean(client) && !error && !finished,
+    cue: snapshot,
+    autoPlay: !reducedMotion,
+  })
 
   /** 单步即接管:手动走一步就停下自动复现,让访客按自己的节奏看。 */
-  const stepOnce = () => {
-    if (!client) return
-    setPlaying(false)
-    sendCommand(moveCommand(client, moves[cursor]))
-  }
+  const stepOnce = useCallback(() => {
+    playback.stop()
+    advance()
+  }, [advance, playback])
 
   /** 回退一步:Worker 从初始状态重放到上一条事件,状态可复现,不是就地反算。 */
-  const stepBack = () => {
+  const stepBack = useCallback(() => {
     if (!client) return
-    setPlaying(false)
+    playback.stop()
     sendCommand(client.back())
-  }
+  }, [client, playback, sendCommand])
 
   /** 从头再看:回到初始状态,进度与推演时刻一并归零。 */
-  const restart = () => {
+  const restart = useCallback(() => {
     if (!client) return
-    setPlaying(false)
+    playback.stop()
     sendCommand(client.reset())
-  }
+  }, [client, playback, sendCommand])
 
   // 运行环境装配失败时没有可看的画面,直接给出说明与唯一出口
   if (error && !snapshot) {
@@ -256,9 +251,18 @@ function ReplayRuntime({ replay }: ReplayRuntimeProps) {
       // 高亮跟随记录本身 —— 选中态由仿真包写在状态里,是原操作者当时的选择
       stage={<TeachingFrameStage frame={frame} selectedElementId={snapshot.state.selectedElementId} />}
       right={
-        frameHasAside(frame) ? (
-          <TeachingFrameAside frame={frame} selectedElementId={snapshot.state.selectedElementId} />
-        ) : undefined
+        <div className="flex flex-col">
+          {frameHasAside(frame) ? (
+            <TeachingFrameAside frame={frame} selectedElementId={snapshot.state.selectedElementId} />
+          ) : null}
+          {/* 执行追踪:公开回放同样呈现代码行与变量,访客看到的教学内容与登录后一致 */}
+          {descriptor.codeTrace ? (
+            <section className="border-t border-dark-line p-4 first:border-t-0">
+              <h2 className="mb-2 text-sm font-medium text-on-dark">执行追踪</h2>
+              <CodeTracePanel codeTrace={descriptor.codeTrace} trace={snapshot.state._trace} />
+            </section>
+          ) : null}
+        </div>
       }
       rightLabel="辅助信息"
       footer={
@@ -270,44 +274,19 @@ function ReplayRuntime({ replay }: ReplayRuntimeProps) {
             {/* 运行中出错:复现已停在当前一步,原因用后端/运行时给出的用户向文案,技术细节只进控制台 */}
             {error ? <span className="mt-0.5 text-xs text-on-dark-danger">{error}</span> : null}
           </div>
-          <div className="flex shrink-0 items-center gap-2">
-            <Button
-              variant="on-dark"
-              size="sm"
-              leftIcon={RotateCcw}
-              disabled={Boolean(error) || cursor === 0}
-              onClick={restart}
-            >
-              从头再看
-            </Button>
-            <Button
-              variant="on-dark"
-              size="sm"
-              leftIcon={StepBack}
-              disabled={Boolean(error) || cursor === 0}
-              onClick={stepBack}
-            >
-              上一步
-            </Button>
-            <Button
-              variant="on-dark"
-              size="sm"
-              leftIcon={playing ? Pause : Play}
-              disabled={Boolean(error) || finished}
-              onClick={() => setPlaying((current) => !current)}
-            >
-              {playing ? '暂停' : '播放'}
-            </Button>
-            <Button
-              variant="on-dark"
-              size="sm"
-              leftIcon={StepForward}
-              disabled={Boolean(error) || finished}
-              onClick={stepOnce}
-            >
-              下一步
-            </Button>
-          </div>
+          <SimPlaybackControls
+            playing={playback.playing}
+            onToggle={playback.toggle}
+            onStep={stepOnce}
+            onStepBack={stepBack}
+            onRestart={restart}
+            multiplier={playback.multiplier}
+            onMultiplierChange={playback.setMultiplier}
+            disabled={Boolean(error)}
+            atEnd={finished}
+            atStart={cursor === 0}
+            playLabel="播放"
+          />
         </div>
       }
     />

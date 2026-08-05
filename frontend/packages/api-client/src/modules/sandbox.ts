@@ -12,6 +12,7 @@ import type {
   SandboxFileSaveResponse,
   SandboxFileWriteRequest,
   SandboxInstance,
+  SandboxOrchestrationCatalog,
   SandboxPrepullStatus,
   SandboxQuota,
   SandboxRuntime,
@@ -31,6 +32,15 @@ export class SandboxApi {
    * constructor 注入统一 API 客户端，避免沙箱模块自行拼接鉴权和错误协议。
    */
   constructor(private client: ApiClient) {}
+
+  /**
+   * 查询编排目录：可用运行时（含其可用镜像版本）与可用工具。
+   * 教师编排实验环境、竞赛对抗环境和漏洞题预验证环境都用这一条 —— 运行时管理接口
+   * 是平台面，会连带下发容器编排清单与镜像地址，编排面不该拿到那些内容。
+   */
+  async getOrchestrationCatalog(): Promise<SandboxOrchestrationCatalog> {
+    return this.client.get('/sandbox/catalog')
+  }
 
   /**
    * 查询平台运行时列表。

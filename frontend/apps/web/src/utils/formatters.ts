@@ -95,3 +95,18 @@ export function formatPercent(done: number, total: number): string {
   if (total <= 0) return '—'
   return `${Math.round((done / total) * 100)}%`
 }
+
+/**
+ * formatFileSize 把字节数换成用户向文件大小文案。
+ * 课时材料、题库附件、备份记录与导出产物共用它 —— 这是跨模块的通用格式化,
+ * 不属于任何单个模块的文案映射,故放在此处而不是 labels/<module>.ts。
+ */
+export function formatFileSize(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes <= 0) return '大小未知'
+  if (bytes < 1024) return `${bytes} 字节`
+  const kb = bytes / 1024
+  if (kb < 1024) return `${kb.toFixed(1)} KB`
+  const mb = kb / 1024
+  if (mb < 1024) return `${mb.toFixed(1)} MB`
+  return `${(mb / 1024).toFixed(2)} GB`
+}

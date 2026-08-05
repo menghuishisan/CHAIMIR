@@ -252,6 +252,8 @@ export interface ReportDTO {
   id: SnowflakeID
   instance_id: SnowflakeID
   student_id: SnowflakeID
+  student_name: string
+  student_no?: string
   content_ref: string
   manual_score: number
   comment?: string
@@ -286,6 +288,8 @@ export interface ExperimentGroupMember {
   id: SnowflakeID
   group_id: SnowflakeID
   student_id: SnowflakeID
+  student_name: string
+  student_no?: string
   role: string
   created_at: string
 }

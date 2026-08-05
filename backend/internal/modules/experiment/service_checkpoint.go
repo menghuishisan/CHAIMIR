@@ -64,7 +64,7 @@ func (s *Service) JudgeCheckpoint(ctx context.Context, instanceID int64, checkpo
 	if err != nil {
 		return CheckpointDTO{}, apperr.ErrExperimentJudgeUnavailable.WithCause(err)
 	}
-	result := CheckpointResult{ID: s.ids.Generate(), TenantID: inst.TenantID, InstanceID: inst.ID, CheckpointID: cp.ID, JudgeTaskRef: ids.Format(task.TaskID), Passed: task.Result.Passed, Score: scaledCheckpointScore(cp.Score, task.Result.Score, task.Result.MaxScore), DetailRef: task.Result.SnapshotRef, BindingOutput: bindingOutput}
+	result := CheckpointResult{ID: s.ids.Generate(), TenantID: inst.TenantID, InstanceID: inst.ID, CheckpointID: cp.ID, JudgeTaskRef: ids.Format(task.TaskID), Passed: task.Result.Passed, Score: scaledCheckpointScore(cp.Score, task.Result.Score, task.Result.MaxScore), DetailRef: task.Result.ResultRef, BindingOutput: bindingOutput}
 	if err := s.store.TenantTx(ctx, inst.TenantID, func(ctx context.Context, tx TxStore) error {
 		var err error
 		result, err = tx.UpsertCheckpoint(ctx, result)
@@ -118,7 +118,7 @@ func (s *Service) HandleJudgeCompleted(ctx context.Context, event contracts.Judg
 		if !ok {
 			return apperr.ErrExperimentCheckpointInvalid
 		}
-		if _, err = tx.UpsertCheckpoint(ctx, CheckpointResult{ID: result.ID, TenantID: event.TenantID, InstanceID: result.InstanceID, CheckpointID: result.CheckpointID, JudgeTaskRef: ids.Format(event.TaskID), Passed: task.Result.Passed, Score: scaledCheckpointScore(cp.Score, task.Result.Score, task.Result.MaxScore), DetailRef: task.Result.SnapshotRef, BindingOutput: result.BindingOutput}); err != nil {
+		if _, err = tx.UpsertCheckpoint(ctx, CheckpointResult{ID: result.ID, TenantID: event.TenantID, InstanceID: result.InstanceID, CheckpointID: result.CheckpointID, JudgeTaskRef: ids.Format(event.TaskID), Passed: task.Result.Passed, Score: scaledCheckpointScore(cp.Score, task.Result.Score, task.Result.MaxScore), DetailRef: task.Result.ResultRef, BindingOutput: result.BindingOutput}); err != nil {
 			return err
 		}
 		if inst.Status != InstanceStatusFinished {

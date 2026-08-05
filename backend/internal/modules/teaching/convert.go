@@ -30,12 +30,29 @@ func lessonDTO(l Lesson) (LessonDTO, error) {
 	if err != nil {
 		return LessonDTO{}, err
 	}
+	// 对象引用只供服务端换取短时授权,普通课时响应不暴露存储实现细节。
+	delete(contentRef, "object_ref")
 	return LessonDTO{ID: ids.ID(l.ID), ChapterID: ids.ID(l.ChapterID), Title: l.Title, ContentType: l.ContentType, ContentRef: contentRef, Sort: l.Sort, CreatedAt: formatTime(l.CreatedAt), UpdatedAt: formatTime(l.UpdatedAt)}, nil
 }
 
 // memberDTO 将课程成员关系转换为 HTTP 响应结构。
-func memberDTO(m CourseMember) MemberDTO {
-	return MemberDTO{ID: ids.ID(m.ID), CourseID: ids.ID(m.CourseID), StudentID: ids.ID(m.StudentID), JoinMode: m.JoinMode, JoinedAt: formatTime(m.JoinedAt)}
+func memberDTO(m CourseMember, profile contracts.AccountInfo) MemberDTO {
+	return MemberDTO{ID: ids.ID(m.ID), CourseID: ids.ID(m.CourseID), StudentID: ids.ID(m.StudentID), StudentName: profile.Name, StudentNo: profile.No, JoinMode: m.JoinMode, JoinedAt: formatTime(m.JoinedAt)}
+}
+
+// memberDTOs 批量转换课程成员,姓名与学号经 M1 账号契约一次批量解析,避免 N+1。
+// 已离校学生的账号可能已被归档或注销,批量结果里取不到时给确定性占位,
+// 不留空白让界面无从解释(§8 文案面向用户)。
+func memberDTOs(members []CourseMember, profiles map[int64]contracts.AccountInfo) []MemberDTO {
+	out := make([]MemberDTO, 0, len(members))
+	for _, member := range members {
+		profile, ok := profiles[member.StudentID]
+		if !ok {
+			profile = contracts.AccountInfo{Name: "已离校学生"}
+		}
+		out = append(out, memberDTO(member, profile))
+	}
+	return out
 }
 
 // assignmentDTO 将作业外壳转换为 HTTP 响应结构。

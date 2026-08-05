@@ -28,14 +28,13 @@ import {
 import { api } from '../../../app/api'
 import { ResourceState } from '../../../components/ResourceState'
 import { usePagedResource } from '../../../hooks'
-import { formatShortDateTime } from '../../../utils/formatters'
+import { formatFileSize, formatShortDateTime } from '../../../utils/formatters'
 import {
   transferChannelLabel,
   transferTaskStatusLabel,
   transferTaskStatusTone,
   transferTaskSubjectLabel,
 } from '../../../utils/labels/transfer'
-import { formatFileSize } from '../../../utils/labels/teaching'
 import { userFacingErrorMessage } from '../../../utils/userFacingError'
 
 /** 通道筛选项:值为空串表示不过滤。 */

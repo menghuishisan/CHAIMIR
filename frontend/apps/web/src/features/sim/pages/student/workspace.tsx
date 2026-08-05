@@ -19,18 +19,14 @@ import {
   Link2,
   LoaderCircle,
   Lock,
-  Pause,
-  Play,
-  RotateCcw,
   Share2,
-  StepBack,
-  StepForward,
   TriangleAlert,
 } from 'lucide-react'
 import {
   Badge,
   Button,
   ChainProgress,
+  CodeTracePanel,
   Modal,
   ModalBody,
   ModalContent,
@@ -45,6 +41,7 @@ import {
   WorkbenchTopbar,
   frameHasAside,
   toast,
+  useReducedMotion,
 } from '@chaimir/ui'
 import { SimWorkerClient, isBuiltinSimulationCode } from '@chaimir/sim-sdk'
 import type {
@@ -62,6 +59,8 @@ import { AppStatusScreen } from '../../../../components/AppStatusScreen'
 import { useAsyncResource } from '../../../../hooks'
 import { useImmersive } from '../../../../layouts/immersive/context'
 import { moveCommand, replayMoves } from '../../replayMoves'
+import { narrativeProgress, useSimPlayback } from '../../playback'
+import { SimPlaybackControls } from '../../SimPlaybackControls'
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
 
 /** 默认随机种子:固定值保证「同一个场景每次进来都一样」,换条件是显式动作。 */
@@ -181,6 +180,7 @@ interface SimRuntimeProps {
  */
 function SimRuntime({ packageCode, version, sessionId, restore }: SimRuntimeProps) {
   const { title, exit } = useImmersive()
+  const reducedMotion = useReducedMotion()
 
   // 带会话时随记录走(seed 决定这条过程),否则用默认随机条件
   const [seed, setSeed] = useState(restore ? restore.seed : DEFAULT_SEED)
@@ -188,7 +188,6 @@ function SimRuntime({ packageCode, version, sessionId, restore }: SimRuntimeProp
   const [descriptor, setDescriptor] = useState<SimPackageDescriptor>()
   const [snapshot, setSnapshot] = useState<RuntimeSnapshot>()
   const [error, setError] = useState<string>()
-  const [playing, setPlaying] = useState(false)
   const [shareOpen, setShareOpen] = useState(false)
   const [restoring, setRestoring] = useState(false)
   // 回退或重播后就偏离了服务端记录(那是只追加的序列,表达不了撤回),此后不再上报
@@ -260,12 +259,19 @@ function SimRuntime({ packageCode, version, sessionId, restore }: SimRuntimeProp
     }
   }, [packageCode, restore, restoreMoves, seed, seedChanged, sendCommand])
 
-  // 自动推进:每一步都在上一步的快照回来之后再排,命令不会在慢帧上堆积
-  useEffect(() => {
-    if (!playing || !client || error) return
-    const timer = setTimeout(() => sendCommand(client.step()), simStepIntervalMs())
-    return () => clearTimeout(timer)
-  }, [client, error, playing, sendCommand, snapshot])
+  // 自动推进一步:交给共享播放控制按当前速度排下一步(见 features/sim/playback.ts)
+  const advance = useCallback(() => {
+    if (!client) return
+    sendCommand(client.step())
+  }, [client, sendCommand])
+
+  // 减弱动效偏好下不自动推进(规范 §7.3:冻结并保留当前态文字),单步仍然可用
+  const playback = useSimPlayback({
+    advance,
+    canAdvance: Boolean(client) && !error,
+    cue: snapshot,
+    autoPlay: !reducedMotion,
+  })
 
   /**
    * report 把一次用户操作上报服务端。
@@ -296,12 +302,12 @@ function SimRuntime({ packageCode, version, sessionId, restore }: SimRuntimeProp
   const interact = useCallback(
     (interaction: InteractionDescriptor, payload: JsonObject, target?: string) => {
       if (!client || !snapshot) return
-      setPlaying(false)
+      playback.stop()
       const body: JsonObject = target ? { ...payload, target } : payload
       sendCommand(client.inject(interaction.emits, body, target))
       report(interaction.emits, body, snapshot.tick)
     },
-    [client, report, sendCommand, snapshot],
+    [client, playback, report, sendCommand, snapshot],
   )
 
   /** selectElement 选中舞台上的一个元素:它也是一次用户操作,同样进 Worker 并上报。 */
@@ -314,11 +320,11 @@ function SimRuntime({ packageCode, version, sessionId, restore }: SimRuntimeProp
     [descriptor, interact],
   )
 
+  /** stepOnce 手动走一步:接管节奏,停下自动推进。 */
   const stepOnce = useCallback(() => {
-    if (!client) return
-    setPlaying(false)
-    sendCommand(client.step())
-  }, [client, sendCommand])
+    playback.stop()
+    advance()
+  }, [advance, playback])
 
   /**
    * stepBack 回退一步:Worker 从初始状态重放到上一条事件,状态可复现,不是就地反算。
@@ -327,18 +333,18 @@ function SimRuntime({ packageCode, version, sessionId, restore }: SimRuntimeProp
    */
   const stepBack = useCallback(() => {
     if (!client) return
-    setPlaying(false)
+    playback.stop()
     if (sessionId) setDiverged(true)
     sendCommand(client.back())
-  }, [client, sendCommand, sessionId])
+  }, [client, playback, sendCommand, sessionId])
 
   /** restart 回到初始状态:同回退,带会话时一并脱离记录(不重置序号,记录不可改写)。 */
   const restart = useCallback(() => {
     if (!client) return
-    setPlaying(false)
+    playback.stop()
     if (sessionId) setDiverged(true)
     sendCommand(client.reset())
-  }, [client, sendCommand, sessionId])
+  }, [client, playback, sendCommand, sessionId])
 
   // 运行环境装配失败时没有可看的画面,直接给出说明与唯一出口
   if (error && !snapshot) {
@@ -429,6 +435,13 @@ function SimRuntime({ packageCode, version, sessionId, restore }: SimRuntimeProp
               onInteract={interact}
             />
             <CheckpointPanel descriptor={descriptor} snapshot={snapshot} />
+            {/* 执行追踪:把当前状态对应到教学代码行,建立「看到的现象 ↔ 代码逻辑」的因果锚点 */}
+            {descriptor.codeTrace ? (
+              <section className="border-b border-dark-line p-4 last:border-b-0">
+                <h2 className="mb-2 text-sm font-medium text-on-dark">执行追踪</h2>
+                <CodeTracePanel codeTrace={descriptor.codeTrace} trace={snapshot.state._trace} />
+              </section>
+            ) : null}
             {frameHasAside(frame) ? (
               <TeachingFrameAside
                 frame={frame}
@@ -473,42 +486,18 @@ function SimRuntime({ packageCode, version, sessionId, restore }: SimRuntimeProp
               >
                 换一组条件
               </Button>
-              <Button
-                variant="on-dark"
-                size="sm"
-                leftIcon={RotateCcw}
-                disabled={Boolean(error) || snapshot.events.length === 0}
-                onClick={restart}
-              >
-                从头再来
-              </Button>
-              <Button
-                variant="on-dark"
-                size="sm"
-                leftIcon={StepBack}
-                disabled={Boolean(error) || snapshot.events.length === 0}
-                onClick={stepBack}
-              >
-                上一步
-              </Button>
-              <Button
-                variant="on-dark"
-                size="sm"
-                leftIcon={playing ? Pause : Play}
+              <SimPlaybackControls
+                playing={playback.playing}
+                onToggle={playback.toggle}
+                onStep={stepOnce}
+                onStepBack={stepBack}
+                onRestart={restart}
+                multiplier={playback.multiplier}
+                onMultiplierChange={playback.setMultiplier}
                 disabled={Boolean(error)}
-                onClick={() => setPlaying((current) => !current)}
-              >
-                {playing ? '暂停' : '自动推进'}
-              </Button>
-              <Button
-                variant="on-dark"
-                size="sm"
-                leftIcon={StepForward}
-                disabled={Boolean(error)}
-                onClick={stepOnce}
-              >
-                下一步
-              </Button>
+                atStart={snapshot.events.length === 0}
+                playLabel="自动推进"
+              />
             </div>
           </div>
         }
@@ -799,20 +788,6 @@ function ShareModal({ sessionId, onClose }: ShareModalProps) {
       </ModalContent>
     </Modal>
   )
-}
-
-/**
- * narrativeProgress 把当前叙事步骤换成链式进度的完成数:讲到第几步,前面几步就都讲过了。
- * 叙事步骤由状态断言命中,尚未命中任何一步时进度为 0。
- */
-function narrativeProgress(descriptor: SimPackageDescriptor, snapshot: RuntimeSnapshot): number {
-  const currentId = snapshot.currentStep?.id
-  return descriptor.narrative.findIndex((step) => step.id === currentId) + 1
-}
-
-/** simStepIntervalMs 自动推进的步长:与公开回放同频,保证同一场景两处看起来节奏一致。 */
-function simStepIntervalMs(): number {
-  return 1200
 }
 
 /** optionValue 从声明的选项里取回原始值:select 的 DOM 值是字符串,不能直接当业务值用。 */

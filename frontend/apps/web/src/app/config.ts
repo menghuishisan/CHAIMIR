@@ -35,6 +35,12 @@ export const appConfig = {
     import.meta.env.VITE_SIM_WORKER_COMMAND_TIMEOUT_MS,
     'VITE_SIM_WORKER_COMMAND_TIMEOUT_MS',
   ),
+  // 仿真自动推进的教学基准节奏(1 倍速的单步间隔);变速档在此基础上按倍数缩放。
+  // 仿真工作台与公开回放共用同一个值,保证同一场景两处看起来节奏一致。
+  simStepIntervalMs: parsePositiveInteger(
+    import.meta.env.VITE_SIM_STEP_INTERVAL_MS,
+    'VITE_SIM_STEP_INTERVAL_MS',
+  ),
 } as const
 
 export const platformLayerEnabled = appConfig.deploymentMode === 'saas'

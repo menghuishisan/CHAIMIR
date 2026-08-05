@@ -137,6 +137,24 @@ func (s *Service) ListJudgers(ctx context.Context) ([]map[string]any, error) {
 	return out, nil
 }
 
+// ListCatalogJudgers 返回业务模块编排检查点所需的可用判题方式目录。
+// 只出可编排字段:资源清单与执行引用属判题私密面,由 §2 的平台管理接口承载,
+// 不经本目录外泄(见 docs/03-评测引擎/04-接口设计.md §2.1)。
+func (s *Service) ListCatalogJudgers(ctx context.Context) ([]CatalogJudger, error) {
+	var items []CatalogJudger
+	if err := s.store.PlatformTx(ctx, func(ctx context.Context, tx TxStore) error {
+		var err error
+		items, err = tx.ListCatalogJudgers(ctx)
+		if err != nil {
+			return apperr.ErrJudgerNotFound.WithCause(err)
+		}
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 // CreateJudger 注册或更新判题器定义。
 func (s *Service) CreateJudger(ctx context.Context, req JudgerRequest) (map[string]any, error) {
 	spec, err := validateJudgerRequest(req)

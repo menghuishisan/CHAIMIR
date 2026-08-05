@@ -330,6 +330,20 @@ GROUP BY a.id, p.no, p.org_id, p.enrollment_year, p.title
 ORDER BY a.created_at DESC, a.id DESC
 LIMIT $5 OFFSET $6;
 
+-- name: ListClassStudents :many
+-- 按班级取在校学生摘要,供 M6 按班级批量选课。班级是 account_profile.org_id 指向的组织节点
+-- (学生的 org_id 必为同租户在用班级,由 0001 迁移的触发器保证),故按 org_id 过滤即为按班级。
+-- 只回在用学生:停用/归档/注销账号不该被加进新课程。
+SELECT a.id, a.tenant_id, a.name, a.base_identity, a.status, p.no
+FROM account a
+JOIN account_profile p ON p.account_id = a.id AND p.tenant_id = a.tenant_id
+WHERE a.tenant_id = $1
+  AND p.org_id = $2
+  AND a.base_identity = 1
+  AND a.status = 2
+  AND a.deleted_at IS NULL
+ORDER BY p.no, a.id;
+
 -- name: UpdateAccountStatus :one
 UPDATE account
 SET status = $3, deleted_at = $4, updated_at = now()

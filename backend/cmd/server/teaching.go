@@ -17,6 +17,7 @@ import (
 	"chaimir/internal/platform/storage"
 	"chaimir/internal/platform/timex"
 	"chaimir/internal/platform/transfer"
+	"chaimir/internal/platform/upload"
 	"chaimir/pkg/snowflake"
 
 	"github.com/gin-gonic/gin"
@@ -64,16 +65,19 @@ func RegisterTeachingModule(ctx context.Context, deps TeachingModuleDeps) (*teac
 	}
 	store := teaching.NewStore(deps.Database)
 	svc, err := teaching.NewService(teaching.ServiceDeps{
-		Store:       store,
-		IDs:         deps.IDs,
-		Audit:       deps.Audit,
-		Content:     deps.Content,
-		Judge:       deps.Judge,
-		Bus:         deps.EventBus,
-		Transfers:   deps.Transfer,
-		Storage:     deps.Storage,
-		FileService: fileService,
-		Config:      deps.Config,
+		Store:                  store,
+		IDs:                    deps.IDs,
+		Audit:                  deps.Audit,
+		Identity:               deps.Roles,
+		Content:                deps.Content,
+		Judge:                  deps.Judge,
+		Bus:                    deps.EventBus,
+		Transfers:              deps.Transfer,
+		Storage:                deps.Storage,
+		FileService:            fileService,
+		Config:                 deps.Config,
+		CourseMaterialMaxBytes: deps.Upload.CourseMaterialMaxBytes,
+		MaterialScanPolicy:     upload.ScanPolicy{Required: deps.Upload.VirusScanRequired},
 	})
 	if err != nil {
 		return nil, err

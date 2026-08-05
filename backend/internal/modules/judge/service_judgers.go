@@ -35,17 +35,23 @@ func (s *Service) executeJudgerStrategy(ctx context.Context, task JudgeTask, san
 // judgeOnchainAssertions 按 M5 提供的 chain_steps/assertions 通过 M2 链能力比对现场状态。
 func (s *Service) judgeOnchainAssertions(ctx context.Context, task JudgeTask, sandboxID int64) (JudgeExecutionResult, error) {
 	steps := sliceValue(task.InputSnapshot.Expectation["chain_steps"])
-	for _, step := range steps {
-		if err := s.runChainStep(ctx, task, sandboxID, mapAny(step)); err != nil {
-			return JudgeExecutionResult{}, err
-		}
-	}
 	assertions := sliceValue(task.InputSnapshot.Expectation["assertions"])
 	if len(assertions) == 0 {
 		return JudgeExecutionResult{}, apperr.ErrJudgerConfigInvalid
 	}
 	details := make([]JudgeResultDetail, 0, len(assertions))
+	actions := make([]contracts.JudgeReplayAction, 0, len(steps))
 	passed := true
+	for seq, raw := range steps {
+		action, err := s.runChainStep(ctx, task, sandboxID, mapAny(raw))
+		if err != nil {
+			return JudgeExecutionResult{}, err
+		}
+		if action != nil {
+			action.Seq = int32(seq + 1)
+			actions = append(actions, *action)
+		}
+	}
 	for _, raw := range assertions {
 		assertion := mapAny(raw)
 		actual, err := s.sandbox.ChainQuery(ctx, contracts.SandboxChainQueryRequest{TenantID: task.TenantID, SandboxID: sandboxID, SourceRef: task.SourceRef, Target: stringValue(assertion["target"])})
@@ -68,24 +74,35 @@ func (s *Service) judgeOnchainAssertions(ctx context.Context, task JudgeTask, sa
 	if passed {
 		score = task.InputSnapshot.MaxScore
 	}
-	return JudgeExecutionResult{Passed: passed, Score: score, MaxScore: task.InputSnapshot.MaxScore, Details: details}, nil
+	return JudgeExecutionResult{Passed: passed, Score: score, MaxScore: task.InputSnapshot.MaxScore, Details: details, Replay: contracts.JudgeReplayTrace{Actions: actions}}, nil
 }
 
 // runChainStep 执行 deploy/tx/reset/query 预处理步骤。
-func (s *Service) runChainStep(ctx context.Context, task JudgeTask, sandboxID int64, step map[string]any) error {
-	switch stringValue(step["op"]) {
+func (s *Service) runChainStep(ctx context.Context, task JudgeTask, sandboxID int64, step map[string]any) (*contracts.JudgeReplayAction, error) {
+	op := stringValue(step["op"])
+	payload := sanitizeReplayMap(mapAny(step["payload"]))
+	switch op {
 	case "deploy":
-		_, err := s.sandbox.ChainDeploy(ctx, contracts.SandboxChainDeployRequest{TenantID: task.TenantID, SandboxID: sandboxID, SourceRef: task.SourceRef, Payload: mapAny(step["payload"])})
-		return err
+		output, err := s.sandbox.ChainDeploy(ctx, contracts.SandboxChainDeployRequest{TenantID: task.TenantID, SandboxID: sandboxID, SourceRef: task.SourceRef, Payload: mapAny(step["payload"])})
+		if err != nil {
+			return nil, err
+		}
+		return &contracts.JudgeReplayAction{Op: op, Payload: payload, Output: sanitizeReplayMap(output)}, nil
 	case "tx":
-		_, err := s.sandbox.ChainSendTx(ctx, contracts.SandboxChainTxRequest{TenantID: task.TenantID, SandboxID: sandboxID, SourceRef: task.SourceRef, Payload: mapAny(step["payload"])})
-		return err
+		output, err := s.sandbox.ChainSendTx(ctx, contracts.SandboxChainTxRequest{TenantID: task.TenantID, SandboxID: sandboxID, SourceRef: task.SourceRef, Payload: mapAny(step["payload"])})
+		if err != nil {
+			return nil, err
+		}
+		return &contracts.JudgeReplayAction{Op: op, Payload: payload, Output: sanitizeReplayMap(output)}, nil
 	case "reset":
-		return s.sandbox.ChainReset(ctx, contracts.SandboxChainResetRequest{TenantID: task.TenantID, SandboxID: sandboxID, SourceRef: task.SourceRef})
+		if err := s.sandbox.ChainReset(ctx, contracts.SandboxChainResetRequest{TenantID: task.TenantID, SandboxID: sandboxID, SourceRef: task.SourceRef}); err != nil {
+			return nil, err
+		}
+		return &contracts.JudgeReplayAction{Op: op}, nil
 	case "query", "":
-		return nil
+		return nil, nil
 	default:
-		return apperr.ErrJudgerConfigInvalid
+		return nil, apperr.ErrJudgerConfigInvalid
 	}
 }
 

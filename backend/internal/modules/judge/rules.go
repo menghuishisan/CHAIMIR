@@ -53,6 +53,46 @@ func containsSensitiveMaterial(value string) bool {
 	return privacy.ContainsResultSensitiveText(value)
 }
 
+// sanitizeReplayMap 递归过滤答案、凭据和内部字段,保留链交易复现所需的公开参数。
+func sanitizeReplayMap(input map[string]any) map[string]any {
+	if input == nil {
+		return nil
+	}
+	out := make(map[string]any, len(input))
+	for key, value := range input {
+		key = strings.TrimSpace(key)
+		if key == "" || strings.HasPrefix(key, "_") || privacy.IsResultSensitiveKey(key) {
+			continue
+		}
+		if clean, ok := sanitizeReplayValue(value); ok {
+			out[key] = clean
+		}
+	}
+	return out
+}
+
+// sanitizeReplayValue 只保留 JSON 基础类型,避免把运行时对象或未校验指针写入回放。
+func sanitizeReplayValue(value any) (any, bool) {
+	switch typed := value.(type) {
+	case nil, bool, float64, int, int32, int64, string:
+		return typed, true
+	case map[string]any:
+		return sanitizeReplayMap(typed), true
+	case []any:
+		out := make([]any, 0, len(typed))
+		for _, item := range typed {
+			clean, ok := sanitizeReplayValue(item)
+			if !ok {
+				return nil, false
+			}
+			out = append(out, clean)
+		}
+		return out, true
+	default:
+		return nil, false
+	}
+}
+
 // statusText 返回 API 用户向状态字符串。
 func statusText(status int16) string {
 	switch status {

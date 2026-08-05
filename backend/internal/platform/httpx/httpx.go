@@ -89,6 +89,9 @@ func WriteAttachmentStream(c *gin.Context, fileName, contentType string, size in
 	c.DataFromReader(http.StatusOK, size, contentType, reader, nil)
 }
 
+// SafeAttachmentName 返回经过响应头安全处理的文件名,供 inline 文件响应复用。
+func SafeAttachmentName(fileName string) string { return safeAttachmentName(fileName) }
+
 // PrefixReverseProxyConfig 描述挂在平台代理前缀下的内部 Web 服务。
 type PrefixReverseProxyConfig struct {
 	Target         *url.URL

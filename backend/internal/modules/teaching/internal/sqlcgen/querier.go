@@ -89,7 +89,6 @@ type Querier interface {
 	SetCourseGradesLock(ctx context.Context, arg SetCourseGradesLockParams) error
 	SetCourseStatus(ctx context.Context, arg SetCourseStatusParams) (SetCourseStatusRow, error)
 	SetCourseVisibility(ctx context.Context, arg SetCourseVisibilityParams) (SetCourseVisibilityRow, error)
-	SetLessonContent(ctx context.Context, arg SetLessonContentParams) (Lesson, error)
 	SoftDeleteChapter(ctx context.Context, arg SoftDeleteChapterParams) (Chapter, error)
 	SoftDeleteCourse(ctx context.Context, arg SoftDeleteCourseParams) (SoftDeleteCourseRow, error)
 	SoftDeleteDiscussionPost(ctx context.Context, arg SoftDeleteDiscussionPostParams) (DiscussionPost, error)

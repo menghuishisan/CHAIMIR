@@ -114,6 +114,25 @@ func AttachmentKindValid(fileName, contentType string, content []byte) bool {
 	}
 }
 
+// CourseVideoKindValid 校验课时视频扩展名、声明 MIME 与容器签名。
+func CourseVideoKindValid(fileName, contentType string, content []byte) bool {
+	ext := strings.ToLower(filepath.Ext(fileName))
+	declared := baseContentType(contentType)
+	switch ext {
+	case ".mp4":
+		return declared == "video/mp4" && looksLikeMP4(content)
+	case ".webm":
+		return declared == "video/webm" && looksLikeWebM(content)
+	default:
+		return false
+	}
+}
+
+// CourseMaterialKindValid 校验课时视频或普通附件,供 M6 复用统一上传边界。
+func CourseMaterialKindValid(fileName, contentType string, content []byte) bool {
+	return CourseVideoKindValid(fileName, contentType, content) || AttachmentKindValid(fileName, contentType, content)
+}
+
 // AllowedCSVContentType 判断 CSV 上传允许的常见 MIME 类型。
 func AllowedCSVContentType(contentType string) bool {
 	switch baseContentType(contentType) {
@@ -147,6 +166,16 @@ func looksLikeGIF(content []byte) bool {
 // looksLikeWEBP 识别 RIFF WEBP 容器签名。
 func looksLikeWEBP(content []byte) bool {
 	return len(content) >= 12 && bytes.Equal(content[:4], []byte("RIFF")) && bytes.Equal(content[8:12], []byte("WEBP"))
+}
+
+// looksLikeMP4 识别 ISO Base Media File Format 的 ftyp box。
+func looksLikeMP4(content []byte) bool {
+	return len(content) >= 12 && bytes.Equal(content[4:8], []byte("ftyp"))
+}
+
+// looksLikeWebM 识别 WebM 使用的 EBML 文件头。
+func looksLikeWebM(content []byte) bool {
+	return len(content) >= 4 && bytes.Equal(content[:4], []byte{0x1a, 0x45, 0xdf, 0xa3})
 }
 
 // looksLikeText 拒绝二进制控制字符,用于文本类附件的轻量内容校验。

@@ -150,9 +150,9 @@
 /api/v1/contest/contests/{id}/battle/matches:
   get:
     tags: [contest]
-    summary: 我的对抗赛对局分页列表
+    summary: 对抗赛对局分页列表(组织者见全部,学生见本队)
     operationId: contestListBattleMatches
-    x-chaimir-audience: student
+    x-chaimir-audience: user
     security: [{ bearerAuth: [] }]
     parameters: [{ $ref: "#/components/parameters/IDPath" }, { $ref: "#/components/parameters/PageQuery" }, { $ref: "#/components/parameters/SizeQuery" }]
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
@@ -234,6 +234,15 @@
     tags: [contest]
     summary: 对局回放
     operationId: contestGetBattleReplay
+    x-chaimir-audience: student
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/contest/matches/{id}/replay/download-grant:
+  post:
+    tags: [contest]
+    summary: 签发对局回放取件授权
+    operationId: contestIssueBattleReplayDownloadGrant
     x-chaimir-audience: student
     security: [{ bearerAuth: [] }]
     parameters: [{ $ref: "#/components/parameters/IDPath" }]

@@ -212,12 +212,15 @@ export interface CourseMember {
   id: SnowflakeID
   course_id: SnowflakeID
   student_id: SnowflakeID
+  student_name: string
+  student_no?: string
   join_mode: JoinMode
   joined_at: string
 }
 
+/** 按班级批量添加课程成员:学生编号由服务端按班级解析，客户端只给班级。 */
 export interface BatchMembersRequest {
-  student_ids: SnowflakeID[]
+  class_id: SnowflakeID
 }
 
 export interface TeachingPostRequest {

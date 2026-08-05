@@ -35,6 +35,13 @@ type ObjectInfo struct {
 	Size   int64
 }
 
+// ReadSeekCloser 是统一下载入口进行 Range 投放所需的对象读取能力。
+type ReadSeekCloser interface {
+	io.Reader
+	io.Seeker
+	io.Closer
+}
+
 // TenantQuota 表示统一文件服务执行上传前校验所需的租户文件配额快照。
 type TenantQuota struct {
 	MaxFiles  int64
@@ -161,7 +168,7 @@ func (s *Storage) Get(ctx context.Context, bucket, key string) (io.ReadCloser, e
 }
 
 // OpenDownload 打开下载对象并读取可信长度和内容类型,供统一下载入口流式响应。
-func (s *Storage) OpenDownload(ctx context.Context, bucket, key string) (io.ReadCloser, int64, string, error) {
+func (s *Storage) OpenDownload(ctx context.Context, bucket, key string) (ReadSeekCloser, int64, string, error) {
 	if s == nil || s.client == nil {
 		return nil, 0, "", fmt.Errorf("对象存储客户端未初始化")
 	}

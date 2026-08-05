@@ -461,6 +461,7 @@ FROM experiment_instance
 WHERE tenant_id = $1 AND experiment_id = $2 AND group_id = $3 AND status IN (1, 2, 3, 7)
 ORDER BY started_at DESC, id DESC
 LIMIT 1
+FOR UPDATE
 `
 
 type GetActiveGroupInstanceParams struct {
@@ -488,6 +489,58 @@ type GetActiveGroupInstanceRow struct {
 func (q *Queries) GetActiveGroupInstance(ctx context.Context, arg GetActiveGroupInstanceParams) (GetActiveGroupInstanceRow, error) {
 	row := q.db.QueryRow(ctx, getActiveGroupInstance, arg.TenantID, arg.ExperimentID, arg.GroupID)
 	var i GetActiveGroupInstanceRow
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.ExperimentID,
+		&i.OwnerAccountID,
+		&i.GroupID,
+		&i.SourceRef,
+		&i.SandboxRefs,
+		&i.SimSessionRefs,
+		&i.Status,
+		&i.Score,
+		&i.StartedAt,
+		&i.FinishedAt,
+		&i.LastActiveAt,
+	)
+	return i, err
+}
+
+const getActiveOwnerInstance = `-- name: GetActiveOwnerInstance :one
+SELECT id, tenant_id, experiment_id, owner_account_id, group_id, source_ref, sandbox_refs, sim_session_refs, status, COALESCE(score::float8, 0)::float8 AS score, started_at, finished_at, last_active_at
+FROM experiment_instance
+WHERE tenant_id = $1 AND experiment_id = $2 AND owner_account_id = $3 AND group_id IS NULL AND status IN (1, 2, 3, 7)
+ORDER BY started_at DESC, id DESC
+LIMIT 1
+FOR UPDATE
+`
+
+type GetActiveOwnerInstanceParams struct {
+	TenantID       int64 `json:"tenant_id"`
+	ExperimentID   int64 `json:"experiment_id"`
+	OwnerAccountID int64 `json:"owner_account_id"`
+}
+
+type GetActiveOwnerInstanceRow struct {
+	ID             int64              `json:"id"`
+	TenantID       int64              `json:"tenant_id"`
+	ExperimentID   int64              `json:"experiment_id"`
+	OwnerAccountID int64              `json:"owner_account_id"`
+	GroupID        pgtype.Int8        `json:"group_id"`
+	SourceRef      string             `json:"source_ref"`
+	SandboxRefs    []byte             `json:"sandbox_refs"`
+	SimSessionRefs []byte             `json:"sim_session_refs"`
+	Status         int16              `json:"status"`
+	Score          float64            `json:"score"`
+	StartedAt      pgtype.Timestamptz `json:"started_at"`
+	FinishedAt     pgtype.Timestamptz `json:"finished_at"`
+	LastActiveAt   pgtype.Timestamptz `json:"last_active_at"`
+}
+
+func (q *Queries) GetActiveOwnerInstance(ctx context.Context, arg GetActiveOwnerInstanceParams) (GetActiveOwnerInstanceRow, error) {
+	row := q.db.QueryRow(ctx, getActiveOwnerInstance, arg.TenantID, arg.ExperimentID, arg.OwnerAccountID)
+	var i GetActiveOwnerInstanceRow
 	err := row.Scan(
 		&i.ID,
 		&i.TenantID,
@@ -1254,6 +1307,72 @@ func (q *Queries) ListGroupMembersByExperiment(ctx context.Context, arg ListGrou
 	return items, nil
 }
 
+const listLiveInstancesByCourse = `-- name: ListLiveInstancesByCourse :many
+SELECT i.id, i.tenant_id, i.experiment_id, i.owner_account_id, i.group_id, i.source_ref, i.sandbox_refs, i.sim_session_refs, i.status,
+       COALESCE(i.score::float8, 0)::float8 AS score, i.started_at, i.finished_at, i.last_active_at
+FROM experiment_instance i
+JOIN experiment e ON e.tenant_id = i.tenant_id AND e.id = i.experiment_id
+WHERE i.tenant_id = $1 AND e.course_id = $2 AND i.status IN (1, 2, 3, 7)
+ORDER BY i.id
+`
+
+type ListLiveInstancesByCourseParams struct {
+	TenantID int64       `json:"tenant_id"`
+	CourseID pgtype.Int8 `json:"course_id"`
+}
+
+type ListLiveInstancesByCourseRow struct {
+	ID             int64              `json:"id"`
+	TenantID       int64              `json:"tenant_id"`
+	ExperimentID   int64              `json:"experiment_id"`
+	OwnerAccountID int64              `json:"owner_account_id"`
+	GroupID        pgtype.Int8        `json:"group_id"`
+	SourceRef      string             `json:"source_ref"`
+	SandboxRefs    []byte             `json:"sandbox_refs"`
+	SimSessionRefs []byte             `json:"sim_session_refs"`
+	Status         int16              `json:"status"`
+	Score          float64            `json:"score"`
+	StartedAt      pgtype.Timestamptz `json:"started_at"`
+	FinishedAt     pgtype.Timestamptz `json:"finished_at"`
+	LastActiveAt   pgtype.Timestamptz `json:"last_active_at"`
+}
+
+// 列出某课程下仍占用引擎资源的实验实例,供课程结束时级联回收(M7 需求 D3)。
+// 只取 creating/running/paused/released 四态:已完成、已回收与错误态不再持有沙箱或仿真会话。
+func (q *Queries) ListLiveInstancesByCourse(ctx context.Context, arg ListLiveInstancesByCourseParams) ([]ListLiveInstancesByCourseRow, error) {
+	rows, err := q.db.Query(ctx, listLiveInstancesByCourse, arg.TenantID, arg.CourseID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListLiveInstancesByCourseRow{}
+	for rows.Next() {
+		var i ListLiveInstancesByCourseRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.ExperimentID,
+			&i.OwnerAccountID,
+			&i.GroupID,
+			&i.SourceRef,
+			&i.SandboxRefs,
+			&i.SimSessionRefs,
+			&i.Status,
+			&i.Score,
+			&i.StartedAt,
+			&i.FinishedAt,
+			&i.LastActiveAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listStudentGroupsForExperiments = `-- name: ListStudentGroupsForExperiments :many
 SELECT eg.experiment_id, gm.group_id
 FROM group_member gm
@@ -1291,6 +1410,15 @@ func (q *Queries) ListStudentGroupsForExperiments(ctx context.Context, arg ListS
 		return nil, err
 	}
 	return items, nil
+}
+
+const lockInstanceCreation = `-- name: LockInstanceCreation :exec
+SELECT pg_advisory_xact_lock($1::bigint)
+`
+
+func (q *Queries) LockInstanceCreation(ctx context.Context, lockKey int64) error {
+	_, err := q.db.Exec(ctx, lockInstanceCreation, lockKey)
+	return err
 }
 
 const markExperimentScoreOutboxFailed = `-- name: MarkExperimentScoreOutboxFailed :one

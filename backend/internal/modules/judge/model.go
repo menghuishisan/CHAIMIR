@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"time"
 
+	"chaimir/internal/contracts"
 	"chaimir/internal/platform/ids"
 	"chaimir/internal/platform/workload"
 )
@@ -23,6 +24,14 @@ type Judger struct {
 	Status            int16
 	CreatedAt         time.Time
 	UpdatedAt         time.Time
+}
+
+// CatalogJudger 是编排目录里的判题方式投影,只保留业务模块选判题方式所需的字段。
+// 判题镜像版本、受控命令与执行组件属判题私密面,由平台管理接口承载,这里刻意不携带。
+type CatalogJudger struct {
+	Code string
+	Name string
+	Type int16
 }
 
 // JudgeTask 是一次提交的判题任务快照。
@@ -71,6 +80,7 @@ type JudgeResult struct {
 	Score           int32
 	MaxScore        int32
 	Details         []JudgeResultDetail
+	Replay          contracts.JudgeReplayTrace
 	JudgeSandboxRef string
 	JudgedAt        time.Time
 	IsRejudge       bool

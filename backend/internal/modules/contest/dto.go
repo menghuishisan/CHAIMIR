@@ -160,20 +160,28 @@ type BattleEntryDTO struct {
 
 // BattleMatchDTO 是对局输出。
 type BattleMatchDTO struct {
-	ID           ids.ID         `json:"id"`
-	ContestID    ids.ID         `json:"contest_id"`
-	ProblemID    ids.ID         `json:"problem_id"`
-	EntryAID     ids.ID         `json:"entry_a_id"`
-	EntryBID     ids.ID         `json:"entry_b_id"`
-	SourceRef    string         `json:"source_ref"`
-	SandboxRef   string         `json:"sandbox_ref,omitempty"`
-	JudgeTaskRef string         `json:"judge_task_ref,omitempty"`
-	Result       int16          `json:"result,omitempty"`
-	ScoreDelta   map[string]any `json:"score_delta"`
-	ReplayRef    string         `json:"replay_ref,omitempty"`
-	Status       int16          `json:"status"`
-	MatchedAt    time.Time      `json:"matched_at"`
-	FinishedAt   time.Time      `json:"finished_at,omitempty"`
+	ID              ids.ID         `json:"id"`
+	ContestID       ids.ID         `json:"contest_id"`
+	ProblemID       ids.ID         `json:"problem_id"`
+	EntryAID        ids.ID         `json:"entry_a_id"`
+	EntryBID        ids.ID         `json:"entry_b_id"`
+	SourceRef       string         `json:"source_ref"`
+	SandboxRef      string         `json:"sandbox_ref,omitempty"`
+	JudgeTaskRef    string         `json:"judge_task_ref,omitempty"`
+	Result          int16          `json:"result,omitempty"`
+	ScoreDelta      map[string]any `json:"score_delta"`
+	ReplayAvailable bool           `json:"replay_available"`
+	Status          int16          `json:"status"`
+	MatchedAt       time.Time      `json:"matched_at"`
+	FinishedAt      time.Time      `json:"finished_at,omitempty"`
+}
+
+// BattleReplayDownloadGrantDTO 是对局回放统一文件服务取件授权响应。
+type BattleReplayDownloadGrantDTO struct {
+	Token     string `json:"token"`
+	Mode      string `json:"mode"`
+	FileName  string `json:"file_name"`
+	ExpiresAt string `json:"expires_at"`
 }
 
 // LadderDTO 是排行榜输出。

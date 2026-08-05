@@ -30,6 +30,7 @@ func (a orgAPI) registerRead(g gin.IRouter) {
 	g.GET("/departments", a.listDepartments)
 	g.GET("/majors", a.listMajors)
 	g.GET("/classes", a.listClasses)
+	g.GET("/classes/:id/students", a.listClassStudents)
 }
 
 // registerWrite 注册学校管理员组织写入、导入和批量状态接口。
@@ -176,6 +177,16 @@ func (a orgAPI) listClasses(c *gin.Context) {
 		return
 	}
 	httpx.Write(c, out, nil)
+}
+
+// listClassStudents 返回指定班级的在校学生名录,供教师挑选学生(只出编号、姓名与学号)。
+func (a orgAPI) listClassStudents(c *gin.Context) {
+	classID, ok := httpx.PathID(c, "id")
+	if !ok {
+		return
+	}
+	out, err := a.svc.ListClassStudentsForViewer(c.Request.Context(), classID)
+	httpx.Write(c, out, err)
 }
 
 // createClass 绑定创建班级请求。

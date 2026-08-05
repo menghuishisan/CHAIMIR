@@ -9,6 +9,10 @@ import (
 )
 
 type Querier interface {
+	// 下架已从标准库移除的内置包。
+	// 内置包被删掉版本时不能物理删除:已有实验定义与仿真会话按 (code, version) 引用它,
+	// 删了会让历史实验取不到场景。改为 status=4(已下架),既让新建选不到、也保住旧引用可解释。
+	ArchiveRetiredBuiltinSimPackages(ctx context.Context, liveKeys []string) ([]SimPackage, error)
 	ArchiveSimSessionsBySourceRef(ctx context.Context, arg ArchiveSimSessionsBySourceRefParams) ([]SimSession, error)
 	CompleteSimReview(ctx context.Context, arg CompleteSimReviewParams) (SimPackageReview, error)
 	CountSimPackages(ctx context.Context, arg CountSimPackagesParams) (int64, error)
@@ -35,6 +39,11 @@ type Querier interface {
 	UpdateSimPackageDraft(ctx context.Context, arg UpdateSimPackageDraftParams) (SimPackage, error)
 	UpdateSimPackageStatus(ctx context.Context, arg UpdateSimPackageStatusParams) (SimPackage, error)
 	UpdateSimSessionStatus(ctx context.Context, arg UpdateSimSessionStatusParams) (SimSession, error)
+	// 平台内置仿真包按 (code, version) 幂等入库。
+	// 内置包不来自教师上传,而是平台随版本交付的标准库(见 docs/04-仿真可视化引擎/09-内置仿真包标准库.md),
+	// 故直接落 author_type=1、status=3(已上架):它不经审核流程,审核针对的是外部提交的包。
+	// 重跑部署 seed 时按 code+version 覆盖协议字段,不新建行、不改 created_at。
+	UpsertBuiltinSimPackage(ctx context.Context, arg UpsertBuiltinSimPackageParams) (SimPackage, error)
 	UpsertSimCheckpoint(ctx context.Context, arg UpsertSimCheckpointParams) (SimCheckpoint, error)
 }
 

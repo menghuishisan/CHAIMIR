@@ -193,6 +193,34 @@ export interface SandboxToolDefinition extends SandboxToolRequest {
   id: SnowflakeID
 }
 
+/**
+ * SandboxOrchestrationCatalog 是编排目录响应:业务模块选运行时与工具只需这些字段。
+ * 它刻意不是 SandboxRuntime / SandboxToolDefinition 的子集别名 —— 适配器清单、镜像地址、
+ * 命令白名单与自检详情属平台运维面,后端也不下发,故编排面按独立类型对接。
+ */
+export interface SandboxOrchestrationCatalog {
+  runtimes: SandboxCatalogRuntime[]
+  tools: SandboxCatalogTool[]
+}
+
+export interface SandboxCatalogRuntime {
+  code: string
+  name: string
+  eco: string
+  images: SandboxCatalogRuntimeImage[]
+}
+
+export interface SandboxCatalogRuntimeImage {
+  version: string
+  is_default: boolean
+}
+
+export interface SandboxCatalogTool {
+  code: string
+  name: string
+  kind: SandboxToolKind
+}
+
 export interface SandboxQuota {
   tenant_id: SnowflakeID
   active_sandbox_count?: number

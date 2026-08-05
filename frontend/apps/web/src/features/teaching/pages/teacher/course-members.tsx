@@ -1,16 +1,15 @@
 // 选课成员管理(课程详情页内区块)。
-// 批量添加需要学生编号,而教师手上只有姓名与学号 —— 故从组织架构选班级、
-// 再从该班级账号里勾选学生,编号由页面在提交时解析(不让教师手填内部 ID)。
+// 批量添加的粒度是「一个班级」(M6 需求 C1):教师从组织架构选班,服务端按班解析在校学生,
+// 页面不接触学生编号 —— 账号目录是学校管理员能力,教师端也不该先拉一份全校名录。
+// 成员列表的姓名与学号由 M6 随成员一并下发(服务端经 M1 契约批量解析),不在前端二次匹配。
 
 import { useCallback, useMemo, useState } from 'react'
 import { UserMinus, UserPlus, Users } from 'lucide-react'
-import { AccountStatus, UserRole, type Account, type Class, type CourseMember } from '@chaimir/api-client'
+import type { Class, CourseMember } from '@chaimir/api-client'
 import {
   Badge,
   Button,
   Callout,
-  Checkbox,
-  Empty,
   FormField,
   IconButton,
   Modal,
@@ -35,9 +34,6 @@ import { formatShortDateTime } from '../../../../utils/formatters'
 import { joinModeLabel } from '../../../../utils/labels/teaching'
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
 
-/** 一次最多取回的班级学生数:后端分页上限 100,一个班级不会超过这个量级。 */
-const CLASS_STUDENT_SIZE = 100
-
 export interface CourseMembersProps {
   courseId: string
 }
@@ -54,18 +50,6 @@ export function CourseMembers({ courseId }: CourseMembersProps) {
   const members = usePagedResource<CourseMember>(
     (params) => api.teaching.listMembers(courseId, params),
     [courseId],
-  )
-
-  // 成员姓名需要账号档案:成员记录只回 student_id
-  const accounts = useAsyncResource(
-    () => api.identity.getAccounts({ role: UserRole.STUDENT, page: 1, size: CLASS_STUDENT_SIZE }),
-    [],
-    () => false,
-  )
-
-  const accountById = useMemo(
-    () => new Map((accounts.data?.list ?? []).map((account: Account) => [account.id, account])),
-    [accounts.data],
   )
 
   const removeMember = useCallback(async () => {
@@ -88,15 +72,14 @@ export function CourseMembers({ courseId }: CourseMembersProps) {
     {
       key: 'student_id',
       header: '学生',
-      render: (member) => {
-        const account = accountById.get(member.student_id)
-        return (
-          <div className="min-w-0">
-            <div className="truncate font-medium text-ink">{account ? account.name : '已离校学生'}</div>
-            {account?.no ? <div className="truncate font-mono text-xs text-ink-sub">{account.no}</div> : null}
-          </div>
-        )
-      },
+      render: (member) => (
+        <div className="min-w-0">
+          <div className="truncate font-medium text-ink">{member.student_name}</div>
+          {member.student_no ? (
+            <div className="truncate font-mono text-xs text-ink-sub">{member.student_no}</div>
+          ) : null}
+        </div>
+      ),
     },
     {
       key: 'join_mode',
@@ -187,9 +170,7 @@ export function CourseMembers({ courseId }: CourseMembersProps) {
             </ModalDescription>
           </ModalHeader>
           <ModalBody>
-            <p className="text-base text-ink">
-              {removeTarget ? (accountById.get(removeTarget.student_id)?.name ?? '该学生') : ''}
-            </p>
+            <p className="text-base text-ink">{removeTarget?.student_name ?? ''}</p>
           </ModalBody>
           <ModalFooter>
             <Button variant="outline" onClick={() => setRemoveTarget(undefined)}>
@@ -212,111 +193,70 @@ interface AddMembersModalProps {
 }
 
 /**
- * AddMembersModal 按班级勾选学生并批量加入课程。
- * 学生编号由页面从账号档案解析,教师只看到姓名与学号。
+ * AddMembersModal 选班级并把该班在校学生整批加入课程。
+ * 粒度就是「一个班」(M6 需求 C1):教师手上有的是班级,学生编号是内部标识,
+ * 由服务端按班级解析,页面不先取一份账号目录再回传编号 —— 账号目录是校管能力。
+ * 已在课程内的学生重复加入不会出错(服务端按课程+学生幂等),故不需要先做差集。
  */
 function AddMembersModal({ courseId, onClose, onAdded }: AddMembersModalProps) {
   const [classId, setClassId] = useState<string>('')
-  const [selected, setSelected] = useState<Set<string>>(new Set())
   const [formError, setFormError] = useState<string>()
   const [working, setWorking] = useState(false)
 
   const classes = useAsyncResource(() => api.identity.listClasses(), [], () => false)
-
-  // 选定班级后取该班学生:未选班级不拉全校账号(数据量与意义都不对)
-  const students = useAsyncResource(
-    () =>
-      classId
-        ? api.identity.getAccounts({
-            role: UserRole.STUDENT,
-            class_id: classId,
-            status: AccountStatus.ACTIVE,
-            page: 1,
-            size: CLASS_STUDENT_SIZE,
-          })
-        : Promise.resolve({ list: [], total: 0, page: 1, size: CLASS_STUDENT_SIZE }),
-    [classId],
-    (value) => value.list.length === 0,
-  )
-
-  const toggle = useCallback((accountId: string) => {
-    setSelected((current) => {
-      const next = new Set(current)
-      if (next.has(accountId)) next.delete(accountId)
-      else next.add(accountId)
-      return next
-    })
-  }, [])
-
-  const submit = useCallback(async () => {
-    if (selected.size === 0) {
-      setFormError('请至少勾选一名学生')
-      return
-    }
-    setFormError(undefined)
-    setWorking(true)
-    try {
-      await api.teaching.addMembers(courseId, { student_ids: Array.from(selected) })
-      toast.success(`已添加 ${selected.size} 名学生`)
-      onAdded()
-    } catch (error) {
-      setFormError(userFacingErrorMessage(error, '添加没有成功,请稍后重试。'))
-    } finally {
-      setWorking(false)
-    }
-  }, [courseId, onAdded, selected])
 
   const classOptions = useMemo(
     () => (classes.data ?? []).map((item: Class) => ({ value: item.id, label: item.name })),
     [classes.data],
   )
 
+  const submit = useCallback(async () => {
+    if (classId === '') {
+      setFormError('请选择要加入课程的班级')
+      return
+    }
+    setFormError(undefined)
+    setWorking(true)
+    try {
+      const added = await api.teaching.addMembers(courseId, { class_id: classId })
+      toast.success(`已添加 ${added.length} 名学生`)
+      onAdded()
+    } catch (error) {
+      setFormError(userFacingErrorMessage(error, '添加没有成功,请稍后重试。'))
+    } finally {
+      setWorking(false)
+    }
+  }, [classId, courseId, onAdded])
+
   return (
     <Modal open onOpenChange={(open) => !open && onClose()}>
-      <ModalContent size="lg">
+      <ModalContent size="md">
         <ModalHeader>
           <ModalTitle>按班级添加学生</ModalTitle>
-          <ModalDescription>先选班级,再勾选要加入课程的学生。</ModalDescription>
+          <ModalDescription>
+            选定班级后,该班在读学生会全部加入本课程;已在课程里的学生不会重复添加。
+          </ModalDescription>
         </ModalHeader>
         <ModalBody className="flex flex-col gap-4">
-          <FormField label="班级" htmlFor="add-members-class" required>
-            <Select
-              id="add-members-class"
-              options={classOptions}
-              value={classId}
-              placeholder={classOptions.length > 0 ? '选择班级' : '暂无班级'}
-              disabled={classOptions.length === 0}
-              onValueChange={(value) => {
-                setClassId(value)
-                setSelected(new Set())
-              }}
-            />
-          </FormField>
-
-          {classId ? (
-            <ResourceState
-              resource={students}
-              emptyIcon={Users}
-              emptyTitle="这个班级没有可添加的学生"
-              emptyDescription="班级里没有状态正常的学生账号。"
-              skeleton={<Skeleton variant="line" lines={4} />}
-            >
-              {(page) => (
-                <div className="flex max-h-72 flex-col gap-2 overflow-y-auto rounded-md border border-line p-3">
-                  {page.list.map((account: Account) => (
-                    <Checkbox
-                      key={account.id}
-                      checked={selected.has(account.id)}
-                      label={`${account.name}${account.no ? ` · ${account.no}` : ''}`}
-                      onCheckedChange={() => toggle(account.id)}
-                    />
-                  ))}
-                </div>
-              )}
-            </ResourceState>
-          ) : (
-            <Empty icon={Users} title="请先选择班级" description="选定班级后才会列出学生。" />
-          )}
+          <ResourceState
+            resource={classes}
+            emptyIcon={Users}
+            emptyTitle="学校还没有建班级"
+            emptyDescription="请联系学校管理员在组织架构里创建班级。"
+            skeleton={<Skeleton variant="line" lines={2} />}
+          >
+            {() => (
+              <FormField label="班级" htmlFor="add-members-class" required>
+                <Select
+                  id="add-members-class"
+                  options={classOptions}
+                  value={classId}
+                  placeholder="选择班级"
+                  onValueChange={setClassId}
+                />
+              </FormField>
+            )}
+          </ResourceState>
 
           {formError ? <Callout tone="danger">{formError}</Callout> : null}
         </ModalBody>
@@ -325,7 +265,7 @@ function AddMembersModal({ courseId, onClose, onAdded }: AddMembersModalProps) {
             取消
           </Button>
           <Button variant="seal" loading={working} onClick={() => void submit()}>
-            添加 {selected.size > 0 ? `${selected.size} 名` : ''}学生
+            添加学生
           </Button>
         </ModalFooter>
       </ModalContent>

@@ -20,6 +20,10 @@ const (
 	CodeTeachingInviteInvalid = "61008"
 	// CodeTeachingDiscussionInvalid 表示讨论、公告或评价操作非法。
 	CodeTeachingDiscussionInvalid = "61009"
+	// CodeTeachingMemberClassEmpty 表示所选班级没有可加入课程的在校学生。
+	CodeTeachingMemberClassEmpty = "61010"
+	// CodeTeachingCourseEndedEventPublishFailed 表示课程结束事件发布失败,课内实验实例暂未级联回收。
+	CodeTeachingCourseEndedEventPublishFailed = "61011"
 )
 
 const (
@@ -80,6 +84,10 @@ var (
 	ErrTeachingInviteInvalid = New(CodeTeachingInviteInvalid, "邀请码无效或课程暂不可加入")
 	// ErrTeachingDiscussionInvalid 表示讨论、公告或评价信息不正确。
 	ErrTeachingDiscussionInvalid = New(CodeTeachingDiscussionInvalid, "课程互动信息不正确")
+	// ErrTeachingMemberClassEmpty 表示所选班级没有可加入课程的在校学生。
+	ErrTeachingMemberClassEmpty = New(CodeTeachingMemberClassEmpty, "这个班级暂时没有可加入课程的在校学生")
+	// ErrTeachingCourseEndedEventPublishFailed 表示课程状态已更新但级联回收通知未发出。
+	ErrTeachingCourseEndedEventPublishFailed = New(CodeTeachingCourseEndedEventPublishFailed, "课程状态已更新,但课内实验环境的回收通知暂时没能发出,请稍后重试")
 )
 
 var (

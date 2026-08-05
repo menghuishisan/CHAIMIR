@@ -1,4 +1,12 @@
 # 本文件按模块维护 sandbox 路径项。
+/api/v1/sandbox/catalog:
+  get:
+    tags: [sandbox]
+    summary: 编排目录(可用运行时与工具的最小字段)
+    operationId: sandboxOrchestrationCatalog
+    x-chaimir-audience: platform-admin-or-teacher
+    security: [{ bearerAuth: [] }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
 /api/v1/sandbox/runtimes:
   get:
     tags: [sandbox]

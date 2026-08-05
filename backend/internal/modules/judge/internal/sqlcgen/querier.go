@@ -23,6 +23,8 @@ type Querier interface {
 	GetJudgeTaskWithResult(ctx context.Context, arg GetJudgeTaskWithResultParams) (GetJudgeTaskWithResultRow, error)
 	GetJudgerByCode(ctx context.Context, code string) (Judger, error)
 	GetJudgerByID(ctx context.Context, id int64) (Judger, error)
+	// 编排目录只取判题方式的 code/name/type,不出 resource_spec 与执行引用;停用项不进可选集。
+	ListCatalogJudgers(ctx context.Context) ([]ListCatalogJudgersRow, error)
 	ListFingerprintsForProblem(ctx context.Context, arg ListFingerprintsForProblemParams) ([]SubmissionFingerprint, error)
 	ListJudgeTasks(ctx context.Context, arg ListJudgeTasksParams) ([]ListJudgeTasksRow, error)
 	ListJudgeTasksBySourceRef(ctx context.Context, arg ListJudgeTasksBySourceRefParams) ([]JudgeTask, error)

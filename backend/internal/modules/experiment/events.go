@@ -22,7 +22,7 @@ func SubscribeEvents(bus eventbus.Bus, svc *Service) ([]eventbus.Subscription, e
 	if svc == nil {
 		return nil, apperr.ErrEventServiceMissing
 	}
-	subs := make([]eventbus.Subscription, 0, 3)
+	subs := make([]eventbus.Subscription, 0, 4)
 	if err := subscribeExperimentEvent(bus, &subs, contracts.SubjectJudgeCompleted, handleJudgeCompletedEvent(svc)); err != nil {
 		return nil, err
 	}
@@ -30,6 +30,9 @@ func SubscribeEvents(bus eventbus.Bus, svc *Service) ([]eventbus.Subscription, e
 		return nil, err
 	}
 	if err := subscribeExperimentEvent(bus, &subs, contracts.SubjectSandboxRecycled, handleSandboxRecycledEvent(svc)); err != nil {
+		return nil, err
+	}
+	if err := subscribeExperimentEvent(bus, &subs, contracts.SubjectTeachingCourseEnded, handleCourseEndedEvent(svc)); err != nil {
 		return nil, err
 	}
 	return subs, nil
@@ -112,4 +115,45 @@ func (s *Service) HandleSandboxRecycled(ctx context.Context, event contracts.San
 		}
 		return nil
 	})
+}
+
+// handleCourseEndedEvent 解码 M6 课程结束事件。
+func handleCourseEndedEvent(svc *Service) eventbus.Handler {
+	return func(ctx context.Context, data []byte) error {
+		var event contracts.TeachingCourseEndedEvent
+		if err := eventbus.Decode(data, &event, apperr.ErrExperimentInstanceInvalid); err != nil {
+			return err
+		}
+		return svc.HandleCourseEnded(ctx, event)
+	}
+}
+
+// HandleCourseEnded 课程结束或归档后级联回收课内仍占用引擎资源的实验实例(M7 需求 D3)。
+//
+// 逐个实例回收而不是批量:回收要按 source_ref 通知 M2/M4,任一失败都必须显式返回让事件重投,
+// 而已回收成功的实例已落 recycled 态,重投时不会被再次取出(查询只看仍占资源的四态),天然幂等。
+func (s *Service) HandleCourseEnded(ctx context.Context, event contracts.TeachingCourseEndedEvent) error {
+	if event.TenantID <= 0 || event.CourseID <= 0 {
+		return apperr.ErrExperimentInstanceInvalid
+	}
+	var items []ExperimentInstance
+	if err := s.store.TenantTx(ctx, event.TenantID, func(ctx context.Context, tx TxStore) error {
+		var err error
+		items, err = tx.ListLiveInstancesByCourse(ctx, event.TenantID, event.CourseID)
+		return err
+	}); err != nil {
+		return err
+	}
+	for _, item := range items {
+		if err := s.recycleEngines(ctx, item, "course_ended"); err != nil {
+			return err
+		}
+		if err := s.store.TenantTx(ctx, event.TenantID, func(ctx context.Context, tx TxStore) error {
+			_, err := tx.SetInstanceStatus(ctx, event.TenantID, item.ID, InstanceStatusRecycled)
+			return err
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
 }

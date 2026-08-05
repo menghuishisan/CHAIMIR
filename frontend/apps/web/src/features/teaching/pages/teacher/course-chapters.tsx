@@ -37,9 +37,9 @@ import {
   type TableColumn,
 } from '@chaimir/ui'
 import { api } from '../../../../app/api'
+import { formatFileSize } from '../../../../utils/formatters'
 import {
   LESSON_CONTENT_TYPES,
-  formatFileSize,
   isLessonMaterialType,
   lessonContentTypeLabel,
 } from '../../../../utils/labels/teaching'

@@ -12,6 +12,8 @@ const (
 	SubjectSandboxRecycled = "sandbox.recycled"
 	// SubjectExperimentScored 表示实验得分落定事件,由 M7 发布供上层流程消费。
 	SubjectExperimentScored = "experiment.scored"
+	// SubjectTeachingCourseEnded 表示课程已结束或归档,由 M6 发布供 M7 级联回收课内实验实例。
+	SubjectTeachingCourseEnded = "teaching.course.ended"
 	// SubjectTeachingGradeUpdated 表示单课程成绩更新事件,由 M6 发布供 M11 重算。
 	SubjectTeachingGradeUpdated = "teaching.grade.updated"
 	// SubjectGradeReviewLockChanged 表示 M11 审核流程锁定态变化,由 M11 发布供 M6 同步写保护投影。
@@ -67,6 +69,18 @@ type ExperimentScoredEvent struct {
 	StudentID    int64     `json:"student_id"`
 	Score        float64   `json:"score"`
 	ScoredAt     time.Time `json:"scored_at"`
+}
+
+// TeachingCourseEndedEvent 是课程结束或归档后的事件载荷。
+//
+// M7 据此级联回收该课程下仍占用引擎资源的实验实例(M7 需求 D3「课程结束级联」)。
+// 走事件而不是同步调用:M6 在第 2 层、M7 也在第 2 层,同层不得互相依赖(架构铁律 2)。
+type TeachingCourseEndedEvent struct {
+	TenantID int64     `json:"tenant_id"`
+	TraceID  string    `json:"trace_id"`
+	CourseID int64     `json:"course_id"`
+	Status   int16     `json:"status"`
+	EndedAt  time.Time `json:"ended_at"`
 }
 
 // TeachingGradeUpdatedEvent 是单课程成绩调整后的事件载荷。

@@ -582,9 +582,10 @@ func (tx *txStore) GetBattleMatchByJudgeTask(ctx context.Context, tenantID int64
 	return battleMatchFromRow(row)
 }
 
-// ListBattleMatchesForTeam 查询队伍对局历史和总数。
+// ListBattleMatchesForTeam 查询对局历史和总数。
+// teamID 传 0 表示不按队伍过滤(组织者视角看本赛事全部对局)。
 func (tx *txStore) ListBattleMatchesForTeam(ctx context.Context, tenantID, contestID, teamID int64, page, size int) ([]BattleMatch, int64, error) {
-	rows, err := tx.q.ListBattleMatchesForTeam(ctx, sqlcgen.ListBattleMatchesForTeamParams{TenantID: tenantID, ContestID: contestID, TeamID: teamID, Limit: int32(size), Offset: int32((page - 1) * size)})
+	rows, err := tx.q.ListBattleMatchesForTeam(ctx, sqlcgen.ListBattleMatchesForTeamParams{TenantID: tenantID, ContestID: contestID, TeamID: teamID, PageLimit: int32(size), PageOffset: int32((page - 1) * size)})
 	if err != nil {
 		return nil, 0, apperr.ErrContestBattleMatchFailed.WithCause(err)
 	}

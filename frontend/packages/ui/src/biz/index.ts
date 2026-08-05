@@ -1,7 +1,8 @@
 /**
  * biz 出口:业务语义层(墨底教学舞台)统一导出。
- * 唯一对外面:TeachingFrame 的三栏渲染组件 + 帧分区/视觉规则工具(供页面装配槽位)。
- * 单个模式渲染器不外露 —— 模式分派由 PatternView 内部完成,页面只按 layout 用三栏组件。
+ * 对外面两块:TeachingFrame 的三栏渲染组件 + 代码执行追踪面板,以及帧分区/视觉规则工具
+ * (供页面装配槽位)。单个模式渲染器不外露 —— 模式分派由 PatternView 内部完成,
+ * 页面只按 layout 用三栏组件。
  */
 export {
   TeachingFrameBrief,
@@ -11,6 +12,7 @@ export {
   type TeachingFrameStageProps,
   type TeachingFrameAsideProps,
 } from "./TeachingFrameStage";
+export { CodeTracePanel, type CodeTracePanelProps } from "./CodeTracePanel";
 export {
   asidePanels,
   frameHasAside,

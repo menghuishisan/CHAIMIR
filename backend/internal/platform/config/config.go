@@ -113,6 +113,7 @@ type MinIOConfig struct {
 	BucketBackup            string
 	PingTimeoutSeconds      int
 	DownloadGrantTTLSeconds int
+	StreamGrantTTLSeconds   int
 }
 
 // AuthConfig 描述 JWT、服务签名和敏感数据加密密钥。
@@ -175,6 +176,7 @@ type SMSConfig struct {
 type UploadConfig struct {
 	ImportMaxBytes              int64
 	ContentAttachmentMaxBytes   int64
+	CourseMaterialMaxBytes      int64
 	SimBundleMaxBytes           int64
 	SimBundleMetadataMaxBytes   int64
 	SimBundleMaxFiles           int
@@ -261,29 +263,29 @@ type AdminConfig struct {
 
 // SandboxConfig 描述 K8s 沙箱编排与镜像证明边界。
 type SandboxConfig struct {
-	KubeconfigPath                string
-	NSPrefixStudent               string
-	NSPrefixJudge                 string
-	NSPrefixBattle                string
-	PrepullNamespace              string
-	SandboxNodeSelector           map[string]string
-	SandboxNodeTolerations        []SandboxToleration
-	ImagePullSecretNames          []string
-	ImageRegistry                 string
-	ImageAttestations             []SandboxImageAttestation
-	CollectorAllowedPrefixes      []string
-	DefaultCPU                    string
-	DefaultMemory                 string
-	DefaultReqCPU                 string
-	DefaultReqMemory              string
-	MaxCPU                        string
-	MaxMemory                     string
-	MaxPods                       string
-	WorkspaceStorage              string
-	StorageClassName              string
-	VolumeSnapshotClassName       string
+	KubeconfigPath           string
+	NSPrefixStudent          string
+	NSPrefixJudge            string
+	NSPrefixBattle           string
+	PrepullNamespace         string
+	SandboxNodeSelector      map[string]string
+	SandboxNodeTolerations   []SandboxToleration
+	ImagePullSecretNames     []string
+	ImageRegistry            string
+	ImageAttestations        []SandboxImageAttestation
+	CollectorAllowedPrefixes []string
+	DefaultCPU               string
+	DefaultMemory            string
+	DefaultReqCPU            string
+	DefaultReqMemory         string
+	MaxCPU                   string
+	MaxMemory                string
+	MaxPods                  string
+	WorkspaceStorage         string
+	StorageClassName         string
+	VolumeSnapshotClassName  string
 	// RuntimeClass 是不可信沙箱 Pod 强制使用的隔离运行时(gVisor runsc 等)对应的 K8s RuntimeClass 名称,必填,缺失即启动失败。
-	RuntimeClass string
+	RuntimeClass                  string
 	PrepullTimeoutSeconds         int
 	PrepullHoldSeconds            int
 	ReadyTimeoutSeconds           int
@@ -505,6 +507,7 @@ func Load() (*Config, error) {
 		BucketBackup:            req("MINIO_BUCKET_BACKUP"),
 		PingTimeoutSeconds:      reqInt("MINIO_PING_TIMEOUT_SECONDS"),
 		DownloadGrantTTLSeconds: reqInt("STORAGE_DOWNLOAD_GRANT_TTL_SECONDS"),
+		StreamGrantTTLSeconds:   reqInt("STORAGE_STREAM_GRANT_TTL_SECONDS"),
 	}
 	c.Auth = AuthConfig{
 		JWTSigningKey:             req("JWT_SIGNING_KEY"),
@@ -557,6 +560,7 @@ func Load() (*Config, error) {
 	c.Upload = UploadConfig{
 		ImportMaxBytes:              reqInt64("UPLOAD_IMPORT_MAX_BYTES"),
 		ContentAttachmentMaxBytes:   reqInt64("UPLOAD_CONTENT_ATTACHMENT_MAX_BYTES"),
+		CourseMaterialMaxBytes:      reqInt64("UPLOAD_COURSE_MATERIAL_MAX_BYTES"),
 		SimBundleMaxBytes:           reqInt64("UPLOAD_SIM_BUNDLE_MAX_BYTES"),
 		SimBundleMetadataMaxBytes:   reqInt64("UPLOAD_SIM_BUNDLE_METADATA_MAX_BYTES"),
 		SimBundleMaxFiles:           reqInt("UPLOAD_SIM_BUNDLE_MAX_FILES"),
@@ -720,6 +724,14 @@ func Load() (*Config, error) {
 	if c.Auth.ServiceAuthMaxSkewSeconds <= 0 {
 		errs = append(errs, "SERVICE_AUTH_MAX_SKEW_SECONDS 必须大于 0")
 	}
+	// 令牌有效期为 0 或负数会让签发出的 access/refresh token 立即过期,且路径受限 Cookie
+	// 的 MaxAge 无从计算,必须在启动时拦下而不是留到运行期表现为「登录后立刻掉线」。
+	if c.Auth.AccessTTLMin <= 0 {
+		errs = append(errs, "JWT_ACCESS_TTL_MIN 必须大于 0")
+	}
+	if c.Auth.RefreshTTLDay <= 0 {
+		errs = append(errs, "JWT_REFRESH_TTL_DAY 必须大于 0")
+	}
 	if c.Server.HealthTimeoutSeconds <= 0 {
 		errs = append(errs, "HEALTH_CHECK_TIMEOUT_SECONDS 必须大于 0")
 	}
@@ -768,6 +780,9 @@ func Load() (*Config, error) {
 	if c.MinIO.DownloadGrantTTLSeconds <= 0 {
 		errs = append(errs, "STORAGE_DOWNLOAD_GRANT_TTL_SECONDS 必须大于 0")
 	}
+	if c.MinIO.StreamGrantTTLSeconds <= 0 || c.MinIO.StreamGrantTTLSeconds >= c.MinIO.DownloadGrantTTLSeconds {
+		errs = append(errs, "STORAGE_STREAM_GRANT_TTL_SECONDS 必须大于 0 且小于 STORAGE_DOWNLOAD_GRANT_TTL_SECONDS")
+	}
 	if c.Upload.VirusScanTimeoutSeconds <= 0 {
 		errs = append(errs, "UPLOAD_VIRUS_SCAN_TIMEOUT_SECONDS 必须大于 0")
 	}
@@ -776,6 +791,9 @@ func Load() (*Config, error) {
 	}
 	if c.Upload.ContentAttachmentMaxBytes <= 0 {
 		errs = append(errs, "UPLOAD_CONTENT_ATTACHMENT_MAX_BYTES 必须大于 0")
+	}
+	if c.Upload.CourseMaterialMaxBytes <= 0 {
+		errs = append(errs, "UPLOAD_COURSE_MATERIAL_MAX_BYTES 必须大于 0")
 	}
 	if c.Upload.SimBundleMaxBytes <= 0 {
 		errs = append(errs, "UPLOAD_SIM_BUNDLE_MAX_BYTES 必须大于 0")

@@ -49,18 +49,24 @@ func instanceDTOFromModel(item ExperimentInstance, checkpoints []CheckpointResul
 }
 
 // groupDTOFromModel 转换小组和成员为 HTTP 输出。
-func groupDTOFromModel(item ExperimentGroup) GroupDTO {
+// profiles 是经 M1 契约批量解析的账号档案;取不到时给确定性占位而不是留空,
+// 让界面能解释「这个学生已离校」而不是显示一片空白(§8 文案面向用户)。
+func groupDTOFromModel(item ExperimentGroup, profiles map[int64]contracts.AccountInfo) GroupDTO {
 	out := GroupDTO{ID: ids.ID(item.ID), ExperimentID: ids.ID(item.ExperimentID), Name: item.Name, CreatedAt: item.CreatedAt}
 	out.Members = make([]GroupMemberDTO, 0, len(item.Members))
 	for _, member := range item.Members {
-		out.Members = append(out.Members, GroupMemberDTO{ID: ids.ID(member.ID), GroupID: ids.ID(member.GroupID), StudentID: ids.ID(member.StudentID), Role: member.Role, CreatedAt: member.CreatedAt})
+		profile, ok := profiles[member.StudentID]
+		if !ok {
+			profile = contracts.AccountInfo{Name: "已离校学生"}
+		}
+		out.Members = append(out.Members, GroupMemberDTO{ID: ids.ID(member.ID), GroupID: ids.ID(member.GroupID), StudentID: ids.ID(member.StudentID), StudentName: profile.Name, StudentNo: profile.No, Role: member.Role, CreatedAt: member.CreatedAt})
 	}
 	return out
 }
 
 // groupDTOWithSharedInstance 转换小组详情并附带当前共享实例。
-func groupDTOWithSharedInstance(group ExperimentGroup, inst *ExperimentInstance) GroupDTO {
-	out := groupDTOFromModel(group)
+func groupDTOWithSharedInstance(group ExperimentGroup, profiles map[int64]contracts.AccountInfo, inst *ExperimentInstance) GroupDTO {
+	out := groupDTOFromModel(group, profiles)
 	if inst != nil {
 		dto := instanceDTOFromModel(*inst, nil)
 		out.SharedInstance = &dto
@@ -69,8 +75,14 @@ func groupDTOWithSharedInstance(group ExperimentGroup, inst *ExperimentInstance)
 }
 
 // reportDTOFromModel 转换报告为 HTTP 输出。
-func reportDTOFromModel(item ExperimentReport) ReportDTO {
-	return ReportDTO{ID: ids.ID(item.ID), InstanceID: ids.ID(item.InstanceID), StudentID: ids.ID(item.StudentID), ContentRef: item.ContentRef, ManualScore: item.ManualScore, Comment: item.Comment, Status: item.Status, SubmittedAt: item.SubmittedAt}
+// 提交者姓名与学号经 M1 账号契约解析后随报告下发:报告表只存 student_id,
+// 而批改界面必须显示是谁交的;取不到时给确定性占位而非空白。
+func reportDTOFromModel(item ExperimentReport, profiles map[int64]contracts.AccountInfo) ReportDTO {
+	profile, ok := profiles[item.StudentID]
+	if !ok {
+		profile = contracts.AccountInfo{Name: "已离校学生"}
+	}
+	return ReportDTO{ID: ids.ID(item.ID), InstanceID: ids.ID(item.InstanceID), StudentID: ids.ID(item.StudentID), StudentName: profile.Name, StudentNo: profile.No, ContentRef: item.ContentRef, ManualScore: item.ManualScore, Comment: item.Comment, Status: item.Status, SubmittedAt: item.SubmittedAt}
 }
 
 // sandboxRefFromContract 提取 M2 沙箱摘要中工作台需要的稳定字段。

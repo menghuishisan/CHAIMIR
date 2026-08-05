@@ -40,6 +40,7 @@ RUN apk upgrade --no-cache \
     && chown -R 101:101 /usr/share/nginx/html /var/cache/nginx /run /var/run /var/log/nginx
 
 COPY images/service/frontend/nginx.conf /etc/nginx/nginx.conf
+COPY images/service/frontend/security-headers.conf /etc/nginx/security-headers.conf
 COPY --from=builder --chown=101:101 /out/ /usr/share/nginx/html/
 
 USER 101:101

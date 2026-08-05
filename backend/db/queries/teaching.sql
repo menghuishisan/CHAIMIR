@@ -159,12 +159,6 @@ SET title = $3, content_type = $4, content_ref = $5, sort = $6, updated_at = now
 WHERE tenant_id = $1 AND id = $2 AND deleted_at IS NULL
 RETURNING id, tenant_id, chapter_id, title, content_type, content_ref, sort, created_at, updated_at, deleted_at;
 
--- name: SetLessonContent :one
-UPDATE lesson
-SET content_type = $3, content_ref = $4, updated_at = now()
-WHERE tenant_id = $1 AND id = $2 AND deleted_at IS NULL
-RETURNING id, tenant_id, chapter_id, title, content_type, content_ref, sort, created_at, updated_at, deleted_at;
-
 -- name: SoftDeleteLesson :one
 UPDATE lesson
 SET deleted_at = now(), updated_at = now()

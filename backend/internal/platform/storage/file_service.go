@@ -18,6 +18,7 @@ type Service struct {
 	Scanner           upload.Scanner
 	SigningKey        string
 	DownloadGrantTTL  time.Duration
+	StreamGrantTTL    time.Duration
 	VirusScanMaxBytes int64
 }
 
@@ -65,6 +66,7 @@ type IssueDownloadGrantRequest struct {
 	Module             string
 	ResourceType       string
 	ResourceID         string
+	Mode               string
 	ExpiresAt          time.Time
 }
 
@@ -80,6 +82,9 @@ func NewServiceFromConfig(authCfg config.AuthConfig, minioCfg config.MinIOConfig
 	if minioCfg.DownloadGrantTTLSeconds <= 0 {
 		return Service{}, fmt.Errorf("统一文件服务下载授权 TTL 必须大于 0")
 	}
+	if minioCfg.StreamGrantTTLSeconds <= 0 || minioCfg.StreamGrantTTLSeconds >= minioCfg.DownloadGrantTTLSeconds {
+		return Service{}, fmt.Errorf("统一文件服务视频流授权 TTL 必须大于 0 且小于普通下载授权 TTL")
+	}
 	if uploadCfg.VirusScanMaxBytes <= 0 {
 		return Service{}, fmt.Errorf("统一文件服务病毒扫描大小上限必须大于 0")
 	}
@@ -87,6 +92,7 @@ func NewServiceFromConfig(authCfg config.AuthConfig, minioCfg config.MinIOConfig
 		Scanner:           scanner,
 		SigningKey:        authCfg.HMACKey,
 		DownloadGrantTTL:  time.Duration(minioCfg.DownloadGrantTTLSeconds) * time.Second,
+		StreamGrantTTL:    time.Duration(minioCfg.StreamGrantTTLSeconds) * time.Second,
 		VirusScanMaxBytes: uploadCfg.VirusScanMaxBytes,
 	}, nil
 }
@@ -167,11 +173,14 @@ func (s Service) PlanUpload(ctx context.Context, req PlanUploadRequest) (UploadP
 func (s Service) IssueDownloadGrant(req IssueDownloadGrantRequest) (string, DownloadGrant, error) {
 	expiresAt := timex.UTC(req.ExpiresAt)
 	if expiresAt.IsZero() {
-		var err error
-		expiresAt, err = s.defaultDownloadExpiry()
-		if err != nil {
-			return "", DownloadGrant{}, err
+		ttl := s.DownloadGrantTTL
+		if normalizeDownloadMode(req.Mode) == DownloadModeStream {
+			ttl = s.StreamGrantTTL
 		}
+		if ttl <= 0 {
+			return "", DownloadGrant{}, fmt.Errorf("统一文件服务下载授权 TTL 配置不完整")
+		}
+		expiresAt = timex.Now().Add(ttl)
 	}
 	grant, err := BuildDownloadGrant(DownloadGrantRequest{
 		TenantID:           req.TenantID,
@@ -181,6 +190,7 @@ func (s Service) IssueDownloadGrant(req IssueDownloadGrantRequest) (string, Down
 		Module:             req.Module,
 		ResourceType:       req.ResourceType,
 		ResourceID:         req.ResourceID,
+		Mode:               req.Mode,
 		ExpiresAt:          expiresAt,
 	})
 	if err != nil {

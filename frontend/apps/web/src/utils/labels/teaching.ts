@@ -168,17 +168,6 @@ export function isLessonMaterialType(type: LessonContentType): boolean {
   return MATERIAL_CONTENT_TYPES.has(type)
 }
 
-/** formatFileSize 把字节数换成用户向文件大小文案。 */
-export function formatFileSize(bytes: number): string {
-  if (!Number.isFinite(bytes) || bytes <= 0) return '大小未知'
-  if (bytes < 1024) return `${bytes} 字节`
-  const kb = bytes / 1024
-  if (kb < 1024) return `${kb.toFixed(1)} KB`
-  const mb = kb / 1024
-  if (mb < 1024) return `${mb.toFixed(1)} MB`
-  return `${(mb / 1024).toFixed(2)} GB`
-}
-
 /**
  * 题目难度文案由 M5 题库负责(`utils/labels/content.ts` 的 contentDifficultyLabel)。
  * 课程难度与题目难度是两套枚举:课程为 TeachingDifficulty(入门/进阶/高阶/研究型),

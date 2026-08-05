@@ -315,20 +315,24 @@ WHERE tenant_id = $1 AND id = $2 AND status = 2
 RETURNING id, tenant_id, contest_id, problem_id, entry_a_id, entry_b_id, source_ref, sandbox_ref, judge_task_ref, result, score_delta, replay_ref, status, matched_at, finished_at;
 
 -- name: ListBattleMatchesForTeam :many
+-- 师生同一查询按视角过滤:传 team_id 只回该队参与的对局(学生视角),
+-- 传 0 回本赛事全部对局(组织者监控视角)。不为教师另开一条同义查询。
 SELECT m.id, m.tenant_id, m.contest_id, m.problem_id, m.entry_a_id, m.entry_b_id, m.source_ref, m.sandbox_ref, m.judge_task_ref, m.result, m.score_delta, m.replay_ref, m.status, m.matched_at, m.finished_at
 FROM battle_match m
 JOIN battle_entry a ON a.tenant_id = m.tenant_id AND a.id = m.entry_a_id
 JOIN battle_entry b ON b.tenant_id = m.tenant_id AND b.id = m.entry_b_id
-WHERE m.tenant_id = $1 AND m.contest_id = $2 AND (a.team_id = $3 OR b.team_id = $3)
+WHERE m.tenant_id = $1 AND m.contest_id = $2
+  AND (sqlc.arg(team_id)::bigint = 0 OR a.team_id = sqlc.arg(team_id)::bigint OR b.team_id = sqlc.arg(team_id)::bigint)
 ORDER BY m.matched_at DESC, m.id DESC
-LIMIT $4 OFFSET $5;
+LIMIT sqlc.arg(page_limit)::int OFFSET sqlc.arg(page_offset)::int;
 
 -- name: CountBattleMatchesForTeam :one
 SELECT count(*)::bigint
 FROM battle_match m
 JOIN battle_entry a ON a.tenant_id = m.tenant_id AND a.id = m.entry_a_id
 JOIN battle_entry b ON b.tenant_id = m.tenant_id AND b.id = m.entry_b_id
-WHERE m.tenant_id = $1 AND m.contest_id = $2 AND (a.team_id = $3 OR b.team_id = $3);
+WHERE m.tenant_id = $1 AND m.contest_id = $2
+  AND (sqlc.arg(team_id)::bigint = 0 OR a.team_id = sqlc.arg(team_id)::bigint OR b.team_id = sqlc.arg(team_id)::bigint);
 
 -- name: ListActiveBattleSourceRefsForArchive :many
 SELECT DISTINCT source_ref

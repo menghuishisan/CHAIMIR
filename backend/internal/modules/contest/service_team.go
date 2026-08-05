@@ -114,49 +114,6 @@ func (s *Service) JoinTeam(ctx context.Context, contestID int64, req JoinTeamReq
 	return teamDTOFromModel(team), s.writeAudit(ctx, id.TenantID, id.AccountID, contracts.RoleNumStudent, "contest.team.join", auditTargetContestTeam, team.ID, map[string]any{"contest_id": contestID})
 }
 
-// JoinTeamByID 通过队伍 ID 和邀请码加入团队赛队伍。
-func (s *Service) JoinTeamByID(ctx context.Context, teamID int64, req JoinTeamRequest) (TeamDTO, error) {
-	id, err := currentIdentity(ctx)
-	if err != nil {
-		return TeamDTO{}, err
-	}
-	code := strings.ToUpper(strings.TrimSpace(req.InviteCode))
-	if code == "" {
-		return TeamDTO{}, apperr.ErrContestTeamInvalid
-	}
-	var team Team
-	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
-		var err error
-		team, err = tx.GetTeam(ctx, id.TenantID, teamID)
-		if err != nil {
-			return err
-		}
-		contest, err := tx.GetContest(ctx, id.TenantID, team.ContestID)
-		if err != nil {
-			return err
-		}
-		if contest.TeamMode != TeamModeGroup || team.InviteCode != code || team.Status != TeamStatusBuilding {
-			return apperr.ErrContestTeamInvalid
-		}
-		if err := validateSignupWindow(contest, timex.Now()); err != nil {
-			return err
-		}
-		if ids, err := tx.AccountTeamIDs(ctx, id.TenantID, contest.ID, id.TenantID, id.AccountID); err != nil {
-			return err
-		} else if len(ids) > 0 {
-			return apperr.ErrContestTeamInvalid
-		}
-		if _, err = tx.AddTeamMember(ctx, TeamMember{ID: s.ids.Generate(), TenantID: id.TenantID, TeamID: team.ID, AccountID: id.AccountID, MemberTenantID: id.TenantID, IsLeader: false}); err != nil {
-			return err
-		}
-		team, err = tx.GetTeam(ctx, id.TenantID, team.ID)
-		return err
-	}); err != nil {
-		return TeamDTO{}, err
-	}
-	return teamDTOFromModel(team), s.writeAudit(ctx, id.TenantID, id.AccountID, contracts.RoleNumStudent, "contest.team.join", auditTargetContestTeam, team.ID, map[string]any{"contest_id": team.ContestID})
-}
-
 // GetTeam 读取当前账号可访问的队伍。
 func (s *Service) GetTeam(ctx context.Context, teamID int64) (TeamDTO, error) {
 	id, err := currentIdentity(ctx)

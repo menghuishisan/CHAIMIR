@@ -99,7 +99,9 @@ func (a experimentAPI) registerSharedRoutes(g gin.IRouter) {
 	g.POST("/instances/:id/resume", a.resumeInstance)
 	g.POST("/instances/:id/stages/:stage/activate", a.activateStage)
 	g.POST("/instances/:id/finish", a.finishInstance)
-	g.DELETE("/instances/:id", a.recycleInstance)
+	// 没有手动回收入口:完成实验(finish)已释放引擎资源,超时与课程结束由后台回收与
+	// teaching.course.ended 事件级联完成(需求 D3)。单独开一条不可逆的销毁接口,
+	// 学生侧不该有、教师侧也不该越过实例归属去销毁别人的环境。
 	g.GET("/groups/:id", a.getGroup)
 }
 
@@ -242,15 +244,6 @@ func (a experimentAPI) activateStage(c *gin.Context) {
 // finishInstance 完成实例并汇总得分。
 func (a experimentAPI) finishInstance(c *gin.Context) {
 	a.writeInstanceAction(c, a.svc.FinishInstance)
-}
-
-// recycleInstance 回收实例引擎资源。
-func (a experimentAPI) recycleInstance(c *gin.Context) {
-	id, ok := httpx.PathID(c, "id")
-	if !ok {
-		return
-	}
-	httpx.Write(c, gin.H{}, a.svc.RecycleInstance(c.Request.Context(), id))
 }
 
 // writeInstanceAction 统一处理实例状态类动作,确保 handler 只把请求 context 传入业务层。

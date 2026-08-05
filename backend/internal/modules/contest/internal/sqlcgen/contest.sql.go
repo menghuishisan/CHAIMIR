@@ -215,7 +215,8 @@ SELECT count(*)::bigint
 FROM battle_match m
 JOIN battle_entry a ON a.tenant_id = m.tenant_id AND a.id = m.entry_a_id
 JOIN battle_entry b ON b.tenant_id = m.tenant_id AND b.id = m.entry_b_id
-WHERE m.tenant_id = $1 AND m.contest_id = $2 AND (a.team_id = $3 OR b.team_id = $3)
+WHERE m.tenant_id = $1 AND m.contest_id = $2
+  AND ($3::bigint = 0 OR a.team_id = $3::bigint OR b.team_id = $3::bigint)
 `
 
 type CountBattleMatchesForTeamParams struct {
@@ -1445,26 +1446,29 @@ SELECT m.id, m.tenant_id, m.contest_id, m.problem_id, m.entry_a_id, m.entry_b_id
 FROM battle_match m
 JOIN battle_entry a ON a.tenant_id = m.tenant_id AND a.id = m.entry_a_id
 JOIN battle_entry b ON b.tenant_id = m.tenant_id AND b.id = m.entry_b_id
-WHERE m.tenant_id = $1 AND m.contest_id = $2 AND (a.team_id = $3 OR b.team_id = $3)
+WHERE m.tenant_id = $1 AND m.contest_id = $2
+  AND ($3::bigint = 0 OR a.team_id = $3::bigint OR b.team_id = $3::bigint)
 ORDER BY m.matched_at DESC, m.id DESC
-LIMIT $4 OFFSET $5
+LIMIT $5::int OFFSET $4::int
 `
 
 type ListBattleMatchesForTeamParams struct {
-	TenantID  int64 `json:"tenant_id"`
-	ContestID int64 `json:"contest_id"`
-	TeamID    int64 `json:"team_id"`
-	Limit     int32 `json:"limit"`
-	Offset    int32 `json:"offset"`
+	TenantID   int64 `json:"tenant_id"`
+	ContestID  int64 `json:"contest_id"`
+	TeamID     int64 `json:"team_id"`
+	PageOffset int32 `json:"page_offset"`
+	PageLimit  int32 `json:"page_limit"`
 }
 
+// 师生同一查询按视角过滤:传 team_id 只回该队参与的对局(学生视角),
+// 传 0 回本赛事全部对局(组织者监控视角)。不为教师另开一条同义查询。
 func (q *Queries) ListBattleMatchesForTeam(ctx context.Context, arg ListBattleMatchesForTeamParams) ([]BattleMatch, error) {
 	rows, err := q.db.Query(ctx, listBattleMatchesForTeam,
 		arg.TenantID,
 		arg.ContestID,
 		arg.TeamID,
-		arg.Limit,
-		arg.Offset,
+		arg.PageOffset,
+		arg.PageLimit,
 	)
 	if err != nil {
 		return nil, err

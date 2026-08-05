@@ -30,6 +30,10 @@ const (
 	AuthorThirdParty int16 = 3
 )
 
+// builtinSimCodePrefix 是平台内置包的 code 前缀,与数据库 CHECK 约束、
+// 前端 sim-sdk 的 BUILTIN_SIM_CODE_PREFIX 同源;前端据此判定一个包能否在本机 Worker 运行。
+const builtinSimCodePrefix = "builtin__"
+
 const (
 	// ReviewPending 表示审核待处理。
 	ReviewPending int16 = 1

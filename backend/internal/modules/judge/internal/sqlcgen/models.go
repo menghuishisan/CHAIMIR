@@ -31,6 +31,7 @@ type JudgeResult struct {
 	Score           int32              `json:"score"`
 	MaxScore        int32              `json:"max_score"`
 	Details         []byte             `json:"details"`
+	ReplayTrace     []byte             `json:"replay_trace"`
 	JudgeSandboxRef string             `json:"judge_sandbox_ref"`
 	JudgedAt        pgtype.Timestamptz `json:"judged_at"`
 	IsRejudge       bool               `json:"is_rejudge"`

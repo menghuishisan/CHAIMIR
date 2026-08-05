@@ -8,6 +8,7 @@ import (
 
 	"chaimir/internal/contracts"
 	"chaimir/internal/platform/pagex"
+	"chaimir/internal/platform/response"
 	"chaimir/internal/platform/timex"
 	"chaimir/pkg/apperr"
 	pkgcrypto "chaimir/pkg/crypto"
@@ -279,7 +280,29 @@ func (s *Service) setCourseStatus(ctx context.Context, courseID int64, status in
 	if err := s.writeAudit(ctx, id.TenantID, id.AccountID, contracts.RoleNumTeacher, action, auditTargetCourse, course.ID, map[string]any{"status": status}); err != nil {
 		return CourseDTO{}, err
 	}
+	// 课程结束/归档后课内实验不再有人做,通知 M7 级联回收仍占着沙箱与仿真会话的实例
+	// (M7 需求 D3)。走事件而非同步调用:M6 与 M7 同在第 2 层,同层不得互相依赖。
+	if status == CourseStatusEnded || status == CourseStatusArchived {
+		if err := s.publishCourseEnded(ctx, course, status); err != nil {
+			return CourseDTO{}, err
+		}
+	}
 	return courseDTO(course)
+}
+
+// publishCourseEnded 发布课程结束事件,供 M7 级联回收课内实验实例。
+func (s *Service) publishCourseEnded(ctx context.Context, course Course, status int16) error {
+	payload := contracts.TeachingCourseEndedEvent{
+		TenantID: course.TenantID,
+		TraceID:  response.TraceFromContext(ctx),
+		CourseID: course.ID,
+		Status:   status,
+		EndedAt:  timex.Now(),
+	}
+	if err := s.bus.Publish(ctx, contracts.SubjectTeachingCourseEnded, payload); err != nil {
+		return apperr.ErrTeachingCourseEndedEventPublishFailed.WithCause(err)
+	}
+	return nil
 }
 
 // cloneCourseGraph 在同一个事务中复制课程、章节、课时、作业和作业题目引用。

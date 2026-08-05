@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"path"
 	"strconv"
 	"strings"
 	"time"
@@ -13,6 +14,7 @@ import (
 	"chaimir/internal/platform/audit"
 	"chaimir/internal/platform/ids"
 	"chaimir/internal/platform/pagex"
+	"chaimir/internal/platform/storage"
 	"chaimir/internal/platform/timex"
 	"chaimir/pkg/apperr"
 )
@@ -111,7 +113,10 @@ func (s *Service) ListBattleEntries(ctx context.Context, contestID int64) ([]Bat
 	return out, nil
 }
 
-// ListBattleMatches 查询当前账号队伍的对局历史分页。
+// ListBattleMatches 查询对局历史分页,按身份分视角。
+// 学生只见本队对局(时空回溯器要的就是本队记录);赛事组织者与学校管理员见本赛事全部对局
+// (实时监控要看的是「哪一局卡住了」)。同一路由同一查询,只是过滤条件不同 ——
+// 为教师另开一条对局列表会让同一张表存在两份分页查询与两套 DTO。
 func (s *Service) ListBattleMatches(ctx context.Context, contestID int64, page, size int) ([]BattleMatchDTO, int64, int, int, error) {
 	id, err := currentIdentity(ctx)
 	if err != nil {
@@ -121,11 +126,21 @@ func (s *Service) ListBattleMatches(ctx context.Context, contestID int64, page, 
 	var matches []BattleMatch
 	var total int64
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
-		team, err := s.currentAccountTeam(ctx, tx, id.TenantID, contestID, id.AccountID)
+		contest, err := tx.GetContest(ctx, id.TenantID, contestID)
 		if err != nil {
 			return err
 		}
-		matches, total, err = tx.ListBattleMatchesForTeam(ctx, id.TenantID, contestID, team.ID, page, size)
+		// 组织者视角:teamID=0 即不按队伍过滤。非组织者退回本队视角,
+		// 且必须确实属于某支队伍 —— 未报名者读不到任何对局。
+		teamID := int64(0)
+		if canManageContest(id.AccountID, s.isSchoolAdmin(ctx, id.AccountID), contest) != nil {
+			team, err := s.currentAccountTeam(ctx, tx, id.TenantID, contestID, id.AccountID)
+			if err != nil {
+				return err
+			}
+			teamID = team.ID
+		}
+		matches, total, err = tx.ListBattleMatchesForTeam(ctx, id.TenantID, contestID, teamID, page, size)
 		return err
 	}); err != nil {
 		return nil, 0, page, size, err
@@ -143,39 +158,86 @@ func (s *Service) GetBattleReplay(ctx context.Context, matchID int64) (map[strin
 	if err != nil {
 		return nil, err
 	}
-	var match BattleMatch
-	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
-		match, err = tx.GetBattleMatch(ctx, id.TenantID, matchID)
-		if err != nil {
-			return err
-		}
-		a, err := tx.GetBattleEntry(ctx, id.TenantID, match.EntryAID)
-		if err != nil {
-			return err
-		}
-		b, err := tx.GetBattleEntry(ctx, id.TenantID, match.EntryBID)
-		if err != nil {
-			return err
-		}
-		teamA, err := tx.GetTeam(ctx, id.TenantID, a.TeamID)
-		if err != nil {
-			return err
-		}
-		teamB, err := tx.GetTeam(ctx, id.TenantID, b.TeamID)
-		if err != nil {
-			return err
-		}
-		if ensureTeamAccess(id.TenantID, id.AccountID, teamA) == nil || ensureTeamAccess(id.TenantID, id.AccountID, teamB) == nil {
-			return nil
-		}
-		return apperr.ErrContestTeamAccessDenied
-	}); err != nil {
+	match, err := s.authorizedBattleReplay(ctx, id.TenantID, id.AccountID, matchID)
+	if err != nil {
 		return nil, err
 	}
 	if match.ReplayRef == "" {
 		return nil, apperr.ErrContestReplayUnavailable
 	}
-	return map[string]any{"match_id": ids.Format(match.ID), "replay_ref": match.ReplayRef}, nil
+	return map[string]any{"match_id": ids.Format(match.ID), "available": true}, nil
+}
+
+// IssueBattleReplayDownloadGrant 为已授权队伍成员签发回放归档的一次性取件授权。
+func (s *Service) IssueBattleReplayDownloadGrant(ctx context.Context, matchID int64) (BattleReplayDownloadGrantDTO, error) {
+	id, err := currentIdentity(ctx)
+	if err != nil {
+		return BattleReplayDownloadGrantDTO{}, err
+	}
+	match, err := s.authorizedBattleReplay(ctx, id.TenantID, id.AccountID, matchID)
+	if err != nil {
+		return BattleReplayDownloadGrantDTO{}, err
+	}
+	ref, err := storage.ParseObjectRef(match.ReplayRef)
+	if err != nil {
+		return BattleReplayDownloadGrantDTO{}, apperr.ErrContestReplayUnavailable.WithCause(err)
+	}
+	prefix, err := storage.ObjectKey(id.TenantID, "contest", "replay", ids.Format(match.ID))
+	if err != nil {
+		return BattleReplayDownloadGrantDTO{}, apperr.ErrContestReplayUnavailable.WithCause(err)
+	}
+	if ref.Bucket != s.replayBucket || path.Dir(ref.Key) != prefix || path.Ext(ref.Key) != ".json" {
+		return BattleReplayDownloadGrantDTO{}, apperr.ErrContestReplayUnavailable
+	}
+	token, grant, err := s.files.IssueDownloadGrant(storage.IssueDownloadGrantRequest{
+		TenantID: id.TenantID, AccountID: id.AccountID, ObjectRef: match.ReplayRef,
+		Module: "contest", ResourceType: "replay", ResourceID: ids.Format(match.ID), Mode: storage.DownloadModeDownload,
+	})
+	if err != nil {
+		return BattleReplayDownloadGrantDTO{}, apperr.ErrContestReplayUnavailable.WithCause(err)
+	}
+	if err := s.writeAudit(ctx, id.TenantID, id.AccountID, contracts.RoleNumStudent, "contest.battle.replay.download_grant", auditTargetBattleMatch, matchID, map[string]any{"match_id": matchID}); err != nil {
+		return BattleReplayDownloadGrantDTO{}, err
+	}
+	return BattleReplayDownloadGrantDTO{Token: token, Mode: grant.Mode, FileName: path.Base(ref.Key), ExpiresAt: grant.ExpiresAt.Format(time.RFC3339)}, nil
+}
+
+// authorizedBattleReplay 读取回放并复用同一条队伍成员鉴权逻辑。
+func (s *Service) authorizedBattleReplay(ctx context.Context, tenantID, accountID, matchID int64) (BattleMatch, error) {
+	var match BattleMatch
+	if err := s.store.TenantTx(ctx, tenantID, func(ctx context.Context, tx TxStore) error {
+		var err error
+		match, err = tx.GetBattleMatch(ctx, tenantID, matchID)
+		if err != nil {
+			return err
+		}
+		a, err := tx.GetBattleEntry(ctx, tenantID, match.EntryAID)
+		if err != nil {
+			return err
+		}
+		b, err := tx.GetBattleEntry(ctx, tenantID, match.EntryBID)
+		if err != nil {
+			return err
+		}
+		teamA, err := tx.GetTeam(ctx, tenantID, a.TeamID)
+		if err != nil {
+			return err
+		}
+		teamB, err := tx.GetTeam(ctx, tenantID, b.TeamID)
+		if err != nil {
+			return err
+		}
+		if ensureTeamAccess(tenantID, accountID, teamA) == nil || ensureTeamAccess(tenantID, accountID, teamB) == nil {
+			return nil
+		}
+		return apperr.ErrContestTeamAccessDenied
+	}); err != nil {
+		return BattleMatch{}, err
+	}
+	if match.ReplayRef == "" {
+		return BattleMatch{}, apperr.ErrContestReplayUnavailable
+	}
+	return match, nil
 }
 
 // RunMatchmakerOnce 执行一次待对局认领和启动,供统一 background runner 调用。
@@ -365,7 +427,15 @@ func (s *Service) HandleBattleJudgeCompleted(ctx context.Context, event contract
 	if task.SourceRef != event.SourceRef {
 		return apperr.ErrContestEventSourceMismatch
 	}
+	replayRef, alreadyFinished, err := s.prepareBattleReplay(ctx, event.TenantID, event.TaskID, task.Result, event.SourceRef)
+	if err != nil {
+		return err
+	}
+	if alreadyFinished {
+		return nil
+	}
 	var match BattleMatch
+	committed := false
 	if err := s.store.TenantTx(ctx, event.TenantID, func(ctx context.Context, tx TxStore) error {
 		current, err := tx.GetBattleMatchByJudgeTask(ctx, event.TenantID, ids.Format(event.TaskID))
 		if err != nil {
@@ -376,6 +446,13 @@ func (s *Service) HandleBattleJudgeCompleted(ctx context.Context, event contract
 		}
 		if current.SourceRef != event.SourceRef {
 			return apperr.ErrContestEventSourceMismatch
+		}
+		if current.Status == BattleMatchStatusDone && current.ReplayRef != "" {
+			match = current
+			return nil
+		}
+		if current.Status != BattleMatchStatusRunning {
+			return apperr.ErrContestBattleMatchFailed
 		}
 		problem, err := tx.GetContestProblem(ctx, event.TenantID, current.ProblemID)
 		if err != nil {
@@ -415,7 +492,7 @@ func (s *Service) HandleBattleJudgeCompleted(ctx context.Context, event contract
 			"k_factor":        s.cfg.BattleELOKFactor,
 			"result":          result,
 		}
-		current.ReplayRef = task.Result.SnapshotRef
+		current.ReplayRef = replayRef
 		match, err = tx.FinishBattleMatch(ctx, current)
 		if err != nil {
 			return err
@@ -426,9 +503,19 @@ func (s *Service) HandleBattleJudgeCompleted(ctx context.Context, event contract
 		if err := s.applyBattleRankDelta(ctx, tx, event.TenantID, current.ContestID, b.TeamID, deltaB); err != nil {
 			return err
 		}
+		committed = true
 		return tx.RefreshContestRanks(ctx, event.TenantID, current.ContestID)
 	}); err != nil {
+		if cleanupErr := s.deleteBattleReplay(ctx, replayRef); cleanupErr != nil {
+			return fmt.Errorf("结算对局失败: %w; 清理回放对象失败: %v", err, cleanupErr)
+		}
 		return err
+	}
+	if !committed {
+		if err := s.deleteBattleReplay(ctx, replayRef); err != nil {
+			return fmt.Errorf("重复结算清理回放对象失败: %w", err)
+		}
+		return nil
 	}
 	if err := s.sandbox.RecycleBySourceRef(ctx, contracts.SandboxRecycleRequest{TenantID: match.TenantID, SourceRef: match.SourceRef, Reason: "battle_finished"}); err != nil {
 		return apperr.ErrContestSandboxUnavailable.WithCause(err)

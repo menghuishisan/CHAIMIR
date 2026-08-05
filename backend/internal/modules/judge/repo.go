@@ -30,6 +30,7 @@ type TxStore interface {
 	GetJudgerByCode(ctx context.Context, code string) (Judger, error)
 	GetJudgerByID(ctx context.Context, id int64) (Judger, error)
 	ListJudgers(ctx context.Context) ([]Judger, error)
+	ListCatalogJudgers(ctx context.Context) ([]CatalogJudger, error)
 	UpsertJudger(ctx context.Context, id int64, req JudgerRequest, spec JudgerResourceSpec, selftestStatus int16) (Judger, error)
 	UpdateJudgerSelftest(ctx context.Context, id int64, selftestStatus, status int16) (Judger, error)
 	CreateJudgeTask(ctx context.Context, task JudgeTask) (JudgeTask, error)
@@ -136,6 +137,19 @@ func (s *txStore) ListJudgers(ctx context.Context) ([]Judger, error) {
 			return nil, err
 		}
 		out = append(out, item)
+	}
+	return out, nil
+}
+
+// ListCatalogJudgers 查询编排目录里的可用判题方式。
+func (s *txStore) ListCatalogJudgers(ctx context.Context) ([]CatalogJudger, error) {
+	rows, err := s.q.ListCatalogJudgers(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]CatalogJudger, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, CatalogJudger{Code: row.Code, Name: row.Name, Type: row.Type})
 	}
 	return out, nil
 }
@@ -345,6 +359,10 @@ func (s *txStore) UpsertJudgeResult(ctx context.Context, result JudgeResult) (Ju
 	if err != nil {
 		return JudgeResult{}, err
 	}
+	replayRaw, err := jsonx.AnyBytes(result.Replay, apperr.ErrJudgeTaskPersistFailed)
+	if err != nil {
+		return JudgeResult{}, err
+	}
 	row, err := s.q.UpsertJudgeResult(ctx, sqlcgen.UpsertJudgeResultParams{
 		ID:              result.ID,
 		TaskID:          result.TaskID,
@@ -353,6 +371,7 @@ func (s *txStore) UpsertJudgeResult(ctx context.Context, result JudgeResult) (Ju
 		Score:           result.Score,
 		MaxScore:        result.MaxScore,
 		Details:         raw,
+		ReplayTrace:     replayRaw,
 		JudgeSandboxRef: result.JudgeSandboxRef,
 		IsRejudge:       result.IsRejudge,
 	})
@@ -363,7 +382,11 @@ func (s *txStore) UpsertJudgeResult(ctx context.Context, result JudgeResult) (Ju
 	if err != nil {
 		return JudgeResult{}, err
 	}
-	return JudgeResult{ID: row.ID, TaskID: row.TaskID, TenantID: row.TenantID, Version: row.Version, Passed: row.Passed, Score: row.Score, MaxScore: row.MaxScore, Details: details, JudgeSandboxRef: row.JudgeSandboxRef, JudgedAt: timex.FromTimestamptz(row.JudgedAt), IsRejudge: row.IsRejudge}, nil
+	replay, err := decodeReplayTrace(row.ReplayTrace)
+	if err != nil {
+		return JudgeResult{}, err
+	}
+	return JudgeResult{ID: row.ID, TaskID: row.TaskID, TenantID: row.TenantID, Version: row.Version, Passed: row.Passed, Score: row.Score, MaxScore: row.MaxScore, Details: details, Replay: replay, JudgeSandboxRef: row.JudgeSandboxRef, JudgedAt: timex.FromTimestamptz(row.JudgedAt), IsRejudge: row.IsRejudge}, nil
 }
 
 // CreateOutbox 写入终态事件 outbox。

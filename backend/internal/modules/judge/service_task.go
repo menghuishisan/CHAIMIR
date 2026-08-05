@@ -187,6 +187,7 @@ func (s *Service) ManualScore(ctx context.Context, tenantID, taskID, scorerID in
 				Actual:        strings.TrimSpace(req.Comment),
 			}},
 			IsRejudge: task.InputSnapshot.Rejudge,
+			Replay:    contracts.JudgeReplayTrace{Actions: []contracts.JudgeReplayAction{}},
 		}
 		if err := validateResultDetails(result.Details); err != nil {
 			return err

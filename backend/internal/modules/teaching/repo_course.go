@@ -295,19 +295,6 @@ func (s *txStore) UpdateLesson(ctx context.Context, lesson Lesson) (Lesson, erro
 	return lessonFromRow(row)
 }
 
-// SetLessonContent 更新课时内容引用。
-func (s *txStore) SetLessonContent(ctx context.Context, tenantID, id int64, contentType int16, ref map[string]any) (Lesson, error) {
-	raw, err := encodeMap(ref)
-	if err != nil {
-		return Lesson{}, err
-	}
-	row, err := s.q.SetLessonContent(ctx, sqlcgen.SetLessonContentParams{TenantID: tenantID, ID: id, ContentType: contentType, ContentRef: raw})
-	if err != nil {
-		return Lesson{}, err
-	}
-	return lessonFromRow(row)
-}
-
 // DeleteLesson 软删课时。
 func (s *txStore) DeleteLesson(ctx context.Context, tenantID, id int64) (Lesson, error) {
 	row, err := s.q.SoftDeleteLesson(ctx, sqlcgen.SoftDeleteLessonParams{TenantID: tenantID, ID: id})

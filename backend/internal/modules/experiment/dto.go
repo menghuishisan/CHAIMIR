@@ -187,6 +187,8 @@ type ReportDTO struct {
 	ID          ids.ID    `json:"id"`
 	InstanceID  ids.ID    `json:"instance_id"`
 	StudentID   ids.ID    `json:"student_id"`
+	StudentName string    `json:"student_name"`
+	StudentNo   string    `json:"student_no,omitempty"`
 	ContentRef  string    `json:"content_ref"`
 	ManualScore float64   `json:"manual_score"`
 	Comment     string    `json:"comment,omitempty"`
@@ -216,10 +218,14 @@ type GroupDTO struct {
 }
 
 // GroupMemberDTO 是协作小组成员输出。
+// 姓名与学号经 M1 账号契约批量解析后随成员一并下发:成员表只存 student_id,
+// 而编组界面必须显示人名 —— 让调用方自己再拉一份账号目录既越权也会 N+1。
 type GroupMemberDTO struct {
-	ID        ids.ID    `json:"id"`
-	GroupID   ids.ID    `json:"group_id"`
-	StudentID ids.ID    `json:"student_id"`
-	Role      string    `json:"role"`
-	CreatedAt time.Time `json:"created_at"`
+	ID          ids.ID    `json:"id"`
+	GroupID     ids.ID    `json:"group_id"`
+	StudentID   ids.ID    `json:"student_id"`
+	StudentName string    `json:"student_name"`
+	StudentNo   string    `json:"student_no,omitempty"`
+	Role        string    `json:"role"`
+	CreatedAt   time.Time `json:"created_at"`
 }

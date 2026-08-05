@@ -46,7 +46,6 @@ type TxStore interface {
 	ListLessonsByChapter(context.Context, int64, int64) ([]Lesson, error)
 	ListLessonsByCourse(context.Context, int64, int64) ([]Lesson, error)
 	UpdateLesson(context.Context, Lesson) (Lesson, error)
-	SetLessonContent(context.Context, int64, int64, int16, map[string]any) (Lesson, error)
 	DeleteLesson(context.Context, int64, int64) (Lesson, error)
 	CreateCourseMember(context.Context, CourseMember) (CourseMember, error)
 	GetCourseMember(context.Context, int64, int64, int64) (CourseMember, error)

@@ -199,11 +199,4 @@ export class ExperimentApi {
   async finishInstance(instanceId: string): Promise<ExperimentInstance> {
     return this.client.post(`/experiment/instances/${instanceId}/finish`)
   }
-
-  /**
-   * 回收实验实例资源
-   */
-  async recycleInstance(instanceId: string): Promise<void> {
-    return this.client.delete(`/experiment/instances/${instanceId}`)
-  }
 }

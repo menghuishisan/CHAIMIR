@@ -471,6 +471,29 @@ func (t *txStore) ListAccounts(ctx context.Context, query AccountQuery) ([]Accou
 	return out, total, nil
 }
 
+// ListClassStudents 读取指定班级的在校学生摘要。
+// 只返回跨模块契约需要的字段(编号、姓名、学号、身份、状态),
+// 不带手机号密文与密码哈希 —— 契约调用方不需要,也不该经此拿到。
+func (t *txStore) ListClassStudents(ctx context.Context, tenantID, classID int64) ([]Account, error) {
+	rows, err := t.q.ListClassStudents(ctx, sqlcgen.ListClassStudentsParams{TenantID: tenantID, OrgID: classID})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]Account, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, Account{
+			ID:           row.ID,
+			TenantID:     row.TenantID,
+			Name:         row.Name,
+			BaseIdentity: row.BaseIdentity,
+			Status:       row.Status,
+			No:           row.No,
+			OrgID:        classID,
+		})
+	}
+	return out, nil
+}
+
 // UpdateAccountEditable 更新账号可编辑字段并返回最新账号快照。
 func (t *txStore) UpdateAccountEditable(ctx context.Context, tenantID, accountID int64, req UpdateAccountRequest) (Account, error) {
 	if err := t.q.UpdateAccountBasic(ctx, sqlcgen.UpdateAccountBasicParams{ID: accountID, TenantID: tenantID, Name: req.Name}); err != nil {

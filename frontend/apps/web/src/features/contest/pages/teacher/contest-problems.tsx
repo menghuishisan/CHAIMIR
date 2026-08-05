@@ -15,8 +15,6 @@ import { Plus, Swords, Target } from 'lucide-react'
 import {
   ContestMode,
   ContentStatus,
-  RuntimeStatus,
-  ToolStatus,
   type BattleRule,
   type Contest,
   type ContestProblem,
@@ -48,6 +46,7 @@ import {
 import { api } from '../../../../app/api'
 import { ResourceState } from '../../../../components/ResourceState'
 import { useAsyncResource } from '../../../../hooks'
+import { useOrchestrationCatalog } from '../../../sandbox/useOrchestrationCatalog'
 import { contentTypeLabel } from '../../../../utils/labels/content'
 import { BATTLE_RULES, battleRuleLabel } from '../../../../utils/labels/contest'
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
@@ -236,27 +235,9 @@ function ProblemFormModal({ contest, problem, nextSeq, onClose, onSaved }: Probl
     () => false,
   )
 
-  const runtimes = useAsyncResource(
-    () => (isBattle ? api.sandbox.listRuntimes() : Promise.resolve([])),
-    [isBattle],
-    () => false,
-  )
-
-  const toolDefs = useAsyncResource(
-    () => (isBattle ? api.sandbox.listTools() : Promise.resolve([])),
-    [isBattle],
-    () => false,
-  )
-
-  // 选定运行时后取镜像版本:版本必须属于该运行时
-  const images = useAsyncResource(
-    () => {
-      const runtime = (runtimes.data ?? []).find((item) => item.code === runtimeCode)
-      return runtime ? api.sandbox.listRuntimeImages(runtime.id) : Promise.resolve([])
-    },
-    [runtimeCode, runtimes.data],
-    () => false,
-  )
+  // 对抗题才需要执行环境:解题赛题目不起环境,故目录只在对抗分支取
+  const catalog = useOrchestrationCatalog(isBattle)
+  const imageOptions = useMemo(() => catalog.imageOptions(runtimeCode), [catalog, runtimeCode])
 
   const itemOptions = useMemo(
     () =>
@@ -265,24 +246,6 @@ function ProblemFormModal({ contest, problem, nextSeq, onClose, onSaved }: Probl
         label: `${item.title} · ${contentTypeLabel(item.type)} · ${item.version}`,
       })),
     [items.data],
-  )
-
-  const runtimeOptions = useMemo(
-    () =>
-      (runtimes.data ?? [])
-        .filter((item) => item.status === RuntimeStatus.AVAILABLE)
-        .map((item) => ({ value: item.code, label: `${item.name} · ${item.code}` })),
-    [runtimes.data],
-  )
-
-  const imageOptions = useMemo(
-    () => (images.data ?? []).map((image) => ({ value: image.version, label: image.version })),
-    [images.data],
-  )
-
-  const availableTools = useMemo(
-    () => (toolDefs.data ?? []).filter((tool) => tool.status === ToolStatus.AVAILABLE),
-    [toolDefs.data],
   )
 
   const submit = useCallback(
@@ -482,75 +445,75 @@ function ProblemFormModal({ contest, problem, nextSeq, onClose, onSaved }: Probl
                 </FormField>
 
                 <ResourceState
-                  resource={runtimes}
+                  resource={catalog.resource}
                   emptyIcon={Target}
                   emptyTitle="平台还没有可用运行时"
                   emptyDescription="请联系平台管理员在链运行时里注册并自检运行时。"
                   skeleton={<Skeleton variant="line" lines={2} />}
                 >
                   {() => (
-                    <div className="grid gap-4 sm:grid-cols-2">
-                      <FormField label="运行时" htmlFor="problem-runtime" required>
-                        <Select
-                          id="problem-runtime"
-                          options={runtimeOptions}
-                          value={runtimeCode}
-                          placeholder={runtimeOptions.length > 0 ? '选择运行时' : '暂无可用运行时'}
-                          disabled={runtimeOptions.length === 0}
-                          onValueChange={(value) => {
-                            setRuntimeCode(value)
-                            setImageVersion('')
-                          }}
-                        />
-                      </FormField>
-                      <FormField label="镜像版本" htmlFor="problem-image" required>
-                        <Select
-                          id="problem-image"
-                          options={imageOptions}
-                          value={imageVersion}
-                          placeholder={
-                            runtimeCode === ''
-                              ? '请先选择运行时'
-                              : imageOptions.length > 0
-                                ? '选择镜像版本'
-                                : '该运行时暂无镜像'
-                          }
-                          disabled={imageOptions.length === 0}
-                          onValueChange={setImageVersion}
-                        />
+                    <div className="flex flex-col gap-4">
+                      <div className="grid gap-4 sm:grid-cols-2">
+                        <FormField label="运行时" htmlFor="problem-runtime" required>
+                          <Select
+                            id="problem-runtime"
+                            options={catalog.runtimeOptions}
+                            value={runtimeCode}
+                            placeholder="选择运行时"
+                            onValueChange={(value) => {
+                              setRuntimeCode(value)
+                              setImageVersion('')
+                            }}
+                          />
+                        </FormField>
+                        <FormField label="镜像版本" htmlFor="problem-image" required>
+                          <Select
+                            id="problem-image"
+                            options={imageOptions}
+                            value={imageVersion}
+                            placeholder={
+                              runtimeCode === ''
+                                ? '请先选择运行时'
+                                : imageOptions.length > 0
+                                  ? '选择镜像版本'
+                                  : '该运行时暂无镜像'
+                            }
+                            disabled={imageOptions.length === 0}
+                            onValueChange={setImageVersion}
+                          />
+                        </FormField>
+                      </div>
+
+                      <FormField
+                        label="可用工具"
+                        helper="对局执行时容器内可用的命令工具,不选则只有运行时自带能力"
+                      >
+                        {catalog.tools.length > 0 ? (
+                          <div className="flex flex-col gap-2">
+                            {catalog.tools.map((tool) => (
+                              <Checkbox
+                                key={tool.code}
+                                checked={toolCodes.includes(tool.code)}
+                                label={tool.name}
+                                onCheckedChange={(checked) =>
+                                  setToolCodes((current) =>
+                                    checked === true
+                                      ? [...current, tool.code]
+                                      : current.filter((code) => code !== tool.code),
+                                  )
+                                }
+                              />
+                            ))}
+                          </div>
+                        ) : (
+                          <p className="text-sm text-ink-sub">
+                            平台还没有可用工具,请联系平台管理员在沙箱工具里注册。
+                          </p>
+                        )}
                       </FormField>
                     </div>
                   )}
                 </ResourceState>
-
-                <FormField label="可用工具" helper="对局执行时容器内可用的命令工具,不选则只有运行时自带能力">
-                  <ResourceState
-                    resource={toolDefs}
-                    emptyIcon={Target}
-                    emptyTitle="平台还没有可用工具"
-                    emptyDescription="请联系平台管理员在沙箱工具里注册工具。"
-                    skeleton={<Skeleton variant="line" lines={3} />}
-                  >
-                    {() => (
-                      <div className="flex flex-col gap-2">
-                        {availableTools.map((tool) => (
-                          <Checkbox
-                            key={tool.code}
-                            checked={toolCodes.includes(tool.code)}
-                            label={tool.name}
-                            onCheckedChange={(checked) =>
-                              setToolCodes((current) =>
-                                checked === true
-                                  ? [...current, tool.code]
-                                  : current.filter((code) => code !== tool.code),
-                              )
-                            }
-                          />
-                        ))}
-                      </div>
-                    )}
-                  </ResourceState>
-                </FormField>
               </div>
             ) : null}
 

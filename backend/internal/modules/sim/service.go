@@ -136,7 +136,7 @@ func (s *Service) IssueBundleDownloadGrant(ctx context.Context, accountID int64,
 	if pkg.Status != PackageStatusPublished {
 		return BundleDownloadGrantDTO{}, apperr.ErrSimPackageUnavailable
 	}
-	if pkg.AuthorType == AuthorPlatformBuiltIn && pkg.Compute == ComputeFrontend && strings.HasPrefix(pkg.Code, "builtin__") {
+	if pkg.AuthorType == AuthorPlatformBuiltIn && pkg.Compute == ComputeFrontend && strings.HasPrefix(pkg.Code, builtinSimCodePrefix) {
 		return BundleDownloadGrantDTO{
 			BundleHash:  pkg.BundleHash,
 			ExpiresAt:   timex.Now().Add(s.downloadGrantTTL).Format(time.RFC3339),

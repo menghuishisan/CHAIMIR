@@ -1,13 +1,13 @@
 // 实验编排向导:环境与仿真步(第 2 步)。
 //
-// 代码环境从 M2 已注册运行时里选(不让教师手填 runtime_code),工具从 M2 工具定义里勾选;
+// 代码环境从 M2 编排目录里选运行时与工具(不让教师手填 runtime_code);
 // 仿真场景从 M4 已发布仿真包里选,版本按包的版本清单选。
 // 组件标识(id)由教师给一个便于识别的短名,后续阶段与检查点引用它 ——
 // 这是编排内部的引用键,故要求可读而不是自动生成的编号。
 
 import { useCallback, useMemo, useState } from 'react'
 import { Network, Plus, Server, Trash2 } from 'lucide-react'
-import { RuntimeStatus, SIM_PACKAGE_STATUS, ToolStatus } from '@chaimir/api-client'
+import { SIM_PACKAGE_STATUS } from '@chaimir/api-client'
 import type { EnvComponent, SimComponent } from '@chaimir/api-client'
 import {
   Badge,
@@ -34,6 +34,7 @@ import {
 import { api } from '../../../../app/api'
 import { ResourceState } from '../../../../components/ResourceState'
 import { useAsyncResource } from '../../../../hooks'
+import { useOrchestrationCatalog } from '../../../sandbox/useOrchestrationCatalog'
 import { sandboxToolKindLabel } from '../../../../utils/labels/sandbox'
 import { simCategoryLabel } from '../../../../utils/labels/sim'
 import type { ExperimentDraft } from './wizard-state'
@@ -273,36 +274,8 @@ function EnvFormModal({ env, usedIds, onClose, onSave }: EnvFormModalProps) {
   const [snapshotEnabled, setSnapshotEnabled] = useState(env?.snapshot_enabled ?? false)
   const [formError, setFormError] = useState<string>()
 
-  const runtimes = useAsyncResource(() => api.sandbox.listRuntimes(), [], () => false)
-  const toolDefs = useAsyncResource(() => api.sandbox.listTools(), [], () => false)
-
-  // 选定运行时后取镜像版本:版本必须属于该运行时
-  const images = useAsyncResource(
-    () => {
-      const runtime = (runtimes.data ?? []).find((item) => item.code === runtimeCode)
-      return runtime ? api.sandbox.listRuntimeImages(runtime.id) : Promise.resolve([])
-    },
-    [runtimeCode, runtimes.data],
-    () => false,
-  )
-
-  const runtimeOptions = useMemo(
-    () =>
-      (runtimes.data ?? [])
-        .filter((item) => item.status === RuntimeStatus.AVAILABLE)
-        .map((item) => ({ value: item.code, label: `${item.name} · ${item.code}` })),
-    [runtimes.data],
-  )
-
-  const imageOptions = useMemo(
-    () => (images.data ?? []).map((image) => ({ value: image.version, label: image.version })),
-    [images.data],
-  )
-
-  const availableTools = useMemo(
-    () => (toolDefs.data ?? []).filter((tool) => tool.status === ToolStatus.AVAILABLE),
-    [toolDefs.data],
-  )
+  const catalog = useOrchestrationCatalog()
+  const imageOptions = useMemo(() => catalog.imageOptions(runtimeCode), [catalog, runtimeCode])
 
   const submit = useCallback(() => {
     const trimmedId = id.trim()
@@ -372,79 +345,76 @@ function EnvFormModal({ env, usedIds, onClose, onSave }: EnvFormModalProps) {
           </FormField>
 
           <ResourceState
-            resource={runtimes}
+            resource={catalog.resource}
             emptyIcon={Server}
             emptyTitle="平台还没有可用运行时"
             emptyDescription="请联系平台管理员在链运行时里注册并自检运行时。"
             skeleton={<Skeleton variant="line" lines={2} />}
           >
             {() => (
-              <div className="grid gap-4 sm:grid-cols-2">
-                <FormField label="运行时" htmlFor="env-runtime" required>
-                  <Select
-                    id="env-runtime"
-                    options={runtimeOptions}
-                    value={runtimeCode}
-                    placeholder={runtimeOptions.length > 0 ? '选择运行时' : '暂无可用运行时'}
-                    disabled={runtimeOptions.length === 0}
-                    onValueChange={(value) => {
-                      setRuntimeCode(value)
-                      setImageVersion('')
-                    }}
-                  />
-                </FormField>
-                <FormField
-                  label="镜像版本"
-                  htmlFor="env-image"
-                  helper="不选则用运行时的默认镜像"
-                >
-                  <Select
-                    id="env-image"
-                    options={imageOptions}
-                    value={imageVersion}
-                    placeholder={
-                      runtimeCode === ''
-                        ? '请先选择运行时'
-                        : imageOptions.length > 0
-                          ? '使用默认镜像'
-                          : '该运行时暂无镜像'
-                    }
-                    disabled={imageOptions.length === 0}
-                    onValueChange={setImageVersion}
-                  />
+              <div className="flex flex-col gap-4">
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <FormField label="运行时" htmlFor="env-runtime" required>
+                    <Select
+                      id="env-runtime"
+                      options={catalog.runtimeOptions}
+                      value={runtimeCode}
+                      placeholder="选择运行时"
+                      onValueChange={(value) => {
+                        setRuntimeCode(value)
+                        setImageVersion('')
+                      }}
+                    />
+                  </FormField>
+                  <FormField
+                    label="镜像版本"
+                    htmlFor="env-image"
+                    helper="不选则用运行时的默认镜像"
+                  >
+                    <Select
+                      id="env-image"
+                      options={imageOptions}
+                      value={imageVersion}
+                      placeholder={
+                        runtimeCode === ''
+                          ? '请先选择运行时'
+                          : imageOptions.length > 0
+                            ? '使用默认镜像'
+                            : '该运行时暂无镜像'
+                      }
+                      disabled={imageOptions.length === 0}
+                      onValueChange={setImageVersion}
+                    />
+                  </FormField>
+                </div>
+
+                <FormField label="可用工具" helper="学生在这个环境里能打开哪些工具">
+                  {catalog.tools.length > 0 ? (
+                    <div className="flex flex-col gap-2">
+                      {catalog.tools.map((tool) => (
+                        <Checkbox
+                          key={tool.code}
+                          checked={tools.includes(tool.code)}
+                          label={`${tool.name} · ${sandboxToolKindLabel(tool.kind)}`}
+                          onCheckedChange={(checked) =>
+                            setTools((current) =>
+                              checked === true
+                                ? [...current, tool.code]
+                                : current.filter((code) => code !== tool.code),
+                            )
+                          }
+                        />
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-sm text-ink-sub">
+                      平台还没有可用工具,请联系平台管理员在沙箱工具里注册。
+                    </p>
+                  )}
                 </FormField>
               </div>
             )}
           </ResourceState>
-
-          <FormField label="可用工具" helper="学生在这个环境里能打开哪些工具">
-            <ResourceState
-              resource={toolDefs}
-              emptyIcon={Server}
-              emptyTitle="平台还没有可用工具"
-              emptyDescription="请联系平台管理员在沙箱工具里注册工具。"
-              skeleton={<Skeleton variant="line" lines={3} />}
-            >
-              {() => (
-                <div className="flex flex-col gap-2">
-                  {availableTools.map((tool) => (
-                    <Checkbox
-                      key={tool.code}
-                      checked={tools.includes(tool.code)}
-                      label={`${tool.name} · ${sandboxToolKindLabel(tool.kind)}`}
-                      onCheckedChange={(checked) =>
-                        setTools((current) =>
-                          checked === true
-                            ? [...current, tool.code]
-                            : current.filter((code) => code !== tool.code),
-                        )
-                      }
-                    />
-                  ))}
-                </div>
-              )}
-            </ResourceState>
-          </FormField>
 
           <div className="flex flex-col gap-3 rounded-md border border-line bg-surface-sunken p-4">
             <Checkbox

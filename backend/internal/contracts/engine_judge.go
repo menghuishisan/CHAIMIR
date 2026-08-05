@@ -53,13 +53,27 @@ type JudgeResultDetail struct {
 	Hint          string `json:"hint"`
 }
 
+// JudgeReplayAction 是链上回放中一条按执行顺序记录的状态变更动作。
+type JudgeReplayAction struct {
+	Seq     int32          `json:"seq"`
+	Op      string         `json:"op"`
+	Payload map[string]any `json:"payload,omitempty"`
+	Output  map[string]any `json:"output,omitempty"`
+}
+
+// JudgeReplayTrace 是 M3 从 M2 链能力调用中收集的可复现交易序列。
+type JudgeReplayTrace struct {
+	Actions []JudgeReplayAction `json:"actions"`
+}
+
 // JudgeTaskResult 是跨模块回写业务结果所需的判题结果快照。
 type JudgeTaskResult struct {
-	Passed      bool                `json:"passed"`
-	Score       int32               `json:"score"`
-	MaxScore    int32               `json:"max_score"`
-	Details     []JudgeResultDetail `json:"details"`
-	SnapshotRef string              `json:"snapshot_ref"`
+	Passed    bool                `json:"passed"`
+	Score     int32               `json:"score"`
+	MaxScore  int32               `json:"max_score"`
+	Details   []JudgeResultDetail `json:"details"`
+	ResultRef string              `json:"result_ref"`
+	Replay    JudgeReplayTrace    `json:"replay"`
 }
 
 // JudgeTaskInfo 是评测引擎向调用方暴露的任务摘要。

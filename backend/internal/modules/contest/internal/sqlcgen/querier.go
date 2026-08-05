@@ -52,6 +52,8 @@ type Querier interface {
 	ListActiveBattleOpponents(ctx context.Context, arg ListActiveBattleOpponentsParams) ([]BattleEntry, error)
 	ListActiveBattleSourceRefsForArchive(ctx context.Context, arg ListActiveBattleSourceRefsForArchiveParams) ([]string, error)
 	ListBattleEntriesForTeam(ctx context.Context, arg ListBattleEntriesForTeamParams) ([]BattleEntry, error)
+	// 师生同一查询按视角过滤:传 team_id 只回该队参与的对局(学生视角),
+	// 传 0 回本赛事全部对局(组织者监控视角)。不为教师另开一条同义查询。
 	ListBattleMatchesForTeam(ctx context.Context, arg ListBattleMatchesForTeamParams) ([]BattleMatch, error)
 	ListCheatRecords(ctx context.Context, arg ListCheatRecordsParams) ([]CheatRecord, error)
 	ListContestProblems(ctx context.Context, arg ListContestProblemsParams) ([]ContestProblem, error)

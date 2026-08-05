@@ -54,6 +54,10 @@ type IdentityService interface {
 	BatchGetAccounts(ctx context.Context, accountIDs []int64) ([]AccountInfo, error)
 	// HasRole 判断账号是否具备指定角色,供平台守卫和聚合入口复用。
 	HasRole(ctx context.Context, accountID int64, role string) (bool, error)
+	// ListClassStudents 读取指定班级的在校学生摘要,供 M6 按班级批量选课使用。
+	// 班级是组织维度,教师可读(`/org/classes` 就在教师组);而账号目录 `/accounts` 是
+	// 学校管理员能力,故按班级取学生走本契约,不把账号目录放开给业务模块或教师端。
+	ListClassStudents(ctx context.Context, tenantID, classID int64) ([]AccountInfo, error)
 }
 
 // IdentityTenantReadService 是 M1 对 M9 等聚合层开放的租户只读契约。

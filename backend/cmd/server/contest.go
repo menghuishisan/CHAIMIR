@@ -15,6 +15,7 @@ import (
 	"chaimir/internal/platform/config"
 	"chaimir/internal/platform/db"
 	"chaimir/internal/platform/eventbus"
+	"chaimir/internal/platform/storage"
 	"chaimir/pkg/crypto"
 	"chaimir/pkg/snowflake"
 
@@ -28,6 +29,9 @@ type ContestModuleDeps struct {
 	IDs           snowflake.Generator
 	Config        config.ContestConfig
 	AuthConfig    config.AuthConfig
+	MinIO         config.MinIOConfig
+	Upload        config.UploadConfig
+	Storage       *storage.Storage
 	Content       contracts.ContentReadService
 	ContentImport contracts.ContentImportService
 	Sandbox       contracts.SandboxService
@@ -50,12 +54,19 @@ func RegisterContestModule(ctx context.Context, deps ContestModuleDeps) (*contes
 	if deps.Database == nil {
 		return nil, fmt.Errorf("contest module 缺少 database")
 	}
+	if deps.Storage == nil {
+		return nil, fmt.Errorf("contest module 缺少共享对象存储")
+	}
 	store := contest.NewStore(deps.Database)
 	key, err := base64.StdEncoding.DecodeString(deps.AuthConfig.EncryptionKey)
 	if err != nil {
 		return nil, fmt.Errorf("contest module 解析 APP_ENCRYPTION_KEY 失败: %w", err)
 	}
 	cipher, err := crypto.NewCipher(key)
+	if err != nil {
+		return nil, err
+	}
+	fileService, err := storage.NewServiceFromConfig(deps.AuthConfig, deps.MinIO, deps.Upload)
 	if err != nil {
 		return nil, err
 	}
@@ -70,6 +81,9 @@ func RegisterContestModule(ctx context.Context, deps ContestModuleDeps) (*contes
 		Sandbox:       deps.Sandbox,
 		Judge:         deps.Judge,
 		Fingerprint:   deps.Fingerprint,
+		FileService:   fileService,
+		ReplayStore:   deps.Storage,
+		ReplayBucket:  deps.Storage.BucketReport(),
 		Bus:           deps.EventBus,
 		Cipher:        cipher,
 	})

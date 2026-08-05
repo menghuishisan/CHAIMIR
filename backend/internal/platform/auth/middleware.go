@@ -48,8 +48,8 @@ const (
 )
 
 const (
-	browserAccessTokenContextKey = "auth_browser_access_token"
-	browserAccessSourceKey       = "auth_browser_access_source"
+	verifiedAccessTokenContextKey = "auth_verified_access_token"
+	browserAccessSourceKey        = "auth_browser_access_source"
 )
 
 var serviceSourceRefRe = regexp.MustCompile(`^[a-z]+:[0-9]{4}:[a-z][a-z0-9_-]*:[0-9A-Za-z_-]+$`)
@@ -98,7 +98,7 @@ func (m *Manager) Middleware() gin.HandlerFunc {
 
 // AuthenticateAccess 校验当前 HTTP 请求的 Bearer access token 并注入服务端身份上下文。
 func (m *Manager) AuthenticateAccess(c *gin.Context) bool {
-	claims, ok := m.accessClaims(c)
+	claims, token, ok := m.accessClaims(c)
 	if !ok {
 		return false
 	}
@@ -106,6 +106,7 @@ func (m *Manager) AuthenticateAccess(c *gin.Context) bool {
 		return false
 	}
 	injectAccessIdentity(c, claims)
+	c.Set(verifiedAccessTokenContextKey, token)
 	return true
 }
 
@@ -126,8 +127,21 @@ func (m *Manager) WebSocketMiddleware() gin.HandlerFunc {
 
 // BrowserAccessMiddleware 校验浏览器内嵌工具入口的 Bearer、一次性 query token 或路径受限 Cookie。
 func (m *Manager) BrowserAccessMiddleware() gin.HandlerFunc {
+	return m.browserAccessGuard(true)
+}
+
+// FileAccessMiddleware 校验统一文件服务入口的 Bearer 或路径受限 Cookie。
+// 与工具代理入口的差别只有一项:本入口**不接受** query 形式的 access token ——
+// `token` 参数位已被投放授权占用,同名两义会让验签路径产生歧义
+// (见 docs/总-API接口总览.md §统一文件服务「鉴权载体」)。
+func (m *Manager) FileAccessMiddleware() gin.HandlerFunc {
+	return m.browserAccessGuard(false)
+}
+
+// browserAccessGuard 是两个浏览器直连入口共用的鉴权实现,只由 allowQueryToken 表达差异。
+func (m *Manager) browserAccessGuard(allowQueryToken bool) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		claims, token, source, ok := m.browserAccessClaims(c)
+		claims, token, source, ok := m.browserAccessClaims(c, allowQueryToken)
 		if !ok {
 			return
 		}
@@ -135,7 +149,7 @@ func (m *Manager) BrowserAccessMiddleware() gin.HandlerFunc {
 			return
 		}
 		injectAccessIdentity(c, claims)
-		c.Set(browserAccessTokenContextKey, token)
+		c.Set(verifiedAccessTokenContextKey, token)
 		c.Set(browserAccessSourceKey, string(source))
 		c.Next()
 	}
@@ -161,7 +175,7 @@ func (m *Manager) PlatformOrServiceMiddleware() gin.HandlerFunc {
 			c.Next()
 			return
 		}
-		claims, ok := m.accessClaims(c)
+		claims, _, ok := m.accessClaims(c)
 		if !ok {
 			return
 		}
@@ -188,7 +202,7 @@ func (m *Manager) ServiceOrTenantAnyRoleMiddleware(identity contracts.IdentitySe
 			c.Next()
 			return
 		}
-		claims, ok := m.accessClaims(c)
+		claims, _, ok := m.accessClaims(c)
 		if !ok {
 			return
 		}
@@ -307,33 +321,37 @@ func AuthorizeTenantAnyRole(c *gin.Context, identity contracts.IdentityService, 
 	return false
 }
 
-// accessClaims 提取并校验 Bearer access token。
-func (m *Manager) accessClaims(c *gin.Context) (*Claims, bool) {
+// accessClaims 从 Authorization 头读取并校验 access token,同时返回原始 token 供后续入口复用。
+func (m *Manager) accessClaims(c *gin.Context) (*Claims, string, bool) {
 	raw := c.GetHeader("Authorization")
 	token, ok := strings.CutPrefix(raw, "Bearer ")
-	if !ok || strings.TrimSpace(token) == "" {
+	token = strings.TrimSpace(token)
+	if !ok || token == "" {
 		response.Fail(c, apperr.ErrUnauthorized)
 		c.Abort()
-		return nil, false
+		return nil, "", false
 	}
-	claims, err := m.VerifyAccess(strings.TrimSpace(token))
+	claims, err := m.VerifyAccess(token)
 	if err != nil {
 		response.Fail(c, apperr.ErrUnauthorized.WithCause(err))
 		c.Abort()
-		return nil, false
+		return nil, "", false
 	}
-	return claims, true
+	return claims, token, true
 }
 
 // browserAccessClaims 按浏览器真实能力依次读取 Header、query token 和路径受限 Cookie。
-func (m *Manager) browserAccessClaims(c *gin.Context) (*Claims, string, browserAccessTokenSource, bool) {
+// allowQueryToken=false 时跳过 query 分支,供 `token` 参数位另有语义的入口使用。
+func (m *Manager) browserAccessClaims(c *gin.Context, allowQueryToken bool) (*Claims, string, browserAccessTokenSource, bool) {
 	if token, ok := bearerAccessToken(c); ok {
 		claims, ok := m.verifyAccessClaims(c, token)
 		return claims, token, browserAccessTokenSourceHeader, ok
 	}
-	if token := strings.TrimSpace(c.Query(BrowserAccessTokenQuery)); token != "" {
-		claims, ok := m.verifyAccessClaims(c, token)
-		return claims, token, browserAccessTokenSourceQuery, ok
+	if allowQueryToken {
+		if token := strings.TrimSpace(c.Query(BrowserAccessTokenQuery)); token != "" {
+			claims, ok := m.verifyAccessClaims(c, token)
+			return claims, token, browserAccessTokenSourceQuery, ok
+		}
 	}
 	if cookie, err := c.Request.Cookie(BrowserAccessCookieName); err == nil {
 		token := strings.TrimSpace(cookie.Value)
@@ -366,9 +384,11 @@ func (m *Manager) verifyAccessClaims(c *gin.Context, token string) (*Claims, boo
 	return claims, true
 }
 
-// BrowserAccessToken 返回浏览器入口中间件已验证过的原始 access token。
-func BrowserAccessToken(c *gin.Context) (string, bool) {
-	token, ok := c.Get(browserAccessTokenContextKey)
+// VerifiedAccessToken 返回本次请求已通过校验的原始 access token。
+// 供需要把同一凭据下传给浏览器直连入口的场景复用(工具代理 Cookie、文件服务 Cookie),
+// 调用方不得自行从 Header/Cookie 再解一遍 —— 那会绕过中间件的会话有效性校验。
+func VerifiedAccessToken(c *gin.Context) (string, bool) {
+	token, ok := c.Get(verifiedAccessTokenContextKey)
 	if !ok {
 		return "", false
 	}
@@ -382,21 +402,19 @@ func BrowserAccessFromQuery(c *gin.Context) bool {
 	return ok && source == string(browserAccessTokenSourceQuery)
 }
 
-// SetBrowserAccessCookie 写入路径受限 HttpOnly access cookie,供内嵌工具后续资源请求复用平台代理鉴权。
+// SetBrowserAccessCookie 写入路径受限 HttpOnly access cookie,供浏览器直连入口
+// (内嵌工具代理、统一文件服务流式投放)在发不出 Authorization 头时复用同一会话凭据。
+// 有效期与 access token 一致,由 platform/config 保证 JWT_ACCESS_TTL_MIN 为正数。
 func (m *Manager) SetBrowserAccessCookie(c *gin.Context, pathPrefix, token string) {
 	pathPrefix = "/" + strings.Trim(strings.TrimSpace(pathPrefix), "/")
 	if pathPrefix == "/" || strings.TrimSpace(token) == "" {
 		return
 	}
-	maxAge := int(m.accessTTL.Seconds())
-	if maxAge <= 0 {
-		maxAge = 900
-	}
 	http.SetCookie(c.Writer, &http.Cookie{
 		Name:     BrowserAccessCookieName,
 		Value:    strings.TrimSpace(token),
 		Path:     pathPrefix,
-		MaxAge:   maxAge,
+		MaxAge:   int(m.accessTTL.Seconds()),
 		HttpOnly: true,
 		Secure:   browserCookieSecure(c),
 		SameSite: http.SameSiteLaxMode,

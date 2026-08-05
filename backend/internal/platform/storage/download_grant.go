@@ -21,6 +21,7 @@ type DownloadGrantRequest struct {
 	Module             string
 	ResourceType       string
 	ResourceID         string
+	Mode               string
 	ExpiresAt          time.Time
 }
 
@@ -31,6 +32,7 @@ type DownloadGrant struct {
 	Module       string
 	ResourceType string
 	ResourceID   string
+	Mode         string `json:"mode"`
 	Object       ObjectRef
 	ExpiresAt    time.Time
 }
@@ -52,6 +54,10 @@ func BuildDownloadGrant(req DownloadGrantRequest) (DownloadGrant, error) {
 	}
 	if strings.TrimSpace(req.Module) == "" || strings.TrimSpace(req.ResourceType) == "" || strings.TrimSpace(req.ResourceID) == "" {
 		return DownloadGrant{}, fmt.Errorf("下载授权缺少资源边界")
+	}
+	mode := normalizeDownloadMode(req.Mode)
+	if mode == "" {
+		return DownloadGrant{}, fmt.Errorf("下载授权 mode 非法")
 	}
 	if req.ExpiresAt.IsZero() || !req.ExpiresAt.After(timex.Now()) {
 		return DownloadGrant{}, fmt.Errorf("下载授权过期时间非法")
@@ -77,6 +83,7 @@ func BuildDownloadGrant(req DownloadGrantRequest) (DownloadGrant, error) {
 		Module:       req.Module,
 		ResourceType: req.ResourceType,
 		ResourceID:   req.ResourceID,
+		Mode:         mode,
 		Object:       objectRef,
 		ExpiresAt:    req.ExpiresAt.UTC(),
 	}, nil
@@ -172,6 +179,9 @@ func validateDownloadGrant(grant DownloadGrant, now time.Time) error {
 	if strings.TrimSpace(grant.Module) == "" || strings.TrimSpace(grant.ResourceType) == "" || strings.TrimSpace(grant.ResourceID) == "" {
 		return fmt.Errorf("下载授权缺少资源边界")
 	}
+	if normalizeDownloadMode(grant.Mode) == "" {
+		return fmt.Errorf("下载授权 mode 非法")
+	}
 	if grant.ExpiresAt.IsZero() || !grant.ExpiresAt.UTC().After(now) {
 		return fmt.Errorf("下载授权已过期")
 	}
@@ -188,4 +198,21 @@ func validateDownloadGrant(grant DownloadGrant, now time.Time) error {
 		return fmt.Errorf("对象引用不属于当前租户资源前缀")
 	}
 	return nil
+}
+
+const (
+	DownloadModeDownload = "download"
+	DownloadModeStream   = "stream"
+)
+
+// normalizeDownloadMode 将空 mode 归一为默认的一次性下载,并拒绝未知模式。
+func normalizeDownloadMode(mode string) string {
+	mode = strings.ToLower(strings.TrimSpace(mode))
+	if mode == "" {
+		return DownloadModeDownload
+	}
+	if mode == DownloadModeDownload || mode == DownloadModeStream {
+		return mode
+	}
+	return ""
 }

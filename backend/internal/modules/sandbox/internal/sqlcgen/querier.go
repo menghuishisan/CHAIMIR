@@ -27,6 +27,13 @@ type Querier interface {
 	GetTenantQuota(ctx context.Context, tenantID int64) (TenantQuotum, error)
 	GetTenantQuotaForUpdate(ctx context.Context, tenantID int64) (TenantQuotum, error)
 	GetToolByCode(ctx context.Context, code string) (Tool, error)
+	// 编排目录只取可编排字段:运行时本体的 code/name/eco 与其可用镜像版本。
+	// 一次 LEFT JOIN 平铺取回后由 repo 按运行时分组,既避免按运行时逐个查镜像的 N+1,
+	// 也不用 jsonb_agg —— 那会让生成的行类型退化成 interface{},把解码负担推给业务层。
+	// 停用的运行时与镜像不进可选集;没有可用镜像的运行时仍要出现(可用默认镜像起环境)。
+	ListCatalogRuntimes(ctx context.Context) ([]ListCatalogRuntimesRow, error)
+	// 编排目录只取工具的 code/name/kind,不出 resource_spec 与镜像引用。
+	ListCatalogTools(ctx context.Context) ([]ListCatalogToolsRow, error)
 	ListRecycleCandidates(ctx context.Context, arg ListRecycleCandidatesParams) ([]Sandbox, error)
 	ListRuntimeImages(ctx context.Context, runtimeID int64) ([]RuntimeImage, error)
 	ListRuntimes(ctx context.Context) ([]Runtime, error)

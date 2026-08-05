@@ -1,7 +1,7 @@
 # API 接口总览
 
 > 汇总 11 模块 API 的 Base 路径、错误码段与全局规范。详细接口见各模块"接口设计"文档。
-> 最后更新:2026-05-29
+> 最后更新:2026-08-05
 
 ---
 
@@ -78,8 +78,8 @@
 - `/auth/ws-ticket`:为浏览器 WebSocket 签发短时路径绑定连接票据。
 - `/platform/applications`、`/platform/tenants`:入驻审核、租户管理 `[平台管理员]`。
 - `/tenant/config`、`/tenant/sso`:租户配置。
-- `/org/*`:院系/专业/班级。
-- `/accounts/*`:账号导入(预览+提交)、增改停用、授予管理员。
+- `/org/*`:院系/专业/班级。读对教师/学校管理员开放,写只对学校管理员开放;`GET /org/classes/{id}/students` 是教师侧挑选学生的唯一入口,只出编号/姓名/学号。
+- `/accounts/*`:账号导入(预览+提交)、增改停用、授予管理员。**只对学校管理员开放** —— 它是账号目录(带手机号掩码、状态、角色),业务模块与教师端取学生一律走 `/org/classes/{id}/students` 或 `contracts.IdentityService`。
 - `/me/*`:个人中心。`GET /me`、`POST /me/password`、`GET /me/sessions` 对租户账号与平台管理员都开放(平台身份走独立分支,只返回姓名/状态/角色);`POST /me/phone` 只对租户账号开放,平台账号无手机号字段。
 - 审计:M1 只持有并写入 `audit_log`,不注册查询路由;对外查询与导出统一在 M9 `/admin/audit`、`/admin/audit/export`。
 
@@ -104,12 +104,13 @@
 
 `stream` 之所以不能沿用一次性消费:播放器为拖动进度会对同一资源发多个分段请求,首个请求就会烧掉一次性令牌。它以更短有效期(`STORAGE_STREAM_GRANT_TTL_SECONDS`)与同样的租户+账号+资源前缀绑定换取可重复性,不放宽任何一项边界校验。两种 mode 共用同一端点、同一 grant 构造器与签名器,不新增第二条投放路由。
 
-**鉴权载体**:`<video src>`、`<img src>` 这类由浏览器自身发起的请求发不出 `Authorization` 头,故本入口接受 **Bearer 头**(XHR 取件)**或路径受限 Cookie**(浏览器直连),沿用 M2 浏览器工具代理已有的 `chaimir_access` 机制。Cookie 由签发 `mode=stream` 授权的业务接口在响应中写入,作用域限定 `/api/v1/storage`、`HttpOnly`。本入口**不接受 query 形式的 access token** —— `token` 参数位已被投放授权占用,同名两义会让验签路径产生歧义。授权本身仍绑定租户与账号,`authorizeDownloadGrant` 的会话比对不因载体变化而放宽。
+**鉴权载体**:`<video src>`、`<img src>` 这类由浏览器自身发起的请求发不出 `Authorization` 头,故本入口接受 **Bearer 头**(XHR 取件)**或路径受限 Cookie**(浏览器直连),沿用 M2 浏览器工具代理已有的 `chaimir_access` 机制(`auth.FileAccessMiddleware` 与工具代理的 `BrowserAccessMiddleware` 共用同一实现,差异只有「是否接受 query token」一项)。Cookie 由签发 `mode=stream` 授权的业务接口在响应中写入(M6 课时材料授权即在此写),作用域限定 `storage.DownloadCookiePath`(`/api/v1/storage`)、`HttpOnly`,有效期与 access token 一致。本入口**不接受 query 形式的 access token** —— `token` 参数位已被投放授权占用,同名两义会让验签路径产生歧义。授权本身仍绑定租户与账号,`authorizeDownloadGrant` 的会话比对不因载体变化而放宽。
 
 > 所有模块签发的授权都只能由本入口消费。业务模块和前端页面不得拼接 MinIO 地址、复制 token 验签逻辑或新增模块私有下载路由。
 
 ### M2 沙箱引擎 `/api/v1/sandbox`
 - `/runtimes`、`/tools`:运行时/工具管理 + 接入即测 `[平台管理员]`;镜像预拉取提供触发与状态查询,完成以全目标节点真实拉取成功为准。
+- `/catalog`:编排目录 `[教师/学校管理员/平台管理员]` —— 可用运行时(含其可用镜像版本)与可用工具的最小字段集。业务模块编排环境只用它,不放开 `/runtimes`、`/tools`:那两条会连带下发容器编排清单、镜像 digest 地址、命令白名单与自检详情,属平台运维资产。
 - `/sandboxes`:创建/查询/销毁/回收 `[内部]`;`WS /sandboxes/{id}/progress`、`/terminal`。
 - `/sandboxes/{id}/files`、`/tools/{code}/*`、`/command-tools/{code}/run`:文件、Web 工具代理和受控命令工具 `[用户]`;Web 工具代理支持浏览器一次性 `token` 入口并换成路径受限 Cookie。
 - `GET /sandboxes/{id}` 响应中的 `capabilities` 由运行时命令清单与服务端注册表计算,是前端文件、终端、命令工具和链操作入口的权威能力声明。
@@ -118,7 +119,8 @@
 - `/quota`:沙箱配额查看与调整。`GET /quota` 校管读本租户(忽略客户端传入的 `tenant_id`),平台管理员必须显式传 `tenant_id` 指定目标租户;`PATCH /quota` 平台管理员在请求体传 `tenant_id`,校管由服务端覆写为会话租户。
 
 ### M3 评测引擎 `/api/v1/judge`
-- `/judgers`:判题器管理。
+- `/judgers`:判题器管理 `[平台管理员]`。
+- `/catalog`:判题器目录 `[教师/学校管理员/平台管理员]` —— 可用判题方式的编码/名称/类型。教师配置检查点只用它,不放开 `/judgers`:`resource_spec` 里的判题镜像版本、受控命令与执行组件属判题私密面。
 - `/tasks`:提交判题(sandbox_mode: fresh/reuse)`[内部]`;`WS /tasks/{id}/progress`;`GET /tasks/{id}`。
 - `/tasks/{id}/rejudge`、`/rejudge/batch`:重判。
 - `/tasks/{id}/manual-score`:人工评分。
@@ -140,8 +142,8 @@
 
 ### M6 教学 `/api/v1/teaching`
 - `/courses/*`:课程 CRUD/发布/克隆/共享/邀请码。
-- `/chapters`、`/lessons`:章节课时(课时关联 M7 实验/M4 仿真)。`POST /lessons/{id}/material` 上传视频或附件、`POST /lessons/{id}/material/access` 换取投放授权(视频 `mode=stream` 可续播,附件 `mode=download` 一次性取件)。
-- `/courses/join`、`/members`:选课成员。
+- `/chapters`、`/lessons`:章节课时**写入口**(课时关联 M7 实验/M4 仿真);只读一律走 `GET /courses/{id}/outline`,它一次返回课程 + 章节 + 课时 + 本人进度,不再另设章节/课时列表接口。`POST /lessons/{id}/material` 上传视频或附件、`POST /lessons/{id}/material/access` 换取投放授权(视频 `mode=stream` 可续播,附件 `mode=download` 一次性取件)。
+- `/courses/join`、`/members`:选课成员。`POST /courses/{id}/members/batch` 的粒度是一个班级(请求体 `{ class_id }`),学生由 M6 经 `contracts.IdentityService.ListClassStudents` 解析;成员响应带 `student_name`/`student_no`,客户端不再另取账号目录。
 - `/assignments/*`、`/submissions/*`:作业/提交/批改(判题调 M3)。`GET /courses/{id}/assignments` 与 `GET /assignments/{id}/submissions` 师生同路由按身份分视角:授课教师见含草稿全量与全班提交,课程内学生只见已发布作业与本人提交 —— 这两条是学生取得作业编号与提交编号的唯一入口。
 - `/posts`、`/announcements`、`/review`:讨论/公告/评价。
 - `/courses/{id}/grades/*`:单课程成绩;`/grades` 只读契约供 M11 聚合;M6 改分后发布 `teaching.grade.updated` 事件。
@@ -149,7 +151,7 @@
 ### M7 实验 `/api/v1/experiment`
 - `/experiments/*`:配置/校验/发布。
 - `/student/experiments`、`/student/experiments/{id}`:学生可发现的已发布实验列表与单条读取,统一走学生投影(剔除环境初始化与判题内部配置)。
-- `/experiments/{id}/instances`、`/instances/{id}`:实例创建(编排 M2/M4)/工作台/控制;`/instances/{id}/stages/{stage}/activate` 是阶段资源创建唯一写入口;`/instances/{id}/progress` 返回 M10 订阅元信息。
+- `/experiments/{id}/instances`、`/instances/{id}`:实例创建(编排 M2/M4)/工作台/控制;`/instances/{id}/stages/{stage}/activate` 是阶段资源创建唯一写入口;`/instances/{id}/progress` 返回 M10 订阅元信息。**无手动回收接口**:引擎资源释放走 `finish` 内部回收、后台超时回收、以及订阅 `teaching.course.ended` 的课程结束级联三条自动路径。
 - `/instances/{id}/checkpoints/{cp}/judge`:检查点判分(调 M3)。
 - `/instances/{id}/report`、`/reports/{id}/grade`:报告。
 - `/groups/*`:多人协作。`GET /experiments/{id}/groups` 是教师编组视角(全部分组 + 成员角色,不含实例),`GET /groups/{id}` 是按组读单组并附带共享实例。
@@ -160,7 +162,7 @@
 - `/student/contests`、`/student/contests/{id}`:学生可发现的非草稿赛事列表与单条读取(门槛与列表一致)。
 - `/signup`、`/contests/{id}/join-team`、`/teams/*`:报名组队。加入队伍只按邀请码(队伍编号对学生是内部标识,不进请求)。
 - `/problems/{pid}/env`、`/submit`:解题赛(环境调 M2、判题调 M3)。
-- `/battle/entry`、`/battle/matches`、`/matches/{id}/replay`、`/ladder`:对抗赛/回放/天梯。
+- `/battle/entry`、`/battle/matches`、`/matches/{id}/replay`、`/ladder`:对抗赛/回放/天梯。`GET /contests/{id}/battle/matches` 师生同路由按身份分视角:赛事组织者与学校管理员见本赛事全部对局(实时监控),其余账号见本队对局(时空回溯器);回放取件仍限参赛队伍成员。
 - `/my/contest-records`、`/result-snapshot`:个人战绩。
 - `/cheat-*`:防作弊。
 - `/vuln-sources/*`、`/vuln-problems/*`:租户漏洞源与漏洞题转化 `[出题教师/学校管理员]`(finalize 调 M5 system-import)。

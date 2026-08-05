@@ -13,6 +13,13 @@ SELECT id, code, name, type, executor_ref, runtime_required, default_timeout_sec
 FROM judger
 ORDER BY created_at DESC, id DESC;
 
+-- name: ListCatalogJudgers :many
+-- 编排目录只取判题方式的 code/name/type,不出 resource_spec 与执行引用;停用项不进可选集。
+SELECT code, name, type
+FROM judger
+WHERE status = 1
+ORDER BY code;
+
 -- name: UpsertJudger :one
 INSERT INTO judger (id, code, name, type, executor_ref, runtime_required, default_timeout_sec, resource_spec, selftest_status, status, created_at, updated_at)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, now(), now())
@@ -75,12 +82,13 @@ SELECT
     COALESCE(r.score, 0)::int AS score,
     COALESCE(r.max_score, 0)::int AS max_score,
     COALESCE(r.details, '[]'::jsonb) AS details,
+    COALESCE(r.replay_trace, '{"actions": []}'::jsonb) AS replay_trace,
     COALESCE(r.judge_sandbox_ref, '')::varchar AS judge_sandbox_ref,
     r.judged_at,
     COALESCE(r.is_rejudge, false)::boolean AS is_rejudge
 FROM judge_task t
 LEFT JOIN LATERAL (
-    SELECT id, version, passed, score, max_score, details, judge_sandbox_ref, judged_at, is_rejudge
+    SELECT id, version, passed, score, max_score, details, replay_trace, judge_sandbox_ref, judged_at, is_rejudge
     FROM judge_result
     WHERE tenant_id = t.tenant_id AND task_id = t.id
     ORDER BY version DESC
@@ -111,12 +119,13 @@ SELECT
     COALESCE(r.score, 0)::int AS score,
     COALESCE(r.max_score, 0)::int AS max_score,
     COALESCE(r.details, '[]'::jsonb) AS details,
+    COALESCE(r.replay_trace, '{"actions": []}'::jsonb) AS replay_trace,
     COALESCE(r.judge_sandbox_ref, '')::varchar AS judge_sandbox_ref,
     r.judged_at,
     COALESCE(r.is_rejudge, false)::boolean AS is_rejudge
 FROM judge_task t
 LEFT JOIN LATERAL (
-    SELECT id, version, passed, score, max_score, details, judge_sandbox_ref, judged_at, is_rejudge
+    SELECT id, version, passed, score, max_score, details, replay_trace, judge_sandbox_ref, judged_at, is_rejudge
     FROM judge_result
     WHERE tenant_id = t.tenant_id AND task_id = t.id
     ORDER BY version DESC
@@ -199,13 +208,13 @@ WHERE tenant_id = $1 AND id = $2
 RETURNING id, tenant_id, judger_id, source_ref, source_owner_id, source_course_id, source_scope, submitter_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, last_error, created_at, updated_at;
 
 -- name: UpsertJudgeResult :one
-INSERT INTO judge_result (id, task_id, tenant_id, version, passed, score, max_score, details, judge_sandbox_ref, judged_at, is_rejudge)
+INSERT INTO judge_result (id, task_id, tenant_id, version, passed, score, max_score, details, replay_trace, judge_sandbox_ref, judged_at, is_rejudge)
 VALUES (
     $1, $2, $3,
     COALESCE((SELECT max(version) + 1 FROM judge_result WHERE tenant_id = $3 AND task_id = $2), 1),
-    $4, $5, $6, $7, $8, now(), $9
+    $4, $5, $6, $7, $8, $9, now(), $10
 )
-RETURNING id, task_id, tenant_id, version, passed, score, max_score, details, judge_sandbox_ref, judged_at, is_rejudge;
+RETURNING id, task_id, tenant_id, version, passed, score, max_score, details, replay_trace, judge_sandbox_ref, judged_at, is_rejudge;
 
 -- name: CreateJudgeOutbox :one
 INSERT INTO judge_event_outbox (id, tenant_id, task_id, subject, payload, status, retry_count, last_error, created_at, updated_at)

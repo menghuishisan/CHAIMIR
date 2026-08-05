@@ -103,7 +103,19 @@ SELECT id, tenant_id, experiment_id, owner_account_id, group_id, source_ref, san
 FROM experiment_instance
 WHERE tenant_id = $1 AND experiment_id = $2 AND group_id = $3 AND status IN (1, 2, 3, 7)
 ORDER BY started_at DESC, id DESC
-LIMIT 1;
+LIMIT 1
+FOR UPDATE;
+
+-- name: GetActiveOwnerInstance :one
+SELECT id, tenant_id, experiment_id, owner_account_id, group_id, source_ref, sandbox_refs, sim_session_refs, status, COALESCE(score::float8, 0)::float8 AS score, started_at, finished_at, last_active_at
+FROM experiment_instance
+WHERE tenant_id = $1 AND experiment_id = $2 AND owner_account_id = $3 AND group_id IS NULL AND status IN (1, 2, 3, 7)
+ORDER BY started_at DESC, id DESC
+LIMIT 1
+FOR UPDATE;
+
+-- name: LockInstanceCreation :exec
+SELECT pg_advisory_xact_lock(sqlc.arg(lock_key)::bigint);
 
 -- name: CreateExperimentInstance :one
 INSERT INTO experiment_instance (id, tenant_id, experiment_id, owner_account_id, group_id, source_ref, sandbox_refs, sim_session_refs, status, score, started_at, finished_at, last_active_at)
@@ -179,6 +191,16 @@ WHERE id IN (
     FOR UPDATE SKIP LOCKED
 )
 RETURNING id, tenant_id, experiment_id, owner_account_id, group_id, source_ref, sandbox_refs, sim_session_refs, status, COALESCE(score::float8, 0)::float8 AS score, started_at, finished_at, last_active_at;
+
+-- name: ListLiveInstancesByCourse :many
+-- 列出某课程下仍占用引擎资源的实验实例,供课程结束时级联回收(M7 需求 D3)。
+-- 只取 creating/running/paused/released 四态:已完成、已回收与错误态不再持有沙箱或仿真会话。
+SELECT i.id, i.tenant_id, i.experiment_id, i.owner_account_id, i.group_id, i.source_ref, i.sandbox_refs, i.sim_session_refs, i.status,
+       COALESCE(i.score::float8, 0)::float8 AS score, i.started_at, i.finished_at, i.last_active_at
+FROM experiment_instance i
+JOIN experiment e ON e.tenant_id = i.tenant_id AND e.id = i.experiment_id
+WHERE i.tenant_id = $1 AND e.course_id = $2 AND i.status IN (1, 2, 3, 7)
+ORDER BY i.id;
 
 -- name: UpsertCheckpointResult :one
 INSERT INTO checkpoint_result (id, tenant_id, instance_id, checkpoint_id, judge_task_ref, passed, score, detail_ref, binding_output, judged_at)

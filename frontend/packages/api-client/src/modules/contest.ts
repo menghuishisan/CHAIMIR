@@ -8,6 +8,7 @@ import type {
   BattleEntry,
   BattleMatch,
   BattleReplayRef,
+  BattleReplayDownloadGrant,
   CheatRecord,
   CheatRecordRequest,
   CheatSuspect,
@@ -207,6 +208,11 @@ export class ContestApi {
    */
   async getBattleReplay(matchId: string): Promise<BattleReplayRef> {
     return this.client.get(`/contest/matches/${matchId}/replay`)
+  }
+
+  /** 为已授权的对局回放签发统一文件服务取件授权。 */
+  async issueBattleReplayDownloadGrant(matchId: string): Promise<BattleReplayDownloadGrant> {
+    return this.client.post(`/contest/matches/${matchId}/replay/download-grant`)
   }
 
   /**

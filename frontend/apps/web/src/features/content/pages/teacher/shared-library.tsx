@@ -1,18 +1,20 @@
 // 共享资源库页(教师侧栏,/teacher/shared)。
 //
-// 浏览其他学校共享出来的题目,克隆到本校后可自行修改与使用。
+// 浏览其他学校共享出来的题目,看过题面后克隆到本校自行修改与使用。
 // 克隆是唯一的复用方式:跨租户不能直接引用他校题目(否则他校改题会影响本校作业),
-// 也不能读他校题目的答案(GET full 只对本租户教师开放)。
+// 也不能读他校题目的答案 —— 题面接口已剥离 answer/judge_config/flag,GET full 只对本租户作者开放。
 
 import { useCallback, useMemo, useState } from 'react'
-import { Copy, Search, Share2 } from 'lucide-react'
+import { Copy, Eye, Search, Share2 } from 'lucide-react'
 import { ContentType, type ContentItem } from '@chaimir/api-client'
 import {
   Badge,
   Breadcrumb,
   Button,
   Callout,
+  DescriptionList,
   FormField,
+  IconButton,
   Input,
   Modal,
   ModalBody,
@@ -26,6 +28,7 @@ import {
   PageSection,
   Pagination,
   SegmentedControl,
+  Skeleton,
   Stat,
   Table,
   toast,
@@ -33,7 +36,7 @@ import {
 } from '@chaimir/ui'
 import { api } from '../../../../app/api'
 import { ResourceState } from '../../../../components/ResourceState'
-import { usePagedResource } from '../../../../hooks'
+import { usePagedResource, useAsyncResource } from '../../../../hooks'
 import { formatShortDateTime } from '../../../../utils/formatters'
 import {
   CONTENT_TYPES,
@@ -56,6 +59,7 @@ export default function TeacherSharedLibraryPage() {
   const [typeFilter, setTypeFilter] = useState<string>('')
   const [keyword, setKeyword] = useState('')
   const [submittedKeyword, setSubmittedKeyword] = useState('')
+  const [previewTarget, setPreviewTarget] = useState<ContentItem>()
   const [cloneTarget, setCloneTarget] = useState<ContentItem>()
 
   const shared = usePagedResource<ContentItem>(
@@ -145,9 +149,18 @@ export default function TeacherSharedLibraryPage() {
       header: '操作',
       align: 'right',
       render: (item) => (
-        <Button variant="ghost" size="sm" leftIcon={Copy} onClick={() => setCloneTarget(item)}>
-          克隆到本校
-        </Button>
+        <div className="flex items-center justify-end gap-1">
+          <IconButton
+            variant="ghost"
+            size="sm"
+            icon={Eye}
+            aria-label={`预览题面 ${item.title}`}
+            onClick={() => setPreviewTarget(item)}
+          />
+          <Button variant="ghost" size="sm" leftIcon={Copy} onClick={() => setCloneTarget(item)}>
+            克隆到本校
+          </Button>
+        </div>
       ),
     },
   ]
@@ -236,6 +249,10 @@ export default function TeacherSharedLibraryPage() {
         </ResourceState>
       </PageSection>
 
+      {previewTarget ? (
+        <SharedFaceModal item={previewTarget} onClose={() => setPreviewTarget(undefined)} />
+      ) : null}
+
       {cloneTarget ? (
         <CloneSharedModal
           item={cloneTarget}
@@ -248,6 +265,99 @@ export default function TeacherSharedLibraryPage() {
       ) : null}
     </PageScaffold>
   )
+}
+
+interface SharedFaceModalProps {
+  item: ContentItem
+  onClose: () => void
+}
+
+/**
+ * SharedFaceModal 预览共享题目的题面。
+ *
+ * 走题面接口(GET /content/items/{code}/{version}),它已按作者声明的 sensitive_fields 与平台默认
+ * 敏感路径剥离答案、判题配置与 flag —— 跨校可见的只有题面。克隆前先看清内容,免得克隆一堆用不上的题。
+ */
+function SharedFaceModal({ item, onClose }: SharedFaceModalProps) {
+  const face = useAsyncResource(
+    () => api.content.getItemFace(item.code, item.version),
+    [item.code, item.version],
+    () => false,
+  )
+
+  return (
+    <Modal open onOpenChange={(open) => !open && onClose()}>
+      <ModalContent size="xl">
+        <ModalHeader>
+          <ModalTitle>{item.title}</ModalTitle>
+          <ModalDescription>
+            {contentTypeLabel(item.type)} · {item.code} · {item.version}。
+            答案、判题配置与 flag 不在共享范围内,这里只呈现题面。
+          </ModalDescription>
+        </ModalHeader>
+        <ResourceState
+          resource={face}
+          emptyIcon={Eye}
+          emptyTitle="这道题暂时打不开"
+          emptyDescription="源学校可能已取消共享或弃用了这个版本。"
+          skeleton={
+            <ModalBody>
+              <Skeleton variant="line" lines={6} />
+            </ModalBody>
+          }
+        >
+          {(data) => (
+            <ModalBody className="flex flex-col gap-4">
+              <DescriptionList
+                dense
+                columns={2}
+                items={[
+                  { term: '难度', description: contentDifficultyLabel(data.difficulty) },
+                  { term: '来源', description: contentAuthorTypeLabel(data.author_type) },
+                  { term: '被引用', description: String(data.usage_count), mono: true },
+                  { term: '更新时间', description: formatShortDateTime(data.updated_at), mono: true },
+                ]}
+              />
+              {data.knowledge_points.length > 0 ? (
+                <div className="flex flex-wrap gap-1">
+                  {data.knowledge_points.map((point) => (
+                    <Badge key={point} tone="neutral">
+                      {point}
+                    </Badge>
+                  ))}
+                </div>
+              ) : null}
+              {/* 正文按类型有不同字段,统一按「键 → 可读文本」平铺:共享库只做浏览,不做结构化编辑 */}
+              <dl className="flex flex-col gap-3">
+                {Object.entries(data.body).map(([key, value]) => (
+                  <div key={key}>
+                    <dt className="font-mono text-xs text-ink-sub">{key}</dt>
+                    <dd className="mt-0.5 whitespace-pre-wrap break-words text-sm text-ink">
+                      {renderBodyValue(value)}
+                    </dd>
+                  </div>
+                ))}
+              </dl>
+            </ModalBody>
+          )}
+        </ResourceState>
+        <ModalFooter>
+          <Button variant="outline" onClick={onClose}>
+            关闭
+          </Button>
+        </ModalFooter>
+      </ModalContent>
+    </Modal>
+  )
+}
+
+/** renderBodyValue 把正文字段值转成可读文本:数组按行、对象按 JSON、其余原样。 */
+function renderBodyValue(value: unknown): string {
+  if (typeof value === 'string') return value
+  if (Array.isArray(value)) return value.map((item) => (typeof item === 'string' ? item : JSON.stringify(item))).join('\n')
+  if (value === null || value === undefined) return '—'
+  if (typeof value === 'object') return JSON.stringify(value, null, 2)
+  return String(value)
 }
 
 interface CloneSharedModalProps {

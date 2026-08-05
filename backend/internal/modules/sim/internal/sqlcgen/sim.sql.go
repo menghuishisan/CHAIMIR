@@ -11,6 +11,58 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const archiveRetiredBuiltinSimPackages = `-- name: ArchiveRetiredBuiltinSimPackages :many
+UPDATE sim_package
+SET status = 4, updated_at = now()
+WHERE author_type = 1
+  AND status <> 4
+  AND (code || '@' || version) <> ALL($1::text[])
+RETURNING id, code, version, name, category, compute, scale_limit, bundle_key, bundle_hash,
+          backend_adapter, backend_config, interaction_schema, code_trace, author_type, author_id, status, created_at, updated_at
+`
+
+// 下架已从标准库移除的内置包。
+// 内置包被删掉版本时不能物理删除:已有实验定义与仿真会话按 (code, version) 引用它,
+// 删了会让历史实验取不到场景。改为 status=4(已下架),既让新建选不到、也保住旧引用可解释。
+func (q *Queries) ArchiveRetiredBuiltinSimPackages(ctx context.Context, liveKeys []string) ([]SimPackage, error) {
+	rows, err := q.db.Query(ctx, archiveRetiredBuiltinSimPackages, liveKeys)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []SimPackage{}
+	for rows.Next() {
+		var i SimPackage
+		if err := rows.Scan(
+			&i.ID,
+			&i.Code,
+			&i.Version,
+			&i.Name,
+			&i.Category,
+			&i.Compute,
+			&i.ScaleLimit,
+			&i.BundleKey,
+			&i.BundleHash,
+			&i.BackendAdapter,
+			&i.BackendConfig,
+			&i.InteractionSchema,
+			&i.CodeTrace,
+			&i.AuthorType,
+			&i.AuthorID,
+			&i.Status,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const archiveSimSessionsBySourceRef = `-- name: ArchiveSimSessionsBySourceRef :many
 UPDATE sim_session
 SET status = 5, updated_at = now()
@@ -1060,6 +1112,85 @@ func (q *Queries) UpdateSimSessionStatus(ctx context.Context, arg UpdateSimSessi
 		&i.Seed,
 		&i.InitParams,
 		&i.Compute,
+		&i.Status,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const upsertBuiltinSimPackage = `-- name: UpsertBuiltinSimPackage :one
+INSERT INTO sim_package (
+    id, code, version, name, category, compute, scale_limit, bundle_key, bundle_hash,
+    backend_adapter, backend_config, interaction_schema, code_trace, author_type, author_id, status, created_at, updated_at
+)
+VALUES ($1, $2, $3, $4, $5, 1, $6, $7, $8, NULL, '{}'::jsonb, $9, $10, 1, NULL, 3, now(), now())
+ON CONFLICT (code, version) DO UPDATE
+SET name = EXCLUDED.name,
+    category = EXCLUDED.category,
+    compute = EXCLUDED.compute,
+    scale_limit = EXCLUDED.scale_limit,
+    bundle_key = EXCLUDED.bundle_key,
+    bundle_hash = EXCLUDED.bundle_hash,
+    backend_adapter = EXCLUDED.backend_adapter,
+    backend_config = EXCLUDED.backend_config,
+    interaction_schema = EXCLUDED.interaction_schema,
+    code_trace = EXCLUDED.code_trace,
+    author_type = EXCLUDED.author_type,
+    author_id = EXCLUDED.author_id,
+    status = EXCLUDED.status,
+    updated_at = now()
+RETURNING id, code, version, name, category, compute, scale_limit, bundle_key, bundle_hash,
+          backend_adapter, backend_config, interaction_schema, code_trace, author_type, author_id, status, created_at, updated_at
+`
+
+type UpsertBuiltinSimPackageParams struct {
+	ID                int64  `json:"id"`
+	Code              string `json:"code"`
+	Version           string `json:"version"`
+	Name              string `json:"name"`
+	Category          string `json:"category"`
+	ScaleLimit        []byte `json:"scale_limit"`
+	BundleKey         string `json:"bundle_key"`
+	BundleHash        string `json:"bundle_hash"`
+	InteractionSchema []byte `json:"interaction_schema"`
+	CodeTrace         []byte `json:"code_trace"`
+}
+
+// 平台内置仿真包按 (code, version) 幂等入库。
+// 内置包不来自教师上传,而是平台随版本交付的标准库(见 docs/04-仿真可视化引擎/09-内置仿真包标准库.md),
+// 故直接落 author_type=1、status=3(已上架):它不经审核流程,审核针对的是外部提交的包。
+// 重跑部署 seed 时按 code+version 覆盖协议字段,不新建行、不改 created_at。
+func (q *Queries) UpsertBuiltinSimPackage(ctx context.Context, arg UpsertBuiltinSimPackageParams) (SimPackage, error) {
+	row := q.db.QueryRow(ctx, upsertBuiltinSimPackage,
+		arg.ID,
+		arg.Code,
+		arg.Version,
+		arg.Name,
+		arg.Category,
+		arg.ScaleLimit,
+		arg.BundleKey,
+		arg.BundleHash,
+		arg.InteractionSchema,
+		arg.CodeTrace,
+	)
+	var i SimPackage
+	err := row.Scan(
+		&i.ID,
+		&i.Code,
+		&i.Version,
+		&i.Name,
+		&i.Category,
+		&i.Compute,
+		&i.ScaleLimit,
+		&i.BundleKey,
+		&i.BundleHash,
+		&i.BackendAdapter,
+		&i.BackendConfig,
+		&i.InteractionSchema,
+		&i.CodeTrace,
+		&i.AuthorType,
+		&i.AuthorID,
 		&i.Status,
 		&i.CreatedAt,
 		&i.UpdatedAt,

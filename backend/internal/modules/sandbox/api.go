@@ -33,6 +33,7 @@ func RegisterRoutes(r gin.IRouter, svc *Service, authn *auth.Manager, roles cont
 	api := sandboxAPI{svc: svc, authn: authn}
 	g := r.Group("/api/v1/sandbox")
 	api.registerPlatformRoutes(g.Group("", authn.Middleware(), auth.RequirePlatformIdentity()))
+	api.registerCatalogRoutes(g.Group("", authn.Middleware(), auth.RequirePlatformOrAnyRole(roles, contracts.RoleTeacher, contracts.RoleSchoolAdmin)))
 	api.registerInternalRoutes(g.Group("/internal", authn.ServiceMiddleware()))
 	api.registerChainRoutes(g.Group("", authn.ServiceOrTenantAnyRoleMiddleware(roles, contracts.RoleStudent, contracts.RoleTeacher, contracts.RoleSchoolAdmin)))
 	api.registerUserRoutes(g.Group("", authn.Middleware(), auth.RequireTenantAnyRole(roles, contracts.RoleStudent, contracts.RoleTeacher, contracts.RoleSchoolAdmin)))
@@ -61,6 +62,22 @@ func (a sandboxAPI) registerPlatformRoutes(g gin.IRouter) {
 	g.GET("/runtimes/:id/images/:img/prepull", a.getRuntimeImagePrepull)
 	g.GET("/tools", a.listTools)
 	g.POST("/tools", a.registerTool)
+}
+
+// registerCatalogRoutes 注册编排目录入口:教师/校管编排环境要选运行时与工具,
+// 但不该看到平台运维面的适配器清单、镜像地址与命令白名单,故用独立最小字段目录。
+func (a sandboxAPI) registerCatalogRoutes(g gin.IRouter) {
+	g.GET("/catalog", a.orchestrationCatalog)
+}
+
+// orchestrationCatalog 返回可编排的运行时(含可用镜像版本)与工具目录。
+func (a sandboxAPI) orchestrationCatalog(c *gin.Context) {
+	runtimes, tools, err := a.svc.ListOrchestrationCatalog(c.Request.Context())
+	if err != nil {
+		httpx.Write(c, nil, err)
+		return
+	}
+	httpx.Write(c, orchestrationCatalogResponse(runtimes, tools), nil)
 }
 
 // runRuntimeSelftest 触发运行时接入即测。
@@ -496,7 +513,7 @@ func (a sandboxAPI) toolProxy(c *gin.Context) {
 
 // prepareToolBrowserAccess 为浏览器工具写入路径受限 Cookie,并清除一次性 query token 后再进入上游代理。
 func (a sandboxAPI) prepareToolBrowserAccess(c *gin.Context, externalPrefix string) bool {
-	token, ok := auth.BrowserAccessToken(c)
+	token, ok := auth.VerifiedAccessToken(c)
 	if ok && a.authn != nil {
 		a.authn.SetBrowserAccessCookie(c, externalPrefix, token)
 	}

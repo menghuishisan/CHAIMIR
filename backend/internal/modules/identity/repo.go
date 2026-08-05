@@ -50,6 +50,7 @@ type TxStore interface {
 	GetAccountByPhoneHash(ctx context.Context, tenantID int64, phoneHash string) (Account, error)
 	GetAccountByNo(ctx context.Context, no string) (Account, error)
 	ListAccounts(ctx context.Context, query AccountQuery) ([]Account, int64, error)
+	ListClassStudents(ctx context.Context, tenantID, classID int64) ([]Account, error)
 	UpdateAccountEditable(ctx context.Context, tenantID, accountID int64, req UpdateAccountRequest) (Account, error)
 	UpdateAccountStatus(ctx context.Context, accountID, tenantID int64, status int16, deleted bool) (Account, error)
 	UpdateAccountPassword(ctx context.Context, accountID, tenantID int64, passwordHash string, mustChange bool, status int16) (Account, error)

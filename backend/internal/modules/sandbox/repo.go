@@ -37,6 +37,8 @@ type TxStore interface {
 	DisableRuntimeImage(ctx context.Context, runtimeID, imageID int64, detail []byte) (RuntimeImage, error)
 	GetToolByCode(ctx context.Context, code string) (Tool, error)
 	ListTools(ctx context.Context) ([]Tool, error)
+	ListCatalogRuntimes(ctx context.Context) ([]CatalogRuntime, error)
+	ListCatalogTools(ctx context.Context) ([]CatalogTool, error)
 	UpsertTool(ctx context.Context, id int64, req ToolRequest, spec ToolResourceSpec) (Tool, error)
 	GetTenantQuota(ctx context.Context, tenantID int64) (TenantQuota, error)
 	EnsureTenantQuota(ctx context.Context, quota TenantQuota) (TenantQuota, error)
@@ -318,6 +320,41 @@ func (s *txStore) ListTools(ctx context.Context) ([]Tool, error) {
 			return nil, err
 		}
 		out = append(out, item)
+	}
+	return out, nil
+}
+
+// ListCatalogRuntimes 查询编排目录里的可用运行时,并把平铺的镜像行按运行时合并。
+// SQL 已按 runtime_code 排序,故顺序扫描即可分组,不需要额外 map。
+func (s *txStore) ListCatalogRuntimes(ctx context.Context) ([]CatalogRuntime, error) {
+	rows, err := s.q.ListCatalogRuntimes(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]CatalogRuntime, 0, len(rows))
+	for _, row := range rows {
+		if len(out) == 0 || out[len(out)-1].Code != row.RuntimeCode {
+			out = append(out, CatalogRuntime{Code: row.RuntimeCode, Name: row.RuntimeName, Eco: row.Eco, Images: []CatalogRuntimeImage{}})
+		}
+		// LEFT JOIN 无镜像时版本为空串,此时只保留运行时本身(可用其默认镜像起环境)。
+		if row.ImageVersion == "" {
+			continue
+		}
+		current := &out[len(out)-1]
+		current.Images = append(current.Images, CatalogRuntimeImage{Version: row.ImageVersion, IsDefault: row.ImageIsDefault})
+	}
+	return out, nil
+}
+
+// ListCatalogTools 查询编排目录里的可用工具。
+func (s *txStore) ListCatalogTools(ctx context.Context) ([]CatalogTool, error) {
+	rows, err := s.q.ListCatalogTools(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]CatalogTool, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, CatalogTool{Code: row.Code, Name: row.Name, Kind: row.Kind})
 	}
 	return out, nil
 }

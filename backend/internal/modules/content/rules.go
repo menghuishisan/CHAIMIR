@@ -54,6 +54,9 @@ func validateSystemImport(req SystemImportRequest) (SystemImportRequest, error) 
 	if err != nil {
 		return SystemImportRequest{}, apperr.ErrContentSystemImportInvalid.WithCause(err)
 	}
+	if err := validateContestSubmitKey(ItemWithBody{Item: Item{Type: create.Type}, Body: create.Body, SensitiveFields: create.SensitiveFields}); err != nil {
+		return SystemImportRequest{}, apperr.ErrContentSystemImportInvalid.WithCause(err)
+	}
 	authorType := req.AuthorType
 	if authorType == 0 {
 		authorType = AuthorSystem
@@ -150,6 +153,60 @@ func validDraftVisibility(value int16) bool {
 // validateContentBodyRefs 拒绝正文内联大文件、data URL 和外部直链,附件必须走统一文件服务对象引用。
 func validateContentBodyRefs(body map[string]any) error {
 	return walkContentBody(body)
+}
+
+// validateContestSubmitKey 校验竞赛题面提交键与隐藏判题配置保持同一字段名。
+// 判题配置只在内容中心可见,因此校验必须在发布前完成,不能让竞赛模块自行读取隐藏正文。
+func validateContestSubmitKey(item ItemWithBody) error {
+	if item.Type != TypeContestProblem {
+		return nil
+	}
+
+	judgeConfig, ok := item.Body["judge_config"].(map[string]any)
+	if !ok {
+		if _, exists := item.Body["submit_key"]; !exists {
+			return nil
+		}
+		return apperr.ErrContentBodyInvalid
+	}
+	expectation, ok := judgeConfig["expectation"].(map[string]any)
+	if !ok {
+		if _, exists := item.Body["submit_key"]; !exists {
+			return nil
+		}
+		return apperr.ErrContentBodyInvalid
+	}
+	rawExpected, flagConfigured := expectation["flag_input_key"]
+	if !flagConfigured {
+		if _, exists := item.Body["submit_key"]; !exists {
+			return nil
+		}
+		return apperr.ErrContentBodyInvalid
+	}
+	expected, ok := rawExpected.(string)
+	expected = strings.TrimSpace(expected)
+	if !ok || expected == "" {
+		return apperr.ErrContentBodyInvalid
+	}
+	rawSubmitKey, exists := item.Body["submit_key"]
+	if !exists {
+		return apperr.ErrContentBodyInvalid
+	}
+	submitKey, ok := rawSubmitKey.(string)
+	if !ok || strings.TrimSpace(submitKey) != expected || containsSensitivePath(item.SensitiveFields, "submit_key") {
+		return apperr.ErrContentBodyInvalid
+	}
+	return nil
+}
+
+// containsSensitivePath 判断敏感字段列表是否把题面必须下发的提交键标记为敏感。
+func containsSensitivePath(fields []string, target string) bool {
+	for _, field := range fields {
+		if strings.EqualFold(strings.TrimSpace(field), target) {
+			return true
+		}
+	}
+	return false
 }
 
 // walkContentBody 递归检查 JSON 正文中的字符串字段是否越过文件服务边界。

@@ -49,6 +49,7 @@ CREATE TABLE IF NOT EXISTS judge_result (
     score INT NOT NULL CHECK (score >= 0),
     max_score INT NOT NULL CHECK (max_score >= 0),
     details JSONB NOT NULL DEFAULT '[]'::jsonb,
+    replay_trace JSONB NOT NULL DEFAULT '{"actions": []}'::jsonb,
     judge_sandbox_ref VARCHAR(128) NOT NULL,
     judged_at TIMESTAMPTZ NOT NULL,
     is_rejudge BOOLEAN NOT NULL DEFAULT false,

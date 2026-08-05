@@ -33,9 +33,8 @@ import {
 import { api } from '../../../../app/api'
 import { ResourceState } from '../../../../components/ResourceState'
 import { useAsyncResource } from '../../../../hooks'
-import { formatDuration, formatShortDateTime } from '../../../../utils/formatters'
+import { formatDuration, formatFileSize, formatShortDateTime } from '../../../../utils/formatters'
 import {
-  formatFileSize,
   isLessonMaterialType,
   lessonContentTypeLabel,
   progressStatusLabel,

@@ -28,6 +28,10 @@ type acceptanceImageAttestation struct {
 const (
 	acceptanceInitCodeRef   = "minio://chaimir-code/910000000000000001/sandbox/init/lab-reentrancy-foundry/workspace.tar"
 	acceptanceInitScriptRef = "minio://chaimir-code/910000000000000001/sandbox/init/lab-reentrancy-foundry/init.sh"
+
+	// 验收仿真会话挂在这个内置场景上,它由 sim.SyncBuiltinPackages 入库,此处只按 code 定位。
+	acceptanceSimPackageCode    = "builtin__runtime-gas-metering"
+	acceptanceSimPackageVersion = "1.0.0"
 )
 
 // acceptanceImageURL 从受控镜像证明清单选择不可变 digest 地址,保证验收种子和沙箱安全规则使用同一来源。
@@ -757,78 +761,23 @@ ON CONFLICT (tenant_id, instance_id, student_id) DO UPDATE SET content_ref=EXCLU
 		acceptanceIDs.ExperimentReport, acceptanceIDs.TenantID, acceptanceIDs.ExperimentInstance, acceptanceIDs.StudentA)
 }
 
-type acceptanceBuiltinSimPackage struct {
-	Code     string
-	Name     string
-	Category string
-	Version  string
-}
-
-var acceptanceBuiltinSimPackages = []acceptanceBuiltinSimPackage{
-	{Code: "builtin__runtime-gas-metering", Name: "Gas 计量与回滚推演", Category: "transaction-runtime", Version: "1.0.0"},
-	{Code: "builtin__cross-bridge-validation", Name: "跨链桥证明验证推演", Category: "cross-chain-system", Version: "1.0.0"},
-	{Code: "builtin__cross-finality-confirmation", Name: "跨链最终性确认推演", Category: "cross-chain-system", Version: "1.0.0"},
-	{Code: "builtin__cross-message-lifecycle", Name: "跨链消息生命周期推演", Category: "cross-chain-system", Version: "1.0.0"},
-	{Code: "builtin__cross-multisig-committee", Name: "跨链多签委员会推演", Category: "cross-chain-system", Version: "1.0.0"},
-	{Code: "builtin__cross-replay-protection", Name: "跨链消息重放防护推演", Category: "cross-chain-system", Version: "1.0.0"},
-	{Code: "builtin__crypto-digital-signature", Name: "数字签名与重放防护推演", Category: "cryptography", Version: "1.0.0"},
-	{Code: "builtin__crypto-hash-chain", Name: "哈希链篡改扩散推演", Category: "cryptography", Version: "1.0.0"},
-	{Code: "builtin__crypto-merkle-proof", Name: "Merkle 证明路径推演", Category: "cryptography", Version: "1.0.0"},
-	{Code: "builtin__crypto-threshold-signature", Name: "门限签名聚合推演", Category: "cryptography", Version: "1.0.0"},
-	{Code: "builtin__crypto-zk-proof", Name: "零知识证明交互流程推演", Category: "cryptography", Version: "1.0.0"},
-	{Code: "builtin__data-blockchain-link", Name: "区块链父哈希结构推演", Category: "data-structure", Version: "1.0.0"},
-	{Code: "builtin__data-merkle-tree-structure", Name: "Merkle Tree 构建更新推演", Category: "data-structure", Version: "1.0.0"},
-	{Code: "builtin__data-patricia-trie", Name: "Patricia Trie 状态树推演", Category: "data-structure", Version: "1.0.0"},
-	{Code: "builtin__data-state-snapshot", Name: "状态快照与回滚推演", Category: "data-structure", Version: "1.0.0"},
-	{Code: "builtin__data-utxo-set", Name: "UTXO 集合更新推演", Category: "data-structure", Version: "1.0.0"},
-	{Code: "builtin__hotstuff-chained-bft", Name: "HotStuff 链式 BFT 推演", Category: "consensus", Version: "1.0.0"},
-	{Code: "builtin__network-dht-routing", Name: "DHT 异或路由推演", Category: "network", Version: "1.0.0"},
-	{Code: "builtin__network-gossip-propagation", Name: "Gossip 消息传播推演", Category: "network", Version: "1.0.0"},
-	{Code: "builtin__network-latency-loss", Name: "延迟丢包与重传推演", Category: "network", Version: "1.0.0"},
-	{Code: "builtin__network-p2p-discovery", Name: "P2P 节点发现推演", Category: "network", Version: "1.0.0"},
-	{Code: "builtin__network-partition-recovery", Name: "网络分区与恢复推演", Category: "network", Version: "1.0.0"},
-	{Code: "builtin__pbft-consensus", Name: "PBFT 三阶段共识推演", Category: "consensus", Version: "1.0.0"},
-	{Code: "builtin__pos-finality", Name: "PoS 权益证明与最终性推演", Category: "consensus", Version: "1.0.0"},
-	{Code: "builtin__pow-longest-chain", Name: "PoW 最长链共识推演", Category: "consensus", Version: "1.0.0"},
-	{Code: "builtin__raft-log-replication", Name: "Raft 选举与日志复制推演", Category: "consensus", Version: "1.0.0"},
-	{Code: "builtin__runtime-block-validation", Name: "区块验证与拒绝推演", Category: "transaction-runtime", Version: "1.0.0"},
-	{Code: "builtin__runtime-evm-call-stack", Name: "EVM 调用栈与 revert 推演", Category: "transaction-runtime", Version: "1.0.0"},
-	{Code: "builtin__runtime-nonce-ordering", Name: "Nonce 顺序与替换交易推演", Category: "transaction-runtime", Version: "1.0.0"},
-	{Code: "builtin__runtime-transaction-lifecycle", Name: "交易生命周期推演", Category: "transaction-runtime", Version: "1.0.0"},
-	{Code: "builtin__security-access-control", Name: "授权缺陷与最小权限推演", Category: "contract-security", Version: "1.0.0"},
-	{Code: "builtin__security-flash-loan", Name: "闪电贷组合攻击推演", Category: "contract-security", Version: "1.0.0"},
-	{Code: "builtin__security-integer-boundary", Name: "整数边界与 checked 运算推演", Category: "contract-security", Version: "1.0.0"},
-	{Code: "builtin__security-oracle-manipulation", Name: "预言机操纵防护推演", Category: "contract-security", Version: "1.0.0"},
-	{Code: "builtin__security-reentrancy", Name: "重入攻击与防护推演", Category: "contract-security", Version: "1.0.0"},
-}
-
-// seedSimRows 写入仿真包、会话、动作、检查点和分享码。
+// seedSimRows 写入验收用的仿真会话、动作、检查点和分享码。
+//
+// 内置仿真包不在此写入:它是平台交付物,由 `sim.SyncBuiltinPackages` 从
+// `@chaimir/sim-sdk` 导出的清单入库(见 cmd/migrate/main.go 的 seed)。验收夹具只按 code
+// 定位已入库的包 —— 在这里再抄一份包清单会与前端标准库漂移(曾漂移出 6 个包与三个错键名)。
 func seedSimRows(ctx context.Context, tx pgx.Tx) error {
-	scale, _ := jsonb(map[string]any{"max_nodes": 96, "max_ticks": 140, "max_events": 240})
-	schema, _ := jsonb(map[string]any{"events": map[string]any{
-		"select":  map[string]any{"interaction_id": "select", "kind": "select-element", "target": "element", "params": []map[string]any{}},
-		"advance": map[string]any{"interaction_id": "advance", "kind": "button", "target": "global", "params": []map[string]any{}},
-		"attack":  map[string]any{"interaction_id": "attack", "kind": "button", "target": "global", "params": []map[string]any{}},
-		"recover": map[string]any{"interaction_id": "recover", "kind": "button", "target": "global", "params": []map[string]any{}},
-	}})
-	for index, pkg := range acceptanceBuiltinSimPackages {
-		packageID := acceptanceIDs.SimPackage + int64(index)
-		bundleKey := fmt.Sprintf("builtin://sim-sdk/%s@%s", pkg.Code, pkg.Version)
-		bundleHash := fmt.Sprintf("%064x", packageID)
-		if err := execJSON(ctx, tx, `
-INSERT INTO sim_package (id, code, version, name, category, compute, scale_limit, bundle_key, bundle_hash, interaction_schema, author_type, status)
-VALUES ($1,$2,$3,$4,$5,1,$6,$7,$8,$9,1,3)
-ON CONFLICT (code, version) DO UPDATE SET name=EXCLUDED.name, category=EXCLUDED.category, compute=EXCLUDED.compute, scale_limit=EXCLUDED.scale_limit, bundle_key=EXCLUDED.bundle_key, bundle_hash=EXCLUDED.bundle_hash, interaction_schema=EXCLUDED.interaction_schema, author_type=EXCLUDED.author_type, status=EXCLUDED.status, updated_at=now()`,
-			packageID, pkg.Code, pkg.Version, pkg.Name, pkg.Category, scale, bundleKey, bundleHash, schema); err != nil {
-			return err
-		}
+	var packageID int64
+	if err := tx.QueryRow(ctx, `SELECT id FROM sim_package WHERE code = $1 AND version = $2`,
+		acceptanceSimPackageCode, acceptanceSimPackageVersion).Scan(&packageID); err != nil {
+		return fmt.Errorf("验收夹具需要内置仿真包 %s@%s,请先执行 migrate-and-seed: %w", acceptanceSimPackageCode, acceptanceSimPackageVersion, err)
 	}
 	params, _ := jsonb(map[string]any{"gas_limit": 42_000, "scenario": "classroom-demo"})
 	if err := execJSON(ctx, tx, `
 INSERT INTO sim_session (id, tenant_id, package_id, source_ref, owner_account_id, seed, init_params, compute, status)
 VALUES ($1,$2,$3,'sim:2026:gas-metering:session-a',$4,2026061901,$5,1,4)
 ON CONFLICT (id) DO UPDATE SET package_id=EXCLUDED.package_id, source_ref=EXCLUDED.source_ref, owner_account_id=EXCLUDED.owner_account_id, seed=EXCLUDED.seed, init_params=EXCLUDED.init_params, compute=EXCLUDED.compute, status=EXCLUDED.status, updated_at=now()`,
-		acceptanceIDs.SimSession, acceptanceIDs.TenantID, acceptanceIDs.SimPackage, acceptanceIDs.StudentA, params); err != nil {
+		acceptanceIDs.SimSession, acceptanceIDs.TenantID, packageID, acceptanceIDs.StudentA, params); err != nil {
 		return err
 	}
 	payload, _ := jsonb(map[string]any{})

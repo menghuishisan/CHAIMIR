@@ -84,16 +84,21 @@ type JoinCourseRequest struct {
 	InviteCode string `json:"invite_code"`
 }
 
+// BatchMembersRequest 是按班级批量添加课程成员的请求。
+// 与 M6 需求 C1「教师按班级批量添加」一致:教师手上有的是班级,学生编号是内部标识,
+// 由服务端经 M1 契约解析该班在校学生,不让客户端先拉一份账号目录再回传编号数组。
 type BatchMembersRequest struct {
-	StudentIDs []ids.ID `json:"student_ids"`
+	ClassID ids.ID `json:"class_id"`
 }
 
 type MemberDTO struct {
-	ID        ids.ID `json:"id"`
-	CourseID  ids.ID `json:"course_id"`
-	StudentID ids.ID `json:"student_id"`
-	JoinMode  int16  `json:"join_mode"`
-	JoinedAt  string `json:"joined_at"`
+	ID          ids.ID `json:"id"`
+	CourseID    ids.ID `json:"course_id"`
+	StudentID   ids.ID `json:"student_id"`
+	StudentName string `json:"student_name"`
+	StudentNo   string `json:"student_no,omitempty"`
+	JoinMode    int16  `json:"join_mode"`
+	JoinedAt    string `json:"joined_at"`
 }
 
 type AssignmentRequest struct {

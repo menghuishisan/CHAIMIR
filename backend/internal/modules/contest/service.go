@@ -4,11 +4,13 @@ package contest
 import (
 	"context"
 	"fmt"
+	"io"
 
 	"chaimir/internal/contracts"
 	"chaimir/internal/platform/audit"
 	"chaimir/internal/platform/config"
 	"chaimir/internal/platform/eventbus"
+	"chaimir/internal/platform/storage"
 	"chaimir/internal/platform/tenant"
 	"chaimir/pkg/apperr"
 	"chaimir/pkg/crypto"
@@ -27,6 +29,9 @@ type Service struct {
 	sandbox       contracts.SandboxService
 	judge         contracts.JudgeService
 	fingerprint   contracts.FingerprintService
+	files         fileService
+	replayStore   replayObjectStore
+	replayBucket  string
 	bus           eventbus.Bus
 	cipher        *crypto.Cipher
 }
@@ -43,6 +48,9 @@ type ServiceDeps struct {
 	Sandbox       contracts.SandboxService
 	Judge         contracts.JudgeService
 	Fingerprint   contracts.FingerprintService
+	FileService   fileService
+	ReplayStore   replayObjectStore
+	ReplayBucket  string
 	Bus           eventbus.Bus
 	Cipher        *crypto.Cipher
 }
@@ -76,6 +84,15 @@ func NewService(deps ServiceDeps) (*Service, error) {
 	if deps.Fingerprint == nil {
 		return nil, fmt.Errorf("contest service 缺少 fingerprint 契约")
 	}
+	if deps.FileService == nil {
+		return nil, fmt.Errorf("contest service 缺少统一文件服务")
+	}
+	if deps.ReplayStore == nil {
+		return nil, fmt.Errorf("contest service 缺少共享回放对象存储")
+	}
+	if deps.ReplayBucket == "" {
+		return nil, fmt.Errorf("contest service 缺少回放对象存储桶")
+	}
 	if deps.Bus == nil {
 		return nil, fmt.Errorf("contest service 缺少事件总线")
 	}
@@ -85,7 +102,18 @@ func NewService(deps ServiceDeps) (*Service, error) {
 	if deps.Config.VulnSourceMaxResponseBytes <= 0 || deps.Config.VulnSourceTimeoutSeconds <= 0 || deps.Config.MatchmakerPollIntervalSeconds <= 0 || deps.Config.AutoArchivePollIntervalSeconds <= 0 || deps.Config.BattleSandboxReadyTimeoutSeconds <= 0 || deps.Config.BattleSandboxReadyPollIntervalMs <= 0 || deps.Config.MatchmakerBatchSize <= 0 || deps.Config.SubmitRateLimitSeconds <= 0 || deps.Config.FailedCooldownSeconds <= 0 || deps.Config.BattleELOInitialScore <= 0 || deps.Config.BattleELOKFactor <= 0 {
 		return nil, fmt.Errorf("contest service 配置不完整")
 	}
-	return &Service{store: deps.Store, ids: deps.IDs, cfg: deps.Config, audit: deps.Audit, roles: deps.Roles, content: deps.Content, contentImport: deps.ContentImport, sandbox: deps.Sandbox, judge: deps.Judge, fingerprint: deps.Fingerprint, bus: deps.Bus, cipher: deps.Cipher}, nil
+	return &Service{store: deps.Store, ids: deps.IDs, cfg: deps.Config, audit: deps.Audit, roles: deps.Roles, content: deps.Content, contentImport: deps.ContentImport, sandbox: deps.Sandbox, judge: deps.Judge, fingerprint: deps.Fingerprint, files: deps.FileService, replayStore: deps.ReplayStore, replayBucket: deps.ReplayBucket, bus: deps.Bus, cipher: deps.Cipher}, nil
+}
+
+// fileService 描述竞赛复用统一文件服务签发受控下载授权所需能力。
+type fileService interface {
+	IssueDownloadGrant(storage.IssueDownloadGrantRequest) (string, storage.DownloadGrant, error)
+}
+
+// replayObjectStore 描述 M8 写入回放归档所需的共享对象存储能力。
+type replayObjectStore interface {
+	Put(context.Context, string, string, io.Reader, int64, string) error
+	Delete(context.Context, string, string) error
 }
 
 // currentIdentity 读取租户账号身份。

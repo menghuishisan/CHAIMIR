@@ -3,7 +3,13 @@
 
 import { ApiClient } from '../client'
 import type { PaginatedResponse } from '../types/common'
-import type { JudgeTask, JudgeManualScoreRequest, Judger, JudgerRequest } from '../types/judge'
+import type {
+  JudgeTask,
+  JudgeManualScoreRequest,
+  Judger,
+  JudgerCatalog,
+  JudgerRequest,
+} from '../types/judge'
 
 /**
  * JudgeApi 封装后端 M3 判题器、判题任务和人工评分接口。
@@ -13,6 +19,14 @@ export class JudgeApi {
    * constructor 注入统一 API 客户端，确保判题模块复用同一错误处理和鉴权链路。
    */
   constructor(private client: ApiClient) {}
+
+  /**
+   * 查询判题方式目录（可编排的最小字段）。
+   * 教师配置检查点用这一条 —— 判题器管理接口是平台面，会连带下发判题镜像与受控命令。
+   */
+  async getJudgerCatalog(): Promise<JudgerCatalog> {
+    return this.client.get('/judge/catalog')
+  }
 
   /**
    * 查询判题器列表。

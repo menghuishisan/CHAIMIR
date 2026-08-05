@@ -27,7 +27,9 @@ export function renderMempoolReplacementView(state: MempoolReplacementState): Te
       secondary: ['mempool-matrix'],
       muted: state.transactions.filter((tx) => tx.status === 'replaced' || tx.status === 'rejected').map((tx) => tx.id),
     },
-    layout: { primary, evidence: ['mempool-matrix'], timeline: 'mempool-lane' },
+    // 三个视图各有职责:主舞台按阶段在传播图、nonce 矩阵与时序间切换,矩阵与传播图恒为证据区。
+    // 每个 pattern 都必须在 layout 里声明职责 —— 未声明的视图会被运行时协议校验拒绝(装配即失败)。
+    layout: { primary, evidence: ['mempool-matrix', 'mempool-graph'], timeline: 'mempool-lane' },
     patterns: [
       lanePattern('mempool-lane', '交易提交、传播和打包时序', ['用户', '本地节点', '对等节点', '构建器', '区块'], laneMessages(state.messages, labelPoolActor), state.tick),
       matrixPattern('mempool-matrix', '账户 nonce 队列与替换结果', state.transactions.map((tx) => tx.id), ['账户/nonce', '费用', '状态', '原因'], poolCells(state)),

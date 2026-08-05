@@ -620,6 +620,29 @@ func (s *Service) ListTools(ctx context.Context) ([]Tool, error) {
 	return out, nil
 }
 
+// ListOrchestrationCatalog 返回业务模块编排环境所需的运行时(含可用镜像版本)与工具目录。
+// 只出可编排字段:适配器清单、镜像地址、命令白名单与自检详情属平台运维面,
+// 由 §2 的管理接口承载,不经本目录外泄(见 docs/02-沙箱引擎/04-接口设计.md §2.1)。
+func (s *Service) ListOrchestrationCatalog(ctx context.Context) ([]CatalogRuntime, []CatalogTool, error) {
+	var runtimes []CatalogRuntime
+	var tools []CatalogTool
+	if err := s.store.PlatformTx(ctx, func(ctx context.Context, tx TxStore) error {
+		var err error
+		runtimes, err = tx.ListCatalogRuntimes(ctx)
+		if err != nil {
+			return apperr.ErrSandboxRuntimeNotFound.WithCause(err)
+		}
+		tools, err = tx.ListCatalogTools(ctx)
+		if err != nil {
+			return apperr.ErrSandboxToolNotFound.WithCause(err)
+		}
+		return nil
+	}); err != nil {
+		return nil, nil, err
+	}
+	return runtimes, tools, nil
+}
+
 // UpsertQuota 调整租户资源配额。
 func (s *Service) UpsertQuota(ctx context.Context, quota TenantQuota) (TenantQuota, error) {
 	if err := validateQuota(quota); err != nil {

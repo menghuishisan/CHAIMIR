@@ -29,6 +29,7 @@ func RegisterRoutes(r gin.IRouter, svc *Service, authn *auth.Manager, roles cont
 	api := judgeAPI{svc: svc}
 	g := r.Group("/api/v1/judge")
 	api.registerPlatformRoutes(g.Group("", authn.Middleware(), auth.RequirePlatformIdentity()))
+	api.registerCatalogRoutes(g.Group("", authn.Middleware(), auth.RequirePlatformOrAnyRole(roles, contracts.RoleTeacher, contracts.RoleSchoolAdmin)))
 	api.registerInternalRoutes(g.Group("/internal", authn.ServiceMiddleware()))
 	api.registerUserRoutes(g.Group("", authn.Middleware(), auth.RequireTenantAnyRole(roles, contracts.RoleTeacher, contracts.RoleSchoolAdmin)))
 	api.registerProgressRoutes(g.Group("", authn.WebSocketMiddleware(), auth.RequireTenantAnyRole(roles, contracts.RoleTeacher, contracts.RoleSchoolAdmin)))
@@ -67,6 +68,22 @@ func (a judgeAPI) registerUserRoutes(g gin.IRouter) {
 // registerProgressRoutes 注册浏览器 WebSocket 可用的判题进度订阅入口。
 func (a judgeAPI) registerProgressRoutes(g gin.IRouter) {
 	g.GET("/tasks/:id/progress", a.progress)
+}
+
+// registerCatalogRoutes 注册判题方式目录入口:教师配置检查点要选判题方式,
+// 但不该看到 resource_spec 里的判题镜像、受控命令与执行组件,故用独立最小字段目录。
+func (a judgeAPI) registerCatalogRoutes(g gin.IRouter) {
+	g.GET("/catalog", a.judgerCatalog)
+}
+
+// judgerCatalog 返回可用判题方式目录。
+func (a judgeAPI) judgerCatalog(c *gin.Context) {
+	items, err := a.svc.ListCatalogJudgers(c.Request.Context())
+	if err != nil {
+		httpx.Write(c, nil, err)
+		return
+	}
+	httpx.Write(c, judgerCatalogResponse(items), nil)
 }
 
 // listJudgers 返回判题器列表。

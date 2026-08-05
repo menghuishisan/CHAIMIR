@@ -1758,6 +1758,62 @@ func (q *Queries) ListAuthSessionsByAccount(ctx context.Context, arg ListAuthSes
 	return items, nil
 }
 
+const listClassStudents = `-- name: ListClassStudents :many
+SELECT a.id, a.tenant_id, a.name, a.base_identity, a.status, p.no
+FROM account a
+JOIN account_profile p ON p.account_id = a.id AND p.tenant_id = a.tenant_id
+WHERE a.tenant_id = $1
+  AND p.org_id = $2
+  AND a.base_identity = 1
+  AND a.status = 2
+  AND a.deleted_at IS NULL
+ORDER BY p.no, a.id
+`
+
+type ListClassStudentsParams struct {
+	TenantID int64 `json:"tenant_id"`
+	OrgID    int64 `json:"org_id"`
+}
+
+type ListClassStudentsRow struct {
+	ID           int64  `json:"id"`
+	TenantID     int64  `json:"tenant_id"`
+	Name         string `json:"name"`
+	BaseIdentity int16  `json:"base_identity"`
+	Status       int16  `json:"status"`
+	No           string `json:"no"`
+}
+
+// 按班级取在校学生摘要,供 M6 按班级批量选课。班级是 account_profile.org_id 指向的组织节点
+// (学生的 org_id 必为同租户在用班级,由 0001 迁移的触发器保证),故按 org_id 过滤即为按班级。
+// 只回在用学生:停用/归档/注销账号不该被加进新课程。
+func (q *Queries) ListClassStudents(ctx context.Context, arg ListClassStudentsParams) ([]ListClassStudentsRow, error) {
+	rows, err := q.db.Query(ctx, listClassStudents, arg.TenantID, arg.OrgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListClassStudentsRow{}
+	for rows.Next() {
+		var i ListClassStudentsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.Name,
+			&i.BaseIdentity,
+			&i.Status,
+			&i.No,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listClasses = `-- name: ListClasses :many
 SELECT id, tenant_id, major_id, name, enrollment_year, status, deleted_at
 FROM class

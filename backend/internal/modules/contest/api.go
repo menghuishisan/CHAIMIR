@@ -73,15 +73,15 @@ func (a contestAPI) registerStudentRoutes(g gin.IRouter) {
 	g.GET("/student/contests", a.listStudentContests)
 	g.GET("/student/contests/:id", a.getStudentContest)
 	g.POST("/contests/:id/signup", a.signup)
-	g.POST("/teams/:id/join", a.joinTeamByTeamID)
+	g.POST("/contests/:id/join-team", a.joinTeam)
 	g.POST("/teams/:id/lock", a.lockTeam)
 	g.POST("/contests/:id/problems/:problem_id/env", a.createEnv)
 	g.POST("/contests/:id/problems/:problem_id/submit", a.submitSolve)
 	g.GET("/submissions/:id", a.getSubmission)
 	g.POST("/contests/:id/battle/entry", a.submitBattleEntry)
 	g.GET("/contests/:id/battle/entries", a.listBattleEntries)
-	g.GET("/contests/:id/battle/matches", a.listBattleMatches)
 	g.GET("/matches/:id/replay", a.getBattleReplay)
+	g.POST("/matches/:id/replay/download-grant", a.issueBattleReplayDownloadGrant)
 	g.GET("/my/contest-records", a.myRecords)
 }
 
@@ -132,6 +132,9 @@ func (a contestAPI) registerSharedRoutes(g gin.IRouter) {
 	g.GET("/contests/:id/problems", a.listProblems)
 	g.GET("/contests/:id/ladder", a.listLadder)
 	g.GET("/teams/:id", a.getTeam)
+	// 对局列表师生同路由按身份分视角:组织者见本赛事全部对局(实时监控),
+	// 学生只见本队对局(时空回溯器)。service 判定视角,不为教师另开一条同义路由。
+	g.GET("/contests/:id/battle/matches", a.listBattleMatches)
 }
 
 // registerInternalRoutes 注册内部只读接口。
@@ -258,8 +261,8 @@ func (a contestAPI) signup(c *gin.Context) {
 	httpx.Write(c, out, err)
 }
 
-// joinTeamByTeamID 绑定按队伍 ID 加入队伍请求。
-func (a contestAPI) joinTeamByTeamID(c *gin.Context) {
+// joinTeam 绑定按赛事编号和邀请码加入队伍请求。
+func (a contestAPI) joinTeam(c *gin.Context) {
 	id, ok := httpx.PathID(c, "id")
 	if !ok {
 		return
@@ -268,7 +271,7 @@ func (a contestAPI) joinTeamByTeamID(c *gin.Context) {
 	if !httpx.BindJSONWithError(c, &req, apperr.ErrContestTeamInvalid) {
 		return
 	}
-	out, err := a.svc.JoinTeamByID(c.Request.Context(), id, req)
+	out, err := a.svc.JoinTeam(c.Request.Context(), id, req)
 	httpx.Write(c, out, err)
 }
 
@@ -375,6 +378,16 @@ func (a contestAPI) getBattleReplay(c *gin.Context) {
 		return
 	}
 	out, err := a.svc.GetBattleReplay(c.Request.Context(), id)
+	httpx.Write(c, out, err)
+}
+
+// issueBattleReplayDownloadGrant 为已授权学生签发统一文件服务回放取件授权。
+func (a contestAPI) issueBattleReplayDownloadGrant(c *gin.Context) {
+	id, ok := httpx.PathID(c, "id")
+	if !ok {
+		return
+	}
+	out, err := a.svc.IssueBattleReplayDownloadGrant(c.Request.Context(), id)
 	httpx.Write(c, out, err)
 }
 

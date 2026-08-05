@@ -545,12 +545,13 @@ SELECT
     COALESCE(r.score, 0)::int AS score,
     COALESCE(r.max_score, 0)::int AS max_score,
     COALESCE(r.details, '[]'::jsonb) AS details,
+    COALESCE(r.replay_trace, '{"actions": []}'::jsonb) AS replay_trace,
     COALESCE(r.judge_sandbox_ref, '')::varchar AS judge_sandbox_ref,
     r.judged_at,
     COALESCE(r.is_rejudge, false)::boolean AS is_rejudge
 FROM judge_task t
 LEFT JOIN LATERAL (
-    SELECT id, version, passed, score, max_score, details, judge_sandbox_ref, judged_at, is_rejudge
+    SELECT id, version, passed, score, max_score, details, replay_trace, judge_sandbox_ref, judged_at, is_rejudge
     FROM judge_result
     WHERE tenant_id = t.tenant_id AND task_id = t.id
     ORDER BY version DESC
@@ -592,6 +593,7 @@ type GetJudgeTaskWithResultRow struct {
 	Score            int32              `json:"score"`
 	MaxScore         int32              `json:"max_score"`
 	Details          []byte             `json:"details"`
+	ReplayTrace      []byte             `json:"replay_trace"`
 	JudgeSandboxRef  string             `json:"judge_sandbox_ref"`
 	JudgedAt         pgtype.Timestamptz `json:"judged_at"`
 	IsRejudge        bool               `json:"is_rejudge"`
@@ -628,6 +630,7 @@ func (q *Queries) GetJudgeTaskWithResult(ctx context.Context, arg GetJudgeTaskWi
 		&i.Score,
 		&i.MaxScore,
 		&i.Details,
+		&i.ReplayTrace,
 		&i.JudgeSandboxRef,
 		&i.JudgedAt,
 		&i.IsRejudge,
@@ -687,6 +690,40 @@ func (q *Queries) GetJudgerByID(ctx context.Context, id int64) (Judger, error) {
 	return i, err
 }
 
+const listCatalogJudgers = `-- name: ListCatalogJudgers :many
+SELECT code, name, type
+FROM judger
+WHERE status = 1
+ORDER BY code
+`
+
+type ListCatalogJudgersRow struct {
+	Code string `json:"code"`
+	Name string `json:"name"`
+	Type int16  `json:"type"`
+}
+
+// 编排目录只取判题方式的 code/name/type,不出 resource_spec 与执行引用;停用项不进可选集。
+func (q *Queries) ListCatalogJudgers(ctx context.Context) ([]ListCatalogJudgersRow, error) {
+	rows, err := q.db.Query(ctx, listCatalogJudgers)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListCatalogJudgersRow{}
+	for rows.Next() {
+		var i ListCatalogJudgersRow
+		if err := rows.Scan(&i.Code, &i.Name, &i.Type); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listFingerprintsForProblem = `-- name: ListFingerprintsForProblem :many
 SELECT id, tenant_id, source_ref, problem_ref, submitter_id, code_hash, sim_vector, created_at
 FROM submission_fingerprint
@@ -740,12 +777,13 @@ SELECT
     COALESCE(r.score, 0)::int AS score,
     COALESCE(r.max_score, 0)::int AS max_score,
     COALESCE(r.details, '[]'::jsonb) AS details,
+    COALESCE(r.replay_trace, '{"actions": []}'::jsonb) AS replay_trace,
     COALESCE(r.judge_sandbox_ref, '')::varchar AS judge_sandbox_ref,
     r.judged_at,
     COALESCE(r.is_rejudge, false)::boolean AS is_rejudge
 FROM judge_task t
 LEFT JOIN LATERAL (
-    SELECT id, version, passed, score, max_score, details, judge_sandbox_ref, judged_at, is_rejudge
+    SELECT id, version, passed, score, max_score, details, replay_trace, judge_sandbox_ref, judged_at, is_rejudge
     FROM judge_result
     WHERE tenant_id = t.tenant_id AND task_id = t.id
     ORDER BY version DESC
@@ -797,6 +835,7 @@ type ListJudgeTasksRow struct {
 	Score            int32              `json:"score"`
 	MaxScore         int32              `json:"max_score"`
 	Details          []byte             `json:"details"`
+	ReplayTrace      []byte             `json:"replay_trace"`
 	JudgeSandboxRef  string             `json:"judge_sandbox_ref"`
 	JudgedAt         pgtype.Timestamptz `json:"judged_at"`
 	IsRejudge        bool               `json:"is_rejudge"`
@@ -846,6 +885,7 @@ func (q *Queries) ListJudgeTasks(ctx context.Context, arg ListJudgeTasksParams) 
 			&i.Score,
 			&i.MaxScore,
 			&i.Details,
+			&i.ReplayTrace,
 			&i.JudgeSandboxRef,
 			&i.JudgedAt,
 			&i.IsRejudge,
@@ -1327,13 +1367,13 @@ func (q *Queries) UpdateJudgerSelftest(ctx context.Context, arg UpdateJudgerSelf
 }
 
 const upsertJudgeResult = `-- name: UpsertJudgeResult :one
-INSERT INTO judge_result (id, task_id, tenant_id, version, passed, score, max_score, details, judge_sandbox_ref, judged_at, is_rejudge)
+INSERT INTO judge_result (id, task_id, tenant_id, version, passed, score, max_score, details, replay_trace, judge_sandbox_ref, judged_at, is_rejudge)
 VALUES (
     $1, $2, $3,
     COALESCE((SELECT max(version) + 1 FROM judge_result WHERE tenant_id = $3 AND task_id = $2), 1),
-    $4, $5, $6, $7, $8, now(), $9
+    $4, $5, $6, $7, $8, $9, now(), $10
 )
-RETURNING id, task_id, tenant_id, version, passed, score, max_score, details, judge_sandbox_ref, judged_at, is_rejudge
+RETURNING id, task_id, tenant_id, version, passed, score, max_score, details, replay_trace, judge_sandbox_ref, judged_at, is_rejudge
 `
 
 type UpsertJudgeResultParams struct {
@@ -1344,6 +1384,7 @@ type UpsertJudgeResultParams struct {
 	Score           int32  `json:"score"`
 	MaxScore        int32  `json:"max_score"`
 	Details         []byte `json:"details"`
+	ReplayTrace     []byte `json:"replay_trace"`
 	JudgeSandboxRef string `json:"judge_sandbox_ref"`
 	IsRejudge       bool   `json:"is_rejudge"`
 }
@@ -1357,6 +1398,7 @@ func (q *Queries) UpsertJudgeResult(ctx context.Context, arg UpsertJudgeResultPa
 		arg.Score,
 		arg.MaxScore,
 		arg.Details,
+		arg.ReplayTrace,
 		arg.JudgeSandboxRef,
 		arg.IsRejudge,
 	)
@@ -1370,6 +1412,7 @@ func (q *Queries) UpsertJudgeResult(ctx context.Context, arg UpsertJudgeResultPa
 		&i.Score,
 		&i.MaxScore,
 		&i.Details,
+		&i.ReplayTrace,
 		&i.JudgeSandboxRef,
 		&i.JudgedAt,
 		&i.IsRejudge,

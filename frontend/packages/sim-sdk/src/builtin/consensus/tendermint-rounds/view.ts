@@ -25,7 +25,9 @@ export function renderTendermintRoundsView(state: TendermintRoundsState): Teachi
       secondary: state.validators.filter((validator) => validator.lockedValue).map((validator) => validator.id),
       muted: state.validators.filter((validator) => !validator.online).map((validator) => validator.id),
     },
-    layout: { primary, evidence: ['tendermint-matrix'], timeline: 'tendermint-lane' },
+    // 三个视图各有职责:主舞台按阶段在时序与投票矩阵间切换,广播网络恒为证据区。
+    // 每个 pattern 都必须在 layout 里声明职责 —— 未声明的视图会被运行时协议校验拒绝(装配即失败)。
+    layout: { primary, evidence: ['tendermint-matrix', 'tendermint-graph'], timeline: 'tendermint-lane' },
     patterns: [
       lanePattern('tendermint-lane', 'Proposal -> Prevote -> Precommit -> Commit 时序', state.validators.map((validator) => validator.label).concat('网络'), laneMessages(state.messages, (id) => labelTendermintActor(state, id)), state.tick),
       matrixPattern('tendermint-matrix', '验证者投票权重和锁定状态', state.validators.map((validator) => validator.label), ['权重', 'Prevote', 'Precommit', 'Lock'], voteMatrix(state)),

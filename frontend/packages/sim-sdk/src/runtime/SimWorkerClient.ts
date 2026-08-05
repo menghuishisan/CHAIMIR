@@ -28,7 +28,6 @@ export interface SimWorkerClientOptions {
   initParams: SimInitParams;
   seed: number;
   commandTimeoutMs: number;
-  stepDurationMs?: number;
   onReady?: (descriptor: SimPackageDescriptor, snapshot: RuntimeSnapshot) => void;
   onSnapshot?: (snapshot: RuntimeSnapshot, event?: SimEvent) => void;
   onError?: (message: string) => void;
@@ -41,15 +40,17 @@ interface PendingRequest {
 }
 
 /**
- * SimWorkerClient 负责创建隔离 Worker、发送命令并维护自动播放计时器。
+ * SimWorkerClient 负责创建隔离 Worker 并发送带超时保护的命令。
+ *
+ * 播放节奏不在此处:自动推进必须等上一步的快照回到主线程后再排下一步,慢帧才不会让命令堆积,
+ * 而 client 无从得知快照何时到达。故节奏、速度档与调度统一由消费端的播放控制持有
+ * (见 apps/web 的 features/sim/playback.ts),client 只提供单次命令。
  */
 export class SimWorkerClient {
   private readonly worker: Worker;
   private readonly options: SimWorkerClientOptions;
   private readonly pending = new Map<number, PendingRequest>();
   private requestId = 1;
-  private intervalId: ReturnType<typeof setInterval> | undefined;
-  private stepDurationMs: number;
   private failed = false;
 
   /**
@@ -57,7 +58,6 @@ export class SimWorkerClient {
    */
   constructor(options: SimWorkerClientOptions) {
     this.options = options;
-    this.stepDurationMs = options.stepDurationMs ?? 1200;
     this.worker = new Worker(new URL('./sim.worker.ts', import.meta.url), { type: 'module' });
     this.worker.onmessage = (event: MessageEvent<WorkerResponse>) => this.handleMessage(event.data);
     this.worker.onerror = (event) => this.failAll(this.userMessage('仿真运行环境异常,请刷新后重试', event.message));
@@ -74,41 +74,6 @@ export class SimWorkerClient {
       initParams: this.options.initParams,
       seed: this.options.seed,
     });
-  }
-
-  /**
-   * start 按当前步长自动发送 tick,自动播放错误会显式进入失败路径。
-   */
-  start(): void {
-    if (this.intervalId) {
-      return;
-    }
-    this.intervalId = setInterval(() => {
-      void this.step().catch((error: unknown) => {
-        this.failAll(this.userMessage('仿真播放中断,请刷新后重试', error));
-      });
-    }, this.stepDurationMs);
-  }
-
-  /**
-   * pause 暂停自动 tick。
-   */
-  pause(): void {
-    if (this.intervalId) {
-      clearInterval(this.intervalId);
-      this.intervalId = undefined;
-    }
-  }
-
-  /**
-   * setStepDuration 更新自动播放间隔。
-   */
-  setStepDuration(durationMs: number): void {
-    this.stepDurationMs = Math.max(250, Math.min(durationMs, 8000));
-    if (this.intervalId) {
-      this.pause();
-      this.start();
-    }
   }
 
   /**
@@ -143,7 +108,6 @@ export class SimWorkerClient {
    * reset 重置到初始状态。
    */
   async reset(): Promise<void> {
-    this.pause();
     await this.post({ type: 'reset', requestId: 0 });
   }
 
@@ -151,7 +115,6 @@ export class SimWorkerClient {
    * destroy 终止 Worker。
    */
   destroy(): void {
-    this.pause();
     for (const pending of this.pending.values()) {
       clearTimeout(pending.timeoutId);
     }
@@ -221,7 +184,6 @@ export class SimWorkerClient {
    */
   private failAll(message: string): Error {
     this.failed = true;
-    this.pause();
     this.worker.terminate();
     const error = new Error(message);
     for (const [requestId, pending] of this.pending.entries()) {

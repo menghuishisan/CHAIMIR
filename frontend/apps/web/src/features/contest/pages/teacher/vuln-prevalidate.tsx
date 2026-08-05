@@ -3,7 +3,7 @@
 // 预验证在隔离沙箱里跑两遍:正向执行 PoC 应让全部断言成立,反向不执行 PoC 应让全部断言不成立。
 // 双向通过才算这道题「可解可判」,才能固化进题库。
 //
-// 运行时与镜像版本从 M2 已注册清单里选(后端 validatePrevalidateRequest 两者必填),
+// 运行时与镜像版本从 M2 编排目录里选(后端 validatePrevalidateRequest 两者必填),
 // 不让教师手填 —— 拼错要等验证跑完才发现。
 //
 // 验证结果里的 actual 是后端已脱敏的短文本(chainassert.ShortJSON),
@@ -11,12 +11,7 @@
 
 import { useCallback, useMemo, useState } from 'react'
 import { CircleCheck, CircleX, FlaskConical, Server } from 'lucide-react'
-import {
-  RuntimeStatus,
-  ToolStatus,
-  VulnPrevalidateStatus,
-  type VulnProblem,
-} from '@chaimir/api-client'
+import { VulnPrevalidateStatus, type VulnProblem } from '@chaimir/api-client'
 import {
   Badge,
   Button,
@@ -38,7 +33,7 @@ import {
 } from '@chaimir/ui'
 import { api } from '../../../../app/api'
 import { ResourceState } from '../../../../components/ResourceState'
-import { useAsyncResource } from '../../../../hooks'
+import { useOrchestrationCatalog } from '../../../sandbox/useOrchestrationCatalog'
 import {
   vulnLevelLabel,
   vulnPrevalidateStatusLabel,
@@ -79,36 +74,8 @@ export function VulnPrevalidateModal({ problem, onClose, onDone }: VulnPrevalida
   const [formError, setFormError] = useState<string>()
   const [running, setRunning] = useState(false)
 
-  const runtimes = useAsyncResource(() => api.sandbox.listRuntimes(), [], () => false)
-  const toolDefs = useAsyncResource(() => api.sandbox.listTools(), [], () => false)
-
-  // 选定运行时后取镜像版本:版本必须属于该运行时
-  const images = useAsyncResource(
-    () => {
-      const runtime = (runtimes.data ?? []).find((item) => item.code === runtimeCode)
-      return runtime ? api.sandbox.listRuntimeImages(runtime.id) : Promise.resolve([])
-    },
-    [runtimeCode, runtimes.data],
-    () => false,
-  )
-
-  const runtimeOptions = useMemo(
-    () =>
-      (runtimes.data ?? [])
-        .filter((item) => item.status === RuntimeStatus.AVAILABLE)
-        .map((item) => ({ value: item.code, label: `${item.name} · ${item.code}` })),
-    [runtimes.data],
-  )
-
-  const imageOptions = useMemo(
-    () => (images.data ?? []).map((image) => ({ value: image.version, label: image.version })),
-    [images.data],
-  )
-
-  const availableTools = useMemo(
-    () => (toolDefs.data ?? []).filter((tool) => tool.status === ToolStatus.AVAILABLE),
-    [toolDefs.data],
-  )
+  const catalog = useOrchestrationCatalog()
+  const imageOptions = useMemo(() => catalog.imageOptions(runtimeCode), [catalog, runtimeCode])
 
   const run = useCallback(async () => {
     if (runtimeCode === '' || imageVersion === '') {
@@ -164,67 +131,68 @@ export function VulnPrevalidateModal({ problem, onClose, onDone }: VulnPrevalida
           />
 
           <ResourceState
-            resource={runtimes}
+            resource={catalog.resource}
             emptyIcon={Server}
             emptyTitle="平台还没有可用运行时"
             emptyDescription="请联系平台管理员在链运行时里注册并自检运行时。"
             skeleton={<Skeleton variant="line" lines={2} />}
           >
             {() => (
-              <div className="grid gap-4 sm:grid-cols-2">
-                <FormField label="运行时" htmlFor="prevalidate-runtime" required>
-                  <Select
-                    id="prevalidate-runtime"
-                    options={runtimeOptions}
-                    value={runtimeCode}
-                    placeholder={runtimeOptions.length > 0 ? '选择运行时' : '暂无可用运行时'}
-                    disabled={runtimeOptions.length === 0}
-                    onValueChange={(value) => {
-                      setRuntimeCode(value)
-                      setImageVersion('')
-                    }}
-                  />
-                </FormField>
-                <FormField label="镜像版本" htmlFor="prevalidate-image" required>
-                  <Select
-                    id="prevalidate-image"
-                    options={imageOptions}
-                    value={imageVersion}
-                    placeholder={
-                      runtimeCode === ''
-                        ? '请先选择运行时'
-                        : imageOptions.length > 0
-                          ? '选择镜像版本'
-                          : '该运行时暂无镜像'
-                    }
-                    disabled={imageOptions.length === 0}
-                    onValueChange={setImageVersion}
-                  />
-                </FormField>
+              <div className="flex flex-col gap-4">
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <FormField label="运行时" htmlFor="prevalidate-runtime" required>
+                    <Select
+                      id="prevalidate-runtime"
+                      options={catalog.runtimeOptions}
+                      value={runtimeCode}
+                      placeholder="选择运行时"
+                      onValueChange={(value) => {
+                        setRuntimeCode(value)
+                        setImageVersion('')
+                      }}
+                    />
+                  </FormField>
+                  <FormField label="镜像版本" htmlFor="prevalidate-image" required>
+                    <Select
+                      id="prevalidate-image"
+                      options={imageOptions}
+                      value={imageVersion}
+                      placeholder={
+                        runtimeCode === ''
+                          ? '请先选择运行时'
+                          : imageOptions.length > 0
+                            ? '选择镜像版本'
+                            : '该运行时暂无镜像'
+                      }
+                      disabled={imageOptions.length === 0}
+                      onValueChange={setImageVersion}
+                    />
+                  </FormField>
+                </div>
+
+                {catalog.tools.length > 0 ? (
+                  <FormField label="验证时可用工具" helper="按攻击步骤的需要勾选;不确定就不勾">
+                    <div className="flex flex-col gap-2">
+                      {catalog.tools.map((tool) => (
+                        <Checkbox
+                          key={tool.code}
+                          checked={toolCodes.includes(tool.code)}
+                          label={tool.name}
+                          onCheckedChange={(checked) =>
+                            setToolCodes((current) =>
+                              checked === true
+                                ? [...current, tool.code]
+                                : current.filter((code) => code !== tool.code),
+                            )
+                          }
+                        />
+                      ))}
+                    </div>
+                  </FormField>
+                ) : null}
               </div>
             )}
           </ResourceState>
-
-          {availableTools.length > 0 ? (
-            <FormField label="验证时可用工具" helper="按攻击步骤的需要勾选;不确定就不勾">
-              <div className="flex flex-col gap-2">
-                {availableTools.map((tool) => (
-                  <Checkbox
-                    key={tool.code}
-                    checked={toolCodes.includes(tool.code)}
-                    label={tool.name}
-                    onCheckedChange={(checked) =>
-                      setToolCodes((current) =>
-                        checked === true
-                          ? [...current, tool.code]
-                          : current.filter((code) => code !== tool.code),
-                      )
-                    }
-                  />
-                ))}
-              </div>
-            </FormField>
-          ) : null}
 
           {formError ? <Callout tone="danger">{formError}</Callout> : null}
 

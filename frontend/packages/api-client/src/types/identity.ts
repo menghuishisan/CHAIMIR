@@ -47,10 +47,6 @@ export interface SendSMSRequest {
   tenant_id?: SnowflakeID
 }
 
-export interface RefreshRequest {
-  refresh_token: string
-}
-
 export interface WebSocketTicketRequest {
   path: string
 }
@@ -243,6 +239,16 @@ export interface Class {
   name: string
   enrollment_year: number
   status: ClassStatus
+}
+
+/**
+ * ClassStudent 是班内学生名录条目：只有编号、姓名与学号。
+ * 刻意不复用 Account —— 那带手机号掩码、账号状态与角色，属学校管理员的账号目录字段。
+ */
+export interface ClassStudent {
+  id: SnowflakeID
+  name: string
+  no?: string
 }
 
 export interface ArchiveClassesRequest {

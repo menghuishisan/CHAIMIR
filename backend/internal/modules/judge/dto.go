@@ -19,6 +19,18 @@ type JudgerRequest struct {
 	Status            int16           `json:"status"`
 }
 
+// JudgerCatalogResponse 是判题器目录接口的输出,只含业务模块选判题方式所需字段。
+type JudgerCatalogResponse struct {
+	Judgers []CatalogJudgerResponse `json:"judgers"`
+}
+
+// CatalogJudgerResponse 是目录里的单个判题方式,不含资源清单与执行引用。
+type CatalogJudgerResponse struct {
+	Code string `json:"code"`
+	Name string `json:"name"`
+	Type int16  `json:"type"`
+}
+
 // SubmitTaskRequest 是内部服务提交判题任务的请求。
 type SubmitTaskRequest struct {
 	JudgerCode       string         `json:"judger_code"`

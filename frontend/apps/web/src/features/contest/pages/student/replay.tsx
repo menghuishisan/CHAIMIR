@@ -8,14 +8,13 @@
 // 状态一律由记录重算,不插值、不补帧(对齐清单 §6.13)。积分变化取对局自带的评分明细
 // (delta/before/after 都是后端写下的事实),不在前端另算一套。
 //
-// 逐帧轨迹为什么不在这里:`GET /matches/{id}/replay` 只回轨迹的对象引用,M8 还没有为它签发
-// 下载授权,浏览器拿不到轨迹内容(§6.12)。故本页对已归档轨迹只做「已归档」的确认,
-// 不做假动画;取件入口开放后,逐帧展开会接进同一条时间轴,不新建页面。
+// 逐帧轨迹走「读取引用 → 签发授权 → 统一文件服务取件」,不把对象存储地址交给浏览器。
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import {
   Clock,
+  Download,
   History,
   LoaderCircle,
   Swords,
@@ -35,6 +34,7 @@ import {
   ChainProgress,
   WorkbenchShell,
   WorkbenchTopbar,
+  toast,
 } from '@chaimir/ui'
 import { api } from '../../../../app/api'
 import { AppStatusScreen } from '../../../../components/AppStatusScreen'
@@ -513,13 +513,12 @@ interface MatchDetailProps {
 }
 
 /**
- * MatchDetail 渲染游标处这一局的事实。
- * 轨迹只做「是否已归档」的确认:引用存在但取件入口未开放(§6.12),
- * 故这里如实说明,不给一个点了必然失败的回放按钮。
+ * MatchDetail 渲染游标处这一局的事实,并提供归档回放的受控取件入口。
  */
 function MatchDetail({ match, myEntryIds }: MatchDetailProps) {
   const [archived, setArchived] = useState<boolean>()
   const [checkError, setCheckError] = useState<string>()
+  const [downloading, setDownloading] = useState(false)
 
   const side = sideOf(match, myEntryIds)
   const outcome = outcomeOf(match, myEntryIds)
@@ -529,18 +528,39 @@ function MatchDetail({ match, myEntryIds }: MatchDetailProps) {
     setCheckError(undefined)
     try {
       const ref = await api.contest.getBattleReplay(match.id)
-      setArchived(ref.replay_ref !== '')
+      setArchived(ref.available)
     } catch (error) {
       setArchived(false)
       setCheckError(userFacingErrorMessage(error, '这一局的轨迹暂时确认不了。'))
     }
   }, [match.id])
 
+  /** downloadReplay 每次重新签发一次性授权,再交给统一文件服务下载。 */
+  const downloadReplay = useCallback(async () => {
+    setDownloading(true)
+    setCheckError(undefined)
+    try {
+      const grant = await api.contest.issueBattleReplayDownloadGrant(match.id)
+      const file = await api.storage.consumeGrant(grant.token)
+      const url = URL.createObjectURL(file.blob)
+      const anchor = document.createElement('a')
+      anchor.href = url
+      anchor.download = file.fileName || grant.file_name
+      anchor.click()
+      URL.revokeObjectURL(url)
+      toast.success('回放归档已开始下载')
+    } catch (error) {
+      setCheckError(userFacingErrorMessage(error, '回放下载没有完成,请稍后重试。'))
+    } finally {
+      setDownloading(false)
+    }
+  }, [match.id])
+
   useEffect(() => {
     setArchived(undefined)
     setCheckError(undefined)
-    if (match.replay_ref) void verifyTrace()
-  }, [match.replay_ref, verifyTrace])
+    if (match.replay_available) void verifyTrace()
+  }, [match.replay_available, verifyTrace])
 
   const before = readNumber(
     match.score_delta,
@@ -589,15 +609,21 @@ function MatchDetail({ match, myEntryIds }: MatchDetailProps) {
       </dl>
 
       <div className="flex flex-wrap items-center gap-2">
-        {match.replay_ref ? (
+        {match.replay_available ? (
           archived === undefined ? (
             <span className="text-xs text-on-dark-sub">正在确认这一局的轨迹…</span>
           ) : archived ? (
             <>
               <Badge tone="jade">轨迹已归档</Badge>
-              <span className="text-xs text-on-dark-sub">
-                逐帧展开待取件入口开放后接进这条时间轴。
-              </span>
+              <Button
+                variant="on-dark"
+                size="sm"
+                leftIcon={Download}
+                loading={downloading}
+                onClick={() => void downloadReplay()}
+              >
+                下载回放归档
+              </Button>
             </>
           ) : (
             <>

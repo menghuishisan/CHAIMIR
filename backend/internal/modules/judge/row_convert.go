@@ -2,6 +2,7 @@
 package judge
 
 import (
+	"chaimir/internal/contracts"
 	"chaimir/internal/modules/judge/internal/sqlcgen"
 	"chaimir/internal/platform/jsonx"
 	"chaimir/internal/platform/pgtypex"
@@ -102,6 +103,10 @@ func taskInfoFromJoined(row sqlcgen.GetJudgeTaskWithResultRow) (JudgeTaskInfo, e
 		if err != nil {
 			return JudgeTaskInfo{}, err
 		}
+		replay, err := decodeReplayTrace(row.ReplayTrace)
+		if err != nil {
+			return JudgeTaskInfo{}, err
+		}
 		info.Result = &JudgeResult{
 			ID:              row.ResultID,
 			TaskID:          row.ID,
@@ -111,6 +116,7 @@ func taskInfoFromJoined(row sqlcgen.GetJudgeTaskWithResultRow) (JudgeTaskInfo, e
 			Score:           row.Score,
 			MaxScore:        row.MaxScore,
 			Details:         details,
+			Replay:          replay,
 			JudgeSandboxRef: row.JudgeSandboxRef,
 			JudgedAt:        timex.FromTimestamptz(row.JudgedAt),
 			IsRejudge:       row.IsRejudge,
@@ -199,6 +205,21 @@ func decodeDetails(raw []byte) ([]JudgeResultDetail, error) {
 	var out []JudgeResultDetail
 	if err := jsonx.DecodeStrict(raw, &out); err != nil {
 		return nil, err
+	}
+	return out, nil
+}
+
+// decodeReplayTrace 解码已持久化的链上回放轨迹,拒绝损坏数据继续进入跨模块结算。
+func decodeReplayTrace(raw []byte) (contracts.JudgeReplayTrace, error) {
+	if len(raw) == 0 {
+		return contracts.JudgeReplayTrace{Actions: []contracts.JudgeReplayAction{}}, nil
+	}
+	var out contracts.JudgeReplayTrace
+	if err := jsonx.DecodeStrict(raw, &out); err != nil {
+		return contracts.JudgeReplayTrace{}, err
+	}
+	if out.Actions == nil {
+		out.Actions = []contracts.JudgeReplayAction{}
 	}
 	return out, nil
 }

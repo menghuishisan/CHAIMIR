@@ -9,6 +9,7 @@ import {
   ContentDifficulty,
   ContentType,
   ContentVisibility,
+  type ContentAttachment,
   type ContentItem,
   type ContentItemSnapshot,
 } from '@chaimir/api-client'
@@ -41,6 +42,7 @@ import {
   contentVisibilityLabel,
 } from '../../../../utils/labels/content'
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
+import { ContentAttachmentsField } from '../../ContentAttachmentsField'
 
 /** 正文各字段在 body 里的键,与 M5 架构设计 §2.2 的类型化内容体对应。 */
 const BODY_KEYS = {
@@ -54,6 +56,8 @@ const BODY_KEYS = {
   explanation: 'explanation',
   runtimeCode: 'runtime_code',
   submitKey: 'submit_key',
+  /** 三种类型共用的附件字段:按类型各起一个名就是三套同义结构 */
+  attachments: 'attachments',
 } as const
 
 /**
@@ -178,6 +182,7 @@ function ItemForm({ item, snapshot, onClose, onSaved }: ItemFormProps) {
   const [explanation, setExplanation] = useState(readString(body, BODY_KEYS.explanation))
   const [runtimeCode, setRuntimeCode] = useState(readString(body, BODY_KEYS.runtimeCode))
   const [submitKey, setSubmitKey] = useState(readString(body, BODY_KEYS.submitKey))
+  const [attachments, setAttachments] = useState<ContentAttachment[]>(readAttachments(body))
 
   const [errors, setErrors] = useState<Record<string, string | null>>({})
   const [formError, setFormError] = useState<string>()
@@ -186,10 +191,15 @@ function ItemForm({ item, snapshot, onClose, onSaved }: ItemFormProps) {
   const categories = useAsyncResource(() => api.content.listCategories(), [], () => false)
   const typeValue = Number(type) as ContentType
 
-  /** buildBody 按类型组装正文,只写该类型用到的键。 */
+  /**
+   * buildBody 按类型组装正文,只写该类型用到的键。
+   * 附件是三种类型共用的字段:有附件才写这个键,避免给没有附件的题目留个空数组。
+   */
   const buildBody = useCallback((): Record<string, unknown> => {
+    const shared = attachments.length > 0 ? { [BODY_KEYS.attachments]: attachments } : {}
     if (typeValue === ContentType.EXPERIMENT_TEMPLATE) {
       return {
+        ...shared,
         [BODY_KEYS.summary]: summary.trim(),
         [BODY_KEYS.steps]: splitLines(steps),
         [BODY_KEYS.runtimeCode]: runtimeCode.trim(),
@@ -198,6 +208,7 @@ function ItemForm({ item, snapshot, onClose, onSaved }: ItemFormProps) {
     }
     if (typeValue === ContentType.CONTEST_PROBLEM) {
       return {
+        ...shared,
         [BODY_KEYS.scenario]: scenario.trim(),
         [BODY_KEYS.statement]: statement.trim(),
         // 实操类竞赛题写运行时:学生答题工作台按它起实操环境(对齐清单 §6.19)
@@ -207,6 +218,7 @@ function ItemForm({ item, snapshot, onClose, onSaved }: ItemFormProps) {
       }
     }
     return {
+      ...shared,
       [BODY_KEYS.statement]: statement.trim(),
       [BODY_KEYS.options]: splitLines(options),
       [BODY_KEYS.answer]: answer.trim(),
@@ -214,6 +226,7 @@ function ItemForm({ item, snapshot, onClose, onSaved }: ItemFormProps) {
     }
   }, [
     answer,
+    attachments,
     explanation,
     options,
     runtimeCode,
@@ -599,6 +612,22 @@ function ItemForm({ item, snapshot, onClose, onSaved }: ItemFormProps) {
                   </FormField>
                 </>
               ) : null}
+
+              {/* 附件三种类型共用:题面配图、说明文档、示例数据都走这里,学生取题面时可见 */}
+              <FormField
+                label="正文附件"
+                helper={
+                  editing
+                    ? '配图、说明文档与示例数据。学生取题面时能看到它们'
+                    : '配图、说明文档与示例数据。创建题目后可在此下载已上传的附件'
+                }
+              >
+                <ContentAttachmentsField
+                  attachments={attachments}
+                  onChange={setAttachments}
+                  resourceId={item?.id}
+                />
+              </FormField>
             </div>
 
             {formError ? <Callout tone="danger">{formError}</Callout> : null}
@@ -628,6 +657,26 @@ function readStringArray(body: Record<string, unknown>, key: string): string[] {
   const value = body[key]
   if (!Array.isArray(value)) return []
   return value.filter((item): item is string => typeof item === 'string')
+}
+
+/**
+ * readAttachments 从正文里读附件清单。
+ * 只接受三字段齐全且 object_ref 是统一文件服务引用的条目 —— 结构不对的条目留在表单里也提交不过去
+ * (后端 validateContentBodyRefs 会拒),不如在读取边界就滤掉。
+ */
+function readAttachments(body: Record<string, unknown>): ContentAttachment[] {
+  const value = body[BODY_KEYS.attachments]
+  if (!Array.isArray(value)) return []
+  return value.filter((item): item is ContentAttachment => {
+    if (!item || typeof item !== 'object') return false
+    const candidate = item as Partial<ContentAttachment>
+    return (
+      typeof candidate.object_ref === 'string' &&
+      candidate.object_ref.startsWith('minio://') &&
+      typeof candidate.file_name === 'string' &&
+      typeof candidate.size === 'number'
+    )
+  })
 }
 
 /** splitLines 把多行文本拆成数组,去掉空行。 */

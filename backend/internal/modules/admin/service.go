@@ -6,8 +6,8 @@ import (
 	"context"
 	"encoding/csv"
 	"fmt"
-	"log/slog"
 	"io"
+	"log/slog"
 	"strings"
 	"time"
 

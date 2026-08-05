@@ -11,7 +11,6 @@ import type {
   LoginNoRequest,
   LoginSMSRequest,
   SendSMSRequest,
-  RefreshRequest,
   WebSocketTicketResponse,
   PasswordResetRequest,
   ActivateRequest,
@@ -36,6 +35,7 @@ import type {
   MajorRequest,
   Class,
   ClassRequest,
+  ClassStudent,
   ArchiveClassesRequest,
   CreateAccountRequest,
   UpdateAccountRequest,
@@ -93,13 +93,6 @@ export class IdentityApi {
    */
   async sendSMS(data: SendSMSRequest): Promise<void> {
     return this.client.post('/auth/sms/send', data)
-  }
-
-  /**
-   * 刷新 Token
-   */
-  async refreshToken(data: RefreshRequest): Promise<LoginResponse> {
-    return this.client.post('/auth/refresh', data)
   }
 
   /**
@@ -381,6 +374,15 @@ export class IdentityApi {
    */
   async listClasses(params?: { major_id?: string }): Promise<Class[]> {
     return this.client.get('/org/classes', params)
+  }
+
+  /**
+   * 查询班内在校学生名录（只含编号、姓名、学号）。
+   * 教师挑选学生（如给实验小组分配成员）用这一条；账号目录 `/accounts` 是学校管理员能力，
+   * 会带手机号掩码、账号状态与角色，教师端不该经它取人。
+   */
+  async listClassStudents(classId: string): Promise<ClassStudent[]> {
+    return this.client.get(`/org/classes/${classId}/students`)
   }
 
   /**

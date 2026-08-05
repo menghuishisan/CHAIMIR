@@ -14,6 +14,7 @@ import (
 
 	"chaimir/db/migrations"
 	"chaimir/internal/modules/identity"
+	"chaimir/internal/modules/sim"
 	"chaimir/internal/platform/auth"
 	"chaimir/internal/platform/config"
 	"chaimir/internal/platform/db"
@@ -235,6 +236,7 @@ func quoteRolePasswordLiteral(ctx context.Context, db *sql.DB, password string) 
 }
 
 // seed 执行依赖业务规则的初始化动作,不在 cmd 中复制模块业务逻辑。
+// 两件事:①把平台内置仿真包标准库入库(平台交付物,与租户无关);②建首个管理员/学校租户。
 func seed(ctx context.Context, cfg *config.Config) (resultErr error) {
 	database, err := db.New(ctx, cfg.Postgres)
 	if err != nil {
@@ -255,6 +257,9 @@ func seed(ctx context.Context, cfg *config.Config) (resultErr error) {
 	}
 	ids, err := snowflake.NewNode(cfg.Snowflake.NodeID)
 	if err != nil {
+		return err
+	}
+	if err := seedBuiltinSimPackages(ctx, database, ids); err != nil {
 		return err
 	}
 	authManager := auth.NewManager(cfg.Auth)
@@ -281,6 +286,20 @@ func seed(ctx context.Context, cfg *config.Config) (resultErr error) {
 	}
 	_, err = identitySvc.BootstrapSchoolTenant(ctx, cfg.Bootstrap)
 	return err
+}
+
+// seedBuiltinSimPackages 调用 M4 模块入口同步内置仿真包标准库。
+// 内置包的协议声明来自前端 sim-sdk 并由 sim 模块 go:embed 校验入库,cmd 只负责编排,
+// 不在此复制 SQL 或协议解析(工程目录设计 §2.0:部署期命令可装配模块入口,不承载业务逻辑)。
+func seedBuiltinSimPackages(ctx context.Context, database *db.DB, ids snowflake.Generator) error {
+	result, err := sim.SyncBuiltinPackages(ctx, sim.NewStore(database), ids)
+	if err != nil {
+		return err
+	}
+	slog.Info("builtin simulation packages synced",
+		slog.Int("upserted", result.Upserted),
+		slog.Int("archived", len(result.Archived)))
+	return nil
 }
 
 // privilegedUser 返回迁移/授权使用的数据库特权用户。

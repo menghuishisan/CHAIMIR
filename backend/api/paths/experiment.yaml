@@ -95,14 +95,6 @@
     security: [{ bearerAuth: [] }]
     parameters: [{ $ref: "#/components/parameters/IDPath" }]
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
-  delete:
-    tags: [experiment]
-    summary: 回收实验实例
-    operationId: experimentRecycleInstance
-    x-chaimir-audience: user
-    security: [{ bearerAuth: [] }]
-    parameters: [{ $ref: "#/components/parameters/IDPath" }]
-    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
 /api/v1/experiment/instances/{id}/progress:
   get:
     tags: [experiment]

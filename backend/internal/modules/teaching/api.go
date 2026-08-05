@@ -7,7 +7,10 @@ import (
 	"chaimir/internal/contracts"
 	"chaimir/internal/platform/auth"
 	"chaimir/internal/platform/httpx"
+	"chaimir/internal/platform/storage"
+	"chaimir/internal/platform/upload"
 	"chaimir/pkg/apperr"
+	"chaimir/pkg/logging"
 
 	"github.com/gin-gonic/gin"
 )
@@ -23,7 +26,7 @@ func RegisterRoutes(r gin.IRouter, svc *Service, authn *auth.Manager, roles cont
 	if authn == nil {
 		return apperr.ErrHTTPAuthMissing
 	}
-	api := teachingAPI{svc: svc}
+	api := teachingAPI{svc: svc, authn: authn}
 	g := r.Group("/api/v1/teaching")
 	all := g.Group("", authn.Middleware(), auth.RequireTenantAnyRole(roles, contracts.RoleStudent, contracts.RoleTeacher, contracts.RoleSchoolAdmin))
 	teacher := g.Group("", authn.Middleware(), auth.RequireTenantAnyRole(roles, contracts.RoleTeacher, contracts.RoleSchoolAdmin))
@@ -37,16 +40,18 @@ func RegisterRoutes(r gin.IRouter, svc *Service, authn *auth.Manager, roles cont
 }
 
 type teachingAPI struct {
-	svc *Service
+	svc   *Service
+	authn *auth.Manager
 }
 
 // registerSharedRoutes 注册师生都可访问的只读学习接口。
 func (a teachingAPI) registerSharedRoutes(g gin.IRouter) {
 	g.GET("/courses", a.listCourses)
-	g.GET("/courses/:id/chapters", a.listChapters)
-	g.GET("/chapters/:id/lessons", a.listLessons)
+	// 章节与课时的只读取用统一走 outline:它一次返回课程 + 章节 + 课时 + 本人进度,
+	// 单独再开「只取章节」「只取某章课时」两条接口是同一份数据的子集形态,徒增第二套读路径。
 	g.GET("/courses/:id/outline", a.getOutline)
 	g.GET("/lessons/:id", a.getLesson)
+	g.POST("/lessons/:id/material/access", a.issueLessonMaterialAccess)
 	g.GET("/courses/:id/assignments", a.listCourseAssignments)
 	g.GET("/assignments/:id", a.getAssignment)
 	g.GET("/assignments/:id/submissions", a.listSubmissions)
@@ -73,7 +78,7 @@ func (a teachingAPI) registerTeacherRoutes(g gin.IRouter) {
 	g.POST("/chapters/:id/lessons", a.createLesson)
 	g.PATCH("/chapters/:id/lessons/:lid", a.updateLesson)
 	g.DELETE("/chapters/:id/lessons/:lid", a.deleteLesson)
-	g.POST("/lessons/:id/content", a.setLessonContent)
+	g.POST("/lessons/:id/material", a.uploadLessonMaterial)
 	g.GET("/courses/:id/members", a.listMembers)
 	g.POST("/courses/:id/members/batch", a.addMembers)
 	g.DELETE("/courses/:id/members/:sid", a.removeMember)
@@ -212,16 +217,6 @@ func (a teachingAPI) createChapter(c *gin.Context) {
 	httpx.Write(c, out, err)
 }
 
-// listChapters 查询课程章节。
-func (a teachingAPI) listChapters(c *gin.Context) {
-	courseID, ok := httpx.PathID(c, "id")
-	if !ok {
-		return
-	}
-	out, err := a.svc.ListChapters(c.Request.Context(), courseID)
-	httpx.Write(c, out, err)
-}
-
 // updateChapter 绑定章节编辑请求。
 func (a teachingAPI) updateChapter(c *gin.Context) {
 	chapterID, ok := httpx.PathID(c, "cid")
@@ -269,14 +264,58 @@ func (a teachingAPI) getLesson(c *gin.Context) {
 	httpx.Write(c, out, err)
 }
 
-// listLessons 查询章节课时列表。
-func (a teachingAPI) listLessons(c *gin.Context) {
+// uploadLessonMaterial 绑定课时材料 multipart 上传并委托 service 做安全校验和持久化。
+func (a teachingAPI) uploadLessonMaterial(c *gin.Context) {
 	id, ok := httpx.PathID(c, "id")
 	if !ok {
 		return
 	}
-	out, err := a.svc.ListLessonsByChapter(c.Request.Context(), id)
+	file, err := c.FormFile("file")
+	if err != nil || file.Size <= 0 || file.Size > a.svc.materialMaxBytes {
+		httpx.Write(c, nil, apperr.ErrTeachingLessonInvalid)
+		return
+	}
+	opened, err := file.Open()
+	if err != nil {
+		httpx.Write(c, nil, apperr.ErrTeachingLessonInvalid.WithCause(err))
+		return
+	}
+	defer logging.CloseContext(c.Request.Context(), "关闭课时材料上传文件失败", opened)
+	content, result, err := upload.ReadBounded(opened, a.svc.materialMaxBytes)
+	if err != nil || result != upload.SizeOK {
+		if err == nil {
+			err = apperr.ErrTeachingLessonInvalid
+		}
+		httpx.Write(c, nil, apperr.ErrTeachingLessonInvalid.WithCause(err))
+		return
+	}
+	out, err := a.svc.UploadLessonMaterial(c.Request.Context(), id, LessonMaterialUploadRequest{FileName: file.Filename, ContentType: file.Header.Get("Content-Type"), Content: content})
 	httpx.Write(c, out, err)
+}
+
+// issueLessonMaterialAccess 为浏览器播放器或附件取件签发统一文件服务授权。
+// 视频走 mode=stream:播放请求由 <video> 元素自身发起、发不出 Authorization 头,
+// 故在此把当前已验证的会话凭据写成作用域限定在统一文件服务的 HttpOnly Cookie
+// (见 docs/总-API接口总览.md §统一文件服务「鉴权载体」);附件走一次性取件,不需要 Cookie。
+func (a teachingAPI) issueLessonMaterialAccess(c *gin.Context) {
+	id, ok := httpx.PathID(c, "id")
+	if !ok {
+		return
+	}
+	out, err := a.svc.IssueLessonMaterialAccess(c.Request.Context(), id)
+	if err != nil {
+		httpx.Write(c, nil, err)
+		return
+	}
+	if out.Mode == storage.DownloadModeStream {
+		token, ok := auth.VerifiedAccessToken(c)
+		if !ok {
+			httpx.Write(c, nil, apperr.ErrUnauthorized)
+			return
+		}
+		a.authn.SetBrowserAccessCookie(c, storage.DownloadCookiePath, token)
+	}
+	httpx.Write(c, out, nil)
 }
 
 // updateLesson 绑定课时编辑请求。
@@ -290,20 +329,6 @@ func (a teachingAPI) updateLesson(c *gin.Context) {
 		return
 	}
 	out, err := a.svc.UpdateLesson(c.Request.Context(), id, req)
-	httpx.Write(c, out, err)
-}
-
-// setLessonContent 设置课时内容引用。
-func (a teachingAPI) setLessonContent(c *gin.Context) {
-	id, ok := httpx.PathID(c, "id")
-	if !ok {
-		return
-	}
-	var req LessonRequest
-	if !httpx.BindJSONWithError(c, &req, apperr.ErrTeachingLessonInvalid) {
-		return
-	}
-	out, err := a.svc.SetLessonContent(c.Request.Context(), id, req)
 	httpx.Write(c, out, err)
 }
 

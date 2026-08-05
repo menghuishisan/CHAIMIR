@@ -3,7 +3,9 @@ package experiment
 
 import (
 	"context"
+	"encoding/binary"
 	"fmt"
+	"hash/fnv"
 	"log/slog"
 	"strings"
 	"time"
@@ -32,6 +34,9 @@ func (s *Service) CreateInstance(ctx context.Context, experimentID int64, req Cr
 		if err := validateInstanceStart(exp, req.GroupID.Int64()); err != nil {
 			return err
 		}
+		if err := tx.LockInstanceCreation(ctx, instanceCreationLockKey(id.TenantID, experimentID, id.AccountID, req.GroupID.Int64())); err != nil {
+			return err
+		}
 		if req.GroupID > 0 {
 			group, err := tx.GetGroup(ctx, id.TenantID, req.GroupID.Int64())
 			if err != nil {
@@ -44,6 +49,15 @@ func (s *Service) CreateInstance(ctx context.Context, experimentID int64, req Cr
 				return err
 			}
 			existing, err := tx.GetActiveGroupInstance(ctx, id.TenantID, experimentID, req.GroupID.Int64())
+			if err == nil {
+				inst = existing
+				return nil
+			}
+			if !isNoRows(err) {
+				return err
+			}
+		} else {
+			existing, err := tx.GetActiveOwnerInstance(ctx, id.TenantID, experimentID, id.AccountID)
 			if err == nil {
 				inst = existing
 				return nil
@@ -83,6 +97,19 @@ func (s *Service) CreateInstance(ctx context.Context, experimentID int64, req Cr
 		return InstanceDTO{}, err
 	}
 	return instanceDTOFromModel(inst, checkpointDefaults(exp, nil), stageDTOs(exp, inst, nil)), nil
+}
+
+// instanceCreationLockKey 为同一租户、实验和协作主体生成事务级互斥键,避免并发请求同时看不到实例而重复创建资源。
+func instanceCreationLockKey(tenantID, experimentID, ownerID, groupID int64) int64 {
+	h := fnv.New64a()
+	var data [32]byte
+	for i, value := range [...]int64{tenantID, experimentID, ownerID, groupID} {
+		binary.BigEndian.PutUint64(data[i*8:], uint64(value))
+	}
+	if _, err := h.Write(data[:]); err != nil {
+		return 0
+	}
+	return int64(h.Sum64())
 }
 
 // GetInstance 读取实验工作台,包含引擎入口和检查点状态。
@@ -248,40 +275,6 @@ func (s *Service) FinishInstance(ctx context.Context, instanceID int64) (Instanc
 		return InstanceDTO{}, err
 	}
 	return instanceDTOFromModel(inst, nil), s.writeAudit(ctx, id.TenantID, id.AccountID, contracts.RoleNumStudent, "experiment.instance.finish", auditTargetInstance, inst.ID, map[string]any{"score": inst.Score})
-}
-
-// RecycleInstance 手动释放实验实例的引擎资源并保留结果。
-func (s *Service) RecycleInstance(ctx context.Context, instanceID int64) error {
-	id, err := currentIdentity(ctx)
-	if err != nil {
-		return err
-	}
-	var inst ExperimentInstance
-	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
-		inst, err = tx.GetInstance(ctx, id.TenantID, instanceID)
-		if err != nil {
-			return err
-		}
-		if err := ensureInstanceAccess(ctx, tx, id.AccountID, inst); err != nil {
-			return err
-		}
-		if err := validateInstanceTransition(inst.Status, InstanceStatusRecycled); err != nil {
-			return err
-		}
-		return nil
-	}); err != nil {
-		return err
-	}
-	if err := s.recycleEngines(ctx, inst, "manual_recycle"); err != nil {
-		return err
-	}
-	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
-		_, err := tx.SetInstanceStatus(ctx, id.TenantID, instanceID, InstanceStatusRecycled)
-		return err
-	}); err != nil {
-		return err
-	}
-	return s.writeAudit(ctx, id.TenantID, id.AccountID, contracts.RoleNumStudent, "experiment.instance.recycle", auditTargetInstance, inst.ID, nil)
 }
 
 // RunRecycleOnce 执行一次 M7 后台回收扫描,供统一 background runner 调用。

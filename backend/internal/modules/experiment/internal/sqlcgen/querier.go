@@ -21,6 +21,7 @@ type Querier interface {
 	ExperimentStats(ctx context.Context, arg ExperimentStatsParams) (ExperimentStatsRow, error)
 	FinishExperimentInstance(ctx context.Context, arg FinishExperimentInstanceParams) (FinishExperimentInstanceRow, error)
 	GetActiveGroupInstance(ctx context.Context, arg GetActiveGroupInstanceParams) (GetActiveGroupInstanceRow, error)
+	GetActiveOwnerInstance(ctx context.Context, arg GetActiveOwnerInstanceParams) (GetActiveOwnerInstanceRow, error)
 	GetCheckpointResult(ctx context.Context, arg GetCheckpointResultParams) (GetCheckpointResultRow, error)
 	GetCheckpointResultByJudgeTask(ctx context.Context, arg GetCheckpointResultByJudgeTaskParams) (GetCheckpointResultByJudgeTaskRow, error)
 	GetExperiment(ctx context.Context, arg GetExperimentParams) (Experiment, error)
@@ -40,8 +41,12 @@ type Querier interface {
 	ListGroupMembers(ctx context.Context, arg ListGroupMembersParams) ([]GroupMember, error)
 	// 按实验一次取回全部分组成员,避免教师编组页逐组调用形成 N+1。
 	ListGroupMembersByExperiment(ctx context.Context, arg ListGroupMembersByExperimentParams) ([]GroupMember, error)
+	// 列出某课程下仍占用引擎资源的实验实例,供课程结束时级联回收(M7 需求 D3)。
+	// 只取 creating/running/paused/released 四态:已完成、已回收与错误态不再持有沙箱或仿真会话。
+	ListLiveInstancesByCourse(ctx context.Context, arg ListLiveInstancesByCourseParams) ([]ListLiveInstancesByCourseRow, error)
 	// 按学生视角批量解析其在给定实验集合中所属的小组,供学生实验列表/详情一次性填充 my_group_id。
 	ListStudentGroupsForExperiments(ctx context.Context, arg ListStudentGroupsForExperimentsParams) ([]ListStudentGroupsForExperimentsRow, error)
+	LockInstanceCreation(ctx context.Context, lockKey int64) error
 	MarkExperimentScoreOutboxFailed(ctx context.Context, arg MarkExperimentScoreOutboxFailedParams) (ExperimentScoreOutbox, error)
 	MarkExperimentScoreOutboxPublished(ctx context.Context, arg MarkExperimentScoreOutboxPublishedParams) (ExperimentScoreOutbox, error)
 	SetExperimentStatus(ctx context.Context, arg SetExperimentStatusParams) (Experiment, error)

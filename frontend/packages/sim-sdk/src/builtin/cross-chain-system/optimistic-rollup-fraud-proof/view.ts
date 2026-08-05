@@ -25,7 +25,14 @@ export function renderOptimisticRollupView(state: OptimisticRollupState): Teachi
       secondary: ['op-rollup-chain'],
       muted: state.fraudProven ? [state.batchId] : [],
     },
-    layout: { primary, evidence: ['op-rollup-chain'], timeline: 'op-rollup-pipeline' },
+    // 三个视图各有职责:争议树是执行追踪(争议阶段升为主舞台),流程恒为时间线,L1 链状态为证据。
+    // 每个 pattern 都必须在 layout 里声明职责 —— 未声明的视图会被运行时协议校验拒绝(装配即失败)。
+    layout: {
+      primary,
+      evidence: ['op-rollup-chain'],
+      timeline: 'op-rollup-pipeline',
+      trace: 'op-rollup-dispute',
+    },
     patterns: [
       pipelinePattern('op-rollup-pipeline', 'L2 batch -> L1 challenge -> fraud proof 流程', steps(state), optimisticRollupPhases[state.phaseIndex].id),
       treePattern('op-rollup-dispute', '交互式二分争议执行 trace', disputeTree(state), ['trace-root', 'right-half', 'l2tx-2']),

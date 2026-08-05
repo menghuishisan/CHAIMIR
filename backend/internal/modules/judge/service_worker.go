@@ -27,11 +27,12 @@ import (
 
 // JudgeExecutionResult 是一次 worker 执行后可落库的脱敏结果。
 type JudgeExecutionResult struct {
-	Passed          bool                `json:"passed"`
-	Score           int32               `json:"score"`
-	MaxScore        int32               `json:"max_score"`
-	Details         []JudgeResultDetail `json:"details"`
-	JudgeSandboxRef string              `json:"judge_sandbox_ref,omitempty"`
+	Passed          bool                       `json:"passed"`
+	Score           int32                      `json:"score"`
+	MaxScore        int32                      `json:"max_score"`
+	Details         []JudgeResultDetail        `json:"details"`
+	Replay          contracts.JudgeReplayTrace `json:"replay,omitempty"`
+	JudgeSandboxRef string                     `json:"judge_sandbox_ref,omitempty"`
 }
 
 // RunWorkerOnce 领取一批排队任务并发布此前积压的终态事件。
@@ -369,6 +370,7 @@ func (s *Service) completeTask(ctx context.Context, task JudgeTask, result Judge
 			Score:           result.Score,
 			MaxScore:        result.MaxScore,
 			Details:         result.Details,
+			Replay:          result.Replay,
 			JudgeSandboxRef: result.JudgeSandboxRef,
 			IsRejudge:       task.InputSnapshot.Rejudge,
 		})
@@ -640,7 +642,7 @@ func decodeCommandResult(stdout []byte, maxBytes int) (JudgeExecutionResult, err
 	return out, nil
 }
 
-// normalizeExecutionResult 校验分数边界和脱敏详情。
+// normalizeExecutionResult 校验分数边界,并限制脱敏详情与回放轨迹的持久化大小。
 func normalizeExecutionResult(result JudgeExecutionResult, snapshotMax int32, maxDetailsBytes int) (JudgeExecutionResult, error) {
 	if result.MaxScore <= 0 {
 		result.MaxScore = snapshotMax
@@ -656,6 +658,13 @@ func normalizeExecutionResult(result JudgeExecutionResult, snapshotMax int32, ma
 		return JudgeExecutionResult{}, apperr.ErrJudgeWorkerFailed.WithCause(err)
 	}
 	if size > maxDetailsBytes {
+		return JudgeExecutionResult{}, apperr.ErrJudgeWorkerFailed
+	}
+	replaySize, err := jsonx.AnyBytes(result.Replay, apperr.ErrJudgeWorkerFailed)
+	if err != nil {
+		return JudgeExecutionResult{}, err
+	}
+	if len(replaySize) > maxDetailsBytes {
 		return JudgeExecutionResult{}, apperr.ErrJudgeWorkerFailed
 	}
 	return result, nil
