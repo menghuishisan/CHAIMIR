@@ -16,42 +16,44 @@ import (
 )
 
 var (
-	simCodePattern        = regexp.MustCompile(`^[a-z][a-z0-9_]{1,31}__[a-z0-9][a-z0-9-]{1,62}[a-z0-9]$`)
-	semverPattern         = regexp.MustCompile(`^[0-9]+\.[0-9]+\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?$`)
-	categoryPattern       = regexp.MustCompile(`^[a-z][a-z0-9_-]{1,31}$`)
-	eventTypePattern      = regexp.MustCompile(`^[a-z][a-z0-9_.:-]{0,63}$`)
-	checkpointIDPattern   = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.:-]{0,95}$`)
-	payloadKeyPattern     = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_.:-]{0,63}$`)
-	immutableReportKeys   = map[string]struct{}{"static_scan": {}, "bundle_hash": {}, "metadata_validation": {}}
-	dynamicReportKeyAllow = map[string]struct{}{"determinism_check": {}, "worker_preview": {}, "details": {}}
+	simCodePattern      = regexp.MustCompile(`^[a-z][a-z0-9_]{1,31}__[a-z0-9][a-z0-9-]{1,62}[a-z0-9]$`)
+	semverPattern       = regexp.MustCompile(`^[0-9]+\.[0-9]+\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?$`)
+	categoryPattern     = regexp.MustCompile(`^[a-z][a-z0-9_-]{1,31}$`)
+	eventTypePattern    = regexp.MustCompile(`^[a-z][a-z0-9_.:-]{0,63}$`)
+	checkpointIDPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.:-]{0,95}$`)
+	payloadKeyPattern   = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_.:-]{0,63}$`)
 )
 
+// M4 协议与入库边界的规模上限统一放在这里:它们是协议常量(前后端同值、与数据库约束同源),
+// 不是部署可调阈值,故不进 config;分散到各校验文件会让"同一类上限在哪"变成翻文件游戏。
 const (
 	maxActionPayloadBytes = 16384
 	maxPublicStringLength = 512
+	// maxValidationMessageLength 限定审核报告里展示给包作者的单条原因长度。
+	// 原因文本来自隔离容器的输出,长度不可信,必须在入库前截断。
+	maxValidationMessageLength = 500
+	// maxFramePatterns 是单帧允许的封闭模式数量上限,与前端 assertValidTeachingFrame 同值。
+	maxFramePatterns = 3
+	// maxPreviewFrames 是隔离预览可写入报告的样例帧数量上限,兜住报告体积。
+	maxPreviewFrames = 32
+	// maxDescriptorInteractions 限定页面一次渲出的操作数量上限。
+	maxDescriptorInteractions = 64
+	// maxDescriptorNarrative 限定教学步骤数量上限。
+	maxDescriptorNarrative = 64
+	// maxDescriptorCheckpoints 限定检查点数量上限。
+	maxDescriptorCheckpoints = 64
 )
 
-// computeFromString 将接口字符串转换为数据库枚举。
-func computeFromString(value string) (int16, error) {
-	switch strings.ToLower(strings.TrimSpace(value)) {
-	case "", "frontend":
-		return ComputeFrontend, nil
-	case "backend":
-		return ComputeBackend, nil
-	default:
-		return 0, apperr.ErrSimPackageInvalid
-	}
-}
-
 // computeText 返回 API 对外稳定字符串。
+// 只在响应里出现:执行位置由服务端按 author_type 派生,客户端不提交该字段,故没有反向解析。
 func computeText(value int16) (string, error) {
 	switch value {
-	case ComputeFrontend:
-		return "frontend", nil
-	case ComputeBackend:
-		return "backend", nil
+	case ComputeBrowser:
+		return "browser", nil
+	case ComputeIsolated:
+		return "isolated", nil
 	default:
-		return "", apperr.ErrSimPackageDataCorrupt.WithCause(fmt.Errorf("仿真包计算模式异常: compute=%d", value))
+		return "", apperr.ErrSimPackageDataCorrupt.WithCause(fmt.Errorf("仿真包执行位置异常: compute=%d", value))
 	}
 }
 
@@ -120,43 +122,27 @@ func reviewResultFromQuery(value string) (int16, error) {
 }
 
 // normalizePackageRequest 修剪字段并给空 JSON 字段补默认对象。
-func normalizePackageRequest(req SubmitPackageRequest) (SubmitPackageRequest, int16, error) {
+func normalizePackageRequest(req SubmitPackageRequest) SubmitPackageRequest {
 	req.Code = strings.TrimSpace(req.Code)
 	req.Version = strings.TrimSpace(req.Version)
 	req.Name = strings.TrimSpace(req.Name)
 	req.Category = strings.TrimSpace(req.Category)
-	req.BackendAdapter = strings.TrimSpace(req.BackendAdapter)
-	compute, err := computeFromString(req.Compute)
-	if err != nil {
-		return req, 0, err
-	}
 	if len(req.ScaleLimit) == 0 {
 		req.ScaleLimit = []byte(`{}`)
 	}
-	if len(req.BackendConfig) == 0 {
-		req.BackendConfig = []byte(`{}`)
-	}
-	return req, compute, nil
+	return req
 }
 
 // validatePackageRequest 校验仿真包元数据和命名空间边界。
-func validatePackageRequest(req SubmitPackageRequest, compute int16, authorID int64) error {
+// 执行位置与运行能力不在此校验:它们由服务端按登录账号派生,请求结构里不存在这两个字段。
+func validatePackageRequest(req SubmitPackageRequest, authorID int64) error {
 	if !simCodePattern.MatchString(req.Code) || !semverPattern.MatchString(req.Version) || strings.TrimSpace(req.Name) == "" || !categoryPattern.MatchString(req.Category) {
 		return apperr.ErrSimPackageInvalid
 	}
 	if len(req.Name) > 128 || len(req.Code) > 96 || len(req.Version) > 32 {
 		return apperr.ErrSimPackageInvalid
 	}
-	if !jsonObject(req.ScaleLimit) || !jsonObject(req.BackendConfig) {
-		return apperr.ErrSimPackageInvalid
-	}
-	if compute == ComputeBackend && strings.TrimSpace(req.BackendAdapter) == "" {
-		return apperr.ErrSimPackageInvalid
-	}
-	if compute == ComputeFrontend && strings.TrimSpace(req.BackendAdapter) != "" {
-		return apperr.ErrSimPackageInvalid
-	}
-	if compute == ComputeFrontend && !jsonObjectEmpty(req.BackendConfig) {
+	if !jsonObject(req.ScaleLimit) {
 		return apperr.ErrSimPackageInvalid
 	}
 	if authorID <= 0 || !strings.HasPrefix(req.Code, "teacher_"+strconv.FormatInt(authorID, 10)+"__") {
@@ -176,15 +162,24 @@ func validateCreateSession(req CreateSessionRequest, tenantID int64) error {
 	return nil
 }
 
-// validateAction 校验操作序列内容。
+// validateAction 校验客户端上报的操作序列内容。
 func validateAction(req ReportActionRequest) error {
-	if req.Seq <= 0 || req.AtTick < 0 || !eventTypePattern.MatchString(strings.TrimSpace(req.EventType)) {
+	if req.Seq <= 0 || req.AtTick < 0 {
 		return apperr.ErrSimActionSeqInvalid
 	}
-	if req.Payload == nil {
+	return validateActionContent(req.EventType, req.Payload)
+}
+
+// validateActionContent 校验一次操作的事件名与 payload 体积。
+// 隔离执行连接单独用它:那里的序号由仓储在事务内续号,连接侧没有也不该编一个序号出来。
+func validateActionContent(eventType string, payload map[string]any) error {
+	if !eventTypePattern.MatchString(strings.TrimSpace(eventType)) {
+		return apperr.ErrSimActionSeqInvalid
+	}
+	if payload == nil {
 		return nil
 	}
-	raw, err := jsonx.AnyBytes(req.Payload, apperr.ErrSimActionSeqInvalid)
+	raw, err := jsonx.AnyBytes(payload, apperr.ErrSimActionSeqInvalid)
 	if err != nil || len(raw) > maxActionPayloadBytes {
 		return apperr.ErrSimActionSeqInvalid
 	}
@@ -195,51 +190,6 @@ func validateAction(req ReportActionRequest) error {
 func validateCheckpoint(sessionID int64, checkpointID string, answer []byte) error {
 	if sessionID <= 0 || !checkpointIDPattern.MatchString(strings.TrimSpace(checkpointID)) || len(answer) == 0 || !jsonx.Valid(answer) {
 		return apperr.ErrSimCheckpointInvalid
-	}
-	return nil
-}
-
-// validateDynamicReport 确保 validation-report 不能覆盖后端生成的静态安全字段。
-func validateDynamicReport(raw map[string]any) error {
-	for key := range raw {
-		if _, blocked := immutableReportKeys[key]; blocked {
-			return apperr.ErrSimPackageValidationFailed
-		}
-		if _, ok := dynamicReportKeyAllow[key]; !ok {
-			return apperr.ErrSimPackageValidationFailed
-		}
-	}
-	return nil
-}
-
-// validateValidationReportRequest 强制受控预览报告只能写入标准结构和值域。
-func validateValidationReportRequest(req ValidationReportRequest) error {
-	if err := validateValidationStatus(req.DeterminismCheck); err != nil {
-		return err
-	}
-	if err := validateValidationStatus(req.WorkerPreview); err != nil {
-		return err
-	}
-	if len(req.Details) > 32 {
-		return apperr.ErrSimPackageValidationFailed
-	}
-	for key, value := range req.Details {
-		if !payloadKeyPattern.MatchString(strings.TrimSpace(key)) || strings.TrimSpace(value) == "" || len(value) > 500 {
-			return apperr.ErrSimPackageValidationFailed
-		}
-	}
-	return nil
-}
-
-// validateValidationStatus 限定动态审核子项枚举和用户可见摘要长度。
-func validateValidationStatus(status ValidationStatus) error {
-	switch strings.TrimSpace(status.Status) {
-	case validationPassed, validationFailed:
-	default:
-		return apperr.ErrSimPackageValidationFailed
-	}
-	if len(strings.TrimSpace(status.Message)) > 500 {
-		return apperr.ErrSimPackageValidationFailed
 	}
 	return nil
 }
@@ -264,13 +214,13 @@ func actionEqual(existing Action, req ReportActionRequest) (bool, error) {
 }
 
 // validateActionAgainstSchema 按包内交互白名单校验用户操作,拒绝未声明事件和多余字段。
-func validateActionAgainstSchema(schema InteractionSchema, req ReportActionRequest) error {
+func validateActionAgainstSchema(schema InteractionSchema, eventType string, rawPayload map[string]any) error {
 	schema = normalizeInteractionSchema(schema)
-	event, ok := schema.Events[strings.TrimSpace(req.EventType)]
+	event, ok := schema.Events[strings.TrimSpace(eventType)]
 	if !ok {
 		return apperr.ErrSimActionSeqInvalid
 	}
-	payload := req.Payload
+	payload := rawPayload
 	if payload == nil {
 		payload = map[string]any{}
 	}

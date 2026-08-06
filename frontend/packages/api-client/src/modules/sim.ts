@@ -8,12 +8,10 @@ import type {
   SimPackageMeta,
   SimPackagePreview,
   SimPackageReview,
-  SimBundleDownloadGrant,
   SimPackageSubmissionResult,
   SimReviewDecision,
   SimActionLog,
   SimPackageSubmit,
-  SimBackendCapabilities,
   SimReplay,
   SimShareCreate,
   SimShareResult,
@@ -21,6 +19,9 @@ import type {
 
 /**
  * SimApi 封装后端 M4 仿真包、审核、回放、分享和实时流接口。
+ *
+ * 没有 bundle 下载授权方法:内置包由 sim-sdk 在浏览器 Worker 内按 code 装配,
+ * 扩展包的归档只经受控 k8s exec 投入隔离容器,从不下发浏览器。
  */
 export class SimApi {
   /**
@@ -29,13 +30,6 @@ export class SimApi {
   constructor(private client: ApiClient) {}
 
   // ===== 仿真包管理 =====
-
-  /**
-   * 获取当前部署真实装配的后端计算能力。
-   */
-  async getBackendCapabilities(): Promise<SimBackendCapabilities> {
-    return this.client.get('/sim/backend-capabilities')
-  }
 
   /**
    * 获取仿真包列表。
@@ -79,13 +73,6 @@ export class SimApi {
     onProgress?: (progress: number) => void
   ): Promise<SimPackageSubmissionResult> {
     return this.client.patchFormData(`/sim/packages/${packageId}`, packageFormData(data), onProgress)
-  }
-
-  /**
-   * 获取仿真包 bundle 短时下载授权
-   */
-  async getBundleGrant(code: string, version: string): Promise<SimBundleDownloadGrant> {
-    return this.client.get(`/sim/packages/${code}/${version}/bundle`)
   }
 
   /**
@@ -167,7 +154,8 @@ export class SimApi {
   }
 
   /**
-   * 获取后端计算仿真的 WebSocket URL。
+   * 获取隔离执行仿真的 WebSocket URL。
+   * 扩展包与重计算仿真经这条流运行:容器算出完整教学帧,浏览器只渲染。
    */
   getStreamWsUrl(sessionId: string): string {
     return this.client.wsURL(`/sim/sessions/${sessionId}/stream`)
@@ -176,6 +164,7 @@ export class SimApi {
 
 /**
  * 构造后端 M4 multipart 上传所需字段。
+ * 不含 compute 与运行能力:服务端按作者类型派生,多传会被 multipart 字段白名单拒绝。
  */
 function packageFormData(data: SimPackageSubmit): FormData {
   const formData = new FormData()
@@ -184,11 +173,6 @@ function packageFormData(data: SimPackageSubmit): FormData {
   formData.append('version', data.version)
   formData.append('name', data.name)
   formData.append('category', data.category)
-  formData.append('compute', data.compute)
   formData.append('scale_limit', JSON.stringify(data.scale_limit ?? {}))
-  formData.append('backend_config', JSON.stringify(data.backend_config ?? {}))
-  if (data.backend_adapter) {
-    formData.append('backend_adapter', data.backend_adapter)
-  }
   return formData
 }

@@ -1,39 +1,25 @@
 // 仿真工作台(学生沉浸态,/student/simulations/:packageCode/workspace)。
 //
-// 场景在隔离 Worker 里确定性运行:同一个 seed 与同一串操作必然得到同一过程 ——
-// 这是仿真能当教学材料用的前提,也是回放能成立的原因。主线程只收纯数据快照,不执行场景代码。
+// 场景确定性运行:同一个 seed 与同一串操作必然得到同一过程 —— 这是仿真能当教学材料用的前提,
+// 也是回放能成立的原因。页面只收纯数据快照,从不执行场景代码。
+//
+// 两个执行位置(见 docs/04-仿真可视化引擎/02-架构设计.md §8):
+//   平台内置场景:在浏览器隔离 Worker 内跑,零延迟、可离线;支持无会话的自由推演。
+//   本校自建场景:在服务端隔离容器内跑,浏览器只渲染容器回传的教学帧。容器按会话创建,
+//     而会话由 M7 实验编排产生,故它必须带 session 进来 —— 没有会话就没有容器可连。
 //
 // 两种模式:
-//   自由推演(默认):学生自己从仿真实验室进来,没有会话。会话由 M7 实验编排产生
-//     (POST /sim/sessions 在 internal 组,对齐清单 §6.6),所以此时不上报动作、不分享。
-//   带会话推演:地址上带 session 时把每一次「用户操作」按连续序号上报服务端,
-//     据此可以出分享码、也可以读回服务端记录。自动推进的 tick 不上报(它由 seed 决定,可复算)。
-//
-// 运行边界与公开回放一致:只运行平台内置场景。扩展场景的运行包契约未定,
-// 不做降级渲染,直接说明清楚。
+//   自由推演(默认):学生自己从仿真实验室进来,没有会话。此时不上报动作、不分享。
+//   带会话推演:内置场景把每一次「用户操作」按连续序号上报服务端;自建场景由服务端在执行时
+//     自行登记(前端不重复上报)。自动推进的 tick 两边都不入记录 —— 它由 seed 决定,可复算。
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useParams, useSearchParams } from 'react-router-dom'
-import {
-  Dices,
-  Link2,
-  LoaderCircle,
-  Lock,
-  Share2,
-  TriangleAlert,
-} from 'lucide-react'
+import { Dices, LoaderCircle, Lock, Share2, TriangleAlert } from 'lucide-react'
 import {
   Badge,
   Button,
   ChainProgress,
-  CodeTracePanel,
-  Modal,
-  ModalBody,
-  ModalContent,
-  ModalDescription,
-  ModalFooter,
-  ModalHeader,
-  ModalTitle,
   TeachingFrameAside,
   TeachingFrameBrief,
   TeachingFrameStage,
@@ -47,7 +33,6 @@ import { SimWorkerClient, isBuiltinSimulationCode } from '@chaimir/sim-sdk'
 import type {
   InteractionDescriptor,
   JsonObject,
-  JsonValue,
   RuntimeSnapshot,
   SimInitParams,
   SimPackageDescriptor,
@@ -61,20 +46,15 @@ import { useImmersive } from '../../../../layouts/immersive/context'
 import { moveCommand, replayMoves } from '../../replayMoves'
 import { narrativeProgress, useSimPlayback } from '../../playback'
 import { SimPlaybackControls } from '../../SimPlaybackControls'
-import { userFacingErrorMessage } from '../../../../utils/userFacingError'
+import { SimShareModal } from '../../SimShareModal'
+import { CheckpointPanel, CodeTraceSection, InteractionPanel } from '../../WorkbenchPanels'
+import { useIsolatedSimStream, type IsolatedSnapshot } from '../../isolatedStream'
 
 /** 默认随机种子:固定值保证「同一个场景每次进来都一样」,换条件是显式动作。 */
 const DEFAULT_SEED = 1
 
-/** 交互标签的用户向说明:扰动与攻击类操作会破坏系统,提前说清。 */
-const TAG_LABELS: Record<'normal' | 'perturb' | 'attack', string> = {
-  normal: '常规操作',
-  perturb: '扰动',
-  attack: '攻击',
-}
-
 /**
- * StudentSimWorkspacePage 判定可运行边界,自身不接触仿真运行时。
+ * StudentSimWorkspacePage 按场景来源选择执行位置,自身不接触仿真运行时。
  */
 export default function StudentSimWorkspacePage() {
   const { packageCode = '' } = useParams<{ packageCode: string }>()
@@ -84,13 +64,18 @@ export default function StudentSimWorkspacePage() {
   const version = searchParams.get('version') ?? ''
   const sessionId = searchParams.get('session') ?? undefined
 
-  // 运行边界:只运行平台内置场景。扩展场景的运行包要按学校资产授权取回,契约未定,不降级
-  if (!isBuiltinSimulationCode(packageCode)) {
+  if (isBuiltinSimulationCode(packageCode)) {
+    return <SimSession packageCode={packageCode} version={version} sessionId={sessionId} />
+  }
+
+  // 自建场景在服务端容器里运行,一个会话一个容器,而会话只能由课程实验编排产生。
+  // 没有会话时不给降级渲染,也不假装能跑:直接说清从哪里进来。
+  if (!sessionId) {
     return (
       <AppStatusScreen
         icon={Lock}
-        title="这个场景还不能在浏览器里推演"
-        description="它是本校自建的仿真场景,运行包的取用方式还没有开放。请联系老师在课堂环境中演示。"
+        title="这个场景要从课程里进入"
+        description="它是本校自建的仿真场景,运行在学校的服务器上,需要由课程实验为你准备好推演环境。请在课程的实验任务里打开它。"
         fullScreen={false}
         actions={
           <Button variant="on-dark" onClick={exit}>
@@ -101,7 +86,7 @@ export default function StudentSimWorkspacePage() {
     )
   }
 
-  return <SimSession packageCode={packageCode} version={version} sessionId={sessionId} />
+  return <IsolatedRuntime version={version} sessionId={sessionId} />
 }
 
 interface SimSessionProps {
@@ -434,14 +419,11 @@ function SimRuntime({ packageCode, version, sessionId, restore }: SimRuntimeProp
               selectedElementId={snapshot.state.selectedElementId}
               onInteract={interact}
             />
-            <CheckpointPanel descriptor={descriptor} snapshot={snapshot} />
-            {/* 执行追踪:把当前状态对应到教学代码行,建立「看到的现象 ↔ 代码逻辑」的因果锚点 */}
-            {descriptor.codeTrace ? (
-              <section className="border-b border-dark-line p-4 last:border-b-0">
-                <h2 className="mb-2 text-sm font-medium text-on-dark">执行追踪</h2>
-                <CodeTracePanel codeTrace={descriptor.codeTrace} trace={snapshot.state._trace} />
-              </section>
-            ) : null}
+            <CheckpointPanel
+              checkpoints={descriptor.checkpoints}
+              results={snapshot.checkpointResults}
+            />
+            <CodeTraceSection codeTrace={descriptor.codeTrace} trace={snapshot.state._trace} />
             {frameHasAside(frame) ? (
               <TeachingFrameAside
                 frame={frame}
@@ -504,297 +486,229 @@ function SimRuntime({ packageCode, version, sessionId, restore }: SimRuntimeProp
       />
 
       {shareOpen && sessionId ? (
-        <ShareModal sessionId={sessionId} onClose={() => setShareOpen(false)} />
+        <SimShareModal sessionId={sessionId} onClose={() => setShareOpen(false)} />
       ) : null}
     </>
   )
 }
 
-interface InteractionPanelProps {
-  interactions: InteractionDescriptor[]
-  availability: Record<string, boolean>
-  selectedElementId?: string
-  onInteract: (interaction: InteractionDescriptor, payload: JsonObject, target?: string) => void
+interface IsolatedRuntimeProps {
+  version: string
+  sessionId: string
 }
 
 /**
- * InteractionPanel 渲染场景声明的可用操作。
- * 能不能点由 Worker 算出的 interactionAvailability 决定 —— 场景自己知道当前状态允许什么,
- * 页面不复制一份判断逻辑。选元素类操作在舞台上直接点,不在这里重复出现按钮。
+ * IsolatedRuntime 渲染在服务端隔离容器内运行的本校自建场景。
+ *
+ * 与本机推演只有三处不同:过程由服务端持有(刷新后由服务端按已登记操作重放回来)、
+ * 操作由服务端在执行成功后自行登记(前端不重复上报)、随机条件由会话决定(这里不能换)。
+ * 舞台、面板与播放控制完全共用 —— 页面不为「跑在哪」写第二套渲染。
  */
-function InteractionPanel({
-  interactions,
-  availability,
-  selectedElementId,
-  onInteract,
-}: InteractionPanelProps) {
-  const actionable = interactions.filter((item) => item.kind !== 'select-element')
-  if (actionable.length === 0) return null
+function IsolatedRuntime({ version, sessionId }: IsolatedRuntimeProps) {
+  const { title, exit } = useImmersive()
+  const reducedMotion = useReducedMotion()
+  const [shareOpen, setShareOpen] = useState(false)
+
+  const stream = useIsolatedSimStream(sessionId)
+  const { descriptor, snapshot } = stream
+
+  // 减弱动效偏好下不自动推进(规范 §7.3),单步仍然可用
+  const playback = useSimPlayback({
+    advance: stream.step,
+    canAdvance: stream.status === 'open' && !stream.error,
+    cue: snapshot,
+    autoPlay: !reducedMotion,
+  })
+
+  /** interact 注入一次用户操作:服务端在容器内执行并登记,前端不再另发上报请求。 */
+  const interact = useCallback(
+    (interaction: InteractionDescriptor, payload: JsonObject, target?: string) => {
+      playback.stop()
+      stream.inject(interaction.emits, payload, target)
+    },
+    [playback, stream],
+  )
+
+  /** selectElement 选中舞台上的一个元素:它同样是一次受控操作,走同一条通道。 */
+  const selectElement = useCallback(
+    (elementId: string) => {
+      const interaction = descriptor?.interactions.find((item) => item.kind === 'select-element')
+      if (!interaction) return
+      interact(interaction, {}, elementId)
+    },
+    [descriptor, interact],
+  )
+
+  /** stepOnce 手动走一步:接管节奏,停下自动推进。 */
+  const stepOnce = useCallback(() => {
+    playback.stop()
+    stream.step()
+  }, [playback, stream])
+
+  /** stepBack 回退一步:服务端丢掉最近一条事件后从初始状态重算,不是就地反算。 */
+  const stepBack = useCallback(() => {
+    playback.stop()
+    stream.back()
+  }, [playback, stream])
+
+  /** restart 回到初始状态:同回退,过程由服务端重算。 */
+  const restart = useCallback(() => {
+    playback.stop()
+    stream.restart()
+  }, [playback, stream])
+
+  // 连接建立不起来时没有可看的画面,给出说明与两个出口
+  if (stream.error && !snapshot) {
+    return (
+      <AppStatusScreen
+        icon={TriangleAlert}
+        title="没能连上服务器上的推演环境"
+        description={stream.error}
+        fullScreen={false}
+        actions={
+          <>
+            <Button variant="on-dark" onClick={stream.reconnect}>
+              重试
+            </Button>
+            <Button variant="on-dark" onClick={exit}>
+              返回仿真实验室
+            </Button>
+          </>
+        }
+      />
+    )
+  }
+
+  if (!descriptor || !snapshot) {
+    return (
+      <AppStatusScreen
+        icon={LoaderCircle}
+        spinning
+        title="正在准备服务器上的推演环境"
+        description="学校自建场景在服务器的隔离环境里运行,首次进入需要等待环境就绪。"
+        fullScreen={false}
+      />
+    )
+  }
+
+  const frame = snapshot.view
+  const narrativeDone = narrativeProgress(descriptor, snapshot)
 
   return (
-    <section className="flex flex-col gap-2 border-b border-dark-line p-4">
-      <h2 className="text-sm font-medium text-on-dark">可用操作</h2>
-      <ul className="flex flex-col gap-2">
-        {actionable.map((interaction) => (
-          <li key={interaction.id}>
-            <InteractionItem
-              interaction={interaction}
-              enabled={availability[interaction.id] !== false}
-              selectedElementId={selectedElementId}
-              onInteract={onInteract}
+    <>
+      <WorkbenchShell
+        topbar={
+          <WorkbenchTopbar
+            onExit={exit}
+            exitLabel="退出推演"
+            title={title}
+            subtitle={version ? `${descriptor.meta.name} · ${version}` : descriptor.meta.name}
+            progress={
+              <ChainProgress
+                onDark
+                size="sm"
+                label="教学步骤"
+                total={descriptor.narrative.length}
+                done={narrativeDone}
+              />
+            }
+            cta={
+              <Button variant="seal" size="sm" leftIcon={Share2} onClick={() => setShareOpen(true)}>
+                分享这次推演
+              </Button>
+            }
+          />
+        }
+        left={<TeachingFrameBrief frame={frame} />}
+        leftLabel="场景说明"
+        stage={
+          <TeachingFrameStage
+            frame={frame}
+            selectedElementId={snapshot.state.selectedElementId}
+            onSelectElement={selectElement}
+          />
+        }
+        right={
+          <div className="flex flex-col">
+            <InteractionPanel
+              interactions={descriptor.interactions}
+              availability={snapshot.interactionAvailability}
+              selectedElementId={snapshot.state.selectedElementId}
+              onInteract={interact}
             />
-          </li>
-        ))}
-      </ul>
-    </section>
+            <CheckpointPanel
+              checkpoints={descriptor.checkpoints}
+              results={snapshot.checkpointResults}
+            />
+            <CodeTraceSection codeTrace={descriptor.codeTrace} trace={snapshot.state._trace} />
+            {frameHasAside(frame) ? (
+              <TeachingFrameAside
+                frame={frame}
+                selectedElementId={snapshot.state.selectedElementId}
+                onSelectElement={selectElement}
+              />
+            ) : null}
+          </div>
+        }
+        rightLabel="操作与结论"
+        footer={<IsolatedFooter stream={stream} playback={playback} snapshot={snapshot} onStep={stepOnce} onStepBack={stepBack} onRestart={restart} />}
+      />
+
+      {shareOpen ? (
+        <SimShareModal sessionId={sessionId} onClose={() => setShareOpen(false)} />
+      ) : null}
+    </>
   )
 }
 
-interface InteractionItemProps {
-  interaction: InteractionDescriptor
-  enabled: boolean
-  selectedElementId?: string
-  onInteract: (interaction: InteractionDescriptor, payload: JsonObject, target?: string) => void
+interface IsolatedFooterProps {
+  stream: ReturnType<typeof useIsolatedSimStream>
+  playback: ReturnType<typeof useSimPlayback>
+  snapshot: IsolatedSnapshot
+  onStep: () => void
+  onStepBack: () => void
+  onRestart: () => void
 }
 
 /**
- * InteractionItem 渲染一个操作及其参数。
- * 参数按场景声明的字段类型渲染显式控件,默认值取声明里的 default ——
- * 这些字段是场景作者定义的教学变量,不是自由输入。
+ * IsolatedFooter 渲染服务端推演的状态条与播放控制。
+ * 状态条不写「已记录 N 步」:操作由服务端在执行成功后登记,前端不持有那个计数,
+ * 也就不该猜一个数字给学生看。
  */
-function InteractionItem({
-  interaction,
-  enabled,
-  selectedElementId,
-  onInteract,
-}: InteractionItemProps) {
-  const fields = interaction.params ?? []
-  const [values, setValues] = useState<JsonObject>(() =>
-    Object.fromEntries(fields.map((field) => [field.name, field.default])),
-  )
-
-  const needsElement = interaction.target === 'element'
-  const blocked = !enabled || (needsElement && !selectedElementId)
-
+function IsolatedFooter({
+  stream,
+  playback,
+  snapshot,
+  onStep,
+  onStepBack,
+  onRestart,
+}: IsolatedFooterProps) {
+  const disabled = stream.status !== 'open' || Boolean(stream.error)
   return (
-    <div className="flex flex-col gap-2 rounded-md border border-dark-line bg-dark-surface p-2">
-      <div className="flex items-start justify-between gap-2">
-        <span className="min-w-0 text-sm text-on-dark">{interaction.label}</span>
-        {interaction.labelTag && interaction.labelTag !== 'normal' ? (
-          <Badge tone={interaction.labelTag === 'attack' ? 'cinnabar' : 'warning'}>
-            {TAG_LABELS[interaction.labelTag]}
+    <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 px-4 py-2">
+      <div className="flex min-w-0 flex-col">
+        <span className="flex flex-wrap items-center gap-2 font-mono text-xs tabular-nums text-on-dark-sub">
+          <span>推演时刻 {snapshot.tick}</span>
+          <Badge tone={stream.status === 'open' ? 'jade' : 'warning'}>
+            {stream.status === 'open' ? '服务端推演中' : '连接已断开'}
           </Badge>
+        </span>
+        {stream.error ? (
+          <span className="mt-0.5 text-xs text-on-dark-danger">{stream.error}</span>
         ) : null}
       </div>
-      {interaction.description ? (
-        <p className="text-xs text-on-dark-sub">{interaction.description}</p>
-      ) : null}
-
-      {fields.map((field) => (
-        <label key={field.name} className="flex flex-col gap-1">
-          <span className="text-xs text-on-dark-sub">{field.label}</span>
-          {field.type === 'boolean' ? (
-            <input
-              type="checkbox"
-              checked={values[field.name] === true}
-              onChange={(event) =>
-                setValues((current) => ({ ...current, [field.name]: event.target.checked }))
-              }
-              className="size-4 accent-jade-500"
-            />
-          ) : field.type === 'select' ? (
-            <select
-              value={String(values[field.name] ?? '')}
-              onChange={(event) =>
-                setValues((current) => ({
-                  ...current,
-                  [field.name]: optionValue(field.options, event.target.value),
-                }))
-              }
-              className="rounded-md border border-dark-line bg-dark-elevated px-2 py-1 text-sm text-on-dark focus:border-accent focus:outline-none"
-            >
-              {(field.options ?? []).map((option) => (
-                <option key={String(option.value)} value={String(option.value)}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-          ) : (
-            <input
-              type={field.type === 'string' ? 'text' : 'number'}
-              value={String(values[field.name] ?? '')}
-              min={field.min}
-              max={field.max}
-              step={field.step}
-              onChange={(event) =>
-                setValues((current) => ({
-                  ...current,
-                  [field.name]:
-                    field.type === 'string' ? event.target.value : Number(event.target.value),
-                }))
-              }
-              className="rounded-md border border-dark-line bg-dark-elevated px-2 py-1 font-mono text-sm text-on-dark focus:border-accent focus:outline-none"
-            />
-          )}
-        </label>
-      ))}
-
-      <div>
-        <Button
-          variant="seal"
-          size="sm"
-          disabled={blocked}
-          onClick={() => onInteract(interaction, values, needsElement ? selectedElementId : undefined)}
-        >
-          执行
-        </Button>
-      </div>
-      {needsElement && !selectedElementId ? (
-        <p className="text-xs text-on-dark-faint">先在舞台上点一个元素,再执行这个操作。</p>
-      ) : null}
+      <SimPlaybackControls
+        playing={playback.playing}
+        onToggle={playback.toggle}
+        onStep={onStep}
+        onStepBack={onStepBack}
+        onRestart={onRestart}
+        multiplier={playback.multiplier}
+        onMultiplierChange={playback.setMultiplier}
+        disabled={disabled}
+        atStart={stream.eventCount === 0}
+        playLabel="自动推进"
+      />
     </div>
   )
-}
-
-interface CheckpointPanelProps {
-  descriptor: SimPackageDescriptor
-  snapshot: RuntimeSnapshot
-}
-
-/**
- * CheckpointPanel 展示场景自带的教学检查点结论。
- * 这些是场景作者写在包里的判定(达成/未达成 + 解释),不是平台判分 ——
- * 实验里的判分走检查点判分接口,两者不混。
- */
-function CheckpointPanel({ descriptor, snapshot }: CheckpointPanelProps) {
-  if (descriptor.checkpoints.length === 0) return null
-
-  return (
-    <section className="flex flex-col gap-2 border-b border-dark-line p-4">
-      <h2 className="text-sm font-medium text-on-dark">观察结论</h2>
-      <ul className="flex flex-col gap-2">
-        {descriptor.checkpoints.map((checkpoint) => {
-          const result = snapshot.checkpointResults[checkpoint.id]
-          return (
-            <li
-              key={checkpoint.id}
-              className="flex flex-col gap-1 rounded-md border border-dark-line bg-dark-surface p-2"
-            >
-              <div className="flex items-start justify-between gap-2">
-                <span className="min-w-0 text-sm text-on-dark">{checkpoint.label}</span>
-                <Badge tone={result?.achieved ? 'success' : 'neutral'}>
-                  {result?.achieved ? '已观察到' : '尚未出现'}
-                </Badge>
-              </div>
-              {result?.explanation ? (
-                <p className="text-xs text-on-dark-sub">{result.explanation}</p>
-              ) : null}
-            </li>
-          )
-        })}
-      </ul>
-    </section>
-  )
-}
-
-interface ShareModalProps {
-  sessionId: string
-  onClose: () => void
-}
-
-/**
- * ShareModal 为这次推演生成公开分享码。
- * 分享出去的是「场景 + 种子 + 操作序列」,任何人打开都能复现同一过程;
- * 它不携带账号与学校信息,也不是取运行包的凭据(公开回放只放平台内置场景)。
- */
-function ShareModal({ sessionId, onClose }: ShareModalProps) {
-  const [expireAt, setExpireAt] = useState('')
-  const [code, setCode] = useState<string>()
-  const [formError, setFormError] = useState<string>()
-  const [working, setWorking] = useState(false)
-
-  const submit = useCallback(async () => {
-    setFormError(undefined)
-    setWorking(true)
-    try {
-      const result = await api.sim.shareSession(sessionId, {
-        expire_at: expireAt ? new Date(expireAt).toISOString() : undefined,
-      })
-      setCode(result.code)
-      toast.success('分享码已生成')
-    } catch (error) {
-      setFormError(userFacingErrorMessage(error, '分享码没有生成成功,请稍后重试。'))
-    } finally {
-      setWorking(false)
-    }
-  }, [expireAt, sessionId])
-
-  const link = code ? `${window.location.origin}/sim/shared/${code}` : ''
-
-  return (
-    <Modal open onOpenChange={(open) => !open && onClose()}>
-      <ModalContent size="lg">
-        <ModalHeader>
-          <ModalTitle>分享这次推演</ModalTitle>
-          <ModalDescription>
-            分享的是这次推演的过程本身:场景、随机条件与你的操作序列。任何人打开都能看到同一过程,
-            链接里不含你的账号与学校信息。
-          </ModalDescription>
-        </ModalHeader>
-        <ModalBody className="flex flex-col gap-4">
-          {code ? (
-            <div className="flex flex-col gap-2 rounded-md border border-line bg-surface-sunken p-3">
-              <span className="text-sm text-ink-sub">公开回放链接</span>
-              <span className="break-all font-mono text-sm text-ink">{link}</span>
-              <Button
-                variant="outline"
-                size="sm"
-                leftIcon={Link2}
-                onClick={() => {
-                  void navigator.clipboard
-                    .writeText(link)
-                    .then(() => toast.success('链接已复制'))
-                    .catch(() => toast.error('复制没有成功,请手动选中链接。'))
-                }}
-              >
-                复制链接
-              </Button>
-            </div>
-          ) : (
-            <label className="flex flex-col gap-1">
-              <span className="text-sm text-ink">有效期至</span>
-              <input
-                type="datetime-local"
-                value={expireAt}
-                onChange={(event) => setExpireAt(event.target.value)}
-                className="rounded-md border border-line-strong bg-surface px-3 py-2 text-base text-ink focus:border-primary focus:outline-none"
-              />
-              <span className="text-xs text-ink-sub">留空表示按平台默认有效期。</span>
-            </label>
-          )}
-
-          {formError ? <p className="text-sm text-danger">{formError}</p> : null}
-        </ModalBody>
-        <ModalFooter>
-          <Button variant="outline" onClick={onClose}>
-            {code ? '关闭' : '取消'}
-          </Button>
-          {code ? null : (
-            <Button variant="seal" leftIcon={Share2} loading={working} onClick={() => void submit()}>
-              生成分享码
-            </Button>
-          )}
-        </ModalFooter>
-      </ModalContent>
-    </Modal>
-  )
-}
-
-/** optionValue 从声明的选项里取回原始值:select 的 DOM 值是字符串,不能直接当业务值用。 */
-function optionValue(
-  options: Array<{ label: string; value: JsonValue }> | undefined,
-  raw: string,
-): JsonValue {
-  const matched = (options ?? []).find((option) => String(option.value) === raw)
-  return matched ? matched.value : raw
 }

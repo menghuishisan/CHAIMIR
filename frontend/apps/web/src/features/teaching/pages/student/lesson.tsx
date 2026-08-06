@@ -48,7 +48,7 @@ interface LessonView {
   progress: Progress | undefined
 }
 
-/** 图文课时的正文键,与 content_ref 形状表一致(后端已清理富文本)。 */
+/** 图文课时的正文键,与 content_ref 形状表一致。 */
 const MARKDOWN_KEY = 'markdown'
 
 /** 视频播放位置回写节流:每 15 秒最多写一次,避免播放中高频打服务端。 */
@@ -159,7 +159,8 @@ function LessonBody({ lesson, progress, onProgressChanged }: LessonBodyProps) {
       return (
         <Card>
           <CardBody>
-            {/* 图文正文按段落渲染:后端已清理富文本,前端不做二次过滤(铁律 1) */}
+            {/* 正文按段落渲染:文本节点本身就是 XSS 边界(全站零 dangerouslySetInnerHTML),
+                后端按原文入库、不做 HTML 实体转义,故这里拿到的就是老师写下的原文 */}
             <div className="flex flex-col gap-3 text-base leading-relaxed text-ink">
               {markdown.split('\n').map((paragraph, index) =>
                 paragraph.trim() === '' ? null : <p key={index}>{paragraph}</p>,

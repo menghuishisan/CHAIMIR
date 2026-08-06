@@ -7,7 +7,7 @@ import { optimisticRollupCodeTrace, optimisticRollupNarrative } from './trace';
 import { renderOptimisticRollupView } from './view';
 
 export const optimisticRollupFraudProofSimulation: SimPackage<OptimisticRollupState> = {
-  meta: { code: 'builtin__cross-optimistic-rollup-fraud-proof', name: 'Optimistic Rollup 欺诈证明推演', category: 'cross-chain-system', version: '1.0.0', compute: 'frontend', summary: '完整推演 L2 batch 提交、挑战窗口、交互式二分、L1 单步证明和裁决回滚。', learningObjectives: ['理解 optimistic rollup 为什么需要挑战窗口', '掌握交互式二分如何减少 L1 计算', '区分 batch pending、finalized 和 reverted'], scaleLimit: { nodes: 80, maxTick: 140, maxEvents: 260 } },
+  meta: { code: 'builtin__cross-optimistic-rollup-fraud-proof', name: 'Optimistic Rollup 欺诈证明推演', category: 'cross-chain-system', version: '1.0.0', summary: '完整推演 L2 batch 提交、挑战窗口、交互式二分、L1 单步证明和裁决回滚。', learningObjectives: ['理解 optimistic rollup 为什么需要挑战窗口', '掌握交互式二分如何减少 L1 计算', '区分 batch pending、finalized 和 reverted'], scaleLimit: { nodes: 80, maxTick: 140, maxEvents: 260 } },
   initState: createInitialOptimisticRollupState,
   reducer: reduceOptimisticRollupEvent,
   interactions: [

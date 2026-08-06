@@ -8,6 +8,10 @@
 // GET /sim/reviews 已经带上了它,而 GET /sim/packages/{key}/preview 在 teacher 组且断言作者本人,
 // 平台身份调用必然被拒(对齐清单 §3.4)。
 //
+// 报告里还带着隔离容器在上架前渲出的样例教学帧,本页必须把它摊开:自动校验只回答「能不能跑、
+// 是否确定性」,回答不了「这个算法实现对不对」—— 只看四个徽章的审核等于没审
+// (见 docs/04-仿真可视化引擎/06-业务流程与状态机.md §4)。
+//
 // 仿真包列表接口也在 teacher 组,平台端看不到;审核记录本身就是平台侧的包窗口 ——
 // 每次提交都会产生一条审核记录,记录里带包的编码、版本与当前状态。
 
@@ -67,6 +71,7 @@ import {
   simReviewResultTone,
 } from '../../../../utils/labels/sim'
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
+import { SimPreviewFrames } from '../../SimPreviewFrames'
 
 /** 审核状态筛选项:值为空串表示不过滤。 */
 const RESULT_FILTERS = [
@@ -298,6 +303,8 @@ function ReviewCard({ review, onAct }: ReviewCardProps) {
             </span>
           ) : null}
         </div>
+
+        <SimPreviewFrames frames={review.preview_report.preview_frames} />
 
         <div className="flex flex-wrap items-center gap-2">
           {pending ? (

@@ -21,6 +21,9 @@ const REPO_ROOT = resolve(fileURLToPath(new URL('../..', import.meta.url)))
 const SDK_ROOT = join(REPO_ROOT, 'frontend/packages/sim-sdk')
 const OUTPUT = join(REPO_ROOT, 'backend/internal/modules/sim/builtin_catalog.json')
 
+/** BUILTIN_CODE_PREFIX 与 sim-sdk 的 BUILTIN_SIM_CODE_PREFIX、后端 builtinSimCodePrefix 同值。 */
+const BUILTIN_CODE_PREFIX = 'builtin__'
+
 /**
  * loadVite 从 frontend 工作区解析 Vite 的 ESM 入口。
  * 本脚本住在仓库根的 scripts/(全仓脚本唯一落点),而 vite 只装在 frontend 工作区,
@@ -85,10 +88,15 @@ async function main() {
   const manifests = packages.map((pkg) => createSimPackageManifest(pkg))
   const codes = new Set()
   for (const item of manifests) {
-    if (item.meta.compute !== 'frontend') {
-      // 内置标准库只做前端确定性推演(见 docs/04-仿真可视化引擎/09-内置仿真包标准库.md)。
-      // 后端计算包需要部署期装配的适配器编号,清单表达不了,故在导出边界直接拒绝。
-      throw new Error(`内置仿真包 ${item.meta.code} 声明了 compute=${item.meta.compute},内置标准库只允许 frontend`)
+    if (!item.meta.code.startsWith(BUILTIN_CODE_PREFIX)) {
+      // 内置标准库的命名空间是入库时 author_type=平台内置 的依据(后端 SyncBuiltinPackages),
+      // 前缀不符会让包以错误的作者类型入库,进而落到错误的执行位置。
+      throw new Error(`内置仿真包 ${item.meta.code} 缺少 ${BUILTIN_CODE_PREFIX} 前缀`)
+    }
+    if (item.meta.entry !== undefined) {
+      // entry 只对扩展包有意义(隔离容器据此装配);内置包由 sim-sdk registry 按 code 装配,
+      // 声明 entry 会让人误以为内置包也走归档装配路径。
+      throw new Error(`内置仿真包 ${item.meta.code} 不应声明 entry`)
     }
     if (codes.has(item.meta.code)) {
       throw new Error(`内置仿真包 code 重复: ${item.meta.code}`)

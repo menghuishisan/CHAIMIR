@@ -1,17 +1,17 @@
 -- name: GetSimPackageByCodeVersion :one
-SELECT id, code, version, name, category, compute, scale_limit, bundle_key, bundle_hash,
+SELECT id, code, version, name, category, compute, scale_limit, bundle_key, bundle_hash, entry,
        backend_adapter, backend_config, interaction_schema, code_trace, author_type, author_id, status, created_at, updated_at
 FROM sim_package
 WHERE code = $1 AND version = $2;
 
 -- name: GetSimPackageByID :one
-SELECT id, code, version, name, category, compute, scale_limit, bundle_key, bundle_hash,
+SELECT id, code, version, name, category, compute, scale_limit, bundle_key, bundle_hash, entry,
        backend_adapter, backend_config, interaction_schema, code_trace, author_type, author_id, status, created_at, updated_at
 FROM sim_package
 WHERE id = $1;
 
 -- name: ListSimPackages :many
-SELECT id, code, version, name, category, compute, scale_limit, bundle_key, bundle_hash,
+SELECT id, code, version, name, category, compute, scale_limit, bundle_key, bundle_hash, entry,
        backend_adapter, backend_config, interaction_schema, code_trace, author_type, author_id, status, created_at, updated_at
 FROM sim_package
 WHERE ($1::smallint = 0 OR status = $1)
@@ -30,7 +30,7 @@ WHERE ($1::smallint = 0 OR status = $1)
   AND ($4::bigint = 0 OR (author_type = 2 AND author_id = $4));
 
 -- name: ListSimPackageVersions :many
-SELECT id, code, version, name, category, compute, scale_limit, bundle_key, bundle_hash,
+SELECT id, code, version, name, category, compute, scale_limit, bundle_key, bundle_hash, entry,
        backend_adapter, backend_config, interaction_schema, code_trace, author_type, author_id, status, created_at, updated_at
 FROM sim_package
 WHERE code = $1
@@ -38,39 +38,35 @@ ORDER BY created_at DESC, id DESC;
 
 -- name: CreateSimPackage :one
 INSERT INTO sim_package (
-    id, code, version, name, category, compute, scale_limit, bundle_key, bundle_hash,
+    id, code, version, name, category, compute, scale_limit, bundle_key, bundle_hash, entry,
     backend_adapter, backend_config, interaction_schema, code_trace, author_type, author_id, status, created_at, updated_at
 )
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, now(), now())
-RETURNING id, code, version, name, category, compute, scale_limit, bundle_key, bundle_hash,
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, now(), now())
+RETURNING id, code, version, name, category, compute, scale_limit, bundle_key, bundle_hash, entry,
           backend_adapter, backend_config, interaction_schema, code_trace, author_type, author_id, status, created_at, updated_at;
 
 -- name: UpsertBuiltinSimPackage :one
 -- 平台内置仿真包按 (code, version) 幂等入库。
 -- 内置包不来自教师上传,而是平台随版本交付的标准库(见 docs/04-仿真可视化引擎/09-内置仿真包标准库.md),
--- 故直接落 author_type=1、status=3(已上架):它不经审核流程,审核针对的是外部提交的包。
+-- 故直接落 author_type=1、compute=1(浏览器执行)、status=3(已上架):它不经审核流程,
+-- 审核针对的是外部提交的包;entry/backend_adapter 恒为 NULL —— 内置包由 sim-sdk registry 按 code 装配。
 -- 重跑部署 seed 时按 code+version 覆盖协议字段,不新建行、不改 created_at。
 INSERT INTO sim_package (
-    id, code, version, name, category, compute, scale_limit, bundle_key, bundle_hash,
+    id, code, version, name, category, compute, scale_limit, bundle_key, bundle_hash, entry,
     backend_adapter, backend_config, interaction_schema, code_trace, author_type, author_id, status, created_at, updated_at
 )
-VALUES ($1, $2, $3, $4, $5, 1, $6, $7, $8, NULL, '{}'::jsonb, $9, $10, 1, NULL, 3, now(), now())
+VALUES ($1, $2, $3, $4, $5, 1, $6, $7, $8, NULL, NULL, '{}'::jsonb, $9, $10, 1, NULL, 3, now(), now())
 ON CONFLICT (code, version) DO UPDATE
 SET name = EXCLUDED.name,
     category = EXCLUDED.category,
-    compute = EXCLUDED.compute,
     scale_limit = EXCLUDED.scale_limit,
     bundle_key = EXCLUDED.bundle_key,
     bundle_hash = EXCLUDED.bundle_hash,
-    backend_adapter = EXCLUDED.backend_adapter,
-    backend_config = EXCLUDED.backend_config,
     interaction_schema = EXCLUDED.interaction_schema,
     code_trace = EXCLUDED.code_trace,
-    author_type = EXCLUDED.author_type,
-    author_id = EXCLUDED.author_id,
     status = EXCLUDED.status,
     updated_at = now()
-RETURNING id, code, version, name, category, compute, scale_limit, bundle_key, bundle_hash,
+RETURNING id, code, version, name, category, compute, scale_limit, bundle_key, bundle_hash, entry,
           backend_adapter, backend_config, interaction_schema, code_trace, author_type, author_id, status, created_at, updated_at;
 
 -- name: ArchiveRetiredBuiltinSimPackages :many
@@ -82,32 +78,32 @@ SET status = 4, updated_at = now()
 WHERE author_type = 1
   AND status <> 4
   AND (code || '@' || version) <> ALL(sqlc.arg(live_keys)::text[])
-RETURNING id, code, version, name, category, compute, scale_limit, bundle_key, bundle_hash,
+RETURNING id, code, version, name, category, compute, scale_limit, bundle_key, bundle_hash, entry,
           backend_adapter, backend_config, interaction_schema, code_trace, author_type, author_id, status, created_at, updated_at;
 
 -- name: UpdateSimPackageDraft :one
+-- 更新草稿或被退回的包。compute、backend_adapter 与 author_type 不在可更新列中:
+-- 它们由服务端按作者类型派生,更新一个包不改变它的作者,也就不该改变执行位置与运行能力。
 UPDATE sim_package
 SET name = $2,
     category = $3,
-    compute = $4,
-    scale_limit = $5,
-    bundle_key = $6,
-    bundle_hash = $7,
-    backend_adapter = $8,
-    backend_config = $9,
-    interaction_schema = $10,
-    code_trace = $11,
-    status = $12,
+    scale_limit = $4,
+    bundle_key = $5,
+    bundle_hash = $6,
+    entry = $7,
+    interaction_schema = $8,
+    code_trace = $9,
+    status = $10,
     updated_at = now()
 WHERE id = $1 AND status IN (1, 5)
-RETURNING id, code, version, name, category, compute, scale_limit, bundle_key, bundle_hash,
+RETURNING id, code, version, name, category, compute, scale_limit, bundle_key, bundle_hash, entry,
           backend_adapter, backend_config, interaction_schema, code_trace, author_type, author_id, status, created_at, updated_at;
 
 -- name: UpdateSimPackageStatus :one
 UPDATE sim_package
 SET status = $2, updated_at = now()
 WHERE id = $1
-RETURNING id, code, version, name, category, compute, scale_limit, bundle_key, bundle_hash,
+RETURNING id, code, version, name, category, compute, scale_limit, bundle_key, bundle_hash, entry,
           backend_adapter, backend_config, interaction_schema, code_trace, author_type, author_id, status, created_at, updated_at;
 
 -- name: CreateSimPackageReview :one
@@ -148,6 +144,23 @@ SET preview_report = preview_report || $2,
 WHERE package_id = $1 AND result = 1
 RETURNING id, package_id, submitter_id, preview_report, reviewer_id, result, comment, created_at, updated_at;
 
+-- name: ClaimSimPackagesForPreview :many
+-- 认领待隔离预览的包:审核中、且报告里两项动态校验都还没有结论。
+-- 四项审核门禁中 determinism_check 与 worker_preview 只能由隔离预览产出,
+-- 没有这个认领查询就没有生产者,教师提交的包会永久停在待审(见 docs/04-仿真可视化引擎/06-业务流程与状态机.md §4)。
+-- FOR UPDATE SKIP LOCKED:多副本部署时各副本认领互不重复,也不互相阻塞。
+SELECT p.id, p.code, p.version, p.name, p.category, p.compute, p.scale_limit, p.bundle_key, p.bundle_hash, p.entry,
+       p.backend_adapter, p.backend_config, p.interaction_schema, p.code_trace, p.author_type, p.author_id, p.status,
+       p.created_at, p.updated_at
+FROM sim_package p
+JOIN sim_package_review r ON r.package_id = p.id AND r.result = 1
+WHERE p.status = 2
+  AND p.compute = 2
+  AND NOT (r.preview_report ? 'determinism_check' AND r.preview_report ? 'worker_preview')
+ORDER BY r.created_at ASC, p.id ASC
+LIMIT $1
+FOR UPDATE OF p SKIP LOCKED;
+
 -- name: CompleteSimReview :one
 UPDATE sim_package_review
 SET result = $2,
@@ -169,11 +182,19 @@ WHERE tenant_id = $1 AND id = $2;
 
 -- name: GetSimSessionWithPackage :one
 SELECT s.id, s.tenant_id, s.package_id, s.source_ref, s.owner_account_id, s.seed, s.init_params, s.compute, s.status, s.created_at, s.updated_at,
-       p.code, p.version, p.name, p.category, p.scale_limit, p.bundle_key, p.bundle_hash, p.backend_adapter, p.backend_config,
+       p.code, p.version, p.name, p.category, p.scale_limit, p.bundle_key, p.bundle_hash, p.entry, p.backend_adapter, p.backend_config,
        p.interaction_schema, p.status AS package_status
 FROM sim_session s
 JOIN sim_package p ON p.id = s.package_id
 WHERE s.tenant_id = $1 AND s.id = $2;
+
+-- name: CountActiveIsolatedSimSessions :one
+-- 统计本租户当前占用集群资源的隔离执行会话数,供并发闸门
+-- SIM_BACKEND_MAX_CONCURRENT_SESSIONS_PER_TENANT 使用。
+-- 一个隔离会话一个 Pod,没有这道闸门循环建会话可耗尽节点;浏览器执行的会话不占集群资源故不计入。
+SELECT COUNT(*)::bigint
+FROM sim_session
+WHERE tenant_id = $1 AND compute = 2 AND status IN (1, 2, 3);
 
 -- name: UpdateSimSessionStatus :one
 UPDATE sim_session

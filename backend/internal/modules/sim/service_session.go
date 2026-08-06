@@ -3,6 +3,7 @@ package sim
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"time"
 
@@ -39,6 +40,17 @@ func (s *Service) CreateSession(ctx context.Context, req contracts.SimCreateSess
 	}
 	session := Session{ID: s.ids.Generate(), TenantID: req.TenantID, PackageID: pkg.ID, SourceRef: req.SourceRef, OwnerAccountID: req.OwnerAccountID, Seed: req.Seed, InitParams: initParams, Compute: pkg.Compute, Status: SessionCreating}
 	if err := s.store.TenantTx(ctx, req.TenantID, func(ctx context.Context, tx TxStore) error {
+		// 并发闸门与建行同事务:一个隔离会话一个 Pod,先查后写在并发下会双双通过,
+		// 放进同一事务才能真正封住"循环建会话耗尽节点"。浏览器执行的会话不占集群资源故不计入。
+		if pkg.Compute == ComputeIsolated {
+			active, err := tx.CountActiveIsolatedSessions(ctx, req.TenantID)
+			if err != nil {
+				return apperr.ErrSimSessionQueryFailed.WithCause(err)
+			}
+			if active >= int64(s.maxIsolatedSessionsPerTenant) {
+				return apperr.ErrSimBackendComputeUnavailable.WithCause(fmt.Errorf("租户 %d 隔离执行会话已达上限 %d", req.TenantID, s.maxIsolatedSessionsPerTenant))
+			}
+		}
 		var err error
 		session, err = tx.CreateSession(ctx, session)
 		if err != nil {
@@ -64,7 +76,7 @@ func (s *Service) CreateSessionFromHTTP(ctx context.Context, tenantID int64, req
 	if err != nil {
 		return nil, err
 	}
-	return map[string]any{"session_id": ids.Format(info.SessionID), "compute": info.Compute, "bundle_ref": info.BundleRef}, nil
+	return map[string]any{"session_id": ids.Format(info.SessionID), "compute": info.Compute}, nil
 }
 
 // ReportAction 保存用户操作序列,同 seq 同内容幂等,同 seq 不同内容拒绝。
@@ -88,7 +100,7 @@ func (s *Service) ReportAction(ctx context.Context, tenantID, accountID, session
 		if !canMutateSession(session.Status) {
 			return apperr.ErrSimSessionStateInvalid
 		}
-		if err := validateActionAgainstSchema(session.InteractionSchema, req); err != nil {
+		if err := validateActionAgainstSchema(session.InteractionSchema, req.EventType, req.Payload); err != nil {
 			return err
 		}
 		existing, err := tx.GetActionBySeq(ctx, tenantID, sessionID, req.Seq)
@@ -375,10 +387,10 @@ func (s *Service) reportCheckpointRaw(ctx context.Context, tenantID, sessionID i
 	})
 }
 
-// releaseBackendSessions 释放已归档 compute=backend 会话的 M4 自有适配器资源。
+// releaseBackendSessions 释放已归档隔离执行会话占用的 Pod 与命名空间,并让出租户并发额度。
 func (s *Service) releaseBackendSessions(ctx context.Context, tenantID int64, sessions []Session) error {
 	for _, archived := range sessions {
-		if archived.Compute != ComputeBackend {
+		if archived.Compute != ComputeIsolated {
 			continue
 		}
 		session, err := s.loadBackendReleaseSession(ctx, tenantID, archived.ID)

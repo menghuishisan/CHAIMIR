@@ -8,22 +8,16 @@ import (
 )
 
 // SubmitPackageRequest 是教师或第三方提交仿真包时的元数据。
+//
+// 刻意不含 compute 与 backend_adapter:执行位置按 author_type 派生(教师/第三方恒为隔离容器,
+// 见 docs/04-仿真可视化引擎/02-架构设计.md §8),让客户端声明它只会产生
+// "提交了一个平台没有任何路径能运行的包"这类无效状态。
 type SubmitPackageRequest struct {
-	Code           string          `json:"code"`
-	Version        string          `json:"version"`
-	Name           string          `json:"name"`
-	Category       string          `json:"category"`
-	Compute        string          `json:"compute"`
-	ScaleLimit     json.RawMessage `json:"scale_limit"`
-	BackendAdapter string          `json:"backend_adapter"`
-	BackendConfig  json.RawMessage `json:"backend_config"`
-}
-
-// ValidationReportRequest 是受控预览流程回写的动态校验结果。
-type ValidationReportRequest struct {
-	DeterminismCheck ValidationStatus  `json:"determinism_check"`
-	WorkerPreview    ValidationStatus  `json:"worker_preview"`
-	Details          map[string]string `json:"details"`
+	Code       string          `json:"code"`
+	Version    string          `json:"version"`
+	Name       string          `json:"name"`
+	Category   string          `json:"category"`
+	ScaleLimit json.RawMessage `json:"scale_limit"`
 }
 
 // RejectReviewRequest 是平台管理员退回审核的意见。
@@ -67,25 +61,12 @@ type CreateShareRequest struct {
 	ExpireAt time.Time `json:"expire_at"`
 }
 
-// BundleDownloadGrantDTO 是仿真包运行授权响应。
-// 内置前端包只回 BuiltinCode(交 sim-sdk Worker 内部装配),扩展包只回 Token(交平台统一对象下载入口)。
-type BundleDownloadGrantDTO struct {
-	Token       string `json:"token,omitempty"`
-	BundleHash  string `json:"bundle_hash"`
-	ExpiresAt   string `json:"expires_at"`
-	BuiltinCode string `json:"builtin_code,omitempty"`
-}
-
-// BackendAdapterDescriptor 描述当前部署已装配的后端计算能力。
+// BackendAdapterDescriptor 描述当前部署已装配的隔离执行能力。
+// 它只在启动装配时用于核对能力目录与适配器实现一致,不对外暴露 —— 执行位置与运行能力
+// 都由服务端按作者类型派生,客户端没有可选项,也就没有能力列表接口。
 type BackendAdapterDescriptor struct {
 	Code        string `json:"code"`
 	Name        string `json:"name"`
 	Protocol    string `json:"protocol"`
 	Description string `json:"description"`
-}
-
-// BackendCapabilitiesDTO 是教师端选择计算方式时的权威能力响应。
-type BackendCapabilitiesDTO struct {
-	BackendCompute bool                       `json:"backend_compute"`
-	Adapters       []BackendAdapterDescriptor `json:"adapters"`
 }

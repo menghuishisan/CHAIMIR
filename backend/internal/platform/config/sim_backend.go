@@ -34,11 +34,23 @@ type SimBackendAdapterConfig struct {
 	MaxOutputBytes        int64             `json:"max_output_bytes"`
 }
 
-// SimBackendConfig 描述 M4 后端计算仿真的共享隔离边界和能力目录。
+// SimBackendConfig 描述 M4 隔离执行的共享边界、能力目录与闸门阈值。
 type SimBackendConfig struct {
 	NamespacePrefix        string
 	PodReadyTimeoutSeconds int
 	StdioAdapters          []SimBackendAdapterConfig
+	// PackageRunnerAdapterCode 是扩展包通用运行器能力编号,服务端按作者类型自动绑定给
+	// 教师/第三方包,教师无从选择;它必须存在于 StdioAdapters 中,否则扩展接入整条链路不可用。
+	PackageRunnerAdapterCode string
+	// MaxConcurrentSessionsPerTenant 限定单租户同时活跃的隔离执行会话数。
+	// 一个会话一个 Pod,没有这道闸门循环建会话可耗尽节点。
+	MaxConcurrentSessionsPerTenant int
+	// PreviewPollIntervalSeconds 是隔离预览任务的轮询间隔。
+	PreviewPollIntervalSeconds int
+	// PreviewBatchSize 是单次认领的待审包数量上限。
+	PreviewBatchSize int
+	// PreviewFrameCount 是隔离预览渲制的样例教学帧数量,供平台管理员判断算法实现是否正确。
+	PreviewFrameCount int
 }
 
 // imageAttestationAllows 确保 M4 只执行供应链证明中已签名且扫描通过的精确 digest 镜像。
@@ -77,6 +89,20 @@ func readSimBackendAdapters(key string, errs *[]string) []SimBackendAdapterConfi
 		return nil
 	}
 	return out
+}
+
+// simAdapterRegistered 判定给定能力编号是否已登记在能力目录中。
+func simAdapterRegistered(items []SimBackendAdapterConfig, code string) bool {
+	code = strings.TrimSpace(code)
+	if code == "" {
+		return false
+	}
+	for _, item := range items {
+		if strings.TrimSpace(item.Code) == code {
+			return true
+		}
+	}
+	return false
 }
 
 // validateSimBackendAdapters 在启动边界统一校验能力编号、镜像证明、命令和资源限制。

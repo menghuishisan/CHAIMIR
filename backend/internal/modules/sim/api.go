@@ -10,7 +10,6 @@ import (
 	"chaimir/internal/contracts"
 	"chaimir/internal/platform/auth"
 	"chaimir/internal/platform/httpx"
-	"chaimir/internal/platform/jsonx"
 	"chaimir/internal/platform/response"
 	"chaimir/internal/platform/tenant"
 	"chaimir/internal/platform/upload"
@@ -21,15 +20,14 @@ import (
 )
 
 var (
+	// simPackageMultipartValues 是提交仿真包允许出现的元数据字段白名单,未列出的字段直接拒绝。
+	// 不含 compute/backend_adapter/backend_config:执行位置与运行能力由服务端按作者类型派生。
 	simPackageMultipartValues = map[string]struct{}{
-		"code":            {},
-		"version":         {},
-		"name":            {},
-		"category":        {},
-		"compute":         {},
-		"backend_adapter": {},
-		"scale_limit":     {},
-		"backend_config":  {},
+		"code":        {},
+		"version":     {},
+		"name":        {},
+		"category":    {},
+		"scale_limit": {},
 	}
 )
 
@@ -51,7 +49,6 @@ func RegisterRoutes(r gin.IRouter, svc *Service, authn *auth.Manager, roles cont
 	api.registerStreamRoutes(g.Group("", authn.WebSocketMiddleware(), auth.RequireTenantAnyRole(roles, contracts.RoleStudent, contracts.RoleTeacher, contracts.RoleSchoolAdmin)))
 	api.registerTeacherRoutes(g.Group("", authn.Middleware(), auth.RequireTenantAnyRole(roles, contracts.RoleTeacher, contracts.RoleSchoolAdmin)))
 	api.registerInternalRoutes(g.Group("/internal", authn.ServiceMiddleware()))
-	g.POST("/internal/packages/:key/validation-report", authn.ServiceMiddleware(), api.validationReport)
 	api.registerPlatformRoutes(g.Group("", authn.Middleware(), auth.RequirePlatformIdentity()))
 	return nil
 }
@@ -65,11 +62,14 @@ func (a simAPI) registerPublicRoutes(g gin.IRouter) {
 	g.GET("/shared/:code", a.getShared)
 }
 
-// registerUserRoutes 注册租户用户可访问的查询、回放、分享和后端计算接口。
+// registerUserRoutes 注册租户用户可访问的查询、回放、分享和隔离执行接口。
+//
+// 没有 bundle 下载授权入口:内置包由 sim-sdk 在浏览器 Worker 内按 code 装配,
+// 扩展包 bundle 只经受控 k8s exec 投入隔离容器,从不下发浏览器
+// (见 docs/04-仿真可视化引擎/05-接口设计.md §2.1)。
 func (a simAPI) registerUserRoutes(g gin.IRouter) {
 	g.GET("/packages", a.listPackages)
 	g.GET("/packages/:key/versions", a.listPackageVersions)
-	g.GET("/packages/:key/:version/bundle", a.getBundle)
 	g.POST("/sessions/:id/actions", a.reportAction)
 	g.GET("/sessions/:id/replay", a.getReplay)
 	g.POST("/sessions/:id/share", a.shareSession)
@@ -81,16 +81,13 @@ func (a simAPI) registerStreamRoutes(g gin.IRouter) {
 }
 
 // registerTeacherRoutes 注册教师/学校管理员仿真包扩展接入接口。
+//
+// 没有运行能力查询入口:执行位置与运行能力都由服务端按作者类型派生,教师无从选择,
+// 一个"可用能力列表"对提交者没有任何可作用的选项(见 docs/04-仿真可视化引擎/05-接口设计.md §2.2)。
 func (a simAPI) registerTeacherRoutes(g gin.IRouter) {
-	g.GET("/backend-capabilities", a.backendCapabilities)
 	g.POST("/packages", a.submitPackage)
 	g.PATCH("/packages/:key", a.updatePackage)
 	g.GET("/packages/:key/preview", a.previewPackage)
-}
-
-// backendCapabilities 返回当前部署真实可用的 M4 后端计算方式。
-func (a simAPI) backendCapabilities(c *gin.Context) {
-	httpx.Write(c, a.svc.BackendCapabilities(), nil)
 }
 
 // registerInternalRoutes 注册内部服务会话和检查点接口。
@@ -146,16 +143,6 @@ func (a simAPI) listPackageVersions(c *gin.Context) {
 	httpx.Write(c, out, err)
 }
 
-// getBundle 为已上架仿真包签发短时下载授权。
-func (a simAPI) getBundle(c *gin.Context) {
-	current, ok := currentTenantIdentity(c)
-	if !ok {
-		return
-	}
-	out, err := a.svc.IssueBundleDownloadGrant(c.Request.Context(), current.AccountID, c.Param("key"), c.Param("version"))
-	httpx.Write(c, out, err)
-}
-
 // submitPackage 绑定 multipart 仿真包上传。
 func (a simAPI) submitPackage(c *gin.Context) {
 	current, ok := currentTenantIdentity(c)
@@ -199,30 +186,6 @@ func (a simAPI) previewPackage(c *gin.Context) {
 		return
 	}
 	out, err := a.svc.PackagePreview(c.Request.Context(), current.AccountID, packageID)
-	httpx.Write(c, out, err)
-}
-
-// validationReport 绑定受控预览回写的动态报告。
-func (a simAPI) validationReport(c *gin.Context) {
-	packageID, ok := httpx.PathID(c, "key")
-	if !ok {
-		return
-	}
-	raw, result, err := upload.ReadBounded(c.Request.Body, a.svc.upload.SimValidationReportMaxBytes)
-	if err != nil {
-		response.Fail(c, apperr.ErrSimPackageValidationFailed.WithCause(err))
-		return
-	}
-	if result != upload.SizeOK {
-		response.Fail(c, apperr.ErrSimPackageValidationFailed)
-		return
-	}
-	var req ValidationReportRequest
-	if err := jsonUnmarshal(raw, &req); err != nil {
-		response.Fail(c, apperr.ErrSimPackageValidationFailed.WithCause(err))
-		return
-	}
-	out, err := a.svc.SubmitValidationReport(c.Request.Context(), packageID, req, raw)
 	httpx.Write(c, out, err)
 }
 
@@ -537,7 +500,7 @@ func readPackageMultipart(c *gin.Context, metadataMaxBytes, bundleMaxBytes int64
 		response.Fail(c, apperr.ErrSimPackageInvalid)
 		return SubmitPackageRequest{}, nil, nil, false
 	}
-	req := SubmitPackageRequest{Code: fields["code"], Version: fields["version"], Name: fields["name"], Category: fields["category"], Compute: fields["compute"], BackendAdapter: fields["backend_adapter"], ScaleLimit: []byte(defaultJSON(fields["scale_limit"])), BackendConfig: []byte(defaultJSON(fields["backend_config"]))}
+	req := SubmitPackageRequest{Code: fields["code"], Version: fields["version"], Name: fields["name"], Category: fields["category"], ScaleLimit: []byte(defaultJSON(fields["scale_limit"]))}
 	return req, header, data, true
 }
 
@@ -577,9 +540,4 @@ func defaultJSON(raw string) string {
 		return "{}"
 	}
 	return raw
-}
-
-// jsonUnmarshal 包装 JSON 解码,避免 api 文件直接散落 encoding/json 依赖。
-func jsonUnmarshal(raw []byte, dst any) error {
-	return jsonx.DecodeStrictKnownFields(raw, dst)
 }

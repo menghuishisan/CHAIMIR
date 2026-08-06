@@ -16,7 +16,6 @@ export const powSimulation: SimPackage<PowState> = {
     name: 'PoW 最长链共识推演',
     category: 'consensus',
     version: '1.0.0',
-    compute: 'frontend',
     summary: '完整推演 PoW 从交易打包、nonce 搜索、区块广播验证到最长链收敛与难度调整的流程。',
     learningObjectives: ['理解工作量证明和难度目标', '观察临时分叉如何按累计工作量收敛', '分析自私挖矿对最终性的影响'],
     scaleLimit: { nodes: 128, maxTick: 180, maxEvents: 320 },

@@ -1,22 +1,17 @@
-// 本文件在 Web Worker 中执行仿真包状态机,主线程不得直接运行第三方仿真代码。
+// 本文件是仿真包在浏览器 Web Worker 内的执行宿主,主线程不得直接运行仿真代码。
+//
+// 它只做三件事:封锁 Worker 能力、按 code 装配平台内置包、把主线程命令转成引擎调用。
+// 状态机推进、事件白名单校验、快照求值与回退重放全部在共享的 SimEngine 内
+// (见 runtime/engine.ts)—— 引擎有两份实现就必然与容器宿主漂移,
+// 而漂移的表现是"同一个 seed 在两个宿主跑出两条过程",回放、分享与判分随之失效。
+//
+// 只装配平台内置包:教师与第三方扩展包在后端隔离容器内运行,归档字节从不下发浏览器
+// (理由见 docs/04-仿真可视化引擎/07-安全设计.md §2)。
 
-import type {
-  FieldDef,
-  CheckpointDescriptor,
-  JsonObject,
-  JsonValue,
-  NarrativeStepDescriptor,
-  ReducerContext,
-  RuntimeSnapshot,
-  SimEvent,
-  SimInitParams,
-  SimPackage,
-  SimPackageDescriptor,
-  SimState,
-} from '../types';
-import { hashSeed, XorShiftRandom } from './deterministic';
+import type { JsonObject, SimInitParams, SimState } from '../types';
+import { SimEngine } from './engine';
+import { blockedCapability, installDeterminismGuards, sealGlobal } from './guards';
 import { getBuiltinSimulation } from '../registry/builtinRegistry';
-import { assertValidSimPackage, assertValidTeachingFrame } from '../validation';
 
 type WorkerRequest =
   | { type: 'init'; requestId: number; builtinCode: string; initParams: SimInitParams; seed: number }
@@ -26,14 +21,7 @@ type WorkerRequest =
   | { type: 'back'; requestId: number }
   | { type: 'reset'; requestId: number };
 
-let simPackage: SimPackage | undefined;
-let descriptor: SimPackageDescriptor | undefined;
-let initParams: SimInitParams = {};
-let seed = 0;
-let state: SimState | undefined;
-let tick = 0;
-let seq = 1;
-let events: SimEvent[] = [];
+let engine: SimEngine | undefined;
 const postToMain = self.postMessage.bind(self);
 
 self.addEventListener('message', (event: MessageEvent<WorkerRequest>) => {
@@ -51,28 +39,23 @@ function handleRequest(request: WorkerRequest): void {
         init(request);
         return;
       case 'step':
-        ensureReady();
-        applyEvent({ type: 'tick', source: 'tick', payload: {}, target: undefined });
-        postSnapshot(request.requestId, events[events.length - 1]);
+        readyEngine().step();
+        postSnapshot(request.requestId, true);
         return;
       case 'inject':
-        ensureReady();
-        applyEvent(userEventInput(request.eventType, request.payload, request.target));
-        postSnapshot(request.requestId, events[events.length - 1]);
+        readyEngine().inject(request.eventType, request.payload, request.target);
+        postSnapshot(request.requestId, true);
         return;
       case 'sync-state':
-        ensureReady();
-        syncBackendState(request.tick, request.state);
+        readyEngine().syncState(request.tick, request.state);
         postSnapshot(request.requestId);
         return;
       case 'back':
-        ensureReady();
-        replay(events.slice(0, -1));
+        readyEngine().back();
         postSnapshot(request.requestId);
         return;
       case 'reset':
-        ensureReady();
-        resetState();
+        readyEngine().reset();
         postSnapshot(request.requestId);
         return;
     }
@@ -82,377 +65,62 @@ function handleRequest(request: WorkerRequest): void {
 }
 
 /**
- * syncBackendState 接收 M4 受控适配器状态，并继续复用包内 render、叙事和检查点函数。
- */
-function syncBackendState(nextTick: number, nextState: SimState): void {
-  if (!Number.isSafeInteger(nextTick) || nextTick < 0 || !nextState || typeof nextState !== 'object') {
-    throw new Error('云端仿真状态不完整，请稍后重试');
-  }
-  tick = nextTick;
-  state = nextState;
-}
-
-/**
- * init 装配仿真包,校验协议结构并生成首个运行快照。
+ * init 装配平台内置包并生成首个运行快照。
  */
 function init(request: Extract<WorkerRequest, { type: 'init' }>): void {
-  simPackage = loadPackage(request);
-  assertValidSimPackage(simPackage);
-  initParams = request.initParams;
-  seed = request.seed;
-  descriptor = describePackage(simPackage);
-  resetState();
-  postToMain({ type: 'ready', requestId: request.requestId, descriptor, snapshot: snapshot() });
-}
-
-/**
- * loadPackage 按 code 装配平台内置包;内置包内核只在 Worker 内解析,业务页面不复制包清单。
- * 扩展包(teacher_/org_ 命名空间)的 bundle 是 ZIP/TAR 归档,须由主线程带凭据取回后交 Worker 解包装配,
- * 该路径的 manifest 入口字段与归档校验尚未定契约(见 docs/总-前端设计规范.md §9),此处不留半成品分支。
- */
-function loadPackage(request: Extract<WorkerRequest, { type: 'init' }>): SimPackage {
   const builtinPackage = getBuiltinSimulation(request.builtinCode);
   if (!builtinPackage) {
     throw new Error('当前仿真场景尚未在平台内置库中上架');
   }
-  return builtinPackage;
-}
-
-/**
- * userEventInput 统一构造用户事件:reducer 读顶层 target,操作日志按后端契约在 payload.target 中持久化。
- */
-function userEventInput(eventType: string, payload: JsonObject, target?: string): Omit<SimEvent, 'seq' | 'atTick'> {
-  const nextPayload: JsonObject = { ...(payload ?? {}) };
-  if (target) {
-    nextPayload.target = target;
-  }
-  return { type: eventType, source: 'user', payload: nextPayload, target };
-}
-
-/**
- * ensureReady 统一校验 worker 是否完成初始化,供只需要状态校验的消息分支使用。
- */
-function ensureReady(): void {
-  void readyPackage();
-}
-
-/**
- * readyPackage 返回已初始化的仿真包,让后续状态机逻辑获得明确的类型收窄结果。
- */
-function readyPackage(): SimPackage {
-  if (!simPackage || !descriptor) {
-    throw new Error('仿真运行环境尚未准备好，请稍后重试');
-  }
-  return simPackage;
-}
-
-/**
- * currentState 返回当前状态快照,避免未初始化时静默继续执行。
- */
-function currentState(): SimState {
-  if (!state) {
-    throw new Error('仿真状态尚未初始化，请重新进入仿真工作台');
-  }
-  return state;
-}
-
-/**
- * resetState 按初始参数和 seed 重建确定性初始状态。
- */
-function resetState(): void {
-  const pkg = readyPackage();
-  tick = 0;
-  seq = 1;
-  events = [];
-  state = pkg.initState(initParams, seed);
-}
-
-/**
- * applyEvent 构造带 seq 和 tick 的事件,并用确定性上下文推进 reducer。
- */
-function applyEvent(eventInput: Omit<SimEvent, 'seq' | 'atTick'>): void {
-  const pkg = readyPackage();
-  const previousState = currentState();
-  enforceEventLimit(eventInput);
-  enforceEventSchema(pkg, eventInput);
-  const event: SimEvent = { ...eventInput, atTick: tick, seq };
-  const context: ReducerContext = {
-    seed,
-    tick,
-    seq,
-    random: new XorShiftRandom(hashSeed(seed, `${pkg.meta.code}:${tick}:${seq}`)),
-  };
-  state = pkg.reducer(previousState, event, context);
-  seq += 1;
-  if (event.source === 'tick') {
-    tick += 1;
-  }
-  events.push(event);
-}
-
-/**
- * enforceEventSchema 复用仿真包交互声明校验事件,避免前端可运行但后端动作日志拒绝。
- */
-function enforceEventSchema(pkg: SimPackage, eventInput: Omit<SimEvent, 'seq' | 'atTick'>): void {
-  if (eventInput.source !== 'user') {
-    return;
-  }
-  const interaction = pkg.interactions.find((item) => item.emits === eventInput.type);
-  if (!interaction) {
-    throw new Error('当前仿真包不支持这个操作');
-  }
-  if ((interaction.target === 'element' || interaction.kind === 'select-element') && !eventInput.target) {
-    throw new Error('请先选择要操作的仿真对象');
-  }
-  if (interaction.target !== 'element' && interaction.kind !== 'select-element' && eventInput.target) {
-    throw new Error('当前对象不能执行这个操作');
-  }
-  const payload = eventInput.payload ?? {};
-  const allowed = new Map((interaction.params ?? []).map((field) => [field.name, field]));
-  for (const key of Object.keys(payload)) {
-    if (platformPayloadValueMatchesInteraction(key, payload[key], interaction)) {
-      continue;
-    }
-    const field = allowed.get(key);
-    if (!field || !payloadValueMatchesField(payload[key], field)) {
-      throw new Error('操作参数不完整，请检查后重试');
-    }
-  }
-  for (const field of interaction.params ?? []) {
-    if (field.required && payload[field.name] === undefined) {
-      throw new Error('请补全操作参数后再继续');
-    }
-  }
-}
-
-/**
- * platformPayloadValueMatchesInteraction 校验平台通用控件自动生成的固定字段,算法字段仍必须走 params。
- */
-function platformPayloadValueMatchesInteraction(key: string, value: JsonValue | undefined, interaction: SimPackage['interactions'][number]): boolean {
-  if (key === 'target') {
-    return (interaction.target === 'element' || interaction.kind === 'select-element') && typeof value === 'string' && value.trim().length > 0 && value.length <= 128;
-  }
-  if (interaction.kind === 'hold' && key === 'active') {
-    return typeof value === 'boolean';
-  }
-  if (interaction.kind !== 'drag') {
-    return false;
-  }
-  if (key === 'phase') {
-    return value === 'start' || value === 'move' || value === 'end';
-  }
-  if (key === 'startX' || key === 'startY' || key === 'currentX' || key === 'currentY' || key === 'deltaX' || key === 'deltaY') {
-    return typeof value === 'number' && Number.isFinite(value);
-  }
-  return false;
-}
-
-/**
- * payloadValueMatchesField 校验用户载荷是否落在字段声明范围内。
- */
-function payloadValueMatchesField(value: JsonValue | undefined, field: FieldDef): boolean {
-  if (value === undefined) {
-    return !field.required;
-  }
-  if (field.type === 'number' || field.type === 'range') {
-    if (typeof value !== 'number' || !Number.isFinite(value)) {
-      return false;
-    }
-    if (field.min !== undefined && value < field.min) {
-      return false;
-    }
-    if (field.max !== undefined && value > field.max) {
-      return false;
-    }
-    return true;
-  }
-  if (field.type === 'boolean') {
-    return typeof value === 'boolean';
-  }
-  if (field.type === 'string') {
-    return typeof value === 'string' && value.trim().length > 0 && value.length <= 512;
-  }
-  if (field.type === 'select') {
-    const valueText = scalarPayloadString(value);
-    return valueText !== undefined && Boolean(field.options?.some((option) => scalarPayloadString(option.value) === valueText));
-  }
-  return false;
-}
-
-/**
- * scalarPayloadString 复刻后端公开标量枚举比较规则,保证 select 参数前后端一致。
- */
-function scalarPayloadString(value: JsonValue | undefined): string | undefined {
-  if (typeof value === 'string') {
-    return value.trim() || undefined;
-  }
-  if (typeof value === 'number' && Number.isFinite(value)) {
-    return String(value);
-  }
-  return undefined;
-}
-
-/**
- * replay 从初始状态重放事件日志,用于回退时保持状态可复现。
- */
-function replay(nextEvents: SimEvent[]): void {
-  const pkg = readyPackage();
-  tick = 0;
-  seq = 1;
-  events = [];
-  let replayState = pkg.initState(initParams, seed);
-  for (const event of nextEvents) {
-    const context: ReducerContext = {
-      seed,
-      tick: event.atTick,
-      seq: event.seq,
-      random: new XorShiftRandom(hashSeed(seed, `${pkg.meta.code}:${event.atTick}:${event.seq}`)),
-    };
-    replayState = pkg.reducer(replayState, event, context);
-    tick = event.source === 'tick' ? event.atTick + 1 : event.atTick;
-    seq = event.seq + 1;
-    events.push(event);
-  }
-  state = replayState;
-}
-
-/**
- * snapshot 汇总状态、视图、叙事、交互可用性和检查点结果。
- */
-function snapshot(): RuntimeSnapshot {
-  const pkg = readyPackage();
-  const current = currentState();
-  const currentStep = currentNarrativeStep();
-  const view = pkg.render(current);
-  assertValidTeachingFrame(view, readyPackage().meta.scaleLimit);
-  const checkpointResults: RuntimeSnapshot['checkpointResults'] = {};
-  for (const checkpoint of pkg.checkpoints ?? []) {
-    checkpointResults[checkpoint.id] = checkpoint.evaluate(current);
-  }
-  const interactionAvailability: Record<string, boolean> = {};
-  for (const interaction of pkg.interactions) {
-    interactionAvailability[interaction.id] = interaction.availableWhen ? interaction.availableWhen(current) : true;
-  }
-  return {
-    state: current,
-    tick,
-    events: [...events],
-    view,
-    currentStep,
-    interactionAvailability,
-    checkpointResults,
-  };
-}
-
-/**
- * postSnapshot 把最新纯数据快照发送给主线程。
- */
-function postSnapshot(requestId: number, event?: SimEvent): void {
-  postToMain({ type: 'snapshot', requestId, snapshot: snapshot(), event });
-}
-
-/**
- * currentNarrativeStep 根据当前状态选择正在触发的叙事步骤。
- */
-function currentNarrativeStep(): NarrativeStepDescriptor | undefined {
-  const pkg = readyPackage();
-  const current = currentState();
-  const steps = pkg.narrative ?? [];
-  const matched = steps.find((step) => step.trigger(current));
-  return stripNarrativeStep(matched);
-}
-
-/**
- * describePackage 把含函数的 SimPackage 收窄成可发送给主线程的描述符。
- */
-function describePackage(pkg: SimPackage): SimPackageDescriptor {
-  return {
-    meta: pkg.meta,
-    interactions: pkg.interactions.map(({ availableWhen: _availableWhen, ...interaction }) => interaction),
-    narrative: (pkg.narrative ?? []).map(stripNarrativeStep).filter((step): step is NarrativeStepDescriptor => Boolean(step)),
-    codeTrace: pkg.codeTrace,
-    checkpoints: (pkg.checkpoints ?? []).map<CheckpointDescriptor>((checkpoint) => ({ id: checkpoint.id, label: checkpoint.label })),
-  };
-}
-
-/**
- * stripNarrativeStep 移除叙事触发函数,只保留可序列化的教学描述。
- */
-function stripNarrativeStep(step?: NonNullable<SimPackage['narrative']>[number]): NarrativeStepDescriptor | undefined {
-  if (!step) {
-    return undefined;
-  }
-  const descriptorStep = { ...step } as NarrativeStepDescriptor & { trigger?: unknown };
-  delete descriptorStep.trigger;
-  return descriptorStep;
-}
-
-/**
- * installRuntimeGuards 禁止仿真包访问网络、嵌套 Worker、真实时间和非确定性随机源。
- */
-function installRuntimeGuards(): void {
-  const scope = self;
-  const blocked = (): never => {
-    throw new Error('仿真包能力不被允许');
-  };
-  Math.random = blocked;
-  Date.now = blocked;
-  blockWorkerGlobal(scope, 'fetch', () => Promise.reject(new Error('仿真包网络访问不被允许')));
-  blockWorkerGlobal(scope, 'XMLHttpRequest', undefined);
-  blockWorkerGlobal(scope, 'WebSocket', undefined);
-  blockWorkerGlobal(scope, 'EventSource', undefined);
-  blockWorkerGlobal(scope, 'Worker', undefined);
-  blockWorkerGlobal(scope, 'SharedWorker', undefined);
-  blockWorkerGlobal(scope, 'BroadcastChannel', undefined);
-  blockWorkerGlobal(scope, 'indexedDB', undefined);
-  blockWorkerGlobal(scope, 'caches', undefined);
-  blockWorkerGlobal(scope, 'importScripts', blocked);
-  blockWorkerGlobal(scope, 'eval', blocked);
-  blockWorkerGlobal(scope, 'Function', blocked);
-  blockWorkerGlobal(scope, 'postMessage', blocked);
-  blockWorkerGlobal(scope, 'addEventListener', blocked);
-}
-
-/**
- * blockWorkerGlobal 覆盖 Worker 全局能力,只接受可重新定义的属性。
- */
-function blockWorkerGlobal(scope: object, key: string, value: unknown): void {
-  const descriptor = findPropertyDescriptor(scope, key);
-  if (descriptor && descriptor.configurable === false) {
-    throw new Error('仿真运行环境无法封锁必要浏览器能力');
-  }
-  Object.defineProperty(scope, key, {
-    value,
-    configurable: true,
-    writable: false,
+  engine = new SimEngine(builtinPackage, request.initParams, request.seed);
+  postToMain({
+    type: 'ready',
+    requestId: request.requestId,
+    descriptor: engine.describe(),
+    snapshot: engine.snapshot(),
   });
 }
 
 /**
- * findPropertyDescriptor 沿原型链查找 Worker 全局属性描述符。
+ * readyEngine 返回已装配的引擎,未初始化时明确失败而不静默继续。
  */
-function findPropertyDescriptor(scope: object, key: string): PropertyDescriptor | undefined {
-  let cursor: object | null = scope;
-  while (cursor) {
-    const descriptor = Object.getOwnPropertyDescriptor(cursor, key);
-    if (descriptor) {
-      return descriptor;
-    }
-    cursor = Object.getPrototypeOf(cursor);
+function readyEngine(): SimEngine {
+  if (!engine) {
+    throw new Error('仿真运行环境尚未准备好,请稍后重试');
   }
-  return undefined;
+  return engine;
 }
 
 /**
- * enforceEventLimit 执行仿真包声明的 tick 和事件规模上限。
+ * postSnapshot 把最新纯数据快照发送给主线程;推进类命令附带刚产生的事件。
  */
-function enforceEventLimit(eventInput: Omit<SimEvent, 'seq' | 'atTick'>): void {
-  const pkg = readyPackage();
-  if (eventInput.source === 'tick' && tick >= pkg.meta.scaleLimit.maxTick) {
-    throw new Error('仿真步骤数量超过限制，请调整场景规模');
+function postSnapshot(requestId: number, withEvent = false): void {
+  const current = readyEngine();
+  postToMain({
+    type: 'snapshot',
+    requestId,
+    snapshot: current.snapshot(),
+    event: withEvent ? current.lastEvent() : undefined,
+  });
+}
+
+/**
+ * installRuntimeGuards 禁止仿真包访问网络、嵌套 Worker、真实时间和非确定性随机源。
+ *
+ * 随机与时间走共享口径(见 runtime/guards.ts):容器宿主必须与这里完全一致,
+ * 否则同一个 seed 在两处跑出两条过程。本函数只声明浏览器这一侧特有的宿主入口。
+ * `fetch` 给一个拒绝的 Promise 而不是 undefined:包里常见写法是 `await fetch(...)`,
+ * 拒绝能让它拿到明确原因,而 undefined 会抛 TypeError,排查时看不出是被平台封锁的。
+ */
+function installRuntimeGuards(): void {
+  const scope = self;
+  installDeterminismGuards(scope);
+  sealGlobal(scope, 'fetch', () => Promise.reject(new Error('仿真包网络访问不被允许')));
+  for (const name of ['XMLHttpRequest', 'WebSocket', 'EventSource', 'Worker', 'SharedWorker', 'BroadcastChannel', 'indexedDB', 'caches']) {
+    sealGlobal(scope, name, undefined);
   }
-  if (events.length >= pkg.meta.scaleLimit.maxEvents) {
-    throw new Error('仿真事件数量超过限制，请调整场景规模');
+  for (const name of ['importScripts', 'eval', 'Function', 'postMessage', 'addEventListener']) {
+    sealGlobal(scope, name, blockedCapability);
   }
 }
 

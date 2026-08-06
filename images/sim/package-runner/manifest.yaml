@@ -1,0 +1,90 @@
+﻿# 本文件声明 sim/package-runner 镜像的职责、端口、安全、资源和供应链约束。
+schema_version: 1
+category: sim
+name: package-runner
+image: sim/package-runner
+labels:
+  app.kubernetes.io/name: package-runner
+  app.kubernetes.io/component: sim
+  app.kubernetes.io/part-of: chaimir
+  chaimir.io/category: sim
+  chaimir.io/image: sim/package-runner
+  chaimir.io/data-driven: "false"
+  chaimir.io/student-access: "false"
+  chaimir.io/sensitivity: untrusted-code-execution
+  chaimir.io/scope: sim
+  chaimir.io/source: platform-built
+description: M4 扩展仿真包通用运行器镜像;镜像内只有平台装配器与 stdio-json 协议实现,不含任何仿真算法。
+source:
+  type: platform-built
+upstream:
+  image: base/node-builder
+  digest: ""
+  reuse_policy: build-base-runtime
+data_driven: false
+capabilities:
+  - simulation-isolated-execution
+  - untrusted-package-assembly
+  - determinism-verification
+sim:
+  compute: backend
+  backend_adapter: sim-package-runner
+  protocol: stdio-json
+  # 包正文不随镜像交付:后端按会话经 k8s exec stdin 推入归档字节,容器内校验 sha256
+  # 与 sim_package.bundle_hash 逐字节一致后按 meta.entry 装配(见 docs/总-镜像与容器设计.md §六之一)。
+  # 之所以不让容器自己下载:计算 Pod 根文件系统只读且网络 deny-all,既写不下也取不到对象存储;
+  # 放开网络等于拆掉隔离边界。
+  bundle_delivery: exec-stdin
+  bundle_hash_verified: true
+  serves_all_extension_packages: true
+  determinism:
+    required: true
+    validation_runs: 2
+  commands:
+    - init
+    - apply
+    - restore
+    - verify
+ports: []
+local_dev:
+  host_mappings: []
+security:
+  run_as_non_root: true
+  read_only_root_filesystem: true
+  allow_privilege_escalation: false
+  privileged: false
+  host_network: false
+  automount_service_account_token: false
+  drop_capabilities:
+    - ALL
+  network_policy: deny-all
+  # 归档解包与装配需要可写目录;唯一可写点是 emptyDir,随会话命名空间删除一并消失。
+  writable_paths:
+    - /tmp/sim-bundle
+student_access:
+  enabled: false
+resources:
+  cpu_request: 100m
+  cpu_limit: "1"
+  memory_request: 192Mi
+  memory_limit: 512Mi
+  ephemeral_storage_limit: 256Mi
+  timeout_seconds: 15
+  # 与 UPLOAD_SIM_BUNDLE_MAX_BYTES(20MiB)留出 base64 膨胀余量。
+  max_input_bytes: 52428800
+  max_output_bytes: 4194304
+build:
+  context: ../../..
+  dockerfile: images/sim/package-runner/Dockerfile
+selftest:
+  commands:
+    - name: protocol-reject-unknown
+      command:
+        - /bin/sh
+        - -c
+        - echo '{"op":"__selftest__"}' | node /opt/sim-runner/runtime/containerMain.js | grep -q '"ok":false'
+supply_chain:
+  sbom: true
+  trivy_required: true
+  cosign_required: true
+  pull_by_digest_in_production: true

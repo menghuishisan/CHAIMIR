@@ -1,22 +1,17 @@
 // 仿真场景提交表单(仿真场景页内弹层)。
 //
 // 后端 validateBundleManifestMatchesRequest 要求表单元数据与包内 sim-package.json 的 meta 逐字一致
-// (code/version/name/category/compute 与 scale_limit),故本表单把这些字段全部显式渲染,
+// (code/version/name/category 与 scale_limit),故本表单把这些字段全部显式渲染,
 // 并在说明里点明「必须与包内声明一致」—— 不一致后端会拒绝,提前说清比事后报错好。
 //
-// 运行方式与后端适配器只能从 GET /sim/backend-capabilities 的响应里选:
-// 部署没装配后端计算时不给「服务端计算」选项;标准 stdio-json 能力不接受包级配置,
-// 因此没有适配器配置输入框(后端 ValidateConfig 对非空配置直接拒绝)。
+// 表单没有「运行方式」:执行位置按代码来源派生,教师与第三方提交的场景一律在平台的隔离容器内运行
+// (见 docs/04-仿真可视化引擎/02-架构设计.md §8),提交请求里不存在这个字段,也就没有可选项。
 //
 // 编号命名空间由后端按登录账号强制为 teacher_<账号编号>__,页面据此在新建时给出前缀提示。
 
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useState } from 'react'
 import { Upload } from 'lucide-react'
-import {
-  SIM_COMPUTE,
-  type SimCompute,
-  type SimPackageMeta,
-} from '@chaimir/api-client'
+import type { SimPackageMeta } from '@chaimir/api-client'
 import {
   Button,
   Callout,
@@ -29,16 +24,10 @@ import {
   ModalFooter,
   ModalHeader,
   ModalTitle,
-  SegmentedControl,
-  Select,
-  Skeleton,
   toast,
 } from '@chaimir/ui'
 import { api } from '../../../../app/api'
-import { ResourceState } from '../../../../components/ResourceState'
-import { useAsyncResource } from '../../../../hooks'
 import { useSession } from '../../../../components/RoleGuard'
-import { simComputeLabel } from '../../../../utils/labels/sim'
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
 
 /** 规模上限的三个键与后端 manifest meta.scale_limit 一致。 */
@@ -60,41 +49,19 @@ export interface SimPackageFormModalProps {
 
 /**
  * SimPackageFormModal 承载仿真包提交与更新。
- * 先读服务端能力目录再渲染表单:运行方式选项来自部署真实装配的适配器,不硬编码。
  */
 export function SimPackageFormModal({ item, onClose, onSaved }: SimPackageFormModalProps) {
-  const capabilities = useAsyncResource(() => api.sim.getBackendCapabilities(), [], () => false)
-
   return (
     <Modal open onOpenChange={(open) => !open && onClose()}>
       <ModalContent size="lg">
         <ModalHeader>
           <ModalTitle>{item ? '更新仿真场景' : '提交仿真场景'}</ModalTitle>
           <ModalDescription>
-            表单里的编号、版本、名称、分类、运行方式与规模上限必须与场景包内的声明完全一致,否则平台会拒收。
+            表单里的编号、版本、名称、分类与规模上限必须与场景包内的声明完全一致,否则平台会拒收。
+            场景提交后由平台在隔离环境里试跑并审核,通过后才能被课程使用。
           </ModalDescription>
         </ModalHeader>
-        <ResourceState
-          resource={capabilities}
-          emptyIcon={Upload}
-          emptyTitle="暂时无法读取平台能力"
-          emptyDescription="请稍后重试。"
-          skeleton={
-            <ModalBody>
-              <Skeleton variant="line" lines={5} />
-            </ModalBody>
-          }
-        >
-          {(data) => (
-            <PackageForm
-              item={item}
-              backendCompute={data.backend_compute}
-              adapters={data.adapters}
-              onClose={onClose}
-              onSaved={onSaved}
-            />
-          )}
-        </ResourceState>
+        <PackageForm item={item} onClose={onClose} onSaved={onSaved} />
       </ModalContent>
     </Modal>
   )
@@ -102,8 +69,6 @@ export function SimPackageFormModal({ item, onClose, onSaved }: SimPackageFormMo
 
 interface PackageFormProps {
   item?: SimPackageMeta
-  backendCompute: boolean
-  adapters: { code: string; name: string; description: string }[]
   onClose: () => void
   onSaved: () => void
 }
@@ -111,7 +76,7 @@ interface PackageFormProps {
 /**
  * PackageForm 渲染表单本体并提交 multipart 上传。
  */
-function PackageForm({ item, backendCompute, adapters, onClose, onSaved }: PackageFormProps) {
+function PackageForm({ item, onClose, onSaved }: PackageFormProps) {
   const { me } = useSession()
   const editing = item !== undefined
 
@@ -119,8 +84,6 @@ function PackageForm({ item, backendCompute, adapters, onClose, onSaved }: Packa
   const [version, setVersion] = useState(item?.version ?? '1.0.0')
   const [name, setName] = useState(item?.name ?? '')
   const [category, setCategory] = useState(item?.category ?? '')
-  const [compute, setCompute] = useState<SimCompute>(item?.compute ?? SIM_COMPUTE.FRONTEND)
-  const [adapter, setAdapter] = useState(item?.backend_adapter ?? '')
   const [scale, setScale] = useState<ScaleLimitForm>(() => readScaleLimit(item))
   const [file, setFile] = useState<File>()
   const [errors, setErrors] = useState<Record<string, string | null>>({})
@@ -129,7 +92,6 @@ function PackageForm({ item, backendCompute, adapters, onClose, onSaved }: Packa
   const [submitting, setSubmitting] = useState(false)
 
   const codePrefix = `teacher_${me.account.id}__`
-  const isBackend = compute === SIM_COMPUTE.BACKEND
 
   const validate = useCallback((): boolean => {
     const next: Record<string, string | null> = {
@@ -144,7 +106,6 @@ function PackageForm({ item, backendCompute, adapters, onClose, onSaved }: Packa
         ? null
         : '分类用小写字母、数字、下划线或连字符,如 consensus',
       file: file ? null : '请选择场景包文件',
-      adapter: isBackend && adapter === '' ? '服务端计算需要选择一种计算能力' : null,
       scale:
         [scale.nodes, scale.maxTick, scale.maxEvents].every((value) => Number(value) > 0)
           ? null
@@ -152,7 +113,7 @@ function PackageForm({ item, backendCompute, adapters, onClose, onSaved }: Packa
     }
     setErrors(next)
     return Object.values(next).every((value) => value === null)
-  }, [adapter, category, code, codePrefix, file, isBackend, name, scale, version])
+  }, [category, code, codePrefix, file, name, scale, version])
 
   const submit = useCallback(
     async (event: React.FormEvent<HTMLFormElement>) => {
@@ -167,15 +128,11 @@ function PackageForm({ item, backendCompute, adapters, onClose, onSaved }: Packa
         version: version.trim(),
         name: name.trim(),
         category: category.trim(),
-        compute,
         scale_limit: {
           nodes: Number(scale.nodes),
           max_tick: Number(scale.maxTick),
           max_events: Number(scale.maxEvents),
         },
-        // 前端计算包不带适配器与后端配置(后端对二者都有互斥校验)
-        backend_adapter: isBackend ? adapter : undefined,
-        backend_config: {},
       }
       try {
         if (editing) {
@@ -198,32 +155,7 @@ function PackageForm({ item, backendCompute, adapters, onClose, onSaved }: Packa
         setProgress(undefined)
       }
     },
-    [
-      adapter,
-      category,
-      code,
-      compute,
-      editing,
-      file,
-      isBackend,
-      item?.id,
-      name,
-      onSaved,
-      scale,
-      validate,
-      version,
-    ],
-  )
-
-  const computeOptions = useMemo(
-    () =>
-      backendCompute
-        ? [
-            { value: SIM_COMPUTE.FRONTEND, label: simComputeLabel(SIM_COMPUTE.FRONTEND) },
-            { value: SIM_COMPUTE.BACKEND, label: simComputeLabel(SIM_COMPUTE.BACKEND) },
-          ]
-        : [{ value: SIM_COMPUTE.FRONTEND, label: simComputeLabel(SIM_COMPUTE.FRONTEND) }],
-    [backendCompute],
+    [category, code, editing, file, item?.id, name, onSaved, scale, validate, version],
   )
 
   return (
@@ -281,47 +213,6 @@ function PackageForm({ item, backendCompute, adapters, onClose, onSaved }: Packa
           </FormField>
         </div>
 
-        <FormField
-          label="运行方式"
-          required
-          helper={
-            backendCompute
-              ? '本机推演在学生浏览器里确定性运行;服务端计算由平台的计算能力执行'
-              : '当前部署只装配了本机推演能力'
-          }
-        >
-          <SegmentedControl
-            aria-label="运行方式"
-            options={computeOptions}
-            value={compute}
-            disabled={!backendCompute}
-            onValueChange={(value) => {
-              setCompute(value as SimCompute)
-              if (value === SIM_COMPUTE.FRONTEND) setAdapter('')
-            }}
-          />
-        </FormField>
-
-        {isBackend ? (
-          <FormField
-            label="计算能力"
-            htmlFor="sim-adapter"
-            required
-            error={errors.adapter}
-            helper="从平台已装配的能力里选择。能力的镜像、资源与超时由平台统一约束,不在这里配置。"
-          >
-            <Select
-              id="sim-adapter"
-              options={adapters.map((entry) => ({ value: entry.code, label: entry.name }))}
-              value={adapter}
-              placeholder={adapters.length > 0 ? '选择计算能力' : '暂无可用能力'}
-              disabled={adapters.length === 0}
-              invalid={Boolean(errors.adapter)}
-              onValueChange={setAdapter}
-            />
-          </FormField>
-        ) : null}
-
         <div className="flex flex-col gap-3 rounded-md border border-line bg-surface-sunken p-4">
           <div className="text-sm font-medium text-ink">规模上限</div>
           <p className="text-xs text-ink-sub">
@@ -364,7 +255,7 @@ function PackageForm({ item, backendCompute, adapters, onClose, onSaved }: Packa
           htmlFor="sim-bundle"
           required
           error={errors.file}
-          helper="ZIP 或 TAR 归档,根目录需含 sim-package.json。平台会校验包内声明并做安全扫描。"
+          helper="ZIP 或 TAR 归档,根目录需含 sim-package.json,并在 meta.entry 指明入口 .mjs 文件。平台会校验包内声明并做安全扫描。"
         >
           <Input
             id="sim-bundle"

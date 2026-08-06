@@ -13,7 +13,6 @@ export const latencyLossSimulation: SimPackage<LatencyLossState> = {
     name: '延迟丢包与重传推演',
     category: 'network',
     version: '1.0.0',
-    compute: 'frontend',
     summary: '完整推演可靠传输中的发送窗口、网络延迟、丢包检测、重传、退避与窗口恢复。',
     learningObjectives: ['理解延迟和丢包的差异', '掌握超时重传流程', '观察窗口退避如何保护网络'],
     scaleLimit: { nodes: 64, maxTick: 140, maxEvents: 240 },

@@ -32,6 +32,7 @@ import {
   Badge,
   Button,
   ChainProgress,
+  Input,
   WorkbenchShell,
   WorkbenchTopbar,
   toast,
@@ -526,12 +527,13 @@ function ProblemStage({
       <div className="flex h-full flex-col gap-3 p-6">
         <label className="flex flex-col gap-1">
           <span className="text-sm text-on-dark">你的答案</span>
-          <input
+          <Input
+            variant="underline"
             value={answer}
             disabled={!answerable}
             placeholder="按题面要求填写"
+            className="font-mono text-sm"
             onChange={(event) => onAnswerChange(event.target.value)}
-            className="rounded-md border border-dark-line bg-dark-surface px-3 py-2 font-mono text-sm text-on-dark placeholder:text-on-dark-faint focus:border-accent focus:outline-none disabled:opacity-50"
           />
         </label>
         <p className="text-xs text-on-dark-sub">

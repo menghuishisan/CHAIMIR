@@ -10,6 +10,7 @@
   "scripts": {
     "dev": "tsc --watch --noEmit",
     "build": "tsc --noEmit",
+    "build:container": "tsc -p tsconfig.container.json",
     "lint": "eslint src --ext .ts,.tsx",
     "type-check": "tsc --noEmit"
   },

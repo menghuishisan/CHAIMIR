@@ -5,8 +5,8 @@
 // 作者边界由服务端会话判定,页面不传作者参数。
 //
 // 边界(对齐清单 §3.2 / §6.1):审核通过、驳回、下架、重新上架只在平台管理端,本页不出现这些动作。
-// 运行方式与后端适配器只能从 GET /sim/backend-capabilities 的响应里选 ——
-// 标准 stdio-json 能力不接受包级自由配置,故本页不提供适配器配置输入。
+// 表单也没有「运行方式」:教师提交的场景一律在平台的隔离容器内运行,执行位置按代码来源派生
+// (见 docs/04-仿真可视化引擎/02-架构设计.md §8),不是提交时的可选项。
 
 import { useMemo, useState } from 'react'
 import { CircleCheck, FileSearch, Network, Pencil, Plus, Upload } from 'lucide-react'
@@ -113,14 +113,11 @@ export default function TeacherSimulationsPage() {
     },
     {
       key: 'compute',
-      header: '运行方式',
+      header: '运行位置',
       render: (pkg) => (
-        <div className="flex flex-wrap items-center gap-1.5">
-          <Badge tone={pkg.compute === SIM_COMPUTE.FRONTEND ? 'jade' : 'info'}>
-            {simComputeLabel(pkg.compute)}
-          </Badge>
-          {pkg.backend_adapter ? <Badge tone="neutral">{pkg.backend_adapter}</Badge> : null}
-        </div>
+        <Badge tone={pkg.compute === SIM_COMPUTE.BROWSER ? 'jade' : 'info'}>
+          {simComputeLabel(pkg.compute)}
+        </Badge>
       ),
     },
     {

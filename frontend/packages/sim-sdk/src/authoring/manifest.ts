@@ -11,7 +11,8 @@ export interface SimPackageManifest {
     name: string;
     category: string;
     version: string;
-    compute: string;
+    /** entry 是归档内入口模块相对路径,供隔离容器装配;内置包按 code 装配故为 undefined。 */
+    entry?: string;
     scale_limit: {
       nodes: number;
       max_tick: number;
@@ -101,16 +102,25 @@ export function defineSimPackage<TState extends SimState>(simPackage: SimPackage
 
 /**
  * createSimPackageManifest 生成上传审核使用的 sim-package.json 结构,不包含 reducer 等可执行函数。
+ *
+ * entry 是归档内入口模块相对路径,由作者在打包时给出(隔离容器据此装配,见
+ * docs/04-仿真可视化引擎/03-可视化SDK与交互协议.md §1)。内置包由平台 registry 按 code 装配,
+ * 不需要 entry,故该参数可省略。
  */
-export function createSimPackageManifest<TState extends SimState>(simPackage: SimPackage<TState>): SimPackageManifest {
+export function createSimPackageManifest<TState extends SimState>(
+  simPackage: SimPackage<TState>,
+  entry?: string,
+): SimPackageManifest {
   const summary = createManifestSummary(simPackage);
+  // 打包参数优先于包内声明:同一份包可能以不同归档结构分发,入口路径由打包那一刻决定。
+  const resolvedEntry = entry ?? simPackage.meta.entry;
   return {
     meta: {
       code: summary.meta.code,
       name: summary.meta.name,
       category: summary.meta.category,
       version: summary.meta.version,
-      compute: summary.meta.compute,
+      ...(resolvedEntry ? { entry: resolvedEntry } : {}),
       scale_limit: {
         nodes: summary.meta.scaleLimit.nodes,
         max_tick: summary.meta.scaleLimit.maxTick,

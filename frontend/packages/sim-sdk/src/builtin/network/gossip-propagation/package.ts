@@ -13,7 +13,6 @@ export const gossipPropagationSimulation: SimPackage<GossipState> = {
     name: 'Gossip 消息传播推演',
     category: 'network',
     version: '1.0.0',
-    compute: 'frontend',
     summary: '完整推演 Gossip 的种子广播、扇出传播、重复抑制、覆盖收敛和污染消息隔离。',
     learningObjectives: ['理解 Gossip 为什么能低成本覆盖网络', '观察 fanout 对速度和重复消息的影响', '掌握污染消息如何被隔离'],
     scaleLimit: { nodes: 120, maxTick: 160, maxEvents: 280 },

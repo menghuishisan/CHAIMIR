@@ -16,7 +16,6 @@ export const raftSimulation: SimPackage<RaftState> = {
     name: 'Raft 选举与日志复制推演',
     category: 'consensus',
     version: '1.0.0',
-    compute: 'frontend',
     summary: '完整推演 Raft 选举超时、RequestVote、多数派领导、AppendEntries、提交索引和分区恢复。',
     learningObjectives: ['理解任期与多数派选举', '掌握日志匹配和提交索引推进', '观察网络分区后如何恢复一致日志'],
     scaleLimit: { nodes: 96, maxTick: 160, maxEvents: 280 },

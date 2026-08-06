@@ -1,8 +1,9 @@
 // 仿真场景审核报告(仿真场景页内弹层)。
 //
 // 只读展示后端 GET /sim/packages/{id}/preview 的审核报告。四个校验子项与后端字段一一对应:
-// 元数据校验与静态扫描在上传时由后端生成,确定性校验与 Worker 预览由受控预览流程回写。
-// 平台要求四项全部通过才能上架,因此这里逐项呈现状态与说明,让教师知道该修什么。
+// 元数据校验与静态扫描在上传时由后端生成,确定性校验与运行预览由平台的隔离预览任务在容器里跑完后回写。
+// 平台要求四项全部通过才能上架,因此这里逐项呈现状态与说明,并摊开容器渲出的样例画面 ——
+// 「跑不起来」与「跑起来但效果不对」是两件事,后者只能看画面。
 //
 // 教师只看自己提交的包(后端 PackagePreview 校验作者归属),本页不含任何审核决策动作。
 
@@ -12,7 +13,6 @@ import {
   Badge,
   Button,
   Callout,
-  DescriptionList,
   Modal,
   ModalBody,
   ModalContent,
@@ -29,6 +29,7 @@ import { ResourceState } from '../../../../components/ResourceState'
 import { useAsyncResource } from '../../../../hooks'
 import { formatDateTime } from '../../../../utils/formatters'
 import { simReviewResultLabel, simReviewResultTone } from '../../../../utils/labels/sim'
+import { SimPreviewFrames } from '../../SimPreviewFrames'
 
 /** 校验子项的用户向名称:后端只给字段名,界面文案在前端维护。 */
 const CHECK_LABELS = {
@@ -96,12 +97,11 @@ export function SimPackagePreviewModal({ item, onClose }: SimPackagePreviewModal
 }
 
 /**
- * PreviewBody 渲染审核结论、四项校验与明细。
+ * PreviewBody 渲染审核结论、四项校验与隔离预览渲出的样例画面。
  */
 function PreviewBody({ review }: { review: SimPackageReview }) {
   const report = review.preview_report
   const scanFindings = report.static_scan?.findings ?? []
-  const details = Object.entries(report.details ?? {})
 
   return (
     <ModalBody className="flex flex-col gap-4">
@@ -150,13 +150,7 @@ function PreviewBody({ review }: { review: SimPackageReview }) {
         </Callout>
       ) : null}
 
-      {details.length > 0 ? (
-        <DescriptionList
-          dense
-          columns={1}
-          items={details.map(([key, value]) => ({ term: key, description: value }))}
-        />
-      ) : null}
+      <SimPreviewFrames frames={report.preview_frames} />
 
       {report.bundle_hash ? (
         <p className="font-mono text-xs text-ink-faint">场景包校验值 {report.bundle_hash}</p>

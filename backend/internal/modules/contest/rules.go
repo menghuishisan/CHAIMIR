@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"chaimir/internal/platform/auth"
+	"chaimir/internal/platform/jsonx"
 	"chaimir/pkg/apperr"
 )
 
@@ -71,7 +72,7 @@ func validateBattleConfig(cfg map[string]any) error {
 		return apperr.ErrContestProblemInvalid
 	}
 	for _, key := range []string{"runtime_code", "runtime_image_version"} {
-		if strings.TrimSpace(stringValue(cfg[key])) == "" {
+		if strings.TrimSpace(jsonx.StringValue(cfg[key])) == "" {
 			return apperr.ErrContestProblemInvalid
 		}
 	}
@@ -81,18 +82,12 @@ func validateBattleConfig(cfg map[string]any) error {
 			return apperr.ErrContestProblemInvalid
 		}
 		for _, item := range items {
-			if strings.TrimSpace(stringValue(item)) == "" {
+			if strings.TrimSpace(jsonx.StringValue(item)) == "" {
 				return apperr.ErrContestProblemInvalid
 			}
 		}
 	}
 	return nil
-}
-
-// stringValue 在规则校验中读取 JSON 字符串值。
-func stringValue(v any) string {
-	s, _ := v.(string)
-	return s
 }
 
 // validateContestTransition 校验竞赛生命周期状态流转。

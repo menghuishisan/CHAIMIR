@@ -39,6 +39,7 @@ type SimPackage struct {
 	ScaleLimit        []byte             `json:"scale_limit"`
 	BundleKey         string             `json:"bundle_key"`
 	BundleHash        string             `json:"bundle_hash"`
+	Entry             pgtype.Text        `json:"entry"`
 	BackendAdapter    pgtype.Text        `json:"backend_adapter"`
 	BackendConfig     []byte             `json:"backend_config"`
 	InteractionSchema []byte             `json:"interaction_schema"`

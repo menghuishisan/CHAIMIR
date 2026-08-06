@@ -39,6 +39,7 @@ func packageFromRow(row sqlcgen.SimPackage) (Package, error) {
 		ScaleLimit:        scale,
 		BundleKey:         row.BundleKey,
 		BundleHash:        row.BundleHash,
+		Entry:             pgtypex.TextValue(row.Entry),
 		BackendAdapter:    pgtypex.TextValue(row.BackendAdapter),
 		BackendConfig:     backendConfig,
 		InteractionSchema: interactionSchema,

@@ -6,7 +6,6 @@ import (
 
 	"chaimir/internal/contracts"
 	"chaimir/internal/platform/ids"
-	"chaimir/internal/platform/jsonx"
 	"chaimir/pkg/apperr"
 )
 
@@ -93,7 +92,7 @@ func sessionToContract(session Session, pkg Package) (contracts.SimSessionInfo, 
 	if err != nil {
 		return contracts.SimSessionInfo{}, err
 	}
-	return contracts.SimSessionInfo{SessionID: session.ID, TenantID: session.TenantID, PackageCode: pkg.Code, Version: pkg.Version, Compute: compute, BundleRef: pkg.BundleKey, SourceRef: session.SourceRef}, nil
+	return contracts.SimSessionInfo{SessionID: session.ID, TenantID: session.TenantID, PackageCode: pkg.Code, Version: pkg.Version, Compute: compute, SourceRef: session.SourceRef}, nil
 }
 
 // replayToContract 转换回放数据为跨模块契约。
@@ -126,20 +125,6 @@ func replayToMapPublic(session SessionWithPackage, actions []Action) map[string]
 // actionToMap 转换操作为 API 输出。
 func actionToMap(action Action) map[string]any {
 	return map[string]any{"seq": action.Seq, "at_tick": action.AtTick, "event_type": action.EventType, "payload": action.Payload, "created_at": action.CreatedAt}
-}
-
-// reportFromRequest 转换动态预览报告请求。
-func reportFromRequest(req ValidationReportRequest) ValidationReport {
-	return ValidationReport{DeterminismCheck: req.DeterminismCheck, WorkerPreview: req.WorkerPreview, Details: req.Details}
-}
-
-// rawReportMap 把动态报告请求解码为 key 集合,用于阻止覆盖后端静态字段。
-func rawReportMap(raw []byte) (map[string]any, error) {
-	out, err := jsonx.ObjectMapStrict(raw)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
 }
 
 // packageStatusText 返回用户接口中的包状态字符串。

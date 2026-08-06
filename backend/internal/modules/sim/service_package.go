@@ -9,8 +9,6 @@ import (
 
 	"chaimir/internal/platform/jsonx"
 	"chaimir/internal/platform/pagex"
-	"chaimir/internal/platform/storage"
-	"chaimir/internal/platform/tenant"
 	"chaimir/pkg/apperr"
 	"chaimir/pkg/logging"
 )
@@ -67,27 +65,24 @@ func (s *Service) ListPackageVersions(ctx context.Context, code string) ([]map[s
 	return out, nil
 }
 
-// SubmitPackage 上传仿真包、执行后端静态校验并创建审核记录。
+// SubmitPackage 上传仿真包、执行静态校验并创建审核记录。
+//
+// 执行位置与运行能力在此派生而非由请求提供:教师提交的包是外部代码,恒在隔离容器内执行
+// (见 docs/04-仿真可视化引擎/02-架构设计.md §8),绑定平台的扩展包运行器能力。
+// 请求结构里没有这两个字段,因此不存在"客户端声明了一个平台无法运行的执行位置"这种状态。
 func (s *Service) SubmitPackage(ctx context.Context, tenantID, accountID int64, req SubmitPackageRequest, input BundleInput) (map[string]any, error) {
-	req, compute, err := normalizePackageRequest(req)
-	if err != nil {
+	req = normalizePackageRequest(req)
+	if err := validatePackageRequest(req, accountID); err != nil {
 		return nil, err
 	}
-	if err := validatePackageRequest(req, compute, accountID); err != nil {
-		return nil, err
-	}
-	backend, err := decodeObject(req.BackendConfig)
-	if err != nil {
-		return nil, err
-	}
-	if err := validateBackendAdapterConfig(compute, req.BackendAdapter, backend, s.backends); err != nil {
+	if err := s.ensurePackageRunnerAvailable(); err != nil {
 		return nil, err
 	}
 	if err := s.ensurePackageVersionAvailable(ctx, req.Code, req.Version); err != nil {
 		return nil, err
 	}
 	packageID := s.ids.Generate()
-	bundleRef, bundleHash, report, interactionSchema, codeTrace, err := s.storeBundle(ctx, tenantID, accountID, packageID, input, req, compute)
+	stored, err := s.storeBundle(ctx, tenantID, accountID, packageID, input, req)
 	if err != nil {
 		return nil, err
 	}
@@ -95,7 +90,14 @@ func (s *Service) SubmitPackage(ctx context.Context, tenantID, accountID int64, 
 	if err != nil {
 		return nil, err
 	}
-	pkg := Package{ID: packageID, Code: req.Code, Version: req.Version, Name: req.Name, Category: req.Category, Compute: compute, ScaleLimit: scale, BundleKey: bundleRef, BundleHash: bundleHash, BackendAdapter: req.BackendAdapter, BackendConfig: backend, InteractionSchema: interactionSchema, CodeTrace: codeTrace, AuthorType: AuthorTeacher, AuthorID: accountID, Status: PackageStatusReviewing}
+	pkg := Package{
+		ID: packageID, Code: req.Code, Version: req.Version, Name: req.Name, Category: req.Category,
+		Compute: ComputeIsolated, ScaleLimit: scale,
+		BundleKey: stored.ObjectRef, BundleHash: stored.BundleHash, Entry: stored.Entry,
+		BackendAdapter: s.packageRunnerCode, BackendConfig: map[string]any{},
+		InteractionSchema: stored.InteractionSchema, CodeTrace: stored.CodeTrace,
+		AuthorType: AuthorTeacher, AuthorID: accountID, Status: PackageStatusReviewing,
+	}
 	var created Package
 	var review Review
 	if err := s.store.PlatformTx(ctx, func(ctx context.Context, tx TxStore) error {
@@ -104,11 +106,12 @@ func (s *Service) SubmitPackage(ctx context.Context, tenantID, accountID int64, 
 		} else if !isNoRows(err) {
 			return apperr.ErrSimPackageInvalid.WithCause(err)
 		}
+		var err error
 		created, err = tx.CreatePackage(ctx, pkg)
 		if err != nil {
 			return apperr.ErrSimPackageInvalid.WithCause(err)
 		}
-		review, err = tx.CreateReview(ctx, s.ids.Generate(), created.ID, accountID, report)
+		review, err = tx.CreateReview(ctx, s.ids.Generate(), created.ID, accountID, stored.Report)
 		if err != nil {
 			return apperr.ErrSimReviewStateInvalid.WithCause(err)
 		}
@@ -116,7 +119,7 @@ func (s *Service) SubmitPackage(ctx context.Context, tenantID, accountID int64, 
 	}); err != nil {
 		return nil, err
 	}
-	if err := s.uploadPlannedBundle(ctx, bundleRef, input); err != nil {
+	if err := s.uploadPlannedBundle(ctx, stored.ObjectRef, input); err != nil {
 		if rollbackErr := s.markUploadFailed(ctx, created.ID, review.ID); rollbackErr != nil {
 			logging.ErrorContext(ctx, "sim package upload rollback failed", rollbackErr.Error(), slog.Int64("tenant_id", tenantID), slog.Int64("package_id", created.ID), slog.Int64("review_id", review.ID))
 			return nil, apperr.ErrSimBundleUnreadable.WithCause(errors.Join(err, rollbackErr))
@@ -139,25 +142,19 @@ func (s *Service) SubmitPackage(ctx context.Context, tenantID, accountID int64, 
 }
 
 // UpdatePackage 更新草稿或退回包的新 bundle,并重新进入审核中。
+// 不改 compute/backend_adapter/author_type:更新一个包不改变它的作者,也就不该改变执行位置。
 func (s *Service) UpdatePackage(ctx context.Context, tenantID, accountID, packageID int64, req SubmitPackageRequest, input BundleInput) (map[string]any, error) {
-	req, compute, err := normalizePackageRequest(req)
-	if err != nil {
+	req = normalizePackageRequest(req)
+	if err := validatePackageRequest(req, accountID); err != nil {
 		return nil, err
 	}
-	if err := validatePackageRequest(req, compute, accountID); err != nil {
-		return nil, err
-	}
-	backend, err := decodeObject(req.BackendConfig)
-	if err != nil {
-		return nil, err
-	}
-	if err := validateBackendAdapterConfig(compute, req.BackendAdapter, backend, s.backends); err != nil {
+	if err := s.ensurePackageRunnerAvailable(); err != nil {
 		return nil, err
 	}
 	if err := s.ensurePackageEditable(ctx, accountID, packageID, req.Code, req.Version); err != nil {
 		return nil, err
 	}
-	bundleRef, bundleHash, report, interactionSchema, codeTrace, err := s.storeBundle(ctx, tenantID, accountID, packageID, input, req, compute)
+	stored, err := s.storeBundle(ctx, tenantID, accountID, packageID, input, req)
 	if err != nil {
 		return nil, err
 	}
@@ -165,15 +162,21 @@ func (s *Service) UpdatePackage(ctx context.Context, tenantID, accountID, packag
 	if err != nil {
 		return nil, err
 	}
-	pkg := Package{ID: packageID, Name: req.Name, Category: req.Category, Compute: compute, ScaleLimit: scale, BundleKey: bundleRef, BundleHash: bundleHash, BackendAdapter: req.BackendAdapter, BackendConfig: backend, InteractionSchema: interactionSchema, CodeTrace: codeTrace, Status: PackageStatusReviewing}
+	pkg := Package{
+		ID: packageID, Name: req.Name, Category: req.Category, ScaleLimit: scale,
+		BundleKey: stored.ObjectRef, BundleHash: stored.BundleHash, Entry: stored.Entry,
+		InteractionSchema: stored.InteractionSchema, CodeTrace: stored.CodeTrace,
+		Status: PackageStatusReviewing,
+	}
 	var updated Package
 	var review Review
 	if err := s.store.PlatformTx(ctx, func(ctx context.Context, tx TxStore) error {
+		var err error
 		updated, err = tx.UpdatePackageDraft(ctx, pkg)
 		if err != nil {
 			return lookupError(err, apperr.ErrSimPackageUnavailable, apperr.ErrSimPackageQueryFailed)
 		}
-		review, err = tx.CreateReview(ctx, s.ids.Generate(), updated.ID, accountID, report)
+		review, err = tx.CreateReview(ctx, s.ids.Generate(), updated.ID, accountID, stored.Report)
 		if err != nil {
 			return apperr.ErrSimReviewStateInvalid.WithCause(err)
 		}
@@ -181,7 +184,7 @@ func (s *Service) UpdatePackage(ctx context.Context, tenantID, accountID, packag
 	}); err != nil {
 		return nil, err
 	}
-	if err := s.uploadPlannedBundle(ctx, bundleRef, input); err != nil {
+	if err := s.uploadPlannedBundle(ctx, stored.ObjectRef, input); err != nil {
 		if rollbackErr := s.markUploadFailed(ctx, updated.ID, review.ID); rollbackErr != nil {
 			logging.ErrorContext(ctx, "sim package upload rollback failed", rollbackErr.Error(), slog.Int64("tenant_id", tenantID), slog.Int64("package_id", updated.ID), slog.Int64("review_id", review.ID))
 			return nil, apperr.ErrSimBundleUnreadable.WithCause(errors.Join(err, rollbackErr))
@@ -268,63 +271,6 @@ func (s *Service) PackagePreview(ctx context.Context, accountID, packageID int64
 		return nil, err
 	}
 	return map[string]any{"package": pkgOut, "review": reviewOut}, nil
-}
-
-// SubmitValidationReport 合并动态校验报告,不得覆盖后端生成的静态字段。
-func (s *Service) SubmitValidationReport(ctx context.Context, packageID int64, req ValidationReportRequest, raw []byte) (map[string]any, error) {
-	keys, err := rawReportMap(raw)
-	if err != nil {
-		return nil, apperr.ErrSimPackageValidationFailed.WithCause(err)
-	}
-	if err := validateDynamicReport(keys); err != nil {
-		return nil, err
-	}
-	if err := validateValidationReportRequest(req); err != nil {
-		return nil, err
-	}
-	report := reportFromRequest(req)
-	report.Details = trimMapStrings(report.Details)
-	var review Review
-	if err := s.store.PlatformTx(ctx, func(ctx context.Context, tx TxStore) error {
-		pkg, err := tx.GetPackageByID(ctx, packageID)
-		if err != nil {
-			return lookupError(err, apperr.ErrSimPackageNotFound, apperr.ErrSimPackageQueryFailed)
-		}
-		if pkg.Status != PackageStatusReviewing {
-			return apperr.ErrSimPackageUnavailable
-		}
-		if err := ensureValidationReportTenant(ctx, pkg); err != nil {
-			return err
-		}
-		review, err = tx.MergeValidationReport(ctx, packageID, report)
-		if err != nil {
-			return lookupError(err, apperr.ErrSimReviewNotFound, apperr.ErrSimReviewQueryFailed)
-		}
-		return nil
-	}); err != nil {
-		return nil, err
-	}
-	return reviewToMap(review)
-}
-
-// ensureValidationReportTenant 绑定受控预览服务的租户签名和包资源归属。
-func ensureValidationReportTenant(ctx context.Context, pkg Package) error {
-	id, ok := tenant.FromContext(ctx)
-	if !ok || !id.IsSystem || id.TenantID <= 0 {
-		return apperr.ErrServiceUnauthorized
-	}
-	ref, err := storage.ParseObjectRef(pkg.BundleKey)
-	if err != nil {
-		return apperr.ErrSimBundleUnreadable.WithCause(err)
-	}
-	ownerTenantID, err := tenantIDFromBundleKey(ref.Key)
-	if err != nil {
-		return err
-	}
-	if ownerTenantID != id.TenantID {
-		return apperr.ErrServiceUnauthorized
-	}
-	return nil
 }
 
 // ListReviews 返回审核分页列表。

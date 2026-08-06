@@ -7,7 +7,7 @@ import { mempoolReplacementCodeTrace, mempoolReplacementNarrative } from './trac
 import { renderMempoolReplacementView } from './view';
 
 export const mempoolReplacementSimulation: SimPackage<MempoolReplacementState> = {
-  meta: { code: 'builtin__runtime-mempool-replacement', name: 'Mempool 替换交易与 Nonce 队列推演', category: 'transaction-runtime', version: '1.0.0', compute: 'frontend', summary: '完整推演 pending/queued 划分、同 nonce 替换阈值、节点视图传播和区块打包释放队列。', learningObjectives: ['理解 nonce 缺口为什么阻塞后续交易', '掌握替换交易必须足额加价', '区分 mempool 本地视图和链上顺序'], scaleLimit: { nodes: 72, maxTick: 120, maxEvents: 240 } },
+  meta: { code: 'builtin__runtime-mempool-replacement', name: 'Mempool 替换交易与 Nonce 队列推演', category: 'transaction-runtime', version: '1.0.0', summary: '完整推演 pending/queued 划分、同 nonce 替换阈值、节点视图传播和区块打包释放队列。', learningObjectives: ['理解 nonce 缺口为什么阻塞后续交易', '掌握替换交易必须足额加价', '区分 mempool 本地视图和链上顺序'], scaleLimit: { nodes: 72, maxTick: 120, maxEvents: 240 } },
   initState: createInitialMempoolReplacementState,
   reducer: reduceMempoolReplacementEvent,
   interactions: [

@@ -74,10 +74,13 @@ export function useSimPlayback({ advance, canAdvance, cue, autoPlay = false }: S
 
 /**
  * narrativeProgress 把当前叙事步骤换成链式进度的完成数:讲到第几步,前面几步就都讲过了。
- * 叙事步骤由状态断言命中(见 sim-sdk 的 sim.worker.ts currentNarrativeStep),
- * 尚未命中任何一步时进度为 0。
+ * 叙事步骤由状态断言命中(浏览器 Worker 与隔离容器同一套引擎求值),
+ * 尚未命中任何一步时进度为 0。两个执行位置的快照都只用到 currentStep,故按这一个字段收窄参数。
  */
-export function narrativeProgress(descriptor: SimPackageDescriptor, snapshot: RuntimeSnapshot): number {
+export function narrativeProgress(
+  descriptor: SimPackageDescriptor,
+  snapshot: Pick<RuntimeSnapshot, 'currentStep'>,
+): number {
   const currentId = snapshot.currentStep?.id
   return descriptor.narrative.findIndex((step) => step.id === currentId) + 1
 }

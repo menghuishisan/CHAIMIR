@@ -16,7 +16,6 @@ export const posSimulation: SimPackage<PosState> = {
     name: 'PoS 权益证明与最终性推演',
     category: 'consensus',
     version: '1.0.0',
-    compute: 'frontend',
     summary: '完整推演 PoS 随机选主、区块提议、权益加权见证、检查点证明、最终性与双签罚没。',
     learningObjectives: ['理解权益权重与随机选主', '掌握三分之二权益见证阈值', '观察双签为何会被罚没'],
     scaleLimit: { nodes: 128, maxTick: 180, maxEvents: 320 },

@@ -29,7 +29,8 @@ const (
 	CodeSimSessionStateInvalid = "42003"
 	// CodeSimActionSeqInvalid 表示操作序列不连续或同 seq 内容冲突。
 	CodeSimActionSeqInvalid = "42004"
-	// CodeSimBackendComputeUnavailable 表示后端计算适配器不可用。
+	// CodeSimBackendComputeUnavailable 表示隔离执行不可用或已达租户并发上限。
+	// 两种情况对使用者是同一件事(现在跑不了、稍后再试),技术原因只进日志。
 	CodeSimBackendComputeUnavailable = "42005"
 	// CodeSimCheckpointInvalid 表示检查点上报内容非法。
 	CodeSimCheckpointInvalid = "42006"
@@ -41,6 +42,9 @@ const (
 	CodeSimSessionQueryFailed = "42009"
 	// CodeSimShareQueryFailed 表示分享数据读取失败。
 	CodeSimShareQueryFailed = "42010"
+	// CodeSimFrameInvalid 表示隔离执行返回的教学帧不合 TeachingFrame 协议。
+	// 与 42005 分开:它指向包本身有缺陷(需要管理员介入)而非"稍后重试能好"。
+	CodeSimFrameInvalid = "42011"
 )
 
 const (
@@ -94,6 +98,8 @@ var (
 	ErrSimSessionQueryFailed = New(CodeSimSessionQueryFailed, "仿真会话暂时无法加载,请稍后重试")
 	// ErrSimShareQueryFailed 表示分享数据读取失败。
 	ErrSimShareQueryFailed = New(CodeSimShareQueryFailed, "分享内容暂时无法加载,请稍后重试")
+	// ErrSimFrameInvalid 表示隔离执行返回的教学帧不合协议。
+	ErrSimFrameInvalid = New(CodeSimFrameInvalid, "仿真场景运行异常,请联系管理员处理")
 )
 
 var (

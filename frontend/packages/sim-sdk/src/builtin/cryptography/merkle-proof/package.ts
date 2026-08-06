@@ -13,7 +13,6 @@ export const merkleProofSimulation: SimPackage<MerkleProofState> = {
     name: 'Merkle 证明路径推演',
     category: 'cryptography',
     version: '1.0.0',
-    compute: 'frontend',
     summary: '完整推演 Merkle 叶子哈希、兄弟路径选择、根摘要重建、证明校验与篡改定位。',
     learningObjectives: ['理解 Merkle 根如何承诺多笔数据', '掌握证明路径为什么只需兄弟哈希', '观察篡改如何导致根不匹配'],
     scaleLimit: { nodes: 64, maxTick: 120, maxEvents: 200 },

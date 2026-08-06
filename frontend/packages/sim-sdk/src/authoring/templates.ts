@@ -10,15 +10,18 @@ interface DeveloperTemplateState extends SimState {
 
 /**
  * createDeveloperTemplate 返回一个可运行的前端仿真包模板,作者应替换状态、阶段和渲染语义数据。
+ *
+ * entry 是归档内入口模块相对路径:平台把教师与第三方包在隔离容器内装配(见
+ * docs/04-仿真可视化引擎/02-架构设计.md §8),需要它才能找到入口。执行位置本身不由作者声明。
  */
-export function createDeveloperTemplate(code: string): SimPackage<DeveloperTemplateState> {
+export function createDeveloperTemplate(code: string, entry = 'dist/index.mjs'): SimPackage<DeveloperTemplateState> {
   return defineSimPackage({
     meta: {
       code,
       name: '自定义仿真模板',
       category: 'consensus',
       version: '0.1.0',
-      compute: 'frontend',
+      entry,
       summary: '用于演示 M4 仿真包需要提供的完整协议字段。',
       learningObjectives: ['理解自描述仿真包结构', '掌握确定性 reducer 与封闭模式输出'],
       scaleLimit: { nodes: 24, maxTick: 120, maxEvents: 240 },

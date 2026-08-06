@@ -13,7 +13,6 @@ export const digitalSignatureSimulation: SimPackage<SignatureState> = {
     name: '数字签名与重放防护推演',
     category: 'cryptography',
     version: '1.0.0',
-    compute: 'frontend',
     summary: '完整推演数字签名的密钥生成、消息摘要、私钥签名、公钥验签、nonce 重放检测与密钥轮换。',
     learningObjectives: ['理解签名如何证明来源', '区分完整性校验和新鲜性校验', '掌握密钥轮换的必要性'],
     scaleLimit: { nodes: 48, maxTick: 120, maxEvents: 200 },

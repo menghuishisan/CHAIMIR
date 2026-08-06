@@ -7,7 +7,7 @@ import { ethPosFinalityCodeTrace, ethPosFinalityNarrative } from './trace';
 import { renderEthPosFinalityView } from './view';
 
 export const ethereumPosFinalitySimulation: SimPackage<EthPosFinalityState> = {
-  meta: { code: 'builtin__consensus-ethereum-pos-finality', name: 'Ethereum PoS 链头选择与最终性推演', category: 'consensus', version: '1.0.0', compute: 'frontend', summary: '完整推演 slot 出块、LMD-GHOST 链头选择、Casper FFG justified/finalized checkpoint 和延迟投票影响。', learningObjectives: ['区分 head、justified 和 finalized', '理解最新消息驱动的 fork choice', '观察延迟投票为什么不等于最终性回滚'], scaleLimit: { nodes: 96, maxTick: 140, maxEvents: 260 } },
+  meta: { code: 'builtin__consensus-ethereum-pos-finality', name: 'Ethereum PoS 链头选择与最终性推演', category: 'consensus', version: '1.0.0', summary: '完整推演 slot 出块、LMD-GHOST 链头选择、Casper FFG justified/finalized checkpoint 和延迟投票影响。', learningObjectives: ['区分 head、justified 和 finalized', '理解最新消息驱动的 fork choice', '观察延迟投票为什么不等于最终性回滚'], scaleLimit: { nodes: 96, maxTick: 140, maxEvents: 260 } },
   initState: createInitialEthPosFinalityState,
   reducer: reduceEthPosFinalityEvent,
   interactions: [

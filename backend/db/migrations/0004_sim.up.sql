@@ -4,10 +4,14 @@ CREATE TABLE IF NOT EXISTS sim_package (
     version VARCHAR(32) NOT NULL,
     name VARCHAR(128) NOT NULL,
     category VARCHAR(32) NOT NULL,
+    -- compute 是执行位置:1=浏览器 Worker(平台内置包)、2=后端隔离容器(教师/第三方扩展包与重计算仿真)。
+    -- 它按 author_type 派生,不是作者可选项(见 docs/04-仿真可视化引擎/02-架构设计.md §8)。
     compute SMALLINT NOT NULL CHECK (compute IN (1, 2)),
     scale_limit JSONB NOT NULL DEFAULT '{}'::jsonb,
     bundle_key VARCHAR(255) NOT NULL,
     bundle_hash VARCHAR(64) NOT NULL,
+    -- entry 是归档内入口模块相对路径,供隔离容器装配;内置包由 sim-sdk registry 按 code 装配故为 NULL。
+    entry VARCHAR(255),
     backend_adapter VARCHAR(96),
     backend_config JSONB NOT NULL DEFAULT '{}'::jsonb,
     interaction_schema JSONB NOT NULL DEFAULT '{"events":{}}'::jsonb,
@@ -17,11 +21,28 @@ CREATE TABLE IF NOT EXISTS sim_package (
     status SMALLINT NOT NULL CHECK (status IN (1, 2, 3, 4, 5)),
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    CHECK ((author_type = 1 AND substring(code FROM 1 FOR 9) = 'builtin__' AND author_id IS NULL)
-        OR (author_type = 2 AND author_id IS NOT NULL AND substring(code FROM 1 FOR length('teacher_' || author_id::TEXT || '__')) = ('teacher_' || author_id::TEXT || '__'))
-        OR (author_type = 3 AND code ~ '^org_[a-z0-9_]+__')),
-    CHECK ((compute = 1 AND backend_adapter IS NULL AND backend_config = '{}'::jsonb)
-        OR (compute = 2 AND backend_adapter IS NOT NULL)),
+    -- 作者类型决定命名空间、执行位置与装配方式三者,合成一条约束表达它们的绑定关系:
+    -- 平台内置 → builtin__ 前缀、浏览器执行、无入口模块、无运行能力;
+    -- 教师/第三方 → 各自前缀、隔离容器执行、必须有入口模块与已注册运行能力。
+    -- 三者拆成独立约束会让"内置包带 entry"这类矛盾组合通过校验。
+    CHECK ((author_type = 1
+            AND substring(code FROM 1 FOR 9) = 'builtin__'
+            AND author_id IS NULL
+            AND compute = 1
+            AND entry IS NULL
+            AND backend_adapter IS NULL
+            AND backend_config = '{}'::jsonb)
+        OR (author_type = 2
+            AND author_id IS NOT NULL
+            AND substring(code FROM 1 FOR length('teacher_' || author_id::TEXT || '__')) = ('teacher_' || author_id::TEXT || '__')
+            AND compute = 2
+            AND entry IS NOT NULL
+            AND backend_adapter IS NOT NULL)
+        OR (author_type = 3
+            AND code ~ '^org_[a-z0-9_]+__'
+            AND compute = 2
+            AND entry IS NOT NULL
+            AND backend_adapter IS NOT NULL)),
     UNIQUE (code, version)
 );
 
@@ -98,6 +119,10 @@ CREATE INDEX IF NOT EXISTS idx_sim_package_code ON sim_package(code, version);
 CREATE INDEX IF NOT EXISTS idx_sim_package_review_result ON sim_package_review(result, created_at ASC);
 CREATE INDEX IF NOT EXISTS idx_sim_session_owner ON sim_session(tenant_id, owner_account_id);
 CREATE INDEX IF NOT EXISTS idx_sim_session_source_ref ON sim_session(tenant_id, source_ref);
+-- 隔离执行会话按租户计数(并发闸门 SIM_BACKEND_MAX_CONCURRENT_SESSIONS_PER_TENANT):
+-- 只索引 compute=2 的活跃态,因为浏览器执行的会话不占集群资源、不参与该闸门。
+CREATE INDEX IF NOT EXISTS idx_sim_session_isolated_active ON sim_session(tenant_id)
+    WHERE compute = 2 AND status IN (1, 2, 3);
 CREATE INDEX IF NOT EXISTS idx_sim_action_session_seq ON sim_action_log(tenant_id, session_id, seq);
 CREATE INDEX IF NOT EXISTS idx_sim_checkpoint_session ON sim_checkpoint(tenant_id, session_id);
 CREATE INDEX IF NOT EXISTS idx_sim_share_session ON sim_share(tenant_id, session_id);

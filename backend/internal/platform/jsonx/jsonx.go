@@ -148,6 +148,21 @@ func StringFromAny(v any) string {
 	return ""
 }
 
+// StringValue 只接受 JSON 字符串标量,其他类型一律返回空字符串。
+//
+// 与 StringFromAny 的区别是不做数字到字符串的宽松转换:校验不可信 JSON 时,
+// 数字形态的 id、布尔形态的 summary 必须判为"缺失"而不是被静默转成字符串,
+// 否则协议校验会放过明显不合契约的输入。
+func StringValue(v any) string {
+	text, _ := v.(string)
+	return text
+}
+
+// StringField 按键读取 JSON 对象中的字符串标量,键缺失或类型不符返回空字符串。
+func StringField(obj map[string]any, key string) string {
+	return StringValue(obj[key])
+}
+
 // IntFromAny 把 JSON 数字或数字字符串转换为 int,无效值返回 0。
 func IntFromAny(v any) int {
 	if n, ok := int64Scalar(v, 64); ok {

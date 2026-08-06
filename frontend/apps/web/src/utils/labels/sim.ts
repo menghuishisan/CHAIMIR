@@ -13,11 +13,11 @@ import {
 } from '@chaimir/api-client'
 
 const COMPUTE_LABELS: Record<SimCompute, string> = {
-  [SIM_COMPUTE.FRONTEND]: '本机推演',
-  [SIM_COMPUTE.BACKEND]: '服务端计算',
+  [SIM_COMPUTE.BROWSER]: '本机推演',
+  [SIM_COMPUTE.ISOLATED]: '服务端推演',
 }
 
-/** simComputeLabel 返回仿真运行方式文案。 */
+/** simComputeLabel 返回仿真运行位置文案。 */
 export function simComputeLabel(compute: SimCompute): string {
   return COMPUTE_LABELS[compute]
 }

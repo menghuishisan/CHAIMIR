@@ -13,7 +13,6 @@ export const zkProofSimulation: SimPackage<ZkState> = {
     name: '零知识证明交互流程推演',
     category: 'cryptography',
     version: '1.0.0',
-    compute: 'frontend',
     summary: '完整推演零知识证明的见证、承诺、挑战、响应、验证等式与多轮可靠性放大。',
     learningObjectives: ['理解承诺-挑战-响应结构', '区分完整性和零知识性', '观察作弊证明为什么会被挑战暴露'],
     scaleLimit: { nodes: 48, maxTick: 140, maxEvents: 220 },

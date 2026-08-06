@@ -20,12 +20,9 @@ type BundleInput struct {
 }
 
 // validateBundleManifestMatchesRequest 确认上传表单与包内自描述元信息一致,防止审核摘要和入库元数据分裂。
-func validateBundleManifestMatchesRequest(manifest bundleManifest, req SubmitPackageRequest, compute int16) error {
+// 不比对 compute:表单与 manifest 都不含它,执行位置由服务端按 author_type 派生。
+func validateBundleManifestMatchesRequest(manifest bundleManifest, req SubmitPackageRequest) error {
 	if strings.TrimSpace(manifest.Meta.Code) != req.Code || strings.TrimSpace(manifest.Meta.Version) != req.Version || strings.TrimSpace(manifest.Meta.Name) != req.Name || strings.TrimSpace(manifest.Meta.Category) != req.Category {
-		return apperr.ErrSimPackageValidationFailed
-	}
-	manifestCompute, err := computeFromString(manifest.Meta.Compute)
-	if err != nil || manifestCompute != compute {
 		return apperr.ErrSimPackageValidationFailed
 	}
 	if !scaleLimitMatchesRequest(manifest.Meta.ScaleLimit, req.ScaleLimit) {
@@ -36,6 +33,13 @@ func validateBundleManifestMatchesRequest(manifest bundleManifest, req SubmitPac
 	}
 	return nil
 }
+
+// dangerousBundlePatterns 是提交时扫描的危险调用模式。
+//
+// 它是**给审核人的信号,不是隔离边界**:正则拦不住 `globalThis['fe'+'tch']` 这类拼接,
+// 动态语言下的能力访问无法靠模式匹配穷尽。真正的边界是隔离容器 —— 扩展包在 deny-all 网络、
+// 只读根、无凭据的 Pod 内执行,`fetch` 在那里本就无处可达(见 docs/04-仿真可视化引擎/07-安全设计.md §3、§5)。
+// 故扫描命中会写进审核报告提请人工重点查看,而不再作为准入的唯一硬门禁。
 
 var dangerousBundlePatterns = []struct {
 	name string
@@ -65,6 +69,13 @@ const simPackageManifestName = "sim-package.json"
 var allowedPatternModes = map[string]struct{}{"graph": {}, "chain": {}, "tree": {}, "matrix": {}, "pipeline": {}, "lane": {}, "chart": {}}
 var allowedRenderPatternRoles = map[string]struct{}{"primary": {}, "evidence": {}, "timeline": {}, "metrics": {}, "trace": {}, "checkpoints": {}}
 
+// entryPathPattern 限定入口模块只能是归档内相对路径的 .mjs 文件。
+//
+// 只接受 .mjs:归档内没有 package.json 时 Node 按 CJS 解析 .js,而扩展包必须默认导出
+// SimPackage(ESM 语义)。允许 .js 会让"能不能装配"取决于归档里有没有 type:module ——
+// 同一份代码在不同打包方式下表现不同,收敛成单一扩展名消掉这类不确定性。
+var entryPathPattern = regexp.MustCompile(`^[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)*\.mjs$`)
+
 // bundleManifest 保存后端可审核的自描述协议摘要,不承载可执行函数正文。
 type bundleManifest struct {
 	Meta              simManifestMeta
@@ -83,12 +94,13 @@ type simPackageManifest struct {
 }
 
 // simManifestMeta 保存包元信息和规模上限,需要与上传表单保持完全一致。
+// 不含 compute:执行位置按 author_type 派生,manifest 与表单都不声明它。
 type simManifestMeta struct {
 	Code       string         `json:"code"`
 	Name       string         `json:"name"`
 	Category   string         `json:"category"`
 	Version    string         `json:"version"`
-	Compute    string         `json:"compute"`
+	Entry      string         `json:"entry,omitempty"`
 	ScaleLimit map[string]any `json:"scale_limit,omitempty"`
 }
 
@@ -185,15 +197,18 @@ func analyzeBundle(input BundleInput, limits upload.ArchiveLimits) (string, Stat
 	return "", StaticScanReport{}, bundleManifest{}, apperr.ErrSimBundleUnreadable
 }
 
-// scanBundleEntries 遍历 ZIP/TAR 普通文件,对代码和 JSON 契约文件执行保守静态扫描。
+// scanBundleEntries 遍历 ZIP/TAR 普通文件,对代码和 JSON 契约文件执行保守静态扫描,
+// 并确认 manifest 声明的入口模块在归档内真实存在。
 func scanBundleEntries(name string, data []byte, limits upload.ArchiveLimits) ([]string, bundleManifest, error) {
 	findings := []string{}
 	var manifestRaw []byte
+	members := map[string]struct{}{}
 	err := upload.WalkArchiveFiles(name, data, limits, func(file upload.ArchiveFile) error {
 		content, err := upload.ReadArchiveFileContent(file, limits.MaxUnpackedBytes)
 		if err != nil {
 			return err
 		}
+		members[cleanMemberName(file.Name)] = struct{}{}
 		if cleanManifestName(file.Name) == simPackageManifestName {
 			manifestRaw = append([]byte(nil), content...)
 		}
@@ -214,7 +229,25 @@ func scanBundleEntries(name string, data []byte, limits upload.ArchiveLimits) ([
 	if len(manifestFindings) > 0 {
 		findings = append(findings, manifestFindings...)
 	}
+	// 入口模块声明合法不代表它真的在包里:容器装配时找不到入口只能报运行失败,
+	// 而那已经是学生打开场景之后了。在上传边界就确认存在性,把缺陷挡在审核之前。
+	if entry := strings.TrimSpace(manifest.Meta.Entry); entry != "" {
+		if _, exists := members[entry]; !exists {
+			findings = append(findings, "manifest:entry-not-in-archive")
+		}
+	}
 	return findings, manifest, nil
+}
+
+// cleanMemberName 归一化归档成员名,剥掉归档工具自动包的唯一顶层目录,
+// 使成员名与 manifest 里的相对路径处于同一坐标系。
+func cleanMemberName(name string) string {
+	value := strings.TrimPrefix(strings.ReplaceAll(strings.TrimSpace(name), "\\", "/"), "./")
+	parts := strings.Split(value, "/")
+	if len(parts) > 1 && strings.Contains(strings.Join(parts[1:], "/"), simPackageManifestName) {
+		return strings.Join(parts[1:], "/")
+	}
+	return value
 }
 
 // scanCandidate 仅扫描可执行/契约文本文件,避免对图片等资产误报。
@@ -253,16 +286,44 @@ func cleanManifestName(name string) string {
 }
 
 // parseBundleManifest 强校验自描述协议,并提取后端运行时需要的最小白名单。
+// 扩展包必须声明入口模块(隔离容器据此装配),故 requiresEntry 恒为真。
 func parseBundleManifest(raw []byte) (bundleManifest, []string) {
 	var doc simPackageManifest
 	if err := jsonx.DecodeStrictKnownFields(raw, &doc); err != nil {
 		return bundleManifest{}, []string{"manifest:invalid-json"}
 	}
-	return buildBundleManifest(doc)
+	return buildBundleManifest(doc, true)
+}
+
+// entryFindings 校验入口模块声明:扩展包必须有且路径合法,内置包不得声明。
+//
+// 路径校验必须严格:entry 来自不可信上传,容器会按它拼出写入与 import 路径,
+// 绝对路径、`..` 与盘符都会把装配点带出工作目录。
+func entryFindings(entry string, requiresEntry bool) []string {
+	value := strings.TrimSpace(entry)
+	if !requiresEntry {
+		if value != "" {
+			return []string{"manifest:entry-not-allowed"}
+		}
+		return nil
+	}
+	if value == "" {
+		return []string{"manifest:entry-missing"}
+	}
+	if len(value) > 255 || !entryPathPattern.MatchString(value) {
+		return []string{"manifest:entry-invalid"}
+	}
+	for _, segment := range strings.Split(value, "/") {
+		if segment == "." || segment == ".." {
+			return []string{"manifest:entry-invalid"}
+		}
+	}
+	return nil
 }
 
 // buildBundleManifest 把 manifest 转为数据库中的审核摘要,同时执行协议结构校验。
-func buildBundleManifest(doc simPackageManifest) (bundleManifest, []string) {
+// requiresEntry 为真时(扩展包)必须声明合法入口模块;内置包由 registry 按 code 装配,不得声明 entry。
+func buildBundleManifest(doc simPackageManifest, requiresEntry bool) (bundleManifest, []string) {
 	findings := []string{}
 	if !simCodePattern.MatchString(strings.TrimSpace(doc.Meta.Code)) || !semverPattern.MatchString(strings.TrimSpace(doc.Meta.Version)) || strings.TrimSpace(doc.Meta.Name) == "" || !categoryPattern.MatchString(strings.TrimSpace(doc.Meta.Category)) {
 		findings = append(findings, "manifest:meta-invalid")
@@ -270,10 +331,7 @@ func buildBundleManifest(doc simPackageManifest) (bundleManifest, []string) {
 	if !validManifestScaleLimit(doc.Meta.ScaleLimit) {
 		findings = append(findings, "manifest:scale-limit-invalid")
 	}
-	compute, err := computeFromString(doc.Meta.Compute)
-	if err != nil || (compute != ComputeFrontend && compute != ComputeBackend) {
-		findings = append(findings, "manifest:compute-invalid")
-	}
+	findings = append(findings, entryFindings(doc.Meta.Entry, requiresEntry)...)
 	if len(doc.Interactions) == 0 {
 		findings = append(findings, "manifest:interactions-empty")
 	}

@@ -1,20 +1,28 @@
-// sim adapter_stdio_json 文件实现数据驱动的 stdio-json Kubernetes 隔离计算适配器。
+// sim adapter_stdio_json 文件实现数据驱动的 stdio-json Kubernetes 隔离执行适配器。
+//
+// 一套编排承载两类执行:扩展包(包正文经 exec stdin 按会话投递)与重计算算法(固化在镜像内)。
+// 差别只在是否投递 bundle,故不复制第二份 K8s 生命周期代码
+// (见 docs/04-仿真可视化引擎/02-架构设计.md §8.3)。
 package sim
 
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"sort"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
 	"chaimir/internal/platform/config"
 	"chaimir/internal/platform/jsonx"
 	platformk8s "chaimir/internal/platform/k8s"
+	"chaimir/pkg/logging"
 
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
@@ -28,6 +36,12 @@ const (
 	stdioJSONContainer      = "compute"
 	stdioJSONPod            = "compute"
 	stdioJSONServiceAccount = "sim-compute"
+	// stdioJSONWorkVolume/Path 是容器内唯一可写点:根文件系统只读,而扩展包归档需要落盘装配。
+	// 路径与 runner 的 SIM_RUNNER_WORKDIR 默认值一致(见 sim-sdk containerBundle.ts)。
+	stdioJSONWorkVolume = "sim-bundle"
+	stdioJSONWorkPath   = "/tmp/sim-bundle"
+	// stdioJSONFSGroup 让非 root 容器能写 emptyDir:emptyDir 默认 root 拥有,不设 fsGroup 就写不进去。
+	stdioJSONFSGroup int64 = 101
 )
 
 // StdioJSONAdapter 使用一项受控能力配置执行任意遵循 stdio-json 协议的算法镜像。
@@ -85,10 +99,18 @@ func (a *StdioJSONAdapter) ValidateConfig(value map[string]any) error {
 	return nil
 }
 
-// Serve 创建隔离计算资源,先推送初始状态,再逐条执行已通过 M4 schema 校验的事件。
-func (a *StdioJSONAdapter) Serve(ctx context.Context, session SessionWithPackage, conn BackendConn) (serveErr error) {
+// Serve 创建隔离计算资源,装配 bundle 后推送首帧,再逐条执行已通过 M4 schema 校验的命令。
+//
+// bundle 非 nil 时(扩展包)先经 exec stdin 把归档字节推入容器:计算 Pod 根文件系统只读且
+// 网络 deny-all,容器既写不下也取不到对象存储正文,放开网络等于拆掉隔离边界。
+// bundle 为 nil 时(算法固化在镜像内的重计算能力)跳过装配,协议其余部分一致。
+//
+// 容器不常驻会话状态:每条命令都带上 seed + 已有事件,容器每次从初始状态重放到当前位置。
+// 代价是重放开销(受包声明 max_events 约束),换来的是容器崩溃、Pod 重建都不影响过程可复现。
+// 首帧同理按已登记操作重放:刷新页面或断线重连要回到上次离开的位置,不从头开始。
+func (a *StdioJSONAdapter) Serve(ctx context.Context, session SessionWithPackage, bundle *ExecutionBundle, recorded []Action, conn BackendConn) (serveErr error) {
 	if _, loaded := a.active.LoadOrStore(session.ID, struct{}{}); loaded {
-		return fmt.Errorf("仿真会话已有后端计算连接")
+		return fmt.Errorf("仿真会话已有隔离执行连接")
 	}
 	defer a.active.Delete(session.ID)
 	defer func() {
@@ -102,36 +124,166 @@ func (a *StdioJSONAdapter) Serve(ctx context.Context, session SessionWithPackage
 	if err := a.prepareSession(ctx, session); err != nil {
 		return err
 	}
-	initial, err := a.run(ctx, session, session.InitParams)
+	namespace := a.namespace(session.ID)
+	// 会话过程由后端持有:容器每次 exec 都是新进程,状态靠 seed + 已执行事件在容器内重放得到。
+	// tick 与 seq 必须与容器内引擎同口径推进(见 sim-sdk runtime/engine.ts applyEvent):
+	// 事件带的是执行前的时刻与序号,tick 只在时刻推进事件后加一。
+	history := newRunnerHistory(backendExecutionLimit(session.ScaleLimit))
+	history.seed(recorded)
+	frame, err := a.firstFrame(ctx, namespace, session, bundle, history)
 	if err != nil {
-		return fmt.Errorf("计算初始仿真状态失败: %w", err)
+		return err
 	}
-	if err := conn.SendJSON(BackendState{Tick: 0, State: initial}); err != nil {
-		return fmt.Errorf("发送初始仿真状态失败: %w", err)
+	// 首帧带上包自描述信息:浏览器不执行扩展包代码,操作清单与检查点标题只能由容器给出。
+	descriptor := frame.Descriptor
+	if err := conn.SendFrame(BackendStreamMessage{Type: backendStreamReady, Descriptor: &descriptor, Snapshot: frame.Snapshot, EventCount: history.length()}); err != nil {
+		return fmt.Errorf("发送初始仿真快照失败: %w", err)
 	}
 
-	var tick int64
-	maxTicks := backendExecutionLimit(session.ScaleLimit)
 	for {
-		if tick >= maxTicks {
-			return fmt.Errorf("后端仿真已达到包声明的执行步数上限")
-		}
-		var event BackendEvent
-		if err := conn.ReadJSON(&event); err != nil {
+		command, err := conn.ReadCommand()
+		if err != nil {
 			if errors.Is(err, context.Canceled) || errors.Is(err, io.EOF) || ctx.Err() != nil {
 				return nil
 			}
-			return fmt.Errorf("读取后端仿真事件失败: %w", err)
+			return fmt.Errorf("读取隔离执行命令失败: %w", err)
 		}
-		state, err := a.run(ctx, session, event.Payload)
+		frame, err := a.advance(ctx, namespace, session, bundle, history, command)
 		if err != nil {
-			return fmt.Errorf("执行后端仿真事件失败: %w", err)
+			return err
 		}
-		tick++
-		if err := conn.SendJSON(BackendState{Tick: tick, State: state}); err != nil {
-			return fmt.Errorf("发送后端仿真状态失败: %w", err)
+		// 先登记再推帧:这条事件已经在容器里生效了,推送失败只是连接断开,不该把已发生的操作丢掉。
+		if err := conn.RecordExecuted(command); err != nil {
+			return fmt.Errorf("登记隔离执行操作失败: %w", err)
+		}
+		if err := conn.SendFrame(BackendStreamMessage{Type: backendStreamSnapshot, Snapshot: frame.Snapshot, EventCount: history.length()}); err != nil {
+			return fmt.Errorf("发送隔离仿真快照失败: %w", err)
 		}
 	}
+}
+
+// firstFrame 产出连接建立时的第一帧:没有历史操作就装配后取初始状态,有历史就重放到那个位置。
+func (a *StdioJSONAdapter) firstFrame(ctx context.Context, namespace string, session SessionWithPackage, bundle *ExecutionBundle, history *runnerHistory) (runnerFrame, error) {
+	if len(history.events) > 0 {
+		return a.replayRunner(ctx, namespace, session, bundle, history)
+	}
+	frame, err := a.execRunner(ctx, namespace, session.ScaleLimit, runnerCommand{
+		Op:         runnerOpInit,
+		Bundle:     bundle,
+		InitParams: session.InitParams,
+		Seed:       session.Seed,
+	})
+	if err != nil {
+		return runnerFrame{}, fmt.Errorf("装配并计算初始仿真状态失败: %w", err)
+	}
+	return frame, nil
+}
+
+// advance 执行一条受控命令并返回新的教学帧。
+//
+// 推进与注入走 apply(在已有过程后追加一条事件);回退与重来走 restore
+// (容器从初始状态重放到目标位置)—— 状态可复现而非就地反算,与浏览器 Worker 同一口径
+// (见 M4 需求 C2、sim-sdk runtime/engine.ts back/replay)。
+func (a *StdioJSONAdapter) advance(ctx context.Context, namespace string, session SessionWithPackage, bundle *ExecutionBundle, history *runnerHistory, command BackendCommand) (runnerFrame, error) {
+	switch command.Kind {
+	case BackendCommandBack:
+		history.back()
+		return a.replayRunner(ctx, namespace, session, bundle, history)
+	case BackendCommandRestart:
+		history.reset()
+		return a.replayRunner(ctx, namespace, session, bundle, history)
+	default:
+		if history.exhausted() {
+			return runnerFrame{}, fmt.Errorf("隔离执行已达到包声明的执行步数上限")
+		}
+		executed, next := history.plan(command)
+		frame, err := a.execRunner(ctx, namespace, session.ScaleLimit, runnerCommand{
+			Op:         runnerOpApply,
+			Bundle:     bundle,
+			InitParams: session.InitParams,
+			Seed:       session.Seed,
+			Events:     history.events,
+			Next:       &next,
+		})
+		if err != nil {
+			return runnerFrame{}, fmt.Errorf("执行隔离仿真事件失败: %w", err)
+		}
+		history.commit(executed)
+		return frame, nil
+	}
+}
+
+// replayRunner 让容器从初始状态重放到当前已保留的事件位置。
+func (a *StdioJSONAdapter) replayRunner(ctx context.Context, namespace string, session SessionWithPackage, bundle *ExecutionBundle, history *runnerHistory) (runnerFrame, error) {
+	frame, err := a.execRunner(ctx, namespace, session.ScaleLimit, runnerCommand{
+		Op:         runnerOpRestore,
+		Bundle:     bundle,
+		InitParams: session.InitParams,
+		Seed:       session.Seed,
+		Events:     history.events,
+	})
+	if err != nil {
+		return runnerFrame{}, fmt.Errorf("重算隔离仿真过程失败: %w", err)
+	}
+	return frame, nil
+}
+
+// Preview 在隔离容器内完成上架前预览:同 seed 双跑比对确定性,并渲出样例教学帧。
+//
+// 与生产运行同一套设施:"跑起来看效果对不对"本身就需要一个能安全执行第三方代码的地方,
+// 不为审核另建一套(见 docs/04-仿真可视化引擎/06-业务流程与状态机.md §4)。
+func (a *StdioJSONAdapter) Preview(ctx context.Context, pkg Package, bundle *ExecutionBundle, frameCount int) (PreviewResult, error) {
+	session := SessionWithPackage{
+		Session:    Session{ID: pkg.ID, InitParams: map[string]any{}, Seed: previewSeed},
+		ScaleLimit: pkg.ScaleLimit,
+	}
+	if _, loaded := a.active.LoadOrStore(session.ID, struct{}{}); loaded {
+		return PreviewResult{}, fmt.Errorf("仿真包已有隔离预览在执行")
+	}
+	defer a.active.Delete(session.ID)
+	// 释放失败记日志而不并进返回值:预览的返回错误会写成包作者能看到的审核结论,
+	// 而"命名空间没删掉"是集群侧问题、不是包的问题 —— 并进去等于给作者一个他改不了的失败原因。
+	// 但它也绝不能被吞掉:Pod 泄漏必须能从日志定位到具体包与命名空间。
+	defer func() {
+		releaseCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Duration(a.cfg.PodReadyTimeoutSeconds)*time.Second)
+		defer cancel()
+		if err := a.Release(releaseCtx, session); err != nil {
+			logging.ErrorContext(releaseCtx, "sim package preview release failed", err.Error(),
+				slog.Int64("package_id", pkg.ID), slog.String("code", pkg.Code), slog.String("version", pkg.Version))
+		}
+	}()
+
+	if err := a.prepareSession(ctx, session); err != nil {
+		return PreviewResult{}, err
+	}
+	raw, err := a.execRunnerRaw(ctx, a.namespace(session.ID), runnerCommand{
+		Op:         runnerOpVerify,
+		Bundle:     bundle,
+		InitParams: map[string]any{},
+		Seed:       previewSeed,
+		FrameCount: frameCount,
+	})
+	if err != nil {
+		return PreviewResult{}, err
+	}
+	var response runnerVerifyResponse
+	if err := jsonx.DecodeStrict(raw, &response); err != nil {
+		return PreviewResult{}, fmt.Errorf("隔离预览输出无效: %w", err)
+	}
+	if !response.OK {
+		return PreviewResult{}, fmt.Errorf("隔离预览失败: %s", response.Error)
+	}
+	// 帧同样要过后端协议校验:它们会展示给平台管理员作为判断依据,不能把非法帧当审核证据。
+	for _, frame := range response.Frames {
+		if err := validateBackendSnapshot(frame, pkg.ScaleLimit); err != nil {
+			return PreviewResult{}, err
+		}
+	}
+	return PreviewResult{
+		DeterminismPassed: response.Determinism == "passed",
+		Detail:            response.Detail,
+		Frames:            response.Frames,
+	}, nil
 }
 
 // Release 删除会话独占命名空间,调用可重复执行。
@@ -236,12 +388,17 @@ func (a *StdioJSONAdapter) deleteNamespaceAndWait(ctx context.Context, namespace
 }
 
 // sessionPod 构造无网络、非 root、只读根文件系统的计算 Pod。
+//
+// 挂一个 emptyDir 到 /tmp/sim-bundle:根文件系统只读,而扩展包归档需要落盘才能按 entry 装配。
+// 它是容器内唯一可写点,随会话命名空间删除一并消失,不跨会话残留。
+// fsGroup 必须显式设置:emptyDir 默认 root 拥有,非 root 容器写不进去 —— 这个坑只有实际起容器才看得见。
 func (a *StdioJSONAdapter) sessionPod(namespace string, labels map[string]string) *corev1.Pod {
 	zero := int64(0)
 	nonRoot := true
 	readOnly := true
 	allowEscalation := false
 	automount := false
+	fsGroup := stdioJSONFSGroup
 	pullSecrets := make([]corev1.LocalObjectReference, 0, len(a.sandbox.ImagePullSecretNames))
 	for _, name := range a.sandbox.ImagePullSecretNames {
 		pullSecrets = append(pullSecrets, corev1.LocalObjectReference{Name: name})
@@ -255,6 +412,7 @@ func (a *StdioJSONAdapter) sessionPod(namespace string, labels map[string]string
 	for _, name := range envNames {
 		env = append(env, corev1.EnvVar{Name: name, Value: a.profile.Env[name]})
 	}
+	sizeLimit := a.limits[corev1.ResourceEphemeralStorage]
 	return &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{Name: stdioJSONPod, Namespace: namespace, Labels: labels},
 		Spec: corev1.PodSpec{
@@ -265,7 +423,11 @@ func (a *StdioJSONAdapter) sessionPod(namespace string, labels map[string]string
 			ImagePullSecrets:              pullSecrets,
 			NodeSelector:                  a.sandbox.SandboxNodeSelector,
 			Tolerations:                   stdioJSONTolerations(a.sandbox.SandboxNodeTolerations),
-			SecurityContext:               &corev1.PodSecurityContext{RunAsNonRoot: &nonRoot, SeccompProfile: &corev1.SeccompProfile{Type: corev1.SeccompProfileTypeRuntimeDefault}},
+			SecurityContext:               &corev1.PodSecurityContext{RunAsNonRoot: &nonRoot, FSGroup: &fsGroup, SeccompProfile: &corev1.SeccompProfile{Type: corev1.SeccompProfileTypeRuntimeDefault}},
+			Volumes: []corev1.Volume{{
+				Name:         stdioJSONWorkVolume,
+				VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{SizeLimit: &sizeLimit}},
+			}},
 			Containers: []corev1.Container{{
 				Name:            stdioJSONContainer,
 				Image:           a.profile.Image,
@@ -273,45 +435,244 @@ func (a *StdioJSONAdapter) sessionPod(namespace string, labels map[string]string
 				Command:         append([]string(nil), a.profile.IdleCommand...),
 				Env:             env,
 				Resources:       corev1.ResourceRequirements{Requests: a.requests, Limits: a.limits},
+				VolumeMounts:    []corev1.VolumeMount{{Name: stdioJSONWorkVolume, MountPath: stdioJSONWorkPath}},
 				SecurityContext: &corev1.SecurityContext{RunAsNonRoot: &nonRoot, ReadOnlyRootFilesystem: &readOnly, AllowPrivilegeEscalation: &allowEscalation, Capabilities: &corev1.Capabilities{Drop: []corev1.Capability{"ALL"}}},
 			}},
 		},
 	}
 }
 
-// run 限制 JSON 输入输出大小,再调用能力目录中登记的无 shell 命令。
-func (a *StdioJSONAdapter) run(ctx context.Context, session SessionWithPackage, inputState map[string]any) (map[string]any, error) {
-	if inputState == nil {
-		return nil, fmt.Errorf("后端仿真输入不能为空")
+// runner 协议常量与命令结构。容器一次 exec 读一行 JSON 命令、写一行 JSON 响应后退出,
+// 与 frontend/packages/sim-sdk/src/runtime/containerHost.ts 的 RunnerCommand 一一对应。
+const (
+	runnerOpInit     = "init"
+	runnerOpApply    = "apply"
+	runnerOpRestore  = "restore"
+	runnerOpVerify   = "verify"
+	runnerSourceUser = "user"
+	runnerSourceTick = "tick"
+	runnerNextTick   = "tick"
+	runnerNextUser   = "user"
+	// previewSeed 是隔离预览使用的固定随机种子:预览要判定确定性,种子必须可复现且与业务无关。
+	previewSeed int64 = 1
+)
+
+// runnerEvent 是投递给容器的已执行事件项,字段名与容器侧 SimEvent 契约对齐(含 camelCase atTick)。
+// 容器用它从初始状态重放到当前位置,故 atTick/seq 必须是事件执行时的值,少一个字段就重放不出同一条过程。
+type runnerEvent struct {
+	Type    string         `json:"type"`
+	Source  string         `json:"source"`
+	AtTick  int64          `json:"atTick"`
+	Seq     int64          `json:"seq"`
+	Payload map[string]any `json:"payload,omitempty"`
+	Target  string         `json:"target,omitempty"`
+}
+
+// runnerNext 是本轮要执行的下一条命令,与容器侧 RunnerCommand.next 契约一致:
+// 推进时刻只带 type=tick,注入交互带事件名与载荷。
+type runnerNext struct {
+	Type      string         `json:"type"`
+	EventType string         `json:"event_type,omitempty"`
+	Payload   map[string]any `json:"payload,omitempty"`
+	Target    string         `json:"target,omitempty"`
+}
+
+// runnerHistory 持有一次隔离会话已执行的事件与推进位置。
+//
+// 为什么后端持有而不是容器:容器一次 exec 一个进程,不常驻状态。用重放换无状态容器是有意取舍 ——
+// 容器崩溃、Pod 重建、后端换副本都不影响过程可复现,代价是重放开销(受包声明 max_events 约束)。
+type runnerHistory struct {
+	events    []runnerEvent
+	tick      int64
+	seq       int64
+	maxEvents int64
+}
+
+// newRunnerHistory 按包声明的事件上限初始化过程记录。
+func newRunnerHistory(maxEvents int64) *runnerHistory {
+	return &runnerHistory{events: make([]runnerEvent, 0, maxEvents), seq: 1, maxEvents: maxEvents}
+}
+
+// exhausted 判定是否已达到包声明的事件上限。
+func (h *runnerHistory) exhausted() bool {
+	return int64(len(h.events)) >= h.maxEvents
+}
+
+// length 返回当前过程已执行的事件数。
+func (h *runnerHistory) length() int64 {
+	return int64(len(h.events))
+}
+
+// seed 按会话已登记的用户操作重建过程位置。
+//
+// 操作记录只存用户操作(时刻推进由 seed 决定可复算),故这里按每条操作的 at_tick
+// 先补齐时刻推进事件再放入该操作 —— 与浏览器内置包恢复现场的摊平算法同一口径
+// (见 frontend features/sim/replayMoves.ts),顺序错了重放出的就不是原过程。
+func (h *runnerHistory) seed(recorded []Action) {
+	for _, action := range recorded {
+		for h.tick < int64(action.AtTick) && !h.exhausted() {
+			h.commit(runnerEvent{Type: runnerSourceTick, Source: runnerSourceTick, AtTick: h.tick, Seq: h.seq})
+		}
+		if h.exhausted() {
+			return
+		}
+		payload := action.Payload
+		target := strings.TrimSpace(jsonx.StringFromAny(payload["target"]))
+		h.commit(runnerEvent{Type: strings.TrimSpace(action.EventType), Source: runnerSourceUser, AtTick: h.tick, Seq: h.seq, Payload: payload, Target: target})
 	}
-	if err := validateBackendStateScale(inputState, session.ScaleLimit); err != nil {
-		return nil, err
+}
+
+// plan 把一条受控命令翻译成"待记录事件 + 容器命令",尚不推进位置 ——
+// 容器执行失败时不应留下一条从未生效的事件。
+func (h *runnerHistory) plan(command BackendCommand) (runnerEvent, runnerNext) {
+	if command.Kind == BackendCommandStep {
+		return runnerEvent{Type: runnerSourceTick, Source: runnerSourceTick, AtTick: h.tick, Seq: h.seq}, runnerNext{Type: runnerNextTick}
 	}
-	input, err := jsonx.EncodeLineBytes(inputState)
+	eventType := strings.TrimSpace(command.Event.EventType)
+	target := strings.TrimSpace(jsonx.StringFromAny(command.Event.Payload["target"]))
+	executed := runnerEvent{Type: eventType, Source: runnerSourceUser, AtTick: h.tick, Seq: h.seq, Payload: command.Event.Payload, Target: target}
+	return executed, runnerNext{Type: runnerNextUser, EventType: eventType, Payload: command.Event.Payload, Target: target}
+}
+
+// commit 记录已成功执行的事件并推进位置,口径与容器内引擎一致:
+// 序号每条加一,时刻只在时刻推进事件后加一。
+func (h *runnerHistory) commit(event runnerEvent) {
+	h.events = append(h.events, event)
+	h.seq++
+	if event.Source == runnerSourceTick {
+		h.tick++
+	}
+}
+
+// back 丢掉最近一条事件并把位置退回到它之前,口径与容器内引擎 replay 一致。
+func (h *runnerHistory) back() {
+	if len(h.events) == 0 {
+		return
+	}
+	h.events = h.events[:len(h.events)-1]
+	if len(h.events) == 0 {
+		h.tick, h.seq = 0, 1
+		return
+	}
+	last := h.events[len(h.events)-1]
+	h.seq = last.Seq + 1
+	h.tick = last.AtTick
+	if last.Source == runnerSourceTick {
+		h.tick = last.AtTick + 1
+	}
+}
+
+// reset 回到初始状态。
+func (h *runnerHistory) reset() {
+	h.events = h.events[:0]
+	h.tick, h.seq = 0, 1
+}
+
+// runnerCommand 是一次 exec 的完整输入。
+// Bundle 为 nil 时省略归档字段:算法固化在镜像内的重计算能力不需要投递包正文。
+type runnerCommand struct {
+	Op         string
+	Bundle     *ExecutionBundle
+	InitParams map[string]any
+	Seed       int64
+	Events     []runnerEvent
+	Next       *runnerNext
+	FrameCount int
+}
+
+// runnerSnapshotResponse 是 init/apply 命令的响应。
+type runnerSnapshotResponse struct {
+	OK         bool              `json:"ok"`
+	Error      string            `json:"error,omitempty"`
+	Descriptor BackendDescriptor `json:"descriptor"`
+	Snapshot   BackendSnapshot   `json:"snapshot"`
+}
+
+// runnerFrame 是一次命令产出的包自描述信息与教学快照。
+type runnerFrame struct {
+	Descriptor BackendDescriptor
+	Snapshot   BackendSnapshot
+}
+
+// runnerVerifyResponse 是 verify 命令的响应。
+type runnerVerifyResponse struct {
+	OK          bool              `json:"ok"`
+	Error       string            `json:"error,omitempty"`
+	Determinism string            `json:"determinism,omitempty"`
+	Detail      string            `json:"detail,omitempty"`
+	Frames      []BackendSnapshot `json:"frames,omitempty"`
+}
+
+// execRunner 执行一条命令并返回已通过后端协议校验的教学快照与包自描述信息。
+func (a *StdioJSONAdapter) execRunner(ctx context.Context, namespace string, scaleLimit map[string]any, cmd runnerCommand) (runnerFrame, error) {
+	raw, err := a.execRunnerRaw(ctx, namespace, cmd)
 	if err != nil {
-		return nil, fmt.Errorf("编码后端仿真输入失败: %w", err)
+		return runnerFrame{}, err
+	}
+	var response runnerSnapshotResponse
+	if err := jsonx.DecodeStrict(raw, &response); err != nil {
+		return runnerFrame{}, fmt.Errorf("隔离执行输出无效: %w", err)
+	}
+	if !response.OK {
+		return runnerFrame{}, fmt.Errorf("隔离执行失败: %s", response.Error)
+	}
+	// 容器输出是不可信输入:它由外部提交的仿真包代码算出。后端必须自己校验一遍,
+	// 只靠前端等于把协议边界交给不可信来源的下游(见 07 安全设计 §3)。
+	if err := validateBackendSnapshot(response.Snapshot, scaleLimit); err != nil {
+		return runnerFrame{}, err
+	}
+	return runnerFrame{Descriptor: response.Descriptor, Snapshot: response.Snapshot}, nil
+}
+
+// execRunnerRaw 编码命令、经 k8s exec 送入容器标准输入,并读回单行响应。
+func (a *StdioJSONAdapter) execRunnerRaw(ctx context.Context, namespace string, cmd runnerCommand) ([]byte, error) {
+	payload := map[string]any{
+		"op":          cmd.Op,
+		"seed":        cmd.Seed,
+		"init_params": orEmptyObject(cmd.InitParams),
+	}
+	if cmd.Bundle != nil {
+		payload["bundle_base64"] = base64.StdEncoding.EncodeToString(cmd.Bundle.Data)
+		payload["bundle_hash"] = cmd.Bundle.Hash
+		payload["bundle_format"] = cmd.Bundle.Format
+		payload["entry"] = cmd.Bundle.Entry
+	}
+	if cmd.Op == runnerOpApply {
+		payload["events"] = cmd.Events
+		payload["next"] = cmd.Next
+	}
+	if cmd.Op == runnerOpRestore {
+		payload["events"] = cmd.Events
+	}
+	if cmd.Op == runnerOpVerify {
+		payload["frame_count"] = cmd.FrameCount
+	}
+	input, err := jsonx.EncodeLineBytes(payload)
+	if err != nil {
+		return nil, fmt.Errorf("编码隔离执行输入失败: %w", err)
 	}
 	if int64(len(input)) > a.profile.MaxInputBytes {
-		return nil, fmt.Errorf("后端仿真输入超过部署上限")
+		return nil, fmt.Errorf("隔离执行输入超过部署上限")
 	}
 	execCtx, cancel := context.WithTimeout(ctx, time.Duration(a.profile.ExecTimeoutSeconds)*time.Second)
 	defer cancel()
 	stdout := newLimitedBuffer(a.profile.MaxOutputBytes)
 	stderr := newLimitedBuffer(a.profile.MaxOutputBytes)
-	if err := a.k8s.Exec(execCtx, a.namespace(session.ID), stdioJSONPod, stdioJSONContainer, a.profile.Command, bytes.NewReader(input), stdout, stderr, false); err != nil {
-		return nil, fmt.Errorf("后端仿真镜像执行失败: %w: %s", err, stderr.String())
+	if err := a.k8s.Exec(execCtx, namespace, stdioJSONPod, stdioJSONContainer, a.profile.Command, bytes.NewReader(input), stdout, stderr, false); err != nil {
+		return nil, fmt.Errorf("隔离执行镜像执行失败: %w: %s", err, stderr.String())
 	}
-	var output map[string]any
-	if err := jsonx.DecodeStrictUseNumber(stdout.Bytes(), &output); err != nil {
-		return nil, fmt.Errorf("后端仿真镜像输出无效: %w", err)
+	if stdout.Len() == 0 {
+		return nil, fmt.Errorf("隔离执行镜像没有输出")
 	}
-	if output == nil {
-		return nil, fmt.Errorf("后端仿真镜像输出必须为 JSON 对象")
+	return stdout.Bytes(), nil
+}
+
+// orEmptyObject 保证初始参数始终是对象,容器侧不必区分 null 与空对象。
+func orEmptyObject(value map[string]any) map[string]any {
+	if value == nil {
+		return map[string]any{}
 	}
-	if err := validateBackendStateScale(output, session.ScaleLimit); err != nil {
-		return nil, fmt.Errorf("后端仿真镜像输出超过包声明边界: %w", err)
-	}
-	return output, nil
+	return value
 }
 
 // backendExecutionLimit 取 max_tick 与 max_events 的更严格值,两者已在包审核边界校验为正整数。
@@ -414,6 +775,9 @@ func (b *limitedBuffer) Write(data []byte) (int, error) {
 
 // Bytes 返回已接收的受限输出。
 func (b *limitedBuffer) Bytes() []byte { return b.buffer.Bytes() }
+
+// Len 返回已收集的输出长度,供调用方区分"镜像没输出"与"输出无效"。
+func (b *limitedBuffer) Len() int { return b.buffer.Len() }
 
 // String 返回已接收的受限输出文本。
 func (b *limitedBuffer) String() string { return b.buffer.String() }

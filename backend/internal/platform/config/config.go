@@ -174,19 +174,18 @@ type SMSConfig struct {
 
 // UploadConfig 描述统一上传边界。
 type UploadConfig struct {
-	ImportMaxBytes              int64
-	ContentAttachmentMaxBytes   int64
-	CourseMaterialMaxBytes      int64
-	SimBundleMaxBytes           int64
-	SimBundleMetadataMaxBytes   int64
-	SimBundleMaxFiles           int
-	SimBundleMaxUnpackedBytes   int64
-	SimValidationReportMaxBytes int64
-	VirusScanRequired           bool
-	VirusScanNetwork            string
-	VirusScanAddress            string
-	VirusScanTimeoutSeconds     int
-	VirusScanMaxBytes           int64
+	ImportMaxBytes            int64
+	ContentAttachmentMaxBytes int64
+	CourseMaterialMaxBytes    int64
+	SimBundleMaxBytes         int64
+	SimBundleMetadataMaxBytes int64
+	SimBundleMaxFiles         int
+	SimBundleMaxUnpackedBytes int64
+	VirusScanRequired         bool
+	VirusScanNetwork          string
+	VirusScanAddress          string
+	VirusScanTimeoutSeconds   int
+	VirusScanMaxBytes         int64
 }
 
 // TransferConfig 描述统一导入导出中心的任务重试与下载中心边界。
@@ -558,24 +557,28 @@ func Load() (*Config, error) {
 		AllowLoopbackEndpoint: optBool("SMS_HTTP_ALLOW_LOOPBACK"),
 	}
 	c.Upload = UploadConfig{
-		ImportMaxBytes:              reqInt64("UPLOAD_IMPORT_MAX_BYTES"),
-		ContentAttachmentMaxBytes:   reqInt64("UPLOAD_CONTENT_ATTACHMENT_MAX_BYTES"),
-		CourseMaterialMaxBytes:      reqInt64("UPLOAD_COURSE_MATERIAL_MAX_BYTES"),
-		SimBundleMaxBytes:           reqInt64("UPLOAD_SIM_BUNDLE_MAX_BYTES"),
-		SimBundleMetadataMaxBytes:   reqInt64("UPLOAD_SIM_BUNDLE_METADATA_MAX_BYTES"),
-		SimBundleMaxFiles:           reqInt("UPLOAD_SIM_BUNDLE_MAX_FILES"),
-		SimBundleMaxUnpackedBytes:   reqInt64("UPLOAD_SIM_BUNDLE_MAX_UNPACKED_BYTES"),
-		SimValidationReportMaxBytes: reqInt64("UPLOAD_SIM_VALIDATION_REPORT_MAX_BYTES"),
-		VirusScanRequired:           reqBool("UPLOAD_VIRUS_SCAN_REQUIRED"),
-		VirusScanNetwork:            os.Getenv("UPLOAD_VIRUS_SCAN_NETWORK"),
-		VirusScanAddress:            os.Getenv("UPLOAD_VIRUS_SCAN_ADDRESS"),
-		VirusScanTimeoutSeconds:     reqInt("UPLOAD_VIRUS_SCAN_TIMEOUT_SECONDS"),
-		VirusScanMaxBytes:           reqInt64("UPLOAD_VIRUS_SCAN_MAX_BYTES"),
+		ImportMaxBytes:            reqInt64("UPLOAD_IMPORT_MAX_BYTES"),
+		ContentAttachmentMaxBytes: reqInt64("UPLOAD_CONTENT_ATTACHMENT_MAX_BYTES"),
+		CourseMaterialMaxBytes:    reqInt64("UPLOAD_COURSE_MATERIAL_MAX_BYTES"),
+		SimBundleMaxBytes:         reqInt64("UPLOAD_SIM_BUNDLE_MAX_BYTES"),
+		SimBundleMetadataMaxBytes: reqInt64("UPLOAD_SIM_BUNDLE_METADATA_MAX_BYTES"),
+		SimBundleMaxFiles:         reqInt("UPLOAD_SIM_BUNDLE_MAX_FILES"),
+		SimBundleMaxUnpackedBytes: reqInt64("UPLOAD_SIM_BUNDLE_MAX_UNPACKED_BYTES"),
+		VirusScanRequired:         reqBool("UPLOAD_VIRUS_SCAN_REQUIRED"),
+		VirusScanNetwork:          os.Getenv("UPLOAD_VIRUS_SCAN_NETWORK"),
+		VirusScanAddress:          os.Getenv("UPLOAD_VIRUS_SCAN_ADDRESS"),
+		VirusScanTimeoutSeconds:   reqInt("UPLOAD_VIRUS_SCAN_TIMEOUT_SECONDS"),
+		VirusScanMaxBytes:         reqInt64("UPLOAD_VIRUS_SCAN_MAX_BYTES"),
 	}
 	c.SimBackend = SimBackendConfig{
-		NamespacePrefix:        req("SIM_BACKEND_NAMESPACE_PREFIX"),
-		PodReadyTimeoutSeconds: reqInt("SIM_BACKEND_POD_READY_TIMEOUT_SECONDS"),
-		StdioAdapters:          readSimBackendAdapters("SIM_BACKEND_STDIO_ADAPTERS_JSON", &errs),
+		NamespacePrefix:                req("SIM_BACKEND_NAMESPACE_PREFIX"),
+		PodReadyTimeoutSeconds:         reqInt("SIM_BACKEND_POD_READY_TIMEOUT_SECONDS"),
+		StdioAdapters:                  readSimBackendAdapters("SIM_BACKEND_STDIO_ADAPTERS_JSON", &errs),
+		PackageRunnerAdapterCode:       req("SIM_PACKAGE_RUNNER_ADAPTER_CODE"),
+		MaxConcurrentSessionsPerTenant: reqInt("SIM_BACKEND_MAX_CONCURRENT_SESSIONS_PER_TENANT"),
+		PreviewPollIntervalSeconds:     reqInt("SIM_PREVIEW_POLL_INTERVAL_SECONDS"),
+		PreviewBatchSize:               reqInt("SIM_PREVIEW_BATCH_SIZE"),
+		PreviewFrameCount:              reqInt("SIM_PREVIEW_FRAME_COUNT"),
 	}
 	c.Transfer = TransferConfig{
 		TaskMaxAttempts:        reqInt("TRANSFER_TASK_MAX_ATTEMPTS"),
@@ -807,9 +810,6 @@ func Load() (*Config, error) {
 	if c.Upload.SimBundleMaxUnpackedBytes <= 0 {
 		errs = append(errs, "UPLOAD_SIM_BUNDLE_MAX_UNPACKED_BYTES 必须大于 0")
 	}
-	if c.Upload.SimValidationReportMaxBytes <= 0 {
-		errs = append(errs, "UPLOAD_SIM_VALIDATION_REPORT_MAX_BYTES 必须大于 0")
-	}
 	if c.SimBackend.PodReadyTimeoutSeconds <= 0 {
 		errs = append(errs, "SIM_BACKEND_POD_READY_TIMEOUT_SECONDS 必须大于 0")
 	}
@@ -817,6 +817,23 @@ func Load() (*Config, error) {
 		errs = append(errs, "SIM_BACKEND_NAMESPACE_PREFIX 必须以 sim- 开头、以连字符结尾且只含小写字母数字或连字符")
 	}
 	errs = append(errs, validateSimBackendAdapters(c.SimBackend.StdioAdapters, c.Sandbox.ImageAttestations, c.Sandbox.ImageRegistry)...)
+	// 扩展包运行器必须真实登记在能力目录里:它承载全部教师/第三方包,
+	// 缺了就等于扩展接入整条链路不可用,而那必须在启动时暴露,不能等教师提交后才报运行时错误。
+	if !simAdapterRegistered(c.SimBackend.StdioAdapters, c.SimBackend.PackageRunnerAdapterCode) {
+		errs = append(errs, "SIM_PACKAGE_RUNNER_ADAPTER_CODE 必须是 SIM_BACKEND_STDIO_ADAPTERS_JSON 中已登记的能力编号")
+	}
+	if c.SimBackend.MaxConcurrentSessionsPerTenant <= 0 {
+		errs = append(errs, "SIM_BACKEND_MAX_CONCURRENT_SESSIONS_PER_TENANT 必须大于 0")
+	}
+	if c.SimBackend.PreviewPollIntervalSeconds <= 0 {
+		errs = append(errs, "SIM_PREVIEW_POLL_INTERVAL_SECONDS 必须大于 0")
+	}
+	if c.SimBackend.PreviewBatchSize <= 0 {
+		errs = append(errs, "SIM_PREVIEW_BATCH_SIZE 必须大于 0")
+	}
+	if c.SimBackend.PreviewFrameCount <= 0 {
+		errs = append(errs, "SIM_PREVIEW_FRAME_COUNT 必须大于 0")
+	}
 	if c.Upload.VirusScanRequired && strings.TrimSpace(c.Upload.VirusScanAddress) == "" {
 		errs = append(errs, "UPLOAD_VIRUS_SCAN_REQUIRED=true 时必须设置 UPLOAD_VIRUS_SCAN_ADDRESS")
 	}

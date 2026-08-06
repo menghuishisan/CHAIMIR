@@ -7,7 +7,7 @@ import { zkRollupCodeTrace, zkRollupNarrative } from './trace';
 import { renderZkRollupView } from './view';
 
 export const zkRollupProofVerificationSimulation: SimPackage<ZkRollupState> = {
-  meta: { code: 'builtin__cross-zk-rollup-proof-verification', name: 'ZK Rollup 批次证明与验证推演', category: 'cross-chain-system', version: '1.0.0', compute: 'frontend', summary: '完整推演 L2 batch 聚合、witness/trace、validity proof、L1 verifier 和状态根更新/拒绝。', learningObjectives: ['理解 validity proof 如何绑定 public inputs', '区分 proof 生成和 L1 验证', '观察错误 public input 为什么不能更新状态根'], scaleLimit: { nodes: 80, maxTick: 140, maxEvents: 260 } },
+  meta: { code: 'builtin__cross-zk-rollup-proof-verification', name: 'ZK Rollup 批次证明与验证推演', category: 'cross-chain-system', version: '1.0.0', summary: '完整推演 L2 batch 聚合、witness/trace、validity proof、L1 verifier 和状态根更新/拒绝。', learningObjectives: ['理解 validity proof 如何绑定 public inputs', '区分 proof 生成和 L1 验证', '观察错误 public input 为什么不能更新状态根'], scaleLimit: { nodes: 80, maxTick: 140, maxEvents: 260 } },
   initState: createInitialZkRollupState,
   reducer: reduceZkRollupEvent,
   interactions: [

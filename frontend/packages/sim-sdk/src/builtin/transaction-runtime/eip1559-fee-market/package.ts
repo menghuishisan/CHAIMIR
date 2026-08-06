@@ -7,7 +7,7 @@ import { feeMarketCodeTrace, feeMarketNarrative } from './trace';
 import { renderFeeMarketView } from './view';
 
 export const eip1559FeeMarketSimulation: SimPackage<FeeMarketState> = {
-  meta: { code: 'builtin__runtime-eip1559-fee-market', name: 'EIP-1559 费用市场推演', category: 'transaction-runtime', version: '1.0.0', compute: 'frontend', summary: '完整推演交易报价、区块选择、base fee 销毁、小费支付和下一块 base fee 调整。', learningObjectives: ['区分 maxFee、priority fee 和实际支付', '理解 base fee 如何随区块负载反馈调整', '观察低报价交易为什么不能入块'], scaleLimit: { nodes: 64, maxTick: 120, maxEvents: 240 } },
+  meta: { code: 'builtin__runtime-eip1559-fee-market', name: 'EIP-1559 费用市场推演', category: 'transaction-runtime', version: '1.0.0', summary: '完整推演交易报价、区块选择、base fee 销毁、小费支付和下一块 base fee 调整。', learningObjectives: ['区分 maxFee、priority fee 和实际支付', '理解 base fee 如何随区块负载反馈调整', '观察低报价交易为什么不能入块'], scaleLimit: { nodes: 64, maxTick: 120, maxEvents: 240 } },
   initState: createInitialFeeMarketState,
   reducer: reduceFeeMarketEvent,
   interactions: [

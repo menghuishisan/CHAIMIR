@@ -5,6 +5,7 @@
 
 import React, { useCallback, useId, useState } from 'react'
 import { ArrowLeft } from 'lucide-react'
+import { Select } from '@chaimir/ui'
 import { api } from '../../../../app/api'
 import {
   TENANT_APPLICATION_SCHOOL_TYPES,
@@ -103,21 +104,19 @@ export default function ApplyPage() {
           onBlur={() => setError('schoolName', requiredError(schoolName, '请输入学校名称'))}
         />
 
-        {/* 机构类型:深色语境下用原生 select(设计系统 Select 为浅面板专用) */}
+        {/* 机构类型:认证页是墨色底层,用设计系统 Select 的深色变体(不在页面手拼深色控件) */}
         <AuthField label="机构类型" htmlFor={`${fieldId}-type`}>
-          <select
+          <Select
+            onDark
             id={`${fieldId}-type`}
             value={String(schoolType)}
+            options={TENANT_APPLICATION_SCHOOL_TYPES.map((type) => ({
+              value: String(type),
+              label: tenantApplicationSchoolTypeLabel(type),
+            }))}
             // 选项只由 TENANT_APPLICATION_SCHOOL_TYPES 渲染,取值必然落在枚举内
-            onChange={(event) => setSchoolType(Number(event.target.value) as TenantApplicationSchoolType)}
-            className="h-10 w-full border-b border-dark-line bg-transparent text-md text-on-dark transition-colors duration-fast hover:border-on-dark-faint focus-visible:border-accent focus-visible:outline-none"
-          >
-            {TENANT_APPLICATION_SCHOOL_TYPES.map((type) => (
-              <option key={type} value={String(type)} className="bg-dark-surface text-on-dark">
-                {tenantApplicationSchoolTypeLabel(type)}
-              </option>
-            ))}
-          </select>
+            onValueChange={(value) => setSchoolType(Number(value) as TenantApplicationSchoolType)}
+          />
         </AuthField>
 
         <AuthTextField

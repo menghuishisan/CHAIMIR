@@ -123,24 +123,18 @@ func loadBuiltinCatalog() ([]Package, error) {
 }
 
 // builtinPackageFromManifest 用与扩展包相同的 manifest 校验把清单条目转成领域模型。
-// 额外三条内置包专属约束:code 必须带 builtin__ 前缀(与数据库 CHECK 及前端前缀判定同源)、
-// compute 必须是前端计算、bundle_hash 由协议内容派生(内置包没有归档字节,用协议摘要表达版本完整性)。
+// 三条内置包专属约束:code 必须带 builtin__ 前缀(与数据库 CHECK 及前端前缀判定同源)、
+// 不得声明 entry(内置包由 sim-sdk registry 按 code 装配,不走归档装配路径)、
+// bundle_hash 由协议内容派生(内置包没有归档字节,用协议摘要表达版本完整性)。
 func builtinPackageFromManifest(doc simPackageManifest) (Package, error) {
 	code := strings.TrimSpace(doc.Meta.Code)
 	version := strings.TrimSpace(doc.Meta.Version)
 	if !strings.HasPrefix(code, builtinSimCodePrefix) {
 		return Package{}, apperr.ErrInternal.WithCause(fmt.Errorf("内置仿真包 %q 缺少 %s 前缀", code, builtinSimCodePrefix))
 	}
-	manifest, findings := buildBundleManifest(doc)
+	manifest, findings := buildBundleManifest(doc, false)
 	if len(findings) > 0 {
 		return Package{}, apperr.ErrInternal.WithCause(fmt.Errorf("内置仿真包 %s@%s 协议校验失败: %s", code, version, strings.Join(findings, ",")))
-	}
-	compute, err := computeFromString(manifest.Meta.Compute)
-	if err != nil {
-		return Package{}, apperr.ErrInternal.WithCause(fmt.Errorf("内置仿真包 %s@%s 计算模式非法: %w", code, version, err))
-	}
-	if compute != ComputeFrontend {
-		return Package{}, apperr.ErrInternal.WithCause(fmt.Errorf("内置仿真包 %s@%s 只允许前端确定性推演", code, version))
 	}
 
 	canonical, err := jsonx.AnyBytes(doc, apperr.ErrInternal)
@@ -152,7 +146,7 @@ func builtinPackageFromManifest(doc simPackageManifest) (Package, error) {
 		Version:           version,
 		Name:              strings.TrimSpace(manifest.Meta.Name),
 		Category:          strings.TrimSpace(manifest.Meta.Category),
-		Compute:           ComputeFrontend,
+		Compute:           ComputeBrowser,
 		ScaleLimit:        manifest.Meta.ScaleLimit,
 		BundleKey:         builtinBundleRefPrefix + code + "@" + version,
 		BundleHash:        pkgcrypto.SHA256Hex(canonical),

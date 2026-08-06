@@ -1,7 +1,10 @@
 // 仿真实验室页(学生侧栏,/student/simulations)。
 // 只做场景检索与版本选择:仿真会话由 M7 实验实例编排产生(POST /sim/sessions 在 internal 组),
-// 学生不能独立建会话。因此本页进入的是「本机确定性推演」——
-// 在 Worker 内按同一 seed 复现场景,不上报动作、不建实时连接(对齐清单 §6.6)。
+// 学生不能独立建会话。因此本页能直接进入的只有「本机确定性推演」——
+// 平台内置场景在浏览器 Worker 内按同一 seed 复现,不上报动作、不建实时连接(对齐清单 §6.6)。
+//
+// 本校自建场景(compute=isolated)在服务端隔离容器里运行,一个会话一个容器,
+// 会话只能由课程实验编排产生,故本页对它不给「进入推演」入口 —— 不摊出必然失败的按钮。
 
 import { useCallback, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
@@ -69,7 +72,7 @@ export default function StudentSimulationsPage() {
 
   const list = packages.data ? packages.data.list : []
   const categoryCount = new Set(list.map((item) => item.category)).size
-  const frontendCount = list.filter((item) => item.compute === SIM_COMPUTE.FRONTEND).length
+  const browserCount = list.filter((item) => item.compute === SIM_COMPUTE.BROWSER).length
 
   const columns: TableColumn<SimPackageMeta>[] = [
     {
@@ -89,9 +92,9 @@ export default function StudentSimulationsPage() {
     },
     {
       key: 'compute',
-      header: '运行方式',
+      header: '运行位置',
       render: (pkg) => (
-        <Badge tone={pkg.compute === SIM_COMPUTE.FRONTEND ? 'jade' : 'info'}>
+        <Badge tone={pkg.compute === SIM_COMPUTE.BROWSER ? 'jade' : 'info'}>
           {simComputeLabel(pkg.compute)}
         </Badge>
       ),
@@ -116,14 +119,17 @@ export default function StudentSimulationsPage() {
       key: 'actions',
       header: '操作',
       align: 'right',
-      render: (pkg) => (
-        <div className="flex justify-end gap-1">
-          <Button variant="ghost" size="sm" onClick={() => setVersionPickerCode(pkg.code)}>
-            选择版本
-          </Button>
-          <EnterSimulationButton code={pkg.code} version={pkg.version} />
-        </div>
-      ),
+      render: (pkg) =>
+        pkg.compute === SIM_COMPUTE.BROWSER ? (
+          <div className="flex justify-end gap-1">
+            <Button variant="ghost" size="sm" onClick={() => setVersionPickerCode(pkg.code)}>
+              选择版本
+            </Button>
+            <EnterSimulationButton code={pkg.code} version={pkg.version} />
+          </div>
+        ) : (
+          <span className="block text-right text-xs text-ink-sub">随课程实验进入</span>
+        ),
     },
   ]
 
@@ -140,7 +146,7 @@ export default function StudentSimulationsPage() {
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           <Stat label="可用场景" value={packages.total} icon={Network} />
           <Stat label="本页涵盖分类" value={categoryCount} icon={Layers} />
-          <Stat label="本页本机推演" value={frontendCount} icon={Play} hint="无需服务端算力" />
+          <Stat label="本页本机推演" value={browserCount} icon={Play} hint="无需服务端算力" />
         </div>
       </PageSection>
 
@@ -251,7 +257,10 @@ function VersionPickerModal({ code, onClose }: VersionPickerModalProps) {
   const options = useMemo(
     () =>
       (versions.data ?? [])
-        .filter((item) => item.status === SIM_PACKAGE_STATUS.PUBLISHED)
+        .filter(
+          (item) =>
+            item.status === SIM_PACKAGE_STATUS.PUBLISHED && item.compute === SIM_COMPUTE.BROWSER,
+        )
         .map((item) => ({ value: item.version, label: `${item.version} · ${formatDate(item.updated_at)}` })),
     [versions.data],
   )

@@ -51,10 +51,12 @@ type TxStore interface {
 	GetLatestReviewForPackage(ctx context.Context, packageID int64) (Review, error)
 	ListReviews(ctx context.Context, result int16, limit, offset int32) ([]ReviewInfo, int64, error)
 	MergeValidationReport(ctx context.Context, packageID int64, report ValidationReport) (Review, error)
+	ClaimPackagesForPreview(ctx context.Context, limit int32) ([]Package, error)
 	CompleteReview(ctx context.Context, id int64, result int16, reviewerID int64, comment string) (Review, error)
 	CreateSession(ctx context.Context, session Session) (Session, error)
 	GetSession(ctx context.Context, tenantID, sessionID int64) (Session, error)
 	GetSessionWithPackage(ctx context.Context, tenantID, sessionID int64) (SessionWithPackage, error)
+	CountActiveIsolatedSessions(ctx context.Context, tenantID int64) (int64, error)
 	UpdateSessionStatus(ctx context.Context, tenantID, sessionID int64, status int16) (Session, error)
 	ArchiveSessionsBySourceRef(ctx context.Context, tenantID int64, sourceRef string) ([]Session, error)
 	GetLastAction(ctx context.Context, tenantID, sessionID int64) (Action, error)
@@ -153,7 +155,11 @@ func (s *txStore) ListPackageVersions(ctx context.Context, code string) ([]Packa
 
 // CreatePackage 新建仿真包版本。
 func (s *txStore) CreatePackage(ctx context.Context, pkg Package) (Package, error) {
-	scale, backend, err := packageJSON(pkg)
+	scale, err := jsonx.AnyBytes(pkg.ScaleLimit, apperr.ErrSimPackageInvalid)
+	if err != nil {
+		return Package{}, err
+	}
+	backend, err := jsonx.AnyBytes(pkg.BackendConfig, apperr.ErrSimPackageInvalid)
 	if err != nil {
 		return Package{}, err
 	}
@@ -165,7 +171,7 @@ func (s *txStore) CreatePackage(ctx context.Context, pkg Package) (Package, erro
 	if err != nil {
 		return Package{}, err
 	}
-	row, err := s.q.CreateSimPackage(ctx, sqlcgen.CreateSimPackageParams{ID: pkg.ID, Code: pkg.Code, Version: pkg.Version, Name: pkg.Name, Category: pkg.Category, Compute: pkg.Compute, ScaleLimit: scale, BundleKey: pkg.BundleKey, BundleHash: pkg.BundleHash, BackendAdapter: pgtypex.Text(pkg.BackendAdapter), BackendConfig: backend, InteractionSchema: interactionSchema, CodeTrace: codeTrace, AuthorType: pkg.AuthorType, AuthorID: pgtypex.Int8(pkg.AuthorID), Status: pkg.Status})
+	row, err := s.q.CreateSimPackage(ctx, sqlcgen.CreateSimPackageParams{ID: pkg.ID, Code: pkg.Code, Version: pkg.Version, Name: pkg.Name, Category: pkg.Category, Compute: pkg.Compute, ScaleLimit: scale, BundleKey: pkg.BundleKey, BundleHash: pkg.BundleHash, Entry: pgtypex.Text(pkg.Entry), BackendAdapter: pgtypex.Text(pkg.BackendAdapter), BackendConfig: backend, InteractionSchema: interactionSchema, CodeTrace: codeTrace, AuthorType: pkg.AuthorType, AuthorID: pgtypex.Int8(pkg.AuthorID), Status: pkg.Status})
 	if err != nil {
 		return Package{}, err
 	}
@@ -213,8 +219,9 @@ func (s *txStore) ArchiveRetiredBuiltinPackages(ctx context.Context, liveKeys []
 }
 
 // UpdatePackageDraft 更新草稿或退回包。
+// 不更新 compute/backend_adapter/author_type:它们按作者类型派生,更新包不改变作者。
 func (s *txStore) UpdatePackageDraft(ctx context.Context, pkg Package) (Package, error) {
-	scale, backend, err := packageJSON(pkg)
+	scale, err := jsonx.AnyBytes(pkg.ScaleLimit, apperr.ErrSimPackageInvalid)
 	if err != nil {
 		return Package{}, err
 	}
@@ -226,7 +233,7 @@ func (s *txStore) UpdatePackageDraft(ctx context.Context, pkg Package) (Package,
 	if err != nil {
 		return Package{}, err
 	}
-	row, err := s.q.UpdateSimPackageDraft(ctx, sqlcgen.UpdateSimPackageDraftParams{ID: pkg.ID, Name: pkg.Name, Category: pkg.Category, Compute: pkg.Compute, ScaleLimit: scale, BundleKey: pkg.BundleKey, BundleHash: pkg.BundleHash, BackendAdapter: pgtypex.Text(pkg.BackendAdapter), BackendConfig: backend, InteractionSchema: interactionSchema, CodeTrace: codeTrace, Status: pkg.Status})
+	row, err := s.q.UpdateSimPackageDraft(ctx, sqlcgen.UpdateSimPackageDraftParams{ID: pkg.ID, Name: pkg.Name, Category: pkg.Category, ScaleLimit: scale, BundleKey: pkg.BundleKey, BundleHash: pkg.BundleHash, Entry: pgtypex.Text(pkg.Entry), InteractionSchema: interactionSchema, CodeTrace: codeTrace, Status: pkg.Status})
 	if err != nil {
 		return Package{}, err
 	}
@@ -307,6 +314,23 @@ func (s *txStore) MergeValidationReport(ctx context.Context, packageID int64, re
 	return reviewFromRow(row)
 }
 
+// ClaimPackagesForPreview 认领待隔离预览的包,SKIP LOCKED 保证多副本认领互不重复。
+func (s *txStore) ClaimPackagesForPreview(ctx context.Context, limit int32) ([]Package, error) {
+	rows, err := s.q.ClaimSimPackagesForPreview(ctx, limit)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]Package, 0, len(rows))
+	for _, row := range rows {
+		pkg, err := packageFromRow(row)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, pkg)
+	}
+	return out, nil
+}
+
 // CompleteReview 完成审核记录。
 func (s *txStore) CompleteReview(ctx context.Context, id int64, result int16, reviewerID int64, comment string) (Review, error) {
 	row, err := s.q.CompleteSimReview(ctx, sqlcgen.CompleteSimReviewParams{ID: id, Result: result, ReviewerID: pgtypex.Int8(reviewerID), Comment: pgtypex.Text(comment)})
@@ -345,6 +369,11 @@ func (s *txStore) GetSessionWithPackage(ctx context.Context, tenantID, sessionID
 		return SessionWithPackage{}, err
 	}
 	return sessionWithPackageFromRow(row)
+}
+
+// CountActiveIsolatedSessions 统计本租户当前占用集群资源的隔离执行会话数,供并发闸门使用。
+func (s *txStore) CountActiveIsolatedSessions(ctx context.Context, tenantID int64) (int64, error) {
+	return s.q.CountActiveIsolatedSimSessions(ctx, tenantID)
 }
 
 // UpdateSessionStatus 更新仿真会话状态。
@@ -461,27 +490,16 @@ func packagesFromRows(rows []sqlcgen.SimPackage) ([]Package, error) {
 	return items, nil
 }
 
-// packageJSON 序列化包 JSONB 字段。
-func packageJSON(pkg Package) ([]byte, []byte, error) {
-	scale, err := jsonx.AnyBytes(pkg.ScaleLimit, apperr.ErrSimPackageInvalid)
-	if err != nil {
-		return nil, nil, err
-	}
-	backend, err := jsonx.AnyBytes(pkg.BackendConfig, apperr.ErrSimPackageInvalid)
-	if err != nil {
-		return nil, nil, err
-	}
-	return scale, backend, nil
-}
-
 // dynamicValidationReportJSON 只序列化受控动态报告字段,避免覆盖上传阶段生成的静态安全门禁。
+// preview_frames 与两项结论同属隔离预览产出:审核人需要凭样例帧判断算法实现是否正确,
+// 故它必须随结论一并写入,不能只落两个 passed 徽章。
 func dynamicValidationReportJSON(report ValidationReport) ([]byte, error) {
 	payload := map[string]any{
 		"determinism_check": report.DeterminismCheck,
 		"worker_preview":    report.WorkerPreview,
 	}
-	if report.Details != nil {
-		payload["details"] = report.Details
+	if len(report.PreviewFrames) > 0 {
+		payload["preview_frames"] = report.PreviewFrames
 	}
 	return jsonx.AnyBytes(payload, apperr.ErrSimPackageValidationFailed)
 }

@@ -2,12 +2,15 @@
 package main
 
 import (
+	"context"
 	"fmt"
+	"time"
 
 	"chaimir/internal/contracts"
 	"chaimir/internal/modules/sim"
 	"chaimir/internal/platform/audit"
 	"chaimir/internal/platform/auth"
+	"chaimir/internal/platform/background"
 	"chaimir/internal/platform/config"
 	"chaimir/internal/platform/db"
 	"chaimir/internal/platform/storage"
@@ -25,6 +28,7 @@ type SimModuleDeps struct {
 	Upload          config.UploadConfig
 	MinIO           config.MinIOConfig
 	AuthConfig      config.AuthConfig
+	SimBackend      config.SimBackendConfig
 	Storage         *storage.Storage
 	Audit           audit.Writer
 	WSHub           *ws.Hub
@@ -33,8 +37,8 @@ type SimModuleDeps struct {
 	BackendAdapters sim.BackendRegistry
 }
 
-// RegisterSimModule 构造仿真 store/service 并注册 HTTP/WS 路由。
-func RegisterSimModule(deps SimModuleDeps) (*sim.Service, error) {
+// RegisterSimModule 构造仿真 store/service、注册 HTTP/WS 路由并启动隔离预览任务。
+func RegisterSimModule(ctx context.Context, deps SimModuleDeps) (*sim.Service, error) {
 	if deps.Router == nil {
 		return nil, fmt.Errorf("sim module 缺少 HTTP router")
 	}
@@ -59,6 +63,7 @@ func RegisterSimModule(deps SimModuleDeps) (*sim.Service, error) {
 		Identity:        deps.Roles,
 		WSHub:           deps.WSHub,
 		BackendAdapters: deps.BackendAdapters,
+		SimBackend:      deps.SimBackend,
 	})
 	if err != nil {
 		return nil, err
@@ -66,5 +71,22 @@ func RegisterSimModule(deps SimModuleDeps) (*sim.Service, error) {
 	if err := sim.RegisterRoutes(deps.Router, svc, deps.Auth, deps.Roles); err != nil {
 		return nil, err
 	}
+	previewTask, err := simPackagePreviewTask(deps.SimBackend, svc)
+	if err != nil {
+		return nil, err
+	}
+	go background.Run(ctx, previewTask)
 	return svc, nil
+}
+
+// simPackagePreviewTask 把上架前隔离预览接入统一后台任务运行器。
+// 它是 determinism_check / worker_preview 两项审核门禁的唯一生产者,缺了扩展包永远无法上架。
+func simPackagePreviewTask(cfg config.SimBackendConfig, svc *sim.Service) (background.Task, error) {
+	if svc == nil {
+		return background.Task{}, fmt.Errorf("sim package preview task 缺少 service")
+	}
+	if cfg.PreviewPollIntervalSeconds <= 0 {
+		return background.Task{}, fmt.Errorf("SIM_PREVIEW_POLL_INTERVAL_SECONDS 必须大于 0")
+	}
+	return background.Task{Name: "sim.package_preview", Interval: time.Duration(cfg.PreviewPollIntervalSeconds) * time.Second, Run: svc.RunPackagePreviewOnce}, nil
 }

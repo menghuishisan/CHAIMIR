@@ -22,7 +22,6 @@ export const pbftSimulation: SimPackage<PbftState> = {
     name: 'PBFT 三阶段共识推演',
     category: 'consensus',
     version: '1.0.0',
-    compute: 'frontend',
     summary: '以协议内核推演 PBFT 请求、预准备、准备、提交、回复、检查点和视图切换,可观察消息飞行、证书形成和安全条件。',
     learningObjectives: ['理解 PBFT 三阶段投票', '掌握 BFT 法定人数', '观察拜占庭主节点双提议与视图切换恢复'],
     scaleLimit: { nodes: 96, maxTick: 120, maxEvents: 240 },

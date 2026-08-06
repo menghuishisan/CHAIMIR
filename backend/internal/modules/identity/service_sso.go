@@ -285,9 +285,9 @@ func (s *Service) ldapConfigFromJSON(raw []byte) (ldapConfig, error) {
 }
 
 // stringField 从配置 JSON map 中读取字符串字段并去除空白。
+// 严格取值复用 jsonx.StringField(不做数字宽松转换),这里只加 SSO 配置字段特有的去空白语义。
 func stringField(data map[string]any, key string) string {
-	value, _ := data[key].(string)
-	return strings.TrimSpace(value)
+	return strings.TrimSpace(jsonx.StringField(data, key))
 }
 
 // loadEnabledSSOConfig 读取租户启用中的指定 SSO 配置,避免 API 层碰数据库。

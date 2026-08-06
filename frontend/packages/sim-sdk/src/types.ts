@@ -1,6 +1,5 @@
 // 本文件定义仿真包、确定性状态机、交互协议、可视化模式与教学叙事契约。
 
-export type SimComputeMode = 'frontend' | 'backend';
 export type SimCategory =
   | 'consensus'
   | 'cryptography'
@@ -26,12 +25,18 @@ export interface SimPackage<TState extends SimState = SimState> {
   checkpoints: CheckpointDef[];
 }
 
+// SimMeta 是仿真包的自描述元信息。
+//
+// 刻意不含 compute:执行位置由后端按 author_type 派生(内置=浏览器 Worker、
+// 教师/第三方=隔离容器,见 docs/04-仿真可视化引擎/02-架构设计.md §8),不是作者可选项。
+// 让作者声明它只会产生"声明了一个平台无法运行的执行位置"这类无效状态。
 export interface SimMeta {
   code: string;
   name: string;
   category: SimCategory;
   version: string;
-  compute: SimComputeMode;
+  /** entry 是归档内入口模块相对路径,供隔离容器装配;内置包由 registry 按 code 装配故省略。 */
+  entry?: string;
   summary: string;
   learningObjectives: string[];
   scaleLimit: {

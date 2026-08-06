@@ -2,7 +2,7 @@
 
 > 本文是仿真包作者的开发契约 SSOT:仿真包怎么写、SDK 怎么用、交互怎么声明。
 > 面向第三方/教师扩展开发者。
-> 最后更新:2026-07-06
+> 最后更新:2026-08-06
 
 ---
 
@@ -11,6 +11,10 @@
 仿真包归档根目录必须包含 `sim-package.json`。若归档工具自动包了一层顶级目录,允许
 `<top-level>/sim-package.json`;其他位置的同名文件不作为协议入口。后端上传审核只读取这
 一个 manifest 生成交互白名单和审核摘要,运行时代码仍随 bundle 保存在对象存储。
+
+**扩展包在后端隔离容器内执行**(见 02 架构设计 §8):归档字节不下发浏览器,而是在会话建立时
+经 k8s exec stdin 推入受限计算 Pod,容器内校验 sha256 后按 `meta.entry` 装配。
+对作者而言执行位置是透明的 —— 下述协议与内置包完全一致,不为"跑在哪"写第二套实现。
 
 ```typescript
 interface SimPackage {
@@ -25,19 +29,24 @@ interface SimPackage {
 }
 
 interface SimMeta {
-  code: string;            // 唯一标识(命名空间前缀防冲突)
+  code: string;            // 唯一标识(命名空间前缀防冲突,由服务端按登录账号强制)
   name: string;
   category: string;        // 领域分类(仅用于检索/配色)
   version: string;         // semver
-  compute: "frontend" | "backend";  // 默认 frontend
+  entry: string;           // 归档内入口模块相对路径,供隔离容器装配(扩展包必填)
   scaleLimit: { nodes: number; maxTick: number; maxEvents: number };  // 性能边界
 }
 ```
 
+`compute` 不由作者声明:执行位置按代码来源派生(内置=浏览器、教师/第三方=隔离容器),
+提交表单与 manifest 都不含该字段。作者写一次协议,平台决定在哪跑。
+
 **硬约束**:
 - `reducer` 必须纯函数:`reducer(s,e,t)` 同输入必同输出,禁用 `Date.now()`/`Math.random()`(随机走种子 PRNG)。
+  隔离预览会同 seed 跑两遍逐帧比对,不纯即拒绝上架。
 - `render` 只能返回 `TeachingFrame` 纯数据,不得自行操作 DOM、Canvas、网络或浏览器全局状态。
-- `interactions` 必须完整声明,运行时据此自动渲染控件。
+  容器内无 DOM、无网络出口,这些调用会直接失败。
+- `interactions` 必须完整声明,运行时据此自动渲染控件并作为服务端事件白名单。
 - `sim-package.json` 只描述 `meta`、`interactions`、`render.protocol`、`render.patterns`、`narrative`、`codeTrace` 与 `checkpoints`;
   后端不执行其中任何函数,只校验 TeachingFrame 协议版本、封闭模式、交互事件、代码追踪配置和检查点锚点。
 
@@ -46,11 +55,11 @@ interface SimMeta {
 ```json
 {
   "meta": {
-    "code": "builtin__pow-mining",
+    "code": "teacher_1001__pow-mining",
     "name": "PoW 挖矿与51%攻击",
     "category": "consensus",
     "version": "1.0.0",
-    "compute": "frontend",
+    "entry": "dist/index.mjs",
     "scale_limit": { "nodes": 50, "max_tick": 5000, "max_events": 10000 }
   },
   "interactions": [
@@ -87,13 +96,16 @@ interface SimMeta {
 ```
 
 后端校验规则:
-- `meta` 必须与上传表单一致,防止 bundle 自描述与入库元数据分裂。
+- `meta` 必须与上传表单一致(`code`/`version`/`name`/`category`/`scale_limit`),防止 bundle 自描述与入库元数据分裂。
+- `meta.entry` 必须是归档内真实存在的 `.mjs` 文件相对路径;不得为绝对路径、不得含 `..`、不得指向归档外。
+  只接受 `.mjs`:归档内没有 `package.json` 时 Node 按 CJS 解析 `.js`,而扩展包必须默认导出 `SimPackage`,
+  允许 `.js` 会让"能不能装配"取决于打包方式。缺失或非法即拒绝(`41002`)—— 容器需要它才能装配,没有它包就是不可运行的。
 - `interactions[].emits` 生成 `sim_package.interaction_schema`,运行时只接受 manifest 声明过的事件和参数。
 - `render.protocol` 必须是 `teaching-frame`。
 - `render.patterns` 必须是 1~3 个封闭模式声明,每项必须有稳定 `id` 和 `mode`,`mode` 只能取 `graph|chain|tree|matrix|pipeline|lane|chart`。
 - `render.patterns[].roles` 只能用于审核该模式可承担的教学区域,取值为 `primary|evidence|timeline|metrics|trace|checkpoints`,不得再使用旧版区域字段。
 - `codeTrace` 使用 camelCase,与前端 TypeScript 协议一致;数据库字段 `code_trace` 只存不含源码正文的审核摘要。
-- `checkpoints` 必须声明检查点 ID 与名称,受控预览和后续 `/sessions/{id}/checkpoints` 上报均以这些锚点派生结果。
+- `checkpoints` 必须声明检查点 ID 与名称,隔离预览和后续 `/sessions/{id}/checkpoints` 上报均以这些锚点派生结果。
 - manifest JSON 拒绝未知字段和尾随内容,避免同一协议出现兼容别名或灰色扩展。
 
 ### 1.2 官方前端 SDK 使用入口
@@ -105,10 +117,10 @@ interface SimMeta {
 - `createDeveloperTemplate(code)`:生成最小完整模板。
 - `validateSimPackage(simPackage)`:上传前检查协议完整性。
 - `createManifestSummary(simPackage)`:生成审核摘要。
-- `createSimPackageManifest(simPackage)`:生成上传归档中的 `sim-package.json` 内容。
-- `SimWorkerClient`:仅供平台页面装配 Worker 运行时,仿真包作者不应直接复刻运行时。
+- `createSimPackageManifest(simPackage, entry)`:生成上传归档中的 `sim-package.json` 内容(`entry` 为归档内入口模块路径)。
+- `SimWorkerClient`:仅供平台页面装配内置包 Worker 运行时,仿真包作者不应直接复刻运行时。
 
-`@chaimir/sim-sdk` 不导出任何 React 视图组件(包内无 react 依赖)。`TeachingFrame` 的渲染由 `@chaimir/ui` 的 `biz/TeachingFrameStage` 负责,页面级装配在 `apps/web` 完成。
+`@chaimir/sim-sdk` 不导出任何 React 视图组件(包内无 react 依赖)。`TeachingFrame` 的渲染由 `@chaimir/ui` 的 `biz/TeachingFrameStage` 负责,页面级装配在 `apps/web` 完成。扩展包在容器内运行时同样只产出 `TeachingFrame` 纯数据,由同一个 `TeachingFrameStage` 绘制 —— 全平台只有一套渲染实现。
 
 内置仿真包 registry 不从 `@chaimir/sim-sdk` 主入口导出。内置包由平台内部装配,第三方/教师包与内置包使用同一套 `SimPackage` 协议。
 
@@ -117,8 +129,10 @@ interface SimMeta {
 1. 使用 `createDeveloperTemplate(code)` 或 `defineSimPackage({...})` 创建包。
 2. 完整实现 `meta`、`initState`、`reducer`、`interactions`、`render`、`narrative`、`codeTrace`、`checkpoints`。
 3. 本地执行 `validateSimPackage(simPackage)`,确认无协议问题。
-4. 使用 `createSimPackageManifest(simPackage)` 生成 `sim-package.json`。
-5. 将 `sim-package.json` 与 bundle 一起提交后端 M4 审核。
+4. 把包打成 ESM 模块(默认导出该 `SimPackage`),记下归档内相对路径作为 `meta.entry`。
+5. 使用 `createSimPackageManifest(simPackage, entry)` 生成 `sim-package.json`。
+6. 把 `sim-package.json` 与入口模块一起打成 ZIP/TAR 归档,提交后端 M4 审核。
+   平台会在隔离容器内装配并同 seed 跑两遍比对确定性、渲出样例教学帧,再由平台管理员判定后上架。
 
 ---
 
@@ -341,8 +355,8 @@ interface NarrativeStep {
 
 ```typescript
 const PoWSim: SimPackage = {
-  meta: { code: "builtin__pow-mining", name: "PoW 挖矿与51%攻击",
-          category: "consensus", version: "1.0.0", compute: "frontend",
+  meta: { code: "teacher_1001__pow-mining", name: "PoW 挖矿与51%攻击",
+          category: "consensus", version: "1.0.0", entry: "dist/index.mjs",
           scaleLimit: { nodes: 50, maxTick: 5000, maxEvents: 10000 } },
   initState: (p, seed) => ({ miners: mkMiners(p.minerCount, seed), chain: [genesis], ... }),
   reducer: (s, e, t) => {

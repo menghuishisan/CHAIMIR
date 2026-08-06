@@ -13,9 +13,13 @@ import (
 	"chaimir/internal/platform/timex"
 	"chaimir/pkg/apperr"
 	"chaimir/pkg/logging"
+	"chaimir/pkg/textx"
 
 	"github.com/google/uuid"
 )
+
+// tenantProvisionFailureDetailLimit 是失败原因入库的字符上限,与 tenant_provision_outbox.detail 列宽一致。
+const tenantProvisionFailureDetailLimit = 255
 
 // enqueueTenantProvision 在租户创建事务内保存跨模块初始化事件。
 func (s *Service) enqueueTenantProvision(ctx context.Context, tx TxStore, item Tenant) error {
@@ -79,11 +83,7 @@ func (s *Service) publishTenantProvisionOutbox(ctx context.Context, item TenantP
 
 // recordTenantProvisionFailure 持久化发布失败原因，记录失败本身也必须可定位。
 func (s *Service) recordTenantProvisionFailure(ctx context.Context, outboxID int64, cause error) {
-	detail := cause.Error()
-	runes := []rune(detail)
-	if len(runes) > 255 {
-		detail = string(runes[:255])
-	}
+	detail := textx.TruncateRunes(cause.Error(), tenantProvisionFailureDetailLimit)
 	if err := s.store.PrivilegedTx(ctx, func(ctx context.Context, tx TxStore) error {
 		_, err := tx.MarkTenantProvisionOutboxFailed(ctx, outboxID, detail)
 		return err

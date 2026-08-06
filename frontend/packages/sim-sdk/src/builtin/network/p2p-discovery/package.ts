@@ -13,7 +13,6 @@ export const p2pDiscoverySimulation: SimPackage<DiscoveryState> = {
     name: 'P2P 节点发现推演',
     category: 'network',
     version: '1.0.0',
-    compute: 'frontend',
     summary: '完整推演 P2P 网络从引导节点接入、地址交换、握手校验、健康探测到恶意节点剔除的过程。',
     learningObjectives: ['理解节点如何从零加入网络', '掌握地址簿和握手的安全边界', '观察地址投毒如何被剔除'],
     scaleLimit: { nodes: 96, maxTick: 140, maxEvents: 240 },

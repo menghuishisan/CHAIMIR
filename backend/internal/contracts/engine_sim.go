@@ -19,13 +19,16 @@ type SimCreateSessionRequest struct {
 }
 
 // SimSessionInfo 是跨模块传递的仿真会话摘要。
+//
+// 不含 bundle 引用:内置包由前端按 package_code 在 Worker 内装配,扩展包 bundle 只经
+// 受控 k8s exec 投入隔离容器,从不下发浏览器(见 docs/04-仿真可视化引擎/05-接口设计.md §3.1)。
+// Compute 取 "browser" 或 "isolated",调用方据此决定是起 Worker 还是连 stream。
 type SimSessionInfo struct {
 	SessionID   int64  `json:"session_id"`
 	TenantID    int64  `json:"tenant_id"`
 	PackageCode string `json:"package_code"`
 	Version     string `json:"version"`
 	Compute     string `json:"compute"`
-	BundleRef   string `json:"bundle_ref"`
 	SourceRef   string `json:"source_ref"`
 }
 

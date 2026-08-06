@@ -13,7 +13,6 @@ export const networkPartitionSimulation: SimPackage<PartitionState> = {
     name: '网络分区与恢复推演',
     category: 'network',
     version: '1.0.0',
-    compute: 'frontend',
     summary: '完整推演网络分区的拓扑切割、分区内同步、跨区阻断、链路恢复与状态合并。',
     learningObjectives: ['理解分区导致的可达性变化', '区分局部一致和全局一致', '掌握分区恢复后的合并步骤'],
     scaleLimit: { nodes: 96, maxTick: 140, maxEvents: 240 },

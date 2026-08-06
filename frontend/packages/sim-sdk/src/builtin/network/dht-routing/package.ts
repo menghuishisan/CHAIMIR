@@ -13,7 +13,6 @@ export const dhtRoutingSimulation: SimPackage<DhtState> = {
     name: 'DHT 异或路由推演',
     category: 'network',
     version: '1.0.0',
-    compute: 'frontend',
     summary: '完整推演 DHT 节点 ID 空间、K 桶维护、异或距离选择、迭代查询与污染路由修复。',
     learningObjectives: ['理解 DHT 为什么按异或距离路由', '掌握 K 桶如何覆盖 ID 空间', '观察路由污染如何影响查找'],
     scaleLimit: { nodes: 96, maxTick: 140, maxEvents: 240 },

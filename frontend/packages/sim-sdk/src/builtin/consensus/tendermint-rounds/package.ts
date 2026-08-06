@@ -7,7 +7,7 @@ import { tendermintRoundsCodeTrace, tendermintRoundsNarrative } from './trace';
 import { renderTendermintRoundsView } from './view';
 
 export const tendermintRoundsSimulation: SimPackage<TendermintRoundsState> = {
-  meta: { code: 'builtin__consensus-tendermint-rounds', name: 'Tendermint 轮次锁定与提交推演', category: 'consensus', version: '1.0.0', compute: 'frontend', summary: '完整推演 proposal、prevote、precommit、commit、timeout/new round 和 lock 约束。', learningObjectives: ['理解 2/3 prevote 与 2/3 precommit 的区别', '观察 lock 如何保护安全性', '理解超时换轮如何保证活性'], scaleLimit: { nodes: 80, maxTick: 140, maxEvents: 260 } },
+  meta: { code: 'builtin__consensus-tendermint-rounds', name: 'Tendermint 轮次锁定与提交推演', category: 'consensus', version: '1.0.0', summary: '完整推演 proposal、prevote、precommit、commit、timeout/new round 和 lock 约束。', learningObjectives: ['理解 2/3 prevote 与 2/3 precommit 的区别', '观察 lock 如何保护安全性', '理解超时换轮如何保证活性'], scaleLimit: { nodes: 80, maxTick: 140, maxEvents: 260 } },
   initState: createInitialTendermintRoundsState,
   reducer: reduceTendermintRoundsEvent,
   interactions: [

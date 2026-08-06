@@ -96,7 +96,7 @@ func sandboxRefFromContract(componentID string, info contracts.SandboxInfo) Sand
 
 // simRefFromContract 提取 M4 仿真摘要中工作台需要的稳定字段。
 func simRefFromContract(componentID string, info contracts.SimSessionInfo) SimSessionRef {
-	return SimSessionRef{ComponentID: componentID, SessionID: ids.ID(info.SessionID), PackageCode: info.PackageCode, Version: info.Version, BundleRef: info.BundleRef}
+	return SimSessionRef{ComponentID: componentID, SessionID: ids.ID(info.SessionID), PackageCode: info.PackageCode, Version: info.Version, Compute: info.Compute}
 }
 
 // scoreSnapshotFromInstance 转换 M7 得分快照为跨模块只读契约。

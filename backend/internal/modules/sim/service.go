@@ -7,14 +7,12 @@ import (
 	"fmt"
 	"io"
 	"strings"
-	"time"
 
 	"chaimir/internal/contracts"
 	"chaimir/internal/platform/audit"
 	"chaimir/internal/platform/config"
 	"chaimir/internal/platform/ids"
 	"chaimir/internal/platform/storage"
-	"chaimir/internal/platform/timex"
 	"chaimir/internal/platform/upload"
 	"chaimir/internal/platform/ws"
 	"chaimir/pkg/apperr"
@@ -28,37 +26,66 @@ const (
 	shareCodeLength       = 18
 )
 
-// objectStorage 描述 M4 写入仿真包 bundle 所需的对象存储能力。
+// objectStorage 描述 M4 写入与读取仿真包 bundle 所需的对象存储能力。
 type objectStorage interface {
 	Put(ctx context.Context, bucket, key string, r io.Reader, size int64, contentType string) error
+	Get(ctx context.Context, bucket, key string) (io.ReadCloser, error)
 	BucketCode() string
 }
 
 // fileService 描述 M4 复用统一文件服务所需能力。
 type fileService interface {
 	PlanUpload(ctx context.Context, req storage.PlanUploadRequest) (storage.UploadPlan, error)
-	IssueDownloadGrant(req storage.IssueDownloadGrantRequest) (string, storage.DownloadGrant, error)
 }
 
-// BackendAdapter 是 M4 自有后端计算适配器,不得调用 M2 模块内部实现。
+// BackendAdapter 是 M4 自有隔离执行适配器,不得调用 M2 模块内部实现。
 type BackendAdapter interface {
-	// Descriptor 返回前端可安全展示的适配器能力,不得暴露镜像或集群细节。
+	// Descriptor 返回前端可安全展示的能力信息,不得暴露镜像或集群细节。
 	Descriptor() BackendAdapterDescriptor
-	// ValidateConfig 在包进入审核前校验适配器专属配置。
+	// ValidateConfig 在包进入审核前校验能力专属配置。
 	ValidateConfig(config map[string]any) error
-	// Serve 在已鉴权的 WebSocket 上执行后端计算协议。
-	Serve(ctx context.Context, session SessionWithPackage, conn BackendConn) error
-	// Release 回收指定后端计算会话占用的适配器资源。
+	// Serve 在已鉴权的 WebSocket 上执行隔离执行协议;bundle 为 nil 时表示算法固化在镜像内。
+	// recorded 是会话已登记的用户操作,连接建立时先在容器内重放到那个位置。
+	Serve(ctx context.Context, session SessionWithPackage, bundle *ExecutionBundle, recorded []Action, conn BackendConn) error
+	// Preview 在隔离容器内做上架前预览:同 seed 双跑比对确定性,并渲出样例教学帧。
+	Preview(ctx context.Context, pkg Package, bundle *ExecutionBundle, frameCount int) (PreviewResult, error)
+	// Release 回收指定会话占用的隔离资源。
 	Release(ctx context.Context, session SessionWithPackage) error
 }
 
-// BackendConn 是 compute=backend 适配器可使用的受控连接能力。
-type BackendConn interface {
-	ReadJSON(v any) error
-	SendJSON(v any) error
+// ExecutionBundle 是投递给隔离容器的归档正文与校验信息。
+//
+// bundle 不经网络下发容器:计算 Pod 根文件系统只读且网络 deny-all,容器既写不下也取不到
+// 对象存储正文;放开网络等于拆掉隔离边界。字节由后端取出后经 k8s exec stdin 推入,
+// 容器内先校验 sha256 与 Hash 一致再按 Entry 装配(见 docs/总-镜像与容器设计.md §六之一)。
+type ExecutionBundle struct {
+	Data   []byte
+	Hash   string
+	Entry  string
+	Format string
 }
 
-// BackendRegistry 保存 compute=backend 可用适配器。
+// PreviewResult 是隔离预览的产出:确定性结论与样例教学帧。
+type PreviewResult struct {
+	DeterminismPassed bool
+	Detail            string
+	Frames            []BackendSnapshot
+}
+
+// BackendConn 是隔离执行适配器可使用的受控连接能力。
+//
+// 刻意不暴露通用 ReadJSON/SendJSON:适配器只能读到已过交互白名单的受控命令,
+// 只能写出协议校验过的教学帧,不得借连接把任意结构透传给浏览器。
+type BackendConn interface {
+	// ReadCommand 读取浏览器下发的下一条受控命令。
+	ReadCommand() (BackendCommand, error)
+	// RecordExecuted 在容器执行成功后登记这条命令的效果;时刻推进不入记录。
+	RecordExecuted(command BackendCommand) error
+	// SendFrame 推送一帧教学快照(首帧附带包自描述信息)。
+	SendFrame(message BackendStreamMessage) error
+}
+
+// BackendRegistry 保存已装配的隔离执行能力。
 type BackendRegistry map[string]BackendAdapter
 
 // Service 承载 sim 模块业务编排,依赖 repo 接口和平台横切能力。
@@ -72,8 +99,14 @@ type Service struct {
 	identity contracts.IdentityService
 	wsHub    *ws.Hub
 	backends BackendRegistry
-	// downloadGrantTTL 与统一文件服务同源,内置包与外部包共用同一套下载授权时效。
-	downloadGrantTTL time.Duration
+	// packageRunnerCode 是扩展包通用运行器能力编号,服务端按作者类型自动绑定给教师/第三方包。
+	packageRunnerCode string
+	// previewFrameCount 是隔离预览渲制的样例帧数量,供平台管理员判断算法实现是否正确。
+	previewFrameCount int
+	// previewBatchSize 是隔离预览任务单轮认领的待审包数量上限。
+	previewBatchSize int
+	// maxIsolatedSessionsPerTenant 是单租户同时活跃的隔离执行会话上限;一个会话一个 Pod。
+	maxIsolatedSessionsPerTenant int
 }
 
 // ServiceDeps 是 sim service 的装配依赖集合。
@@ -87,6 +120,7 @@ type ServiceDeps struct {
 	Identity        contracts.IdentityService
 	WSHub           *ws.Hub
 	BackendAdapters BackendRegistry
+	SimBackend      config.SimBackendConfig
 }
 
 // NewService 构造 sim 服务,不接收数据库连接,由装配层传入 Store。
@@ -110,7 +144,7 @@ func NewService(deps ServiceDeps) (*Service, error) {
 		return nil, fmt.Errorf("sim service 缺少身份读取契约")
 	}
 	if deps.BackendAdapters == nil {
-		return nil, fmt.Errorf("sim service 缺少后端计算适配器注册表")
+		return nil, fmt.Errorf("sim service 缺少隔离执行能力注册表")
 	}
 	for code, adapter := range deps.BackendAdapters {
 		if adapter == nil {
@@ -121,51 +155,89 @@ func NewService(deps ServiceDeps) (*Service, error) {
 			return nil, fmt.Errorf("sim backend adapter %q 描述无效", code)
 		}
 	}
-	return &Service{store: deps.Store, ids: deps.IDs, upload: deps.Upload, storage: deps.Storage, files: deps.FileService, audit: deps.Audit, identity: deps.Identity, wsHub: deps.WSHub, backends: deps.BackendAdapters, downloadGrantTTL: deps.FileService.DownloadGrantTTL}, nil
+	// 扩展包运行器必须真实注册:它承载全部教师/第三方包,缺了就等于扩展接入整条链路不可用,
+	// 而那必须在启动时暴露,不能等到教师提交后才以运行时错误的形式出现。
+	runnerCode := strings.TrimSpace(deps.SimBackend.PackageRunnerAdapterCode)
+	if runnerCode == "" {
+		return nil, fmt.Errorf("sim service 缺少 SIM_PACKAGE_RUNNER_ADAPTER_CODE")
+	}
+	if deps.BackendAdapters[runnerCode] == nil {
+		return nil, fmt.Errorf("sim service 扩展包运行器能力 %q 未在 SIM_BACKEND_STDIO_ADAPTERS_JSON 中注册", runnerCode)
+	}
+	if deps.SimBackend.PreviewFrameCount <= 0 || deps.SimBackend.PreviewFrameCount > maxPreviewFrames {
+		return nil, fmt.Errorf("SIM_PREVIEW_FRAME_COUNT 必须在 1 到 %d 之间", maxPreviewFrames)
+	}
+	if deps.SimBackend.PreviewBatchSize <= 0 {
+		return nil, fmt.Errorf("SIM_PREVIEW_BATCH_SIZE 必须大于 0")
+	}
+	if deps.SimBackend.MaxConcurrentSessionsPerTenant <= 0 {
+		return nil, fmt.Errorf("SIM_BACKEND_MAX_CONCURRENT_SESSIONS_PER_TENANT 必须大于 0")
+	}
+	return &Service{
+		store: deps.Store, ids: deps.IDs, upload: deps.Upload, storage: deps.Storage,
+		files: deps.FileService, audit: deps.Audit, identity: deps.Identity, wsHub: deps.WSHub,
+		backends: deps.BackendAdapters, packageRunnerCode: runnerCode,
+		previewFrameCount:            deps.SimBackend.PreviewFrameCount,
+		previewBatchSize:             deps.SimBackend.PreviewBatchSize,
+		maxIsolatedSessionsPerTenant: deps.SimBackend.MaxConcurrentSessionsPerTenant,
+	}, nil
 }
 
-// IssueBundleDownloadGrant 为已上架仿真包签发短时运行授权；内置包由平台 SDK 装配,外部包走统一文件服务边界。
-func (s *Service) IssueBundleDownloadGrant(ctx context.Context, accountID int64, code, version string) (BundleDownloadGrantDTO, error) {
-	if accountID <= 0 {
-		return BundleDownloadGrantDTO{}, apperr.ErrUnauthorized
+// ensurePackageRunnerAvailable 在提交与更新入口确认扩展包运行器仍然可用。
+func (s *Service) ensurePackageRunnerAvailable() error {
+	if s.backends[s.packageRunnerCode] == nil {
+		return apperr.ErrSimBackendComputeUnavailable
 	}
-	pkg, err := s.loadPackage(ctx, code, version)
-	if err != nil {
-		return BundleDownloadGrantDTO{}, err
-	}
-	if pkg.Status != PackageStatusPublished {
-		return BundleDownloadGrantDTO{}, apperr.ErrSimPackageUnavailable
-	}
-	if pkg.AuthorType == AuthorPlatformBuiltIn && pkg.Compute == ComputeFrontend && strings.HasPrefix(pkg.Code, builtinSimCodePrefix) {
-		return BundleDownloadGrantDTO{
-			BundleHash:  pkg.BundleHash,
-			ExpiresAt:   timex.Now().Add(s.downloadGrantTTL).Format(time.RFC3339),
-			BuiltinCode: pkg.Code,
-		}, nil
-	}
-	ref, err := storage.ParseObjectRef(pkg.BundleKey)
-	if err != nil {
-		return BundleDownloadGrantDTO{}, apperr.ErrSimBundleUnreadable.WithCause(err)
-	}
-	ownerTenantID, err := tenantIDFromBundleKey(ref.Key)
-	if err != nil {
-		return BundleDownloadGrantDTO{}, err
-	}
-	token, grant, err := s.files.IssueDownloadGrant(storage.IssueDownloadGrantRequest{
-		TenantID:     ownerTenantID,
-		AccountID:    accountID,
-		ObjectRef:    pkg.BundleKey,
-		Module:       simModuleName,
-		ResourceType: simBundleResourceType,
-		ResourceID:   ids.Format(pkg.ID),
-	})
-	if err != nil {
-		return BundleDownloadGrantDTO{}, apperr.ErrSimBundleUnreadable.WithCause(err)
-	}
-	return BundleDownloadGrantDTO{Token: token, BundleHash: pkg.BundleHash, ExpiresAt: grant.ExpiresAt.Format(time.RFC3339)}, nil
+	return nil
 }
 
-// tenantIDFromBundleKey 从统一对象 key 的首段解析上传租户,用于全局包的下载授权边界。
+// loadBundleForExecution 取出会话所引用包的归档正文,交隔离容器装配。
+// 内置包不走这条路径:它们在浏览器 Worker 内按 code 装配,没有归档字节。
+func (s *Service) loadBundleForExecution(ctx context.Context, session SessionWithPackage) (*ExecutionBundle, error) {
+	if strings.TrimSpace(session.Entry) == "" {
+		// 算法固化在镜像内的重计算能力没有归档,交 nil 表示"无需投递 bundle"。
+		return nil, nil
+	}
+	ref, err := storage.ParseObjectRef(session.BundleKey)
+	if err != nil {
+		return nil, apperr.ErrSimBundleUnreadable.WithCause(err)
+	}
+	reader, err := s.storage.Get(ctx, ref.Bucket, ref.Key)
+	if err != nil {
+		return nil, apperr.ErrSimBundleUnreadable.WithCause(err)
+	}
+	defer func() { _ = reader.Close() }()
+	data, err := io.ReadAll(io.LimitReader(reader, s.upload.SimBundleMaxBytes+1))
+	if err != nil {
+		return nil, apperr.ErrSimBundleUnreadable.WithCause(err)
+	}
+	if int64(len(data)) > s.upload.SimBundleMaxBytes {
+		return nil, apperr.ErrSimBundleUnreadable.WithCause(fmt.Errorf("仿真包归档超过上传上限"))
+	}
+	format, err := bundleFormat(data)
+	if err != nil {
+		return nil, err
+	}
+	return &ExecutionBundle{Data: data, Hash: session.BundleHash, Entry: session.Entry, Format: format}, nil
+}
+
+// bundleFormat 判定归档格式,只接受与上传边界一致的 ZIP/TAR。
+func bundleFormat(data []byte) (string, error) {
+	detected, err := upload.DetectArchiveFormat("bundle", data)
+	if err != nil {
+		return "", apperr.ErrSimBundleUnreadable.WithCause(err)
+	}
+	switch detected {
+	case upload.ArchiveFormatZIP:
+		return "zip", nil
+	case upload.ArchiveFormatTAR:
+		return "tar", nil
+	default:
+		return "", apperr.ErrSimBundleUnreadable.WithCause(fmt.Errorf("仿真包归档格式不支持"))
+	}
+}
+
+// tenantIDFromBundleKey 从统一对象 key 的首段解析上传租户,用于隔离执行时的归属核对。
 func tenantIDFromBundleKey(key string) (int64, error) {
 	parts := strings.Split(strings.TrimSpace(key), "/")
 	if len(parts) < 4 || parts[1] != simModuleName || parts[2] != simBundleResourceType {
@@ -178,25 +250,58 @@ func tenantIDFromBundleKey(key string) (int64, error) {
 	return tenantID, nil
 }
 
-// storeBundle 通过统一文件服务执行扫描并规划对象引用。
-func (s *Service) storeBundle(ctx context.Context, tenantID, accountID, packageID int64, input BundleInput, req SubmitPackageRequest, compute int16) (string, string, ValidationReport, InteractionSchema, CodeTraceAudit, error) {
+// storedBundle 汇总一次 bundle 上传规划的结果,避免多返回值堆叠到六个。
+type storedBundle struct {
+	ObjectRef         string
+	BundleHash        string
+	Entry             string
+	Report            ValidationReport
+	InteractionSchema InteractionSchema
+	CodeTrace         CodeTraceAudit
+}
+
+// storeBundle 执行归档校验与静态扫描,并规划对象引用。
+//
+// 静态扫描命中不再阻断进入审核:它是给审核人的信号而非隔离边界(见 07 安全设计 §5),
+// 真正的边界是隔离容器。命中项写进报告,由平台管理员在看样例帧时一并重点查看。
+// 只有归档结构、manifest 协议或表单一致性问题才拒绝入库 —— 那些是包本身不可运行。
+func (s *Service) storeBundle(ctx context.Context, tenantID, accountID, packageID int64, input BundleInput, req SubmitPackageRequest) (storedBundle, error) {
 	limits := upload.ArchiveLimits{MaxFiles: s.upload.SimBundleMaxFiles, MaxUnpackedBytes: s.upload.SimBundleMaxUnpackedBytes}
 	bundleHash, staticScan, manifest, err := analyzeBundle(input, limits)
 	if err != nil {
-		return "", "", ValidationReport{}, InteractionSchema{}, CodeTraceAudit{}, err
+		return storedBundle{}, err
 	}
 	report := ValidationReport{BundleHash: bundleHash, MetadataValidation: ValidationStatus{Status: validationPassed}, StaticScan: staticScan}
-	if staticScan.Status != validationPassed {
-		return "", bundleHash, report, InteractionSchema{}, CodeTraceAudit{}, apperr.ErrSimPackageValidationFailed
+	if hasBlockingFindings(staticScan.Findings) {
+		return storedBundle{BundleHash: bundleHash, Report: report}, apperr.ErrSimPackageValidationFailed
 	}
-	if err := validateBundleManifestMatchesRequest(manifest, req, compute); err != nil {
-		return "", bundleHash, report, InteractionSchema{}, CodeTraceAudit{}, err
+	if err := validateBundleManifestMatchesRequest(manifest, req); err != nil {
+		return storedBundle{BundleHash: bundleHash, Report: report}, err
 	}
 	plan, err := s.planBundleObject(ctx, tenantID, accountID, packageID, input)
 	if err != nil {
-		return "", bundleHash, report, InteractionSchema{}, CodeTraceAudit{}, err
+		return storedBundle{BundleHash: bundleHash, Report: report}, err
 	}
-	return plan.ObjectRef, bundleHash, report, manifest.InteractionSchema, manifest.CodeTrace, nil
+	return storedBundle{
+		ObjectRef:         plan.ObjectRef,
+		BundleHash:        bundleHash,
+		Entry:             strings.TrimSpace(manifest.Meta.Entry),
+		Report:            report,
+		InteractionSchema: manifest.InteractionSchema,
+		CodeTrace:         manifest.CodeTrace,
+	}, nil
+}
+
+// hasBlockingFindings 判定扫描结果里是否存在"包本身不可运行"的问题。
+// manifest: 前缀的命中来自协议解析(结构非法、入口缺失、模式越界),包不可装配故必须拒收;
+// 其余命中是危险调用模式,只作为审核信号(容器隔离已覆盖其风险面)。
+func hasBlockingFindings(findings []string) bool {
+	for _, item := range findings {
+		if strings.HasPrefix(item, "manifest:") {
+			return true
+		}
+	}
+	return false
 }
 
 // planBundleObject 规划 bundle 对象引用,调用方在数据库侧前置校验后再执行实际上传。
@@ -249,19 +354,6 @@ func simBundleKind(fileName, _ string, content []byte) bool {
 // newShareCode 生成不可从 session_id 推导的全局分享码。
 func newShareCode() (string, error) {
 	return pkgcrypto.RandomToken(shareCodeLength)
-}
-
-// trimMapStrings 清理动态报告 details,避免无意义空 key/value 入库。
-func trimMapStrings(in map[string]string) map[string]string {
-	out := map[string]string{}
-	for k, v := range in {
-		key := strings.TrimSpace(k)
-		value := strings.TrimSpace(v)
-		if key != "" && value != "" {
-			out[key] = value
-		}
-	}
-	return out
 }
 
 // lookupError 保留仓储层已经归类好的应用错误,无记录时走 not found,其他底层错误走查询失败。

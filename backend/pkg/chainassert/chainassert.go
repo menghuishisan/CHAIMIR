@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"chaimir/pkg/privacy"
+	"chaimir/pkg/textx"
 )
 
 const (
@@ -75,12 +76,7 @@ func ShortJSON(v any) string {
 	if err != nil {
 		return ""
 	}
-	text := string(raw)
-	runes := []rune(text)
-	if len(runes) > shortJSONRuneLimit {
-		return string(runes[:shortJSONRuneLimit])
-	}
-	return text
+	return textx.TruncateRunes(string(raw), shortJSONRuneLimit)
 }
 
 // redactSensitiveValues 在链上断言摘要序列化前按字段名递归脱敏,避免截断文本仍泄露密钥或 flag。

@@ -16,7 +16,6 @@ export const hotstuffSimulation: SimPackage<HotStuffState> = {
     name: 'HotStuff 链式 BFT 推演',
     category: 'consensus',
     version: '1.0.0',
-    compute: 'frontend',
     summary: '完整推演 HotStuff 新视图、高 QC 提案、安全投票、QC 聚合、三链提交和 pacemaker 超时换主。',
     learningObjectives: ['理解 high QC 与锁规则', '掌握 BFT 法定人数投票聚合成 QC', '观察三链提交和超时换主如何保证安全与活性'],
     scaleLimit: { nodes: 96, maxTick: 160, maxEvents: 300 },

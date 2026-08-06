@@ -7,6 +7,8 @@ import (
 )
 
 // Package 是平台级仿真包版本定义。
+// Compute 与 Entry 按 AuthorType 派生:平台内置 → 浏览器执行、无入口模块;
+// 教师/第三方 → 隔离容器执行、必须有入口模块与运行能力(见 docs/04-仿真可视化引擎/02-架构设计.md §8)。
 type Package struct {
 	ID                int64
 	Code              string
@@ -17,6 +19,7 @@ type Package struct {
 	ScaleLimit        map[string]any
 	BundleKey         string
 	BundleHash        string
+	Entry             string
 	BackendAdapter    string
 	BackendConfig     map[string]any
 	InteractionSchema InteractionSchema
@@ -67,7 +70,7 @@ type Session struct {
 	UpdatedAt      time.Time
 }
 
-// SessionWithPackage 是回放、分享和后端计算需要的会话加包摘要。
+// SessionWithPackage 是回放、分享和隔离执行需要的会话加包摘要。
 type SessionWithPackage struct {
 	Session
 	PackageCode       string
@@ -77,6 +80,7 @@ type SessionWithPackage struct {
 	ScaleLimit        map[string]any
 	BundleKey         string
 	BundleHash        string
+	Entry             string
 	BackendAdapter    string
 	BackendConfig     map[string]any
 	InteractionSchema InteractionSchema
@@ -153,14 +157,19 @@ type Share struct {
 	UpdatedAt time.Time
 }
 
-// ValidationReport 保存上架审核所需的后端静态与受控预览结论。
+// ValidationReport 保存上架审核所需的静态与隔离预览结论。
+//
+// 四项门禁各有明确生产者:BundleHash/MetadataValidation/StaticScan 由上传流程写入;
+// DeterminismCheck/WorkerPreview/PreviewFrames 由 M4 自己的隔离预览任务写入(见 service_preview.go)。
+// PreviewFrames 是容器渲出的样例教学帧 —— 自动校验只能回答"能不能跑、是否确定性",
+// 回答不了"这个算法实现对不对",故必须把帧摊给平台管理员看(见 06 流程 §4)。
 type ValidationReport struct {
-	BundleHash         string            `json:"bundle_hash,omitempty"`
-	MetadataValidation ValidationStatus  `json:"metadata_validation,omitempty"`
-	StaticScan         StaticScanReport  `json:"static_scan,omitempty"`
-	DeterminismCheck   ValidationStatus  `json:"determinism_check,omitempty"`
-	WorkerPreview      ValidationStatus  `json:"worker_preview,omitempty"`
-	Details            map[string]string `json:"details,omitempty"`
+	BundleHash         string           `json:"bundle_hash,omitempty"`
+	MetadataValidation ValidationStatus `json:"metadata_validation,omitempty"`
+	StaticScan         StaticScanReport `json:"static_scan,omitempty"`
+	DeterminismCheck   ValidationStatus `json:"determinism_check,omitempty"`
+	WorkerPreview      ValidationStatus `json:"worker_preview,omitempty"`
+	PreviewFrames      json.RawMessage  `json:"preview_frames,omitempty"`
 }
 
 // ValidationStatus 是动态或静态审核子项的标准化结果。
@@ -170,19 +179,76 @@ type ValidationStatus struct {
 }
 
 // StaticScanReport 描述后端上传时执行的危险调用扫描结果。
+//
+// 它是**给审核人的信号,不是隔离边界**:正则拦不住 `globalThis['fe'+'tch']` 这类拼接,
+// 动态语言下的能力访问无法靠模式匹配穷尽。真正的边界是隔离容器(见 07 安全设计 §3),
+// 扫描命中只用于把可疑包提请人工重点查看。
 type StaticScanReport struct {
 	Status   string   `json:"status,omitempty"`
 	Findings []string `json:"findings,omitempty"`
 }
 
-// BackendEvent 是 compute=backend WebSocket 客户端发来的事件。
+// BackendEvent 是隔离执行 WebSocket 客户端发来的交互事件。
 type BackendEvent struct {
 	EventType string         `json:"event_type"`
 	Payload   map[string]any `json:"payload"`
 }
 
-// BackendState 是 compute=backend WebSocket 推给前端的状态。
-type BackendState struct {
-	Tick  int64          `json:"tick"`
-	State map[string]any `json:"state"`
+// BackendClientMessage 是浏览器在隔离执行连接上下发的一条消息。
+//
+// 四种受控命令(取值见 enum.go 的 BackendCommandKind):推进一个推演时刻、注入一次包内声明的交互、
+// 回退一步、回到初始状态。
+// 时刻推进不是交互,不走交互白名单也不进操作记录 —— 它由 seed 决定、可复算,
+// 与内置包在浏览器 Worker 里的语义一致(见 docs/04-仿真可视化引擎/05-接口设计.md §4)。
+// 回退与重来按 M4 需求 C2「基于确定性重算到上一 tick」实现:容器从初始状态重放到目标位置,
+// 不做就地反算。
+type BackendClientMessage struct {
+	Type      string         `json:"type"`
+	EventType string         `json:"event_type,omitempty"`
+	Payload   map[string]any `json:"payload,omitempty"`
+}
+
+// BackendCommand 是经交互白名单校验后交给适配器执行的受控命令。
+type BackendCommand struct {
+	Kind  BackendCommandKind
+	Event BackendEvent
+}
+
+// BackendSnapshot 是隔离容器算出、经后端协议校验后推给前端的完整教学快照。
+//
+// 为什么推完整快照而非仅 State:render 是仿真包自己的函数,扩展包的 render 属外部代码,
+// 浏览器不得执行(见 07 安全设计 §2)。容器内完成 reducer + render + 叙事命中 + 检查点求值,
+// 前端拿到的已是纯数据帧,交给平台自己的封闭模式渲染器绘制。
+type BackendSnapshot struct {
+	Tick                    int64          `json:"tick"`
+	State                   map[string]any `json:"state"`
+	View                    map[string]any `json:"view"`
+	CurrentStep             map[string]any `json:"current_step,omitempty"`
+	InteractionAvailability map[string]any `json:"interaction_availability,omitempty"`
+	CheckpointResults       map[string]any `json:"checkpoint_results,omitempty"`
+}
+
+// BackendDescriptor 是隔离容器回传的仿真包自描述信息:操作清单、教学步骤、检查点与代码追踪。
+//
+// 为什么必须回传:浏览器不执行扩展包代码,拿不到包内声明,而"可用操作"的名称、参数字段、
+// 检查点标题和教学步骤总数都是渲染工作台的必要材料 —— 只推快照的话页面能画舞台却画不出操作面板。
+// 它与快照一样来自不可信容器,故同样要在后端校验后才转发(见 validateBackendDescriptor)。
+type BackendDescriptor struct {
+	Meta         map[string]any   `json:"meta"`
+	Interactions []map[string]any `json:"interactions"`
+	Narrative    []map[string]any `json:"narrative,omitempty"`
+	CodeTrace    map[string]any   `json:"codeTrace,omitempty"`
+	Checkpoints  []map[string]any `json:"checkpoints,omitempty"`
+}
+
+// BackendStreamMessage 是隔离执行 WebSocket 推给浏览器的一帧。
+// Descriptor 只随首帧(type=ready)下发一次:它是包的静态声明,不随 tick 变化,
+// 每帧重发会把代码追踪源码这类大字段重复推送。帧类型取值见 enum.go。
+type BackendStreamMessage struct {
+	Type       string             `json:"type"`
+	Descriptor *BackendDescriptor `json:"descriptor,omitempty"`
+	Snapshot   BackendSnapshot    `json:"snapshot"`
+	// EventCount 是当前过程已执行的事件数。过程由服务端持有,浏览器据此判断还能不能回退 ——
+	// 它自己数不出来:刷新重连后服务端会按已登记操作把过程重放回来,前端计数会与服务端不一致。
+	EventCount int64 `json:"event_count"`
 }

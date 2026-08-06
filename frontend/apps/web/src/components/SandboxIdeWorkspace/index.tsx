@@ -35,7 +35,17 @@ import {
   type SandboxToolAccess,
 } from '@chaimir/api-client'
 import { mountMonacoEditor, mountTerminal, type MountedEditor, type MountedTerminal } from '@chaimir/ide'
-import { Button, ChainProgress, Tabs, TabsContent, TabsList, TabsTrigger, toast } from '@chaimir/ui'
+import {
+  Button,
+  ChainProgress,
+  Input,
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+  Textarea,
+  toast,
+} from '@chaimir/ui'
 import { api } from '../../app/api'
 import { useTicketedWebSocket } from '../../hooks'
 import { decodeUtf8Base64, encodeUtf8Base64 } from '../../utils/base64'
@@ -703,11 +713,12 @@ function ChainPanel({ sandboxId, operations }: ChainPanelProps) {
       {operation === 'query' ? (
         <label className="flex flex-col gap-1">
           <span className="text-xs text-on-dark-sub">查询目标</span>
-          <input
+          <Input
+            variant="underline"
             value={target}
             placeholder="合约地址或状态键"
+            className="font-mono text-sm"
             onChange={(event) => setTarget(event.target.value)}
-            className="rounded-md border border-dark-line bg-dark-surface px-3 py-2 font-mono text-sm text-on-dark placeholder:text-on-dark-faint focus:border-accent focus:outline-none"
           />
         </label>
       ) : (
@@ -715,12 +726,13 @@ function ChainPanel({ sandboxId, operations }: ChainPanelProps) {
           <span className="text-xs text-on-dark-sub">
             {operation === 'deploy' ? '部署参数' : '交易参数'}
           </span>
-          <textarea
+          <Textarea
+            onDark
             value={payloadText}
             rows={8}
             spellCheck={false}
+            className="font-mono text-sm"
             onChange={(event) => setPayloadText(event.target.value)}
-            className="rounded-md border border-dark-line bg-dark-surface px-3 py-2 font-mono text-sm text-on-dark placeholder:text-on-dark-faint focus:border-accent focus:outline-none"
           />
         </label>
       )}
@@ -812,14 +824,15 @@ function CommandPanel({ sandboxId, tools }: CommandPanelProps) {
 
       <label className="flex flex-col gap-1">
         <span className="text-xs text-on-dark-sub">命令与参数(按空格分隔)</span>
-        <input
+        <Input
+          variant="underline"
           value={commandLine}
           placeholder="forge test"
+          className="font-mono text-sm"
           onChange={(event) => setCommandLine(event.target.value)}
           onKeyDown={(event) => {
             if (event.key === 'Enter' && !busy) void run()
           }}
-          className="rounded-md border border-dark-line bg-dark-surface px-3 py-2 font-mono text-sm text-on-dark placeholder:text-on-dark-faint focus:border-accent focus:outline-none"
         />
       </label>
 

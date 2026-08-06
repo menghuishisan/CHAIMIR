@@ -8,7 +8,6 @@
         "name": "Ethereum PoS 链头选择与最终性推演",
         "category": "consensus",
         "version": "1.0.0",
-        "compute": "frontend",
         "scale_limit": {
           "nodes": 96,
           "max_tick": 140,
@@ -209,7 +208,6 @@
         "name": "Tendermint 轮次锁定与提交推演",
         "category": "consensus",
         "version": "1.0.0",
-        "compute": "frontend",
         "scale_limit": {
           "nodes": 80,
           "max_tick": 140,
@@ -406,7 +404,6 @@
         "name": "跨链桥证明验证推演",
         "category": "cross-chain-system",
         "version": "1.0.0",
-        "compute": "frontend",
         "scale_limit": {
           "nodes": 48,
           "max_tick": 120,
@@ -567,7 +564,6 @@
         "name": "跨链最终性确认推演",
         "category": "cross-chain-system",
         "version": "1.0.0",
-        "compute": "frontend",
         "scale_limit": {
           "nodes": 48,
           "max_tick": 120,
@@ -728,7 +724,6 @@
         "name": "跨链消息生命周期推演",
         "category": "cross-chain-system",
         "version": "1.0.0",
-        "compute": "frontend",
         "scale_limit": {
           "nodes": 64,
           "max_tick": 120,
@@ -904,7 +899,6 @@
         "name": "跨链多签委员会推演",
         "category": "cross-chain-system",
         "version": "1.0.0",
-        "compute": "frontend",
         "scale_limit": {
           "nodes": 64,
           "max_tick": 120,
@@ -1065,7 +1059,6 @@
         "name": "Optimistic Rollup 欺诈证明推演",
         "category": "cross-chain-system",
         "version": "1.0.0",
-        "compute": "frontend",
         "scale_limit": {
           "nodes": 80,
           "max_tick": 140,
@@ -1267,7 +1260,6 @@
         "name": "跨链消息重放防护推演",
         "category": "cross-chain-system",
         "version": "1.0.0",
-        "compute": "frontend",
         "scale_limit": {
           "nodes": 48,
           "max_tick": 120,
@@ -1428,7 +1420,6 @@
         "name": "ZK Rollup 批次证明与验证推演",
         "category": "cross-chain-system",
         "version": "1.0.0",
-        "compute": "frontend",
         "scale_limit": {
           "nodes": 80,
           "max_tick": 140,
@@ -1629,7 +1620,6 @@
         "name": "数字签名与重放防护推演",
         "category": "cryptography",
         "version": "1.0.0",
-        "compute": "frontend",
         "scale_limit": {
           "nodes": 48,
           "max_tick": 120,
@@ -1827,7 +1817,6 @@
         "name": "哈希链篡改扩散推演",
         "category": "cryptography",
         "version": "1.0.0",
-        "compute": "frontend",
         "scale_limit": {
           "nodes": 80,
           "max_tick": 120,
@@ -2009,7 +1998,6 @@
         "name": "Merkle 证明路径推演",
         "category": "cryptography",
         "version": "1.0.0",
-        "compute": "frontend",
         "scale_limit": {
           "nodes": 64,
           "max_tick": 120,
@@ -2192,7 +2180,6 @@
         "name": "门限签名聚合推演",
         "category": "cryptography",
         "version": "1.0.0",
-        "compute": "frontend",
         "scale_limit": {
           "nodes": 80,
           "max_tick": 140,
@@ -2383,7 +2370,6 @@
         "name": "零知识证明交互流程推演",
         "category": "cryptography",
         "version": "1.0.0",
-        "compute": "frontend",
         "scale_limit": {
           "nodes": 48,
           "max_tick": 140,
@@ -2570,7 +2556,6 @@
         "name": "区块链父哈希结构推演",
         "category": "data-structure",
         "version": "1.0.0",
-        "compute": "frontend",
         "scale_limit": {
           "nodes": 96,
           "max_tick": 140,
@@ -2746,7 +2731,6 @@
         "name": "Merkle Tree 构建更新推演",
         "category": "data-structure",
         "version": "1.0.0",
-        "compute": "frontend",
         "scale_limit": {
           "nodes": 80,
           "max_tick": 120,
@@ -2922,7 +2906,6 @@
         "name": "Patricia Trie 状态树推演",
         "category": "data-structure",
         "version": "1.0.0",
-        "compute": "frontend",
         "scale_limit": {
           "nodes": 96,
           "max_tick": 140,
@@ -3098,7 +3081,6 @@
         "name": "状态快照与回滚推演",
         "category": "data-structure",
         "version": "1.0.0",
-        "compute": "frontend",
         "scale_limit": {
           "nodes": 80,
           "max_tick": 120,
@@ -3274,7 +3256,6 @@
         "name": "UTXO 集合更新推演",
         "category": "data-structure",
         "version": "1.0.0",
-        "compute": "frontend",
         "scale_limit": {
           "nodes": 80,
           "max_tick": 120,
@@ -3443,7 +3424,6 @@
         "name": "HotStuff 链式 BFT 推演",
         "category": "consensus",
         "version": "1.0.0",
-        "compute": "frontend",
         "scale_limit": {
           "nodes": 96,
           "max_tick": 160,
@@ -3655,7 +3635,6 @@
         "name": "DHT 异或路由推演",
         "category": "network",
         "version": "1.0.0",
-        "compute": "frontend",
         "scale_limit": {
           "nodes": 96,
           "max_tick": 140,
@@ -3842,7 +3821,6 @@
         "name": "Gossip 消息传播推演",
         "category": "network",
         "version": "1.0.0",
-        "compute": "frontend",
         "scale_limit": {
           "nodes": 120,
           "max_tick": 160,
@@ -4024,7 +4002,6 @@
         "name": "延迟丢包与重传推演",
         "category": "network",
         "version": "1.0.0",
-        "compute": "frontend",
         "scale_limit": {
           "nodes": 64,
           "max_tick": 140,
@@ -4208,7 +4185,6 @@
         "name": "P2P 节点发现推演",
         "category": "network",
         "version": "1.0.0",
-        "compute": "frontend",
         "scale_limit": {
           "nodes": 96,
           "max_tick": 140,
@@ -4395,7 +4371,6 @@
         "name": "网络分区与恢复推演",
         "category": "network",
         "version": "1.0.0",
-        "compute": "frontend",
         "scale_limit": {
           "nodes": 96,
           "max_tick": 140,
@@ -4573,7 +4548,6 @@
         "name": "PBFT 三阶段共识推演",
         "category": "consensus",
         "version": "1.0.0",
-        "compute": "frontend",
         "scale_limit": {
           "nodes": 96,
           "max_tick": 120,
@@ -4799,7 +4773,6 @@
         "name": "PoS 权益证明与最终性推演",
         "category": "consensus",
         "version": "1.0.0",
-        "compute": "frontend",
         "scale_limit": {
           "nodes": 128,
           "max_tick": 180,
@@ -5035,7 +5008,6 @@
         "name": "PoW 最长链共识推演",
         "category": "consensus",
         "version": "1.0.0",
-        "compute": "frontend",
         "scale_limit": {
           "nodes": 128,
           "max_tick": 180,
@@ -5270,7 +5242,6 @@
         "name": "Raft 选举与日志复制推演",
         "category": "consensus",
         "version": "1.0.0",
-        "compute": "frontend",
         "scale_limit": {
           "nodes": 96,
           "max_tick": 160,
@@ -5495,7 +5466,6 @@
         "name": "区块验证与拒绝推演",
         "category": "transaction-runtime",
         "version": "1.0.0",
-        "compute": "frontend",
         "scale_limit": {
           "nodes": 48,
           "max_tick": 120,
@@ -5664,7 +5634,6 @@
         "name": "EIP-1559 费用市场推演",
         "category": "transaction-runtime",
         "version": "1.0.0",
-        "compute": "frontend",
         "scale_limit": {
           "nodes": 64,
           "max_tick": 120,
@@ -5865,7 +5834,6 @@
         "name": "EVM 调用栈与 revert 推演",
         "category": "transaction-runtime",
         "version": "1.0.0",
-        "compute": "frontend",
         "scale_limit": {
           "nodes": 64,
           "max_tick": 120,
@@ -6041,7 +6009,6 @@
         "name": "Gas 计量与回滚推演",
         "category": "transaction-runtime",
         "version": "1.0.0",
-        "compute": "frontend",
         "scale_limit": {
           "nodes": 48,
           "max_tick": 100,
@@ -6210,7 +6177,6 @@
         "name": "Mempool 替换交易与 Nonce 队列推演",
         "category": "transaction-runtime",
         "version": "1.0.0",
-        "compute": "frontend",
         "scale_limit": {
           "nodes": 72,
           "max_tick": 120,
@@ -6407,7 +6373,6 @@
         "name": "Nonce 顺序与替换交易推演",
         "category": "transaction-runtime",
         "version": "1.0.0",
-        "compute": "frontend",
         "scale_limit": {
           "nodes": 48,
           "max_tick": 100,
@@ -6576,7 +6541,6 @@
         "name": "交易生命周期推演",
         "category": "transaction-runtime",
         "version": "1.0.0",
-        "compute": "frontend",
         "scale_limit": {
           "nodes": 64,
           "max_tick": 120,
@@ -6752,7 +6716,6 @@
         "name": "授权缺陷与最小权限推演",
         "category": "contract-security",
         "version": "1.0.0",
-        "compute": "frontend",
         "scale_limit": {
           "nodes": 64,
           "max_tick": 120,
@@ -6928,7 +6891,6 @@
         "name": "闪电贷组合攻击推演",
         "category": "contract-security",
         "version": "1.0.0",
-        "compute": "frontend",
         "scale_limit": {
           "nodes": 64,
           "max_tick": 120,
@@ -7104,7 +7066,6 @@
         "name": "整数边界与 checked 运算推演",
         "category": "contract-security",
         "version": "1.0.0",
-        "compute": "frontend",
         "scale_limit": {
           "nodes": 48,
           "max_tick": 100,
@@ -7273,7 +7234,6 @@
         "name": "预言机操纵防护推演",
         "category": "contract-security",
         "version": "1.0.0",
-        "compute": "frontend",
         "scale_limit": {
           "nodes": 64,
           "max_tick": 120,
@@ -7449,7 +7409,6 @@
         "name": "重入攻击与防护推演",
         "category": "contract-security",
         "version": "1.0.0",
-        "compute": "frontend",
         "scale_limit": {
           "nodes": 64,
           "max_tick": 120,

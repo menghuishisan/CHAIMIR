@@ -102,9 +102,6 @@ function validateMeta<TState extends SimState>(simPackage: SimPackage<TState>, i
   if (!meta?.code?.trim() || !meta.name?.trim() || !meta.category?.trim() || !meta.version?.trim() || !meta.summary?.trim()) {
     issues.push({ path: 'meta', message: '仿真包元数据不完整。' })
   }
-  if (meta?.compute !== 'frontend' && meta?.compute !== 'backend') {
-    issues.push({ path: 'meta.compute', message: '计算模式必须声明为 frontend 或 backend。' })
-  }
   if (!Array.isArray(meta?.learningObjectives) || meta.learningObjectives.length === 0) {
     issues.push({ path: 'meta.learningObjectives', message: '仿真包必须声明教学目标。' })
   }
