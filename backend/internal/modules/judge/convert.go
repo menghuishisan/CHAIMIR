@@ -130,7 +130,7 @@ func judgerToMap(j Judger) (map[string]any, error) {
 func judgerCatalogResponse(items []CatalogJudger) JudgerCatalogResponse {
 	out := JudgerCatalogResponse{Judgers: make([]CatalogJudgerResponse, 0, len(items))}
 	for _, item := range items {
-		out.Judgers = append(out.Judgers, CatalogJudgerResponse{Code: item.Code, Name: item.Name, Type: item.Type})
+		out.Judgers = append(out.Judgers, CatalogJudgerResponse(item))
 	}
 	return out
 }

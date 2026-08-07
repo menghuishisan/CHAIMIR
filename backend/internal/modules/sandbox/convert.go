@@ -175,12 +175,12 @@ func orchestrationCatalogResponse(runtimes []CatalogRuntime, tools []CatalogTool
 	for _, runtime := range runtimes {
 		images := make([]CatalogRuntimeImageResponse, 0, len(runtime.Images))
 		for _, image := range runtime.Images {
-			images = append(images, CatalogRuntimeImageResponse{Version: image.Version, IsDefault: image.IsDefault})
+			images = append(images, CatalogRuntimeImageResponse(image))
 		}
 		out.Runtimes = append(out.Runtimes, CatalogRuntimeResponse{Code: runtime.Code, Name: runtime.Name, Eco: runtime.Eco, Images: images})
 	}
 	for _, tool := range tools {
-		out.Tools = append(out.Tools, CatalogToolResponse{Code: tool.Code, Name: tool.Name, Kind: tool.Kind})
+		out.Tools = append(out.Tools, CatalogToolResponse(tool))
 	}
 	return out
 }

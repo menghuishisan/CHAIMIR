@@ -412,12 +412,6 @@ func jsonObject(raw []byte) bool {
 	return len(raw) > 0 && jsonx.DecodeStrict(raw, &value) == nil
 }
 
-// jsonObjectEmpty 校验字段是空 JSON 对象。
-func jsonObjectEmpty(raw []byte) bool {
-	var value map[string]any
-	return len(raw) > 0 && jsonx.DecodeStrict(raw, &value) == nil && len(value) == 0
-}
-
 // isSHA256Hex 校验内容哈希格式。
 func isSHA256Hex(value string) bool {
 	value = strings.TrimSpace(value)

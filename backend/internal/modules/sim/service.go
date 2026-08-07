@@ -243,19 +243,6 @@ func bundleFormat(data []byte) (string, error) {
 	}
 }
 
-// tenantIDFromBundleKey 从统一对象 key 的首段解析上传租户,用于隔离执行时的归属核对。
-func tenantIDFromBundleKey(key string) (int64, error) {
-	parts := strings.Split(strings.TrimSpace(key), "/")
-	if len(parts) < 4 || parts[1] != simModuleName || parts[2] != simBundleResourceType {
-		return 0, apperr.ErrSimBundleUnreadable.WithCause(fmt.Errorf("仿真包对象 key 结构异常: key=%q", key))
-	}
-	tenantID, ok := ids.Parse(parts[0])
-	if !ok {
-		return 0, apperr.ErrSimBundleUnreadable.WithCause(fmt.Errorf("仿真包对象 key 租户段异常: key=%q", key))
-	}
-	return tenantID, nil
-}
-
 // storedBundle 汇总一次 bundle 上传规划的结果,避免多返回值堆叠到六个。
 type storedBundle struct {
 	ObjectRef         string
