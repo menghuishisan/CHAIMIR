@@ -53,10 +53,13 @@ frontend/
 pnpm install
 ```
 
-启动开发服务器：
+启动完整本地平台：
 ```bash
-pnpm run dev
+cd ../deploy
+make dev-up
 ```
+
+前后端和依赖服务统一由 Kubernetes `local-dev` overlay 启动，浏览器入口为 `https://chaimir`。本目录的 `pnpm` 命令只用于依赖安装、静态检查和构建校验，不单独承担平台启动。
 
 ## 常用命令
 

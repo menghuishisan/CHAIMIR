@@ -12,7 +12,7 @@ components:
   - ../../components/middleware
 
 # dev 密钥:从 deploy/config/secret.env(被 .gitignore 忽略)生成。
-# make dev-up 会在首次运行时由 secret.env.example 生成随机值写入 config/secret.env。
+# make dev-up 只校验 config/secret.env 已存在,不会自动生成或覆盖密钥。
 # 生成两份(命名空间隔离):chaimir-system 给应用,chaimir-data 给中间件。同源文件,单一来源。
 secretGenerator:
   - name: chaimir-secret

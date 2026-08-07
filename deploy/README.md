@@ -79,7 +79,7 @@ staging 和 prod-saas 部署流水线会在应用资源后等待 `chaimir-system
 
 前置:`docker`、`kubectl`(内置 kustomize);可选 `kubeconform`(校验)。Trivy、Cosign、Helm 不要求安装到宿主机,统一通过 `image-supply-chain.compose.yaml` 的容器化工具入口运行。本仓库不要求额外安装 kind:只要当前 kubeconfig 指向可用 Kubernetes 集群即可,例如 Docker Desktop Kubernetes、k3s 或生产/预发布集群。
 
-当前联调阶段可以只把 PostgreSQL、Redis、NATS、MinIO、ClamAV 等依赖跑在 Kubernetes,后端和前端进程直接在工作区运行。生产/私有化部署仍使用同一套 K8s 清单把平台服务镜像部署进集群,不会为本地直跑在后端代码里写分支。
+本地联调统一使用完整 `local-dev` overlay：PostgreSQL、Redis、NATS、MinIO、ClamAV、后端、前端和迁移任务全部运行在当前 Kubernetes 集群。工作区直跑后端或前端不再作为平台启动方式，避免同一环境同时存在两套服务入口。
 
 检查当前集群:
 
@@ -88,43 +88,14 @@ kubectl config current-context
 kubectl get nodes
 ```
 
-完整 K8s 本地部署仍可渲染/应用 `overlays/local-dev`,它会部署后端、前端、migrate 和单实例中间件,适合验证容器化部署形态。若只需要本地进程联调,不要应用完整 `local-dev` overlay,避免业务 Pod 与本地进程并行。
-
-本项目把本地/私有化密钥统一放在 `deploy/config/secret.env`,overlay 需要读取目录外的同一份文件。不要直接执行 `kubectl apply -k overlays/...`;使用 Makefile 目标,或显式加 Kustomize load restrictor:
-
-```bash
-kubectl kustomize --load-restrictor=LoadRestrictionsNone overlays/local-deps | kubectl apply -f -
-```
-
-只部署依赖:
+完整启动使用唯一入口:
 
 ```bash
 cd deploy
-make deps-up
+make dev-up
 ```
 
-业务进程在宿主机直跑时,通过 port-forward 把依赖暴露到 `127.0.0.1`,并在 `backend/.env` 覆盖对应地址:
-
-```bash
-kubectl -n chaimir-data port-forward svc/postgres 15432:5432
-kubectl -n chaimir-data port-forward svc/redis 16379:6379
-kubectl -n chaimir-data port-forward svc/nats 14222:4222
-kubectl -n chaimir-data port-forward svc/minio 19000:9000
-kubectl -n chaimir-data port-forward svc/clamav 13310:3310
-```
-
-对应本地覆盖示例:
-
-```env
-PG_HOST=127.0.0.1
-PG_PORT=15432
-REDIS_HOST=127.0.0.1
-REDIS_PORT=16379
-NATS_URL=nats://127.0.0.1:14222
-MINIO_ENDPOINT=127.0.0.1:19000
-UPLOAD_VIRUS_SCAN_ADDRESS=127.0.0.1:13310
-KUBECONFIG_PATH=C:\Users\<你的用户名>\.kube\config
-```
+该目标会校验当前 Kubernetes context、安装本地必需的集群组件、生成 HTTPS Secret、部署完整 `local-dev` overlay 并运行迁移任务。启动完成后将 `chaimir` 解析到 `127.0.0.1`,信任 `config/chaimir-tls/tls.crt`,通过 `https://chaimir` 访问。
 
 `make dev-up` 仅是便捷包装,使用当前 Kubernetes context,不负责创建任何集群。生产/标准集群使用 `make metrics-up` 保持 kubelet TLS 校验;
 Docker Desktop 等本地集群如 kubelet 证书不完整,使用 `make metrics-up-local`,仅本地追加
@@ -137,7 +108,7 @@ M2 快照能力分为两层:通用 `VolumeSnapshot` CRD/snapshot-controller 与�
 中填写真实类名。`rancher.io/local-path`、普通 Docker volume 或演示用 hostpath CSI 不作为生产
 快照方案。
 
-将 `chaimir` 指向 `127.0.0.1`(hosts)后,前端经 `https://chaimir` 访问,并信任 `config/chaimir-tls/tls.crt`。`dev-up` 是唯一的浏览器联调入口；`deps-up` 只启动依赖服务，前后端工作区进程不提供绕过 Ingress 的 HTTP 登录入口。
+将 `chaimir` 指向 `127.0.0.1`(hosts)后,前端经 `https://chaimir` 访问,并信任 `config/chaimir-tls/tls.crt`。`dev-up` 是唯一的浏览器联调入口。
 
 > 应用镜像就绪前(目录2/3 未产出),backend/frontend/migrate Pod 会处于 ImagePull 待命 —— 属预期。
 > 镜像必须由统一供应链直接推送 Harbor、按 digest 回拉并通过门禁,再由 `image-metadata-promotion` 晋升到权威锁和 local-dev overlay;不得导入本地 `:dev` tag 绕过该流程。

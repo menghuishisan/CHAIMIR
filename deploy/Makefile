@@ -1,13 +1,12 @@
 # Chaimir 本地开发与部署编排。
 # 依据 docs/总-部署架构设计.md:local-dev 使用当前 kubeconfig 指向的 Kubernetes 集群。
-# 用法:make dev-up(当前集群部署中间件+应用) / make deps-up(仅部署本地联调依赖)。
+# 用法:make dev-up(当前集群部署中间件+应用)。这是唯一的本地浏览器联调入口。
 #
 # 前置:docker、kubectl(内置 kustomize)。Harbor/Trivy/Cosign/Helm 统一走容器化工具入口。
 # 注:本仓库用 kubectl 内置 kustomize(kubectl kustomize / kubectl apply -k)。
 
 SHELL := /bin/bash
 OVERLAY := overlays/local-dev
-DEPS_OVERLAY := overlays/local-deps
 SECRET_FILE := config/secret.env
 SECRET_EXAMPLE := config/secret.env.example
 SUPPLY_CHAIN_CONFIG := config/chaimir.env
@@ -39,19 +38,6 @@ dev-up: context-check gvisor-up-local ingress-up metrics-up-local policy-control
 .PHONY: dev-down
 dev-down: ## 删除当前 K8s context 中的 Chaimir 本地资源(不删除集群)
 	kubectl kustomize --load-restrictor=LoadRestrictionsNone $(OVERLAY) | kubectl delete -f - --ignore-not-found=true
-
-.PHONY: deps-up
-deps-up: context-check gen-secret ## 仅部署 PG/Redis/NATS/MinIO/ClamAV,供后端/前端在工作区直跑
-	kubectl kustomize --load-restrictor=LoadRestrictionsNone $(DEPS_OVERLAY) | kubectl apply -f -
-	kubectl -n chaimir-data rollout status statefulset/postgres --timeout=180s
-	kubectl -n chaimir-data rollout status statefulset/redis --timeout=120s
-	kubectl -n chaimir-data rollout status statefulset/nats --timeout=120s
-	kubectl -n chaimir-data rollout status statefulset/minio --timeout=120s
-	kubectl -n chaimir-data rollout status statefulset/clamav --timeout=300s
-
-.PHONY: deps-down
-deps-down: ## 删除仅依赖 overlay 资源(不删除集群)
-	kubectl kustomize --load-restrictor=LoadRestrictionsNone $(DEPS_OVERLAY) | kubectl delete -f - --ignore-not-found=true
 
 .PHONY: context-check
 context-check: ## 显示并校验当前 Kubernetes context
@@ -133,7 +119,7 @@ policy-controller-up: supply-chain-tools-pull ## 安装 Sigstore policy-controll
 .PHONY: gen-secret
 gen-secret: ## 校验 config/secret.env 已由运维/开发者按模板填好
 	@if [ ! -f $(SECRET_FILE) ]; then \
-		echo "缺少 $(SECRET_FILE)。请复制 config/secret.env.example 为 config/secret.env,按模板命令生成并填入真实值。"; \
+		echo "缺少 $(SECRET_FILE)。请复制 $(SECRET_EXAMPLE) 为 $(SECRET_FILE),按模板命令生成并填入真实值。"; \
 		exit 1; \
 	else echo "$(SECRET_FILE) 已存在"; fi
 
@@ -220,14 +206,14 @@ image-attestations-generate: supply-chain-secret-check ## 扫描/签名/验签�
 # ---- 校验(无需集群)----
 .PHONY: render
 render: ## 渲染 overlay(检查 kustomize 构建)
-	@for env in local-deps local-dev staging prod-saas prod-school; do \
+	@for env in local-dev staging prod-saas prod-school; do \
 		echo "=== overlays/$$env ==="; \
 		kubectl kustomize --load-restrictor=LoadRestrictionsNone overlays/$$env > /dev/null && echo "OK" || exit 1; \
 	done
 
 .PHONY: validate
 validate: render ## 用 kubeconform 校验渲染产物(需安装 kubeconform)
-	@for env in local-deps local-dev staging prod-saas prod-school; do \
+	@for env in local-dev staging prod-saas prod-school; do \
 		echo "=== validate overlays/$$env ==="; \
 		kubectl kustomize --load-restrictor=LoadRestrictionsNone overlays/$$env | kubeconform -strict -ignore-missing-schemas -summary; \
 	done

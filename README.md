@@ -6,7 +6,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Go](https://img.shields.io/badge/Go-1.25+-00ADD8?logo=go)](https://go.dev/)
-[![React](https://img.shields.io/badge/React-18+-61DAFB?logo=react)](https://react.dev/)
+[![React](https://img.shields.io/badge/React-19+-61DAFB?logo=react)](https://react.dev/)
 
 ---
 
@@ -62,7 +62,7 @@ Chaimir 支持两种部署形态：
 ### 环境要求
 
 - Go 1.25+
-- Node.js 20+ + pnpm 9+
+- Node.js 24.x + pnpm 9+
 - PostgreSQL 14+
 - Docker & Kubernetes（推荐，用于完整沙箱环境）
 
@@ -87,15 +87,14 @@ pnpm type-check
 
 完整环境准备、数据库迁移、镜像构建与部署流程请参考文档。
 
-### 本地开发
+### 本地启动
 
 ```bash
-# 前端四端与共享包开发
-cd frontend
-pnpm run dev
+cd deploy
+make dev-up
 ```
 
-需要完整沙箱、数据库、对象存储、病毒扫描与镜像供应链时，请按 [deploy/README](deploy/README.md) 使用 `deploy/` 下的 Kustomize 清单与 Makefile。日常本地进程联调不需要先应用完整 Kubernetes overlay。
+前后端、依赖服务、迁移任务和 HTTPS Ingress 由同一条入口统一启动，浏览器访问 `https://chaimir`。前端的 `pnpm lint`、`pnpm type-check` 和 `pnpm build` 仅用于工作区校验，不是第二套平台启动入口。
 
 ---
 
