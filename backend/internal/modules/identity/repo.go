@@ -39,6 +39,7 @@ type TxStore interface {
 	UpdateTenantConfig(ctx context.Context, input UpdateTenantConfigInput) (Tenant, error)
 	UpdateTenantStatus(ctx context.Context, input UpdateTenantStatusInput) (Tenant, error)
 	CreateTenantApplication(ctx context.Context, input CreateApplicationRequest, id int64) (TenantApplication, error)
+	HasPendingTenantApplication(ctx context.Context, phone, email string) (bool, error)
 	GetTenantApplication(ctx context.Context, id int64) (TenantApplication, error)
 	ListTenantApplications(ctx context.Context, status int16) ([]TenantApplication, error)
 	ApproveTenantApplication(ctx context.Context, id, reviewerID, tenantID int64) (TenantApplication, error)

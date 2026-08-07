@@ -6,7 +6,7 @@
 // 前端不拼接任何外部地址,避免开放重定向。
 
 import React, { useCallback, useEffect, useId, useRef, useState } from 'react'
-import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
+import { useNavigate, useParams, useSearchParams } from 'react-router'
 import { Button, Icon } from '@chaimir/ui'
 import { ArrowLeft, LoaderCircle } from 'lucide-react'
 import { api } from '../../../../app/api'
@@ -57,7 +57,7 @@ export default function SsoCallbackPage() {
       .casCallback(tenantCode, { ticket, service: ssoServiceUrl(tenantCode) })
       .then((response) => {
         if (!active) return
-        persistLoginTokens(response, false)
+        persistLoginTokens(response)
         navigate(loginEntryPath(response), { replace: true })
       })
       .catch((callbackError) => {
@@ -97,7 +97,7 @@ export default function SsoCallbackPage() {
       setFormError(null)
       try {
         const response = await api.identity.ldapLogin(tenantCode, { username: username.trim(), password })
-        persistLoginTokens(response, false)
+        persistLoginTokens(response)
         navigate(loginEntryPath(response), { replace: true })
       } catch (loginError) {
         setFormError(userFacingErrorMessage(loginError, '统一认证登录失败,请确认账号和密码后重试。'))

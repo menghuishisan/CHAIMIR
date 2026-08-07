@@ -5,7 +5,7 @@
 // 路由切换只动光面内容的 opacity/translateY,底层与导航保持静止(§4.4)。
 
 import { useCallback, useEffect, useState } from 'react'
-import { Outlet, useLocation } from 'react-router-dom'
+import { Outlet, useLocation } from 'react-router'
 import { Menu as MenuIcon } from 'lucide-react'
 import {
   Drawer,

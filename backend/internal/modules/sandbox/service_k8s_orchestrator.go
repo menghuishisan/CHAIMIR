@@ -54,6 +54,9 @@ func (o *K8sOrchestrator) CreateSandboxResources(ctx context.Context, plan Creat
 	if _, err := cs.CoreV1().Namespaces().Create(ctx, ns, metav1.CreateOptions{}); err != nil && !apierrors.IsAlreadyExists(err) {
 		return fmt.Errorf("创建沙箱 Namespace 失败: %w", err)
 	}
+	if err := platformk8s.WaitForSandboxBackendRBAC(ctx, cs, plan.Sandbox.Namespace, platformk8s.SandboxBackendServiceAccountNamespace, platformk8s.SandboxBackendServiceAccountName, time.Duration(o.cfg.ReadyTimeoutSeconds)*time.Second, time.Duration(o.cfg.ReadyPollIntervalSeconds)*time.Second); err != nil {
+		return err
+	}
 	if err := o.ensureImagePullSecrets(ctx, plan.Sandbox.Namespace); err != nil {
 		return err
 	}
@@ -192,6 +195,9 @@ func (o *K8sOrchestrator) RestoreSnapshotResources(ctx context.Context, plan Cre
 	ns := namespaceObject(plan.Sandbox.Namespace, plan.Sandbox)
 	if _, err := cs.CoreV1().Namespaces().Create(ctx, ns, metav1.CreateOptions{}); err != nil && !apierrors.IsAlreadyExists(err) {
 		return fmt.Errorf("创建快照恢复 Namespace 失败: %w", err)
+	}
+	if err := platformk8s.WaitForSandboxBackendRBAC(ctx, cs, plan.Sandbox.Namespace, platformk8s.SandboxBackendServiceAccountNamespace, platformk8s.SandboxBackendServiceAccountName, time.Duration(o.cfg.ReadyTimeoutSeconds)*time.Second, time.Duration(o.cfg.ReadyPollIntervalSeconds)*time.Second); err != nil {
+		return err
 	}
 	if err := o.ensureImagePullSecrets(ctx, plan.Sandbox.Namespace); err != nil {
 		return err

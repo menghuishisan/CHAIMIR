@@ -5,7 +5,7 @@
 // 因此不做「开始 / 继续」二态判断,一个按钮既创建也恢复。
 
 import { useCallback, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate } from 'react-router'
 import { FlaskConical, Play, Target, Users } from 'lucide-react'
 import { ExperimentCollabMode, type StudentExperiment } from '@chaimir/api-client'
 import {

@@ -4,9 +4,11 @@ package contest
 import (
 	"context"
 	"fmt"
+	"math"
 	"strings"
 
 	"chaimir/internal/contracts"
+	"chaimir/internal/platform/intx"
 	"chaimir/internal/platform/ids"
 	"chaimir/internal/platform/jsonx"
 	"chaimir/internal/platform/pagex"
@@ -373,7 +375,14 @@ func scaledContestScore(maxScore, score, judgeMax int32) int32 {
 		}
 		return score
 	}
-	return int32((int64(score)*int64(maxScore) + int64(judgeMax)/2) / int64(judgeMax))
+	scaled := (int64(score)*int64(maxScore) + int64(judgeMax)/2) / int64(judgeMax)
+	if scaled < math.MinInt32 {
+		return math.MinInt32
+	}
+	if scaled > math.MaxInt32 {
+		return math.MaxInt32
+	}
+	return int32(scaled)
 }
 
 // dynamicSolveScore 按题目动态分配置计算通过提交得分。
@@ -387,7 +396,14 @@ func (s *Service) dynamicSolveScore(ctx context.Context, tx TxStore, tenantID, c
 	}
 	minScore := int32FromMap(problem.DynamicScore, "min_score", problem.Score)
 	decay := int32FromMap(problem.DynamicScore, "decay_per_solve", 0)
-	score := problem.Score - int32(solved)*decay
+	if solved < 0 || decay != 0 && solved > math.MaxInt64/int64(absInt32(decay)) {
+		return 0, apperr.ErrContestProblemInvalid
+	}
+	score64 := int64(problem.Score) - solved*int64(decay)
+	if score64 < math.MinInt32 || score64 > math.MaxInt32 {
+		return 0, apperr.ErrContestProblemInvalid
+	}
+	score := int32(score64)
 	if score < minScore {
 		score = minScore
 	}
@@ -401,12 +417,30 @@ func (s *Service) dynamicSolveScore(ctx context.Context, tx TxStore, tenantID, c
 func int32FromMap(m map[string]any, key string, defaultValue int32) int32 {
 	switch v := m[key].(type) {
 	case float64:
+		if math.IsNaN(v) || math.IsInf(v, 0) || math.Trunc(v) != v || v < math.MinInt32 || v > math.MaxInt32 {
+			return defaultValue
+		}
 		return int32(v)
 	case int:
-		return int32(v)
+		converted, ok := intx.Int32(v)
+		if !ok {
+			return defaultValue
+		}
+		return converted
 	case int32:
 		return v
 	default:
 		return defaultValue
 	}
+}
+
+// absInt32 将 int32 绝对值提升为 int64，避免最小负数取反溢出。
+func absInt32(value int32) int64 {
+	if value == math.MinInt32 {
+		return 1 << 31
+	}
+	if value < 0 {
+		return int64(-value)
+	}
+	return int64(value)
 }

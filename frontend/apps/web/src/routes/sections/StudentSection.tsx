@@ -7,7 +7,7 @@
 // (WorkbenchShell 使用契约:覆盖层的背景可被 Tab 穿透与滚动)。
 
 import { lazy } from 'react'
-import { Navigate, Route, Routes } from 'react-router-dom'
+import { Navigate, Route, Routes } from 'react-router'
 import { MainLayout } from '../../layouts/main/MainLayout'
 import { ImmersiveLayout } from '../../layouts/immersive/ImmersiveLayout'
 import { RoleNotFoundPage } from '../../components/StatusPages'

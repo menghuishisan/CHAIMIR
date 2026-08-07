@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"chaimir/internal/contracts"
+	"chaimir/internal/platform/intx"
 	"chaimir/internal/platform/jsonx"
 	"chaimir/internal/platform/storage"
 	"chaimir/internal/platform/upload"
@@ -287,7 +288,11 @@ func (s *Service) ExecSandboxCommand(ctx context.Context, req contracts.SandboxE
 	}
 	timeoutSec := req.TimeoutSec
 	if timeoutSec <= 0 {
-		timeoutSec = int32(s.cfg.ExecTimeoutSeconds)
+		var ok bool
+		timeoutSec, ok = intx.Int32(s.cfg.ExecTimeoutSeconds)
+		if !ok {
+			return contracts.SandboxExecResult{}, apperr.ErrSandboxContractRequestInvalid
+		}
 	}
 	if timeoutSec <= 0 {
 		return contracts.SandboxExecResult{}, apperr.ErrSandboxContractRequestInvalid

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"chaimir/internal/modules/teaching/internal/sqlcgen"
+	"chaimir/internal/platform/pagex"
 	"chaimir/internal/platform/pgtypex"
 	"chaimir/internal/platform/timex"
 )
@@ -74,7 +75,8 @@ func (s *txStore) GetPost(ctx context.Context, tenantID, id int64) (DiscussionPo
 
 // ListPosts 查询课程讨论和总数。
 func (s *txStore) ListPosts(ctx context.Context, tenantID, courseID int64, page, size int) ([]DiscussionPost, int64, error) {
-	rows, err := s.q.ListDiscussionPosts(ctx, sqlcgen.ListDiscussionPostsParams{TenantID: tenantID, CourseID: courseID, Limit: int32(size), Offset: int32((page - 1) * size)})
+	limit, offset := pagex.LimitOffset(page, size)
+	rows, err := s.q.ListDiscussionPosts(ctx, sqlcgen.ListDiscussionPostsParams{TenantID: tenantID, CourseID: courseID, Limit: limit, Offset: offset})
 	if err != nil {
 		return nil, 0, err
 	}

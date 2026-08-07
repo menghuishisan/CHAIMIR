@@ -8,7 +8,7 @@
 // 经 labels 翻成中文动作名;未登记的按模块拼出可读说明,不暴露点分标识。
 
 import { useCallback, useMemo, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate } from 'react-router'
 import { Download, FileText, Search, UserSearch } from 'lucide-react'
 import {
   type Account,

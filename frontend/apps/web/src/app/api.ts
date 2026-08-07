@@ -3,7 +3,7 @@
 // 因此这里不注入任何 X-Trace-Id 请求头 —— 由前端回灌的编号在运维侧查不到，等于假报障线索。
 
 import { createApi } from '@chaimir/api-client'
-import { clearLoginTokens, getStoredAccessToken, getStoredRefreshToken, persistRefreshedTokens } from '../utils/authSession'
+import { clearLoginTokens, getStoredAccessToken, persistRefreshedTokens } from '../utils/authSession'
 import { loginPathForPath } from '../utils/roleRouting'
 import { appConfig } from './config'
 
@@ -15,7 +15,7 @@ export const api = createApi({
   wsBaseURL: appConfig.wsBaseURL,
   timeout: appConfig.apiTimeoutMs,
   getToken: getStoredAccessToken,
-  getRefreshToken: getStoredRefreshToken,
+  hasRefreshSession: () => true,
   onTokensRefreshed: persistRefreshedTokens,
   onUnauthorized: () => {
     clearLoginTokens()

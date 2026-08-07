@@ -6,7 +6,7 @@
 // 登记在 routes/sections/studentImmersiveRoutes.ts,随学生区块下载,不进入口包。
 
 import { lazy } from 'react'
-import { Route } from 'react-router-dom'
+import { Route } from 'react-router'
 import type { ImmersiveRouteConfig } from '../layouts/immersive/immersiveRoutes'
 
 /* 懒加载:访客只下载公开回放代码,不触碰任何角色端代码碎片 */

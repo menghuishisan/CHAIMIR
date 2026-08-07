@@ -145,7 +145,7 @@ func (a contestAPI) registerInternalRoutes(g gin.IRouter) {
 
 // listContests 绑定竞赛列表参数。
 func (a contestAPI) listContests(c *gin.Context) {
-	status, ok := httpx.QueryInt(c, "status", httpx.QueryIntRule{Default: 0, Min: 0, Max: 6, HasMax: true})
+	status, ok := httpx.QueryInt16(c, "status", httpx.QueryIntRule{Default: 0, Min: 0, Max: 6, HasMax: true})
 	if !ok {
 		return
 	}
@@ -153,7 +153,7 @@ func (a contestAPI) listContests(c *gin.Context) {
 	if !ok {
 		return
 	}
-	out, total, p, s, err := a.svc.ListContests(c.Request.Context(), int16(status), page, size)
+	out, total, p, s, err := a.svc.ListContests(c.Request.Context(), status, page, size)
 	httpx.WritePage(c, out, total, p, s, err)
 }
 
@@ -494,7 +494,7 @@ func (a contestAPI) listVulnProblems(c *gin.Context) {
 	if !ok {
 		return
 	}
-	status, ok := httpx.QueryInt(c, "status", httpx.QueryIntRule{Default: 0, Min: 0, Max: 3, HasMax: true})
+	status, ok := httpx.QueryInt16(c, "status", httpx.QueryIntRule{Default: 0, Min: 0, Max: 3, HasMax: true})
 	if !ok {
 		return
 	}
@@ -502,7 +502,7 @@ func (a contestAPI) listVulnProblems(c *gin.Context) {
 	if !ok {
 		return
 	}
-	out, total, p, s, err := a.svc.ListVulnProblems(c.Request.Context(), sourceID, int16(status), page, size)
+	out, total, p, s, err := a.svc.ListVulnProblems(c.Request.Context(), sourceID, status, page, size)
 	httpx.WritePage(c, out, total, p, s, err)
 }
 

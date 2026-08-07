@@ -22,7 +22,7 @@ jobs:
     runs-on: ubuntu-latest
     environment: staging  # GitHub Environment(可配审批/保护规则)。
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: 配置 kubeconfig(staging)
         run: |
           mkdir -p ~/.kube
@@ -40,6 +40,7 @@ jobs:
         run: |
           set -euo pipefail
           kubectl kustomize "$RUNNER_TEMP/staging" --load-restrictor LoadRestrictionsNone | kubectl apply -f -
+          bash ./deploy/scripts/wait-tls-secret.sh chaimir-system chaimir-tls 300
           kubectl -n chaimir-system rollout status deployment/chaimir-backend --timeout=300s
           kubectl -n chaimir-system rollout status deployment/chaimir-frontend --timeout=300s
 
@@ -49,7 +50,7 @@ jobs:
     runs-on: ubuntu-latest
     environment: prod-saas  # 该 Environment 配置必需审批人(人工审批门禁)。
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: 配置 kubeconfig(prod-saas)
         run: |
           mkdir -p ~/.kube
@@ -67,5 +68,6 @@ jobs:
         run: |
           set -euo pipefail
           kubectl kustomize "$RUNNER_TEMP/prod-saas" --load-restrictor LoadRestrictionsNone | kubectl apply -f -
+          bash ./deploy/scripts/wait-tls-secret.sh chaimir-system chaimir-tls 300
           kubectl -n chaimir-system rollout status deployment/chaimir-backend --timeout=600s
           kubectl -n chaimir-system rollout status deployment/chaimir-frontend --timeout=600s

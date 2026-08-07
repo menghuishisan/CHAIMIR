@@ -7,7 +7,7 @@
 // 结果快照不对学生开放(teacher 组),最终名次经天梯榜与竞赛战绩呈现。
 
 import { useCallback, useMemo, useState } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
+import { useNavigate, useParams } from 'react-router'
 import { ListOrdered, Lock, Play, Swords, Trophy, UserPlus, Users } from 'lucide-react'
 import {
   ContestStatus,

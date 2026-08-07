@@ -11,7 +11,7 @@
 //   /auth/sso/:tenantCode CAS 回跳落地(GET sso/:tenant_code/callback)
 
 import { lazy } from 'react'
-import { Navigate, Route } from 'react-router-dom'
+import { Navigate, Route } from 'react-router'
 
 /* 懒加载:未登录用户只下载认证域代码,不触碰任何角色端代码碎片 */
 const LoginPage = lazy(() => import('../features/identity/pages/auth/login'))

@@ -119,13 +119,14 @@ func (s *Service) ListTasks(ctx context.Context, query TaskListQuery) ([]Task, i
 		return nil, 0, 0, apperr.ErrTransferTaskInvalid
 	}
 	page, size := pagex.Normalize(query.Page, query.Size)
+	limit, offset := pagex.LimitOffset(page, size)
 	items, err := s.store.ListTasks(ctx, ListTasksQuery{
 		TenantID:  query.TenantID,
 		AccountID: query.AccountID,
 		Channel:   query.Channel,
 		Status:    query.Status,
-		Limit:     int32(size),
-		Offset:    int32((page - 1) * size),
+		Limit:     limit,
+		Offset:    offset,
 	})
 	if err != nil {
 		return nil, 0, 0, err

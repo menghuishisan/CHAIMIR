@@ -11,6 +11,8 @@ import (
 	"net"
 	"strings"
 	"time"
+
+	"chaimir/internal/platform/intx"
 )
 
 // ClamAVScanner 通过 clamd 的 INSTREAM 协议执行病毒扫描,供统一文件服务复用。
@@ -72,7 +74,11 @@ func (s *ClamAVScanner) Scan(ctx context.Context, req ScanRequest) (result ScanR
 	for {
 		n, readErr := reader.Read(buf)
 		if n > 0 {
-			if err := binary.Write(conn, binary.BigEndian, uint32(n)); err != nil {
+			chunkLength, ok := intx.Uint32(n)
+			if !ok {
+				return ScanResult{}, fmt.Errorf("ClamAV 数据块长度超出协议范围")
+			}
+			if err := binary.Write(conn, binary.BigEndian, chunkLength); err != nil {
 				return ScanResult{}, fmt.Errorf("发送 ClamAV 数据块长度失败: %w", err)
 			}
 			if _, err := conn.Write(buf[:n]); err != nil {

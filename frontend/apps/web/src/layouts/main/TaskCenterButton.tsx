@@ -3,7 +3,7 @@
 // 数据来自基础层 transfer 模块;角标与面板共用同一份读取,打开面板时重新拉取以拿到最新进度。
 
 import { useEffect, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate } from 'react-router'
 import { ListChecks } from 'lucide-react'
 import type { TransferTask } from '@chaimir/api-client'
 import {

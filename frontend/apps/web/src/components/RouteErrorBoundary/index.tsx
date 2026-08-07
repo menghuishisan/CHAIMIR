@@ -6,7 +6,7 @@
 import React from 'react'
 import { TriangleAlert } from 'lucide-react'
 import { Button } from '@chaimir/ui'
-import { useLocation } from 'react-router-dom'
+import { useLocation } from 'react-router'
 import { AppStatusScreen } from '../AppStatusScreen'
 import { traceIdOf } from '../../utils/userFacingError'
 

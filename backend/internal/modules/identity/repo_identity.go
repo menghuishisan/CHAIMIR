@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"chaimir/internal/modules/identity/internal/sqlcgen"
+	"chaimir/internal/platform/pagex"
 	"chaimir/internal/platform/pgtypex"
 	"chaimir/internal/platform/timex"
 	"chaimir/pkg/apperr"
@@ -123,7 +124,8 @@ func (t *txStore) ListAllTenants(ctx context.Context) ([]Tenant, error) {
 
 // ListTenants 分页读取平台租户摘要。
 func (t *txStore) ListTenants(ctx context.Context, page, size int) ([]Tenant, int64, error) {
-	rows, err := t.q.ListTenantsPaged(ctx, sqlcgen.ListTenantsPagedParams{Limit: int32(size), Offset: int32((page - 1) * size)})
+	limit, offset := pagex.LimitOffset(page, size)
+	rows, err := t.q.ListTenantsPaged(ctx, sqlcgen.ListTenantsPagedParams{Limit: limit, Offset: offset})
 	if err != nil {
 		return nil, 0, err
 	}
@@ -202,6 +204,11 @@ func (t *txStore) CreateTenantApplication(ctx context.Context, input CreateAppli
 		return TenantApplication{}, err
 	}
 	return applicationFromRow(row), nil
+}
+
+// HasPendingTenantApplication 检查联系方式是否已有待审核申请，避免匿名重复写入。
+func (t *txStore) HasPendingTenantApplication(ctx context.Context, phone, email string) (bool, error) {
+	return t.q.HasPendingTenantApplication(ctx, sqlcgen.HasPendingTenantApplicationParams{ContactPhone: phone, Lower: email})
 }
 
 // GetTenantApplication 读取单个入驻申请。

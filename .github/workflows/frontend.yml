@@ -28,7 +28,7 @@ jobs:
     outputs:
       required: ${{ steps.detect.outputs.required }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0
       - id: detect
@@ -65,12 +65,12 @@ jobs:
     if: needs.detect-image-build.outputs.required == 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
         with:
           version: 9.1.0
           run_install: false
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: "24"
           cache: pnpm
@@ -83,6 +83,8 @@ jobs:
         run: |
           pnpm lint
           pnpm type-check
+          pnpm audit --prod --json > .tmp-pnpm-audit.json
+          node -e "const fs=require('fs'); const p='.tmp-pnpm-audit.json'; const report=JSON.parse(fs.readFileSync(p,'utf8')); const total=report.metadata?.vulnerabilities||{}; if(Object.values(total).some(Number)){ console.error(JSON.stringify(report,null,2)); process.exit(1); } console.log('pnpm audit: no production vulnerabilities.');"
       - name: 构建四端静态资源
         working-directory: frontend
         run: pnpm build
@@ -92,9 +94,9 @@ jobs:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.detect-image-build.outputs.required == 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: 安装 Cosign
-        uses: sigstore/cosign-installer@v4.1.2
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
         with:
           cosign-release: v3.1.1
       - id: build-base
@@ -154,7 +156,7 @@ jobs:
           mkdir -p image-digest-artifacts
           printf '%s %s\n' 'service/frontend' '${{ steps.frontend-image.outputs.digest }}' > image-digest-artifacts/service-frontend.lock
       - name: 上传前端服务 digest 片段
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: image-digest-frontend-service
           path: image-digest-artifacts/service-frontend.lock

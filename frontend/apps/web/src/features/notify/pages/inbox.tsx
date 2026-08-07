@@ -7,7 +7,7 @@
 // 未读数改变后经资源失效协议广播给顶栏角标 —— 壳层与页面不在同一渲染树。
 
 import { useCallback, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate } from 'react-router'
 import { Bell, BellOff, CheckCheck, Inbox, Megaphone, Settings2, Trash2 } from 'lucide-react'
 import type { Announcement, Notification, NotificationPreference } from '@chaimir/api-client'
 import {

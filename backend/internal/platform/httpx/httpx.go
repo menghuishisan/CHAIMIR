@@ -4,16 +4,19 @@ package httpx
 import (
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 
 	"chaimir/internal/platform/audit"
 	"chaimir/internal/platform/auth"
 	"chaimir/internal/platform/ids"
 	"chaimir/internal/platform/pagex"
+	platformredis "chaimir/internal/platform/redis"
 	"chaimir/internal/platform/response"
 	"chaimir/pkg/apperr"
 
@@ -28,6 +31,47 @@ func AuditContextMiddleware() gin.HandlerFunc {
 			TraceID: response.TraceFromGin(c),
 		})
 		c.Request = c.Request.WithContext(ctx)
+		c.Next()
+	}
+}
+
+// RequestBodyLimitMiddleware 在解析前限制请求体，避免 JSON 绑定和 multipart 解析无界占用内存或临时磁盘。
+// multipart 使用平台已声明的最大业务额度，具体路由仍以自身文件限额做更严格校验。
+func RequestBodyLimitMiddleware(maxJSONBytes, maxMultipartBytes int64) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		contentType := strings.ToLower(c.GetHeader("Content-Type"))
+		limit := maxJSONBytes
+		if strings.HasPrefix(contentType, "multipart/") {
+			limit = maxMultipartBytes
+		}
+		if limit > 0 && c.Request.Body != nil {
+			c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, limit)
+		}
+		c.Next()
+	}
+}
+
+// RateLimitMiddleware 使用 Redis 原子计数对匿名或高成本入口执行来源限流。
+// Redis 不可用时拒绝请求，避免安全控制在依赖故障时静默失效。
+func RateLimitMiddleware(counter *platformredis.Client, keyPrefix string, max int, window time.Duration) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if counter == nil || max <= 0 || window <= 0 {
+			response.Fail(c, apperr.ErrInternal.WithCause(fmt.Errorf("限流依赖或配置非法")))
+			c.Abort()
+			return
+		}
+		key := strings.Join([]string{strings.TrimSpace(keyPrefix), c.FullPath(), c.ClientIP()}, ":")
+		count, err := counter.IncrWithTTL(c.Request.Context(), key, window)
+		if err != nil {
+			response.Fail(c, apperr.ErrInternal.WithCause(err))
+			c.Abort()
+			return
+		}
+		if count > int64(max) {
+			response.Fail(c, apperr.ErrRateLimited)
+			c.Abort()
+			return
+		}
 		c.Next()
 	}
 }
@@ -181,6 +225,20 @@ func QueryInt(c *gin.Context, key string, rule QueryIntRule) (int64, bool) {
 		return 0, false
 	}
 	return value, true
+}
+
+// QueryInt16 解析并安全收窄状态类查询参数，调用方无需重复写不安全转换。
+func QueryInt16(c *gin.Context, key string, rule QueryIntRule) (int16, bool) {
+	rule.BitSize = 16
+	value, ok := QueryInt(c, key, rule)
+	if !ok {
+		return 0, false
+	}
+	if value < math.MinInt16 || value > math.MaxInt16 {
+		response.Fail(c, apperr.ErrQueryParamInvalid)
+		return 0, false
+	}
+	return int16(value), true
 }
 
 // Page 统一解析 page/size 查询参数,具体默认值和上限由 pagex 单一维护。

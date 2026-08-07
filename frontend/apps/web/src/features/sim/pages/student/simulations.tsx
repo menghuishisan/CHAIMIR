@@ -7,7 +7,7 @@
 // 会话只能由课程实验编排产生,故本页对它不给「进入推演」入口 —— 不摊出必然失败的按钮。
 
 import { useCallback, useMemo, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate } from 'react-router'
 import { Layers, Network, Play, Search } from 'lucide-react'
 import { SIM_COMPUTE, SIM_PACKAGE_STATUS, type SimPackageMeta } from '@chaimir/api-client'
 import {

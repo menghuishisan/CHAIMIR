@@ -5,7 +5,7 @@
 // 步进用 Steps 组件,不做成手填数字输入(规范 §6.6)。
 
 import { useCallback, useMemo, useState } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
+import { useNavigate, useParams } from 'react-router'
 import { ArrowLeft, ArrowRight, CircleCheck, LayoutTemplate, Send } from 'lucide-react'
 import {
   ExperimentCollabMode,

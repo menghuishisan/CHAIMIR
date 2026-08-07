@@ -8,6 +8,7 @@ import (
 
 	"chaimir/internal/modules/content/internal/sqlcgen"
 	"chaimir/internal/platform/db"
+	"chaimir/internal/platform/pagex"
 	"chaimir/internal/platform/pgtypex"
 
 	"github.com/jackc/pgx/v5"
@@ -136,7 +137,8 @@ func (s *txStore) GetItemWithBodyByRef(ctx context.Context, tenantID int64, code
 
 // ListItems 查询内容分页。
 func (s *txStore) ListItems(ctx context.Context, tenantID int64, filter ItemListFilter) ([]Item, int64, error) {
-	params := sqlcgen.ListContentItemsParams{TenantID: tenantID, Column2: filter.Type, Column3: filter.CategoryID, Column4: filter.Difficulty, Column5: filter.Tag, Column6: filter.KnowledgePoint, Column7: filter.Keyword, Column8: filter.Visibility, Column9: filter.Status, Column10: filter.AuthorID, Column11: filter.OnlyShared, AuthorID: filter.ViewerID, Limit: int32(filter.Size), Offset: int32((filter.Page - 1) * filter.Size)}
+	limit, offset := pagex.LimitOffset(filter.Page, filter.Size)
+	params := sqlcgen.ListContentItemsParams{TenantID: tenantID, Column2: filter.Type, Column3: filter.CategoryID, Column4: filter.Difficulty, Column5: filter.Tag, Column6: filter.KnowledgePoint, Column7: filter.Keyword, Column8: filter.Visibility, Column9: filter.Status, Column10: filter.AuthorID, Column11: filter.OnlyShared, AuthorID: filter.ViewerID, Limit: limit, Offset: offset}
 	rows, err := s.q.ListContentItems(ctx, params)
 	if err != nil {
 		return nil, 0, err
@@ -324,7 +326,8 @@ func (s *txStore) GetPaper(ctx context.Context, tenantID, id int64) (Paper, erro
 
 // ListPapers 查询试卷分页。
 func (s *txStore) ListPapers(ctx context.Context, tenantID int64, page, size int) ([]Paper, int64, error) {
-	rows, err := s.q.ListPapers(ctx, sqlcgen.ListPapersParams{TenantID: tenantID, Limit: int32(size), Offset: int32((page - 1) * size)})
+	limit, offset := pagex.LimitOffset(page, size)
+	rows, err := s.q.ListPapers(ctx, sqlcgen.ListPapersParams{TenantID: tenantID, Limit: limit, Offset: offset})
 	if err != nil {
 		return nil, 0, err
 	}

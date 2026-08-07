@@ -7,7 +7,7 @@
 // 预警规则的维护在成绩配置页(对齐清单 §3.3:预警规则是配置页内 Tab)。
 
 import { useCallback, useMemo, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate } from 'react-router'
 import { RefreshCw, Settings2, TriangleAlert, UserCheck } from 'lucide-react'
 import {
   GradeWarningStatus,

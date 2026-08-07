@@ -8,6 +8,7 @@ import (
 
 	"chaimir/internal/modules/notify/internal/sqlcgen"
 	"chaimir/internal/platform/ids"
+	"chaimir/internal/platform/pagex"
 	"chaimir/internal/platform/pgtypex"
 	"chaimir/internal/platform/timex"
 	"chaimir/pkg/apperr"
@@ -76,7 +77,8 @@ func (t *txStore) CreateNotifications(ctx context.Context, records []notificatio
 
 // ListNotifications 查询站内信分页。
 func (t *txStore) ListNotifications(ctx context.Context, accountID int64, isRead *bool, typ string, page, size int) ([]NotificationDTO, int64, error) {
-	arg := sqlcgen.ListNotificationsParams{ReceiverID: accountID, IsRead: pgtypex.BoolPtr(isRead), Type: strings.TrimSpace(typ), PageOffset: int32((page - 1) * size), PageLimit: int32(size)}
+	limit, offset := pagex.LimitOffset(page, size)
+	arg := sqlcgen.ListNotificationsParams{ReceiverID: accountID, IsRead: pgtypex.BoolPtr(isRead), Type: strings.TrimSpace(typ), PageOffset: offset, PageLimit: limit}
 	rows, err := t.q.ListNotifications(ctx, arg)
 	if err != nil {
 		return nil, 0, err
@@ -167,7 +169,8 @@ func (t *txStore) CreateAnnouncement(ctx context.Context, id, tenantID, publishe
 
 // ListAnnouncements 查询系统公告。
 func (t *txStore) ListAnnouncements(ctx context.Context, tenantID, accountID int64, roleNumbers []int16, page, size int) ([]AnnouncementDTO, int64, error) {
-	rows, err := t.q.ListAnnouncements(ctx, sqlcgen.ListAnnouncementsParams{TenantID: tenantID, AccountID: accountID, RoleNumbers: roleNumbers, PageLimit: int32(size), PageOffset: int32((page - 1) * size)})
+	limit, offset := pagex.LimitOffset(page, size)
+	rows, err := t.q.ListAnnouncements(ctx, sqlcgen.ListAnnouncementsParams{TenantID: tenantID, AccountID: accountID, RoleNumbers: roleNumbers, PageLimit: limit, PageOffset: offset})
 	if err != nil {
 		return nil, 0, err
 	}

@@ -21,8 +21,7 @@ func (s *Service) ListTasks(ctx context.Context, tenantID, accountID int64, sour
 		return nil, 0, 0, 0, apperr.ErrJudgeSubmitInvalid
 	}
 	page, size = pagex.Normalize(page, size)
-	offset := int32((page - 1) * size)
-	limit := int32(size)
+	limit, offset := pagex.LimitOffset(page, size)
 	var (
 		items []JudgeTaskInfo
 		total int64

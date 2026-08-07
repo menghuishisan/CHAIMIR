@@ -1532,6 +1532,25 @@ func (q *Queries) GetTenantByID(ctx context.Context, id int64) (Tenant, error) {
 	return i, err
 }
 
+const hasPendingTenantApplication = `-- name: HasPendingTenantApplication :one
+SELECT EXISTS(
+  SELECT 1 FROM tenant_application
+  WHERE status = 1 AND (contact_phone = $1 OR lower(contact_email) = lower($2))
+)
+`
+
+type HasPendingTenantApplicationParams struct {
+	ContactPhone string `json:"contact_phone"`
+	Lower        string `json:"lower"`
+}
+
+func (q *Queries) HasPendingTenantApplication(ctx context.Context, arg HasPendingTenantApplicationParams) (bool, error) {
+	row := q.db.QueryRow(ctx, hasPendingTenantApplication, arg.ContactPhone, arg.Lower)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
+}
+
 const incrementSMSVerifyAttempts = `-- name: IncrementSMSVerifyAttempts :exec
 UPDATE sms_code SET verify_attempts = verify_attempts + 1
 WHERE id = $1 AND tenant_id = $2

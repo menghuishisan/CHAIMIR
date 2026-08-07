@@ -5,7 +5,7 @@
 // 平台管理区与平台特权入口仅 SaaS 形态注册 —— 私有化部署下路径不存在,而非前端隐藏。
 
 import { Suspense } from 'react'
-import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
+import { BrowserRouter, Navigate, Route, Routes } from 'react-router'
 import { LoaderCircle } from 'lucide-react'
 import { Toaster, TooltipProvider } from '@chaimir/ui'
 import AuthLayout from '../layouts/auth/AuthLayout'

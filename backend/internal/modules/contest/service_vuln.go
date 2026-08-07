@@ -643,9 +643,9 @@ func vulnLevelFromAny(v any, defaultValue int16) int16 {
 			return VulnLevelC
 		}
 	case float64:
-		return int16(x)
+		return jsonx.Int16FromAny(x, defaultValue)
 	case int:
-		return int16(x)
+		return jsonx.Int16FromAny(x, defaultValue)
 	case int16:
 		return x
 	}
@@ -667,9 +667,9 @@ func vulnRuntimeFromAny(v any, defaultValue int16) int16 {
 			return VulnRuntimeForked
 		}
 	case float64:
-		return int16(x)
+		return jsonx.Int16FromAny(x, defaultValue)
 	case int:
-		return int16(x)
+		return jsonx.Int16FromAny(x, defaultValue)
 	case int16:
 		return x
 	}

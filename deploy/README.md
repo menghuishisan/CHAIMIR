@@ -65,6 +65,10 @@ Kustomize component 同时生成两个命名空间的 ConfigMap:
 
 **密钥**走 `secret.env`(从 `config/secret.env.example` 复制,被 `.gitignore` 忽略):
 
+`make tls` 会在 `config/chaimir-tls/` 持久化生成有效期 825 天的 `chaimir` 自签证书，并创建统一名称 `chaimir-tls`。证书文件被 `.gitignore` 忽略，不会上传到 GitHub；文件存在且仍有效时，重复启动不会重新生成。浏览器入口统一使用 `https://chaimir`，需将域名解析到 `127.0.0.1` 并信任 `config/chaimir-tls/tls.crt`；Cookie 不提供 HTTP 降级。
+
+staging 和 prod-saas 部署流水线会在应用资源后等待 `chaimir-system/chaimir-tls`，并校验 Secret 类型为 `kubernetes.io/tls` 且同时包含证书和私钥；缺失或不完整会阻断部署。prod-school 交付前必须由学校运维在同一命名空间预创建同名 TLS Secret，再执行清单应用和 `bash deploy/scripts/wait-tls-secret.sh chaimir-system chaimir-tls 300` 验收。
+
 - `local-dev` / `prod-school`:overlay 用 `secretGenerator` 从本地 `secret.env` 生成
   `chaimir-secret`(系统层)+ `chaimir-data-secret`(数据层)。
 - `staging` / `prod-saas`:不提交任何密钥 —— overlay 引用 `config/external-secret/`
@@ -133,7 +137,7 @@ M2 快照能力分为两层:通用 `VolumeSnapshot` CRD/snapshot-controller 与�
 中填写真实类名。`rancher.io/local-path`、普通 Docker volume 或演示用 hostpath CSI 不作为生产
 快照方案。
 
-将 `chaimir.local` 指向 `127.0.0.1`(hosts)后,前端经 `http://chaimir.local` 访问。
+将 `chaimir` 指向 `127.0.0.1`(hosts)后,前端经 `https://chaimir` 访问,并信任 `config/chaimir-tls/tls.crt`。`dev-up` 是唯一的浏览器联调入口；`deps-up` 只启动依赖服务，前后端工作区进程不提供绕过 Ingress 的 HTTP 登录入口。
 
 > 应用镜像就绪前(目录2/3 未产出),backend/frontend/migrate Pod 会处于 ImagePull 待命 —— 属预期。
 > 镜像必须由统一供应链直接推送 Harbor、按 digest 回拉并通过门禁,再由 `image-metadata-promotion` 晋升到权威锁和 local-dev overlay;不得导入本地 `:dev` tag 绕过该流程。

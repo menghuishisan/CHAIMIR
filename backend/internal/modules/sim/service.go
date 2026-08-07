@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log/slog"
 	"strings"
 
 	"chaimir/internal/contracts"
@@ -17,6 +18,7 @@ import (
 	"chaimir/internal/platform/ws"
 	"chaimir/pkg/apperr"
 	pkgcrypto "chaimir/pkg/crypto"
+	"chaimir/pkg/logging"
 	"chaimir/pkg/snowflake"
 )
 
@@ -206,7 +208,11 @@ func (s *Service) loadBundleForExecution(ctx context.Context, session SessionWit
 	if err != nil {
 		return nil, apperr.ErrSimBundleUnreadable.WithCause(err)
 	}
-	defer func() { _ = reader.Close() }()
+	defer func() {
+		if closeErr := reader.Close(); closeErr != nil {
+			logging.ErrorContext(ctx, "关闭仿真包对象读取器失败", closeErr.Error(), slog.String("object_key", ref.Key))
+		}
+	}()
 	data, err := io.ReadAll(io.LimitReader(reader, s.upload.SimBundleMaxBytes+1))
 	if err != nil {
 		return nil, apperr.ErrSimBundleUnreadable.WithCause(err)

@@ -233,9 +233,33 @@ func dumpPostgres(ctx context.Context, cfg *config.Config, outPath string) error
 		"--dbname", cfg.Postgres.Database,
 		"--file", outPath,
 	}
-	cmd := exec.CommandContext(ctx, "pg_dump", args...)
-	cmd.Env = append(os.Environ(), "PGPASSWORD="+cfg.Postgres.Password)
-	out, err := cmd.CombinedOutput()
+	cmd := &exec.Cmd{
+		Path: "pg_dump",
+		Args: append([]string{"pg_dump"}, args...),
+		Env:  append(os.Environ(), "PGPASSWORD="+cfg.Postgres.Password),
+	}
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("pg_dump 上下文已取消: %w", err)
+	}
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("启动 pg_dump 失败: %w", err)
+	}
+	finished := make(chan struct{})
+	go func() {
+		select {
+		case <-ctx.Done():
+			if err := cmd.Process.Kill(); err != nil && !errors.Is(err, os.ErrProcessDone) {
+				slog.Warn("pg_dump 取消失败", slog.String("error", logging.SanitizeError(err.Error())))
+			}
+		case <-finished:
+		}
+	}()
+	err := cmd.Wait()
+	close(finished)
+	out := append(stdout.Bytes(), stderr.Bytes()...)
 	if err != nil {
 		return fmt.Errorf("pg_dump 执行失败: %w: %s", err, logging.SanitizeError(string(out)))
 	}
@@ -244,7 +268,7 @@ func dumpPostgres(ctx context.Context, cfg *config.Config, outPath string) error
 
 // uploadFile 把本地 pg_dump 产物上传到备份桶。
 func uploadFile(ctx context.Context, objects *storage.Storage, bucket, key, path string) (int64, string, error) {
-	f, err := os.Open(path)
+	f, err := os.OpenInRoot(filepath.Dir(path), filepath.Base(path))
 	if err != nil {
 		return 0, "", fmt.Errorf("打开备份文件失败: %w", err)
 	}

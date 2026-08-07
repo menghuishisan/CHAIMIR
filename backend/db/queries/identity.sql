@@ -92,6 +92,12 @@ INSERT INTO tenant_application (id, school_name, school_type, contact_name, cont
 VALUES ($1, $2, $3, $4, $5, $6, $7, now(), now())
 RETURNING id, school_name, school_type, contact_name, contact_phone, contact_email, status, reject_reason, reviewed_by, tenant_id, created_at, updated_at;
 
+-- name: HasPendingTenantApplication :one
+SELECT EXISTS(
+  SELECT 1 FROM tenant_application
+  WHERE status = 1 AND (contact_phone = $1 OR lower(contact_email) = lower($2))
+);
+
 -- name: GetTenantApplication :one
 SELECT id, school_name, school_type, contact_name, contact_phone, contact_email, status, reject_reason, reviewed_by, tenant_id, created_at, updated_at
 FROM tenant_application

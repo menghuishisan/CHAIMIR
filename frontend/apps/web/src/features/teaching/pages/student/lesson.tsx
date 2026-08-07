@@ -10,7 +10,7 @@
 // 材料地址一律经统一文件服务,页面不拼接对象存储地址。
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
+import { useNavigate, useParams } from 'react-router'
 import { BookOpen, CheckCheck, Download, FlaskConical, Network } from 'lucide-react'
 import { LessonContentType, ProgressStatus, type Lesson, type Progress } from '@chaimir/api-client'
 import {

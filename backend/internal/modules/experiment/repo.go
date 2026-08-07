@@ -9,6 +9,7 @@ import (
 
 	"chaimir/internal/modules/experiment/internal/sqlcgen"
 	"chaimir/internal/platform/db"
+	"chaimir/internal/platform/pagex"
 	"chaimir/internal/platform/pgtypex"
 	"chaimir/internal/platform/timex"
 	"chaimir/pkg/apperr"
@@ -125,7 +126,8 @@ func (tx *txStore) GetExperiment(ctx context.Context, tenantID, id int64) (Exper
 
 // ListExperiments 查询实验定义分页。
 func (tx *txStore) ListExperiments(ctx context.Context, tenantID, courseID int64, status int16, page, size int) ([]Experiment, int64, error) {
-	rows, err := tx.q.ListExperiments(ctx, sqlcgen.ListExperimentsParams{TenantID: tenantID, Column2: courseID, Column3: status, Limit: int32(size), Offset: int32((page - 1) * size)})
+	limit, offset := pagex.LimitOffset(page, size)
+	rows, err := tx.q.ListExperiments(ctx, sqlcgen.ListExperimentsParams{TenantID: tenantID, Column2: courseID, Column3: status, Limit: limit, Offset: offset})
 	if err != nil {
 		return nil, 0, apperr.ErrExperimentInvalid.WithCause(err)
 	}
@@ -487,7 +489,8 @@ func (tx *txStore) GetReportByInstanceStudent(ctx context.Context, tenantID, ins
 
 // ListReports 查询实验报告分页。
 func (tx *txStore) ListReports(ctx context.Context, tenantID, experimentID int64, page, size int) ([]ExperimentReport, int64, error) {
-	rows, err := tx.q.ListExperimentReports(ctx, sqlcgen.ListExperimentReportsParams{TenantID: tenantID, ExperimentID: experimentID, Limit: int32(size), Offset: int32((page - 1) * size)})
+	limit, offset := pagex.LimitOffset(page, size)
+	rows, err := tx.q.ListExperimentReports(ctx, sqlcgen.ListExperimentReportsParams{TenantID: tenantID, ExperimentID: experimentID, Limit: limit, Offset: offset})
 	if err != nil {
 		return nil, 0, apperr.ErrExperimentReportInvalid.WithCause(err)
 	}

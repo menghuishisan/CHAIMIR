@@ -9,6 +9,8 @@ import (
 	"fmt"
 	"strings"
 
+	"chaimir/internal/platform/intx"
+
 	"golang.org/x/crypto/argon2"
 )
 
@@ -53,7 +55,11 @@ func VerifyPassword(password, encoded string) (bool, error) {
 	if err != nil {
 		return false, fmt.Errorf("解析 hash 失败: %w", err)
 	}
-	got := argon2.IDKey([]byte(password), salt, t, m, p, uint32(len(want)))
+	hashLength, ok := intx.Uint32(len(want))
+	if !ok || hashLength == 0 {
+		return false, fmt.Errorf("密码哈希长度非法")
+	}
+	got := argon2.IDKey([]byte(password), salt, t, m, p, hashLength)
 	return EqualBytes(got, want), nil
 }
 

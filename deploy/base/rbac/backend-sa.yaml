@@ -1,13 +1,4 @@
-# 后端单体的 ServiceAccount 与最小 RBAC。
-# 依据 docs/总-部署架构设计.md §二/§九:
-#   后端 ServiceAccount 通过 client-go 创建/销毁动态运行命名空间(sbx-*/judge-*/battle-*/sim-*)
-#   及其中的 Pod;权限取最小集,绝不授予集群管理员。
-#
-# K8s RBAC 局限说明(重要):
-#   RBAC 的 resourceNames 不支持通配,无法限定"仅能操作指定前缀动态命名空间"。
-#   因此 namespace 的 create/delete 是集群级动词。名称模式与"仅删除自己创建的命名空间"
-#   这一约束由运行引擎代码强制(创建时打平台所有权标签,删除前校验),并由
-#   base/admission/sandbox-namespace-policy.yaml 的 ValidatingAdmissionPolicy 在准入层兜底。
+# 后端单体与沙箱 RBAC 资源,工作负载权限由独立命名空间预配器按命名空间授予。
 ---
 apiVersion: v1
 kind: ServiceAccount
@@ -20,8 +11,7 @@ metadata:
 imagePullSecrets:
   - name: chaimir-harbor-pull
 ---
-# 集群级:仅命名空间生命周期 + 节点/命名空间只读(调度决策需要)。
-# 不含 secrets/configmaps 的集群级读,不含任何 RBAC/集群资源写。
+# 后端仅负责动态命名空间生命周期和调度/快照能力探测,不直接持有工作负载权限。
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
@@ -29,68 +19,14 @@ metadata:
   labels:
     app.kubernetes.io/part-of: chaimir
 rules:
-  # 动态运行命名空间的创建/销毁(名称模式由代码 + ValidatingAdmissionPolicy 约束)。
   - apiGroups: [""]
     resources: ["namespaces"]
     verbs: ["create", "delete", "get", "list", "watch"]
-  # 调度与配额决策需读取节点信息(只读)。
   - apiGroups: [""]
     resources: ["nodes"]
     verbs: ["get", "list", "watch"]
-  # 快照能力检测需读取 StorageClass,用于拒绝未接入真实 CSI 存储的 snapshot_enabled。
   - apiGroups: ["storage.k8s.io"]
     resources: ["storageclasses"]
-    verbs: ["get", "list", "watch"]
----
-# 命名空间内运行工作负载管理权限,经下方 ClusterRoleBinding 绑定后,
-# 在后端创建的每个动态命名空间内由 client-go 套用(此处定义为可复用 ClusterRole,
-# 实际作用域受动态命名空间存在性约束;沙箱命名空间用后即毁,权限随之失效)。
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRole
-metadata:
-  name: chaimir-backend-sandbox-workload
-  labels:
-    app.kubernetes.io/part-of: chaimir
-rules:
-  # 沙箱与 M4 后端仿真 Pod 的编排。
-  - apiGroups: [""]
-    resources: ["pods", "pods/log", "pods/exec", "pods/status"]
-    verbs: ["create", "delete", "get", "list", "watch"]
-  # 每个动态沙箱命名空间内显式创建最小权限 ServiceAccount,禁止依赖 default SA。
-  - apiGroups: [""]
-    resources: ["serviceaccounts"]
-    verbs: ["create", "delete", "get", "list", "watch", "update"]
-  # 工具容器(code-server/remix 等)的 ClusterIP 暴露 + 配置注入。
-  - apiGroups: [""]
-    resources: ["services", "configmaps"]
-    verbs: ["create", "delete", "get", "list", "watch"]
-  # 动态运行命名空间内只同步 imagePullSecret,用于 Harbor 私有 digest 镜像拉取。
-  - apiGroups: [""]
-    resources: ["secrets"]
-    verbs: ["create", "delete", "get", "list", "watch", "update"]
-  # 持久卷声明(部分实验需可写卷)。
-  - apiGroups: [""]
-    resources: ["persistentvolumeclaims"]
-    verbs: ["create", "delete", "get", "list", "watch"]
-  # 动态运行命名空间的 deny-all NetworkPolicy 由后端套用。
-  - apiGroups: ["networking.k8s.io"]
-    resources: ["networkpolicies"]
-    verbs: ["create", "delete", "get", "list", "watch"]
-  # 资源硬限(沙箱配额约束)。
-  - apiGroups: [""]
-    resources: ["resourcequotas", "limitranges"]
-    verbs: ["create", "delete", "get", "list", "watch"]
-  # 实时资源用量读取,仅用于 M2 状态查询,不得用 requests/limits 伪装实时指标。
-  - apiGroups: ["metrics.k8s.io"]
-    resources: ["pods"]
-    verbs: ["get", "list", "watch"]
-  # CSI VolumeSnapshot 管理,用于教师显式开启的高成本实验保活/恢复。
-  - apiGroups: ["snapshot.storage.k8s.io"]
-    resources: ["volumesnapshots"]
-    verbs: ["create", "delete", "get", "list", "watch"]
-  # 快照准入和 ready 校验只读 VolumeSnapshotClass/Content,不允许后端直接改写底层快照内容。
-  - apiGroups: ["snapshot.storage.k8s.io"]
-    resources: ["volumesnapshotcontents", "volumesnapshotclasses"]
     verbs: ["get", "list", "watch"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
@@ -108,6 +44,78 @@ subjects:
     name: chaimir-backend
     namespace: chaimir-system
 ---
+# 预配器只观察 Namespace,并在受标签保护的动态 Namespace 内修复固定 Role/RoleBinding。
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: chaimir-sandbox-rbac-provisioner
+  namespace: chaimir-system
+  labels:
+    app.kubernetes.io/name: chaimir-sandbox-rbac-provisioner
+    app.kubernetes.io/part-of: chaimir
+imagePullSecrets:
+  - name: chaimir-harbor-pull
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: chaimir-sandbox-rbac-provisioner
+  labels:
+    app.kubernetes.io/part-of: chaimir
+rules:
+  - apiGroups: [""]
+    resources: ["namespaces"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["rbac.authorization.k8s.io"]
+    resources: ["roles", "rolebindings"]
+    verbs: ["create", "get", "update"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: chaimir-sandbox-rbac-provisioner
+  labels:
+    app.kubernetes.io/part-of: chaimir
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: chaimir-sandbox-rbac-provisioner
+subjects:
+  - kind: ServiceAccount
+    name: chaimir-sandbox-rbac-provisioner
+    namespace: chaimir-system
+---
+# 后端只读取固定 Harbor 拉取凭据,避免读取控制命名空间中的 JWT/数据库等 Secret。
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: chaimir-backend-image-pull-source
+  namespace: chaimir-system
+  labels:
+    app.kubernetes.io/part-of: chaimir
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames: ["chaimir-harbor-pull"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: chaimir-backend-image-pull-source
+  namespace: chaimir-system
+  labels:
+    app.kubernetes.io/part-of: chaimir
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: chaimir-backend-image-pull-source
+subjects:
+  - kind: ServiceAccount
+    name: chaimir-backend
+    namespace: chaimir-system
+---
+# 预拉取 DaemonSet 只能在固定命名空间内管理,不扩大到其他静态命名空间。
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
@@ -116,11 +124,9 @@ metadata:
   labels:
     app.kubernetes.io/part-of: chaimir
 rules:
-  # M2 预拉取闭环只在 chaimir-prepull 命名空间管理 DaemonSet,不扩大到其他静态命名空间。
   - apiGroups: ["apps"]
     resources: ["daemonsets"]
     verbs: ["create", "delete", "get", "list", "watch", "update"]
-  # 预拉取状态需要读取 DaemonSet 创建的 Pod,用于识别 ImagePullBackOff 等真实失败。
   - apiGroups: [""]
     resources: ["pods"]
     verbs: ["get", "list", "watch"]
@@ -136,21 +142,6 @@ roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
   name: chaimir-backend-prepull-workload
-subjects:
-  - kind: ServiceAccount
-    name: chaimir-backend
-    namespace: chaimir-system
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRoleBinding
-metadata:
-  name: chaimir-backend-sandbox-workload
-  labels:
-    app.kubernetes.io/part-of: chaimir
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: ClusterRole
-  name: chaimir-backend-sandbox-workload
 subjects:
   - kind: ServiceAccount
     name: chaimir-backend

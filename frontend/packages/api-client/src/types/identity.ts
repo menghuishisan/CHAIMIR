@@ -21,24 +21,28 @@ import type {
 export interface LoginPlatformRequest {
   username: string
   password: string
+  remember: boolean
 }
 
 export interface LoginPhoneRequest {
   phone: string
   password: string
   tenant_id?: SnowflakeID
+  remember: boolean
 }
 
 export interface LoginNoRequest {
   tenant_code: string
   no: string
   password: string
+  remember: boolean
 }
 
 export interface LoginSMSRequest {
   phone: string
   code: string
   tenant_id?: SnowflakeID
+  remember: boolean
 }
 
 export interface SendSMSRequest {
@@ -71,7 +75,6 @@ export interface ActivateRequest {
 
 export interface LoginResponse {
   access_token?: string
-  refresh_token?: string
   must_change_pwd?: boolean
   need_select_tenant?: boolean
   tenants?: TenantOption[]

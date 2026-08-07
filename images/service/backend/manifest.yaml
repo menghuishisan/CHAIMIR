@@ -27,6 +27,7 @@ capabilities:
   - platform-service
   - control-plane
   - api-worker
+  - sandbox-rbac-provisioner
 ports:
   - name: http
     container_port: 8080
@@ -71,4 +72,3 @@ supply_chain:
   trivy_required: true
   cosign_required: true
   pull_by_digest_in_production: true
-

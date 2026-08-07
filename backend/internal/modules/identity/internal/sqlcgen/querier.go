@@ -53,6 +53,7 @@ type Querier interface {
 	GetTenantApplication(ctx context.Context, id int64) (TenantApplication, error)
 	GetTenantByCode(ctx context.Context, code string) (Tenant, error)
 	GetTenantByID(ctx context.Context, id int64) (Tenant, error)
+	HasPendingTenantApplication(ctx context.Context, arg HasPendingTenantApplicationParams) (bool, error)
 	IncrementSMSVerifyAttempts(ctx context.Context, arg IncrementSMSVerifyAttemptsParams) error
 	ListAccounts(ctx context.Context, arg ListAccountsParams) ([]ListAccountsRow, error)
 	ListAccountsByPhoneHashPrivileged(ctx context.Context, phoneHash string) ([]ListAccountsByPhoneHashPrivilegedRow, error)

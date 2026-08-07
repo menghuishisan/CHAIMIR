@@ -8,6 +8,7 @@ import (
 	"chaimir/internal/modules/admin/internal/sqlcgen"
 	"chaimir/internal/platform/ids"
 	"chaimir/internal/platform/jsonx"
+	"chaimir/internal/platform/pagex"
 	"chaimir/internal/platform/pgtypex"
 	"chaimir/internal/platform/timex"
 	"chaimir/pkg/apperr"
@@ -91,7 +92,8 @@ func (t *txStore) GetConfigChangeLog(ctx context.Context, id, configID int64) (C
 
 // ListConfigChangeLogs 查询配置变更历史和总数。
 func (t *txStore) ListConfigChangeLogs(ctx context.Context, configID int64, page, size int) ([]ConfigChangeLogDTO, int64, error) {
-	rows, err := t.q.ListConfigChangeLogs(ctx, sqlcgen.ListConfigChangeLogsParams{ConfigID: configID, Limit: int32(size), Offset: int32((page - 1) * size)})
+	limit, offset := pagex.LimitOffset(page, size)
+	rows, err := t.q.ListConfigChangeLogs(ctx, sqlcgen.ListConfigChangeLogsParams{ConfigID: configID, Limit: limit, Offset: offset})
 	if err != nil {
 		return nil, 0, err
 	}
@@ -156,7 +158,8 @@ func (t *txStore) CreateAlertEvent(ctx context.Context, id, ruleID, tenantID int
 
 // ListAlertEvents 查询告警事件和总数。
 func (t *txStore) ListAlertEvents(ctx context.Context, status int16, tenantID int64, page, size int) ([]AlertEventDTO, int64, error) {
-	rows, err := t.q.ListAlertEvents(ctx, sqlcgen.ListAlertEventsParams{Status: status, TenantID: pgtypex.Int8(tenantID), PageOffset: int32((page - 1) * size), PageLimit: int32(size)})
+	limit, offset := pagex.LimitOffset(page, size)
+	rows, err := t.q.ListAlertEvents(ctx, sqlcgen.ListAlertEventsParams{Status: status, TenantID: pgtypex.Int8(tenantID), PageOffset: offset, PageLimit: limit})
 	if err != nil {
 		return nil, 0, err
 	}
@@ -238,7 +241,8 @@ func (t *txStore) CreateBackupRecord(ctx context.Context, id int64, req BackupRe
 
 // ListBackupRecords 查询备份记录和总数。
 func (t *txStore) ListBackupRecords(ctx context.Context, page, size int) ([]BackupRecordDTO, int64, error) {
-	rows, err := t.q.ListBackupRecords(ctx, sqlcgen.ListBackupRecordsParams{Limit: int32(size), Offset: int32((page - 1) * size)})
+	limit, offset := pagex.LimitOffset(page, size)
+	rows, err := t.q.ListBackupRecords(ctx, sqlcgen.ListBackupRecordsParams{Limit: limit, Offset: offset})
 	if err != nil {
 		return nil, 0, err
 	}

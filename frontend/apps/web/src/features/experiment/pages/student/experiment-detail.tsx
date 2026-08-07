@@ -6,7 +6,7 @@
 // 判题器编号、题目引用、环境初始化脚本已由后端投影剔除,前端不做二次过滤(铁律 1)。
 
 import { useCallback, useMemo, useState } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
+import { useNavigate, useParams } from 'react-router'
 import { FlaskConical, Layers, Play, Target, Users } from 'lucide-react'
 import {
   EXPERIMENT_STAGE_STATUS,

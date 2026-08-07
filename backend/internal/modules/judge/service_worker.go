@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"chaimir/internal/contracts"
+	"chaimir/internal/platform/intx"
 	"chaimir/internal/platform/jsonx"
 	"chaimir/internal/platform/timex"
 	"chaimir/internal/platform/upload"
@@ -40,8 +41,8 @@ func (s *Service) RunWorkerOnce(ctx context.Context) error {
 	if err := s.publishPendingOutbox(ctx); err != nil {
 		return err
 	}
-	limit := int32(s.cfg.WorkerBatchSize)
-	if limit <= 0 {
+	limit, ok := intx.Int32(s.cfg.WorkerBatchSize)
+	if !ok || limit <= 0 {
 		limit = 1
 	}
 	var tasks []JudgeTask
@@ -228,7 +229,15 @@ func privateSidecarsForSandbox(items []workload.ComponentSpec) []contracts.Sandb
 
 // waitSandboxReady 轮询 M2 沙箱状态直到运行时可执行或超时。
 func (s *Service) waitSandboxReady(ctx context.Context, task JudgeTask, sandboxID int64) error {
-	timeout := time.Duration(task.InputSnapshot.TimeoutSec+int32(s.cfg.SandboxReadyGraceSeconds)) * time.Second
+	graceSeconds, ok := intx.Int32(s.cfg.SandboxReadyGraceSeconds)
+	if !ok || graceSeconds < 0 {
+		return apperr.ErrJudgeTimeout
+	}
+	timeoutSeconds := int64(task.InputSnapshot.TimeoutSec) + int64(graceSeconds)
+	if timeoutSeconds <= 0 {
+		return apperr.ErrJudgeTimeout
+	}
+	timeout := time.Duration(timeoutSeconds) * time.Second
 	if timeout <= 0 {
 		return apperr.ErrJudgeTimeout
 	}
@@ -456,8 +465,8 @@ func (s *Service) markFailureIntermediate(ctx context.Context, task JudgeTask, s
 // publishPendingOutbox 发布已落库的终态事件并回写发布状态。
 func (s *Service) publishPendingOutbox(ctx context.Context) error {
 	var items []JudgeEventOutbox
-	limit := int32(s.cfg.WorkerBatchSize)
-	if limit <= 0 {
+	limit, ok := intx.Int32(s.cfg.WorkerBatchSize)
+	if !ok || limit <= 0 {
 		limit = 10
 	}
 	if err := s.store.PrivilegedTx(ctx, func(ctx context.Context, tx TxStore) error {

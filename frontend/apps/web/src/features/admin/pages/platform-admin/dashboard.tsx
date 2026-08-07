@@ -8,7 +8,7 @@
 // 只有平台范围才会填),故这两项缺失时不渲染空指标。
 
 import { useMemo, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate } from 'react-router'
 import {
   Activity,
   Book,

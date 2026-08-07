@@ -11,7 +11,7 @@
 // 故作为本页内区块而不进侧栏(对齐清单 §3.2:成绩申诉是批改/成绩内页)。
 
 import { useCallback, useMemo, useState } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { useSearchParams } from 'react-router'
 import { CheckSquare, ClipboardCheck, RefreshCw, RotateCcw } from 'lucide-react'
 import {
   SubmissionStatus,

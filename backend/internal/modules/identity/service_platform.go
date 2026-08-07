@@ -3,6 +3,7 @@ package identity
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"time"
 
@@ -14,6 +15,7 @@ import (
 	"chaimir/internal/platform/timex"
 	"chaimir/pkg/apperr"
 	"chaimir/pkg/crypto"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 // CreateApplication 提交学校入驻申请,这是申请流程而非自助注册。
@@ -30,8 +32,17 @@ func (s *Service) CreateApplication(ctx context.Context, req CreateApplicationRe
 	if err := ValidateEmail(req.ContactEmail); err != nil {
 		return TenantApplication{}, err
 	}
+	req.ContactPhone = strings.TrimSpace(req.ContactPhone)
+	req.ContactEmail = strings.TrimSpace(req.ContactEmail)
 	var app TenantApplication
 	if err := s.store.PlatformTx(ctx, func(ctx context.Context, tx TxStore) error {
+		duplicate, err := tx.HasPendingTenantApplication(ctx, req.ContactPhone, req.ContactEmail)
+		if err != nil {
+			return err
+		}
+		if duplicate {
+			return apperr.ErrIdentityApplicationInvalid
+		}
 		row, err := tx.CreateTenantApplication(ctx, req, s.ids.Generate())
 		if err != nil {
 			return err
@@ -39,6 +50,10 @@ func (s *Service) CreateApplication(ctx context.Context, req CreateApplicationRe
 		app = row
 		return nil
 	}); err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+			return TenantApplication{}, apperr.ErrIdentityApplicationInvalid
+		}
 		return TenantApplication{}, apperr.ErrInternal.WithCause(err)
 	}
 	return app, nil

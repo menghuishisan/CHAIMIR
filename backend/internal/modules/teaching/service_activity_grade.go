@@ -12,6 +12,7 @@ import (
 
 	"chaimir/internal/contracts"
 	"chaimir/internal/platform/ids"
+	"chaimir/internal/platform/intx"
 	"chaimir/internal/platform/pagex"
 	"chaimir/internal/platform/response"
 	"chaimir/internal/platform/storage"
@@ -490,7 +491,11 @@ func (s *Service) ListGrades(ctx context.Context, courseID int64) ([]GradeDTO, e
 		if err := ensureTeacherOwned(course, id.AccountID); err != nil {
 			return err
 		}
-		grades, err = tx.ListCourseGrades(ctx, id.TenantID, courseID, int32(s.cfg.CourseGradesMaxRows), 0)
+		maxRows, ok := intx.Int32(s.cfg.CourseGradesMaxRows)
+		if !ok || maxRows <= 0 {
+			return apperr.ErrTeachingGradeInvalid
+		}
+		grades, err = tx.ListCourseGrades(ctx, id.TenantID, courseID, maxRows, 0)
 		return err
 	}); err != nil {
 		return nil, mapGradeError(err)
@@ -732,7 +737,11 @@ func (s *Service) listCourseGradesForTenant(ctx context.Context, tenantID, cours
 	var grades []CourseGrade
 	if err := s.store.TenantTx(ctx, tenantID, func(ctx context.Context, tx TxStore) error {
 		var err error
-		grades, err = tx.ListCourseGrades(ctx, tenantID, courseID, int32(s.cfg.CourseGradesMaxRows), 0)
+		maxRows, ok := intx.Int32(s.cfg.CourseGradesMaxRows)
+		if !ok || maxRows <= 0 {
+			return apperr.ErrTeachingGradeInvalid
+		}
+		grades, err = tx.ListCourseGrades(ctx, tenantID, courseID, maxRows, 0)
 		return err
 	}); err != nil {
 		return nil, mapGradeError(err)
@@ -742,15 +751,18 @@ func (s *Service) listCourseGradesForTenant(ctx context.Context, tenantID, cours
 
 // listCourseGradesForExport 按导出批量配置分批读取课程成绩。
 func (s *Service) listCourseGradesForExport(ctx context.Context, tx TxStore, tenantID, courseID int64) ([]CourseGrade, error) {
-	batchSize := int32(s.cfg.GradeExportBatchSize)
-	out := make([]CourseGrade, 0, batchSize)
+	batchSize, ok := intx.Int32(s.cfg.GradeExportBatchSize)
+	if !ok || batchSize <= 0 {
+		return nil, apperr.ErrTeachingGradeExportFailed
+	}
+	out := make([]CourseGrade, 0, int(batchSize))
 	for offset := int32(0); ; offset += batchSize {
 		batch, err := tx.ListCourseGrades(ctx, tenantID, courseID, batchSize, offset)
 		if err != nil {
 			return nil, err
 		}
 		out = append(out, batch...)
-		if int32(len(batch)) < batchSize {
+		if len(batch) < int(batchSize) {
 			return out, nil
 		}
 	}
@@ -787,8 +799,8 @@ func (s *Service) enqueueTeachingGradeEventOutbox(ctx context.Context, tx TxStor
 
 // RunTeachingGradeEventOutboxOnce 领取并发布 M6 成绩变更事件。
 func (s *Service) RunTeachingGradeEventOutboxOnce(ctx context.Context) error {
-	limit := int32(s.cfg.GradeEventOutboxBatchSize)
-	if limit <= 0 {
+	limit, ok := intx.Int32(s.cfg.GradeEventOutboxBatchSize)
+	if !ok || limit <= 0 {
 		return apperr.ErrTeachingGradeEventPublishFailed
 	}
 	staleBefore := timex.Now().Add(-time.Duration(s.cfg.GradeEventOutboxStaleMs) * time.Millisecond)

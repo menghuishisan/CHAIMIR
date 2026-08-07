@@ -9,6 +9,7 @@ import (
 
 	"chaimir/internal/platform/auth"
 	"chaimir/internal/platform/config"
+	"chaimir/internal/platform/intx"
 	"chaimir/internal/platform/jsonx"
 	"chaimir/internal/platform/workload"
 	"chaimir/pkg/apperr"
@@ -1119,7 +1120,11 @@ func validateCapabilityCommands(spec *AdapterSpec, cfg config.SandboxConfig) err
 			return apperr.ErrSandboxCapabilityCommandInvalid
 		}
 		if command.TimeoutSeconds == 0 {
-			command.TimeoutSeconds = int32(cfg.ChainRPCTimeoutSeconds)
+			defaultTimeout, ok := intx.Int32(cfg.ChainRPCTimeoutSeconds)
+			if !ok || defaultTimeout <= 0 {
+				return apperr.ErrSandboxCapabilityCommandInvalid
+			}
+			command.TimeoutSeconds = defaultTimeout
 		}
 	}
 	return nil

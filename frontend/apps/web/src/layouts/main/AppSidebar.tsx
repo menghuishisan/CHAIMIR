@@ -2,7 +2,7 @@
 // 品牌章 + 分组导航(图标+文字,激活态玉浅底+左指示条+aria-current)。
 // 折叠态(仅桌面)只留图标,标签经 Tooltip 提供;窄屏由 MainLayout 放入抽屉,不折叠。
 
-import { NavLink } from 'react-router-dom'
+import { NavLink } from 'react-router'
 import { PanelLeftClose, PanelLeftOpen } from 'lucide-react'
 import { Icon, IconButton, Tooltip, cn } from '@chaimir/ui'
 import type { RoleNavigationConfig, RoleNavigationItem } from './navigation'

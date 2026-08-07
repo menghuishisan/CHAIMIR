@@ -16,21 +16,21 @@
     "@chaimir/sim-sdk": "workspace:*",
     "@chaimir/ui": "workspace:*",
     "lucide-react": "^0.460.0",
-    "react": "^18.3.1",
-    "react-dom": "^18.3.1",
-    "react-router-dom": "^6.23.1"
+    "react": "19.2.7",
+    "react-dom": "19.2.7",
+    "react-router": "8.3.0"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.1.0",
-    "tailwindcss": "^4.1.0",
-    "@types/react": "^18.3.3",
-    "@types/react-dom": "^18.3.0",
+    "@types/react": "19.2.18",
+    "@types/react-dom": "19.2.4",
     "@typescript-eslint/eslint-plugin": "^7.13.0",
     "@typescript-eslint/parser": "^7.13.0",
     "@vitejs/plugin-react": "^4.3.1",
     "eslint": "^8.57.0",
     "eslint-plugin-react-hooks": "^4.6.2",
     "eslint-plugin-react-refresh": "^0.4.7",
+    "tailwindcss": "^4.1.0",
     "typescript": "^5.4.5",
     "vite": "^5.3.1"
   }

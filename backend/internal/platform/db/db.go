@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"chaimir/internal/platform/config"
+	"chaimir/internal/platform/intx"
 	"chaimir/internal/platform/tenant"
 
 	"github.com/jackc/pgx/v5"
@@ -186,8 +187,13 @@ func buildPoolConfig(cfg config.PostgresConfig, user, password string) (*pgxpool
 	if err != nil {
 		return nil, err
 	}
-	pc.MaxConns = int32(cfg.MaxConns)
-	pc.MinConns = int32(cfg.MinConns)
+	maxConns, maxOK := intx.Int32(cfg.MaxConns)
+	minConns, minOK := intx.Int32(cfg.MinConns)
+	if !maxOK || !minOK || minConns < 0 || maxConns <= 0 || minConns > maxConns {
+		return nil, fmt.Errorf("数据库连接池配置超出 int32 范围或无效")
+	}
+	pc.MaxConns = maxConns
+	pc.MinConns = minConns
 	return pc, nil
 }
 

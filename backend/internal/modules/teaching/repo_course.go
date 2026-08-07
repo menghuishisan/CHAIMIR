@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"chaimir/internal/modules/teaching/internal/sqlcgen"
+	"chaimir/internal/platform/pagex"
 	"chaimir/internal/platform/pgtypex"
 	"chaimir/internal/platform/timex"
 )
@@ -58,7 +59,8 @@ func (s *txStore) GetCourseByInviteCode(ctx context.Context, code string) (Cours
 
 // ListTeacherCourses 查询教师课程分页。
 func (s *txStore) ListTeacherCourses(ctx context.Context, tenantID, teacherID int64, filter CourseListFilter) ([]Course, int64, error) {
-	rows, err := s.q.ListTeacherCourses(ctx, sqlcgen.ListTeacherCoursesParams{TenantID: tenantID, TeacherID: teacherID, Column3: filter.Status, Limit: int32(filter.Size), Offset: int32((filter.Page - 1) * filter.Size)})
+	limit, offset := pagex.LimitOffset(filter.Page, filter.Size)
+	rows, err := s.q.ListTeacherCourses(ctx, sqlcgen.ListTeacherCoursesParams{TenantID: tenantID, TeacherID: teacherID, Column3: filter.Status, Limit: limit, Offset: offset})
 	if err != nil {
 		return nil, 0, err
 	}
@@ -79,7 +81,8 @@ func (s *txStore) ListTeacherCourses(ctx context.Context, tenantID, teacherID in
 
 // ListStudentCourses 查询学生课程分页。
 func (s *txStore) ListStudentCourses(ctx context.Context, tenantID, studentID int64, filter CourseListFilter) ([]Course, int64, error) {
-	rows, err := s.q.ListStudentCourses(ctx, sqlcgen.ListStudentCoursesParams{TenantID: tenantID, StudentID: studentID, Column3: filter.Status, Limit: int32(filter.Size), Offset: int32((filter.Page - 1) * filter.Size)})
+	limit, offset := pagex.LimitOffset(filter.Page, filter.Size)
+	rows, err := s.q.ListStudentCourses(ctx, sqlcgen.ListStudentCoursesParams{TenantID: tenantID, StudentID: studentID, Column3: filter.Status, Limit: limit, Offset: offset})
 	if err != nil {
 		return nil, 0, err
 	}
@@ -324,7 +327,8 @@ func (s *txStore) GetCourseMember(ctx context.Context, tenantID, courseID, stude
 
 // ListCourseMembers 查询课程成员分页。
 func (s *txStore) ListCourseMembers(ctx context.Context, tenantID, courseID int64, page, size int) ([]CourseMember, int64, error) {
-	rows, err := s.q.ListCourseMembers(ctx, sqlcgen.ListCourseMembersParams{TenantID: tenantID, CourseID: courseID, Limit: int32(size), Offset: int32((page - 1) * size)})
+	limit, offset := pagex.LimitOffset(page, size)
+	rows, err := s.q.ListCourseMembers(ctx, sqlcgen.ListCourseMembersParams{TenantID: tenantID, CourseID: courseID, Limit: limit, Offset: offset})
 	if err != nil {
 		return nil, 0, err
 	}

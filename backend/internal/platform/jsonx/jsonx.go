@@ -6,10 +6,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"reflect"
 	"strconv"
 	"strings"
 
+	"chaimir/internal/platform/intx"
 	"chaimir/pkg/apperr"
 )
 
@@ -174,7 +176,23 @@ func IntFromAny(v any) int {
 // Int32FromAny 把 JSON 数字或数字字符串转换为 int32,无效值返回默认值。
 func Int32FromAny(v any, defaultValue int32) int32 {
 	if n, ok := int64Scalar(v, 32); ok {
-		return int32(n)
+		converted, fits := intx.Int64ToInt32(n)
+		if !fits {
+			return defaultValue
+		}
+		return converted
+	}
+	return defaultValue
+}
+
+// Int16FromAny 把 JSON 数字或数字字符串转换为 int16,无效值返回默认值。
+func Int16FromAny(v any, defaultValue int16) int16 {
+	if n, ok := int64Scalar(v, 16); ok {
+		converted, fits := intx.Int64ToInt16(n)
+		if !fits {
+			return defaultValue
+		}
+		return converted
 	}
 	return defaultValue
 }
@@ -243,13 +261,14 @@ func int64Scalar(v any, bitSize int) (int64, bool) {
 	case int64:
 		return val, intFits(val, bitSize)
 	case float32:
-		if val != float32(int64(val)) {
+		f := float64(val)
+		if math.IsNaN(f) || math.IsInf(f, 0) || math.Trunc(f) != f || f < -9223372036854775808 || f >= 9223372036854775808 {
 			return 0, false
 		}
 		n := int64(val)
 		return n, intFits(n, bitSize)
 	case float64:
-		if val != float64(int64(val)) {
+		if math.IsNaN(val) || math.IsInf(val, 0) || math.Trunc(val) != val || val < -9223372036854775808 || val >= 9223372036854775808 {
 			return 0, false
 		}
 		n := int64(val)
@@ -295,7 +314,7 @@ func float64Scalar(v any) (float64, bool) {
 func intFits(n int64, bitSize int) bool {
 	switch bitSize {
 	case 32:
-		return int64(int32(n)) == n
+		return n >= math.MinInt32 && n <= math.MaxInt32
 	case 64:
 		return true
 	default:

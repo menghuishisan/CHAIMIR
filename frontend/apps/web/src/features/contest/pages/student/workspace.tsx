@@ -10,7 +10,7 @@
 // 本页只读 face,不请求 full,也不展示任何判题细节。
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
+import { useNavigate, useParams } from 'react-router'
 import {
   History,
   LoaderCircle,

@@ -5,7 +5,7 @@
 
 import { useCallback, useEffect, useState } from 'react'
 import type { FormEvent } from 'react'
-import { useLocation, useNavigate } from 'react-router-dom'
+import { useLocation, useNavigate } from 'react-router'
 import type { LoginResponse, TenantOption } from '@chaimir/api-client'
 import { SmsScene } from '@chaimir/api-client'
 import { api } from '../../../../app/api'
@@ -119,10 +119,10 @@ export function useLoginController(): LoginController {
   const completeLogin = useCallback(
     (response: LoginResponse) => {
       clearPendingTenantLogin()
-      persistLoginTokens(response, remember)
+      persistLoginTokens(response)
       navigate(loginEntryPath(response, returnPath), { replace: true })
     },
-    [navigate, remember, returnPath],
+    [navigate, returnPath],
   )
 
   /** enterTenantSelect 暂存凭证进入多学校选择(凭证仅存内存) */
@@ -164,14 +164,14 @@ export function useLoginController(): LoginController {
       setFormError(null)
       try {
         if (phoneMethod === 'password') {
-          const response = await api.identity.loginPhone({ phone: phone.trim(), password })
+          const response = await api.identity.loginPhone({ phone: phone.trim(), password, remember })
           if (response.need_select_tenant && response.tenants && response.tenants.length > 0) {
             enterTenantSelect(response.tenants, { type: 'phone', phone: phone.trim(), password })
             return
           }
           completeLogin(response)
         } else {
-          const response = await api.identity.loginSMS({ phone: phone.trim(), code: smsCode.trim() })
+          const response = await api.identity.loginSMS({ phone: phone.trim(), code: smsCode.trim(), remember })
           if (response.need_select_tenant && response.tenants && response.tenants.length > 0) {
             enterTenantSelect(response.tenants, { type: 'sms', phone: phone.trim(), code: smsCode.trim() })
             return
@@ -189,7 +189,7 @@ export function useLoginController(): LoginController {
         setSubmitting(false)
       }
     },
-    [completeLogin, enterTenantSelect, password, phone, phoneMethod, setError, smsCode],
+    [completeLogin, enterTenantSelect, password, phone, phoneMethod, remember, setError, smsCode],
   )
 
   /** submitAccount 学校代号 + 学号/工号登录(学校已定,不存在选校分支) */
@@ -208,6 +208,7 @@ export function useLoginController(): LoginController {
           tenant_code: tenantCode.trim(),
           no: accountNo.trim(),
           password,
+          remember,
         })
         completeLogin(response)
       } catch (loginError) {
@@ -216,7 +217,7 @@ export function useLoginController(): LoginController {
         setSubmitting(false)
       }
     },
-    [accountNo, completeLogin, password, setError, tenantCode],
+    [accountNo, completeLogin, password, remember, setError, tenantCode],
   )
 
   /** submitSso 进入该学校的统一认证中转页(认证由学校侧完成) */

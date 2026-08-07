@@ -8,6 +8,7 @@ import (
 	"chaimir/internal/modules/grade/internal/sqlcgen"
 	"chaimir/internal/platform/ids"
 	"chaimir/internal/platform/jsonx"
+	"chaimir/internal/platform/pagex"
 	"chaimir/internal/platform/pgtypex"
 	"chaimir/internal/platform/timex"
 	"chaimir/pkg/apperr"
@@ -141,7 +142,8 @@ func (t *txStore) CreateGradeReview(ctx context.Context, id, tenantID, submitter
 
 // ListGradeReviews 查询成绩审核分页列表和总数。
 func (t *txStore) ListGradeReviews(ctx context.Context, status int16, page, size int) ([]ReviewDTO, int64, error) {
-	rows, err := t.q.ListGradeReviews(ctx, sqlcgen.ListGradeReviewsParams{Status: status, PageOffset: int32((page - 1) * size), PageLimit: int32(size)})
+	limit, offset := pagex.LimitOffset(page, size)
+	rows, err := t.q.ListGradeReviews(ctx, sqlcgen.ListGradeReviewsParams{Status: status, PageOffset: offset, PageLimit: limit})
 	if err != nil {
 		return nil, 0, err
 	}
@@ -158,7 +160,8 @@ func (t *txStore) ListGradeReviews(ctx context.Context, status int16, page, size
 
 // ListOwnGradeReviews 查询指定提交人的成绩审核分页列表。
 func (t *txStore) ListOwnGradeReviews(ctx context.Context, submitterID int64, status int16, page, size int) ([]ReviewDTO, int64, error) {
-	rows, err := t.q.ListOwnGradeReviews(ctx, sqlcgen.ListOwnGradeReviewsParams{SubmitterID: submitterID, Status: status, PageOffset: int32((page - 1) * size), PageLimit: int32(size)})
+	limit, offset := pagex.LimitOffset(page, size)
+	rows, err := t.q.ListOwnGradeReviews(ctx, sqlcgen.ListOwnGradeReviewsParams{SubmitterID: submitterID, Status: status, PageOffset: offset, PageLimit: limit})
 	if err != nil {
 		return nil, 0, err
 	}
@@ -345,7 +348,8 @@ func (t *txStore) GetGradeAppeal(ctx context.Context, id int64) (AppealDTO, erro
 
 // ListGradeAppeals 查询成绩申诉分页列表和总数。
 func (t *txStore) ListGradeAppeals(ctx context.Context, status int16, page, size int) ([]AppealDTO, int64, error) {
-	rows, err := t.q.ListGradeAppeals(ctx, sqlcgen.ListGradeAppealsParams{Status: status, PageOffset: int32((page - 1) * size), PageLimit: int32(size)})
+	limit, offset := pagex.LimitOffset(page, size)
+	rows, err := t.q.ListGradeAppeals(ctx, sqlcgen.ListGradeAppealsParams{Status: status, PageOffset: offset, PageLimit: limit})
 	if err != nil {
 		return nil, 0, err
 	}
@@ -397,7 +401,8 @@ func (t *txStore) CreateAcademicWarning(ctx context.Context, id, tenantID, stude
 
 // ListAcademicWarnings 查询学业预警分页列表和总数。
 func (t *txStore) ListAcademicWarnings(ctx context.Context, studentID int64, page, size int) ([]WarningDTO, int64, error) {
-	rows, err := t.q.ListAcademicWarnings(ctx, sqlcgen.ListAcademicWarningsParams{StudentID: studentID, PageOffset: int32((page - 1) * size), PageLimit: int32(size)})
+	limit, offset := pagex.LimitOffset(page, size)
+	rows, err := t.q.ListAcademicWarnings(ctx, sqlcgen.ListAcademicWarningsParams{StudentID: studentID, PageOffset: offset, PageLimit: limit})
 	if err != nil {
 		return nil, 0, err
 	}
@@ -441,7 +446,8 @@ func (t *txStore) GetTranscriptRecord(ctx context.Context, id int64) (Transcript
 
 // ListTranscriptRecords 查询成绩单记录。
 func (t *txStore) ListTranscriptRecords(ctx context.Context, studentID int64, page, size int) ([]TranscriptDTO, error) {
-	rows, err := t.q.ListTranscriptRecords(ctx, sqlcgen.ListTranscriptRecordsParams{StudentID: studentID, PageOffset: int32((page - 1) * size), PageLimit: int32(size)})
+	limit, offset := pagex.LimitOffset(page, size)
+	rows, err := t.q.ListTranscriptRecords(ctx, sqlcgen.ListTranscriptRecordsParams{StudentID: studentID, PageOffset: offset, PageLimit: limit})
 	if err != nil {
 		return nil, err
 	}

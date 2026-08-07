@@ -2,7 +2,7 @@
 // 墨色底层 + 两团呼吸氛围光(玉冷/朱砂暖对置)+ 左密右疏点阵 + 横贯全宽的页脚。
 // 子页面(登录/多校选择/强制改密)直接生长在底层上,无卡片壳。
 
-import { Outlet } from 'react-router-dom'
+import { Outlet } from 'react-router'
 
 /**
  * AuthLayout 提供认证域的底层氛围与页脚;内容经 Outlet 渲染。

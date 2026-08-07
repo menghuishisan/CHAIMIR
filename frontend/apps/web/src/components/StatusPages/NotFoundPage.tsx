@@ -1,6 +1,6 @@
 // NotFoundPage(全局 404):角色区之外的未知路径落点(角色区内另有保留导航壳的 404 页)。
 
-import { useNavigate } from 'react-router-dom'
+import { useNavigate } from 'react-router'
 import { Compass } from 'lucide-react'
 import { Button } from '@chaimir/ui'
 import { AppStatusScreen } from '../AppStatusScreen'

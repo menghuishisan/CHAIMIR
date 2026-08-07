@@ -12,7 +12,7 @@
 //   实例本身才是权威,推送只是「该刷新了」的信号,不用推送内容改本地状态。
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { useParams, useSearchParams } from 'react-router-dom'
+import { useParams, useSearchParams } from 'react-router'
 import {
   FlaskConical,
   LoaderCircle,

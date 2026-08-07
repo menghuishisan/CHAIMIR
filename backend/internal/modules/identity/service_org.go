@@ -22,6 +22,7 @@ import (
 	"chaimir/pkg/logging"
 
 	"chaimir/internal/platform/ids"
+	"chaimir/internal/platform/intx"
 	"github.com/xuri/excelize/v2"
 )
 
@@ -436,13 +437,17 @@ func (s *Service) CommitOrgImportByAdmin(ctx context.Context, req ImportCommitRe
 		if err != nil {
 			return err
 		}
+		total, totalOK := intx.Int32(len(rows))
+		if !totalOK {
+			return apperr.ErrIdentityImportContentInvalid
+		}
 		created, err := tx.CreateImportBatch(ctx, CreateImportBatchInput{
 			ID:          s.ids.Generate(),
 			TenantID:    id.TenantID,
 			OperatorID:  id.AccountID,
 			TargetType:  ImportTargetOrg,
 			FileName:    preview.FileName,
-			Total:       int32(len(rows)),
+			Total:       total,
 			Success:     success,
 			Failed:      failed,
 			ErrorDetail: errorDetail,
@@ -640,9 +645,10 @@ func parseOrgImportRecords(records [][]string) ([]orgImportRow, []ImportRowResul
 					result.Error = "班级必须填写入学年份"
 				} else {
 					year, err := strconv.ParseInt(strings.TrimSpace(record[3]), 10, 16)
-					row.EnrollmentYear = int16(year)
-					if err != nil || row.EnrollmentYear <= 0 {
+					if err != nil || year <= 0 {
 						result.Error = "入学年份不正确"
+					} else {
+						row.EnrollmentYear = int16(year)
 					}
 				}
 			}

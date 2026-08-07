@@ -3,8 +3,10 @@ package sim
 
 import (
 	"context"
+	"math"
 	"strings"
 
+	"chaimir/internal/platform/intx"
 	"chaimir/internal/platform/ws"
 	"chaimir/pkg/apperr"
 )
@@ -167,7 +169,10 @@ func (c *backendValidatedConn) SendFrame(message BackendStreamMessage) error {
 // persist 把隔离执行的用户操作写入同一条 sim_action_log 序列。
 func (c *backendValidatedConn) persist(event BackendEvent) (Action, error) {
 	var out Action
-	atTick := int32(c.tick)
+	atTick, tickOK := intx.Int64ToInt32(c.tick)
+	if !tickOK || atTick < 0 {
+		return Action{}, apperr.ErrSimActionSeqInvalid
+	}
 	err := c.svc.store.TenantTx(c.ctx, c.tenantID, func(ctx context.Context, tx TxStore) error {
 		session, err := tx.GetSession(ctx, c.tenantID, c.session.ID)
 		if err != nil {
@@ -182,6 +187,9 @@ func (c *backendValidatedConn) persist(event BackendEvent) (Action, error) {
 		}
 		seq := int32(1)
 		if !isNoRows(err) {
+			if last.Seq == math.MaxInt32 {
+				return apperr.ErrSimActionSeqInvalid
+			}
 			seq = last.Seq + 1
 		}
 		created, err := tx.CreateAction(ctx, Action{ID: c.svc.ids.Generate(), TenantID: c.tenantID, SessionID: c.session.ID, Seq: seq, AtTick: atTick, EventType: strings.TrimSpace(event.EventType), Payload: event.Payload})

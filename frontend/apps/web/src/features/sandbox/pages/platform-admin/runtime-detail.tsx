@@ -10,7 +10,7 @@
 // 后端没有单条运行时读取接口,故从运行时列表里定位这一条。
 
 import { useCallback, useMemo, useState } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
+import { useNavigate, useParams } from 'react-router'
 import {
   CircleSlash,
   CloudDownload,

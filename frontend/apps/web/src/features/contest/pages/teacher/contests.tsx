@@ -3,7 +3,7 @@
 // 归档会生成结果快照且不可逆,故走确认;其余流转也各自确认,避免误点改变学生可见性。
 
 import { useCallback, useMemo, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate } from 'react-router'
 import { Bug, Flag, Lock, MoreVertical, Play, Plus, Snowflake, Trophy } from 'lucide-react'
 import { ContestStatus, type Contest } from '@chaimir/api-client'
 import {

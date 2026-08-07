@@ -1,0 +1,49 @@
+# 独立沙箱 RBAC 预配器 Deployment:只负责给受平台所有权标签保护的动态命名空间授予最小 RoleBinding。
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: chaimir-sandbox-rbac-provisioner
+  namespace: chaimir-system
+  labels:
+    app.kubernetes.io/name: chaimir-sandbox-rbac-provisioner
+    app.kubernetes.io/component: rbac-provisioner
+    app.kubernetes.io/part-of: chaimir
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: chaimir-sandbox-rbac-provisioner
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: chaimir-sandbox-rbac-provisioner
+        app.kubernetes.io/component: rbac-provisioner
+        app.kubernetes.io/part-of: chaimir
+    spec:
+      serviceAccountName: chaimir-sandbox-rbac-provisioner
+      automountServiceAccountToken: true
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: provisioner
+          image: chaimir/backend:placeholder
+          command: ["/app/provisioner"]
+          envFrom:
+            - configMapRef:
+                name: chaimir-config
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 250m
+              memory: 256Mi

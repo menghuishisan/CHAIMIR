@@ -210,8 +210,8 @@ func (s *Service) LoginSMS(ctx context.Context, req LoginSMSRequest, device, ip 
 }
 
 // RefreshToken 校验并轮转 Refresh Token,旧 token 立即失效。
-func (s *Service) RefreshToken(ctx context.Context, req RefreshRequest, device, ip string) (LoginResponse, error) {
-	hash, err := s.hashSecret(strings.TrimSpace(req.RefreshToken))
+func (s *Service) RefreshToken(ctx context.Context, refreshToken, device, ip string) (LoginResponse, error) {
+	hash, err := s.hashSecret(strings.TrimSpace(refreshToken))
 	if err != nil {
 		return LoginResponse{}, apperr.ErrInternal.WithCause(err)
 	}

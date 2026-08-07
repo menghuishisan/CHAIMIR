@@ -57,14 +57,22 @@ patches:
       - op: replace
         path: /spec/rules/0/host
         value: www.chaimir.io
+      - op: replace
+        path: /spec/tls/0/hosts/0
+        value: www.chaimir.io
       - op: add
         path: /metadata/annotations/cert-manager.io~1cluster-issuer
         value: chaimir-prod-issuer
-      - op: add
-        path: /spec/tls
-        value:
-          - hosts: ["www.chaimir.io"]
-            secretName: chaimir-tls
+  - target:
+      kind: Ingress
+      name: chaimir-public-deny
+    patch: |-
+      - op: replace
+        path: /spec/rules/0/host
+        value: www.chaimir.io
+      - op: replace
+        path: /spec/tls/0/hosts/0
+        value: www.chaimir.io
   # prod-saas 密钥 Store 与远端键前缀。ExternalSecret 键集合统一维护在 deploy/config。
   - target:
       kind: ExternalSecret

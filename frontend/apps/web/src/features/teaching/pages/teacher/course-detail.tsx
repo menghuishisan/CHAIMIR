@@ -2,7 +2,7 @@
 // 一页承载课程编辑入口、章节课时、选课成员、作业管理、讨论公告与课程成绩六件事 ——
 // 它们都以同一门课程为上下文,拆成六个侧栏项会让教师在页面间来回跳。
 
-import { useNavigate, useParams } from 'react-router-dom'
+import { useNavigate, useParams } from 'react-router'
 import {
   Book,
   ClipboardList,

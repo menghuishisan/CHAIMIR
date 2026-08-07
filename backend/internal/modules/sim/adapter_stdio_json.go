@@ -323,6 +323,9 @@ func (a *StdioJSONAdapter) prepareSession(ctx context.Context, session SessionWi
 	if _, err := a.k8s.Clientset().CoreV1().Namespaces().Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: namespace, Labels: namespaceLabels}}, metav1.CreateOptions{}); err != nil {
 		return fmt.Errorf("创建后端仿真会话命名空间失败: %w", err)
 	}
+	if err := platformk8s.WaitForSandboxBackendRBAC(ctx, a.k8s.Clientset(), namespace, platformk8s.SandboxBackendServiceAccountNamespace, platformk8s.SandboxBackendServiceAccountName, time.Duration(a.cfg.PodReadyTimeoutSeconds)*time.Second, time.Duration(a.sandbox.ReadyPollIntervalSeconds)*time.Second); err != nil {
+		return err
+	}
 	if err := a.k8s.SyncImagePullSecrets(ctx, a.sandbox.ControlNamespace, namespace, "sim", a.sandbox.ImagePullSecretNames); err != nil {
 		return err
 	}

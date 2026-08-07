@@ -8,7 +8,7 @@
 // 平台端只读:PATCH /tenant/config 走的是「当前租户」语义,平台账号没有当前租户。
 
 import { useCallback, useState } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
+import { useNavigate, useParams } from 'react-router'
 import {
   Building,
   Cpu,

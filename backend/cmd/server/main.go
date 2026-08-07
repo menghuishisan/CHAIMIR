@@ -68,6 +68,10 @@ func run() error {
 		Addr:              fmt.Sprintf("%s:%d", cfg.Server.Addr, cfg.Server.Port),
 		Handler:           router,
 		ReadHeaderTimeout: time.Duration(cfg.Server.ReadHeaderTimeoutSeconds) * time.Second,
+		ReadTimeout:       time.Duration(cfg.Server.ReadTimeoutSeconds) * time.Second,
+		WriteTimeout:      time.Duration(cfg.Server.WriteTimeoutSeconds) * time.Second,
+		IdleTimeout:       time.Duration(cfg.Server.IdleTimeoutSeconds) * time.Second,
+		MaxHeaderBytes:    cfg.Server.MaxHeaderBytes,
 	}
 	errCh := make(chan error, 1)
 	go func() {
@@ -192,12 +196,36 @@ func (i *infrastructure) close() {
 // newRouter 创建 HTTP 路由器、统一 trace 中间件和健康探针。
 func newRouter(cfg *config.Config, infra *infrastructure) *gin.Engine {
 	r := gin.New()
-	r.Use(response.TraceMiddleware(), httpx.AuditContextMiddleware(), response.RecoveryMiddleware())
+	r.Use(
+		response.TraceMiddleware(),
+		httpx.RequestBodyLimitMiddleware(cfg.Server.MaxJSONBodyBytes, maxMultipartBodyBytes(cfg)),
+		httpx.AuditContextMiddleware(),
+		response.RecoveryMiddleware(),
+	)
 	r.NoRoute(response.NoRoute)
 	r.GET("/-/healthz", livenessProbe)
 	r.GET("/api/healthz", livenessProbe)
 	r.GET("/-/readyz", readinessProbe(cfg, infra))
 	return r
+}
+
+// maxMultipartBodyBytes 返回所有已注册 multipart 路由允许的最大请求体。
+// 业务 handler 仍逐项校验自己的文件额度；此处只确保 Gin 解析前存在硬上限。
+func maxMultipartBodyBytes(cfg *config.Config) int64 {
+	limits := []int64{
+		cfg.Upload.ImportMaxBytes,
+		cfg.Upload.ContentAttachmentMaxBytes,
+		cfg.Upload.CourseMaterialMaxBytes,
+		cfg.Upload.SimBundleMaxBytes + cfg.Upload.SimBundleMetadataMaxBytes,
+	}
+	maxBytes := limits[0]
+	for _, limit := range limits[1:] {
+		if limit > maxBytes {
+			maxBytes = limit
+		}
+	}
+	// 为 multipart 边界和非文件字段预留固定且很小的开销，避免业务额度被编码开销误拒绝。
+	return maxBytes + 1<<20
 }
 
 // livenessProbe 回存活明文。探针消费者是 kubelet 与网关,不是终端用户,

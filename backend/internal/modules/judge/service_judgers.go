@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"chaimir/internal/contracts"
+	"chaimir/internal/platform/intx"
 	"chaimir/internal/platform/jsonx"
 	"chaimir/pkg/apperr"
 	"chaimir/pkg/chainassert"
@@ -48,7 +49,11 @@ func (s *Service) judgeOnchainAssertions(ctx context.Context, task JudgeTask, sa
 			return JudgeExecutionResult{}, err
 		}
 		if action != nil {
-			action.Seq = int32(seq + 1)
+			sequence, ok := intx.Int32(seq + 1)
+			if !ok {
+				return JudgeExecutionResult{}, apperr.ErrJudgerConfigInvalid
+			}
+			action.Seq = sequence
 			actions = append(actions, *action)
 		}
 	}

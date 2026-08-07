@@ -11,7 +11,7 @@
 // 本页承载客观题与主观题作答;编程题在此说明去处,不在页面里让用户手填对象存储键。
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
+import { useNavigate, useParams } from 'react-router'
 import { ClipboardList, FileText, Send } from 'lucide-react'
 import { GradingMode, type AssignmentDetail, type AssignmentItem } from '@chaimir/api-client'
 import {

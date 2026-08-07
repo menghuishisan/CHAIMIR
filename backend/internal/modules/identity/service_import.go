@@ -23,6 +23,7 @@ import (
 	"chaimir/pkg/logging"
 
 	"chaimir/internal/platform/ids"
+	"chaimir/internal/platform/intx"
 	"github.com/jackc/pgx/v5"
 	"github.com/xuri/excelize/v2"
 )
@@ -275,13 +276,17 @@ func (s *Service) CommitAccountImport(ctx context.Context, req ImportCommitReque
 		if err != nil {
 			return err
 		}
+		total, totalOK := intx.Int32(len(rows))
+		if !totalOK {
+			return apperr.ErrIdentityImportContentInvalid
+		}
 		b, err := tx.CreateImportBatch(ctx, CreateImportBatchInput{
 			ID:          s.ids.Generate(),
 			TenantID:    id.TenantID,
 			OperatorID:  id.AccountID,
 			TargetType:  preview.TargetType,
 			FileName:    preview.FileName,
-			Total:       int32(len(rows)),
+			Total:       total,
 			Success:     success,
 			Failed:      failed,
 			ErrorDetail: errorDetail,

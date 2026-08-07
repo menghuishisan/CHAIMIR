@@ -175,7 +175,7 @@ func acceptanceImagesRoot() (string, error) {
 
 // readToolManifest 严格读取单个工具 manifest。
 func readToolManifest(path string) (toolManifest, error) {
-	raw, err := os.ReadFile(path)
+	raw, err := readSeedFile(path)
 	if err != nil {
 		return toolManifest{}, fmt.Errorf("读取工具 manifest 失败: %w", err)
 	}

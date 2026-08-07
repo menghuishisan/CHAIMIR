@@ -8,7 +8,7 @@
 // 不给裸 JSON 文本域;未登记的键原样保留不丢弃(平台侧可能写入其他开关)。
 
 import { useCallback, useMemo, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate } from 'react-router'
 import { CircleCheck, KeyRound, Settings, Shield } from 'lucide-react'
 import { AuthMode, DeployMode, type Tenant } from '@chaimir/api-client'
 import {

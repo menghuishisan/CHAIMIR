@@ -5,6 +5,7 @@ import (
 	"context"
 
 	"chaimir/internal/contracts"
+	"chaimir/internal/platform/intx"
 	"chaimir/internal/platform/pagex"
 	"chaimir/pkg/apperr"
 )
@@ -134,7 +135,11 @@ func (s *Service) buildPaperItems(ctx context.Context, tx TxStore, tenantID, pap
 			if item.Status != StatusPublished {
 				return nil, apperr.ErrContentVersionNotPublished
 			}
-			items = append(items, PaperItem{ID: s.ids.Generate(), TenantID: tenantID, PaperID: paperID, ItemCode: input.Code, ItemVersion: input.Version, Score: input.Score, Seq: int32(i + 1)})
+			seq, ok := intx.Int32(i + 1)
+			if !ok || seq <= 0 {
+				return nil, apperr.ErrPaperGenerateFailed
+			}
+			items = append(items, PaperItem{ID: s.ids.Generate(), TenantID: tenantID, PaperID: paperID, ItemCode: input.Code, ItemVersion: input.Version, Score: input.Score, Seq: seq})
 		}
 		return tx.ReplacePaperItems(ctx, tenantID, paperID, items)
 	}
@@ -142,12 +147,17 @@ func (s *Service) buildPaperItems(ctx context.Context, tx TxStore, tenantID, pap
 	if err != nil {
 		return nil, apperr.ErrPaperGenerateFailed.WithCause(err)
 	}
-	if int32(len(picked)) < req.GenCriteria.Count {
+	pickedCount, ok := intx.Int32(len(picked))
+	if !ok || pickedCount < req.GenCriteria.Count {
 		return nil, apperr.ErrPaperPickNotEnough
 	}
 	items := make([]PaperItem, 0, len(picked))
 	for i, item := range picked {
-		items = append(items, PaperItem{ID: s.ids.Generate(), TenantID: tenantID, PaperID: paperID, ItemCode: item.Code, ItemVersion: item.Version, Score: req.GenCriteria.DefaultScore, Seq: int32(i + 1)})
+		seq, ok := intx.Int32(i + 1)
+		if !ok || seq <= 0 {
+			return nil, apperr.ErrPaperGenerateFailed
+		}
+		items = append(items, PaperItem{ID: s.ids.Generate(), TenantID: tenantID, PaperID: paperID, ItemCode: item.Code, ItemVersion: item.Version, Score: req.GenCriteria.DefaultScore, Seq: seq})
 	}
 	return tx.ReplacePaperItems(ctx, tenantID, paperID, items)
 }

@@ -8,7 +8,7 @@
 // 停用与到期的后果不同,故各自说明再确认。到期时间只在这条接口上可改。
 
 import { useCallback, useMemo, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate } from 'react-router'
 import { Building, CalendarClock, CircleSlash, Search, ShieldCheck } from 'lucide-react'
 import { DeployMode, TenantStatus, type Tenant } from '@chaimir/api-client'
 import {

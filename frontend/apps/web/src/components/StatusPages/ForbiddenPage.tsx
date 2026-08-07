@@ -2,7 +2,7 @@
 // 保留原 URL(便于返回/报障),提供回到本人首页与退出登录两条出路;
 // 绝不把角色不匹配误判为未登录(审查 S6 的根治点)。
 
-import { useNavigate } from 'react-router-dom'
+import { useNavigate } from 'react-router'
 import { ShieldX } from 'lucide-react'
 import type { UserRole } from '@chaimir/api-client'
 import { Button } from '@chaimir/ui'

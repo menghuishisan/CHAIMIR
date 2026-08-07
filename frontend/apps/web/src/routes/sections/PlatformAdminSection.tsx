@@ -7,7 +7,7 @@
 // 沉浸态(实验工作台/仿真推演/竞赛答题/对局回放)是学生侧能力,平台区不注册。
 
 import { lazy } from 'react'
-import { Navigate, Route, Routes } from 'react-router-dom'
+import { Navigate, Route, Routes } from 'react-router'
 import { AdminScope } from '@chaimir/api-client'
 import { MainLayout } from '../../layouts/main/MainLayout'
 import { RoleNotFoundPage } from '../../components/StatusPages'

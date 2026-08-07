@@ -11,6 +11,7 @@ const PHONE_PATTERN = /^1\d{10}$/
 
 /** 邮箱格式:只判「像不像邮箱」,能否收到由平台运营人员实际联系时确认 */
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+const MAX_EMAIL_LENGTH = 254
 
 /** 短信验证码的重发冷却秒数:与后端 identity 的发送频控口径一致 */
 const SMS_RESEND_SECONDS = 60
@@ -51,6 +52,7 @@ export function phoneError(value: string, label: string): string | null {
 export function emailError(value: string): string | null {
   const email = value.trim()
   if (!email) return '请输入联系邮箱'
+  if (email.length > MAX_EMAIL_LENGTH) return '邮箱格式不正确,请检查后重试'
   if (!EMAIL_PATTERN.test(email)) return '邮箱格式不正确,请检查后重试'
   return null
 }

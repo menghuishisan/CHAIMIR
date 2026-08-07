@@ -4,7 +4,7 @@
 // 因此完成率放在课程详情页(见 docs/前端后端功能对齐清单.md §6.6)。
 
 import { useCallback, useId, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate } from 'react-router'
 import { BookOpen, GraduationCap, Layers, TicketCheck } from 'lucide-react'
 import { CourseStatus, type Course } from '@chaimir/api-client'
 import {

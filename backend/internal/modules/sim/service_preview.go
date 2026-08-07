@@ -16,6 +16,7 @@ import (
 	"log/slog"
 	"strings"
 
+	"chaimir/internal/platform/intx"
 	"chaimir/internal/platform/jsonx"
 	"chaimir/pkg/apperr"
 	"chaimir/pkg/logging"
@@ -27,9 +28,13 @@ import (
 // 单个包失败不阻断整批:一个包的缺陷不该让同批其他包一起卡住,失败结论会写回报告
 // 让作者看到原因。只有认领本身失败才向上返回,由 runner 重试。
 func (s *Service) RunPackagePreviewOnce(ctx context.Context) error {
+	batchSize, ok := intx.Int32(s.previewBatchSize)
+	if !ok || batchSize <= 0 {
+		return apperr.ErrSimPackageQueryFailed
+	}
 	var pending []Package
 	if err := s.store.PlatformTx(ctx, func(ctx context.Context, tx TxStore) error {
-		items, err := tx.ClaimPackagesForPreview(ctx, int32(s.previewBatchSize))
+		items, err := tx.ClaimPackagesForPreview(ctx, batchSize)
 		if err != nil {
 			return apperr.ErrSimPackageQueryFailed.WithCause(err)
 		}

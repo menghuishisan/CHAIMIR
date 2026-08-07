@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"time"
 
+	"chaimir/internal/platform/intx"
 	"chaimir/internal/platform/jsonx"
 	"chaimir/pkg/apperr"
 )
@@ -67,7 +68,11 @@ func (c execChainCapability) runJSON(ctx context.Context, sb Sandbox, runtime Ru
 func (c execChainCapability) commandTimeout(spec CapabilityCommandSpec) time.Duration {
 	seconds := spec.TimeoutSeconds
 	if seconds <= 0 {
-		seconds = int32(c.timeoutSeconds)
+		var ok bool
+		seconds, ok = intx.Int32(c.timeoutSeconds)
+		if !ok {
+			return 0
+		}
 	}
 	if seconds <= 0 {
 		seconds = 1

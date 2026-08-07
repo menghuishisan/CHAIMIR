@@ -30,7 +30,9 @@ LABEL org.opencontainers.image.title="sim/package-runner"
 LABEL org.opencontainers.image.description="Chaimir M4 extension simulation package runner"
 
 USER root
+# 运行器只执行 Node 入口,不需要 npm/npx;移除包管理器及其依赖,避免把构建期漏洞带入运行层。
 RUN apk upgrade --no-cache \
+    && rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx \
     && mkdir -p /opt/sim-runner /tmp/sim-bundle \
     && chown -R chaimir:chaimir /opt/sim-runner /tmp/sim-bundle
 

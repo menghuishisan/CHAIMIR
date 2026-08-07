@@ -8,7 +8,7 @@
 
 import { lazy } from 'react'
 import type { ReactNode } from 'react'
-import { Route } from 'react-router-dom'
+import { Route } from 'react-router'
 import { UserRole } from '@chaimir/api-client'
 import { RoleGuard } from '../components/RoleGuard'
 import { ROLE_ROUTES } from '../utils/roleRouting'

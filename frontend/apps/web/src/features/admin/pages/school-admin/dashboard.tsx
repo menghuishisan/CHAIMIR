@@ -8,7 +8,7 @@
 // 只呈现已登记的键 —— 未登记键不猜语义、不把内部键名抛到界面上。
 
 import { useMemo, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate } from 'react-router'
 import {
   Activity,
   Book,

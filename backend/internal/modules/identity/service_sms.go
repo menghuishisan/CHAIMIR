@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"chaimir/internal/platform/intx"
 	"chaimir/internal/platform/tenant"
 	"chaimir/internal/platform/timex"
 	"chaimir/pkg/apperr"
@@ -101,7 +102,11 @@ func (s *Service) verifySMSCodeInTx(ctx context.Context, tx TxStore, tenantID in
 	if row.Used || timex.Now().After(row.ExpireAt) {
 		return apperr.ErrIdentitySMSInvalid
 	}
-	if row.VerifyAttempts >= int16(s.cfg.SMSVerifyMaxAttempts) {
+	maxAttempts, ok := intx.Int16(s.cfg.SMSVerifyMaxAttempts)
+	if !ok || maxAttempts <= 0 {
+		return apperr.ErrInternal
+	}
+	if row.VerifyAttempts >= maxAttempts {
 		return apperr.ErrIdentitySMSAttemptsLimited
 	}
 	if !crypto.EqualHMAC(row.CodeHash, codeHash) {

@@ -3,7 +3,7 @@
 // 面板只在打开时拉取(关闭状态不发请求),点条目跳转对应链接并就地标记已读。
 
 import { useCallback, useEffect, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate } from 'react-router'
 import { Bell, Megaphone } from 'lucide-react'
 import type { Announcement, Notification } from '@chaimir/api-client'
 import {

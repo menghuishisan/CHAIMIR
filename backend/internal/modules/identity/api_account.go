@@ -7,6 +7,7 @@ import (
 	"chaimir/internal/contracts"
 	"chaimir/internal/platform/auth"
 	"chaimir/internal/platform/httpx"
+	"chaimir/internal/platform/pagex"
 	"chaimir/internal/platform/upload"
 	"chaimir/pkg/apperr"
 
@@ -303,16 +304,16 @@ func (a accountAPI) importBatches(c *gin.Context) {
 // bindAccountQuery 解析账号列表过滤和分页查询参数。
 func bindAccountQuery(c *gin.Context) (AccountQuery, bool) {
 	query := AccountQuery{}
-	status, ok := httpx.QueryInt(c, "status", httpx.QueryIntRule{BitSize: 16, Min: 0})
+	status, ok := httpx.QueryInt16(c, "status", httpx.QueryIntRule{Min: 0})
 	if !ok {
 		return AccountQuery{}, false
 	}
-	query.Status = int16(status)
-	baseIdentity, ok := httpx.QueryInt(c, "role", httpx.QueryIntRule{BitSize: 16, Min: 0})
+	query.Status = status
+	baseIdentity, ok := httpx.QueryInt16(c, "role", httpx.QueryIntRule{Min: 0})
 	if !ok {
 		return AccountQuery{}, false
 	}
-	query.BaseIdentity = int16(baseIdentity)
+	query.BaseIdentity = baseIdentity
 	classID, ok := httpx.QueryInt(c, "class_id", httpx.QueryIntRule{BitSize: 64, Min: 0})
 	if !ok {
 		return AccountQuery{}, false
@@ -322,8 +323,7 @@ func bindAccountQuery(c *gin.Context) (AccountQuery, bool) {
 	if !ok {
 		return AccountQuery{}, false
 	}
-	query.Page = int32(page)
-	query.Size = int32(size)
+	query.Page, query.Size = pagex.Int32(page, size)
 	query.Keyword = c.Query("keyword")
 	return query, true
 }

@@ -365,7 +365,7 @@ func itemListFilterFromQuery(c *gin.Context) (ItemListFilter, bool) {
 	if !ok {
 		return ItemListFilter{}, false
 	}
-	typeValue, ok := httpx.QueryInt(c, "type", httpx.QueryIntRule{Default: 0, Min: 0, Max: 3, HasMax: true})
+	typeValue, ok := httpx.QueryInt16(c, "type", httpx.QueryIntRule{Default: 0, Min: 0, Max: 3, HasMax: true})
 	if !ok {
 		return ItemListFilter{}, false
 	}
@@ -373,15 +373,15 @@ func itemListFilterFromQuery(c *gin.Context) (ItemListFilter, bool) {
 	if !ok {
 		return ItemListFilter{}, false
 	}
-	difficulty, ok := httpx.QueryInt(c, "difficulty", httpx.QueryIntRule{Default: 0, Min: 0, Max: 4, HasMax: true})
+	difficulty, ok := httpx.QueryInt16(c, "difficulty", httpx.QueryIntRule{Default: 0, Min: 0, Max: 4, HasMax: true})
 	if !ok {
 		return ItemListFilter{}, false
 	}
-	visibility, ok := httpx.QueryInt(c, "visibility", httpx.QueryIntRule{Default: 0, Min: 0, Max: 3, HasMax: true})
+	visibility, ok := httpx.QueryInt16(c, "visibility", httpx.QueryIntRule{Default: 0, Min: 0, Max: 3, HasMax: true})
 	if !ok {
 		return ItemListFilter{}, false
 	}
-	status, ok := httpx.QueryInt(c, "status", httpx.QueryIntRule{Default: 0, Min: 0, Max: 3, HasMax: true})
+	status, ok := httpx.QueryInt16(c, "status", httpx.QueryIntRule{Default: 0, Min: 0, Max: 3, HasMax: true})
 	if !ok {
 		return ItemListFilter{}, false
 	}
@@ -389,7 +389,7 @@ func itemListFilterFromQuery(c *gin.Context) (ItemListFilter, bool) {
 	if !ok {
 		return ItemListFilter{}, false
 	}
-	return ItemListFilter{Type: int16(typeValue), CategoryID: category, Difficulty: int16(difficulty), Tag: c.Query("tag"), KnowledgePoint: c.Query("kp"), Keyword: c.Query("keyword"), Visibility: int16(visibility), Status: int16(status), AuthorID: authorID, Page: page, Size: size}, true
+	return ItemListFilter{Type: typeValue, CategoryID: category, Difficulty: difficulty, Tag: c.Query("tag"), KnowledgePoint: c.Query("kp"), Keyword: c.Query("keyword"), Visibility: visibility, Status: status, AuthorID: authorID, Page: page, Size: size}, true
 }
 
 // currentHTTPIdentity 从上下文读取租户账号身份。

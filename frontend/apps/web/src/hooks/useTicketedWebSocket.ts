@@ -42,7 +42,7 @@ export function useTicketedWebSocket(options: TicketedSocketOptions): TicketedSo
   const [status, setStatus] = useState<SocketStatus>('idle')
   const [error, setError] = useState<string>()
   const [attempt, setAttempt] = useState(0)
-  const socketRef = useRef<WebSocket>()
+  const socketRef = useRef<WebSocket | undefined>(undefined)
 
   // 回调放进 ref:换票是异步的,把回调列进 effect 依赖会让每次渲染都重连
   const handlersRef = useRef({ onMessage, onOpen })

@@ -333,7 +333,7 @@ function FilesPanel({ sandboxId, onSaved }: FilesPanelProps) {
   const [panelError, setPanelError] = useState<string>()
 
   const editorHost = useRef<HTMLDivElement>(null)
-  const editorRef = useRef<MountedEditor>()
+  const editorRef = useRef<MountedEditor | undefined>(undefined)
   // 编辑内容放进 ref:Monaco 的 onChange 回调在装配时固定,不能依赖闭包里的 state
   const contentRef = useRef('')
   contentRef.current = content
@@ -560,7 +560,7 @@ function FilesPanel({ sandboxId, onSaved }: FilesPanelProps) {
  */
 function TerminalPanel({ sandboxId }: { sandboxId: string }) {
   const host = useRef<HTMLDivElement>(null)
-  const terminalRef = useRef<MountedTerminal>()
+  const terminalRef = useRef<MountedTerminal | undefined>(undefined)
   const [ready, setReady] = useState(false)
 
   const url = useMemo(() => api.sandbox.getTerminalWsUrl(sandboxId), [sandboxId])

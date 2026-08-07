@@ -5,7 +5,7 @@
 #   /api       → 后端控制面与 M10 统一 WebSocket Hub(chaimir-backend,需 upgrade)
 # 注:/platform 不是独立路径,平台管理员前端为 SPA 由 / 提供;平台层关闭由
 #   PLATFORM_LAYER_ENABLED + 后端鉴权 + 前端路由控制(prod-school overlay)。
-# host 为占位,overlay 覆盖真实域名;TLS 经 overlay 注入证书(prod 真实证书)。
+# host 和 TLS Secret 名为统一占位,overlay 只替换域名;各环境分别提供同名 chaimir-tls Secret。
 ---
 apiVersion: networking.k8s.io/v1
 kind: Ingress
@@ -18,10 +18,17 @@ metadata:
     # WebSocket 长连接(/api/ws)需要更长读超时。
     nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
     nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+    # 与后端 multipart 最大额度对齐；具体路由还会在 Gin 解析前执行自身限制。
+    nginx.ingress.kubernetes.io/proxy-body-size: "501m"
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
 spec:
   ingressClassName: nginx
+  tls:
+    - hosts:
+        - chaimir
+      secretName: chaimir-tls
   rules:
-    - host: chaimir.local  # overlay 覆盖真实域名。
+    - host: chaimir # overlay 覆盖真实域名。
       http:
         paths:
           - path: /api
@@ -63,10 +70,15 @@ metadata:
     app.kubernetes.io/part-of: chaimir
   annotations:
     nginx.ingress.kubernetes.io/use-regex: "true"
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
 spec:
   ingressClassName: nginx
+  tls:
+    - hosts:
+        - chaimir
+      secretName: chaimir-tls
   rules:
-    - host: chaimir.local
+    - host: chaimir
       http:
         paths:
           - path: /api/readyz

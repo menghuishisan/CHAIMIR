@@ -8,7 +8,7 @@
 // 退出目标必须显式声明:相对跳转(`..`)在嵌套路由下会落到角色区之外并被登录守卫拦回登录页,
 // 因此每条沉浸路由都要登记它退回的日常页,且登记的必须是真实存在的路由。
 
-import { matchPath } from 'react-router-dom'
+import { matchPath } from 'react-router'
 
 export interface ImmersiveRouteConfig {
   /** 完整路径模式(含角色前缀) */

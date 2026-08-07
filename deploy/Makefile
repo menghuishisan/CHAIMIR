@@ -15,6 +15,8 @@ SUPPLY_CHAIN_SECRET_FILE := config/supply-chain.secret.env
 SUPPLY_CHAIN_SECRET_EXAMPLE := config/supply-chain.secret.env.example
 SUPPLY_CHAIN_COMPOSE := image-supply-chain.compose.yaml
 SUPPLY_CHAIN_PROJECT := chaimir-supply-chain
+TLS_DIR := config/chaimir-tls
+TLS_SECRET := chaimir-tls
 INGRESS_NGINX_VERSION := controller-v1.11.3
 METRICS_SERVER_VERSION := v0.8.1
 POLICY_CONTROLLER_VERSION := 0.10.6
@@ -31,8 +33,8 @@ help: ## 显示可用目标
 
 # ---- 一键起步 ----
 .PHONY: dev-up
-dev-up: context-check gvisor-up-local ingress-up metrics-up-local policy-controller-up gen-secret middleware-wait apply-dev migrate ## 使用当前 K8s context 拉起完整本地部署(中间件+应用+迁移)
-	@echo "本地环境就绪。前端: http://chaimir.local (需将 chaimir.local 指向 127.0.0.1)"
+dev-up: context-check gvisor-up-local ingress-up metrics-up-local policy-controller-up gen-secret tls middleware-wait apply-dev migrate ## 使用当前 K8s context 拉起完整部署(中间件+应用+迁移)
+	@echo "环境就绪。前端: https://chaimir (需将 chaimir 指向 127.0.0.1 并信任 config/chaimir-tls/tls.crt)"
 
 .PHONY: dev-down
 dev-down: ## 删除当前 K8s context 中的 Chaimir 本地资源(不删除集群)
@@ -144,8 +146,24 @@ supply-chain-secret-check: ## 校验供应链专用密钥文件存在,不注入�
 
 # ---- 应用部署 ----
 .PHONY: apply-dev
-apply-dev: gen-secret ## apply local-dev overlay(命名空间/中间件/应用)
+apply-dev: gen-secret tls ## 应用 local-dev overlay(命名空间/中间件/应用)
 	kubectl kustomize --load-restrictor=LoadRestrictionsNone $(OVERLAY) | kubectl apply -f -
+
+.PHONY: tls
+tls: ## 使用持久化 HTTPS 证书并写入当前集群的 TLS Secret
+	@set -euo pipefail; \
+	command -v openssl >/dev/null 2>&1 || { echo "缺少 openssl,无法生成 HTTPS 证书"; exit 1; }; \
+	mkdir -p "$(TLS_DIR)"; \
+	if [ ! -s "$(TLS_DIR)/tls.key" ] || [ ! -s "$(TLS_DIR)/tls.crt" ] || ! openssl x509 -in "$(TLS_DIR)/tls.crt" -checkend 86400 -noout >/dev/null 2>&1; then \
+		openssl req -x509 -nodes -newkey rsa:2048 -days 825 \
+			-keyout "$(TLS_DIR)/tls.key" -out "$(TLS_DIR)/tls.crt" \
+			-subj "/CN=chaimir" \
+			-addext "subjectAltName=DNS:chaimir" >/dev/null 2>&1; \
+	fi; \
+	kubectl create namespace chaimir-system --dry-run=client -o yaml | kubectl apply -f -; \
+	kubectl -n chaimir-system create secret tls "$(TLS_SECRET)" \
+		--cert="$(TLS_DIR)/tls.crt" --key="$(TLS_DIR)/tls.key" \
+		--dry-run=client -o yaml | kubectl apply -f -
 
 .PHONY: middleware-wait
 middleware-wait: apply-dev ## 等待中间件就绪(迁移前置)

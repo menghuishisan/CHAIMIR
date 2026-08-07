@@ -3,14 +3,13 @@
 // 校验通过 → 经 SessionContext 下发账号供壳层与页面复用。
 
 import React from 'react'
-import { Navigate, Outlet, useLocation } from 'react-router-dom'
+import { Navigate, Outlet } from 'react-router'
 import { LoaderCircle, ShieldAlert } from 'lucide-react'
 import type { UserRole } from '@chaimir/api-client'
 import { Button } from '@chaimir/ui'
 import { api } from '../../app/api'
 import { useAsyncResource } from '../../hooks'
-import { getStoredAccessToken, isPasswordChangeRequired } from '../../utils/authSession'
-import { roleRouteForRoles } from '../../utils/roleRouting'
+import { isPasswordChangeRequired } from '../../utils/authSession'
 import { AppStatusScreen } from '../AppStatusScreen'
 import { ForbiddenPage } from '../StatusPages'
 import { SessionContext } from './session'
@@ -20,32 +19,13 @@ export interface RoleGuardProps {
 }
 
 /**
- * loginPathFor 取本区对应的登录入口:平台管理区回平台通道,学校侧回学校登录页。
- * 统一走 ROLE_ROUTES 契约,避免各处硬编码 '/auth/login' 把超管踢到学校入口。
- */
-function loginPathFor(allowedRoles: UserRole[]): string {
-  const route = roleRouteForRoles(allowedRoles)
-  if (!route) {
-    throw new Error(`RoleGuard 收到未登记的角色: ${allowedRoles.join(',')}`)
-  }
-  return route.loginPath
-}
-
-/**
- * RoleGuard 先执行本地拦截(改密要求/无令牌),再进入服务端会话校验。
+ * RoleGuard 只执行本地改密拦截，认证状态统一由 /me 与 HttpOnly refresh cookie 恢复。
  */
 export const RoleGuard: React.FC<RoleGuardProps> = ({ allowedRoles }) => {
-  const location = useLocation()
-
   // 服务端要求改密的账号先完成改密,再进入任何受保护页面
   if (isPasswordChangeRequired()) {
     return <Navigate to="/auth/change-pwd" replace />
   }
-  // 无令牌直接回登录页,免一次必然 401 的请求往返
-  if (!getStoredAccessToken()) {
-    return <Navigate to={loginPathFor(allowedRoles)} replace state={{ from: location.pathname }} />
-  }
-
   return <VerifiedRoleGuard allowedRoles={allowedRoles} />
 }
 

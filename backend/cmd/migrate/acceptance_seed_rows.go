@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -267,12 +266,16 @@ type acceptanceImageUnitManifest struct {
 
 // acceptanceImageUnitManifestFor 严格读取指定镜像单元 manifest,并校验目录分类与镜像名前缀一致。
 func acceptanceImageUnitManifestFor(image, category string) (acceptanceImageUnitManifest, error) {
+	cleanImage := filepath.ToSlash(filepath.Clean(filepath.FromSlash(image)))
+	if image == "" || cleanImage != image || strings.Contains(image, "\\") || strings.HasPrefix(image, "/") {
+		return acceptanceImageUnitManifest{}, fmt.Errorf("镜像路径非法: %s", image)
+	}
 	root, err := acceptanceImagesRoot()
 	if err != nil {
 		return acceptanceImageUnitManifest{}, err
 	}
 	path := filepath.Join(root, filepath.FromSlash(image), "manifest.yaml")
-	raw, err := os.ReadFile(path)
+	raw, err := readSeedFile(path)
 	if err != nil {
 		return acceptanceImageUnitManifest{}, fmt.Errorf("读取镜像 manifest 失败 %s: %w", image, err)
 	}

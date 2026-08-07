@@ -8,7 +8,7 @@
 // 故从 teacher 组的列表里定位 —— 与实验编排向导同一做法。
 
 import { useMemo, useState } from 'react'
-import { useParams } from 'react-router-dom'
+import { useParams } from 'react-router'
 import {
   Archive,
   ListOrdered,

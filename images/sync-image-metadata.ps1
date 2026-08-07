@@ -287,7 +287,9 @@ function Update-ImageAttestations {
         }
     }
     $attestations = @($byLogical.Values | Sort-Object image_url)
-    $lines[$keyIndex] = "$Key=$(ConvertTo-Json -InputObject $attestations -Compress -Depth 8)"
+    # 显式转换为数组再序列化，确保单项和多项结果都保持 JSON 数组。
+    $json = ConvertTo-Json -InputObject ([array]$attestations) -Compress -Depth 8
+    $lines[$keyIndex] = "$Key=$json"
     Write-TextLinesPreservingEncoding -Path $Path -Lines $lines
 }
 

@@ -6,7 +6,7 @@
 // 登记表由挂载方传入而不是壳层内置:学生区四条沉浸路径要随学生区块下载,
 // 不能因为公开深链需要本壳而被带进入口包(铁律 2)。退出目标由登记显式给出(不用 `..`,S1)。
 
-import { Outlet, useLocation, useNavigate } from 'react-router-dom'
+import { Outlet, useLocation, useNavigate } from 'react-router'
 import { RouteErrorBoundary } from '../../components/RouteErrorBoundary'
 import { immersiveRouteForPath, type ImmersiveRouteConfig } from './immersiveRoutes'
 import { ImmersiveContext } from './context'

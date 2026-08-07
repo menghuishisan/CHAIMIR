@@ -7,7 +7,7 @@
 // 后端 GET /platform/applications 回全量列表(不分页),故筛选与统计在本页内完成。
 
 import { useMemo, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate } from 'react-router'
 import { CircleCheck, CircleX, Inbox, Search } from 'lucide-react'
 import { ApplicationStatus, type TenantApplication } from '@chaimir/api-client'
 import {

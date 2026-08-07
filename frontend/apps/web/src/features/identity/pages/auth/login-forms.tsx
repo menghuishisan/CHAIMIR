@@ -4,7 +4,7 @@
 // 页尾三条次级公共入口(统一认证 / 激活码 / 入驻申请)随主要方式一同出现,统一认证页自身不再重复。
 
 import { useId } from 'react'
-import { Link } from 'react-router-dom'
+import { Link } from 'react-router'
 import { ArrowLeft, IdCard } from 'lucide-react'
 import { Checkbox, cn } from '@chaimir/ui'
 import { platformLayerEnabled } from '../../../../app/config'

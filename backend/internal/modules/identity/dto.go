@@ -10,24 +10,28 @@ import (
 type LoginPlatformRequest struct {
 	Username string `json:"username"`
 	Password string `json:"password"`
+	Remember bool   `json:"remember"`
 }
 
 type LoginPhoneRequest struct {
 	Phone    string `json:"phone"`
 	Password string `json:"password"`
 	TenantID ids.ID `json:"tenant_id"`
+	Remember bool   `json:"remember"`
 }
 
 type LoginNoRequest struct {
 	TenantCode string `json:"tenant_code"`
 	No         string `json:"no"`
 	Password   string `json:"password"`
+	Remember   bool   `json:"remember"`
 }
 
 type LoginSMSRequest struct {
 	Phone    string `json:"phone"`
 	Code     string `json:"code"`
 	TenantID ids.ID `json:"tenant_id"`
+	Remember bool   `json:"remember"`
 }
 
 type SendSMSRequest struct {
@@ -36,9 +40,7 @@ type SendSMSRequest struct {
 	TenantID ids.ID `json:"tenant_id"`
 }
 
-type RefreshRequest struct {
-	RefreshToken string `json:"refresh_token"`
-}
+type RefreshRequest struct{}
 
 type WebSocketTicketRequest struct {
 	Path string `json:"path"`
@@ -63,7 +65,7 @@ type ActivateRequest struct {
 
 type LoginResponse struct {
 	AccessToken      string            `json:"access_token,omitempty"`
-	RefreshToken     string            `json:"refresh_token,omitempty"`
+	RefreshToken     string            `json:"-"`
 	MustChangePwd    bool              `json:"must_change_pwd,omitempty"`
 	NeedSelectTenant bool              `json:"need_select_tenant,omitempty"`
 	Tenants          []TenantOptionDTO `json:"tenants,omitempty"`

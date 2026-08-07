@@ -59,6 +59,7 @@ type Manager struct {
 	signingKey     []byte
 	hmacKey        []byte
 	accessTTL      time.Duration
+	refreshTTL     time.Duration
 	issuer         string
 	serviceMaxSkew time.Duration
 	sessions       SessionValidator
@@ -70,6 +71,7 @@ func NewManager(cfg config.AuthConfig) *Manager {
 		signingKey:     []byte(cfg.JWTSigningKey),
 		hmacKey:        []byte(cfg.HMACKey),
 		accessTTL:      time.Duration(cfg.AccessTTLMin) * time.Minute,
+		refreshTTL:     time.Duration(cfg.RefreshTTLDay) * 24 * time.Hour,
 		issuer:         cfg.JWTIssuer,
 		serviceMaxSkew: time.Duration(cfg.ServiceAuthMaxSkewSeconds) * time.Second,
 	}

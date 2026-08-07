@@ -12,6 +12,7 @@ resources:
   - namespaces/namespaces.yaml
   - rbac/backend-sa.yaml
   - backend/deployment.yaml
+  - backend/rbac-provisioner-deployment.yaml
   - frontend/deployment.yaml
   - migrate/migrate-job.yaml
   - ingress/ingress.yaml

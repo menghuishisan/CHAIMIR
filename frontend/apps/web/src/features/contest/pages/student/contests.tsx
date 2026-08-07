@@ -4,7 +4,7 @@
 // team_id 的接口(对齐清单 §3.1),没有独立的「我的报名」接口。
 
 import { useMemo } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate } from 'react-router'
 import { Swords, Trophy, UserCheck } from 'lucide-react'
 import { ContestStatus, type Contest, type ContestRecord } from '@chaimir/api-client'
 import {

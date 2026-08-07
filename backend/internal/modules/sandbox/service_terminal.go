@@ -9,6 +9,7 @@ import (
 	"io"
 	"strings"
 
+	"chaimir/internal/platform/intx"
 	"chaimir/internal/platform/workload"
 	"chaimir/pkg/apperr"
 	k8sexec "k8s.io/client-go/util/exec"
@@ -113,7 +114,11 @@ func (s *Service) RunCommandToolForOwner(ctx context.Context, tenantID, accountI
 	if !commandToolCommandAllowed(tool.ResourceSpec.CommandPolicy, req.Command[0]) {
 		return ToolRunResponse{}, apperr.ErrSandboxToolRunRequestInvalid
 	}
-	timeoutSec := commandToolTimeoutSeconds(tool.ResourceSpec.CommandPolicy, req.TimeoutSec, int32(s.cfg.ExecTimeoutSeconds))
+	defaultTimeout, ok := intx.Int32(s.cfg.ExecTimeoutSeconds)
+	if !ok || defaultTimeout <= 0 {
+		return ToolRunResponse{}, apperr.ErrSandboxToolRunRequestInvalid
+	}
+	timeoutSec := commandToolTimeoutSeconds(tool.ResourceSpec.CommandPolicy, req.TimeoutSec, defaultTimeout)
 	if timeoutSec <= 0 {
 		return ToolRunResponse{}, apperr.ErrSandboxToolRunRequestInvalid
 	}

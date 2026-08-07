@@ -28,16 +28,16 @@ secretGenerator:
 images:
   - name: chaimir/backend
     newName: harbor.chaimir:30080/service/backend
-    digest: sha256:9032642fc103d8a3c8b4562cab6fec0697f577c50afb26d5028abe6cd589313e
+    digest: sha256:b3f0a2860b7c13eb236167d362bff3e7f8bb1cb2d4369f4908a5bcafac2ec0ff
   - name: chaimir/frontend
     newName: harbor.chaimir:30080/service/frontend
     digest: sha256:db060f0d6607edef65c439cfc18c2309982b997d47f72f8c5d95d02bda0385c1
   - name: chaimir/migrate
     newName: harbor.chaimir:30080/service/migrate
-    digest: sha256:eab732aa1038268823a7f9ce474292a3a7cc53922ec1dfcf6c51c1cfa88bfb8c
+    digest: sha256:7a5801aa8f36f60aa0215f2112bb71b9f9bbe5d26ac33221d85ea1a87d99120e
   - name: chaimir/cron
     newName: harbor.chaimir:30080/service/cron
-    digest: sha256:1c57c2407db6cbe728bdb0081164f16c8150e98bb1daba1e52d7e798d51d4f3a
+    digest: sha256:cc9fd62e2051af857a4c17876b1e2421f587915241f88a36216edda8619b9816
   - name: chaimir/middleware/clamav
     newName: harbor.chaimir:30080/middleware/clamav
     digest: sha256:8e1af8fa21a9954abc87aa4c59993a82ec6984ee89bc09097ab9828efddc399a

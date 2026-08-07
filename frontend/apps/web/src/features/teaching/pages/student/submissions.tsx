@@ -7,7 +7,7 @@
 // (judge 用户组守卫为教师/校管),学生侧不连(对齐清单 §6.6)。
 
 import { useMemo } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
+import { useNavigate, useParams } from 'react-router'
 import { ClipboardCheck, ClipboardList, MessageSquare } from 'lucide-react'
 import { SubmissionStatus, type Submission } from '@chaimir/api-client'
 import {

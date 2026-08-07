@@ -213,8 +213,7 @@ func (s *Service) TenantStats(ctx context.Context, tenantID int64) (contracts.Id
 // QueryAuditLogs 按权限范围查询共享审计日志。
 func (s *Service) QueryAuditLogs(ctx context.Context, query contracts.AuditQuery) (contracts.AuditQueryResult, error) {
 	page, size := pagex.Normalize(int(query.Page), int(query.Size))
-	query.Page = int32(page)
-	query.Size = int32(size)
+	query.Page, query.Size = pagex.Int32(page, size)
 	var rows []AuditLogRow
 	var total int64
 	read := func(ctx context.Context, tx TxStore) error {

@@ -12,7 +12,7 @@ export interface ApiConfig {
   /** 请求超时毫秒数:由装配层从部署环境变量读入,SDK 不设默认阈值 */
   timeout: number
   getToken?: () => string | null
-  getRefreshToken?: () => string | null
+  hasRefreshSession?: () => boolean
   onTokensRefreshed?: (tokens: TokenRefreshResponse) => void
   onUnauthorized?: () => void
 }
@@ -48,7 +48,6 @@ export class ApiError extends Error {
 
 export interface TokenRefreshResponse {
   access_token: string
-  refresh_token: string
   must_change_pwd?: boolean
 }
 
@@ -73,6 +72,7 @@ export class ApiClient {
     this.client = axios.create({
       baseURL: this.config.baseURL,
       timeout: this.config.timeout,
+      withCredentials: true,
       headers: {
         'Content-Type': 'application/json',
       },
@@ -145,7 +145,7 @@ export class ApiClient {
   /** shouldRefresh 只对后端明确的登录失效错误触发一次令牌轮转。 */
   private shouldRefresh(response: ApiResponse, requestConfig: RetriableRequestConfig): boolean {
     return response.code === API_ERROR_CODES.UNAUTHORIZED
-      && Boolean(this.config.getRefreshToken?.())
+      && Boolean(this.config.hasRefreshSession?.())
       && !requestConfig.chaimirRetried
       && !requestConfig.url?.endsWith('/auth/refresh')
   }
@@ -162,8 +162,7 @@ export class ApiClient {
 
   /** performTokenRefresh 使用独立客户端完成轮转，避免刷新请求进入业务响应拦截器。 */
   private async performTokenRefresh(): Promise<void> {
-    const refreshToken = this.config.getRefreshToken?.()
-    if (!refreshToken) {
+    if (!this.config.hasRefreshSession?.()) {
       this.config.onUnauthorized?.()
       throw new Error('refresh token unavailable')
     }
@@ -171,12 +170,11 @@ export class ApiClient {
     try {
       const response = await axios.post<ApiResponse<TokenRefreshResponse>>(
         `${this.config.baseURL}/auth/refresh`,
-        { refresh_token: refreshToken },
-        { timeout: this.config.timeout, headers: { 'Content-Type': 'application/json' } },
+        {},
+        { timeout: this.config.timeout, withCredentials: true, headers: { 'Content-Type': 'application/json' } },
       )
       const envelope = response.data
-      if (!isEnvelope(envelope) || envelope.code !== API_SUCCESS_CODE
-        || !envelope.data?.access_token || !envelope.data.refresh_token) {
+      if (!isEnvelope(envelope) || envelope.code !== API_SUCCESS_CODE || !envelope.data?.access_token) {
         throw new Error('refresh response invalid')
       }
       this.config.onTokensRefreshed?.(envelope.data)
@@ -192,35 +190,35 @@ export class ApiClient {
    * get 发送 GET 请求并返回后端信封中的 data 字段。
    */
   async get<T = unknown>(url: string, params?: object): Promise<T> {
-    return this.client.get<unknown, T>(url, { params })
+    return this.client.get<unknown, T>(url, { params }) as unknown as T
   }
 
   /**
    * post 发送 POST 请求并返回后端信封中的 data 字段。
    */
   async post<T = unknown>(url: string, data?: unknown): Promise<T> {
-    return this.client.post<unknown, T>(url, data)
+    return this.client.post<unknown, T>(url, data) as unknown as T
   }
 
   /**
    * put 发送 PUT 请求并返回后端信封中的 data 字段。
    */
   async put<T = unknown>(url: string, data?: unknown): Promise<T> {
-    return this.client.put<unknown, T>(url, data)
+    return this.client.put<unknown, T>(url, data) as unknown as T
   }
 
   /**
    * patch 发送 PATCH 请求并返回后端信封中的 data 字段。
    */
   async patch<T = unknown>(url: string, data?: unknown): Promise<T> {
-    return this.client.patch<unknown, T>(url, data)
+    return this.client.patch<unknown, T>(url, data) as unknown as T
   }
 
   /**
    * delete 发送 DELETE 请求并返回后端信封中的 data 字段。
    */
   async delete<T = unknown>(url: string): Promise<T> {
-    return this.client.delete<unknown, T>(url)
+    return this.client.delete<unknown, T>(url) as unknown as T
   }
 
   // === URL 构造 ===
@@ -304,7 +302,7 @@ export class ApiClient {
           onProgress(progress)
         }
       },
-    })
+    }) as unknown as T
   }
 
   /**
@@ -325,7 +323,7 @@ export class ApiClient {
           onProgress(progress)
         }
       },
-    })
+    }) as unknown as T
   }
 
   /**
@@ -346,7 +344,7 @@ export class ApiClient {
           onProgress(progress)
         }
       },
-    })
+    }) as unknown as T
   }
 
   /**

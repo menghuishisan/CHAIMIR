@@ -7,6 +7,7 @@ import (
 
 	"chaimir/internal/contracts"
 	"chaimir/internal/platform/auth"
+	"chaimir/internal/platform/intx"
 	"chaimir/internal/platform/jsonx"
 	"chaimir/internal/platform/workload"
 	"chaimir/pkg/apperr"
@@ -133,7 +134,11 @@ func maxRetriesForJudger(j Judger, defaultMax int) int32 {
 	if defaultMax < 0 {
 		return 0
 	}
-	return int32(defaultMax)
+	maxRetries, ok := intx.Int32(defaultMax)
+	if !ok {
+		return 0
+	}
+	return maxRetries
 }
 
 // timeoutForSnapshot 选择判题器配置或默认超时。

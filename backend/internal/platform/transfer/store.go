@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"chaimir/internal/platform/db"
+	"chaimir/internal/platform/intx"
 	"chaimir/internal/platform/timex"
 	"chaimir/internal/platform/transfer/internal/sqlcgen"
 	"chaimir/pkg/apperr"
@@ -42,13 +43,27 @@ func NewStore(database *db.DB) Store {
 	return &store{db: database}
 }
 
+// taskAttemptCounts 验证任务重试计数可写入数据库 int4 列。
+func taskAttemptCounts(task Task) (int32, int32, error) {
+	attemptCount, attemptOK := intx.Int32(task.AttemptCount)
+	maxAttempts, maxOK := intx.Int32(task.MaxAttempts)
+	if !attemptOK || !maxOK || attemptCount < 0 || maxAttempts <= 0 || attemptCount > maxAttempts {
+		return 0, 0, fmt.Errorf("导入导出任务重试计数非法")
+	}
+	return attemptCount, maxAttempts, nil
+}
+
 // CreateTask 在租户 RLS 边界内创建导入导出任务。
 func (s *store) CreateTask(ctx context.Context, task Task) (Task, error) {
 	if s.db == nil {
 		return Task{}, fmt.Errorf("transfer store 缺少 database")
 	}
+	attemptCount, maxAttempts, err := taskAttemptCounts(task)
+	if err != nil {
+		return Task{}, err
+	}
 	var out Task
-	err := s.withTaskTx(ctx, task.TenantID, func(ctx context.Context, tx pgx.Tx) error {
+	err = s.withTaskTx(ctx, task.TenantID, func(ctx context.Context, tx pgx.Tx) error {
 		row, err := sqlcgen.New(tx).CreateTransferTask(ctx, sqlcgen.CreateTransferTaskParams{
 			ID:                  task.TaskID,
 			TenantID:            task.TenantID,
@@ -58,8 +73,8 @@ func (s *store) CreateTask(ctx context.Context, task Task) (Task, error) {
 			Status:              string(task.Status),
 			ContentType:         task.ContentType,
 			FileName:            task.FileName,
-			AttemptCount:        int32(task.AttemptCount),
-			MaxAttempts:         int32(task.MaxAttempts),
+			AttemptCount:        attemptCount,
+			MaxAttempts:         maxAttempts,
 			LastError:           task.LastError,
 			ArtifactRef:         task.Artifact.ObjectRef,
 			ArtifactSize:        task.Artifact.Size,
@@ -134,14 +149,18 @@ func (s *store) UpdateTask(ctx context.Context, task Task) (Task, error) {
 	if s.db == nil {
 		return Task{}, fmt.Errorf("transfer store 缺少 database")
 	}
+	attemptCount, maxAttempts, err := taskAttemptCounts(task)
+	if err != nil {
+		return Task{}, err
+	}
 	var out Task
-	err := s.withTaskTx(ctx, task.TenantID, func(ctx context.Context, tx pgx.Tx) error {
+	err = s.withTaskTx(ctx, task.TenantID, func(ctx context.Context, tx pgx.Tx) error {
 		row, err := sqlcgen.New(tx).UpdateTransferTask(ctx, sqlcgen.UpdateTransferTaskParams{
 			TenantID:            task.TenantID,
 			ID:                  task.TaskID,
 			Status:              string(task.Status),
-			AttemptCount:        int32(task.AttemptCount),
-			MaxAttempts:         int32(task.MaxAttempts),
+			AttemptCount:        attemptCount,
+			MaxAttempts:         maxAttempts,
 			LastError:           task.LastError,
 			ArtifactRef:         task.Artifact.ObjectRef,
 			ArtifactSize:        task.Artifact.Size,

@@ -8,6 +8,7 @@ import (
 
 	"chaimir/internal/contracts"
 	"chaimir/internal/platform/ids"
+	"chaimir/internal/platform/intx"
 	"chaimir/internal/platform/pagex"
 	"chaimir/internal/platform/response"
 	"chaimir/internal/platform/timex"
@@ -310,7 +311,11 @@ func (s *Service) SubmitAssignment(ctx context.Context, assignmentID int64, req 
 				break
 			}
 		}
-		sub, err = tx.CreateSubmission(ctx, Submission{ID: s.ids.Generate(), TenantID: id.TenantID, AssignmentID: assignmentID, StudentID: id.AccountID, AttemptNo: int32(attempts + 1), ContentRef: req.ContentRef, FinalScore: final, IsLate: isLate, Status: status})
+		attemptNo, attemptOK := intx.Int64ToInt32(attempts + 1)
+		if !attemptOK || attemptNo <= 0 {
+			return apperr.ErrTeachingSubmissionLimitExceeded
+		}
+		sub, err = tx.CreateSubmission(ctx, Submission{ID: s.ids.Generate(), TenantID: id.TenantID, AssignmentID: assignmentID, StudentID: id.AccountID, AttemptNo: attemptNo, ContentRef: req.ContentRef, FinalScore: final, IsLate: isLate, Status: status})
 		if err != nil {
 			return err
 		}
@@ -461,6 +466,10 @@ func (s *Service) RunJudgeOutboxOnce(ctx context.Context, tenantID int64) error 
 	if s.judge == nil {
 		return apperr.ErrTeachingJudgeServiceUnavailable
 	}
+	batchSize, ok := intx.Int32(s.cfg.JudgeOutboxBatchSize)
+	if !ok || batchSize <= 0 {
+		return apperr.ErrTeachingJudgeOutboxInvalid
+	}
 	var outboxes []JudgeOutbox
 	claim := s.store.TenantTx
 	if tenantID <= 0 {
@@ -471,10 +480,10 @@ func (s *Service) RunJudgeOutboxOnce(ctx context.Context, tenantID int64) error 
 	if err := claim(ctx, tenantID, func(ctx context.Context, tx TxStore) error {
 		var err error
 		if tenantID > 0 {
-			outboxes, err = tx.ClaimJudgeOutbox(ctx, tenantID, int32(s.cfg.JudgeOutboxBatchSize))
+			outboxes, err = tx.ClaimJudgeOutbox(ctx, tenantID, batchSize)
 			return err
 		}
-		outboxes, err = tx.ClaimJudgeOutboxAcrossTenants(ctx, int32(s.cfg.JudgeOutboxBatchSize))
+		outboxes, err = tx.ClaimJudgeOutboxAcrossTenants(ctx, batchSize)
 		return err
 	}); err != nil {
 		return apperr.ErrTeachingJudgeOutboxInvalid.WithCause(err)

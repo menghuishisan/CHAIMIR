@@ -18,11 +18,12 @@ import (
 // 为 0 时返回全部符合状态过滤的包(学生与教师浏览可用场景)。
 func (s *Service) ListPackages(ctx context.Context, status int16, category, keyword string, authorID int64, page, size int) ([]map[string]any, int64, int, int, error) {
 	page, size = pagex.Normalize(page, size)
+	limit, offset := pagex.LimitOffset(page, size)
 	var items []Package
 	var total int64
 	if err := s.store.PlatformTx(ctx, func(ctx context.Context, tx TxStore) error {
 		var err error
-		items, total, err = tx.ListPackages(ctx, status, strings.TrimSpace(category), strings.TrimSpace(keyword), authorID, int32(size), int32((page-1)*size))
+		items, total, err = tx.ListPackages(ctx, status, strings.TrimSpace(category), strings.TrimSpace(keyword), authorID, limit, offset)
 		return err
 	}); err != nil {
 		return nil, 0, page, size, lookupError(err, apperr.ErrSimPackageNotFound, apperr.ErrSimPackageQueryFailed)
@@ -276,11 +277,12 @@ func (s *Service) PackagePreview(ctx context.Context, accountID, packageID int64
 // ListReviews 返回审核分页列表。
 func (s *Service) ListReviews(ctx context.Context, result int16, page, size int) ([]map[string]any, int64, int, int, error) {
 	page, size = pagex.Normalize(page, size)
+	limit, offset := pagex.LimitOffset(page, size)
 	var items []ReviewInfo
 	var total int64
 	if err := s.store.PlatformTx(ctx, func(ctx context.Context, tx TxStore) error {
 		var err error
-		items, total, err = tx.ListReviews(ctx, result, int32(size), int32((page-1)*size))
+		items, total, err = tx.ListReviews(ctx, result, limit, offset)
 		return err
 	}); err != nil {
 		return nil, 0, page, size, lookupError(err, apperr.ErrSimReviewNotFound, apperr.ErrSimReviewQueryFailed)

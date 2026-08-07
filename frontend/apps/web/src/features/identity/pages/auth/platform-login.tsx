@@ -5,7 +5,7 @@
 
 import { useCallback, useId, useState } from 'react'
 import type { FormEvent } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate } from 'react-router'
 import { ShieldCheck } from 'lucide-react'
 import { Icon } from '@chaimir/ui'
 import { api } from '../../../../app/api'
@@ -45,9 +45,8 @@ export default function PlatformLoginPage() {
       setSubmitting(true)
       setFormError(null)
       try {
-        const response = await api.identity.loginPlatform({ username: username.trim(), password })
-        // remember=false:特权会话只写 sessionStorage,关闭浏览器即失效
-        persistLoginTokens(response, false)
+        const response = await api.identity.loginPlatform({ username: username.trim(), password, remember: false })
+        persistLoginTokens(response)
         navigate(loginEntryPath(response), { replace: true })
       } catch (loginError) {
         setFormError(userFacingErrorMessage(loginError, '登录失败,请检查账号和密码后重试。'))

@@ -9,7 +9,7 @@
 // 塞进列表会让「有哪些运行时、各自到哪一步」这件常做的事变慢。
 
 import { useCallback, useMemo, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate } from 'react-router'
 import { CircleCheck, Plus, Server, Settings2, ShieldCheck } from 'lucide-react'
 import { RuntimeSelftestStatus, RuntimeStatus, type SandboxRuntime } from '@chaimir/api-client'
 import {

@@ -1,7 +1,7 @@
 // RoleNotFoundPage:角色区内未匹配路径的 404 页(保留导航壳与顶栏,审查 S6 根治点之一)。
 // 界面上的可达入口永远指向真实页面,本页只服务手输或外部粘贴的地址。
 
-import { useNavigate } from 'react-router-dom'
+import { useNavigate } from 'react-router'
 import { Compass } from 'lucide-react'
 import { Button, Empty } from '@chaimir/ui'
 

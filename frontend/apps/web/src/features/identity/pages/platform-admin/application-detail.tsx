@@ -9,7 +9,7 @@
 // 后端只有列表接口(GET /platform/applications),没有单条读取;故本页从全量列表里定位。
 
 import { useCallback, useMemo, useState } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
+import { useNavigate, useParams } from 'react-router'
 import { CircleCheck, CircleX, Inbox, ShieldCheck } from 'lucide-react'
 import { ApplicationStatus, type TenantApplication } from '@chaimir/api-client'
 import {

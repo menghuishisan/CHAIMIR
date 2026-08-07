@@ -25,7 +25,7 @@ import {
   Skeleton,
   Stat,
 } from '@chaimir/ui'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate } from 'react-router'
 import { api } from '../../../../app/api'
 import { ResourceState } from '../../../../components/ResourceState'
 import { useAsyncResource } from '../../../../hooks'

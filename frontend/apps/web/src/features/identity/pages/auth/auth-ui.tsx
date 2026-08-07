@@ -6,7 +6,7 @@
 // 仅认证域使用;日常光面表单走 @chaimir/ui 的 FormField(浅色语境)。
 
 import React from 'react'
-import { Link } from 'react-router-dom'
+import { Link } from 'react-router'
 import { CircleAlert, CircleCheck } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { Button, Icon, Input, buttonVariants, cn } from '@chaimir/ui'

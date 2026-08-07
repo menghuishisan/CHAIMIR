@@ -4,7 +4,7 @@
 // 不把全部动作平铺成永远可点的按钮组。
 
 import { useCallback, useMemo, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate } from 'react-router'
 import { Book, BookPlus, Copy, KeyRound, Layers, MoreVertical, Share2 } from 'lucide-react'
 import { CourseStatus, CourseVisibility, type Course } from '@chaimir/api-client'
 import {

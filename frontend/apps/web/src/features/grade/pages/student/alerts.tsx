@@ -4,7 +4,7 @@
 // 预警明细 detail 是后端按类型写入的开放对象:只呈现已登记的键,未登记键不猜语义。
 
 import { useCallback, useMemo, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate } from 'react-router'
 import { CheckCheck, GraduationCap, ShieldCheck, TriangleAlert } from 'lucide-react'
 import { GradeWarningStatus, type GradeWarning, type Semester } from '@chaimir/api-client'
 import {

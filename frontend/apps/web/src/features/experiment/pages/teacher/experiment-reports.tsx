@@ -7,7 +7,7 @@
 // 小组分区只在协作方式为小组实验时出现 —— 后端 CreateGroup 对独立完成的实验直接拒绝。
 
 import { useCallback, useMemo, useState } from 'react'
-import { useParams } from 'react-router-dom'
+import { useParams } from 'react-router'
 import {
   ClipboardCheck,
   FileText,

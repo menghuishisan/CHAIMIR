@@ -2,6 +2,8 @@
 package identity
 
 import (
+	"time"
+
 	"chaimir/internal/platform/auth"
 	"chaimir/internal/platform/httpx"
 
@@ -17,7 +19,7 @@ type platformAPI struct {
 func registerPlatformRoutes(r gin.IRouter, svc *Service, authn *auth.Manager) {
 	api := platformAPI{svc: svc}
 	g := r.Group("/platform")
-	g.POST("/applications", api.createApplication)
+	g.POST("/applications", httpx.RateLimitMiddleware(svc.redis, "identity:application-rate", svc.cfg.ApplicationRateMax, time.Duration(svc.cfg.ApplicationRateWindowSeconds)*time.Second), api.createApplication)
 	g.GET("/applications", authn.Middleware(), auth.RequirePlatformIdentity(), api.listApplications)
 	g.POST("/applications/:id/approve", authn.Middleware(), auth.RequirePlatformIdentity(), api.approveApplication)
 	g.POST("/applications/:id/reject", authn.Middleware(), auth.RequirePlatformIdentity(), api.rejectApplication)
@@ -42,11 +44,11 @@ func (a platformAPI) createApplication(c *gin.Context) {
 
 // listApplications 读取平台入驻申请列表,状态过滤仅在 service/repo 中使用。
 func (a platformAPI) listApplications(c *gin.Context) {
-	status, ok := httpx.QueryInt(c, "status", httpx.QueryIntRule{BitSize: 16, Min: 0})
+	status, ok := httpx.QueryInt16(c, "status", httpx.QueryIntRule{Min: 0, Max: 3, HasMax: true})
 	if !ok {
 		return
 	}
-	out, err := a.svc.ListApplicationsByPlatform(c.Request.Context(), int16(status))
+	out, err := a.svc.ListApplicationsByPlatform(c.Request.Context(), status)
 	if err != nil {
 		httpx.Write(c, gin.H{}, err)
 		return

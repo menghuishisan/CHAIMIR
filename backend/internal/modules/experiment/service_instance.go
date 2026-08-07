@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"chaimir/internal/contracts"
+	"chaimir/internal/platform/intx"
 	"chaimir/internal/platform/response"
 	"chaimir/internal/platform/timex"
 	"chaimir/pkg/apperr"
@@ -104,12 +105,19 @@ func instanceCreationLockKey(tenantID, experimentID, ownerID, groupID int64) int
 	h := fnv.New64a()
 	var data [32]byte
 	for i, value := range [...]int64{tenantID, experimentID, ownerID, groupID} {
+		if value < 0 {
+			return 0
+		}
 		binary.BigEndian.PutUint64(data[i*8:], uint64(value))
 	}
 	if _, err := h.Write(data[:]); err != nil {
 		return 0
 	}
-	return int64(h.Sum64())
+	var encoded [8]byte
+	binary.BigEndian.PutUint64(encoded[:], h.Sum64())
+	high := binary.BigEndian.Uint32(encoded[:4])
+	low := binary.BigEndian.Uint32(encoded[4:])
+	return int64(high)<<32 | int64(low)
 }
 
 // GetInstance 读取实验工作台,包含引擎入口和检查点状态。
@@ -282,7 +290,11 @@ func (s *Service) RunRecycleOnce(ctx context.Context) error {
 	var items []ExperimentInstance
 	if err := s.store.PrivilegedTx(ctx, func(ctx context.Context, tx TxStore) error {
 		var err error
-		items, err = tx.ClaimRecyclableInstances(ctx, s.cfg.PausedTimeoutSeconds, s.cfg.InstanceIdleTimeoutSeconds, int32(s.cfg.RecycleBatchSize))
+		limit, ok := intx.Int32(s.cfg.RecycleBatchSize)
+		if !ok || limit <= 0 {
+			return apperr.ErrExperimentInstanceInvalid
+		}
+		items, err = tx.ClaimRecyclableInstances(ctx, s.cfg.PausedTimeoutSeconds, s.cfg.InstanceIdleTimeoutSeconds, limit)
 		return err
 	}); err != nil {
 		return err
@@ -436,8 +448,8 @@ func (s *Service) enqueueExperimentScoreOutbox(ctx context.Context, tx TxStore, 
 
 // RunExperimentScoreOutboxOnce 领取并发布 M7 实验得分事件。
 func (s *Service) RunExperimentScoreOutboxOnce(ctx context.Context) error {
-	limit := int32(s.cfg.ScoreOutboxBatchSize)
-	if limit <= 0 {
+	limit, ok := intx.Int32(s.cfg.ScoreOutboxBatchSize)
+	if !ok || limit <= 0 {
 		return apperr.ErrExperimentEventFailed
 	}
 	staleBefore := timex.Now().Add(-time.Duration(s.cfg.ScoreOutboxStaleMs) * time.Millisecond)

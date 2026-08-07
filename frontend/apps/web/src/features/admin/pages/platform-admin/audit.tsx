@@ -10,7 +10,7 @@
 // 导出走 transfer 任务而不是直接下文件(大量日志同步生成会拖住请求)。
 
 import { useCallback, useMemo, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate } from 'react-router'
 import { Building, Download, FileText, Search } from 'lucide-react'
 import type { AuditLogEntry, AuditQueryParams, Tenant } from '@chaimir/api-client'
 import {

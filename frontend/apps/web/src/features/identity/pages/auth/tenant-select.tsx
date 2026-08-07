@@ -2,7 +2,7 @@
 // 凭证来自内存暂存(pendingLogin),刷新即失效——此时如实引导重新登录,凭证绝不持久化。
 
 import { useCallback, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate } from 'react-router'
 import { ArrowLeft, Building2 } from 'lucide-react'
 import { Button, Icon } from '@chaimir/ui'
 import { api } from '../../../../app/api'
@@ -40,14 +40,16 @@ export default function TenantSelectPage() {
                 phone: pending.method.phone,
                 password: pending.method.password,
                 tenant_id: tenantId,
+                remember: pending.remember,
               })
             : await api.identity.loginSMS({
                 phone: pending.method.phone,
                 code: pending.method.code,
                 tenant_id: tenantId,
+                remember: pending.remember,
               })
         clearPendingTenantLogin()
-        persistLoginTokens(response, pending.remember)
+        persistLoginTokens(response)
         navigate(loginEntryPath(response, pending.returnPath), { replace: true })
       } catch (selectError) {
         setError(userFacingErrorMessage(selectError, '无法进入所选学校,请稍后重试。'))

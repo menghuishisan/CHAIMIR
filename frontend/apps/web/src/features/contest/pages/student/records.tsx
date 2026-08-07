@@ -4,7 +4,7 @@
 // 「我的战绩」是本页的深页别名(对齐清单 §3.1),不新增侧栏项:同一份数据同一个页面。
 
 import { useMemo } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate } from 'react-router'
 import { ListOrdered, Medal, Swords, Trophy } from 'lucide-react'
 import { ContestStatus, type ContestRecord } from '@chaimir/api-client'
 import {

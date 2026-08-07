@@ -9,6 +9,7 @@ import (
 	"chaimir/internal/platform/auth"
 	"chaimir/internal/platform/httpx"
 	"chaimir/internal/platform/ids"
+	"chaimir/internal/platform/pagex"
 	"chaimir/internal/platform/response"
 	"chaimir/internal/platform/timex"
 	"chaimir/pkg/apperr"
@@ -98,11 +99,11 @@ func (a adminAPI) exportAudit(c *gin.Context) {
 
 // listConfigs 查询配置。
 func (a adminAPI) listConfigs(c *gin.Context) {
-	scope, ok := httpx.QueryInt(c, "scope", httpx.QueryIntRule{Default: 0, Min: 0, Max: 2, HasMax: true})
+	scope, ok := httpx.QueryInt16(c, "scope", httpx.QueryIntRule{Default: 0, Min: 0, Max: 2, HasMax: true})
 	if !ok {
 		return
 	}
-	out2, err := a.svc.ListConfigs(c.Request.Context(), int16(scope))
+	out2, err := a.svc.ListConfigs(c.Request.Context(), scope)
 	httpx.Write(c, out2, err)
 }
 
@@ -122,7 +123,7 @@ func (a adminAPI) configHistory(c *gin.Context) {
 	if !ok {
 		return
 	}
-	scope, ok := httpx.QueryInt(c, "scope", httpx.QueryIntRule{Default: 1, Min: 1, Max: 2, HasMax: true})
+	scope, ok := httpx.QueryInt16(c, "scope", httpx.QueryIntRule{Default: 1, Min: 1, Max: 2, HasMax: true})
 	if !ok {
 		return
 	}
@@ -130,7 +131,7 @@ func (a adminAPI) configHistory(c *gin.Context) {
 	if !ok {
 		return
 	}
-	out4, total, p, s, err := a.svc.ListConfigHistory(c.Request.Context(), int16(scope), tenantID, c.Param("key"), page, size)
+	out4, total, p, s, err := a.svc.ListConfigHistory(c.Request.Context(), scope, tenantID, c.Param("key"), page, size)
 	httpx.WritePage(c, out4, total, p, s, err)
 }
 
@@ -146,11 +147,11 @@ func (a adminAPI) rollbackConfig(c *gin.Context) {
 
 // listAlertRules 查询告警规则。
 func (a adminAPI) listAlertRules(c *gin.Context) {
-	scope, ok := httpx.QueryInt(c, "scope", httpx.QueryIntRule{Default: 0, Min: 0, Max: 2, HasMax: true})
+	scope, ok := httpx.QueryInt16(c, "scope", httpx.QueryIntRule{Default: 0, Min: 0, Max: 2, HasMax: true})
 	if !ok {
 		return
 	}
-	out6, err := a.svc.ListAlertRules(c.Request.Context(), int16(scope))
+	out6, err := a.svc.ListAlertRules(c.Request.Context(), scope)
 	httpx.Write(c, out6, err)
 }
 
@@ -184,11 +185,11 @@ func (a adminAPI) listAlertEvents(c *gin.Context) {
 	if !ok {
 		return
 	}
-	status, ok := httpx.QueryInt(c, "status", httpx.QueryIntRule{Default: 0, Min: 0, Max: 3, HasMax: true})
+	status, ok := httpx.QueryInt16(c, "status", httpx.QueryIntRule{Default: 0, Min: 0, Max: 3, HasMax: true})
 	if !ok {
 		return
 	}
-	out9, total, p, s, err := a.svc.ListAlertEvents(c.Request.Context(), int16(status), page, size)
+	out9, total, p, s, err := a.svc.ListAlertEvents(c.Request.Context(), status, page, size)
 	httpx.WritePage(c, out9, total, p, s, err)
 }
 
@@ -240,7 +241,8 @@ func auditQuery(c *gin.Context, page, size int) (contracts.AuditQuery, bool) {
 		response.Fail(c, apperr.ErrAdminAuditQueryInvalid)
 		return contracts.AuditQuery{}, false
 	}
-	return contracts.AuditQuery{ActorID: actorID, Action: strings.TrimSpace(c.Query("action")), TargetType: strings.TrimSpace(c.Query("target_type")), From: from, To: to, Page: int32(page), Size: int32(size)}, true
+	queryPage, querySize := pagex.Int32(page, size)
+	return contracts.AuditQuery{ActorID: actorID, Action: strings.TrimSpace(c.Query("action")), TargetType: strings.TrimSpace(c.Query("target_type")), From: from, To: to, Page: queryPage, Size: querySize}, true
 }
 
 // queryRFC3339 解析可选 RFC3339 时间查询参数。

@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"math"
 	"strings"
 )
 
@@ -56,7 +57,11 @@ func ZIPEntryNames(r *zip.Reader, limits ArchiveLimits) ([]string, error) {
 			if mode&fs.ModeSymlink != 0 || !mode.IsRegular() {
 				return fmt.Errorf("ZIP 归档包含不受支持的成员类型: %s", file.Name)
 			}
-			if err := visit(file.Name, int64(file.UncompressedSize64)); err != nil {
+			size, err := archiveSizeFromUint64(file.UncompressedSize64)
+			if err != nil {
+				return err
+			}
+			if err := visit(file.Name, size); err != nil {
 				return err
 			}
 		}
@@ -192,14 +197,18 @@ func zipToSafeTar(zr *zip.Reader, limits ArchiveLimits) ([]byte, error) {
 			continue
 		}
 		seen[name] = struct{}{}
-		if err := tw.WriteHeader(&tar.Header{Name: name, Mode: 0600, Size: int64(file.UncompressedSize64), Typeflag: tar.TypeReg}); err != nil {
+		size, err := archiveSizeFromUint64(file.UncompressedSize64)
+		if err != nil {
+			return nil, err
+		}
+		if err := tw.WriteHeader(&tar.Header{Name: name, Mode: 0600, Size: size, Typeflag: tar.TypeReg}); err != nil {
 			return nil, err
 		}
 		rc, err := file.Open()
 		if err != nil {
 			return nil, err
 		}
-		if err := copyExactArchiveEntry(tw, rc, int64(file.UncompressedSize64), limits.MaxUnpackedBytes); err != nil {
+		if err := copyExactArchiveEntry(tw, rc, size, limits.MaxUnpackedBytes); err != nil {
 			return nil, errors.Join(err, closeArchiveReader(rc))
 		}
 		if err := rc.Close(); err != nil {
@@ -232,7 +241,11 @@ func walkSafeZIPFiles(zr *zip.Reader, safeNames []string, visit func(ArchiveFile
 		if err != nil {
 			return err
 		}
-		err = visit(ArchiveFile{Name: name, Size: int64(file.UncompressedSize64), Reader: io.LimitReader(rc, int64(file.UncompressedSize64)+1)})
+		size, sizeErr := archiveSizeFromUint64(file.UncompressedSize64)
+		if sizeErr != nil {
+			return errors.Join(sizeErr, rc.Close())
+		}
+		err = visit(ArchiveFile{Name: name, Size: size, Reader: io.LimitReader(rc, size+1)})
 		if closeErr := rc.Close(); closeErr != nil && err == nil {
 			err = closeErr
 		}
@@ -241,6 +254,14 @@ func walkSafeZIPFiles(zr *zip.Reader, safeNames []string, visit func(ArchiveFile
 		}
 	}
 	return nil
+}
+
+// archiveSizeFromUint64 拒绝 ZIP 元数据中无法安全表示为 int64 的成员大小。
+func archiveSizeFromUint64(size uint64) (int64, error) {
+	if size > math.MaxInt64 {
+		return 0, fmt.Errorf("ZIP 归档成员大小超出平台上限")
+	}
+	return int64(size), nil
 }
 
 // walkSafeTARFiles 在 TAR 已通过安全校验后遍历普通文件内容。

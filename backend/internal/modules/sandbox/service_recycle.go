@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"chaimir/internal/contracts"
+	"chaimir/internal/platform/intx"
 	"chaimir/internal/platform/response"
 	"chaimir/internal/platform/timex"
 	"chaimir/pkg/apperr"
@@ -18,6 +19,10 @@ func (s *Service) RunRecycleOnce(ctx context.Context) error {
 	if s.cfg.RecycleBatchSize <= 0 || s.cfg.ReadyIdleTimeoutSeconds <= 0 || s.cfg.ReadyTimeoutSeconds <= 0 {
 		return apperr.ErrSandboxRecycleConfigInvalid
 	}
+	batchSize, ok := intx.Int32(s.cfg.RecycleBatchSize)
+	if !ok || batchSize <= 0 {
+		return apperr.ErrSandboxRecycleConfigInvalid
+	}
 	readyDeadline := timex.Now().Add(-time.Duration(s.cfg.ReadyIdleTimeoutSeconds) * time.Second)
 	var candidates []Sandbox
 	if err := s.store.PrivilegedTx(ctx, func(ctx context.Context, tx TxStore) error {
@@ -25,7 +30,7 @@ func (s *Service) RunRecycleOnce(ctx context.Context) error {
 			return apperr.ErrSandboxRecycleScanFailed.WithCause(err)
 		}
 		var err error
-		candidates, err = tx.ListRecycleCandidates(ctx, readyDeadline, int32(s.cfg.RecycleBatchSize))
+		candidates, err = tx.ListRecycleCandidates(ctx, readyDeadline, batchSize)
 		if err != nil {
 			return apperr.ErrSandboxRecycleScanFailed.WithCause(err)
 		}
@@ -45,7 +50,7 @@ func (s *Service) RunRecycleOnce(ctx context.Context) error {
 	var snapshots []Sandbox
 	if err := s.store.PrivilegedTx(ctx, func(ctx context.Context, tx TxStore) error {
 		var err error
-		snapshots, err = tx.ListSnapshotCleanupCandidates(ctx, int32(s.cfg.RecycleBatchSize))
+		snapshots, err = tx.ListSnapshotCleanupCandidates(ctx, batchSize)
 		if err != nil {
 			return apperr.ErrSandboxRecycleScanFailed.WithCause(err)
 		}
@@ -151,8 +156,8 @@ func (s *Service) recycleOne(ctx context.Context, sb Sandbox, reason string) err
 
 // RunSandboxRecycleOutboxOnce 领取并发布沙箱回收事件,供后台任务和事务后补偿调用。
 func (s *Service) RunSandboxRecycleOutboxOnce(ctx context.Context) error {
-	limit := int32(s.cfg.RecycleOutboxBatchSize)
-	if limit <= 0 || s.cfg.RecycleOutboxStaleMs <= 0 {
+	limit, ok := intx.Int32(s.cfg.RecycleOutboxBatchSize)
+	if !ok || limit <= 0 || s.cfg.RecycleOutboxStaleMs <= 0 {
 		return apperr.ErrSandboxRecycleEventPublishFailed
 	}
 	staleBefore := timex.Now().Add(-time.Duration(s.cfg.RecycleOutboxStaleMs) * time.Millisecond)

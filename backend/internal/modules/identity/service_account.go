@@ -20,8 +20,7 @@ func (s *Service) ListAccountsByAdmin(ctx context.Context, query AccountQuery) (
 		return nil, 0, int(query.Page), int(query.Size), err
 	}
 	page, size := pagex.Normalize(int(query.Page), int(query.Size))
-	query.Page = int32(page)
-	query.Size = int32(size)
+	query.Page, query.Size = pagex.Int32(page, size)
 	var rows []Account
 	var total int64
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {

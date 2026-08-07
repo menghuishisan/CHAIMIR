@@ -118,7 +118,7 @@ func (a teachingAPI) registerInternalRoutes(g gin.IRouter) {
 
 // listCourses 绑定课程列表过滤参数。
 func (a teachingAPI) listCourses(c *gin.Context) {
-	status, ok := httpx.QueryInt(c, "status", httpx.QueryIntRule{Default: 0, Min: 0, Max: 5, HasMax: true})
+	status, ok := httpx.QueryInt16(c, "status", httpx.QueryIntRule{Default: 0, Min: 0, Max: 5, HasMax: true})
 	if !ok {
 		return
 	}
@@ -126,7 +126,7 @@ func (a teachingAPI) listCourses(c *gin.Context) {
 	if !ok {
 		return
 	}
-	out, total, p, s, err := a.svc.ListCourses(c.Request.Context(), CourseListFilter{Role: c.Query("role"), Status: int16(status), Page: page, Size: size})
+	out, total, p, s, err := a.svc.ListCourses(c.Request.Context(), CourseListFilter{Role: c.Query("role"), Status: status, Page: page, Size: size})
 	httpx.WritePage(c, out, total, p, s, err)
 }
 

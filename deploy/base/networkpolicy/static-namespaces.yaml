@@ -116,7 +116,7 @@ spec:
     matchExpressions:
       - key: app.kubernetes.io/component
         operator: In
-        values: ["control-plane"]
+        values: ["control-plane", "rbac-provisioner"]
   policyTypes: ["Egress"]
   egress:
     - ports:

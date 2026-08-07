@@ -1,4 +1,4 @@
-// config 统一从环境变量加载后端与平台基础设施所需配置,启动期一次性校验并 fail-fast。
+// config 统一从环境变量加载后端与平台基础设施所需配置,启动期一次性校验并在错误时立即退出。
 package config
 
 import (
@@ -59,6 +59,11 @@ type ServerConfig struct {
 	HealthTimeoutSeconds     int
 	ShutdownTimeoutSeconds   int
 	ReadHeaderTimeoutSeconds int
+	ReadTimeoutSeconds       int
+	WriteTimeoutSeconds      int
+	IdleTimeoutSeconds       int
+	MaxHeaderBytes           int
+	MaxJSONBodyBytes         int64
 	WSReadTimeoutSeconds     int
 	WSWriteTimeoutSeconds    int
 	WSPingIntervalSeconds    int
@@ -153,6 +158,10 @@ type IdentityConfig struct {
 	SMSDailyLimit                int
 	SMSCodeTTLMinutes            int
 	SMSVerifyMaxAttempts         int
+	AuthRateWindowSeconds        int
+	AuthRateMax                  int
+	ApplicationRateWindowSeconds int
+	ApplicationRateMax           int
 	ImportMaxRows                int
 	ImportPreviewTTLHours        int
 	TenantProvisionOutboxPollMs  int
@@ -323,6 +332,45 @@ type SandboxConfig struct {
 	DNSPort                       int32
 }
 
+// SandboxRBACProvisionerConfig 是独立动态命名空间 RBAC 预配器的最小配置。
+type SandboxRBACProvisionerConfig struct {
+	KubeconfigPath          string
+	PollIntervalSeconds     int
+	LogLevel                string
+	LogFormat               string
+	ServiceAccountNamespace string
+	ServiceAccountName      string
+}
+
+// LoadSandboxRBACProvisioner 只读取预配器所需配置,避免独立控制器获取数据库和业务密钥。
+func LoadSandboxRBACProvisioner() (SandboxRBACProvisionerConfig, error) {
+	var errs []string
+	required := func(key string) string {
+		value := strings.TrimSpace(os.Getenv(key))
+		if value == "" {
+			errs = append(errs, "缺少必填环境变量: "+key)
+		}
+		return value
+	}
+	intervalRaw := strings.TrimSpace(os.Getenv("SANDBOX_RBAC_PROVISIONER_POLL_INTERVAL_SECONDS"))
+	interval, err := strconv.Atoi(intervalRaw)
+	if err != nil || interval <= 0 {
+		errs = append(errs, fmt.Sprintf("环境变量 SANDBOX_RBAC_PROVISIONER_POLL_INTERVAL_SECONDS 必须是大于 0 的整数,实际=%q", intervalRaw))
+	}
+	cfg := SandboxRBACProvisionerConfig{
+		KubeconfigPath:          strings.TrimSpace(os.Getenv("KUBECONFIG_PATH")),
+		PollIntervalSeconds:     interval,
+		LogLevel:                required("LOG_LEVEL"),
+		LogFormat:               required("LOG_FORMAT"),
+		ServiceAccountNamespace: required("SANDBOX_RBAC_BACKEND_SERVICE_ACCOUNT_NAMESPACE"),
+		ServiceAccountName:      required("SANDBOX_RBAC_BACKEND_SERVICE_ACCOUNT_NAME"),
+	}
+	if len(errs) > 0 {
+		return SandboxRBACProvisionerConfig{}, fmt.Errorf("加载沙箱 RBAC 预配器配置失败: %s", strings.Join(errs, "; "))
+	}
+	return cfg, nil
+}
+
 // SandboxToleration 描述沙箱工作负载允许调度到带污点节点的最小配置。
 type SandboxToleration struct {
 	Key               string `json:"key"`
@@ -387,6 +435,14 @@ func Load() (*Config, error) {
 		}
 		return n
 	}
+	reqInt32 := func(key string) int32 {
+		v := os.Getenv(key)
+		n, err := strconv.ParseInt(strings.TrimSpace(v), 10, 32)
+		if err != nil {
+			errs = append(errs, fmt.Sprintf("环境变量 %s 需为 int32,实际=%q", key, v))
+		}
+		return int32(n)
+	}
 	reqInt64 := func(key string) int64 {
 		v := os.Getenv(key)
 		n, err := strconv.ParseInt(strings.TrimSpace(v), 10, 64)
@@ -413,6 +469,17 @@ func Load() (*Config, error) {
 			errs = append(errs, fmt.Sprintf("环境变量 %s 需为 int64,实际=%q", key, v))
 		}
 		return n
+	}
+	optInt16 := func(key string) int16 {
+		v := strings.TrimSpace(os.Getenv(key))
+		if v == "" {
+			return 0
+		}
+		n, err := strconv.ParseInt(v, 10, 16)
+		if err != nil {
+			errs = append(errs, fmt.Sprintf("环境变量 %s 需为 int16,实际=%q", key, v))
+		}
+		return int16(n)
 	}
 	reqBool := func(key string) bool {
 		v := strings.ToLower(strings.TrimSpace(os.Getenv(key)))
@@ -460,6 +527,11 @@ func Load() (*Config, error) {
 		HealthTimeoutSeconds:     reqInt("HEALTH_CHECK_TIMEOUT_SECONDS"),
 		ShutdownTimeoutSeconds:   reqInt("HTTP_SHUTDOWN_TIMEOUT_SECONDS"),
 		ReadHeaderTimeoutSeconds: reqInt("HTTP_READ_HEADER_TIMEOUT_SECONDS"),
+		ReadTimeoutSeconds:       reqInt("HTTP_READ_TIMEOUT_SECONDS"),
+		WriteTimeoutSeconds:      reqInt("HTTP_WRITE_TIMEOUT_SECONDS"),
+		IdleTimeoutSeconds:       reqInt("HTTP_IDLE_TIMEOUT_SECONDS"),
+		MaxHeaderBytes:           reqInt("HTTP_MAX_HEADER_BYTES"),
+		MaxJSONBodyBytes:         reqInt64("HTTP_MAX_JSON_BODY_BYTES"),
 		WSReadTimeoutSeconds:     reqInt("WS_READ_TIMEOUT_SECONDS"),
 		WSWriteTimeoutSeconds:    reqInt("WS_WRITE_TIMEOUT_SECONDS"),
 		WSPingIntervalSeconds:    reqInt("WS_PING_INTERVAL_SECONDS"),
@@ -521,7 +593,7 @@ func Load() (*Config, error) {
 		SchoolTenantID:        c.Deploy.SchoolTenantID,
 		SchoolTenantCode:      os.Getenv("BOOTSTRAP_SCHOOL_TENANT_CODE"),
 		SchoolName:            os.Getenv("BOOTSTRAP_SCHOOL_NAME"),
-		SchoolType:            int16(optInt64("BOOTSTRAP_SCHOOL_TYPE")),
+		SchoolType:            optInt16("BOOTSTRAP_SCHOOL_TYPE"),
 		AdminPhone:            os.Getenv("BOOTSTRAP_ADMIN_PHONE"),
 		AdminName:             os.Getenv("BOOTSTRAP_ADMIN_NAME"),
 		AdminPassword:         os.Getenv("BOOTSTRAP_ADMIN_PASSWORD"),
@@ -540,6 +612,10 @@ func Load() (*Config, error) {
 		SMSDailyLimit:                reqInt("IDENTITY_SMS_DAILY_LIMIT"),
 		SMSCodeTTLMinutes:            reqInt("IDENTITY_SMS_CODE_TTL_MINUTES"),
 		SMSVerifyMaxAttempts:         reqInt("IDENTITY_SMS_VERIFY_MAX_ATTEMPTS"),
+		AuthRateWindowSeconds:        reqInt("IDENTITY_AUTH_RATE_WINDOW_SECONDS"),
+		AuthRateMax:                  reqInt("IDENTITY_AUTH_RATE_MAX"),
+		ApplicationRateWindowSeconds: reqInt("IDENTITY_APPLICATION_RATE_WINDOW_SECONDS"),
+		ApplicationRateMax:           reqInt("IDENTITY_APPLICATION_RATE_MAX"),
 		ImportMaxRows:                reqInt("IDENTITY_IMPORT_MAX_ROWS"),
 		ImportPreviewTTLHours:        reqInt("IDENTITY_IMPORT_PREVIEW_TTL_HOURS"),
 		TenantProvisionOutboxPollMs:  reqInt("IDENTITY_TENANT_PROVISION_OUTBOX_POLL_INTERVAL_MS"),
@@ -676,27 +752,27 @@ func Load() (*Config, error) {
 		InitArchiveMaxFiles:           reqInt("SANDBOX_INIT_ARCHIVE_MAX_FILES"),
 		InitArchiveMaxUnpackedBytes:   reqInt64("SANDBOX_INIT_ARCHIVE_MAX_UNPACKED_BYTES"),
 		FileSaveDebounceMs:            reqInt("SANDBOX_FILE_SAVE_DEBOUNCE_MS"),
-		ProbeDefaultPeriodSeconds:     int32(reqInt("SANDBOX_PROBE_DEFAULT_PERIOD_SECONDS")),
-		ProbeDefaultFailureThreshold:  int32(reqInt("SANDBOX_PROBE_DEFAULT_FAILURE_THRESHOLD")),
+		ProbeDefaultPeriodSeconds:     reqInt32("SANDBOX_PROBE_DEFAULT_PERIOD_SECONDS"),
+		ProbeDefaultFailureThreshold:  reqInt32("SANDBOX_PROBE_DEFAULT_FAILURE_THRESHOLD"),
 		RecyclePollIntervalSeconds:    reqInt("SANDBOX_RECYCLE_POLL_INTERVAL_SECONDS"),
 		RecycleBatchSize:              reqInt("SANDBOX_RECYCLE_BATCH_SIZE"),
 		RecycleOutboxBatchSize:        reqInt("SANDBOX_RECYCLE_OUTBOX_BATCH_SIZE"),
 		RecycleOutboxPollMs:           reqInt("SANDBOX_RECYCLE_OUTBOX_POLL_INTERVAL_MS"),
 		RecycleOutboxStaleMs:          reqInt("SANDBOX_RECYCLE_OUTBOX_STALE_INTERVAL_MS"),
-		TenantDefaultMaxConcurrent:    int32(reqInt("SANDBOX_TENANT_DEFAULT_MAX_CONCURRENT")),
-		TenantDefaultMaxCPU:           int32(reqInt("SANDBOX_TENANT_DEFAULT_MAX_CPU")),
-		TenantDefaultMaxMemoryMB:      int32(reqInt("SANDBOX_TENANT_DEFAULT_MAX_MEMORY_MB")),
-		TenantDefaultIdleTimeoutMin:   int32(reqInt("SANDBOX_TENANT_DEFAULT_IDLE_TIMEOUT_MIN")),
-		TenantDefaultMaxLifetimeMin:   int32(reqInt("SANDBOX_TENANT_DEFAULT_MAX_LIFETIME_MIN")),
-		TenantDefaultMaxKeepaliveMin:  int32(reqInt("SANDBOX_TENANT_DEFAULT_MAX_KEEPALIVE_MIN")),
-		TenantDefaultSnapshotMin:      int32(reqInt("SANDBOX_TENANT_DEFAULT_MAX_SNAPSHOT_RETENTION_MIN")),
+		TenantDefaultMaxConcurrent:    reqInt32("SANDBOX_TENANT_DEFAULT_MAX_CONCURRENT"),
+		TenantDefaultMaxCPU:           reqInt32("SANDBOX_TENANT_DEFAULT_MAX_CPU"),
+		TenantDefaultMaxMemoryMB:      reqInt32("SANDBOX_TENANT_DEFAULT_MAX_MEMORY_MB"),
+		TenantDefaultIdleTimeoutMin:   reqInt32("SANDBOX_TENANT_DEFAULT_IDLE_TIMEOUT_MIN"),
+		TenantDefaultMaxLifetimeMin:   reqInt32("SANDBOX_TENANT_DEFAULT_MAX_LIFETIME_MIN"),
+		TenantDefaultMaxKeepaliveMin:  reqInt32("SANDBOX_TENANT_DEFAULT_MAX_KEEPALIVE_MIN"),
+		TenantDefaultSnapshotMin:      reqInt32("SANDBOX_TENANT_DEFAULT_MAX_SNAPSHOT_RETENTION_MIN"),
 		ReadyIdleTimeoutSeconds:       reqInt("SANDBOX_READY_IDLE_TIMEOUT_SECONDS"),
 		SelftestRecycleTimeoutSeconds: reqInt("SANDBOX_SELFTEST_RECYCLE_TIMEOUT_SECONDS"),
 		ControlNamespace:              req("SANDBOX_CONTROL_NAMESPACE"),
 		ControlPodLabelKey:            req("SANDBOX_CONTROL_POD_LABEL_KEY"),
 		ControlPodLabelValue:          req("SANDBOX_CONTROL_POD_LABEL_VALUE"),
 		DNSNamespace:                  req("SANDBOX_DNS_NAMESPACE"),
-		DNSPort:                       int32(reqInt("SANDBOX_DNS_PORT")),
+		DNSPort:                       reqInt32("SANDBOX_DNS_PORT"),
 	}
 	errs = append(errs, validateSandboxQuantities(c.Sandbox)...)
 	c.Judge = JudgeConfig{
@@ -743,6 +819,21 @@ func Load() (*Config, error) {
 	}
 	if c.Server.ReadHeaderTimeoutSeconds <= 0 {
 		errs = append(errs, "HTTP_READ_HEADER_TIMEOUT_SECONDS 必须大于 0")
+	}
+	if c.Server.ReadTimeoutSeconds <= 0 {
+		errs = append(errs, "HTTP_READ_TIMEOUT_SECONDS 必须大于 0")
+	}
+	if c.Server.WriteTimeoutSeconds <= 0 {
+		errs = append(errs, "HTTP_WRITE_TIMEOUT_SECONDS 必须大于 0")
+	}
+	if c.Server.IdleTimeoutSeconds <= 0 {
+		errs = append(errs, "HTTP_IDLE_TIMEOUT_SECONDS 必须大于 0")
+	}
+	if c.Server.MaxHeaderBytes <= 0 {
+		errs = append(errs, "HTTP_MAX_HEADER_BYTES 必须大于 0")
+	}
+	if c.Server.MaxJSONBodyBytes <= 0 {
+		errs = append(errs, "HTTP_MAX_JSON_BODY_BYTES 必须大于 0")
 	}
 	if c.Server.WSReadTimeoutSeconds <= 0 {
 		errs = append(errs, "WS_READ_TIMEOUT_SECONDS 必须大于 0")
@@ -1092,6 +1183,12 @@ func Load() (*Config, error) {
 	}
 	if c.Identity.TenantProvisionOutboxPollMs <= 0 || c.Identity.TenantProvisionOutboxBatch <= 0 || c.Identity.TenantProvisionOutboxStaleMs <= 0 {
 		errs = append(errs, "IDENTITY_TENANT_PROVISION_OUTBOX_* 必须全部大于 0")
+	}
+	if c.Identity.AuthRateWindowSeconds <= 0 || c.Identity.AuthRateMax <= 0 {
+		errs = append(errs, "IDENTITY_AUTH_RATE_WINDOW_SECONDS 和 IDENTITY_AUTH_RATE_MAX 必须大于 0")
+	}
+	if c.Identity.ApplicationRateWindowSeconds <= 0 || c.Identity.ApplicationRateMax <= 0 {
+		errs = append(errs, "IDENTITY_APPLICATION_RATE_WINDOW_SECONDS 和 IDENTITY_APPLICATION_RATE_MAX 必须大于 0")
 	}
 	if c.SMS.TimeoutSeconds <= 0 {
 		errs = append(errs, "SMS_TIMEOUT_SECONDS 必须大于 0")

@@ -117,7 +117,7 @@ func (a experimentAPI) listExperiments(c *gin.Context) {
 	if !ok {
 		return
 	}
-	status, ok := httpx.QueryInt(c, "status", httpx.QueryIntRule{Default: 0, Min: 0, Max: 3, HasMax: true})
+	status, ok := httpx.QueryInt16(c, "status", httpx.QueryIntRule{Default: 0, Min: 0, Max: 3, HasMax: true})
 	if !ok {
 		return
 	}
@@ -125,7 +125,7 @@ func (a experimentAPI) listExperiments(c *gin.Context) {
 	if !ok {
 		return
 	}
-	out, total, p, s, err := a.svc.ListExperiments(c.Request.Context(), courseID, int16(status), page, size)
+	out, total, p, s, err := a.svc.ListExperiments(c.Request.Context(), courseID, status, page, size)
 	httpx.WritePage(c, out, total, p, s, err)
 }
 

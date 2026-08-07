@@ -3,7 +3,7 @@
 // 校验在 blur 就近进行;完成后跳转登录时暂存的角色入口。
 
 import React, { useCallback, useId, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate } from 'react-router'
 import { api } from '../../../../app/api'
 import {
   clearLoginTokens,

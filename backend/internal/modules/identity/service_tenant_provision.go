@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"chaimir/internal/contracts"
+	"chaimir/internal/platform/intx"
 	"chaimir/internal/platform/response"
 	"chaimir/internal/platform/timex"
 	"chaimir/pkg/apperr"
@@ -45,7 +46,10 @@ func (s *Service) RunTenantProvisionOutboxOnce(ctx context.Context) error {
 	if s.bus == nil {
 		return apperr.ErrInternal.WithCause(fmt.Errorf("新租户初始化事件总线未装配"))
 	}
-	limit := int32(s.cfg.TenantProvisionOutboxBatch)
+	limit, ok := intx.Int32(s.cfg.TenantProvisionOutboxBatch)
+	if !ok || limit <= 0 {
+		return apperr.ErrInternal
+	}
 	staleBefore := timex.Now().Add(-time.Duration(s.cfg.TenantProvisionOutboxStaleMs) * time.Millisecond)
 	var items []TenantProvisionOutbox
 	if err := s.store.PrivilegedTx(ctx, func(ctx context.Context, tx TxStore) error {

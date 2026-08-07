@@ -3,7 +3,7 @@
 // 作业清单走 GET /teaching/courses/{id}/assignments —— 学生取得作业编号的唯一入口。
 
 import { useMemo } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
+import { useNavigate, useParams } from 'react-router'
 import {
   BookOpen,
   CalendarClock,

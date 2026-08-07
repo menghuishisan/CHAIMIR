@@ -7,7 +7,7 @@
 // 每个动作单独确认并说明后果,避免误点改变学生登录能力。
 
 import { useCallback, useMemo, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate } from 'react-router'
 import {
   CircleSlash,
   Download,

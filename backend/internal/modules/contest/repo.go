@@ -8,6 +8,8 @@ import (
 
 	"chaimir/internal/modules/contest/internal/sqlcgen"
 	"chaimir/internal/platform/db"
+	"chaimir/internal/platform/intx"
+	"chaimir/internal/platform/pagex"
 	"chaimir/internal/platform/pgtypex"
 	"chaimir/internal/platform/timex"
 	"chaimir/pkg/apperr"
@@ -142,7 +144,8 @@ func (tx *txStore) GetContest(ctx context.Context, tenantID, id int64) (Contest,
 
 // ListContests 查询竞赛列表。
 func (tx *txStore) ListContests(ctx context.Context, tenantID int64, status int16, page, size int) ([]Contest, int64, error) {
-	rows, err := tx.q.ListContests(ctx, sqlcgen.ListContestsParams{TenantID: tenantID, Column2: status, Limit: int32(size), Offset: int32((page - 1) * size)})
+	limit, offset := pagex.LimitOffset(page, size)
+	rows, err := tx.q.ListContests(ctx, sqlcgen.ListContestsParams{TenantID: tenantID, Column2: status, Limit: limit, Offset: offset})
 	if err != nil {
 		return nil, 0, apperr.ErrContestInvalid.WithCause(err)
 	}
@@ -163,7 +166,8 @@ func (tx *txStore) ListContests(ctx context.Context, tenantID int64, status int1
 
 // ListStudentContests 查询学生可发现的非草稿竞赛分页。
 func (tx *txStore) ListStudentContests(ctx context.Context, tenantID int64, page, size int) ([]Contest, int64, error) {
-	rows, err := tx.q.ListStudentContests(ctx, sqlcgen.ListStudentContestsParams{TenantID: tenantID, Limit: int32(size), Offset: int32((page - 1) * size)})
+	limit, offset := pagex.LimitOffset(page, size)
+	rows, err := tx.q.ListStudentContests(ctx, sqlcgen.ListStudentContestsParams{TenantID: tenantID, Limit: limit, Offset: offset})
 	if err != nil {
 		return nil, 0, err
 	}
@@ -432,7 +436,8 @@ func (tx *txStore) RefreshContestRanks(ctx context.Context, tenantID, contestID 
 
 // ListLadder 查询排行榜。
 func (tx *txStore) ListLadder(ctx context.Context, tenantID, contestID int64, page, size int) ([]LadderRank, int64, error) {
-	rows, err := tx.q.ListLadder(ctx, sqlcgen.ListLadderParams{TenantID: tenantID, ContestID: contestID, Limit: int32(size), Offset: int32((page - 1) * size)})
+	limit, offset := pagex.LimitOffset(page, size)
+	rows, err := tx.q.ListLadder(ctx, sqlcgen.ListLadderParams{TenantID: tenantID, ContestID: contestID, Limit: limit, Offset: offset})
 	if err != nil {
 		return nil, 0, apperr.ErrContestInvalid.WithCause(err)
 	}
@@ -501,7 +506,11 @@ func (tx *txStore) ListActiveBattleOpponents(ctx context.Context, tenantID, cont
 	if err != nil {
 		return nil, apperr.ErrContestBattleEntryInvalid.WithCause(err)
 	}
-	rows, err := tx.q.ListActiveBattleOpponents(ctx, sqlcgen.ListActiveBattleOpponentsParams{TenantID: tenantID, ContestID: contestID, ProblemID: problemID, ID: excludeEntryID, TeamID: excludeTeamID, Column6: matchMode, Limit: int32(limit), Column8: initialScoreValue})
+	limit32, ok := intx.Int32(limit)
+	if !ok || limit32 <= 0 {
+		return nil, apperr.ErrContestBattleEntryInvalid
+	}
+	rows, err := tx.q.ListActiveBattleOpponents(ctx, sqlcgen.ListActiveBattleOpponentsParams{TenantID: tenantID, ContestID: contestID, ProblemID: problemID, ID: excludeEntryID, TeamID: excludeTeamID, Column6: matchMode, Limit: limit32, Column8: initialScoreValue})
 	if err != nil {
 		return nil, apperr.ErrContestBattleEntryInvalid.WithCause(err)
 	}
@@ -523,7 +532,11 @@ func (tx *txStore) CreateBattleMatch(ctx context.Context, item BattleMatch) (Bat
 
 // ClaimPendingBattleMatches 跨租户认领待执行对局。
 func (tx *txStore) ClaimPendingBattleMatches(ctx context.Context, limit int) ([]BattleMatch, error) {
-	rows, err := tx.q.ClaimPendingBattleMatchesAcrossTenants(ctx, int32(limit))
+	limit32, ok := intx.Int32(limit)
+	if !ok || limit32 <= 0 {
+		return nil, apperr.ErrContestBattleMatchFailed
+	}
+	rows, err := tx.q.ClaimPendingBattleMatchesAcrossTenants(ctx, limit32)
 	if err != nil {
 		return nil, apperr.ErrContestBattleMatchFailed.WithCause(err)
 	}
@@ -540,7 +553,11 @@ func (tx *txStore) ClaimPendingBattleMatches(ctx context.Context, limit int) ([]
 
 // ListRunningBattleMatchesWithJudgeTask 查询已启动但尚未结算的对局,用于补偿死信或短暂消费失败的判题完成事件。
 func (tx *txStore) ListRunningBattleMatchesWithJudgeTask(ctx context.Context, limit int) ([]BattleMatch, error) {
-	rows, err := tx.q.ListRunningBattleMatchesWithJudgeTask(ctx, int32(limit))
+	limit32, ok := intx.Int32(limit)
+	if !ok || limit32 <= 0 {
+		return nil, apperr.ErrContestBattleMatchFailed
+	}
+	rows, err := tx.q.ListRunningBattleMatchesWithJudgeTask(ctx, limit32)
 	if err != nil {
 		return nil, apperr.ErrContestBattleMatchFailed.WithCause(err)
 	}
@@ -585,7 +602,8 @@ func (tx *txStore) GetBattleMatchByJudgeTask(ctx context.Context, tenantID int64
 // ListBattleMatchesForTeam 查询对局历史和总数。
 // teamID 传 0 表示不按队伍过滤(组织者视角看本赛事全部对局)。
 func (tx *txStore) ListBattleMatchesForTeam(ctx context.Context, tenantID, contestID, teamID int64, page, size int) ([]BattleMatch, int64, error) {
-	rows, err := tx.q.ListBattleMatchesForTeam(ctx, sqlcgen.ListBattleMatchesForTeamParams{TenantID: tenantID, ContestID: contestID, TeamID: teamID, PageLimit: int32(size), PageOffset: int32((page - 1) * size)})
+	limit, offset := pagex.LimitOffset(page, size)
+	rows, err := tx.q.ListBattleMatchesForTeam(ctx, sqlcgen.ListBattleMatchesForTeamParams{TenantID: tenantID, ContestID: contestID, TeamID: teamID, PageLimit: limit, PageOffset: offset})
 	if err != nil {
 		return nil, 0, apperr.ErrContestBattleMatchFailed.WithCause(err)
 	}
@@ -672,7 +690,8 @@ func (tx *txStore) CreateCheatRecord(ctx context.Context, item CheatRecord) (Che
 
 // ListCheatRecords 查询违规记录和总数。
 func (tx *txStore) ListCheatRecords(ctx context.Context, tenantID, contestID int64, page, size int) ([]CheatRecord, int64, error) {
-	rows, err := tx.q.ListCheatRecords(ctx, sqlcgen.ListCheatRecordsParams{TenantID: tenantID, ContestID: contestID, Limit: int32(size), Offset: int32((page - 1) * size)})
+	limit, offset := pagex.LimitOffset(page, size)
+	rows, err := tx.q.ListCheatRecords(ctx, sqlcgen.ListCheatRecordsParams{TenantID: tenantID, ContestID: contestID, Limit: limit, Offset: offset})
 	if err != nil {
 		return nil, 0, apperr.ErrContestCheatInvalid.WithCause(err)
 	}
@@ -763,7 +782,8 @@ func (tx *txStore) GetVulnProblem(ctx context.Context, tenantID, id int64) (Vuln
 
 // ListVulnProblems 查询漏洞题草稿和总数。
 func (tx *txStore) ListVulnProblems(ctx context.Context, tenantID, sourceID int64, status int16, page, size int) ([]VulnProblem, int64, error) {
-	rows, err := tx.q.ListVulnProblems(ctx, sqlcgen.ListVulnProblemsParams{TenantID: tenantID, Column2: sourceID, Column3: status, Limit: int32(size), Offset: int32((page - 1) * size)})
+	limit, offset := pagex.LimitOffset(page, size)
+	rows, err := tx.q.ListVulnProblems(ctx, sqlcgen.ListVulnProblemsParams{TenantID: tenantID, Column2: sourceID, Column3: status, Limit: limit, Offset: offset})
 	if err != nil {
 		return nil, 0, apperr.ErrContestVulnProblemInvalid.WithCause(err)
 	}
@@ -828,7 +848,11 @@ func (tx *txStore) Stats(ctx context.Context, tenantID int64) (ContestStatsSnaps
 
 // ClaimAutoArchiveContests 跨租户认领已到结束时间的竞赛并标记为已结束。
 func (tx *txStore) ClaimAutoArchiveContests(ctx context.Context, limit int) ([]Contest, error) {
-	rows, err := tx.q.ClaimAutoArchiveContestsAcrossTenants(ctx, int32(limit))
+	limit32, ok := intx.Int32(limit)
+	if !ok || limit32 <= 0 {
+		return nil, apperr.ErrContestStateInvalid
+	}
+	rows, err := tx.q.ClaimAutoArchiveContestsAcrossTenants(ctx, limit32)
 	if err != nil {
 		return nil, apperr.ErrContestStateInvalid.WithCause(err)
 	}

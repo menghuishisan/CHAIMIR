@@ -15,6 +15,7 @@ import (
 	"chaimir/internal/platform/config"
 	"chaimir/internal/platform/eventbus"
 	"chaimir/internal/platform/ids"
+	"chaimir/internal/platform/intx"
 	"chaimir/internal/platform/jsonx"
 	"chaimir/internal/platform/response"
 	"chaimir/internal/platform/storage"
@@ -754,7 +755,11 @@ func (s *Service) checkSubmitRate(ctx context.Context, task JudgeTask) error {
 	var recent []JudgeTask
 	if err := s.store.TenantTx(ctx, task.TenantID, func(ctx context.Context, tx TxStore) error {
 		var err error
-		recent, err = tx.ListRecentJudgeTasksBySubmitterProblem(ctx, task.TenantID, task.SubmitterID, task.ProblemRef, int32(s.cfg.SubmitRateLimitSec))
+		window, ok := intx.Int32(s.cfg.SubmitRateLimitSec)
+		if !ok || window <= 0 {
+			return apperr.ErrJudgeTaskEnqueueFailed
+		}
+		recent, err = tx.ListRecentJudgeTasksBySubmitterProblem(ctx, task.TenantID, task.SubmitterID, task.ProblemRef, window)
 		return err
 	}); err != nil {
 		return apperr.ErrJudgeTaskEnqueueFailed.WithCause(err)

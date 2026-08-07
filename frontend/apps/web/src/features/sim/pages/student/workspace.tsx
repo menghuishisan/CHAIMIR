@@ -14,7 +14,7 @@
 //     自行登记(前端不重复上报)。自动推进的 tick 两边都不入记录 —— 它由 seed 决定,可复算。
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { useParams, useSearchParams } from 'react-router-dom'
+import { useParams, useSearchParams } from 'react-router'
 import { Dices, LoaderCircle, Lock, Share2, TriangleAlert } from 'lucide-react'
 import {
   Badge,

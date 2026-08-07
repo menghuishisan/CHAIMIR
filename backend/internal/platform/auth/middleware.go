@@ -24,6 +24,8 @@ import (
 const (
 	// BrowserAccessCookieName 是浏览器内嵌工具入口使用的路径受限 access cookie 名称。
 	BrowserAccessCookieName = "chaimir_access"
+	// RefreshCookieName 是仅后端可读的刷新会话 cookie 名称。
+	RefreshCookieName = "chaimir_refresh"
 	// BrowserAccessTokenQuery 是浏览器无法设置 Authorization 头时使用的一次性入口参数。
 	BrowserAccessTokenQuery = "token"
 	// ServiceNameHeader 标识内部服务调用方。
@@ -48,15 +50,15 @@ const (
 )
 
 const (
-	verifiedAccessTokenContextKey = "auth_verified_access_token"
+	verifiedAccessContextKey = "auth_verified_value"
 	browserAccessSourceKey        = "auth_browser_access_source"
 )
 
-var serviceSourceRefRe = regexp.MustCompile(`^[a-z]+:[0-9]{4}:[a-z][a-z0-9_-]*:[0-9A-Za-z_-]+$`)
+var serviceSourcePattern = regexp.MustCompile(`^[a-z]+:[0-9]{4}:[a-z][a-z0-9_-]*:[0-9A-Za-z_-]+$`)
 
 // ValidSourceRef 校验 source_ref 是否符合全局四段规范。
 func ValidSourceRef(sourceRef string) bool {
-	return serviceSourceRefRe.MatchString(strings.TrimSpace(sourceRef))
+	return serviceSourcePattern.MatchString(strings.TrimSpace(sourceRef))
 }
 
 // ServiceSourceRefFromContext 读取已经服务端验签后的来源标识。
@@ -106,7 +108,7 @@ func (m *Manager) AuthenticateAccess(c *gin.Context) bool {
 		return false
 	}
 	injectAccessIdentity(c, claims)
-	c.Set(verifiedAccessTokenContextKey, token)
+	c.Set(verifiedAccessContextKey, token)
 	return true
 }
 
@@ -149,7 +151,7 @@ func (m *Manager) browserAccessGuard(allowQueryToken bool) gin.HandlerFunc {
 			return
 		}
 		injectAccessIdentity(c, claims)
-		c.Set(verifiedAccessTokenContextKey, token)
+		c.Set(verifiedAccessContextKey, token)
 		c.Set(browserAccessSourceKey, string(source))
 		c.Next()
 	}
@@ -388,7 +390,7 @@ func (m *Manager) verifyAccessClaims(c *gin.Context, token string) (*Claims, boo
 // 供需要把同一凭据下传给浏览器直连入口的场景复用(工具代理 Cookie、文件服务 Cookie),
 // 调用方不得自行从 Header/Cookie 再解一遍 —— 那会绕过中间件的会话有效性校验。
 func VerifiedAccessToken(c *gin.Context) (string, bool) {
-	token, ok := c.Get(verifiedAccessTokenContextKey)
+	token, ok := c.Get(verifiedAccessContextKey)
 	if !ok {
 		return "", false
 	}
@@ -410,20 +412,71 @@ func (m *Manager) SetBrowserAccessCookie(c *gin.Context, pathPrefix, token strin
 	if pathPrefix == "/" || strings.TrimSpace(token) == "" {
 		return
 	}
-	http.SetCookie(c.Writer, &http.Cookie{
-		Name:     BrowserAccessCookieName,
-		Value:    strings.TrimSpace(token),
-		Path:     pathPrefix,
-		MaxAge:   int(m.accessTTL.Seconds()),
-		HttpOnly: true,
-		Secure:   browserCookieSecure(c),
-		SameSite: http.SameSiteLaxMode,
-	})
+	http.SetCookie(c.Writer, newBrowserAccessCookie(BrowserAccessCookieName, strings.TrimSpace(token), pathPrefix, int(m.accessTTL.Seconds())))
 }
 
-// browserCookieSecure 判断当前入口是否应写 Secure cookie,支持 TLS 终止在前置网关的部署。
-func browserCookieSecure(c *gin.Context) bool {
-	return c.Request.TLS != nil || strings.EqualFold(strings.TrimSpace(c.GetHeader("X-Forwarded-Proto")), "https")
+// SetRefreshCookie 写入 HttpOnly refresh cookie；持久化标记只在 cookie 值内部编码，令牌永不进入 JS。
+func (m *Manager) SetRefreshCookie(c *gin.Context, token string, persistent bool) {
+	if strings.TrimSpace(token) == "" {
+		return
+	}
+	marker := "s."
+	maxAge := 0
+	if persistent {
+		marker = "p."
+		maxAge = int(m.refreshTTL.Seconds())
+	}
+	http.SetCookie(c.Writer, newAuthCookie(RefreshCookieName, marker+strings.TrimSpace(token), "/", maxAge))
+}
+
+// RefreshCookieFromRequest 读取并解码 refresh cookie，同时返回登录时的持久化选择。
+func RefreshCookieFromRequest(c *gin.Context) (string, bool, bool) {
+	cookie, err := c.Request.Cookie(RefreshCookieName)
+	if err != nil {
+		return "", false, false
+	}
+	value := strings.TrimSpace(cookie.Value)
+	if strings.HasPrefix(value, "p.") {
+		value = strings.TrimPrefix(value, "p.")
+		return value, true, value != ""
+	}
+	if strings.HasPrefix(value, "s.") {
+		value = strings.TrimPrefix(value, "s.")
+		return value, false, value != ""
+	}
+	return "", false, false
+}
+
+// ClearRefreshCookie 立即删除浏览器刷新会话。
+func (m *Manager) ClearRefreshCookie(c *gin.Context) {
+	http.SetCookie(c.Writer, newAuthCookie(RefreshCookieName, "", "/", -1))
+}
+
+// newAuthCookie 以固定安全属性构造鉴权 Cookie;所有部署形态都必须通过 HTTPS 访问。
+func newAuthCookie(name, value, path string, maxAge int) *http.Cookie {
+	cookie := http.Cookie{
+		Name:     name,
+		Value:    value,
+		Path:     path,
+		MaxAge:   maxAge,
+		HttpOnly: true,
+		Secure:   true,
+		SameSite: http.SameSiteStrictMode,
+	}
+	return &cookie
+}
+
+// newBrowserAccessCookie 构造浏览器顶层导航仍可携带的路径受限 Cookie;Lax 是该入口的必要策略。
+func newBrowserAccessCookie(name, value, path string, maxAge int) *http.Cookie {
+	return &http.Cookie{
+		Name:     name,
+		Value:    value,
+		Path:     path,
+		MaxAge:   maxAge,
+		HttpOnly: true,
+		Secure:   true,
+		SameSite: http.SameSiteLaxMode,
+	}
 }
 
 // webSocketTicketClaims 提取并校验查询参数中的短时连接票据。
@@ -521,7 +574,7 @@ func (m *Manager) injectServiceIdentity(c *gin.Context) bool {
 		c.Abort()
 		return false
 	}
-	expected := m.serviceSignature(c.Request.Method, c.Request.URL.EscapedPath(), tenantIDRaw, sourceRef, timestamp, traceID)
+	expected := m.serviceSignature(service, c.Request.Method, c.Request.URL.EscapedPath(), tenantIDRaw, sourceRef, timestamp, traceID)
 	if !pkgcrypto.EqualHexHMAC(signature, expected) {
 		response.Fail(c, apperr.ErrServiceUnauthorized)
 		c.Abort()
@@ -560,9 +613,9 @@ func hasServiceAuthHeaders(c *gin.Context) bool {
 		strings.TrimSpace(c.GetHeader(ServiceSignatureHeader)) != ""
 }
 
-// serviceSignature 计算固定字段顺序的内部服务签名。
-func (m *Manager) serviceSignature(method, path, tenantID, sourceRef, timestamp, traceID string) string {
-	signature, err := pkgcrypto.HMACSHA256Hex(m.hmacKey, strings.ToUpper(method)+"\n"+path+"\n"+tenantID+"\n"+sourceRef+"\n"+timestamp+"\n"+traceID)
+// serviceSignature 计算固定字段顺序的内部服务签名,把调用方服务名纳入签名防止身份头被替换。
+func (m *Manager) serviceSignature(service, method, path, tenantID, sourceRef, timestamp, traceID string) string {
+	signature, err := pkgcrypto.HMACSHA256Hex(m.hmacKey, service+"\n"+strings.ToUpper(method)+"\n"+path+"\n"+tenantID+"\n"+sourceRef+"\n"+timestamp+"\n"+traceID)
 	if err != nil {
 		return ""
 	}

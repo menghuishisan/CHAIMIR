@@ -2,7 +2,7 @@
 // 身份数据全部来自服务端会话(RoleGuard 的 /me),不接受任何客户端传入的角色。
 
 import { useCallback, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate } from 'react-router'
 import { ChevronDown, LogOut, UserCog } from 'lucide-react'
 import {
   Menu,

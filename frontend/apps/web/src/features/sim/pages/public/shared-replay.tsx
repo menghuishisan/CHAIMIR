@@ -8,7 +8,7 @@
 // 数据边界:只呈现推演过程本身,不显示记录时间、所属学校与会话归属。
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { useParams } from 'react-router-dom'
+import { useParams } from 'react-router'
 import { Info, LoaderCircle, Lock, TriangleAlert } from 'lucide-react'
 import {
   Button,

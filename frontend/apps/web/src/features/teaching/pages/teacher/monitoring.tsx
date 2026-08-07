@@ -8,7 +8,7 @@
 // 由教师按需刷新或在处理完一项后自动刷新。
 
 import { useCallback, useMemo, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate } from 'react-router'
 import { Activity, FlaskConical, RefreshCw, RotateCcw, Swords } from 'lucide-react'
 import {
   BattleMatchStatus,

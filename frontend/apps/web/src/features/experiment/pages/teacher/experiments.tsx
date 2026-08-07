@@ -4,7 +4,7 @@
 // (旧前端把 wizard_step 做成数字输入是被审查列为 P0 的问题)。
 
 import { useCallback, useMemo, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate } from 'react-router'
 import { CircleCheck, ClipboardCheck, FlaskConical, LayoutTemplate, Pencil, Plus, Send, Undo2 } from 'lucide-react'
 import { ExperimentStatus, type Experiment, type ValidationResult } from '@chaimir/api-client'
 import {

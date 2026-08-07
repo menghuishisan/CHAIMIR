@@ -22,19 +22,20 @@ type authAPI struct {
 func registerAuthRoutes(r gin.IRouter, svc *Service, authn *auth.Manager) {
 	api := authAPI{svc: svc, authn: authn}
 	g := r.Group("/auth")
-	g.POST("/login/platform", api.loginPlatform)
-	g.POST("/login/phone", api.loginPhone)
-	g.POST("/login/no", api.loginNo)
-	g.POST("/login/sms", api.loginSMS)
-	g.POST("/sms/send", api.sendSMS)
-	g.POST("/refresh", api.refreshToken)
+	rateLimit := httpx.RateLimitMiddleware(svc.redis, "identity:auth-rate", svc.cfg.AuthRateMax, time.Duration(svc.cfg.AuthRateWindowSeconds)*time.Second)
+	g.POST("/login/platform", rateLimit, api.loginPlatform)
+	g.POST("/login/phone", rateLimit, api.loginPhone)
+	g.POST("/login/no", rateLimit, api.loginNo)
+	g.POST("/login/sms", rateLimit, api.loginSMS)
+	g.POST("/sms/send", rateLimit, api.sendSMS)
+	g.POST("/refresh", rateLimit, api.refreshToken)
 	g.POST("/ws-ticket", authn.Middleware(), api.issueWebSocketTicket)
-	g.POST("/password/reset", api.resetPassword)
-	g.POST("/activate", api.activate)
+	g.POST("/password/reset", rateLimit, api.resetPassword)
+	g.POST("/activate", rateLimit, api.activate)
 	g.POST("/logout", authn.Middleware(), api.logout)
 	g.GET("/sso/:tenant_code/login", api.casLoginURL)
 	g.GET("/sso/:tenant_code/callback", api.casCallback)
-	g.POST("/sso/:tenant_code/ldap", api.ldapLogin)
+	g.POST("/sso/:tenant_code/ldap", rateLimit, api.ldapLogin)
 }
 
 // loginPlatform 绑定平台管理员登录请求并返回平台级 token。
@@ -48,7 +49,7 @@ func (a authAPI) loginPlatform(c *gin.Context) {
 		httpx.Write(c, gin.H{}, err)
 		return
 	}
-	httpx.Write(c, out, nil)
+	a.writeLoginResponse(c, out, req.Remember)
 }
 
 // loginPhone 绑定手机号密码登录请求,一号多校时由 service 返回租户选择结果。
@@ -62,7 +63,7 @@ func (a authAPI) loginPhone(c *gin.Context) {
 		httpx.Write(c, gin.H{}, err)
 		return
 	}
-	httpx.Write(c, out, nil)
+	a.writeLoginResponse(c, out, req.Remember)
 }
 
 // loginNo 绑定学校短码加学号工号的备用登录请求。
@@ -76,7 +77,7 @@ func (a authAPI) loginNo(c *gin.Context) {
 		httpx.Write(c, gin.H{}, err)
 		return
 	}
-	httpx.Write(c, out, nil)
+	a.writeLoginResponse(c, out, req.Remember)
 }
 
 // loginSMS 绑定短信验证码登录请求,验证码校验和会话签发均由 service 完成。
@@ -90,7 +91,7 @@ func (a authAPI) loginSMS(c *gin.Context) {
 		httpx.Write(c, gin.H{}, err)
 		return
 	}
-	httpx.Write(c, out, nil)
+	a.writeLoginResponse(c, out, req.Remember)
 }
 
 // sendSMS 绑定发送验证码请求,API 层只读取参数不执行限频逻辑。
@@ -109,18 +110,20 @@ func (a authAPI) sendSMS(c *gin.Context) {
 	httpx.Write(c, gin.H{}, nil)
 }
 
-// refreshToken 绑定 Refresh Token 轮转请求。
+// refreshToken 从 HttpOnly cookie 读取并轮转 Refresh Token，令牌不接受 JSON 输入。
 func (a authAPI) refreshToken(c *gin.Context) {
-	var req RefreshRequest
-	if !httpx.BindJSON(c, &req) {
+	refreshToken, persistent, ok := auth.RefreshCookieFromRequest(c)
+	if !ok {
+		httpx.Write(c, gin.H{}, apperr.ErrIdentitySessionInvalid)
 		return
 	}
-	out, err := a.svc.RefreshToken(c.Request.Context(), req, c.GetHeader("User-Agent"), c.ClientIP())
+	out, err := a.svc.RefreshToken(c.Request.Context(), refreshToken, c.GetHeader("User-Agent"), c.ClientIP())
 	if err != nil {
+		a.authn.ClearRefreshCookie(c)
 		httpx.Write(c, gin.H{}, err)
 		return
 	}
-	httpx.Write(c, out, nil)
+	a.writeLoginResponse(c, out, persistent)
 }
 
 // issueWebSocketTicket 用当前服务端会话为指定实时通道签发短时连接票据。
@@ -176,7 +179,7 @@ func (a authAPI) activate(c *gin.Context) {
 		httpx.Write(c, gin.H{}, err)
 		return
 	}
-	httpx.Write(c, out, nil)
+	a.writeLoginResponse(c, out, false)
 }
 
 // logout 吊销当前 JWT 对应的服务端会话。
@@ -189,6 +192,7 @@ func (a authAPI) logout(c *gin.Context) {
 		httpx.Write(c, gin.H{}, err)
 		return
 	}
+	a.authn.ClearRefreshCookie(c)
 	httpx.Write(c, gin.H{}, nil)
 }
 
@@ -209,7 +213,7 @@ func (a authAPI) casCallback(c *gin.Context) {
 		httpx.Write(c, gin.H{}, err)
 		return
 	}
-	httpx.Write(c, out, nil)
+	a.writeLoginResponse(c, out, false)
 }
 
 // ldapLogin 绑定 LDAP 登录请求,实际目录绑定与名单匹配由 service 完成。
@@ -222,6 +226,14 @@ func (a authAPI) ldapLogin(c *gin.Context) {
 	if err != nil {
 		httpx.Write(c, gin.H{}, err)
 		return
+	}
+	a.writeLoginResponse(c, out, false)
+}
+
+// writeLoginResponse 把 refresh token 固定写入 HttpOnly cookie，响应体仅保留短期 access token 和账号状态。
+func (a authAPI) writeLoginResponse(c *gin.Context, out LoginResponse, persistent bool) {
+	if out.RefreshToken != "" {
+		a.authn.SetRefreshCookie(c, out.RefreshToken, persistent)
 	}
 	httpx.Write(c, out, nil)
 }

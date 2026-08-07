@@ -3,79 +3,47 @@
 import type { LoginResponse, TokenRefreshResponse } from '@chaimir/api-client'
 import { isRoleHomePath, roleRouteForRoles, type RoleRouteConfig } from './roleRouting'
 
-export const ACCESS_TOKEN_KEY = 'chaimir.access_token'
-export const REFRESH_TOKEN_KEY = 'chaimir.refresh_token'
 const MUST_CHANGE_PASSWORD_KEY = 'chaimir.must_change_password'
 const PENDING_ENTRY_PATH_KEY = 'chaimir.pending_entry_path'
-
-type TokenStoragePair = {
-  storage: Storage
-  otherStorage: Storage
-}
-
-/** persistTokenPair 统一按登录选择切换两种浏览器存储中的令牌。 */
-function persistTokenPair(accessToken: string | undefined, refreshToken: string | undefined, remember: boolean): TokenStoragePair {
-  const storage = remember ? window.localStorage : window.sessionStorage
-  const otherStorage = remember ? window.sessionStorage : window.localStorage
-  otherStorage.removeItem(ACCESS_TOKEN_KEY)
-  otherStorage.removeItem(REFRESH_TOKEN_KEY)
-  if (accessToken) storage.setItem(ACCESS_TOKEN_KEY, accessToken)
-  if (refreshToken) storage.setItem(REFRESH_TOKEN_KEY, refreshToken)
-  return { storage, otherStorage }
-}
+let accessToken: string | null = null
 
 /**
- * persistLoginTokens 按用户选择把登录令牌写入同一种键名。
+ * persistLoginTokens 仅在内存保留短期 access token；refresh token 由后端写入 HttpOnly cookie。
  */
-export function persistLoginTokens(response: LoginResponse, remember: boolean): void {
-  const { storage, otherStorage } = persistTokenPair(response.access_token, response.refresh_token, remember)
-  otherStorage.removeItem(MUST_CHANGE_PASSWORD_KEY)
-  otherStorage.removeItem(PENDING_ENTRY_PATH_KEY)
+export function persistLoginTokens(response: LoginResponse): void {
+  accessToken = response.access_token || null
+  window.sessionStorage.removeItem(MUST_CHANGE_PASSWORD_KEY)
+  window.sessionStorage.removeItem(PENDING_ENTRY_PATH_KEY)
   if (response.must_change_pwd) {
-    storage.setItem(MUST_CHANGE_PASSWORD_KEY, 'true')
-    storage.setItem(PENDING_ENTRY_PATH_KEY, roleEntryPath(response))
+    window.sessionStorage.setItem(MUST_CHANGE_PASSWORD_KEY, 'true')
+    window.sessionStorage.setItem(PENDING_ENTRY_PATH_KEY, roleEntryPath(response))
   } else {
-    storage.removeItem(MUST_CHANGE_PASSWORD_KEY)
-    storage.removeItem(PENDING_ENTRY_PATH_KEY)
+    window.sessionStorage.removeItem(MUST_CHANGE_PASSWORD_KEY)
+    window.sessionStorage.removeItem(PENDING_ENTRY_PATH_KEY)
   }
 }
 
 /**
- * clearLoginTokens 清除浏览器两类存储中的登录令牌。
+ * clearLoginTokens 清除内存 access token 和非敏感会话状态；HttpOnly cookie 由登出接口删除。
  */
 export function clearLoginTokens(): void {
-  window.localStorage.removeItem(ACCESS_TOKEN_KEY)
-  window.localStorage.removeItem(REFRESH_TOKEN_KEY)
-  window.sessionStorage.removeItem(ACCESS_TOKEN_KEY)
-  window.sessionStorage.removeItem(REFRESH_TOKEN_KEY)
-  window.localStorage.removeItem(MUST_CHANGE_PASSWORD_KEY)
-  window.localStorage.removeItem(PENDING_ENTRY_PATH_KEY)
+  accessToken = null
   window.sessionStorage.removeItem(MUST_CHANGE_PASSWORD_KEY)
   window.sessionStorage.removeItem(PENDING_ENTRY_PATH_KEY)
 }
 
 /**
- * getStoredRefreshToken 读取当前会话所在存储中的刷新令牌。
- */
-export function getStoredRefreshToken(): string | null {
-  return window.localStorage.getItem(REFRESH_TOKEN_KEY)
-    || window.sessionStorage.getItem(REFRESH_TOKEN_KEY)
-}
-
-/**
- * getStoredAccessToken 读取当前浏览器会话的访问令牌，仅用于决定是否进入受保护流程。
+ * getStoredAccessToken 读取当前页面内存中的 access token。
  */
 export function getStoredAccessToken(): string | null {
-  return window.localStorage.getItem(ACCESS_TOKEN_KEY)
-    || window.sessionStorage.getItem(ACCESS_TOKEN_KEY)
+  return accessToken
 }
 
 /**
- * persistRefreshedTokens 保持原有“保持登录”选择并替换后端签发的新令牌。
+ * persistRefreshedTokens 接收轮转后新的短期 access token。
  */
 export function persistRefreshedTokens(response: TokenRefreshResponse): void {
-  const remembered = window.localStorage.getItem(REFRESH_TOKEN_KEY) !== null
-  persistTokenPair(response.access_token, response.refresh_token, remembered)
+  accessToken = response.access_token
 }
 
 /**
@@ -107,18 +75,14 @@ function safeInternalPath(value: unknown, rolePrefix: string): string | null {
  * isPasswordChangeRequired 读取登录时保存的服务端改密要求，供路由边界即时拦截。
  */
 export function isPasswordChangeRequired(): boolean {
-  return window.localStorage.getItem(MUST_CHANGE_PASSWORD_KEY) === 'true'
-    || window.sessionStorage.getItem(MUST_CHANGE_PASSWORD_KEY) === 'true'
+  return window.sessionStorage.getItem(MUST_CHANGE_PASSWORD_KEY) === 'true'
 }
 
 /**
  * completeRequiredPasswordChange 清除改密拦截并返回经过白名单校验的角色入口。
  */
 export function completeRequiredPasswordChange(): string {
-  const pendingPath = window.localStorage.getItem(PENDING_ENTRY_PATH_KEY)
-    || window.sessionStorage.getItem(PENDING_ENTRY_PATH_KEY)
-  window.localStorage.removeItem(MUST_CHANGE_PASSWORD_KEY)
-  window.localStorage.removeItem(PENDING_ENTRY_PATH_KEY)
+  const pendingPath = window.sessionStorage.getItem(PENDING_ENTRY_PATH_KEY)
   window.sessionStorage.removeItem(MUST_CHANGE_PASSWORD_KEY)
   window.sessionStorage.removeItem(PENDING_ENTRY_PATH_KEY)
   return pendingPath && isRoleHomePath(pendingPath) ? pendingPath : '/auth/login'

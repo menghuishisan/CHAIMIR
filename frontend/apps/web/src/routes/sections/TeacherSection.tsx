@@ -3,7 +3,7 @@
 // 沉浸态是学生侧能力(实验工作台/仿真推演/竞赛答题/对局回放),教师区不注册。
 
 import { lazy } from 'react'
-import { Navigate, Route, Routes } from 'react-router-dom'
+import { Navigate, Route, Routes } from 'react-router'
 import { MainLayout } from '../../layouts/main/MainLayout'
 import { RoleNotFoundPage } from '../../components/StatusPages'
 import { teacherNavigation } from './teacherNavigation'

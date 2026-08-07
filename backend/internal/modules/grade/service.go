@@ -16,6 +16,7 @@ import (
 	"chaimir/internal/platform/config"
 	"chaimir/internal/platform/eventbus"
 	"chaimir/internal/platform/ids"
+	"chaimir/internal/platform/intx"
 	"chaimir/internal/platform/jsonx"
 	"chaimir/internal/platform/pagex"
 	"chaimir/internal/platform/response"
@@ -1168,8 +1169,8 @@ func (s *Service) enqueueLockOutbox(ctx context.Context, tx TxStore, review Revi
 
 // RunLockOutboxOnce 领取并发布 M11 成绩锁事件,供后台任务和事务后补偿调用。
 func (s *Service) RunLockOutboxOnce(ctx context.Context) error {
-	limit := int32(s.cfg.LockOutboxBatchSize)
-	if limit <= 0 {
+	limit, ok := intx.Int32(s.cfg.LockOutboxBatchSize)
+	if !ok || limit <= 0 {
 		return apperr.ErrGradeEventPublishFailed
 	}
 	staleBefore := timex.Now().Add(-time.Duration(s.cfg.LockOutboxStaleMs) * time.Millisecond)

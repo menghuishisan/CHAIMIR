@@ -70,11 +70,25 @@ function rotate(state: ReplayState): ReplayState {
  * nextDomainVersion 递增 domain 末尾版本号,没有版本号时追加 v2。
  */
 function nextDomainVersion(domain: string): string {
-  const match = domain.match(/^(.*:v)(\d+)$/);
-  if (!match) {
+  const markerIndex = domain.lastIndexOf(':v');
+  const versionText = markerIndex >= 0 ? domain.slice(markerIndex + 2) : '';
+  if (versionText === '' || !isDecimal(versionText)) {
     return `${domain}:v2`;
   }
-  return `${match[1]}${Number(match[2]) + 1}`;
+  const version = Number(versionText);
+  if (!Number.isSafeInteger(version) || version >= Number.MAX_SAFE_INTEGER) {
+    return `${domain.slice(0, markerIndex + 2)}2`;
+  }
+  return `${domain.slice(0, markerIndex + 2)}${version + 1}`;
+}
+
+/** isDecimal 用字符循环校验版本尾缀，避免对外部字符串执行带回溯的宽松正则。 */
+function isDecimal(value: string): boolean {
+  for (let index = 0; index < value.length; index += 1) {
+    const code = value.charCodeAt(index);
+    if (code < 48 || code > 57) return false;
+  }
+  return true;
 }
 
 /**

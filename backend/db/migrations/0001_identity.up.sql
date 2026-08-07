@@ -66,6 +66,12 @@ CREATE TABLE IF NOT EXISTS tenant_application (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+CREATE UNIQUE INDEX IF NOT EXISTS uq_tenant_application_pending_phone
+    ON tenant_application (contact_phone) WHERE status = 1;
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_tenant_application_pending_email
+    ON tenant_application (lower(contact_email)) WHERE status = 1;
+
 CREATE TABLE IF NOT EXISTS department (
     id BIGINT PRIMARY KEY,
     tenant_id BIGINT NOT NULL REFERENCES tenant(id),
