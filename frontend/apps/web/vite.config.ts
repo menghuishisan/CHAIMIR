@@ -36,16 +36,11 @@ function monacoManualChunk(moduleId: string): string | undefined {
   return undefined
 }
 
-// https://vitejs.dev/config/
 export default defineConfig({
   envDir: path.resolve(__dirname, '../..'),
   plugins: [react(), tailwindcss()],
   // 路径别名不设:tsconfig 未声明对应 paths,只在 Vite 侧配别名会让 tsc 与打包解析结果不一致;
   // 全站统一用相对路径导入,单一解析规则。
-  server: {
-    port: 5173,
-    host: true,
-  },
   build: {
     // Monaco 仅在 IDE 打开后加载并已拆到约 500 KiB;保留少量版本波动空间。
     chunkSizeWarningLimit: 550,

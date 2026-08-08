@@ -171,7 +171,11 @@ export class ApiClient {
       const response = await axios.post<ApiResponse<TokenRefreshResponse>>(
         `${this.config.baseURL}/auth/refresh`,
         {},
-        { timeout: this.config.timeout, withCredentials: true, headers: { 'Content-Type': 'application/json' } },
+        {
+          timeout: this.config.timeout,
+          withCredentials: true,
+          headers: { 'Content-Type': 'application/json', 'X-Chaimir-Refresh': '1' },
+        },
       )
       const envelope = response.data
       if (!isEnvelope(envelope) || envelope.code !== API_SUCCESS_CODE || !envelope.data?.access_token) {

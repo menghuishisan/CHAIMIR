@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -51,18 +52,25 @@ type HubOptions struct {
 
 // OriginPolicy 是统一的 WebSocket Origin 白名单策略。
 type OriginPolicy struct {
-	allowed map[string]struct{}
+	allowed        map[string]struct{}
+	trustedProxies []*net.IPNet
 }
 
 // NewOriginPolicy 根据配置白名单构造 Origin 校验策略。
-func NewOriginPolicy(origins []string) OriginPolicy {
+func NewOriginPolicy(origins []string, trustedProxies []string) OriginPolicy {
 	allowed := make(map[string]struct{}, len(origins))
 	for _, raw := range origins {
 		if origin, present, valid := normalizeOrigin(raw); present && valid {
 			allowed[origin] = struct{}{}
 		}
 	}
-	return OriginPolicy{allowed: allowed}
+	trusted := make([]*net.IPNet, 0, len(trustedProxies))
+	for _, raw := range trustedProxies {
+		if network := parseTrustedProxy(raw); network != nil {
+			trusted = append(trusted, network)
+		}
+	}
+	return OriginPolicy{allowed: allowed, trustedProxies: trusted}
 }
 
 // Check 判断请求 Origin 是否为同源或白名单内来源。
@@ -74,11 +82,68 @@ func (p OriginPolicy) Check(r *http.Request) bool {
 	if !valid {
 		return false
 	}
-	if origin == requestOrigin(r) {
+	if origin == p.requestOrigin(r) {
 		return true
 	}
 	_, ok := p.allowed[origin]
 	return ok
+}
+
+// requestOrigin 根据受信代理头、URL 和 TLS 推导当前请求的同源 origin。
+func (p OriginPolicy) requestOrigin(r *http.Request) string {
+	scheme := "http"
+	if p.isTrustedProxy(r) {
+		if forwarded := r.Header.Get("X-Forwarded-Proto"); forwarded == "http" || forwarded == "https" {
+			scheme = forwarded
+		}
+	} else if r.URL != nil && (r.URL.Scheme == "http" || r.URL.Scheme == "https") {
+		scheme = r.URL.Scheme
+	} else if r.TLS != nil {
+		scheme = "https"
+	}
+	return scheme + "://" + r.Host
+}
+
+// isTrustedProxy 只允许来自配置代理网段的请求使用转发协议头。
+func (p OriginPolicy) isTrustedProxy(r *http.Request) bool {
+	if len(p.trustedProxies) == 0 || r == nil {
+		return false
+	}
+	host := r.RemoteAddr
+	if parsedHost, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
+		host = parsedHost
+	}
+	ip := net.ParseIP(strings.Trim(host, "[]"))
+	if ip == nil {
+		return false
+	}
+	for _, network := range p.trustedProxies {
+		if network.Contains(ip) {
+			return true
+		}
+	}
+	return false
+}
+
+// parseTrustedProxy 解析单个代理 IP 或 CIDR,非法值按不可信处理。
+func parseTrustedProxy(raw string) *net.IPNet {
+	value := strings.TrimSpace(raw)
+	if value == "" {
+		return nil
+	}
+	if ip := net.ParseIP(value); ip != nil {
+		bits := 128
+		if ip.To4() != nil {
+			ip = ip.To4()
+			bits = 32
+		}
+		return &net.IPNet{IP: ip, Mask: net.CIDRMask(bits, bits)}
+	}
+	_, network, err := net.ParseCIDR(value)
+	if err != nil {
+		return nil
+	}
+	return network
 }
 
 // NewHub 创建带统一 Origin 策略和连接生命周期约束的 Hub。
@@ -466,17 +531,4 @@ func normalizeOrigin(raw string) (origin string, present bool, valid bool) {
 		return "", true, false
 	}
 	return parsed.Scheme + "://" + parsed.Host, true, true
-}
-
-// requestOrigin 根据代理头、URL 和 TLS 推导当前请求的同源 origin。
-func requestOrigin(r *http.Request) string {
-	scheme := "http"
-	if forwarded := r.Header.Get("X-Forwarded-Proto"); forwarded == "http" || forwarded == "https" {
-		scheme = forwarded
-	} else if r.URL != nil && (r.URL.Scheme == "http" || r.URL.Scheme == "https") {
-		scheme = r.URL.Scheme
-	} else if r.TLS != nil {
-		scheme = "https"
-	}
-	return scheme + "://" + r.Host
 }

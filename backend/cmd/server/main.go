@@ -137,7 +137,7 @@ func newInfrastructure(ctx context.Context, cfg *config.Config) (*infrastructure
 	if err != nil {
 		return nil, errors.Join(err, closeStartupInfrastructure(database, redisClient, bus))
 	}
-	hub, err := ws.NewHub(ws.NewOriginPolicy(cfg.Server.WSAllowedOrigins), ws.HubOptions{
+	hub, err := ws.NewHub(ws.NewOriginPolicy(cfg.Server.WSAllowedOrigins, cfg.Server.TrustedProxies), ws.HubOptions{
 		ReadTimeout:  time.Duration(cfg.Server.WSReadTimeoutSeconds) * time.Second,
 		WriteTimeout: time.Duration(cfg.Server.WSWriteTimeoutSeconds) * time.Second,
 		PingInterval: time.Duration(cfg.Server.WSPingIntervalSeconds) * time.Second,

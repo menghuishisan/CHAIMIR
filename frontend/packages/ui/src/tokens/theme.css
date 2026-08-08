@@ -371,6 +371,32 @@
   }
 }
 
+/* ---------- 布局、层级与动效运行令牌(§2.4/§2.5) ---------- */
+:root {
+  --z-below: -1;
+  --z-ground: 0;
+  --z-base: 1;
+  --z-sticky: 50;
+  --z-dropdown: 60;
+  --z-drawer: 80;
+  --z-immersive: 100;
+  --z-modal: 120;
+  --z-toast: 200;
+
+  --topnav-h: 56px;
+  --sidebar-w: 220px;
+  --sidebar-w-collapsed: 64px;
+  --content-max: 1240px;
+  --pane-inset: 14px;
+
+  --t-press: 120ms;
+  --t-fast: 160ms;
+  --t-base: 200ms;
+  --t-slow: 280ms;
+  --t-entrance: 550ms;
+  --t-stagger: 80ms;
+}
+
 /* ---------- 骨架屏微光(§5.1 Skeleton:渐变扫过,循环仅限加载指示) ---------- */
 @utility skeleton-shimmer {
   background-image: linear-gradient(

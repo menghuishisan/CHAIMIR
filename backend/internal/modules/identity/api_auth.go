@@ -112,6 +112,10 @@ func (a authAPI) sendSMS(c *gin.Context) {
 
 // refreshToken 从 HttpOnly cookie 读取并轮转 Refresh Token，令牌不接受 JSON 输入。
 func (a authAPI) refreshToken(c *gin.Context) {
+	if !auth.ValidRefreshRequestHeader(c.GetHeader(auth.RefreshRequestHeader)) {
+		httpx.Write(c, gin.H{}, apperr.ErrIdentitySessionInvalid)
+		return
+	}
 	refreshToken, persistent, ok := auth.RefreshCookieFromRequest(c)
 	if !ok {
 		httpx.Write(c, gin.H{}, apperr.ErrIdentitySessionInvalid)

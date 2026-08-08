@@ -72,6 +72,14 @@
     summary: 刷新 Token
     operationId: identityRefreshToken
     x-chaimir-audience: public
+    parameters:
+      - name: X-Chaimir-Refresh
+        in: header
+        required: true
+        description: 固定为 `1` 的浏览器自定义头;与 HttpOnly refresh Cookie 共同阻断跨站表单伪造。
+        schema:
+          type: string
+          enum: ["1"]
     requestBody:
       $ref: "#/components/requestBodies/ObjectBody"
     responses:

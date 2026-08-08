@@ -33,7 +33,7 @@
 这是一次不兼容的统一契约，不接受旧 number ID 双读或降级分支。
 
 ### 3. 鉴权
-- JWT 会话(M1):登录响应只返回短期 `access_token`；长期 refresh token 由后端写入 `HttpOnly; SameSite=Strict` cookie，浏览器脚本和 Web Storage 均不可读取。客户端用空 JSON 请求 `/auth/refresh` 轮转 access，禁止在请求体或 URL 传 refresh token。
+- JWT 会话(M1):登录响应只返回短期 `access_token`；长期 refresh token 由后端写入 `Secure; HttpOnly; SameSite=Strict` cookie，浏览器脚本和 Web Storage 均不可读取。客户端用空 JSON 请求 `/auth/refresh` 并携带 `X-Chaimir-Refresh: 1` 轮转 access，禁止在请求体或 URL 传 refresh token。
 - 登录前定位租户:`X-Tenant-Code`(学校短码)。
 - Access 15min,Refresh 7d 轮转;单端登录。
 - 浏览器原生 WebSocket 不能设置 `Authorization` 头时,前端先通过 `POST /api/v1/auth/ws-ticket` 使用当前登录态为目标 WS path 换取短时路径绑定票据,再以 `?ticket=<ws_ticket>` 建连;后端校验票据路径和服务端会话,不得在普通 WS URL 中携带 access token。

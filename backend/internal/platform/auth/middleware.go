@@ -5,6 +5,7 @@ import (
 	"context"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
@@ -26,6 +27,10 @@ const (
 	BrowserAccessCookieName = "chaimir_access"
 	// RefreshCookieName 是仅后端可读的刷新会话 cookie 名称。
 	RefreshCookieName = "chaimir_refresh"
+	// RefreshRequestHeader 是刷新接口的 CSRF 自定义请求头,跨站表单不能伪造该头。
+	RefreshRequestHeader = "X-Chaimir-Refresh"
+	// RefreshRequestHeaderValue 是刷新接口要求的固定请求头值,仅用于确认请求来自受控客户端。
+	RefreshRequestHeaderValue = "1"
 	// BrowserAccessTokenQuery 是浏览器无法设置 Authorization 头时使用的一次性入口参数。
 	BrowserAccessTokenQuery = "token"
 	// ServiceNameHeader 标识内部服务调用方。
@@ -40,6 +45,11 @@ const (
 	ServiceSignatureHeader = "X-Chaimir-Signature"
 )
 
+// ValidRefreshRequestHeader 校验刷新请求的自定义头,与 SameSite Cookie 共同阻断跨站会话轮转。
+func ValidRefreshRequestHeader(value string) bool {
+	return strings.TrimSpace(value) == RefreshRequestHeaderValue
+}
+
 type serviceSourceRefKey struct{}
 type browserAccessTokenSource string
 
@@ -51,7 +61,7 @@ const (
 
 const (
 	verifiedAccessContextKey = "auth_verified_value"
-	browserAccessSourceKey        = "auth_browser_access_source"
+	browserAccessSourceKey   = "auth_browser_access_source"
 )
 
 var serviceSourcePattern = regexp.MustCompile(`^[a-z]+:[0-9]{4}:[a-z][a-z0-9_-]*:[0-9A-Za-z_-]+$`)
@@ -127,6 +137,41 @@ func (m *Manager) WebSocketMiddleware() gin.HandlerFunc {
 	}
 }
 
+// browserAccessCSRFBlocked 拒绝路径 Cookie 对非安全方法的跨站调用。
+// 工具代理不能统一改造上游页面,因此用浏览器 Fetch Metadata 优先、Origin/Referer 兜底建立同源边界。
+func browserAccessCSRFBlocked(c *gin.Context) bool {
+	if c == nil || c.Request == nil {
+		return true
+	}
+	switch c.Request.Method {
+	case http.MethodGet, http.MethodHead, http.MethodOptions:
+		return false
+	}
+	if site := strings.ToLower(strings.TrimSpace(c.GetHeader("Sec-Fetch-Site"))); site != "" {
+		switch site {
+		case "same-origin", "none":
+			return false
+		case "same-site":
+			// same-site 仍可能来自不同子域,继续精确校验 Origin/Referer 主机。
+		default:
+			return true
+		}
+	}
+	if rawOrigin := strings.TrimSpace(c.GetHeader("Origin")); rawOrigin != "" {
+		return !sameRequestHost(rawOrigin, c.Request.Host)
+	}
+	if rawReferer := strings.TrimSpace(c.GetHeader("Referer")); rawReferer != "" {
+		return !sameRequestHost(rawReferer, c.Request.Host)
+	}
+	return true
+}
+
+// sameRequestHost 校验 Origin/Referer 只有合法 HTTP(S) 地址且主机精确匹配当前请求。
+func sameRequestHost(raw, requestHost string) bool {
+	parsed, err := url.Parse(raw)
+	return err == nil && (parsed.Scheme == "http" || parsed.Scheme == "https") && parsed.Host == requestHost && parsed.User == nil
+}
+
 // BrowserAccessMiddleware 校验浏览器内嵌工具入口的 Bearer、一次性 query token 或路径受限 Cookie。
 func (m *Manager) BrowserAccessMiddleware() gin.HandlerFunc {
 	return m.browserAccessGuard(true)
@@ -148,6 +193,11 @@ func (m *Manager) browserAccessGuard(allowQueryToken bool) gin.HandlerFunc {
 			return
 		}
 		if !m.validateAccessSession(c, claims) {
+			return
+		}
+		if source == browserAccessTokenSourceCookie && browserAccessCSRFBlocked(c) {
+			response.Fail(c, apperr.ErrForbidden)
+			c.Abort()
 			return
 		}
 		injectAccessIdentity(c, claims)

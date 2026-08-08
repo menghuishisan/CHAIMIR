@@ -4,34 +4,6 @@
  * 见 docs/总-前端设计规范.md §2.4/§2.5/§3。
  */
 
-:root {
-  /* 层级阶梯(§2.4):组件经 @utility z-* 消费,禁止裸数字 */
-  --z-below: -1;
-  --z-ground: 0;
-  --z-base: 1;
-  --z-sticky: 50;
-  --z-dropdown: 60;
-  --z-drawer: 80;
-  --z-immersive: 100;
-  --z-modal: 120;
-  --z-toast: 200;
-
-  /* 布局尺寸(§2.4) */
-  --topnav-h: 56px;
-  --sidebar-w: 220px;
-  --sidebar-w-collapsed: 64px;
-  --content-max: 1240px;
-  --pane-inset: 14px;
-
-  /* 动效时长(§2.5):经 @utility duration-* 消费 */
-  --t-press: 120ms;
-  --t-fast: 160ms;
-  --t-base: 200ms;
-  --t-slow: 280ms;
-  --t-entrance: 550ms;
-  --t-stagger: 80ms; /* 入场编排阶梯步长(§4.3 列表批量入场 40-60ms、低频页 60-90ms 取中) */
-}
-
 /* 底层世界:整站根背景是墨色底层(FE-6 底层曝光系统) */
 html,
 body {

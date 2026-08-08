@@ -71,7 +71,7 @@ func acceptanceImageDigest(imageURL string) string {
 	return parts[1]
 }
 
-// seedRuntimeRows 写入沙箱运行时、镜像、工具和判题器基础能力。
+// seedRuntimeRows 写入沙箱运行时、镜像、工具和判题器基础能力,自检状态由正式接入即测流程更新。
 func seedRuntimeRows(ctx context.Context, tx pgx.Tx) error {
 	runtimeImageURL, err := acceptanceImageURL("runtime/evm-foundry")
 	if err != nil {
@@ -80,7 +80,7 @@ func seedRuntimeRows(ctx context.Context, tx pgx.Tx) error {
 	runtimeSpec, _ := jsonb(acceptanceRuntimeAdapterSpec(runtimeImageURL))
 	if err := execJSON(ctx, tx, `
 INSERT INTO runtime (id, code, name, eco, adapter_level, adapter_spec, capability_impl, selftest_status, selftest_detail, status)
-VALUES ($1,'evm-foundry','EVM Foundry 教学运行时','evm',2,$2,'sandbox-exec',2,'{"checked_by":"acceptance-seed"}'::jsonb,1)
+VALUES ($1,'evm-foundry','EVM Foundry 教学运行时','evm',2,$2,'sandbox-exec',1,'{"result":"pending","reason":"requires-runtime-selftest"}'::jsonb,2)
 ON CONFLICT (id) DO UPDATE SET code=EXCLUDED.code, name=EXCLUDED.name, eco=EXCLUDED.eco, adapter_level=EXCLUDED.adapter_level, adapter_spec=EXCLUDED.adapter_spec, capability_impl=EXCLUDED.capability_impl, selftest_status=EXCLUDED.selftest_status, selftest_detail=EXCLUDED.selftest_detail, status=EXCLUDED.status, updated_at=now()`,
 		acceptanceIDs.Runtime, runtimeSpec); err != nil {
 		return err
@@ -114,7 +114,7 @@ ON CONFLICT (runtime_id, version) DO UPDATE SET image_url=EXCLUDED.image_url, st
 	})
 	if err := execJSON(ctx, tx, `
 INSERT INTO judger (id, code, name, type, executor_ref, runtime_required, default_timeout_sec, resource_spec, selftest_status, status)
-VALUES ($1,'solidity-unit','Solidity 单元测试判题器',1,$3,true,60,$2,2,1)
+VALUES ($1,'solidity-unit','Solidity 单元测试判题器',1,$3,true,60,$2,1,2)
 ON CONFLICT (code) DO UPDATE SET name=EXCLUDED.name, type=EXCLUDED.type, executor_ref=EXCLUDED.executor_ref, runtime_required=EXCLUDED.runtime_required, default_timeout_sec=EXCLUDED.default_timeout_sec, resource_spec=EXCLUDED.resource_spec, selftest_status=EXCLUDED.selftest_status, status=EXCLUDED.status, updated_at=now()`,
 		acceptanceIDs.Judger, judgeSpec, judgerImageURL); err != nil {
 		return err
@@ -140,7 +140,7 @@ ON CONFLICT (code) DO UPDATE SET name=EXCLUDED.name, type=EXCLUDED.type, executo
 	})
 	if err := execJSON(ctx, tx, `
 INSERT INTO judger (id, code, name, type, executor_ref, runtime_required, default_timeout_sec, resource_spec, selftest_status, status)
-VALUES ($1,'onchain-assert','链上状态断言判题器',2,'m3-backend-strategy',true,60,$2,2,1)
+VALUES ($1,'onchain-assert','链上状态断言判题器',2,'m3-backend-strategy',true,60,$2,1,2)
 ON CONFLICT (code) DO UPDATE SET name=EXCLUDED.name, type=EXCLUDED.type, executor_ref=EXCLUDED.executor_ref, runtime_required=EXCLUDED.runtime_required, default_timeout_sec=EXCLUDED.default_timeout_sec, resource_spec=EXCLUDED.resource_spec, selftest_status=EXCLUDED.selftest_status, status=EXCLUDED.status, updated_at=now()`,
 		acceptanceIDs.JudgerOnchain, onchainSpec); err != nil {
 		return err
