@@ -223,20 +223,30 @@ func writeFailureMarker(ctx context.Context, objects *storage.Storage, batch str
 
 // dumpPostgres 使用官方 pg_dump 生成可由 pg_restore 恢复的自定义格式数据库备份。
 func dumpPostgres(ctx context.Context, cfg *config.Config, outPath string) error {
+	pgDumpPath, err := exec.LookPath("pg_dump")
+	if err != nil {
+		return fmt.Errorf("查找 pg_dump 失败: %w", err)
+	}
+	if strings.TrimSpace(cfg.Postgres.PrivUser) == "" || cfg.Postgres.PrivPassword == "" {
+		return fmt.Errorf("pg_dump 缺少 PostgreSQL 特权凭据")
+	}
 	args := []string{
 		"--format=custom",
 		"--no-owner",
 		"--no-privileges",
 		"--host", cfg.Postgres.Host,
 		"--port", fmt.Sprint(cfg.Postgres.Port),
-		"--username", cfg.Postgres.User,
+		"--username", cfg.Postgres.PrivUser,
 		"--dbname", cfg.Postgres.Database,
 		"--file", outPath,
 	}
 	cmd := &exec.Cmd{
-		Path: "pg_dump",
+		Path: pgDumpPath,
 		Args: append([]string{"pg_dump"}, args...),
-		Env:  append(os.Environ(), "PGPASSWORD="+cfg.Postgres.Password),
+		Env: append(os.Environ(),
+			"PGPASSWORD="+cfg.Postgres.PrivPassword,
+			"PGSSLMODE="+cfg.Postgres.SSLMode,
+		),
 	}
 	if err := ctx.Err(); err != nil {
 		return fmt.Errorf("pg_dump 上下文已取消: %w", err)
@@ -257,7 +267,7 @@ func dumpPostgres(ctx context.Context, cfg *config.Config, outPath string) error
 		case <-finished:
 		}
 	}()
-	err := cmd.Wait()
+	err = cmd.Wait()
 	close(finished)
 	out := append(stdout.Bytes(), stderr.Bytes()...)
 	if err != nil {

@@ -32,6 +32,7 @@ spec:
         metadata:
           labels:
             app.kubernetes.io/part-of: chaimir
+            app.kubernetes.io/component: cronjob
         spec:
           restartPolicy: Never
           serviceAccountName: chaimir-cron

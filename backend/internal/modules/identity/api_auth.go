@@ -33,8 +33,9 @@ func registerAuthRoutes(r gin.IRouter, svc *Service, authn *auth.Manager) {
 	g.POST("/password/reset", rateLimit, api.resetPassword)
 	g.POST("/activate", rateLimit, api.activate)
 	g.POST("/logout", authn.Middleware(), api.logout)
-	g.GET("/sso/:tenant_code/login", api.casLoginURL)
-	g.GET("/sso/:tenant_code/callback", api.casCallback)
+	ssoRateLimit := httpx.RateLimitMiddleware(svc.redis, "identity:sso-rate", svc.cfg.AuthRateMax, time.Duration(svc.cfg.AuthRateWindowSeconds)*time.Second)
+	g.GET("/sso/:tenant_code/login", ssoRateLimit, api.casLoginURL)
+	g.GET("/sso/:tenant_code/callback", ssoRateLimit, api.casCallback)
 	g.POST("/sso/:tenant_code/ldap", rateLimit, api.ldapLogin)
 }
 

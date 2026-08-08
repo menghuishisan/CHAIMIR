@@ -16,16 +16,16 @@ components:
 
 images:
   - name: chaimir/backend
-    newName: harbor.chaimir.io/service/backend
+    newName: registry.chaimir.io/service/backend
     newTag: "1.0.0"  # CD 按 tag 覆盖。
   - name: chaimir/frontend
-    newName: harbor.chaimir.io/service/frontend
+    newName: registry.chaimir.io/service/frontend
     newTag: "1.0.0"
   - name: chaimir/migrate
-    newName: harbor.chaimir.io/service/migrate
+    newName: registry.chaimir.io/service/migrate
     newTag: "1.0.0"
   - name: chaimir/cron
-    newName: harbor.chaimir.io/service/cron
+    newName: registry.chaimir.io/service/cron
     newTag: "1.0.0"
 
 configMapGenerator:

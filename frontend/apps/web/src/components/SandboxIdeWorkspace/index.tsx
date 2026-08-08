@@ -47,6 +47,7 @@ import {
   toast,
 } from '@chaimir/ui'
 import { api } from '../../app/api'
+import { appConfig } from '../../app/config'
 import { useTicketedWebSocket } from '../../hooks'
 import { decodeUtf8Base64, encodeUtf8Base64 } from '../../utils/base64'
 import { SANDBOX_PHASES, sandboxPhaseLabel } from '../../utils/labels/sandbox'
@@ -861,11 +862,16 @@ function CommandPanel({ sandboxId, tools }: CommandPanelProps) {
  * 页面不拼容器地址,也就不存在把内网地址暴露给浏览器的问题。
  */
 function WebToolPanel({ sandboxId, toolCode }: { sandboxId: string; toolCode: string }) {
-  const src = useMemo(() => api.sandbox.getToolProxyUrl(sandboxId, toolCode), [sandboxId, toolCode])
+  const src = useMemo(
+    () => api.sandbox.getToolProxyUrl(sandboxId, toolCode, '', appConfig.sandboxToolOrigin),
+    [sandboxId, toolCode],
+  )
   return (
     <iframe
       src={src}
       title={`${toolCode} 工具`}
+      sandbox="allow-scripts allow-same-origin allow-forms allow-downloads allow-modals"
+      referrerPolicy="no-referrer"
       className="h-full w-full border-0 bg-dark-surface"
     />
   )

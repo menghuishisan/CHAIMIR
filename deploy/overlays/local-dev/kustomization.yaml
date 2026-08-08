@@ -23,35 +23,43 @@ secretGenerator:
     namespace: chaimir-data
     envs:
       - ../../config/secret.env
+  - name: postgres-tls
+    namespace: chaimir-data
+    type: kubernetes.io/tls
+    files:
+      - tls.crt=../../config/chaimir-tls/postgres.crt
+      - tls.key=../../config/chaimir-tls/postgres.key
+    options:
+      disableNameSuffixHash: true
 
 # 本地验收镜像也必须使用 Harbor digest,不再保留旧 chaimir/*:dev 兼容路径。
 images:
   - name: chaimir/backend
-    newName: harbor.chaimir:30080/service/backend
-    digest: sha256:b3f0a2860b7c13eb236167d362bff3e7f8bb1cb2d4369f4908a5bcafac2ec0ff
+    newName: registry.chaimir.io/service/backend
+    digest: sha256:c8febfe6fc3920c089f7191267ebd8538dafa07768147b5c98d20c02acd03217
   - name: chaimir/frontend
-    newName: harbor.chaimir:30080/service/frontend
-    digest: sha256:db060f0d6607edef65c439cfc18c2309982b997d47f72f8c5d95d02bda0385c1
+    newName: registry.chaimir.io/service/frontend
+    digest: sha256:bc5ca0c4238bae8c7731384ecac2ddf60d41d7c12afa10958755e56c63a6e38b
   - name: chaimir/migrate
-    newName: harbor.chaimir:30080/service/migrate
-    digest: sha256:7a5801aa8f36f60aa0215f2112bb71b9f9bbe5d26ac33221d85ea1a87d99120e
+    newName: registry.chaimir.io/service/migrate
+    digest: sha256:32b920e1653766c1be0562f96cf9b26ee995f78c99b01e2c0c765ac7fce57a82
   - name: chaimir/cron
-    newName: harbor.chaimir:30080/service/cron
-    digest: sha256:cc9fd62e2051af857a4c17876b1e2421f587915241f88a36216edda8619b9816
+    newName: registry.chaimir.io/service/cron
+    digest: sha256:e3f899f23ef51ba911845a09473d4f941e885f7fc767c84f99901ddad2d6a9b8
   - name: chaimir/middleware/clamav
-    newName: harbor.chaimir:30080/middleware/clamav
+    newName: registry.chaimir.io/middleware/clamav
     digest: sha256:8e1af8fa21a9954abc87aa4c59993a82ec6984ee89bc09097ab9828efddc399a
   - name: chaimir/middleware/minio
-    newName: harbor.chaimir:30080/middleware/minio
+    newName: registry.chaimir.io/middleware/minio
     digest: sha256:572a6ab846e59cf2e0b56645c955136107aecef09a365afa237ff127c4646cab
   - name: chaimir/middleware/nats
-    newName: harbor.chaimir:30080/middleware/nats
+    newName: registry.chaimir.io/middleware/nats
     digest: sha256:502f6b38e93402ba6049abb388fb86ddb6a3ae1739ac71f1a935e0b5be1f8528
   - name: chaimir/middleware/postgres
-    newName: harbor.chaimir:30080/middleware/postgres
+    newName: registry.chaimir.io/middleware/postgres
     digest: sha256:8a08cd59bcab2c21965dd8826440e5be1c93a3754de9a7a543a33286b2d2edbe
   - name: chaimir/middleware/redis
-    newName: harbor.chaimir:30080/middleware/redis
+    newName: registry.chaimir.io/middleware/redis
     digest: sha256:3f7c4af1c5509dace732614ed08b168d436d8a5c39a1001c3fbb7c1a1290f975
 
 # 本地形态:SaaS 多租户 + 平台层开(便于本地验证全功能)。
@@ -64,9 +72,32 @@ configMapGenerator:
       - DEPLOY_MODE=saas
       - PLATFORM_LAYER_ENABLED=true
       - LOG_LEVEL=debug
-      - PG_SSLMODE=disable
+      - PG_SSLMODE=require
       - SMS_HTTP_ENDPOINT=http://sms-gateway.chaimir-system.svc.cluster.local:18080/sms
-      - SMS_HTTP_ALLOW_LOOPBACK=false
+      - SMS_HTTP_ENDPOINT_SCOPE=cluster
+      - SMS_HTTP_CLUSTER_CIDRS=10.96.0.0/12
       - SMS_TEMPLATE_LOGIN=local-login
       - SMS_TEMPLATE_RESET=local-reset
       - SMS_TEMPLATE_CHANGE_PHONE=local-change-phone
+
+patches:
+  - target:
+      kind: Ingress
+      name: chaimir
+    patch: |-
+      - op: replace
+        path: /spec/rules/0/host
+        value: www.chaimir.io
+      - op: replace
+        path: /spec/tls/0/hosts/0
+        value: www.chaimir.io
+  - target:
+      kind: Ingress
+      name: chaimir-public-deny
+    patch: |-
+      - op: replace
+        path: /spec/rules/0/host
+        value: www.chaimir.io
+      - op: replace
+        path: /spec/tls/0/hosts/0
+        value: www.chaimir.io

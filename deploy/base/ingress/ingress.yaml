@@ -21,11 +21,13 @@ metadata:
     # 与后端 multipart 最大额度对齐；具体路由还会在 Gin 解析前执行自身限制。
     nginx.ingress.kubernetes.io/proxy-body-size: "501m"
     nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
 spec:
   ingressClassName: nginx
   tls:
     - hosts:
         - chaimir
+        - tools.chaimir.io
       secretName: chaimir-tls
   rules:
     - host: chaimir # overlay 覆盖真实域名。
@@ -43,6 +45,16 @@ spec:
             backend:
               service:
                 name: chaimir-frontend
+                port:
+                  number: 80
+    - host: tools.chaimir.io
+      http:
+        paths:
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: chaimir-backend
                 port:
                   number: 80
 ---
@@ -71,14 +83,33 @@ metadata:
   annotations:
     nginx.ingress.kubernetes.io/use-regex: "true"
     nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
 spec:
   ingressClassName: nginx
   tls:
     - hosts:
         - chaimir
+        - tools.chaimir.io
       secretName: chaimir-tls
   rules:
     - host: chaimir
+      http:
+        paths:
+          - path: /api/readyz
+            pathType: Exact
+            backend:
+              service:
+                name: chaimir-public-deny
+                port:
+                  number: 80
+          - path: /api/v1/.*/internal(/|$)(.*)
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: chaimir-public-deny
+                port:
+                  number: 80
+    - host: tools.chaimir.io
       http:
         paths:
           - path: /api/readyz

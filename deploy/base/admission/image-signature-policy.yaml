@@ -10,10 +10,9 @@ metadata:
     app.kubernetes.io/part-of: chaimir
 spec:
   images:
-    - glob: "harbor.chaimir:30080/**"
-    - glob: "harbor.chaimir.io/**"
-    - glob: "harbor.chaimir/**"
-    - glob: "harbor.school.local/**"
+    # policy-controller glob 匹配按仓库路径段展开;覆盖平台 service/middleware 镜像且只允许 canonical registry。
+    - glob: "registry.chaimir.io/service/*"
+    - glob: "registry.chaimir.io/middleware/*"
   authorities:
     - name: chaimir-cosign
       source:

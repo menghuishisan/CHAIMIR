@@ -24,6 +24,8 @@ spec:
         app.kubernetes.io/component: web
         app.kubernetes.io/part-of: chaimir
     spec:
+      imagePullSecrets:
+        - name: chaimir-harbor-pull
       securityContext:
         runAsNonRoot: true
         runAsUser: 101  # nginx unprivileged 镜像默认 uid。

@@ -71,6 +71,8 @@ images/**/build/
 .DS_Store
 *.log
 .tmp/
+# Local-only audit and test reports; never publish these artifacts.
+/docs/审查测试记录/
 .idea/
 .vscode/
 .claude/

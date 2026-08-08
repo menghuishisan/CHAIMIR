@@ -1,18 +1,21 @@
 # Harbor 官方 Helm chart 的非密 values;密钥由 supply-chain.secret.env 或 KMS 注入。
-externalURL: http://harbor.chaimir:30080
+externalURL: https://registry.chaimir.io
 harborAdminPassword: ""
 
 expose:
   type: ingress
   tls:
-    enabled: false
+    enabled: true
+    certSource: secret
+    secretName: harbor-tls
   ingress:
     hosts:
-      core: harbor.chaimir
+      core: registry.chaimir.io
     className: nginx
     annotations:
-      ingress.kubernetes.io/ssl-redirect: "false"
-      nginx.ingress.kubernetes.io/ssl-redirect: "false"
+      ingress.kubernetes.io/ssl-redirect: "true"
+      nginx.ingress.kubernetes.io/ssl-redirect: "true"
+      nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
 
 persistence:
   enabled: true

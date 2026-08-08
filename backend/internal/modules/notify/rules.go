@@ -7,7 +7,6 @@ import (
 	"strconv"
 	"strings"
 
-	"chaimir/internal/contracts"
 	"chaimir/pkg/apperr"
 )
 
@@ -143,7 +142,7 @@ func validateSendRequest(req SendRequest) (SendRequest, error) {
 }
 
 // validateAnnouncementRequest 校验公告发布请求和平台/租户边界。
-func validateAnnouncementRequest(req AnnouncementRequest, isPlatform bool) error {
+func validateAnnouncementRequest(req AnnouncementRequest, isPlatform bool, validRoleNumber func(int16) bool) error {
 	if strings.TrimSpace(req.Title) == "" || strings.TrimSpace(req.Content) == "" {
 		return apperr.ErrNotifyAnnouncementInvalid
 	}
@@ -161,7 +160,7 @@ func validateAnnouncementRequest(req AnnouncementRequest, isPlatform bool) error
 			return apperr.ErrNotifyAnnouncementInvalid
 		}
 		for _, role := range req.TargetRoles {
-			if contracts.RoleCode(role) == "unknown" {
+			if !validRoleNumber(role) {
 				return apperr.ErrNotifyAnnouncementInvalid
 			}
 		}

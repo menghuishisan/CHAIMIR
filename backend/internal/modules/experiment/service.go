@@ -50,6 +50,11 @@ type ServiceDeps struct {
 	Storage *storage.Storage
 }
 
+// isValidJudgeSandboxMode 在 service 边界校验 M3 沙箱模式契约,避免 rules 层依赖 contracts。
+func isValidJudgeSandboxMode(mode string) bool {
+	return mode == contracts.JudgeSandboxModeFresh || mode == contracts.JudgeSandboxModeReuse
+}
+
 // NewService 构造 experiment 服务,不接收数据库连接,由装配层传入 Store。
 func NewService(deps ServiceDeps) (*Service, error) {
 	if deps.Store == nil {

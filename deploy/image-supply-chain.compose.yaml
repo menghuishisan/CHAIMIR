@@ -5,9 +5,10 @@ services:
     image: ${SUPPLY_CHAIN_TRIVY_IMAGE:?SUPPLY_CHAIN_TRIVY_IMAGE is required}
     entrypoint: ["trivy"]
     extra_hosts:
-      - "${SUPPLY_CHAIN_REGISTRY_HOST_ALIAS:-harbor.chaimir}:host-gateway"
+      - "${SUPPLY_CHAIN_REGISTRY_HOST_ALIAS:-registry.chaimir.io}:host-gateway"
     environment:
       DOCKER_CONFIG: /docker-config
+      SSL_CERT_FILE: /registry-ca/ca.crt
       HTTP_PROXY: ${HTTP_PROXY:-}
       HTTPS_PROXY: ${HTTPS_PROXY:-}
       NO_PROXY: ${NO_PROXY:-}
@@ -23,6 +24,10 @@ services:
         source: ${SUPPLY_CHAIN_DOCKER_CONFIG_HOST_DIR:-config/docker-auth}
         target: /docker-config
         read_only: true
+      - type: bind
+        source: ${SUPPLY_CHAIN_REGISTRY_CA_HOST_PATH:?SUPPLY_CHAIN_REGISTRY_CA_HOST_PATH is required}
+        target: /registry-ca/ca.crt
+        read_only: true
       - type: volume
         source: trivy-cache
         target: /root/.cache/trivy
@@ -37,10 +42,11 @@ services:
     entrypoint: ["cosign"]
     working_dir: /workspace
     extra_hosts:
-      - "${SUPPLY_CHAIN_REGISTRY_HOST_ALIAS:-harbor.chaimir}:host-gateway"
+      - "${SUPPLY_CHAIN_REGISTRY_HOST_ALIAS:-registry.chaimir.io}:host-gateway"
     environment:
       COSIGN_PASSWORD: ${COSIGN_PRIVATE_KEY_PASSWORD:-}
       DOCKER_CONFIG: /docker-config
+      SSL_CERT_FILE: /registry-ca/ca.crt
       HTTP_PROXY: ${HTTP_PROXY:-}
       HTTPS_PROXY: ${HTTPS_PROXY:-}
       NO_PROXY: ${NO_PROXY:-}
@@ -57,6 +63,10 @@ services:
         target: /docker-config
         read_only: true
       - type: bind
+        source: ${SUPPLY_CHAIN_REGISTRY_CA_HOST_PATH:?SUPPLY_CHAIN_REGISTRY_CA_HOST_PATH is required}
+        target: /registry-ca/ca.crt
+        read_only: true
+      - type: bind
         source: ${SUPPLY_CHAIN_EVIDENCE_HOST_DIR:-../.tmp/image-supply-chain/evidence}
         target: /evidence
         read_only: true
@@ -68,7 +78,7 @@ services:
     entrypoint: ["helm"]
     working_dir: /workspace
     extra_hosts:
-      - "${SUPPLY_CHAIN_REGISTRY_HOST_ALIAS:-harbor.chaimir}:host-gateway"
+      - "${SUPPLY_CHAIN_REGISTRY_HOST_ALIAS:-registry.chaimir.io}:host-gateway"
     environment:
       KUBECONFIG: /kubeconfig
       HARBOR_ADMIN_PASSWORD: ${HARBOR_ADMIN_PASSWORD:-}

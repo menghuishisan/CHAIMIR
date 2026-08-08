@@ -1,6 +1,6 @@
 # Chaimir 本地开发与部署编排。
 # 依据 docs/总-部署架构设计.md:local-dev 使用当前 kubeconfig 指向的 Kubernetes 集群。
-# 用法:make dev-up(当前集群部署中间件+应用)。这是唯一的本地浏览器联调入口。
+# 用法:make dev-up(首次 bootstrap);make dev-refresh(已 bootstrap 后刷新应用/迁移)。
 #
 # 前置:docker、kubectl(内置 kustomize)。Harbor/Trivy/Cosign/Helm 统一走容器化工具入口。
 # 注:本仓库用 kubectl 内置 kustomize(kubectl kustomize / kubectl apply -k)。
@@ -33,7 +33,11 @@ help: ## 显示可用目标
 # ---- 一键起步 ----
 .PHONY: dev-up
 dev-up: context-check gvisor-up-local ingress-up metrics-up-local policy-controller-up gen-secret tls middleware-wait apply-dev migrate ## 使用当前 K8s context 拉起完整部署(中间件+应用+迁移)
-	@echo "环境就绪。前端: https://chaimir (需将 chaimir 指向 127.0.0.1 并信任 config/chaimir-tls/tls.crt)"
+	@echo "环境就绪。前端: https://www.chaimir.io (需将 www.chaimir.io 指向 127.0.0.1 并信任 config/chaimir-tls/tls.crt)"
+
+.PHONY: dev-refresh
+dev-refresh: context-check gen-secret tls middleware-wait migrate ## 已完成 bootstrap 后刷新应用与迁移,不重复安装节点/集群组件
+	@echo "环境已刷新。前端: https://www.chaimir.io"
 
 .PHONY: dev-down
 dev-down: ## 删除当前 K8s context 中的 Chaimir 本地资源(不删除集群)
@@ -138,13 +142,17 @@ apply-dev: gen-secret tls ## 应用 local-dev overlay(命名空间/中间件/应
 .PHONY: tls
 tls: ## 使用持久化 HTTPS 证书并写入当前集群的 TLS Secret
 	@set -euo pipefail; \
-	command -v openssl >/dev/null 2>&1 || { echo "缺少 openssl,无法生成 HTTPS 证书"; exit 1; }; \
 	mkdir -p "$(TLS_DIR)"; \
-	if [ ! -s "$(TLS_DIR)/tls.key" ] || [ ! -s "$(TLS_DIR)/tls.crt" ] || ! openssl x509 -in "$(TLS_DIR)/tls.crt" -checkend 86400 -noout >/dev/null 2>&1; then \
+	if [ -s "$(TLS_DIR)/tls.key" ] && [ -s "$(TLS_DIR)/tls.crt" ] && ! command -v openssl >/dev/null 2>&1; then \
+		echo "复用已有 TLS 证书(宿主机无 openssl,不执行生成)"; \
+	elif [ -s "$(TLS_DIR)/tls.key" ] && [ -s "$(TLS_DIR)/tls.crt" ] && openssl x509 -in "$(TLS_DIR)/tls.crt" -checkend 86400 -noout >/dev/null 2>&1 && openssl x509 -in "$(TLS_DIR)/tls.crt" -noout -ext subjectAltName | grep -q 'DNS:www.chaimir.io' && openssl x509 -in "$(TLS_DIR)/tls.crt" -noout -ext subjectAltName | grep -q 'DNS:tools.chaimir.io' && openssl x509 -in "$(TLS_DIR)/tls.crt" -noout -ext subjectAltName | grep -q 'DNS:registry.chaimir.io'; then \
+		echo "复用现有 canonical TLS 证书"; \
+	else \
+		command -v openssl >/dev/null 2>&1 || { echo "缺少 openssl,无法生成 HTTPS 证书"; exit 1; }; \
 		openssl req -x509 -nodes -newkey rsa:2048 -days 825 \
 			-keyout "$(TLS_DIR)/tls.key" -out "$(TLS_DIR)/tls.crt" \
-			-subj "/CN=chaimir" \
-			-addext "subjectAltName=DNS:chaimir" >/dev/null 2>&1; \
+			-subj "/CN=www.chaimir.io" \
+			-addext "subjectAltName=DNS:www.chaimir.io,DNS:tools.chaimir.io,DNS:registry.chaimir.io" >/dev/null 2>&1; \
 	fi; \
 	kubectl create namespace chaimir-system --dry-run=client -o yaml | kubectl apply -f -; \
 	kubectl -n chaimir-system create secret tls "$(TLS_SECRET)" \

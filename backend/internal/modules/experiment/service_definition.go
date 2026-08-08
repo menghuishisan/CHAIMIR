@@ -100,7 +100,7 @@ func (s *Service) CreateExperiment(ctx context.Context, req ExperimentRequest) (
 	if err != nil {
 		return ExperimentDTO{}, err
 	}
-	req, err = validateExperimentRequest(req)
+	req, err = validateExperimentRequest(req, isValidJudgeSandboxMode)
 	if err != nil {
 		return ExperimentDTO{}, err
 	}
@@ -124,7 +124,7 @@ func (s *Service) UpdateExperiment(ctx context.Context, experimentID int64, req 
 	if err != nil {
 		return ExperimentDTO{}, err
 	}
-	req, err = validateExperimentRequest(req)
+	req, err = validateExperimentRequest(req, isValidJudgeSandboxMode)
 	if err != nil {
 		return ExperimentDTO{}, err
 	}
@@ -253,7 +253,7 @@ func (s *Service) validateExperimentComponents(ctx context.Context, item Experim
 			result.OK = false
 		}
 	}
-	if err := validateComponentConfig(item.Components, item.CollabMode, item.GroupConfig); err != nil {
+	if err := validateComponentConfig(item.Components, item.CollabMode, item.GroupConfig, isValidJudgeSandboxMode); err != nil {
 		add(ValidationLevelError, "实验组件配置不完整")
 	}
 	if s.sandbox == nil && len(item.Components.Envs) > 0 {

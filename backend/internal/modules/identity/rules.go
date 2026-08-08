@@ -6,7 +6,6 @@ import (
 	"strings"
 	"time"
 
-	"chaimir/internal/contracts"
 	"chaimir/pkg/apperr"
 	"chaimir/pkg/privacy"
 )
@@ -117,14 +116,14 @@ func EnsureTenantCanLogin(tenant Tenant, now time.Time) error {
 	return nil
 }
 
-// BaseRole 返回基础身份对应的固定 RBAC 角色。
-func BaseRole(baseIdentity int16) (int16, error) {
+// ValidateBaseIdentity 校验基础身份取值,角色契约映射由 service 边界负责。
+func ValidateBaseIdentity(baseIdentity int16) error {
 	switch baseIdentity {
 	case BaseIdentityTeacher:
-		return contracts.RoleNumTeacher, nil
+		return nil
 	case BaseIdentityStudent:
-		return contracts.RoleNumStudent, nil
+		return nil
 	default:
-		return 0, apperr.ErrIdentityBaseRoleInvalid
+		return apperr.ErrIdentityBaseRoleInvalid
 	}
 }

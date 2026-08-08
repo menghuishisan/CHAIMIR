@@ -65,7 +65,7 @@ Kustomize component 同时生成两个命名空间的 ConfigMap:
 
 **密钥**走 `secret.env`(从 `config/secret.env.example` 复制,被 `.gitignore` 忽略):
 
-`make tls` 会在 `config/chaimir-tls/` 持久化生成有效期 825 天的 `chaimir` 自签证书，并创建统一名称 `chaimir-tls`。证书文件被 `.gitignore` 忽略，不会上传到 GitHub；文件存在且仍有效时，重复启动不会重新生成。浏览器入口统一使用 `https://chaimir`，需将域名解析到 `127.0.0.1` 并信任 `config/chaimir-tls/tls.crt`；Cookie 不提供 HTTP 降级。
+`make tls` 会在 `config/chaimir-tls/` 持久化生成有效期 825 天的 `www.chaimir.io` 自签证书，并创建统一名称 `chaimir-tls`。证书文件被 `.gitignore` 忽略，不会上传到 GitHub；文件存在且仍有效时，重复启动不会重新生成。浏览器入口统一使用 `https://www.chaimir.io`，需将域名解析到 `127.0.0.1` 并信任 `config/chaimir-tls/tls.crt`；Cookie 不提供 HTTP 降级。
 
 staging 和 prod-saas 部署流水线会在应用资源后等待 `chaimir-system/chaimir-tls`，并校验 Secret 类型为 `kubernetes.io/tls` 且同时包含证书和私钥；缺失或不完整会阻断部署。prod-school 交付前必须由学校运维在同一命名空间预创建同名 TLS Secret，再执行清单应用和 `bash deploy/scripts/wait-tls-secret.sh chaimir-system chaimir-tls 300` 验收。
 
@@ -81,6 +81,8 @@ staging 和 prod-saas 部署流水线会在应用资源后等待 `chaimir-system
 
 本地联调统一使用完整 `local-dev` overlay：PostgreSQL、Redis、NATS、MinIO、ClamAV、后端、前端和迁移任务全部运行在当前 Kubernetes 集群。工作区直跑后端或前端不再作为平台启动方式，避免同一环境同时存在两套服务入口。
 
+短信验证码仍走后端唯一的 HTTP 网关发送链路。`local-dev` 仅把 `SMS_HTTP_ENDPOINT_SCOPE` 显式设为 `cluster`，并限制到 `10.96.0.0/12` Service CIDR；预发布和生产统一使用 `public` 外部网关。该测试夹具由 `scripts/e2e/start-sms-gateway.ps1` 临时创建并按标签清理，不是项目运行时镜像，也不会引入公开的 `local` 域名。
+
 检查当前集群:
 
 ```bash
@@ -95,9 +97,9 @@ cd deploy
 make dev-up
 ```
 
-该目标会校验当前 Kubernetes context、安装本地必需的集群组件、生成 HTTPS Secret、部署完整 `local-dev` overlay 并运行迁移任务。启动完成后将 `chaimir` 解析到 `127.0.0.1`,信任 `config/chaimir-tls/tls.crt`,通过 `https://chaimir` 访问。
+该目标会校验当前 Kubernetes context、安装本地必需的集群组件、生成 HTTPS Secret、部署完整 `local-dev` overlay 并运行迁移任务。启动完成后将 `www.chaimir.io` 解析到 `127.0.0.1`,信任 `config/chaimir-tls/tls.crt`,通过 `https://www.chaimir.io` 访问。
 
-`make dev-up` 仅是便捷包装,使用当前 Kubernetes context,不负责创建任何集群。生产/标准集群使用 `make metrics-up` 保持 kubelet TLS 校验;
+`make dev-up` 仅是首次 bootstrap 的便捷包装,使用当前 Kubernetes context,不负责创建任何集群；它会安装/校验 gVisor、ingress、metrics-server、policy-controller 并等待中间件。集群已完成 bootstrap 后，日常代码或镜像刷新使用 `make dev-refresh`，不会重复下载 gVisor、重启节点或安装集群级组件。生产/标准集群使用 `make metrics-up` 保持 kubelet TLS 校验;
 Docker Desktop 等本地集群如 kubelet 证书不完整,使用 `make metrics-up-local`,仅本地追加
 `--kubelet-insecure-tls`,不得用于生产。
 
@@ -108,7 +110,7 @@ M2 快照能力分为两层:通用 `VolumeSnapshot` CRD/snapshot-controller 与�
 中填写真实类名。`rancher.io/local-path`、普通 Docker volume 或演示用 hostpath CSI 不作为生产
 快照方案。
 
-将 `chaimir` 指向 `127.0.0.1`(hosts)后,前端经 `https://chaimir` 访问,并信任 `config/chaimir-tls/tls.crt`。`dev-up` 是唯一的浏览器联调入口。
+将 `www.chaimir.io` 指向 `127.0.0.1`(hosts)后,前端经 `https://www.chaimir.io` 访问,并信任 `config/chaimir-tls/tls.crt`。首次环境使用 `dev-up`，后续浏览器联调和 E2E 使用 `dev-refresh`。
 
 > 应用镜像就绪前(目录2/3 未产出),backend/frontend/migrate Pod 会处于 ImagePull 待命 —— 属预期。
 > 镜像必须由统一供应链直接推送 Harbor、按 digest 回拉并通过门禁,再由 `image-metadata-promotion` 晋升到权威锁和 local-dev overlay;不得导入本地 `:dev` tag 绕过该流程。
@@ -127,7 +129,7 @@ make harbor-projects-ensure
 ```
 
 Docker Desktop 本地没有固定入口 IP 时,不要把 ingress 的 `172.18.x.x` 写入配置或 hosts;该地址会随
-Docker/K8s 重启变化。统一使用 `SUPPLY_CHAIN_HARBOR_EXTERNAL_URL=http://harbor.chaimir:30080`
+Docker/K8s 重启变化。统一使用 `SUPPLY_CHAIN_HARBOR_EXTERNAL_URL=http://registry.chaimir.io`
 和 `make harbor-forward` 暴露 Harbor Ingress Controller。`harbor-forward` 需要在单独终端保持运行;
 它按 `SUPPLY_CHAIN_HARBOR_FORWARD_ADDRESS` 监听 `SUPPLY_CHAIN_HARBOR_FORWARD_PORT`,并且必须转发
 Ingress Controller,不能直连 `harbor-core`,否则 `/v2/` 上传路径与生产不一致。生产/预发布必须通过交付配置把
@@ -156,7 +158,7 @@ Harbor 入口,必须与 `SUPPLY_CHAIN_REGISTRY` 的主机名一致。生产/预�
 只有进入 Chaimir 镜像供应链或实验真实测试流程时才启动 `make harbor-forward`;日常只打开 Docker
 Desktop 做其他项目时不应自动占用该端口。生产不得依赖 port-forward。
 
-`SUPPLY_CHAIN_TRIVY_IMAGE`、`SUPPLY_CHAIN_COSIGN_IMAGE`、`SUPPLY_CHAIN_HELM_IMAGE` 使用 digest 固定。当前 Trivy 固定为 0.72.0,Cosign 固定为 3.1.1;GitHub 工作流也显式安装同一 Cosign 版本。本地、私有化与 CI 使用项目私钥且不上传公共透明日志。需要升级工具时,先拉取目标稳定版本并确认 digest与命令参数,再同步更新 `config/chaimir.env` 和工作流版本,不得提交可变 `latest`。
+`SUPPLY_CHAIN_TRIVY_IMAGE`、`SUPPLY_CHAIN_COSIGN_IMAGE`、`SUPPLY_CHAIN_HELM_IMAGE` 使用 digest 固定。当前 Trivy 固定为 0.72.0,Cosign 固定为 2.4.3（与 policy-controller 0.13.1 的 legacy 签名格式契约一致）;GitHub 工作流也显式安装同一 Cosign 版本。本地、私有化与 CI 使用项目私钥且不上传公共透明日志。需要升级工具时,先拉取目标稳定版本并确认 digest与命令参数,再同步更新 `config/chaimir.env` 和工作流版本,不得提交可变 `latest`。
 
 ## 校验(无需集群)
 
@@ -181,7 +183,7 @@ README、docs 或普通应用提交不直接创建 staging Deployment。只有�
 所需 GitHub Secrets:`HARBOR_REGISTRY`、`HARBOR_USERNAME`、`HARBOR_PASSWORD`、
 `COSIGN_KEY`、`COSIGN_PASSWORD`、`IMAGE_METADATA_BOT_TOKEN`、`KUBECONFIG_STAGING`、`KUBECONFIG_PROD_SAAS`。仓库还必须启用 Auto-merge;`IMAGE_METADATA_BOT_TOKEN` 使用能触发 PR 检查的 GitHub App 或细粒度 PAT,不得用默认 `GITHUB_TOKEN` 替代。
 
-默认 `ubuntu-latest` runner 必须能通过 HTTPS 访问 `HARBOR_REGISTRY` 与目标 staging/prod Kubernetes API。本机 `harbor.chaimir:30080` 依赖端口转发,只属于本地供应链,不能填写为 GitHub 托管 runner 的 registry。若交付环境只提供私网 Harbor/K8s,必须先在同一受控网络注册专用自托管 runner,再将镜像构建和部署 job 的 `runs-on` 收敛到该 runner 标签;不得通过暴露本机临时端口或提交本地凭据绕过网络边界。
+默认 `ubuntu-latest` runner 必须能通过 HTTPS 访问 `HARBOR_REGISTRY` 与目标 staging/prod Kubernetes API。本机 `registry.chaimir.io` 依赖端口转发,只属于本地供应链,不能填写为 GitHub 托管 runner 的 registry。若交付环境只提供私网 Harbor/K8s,必须先在同一受控网络注册专用自托管 runner,再将镜像构建和部署 job 的 `runs-on` 收敛到该 runner 标签;不得通过暴露本机临时端口或提交本地凭据绕过网络边界。
 
 ## 安全基线
 

@@ -27,7 +27,7 @@ if ([string]::IsNullOrWhiteSpace($Registry)) {
     $Registry = $env:IMAGE_REGISTRY
 }
 if ([string]::IsNullOrWhiteSpace($Registry)) {
-    $Registry = "harbor.chaimir:30080"
+    $Registry = "registry.chaimir.io"
 }
 if ([string]::IsNullOrWhiteSpace($DigestLock)) {
     $DigestLock = Join-Path $Root "image-digests.lock"
@@ -141,9 +141,6 @@ function Get-RemoteDigestFromRegistryV2 {
     $repository = $Matches[2]
     $tag = $Matches[3]
     $scheme = "https"
-    if ($registryHost -eq "harbor.chaimir" -or $registryHost.StartsWith("harbor.chaimir:")) {
-        $scheme = "http"
-    }
     $headers = @{
         Accept = "application/vnd.oci.image.index.v1+json, application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json"
     }

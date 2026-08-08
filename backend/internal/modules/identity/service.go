@@ -6,15 +6,32 @@ import (
 	"fmt"
 	"time"
 
+	"chaimir/internal/contracts"
 	"chaimir/internal/platform/auth"
 	"chaimir/internal/platform/config"
 	"chaimir/internal/platform/eventbus"
 	"chaimir/internal/platform/redis"
 	"chaimir/internal/platform/timex"
 	"chaimir/internal/platform/upload"
+	"chaimir/pkg/apperr"
 	"chaimir/pkg/crypto"
 	"chaimir/pkg/snowflake"
 )
+
+// baseRoleNumber 将 identity 基础身份映射为跨模块 RBAC 数字契约,只在 service 边界适配。
+func baseRoleNumber(baseIdentity int16) (int16, error) {
+	if err := ValidateBaseIdentity(baseIdentity); err != nil {
+		return 0, err
+	}
+	switch baseIdentity {
+	case BaseIdentityTeacher:
+		return contracts.RoleNumTeacher, nil
+	case BaseIdentityStudent:
+		return contracts.RoleNumStudent, nil
+	default:
+		return 0, apperr.ErrIdentityBaseRoleInvalid
+	}
+}
 
 // Service 承载 identity 模块业务编排,依赖 repo 接口和平台横切能力。
 type Service struct {

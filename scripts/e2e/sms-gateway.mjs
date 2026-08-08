@@ -1,24 +1,31 @@
-// sms-gateway.mjs 模拟本地短信代理网关，供浏览器验收短信登录与找回密码闭环。
-// 鉴权 token 与后端进程同源：均取自 env.mjs 统一加载的 deploy/config/secret.env，
-// 因此这里不接受任何形式的默认值或宽松校验。
+// sms-gateway.mjs 是 local-dev E2E 使用的临时短信代理网关实现。
+// 鉴权 token 只从运行时注入的 SMS_HTTP_TOKEN 读取，不接受默认值或配置文件路径。
 
 import fs from 'node:fs'
 import http from 'node:http'
 import path from 'node:path'
-import { loadE2EEnv, requireEnv } from './env.mjs'
 
-const env = loadE2EEnv()
-const token = requireEnv(env, 'SMS_HTTP_TOKEN')
-const port = Number(process.env.E2E_SMS_PORT || 18888)
+const token = (process.env.SMS_HTTP_TOKEN || '').trim()
+if (!token) {
+  throw new Error('SMS_HTTP_TOKEN 未注入，拒绝启动短信验收网关')
+}
+const port = Number(process.env.SMS_GATEWAY_PORT || 18080)
+if (!Number.isInteger(port) || port < 1 || port > 65535) {
+  throw new Error('SMS_GATEWAY_PORT 必须是有效端口')
+}
 
 // 收到的验证码落盘成 ndjson，供用例读取验证码完成短信登录与找回密码闭环。
-const logPath = process.env.E2E_SMS_LOG_PATH
+const logPath = process.env.SMS_GATEWAY_LOG_PATH
 if (logPath) {
   fs.mkdirSync(path.dirname(logPath), { recursive: true })
 }
 
 const server = http.createServer((req, res) => {
-  if (req.method !== 'POST' || req.url !== '/send') {
+  if (req.method === 'GET' && req.url === '/-/readyz') {
+    res.writeHead(200).end('ok')
+    return
+  }
+  if (req.method !== 'POST' || req.url !== '/sms') {
     res.writeHead(404).end()
     return
   }
@@ -38,7 +45,6 @@ const server = http.createServer((req, res) => {
         return
       }
       const record = JSON.stringify({ received_at: new Date().toISOString(), ...payload })
-      console.log(record)
       if (logPath) {
         fs.appendFileSync(logPath, record + '\n')
       }
@@ -49,6 +55,6 @@ const server = http.createServer((req, res) => {
   })
 })
 
-server.listen(port, '127.0.0.1', () => {
-  console.log(`Chaimir E2E SMS gateway listening on http://127.0.0.1:${port}/send`)
+server.listen(port, '0.0.0.0', () => {
+  console.log(`Chaimir E2E SMS gateway listening on 0.0.0.0:${port}/sms`)
 })

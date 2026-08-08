@@ -1,4 +1,4 @@
-﻿# Chaimir
+# Chaimir
 
 区块链教学 · 实验 · 竞赛三位一体平台
 
@@ -94,7 +94,7 @@ cd deploy
 make dev-up
 ```
 
-前后端、依赖服务、迁移任务和 HTTPS Ingress 由同一条入口统一启动，浏览器访问 `https://chaimir`。前端的 `pnpm lint`、`pnpm type-check` 和 `pnpm build` 仅用于工作区校验，不是第二套平台启动入口。
+前后端、依赖服务、迁移任务和 HTTPS Ingress 由同一条入口统一启动，浏览器访问 `https://www.chaimir.io`。前端的 `pnpm lint`、`pnpm type-check` 和 `pnpm build` 仅用于工作区校验，不是第二套平台启动入口。
 
 ---
 

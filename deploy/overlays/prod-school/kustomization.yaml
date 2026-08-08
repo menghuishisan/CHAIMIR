@@ -29,31 +29,31 @@ secretGenerator:
 # 镜像来自校内 Harbor(离线导入),版本随平台版本固定。
 images:
   - name: chaimir/backend
-    newName: harbor.school.local/service/backend
+    newName: registry.chaimir.io/service/backend
     newTag: "1.0.0"
   - name: chaimir/frontend
-    newName: harbor.school.local/service/frontend
+    newName: registry.chaimir.io/service/frontend
     newTag: "1.0.0"
   - name: chaimir/migrate
-    newName: harbor.school.local/service/migrate
+    newName: registry.chaimir.io/service/migrate
     newTag: "1.0.0"
   - name: chaimir/cron
-    newName: harbor.school.local/service/cron
+    newName: registry.chaimir.io/service/cron
     newTag: "1.0.0"
   - name: chaimir/middleware/clamav
-    newName: harbor.school.local/middleware/clamav
+    newName: registry.chaimir.io/middleware/clamav
     newTag: "1.0.0"
   - name: chaimir/middleware/minio
-    newName: harbor.school.local/middleware/minio
+    newName: registry.chaimir.io/middleware/minio
     newTag: "1.0.0"
   - name: chaimir/middleware/nats
-    newName: harbor.school.local/middleware/nats
+    newName: registry.chaimir.io/middleware/nats
     newTag: "1.0.0"
   - name: chaimir/middleware/postgres
-    newName: harbor.school.local/middleware/postgres
+    newName: registry.chaimir.io/middleware/postgres
     newTag: "1.0.0"
   - name: chaimir/middleware/redis
-    newName: harbor.school.local/middleware/redis
+    newName: registry.chaimir.io/middleware/redis
     newTag: "1.0.0"
 
 # 私有化形态:school 单租户 + 关平台层。
@@ -66,7 +66,7 @@ configMapGenerator:
       - PLATFORM_LAYER_ENABLED=false
       - SCHOOL_TENANT_ID=1001
       - LOG_LEVEL=info
-      - PG_SSLMODE=disable
+      - PG_SSLMODE=require
 
 patches:
   # 校内域名(私有化按校配置)。

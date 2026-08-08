@@ -35,13 +35,29 @@ func NewSMSSender(cfg config.SMSConfig) (SMSSender, error) {
 		client *http.Client
 		err    error
 	)
-	if cfg.AllowLoopbackEndpoint {
-		client, err = netx.NewLoopbackHTTPClient(timeout)
-	} else {
+	switch strings.ToLower(strings.TrimSpace(cfg.EndpointScope)) {
+	case "public":
 		client, err = netx.NewPublicHTTPClient(timeout)
+	case "cluster":
+		client, err = netx.NewClusterHTTPClient(timeout, cfg.ClusterCIDRs)
+	default:
+		err = fmt.Errorf("短信 HTTP 网关端点范围不支持: %s", cfg.EndpointScope)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("创建短信 HTTP 客户端失败: %w", err)
+	}
+	if strings.TrimSpace(cfg.Endpoint) == "" {
+		return nil, fmt.Errorf("短信 HTTP 网关地址不能为空")
+	}
+	switch strings.ToLower(strings.TrimSpace(cfg.EndpointScope)) {
+	case "public":
+		if _, err := netx.ValidatePublicHTTPURL(cfg.Endpoint); err != nil {
+			return nil, fmt.Errorf("短信 HTTP 网关地址不安全: %w", err)
+		}
+	case "cluster":
+		if _, err := netx.ValidateClusterHTTPURL(cfg.Endpoint); err != nil {
+			return nil, fmt.Errorf("短信 HTTP 网关地址不安全: %w", err)
+		}
 	}
 	return &HTTPSMSSender{cfg: cfg, client: client}, nil
 }
@@ -65,10 +81,13 @@ func (s *HTTPSMSSender) sendHTTP(ctx context.Context, phone string, scene int16,
 		endpoint string
 		err      error
 	)
-	if s.cfg.AllowLoopbackEndpoint {
-		endpoint, err = netx.ValidateLoopbackHTTPURL(s.cfg.Endpoint)
-	} else {
+	switch strings.ToLower(strings.TrimSpace(s.cfg.EndpointScope)) {
+	case "public":
 		endpoint, err = netx.ValidatePublicHTTPURL(s.cfg.Endpoint)
+	case "cluster":
+		endpoint, err = netx.ValidateClusterHTTPURL(s.cfg.Endpoint)
+	default:
+		err = fmt.Errorf("短信 HTTP 网关端点范围不支持: %s", s.cfg.EndpointScope)
 	}
 	if err != nil {
 		return fmt.Errorf("短信 HTTP 网关地址不安全: %w", err)

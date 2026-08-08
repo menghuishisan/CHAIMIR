@@ -270,6 +270,18 @@ export class ApiClient {
   }
 
   /**
+   * 基于独立工具 origin 生成浏览器工具代理入口地址。
+   * 工具页必须与平台页面分 origin，避免被嵌入页面读取平台 DOM 或同源凭据。
+   */
+  public browserURLAtOrigin(origin: string, path: string, query?: Record<string, string | undefined>): string {
+    const normalizedOrigin = origin.trim().replace(/\/+$/, '')
+    if (!/^https:\/\//.test(normalizedOrigin)) {
+      throw new Error('工具代理 origin 必须使用 HTTPS')
+    }
+    return `${normalizedOrigin}${normalizePath(path)}${this.browserTokenQuery(query)}`
+  }
+
+  /**
    * 构造浏览器工具代理入口使用的一次性 token 查询参数。
    */
   public browserTokenQuery(extra?: Record<string, string | undefined>): string {

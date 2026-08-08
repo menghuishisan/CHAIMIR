@@ -57,7 +57,7 @@ func (s *Service) CreateAccountByAdmin(ctx context.Context, req CreateAccountReq
 	if err := ValidatePhone(req.Phone); err != nil {
 		return AccountDTO{}, "", err
 	}
-	role, err := BaseRole(req.BaseIdentity)
+	role, err := baseRoleNumber(req.BaseIdentity)
 	if err != nil {
 		return AccountDTO{}, "", err
 	}

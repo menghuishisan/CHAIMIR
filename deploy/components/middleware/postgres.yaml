@@ -50,6 +50,14 @@ spec:
       containers:
         - name: postgres
           image: chaimir/middleware/postgres:placeholder
+          args:
+            - postgres
+            - -c
+            - ssl=on
+            - -c
+            - ssl_cert_file=/etc/postgresql/tls/tls.crt
+            - -c
+            - ssl_key_file=/etc/postgresql/tls/tls.key
           ports:
             - name: postgres
               containerPort: 5432
@@ -95,6 +103,14 @@ spec:
           volumeMounts:
             - name: data
               mountPath: /var/lib/postgresql/data
+            - name: postgres-tls
+              mountPath: /etc/postgresql/tls
+              readOnly: true
+      volumes:
+        - name: postgres-tls
+          secret:
+            secretName: postgres-tls
+            defaultMode: 0440
   volumeClaimTemplates:
     - metadata:
         name: data

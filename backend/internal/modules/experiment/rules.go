@@ -7,7 +7,6 @@ import (
 	"strings"
 	"time"
 
-	"chaimir/internal/contracts"
 	"chaimir/internal/platform/auth"
 	"chaimir/internal/platform/jsonx"
 	"chaimir/pkg/apperr"
@@ -18,7 +17,7 @@ const maxCheckpointBindingOutputBytes = 16 * 1024
 var componentIDPattern = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$`)
 
 // validateExperimentRequest 校验教师向导草稿的边界字段和组件结构。
-func validateExperimentRequest(req ExperimentRequest) (ExperimentRequest, error) {
+func validateExperimentRequest(req ExperimentRequest, validJudgeMode func(string) bool) (ExperimentRequest, error) {
 	req.Name = strings.TrimSpace(req.Name)
 	req.Description = strings.TrimSpace(req.Description)
 	req.TemplateRef = strings.TrimSpace(req.TemplateRef)
@@ -48,14 +47,14 @@ func validateExperimentRequest(req ExperimentRequest) (ExperimentRequest, error)
 		req.Components.Stages = []StageConfig{}
 	}
 	req.Components = normalizeComponentConfig(req.Components)
-	if err := validateComponentConfig(req.Components, req.CollabMode, req.GroupConfig); err != nil {
+	if err := validateComponentConfig(req.Components, req.CollabMode, req.GroupConfig, validJudgeMode); err != nil {
 		return ExperimentRequest{}, err
 	}
 	return req, nil
 }
 
 // validateComponentConfig 校验自由组合组件的引用完整性和分值边界。
-func validateComponentConfig(cfg ComponentConfig, collabMode int16, group GroupConfig) error {
+func validateComponentConfig(cfg ComponentConfig, collabMode int16, group GroupConfig, validJudgeMode func(string) bool) error {
 	ids := map[string]bool{}
 	envIDs := map[string]bool{}
 	simIDs := map[string]bool{}
@@ -83,7 +82,7 @@ func validateComponentConfig(cfg ComponentConfig, collabMode int16, group GroupC
 		if !componentIDPattern.MatchString(cp.ID) || checkpointIDs[cp.ID] || strings.TrimSpace(cp.ItemCode) == "" || strings.TrimSpace(cp.ItemVersion) == "" || strings.TrimSpace(cp.JudgerCode) == "" || cp.Score <= 0 {
 			return apperr.ErrExperimentCheckpointInvalid
 		}
-		if cp.Mode != "" && cp.Mode != contracts.JudgeSandboxModeFresh && cp.Mode != contracts.JudgeSandboxModeReuse {
+		if cp.Mode != "" && !validJudgeMode(cp.Mode) {
 			return apperr.ErrExperimentCheckpointInvalid
 		}
 		if cp.EnvID != "" && !envIDs[cp.EnvID] {

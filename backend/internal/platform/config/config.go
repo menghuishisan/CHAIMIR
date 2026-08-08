@@ -4,6 +4,7 @@ package config
 import (
 	"encoding/json"
 	"fmt"
+	"net/netip"
 	"net/url"
 	"os"
 	"strconv"
@@ -171,14 +172,15 @@ type IdentityConfig struct {
 
 // SMSConfig 描述短信网关接入边界。
 type SMSConfig struct {
-	Provider              string
-	Endpoint              string
-	Token                 string
-	LoginTemplate         string
-	ResetTemplate         string
-	ChangeTemplate        string
-	TimeoutSeconds        int
-	AllowLoopbackEndpoint bool
+	Provider       string
+	Endpoint       string
+	Token          string
+	EndpointScope  string
+	ClusterCIDRs   []netip.Prefix
+	LoginTemplate  string
+	ResetTemplate  string
+	ChangeTemplate string
+	TimeoutSeconds int
 }
 
 // UploadConfig 描述统一上传边界。
@@ -493,22 +495,6 @@ func Load() (*Config, error) {
 			return false
 		}
 	}
-	optBool := func(key string) bool {
-		v := strings.TrimSpace(os.Getenv(key))
-		if v == "" {
-			return false
-		}
-		switch strings.ToLower(v) {
-		case "true", "1", "yes", "y", "on":
-			return true
-		case "false", "0", "no", "n", "off":
-			return false
-		default:
-			errs = append(errs, fmt.Sprintf("环境变量 %s 需为布尔值,实际=%q", key, os.Getenv(key)))
-			return false
-		}
-	}
-
 	// 第二步:按配置域分组装载环境变量,保持 deploy/server/db/... 的职责边界清晰。
 	c.Deploy = DeployConfig{
 		Mode:            req("DEPLOY_MODE"),
@@ -622,15 +608,20 @@ func Load() (*Config, error) {
 		TenantProvisionOutboxBatch:   reqInt("IDENTITY_TENANT_PROVISION_OUTBOX_BATCH_SIZE"),
 		TenantProvisionOutboxStaleMs: reqInt("IDENTITY_TENANT_PROVISION_OUTBOX_STALE_INTERVAL_MS"),
 	}
+	clusterCIDRs, clusterCIDRsErr := parseCIDRPrefixes(os.Getenv("SMS_HTTP_CLUSTER_CIDRS"))
+	if clusterCIDRsErr != nil {
+		errs = append(errs, clusterCIDRsErr.Error())
+	}
 	c.SMS = SMSConfig{
-		Provider:              req("SMS_PROVIDER"),
-		Endpoint:              os.Getenv("SMS_HTTP_ENDPOINT"),
-		Token:                 os.Getenv("SMS_HTTP_TOKEN"),
-		LoginTemplate:         os.Getenv("SMS_TEMPLATE_LOGIN"),
-		ResetTemplate:         os.Getenv("SMS_TEMPLATE_RESET"),
-		ChangeTemplate:        os.Getenv("SMS_TEMPLATE_CHANGE_PHONE"),
-		TimeoutSeconds:        reqInt("SMS_TIMEOUT_SECONDS"),
-		AllowLoopbackEndpoint: optBool("SMS_HTTP_ALLOW_LOOPBACK"),
+		Provider:       req("SMS_PROVIDER"),
+		Endpoint:       os.Getenv("SMS_HTTP_ENDPOINT"),
+		Token:          os.Getenv("SMS_HTTP_TOKEN"),
+		EndpointScope:  strings.ToLower(strings.TrimSpace(req("SMS_HTTP_ENDPOINT_SCOPE"))),
+		ClusterCIDRs:   clusterCIDRs,
+		LoginTemplate:  os.Getenv("SMS_TEMPLATE_LOGIN"),
+		ResetTemplate:  os.Getenv("SMS_TEMPLATE_RESET"),
+		ChangeTemplate: os.Getenv("SMS_TEMPLATE_CHANGE_PHONE"),
+		TimeoutSeconds: reqInt("SMS_TIMEOUT_SECONDS"),
 	}
 	c.Upload = UploadConfig{
 		ImportMaxBytes:            reqInt64("UPLOAD_IMPORT_MAX_BYTES"),
@@ -852,6 +843,9 @@ func Load() (*Config, error) {
 	}
 	if c.Postgres.GrantTimeoutSeconds <= 0 {
 		errs = append(errs, "PG_GRANT_TIMEOUT_SECONDS 必须大于 0")
+	}
+	if strings.EqualFold(strings.TrimSpace(c.Postgres.SSLMode), "disable") && !isLocalLikeEnv(c.Server.AppEnv) {
+		errs = append(errs, "生产或预发布环境 PG_SSLMODE 不得为 disable")
 	}
 	if c.NATS.ReconnectWaitSeconds <= 0 {
 		errs = append(errs, "NATS_RECONNECT_WAIT_SECONDS 必须大于 0")
@@ -1193,9 +1187,6 @@ func Load() (*Config, error) {
 	if c.SMS.TimeoutSeconds <= 0 {
 		errs = append(errs, "SMS_TIMEOUT_SECONDS 必须大于 0")
 	}
-	if c.SMS.AllowLoopbackEndpoint && !isLocalLikeEnv(c.Server.AppEnv) {
-		errs = append(errs, "SMS_HTTP_ALLOW_LOOPBACK 只能在 APP_ENV=local/dev/test 时开启")
-	}
 	switch strings.ToLower(strings.TrimSpace(c.SMS.Provider)) {
 	case "http":
 		if strings.TrimSpace(c.SMS.Endpoint) == "" || strings.TrimSpace(c.SMS.Token) == "" {
@@ -1206,6 +1197,23 @@ func Load() (*Config, error) {
 		}
 		if u, err := url.Parse(strings.TrimSpace(c.SMS.Endpoint)); err != nil || u.Scheme == "" || u.Host == "" || u.User != nil || (u.Scheme != "http" && u.Scheme != "https") {
 			errs = append(errs, "SMS_HTTP_ENDPOINT 必须是不含凭据的 HTTP(S) URL")
+		}
+		switch c.SMS.EndpointScope {
+		case "public":
+			if len(c.SMS.ClusterCIDRs) > 0 {
+				errs = append(errs, "SMS_HTTP_ENDPOINT_SCOPE=public 时不得配置 SMS_HTTP_CLUSTER_CIDRS")
+			}
+		case "cluster":
+			if !isLocalLikeEnv(c.Server.AppEnv) {
+				errs = append(errs, "SMS_HTTP_ENDPOINT_SCOPE=cluster 只能在 APP_ENV=local/dev/test 时使用")
+			}
+			if len(c.SMS.ClusterCIDRs) == 0 {
+				errs = append(errs, "SMS_HTTP_ENDPOINT_SCOPE=cluster 时必须配置 SMS_HTTP_CLUSTER_CIDRS")
+			}
+		case "":
+			// req 已记录缺失错误,避免重复报告。
+		default:
+			errs = append(errs, "SMS_HTTP_ENDPOINT_SCOPE 只能为 public 或 cluster")
 		}
 	default:
 		errs = append(errs, "SMS_PROVIDER 只能为 http")
@@ -1226,6 +1234,28 @@ func Load() (*Config, error) {
 func validOrigin(raw string) bool {
 	u, err := url.Parse(strings.TrimSpace(raw))
 	return err == nil && u.Scheme != "" && u.Host != "" && u.Path == "" && u.RawQuery == "" && u.Fragment == ""
+}
+
+// parseCIDRPrefixes 解析受控集群出站允许网段,拒绝部分解析或空网段导致的隐式放行。
+func parseCIDRPrefixes(raw string) ([]netip.Prefix, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil, nil
+	}
+	parts := strings.Split(raw, ",")
+	prefixes := make([]netip.Prefix, 0, len(parts))
+	for _, part := range parts {
+		value := strings.TrimSpace(part)
+		if value == "" {
+			return nil, fmt.Errorf("环境变量 SMS_HTTP_CLUSTER_CIDRS 包含空网段")
+		}
+		prefix, err := netip.ParsePrefix(value)
+		if err != nil {
+			return nil, fmt.Errorf("环境变量 SMS_HTTP_CLUSTER_CIDRS 包含非法网段 %q: %w", value, err)
+		}
+		prefixes = append(prefixes, prefix.Masked())
+	}
+	return prefixes, nil
 }
 
 // isLocalLikeEnv 判断配置是否处于本地或测试环境,用于限制验收专用能力。

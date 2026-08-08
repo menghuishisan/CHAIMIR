@@ -5,8 +5,8 @@
 import { loadE2EEnv, requireEnv } from './env.mjs'
 
 const env = loadE2EEnv()
-const backendBaseURL = process.env.E2E_BACKEND_BASE_URL || 'http://127.0.0.1:8080'
-const smsEndpoint = process.env.E2E_SMS_ENDPOINT || 'http://127.0.0.1:18888/send'
+const backendBaseURL = process.env.E2E_BACKEND_BASE_URL || 'http://127.0.0.1:18081'
+const smsEndpoint = process.env.E2E_SMS_ENDPOINT || 'http://127.0.0.1:18080/sms'
 
 // 探活使用验收种子中的固定学生账号（backend/cmd/migrate/acceptance_seed.go），
 // 其手机号在验收租户内唯一，因此无需显式传 tenant_id。
@@ -37,12 +37,12 @@ async function probeGatewayToken(token) {
       body: JSON.stringify({ phone: PROBE_PHONE, template: 'preflight', code: 'PREFLT' }),
     })
   } catch (error) {
-    fail(`短信 mock 未就绪，无法连接 ${smsEndpoint}`, `请先启动 scripts/e2e/sms-gateway.mjs（${error.message}）`)
+    fail(`短信验收网关未就绪，无法连接 ${smsEndpoint}`, `请先启动 scripts/e2e/start-sms-gateway.ps1（${error.message}）`)
   }
   if (response.status === 401) {
     fail(
       '短信 mock 拒绝了配置中的 token',
-      '运行中的 mock 进程加载的不是当前 deploy/config/secret.env，请重启 scripts/e2e/sms-gateway.mjs',
+      '临时网关加载的不是当前 chaimir-secret，请执行 scripts/e2e/start-sms-gateway.ps1 -Cleanup 后重启',
     )
   }
   if (response.status !== 204) {

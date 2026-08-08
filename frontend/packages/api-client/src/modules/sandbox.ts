@@ -220,9 +220,10 @@ export class SandboxApi {
   /**
    * 获取 Web 工具代理 URL
    */
-  getToolProxyUrl(instanceId: string, toolCode: string, proxyPath = ''): string {
+  getToolProxyUrl(instanceId: string, toolCode: string, proxyPath = '', toolOrigin: string): string {
     const normalizedPath = proxyPath.replace(/^\/+/, '')
     const encodedTool = encodeURIComponent(toolCode)
-    return this.client.browserURL(`/sandbox/sandboxes/${instanceId}/tools/${encodedTool}/${normalizedPath}`)
+    const path = `/sandbox/sandboxes/${instanceId}/tools/${encodedTool}/${normalizedPath}`
+    return this.client.browserURLAtOrigin(toolOrigin, path)
   }
 }

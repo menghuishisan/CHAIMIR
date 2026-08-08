@@ -225,7 +225,7 @@ func (s *Service) CommitAccountImport(ctx context.Context, req ImportCommitReque
 			if err != nil {
 				return err
 			}
-			role, err := BaseRole(row.BaseIdentity)
+			role, err := baseRoleNumber(row.BaseIdentity)
 			if err != nil {
 				return err
 			}

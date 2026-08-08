@@ -39,7 +39,7 @@ CI 的后端、前端和通用镜像流水线在 Trivy 扫描、SBOM、推送 Ha
 机器人 PR 合并后,`images/image-digests.lock` 就是对应源码提交的最新已验证构建结果。发布或离线包制作直接执行:
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File images/pull-images.ps1 -Scope all -Registry harbor.chaimir:30080
+powershell -NoProfile -ExecutionPolicy Bypass -File images/pull-images.ps1 -Scope all -Registry registry.chaimir.io
 ```
 
 脚本会先一次性读取本机全部 digest 引用;本地已经存在目标不可变 digest 时直接复用,不会再次访问 registry。缺失镜像默认最多尝试 3 次。单次 `docker pull` 失败后,若本地原本没有该 digest 引用,会执行 `docker image rm <ref>` 清理失败残留后重试;若本地已存在该 digest,则保留本地可用镜像,避免瞬时 registry 错误破坏已预热结果。当前镜像全部重试失败后立即停止并返回非 0,不得继续拉取后续镜像。生产不应启用 `-NoCleanupFailedPull`,该开关仅用于诊断 Docker 本地状态。
@@ -50,7 +50,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File images/pull-images.ps1 -Scop
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File images/build-images.ps1 `
-  -Registry harbor.chaimir:30080 `
+  -Registry registry.chaimir.io `
   -Tag $env:GIT_COMMIT `
   -DigestLock .tmp/backend-functional-test/evidence/candidate-image-digests.lock `
   -DigestLockOut .tmp/backend-functional-test/evidence/candidate-image-digests.lock `
@@ -58,7 +58,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File images/build-images.ps1 `
   -Push
 ```
 
-`-Push` 使用 `docker buildx build --push` 将镜像直接推入 Harbor,并把 Harbor 解析出的 digest 写入 `-DigestLockOut`。`-DigestLock` 同时作为构建依赖输入:例如 `base/judge-min` 依赖 `base/go-builder` 时,必须先让 `base/go-builder` 写入同一候选锁,后续镜像才能按 `harbor.chaimir:30080/base/go-builder@sha256:...` 构建。
+`-Push` 使用 `docker buildx build --push` 将镜像直接推入 `registry.chaimir.io`,并把 Registry 解析出的 digest 写入 `-DigestLockOut`。`-DigestLock` 同时作为构建依赖输入:例如 `base/judge-min` 依赖 `base/go-builder` 时,必须先让 `base/go-builder` 写入同一候选锁,后续镜像才能按 `registry.chaimir.io/base/go-builder@sha256:...` 构建。
 
 构建脚本会根据 Dockerfile 中的受控镜像参数做内部依赖拓扑排序;本机已有同一基础镜像 digest 时不会重复拉取。网络代理或 registry mirror 只能配置在 Docker Desktop、BuildKit 或 CI runner 传输层,脚本和仓库配置不维护本地专用镜像源。
 
@@ -67,7 +67,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File images/build-images.ps1 `
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File images/pull-images.ps1 `
   -Scope all `
-  -Registry harbor.chaimir:30080 `
+  -Registry registry.chaimir.io `
   -DigestLock .tmp/backend-functional-test/evidence/candidate-image-digests.lock
 ```
 

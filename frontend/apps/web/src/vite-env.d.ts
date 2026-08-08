@@ -7,6 +7,7 @@ interface ImportMetaEnv {
   readonly VITE_API_BASE_URL?: string
   /** 可选的独立 WebSocket 根地址;缺省时由 API 地址推导 */
   readonly VITE_WS_BASE_URL?: string
+  readonly VITE_SANDBOX_TOOL_ORIGIN?: string
   /** 部署形态:saas 保留平台层入口,school 为学校私有化 */
   readonly VITE_DEPLOY_MODE?: string
   /** 前端 API 请求超时(毫秒) */

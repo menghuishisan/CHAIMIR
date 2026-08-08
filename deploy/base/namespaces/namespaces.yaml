@@ -19,6 +19,7 @@ metadata:
   labels:
     app.kubernetes.io/part-of: chaimir
     chaimir.io/layer: system
+    policy.sigstore.dev/include: "true"
     # Pod Security:平台工作负载强制 restricted(non-root、禁特权、seccomp)。
     pod-security.kubernetes.io/enforce: restricted
     pod-security.kubernetes.io/enforce-version: latest
@@ -32,6 +33,7 @@ metadata:
   labels:
     app.kubernetes.io/part-of: chaimir
     chaimir.io/layer: data
+    policy.sigstore.dev/include: "true"
     # 中间件需挂数据卷、部分镜像固定 uid,放宽到 baseline(仍禁特权/主机命名空间)。
     pod-security.kubernetes.io/enforce: baseline
     pod-security.kubernetes.io/enforce-version: latest
@@ -45,6 +47,7 @@ metadata:
   labels:
     app.kubernetes.io/part-of: chaimir
     chaimir.io/layer: sandbox-prepull
+    policy.sigstore.dev/include: "true"
     # 镜像预拉取仅运行非业务 DaemonSet,必须保持 restricted。
     pod-security.kubernetes.io/enforce: restricted
     pod-security.kubernetes.io/enforce-version: latest

@@ -57,6 +57,11 @@ type ServiceDeps struct {
 	Config config.NotifyConfig
 }
 
+// isValidRoleNumber 在 service 边界校验跨模块角色数字契约,保持 rules 层纯净。
+func isValidRoleNumber(role int16) bool {
+	return contracts.RoleCode(role) != "unknown"
+}
+
 // NewService 构造 M10 服务。
 func NewService(deps ServiceDeps) (*Service, error) {
 	if deps.Store == nil || deps.IDs == nil || deps.Redis == nil || deps.Hub == nil || deps.Roles == nil || deps.Audit == nil {
@@ -272,7 +277,7 @@ func (s *Service) CreateAnnouncement(ctx context.Context, req AnnouncementReques
 	if err != nil {
 		return AnnouncementDTO{}, err
 	}
-	if err := validateAnnouncementRequest(req, id.IsPlatform); err != nil {
+	if err := validateAnnouncementRequest(req, id.IsPlatform, isValidRoleNumber); err != nil {
 		return AnnouncementDTO{}, err
 	}
 	tenantID := id.TenantID

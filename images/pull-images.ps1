@@ -23,7 +23,7 @@ if ([string]::IsNullOrWhiteSpace($Registry)) {
     $Registry = $env:IMAGE_REGISTRY
 }
 if ([string]::IsNullOrWhiteSpace($Registry)) {
-    $Registry = "harbor.chaimir:30080"
+    $Registry = "registry.chaimir.io"
 }
 if ([string]::IsNullOrWhiteSpace($DigestLock)) {
     $DigestLock = Join-Path $Root "image-digests.lock"

@@ -688,6 +688,7 @@ func namespaceObject(name string, sb Sandbox) *corev1.Namespace {
 			"app":                                "chaimir",
 			"app.kubernetes.io/part-of":          "chaimir",
 			"module":                             "sandbox",
+			"policy.sigstore.dev/include":        "true",
 			"chaimir.io/sandbox":                 "true",
 			"chaimir.io/managed-by":              "chaimir-backend",
 			"chaimir.io/tenant-id":               fmt.Sprintf("%d", sb.TenantID),
