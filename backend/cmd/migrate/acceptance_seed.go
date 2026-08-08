@@ -20,94 +20,102 @@ import (
 
 // acceptanceSeedIDs 统一管理验收数据固定 ID,保证重复运行更新同一批数据。
 type acceptanceSeedIDs struct {
-	TenantID           int64
-	DepartmentCS       int64
-	DepartmentSec      int64
-	MajorChain         int64
-	MajorSecurity      int64
-	ClassChain         int64
-	ClassSecurity      int64
-	SchoolAdmin        int64
-	TeacherMain        int64
-	TeacherAssist      int64
-	StudentA           int64
-	StudentB           int64
-	StudentC           int64
-	AuthSession        int64
-	Runtime            int64
-	RuntimeImage       int64
-	Sandbox            int64
-	SandboxTool        int64
-	SandboxEvent       int64
-	Judger             int64
-	JudgerOnchain      int64
-	JudgeTask          int64
-	JudgeResult        int64
-	ContentCat         int64
-	ContentLab         int64
-	ContentContest     int64
-	ContentBattle      int64
-	ContentTheory      int64
-	Paper              int64
-	Course             int64
-	ChapterIntro       int64
-	ChapterLab         int64
-	LessonIntro        int64
-	LessonLab          int64
-	Assignment         int64
-	AssignmentItem     int64
-	SubmissionA        int64
-	DraftB             int64
-	ProgressA          int64
-	Discussion         int64
-	CourseNotice       int64
-	CourseReview       int64
-	GradeWeight        int64
-	CourseGradeA       int64
-	Experiment         int64
-	ExperimentGroup    int64
-	GroupMemberA       int64
-	GroupMemberB       int64
-	ExperimentInstance int64
-	CheckpointResult   int64
-	ExperimentReport   int64
-	SimSession         int64
-	SimAction          int64
-	SimCheckpoint      int64
-	SimShare           int64
-	Contest            int64
-	ContestProblem     int64
-	TeamA              int64
-	TeamAMember        int64
-	SolveSubmission    int64
-	LadderRank         int64
-	ResultSnapshot     int64
-	VulnSource         int64
-	VulnProblem        int64
-	SystemAnnouncement int64
-	NotificationA      int64
-	PreferenceA        int64
-	AnnouncementReadA  int64
-	GradeLevel         int64
-	Semester           int64
-	GradeReview        int64
-	GradeAppeal        int64
-	AcademicWarning    int64
-	Transcript         int64
-	SystemConfig       int64
-	AlertRule          int64
-	AlertEvent         int64
-	Statistics         int64
-	BackupRecord       int64
-	TransferTask       int64
-	AuditEntry         int64
+	TenantID            int64
+	TenantIsolation     int64
+	DepartmentCS        int64
+	DepartmentSec       int64
+	DepartmentIsolation int64
+	MajorChain          int64
+	MajorSecurity       int64
+	MajorIsolation      int64
+	ClassChain          int64
+	ClassSecurity       int64
+	ClassIsolation      int64
+	SchoolAdmin         int64
+	TeacherMain         int64
+	TeacherAssist       int64
+	TeacherIsolation    int64
+	StudentA            int64
+	StudentB            int64
+	StudentC            int64
+	StudentIsolation    int64
+	AuthSession         int64
+	Runtime             int64
+	RuntimeImage        int64
+	Sandbox             int64
+	SandboxTool         int64
+	SandboxEvent        int64
+	Judger              int64
+	JudgerOnchain       int64
+	JudgeTask           int64
+	JudgeResult         int64
+	ContentCat          int64
+	ContentLab          int64
+	ContentContest      int64
+	ContentBattle       int64
+	ContentTheory       int64
+	Paper               int64
+	Course              int64
+	ChapterIntro        int64
+	ChapterLab          int64
+	LessonIntro         int64
+	LessonLab           int64
+	Assignment          int64
+	AssignmentItem      int64
+	SubmissionA         int64
+	DraftB              int64
+	ProgressA           int64
+	Discussion          int64
+	CourseNotice        int64
+	CourseReview        int64
+	GradeWeight         int64
+	CourseGradeA        int64
+	Experiment          int64
+	ExperimentGroup     int64
+	GroupMemberA        int64
+	GroupMemberB        int64
+	ExperimentInstance  int64
+	CheckpointResult    int64
+	ExperimentReport    int64
+	SimSession          int64
+	SimAction           int64
+	SimCheckpoint       int64
+	SimShare            int64
+	Contest             int64
+	ContestProblem      int64
+	TeamA               int64
+	TeamAMember         int64
+	SolveSubmission     int64
+	LadderRank          int64
+	ResultSnapshot      int64
+	VulnSource          int64
+	VulnProblem         int64
+	SystemAnnouncement  int64
+	NotificationA       int64
+	PreferenceA         int64
+	AnnouncementReadA   int64
+	GradeLevel          int64
+	Semester            int64
+	GradeReview         int64
+	GradeAppeal         int64
+	AcademicWarning     int64
+	Transcript          int64
+	SystemConfig        int64
+	AlertRule           int64
+	AlertEvent          int64
+	Statistics          int64
+	BackupRecord        int64
+	TransferTask        int64
+	AuditEntry          int64
 }
 
 var acceptanceIDs = acceptanceSeedIDs{
-	TenantID: 910000000000000001, DepartmentCS: 910000000000000011, DepartmentSec: 910000000000000012,
-	MajorChain: 910000000000000021, MajorSecurity: 910000000000000022, ClassChain: 910000000000000031, ClassSecurity: 910000000000000032,
-	SchoolAdmin: 910000000000000101, TeacherMain: 910000000000000102, TeacherAssist: 910000000000000103,
-	StudentA: 910000000000000201, StudentB: 910000000000000202, StudentC: 910000000000000203, AuthSession: 910000000000000301,
+	TenantID: 910000000000000001, TenantIsolation: 910000000000000002,
+	DepartmentCS: 910000000000000011, DepartmentSec: 910000000000000012, DepartmentIsolation: 910000000000000013,
+	MajorChain: 910000000000000021, MajorSecurity: 910000000000000022, MajorIsolation: 910000000000000023,
+	ClassChain: 910000000000000031, ClassSecurity: 910000000000000032, ClassIsolation: 910000000000000033,
+	SchoolAdmin: 910000000000000101, TeacherMain: 910000000000000102, TeacherAssist: 910000000000000103, TeacherIsolation: 910000000000000104,
+	StudentA: 910000000000000201, StudentB: 910000000000000202, StudentC: 910000000000000203, StudentIsolation: 910000000000000204, AuthSession: 910000000000000301,
 	Runtime: 910000000000001001, RuntimeImage: 910000000000001002,
 	Sandbox: 910000000000001021, SandboxTool: 910000000000001022, SandboxEvent: 910000000000001023,
 	Judger: 910000000000002001, JudgerOnchain: 910000000000002002, JudgeTask: 910000000000002011, JudgeResult: 910000000000002012,
@@ -129,6 +137,7 @@ var acceptanceIDs = acceptanceSeedIDs{
 }
 
 type acceptanceAccount struct {
+	TenantID       int64
 	ID             int64
 	Phone          string
 	Name           string
@@ -150,13 +159,14 @@ func seedAcceptance(ctx context.Context, cfg *config.Config) error {
 		return err
 	}
 	defer database.Close()
-	if err := seedAcceptanceTenant(ctx, database); err != nil {
+	includeIsolationTenant := cfg.Deploy.PlatformEnabled
+	if err := seedAcceptanceTenant(ctx, database, includeIsolationTenant); err != nil {
 		return err
 	}
-	if err := seedAcceptanceOrg(ctx, database); err != nil {
+	if err := seedAcceptanceOrg(ctx, database, includeIsolationTenant); err != nil {
 		return err
 	}
-	if err := seedAcceptanceAccounts(ctx, database, cfg.Bootstrap.AdminPassword); err != nil {
+	if err := seedAcceptanceAccounts(ctx, database, cfg.Bootstrap.AdminPassword, includeIsolationTenant); err != nil {
 		return err
 	}
 	if err := seedAcceptanceBusiness(ctx, database); err != nil {
@@ -178,12 +188,29 @@ func ensureAcceptanceSeedAllowed(cfg *config.Config) error {
 	return nil
 }
 
-// seedAcceptanceTenant 创建一所完整的验收租户,不依赖生产 bootstrap 租户。
-func seedAcceptanceTenant(ctx context.Context, database *db.DB) error {
+// seedAcceptanceTenant 创建验收租户,不依赖生产 bootstrap 租户;隔离租户仅用于 SaaS 多租户验收。
+func seedAcceptanceTenant(ctx context.Context, database *db.DB, includeIsolation bool) error {
 	return database.WithPrivilegedTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-		_, err := tx.Exec(ctx, `
+		tenants := []struct {
+			id          int64
+			code        string
+			name        string
+			displayName string
+		}{
+			{acceptanceIDs.TenantID, "acceptance-chainlab", "华东链安实验学院", "华东链安实验学院"},
+		}
+		if includeIsolation {
+			tenants = append(tenants, struct {
+				id          int64
+				code        string
+				name        string
+				displayName string
+			}{acceptanceIDs.TenantIsolation, "acceptance-isolation", "华南链安实验学院", "华南链安实验学院"})
+		}
+		for _, tenant := range tenants {
+			if _, err := tx.Exec(ctx, `
 INSERT INTO tenant (id, code, name, type, status, deploy_mode, display_name, feature_flags, auth_mode, enable_activation_code)
-VALUES ($1, 'acceptance-chainlab', '华东链安实验学院', 3, 1, 2, '华东链安实验学院', '{"modules":["teaching","experiment","contest"]}'::jsonb, 1, false)
+VALUES ($1, $2, $3, 3, 1, 2, $4, '{"modules":["teaching","experiment","contest"]}'::jsonb, 1, false)
 ON CONFLICT (id) DO UPDATE SET
 	code = EXCLUDED.code,
 	name = EXCLUDED.name,
@@ -194,27 +221,7 @@ ON CONFLICT (id) DO UPDATE SET
 	feature_flags = EXCLUDED.feature_flags,
 	auth_mode = EXCLUDED.auth_mode,
 	enable_activation_code = EXCLUDED.enable_activation_code,
-	updated_at = now()`, acceptanceIDs.TenantID)
-		return err
-	})
-}
-
-// seedAcceptanceOrg 创建院系、专业和班级,供账号档案和课程数据引用。
-func seedAcceptanceOrg(ctx context.Context, database *db.DB) error {
-	return database.WithTenantTxID(ctx, acceptanceIDs.TenantID, func(ctx context.Context, tx pgx.Tx) error {
-		statements := []struct {
-			sql  string
-			args []any
-		}{
-			{`INSERT INTO department (id, tenant_id, name, code) VALUES ($1,$2,'计算机科学与技术学院','CS') ON CONFLICT (id) DO UPDATE SET name=EXCLUDED.name, code=EXCLUDED.code, deleted_at=NULL`, []any{acceptanceIDs.DepartmentCS, acceptanceIDs.TenantID}},
-			{`INSERT INTO department (id, tenant_id, name, code) VALUES ($1,$2,'网络空间安全学院','SEC') ON CONFLICT (id) DO UPDATE SET name=EXCLUDED.name, code=EXCLUDED.code, deleted_at=NULL`, []any{acceptanceIDs.DepartmentSec, acceptanceIDs.TenantID}},
-			{`INSERT INTO major (id, tenant_id, department_id, name) VALUES ($1,$2,$3,'区块链工程') ON CONFLICT (id) DO UPDATE SET department_id=EXCLUDED.department_id, name=EXCLUDED.name, deleted_at=NULL`, []any{acceptanceIDs.MajorChain, acceptanceIDs.TenantID, acceptanceIDs.DepartmentCS}},
-			{`INSERT INTO major (id, tenant_id, department_id, name) VALUES ($1,$2,$3,'网络空间安全') ON CONFLICT (id) DO UPDATE SET department_id=EXCLUDED.department_id, name=EXCLUDED.name, deleted_at=NULL`, []any{acceptanceIDs.MajorSecurity, acceptanceIDs.TenantID, acceptanceIDs.DepartmentSec}},
-			{`INSERT INTO class (id, tenant_id, major_id, name, enrollment_year, status) VALUES ($1,$2,$3,'区块链工程 2026-1 班',2026,1) ON CONFLICT (id) DO UPDATE SET major_id=EXCLUDED.major_id, name=EXCLUDED.name, enrollment_year=EXCLUDED.enrollment_year, status=EXCLUDED.status, deleted_at=NULL`, []any{acceptanceIDs.ClassChain, acceptanceIDs.TenantID, acceptanceIDs.MajorChain}},
-			{`INSERT INTO class (id, tenant_id, major_id, name, enrollment_year, status) VALUES ($1,$2,$3,'网络空间安全 2026-1 班',2026,1) ON CONFLICT (id) DO UPDATE SET major_id=EXCLUDED.major_id, name=EXCLUDED.name, enrollment_year=EXCLUDED.enrollment_year, status=EXCLUDED.status, deleted_at=NULL`, []any{acceptanceIDs.ClassSecurity, acceptanceIDs.TenantID, acceptanceIDs.MajorSecurity}},
-		}
-		for _, stmt := range statements {
-			if _, err := tx.Exec(ctx, stmt.sql, stmt.args...); err != nil {
+	updated_at = now()`, tenant.id, tenant.code, tenant.name, tenant.displayName); err != nil {
 				return err
 			}
 		}
@@ -222,17 +229,62 @@ func seedAcceptanceOrg(ctx context.Context, database *db.DB) error {
 	})
 }
 
+// seedAcceptanceOrg 创建院系、专业和班级,供账号档案和课程数据引用。
+func seedAcceptanceOrg(ctx context.Context, database *db.DB, includeIsolation bool) error {
+	orgs := []struct {
+		tenantID, departmentID, majorID, classID     int64
+		department, departmentCode, major, className string
+	}{
+		{acceptanceIDs.TenantID, acceptanceIDs.DepartmentCS, acceptanceIDs.MajorChain, acceptanceIDs.ClassChain, "计算机科学与技术学院", "CS", "区块链工程", "区块链工程 2026-1 班"},
+		{acceptanceIDs.TenantID, acceptanceIDs.DepartmentSec, acceptanceIDs.MajorSecurity, acceptanceIDs.ClassSecurity, "网络空间安全学院", "SEC", "网络空间安全", "网络空间安全 2026-1 班"},
+	}
+	if includeIsolation {
+		orgs = append(orgs, struct {
+			tenantID, departmentID, majorID, classID     int64
+			department, departmentCode, major, className string
+		}{acceptanceIDs.TenantIsolation, acceptanceIDs.DepartmentIsolation, acceptanceIDs.MajorIsolation, acceptanceIDs.ClassIsolation, "信息工程学院", "IE", "软件工程", "软件工程 2026-1 班"})
+	}
+	for _, org := range orgs {
+		if err := database.WithTenantTxID(ctx, org.tenantID, func(ctx context.Context, tx pgx.Tx) error {
+			statements := []struct {
+				sql  string
+				args []any
+			}{
+				{`INSERT INTO department (id, tenant_id, name, code) VALUES ($1,$2,$3,$4) ON CONFLICT (id) DO UPDATE SET name=EXCLUDED.name, code=EXCLUDED.code, deleted_at=NULL`, []any{org.departmentID, org.tenantID, org.department, org.departmentCode}},
+				{`INSERT INTO major (id, tenant_id, department_id, name) VALUES ($1,$2,$3,$4) ON CONFLICT (id) DO UPDATE SET department_id=EXCLUDED.department_id, name=EXCLUDED.name, deleted_at=NULL`, []any{org.majorID, org.tenantID, org.departmentID, org.major}},
+				{`INSERT INTO class (id, tenant_id, major_id, name, enrollment_year, status) VALUES ($1,$2,$3,$4,2026,1) ON CONFLICT (id) DO UPDATE SET major_id=EXCLUDED.major_id, name=EXCLUDED.name, enrollment_year=EXCLUDED.enrollment_year, status=EXCLUDED.status, deleted_at=NULL`, []any{org.classID, org.tenantID, org.majorID, org.className}},
+			}
+			for _, stmt := range statements {
+				if _, err := tx.Exec(ctx, stmt.sql, stmt.args...); err != nil {
+					return err
+				}
+			}
+			return nil
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // seedAcceptanceAccounts 写入固定验收账号,复用正式密码哈希、手机号加密和数据库档案校验。
-func seedAcceptanceAccounts(ctx context.Context, database *db.DB, initialPassword string) error {
-	for _, account := range []acceptanceAccount{
-		{ID: acceptanceIDs.SchoolAdmin, Phone: "13900001001", Name: "林明远", No: "T20260001", BaseIdentity: identity.BaseIdentityTeacher, OrgID: acceptanceIDs.DepartmentCS, Title: "教学副院长", Roles: []int16{contracts.RoleNumTeacher, contracts.RoleNumSchoolAdmin}},
-		{ID: acceptanceIDs.TeacherMain, Phone: "13900001002", Name: "周子衡", No: "T20260002", BaseIdentity: identity.BaseIdentityTeacher, OrgID: acceptanceIDs.DepartmentCS, Title: "副教授", Roles: []int16{contracts.RoleNumTeacher}},
-		{ID: acceptanceIDs.TeacherAssist, Phone: "13900001003", Name: "陈若水", No: "T20260003", BaseIdentity: identity.BaseIdentityTeacher, OrgID: acceptanceIDs.DepartmentSec, Title: "讲师", Roles: []int16{contracts.RoleNumTeacher}},
-		{ID: acceptanceIDs.StudentA, Phone: "13900002001", Name: "赵一航", No: "S20260001", BaseIdentity: identity.BaseIdentityStudent, OrgID: acceptanceIDs.ClassChain, EnrollmentYear: 2026, Roles: []int16{contracts.RoleNumStudent}},
-		{ID: acceptanceIDs.StudentB, Phone: "13900002002", Name: "钱思源", No: "S20260002", BaseIdentity: identity.BaseIdentityStudent, OrgID: acceptanceIDs.ClassChain, EnrollmentYear: 2026, Roles: []int16{contracts.RoleNumStudent}},
-		{ID: acceptanceIDs.StudentC, Phone: "13900002003", Name: "孙明珂", No: "S20260003", BaseIdentity: identity.BaseIdentityStudent, OrgID: acceptanceIDs.ClassSecurity, EnrollmentYear: 2026, Roles: []int16{contracts.RoleNumStudent}},
-	} {
-		if err := ensureAcceptanceAccount(ctx, database, account, initialPassword); err != nil {
+func seedAcceptanceAccounts(ctx context.Context, database *db.DB, initialPassword string, includeIsolation bool) error {
+	accounts := []acceptanceAccount{
+		{TenantID: acceptanceIDs.TenantID, ID: acceptanceIDs.SchoolAdmin, Phone: "13900001001", Name: "林明远", No: "T20260001", BaseIdentity: identity.BaseIdentityTeacher, OrgID: acceptanceIDs.DepartmentCS, Title: "教学副院长", Roles: []int16{contracts.RoleNumTeacher, contracts.RoleNumSchoolAdmin}},
+		{TenantID: acceptanceIDs.TenantID, ID: acceptanceIDs.TeacherMain, Phone: "13900001002", Name: "周子衡", No: "T20260002", BaseIdentity: identity.BaseIdentityTeacher, OrgID: acceptanceIDs.DepartmentCS, Title: "副教授", Roles: []int16{contracts.RoleNumTeacher}},
+		{TenantID: acceptanceIDs.TenantID, ID: acceptanceIDs.TeacherAssist, Phone: "13900001003", Name: "陈若水", No: "T20260003", BaseIdentity: identity.BaseIdentityTeacher, OrgID: acceptanceIDs.DepartmentSec, Title: "讲师", Roles: []int16{contracts.RoleNumTeacher}},
+		{TenantID: acceptanceIDs.TenantID, ID: acceptanceIDs.StudentA, Phone: "13900002001", Name: "赵一航", No: "S20260001", BaseIdentity: identity.BaseIdentityStudent, OrgID: acceptanceIDs.ClassChain, EnrollmentYear: 2026, Roles: []int16{contracts.RoleNumStudent}},
+		{TenantID: acceptanceIDs.TenantID, ID: acceptanceIDs.StudentB, Phone: "13900002002", Name: "钱思源", No: "S20260002", BaseIdentity: identity.BaseIdentityStudent, OrgID: acceptanceIDs.ClassChain, EnrollmentYear: 2026, Roles: []int16{contracts.RoleNumStudent}},
+		{TenantID: acceptanceIDs.TenantID, ID: acceptanceIDs.StudentC, Phone: "13900002003", Name: "孙明珂", No: "S20260003", BaseIdentity: identity.BaseIdentityStudent, OrgID: acceptanceIDs.ClassSecurity, EnrollmentYear: 2026, Roles: []int16{contracts.RoleNumStudent}},
+	}
+	if includeIsolation {
+		accounts = append(accounts,
+			acceptanceAccount{TenantID: acceptanceIDs.TenantIsolation, ID: acceptanceIDs.TeacherIsolation, Phone: "13900001002", Name: "周子衡（隔离租户）", No: "T20260002-I", BaseIdentity: identity.BaseIdentityTeacher, OrgID: acceptanceIDs.DepartmentIsolation, Title: "副教授", Roles: []int16{contracts.RoleNumTeacher}},
+			acceptanceAccount{TenantID: acceptanceIDs.TenantIsolation, ID: acceptanceIDs.StudentIsolation, Phone: "13900002001", Name: "赵一航（隔离租户）", No: "S20260001-I", BaseIdentity: identity.BaseIdentityStudent, OrgID: acceptanceIDs.ClassIsolation, EnrollmentYear: 2026, Roles: []int16{contracts.RoleNumStudent}},
+		)
+	}
+	for _, account := range accounts {
+		if err := ensureAcceptanceAccount(ctx, database, account.TenantID, account, initialPassword); err != nil {
 			return err
 		}
 	}
@@ -240,7 +292,7 @@ func seedAcceptanceAccounts(ctx context.Context, database *db.DB, initialPasswor
 }
 
 // ensureAcceptanceAccount 幂等写入单个账号、角色和组织档案。
-func ensureAcceptanceAccount(ctx context.Context, database *db.DB, account acceptanceAccount, initialPassword string) error {
+func ensureAcceptanceAccount(ctx context.Context, database *db.DB, tenantID int64, account acceptanceAccount, initialPassword string) error {
 	if err := identity.ValidatePhone(account.Phone); err != nil {
 		return err
 	}
@@ -255,16 +307,16 @@ func ensureAcceptanceAccount(ctx context.Context, database *db.DB, account accep
 	if err != nil {
 		return err
 	}
-	return database.WithTenantTxID(ctx, acceptanceIDs.TenantID, func(ctx context.Context, tx pgx.Tx) error {
+	return database.WithTenantTxID(ctx, tenantID, func(ctx context.Context, tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx, `
 INSERT INTO account (id, tenant_id, phone_enc, phone_hash, password_hash, name, base_identity, status, must_change_pwd, activated_at)
 VALUES ($1,$2,$3,$4,$5,$6,$7,2,false,now())
 ON CONFLICT (id) DO UPDATE SET phone_enc=EXCLUDED.phone_enc, phone_hash=EXCLUDED.phone_hash, password_hash=EXCLUDED.password_hash, name=EXCLUDED.name, base_identity=EXCLUDED.base_identity, status=EXCLUDED.status, must_change_pwd=EXCLUDED.must_change_pwd, activated_at=EXCLUDED.activated_at, deleted_at=NULL, updated_at=now()`,
-			account.ID, acceptanceIDs.TenantID, phoneEnc, phoneHash, passwordHash, account.Name, account.BaseIdentity); err != nil {
+			account.ID, tenantID, phoneEnc, phoneHash, passwordHash, account.Name, account.BaseIdentity); err != nil {
 			return err
 		}
 		for i, role := range account.Roles {
-			if err := upsertAccountRole(ctx, tx, account.ID, role, acceptanceRoleID(account.ID, i)); err != nil {
+			if err := upsertAccountRole(ctx, tx, tenantID, account.ID, role, acceptanceRoleID(account.ID, i)); err != nil {
 				return err
 			}
 		}
@@ -272,7 +324,7 @@ ON CONFLICT (id) DO UPDATE SET phone_enc=EXCLUDED.phone_enc, phone_hash=EXCLUDED
 INSERT INTO account_profile (account_id, tenant_id, no, org_id, enrollment_year, title)
 VALUES ($1,$2,$3,$4,$5,$6)
 ON CONFLICT (account_id) DO UPDATE SET no=EXCLUDED.no, org_id=EXCLUDED.org_id, enrollment_year=EXCLUDED.enrollment_year, title=EXCLUDED.title`,
-			account.ID, acceptanceIDs.TenantID, account.No, account.OrgID, nullInt16(account.EnrollmentYear), account.Title)
+			account.ID, tenantID, account.No, account.OrgID, nullInt16(account.EnrollmentYear), account.Title)
 		return err
 	})
 }
@@ -343,11 +395,11 @@ func osEnv(key string) string {
 }
 
 // upsertAccountRole 幂等写入账号角色。
-func upsertAccountRole(ctx context.Context, tx pgx.Tx, accountID int64, role int16, roleID int64) error {
+func upsertAccountRole(ctx context.Context, tx pgx.Tx, tenantID, accountID int64, role int16, roleID int64) error {
 	_, err := tx.Exec(ctx, `
 INSERT INTO account_role (id, tenant_id, account_id, role)
 VALUES ($1,$2,$3,$4)
-ON CONFLICT (tenant_id, account_id, role) DO NOTHING`, roleID, acceptanceIDs.TenantID, accountID, role)
+ON CONFLICT (tenant_id, account_id, role) DO NOTHING`, roleID, tenantID, accountID, role)
 	return err
 }
 

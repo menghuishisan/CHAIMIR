@@ -374,14 +374,14 @@ function GroupsPanel({ experiment }: { experiment: Experiment }) {
   const groups = useAsyncResource(
     () => api.experiment.listGroups(experiment.id),
     [experiment.id],
-    (value) => value.length === 0,
+    (value) => (value ?? []).length === 0,
   )
 
   return (
     <Card>
       <CardHeader
         title="小组编排"
-        description={`每组 ${experiment.group_config.size} 人。同组成员共享同一套实验环境。`}
+        description={`每组 ${experiment.group_config?.size ?? 0} 人。同组成员共享同一套实验环境。`}
         actions={
           <Button variant="outline" size="sm" leftIcon={Plus} onClick={() => setCreateOpen(true)}>
             新建小组
@@ -389,9 +389,9 @@ function GroupsPanel({ experiment }: { experiment: Experiment }) {
         }
       />
       <CardBody className="flex flex-col gap-3">
-        {experiment.group_config.roles.length > 0 ? (
+        {(experiment.group_config?.roles ?? []).length > 0 ? (
           <div className="flex flex-wrap gap-1.5">
-            {experiment.group_config.roles.map((role) => (
+            {(experiment.group_config?.roles ?? []).map((role) => (
               <Badge key={role} tone="jade">
                 {role}
               </Badge>
@@ -422,22 +422,25 @@ function GroupsPanel({ experiment }: { experiment: Experiment }) {
                     <span className="min-w-0 truncate text-base text-ink">{group.name}</span>
                     <Badge
                       tone={
-                        experiment.group_config.size > 0 &&
-                        group.members.length >= experiment.group_config.size
+                        (experiment.group_config?.size ?? 0) > 0 &&
+                        (group.members ?? []).length >= (experiment.group_config?.size ?? 0)
                           ? 'success'
                           : 'neutral'
                       }
                     >
-                      {group.members.length}
-                      {experiment.group_config.size > 0 ? ` / ${experiment.group_config.size}` : ''} 人
+                      {(group.members ?? []).length}
+                      {(experiment.group_config?.size ?? 0) > 0
+                        ? ` / ${experiment.group_config?.size}`
+                        : ''}{' '}
+                      人
                     </Badge>
                   </div>
 
-                  {group.members.length === 0 ? (
+                  {(group.members ?? []).length === 0 ? (
                     <p className="text-sm text-ink-sub">还没有成员。</p>
                   ) : (
                     <ul className="flex flex-col gap-1">
-                      {group.members.map((member) => (
+                      {(group.members ?? []).map((member) => (
                         <li key={member.id} className="flex items-center justify-between gap-2 text-sm">
                           <span className="min-w-0 truncate text-ink">{member.student_name}</span>
                           <Badge tone="neutral">{member.role}</Badge>
@@ -475,7 +478,7 @@ function GroupsPanel({ experiment }: { experiment: Experiment }) {
       {memberTarget ? (
         <AddMemberModal
           group={memberTarget}
-          roles={experiment.group_config.roles}
+          roles={experiment.group_config?.roles ?? []}
           onClose={() => setMemberTarget(undefined)}
           onSaved={() => {
             setMemberTarget(undefined)
@@ -581,7 +584,7 @@ function AddMemberModal({ group, roles, onClose, onSaved }: AddMemberModalProps)
   const students = useAsyncResource(
     () => (classId === '' ? Promise.resolve<ClassStudent[]>([]) : api.identity.listClassStudents(classId)),
     [classId],
-    (value) => value.length === 0,
+    (value) => (value ?? []).length === 0,
   )
 
   const classOptions = useMemo(

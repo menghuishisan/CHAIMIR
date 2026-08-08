@@ -72,15 +72,16 @@ Remove-Fixture
 # ConfigMap 只包含测试网关代码；SMS_HTTP_TOKEN 由运行时 Secret 注入，不写入文件。
 $backendDeployment = kubectl -n $Namespace get deployment/chaimir-backend -o json | ConvertFrom-Json
 $secretName = ($backendDeployment.spec.template.spec.containers[0].envFrom |
-    Where-Object { $_.secretRef } |
+    Where-Object { $_.PSObject.Properties.Name -contains "secretRef" -and $_.secretRef } |
     Select-Object -First 1).secretRef.name
 if ([string]::IsNullOrWhiteSpace($secretName)) {
     throw "无法从 chaimir-backend Deployment 解析当前哈希 Secret 名称"
 }
 & kubectl -n $Namespace create configmap sms-gateway-script `
     --from-file="sms-gateway.mjs=$($scriptDir)\sms-gateway.mjs" `
-    --label="$label" `
-    --dry-run=client -o yaml | Set-Content -Path $gatewayConfig -Encoding utf8
+    --dry-run=client -o yaml |
+    kubectl label --local -f - $label -o yaml |
+    Set-Content -Path $gatewayConfig -Encoding utf8
 if ($LASTEXITCODE -ne 0) {
     throw "生成短信网关 ConfigMap 失败"
 }
