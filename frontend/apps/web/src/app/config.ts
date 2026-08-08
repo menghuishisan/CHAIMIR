@@ -26,11 +26,23 @@ function parsePositiveInteger(value: string | undefined, name: string): number {
 
 /** parseHttpsOrigin 校验工具代理使用独立 HTTPS origin，避免同源 iframe 信任边界失效。 */
 function parseHttpsOrigin(value: string | undefined, name: string): string {
-  const normalized = value?.trim().replace(/\/+$/, '')
-  if (!normalized || !/^https:\/\/[^/]+$/.test(normalized)) {
+  let parsed: URL
+  try {
+    parsed = new URL(value?.trim() || '')
+  } catch {
     throw new Error(`${name} 必须配置为 HTTPS origin`)
   }
-  return normalized
+  if (
+    parsed.protocol !== 'https:' ||
+    parsed.username ||
+    parsed.password ||
+    parsed.pathname !== '/' ||
+    parsed.search ||
+    parsed.hash
+  ) {
+    throw new Error(`${name} 必须配置为 HTTPS origin`)
+  }
+  return parsed.origin
 }
 
 export const appConfig = {

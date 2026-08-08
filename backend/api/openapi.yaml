@@ -11,7 +11,7 @@ servers:
   - url: https://{host}
     variables:
       host:
-        default: api.chaimir.example.com
+        default: www.chaimir.io
 tags:
   - name: health
     description: 服务健康探针

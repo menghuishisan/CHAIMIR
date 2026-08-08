@@ -79,4 +79,4 @@ powershell -NoProfile -ExecutionPolicy Bypass -File images/pull-images.ps1 `
 
 `SANDBOX_IMAGE_ATTESTATIONS_JSON` 是环境相关的准入证明,由 `deploy/scripts/image-attestations-generate.ps1` 在目标 registry 完成扫描、签名和验签后写入运行环境或 Secret,不能仅凭新 digest 在仓库中伪造。仓库自动同步只更新可审计的 digest 权威文件与静态引用。
 
-部署工作流不消费可变 tag:权威锁合入 `main` 后,staging 从该锁一次读取全部服务 digest;生产发布从 tag 所指提交读取同一组 digest。两者都通过 `deploy/scripts/render-locked-overlay.ps1` 生成临时 Kustomize overlay 后应用。仓库中的 staging/production tag 只保留为环境模板默认值,不能当作产物存在性证明。
+部署工作流不消费可变 tag:权威锁合入 `main` 后,staging 从该锁一次读取全部服务 digest;生产发布从 tag 所指提交读取同一组 digest。两者都通过 `deploy/scripts/render-locked-overlay.ps1` 生成临时 Kustomize overlay 后应用,仓库静态 overlay 与临时 overlay 必须解析到同一组 digest。

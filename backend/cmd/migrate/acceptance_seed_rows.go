@@ -37,7 +37,7 @@ const (
 func acceptanceImageURL(image string) (string, error) {
 	registry := strings.TrimRight(osEnv("IMAGE_REGISTRY"), "/")
 	if registry == "" {
-		registry = "harbor.chaimir"
+		return "", fmt.Errorf("IMAGE_REGISTRY 未配置")
 	}
 	prefix := registry + "/" + strings.TrimLeft(image, "/") + "@sha256:"
 	raw := strings.TrimSpace(osEnv("SANDBOX_IMAGE_ATTESTATIONS_JSON"))

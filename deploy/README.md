@@ -129,7 +129,7 @@ make harbor-projects-ensure
 ```
 
 Docker Desktop 本地没有固定入口 IP 时,不要把 ingress 的 `172.18.x.x` 写入配置或 hosts;该地址会随
-Docker/K8s 重启变化。统一使用 `SUPPLY_CHAIN_HARBOR_EXTERNAL_URL=http://registry.chaimir.io`
+Docker/K8s 重启变化。统一使用 `SUPPLY_CHAIN_HARBOR_EXTERNAL_URL=https://registry.chaimir.io`
 和 `make harbor-forward` 暴露 Harbor Ingress Controller。`harbor-forward` 需要在单独终端保持运行;
 它按 `SUPPLY_CHAIN_HARBOR_FORWARD_ADDRESS` 监听 `SUPPLY_CHAIN_HARBOR_FORWARD_PORT`,并且必须转发
 Ingress Controller,不能直连 `harbor-core`,否则 `/v2/` 上传路径与生产不一致。生产/预发布必须通过交付配置把

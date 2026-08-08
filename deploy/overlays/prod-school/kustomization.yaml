@@ -26,35 +26,35 @@ secretGenerator:
     envs:
       - ../../config/secret.env
 
-# 镜像来自校内 Harbor(离线导入),版本随平台版本固定。
+# 镜像使用平台统一的不可变 registry digest,离线交付时由运维按同一 digest 导入。
 images:
   - name: chaimir/backend
     newName: registry.chaimir.io/service/backend
-    newTag: "1.0.0"
+    digest: sha256:c8febfe6fc3920c089f7191267ebd8538dafa07768147b5c98d20c02acd03217
   - name: chaimir/frontend
     newName: registry.chaimir.io/service/frontend
-    newTag: "1.0.0"
+    digest: sha256:bc5ca0c4238bae8c7731384ecac2ddf60d41d7c12afa10958755e56c63a6e38b
   - name: chaimir/migrate
     newName: registry.chaimir.io/service/migrate
-    newTag: "1.0.0"
+    digest: sha256:32b920e1653766c1be0562f96cf9b26ee995f78c99b01e2c0c765ac7fce57a82
   - name: chaimir/cron
     newName: registry.chaimir.io/service/cron
-    newTag: "1.0.0"
+    digest: sha256:e3f899f23ef51ba911845a09473d4f941e885f7fc767c84f99901ddad2d6a9b8
   - name: chaimir/middleware/clamav
     newName: registry.chaimir.io/middleware/clamav
-    newTag: "1.0.0"
+    digest: sha256:8e1af8fa21a9954abc87aa4c59993a82ec6984ee89bc09097ab9828efddc399a
   - name: chaimir/middleware/minio
     newName: registry.chaimir.io/middleware/minio
-    newTag: "1.0.0"
+    digest: sha256:572a6ab846e59cf2e0b56645c955136107aecef09a365afa237ff127c4646cab
   - name: chaimir/middleware/nats
     newName: registry.chaimir.io/middleware/nats
-    newTag: "1.0.0"
+    digest: sha256:502f6b38e93402ba6049abb388fb86ddb6a3ae1739ac71f1a935e0b5be1f8528
   - name: chaimir/middleware/postgres
     newName: registry.chaimir.io/middleware/postgres
-    newTag: "1.0.0"
+    digest: sha256:8a08cd59bcab2c21965dd8826440e5be1c93a3754de9a7a543a33286b2d2edbe
   - name: chaimir/middleware/redis
     newName: registry.chaimir.io/middleware/redis
-    newTag: "1.0.0"
+    digest: sha256:3f7c4af1c5509dace732614ed08b168d436d8a5c39a1001c3fbb7c1a1290f975
 
 # 私有化形态:school 单租户 + 关平台层。
 configMapGenerator:
@@ -69,24 +69,24 @@ configMapGenerator:
       - PG_SSLMODE=require
 
 patches:
-  # 校内域名(私有化按校配置)。
+  # 平台统一公网域名;私有化交付也通过同一入口和证书策略接入。
   - target:
       kind: Ingress
       name: chaimir
     patch: |-
       - op: replace
         path: /spec/rules/0/host
-        value: chaimir.school.local
+        value: www.chaimir.io
       - op: replace
         path: /spec/tls/0/hosts/0
-        value: chaimir.school.local
+        value: www.chaimir.io
   - target:
       kind: Ingress
       name: chaimir-public-deny
     patch: |-
       - op: replace
         path: /spec/rules/0/host
-        value: chaimir.school.local
+        value: www.chaimir.io
       - op: replace
         path: /spec/tls/0/hosts/0
-        value: chaimir.school.local
+        value: www.chaimir.io

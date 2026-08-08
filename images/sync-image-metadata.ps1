@@ -4,7 +4,7 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$FragmentsPath,
     [string]$DigestLockPath = "",
-    [string]$LocalOverlayPath = "",
+    [string[]]$OverlayPaths = @(),
     [string[]]$EnvPaths = @(),
     [string]$SimAdapterEnvKey = "SIM_BACKEND_STDIO_ADAPTERS_JSON",
     [string[]]$AttestationEnvPaths = @(),
@@ -21,8 +21,13 @@ Import-Module (Join-Path $PSScriptRoot "lib\ImageMetadata.psm1") -Force
 if ([string]::IsNullOrWhiteSpace($DigestLockPath)) {
     $DigestLockPath = Join-Path $RepoRoot "images\image-digests.lock"
 }
-if ([string]::IsNullOrWhiteSpace($LocalOverlayPath)) {
-    $LocalOverlayPath = Join-Path $RepoRoot "deploy\overlays\local-dev\kustomization.yaml"
+if ($OverlayPaths.Count -eq 0) {
+    $OverlayPaths = @(
+        (Join-Path $RepoRoot "deploy\overlays\local-dev\kustomization.yaml"),
+        (Join-Path $RepoRoot "deploy\overlays\staging\kustomization.yaml"),
+        (Join-Path $RepoRoot "deploy\overlays\prod-saas\kustomization.yaml"),
+        (Join-Path $RepoRoot "deploy\overlays\prod-school\kustomization.yaml")
+    )
 }
 if ($EnvPaths.Count -eq 0) {
     $EnvPaths = @(
@@ -89,14 +94,14 @@ function Get-KustomizeLogicalImage {
     return $suffix
 }
 
-# Update-KustomizeDigests 更新 local-dev images 条目,首次晋升时将旧 tag 原位替换为 digest。
+# Update-KustomizeDigests 更新所有部署 overlay 的 images 条目,确保各环境只引用同一份 digest 锁。
 function Update-KustomizeDigests {
     param(
         [string]$Path,
         [hashtable]$Digests
     )
     if (-not (Test-Path -LiteralPath $Path)) {
-        throw "缺少 local-dev Kustomize 文件: $Path"
+        throw "缺少 Kustomize 文件: $Path"
     }
     $source = @(Get-Content -LiteralPath $Path)
     $output = [System.Collections.Generic.List[string]]::new()
@@ -319,7 +324,9 @@ foreach ($image in $fragments.Keys) {
 }
 
 Write-ChaimirDigestLock -Path $DigestLockPath -Items $merged
-Update-KustomizeDigests -Path $LocalOverlayPath -Digests $merged
+foreach ($overlayPath in $OverlayPaths) {
+    Update-KustomizeDigests -Path $overlayPath -Digests $merged
+}
 foreach ($envPath in $EnvPaths) {
     Update-SimAdapterDigests -Path $envPath -Key $SimAdapterEnvKey -Digests $merged
 }

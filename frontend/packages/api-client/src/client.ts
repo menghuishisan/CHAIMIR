@@ -274,11 +274,23 @@ export class ApiClient {
    * 工具页必须与平台页面分 origin，避免被嵌入页面读取平台 DOM 或同源凭据。
    */
   public browserURLAtOrigin(origin: string, path: string, query?: Record<string, string | undefined>): string {
-    const normalizedOrigin = origin.trim().replace(/\/+$/, '')
-    if (!/^https:\/\//.test(normalizedOrigin)) {
+    let parsedOrigin: URL
+    try {
+      parsedOrigin = new URL(origin.trim())
+    } catch {
+      throw new Error('工具代理 origin 必须配置为有效的 HTTPS origin')
+    }
+    if (
+      parsedOrigin.protocol !== 'https:' ||
+      parsedOrigin.username ||
+      parsedOrigin.password ||
+      parsedOrigin.pathname !== '/' ||
+      parsedOrigin.search ||
+      parsedOrigin.hash
+    ) {
       throw new Error('工具代理 origin 必须使用 HTTPS')
     }
-    return `${normalizedOrigin}${normalizePath(path)}${this.browserTokenQuery(query)}`
+    return `${parsedOrigin.origin}${normalizePath(path)}${this.browserTokenQuery(query)}`
   }
 
   /**

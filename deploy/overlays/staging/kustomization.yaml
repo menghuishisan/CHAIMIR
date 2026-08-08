@@ -16,16 +16,16 @@ components:
 images:
   - name: chaimir/backend
     newName: registry.chaimir.io/service/backend
-    newTag: staging
+    digest: sha256:c8febfe6fc3920c089f7191267ebd8538dafa07768147b5c98d20c02acd03217
   - name: chaimir/frontend
     newName: registry.chaimir.io/service/frontend
-    newTag: staging
+    digest: sha256:bc5ca0c4238bae8c7731384ecac2ddf60d41d7c12afa10958755e56c63a6e38b
   - name: chaimir/migrate
     newName: registry.chaimir.io/service/migrate
-    newTag: staging
+    digest: sha256:32b920e1653766c1be0562f96cf9b26ee995f78c99b01e2c0c765ac7fce57a82
   - name: chaimir/cron
     newName: registry.chaimir.io/service/cron
-    newTag: staging
+    digest: sha256:e3f899f23ef51ba911845a09473d4f941e885f7fc767c84f99901ddad2d6a9b8
 
 # 中间件外接端点 + SaaS 形态(host 为 staging 托管中间件内部域名)。
 configMapGenerator:
@@ -49,27 +49,27 @@ replicas:
     count: 2
 
 patches:
-  # staging 域名。
+  # 平台统一公网域名。
   - target:
       kind: Ingress
       name: chaimir
     patch: |-
       - op: replace
         path: /spec/rules/0/host
-        value: staging.chaimir.example.com
+        value: www.chaimir.io
       - op: replace
         path: /spec/tls/0/hosts/0
-        value: staging.chaimir.example.com
+        value: www.chaimir.io
   - target:
       kind: Ingress
       name: chaimir-public-deny
     patch: |-
       - op: replace
         path: /spec/rules/0/host
-        value: staging.chaimir.example.com
+        value: www.chaimir.io
       - op: replace
         path: /spec/tls/0/hosts/0
-        value: staging.chaimir.example.com
+        value: www.chaimir.io
   # staging 密钥 Store 与远端键前缀。ExternalSecret 键集合统一维护在 deploy/config。
   - target:
       kind: ExternalSecret
