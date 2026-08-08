@@ -111,7 +111,7 @@ export function TabsTrigger({ icon, className, children, ...rest }: TabsTriggerP
   return (
     <TabsPrimitive.Trigger
       className={cn(
-        "inline-flex items-center gap-1.5 rounded-sm px-3 py-2 text-sm text-ink-sub",
+        "inline-flex min-h-11 items-center gap-1.5 rounded-sm px-3 py-2 text-sm text-ink-sub",
         "transition-colors duration-fast hover:text-ink",
         "data-[state=active]:font-medium data-[state=active]:text-primary",
         "focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-2",

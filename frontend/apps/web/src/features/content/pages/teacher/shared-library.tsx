@@ -292,7 +292,7 @@ function SharedFaceModal({ item, onClose }: SharedFaceModalProps) {
           <ModalTitle>{item.title}</ModalTitle>
           <ModalDescription>
             {contentTypeLabel(item.type)} · {item.code} · {item.version}。
-            答案、判题配置与 flag 不在共享范围内,这里只呈现题面。
+            答案与判题配置不在共享范围内,这里只呈现题面。
           </ModalDescription>
         </ModalHeader>
         <ResourceState
@@ -379,7 +379,7 @@ function CloneSharedModal({ item, onClose, onCloned }: CloneSharedModalProps) {
   const submit = useCallback(async () => {
     const code = newCode.trim()
     if (!/^[a-z0-9-]{3,}$/.test(code)) {
-      setFormError('编号用小写字母、数字与连字符,至少 3 位')
+      setFormError('短名用小写字母、数字与连字符,至少 3 位')
       return
     }
     if (!/^\d+\.\d+\.\d+$/.test(newVersion.trim())) {
@@ -416,7 +416,7 @@ function CloneSharedModal({ item, onClose, onCloned }: CloneSharedModalProps) {
           </Callout>
 
           <div className="grid gap-4 sm:grid-cols-2">
-            <FormField label="本校题目编号" htmlFor="shared-clone-code" required error={formError}>
+            <FormField label="本校题目短名" htmlFor="shared-clone-code" required error={formError}>
               <Input
                 id="shared-clone-code"
                 value={newCode}

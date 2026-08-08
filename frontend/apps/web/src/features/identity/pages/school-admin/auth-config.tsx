@@ -176,7 +176,7 @@ function CasConfigCard({ config, onSaved }: ConfigCardProps) {
           <FormField
             label="名单匹配方式"
             required
-            helper="统一认证返回的账号标识按这个字段对应到平台账号"
+            helper="统一认证返回的账号信息按这个字段对应到平台账号"
           >
             <SegmentedControl
               aria-label="CAS 名单匹配方式"

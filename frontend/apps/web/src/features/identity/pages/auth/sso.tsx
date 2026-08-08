@@ -11,6 +11,7 @@ import { Button, Icon } from '@chaimir/ui'
 import { ArrowLeft, LoaderCircle } from 'lucide-react'
 import { api } from '../../../../app/api'
 import { loginEntryPath, persistLoginTokens } from '../../../../utils/authSession'
+import { safeExternalHttpUrl } from '../../../../utils/safeNavigation'
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
 import { passwordRequiredError, requiredError, useFieldErrors } from './auth-form'
 import {
@@ -78,7 +79,9 @@ export default function SsoCallbackPage() {
     setFormError(null)
     try {
       const { redirect_url } = await api.identity.getCASLoginUrl(tenantCode, ssoServiceUrl(tenantCode))
-      window.location.assign(redirect_url)
+      const safeRedirectUrl = safeExternalHttpUrl(redirect_url)
+      if (!safeRedirectUrl) throw new Error('认证地址无效')
+      window.location.assign(safeRedirectUrl)
     } catch (redirectError) {
       setFormError(userFacingErrorMessage(redirectError, '暂时无法前往学校统一认证,请稍后重试。'))
       setRedirecting(false)
@@ -131,13 +134,13 @@ export default function SsoCallbackPage() {
           size="lg"
           loading={redirecting}
           onClick={handleCasRedirect}
-          className="mt-7 w-full tracking-widest"
+          className="mt-7 w-full"
         >
           前往学校统一认证登录
         </Button>
 
         {/* 两种方式的分界:文字提示即层级,不做分隔线(FE-6 过渡靠密度) */}
-        <p className="mt-8 text-xs uppercase tracking-widest text-on-dark-faint">或使用学校目录账号</p>
+        <p className="mt-8 text-xs uppercase text-on-dark-faint">或使用学校目录账号</p>
 
         <form onSubmit={handleLdapSubmit} noValidate>
           <AuthTextField

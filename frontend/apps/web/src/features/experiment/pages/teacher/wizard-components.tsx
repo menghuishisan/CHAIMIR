@@ -136,7 +136,7 @@ export function WizardComponentsStep({ draft, errors, onChange }: WizardComponen
                   className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-line p-3"
                 >
                   <div className="min-w-0">
-                    <div className="truncate text-base text-ink">{env.id}</div>
+                    <div className="truncate text-base text-ink">代码环境 {index + 1}</div>
                     <div className="flex flex-wrap items-center gap-1.5">
                       <Badge tone="neutral">{env.runtime_code}</Badge>
                       {env.tools.map((tool) => (
@@ -155,7 +155,7 @@ export function WizardComponentsStep({ draft, errors, onChange }: WizardComponen
                       variant="ghost"
                       size="sm"
                       icon={Trash2}
-                      aria-label={`删除环境 ${env.id}`}
+                      aria-label={`删除第 ${index + 1} 个代码环境`}
                       onClick={() => removeEnv(index)}
                     />
                   </div>
@@ -191,7 +191,7 @@ export function WizardComponentsStep({ draft, errors, onChange }: WizardComponen
                   className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-line p-3"
                 >
                   <div className="min-w-0">
-                    <div className="truncate text-base text-ink">{sim.id}</div>
+                    <div className="truncate text-base text-ink">仿真场景 {index + 1}</div>
                     <div className="flex flex-wrap items-center gap-1.5">
                       <Badge tone="neutral">{sim.package_code}</Badge>
                       <Badge tone="neutral">{sim.version}</Badge>
@@ -206,7 +206,7 @@ export function WizardComponentsStep({ draft, errors, onChange }: WizardComponen
                       variant="ghost"
                       size="sm"
                       icon={Trash2}
-                      aria-label={`删除场景 ${sim.id}`}
+                      aria-label={`删除第 ${index + 1} 个仿真场景`}
                       onClick={() => removeSim(index)}
                     />
                   </div>
@@ -280,11 +280,11 @@ function EnvFormModal({ env, usedIds, onClose, onSave }: EnvFormModalProps) {
   const submit = useCallback(() => {
     const trimmedId = id.trim()
     if (trimmedId === '') {
-      setFormError('请给这个环境起一个标识,后面的阶段与检查点会引用它')
+      setFormError('请给这个环境起一个名称,后面的阶段与检查点会引用它')
       return
     }
     if (!editing && usedIds.includes(trimmedId)) {
-      setFormError('这个标识已被其他环境使用,请换一个')
+      setFormError('这个名称已被其他环境使用,请换一个')
       return
     }
     if (runtimeCode === '') {
@@ -331,10 +331,10 @@ function EnvFormModal({ env, usedIds, onClose, onSave }: EnvFormModalProps) {
         </ModalHeader>
         <ModalBody className="flex flex-col gap-4">
           <FormField
-            label="环境标识"
+            label="环境名称"
             htmlFor="env-id"
             required
-            helper="用便于识别的短名,例如 main 或 attack。阶段与检查点按这个名字引用环境"
+            helper="用便于识别的短名,例如 main 或 attack;阶段与检查点会按此名称引用环境"
           >
             <Input
               id="env-id"
@@ -513,11 +513,11 @@ function SimFormModal({ sim, usedIds, onClose, onSave }: SimFormModalProps) {
   const submit = useCallback(() => {
     const trimmedId = id.trim()
     if (trimmedId === '') {
-      setFormError('请给这个场景起一个标识')
+      setFormError('请给这个场景起一个名称')
       return
     }
     if (!editing && usedIds.includes(trimmedId)) {
-      setFormError('这个标识已被其他场景使用,请换一个')
+      setFormError('这个名称已被其他场景使用,请换一个')
       return
     }
     if (packageCode === '' || version === '') {
@@ -547,10 +547,10 @@ function SimFormModal({ sim, usedIds, onClose, onSave }: SimFormModalProps) {
         </ModalHeader>
         <ModalBody className="flex flex-col gap-4">
           <FormField
-            label="场景标识"
+            label="场景名称"
             htmlFor="sim-id"
             required
-            helper="用便于识别的短名,阶段与检查点按这个名字引用场景"
+            helper="用便于识别的短名;阶段与检查点会按此名称引用场景"
           >
             <Input
               id="sim-id"

@@ -105,7 +105,7 @@ export function ElementList({
                 onClick={() => onSelectElement?.(item.id)}
                 // pressable 已含颜色过渡契约(theme.css),不再叠加 transition-colors
                 className={cn(
-                  "pressable block w-full border-l-2 px-2 py-1.5 text-left hover:bg-dark-elevated focus-visible:outline-2 focus-visible:outline-accent focus-visible:-outline-offset-2",
+                  "hit-target relative pressable block w-full border-l-2 px-2 py-1.5 text-left hover:bg-dark-elevated focus-visible:outline-2 focus-visible:outline-accent focus-visible:-outline-offset-2",
                   ROW_EMPHASIS[item.emphasis],
                   selected && "bg-dark-elevated",
                 )}

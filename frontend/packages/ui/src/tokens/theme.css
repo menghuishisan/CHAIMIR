@@ -423,6 +423,16 @@
   transition-duration: var(--t-slow);
 }
 
+/* ---------- 侧栏宽度过渡(§4.4:只动导航宽度,属性名集中于主题层) ---------- */
+@utility transition-sidebar {
+  transition-property: width;
+}
+
+/* ---------- Select 浮层原点(跟随 Radix 触发源,避免业务层写任意值) ---------- */
+@utility origin-radix-select {
+  transform-origin: var(--radix-select-content-transform-origin);
+}
+
 /* ---------- 按压反馈(§4.3:scale .97,可中断 transition) ----------
    同时接管颜色过渡:pressable 元素不再叠加 transition-colors
    (两者都会设置 transition-property,叠加时按样式序互相覆盖,故合并声明) */

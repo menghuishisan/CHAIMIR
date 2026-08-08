@@ -21,7 +21,7 @@ export const Switch = forwardRef<ElementRef<typeof SwitchPrimitive.Root>, Switch
         disabled={disabled}
         className={cn(
           // 未选中 hover 轨道加深作可点暗示;限定 data-[state=unchecked] 保证不与 checked 的主色底争覆盖
-          "inline-flex h-5 w-9 shrink-0 items-center rounded-full bg-line-strong p-0.5 transition-colors duration-fast hover:data-[state=unchecked]:bg-ink-faint data-[state=checked]:bg-primary focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-2 disabled:pointer-events-none",
+          "hit-target relative inline-flex h-5 w-9 shrink-0 items-center rounded-full bg-line-strong p-0.5 transition-colors duration-fast hover:data-[state=unchecked]:bg-ink-faint data-[state=checked]:bg-primary focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-2 disabled:pointer-events-none",
           // 无 label 时禁用态在轨道上弱化;有 label 时由外层 label 统一弱化
           !label && "disabled:opacity-50",
           !label && className,

@@ -78,7 +78,10 @@ function splitFuncs(lines) {
 }
 
 function parsePackage(dir) {
-  const files = walk(dir, (p) => /api[^/\\]*\.go$/.test(p) && !p.endsWith('_test.go') && dirname(p) === dir)
+  const isServerAssembly = relative(ROOT, dir).replace(/\\/g, '/') === 'backend/cmd/server'
+  const files = walk(dir, (p) =>
+    !p.endsWith('_test.go') && dirname(p) === dir && (/api[^/\\]*\.go$/.test(p) || (isServerAssembly && p.endsWith('main.go'))),
+  )
   if (!files.length) return []
 
   const blocks = []
@@ -200,8 +203,10 @@ const pkgDirs = [
   ...readdirSync(join(ROOT, 'backend/internal/modules')).map((n) => join(ROOT, 'backend/internal/modules', n)),
   join(ROOT, 'backend/internal/platform/transfer'),
   join(ROOT, 'backend/internal/platform/storage'),
+  // server 装配层注册健康探针;纳入 /api/healthz,但下方过滤仅供 K8s 的 /-/healthz 和 /-/readyz。
+  join(ROOT, 'backend/cmd/server'),
 ]
-const routes = pkgDirs.flatMap(parsePackage)
+const routes = pkgDirs.flatMap(parsePackage).filter((route) => !['/-/healthz', '/-/readyz'].includes(route.path))
 
 // ── openapi ──────────────────────────────────────────────────────────────────
 const yamlOps = []

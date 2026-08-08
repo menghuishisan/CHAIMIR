@@ -79,7 +79,7 @@ function BlockCard({ block, emphasis, isTip, selected, onSelect }: BlockCardProp
       // pressable 已含颜色过渡契约(theme.css),不再叠加 transition-colors
       className={cn(
         boxClass,
-        "pressable hover:bg-dark-surface focus-visible:outline-2 focus-visible:outline-accent focus-visible:-outline-offset-2",
+        "hit-target relative pressable hover:bg-dark-surface focus-visible:outline-2 focus-visible:outline-accent focus-visible:-outline-offset-2",
       )}
     >
       {content}

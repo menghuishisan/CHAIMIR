@@ -492,7 +492,7 @@ function FilesPanel({ sandboxId, onSaved }: FilesPanelProps) {
                       : void openFile(entry.relative_path)
                   }
                   className={
-                    'flex w-full items-center gap-2 truncate rounded-md px-2 py-1 text-left text-sm text-on-dark-sub hover:bg-dark-surface hover:text-on-dark focus-visible:outline-2 focus-visible:outline-accent focus-visible:-outline-offset-2' +
+                    'hit-target relative flex w-full items-center gap-2 truncate rounded-md px-2 py-1 text-left text-sm text-on-dark-sub hover:bg-dark-surface hover:text-on-dark focus-visible:outline-2 focus-visible:outline-accent focus-visible:-outline-offset-2' +
                     (openPath === entry.relative_path ? ' bg-dark-surface text-on-dark' : '')
                   }
                 >

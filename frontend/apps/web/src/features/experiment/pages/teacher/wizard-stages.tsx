@@ -110,14 +110,14 @@ export function WizardStagesStep({ draft, errors, onChange }: WizardStagesStepPr
                         <p className="mt-1 line-clamp-2 text-xs text-ink-sub">{stage.description}</p>
                       ) : null}
                       <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
-                        {(stage.components.envs ?? []).map((envId) => (
+                        {(stage.components.envs ?? []).map((envId, envIndex) => (
                           <Badge key={envId} tone="neutral">
-                            环境 {envId}
+                            代码环境 {envIndex + 1}
                           </Badge>
                         ))}
-                        {(stage.components.sims ?? []).map((simId) => (
+                        {(stage.components.sims ?? []).map((simId, simIndex) => (
                           <Badge key={simId} tone="neutral">
-                            场景 {simId}
+                            仿真场景 {simIndex + 1}
                           </Badge>
                         ))}
                         <Badge tone={stage.unlock_condition ? 'info' : 'neutral'}>
@@ -301,11 +301,11 @@ function StageFormModal({ stage, stageNumber, draft, onClose, onSave }: StageFor
               <Callout tone="info">上一步还没有配置代码环境。</Callout>
             ) : (
               <div className="flex flex-col gap-2">
-                {draft.components.envs.map((env) => (
+                {draft.components.envs.map((env, index) => (
                   <Checkbox
                     key={env.id}
                     checked={envIds.includes(env.id)}
-                    label={`${env.id} · ${env.runtime_code}`}
+                    label={`代码环境 ${index + 1} · ${env.runtime_code}`}
                     onCheckedChange={(checked) =>
                       setEnvIds((current) =>
                         checked === true ? [...current, env.id] : current.filter((id) => id !== env.id),
@@ -322,11 +322,11 @@ function StageFormModal({ stage, stageNumber, draft, onClose, onSave }: StageFor
               <Callout tone="info">上一步还没有配置仿真场景。</Callout>
             ) : (
               <div className="flex flex-col gap-2">
-                {draft.components.sims.map((sim) => (
+                {draft.components.sims.map((sim, index) => (
                   <Checkbox
                     key={sim.id}
                     checked={simIds.includes(sim.id)}
-                    label={`${sim.id} · ${sim.package_code}`}
+                    label={`仿真场景 ${index + 1} · ${sim.package_code}`}
                     onCheckedChange={(checked) =>
                       setSimIds((current) =>
                         checked === true ? [...current, sim.id] : current.filter((id) => id !== sim.id),
@@ -361,9 +361,9 @@ function StageFormModal({ stage, stageNumber, draft, onClose, onSave }: StageFor
                 ) : (
                   <Select
                     id="stage-unlock-checkpoint"
-                    options={draft.components.checkpoints.map((checkpoint) => ({
+                    options={draft.components.checkpoints.map((checkpoint, index) => ({
                       value: checkpoint.id,
-                      label: `${checkpoint.id} · ${checkpoint.score} 分`,
+                      label: `检查点 ${index + 1} · ${checkpoint.score} 分`,
                     }))}
                     value={unlockCheckpoint}
                     placeholder="选择检查点"
@@ -417,8 +417,8 @@ interface ParamBindingsEditorProps {
  */
 function ParamBindingsEditor({ draft, bindings, onChange }: ParamBindingsEditorProps) {
   const componentOptions = [
-    ...draft.components.envs.map((env) => ({ value: env.id, label: `环境 ${env.id}` })),
-    ...draft.components.sims.map((sim) => ({ value: sim.id, label: `场景 ${sim.id}` })),
+    ...draft.components.envs.map((env, index) => ({ value: env.id, label: `代码环境 ${index + 1}` })),
+    ...draft.components.sims.map((sim, index) => ({ value: sim.id, label: `仿真场景 ${index + 1}` })),
   ]
 
   const update = useCallback(
@@ -510,9 +510,9 @@ function ParamBindingsEditor({ draft, bindings, onChange }: ParamBindingsEditorP
                   <Select
                     id={`binding-source-${index}`}
                     size="sm"
-                    options={draft.components.checkpoints.map((checkpoint) => ({
+                    options={draft.components.checkpoints.map((checkpoint, checkpointIndex) => ({
                       value: checkpoint.id,
-                      label: checkpoint.id,
+                      label: `检查点 ${checkpointIndex + 1}`,
                     }))}
                     value={binding.source_ref ?? ''}
                     onValueChange={(value) => update(index, { source_ref: value })}

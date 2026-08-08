@@ -45,7 +45,7 @@ import { userFacingErrorMessage } from '../../../../utils/userFacingError'
 const ADAPTER_LEVELS = [
   { value: '1', label: '一级 · 只托管环境', hint: '平台只负责起容器,链操作由学生自己在终端完成' },
   { value: '2', label: '二级 · 声明标准链能力', hint: '用命令声明部署/交易/查询/重置,平台统一调用' },
-  { value: '3', label: '三级 · 自带插件实现', hint: '链能力由运行时插件实现,平台按插件标识调用' },
+  { value: '3', label: '三级 · 自带插件实现', hint: '链能力由运行时插件实现,平台按插件名称调用' },
 ] as const
 
 /** 可提交的状态:可用由自检结果决定,不接受手填(后端 validateRuntimeRequest)。 */
@@ -152,7 +152,7 @@ export function RuntimeFormModal({ runtime, onClose, onSaved }: RuntimeFormModal
         }
         if (editing) await api.sandbox.updateRuntime(runtime.id, payload)
         else await api.sandbox.registerRuntime(payload)
-        toast.success(editing ? '运行时声明已更新' : '运行时已登记,接下来登记镜像并预拉取')
+        toast.success(editing ? '运行时配置已更新' : '运行时已登记,接下来登记镜像并预拉取')
         onSaved()
       } catch (error) {
         setFormError(userFacingErrorMessage(error, '保存没有成功,请检查声明后重试。'))
@@ -181,7 +181,7 @@ export function RuntimeFormModal({ runtime, onClose, onSaved }: RuntimeFormModal
     <Modal open onOpenChange={(open) => !open && onClose()}>
       <ModalContent size="xl">
         <ModalHeader>
-          <ModalTitle>{editing ? '修改运行时声明' : '登记链运行时'}</ModalTitle>
+          <ModalTitle>{editing ? '修改运行时配置' : '登记链运行时'}</ModalTitle>
           <ModalDescription>
             运行时描述一条链在平台里怎么跑起来。登记后还要登记镜像、预拉取、自检通过,才会变成可用。
           </ModalDescription>
@@ -190,11 +190,11 @@ export function RuntimeFormModal({ runtime, onClose, onSaved }: RuntimeFormModal
           <ModalBody className="flex flex-col gap-4">
             <div className="grid gap-4 sm:grid-cols-2">
               <FormField
-                label="运行时编码"
+                label="运行时短名"
                 htmlFor={`${fieldId}-code`}
                 required
                 error={errors.code}
-                helper={editing ? '编码在登记后不能修改' : '平台内唯一标识,例如 ethereum-hardhat'}
+                helper={editing ? '登记后不能修改' : '平台内唯一短名,例如 ethereum-hardhat'}
               >
                 <Input
                   id={`${fieldId}-code`}
@@ -244,9 +244,9 @@ export function RuntimeFormModal({ runtime, onClose, onSaved }: RuntimeFormModal
 
             <div className="grid gap-4 sm:grid-cols-2">
               <FormField
-                label="能力实现标识"
+                label="链能力实现名称"
                 htmlFor={`${fieldId}-impl`}
-                helper="二级以上必须给出能力来源:填这里、填插件标识,或在清单里声明四个能力命令"
+                helper="二级以上需要指定能力来源:填写实现名称、插件名称,或在清单里声明四个能力命令"
               >
                 <Input
                   id={`${fieldId}-impl`}
@@ -256,9 +256,9 @@ export function RuntimeFormModal({ runtime, onClose, onSaved }: RuntimeFormModal
                 />
               </FormField>
               <FormField
-                label="插件标识"
+                label="链能力插件名称"
                 htmlFor={`${fieldId}-plugin`}
-                helper="三级运行时填插件标识,平台按它调用链能力"
+                helper="三级运行时填写插件名称,平台会用它调用链能力"
               >
                 <Input
                   id={`${fieldId}-plugin`}
@@ -285,7 +285,7 @@ export function RuntimeFormModal({ runtime, onClose, onSaved }: RuntimeFormModal
             </FormField>
 
             <FormField
-              label="环境声明清单"
+              label="环境配置清单"
               htmlFor={`${fieldId}-spec`}
               required
               error={errors.spec}

@@ -527,7 +527,7 @@ function ImageFormModal({ runtimeId, onClose, onSaved }: ImageFormModalProps) {
                 id="image-url"
                 className="font-mono text-sm"
                 value={imageUrl}
-                placeholder="harbor.example.com/chain/geth@sha256:0f1e…"
+                placeholder="填写仓库地址@内容摘要"
                 invalid={Boolean(errors.imageUrl)}
                 onChange={(event) => setImageUrl(event.target.value)}
               />

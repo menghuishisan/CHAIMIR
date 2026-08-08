@@ -42,7 +42,7 @@ export const RadioItem = forwardRef<
       disabled={disabled}
       className={cn(
         // hover 边框转主色作可点暗示;选中态边框已是主色,叠加无视觉冲突
-        "flex h-4 w-4 shrink-0 items-center justify-center rounded-full border border-line-strong bg-surface transition-colors duration-fast hover:border-primary data-[state=checked]:border-primary focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-2 disabled:pointer-events-none",
+        "hit-target relative flex h-4 w-4 shrink-0 items-center justify-center rounded-full border border-line-strong bg-surface transition-colors duration-fast hover:border-primary data-[state=checked]:border-primary focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-2 disabled:pointer-events-none",
         // 无 label 时禁用态在圆圈上弱化;有 label 时由外层 label 统一弱化
         !label && "disabled:opacity-50",
         !label && className,

@@ -470,7 +470,7 @@ function TimelineStage({
                   onClick={() => onCursorChange(index + 1)}
                   aria-label={`回溯到第 ${index + 1} 局`}
                   className={
-                    'rounded-md border px-2 py-1 font-mono text-xs tabular-nums focus-visible:outline-2 focus-visible:outline-accent focus-visible:-outline-offset-2 ' +
+                    'hit-target relative rounded-md border px-2 py-1 font-mono text-xs tabular-nums focus-visible:outline-2 focus-visible:outline-accent focus-visible:-outline-offset-2 ' +
                     outcomeClass(outcome, reached)
                   }
                 >

@@ -454,7 +454,7 @@ function ProblemBrief({ problems, currentId, onPick, spec }: ProblemBriefProps) 
                 type="button"
                 onClick={() => onPick(item.id)}
                 className={
-                  'flex w-full items-center justify-between gap-2 rounded-md border px-2 py-1.5 text-left focus-visible:outline-2 focus-visible:outline-accent focus-visible:-outline-offset-2 ' +
+                  'hit-target relative flex w-full items-center justify-between gap-2 rounded-md border px-2 py-1.5 text-left focus-visible:outline-2 focus-visible:outline-accent focus-visible:-outline-offset-2 ' +
                   (item.id === currentId
                     ? 'border-accent bg-dark-elevated'
                     : 'border-dark-line bg-dark-surface hover:bg-dark-elevated')

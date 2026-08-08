@@ -196,7 +196,7 @@ function SettingsContent({ tenant, onSaved }: SettingsContentProps) {
                 <FormField
                   label="校徽地址"
                   htmlFor="tenant-logo"
-                  helper="填图片地址,留空则显示默认标识"
+                  helper="填图片地址,留空则显示默认校徽"
                 >
                   <Input
                     id="tenant-logo"

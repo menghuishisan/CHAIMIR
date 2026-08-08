@@ -53,7 +53,7 @@ export function Autosave({ state, savedAt, onRetry, className }: AutosaveProps) 
             <button
               type="button"
               onClick={onRetry}
-              className="rounded-sm text-danger underline underline-offset-2 transition-colors duration-fast hover:text-danger-hover focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-2"
+              className="hit-target relative rounded-sm text-danger underline underline-offset-2 transition-colors duration-fast hover:text-danger-hover focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-2"
             >
               重试
             </button>

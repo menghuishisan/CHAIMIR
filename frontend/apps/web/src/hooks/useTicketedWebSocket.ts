@@ -19,8 +19,8 @@ export interface TicketedSocketState {
   status: SocketStatus
   /** 用户向失败文案;技术原因进控制台,不上界面 */
   error?: string
-  /** 向服务端发送一段文本;未连接时静默丢弃(调用方按 status 决定是否可交互) */
-  send: (data: string) => void
+  /** 向服务端发送一段文本;未连接时返回 false 并给出用户向状态 */
+  send: (data: string) => boolean
   /** 重新换票并建连 */
   reconnect: () => void
 }
@@ -130,7 +130,10 @@ export function useTicketedWebSocket(options: TicketedSocketOptions): TicketedSo
     const socket = socketRef.current
     if (socket && socket.readyState === WebSocket.OPEN) {
       socket.send(data)
+      return true
     }
+    setError('实时连接尚未就绪,请稍后重试。')
+    return false
   }, [])
 
   const reconnect = useCallback(() => setAttempt((current) => current + 1), [])

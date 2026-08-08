@@ -44,7 +44,7 @@ function PhoneMethodSwitch({
           aria-pressed={method === option.value}
           onClick={() => onChange(option.value)}
           className={cn(
-            'flex-1 rounded-md py-1.5 text-sm transition-colors duration-fast',
+            'flex min-h-11 flex-1 rounded-md text-sm transition-colors duration-fast focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-2',
             method === option.value
               ? 'bg-dark-surface font-medium text-accent'
               : 'text-on-dark-sub hover:text-on-dark',
@@ -69,7 +69,7 @@ function RememberRow({ remember, onRememberChange }: { remember: boolean; onReme
         onCheckedChange={(checked) => onRememberChange(checked === true)}
         className="text-on-dark-sub"
       />
-      <Link to="/auth/forgot" className="text-sm text-on-dark-sub transition-colors duration-fast hover:text-accent">
+      <Link to="/auth/forgot" className="hit-target relative rounded-sm text-sm text-on-dark-sub transition-colors duration-fast hover:text-accent focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-2">
         忘记密码
       </Link>
     </div>
@@ -85,15 +85,15 @@ function AltEntries({ onUseSso }: { onUseSso: () => void }) {
   return (
     <div className="mt-10">
       {/* 与主表单的分界靠留白密度,不画分隔线(FE-6/规范 §1.2) */}
-      <p className="text-xs uppercase tracking-widest text-on-dark-faint">其他方式</p>
+      <p className="text-xs uppercase text-on-dark-faint">其他方式</p>
       <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-on-dark-sub">
-        <button type="button" onClick={onUseSso} className="transition-colors duration-fast hover:text-accent">
+        <button type="button" onClick={onUseSso} className="hit-target relative rounded-sm transition-colors duration-fast hover:text-accent focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-2">
           学校统一认证登录
         </button>
         <span aria-hidden className="text-on-dark-faint">
           ·
         </span>
-        <Link to="/auth/activate" className="transition-colors duration-fast hover:text-accent">
+        <Link to="/auth/activate" className="hit-target relative rounded-sm transition-colors duration-fast hover:text-accent focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-2">
           用激活码开通账号
         </Link>
         {platformLayerEnabled ? (
@@ -101,7 +101,7 @@ function AltEntries({ onUseSso }: { onUseSso: () => void }) {
             <span aria-hidden className="text-on-dark-faint">
               ·
             </span>
-            <Link to="/auth/apply" className="transition-colors duration-fast hover:text-accent">
+            <Link to="/auth/apply" className="hit-target relative rounded-sm transition-colors duration-fast hover:text-accent focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-2">
               学校入驻申请
             </Link>
           </>

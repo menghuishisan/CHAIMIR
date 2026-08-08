@@ -65,7 +65,11 @@ export function WizardCheckpointsStep({ draft, errors, onChange }: WizardCheckpo
     {
       key: 'id',
       header: '检查点',
-      render: (checkpoint) => <span className="font-medium text-ink">{checkpoint.id}</span>,
+      render: (checkpoint) => (
+        <span className="font-medium text-ink">
+          检查点 {draft.components.checkpoints.indexOf(checkpoint) + 1}
+        </span>
+      ),
     },
     {
       key: 'judger',
@@ -86,8 +90,8 @@ export function WizardCheckpointsStep({ draft, errors, onChange }: WizardCheckpo
       header: '绑定组件',
       render: (checkpoint) => (
         <div className="flex flex-wrap gap-1.5">
-          {checkpoint.env_id ? <Badge tone="neutral">环境 {checkpoint.env_id}</Badge> : null}
-          {checkpoint.sim_id ? <Badge tone="neutral">场景 {checkpoint.sim_id}</Badge> : null}
+          {checkpoint.env_id ? <Badge tone="neutral">已绑定代码环境</Badge> : null}
+          {checkpoint.sim_id ? <Badge tone="neutral">已绑定仿真场景</Badge> : null}
           {!checkpoint.env_id && !checkpoint.sim_id ? (
             <span className="text-ink-sub">不限</span>
           ) : null}
@@ -247,8 +251,8 @@ function CheckpointFormModal({
   const bindOptions = useMemo(
     () => [
       { value: '', label: '不绑定(按整体产出判分)' },
-      ...draft.components.envs.map((env) => ({ value: `env:${env.id}`, label: `环境 ${env.id}` })),
-      ...draft.components.sims.map((sim) => ({ value: `sim:${sim.id}`, label: `场景 ${sim.id}` })),
+      ...draft.components.envs.map((env, index) => ({ value: `env:${env.id}`, label: `代码环境 ${index + 1}` })),
+      ...draft.components.sims.map((sim, index) => ({ value: `sim:${sim.id}`, label: `仿真场景 ${index + 1}` })),
     ],
     [draft.components.envs, draft.components.sims],
   )
@@ -256,11 +260,11 @@ function CheckpointFormModal({
   const submit = useCallback(() => {
     const trimmedId = id.trim()
     if (trimmedId === '') {
-      setFormError('请给这个检查点起一个标识,阶段解锁与参数传递会引用它')
+      setFormError('请给这个检查点起一个名称,阶段解锁与参数传递会引用它')
       return
     }
     if (!editing && usedIds.includes(trimmedId)) {
-      setFormError('这个标识已被其他检查点使用,请换一个')
+      setFormError('这个名称已被其他检查点使用,请换一个')
       return
     }
     if (judger === '') {
@@ -312,15 +316,15 @@ function CheckpointFormModal({
         <ModalHeader>
           <ModalTitle>{editing ? '编辑检查点' : '添加检查点'}</ModalTitle>
           <ModalDescription>
-            判题方式决定怎么判(跑测试、查链上状态、比对 flag),题目决定判什么。
+            判题方式决定怎么判(跑测试、查链上状态、比对答案口令),题目决定判什么。
           </ModalDescription>
         </ModalHeader>
         <ModalBody className="flex flex-col gap-4">
           <FormField
-            label="检查点标识"
+            label="检查点名称"
             htmlFor="checkpoint-id"
             required
-            helper="用便于识别的短名,例如 deploy 或 exploit"
+            helper="用便于识别的短名,例如 deploy 或 exploit;阶段解锁与参数传递会引用它"
           >
             <Input
               id="checkpoint-id"

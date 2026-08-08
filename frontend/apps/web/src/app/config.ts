@@ -24,6 +24,64 @@ function parsePositiveInteger(value: string | undefined, name: string): number {
   return parsed
 }
 
+/**
+ * parseSameOriginBaseURL 校验 API 根地址只能落在当前平台 origin。
+ * API 客户端会自动携带内存 access token;放行外部 origin 会把令牌交给错误的部署地址。
+ * 相对路径是生产部署的标准形式(`/api/v1`),绝对地址仅用于同源的显式配置。
+ */
+function parseSameOriginBaseURL(value: string | undefined, name: string): string | undefined {
+  const normalized = value?.trim()
+  if (!normalized) return undefined
+  if (normalized.startsWith('//') || normalized.includes('\\')) {
+    throw new Error(`${name} 必须使用当前平台的站内地址`)
+  }
+
+  let parsed: URL
+  try {
+    parsed = new URL(normalized, window.location.origin)
+  } catch {
+    throw new Error(`${name} 必须配置为有效的站内地址`)
+  }
+  if (
+    !['http:', 'https:'].includes(parsed.protocol) ||
+    parsed.origin !== window.location.origin ||
+    parsed.username ||
+    parsed.password ||
+    parsed.search ||
+    parsed.hash
+  ) {
+    throw new Error(`${name} 必须使用当前平台的站内地址`)
+  }
+  return parsed.pathname.replace(/\/+$/, '') || '/'
+}
+
+/** parseWebSocketBaseURL 校验 WS 根地址与页面同源,避免票据流向外部站点。 */
+function parseWebSocketBaseURL(value: string | undefined, name: string): string | undefined {
+  const normalized = value?.trim()
+  if (!normalized) return undefined
+  if (normalized.startsWith('//') || normalized.includes('\\')) {
+    throw new Error(`${name} 必须使用当前平台的站内地址`)
+  }
+
+  let parsed: URL
+  try {
+    parsed = new URL(normalized, window.location.origin)
+  } catch {
+    throw new Error(`${name} 必须配置为有效的站内地址`)
+  }
+  if (
+    !['http:', 'https:', 'ws:', 'wss:'].includes(parsed.protocol) ||
+    parsed.origin !== window.location.origin ||
+    parsed.username ||
+    parsed.password ||
+    parsed.search ||
+    parsed.hash
+  ) {
+    throw new Error(`${name} 必须使用当前平台的站内地址`)
+  }
+  return normalized.replace(/\/$/, '')
+}
+
 /** parseHttpsOrigin 校验工具代理使用独立 HTTPS origin，避免同源 iframe 信任边界失效。 */
 function parseHttpsOrigin(value: string | undefined, name: string): string {
   let parsed: URL
@@ -42,12 +100,15 @@ function parseHttpsOrigin(value: string | undefined, name: string): string {
   ) {
     throw new Error(`${name} 必须配置为 HTTPS origin`)
   }
+  if (parsed.origin === window.location.origin) {
+    throw new Error(`${name} 必须使用独立于平台的工具 origin`)
+  }
   return parsed.origin
 }
 
 export const appConfig = {
-  apiBaseURL: import.meta.env.VITE_API_BASE_URL || window.location.origin,
-  wsBaseURL: import.meta.env.VITE_WS_BASE_URL || undefined,
+  apiBaseURL: parseSameOriginBaseURL(import.meta.env.VITE_API_BASE_URL, 'VITE_API_BASE_URL') || window.location.origin,
+  wsBaseURL: parseWebSocketBaseURL(import.meta.env.VITE_WS_BASE_URL, 'VITE_WS_BASE_URL'),
   sandboxToolOrigin: parseHttpsOrigin(import.meta.env.VITE_SANDBOX_TOOL_ORIGIN, 'VITE_SANDBOX_TOOL_ORIGIN'),
   apiTimeoutMs: parsePositiveInteger(import.meta.env.VITE_API_TIMEOUT_MS, 'VITE_API_TIMEOUT_MS'),
   deploymentMode: parseDeploymentMode(import.meta.env.VITE_DEPLOY_MODE),

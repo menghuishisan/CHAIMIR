@@ -18,7 +18,7 @@ import { Icon, type IconSize } from "../../lib/icon";
  * 对外导出:少数必须是链接的按钮(如认证页成功态的「前往登录」)需要同一套视觉,
  * 由调用方把它套到 <Link> 上,避免把类名再抄一遍写出第二套落印按钮。 */
 export const buttonVariants = cva(
-  "pressable inline-flex select-none items-center justify-center gap-2 whitespace-nowrap rounded-md font-medium focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-2 disabled:pointer-events-none disabled:opacity-50",
+  "pressable inline-flex min-h-11 select-none items-center justify-center gap-2 whitespace-nowrap rounded-md font-medium focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-2 disabled:pointer-events-none disabled:opacity-50",
   {
     variants: {
       variant: {

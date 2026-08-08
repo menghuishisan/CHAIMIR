@@ -21,6 +21,7 @@ import { api } from '../../app/api'
 import { invalidateAppResource, subscribeAppResource } from '../../app/resourceInvalidation'
 import { useAsyncResource } from '../../hooks'
 import { formatShortDateTime } from '../../utils/formatters'
+import { safeInternalNavigation } from '../../utils/safeNavigation'
 
 /** 下拉内每类条目的展示条数:面板是「最近」摘要,全量在通知中心页 */
 const RECENT_SIZE = 5
@@ -103,9 +104,10 @@ function NotificationPanel({ allPath, onNavigate }: NotificationPanelProps) {
           // 标记已读失败不阻断阅读:用户仍可打开通知内容,未读数下次刷新自然纠正
         }
       }
-      if (item.link) {
+      const safeLink = safeInternalNavigation(item.link)
+      if (safeLink) {
         onNavigate()
-        navigate(item.link)
+        navigate(safeLink)
       }
     },
     [navigate, onNavigate],

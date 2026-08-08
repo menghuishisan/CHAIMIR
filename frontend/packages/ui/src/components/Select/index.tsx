@@ -57,7 +57,7 @@ export function Select({
         aria-label={ariaLabel}
         aria-invalid={invalid || undefined}
         className={cn(
-          "inline-flex w-full items-center justify-between gap-2 rounded-md border px-3 transition-colors duration-fast focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-2 disabled:pointer-events-none disabled:opacity-50",
+          "inline-flex min-h-11 w-full items-center justify-between gap-2 rounded-md border px-3 transition-colors duration-fast focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-2 disabled:pointer-events-none disabled:opacity-50",
           onDark
             ? "border-dark-line bg-dark-elevated text-on-dark data-[placeholder]:text-on-dark-faint hover:border-on-dark-faint"
             : "border-line-strong bg-surface text-ink data-[placeholder]:text-ink-faint hover:border-ink-faint",
@@ -77,7 +77,7 @@ export function Select({
           position="popper"
           sideOffset={4}
           className={cn(
-            "z-dropdown max-h-72 overflow-hidden rounded-lg border shadow-md origin-(--radix-select-content-transform-origin) data-[state=open]:animate-pop-in data-[state=closed]:animate-pop-out",
+            "z-dropdown max-h-72 overflow-hidden rounded-lg border shadow-md origin-radix-select data-[state=open]:animate-pop-in data-[state=closed]:animate-pop-out",
             onDark ? "border-dark-line bg-dark-elevated" : "border-line bg-surface",
           )}
         >

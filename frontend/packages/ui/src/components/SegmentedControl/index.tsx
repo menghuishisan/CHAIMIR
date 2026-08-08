@@ -32,7 +32,7 @@ export interface SegmentedControlProps {
 
 /** 分段项样式:光面语境激活项浮起为白面,墨底语境激活项浮起为深色面板 + 玉色文字 */
 const segmentedItemVariants = cva(
-  "inline-flex select-none items-center gap-1.5 rounded-md font-medium transition-colors duration-fast focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-2 disabled:pointer-events-none disabled:opacity-50",
+  "hit-target relative inline-flex min-h-11 select-none items-center gap-1.5 rounded-md font-medium transition-colors duration-fast focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-2 disabled:pointer-events-none disabled:opacity-50",
   {
     variants: {
       size: {

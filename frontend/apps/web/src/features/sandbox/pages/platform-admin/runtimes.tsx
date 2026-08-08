@@ -42,7 +42,7 @@ import {
 import { RuntimeFormModal } from './runtime-form'
 
 /** 接入四步:与后端的硬前置一致(镜像 → 预拉取 → 自检 → 可用)。 */
-const ONBOARDING_STEPS = ['登记声明', '登记镜像并预拉取', '自检通过', '开放给学校'] as const
+const ONBOARDING_STEPS = ['填写环境配置', '登记镜像并预拉取', '自检通过', '开放给学校'] as const
 
 /** 适配层级说明:列表上只给一句话,详细含义在登记表单里。 */
 const ADAPTER_LEVEL_LABELS: Record<number, string> = {
@@ -89,7 +89,7 @@ export default function PlatformRuntimesPage() {
       <PageHeader
         kicker={<Breadcrumb items={[{ label: '底层资源' }, { label: '链运行时' }]} />}
         title="链运行时"
-        description="学生做实验和答题时跑的链环境。登记声明后还要登记镜像、预拉取并自检通过,才会开放给学校。"
+        description="学生做实验和答题时使用的链环境。填写配置后还要登记镜像、预拉取并自检通过,才会开放给学校。"
         icon={Server}
         actions={
           <Button variant="primary" leftIcon={Plus} onClick={() => setFormTarget({})}>
@@ -217,7 +217,7 @@ function RuntimeCard({ runtime, onEdit }: RuntimeCardProps) {
         <DescriptionList
           dense
           items={[
-            { term: '运行时编码', description: runtime.code, mono: true },
+            { term: '运行时短名', description: runtime.code, mono: true },
             {
               term: '工作区目录',
               description: runtime.adapter_spec.workspace_dir,
@@ -253,7 +253,7 @@ function RuntimeCard({ runtime, onEdit }: RuntimeCardProps) {
             镜像与自检
           </Button>
           <Button variant="ghost" size="sm" leftIcon={Settings2} onClick={onEdit}>
-            修改声明
+              修改配置
           </Button>
         </div>
       </CardBody>

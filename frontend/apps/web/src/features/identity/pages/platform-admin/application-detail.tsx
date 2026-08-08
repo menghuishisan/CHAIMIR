@@ -192,7 +192,7 @@ function ApplicationReview({ application, onReviewed }: ApplicationReviewProps) 
         title="审核决定"
         description={
           pending
-            ? '通过需要指定学校编码与首个管理员;驳回需要写明理由,学校会看到这段话。'
+            ? '通过需要指定学校短名与首个管理员;驳回需要写明理由,学校会看到这段话。'
             : '这份申请已经处理过,不能再改判。'
         }
       >
@@ -306,7 +306,7 @@ function ApproveModal({ application, onClose, onDone }: ReviewModalProps) {
               dense
               items={[
                 { term: '学校', description: application.school_name },
-                { term: '学校编码', description: tenantCode.trim(), mono: true },
+                { term: '学校短名', description: tenantCode.trim(), mono: true },
                 { term: '管理员', description: adminName.trim() },
                 { term: '管理员手机号', description: adminPhone.trim(), mono: true },
                 {
@@ -351,11 +351,11 @@ function ApproveModal({ application, onClose, onDone }: ReviewModalProps) {
             />
 
             <FormField
-              label="学校编码"
+              label="学校短名"
               htmlFor="approve-code"
               required
               error={errors.tenantCode}
-              helper="学校在平台内的唯一标识,开通后不能修改。例如 nanjing-tech"
+              helper="学校在平台内使用的唯一短名,开通后不能修改。例如 nanjing-tech"
             >
               <Input
                 id="approve-code"

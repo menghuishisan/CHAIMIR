@@ -29,6 +29,7 @@ import { useNavigate } from 'react-router'
 import { api } from '../../../../app/api'
 import { ResourceState } from '../../../../components/ResourceState'
 import { useAsyncResource } from '../../../../hooks'
+import { safeMonitoringUrl } from '../../../../utils/safeNavigation'
 
 /**
  * PlatformMonitoringPage 列出受控的外部监控入口。
@@ -111,6 +112,8 @@ export default function PlatformMonitoringPage() {
  * 不把管理端地址带给外部系统,也不让外部页面拿到本页的窗口句柄。
  */
 function PanelCard({ panel }: { panel: MonitoringPanel }) {
+  const safeUrl = safeMonitoringUrl(panel.url)
+
   return (
     <Card>
       <CardHeader title={panel.name} description="外部监控系统" />
@@ -121,7 +124,10 @@ function PanelCard({ panel }: { panel: MonitoringPanel }) {
             variant="outline"
             size="sm"
             leftIcon={ExternalLink}
-            onClick={() => window.open(panel.url, '_blank', 'noopener,noreferrer')}
+            disabled={!safeUrl}
+            onClick={() => {
+              if (safeUrl) window.open(safeUrl, '_blank', 'noopener,noreferrer')
+            }}
           >
             在新标签打开
           </Button>

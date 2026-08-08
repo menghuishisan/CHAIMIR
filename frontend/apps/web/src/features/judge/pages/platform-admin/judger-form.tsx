@@ -162,7 +162,7 @@ export function JudgerFormModal({ judger, onClose, onSaved }: JudgerFormModalPro
         ? null
         : '用小写字母开头,只含小写字母、数字与连字符,长度 2 到 32 位',
       name: name.trim() === '' ? '请输入判题器名称' : null,
-      executorRef: executorRef.trim() === '' ? '请填写执行器标识' : null,
+      executorRef: executorRef.trim() === '' ? '请填写判题实现名称' : null,
       defaultTimeout:
         !Number.isInteger(defaultTimeoutValue) || defaultTimeoutValue <= 0
           ? '默认超时要是大于 0 的整数秒'
@@ -182,7 +182,7 @@ export function JudgerFormModal({ judger, onClose, onSaved }: JudgerFormModalPro
     if (needsRuntime) {
       next.runtimeCode = runtimeCode.trim() === '' ? '请选择判题时使用的链环境' : null
       next.imageVersion = imageVersion.trim() === '' ? '请选择链环境的镜像版本' : null
-      next.genesisRef = genesisRef.trim() === '' ? '请填写创世状态标识' : null
+      next.genesisRef = genesisRef.trim() === '' ? '请填写初始链状态名称' : null
     }
 
     if (needsCommand) {
@@ -314,11 +314,11 @@ export function JudgerFormModal({ judger, onClose, onSaved }: JudgerFormModalPro
           <ModalBody className="flex flex-col gap-4">
             <div className="grid gap-4 sm:grid-cols-2">
               <FormField
-                label="判题器编码"
+                label="判题器短名"
                 htmlFor={`${fieldId}-code`}
                 required
                 error={errors.code}
-                helper={editing ? '编码在登记后不能修改' : '教师出题时按这个编码引用'}
+                helper={editing ? '登记后不能修改' : '教师出题时按这个短名引用'}
               >
                 <Input
                   id={`${fieldId}-code`}
@@ -353,11 +353,11 @@ export function JudgerFormModal({ judger, onClose, onSaved }: JudgerFormModalPro
                 />
               </FormField>
               <FormField
-                label="执行器标识"
+                label="判题实现名称"
                 htmlFor={`${fieldId}-executor`}
                 required
                 error={errors.executorRef}
-                helper="平台按这个标识找到对应的判题实现"
+                helper="平台会按这个名称找到对应的判题实现"
               >
                 <Input
                   id={`${fieldId}-executor`}
@@ -503,7 +503,7 @@ export function JudgerFormModal({ judger, onClose, onSaved }: JudgerFormModalPro
                 </div>
 
                 <FormField
-                  label="创世状态标识"
+                  label="初始链状态名称"
                   htmlFor={`${fieldId}-genesis`}
                   required
                   error={errors.genesisRef}
@@ -617,7 +617,7 @@ export function JudgerFormModal({ judger, onClose, onSaved }: JudgerFormModalPro
                 </div>
 
                 <FormField
-                  label="执行容器声明"
+                  label="执行环境配置"
                   htmlFor={`${fieldId}-sidecars`}
                   required
                   error={errors.sidecars}
@@ -637,7 +637,7 @@ export function JudgerFormModal({ judger, onClose, onSaved }: JudgerFormModalPro
             ) : null}
 
             <FormField
-              label="初始化脚本标识"
+              label="初始化脚本名称"
               htmlFor={`${fieldId}-init`}
               helper="判题开始前先跑一段准备脚本。留空表示不需要"
             >
@@ -684,7 +684,7 @@ interface ParsedSidecars {
  */
 function parseSidecars(text: string): ParsedSidecars {
   const trimmed = text.trim()
-  if (trimmed === '') return { sidecars: [], error: '请填写执行容器声明。' }
+  if (trimmed === '') return { sidecars: [], error: '请填写执行环境配置。' }
 
   let raw: unknown
   try {
@@ -692,7 +692,7 @@ function parseSidecars(text: string): ParsedSidecars {
   } catch {
     return { sidecars: [], error: '内容不是合法的声明格式,检查是否漏了逗号或引号。' }
   }
-  if (!Array.isArray(raw)) return { sidecars: [], error: '执行容器声明要是一个数组。' }
+  if (!Array.isArray(raw)) return { sidecars: [], error: '执行环境配置格式不正确,请按示例填写多个条目。' }
   if (raw.length === 0) return { sidecars: [], error: '至少要声明一个执行容器。' }
   for (const item of raw) {
     const record = typeof item === 'object' && item !== null ? (item as Record<string, unknown>) : undefined

@@ -339,11 +339,11 @@ function ItemForm({ item, snapshot, onClose, onSaved }: ItemFormProps) {
             {!editing ? (
               <div className="grid gap-4 sm:grid-cols-2">
                 <FormField
-                  label="题目编号"
+                  label="题目短名"
                   htmlFor={`${fieldId}-code`}
                   required
                   error={errors.code}
-                  helper="作业与实验按编号加版本引用题目,创建后不可修改"
+                  helper="作业与实验按短名和版本引用题目,创建后不可修改"
                 >
                   <Input
                     id={`${fieldId}-code`}
@@ -486,7 +486,7 @@ function ItemForm({ item, snapshot, onClose, onSaved }: ItemFormProps) {
                   <FormField
                     label="建议运行时"
                     htmlFor={`${fieldId}-runtime`}
-                    helper="实验编排时会按这个运行时准备环境,填运行时编号"
+                    helper="实验编排时会按这个运行时准备环境,填写运行时名称"
                   >
                     <Input
                       id={`${fieldId}-runtime`}
@@ -526,7 +526,7 @@ function ItemForm({ item, snapshot, onClose, onSaved }: ItemFormProps) {
                     <FormField
                       label="实操运行时"
                       htmlFor={`${fieldId}-contest-runtime`}
-                      helper="填了运行时编号,学生答题时会起一个实操环境写代码;纯答题题留空"
+                      helper="填写运行时名称后,学生答题时会准备实操环境;纯答题题留空"
                     >
                       <Input
                         id={`${fieldId}-contest-runtime`}
@@ -536,21 +536,21 @@ function ItemForm({ item, snapshot, onClose, onSaved }: ItemFormProps) {
                       />
                     </FormField>
                     <FormField
-                      label="答案提交键"
+                      label="答案提交字段"
                       htmlFor={`${fieldId}-submit-key`}
-                      helper="学生输入的答案放在提交体的哪个键上,要与判题配置里的取值键一致;纯代码题留空"
+                      helper="学生输入的答案放在哪个字段中;需与判题配置保持一致;纯代码题留空"
                     >
                       <Input
                         id={`${fieldId}-submit-key`}
                         className="font-mono text-sm"
                         value={submitKey}
-                        placeholder="flag"
+                        placeholder="例如 answer"
                         onChange={(event) => setSubmitKey(event.target.value)}
                       />
                     </FormField>
                   </div>
                   <Callout tone="info">
-                    判题配置与 flag 明文不在这里填写,也不会传给学生。提交键只是表单字段名,
+                    判题配置与答案内容不在这里填写,也不会传给学生。提交键只是表单字段名,
                     随题面下发,学生据此知道答案该放在哪里。
                   </Callout>
                 </>

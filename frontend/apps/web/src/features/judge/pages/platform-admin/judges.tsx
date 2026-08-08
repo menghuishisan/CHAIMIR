@@ -51,7 +51,7 @@ const TYPE_FILTERS = [
 const TYPE_HINTS: Record<JudgerType, string> = {
   [JudgerType.TESTCASE]: '跑测试用例,按通过的用例数给分',
   [JudgerType.ONCHAIN_ASSERT]: '在链上执行断言,检查合约状态是否符合预期',
-  [JudgerType.FLAG]: '比对学生提交的 flag,用于夺旗类赛题',
+  [JudgerType.FLAG]: '比对学生提交的答案口令,用于夺旗类赛题',
   [JudgerType.STATIC_SCAN]: '静态扫描代码,查找漏洞模式与写法问题',
   [JudgerType.SIM_CHECKPOINT]: '按仿真过程中的检查点给分',
   [JudgerType.MANUAL]: '不自动判,由教师在批改中心人工打分',
@@ -88,7 +88,7 @@ export default function PlatformJudgesPage() {
       <PageHeader
         kicker={<Breadcrumb items={[{ label: '底层资源' }, { label: '判题器' }]} />}
         title="判题器"
-        description="判一道题用哪种方式。教师出题时按编码引用,登记后建议先自测一次再开放。"
+        description="判一道题用哪种方式。教师出题时按短名引用,登记后建议先自测一次再开放。"
         icon={Cpu}
         actions={
           <Button variant="primary" leftIcon={Plus} onClick={() => setFormTarget({})}>
@@ -101,7 +101,7 @@ export default function PlatformJudgesPage() {
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <Stat label="判题器总数" value={list.length} icon={Cpu} />
           <Stat label="可用" value={stats.available} icon={ShieldCheck} hint="教师可以引用" />
-          <Stat label="需要链环境" value={stats.runtimeBound} icon={Cpu} hint="判题时会起沙箱" />
+          <Stat label="需要链环境" value={stats.runtimeBound} icon={Cpu} hint="判题时会准备实验环境" />
           <Stat label="人工评分" value={stats.manual} icon={Settings2} hint="由教师打分" />
         </div>
       </PageSection>
@@ -209,8 +209,8 @@ function JudgerCard({ judger, onEdit, onSelftested, onError }: JudgerCardProps) 
 
   const items = useMemo(() => {
     const base = [
-      { term: '判题器编码', description: judger.code, mono: true },
-      { term: '执行器标识', description: judger.executor_ref, mono: true },
+      { term: '判题器短名', description: judger.code, mono: true },
+      { term: '判题实现名称', description: judger.executor_ref, mono: true },
       {
         term: '默认超时',
         description: `${judger.default_timeout_sec} 秒${
@@ -249,7 +249,7 @@ function JudgerCard({ judger, onEdit, onSelftested, onError }: JudgerCardProps) 
         description={judgerTypeLabel(judger.type)}
         actions={
           <div className="flex flex-wrap items-center gap-2">
-            {judger.runtime_required ? <Badge tone="neutral">起沙箱</Badge> : null}
+            {judger.runtime_required ? <Badge tone="neutral">需要实验环境</Badge> : null}
             <StatusIndicator
               tone={judgerStatusTone(judger.status)}
               label={judgerStatusLabel(judger.status)}

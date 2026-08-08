@@ -163,11 +163,11 @@ function PackageForm({ item, onClose, onSaved }: PackageFormProps) {
       <ModalBody className="flex flex-col gap-4">
         <div className="grid gap-4 sm:grid-cols-2">
           <FormField
-            label="场景编号"
+            label="场景短名"
             htmlFor="sim-code"
             required
             error={errors.code}
-            helper={editing ? '更新时编号与版本不可修改' : `以 ${codePrefix} 开头`}
+            helper={editing ? '更新时短名与版本不可修改' : `以 ${codePrefix} 开头`}
           >
             <Input
               id="sim-code"

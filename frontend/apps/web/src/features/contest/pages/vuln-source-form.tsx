@@ -252,7 +252,7 @@ export function VulnSourceFormModal({
                 />
               </FormField>
               <FormField
-                label="超时(秒)"
+                label="响应等待时间(秒)"
                 htmlFor={`${fieldId}-timeout`}
                 required
                 error={errors.timeoutSeconds}
@@ -268,9 +268,9 @@ export function VulnSourceFormModal({
                 />
               </FormField>
               <FormField
-                label="案例列表路径"
+                label="案例列表位置"
                 htmlFor={`${fieldId}-cases`}
-                helper="响应里案例数组的位置,如 data.items;响应本身就是数组则留空"
+                helper="响应中案例列表所在的位置,例如 data.items;响应本身就是列表时留空"
               >
                 <Input
                   id={`${fieldId}-cases`}
@@ -300,7 +300,7 @@ export function VulnSourceFormModal({
                   <Input
                     id={`${fieldId}-map-ref`}
                     value={mapping.externalRef}
-                    placeholder="id"
+                    placeholder="填写案例编号所在字段"
                     invalid={Boolean(errors.externalRef)}
                     onChange={(event) => patchMapping(setMapping, { externalRef: event.target.value })}
                   />
@@ -309,7 +309,7 @@ export function VulnSourceFormModal({
                   <Input
                     id={`${fieldId}-map-title`}
                     value={mapping.title}
-                    placeholder="title"
+                    placeholder="填写标题所在字段"
                     invalid={Boolean(errors.title)}
                     onChange={(event) => patchMapping(setMapping, { title: event.target.value })}
                   />
@@ -326,7 +326,7 @@ export function VulnSourceFormModal({
                 <Input
                   id={`${fieldId}-map-body`}
                   value={mapping.draftBody}
-                  placeholder="detail"
+                  placeholder="填写题目正文所在字段"
                   invalid={Boolean(errors.draftBody)}
                   onChange={(event) => patchMapping(setMapping, { draftBody: event.target.value })}
                 />
@@ -341,19 +341,19 @@ export function VulnSourceFormModal({
                   <Input
                     id={`${fieldId}-map-level`}
                     value={mapping.level}
-                    placeholder="severity"
+                    placeholder="填写分级所在字段"
                     onChange={(event) => patchMapping(setMapping, { level: event.target.value })}
                   />
                 </FormField>
                 <FormField
                   label="复现方式"
                   htmlFor={`${fieldId}-map-runtime`}
-                  helper="留空则按干净测试链复现"
+                  helper="留空则按干净测试链复现;填写来源响应中复现方式所在字段"
                 >
                   <Input
                     id={`${fieldId}-map-runtime`}
                     value={mapping.runtimeMode}
-                    placeholder="runtime_mode"
+                    placeholder="填写复现方式所在字段"
                     onChange={(event) => patchMapping(setMapping, { runtimeMode: event.target.value })}
                   />
                 </FormField>

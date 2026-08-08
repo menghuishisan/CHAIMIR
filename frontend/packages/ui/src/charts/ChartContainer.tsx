@@ -46,7 +46,7 @@ export interface ChartContainerProps {
 /** 视图切换小按钮的公共类(两态按钮,aria-pressed 表达当前视图);
  *  pressable 已含颜色过渡契约(theme.css),不再叠加 transition-colors */
 const TOGGLE_BTN =
-  "pressable rounded-sm px-2 py-1 text-xs focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-2";
+  "pressable min-h-11 rounded-sm px-2 py-1 text-xs focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-2";
 
 /** 两种语境的语义类:光面走 ink/surface/line,墨底走 on-dark/dark-* 系令牌 */
 const STYLES: Record<
@@ -184,7 +184,7 @@ export function ChartContainer({
               onClick={onRetry}
               // pressable 已含颜色过渡契约(theme.css),不再叠加 transition-colors
               className={cn(
-                "pressable rounded-md border px-3 py-1.5 text-sm focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-2",
+                "pressable min-h-11 rounded-md border px-3 py-1.5 text-sm focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-2",
                 styles.retryBtn,
               )}
             >

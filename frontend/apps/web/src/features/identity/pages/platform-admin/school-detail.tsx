@@ -125,7 +125,7 @@ function SchoolOverview({ tenant }: { tenant: Tenant }) {
         </div>
       </PageSection>
 
-      <PageSection title="开通信息" description="学校编码在开通时确定,不能修改。">
+      <PageSection title="开通信息" description="学校短名在开通时确定,不能修改。">
         <Card>
           <CardHeader
             title={tenant.name}
@@ -141,7 +141,7 @@ function SchoolOverview({ tenant }: { tenant: Tenant }) {
             <DescriptionList
               columns={2}
               items={[
-                { term: '学校编码', description: tenant.code, mono: true },
+                { term: '学校短名', description: tenant.code, mono: true },
                 { term: '登录方式', description: authModeLabel(tenant.auth_mode) },
                 {
                   term: '激活码开通',

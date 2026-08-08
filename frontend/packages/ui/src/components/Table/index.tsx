@@ -122,7 +122,7 @@ export function Table<T>({
                   }
                   style={column.width ? { width: column.width } : undefined}
                   className={cn(
-                    "px-4 py-3 text-xs font-medium uppercase tracking-wider text-ink-sub",
+                    "px-4 py-3 text-xs font-medium uppercase text-ink-sub",
                     ALIGN_CLASS[column.align ?? "left"],
                   )}
                 >

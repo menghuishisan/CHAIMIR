@@ -124,7 +124,7 @@ export function MatrixPatternView({
                         aria-pressed={selected}
                         onClick={() => onSelectElement(id)}
                         // pressable 已含颜色过渡契约(theme.css),不再叠加 transition-colors
-                        className="pressable block w-full rounded-sm text-left hover:bg-dark-surface focus-visible:outline-2 focus-visible:outline-accent focus-visible:-outline-offset-2"
+                        className="hit-target relative pressable block w-full rounded-sm text-left hover:bg-dark-surface focus-visible:outline-2 focus-visible:outline-accent focus-visible:-outline-offset-2"
                       >
                         {cellNode(cell)}
                       </button>

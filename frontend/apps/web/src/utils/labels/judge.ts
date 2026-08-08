@@ -64,7 +64,7 @@ export function isJudgeTaskAbnormal(status: JudgeTaskStatus): boolean {
 const JUDGER_TYPE_LABELS: Record<JudgerType, string> = {
   [JudgerType.TESTCASE]: '测试用例',
   [JudgerType.ONCHAIN_ASSERT]: '链上断言',
-  [JudgerType.FLAG]: 'flag 比对',
+  [JudgerType.FLAG]: '答案口令比对',
   [JudgerType.STATIC_SCAN]: '静态扫描',
   [JudgerType.SIM_CHECKPOINT]: '仿真检查点',
   [JudgerType.MANUAL]: '人工评分',

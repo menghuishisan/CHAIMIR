@@ -14,10 +14,10 @@ import type { InputProps } from '@chaimir/ui'
 
 /** 页尾弱化通路的统一样式:返回登录、切换登录方式、退出登录共用一套(层级靠留白密度,不画分隔线) */
 const QUIET_ACTION_CLASS =
-  'mt-5 flex w-full items-center justify-center gap-1.5 text-sm text-on-dark-sub transition-colors duration-fast hover:text-on-dark'
+  'mt-5 flex min-h-11 w-full items-center justify-center gap-1.5 rounded-md text-sm text-on-dark-sub transition-colors duration-fast hover:text-on-dark focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-2'
 
 /** 主落点(落印级)的统一样式:通栏、字距放宽,与表单末字段保持一个呼吸 */
-const PRIMARY_ACTION_CLASS = 'mt-7 w-full tracking-widest'
+const PRIMARY_ACTION_CLASS = 'mt-7 w-full'
 
 export interface AuthPanelProps {
   children: React.ReactNode
@@ -49,7 +49,7 @@ export function AuthField({ label, htmlFor, error, children }: AuthFieldProps) {
     <div className="mt-6">
       <label
         htmlFor={htmlFor}
-        className="font-mono text-xs uppercase tracking-widest text-on-dark-sub"
+        className="font-mono text-xs uppercase text-on-dark-sub"
       >
         {label}
       </label>
@@ -308,7 +308,7 @@ export function AuthBrandMark({ large, subtitle = '区块链教学实验竞赛�
       </span>
       <span>
         <span className="block text-md font-bold leading-tight text-on-dark">Chaimir</span>
-        <span className="block font-mono text-xs tracking-widest text-on-dark-sub">{subtitle}</span>
+        <span className="block font-mono text-xs text-on-dark-sub">{subtitle}</span>
       </span>
     </div>
   )

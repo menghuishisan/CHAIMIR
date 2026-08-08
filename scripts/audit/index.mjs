@@ -1,12 +1,13 @@
-// 一次性审查脚本:合规审查的统一入口,依次跑五项静态一致性检查并汇总判定。
+// 一次性审查脚本:合规审查的统一入口,依次跑六项静态一致性检查并汇总判定。
 // 用法:node scripts/audit/index.mjs
 //
-// 五项分别回答一个问题:
+// 六项分别回答一个问题:
 //   route-matrix          后端注册路由 ↔ openapi 契约是否四方一致、有无同 handler 双轨
 //   sdk-matrix            api-client 每条路径是否命中真实后端路由、有无不可达方法
 //   role-guard-crosscheck 各角色页面调用的接口守卫是否与该角色相容(静态检查发现不了的越权)
 //   sim-catalog-drift     后端内置仿真包清单产物 ↔ 前端 sim-sdk 源码是否一致
 //   bundle-boundary       入口包是否泄漏四端路由结构与栏目名(前端铁律 2 自证)
+//   frontend-boundaries   公共/工具/CAS origin、overlay 和安全响应头是否统一
 //
 // bundle-boundary 依赖 frontend/apps/web/dist,需先跑 pnpm build。
 import { execFileSync } from 'node:child_process'
@@ -20,6 +21,7 @@ const CHECKS = [
   { name: 'role-guard-crosscheck', title: '角色页面 ↔ 接口守卫相容性' },
   { name: 'sim-catalog-drift', title: '内置仿真包清单 ↔ sim-sdk 源码一致性' },
   { name: 'bundle-boundary', title: '前端打包边界自证', needsDist: true },
+  { name: 'frontend-boundaries', title: '前端域名、Origin、Ingress 与安全响应头边界' },
 ]
 
 let failed = false
@@ -44,4 +46,4 @@ for (const check of CHECKS) {
 }
 
 console.log(`\n${'='.repeat(72)}`)
-console.log(failed ? '有检查未能完成,见上方输出。' : '五项检查全部执行完毕,逐项结论见上方输出。')
+console.log(failed ? '有检查未能完成,见上方输出。' : '六项检查全部执行完毕,逐项结论见上方输出。')

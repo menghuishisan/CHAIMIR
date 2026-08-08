@@ -113,7 +113,7 @@ export function VulnProblemFormModal({ sources, onClose, onSaved }: VulnProblemF
         ? '每条断言都要填查询目标'
         : null,
       steps: [...initSteps, ...positiveSteps].some((step) => !isValidPayload(step))
-        ? '有步骤的参数不是合法的 JSON 对象,请检查后重填'
+        ? '有步骤的参数格式不正确,请检查内容后重填'
         : null,
     }
     setErrors(next)
@@ -395,8 +395,8 @@ function ChainStepEditor({ title, description, steps, onChange }: ChainStepEdito
                   label="参数"
                   htmlFor={`${fieldId}-payload-${index}`}
                   className="mb-0"
-                  helper="链能力的入参对象,形状由运行时适配器决定"
-                  error={isValidPayload(step) ? undefined : '不是合法的 JSON 对象'}
+                  helper="这一步需要传入的参数,格式由所选运行环境决定"
+                  error={isValidPayload(step) ? undefined : '参数格式不正确,请按示例填写'}
                 >
                   <Textarea
                     id={`${fieldId}-payload-${index}`}
@@ -513,7 +513,7 @@ function AssertionEditor({ assertions, error, onChange }: AssertionEditorProps) 
                   <Input
                     id={`${fieldId}-field-${index}`}
                     value={assertion.field}
-                    placeholder="balance"
+                    placeholder="例如 balanceOf"
                     onChange={(event) => patch(onChange, assertions, index, { field: event.target.value })}
                   />
                 </FormField>

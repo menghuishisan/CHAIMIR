@@ -89,6 +89,9 @@ export function createApi(config: ApiConfig): ChaimirApi {
 
 /** webSocketPath 提取后端票据需要绑定的 WebSocket 路径。 */
 function webSocketPath(url: string): string {
-  const base = typeof window === 'undefined' ? 'https://chaimir' : window.location.href
-  return new URL(url, base).pathname
+  if (typeof window === 'undefined') {
+    // SSR/非浏览器装配没有可信的页面 origin,拒绝用占位域名猜测相对地址。
+    return new URL(url).pathname
+  }
+  return new URL(url, window.location.href).pathname
 }

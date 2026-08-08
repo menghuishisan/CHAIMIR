@@ -70,7 +70,7 @@ export function MainLayout({ config }: MainLayoutProps) {
   const profilePath = `${config.pathPrefix}/profile`
 
   return (
-    <div className="flex min-h-screen bg-substrate">
+    <div className="flex min-h-dvh bg-substrate">
       <a href="#main-content" className="skip-link">
         跳到主要内容
       </a>
@@ -78,7 +78,7 @@ export function MainLayout({ config }: MainLayoutProps) {
       {/* 常驻侧栏(≥lg):固定宽度走令牌,折叠只改宽度不改结构 */}
       {isDesktop ? (
         <div
-          className="sticky top-0 h-screen shrink-0 transition-[width] duration-base ease-out"
+          className="sticky top-0 h-dvh shrink-0 transition-sidebar duration-base ease-out"
           style={{ width: collapsed ? 'var(--sidebar-w-collapsed)' : 'var(--sidebar-w)' }}
         >
           <AppSidebar config={config} collapsed={collapsed} onToggleCollapsed={toggleCollapsed} />

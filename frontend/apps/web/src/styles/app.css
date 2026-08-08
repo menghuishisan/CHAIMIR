@@ -8,14 +8,3 @@
 @import "tailwindcss";
 @import "@chaimir/ui/styles";
 @source "../../../../packages/ui/src";
-
-/* 认证壳点阵纹理:左密右疏(遮罩渐隐),纯装饰,色值引用令牌 */
-.auth-dots {
-  background-image: radial-gradient(
-    circle at 1px 1px,
-    color-mix(in srgb, var(--color-on-dark) 5%, transparent) 1px,
-    transparent 0
-  );
-  background-size: 28px 28px;
-  mask-image: linear-gradient(90deg, rgb(0 0 0), rgb(0 0 0 / 0.5) 55%, transparent 85%);
-}

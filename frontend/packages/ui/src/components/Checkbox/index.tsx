@@ -26,7 +26,7 @@ export const Checkbox = forwardRef<ElementRef<typeof CheckboxPrimitive.Root>, Ch
         disabled={disabled}
         className={cn(
           // hover 边框转主色作可点暗示;选中态边框已是主色,叠加无视觉冲突
-          "flex h-4 w-4 shrink-0 items-center justify-center rounded-sm border transition-colors duration-fast focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-2 disabled:pointer-events-none",
+          "hit-target relative flex h-4 w-4 shrink-0 items-center justify-center rounded-sm border transition-colors duration-fast focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-2 disabled:pointer-events-none",
           onDark
             ? "border-dark-line bg-dark-elevated hover:border-accent data-[state=checked]:border-accent data-[state=checked]:bg-accent"
             : "border-line-strong bg-surface hover:border-primary data-[state=checked]:border-primary data-[state=checked]:bg-primary",

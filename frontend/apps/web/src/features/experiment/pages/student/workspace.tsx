@@ -495,7 +495,7 @@ function ExperimentBrief({
                   type="button"
                   onClick={() => onPickSandbox(sandbox.sandbox_id)}
                   className={
-                    'flex w-full flex-col rounded-md border px-2 py-1.5 text-left focus-visible:outline-2 focus-visible:outline-accent focus-visible:-outline-offset-2 ' +
+                    'hit-target relative flex w-full flex-col rounded-md border px-2 py-1.5 text-left focus-visible:outline-2 focus-visible:outline-accent focus-visible:-outline-offset-2 ' +
                     (sandbox.sandbox_id === currentSandboxId
                       ? 'border-accent bg-dark-elevated'
                       : 'border-dark-line bg-dark-surface hover:bg-dark-elevated')

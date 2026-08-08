@@ -517,7 +517,7 @@ function LessonFormModal({ chapterId, lesson, nextSort, onClose, onSaved }: Less
         return
       }
       if (typeValue === LessonContentType.SIMULATION && simCode.trim() === '') {
-        setFormError('请填写仿真场景标识')
+        setFormError('请填写仿真场景名称')
         return
       }
       setFormError(undefined)
@@ -601,7 +601,7 @@ function LessonFormModal({ chapterId, lesson, nextSort, onClose, onSaved }: Less
               <FormField
                 label="关联实验"
                 htmlFor="lesson-experiment"
-                helper="填写实验编排里的实验标识,学生从课时跳转到实验实训"
+                helper="填写实验编排里的实验名称,学生可从课时直接进入实验实训"
               >
                 <Input
                   id="lesson-experiment"
@@ -613,7 +613,7 @@ function LessonFormModal({ chapterId, lesson, nextSort, onClose, onSaved }: Less
 
             {typeValue === LessonContentType.SIMULATION ? (
               <div className="grid gap-4 sm:grid-cols-2">
-                <FormField label="仿真场景标识" htmlFor="lesson-sim-code" required>
+                <FormField label="仿真场景名称" htmlFor="lesson-sim-code" required>
                   <Input
                     id="lesson-sim-code"
                     value={simCode}

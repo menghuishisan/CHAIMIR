@@ -6,6 +6,7 @@
   "scripts": {
     "build": "turbo run build",
     "lint": "turbo run lint",
+    "lint:frontend-standards": "node ../scripts/audit/check-frontend-standards.mjs",
     "type-check": "turbo run type-check",
     "clean:artifacts": "rimraf --glob .turbo apps/*/.turbo apps/*/dist packages/*/.turbo packages/*/dist",
     "clean:deps": "node -e \"const fs=require('node:fs');const path=require('node:path');for(const root of ['apps','packages'])if(fs.existsSync(root))for(const name of fs.readdirSync(root))fs.rmSync(path.join(root,name,'node_modules'),{recursive:true,force:true});fs.rmSync('node_modules',{recursive:true,force:true});\"",

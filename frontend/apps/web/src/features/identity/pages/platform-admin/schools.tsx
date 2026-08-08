@@ -191,7 +191,7 @@ export default function PlatformSchoolsPage() {
 
       <PageSection
         title="学校列表"
-        description={`共 ${tenants.total} 所学校。按名称或编码搜索,按状态筛选。`}
+        description={`共 ${tenants.total} 所学校。按名称或短名搜索,按状态筛选。`}
         actions={
           <div className="flex flex-wrap items-end gap-2">
             <SegmentedControl
@@ -208,7 +208,7 @@ export default function PlatformSchoolsPage() {
               onValueChange={setStatusFilter}
             />
             <Input
-              aria-label="按学校名称或编码搜索"
+            aria-label="按学校名称或短名搜索"
               leftIcon={Search}
               value={keyword}
               placeholder="搜索学校"
@@ -316,7 +316,7 @@ function TenantStatusModal({ tenant, onClose, onSaved }: TenantStatusModalProps)
             dense
             items={[
               { term: '学校', description: tenant.display_name || tenant.name },
-              { term: '学校编码', description: tenant.code, mono: true },
+              { term: '学校短名', description: tenant.code, mono: true },
               { term: '当前状态', description: tenantStatusLabel(tenant.status) },
               { term: '最近更新', description: formatDateTime(tenant.updated_at), mono: true },
             ]}

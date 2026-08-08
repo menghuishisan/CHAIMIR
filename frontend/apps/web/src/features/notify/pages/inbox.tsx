@@ -36,6 +36,7 @@ import { invalidateAppResource } from '../../../app/resourceInvalidation'
 import { ResourceState } from '../../../components/ResourceState'
 import { useAsyncResource, usePagedResource } from '../../../hooks'
 import { formatShortDateTime } from '../../../utils/formatters'
+import { safeInternalNavigation } from '../../../utils/safeNavigation'
 import {
   FORCED_PREFERENCE_HINT,
   announcementScopeLabel,
@@ -107,7 +108,8 @@ function NotificationList() {
           return
         }
       }
-      if (item.link) navigate(item.link)
+      const safeLink = safeInternalNavigation(item.link)
+      if (safeLink) navigate(safeLink)
     },
     [navigate, refreshAll],
   )

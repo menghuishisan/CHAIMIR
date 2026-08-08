@@ -260,18 +260,18 @@ export function ToolFormModal({ onClose, onSaved }: ToolFormModalProps) {
         <ModalHeader>
           <ModalTitle>登记沙箱工具</ModalTitle>
           <ModalDescription>
-            用已存在的编码再登记一次就是覆盖原定义。改动对之后创建的环境生效。
+            用已存在的短名再登记一次就是覆盖原定义。改动对之后创建的环境生效。
           </ModalDescription>
         </ModalHeader>
         <form onSubmit={submit} noValidate>
           <ModalBody className="flex flex-col gap-4">
             <div className="grid gap-4 sm:grid-cols-2">
               <FormField
-                label="工具编码"
+                label="工具短名"
                 htmlFor={`${fieldId}-code`}
                 required
                 error={errors.code}
-                helper="平台内唯一标识,例如 code-server"
+                helper="平台内唯一短名,例如 code-server"
               >
                 <Input
                   id={`${fieldId}-code`}
@@ -336,7 +336,7 @@ export function ToolFormModal({ onClose, onSaved }: ToolFormModalProps) {
                 htmlFor={`${fieldId}-endpoint`}
                 required
                 error={errors.builtinEndpoint}
-                helper="平台按学生的沙箱编号替换 {sandbox_id} 后拼出真实入口"
+                helper="平台会自动替换学生实验环境编号并生成真实入口"
               >
                 <Input
                   id={`${fieldId}-endpoint`}
@@ -419,7 +419,7 @@ export function ToolFormModal({ onClose, onSaved }: ToolFormModalProps) {
                 </div>
 
                 <FormField
-                  label="执行容器声明"
+                  label="执行环境配置"
                   htmlFor={`${fieldId}-components`}
                   required
                   error={errors.components}
@@ -461,7 +461,7 @@ export function ToolFormModal({ onClose, onSaved }: ToolFormModalProps) {
             {kindValue === SandboxToolKind.WEB_EMBED ? (
               <>
                 <FormField
-                  label="网页工具声明"
+                  label="网页工具配置"
                   htmlFor={`${fieldId}-web-spec`}
                   required
                   error={errors.webSpec}
@@ -532,7 +532,7 @@ interface ParsedComponents {
  */
 function parseComponents(text: string): ParsedComponents {
   const trimmed = text.trim()
-  if (trimmed === '') return { components: [], error: '请填写执行容器声明。' }
+  if (trimmed === '') return { components: [], error: '请填写执行环境配置。' }
 
   let raw: unknown
   try {
@@ -540,7 +540,7 @@ function parseComponents(text: string): ParsedComponents {
   } catch {
     return { components: [], error: '内容不是合法的声明格式,检查是否漏了逗号或引号。' }
   }
-  if (!Array.isArray(raw)) return { components: [], error: '容器声明要是一个数组。' }
+  if (!Array.isArray(raw)) return { components: [], error: '执行环境配置格式不正确,请按示例填写多个条目。' }
   if (raw.length !== 1) {
     return { components: [], error: '命令工具只能声明一个执行容器。' }
   }
@@ -564,7 +564,7 @@ interface ParsedWebEmbed {
  */
 function parseWebEmbedSpec(text: string): ParsedWebEmbed {
   const trimmed = text.trim()
-  if (trimmed === '') return { error: '请填写网页工具声明。' }
+  if (trimmed === '') return { error: '请填写网页工具配置。' }
 
   let raw: unknown
   try {

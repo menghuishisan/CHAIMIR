@@ -38,7 +38,7 @@ export function AppSidebar({ config, collapsed = false, onToggleCollapsed }: App
         {config.groups.map((group) => (
           <div key={group.title} className="mt-4 first:mt-0">
             {!collapsed && (
-              <div className="px-2.5 pb-1.5 font-mono text-xs tracking-widest text-on-dark-sub">
+              <div className="px-2.5 pb-1.5 font-mono text-xs text-on-dark-sub">
                 {group.title}
               </div>
             )}

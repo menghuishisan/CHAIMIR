@@ -125,7 +125,7 @@ export const CONTENT_BODY_FIELD_LABELS = {
   options: '选项',
   runtime_code: '运行时',
   tools: '所需工具',
-  submit_key: '答案提交键',
+  submit_key: '答案提交字段',
 } as const
 
 /**

@@ -27,7 +27,7 @@ export function PanelHeader({ eyebrow, title, description, icon, meta, actions, 
     <div className={cn("flex flex-wrap items-start justify-between gap-x-4 gap-y-3", className)}>
       <div className="min-w-0">
         {eyebrow && (
-          <p className="font-mono text-xs uppercase tracking-widest text-ink-sub">{eyebrow}</p>
+          <p className="font-mono text-xs uppercase text-ink-sub">{eyebrow}</p>
         )}
         <div className={cn("flex items-center gap-2", eyebrow && "mt-1")}>
           {icon && <Icon icon={icon} size="lg" className="text-ink-sub" />}

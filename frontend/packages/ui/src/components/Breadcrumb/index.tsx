@@ -35,7 +35,7 @@ export interface BreadcrumbProps {
 export function Breadcrumb({ items, className }: BreadcrumbProps) {
   return (
     <nav aria-label="面包屑" className={className}>
-      <ol className="flex flex-wrap items-center gap-2 font-mono text-xs uppercase tracking-widest">
+      <ol className="flex flex-wrap items-center gap-2 font-mono text-xs uppercase">
         {items.map((item, index) => {
           const isCurrent = index === items.length - 1;
           return (
