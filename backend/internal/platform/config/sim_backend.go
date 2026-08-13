@@ -54,7 +54,7 @@ type SimBackendConfig struct {
 }
 
 // imageAttestationAllows 确保 M4 只执行供应链证明中已签名且扫描通过的精确 digest 镜像。
-func imageAttestationAllows(items []SandboxImageAttestation, imageURL, registry string) bool {
+func imageAttestationAllows(items []PlatformImageAttestation, imageURL, registry string) bool {
 	imageURL = strings.TrimSpace(imageURL)
 	registry = strings.Trim(strings.TrimSpace(strings.TrimPrefix(strings.TrimPrefix(registry, "https://"), "http://")), "/")
 	digestIndex := strings.LastIndex(imageURL, "@sha256:")
@@ -106,7 +106,7 @@ func simAdapterRegistered(items []SimBackendAdapterConfig, code string) bool {
 }
 
 // validateSimBackendAdapters 在启动边界统一校验能力编号、镜像证明、命令和资源限制。
-func validateSimBackendAdapters(items []SimBackendAdapterConfig, attestations []SandboxImageAttestation, registry string) []string {
+func validateSimBackendAdapters(items []SimBackendAdapterConfig, attestations []PlatformImageAttestation, registry string) []string {
 	if len(items) == 0 {
 		return []string{"SIM_BACKEND_STDIO_ADAPTERS_JSON 至少登记一个生产能力"}
 	}

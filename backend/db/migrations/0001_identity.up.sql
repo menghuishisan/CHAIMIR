@@ -28,7 +28,7 @@ CREATE TABLE IF NOT EXISTS tenant (
     status SMALLINT NOT NULL,
     deploy_mode SMALLINT NOT NULL,
     expire_at TIMESTAMPTZ,
-    logo_url VARCHAR(255),
+    logo_ref VARCHAR(255),
     display_name VARCHAR(128),
     feature_flags JSONB NOT NULL DEFAULT '{}'::jsonb,
     auth_mode SMALLINT NOT NULL DEFAULT 1,

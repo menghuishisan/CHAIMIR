@@ -11,6 +11,7 @@ import {
   LatePolicy,
   type Assignment,
   type AssignmentItemInput,
+  type AssignmentRequest,
   type ContentItem,
   type CourseOutline,
 } from '@chaimir/api-client'
@@ -298,9 +299,8 @@ function AssignmentFormModal({
       setFormError(undefined)
       setWorking(true)
       try {
-        const payload = {
+        const payload: AssignmentRequest = {
           title: title.trim(),
-          chapter_id: chapterId,
           due_at: new Date(dueAt).toISOString(),
           max_attempts: Number(maxAttempts) || 1,
           late_policy: Number(latePolicy) as LatePolicy,
@@ -308,6 +308,7 @@ function AssignmentFormModal({
           late_penalty: {},
           items: items.map((item, index) => ({ ...item, seq: index + 1 })),
         }
+        if (chapterId !== '') payload.chapter_id = chapterId
         if (editing) {
           await api.teaching.updateAssignment(assignment.id, payload)
           toast.success('作业已更新')

@@ -2,7 +2,7 @@
 // 语义色与文案同源:同一个后端枚举的界面表达只在这里登记一次,
 // 避免每个页面各自决定"进行中该用什么颜色"而出现同一状态多种视觉。
 
-import type { BadgeTone, StatusTone } from '@chaimir/ui'
+import type { BadgeTone, CoverAccent, StatusTone } from '@chaimir/ui'
 import {
   AssignmentStatus,
   CourseStatus,
@@ -55,6 +55,23 @@ const COURSE_TYPE_LABELS: Record<CourseType, string> = {
 /** courseTypeLabel 返回课程类型文案。 */
 export function courseTypeLabel(type: CourseType): string {
   return COURSE_TYPE_LABELS[type]
+}
+
+/**
+ * 默认封面的题识与注册线色:与上面的类型文案同源登记,不在页面里各写一遍。
+ * 题识取两字(压在封面右侧的大字),四类各有可区分的语义色;
+ * 「理论与实验」用朱砂是规范 §1.1 的登记例外(见 docs/总-前端设计规范.md §1.3)。
+ */
+const COURSE_TYPE_COVERS: Record<CourseType, { glyph: string; accent: CoverAccent }> = {
+  [CourseType.THEORY]: { glyph: '理论', accent: 'blue' },
+  [CourseType.LAB]: { glyph: '实验', accent: 'jade' },
+  [CourseType.MIXED]: { glyph: '兼修', accent: 'cinnabar' },
+  [CourseType.PROJECT]: { glyph: '项目', accent: 'graphite' },
+}
+
+/** courseTypeCover 返回该课程类型默认封面的题识与语义色。 */
+export function courseTypeCover(type: CourseType): { glyph: string; accent: CoverAccent } {
+  return COURSE_TYPE_COVERS[type]
 }
 
 const DIFFICULTY_LABELS: Record<TeachingDifficulty, string> = {

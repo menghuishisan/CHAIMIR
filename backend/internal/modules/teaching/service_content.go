@@ -404,7 +404,14 @@ func (s *Service) GetCourseOutline(ctx context.Context, courseID int64) (Outline
 	if err != nil {
 		return OutlineDTO{}, mapCourseError(err)
 	}
-	out := OutlineDTO{Course: courseDTOValue}
+	// HTTP 契约中的集合字段始终返回空数组而不是 null,这样新课程没有章节/课时时
+	// 客户端仍可直接渲染,也不需要在每个消费者增加一套 null 兼容分支。
+	out := OutlineDTO{
+		Course:   courseDTOValue,
+		Chapters: make([]ChapterDTO, 0, len(chapters)),
+		Lessons:  make([]LessonDTO, 0, len(lessons)),
+		Progress: make([]ProgressDTO, 0, len(progresses)),
+	}
 	for _, chapter := range chapters {
 		out.Chapters = append(out.Chapters, chapterDTO(chapter))
 	}

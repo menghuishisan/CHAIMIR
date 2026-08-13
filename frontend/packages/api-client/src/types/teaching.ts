@@ -25,7 +25,8 @@ export interface Course {
   description: string
   type: CourseType
   difficulty: TeachingDifficulty
-  cover_url?: string
+  /** 封面的对象引用,由 POST /teaching/courses/cover 上传取得;显示前需换取投放授权 */
+  cover_ref?: string
   semester: string
   credits: number
   schedule: Record<string, unknown>
@@ -43,7 +44,8 @@ export interface CourseRequest {
   description: string
   type: CourseType
   difficulty: TeachingDifficulty
-  cover_url?: string
+  /** 封面的对象引用,由 POST /teaching/courses/cover 上传取得;显示前需换取投放授权 */
+  cover_ref?: string
   semester: string
   credits: number
   schedule: Record<string, unknown>
@@ -97,6 +99,24 @@ export interface LessonRequest {
   sort: number
 }
 
+/** 封面上传结果:object_ref 随创建或编辑课程一起提交才会生效。 */
+export interface CourseCoverUpload {
+  object_ref: string
+  file_name: string
+  size: number
+}
+
+/**
+ * CourseCoverAccess 是课程封面的投放授权。
+ * 固定 mode=stream:封面由 img 元素直接取件,列表页同屏多张且浏览器可能重复请求同一地址,
+ * 一次性令牌会在第一次请求后作废。
+ */
+export interface CourseCoverAccess {
+  token: string
+  mode: 'stream'
+  expires_at: string
+}
+
 export interface CourseOutline {
   course: Course
   chapters: Chapter[]
@@ -139,7 +159,7 @@ export interface Assignment {
 
 export interface AssignmentRequest {
   title: string
-  chapter_id: SnowflakeID
+  chapter_id?: SnowflakeID
   due_at: string
   max_attempts: number
   late_policy: LatePolicy

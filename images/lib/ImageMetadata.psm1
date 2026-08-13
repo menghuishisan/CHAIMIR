@@ -108,6 +108,9 @@ function Get-ChaimirInternalImageBuildArguments {
         FABRIC_TOOLS_IMAGE = "base/fabric-tools"
         RUNTIME_IMAGE      = "base/runtime-min"
         PG_CLIENT_IMAGE    = "middleware/postgres"
+        CILIUM_RUNTIME_IMAGE = "network/cilium-runtime"
+        CILIUM_BUILDER_IMAGE = "network/cilium-builder"
+        CILIUM_ENVOY_IMAGE   = "network/cilium-envoy"
     }
 }
 

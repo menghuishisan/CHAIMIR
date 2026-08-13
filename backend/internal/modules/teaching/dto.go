@@ -11,7 +11,7 @@ type CourseDTO struct {
 	Description string         `json:"description"`
 	Type        int16          `json:"type"`
 	Difficulty  int16          `json:"difficulty"`
-	CoverURL    string         `json:"cover_url,omitempty"`
+	CoverRef    string         `json:"cover_ref,omitempty"`
 	Semester    string         `json:"semester"`
 	Credits     float64        `json:"credits"`
 	Schedule    map[string]any `json:"schedule"`
@@ -29,7 +29,7 @@ type CourseRequest struct {
 	Description string         `json:"description"`
 	Type        int16          `json:"type"`
 	Difficulty  int16          `json:"difficulty"`
-	CoverURL    string         `json:"cover_url"`
+	CoverRef    string         `json:"cover_ref"`
 	Semester    string         `json:"semester"`
 	Credits     float64        `json:"credits"`
 	Schedule    map[string]any `json:"schedule"`

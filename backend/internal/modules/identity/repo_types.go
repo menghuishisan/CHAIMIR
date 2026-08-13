@@ -12,7 +12,7 @@ type CreateTenantInput struct {
 	Status               int16
 	DeployMode           int16
 	ExpireAt             *time.Time
-	LogoURL              string
+	LogoRef              string
 	DisplayName          string
 	FeatureFlags         []byte
 	AuthMode             int16
@@ -31,7 +31,7 @@ type CreatePlatformAdminInput struct {
 // UpdateTenantConfigInput 描述租户内联配置更新字段。
 type UpdateTenantConfigInput struct {
 	TenantID             int64
-	LogoURL              string
+	LogoRef              string
 	DisplayName          string
 	FeatureFlags         []byte
 	AuthMode             int16

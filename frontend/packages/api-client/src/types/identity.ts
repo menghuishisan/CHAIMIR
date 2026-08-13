@@ -139,7 +139,10 @@ export interface Tenant {
   status: TenantStatus
   deploy_mode: DeployMode
   expire_at?: string
-  logo_url?: string
+  /** 校徽的对象引用,由 POST /tenant/logo 上传取得;不是可直接显示的地址 */
+  logo_ref?: string
+  /** 校徽的 data URI,只在读取租户配置与学校品牌时返回;可直接作为 img src */
+  logo_image?: string
   display_name?: string
   feature_flags: Record<string, unknown>
   auth_mode: AuthMode
@@ -176,11 +179,20 @@ export interface UpdateTenantStatusRequest {
 }
 
 export interface TenantConfigRequest {
-  logo_url: string
   display_name: string
   feature_flags: Record<string, unknown>
   auth_mode: AuthMode
   enable_activation_code: boolean
+}
+
+/**
+ * 学校品牌:登录页免鉴权读取。
+ * 只有学校私有部署才有内容 —— 平台托管的登录页面对的是尚未确定的学校,没有校徽可显示。
+ */
+export interface TenantBrand {
+  display_name: string
+  /** 校徽的 data URI;没有校徽或平台托管部署时为空串 */
+  logo_image: string
 }
 
 export interface SSOConfig {

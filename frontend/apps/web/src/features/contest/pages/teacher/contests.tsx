@@ -326,10 +326,16 @@ interface ContestActionMenuProps {
  * 归档是不可逆动作,与常规项用分隔线隔开。
  */
 function ContestActionMenu({ contest, onRequest }: ContestActionMenuProps) {
+  const now = Date.now()
+  const startAt = Date.parse(contest.start_at)
+  const endAt = Date.parse(contest.end_at)
+  const freezeAt = endAt - contest.freeze_minutes * 60_000
   const canPublish = contest.status === ContestStatus.DRAFT
-  const canStart = contest.status === ContestStatus.SIGNUP
-  const canFreeze = contest.status === ContestStatus.RUNNING
-  const canEnd = contest.status === ContestStatus.RUNNING || contest.status === ContestStatus.FROZEN
+  const canStart = contest.status === ContestStatus.SIGNUP && now >= startAt && now < endAt
+  const canFreeze =
+    contest.status === ContestStatus.RUNNING && contest.freeze_minutes > 0 && now >= freezeAt && now < endAt
+  const canEnd =
+    (contest.status === ContestStatus.RUNNING || contest.status === ContestStatus.FROZEN) && now >= endAt
   const canArchive = contest.status === ContestStatus.ENDED
 
   return (

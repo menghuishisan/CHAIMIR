@@ -16,7 +16,7 @@ import (
 func validateCourseRequest(req CourseRequest) (CourseRequest, time.Time, time.Time, error) {
 	req.Name = strings.TrimSpace(req.Name)
 	req.Description = strings.TrimSpace(req.Description)
-	req.CoverURL = strings.TrimSpace(req.CoverURL)
+	req.CoverRef = strings.TrimSpace(req.CoverRef)
 	req.Semester = strings.TrimSpace(req.Semester)
 	req.StartAt = strings.TrimSpace(req.StartAt)
 	req.EndAt = strings.TrimSpace(req.EndAt)
@@ -157,8 +157,15 @@ func validateGradeWeightRequest(req GradeWeightRequest) (GradeWeightRequest, err
 	seen := map[string]struct{}{}
 	for i := range req.Items {
 		req.Items[i].SourceRef = strings.TrimSpace(req.Items[i].SourceRef)
-		if _, ok := ids.Parse(req.Items[i].SourceRef); !validGradeSource(req.Items[i].SourceType) || !ok || req.Items[i].Weight <= 0 {
+		if !validGradeSource(req.Items[i].SourceType) || req.Items[i].SourceRef == "" || req.Items[i].Weight <= 0 {
 			return GradeWeightRequest{}, apperr.ErrTeachingGradeWeightInvalid
+		}
+		// 作业成绩需要回查提交记录,所以 source_ref 必须是作业雪花 ID;
+		// 实验和考试的来源由课程配置命名,不应被错误要求为数据库 ID。
+		if req.Items[i].SourceType == GradeSourceAssignment {
+			if _, ok := ids.Parse(req.Items[i].SourceRef); !ok {
+				return GradeWeightRequest{}, apperr.ErrTeachingGradeWeightInvalid
+			}
 		}
 		key := fmt.Sprintf("%d:%s", req.Items[i].SourceType, req.Items[i].SourceRef)
 		if _, ok := seen[key]; ok {

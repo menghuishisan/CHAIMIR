@@ -1,5 +1,5 @@
 # 本文件定义 Chainlink 预言机节点镜像,复用 Chainlink 官方节点镜像并固定上游 digest。
-FROM smartcontract/chainlink@sha256:77a78d4e427c39b3810bf740ba7582240c4c6538d31d0e1069ba0852acb58bc5
+FROM smartcontract/chainlink@sha256:56e653e0ef43759e7e1fe24bbd7b29db7de53ca7a86a99aa949e9fa9ff4813ca
 
 LABEL org.opencontainers.image.title="infra/chainlink-node"
 LABEL org.opencontainers.image.description="Chaimir Chainlink oracle node image"
@@ -10,17 +10,19 @@ USER root
 RUN apt-get update \
     && apt-get upgrade -y --no-install-recommends \
     && rm -f \
-        /usr/local/bin/chainlink-aptos \
-        /usr/local/bin/chainlink-cosmos \
-        /usr/local/bin/chainlink-evm \
-        /usr/local/bin/chainlink-feeds \
-        /usr/local/bin/chainlink-mercury \
-        /usr/local/bin/chainlink-solana \
-        /usr/local/bin/chainlink-starknet \
-        /usr/local/bin/chainlink-sui \
-        /usr/local/bin/chainlink-ton \
-        /usr/local/bin/chainlink-tron \
+        /usr/local/bin/chainlink-* \
+        /usr/local/bin/aptos \
+        /usr/local/bin/consensus \
+        /usr/local/bin/cron \
+        /usr/local/bin/evm \
+        /usr/local/bin/http_action \
+        /usr/local/bin/http_trigger \
+        /usr/local/bin/log-event-trigger \
+        /usr/local/bin/readcontract \
+        /usr/local/bin/solana \
         /usr/local/bin/confidential-http \
+        /usr/local/bin/confidential-workflows \
+        /usr/local/bin/stellar \
     && rm -rf /var/lib/apt/lists/* \
     && (getent group 1000 >/dev/null || groupadd --gid 1000 chaimir) \
     && (id -u 1000 >/dev/null 2>&1 || useradd --uid 1000 --gid 1000 --home-dir /workspace --create-home --shell /usr/sbin/nologin chaimir) \

@@ -126,6 +126,17 @@ func (s *Service) DeleteDepartmentByAdmin(ctx context.Context, departmentID int6
 	return nil
 }
 
+// mapPromoteClassesError 保留事务内已判定的业务错误,仅把未知数据库/基础设施错误收敛为内部错误。
+func mapPromoteClassesError(err error) error {
+	if err == nil {
+		return nil
+	}
+	if appErr, ok := apperr.As(err); ok {
+		return appErr
+	}
+	return apperr.ErrInternal.WithCause(err)
+}
+
 // ListMajorsForViewer 为教师和学校管理员读取专业列表,可按院系过滤。
 func (s *Service) ListMajorsForViewer(ctx context.Context, departmentID int64) ([]MajorDTO, error) {
 	id, err := requireTenantAnyRole(ctx, s, contracts.RoleTeacher, contracts.RoleSchoolAdmin)
@@ -743,7 +754,7 @@ func (s *Service) PromoteClassesByAdmin(ctx context.Context, req PromoteClassesR
 		// 班级升级会批量改变组织口径,必须与变更一起写审计,避免后续无法追踪批量来源。
 		return s.writeOrgAuditInTx(ctx, tx, id, "org.class.promote", "identity.class", 0, map[string]any{"class_ids": classIDs, "target_year": req.TargetYear})
 	}); err != nil {
-		return apperr.ErrInternal.WithCause(err)
+		return mapPromoteClassesError(err)
 	}
 	return nil
 }

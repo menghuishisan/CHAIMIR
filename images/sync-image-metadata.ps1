@@ -8,7 +8,7 @@ param(
     [string[]]$EnvPaths = @(),
     [string]$SimAdapterEnvKey = "SIM_BACKEND_STDIO_ADAPTERS_JSON",
     [string[]]$AttestationEnvPaths = @(),
-    [string]$AttestationEnvKey = "SANDBOX_IMAGE_ATTESTATIONS_JSON",
+    [string]$AttestationEnvKey = "PLATFORM_IMAGE_ATTESTATIONS_JSON",
     [string]$RegistryEnvKey = "SUPPLY_CHAIN_REGISTRY"
 )
 

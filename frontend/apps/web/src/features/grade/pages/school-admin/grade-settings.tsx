@@ -669,6 +669,10 @@ function WarningRulesForm({ rules, onSaved }: WarningRulesFormProps) {
   const submit = useCallback(
     async (event: React.FormEvent<HTMLFormElement>) => {
       event.preventDefault()
+      if (failCount.trim() === '' || minGpa.trim() === '') {
+        setFormError('请填写不及格门数上限和绩点下限')
+        return
+      }
       const fail = Number(failCount)
       const gpa = Number(minGpa)
       if (!Number.isInteger(fail) || fail < 0) {

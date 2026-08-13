@@ -1341,7 +1341,7 @@ func imageAttested(cfg config.SandboxConfig, imageURL, digest string) bool {
 	if !imageUnderRegistry(imageURL, cfg.ImageRegistry) || digestFromImageURL(imageURL) != digest {
 		return false
 	}
-	for _, item := range cfg.ImageAttestations {
+	for _, item := range cfg.PlatformImageAttestations {
 		if item.ImageURL == imageURL && item.Digest == digest && item.CosignVerified && strings.EqualFold(item.TrivyStatus, "passed") {
 			return true
 		}

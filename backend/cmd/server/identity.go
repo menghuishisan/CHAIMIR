@@ -13,6 +13,7 @@ import (
 	"chaimir/internal/platform/db"
 	"chaimir/internal/platform/eventbus"
 	"chaimir/internal/platform/redis"
+	"chaimir/internal/platform/storage"
 	"chaimir/internal/platform/upload"
 	"chaimir/pkg/snowflake"
 
@@ -27,6 +28,7 @@ type IdentityModuleDeps struct {
 	Redis    *redis.Client
 	IDs      snowflake.Generator
 	Config   config.Config
+	Storage  *storage.Storage
 	EventBus eventbus.Bus
 }
 
@@ -43,6 +45,13 @@ func RegisterIdentityModule(deps IdentityModuleDeps) (*identity.Service, error) 
 	}
 	if deps.EventBus == nil {
 		return nil, fmt.Errorf("identity module 缺少事件总线")
+	}
+	if deps.Storage == nil {
+		return nil, fmt.Errorf("identity module 缺少统一对象存储")
+	}
+	fileService, err := storage.NewServiceFromConfig(deps.Config.Auth, deps.Config.MinIO, deps.Config.Upload)
+	if err != nil {
+		return nil, err
 	}
 	store := identity.NewStore(deps.Database)
 	smsSender, err := identity.NewSMSSender(deps.Config.SMS)
@@ -62,6 +71,8 @@ func RegisterIdentityModule(deps IdentityModuleDeps) (*identity.Service, error) 
 		IdentityConfig: deps.Config.Identity,
 		UploadConfig:   deps.Config.Upload,
 		Scanner:        scanner,
+		Objects:        deps.Storage,
+		FileService:    fileService,
 		DeployConfig:   deps.Config.Deploy,
 		SMSSender:      smsSender,
 		EventBus:       deps.EventBus,

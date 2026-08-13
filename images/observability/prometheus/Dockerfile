@@ -11,6 +11,10 @@ USER root
 RUN apk add --no-cache bash=5.3.3-r1 gzip=1.14-r2
 USER chaimir
 
+# Prometheus 的生产静态资源不发布 source map;限制 Node 堆避免 Docker Desktop 在资源紧张时断开 BuildKit 状态流。
+ENV GENERATE_SOURCEMAP=false \
+    NODE_OPTIONS=--max-old-space-size=2048
+
 ADD --chown=100:101 --chmod=0644 ${PROMETHEUS_SOURCE_URL} /tmp/prometheus-source.tar.gz
 RUN echo "${PROMETHEUS_SOURCE_SHA256}  /tmp/prometheus-source.tar.gz" | sha256sum -c - \
     && mkdir -p /src/prometheus \
@@ -30,7 +34,15 @@ RUN --mount=type=cache,target=/src/.npm,uid=100,gid=101 \
         sleep $((attempt * 3)); \
     done \
     && cd /src/prometheus/web/ui \
-    && npm run build
+    && ( \
+        npm run build & \
+        build_pid=$!; \
+        while kill -0 "$build_pid" 2>/dev/null; do \
+            echo "prometheus-ui-build heartbeat"; \
+            sleep 30; \
+        done; \
+        wait "$build_pid" \
+    )
 
 WORKDIR /src/prometheus
 RUN scripts/compress_assets.sh
@@ -39,28 +51,37 @@ FROM ${GO_BUILDER_IMAGE} AS build
 
 ARG PROMETHEUS_VERSION=3.12.0
 ARG PROMETHEUS_COMMIT=9f27dffc1f93ca23287972f632025879f2d1c658
+ARG GO_MODULE_PROXY=https://proxy.golang.org|direct
+
+# Keep the source build within the local Docker Engine memory envelope.
+ENV GOMEMLIMIT=768MiB \
+    GOGC=50 \
+    GOPROXY=${GO_MODULE_PROXY}
 
 COPY --from=assets --chown=1000:1000 /src/prometheus /src/prometheus
 WORKDIR /src/prometheus
 RUN --mount=type=cache,target=/go/pkg,uid=1000,gid=1000 \
     --mount=type=cache,target=/tmp/go-cache,uid=1000,gid=1000 \
     for attempt in 1 2 3 4 5 6 7 8; do \
-        if go get golang.org/x/crypto@v0.52.0; then \
-            break; \
-        fi; \
-        if [ "${attempt}" -eq 8 ]; then exit 1; fi; \
-        sleep $((attempt * 3)); \
-    done \
-    && for attempt in 1 2 3 4 5 6 7 8; do \
-        if CGO_ENABLED=0 GOOS=linux GOARCH=amd64 GOMAXPROCS=2 go list -tags netgo,builtinassets -deps ./cmd/prometheus ./cmd/promtool >/dev/null; then \
+        if timeout 900 go get golang.org/x/crypto@v0.53.0 golang.org/x/text@v0.39.0 google.golang.org/grpc@v1.82.1; then \
             break; \
         fi; \
         if [ "${attempt}" -eq 8 ]; then exit 1; fi; \
         sleep $((attempt * 3)); \
     done \
     && common_ldflags="-s -w -X github.com/prometheus/common/version.Version=${PROMETHEUS_VERSION} -X github.com/prometheus/common/version.Revision=${PROMETHEUS_COMMIT} -X github.com/prometheus/common/version.Branch=HEAD -X github.com/prometheus/common/version.BuildUser=chaimir -X github.com/prometheus/common/version.BuildDate=19700101-00:00:00" \
-    && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 GOMAXPROCS=2 go build -p=2 -tags netgo,builtinassets -trimpath -ldflags="${common_ldflags}" -o /out/prometheus ./cmd/prometheus \
-    && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 GOMAXPROCS=2 go build -p=2 -tags netgo,builtinassets -trimpath -ldflags="${common_ldflags}" -o /out/promtool ./cmd/promtool
+    && ( \
+        timeout 900 env CGO_ENABLED=0 GOOS=linux GOARCH=amd64 GOMAXPROCS=1 go build -p=1 -tags netgo,builtinassets -trimpath -ldflags="${common_ldflags}" -o /out/prometheus ./cmd/prometheus & \
+        build_pid=$!; \
+        while kill -0 "$build_pid" 2>/dev/null; do echo "prometheus-go-build heartbeat"; sleep 30; done; \
+        wait "$build_pid" \
+    ) \
+    && ( \
+        timeout 900 env CGO_ENABLED=0 GOOS=linux GOARCH=amd64 GOMAXPROCS=1 go build -p=1 -tags netgo,builtinassets -trimpath -ldflags="${common_ldflags}" -o /out/promtool ./cmd/promtool & \
+        build_pid=$!; \
+        while kill -0 "$build_pid" 2>/dev/null; do echo "prometheus-promtool-build heartbeat"; sleep 30; done; \
+        wait "$build_pid" \
+    )
 
 FROM cgr.dev/chainguard/wolfi-base@sha256:02dab76bd852a70556b5b2002195c8a5fdab77d323c433bf6642aab080489795
 

@@ -14,6 +14,7 @@ import {
   Card,
   CardBody,
   CardHeader,
+  CoverImage,
   FormField,
   Input,
   PageBody,
@@ -35,6 +36,7 @@ import { formatDate } from '../../../../utils/formatters'
 import {
   courseStatusLabel,
   courseStatusTone,
+  courseTypeCover,
   courseTypeLabel,
   teachingDifficultyLabel,
 } from '../../../../utils/labels/teaching'
@@ -73,12 +75,29 @@ export default function StudentCoursesPage() {
     {
       key: 'name',
       header: '课程',
-      render: (course) => (
-        <div className="min-w-0">
-          <div className="truncate font-medium text-ink">{course.name}</div>
-          <div className="truncate text-xs text-ink-sub">{course.semester}</div>
-        </div>
-      ),
+      render: (course) => {
+        const cover = courseTypeCover(course.type)
+        return (
+          <div className="flex min-w-0 items-center gap-3">
+            {/*
+              列表缩略图固定用纸材质加题识,不换取每门课的封面授权:
+              一页课程要换一页授权,而列表接口已按可见性筛过课程,逐行再换一次不产生新的鉴权判断。
+              真实封面在课程详情页显示(见 useCourseCoverSrc)。
+            */}
+            <CoverImage
+              id={course.id}
+              name={course.name}
+              glyph={cover.glyph}
+              accent={cover.accent}
+              className="w-28 shrink-0"
+            />
+            <div className="min-w-0">
+              <div className="truncate font-medium text-ink">{course.name}</div>
+              <div className="truncate text-xs text-ink-sub">{course.semester}</div>
+            </div>
+          </div>
+        )
+      },
     },
     {
       key: 'type',

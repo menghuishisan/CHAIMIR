@@ -47,6 +47,14 @@ type DeployConfig struct {
 	SchoolTenantID  int64
 }
 
+// DeployModeSchool 是 DEPLOY_MODE 表示学校私有化部署的取值,业务模块按它判断部署形态,不各写字面量。
+const DeployModeSchool = "school"
+
+// IsSchool 判断当前是否为学校私有化部署,并确认固定租户已配置。
+func (d DeployConfig) IsSchool() bool {
+	return strings.EqualFold(strings.TrimSpace(d.Mode), DeployModeSchool) && d.SchoolTenantID > 0
+}
+
 // ServerConfig 描述 HTTP、WebSocket 与日志运行边界。
 type ServerConfig struct {
 	Addr                     string
@@ -188,6 +196,8 @@ type UploadConfig struct {
 	ImportMaxBytes            int64
 	ContentAttachmentMaxBytes int64
 	CourseMaterialMaxBytes    int64
+	TenantLogoMaxBytes        int64
+	CourseCoverMaxBytes       int64
 	SimBundleMaxBytes         int64
 	SimBundleMetadataMaxBytes int64
 	SimBundleMaxFiles         int
@@ -273,27 +283,27 @@ type AdminConfig struct {
 
 // SandboxConfig 描述 K8s 沙箱编排与镜像证明边界。
 type SandboxConfig struct {
-	KubeconfigPath           string
-	NSPrefixStudent          string
-	NSPrefixJudge            string
-	NSPrefixBattle           string
-	PrepullNamespace         string
-	SandboxNodeSelector      map[string]string
-	SandboxNodeTolerations   []SandboxToleration
-	ImagePullSecretNames     []string
-	ImageRegistry            string
-	ImageAttestations        []SandboxImageAttestation
-	CollectorAllowedPrefixes []string
-	DefaultCPU               string
-	DefaultMemory            string
-	DefaultReqCPU            string
-	DefaultReqMemory         string
-	MaxCPU                   string
-	MaxMemory                string
-	MaxPods                  string
-	WorkspaceStorage         string
-	StorageClassName         string
-	VolumeSnapshotClassName  string
+	KubeconfigPath            string
+	NSPrefixStudent           string
+	NSPrefixJudge             string
+	NSPrefixBattle            string
+	PrepullNamespace          string
+	SandboxNodeSelector       map[string]string
+	SandboxNodeTolerations    []SandboxToleration
+	ImagePullSecretNames      []string
+	ImageRegistry             string
+	PlatformImageAttestations []PlatformImageAttestation
+	CollectorAllowedPrefixes  []string
+	DefaultCPU                string
+	DefaultMemory             string
+	DefaultReqCPU             string
+	DefaultReqMemory          string
+	MaxCPU                    string
+	MaxMemory                 string
+	MaxPods                   string
+	WorkspaceStorage          string
+	StorageClassName          string
+	VolumeSnapshotClassName   string
 	// RuntimeClass 是不可信沙箱 Pod 强制使用的隔离运行时(gVisor runsc 等)对应的 K8s RuntimeClass 名称,必填,缺失即启动失败。
 	RuntimeClass                  string
 	PrepullTimeoutSeconds         int
@@ -382,8 +392,8 @@ type SandboxToleration struct {
 	TolerationSeconds *int64 `json:"toleration_seconds"`
 }
 
-// SandboxImageAttestation 描述一条受控镜像的签名与扫描证明。
-type SandboxImageAttestation struct {
+// PlatformImageAttestation 描述一条受控平台镜像的签名与扫描证明。
+type PlatformImageAttestation struct {
 	ImageURL       string `json:"image_url"`
 	Digest         string `json:"digest"`
 	CosignVerified bool   `json:"cosign_verified"`
@@ -627,6 +637,8 @@ func Load() (*Config, error) {
 		ImportMaxBytes:            reqInt64("UPLOAD_IMPORT_MAX_BYTES"),
 		ContentAttachmentMaxBytes: reqInt64("UPLOAD_CONTENT_ATTACHMENT_MAX_BYTES"),
 		CourseMaterialMaxBytes:    reqInt64("UPLOAD_COURSE_MATERIAL_MAX_BYTES"),
+		TenantLogoMaxBytes:        reqInt64("UPLOAD_TENANT_LOGO_MAX_BYTES"),
+		CourseCoverMaxBytes:       reqInt64("UPLOAD_COURSE_COVER_MAX_BYTES"),
 		SimBundleMaxBytes:         reqInt64("UPLOAD_SIM_BUNDLE_MAX_BYTES"),
 		SimBundleMetadataMaxBytes: reqInt64("UPLOAD_SIM_BUNDLE_METADATA_MAX_BYTES"),
 		SimBundleMaxFiles:         reqInt("UPLOAD_SIM_BUNDLE_MAX_FILES"),
@@ -715,7 +727,7 @@ func Load() (*Config, error) {
 		SandboxNodeTolerations:        readSandboxTolerations("SANDBOX_NODE_TOLERATIONS_JSON", &errs),
 		ImagePullSecretNames:          getCSV("SANDBOX_IMAGE_PULL_SECRET_NAMES"),
 		ImageRegistry:                 req("IMAGE_REGISTRY"),
-		ImageAttestations:             readSandboxImageAttestations("SANDBOX_IMAGE_ATTESTATIONS_JSON", &errs),
+		PlatformImageAttestations:     readPlatformImageAttestations("PLATFORM_IMAGE_ATTESTATIONS_JSON", &errs),
 		CollectorAllowedPrefixes:      getCSV("CHAIMIR_COLLECTOR_ALLOWED_PREFIXES"),
 		DefaultCPU:                    req("SANDBOX_DEFAULT_CPU"),
 		DefaultMemory:                 req("SANDBOX_DEFAULT_MEMORY"),
@@ -788,7 +800,7 @@ func Load() (*Config, error) {
 	}
 
 	// 第三步:集中执行跨字段约束和安全边界校验,避免运行时才暴露配置问题。
-	if c.Deploy.Mode == "school" && c.Deploy.SchoolTenantID == 0 {
+	if c.Deploy.Mode == DeployModeSchool && c.Deploy.SchoolTenantID == 0 {
 		errs = append(errs, "DEPLOY_MODE=school 时必须设置 SCHOOL_TENANT_ID")
 	}
 	if c.Auth.ServiceAuthMaxSkewSeconds <= 0 {
@@ -883,6 +895,12 @@ func Load() (*Config, error) {
 	if c.Upload.CourseMaterialMaxBytes <= 0 {
 		errs = append(errs, "UPLOAD_COURSE_MATERIAL_MAX_BYTES 必须大于 0")
 	}
+	if c.Upload.TenantLogoMaxBytes <= 0 {
+		errs = append(errs, "UPLOAD_TENANT_LOGO_MAX_BYTES 必须大于 0")
+	}
+	if c.Upload.CourseCoverMaxBytes <= 0 {
+		errs = append(errs, "UPLOAD_COURSE_COVER_MAX_BYTES 必须大于 0")
+	}
 	if c.Upload.SimBundleMaxBytes <= 0 {
 		errs = append(errs, "UPLOAD_SIM_BUNDLE_MAX_BYTES 必须大于 0")
 	}
@@ -901,7 +919,7 @@ func Load() (*Config, error) {
 	if !validKubernetesNamePrefix(c.SimBackend.NamespacePrefix) {
 		errs = append(errs, "SIM_BACKEND_NAMESPACE_PREFIX 必须以 sim- 开头、以连字符结尾且只含小写字母数字或连字符")
 	}
-	errs = append(errs, validateSimBackendAdapters(c.SimBackend.StdioAdapters, c.Sandbox.ImageAttestations, c.Sandbox.ImageRegistry)...)
+	errs = append(errs, validateSimBackendAdapters(c.SimBackend.StdioAdapters, c.Sandbox.PlatformImageAttestations, c.Sandbox.ImageRegistry)...)
 	// 扩展包运行器必须真实登记在能力目录里:它承载全部教师/第三方包,
 	// 缺了就等于扩展接入整条链路不可用,而那必须在启动时暴露,不能等教师提交后才报运行时错误。
 	if !simAdapterRegistered(c.SimBackend.StdioAdapters, c.SimBackend.PackageRunnerAdapterCode) {
@@ -1282,14 +1300,14 @@ func validKubernetesNamePrefix(prefix string) bool {
 	return prefix[0] >= 'a' && prefix[0] <= 'z'
 }
 
-// readSandboxImageAttestations 解析镜像证明 JSON 数组,并校验证明字段完整性。
-func readSandboxImageAttestations(key string, errs *[]string) []SandboxImageAttestation {
+// readPlatformImageAttestations 解析平台镜像证明 JSON 数组,并校验证明字段完整性。
+func readPlatformImageAttestations(key string, errs *[]string) []PlatformImageAttestation {
 	raw := strings.TrimSpace(os.Getenv(key))
 	if raw == "" {
 		*errs = append(*errs, "缺少必填环境变量: "+key)
 		return nil
 	}
-	var out []SandboxImageAttestation
+	var out []PlatformImageAttestation
 	if err := json.Unmarshal([]byte(raw), &out); err != nil {
 		*errs = append(*errs, fmt.Sprintf("环境变量 %s 需为镜像证明 JSON 数组: %v", key, err))
 		return nil

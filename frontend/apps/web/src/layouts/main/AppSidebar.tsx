@@ -1,10 +1,10 @@
 // AppSidebar 角色导航(生长在墨色底层上,非独立面板,FE-6/规范 §6.2):
-// 品牌章 + 分组导航(图标+文字,激活态玉浅底+左指示条+aria-current)。
+// 主标志 + 分组导航(图标+文字,激活态玉浅底+左指示条+aria-current)。
 // 折叠态(仅桌面)只留图标,标签经 Tooltip 提供;窄屏由 MainLayout 放入抽屉,不折叠。
 
 import { NavLink } from 'react-router'
 import { PanelLeftClose, PanelLeftOpen } from 'lucide-react'
-import { Icon, IconButton, Tooltip, cn } from '@chaimir/ui'
+import { BrandMark, Icon, IconButton, Tooltip, cn } from '@chaimir/ui'
 import type { RoleNavigationConfig, RoleNavigationItem } from './navigation'
 import { useOnlineStatus } from '../../hooks'
 
@@ -23,11 +23,9 @@ export function AppSidebar({ config, collapsed = false, onToggleCollapsed }: App
   const online = useOnlineStatus()
   return (
     <div className="flex h-full min-h-0 flex-col px-3 py-4">
-      {/* 品牌:朱砂章 + 端名 */}
+      {/* 品牌:主标志 + 端名(标志不承担导航,只承担识别,规范 §1.3) */}
       <div className={cn('flex items-center gap-2.5 px-2 pb-4', collapsed && 'justify-center px-0')}>
-        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-seal text-base font-bold text-on-solid shadow-md">
-          链
-        </span>
+        <BrandMark size="md" className="text-accent" label={collapsed ? 'Chaimir' : undefined} />
         {!collapsed && (
           <span className="truncate text-sm font-semibold text-on-dark">{config.brandName}</span>
         )}

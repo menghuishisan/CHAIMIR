@@ -6,8 +6,8 @@ LABEL org.opencontainers.image.description="Chaimir ERC-4337 bundler image"
 
 USER root
 
-RUN apt-get update \
-    && apt-get upgrade -y --no-install-recommends \
+RUN apt-get -o Acquire::Retries=5 update \
+    && apt-get -o Acquire::Retries=5 upgrade -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/* \
     && mkdir -p /workspace /bundler \
     && chown -R 1000:1000 /workspace /bundler

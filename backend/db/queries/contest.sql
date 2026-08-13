@@ -46,7 +46,7 @@ SET name = $3,
     freeze_minutes = $11,
     rules = $12,
     updated_at = now()
-WHERE tenant_id = $1 AND id = $2 AND status = 1 AND deleted_at IS NULL
+WHERE tenant_id = $1 AND id = $2 AND status IN (1, 2) AND deleted_at IS NULL
 RETURNING id, tenant_id, organizer_id, name, mode, match_mode, team_mode, signup_start, signup_end, start_at, end_at, freeze_minutes, rules, status, created_at, updated_at, deleted_at;
 
 -- name: SetContestStatus :one

@@ -16,8 +16,6 @@ import (
 	"chaimir/pkg/logging"
 )
 
-const lessonMaterialResourceType = "material"
-
 // LessonMaterialUploadRequest 描述课时材料的已读取文件内容。
 type LessonMaterialUploadRequest struct {
 	FileName    string
@@ -73,7 +71,7 @@ func (s *Service) UploadLessonMaterial(ctx context.Context, lessonID int64, req 
 	plan, err := s.files.PlanUpload(ctx, storage.PlanUploadRequest{
 		TenantID:        id.TenantID,
 		AccountID:       id.AccountID,
-		Module:          "teaching",
+		Module:          teachingModuleName,
 		ResourceType:    lessonMaterialResourceType,
 		ResourceID:      strconv.FormatInt(lessonID, 10),
 		FileName:        req.FileName,
@@ -124,7 +122,7 @@ func (s *Service) UploadLessonMaterial(ctx context.Context, lessonID int64, req 
 		if parseErr != nil {
 			logging.ErrorContext(ctx, "替换课时材料时旧对象引用无效", parseErr.Error())
 		} else {
-			prefix, prefixErr := storage.ObjectKey(id.TenantID, "teaching", lessonMaterialResourceType, strconv.FormatInt(lessonID, 10))
+			prefix, prefixErr := storage.ObjectKey(id.TenantID, teachingModuleName, lessonMaterialResourceType, strconv.FormatInt(lessonID, 10))
 			if prefixErr != nil {
 				logging.ErrorContext(ctx, "替换课时材料时无法生成受控材料路径", prefixErr.Error())
 			} else if oldRef.Bucket != s.storage.BucketAttach() || !strings.HasPrefix(oldRef.Key, prefix+"/") {
@@ -178,7 +176,7 @@ func (s *Service) IssueLessonMaterialAccess(ctx context.Context, lessonID int64)
 		TenantID:     id.TenantID,
 		AccountID:    id.AccountID,
 		ObjectRef:    objectRef,
-		Module:       "teaching",
+		Module:       teachingModuleName,
 		ResourceType: lessonMaterialResourceType,
 		ResourceID:   strconv.FormatInt(lessonID, 10),
 		Mode:         mode,

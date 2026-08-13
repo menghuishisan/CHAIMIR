@@ -267,6 +267,10 @@ func seed(ctx context.Context, cfg *config.Config) (resultErr error) {
 	if err != nil {
 		return err
 	}
+	identityFiles, err := storage.NewServiceFromConfig(cfg.Auth, cfg.MinIO, cfg.Upload)
+	if err != nil {
+		return err
+	}
 	identitySvc, err := identity.NewService(identity.ServiceDeps{
 		Store:          identity.NewStore(database),
 		Auth:           authManager,
@@ -275,6 +279,8 @@ func seed(ctx context.Context, cfg *config.Config) (resultErr error) {
 		AuthConfig:     cfg.Auth,
 		IdentityConfig: cfg.Identity,
 		UploadConfig:   cfg.Upload,
+		Objects:        objectStore,
+		FileService:    identityFiles,
 		DeployConfig:   cfg.Deploy,
 		SMSSender:      smsSender,
 	})

@@ -5,7 +5,8 @@
 //   输入与提交流程在 login-state(三种方式共用一套状态),各方式的表单在 login-forms。
 // 多学校账号经内存暂存凭证进入 /auth/tenant-select(凭证不进路由 state,防历史记录持久化)。
 
-import { AuthBrandMark } from './auth-ui'
+import { useTenantBrand } from '../../useTenantBrand'
+import { AuthBrandMark, SchoolBrandLine } from './auth-ui'
 import { AccountLoginForm, PhoneLoginForm, SsoLoginForm } from './login-forms'
 import { LoginIntro } from './login-intro'
 import { useLoginController } from './login-state'
@@ -15,6 +16,7 @@ import { useLoginController } from './login-state'
  */
 export default function LoginPage() {
   const login = useLoginController()
+  const brand = useTenantBrand()
 
   return (
     <div className="flex w-full flex-1 flex-col lg:flex-row">
@@ -29,8 +31,11 @@ export default function LoginPage() {
         />
         <div className="relative w-full max-w-sm">
           {/* 窄屏品牌行(左区隐藏时的紧凑替代) */}
-          <div className="mb-10 lg:hidden">
+          <div className="mb-10 flex flex-col gap-3 lg:hidden">
             <AuthBrandMark />
+            {brand ? (
+              <SchoolBrandLine name={brand.display_name} logoSrc={brand.logo_image} />
+            ) : null}
           </div>
 
           {login.view === 'phone' ? (

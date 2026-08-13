@@ -170,7 +170,7 @@ type Tenant struct {
 	Status               int16              `json:"status"`
 	DeployMode           int16              `json:"deploy_mode"`
 	ExpireAt             pgtype.Timestamptz `json:"expire_at"`
-	LogoUrl              pgtype.Text        `json:"logo_url"`
+	LogoRef              pgtype.Text        `json:"logo_ref"`
 	DisplayName          pgtype.Text        `json:"display_name"`
 	FeatureFlags         []byte             `json:"feature_flags"`
 	AuthMode             int16              `json:"auth_mode"`

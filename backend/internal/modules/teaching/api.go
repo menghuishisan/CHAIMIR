@@ -52,6 +52,7 @@ func (a teachingAPI) registerSharedRoutes(g gin.IRouter) {
 	g.GET("/courses/:id/outline", a.getOutline)
 	g.GET("/lessons/:id", a.getLesson)
 	g.POST("/lessons/:id/material/access", a.issueLessonMaterialAccess)
+	g.POST("/courses/:id/cover/access", a.issueCourseCoverAccess)
 	g.GET("/courses/:id/assignments", a.listCourseAssignments)
 	g.GET("/assignments/:id", a.getAssignment)
 	g.GET("/assignments/:id/submissions", a.listSubmissions)
@@ -65,6 +66,9 @@ func (a teachingAPI) registerSharedRoutes(g gin.IRouter) {
 // registerTeacherRoutes 注册授课教师和学校管理员管理接口。
 func (a teachingAPI) registerTeacherRoutes(g gin.IRouter) {
 	g.POST("/courses", a.createCourse)
+	// 封面上传不绑课程 id:新建课程时还没有 id,先传图拿 object_ref 再随创建请求提交,
+	// 编辑时同样,故创建与修改共用这一条路径。
+	g.POST("/courses/cover", a.uploadCourseCover)
 	g.PATCH("/courses/:id", a.updateCourse)
 	g.POST("/courses/:id/publish", a.publishCourse)
 	g.POST("/courses/:id/end", a.endCourse)
@@ -315,6 +319,68 @@ func (a teachingAPI) issueLessonMaterialAccess(c *gin.Context) {
 		}
 		a.authn.SetBrowserAccessCookie(c, storage.DownloadCookiePath, token)
 	}
+	httpx.Write(c, out, nil)
+}
+
+// uploadCourseCover 绑定课程封面 multipart 上传并委托 service 做安全校验和持久化。
+func (a teachingAPI) uploadCourseCover(c *gin.Context) {
+	maxBytes := a.svc.coverMaxBytes
+	file, err := c.FormFile("file")
+	if err != nil {
+		httpx.Write(c, nil, apperr.ErrTeachingCourseCoverInvalid.WithCause(err))
+		return
+	}
+	if file.Size <= 0 {
+		httpx.Write(c, nil, apperr.ErrTeachingCourseCoverInvalid)
+		return
+	}
+	if file.Size > maxBytes {
+		httpx.Write(c, nil, apperr.ErrTeachingCourseCoverTooLarge)
+		return
+	}
+	opened, err := file.Open()
+	if err != nil {
+		httpx.Write(c, nil, apperr.ErrTeachingCourseCoverInvalid.WithCause(err))
+		return
+	}
+	defer logging.CloseContext(c.Request.Context(), "关闭课程封面上传文件失败", opened)
+	content, result, err := upload.ReadBounded(opened, maxBytes)
+	if err != nil {
+		httpx.Write(c, nil, apperr.ErrTeachingCourseCoverInvalid.WithCause(err))
+		return
+	}
+	if result != upload.SizeOK {
+		httpx.Write(c, nil, apperr.ErrTeachingCourseCoverTooLarge)
+		return
+	}
+	out, err := a.svc.UploadCourseCover(c.Request.Context(), CourseCoverUploadRequest{
+		FileName:    file.Filename,
+		ContentType: file.Header.Get("Content-Type"),
+		Content:     content,
+	})
+	httpx.Write(c, out, err)
+}
+
+// issueCourseCoverAccess 为浏览器直接加载封面图签发统一文件服务授权。
+// 与课时视频同理:<img src> 由浏览器自身发起、发不出 Authorization 头,
+// 故在此写作用域限定在统一文件服务的 HttpOnly Cookie
+// (见 docs/总-API接口总览.md §统一文件服务「鉴权载体」)。
+func (a teachingAPI) issueCourseCoverAccess(c *gin.Context) {
+	id, ok := httpx.PathID(c, "id")
+	if !ok {
+		return
+	}
+	out, err := a.svc.IssueCourseCoverAccess(c.Request.Context(), id)
+	if err != nil {
+		httpx.Write(c, nil, err)
+		return
+	}
+	token, ok := auth.VerifiedAccessToken(c)
+	if !ok {
+		httpx.Write(c, nil, apperr.ErrUnauthorized)
+		return
+	}
+	a.authn.SetBrowserAccessCookie(c, storage.DownloadCookiePath, token)
 	httpx.Write(c, out, nil)
 }
 

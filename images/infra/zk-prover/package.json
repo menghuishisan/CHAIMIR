@@ -5,6 +5,7 @@
   },
   "overrides": {
     "minimatch": "5.1.8",
+    "brace-expansion": "2.1.4",
     "underscore": "1.13.8"
   }
 }

@@ -253,6 +253,10 @@ func (s *Service) validateExperimentComponents(ctx context.Context, item Experim
 			result.OK = false
 		}
 	}
+	// 草稿允许先保存空编排,但发布必须至少包含一个可执行组件。
+	if !hasExecutableComponent(item.Components) {
+		add(ValidationLevelError, "实验至少需要配置一个环境、仿真或检查点")
+	}
 	if err := validateComponentConfig(item.Components, item.CollabMode, item.GroupConfig, isValidJudgeSandboxMode); err != nil {
 		add(ValidationLevelError, "实验组件配置不完整")
 	}

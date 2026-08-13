@@ -24,6 +24,12 @@ const (
 	CodeTeachingMemberClassEmpty = "61010"
 	// CodeTeachingCourseEndedEventPublishFailed 表示课程结束事件发布失败,课内实验实例暂未级联回收。
 	CodeTeachingCourseEndedEventPublishFailed = "61011"
+	// CodeTeachingCourseCoverInvalid 表示课程封面文件类型或内容不是受支持的图片。
+	CodeTeachingCourseCoverInvalid = "61012"
+	// CodeTeachingCourseCoverTooLarge 表示课程封面文件超过上传大小上限。
+	CodeTeachingCourseCoverTooLarge = "61013"
+	// CodeTeachingCourseCoverMissing 表示该课程还没有设置封面,无法签发投放授权。
+	CodeTeachingCourseCoverMissing = "61014"
 )
 
 const (
@@ -88,6 +94,12 @@ var (
 	ErrTeachingMemberClassEmpty = New(CodeTeachingMemberClassEmpty, "这个班级暂时没有可加入课程的在校学生")
 	// ErrTeachingCourseEndedEventPublishFailed 表示课程状态已更新但级联回收通知未发出。
 	ErrTeachingCourseEndedEventPublishFailed = New(CodeTeachingCourseEndedEventPublishFailed, "课程状态已更新,但课内实验环境的回收通知暂时没能发出,请稍后重试")
+	// ErrTeachingCourseCoverInvalid 表示封面不是受支持的图片格式。
+	ErrTeachingCourseCoverInvalid = New(CodeTeachingCourseCoverInvalid, "封面请用 JPG、PNG 或 WEBP 图片")
+	// ErrTeachingCourseCoverTooLarge 表示封面文件超过上传上限。
+	ErrTeachingCourseCoverTooLarge = New(CodeTeachingCourseCoverTooLarge, "封面图片太大了,请换一张小一些的")
+	// ErrTeachingCourseCoverMissing 表示课程还没有设置封面。
+	ErrTeachingCourseCoverMissing = New(CodeTeachingCourseCoverMissing, "这门课程还没有设置封面")
 )
 
 var (

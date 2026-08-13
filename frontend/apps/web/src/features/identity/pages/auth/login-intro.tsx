@@ -1,11 +1,14 @@
 // login-intro 是登录页左区的平台介绍(桌面宽屏可见,窄屏折叠为顶部品牌行)。
 // 这一区不参与登录流程,只回答访客的第一个问题:这是什么平台、能在上面做什么。
 // 文案即信息(不是排版素材),故与登录表单分开维护:改介绍不必碰登录状态机。
-// 入场动效为低频页编排(规范 §4.5):印章落下 → 标题显影 → 段落与能力点阶梯浮现,总时长 ≤1.1s。
+// 入场动效为低频页编排(规范 §4.5):品牌显影 → 标题显影 → 段落与能力点阶梯浮现,总时长 ≤1.1s。
+// 品牌区不用「落印」:那是品牌章的动效,而章表达「已确权、不可逆」,登录页只是入口,
+// 章与落印留给提交成功回执(AuthSuccess)。
 
 import { BookOpen, Braces, Trophy } from 'lucide-react'
 import { Icon } from '@chaimir/ui'
-import { AuthBrandMark } from './auth-ui'
+import { useTenantBrand } from '../../useTenantBrand'
+import { AuthBrandMark, SchoolBrandLine } from './auth-ui'
 
 /** 平台能力点:三条对应三位一体(教学 · 实验 · 竞赛),与首页宣传口径同源 */
 const FEATURES = [
@@ -15,12 +18,20 @@ const FEATURES = [
 ] as const
 
 /**
- * LoginIntro 渲染品牌章与平台介绍;内容自足,不接受任何入参。
+ * LoginIntro 渲染品牌锁定组合与平台介绍;内容自足,不接受任何入参。
+ * 学校私有部署会在品牌区下方多一行学校身份 —— 那台部署只服务这一所学校。
  */
 export function LoginIntro() {
+  const brand = useTenantBrand()
+
   return (
     <section className="relative hidden w-3/5 flex-col px-14 pb-16 pt-12 lg:flex">
       <AuthBrandMark large />
+      {brand ? (
+        <div className="mt-5 animate-develop" style={{ animationDelay: 'calc(var(--t-stagger) * 1)' }}>
+          <SchoolBrandLine name={brand.display_name} logoSrc={brand.logo_image} />
+        </div>
+      ) : null}
       <div className="mt-auto max-w-lg">
         <h2
           className="font-display text-4xl font-normal leading-tight text-on-dark animate-develop"

@@ -40,6 +40,7 @@ import {
   vulnSourceTypeLabel,
 } from '../../../utils/labels/contest'
 import { userFacingErrorMessage } from '../../../utils/userFacingError'
+import { isHttpUrl } from '../../../utils/validators'
 
 /** 后端允许的超时区间(秒),与 validateVulnSourceConfig 一致。 */
 const TIMEOUT_MIN = 1
@@ -428,10 +429,4 @@ function readString(source: Record<string, unknown> | undefined, key: string): s
 function readNumber(source: Record<string, unknown> | undefined, key: string, fallback: number): number {
   const value = source?.[key]
   return typeof value === 'number' && Number.isFinite(value) ? value : fallback
-}
-
-/** isHttpUrl 前端先挡明显非法地址;公网可达性由后端最终判定。 */
-function isHttpUrl(value: string): boolean {
-  const trimmed = value.trim()
-  return trimmed.startsWith('http://') || trimmed.startsWith('https://')
 }

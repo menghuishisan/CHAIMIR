@@ -126,6 +126,9 @@ if (-not (Test-Path -LiteralPath $SecretPath)) {
 
 $externalUrl = (Get-EnvValue -Path $ConfigPath -Key "SUPPLY_CHAIN_HARBOR_EXTERNAL_URL").TrimEnd("/")
 $registry = Get-OptionalEnvValue -Path $ConfigPath -Key "SUPPLY_CHAIN_REGISTRY" -DefaultValue (Get-OptionalEnvValue -Path $ConfigPath -Key "IMAGE_REGISTRY" -DefaultValue "")
+$registryEndpoint = Get-OptionalEnvValue -Path $ConfigPath -Key "SUPPLY_CHAIN_REGISTRY_ENDPOINT" -DefaultValue $registry
+$apiScheme = if ($externalUrl.StartsWith("http://", [System.StringComparison]::OrdinalIgnoreCase)) { "http" } else { "https" }
+$apiBase = "${apiScheme}://$registryEndpoint"
 $dockerConfigValue = Get-OptionalEnvValue -Path $ConfigPath -Key "SUPPLY_CHAIN_DOCKER_CONFIG_HOST_DIR" -DefaultValue "config/docker-auth"
 $dockerConfigDir = Resolve-DeployPath -Value $dockerConfigValue
 $adminPassword = Get-EnvValue -Path $SecretPath -Key "HARBOR_ADMIN_PASSWORD"
@@ -145,11 +148,12 @@ $projects = @(
     "base",
     "middleware",
     "observability",
-    "ingress"
+    "ingress",
+    "network"
 )
 
 foreach ($project in $projects) {
-    $projectUri = "$externalUrl/api/v2.0/projects/$project"
+    $projectUri = "$apiBase/api/v2.0/projects/$project"
     try {
         Invoke-WebRequest -UseBasicParsing -Uri $projectUri -Headers $headers -TimeoutSec 20 | Out-Null
         Write-Host "Harbor project exists: $project"
@@ -167,14 +171,14 @@ foreach ($project in $projects) {
             public = "false"
         }
     } | ConvertTo-Json -Compress
-    Invoke-WebRequest -UseBasicParsing -Uri "$externalUrl/api/v2.0/projects" -Method Post -Headers ($headers + @{ "Content-Type" = "application/json" }) -Body $body -TimeoutSec 20 | Out-Null
+    Invoke-WebRequest -UseBasicParsing -Uri "$apiBase/api/v2.0/projects" -Method Post -Headers ($headers + @{ "Content-Type" = "application/json" }) -Body $body -TimeoutSec 20 | Out-Null
     Write-Host "Created Harbor project: $project"
 }
 
 $robotName = Get-OptionalEnvValue -Path $SecretPath -Key "HARBOR_ROBOT_NAME" -DefaultValue "chaimir-supply-chain"
 $registryUser = Get-OptionalEnvValue -Path $SecretPath -Key "HARBOR_ROBOT_USERNAME" -DefaultValue ""
 $registryPassword = Get-OptionalEnvValue -Path $SecretPath -Key "HARBOR_ROBOT_PASSWORD" -DefaultValue ""
-$robots = Invoke-RestMethod -UseBasicParsing -Uri "$externalUrl/api/v2.0/robots" -Headers $headers -TimeoutSec 20
+$robots = Invoke-RestMethod -UseBasicParsing -Uri "$apiBase/api/v2.0/robots" -Headers $headers -TimeoutSec 20
 $robotFullName = "robot`$$robotName"
 $existingRobot = @($robots | Where-Object { $_.name -eq $robotFullName -or $_.name -eq $robotName }) | Select-Object -First 1
 if ($existingRobot) {
@@ -208,7 +212,7 @@ if ($existingRobot) {
         level = "system"
         permissions = $permissions
     } | ConvertTo-Json -Compress -Depth 6
-    $createdRobot = Invoke-RestMethod -UseBasicParsing -Uri "$externalUrl/api/v2.0/robots" -Method Post -Headers ($headers + @{ "Content-Type" = "application/json" }) -Body $robotBody -TimeoutSec 20
+    $createdRobot = Invoke-RestMethod -UseBasicParsing -Uri "$apiBase/api/v2.0/robots" -Method Post -Headers ($headers + @{ "Content-Type" = "application/json" }) -Body $robotBody -TimeoutSec 20
     $registryUser = $createdRobot.name
     if ([string]::IsNullOrWhiteSpace($registryUser)) {
         $registryUser = $robotFullName
@@ -229,5 +233,5 @@ if ($existingRobot) {
 if ([string]::IsNullOrWhiteSpace($registry)) {
     throw "缺少 SUPPLY_CHAIN_REGISTRY 或 IMAGE_REGISTRY"
 }
-Write-DockerAuthConfig -Registry $registry -Username $registryUser -Password $registryPassword -DockerConfigDir $dockerConfigDir
+Write-DockerAuthConfig -Registry $registryEndpoint -Username $registryUser -Password $registryPassword -DockerConfigDir $dockerConfigDir
 Write-Host "Wrote Docker registry auth config: $dockerConfigDir\config.json"

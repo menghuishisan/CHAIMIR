@@ -7,9 +7,9 @@
 
 import React from 'react'
 import { Link } from 'react-router'
-import { CircleAlert, CircleCheck } from 'lucide-react'
+import { CircleAlert } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
-import { Button, Icon, Input, buttonVariants, cn } from '@chaimir/ui'
+import { Button, BrandLockup, BrandSeal, Icon, Input, TenantCrest, buttonVariants, cn } from '@chaimir/ui'
 import type { InputProps } from '@chaimir/ui'
 
 /** 页尾弱化通路的统一样式:返回登录、切换登录方式、退出登录共用一套(层级靠留白密度,不画分隔线) */
@@ -264,13 +264,15 @@ export interface AuthSuccessProps {
 }
 
 /**
- * AuthSuccess 提交成功后的整页回执:玉色对勾 + 结果说明 + 去处。
+ * AuthSuccess 提交成功后的整页回执:品牌章落印 + 结果说明 + 去处。
  * 表单已经消失,故这里不保留任何输入痕迹,只讲清「成了什么、接下来去哪」。
+ * 用品牌章而非对勾图标:入驻申请、改密这类回执是「已确权、不可逆」,正是落印语义(§4.5);
+ * 对勾只表示「这一步过了」,承载不了不可逆。
  */
 export function AuthSuccess({ title, description, children }: AuthSuccessProps) {
   return (
     <div className="w-full max-w-sm animate-rise">
-      <Icon icon={CircleCheck} size="lg" className="text-accent" />
+      <BrandSeal size="md" animated label="已完成" className="text-seal" />
       <AuthHeading title={title} description={description} />
       {children}
     </div>
@@ -280,36 +282,49 @@ export function AuthSuccess({ title, description, children }: AuthSuccessProps) 
 export interface AuthBrandMarkProps {
   /** large 桌面品牌区的放大字号;窄屏与特权通道用常规字号 */
   large?: boolean
-  /** subtitle 章下副标题:默认平台全称,特权通道在此标明这是平台管理通道 */
+  /** subtitle 锁定组合下的副标题:默认平台全称,特权通道在此标明这是平台管理通道 */
   subtitle?: string
 }
 
 /**
- * AuthBrandMark 品牌章 + 名称;入场时印章「盖」下并散开一圈墨晕(§4.5 落印,只在入场一次)。
- * 朱砂只用在这枚章与落印动作上(规范 §1.1),认证页的其余强调一律用玉色。
+ * AuthBrandMark 认证页品牌区:锁定组合 + 副标题,入场走显影(§4.5)。
+ * 这里只出现一次锁定组合(规范 §1.3),不并排放品牌章 ——
+ * 章与主标志是同源两态(开口 vs 缺口合上),同屏摆两个等于把同一个记忆点讲两遍;
+ * 章与它的落印动效留给 AuthSuccess 这类「已确权、不可逆」回执。
+ *
+ * 学校私有部署另有一条学校身份行(SchoolBrandLine):锁定组合讲这是什么产品,
+ * 那一行讲这是哪所学校的部署。平台托管不显示 —— 登录页面对的学校还未确定。
  */
 export function AuthBrandMark({ large, subtitle = '区块链教学实验竞赛平台' }: AuthBrandMarkProps) {
   return (
-    <div className="flex items-center gap-3">
-      <span className="relative">
-        <span
-          className={cn(
-            'flex items-center justify-center rounded-lg bg-seal font-bold text-on-solid shadow-md animate-seal-drop',
-            large ? 'h-9 w-9 text-lg' : 'h-8 w-8 text-base',
-          )}
-        >
-          链
-        </span>
-        <span
-          aria-hidden
-          className="absolute -inset-0.5 rounded-lg border border-seal/60 animate-seal-ring"
-          style={{ animationDelay: 'calc(var(--t-stagger) * 3)' }}
-        />
-      </span>
-      <span>
-        <span className="block text-md font-bold leading-tight text-on-dark">Chaimir</span>
-        <span className="block font-mono text-xs text-on-dark-sub">{subtitle}</span>
-      </span>
+    <div className="animate-develop">
+      <BrandLockup
+        variant={large ? 'wide' : 'narrow'}
+        markClassName="text-accent"
+        className="text-on-dark"
+      />
+      <span className="mt-1.5 block font-mono text-xs text-on-dark-sub">{subtitle}</span>
+    </div>
+  )
+}
+
+export interface SchoolBrandLineProps {
+  /** 学校显示名 */
+  name: string
+  /** 校徽的内联地址;为空时徽记位回落学校名首字 */
+  logoSrc: string
+}
+
+/**
+ * SchoolBrandLine 在认证页显示学校徽记与校名。
+ * 徽记用 sm 档而不是与锁定组合等大:锁定组合是主标识,学校身份是这台部署的归属,
+ * 两个等大的图形会互相抢焦点(规范 §1.3 不堆砌品牌图形)。
+ */
+export function SchoolBrandLine({ name, logoSrc }: SchoolBrandLineProps) {
+  return (
+    <div className="flex items-center gap-2.5">
+      <TenantCrest name={name} logoSrc={logoSrc} size="sm" onDark />
+      <span className="truncate text-sm text-on-dark">{name}</span>
     </div>
   )
 }

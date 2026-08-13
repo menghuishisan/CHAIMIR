@@ -8,6 +8,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { Outlet, useLocation } from 'react-router'
 import { Menu as MenuIcon } from 'lucide-react'
 import {
+  BrandMark,
   Drawer,
   DrawerContent,
   DrawerTitle,
@@ -108,10 +109,13 @@ export function MainLayout({ config }: MainLayoutProps) {
             />
           ) : null}
 
-          {/* 窄屏顶栏承载端名(侧栏收进抽屉后品牌需有落点) */}
+          {/* 窄屏顶栏承载品牌与端名(侧栏收进抽屉后品牌需有落点) */}
           {!isDesktop ? (
-            <span className="min-w-0 flex-1 truncate text-sm font-semibold text-on-dark">
-              {config.brandName}
+            <span className="flex min-w-0 flex-1 items-center gap-2">
+              <BrandMark size="sm" className="text-accent" />
+              <span className="truncate text-sm font-semibold text-on-dark">
+                {config.brandName}
+              </span>
             </span>
           ) : (
             <span className="flex-1" />

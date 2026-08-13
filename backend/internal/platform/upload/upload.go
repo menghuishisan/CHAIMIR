@@ -69,7 +69,11 @@ func CSVOrXLSXKind(fileName, contentType string, content []byte) FileKind {
 	ext := strings.ToLower(filepath.Ext(fileName))
 	switch ext {
 	case ".csv":
-		if !AllowedCSVContentType(contentType) || LooksLikeZip(content) {
+		declared := baseContentType(contentType)
+		// Chromium/Firefox 在本地选择器上传部分纯文本文件时可能省略
+		// 文件级 Content-Type,或声明为通用 octet-stream。此时必须靠
+		// 扩展名与文本内容签名共同兜底,不能把合法 CSV 误判为不支持。
+		if (declared != "" && declared != "application/octet-stream" && !AllowedCSVContentType(declared)) || LooksLikeZip(content) || !looksLikeText(content) {
 			return KindInvalid
 		}
 		return KindCSV
@@ -111,6 +115,44 @@ func AttachmentKindValid(fileName, contentType string, content []byte) bool {
 		return AllowedCSVContentType(declared) && looksLikeText(content)
 	default:
 		return false
+	}
+}
+
+// BrandImageKindValid 校验品牌图片(校徽、课程封面)的扩展名、声明 MIME 与内容魔数。
+// 只放行 JPEG/PNG/WEBP:这三种是浏览器普遍支持、且能在小体积下表达标识与封面的位图格式。
+// 不复用 AttachmentKindValid —— 后者还放行 GIF、PDF、纯文本和 JSON,把它用在图片位上,
+// 等于让一份 PDF 或动图挂到校徽和封面槽位;品牌位的类型面必须比通用附件窄。
+func BrandImageKindValid(fileName, contentType string, content []byte) bool {
+	ext := strings.ToLower(filepath.Ext(fileName))
+	declared := baseContentType(contentType)
+	if len(content) == 0 {
+		return false
+	}
+	switch ext {
+	case ".jpg", ".jpeg":
+		return declared == "image/jpeg" && looksLikeJPEG(content)
+	case ".png":
+		return declared == "image/png" && looksLikePNG(content)
+	case ".webp":
+		return declared == "image/webp" && looksLikeWEBP(content)
+	default:
+		return false
+	}
+}
+
+// BrandImageContentType 按内容魔数判定品牌图片的 MIME,内容不是受支持图片时返回空串。
+// 投放前重新按魔数判定,而不是沿用上传时声明的 MIME:声明值来自客户端,
+// 而这个返回值会进入响应头或 data URI,必须由内容本身决定。
+func BrandImageContentType(content []byte) string {
+	switch {
+	case looksLikeJPEG(content):
+		return "image/jpeg"
+	case looksLikePNG(content):
+		return "image/png"
+	case looksLikeWEBP(content):
+		return "image/webp"
+	default:
+		return ""
 	}
 }
 

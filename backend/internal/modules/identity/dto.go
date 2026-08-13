@@ -150,14 +150,17 @@ type UpdateTenantStatusRequest struct {
 }
 
 type TenantDTO struct {
-	ID                   ids.ID         `json:"id"`
-	Code                 string         `json:"code"`
-	Name                 string         `json:"name"`
-	Type                 int16          `json:"type"`
-	Status               int16          `json:"status"`
-	DeployMode           int16          `json:"deploy_mode"`
-	ExpireAt             *time.Time     `json:"expire_at,omitempty"`
-	LogoURL              string         `json:"logo_url,omitempty"`
+	ID         ids.ID     `json:"id"`
+	Code       string     `json:"code"`
+	Name       string     `json:"name"`
+	Type       int16      `json:"type"`
+	Status     int16      `json:"status"`
+	DeployMode int16      `json:"deploy_mode"`
+	ExpireAt   *time.Time `json:"expire_at,omitempty"`
+	LogoRef    string     `json:"logo_ref,omitempty"`
+	// LogoImage 是校徽的 data URI,只在租户配置读取时填充(见 service_brand.go 说明);
+	// 平台租户列表不渲染徽记,故那里保持为空,不为每一行去读一次对象存储。
+	LogoImage            string         `json:"logo_image,omitempty"`
 	DisplayName          string         `json:"display_name,omitempty"`
 	FeatureFlags         map[string]any `json:"feature_flags"`
 	AuthMode             int16          `json:"auth_mode"`
@@ -167,7 +170,6 @@ type TenantDTO struct {
 }
 
 type TenantConfigRequest struct {
-	LogoURL              string         `json:"logo_url"`
 	DisplayName          string         `json:"display_name"`
 	FeatureFlags         map[string]any `json:"feature_flags"`
 	AuthMode             int16          `json:"auth_mode"`

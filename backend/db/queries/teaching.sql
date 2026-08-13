@@ -1,25 +1,25 @@
 -- name: CreateCourse :one
-INSERT INTO course (id, tenant_id, teacher_id, name, description, type, difficulty, cover_url, semester, credits, schedule, start_at, end_at, invite_code, status, visibility, created_at, updated_at, deleted_at)
+INSERT INTO course (id, tenant_id, teacher_id, name, description, type, difficulty, cover_ref, semester, credits, schedule, start_at, end_at, invite_code, status, visibility, created_at, updated_at, deleted_at)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::text::numeric, $11, $12, $13, $14, $15, $16, now(), now(), NULL)
-RETURNING id, tenant_id, teacher_id, name, description, type, difficulty, cover_url, semester, credits::float8 AS credits, schedule, start_at, end_at, invite_code, status, visibility, created_at, updated_at, deleted_at;
+RETURNING id, tenant_id, teacher_id, name, description, type, difficulty, cover_ref, semester, credits::float8 AS credits, schedule, start_at, end_at, invite_code, status, visibility, created_at, updated_at, deleted_at;
 
 -- name: GetCourseByID :one
-SELECT id, tenant_id, teacher_id, name, description, type, difficulty, cover_url, semester, credits::float8 AS credits, schedule, start_at, end_at, invite_code, status, visibility, created_at, updated_at, deleted_at
+SELECT id, tenant_id, teacher_id, name, description, type, difficulty, cover_ref, semester, credits::float8 AS credits, schedule, start_at, end_at, invite_code, status, visibility, created_at, updated_at, deleted_at
 FROM course
 WHERE tenant_id = $1 AND id = $2 AND deleted_at IS NULL;
 
 -- name: GetCloneableCourseByID :one
-SELECT id, tenant_id, teacher_id, name, description, type, difficulty, cover_url, semester, credits::float8 AS credits, schedule, start_at, end_at, invite_code, status, visibility, created_at, updated_at, deleted_at
+SELECT id, tenant_id, teacher_id, name, description, type, difficulty, cover_ref, semester, credits::float8 AS credits, schedule, start_at, end_at, invite_code, status, visibility, created_at, updated_at, deleted_at
 FROM course
 WHERE id = $1 AND deleted_at IS NULL AND (tenant_id = $2 OR visibility = 2);
 
 -- name: GetCourseByInviteCode :one
-SELECT id, tenant_id, teacher_id, name, description, type, difficulty, cover_url, semester, credits::float8 AS credits, schedule, start_at, end_at, invite_code, status, visibility, created_at, updated_at, deleted_at
+SELECT id, tenant_id, teacher_id, name, description, type, difficulty, cover_ref, semester, credits::float8 AS credits, schedule, start_at, end_at, invite_code, status, visibility, created_at, updated_at, deleted_at
 FROM course
 WHERE invite_code = $1 AND deleted_at IS NULL;
 
 -- name: ListTeacherCourses :many
-SELECT id, tenant_id, teacher_id, name, description, type, difficulty, cover_url, semester, credits::float8 AS credits, schedule, start_at, end_at, invite_code, status, visibility, created_at, updated_at, deleted_at
+SELECT id, tenant_id, teacher_id, name, description, type, difficulty, cover_ref, semester, credits::float8 AS credits, schedule, start_at, end_at, invite_code, status, visibility, created_at, updated_at, deleted_at
 FROM course
 WHERE tenant_id = $1 AND teacher_id = $2 AND deleted_at IS NULL AND ($3::smallint = 0 OR status = $3)
 ORDER BY updated_at DESC, id DESC
@@ -31,7 +31,7 @@ FROM course
 WHERE tenant_id = $1 AND teacher_id = $2 AND deleted_at IS NULL AND ($3::smallint = 0 OR status = $3);
 
 -- name: ListStudentCourses :many
-SELECT c.id, c.tenant_id, c.teacher_id, c.name, c.description, c.type, c.difficulty, c.cover_url, c.semester, c.credits::float8 AS credits, c.schedule, c.start_at, c.end_at, c.invite_code, c.status, c.visibility, c.created_at, c.updated_at, c.deleted_at
+SELECT c.id, c.tenant_id, c.teacher_id, c.name, c.description, c.type, c.difficulty, c.cover_ref, c.semester, c.credits::float8 AS credits, c.schedule, c.start_at, c.end_at, c.invite_code, c.status, c.visibility, c.created_at, c.updated_at, c.deleted_at
 FROM course c
 JOIN course_member m ON m.tenant_id = c.tenant_id AND m.course_id = c.id
 WHERE c.tenant_id = $1 AND m.student_id = $2 AND c.deleted_at IS NULL AND ($3::smallint = 0 OR c.status = $3)
@@ -50,7 +50,7 @@ SET name = $3,
     description = $4,
     type = $5,
     difficulty = $6,
-    cover_url = $7,
+    cover_ref = $7,
     semester = $8,
     credits = $9::text::numeric,
     schedule = $10,
@@ -58,25 +58,25 @@ SET name = $3,
     end_at = $12,
     updated_at = now()
 WHERE tenant_id = $1 AND id = $2 AND deleted_at IS NULL
-RETURNING id, tenant_id, teacher_id, name, description, type, difficulty, cover_url, semester, credits::float8 AS credits, schedule, start_at, end_at, invite_code, status, visibility, created_at, updated_at, deleted_at;
+RETURNING id, tenant_id, teacher_id, name, description, type, difficulty, cover_ref, semester, credits::float8 AS credits, schedule, start_at, end_at, invite_code, status, visibility, created_at, updated_at, deleted_at;
 
 -- name: SetCourseStatus :one
 UPDATE course
 SET status = $3, updated_at = now()
 WHERE tenant_id = $1 AND id = $2 AND deleted_at IS NULL
-RETURNING id, tenant_id, teacher_id, name, description, type, difficulty, cover_url, semester, credits::float8 AS credits, schedule, start_at, end_at, invite_code, status, visibility, created_at, updated_at, deleted_at;
+RETURNING id, tenant_id, teacher_id, name, description, type, difficulty, cover_ref, semester, credits::float8 AS credits, schedule, start_at, end_at, invite_code, status, visibility, created_at, updated_at, deleted_at;
 
 -- name: SetCourseVisibility :one
 UPDATE course
 SET visibility = $3, updated_at = now()
 WHERE tenant_id = $1 AND id = $2 AND deleted_at IS NULL
-RETURNING id, tenant_id, teacher_id, name, description, type, difficulty, cover_url, semester, credits::float8 AS credits, schedule, start_at, end_at, invite_code, status, visibility, created_at, updated_at, deleted_at;
+RETURNING id, tenant_id, teacher_id, name, description, type, difficulty, cover_ref, semester, credits::float8 AS credits, schedule, start_at, end_at, invite_code, status, visibility, created_at, updated_at, deleted_at;
 
 -- name: RefreshCourseInviteCode :one
 UPDATE course
 SET invite_code = $3, updated_at = now()
 WHERE tenant_id = $1 AND id = $2 AND deleted_at IS NULL
-RETURNING id, tenant_id, teacher_id, name, description, type, difficulty, cover_url, semester, credits::float8 AS credits, schedule, start_at, end_at, invite_code, status, visibility, created_at, updated_at, deleted_at;
+RETURNING id, tenant_id, teacher_id, name, description, type, difficulty, cover_ref, semester, credits::float8 AS credits, schedule, start_at, end_at, invite_code, status, visibility, created_at, updated_at, deleted_at;
 
 -- name: CountCourseLessons :one
 SELECT COUNT(*)::bigint
@@ -85,13 +85,13 @@ JOIN chapter c ON c.tenant_id = l.tenant_id AND c.id = l.chapter_id
 WHERE c.tenant_id = $1 AND c.course_id = $2 AND c.deleted_at IS NULL AND l.deleted_at IS NULL;
 
 -- name: ListCoursesDueToRun :many
-SELECT id, tenant_id, teacher_id, name, description, type, difficulty, cover_url, semester, credits::float8 AS credits, schedule, start_at, end_at, invite_code, status, visibility, created_at, updated_at, deleted_at
+SELECT id, tenant_id, teacher_id, name, description, type, difficulty, cover_ref, semester, credits::float8 AS credits, schedule, start_at, end_at, invite_code, status, visibility, created_at, updated_at, deleted_at
 FROM course
 WHERE deleted_at IS NULL AND status = 2 AND start_at <= $1
 ORDER BY start_at ASC, id ASC;
 
 -- name: ListCoursesDueToEnd :many
-SELECT id, tenant_id, teacher_id, name, description, type, difficulty, cover_url, semester, credits::float8 AS credits, schedule, start_at, end_at, invite_code, status, visibility, created_at, updated_at, deleted_at
+SELECT id, tenant_id, teacher_id, name, description, type, difficulty, cover_ref, semester, credits::float8 AS credits, schedule, start_at, end_at, invite_code, status, visibility, created_at, updated_at, deleted_at
 FROM course
 WHERE deleted_at IS NULL AND status IN (2, 3) AND end_at <= $1
 ORDER BY end_at ASC, id ASC;
@@ -100,7 +100,7 @@ ORDER BY end_at ASC, id ASC;
 UPDATE course
 SET deleted_at = now(), updated_at = now()
 WHERE tenant_id = $1 AND id = $2 AND status = 1 AND deleted_at IS NULL
-RETURNING id, tenant_id, teacher_id, name, description, type, difficulty, cover_url, semester, credits::float8 AS credits, schedule, start_at, end_at, invite_code, status, visibility, created_at, updated_at, deleted_at;
+RETURNING id, tenant_id, teacher_id, name, description, type, difficulty, cover_ref, semester, credits::float8 AS credits, schedule, start_at, end_at, invite_code, status, visibility, created_at, updated_at, deleted_at;
 
 -- name: CreateChapter :one
 INSERT INTO chapter (id, tenant_id, course_id, title, sort, created_at, updated_at, deleted_at)

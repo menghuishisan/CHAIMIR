@@ -72,7 +72,8 @@ func ValidateAccountStatusTransition(fromStatus, toStatus int16) error {
 	default:
 		return apperr.ErrIdentityAccountUpdateInvalid
 	}
-	if fromStatus == AccountStatusPending {
+	// 注销是不可逆的终态，待激活账号也必须能被管理员取消，避免遗留无法登录且无法清理的账号。
+	if fromStatus == AccountStatusPending && toStatus != AccountStatusCancelled {
 		return apperr.ErrIdentityAccountUpdateInvalid
 	}
 	if fromStatus == AccountStatusCancelled && toStatus != AccountStatusCancelled {

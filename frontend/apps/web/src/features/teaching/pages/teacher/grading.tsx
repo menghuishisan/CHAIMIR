@@ -327,9 +327,10 @@ function GradeSubmissionModal({ submission, onClose, onSaved, onError }: GradeSu
   const [working, setWorking] = useState(false)
 
   const submit = useCallback(async () => {
-    const value = Number(score)
-    if (!Number.isFinite(value) || value < 0) {
-      setFormError('分数需要是 0 或更大的数字')
+    const normalizedScore = score.trim()
+    const value = Number(normalizedScore)
+    if (normalizedScore === '' || !Number.isFinite(value) || value < 0) {
+      setFormError('请输入 0 或更大的评分')
       return
     }
     if (comment.trim() === '') {

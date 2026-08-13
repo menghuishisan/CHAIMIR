@@ -28,8 +28,10 @@ RUN if [ -n "${GO_MODULE_PROXY}" ]; then go env -w GOPROXY="${GO_MODULE_PROXY}";
         go.opentelemetry.io/otel/sdk@v1.43.0 \
         github.com/shamaton/msgpack/v2@v2.4.1 \
         github.com/bytedance/sonic@v1.15.0 \
-        golang.org/x/crypto@v0.52.0 \
-        golang.org/x/net@v0.55.0 \
+        golang.org/x/crypto@v0.53.0 \
+        golang.org/x/net@v0.56.0 \
+        golang.org/x/text@v0.39.0 \
+        google.golang.org/grpc@v1.82.1 \
     && go mod tidy \
     && CGO_CFLAGS="-D__BLST_PORTABLE__" go build -trimpath -tags "netgo" -ldflags "-s -w" -o /out/gaiad ./cmd/gaiad \
     && find /go/pkg/mod -name "libwasmvm.x86_64.so" -type f -print -exec cp {} /out/libwasmvm.x86_64.so \;

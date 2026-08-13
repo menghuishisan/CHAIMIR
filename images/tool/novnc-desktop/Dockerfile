@@ -8,7 +8,7 @@ RUN apk add --no-cache \
         bash \
         ca-certificates \
         fluxbox \
-        nginx \
+        nginx=1.28.3-r7 \
         openbox \
         supervisor \
         tini \

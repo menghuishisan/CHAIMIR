@@ -6,7 +6,7 @@ CREATE TABLE IF NOT EXISTS course (
     description TEXT NOT NULL DEFAULT '',
     type SMALLINT NOT NULL CHECK (type IN (1, 2, 3, 4)),
     difficulty SMALLINT NOT NULL CHECK (difficulty IN (1, 2, 3, 4)),
-    cover_url VARCHAR(255),
+    cover_ref VARCHAR(255),
     semester VARCHAR(32) NOT NULL,
     credits NUMERIC(3,1) NOT NULL CHECK (credits >= 0),
     schedule JSONB NOT NULL DEFAULT '[]'::jsonb,

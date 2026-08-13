@@ -26,6 +26,7 @@ import type {
   ReviewApplicationRequest,
   UpdateTenantStatusRequest,
   TenantConfigRequest,
+  TenantBrand,
   SSOConfig,
   SSOConfigRequest,
   LDAPLoginRequest,
@@ -457,6 +458,35 @@ export class IdentityApi {
    */
   async updateTenantConfig(data: TenantConfigRequest): Promise<Tenant> {
     return this.client.patch('/tenant/config', data)
+  }
+
+  /**
+   * 上传校徽,上传即生效并返回更新后的学校配置。
+   * 不需要再提交一次引用:学校管理员上传时学校一定已存在,没有「对象先于记录」的时序问题,
+   * 而两步提交一旦被放弃就会留下没有引用者的对象。
+   */
+  async uploadTenantLogo(
+    file: File,
+    onProgress?: (progress: number) => void
+  ): Promise<Tenant> {
+    const formData = new FormData()
+    formData.append('file', file)
+    return this.client.postFormData('/tenant/logo', formData, onProgress)
+  }
+
+  /**
+   * 移除校徽,徽记位回落学校名首字。
+   */
+  async clearTenantLogo(): Promise<Tenant> {
+    return this.client.delete('/tenant/logo')
+  }
+
+  /**
+   * 读取学校品牌,供登录页在没有会话时显示学校名与校徽。
+   * 不接受任何学校标识参数:平台托管部署返回空品牌,只有学校私有部署才有内容。
+   */
+  async getTenantBrand(): Promise<TenantBrand> {
+    return this.client.get('/tenant/brand')
   }
 
   /**

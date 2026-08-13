@@ -20,7 +20,7 @@ func ToTenantDTO(t Tenant) TenantDTO {
 		Status:               t.Status,
 		DeployMode:           t.DeployMode,
 		ExpireAt:             t.ExpireAt,
-		LogoURL:              t.LogoURL,
+		LogoRef:              t.LogoRef,
 		DisplayName:          t.DisplayName,
 		FeatureFlags:         jsonx.ObjectMap(t.FeatureFlags),
 		AuthMode:             t.AuthMode,

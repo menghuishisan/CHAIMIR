@@ -276,6 +276,11 @@ func validatePublishResult(result ValidationResultDTO) error {
 	return nil
 }
 
+// hasExecutableComponent 判断实验发布是否至少编排了一个可执行组件。
+func hasExecutableComponent(cfg ComponentConfig) bool {
+	return len(cfg.Envs) > 0 || len(cfg.Sims) > 0 || len(cfg.Checkpoints) > 0
+}
+
 // validateInstanceStart 校验发起实例的定义状态与小组参数。
 func validateInstanceStart(exp Experiment, groupID int64) error {
 	if exp.Status != ExperimentStatusPublished {

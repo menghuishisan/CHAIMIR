@@ -21,6 +21,9 @@ RUN apk upgrade --no-cache \
         "setuptools>=80.0.0" \
         "wheel>=0.46.0" \
         "slither-analyzer==0.11.3" \
+        "aiohttp>=3.14.3" \
+    && rm -rf /opt/slither/lib/python3.12/site-packages/pip /opt/slither/lib/python3.12/site-packages/pip-*.dist-info \
+    && apk del py3-pip \
     && ln -s /opt/slither/bin/slither /usr/local/bin/slither \
     && slither --version >/dev/null \
     && solc --version >/dev/null \

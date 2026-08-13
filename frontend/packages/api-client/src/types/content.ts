@@ -41,7 +41,7 @@ export interface CreateItemRequest {
   version: string
   type: ContentType
   title: string
-  category_id: SnowflakeID
+  category_id?: SnowflakeID
   difficulty: ContentDifficulty
   tags: string[]
   knowledge_points: string[]
@@ -52,7 +52,7 @@ export interface CreateItemRequest {
 
 export interface UpdateItemRequest {
   title: string
-  category_id: SnowflakeID
+  category_id?: SnowflakeID
   difficulty: ContentDifficulty
   tags: string[]
   knowledge_points: string[]

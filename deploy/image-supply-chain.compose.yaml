@@ -9,9 +9,15 @@ services:
     environment:
       DOCKER_CONFIG: /docker-config
       SSL_CERT_FILE: /registry-ca/ca.crt
-      HTTP_PROXY: ${HTTP_PROXY:-}
-      HTTPS_PROXY: ${HTTPS_PROXY:-}
-      NO_PROXY: ${NO_PROXY:-}
+      HTTP_PROXY: ${SUPPLY_CHAIN_HTTP_PROXY:-}
+      HTTPS_PROXY: ${SUPPLY_CHAIN_HTTPS_PROXY:-}
+      NO_PROXY: ${SUPPLY_CHAIN_NO_PROXY:-}
+      # OCI 客户端对代理环境变量的大小写支持并不一致；统一从同一配置注入。
+      http_proxy: ${SUPPLY_CHAIN_HTTP_PROXY:-}
+      https_proxy: ${SUPPLY_CHAIN_HTTPS_PROXY:-}
+      no_proxy: ${SUPPLY_CHAIN_NO_PROXY:-}
+      TRIVY_DB_REPOSITORY: ${SUPPLY_CHAIN_TRIVY_DB_REPOSITORY:-ghcr.io/aquasecurity/trivy-db:2}
+      TRIVY_JAVA_DB_REPOSITORY: ${SUPPLY_CHAIN_TRIVY_JAVA_DB_REPOSITORY:-ghcr.io/aquasecurity/trivy-java-db:1}
     volumes:
       - type: bind
         source: ${SUPPLY_CHAIN_REPO_HOST_PATH:?SUPPLY_CHAIN_REPO_HOST_PATH is required}
@@ -47,9 +53,12 @@ services:
       COSIGN_PASSWORD: ${COSIGN_PRIVATE_KEY_PASSWORD:-}
       DOCKER_CONFIG: /docker-config
       SSL_CERT_FILE: /registry-ca/ca.crt
-      HTTP_PROXY: ${HTTP_PROXY:-}
-      HTTPS_PROXY: ${HTTPS_PROXY:-}
-      NO_PROXY: ${NO_PROXY:-}
+      HTTP_PROXY: ${SUPPLY_CHAIN_HTTP_PROXY:-}
+      HTTPS_PROXY: ${SUPPLY_CHAIN_HTTPS_PROXY:-}
+      NO_PROXY: ${SUPPLY_CHAIN_NO_PROXY:-}
+      http_proxy: ${SUPPLY_CHAIN_HTTP_PROXY:-}
+      https_proxy: ${SUPPLY_CHAIN_HTTPS_PROXY:-}
+      no_proxy: ${SUPPLY_CHAIN_NO_PROXY:-}
     volumes:
       - type: bind
         source: ${SUPPLY_CHAIN_REPO_HOST_PATH:?SUPPLY_CHAIN_REPO_HOST_PATH is required}
@@ -87,9 +96,12 @@ services:
       SUPPLY_CHAIN_HARBOR_NAMESPACE: ${SUPPLY_CHAIN_HARBOR_NAMESPACE:?SUPPLY_CHAIN_HARBOR_NAMESPACE is required}
       SUPPLY_CHAIN_HARBOR_VALUES_PATH: ${SUPPLY_CHAIN_HARBOR_VALUES_PATH:?SUPPLY_CHAIN_HARBOR_VALUES_PATH is required}
       SUPPLY_CHAIN_HARBOR_EXTERNAL_URL: ${SUPPLY_CHAIN_HARBOR_EXTERNAL_URL:?SUPPLY_CHAIN_HARBOR_EXTERNAL_URL is required}
-      HTTP_PROXY: ${HTTP_PROXY:-}
-      HTTPS_PROXY: ${HTTPS_PROXY:-}
-      NO_PROXY: ${NO_PROXY:-}
+      HTTP_PROXY: ${SUPPLY_CHAIN_HTTP_PROXY:-}
+      HTTPS_PROXY: ${SUPPLY_CHAIN_HTTPS_PROXY:-}
+      NO_PROXY: ${SUPPLY_CHAIN_NO_PROXY:-}
+      http_proxy: ${SUPPLY_CHAIN_HTTP_PROXY:-}
+      https_proxy: ${SUPPLY_CHAIN_HTTPS_PROXY:-}
+      no_proxy: ${SUPPLY_CHAIN_NO_PROXY:-}
     volumes:
       - type: bind
         source: ${SUPPLY_CHAIN_REPO_HOST_PATH:?SUPPLY_CHAIN_REPO_HOST_PATH is required}

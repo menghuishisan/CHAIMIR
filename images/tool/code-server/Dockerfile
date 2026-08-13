@@ -5,15 +5,18 @@ FROM node:22-trixie-slim@sha256:4228fca437e45714a3ebd1d4ecd1dcc583cf79f5a940aa02
 COPY --from=upstream /usr/lib/code-server /usr/lib/code-server
 COPY --from=upstream /usr/bin/code-server /usr/bin/code-server
 RUN npm --prefix /usr/lib/code-server install --omit=dev --ignore-scripts --package-lock=false --no-audit --no-fund \
-        basic-ftp@5.3.1 \
+    basic-ftp@5.3.1 \
+        adm-zip@0.6.0 \
         minimatch@3.1.4 \
         path-to-regexp@8.4.0 \
-        tar@7.5.11 \
+        tar@7.5.19 \
         ws@8.21.0 \
     && npm --prefix /usr/lib/code-server/lib/vscode install --omit=dev --ignore-scripts --package-lock=false --no-audit --no-fund \
         picomatch@4.0.4 \
         tar-fs@2.1.4 \
-        undici@7.28.0 \
+        undici@7.29.0 \
+    && npm --prefix /usr/lib/code-server/lib/vscode/node_modules/@github/copilot-linux-x64/foundry-local-sdk/node_modules/foundry-local-sdk \
+        install --omit=dev --ignore-scripts --package-lock=false --no-audit --no-fund adm-zip@0.6.0 \
     && test -x /usr/lib/code-server/bin/code-server
 
 FROM cgr.dev/chainguard/wolfi-base@sha256:02dab76bd852a70556b5b2002195c8a5fdab77d323c433bf6642aab080489795
@@ -22,7 +25,7 @@ LABEL org.opencontainers.image.title="tool/code-server"
 LABEL org.opencontainers.image.description="Chaimir code-server web IDE image"
 
 RUN --mount=type=cache,target=/var/cache/apk,sharing=locked \
-    packages='bash=5.3-r12 ca-certificates=20260413-r0 git=2.55.0-r3 git-lfs=3.7.1-r17 openssh-client=10.4_p1-r1 nodejs-24=24.18.0-r2 npm=12.0.1-r0' \
+    packages='bash=5.3-r12 ca-certificates=20260413-r0 git=2.55.0-r3 git-lfs=3.7.1-r18 openssh-client=10.4_p1-r1 nodejs-24=24.18.0-r2 npm=12.0.1-r2' \
     && for attempt in 1 2 3 4 5 6 7 8; do \
         apk add --cache-dir /var/cache/apk --update-cache ${packages} && break; \
         if [ "${attempt}" -eq 8 ]; then exit 1; fi; \

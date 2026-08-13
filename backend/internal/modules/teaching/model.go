@@ -14,7 +14,7 @@ type Course struct {
 	Description string
 	Type        int16
 	Difficulty  int16
-	CoverURL    string
+	CoverRef    string
 	Semester    string
 	Credits     float64
 	Schedule    map[string]any

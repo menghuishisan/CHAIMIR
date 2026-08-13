@@ -150,9 +150,14 @@ func (s *Service) AddProblem(ctx context.Context, contestID int64, req ProblemRe
 		return ProblemDTO{}, err
 	}
 	var contest Contest
+	var existingProblems []ContestProblem
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
 		var err error
 		contest, err = s.loadContestForManage(ctx, tx, id.TenantID, id.AccountID, contestID)
+		if err != nil {
+			return err
+		}
+		existingProblems, err = tx.ListContestProblems(ctx, id.TenantID, contestID)
 		return err
 	}); err != nil {
 		return ProblemDTO{}, err
@@ -160,6 +165,11 @@ func (s *Service) AddProblem(ctx context.Context, contestID int64, req ProblemRe
 	req, err = validateProblemRequest(req, contest.Mode)
 	if err != nil {
 		return ProblemDTO{}, err
+	}
+	for _, existing := range existingProblems {
+		if existing.ItemCode == req.ItemCode && existing.ItemVersion == req.ItemVersion && existing.Seq != req.Seq {
+			return ProblemDTO{}, apperr.ErrContestProblemInvalid
+		}
 	}
 	if _, err := s.content.GetContentFace(ctx, id.TenantID, contracts.ContentItemRef{ItemCode: req.ItemCode, ItemVersion: req.ItemVersion}); err != nil {
 		return ProblemDTO{}, apperr.ErrContestContentUnavailable.WithCause(err)

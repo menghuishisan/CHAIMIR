@@ -5,8 +5,8 @@ LABEL org.opencontainers.image.title="infra/bridge-relayer"
 LABEL org.opencontainers.image.description="Chaimir Hyperlane bridge relayer image"
 
 USER root
-RUN apt-get update \
-    && apt-get upgrade -y --no-install-recommends \
+RUN apt-get -o Acquire::Retries=5 update \
+    && apt-get -o Acquire::Retries=5 upgrade -y --no-install-recommends \
     && groupadd --gid 1000 chaimir \
     && useradd --uid 1000 --gid 1000 --home-dir /workspace --create-home --shell /usr/sbin/nologin chaimir \
     && mkdir -p /workspace /runtime-state /hyperlane-config \

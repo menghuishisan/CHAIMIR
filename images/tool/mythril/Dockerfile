@@ -6,7 +6,7 @@ ARG SOLC_PATH=solc-linux-amd64-v0.8.26+commit.8a97fa7a
 ARG SOLC_SHA256=d5f23436f443edb85d8e76906d12f0a86ce0490e7663a9e608efeb7a93f149ef
 
 RUN --mount=type=cache,target=/var/cache/apk,sharing=locked \
-    packages='ca-certificates gcc git libstdc++ make python-3.10 python-3.10-dev py3.10-pip' \
+    packages='ca-certificates gcc git libstdc++ make python-3.10=3.10.20-r10 python-3.10-dev py3.10-pip' \
     && for attempt in 1 2 3 4 5 6 7 8; do \
         apk add --cache-dir /var/cache/apk --update-cache ${packages} && break; \
         if [ "${attempt}" -eq 8 ]; then exit 1; fi; \
@@ -18,7 +18,7 @@ RUN --mount=type=cache,target=/var/cache/apk,sharing=locked \
         "mythril==0.24.8" \
         "setuptools==80.9.0" \
         "urllib3>=2.6.0" \
-        "cryptography>=46.0.0" \
+        "cryptography>=50.0.0" \
         "requests>=2.32.5" \
     && rm -rf \
         /opt/mythril/lib/python3.10/site-packages/setuptools/_vendor/wheel \
@@ -37,13 +37,14 @@ LABEL org.opencontainers.image.description="Chaimir Mythril symbolic execution t
 
 ADD https://binaries.soliditylang.org/linux-amd64/${SOLC_PATH} /usr/local/bin/solc-${SOLC_VERSION}
 RUN --mount=type=cache,target=/var/cache/apk,sharing=locked \
-    packages='ca-certificates libstdc++ python-3.10' \
+    packages='ca-certificates libstdc++ python-3.10=3.10.20-r10' \
     && for attempt in 1 2 3 4 5 6 7 8; do \
         apk add --cache-dir /var/cache/apk --update-cache ${packages} && break; \
         if [ "${attempt}" -eq 8 ]; then exit 1; fi; \
         sleep $((attempt * 3)); \
     done
 COPY --from=build /opt/mythril /opt/mythril
+RUN rm -rf /opt/mythril/lib/python3.10/site-packages/pip /opt/mythril/lib/python3.10/site-packages/pip-*.dist-info /opt/mythril/lib/python3.10/site-packages/setuptools-*.dist-info
 RUN addgroup -g 1000 chaimir \
     && adduser -D -u 1000 -G chaimir -h /workspace -s /sbin/nologin chaimir \
     && mkdir -p /usr/local/bin /opt/solcx \

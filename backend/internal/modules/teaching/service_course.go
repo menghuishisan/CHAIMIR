@@ -67,11 +67,19 @@ func (s *Service) CreateCourse(ctx context.Context, req CourseRequest) (CourseDT
 	if err != nil {
 		return CourseDTO{}, err
 	}
-	course := Course{ID: s.ids.Generate(), TenantID: id.TenantID, TeacherID: id.AccountID, Name: req.Name, Description: req.Description, Type: req.Type, Difficulty: req.Difficulty, CoverURL: req.CoverURL, Semester: req.Semester, Credits: req.Credits, Schedule: req.Schedule, StartAt: startAt, EndAt: endAt, InviteCode: inviteCode, Status: CourseStatusDraft, Visibility: CourseVisibilityPrivate}
+	courseID := s.ids.Generate()
+	// 封面先搬到这门课的正式位再落库:课程 id 此刻已生成,不需要等记录写完。
+	coverRef, err := s.promoteCourseCover(ctx, id.TenantID, id.AccountID, courseID, req.CoverRef, "")
+	if err != nil {
+		return CourseDTO{}, err
+	}
+	course := Course{ID: courseID, TenantID: id.TenantID, TeacherID: id.AccountID, Name: req.Name, Description: req.Description, Type: req.Type, Difficulty: req.Difficulty, CoverRef: coverRef, Semester: req.Semester, Credits: req.Credits, Schedule: req.Schedule, StartAt: startAt, EndAt: endAt, InviteCode: inviteCode, Status: CourseStatusDraft, Visibility: CourseVisibilityPrivate}
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
 		course, err = tx.CreateCourse(ctx, course)
 		return err
 	}); err != nil {
+		// 课程没建成,刚搬过来的封面就没有引用者,立即清掉。
+		s.discardCourseCoverObject(ctx, id.TenantID, id.AccountID, coverRef)
 		return CourseDTO{}, mapCourseError(err)
 	}
 	if err := s.writeAudit(ctx, id.TenantID, id.AccountID, contracts.RoleNumTeacher, "teaching.course.create", auditTargetCourse, course.ID, map[string]any{"name": course.Name}); err != nil {
@@ -90,6 +98,25 @@ func (s *Service) UpdateCourse(ctx context.Context, courseID int64, req CourseRe
 	if err != nil {
 		return CourseDTO{}, err
 	}
+	// 先读一次当前封面:搬对象是 IO,必须在事务外完成,而是否需要搬取决于引用有没有变。
+	var existing Course
+	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
+		current, err := tx.GetCourse(ctx, id.TenantID, courseID)
+		if err != nil {
+			return err
+		}
+		if err := ensureTeacherOwned(current, id.AccountID); err != nil {
+			return err
+		}
+		existing = current
+		return nil
+	}); err != nil {
+		return CourseDTO{}, mapCourseError(err)
+	}
+	coverRef, err := s.promoteCourseCover(ctx, id.TenantID, id.AccountID, courseID, req.CoverRef, existing.CoverRef)
+	if err != nil {
+		return CourseDTO{}, err
+	}
 	var course Course
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
 		current, err := tx.GetCourse(ctx, id.TenantID, courseID)
@@ -99,11 +126,18 @@ func (s *Service) UpdateCourse(ctx context.Context, courseID int64, req CourseRe
 		if err := ensureTeacherOwned(current, id.AccountID); err != nil {
 			return err
 		}
-		current.Name, current.Description, current.Type, current.Difficulty, current.CoverURL, current.Semester, current.Credits, current.Schedule, current.StartAt, current.EndAt = req.Name, req.Description, req.Type, req.Difficulty, req.CoverURL, req.Semester, req.Credits, req.Schedule, startAt, endAt
+		current.Name, current.Description, current.Type, current.Difficulty, current.CoverRef, current.Semester, current.Credits, current.Schedule, current.StartAt, current.EndAt = req.Name, req.Description, req.Type, req.Difficulty, coverRef, req.Semester, req.Credits, req.Schedule, startAt, endAt
 		course, err = tx.UpdateCourse(ctx, current)
 		return err
 	}); err != nil {
+		if coverRef != existing.CoverRef {
+			s.discardCourseCoverObject(ctx, id.TenantID, id.AccountID, coverRef)
+		}
 		return CourseDTO{}, mapCourseError(err)
+	}
+	// 换封面后旧对象没有任何引用者(克隆不继承封面,一个对象只被一门课引用),留着只会堆积。
+	if existing.CoverRef != course.CoverRef {
+		s.discardCourseCoverObject(ctx, id.TenantID, id.AccountID, existing.CoverRef)
 	}
 	return courseDTO(course)
 }
@@ -325,15 +359,17 @@ func (s *Service) cloneCourseGraph(ctx context.Context, tx TxStore, source Cours
 		Description: source.Description,
 		Type:        source.Type,
 		Difficulty:  source.Difficulty,
-		CoverURL:    source.CoverURL,
-		Semester:    source.Semester,
-		Credits:     source.Credits,
-		Schedule:    nil,
-		StartAt:     source.StartAt,
-		EndAt:       source.EndAt,
-		InviteCode:  inviteCode,
-		Status:      CourseStatusDraft,
-		Visibility:  CourseVisibilityPrivate,
+		// 克隆不继承封面:封面对象落在原作者的受控前缀下,跨租户克隆时目标租户拿不到投放授权;
+		// 而共用同一对象又会让任一方换封面时删掉另一方仍在用的图。克隆后由新作者自己上传。
+		CoverRef:   "",
+		Semester:   source.Semester,
+		Credits:    source.Credits,
+		Schedule:   nil,
+		StartAt:    source.StartAt,
+		EndAt:      source.EndAt,
+		InviteCode: inviteCode,
+		Status:     CourseStatusDraft,
+		Visibility: CourseVisibilityPrivate,
 	}
 	schedule, err := cloneMap(source.Schedule)
 	if err != nil {

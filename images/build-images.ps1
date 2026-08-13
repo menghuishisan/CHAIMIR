@@ -2,6 +2,7 @@
 param(
     [string]$Root = (Split-Path -Parent $MyInvocation.MyCommand.Path),
     [string]$Registry = $env:CHAIMIR_IMAGE_REGISTRY,
+    [string]$RegistryEndpoint = $env:SUPPLY_CHAIN_REGISTRY_ENDPOINT,
     [string]$DockerConfig = $env:DOCKER_CONFIG,
     [string]$DigestLock = "",
     [string]$DigestLockOut = "",
@@ -9,6 +10,7 @@ param(
     [string[]]$Images = @(),
     [string]$Platform = "linux/amd64",
     [string]$BuildxBuilder = $env:BUILDX_BUILDER,
+    [string]$BuildNetwork = $env:SUPPLY_CHAIN_BUILD_NETWORK,
     [int]$MaxAttempts = 3,
     [int]$RetryDelaySeconds = 10,
     [switch]$Push,
@@ -28,6 +30,9 @@ if ([string]::IsNullOrWhiteSpace($Registry)) {
 }
 if ([string]::IsNullOrWhiteSpace($Registry)) {
     $Registry = "registry.chaimir.io"
+}
+if ([string]::IsNullOrWhiteSpace($RegistryEndpoint)) {
+    $RegistryEndpoint = $Registry
 }
 if ([string]::IsNullOrWhiteSpace($DigestLock)) {
     $DigestLock = Join-Path $Root "image-digests.lock"
@@ -55,7 +60,7 @@ function Get-LockedRef {
     if ([string]::IsNullOrWhiteSpace($digest)) {
         throw "digest 锁缺少 $Image,无法构建依赖它的镜像"
     }
-    return "$Registry/$Image@$digest"
+    return "$RegistryEndpoint/$Image@$digest"
 }
 
 # Get-PinnedUpstreamRef 从 manifest 读取上游镜像与 digest,拒绝可变或不完整的运行基座。
@@ -141,6 +146,15 @@ function Get-RemoteDigestFromRegistryV2 {
     $repository = $Matches[2]
     $tag = $Matches[3]
     $scheme = "https"
+    $registryEndpointForRequest = $RegistryEndpoint
+    if ([string]::IsNullOrWhiteSpace($registryEndpointForRequest)) {
+        $registryEndpointForRequest = $registryHost
+    }
+    if ($registryEndpointForRequest -match "^https?://") {
+        $registryBaseUri = $registryEndpointForRequest.TrimEnd('/')
+    } else {
+        $registryBaseUri = "$scheme`://$($registryEndpointForRequest.TrimEnd('/'))"
+    }
     $headers = @{
         Accept = "application/vnd.oci.image.index.v1+json, application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json"
     }
@@ -149,7 +163,7 @@ function Get-RemoteDigestFromRegistryV2 {
         $headers["Authorization"] = "Basic $basicAuth"
     }
     try {
-        $response = Invoke-WebRequest -UseBasicParsing -Method Head -Uri "$scheme`://$registryHost/v2/$repository/manifests/$tag" -Headers $headers -TimeoutSec 30
+        $response = Invoke-WebRequest -UseBasicParsing -Method Head -Uri "$registryBaseUri/v2/$repository/manifests/$tag" -Headers $headers -TimeoutSec 30
         $digest = $response.Headers["Docker-Content-Digest"]
         if ($digest -match "^sha256:[0-9a-f]{64}$") {
             return $digest
@@ -327,7 +341,7 @@ foreach ($manifest in $manifests) {
         Dockerfile = $dockerfilePath
         DockerfileText = $dockerfileText
         Dependencies = $dependencies.ToArray()
-        Ref = "$Registry/$image`:$Tag"
+        Ref = "$RegistryEndpoint/$image`:$Tag"
     })
 }
 
@@ -363,6 +377,10 @@ foreach ($item in $selected) {
             $args += @("--builder", $BuildxBuilder)
         }
         $args += @("--platform", $Platform, "--push", "--provenance=false", "--sbom=false", "-f", $item.Dockerfile, "-t", $item.Ref)
+        if ($RegistryEndpoint -match ":\d+$") {
+            $registryHost = ($RegistryEndpoint -replace "^https?://", "").Split("/")[0].Split(":")[0]
+            $args += @("--add-host", "$registryHost`:host-gateway")
+        }
     } else {
         $args = @("build", "-f", $item.Dockerfile, "-t", $item.Ref)
     }
@@ -385,10 +403,20 @@ foreach ($item in $selected) {
     foreach ($key in $buildArguments.Keys | Sort-Object) {
         $args += @("--build-arg", "$key=$($buildArguments[$key])")
     }
-    foreach ($proxyKey in @("HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY")) {
-        if (-not [string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($proxyKey))) {
-            $args += @("--build-arg", $proxyKey)
+    if ($BuildNetwork -ne "host") {
+        $proxyBuildArgs = @{
+            HTTP_PROXY  = $env:SUPPLY_CHAIN_HTTP_PROXY
+            HTTPS_PROXY = $env:SUPPLY_CHAIN_HTTPS_PROXY
+            NO_PROXY    = $env:SUPPLY_CHAIN_NO_PROXY
         }
+        foreach ($proxyKey in $proxyBuildArgs.Keys) {
+            if (-not [string]::IsNullOrWhiteSpace($proxyBuildArgs[$proxyKey])) {
+                $args += @("--build-arg", "$proxyKey=$($proxyBuildArgs[$proxyKey])")
+            }
+        }
+    }
+    if (-not [string]::IsNullOrWhiteSpace($BuildNetwork)) {
+        $args += @("--network", $BuildNetwork)
     }
     if ($Pull) {
         foreach ($baseRef in Get-DockerfileBaseRefs -DockerfileText $item.DockerfileText -BuildArguments $buildArguments) {
@@ -410,7 +438,7 @@ foreach ($item in $selected) {
 }
 
 if ($Push) {
-    Write-Host "Built and pushed $($selected.Count) image(s). registry=$Registry tag=$Tag digestLock=$DigestLockOut"
+    Write-Host "Built and pushed $($selected.Count) image(s). registry=$Registry registry_endpoint=$RegistryEndpoint tag=$Tag digestLock=$DigestLockOut"
 } else {
     Write-Host "Built $($selected.Count) image(s). registry=$Registry tag=$Tag"
 }

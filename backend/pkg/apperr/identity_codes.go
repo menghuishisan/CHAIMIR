@@ -103,6 +103,12 @@ const (
 	CodeIdentityBootstrapInvalid = "13020"
 	// CodeIdentityRouteDependencyMissing 表示身份模块 HTTP 路由装配缺少必要依赖。
 	CodeIdentityRouteDependencyMissing = "13021"
+	// CodeIdentityTenantLogoInvalid 表示校徽文件类型或内容不是受支持的图片。
+	CodeIdentityTenantLogoInvalid = "13022"
+	// CodeIdentityTenantLogoTooLarge 表示校徽文件超过上传大小上限。
+	CodeIdentityTenantLogoTooLarge = "13023"
+	// CodeIdentityTenantLogoUnavailable 表示已登记的校徽暂时读不出来。
+	CodeIdentityTenantLogoUnavailable = "13024"
 )
 
 const (
@@ -228,6 +234,12 @@ var (
 	ErrIdentityBootstrapInvalid = New(CodeIdentityBootstrapInvalid, "初始化学校信息不完整,请检查配置")
 	// ErrIdentityRouteDependencyMissing 表示身份模块 HTTP 路由装配缺少必要依赖。
 	ErrIdentityRouteDependencyMissing = New(CodeIdentityRouteDependencyMissing, "服务暂时不可用,请稍后重试")
+	// ErrIdentityTenantLogoInvalid 表示校徽不是受支持的图片格式。
+	ErrIdentityTenantLogoInvalid = New(CodeIdentityTenantLogoInvalid, "校徽请用 JPG、PNG 或 WEBP 图片")
+	// ErrIdentityTenantLogoTooLarge 表示校徽文件超过上传上限。
+	ErrIdentityTenantLogoTooLarge = New(CodeIdentityTenantLogoTooLarge, "校徽图片太大了,请换一张小一些的")
+	// ErrIdentityTenantLogoUnavailable 表示校徽暂时读不出来。
+	ErrIdentityTenantLogoUnavailable = New(CodeIdentityTenantLogoUnavailable, "校徽暂时显示不出来,请稍后重试")
 )
 
 var (

@@ -118,16 +118,17 @@ func encodeImportXLSX(records [][]string) ([]byte, error) {
 }
 
 type importRow struct {
-	Line            int    `json:"line"`
-	Phone           string `json:"phone"`
-	Name            string `json:"name"`
-	No              string `json:"no"`
-	OrgID           ids.ID `json:"org_id"`
-	BaseIdentity    int16  `json:"base_identity"`
-	EnrollmentYear  int16  `json:"enrollment_year,omitempty"`
-	Title           string `json:"title,omitempty"`
-	InitialPassword string `json:"initial_password,omitempty"`
-	Error           string `json:"error,omitempty"`
+	Line  int    `json:"line"`
+	Phone string `json:"phone"`
+	Name  string `json:"name"`
+	No    string `json:"no"`
+	// OrgID 允许为空,这样组织 ID 无效的错误行仍可持久化为预览结果。
+	OrgID           *ids.ID `json:"org_id,omitempty"`
+	BaseIdentity    int16   `json:"base_identity"`
+	EnrollmentYear  int16   `json:"enrollment_year,omitempty"`
+	Title           string  `json:"title,omitempty"`
+	InitialPassword string  `json:"initial_password,omitempty"`
+	Error           string  `json:"error,omitempty"`
 }
 
 // PreviewAccountImport 解析上传文件并把预览行和校验结果持久化到 import_preview。
@@ -387,6 +388,9 @@ func (s *Service) applyAccountImportOpeningRules(ctx context.Context, tenantID i
 
 // accountImportOrgExists 校验导入账号挂靠的组织类型,教师挂院系,学生挂班级。
 func accountImportOrgExists(ctx context.Context, tx TxStore, tenantID int64, row importRow) (bool, error) {
+	if row.OrgID == nil {
+		return false, nil
+	}
 	err := validateAccountOrgForProfile(ctx, tx, tenantID, row.BaseIdentity, row.OrgID.Int64(), row.EnrollmentYear)
 	if err == nil {
 		return true, nil
@@ -484,8 +488,11 @@ func (s *Service) parseImportRecords(records [][]string, targetType int16) ([]im
 			row.Name = strings.TrimSpace(record[1])
 			row.No = strings.TrimSpace(record[2])
 			orgID, scanErr := strconv.ParseInt(strings.TrimSpace(record[3]), 10, 64)
-			row.OrgID = ids.ID(orgID)
-			if scanErr != nil || row.OrgID <= 0 {
+			if scanErr == nil && orgID > 0 {
+				parsedOrgID := ids.ID(orgID)
+				row.OrgID = &parsedOrgID
+			}
+			if scanErr != nil || row.OrgID == nil {
 				row.Error = "组织 ID 不正确"
 			}
 			if err := ValidatePhone(row.Phone); err != nil && row.Error == "" {

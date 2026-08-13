@@ -1,6 +1,6 @@
 # Chaimir 镜像层
 
-本目录是 Chaimir 全量镜像治理目录。这里不按后端模块划分,而按镜像职责划分:`service`、`runtime`、`infra`、`tool`、`judger`、`sim`、`sidecar`、`init`、`base`、`middleware`、`observability`、`ingress`。
+本目录是 Chaimir 全量镜像治理目录。这里不按后端模块划分,而按镜像职责划分:`service`、`runtime`、`infra`、`tool`、`judger`、`sim`、`sidecar`、`init`、`base`、`middleware`、`observability`、`ingress`、`network`。
 
 ## 维护原则
 
@@ -71,12 +71,12 @@ powershell -NoProfile -ExecutionPolicy Bypass -File images/pull-images.ps1 `
   -DigestLock .tmp/backend-functional-test/evidence/candidate-image-digests.lock
 ```
 
-拉回后的镜像必须经过统一 Trivy 配置的 HIGH/CRITICAL 阻断扫描、CycloneDX SBOM 生成、Cosign 镜像签名、SBOM 证明和双重验证。只有全部镜像通过后,候选锁才能晋升为正式 `images/image-digests.lock` 或生成 `SANDBOX_IMAGE_ATTESTATIONS_JSON`。平台构建镜像只允许通过 `images/build-images.ps1 -Push` 推送并生成候选锁,拉取脚本不承担构建产物发布职责。
+拉回后的镜像必须经过统一 Trivy 配置的 HIGH/CRITICAL 阻断扫描、CycloneDX SBOM 生成、Cosign 镜像签名、SBOM 证明和双重验证。只有全部镜像通过后,候选锁才能晋升为正式 `images/image-digests.lock` 或生成 `PLATFORM_IMAGE_ATTESTATIONS_JSON`。平台构建镜像只允许通过 `images/build-images.ps1 -Push` 推送并生成候选锁,拉取脚本不承担构建产物发布职责。
 
 无需密钥的静态门禁统一运行 `images/validate-image-metadata.ps1`:它校验目录/category/name、Dockerfile/构建路径、不可变基础镜像和正式锁现有条目,但不会把尚待流水线首次晋升的新镜像误判为失败。
 
 项目清理只按 `docs/总-镜像与容器设计.md` 的“项目级 Docker 清理边界”执行。常规清理不得删除正式锁在本机的最后 digest 引用、Harbor PVC、Trivy 缓存、认证、Cosign 密钥或尚未晋升的证据,也不得对整台宿主机执行全局 prune。
 
-`SANDBOX_IMAGE_ATTESTATIONS_JSON` 是环境相关的准入证明,由 `deploy/scripts/image-attestations-generate.ps1` 在目标 registry 完成扫描、签名和验签后写入运行环境或 Secret,不能仅凭新 digest 在仓库中伪造。仓库自动同步只更新可审计的 digest 权威文件与静态引用。
+`PLATFORM_IMAGE_ATTESTATIONS_JSON` 是环境相关的全平台准入证明,由 `deploy/scripts/image-attestations-generate.ps1` 在目标 registry 完成扫描、签名和验签后写入运行环境或 Secret,不能仅凭新 digest 在仓库中伪造。仓库自动同步只更新可审计的 digest 权威文件与静态引用。
 
 部署工作流不消费可变 tag:权威锁合入 `main` 后,staging 从该锁一次读取全部服务 digest;生产发布从 tag 所指提交读取同一组 digest。两者都通过 `deploy/scripts/render-locked-overlay.ps1` 生成临时 Kustomize overlay 后应用,仓库静态 overlay 与临时 overlay 必须解析到同一组 digest。

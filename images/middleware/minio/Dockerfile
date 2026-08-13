@@ -22,9 +22,10 @@ RUN if [ -n "${GO_MODULE_PROXY}" ]; then go env -w GOPROXY="${GO_MODULE_PROXY}";
         github.com/go-jose/go-jose/v4@v4.1.4 \
         github.com/prometheus/prometheus@v0.311.3 \
         go.opentelemetry.io/otel/sdk@v1.43.0 \
-        google.golang.org/grpc@v1.79.3 \
-        golang.org/x/crypto@v0.52.0 \
-        golang.org/x/net@v0.55.0 \
+        google.golang.org/grpc@v1.82.1 \
+        golang.org/x/text@v0.39.0 \
+        golang.org/x/crypto@v0.53.0 \
+        golang.org/x/net@v0.56.0 \
     && GOFLAGS=-mod=mod go build -tags kqueue -p 2 -trimpath \
         -ldflags "-s -w -X github.com/minio/minio/cmd.Version=${MINIO_VERSION} -X github.com/minio/minio/cmd.ReleaseTag=${MINIO_VERSION} -X github.com/minio/minio/cmd.CommitID=${MINIO_COMMIT} -X github.com/minio/minio/cmd.ShortCommitID=7aac2a2c5b7c" \
         -o /out/minio .

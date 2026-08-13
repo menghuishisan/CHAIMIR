@@ -2,7 +2,25 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
+import fs from 'node:fs'
 import path from 'path'
+
+/**
+ * readFrontendSecurityHeaders 从生产前端 Nginx 的唯一安全头配置读取本地入口策略。
+ * Vite preview 入口承载构建产物，复用生产 Nginx 的 CSP、Referrer-Policy 与防嗅探头；
+ * dev 入口保留 Vite React 预注入与 HMR 所需的开发协议，正式验收使用 HTTPS Ingress。
+ */
+function readFrontendSecurityHeaders(): Record<string, string> {
+  const configPath = path.resolve(__dirname, '../../../images/service/frontend/security-headers.conf')
+  const config = fs.readFileSync(configPath, 'utf8')
+  const headers: Record<string, string> = {}
+  const declaration = /^\s*add_header\s+([A-Za-z0-9-]+)\s+"([^"]*)"\s+always;\s*$/gm
+  for (const match of config.matchAll(declaration)) {
+    headers[match[1]] = match[2]
+  }
+  delete headers['Strict-Transport-Security']
+  return headers
+}
 
 /** monacoManualChunk 按 Monaco 稳定源码边界拆分仅在 IDE 打开时加载的编辑器核心。 */
 function monacoManualChunk(moduleId: string): string | undefined {
@@ -39,6 +57,9 @@ function monacoManualChunk(moduleId: string): string | undefined {
 export default defineConfig({
   envDir: path.resolve(__dirname, '../..'),
   plugins: [react(), tailwindcss()],
+  preview: {
+    headers: readFrontendSecurityHeaders(),
+  },
   // 路径别名不设:tsconfig 未声明对应 paths,只在 Vite 侧配别名会让 tsc 与打包解析结果不一致;
   // 全站统一用相对路径导入,单一解析规则。
   build: {

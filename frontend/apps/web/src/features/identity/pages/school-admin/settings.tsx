@@ -29,9 +29,11 @@ import {
   SegmentedControl,
   Skeleton,
   Switch,
+  TenantCrest,
   toast,
 } from '@chaimir/ui'
 import { api } from '../../../../app/api'
+import { ImageUploadField } from '../../../../components/ImageUploadField'
 import { ResourceState } from '../../../../components/ResourceState'
 import { useAsyncResource } from '../../../../hooks'
 import { formatDate } from '../../../../utils/formatters'
@@ -105,7 +107,9 @@ function SettingsContent({ tenant, onSaved }: SettingsContentProps) {
   const navigate = useNavigate()
 
   const [displayName, setDisplayName] = useState(tenant.display_name ?? tenant.name)
-  const [logoUrl, setLogoUrl] = useState(tenant.logo_url ?? '')
+  // 校徽是即时生效的:上传或移除当场落库,响应就是新的配置视图,故这里只存可显示的图。
+  // 它不参与下面这个表单的提交 —— 表单负责显示名、模块开关、登录方式与激活码策略。
+  const [logoImage, setLogoImage] = useState(tenant.logo_image ?? '')
   const [authMode, setAuthMode] = useState(String(tenant.auth_mode))
   const [enableActivation, setEnableActivation] = useState(tenant.enable_activation_code)
   const [modules, setModules] = useState<string[]>(() => readModules(tenant.feature_flags))
@@ -136,10 +140,6 @@ function SettingsContent({ tenant, onSaved }: SettingsContentProps) {
         setFormError('请输入学校显示名')
         return
       }
-      if (logoUrl.trim() !== '' && !isHttpUrl(logoUrl)) {
-        setFormError('校徽地址要以 http:// 或 https:// 开头')
-        return
-      }
       if (modules.length === 0) {
         setFormError('至少启用一个业务模块,否则师生进入后没有可用功能')
         return
@@ -149,7 +149,6 @@ function SettingsContent({ tenant, onSaved }: SettingsContentProps) {
       try {
         await api.identity.updateTenantConfig({
           display_name: displayName.trim(),
-          logo_url: logoUrl.trim(),
           // 未登记的开关原样保留:平台侧可能写入其他键,前端不该丢弃
           feature_flags: { ...tenant.feature_flags, [MODULES_KEY]: modules },
           auth_mode: authModeValue,
@@ -163,7 +162,7 @@ function SettingsContent({ tenant, onSaved }: SettingsContentProps) {
         setWorking(false)
       }
     },
-    [authModeValue, displayName, enableActivation, logoUrl, modules, onSaved, tenant.feature_flags],
+    [authModeValue, displayName, enableActivation, modules, onSaved, tenant.feature_flags],
   )
 
   return (
@@ -194,15 +193,32 @@ function SettingsContent({ tenant, onSaved }: SettingsContentProps) {
                   />
                 </FormField>
                 <FormField
-                  label="校徽地址"
+                  label="校徽"
                   htmlFor="tenant-logo"
-                  helper="填图片地址,留空则显示默认校徽"
+                  helper="选好即刻生效,不用再点保存;留空时显示学校名称的第一个字。"
                 >
-                  <Input
-                    id="tenant-logo"
-                    value={logoUrl}
-                    placeholder="https://example.edu/logo.png"
-                    onChange={(event) => setLogoUrl(event.target.value)}
+                  <ImageUploadField
+                    inputId="tenant-logo"
+                    hasImage={logoImage !== ''}
+                    failureMessage="校徽这次没有更新成功,请稍后重试。"
+                    preview={
+                      <TenantCrest
+                        name={displayName || tenant.name}
+                        logoSrc={logoImage}
+                        size="lg"
+                      />
+                    }
+                    onUpload={async (file, onProgress) => {
+                      // 上传即生效,响应就是新的配置视图,预览直接取服务端给的校徽
+                      const saved = await api.identity.uploadTenantLogo(file, onProgress)
+                      setLogoImage(saved.logo_image ?? '')
+                      toast.success('校徽已更新')
+                    }}
+                    onCleared={async () => {
+                      await api.identity.clearTenantLogo()
+                      setLogoImage('')
+                      toast.success('校徽已移除')
+                    }}
                   />
                 </FormField>
               </div>
@@ -314,10 +330,4 @@ function readModules(flags: Record<string, unknown>): string[] {
   if (!Array.isArray(raw)) return MODULE_OPTIONS.map((item) => item.value)
   const values = raw.filter((item): item is string => typeof item === 'string')
   return values.length > 0 ? values : MODULE_OPTIONS.map((item) => item.value)
-}
-
-/** isHttpUrl 前端先挡明显非法地址。 */
-function isHttpUrl(value: string): boolean {
-  const trimmed = value.trim()
-  return trimmed.startsWith('http://') || trimmed.startsWith('https://')
 }

@@ -15,7 +15,14 @@ RUN echo "${FABRIC_SOURCE_SHA256}  /tmp/fabric-source.tar.gz" | sha256sum -c - \
 
 USER 1000:1000
 WORKDIR /src/fabric
-RUN go mod download \
+# 代理环境下限制 Go 构建并发,避免完整 Fabric 依赖图同时建立过多外部连接导致模块下载被截断。
+ENV GOMAXPROCS=2
+RUN --mount=type=cache,target=/go/pkg,uid=1000,gid=1000 \
+    --mount=type=cache,target=/tmp/go-cache,uid=1000,gid=1000 \
+    go mod download \
+    && go get golang.org/x/text@v0.39.0 google.golang.org/grpc@v1.82.1 \
+    && go mod tidy \
+    && go mod vendor \
     && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o /out/bin/peer ./cmd/peer \
     && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o /out/bin/configtxgen ./cmd/configtxgen \
     && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o /out/bin/configtxlator ./cmd/configtxlator \

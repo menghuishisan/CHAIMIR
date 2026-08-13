@@ -8,9 +8,12 @@ LABEL org.opencontainers.image.description="Chaimir Node builder base image"
 RUN apk upgrade --no-cache \
     && npm install -g npm@11.17.0 \
     && npm install -g undici@6.27.0 \
-    && rm -rf /usr/local/lib/node_modules/npm/node_modules/undici \
-    && cp -a /usr/local/lib/node_modules/undici /usr/local/lib/node_modules/npm/node_modules/undici \
-    && npm uninstall -g undici \
+    && npm install -g brace-expansion@5.0.9 ip-address@10.3.1 tar@7.5.19 \
+    && for package in undici brace-expansion ip-address tar; do \
+        rm -rf "/usr/local/lib/node_modules/npm/node_modules/${package}" \
+        && cp -a "/usr/local/lib/node_modules/${package}" "/usr/local/lib/node_modules/npm/node_modules/${package}"; \
+    done \
+    && npm uninstall -g undici brace-expansion ip-address tar \
     && npm cache clean --force
 
 # 创建非 root 构建用户,后续镜像需要写缓存时应显式使用 BuildKit cache mount。

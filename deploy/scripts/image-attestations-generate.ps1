@@ -207,6 +207,12 @@ if ([string]::IsNullOrWhiteSpace($registry)) {
 if ([string]::IsNullOrWhiteSpace($registry)) {
     throw "缺少 SUPPLY_CHAIN_REGISTRY 或 IMAGE_REGISTRY"
 }
+# registryEndpoint 是供应链工具访问当前环境 Registry 的传输端点。
+# 业务准入证明仍使用无端口的规范 registry 地址，避免把本地 port-forward 写入运行时配置。
+$registryEndpoint = [string]$config["SUPPLY_CHAIN_REGISTRY_ENDPOINT"]
+if ([string]::IsNullOrWhiteSpace($registryEndpoint)) {
+    $registryEndpoint = $registry
+}
 $registryExternalUrl = [string]$config["SUPPLY_CHAIN_HARBOR_EXTERNAL_URL"]
 $allowHttpRegistry = $registryExternalUrl.StartsWith("http://", [System.StringComparison]::OrdinalIgnoreCase)
 $script:cosignPrivateKeyPassword = $secret["COSIGN_PRIVATE_KEY_PASSWORD"]
@@ -240,7 +246,7 @@ $scanLog = Join-Path $EvidenceDir "image-attestations-trivy.log"
 $signLog = Join-Path $EvidenceDir "image-attestations-cosign.log"
 $sbomDir = Join-Path $EvidenceDir "sbom"
 New-Item -ItemType Directory -Force -Path $sbomDir | Out-Null
-$jsonPath = Join-Path $EvidenceDir "sandbox-image-attestations.json"
+$jsonPath = Join-Path $EvidenceDir "platform-image-attestations.json"
 $summaryPath = Join-Path $EvidenceDir "image-attestations-summary.txt"
 Remove-Item -LiteralPath $scanLog, $signLog -ErrorAction SilentlyContinue
 
@@ -267,8 +273,9 @@ foreach ($item in $items) {
         Write-Host "Blocking attestation $($item.Image)@$($item.Digest): $($blocked.Reason)"
         continue
     }
-    $ref = "$registry/$($item.Image)@$($item.Digest)"
-    Write-Host "Attesting $ref"
+    $toolRef = "$registryEndpoint/$($item.Image)@$($item.Digest)"
+    $canonicalRef = "$registry/$($item.Image)@$($item.Digest)"
+    Write-Host "Attesting $canonicalRef via $registryEndpoint"
     try {
         $trivyArgs = @("image", "--config", "/workspace/deploy/ci/trivy.yaml")
         if ($allowHttpRegistry) {
@@ -279,8 +286,8 @@ foreach ($item in $items) {
                 $trivyArgs += @("--skip-files", $skipFile)
             }
         }
-        $trivyArgs += $ref
-        Invoke-ComposeTool -Tool "trivy" -ToolArgs $trivyArgs -Context "Trivy 扫描 $ref" *>> $scanLog
+        $trivyArgs += $toolRef
+        Invoke-ComposeTool -Tool "trivy" -ToolArgs $trivyArgs -Context "Trivy 扫描 $canonicalRef" *>> $scanLog
     } catch {
         $blockedItems.Add([pscustomobject]@{
             image    = $item.Image
@@ -288,7 +295,7 @@ foreach ($item in $items) {
             reason   = "Trivy 扫描未通过: $($_.Exception.Message)"
             manifest = ""
         })
-        Write-Warning "Blocking attestation ${ref}: Trivy 扫描未通过"
+        Write-Warning "Blocking attestation ${canonicalRef}: Trivy 扫描未通过"
         continue
     }
     $sbomName = $item.Image.Replace("/", "-") + ".cdx.json"
@@ -298,8 +305,8 @@ foreach ($item in $items) {
         if ($allowHttpRegistry) {
             $sbomArgs += "--insecure"
         }
-        $sbomArgs += $ref
-        Invoke-ComposeTool -Tool "trivy" -ToolArgs $sbomArgs -Context "生成 SBOM $ref" *>> $scanLog
+        $sbomArgs += $toolRef
+        Invoke-ComposeTool -Tool "trivy" -ToolArgs $sbomArgs -Context "生成 SBOM $canonicalRef" *>> $scanLog
     } catch {
         $blockedItems.Add([pscustomobject]@{
             image    = $item.Image
@@ -307,29 +314,28 @@ foreach ($item in $items) {
             reason   = "SBOM 生成失败: $($_.Exception.Message)"
             manifest = ""
         })
-        Write-Warning "Blocking attestation ${ref}: SBOM 生成失败"
+        Write-Warning "Blocking attestation ${canonicalRef}: SBOM 生成失败"
         continue
     }
     try {
         $cosignSignArgs = @(
-            "sign", "--yes", "--key", "/cosign/cosign.key", "--tlog-upload=false",
-            "--use-signing-config=false"
+            "sign", "--yes", "--key", "/cosign/cosign.key", "--tlog-upload=false"
         )
         if ($allowHttpRegistry) {
             $cosignSignArgs += "--allow-http-registry"
         }
-        $cosignSignArgs += $ref
-        Invoke-ComposeTool -Tool "cosign" -ToolArgs $cosignSignArgs -Context "Cosign 签名 $ref" *>> $signLog
+        $cosignSignArgs += $toolRef
+        Invoke-ComposeTool -Tool "cosign" -ToolArgs $cosignSignArgs -Context "Cosign 签名 $canonicalRef" *>> $signLog
 
         $cosignAttestArgs = @(
             "attest", "--yes", "--key", "/cosign/cosign.key", "--type", "cyclonedx",
-            "--predicate", $sbomContainerPath, "--use-signing-config=false"
+            "--predicate", $sbomContainerPath, "--tlog-upload=false"
         )
         if ($allowHttpRegistry) {
             $cosignAttestArgs += "--allow-http-registry"
         }
-        $cosignAttestArgs += $ref
-        Invoke-ComposeTool -Tool "cosign" -ToolArgs $cosignAttestArgs -Context "Cosign SBOM 证明 $ref" *>> $signLog
+        $cosignAttestArgs += $toolRef
+        Invoke-ComposeTool -Tool "cosign" -ToolArgs $cosignAttestArgs -Context "Cosign SBOM 证明 $canonicalRef" *>> $signLog
     } catch {
         $blockedItems.Add([pscustomobject]@{
             image    = $item.Image
@@ -337,7 +343,7 @@ foreach ($item in $items) {
             reason   = "Cosign 签名或 SBOM 证明失败: $($_.Exception.Message)"
             manifest = ""
         })
-        Write-Warning "Blocking attestation ${ref}: Cosign 签名或 SBOM 证明失败"
+        Write-Warning "Blocking attestation ${canonicalRef}: Cosign 签名或 SBOM 证明失败"
         continue
     }
     try {
@@ -345,8 +351,8 @@ foreach ($item in $items) {
         if ($allowHttpRegistry) {
             $cosignVerifyArgs += "--allow-http-registry"
         }
-        $cosignVerifyArgs += $ref
-        Invoke-ComposeTool -Tool "cosign" -ToolArgs $cosignVerifyArgs -Context "Cosign 验签 $ref" *>> $signLog
+        $cosignVerifyArgs += $toolRef
+        Invoke-ComposeTool -Tool "cosign" -ToolArgs $cosignVerifyArgs -Context "Cosign 验签 $canonicalRef" *>> $signLog
 
         $cosignVerifyAttestationArgs = @(
             "verify-attestation", "--key", "/cosign/cosign.pub", "--type", "cyclonedx",
@@ -355,8 +361,8 @@ foreach ($item in $items) {
         if ($allowHttpRegistry) {
             $cosignVerifyAttestationArgs += "--allow-http-registry"
         }
-        $cosignVerifyAttestationArgs += $ref
-        Invoke-ComposeTool -Tool "cosign" -ToolArgs $cosignVerifyAttestationArgs -Context "Cosign SBOM 验证 $ref" *>> $signLog
+        $cosignVerifyAttestationArgs += $toolRef
+        Invoke-ComposeTool -Tool "cosign" -ToolArgs $cosignVerifyAttestationArgs -Context "Cosign SBOM 验证 $canonicalRef" *>> $signLog
     } catch {
         $blockedItems.Add([pscustomobject]@{
             image    = $item.Image
@@ -364,31 +370,36 @@ foreach ($item in $items) {
             reason   = "Cosign 签名或 SBOM 验证失败: $($_.Exception.Message)"
             manifest = ""
         })
-        Write-Warning "Blocking attestation ${ref}: Cosign 签名或 SBOM 验证失败"
+        Write-Warning "Blocking attestation ${canonicalRef}: Cosign 签名或 SBOM 验证失败"
         continue
     }
     $attestations.Add([pscustomobject]@{
-        image_url       = $ref
+        image_url       = $canonicalRef
         digest          = $item.Digest
         cosign_verified = $true
         trivy_status    = "passed"
     })
 }
 
-$json = $attestations | ConvertTo-Json -Compress -Depth 5
+$json = if ($attestations.Count -eq 0) {
+    "[]"
+} else {
+    $attestations | ConvertTo-Json -Compress -Depth 5
+}
 Write-TextFile -Path $jsonPath -Lines @($json)
 $blockedPath = Join-Path $EvidenceDir "image-attestations-blocked.json"
 $blockedJson = $blockedItems | ConvertTo-Json -Compress -Depth 5
 Write-TextFile -Path $blockedPath -Lines @($blockedJson)
-if (-not $NoEnvWrite) {
-    Set-EnvValue -Path $DeployEnvPath -Key "SANDBOX_IMAGE_ATTESTATIONS_JSON" -Value $json
-    Set-EnvValue -Path $BackendEnvPath -Key "SANDBOX_IMAGE_ATTESTATIONS_JSON" -Value $json
+if (-not $NoEnvWrite -and $blockedItems.Count -eq 0) {
+    Set-EnvValue -Path $DeployEnvPath -Key "PLATFORM_IMAGE_ATTESTATIONS_JSON" -Value $json
+    Set-EnvValue -Path $BackendEnvPath -Key "PLATFORM_IMAGE_ATTESTATIONS_JSON" -Value $json
 }
 
 $summary = @(
     "attested_count=$($attestations.Count)",
     "blocked_count=$($blockedItems.Count)",
     "registry=$registry",
+    "registry_endpoint=$registryEndpoint",
     "digest_lock=$DigestLock",
     "json=$jsonPath",
     "blocked_json=$blockedPath",

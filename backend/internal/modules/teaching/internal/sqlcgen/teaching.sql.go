@@ -542,9 +542,9 @@ func (q *Queries) CreateChapter(ctx context.Context, arg CreateChapterParams) (C
 }
 
 const createCourse = `-- name: CreateCourse :one
-INSERT INTO course (id, tenant_id, teacher_id, name, description, type, difficulty, cover_url, semester, credits, schedule, start_at, end_at, invite_code, status, visibility, created_at, updated_at, deleted_at)
+INSERT INTO course (id, tenant_id, teacher_id, name, description, type, difficulty, cover_ref, semester, credits, schedule, start_at, end_at, invite_code, status, visibility, created_at, updated_at, deleted_at)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::text::numeric, $11, $12, $13, $14, $15, $16, now(), now(), NULL)
-RETURNING id, tenant_id, teacher_id, name, description, type, difficulty, cover_url, semester, credits::float8 AS credits, schedule, start_at, end_at, invite_code, status, visibility, created_at, updated_at, deleted_at
+RETURNING id, tenant_id, teacher_id, name, description, type, difficulty, cover_ref, semester, credits::float8 AS credits, schedule, start_at, end_at, invite_code, status, visibility, created_at, updated_at, deleted_at
 `
 
 type CreateCourseParams struct {
@@ -555,7 +555,7 @@ type CreateCourseParams struct {
 	Description string             `json:"description"`
 	Type        int16              `json:"type"`
 	Difficulty  int16              `json:"difficulty"`
-	CoverUrl    pgtype.Text        `json:"cover_url"`
+	CoverRef    pgtype.Text        `json:"cover_ref"`
 	Semester    string             `json:"semester"`
 	Column10    string             `json:"column_10"`
 	Schedule    []byte             `json:"schedule"`
@@ -574,7 +574,7 @@ type CreateCourseRow struct {
 	Description string             `json:"description"`
 	Type        int16              `json:"type"`
 	Difficulty  int16              `json:"difficulty"`
-	CoverUrl    pgtype.Text        `json:"cover_url"`
+	CoverRef    pgtype.Text        `json:"cover_ref"`
 	Semester    string             `json:"semester"`
 	Credits     float64            `json:"credits"`
 	Schedule    []byte             `json:"schedule"`
@@ -597,7 +597,7 @@ func (q *Queries) CreateCourse(ctx context.Context, arg CreateCourseParams) (Cre
 		arg.Description,
 		arg.Type,
 		arg.Difficulty,
-		arg.CoverUrl,
+		arg.CoverRef,
 		arg.Semester,
 		arg.Column10,
 		arg.Schedule,
@@ -616,7 +616,7 @@ func (q *Queries) CreateCourse(ctx context.Context, arg CreateCourseParams) (Cre
 		&i.Description,
 		&i.Type,
 		&i.Difficulty,
-		&i.CoverUrl,
+		&i.CoverRef,
 		&i.Semester,
 		&i.Credits,
 		&i.Schedule,
@@ -1080,7 +1080,7 @@ func (q *Queries) GetChapter(ctx context.Context, arg GetChapterParams) (Chapter
 }
 
 const getCloneableCourseByID = `-- name: GetCloneableCourseByID :one
-SELECT id, tenant_id, teacher_id, name, description, type, difficulty, cover_url, semester, credits::float8 AS credits, schedule, start_at, end_at, invite_code, status, visibility, created_at, updated_at, deleted_at
+SELECT id, tenant_id, teacher_id, name, description, type, difficulty, cover_ref, semester, credits::float8 AS credits, schedule, start_at, end_at, invite_code, status, visibility, created_at, updated_at, deleted_at
 FROM course
 WHERE id = $1 AND deleted_at IS NULL AND (tenant_id = $2 OR visibility = 2)
 `
@@ -1098,7 +1098,7 @@ type GetCloneableCourseByIDRow struct {
 	Description string             `json:"description"`
 	Type        int16              `json:"type"`
 	Difficulty  int16              `json:"difficulty"`
-	CoverUrl    pgtype.Text        `json:"cover_url"`
+	CoverRef    pgtype.Text        `json:"cover_ref"`
 	Semester    string             `json:"semester"`
 	Credits     float64            `json:"credits"`
 	Schedule    []byte             `json:"schedule"`
@@ -1123,7 +1123,7 @@ func (q *Queries) GetCloneableCourseByID(ctx context.Context, arg GetCloneableCo
 		&i.Description,
 		&i.Type,
 		&i.Difficulty,
-		&i.CoverUrl,
+		&i.CoverRef,
 		&i.Semester,
 		&i.Credits,
 		&i.Schedule,
@@ -1140,7 +1140,7 @@ func (q *Queries) GetCloneableCourseByID(ctx context.Context, arg GetCloneableCo
 }
 
 const getCourseByID = `-- name: GetCourseByID :one
-SELECT id, tenant_id, teacher_id, name, description, type, difficulty, cover_url, semester, credits::float8 AS credits, schedule, start_at, end_at, invite_code, status, visibility, created_at, updated_at, deleted_at
+SELECT id, tenant_id, teacher_id, name, description, type, difficulty, cover_ref, semester, credits::float8 AS credits, schedule, start_at, end_at, invite_code, status, visibility, created_at, updated_at, deleted_at
 FROM course
 WHERE tenant_id = $1 AND id = $2 AND deleted_at IS NULL
 `
@@ -1158,7 +1158,7 @@ type GetCourseByIDRow struct {
 	Description string             `json:"description"`
 	Type        int16              `json:"type"`
 	Difficulty  int16              `json:"difficulty"`
-	CoverUrl    pgtype.Text        `json:"cover_url"`
+	CoverRef    pgtype.Text        `json:"cover_ref"`
 	Semester    string             `json:"semester"`
 	Credits     float64            `json:"credits"`
 	Schedule    []byte             `json:"schedule"`
@@ -1183,7 +1183,7 @@ func (q *Queries) GetCourseByID(ctx context.Context, arg GetCourseByIDParams) (G
 		&i.Description,
 		&i.Type,
 		&i.Difficulty,
-		&i.CoverUrl,
+		&i.CoverRef,
 		&i.Semester,
 		&i.Credits,
 		&i.Schedule,
@@ -1200,7 +1200,7 @@ func (q *Queries) GetCourseByID(ctx context.Context, arg GetCourseByIDParams) (G
 }
 
 const getCourseByInviteCode = `-- name: GetCourseByInviteCode :one
-SELECT id, tenant_id, teacher_id, name, description, type, difficulty, cover_url, semester, credits::float8 AS credits, schedule, start_at, end_at, invite_code, status, visibility, created_at, updated_at, deleted_at
+SELECT id, tenant_id, teacher_id, name, description, type, difficulty, cover_ref, semester, credits::float8 AS credits, schedule, start_at, end_at, invite_code, status, visibility, created_at, updated_at, deleted_at
 FROM course
 WHERE invite_code = $1 AND deleted_at IS NULL
 `
@@ -1213,7 +1213,7 @@ type GetCourseByInviteCodeRow struct {
 	Description string             `json:"description"`
 	Type        int16              `json:"type"`
 	Difficulty  int16              `json:"difficulty"`
-	CoverUrl    pgtype.Text        `json:"cover_url"`
+	CoverRef    pgtype.Text        `json:"cover_ref"`
 	Semester    string             `json:"semester"`
 	Credits     float64            `json:"credits"`
 	Schedule    []byte             `json:"schedule"`
@@ -1238,7 +1238,7 @@ func (q *Queries) GetCourseByInviteCode(ctx context.Context, inviteCode string) 
 		&i.Description,
 		&i.Type,
 		&i.Difficulty,
-		&i.CoverUrl,
+		&i.CoverRef,
 		&i.Semester,
 		&i.Credits,
 		&i.Schedule,
@@ -1822,7 +1822,7 @@ func (q *Queries) ListCourseMembers(ctx context.Context, arg ListCourseMembersPa
 }
 
 const listCoursesDueToEnd = `-- name: ListCoursesDueToEnd :many
-SELECT id, tenant_id, teacher_id, name, description, type, difficulty, cover_url, semester, credits::float8 AS credits, schedule, start_at, end_at, invite_code, status, visibility, created_at, updated_at, deleted_at
+SELECT id, tenant_id, teacher_id, name, description, type, difficulty, cover_ref, semester, credits::float8 AS credits, schedule, start_at, end_at, invite_code, status, visibility, created_at, updated_at, deleted_at
 FROM course
 WHERE deleted_at IS NULL AND status IN (2, 3) AND end_at <= $1
 ORDER BY end_at ASC, id ASC
@@ -1836,7 +1836,7 @@ type ListCoursesDueToEndRow struct {
 	Description string             `json:"description"`
 	Type        int16              `json:"type"`
 	Difficulty  int16              `json:"difficulty"`
-	CoverUrl    pgtype.Text        `json:"cover_url"`
+	CoverRef    pgtype.Text        `json:"cover_ref"`
 	Semester    string             `json:"semester"`
 	Credits     float64            `json:"credits"`
 	Schedule    []byte             `json:"schedule"`
@@ -1867,7 +1867,7 @@ func (q *Queries) ListCoursesDueToEnd(ctx context.Context, endAt pgtype.Timestam
 			&i.Description,
 			&i.Type,
 			&i.Difficulty,
-			&i.CoverUrl,
+			&i.CoverRef,
 			&i.Semester,
 			&i.Credits,
 			&i.Schedule,
@@ -1891,7 +1891,7 @@ func (q *Queries) ListCoursesDueToEnd(ctx context.Context, endAt pgtype.Timestam
 }
 
 const listCoursesDueToRun = `-- name: ListCoursesDueToRun :many
-SELECT id, tenant_id, teacher_id, name, description, type, difficulty, cover_url, semester, credits::float8 AS credits, schedule, start_at, end_at, invite_code, status, visibility, created_at, updated_at, deleted_at
+SELECT id, tenant_id, teacher_id, name, description, type, difficulty, cover_ref, semester, credits::float8 AS credits, schedule, start_at, end_at, invite_code, status, visibility, created_at, updated_at, deleted_at
 FROM course
 WHERE deleted_at IS NULL AND status = 2 AND start_at <= $1
 ORDER BY start_at ASC, id ASC
@@ -1905,7 +1905,7 @@ type ListCoursesDueToRunRow struct {
 	Description string             `json:"description"`
 	Type        int16              `json:"type"`
 	Difficulty  int16              `json:"difficulty"`
-	CoverUrl    pgtype.Text        `json:"cover_url"`
+	CoverRef    pgtype.Text        `json:"cover_ref"`
 	Semester    string             `json:"semester"`
 	Credits     float64            `json:"credits"`
 	Schedule    []byte             `json:"schedule"`
@@ -1936,7 +1936,7 @@ func (q *Queries) ListCoursesDueToRun(ctx context.Context, startAt pgtype.Timest
 			&i.Description,
 			&i.Type,
 			&i.Difficulty,
-			&i.CoverUrl,
+			&i.CoverRef,
 			&i.Semester,
 			&i.Credits,
 			&i.Schedule,
@@ -2248,7 +2248,7 @@ func (q *Queries) ListProgressByCourse(ctx context.Context, arg ListProgressByCo
 }
 
 const listStudentCourses = `-- name: ListStudentCourses :many
-SELECT c.id, c.tenant_id, c.teacher_id, c.name, c.description, c.type, c.difficulty, c.cover_url, c.semester, c.credits::float8 AS credits, c.schedule, c.start_at, c.end_at, c.invite_code, c.status, c.visibility, c.created_at, c.updated_at, c.deleted_at
+SELECT c.id, c.tenant_id, c.teacher_id, c.name, c.description, c.type, c.difficulty, c.cover_ref, c.semester, c.credits::float8 AS credits, c.schedule, c.start_at, c.end_at, c.invite_code, c.status, c.visibility, c.created_at, c.updated_at, c.deleted_at
 FROM course c
 JOIN course_member m ON m.tenant_id = c.tenant_id AND m.course_id = c.id
 WHERE c.tenant_id = $1 AND m.student_id = $2 AND c.deleted_at IS NULL AND ($3::smallint = 0 OR c.status = $3)
@@ -2272,7 +2272,7 @@ type ListStudentCoursesRow struct {
 	Description string             `json:"description"`
 	Type        int16              `json:"type"`
 	Difficulty  int16              `json:"difficulty"`
-	CoverUrl    pgtype.Text        `json:"cover_url"`
+	CoverRef    pgtype.Text        `json:"cover_ref"`
 	Semester    string             `json:"semester"`
 	Credits     float64            `json:"credits"`
 	Schedule    []byte             `json:"schedule"`
@@ -2309,7 +2309,7 @@ func (q *Queries) ListStudentCourses(ctx context.Context, arg ListStudentCourses
 			&i.Description,
 			&i.Type,
 			&i.Difficulty,
-			&i.CoverUrl,
+			&i.CoverRef,
 			&i.Semester,
 			&i.Credits,
 			&i.Schedule,
@@ -2496,7 +2496,7 @@ func (q *Queries) ListSubmissionsByAssignment(ctx context.Context, arg ListSubmi
 }
 
 const listTeacherCourses = `-- name: ListTeacherCourses :many
-SELECT id, tenant_id, teacher_id, name, description, type, difficulty, cover_url, semester, credits::float8 AS credits, schedule, start_at, end_at, invite_code, status, visibility, created_at, updated_at, deleted_at
+SELECT id, tenant_id, teacher_id, name, description, type, difficulty, cover_ref, semester, credits::float8 AS credits, schedule, start_at, end_at, invite_code, status, visibility, created_at, updated_at, deleted_at
 FROM course
 WHERE tenant_id = $1 AND teacher_id = $2 AND deleted_at IS NULL AND ($3::smallint = 0 OR status = $3)
 ORDER BY updated_at DESC, id DESC
@@ -2519,7 +2519,7 @@ type ListTeacherCoursesRow struct {
 	Description string             `json:"description"`
 	Type        int16              `json:"type"`
 	Difficulty  int16              `json:"difficulty"`
-	CoverUrl    pgtype.Text        `json:"cover_url"`
+	CoverRef    pgtype.Text        `json:"cover_ref"`
 	Semester    string             `json:"semester"`
 	Credits     float64            `json:"credits"`
 	Schedule    []byte             `json:"schedule"`
@@ -2556,7 +2556,7 @@ func (q *Queries) ListTeacherCourses(ctx context.Context, arg ListTeacherCourses
 			&i.Description,
 			&i.Type,
 			&i.Difficulty,
-			&i.CoverUrl,
+			&i.CoverRef,
 			&i.Semester,
 			&i.Credits,
 			&i.Schedule,
@@ -2887,7 +2887,7 @@ const refreshCourseInviteCode = `-- name: RefreshCourseInviteCode :one
 UPDATE course
 SET invite_code = $3, updated_at = now()
 WHERE tenant_id = $1 AND id = $2 AND deleted_at IS NULL
-RETURNING id, tenant_id, teacher_id, name, description, type, difficulty, cover_url, semester, credits::float8 AS credits, schedule, start_at, end_at, invite_code, status, visibility, created_at, updated_at, deleted_at
+RETURNING id, tenant_id, teacher_id, name, description, type, difficulty, cover_ref, semester, credits::float8 AS credits, schedule, start_at, end_at, invite_code, status, visibility, created_at, updated_at, deleted_at
 `
 
 type RefreshCourseInviteCodeParams struct {
@@ -2904,7 +2904,7 @@ type RefreshCourseInviteCodeRow struct {
 	Description string             `json:"description"`
 	Type        int16              `json:"type"`
 	Difficulty  int16              `json:"difficulty"`
-	CoverUrl    pgtype.Text        `json:"cover_url"`
+	CoverRef    pgtype.Text        `json:"cover_ref"`
 	Semester    string             `json:"semester"`
 	Credits     float64            `json:"credits"`
 	Schedule    []byte             `json:"schedule"`
@@ -2929,7 +2929,7 @@ func (q *Queries) RefreshCourseInviteCode(ctx context.Context, arg RefreshCourse
 		&i.Description,
 		&i.Type,
 		&i.Difficulty,
-		&i.CoverUrl,
+		&i.CoverRef,
 		&i.Semester,
 		&i.Credits,
 		&i.Schedule,
@@ -3010,7 +3010,7 @@ const setCourseStatus = `-- name: SetCourseStatus :one
 UPDATE course
 SET status = $3, updated_at = now()
 WHERE tenant_id = $1 AND id = $2 AND deleted_at IS NULL
-RETURNING id, tenant_id, teacher_id, name, description, type, difficulty, cover_url, semester, credits::float8 AS credits, schedule, start_at, end_at, invite_code, status, visibility, created_at, updated_at, deleted_at
+RETURNING id, tenant_id, teacher_id, name, description, type, difficulty, cover_ref, semester, credits::float8 AS credits, schedule, start_at, end_at, invite_code, status, visibility, created_at, updated_at, deleted_at
 `
 
 type SetCourseStatusParams struct {
@@ -3027,7 +3027,7 @@ type SetCourseStatusRow struct {
 	Description string             `json:"description"`
 	Type        int16              `json:"type"`
 	Difficulty  int16              `json:"difficulty"`
-	CoverUrl    pgtype.Text        `json:"cover_url"`
+	CoverRef    pgtype.Text        `json:"cover_ref"`
 	Semester    string             `json:"semester"`
 	Credits     float64            `json:"credits"`
 	Schedule    []byte             `json:"schedule"`
@@ -3052,7 +3052,7 @@ func (q *Queries) SetCourseStatus(ctx context.Context, arg SetCourseStatusParams
 		&i.Description,
 		&i.Type,
 		&i.Difficulty,
-		&i.CoverUrl,
+		&i.CoverRef,
 		&i.Semester,
 		&i.Credits,
 		&i.Schedule,
@@ -3072,7 +3072,7 @@ const setCourseVisibility = `-- name: SetCourseVisibility :one
 UPDATE course
 SET visibility = $3, updated_at = now()
 WHERE tenant_id = $1 AND id = $2 AND deleted_at IS NULL
-RETURNING id, tenant_id, teacher_id, name, description, type, difficulty, cover_url, semester, credits::float8 AS credits, schedule, start_at, end_at, invite_code, status, visibility, created_at, updated_at, deleted_at
+RETURNING id, tenant_id, teacher_id, name, description, type, difficulty, cover_ref, semester, credits::float8 AS credits, schedule, start_at, end_at, invite_code, status, visibility, created_at, updated_at, deleted_at
 `
 
 type SetCourseVisibilityParams struct {
@@ -3089,7 +3089,7 @@ type SetCourseVisibilityRow struct {
 	Description string             `json:"description"`
 	Type        int16              `json:"type"`
 	Difficulty  int16              `json:"difficulty"`
-	CoverUrl    pgtype.Text        `json:"cover_url"`
+	CoverRef    pgtype.Text        `json:"cover_ref"`
 	Semester    string             `json:"semester"`
 	Credits     float64            `json:"credits"`
 	Schedule    []byte             `json:"schedule"`
@@ -3114,7 +3114,7 @@ func (q *Queries) SetCourseVisibility(ctx context.Context, arg SetCourseVisibili
 		&i.Description,
 		&i.Type,
 		&i.Difficulty,
-		&i.CoverUrl,
+		&i.CoverRef,
 		&i.Semester,
 		&i.Credits,
 		&i.Schedule,
@@ -3162,7 +3162,7 @@ const softDeleteCourse = `-- name: SoftDeleteCourse :one
 UPDATE course
 SET deleted_at = now(), updated_at = now()
 WHERE tenant_id = $1 AND id = $2 AND status = 1 AND deleted_at IS NULL
-RETURNING id, tenant_id, teacher_id, name, description, type, difficulty, cover_url, semester, credits::float8 AS credits, schedule, start_at, end_at, invite_code, status, visibility, created_at, updated_at, deleted_at
+RETURNING id, tenant_id, teacher_id, name, description, type, difficulty, cover_ref, semester, credits::float8 AS credits, schedule, start_at, end_at, invite_code, status, visibility, created_at, updated_at, deleted_at
 `
 
 type SoftDeleteCourseParams struct {
@@ -3178,7 +3178,7 @@ type SoftDeleteCourseRow struct {
 	Description string             `json:"description"`
 	Type        int16              `json:"type"`
 	Difficulty  int16              `json:"difficulty"`
-	CoverUrl    pgtype.Text        `json:"cover_url"`
+	CoverRef    pgtype.Text        `json:"cover_ref"`
 	Semester    string             `json:"semester"`
 	Credits     float64            `json:"credits"`
 	Schedule    []byte             `json:"schedule"`
@@ -3203,7 +3203,7 @@ func (q *Queries) SoftDeleteCourse(ctx context.Context, arg SoftDeleteCoursePara
 		&i.Description,
 		&i.Type,
 		&i.Difficulty,
-		&i.CoverUrl,
+		&i.CoverRef,
 		&i.Semester,
 		&i.Credits,
 		&i.Schedule,
@@ -3396,7 +3396,7 @@ SET name = $3,
     description = $4,
     type = $5,
     difficulty = $6,
-    cover_url = $7,
+    cover_ref = $7,
     semester = $8,
     credits = $9::text::numeric,
     schedule = $10,
@@ -3404,7 +3404,7 @@ SET name = $3,
     end_at = $12,
     updated_at = now()
 WHERE tenant_id = $1 AND id = $2 AND deleted_at IS NULL
-RETURNING id, tenant_id, teacher_id, name, description, type, difficulty, cover_url, semester, credits::float8 AS credits, schedule, start_at, end_at, invite_code, status, visibility, created_at, updated_at, deleted_at
+RETURNING id, tenant_id, teacher_id, name, description, type, difficulty, cover_ref, semester, credits::float8 AS credits, schedule, start_at, end_at, invite_code, status, visibility, created_at, updated_at, deleted_at
 `
 
 type UpdateCourseParams struct {
@@ -3414,7 +3414,7 @@ type UpdateCourseParams struct {
 	Description string             `json:"description"`
 	Type        int16              `json:"type"`
 	Difficulty  int16              `json:"difficulty"`
-	CoverUrl    pgtype.Text        `json:"cover_url"`
+	CoverRef    pgtype.Text        `json:"cover_ref"`
 	Semester    string             `json:"semester"`
 	Column9     string             `json:"column_9"`
 	Schedule    []byte             `json:"schedule"`
@@ -3430,7 +3430,7 @@ type UpdateCourseRow struct {
 	Description string             `json:"description"`
 	Type        int16              `json:"type"`
 	Difficulty  int16              `json:"difficulty"`
-	CoverUrl    pgtype.Text        `json:"cover_url"`
+	CoverRef    pgtype.Text        `json:"cover_ref"`
 	Semester    string             `json:"semester"`
 	Credits     float64            `json:"credits"`
 	Schedule    []byte             `json:"schedule"`
@@ -3452,7 +3452,7 @@ func (q *Queries) UpdateCourse(ctx context.Context, arg UpdateCourseParams) (Upd
 		arg.Description,
 		arg.Type,
 		arg.Difficulty,
-		arg.CoverUrl,
+		arg.CoverRef,
 		arg.Semester,
 		arg.Column9,
 		arg.Schedule,
@@ -3468,7 +3468,7 @@ func (q *Queries) UpdateCourse(ctx context.Context, arg UpdateCourseParams) (Upd
 		&i.Description,
 		&i.Type,
 		&i.Difficulty,
-		&i.CoverUrl,
+		&i.CoverRef,
 		&i.Semester,
 		&i.Credits,
 		&i.Schedule,

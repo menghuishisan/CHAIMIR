@@ -505,7 +505,7 @@ func currentIdentityAllowPlatform(ctx context.Context) (tenant.Identity, error) 
 func (s *Service) filterAnnouncementsByRole(ctx context.Context, accountID int64, items []AnnouncementDTO) ([]AnnouncementDTO, error) {
 	out := make([]AnnouncementDTO, 0, len(items))
 	for _, item := range items {
-		if item.Scope != AnnouncementScopeRoles {
+		if announcementVisibleForIdentity(item, accountID, nil) {
 			out = append(out, item)
 			continue
 		}
@@ -529,6 +529,26 @@ func (s *Service) filterAnnouncementsByRole(ctx context.Context, accountID int64
 		}
 	}
 	return out, nil
+}
+
+// announcementVisibleForIdentity 判断公告是否因发布者身份直接可见。
+// 定向公告通常只展示给目标角色，但发布者必须能在“已发布公告”列表确认自己的发布结果。
+// roleNumbers 为空时仅检查发布者直达规则，角色交集仍由调用方继续校验。
+func announcementVisibleForIdentity(item AnnouncementDTO, accountID int64, roleNumbers []int16) bool {
+	if item.Scope != AnnouncementScopeRoles || item.PublisherID.Int64() == accountID {
+		return true
+	}
+	if len(roleNumbers) == 0 {
+		return false
+	}
+	for _, target := range item.TargetRoles {
+		for _, role := range roleNumbers {
+			if target == role {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // currentRoleNumbers 读取当前用户角色并转成公告查询所需的数字角色集合。

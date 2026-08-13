@@ -216,6 +216,8 @@ func maxMultipartBodyBytes(cfg *config.Config) int64 {
 		cfg.Upload.ImportMaxBytes,
 		cfg.Upload.ContentAttachmentMaxBytes,
 		cfg.Upload.CourseMaterialMaxBytes,
+		cfg.Upload.TenantLogoMaxBytes,
+		cfg.Upload.CourseCoverMaxBytes,
 		cfg.Upload.SimBundleMaxBytes + cfg.Upload.SimBundleMetadataMaxBytes,
 	}
 	maxBytes := limits[0]
@@ -272,6 +274,7 @@ func assembleModules(ctx context.Context, router gin.IRouter, cfg *config.Config
 		Redis:    infra.redis,
 		IDs:      infra.ids,
 		Config:   *cfg,
+		Storage:  infra.storage,
 		EventBus: infra.bus,
 	})
 	if err != nil {

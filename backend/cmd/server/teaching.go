@@ -77,6 +77,7 @@ func RegisterTeachingModule(ctx context.Context, deps TeachingModuleDeps) (*teac
 		FileService:            fileService,
 		Config:                 deps.Config,
 		CourseMaterialMaxBytes: deps.Upload.CourseMaterialMaxBytes,
+		CourseCoverMaxBytes:    deps.Upload.CourseCoverMaxBytes,
 		MaterialScanPolicy:     upload.ScanPolicy{Required: deps.Upload.VirusScanRequired},
 	})
 	if err != nil {

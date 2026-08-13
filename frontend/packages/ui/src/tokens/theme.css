@@ -3,6 +3,12 @@
  * Tailwind v4 @theme:此处定义的变量同时生成工具类(bg-、text-、ease- 等前缀)。
  * 注意本文件注释内不得出现 * 与 / 相连的写法,那会提前闭合 CSS 块注释。
  * 铁律 FE-1:组件零裸 hex、零任意值;新颜色必须先经对比度校验入本表再使用。
+ *
+ * 令牌镜像(改这两个值时必须同步,它们由浏览器与操作系统在 React 之外加载,取不到 CSS 变量):
+ *   color-ink-1000  ->  apps/web/public/app-icon.svg 底色
+ *                       apps/web/public/manifest.webmanifest 的 background_color / theme_color
+ *                       apps/web/index.html 的 meta theme-color
+ *   color-accent    ->  apps/web/public/favicon.svg 与 app-icon.svg 的标志描线
  */
 
 @theme {

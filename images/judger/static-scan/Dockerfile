@@ -14,17 +14,29 @@ LABEL org.opencontainers.image.description="Chaimir static scan judger image"
 
 USER root
 ADD https://binaries.soliditylang.org/linux-amd64/${SOLC_PATH} /usr/local/bin/solc-${SOLC_VERSION}
-RUN apk upgrade --no-cache \
-    && apk add --no-cache bash ca-certificates gcompat git libstdc++ py3-pip python3 \
+RUN for attempt in 1 2 3 4 5; do \
+        if apk upgrade --no-cache --timeout 300; then break; fi; \
+        if [ "$attempt" -eq 5 ]; then echo "apk upgrade failed after 5 attempts" >&2; exit 1; fi; \
+        sleep 3; \
+    done \
+    && for attempt in 1 2 3 4 5; do \
+        if apk add --no-cache --timeout 300 bash ca-certificates gcompat git libstdc++ py3-pip 'py3-setuptools>=80.9.0-r2' python3; then break; fi; \
+        if [ "$attempt" -eq 5 ]; then echo "apk package installation failed after 5 attempts" >&2; exit 1; fi; \
+        sleep 3; \
+    done \
     && echo "${SOLC_SHA256}  /usr/local/bin/solc-${SOLC_VERSION}" | sha256sum -c - \
     && chmod 0755 /usr/local/bin/solc-${SOLC_VERSION} \
     && ln -s /usr/local/bin/solc-${SOLC_VERSION} /usr/local/bin/solc \
     && python3 -m venv /opt/slither \
-    && /opt/slither/bin/pip install --no-cache-dir --upgrade \
+    && /opt/slither/bin/pip install --no-cache-dir --timeout 300 --retries 5 --upgrade \
         "pip>=25.3" \
         "setuptools>=80.0.0" \
         "wheel>=0.46.0" \
+        "msgpack>=1.2.1" \
         "slither-analyzer==0.11.3" \
+        "aiohttp>=3.14.3" \
+    && rm -rf /opt/slither/lib/python3.12/site-packages/pip /opt/slither/lib/python3.12/site-packages/pip-*.dist-info \
+    && apk del py3-pip py3-setuptools \
     && ln -s /opt/slither/bin/slither /usr/local/bin/slither \
     && slither --version >/dev/null \
     && solc --version >/dev/null \

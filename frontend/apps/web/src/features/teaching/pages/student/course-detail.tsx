@@ -20,6 +20,7 @@ import {
   Card,
   CardBody,
   CardHeader,
+  CoverImage,
   DescriptionList,
   Empty,
   PageBody,
@@ -49,6 +50,7 @@ import {
   ASSIGNMENT_DUE_TONE,
   courseStatusLabel,
   courseStatusTone,
+  courseTypeCover,
   courseTypeLabel,
   latePolicyLabel,
   lessonContentTypeLabel,
@@ -56,6 +58,7 @@ import {
   progressStatusTone,
   teachingDifficultyLabel,
 } from '../../../../utils/labels/teaching'
+import { useCourseCoverSrc } from '../../useCourseCoverSrc'
 import { CourseDiscussion } from './course-discussion'
 import { CourseReviewCard } from './course-review'
 
@@ -127,6 +130,7 @@ interface CourseDetailContentProps {
  */
 function CourseDetailContent({ courseId, outline, onNavigate }: CourseDetailContentProps) {
   const course = outline.course
+  const coverSrc = useCourseCoverSrc(course.id, course.cover_ref)
   const rows = useMemo(() => outlineRows(outline), [outline])
   const doneCount = rows.filter((row) => row.status === ProgressStatus.DONE).length
   const learnedSeconds = rows.reduce((sum, row) => sum + row.durationSec, 0)
@@ -193,6 +197,19 @@ function CourseDetailContent({ courseId, outline, onNavigate }: CourseDetailCont
         icon={BookOpen}
         actions={<StatusIndicator tone={courseStatusTone(course.status)} label={courseStatusLabel(course.status)} />}
       />
+
+      {/* 封面在详情页只占首屏一小条:课程目标与继续学习动作优先于装饰(规范 §1.3 资产不抢内容) */}
+      <PageSection>
+        <CoverImage
+          id={course.id}
+          coverSrc={coverSrc}
+          name={course.name}
+          glyph={courseTypeCover(course.type).glyph}
+          accent={courseTypeCover(course.type).accent}
+          ratio="3/2"
+          className="max-h-52 w-full"
+        />
+      </PageSection>
 
       <PageSection>
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">

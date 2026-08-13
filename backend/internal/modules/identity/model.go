@@ -12,7 +12,7 @@ type Tenant struct {
 	Status               int16
 	DeployMode           int16
 	ExpireAt             *time.Time
-	LogoURL              string
+	LogoRef              string
 	DisplayName          string
 	FeatureFlags         []byte
 	AuthMode             int16

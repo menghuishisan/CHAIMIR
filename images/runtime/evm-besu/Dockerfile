@@ -3,7 +3,7 @@ FROM hyperledger/besu:26.6.1@sha256:ac85d23b4250308ce5f6d004fff7fa6779f82932d1ba
 
 FROM cgr.dev/chainguard/wolfi-base@sha256:02dab76bd852a70556b5b2002195c8a5fdab77d323c433bf6642aab080489795 AS patched-besu
 
-ARG NETTY_VERSION=4.2.15.Final
+ARG NETTY_VERSION=4.2.16.Final
 ARG JACKSON_VERSION=2.21.4
 
 RUN --mount=type=cache,target=/var/cache/apk,sharing=locked \

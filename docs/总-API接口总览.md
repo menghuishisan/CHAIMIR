@@ -77,7 +77,7 @@
 - `/auth/*`:登录(手机号/学号/短信)、刷新、登出、找回、SSO。
 - `/auth/ws-ticket`:为浏览器 WebSocket 签发短时路径绑定连接票据。
 - `/platform/applications`、`/platform/tenants`:入驻审核、租户管理 `[平台管理员]`。
-- `/tenant/config`、`/tenant/sso`:租户配置。
+- `/tenant/config`、`/tenant/sso`:租户配置。`POST /tenant/logo` 上传校徽(multipart,**上传即生效**,同一请求内落 `logo_ref` 并返回新的配置视图),`DELETE /tenant/logo` 移除;`PATCH /tenant/config` 不接受 `logo_ref`。`GET /tenant/brand` 是**免鉴权且无参数**的品牌读取口,返回 `{ display_name, logo_image }`,仅 `deploy_mode=school` 下有内容 —— SaaS 登录页面对未确定租户,本无校徽可显示,而带 `tenant_code` 的公开端点会成为廉价的租户枚举通道。校徽以 data URI 内联下发而不签发投放授权:登录页没有会话,授权绑不到账号(详见 M1 接口设计 §4)。
 - `/org/*`:院系/专业/班级。读对教师/学校管理员开放,写只对学校管理员开放;`GET /org/classes/{id}/students` 是教师侧挑选学生的唯一入口,只出编号/姓名/学号。
 - `/accounts/*`:账号导入(预览+提交)、增改停用、授予管理员。**只对学校管理员开放** —— 它是账号目录(带手机号掩码、状态、角色),业务模块与教师端取学生一律走 `/org/classes/{id}/students` 或 `contracts.IdentityService`。
 - `/me/*`:个人中心。`GET /me`、`POST /me/password`、`GET /me/sessions` 对租户账号与平台管理员都开放(平台身份走独立分支,只返回姓名/状态/角色);`POST /me/phone` 只对租户账号开放,平台账号无手机号字段。
@@ -140,7 +140,7 @@
 - `/items/{code}/{version}/full`、`/items/batch`:内部取用 `[内部]`。
 
 ### M6 教学 `/api/v1/teaching`
-- `/courses/*`:课程 CRUD/发布/克隆/共享/邀请码。
+- `/courses/*`:课程 CRUD/发布/克隆/共享/邀请码。`POST /courses/cover` 上传封面(multipart,返回 `object_ref`,不绑课程 id —— 先落上传教师的暂存位,随创建/编辑课程提交后由服务端搬到该课程正式位);`POST /courses/{id}/cover/access` 换取封面投放授权(`mode=stream`)。封面只对能看到该课程的人可见,不设公开路径;课程列表缩略图用平台纸材质,不逐行换授权。
 - `/chapters`、`/lessons`:章节课时**写入口**(课时关联 M7 实验/M4 仿真);只读一律走 `GET /courses/{id}/outline`,它一次返回课程 + 章节 + 课时 + 本人进度,不再另设章节/课时列表接口。`POST /lessons/{id}/material` 上传视频或附件、`POST /lessons/{id}/material/access` 换取投放授权(视频 `mode=stream` 可续播,附件 `mode=download` 一次性取件)。
 - `/courses/join`、`/members`:选课成员。`POST /courses/{id}/members/batch` 的粒度是一个班级(请求体 `{ class_id }`),学生由 M6 经 `contracts.IdentityService.ListClassStudents` 解析;成员响应带 `student_name`/`student_no`,客户端不再另取账号目录。
 - `/assignments/*`、`/submissions/*`:作业/提交/批改(判题调 M3)。`GET /courses/{id}/assignments` 与 `GET /assignments/{id}/submissions` 师生同路由按身份分视角:授课教师见含草稿全量与全班提交,课程内学生只见已发布作业与本人提交 —— 这两条是学生取得作业编号与提交编号的唯一入口。

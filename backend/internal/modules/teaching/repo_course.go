@@ -23,7 +23,7 @@ func (s *txStore) CreateCourse(ctx context.Context, course Course) (Course, erro
 	if err != nil {
 		return Course{}, err
 	}
-	row, err := s.q.CreateCourse(ctx, sqlcgen.CreateCourseParams{ID: course.ID, TenantID: course.TenantID, TeacherID: course.TeacherID, Name: course.Name, Description: course.Description, Type: course.Type, Difficulty: course.Difficulty, CoverUrl: pgtypex.Text(course.CoverURL), Semester: course.Semester, Column10: formatNumber(course.Credits), Schedule: schedule, StartAt: timex.Timestamptz(course.StartAt), EndAt: timex.Timestamptz(course.EndAt), InviteCode: course.InviteCode, Status: course.Status, Visibility: course.Visibility})
+	row, err := s.q.CreateCourse(ctx, sqlcgen.CreateCourseParams{ID: course.ID, TenantID: course.TenantID, TeacherID: course.TeacherID, Name: course.Name, Description: course.Description, Type: course.Type, Difficulty: course.Difficulty, CoverRef: pgtypex.Text(course.CoverRef), Semester: course.Semester, Column10: formatNumber(course.Credits), Schedule: schedule, StartAt: timex.Timestamptz(course.StartAt), EndAt: timex.Timestamptz(course.EndAt), InviteCode: course.InviteCode, Status: course.Status, Visibility: course.Visibility})
 	if err != nil {
 		return Course{}, err
 	}
@@ -107,7 +107,7 @@ func (s *txStore) UpdateCourse(ctx context.Context, course Course) (Course, erro
 	if err != nil {
 		return Course{}, err
 	}
-	row, err := s.q.UpdateCourse(ctx, sqlcgen.UpdateCourseParams{TenantID: course.TenantID, ID: course.ID, Name: course.Name, Description: course.Description, Type: course.Type, Difficulty: course.Difficulty, CoverUrl: pgtypex.Text(course.CoverURL), Semester: course.Semester, Column9: formatNumber(course.Credits), Schedule: schedule, StartAt: timex.Timestamptz(course.StartAt), EndAt: timex.Timestamptz(course.EndAt)})
+	row, err := s.q.UpdateCourse(ctx, sqlcgen.UpdateCourseParams{TenantID: course.TenantID, ID: course.ID, Name: course.Name, Description: course.Description, Type: course.Type, Difficulty: course.Difficulty, CoverRef: pgtypex.Text(course.CoverRef), Semester: course.Semester, Column9: formatNumber(course.Credits), Schedule: schedule, StartAt: timex.Timestamptz(course.StartAt), EndAt: timex.Timestamptz(course.EndAt)})
 	if err != nil {
 		return Course{}, err
 	}
@@ -154,7 +154,7 @@ func (s *txStore) ListCoursesDueToRun(ctx context.Context, now time.Time) ([]Cou
 	}
 	out := make([]Course, 0, len(rows))
 	for _, row := range rows {
-		course, err := courseFromFields(row.ID, row.TenantID, row.TeacherID, row.Name, row.Description, row.Type, row.Difficulty, row.CoverUrl, row.Semester, row.Credits, row.Schedule, row.StartAt, row.EndAt, row.InviteCode, row.Status, row.Visibility, row.CreatedAt, row.UpdatedAt)
+		course, err := courseFromFields(row.ID, row.TenantID, row.TeacherID, row.Name, row.Description, row.Type, row.Difficulty, row.CoverRef, row.Semester, row.Credits, row.Schedule, row.StartAt, row.EndAt, row.InviteCode, row.Status, row.Visibility, row.CreatedAt, row.UpdatedAt)
 		if err != nil {
 			return nil, err
 		}
@@ -171,7 +171,7 @@ func (s *txStore) ListCoursesDueToEnd(ctx context.Context, now time.Time) ([]Cou
 	}
 	out := make([]Course, 0, len(rows))
 	for _, row := range rows {
-		course, err := courseFromFields(row.ID, row.TenantID, row.TeacherID, row.Name, row.Description, row.Type, row.Difficulty, row.CoverUrl, row.Semester, row.Credits, row.Schedule, row.StartAt, row.EndAt, row.InviteCode, row.Status, row.Visibility, row.CreatedAt, row.UpdatedAt)
+		course, err := courseFromFields(row.ID, row.TenantID, row.TeacherID, row.Name, row.Description, row.Type, row.Difficulty, row.CoverRef, row.Semester, row.Credits, row.Schedule, row.StartAt, row.EndAt, row.InviteCode, row.Status, row.Visibility, row.CreatedAt, row.UpdatedAt)
 		if err != nil {
 			return nil, err
 		}

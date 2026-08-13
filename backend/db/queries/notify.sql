@@ -90,7 +90,7 @@ FROM system_announcement a
 LEFT JOIN announcement_read r ON r.announcement_id = a.id AND r.tenant_id = $1 AND r.account_id = $2
 WHERE (a.tenant_id IS NULL OR a.tenant_id = $1)
   AND (a.expire_at IS NULL OR a.expire_at > now())
-  AND (a.scope <> 3 OR a.target_roles && sqlc.arg(role_numbers)::smallint[])
+  AND (a.scope <> 3 OR a.target_roles && sqlc.arg(role_numbers)::smallint[] OR a.publisher_id = $2)
 ORDER BY a.published_at DESC
 LIMIT sqlc.arg(page_limit)::int OFFSET sqlc.arg(page_offset)::int;
 
@@ -99,7 +99,7 @@ SELECT COUNT(*)
 FROM system_announcement a
 WHERE (a.tenant_id IS NULL OR a.tenant_id = $1)
   AND (a.expire_at IS NULL OR a.expire_at > now())
-  AND (a.scope <> 3 OR a.target_roles && sqlc.arg(role_numbers)::smallint[]);
+  AND (a.scope <> 3 OR a.target_roles && sqlc.arg(role_numbers)::smallint[] OR a.publisher_id = sqlc.arg(account_id));
 
 -- name: GetVisibleAnnouncement :one
 SELECT a.id, a.tenant_id, a.title, a.content, a.scope, a.target_roles, a.publisher_id, a.published_at, a.expire_at,

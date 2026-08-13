@@ -13,52 +13,52 @@ import (
 
 // courseFromCreateRow 转换建课返回行为领域模型。
 func courseFromCreateRow(row sqlcgen.CreateCourseRow) (Course, error) {
-	return courseFromFields(row.ID, row.TenantID, row.TeacherID, row.Name, row.Description, row.Type, row.Difficulty, row.CoverUrl, row.Semester, row.Credits, row.Schedule, row.StartAt, row.EndAt, row.InviteCode, row.Status, row.Visibility, row.CreatedAt, row.UpdatedAt)
+	return courseFromFields(row.ID, row.TenantID, row.TeacherID, row.Name, row.Description, row.Type, row.Difficulty, row.CoverRef, row.Semester, row.Credits, row.Schedule, row.StartAt, row.EndAt, row.InviteCode, row.Status, row.Visibility, row.CreatedAt, row.UpdatedAt)
 }
 
 // courseFromGetRow 转换按 ID 读取的课程行。
 func courseFromGetRow(row sqlcgen.GetCourseByIDRow) (Course, error) {
-	return courseFromFields(row.ID, row.TenantID, row.TeacherID, row.Name, row.Description, row.Type, row.Difficulty, row.CoverUrl, row.Semester, row.Credits, row.Schedule, row.StartAt, row.EndAt, row.InviteCode, row.Status, row.Visibility, row.CreatedAt, row.UpdatedAt)
+	return courseFromFields(row.ID, row.TenantID, row.TeacherID, row.Name, row.Description, row.Type, row.Difficulty, row.CoverRef, row.Semester, row.Credits, row.Schedule, row.StartAt, row.EndAt, row.InviteCode, row.Status, row.Visibility, row.CreatedAt, row.UpdatedAt)
 }
 
 // courseFromCloneableRow 转换跨租户共享课程读取行。
 func courseFromCloneableRow(row sqlcgen.GetCloneableCourseByIDRow) (Course, error) {
-	return courseFromFields(row.ID, row.TenantID, row.TeacherID, row.Name, row.Description, row.Type, row.Difficulty, row.CoverUrl, row.Semester, row.Credits, row.Schedule, row.StartAt, row.EndAt, row.InviteCode, row.Status, row.Visibility, row.CreatedAt, row.UpdatedAt)
+	return courseFromFields(row.ID, row.TenantID, row.TeacherID, row.Name, row.Description, row.Type, row.Difficulty, row.CoverRef, row.Semester, row.Credits, row.Schedule, row.StartAt, row.EndAt, row.InviteCode, row.Status, row.Visibility, row.CreatedAt, row.UpdatedAt)
 }
 
 // courseFromInviteRow 转换按邀请码读取的课程行。
 func courseFromInviteRow(row sqlcgen.GetCourseByInviteCodeRow) (Course, error) {
-	return courseFromFields(row.ID, row.TenantID, row.TeacherID, row.Name, row.Description, row.Type, row.Difficulty, row.CoverUrl, row.Semester, row.Credits, row.Schedule, row.StartAt, row.EndAt, row.InviteCode, row.Status, row.Visibility, row.CreatedAt, row.UpdatedAt)
+	return courseFromFields(row.ID, row.TenantID, row.TeacherID, row.Name, row.Description, row.Type, row.Difficulty, row.CoverRef, row.Semester, row.Credits, row.Schedule, row.StartAt, row.EndAt, row.InviteCode, row.Status, row.Visibility, row.CreatedAt, row.UpdatedAt)
 }
 
 // courseFromUpdateRow 转换课程编辑返回行。
 func courseFromUpdateRow(row sqlcgen.UpdateCourseRow) (Course, error) {
-	return courseFromFields(row.ID, row.TenantID, row.TeacherID, row.Name, row.Description, row.Type, row.Difficulty, row.CoverUrl, row.Semester, row.Credits, row.Schedule, row.StartAt, row.EndAt, row.InviteCode, row.Status, row.Visibility, row.CreatedAt, row.UpdatedAt)
+	return courseFromFields(row.ID, row.TenantID, row.TeacherID, row.Name, row.Description, row.Type, row.Difficulty, row.CoverRef, row.Semester, row.Credits, row.Schedule, row.StartAt, row.EndAt, row.InviteCode, row.Status, row.Visibility, row.CreatedAt, row.UpdatedAt)
 }
 
 // courseFromStatusRow 转换课程状态流转返回行。
 func courseFromStatusRow(row sqlcgen.SetCourseStatusRow) (Course, error) {
-	return courseFromFields(row.ID, row.TenantID, row.TeacherID, row.Name, row.Description, row.Type, row.Difficulty, row.CoverUrl, row.Semester, row.Credits, row.Schedule, row.StartAt, row.EndAt, row.InviteCode, row.Status, row.Visibility, row.CreatedAt, row.UpdatedAt)
+	return courseFromFields(row.ID, row.TenantID, row.TeacherID, row.Name, row.Description, row.Type, row.Difficulty, row.CoverRef, row.Semester, row.Credits, row.Schedule, row.StartAt, row.EndAt, row.InviteCode, row.Status, row.Visibility, row.CreatedAt, row.UpdatedAt)
 }
 
 // courseFromVisibilityRow 转换课程共享状态返回行。
 func courseFromVisibilityRow(row sqlcgen.SetCourseVisibilityRow) (Course, error) {
-	return courseFromFields(row.ID, row.TenantID, row.TeacherID, row.Name, row.Description, row.Type, row.Difficulty, row.CoverUrl, row.Semester, row.Credits, row.Schedule, row.StartAt, row.EndAt, row.InviteCode, row.Status, row.Visibility, row.CreatedAt, row.UpdatedAt)
+	return courseFromFields(row.ID, row.TenantID, row.TeacherID, row.Name, row.Description, row.Type, row.Difficulty, row.CoverRef, row.Semester, row.Credits, row.Schedule, row.StartAt, row.EndAt, row.InviteCode, row.Status, row.Visibility, row.CreatedAt, row.UpdatedAt)
 }
 
 // courseFromRefreshRow 转换邀请码刷新返回行。
 func courseFromRefreshRow(row sqlcgen.RefreshCourseInviteCodeRow) (Course, error) {
-	return courseFromFields(row.ID, row.TenantID, row.TeacherID, row.Name, row.Description, row.Type, row.Difficulty, row.CoverUrl, row.Semester, row.Credits, row.Schedule, row.StartAt, row.EndAt, row.InviteCode, row.Status, row.Visibility, row.CreatedAt, row.UpdatedAt)
+	return courseFromFields(row.ID, row.TenantID, row.TeacherID, row.Name, row.Description, row.Type, row.Difficulty, row.CoverRef, row.Semester, row.Credits, row.Schedule, row.StartAt, row.EndAt, row.InviteCode, row.Status, row.Visibility, row.CreatedAt, row.UpdatedAt)
 }
 
 // courseFromTeacherRow 转换教师课程列表行。
 func courseFromTeacherRow(row sqlcgen.ListTeacherCoursesRow) (Course, error) {
-	return courseFromFields(row.ID, row.TenantID, row.TeacherID, row.Name, row.Description, row.Type, row.Difficulty, row.CoverUrl, row.Semester, row.Credits, row.Schedule, row.StartAt, row.EndAt, row.InviteCode, row.Status, row.Visibility, row.CreatedAt, row.UpdatedAt)
+	return courseFromFields(row.ID, row.TenantID, row.TeacherID, row.Name, row.Description, row.Type, row.Difficulty, row.CoverRef, row.Semester, row.Credits, row.Schedule, row.StartAt, row.EndAt, row.InviteCode, row.Status, row.Visibility, row.CreatedAt, row.UpdatedAt)
 }
 
 // courseFromStudentRow 转换学生课程列表行。
 func courseFromStudentRow(row sqlcgen.ListStudentCoursesRow) (Course, error) {
-	return courseFromFields(row.ID, row.TenantID, row.TeacherID, row.Name, row.Description, row.Type, row.Difficulty, row.CoverUrl, row.Semester, row.Credits, row.Schedule, row.StartAt, row.EndAt, row.InviteCode, row.Status, row.Visibility, row.CreatedAt, row.UpdatedAt)
+	return courseFromFields(row.ID, row.TenantID, row.TeacherID, row.Name, row.Description, row.Type, row.Difficulty, row.CoverRef, row.Semester, row.Credits, row.Schedule, row.StartAt, row.EndAt, row.InviteCode, row.Status, row.Visibility, row.CreatedAt, row.UpdatedAt)
 }
 
 // courseFromFields 统一转换 sqlc 为各课程查询生成的同构字段集合。
@@ -67,7 +67,7 @@ func courseFromFields(id, tenantID, teacherID int64, name, description string, t
 	if err != nil {
 		return Course{}, err
 	}
-	return Course{ID: id, TenantID: tenantID, TeacherID: teacherID, Name: name, Description: description, Type: typ, Difficulty: difficulty, CoverURL: pgtypex.TextValue(cover), Semester: semester, Credits: credits, Schedule: schedule, StartAt: timex.FromTimestamptz(startAt), EndAt: timex.FromTimestamptz(endAt), InviteCode: invite, Status: status, Visibility: visibility, CreatedAt: timex.FromTimestamptz(createdAt), UpdatedAt: timex.FromTimestamptz(updatedAt)}, nil
+	return Course{ID: id, TenantID: tenantID, TeacherID: teacherID, Name: name, Description: description, Type: typ, Difficulty: difficulty, CoverRef: pgtypex.TextValue(cover), Semester: semester, Credits: credits, Schedule: schedule, StartAt: timex.FromTimestamptz(startAt), EndAt: timex.FromTimestamptz(endAt), InviteCode: invite, Status: status, Visibility: visibility, CreatedAt: timex.FromTimestamptz(createdAt), UpdatedAt: timex.FromTimestamptz(updatedAt)}, nil
 }
 
 // chapterFromRow 转换章节表行。

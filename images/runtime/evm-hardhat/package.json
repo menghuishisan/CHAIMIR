@@ -4,6 +4,7 @@
   },
   "overrides": {
     "picomatch": "4.0.4",
-    "undici": "6.27.0"
+    "undici": "6.27.0",
+    "adm-zip": "0.6.0"
   }
 }

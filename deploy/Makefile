@@ -54,6 +54,10 @@ ingress-up: ## 安装 ingress-nginx 并打 namespace 标签(供 NetworkPolicy �
 	kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/$(INGRESS_NGINX_VERSION)/deploy/static/provider/cloud/deploy.yaml
 	kubectl wait --namespace ingress-nginx --for=condition=ready pod \
 		--selector=app.kubernetes.io/component=controller --timeout=180s
+	# LoadBalancer 必须在所有节点转发到真实 Ingress endpoint;本地 Docker Desktop/cloud-provider-kind
+	# 无法保证入口 Pod 与暴露节点一致,使用 Cluster 避免正式 443 被无 endpoint 节点重置。
+	kubectl -n ingress-nginx patch service ingress-nginx-controller --type=merge \
+		-p '{"spec":{"externalTrafficPolicy":"Cluster"}}'
 
 # ---- metrics-server ----
 .PHONY: metrics-up
@@ -195,17 +199,6 @@ harbor-up: supply-chain-secret-check ## 经容器化 Helm 安装 Harbor 到当�
 harbor-projects-ensure: supply-chain-secret-check ## 按镜像分类创建 Harbor project 和供应链 robot
 	@test -n "$$(sed -n 's/^SUPPLY_CHAIN_HARBOR_EXTERNAL_URL=//p' $(SUPPLY_CHAIN_CONFIG))" || { echo "请先在 $(SUPPLY_CHAIN_CONFIG) 填写 SUPPLY_CHAIN_HARBOR_EXTERNAL_URL"; exit 1; }
 	powershell -NoProfile -ExecutionPolicy Bypass -File scripts/harbor-projects-ensure.ps1 -ConfigPath "$(SUPPLY_CHAIN_CONFIG)" -SecretPath "$(SUPPLY_CHAIN_SECRET_FILE)"
-
-.PHONY: harbor-forward
-harbor-forward: ## 本地固定端口暴露 Harbor Ingress;在单独终端保持运行
-	@test -n "$$(sed -n 's/^SUPPLY_CHAIN_HARBOR_FORWARD_PORT=//p' $(SUPPLY_CHAIN_CONFIG))" || { echo "请先在 $(SUPPLY_CHAIN_CONFIG) 填写 SUPPLY_CHAIN_HARBOR_FORWARD_PORT"; exit 1; }
-	@test -n "$$(sed -n 's/^SUPPLY_CHAIN_HARBOR_FORWARD_NAMESPACE=//p' $(SUPPLY_CHAIN_CONFIG))" || { echo "请先在 $(SUPPLY_CHAIN_CONFIG) 填写 SUPPLY_CHAIN_HARBOR_FORWARD_NAMESPACE"; exit 1; }
-	@test -n "$$(sed -n 's/^SUPPLY_CHAIN_HARBOR_FORWARD_SERVICE=//p' $(SUPPLY_CHAIN_CONFIG))" || { echo "请先在 $(SUPPLY_CHAIN_CONFIG) 填写 SUPPLY_CHAIN_HARBOR_FORWARD_SERVICE"; exit 1; }
-	kubectl -n "$$(sed -n 's/^SUPPLY_CHAIN_HARBOR_FORWARD_NAMESPACE=//p' $(SUPPLY_CHAIN_CONFIG))" port-forward "svc/$$(sed -n 's/^SUPPLY_CHAIN_HARBOR_FORWARD_SERVICE=//p' $(SUPPLY_CHAIN_CONFIG))" "$$(sed -n 's/^SUPPLY_CHAIN_HARBOR_FORWARD_PORT=//p' $(SUPPLY_CHAIN_CONFIG)):80" --address "$$(sed -n 's/^SUPPLY_CHAIN_HARBOR_FORWARD_ADDRESS=//p' $(SUPPLY_CHAIN_CONFIG))"
-
-.PHONY: harbor-forward-status
-harbor-forward-status: ## 检查本地 Harbor 固定端口转发状态
-	powershell -NoProfile -Command "$$port = [int]((Get-Content $(SUPPLY_CHAIN_CONFIG) | Select-String '^SUPPLY_CHAIN_HARBOR_FORWARD_PORT=').Line.Split('=',2)[1]); Get-NetTCPConnection -LocalPort $$port -ErrorAction SilentlyContinue | Select-Object LocalAddress,LocalPort,State,OwningProcess"
 
 .PHONY: image-attestations-generate
 image-attestations-generate: supply-chain-secret-check ## 扫描/签名/验签镜像并回写 deploy 与 backend env 的沙箱准入证明

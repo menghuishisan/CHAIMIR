@@ -40,13 +40,13 @@ func acceptanceImageURL(image string) (string, error) {
 		return "", fmt.Errorf("IMAGE_REGISTRY 未配置")
 	}
 	prefix := registry + "/" + strings.TrimLeft(image, "/") + "@sha256:"
-	raw := strings.TrimSpace(osEnv("SANDBOX_IMAGE_ATTESTATIONS_JSON"))
+	raw := strings.TrimSpace(osEnv("PLATFORM_IMAGE_ATTESTATIONS_JSON"))
 	if raw == "" {
-		return "", fmt.Errorf("SANDBOX_IMAGE_ATTESTATIONS_JSON 缺少 %s 的镜像证明", image)
+		return "", fmt.Errorf("PLATFORM_IMAGE_ATTESTATIONS_JSON 缺少 %s 的镜像证明", image)
 	}
 	var items []acceptanceImageAttestation
 	if err := json.Unmarshal([]byte(raw), &items); err != nil {
-		return "", fmt.Errorf("SANDBOX_IMAGE_ATTESTATIONS_JSON 解析失败: %w", err)
+		return "", fmt.Errorf("PLATFORM_IMAGE_ATTESTATIONS_JSON 解析失败: %w", err)
 	}
 	for _, item := range items {
 		imageURL := strings.TrimSpace(item.ImageURL)
@@ -59,7 +59,7 @@ func acceptanceImageURL(image string) (string, error) {
 			return imageURL, nil
 		}
 	}
-	return "", fmt.Errorf("SANDBOX_IMAGE_ATTESTATIONS_JSON 未包含通过校验的 %s digest 镜像证明", image)
+	return "", fmt.Errorf("PLATFORM_IMAGE_ATTESTATIONS_JSON 未包含通过校验的 %s digest 镜像证明", image)
 }
 
 // acceptanceImageDigest 提取 image@sha256:... 中的不可变 digest。
@@ -456,13 +456,16 @@ ON CONFLICT (tenant_id, task_id, version) DO UPDATE SET passed=EXCLUDED.passed, 
 func seedContentRows(ctx context.Context, tx pgx.Tx) error {
 	bodyLab, _ := jsonb(map[string]any{"summary": "使用 Foundry 复现可重入漏洞并完成修复。", "steps": []string{"审计 withdraw 调用顺序", "编写攻击合约", "应用 checks-effects-interactions 修复"}})
 	bodyContest, _ := jsonb(map[string]any{
-		"scenario":  "给定简化金库合约,提交能够触发资金重复提取的最小攻击代码。",
-		"flag_rule": "链上余额断言通过后计分",
+		"title":      "Reentrancy Vault 攻击题",
+		"scenario":   "给定简化金库合约,提交能够触发资金重复提取的最小攻击代码。",
+		"statement":  "请提交题面要求的答案,系统会按题目声明的答案键进行判定。",
+		"submit_key": "answer",
+		"flag_rule":  "链上余额断言通过后计分",
 		"judge_config": map[string]any{
 			"judger_code": "solidity-unit",
 			"suite_ref":   "minio://chaimir-code/910000000000000001/judge/suites/ctf-reentrancy-vault/public-regression.tar.gz",
 			"max_score":   100,
-			"expectation": map[string]any{"public": true},
+			"expectation": map[string]any{"public": true, "flag_input_key": "answer"},
 		},
 	})
 	bodyBattle, _ := jsonb(map[string]any{
@@ -545,6 +548,8 @@ ON CONFLICT (item_id) DO UPDATE SET body=EXCLUDED.body, sensitive_fields=EXCLUDE
 }
 
 // seedTeachingRows 写入课程、课节、作业、提交、讨论和课程成绩。
+// 课程不写 cover_ref:种子只写库不往 MinIO 放字节,编个引用会让封面「有引用但取不到」;
+// 留空则走设计好的纸材质回落,真实封面在验收时经上传入口产生(同 seedAcceptanceTenant 的说明)。
 func seedTeachingRows(ctx context.Context, tx pgx.Tx) error {
 	schedule, _ := jsonb(map[string]any{"items": []map[string]any{{"weekday": 2, "time": "13:30-15:05", "room": "链安实验室 A302"}}})
 	start := time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)
@@ -652,8 +657,8 @@ ON CONFLICT (tenant_id, course_id, student_id) DO UPDATE SET rating=EXCLUDED.rat
 	if err := execJSON(ctx, tx, `
 INSERT INTO grade_weight (id, tenant_id, course_id, source_type, source_ref, weight)
 VALUES ($1,$2,$3,1,$4,100.00)
-ON CONFLICT (tenant_id, course_id, source_type, source_ref) DO UPDATE SET weight=EXCLUDED.weight, updated_at=now()`,
-		acceptanceIDs.GradeWeight, acceptanceIDs.TenantID, acceptanceIDs.Course, "assignment:910000000000005031"); err != nil {
+ON CONFLICT (id) DO UPDATE SET tenant_id=EXCLUDED.tenant_id, course_id=EXCLUDED.course_id, source_type=EXCLUDED.source_type, source_ref=EXCLUDED.source_ref, weight=EXCLUDED.weight, updated_at=now()`,
+		acceptanceIDs.GradeWeight, acceptanceIDs.TenantID, acceptanceIDs.Course, "910000000000005031"); err != nil {
 		return err
 	}
 	return execJSON(ctx, tx, `
@@ -674,6 +679,7 @@ ON CONFLICT (id) DO UPDATE SET chapter_id=EXCLUDED.chapter_id, title=EXCLUDED.ti
 
 // seedExperimentRows 写入实验定义、分组、实例、检查点和报告。
 func seedExperimentRows(ctx context.Context, tx pgx.Tx) error {
+	groupConfig, _ := jsonb(map[string]any{"size": 2, "roles": []string{"leader", "member"}})
 	components, _ := jsonb(map[string]any{
 		"envs": []map[string]any{{
 			"id":                         "lab-foundry",
@@ -696,10 +702,10 @@ func seedExperimentRows(ctx context.Context, tx pgx.Tx) error {
 		},
 	})
 	if err := execJSON(ctx, tx, `
-INSERT INTO experiment (id, tenant_id, course_id, author_id, template_ref, template_version, name, description, components, collab_mode, require_report, wizard_step, status)
-VALUES ($1,$2,$3,$4,'lab-reentrancy-foundry','1.0.0','可重入漏洞攻防实验','学生需要复现攻击、完成修复并提交报告。',$5,2,true,6,2)
-ON CONFLICT (id) DO UPDATE SET course_id=EXCLUDED.course_id, author_id=EXCLUDED.author_id, template_ref=EXCLUDED.template_ref, template_version=EXCLUDED.template_version, name=EXCLUDED.name, description=EXCLUDED.description, components=EXCLUDED.components, collab_mode=EXCLUDED.collab_mode, require_report=EXCLUDED.require_report, wizard_step=EXCLUDED.wizard_step, status=EXCLUDED.status, deleted_at=NULL, updated_at=now()`,
-		acceptanceIDs.Experiment, acceptanceIDs.TenantID, acceptanceIDs.Course, acceptanceIDs.TeacherMain, components); err != nil {
+	INSERT INTO experiment (id, tenant_id, course_id, author_id, template_ref, template_version, name, description, components, collab_mode, group_config, require_report, wizard_step, status)
+	VALUES ($1,$2,$3,$4,'lab-reentrancy-foundry','1.0.0','可重入漏洞攻防实验','学生需要复现攻击、完成修复并提交报告。',$5,2,$6,true,6,2)
+	ON CONFLICT (id) DO UPDATE SET course_id=EXCLUDED.course_id, author_id=EXCLUDED.author_id, template_ref=EXCLUDED.template_ref, template_version=EXCLUDED.template_version, name=EXCLUDED.name, description=EXCLUDED.description, components=EXCLUDED.components, collab_mode=EXCLUDED.collab_mode, group_config=EXCLUDED.group_config, require_report=EXCLUDED.require_report, wizard_step=EXCLUDED.wizard_step, status=EXCLUDED.status, deleted_at=NULL, updated_at=now()`,
+		acceptanceIDs.Experiment, acceptanceIDs.TenantID, acceptanceIDs.Course, acceptanceIDs.TeacherMain, components, groupConfig); err != nil {
 		return err
 	}
 	if err := execJSON(ctx, tx, `
@@ -965,8 +971,35 @@ ON CONFLICT (id) DO UPDATE SET scope=EXCLUDED.scope, semester_id=EXCLUDED.semest
 		acceptanceIDs.Transcript, acceptanceIDs.TenantID, acceptanceIDs.StudentA, acceptanceIDs.Semester)
 }
 
+// seedIsolationGradeRows 为 SaaS 隔离租户提供空数据态所需的最小成绩配置。
+// 不写课程成绩、审核、申诉或成绩单，确保隔离租户仍保持业务空态。
+func seedIsolationGradeRows(ctx context.Context, tx pgx.Tx) error {
+	mapping, _ := jsonb([]map[string]any{{"min": 90, "grade": "A", "gpa": 4.0}, {"min": 80, "grade": "B", "gpa": 3.0}, {"min": 60, "grade": "C", "gpa": 2.0}, {"min": 0, "grade": "F", "gpa": 0.0}})
+	warningRules, _ := jsonb(map[string]any{"min_gpa": 2.0, "fail_count": 1})
+	if err := execJSON(ctx, tx, `
+INSERT INTO grade_level_config (id, tenant_id, name, mapping, warning_rules, is_default)
+VALUES ($1,$2,'四分制等级换算',$3,$4,true)
+ON CONFLICT (id) DO UPDATE SET tenant_id=EXCLUDED.tenant_id, name=EXCLUDED.name, mapping=EXCLUDED.mapping, warning_rules=EXCLUDED.warning_rules, is_default=true, updated_at=now()`,
+		acceptanceIDs.GradeLevel+1, acceptanceIDs.TenantIsolation, mapping, warningRules); err != nil {
+		return err
+	}
+	return execJSON(ctx, tx, `
+INSERT INTO semester (id, tenant_id, name, start_date, end_date, is_current)
+VALUES ($1,$2,'2026-2027-1','2026-09-01','2027-01-15',true)
+ON CONFLICT (tenant_id, name) DO UPDATE SET start_date=EXCLUDED.start_date, end_date=EXCLUDED.end_date, is_current=EXCLUDED.is_current`,
+		acceptanceIDs.Semester+1, acceptanceIDs.TenantIsolation)
+}
+
 // seedAdminRows 写入管理后台配置、告警、统计和备份记录。
 func seedAdminRows(ctx context.Context, tx pgx.Tx) error {
+	platformValue, _ := jsonb(map[string]any{"acceptance_mode": true, "max_retries": 3})
+	if err := execJSON(ctx, tx, `
+INSERT INTO system_config (id, scope, tenant_id, key, value, version, updated_by)
+VALUES ($1,1,NULL,'acceptance.platform.runtime',$2,1,$3)
+ON CONFLICT (scope, key) WHERE tenant_id IS NULL DO UPDATE SET value=EXCLUDED.value, version=system_config.version+1, updated_by=EXCLUDED.updated_by, updated_at=now()`,
+		acceptanceIDs.SystemConfig+1, platformValue, acceptanceIDs.SchoolAdmin); err != nil {
+		return err
+	}
 	value, _ := jsonb(map[string]any{"max_concurrent_sandbox": 30, "idle_timeout_min": 45})
 	if err := execJSON(ctx, tx, `
 INSERT INTO system_config (id, scope, tenant_id, key, value, version, updated_by)

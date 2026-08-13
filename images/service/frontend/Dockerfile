@@ -15,6 +15,8 @@ COPY frontend/package.json frontend/pnpm-lock.yaml frontend/pnpm-workspace.yaml 
 COPY frontend/.eslintrc.js frontend/.prettierrc.json ./
 COPY frontend/packages ./packages
 COPY frontend/apps ./apps
+# Vite 与 Nginx 共同读取同一份生产安全头配置,构建阶段只复制该真相源供 Vite 解析。
+COPY images/service/frontend/security-headers.conf /src/images/service/frontend/security-headers.conf
 
 RUN pnpm install --frozen-lockfile
 RUN pnpm build && \
@@ -24,8 +26,8 @@ RUN pnpm build && \
 # 构建期预压缩:运行期根文件系统只读(manifest security.read_only_root_filesystem),
 # Nginx 无处写压缩缓存,只能在此产出 .gz 供 gzip_static 直接发送。
 # 用最高压缩比(-9)——构建一次、分发无数次,运行期零 CPU。
-# 仅压缩文本类资源;woff2/woff 已是压缩格式,再压反而更大。
-RUN find /out -type f \( -name '*.js' -o -name '*.css' -o -name '*.html' -o -name '*.json' -o -name '*.svg' -o -name '*.map' \) \
+# 仅压缩文本类资源;woff2/woff 与 avif/webp/png 已是压缩格式,再压反而更大。
+RUN find /out -type f \( -name '*.js' -o -name '*.css' -o -name '*.html' -o -name '*.json' -o -name '*.svg' -o -name '*.map' -o -name '*.webmanifest' \) \
       -exec gzip -9 -k {} +
 
 FROM ${NGINX_RUNTIME_IMAGE}

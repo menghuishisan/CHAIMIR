@@ -1,6 +1,7 @@
 /**
  * Select:单选下拉框(基于 Radix Select 封装)。
- * Trigger 样式与盒式 Input 一致;Content 走 Portal + z-dropdown,
+ * Trigger 样式与盒式 Input 一致;Content 走 Portal + z-modal,
+ * 确保弹窗内的下拉项位于 Modal 遮罩之上,
  * 进出场 pop-in / pop-out 且 transform-origin 对齐触发源(§4.3 浮层从触发源缩放淡入);
  * 选项带 Check 指示,键盘导航与 typeahead 由 Radix 保证。
  * 深色面板(沉浸式工作台,§7.1)传 onDark,改用墨底语义令牌 —— 页面不在深色语境里另拼一套配色。
@@ -77,7 +78,7 @@ export function Select({
           position="popper"
           sideOffset={4}
           className={cn(
-            "z-dropdown max-h-72 overflow-hidden rounded-lg border shadow-md origin-radix-select data-[state=open]:animate-pop-in data-[state=closed]:animate-pop-out",
+            "z-modal max-h-72 overflow-hidden rounded-lg border shadow-md origin-radix-select data-[state=open]:animate-pop-in data-[state=closed]:animate-pop-out",
             onDark ? "border-dark-line bg-dark-elevated" : "border-line bg-surface",
           )}
         >

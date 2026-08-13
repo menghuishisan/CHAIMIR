@@ -31,6 +31,8 @@ RUN if [ -n "${GO_MODULE_PROXY}" ]; then go env -w GOPROXY="${GO_MODULE_PROXY}";
     && go get github.com/libp2p/go-libp2p@v0.39.1 \
         github.com/quic-go/quic-go@v0.49.1 \
         github.com/pion/interceptor@v0.1.39 \
+        golang.org/x/text@v0.39.0 \
+        google.golang.org/grpc@v1.82.1 \
     && sed -i 's|"github.com/libp2p/go-libp2p/p2p/muxer/yamux"|"github.com/libp2p/go-libp2p/p2p/muxer/yamux"\n\t"github.com/libp2p/go-libp2p/p2p/net/swarm"|' op-node/p2p/host.go \
     && sed -i 's|libp2p.MultiaddrResolver(madns.DefaultResolver)|libp2p.MultiaddrResolver(swarm.ResolverFromMaDNS{Resolver: madns.DefaultResolver})|' op-node/p2p/host.go \
     && go mod tidy \

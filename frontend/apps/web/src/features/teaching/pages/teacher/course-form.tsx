@@ -14,6 +14,7 @@ import {
 import {
   Button,
   Callout,
+  CoverImage,
   FormField,
   Input,
   Modal,
@@ -31,10 +32,13 @@ import { api } from '../../../../app/api'
 import {
   COURSE_TYPES,
   TEACHING_DIFFICULTIES,
+  courseTypeCover,
   courseTypeLabel,
   teachingDifficultyLabel,
 } from '../../../../utils/labels/teaching'
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
+import { ImageUploadField, readImageDataUrl } from '../../../../components/ImageUploadField'
+import { useCourseCoverSrc } from '../../useCourseCoverSrc'
 
 /** 星期取值与显示名:课程表用它构造结构化的上课时间,不让用户手写 JSON。 */
 const WEEKDAYS = [
@@ -75,6 +79,11 @@ export function CourseFormModal({ course, onClose, onSaved }: CourseFormModalPro
   const [period, setPeriod] = useState(readScheduleString(course, SCHEDULE_PERIOD_KEY, ''))
   const [startAt, setStartAt] = useState(toDateInput(course?.start_at))
   const [endAt, setEndAt] = useState(toDateInput(course?.end_at))
+  const [coverRef, setCoverRef] = useState(course?.cover_ref ?? '')
+  const [coverPreview, setCoverPreview] = useState('')
+  // 编辑已有封面时换一次投放授权用于预览;本次刚选的图优先,清空后两者都不显示。
+  const savedCoverSrc = useCourseCoverSrc(course?.id, course?.cover_ref)
+  const coverSrc = coverPreview !== '' ? coverPreview : coverRef !== '' ? savedCoverSrc : ''
 
   const [errors, setErrors] = useState<Record<string, string | null>>({})
   const [formError, setFormError] = useState<string>()
@@ -117,6 +126,8 @@ export function CourseFormModal({ course, onClose, onSaved }: CourseFormModalPro
         schedule: { [SCHEDULE_WEEKDAY_KEY]: weekday, [SCHEDULE_PERIOD_KEY]: period.trim() },
         start_at: toIsoStart(startAt),
         end_at: toIsoEnd(endAt),
+        // 留空即不设封面:传空串会把「没设过」和「设了个空值」混成一种状态
+        cover_ref: coverRef === '' ? undefined : coverRef,
       }
       try {
         if (editing) {
@@ -137,6 +148,7 @@ export function CourseFormModal({ course, onClose, onSaved }: CourseFormModalPro
     },
     [
       course?.id,
+      coverRef,
       credits,
       description,
       difficulty,
@@ -282,6 +294,38 @@ export function CourseFormModal({ course, onClose, onSaved }: CourseFormModalPro
                 />
               </FormField>
             </div>
+
+            <FormField
+              label="课程封面"
+              htmlFor={`${fieldId}-cover`}
+              helper="留空时按课程形式自动配一张。"
+            >
+              <ImageUploadField
+                inputId={`${fieldId}-cover`}
+                hasImage={coverRef !== ''}
+                failureMessage="封面这次没有更新成功,请稍后重试。"
+                preview={
+                  <CoverImage
+                    id={course?.id ?? ''}
+                    coverSrc={coverSrc}
+                    name={name || '课程'}
+                    glyph={courseTypeCover(Number(type) as CourseType).glyph}
+                    accent={courseTypeCover(Number(type) as CourseType).accent}
+                    className="w-40 shrink-0"
+                  />
+                }
+                onUpload={async (file, onProgress) => {
+                  const uploaded = await api.teaching.uploadCourseCover(file, onProgress)
+                  setCoverRef(uploaded.object_ref)
+                  // 此刻封面还只在暂存位、课程也可能还不存在,拿不到投放地址,先用本地文件预览
+                  setCoverPreview(await readImageDataUrl(file))
+                }}
+                onCleared={() => {
+                  setCoverRef('')
+                  setCoverPreview('')
+                }}
+              />
+            </FormField>
 
             {formError ? <Callout tone="danger">{formError}</Callout> : null}
           </ModalBody>

@@ -18,8 +18,8 @@ description: Chainlink 预言机节点镜像。
 source:
   type: thin-wrapper
 upstream:
-  image: smartcontract/chainlink:2.54.0
-  digest: sha256:77a78d4e427c39b3810bf740ba7582240c4c6538d31d0e1069ba0852acb58bc5
+  image: smartcontract/chainlink:2.58.0
+  digest: sha256:56e653e0ef43759e7e1fe24bbd7b29db7de53ca7a86a99aa949e9fa9ff4813ca
   reuse_policy: thin-wrapper
 data_driven: true
 capabilities:
@@ -79,7 +79,7 @@ selftest:
         - --version
 supply_chain:
   deployable: false
-  block_reason: 2026-07-12 官方最新 smartcontract/chainlink:2.54.0 的 Linux/amd64 产物仍由 Go 1.26.4 构建,Trivy 0.71.2 检出 CVE-2026-39822 HIGH,修复版本为 Go 1.26.5;在官方发布使用修复工具链的稳定镜像前不得部署。
+  block_reason: "官方 smartcontract/chainlink:2.58.0 amd64 digest 已完成拉取,但主 chainlink 二进制仍命中 Go 标准库 HIGH;在上游发布 Go 修复版本或完成可验证源码重建、HIGH/CRITICAL 扫描、Cosign 签名证明并写入正式 digest lock 前不得部署。"
   sbom: true
   trivy_required: true
   cosign_required: true

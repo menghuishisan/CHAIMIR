@@ -16,7 +16,7 @@ func courseDTO(c Course) (CourseDTO, error) {
 	if err != nil {
 		return CourseDTO{}, err
 	}
-	return CourseDTO{ID: ids.ID(c.ID), TenantID: ids.ID(c.TenantID), TeacherID: ids.ID(c.TeacherID), Name: c.Name, Description: c.Description, Type: c.Type, Difficulty: c.Difficulty, CoverURL: c.CoverURL, Semester: c.Semester, Credits: c.Credits, Schedule: schedule, StartAt: formatTime(c.StartAt), EndAt: formatTime(c.EndAt), InviteCode: c.InviteCode, Status: c.Status, Visibility: c.Visibility, CreatedAt: formatTime(c.CreatedAt), UpdatedAt: formatTime(c.UpdatedAt)}, nil
+	return CourseDTO{ID: ids.ID(c.ID), TenantID: ids.ID(c.TenantID), TeacherID: ids.ID(c.TeacherID), Name: c.Name, Description: c.Description, Type: c.Type, Difficulty: c.Difficulty, CoverRef: c.CoverRef, Semester: c.Semester, Credits: c.Credits, Schedule: schedule, StartAt: formatTime(c.StartAt), EndAt: formatTime(c.EndAt), InviteCode: c.InviteCode, Status: c.Status, Visibility: c.Visibility, CreatedAt: formatTime(c.CreatedAt), UpdatedAt: formatTime(c.UpdatedAt)}, nil
 }
 
 // chapterDTO 将章节领域模型转换为 HTTP 响应结构。

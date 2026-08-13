@@ -18,6 +18,14 @@ import (
 	"chaimir/pkg/snowflake"
 )
 
+const (
+	// teachingModuleName 是 M6 在统一文件服务对象路径与授权边界里的模块段。
+	teachingModuleName = "teaching"
+	// lessonMaterialResourceType 与 courseCoverResourceType 是 M6 两类对象的资源段。
+	lessonMaterialResourceType = "material"
+	courseCoverResourceType    = "cover"
+)
+
 // Service 承载 teaching 模块业务编排,依赖 repo 接口和跨模块 contracts。
 type Service struct {
 	store              Store
@@ -32,6 +40,7 @@ type Service struct {
 	files              fileService
 	cfg                config.TeachingConfig
 	materialMaxBytes   int64
+	coverMaxBytes      int64
 	materialScanPolicy upload.ScanPolicy
 }
 
@@ -39,6 +48,7 @@ type Service struct {
 type objectStorage interface {
 	Delete(ctx context.Context, bucket, key string) error
 	Put(ctx context.Context, bucket, key string, r io.Reader, size int64, contentType string) error
+	CopyObject(ctx context.Context, srcBucket, srcKey, dstBucket, dstKey string) (int64, error)
 	BucketAttach() string
 	BucketReport() string
 }
@@ -70,6 +80,7 @@ type ServiceDeps struct {
 	FileService            fileService
 	Config                 config.TeachingConfig
 	CourseMaterialMaxBytes int64
+	CourseCoverMaxBytes    int64
 	MaterialScanPolicy     upload.ScanPolicy
 }
 
@@ -103,10 +114,10 @@ func NewService(deps ServiceDeps) (*Service, error) {
 	if deps.Transfers == nil || objects == nil || deps.FileService == nil {
 		return nil, fmt.Errorf("teaching service 缺少统一导入导出或文件服务依赖")
 	}
-	if deps.Config.CourseGradesMaxRows <= 0 || deps.Config.JudgeOutboxBatchSize <= 0 || deps.Config.GradeEventOutboxBatchSize <= 0 || deps.Config.GradeEventOutboxStaleMs <= 0 || deps.Config.GradeExportBatchSize <= 0 || deps.CourseMaterialMaxBytes <= 0 {
+	if deps.Config.CourseGradesMaxRows <= 0 || deps.Config.JudgeOutboxBatchSize <= 0 || deps.Config.GradeEventOutboxBatchSize <= 0 || deps.Config.GradeEventOutboxStaleMs <= 0 || deps.Config.GradeExportBatchSize <= 0 || deps.CourseMaterialMaxBytes <= 0 || deps.CourseCoverMaxBytes <= 0 {
 		return nil, fmt.Errorf("teaching service 配置不完整")
 	}
-	return &Service{store: deps.Store, ids: deps.IDs, audit: deps.Audit, identity: deps.Identity, content: deps.Content, judge: deps.Judge, bus: deps.Bus, transfers: deps.Transfers, storage: objects, files: deps.FileService, cfg: deps.Config, materialMaxBytes: deps.CourseMaterialMaxBytes, materialScanPolicy: deps.MaterialScanPolicy}, nil
+	return &Service{store: deps.Store, ids: deps.IDs, audit: deps.Audit, identity: deps.Identity, content: deps.Content, judge: deps.Judge, bus: deps.Bus, transfers: deps.Transfers, storage: objects, files: deps.FileService, cfg: deps.Config, materialMaxBytes: deps.CourseMaterialMaxBytes, coverMaxBytes: deps.CourseCoverMaxBytes, materialScanPolicy: deps.MaterialScanPolicy}, nil
 }
 
 // currentIdentity 读取租户账号身份。

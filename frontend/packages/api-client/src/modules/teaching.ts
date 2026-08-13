@@ -20,6 +20,8 @@ import type {
   AssignmentDetail,
   Draft,
   LessonMaterialAccess,
+  CourseCoverUpload,
+  CourseCoverAccess,
   Submission,
   SubmitRequest,
   BatchMembersRequest,
@@ -208,6 +210,28 @@ export class TeachingApi {
    */
   async issueLessonMaterialAccess(lessonId: string): Promise<LessonMaterialAccess> {
     return this.client.post(`/teaching/lessons/${lessonId}/material/access`)
+  }
+
+  /**
+   * 上传课程封面,返回对象引用。
+   * 引用要随 createCourse 或 updateCourse 一起提交才会生效 —— 上传不绑课程 id,
+   * 所以「新建课程时先传图」与「后续改封面」共用这一条路径。
+   */
+  async uploadCourseCover(
+    file: File,
+    onProgress?: (progress: number) => void
+  ): Promise<CourseCoverUpload> {
+    const formData = new FormData()
+    formData.append('file', file)
+    return this.client.postFormData('/teaching/courses/cover', formData, onProgress)
+  }
+
+  /**
+   * 换取课程封面投放授权,拿到 token 后交给 storage.streamUrl 作 img 地址。
+   * 封面只对能看到该课程的人可见,故没有公开路径,每次显示都要重新换取授权。
+   */
+  async issueCourseCoverAccess(courseId: string): Promise<CourseCoverAccess> {
+    return this.client.post(`/teaching/courses/${courseId}/cover/access`)
   }
 
   /**

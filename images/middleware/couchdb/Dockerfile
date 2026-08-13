@@ -4,10 +4,14 @@ FROM cgr.dev/chainguard/wolfi-base@sha256:02dab76bd852a70556b5b2002195c8a5fdab77
 LABEL org.opencontainers.image.title="middleware/couchdb"
 LABEL org.opencontainers.image.description="Chaimir CouchDB middleware on Wolfi"
 
-RUN apk add --no-cache couchdb-3.3=3.3.3-r16 couchdb-3.3-compat=3.3.3-r16
+RUN for attempt in 1 2 3 4 5 6 7 8; do \
+        if apk add --no-cache --timeout 300 couchdb-3.3=3.3.3-r16 couchdb-3.3-compat=3.3.3-r16; then break; fi; \
+        if [ "$attempt" -eq 8 ]; then echo "CouchDB package installation failed after 8 attempts" >&2; exit 1; fi; \
+        sleep $((attempt * 3)); \
+    done
 COPY entrypoint.sh /usr/local/bin/chaimir-couchdb-entrypoint
-RUN addgroup -g 5984 couchdb || true \
-    && adduser -D -H -u 5984 -G couchdb couchdb || true \
+RUN if ! grep -q '^couchdb:' /etc/group; then addgroup -g 5984 couchdb; fi \
+    && if ! grep -q '^couchdb:' /etc/passwd; then adduser -D -H -u 5984 -G couchdb couchdb; fi \
     && mkdir -p /opt/couchdb/data /opt/couchdb/etc/local.d /run/couchdb \
     && chown -R 5984:5984 /opt/couchdb/data /opt/couchdb/etc/local.d /run/couchdb \
     && chmod 0755 /usr/local/bin/chaimir-couchdb-entrypoint

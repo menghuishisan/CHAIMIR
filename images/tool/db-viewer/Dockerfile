@@ -13,6 +13,8 @@ RUN test "$(git rev-parse HEAD)" = "${PGWEB_COMMIT}" \
         github.com/sirupsen/logrus@v1.9.4 \
         golang.org/x/crypto@v0.52.0 \
         golang.org/x/net@v0.55.0 \
+        golang.org/x/text@v0.39.0 \
+        google.golang.org/grpc@v1.82.1 \
     && go mod tidy \
     && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o /out/pgweb .
 

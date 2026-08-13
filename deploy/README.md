@@ -124,18 +124,16 @@ cd deploy
 make supply-chain-tools-pull
 make supply-chain-tools-check
 make harbor-up
-make harbor-forward
 make harbor-projects-ensure
 ```
 
-Docker Desktop 本地没有固定入口 IP 时,不要把 ingress 的 `172.18.x.x` 写入配置或 hosts;该地址会随
-Docker/K8s 重启变化。统一使用 `SUPPLY_CHAIN_HARBOR_EXTERNAL_URL=https://registry.chaimir.io`
-和 `make harbor-forward` 暴露 Harbor Ingress Controller。`harbor-forward` 需要在单独终端保持运行;
-它按 `SUPPLY_CHAIN_HARBOR_FORWARD_ADDRESS` 监听 `SUPPLY_CHAIN_HARBOR_FORWARD_PORT`,并且必须转发
-Ingress Controller,不能直连 `harbor-core`,否则 `/v2/` 上传路径与生产不一致。生产/预发布必须通过交付配置把
-`SUPPLY_CHAIN_HARBOR_EXTERNAL_URL` 和 `SUPPLY_CHAIN_REGISTRY` 覆盖为 HTTPS 真实域名。
+Docker Desktop 本地没有固定入口 IP 时,不要把 Ingress 的 `172.18.x.x` 写入配置或 hosts;该地址会随
+Docker/Kubernetes 重启变化。`SUPPLY_CHAIN_HARBOR_EXTERNAL_URL`、`SUPPLY_CHAIN_REGISTRY` 与
+`SUPPLY_CHAIN_REGISTRY_ENDPOINT` 必须都等于同一个 HTTPS 域名 `registry.chaimir.io`。宿主机 hosts 只解析该域名，
+镜像构建、签名、验签、digest 锁和集群运行时都走其标准 443 入口；禁止 port-forward、附加端口或直连 `harbor-core`，
+否则上传路径、TLS 和生产链路会分叉。
 
-`harbor-projects-ensure` 创建镜像规范里的 Harbor project:`service/runtime/infra/tool/judger/sim/sidecar/init/base/middleware/observability/ingress`,并创建供应链 robot 账号。平台镜像不得推到默认 `library`,否则 digest 锁和准入策略无法按分类审计。
+`harbor-projects-ensure` 创建镜像规范里的 Harbor project:`service/runtime/infra/tool/judger/sim/sidecar/init/base/middleware/observability/ingress/network`,并创建供应链 robot 账号。平台镜像不得推到默认 `library`,否则 digest 锁和准入策略无法按分类审计。
 
 该目标通过 `deploy/scripts/harbor-projects-ensure.ps1` 运行,避免把 PowerShell 逻辑塞进 Makefile 字符串里。首次创建 robot 时,Harbor 只返回一次 token;脚本会把 `HARBOR_ROBOT_USERNAME` 和 `HARBOR_ROBOT_PASSWORD` 回写到被忽略的 `deploy/config/supply-chain.secret.env`,不得提交。
 
@@ -147,7 +145,7 @@ make image-attestations-generate
 ```
 
 该目标会通过容器化 Trivy/Cosign 扫描、生成 CycloneDX SBOM、签名镜像、签署 SBOM 证明并分别验证 digest 锁中的镜像,再把
-`SANDBOX_IMAGE_ATTESTATIONS_JSON` 同步回写到 `deploy/config/chaimir.env` 与
+`PLATFORM_IMAGE_ATTESTATIONS_JSON` 同步回写到 `deploy/config/chaimir.env` 与
 `backend/.env`。Cosign 私钥目录固定由 `SUPPLY_CHAIN_COSIGN_KEY_HOST_DIR` 指向,默认是
 `deploy/config/cosign/`;Docker registry 认证目录由 `SUPPLY_CHAIN_DOCKER_CONFIG_HOST_DIR`
 指向,默认是 `deploy/config/docker-auth/`。这两个目录只保存本地/私有化凭据,已被 Git 忽略,
@@ -155,8 +153,8 @@ make image-attestations-generate
 Harbor 入口,必须与 `SUPPLY_CHAIN_REGISTRY` 的主机名一致。生产/预发布环境应由 CI/Harbor/KMS
 提供对应密钥和认证配置。
 
-只有进入 Chaimir 镜像供应链或实验真实测试流程时才启动 `make harbor-forward`;日常只打开 Docker
-Desktop 做其他项目时不应自动占用该端口。生产不得依赖 port-forward。
+本地供应链和实验测试都直接使用 `https://registry.chaimir.io` 的标准 443 入口；日常只打开 Docker
+Desktop 做其他项目时不会占用额外 Harbor 端口。生产与本地不使用两套 registry 地址。
 
 `SUPPLY_CHAIN_TRIVY_IMAGE`、`SUPPLY_CHAIN_COSIGN_IMAGE`、`SUPPLY_CHAIN_HELM_IMAGE` 使用 digest 固定。当前 Trivy 固定为 0.72.0,Cosign 固定为 2.4.3（与 policy-controller 0.13.1 的 legacy 签名格式契约一致）;GitHub 工作流也显式安装同一 Cosign 版本。本地、私有化与 CI 使用项目私钥且不上传公共透明日志。需要升级工具时,先拉取目标稳定版本并确认 digest与命令参数,再同步更新 `config/chaimir.env` 和工作流版本,不得提交可变 `latest`。
 
@@ -183,7 +181,7 @@ README、docs 或普通应用提交不直接创建 staging Deployment。只有�
 所需 GitHub Secrets:`HARBOR_REGISTRY`、`HARBOR_USERNAME`、`HARBOR_PASSWORD`、
 `COSIGN_KEY`、`COSIGN_PASSWORD`、`IMAGE_METADATA_BOT_TOKEN`、`KUBECONFIG_STAGING`、`KUBECONFIG_PROD_SAAS`。仓库还必须启用 Auto-merge;`IMAGE_METADATA_BOT_TOKEN` 使用能触发 PR 检查的 GitHub App 或细粒度 PAT,不得用默认 `GITHUB_TOKEN` 替代。
 
-默认 `ubuntu-latest` runner 必须能通过 HTTPS 访问 `HARBOR_REGISTRY` 与目标 staging/prod Kubernetes API。本机 `registry.chaimir.io` 依赖端口转发,只属于本地供应链,不能填写为 GitHub 托管 runner 的 registry。若交付环境只提供私网 Harbor/K8s,必须先在同一受控网络注册专用自托管 runner,再将镜像构建和部署 job 的 `runs-on` 收敛到该 runner 标签;不得通过暴露本机临时端口或提交本地凭据绕过网络边界。
+默认 `ubuntu-latest` runner 必须能通过 HTTPS 访问 `HARBOR_REGISTRY` 与目标 staging/prod Kubernetes API。本机 `registry.chaimir.io` 仅用于当前受控 Docker Desktop 环境，不能填写为 GitHub 托管 runner 的 registry。若交付环境只提供私网 Harbor/K8s,必须先在同一受控网络注册专用自托管 runner,再将镜像构建和部署 job 的 `runs-on` 收敛到该 runner 标签;不得通过暴露本机临时端口或提交本地凭据绕过网络边界。
 
 ## 安全基线
 

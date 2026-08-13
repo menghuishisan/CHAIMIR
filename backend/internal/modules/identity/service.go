@@ -2,8 +2,10 @@
 package identity
 
 import (
+	"context"
 	"encoding/base64"
 	"fmt"
+	"io"
 	"time"
 
 	"chaimir/internal/contracts"
@@ -11,11 +13,20 @@ import (
 	"chaimir/internal/platform/config"
 	"chaimir/internal/platform/eventbus"
 	"chaimir/internal/platform/redis"
+	"chaimir/internal/platform/storage"
 	"chaimir/internal/platform/timex"
 	"chaimir/internal/platform/upload"
 	"chaimir/pkg/apperr"
 	"chaimir/pkg/crypto"
 	"chaimir/pkg/snowflake"
+)
+
+const (
+	// identityModuleName 与 tenantLogo* 共同构成校徽对象在统一文件服务里的受控前缀。
+	identityModuleName     = "identity"
+	tenantLogoResourceType = "logo"
+	// tenantLogoResourceID 固定为 current:一个租户只有一枚在用校徽,不需要 id 维度。
+	tenantLogoResourceID = "current"
 )
 
 // baseRoleNumber 将 identity 基础身份映射为跨模块 RBAC 数字契约,只在 service 边界适配。
@@ -33,6 +44,19 @@ func baseRoleNumber(baseIdentity int16) (int16, error) {
 	}
 }
 
+// objectStorage 描述 M1 写入与读取校徽对象所需的共享对象存储能力。
+type objectStorage interface {
+	Put(ctx context.Context, bucket, key string, r io.Reader, size int64, contentType string) error
+	Get(ctx context.Context, bucket, key string) (io.ReadCloser, error)
+	Delete(ctx context.Context, bucket, key string) error
+	BucketAttach() string
+}
+
+// fileService 描述 M1 复用统一文件服务规划受控对象路径所需能力。
+type fileService interface {
+	PlanUpload(ctx context.Context, req storage.PlanUploadRequest) (storage.UploadPlan, error)
+}
+
 // Service 承载 identity 模块业务编排,依赖 repo 接口和平台横切能力。
 type Service struct {
 	store       Store
@@ -44,6 +68,8 @@ type Service struct {
 	cfg         config.IdentityConfig
 	uploadCfg   config.UploadConfig
 	scanner     upload.Scanner
+	objects     objectStorage
+	files       fileService
 	deploy      config.DeployConfig
 	authCfg     config.AuthConfig
 	sms         SMSSender
@@ -61,6 +87,12 @@ func NewService(deps ServiceDeps) (*Service, error) {
 	}
 	if deps.IDs == nil {
 		return nil, fmt.Errorf("identity service 缺少 ID 生成器")
+	}
+	if deps.Objects == nil {
+		return nil, fmt.Errorf("identity service 缺少统一对象存储")
+	}
+	if deps.FileService == nil {
+		return nil, fmt.Errorf("identity service 缺少统一文件服务")
 	}
 	key, err := base64.StdEncoding.DecodeString(deps.AuthConfig.EncryptionKey)
 	if err != nil {
@@ -80,6 +112,8 @@ func NewService(deps ServiceDeps) (*Service, error) {
 		cfg:       deps.IdentityConfig,
 		uploadCfg: deps.UploadConfig,
 		scanner:   deps.Scanner,
+		objects:   deps.Objects,
+		files:     deps.FileService,
 		deploy:    deps.DeployConfig,
 		authCfg:   deps.AuthConfig,
 		sms:       deps.SMSSender,
@@ -103,6 +137,8 @@ type ServiceDeps struct {
 	IdentityConfig config.IdentityConfig
 	UploadConfig   config.UploadConfig
 	Scanner        upload.Scanner
+	Objects        objectStorage
+	FileService    fileService
 	DeployConfig   config.DeployConfig
 	SMSSender      SMSSender
 	EventBus       eventbus.Bus

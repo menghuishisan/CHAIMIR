@@ -174,7 +174,7 @@ func (t *txStore) ListAnnouncements(ctx context.Context, tenantID, accountID int
 	if err != nil {
 		return nil, 0, err
 	}
-	total, err := t.q.CountAnnouncements(ctx, sqlcgen.CountAnnouncementsParams{TenantID: pgtypex.Int8(tenantID), RoleNumbers: roleNumbers})
+	total, err := t.q.CountAnnouncements(ctx, sqlcgen.CountAnnouncementsParams{TenantID: pgtypex.Int8(tenantID), AccountID: accountID, RoleNumbers: roleNumbers})
 	if err != nil {
 		return nil, 0, err
 	}

@@ -160,7 +160,19 @@ func seedAcceptance(ctx context.Context, cfg *config.Config) error {
 	}
 	defer database.Close()
 	includeIsolationTenant := cfg.Deploy.PlatformEnabled
-	if err := seedAcceptanceTenant(ctx, database, includeIsolationTenant); err != nil {
+	tenantDeployMode := identity.DeployModeSaaS
+	if cfg.Deploy.IsSchool() {
+		tenantDeployMode = identity.DeployModeSchool
+		// 私有化形态下「唯一那所学校」由 SCHOOL_TENANT_ID 指定,运行期的免鉴权品牌读取口
+		// (GET /tenant/brand)就按它取租户。夹具租户 id 是固定常量,两者不一致时
+		// 种子会造出一个运行期永远读不到的租户 —— 登录页没有校徽却查不出原因,
+		// 故在这里直接失败,不把配置矛盾留到运行期。
+		if cfg.Deploy.SchoolTenantID != acceptanceIDs.TenantID {
+			return fmt.Errorf("DEPLOY_MODE=school 时 SCHOOL_TENANT_ID 必须为验收夹具租户 %d,当前=%d",
+				acceptanceIDs.TenantID, cfg.Deploy.SchoolTenantID)
+		}
+	}
+	if err := seedAcceptanceTenant(ctx, database, includeIsolationTenant, tenantDeployMode); err != nil {
 		return err
 	}
 	if err := seedAcceptanceOrg(ctx, database, includeIsolationTenant); err != nil {
@@ -169,7 +181,7 @@ func seedAcceptance(ctx context.Context, cfg *config.Config) error {
 	if err := seedAcceptanceAccounts(ctx, database, cfg.Bootstrap.AdminPassword, includeIsolationTenant); err != nil {
 		return err
 	}
-	if err := seedAcceptanceBusiness(ctx, database); err != nil {
+	if err := seedAcceptanceBusiness(ctx, database, includeIsolationTenant); err != nil {
 		return err
 	}
 	return nil
@@ -189,7 +201,12 @@ func ensureAcceptanceSeedAllowed(cfg *config.Config) error {
 }
 
 // seedAcceptanceTenant 创建验收租户,不依赖生产 bootstrap 租户;隔离租户仅用于 SaaS 多租户验收。
-func seedAcceptanceTenant(ctx context.Context, database *db.DB, includeIsolation bool) error {
+//
+// 刻意不写 logo_ref:校徽与课程封面存的是对象引用,而种子只写库不往 MinIO 放字节。
+// 编一个引用出来会让验收环境「有校徽但取不到」——比没有校徽更难排查;留空则走设计好的
+// 回落(徽记位显示校名首字、封面用平台纸材质),校徽/封面本身在验收时经上传入口真实产生。
+// 同理 course.cover_ref 也不写(见 acceptance_seed_rows.go 的 course 插入)。
+func seedAcceptanceTenant(ctx context.Context, database *db.DB, includeIsolation bool, deployMode int16) error {
 	return database.WithPrivilegedTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		tenants := []struct {
 			id          int64
@@ -210,7 +227,7 @@ func seedAcceptanceTenant(ctx context.Context, database *db.DB, includeIsolation
 		for _, tenant := range tenants {
 			if _, err := tx.Exec(ctx, `
 INSERT INTO tenant (id, code, name, type, status, deploy_mode, display_name, feature_flags, auth_mode, enable_activation_code)
-VALUES ($1, $2, $3, 3, 1, 2, $4, '{"modules":["teaching","experiment","contest"]}'::jsonb, 1, false)
+VALUES ($1, $2, $3, 3, 1, $5, $4, '{"modules":["teaching","experiment","contest"]}'::jsonb, 1, false)
 ON CONFLICT (id) DO UPDATE SET
 	code = EXCLUDED.code,
 	name = EXCLUDED.name,
@@ -221,7 +238,7 @@ ON CONFLICT (id) DO UPDATE SET
 	feature_flags = EXCLUDED.feature_flags,
 	auth_mode = EXCLUDED.auth_mode,
 	enable_activation_code = EXCLUDED.enable_activation_code,
-	updated_at = now()`, tenant.id, tenant.code, tenant.name, tenant.displayName); err != nil {
+			updated_at = now()`, tenant.id, tenant.code, tenant.name, tenant.displayName, deployMode); err != nil {
 				return err
 			}
 		}
@@ -351,8 +368,8 @@ func acceptanceRoleID(accountID int64, index int) int64 {
 }
 
 // seedAcceptanceBusiness 写入跨模块验收业务数据。
-func seedAcceptanceBusiness(ctx context.Context, database *db.DB) error {
-	return database.WithTenantTxID(ctx, acceptanceIDs.TenantID, func(ctx context.Context, tx pgx.Tx) error {
+func seedAcceptanceBusiness(ctx context.Context, database *db.DB, includeIsolation bool) error {
+	if err := database.WithTenantTxID(ctx, acceptanceIDs.TenantID, func(ctx context.Context, tx pgx.Tx) error {
 		for _, fn := range []func(context.Context, pgx.Tx) error{
 			seedRuntimeRows,
 			seedContentRows,
@@ -371,7 +388,14 @@ func seedAcceptanceBusiness(ctx context.Context, database *db.DB) error {
 			}
 		}
 		return nil
-	})
+	}); err != nil {
+		return err
+	}
+	if !includeIsolation {
+		return nil
+	}
+	// 隔离租户保持业务空态，但必须拥有可计算成绩的默认配置，否则学生成绩中心会进入配置错误态。
+	return database.WithTenantTxID(ctx, acceptanceIDs.TenantIsolation, seedIsolationGradeRows)
 }
 
 // protectedPhone 复用生产加密与 HMAC 算法生成手机号持久化字段。

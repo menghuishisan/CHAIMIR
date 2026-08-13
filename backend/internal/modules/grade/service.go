@@ -329,23 +329,25 @@ func (s *Service) ApproveReview(ctx context.Context, reviewID int64, req ReviewD
 	if err != nil {
 		return ReviewDTO{}, err
 	}
-	if req.SemesterID <= 0 {
-		return ReviewDTO{}, apperr.ErrGradeReviewInvalid
-	}
-	if _, err := s.getSemester(ctx, id.TenantID, req.SemesterID.Int64()); err != nil {
-		return ReviewDTO{}, err
-	}
 	review, err := s.getReview(ctx, id.TenantID, reviewID)
 	if err != nil {
 		return ReviewDTO{}, err
 	}
-	if err := s.validateReviewCourseMatchesSemester(ctx, id.TenantID, review.CourseID.Int64(), req.SemesterID.Int64()); err != nil {
+	// 管理员未另选归档学期时沿用教师报送的学期；只有显式选择时才覆盖。
+	semesterID := effectiveReviewSemesterID(review.SemesterID.Int64(), req.SemesterID.Int64())
+	if semesterID <= 0 {
+		return ReviewDTO{}, apperr.ErrGradeReviewInvalid
+	}
+	if _, err := s.getSemester(ctx, id.TenantID, semesterID); err != nil {
+		return ReviewDTO{}, err
+	}
+	if err := s.validateReviewCourseMatchesSemester(ctx, id.TenantID, review.CourseID.Int64(), semesterID); err != nil {
 		return ReviewDTO{}, err
 	}
 	var out ReviewDTO
 	err = s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
 		var err error
-		out, err = tx.ApproveGradeReview(ctx, reviewID, id.AccountID, req.SemesterID.Int64(), req.Comment)
+		out, err = tx.ApproveGradeReview(ctx, reviewID, id.AccountID, semesterID, req.Comment)
 		if err != nil {
 			return err
 		}
@@ -364,11 +366,26 @@ func (s *Service) ApproveReview(ctx context.Context, reviewID int64, req ReviewD
 	return out, nil
 }
 
+// effectiveReviewSemesterID 计算成绩审核通过时最终归档学期，未显式选择则沿用报送学期。
+func effectiveReviewSemesterID(reviewSemesterID, requestedSemesterID int64) int64 {
+	if requestedSemesterID > 0 {
+		return requestedSemesterID
+	}
+	return reviewSemesterID
+}
+
 // RejectReview 驳回成绩审核。
 func (s *Service) RejectReview(ctx context.Context, reviewID int64, req ReviewDecisionRequest) (ReviewDTO, error) {
 	id, err := s.requireSchoolAdmin(ctx)
 	if err != nil {
 		return ReviewDTO{}, err
+	}
+	review, err := s.getReview(ctx, id.TenantID, reviewID)
+	if err != nil {
+		return ReviewDTO{}, err
+	}
+	if _, err := s.teaching.GetCourse(ctx, id.TenantID, review.CourseID.Int64()); err != nil {
+		return ReviewDTO{}, apperr.ErrGradeReviewInvalid.WithCause(err)
 	}
 	var out ReviewDTO
 	err = s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
@@ -378,9 +395,6 @@ func (s *Service) RejectReview(ctx context.Context, reviewID int64, req ReviewDe
 	})
 	if err != nil {
 		return ReviewDTO{}, mapGradeReviewErr(err)
-	}
-	if _, err := s.teaching.GetCourse(ctx, id.TenantID, out.CourseID.Int64()); err != nil {
-		return ReviewDTO{}, apperr.ErrGradeReviewInvalid.WithCause(err)
 	}
 	if err := s.writeAudit(ctx, id.TenantID, id.AccountID, contracts.RoleNumSchoolAdmin, "grade.review.reject", auditTargetGradeReview, out.ID.Int64(), map[string]any{"course_id": out.CourseID.String()}); err != nil {
 		return ReviewDTO{}, err

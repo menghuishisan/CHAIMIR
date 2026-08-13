@@ -20,7 +20,7 @@ Import-Module (Join-Path $PSScriptRoot "lib\ImageMetadata.psm1") -Force
 $imagesRoot = (Resolve-Path (Join-Path $RepoRoot "images")).Path
 $catalog = Get-ChaimirImageCatalog -ImagesRoot $imagesRoot
 $lock = Read-ChaimirDigestLock -Path $DigestLockPath -Required
-$allowedCategories = @("service", "runtime", "infra", "tool", "judger", "sim", "sidecar", "init", "base", "middleware", "observability", "ingress")
+$allowedCategories = @("service", "runtime", "infra", "tool", "judger", "sim", "sidecar", "init", "base", "middleware", "observability", "ingress", "network")
 $buildSourceTypes = @("platform-built", "thin-wrapper", "build-base")
 $internalBuildArguments = Get-ChaimirInternalImageBuildArguments
 $errors = [System.Collections.Generic.List[string]]::new()
@@ -129,9 +129,9 @@ foreach ($image in $lock.Keys) {
 }
 
 # 本地/私有化静态证明不得引用已阻断、已删除或与正式锁不一致的旧 digest。
-$attestationLine = Get-Content -LiteralPath $DeployConfigPath | Where-Object { $_ -match "^SANDBOX_IMAGE_ATTESTATIONS_JSON=" }
+$attestationLine = Get-Content -LiteralPath $DeployConfigPath | Where-Object { $_ -match "^PLATFORM_IMAGE_ATTESTATIONS_JSON=" }
 if (@($attestationLine).Count -ne 1) {
-    $errors.Add("$DeployConfigPath 必须且只能声明一次 SANDBOX_IMAGE_ATTESTATIONS_JSON")
+    $errors.Add("$DeployConfigPath 必须且只能声明一次 PLATFORM_IMAGE_ATTESTATIONS_JSON")
 } else {
     $attestationJSON = $attestationLine.Substring($attestationLine.IndexOf("=") + 1)
     $seenAttestations = @{}
@@ -139,21 +139,21 @@ if (@($attestationLine).Count -ne 1) {
     foreach ($item in $parsedAttestations) {
         $imageURL = [string]$item.image_url
         if ($imageURL -notmatch "^.+/([^/]+/[^/@]+)@(sha256:[0-9a-f]{64})$") {
-            $errors.Add("SANDBOX_IMAGE_ATTESTATIONS_JSON 包含非法镜像引用")
+            $errors.Add("PLATFORM_IMAGE_ATTESTATIONS_JSON 包含非法镜像引用")
             continue
         }
         $logical = $Matches[1]
         $digest = $Matches[2]
         if ($seenAttestations.ContainsKey($logical)) {
-            $errors.Add("SANDBOX_IMAGE_ATTESTATIONS_JSON 重复登记: $logical")
+            $errors.Add("PLATFORM_IMAGE_ATTESTATIONS_JSON 重复登记: $logical")
             continue
         }
         $seenAttestations[$logical] = $true
         if (-not ($lock.ContainsKey($logical)) -or $lock[$logical] -ne $digest) {
-            $errors.Add("SANDBOX_IMAGE_ATTESTATIONS_JSON 与正式 digest lock 不一致: $logical")
+            $errors.Add("PLATFORM_IMAGE_ATTESTATIONS_JSON 与正式 digest lock 不一致: $logical")
         }
         if (-not ([bool]$item.cosign_verified) -or -not [string]::Equals(([string]$item.trivy_status), "passed", [System.StringComparison]::OrdinalIgnoreCase)) {
-            $errors.Add("SANDBOX_IMAGE_ATTESTATIONS_JSON 包含未通过门禁的条目: $logical")
+            $errors.Add("PLATFORM_IMAGE_ATTESTATIONS_JSON 包含未通过门禁的条目: $logical")
         }
     }
 }

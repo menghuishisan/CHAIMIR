@@ -1,7 +1,7 @@
 /**
  * @chaimir/ui 总出口(墨玉体系设计系统)。
- * 分层:lib(工具)/ hooks / components(§5.1 清单)/ charts(§8 数据可视化)/
- * biz(§7.1 教学帧舞台,由仿真协议驱动)。
+ * 分层:lib(工具)/ hooks / components(§5.1 清单)/ brand(§1.3 品牌资产)/
+ * charts(§8 数据可视化)/ biz(§7.1 教学帧舞台,由仿真协议驱动)。
  * 样式入口另见 "@chaimir/ui/styles"(tokens/index.css)。
  */
 
@@ -46,6 +46,9 @@ export * from "./components/Textarea";
 export * from "./components/Toast";
 export * from "./components/Tooltip";
 export * from "./components/WorkbenchShell";
+
+/* 品牌资产(§1.3:主标志/锁定组合/品牌章/租户徽记/内容封面) */
+export * from "./brand";
 
 /* 数据可视化 */
 export * from "./charts";

@@ -148,7 +148,7 @@ func (t *txStore) CreateTenant(ctx context.Context, input CreateTenantInput) (Te
 		Status:               input.Status,
 		DeployMode:           input.DeployMode,
 		ExpireAt:             pgtypex.TimestamptzPtr(input.ExpireAt),
-		LogoUrl:              pgtypex.Text(input.LogoURL),
+		LogoRef:              pgtypex.Text(input.LogoRef),
 		DisplayName:          pgtypex.Text(input.DisplayName),
 		FeatureFlags:         input.FeatureFlags,
 		AuthMode:             input.AuthMode,
@@ -164,7 +164,7 @@ func (t *txStore) CreateTenant(ctx context.Context, input CreateTenantInput) (Te
 func (t *txStore) UpdateTenantConfig(ctx context.Context, input UpdateTenantConfigInput) (Tenant, error) {
 	row, err := t.q.UpdateTenantConfig(ctx, sqlcgen.UpdateTenantConfigParams{
 		ID:                   input.TenantID,
-		LogoUrl:              pgtypex.Text(input.LogoURL),
+		LogoRef:              pgtypex.Text(input.LogoRef),
 		DisplayName:          pgtypex.Text(input.DisplayName),
 		FeatureFlags:         input.FeatureFlags,
 		AuthMode:             input.AuthMode,

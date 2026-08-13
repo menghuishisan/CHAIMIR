@@ -16,16 +16,17 @@ SELECT COUNT(*)
 FROM system_announcement a
 WHERE (a.tenant_id IS NULL OR a.tenant_id = $1)
   AND (a.expire_at IS NULL OR a.expire_at > now())
-  AND (a.scope <> 3 OR a.target_roles && $2::smallint[])
+  AND (a.scope <> 3 OR a.target_roles && $2::smallint[] OR a.publisher_id = $3)
 `
 
 type CountAnnouncementsParams struct {
 	TenantID    pgtype.Int8 `json:"tenant_id"`
 	RoleNumbers []int16     `json:"role_numbers"`
+	AccountID   int64       `json:"account_id"`
 }
 
 func (q *Queries) CountAnnouncements(ctx context.Context, arg CountAnnouncementsParams) (int64, error) {
-	row := q.db.QueryRow(ctx, countAnnouncements, arg.TenantID, arg.RoleNumbers)
+	row := q.db.QueryRow(ctx, countAnnouncements, arg.TenantID, arg.RoleNumbers, arg.AccountID)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
@@ -264,7 +265,7 @@ FROM system_announcement a
 LEFT JOIN announcement_read r ON r.announcement_id = a.id AND r.tenant_id = $1 AND r.account_id = $2
 WHERE (a.tenant_id IS NULL OR a.tenant_id = $1)
   AND (a.expire_at IS NULL OR a.expire_at > now())
-  AND (a.scope <> 3 OR a.target_roles && $3::smallint[])
+  AND (a.scope <> 3 OR a.target_roles && $3::smallint[] OR a.publisher_id = $2)
 ORDER BY a.published_at DESC
 LIMIT $5::int OFFSET $4::int
 `

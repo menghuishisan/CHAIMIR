@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="Chaimir">
+  <!--
+    应用图标源文件(A4):墨色圆角底 + 玉色主标志。
+    path 与 BrandMark 逐字符相同 —— 桌面图标需要不透明底(透明底在深浅壁纸上都会丢边界),
+    但几何一律不动,故只在其外加一层底,不另写一套坐标。
+    颜色写死是必要例外:图标由操作系统与浏览器在 React 之外加载,取不到 CSS 令牌。
+    值取自 tokens/theme.css:底 color-ink-1000,标志 color-accent(jade-400)。
+    icon-192.png 与 icon-512.png 由本文件经 sharp 光栅化,不手工描一遍。
+    注:XML 注释内不得出现连续两个连字符,故此处令牌名不带前缀写法。
+  -->
+  <rect width="32" height="32" rx="7" fill="#0a100e"/>
+  <path d="M26 21.1V23a3 3 0 0 1-3 3H9a3 3 0 0 1-3-3V9a3 3 0 0 1 3-3h14a3 3 0 0 1 3 3v1.9"
+        fill="none" stroke="#3fd2a8" stroke-width="3.2"
+        stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="20.5" cy="16" r="2" fill="#3fd2a8"/>
+</svg>

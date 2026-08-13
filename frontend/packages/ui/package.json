@@ -8,6 +8,7 @@
     ".": "./src/index.ts",
     "./styles": "./src/tokens/index.css",
     "./components/*": "./src/components/*/index.tsx",
+    "./brand": "./src/brand/index.ts",
     "./charts": "./src/charts/index.ts",
     "./biz": "./src/biz/index.ts"
   },

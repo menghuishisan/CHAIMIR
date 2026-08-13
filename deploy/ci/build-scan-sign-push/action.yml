@@ -199,12 +199,13 @@ runs:
         trap 'rm -f "$key_file" "$public_key_file"' EXIT
         printf '%s\n' "$COSIGN_PRIVATE_KEY" > "$key_file"
         cosign public-key --key "$key_file" > "$public_key_file"
-        cosign sign --yes --key "$key_file" --tlog-upload=false --use-signing-config=false \
+        cosign sign --yes --key "$key_file" --tlog-upload=false \
           "${{ steps.digest.outputs.digest_ref }}"
         cosign verify --key "$public_key_file" --insecure-ignore-tlog=true \
           "${{ steps.digest.outputs.digest_ref }}"
-        cosign attest --yes --key "$key_file" --type cyclonedx --use-signing-config=false \
+        cosign attest --yes --key "$key_file" --type cyclonedx \
           --predicate "$RUNNER_TEMP/chaimir-image-sbom.cdx.json" \
+          --tlog-upload=false \
           "${{ steps.digest.outputs.digest_ref }}"
         cosign verify-attestation --key "$public_key_file" --type cyclonedx --insecure-ignore-tlog=true \
           "${{ steps.digest.outputs.digest_ref }}"

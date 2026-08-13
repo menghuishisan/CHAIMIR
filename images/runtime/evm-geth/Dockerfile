@@ -10,9 +10,10 @@ ENV CGO_ENABLED=0
 RUN git clone --branch "${GETH_VERSION}" --depth 1 https://github.com/ethereum/go-ethereum.git /src/geth
 WORKDIR /src/geth
 RUN go get \
-        golang.org/x/crypto@v0.52.0 \
-        golang.org/x/net@v0.55.0 \
-        google.golang.org/grpc@v1.79.3 \
+        golang.org/x/crypto@v0.53.0 \
+        golang.org/x/net@v0.56.0 \
+        google.golang.org/grpc@v1.82.1 \
+        golang.org/x/text@v0.39.0 \
         go.opentelemetry.io/otel/sdk@v1.43.0 \
     && go mod tidy \
     && go build -trimpath -ldflags "-s -w" -o /out/geth ./cmd/geth

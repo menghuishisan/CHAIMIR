@@ -269,7 +269,7 @@ function ItemForm({ item, snapshot, onClose, onSaved }: ItemFormProps) {
       setFormError(undefined)
       const common = {
         title: title.trim(),
-        category_id: categoryId,
+        category_id: categoryId || undefined,
         difficulty: Number(difficulty) as ContentDifficulty,
         tags: splitCommas(tags),
         knowledge_points: splitCommas(knowledgePoints),
