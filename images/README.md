@@ -86,6 +86,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File images/pull-images.ps1 `
 
 选择性证明命令必须带 `-Images`、`-NoEnvWrite` 和 `-DigestFragmentsDir`;脚本只有在选定集合全部通过时才生成 `verified-images.lock`。再用 `images/sync-image-metadata.ps1 -FragmentsPath` 增量晋升正式锁、四个 overlay、`deploy/config/chaimir.env` 和存在时的本地 `backend/.env` 准入证明。未选镜像继续使用正式锁中的原 digest,不重复构建、拉取、扫描或签名。完成晋升后执行 `make dev-refresh`,检查只有受影响的工作负载滚动更新。
 
+`images/build-images.ps1 -Push` 成功后会自动调用 `images/cleanup-local-images.ps1 -Apply`:只清理 `e2e-*`、`candidate-*`、`refresh-*`、`local-*` 临时标签和没有正式/候选 digest、没有容器引用的悬空层。正式锁、当前候选锁、运行中或已保留容器、Harbor/Trivy/Cosign 状态不会删除。清理器会在删除后逐项执行 `docker image inspect image@digest`,任一正式或候选引用不可访问即失败。
+
 无需密钥的静态门禁统一运行 `images/validate-image-metadata.ps1`:它校验目录/category/name、Dockerfile/构建路径、不可变基础镜像和正式锁现有条目,但不会把尚待流水线首次晋升的新镜像误判为失败。
 
 项目清理只按 `docs/总-镜像与容器设计.md` 的“项目级 Docker 清理边界”执行。常规清理不得删除正式锁在本机的最后 digest 引用、Harbor PVC、Trivy 缓存、认证、Cosign 密钥或尚未晋升的证据,也不得对整台宿主机执行全局 prune。

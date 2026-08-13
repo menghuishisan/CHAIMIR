@@ -460,6 +460,18 @@ foreach ($item in $selected) {
 }
 
 if ($Push) {
+    $cleanupArgs = @(
+        "-RepoRoot", $repoRoot,
+        "-Registry", $Registry,
+        "-DigestLockPath", $DigestLock,
+        "-CandidateDigestLockPath", $DigestLockOut,
+        "-KeepTags", $Tag,
+        "-Apply"
+    )
+    & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot "cleanup-local-images.ps1") @cleanupArgs
+    if ($LASTEXITCODE -ne 0) {
+        throw "构建成功但项目镜像清理失败,拒绝继续: exit=$LASTEXITCODE"
+    }
     Write-Host "Built and pushed $($selected.Count) image(s). registry=$Registry registry_endpoint=$RegistryEndpoint tag=$Tag digestLock=$DigestLockOut"
 } else {
     Write-Host "Built $($selected.Count) image(s). registry=$Registry tag=$Tag"

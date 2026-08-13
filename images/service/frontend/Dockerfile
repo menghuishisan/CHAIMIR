@@ -46,6 +46,7 @@ RUN pnpm build && \
 # 用最高压缩比(-9)——构建一次、分发无数次,运行期零 CPU。
 # 仅压缩文本类资源;woff2/woff 与 avif/webp/png 已是压缩格式,再压反而更大。
 RUN find /out -type f \( -name '*.js' -o -name '*.css' -o -name '*.html' -o -name '*.json' -o -name '*.svg' -o -name '*.map' -o -name '*.webmanifest' \) \
+      ! -name 'runtime-config.js' \
       -exec gzip -9 -k {} +
 
 FROM ${NGINX_RUNTIME_IMAGE}

@@ -9,7 +9,7 @@ param(
     [string]$SimAdapterEnvKey = "SIM_BACKEND_STDIO_ADAPTERS_JSON",
     [string[]]$AttestationEnvPaths = @(),
     [string]$AttestationEnvKey = "PLATFORM_IMAGE_ATTESTATIONS_JSON",
-    [string]$RegistryEnvKey = "SUPPLY_CHAIN_REGISTRY"
+    [string]$RegistryEnvKey = "IMAGE_REGISTRY"
 )
 
 $ErrorActionPreference = "Stop"

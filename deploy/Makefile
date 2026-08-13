@@ -32,11 +32,11 @@ help: ## 显示可用目标
 
 # ---- 一键起步 ----
 .PHONY: dev-up
-dev-up: context-check gvisor-up-local ingress-up metrics-up-local policy-controller-up gen-secret tls registry-pull-secret-sync middleware-wait apply-dev migrate ## 使用当前 K8s context 拉起完整部署(中间件+应用+迁移)
+dev-up: context-check gvisor-up-local ingress-up metrics-up-local policy-controller-up gen-secret tls registry-pull-secret-sync middleware-wait apply-dev acceptance-seed ## 使用当前 K8s context 拉起完整 local-dev 部署和验收夹具
 	@echo "环境就绪。前端: https://www.chaimir.io (需将 www.chaimir.io 指向 127.0.0.1 并信任 config/chaimir-tls/tls.crt)"
 
 .PHONY: dev-refresh
-dev-refresh: context-check gen-secret tls registry-pull-secret-sync middleware-wait apply-dev migrate ## 已完成 bootstrap 后刷新应用与迁移,不重复安装节点/集群组件
+dev-refresh: context-check gen-secret tls registry-pull-secret-sync middleware-wait apply-dev acceptance-seed ## 已完成 bootstrap 后刷新应用、迁移和验收夹具,不重复安装节点/集群组件
 	@echo "环境已刷新。前端: https://www.chaimir.io"
 
 .PHONY: dev-down
@@ -195,9 +195,14 @@ middleware-wait: apply-dev ## 等待中间件就绪(迁移前置)
 
 # ---- 数据库迁移(中间件就绪后)----
 .PHONY: migrate
-migrate: ## 确认迁移 + RLS 初始化 + seed Job 已提交
+migrate: ## 确认迁移 + RLS 初始化 +基础 seed Job 已提交
 	@kubectl -n chaimir-system get job chaimir-migrate >/dev/null
 	@echo "migrate Job 已提交(镜像就绪后执行;目录2/3 产出 service/migrate 镜像后生效)"
+
+.PHONY: acceptance-seed
+acceptance-seed: migrate ## 等待基础迁移完成并执行 local-dev canonical 验收夹具 seed
+	kubectl -n chaimir-system wait --for=condition=complete job/chaimir-migrate --timeout=180s
+	powershell -NoProfile -ExecutionPolicy Bypass -File ../scripts/db/run-acceptance-seed-job.ps1 -Namespace chaimir-system -MigrationJob chaimir-migrate -SeedJob chaimir-seed-acceptance
 
 # ---- 镜像供应链工具与 Harbor(可选,本地/私有化私有仓)----
 .PHONY: supply-chain-tools-pull

@@ -97,7 +97,7 @@ cd deploy
 make dev-up
 ```
 
-该目标会校验当前 Kubernetes context、安装本地必需的集群组件、生成 HTTPS Secret、部署完整 `local-dev` overlay 并运行迁移任务。启动完成后将 `www.chaimir.io` 解析到 `127.0.0.1`,信任 `config/chaimir-tls/tls.crt`,通过 `https://www.chaimir.io` 访问。
+该目标会校验当前 Kubernetes context、安装本地必需的集群组件、生成 HTTPS Secret、部署完整 `local-dev` overlay 并运行迁移任务。启动完成后将 `www.chaimir.io` 解析到 `127.0.0.1`,信任 `config/chaimir-tls/tls.crt`,通过 `https://www.chaimir.io` 访问。local-dev 会先等待 `migrate-and-seed` 完成,再用同一份不可变 migrate 镜像调度 `seed-acceptance`;该命令仅在 local/dev 门禁下写入 canonical 验收夹具,不会进入 SaaS/学校生产 overlay。
 
 `make dev-up` 仅是首次 bootstrap 的便捷包装,使用当前 Kubernetes context,不负责创建任何集群；它会安装/校验 gVisor、ingress、metrics-server、policy-controller 并等待中间件。集群已完成 bootstrap 后，日常代码或镜像刷新使用 `make dev-refresh`，不会重复下载 gVisor、重启节点或安装集群级组件。生产/标准集群使用 `make metrics-up` 保持 kubelet TLS 校验;
 Docker Desktop 等本地集群如 kubelet 证书不完整,使用 `make metrics-up-local`,仅本地追加

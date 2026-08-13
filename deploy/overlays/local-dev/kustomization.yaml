@@ -40,7 +40,7 @@ images:
     digest: sha256:60b06437bf6195a4d1aeae7b9e1151ceadeaf70ac27e921a8933abcf3e0879c1
   - name: chaimir/frontend
     newName: registry.chaimir.io/service/frontend
-    digest: sha256:3342d0d2adbf50e8b89b1f2d909a4d6ad3262df250d38273e268dc4cf0fa87f6
+    digest: sha256:69f481d55f74bc4755c2b1617640f50a5b8fa3a6d288d494c763088b9cf709d7
   - name: chaimir/migrate
     newName: registry.chaimir.io/service/migrate
     digest: sha256:85824d7df6dceb7fff0ba2d4dcd5fd7d51c22d84c0fdd68258043b7144ac08e7
