@@ -6,8 +6,8 @@ FROM ${CILIUM_RUNTIME_IMAGE}
 
 ARG GO_MODULE_PROXY=https://proxy.golang.org|direct
 ARG CILIUM_SOURCE_URL=https://github.com/cilium/cilium/archive/refs/tags/v1.20.0.tar.gz
-ARG CILIUM_SOURCE_SHA256=07d7dff04f749ef26d6244ecd9affd83bde106a1eb8472d0d9aef636df01b91d
-ARG CILIUM_SOURCE_COMMIT=450c53145dc0a872ae20dfb05598c94ef55a71e2
+ARG CILIUM_SOURCE_SHA256=665d818161c87a21588305f7a135e2f890c8983999715bf4d9685933b3583eb4
+ARG CILIUM_SOURCE_COMMIT=97ce49d65e777e07fa2457e942725050b086d553
 
 USER root
 RUN apt-get update \
@@ -26,7 +26,7 @@ ENV GOROOT=/usr/local/go \
     GOPROXY=${GO_MODULE_PROXY} \
     PATH=/usr/local/go/bin:/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
-ADD --checksum=sha256:07d7dff04f749ef26d6244ecd9affd83bde106a1eb8472d0d9aef636df01b91d ${CILIUM_SOURCE_URL} /tmp/cilium-source.tar.gz
+ADD --checksum=sha256:665d818161c87a21588305f7a135e2f890c8983999715bf4d9685933b3583eb4 ${CILIUM_SOURCE_URL} /tmp/cilium-source.tar.gz
 RUN mkdir -p /src/cilium /go /tmp/go-cache \
     && tar -xzf /tmp/cilium-source.tar.gz -C /src/cilium --strip-components=1 \
     && rm -f /tmp/cilium-source.tar.gz \

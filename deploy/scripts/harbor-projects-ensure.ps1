@@ -178,6 +178,23 @@ foreach ($project in $projects) {
 $robotName = Get-OptionalEnvValue -Path $SecretPath -Key "HARBOR_ROBOT_NAME" -DefaultValue "chaimir-supply-chain"
 $registryUser = Get-OptionalEnvValue -Path $SecretPath -Key "HARBOR_ROBOT_USERNAME" -DefaultValue ""
 $registryPassword = Get-OptionalEnvValue -Path $SecretPath -Key "HARBOR_ROBOT_PASSWORD" -DefaultValue ""
+$access = @(
+    @{ resource = "repository"; action = "pull" },
+    @{ resource = "repository"; action = "push" },
+    @{ resource = "repository"; action = "delete" },
+    @{ resource = "tag"; action = "create" },
+    @{ resource = "tag"; action = "delete" },
+    @{ resource = "artifact-label"; action = "create" },
+    @{ resource = "scan"; action = "create" }
+)
+$permissions = @()
+foreach ($project in $projects) {
+    $permissions += @{
+        kind = "project"
+        namespace = $project
+        access = $access
+    }
+}
 $robots = Invoke-RestMethod -UseBasicParsing -Uri "$apiBase/api/v2.0/robots" -Headers $headers -TimeoutSec 20
 $robotFullName = "robot`$$robotName"
 $existingRobot = @($robots | Where-Object { $_.name -eq $robotFullName -or $_.name -eq $robotName }) | Select-Object -First 1
@@ -185,25 +202,37 @@ if ($existingRobot) {
     if ([string]::IsNullOrWhiteSpace($registryUser) -or [string]::IsNullOrWhiteSpace($registryPassword)) {
         throw "Harbor robot 已存在但本地缺少 HARBOR_ROBOT_USERNAME/HARBOR_ROBOT_PASSWORD;请在 Harbor UI 刷新 secret 后写入 $SecretPath"
     }
-    Write-Host "Harbor robot exists: $($existingRobot.name)"
-} else {
-    $access = @(
-        @{ resource = "repository"; action = "pull" },
-        @{ resource = "repository"; action = "push" },
-        @{ resource = "repository"; action = "delete" },
-        @{ resource = "tag"; action = "create" },
-        @{ resource = "tag"; action = "delete" },
-        @{ resource = "artifact-label"; action = "create" },
-        @{ resource = "scan"; action = "create" }
-    )
-    $permissions = @()
-    foreach ($project in $projects) {
-        $permissions += @{
-            kind = "project"
-            namespace = $project
-            access = $access
+    $existingNamespaces = @($existingRobot.permissions | Where-Object { $_.kind -eq "project" } | ForEach-Object { $_.namespace })
+    $missingNamespaces = @($projects | Where-Object { $_ -notin $existingNamespaces })
+    $refreshRobot = $false
+    if ($missingNamespaces.Count -gt 0) {
+        $refreshRobot = $true
+        Write-Host "Harbor robot permissions missing projects: $($missingNamespaces -join ',')"
+    } else {
+        $registryAuth = Get-BasicAuthHeader -User $registryUser -Password $registryPassword
+        try {
+            Invoke-WebRequest -UseBasicParsing -Uri "$apiBase/v2/" -Headers @{ Authorization = "Basic $registryAuth" } -TimeoutSec 20 | Out-Null
+            Write-Host "Harbor robot exists with complete project permissions: $($existingRobot.name)"
+        } catch {
+            $response = $_.Exception.Response
+            if ($null -eq $response -or [int]$response.StatusCode -ne 401) {
+                throw
+            }
+            $refreshRobot = $true
+            Write-Host "Harbor robot credential expired; refreshing token: $($existingRobot.name)"
         }
     }
+    if ($refreshRobot) {
+        $robotBody = @{ permissions = $permissions } | ConvertTo-Json -Compress -Depth 6
+        $updatedRobot = Invoke-RestMethod -UseBasicParsing -Uri "$apiBase/api/v2.0/robots/$($existingRobot.id)" -Method Patch -Headers ($headers + @{ "Content-Type" = "application/json" }) -Body $robotBody -TimeoutSec 20
+        if (-not [string]::IsNullOrWhiteSpace($updatedRobot.secret)) {
+            $registryPassword = $updatedRobot.secret
+            Set-EnvValue -Path $SecretPath -Key "HARBOR_ROBOT_USERNAME" -Value $registryUser
+            Set-EnvValue -Path $SecretPath -Key "HARBOR_ROBOT_PASSWORD" -Value $registryPassword
+        }
+        Write-Host "Updated Harbor robot permissions and credential: $($existingRobot.name)"
+    }
+} else {
     $robotBody = @{
         name = $robotName
         description = "Chaimir image supply-chain publishing, scanning and signing"

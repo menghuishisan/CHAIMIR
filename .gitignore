@@ -15,6 +15,7 @@ deploy/config/cosign/
 deploy/config/docker-auth/
 deploy/config/harbor-tls/
 deploy/config/chaimir-tls/
+deploy/config/trivy/
 
 # ---- K8s/部署本地产物 ----
 deploy/**/rendered.yaml

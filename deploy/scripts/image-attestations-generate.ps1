@@ -4,9 +4,11 @@ param(
     [string]$ConfigPath = "",
     [string]$SecretPath = "",
     [string]$DigestLock = "",
+    [string[]]$Images = @(),
     [string]$BackendEnvPath = "",
     [string]$DeployEnvPath = "",
     [string]$EvidenceDir = "",
+    [string]$DigestFragmentsDir = "",
     [switch]$GenerateKeyIfMissing,
     [switch]$NoEnvWrite
 )
@@ -39,6 +41,16 @@ $EvidenceDir = if ([System.IO.Path]::IsPathRooted($EvidenceDir)) {
 }
 New-Item -ItemType Directory -Force -Path $EvidenceDir | Out-Null
 $script:evidenceHostDir = $EvidenceDir
+if (-not [string]::IsNullOrWhiteSpace($DigestFragmentsDir)) {
+    $DigestFragmentsDir = if ([System.IO.Path]::IsPathRooted($DigestFragmentsDir)) {
+        [System.IO.Path]::GetFullPath($DigestFragmentsDir)
+    } else {
+        [System.IO.Path]::GetFullPath((Join-Path $EvidenceDir $DigestFragmentsDir))
+    }
+    New-Item -ItemType Directory -Force -Path $DigestFragmentsDir | Out-Null
+    # 每轮只允许当前证明结果晋升,避免复用同一证据目录时误读上一轮片段。
+    Remove-Item -LiteralPath (Join-Path $DigestFragmentsDir "verified-images.lock") -Force -ErrorAction SilentlyContinue
+}
 
 # Read-EnvFile 读取简单 KEY=VALUE 文件;只返回键值,不输出密钥内容。
 function Read-EnvFile {
@@ -254,9 +266,12 @@ $digestItems = Read-ChaimirDigestLock -Path $DigestLock -Required
 if ($digestItems.Count -eq 0) {
     throw "digest lock 中没有可证明镜像: $DigestLock"
 }
-$items = @($digestItems.Keys | Sort-Object | ForEach-Object {
+$items = @($digestItems.Keys | Sort-Object | Where-Object { $Images.Count -eq 0 -or $_ -in $Images } | ForEach-Object {
     [pscustomobject]@{ Image = $_; Digest = $digestItems[$_] }
 })
+if ($Images.Count -gt 0 -and $items.Count -eq 0) {
+    throw "-Images 未匹配 digest lock 中的任何镜像: $($Images -join ', ')"
+}
 $blockedByManifest = Read-ManifestAdmissionMap -ImagesRoot (Join-Path $RepoRoot "images")
 $trivySkipByManifest = Read-ManifestTrivySkipMap -ImagesRoot (Join-Path $RepoRoot "images")
 $blockedItems = [System.Collections.Generic.List[object]]::new()
@@ -384,7 +399,7 @@ foreach ($item in $items) {
 $json = if ($attestations.Count -eq 0) {
     "[]"
 } else {
-    $attestations | ConvertTo-Json -Compress -Depth 5
+    ConvertTo-Json -InputObject ([array]$attestations) -Compress -Depth 5
 }
 Write-TextFile -Path $jsonPath -Lines @($json)
 $blockedPath = Join-Path $EvidenceDir "image-attestations-blocked.json"
@@ -409,6 +424,22 @@ $summary = @(
     "sign_log=$signLog",
     "sbom_dir=$sbomDir"
 )
+if ($blockedItems.Count -eq 0 -and -not [string]::IsNullOrWhiteSpace($DigestFragmentsDir)) {
+    if ($attestations.Count -ne $items.Count) {
+        throw "已选镜像的准入证明数量不完整: expected=$($items.Count), actual=$($attestations.Count)"
+    }
+    New-Item -ItemType Directory -Force -Path $DigestFragmentsDir | Out-Null
+    $fragmentPath = Join-Path $DigestFragmentsDir "verified-images.lock"
+    $fragmentLines = @($attestations | Sort-Object image_url | ForEach-Object {
+        $imageUrl = [string]$_.image_url
+        if ($imageUrl -notmatch "^$([regex]::Escape($registry))/([^@]+)@(sha256:[0-9a-f]{64})$") {
+            throw "准入证明包含非 canonical registry 引用: $imageUrl"
+        }
+        "$($Matches[1]) $($Matches[2])"
+    })
+    Write-TextFile -Path $fragmentPath -Lines $fragmentLines
+    $summary += "digest_fragment=$fragmentPath"
+}
 Write-TextFile -Path $summaryPath -Lines $summary
 Write-Output ($summary -join "`n")
 if ($blockedItems.Count -gt 0) {

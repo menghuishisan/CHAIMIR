@@ -6,6 +6,7 @@ param(
     [string]$Registry = $env:CHAIMIR_IMAGE_REGISTRY,
     [string]$DockerConfig = $env:DOCKER_CONFIG,
     [string]$DigestLock = "",
+    [string[]]$Images = @(),
     [switch]$PrintBuildArgs,
     [int]$MaxAttempts = 3,
     [int]$RetryDelaySeconds = 5,
@@ -327,6 +328,10 @@ foreach ($manifest in $manifests) {
         continue
     }
     $sourceType = Get-ChaimirImageSourceType -Path $manifest.FullName
+    $manifestImage = Get-ChaimirTopLevelYamlValue -Lines (Get-Content -LiteralPath $manifest.FullName) -Key "image"
+    if ($Images.Count -gt 0 -and $manifestImage -notin $Images) {
+        continue
+    }
     switch ($sourceType) {
         "upstream-pinned" {
             if ($Scope -in @("all", "upstream-pinned")) {

@@ -1,0 +1,25 @@
+# Docker Desktop kindnet 会把 Kubernetes Service VIP 的流量 DNAT 到本地控制面 endpoint。
+# 仅 local-dev 放行控制面 Pod 到 Docker Desktop 控制面网段的 API 端口;
+# 生产/私有化使用正式 CNI 和基础策略,不复用本地 endpoint 网段。
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-egress-to-apiserver-docker-desktop
+  namespace: chaimir-system
+  labels:
+    app.kubernetes.io/part-of: chaimir
+    app.kubernetes.io/managed-by: kustomize
+spec:
+  podSelector:
+    matchExpressions:
+      - key: app.kubernetes.io/component
+        operator: In
+        values: ["control-plane", "rbac-provisioner"]
+  policyTypes: ["Egress"]
+  egress:
+    - to:
+        - ipBlock:
+            cidr: 172.18.0.0/16
+      ports:
+        - protocol: TCP
+          port: 6443

@@ -25,9 +25,9 @@ upstream:
       digest: sha256:3aff6657219a4d9c14e27fb1d8976c49c29fddb70ba835014f477e1c70636647
   source_repository: https://github.com/cilium/cilium
   version: v1.20.0
-  source_commit: 450c53145dc0a872ae20dfb05598c94ef55a71e2
+  source_commit: 97ce49d65e777e07fa2457e942725050b086d553
   source_archive: https://github.com/cilium/cilium/archive/refs/tags/v1.20.0.tar.gz
-  source_sha256: 07d7dff04f749ef26d6244ecd9affd83bde106a1eb8472d0d9aef636df01b91d
+  source_sha256: 665d818161c87a21588305f7a135e2f890c8983999715bf4d9685933b3583eb4
   builder_arg: CILIUM_RUNTIME_IMAGE
   source_security_overrides:
     golang.org/x/text: v0.39.0

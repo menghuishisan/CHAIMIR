@@ -32,11 +32,11 @@ help: ## 显示可用目标
 
 # ---- 一键起步 ----
 .PHONY: dev-up
-dev-up: context-check gvisor-up-local ingress-up metrics-up-local policy-controller-up gen-secret tls middleware-wait apply-dev migrate ## 使用当前 K8s context 拉起完整部署(中间件+应用+迁移)
+dev-up: context-check gvisor-up-local ingress-up metrics-up-local policy-controller-up gen-secret tls registry-pull-secret-sync middleware-wait apply-dev migrate ## 使用当前 K8s context 拉起完整部署(中间件+应用+迁移)
 	@echo "环境就绪。前端: https://www.chaimir.io (需将 www.chaimir.io 指向 127.0.0.1 并信任 config/chaimir-tls/tls.crt)"
 
 .PHONY: dev-refresh
-dev-refresh: context-check gen-secret tls middleware-wait migrate ## 已完成 bootstrap 后刷新应用与迁移,不重复安装节点/集群组件
+dev-refresh: context-check gen-secret tls registry-pull-secret-sync middleware-wait apply-dev migrate ## 已完成 bootstrap 后刷新应用与迁移,不重复安装节点/集群组件
 	@echo "环境已刷新。前端: https://www.chaimir.io"
 
 .PHONY: dev-down
@@ -47,6 +47,24 @@ dev-down: ## 删除当前 K8s context 中的 Chaimir 本地资源(不删除集�
 context-check: ## 显示并校验当前 Kubernetes context
 	kubectl config current-context
 	kubectl get nodes
+
+.PHONY: registry-runtime-dns
+registry-runtime-dns: context-check ## 修复 Docker Desktop 节点到 canonical Harbor 443 入口的 split-DNS
+	@bash scripts/configure-docker-desktop-registry.sh registry.chaimir.io
+
+.PHONY: registry-pull-secret-sync
+registry-pull-secret-sync: registry-runtime-dns harbor-projects-ensure ## 同步唯一 Harbor pull 凭据并刷新签名准入控制器
+	@auth_dir="$$(sed -n 's/^SUPPLY_CHAIN_DOCKER_CONFIG_HOST_DIR=//p' "$(SUPPLY_CHAIN_CONFIG)")"; \
+	auth_file="$$auth_dir/config.json"; \
+	test -f "$$auth_file" || { echo "缺少 $$auth_file;请先完成 Harbor robot 凭据校验"; exit 1; }; \
+	for namespace in cosign-system chaimir-system chaimir-data chaimir-prepull; do \
+		kubectl -n $$namespace create secret generic chaimir-harbor-pull \
+			--from-file=.dockerconfigjson="$$auth_file" \
+			--type=kubernetes.io/dockerconfigjson \
+			--dry-run=client -o yaml | kubectl apply -f -; \
+	done
+	kubectl -n cosign-system rollout restart deployment/policy-controller-webhook
+	kubectl -n cosign-system rollout status deployment/policy-controller-webhook --timeout=180s
 
 # ---- ingress-nginx ----
 .PHONY: ingress-up
@@ -60,13 +78,16 @@ ingress-up: ## 安装 ingress-nginx 并打 namespace 标签(供 NetworkPolicy �
 		-p '{"spec":{"externalTrafficPolicy":"Cluster"}}'
 
 # ---- metrics-server ----
-.PHONY: metrics-up
-metrics-up: ## 安装官方 metrics-server(生产/标准集群路径,不放宽 kubelet TLS)
+.PHONY: metrics-apply
+metrics-apply: ## 应用项目固定的 metrics-server 清单
 	kubectl apply -k components/metrics-server
+
+.PHONY: metrics-up
+metrics-up: metrics-apply ## 安装官方 metrics-server(生产/标准集群路径,不放宽 kubelet TLS)
 	kubectl -n kube-system rollout status deployment/metrics-server --timeout=180s
 
 .PHONY: metrics-up-local
-metrics-up-local: metrics-up ## Docker Desktop 等本地集群安装 metrics-server 并仅在本地放宽 kubelet TLS
+metrics-up-local: metrics-apply ## Docker Desktop 等本地集群安装 metrics-server 并仅在本地放宽 kubelet TLS
 	kubectl -n kube-system patch deployment metrics-server --type=strategic -p '{"spec":{"template":{"spec":{"containers":[{"name":"metrics-server","args":["--cert-dir=/tmp","--secure-port=10250","--kubelet-preferred-address-types=InternalIP,ExternalIP,Hostname","--kubelet-use-node-status-port","--metric-resolution=15s","--kubelet-insecure-tls"]}]}}}}'
 	kubectl -n kube-system rollout status deployment/metrics-server --timeout=180s
 
@@ -141,6 +162,7 @@ supply-chain-secret-check: ## 校验供应链专用密钥文件存在,不注入�
 # ---- 应用部署 ----
 .PHONY: apply-dev
 apply-dev: gen-secret tls ## 应用 local-dev overlay(命名空间/中间件/应用)
+	-kubectl -n chaimir-system delete job chaimir-migrate --ignore-not-found
 	kubectl kustomize --load-restrictor=LoadRestrictionsNone $(OVERLAY) | kubectl apply -f -
 
 .PHONY: tls
@@ -173,10 +195,9 @@ middleware-wait: apply-dev ## 等待中间件就绪(迁移前置)
 
 # ---- 数据库迁移(中间件就绪后)----
 .PHONY: migrate
-migrate: ## 运行迁移 + RLS 初始化 + seed(删旧 Job 后重建)
-	-kubectl -n chaimir-system delete job chaimir-migrate --ignore-not-found
-	kubectl kustomize --load-restrictor=LoadRestrictionsNone $(OVERLAY) | kubectl apply -f -
-	@echo "migrate Job 已提交(镜像就绪后执行;目录2/3 产出 chaimir/migrate 镜像后生效)"
+migrate: ## 确认迁移 + RLS 初始化 + seed Job 已提交
+	@kubectl -n chaimir-system get job chaimir-migrate >/dev/null
+	@echo "migrate Job 已提交(镜像就绪后执行;目录2/3 产出 service/migrate 镜像后生效)"
 
 # ---- 镜像供应链工具与 Harbor(可选,本地/私有化私有仓)----
 .PHONY: supply-chain-tools-pull

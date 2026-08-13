@@ -48,6 +48,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File images/pull-images.ps1 -Scop
 
 本地完整功能测试、预发布和生产必须走同一套 Harbor + digest lock 机制。构建类镜像不得先落到 `local`、`chaimir/*:dev` 或其他本地命名空间再转换;构建命令必须直接使用与生产一致的 Harbor 分类命名空间,并从 Harbor 返回值生成候选锁:
 
+完整镜像包、首次环境或发布验收使用下面的全量流程。日常源码修改不需要重复处理全部镜像,但不能因此降低被修改镜像的任何门禁。
+
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File images/build-images.ps1 `
   -Registry registry.chaimir.io `
@@ -72,6 +74,17 @@ powershell -NoProfile -ExecutionPolicy Bypass -File images/pull-images.ps1 `
 ```
 
 拉回后的镜像必须经过统一 Trivy 配置的 HIGH/CRITICAL 阻断扫描、CycloneDX SBOM 生成、Cosign 镜像签名、SBOM 证明和双重验证。只有全部镜像通过后,候选锁才能晋升为正式 `images/image-digests.lock` 或生成 `PLATFORM_IMAGE_ATTESTATIONS_JSON`。平台构建镜像只允许通过 `images/build-images.ps1 -Push` 推送并生成候选锁,拉取脚本不承担构建产物发布职责。
+
+### 日常源码迭代的选择性刷新
+
+测试阶段仍运行在项目的 Kubernetes + HTTPS 入口,不启动宿主机 Go/pnpm 服务,不使用源码 hostPath、`kubectl cp`、临时 tag 或第二套生产路径。只对变更影响集合执行同一套候选锁、digest 回拉、Trivy/SBOM/Cosign 门禁:
+
+- `frontend/**`、`images/service/frontend/**` 或 `base/node-builder` digest 变化: `-Images service/frontend`。
+- `backend/**`: `-Images service/backend,service/migrate,service/cron`,因为三个服务镜像都复制后端源码。
+- 仅修改某个 `images/service/<name>` Dockerfile 或 manifest: 只选择对应的 `service/<name>`。
+- `base/go-builder`、`base/runtime-min`、`middleware/postgres` 变化: 根据 Dockerfile 的真实 `FROM` 依赖扩展到实际消费者,不受影响镜像不重复处理。
+
+选择性证明命令必须带 `-Images`、`-NoEnvWrite` 和 `-DigestFragmentsDir`;脚本只有在选定集合全部通过时才生成 `verified-images.lock`。再用 `images/sync-image-metadata.ps1 -FragmentsPath` 增量晋升正式锁、四个 overlay、`deploy/config/chaimir.env` 和存在时的本地 `backend/.env` 准入证明。未选镜像继续使用正式锁中的原 digest,不重复构建、拉取、扫描或签名。完成晋升后执行 `make dev-refresh`,检查只有受影响的工作负载滚动更新。
 
 无需密钥的静态门禁统一运行 `images/validate-image-metadata.ps1`:它校验目录/category/name、Dockerfile/构建路径、不可变基础镜像和正式锁现有条目,但不会把尚待流水线首次晋升的新镜像误判为失败。
 

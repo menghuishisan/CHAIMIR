@@ -397,6 +397,28 @@ foreach ($item in $selected) {
     if ($item.DockerfileText -match "(?m)^\s*ARG\s+NGINX_RUNTIME_IMAGE\b") {
         $buildArguments["NGINX_RUNTIME_IMAGE"] = Get-PinnedUpstreamRef -ManifestPath $item.Manifest -ImageKey "runtime" -DigestKey "runtime_digest"
     }
+    if ($item.Image -eq "service/frontend") {
+        $frontendEnvPath = Join-Path $repoRoot "frontend\.env"
+        if (-not (Test-Path -LiteralPath $frontendEnvPath)) {
+            throw "service/frontend 构建缺少前端构建配置: $frontendEnvPath"
+        }
+        foreach ($line in Get-Content -LiteralPath $frontendEnvPath) {
+            if ($line -match '^\s*(VITE_[A-Z0-9_]+)\s*=(.*)$') {
+                $buildArguments[$Matches[1]] = $Matches[2].Trim()
+            }
+        }
+        $requiredFrontendArgs = @(
+            "VITE_API_BASE_URL",
+            "VITE_API_TIMEOUT_MS",
+            "VITE_SIM_WORKER_COMMAND_TIMEOUT_MS",
+            "VITE_SIM_STEP_INTERVAL_MS"
+        )
+        foreach ($argumentName in $requiredFrontendArgs) {
+            if (-not $buildArguments.ContainsKey($argumentName) -or [string]::IsNullOrWhiteSpace([string]$buildArguments[$argumentName])) {
+                throw "service/frontend 构建配置缺少 $argumentName"
+            }
+        }
+    }
     if ($item.DockerfileText -match "(?m)^\s*ARG\s+GO_MODULE_PROXY\b" -and -not [string]::IsNullOrWhiteSpace($env:GO_MODULE_PROXY)) {
         $buildArguments["GO_MODULE_PROXY"] = $env:GO_MODULE_PROXY
     }

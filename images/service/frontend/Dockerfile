@@ -2,7 +2,18 @@
 # 构建与运行基座都由 images/build-images.ps1 注入不可变引用,禁止裸 tag 构建。
 ARG NODE_BUILDER_IMAGE=invalid.invalid/base/node-builder:required
 ARG NGINX_RUNTIME_IMAGE=invalid.invalid/runtime/nginx:required
+ARG VITE_API_BASE_URL
+ARG VITE_WS_BASE_URL
+ARG VITE_API_TIMEOUT_MS
+ARG VITE_SIM_WORKER_COMMAND_TIMEOUT_MS
+ARG VITE_SIM_STEP_INTERVAL_MS
 FROM ${NODE_BUILDER_IMAGE} AS builder
+
+ARG VITE_API_BASE_URL
+ARG VITE_WS_BASE_URL
+ARG VITE_API_TIMEOUT_MS
+ARG VITE_SIM_WORKER_COMMAND_TIMEOUT_MS
+ARG VITE_SIM_STEP_INTERVAL_MS
 
 USER root
 
@@ -17,6 +28,13 @@ COPY frontend/packages ./packages
 COPY frontend/apps ./apps
 # Vite 与 Nginx 共同读取同一份生产安全头配置,构建阶段只复制该真相源供 Vite 解析。
 COPY images/service/frontend/security-headers.conf /src/images/service/frontend/security-headers.conf
+
+# Vite 只在构建期读取客户端变量;所有部署形态通过构建参数显式注入同一组值。
+ENV VITE_API_BASE_URL=${VITE_API_BASE_URL} \
+    VITE_WS_BASE_URL=${VITE_WS_BASE_URL} \
+    VITE_API_TIMEOUT_MS=${VITE_API_TIMEOUT_MS} \
+    VITE_SIM_WORKER_COMMAND_TIMEOUT_MS=${VITE_SIM_WORKER_COMMAND_TIMEOUT_MS} \
+    VITE_SIM_STEP_INTERVAL_MS=${VITE_SIM_STEP_INTERVAL_MS}
 
 RUN pnpm install --frozen-lockfile
 RUN pnpm build && \

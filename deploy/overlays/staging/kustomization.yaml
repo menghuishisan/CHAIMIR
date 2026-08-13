@@ -16,19 +16,24 @@ components:
 images:
   - name: chaimir/backend
     newName: registry.chaimir.io/service/backend
-    digest: sha256:4f38baa5e6f652302c090c765b554a984d1c25bec1638bd814130a0695dfc2ea
+    digest: sha256:60b06437bf6195a4d1aeae7b9e1151ceadeaf70ac27e921a8933abcf3e0879c1
   - name: chaimir/frontend
     newName: registry.chaimir.io/service/frontend
-    digest: sha256:85b94c9ce6e3cced53aa4a6bbce3825155d8cb856206d6eafd2a70cd1cc5c578
+    digest: sha256:3342d0d2adbf50e8b89b1f2d909a4d6ad3262df250d38273e268dc4cf0fa87f6
   - name: chaimir/migrate
     newName: registry.chaimir.io/service/migrate
-    digest: sha256:0b815b351f330e4dfdda33cbaa6808327e9c1f97322a303494145329ee71e2de
+    digest: sha256:85824d7df6dceb7fff0ba2d4dcd5fd7d51c22d84c0fdd68258043b7144ac08e7
   - name: chaimir/cron
     newName: registry.chaimir.io/service/cron
-    digest: sha256:819508b49619d34268ccfca4093e2e3cadaa569cde99e1d7f773c19aeb6481ba
+    digest: sha256:1b7755bd50eb47287c6882521b4cab16ea324a502d3f0acc37071427318a3d86
 
 # 中间件外接端点 + SaaS 形态(host 为 staging 托管中间件内部域名)。
 configMapGenerator:
+  - name: chaimir-frontend-runtime-config
+    namespace: chaimir-system
+    behavior: replace
+    files:
+      - runtime-config.js=frontend-runtime-config.js
   - name: chaimir-config
     namespace: chaimir-system
     behavior: merge

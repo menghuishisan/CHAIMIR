@@ -29,7 +29,16 @@ for (const relativePath of ['frontend/.env', 'frontend/.env.example']) {
   const source = read(relativePath)
   requireMatch(relativePath, source, /^VITE_API_BASE_URL=\/api\/v1\s*$/m, 'API 必须使用同源 /api/v1')
   requireMatch(relativePath, source, /^VITE_WS_BASE_URL=\s*$/m, 'WebSocket 默认必须使用同源票据流')
-  requireMatch(relativePath, source, new RegExp(`^VITE_SANDBOX_TOOL_ORIGIN=${TOOL_ORIGIN.replaceAll('.', '\\.') }\\s*$`, 'm'), `工具 origin 必须为 ${TOOL_ORIGIN}`)
+  if (/^VITE_(?:SANDBOX_TOOL_ORIGIN|DEPLOY_MODE)=/m.test(source)) {
+    failures.push(`${relativePath}: 部署形态与工具 origin 必须由 overlay 的 /runtime-config.js 注入,不能写入 Vite 构建环境`)
+  }
+}
+
+for (const [name, deploymentMode] of [['local-dev', 'saas'], ['staging', 'saas'], ['prod-saas', 'saas'], ['prod-school', 'school']]) {
+  const relativePath = `deploy/overlays/${name}/frontend-runtime-config.js`
+  const source = read(relativePath)
+  requireMatch(relativePath, source, new RegExp(`deploymentMode:\\s*['"]${deploymentMode}['"]`), `运行时部署形态必须为 ${deploymentMode}`)
+  requireMatch(relativePath, source, new RegExp(`sandboxToolOrigin:\\s*['"]${TOOL_ORIGIN.replaceAll('.', '\\.') }['"]`), `工具 origin 必须为 ${TOOL_ORIGIN}`)
 }
 
 for (const relativePath of ['backend/.env.example', 'deploy/config/chaimir.env']) {

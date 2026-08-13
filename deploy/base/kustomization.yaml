@@ -21,6 +21,12 @@ resources:
   - admission/image-signature-policy.yaml
   - cronjobs/cronjobs.yaml
 
+configMapGenerator:
+  - name: chaimir-frontend-runtime-config
+    namespace: chaimir-system
+    files:
+      - runtime-config.js=frontend/runtime-config.js
+
 # 环境变量键:由 config component 从「唯一」env 源 ../config/chaimir.env 生成
 #   chaimir-config(chaimir-system)+ chaimir-data-config(chaimir-data)。
 # overlay 用 configMapGenerator behavior: merge 覆盖差异键(DEPLOY_MODE 等)。

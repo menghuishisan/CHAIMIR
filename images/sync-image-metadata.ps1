@@ -36,7 +36,10 @@ if ($EnvPaths.Count -eq 0) {
     )
 }
 if ($AttestationEnvPaths.Count -eq 0) {
-    $AttestationEnvPaths = @((Join-Path $RepoRoot "deploy\config\chaimir.env"))
+    $AttestationEnvPaths = @(
+        (Join-Path $RepoRoot "deploy\config\chaimir.env"),
+        (Join-Path $RepoRoot "backend\.env")
+    ) | Where-Object { Test-Path -LiteralPath $_ }
 }
 
 # Read-VerifiedFragments 读取当前流水线产出的锁片段,同一镜像出现不同 digest 时拒绝晋升。

@@ -110,10 +110,21 @@ M2 快照能力分为两层:通用 `VolumeSnapshot` CRD/snapshot-controller 与�
 中填写真实类名。`rancher.io/local-path`、普通 Docker volume 或演示用 hostpath CSI 不作为生产
 快照方案。
 
-将 `www.chaimir.io` 指向 `127.0.0.1`(hosts)后,前端经 `https://www.chaimir.io` 访问,并信任 `config/chaimir-tls/tls.crt`。首次环境使用 `dev-up`，后续浏览器联调和 E2E 使用 `dev-refresh`。
+将 `www.chaimir.io` 指向 `127.0.0.1`(hosts)后,前端经 `https://www.chaimir.io` 访问,并信任 `config/chaimir-tls/tls.crt`。首次环境使用 `dev-up`，后续浏览器联调和 E2E 使用 `dev-refresh`；两个入口都会先维护节点 split-DNS 并重新应用唯一 local-dev overlay。
 
 > 应用镜像就绪前(目录2/3 未产出),backend/frontend/migrate Pod 会处于 ImagePull 待命 —— 属预期。
 > 镜像必须由统一供应链直接推送 Harbor、按 digest 回拉并通过门禁,再由 `image-metadata-promotion` 晋升到权威锁和 local-dev overlay;不得导入本地 `:dev` tag 绕过该流程。
+
+### 本地代码变更的选择性镜像刷新
+
+测试阶段仍使用 Kubernetes + HTTPS,不在宿主机直跑 Go 或 pnpm。为缩短单次修改后的刷新时间,只对实际受影响的服务执行构建、按 digest 回拉和供应链证明:
+
+- `frontend/**` 或 `images/service/frontend/**` 只更新 `service/frontend`。
+- `backend/**` 会同时更新 `service/backend`、`service/migrate`、`service/cron`,因为三个 Dockerfile 都复制后端源码。
+- 只改 `images/service/backend/**`、`images/service/migrate/**` 或 `images/service/cron/**` 时,只更新对应服务。
+- 共享构建基座 digest 变化时,按 Dockerfile 的真实 `FROM` 依赖扩展受影响集合;未受影响镜像继续使用正式锁中的原 digest。
+
+选定集合必须使用 `images/build-images.ps1 -Images` 生成候选锁,再用 `images/pull-images.ps1 -Images` 按候选锁回拉。候选集合必须通过 `deploy/scripts/image-attestations-generate.ps1 -Images -NoEnvWrite -DigestFragmentsDir <证据目录>\\fragments`;脚本只有在选定集合全部验证成功时才写出 `verified-images.lock`。把该片段交给 `images/sync-image-metadata.ps1` 后,才更新正式 `images/image-digests.lock`、四个环境 overlay、`deploy/config/chaimir.env` 和存在时的本地 `backend/.env` 准入证明。禁止把候选锁直接复制成正式锁,也禁止用 tag、手工 digest、`kubectl set image` 或临时本地镜像绕过流程。最后仍执行 `make dev-refresh`;该命令只会因 digest 变化滚动更新对应工作负载,未变更服务继续使用原镜像。
 
 ## Harbor 与供应链工具
 
@@ -153,7 +164,9 @@ make image-attestations-generate
 Harbor 入口,必须与 `SUPPLY_CHAIN_REGISTRY` 的主机名一致。生产/预发布环境应由 CI/Harbor/KMS
 提供对应密钥和认证配置。
 
-本地供应链和实验测试都直接使用 `https://registry.chaimir.io` 的标准 443 入口；日常只打开 Docker
+本地供应链和实验测试都直接使用 `https://registry.chaimir.io` 的标准 443 入口；Docker Desktop
+节点启动时由 `make registry-runtime-dns` 使用节点动态解析到的 `host.docker.internal` 网关维护
+split-DNS，节点内不会把宿主机的 `127.0.0.1` hosts 映射当作 registry 地址；日常只打开 Docker
 Desktop 做其他项目时不会占用额外 Harbor 端口。生产与本地不使用两套 registry 地址。
 
 `SUPPLY_CHAIN_TRIVY_IMAGE`、`SUPPLY_CHAIN_COSIGN_IMAGE`、`SUPPLY_CHAIN_HELM_IMAGE` 使用 digest 固定。当前 Trivy 固定为 0.72.0,Cosign 固定为 2.4.3（与 policy-controller 0.13.1 的 legacy 签名格式契约一致）;GitHub 工作流也显式安装同一 Cosign 版本。本地、私有化与 CI 使用项目私钥且不上传公共透明日志。需要升级工具时,先拉取目标稳定版本并确认 digest与命令参数,再同步更新 `config/chaimir.env` 和工作流版本,不得提交可变 `latest`。
