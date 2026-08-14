@@ -135,7 +135,7 @@ function DashboardContent({ dashboard }: { dashboard: Dashboard }) {
             hint={`进行中 ${dashboard.active_contest_count}`}
           />
           <Stat
-            label="活跃沙箱"
+            label="活跃实验环境"
             value={dashboard.active_sandbox_count}
             icon={Activity}
             hint="当前占用运行资源"
@@ -144,7 +144,7 @@ function DashboardContent({ dashboard }: { dashboard: Dashboard }) {
       </PageSection>
 
       {quotaItems.length > 0 ? (
-        <PageSection title="资源配额" description="沙箱并发与资源上限由平台管理员设定。">
+        <PageSection title="资源配额" description="实验环境并发与资源上限由平台管理员设定。">
           <DescriptionList dense columns={2} items={quotaItems} />
         </PageSection>
       ) : null}
@@ -231,7 +231,7 @@ function StatisticsSection() {
   return (
     <PageSection
       title="运营统计"
-      description="按日聚合的历史快照。表格是无障碍的等价呈现,不做无来源的装饰图形。"
+      description="每日记录的历史数据,帮助您了解学校的运营变化趋势。"
       actions={
         <form
           className="flex flex-wrap items-end gap-2"
@@ -268,7 +268,7 @@ function StatisticsSection() {
         <ResourceState
           resource={statistics}
           emptyIcon={TrendingUp}
-          emptyDescription="这个区间内还没有聚合快照。统计每日生成,新学校要等一天。"
+          emptyDescription="这个区间内还没有统计数据。统计每日生成,新学校需要等待一天。"
           emptyTitle="暂无统计数据"
           skeleton={<Table columns={columns} data={[]} rowKey={() => ''} loading />}
         >
@@ -277,7 +277,7 @@ function StatisticsSection() {
               <Empty
                 icon={TrendingUp}
                 title="这段时间没有可呈现的指标"
-                description="快照里的指标都还未登记名称,已跳过以避免显示内部键名。"
+                description="当前区间内暂无可显示的统计指标。"
               />
             ) : (
               <Table columns={columns} data={rows} rowKey={(row) => `${row.date}-${row.term}`} />

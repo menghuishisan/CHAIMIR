@@ -73,7 +73,7 @@ export function useTicketedWebSocket(options: TicketedSocketOptions): TicketedSo
       if (!active) return
       if (!ticket) {
         console.error('[ws] 后端未签发连接票据', { url })
-        setError('实时连接没能建立,请稍后重试。')
+        setError('与实验环境的连接建立失败,请稍后重试。')
         setStatus('error')
         return
       }
@@ -105,7 +105,7 @@ export function useTicketedWebSocket(options: TicketedSocketOptions): TicketedSo
         if (!active) return
         // WebSocket 的 error 事件不带原因(规范如此),原因只能从随后的 close 码判断
         console.error('[ws] 连接出错', { url })
-        setError('实时连接中断了。可以重试连接。')
+        setError('与实验环境的连接中断。可以重试连接。')
         setStatus('error')
       }
       socket.onclose = () => {

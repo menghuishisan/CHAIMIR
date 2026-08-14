@@ -1,10 +1,10 @@
 // 沙箱工具登记表单(沙箱工具页内)。
 //
 // 四类工具的声明形态互斥,后端 validateToolResourceSpecShape 对每类都有必填与禁填:
-//   平台内置:只要入口地址模板,不能带容器、命令策略或网络规则;
+//   平台内置:只要入口地址模板,不能带组件、命令策略或网络规则;
 //   终端:什么都不要,带任何声明都会被拒;
-//   网页工具:容器、服务、代理路由三者都必须有,不能带命令策略;
-//   命令工具:恰好一个容器 + 命令白名单,不能有服务、路由或网络规则。
+//   网页工具:组件、服务、代理路由三者都必须有,不能带命令策略;
+//   命令工具:恰好一个组件 + 命令白名单,不能有服务、路由或网络规则。
 // 故表单按类型分叉,只渲染该类型允许的字段 —— 把四类字段并排摊出来,填错的概率高于填对。
 //
 // 容器声明本身是不定长的编排清单(镜像、端口、探针、挂载),键不可枚举,
@@ -52,7 +52,7 @@ const CODE_PATTERN = /^[a-z][a-z0-9-]{0,30}[a-z0-9]$/
 /** 内置工具入口模板的固定前缀,与后端 validBuiltinEndpointTemplate 一致。 */
 const BUILTIN_ENDPOINT_PREFIX = '/api/v1/sandbox/sandboxes/{sandbox_id}'
 
-/** 命令工具的单容器清单骨架:恰好一个容器,不声明端口。 */
+/** 命令工具的单容器清单骨架:恰好一个组件,不声明端口。 */
 const COMMAND_COMPONENT_TEMPLATE = `[
   {
     "name": "compiler",
@@ -145,7 +145,7 @@ export function ToolFormModal({ onClose, onSaved }: ToolFormModalProps) {
       case SandboxToolKind.WEB_EMBED:
         return webParsed.spec ?? {}
       default:
-        // 终端工具不带任何声明:后端对它禁填容器、入口模板、命令策略与网络规则
+        // 终端工具不带任何声明:后端对它禁填组件、入口模板、命令策略与网络规则
         return {}
     }
   }, [
@@ -423,7 +423,7 @@ export function ToolFormModal({ onClose, onSaved }: ToolFormModalProps) {
                   htmlFor={`${fieldId}-components`}
                   required
                   error={errors.components}
-                  helper="恰好一个容器。命令工具不对外暴露端口,也不配代理路由"
+                  helper="恰好一个组件。命令工具不对外暴露端口,也不配代理路由"
                 >
                   <Textarea
                     id={`${fieldId}-components`}
@@ -442,12 +442,12 @@ export function ToolFormModal({ onClose, onSaved }: ToolFormModalProps) {
                     columns={2}
                     items={[
                       {
-                        term: '容器名',
+                        term: '组件名称',
                         description: readComponentField(componentsParsed.components[0], 'name'),
                         mono: true,
                       },
                       {
-                        term: '容器镜像',
+                        term: '镜像',
                         description:
                           readComponentField(componentsParsed.components[0], 'image_url') || '未填写',
                         mono: true,
@@ -465,7 +465,7 @@ export function ToolFormModal({ onClose, onSaved }: ToolFormModalProps) {
                   htmlFor={`${fieldId}-web-spec`}
                   required
                   error={errors.webSpec}
-                  helper="容器、服务、代理路由三段都要有:平台按路由把工具页面代理进工作台"
+                  helper="组件、服务、代理路由三段都要有:平台按路由把工具页面代理进工作台"
                 >
                   <Textarea
                     id={`${fieldId}-web-spec`}
@@ -483,7 +483,7 @@ export function ToolFormModal({ onClose, onSaved }: ToolFormModalProps) {
                     dense
                     columns={3}
                     items={[
-                      { term: '容器', description: `${webParsed.summary.components} 个` },
+                      { term: '组件', description: `${webParsed.summary.components} 个` },
                       { term: '服务', description: `${webParsed.summary.services} 个` },
                       { term: '代理路由', description: `${webParsed.summary.routes} 条` },
                     ]}
@@ -493,7 +493,7 @@ export function ToolFormModal({ onClose, onSaved }: ToolFormModalProps) {
             ) : null}
 
             <Callout tone="info">
-              容器镜像必须来自平台私有仓库并通过签名与漏洞扫描,登记时后端会校验。
+              镜像必须来自平台私有仓库并通过签名与漏洞扫描,登记时后端会校验。
             </Callout>
 
             {formError ? <Callout tone="danger">{formError}</Callout> : null}
@@ -515,9 +515,9 @@ export function ToolFormModal({ onClose, onSaved }: ToolFormModalProps) {
 /** 各类工具的选型说明,与列表页同源口径。 */
 const KIND_HINTS: Record<SandboxToolKind, string> = {
   [SandboxToolKind.BUILTIN]: '平台自带的面板,只需要入口地址模板',
-  [SandboxToolKind.TERMINAL]: '直连运行时容器的终端,不需要任何额外声明',
-  [SandboxToolKind.WEB_EMBED]: '独立容器提供网页界面,要声明容器、服务与代理路由',
-  [SandboxToolKind.COMMAND]: '在白名单内执行命令,要声明一个执行容器与允许的命令',
+  [SandboxToolKind.TERMINAL]: '直接连接运行时环境的终端,不需要任何额外声明',
+  [SandboxToolKind.WEB_EMBED]: '独立环境提供网页界面,要声明组件、服务与代理路由',
+  [SandboxToolKind.COMMAND]: '在白名单内执行命令,要声明一个执行环境与允许的命令',
 }
 
 /** ParsedComponents 是命令工具容器清单的解析结果。 */
@@ -528,7 +528,7 @@ interface ParsedComponents {
 
 /**
  * parseComponents 解析命令工具的容器清单。
- * 后端要求恰好一个容器且每个容器有名字,这两条能在本地判定,故在此挡住。
+ * 后端要求恰好一个组件且每个容器有名字,这两条能在本地判定,故在此挡住。
  */
 function parseComponents(text: string): ParsedComponents {
   const trimmed = text.trim()
@@ -542,11 +542,11 @@ function parseComponents(text: string): ParsedComponents {
   }
   if (!Array.isArray(raw)) return { components: [], error: '执行环境配置格式不正确,请按示例填写多个条目。' }
   if (raw.length !== 1) {
-    return { components: [], error: '命令工具只能声明一个执行容器。' }
+    return { components: [], error: '命令工具只能声明一个执行环境。' }
   }
   const first = asRecord(raw[0])
   if (!first || typeof first.name !== 'string' || first.name.trim() === '') {
-    return { components: [], error: '容器要有名字(name)。' }
+    return { components: [], error: '组件要有名字(name)。' }
   }
   return { components: raw as WorkloadComponent[] }
 }
@@ -560,7 +560,7 @@ interface ParsedWebEmbed {
 
 /**
  * parseWebEmbedSpec 解析网页工具清单。
- * 后端要求容器、服务、代理路由三段都非空,且不能带命令策略;这几条在本地判定。
+ * 后端要求组件、服务、代理路由三段都非空,且不能带命令策略;这几条在本地判定。
  */
 function parseWebEmbedSpec(text: string): ParsedWebEmbed {
   const trimmed = text.trim()
@@ -579,8 +579,8 @@ function parseWebEmbedSpec(text: string): ParsedWebEmbed {
   const services = Array.isArray(spec.services) ? spec.services : []
   const routes = Array.isArray(spec.routes) ? spec.routes : []
 
-  if (components.length === 0) return { error: '至少要声明一个容器。' }
-  if (services.length === 0) return { error: '至少要声明一个服务,否则平台无法访问容器端口。' }
+  if (components.length === 0) return { error: '至少要声明一个组件。' }
+  if (services.length === 0) return { error: '至少要声明一个服务,否则平台无法访问环境端口。' }
   if (routes.length === 0) return { error: '至少要声明一条代理路由,否则工具页面无法嵌入工作台。' }
   if (spec.command_policy !== undefined) {
     return { error: '网页工具不能带命令白名单,那是命令工具的字段。' }

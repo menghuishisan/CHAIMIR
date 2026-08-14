@@ -1,52 +1,38 @@
 // LoginPage 公共登录页(墨玉体系,底层全裸露形态):
-// 左区为面向用户的平台介绍(非对称 ~58%,见 login-intro),右区登录表单(无卡片盒,底线输入),
-// 两区之间无分隔线,靠暗化渐变过渡(FE-6/规范 §1.2)。
-// 本文件只做两区布局与「当前是哪种登录方式」的取舍:
+// 左区介绍已移至 AuthLayout 作为固定左栏(对所有认证页可见);本页只渲染右区登录表单。
+// 窄屏时左区折叠,需要在表单顶部补充紧凑品牌行(lg:hidden)。
+// 本文件只做「当前是哪种登录方式」的取舍:
 //   输入与提交流程在 login-state(三种方式共用一套状态),各方式的表单在 login-forms。
 // 多学校账号经内存暂存凭证进入 /auth/tenant-select(凭证不进路由 state,防历史记录持久化)。
 
 import { useTenantBrand } from '../../useTenantBrand'
 import { AuthBrandMark, SchoolBrandLine } from './auth-ui'
 import { AccountLoginForm, PhoneLoginForm, SsoLoginForm } from './login-forms'
-import { LoginIntro } from './login-intro'
 import { useLoginController } from './login-state'
 
 /**
- * LoginPage 组合介绍区与表单区,并按当前登录方式渲染对应表单。
+ * LoginPage 按当前登录方式渲染对应表单。
+ * 左侧介绍区已提升至 AuthLayout,本页不再自建分栏。
  */
 export default function LoginPage() {
   const login = useLoginController()
   const brand = useTenantBrand()
 
   return (
-    <div className="flex w-full flex-1 flex-col lg:flex-row">
-      {/* ---------- 左区:品牌与介绍(桌面),窄屏折叠为顶部紧凑版 ---------- */}
-      <LoginIntro />
+    <>
+      {/* 窄屏品牌行(左区隐藏时的紧凑替代) */}
+      <div className="mb-10 flex flex-col gap-3 lg:hidden">
+        <AuthBrandMark />
+        {brand ? <SchoolBrandLine name={brand.display_name} logoSrc={brand.logo_image} /> : null}
+      </div>
 
-      {/* ---------- 右区:登录表单(同一底层,仅暗化渐变过渡,无边线) ---------- */}
-      <section className="relative flex flex-1 items-center justify-center px-6 py-10 lg:justify-start lg:px-16">
-        <div
-          aria-hidden
-          className="pointer-events-none absolute inset-0 hidden bg-gradient-to-r from-transparent via-substrate/40 to-substrate/70 lg:block"
-        />
-        <div className="relative w-full max-w-sm">
-          {/* 窄屏品牌行(左区隐藏时的紧凑替代) */}
-          <div className="mb-10 flex flex-col gap-3 lg:hidden">
-            <AuthBrandMark />
-            {brand ? (
-              <SchoolBrandLine name={brand.display_name} logoSrc={brand.logo_image} />
-            ) : null}
-          </div>
-
-          {login.view === 'phone' ? (
-            <PhoneLoginForm login={login} />
-          ) : login.view === 'account' ? (
-            <AccountLoginForm login={login} />
-          ) : (
-            <SsoLoginForm login={login} />
-          )}
-        </div>
-      </section>
-    </div>
+      {login.view === 'phone' ? (
+        <PhoneLoginForm login={login} />
+      ) : login.view === 'account' ? (
+        <AccountLoginForm login={login} />
+      ) : (
+        <SsoLoginForm login={login} />
+      )}
+    </>
   )
 }

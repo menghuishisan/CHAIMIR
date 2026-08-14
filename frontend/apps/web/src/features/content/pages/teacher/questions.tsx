@@ -238,9 +238,9 @@ export default function TeacherQuestionsPage() {
       <PageSection>
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <Stat label="题目总数" value={items.total} icon={Database} />
-          <Stat label="本页已发布" value={stats.published} icon={Send} hint="可被作业与实验引用" />
-          <Stat label="本页草稿" value={stats.draft} icon={Pencil} />
-          <Stat label="本页已共享" value={stats.shared} icon={Share2} hint="其他学校可复用" />
+          <Stat label="已发布" value={stats.published} icon={Send} hint="可被作业与实验引用" />
+          <Stat label="草稿" value={stats.draft} icon={Pencil} />
+          <Stat label="已共享" value={stats.shared} icon={Share2} hint="其他学校可复用" />
         </div>
       </PageSection>
 

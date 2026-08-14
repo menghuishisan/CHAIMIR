@@ -156,7 +156,7 @@ export default function PlatformRuntimesPage() {
           </ResourceState>
 
           <Callout tone="info">
-            停用运行时不影响正在跑的环境,只是之后不再分配。要换镜像版本请在详情里登记新版本并设为默认。
+            停用运行时不影响已创建的环境,只是之后不再分配。要换镜像版本请在详情里登记新版本并设为默认。
           </Callout>
         </div>
       </PageSection>

@@ -166,9 +166,9 @@ export default function TeacherGradesPage() {
       <PageSection>
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <Stat label="我的报送记录" value={reviews.total} icon={ClipboardList} />
-          <Stat label="本页待审核" value={stats.pending} icon={Send} hint="等待学校处理" />
-          <Stat label="本页已通过" value={stats.approved} icon={CircleCheck} />
-          <Stat label="本页已锁定" value={stats.locked} icon={Lock} hint="锁定后不能再调分" />
+          <Stat label="待审核" value={stats.pending} icon={Send} hint="等待学校处理" />
+          <Stat label="已通过" value={stats.approved} icon={CircleCheck} />
+          <Stat label="已锁定" value={stats.locked} icon={Lock} hint="锁定后不能再调分" />
         </div>
       </PageSection>
 

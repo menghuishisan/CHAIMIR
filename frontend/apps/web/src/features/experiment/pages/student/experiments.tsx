@@ -162,8 +162,8 @@ export default function StudentExperimentsPage() {
       <PageSection>
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           <Stat label="可做实验" value={experiments.total} icon={FlaskConical} />
-          <Stat label="本页小组实验" value={groupCount} icon={Users} hint="需要分组后进入" />
-          <Stat label="本页需交报告" value={reportCount} icon={Target} />
+          <Stat label="小组实验" value={groupCount} icon={Users} hint="需要分组后进入" />
+          <Stat label="需交报告" value={reportCount} icon={Target} />
         </div>
       </PageSection>
 

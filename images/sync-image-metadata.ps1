@@ -189,6 +189,13 @@ function Update-SimAdapterDigests {
         $matched = $true
         $jsonValue = $Matches[1]
         $parsedProfiles = ConvertFrom-Json -InputObject $jsonValue
+        # Windows PowerShell 5.1 将 JSON 数组解码为带 value/Count 属性的包装对象;
+        # 统一解包后再遍历,避免只处理包装对象导致配置数组被截断。
+        if ($parsedProfiles.PSObject.Properties.Name -contains "value" -and $parsedProfiles.PSObject.Properties.Name -contains "Count") {
+            $parsedProfiles = @($parsedProfiles.value)
+        } else {
+            $parsedProfiles = @($parsedProfiles)
+        }
         $profiles = [System.Collections.Generic.List[object]]::new()
         foreach ($parsedProfile in $parsedProfiles) {
             $profiles.Add($parsedProfile)
@@ -255,6 +262,12 @@ function Update-ImageAttestations {
 
     $byLogical = @{}
     $parsedAttestations = ConvertFrom-Json -InputObject $jsonValue
+    # Windows PowerShell 5.1 的 JSON 数组包装对象必须先解包,否则 foreach 只会看到空 image_url。
+    if ($parsedAttestations.PSObject.Properties.Name -contains "value" -and $parsedAttestations.PSObject.Properties.Name -contains "Count") {
+        $parsedAttestations = @($parsedAttestations.value)
+    } else {
+        $parsedAttestations = @($parsedAttestations)
+    }
     foreach ($item in $parsedAttestations) {
         $imageURL = [string]$item.image_url
         if ($imageURL -notmatch "^(.+/)([^/]+/[^/@]+)@(sha256:[0-9a-f]{64})$") {

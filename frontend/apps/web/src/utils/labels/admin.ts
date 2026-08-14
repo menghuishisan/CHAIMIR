@@ -275,10 +275,10 @@ export function configKeyDescription(key: string): string | undefined {
  * 不让管理员手写指标名(写错要等到告警不触发才发现)。
  */
 export const ALERT_METRICS = [
-  { value: 'sandbox.active_count', label: '活跃沙箱数' },
-  { value: 'sandbox.failed_rate', label: '沙箱创建失败率' },
-  { value: 'judge.queue_length', label: '判题排队长度' },
-  { value: 'judge.failed_rate', label: '判题失败率' },
+  { value: 'sandbox.active_count', label: '活跃实验环境数' },
+  { value: 'sandbox.failed_rate', label: '实验环境创建失败率' },
+  { value: 'judge.queue_length', label: '待评分任务数量' },
+  { value: 'judge.failed_rate', label: '自动评分失败率' },
   { value: 'account.login_failed_count', label: '登录失败次数' },
   { value: 'transfer.failed_count', label: '导入导出失败数' },
   { value: 'grade.warning_count', label: '学业预警数' },

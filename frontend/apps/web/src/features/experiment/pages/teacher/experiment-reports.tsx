@@ -206,8 +206,8 @@ function ReportsContent({ experiment }: { experiment: Experiment }) {
       <PageSection>
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <Stat label="报告总数" value={reports.total} icon={FileText} />
-          <Stat label="本页待批改" value={stats.pending} icon={ClipboardCheck} />
-          <Stat label="本页已批改" value={stats.graded} icon={ClipboardCheck} />
+          <Stat label="待批改" value={stats.pending} icon={ClipboardCheck} />
+          <Stat label="已批改" value={stats.graded} icon={ClipboardCheck} />
           <Stat
             label="检查点合计"
             value={experiment.components.checkpoints.reduce((sum, item) => sum + item.score, 0)}

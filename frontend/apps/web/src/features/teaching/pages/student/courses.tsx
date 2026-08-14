@@ -150,9 +150,9 @@ export default function StudentCoursesPage() {
       <PageSection>
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           <Stat label="已加入课程" value={courses.total} icon={BookOpen} hint="本学期及历史全部课程" />
-          <Stat label="本页进行中" value={runningCount} icon={Layers} hint="正在上课的课程数" />
+          <Stat label="进行中" value={runningCount} icon={Layers} hint="正在上课的课程数" />
           <Stat
-            label="本页学分合计"
+            label="学分合计"
             value={totalCredits}
             icon={GraduationCap}
             hint="以当前页课程累计"

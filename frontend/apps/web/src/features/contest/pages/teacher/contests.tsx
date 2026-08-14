@@ -222,9 +222,9 @@ export default function TeacherContestsPage() {
       <PageSection>
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <Stat label="赛事总数" value={contests.total} icon={Trophy} />
-          <Stat label="本页报名中" value={stats.signup} icon={Flag} />
-          <Stat label="本页进行中" value={stats.running} icon={Play} />
-          <Stat label="本页草稿" value={stats.draft} icon={Plus} hint="发布后学生可见" />
+          <Stat label="报名中" value={stats.signup} icon={Flag} />
+          <Stat label="进行中" value={stats.running} icon={Play} />
+          <Stat label="草稿" value={stats.draft} icon={Plus} hint="发布后学生可见" />
         </div>
       </PageSection>
 

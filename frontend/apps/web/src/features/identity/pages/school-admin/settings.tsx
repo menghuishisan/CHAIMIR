@@ -71,8 +71,8 @@ export default function SchoolAdminSettingsPage() {
   return (
     <PageScaffold>
       <PageHeader
-        kicker={<Breadcrumb items={[{ label: '系统配置' }, { label: '租户配置' }]} />}
-        title="租户配置"
+        kicker={<Breadcrumb items={[{ label: '系统配置' }, { label: '学校配置' }]} />}
+        title="学校配置"
         description="学校的展示信息、启用的业务模块、登录方式与账号开通策略。"
         icon={Settings}
       />

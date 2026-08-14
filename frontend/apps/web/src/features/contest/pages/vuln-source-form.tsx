@@ -227,7 +227,7 @@ export function VulnSourceFormModal({
             </div>
 
             <FormField
-              label="接口地址"
+              label="来源地址"
               htmlFor={`${fieldId}-endpoint`}
               required
               error={errors.endpoint}
@@ -243,9 +243,9 @@ export function VulnSourceFormModal({
             </FormField>
 
             <div className="grid gap-4 sm:grid-cols-3">
-              <FormField label="请求方式" required>
+              <FormField label="获取方式" required>
                 <SegmentedControl
-                  aria-label="请求方式"
+                  aria-label="获取方式"
                   size="sm"
                   options={VULN_SOURCE_METHODS.map((item) => ({ value: item, label: item }))}
                   value={method}
@@ -253,7 +253,7 @@ export function VulnSourceFormModal({
                 />
               </FormField>
               <FormField
-                label="响应等待时间(秒)"
+                label="等待时间(秒)"
                 htmlFor={`${fieldId}-timeout`}
                 required
                 error={errors.timeoutSeconds}
@@ -271,7 +271,7 @@ export function VulnSourceFormModal({
               <FormField
                 label="案例列表位置"
                 htmlFor={`${fieldId}-cases`}
-                helper="响应中案例列表所在的位置,例如 data.items;响应本身就是列表时留空"
+                helper="案例列表在数据中的位置,例如 data.items;数据本身就是列表时留空"
               >
                 <Input
                   id={`${fieldId}-cases`}
@@ -284,9 +284,9 @@ export function VulnSourceFormModal({
 
             <div className="flex flex-col gap-4 rounded-md border border-line bg-surface-sunken p-4">
               <div>
-                <p className="text-base text-ink">字段映射</p>
+                <p className="text-base text-ink">数据对应关系</p>
                 <p className="text-sm text-ink-sub">
-                  填写外部响应里对应字段的路径。嵌套字段用点号连接,如 <span className="font-mono">detail.body</span>。
+                  填写外部数据中对应信息的位置。嵌套内容用点号连接,如 <span className="font-mono">detail.body</span>。
                 </p>
               </div>
 

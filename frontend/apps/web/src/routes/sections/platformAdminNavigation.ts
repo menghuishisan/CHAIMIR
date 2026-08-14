@@ -29,7 +29,7 @@ export const platformAdminNavigation: RoleNavigationConfig = {
   hasNotificationInbox: false,
   groups: [
     {
-      title: '租户',
+      title: '学校管理',
       items: [
         { name: '学校管理', path: '/platform-admin/schools', icon: Building },
         { name: '入驻申请', path: '/platform-admin/applications', icon: Inbox },

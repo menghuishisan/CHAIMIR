@@ -189,7 +189,7 @@ export function JudgerFormModal({ judger, onClose, onSaved }: JudgerFormModalPro
       next.command = commandList.length === 0 ? '请填写判题要执行的命令' : null
       next.execTarget = EXEC_TARGET_PATTERN.test(execTarget.trim())
         ? null
-        : '执行目标写成「容器组/容器」两段,例如 runner/runner'
+        : '执行目标写成「组/名称」两段,例如 runner/runner'
       next.sidecars = sidecarsParsed.error ?? null
     }
 
@@ -522,12 +522,12 @@ export function JudgerFormModal({ judger, onClose, onSaved }: JudgerFormModalPro
             ) : null}
 
             <FormField
-              label="需要的沙箱工具"
-              helper="判题容器里要用到的工具,只列已登记的。不需要就都不选"
+              label="需要的工具"
+              helper="判题环境里要用到的工具,只列已登记的。不需要就都不选"
             >
               <div className="flex flex-col gap-2">
                 {(tools.data ?? []).length === 0 ? (
-                  <span className="text-sm text-ink-sub">还没有登记沙箱工具。</span>
+                  <span className="text-sm text-ink-sub">还没有登记工具。</span>
                 ) : (
                   (tools.data ?? []).map((tool) => (
                     <Checkbox
@@ -590,7 +590,7 @@ export function JudgerFormModal({ judger, onClose, onSaved }: JudgerFormModalPro
                     htmlFor={`${fieldId}-exec-target`}
                     required
                     error={errors.execTarget}
-                    helper="写成「容器组/容器」两段,指向下面声明的执行容器"
+                    helper="写成「组/名称」两段,指向下面声明的执行环境"
                   >
                     <Input
                       id={`${fieldId}-exec-target`}
@@ -604,7 +604,7 @@ export function JudgerFormModal({ judger, onClose, onSaved }: JudgerFormModalPro
                   <FormField
                     label="测试集压缩包名"
                     htmlFor={`${fieldId}-suite`}
-                    helper="题目附带的测试集在容器里的文件名。留空表示不需要"
+                    helper="题目附带的测试集文件名。留空表示不需要"
                   >
                     <Input
                       id={`${fieldId}-suite`}
@@ -621,7 +621,7 @@ export function JudgerFormModal({ judger, onClose, onSaved }: JudgerFormModalPro
                   htmlFor={`${fieldId}-sidecars`}
                   required
                   error={errors.sidecars}
-                  helper="判题跑在这些容器里,判完即销毁。至少一个"
+                  helper="评分任务在这些环境中执行,完成后自动清理。至少配置一个"
                 >
                   <Textarea
                     id={`${fieldId}-sidecars`}
@@ -693,11 +693,11 @@ function parseSidecars(text: string): ParsedSidecars {
     return { sidecars: [], error: '内容不是合法的声明格式,检查是否漏了逗号或引号。' }
   }
   if (!Array.isArray(raw)) return { sidecars: [], error: '执行环境配置格式不正确,请按示例填写多个条目。' }
-  if (raw.length === 0) return { sidecars: [], error: '至少要声明一个执行容器。' }
+  if (raw.length === 0) return { sidecars: [], error: '至少要声明一个执行环境。' }
   for (const item of raw) {
     const record = typeof item === 'object' && item !== null ? (item as Record<string, unknown>) : undefined
     if (!record || typeof record.name !== 'string' || record.name.trim() === '') {
-      return { sidecars: [], error: '每个执行容器都要有名字(name)。' }
+      return { sidecars: [], error: '每个执行环境都要有名称(name)。' }
     }
   }
   return { sidecars: raw as WorkloadComponent[] }

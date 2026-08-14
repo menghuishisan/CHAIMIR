@@ -690,7 +690,7 @@ function IsolatedFooter({
         <span className="flex flex-wrap items-center gap-2 font-mono text-xs tabular-nums text-on-dark-sub">
           <span>推演时刻 {snapshot.tick}</span>
           <Badge tone={stream.status === 'open' ? 'jade' : 'warning'}>
-            {stream.status === 'open' ? '服务端推演中' : '连接已断开'}
+            {stream.status === 'open' ? '正在推演' : '连接已断开'}
           </Badge>
         </span>
         {stream.error ? (

@@ -10,8 +10,8 @@ import { useCallback, useMemo, useState } from 'react'
 import { Download, FileText, GraduationCap, Users } from 'lucide-react'
 import {
   AccountStatus,
+  BaseIdentity,
   TranscriptScope,
-  UserRole,
   type Account,
   type Class,
   type GradeTranscript,
@@ -69,7 +69,7 @@ export function TranscriptBatchSection() {
     () =>
       classId
         ? api.identity.getAccounts({
-            role: UserRole.STUDENT,
+            role: BaseIdentity.STUDENT,
             class_id: classId,
             status: AccountStatus.ACTIVE,
             page: 1,

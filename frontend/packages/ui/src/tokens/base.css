@@ -95,3 +95,12 @@ body {
     scroll-behavior: auto !important;
   }
 }
+
+/* 认证页左区光晕(规范 §1.2:用光晕、密度、暗化渐变过渡,不用边线/色块分隔) */
+.auth-intro-glow {
+  background: radial-gradient(
+    ellipse 800px 600px at 40% 50%,
+    color-mix(in srgb, var(--color-jade-400) 8%, transparent) 0%,
+    transparent 60%
+  ), var(--color-substrate);
+}

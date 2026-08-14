@@ -177,8 +177,8 @@ export default function TeacherSharedLibraryPage() {
       <PageSection>
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           <Stat label="共享题目" value={shared.total} icon={Share2} />
-          <Stat label="本页涵盖类型" value={stats.types} icon={Share2} />
-          <Stat label="本页涵盖知识点" value={stats.knowledgePoints} icon={Search} />
+          <Stat label="涵盖类型" value={stats.types} icon={Share2} />
+          <Stat label="涵盖知识点" value={stats.knowledgePoints} icon={Search} />
         </div>
       </PageSection>
 

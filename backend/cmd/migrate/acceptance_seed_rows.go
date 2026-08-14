@@ -655,6 +655,12 @@ ON CONFLICT (tenant_id, course_id, student_id) DO UPDATE SET rating=EXCLUDED.rat
 		return err
 	}
 	if err := execJSON(ctx, tx, `
+DELETE FROM grade_weight
+WHERE tenant_id=$1 AND course_id=$2 AND source_type=1 AND source_ref=$3 AND id<>$4`,
+		acceptanceIDs.TenantID, acceptanceIDs.Course, "910000000000005031", acceptanceIDs.GradeWeight); err != nil {
+		return err
+	}
+	if err := execJSON(ctx, tx, `
 INSERT INTO grade_weight (id, tenant_id, course_id, source_type, source_ref, weight)
 VALUES ($1,$2,$3,1,$4,100.00)
 ON CONFLICT (id) DO UPDATE SET tenant_id=EXCLUDED.tenant_id, course_id=EXCLUDED.course_id, source_type=EXCLUDED.source_type, source_ref=EXCLUDED.source_ref, weight=EXCLUDED.weight, updated_at=now()`,
@@ -812,6 +818,27 @@ ON CONFLICT (code) DO UPDATE SET session_id=EXCLUDED.session_id, created_by=EXCL
 		acceptanceIDs.SimShare, acceptanceIDs.TenantID, acceptanceIDs.SimSession, acceptanceIDs.StudentA)
 }
 
+// seedApplicationRows 写入平台入驻审核页所需的待审核、已驳回和已开通申请。
+// 这些是平台层全局夹具,只在 SaaS 验收种子中写入,不进入学校私有化数据。
+func seedApplicationRows(ctx context.Context, tx pgx.Tx) error {
+	if err := execJSON(ctx, tx, `
+INSERT INTO tenant_application (id, school_name, school_type, contact_name, contact_phone, contact_email, status, reject_reason, reviewed_by, tenant_id)
+VALUES ($1,'东陆区块链职业学院',2,'周宁','13900001401','apply-pending@acceptance.chaimir.io',1,NULL,NULL,NULL)
+ON CONFLICT (id) DO UPDATE SET school_name=EXCLUDED.school_name, school_type=EXCLUDED.school_type, contact_name=EXCLUDED.contact_name, contact_phone=EXCLUDED.contact_phone, contact_email=EXCLUDED.contact_email, status=EXCLUDED.status, reject_reason=NULL, reviewed_by=NULL, tenant_id=NULL, updated_at=now()`, acceptanceIDs.ApplicationPending); err != nil {
+		return err
+	}
+	if err := execJSON(ctx, tx, `
+INSERT INTO tenant_application (id, school_name, school_type, contact_name, contact_phone, contact_email, status, reject_reason, reviewed_by, tenant_id)
+VALUES ($1,'南岭智能工程学院',1,'陈默','13900001402','apply-rejected@acceptance.chaimir.io',3,'联系人信息未能完成核验,请补充材料后重新提交。',NULL,NULL)
+ON CONFLICT (id) DO UPDATE SET school_name=EXCLUDED.school_name, school_type=EXCLUDED.school_type, contact_name=EXCLUDED.contact_name, contact_phone=EXCLUDED.contact_phone, contact_email=EXCLUDED.contact_email, status=EXCLUDED.status, reject_reason=EXCLUDED.reject_reason, reviewed_by=NULL, tenant_id=NULL, updated_at=now()`, acceptanceIDs.ApplicationRejected); err != nil {
+		return err
+	}
+	return execJSON(ctx, tx, `
+INSERT INTO tenant_application (id, school_name, school_type, contact_name, contact_phone, contact_email, status, reject_reason, reviewed_by, tenant_id)
+VALUES ($1,'华东链安实验学院',1,'林老师','13900001403','apply-approved@acceptance.chaimir.io',2,NULL,NULL,$2)
+ON CONFLICT (id) DO UPDATE SET school_name=EXCLUDED.school_name, school_type=EXCLUDED.school_type, contact_name=EXCLUDED.contact_name, contact_phone=EXCLUDED.contact_phone, contact_email=EXCLUDED.contact_email, status=EXCLUDED.status, reject_reason=NULL, reviewed_by=NULL, tenant_id=EXCLUDED.tenant_id, updated_at=now()`, acceptanceIDs.ApplicationApproved, acceptanceIDs.TenantID)
+}
+
 // seedContestRows 写入解题赛、队伍、提交、榜单和漏洞题素材。
 func seedContestRows(ctx context.Context, tx pgx.Tx) error {
 	rules, _ := jsonb(map[string]any{"scoring": "static", "allowed_languages": []string{"solidity"}, "appeal_minutes": 20})
@@ -871,6 +898,90 @@ ON CONFLICT (tenant_id, contest_id, snapshot_status) DO UPDATE SET ranking=EXCLU
 		acceptanceIDs.ResultSnapshot, acceptanceIDs.TenantID, acceptanceIDs.Contest, ranking); err != nil {
 		return err
 	}
+	battleConfig, _ := jsonb(map[string]any{
+		"runtime_code": "evm-foundry", "runtime_image_version": "2026.06",
+		"tool_codes": []string{"code-server"}, "init_code_ref": acceptanceInitCodeRef, "init_script_ref": acceptanceInitScriptRef,
+	})
+	if err := execJSON(ctx, tx, `
+INSERT INTO contest (id, tenant_id, organizer_id, name, mode, match_mode, team_mode, signup_start, signup_end, start_at, end_at, freeze_minutes, rules, status)
+VALUES ($1,$2,$3,'2026 链安攻防回放验收赛',2,2,1,$4,$5,$6,$7,0,$8,5)
+ON CONFLICT (id) DO UPDATE SET organizer_id=EXCLUDED.organizer_id, name=EXCLUDED.name, mode=EXCLUDED.mode, match_mode=EXCLUDED.match_mode, team_mode=EXCLUDED.team_mode, signup_start=EXCLUDED.signup_start, signup_end=EXCLUDED.signup_end, start_at=EXCLUDED.start_at, end_at=EXCLUDED.end_at, freeze_minutes=EXCLUDED.freeze_minutes, rules=EXCLUDED.rules, status=EXCLUDED.status, deleted_at=NULL, updated_at=now()`,
+		acceptanceIDs.BattleContest, acceptanceIDs.TenantID, acceptanceIDs.TeacherMain,
+		time.Date(2026, 7, 1, 8, 0, 0, 0, time.UTC), time.Date(2026, 7, 7, 18, 0, 0, 0, time.UTC),
+		time.Date(2026, 7, 8, 9, 0, 0, 0, time.UTC), time.Date(2026, 7, 8, 17, 0, 0, 0, time.UTC), battleConfig); err != nil {
+		return err
+	}
+	if err := execJSON(ctx, tx, `
+INSERT INTO contest_problem (id, tenant_id, contest_id, item_code, item_version, score, battle_config, battle_rule, seq)
+VALUES ($1,$2,$3,'battle-reentrancy-duel','1.0.0',100,$4,1,1)
+ON CONFLICT (tenant_id, contest_id, item_code, item_version) DO UPDATE SET score=EXCLUDED.score, battle_config=EXCLUDED.battle_config, battle_rule=EXCLUDED.battle_rule, seq=EXCLUDED.seq`,
+		acceptanceIDs.BattleContestProblem, acceptanceIDs.TenantID, acceptanceIDs.BattleContest, battleConfig); err != nil {
+		return err
+	}
+	if err := execJSON(ctx, tx, `
+INSERT INTO team (id, tenant_id, contest_id, name, invite_code, status)
+VALUES ($1,$2,$3,'回放验收队 A','RPA2026',2)
+ON CONFLICT (id) DO UPDATE SET contest_id=EXCLUDED.contest_id, name=EXCLUDED.name, invite_code=EXCLUDED.invite_code, status=EXCLUDED.status`,
+		acceptanceIDs.BattleTeamA, acceptanceIDs.TenantID, acceptanceIDs.BattleContest); err != nil {
+		return err
+	}
+	if err := execJSON(ctx, tx, `
+INSERT INTO team (id, tenant_id, contest_id, name, invite_code, status)
+VALUES ($1,$2,$3,'回放验收队 B','RPB2026',2)
+ON CONFLICT (id) DO UPDATE SET contest_id=EXCLUDED.contest_id, name=EXCLUDED.name, invite_code=EXCLUDED.invite_code, status=EXCLUDED.status`,
+		acceptanceIDs.BattleTeamB, acceptanceIDs.TenantID, acceptanceIDs.BattleContest); err != nil {
+		return err
+	}
+	if err := execJSON(ctx, tx, `
+INSERT INTO team_member (id, tenant_id, team_id, account_id, member_tenant_id, is_leader)
+VALUES ($1,$2,$3,$4,$2,true)
+ON CONFLICT (tenant_id, team_id, member_tenant_id, account_id) DO UPDATE SET is_leader=EXCLUDED.is_leader`,
+		acceptanceIDs.BattleTeamAMember, acceptanceIDs.TenantID, acceptanceIDs.BattleTeamA, acceptanceIDs.StudentA); err != nil {
+		return err
+	}
+	if err := execJSON(ctx, tx, `
+INSERT INTO team_member (id, tenant_id, team_id, account_id, member_tenant_id, is_leader)
+VALUES ($1,$2,$3,$4,$2,true)
+ON CONFLICT (tenant_id, team_id, member_tenant_id, account_id) DO UPDATE SET is_leader=EXCLUDED.is_leader`,
+		acceptanceIDs.BattleTeamBMember, acceptanceIDs.TenantID, acceptanceIDs.BattleTeamB, acceptanceIDs.StudentB); err != nil {
+		return err
+	}
+	if err := execJSON(ctx, tx, `
+INSERT INTO battle_entry (id, tenant_id, contest_id, problem_id, team_id, role, artifact_ref, artifact_hash, version_no, is_active, submitted_at)
+VALUES ($1,$2,$3,$4,$5,2,'minio://chaimir-code/acceptance/battle/replay-a.zip',$6,1,true,now() - interval '20 minutes')
+ON CONFLICT (id) DO UPDATE SET contest_id=EXCLUDED.contest_id, problem_id=EXCLUDED.problem_id, team_id=EXCLUDED.team_id, role=EXCLUDED.role, artifact_ref=EXCLUDED.artifact_ref, artifact_hash=EXCLUDED.artifact_hash, version_no=EXCLUDED.version_no, is_active=EXCLUDED.is_active, submitted_at=EXCLUDED.submitted_at`,
+		acceptanceIDs.BattleEntryA, acceptanceIDs.TenantID, acceptanceIDs.BattleContest, acceptanceIDs.BattleContestProblem, acceptanceIDs.BattleTeamA, strings.Repeat("a", 64)); err != nil {
+		return err
+	}
+	if err := execJSON(ctx, tx, `
+INSERT INTO battle_entry (id, tenant_id, contest_id, problem_id, team_id, role, artifact_ref, artifact_hash, version_no, is_active, submitted_at)
+VALUES ($1,$2,$3,$4,$5,1,'minio://chaimir-code/acceptance/battle/replay-b.zip',$6,1,true,now() - interval '19 minutes')
+ON CONFLICT (id) DO UPDATE SET contest_id=EXCLUDED.contest_id, problem_id=EXCLUDED.problem_id, team_id=EXCLUDED.team_id, role=EXCLUDED.role, artifact_ref=EXCLUDED.artifact_ref, artifact_hash=EXCLUDED.artifact_hash, version_no=EXCLUDED.version_no, is_active=EXCLUDED.is_active, submitted_at=EXCLUDED.submitted_at`,
+		acceptanceIDs.BattleEntryB, acceptanceIDs.TenantID, acceptanceIDs.BattleContest, acceptanceIDs.BattleContestProblem, acceptanceIDs.BattleTeamB, strings.Repeat("b", 64)); err != nil {
+		return err
+	}
+	scoreDelta, _ := jsonb(map[string]any{"team_a": fmt.Sprintf("%d", acceptanceIDs.BattleTeamA), "team_b": fmt.Sprintf("%d", acceptanceIDs.BattleTeamB), "rating_a_before": 1200, "rating_b_before": 1200, "rating_a_after": 1216, "rating_b_after": 1184, "delta_a": 16, "delta_b": -16})
+	if err := execJSON(ctx, tx, `
+INSERT INTO battle_match (id, tenant_id, contest_id, problem_id, entry_a_id, entry_b_id, source_ref, sandbox_ref, judge_task_ref, result, score_delta, replay_ref, status, matched_at, finished_at)
+VALUES ($1,$2,$3,$4,$5,$6,'contest:2026:battle:acceptance-001','sandbox:acceptance-battle-001','judge:acceptance-battle-001',1,$7,NULL,3,now() - interval '18 minutes',now() - interval '10 minutes')
+ON CONFLICT (id) DO UPDATE SET contest_id=EXCLUDED.contest_id, problem_id=EXCLUDED.problem_id, entry_a_id=EXCLUDED.entry_a_id, entry_b_id=EXCLUDED.entry_b_id, sandbox_ref=EXCLUDED.sandbox_ref, judge_task_ref=EXCLUDED.judge_task_ref, result=EXCLUDED.result, score_delta=EXCLUDED.score_delta, status=EXCLUDED.status, matched_at=EXCLUDED.matched_at, finished_at=EXCLUDED.finished_at`,
+		acceptanceIDs.BattleMatch, acceptanceIDs.TenantID, acceptanceIDs.BattleContest, acceptanceIDs.BattleContestProblem, acceptanceIDs.BattleEntryA, acceptanceIDs.BattleEntryB, scoreDelta); err != nil {
+		return err
+	}
+	if err := execJSON(ctx, tx, `
+INSERT INTO ladder_rank (id, tenant_id, contest_id, team_id, score, solved_count, last_solve_at, rank)
+VALUES ($1,$2,$3,$4,1216.00,0,now() - interval '10 minutes',1)
+ON CONFLICT (id) DO UPDATE SET contest_id=EXCLUDED.contest_id, team_id=EXCLUDED.team_id, score=EXCLUDED.score, solved_count=EXCLUDED.solved_count, last_solve_at=EXCLUDED.last_solve_at, rank=EXCLUDED.rank, updated_at=now()`,
+		acceptanceIDs.BattleLadderRankA, acceptanceIDs.TenantID, acceptanceIDs.BattleContest, acceptanceIDs.BattleTeamA); err != nil {
+		return err
+	}
+	if err := execJSON(ctx, tx, `
+INSERT INTO ladder_rank (id, tenant_id, contest_id, team_id, score, solved_count, last_solve_at, rank)
+VALUES ($1,$2,$3,$4,1184.00,0,now() - interval '10 minutes',2)
+ON CONFLICT (id) DO UPDATE SET contest_id=EXCLUDED.contest_id, team_id=EXCLUDED.team_id, score=EXCLUDED.score, solved_count=EXCLUDED.solved_count, last_solve_at=EXCLUDED.last_solve_at, rank=EXCLUDED.rank, updated_at=now()`,
+		acceptanceIDs.BattleLadderRankB, acceptanceIDs.TenantID, acceptanceIDs.BattleContest, acceptanceIDs.BattleTeamB); err != nil {
+		return err
+	}
 	sourceConfig, _ := jsonb(map[string]any{"source": "teacher-curated", "license": "internal-training"})
 	if err := execJSON(ctx, tx, `
 INSERT INTO vuln_source (id, tenant_id, type, name, config, default_level, enabled, last_sync_at)
@@ -885,6 +996,14 @@ INSERT INTO vuln_problem (id, tenant_id, source_id, external_ref, title, level, 
 VALUES ($1,$2,$3,'CL-REENTRANCY-2026-001','Vault withdraw 可重入漏洞',1,1,$4,2,'{"positive":"passed","negative":"passed"}'::jsonb,'ctf-reentrancy-vault','1.0.0',2)
 ON CONFLICT (id) DO UPDATE SET source_id=EXCLUDED.source_id, external_ref=EXCLUDED.external_ref, title=EXCLUDED.title, level=EXCLUDED.level, runtime_mode=EXCLUDED.runtime_mode, draft_body=EXCLUDED.draft_body, prevalidate_status=EXCLUDED.prevalidate_status, prevalidate_detail=EXCLUDED.prevalidate_detail, content_item_code=EXCLUDED.content_item_code, content_item_version=EXCLUDED.content_item_version, status=EXCLUDED.status, updated_at=now()`,
 		acceptanceIDs.VulnProblem, acceptanceIDs.TenantID, acceptanceIDs.VulnSource, draftBody)
+}
+
+// seedContestReplayRows 绑定已写入对象存储的历史回放归档引用。
+func seedContestReplayRows(ctx context.Context, tx pgx.Tx, replayRef string) error {
+	return execJSON(ctx, tx, `
+UPDATE battle_match
+SET replay_ref=$2
+WHERE tenant_id=$1 AND id=$3`, acceptanceIDs.TenantID, replayRef, acceptanceIDs.BattleMatch)
 }
 
 // seedNotifyRows 写入公告、站内信、偏好和已读状态。
@@ -933,6 +1052,14 @@ INSERT INTO semester (id, tenant_id, name, start_date, end_date, is_current)
 VALUES ($1,$2,'2026-2027-1','2026-09-01','2027-01-15',true)
 ON CONFLICT (tenant_id, name) DO UPDATE SET start_date=EXCLUDED.start_date, end_date=EXCLUDED.end_date, is_current=EXCLUDED.is_current`,
 		acceptanceIDs.Semester, acceptanceIDs.TenantID); err != nil {
+		return err
+	}
+	// 关闭同一验收课程上一次浏览器回归留下的未完成申诉,恢复可重复提交的基线。
+	if err := execJSON(ctx, tx, `
+UPDATE grade_appeal
+SET status=3, result_comment='验收种子已关闭上一轮未完成申诉。', handled_at=now()
+WHERE tenant_id=$1 AND student_id=$2 AND course_id=$3 AND status IN (1,2) AND id<>$4`,
+		acceptanceIDs.TenantID, acceptanceIDs.StudentA, acceptanceIDs.Course, acceptanceIDs.GradeAppeal); err != nil {
 		return err
 	}
 	if err := execJSON(ctx, tx, `

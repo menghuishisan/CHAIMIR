@@ -166,7 +166,7 @@ export default function PlatformAuditPage() {
     },
     {
       key: 'target_type',
-      header: '对象',
+      header: '操作对象',
       render: (entry) => (
         <span className="text-sm text-ink-sub">{auditTargetTypeLabel(entry.target_type)}</span>
       ),
@@ -180,7 +180,7 @@ export default function PlatformAuditPage() {
     },
     {
       key: 'trace_id',
-      header: '追踪编号',
+      header: '操作编号',
       render: (entry) =>
         entry.trace_id ? (
           <span className="truncate font-mono text-xs text-ink-faint">{entry.trace_id}</span>
@@ -245,7 +245,7 @@ export default function PlatformAuditPage() {
             />
           </FormField>
 
-          <FormField label="对象类型" htmlFor="platform-audit-target">
+          <FormField label="操作对象类型" htmlFor="platform-audit-target">
             <Select
               id="platform-audit-target"
               options={TARGET_TYPE_OPTIONS.map((item) => ({ value: item.value, label: item.label }))}

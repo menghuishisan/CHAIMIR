@@ -245,9 +245,9 @@ export default function TeacherVulnWorkshopPage() {
       <PageSection>
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <Stat label="漏洞题草稿" value={problems.total} icon={Bug} />
-          <Stat label="本页验证通过" value={stats.passed} icon={CircleCheck} hint="可固化到题库" />
-          <Stat label="本页尚未验证" value={stats.pending} icon={FlaskConical} />
-          <Stat label="本页已固化" value={stats.finalized} icon={Database} hint="可作为赛题引用" />
+          <Stat label="验证通过" value={stats.passed} icon={CircleCheck} hint="可固化到题库" />
+          <Stat label="尚未验证" value={stats.pending} icon={FlaskConical} />
+          <Stat label="已固化" value={stats.finalized} icon={Database} hint="可作为赛题引用" />
         </div>
       </PageSection>
 
@@ -430,7 +430,7 @@ function VulnSourceCard({ source, onEdit, onSynced, onError }: VulnSourceCardPro
           items={[
             { term: '默认分级', description: vulnLevelLabel(source.default_level) },
             {
-              term: '接口地址',
+              term: '来源地址',
               description: endpoint || '未配置',
               mono: true,
             },

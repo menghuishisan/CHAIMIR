@@ -455,10 +455,10 @@ export class TeachingApi {
   }
 
   /**
-   * 查询课程成绩列表。
+   * 查询课程成绩汇总。后端按课程成绩契约返回完整数组,不分页。
    */
-  async listGrades(courseId: string, params?: { page?: number; size?: number }): Promise<PaginatedResponse<TeachingCourseGrade>> {
-    return this.client.get(`/teaching/courses/${courseId}/grades`, params)
+  async listGrades(courseId: string): Promise<TeachingCourseGrade[]> {
+    return this.client.get(`/teaching/courses/${courseId}/grades`)
   }
 
   /**

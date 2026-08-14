@@ -194,55 +194,56 @@ function RuntimeOverview({
           />
         </div>
 
-        <Card>
-          <CardHeader
-            title={runtime.code}
-            description={`${runtime.eco} · 适配层级 ${runtime.adapter_level}`}
-            actions={
-              <div className="flex flex-wrap items-center gap-2">
-                <StatusIndicator
-                  tone={runtimeStatusTone(runtime.status)}
-                  label={runtimeStatusLabel(runtime.status)}
-                />
-                <StatusIndicator
-                  tone={runtimeSelftestStatusTone(runtime.selftest_status)}
-                  label={runtimeSelftestStatusLabel(runtime.selftest_status)}
-                />
-              </div>
-            }
+        <div className="flex flex-col gap-4">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div className="min-w-0">
+              <h3 className="text-base font-semibold text-ink">{runtime.code}</h3>
+              <p className="mt-0.5 text-sm text-ink-sub">
+                {runtime.eco} · 适配层级 {runtime.adapter_level}
+              </p>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <StatusIndicator
+                tone={runtimeStatusTone(runtime.status)}
+                label={runtimeStatusLabel(runtime.status)}
+              />
+              <StatusIndicator
+                tone={runtimeSelftestStatusTone(runtime.selftest_status)}
+                label={runtimeSelftestStatusLabel(runtime.selftest_status)}
+              />
+            </div>
+          </div>
+
+          <DescriptionList
+            columns={2}
+            items={[
+              { term: '工作区目录', description: runtime.adapter_spec.workspace_dir, mono: true },
+              {
+                term: '主环境',
+                description: runtime.adapter_spec.runtime_container.name,
+                mono: true,
+              },
+              {
+                term: '对外端口',
+                description: `${runtime.adapter_spec.runtime_container.ports?.length ?? 0} 个`,
+              },
+              {
+                term: '附加组件',
+                description: `${runtime.adapter_spec.infra_sidecars?.length ?? 0} 个`,
+              },
+              {
+                term: '默认工具',
+                description:
+                  (runtime.adapter_spec.default_tool_codes ?? []).join('、') || '未指定',
+              },
+              {
+                term: '能力实现',
+                description: runtime.capability_impl || runtime.plugin_ref || '清单声明的能力命令',
+                mono: true,
+              },
+            ]}
           />
-          <CardBody>
-            <DescriptionList
-              columns={2}
-              items={[
-                { term: '工作区目录', description: runtime.adapter_spec.workspace_dir, mono: true },
-                {
-                  term: '主容器',
-                  description: runtime.adapter_spec.runtime_container.name,
-                  mono: true,
-                },
-                {
-                  term: '对外端口',
-                  description: `${runtime.adapter_spec.runtime_container.ports?.length ?? 0} 个`,
-                },
-                {
-                  term: '附加容器',
-                  description: `${runtime.adapter_spec.infra_sidecars?.length ?? 0} 个`,
-                },
-                {
-                  term: '默认工具',
-                  description:
-                    (runtime.adapter_spec.default_tool_codes ?? []).join('、') || '未指定',
-                },
-                {
-                  term: '能力实现',
-                  description: runtime.capability_impl || runtime.plugin_ref || '清单声明的能力命令',
-                  mono: true,
-                },
-              ]}
-            />
-          </CardBody>
-        </Card>
+        </div>
       </div>
     </PageSection>
   )
@@ -762,31 +763,30 @@ function SelftestSection({ runtime, images, onDone }: SelftestSectionProps) {
           </Callout>
         ) : null}
 
-        <Card>
-          <CardHeader
-            title="自检状态"
-            description={
-              runtime.selftest_status === RuntimeSelftestStatus.PASSED
-                ? '这条运行时已经通过自检。改了声明或换了默认镜像后建议重新自检。'
-                : '自检通过后运行时才会转为可用。'
-            }
-            actions={
-              <StatusIndicator
-                tone={runtimeSelftestStatusTone(runtime.selftest_status)}
-                label={runtimeSelftestStatusLabel(runtime.selftest_status)}
-              />
-            }
-          />
-          <CardBody>
-            {detailItems.length > 0 ? (
-              <DescriptionList dense items={detailItems} />
-            ) : (
-              <p className="text-sm text-ink-sub">
-                还没有读取到分步结果。点「读取上次结果」查看,或直接开始一次新的自检。
+        <div className="flex flex-col gap-4">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div className="min-w-0">
+              <h3 className="text-base font-semibold text-ink">自检状态</h3>
+              <p className="mt-0.5 text-sm text-ink-sub">
+                {runtime.selftest_status === RuntimeSelftestStatus.PASSED
+                  ? '这条运行时已经通过自检。改了声明或换了默认镜像后建议重新自检。'
+                  : '自检通过后运行时才会转为可用。'}
               </p>
-            )}
-          </CardBody>
-        </Card>
+            </div>
+            <StatusIndicator
+              tone={runtimeSelftestStatusTone(runtime.selftest_status)}
+              label={runtimeSelftestStatusLabel(runtime.selftest_status)}
+            />
+          </div>
+
+          {detailItems.length > 0 ? (
+            <DescriptionList dense items={detailItems} />
+          ) : (
+            <p className="text-sm text-ink-sub">
+              还没有读取到分步结果。点「读取上次结果」查看,或直接开始一次新的自检。
+            </p>
+          )}
+        </div>
       </div>
     </PageSection>
   )

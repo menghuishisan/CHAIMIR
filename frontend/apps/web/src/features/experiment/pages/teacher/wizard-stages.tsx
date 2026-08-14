@@ -473,10 +473,10 @@ function ParamBindingsEditor({ draft, bindings, onChange }: ParamBindingsEditorP
               />
             </FormField>
             <FormField
-              label="参数名"
+              label="配置项名称"
               htmlFor={`binding-param-${index}`}
               required
-              helper="组件识别的参数名,由仿真包或运行时文档给出"
+              helper="要配置的项目名称,可在仿真包或运行时文档中查阅"
             >
               <Input
                 id={`binding-param-${index}`}
@@ -488,7 +488,7 @@ function ParamBindingsEditor({ draft, bindings, onChange }: ParamBindingsEditorP
 
           <FormField label="取值来源" required>
             <SegmentedControl
-              aria-label="参数取值来源"
+              aria-label="取值来源"
               size="sm"
               options={[
                 { value: 'checkpoint', label: '检查点结果' },
@@ -520,9 +520,9 @@ function ParamBindingsEditor({ draft, bindings, onChange }: ParamBindingsEditorP
                 )}
               </FormField>
               <FormField
-                label="取哪个字段"
+                label="提取哪项数据"
                 htmlFor={`binding-path-${index}`}
-                helper="判分输出里的字段名,例如 contract_address"
+                helper="检查点输出中的数据项名称,例如 contract_address"
               >
                 <Input
                   id={`binding-path-${index}`}

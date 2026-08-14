@@ -11,7 +11,7 @@ import { useNavigate } from 'react-router'
 import { RefreshCw, Settings2, TriangleAlert, UserCheck } from 'lucide-react'
 import {
   GradeWarningStatus,
-  UserRole,
+  BaseIdentity,
   type Account,
   type GradeWarning,
   type Semester,
@@ -83,7 +83,7 @@ export default function SchoolAdminAlertsPage() {
 
   // 预警只回 student_id / semester_id,姓名与学期名在此解析
   const students = useAsyncResource(
-    () => api.identity.getAccounts({ role: UserRole.STUDENT, page: 1, size: STUDENT_PICKER_SIZE }),
+    () => api.identity.getAccounts({ role: BaseIdentity.STUDENT, page: 1, size: STUDENT_PICKER_SIZE }),
     [],
     () => false,
   )
@@ -197,12 +197,12 @@ export default function SchoolAdminAlertsPage() {
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           <Stat label="预警总数" value={warnings.total} icon={TriangleAlert} />
           <Stat
-            label="本页待确认"
+            label="待确认"
             value={stats.pending}
             icon={TriangleAlert}
             hint="学生尚未查看"
           />
-          <Stat label="本页已确认" value={stats.acknowledged} icon={UserCheck} />
+          <Stat label="已确认" value={stats.acknowledged} icon={UserCheck} />
         </div>
       </PageSection>
 

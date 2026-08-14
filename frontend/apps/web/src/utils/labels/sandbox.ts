@@ -15,12 +15,12 @@ import {
 
 const SANDBOX_PHASE_LABELS: Record<SandboxPhase, string> = {
   [SandboxPhase.ALLOCATING]: '正在分配资源',
-  [SandboxPhase.READY]: '容器已就绪',
+  [SandboxPhase.READY]: '环境已就绪',
   [SandboxPhase.INITIALIZING]: '正在初始化环境',
   [SandboxPhase.FULLY_READY]: '环境已就绪',
 }
 
-/** sandboxPhaseLabel 返回沙箱准备阶段文案(区块孵化器的阶段名)。 */
+/** sandboxPhaseLabel 返回实验环境准备阶段文案(区块孵化器的阶段名)。 */
 export function sandboxPhaseLabel(phase: SandboxPhase): string {
   return SANDBOX_PHASE_LABELS[phase]
 }

@@ -100,7 +100,7 @@ function DashboardContent({ dashboard }: { dashboard: Dashboard }) {
 
   return (
     <>
-      <PageSection title="租户" description="已开通的学校与待处理的入驻申请。">
+      <PageSection title="学校" description="已开通的学校与待处理的入驻申请。">
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <Stat label="学校数" value={dashboard.tenant_count ?? 0} icon={Building} />
           <Stat
@@ -147,7 +147,7 @@ function DashboardContent({ dashboard }: { dashboard: Dashboard }) {
             hint={`进行中 ${dashboard.active_contest_count}`}
           />
           <Stat
-            label="活跃沙箱"
+            label="活跃实验环境"
             value={dashboard.active_sandbox_count}
             icon={Activity}
             hint="当前占用运行资源"
@@ -156,7 +156,7 @@ function DashboardContent({ dashboard }: { dashboard: Dashboard }) {
       </PageSection>
 
       {quotaItems.length > 0 ? (
-        <PageSection title="资源占用快照" description="按平台聚合的沙箱资源用量。">
+        <PageSection title="资源占用快照" description="按平台聚合的实验环境资源用量。">
           <DescriptionList dense columns={2} items={quotaItems} />
         </PageSection>
       ) : null}

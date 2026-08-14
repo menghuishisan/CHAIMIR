@@ -232,9 +232,9 @@ export default function TeacherExperimentsPage() {
       <PageSection>
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <Stat label="实验总数" value={experiments.total} icon={FlaskConical} />
-          <Stat label="本页已发布" value={stats.published} icon={Send} hint="学生可进入" />
-          <Stat label="本页草稿" value={stats.draft} icon={Pencil} />
-          <Stat label="本页检查点合计" value={stats.checkpoints} icon={CircleCheck} />
+          <Stat label="已发布" value={stats.published} icon={Send} hint="学生可进入" />
+          <Stat label="草稿" value={stats.draft} icon={Pencil} />
+          <Stat label="检查点合计" value={stats.checkpoints} icon={CircleCheck} />
         </div>
       </PageSection>
 

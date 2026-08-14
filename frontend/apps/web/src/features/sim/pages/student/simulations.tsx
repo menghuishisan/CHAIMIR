@@ -145,8 +145,8 @@ export default function StudentSimulationsPage() {
       <PageSection>
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           <Stat label="可用场景" value={packages.total} icon={Network} />
-          <Stat label="本页涵盖分类" value={categoryCount} icon={Layers} />
-          <Stat label="本页本机推演" value={browserCount} icon={Play} hint="无需服务端算力" />
+          <Stat label="涵盖分类" value={categoryCount} icon={Layers} />
+          <Stat label="本机推演" value={browserCount} icon={Play} hint="无需服务端算力" />
         </div>
       </PageSection>
 

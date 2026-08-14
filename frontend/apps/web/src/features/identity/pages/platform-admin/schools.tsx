@@ -183,9 +183,9 @@ export default function PlatformSchoolsPage() {
       <PageSection>
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <Stat label="学校总数" value={tenants.total} icon={Building} />
-          <Stat label="本页正常使用" value={stats.active} icon={ShieldCheck} />
-          <Stat label="本页平台托管" value={stats.saas} icon={Building} hint="其余为学校自建" />
-          <Stat label="本页已设到期" value={stats.expiring} icon={CalendarClock} hint="需要关注续期" />
+          <Stat label="正常使用" value={stats.active} icon={ShieldCheck} />
+          <Stat label="平台托管" value={stats.saas} icon={Building} hint="其余为学校自建" />
+          <Stat label="已设到期" value={stats.expiring} icon={CalendarClock} hint="需要关注续期" />
         </div>
       </PageSection>
 
@@ -349,7 +349,7 @@ function TenantStatusModal({ tenant, onClose, onSaved }: TenantStatusModalProps)
 
           {statusValue !== TenantStatus.ACTIVE ? (
             <Callout tone="warning" title="会立即生效">
-              保存后该校师生的登录会被拒绝,正在运行的实验与仿真环境将被回收。
+              保存后该校师生将无法登录,正在进行的实验与仿真会被停止。
             </Callout>
           ) : null}
 

@@ -48,10 +48,10 @@ const KIND_FILTERS = [
 
 /** 各类工具的一句话说明:登记表单里给更细的要求。 */
 const KIND_HINTS: Record<SandboxToolKind, string> = {
-  [SandboxToolKind.BUILTIN]: '平台自带的面板,按沙箱编号拼出入口地址,不额外起容器',
-  [SandboxToolKind.TERMINAL]: '直连运行时容器的终端,不需要额外声明',
-  [SandboxToolKind.WEB_EMBED]: '独立容器提供的网页界面,经平台代理嵌入工作台',
-  [SandboxToolKind.COMMAND]: '在受控白名单内执行命令,单容器、不对外暴露端口',
+  [SandboxToolKind.BUILTIN]: '平台自带的面板,按实验环境编号生成入口,无需额外启动',
+  [SandboxToolKind.TERMINAL]: '直接连接实验环境的命令行,不需要额外声明',
+  [SandboxToolKind.WEB_EMBED]: '独立环境提供的网页工具,经平台代理嵌入工作台',
+  [SandboxToolKind.COMMAND]: '在受控白名单内执行命令,独立运行、不开放网络端口',
 }
 
 /**
@@ -82,8 +82,8 @@ export default function PlatformSandboxToolsPage() {
   return (
     <PageScaffold>
       <PageHeader
-        kicker={<Breadcrumb items={[{ label: '底层资源' }, { label: '沙箱工具' }]} />}
-        title="沙箱工具"
+        kicker={<Breadcrumb items={[{ label: '底层资源' }, { label: '实验工具' }]} />}
+        title="实验工具"
         description="学生在实验环境里能用到的工具。运行时声明里指定默认工具,教师编排实验时可以再挑。"
         icon={Package}
         actions={
@@ -193,7 +193,7 @@ function ToolCard({ tool }: { tool: SandboxToolDefinition }) {
               : '未配置',
           },
           {
-            term: '执行容器',
+            term: '执行环境',
             description: tool.resource_spec.components?.[0]?.name ?? '未配置',
             mono: true,
           },
@@ -202,7 +202,7 @@ function ToolCard({ tool }: { tool: SandboxToolDefinition }) {
       case SandboxToolKind.WEB_EMBED:
         return [
           ...base,
-          { term: '容器数', description: `${tool.resource_spec.components?.length ?? 0} 个` },
+          { term: '组件数量', description: `${tool.resource_spec.components?.length ?? 0} 个` },
           { term: '代理路由数', description: `${tool.resource_spec.routes?.length ?? 0} 条` },
           {
             term: '网络放行规则',

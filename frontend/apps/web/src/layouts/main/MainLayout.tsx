@@ -129,21 +129,23 @@ export function MainLayout({ config }: MainLayoutProps) {
           </div>
         </header>
 
-        {/* 光面外框:内距即底层曝光量,<md 归零全宽 */}
-        <div className="pane-frame flex min-h-0 flex-1 flex-col pt-0">
+        {/* 光面外框:四周底层曝光(上右下 14px,左侧 8px 适度分离);<md 归零全宽 */}
+        <div className="flex min-h-0 flex-1 flex-col p-0 md:pb-3.5 md:pl-2 md:pr-3.5 md:pt-3.5">
           <main
             id="main-content"
             /* key 绑定路径:切页时重放入场动画,只动 opacity/translateY(§4.4) */
             key={location.pathname}
             className={cn(
-              'flex min-h-0 flex-1 flex-col overflow-x-hidden bg-canvas',
+              'flex min-h-0 flex-1 flex-col overflow-hidden bg-canvas',
               'rounded-none md:rounded-pane md:shadow-pane',
               'animate-pane-in',
             )}
           >
-            <RouteErrorBoundary>
-              <Outlet />
-            </RouteErrorBoundary>
+            <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
+              <RouteErrorBoundary>
+                <Outlet />
+              </RouteErrorBoundary>
+            </div>
           </main>
         </div>
       </div>

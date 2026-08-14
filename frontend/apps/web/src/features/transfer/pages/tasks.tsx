@@ -237,13 +237,13 @@ export default function TransferTasksPage() {
       <PageSection>
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           <Stat
-            label="本页进行中"
+            label="进行中"
             value={stats.activeCount}
             icon={RefreshCw}
             hint={stats.activeCount > 0 ? '处理完成后可刷新查看' : undefined}
           />
-          <Stat label="本页已完成" value={stats.succeededCount} icon={FileDown} />
-          <Stat label="本页处理失败" value={stats.failedCount} icon={ListChecks} />
+          <Stat label="已完成" value={stats.succeededCount} icon={FileDown} />
+          <Stat label="处理失败" value={stats.failedCount} icon={ListChecks} />
         </div>
       </PageSection>
 

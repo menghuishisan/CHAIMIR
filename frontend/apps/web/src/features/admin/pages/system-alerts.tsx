@@ -279,9 +279,9 @@ function AlertEventsSection({ eventScope }: { eventScope: string }) {
       <PageSection>
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           <Stat label="告警总数" value={events.total} icon={BellRing} />
-          <Stat label="本页待处理" value={stats.pending} icon={BellRing} hint="需要跟进" />
+          <Stat label="待处理" value={stats.pending} icon={BellRing} hint="需要跟进" />
           <Stat
-            label="本页紧急"
+            label="紧急"
             value={stats.urgent}
             icon={BellRing}
             hint={stats.urgent > 0 ? '优先处理' : '暂无紧急告警'}

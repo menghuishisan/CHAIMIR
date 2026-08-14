@@ -24,12 +24,12 @@ export interface AuthPanelProps {
 }
 
 /**
- * AuthPanel 认证页的居中容器:填满 AuthLayout 让出的主区并把内容居中。
- * 内容宽度归内层自己(常规表单 max-w-sm,字段更多的入驻申请 max-w-md),
- * 容器只负责「站在页面中间」这一件事。
+ * AuthPanel 认证页的内容容器(已由 AuthLayout 居中,本组件不再负责布局)。
+ * 内容宽度归内层自己(常规表单 max-w-sm,字段更多的入驻申请 max-w-md)。
+ * AuthLayout 已统一处理左右分栏、居中对齐与路由切换动画,本容器只包裹内容。
  */
 export function AuthPanel({ children }: AuthPanelProps) {
-  return <div className="flex w-full flex-1 items-center justify-center px-6 py-10">{children}</div>
+  return <div className="w-full">{children}</div>
 }
 
 export interface AuthFieldProps {

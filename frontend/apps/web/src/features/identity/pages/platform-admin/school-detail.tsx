@@ -126,38 +126,39 @@ function SchoolOverview({ tenant }: { tenant: Tenant }) {
       </PageSection>
 
       <PageSection title="开通信息" description="学校短名在开通时确定,不能修改。">
-        <Card>
-          <CardHeader
-            title={tenant.name}
-            description={tenant.display_name ? `对外显示为「${tenant.display_name}」` : '未设置对外显示名'}
-            actions={
-              <StatusIndicator
-                tone={tenantStatusTone(tenant.status)}
-                label={tenantStatusLabel(tenant.status)}
-              />
-            }
-          />
-          <CardBody className="flex flex-col gap-4">
-            <DescriptionList
-              columns={2}
-              items={[
-                { term: '学校短名', description: tenant.code, mono: true },
-                { term: '登录方式', description: authModeLabel(tenant.auth_mode) },
-                {
-                  term: '激活码开通',
-                  description: tenant.enable_activation_code ? '已启用' : '已关闭',
-                },
-                { term: '开通时间', description: formatDateTime(tenant.created_at), mono: true },
-                { term: '最近更新', description: formatDateTime(tenant.updated_at), mono: true },
-              ]}
-            />
-
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="text-sm text-ink-sub">已开启的模块:</span>
-              <TenantModuleBadges featureFlags={tenant.feature_flags} />
+        <div className="flex flex-col gap-4">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div className="min-w-0">
+              <h3 className="text-base font-semibold text-ink">{tenant.name}</h3>
+              <p className="mt-0.5 text-sm text-ink-sub">
+                {tenant.display_name ? `对外显示为「${tenant.display_name}」` : '未设置对外显示名'}
+              </p>
             </div>
-          </CardBody>
-        </Card>
+            <StatusIndicator
+              tone={tenantStatusTone(tenant.status)}
+              label={tenantStatusLabel(tenant.status)}
+            />
+          </div>
+
+          <DescriptionList
+            columns={2}
+            items={[
+              { term: '学校短名', description: tenant.code, mono: true },
+              { term: '登录方式', description: authModeLabel(tenant.auth_mode) },
+              {
+                term: '激活码开通',
+                description: tenant.enable_activation_code ? '已启用' : '已关闭',
+              },
+              { term: '开通时间', description: formatDateTime(tenant.created_at), mono: true },
+              { term: '最近更新', description: formatDateTime(tenant.updated_at), mono: true },
+            ]}
+          />
+
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-sm text-ink-sub">已开启的模块:</span>
+            <TenantModuleBadges featureFlags={tenant.feature_flags} />
+          </div>
+        </div>
       </PageSection>
     </>
   )
@@ -212,8 +213,8 @@ function QuotaSection({ tenantId }: { tenantId: string }) {
 
   return (
     <PageSection
-      title="沙箱资源配额"
-      description="这所学校能同时开的沙箱数量与单校资源上限。调低不会影响已在运行的环境,下一次创建时生效。"
+      title="实验环境资源配额"
+      description="这所学校能同时开的实验环境数量与单校资源上限。调低不会影响已在运行的环境,下一次创建时生效。"
     >
       <ResourceState
         resource={quota}
@@ -337,7 +338,7 @@ function QuotaForm({ quota, tenantId, onSaved }: QuotaFormProps) {
     <div className="flex flex-col gap-4">
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         <Stat
-          label="当前活跃沙箱"
+          label="当前活跃实验环境"
           value={quota.active_sandbox_count ?? 0}
           icon={Cpu}
           hint={`并发上限 ${quota.max_concurrent_sandbox}`}

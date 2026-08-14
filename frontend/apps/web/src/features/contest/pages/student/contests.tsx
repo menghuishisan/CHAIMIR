@@ -126,8 +126,8 @@ export default function StudentContestsPage() {
       <PageSection>
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           <Stat label="可参与赛事" value={contests.total} icon={Swords} />
-          <Stat label="本页报名中" value={signupOpenCount} icon={UserCheck} hint="报名窗口尚未关闭" />
-          <Stat label="本页进行中" value={runningCount} icon={Trophy} />
+          <Stat label="报名中" value={signupOpenCount} icon={UserCheck} hint="报名窗口尚未关闭" />
+          <Stat label="进行中" value={runningCount} icon={Trophy} />
         </div>
       </PageSection>
 

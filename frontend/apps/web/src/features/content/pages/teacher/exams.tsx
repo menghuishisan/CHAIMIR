@@ -140,8 +140,8 @@ export default function TeacherExamsPage() {
       <PageSection>
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           <Stat label="试卷总数" value={papers.total} icon={FileText} />
-          <Stat label="本页手动选题" value={stats.manual} icon={FileText} />
-          <Stat label="本页条件抽题" value={stats.random} icon={Dices} hint="可重新抽取" />
+          <Stat label="手动选题" value={stats.manual} icon={FileText} />
+          <Stat label="条件抽题" value={stats.random} icon={Dices} hint="可重新抽取" />
         </div>
       </PageSection>
 

@@ -175,10 +175,10 @@ export default function TeacherSimulationsPage() {
       <PageSection>
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <Stat label={mine ? '我提交的场景' : '可用场景'} value={packages.total} icon={Network} />
-          <Stat label="本页已上架" value={stats.published} icon={CircleCheck} hint="学生可使用" />
-          <Stat label="本页审核中" value={stats.reviewing} icon={Upload} hint="等待平台审核" />
+          <Stat label="已上架" value={stats.published} icon={CircleCheck} hint="学生可使用" />
+          <Stat label="审核中" value={stats.reviewing} icon={Upload} hint="等待平台审核" />
           <Stat
-            label="本页已退回"
+            label="已退回"
             value={stats.rejected}
             icon={Pencil}
             hint={stats.rejected > 0 ? '按审核意见修改后重新提交' : '暂无退回'}

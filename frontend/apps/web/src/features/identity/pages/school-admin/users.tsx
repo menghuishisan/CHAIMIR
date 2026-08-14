@@ -88,8 +88,8 @@ const STATUS_FILTERS = [
 /** 身份筛选项:值为空串表示不过滤。 */
 const ROLE_FILTERS = [
   { value: '', label: '全部' },
-  { value: String(UserRole.TEACHER), label: '教师' },
-  { value: String(UserRole.STUDENT), label: '学生' },
+  { value: String(BaseIdentity.TEACHER), label: '教师' },
+  { value: String(BaseIdentity.STUDENT), label: '学生' },
 ] as const
 
 /** 单账号可执行的状态动作。 */
@@ -169,7 +169,7 @@ export default function SchoolAdminUsersPage() {
   const accounts = usePagedResource<Account>(
     (params) =>
       api.identity.getAccounts({
-        role: roleFilter ? (Number(roleFilter) as UserRole) : undefined,
+        role: roleFilter ? (Number(roleFilter) as BaseIdentity) : undefined,
         status: statusFilter ? (Number(statusFilter) as AccountStatus) : undefined,
         class_id: classFilter || undefined,
         keyword: searchTerm || undefined,
@@ -363,9 +363,9 @@ export default function SchoolAdminUsersPage() {
       <PageSection>
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <Stat label="账号总数" value={accounts.total} icon={Users} />
-          <Stat label="本页待激活" value={stats.pending} icon={UserPlus} hint="尚未设置密码" />
-          <Stat label="本页正常" value={stats.active} icon={UserCheck} />
-          <Stat label="本页已停用" value={stats.disabled} icon={CircleSlash} />
+          <Stat label="待激活" value={stats.pending} icon={UserPlus} hint="尚未设置密码" />
+          <Stat label="正常" value={stats.active} icon={UserCheck} />
+          <Stat label="已停用" value={stats.disabled} icon={CircleSlash} />
         </div>
       </PageSection>
 

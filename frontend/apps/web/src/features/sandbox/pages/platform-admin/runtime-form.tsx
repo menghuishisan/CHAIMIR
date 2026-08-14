@@ -1,11 +1,11 @@
 // 运行时声明表单(链运行时页内)。
 //
-// 运行时的 adapter_spec 是声明式容器编排清单:主容器、附加容器、端口、探针、卷域、
+// 运行时的 adapter_spec 是声明式容器编排清单:主环境、附加组件、端口、探针、卷域、
 // 服务与网络规则都是不定长数组,键不可枚举。把它拆成表单会得到一个几百字段仍不完备的
 // 界面,故这里的分工是 ——
 //   可枚举的顶层字段(编码/名称/生态/适配层级/能力实现/状态)做结构化表单;
 //   清单本身用文档编辑器,但前端按后端 normalizeAndValidateAdapterSpec 的必要条件做结构校验
-//   (JSON 合法、工作区目录绝对路径、八个工作区操作命令齐备、主容器有名字和端口),
+//   (JSON 合法、工作区目录绝对路径、八个工作区操作命令齐备、主环境有名字和端口),
 //   并把解析结果摊成可读摘要 —— 让人在保存前看见系统读到了什么,而不是提交后才知道。
 //
 // 状态只提供「接入中 / 已停用」:后端 validateRuntimeRequest 拒绝把状态直接设为可用,
@@ -43,7 +43,7 @@ import { userFacingErrorMessage } from '../../../../utils/userFacingError'
 
 /** 适配层级:1 只托管环境,2 提供标准链能力,3 自带插件实现。 */
 const ADAPTER_LEVELS = [
-  { value: '1', label: '一级 · 只托管环境', hint: '平台只负责起容器,链操作由学生自己在终端完成' },
+  { value: '1', label: '一级 · 只托管环境', hint: '平台只负责启动环境,链操作由学生自己在终端完成' },
   { value: '2', label: '二级 · 声明标准链能力', hint: '用命令声明部署/交易/查询/重置,平台统一调用' },
   { value: '3', label: '三级 · 自带插件实现', hint: '链能力由运行时插件实现,平台按插件名称调用' },
 ] as const
@@ -289,7 +289,7 @@ export function RuntimeFormModal({ runtime, onClose, onSaved }: RuntimeFormModal
               htmlFor={`${fieldId}-spec`}
               required
               error={errors.spec}
-              helper="容器、端口、卷域与工作区操作命令的完整声明。保存前会先在本地校验结构。"
+              helper="组件、端口、卷域与工作区操作命令的完整声明。保存前会先在本地校验结构。"
             >
               <Textarea
                 id={`${fieldId}-spec`}
@@ -361,10 +361,10 @@ function SpecSummary({ summary, error }: { summary?: SpecSummaryData; error?: st
         columns={2}
         items={[
           { term: '工作区目录', description: summary.workspaceDir, mono: true },
-          { term: '主容器', description: summary.containerName, mono: true },
-          { term: '主容器镜像', description: summary.imageUrl || '按镜像版本登记时指定', mono: true },
+          { term: '主环境', description: summary.containerName, mono: true },
+          { term: '主环境镜像', description: summary.imageUrl || '按镜像版本登记时指定', mono: true },
           { term: '对外端口', description: `${summary.portCount} 个` },
-          { term: '附加容器', description: `${summary.sidecarCount} 个` },
+          { term: '附加组件', description: `${summary.sidecarCount} 个` },
           { term: '数据卷域', description: `${summary.volumeCount} 个` },
         ]}
       />
@@ -387,7 +387,7 @@ interface ParsedSpec {
 /**
  * parseSpec 解析并按后端必要条件校验声明清单。
  * 校验项对齐 normalizeAndValidateAdapterSpec 的硬性前提:JSON 合法、工作区目录为绝对路径、
- * 八个工作区操作命令齐备、主容器有名字且至少一个端口。其余细项(镜像签名、探针、网络规则)
+ * 八个工作区操作命令齐备、主环境有名字且至少一个端口。其余细项(镜像签名、探针、网络规则)
  * 由后端最终判定 —— 前端只挡住能在本地确定的错误,不重复实现一套校验器。
  */
 function parseSpec(text: string): ParsedSpec {
@@ -407,17 +407,17 @@ function parseSpec(text: string): ParsedSpec {
 
   const workspaceDir = typeof spec.workspace_dir === 'string' ? spec.workspace_dir.trim() : ''
   if (!workspaceDir.startsWith('/')) {
-    return { error: '工作区目录要填容器内的绝对路径,例如 /workspace。' }
+    return { error: '工作区目录要填环境内的绝对路径,例如 /workspace。' }
   }
 
   const container = asRecord(spec.runtime_container)
   const containerName = typeof container?.name === 'string' ? container.name.trim() : ''
   if (containerName === '') {
-    return { error: '主容器要有名字(runtime_container.name)。' }
+    return { error: '主环境要有名字(runtime_container.name)。' }
   }
   const ports = Array.isArray(container?.ports) ? container.ports : []
   if (ports.length === 0) {
-    return { error: '主容器至少要声明一个对外端口,否则平台无法访问这条链。' }
+    return { error: '主环境至少要声明一个对外端口,否则平台无法访问这条链。' }
   }
 
   const ops = asRecord(spec.workspace_ops)
@@ -433,7 +433,7 @@ function parseSpec(text: string): ParsedSpec {
   })
 
   return {
-    // 必要字段已在上面逐项确认(工作区目录、主容器与端口、八个操作命令),
+    // 必要字段已在上面逐项确认(工作区目录、主环境与端口、八个操作命令),
     // 其余细项由后端最终判定,故此处按声明类型交给 SDK,不再复制一份类型定义。
     spec: spec as unknown as SandboxAdapterSpec,
     summary: {

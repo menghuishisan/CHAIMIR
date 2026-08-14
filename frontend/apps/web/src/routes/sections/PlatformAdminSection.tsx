@@ -101,7 +101,7 @@ export default function PlatformAdminSection() {
         {/* 顶栏派生的共享路径:平台端无收件箱,故只有这两条 */}
         <Route path="tasks" element={<TransferTasksPage />} />
         {/* 平台账号无手机号列,不渲染换绑手机号(后端 ChangeMyPhone 拒平台身份) */}
-        <Route path="profile" element={<ProfilePage canChangePhone={false} />} />
+        <Route path="profile" element={<ProfilePage canChangePhone={false} statusKind="platform" />} />
 
         <Route path="*" element={<RoleNotFoundPage homePath={platformAdminNavigation.homePath} />} />
       </Route>

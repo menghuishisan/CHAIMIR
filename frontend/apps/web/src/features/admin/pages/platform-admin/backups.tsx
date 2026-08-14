@@ -112,18 +112,18 @@ export default function PlatformBackupsPage() {
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <Stat
             label="最近一次成功"
-            value={stats.latest ? formatDateTime(stats.latest.started_at) : '本页没有成功记录'}
+            value={stats.latest ? formatDateTime(stats.latest.started_at) : '暂无成功记录'}
             icon={CircleCheck}
             hint={stats.latest ? formatFileSize(stats.latest.size_bytes) : '往前翻页查看'}
           />
-          <Stat label="本页成功" value={stats.succeeded} icon={CircleCheck} />
+          <Stat label="已成功" value={stats.succeeded} icon={CircleCheck} />
           <Stat
-            label="本页失败"
+            label="已失败"
             value={stats.failed}
             icon={CircleX}
             hint={stats.failed > 0 ? '需要查原因' : '暂无失败'}
           />
-          <Stat label="本页进行中" value={stats.running} icon={Database} />
+          <Stat label="进行中" value={stats.running} icon={Database} />
         </div>
       </PageSection>
 

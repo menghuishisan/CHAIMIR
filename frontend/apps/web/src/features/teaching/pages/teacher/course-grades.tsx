@@ -28,7 +28,6 @@ import {
   ModalHeader,
   ModalTitle,
   PageSection,
-  Pagination,
   Select,
   Skeleton,
   Table,
@@ -37,7 +36,7 @@ import {
 } from '@chaimir/ui'
 import { api } from '../../../../app/api'
 import { ResourceState } from '../../../../components/ResourceState'
-import { useAsyncResource, usePagedResource } from '../../../../hooks'
+import { useAsyncResource } from '../../../../hooks'
 import { formatScore, formatShortDateTime } from '../../../../utils/formatters'
 import { GRADE_SOURCES, gradeSourceLabel } from '../../../../utils/labels/teaching'
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
@@ -47,7 +46,7 @@ export interface CourseGradesProps {
 }
 
 /**
- * CourseGrades 承载权重配置、成绩计算、调分与导出。
+ * CourseGrades 承载权重配置、成绩计算、调分与导出;成绩汇总按 M6 契约一次读取完整数组。
  */
 export function CourseGrades({ courseId }: CourseGradesProps) {
   const [weightOpen, setWeightOpen] = useState(false)
@@ -56,10 +55,7 @@ export function CourseGrades({ courseId }: CourseGradesProps) {
   const [actionError, setActionError] = useState<string>()
 
   const weights = useAsyncResource(() => api.teaching.listGradeWeights(courseId), [courseId], () => false)
-  const grades = usePagedResource<TeachingCourseGrade>(
-    (params) => api.teaching.listGrades(courseId, params),
-    [courseId],
-  )
+  const grades = useAsyncResource(() => api.teaching.listGrades(courseId), [courseId])
 
   /** computeGrades 按权重重算全班成绩。 */
   const computeGrades = useCallback(async () => {
@@ -193,7 +189,7 @@ export function CourseGrades({ courseId }: CourseGradesProps) {
 
       <PageSection
         title="全班成绩"
-        description={`共 ${grades.total} 名学生。调分只影响总评,不改变各项得分。`}
+        description={`共 ${grades.data?.length ?? 0} 名学生。调分只影响总评,不改变各项得分。`}
         actions={
           <div className="flex flex-wrap items-center gap-2">
             <Button variant="outline" leftIcon={Calculator} loading={working} onClick={() => void computeGrades()}>
@@ -215,17 +211,7 @@ export function CourseGrades({ courseId }: CourseGradesProps) {
             emptyDescription="配置权重后点「按权重计算」生成全班成绩。"
             skeleton={<Table columns={columns} data={[]} rowKey={() => ''} loading />}
           >
-            {(page) => (
-              <>
-                <Table columns={columns} data={page.list} rowKey={(grade) => grade.student_id} />
-                <Pagination
-                  page={grades.page}
-                  pageSize={grades.pageSize}
-                  total={grades.total}
-                  onPageChange={grades.setPage}
-                />
-              </>
-            )}
+            {(list) => <Table columns={columns} data={list} rowKey={(grade) => grade.student_id} />}
           </ResourceState>
         </div>
       </PageSection>

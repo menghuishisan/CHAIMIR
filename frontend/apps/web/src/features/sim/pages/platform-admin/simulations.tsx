@@ -160,13 +160,13 @@ export default function PlatformSimulationsPage() {
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <Stat label="提交记录" value={reviews.total} icon={Shield} />
           <Stat
-            label="本页待审核"
+            label="待审核"
             value={stats.pending}
             icon={ShieldCheck}
             hint={stats.pending > 0 ? '需要你处理' : '暂时没有积压'}
           />
-          <Stat label="本页已上架" value={stats.published} icon={CircleCheck} />
-          <Stat label="本页已下架" value={stats.archived} icon={Archive} />
+          <Stat label="已上架" value={stats.published} icon={CircleCheck} />
+          <Stat label="已下架" value={stats.archived} icon={Archive} />
         </div>
       </PageSection>
 

@@ -259,9 +259,9 @@ function SubmissionsPanel({ assignmentId }: { assignmentId: string }) {
       <PageSection>
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <Stat label="提交总数" value={submissions.total} icon={ClipboardCheck} />
-          <Stat label="本页待批改" value={stats.pending} icon={CheckSquare} />
-          <Stat label="本页已出分" value={stats.graded} icon={ClipboardCheck} />
-          <Stat label="本页迟交" value={stats.late} icon={ClipboardCheck} />
+          <Stat label="待批改" value={stats.pending} icon={CheckSquare} />
+          <Stat label="已出分" value={stats.graded} icon={ClipboardCheck} />
+          <Stat label="迟交" value={stats.late} icon={ClipboardCheck} />
         </div>
       </PageSection>
 

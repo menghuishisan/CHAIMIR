@@ -2,17 +2,20 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"chaimir/internal/contracts"
 	"chaimir/internal/modules/identity"
 	"chaimir/internal/platform/config"
 	"chaimir/internal/platform/db"
+	"chaimir/internal/platform/storage"
 	"chaimir/pkg/crypto"
 
 	"github.com/jackc/pgx/v5"
@@ -107,6 +110,20 @@ type acceptanceSeedIDs struct {
 	BackupRecord        int64
 	TransferTask        int64
 	AuditEntry          int64
+	ApplicationPending  int64
+	ApplicationRejected int64
+	ApplicationApproved int64
+	BattleContest       int64
+	BattleContestProblem int64
+	BattleTeamA         int64
+	BattleTeamAMember   int64
+	BattleTeamB         int64
+	BattleTeamBMember   int64
+	BattleEntryA        int64
+	BattleEntryB        int64
+	BattleMatch         int64
+	BattleLadderRankA   int64
+	BattleLadderRankB   int64
 }
 
 var acceptanceIDs = acceptanceSeedIDs{
@@ -134,6 +151,12 @@ var acceptanceIDs = acceptanceSeedIDs{
 	SystemConfig: 910000000000012001, AlertRule: 910000000000012002, AlertEvent: 910000000000012003, Statistics: 910000000000012004, BackupRecord: 910000000000012005,
 	TransferTask: 910000000000013001,
 	AuditEntry:   910000000000099001,
+	ApplicationPending:  910000000000014001, ApplicationRejected: 910000000000014002, ApplicationApproved: 910000000000014003,
+	BattleContest: 910000000000008101, BattleContestProblem: 910000000000008102,
+	BattleTeamA: 910000000000008111, BattleTeamAMember: 910000000000008112,
+	BattleTeamB: 910000000000008113, BattleTeamBMember: 910000000000008114,
+	BattleEntryA: 910000000000008121, BattleEntryB: 910000000000008122, BattleMatch: 910000000000008131,
+	BattleLadderRankA: 910000000000008141, BattleLadderRankB: 910000000000008142,
 }
 
 type acceptanceAccount struct {
@@ -159,6 +182,13 @@ func seedAcceptance(ctx context.Context, cfg *config.Config) error {
 		return err
 	}
 	defer database.Close()
+	objectStore, err := storage.New(ctx, cfg.MinIO)
+	if err != nil {
+		return err
+	}
+	if err := objectStore.EnsureBuckets(ctx); err != nil {
+		return err
+	}
 	includeIsolationTenant := cfg.Deploy.PlatformEnabled
 	tenantDeployMode := identity.DeployModeSaaS
 	if cfg.Deploy.IsSchool() {
@@ -181,10 +211,54 @@ func seedAcceptance(ctx context.Context, cfg *config.Config) error {
 	if err := seedAcceptanceAccounts(ctx, database, cfg.Bootstrap.AdminPassword, includeIsolationTenant); err != nil {
 		return err
 	}
-	if err := seedAcceptanceBusiness(ctx, database, includeIsolationTenant); err != nil {
+	replayRef, replayKey, err := seedAcceptanceReplayObject(ctx, objectStore, cfg.MinIO.BucketReport)
+	if err != nil {
+		return err
+	}
+	if err := seedAcceptanceBusiness(ctx, database, includeIsolationTenant, replayRef); err != nil {
+		if cleanupErr := objectStore.Delete(ctx, cfg.MinIO.BucketReport, replayKey); cleanupErr != nil {
+			return fmt.Errorf("写入验收业务数据失败: %w; 清理回放对象失败: %v", err, cleanupErr)
+		}
 		return err
 	}
 	return nil
+}
+
+// seedAcceptanceReplayObject 写入一份结构完整的验收回放归档,供浏览器验证授权与下载链路。
+// 归档是历史事实夹具,不代表运行时镜像已可用,也不触发沙箱或判题执行。
+func seedAcceptanceReplayObject(ctx context.Context, objects *storage.Storage, bucket string) (string, string, error) {
+	key, err := storage.ObjectKey(acceptanceIDs.TenantID, "contest", "replay", fmt.Sprintf("%d", acceptanceIDs.BattleMatch), "acceptance-battle-replay.json")
+	if err != nil {
+		return "", "", err
+	}
+	ref, err := storage.ObjectRefString(bucket, key)
+	if err != nil {
+		return "", "", err
+	}
+	archive := map[string]any{
+		"version":    1,
+		"match_id":   fmt.Sprintf("%d", acceptanceIDs.BattleMatch),
+		"task_id":    "acceptance-battle-task-001",
+		"source_ref": "contest:2026:battle:acceptance-001",
+		"initial_state": map[string]any{
+			"contest_id": acceptanceIDs.BattleContest,
+			"problem_id": acceptanceIDs.BattleContestProblem,
+			"battle_rule": 1,
+			"entry_a": map[string]any{"role": 2, "version_no": 1, "artifact_hash": strings.Repeat("a", 64)},
+			"entry_b": map[string]any{"role": 1, "version_no": 1, "artifact_hash": strings.Repeat("b", 64)},
+		},
+		"actions": []map[string]any{{"seq": 1, "at_tick": 1, "event_type": "assertion", "payload": map[string]any{"passed": true}}},
+		"result": map[string]any{"passed": true, "score": 1, "max_score": 1, "details": map[string]any{"winner": "entry_a"}},
+		"finished_at": time.Now().UTC().Format(time.RFC3339),
+	}
+	raw, err := json.Marshal(archive)
+	if err != nil {
+		return "", "", err
+	}
+	if err := objects.Put(ctx, bucket, key, bytes.NewReader(raw), int64(len(raw)), "application/json"); err != nil {
+		return "", "", err
+	}
+	return ref, key, nil
 }
 
 // ensureAcceptanceSeedAllowed 防止验收夹具被误写入生产库。
@@ -368,7 +442,12 @@ func acceptanceRoleID(accountID int64, index int) int64 {
 }
 
 // seedAcceptanceBusiness 写入跨模块验收业务数据。
-func seedAcceptanceBusiness(ctx context.Context, database *db.DB, includeIsolation bool) error {
+func seedAcceptanceBusiness(ctx context.Context, database *db.DB, includeIsolation bool, replayRef string) error {
+	if includeIsolation {
+		if err := database.WithPrivilegedTx(ctx, seedApplicationRows); err != nil {
+			return err
+		}
+	}
 	if err := database.WithTenantTxID(ctx, acceptanceIDs.TenantID, func(ctx context.Context, tx pgx.Tx) error {
 		for _, fn := range []func(context.Context, pgx.Tx) error{
 			seedRuntimeRows,
@@ -386,6 +465,9 @@ func seedAcceptanceBusiness(ctx context.Context, database *db.DB, includeIsolati
 			if err := fn(ctx, tx); err != nil {
 				return err
 			}
+		}
+		if err := seedContestReplayRows(ctx, tx, replayRef); err != nil {
+			return err
 		}
 		return nil
 	}); err != nil {

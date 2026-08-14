@@ -151,9 +151,9 @@ export default function StudentAlertsPage() {
       <PageSection>
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           <Stat label="全部预警" value={warnings.total} icon={TriangleAlert} />
-          <Stat label="本页待确认" value={pendingCount} icon={ShieldCheck} hint="确认后不再提示" />
+          <Stat label="待确认" value={pendingCount} icon={ShieldCheck} hint="确认后不再提示" />
           <Stat
-            label="本页已确认"
+            label="已确认"
             value={list.length - pendingCount}
             icon={CheckCheck}
           />

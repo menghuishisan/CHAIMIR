@@ -254,9 +254,9 @@ export default function TeacherCoursesPage() {
       <PageSection>
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <Stat label="我的课程" value={courses.total} icon={Book} />
-          <Stat label="本页进行中" value={stats.running} icon={Layers} />
-          <Stat label="本页草稿" value={stats.draft} icon={BookPlus} hint="发布后学生才可加入" />
-          <Stat label="本页已共享" value={stats.shared} icon={Share2} hint="其他教师可克隆复用" />
+          <Stat label="进行中" value={stats.running} icon={Layers} />
+          <Stat label="草稿" value={stats.draft} icon={BookPlus} hint="发布后学生才可加入" />
+          <Stat label="已共享" value={stats.shared} icon={Share2} hint="其他教师可克隆复用" />
         </div>
       </PageSection>
 

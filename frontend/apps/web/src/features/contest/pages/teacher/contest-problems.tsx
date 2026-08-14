@@ -486,7 +486,7 @@ function ProblemFormModal({ contest, problem, nextSeq, onClose, onSaved }: Probl
 
                       <FormField
                         label="可用工具"
-                        helper="对局执行时容器内可用的命令工具,不选则只有运行时自带能力"
+                        helper="对局执行时可用的命令工具,不选则只有运行时自带能力"
                       >
                         {catalog.tools.length > 0 ? (
                           <div className="flex flex-col gap-2">

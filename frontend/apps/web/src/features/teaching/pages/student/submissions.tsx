@@ -215,7 +215,7 @@ function FeedbackCard({ submission }: { submission: Submission }) {
             <Callout tone="warning">这次提交在截止时间之后,按课程迟交规则计分。</Callout>
           ) : null}
           {submission.status === SubmissionStatus.PENDING ? (
-            <Callout tone="info">老师正在批改,出分后会在这里显示。</Callout>
+            <Callout tone="info">教师正在评分,完成后会在这里显示。</Callout>
           ) : null}
         </CardBody>
       </Card>

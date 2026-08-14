@@ -148,7 +148,7 @@ export default function StudentExperimentWorkspacePage() {
         icon={LoaderCircle}
         spinning
         title="正在准备实验环境"
-        description="第一次进入需要拉起容器,通常十几秒。"
+        description="第一次进入需要启动环境,通常十几秒。"
         fullScreen={false}
       />
     )

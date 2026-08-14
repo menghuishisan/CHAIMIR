@@ -133,13 +133,13 @@ export default function AnnouncementsPage({ publisher }: AnnouncementsPageProps)
           <Stat label="公告总数" value={announcements.total} icon={Megaphone} />
           {isPlatform ? (
             <>
-              <Stat label="本页平台公告" value={stats.platform} icon={Send} />
-              <Stat label="本页覆盖学校" value="全部" icon={Users} hint="平台公告对所有学校可见" />
+              <Stat label="平台公告" value={stats.platform} icon={Send} />
+              <Stat label="覆盖学校" value="全部" icon={Users} hint="平台公告对所有学校可见" />
             </>
           ) : (
             <>
-              <Stat label="本页全校公告" value={stats.tenant} icon={Users} />
-              <Stat label="本页定向公告" value={stats.roles} icon={Send} />
+              <Stat label="全校公告" value={stats.tenant} icon={Users} />
+              <Stat label="定向公告" value={stats.roles} icon={Send} />
             </>
           )}
         </div>

@@ -3,7 +3,7 @@
 
 import { ApiClient } from '../client'
 import type { AttachmentResponse } from '../client'
-import type { AccountStatus, ApplicationStatus, ImportTemplateFormat, UserRole } from '../constants/identity'
+import type { AccountStatus, ApplicationStatus, BaseIdentity, ImportTemplateFormat } from '../constants/identity'
 import type { PaginatedResponse } from '../types/common'
 import type {
   LoginPlatformRequest,
@@ -182,7 +182,8 @@ export class IdentityApi {
    */
   async getAccounts(params?: {
     status?: AccountStatus
-    role?: UserRole
+    /** 基础身份筛选:与后端 /accounts 的 role 参数一致,不是 RBAC 角色编号。 */
+    role?: BaseIdentity
     class_id?: string
     keyword?: string
     page?: number

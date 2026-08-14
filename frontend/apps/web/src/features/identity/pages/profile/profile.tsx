@@ -8,7 +8,7 @@
 
 import { useCallback, useId, useMemo, useState } from 'react'
 import { KeyRound, LogOut, ShieldCheck, Smartphone, UserCog } from 'lucide-react'
-import { SessionStatus, SmsScene, type Session } from '@chaimir/api-client'
+import { SessionStatus, SmsScene, TenantStatus, type Session } from '@chaimir/api-client'
 import {
   Badge,
   Breadcrumb,
@@ -41,6 +41,8 @@ import {
   baseIdentityLabel,
   sessionStatusLabel,
   sessionStatusTone,
+  tenantStatusLabel,
+  tenantStatusTone,
   userRolesLabel,
 } from '../../../../utils/labels/identity'
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
@@ -60,14 +62,26 @@ export interface ProfilePageProps {
    * 且 platform_admin 表无手机号列 —— 渲染这个表单等于给一个必然失败的入口。
    */
   canChangePhone: boolean
+  /** 平台管理员的 status 使用 platform_admin 状态枚举,不能按租户账号状态解释。 */
+  statusKind?: 'account' | 'platform'
 }
 
 /**
  * ProfilePage 呈现账号资料并承载改密、换绑手机号与会话管理。
  */
-export default function ProfilePage({ canChangePhone }: ProfilePageProps) {
+export default function ProfilePage({ canChangePhone, statusKind = 'account' }: ProfilePageProps) {
   const { me, reload } = useSession()
   const account = me.account
+  const statusPresentation =
+    statusKind === 'platform'
+      ? {
+          tone: tenantStatusTone(Number(account.status) as TenantStatus),
+          label: tenantStatusLabel(Number(account.status) as TenantStatus),
+        }
+      : {
+          tone: accountStatusTone(account.status),
+          label: accountStatusLabel(account.status),
+        }
 
   const profileItems = useMemo(() => {
     const items = [
@@ -96,8 +110,8 @@ export default function ProfilePage({ canChangePhone }: ProfilePageProps) {
         icon={UserCog}
         actions={
           <StatusIndicator
-            tone={accountStatusTone(account.status)}
-            label={accountStatusLabel(account.status)}
+            tone={statusPresentation.tone}
+            label={statusPresentation.label}
           />
         }
       />
@@ -111,11 +125,7 @@ export default function ProfilePage({ canChangePhone }: ProfilePageProps) {
         }
       >
         <PageSection title="账号资料" description="资料由学校维护,如需更正请联系管理员。">
-          <Card>
-            <CardBody>
-              <DescriptionList columns={2} items={profileItems} />
-            </CardBody>
-          </Card>
+          <DescriptionList columns={2} items={profileItems} />
         </PageSection>
 
         <SessionsSection />

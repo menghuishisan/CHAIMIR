@@ -671,12 +671,12 @@ function ChainPanel({ sandboxId, operations }: ChainPanelProps) {
       try {
         const parsed: unknown = JSON.parse(payloadText)
         if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
-          setPanelError('参数最外层要是一个对象。')
+          setPanelError('内容格式不正确,最外层应当是大括号包裹的内容。')
           return
         }
         payload = parsed as Record<string, unknown>
       } catch {
-        setPanelError('参数不是合法的格式,检查是否漏了逗号或引号。')
+        setPanelError('内容格式不正确,请检查是否漏了逗号或引号。')
         return
       }
 

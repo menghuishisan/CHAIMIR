@@ -162,8 +162,8 @@ function VulnSourceCard({ source, onEdit }: VulnSourceCardProps) {
           dense
           items={[
             { term: '默认分级', description: vulnLevelLabel(source.default_level) },
-            { term: '接口地址', description: endpoint || '未配置', mono: true },
-            { term: '请求方式', description: method || 'GET' },
+            { term: '来源地址', description: endpoint || '未配置', mono: true },
+            { term: '获取方式', description: method || 'GET' },
             {
               term: '上次同步',
               description: source.last_sync_at ? formatDateTime(source.last_sync_at) : '尚未同步',

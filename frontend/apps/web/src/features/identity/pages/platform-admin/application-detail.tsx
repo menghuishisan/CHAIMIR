@@ -17,9 +17,6 @@ import {
   Breadcrumb,
   Button,
   Callout,
-  Card,
-  CardBody,
-  CardHeader,
   DescriptionList,
   FormField,
   Input,
@@ -134,58 +131,57 @@ function ApplicationReview({ application, onReviewed }: ApplicationReviewProps) 
   return (
     <>
       <PageSection title="申请资料" description="联系方式由学校自行填写,开通前请另行核实身份。">
-        <Card>
-          <CardHeader
-            title={application.school_name}
-            description={schoolTypeLabel(application.school_type)}
-            actions={
-              <StatusIndicator
-                tone={applicationStatusTone(application.status)}
-                label={applicationStatusLabel(application.status)}
-              />
-            }
-          />
-          <CardBody className="flex flex-col gap-4">
-            <DescriptionList
-              columns={2}
-              items={[
-                { term: '联系人', description: application.contact_name },
-                { term: '联系电话', description: application.contact_phone, mono: true },
-                { term: '联系邮箱', description: application.contact_email, mono: true },
-                { term: '提交时间', description: formatDateTime(application.submitted_at), mono: true },
-                ...(application.reviewed_at
-                  ? [
-                      {
-                        term: '处理时间',
-                        description: formatDateTime(application.reviewed_at),
-                        mono: true,
-                      },
-                    ]
-                  : []),
-              ]}
+        <div className="flex flex-col gap-4">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div className="min-w-0">
+              <h3 className="text-base font-semibold text-ink">{application.school_name}</h3>
+              <p className="mt-0.5 text-sm text-ink-sub">{schoolTypeLabel(application.school_type)}</p>
+            </div>
+            <StatusIndicator
+              tone={applicationStatusTone(application.status)}
+              label={applicationStatusLabel(application.status)}
             />
+          </div>
 
-            {application.reject_reason ? (
-              <Callout tone="warning" title="驳回理由">
-                {application.reject_reason}
-              </Callout>
-            ) : null}
+          <DescriptionList
+            columns={2}
+            items={[
+              { term: '联系人', description: application.contact_name },
+              { term: '联系电话', description: application.contact_phone, mono: true },
+              { term: '联系邮箱', description: application.contact_email, mono: true },
+              { term: '提交时间', description: formatDateTime(application.submitted_at), mono: true },
+              ...(application.reviewed_at
+                ? [
+                    {
+                      term: '处理时间',
+                      description: formatDateTime(application.reviewed_at),
+                      mono: true,
+                    },
+                  ]
+                : []),
+            ]}
+          />
 
-            {application.tenant_id ? (
-              <div className="flex flex-wrap items-center gap-2 rounded-md border border-line bg-surface-sunken p-3">
-                <Badge tone="success">已开通</Badge>
-                <span className="text-sm text-ink-sub">这份申请对应的学校已经创建。</span>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => navigate(`/platform-admin/schools/${application.tenant_id}`)}
-                >
-                  去学校详情
-                </Button>
-              </div>
-            ) : null}
-          </CardBody>
-        </Card>
+          {application.reject_reason ? (
+            <Callout tone="warning" title="驳回理由">
+              {application.reject_reason}
+            </Callout>
+          ) : null}
+
+          {application.tenant_id ? (
+            <div className="flex flex-wrap items-center gap-2 rounded-md border border-line bg-surface-sunken p-3">
+              <Badge tone="success">已开通</Badge>
+              <span className="text-sm text-ink-sub">这份申请对应的学校已经创建。</span>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => navigate(`/platform-admin/schools/${application.tenant_id}`)}
+              >
+                去学校详情
+              </Button>
+            </div>
+          ) : null}
+        </div>
       </PageSection>
 
       <PageSection

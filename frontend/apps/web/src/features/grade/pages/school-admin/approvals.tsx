@@ -227,9 +227,9 @@ export default function SchoolAdminApprovalsPage() {
       <PageSection>
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <Stat label="报送记录" value={reviews.total} icon={Send} />
-          <Stat label="本页待审核" value={stats.pending} icon={CircleCheck} hint="需要你处理" />
-          <Stat label="本页已通过" value={stats.approved} icon={CircleCheck} />
-          <Stat label="本页已锁定" value={stats.locked} icon={LockOpen} hint="教师不能再调分" />
+          <Stat label="待审核" value={stats.pending} icon={CircleCheck} hint="需要你处理" />
+          <Stat label="已通过" value={stats.approved} icon={CircleCheck} />
+          <Stat label="已锁定" value={stats.locked} icon={LockOpen} hint="教师不能再调分" />
         </div>
       </PageSection>
 
