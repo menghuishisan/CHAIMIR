@@ -25,7 +25,7 @@ export function renderEthPosFinalityView(state: EthPosFinalityState): TeachingFr
       secondary: [state.justified, state.finalized],
       muted: state.blocks.filter((block) => block.status === 'orphaned').map((block) => block.id),
     },
-    layout: { primary, evidence: ['eth-pos-votes'], metrics: ['eth-pos-chart'] },
+    layout: { primary, evidence: ['eth-pos-chain', 'eth-pos-votes'], metrics: ['eth-pos-chart'] },
     patterns: [
       chainPattern('eth-pos-chain', 'LMD-GHOST 链头与 checkpoint', ethPosChainBlocks(state)),
       matrixPattern('eth-pos-votes', '验证者最新消息和 FFG 权重', state.validators.map((validator) => validator.label), ['权重', '在线', 'latest vote', 'finality'], voteMatrix(state)),

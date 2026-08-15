@@ -12,7 +12,7 @@ export const zkRollupProofVerificationSimulation: SimPackage<ZkRollupState> = {
   reducer: reduceZkRollupEvent,
   interactions: [
     { id: 'select', kind: 'select-element', label: '选择证明输入', description: '查看 proof、public inputs 和状态根绑定。', emits: 'select', target: 'element', elementFilter: 'zk-rollup-input' },
-    { id: 'advance', kind: 'button', label: '推进证明流程', description: '按 ZK Rollup 有效性证明流程推进。', emits: 'advance', labelTag: 'normal' },
+    { id: 'advance', kind: 'button', label: '推进证明流程', description: '按 ZK Rollup 有效性证明流程推进。', emits: 'advance', labelTag: 'normal', availableWhen: (state) => (state as ZkRollupState).phaseIndex < 4 },
     { id: 'attack', kind: 'button', label: '篡改公开输入', description: '让 public input 与 newRoot 不匹配。', emits: 'attack', labelTag: 'attack' },
     { id: 'recover', kind: 'button', label: '修正证明输入', description: '恢复 public input 与 proof 绑定。', emits: 'recover', labelTag: 'perturb' },
   ],

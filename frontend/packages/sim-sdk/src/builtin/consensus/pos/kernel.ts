@@ -159,7 +159,7 @@ function injectEquivocation(state: PosState): PosState {
   const proposer = state.validators.find((validator) => validator.proposer) ?? state.validators[0];
   const conflictingRoot = canonicalConsensusDigest('pos-conflicting-block', { blockRoot: state.blockRoot, proposerId: proposer.id }, 16);
   const conflict = { validatorId: proposer.id, blockRoot: conflictingRoot, sourceEpoch: state.justifiedEpoch, targetEpoch: state.epoch, signature: signAttestation(proposer.id, conflictingRoot, state.justifiedEpoch, state.epoch), valid: false };
-  return { ...state, tick: state.tick + 1, lastTransition: 'slash', conflictingRoot, attestations: state.attestations.concat(conflict), messages: state.messages.concat(broadcast(state, proposer.id, '冲突提议')) };
+  return { ...state, phaseIndex: 6, tick: state.tick + 1, lastTransition: 'slash', conflictingRoot, attestations: state.attestations.concat(conflict), messages: state.messages.concat(broadcast(state, proposer.id, '冲突提议')) };
 }
 
 /**
@@ -168,7 +168,7 @@ function injectEquivocation(state: PosState): PosState {
 function slashEquivocators(state: PosState): PosState {
   const slashings = detectSlashings(state.attestations);
   const offenders = new Set(slashings.map((slashing) => slashing.validatorId));
-  return { ...state, tick: state.tick + 1, lastTransition: 'slash', slashings, validators: state.validators.map((validator) => (offenders.has(validator.id) ? { ...validator, slashed: true, online: false, proposer: false, attested: false } : validator)), conflictingRoot: offenders.size > 0 ? undefined : state.conflictingRoot };
+  return { ...state, phaseIndex: 6, tick: state.tick + 1, lastTransition: 'slash', slashings, validators: state.validators.map((validator) => (offenders.has(validator.id) ? { ...validator, slashed: true, online: false, proposer: false, attested: false } : validator)), conflictingRoot: offenders.size > 0 ? undefined : state.conflictingRoot };
 }
 
 /**

@@ -62,7 +62,7 @@ export function messageExecuted(state: CrossChainMessageState): CheckpointResult
  * dropRelay 模拟中继丢失消息。
  */
 function dropRelay(state: CrossChainMessageState): CrossChainMessageState {
-  return { ...state, lastTransition: 'relay', relayed: false, verified: false, executed: false, messages: state.messages.concat(message('relayer', 'target', '中继丢失', state.tick, true, '中继者没有把证明提交到目标链。')) };
+  return { ...state, phaseIndex: 2, lastTransition: 'relay', relayed: false, verified: false, executed: false, messages: state.messages.concat(message('relayer', 'target', '中继丢失', state.tick, true, '中继者没有把证明提交到目标链。')) };
 }
 
 /**

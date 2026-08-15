@@ -76,7 +76,7 @@ export function finalizePartitionState(state: PartitionState): PartitionState {
  * cutPartition 切断跨区链路。
  */
 function cutPartition(state: PartitionState): PartitionState {
-  return { ...state, lastTransition: 'cut', partitionActive: true, links: state.links.map((link) => (link.crossRegion ? { ...link, cut: true } : link)), nodes: state.nodes.map((node) => ({ ...node, reachable: node.group === 'left' })), messages: state.messages.concat(crossMessages(state, '跨区消息阻断', true)) };
+  return { ...state, phaseIndex: 1, lastTransition: 'cut', partitionActive: true, links: state.links.map((link) => (link.crossRegion ? { ...link, cut: true } : link)), nodes: state.nodes.map((node) => ({ ...node, reachable: node.group === 'left' })), messages: state.messages.concat(crossMessages(state, '跨区消息阻断', true)) };
 }
 
 /**
@@ -90,7 +90,7 @@ function localSync(state: PartitionState): PartitionState {
  * healPartition 恢复跨区链路并交换版本。
  */
 function healPartition(state: PartitionState): PartitionState {
-  return { ...state, lastTransition: 'heal', partitionActive: false, links: state.links.map((link) => ({ ...link, cut: false })), nodes: state.nodes.map((node) => ({ ...node, reachable: true })), messages: state.messages.concat(crossMessages(state, '恢复同步', false)) };
+  return { ...state, phaseIndex: 3, lastTransition: 'heal', partitionActive: false, links: state.links.map((link) => ({ ...link, cut: false })), nodes: state.nodes.map((node) => ({ ...node, reachable: true })), messages: state.messages.concat(crossMessages(state, '恢复同步', false)) };
 }
 
 /**

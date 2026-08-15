@@ -151,7 +151,7 @@ function commitThreeChain(state: HotStuffState): HotStuffState {
  * injectLeaderTimeout 模拟领导者失效导致副本超时。
  */
 function injectLeaderTimeout(state: HotStuffState): HotStuffState {
-  return { ...state, tick: state.tick + 1, lastTransition: 'pacemaker', timeoutActive: true, replicas: state.replicas.map((replica) => ({ ...replica, timeout: replica.id !== state.leaderId, faulty: replica.id === state.leaderId })) };
+  return { ...state, phaseIndex: 5, tick: state.tick + 1, lastTransition: 'pacemaker', timeoutActive: true, replicas: state.replicas.map((replica) => ({ ...replica, timeout: replica.id !== state.leaderId, faulty: replica.id === state.leaderId })) };
 }
 
 /**

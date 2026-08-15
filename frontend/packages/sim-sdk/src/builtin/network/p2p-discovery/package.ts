@@ -19,7 +19,7 @@ export const p2pDiscoverySimulation: SimPackage<DiscoveryState> = {
   },
   initState: createInitialDiscoveryState,
   reducer: reduceDiscoveryEvent,
-  interactions: commonAlgorithmInteractions('p2p-peer'),
+  interactions: commonAlgorithmInteractions('p2p-peer', 4),
   render: renderDiscoveryView,
   narrative: discoveryNarrative,
   codeTrace: discoveryCodeTrace,

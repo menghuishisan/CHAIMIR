@@ -47,8 +47,8 @@ export function finalizeMempoolReplacementState(state: MempoolReplacementState):
     explanation: explain(state.phaseIndex),
     metrics: { result: included > 0 ? '连续 nonce 已打包' : rejected > 0 ? '替换被拒绝' : '交易池排序中', risk: rejected > 0 ? 38 : 10, included, rejected },
     checkpointValues: {
-      replacementAccepted: state.transactions.some((tx) => tx.id === 'alice-7-fast' && tx.status === 'pending'),
-      queueReleased: state.transactions.some((tx) => tx.id === 'alice-8-next' && tx.status === 'pending'),
+      replacementAccepted: state.transactions.some((tx) => tx.id === 'alice-7-fast' && (tx.status === 'pending' || tx.status === 'included')),
+      queueReleased: state.transactions.some((tx) => tx.id === 'alice-8-next' && (tx.status === 'pending' || tx.status === 'included')),
       rejectedWeakReplacement: rejected > 0,
     },
     _trace: {

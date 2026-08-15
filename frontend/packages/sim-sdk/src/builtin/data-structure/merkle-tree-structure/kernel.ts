@@ -78,7 +78,7 @@ function updateLeaf(state: MerkleTreeState): MerkleTreeState {
  */
 function rebuildRoot(state: MerkleTreeState): MerkleTreeState {
   const targetId = state.dirtyLeafId ?? state.selectedElementId ?? state.items[0]?.id;
-  return { ...state, lastTransition: 'root', rootHash: computeMerkleRoot(state.items), proofPath: merkleProofPath(state.items, targetId), dirtyLeafId: undefined };
+  return { ...state, phaseIndex: 3, lastTransition: 'root', rootHash: computeMerkleRoot(state.items), proofPath: merkleProofPath(state.items, targetId), dirtyLeafId: undefined };
 }
 
 /**

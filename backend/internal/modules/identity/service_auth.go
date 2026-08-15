@@ -106,6 +106,7 @@ func (s *Service) LoginPhone(ctx context.Context, req LoginPhoneRequest, device,
 	}); err != nil {
 		return LoginResponse{}, apperr.ErrIdentityInvalidCredentials.WithCause(err)
 	}
+	candidates = filterLoginCandidatesForDeployment(candidates, s.deploy)
 	if len(candidates) == 0 {
 		return LoginResponse{}, apperr.ErrIdentityInvalidCredentials
 	}

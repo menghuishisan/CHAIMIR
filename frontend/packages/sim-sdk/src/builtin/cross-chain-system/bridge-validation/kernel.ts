@@ -23,7 +23,7 @@ export function createInitialBridgeState(params: SimInitParams, _seed: number): 
  */
 export function reduceBridgeEvent(state: BridgeState, event: SimEvent, _context: ReducerContext): BridgeState {
   if (event.type === 'attack') return finalizeBridgeState({ ...state, phaseIndex: 2, lastTransition: 'verify', proofHash: invalidBridgeProofHash(state.proofHash), invalidProof: true, minted: false });
-  if (event.type === 'recover') return finalizeBridgeState({ ...state, lastTransition: 'sync', proofHash: state.canonicalProofHash, invalidProof: false, lightClientSynced: true, minted: false, redeemed: false });
+  if (event.type === 'recover') return finalizeBridgeState({ ...state, phaseIndex: 1, lastTransition: 'sync', proofHash: state.canonicalProofHash, invalidProof: false, lightClientSynced: true, minted: false, redeemed: false });
   if (event.type === 'advance' || event.type === 'tick') return finalizeBridgeState(advanceBridge(state, event));
   return state;
 }

@@ -25,11 +25,11 @@ upstream:
       digest: sha256:fd791d74b68913cbb027c6546007b3f0d3bc45125f797758156952bc2d6daf40
     - image: go
       registry: https://go.dev/dl
-      version: go1.26.5
-      digest: sha256:5c2c3b16caefa1d968a94c1daca04a7ca301a496d9b086e17ad77bb81393f053
-  release_url: https://go.dev/dl/go1.26.5.linux-amd64.tar.gz
-  sha256: 5c2c3b16caefa1d968a94c1daca04a7ca301a496d9b086e17ad77bb81393f053
-  version: go1.26.5
+      version: go1.26.6
+      digest: sha256:708effb774be8237570d0add163225abbdfaf4fca28b2611df167beba4feef89
+  release_url: https://go.dev/dl/go1.26.6.linux-amd64.tar.gz
+  sha256: 708effb774be8237570d0add163225abbdfaf4fca28b2611df167beba4feef89
+  version: go1.26.6
   reuse_policy: official-release-toolchain
 data_driven: false
 capabilities:
@@ -70,4 +70,3 @@ supply_chain:
   trivy_required: true
   cosign_required: true
   pull_by_digest_in_production: true
-

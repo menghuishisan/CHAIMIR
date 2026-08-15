@@ -19,7 +19,7 @@ source:
   type: platform-built
 upstream:
   builder: base/go-builder
-  builder_version: go1.26.5
+  builder_version: go1.26.6
   runtime: base/runtime-min
   reuse_policy: multi-stage-build
 data_driven: false

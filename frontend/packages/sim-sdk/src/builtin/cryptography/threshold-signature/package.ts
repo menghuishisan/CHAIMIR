@@ -19,7 +19,7 @@ export const thresholdSignatureSimulation: SimPackage<ThresholdState> = {
   },
   initState: createInitialThresholdSignatureState,
   reducer: reduceThresholdSignatureEvent,
-  interactions: commonAlgorithmInteractions('share-holder'),
+  interactions: commonAlgorithmInteractions('share-holder', 5),
   render: renderThresholdSignatureView,
   narrative: thresholdSignatureNarrative,
   codeTrace: thresholdSignatureCodeTrace,

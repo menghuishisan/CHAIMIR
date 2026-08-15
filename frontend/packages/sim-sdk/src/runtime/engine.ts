@@ -57,6 +57,8 @@ export class SimEngine {
 
   /** step 推进一个 tick。 */
   step(): void {
+    const advance = this.simPackage.interactions.find((item) => item.emits === 'advance');
+    if (advance && !this.isInteractionAvailable(advance)) return;
     this.applyEvent({ type: 'tick', source: 'tick', payload: {}, target: undefined });
   }
 
@@ -121,9 +123,7 @@ export class SimEngine {
     }
     const interactionAvailability: Record<string, boolean> = {};
     for (const interaction of this.simPackage.interactions) {
-      interactionAvailability[interaction.id] = interaction.availableWhen
-        ? interaction.availableWhen(this.state)
-        : true;
+      interactionAvailability[interaction.id] = this.isInteractionAvailable(interaction);
     }
     return {
       state: this.state,
@@ -196,6 +196,9 @@ export class SimEngine {
     if (!interaction) {
       throw new Error('当前仿真包不支持这个操作');
     }
+    if (!this.isInteractionAvailable(interaction)) {
+      throw new Error('当前阶段不允许这个操作');
+    }
     const needsElement = interaction.target === 'element' || interaction.kind === 'select-element';
     if (needsElement && !eventInput.target) {
       throw new Error('请先选择要操作的仿真对象');
@@ -219,6 +222,37 @@ export class SimEngine {
         throw new Error('请补全操作参数后再继续');
       }
     }
+  }
+
+  /**
+   * isInteractionAvailable 统一计算声明条件与通用攻击-恢复顺序,让控件状态与引擎校验使用同一份契约。
+   */
+  private isInteractionAvailable(interaction: SimPackage['interactions'][number]): boolean {
+    if (interaction.availableWhen && !interaction.availableWhen(this.state)) return false;
+    // 每个包都必须把 attack -> recover 作为完整教学链;顺序之外的语义由包自身 availableWhen 定义。
+    if (interaction.emits === 'advance' && !this.wouldChangeState(interaction, 'user')) return false;
+    if (interaction.emits !== 'recover') return true;
+    const lastAttack = this.events.reduce((index, event, currentIndex) => event.type === 'attack' ? currentIndex : index, -1);
+    const lastRecover = this.events.reduce((index, event, currentIndex) => event.type === 'recover' ? currentIndex : index, -1);
+    return lastAttack > lastRecover;
+  }
+
+  /**
+   * wouldChangeState 预演一次推进动作,只比较业务 state,不把事件日志当成画面变化。
+   * 终态 reducer 若返回同一份业务状态,控件必须禁用,否则用户只能不断追加无效事件直到撞上规模上限。
+   */
+  private wouldChangeState(interaction: SimPackage['interactions'][number], source: 'tick' | 'user'): boolean {
+    const probeEvent: SimEvent = {
+      type: interaction.emits,
+      source,
+      payload: {},
+      target: undefined,
+      atTick: this.tick,
+      seq: this.seq,
+    };
+    const before = JSON.stringify(this.state);
+    const after = this.simPackage.reducer(this.state, probeEvent, this.reducerContext(this.tick, this.seq));
+    return JSON.stringify(after) !== before;
   }
 
   /**

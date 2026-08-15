@@ -99,7 +99,7 @@ function injectLoss(state: LatencyLossState): LatencyLossState {
   if (!target) {
     return state;
   }
-  return { ...state, lastTransition: 'loss', lossInjected: true, congestionWindow: 1, slowStartThreshold: Math.max(1, Math.floor(state.congestionWindow / 2)), packets: state.packets.map((packet) => (packet.seq === target.seq ? { ...packet, sent: true, delivered: false, acked: false, dropped: true, timeoutAt: Math.max(packet.timeoutAt, state.tick + 1) } : packet)), messages: state.messages.concat(message(target.seq, '丢包', state.tick, true, '包超时未确认,被标记为丢失。')) };
+  return { ...state, phaseIndex: 2, lastTransition: 'loss', lossInjected: true, congestionWindow: 1, slowStartThreshold: Math.max(1, Math.floor(state.congestionWindow / 2)), packets: state.packets.map((packet) => (packet.seq === target.seq ? { ...packet, sent: true, delivered: false, acked: false, dropped: true, timeoutAt: Math.max(packet.timeoutAt, state.tick + 1) } : packet)), messages: state.messages.concat(message(target.seq, '丢包', state.tick, true, '包超时未确认,被标记为丢失。')) };
 }
 
 /**
@@ -113,7 +113,7 @@ function detectLoss(state: LatencyLossState): LatencyLossState {
  * retransmitLost 重传所有丢失包。
  */
 function retransmitLost(state: LatencyLossState): LatencyLossState {
-  return { ...state, lastTransition: 'retry', packets: state.packets.map((packet) => (packet.dropped ? { ...packet, sent: true, delivered: true, acked: true, dropped: false, retry: packet.retry + 1, latencyMs: packet.latencyMs + 40, timeoutAt: state.tick + 2 } : packet)), messages: state.messages.concat(state.packets.filter((packet) => packet.dropped).map((packet) => message(packet.seq, '重传', state.tick, false, '发送端重传丢失数据包。'))) };
+  return { ...state, phaseIndex: 3, lastTransition: 'retry', packets: state.packets.map((packet) => (packet.dropped ? { ...packet, sent: true, delivered: true, acked: true, dropped: false, retry: packet.retry + 1, latencyMs: packet.latencyMs + 40, timeoutAt: state.tick + 2 } : packet)), messages: state.messages.concat(state.packets.filter((packet) => packet.dropped).map((packet) => message(packet.seq, '重传', state.tick, false, '发送端重传丢失数据包。'))) };
 }
 
 /**

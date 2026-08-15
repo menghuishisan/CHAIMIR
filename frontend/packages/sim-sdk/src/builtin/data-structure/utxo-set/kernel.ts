@@ -45,7 +45,8 @@ export function advanceUtxo(state: UtxoState, event: SimEvent): UtxoState {
  * finalizeUtxoState 刷新指标、检查点和代码追踪。
  */
 export function finalizeUtxoState(state: UtxoState): UtxoState {
-  const inputSum = state.utxos.filter((item) => state.inputs.includes(item.id) && !item.spent).reduce((sum, item) => sum + item.amount, 0);
+  // 输入金额属于本次交易的消耗凭证,提交后即使标记 spent 也必须保留在校验统计中。
+  const inputSum = state.utxos.filter((item) => state.inputs.includes(item.id)).reduce((sum, item) => sum + item.amount, 0);
   const outputSum = state.outputs.reduce((sum, item) => sum + item.amount, 0);
   const hasDoubleSpend = hasDuplicateInput(state.inputs) || state.utxos.some((item) => item.doubleSpend);
   const valid = inputSum >= outputSum && !hasDoubleSpend;
@@ -73,9 +74,21 @@ function doubleSpend(state: UtxoState): UtxoState {
  */
 function compact(state: UtxoState): UtxoState {
   const hasDoubleSpend = hasDuplicateInput(state.inputs) || state.utxos.some((item) => item.doubleSpend);
-  if (hasDoubleSpend) return { ...state, lastTransition: 'compact', txValid: false };
+  if (hasDoubleSpend) {
+    // 双花演示只保留一次合法输入,清除攻击标记后再执行集合更新。
+    const uniqueInputs = Array.from(new Set(state.inputs));
+    const cleaned = { ...state, inputs: uniqueInputs, utxos: state.utxos.map((item) => ({ ...item, doubleSpend: false })) };
+    const outputs = cleaned.outputs.length > 0 ? cleaned.outputs : createOutputs(cleaned);
+    return commitUtxoSet(cleaned, uniqueInputs, outputs);
+  }
   const outputs = state.outputs.length > 0 ? state.outputs : createOutputs(state);
-  return { ...state, lastTransition: 'compact', outputs, txValid: true, utxos: state.utxos.map((item) => (state.inputs.includes(item.id) ? { ...item, spent: true } : item)).concat(outputs) };
+  return commitUtxoSet(state, state.inputs, outputs);
+}
+
+/** commitUtxoSet 提交一次集合更新并保持重复恢复操作幂等。 */
+function commitUtxoSet(state: UtxoState, inputIds: string[], outputs: Utxo[]): UtxoState {
+  const existingIds = new Set(state.utxos.map((item) => item.id));
+  return { ...state, lastTransition: 'compact', outputs, txValid: true, utxos: state.utxos.map((item) => (inputIds.includes(item.id) ? { ...item, spent: true } : item)).concat(outputs.filter((output) => !existingIds.has(output.id))) };
 }
 
 /**

@@ -52,7 +52,8 @@
             "id": "eth-pos-chain",
             "mode": "chain",
             "roles": [
-              "primary"
+              "primary",
+              "evidence"
             ]
           },
           {
@@ -1464,7 +1465,8 @@
             "id": "zk-rollup-pipeline",
             "mode": "pipeline",
             "roles": [
-              "primary"
+              "primary",
+              "evidence"
             ]
           },
           {
@@ -5678,7 +5680,8 @@
             "id": "eip1559-pipeline",
             "mode": "pipeline",
             "roles": [
-              "primary"
+              "primary",
+              "evidence"
             ]
           },
           {

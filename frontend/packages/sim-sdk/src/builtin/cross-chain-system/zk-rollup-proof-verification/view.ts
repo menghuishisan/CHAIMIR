@@ -24,7 +24,7 @@ export function renderZkRollupView(state: ZkRollupState): TeachingFrame {
       secondary: ['new-root', 'old-root'],
       muted: state.phaseIndex === 5 ? ['proof'] : [],
     },
-    layout: { primary, evidence: ['zk-rollup-matrix'], metrics: ['zk-rollup-chart'] },
+    layout: { primary, evidence: ['zk-rollup-pipeline', 'zk-rollup-matrix'], metrics: ['zk-rollup-chart'] },
     patterns: [
       pipelinePattern('zk-rollup-pipeline', 'ZK Rollup batch -> proof -> verifier -> state root 流程', steps(state), zkRollupPhases[state.phaseIndex].id),
       matrixPattern('zk-rollup-matrix', 'proof 与 public inputs 绑定检查', state.inputs.map((input) => input.id), ['类型', '值', '一致性'], inputCells(state)),

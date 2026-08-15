@@ -21,7 +21,7 @@ export function createInitialSnapshotState(params: SimInitParams, _seed: number)
 export function reduceSnapshotEvent(state: SnapshotState, event: SimEvent, _context: ReducerContext): SnapshotState {
   if (event.type === 'select') return finalizeSnapshotState({ ...state, selectedElementId: event.target });
   if (event.type === 'attack') return finalizeSnapshotState(applyDirtyWrite(state));
-  if (event.type === 'recover') return finalizeSnapshotState(rollbackSnapshot(state));
+  if (event.type === 'recover') return finalizeSnapshotState({ ...rollbackSnapshot(state), phaseIndex: 4, lastTransition: 'verify' });
   if (event.type === 'advance' || event.type === 'tick') return finalizeSnapshotState(advanceSnapshot(state, event));
   return state;
 }

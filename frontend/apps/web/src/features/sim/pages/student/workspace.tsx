@@ -253,7 +253,7 @@ function SimRuntime({ packageCode, version, sessionId, restore }: SimRuntimeProp
   // 减弱动效偏好下不自动推进(规范 §7.3:冻结并保留当前态文字),单步仍然可用
   const playback = useSimPlayback({
     advance,
-    canAdvance: Boolean(client) && !error,
+    canAdvance: Boolean(client) && !error && snapshot?.interactionAvailability.advance !== false,
     cue: snapshot,
     autoPlay: !reducedMotion,
   })
@@ -477,6 +477,7 @@ function SimRuntime({ packageCode, version, sessionId, restore }: SimRuntimeProp
                 multiplier={playback.multiplier}
                 onMultiplierChange={playback.setMultiplier}
                 disabled={Boolean(error)}
+                atEnd={!error && snapshot.interactionAvailability.advance === false}
                 atStart={snapshot.events.length === 0}
                 playLabel="自动推进"
               />
@@ -515,7 +516,7 @@ function IsolatedRuntime({ version, sessionId }: IsolatedRuntimeProps) {
   // 减弱动效偏好下不自动推进(规范 §7.3),单步仍然可用
   const playback = useSimPlayback({
     advance: stream.step,
-    canAdvance: stream.status === 'open' && !stream.error,
+    canAdvance: stream.status === 'open' && !stream.error && snapshot?.interactionAvailability.advance !== false,
     cue: snapshot,
     autoPlay: !reducedMotion,
   })
@@ -706,6 +707,7 @@ function IsolatedFooter({
         multiplier={playback.multiplier}
         onMultiplierChange={playback.setMultiplier}
         disabled={disabled}
+        atEnd={!stream.error && snapshot.interactionAvailability.advance === false}
         atStart={stream.eventCount === 0}
         playLabel="自动推进"
       />

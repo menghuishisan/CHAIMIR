@@ -8,7 +8,7 @@ import { pbftCodeTrace, pbftNarrative } from './trace';
 
 const pbftInteractions: InteractionDef[] = [
   { id: 'select', kind: 'select-element', label: '选择对象', description: '选择副本、消息或证书,查看它在 PBFT 当前过程中的状态。', emits: 'select', target: 'element', elementFilter: 'participant' },
-  { id: 'advance', kind: 'button', label: '推进过程', description: '按 PBFT 协议规则推进一个确定性过程单元。', emits: 'advance', labelTag: 'normal' },
+  { id: 'advance', kind: 'button', label: '推进过程', description: '按 PBFT 协议规则推进一个确定性过程单元。', emits: 'advance', labelTag: 'normal', availableWhen: (state) => (state as PbftState).phaseIndex < 5 },
   { id: 'attack', kind: 'button', label: '注入双提议', description: '让当前主节点发送冲突摘要,观察正确副本如何拒绝并保留证据。', emits: 'attack', labelTag: 'attack' },
   { id: 'recover', kind: 'button', label: '执行视图切换', description: '收集视图切换证书,由新主节点继承安全摘要并恢复推进。', emits: 'recover', labelTag: 'perturb' },
 ];

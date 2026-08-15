@@ -76,7 +76,10 @@ function replaceNonce(state: NonceState): NonceState {
  */
 function includeNextOrdered(state: NonceState): NonceState {
   const nextTx = [...state.txs].filter((tx) => tx.status !== 'included').sort((left, right) => left.nonce - right.nonce || right.fee - left.fee)[0];
-  if (!nextTx || nextTx.nonce !== state.accountNonce) {
+  if (!nextTx) {
+    return { ...state, gapDetected: false };
+  }
+  if (nextTx.nonce !== state.accountNonce) {
     return { ...state, gapDetected: true, txs: state.txs.map((tx) => (tx.status === 'included' ? tx : { ...tx, status: 'blocked' })) };
   }
   return { ...state, accountNonce: state.accountNonce + 1, txs: state.txs.map((tx) => (tx.id === nextTx.id ? { ...tx, status: 'included' } : tx)) };

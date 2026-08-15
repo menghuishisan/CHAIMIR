@@ -4,8 +4,8 @@ FROM alpine:3.23@sha256:fd791d74b68913cbb027c6546007b3f0d3bc45125f797758156952bc
 LABEL org.opencontainers.image.title="base/go-builder"
 LABEL org.opencontainers.image.description="Chaimir Go builder base image"
 
-ARG GO_VERSION=go1.26.5
-ARG GO_SHA256=5c2c3b16caefa1d968a94c1daca04a7ca301a496d9b086e17ad77bb81393f053
+ARG GO_VERSION=go1.26.6
+ARG GO_SHA256=708effb774be8237570d0add163225abbdfaf4fca28b2611df167beba4feef89
 
 # 构建基座必须应用发行版安全更新,并用官方 SHA256 校验 Go 工具链。
 RUN apk upgrade --no-cache \

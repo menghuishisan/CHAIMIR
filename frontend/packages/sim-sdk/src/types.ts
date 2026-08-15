@@ -53,6 +53,8 @@ export interface SimInitParams {
 export interface SimState {
   tick: number;
   phase: string;
+  /** 阶段型内置仿真用此索引声明有限流程的终态;非阶段模型可省略。 */
+  phaseIndex?: number;
   selectedElementId?: string;
   explanation: StepExplanation;
   _trace?: TraceInfo;

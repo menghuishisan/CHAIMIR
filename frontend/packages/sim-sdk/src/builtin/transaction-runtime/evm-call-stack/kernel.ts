@@ -16,7 +16,7 @@ export function createInitialCallStackState(params: SimInitParams, _seed: number
     { id: 'eoa', label: '外部账户', role: 'runtime-actor', status: 'active' },
     ...contracts.map<RuntimeActor>((label, index) => ({ id: contractId(index), label, role: 'runtime-actor', status: 'idle' })),
   ];
-  return finalizeCallStackState({ tick: 0, phase: callStackPhases[0].label, phaseIndex: 0, maxDepth: integerParam(params, 'maxDepth', 4, 2, 32), frames: [], actors, messages: [], lastTransition: 'external', explanation: explain(0), metrics: {}, checkpointValues: {} });
+  return finalizeCallStackState({ tick: 0, phase: callStackPhases[0].label, phaseIndex: 0, maxDepth: integerParam(params, 'maxDepth', 4, 2, 32), frames: [], handledRevert: false, actors, messages: [], lastTransition: 'external', explanation: explain(0), metrics: {}, checkpointValues: {} });
 }
 
 /**
@@ -54,7 +54,7 @@ export function advanceCallStack(state: CallStackState, event: SimEvent): CallSt
  */
 export function finalizeCallStackState(state: CallStackState): CallStackState {
   const depth = activeDepth(state);
-  const safe = depth <= state.maxDepth && !state.frames.some((frame) => frame.reverted);
+  const safe = depth <= state.maxDepth && (!state.frames.some((frame) => frame.reverted) || state.handledRevert);
   return { ...state, phase: callStackPhases[state.phaseIndex].label, actors: state.actors.map((actor) => ({ ...actor, status: state.frames.some((frame) => frame.reverted && actor.label === frame.contract) ? 'danger' : actor.status })), explanation: explain(state.phaseIndex), metrics: { result: safe ? '调用栈可控' : '调用失败或过深', risk: safe ? 8 : 72, depth }, checkpointValues: { safe }, _trace: { triggeredLines: traceLinesForCallStack(state.lastTransition), variables: { depth }, executionPath: `call-stack/${state.lastTransition}` } };
 }
 
@@ -101,7 +101,7 @@ function contractLabel(state: CallStackState, index: number): string {
 function revertDeep(state: CallStackState): CallStackState {
   const activeIndex = findDeepestActiveFrameIndex(state);
   const targetIndex = activeIndex >= 0 ? activeIndex : state.frames.length - 1;
-  return { ...state, phaseIndex: 3, lastTransition: 'revert', frames: state.frames.map((frame, index) => (index === targetIndex ? { ...frame, reverted: true, returned: false } : frame)) };
+  return { ...state, phaseIndex: 3, lastTransition: 'revert', handledRevert: false, frames: state.frames.map((frame, index) => (index === targetIndex ? { ...frame, reverted: true, returned: false } : frame)) };
 }
 
 /**
@@ -109,7 +109,7 @@ function revertDeep(state: CallStackState): CallStackState {
  */
 function popRecover(state: CallStackState): CallStackState {
   if (state.frames.some((frame) => frame.reverted)) {
-    return { ...state, lastTransition: 'return', frames: state.frames.map((frame) => ({ ...frame, returned: false })) };
+    return { ...state, lastTransition: 'return', handledRevert: true, frames: state.frames.map((frame) => ({ ...frame, returned: true })) };
   }
   const targetIndex = findDeepestActiveFrameIndex(state);
   return { ...state, lastTransition: 'return', frames: state.frames.map((frame, index) => (index === targetIndex ? { ...frame, returned: true } : frame)) };

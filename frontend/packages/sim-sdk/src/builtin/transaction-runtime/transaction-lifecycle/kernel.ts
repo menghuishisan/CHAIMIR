@@ -63,14 +63,14 @@ export function receiptReady(state: TxLifecycleState): CheckpointResult {
  * dropTx 模拟交易被交易池丢弃。
  */
 function dropTx(state: TxLifecycleState): TxLifecycleState {
-  return { ...state, lastTransition: 'mempool', dropped: true, inMempool: false, receipt: '已丢弃' };
+  return { ...state, phaseIndex: 2, lastTransition: 'mempool', dropped: true, inMempool: false, receipt: '已丢弃' };
 }
 
 /**
  * resubmit 提高费用并重新提交交易。
  */
 function resubmit(state: TxLifecycleState): TxLifecycleState {
-  return { ...state, lastTransition: 'mempool', dropped: false, inMempool: true, receipt: '', messages: state.messages.concat(message('wallet', 'node', '提高费用重交', state.tick, '用户提高费用后重新进入交易池。')) };
+  return { ...state, phaseIndex: 2, lastTransition: 'mempool', dropped: false, inMempool: true, receipt: '', messages: state.messages.concat(message('wallet', 'node', '提高费用重交', state.tick, '用户提高费用后重新进入交易池。')) };
 }
 
 /**

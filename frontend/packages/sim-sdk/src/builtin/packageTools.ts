@@ -78,10 +78,21 @@ export function createAlgorithmPackage<TState extends SimState>(spec: AlgorithmP
 /**
  * commonAlgorithmInteractions 返回通用控件声明,实际效果由每个算法自己的 reducer 决定。
  */
-export function commonAlgorithmInteractions(targetFilter: string): InteractionDef[] {
+export function commonAlgorithmInteractions(targetFilter: string, terminalPhaseIndex?: number): InteractionDef[] {
+  const advance = {
+    id: 'advance',
+    kind: 'button' as const,
+    label: '推进阶段',
+    description: '按当前算法规则推进一个阶段。',
+    emits: 'advance',
+    labelTag: 'normal' as const,
+    ...(terminalPhaseIndex === undefined
+      ? {}
+      : { availableWhen: (state: SimState) => (state as SimState & { phaseIndex: number }).phaseIndex < terminalPhaseIndex }),
+  };
   return [
     { id: 'select', kind: 'select-element', label: '选择对象', description: '选择画面中的对象,查看它在当前算法流程中的状态。', emits: 'select', target: 'element', elementFilter: targetFilter },
-    { id: 'advance', kind: 'button', label: '推进阶段', description: '按当前算法规则推进一个阶段。', emits: 'advance', labelTag: 'normal' },
+    advance,
     { id: 'attack', kind: 'button', label: '注入异常', description: '注入该算法需要处理的异常输入或攻击路径。', emits: 'attack', labelTag: 'attack' },
     { id: 'recover', kind: 'button', label: '执行修复', description: '按该算法的恢复或防护规则处理异常。', emits: 'recover', labelTag: 'perturb' },
   ];

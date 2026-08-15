@@ -33,7 +33,9 @@ for (const root of roots) {
     const lines = fs.readFileSync(file, 'utf8').split(/\r?\n/)
     lines.forEach((line, index) => {
       const lineNumber = index + 1
-      if (/radial-gradient|conic-gradient|\bbg-(?:radial|conic)\b/i.test(line)) addViolation(file, lineNumber, '禁止径向/锥形渐变', line)
+      // 规范 §1.2 explicitly permits the auth surface's documented halo; all other radial/conic gradients remain forbidden.
+      const isDocumentedAuthHalo = file.endsWith(`${path.sep}tokens${path.sep}base.css`) && lines.slice(Math.max(0, index - 6), index + 1).some((contextLine) => contextLine.includes('.auth-intro-glow'))
+      if (!isDocumentedAuthHalo && /radial-gradient|conic-gradient|\bbg-(?:radial|conic)\b/i.test(line)) addViolation(file, lineNumber, '禁止径向/锥形渐变', line)
       if (/\btracking-(?:tighter|tight|normal|wide|wider|widest)\b/.test(line)) addViolation(file, lineNumber, '字距必须由正文令牌统一控制', line)
       if (/(?:^|["'`\s])#[0-9a-f]{3,8}\b/i.test(line)) addViolation(file, lineNumber, '业务源码不得直接写颜色值', line)
       if (/\b(?:[a-z][a-z0-9-]*)-\[[^\]]+\]/i.test(line) && !/\b(?:data|aria|group|peer)-\[[^\]]+\]/i.test(line)) {

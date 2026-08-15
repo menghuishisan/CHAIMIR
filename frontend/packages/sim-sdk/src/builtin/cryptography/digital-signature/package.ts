@@ -19,7 +19,7 @@ export const digitalSignatureSimulation: SimPackage<SignatureState> = {
   },
   initState: createInitialDigitalSignatureState,
   reducer: reduceDigitalSignatureEvent,
-  interactions: commonAlgorithmInteractions('crypto-actor'),
+  interactions: commonAlgorithmInteractions('crypto-actor', 5),
   render: renderDigitalSignatureView,
   narrative: digitalSignatureNarrative,
   codeTrace: digitalSignatureCodeTrace,

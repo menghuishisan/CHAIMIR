@@ -207,6 +207,7 @@ func (s *Service) resolveSMSCredentialTenant(ctx context.Context, phone string, 
 	}); err != nil {
 		return 0, apperr.ErrIdentityInvalidCredentials.WithCause(err)
 	}
+	candidates = filterLoginCandidatesForDeployment(candidates, s.deploy)
 	if len(candidates) == 0 {
 		return 0, apperr.ErrIdentityInvalidCredentials
 	}

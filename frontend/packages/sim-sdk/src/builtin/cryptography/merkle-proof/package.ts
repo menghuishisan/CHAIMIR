@@ -19,7 +19,7 @@ export const merkleProofSimulation: SimPackage<MerkleProofState> = {
   },
   initState: createInitialMerkleProofState,
   reducer: reduceMerkleProofEvent,
-  interactions: commonAlgorithmInteractions('merkle-leaf'),
+  interactions: commonAlgorithmInteractions('merkle-leaf', 4),
   render: renderMerkleProofView,
   narrative: merkleProofNarrative,
   codeTrace: merkleProofCodeTrace,

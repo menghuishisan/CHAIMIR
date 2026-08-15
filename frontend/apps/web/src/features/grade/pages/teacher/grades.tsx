@@ -307,7 +307,10 @@ function SubmitReviewCard({
               value={selectedCourseId}
               placeholder={courseOptions.length > 0 ? '选择课程' : '暂无课程'}
               disabled={courseOptions.length === 0}
-              onValueChange={onCourseChange}
+              onValueChange={(value) => {
+                onCourseChange(value)
+                setFieldError(undefined)
+              }}
             />
           </FormField>
 

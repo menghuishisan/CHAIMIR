@@ -19,7 +19,7 @@ export const hashChainSimulation: SimPackage<HashChainState> = {
   },
   initState: createInitialHashChainState,
   reducer: reduceHashChainEvent,
-  interactions: commonAlgorithmInteractions('hash-record'),
+  interactions: commonAlgorithmInteractions('hash-record', 4),
   render: renderHashChainView,
   narrative: hashChainNarrative,
   codeTrace: hashChainCodeTrace,

@@ -182,7 +182,7 @@ function commitEntry(state: RaftState): RaftState {
  * partitionLeader 注入领导者网络分区。
  */
 function partitionLeader(state: RaftState): RaftState {
-  return { ...state, tick: state.tick + 1, lastTransition: 'timeout', partitionActive: true, nodes: state.nodes.map((node) => (node.id === state.leaderId ? { ...node, partitioned: true, role: 'follower' } : node)) };
+  return { ...state, phaseIndex: 0, tick: state.tick + 1, lastTransition: 'timeout', partitionActive: true, nodes: state.nodes.map((node) => (node.id === state.leaderId ? { ...node, partitioned: true, role: 'follower' } : node)) };
 }
 
 /**
@@ -191,7 +191,7 @@ function partitionLeader(state: RaftState): RaftState {
 function recoverPartition(state: RaftState): RaftState {
   const leaderId = state.candidateId ?? state.nodes.find((node) => !node.partitioned)?.id ?? state.leaderId;
   const leaderLastTerm = lastEntry(state).term;
-  return { ...state, tick: state.tick + 1, lastTransition: 'recover', partitionActive: false, leaderId, nodes: state.nodes.map((node) => ({ ...node, partitioned: false, role: node.id === leaderId ? 'leader' : 'follower', logLength: state.log.length, lastLogTerm: leaderLastTerm, matchIndex: state.log.length, nextIndex: state.log.length + 1, commitIndex: state.commitIndex, appliedIndex: state.commitIndex })) };
+  return { ...state, phaseIndex: 6, tick: state.tick + 1, lastTransition: 'recover', partitionActive: false, leaderId, nodes: state.nodes.map((node) => ({ ...node, partitioned: false, role: node.id === leaderId ? 'leader' : 'follower', logLength: state.log.length, lastLogTerm: leaderLastTerm, matchIndex: state.log.length, nextIndex: state.log.length + 1, commitIndex: state.commitIndex, appliedIndex: state.commitIndex })) };
 }
 
 /**

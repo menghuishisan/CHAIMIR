@@ -19,7 +19,7 @@ export const latencyLossSimulation: SimPackage<LatencyLossState> = {
   },
   initState: createInitialLatencyLossState,
   reducer: reduceLatencyLossEvent,
-  interactions: commonAlgorithmInteractions('packet'),
+  interactions: commonAlgorithmInteractions('packet', 4),
   render: renderLatencyLossView,
   narrative: latencyLossNarrative,
   codeTrace: latencyLossCodeTrace,

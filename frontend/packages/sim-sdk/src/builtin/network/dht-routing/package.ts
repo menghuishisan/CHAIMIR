@@ -19,7 +19,7 @@ export const dhtRoutingSimulation: SimPackage<DhtState> = {
   },
   initState: createInitialDhtState,
   reducer: reduceDhtEvent,
-  interactions: commonAlgorithmInteractions('dht-peer'),
+  interactions: commonAlgorithmInteractions('dht-peer', 4),
   render: renderDhtView,
   narrative: dhtNarrative,
   codeTrace: dhtCodeTrace,

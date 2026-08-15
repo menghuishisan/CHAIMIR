@@ -30,16 +30,16 @@ secretGenerator:
 images:
   - name: chaimir/backend
     newName: registry.chaimir.io/service/backend
-    digest: sha256:810ac6f06f63622bf9f8b35591b2d8b5e238d5eebe31a5a268e510c60d43b155
+    digest: sha256:09568d022f43787bf28546c53855cf4ab5c03b0d5ba79847023cb532e865853a
   - name: chaimir/frontend
     newName: registry.chaimir.io/service/frontend
-    digest: sha256:11d50326acbeecba6d25323b72c8ca1d95813d2f65a607fc32ad8906152bbf16
+    digest: sha256:cfca2977304afeb9e2d9aa7cd6f18491e3d37e9e50f29c421d46eba31bc06186
   - name: chaimir/migrate
     newName: registry.chaimir.io/service/migrate
-    digest: sha256:5ba33be5e09d596b16766087b331307c5e68af527e3b01202d4221818afb6428
+    digest: sha256:554723b57a20b8541120c4de53d11e6e36facf712b35d8c8f1de292f585179c5
   - name: chaimir/cron
     newName: registry.chaimir.io/service/cron
-    digest: sha256:4d1495ff799a26260ad23730acd3c6d0de21fca7fe33de1d631c498175b0603a
+    digest: sha256:f9565bf47f56bbda31c97bdfb91eb988868280fd2b957ac9cfd56724154dc5c7
   - name: chaimir/middleware/clamav
     newName: registry.chaimir.io/middleware/clamav
     digest: sha256:5eeae8652cff5a00d4321628345bd53bb0488f285e7f038a49cdc4042a3f1445

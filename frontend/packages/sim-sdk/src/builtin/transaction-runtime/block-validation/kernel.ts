@@ -34,7 +34,10 @@ export function reduceBlockValidationEvent(state: BlockValidationState, event: S
  */
 export function advanceBlockValidation(state: BlockValidationState, event: SimEvent): BlockValidationState {
   const phaseIndex = Math.min(blockValidationPhases.length - 1, state.phaseIndex + 1);
-  return { ...state, phaseIndex, tick: event.source === 'tick' ? state.tick + 1 : state.tick, lastTransition: blockValidationPhases[phaseIndex].id, accepted: phaseIndex >= 4 && state.items.every((item) => item.valid) };
+  const allValid = state.items.every((item) => item.valid);
+  // “拒绝无效区块”是失败分支,有效区块在状态根校验后即可接受。
+  const nextPhaseIndex = allValid && phaseIndex === 4 ? 3 : phaseIndex;
+  return { ...state, phaseIndex: nextPhaseIndex, tick: event.source === 'tick' ? state.tick + 1 : state.tick, lastTransition: blockValidationPhases[nextPhaseIndex].id, accepted: allValid && nextPhaseIndex === 3 };
 }
 
 /**
@@ -65,7 +68,7 @@ function corruptStateRoot(state: BlockValidationState): BlockValidationState {
  * recomputeRoots 重算所有根摘要。
  */
 function recomputeRoots(state: BlockValidationState): BlockValidationState {
-  return { ...state, lastTransition: 'state-root', items: state.items.map((item) => ({ ...item, actual: item.expected, valid: true })) };
+  return { ...state, phaseIndex: 3, lastTransition: 'state-root', accepted: true, items: state.items.map((item) => ({ ...item, actual: item.expected, valid: true })) };
 }
 
 /**

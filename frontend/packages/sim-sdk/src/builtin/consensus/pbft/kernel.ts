@@ -41,7 +41,8 @@ export function createInitialPbftState(params: SimInitParams, seed: number): Pbf
     messages: [],
     certificates: [],
     viewChanges: [],
-    lastTransition: 'init',
+    // 初始阶段就是客户端请求,推进门控必须与阶段 id 对齐才能进入预准备。
+    lastTransition: pbftPhases[0].id,
     explanation: explainPhase(0),
     metrics: {},
     checkpointValues: {},
@@ -63,6 +64,7 @@ export function reducePbftEvent(state: PbftState, event: SimEvent, context: Redu
  * advancePbft 按 PBFT 协议顺序推进一个过程单元,每步都会产生真实协议消息。
  */
 export function advancePbft(state: PbftState): PbftState {
+  if (state.phaseIndex >= pbftPhases.length - 1) return state;
   const tick = state.tick + 1;
   const currentPhaseId = pbftPhases[state.phaseIndex]?.id;
   const nextIndex = state.lastTransition === currentPhaseId ? Math.min(pbftPhases.length - 1, state.phaseIndex + 1) : state.phaseIndex;
@@ -99,6 +101,7 @@ export function injectByzantinePrimary(state: PbftState, context: ReducerContext
   return {
     ...state,
     tick: state.tick + 1,
+    phaseIndex: Math.max(1, state.phaseIndex),
     conflictingDigest,
     lastTransition: 'fault-injected',
     messages: state.messages.concat(messages),
@@ -178,7 +181,7 @@ export function pbftSafetyCheckpoint(state: PbftState): CheckpointResult {
  * pbftViewChangeCheckpoint 检查异常主节点是否已被法定人数视图切换消息替换。
  */
 export function pbftViewChangeCheckpoint(state: PbftState): CheckpointResult {
-  const achieved = state.viewChanges.length >= quorum(state) || !state.conflictingDigest;
+  const achieved = state.view > 0 && state.viewChanges.length >= quorum(state);
   return {
     achieved,
     answer: { view: state.view, viewChangeMessages: state.viewChanges.length, quorum: quorum(state) },
@@ -339,6 +342,7 @@ function executeAndReply(state: PbftState): PbftState {
  * stabilizeCheckpoint 让执行副本生成检查点并达成稳定证书。
  */
 function stabilizeCheckpoint(state: PbftState): PbftState {
+  if (findCertificate(state, 'checkpoint')?.achieved === true) return state;
   const checkpointSenders = state.replicas.filter((replica) => replica.executedDigest === state.request.digest);
   const messages = checkpointSenders.flatMap((from) =>
     state.replicas

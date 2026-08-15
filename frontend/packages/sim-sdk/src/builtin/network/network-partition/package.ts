@@ -19,7 +19,7 @@ export const networkPartitionSimulation: SimPackage<PartitionState> = {
   },
   initState: createInitialPartitionState,
   reducer: reducePartitionEvent,
-  interactions: commonAlgorithmInteractions('partition-node'),
+  interactions: commonAlgorithmInteractions('partition-node', 4),
   render: renderPartitionView,
   narrative: partitionNarrative,
   codeTrace: partitionCodeTrace,

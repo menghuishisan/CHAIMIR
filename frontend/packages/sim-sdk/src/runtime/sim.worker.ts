@@ -135,5 +135,14 @@ function reportRuntimeError(request: WorkerRequest, error: unknown): void {
     request_id: request.requestId,
     error: error instanceof Error ? error.message : String(error),
   });
-  postToMain({ type: 'error', requestId: request.requestId, message: '仿真运行失败,请刷新后重试' });
+  postToMain({ type: 'error', requestId: request.requestId, message: runtimeErrorMessage(error) });
+}
+
+/** runtimeErrorMessage 将可恢复的规模边界转成用户可执行的提示,其他错误仍保持通用文案。 */
+function runtimeErrorMessage(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  if (message === '仿真步骤数量超过限制,请调整场景规模') {
+    return '仿真已达到规模上限,请重新开始或调整场景规模。';
+  }
+  return '仿真运行失败,请刷新后重试';
 }

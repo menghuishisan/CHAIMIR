@@ -20,7 +20,7 @@ export function createInitialFinalityState(params: SimInitParams, _seed: number)
  */
 export function reduceFinalityEvent(state: FinalityState, event: SimEvent, _context: ReducerContext): FinalityState {
   if (event.type === 'attack') return finalizeFinalityState({ ...state, phaseIndex: 3, lastTransition: 'reorg', reorgDetected: true, released: false });
-  if (event.type === 'recover') return finalizeFinalityState({ ...state, lastTransition: 'prove', reorgDetected: false, confirmations: state.requiredConfirmations, finalityProof: true });
+  if (event.type === 'recover') return finalizeFinalityState({ ...state, phaseIndex: 2, lastTransition: 'prove', reorgDetected: false, confirmations: state.requiredConfirmations, finalityProof: true });
   if (event.type === 'advance' || event.type === 'tick') return finalizeFinalityState(advanceFinality(state, event));
   return state;
 }

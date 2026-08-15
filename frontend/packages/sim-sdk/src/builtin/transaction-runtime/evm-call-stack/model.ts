@@ -15,6 +15,8 @@ export interface CallStackState extends SimState {
   phaseIndex: number;
   frames: Frame[];
   maxDepth: number;
+  /** 上层是否已检查并处理底层 revert 返回值,失败证据仍保留在 frame.reverted。 */
+  handledRevert: boolean;
   actors: RuntimeActor[];
   messages: RuntimeMessage[];
   lastTransition: string;

@@ -19,7 +19,7 @@ export const zkProofSimulation: SimPackage<ZkState> = {
   },
   initState: createInitialZkProofState,
   reducer: reduceZkProofEvent,
-  interactions: commonAlgorithmInteractions('crypto-actor'),
+  interactions: commonAlgorithmInteractions('crypto-actor', 5),
   render: renderZkProofView,
   narrative: zkProofNarrative,
   codeTrace: zkProofCodeTrace,

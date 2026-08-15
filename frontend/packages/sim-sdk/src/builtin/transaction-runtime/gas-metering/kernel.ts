@@ -68,7 +68,13 @@ function executeStep(state: GasState, event: SimEvent): GasState {
 function lowerLimit(state: GasState): GasState {
   const executedCost = state.steps.filter((step) => step.executed).reduce((sum, step) => sum + step.cost, 0);
   const nextCost = state.steps.find((step) => !step.executed)?.cost ?? state.steps[state.steps.length - 1]?.cost ?? 1;
-  return { ...state, phaseIndex: 2, lastTransition: 'oog', gasLimit: Math.max(1, executedCost + nextCost - 1) };
+  return {
+    ...state,
+    phaseIndex: 2,
+    lastTransition: 'oog',
+    gasLimit: Math.max(1, executedCost + nextCost - 1),
+    outOfGas: true,
+  };
 }
 
 /**

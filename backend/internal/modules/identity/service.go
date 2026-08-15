@@ -77,6 +77,21 @@ type Service struct {
 	bus         eventbus.Bus
 }
 
+// filterLoginCandidatesForDeployment 将私有化部署的预认证候选收敛到固定学校租户。
+// 私有化实例只对外提供一个租户边界，不能把共享数据库中的同手机号账号暴露给登录选择器。
+func filterLoginCandidatesForDeployment(candidates []LoginCandidate, deploy config.DeployConfig) []LoginCandidate {
+	if !deploy.IsSchool() {
+		return candidates
+	}
+	filtered := make([]LoginCandidate, 0, len(candidates))
+	for _, candidate := range candidates {
+		if candidate.TenantID == deploy.SchoolTenantID {
+			filtered = append(filtered, candidate)
+		}
+	}
+	return filtered
+}
+
 // NewService 构造 identity 服务,不接收数据库连接,由装配层传入 Store。
 func NewService(deps ServiceDeps) (*Service, error) {
 	if deps.Store == nil {

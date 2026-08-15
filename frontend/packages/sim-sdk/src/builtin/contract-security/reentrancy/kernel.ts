@@ -22,8 +22,8 @@ export function createInitialReentrancyState(params: SimInitParams, _seed: numbe
  */
 export function reduceReentrancyEvent(state: ReentrancyState, event: SimEvent, _context: ReducerContext): ReentrancyState {
   if (event.type === 'select') return finalizeReentrancyState({ ...state, selectedElementId: event.target });
-  if (event.type === 'attack') return finalizeReentrancyState(reenter(state));
-  if (event.type === 'recover') return finalizeReentrancyState(guard(state));
+  if (event.type === 'attack') return finalizeReentrancyState(canAttack(state) ? reenter(state) : state);
+  if (event.type === 'recover') return finalizeReentrancyState(canRecover(state) ? guard(state) : state);
   if (event.type === 'advance' || event.type === 'tick') return finalizeReentrancyState(advanceReentrancy(state, event));
   return state;
 }
@@ -32,6 +32,7 @@ export function reduceReentrancyEvent(state: ReentrancyState, event: SimEvent, _
  * advanceReentrancy 按重入攻击调用栈推进一个过程单元。
  */
 export function advanceReentrancy(state: ReentrancyState, event: SimEvent): ReentrancyState {
+  if (state.phaseIndex >= 2) return state;
   const phaseIndex = Math.min(reentrancyPhases.length - 1, state.phaseIndex + 1);
   const next = { ...state, phaseIndex, tick: event.source === 'tick' ? state.tick + 1 : state.tick, lastTransition: reentrancyPhases[phaseIndex].id };
   if (phaseIndex === 1) return { ...next, calls: next.calls.concat(call('attacker', 'vault', 'withdraw', next.tick, '攻击合约发起合法提款入口。')) };
@@ -60,7 +61,7 @@ export function reentrancyBlocked(state: ReentrancyState): CheckpointResult {
  * reenter 在余额扣减前再次提款。
  */
 function reenter(state: ReentrancyState): ReentrancyState {
-  if (state.lockEnabled) return blockReentry(state);
+  if (!canAttack(state)) return state;
   return { ...state, phaseIndex: 3, lastTransition: 'callback', reentered: true, vaultBalance: state.vaultBalance - state.attackerCredit, attackerBalance: state.attackerBalance + state.attackerCredit, calls: state.calls.concat(call('attacker', 'vault', 'fallback 重入', state.tick, 'fallback 在状态未更新时再次进入提款。')) };
 }
 
@@ -68,6 +69,7 @@ function reenter(state: ReentrancyState): ReentrancyState {
  * guard 启用重入锁并执行一次受保护提款,验证 fallback 重入被拒绝。
  */
 function guard(state: ReentrancyState): ReentrancyState {
+  if (!canRecover(state)) return state;
   return blockReentry({ ...state, phaseIndex: 4, lastTransition: 'guard', lockEnabled: true });
 }
 
@@ -76,6 +78,16 @@ function guard(state: ReentrancyState): ReentrancyState {
  */
 function blockReentry(state: ReentrancyState): ReentrancyState {
   return { ...state, phaseIndex: 4, lastTransition: 'guard', blockedReentry: true, calls: state.calls.concat(call('attacker', 'vault', 'fallback 被拒绝', state.tick, '重入锁在回调再次进入时拒绝提款。', 'dropped')) };
+}
+
+/** canAttack 只允许在外部转账阶段之后触发一次未受保护的回调。 */
+function canAttack(state: ReentrancyState): boolean {
+  return state.phaseIndex === 2 && !state.reentered && !state.lockEnabled;
+}
+
+/** canRecover 要求攻击已经发生且尚未启用重入锁,避免跳过攻击路径或重复写入拒绝消息。 */
+function canRecover(state: ReentrancyState): boolean {
+  return state.phaseIndex === 3 && state.reentered && !state.lockEnabled;
 }
 
 /**

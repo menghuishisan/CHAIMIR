@@ -19,7 +19,7 @@ export const gossipPropagationSimulation: SimPackage<GossipState> = {
   },
   initState: createInitialGossipState,
   reducer: reduceGossipEvent,
-  interactions: commonAlgorithmInteractions('gossip-peer'),
+  interactions: commonAlgorithmInteractions('gossip-peer', 4),
   render: renderGossipView,
   narrative: gossipNarrative,
   codeTrace: gossipCodeTrace,

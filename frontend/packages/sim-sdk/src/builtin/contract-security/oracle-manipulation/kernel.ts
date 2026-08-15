@@ -58,7 +58,7 @@ export function oracleSafe(state: OracleState): CheckpointResult {
  * manipulate 推偏现货价格并记录价格调用。
  */
 function manipulate(state: OracleState): OracleState {
-  return { ...state, lastTransition: state.lastTransition === 'read' ? 'swap' : state.lastTransition, spotPrice: manipulatedPrice(state), manipulationActive: true, calls: state.calls.concat(call('attacker', 'amm', '大额兑换', state.tick, '攻击者用低流动性池推偏现货价。'), call('amm', 'lending', '偏移价格', state.tick, '借贷合约读取被操纵的现货价。')) };
+  return { ...state, phaseIndex: Math.max(1, state.phaseIndex), lastTransition: state.lastTransition === 'read' ? 'swap' : state.lastTransition, spotPrice: manipulatedPrice(state), manipulationActive: true, calls: state.calls.concat(call('attacker', 'amm', '大额兑换', state.tick, '攻击者用低流动性池推偏现货价。'), call('amm', 'lending', '偏移价格', state.tick, '借贷合约读取被操纵的现货价。')) };
 }
 
 /**

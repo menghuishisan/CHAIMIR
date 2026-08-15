@@ -87,7 +87,7 @@ function selectLeaf(state: MerkleProofState, target?: string): MerkleProofState 
  * tamperLeaf 修改目标叶子内容,使证明根不再匹配可信根。
  */
 function tamperLeaf(state: MerkleProofState): MerkleProofState {
-  return rebuildProof({ ...state, leaves: state.leaves.map((leaf) => (leaf.id === state.targetLeafId ? { ...leaf, value: `${leaf.value}:changed`, hash: merkleLeafHash(leafIndex(leaf.id), `${leaf.value}:changed`), tampered: true } : leaf)) }, 'tamper');
+  return rebuildProof({ ...state, phaseIndex: 4, leaves: state.leaves.map((leaf) => (leaf.id === state.targetLeafId ? { ...leaf, value: `${leaf.value}:changed`, hash: merkleLeafHash(leafIndex(leaf.id), `${leaf.value}:changed`), tampered: true } : leaf)) }, 'tamper');
 }
 
 /**
@@ -97,6 +97,7 @@ function recoverLeaf(state: MerkleProofState): MerkleProofState {
   return rebuildProof(
     {
       ...state,
+      phaseIndex: 3,
       leaves: state.leaves.map((leaf) => (leaf.id === state.targetLeafId ? { ...leaf, value: leaf.canonicalValue, hash: merkleLeafHash(leafIndex(leaf.id), leaf.canonicalValue), tampered: false } : leaf)),
     },
     'compare'

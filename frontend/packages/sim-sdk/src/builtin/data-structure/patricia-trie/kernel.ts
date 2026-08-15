@@ -96,7 +96,7 @@ function missingProofKey(keys: string[]): string {
  * rehashTrie 自底向上重算根哈希。
  */
 function rehashTrie(state: PatriciaTrieState): PatriciaTrieState {
-  return { ...state, lastTransition: state.lastTransition === 'insert' ? 'rehash' : state.lastTransition, rootHash: computeTrieRoot(state.entries), proofValid: true };
+  return { ...state, phaseIndex: 3, lastTransition: state.lastTransition === 'insert' ? 'rehash' : state.lastTransition, rootHash: computeTrieRoot(state.entries), proofValid: true };
 }
 
 /**

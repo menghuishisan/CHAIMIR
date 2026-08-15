@@ -115,7 +115,11 @@ export function finalizePowState(state: PowState): PowState {
     messages: refreshViewMessages(state.messages, state.tick, (message) => message.detail ?? `${message.label} 从矿工传播到对端节点。`),
     samples,
     metrics: { result: state.selfishMining && state.privateFork.length < state.privateMiningTargetDepth ? '私有分叉继续挖矿' : state.selfishMining ? '存在私有分叉' : state.phaseIndex === 2 && !state.candidateReady ? '继续搜索 nonce' : '按累计工作量收敛', risk, finality, work: chainWork(state.blocks), difficulty: state.difficulty },
-    checkpointValues: { workValid: nonGenesisBlocks.every((item) => blockValid(item)), forkChoice: chainWork(state.blocks) >= forkChainWork(state) },
+    // 创世块只是起点,不能在尚未挖出任何区块时把工作量和最长链检查点判为完成。
+    checkpointValues: {
+      workValid: nonGenesisBlocks.length > 0 && nonGenesisBlocks.every((item) => blockValid(item)),
+      forkChoice: nonGenesisBlocks.length > 0 && chainWork(state.blocks) >= forkChainWork(state),
+    },
     _trace: { triggeredLines: traceLinesForPow(state.lastTransition), variables: { difficulty: state.difficulty, target: state.targetPrefix, nonce: state.candidateNonce, candidateHash: state.candidateHash, attempts: state.hashAttempts.length, candidateReady: state.candidateReady, privateDepth: state.privateFork.length, hashWindowSize: state.hashWindowSize }, executionPath: `pow/${state.lastTransition}` },
   };
 }
@@ -191,6 +195,7 @@ function startSelfishMining(state: PowState): PowState {
   const attacker = attackerMiner(state);
   return continueSelfishMining({
     ...state,
+    phaseIndex: 2,
     tick: state.tick + 1,
     lastTransition: 'selfish-mining',
     selfishMining: true,
@@ -207,7 +212,7 @@ function publishPrivateFork(state: PowState): PowState {
   if (state.privateFork.length === 0) {
     return continueSelfishMining({ ...state, tick: state.tick + 1 });
   }
-  return chooseLongestChain({ ...state, tick: state.tick + 1, messages: state.messages.concat(broadcast(state, attackerMiner(state).id, '发布私有分叉')) });
+  return chooseLongestChain({ ...state, phaseIndex: 5, tick: state.tick + 1, messages: state.messages.concat(broadcast(state, attackerMiner(state).id, '发布私有分叉')) });
 }
 
 /**

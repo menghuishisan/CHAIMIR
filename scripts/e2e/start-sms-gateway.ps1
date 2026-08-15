@@ -22,7 +22,8 @@ if (-not $LogDir) {
 New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
 
 $label = "chaimir.io/e2e=sms-gateway"
-$gatewayImage = "registry.chaimir.io/base/node-builder@sha256:2e2a8ce7847dd5a58a6f5c02c7d1e10201e9ea3ec7f8cd286caa166fb4426d76"
+# 使用正式镜像锁中的 Node 基座 digest，确保 E2E 夹具也通过集群签名准入。
+$gatewayImage = "registry.chaimir.io/base/node-builder@sha256:e6613c834ef13f9613344b87c84cc0a0bf2db5166b5bbfaad02d0ebdb8eeb3fc"
 $gatewayManifest = Join-Path $LogDir "sms-gateway-resources.yaml"
 $gatewayConfig = Join-Path $LogDir "sms-gateway-configmap.yaml"
 $gatewayForwardLog = Join-Path $LogDir "sms-gateway-port-forward.log"

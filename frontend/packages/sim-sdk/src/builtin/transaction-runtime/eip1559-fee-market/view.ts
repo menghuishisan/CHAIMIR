@@ -27,7 +27,7 @@ export function renderFeeMarketView(state: FeeMarketState): TeachingFrame {
     },
     layout: {
       primary,
-      evidence: ['eip1559-matrix'],
+      evidence: ['eip1559-pipeline', 'eip1559-matrix'],
       metrics: ['eip1559-chart'],
     },
     patterns: [

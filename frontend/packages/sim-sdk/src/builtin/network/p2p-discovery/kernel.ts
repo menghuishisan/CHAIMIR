@@ -139,7 +139,7 @@ function poisonAddressBook(state: DiscoveryState): DiscoveryState {
   const poisonTarget = state.peers.find((peer) => peer.id !== 'p2p-boot' && !peer.connected)?.id ?? state.peers[state.peers.length - 1]?.id ?? 'p2p-boot';
   const poisoned = state.peers.map((peer) => (peer.id === poisonTarget ? { ...peer, malicious: true, networkId: 'evil-net', protocolVersion: state.minProtocolVersion + 97 } : peer));
   const poisonAddress: DiscoveryAddress = { peerId: poisonTarget, networkId: 'evil-net', protocolVersion: state.minProtocolVersion + 97, score: 95, source: 'unknown' };
-  return { ...state, lastTransition: 'poison', peers: poisoned, addressBook: dedupeAddresses(state.addressBook.concat(poisonAddress)) };
+  return { ...state, phaseIndex: 1, lastTransition: 'poison', peers: poisoned, addressBook: dedupeAddresses(state.addressBook.concat(poisonAddress)) };
 }
 
 /**
@@ -147,7 +147,7 @@ function poisonAddressBook(state: DiscoveryState): DiscoveryState {
  */
 function banInvalidPeers(state: DiscoveryState): DiscoveryState {
   const bannedPeerIds = Array.from(new Set(state.peers.filter((peer) => peer.malicious || peer.failedHandshakeReason).map((peer) => peer.id)));
-  return { ...state, lastTransition: 'ban', bannedPeerIds, peers: state.peers.map((peer) => (bannedPeerIds.includes(peer.id) ? { ...peer, connected: false, healthy: false, banned: true } : peer)), addressBook: state.addressBook.filter((address) => !bannedPeerIds.includes(address.peerId)) };
+  return { ...state, phaseIndex: 4, lastTransition: 'ban', bannedPeerIds, peers: state.peers.map((peer) => (bannedPeerIds.includes(peer.id) ? { ...peer, connected: false, healthy: false, banned: true } : peer)), addressBook: state.addressBook.filter((address) => !bannedPeerIds.includes(address.peerId)) };
 }
 
 /**

@@ -110,7 +110,7 @@ function queryClosest(state: DhtState): DhtState {
 function polluteRoute(state: DhtState): DhtState {
   const pollutedId = pollutedPeerId(state);
   const misleadingPeers = farthest(state.peers.filter((peer) => peer.id !== pollutedId), state.lookupKey, Math.min(state.alpha, state.peers.length - 1)).map((peer) => peer.nodeId);
-  return { ...state, lastTransition: 'pollute', foundValue: false, shortlist: Array.from(new Set([pollutedId].concat(state.shortlist))), peers: state.peers.map((peer) => (peer.id === pollutedId ? { ...peer, polluted: true, closest: true, returnedPeers: misleadingPeers } : peer)) };
+  return { ...state, phaseIndex: 3, lastTransition: 'pollute', foundValue: false, shortlist: Array.from(new Set([pollutedId].concat(state.shortlist))), peers: state.peers.map((peer) => (peer.id === pollutedId ? { ...peer, polluted: true, closest: true, returnedPeers: misleadingPeers } : peer)) };
 }
 
 /**
@@ -118,7 +118,7 @@ function polluteRoute(state: DhtState): DhtState {
  */
 function repairRoute(state: DhtState): DhtState {
   const peers = state.peers.map((peer) => (peer.polluted ? { ...peer, closest: false, inShortlist: false } : peer));
-  const repaired = refreshShortlist({ ...state, peers, shortlist: state.shortlist.filter((id) => !peers.find((peer) => peer.id === id)?.polluted), foundValue: peers.some((peer) => peer.hasValue && peer.queried) }, 'repair');
+  const repaired = refreshShortlist({ ...state, phaseIndex: 4, peers, shortlist: state.shortlist.filter((id) => !peers.find((peer) => peer.id === id)?.polluted), foundValue: peers.some((peer) => peer.hasValue && peer.queried) }, 'repair');
   return queryClosest({ ...repaired, lastTransition: 'repair' });
 }
 

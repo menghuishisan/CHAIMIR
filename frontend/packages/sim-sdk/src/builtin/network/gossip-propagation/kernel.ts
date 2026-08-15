@@ -120,14 +120,14 @@ function converge(state: GossipState): GossipState {
  */
 function polluteGossip(state: GossipState): GossipState {
   const targetId = state.peers.find((peer) => !peer.informed)?.id ?? state.peers[Math.min(2, state.peers.length - 1)]?.id;
-  return { ...state, lastTransition: 'pollute', peers: state.peers.map((peer) => (peer.id === targetId ? { ...peer, polluted: true, informed: true, seenMessageIds: peer.seenMessageIds.concat(pollutedMessageId(state.tick)) } : peer)) };
+  return { ...state, phaseIndex: 2, lastTransition: 'pollute', peers: state.peers.map((peer) => (peer.id === targetId ? { ...peer, polluted: true, informed: true, seenMessageIds: peer.seenMessageIds.concat(pollutedMessageId(state.tick)) } : peer)) };
 }
 
 /**
  * quarantinePollution 隔离污染节点并保留其他节点的已知状态。
  */
 function quarantinePollution(state: GossipState): GossipState {
-  return { ...state, lastTransition: 'dedupe', peers: state.peers.map((peer) => (peer.polluted ? { ...peer, polluted: false, informed: false, activeSender: false, duplicateCount: 0, seenMessageIds: [] } : peer)) };
+  return { ...state, phaseIndex: 3, lastTransition: 'dedupe', peers: state.peers.map((peer) => (peer.polluted ? { ...peer, polluted: false, informed: false, activeSender: false, duplicateCount: 0, seenMessageIds: [] } : peer)) };
 }
 
 /**
