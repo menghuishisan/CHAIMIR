@@ -9,16 +9,8 @@
 
 import { useCallback, useState } from 'react'
 import { useNavigate, useParams } from 'react-router'
-import {
-  Building,
-  Cpu,
-  Gauge,
-  HardDrive,
-  MemoryStick,
-  Save,
-  Timer,
-} from 'lucide-react'
-import { type SandboxQuota, type Tenant } from '@chaimir/api-client'
+import { Building, Cpu, Gauge, MemoryStick, Save } from 'lucide-react'
+import { TenantStatus, type SandboxQuota, type Tenant } from '@chaimir/api-client'
 import {
   Badge,
   Breadcrumb,
@@ -39,6 +31,7 @@ import {
   toast,
 } from '@chaimir/ui'
 import { api } from '../../../../app/api'
+import { TENANT_MODULE_LABELS } from '../../../../utils/labels/identity'
 import { ResourceState } from '../../../../components/ResourceState'
 import { useAsyncResource } from '../../../../hooks'
 import { formatDate, formatDateTime } from '../../../../utils/formatters'
@@ -49,6 +42,7 @@ import {
   tenantStatusTone,
 } from '../../../../utils/labels/identity'
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
+import { readTenantModules } from '../../tenantModules'
 
 /**
  * PlatformSchoolDetailPage 呈现单所学校的平台侧信息与沙箱配额。
@@ -57,7 +51,11 @@ export default function PlatformSchoolDetailPage() {
   const { tenantId = '' } = useParams<{ tenantId: string }>()
   const navigate = useNavigate()
 
-  const tenant = useAsyncResource(() => api.identity.getTenant(tenantId), [tenantId], () => false)
+  const tenant = useAsyncResource(
+    () => api.identity.getTenant(tenantId),
+    [tenantId],
+    () => false
+  )
 
   return (
     <PageScaffold>
@@ -107,25 +105,11 @@ export default function PlatformSchoolDetailPage() {
 function SchoolOverview({ tenant }: { tenant: Tenant }) {
   return (
     <>
-      <PageSection title="服务状态" description="状态与到期时间在学校列表页调整。">
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          <Stat
-            label="当前状态"
-            value={tenantStatusLabel(tenant.status)}
-            icon={Building}
-            hint={tenant.status === 1 ? '师生可正常登录' : '师生登录已被拒绝'}
-          />
-          <Stat
-            label="服务到期"
-            value={tenant.expire_at ? formatDate(tenant.expire_at) : '未设置'}
-            icon={Timer}
-            hint={tenant.expire_at ? '到期后自动停止服务' : '不限期'}
-          />
-          <Stat label="部署形态" value={deployModeLabel(tenant.deploy_mode)} icon={HardDrive} />
-        </div>
-      </PageSection>
-
-      <PageSection title="开通信息" description="学校短名在开通时确定,不能修改。">
+      {/* 状态、到期与部署形态都是租户静态属性,归入开通信息属性表,不占指标位(规范 §6.5) */}
+      <PageSection
+        title="开通信息"
+        description="学校短名在开通时确定,不能修改;状态与到期时间在学校列表页调整。"
+      >
         <div className="flex flex-col gap-4">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div className="min-w-0">
@@ -143,6 +127,20 @@ function SchoolOverview({ tenant }: { tenant: Tenant }) {
           <DescriptionList
             columns={2}
             items={[
+              {
+                term: '服务状态',
+                description:
+                  tenant.status === TenantStatus.ACTIVE
+                    ? `${tenantStatusLabel(tenant.status)} · 师生可正常登录`
+                    : `${tenantStatusLabel(tenant.status)} · 师生登录已被拒绝`,
+              },
+              {
+                term: '服务到期',
+                description: tenant.expire_at
+                  ? `${formatDate(tenant.expire_at)} 到期后自动停止服务`
+                  : '不限期',
+              },
+              { term: '部署形态', description: deployModeLabel(tenant.deploy_mode) },
               { term: '学校短名', description: tenant.code, mono: true },
               { term: '登录方式', description: authModeLabel(tenant.auth_mode) },
               {
@@ -164,35 +162,21 @@ function SchoolOverview({ tenant }: { tenant: Tenant }) {
   )
 }
 
-/** 模块开关在租户配置里的键,与校管端「租户配置」页写入的键一致。 */
-const MODULES_KEY = 'modules'
-
-/** 模块名称登记表:未登记的键不显示,避免把内部标识抛到界面上。 */
-const MODULE_LABELS: Record<string, string> = {
-  teaching: '教学',
-  experiment: '实验',
-  contest: '竞赛',
-  sim: '仿真',
-  grade: '成绩',
-}
-
 /**
  * TenantModuleBadges 展示该校已开启的功能模块。
  * feature_flags 是开放 JSONB,只呈现已登记的模块键;学校没配过就显示默认口径。
  */
 function TenantModuleBadges({ featureFlags }: { featureFlags: Record<string, unknown> }) {
-  const raw = featureFlags[MODULES_KEY]
-  const modules = Array.isArray(raw) ? raw.filter((item): item is string => typeof item === 'string') : []
-  const known = modules.filter((code) => MODULE_LABELS[code] !== undefined)
+  const modules = readTenantModules(featureFlags)
 
-  if (known.length === 0) {
-    return <span className="text-sm text-ink-sub">按平台默认(全部模块可用)</span>
+  if (modules.length === 0) {
+    return <span className="text-sm text-ink-sub">未启用业务模块</span>
   }
   return (
     <span className="flex flex-wrap gap-1">
-      {known.map((code) => (
+      {modules.map((code) => (
         <Badge key={code} tone="jade">
-          {MODULE_LABELS[code]}
+          {TENANT_MODULE_LABELS[code]}
         </Badge>
       ))}
     </span>
@@ -208,7 +192,7 @@ function QuotaSection({ tenantId }: { tenantId: string }) {
   const quota = useAsyncResource(
     () => api.sandbox.getQuota({ tenant_id: tenantId }),
     [tenantId],
-    () => false,
+    () => false
   )
 
   return (
@@ -331,7 +315,7 @@ function QuotaForm({ quota, tenantId, onSaved }: QuotaFormProps) {
         setWorking(false)
       }
     },
-    [onSaved, tenantId, values],
+    [onSaved, tenantId, values]
   )
 
   return (
@@ -381,7 +365,7 @@ function QuotaForm({ quota, tenantId, onSaved }: QuotaFormProps) {
             {formError ? <Callout tone="danger">{formError}</Callout> : null}
 
             <div className="flex items-center gap-2">
-              <Button type="submit" variant="seal" leftIcon={Save} loading={working}>
+              <Button type="submit" variant="primary" leftIcon={Save} loading={working}>
                 保存配额
               </Button>
               <span className="text-sm text-ink-sub">

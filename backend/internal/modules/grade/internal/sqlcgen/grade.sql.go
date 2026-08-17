@@ -153,10 +153,16 @@ const countAcademicWarnings = `-- name: CountAcademicWarnings :one
 SELECT count(*)::bigint
 FROM academic_warning
 WHERE ($1::bigint = 0 OR student_id = $1::bigint)
+  AND ($2::smallint = 0 OR status = $2::smallint)
 `
 
-func (q *Queries) CountAcademicWarnings(ctx context.Context, studentID int64) (int64, error) {
-	row := q.db.QueryRow(ctx, countAcademicWarnings, studentID)
+type CountAcademicWarningsParams struct {
+	StudentID int64 `json:"student_id"`
+	Status    int16 `json:"status"`
+}
+
+func (q *Queries) CountAcademicWarnings(ctx context.Context, arg CountAcademicWarningsParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countAcademicWarnings, arg.StudentID, arg.Status)
 	var column_1 int64
 	err := row.Scan(&column_1)
 	return column_1, err
@@ -671,18 +677,25 @@ const listAcademicWarnings = `-- name: ListAcademicWarnings :many
 SELECT id, tenant_id, student_id, semester_id, type, detail, status, created_at
 FROM academic_warning
 WHERE ($1::bigint = 0 OR student_id = $1::bigint)
+  AND ($2::smallint = 0 OR status = $2::smallint)
 ORDER BY created_at DESC
-LIMIT $3::int OFFSET $2::int
+LIMIT $4::int OFFSET $3::int
 `
 
 type ListAcademicWarningsParams struct {
 	StudentID  int64 `json:"student_id"`
+	Status     int16 `json:"status"`
 	PageOffset int32 `json:"page_offset"`
 	PageLimit  int32 `json:"page_limit"`
 }
 
 func (q *Queries) ListAcademicWarnings(ctx context.Context, arg ListAcademicWarningsParams) ([]AcademicWarning, error) {
-	rows, err := q.db.Query(ctx, listAcademicWarnings, arg.StudentID, arg.PageOffset, arg.PageLimit)
+	rows, err := q.db.Query(ctx, listAcademicWarnings,
+		arg.StudentID,
+		arg.Status,
+		arg.PageOffset,
+		arg.PageLimit,
+	)
 	if err != nil {
 		return nil, err
 	}

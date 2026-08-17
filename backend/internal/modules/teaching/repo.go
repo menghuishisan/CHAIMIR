@@ -64,7 +64,7 @@ type TxStore interface {
 	GetSubmission(context.Context, int64, int64) (Submission, error)
 	GetSubmissionBySourceRef(context.Context, int64, string) (Submission, error)
 	ListJudgeOutboxBySubmission(context.Context, int64, int64) ([]JudgeOutbox, error)
-	ListSubmissionsByAssignment(context.Context, int64, int64, int64, int, int) ([]Submission, int64, error)
+	ListSubmissionsByAssignment(context.Context, SubmissionListQuery) ([]Submission, int64, error)
 	UpdateSubmissionManualGrade(context.Context, int64, int64, int32, int32, string) (Submission, error)
 	UpdateSubmissionJudgeRef(context.Context, int64, int64, string) (Submission, error)
 	UpdateSubmissionAutoScore(context.Context, int64, int64, int32, int32) (Submission, error)
@@ -112,6 +112,18 @@ type contractsStats struct {
 	CourseCount         int64
 	ActiveCourseCount   int64
 	LearningDurationSec int64
+}
+
+// SubmissionListQuery 描述作业提交列表的过滤与分页字段。
+// StudentID 传 0 回全部学生提交(授课教师批改视角),传具体学生只回其本人提交;
+// Status 传 0 表示不按批改状态过滤。
+type SubmissionListQuery struct {
+	TenantID     int64
+	AssignmentID int64
+	StudentID    int64
+	Status       int16
+	Page         int
+	Size         int
 }
 
 type store struct{ database *db.DB }

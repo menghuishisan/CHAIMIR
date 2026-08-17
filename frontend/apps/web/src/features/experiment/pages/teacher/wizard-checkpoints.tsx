@@ -414,7 +414,7 @@ function CheckpointFormModal({
           <Button variant="outline" onClick={onClose}>
             取消
           </Button>
-          <Button variant="seal" onClick={submit}>
+          <Button variant="primary" onClick={submit}>
             {editing ? '保存检查点' : '添加检查点'}
           </Button>
         </ModalFooter>

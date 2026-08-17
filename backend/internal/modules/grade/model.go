@@ -1,11 +1,7 @@
-// grade model 文件定义 M11 成绩中心领域模型和响应视图。
+// grade model 文件定义 M11 成绩中心领域模型和内部 outbox 载荷。
 package grade
 
-import (
-	"time"
-
-	"chaimir/internal/platform/ids"
-)
+import "chaimir/internal/platform/ids"
 
 // LevelRule 是分数到等级和绩点的映射规则。
 type LevelRule struct {
@@ -26,17 +22,6 @@ type CourseGradeInput struct {
 	StudentID  ids.ID  `json:"student_id"`
 	FinalTotal float64 `json:"final_total"`
 	Credits    float64 `json:"credits"`
-}
-
-// GradeSummaryDTO 是学生成绩聚合响应。
-type GradeSummaryDTO struct {
-	StudentID     ids.ID             `json:"student_id"`
-	SemesterID    ids.ID             `json:"semester_id,omitempty"`
-	TotalCredits  float64            `json:"total_credits"`
-	GPA           float64            `json:"gpa"`
-	CumulativeGPA float64            `json:"cumulative_gpa"`
-	CourseGrades  []CourseGradeInput `json:"course_grades"`
-	ComputedAt    time.Time          `json:"computed_at"`
 }
 
 // GradeLockOutbox 是成绩锁定事件的生产者 outbox 记录。

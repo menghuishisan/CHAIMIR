@@ -185,7 +185,13 @@ export function pbftViewChangeCheckpoint(state: PbftState): CheckpointResult {
   return {
     achieved,
     answer: { view: state.view, viewChangeMessages: state.viewChanges.length, quorum: quorum(state) },
-    explanation: state.viewChanges.length >= quorum(state) ? '视图切换消息达到法定人数,新主节点已经安装安全视图。' : '当前还没有收集足够视图切换消息。',
+    // 说明必须跟着 achieved 走:票数够了但视图还没换过(view 仍为 0)时说「新主节点已安装」,
+    // 会与「尚未出现」的结论相互打脸。
+    explanation: achieved
+      ? '视图切换消息达到法定人数,新主节点已经安装安全视图。'
+      : state.viewChanges.length >= quorum(state)
+        ? '视图切换消息已达法定人数,但视图还没真正切换过去。'
+        : '当前还没有收集足够视图切换消息。',
   };
 }
 

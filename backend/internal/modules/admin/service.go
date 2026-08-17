@@ -5,11 +5,11 @@ import (
 	"bytes"
 	"context"
 	"encoding/csv"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
 	"strings"
-	"time"
 
 	"chaimir/internal/contracts"
 	"chaimir/internal/platform/audit"
@@ -158,7 +158,11 @@ func (s *Service) SchoolDashboard(ctx context.Context) (DashboardDTO, error) {
 		return DashboardDTO{}, apperr.ErrAdminDashboardSandboxFailed.WithCause(err)
 	}
 	out.ActiveSandboxCount = q.ActiveSandboxCount
-	out.ResourceQuotaSnapshot = map[string]any{"max_concurrent_sandbox": q.MaxConcurrentSandbox, "max_cpu": q.MaxCPU, "max_memory_mb": q.MaxMemoryMB}
+	out.ResourceQuotaSnapshot = &ResourceQuotaSnapshotDTO{
+		MaxConcurrentSandbox: int64(q.MaxConcurrentSandbox),
+		MaxCPU:               int64(q.MaxCPU),
+		MaxMemoryMB:          int64(q.MaxMemoryMB),
+	}
 	return out, nil
 }
 
@@ -270,7 +274,7 @@ func (s *Service) ExportAuditCSV(ctx context.Context, query contracts.AuditQuery
 		AllowPlatformScope: id.IsPlatform,
 		Module:             "transfer",
 		ResourceType:       string(transfer.ChannelExport),
-		ResourceID:         fmt.Sprint(task.TaskID),
+		ResourceID:         ids.Format(task.TaskID),
 		FileName:           fileName,
 		ContentType:        "text/csv; charset=utf-8",
 		Size:               int64(len(data)),
@@ -325,7 +329,7 @@ func auditCSVBytes(result contracts.AuditQueryResult) ([]byte, error) {
 		return nil, fmt.Errorf("写入 CSV 表头失败: %w", err)
 	}
 	for _, row := range result.List {
-		if err := w.Write([]string{fmt.Sprint(row.ID), fmt.Sprint(row.TenantID), fmt.Sprint(row.ActorID), row.Action, row.TargetType, fmt.Sprint(row.TargetID), row.TraceID, row.CreatedAt.Format(time.RFC3339)}); err != nil {
+		if err := w.Write([]string{ids.Format(row.ID), ids.Format(row.TenantID), ids.Format(row.ActorID), row.Action, row.TargetType, ids.Format(row.TargetID), row.TraceID, timex.RFC3339OrEmpty(row.CreatedAt)}); err != nil {
 			return nil, fmt.Errorf("写入 CSV 行失败: %w", err)
 		}
 	}
@@ -620,20 +624,19 @@ func (s *Service) HandleAlertEvent(ctx context.Context, eventID int64, req Alert
 	}
 	if out.TenantID > 0 {
 		// 告警推送为提交后即时通知,统一走异步事件由 M10 兜底投递,失败不回滚已处理的告警事件。
-		evt := contracts.NotifyPushRequestedEvent{
-			TenantID: out.TenantID.Int64(),
-			TraceID:  response.TraceFromContext(ctx),
-			Topic:    fmt.Sprintf("tenant:%d:alert", out.TenantID),
-			Payload: map[string]any{
-				"event_id":   out.ID,
-				"rule_id":    out.RuleID,
-				"level":      out.Level,
-				"status":     out.Status,
-				"handler_id": out.HandlerID,
-			},
-		}
-		if pubErr := s.bus.Publish(ctx, contracts.SubjectNotifyPushRequested, evt); pubErr != nil {
-			logging.ErrorContext(ctx, "admin alert notify publish failed", pubErr.Error(), slog.Int64("tenant_id", out.TenantID.Int64()), slog.Int64("alert_event_id", out.ID.Int64()))
+		payload, marshalErr := json.Marshal(AlertEventPushDTO{EventID: out.ID, RuleID: out.RuleID, Level: out.Level, Status: out.Status, HandlerID: out.HandlerID})
+		if marshalErr != nil {
+			logging.ErrorContext(ctx, "admin alert notify serialization failed", marshalErr.Error(), slog.Int64("tenant_id", out.TenantID.Int64()), slog.Int64("alert_event_id", out.ID.Int64()))
+		} else {
+			evt := contracts.NotifyPushRequestedEvent{
+				TenantID: out.TenantID.Int64(),
+				TraceID:  response.TraceFromContext(ctx),
+				Topic:    "tenant:" + ids.Format(out.TenantID.Int64()) + ":alert",
+				Payload:  payload,
+			}
+			if pubErr := s.bus.Publish(ctx, contracts.SubjectNotifyPushRequested, evt); pubErr != nil {
+				logging.ErrorContext(ctx, "admin alert notify publish failed", pubErr.Error(), slog.Int64("tenant_id", out.TenantID.Int64()), slog.Int64("alert_event_id", out.ID.Int64()))
+			}
 		}
 	}
 	if err := s.writeAudit(ctx, id, "admin.alert.handle", "alert_event", out.ID.Int64(), map[string]any{"status": out.Status}); err != nil {
@@ -650,15 +653,15 @@ func (s *Service) MonitoringPanels(ctx context.Context) ([]MonitoringPanel, erro
 	return ParseMonitoringPanels(s.monitoring.PanelsJSON)
 }
 
-// ListBackups 查询备份记录。
-func (s *Service) ListBackups(ctx context.Context, page, size int) ([]BackupRecordDTO, int64, int, int, error) {
+// ListBackups 查询备份记录;status 传 0 表示不按结果过滤。
+func (s *Service) ListBackups(ctx context.Context, status int16, page, size int) ([]BackupRecordDTO, int64, int, int, error) {
 	if _, err := requirePlatform(ctx); err != nil {
 		return nil, 0, page, size, err
 	}
 	page, size = pagex.Normalize(page, size)
 	var total int64
 	rows, err := runAdminRead(ctx, s.store, 0, func(ctx context.Context, tx TxStore) ([]BackupRecordDTO, error) {
-		out, count, err := tx.ListBackupRecords(ctx, page, size)
+		out, count, err := tx.ListBackupRecords(ctx, status, page, size)
 		total = count
 		return out, err
 	})
@@ -734,7 +737,7 @@ func validateAlertRule(req AlertRuleRequest) error {
 	if err := validateScopeTenant(req.Scope, req.TenantID.Int64()); err != nil {
 		return apperr.ErrAdminAlertInvalid
 	}
-	if strings.TrimSpace(req.Name) == "" || strings.TrimSpace(req.Metric) == "" || req.Level < 1 || req.Level > 4 {
+	if strings.TrimSpace(req.Name) == "" || strings.TrimSpace(req.Metric) == "" || req.Level < AlertLevelNotice || req.Level > AlertLevelCritical {
 		return apperr.ErrAdminAlertInvalid
 	}
 	return nil

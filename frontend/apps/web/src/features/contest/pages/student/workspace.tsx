@@ -39,7 +39,7 @@ import {
 } from '@chaimir/ui'
 import { api } from '../../../../app/api'
 import { AppStatusScreen } from '../../../../components/AppStatusScreen'
-import { SandboxIdeWorkspace } from '../../../../components/SandboxIdeWorkspace'
+import { SandboxIdeWorkspace } from '../../../sandbox/SandboxIdeWorkspace'
 import { useSession } from '../../../../components/RoleGuard'
 import { useAsyncResource, useTicketedWebSocket } from '../../../../hooks'
 import { useImmersive } from '../../../../layouts/immersive/context'
@@ -47,7 +47,7 @@ import { formatDateTime } from '../../../../utils/formatters'
 import { battleRoleLabel, contestStatusLabel, isContestLeaderboardFrozen } from '../../../../utils/labels/contest'
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
 
-/** 题面与对抗配置里的键:与题库正文、教师赛题编排写入的键一致。 */
+/** 题面开放载荷里的键:与题库正文写入的键一致。 */
 const FACE_KEYS = {
   scenario: 'scenario',
   statement: 'statement',
@@ -55,12 +55,6 @@ const FACE_KEYS = {
   runtimeCode: 'runtime_code',
   tools: 'tools',
   submitKey: 'submit_key',
-} as const
-
-const BATTLE_KEYS = {
-  runtimeCode: 'runtime_code',
-  runtimeImageVersion: 'runtime_image_version',
-  toolCodes: 'tool_codes',
 } as const
 
 /** 参战角色:攻防题分攻守,博弈题只有策略方。 */
@@ -88,6 +82,7 @@ export default function StudentContestWorkspacePage() {
     return (
       <AppStatusScreen
         icon={TriangleAlert}
+        tone="danger"
         title="进不去这场比赛"
         description={contest.error?.message}
         traceId={contest.error?.traceId}
@@ -270,6 +265,7 @@ function ContestWorkbench({ contest, problems }: ContestWorkbenchProps) {
 
   return (
     <WorkbenchShell
+      workbench="contest"
       topbar={
         <WorkbenchTopbar
           onExit={exit}
@@ -336,7 +332,8 @@ function ContestWorkbench({ contest, problems }: ContestWorkbenchProps) {
         />
       }
       right={
-        <div className="flex flex-col">
+        // 壳不给槽位套滚动(主舞台永不滚动,规范 §7.1),这一栏的两块内容自己滚
+        <div className="flex h-full min-h-0 flex-col overflow-y-auto">
           {spec.kind === 'battle' ? (
             <BattlePanel
               role={role}
@@ -359,7 +356,7 @@ function ContestWorkbench({ contest, problems }: ContestWorkbenchProps) {
         <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 px-4 py-2">
           <div className="flex min-w-0 flex-col">
             <span className="flex flex-wrap items-center gap-2 text-xs text-on-dark-sub">
-              <Badge tone={answerable ? 'jade' : 'neutral'}>{contestStatusLabel(contest.status)}</Badge>
+              <Badge onDark tone={answerable ? 'jade' : 'neutral'}>{contestStatusLabel(contest.status)}</Badge>
               <span className="font-mono tabular-nums">本题 {problem.score} 分</span>
               {codeRef ? <span>代码已保存</span> : null}
             </span>
@@ -409,13 +406,13 @@ function problemSpec(problem: ContestProblem): ProblemSpec {
   }
 
   if (problem.battle_rule !== undefined) {
-    const config = problem.battle_config ?? {}
+    const config = problem.battle_config
     return {
       ...base,
       kind: 'battle',
-      runtimeCode: readString(config, BATTLE_KEYS.runtimeCode) || undefined,
-      runtimeImageVersion: readString(config, BATTLE_KEYS.runtimeImageVersion),
-      toolCodes: readStringArray(config, BATTLE_KEYS.toolCodes),
+      runtimeCode: config?.runtime_code || undefined,
+      runtimeImageVersion: config?.runtime_image_version ?? '',
+      toolCodes: config?.tool_codes ?? [],
     }
   }
 
@@ -444,7 +441,7 @@ interface ProblemBriefProps {
  */
 function ProblemBrief({ problems, currentId, onPick, spec }: ProblemBriefProps) {
   return (
-    <div className="flex flex-col gap-4 p-4">
+    <div className="flex h-full min-h-0 flex-col gap-4 overflow-y-auto p-4">
       <section className="flex flex-col gap-2">
         <h2 className="text-sm font-medium text-on-dark">赛题</h2>
         <ul className="flex flex-col gap-1">
@@ -552,7 +549,7 @@ function ProblemStage({
         <p className="max-w-md text-sm text-on-dark-sub">
           环境按题目指定的链运行时准备,起好后可以写代码、开终端、做链上操作。
         </p>
-        <Button variant="seal" loading={busy} disabled={!answerable} onClick={onCreateEnv}>
+        <Button variant="primary" loading={busy} disabled={!answerable} onClick={onCreateEnv}>
           准备实操环境
         </Button>
         {!spec.runtimeCode ? (
@@ -584,7 +581,7 @@ function SubmissionPanel({
       {submission ? (
         <div className="flex flex-col gap-2 rounded-md border border-dark-line bg-dark-surface p-2">
           <div className="flex items-center justify-between gap-2">
-            <Badge tone={submission.passed ? 'success' : 'neutral'}>
+            <Badge onDark tone={submission.passed ? 'success' : 'neutral'}>
               {submission.passed ? '已通过' : '判定中或未通过'}
             </Badge>
             <span className="font-mono text-xs tabular-nums text-on-dark-sub">
@@ -654,7 +651,7 @@ function BattlePanel({ role, onRoleChange, entries, onOpenReplay }: BattlePanelP
                 <span className="min-w-0 truncate text-xs text-on-dark">
                   第 {entry.version_no} 版 · {battleRoleLabel(entry.role)}
                 </span>
-                {entry.is_active ? <Badge tone="jade">生效中</Badge> : null}
+                {entry.is_active ? <Badge onDark tone="jade">生效中</Badge> : null}
               </li>
             ))}
           </ul>
@@ -683,12 +680,12 @@ function LadderPanel({ ranks, live, frozen }: LadderPanelProps) {
   return (
     <section className="flex flex-col gap-2 p-4">
       <div className="flex flex-wrap items-center gap-2">
-        <Trophy aria-hidden="true" className="size-4 text-on-dark-accent" />
+        <Trophy aria-hidden="true" className="size-4 text-accent" />
         <h2 className="text-sm font-medium text-on-dark">天梯前列</h2>
         {frozen ? (
-          <Badge tone="warning">封榜中</Badge>
+          <Badge onDark tone="warning">封榜中</Badge>
         ) : live ? (
-          <Badge tone="jade">实时</Badge>
+          <Badge onDark tone="jade">实时</Badge>
         ) : null}
       </div>
       {ranks.length === 0 ? (

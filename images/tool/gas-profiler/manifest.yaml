@@ -34,8 +34,8 @@ tool:
     - sleep
     - "2147483647"
   command_policy:
-    allowed_commands:
-      - gas-profiler
+    allowed_argv:
+      - ["gas-profiler"]
     default_timeout_seconds: 60
     max_timeout_seconds: 180
 ports: []

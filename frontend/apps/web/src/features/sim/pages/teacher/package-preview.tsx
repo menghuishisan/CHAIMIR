@@ -8,7 +8,13 @@
 // 教师只看自己提交的包(后端 PackagePreview 校验作者归属),本页不含任何审核决策动作。
 
 import { CircleCheck, FileSearch, ShieldAlert } from 'lucide-react'
-import type { SimPackageMeta, SimPackageReview, SimValidationStatus } from '@chaimir/api-client'
+import {
+  SIM_VALIDATION_STATUS,
+  type SimPackageMeta,
+  type SimPackageReview,
+  type SimValidationStatus,
+  type SimValidationStatusValue,
+} from '@chaimir/api-client'
 import {
   Badge,
   Button,
@@ -40,16 +46,16 @@ const CHECK_LABELS = {
 } as const
 
 /** 后端校验状态取值只有 passed / failed 两种(enum.go),其余视为尚未执行。 */
-function checkTone(status: string | undefined): StatusTone {
-  if (status === 'passed') return 'success'
-  if (status === 'failed') return 'danger'
+function checkTone(status: SimValidationStatusValue | undefined): StatusTone {
+  if (status === SIM_VALIDATION_STATUS.PASSED) return 'success'
+  if (status === SIM_VALIDATION_STATUS.FAILED) return 'danger'
   return 'neutral'
 }
 
 /** checkLabel 把校验状态翻成用户向文案。 */
-function checkLabel(status: string | undefined): string {
-  if (status === 'passed') return '通过'
-  if (status === 'failed') return '未通过'
+function checkLabel(status: SimValidationStatusValue | undefined): string {
+  if (status === SIM_VALIDATION_STATUS.PASSED) return '通过'
+  if (status === SIM_VALIDATION_STATUS.FAILED) return '未通过'
   return '尚未执行'
 }
 
@@ -62,7 +68,11 @@ export interface SimPackagePreviewModalProps {
  * SimPackagePreviewModal 展示单个场景包的最新审核报告。
  */
 export function SimPackagePreviewModal({ item, onClose }: SimPackagePreviewModalProps) {
-  const preview = useAsyncResource(() => api.sim.previewPackage(item.id), [item.id], () => false)
+  const preview = useAsyncResource(
+    () => api.sim.previewPackage(item.id),
+    [item.id],
+    () => false
+  )
 
   return (
     <Modal open onOpenChange={(open) => !open && onClose()}>
@@ -106,7 +116,10 @@ function PreviewBody({ review }: { review: SimPackageReview }) {
   return (
     <ModalBody className="flex flex-col gap-4">
       <div className="flex flex-wrap items-center gap-2">
-        <StatusIndicator tone={simReviewResultTone(review.result)} label={simReviewResultLabel(review.result)} />
+        <StatusIndicator
+          tone={simReviewResultTone(review.result)}
+          label={simReviewResultLabel(review.result)}
+        />
         <span className="font-mono text-xs tabular-nums text-ink-sub">
           提交于 {formatDateTime(review.created_at)}
         </span>
@@ -170,13 +183,13 @@ interface CheckRowProps {
  */
 function CheckRow({ label, status, extra }: CheckRowProps) {
   return (
-    <div className="flex flex-col gap-1.5 rounded-md border border-line p-3">
+    <div className="flex flex-col gap-1.5 well p-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <span className="text-sm text-ink">{label}</span>
         <StatusIndicator
           tone={checkTone(status?.status)}
           label={checkLabel(status?.status)}
-          icon={status?.status === 'passed' ? CircleCheck : undefined}
+          icon={status?.status === SIM_VALIDATION_STATUS.PASSED ? CircleCheck : undefined}
         />
       </div>
       {status?.message ? <p className="text-xs text-ink-sub">{status.message}</p> : null}

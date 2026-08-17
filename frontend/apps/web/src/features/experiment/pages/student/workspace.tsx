@@ -24,6 +24,7 @@ import {
   TriangleAlert,
 } from 'lucide-react'
 import {
+  EXPERIMENT_STAGE_STATUS,
   ExperimentInstanceStatus,
   type ExperimentInstance,
   type SandboxRef,
@@ -48,12 +49,10 @@ import {
 } from '@chaimir/ui'
 import { api } from '../../../../app/api'
 import { AppStatusScreen } from '../../../../components/AppStatusScreen'
-import { SandboxIdeWorkspace } from '../../../../components/SandboxIdeWorkspace'
+import { SandboxIdeWorkspace } from '../../../sandbox/SandboxIdeWorkspace'
 import { useTicketedWebSocket } from '../../../../hooks'
 import { useImmersive } from '../../../../layouts/immersive/context'
-import {
-  experimentInstanceStatusLabel,
-} from '../../../../utils/labels/experiment'
+import { experimentInstanceStatusLabel } from '../../../../utils/labels/experiment'
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
 import { BlockIncubator, type WorkspaceCodeRef } from './block-incubator'
 
@@ -99,7 +98,7 @@ export default function StudentExperimentWorkspacePage() {
           next.set(INSTANCE_PARAM, created.instance_id)
           return next
         },
-        { replace: true },
+        { replace: true }
       )
     } catch (error) {
       setFatalError(userFacingErrorMessage(error, '实验环境没能打开,请退出后重试。'))
@@ -125,6 +124,7 @@ export default function StudentExperimentWorkspacePage() {
     return (
       <AppStatusScreen
         icon={TriangleAlert}
+        tone="danger"
         title="实验环境没能打开"
         description={fatalError}
         fullScreen={false}
@@ -197,20 +197,23 @@ function ExperimentWorkbench({
 
   // 当前阶段:后端把活跃阶段标成 active;没有分阶段的实验就只有一组资源
   const activeStage = useMemo(
-    () => stages.find((stage) => stage.status === 'active')?.stage,
-    [stages],
+    () => stages.find((stage) => stage.status === EXPERIMENT_STAGE_STATUS.ACTIVE)?.stage,
+    [stages]
   )
 
   // 只呈现当前阶段的资源:老师按阶段编排环境,把全部阶段的沙箱一起摊出来会让人点错
   const sandboxes = useMemo(
     () => filterByStage(instance.sandboxes, activeStage),
-    [activeStage, instance.sandboxes],
+    [activeStage, instance.sandboxes]
   )
-  const sims = useMemo(() => filterByStage(instance.sims, activeStage), [activeStage, instance.sims])
+  const sims = useMemo(
+    () => filterByStage(instance.sims, activeStage),
+    [activeStage, instance.sims]
+  )
 
   const currentSandbox = useMemo(
     () => sandboxes.find((item) => item.sandbox_id === activeSandboxId) ?? sandboxes[0],
-    [activeSandboxId, sandboxes],
+    [activeSandboxId, sandboxes]
   )
 
   // 进度订阅:topic 由实例给出,连的是 M10 统一业务 WS;推送只当刷新信号
@@ -231,12 +234,16 @@ function ExperimentWorkbench({
     }
   }, [instance.instance_id])
 
-  const eventUrl = useMemo(() => (progressTopic ? api.eventWebSocketUrl() : undefined), [progressTopic])
+  const eventUrl = useMemo(
+    () => (progressTopic ? api.eventWebSocketUrl() : undefined),
+    [progressTopic]
+  )
 
   const socket = useTicketedWebSocket({
     url: eventUrl,
     onOpen: () => {
-      if (progressTopic) socket.send(JSON.stringify({ action: 'subscribe', topics: [progressTopic] }))
+      if (progressTopic)
+        socket.send(JSON.stringify({ action: 'subscribe', topics: [progressTopic] }))
     },
     onMessage: (data) => {
       // 推送内容只用来判断「是不是该刷新了」,状态一律回实例读
@@ -255,7 +262,11 @@ function ExperimentWorkbench({
         if (action === 'resume') await api.experiment.resumeInstance(instance.instance_id)
         if (action === 'finish') await api.experiment.finishInstance(instance.instance_id)
         toast.success(
-          action === 'pause' ? '实验已暂停,环境保留' : action === 'resume' ? '实验已恢复' : '实验已完成',
+          action === 'pause'
+            ? '实验已暂停,环境保留'
+            : action === 'resume'
+              ? '实验已恢复'
+              : '实验已完成'
         )
         onReload()
       } catch (error) {
@@ -264,7 +275,7 @@ function ExperimentWorkbench({
         setBusy(false)
       }
     },
-    [instance.instance_id, onReload],
+    [instance.instance_id, onReload]
   )
 
   /** activateStage 激活已解锁阶段:阶段切换会带出该阶段的环境与仿真。 */
@@ -283,7 +294,7 @@ function ExperimentWorkbench({
         setBusy(false)
       }
     },
-    [instance.instance_id, onReload],
+    [instance.instance_id, onReload]
   )
 
   const paused = instance.status === ExperimentInstanceStatus.PAUSED
@@ -297,6 +308,7 @@ function ExperimentWorkbench({
   return (
     <>
       <WorkbenchShell
+        workbench="experiment"
         topbar={
           <WorkbenchTopbar
             onExit={onExit}
@@ -381,7 +393,7 @@ function ExperimentWorkbench({
           <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 px-4 py-2">
             <div className="flex min-w-0 flex-col">
               <span className="flex flex-wrap items-center gap-2 text-xs text-on-dark-sub">
-                <Badge tone={paused ? 'warning' : finished ? 'neutral' : 'jade'}>
+                <Badge onDark tone={paused ? 'warning' : finished ? 'neutral' : 'jade'}>
                   {experimentInstanceStatusLabel(instance.status)}
                 </Badge>
                 <span className="font-mono tabular-nums">当前得分 {instance.score}</span>
@@ -464,10 +476,10 @@ function ExperimentBrief({
   onPickSandbox,
 }: ExperimentBriefProps) {
   return (
-    <div className="flex flex-col gap-4 p-4">
+    <div className="flex h-full min-h-0 flex-col gap-4 overflow-y-auto p-4">
       <section className="flex flex-col gap-2">
         <div className="flex items-center gap-2">
-          <FlaskConical aria-hidden="true" className="size-4 text-on-dark-accent" />
+          <FlaskConical aria-hidden="true" className="size-4 text-accent" />
           <h2 className="text-sm font-medium text-on-dark">实验说明</h2>
         </div>
         <p className="whitespace-pre-wrap text-xs leading-relaxed text-on-dark-sub">

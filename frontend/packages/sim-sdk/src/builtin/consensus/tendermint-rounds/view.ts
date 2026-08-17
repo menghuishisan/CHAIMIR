@@ -18,7 +18,6 @@ export function renderTendermintRoundsView(state: TendermintRoundsState): Teachi
       intent: state.timeout ? 'recover' : state.phaseIndex >= 2 ? 'verify' : 'observe',
       what: state.explanation.effect,
       why: state.explanation.reason,
-      watch: summary,
     },
     focus: {
       primary: selectedOrFrameFocus(state.selectedElementId, [state.proposal?.id ?? 'tendermint-lane']),

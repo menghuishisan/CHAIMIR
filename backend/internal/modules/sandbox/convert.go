@@ -74,19 +74,19 @@ func sandboxCapabilitiesFromModel(runtime Runtime, tools []SandboxTool, register
 		}
 	}
 	key := strings.TrimSpace(runtime.CapabilityImpl)
-	if runtime.AdapterLevel == 3 {
+	if runtime.AdapterLevel == RuntimeAdapterLevelPlugin {
 		key = strings.TrimSpace(runtime.PluginRef)
 	}
 	if registered[key] == nil {
 		return out
 	}
-	if runtime.AdapterLevel == 3 || len(runtime.AdapterSpec.CapabilityCommands.Deploy.Command) > 0 {
+	if runtime.AdapterLevel == RuntimeAdapterLevelPlugin || len(runtime.AdapterSpec.CapabilityCommands.Deploy.Command) > 0 {
 		out.ChainOperations = append(out.ChainOperations, "deploy")
 	}
-	if runtime.AdapterLevel == 3 || len(runtime.AdapterSpec.CapabilityCommands.Tx.Command) > 0 {
+	if runtime.AdapterLevel == RuntimeAdapterLevelPlugin || len(runtime.AdapterSpec.CapabilityCommands.Tx.Command) > 0 {
 		out.ChainOperations = append(out.ChainOperations, "transaction")
 	}
-	if runtime.AdapterLevel == 3 || len(runtime.AdapterSpec.CapabilityCommands.Query.Command) > 0 {
+	if runtime.AdapterLevel == RuntimeAdapterLevelPlugin || len(runtime.AdapterSpec.CapabilityCommands.Query.Command) > 0 {
 		out.ChainOperations = append(out.ChainOperations, "query")
 	}
 	return out

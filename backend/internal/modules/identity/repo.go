@@ -4,11 +4,11 @@ package identity
 import (
 	"context"
 	"fmt"
-	"strconv"
 	"time"
 
 	"chaimir/internal/modules/identity/internal/sqlcgen"
 	"chaimir/internal/platform/db"
+	"chaimir/internal/platform/ids"
 
 	"github.com/jackc/pgx/v5"
 )
@@ -30,7 +30,7 @@ type TxStore interface {
 	GetTenantByCode(ctx context.Context, code string) (Tenant, error)
 	GetTenantByID(ctx context.Context, id int64) (Tenant, error)
 	ListAllTenants(ctx context.Context) ([]Tenant, error)
-	ListTenants(ctx context.Context, page, size int) ([]Tenant, int64, error)
+	ListTenants(ctx context.Context, query TenantListQuery) ([]Tenant, int64, error)
 	CreateTenant(ctx context.Context, input CreateTenantInput) (Tenant, error)
 	CreateTenantProvisionOutbox(ctx context.Context, item TenantProvisionOutbox) (TenantProvisionOutbox, error)
 	ClaimTenantProvisionOutbox(ctx context.Context, limit int32, staleBefore time.Time) ([]TenantProvisionOutbox, error)
@@ -141,7 +141,7 @@ func (t *txStore) UseTenant(ctx context.Context, tenantID int64) error {
 	if tenantID <= 0 {
 		return fmt.Errorf("tenant_id 必须大于 0")
 	}
-	if _, err := t.tx.Exec(ctx, "SELECT set_config('app.tenant_id', $1, true)", strconv.FormatInt(tenantID, 10)); err != nil {
+	if _, err := t.tx.Exec(ctx, "SELECT set_config('app.tenant_id', $1, true)", ids.Format(tenantID)); err != nil {
 		return fmt.Errorf("注入 app.tenant_id 失败: %w", err)
 	}
 	return nil

@@ -136,8 +136,12 @@ WHERE t.tenant_id = $1
   AND ($2::text = '' OR t.source_ref = $2)
   AND ($3::boolean = false OR (t.status = 2 AND j.type = 6))
   AND ($4::bigint = 0 OR t.source_owner_id = $4 OR t.submitter_id = $4)
+  -- state 取运维分组:active=排队/执行中(1,2),abnormal=超时/失败/出错(4,5,6),空串不筛
+  AND (sqlc.arg(state)::text = ''
+       OR (sqlc.arg(state)::text = 'active' AND t.status IN (1, 2))
+       OR (sqlc.arg(state)::text = 'abnormal' AND t.status IN (4, 5, 6)))
 ORDER BY t.created_at DESC, t.id DESC
-LIMIT $5 OFFSET $6;
+LIMIT sqlc.arg(page_limit)::int OFFSET sqlc.arg(page_offset)::int;
 
 -- name: CountJudgeTasks :one
 SELECT COUNT(*)::bigint
@@ -146,7 +150,11 @@ JOIN judger ON judger.id = judge_task.judger_id
 WHERE judge_task.tenant_id = $1
   AND ($2::text = '' OR judge_task.source_ref = $2)
   AND ($3::boolean = false OR (judge_task.status = 2 AND judger.type = 6))
-  AND ($4::bigint = 0 OR judge_task.source_owner_id = $4 OR judge_task.submitter_id = $4);
+  AND ($4::bigint = 0 OR judge_task.source_owner_id = $4 OR judge_task.submitter_id = $4)
+  -- state 与列表逐字同口径,否则指标带与分页会自相矛盾
+  AND (sqlc.arg(state)::text = ''
+       OR (sqlc.arg(state)::text = 'active' AND judge_task.status IN (1, 2))
+       OR (sqlc.arg(state)::text = 'abnormal' AND judge_task.status IN (4, 5, 6)));
 
 -- name: CancelQueuedJudgeTask :one
 UPDATE judge_task

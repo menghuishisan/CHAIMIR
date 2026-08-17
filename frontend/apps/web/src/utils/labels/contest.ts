@@ -17,6 +17,7 @@ import {
   VulnPrevalidateStatus,
   VulnProblemStatus,
   VulnRuntimeMode,
+  VulnSourceType,
 } from '@chaimir/api-client'
 
 const CONTEST_STATUS_LABELS: Record<ContestStatus, string> = {
@@ -173,7 +174,11 @@ export function cheatTypeLabel(type: CheatType): string {
 }
 
 /** CHEAT_TYPES 供违规处理表单按登记顺序渲染类型选项。 */
-export const CHEAT_TYPES = [CheatType.SIMILARITY, CheatType.BEHAVIOR, CheatType.ENVIRONMENT] as const
+export const CHEAT_TYPES = [
+  CheatType.SIMILARITY,
+  CheatType.BEHAVIOR,
+  CheatType.ENVIRONMENT,
+] as const
 
 const CHEAT_ACTION_LABELS: Record<CheatAction, string> = {
   [CheatAction.WARN]: '警告',
@@ -198,26 +203,32 @@ export function cheatActionTone(action: CheatAction): BadgeTone {
 }
 
 /** CHEAT_ACTIONS 供违规处理表单按登记顺序渲染处理方式选项。 */
-export const CHEAT_ACTIONS = [CheatAction.WARN, CheatAction.PENALTY, CheatAction.DISQUALIFY] as const
+export const CHEAT_ACTIONS = [
+  CheatAction.WARN,
+  CheatAction.PENALTY,
+  CheatAction.DISQUALIFY,
+] as const
 
 /**
  * 漏洞源类型文案(数据模型 §6.2:1 SWC / 2 漏洞情报 / 3 CVE 链上事件)。
  * 这是封闭枚举而非开放字符串,故用 Record 而不做兜底。
  */
-const VULN_SOURCE_TYPE_LABELS = {
-  1: '合约弱点分类库',
-  2: '公开漏洞情报',
-  3: 'CVE 与链上事件',
-} as const
-
-export type VulnSourceType = keyof typeof VULN_SOURCE_TYPE_LABELS
+const VULN_SOURCE_TYPE_LABELS: Record<VulnSourceType, string> = {
+  [VulnSourceType.SWC]: '合约弱点分类库',
+  [VulnSourceType.INTELLIGENCE]: '公开漏洞情报',
+  [VulnSourceType.CVE_ONCHAIN]: 'CVE 与链上事件',
+}
 
 /** VULN_SOURCE_TYPES 供漏洞源表单按登记顺序渲染类型选项。 */
-export const VULN_SOURCE_TYPES = [1, 2, 3] as const satisfies readonly VulnSourceType[]
+export const VULN_SOURCE_TYPES = [
+  VulnSourceType.SWC,
+  VulnSourceType.INTELLIGENCE,
+  VulnSourceType.CVE_ONCHAIN,
+] as const satisfies readonly VulnSourceType[]
 
 /** vulnSourceTypeLabel 返回漏洞源类型文案;未登记类型给通用名,不暴露裸数字。 */
-export function vulnSourceTypeLabel(type: number): string {
-  return VULN_SOURCE_TYPE_LABELS[type as VulnSourceType] ?? '其他来源'
+export function vulnSourceTypeLabel(type: VulnSourceType): string {
+  return VULN_SOURCE_TYPE_LABELS[type]
 }
 
 const VULN_LEVEL_LABELS: Record<VulnLevel, string> = {
@@ -334,7 +345,12 @@ const VULN_CHAIN_OP_LABELS = {
 export type VulnChainOp = keyof typeof VULN_CHAIN_OP_LABELS
 
 /** VULN_CHAIN_OPS 供步骤表单按后端支持顺序渲染操作选项。 */
-export const VULN_CHAIN_OPS = ['deploy', 'tx', 'reset', 'query'] as const satisfies readonly VulnChainOp[]
+export const VULN_CHAIN_OPS = [
+  'deploy',
+  'tx',
+  'reset',
+  'query',
+] as const satisfies readonly VulnChainOp[]
 
 /** vulnChainOpLabel 返回链上步骤操作文案。 */
 export function vulnChainOpLabel(op: VulnChainOp): string {
@@ -362,7 +378,12 @@ const VULN_ASSERT_OP_LABELS = {
 export type VulnAssertOp = keyof typeof VULN_ASSERT_OP_LABELS
 
 /** VULN_ASSERT_OPS 供断言表单按后端支持顺序渲染判定方式。 */
-export const VULN_ASSERT_OPS = ['eq', 'ne', 'contains', 'exists'] as const satisfies readonly VulnAssertOp[]
+export const VULN_ASSERT_OPS = [
+  'eq',
+  'ne',
+  'contains',
+  'exists',
+] as const satisfies readonly VulnAssertOp[]
 
 /** vulnAssertOpLabel 返回断言判定方式文案。 */
 export function vulnAssertOpLabel(op: VulnAssertOp): string {
@@ -392,3 +413,19 @@ export const VULN_SOURCE_MAPPING_FIELDS = {
 
 /** 漏洞源请求方法:后端只允许 GET 与 POST。 */
 export const VULN_SOURCE_METHODS = ['GET', 'POST'] as const
+
+/**
+ * 回放归档里链操作的用户向名称。
+ * 取值来自 M3 runChainStep 的封闭集(deploy/tx/reset),归档解析已把集外操作滤掉;
+ * 这里仍给未登记值一个中性名,保证界面不出现裸英文 op。
+ */
+const BATTLE_CHAIN_OP_LABELS: Record<string, string> = {
+  deploy: '部署合约',
+  tx: '发起交易',
+  reset: '重置链状态',
+}
+
+/** battleChainOpLabel 返回链操作文案。 */
+export function battleChainOpLabel(op: string): string {
+  return BATTLE_CHAIN_OP_LABELS[op] ?? '链上操作'
+}

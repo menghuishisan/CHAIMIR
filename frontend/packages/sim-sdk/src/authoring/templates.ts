@@ -127,7 +127,6 @@ function renderTemplateView(state: DeveloperTemplateState): TeachingFrame {
       explanation: {
         what: state.explanation.effect,
         why: state.explanation.reason,
-        watch: '观察流水线当前步骤和完成状态。',
       },
     },
     focus: {

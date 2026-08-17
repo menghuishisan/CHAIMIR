@@ -6,11 +6,50 @@ import {
   ApplicationStatus,
   AuthMode,
   BaseIdentity,
+  ClassStatus,
   DeployMode,
   SessionStatus,
   TenantStatus,
   UserRole,
+  TENANT_MODULE,
+  type TenantModule,
 } from '@chaimir/api-client'
+
+/** 班级状态用户向文案与语义色,供教师只读和校管维护页面共用。 */
+export const CLASS_STATUS_LABELS: Record<ClassStatus, string> = {
+  [ClassStatus.ACTIVE]: '在读',
+  [ClassStatus.ARCHIVED]: '已归档',
+}
+
+export const CLASS_STATUS_TONES: Record<ClassStatus, StatusTone> = {
+  [ClassStatus.ACTIVE]: 'success',
+  [ClassStatus.ARCHIVED]: 'neutral',
+}
+
+/** CLASS_STATUS_FILTERS 是组织页面共同使用的状态筛选清单。 */
+export const CLASS_STATUS_FILTERS = [
+  { value: '', label: '全部' },
+  { value: String(ClassStatus.ACTIVE), label: CLASS_STATUS_LABELS[ClassStatus.ACTIVE] },
+  { value: String(ClassStatus.ARCHIVED), label: CLASS_STATUS_LABELS[ClassStatus.ARCHIVED] },
+] as const
+
+/** 租户模块用户向文案与说明,供校管配置和平台只读详情共同使用。 */
+export const TENANT_MODULE_LABELS: Record<TenantModule, string> = {
+  [TENANT_MODULE.TEACHING]: '教学',
+  [TENANT_MODULE.EXPERIMENT]: '实验',
+  [TENANT_MODULE.CONTEST]: '竞赛',
+  [TENANT_MODULE.SIM]: '仿真',
+  [TENANT_MODULE.GRADE]: '成绩',
+}
+
+/** TENANT_MODULE_OPTIONS 是校管端模块开关的唯一用户向选项清单。 */
+export const TENANT_MODULE_OPTIONS = [
+  { value: TENANT_MODULE.TEACHING, label: '教学', description: '课程、章节课时、作业与批改' },
+  { value: TENANT_MODULE.EXPERIMENT, label: '实验', description: '实验编排与沙箱实验环境' },
+  { value: TENANT_MODULE.CONTEST, label: '竞赛', description: '赛事组织、解题赛与对抗赛' },
+  { value: TENANT_MODULE.SIM, label: '仿真', description: '区块链协议与系统推演' },
+  { value: TENANT_MODULE.GRADE, label: '成绩', description: '成绩汇总与学业分析' },
+] as const
 
 /** 机构类型取值与后端 school_type 一致(1 本科 / 2 高职高专 / 3 其他),取值与文案在此单一登记。 */
 const TENANT_APPLICATION_SCHOOL_TYPE_LABELS = {

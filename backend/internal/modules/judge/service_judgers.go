@@ -35,8 +35,8 @@ func (s *Service) executeJudgerStrategy(ctx context.Context, task JudgeTask, san
 
 // judgeOnchainAssertions 按 M5 提供的 chain_steps/assertions 通过 M2 链能力比对现场状态。
 func (s *Service) judgeOnchainAssertions(ctx context.Context, task JudgeTask, sandboxID int64) (JudgeExecutionResult, error) {
-	steps := sliceValue(task.InputSnapshot.Expectation["chain_steps"])
-	assertions := sliceValue(task.InputSnapshot.Expectation["assertions"])
+	steps := jsonx.SliceFromAny(task.InputSnapshot.Expectation["chain_steps"])
+	assertions := jsonx.SliceFromAny(task.InputSnapshot.Expectation["assertions"])
 	if len(assertions) == 0 {
 		return JudgeExecutionResult{}, apperr.ErrJudgerConfigInvalid
 	}
@@ -44,7 +44,7 @@ func (s *Service) judgeOnchainAssertions(ctx context.Context, task JudgeTask, sa
 	actions := make([]contracts.JudgeReplayAction, 0, len(steps))
 	passed := true
 	for seq, raw := range steps {
-		action, err := s.runChainStep(ctx, task, sandboxID, mapAny(raw))
+		action, err := s.runChainStep(ctx, task, sandboxID, jsonx.ObjectFromAny(raw))
 		if err != nil {
 			return JudgeExecutionResult{}, err
 		}
@@ -58,8 +58,8 @@ func (s *Service) judgeOnchainAssertions(ctx context.Context, task JudgeTask, sa
 		}
 	}
 	for _, raw := range assertions {
-		assertion := mapAny(raw)
-		actual, err := s.sandbox.ChainQuery(ctx, contracts.SandboxChainQueryRequest{TenantID: task.TenantID, SandboxID: sandboxID, SourceRef: task.SourceRef, Target: stringValue(assertion["target"])})
+		assertion := jsonx.ObjectFromAny(raw)
+		actual, err := s.sandbox.ChainQuery(ctx, contracts.SandboxChainQueryRequest{TenantID: task.TenantID, SandboxID: sandboxID, SourceRef: task.SourceRef, Target: strings.TrimSpace(jsonx.StringFromAny(assertion["target"]))})
 		if err != nil {
 			return JudgeExecutionResult{}, apperr.ErrJudgeWorkerFailed.WithCause(err)
 		}
@@ -84,17 +84,17 @@ func (s *Service) judgeOnchainAssertions(ctx context.Context, task JudgeTask, sa
 
 // runChainStep 执行 deploy/tx/reset/query 预处理步骤。
 func (s *Service) runChainStep(ctx context.Context, task JudgeTask, sandboxID int64, step map[string]any) (*contracts.JudgeReplayAction, error) {
-	op := stringValue(step["op"])
-	payload := sanitizeReplayMap(mapAny(step["payload"]))
+	op := strings.TrimSpace(jsonx.StringFromAny(step["op"]))
+	payload := sanitizeReplayMap(jsonx.ObjectFromAny(step["payload"]))
 	switch op {
 	case "deploy":
-		output, err := s.sandbox.ChainDeploy(ctx, contracts.SandboxChainDeployRequest{TenantID: task.TenantID, SandboxID: sandboxID, SourceRef: task.SourceRef, Payload: mapAny(step["payload"])})
+		output, err := s.sandbox.ChainDeploy(ctx, contracts.SandboxChainDeployRequest{TenantID: task.TenantID, SandboxID: sandboxID, SourceRef: task.SourceRef, Payload: jsonx.ObjectFromAny(step["payload"])})
 		if err != nil {
 			return nil, err
 		}
 		return &contracts.JudgeReplayAction{Op: op, Payload: payload, Output: sanitizeReplayMap(output)}, nil
 	case "tx":
-		output, err := s.sandbox.ChainSendTx(ctx, contracts.SandboxChainTxRequest{TenantID: task.TenantID, SandboxID: sandboxID, SourceRef: task.SourceRef, Payload: mapAny(step["payload"])})
+		output, err := s.sandbox.ChainSendTx(ctx, contracts.SandboxChainTxRequest{TenantID: task.TenantID, SandboxID: sandboxID, SourceRef: task.SourceRef, Payload: jsonx.ObjectFromAny(step["payload"])})
 		if err != nil {
 			return nil, err
 		}
@@ -113,19 +113,20 @@ func (s *Service) runChainStep(ctx context.Context, task JudgeTask, sandboxID in
 
 // judgeFlag 仅用快照中的 HMAC 摘要比对提交值或链上查询值,不保存明文 flag 或 HMAC secret。
 func (s *Service) judgeFlag(ctx context.Context, task JudgeTask, sandboxID int64) (JudgeExecutionResult, error) {
-	hash := stringValue(task.InputSnapshot.Expectation["flag_hash"])
-	inputKey := stringValue(task.InputSnapshot.Expectation["flag_input_key"])
+	hash := strings.TrimSpace(jsonx.StringFromAny(task.InputSnapshot.Expectation["flag_hash"]))
+	inputKey := strings.TrimSpace(jsonx.StringFromAny(task.InputSnapshot.Expectation["flag_input_key"]))
 	if hash == "" || inputKey == "" {
 		return JudgeExecutionResult{}, apperr.ErrJudgerConfigInvalid
 	}
-	submittedHash := stringValue(task.InputSnapshot.ExtraInput["submitted_flag_hash"])
-	if target := stringValue(task.InputSnapshot.Expectation["flag_chain_target"]); target != "" {
+	submittedHash := strings.TrimSpace(jsonx.StringFromAny(task.InputSnapshot.ExtraInput["submitted_flag_hash"]))
+	if target := strings.TrimSpace(jsonx.StringFromAny(task.InputSnapshot.Expectation["flag_chain_target"])); target != "" {
 		actual, err := s.sandbox.ChainQuery(ctx, contracts.SandboxChainQueryRequest{TenantID: task.TenantID, SandboxID: sandboxID, SourceRef: task.SourceRef, Target: target})
 		if err != nil {
 			return JudgeExecutionResult{}, apperr.ErrJudgeWorkerFailed.WithCause(err)
 		}
 		submittedHash = ""
-		submitted := stringValue(actual[stringValue(task.InputSnapshot.Expectation["flag_chain_field"])])
+		field := strings.TrimSpace(jsonx.StringFromAny(task.InputSnapshot.Expectation["flag_chain_field"]))
+		submitted := strings.TrimSpace(jsonx.StringFromAny(actual[field]))
 		if submitted != "" {
 			var err error
 			submittedHash, err = pkgcrypto.HMACSHA256Hex(s.hmacKey, strings.TrimSpace(submitted))
@@ -169,7 +170,7 @@ func judgeSimCheckpoint(task JudgeTask) (JudgeExecutionResult, error) {
 		Passed:   passed,
 		Score:    score,
 		MaxScore: task.InputSnapshot.MaxScore,
-		Details:  []JudgeResultDetail{{Case: "仿真检查点", Passed: passed, ExpectedLabel: stringValue(task.InputSnapshot.Expectation["expected_label"]), Actual: chainassert.ShortJSON(actual)}},
+		Details:  []JudgeResultDetail{{Case: "仿真检查点", Passed: passed, ExpectedLabel: strings.TrimSpace(jsonx.StringFromAny(task.InputSnapshot.Expectation["expected_label"])), Actual: chainassert.ShortJSON(actual)}},
 	}, nil
 }
 
@@ -181,22 +182,22 @@ func (s *Service) snapshotExpectationForJudger(typ int16, expectation map[string
 	}
 	switch typ {
 	case JudgerTypeFlag:
-		hash := stringValue(out["flag_hash"])
+		hash := strings.TrimSpace(jsonx.StringFromAny(out["flag_hash"]))
 		if !isSHA256Hex(hash) {
 			return nil, apperr.ErrJudgerConfigInvalid
 		}
-		inputKey := stringValue(out["flag_input_key"])
+		inputKey := strings.TrimSpace(jsonx.StringFromAny(out["flag_input_key"]))
 		if inputKey == "" {
 			return nil, apperr.ErrJudgerConfigInvalid
 		}
 		safe := map[string]any{"flag_hash": hash, "flag_input_key": inputKey}
-		if target := stringValue(out["flag_chain_target"]); target != "" {
+		if target := strings.TrimSpace(jsonx.StringFromAny(out["flag_chain_target"])); target != "" {
 			safe["flag_chain_target"] = target
-			safe["flag_chain_field"] = stringValue(out["flag_chain_field"])
+			safe["flag_chain_field"] = strings.TrimSpace(jsonx.StringFromAny(out["flag_chain_field"]))
 		}
 		return safe, nil
 	case JudgerTypeOnchainAssert:
-		if len(sliceValue(out["assertions"])) == 0 {
+		if len(jsonx.SliceFromAny(out["assertions"])) == 0 {
 			return nil, apperr.ErrJudgerConfigInvalid
 		}
 		if !hasDeterministicExpectation(out) {
@@ -227,7 +228,7 @@ func (s *Service) executionExpectationForJudger(typ int16, spec contracts.Conten
 	switch typ {
 	case JudgerTypeOnchainAssert:
 		out := cloneExpectationMap(spec.Expectation)
-		if len(sliceValue(out["assertions"])) == 0 {
+		if len(jsonx.SliceFromAny(out["assertions"])) == 0 {
 			return nil, apperr.ErrJudgerConfigInvalid
 		}
 		if !hasDeterministicExpectation(out) {
@@ -250,25 +251,25 @@ func (s *Service) executionExpectationForJudger(typ int16, spec contracts.Conten
 
 // summarizeOnchainExpectation 保留链上断言的审计摘要,剥离步骤 payload 和断言标准值。
 func summarizeOnchainExpectation(expectation map[string]any) map[string]any {
-	assertions := sliceValue(expectation["assertions"])
+	assertions := jsonx.SliceFromAny(expectation["assertions"])
 	out := map[string]any{
 		"assertion_count": len(assertions),
 	}
-	if steps := sliceValue(expectation["chain_steps"]); len(steps) > 0 {
+	if steps := jsonx.SliceFromAny(expectation["chain_steps"]); len(steps) > 0 {
 		out["chain_step_count"] = len(steps)
 	}
 	labels := make([]string, 0, len(assertions))
 	targets := make([]string, 0, len(assertions))
 	operators := make([]string, 0, len(assertions))
 	for _, raw := range assertions {
-		assertion := mapAny(raw)
+		assertion := jsonx.ObjectFromAny(raw)
 		if label := firstNonEmptyString(assertion["expected_label"], assertion["label"], assertion["target"]); label != "" {
 			labels = append(labels, label)
 		}
-		if target := stringValue(assertion["target"]); target != "" {
+		if target := strings.TrimSpace(jsonx.StringFromAny(assertion["target"])); target != "" {
 			targets = append(targets, target)
 		}
-		if op := stringValue(assertion["op"]); op != "" {
+		if op := strings.TrimSpace(jsonx.StringFromAny(assertion["op"])); op != "" {
 			operators = append(operators, op)
 		}
 	}
@@ -287,7 +288,7 @@ func summarizeOnchainExpectation(expectation map[string]any) map[string]any {
 // summarizeSimCheckpointExpectation 只保存检查点标签和形态摘要,不保存标准检查点结构。
 func summarizeSimCheckpointExpectation(expectation map[string]any) map[string]any {
 	out := map[string]any{}
-	if label := stringValue(expectation["expected_label"]); label != "" {
+	if label := strings.TrimSpace(jsonx.StringFromAny(expectation["expected_label"])); label != "" {
 		out["expected_label"] = label
 	}
 	checkpoint := expectation["checkpoint"]
@@ -316,7 +317,7 @@ func cloneExpectationMap(expectation map[string]any) map[string]any {
 // firstNonEmptyString 选择第一个非空摘要文本。
 func firstNonEmptyString(values ...any) string {
 	for _, value := range values {
-		if text := stringValue(value); text != "" {
+		if text := strings.TrimSpace(jsonx.StringFromAny(value)); text != "" {
 			return text
 		}
 	}
@@ -344,21 +345,6 @@ func uniqueSortedStrings(values []string) []string {
 func containsSensitiveExpectationMaterial(v any) bool {
 	raw := strings.ToLower(chainassert.ShortJSON(v))
 	return privacy.ContainsResultSensitiveText(raw)
-}
-
-// mapAny 读取 map[string]any。
-func mapAny(v any) map[string]any {
-	return jsonx.ObjectFromAny(v)
-}
-
-// sliceValue 读取 []any。
-func sliceValue(v any) []any {
-	return jsonx.SliceFromAny(v)
-}
-
-// stringValue 读取字符串值。
-func stringValue(v any) string {
-	return strings.TrimSpace(jsonx.StringFromAny(v))
 }
 
 // flagActualText 返回用户向 flag 判题实际状态。

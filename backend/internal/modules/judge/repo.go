@@ -39,7 +39,7 @@ type TxStore interface {
 	GetJudgeTaskInfo(ctx context.Context, tenantID, taskID int64) (JudgeTaskInfo, error)
 	ListJudgeTasksBySourceRef(ctx context.Context, tenantID int64, sourceRef string) ([]JudgeTask, error)
 	ListRecentJudgeTasksBySubmitterProblem(ctx context.Context, tenantID, submitterID int64, problemRef string, windowSeconds int32) ([]JudgeTask, error)
-	ListJudgeTasks(ctx context.Context, tenantID int64, sourceRef string, pendingManual bool, sourceOwnerID int64, limit, offset int32) ([]JudgeTaskInfo, int64, error)
+	ListJudgeTasks(ctx context.Context, tenantID int64, sourceRef string, pendingManual bool, sourceOwnerID int64, state string, limit, offset int32) ([]JudgeTaskInfo, int64, error)
 	CancelQueuedJudgeTask(ctx context.Context, tenantID, taskID int64) (JudgeTask, error)
 	ResetJudgeTaskForRejudge(ctx context.Context, tenantID, taskID int64, snapshot JudgeInputSnapshot) (JudgeTask, error)
 	DequeueJudgeTasks(ctx context.Context, limit int32) ([]JudgeTask, error)
@@ -264,12 +264,14 @@ func (s *txStore) ListRecentJudgeTasksBySubmitterProblem(ctx context.Context, te
 }
 
 // ListJudgeTasks 查询任务分页列表。
-func (s *txStore) ListJudgeTasks(ctx context.Context, tenantID int64, sourceRef string, pendingManual bool, sourceOwnerID int64, limit, offset int32) ([]JudgeTaskInfo, int64, error) {
-	rows, err := s.q.ListJudgeTasks(ctx, sqlcgen.ListJudgeTasksParams{TenantID: tenantID, Column2: sourceRef, Column3: pendingManual, Column4: sourceOwnerID, Limit: limit, Offset: offset})
+// state 取运维分组(空串不筛 / active 排队与执行中 / abnormal 超时失败出错),
+// 总数按同一条件计,与列表同口径。
+func (s *txStore) ListJudgeTasks(ctx context.Context, tenantID int64, sourceRef string, pendingManual bool, sourceOwnerID int64, state string, limit, offset int32) ([]JudgeTaskInfo, int64, error) {
+	rows, err := s.q.ListJudgeTasks(ctx, sqlcgen.ListJudgeTasksParams{TenantID: tenantID, Column2: sourceRef, Column3: pendingManual, Column4: sourceOwnerID, State: state, PageLimit: limit, PageOffset: offset})
 	if err != nil {
 		return nil, 0, err
 	}
-	total, err := s.q.CountJudgeTasks(ctx, sqlcgen.CountJudgeTasksParams{TenantID: tenantID, Column2: sourceRef, Column3: pendingManual, Column4: sourceOwnerID})
+	total, err := s.q.CountJudgeTasks(ctx, sqlcgen.CountJudgeTasksParams{TenantID: tenantID, Column2: sourceRef, Column3: pendingManual, Column4: sourceOwnerID, State: state})
 	if err != nil {
 		return nil, 0, err
 	}

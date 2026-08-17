@@ -99,7 +99,7 @@ export function WizardStagesStep({ draft, errors, onChange }: WizardStagesStepPr
           ) : (
             <div className="flex flex-col gap-2">
               {draft.components.stages.map((stage, index) => (
-                <div key={stage.stage} className="flex flex-col gap-2 rounded-md border border-line p-3">
+                <div key={stage.stage} className="flex flex-col gap-2 well p-3">
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div className="min-w-0">
                       <div className="flex flex-wrap items-center gap-2">
@@ -352,7 +352,7 @@ function StageFormModal({ stage, stageNumber, draft, onClose, onSave }: StageFor
           </FormField>
 
           {unlockType === 'checkpoint' ? (
-            <div className="grid gap-4 rounded-md border border-line bg-surface-sunken p-4 sm:grid-cols-2">
+            <div className="grid gap-4 well p-4 sm:grid-cols-2">
               <FormField label="作为条件的检查点" htmlFor="stage-unlock-checkpoint" required>
                 {draft.components.checkpoints.length === 0 ? (
                   <Callout tone="warning">
@@ -395,7 +395,7 @@ function StageFormModal({ stage, stageNumber, draft, onClose, onSave }: StageFor
           <Button variant="outline" onClick={onClose}>
             取消
           </Button>
-          <Button variant="seal" onClick={submit}>
+          <Button variant="primary" onClick={submit}>
             {editing ? '保存阶段' : '添加阶段'}
           </Button>
         </ModalFooter>
@@ -461,7 +461,7 @@ function ParamBindingsEditor({ draft, bindings, onChange }: ParamBindingsEditorP
       </div>
 
       {bindings.map((binding, index) => (
-        <div key={index} className="flex flex-col gap-3 rounded-md border border-line p-3">
+        <div key={index} className="flex flex-col gap-3 well p-3">
           <div className="grid gap-3 sm:grid-cols-2">
             <FormField label="传给哪个组件" htmlFor={`binding-target-${index}`} required>
               <Select

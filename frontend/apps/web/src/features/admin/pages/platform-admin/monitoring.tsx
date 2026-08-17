@@ -10,7 +10,7 @@
 // 平台自己的运营数字在平台看板;这里是基础设施层的指标(节点、队列、数据库)。
 
 import { useMemo } from 'react'
-import { ExternalLink, LayoutDashboard, Monitor } from 'lucide-react'
+import { ExternalLink, Monitor } from 'lucide-react'
 import type { MonitoringPanel } from '@chaimir/api-client'
 import {
   Breadcrumb,
@@ -23,7 +23,6 @@ import {
   PageScaffold,
   PageSection,
   Skeleton,
-  Stat,
 } from '@chaimir/ui'
 import { useNavigate } from 'react-router'
 import { api } from '../../../../app/api'
@@ -54,21 +53,11 @@ export default function PlatformMonitoringPage() {
         icon={Monitor}
       />
 
-      <PageSection>
-        <div className="grid gap-4 sm:grid-cols-2">
-          <Stat label="可用面板" value={list.length} icon={Monitor} />
-          <Stat
-            label="业务运营数据"
-            value="在平台看板"
-            icon={LayoutDashboard}
-            hint="学校、账号、课程与竞赛规模"
-          />
-        </div>
-      </PageSection>
-
+      {/* 不做指标带:面板数量在下方分组说明里,「业务运营数据 在平台看板」是导航指引而非可度量数字
+          (规范 §6.5),改成页面底部的跳转入口。 */}
       <PageSection
         title="监控入口"
-        description="点开会在新标签页打开监控系统。需要单独登录时按运维给的账号进入。"
+        description={`共 ${list.length} 个面板。点开会在新标签页打开监控系统,需要单独登录时按运维给的账号进入。`}
       >
         <div className="flex flex-col gap-4">
           <ResourceState
@@ -91,13 +80,18 @@ export default function PlatformMonitoringPage() {
             监控画面不内嵌在后台里:外部系统通常禁止被嵌入,而且把第三方页面放进管理端同一个浏览环境会削弱隔离。
           </Callout>
 
-          <div className="flex flex-wrap items-center gap-2 rounded-md border border-line bg-surface-sunken p-3">
-            <span className="text-sm text-ink-sub">资源告警在告警中心处理,备份结果在备份记录里看。</span>
+          <div className="flex flex-wrap items-center gap-2 well p-3">
+            <span className="text-sm text-ink-sub">
+              资源告警在告警中心处理,备份结果在备份记录里看,学校与账号规模在平台看板。
+            </span>
             <Button variant="ghost" size="sm" onClick={() => navigate('/platform-admin/alerts')}>
               去告警中心
             </Button>
             <Button variant="ghost" size="sm" onClick={() => navigate('/platform-admin/backups')}>
               去备份记录
+            </Button>
+            <Button variant="ghost" size="sm" onClick={() => navigate('/platform-admin/dashboard')}>
+              去平台看板
             </Button>
           </div>
         </div>

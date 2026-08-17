@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"chaimir/internal/platform/config"
+	"chaimir/internal/platform/timex"
 	"chaimir/pkg/logging"
 )
 
@@ -131,7 +132,7 @@ func (b *natsBus) publishDeadLetter(ctx context.Context, subject, queue string, 
 		Payload:         data,
 		LastError:       logging.SanitizeError(lastErr.Error()),
 		AttemptCount:    max(b.cfg.retryMax, 1),
-		OccurredAt:      time.Now().UTC().Format(time.RFC3339),
+		OccurredAt:      timex.RFC3339OrEmpty(timex.Now()),
 	})
 	if err != nil {
 		return fmt.Errorf("序列化死信消息失败: %w", err)

@@ -2,7 +2,7 @@
 // 对应后端 M7 模块
 
 import { ApiClient } from '../client'
-import type { ExperimentStatus } from '../constants/experiment'
+import type { ExperimentReportStatus, ExperimentStatus } from '../constants/experiment'
 import type { PaginatedResponse } from '../types/common'
 import type {
   Experiment,
@@ -91,9 +91,13 @@ export class ExperimentApi {
   }
 
   /**
-   * 查询实验报告列表。
+   * 查询实验报告列表。状态筛选由服务端执行,total 与筛选同口径。
    */
-  async listReports(experimentId: string, params?: { page?: number; size?: number }): Promise<PaginatedResponse<ReportDTO>> {
+  async listReports(experimentId: string, params?: {
+    status?: ExperimentReportStatus
+    page?: number
+    size?: number
+  }): Promise<PaginatedResponse<ReportDTO>> {
     return this.client.get(`/experiment/experiments/${experimentId}/reports`, params)
   }
 

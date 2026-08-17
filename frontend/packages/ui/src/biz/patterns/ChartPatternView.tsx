@@ -6,6 +6,7 @@
  */
 import { ChartContainer, type ChartDataTable } from "../../charts/ChartContainer";
 import { TrendLineChart, type TrendSeries } from "../../charts/TrendLineChart";
+import { PatternFrame } from "./PatternFrame";
 import type { PatternViewProps } from "./types";
 import type { ChartPattern } from "@chaimir/sim-sdk";
 
@@ -58,15 +59,17 @@ export function ChartPatternView({ pattern, density }: PatternViewProps<ChartPat
   const height = density === "panel" ? 160 : 280;
 
   return (
-    <ChartContainer
-      context="dark"
-      height={height}
-      isEmpty={rows.length === 0}
-      emptyHint="仿真推进后这里会出现趋势曲线。"
-      ariaSummary={summarize(pattern)}
-      dataTable={dataTable}
-    >
-      <TrendLineChart data={rows} xKey={X_KEY} series={trendSeries} height={height} context="dark" />
-    </ChartContainer>
+    <PatternFrame density={density}>
+      <ChartContainer
+        context="dark"
+        height={height}
+        isEmpty={rows.length === 0}
+        emptyHint="仿真推进后这里会出现趋势曲线。"
+        ariaSummary={summarize(pattern)}
+        dataTable={dataTable}
+      >
+        <TrendLineChart data={rows} xKey={X_KEY} series={trendSeries} height={height} context="dark" />
+      </ChartContainer>
+    </PatternFrame>
   );
 }

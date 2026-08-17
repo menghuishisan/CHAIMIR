@@ -61,6 +61,15 @@ const (
 )
 
 const (
+	// RuntimeAdapterLevelHosted 表示平台只托管运行环境。
+	RuntimeAdapterLevelHosted int16 = 1
+	// RuntimeAdapterLevelStandard 表示运行时声明平台标准链能力。
+	RuntimeAdapterLevelStandard int16 = 2
+	// RuntimeAdapterLevelPlugin 表示运行时使用已注册插件实现链能力。
+	RuntimeAdapterLevelPlugin int16 = 3
+)
+
+const (
 	// RuntimeStatusAvailable 表示运行时已通过自检并可调度。
 	RuntimeStatusAvailable int16 = 1
 	// RuntimeStatusOnboarding 表示运行时仍处于接入中。

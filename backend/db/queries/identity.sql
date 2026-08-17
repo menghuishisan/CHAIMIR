@@ -32,6 +32,8 @@ WHERE id = $1;
 SELECT id, code, name, type, status, deploy_mode, expire_at, logo_ref, display_name, feature_flags, auth_mode, enable_activation_code, created_at, updated_at,
        COUNT(*) OVER() AS total_count
 FROM tenant
+WHERE ($3::smallint = 0 OR status = $3)
+  AND ($4::text = '' OR name ILIKE '%' || $4 || '%' OR code ILIKE '%' || $4 || '%')
 ORDER BY created_at DESC, id DESC
 LIMIT $1 OFFSET $2;
 

@@ -3,11 +3,11 @@ package experiment
 
 import (
 	"context"
-	"fmt"
 	"math"
 
 	"chaimir/internal/contracts"
 	"chaimir/internal/platform/ids"
+	"chaimir/internal/platform/jsonx"
 	"chaimir/pkg/apperr"
 )
 
@@ -55,7 +55,10 @@ func (s *Service) JudgeCheckpoint(ctx context.Context, instanceID int64, checkpo
 	if err != nil {
 		return CheckpointDTO{}, err
 	}
-	extra := cloneAnyMap(cp.ExtraInput)
+	extra, err := jsonx.CloneObjectStrict(cp.ExtraInput)
+	if err != nil {
+		return CheckpointDTO{}, apperr.ErrExperimentCheckpointInvalid.WithCause(err)
+	}
 	for key, value := range req.ExtraInput {
 		extra[key] = value
 	}
@@ -227,11 +230,11 @@ func targetSandboxRef(cp CheckpointComponent, inst ExperimentInstance, mode stri
 	if cp.EnvID != "" {
 		for _, ref := range inst.SandboxRefs {
 			if ref.ComponentID == cp.EnvID {
-				return fmt.Sprintf("%d", ref.SandboxID)
+				return ids.Format(ref.SandboxID.Int64())
 			}
 		}
 	}
-	return fmt.Sprintf("%d", inst.SandboxRefs[0].SandboxID)
+	return ids.Format(inst.SandboxRefs[0].SandboxID.Int64())
 }
 
 // scaledCheckpointScore 将 M3 原始分按检查点配置分值归一。
@@ -243,13 +246,4 @@ func scaledCheckpointScore(maxScore float64, score, judgeMax int32) float64 {
 		return float64(score)
 	}
 	return math.Round((float64(score)/float64(judgeMax))*maxScore*100) / 100
-}
-
-// cloneAnyMap 复制动态输入,避免修改组件定义中的原始 map。
-func cloneAnyMap(in map[string]any) map[string]any {
-	out := map[string]any{}
-	for key, value := range in {
-		out[key] = value
-	}
-	return out
 }

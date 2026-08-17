@@ -288,15 +288,15 @@
     summary: 沙箱 Web 工具代理
     operationId: sandboxToolProxy
     x-chaimir-audience: user
-    security: [{ bearerAuth: [] }]
-    parameters: [{ $ref: "#/components/parameters/IDPath" }, { $ref: "#/components/parameters/ToolCodePath" }, { $ref: "#/components/parameters/ProxyPath" }, { name: token, in: query, required: false, schema: { type: string }, description: 浏览器首次进入 Web 工具时使用的一次性 access token,后端会写入路径受限 HttpOnly Cookie 并重定向清除该参数 }]
+    security: [{ bearerAuth: [] }, { browserTicketAuth: [] }, { browserAccessCookie: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }, { $ref: "#/components/parameters/ToolCodePath" }, { $ref: "#/components/parameters/ProxyPath" }]
     responses: { "200": { description: 工具代理响应 }, default: { $ref: "#/components/responses/Error" } }
   post:
     tags: [sandbox]
     summary: 沙箱 Web 工具代理提交
     operationId: sandboxToolProxyPost
     x-chaimir-audience: user
-    security: [{ bearerAuth: [] }]
+    security: [{ bearerAuth: [] }, { browserAccessCookie: [] }]
     parameters: [{ $ref: "#/components/parameters/IDPath" }, { $ref: "#/components/parameters/ToolCodePath" }, { $ref: "#/components/parameters/ProxyPath" }]
     requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
     responses: { "200": { description: 工具代理响应 }, default: { $ref: "#/components/responses/Error" } }
@@ -305,7 +305,7 @@
     summary: 沙箱 Web 工具代理更新
     operationId: sandboxToolProxyPut
     x-chaimir-audience: user
-    security: [{ bearerAuth: [] }]
+    security: [{ bearerAuth: [] }, { browserAccessCookie: [] }]
     parameters: [{ $ref: "#/components/parameters/IDPath" }, { $ref: "#/components/parameters/ToolCodePath" }, { $ref: "#/components/parameters/ProxyPath" }]
     requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
     responses: { "200": { description: 工具代理响应 }, default: { $ref: "#/components/responses/Error" } }
@@ -314,7 +314,7 @@
     summary: 沙箱 Web 工具代理局部更新
     operationId: sandboxToolProxyPatch
     x-chaimir-audience: user
-    security: [{ bearerAuth: [] }]
+    security: [{ bearerAuth: [] }, { browserAccessCookie: [] }]
     parameters: [{ $ref: "#/components/parameters/IDPath" }, { $ref: "#/components/parameters/ToolCodePath" }, { $ref: "#/components/parameters/ProxyPath" }]
     requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
     responses: { "200": { description: 工具代理响应 }, default: { $ref: "#/components/responses/Error" } }
@@ -323,7 +323,7 @@
     summary: 沙箱 Web 工具代理删除
     operationId: sandboxToolProxyDelete
     x-chaimir-audience: user
-    security: [{ bearerAuth: [] }]
+    security: [{ bearerAuth: [] }, { browserAccessCookie: [] }]
     parameters: [{ $ref: "#/components/parameters/IDPath" }, { $ref: "#/components/parameters/ToolCodePath" }, { $ref: "#/components/parameters/ProxyPath" }]
     responses: { "200": { description: 工具代理响应 }, default: { $ref: "#/components/responses/Error" } }
   head:
@@ -331,7 +331,7 @@
     summary: 沙箱 Web 工具代理元信息
     operationId: sandboxToolProxyHead
     x-chaimir-audience: user
-    security: [{ bearerAuth: [] }]
+    security: [{ bearerAuth: [] }, { browserAccessCookie: [] }]
     parameters: [{ $ref: "#/components/parameters/IDPath" }, { $ref: "#/components/parameters/ToolCodePath" }, { $ref: "#/components/parameters/ProxyPath" }]
     responses: { "200": { description: 工具代理响应 }, default: { $ref: "#/components/responses/Error" } }
   options:
@@ -339,7 +339,7 @@
     summary: 沙箱 Web 工具代理预检
     operationId: sandboxToolProxyOptions
     x-chaimir-audience: user
-    security: [{ bearerAuth: [] }]
+    security: [{ bearerAuth: [] }, { browserAccessCookie: [] }]
     parameters: [{ $ref: "#/components/parameters/IDPath" }, { $ref: "#/components/parameters/ToolCodePath" }, { $ref: "#/components/parameters/ProxyPath" }]
     responses: { "200": { description: 工具代理响应 }, default: { $ref: "#/components/responses/Error" } }
 /api/v1/sandbox/quota:

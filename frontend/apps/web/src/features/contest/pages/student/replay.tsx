@@ -1,14 +1,21 @@
 // 对局回放 · 时空回溯器(学生沉浸态,/student/contests/:contestId/replay)。
 //
-// 这是阶段 5 的创新②:把本队的对抗历程做成一条可以拖回去的时间轴。
-// 为什么这样做 —— 对抗赛的结果是一串对局,每局都改变积分与名次;学生看到的却只有一个当前分数,
-// 不知道是哪一版参战物、在哪一局把分数拉起来或掉下去的。于是把时间本身做成可操作对象:
-// 拖到任一时刻,就按**那一刻之前已结束的对局**重算当时的战绩、当时的积分、当时生效的参战物版本。
+// 这是阶段 5 的创新②:把本队的对抗历程做成一条可以拖回去的时间轴,并在选定的一局里
+// 继续按链上动作逐帧回放。为什么这样做 —— 对抗赛的结果是一串对局,每局都改变积分与名次;
+// 学生看到的却只有一个当前分数,不知道是哪一版参战物、在哪一局、被哪一步链上操作打穿的。
+// 于是把时间本身做成可操作对象:
+//   外层游标拖到任一时刻 → 按**那一刻之前已结束的对局**重算当时战绩、积分与生效参战物;
+//   内层游标拖到某一步   → 按**归档里已执行到的动作**画出攻防拓扑并让链上日志流增长。
 //
 // 状态一律由记录重算,不插值、不补帧(对齐清单 §6.13)。积分变化取对局自带的评分明细
 // (delta/before/after 都是后端写下的事实),不在前端另算一套。
 //
 // 逐帧轨迹走「读取引用 → 签发授权 → 统一文件服务取件」,不把对象存储地址交给浏览器。
+// 攻防角色只在归档的 initial_state 里(对局列表不带、本队参战记录只有本队角色),
+// 故未取件前如实说明拓扑画不出来,不拿猜出来的角色先画一个。
+//
+// 三区分工遵守规范 §7.1:左=当时的战绩与榜单(有界状态)、中=拓扑与两级回溯条(主体,不滚动)、
+// 右=链上日志流(无界序列)。
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useParams } from 'react-router'
@@ -24,8 +31,10 @@ import {
 import {
   BattleMatchStatus,
   BattleResult,
+  BattleRole,
   type BattleEntry,
   type BattleMatch,
+  type BattleReplayArchive,
   type LadderRank,
 } from '@chaimir/api-client'
 import {
@@ -40,24 +49,20 @@ import { api } from '../../../../app/api'
 import { AppStatusScreen } from '../../../../components/AppStatusScreen'
 import { useAsyncResource } from '../../../../hooks'
 import { useImmersive } from '../../../../layouts/immersive/context'
+import { downloadAttachment } from '../../../../utils/downloadAttachment'
 import { formatDateTime } from '../../../../utils/formatters'
 import { battleResultLabel, battleRoleLabel } from '../../../../utils/labels/contest'
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
+import { readBattleReplayArchive } from '../../battleTrace'
+import {
+  AttackDefenseTopology,
+  ChainLogStream,
+  TraceAssertions,
+  TraceLegend,
+} from '../../BattleTracePanels'
 
 /** 对局一次取回的条数:一场比赛内本队对局量级远小于此,足够铺满时间轴。 */
 const MATCH_PAGE_SIZE = 100
-
-/** 评分明细里的键,与后端写入 score_delta 的键一致。 */
-const DELTA_KEYS = {
-  teamA: 'team_a',
-  teamB: 'team_b',
-  ratingABefore: 'rating_a_before',
-  ratingBBefore: 'rating_b_before',
-  ratingAAfter: 'rating_a_after',
-  ratingBAfter: 'rating_b_after',
-  deltaA: 'delta_a',
-  deltaB: 'delta_b',
-} as const
 
 /**
  * StudentContestReplayPage 取回本队对局与参战记录。
@@ -90,6 +95,7 @@ export default function StudentContestReplayPage() {
     return (
       <AppStatusScreen
         icon={TriangleAlert}
+        tone="danger"
         title="对局记录暂时读不到"
         description={matches.error?.message}
         traceId={matches.error?.traceId}
@@ -185,8 +191,47 @@ function Rewinder({ matches, entries, ranks }: RewinderProps) {
     [cursor, myEntryIds, timeline],
   )
 
+  // 攻击锚点:本队为攻方且获胜,或本队为守方且失利 —— 两种情况都意味着这一局攻方得手。
+  // 角色取「那一刻生效的参战物」,分不出角色时不标锚点(与其猜一个红刻度,不如不给)。
+  const attackAnchors = useMemo(
+    () =>
+      new Set(
+        timeline.reduce<number[]>((indexes, match, index) => {
+          if (attackLandedAt(match, entries, myEntryIds)) indexes.push(index)
+          return indexes
+        }, []),
+      ),
+    [entries, myEntryIds, timeline],
+  )
+
+  // 逐帧轨迹:每换一局都重新取件(授权是一次性短时凭据,不跨局缓存)
+  const [trace, setTrace] = useState<TraceState>({ loading: false })
+  const [step, setStep] = useState(0)
+
+  useEffect(() => {
+    setTrace({ loading: false })
+    setStep(0)
+  }, [currentMatch?.id])
+
+  const loadTrace = useCallback(async () => {
+    if (!currentMatch) return
+    setTrace({ loading: true })
+    try {
+      const archive = await readBattleReplayArchive(currentMatch.id)
+      setTrace({ loading: false, archive })
+      // 取件后直接停在最后一步:先给完整结果,再让用户往回拖
+      setStep(archive.actions.length)
+    } catch (error) {
+      setTrace({
+        loading: false,
+        error: userFacingErrorMessage(error, '这一局的轨迹没有读到,请稍后重试。'),
+      })
+    }
+  }, [currentMatch])
+
   return (
     <WorkbenchShell
+      workbench="replay"
       topbar={
         <WorkbenchTopbar
           onExit={exit}
@@ -205,19 +250,41 @@ function Rewinder({ matches, entries, ranks }: RewinderProps) {
           }
         />
       }
-      left={<StandingPanel standing={standing} activeEntry={activeEntry} cursor={cursor} total={timeline.length} />}
-      leftLabel="当时的战绩"
+      left={
+        <SituationPanel
+          standing={standing}
+          activeEntry={activeEntry}
+          cursor={cursor}
+          total={timeline.length}
+          ranks={ranks}
+          pending={pending}
+        />
+      }
+      leftLabel="当时的战绩与榜单"
       stage={
         <TimelineStage
           timeline={timeline}
           cursor={cursor}
           myEntryIds={myEntryIds}
+          attackAnchors={attackAnchors}
           onCursorChange={setCursor}
           currentMatch={currentMatch}
+          archive={trace.archive}
+          step={step}
+          onStepChange={setStep}
         />
       }
-      right={<LadderPanel ranks={ranks} pending={pending} />}
-      rightLabel="榜单与待打对局"
+      right={
+        <ChainLogStream
+          archive={trace.archive}
+          step={step}
+          loading={trace.loading}
+          error={trace.error}
+          available={currentMatch?.replay_available === true}
+          onLoad={() => void loadTrace()}
+        />
+      }
+      rightLabel="链上日志流"
       footer={
         <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 px-4 py-2">
           <div className="flex min-w-0 flex-col">
@@ -272,6 +339,31 @@ function Rewinder({ matches, entries, ranks }: RewinderProps) {
 /** Outcome 是本队在一局里的结果。 */
 type Outcome = 'win' | 'lose' | 'draw' | 'unknown'
 
+/** TraceState 是当前这一局逐帧轨迹的取件状态。 */
+interface TraceState {
+  loading: boolean
+  archive?: BattleReplayArchive
+  /** 用户向失败文案;技术原因只进控制台之外的错误链,不上界面 */
+  error?: string
+}
+
+/**
+ * attackLandedAt 判断这一局「攻方是否得手」,用于时间轴上的攻击锚点。
+ * 判据只用事实:本队为攻方且获胜、或本队为守方且失利 —— 两者都说明攻击成功。
+ * 那一刻的本队角色取生效的参战物;角色或胜负分不出来时回 false,不给猜出来的红刻度。
+ */
+function attackLandedAt(
+  match: BattleMatch,
+  entries: BattleEntry[],
+  myEntryIds: ReadonlySet<string>,
+): boolean {
+  const role = entryInEffectAt(entries, matchTime(match))?.role
+  if (role !== BattleRole.ATTACK && role !== BattleRole.DEFENSE) return false
+  const outcome = outcomeOf(match, myEntryIds)
+  if (outcome === 'unknown' || outcome === 'draw') return false
+  return role === BattleRole.ATTACK ? outcome === 'win' : outcome === 'lose'
+}
+
 /** Standing 是某一时刻重算出来的战绩。 */
 interface Standing {
   win: number
@@ -298,12 +390,9 @@ function recomputeStanding(played: BattleMatch[], myEntryIds: ReadonlySet<string
 
     const side = sideOf(match, myEntryIds)
     if (!side) continue
-    const delta = readNumber(match.score_delta, side === 'a' ? DELTA_KEYS.deltaA : DELTA_KEYS.deltaB)
+    const delta = side === 'a' ? (match.score_delta?.delta_a ?? 0) : (match.score_delta?.delta_b ?? 0)
     standing.ratingDelta += delta
-    const after = readNumber(
-      match.score_delta,
-      side === 'a' ? DELTA_KEYS.ratingAAfter : DELTA_KEYS.ratingBAfter,
-    )
+    const after = side === 'a' ? (match.score_delta?.rating_a_after ?? 0) : (match.score_delta?.rating_b_after ?? 0)
     if (after !== 0) standing.rating = after
   }
   return standing
@@ -340,13 +429,37 @@ function matchTime(match: BattleMatch): number {
   return new Date(match.finished_at ?? match.matched_at).getTime()
 }
 
-/** readNumber 从评分明细里读数字;缺失或类型不符回 0。 */
-function readNumber(source: Record<string, unknown>, key: string): number {
-  const value = source[key]
-  return typeof value === 'number' && Number.isFinite(value) ? value : 0
+interface SituationPanelProps {
+  standing: Standing
+  activeEntry?: BattleEntry
+  cursor: number
+  total: number
+  ranks: LadderRank[]
+  pending: number
 }
 
-interface StandingPanelProps {
+/**
+ * SituationPanel 是左辅助区:当时的战绩、当时生效的参战物、当前天梯与待打对局。
+ * 这些都是**有界状态**,按规范 §7.1 的状态与事件分流留在辅助区;
+ * 无界的链上动作序列在右侧事件流,不在这里重复一份。
+ */
+function SituationPanel({
+  standing,
+  activeEntry,
+  cursor,
+  total,
+  ranks,
+  pending,
+}: SituationPanelProps) {
+  return (
+    <div className="flex h-full min-h-0 flex-col gap-4 overflow-y-auto p-4">
+      <StandingSection standing={standing} activeEntry={activeEntry} cursor={cursor} total={total} />
+      <LadderSection ranks={ranks} pending={pending} />
+    </div>
+  )
+}
+
+interface StandingSectionProps {
   standing: Standing
   activeEntry?: BattleEntry
   cursor: number
@@ -354,14 +467,14 @@ interface StandingPanelProps {
 }
 
 /**
- * StandingPanel 渲染当时的战绩与当时生效的参战物。
+ * StandingSection 渲染当时的战绩与当时生效的参战物。
  */
-function StandingPanel({ standing, activeEntry, cursor, total }: StandingPanelProps) {
+function StandingSection({ standing, activeEntry, cursor, total }: StandingSectionProps) {
   return (
-    <div className="flex flex-col gap-4 p-4">
+    <>
       <section className="flex flex-col gap-2">
         <div className="flex items-center gap-2">
-          <History aria-hidden="true" className="size-4 text-on-dark-accent" />
+          <History aria-hidden="true" className="size-4 text-accent" />
           <h2 className="text-sm font-medium text-on-dark">时空回溯器</h2>
         </div>
         <p className="text-xs text-on-dark-sub">
@@ -423,7 +536,7 @@ function StandingPanel({ standing, activeEntry, cursor, total }: StandingPanelPr
           换版本会改变后续对局的打法,把时间轴拖过版本更替的位置就能看出差别。
         </p>
       </section>
-    </div>
+    </>
   )
 }
 
@@ -431,23 +544,50 @@ interface TimelineStageProps {
   timeline: BattleMatch[]
   cursor: number
   myEntryIds: ReadonlySet<string>
+  /** 攻方得手的局次下标,时间轴上以攻击锚点标出 */
+  attackAnchors: ReadonlySet<number>
   onCursorChange: (cursor: number) => void
   currentMatch?: BattleMatch
+  /** 当前这一局的轨迹归档;未取件时不画拓扑 */
+  archive?: BattleReplayArchive
+  step: number
+  onStepChange: (step: number) => void
 }
 
 /**
- * TimelineStage 渲染可拖动的时间轴与游标处这一局的详情。
+ * TimelineStage 是主舞台:攻防拓扑 + 两级回溯条(对局级 / 逐帧级)+ 这一局的事实。
+ * 舞台永不滚动(规范 §7.1):两条回溯条与拓扑钉在上方,详情在下方自己滚 ——
+ * 回溯条是这一台的主体,不能被局数或步数一多顶出视口。
  */
 function TimelineStage({
   timeline,
   cursor,
   myEntryIds,
+  attackAnchors,
   onCursorChange,
   currentMatch,
+  archive,
+  step,
+  onStepChange,
 }: TimelineStageProps) {
+  const mySide = currentMatch ? sideOf(currentMatch, myEntryIds) : undefined
+
   return (
-    <div className="flex flex-col gap-4 p-4">
-      <section className="flex flex-col gap-3">
+    <div className="flex h-full min-h-0 flex-col gap-4 p-4">
+      {archive ? (
+        <AttackDefenseTopology archive={archive} mySide={mySide} step={step} />
+      ) : (
+        <section className="flex shrink-0 flex-col gap-1" aria-label="攻防拓扑">
+          <h2 className="text-sm font-medium text-on-dark">攻防拓扑</h2>
+          <p className="text-xs text-on-dark-sub">
+            {currentMatch
+              ? '双方的攻防角色只写在这一局的轨迹归档里。在右侧读取轨迹后,这里会画出攻防关系。'
+              : '选一局之后才有攻防关系可画。'}
+          </p>
+        </section>
+      )}
+
+      <section className="flex shrink-0 flex-col gap-3">
         <h2 className="text-sm font-medium text-on-dark">对局时间轴</h2>
         <input
           type="range"
@@ -459,42 +599,77 @@ function TimelineStage({
           onChange={(event) => onCursorChange(Number(event.target.value))}
           className="w-full accent-jade-500"
         />
-        <ol className="flex flex-wrap gap-1.5">
+        {/* 局次超多时自己滚,不挤压下方详情 */}
+        <ol className="flex max-h-24 flex-wrap gap-1.5 overflow-y-auto">
           {timeline.map((match, index) => {
             const outcome = outcomeOf(match, myEntryIds)
             const reached = index < cursor
+            const anchored = attackAnchors.has(index)
             return (
               <li key={match.id}>
                 <button
                   type="button"
                   onClick={() => onCursorChange(index + 1)}
-                  aria-label={`回溯到第 ${index + 1} 局`}
+                  aria-label={`回溯到第 ${index + 1} 局${anchored ? ',这一局攻方得手' : ''}`}
                   className={
                     'hit-target relative rounded-md border px-2 py-1 font-mono text-xs tabular-nums focus-visible:outline-2 focus-visible:outline-accent focus-visible:-outline-offset-2 ' +
                     outcomeClass(outcome, reached)
                   }
                 >
                   {index + 1}
+                  {/* 攻击锚点:颜色之外用一个上标记号,色弱用户同样能定位 */}
+                  {anchored ? (
+                    <span aria-hidden="true" className="absolute -top-1 right-0 text-on-dark-danger">
+                      ×
+                    </span>
+                  ) : null}
                 </button>
               </li>
             )
           })}
         </ol>
         <div className="flex flex-wrap items-center gap-2 text-xs text-on-dark-sub">
-          <Badge tone="success">胜</Badge>
-          <Badge tone="danger">负</Badge>
-          <Badge tone="neutral">平或未判定</Badge>
-          <span>已回溯到的局次为实心,后面的是尚未回溯到的。</span>
+          <Badge onDark tone="success">胜</Badge>
+          <Badge onDark tone="danger">负</Badge>
+          <Badge onDark tone="neutral">平或未判定</Badge>
+          <span>已回溯到的局次为实心;带 × 的是攻方得手的局。</span>
         </div>
       </section>
 
-      {currentMatch ? (
-        <MatchDetail match={currentMatch} myEntryIds={myEntryIds} />
-      ) : (
-        <p className="text-sm text-on-dark-sub">
-          时间轴在开赛之前。往右拖或点一个局次,就能看到那一局发生了什么。
-        </p>
-      )}
+      {archive ? (
+        <section className="flex shrink-0 flex-col gap-2" aria-label="逐帧回溯">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h2 className="text-sm font-medium text-on-dark">逐帧回溯</h2>
+            <span className="font-mono text-xs tabular-nums text-on-dark-sub">
+              第 {step}/{archive.actions.length} 步
+            </span>
+          </div>
+          <input
+            type="range"
+            min={0}
+            max={archive.actions.length}
+            step={1}
+            value={step}
+            aria-label="回放到第几步链上动作"
+            onChange={(event) => onStepChange(Number(event.target.value))}
+            className="w-full accent-jade-500"
+          />
+          <TraceLegend />
+        </section>
+      ) : null}
+
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        {currentMatch ? (
+          <div className="flex flex-col gap-3">
+            <MatchDetail match={currentMatch} myEntryIds={myEntryIds} />
+            {archive ? <TraceAssertions archive={archive} /> : null}
+          </div>
+        ) : (
+          <p className="text-sm text-on-dark-sub">
+            时间轴在开赛之前。往右拖或点一个局次,就能看到那一局发生了什么。
+          </p>
+        )}
+      </div>
     </div>
   )
 }
@@ -542,12 +717,7 @@ function MatchDetail({ match, myEntryIds }: MatchDetailProps) {
     try {
       const grant = await api.contest.issueBattleReplayDownloadGrant(match.id)
       const file = await api.storage.consumeGrant(grant.token)
-      const url = URL.createObjectURL(file.blob)
-      const anchor = document.createElement('a')
-      anchor.href = url
-      anchor.download = file.fileName || grant.file_name
-      anchor.click()
-      URL.revokeObjectURL(url)
+      downloadAttachment(file)
       toast.success('回放归档已开始下载')
     } catch (error) {
       setCheckError(userFacingErrorMessage(error, '回放下载没有完成,请稍后重试。'))
@@ -562,15 +732,9 @@ function MatchDetail({ match, myEntryIds }: MatchDetailProps) {
     if (match.replay_available) void verifyTrace()
   }, [match.replay_available, verifyTrace])
 
-  const before = readNumber(
-    match.score_delta,
-    side === 'b' ? DELTA_KEYS.ratingBBefore : DELTA_KEYS.ratingABefore,
-  )
-  const after = readNumber(
-    match.score_delta,
-    side === 'b' ? DELTA_KEYS.ratingBAfter : DELTA_KEYS.ratingAAfter,
-  )
-  const delta = readNumber(match.score_delta, side === 'b' ? DELTA_KEYS.deltaB : DELTA_KEYS.deltaA)
+  const before = side === 'b' ? (match.score_delta?.rating_b_before ?? 0) : (match.score_delta?.rating_a_before ?? 0)
+  const after = side === 'b' ? (match.score_delta?.rating_b_after ?? 0) : (match.score_delta?.rating_a_after ?? 0)
+  const delta = side === 'b' ? (match.score_delta?.delta_b ?? 0) : (match.score_delta?.delta_a ?? 0)
 
   return (
     <section className="flex flex-col gap-3 rounded-md border border-dark-line bg-dark-surface p-3">
@@ -578,6 +742,7 @@ function MatchDetail({ match, myEntryIds }: MatchDetailProps) {
         <h3 className="text-sm font-medium text-on-dark">这一局</h3>
         <div className="flex flex-wrap items-center gap-2">
           <Badge
+            onDark
             tone={outcome === 'win' ? 'success' : outcome === 'lose' ? 'danger' : 'neutral'}
           >
             {outcome === 'unknown'
@@ -589,9 +754,9 @@ function MatchDetail({ match, myEntryIds }: MatchDetailProps) {
                   : '本队失利'}
           </Badge>
           {match.result !== undefined ? (
-            <Badge tone="neutral">{battleResultLabel(match.result)}</Badge>
+            <Badge onDark tone="neutral">{battleResultLabel(match.result)}</Badge>
           ) : null}
-          {side ? <Badge tone="neutral">本队为 {side === 'a' ? '先手' : '后手'}</Badge> : null}
+          {side ? <Badge onDark tone="neutral">本队为 {side === 'a' ? '先手' : '后手'}</Badge> : null}
         </div>
       </div>
 
@@ -614,7 +779,7 @@ function MatchDetail({ match, myEntryIds }: MatchDetailProps) {
             <span className="text-xs text-on-dark-sub">正在确认这一局的轨迹…</span>
           ) : archived ? (
             <>
-              <Badge tone="jade">轨迹已归档</Badge>
+              <Badge onDark tone="jade">轨迹已归档</Badge>
               <Button
                 variant="on-dark"
                 size="sm"
@@ -651,21 +816,21 @@ function TimelineFact({ term, value }: { term: string; value: string }) {
   )
 }
 
-interface LadderPanelProps {
+interface LadderSectionProps {
   ranks: LadderRank[]
   pending: number
 }
 
 /**
- * LadderPanel 展示当前天梯与还没打完的对局数。
+ * LadderSection 展示当前天梯与还没打完的对局数。
  * 榜单是「现在」的,不随时间轴回溯 —— 后端只存当前投影,回溯它会变成前端编造。
  */
-function LadderPanel({ ranks, pending }: LadderPanelProps) {
+function LadderSection({ ranks, pending }: LadderSectionProps) {
   return (
-    <div className="flex flex-col gap-4 p-4">
+    <>
       <section className="flex flex-col gap-2">
         <div className="flex items-center gap-2">
-          <Trophy aria-hidden="true" className="size-4 text-on-dark-accent" />
+          <Trophy aria-hidden="true" className="size-4 text-accent" />
           <h2 className="text-sm font-medium text-on-dark">当前天梯</h2>
         </div>
         {ranks.length === 0 ? (
@@ -698,6 +863,6 @@ function LadderPanel({ ranks, pending }: LadderPanelProps) {
           </p>
         </section>
       ) : null}
-    </div>
+    </>
   )
 }

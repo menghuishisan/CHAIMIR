@@ -33,10 +33,11 @@ func (q *Queries) CountAlertEvents(ctx context.Context, arg CountAlertEventsPara
 const countBackupRecords = `-- name: CountBackupRecords :one
 SELECT count(*)::bigint
 FROM backup_record
+WHERE ($1::smallint = 0 OR status = $1::smallint)
 `
 
-func (q *Queries) CountBackupRecords(ctx context.Context) (int64, error) {
-	row := q.db.QueryRow(ctx, countBackupRecords)
+func (q *Queries) CountBackupRecords(ctx context.Context, status int16) (int64, error) {
+	row := q.db.QueryRow(ctx, countBackupRecords, status)
 	var column_1 int64
 	err := row.Scan(&column_1)
 	return column_1, err
@@ -463,17 +464,20 @@ func (q *Queries) ListAlertRules(ctx context.Context, arg ListAlertRulesParams) 
 const listBackupRecords = `-- name: ListBackupRecords :many
 SELECT id, type, storage_ref, size_bytes, status, started_at, finished_at
 FROM backup_record
+WHERE ($1::smallint = 0 OR status = $1::smallint)
 ORDER BY started_at DESC
-LIMIT $1 OFFSET $2
+LIMIT $3::int OFFSET $2::int
 `
 
 type ListBackupRecordsParams struct {
-	Limit  int32 `json:"limit"`
-	Offset int32 `json:"offset"`
+	Status     int16 `json:"status"`
+	PageOffset int32 `json:"page_offset"`
+	PageLimit  int32 `json:"page_limit"`
 }
 
+// status 传 0 不按结果过滤;传具体结果供备份巡检按「已成功/已失败/进行中」取数与计数。
 func (q *Queries) ListBackupRecords(ctx context.Context, arg ListBackupRecordsParams) ([]BackupRecord, error) {
-	rows, err := q.db.Query(ctx, listBackupRecords, arg.Limit, arg.Offset)
+	rows, err := q.db.Query(ctx, listBackupRecords, arg.Status, arg.PageOffset, arg.PageLimit)
 	if err != nil {
 		return nil, err
 	}

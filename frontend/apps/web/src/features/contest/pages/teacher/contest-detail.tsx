@@ -11,7 +11,6 @@ import { useMemo, useState } from 'react'
 import { useParams } from 'react-router'
 import {
   Archive,
-  ListOrdered,
   Pencil,
   ShieldAlert,
   Swords,
@@ -28,7 +27,6 @@ import {
   PageHeader,
   PageScaffold,
   PageSection,
-  Stat,
   StatusIndicator,
   Table,
   Tabs,
@@ -99,8 +97,15 @@ function ContestDetailContent({ contest, onRefresh }: ContestDetailContentProps)
   const archived = contest.status === ContestStatus.ARCHIVED
   const isDraft = contest.status === ContestStatus.DRAFT
 
+  // 赛制、参赛形式、封榜时长与赛程都是赛事静态属性,统一进这张属性表,不占指标位(规范 §6.5)
   const scheduleItems = useMemo(
     () => [
+      { term: '赛制', description: contestModeLabel(contest.mode) },
+      { term: '参赛形式', description: teamModeLabel(contest.team_mode) },
+      {
+        term: '封榜时长',
+        description: contest.freeze_minutes > 0 ? `${contest.freeze_minutes} 分钟` : '不封榜',
+      },
       { term: '报名开始', description: formatDateTime(contest.signup_start), mono: true },
       { term: '报名截止', description: formatDateTime(contest.signup_end), mono: true },
       { term: '比赛开始', description: formatDateTime(contest.start_at), mono: true },
@@ -139,26 +144,7 @@ function ContestDetailContent({ contest, onRefresh }: ContestDetailContentProps)
         }
       />
 
-      <PageSection>
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <Stat label="赛制" value={contestModeLabel(contest.mode)} icon={Swords} />
-          <Stat label="参赛形式" value={teamModeLabel(contest.team_mode)} icon={Trophy} />
-          <Stat
-            label="封榜时长"
-            value={contest.freeze_minutes > 0 ? `${contest.freeze_minutes} 分钟` : '不封榜'}
-            icon={ListOrdered}
-            hint={isContestLeaderboardFrozen(contest.status) ? '当前处于封榜期' : undefined}
-          />
-          <Stat
-            label="赛程"
-            value={formatDateTime(contest.start_at)}
-            icon={Archive}
-            hint={`至 ${formatDateTime(contest.end_at)}`}
-          />
-        </div>
-      </PageSection>
-
-      <PageSection>
+      <PageSection title="赛事信息" description={isContestLeaderboardFrozen(contest.status) ? '当前处于封榜期,榜单暂停更新。' : undefined}>
         <DescriptionList dense columns={2} items={scheduleItems} />
       </PageSection>
 
@@ -218,7 +204,7 @@ function ContestDetailContent({ contest, onRefresh }: ContestDetailContentProps)
   )
 }
 
-/** SnapshotRow 是快照榜单的一行:final_ranking 是开放对象数组,页面只读已登记的键。 */
+/** SnapshotRow 是快照榜单的一行。 */
 interface SnapshotRow {
   rank: number
   score: number
@@ -226,11 +212,7 @@ interface SnapshotRow {
   lastSolveAt: string
 }
 
-/**
- * ContestSnapshot 展示归档后的最终榜单。
- * final_ranking 由后端 saveLadderSnapshot 按固定键写入,这里按那些键读取,
- * 未登记的键不猜测语义、不把内部键名抛到界面上。
- */
+/** ContestSnapshot 展示归档后的最终榜单。 */
 function ContestSnapshot({ contestId }: { contestId: string }) {
   const snapshot = useAsyncResource(
     () => api.contest.getResultSnapshot(contestId),
@@ -288,24 +270,14 @@ function ContestSnapshot({ contestId }: { contestId: string }) {
   )
 }
 
-/** snapshotRows 把开放对象数组转成有类型的行,并按名次升序。 */
+/** snapshotRows 把公开快照条目转换为展示行并按名次升序。 */
 function snapshotRows(snapshot: ResultSnapshot): SnapshotRow[] {
   return snapshot.final_ranking
     .map((entry) => ({
-      rank: numberValue(entry.rank),
-      score: numberValue(entry.score),
-      solvedCount: numberValue(entry.solved_count),
-      lastSolveAt: stringValue(entry.last_solve_at),
+      rank: entry.rank,
+      score: entry.score,
+      solvedCount: entry.solved_count,
+      lastSolveAt: entry.last_solve_at ?? '',
     }))
     .sort((a, b) => a.rank - b.rank)
-}
-
-/** numberValue 读取快照里的数字字段;缺失或类型不符回 0。 */
-function numberValue(value: unknown): number {
-  return typeof value === 'number' && Number.isFinite(value) ? value : 0
-}
-
-/** stringValue 读取快照里的字符串字段;缺失或类型不符回空串。 */
-function stringValue(value: unknown): string {
-  return typeof value === 'string' ? value : ''
 }

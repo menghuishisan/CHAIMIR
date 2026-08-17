@@ -38,6 +38,7 @@ import {
 import { api } from '../../../../app/api'
 import { ResourceState } from '../../../../components/ResourceState'
 import { useAsyncResource } from '../../../../hooks'
+import { downloadAttachment } from '../../../../utils/downloadAttachment'
 import { formatDateTime } from '../../../../utils/formatters'
 import { transcriptScopeLabel } from '../../../../utils/labels/grade'
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
@@ -125,12 +126,7 @@ export function TranscriptBatchSection() {
     try {
       const grant = await api.grade.downloadTranscript(transcript.id)
       const file = await api.storage.consumeGrant(grant.token)
-      const url = URL.createObjectURL(file.blob)
-      const anchor = document.createElement('a')
-      anchor.href = url
-      anchor.download = file.fileName
-      anchor.click()
-      URL.revokeObjectURL(url)
+      downloadAttachment(file)
     } catch (error) {
       setFormError(userFacingErrorMessage(error, '下载没有完成,请稍后重试。'))
     } finally {
@@ -269,7 +265,7 @@ export function TranscriptBatchSection() {
                           清空
                         </Button>
                       </div>
-                      <div className="flex max-h-72 flex-col gap-2 overflow-y-auto rounded-md border border-line p-3">
+                      <div className="flex max-h-72 flex-col gap-2 overflow-y-auto well p-3">
                         {page.list.map((account: Account) => (
                           <Checkbox
                             key={account.id}
@@ -298,7 +294,7 @@ export function TranscriptBatchSection() {
 
             <div className="flex items-center gap-2">
               <Button
-                variant="seal"
+                variant="primary"
                 leftIcon={FileText}
                 loading={working}
                 disabled={selected.size === 0}

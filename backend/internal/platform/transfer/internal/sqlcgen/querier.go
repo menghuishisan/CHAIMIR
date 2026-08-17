@@ -10,6 +10,7 @@ import (
 
 type Querier interface {
 	ClaimDueTransferTasks(ctx context.Context, arg ClaimDueTransferTasksParams) ([]TransferTask, error)
+	CountTransferTasks(ctx context.Context, arg CountTransferTasksParams) (int64, error)
 	CreateTransferTask(ctx context.Context, arg CreateTransferTaskParams) (TransferTask, error)
 	GetTransferTask(ctx context.Context, arg GetTransferTaskParams) (TransferTask, error)
 	ListTransferTasks(ctx context.Context, arg ListTransferTasksParams) ([]TransferTask, error)

@@ -54,7 +54,7 @@ export function matrixCells(rows: string[], columns: string[], read: (row: strin
  * pipelineSteps 生成跨链流程阶段。
  */
 export function pipelineSteps(phases: Array<{ id: string; label: string; detail: string }>, activeIndex: number, failed = false): PipelineStep[] {
-  return phases.map((phase, index) => ({ id: phase.id, label: phase.label, detail: phase.detail, status: index < activeIndex ? 'complete' : index === activeIndex ? (failed ? 'failed' : 'running') : 'pending', process: processSpan(index, activeIndex, phase.label) }));
+  return phases.map((phase, index) => ({ id: phase.id, label: phase.label, detail: phase.detail, status: index < activeIndex ? 'complete' : index === activeIndex ? (failed ? 'failed' : 'running') : 'pending', process: processSpan(index, activeIndex) }));
 }
 
 /**
@@ -62,15 +62,15 @@ export function pipelineSteps(phases: Array<{ id: string; label: string; detail:
  */
 export function processCrossMessage(message: Omit<CrossMessage, 'endAt' | 'process' | 'detail'>, detail: string): CrossMessage {
   const endedAt = message.at + 3;
-  return { ...message, endAt: endedAt, detail, process: { startedAt: message.at, endedAt, progress: message.status === 'sent' ? 0.45 : message.status === 'dropped' ? 0.75 : 1, label: detail } };
+  return { ...message, endAt: endedAt, detail, process: { startedAt: message.at, endedAt, progress: message.status === 'sent' ? 0.45 : message.status === 'dropped' ? 0.75 : 1 } };
 }
 
 /**
  * processSpan 给跨链流程阶段附加过程进度。
  */
-function processSpan(index: number, activeIndex: number, label: string): ProcessSpan {
+function processSpan(index: number, activeIndex: number): ProcessSpan {
   const startedAt = index * 2;
   const endedAt = startedAt + 2;
   const progress = index < activeIndex ? 1 : index === activeIndex ? 0.6 : 0;
-  return { startedAt, endedAt, progress, label };
+  return { startedAt, endedAt, progress };
 }

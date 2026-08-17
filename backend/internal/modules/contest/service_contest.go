@@ -39,7 +39,8 @@ func (s *Service) ListContests(ctx context.Context, status int16, page, size int
 }
 
 // ListStudentContests 查询学生可发现的报名中、进行中和已结束竞赛。
-func (s *Service) ListStudentContests(ctx context.Context, page, size int) ([]ContestDTO, int64, int, int, error) {
+// status 传 0 表示不按状态过滤;传具体状态时仍受「非草稿」可见区间约束。
+func (s *Service) ListStudentContests(ctx context.Context, status int16, page, size int) ([]ContestDTO, int64, int, int, error) {
 	id, err := currentIdentity(ctx)
 	if err != nil {
 		return nil, 0, 0, 0, err
@@ -49,7 +50,7 @@ func (s *Service) ListStudentContests(ctx context.Context, page, size int) ([]Co
 	var total int64
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
 		var err error
-		items, total, err = tx.ListStudentContests(ctx, id.TenantID, page, size)
+		items, total, err = tx.ListStudentContests(ctx, id.TenantID, status, page, size)
 		return err
 	}); err != nil {
 		return nil, 0, 0, 0, err
@@ -440,16 +441,9 @@ func (s *Service) saveLadderSnapshot(ctx context.Context, tx TxStore, tenantID, 
 	if snapshotStatus != ContestStatusFrozen && snapshotStatus != ContestStatusArchived {
 		return LadderSnapshot{}, apperr.ErrContestInvalid
 	}
-	ranking := make([]map[string]any, 0, len(ranks))
+	ranking := make([]LadderSnapshotEntry, 0, len(ranks))
 	for _, rank := range ranks {
-		ranking = append(ranking, map[string]any{
-			"team_id":       ids.Format(rank.TeamID),
-			"score":         rank.Score,
-			"solved_count":  rank.SolvedCount,
-			"last_solve_at": rank.LastSolveAt,
-			"rank":          rank.Rank,
-			"updated_at":    rank.UpdatedAt,
-		})
+		ranking = append(ranking, LadderSnapshotEntry{TeamID: rank.TeamID, Score: rank.Score, SolvedCount: rank.SolvedCount, LastSolveAt: rank.LastSolveAt, Rank: rank.Rank, UpdatedAt: rank.UpdatedAt})
 	}
 	return tx.UpsertLadderSnapshot(ctx, LadderSnapshot{ID: s.ids.Generate(), TenantID: tenantID, ContestID: contestID, SnapshotStatus: snapshotStatus, Ranking: ranking})
 }
@@ -477,7 +471,7 @@ func (s *Service) refreshProblemUsageRefs(ctx context.Context, tenantID, contest
 	}); err != nil {
 		return err
 	}
-	sourceRef := fmt.Sprintf("contest:%d:contest:%d", createdAt.Year(), contestID)
+	sourceRef := fmt.Sprintf("contest:%d:contest:%s", createdAt.Year(), ids.Format(contestID))
 	if err := s.content.ReplaceUsageRefs(ctx, tenantID, "contest.contest", sourceRef, refs); err != nil {
 		return apperr.ErrContestContentUnavailable.WithCause(err)
 	}

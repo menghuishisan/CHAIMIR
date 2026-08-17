@@ -200,6 +200,26 @@ func PathID(c *gin.Context, name string) (int64, bool) {
 	return id, true
 }
 
+// QueryID 解析查询参数中的 Snowflake 资源 ID，缺失的可选 ID 返回零值。
+// 必填 ID 缺失或任意非规范十进制 ID 均使用 QueryInt 一致的参数错误响应。
+func QueryID(c *gin.Context, key string, required bool) (int64, bool) {
+	raw := c.Query(key)
+	if raw == "" {
+		if !required {
+			return 0, true
+		}
+		response.Fail(c, apperr.ErrQueryParamInvalid)
+		return 0, false
+	}
+
+	id, ok := ids.Parse(raw)
+	if !ok {
+		response.Fail(c, apperr.ErrQueryParamInvalid)
+		return 0, false
+	}
+	return id, true
+}
+
 // QueryIntRule 描述 HTTP 查询整数的统一解析规则,避免每种参数场景各自实现一套函数。
 type QueryIntRule struct {
 	BitSize int

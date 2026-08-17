@@ -64,7 +64,7 @@ export function UserMenu({ profilePath, loginPath }: UserMenuProps) {
       >
         <span
           aria-hidden="true"
-          className="grid size-8 shrink-0 place-items-center rounded-full bg-jade-400/15 text-sm font-medium text-accent"
+          className="grid size-8 shrink-0 place-items-center rounded-full bg-on-dark-accent-soft text-sm font-medium text-accent"
         >
           {account.name.slice(0, 1)}
         </span>

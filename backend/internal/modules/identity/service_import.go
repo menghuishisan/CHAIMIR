@@ -487,12 +487,12 @@ func (s *Service) parseImportRecords(records [][]string, targetType int16) ([]im
 			row.Phone = strings.TrimSpace(record[0])
 			row.Name = strings.TrimSpace(record[1])
 			row.No = strings.TrimSpace(record[2])
-			orgID, scanErr := strconv.ParseInt(strings.TrimSpace(record[3]), 10, 64)
-			if scanErr == nil && orgID > 0 {
+			orgID, ok := ids.Parse(strings.TrimSpace(record[3]))
+			if ok {
 				parsedOrgID := ids.ID(orgID)
 				row.OrgID = &parsedOrgID
 			}
-			if scanErr != nil || row.OrgID == nil {
+			if row.OrgID == nil {
 				row.Error = "组织 ID 不正确"
 			}
 			if err := ValidatePhone(row.Phone); err != nil && row.Error == "" {

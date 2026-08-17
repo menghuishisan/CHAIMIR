@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"chaimir/internal/contracts"
+	"chaimir/internal/platform/ids"
 	"chaimir/internal/platform/intx"
 	"chaimir/internal/platform/response"
 	"chaimir/internal/platform/timex"
@@ -176,7 +177,7 @@ func (s *Service) GetProgress(ctx context.Context, instanceID int64) (ProgressDT
 	}); err != nil {
 		return ProgressDTO{}, err
 	}
-	return ProgressDTO{Topic: fmt.Sprintf("tenant:%d:experiment:%d:%s", inst.TenantID, inst.ID, progressChannelName), Channel: progressChannelName}, nil
+	return ProgressDTO{Topic: "tenant:" + ids.Format(inst.TenantID) + ":experiment:" + ids.Format(inst.ID) + ":" + progressChannelName, Channel: progressChannelName}, nil
 }
 
 // PauseInstance 暂停实验实例并通知 M2 暂停已有沙箱。
@@ -506,7 +507,7 @@ func (s *Service) publishExperimentCompletedNotification(ctx context.Context, it
 			"experiment": exp.Name,
 			"score":      fmt.Sprintf("%.2f", item.Score),
 		},
-		Link: fmt.Sprintf("student/experiment-detail?id=%d", item.ExperimentID),
+		Link: "student/experiment-detail?id=" + ids.Format(item.ExperimentID),
 	}
 	return s.bus.Publish(ctx, contracts.SubjectNotifySendRequested, evt)
 }
@@ -537,4 +538,52 @@ func (s *Service) drainExperimentScoreOutboxBestEffort(ctx context.Context) {
 	if err := s.RunExperimentScoreOutboxOnce(ctx); err != nil {
 		logging.ErrorContext(ctx, "experiment score outbox drain failed", err.Error())
 	}
+}
+
+// HandleSandboxRecycled 消费 M2 回收事件并将仍在进行的实例标记为环境已释放。
+func (s *Service) HandleSandboxRecycled(ctx context.Context, event contracts.SandboxRecycledEvent) error {
+	if event.TenantID <= 0 || !validExperimentSourceRef(event.SourceRef) {
+		return apperr.ErrExperimentSourceRefInvalid
+	}
+	return s.store.TenantTx(ctx, event.TenantID, func(ctx context.Context, tx TxStore) error {
+		inst, err := tx.GetInstanceBySourceRef(ctx, event.TenantID, event.SourceRef)
+		if err != nil {
+			return err
+		}
+		if inst.Status == InstanceStatusRunning || inst.Status == InstanceStatusPaused || inst.Status == InstanceStatusCreating {
+			_, err = tx.SetInstanceStatus(ctx, event.TenantID, inst.ID, InstanceStatusReleased)
+			return err
+		}
+		return nil
+	})
+}
+
+// HandleCourseEnded 课程结束或归档后级联回收课内仍占用引擎资源的实验实例(M7 需求 D3)。
+//
+// 逐个实例回收而不是批量:回收要按 source_ref 通知 M2/M4,任一失败都必须显式返回让事件重投,
+// 而已回收成功的实例已落 recycled 态,重投时不会被再次取出(查询只看仍占资源的四态),天然幂等。
+func (s *Service) HandleCourseEnded(ctx context.Context, event contracts.TeachingCourseEndedEvent) error {
+	if event.TenantID <= 0 || event.CourseID <= 0 {
+		return apperr.ErrExperimentInstanceInvalid
+	}
+	var items []ExperimentInstance
+	if err := s.store.TenantTx(ctx, event.TenantID, func(ctx context.Context, tx TxStore) error {
+		var err error
+		items, err = tx.ListLiveInstancesByCourse(ctx, event.TenantID, event.CourseID)
+		return err
+	}); err != nil {
+		return err
+	}
+	for _, item := range items {
+		if err := s.recycleEngines(ctx, item, "course_ended"); err != nil {
+			return err
+		}
+		if err := s.store.TenantTx(ctx, event.TenantID, func(ctx context.Context, tx TxStore) error {
+			_, err := tx.SetInstanceStatus(ctx, event.TenantID, item.ID, InstanceStatusRecycled)
+			return err
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
 }

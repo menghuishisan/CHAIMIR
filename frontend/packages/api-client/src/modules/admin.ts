@@ -1,7 +1,7 @@
 // Admin API 文件定义 M9 管理后台前端唯一调用入口。
 
 import { ApiClient } from '../client'
-import type { AdminScope, AlertStatus } from '../constants/admin'
+import type { AdminScope, AlertStatus, BackupStatus } from '../constants/admin'
 import type { PaginatedResponse } from '../types/common'
 import type {
   AlertEvent,
@@ -113,8 +113,12 @@ export class AdminApi {
     return this.client.get('/admin/platform/monitoring/panels')
   }
 
-  // listBackups 查询受控运维任务写入的备份记录。
-  async listBackups(params?: { page?: number; size?: number }): Promise<PaginatedResponse<BackupRecord>> {
+  // listBackups 查询受控运维任务写入的备份记录。结果筛选由服务端执行,total 与筛选同口径。
+  async listBackups(params?: {
+    status?: BackupStatus
+    page?: number
+    size?: number
+  }): Promise<PaginatedResponse<BackupRecord>> {
     return this.client.get('/admin/platform/backups', params)
   }
 }

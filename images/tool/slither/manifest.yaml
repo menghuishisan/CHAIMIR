@@ -38,8 +38,8 @@ tool:
     - sleep
     - "2147483647"
   command_policy:
-    allowed_commands:
-      - slither
+    allowed_argv:
+      - ["slither"]
     default_timeout_seconds: 60
     max_timeout_seconds: 180
 ports: []
@@ -87,4 +87,3 @@ supply_chain:
   trivy_required: true
   cosign_required: true
   pull_by_digest_in_production: true
-

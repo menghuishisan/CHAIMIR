@@ -15,6 +15,8 @@ import {
   Breadcrumb,
   Button,
   Callout,
+  FilterBar,
+  FilterField,
   FormField,
   Input,
   Modal,
@@ -30,7 +32,6 @@ import {
   Pagination,
   Select,
   Skeleton,
-  Stat,
   StatusIndicator,
   Table,
   type TableColumn,
@@ -65,14 +66,10 @@ export default function StudentSimulationsPage() {
     [submittedKeyword],
   )
 
-  const handleSearch = useCallback((event: React.FormEvent<HTMLFormElement>) => {
-    event.preventDefault()
+  // FilterBar 自己是 form 并接住回车,故这里只需要提交动作本身
+  const handleSearch = useCallback(() => {
     setSubmittedKeyword(keyword.trim())
   }, [keyword])
-
-  const list = packages.data ? packages.data.list : []
-  const categoryCount = new Set(list.map((item) => item.category)).size
-  const browserCount = list.filter((item) => item.compute === SIM_COMPUTE.BROWSER).length
 
   const columns: TableColumn<SimPackageMeta>[] = [
     {
@@ -142,69 +139,66 @@ export default function StudentSimulationsPage() {
         icon={Network}
       />
 
-      <PageSection>
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          <Stat label="可用场景" value={packages.total} icon={Network} />
-          <Stat label="涵盖分类" value={categoryCount} icon={Layers} />
-          <Stat label="本机推演" value={browserCount} icon={Play} hint="无需服务端算力" />
-        </div>
-      </PageSection>
-
+      {/* 不做指标带:可用场景数已在下方分组说明里给出,而「涵盖分类/本机推演」没有服务端聚合,
+          用第 1 页的 20 条数出来就是错数(规范 §6.5);分类与算力位置在每一行里逐条可见。 */}
       <PageSection
         title="场景列表"
-        description={`共 ${packages.total} 个可用场景`}
-        actions={
-          <form onSubmit={handleSearch} className="flex items-end gap-2">
-            <FormField label="按名称搜索" className="mb-0">
+        description={
+          submittedKeyword
+            ? `共 ${packages.total} 个匹配「${submittedKeyword}」的场景`
+            : `共 ${packages.total} 个可用场景`
+        }
+      >
+        <div className="flex flex-col gap-4">
+          <FilterBar label="场景筛选" onSubmit={handleSearch} submitLabel="搜索">
+            <FilterField label="场景名称" htmlFor="sim-keyword">
               <Input
+                id="sim-keyword"
                 value={keyword}
                 leftIcon={Search}
                 placeholder="输入场景名称"
                 onChange={(event) => setKeyword(event.target.value)}
               />
-            </FormField>
-            <Button type="submit" variant="outline">
-              搜索
-            </Button>
-          </form>
-        }
-      >
-        <ResourceState
-          resource={packages}
-          emptyIcon={Network}
-          emptyTitle={submittedKeyword ? '没有匹配的场景' : '暂无可用场景'}
-          emptyDescription={
-            submittedKeyword
-              ? '换个关键词再试,或清空搜索查看全部场景。'
-              : '老师提交并通过审核的仿真场景会显示在这里。'
-          }
-          emptyAction={
-            submittedKeyword ? (
-              <Button
-                variant="outline"
-                onClick={() => {
-                  setKeyword('')
-                  setSubmittedKeyword('')
-                }}
-              >
-                清空搜索
-              </Button>
-            ) : undefined
-          }
-          skeleton={<Table columns={columns} data={[]} rowKey={() => ''} loading />}
-        >
-          {(page) => (
-            <div className="flex flex-col gap-4">
-              <Table columns={columns} data={page.list} rowKey={(item) => item.id} />
-              <Pagination
-                page={packages.page}
-                pageSize={packages.pageSize}
-                total={packages.total}
-                onPageChange={packages.setPage}
-              />
-            </div>
-          )}
-        </ResourceState>
+            </FilterField>
+          </FilterBar>
+
+          <ResourceState
+            resource={packages}
+            emptyIcon={Network}
+            emptyTitle={submittedKeyword ? '没有匹配的场景' : '暂无可用场景'}
+            emptyDescription={
+              submittedKeyword
+                ? '换个关键词再试,或清空搜索查看全部场景。'
+                : '老师提交并通过审核的仿真场景会显示在这里。'
+            }
+            emptyAction={
+              submittedKeyword ? (
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    setKeyword('')
+                    setSubmittedKeyword('')
+                  }}
+                >
+                  清空搜索
+                </Button>
+              ) : undefined
+            }
+            skeleton={<Table columns={columns} data={[]} rowKey={() => ''} loading />}
+          >
+            {(page) => (
+              <div className="flex flex-col gap-4">
+                <Table columns={columns} data={page.list} rowKey={(item) => item.id} />
+                <Pagination
+                  page={packages.page}
+                  pageSize={packages.pageSize}
+                  total={packages.total}
+                  onPageChange={packages.setPage}
+                />
+              </div>
+            )}
+          </ResourceState>
+        </div>
       </PageSection>
 
       {versionPickerCode ? (

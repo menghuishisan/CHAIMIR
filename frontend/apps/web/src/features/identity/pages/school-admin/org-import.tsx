@@ -25,6 +25,7 @@ import {
   type TableColumn,
 } from '@chaimir/ui'
 import { api } from '../../../../app/api'
+import { downloadAttachment } from '../../../../utils/downloadAttachment'
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
 
 export interface OrgImportModalProps {
@@ -46,12 +47,7 @@ export function OrgImportModal({ onClose, onCommitted }: OrgImportModalProps) {
     setFormError(undefined)
     try {
       const result = await api.identity.downloadOrgImportTemplate()
-      const url = URL.createObjectURL(result.blob)
-      const anchor = document.createElement('a')
-      anchor.href = url
-      anchor.download = result.fileName
-      anchor.click()
-      URL.revokeObjectURL(url)
+      downloadAttachment(result)
     } catch (error) {
       setFormError(userFacingErrorMessage(error, '模板下载没有成功,请稍后重试。'))
     }
@@ -140,7 +136,7 @@ export function OrgImportModal({ onClose, onCommitted }: OrgImportModalProps) {
           ) : null}
 
           {preview ? (
-            <div className="flex flex-col gap-3 rounded-md border border-line bg-surface-sunken p-4">
+            <div className="flex flex-col gap-3 well p-4">
               <div className="flex flex-wrap items-center gap-2">
                 <Badge tone="neutral">共 {preview.total} 行</Badge>
                 <Badge tone="success">可导入 {preview.valid} 行</Badge>
@@ -178,7 +174,7 @@ export function OrgImportModal({ onClose, onCommitted }: OrgImportModalProps) {
                 换个文件
               </Button>
               <Button
-                variant="seal"
+                variant="primary"
                 leftIcon={CircleCheck}
                 loading={working}
                 disabled={preview.valid === 0}
@@ -189,7 +185,7 @@ export function OrgImportModal({ onClose, onCommitted }: OrgImportModalProps) {
             </>
           ) : (
             <Button
-              variant="seal"
+              variant="primary"
               leftIcon={FileSpreadsheet}
               loading={working}
               disabled={!file}

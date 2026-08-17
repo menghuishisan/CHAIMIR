@@ -119,7 +119,7 @@ export function CourseReviewCard({ courseId, courseStatus }: CourseReviewCardPro
               {formError}
             </Callout>
           ) : null}
-          <Button type="submit" variant="seal" leftIcon={Star} loading={submitting} className="mt-4 w-full">
+          <Button type="submit" variant="primary" leftIcon={Star} loading={submitting} className="mt-4 w-full">
             提交评价
           </Button>
         </form>

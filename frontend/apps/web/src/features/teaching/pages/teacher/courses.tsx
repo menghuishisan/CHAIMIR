@@ -3,9 +3,18 @@
 // 状态流转是有向的(草稿→发布→进行中→结课→归档),故动作按当前状态给出,
 // 不把全部动作平铺成永远可点的按钮组。
 
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useState } from 'react'
 import { useNavigate } from 'react-router'
-import { Book, BookPlus, Copy, KeyRound, Layers, MoreVertical, Share2 } from 'lucide-react'
+import {
+  Book,
+  BookPlus,
+  ClipboardCopy,
+  Copy,
+  KeyRound,
+  Layers,
+  MoreVertical,
+  Share2,
+} from 'lucide-react'
 import { CourseStatus, CourseVisibility, type Course } from '@chaimir/api-client'
 import {
   Badge,
@@ -13,6 +22,8 @@ import {
   Button,
   Callout,
   CoverImage,
+  FilterBar,
+  FilterField,
   FormField,
   IconButton,
   Input,
@@ -41,7 +52,8 @@ import {
 } from '@chaimir/ui'
 import { api } from '../../../../app/api'
 import { ResourceState } from '../../../../components/ResourceState'
-import { usePagedResource } from '../../../../hooks'
+import { usePagedResource, useResourceTotal } from '../../../../hooks'
+import { copyText } from '../../../../utils/clipboard'
 import { formatDate } from '../../../../utils/formatters'
 import {
   courseStatusLabel,
@@ -153,14 +165,25 @@ export default function TeacherCoursesPage() {
     [courses],
   )
 
-  const stats = useMemo(() => {
-    const list = courses.data ? courses.data.list : []
-    return {
-      running: list.filter((course) => course.status === CourseStatus.RUNNING).length,
-      draft: list.filter((course) => course.status === CourseStatus.DRAFT).length,
-      shared: list.filter((course) => course.visibility === CourseVisibility.SHARED).length,
-    }
-  }, [courses.data])
+  // 指标带取服务端全量口径,不随下方状态筛选变化。
+  // 「已共享」没有服务端筛选参数,故不做这张卡:共享状态在每一行的标签里可见(规范 §6.5)。
+  const totalCount = useResourceTotal(
+    (params) => api.teaching.getCourses({ role: 'teacher', ...params }),
+    [],
+  )
+  const runningCount = useResourceTotal(
+    (params) =>
+      api.teaching.getCourses({ role: 'teacher', status: CourseStatus.RUNNING, ...params }),
+    [],
+  )
+  const draftCount = useResourceTotal(
+    (params) => api.teaching.getCourses({ role: 'teacher', status: CourseStatus.DRAFT, ...params }),
+    [],
+  )
+  const endedCount = useResourceTotal(
+    (params) => api.teaching.getCourses({ role: 'teacher', status: CourseStatus.ENDED, ...params }),
+    [],
+  )
 
   const columns: TableColumn<Course>[] = [
     {
@@ -204,7 +227,31 @@ export default function TeacherCoursesPage() {
       key: 'invite_code',
       header: '邀请码',
       mono: true,
-      render: (course) => course.invite_code ?? '—',
+      // 本页的用途就是「把邀请码发给学生」,所以邀请码必须能一键复制,
+      // 而不是让老师用鼠标框选一串等宽字符(规范 §6.5 动作就近)。
+      render: (course) => {
+        const inviteCode = course.invite_code
+        if (!inviteCode) return '—'
+        return (
+          <span className="flex items-center gap-1">
+            <span className="whitespace-nowrap">{inviteCode}</span>
+            <IconButton
+              variant="ghost"
+              size="sm"
+              icon={ClipboardCopy}
+              aria-label={`复制课程「${course.name}」的邀请码`}
+              onClick={() => {
+                void copyText(inviteCode, {
+                  what: '邀请码',
+                  operation: 'teaching.course.copyInviteCode',
+                }).then((ok) => {
+                  if (ok) toast.success('邀请码已复制')
+                })
+              }}
+            />
+          </span>
+        )
+      },
     },
     {
       key: 'status',
@@ -253,27 +300,30 @@ export default function TeacherCoursesPage() {
 
       <PageSection>
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <Stat label="我的课程" value={courses.total} icon={Book} />
-          <Stat label="进行中" value={stats.running} icon={Layers} />
-          <Stat label="草稿" value={stats.draft} icon={BookPlus} hint="发布后学生才可加入" />
-          <Stat label="已共享" value={stats.shared} icon={Share2} hint="其他教师可克隆复用" />
+          <Stat label="我的课程" value={totalCount ?? '—'} icon={Book} hint="不受下方筛选影响" />
+          <Stat label="进行中" value={runningCount ?? '—'} icon={Layers} />
+          <Stat label="草稿" value={draftCount ?? '—'} icon={BookPlus} hint="发布后学生才可加入" />
+          <Stat label="已结课" value={endedCount ?? '—'} icon={Share2} hint="可归档结算成绩" />
         </div>
       </PageSection>
 
       <PageSection
         title="课程列表"
         description={`共 ${courses.total} 门课程`}
-        actions={
-          <SegmentedControl
-            aria-label="按课程状态筛选"
-            size="sm"
-            options={STATUS_FILTERS.map((item) => ({ value: item.value, label: item.label }))}
-            value={statusFilter}
-            onValueChange={setStatusFilter}
-          />
-        }
       >
         <div className="flex flex-col gap-4">
+          <FilterBar label="课程筛选">
+            <FilterField label="课程状态" group>
+              <SegmentedControl
+                aria-label="按课程状态筛选"
+                size="sm"
+                options={STATUS_FILTERS.map((item) => ({ value: item.value, label: item.label }))}
+                value={statusFilter}
+                onValueChange={setStatusFilter}
+              />
+            </FilterField>
+          </FilterBar>
+
           {actionError ? <Callout tone="danger">{actionError}</Callout> : null}
 
           <ResourceState
@@ -474,7 +524,7 @@ function CloneCourseModal({ course, onClose, onCloned }: CloneCourseModalProps) 
           <Button variant="outline" onClick={onClose}>
             取消
           </Button>
-          <Button variant="seal" loading={working} onClick={() => void submit()}>
+          <Button variant="primary" loading={working} onClick={() => void submit()}>
             确认克隆
           </Button>
         </ModalFooter>

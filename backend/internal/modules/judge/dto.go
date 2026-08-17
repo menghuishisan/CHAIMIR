@@ -19,6 +19,20 @@ type JudgerRequest struct {
 	Status            int16           `json:"status"`
 }
 
+// JudgerDTO 是平台管理员读取和维护判题器时使用的公开响应。
+type JudgerDTO struct {
+	ID                ids.ID          `json:"id"`
+	Code              string          `json:"code"`
+	Name              string          `json:"name"`
+	Type              int16           `json:"type"`
+	ExecutorRef       string          `json:"executor_ref"`
+	RuntimeRequired   bool            `json:"runtime_required"`
+	DefaultTimeoutSec int32           `json:"default_timeout_sec"`
+	ResourceSpec      json.RawMessage `json:"resource_spec"`
+	SelftestStatus    int16           `json:"selftest_status"`
+	Status            int16           `json:"status"`
+}
+
 // JudgerCatalogResponse 是判题器目录接口的输出,只含业务模块选判题方式所需字段。
 type JudgerCatalogResponse struct {
 	Judgers []CatalogJudgerResponse `json:"judgers"`
@@ -54,6 +68,39 @@ type ManualScoreRequest struct {
 	MaxScore int32  `json:"max_score"`
 	Passed   bool   `json:"passed"`
 	Comment  string `json:"comment"`
+}
+
+// JudgeTaskDTO 是教师查询、重判和人工评分返回的任务摘要。
+type JudgeTaskDTO struct {
+	TaskID      ids.ID              `json:"task_id"`
+	TenantID    ids.ID              `json:"tenant_id"`
+	SourceRef   string              `json:"source_ref"`
+	SubmitterID ids.ID              `json:"submitter_id"`
+	Status      string              `json:"status"`
+	Existing    bool                `json:"existing"`
+	Result      *JudgeTaskResultDTO `json:"result,omitempty"`
+}
+
+// JudgeTaskResultDTO 是判题任务最新版本的可公开结果。
+type JudgeTaskResultDTO struct {
+	Passed    bool                   `json:"passed"`
+	Score     int32                  `json:"score"`
+	MaxScore  int32                  `json:"max_score"`
+	Version   int32                  `json:"version"`
+	IsRejudge bool                   `json:"is_rejudge"`
+	Details   []JudgeResultDetailDTO `json:"details"`
+	ResultRef string                 `json:"result_ref"`
+}
+
+// JudgeResultDetailDTO 是单条脱敏的判题可解释详情。
+type JudgeResultDetailDTO struct {
+	Case          string `json:"case,omitempty"`
+	Source        string `json:"source,omitempty"`
+	Target        string `json:"target,omitempty"`
+	Passed        bool   `json:"passed"`
+	ExpectedLabel string `json:"expected_label,omitempty"`
+	Actual        string `json:"actual,omitempty"`
+	Hint          string `json:"hint,omitempty"`
 }
 
 // RejudgeBatchRequest 是按来源批量重判的请求。

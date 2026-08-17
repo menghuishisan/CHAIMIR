@@ -15,8 +15,10 @@ import (
 
 	"chaimir/internal/contracts"
 	"chaimir/internal/platform/config"
+	"chaimir/internal/platform/ids"
 	platformk8s "chaimir/internal/platform/k8s"
 	"chaimir/internal/platform/workload"
+	"chaimir/pkg/limitio"
 	"chaimir/pkg/logging"
 
 	appsv1 "k8s.io/api/apps/v1"
@@ -108,7 +110,7 @@ func (o *K8sOrchestrator) DestroySandboxResources(ctx context.Context, sb Sandbo
 // StopComputeKeepSnapshot 释放计算工作负载但保留快照命名空间和 PVC。
 func (o *K8sOrchestrator) StopComputeKeepSnapshot(ctx context.Context, sb Sandbox) error {
 	cs := o.client.Clientset()
-	selector := fmt.Sprintf("chaimir.io/sandbox-id=%d", sb.ID)
+	selector := "chaimir.io/sandbox-id=" + ids.Format(sb.ID)
 	if err := cs.CoreV1().Pods(sb.Namespace).DeleteCollection(ctx, metav1.DeleteOptions{}, metav1.ListOptions{LabelSelector: selector}); err != nil && !apierrors.IsNotFound(err) {
 		return fmt.Errorf("删除快照沙箱计算 Pod 失败: %w", err)
 	}
@@ -240,7 +242,7 @@ func (o *K8sOrchestrator) ResourceUsage(ctx context.Context, sb Sandbox) (contra
 	cs := o.client.Clientset()
 	usage := contracts.SandboxResourceUsage{}
 	metrics, err := o.client.Metrics().MetricsV1beta1().PodMetricses(sb.Namespace).List(ctx, metav1.ListOptions{
-		LabelSelector: fmt.Sprintf("chaimir.io/sandbox-id=%d", sb.ID),
+		LabelSelector: "chaimir.io/sandbox-id=" + ids.Format(sb.ID),
 	})
 	if err != nil {
 		if unavailable := metricsUnavailableError(err); unavailable != nil {
@@ -250,7 +252,7 @@ func (o *K8sOrchestrator) ResourceUsage(ctx context.Context, sb Sandbox) (contra
 	}
 	addPodMetricsUsage(&usage, metrics.Items)
 	pods, err := cs.CoreV1().Pods(sb.Namespace).List(ctx, metav1.ListOptions{
-		LabelSelector: fmt.Sprintf("chaimir.io/sandbox-id=%d", sb.ID),
+		LabelSelector: "chaimir.io/sandbox-id=" + ids.Format(sb.ID),
 	})
 	if apierrors.IsNotFound(err) {
 		return usage, nil
@@ -264,7 +266,7 @@ func (o *K8sOrchestrator) ResourceUsage(ctx context.Context, sb Sandbox) (contra
 		}
 	}
 	pvcs, err := cs.CoreV1().PersistentVolumeClaims(sb.Namespace).List(ctx, metav1.ListOptions{
-		LabelSelector: fmt.Sprintf("chaimir.io/sandbox-id=%d", sb.ID),
+		LabelSelector: "chaimir.io/sandbox-id=" + ids.Format(sb.ID),
 	})
 	if apierrors.IsNotFound(err) {
 		return usage, nil
@@ -298,11 +300,15 @@ func metricsUnavailableError(err error) error {
 	return nil
 }
 
-// Exec 在沙箱容器中执行受控命令。
+// Exec 在沙箱容器中执行受控命令,stdout/stderr 分别受配置上限约束。
 func (o *K8sOrchestrator) Exec(ctx context.Context, namespace, container string, command []string, stdin []byte, tty bool) ([]byte, []byte, error) {
+	if o.cfg.ExecOutputMaxBytes <= 0 {
+		return nil, nil, fmt.Errorf("SANDBOX_EXEC_OUTPUT_MAX_BYTES 未配置")
+	}
 	podName, containerName := splitExecTarget(container)
-	var stdout, stderr bytes.Buffer
-	err := o.client.Exec(ctx, namespace, podName, containerName, command, execInputReader(stdin), &stdout, &stderr, tty)
+	stdout := limitio.NewBuffer(o.cfg.ExecOutputMaxBytes)
+	stderr := limitio.NewBuffer(o.cfg.ExecOutputMaxBytes)
+	err := o.client.Exec(ctx, namespace, podName, containerName, command, execInputReader(stdin), stdout, stderr, tty)
 	return stdout.Bytes(), stderr.Bytes(), err
 }
 
@@ -398,7 +404,7 @@ func (o *K8sOrchestrator) PrepullImage(ctx context.Context, image RuntimeImage, 
 
 // DeletePrepullDaemonSet 删除镜像预拉取 DaemonSet,NotFound 视为幂等成功。
 func (o *K8sOrchestrator) DeletePrepullDaemonSet(ctx context.Context, image RuntimeImage) error {
-	name := fmt.Sprintf("chaimir-prepull-%d", image.ID)
+	name := "chaimir-prepull-" + ids.Format(image.ID)
 	err := o.client.Clientset().AppsV1().DaemonSets(o.cfg.PrepullNamespace).Delete(ctx, name, metav1.DeleteOptions{})
 	if apierrors.IsNotFound(err) {
 		return nil
@@ -691,8 +697,8 @@ func namespaceObject(name string, sb Sandbox) *corev1.Namespace {
 			"policy.sigstore.dev/include":        "true",
 			"chaimir.io/sandbox":                 "true",
 			"chaimir.io/managed-by":              "chaimir-backend",
-			"chaimir.io/tenant-id":               fmt.Sprintf("%d", sb.TenantID),
-			"chaimir.io/sandbox-id":              fmt.Sprintf("%d", sb.ID),
+			"chaimir.io/tenant-id":               ids.Format(sb.TenantID),
+			"chaimir.io/sandbox-id":              ids.Format(sb.ID),
 			"pod-security.kubernetes.io/enforce": "restricted",
 		},
 	}}
@@ -709,7 +715,7 @@ func (o *K8sOrchestrator) applySandboxServiceAccount(ctx context.Context, cs kub
 			Labels: map[string]string{
 				"app":                   "chaimir",
 				"module":                "sandbox",
-				"chaimir.io/sandbox-id": fmt.Sprintf("%d", plan.Sandbox.ID),
+				"chaimir.io/sandbox-id": ids.Format(plan.Sandbox.ID),
 			},
 		},
 		AutomountServiceAccountToken: &automount,
@@ -1049,7 +1055,7 @@ func (o *K8sOrchestrator) createVolumeDomainPVC(ctx context.Context, cs kubernet
 			Labels: map[string]string{
 				"app":                   "chaimir",
 				"module":                "sandbox",
-				"chaimir.io/sandbox-id": fmt.Sprintf("%d", plan.Sandbox.ID),
+				"chaimir.io/sandbox-id": ids.Format(plan.Sandbox.ID),
 				"chaimir.io/volume":     domain.Name,
 			},
 		},
@@ -1145,7 +1151,7 @@ func (o *K8sOrchestrator) podFromSpec(plan CreateSandboxPlan, spec workload.PodS
 			Labels: map[string]string{
 				"app":                   "chaimir",
 				"module":                "sandbox",
-				"chaimir.io/sandbox-id": fmt.Sprintf("%d", plan.Sandbox.ID),
+				"chaimir.io/sandbox-id": ids.Format(plan.Sandbox.ID),
 				"chaimir.io/pod-role":   spec.Name,
 			},
 		},
@@ -1176,7 +1182,7 @@ func (o *K8sOrchestrator) toolPodForPlan(plan CreateSandboxPlan, tool Tool, comp
 			Labels: map[string]string{
 				"app":                   "chaimir",
 				"module":                "sandbox",
-				"chaimir.io/sandbox-id": fmt.Sprintf("%d", plan.Sandbox.ID),
+				"chaimir.io/sandbox-id": ids.Format(plan.Sandbox.ID),
 				"chaimir.io/tool-code":  tool.Code,
 				"chaimir.io/component":  component.Name,
 				"chaimir.io/pod-role":   podName,
@@ -1430,7 +1436,7 @@ func volumeSnapshotObject(sb Sandbox, domain, name string, retention time.Durati
 			"labels": map[string]any{
 				"app":                   "chaimir",
 				"module":                "sandbox",
-				"chaimir.io/sandbox-id": fmt.Sprintf("%d", sb.ID),
+				"chaimir.io/sandbox-id": ids.Format(sb.ID),
 				"chaimir.io/volume":     domain,
 			},
 			"annotations": map[string]any{
@@ -1443,7 +1449,7 @@ func volumeSnapshotObject(sb Sandbox, domain, name string, retention time.Durati
 
 // snapshotGroupName 返回沙箱快照组引用名,具体卷域快照由同一前缀派生。
 func snapshotGroupName(sb Sandbox) string {
-	return fmt.Sprintf("snapshot-%d", sb.ID)
+	return "snapshot-" + ids.Format(sb.ID)
 }
 
 // volumeSnapshotName 返回单个卷域的 VolumeSnapshot 名称。
@@ -1517,7 +1523,7 @@ func sandboxPodRoleLabels(sb Sandbox, role string) map[string]string {
 	return map[string]string{
 		"app":                   "chaimir",
 		"module":                "sandbox",
-		"chaimir.io/sandbox-id": fmt.Sprintf("%d", sb.ID),
+		"chaimir.io/sandbox-id": ids.Format(sb.ID),
 		"chaimir.io/pod-role":   role,
 	}
 }
@@ -1641,7 +1647,7 @@ func splitExecTarget(target string) (string, string) {
 
 // prepullDaemonSet 构造镜像预拉取 DaemonSet。
 func (o *K8sOrchestrator) prepullDaemonSet(image RuntimeImage, specs []PrepullImageSpec) *appsv1.DaemonSet {
-	labels := map[string]string{"app": "chaimir", "module": "sandbox", "runtime_image_id": fmt.Sprintf("%d", image.ID)}
+	labels := map[string]string{"app": "chaimir", "module": "sandbox", "runtime_image_id": ids.Format(image.ID)}
 	automount := false
 	initContainers := make([]corev1.Container, 0, len(specs))
 	for idx, spec := range specs {
@@ -1675,7 +1681,7 @@ func (o *K8sOrchestrator) prepullDaemonSet(image RuntimeImage, specs []PrepullIm
 		VolumeMounts:    prepullVolumeMounts(holdSpec),
 	}
 	return &appsv1.DaemonSet{
-		ObjectMeta: metav1.ObjectMeta{Name: fmt.Sprintf("chaimir-prepull-%d", image.ID), Namespace: o.cfg.PrepullNamespace, Labels: labels},
+		ObjectMeta: metav1.ObjectMeta{Name: "chaimir-prepull-" + ids.Format(image.ID), Namespace: o.cfg.PrepullNamespace, Labels: labels},
 		Spec: appsv1.DaemonSetSpec{
 			Selector: &metav1.LabelSelector{MatchLabels: labels},
 			Template: corev1.PodTemplateSpec{

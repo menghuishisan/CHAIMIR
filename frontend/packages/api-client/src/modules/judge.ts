@@ -2,6 +2,7 @@
 // 对应后端 M3 模块
 
 import { ApiClient } from '../client'
+import type { JudgeTaskState } from '../constants/judge'
 import type { PaginatedResponse } from '../types/common'
 import type {
   JudgeTask,
@@ -76,6 +77,8 @@ export class JudgeApi {
   async getTasks(params?: {
     source_ref?: string
     pending_manual?: boolean
+    /** 运维分组:省略=不筛、active=排队与执行中、abnormal=超时/失败/出错。筛选与 total 同口径 */
+    state?: JudgeTaskState
     page?: number
     size?: number
   }): Promise<PaginatedResponse<JudgeTask>> {

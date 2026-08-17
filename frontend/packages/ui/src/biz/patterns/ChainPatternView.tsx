@@ -8,6 +8,7 @@ import { cn } from "../../lib/cn";
 import { Icon } from "../../lib/icon";
 import { EMPHASIS_BOX, resolveEmphasis, shortLabel } from "../frameVisual";
 import { TONE_BORDER, TONE_ICON, TONE_TEXT, type DarkTone } from "./darkTone";
+import { PatternFrame } from "./PatternFrame";
 import type { PatternViewProps } from "./types";
 import type { ChainBlock, ChainPattern } from "@chaimir/sim-sdk";
 
@@ -102,7 +103,7 @@ export function ChainPatternView({
   const laneClass = compact ? "flex flex-col gap-2" : "flex flex-wrap items-stretch gap-2";
 
   return (
-    <div className="flex flex-col gap-3">
+    <PatternFrame density={density}>
       <div className={laneClass} role="list" aria-label={`${pattern.title} 主链区块`}>
         {blocks.map((block) => (
           <div key={block.id} role="listitem" className="flex items-center gap-2">
@@ -141,6 +142,6 @@ export function ChainPatternView({
           </div>
         );
       })}
-    </div>
+    </PatternFrame>
   );
 }

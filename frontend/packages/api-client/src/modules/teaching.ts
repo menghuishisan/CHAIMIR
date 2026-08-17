@@ -2,7 +2,7 @@
 // 对应后端 M6 模块
 
 import { ApiClient } from '../client'
-import type { CourseStatus } from '../constants/teaching'
+import type { CourseStatus, SubmissionStatus } from '../constants/teaching'
 import type { PaginatedResponse } from '../types/common'
 import type {
   Course,
@@ -19,6 +19,7 @@ import type {
   AssignmentRequest,
   AssignmentDetail,
   Draft,
+  DraftSave,
   LessonMaterialAccess,
   CourseCoverUpload,
   CourseCoverAccess,
@@ -318,6 +319,7 @@ export class TeachingApi {
    * （学生刷新页面后据此取回提交编号）。学生编号由服务端会话决定，不接受客户端传参。
    */
   async getSubmissions(assignmentId: string, params?: {
+    status?: SubmissionStatus
     page?: number
     size?: number
   }): Promise<PaginatedResponse<Submission>> {
@@ -341,7 +343,7 @@ export class TeachingApi {
   /**
    * 保存草稿
    */
-  async saveDraft(assignmentId: string, data: { content: Record<string, unknown> }): Promise<{ updated_at: string }> {
+  async saveDraft(assignmentId: string, data: { content: Record<string, unknown> }): Promise<DraftSave> {
     return this.client.post(`/teaching/assignments/${assignmentId}/draft`, data)
   }
 

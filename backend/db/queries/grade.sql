@@ -226,13 +226,15 @@ RETURNING id, tenant_id, student_id, semester_id, type, detail, status, created_
 SELECT id, tenant_id, student_id, semester_id, type, detail, status, created_at
 FROM academic_warning
 WHERE (sqlc.arg(student_id)::bigint = 0 OR student_id = sqlc.arg(student_id)::bigint)
+  AND (sqlc.arg(status)::smallint = 0 OR status = sqlc.arg(status)::smallint)
 ORDER BY created_at DESC
 LIMIT sqlc.arg(page_limit)::int OFFSET sqlc.arg(page_offset)::int;
 
 -- name: CountAcademicWarnings :one
 SELECT count(*)::bigint
 FROM academic_warning
-WHERE (sqlc.arg(student_id)::bigint = 0 OR student_id = sqlc.arg(student_id)::bigint);
+WHERE (sqlc.arg(student_id)::bigint = 0 OR student_id = sqlc.arg(student_id)::bigint)
+  AND (sqlc.arg(status)::smallint = 0 OR status = sqlc.arg(status)::smallint);
 
 -- name: AckAcademicWarning :one
 UPDATE academic_warning

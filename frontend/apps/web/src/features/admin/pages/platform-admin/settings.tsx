@@ -355,7 +355,7 @@ function ConfigEditModal({ config, onClose, onSaved }: ConfigEditModalProps) {
             </FormField>
 
             {credentialKeys.length > 0 ? (
-              <div className="flex flex-col gap-4 rounded-md border border-line bg-surface-sunken p-4">
+              <div className="flex flex-col gap-4 well p-4">
                 <div>
                   <p className="text-base text-ink">凭据字段</p>
                   <p className="text-sm text-ink-sub">
@@ -394,7 +394,7 @@ function ConfigEditModal({ config, onClose, onSaved }: ConfigEditModalProps) {
             <Button type="button" variant="outline" onClick={onClose}>
               取消
             </Button>
-            <Button type="submit" variant="seal" loading={working}>
+            <Button type="submit" variant="primary" loading={working}>
               保存配置
             </Button>
           </ModalFooter>
@@ -521,7 +521,7 @@ function ConfigHistoryModal({ config, onClose, onRolledBack }: ConfigHistoryModa
           </ResourceState>
 
           {target ? (
-            <div className="flex flex-col gap-3 rounded-md border border-line bg-surface-sunken p-4">
+            <div className="flex flex-col gap-3 well p-4">
               <div className="flex flex-wrap items-center gap-2">
                 <TriangleAlert aria-hidden="true" className="size-4 text-warning" />
                 <span className="text-base text-ink">

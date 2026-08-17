@@ -123,9 +123,15 @@ func (t *txStore) ListAllTenants(ctx context.Context) ([]Tenant, error) {
 }
 
 // ListTenants 分页读取平台租户摘要。
-func (t *txStore) ListTenants(ctx context.Context, page, size int) ([]Tenant, int64, error) {
-	limit, offset := pagex.LimitOffset(page, size)
-	rows, err := t.q.ListTenantsPaged(ctx, sqlcgen.ListTenantsPagedParams{Limit: limit, Offset: offset})
+// status 传 0、keyword 传空串表示该维度不过滤;总数取窗口函数结果,与过滤条件同口径。
+func (t *txStore) ListTenants(ctx context.Context, query TenantListQuery) ([]Tenant, int64, error) {
+	limit, offset := pagex.LimitOffset(query.Page, query.Size)
+	rows, err := t.q.ListTenantsPaged(ctx, sqlcgen.ListTenantsPagedParams{
+		Limit:   limit,
+		Offset:  offset,
+		Column3: query.Status,
+		Column4: query.Keyword,
+	})
 	if err != nil {
 		return nil, 0, err
 	}

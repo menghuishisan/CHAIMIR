@@ -3,10 +3,10 @@ package transfer
 
 import (
 	"fmt"
-	"strconv"
 	"strings"
 	"time"
 
+	"chaimir/internal/platform/ids"
 	"chaimir/internal/platform/storage"
 	"chaimir/internal/platform/timex"
 )
@@ -216,7 +216,7 @@ func (m Manager) BuildDownloadGrant(task Task, now time.Time) (string, storage.D
 		ObjectRef:          task.Artifact.ObjectRef,
 		Module:             "transfer",
 		ResourceType:       string(task.Channel),
-		ResourceID:         strconv.FormatInt(task.TaskID, 10),
+		ResourceID:         ids.Format(task.TaskID),
 		ExpiresAt:          now.Add(m.Config.DownloadGrantTTL),
 	})
 }

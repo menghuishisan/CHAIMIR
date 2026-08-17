@@ -4,10 +4,17 @@ import type {
   SimCompute,
   SimPackageStatus,
   SimReviewResult,
-  SimShareStatus,
   SimStreamCommand,
+  SimValidationStatusValue,
 } from '../constants/sim'
 import type { SnowflakeID } from './common'
+
+/** 仿真包协议固定的三项规模上限,与 M4 manifest meta.scale_limit 一致。 */
+export interface SimScaleLimit {
+  nodes: number
+  max_tick: number
+  max_events: number
+}
 
 export interface SimPackageMeta {
   id: SnowflakeID
@@ -16,7 +23,7 @@ export interface SimPackageMeta {
   name: string
   category: string
   compute: SimCompute
-  scale_limit?: Record<string, unknown>
+  scale_limit?: SimScaleLimit
   bundle_hash?: string
   status: SimPackageStatus
   created_at: string
@@ -33,7 +40,7 @@ export interface SimPackageSubmit {
   version: string
   name: string
   category: string
-  scale_limit?: Record<string, unknown>
+  scale_limit?: SimScaleLimit
 }
 
 export interface SimPackageSubmissionResult extends SimPackageMeta {
@@ -55,7 +62,7 @@ export interface SimReviewDecision {
 }
 
 export interface SimValidationStatus {
-  status?: string
+  status?: SimValidationStatusValue
   message?: string
 }
 
@@ -85,7 +92,7 @@ export interface SimStreamCommandMessage {
 }
 
 export interface SimStaticScanReport {
-  status?: string
+  status?: SimValidationStatusValue
   findings?: string[]
 }
 
@@ -145,5 +152,5 @@ export interface SimShareCreate {
 export interface SimShareResult {
   code: string
   expire_at: string
-  status: SimShareStatus
+  status: 'active'
 }

@@ -21,7 +21,7 @@ type Querier interface {
 	CountContests(ctx context.Context, arg CountContestsParams) (int64, error)
 	CountLadder(ctx context.Context, arg CountLadderParams) (int64, error)
 	CountProblemSolvedTeams(ctx context.Context, arg CountProblemSolvedTeamsParams) (int64, error)
-	CountStudentContests(ctx context.Context, tenantID int64) (int64, error)
+	CountStudentContests(ctx context.Context, arg CountStudentContestsParams) (int64, error)
 	CountVulnProblems(ctx context.Context, arg CountVulnProblemsParams) (int64, error)
 	CreateBattleEntry(ctx context.Context, arg CreateBattleEntryParams) (BattleEntry, error)
 	CreateBattleMatch(ctx context.Context, arg CreateBattleMatchParams) (BattleMatch, error)
@@ -61,6 +61,7 @@ type Querier interface {
 	ListLadder(ctx context.Context, arg ListLadderParams) ([]ListLadderRow, error)
 	ListRunningBattleMatchesWithJudgeTask(ctx context.Context, limit int32) ([]BattleMatch, error)
 	ListStudentContestRecords(ctx context.Context, arg ListStudentContestRecordsParams) ([]ListStudentContestRecordsRow, error)
+	// status 传 0 回学生可发现的全部赛事(草稿态不可见);传具体状态时仍受可见区间约束。
 	ListStudentContests(ctx context.Context, arg ListStudentContestsParams) ([]Contest, error)
 	ListTeamMembers(ctx context.Context, arg ListTeamMembersParams) ([]TeamMember, error)
 	ListVulnProblems(ctx context.Context, arg ListVulnProblemsParams) ([]VulnProblem, error)

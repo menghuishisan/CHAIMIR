@@ -158,13 +158,6 @@ func (s *Service) tenantDTOWithLogo(ctx context.Context, tenantID int64, row Ten
 	return out
 }
 
-// TenantBrandDTO 是登录页面读取的学校品牌信息。
-type TenantBrandDTO struct {
-	DisplayName string `json:"display_name"`
-	// LogoImage 是 data URI 形式的校徽;没有校徽或非私有化部署时为空串。
-	LogoImage string `json:"logo_image"`
-}
-
 // GetTenantBrand 供登录页免鉴权读取学校品牌,不接受任何租户标识参数。
 // SaaS 登录页面对的是尚未确定的租户,本就没有校徽可显示;而任何带租户标识的公开端点
 // 都会成为廉价的租户枚举通道,所以这里只在私有化部署下按配置里的固定租户返回内容。

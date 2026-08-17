@@ -1,7 +1,10 @@
 // contracts 定义第 3 层通知模块对其他模块开放的站内信与实时推送契约。
 package contracts
 
-import "context"
+import (
+	"context"
+	"encoding/json"
+)
 
 // NotifySendRequest 是模块发送站内信时提交给 M10 的统一请求。
 type NotifySendRequest struct {
@@ -19,8 +22,8 @@ type NotifyPushRequest struct {
 	// tenant:{tenant_id}:notify:{account_id}、tenant:{tenant_id}:alert、
 	// tenant:{tenant_id}:{contest|sandbox|sim|experiment|course|judge}:{resource_id}:{channel}。
 	// 不得回退到无租户前缀 topic,否则无法在 M10 边界独立校验租户隔离。
-	Topic   string         `json:"topic"`
-	Payload map[string]any `json:"payload"`
+	Topic   string          `json:"topic"`
+	Payload json.RawMessage `json:"payload"`
 }
 
 // NotifyService 是 M10 对全平台开放的通知与实时推送契约。

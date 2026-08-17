@@ -14,7 +14,7 @@ export const tendermintRoundsSimulation: SimPackage<TendermintRoundsState> = {
     { id: 'select', kind: 'select-element', label: '选择验证者', description: '查看验证者投票、锁定值和权重。', emits: 'select', target: 'element', elementFilter: 'tendermint-validator' },
     { id: 'advance', kind: 'button', label: '推进 Round', description: '按 Tendermint 阶段推进。', emits: 'advance', labelTag: 'normal' },
     { id: 'attack', kind: 'button', label: '触发超时', description: '模拟验证者离线导致阈值不足。', emits: 'attack', labelTag: 'attack' },
-    { id: 'recover', kind: 'button', label: '恢复广播', description: '恢复验证者并携带 valid value 进入下一轮。', emits: 'recover', labelTag: 'perturb' },
+    { id: 'recover', kind: 'button', label: '恢复广播', description: '恢复验证者并携带 valid value 进入下一轮。', emits: 'recover', labelTag: 'recover' },
   ],
   render: renderTendermintRoundsView,
   narrative: tendermintRoundsNarrative,

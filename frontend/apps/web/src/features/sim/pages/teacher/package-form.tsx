@@ -213,7 +213,7 @@ function PackageForm({ item, onClose, onSaved }: PackageFormProps) {
           </FormField>
         </div>
 
-        <div className="flex flex-col gap-3 rounded-md border border-line bg-surface-sunken p-4">
+        <div className="flex flex-col gap-3 well p-4">
           <div className="text-sm font-medium text-ink">规模上限</div>
           <p className="text-xs text-ink-sub">
             运行时按这三个上限约束状态规模与执行步数。填写的值必须与场景包内声明的一致。
@@ -276,7 +276,7 @@ function PackageForm({ item, onClose, onSaved }: PackageFormProps) {
         <Button type="button" variant="outline" onClick={onClose}>
           取消
         </Button>
-        <Button type="submit" variant="seal" leftIcon={Upload} loading={submitting}>
+        <Button type="submit" variant="primary" leftIcon={Upload} loading={submitting}>
           {editing ? '重新提交审核' : '提交审核'}
         </Button>
       </ModalFooter>
@@ -284,13 +284,13 @@ function PackageForm({ item, onClose, onSaved }: PackageFormProps) {
   )
 }
 
-/** readScaleLimit 从已有包的规模上限回填表单;缺失键取默认值(后端存的是开放对象)。 */
+/** readScaleLimit 从已有包的固定三项规模上限回填表单;缺失键取默认值。 */
 function readScaleLimit(item?: SimPackageMeta): ScaleLimitForm {
-  const raw = item?.scale_limit ?? {}
+  const raw = item?.scale_limit
   return {
-    nodes: readPositiveInt(raw.nodes) ?? DEFAULT_SCALE_LIMIT.nodes,
-    maxTick: readPositiveInt(raw.max_tick) ?? DEFAULT_SCALE_LIMIT.maxTick,
-    maxEvents: readPositiveInt(raw.max_events) ?? DEFAULT_SCALE_LIMIT.maxEvents,
+    nodes: readPositiveInt(raw?.nodes) ?? DEFAULT_SCALE_LIMIT.nodes,
+    maxTick: readPositiveInt(raw?.max_tick) ?? DEFAULT_SCALE_LIMIT.maxTick,
+    maxEvents: readPositiveInt(raw?.max_events) ?? DEFAULT_SCALE_LIMIT.maxEvents,
   }
 }
 

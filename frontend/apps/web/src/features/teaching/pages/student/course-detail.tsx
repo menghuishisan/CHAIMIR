@@ -8,7 +8,6 @@ import {
   BookOpen,
   CalendarClock,
   ClipboardList,
-  FileText,
   Layers,
   MessageSquare,
 } from 'lucide-react'
@@ -211,8 +210,10 @@ function CourseDetailContent({ courseId, outline, onNavigate }: CourseDetailCont
         />
       </PageSection>
 
+      {/* 指标带只放可度量的学习进度;学分、课程形式、难度是静态属性,
+          在右侧「课程信息」里已逐项列出,不再占指标位(规范 §6.5)。 */}
       <PageSection>
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="grid gap-4 sm:grid-cols-2">
           <Stat
             label="课时完成"
             value={formatPercent(doneCount, rows.length)}
@@ -221,13 +222,6 @@ function CourseDetailContent({ courseId, outline, onNavigate }: CourseDetailCont
             hint={`共 ${rows.length} 个课时`}
           />
           <Stat label="累计学习时长" value={formatDuration(learnedSeconds)} icon={CalendarClock} />
-          <Stat label="课程学分" value={course.credits} icon={FileText} hint={course.semester} />
-          <Stat
-            label="课程形式"
-            value={courseTypeLabel(course.type)}
-            icon={BookOpen}
-            hint={teachingDifficultyLabel(course.difficulty)}
-          />
         </div>
       </PageSection>
 

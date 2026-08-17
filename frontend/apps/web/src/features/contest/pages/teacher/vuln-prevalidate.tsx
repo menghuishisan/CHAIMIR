@@ -233,7 +233,7 @@ export function VulnPrevalidateModal({ problem, onClose, onDone }: VulnPrevalida
           <Button variant="outline" onClick={onClose}>
             关闭
           </Button>
-          <Button variant="seal" leftIcon={FlaskConical} loading={running} onClick={() => void run()}>
+          <Button variant="primary" leftIcon={FlaskConical} loading={running} onClick={() => void run()}>
             {Object.keys(result.prevalidate_detail).length === 0 ? '开始验证' : '重新验证'}
           </Button>
         </ModalFooter>
@@ -266,7 +266,7 @@ interface ValidationSectionProps {
 function ValidationSection({ title, description, expectPassed, section }: ValidationSectionProps) {
   if (section === undefined) {
     return (
-      <div className="rounded-md border border-line bg-surface-sunken p-4">
+      <div className="well p-4">
         <p className="text-base text-ink">{title}</p>
         <p className="text-sm text-ink-sub">这一段没有执行到。</p>
       </div>
@@ -274,7 +274,7 @@ function ValidationSection({ title, description, expectPassed, section }: Valida
   }
 
   return (
-    <div className="flex flex-col gap-3 rounded-md border border-line bg-surface-sunken p-4">
+    <div className="flex flex-col gap-3 well p-4">
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div className="min-w-0">
           <p className="text-base text-ink">{title}</p>
@@ -288,9 +288,10 @@ function ValidationSection({ title, description, expectPassed, section }: Valida
       {section.assertions.length === 0 ? (
         <p className="text-sm text-ink-sub">这一段没有断言结果。</p>
       ) : (
-        <div className="flex flex-col gap-2">
+        // 井内的并列条目用分隔线区分,不再各自画盒(规范 §6.5.1)
+        <div className="flex flex-col divide-y divide-line">
           {section.assertions.map((assertion, index) => (
-            <div key={index} className="flex flex-col gap-1 rounded-md border border-line bg-surface p-3">
+            <div key={index} className="flex flex-col gap-1 py-3 first:pt-0 last:pb-0">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <span className="min-w-0 truncate text-sm text-ink">
                   {assertion.name || `断言 ${index + 1}`}

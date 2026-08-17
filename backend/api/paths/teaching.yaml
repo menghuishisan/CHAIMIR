@@ -20,6 +20,24 @@
     security: [{ bearerAuth: [] }]
     requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/teaching/courses/cover:
+  post:
+    tags: [teaching]
+    summary: 上传课程封面
+    operationId: teachingUploadCourseCover
+    x-chaimir-audience: teacher
+    security: [{ bearerAuth: [] }]
+    requestBody: { $ref: "#/components/requestBodies/MultipartBody" }
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/teaching/courses/{id}/cover/access:
+  post:
+    tags: [teaching]
+    summary: 签发课程封面访问授权
+    operationId: teachingIssueCourseCoverAccess
+    x-chaimir-audience: user
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
 /api/v1/teaching/courses/join:
   post:
     tags: [teaching]

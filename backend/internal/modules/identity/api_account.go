@@ -314,7 +314,7 @@ func bindAccountQuery(c *gin.Context) (AccountQuery, bool) {
 		return AccountQuery{}, false
 	}
 	query.BaseIdentity = baseIdentity
-	classID, ok := httpx.QueryInt(c, "class_id", httpx.QueryIntRule{BitSize: 64, Min: 0})
+	classID, ok := httpx.QueryID(c, "class_id", false)
 	if !ok {
 		return AccountQuery{}, false
 	}

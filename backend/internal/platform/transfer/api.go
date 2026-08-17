@@ -39,8 +39,8 @@ func (a transferAPI) listTasks(c *gin.Context) {
 	if !ok {
 		return
 	}
-	tasks, p, s, err := a.svc.ListTasks(c.Request.Context(), TaskListQuery{TenantID: id.TenantID, AccountID: id.AccountID, Channel: Channel(c.Query("channel")), Status: Status(c.Query("status")), Page: page, Size: size})
-	httpx.Write(c, gin.H{"items": TasksToDTO(tasks), "page": p, "size": s}, err)
+	tasks, total, p, s, err := a.svc.ListTasks(c.Request.Context(), TaskListQuery{TenantID: id.TenantID, AccountID: id.AccountID, Channel: Channel(c.Query("channel")), Status: Status(c.Query("status")), Page: page, Size: size})
+	httpx.WritePage(c, TasksToDTO(tasks), total, p, s, err)
 }
 
 // getTask 读取当前账号可见的单个导入导出任务。

@@ -326,7 +326,7 @@ function SuspectsCard({ contest, onHandle }: SuspectsCardProps) {
               .map((suspect) => (
                 <div
                   key={suspect.source_ref}
-                  className="flex flex-col gap-2 rounded-md border border-line p-3"
+                  className="flex flex-col gap-2 well p-3"
                 >
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <Badge tone={suspect.score >= 0.95 ? 'danger' : 'warning'}>

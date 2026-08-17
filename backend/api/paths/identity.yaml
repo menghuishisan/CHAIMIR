@@ -102,6 +102,21 @@
         $ref: "#/components/responses/Standard"
       default:
         $ref: "#/components/responses/Error"
+/api/v1/auth/browser-ticket:
+  post:
+    tags: [identity]
+    summary: 签发浏览器工具短时入口票据
+    operationId: identityIssueBrowserAccessTicket
+    x-chaimir-audience: user
+    security:
+      - bearerAuth: []
+    requestBody:
+      $ref: "#/components/requestBodies/ObjectBody"
+    responses:
+      "200":
+        $ref: "#/components/responses/Standard"
+      default:
+        $ref: "#/components/responses/Error"
 /api/v1/auth/password/reset:
   post:
     tags: [identity]
@@ -325,6 +340,29 @@
         $ref: "#/components/responses/Standard"
       default:
         $ref: "#/components/responses/Error"
+/api/v1/tenant/brand:
+  get:
+    tags: [identity]
+    summary: 读取登录页学校品牌
+    operationId: identityGetTenantBrand
+    x-chaimir-audience: public
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/tenant/logo:
+  post:
+    tags: [identity]
+    summary: 上传学校校徽
+    operationId: identityUploadTenantLogo
+    x-chaimir-audience: school-admin
+    security: [{ bearerAuth: [] }]
+    requestBody: { $ref: "#/components/requestBodies/MultipartBody" }
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+  delete:
+    tags: [identity]
+    summary: 移除学校校徽
+    operationId: identityClearTenantLogo
+    x-chaimir-audience: school-admin
+    security: [{ bearerAuth: [] }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
 /api/v1/tenant/sso:
   get:
     tags: [identity]

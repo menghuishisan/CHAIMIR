@@ -1,7 +1,10 @@
 // contracts 定义跨模块反向通信统一使用的事件主题常量与载荷 DTO。
 package contracts
 
-import "time"
+import (
+	"encoding/json"
+	"time"
+)
 
 const (
 	// SubjectJudgeCompleted 表示判题完成事件,由 M3 发布供业务模块订阅。
@@ -137,6 +140,6 @@ type NotifyPushRequestedEvent struct {
 	TenantID int64  `json:"tenant_id"`
 	TraceID  string `json:"trace_id"`
 	// Topic 必须使用 M10 统一租户前缀规范,不得发布无租户前缀或旧格式主题。
-	Topic   string         `json:"topic"`
-	Payload map[string]any `json:"payload"`
+	Topic   string          `json:"topic"`
+	Payload json.RawMessage `json:"payload"`
 }

@@ -29,7 +29,7 @@ import {
 } from '@chaimir/ui'
 import { api } from '../../../../app/api'
 import { ResourceState } from '../../../../components/ResourceState'
-import { useAsyncResource, usePagedResource } from '../../../../hooks'
+import { useAsyncResource, usePagedResource, useResourceTotal } from '../../../../hooks'
 import { formatShortDateTime } from '../../../../utils/formatters'
 import {
   gradeWarningDetailTerm,
@@ -76,8 +76,16 @@ export default function StudentAlertsPage() {
     [warnings],
   )
 
-  const list = warnings.data ? warnings.data.list : []
-  const pendingCount = list.filter((item) => item.status === GradeWarningStatus.PENDING).length
+  // 指标带取服务端全量口径:预警会跨多页,用当前页数出来的「待确认」是错数
+  const totalCount = useResourceTotal((params) => api.grade.listWarnings(params), [])
+  const pendingCount = useResourceTotal(
+    (params) => api.grade.listWarnings({ status: GradeWarningStatus.PENDING, ...params }),
+    [],
+  )
+  const acknowledgedCount = useResourceTotal(
+    (params) => api.grade.listWarnings({ status: GradeWarningStatus.ACKNOWLEDGED, ...params }),
+    [],
+  )
 
   const columns: TableColumn<GradeWarning>[] = [
     {
@@ -150,13 +158,9 @@ export default function StudentAlertsPage() {
 
       <PageSection>
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          <Stat label="全部预警" value={warnings.total} icon={TriangleAlert} />
-          <Stat label="待确认" value={pendingCount} icon={ShieldCheck} hint="确认后不再提示" />
-          <Stat
-            label="已确认"
-            value={list.length - pendingCount}
-            icon={CheckCheck}
-          />
+          <Stat label="全部预警" value={totalCount ?? '—'} icon={TriangleAlert} />
+          <Stat label="待确认" value={pendingCount ?? '—'} icon={ShieldCheck} hint="确认后不再提示" />
+          <Stat label="已确认" value={acknowledgedCount ?? '—'} icon={CheckCheck} />
         </div>
       </PageSection>
 

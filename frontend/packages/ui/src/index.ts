@@ -22,6 +22,7 @@ export * from "./components/Checkbox";
 export * from "./components/DescriptionList";
 export * from "./components/Drawer";
 export * from "./components/Empty";
+export * from "./components/FilterBar";
 export * from "./components/FormField";
 export * from "./components/IconButton";
 export * from "./components/Input";
@@ -45,6 +46,7 @@ export * from "./components/Tabs";
 export * from "./components/Textarea";
 export * from "./components/Toast";
 export * from "./components/Tooltip";
+export * from "./components/WorkbenchAccordion";
 export * from "./components/WorkbenchShell";
 
 /* 品牌资产(§1.3:主标志/锁定组合/品牌章/租户徽记/内容封面) */

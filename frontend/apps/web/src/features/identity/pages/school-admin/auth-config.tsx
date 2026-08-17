@@ -198,7 +198,7 @@ function CasConfigCard({ config, onSaved }: ConfigCardProps) {
           {formError ? <Callout tone="danger">{formError}</Callout> : null}
 
           <div className="flex items-center gap-2">
-            <Button type="submit" variant="seal" leftIcon={CircleCheck} loading={working}>
+            <Button type="submit" variant="primary" leftIcon={CircleCheck} loading={working}>
               保存 CAS 配置
             </Button>
             <span className="text-sm text-ink-sub">
@@ -417,7 +417,7 @@ function LdapConfigCard({ config, onSaved }: ConfigCardProps) {
           {formError ? <Callout tone="danger">{formError}</Callout> : null}
 
           <div className="flex items-center gap-2">
-            <Button type="submit" variant="seal" leftIcon={ShieldCheck} loading={working}>
+            <Button type="submit" variant="primary" leftIcon={ShieldCheck} loading={working}>
               保存 LDAP 配置
             </Button>
             <span className="text-sm text-ink-sub">

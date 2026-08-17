@@ -3,6 +3,19 @@ package content
 
 import "chaimir/internal/platform/ids"
 
+// AttachmentUploadDTO 是附件上传后的受控对象引用。
+type AttachmentUploadDTO struct {
+	ObjectRef string `json:"object_ref"`
+	FileName  string `json:"file_name"`
+	Size      int64  `json:"size"`
+}
+
+// AttachmentDownloadGrantDTO 是附件短时下载授权响应。
+type AttachmentDownloadGrantDTO struct {
+	Token     string `json:"token"`
+	ExpiresAt string `json:"expires_at"`
+}
+
 // ItemDTO 是内容外壳响应。
 type ItemDTO struct {
 	ID              ids.ID   `json:"id"`

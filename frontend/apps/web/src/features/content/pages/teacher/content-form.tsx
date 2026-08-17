@@ -452,7 +452,7 @@ function ItemForm({ item, snapshot, onClose, onSaved }: ItemFormProps) {
               />
             </FormField>
 
-            <div className="flex flex-col gap-4 rounded-md border border-line bg-surface-sunken p-4">
+            <div className="flex flex-col gap-4 well p-4">
               <div className="text-sm font-medium text-ink">题目正文</div>
 
               {typeValue === ContentType.EXPERIMENT_TEMPLATE ? (
@@ -636,7 +636,7 @@ function ItemForm({ item, snapshot, onClose, onSaved }: ItemFormProps) {
             <Button type="button" variant="outline" onClick={onClose}>
               取消
             </Button>
-            <Button type="submit" variant="seal" loading={submitting}>
+            <Button type="submit" variant="primary" loading={submitting}>
               {editing ? '保存修改' : '创建题目'}
             </Button>
           </ModalFooter>

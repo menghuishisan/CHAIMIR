@@ -6,7 +6,7 @@
 // 答案与判题配置属敏感字段:创建与编辑时由 sensitive_fields 声明哪些路径要对学生剥离,
 // 列表与题面视角都不展示这些内容。
 
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useState } from 'react'
 import { Database, FolderTree, MoreVertical, Pencil, Plus, Send, Share2, Trash2 } from 'lucide-react'
 import {
   ContentStatus,
@@ -19,6 +19,8 @@ import {
   Breadcrumb,
   Button,
   Callout,
+  FilterBar,
+  FilterField,
   IconButton,
   Menu,
   MenuContent,
@@ -49,7 +51,7 @@ import {
 } from '@chaimir/ui'
 import { api } from '../../../../app/api'
 import { ResourceState } from '../../../../components/ResourceState'
-import { usePagedResource } from '../../../../hooks'
+import { usePagedResource, useResourceTotal } from '../../../../hooks'
 import { formatShortDateTime } from '../../../../utils/formatters'
 import {
   CONTENT_TYPES,
@@ -128,14 +130,20 @@ export default function TeacherQuestionsPage() {
     [items],
   )
 
-  const stats = useMemo(() => {
-    const list = items.data ? items.data.list : []
-    return {
-      published: list.filter((item) => item.status === ContentStatus.PUBLISHED).length,
-      draft: list.filter((item) => item.status === ContentStatus.DRAFT).length,
-      shared: list.filter((item) => item.visibility === ContentVisibility.SHARED).length,
-    }
-  }, [items.data])
+  // 指标带取服务端全量口径,不随上方题型筛选变化:它回答「我的题库整体状况」
+  const totalCount = useResourceTotal((params) => api.content.getItems(params), [])
+  const publishedCount = useResourceTotal(
+    (params) => api.content.getItems({ status: ContentStatus.PUBLISHED, ...params }),
+    [],
+  )
+  const draftCount = useResourceTotal(
+    (params) => api.content.getItems({ status: ContentStatus.DRAFT, ...params }),
+    [],
+  )
+  const sharedCount = useResourceTotal(
+    (params) => api.content.getItems({ visibility: ContentVisibility.SHARED, ...params }),
+    [],
+  )
 
   const columns: TableColumn<ContentItem>[] = [
     {
@@ -237,10 +245,10 @@ export default function TeacherQuestionsPage() {
 
       <PageSection>
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <Stat label="题目总数" value={items.total} icon={Database} />
-          <Stat label="已发布" value={stats.published} icon={Send} hint="可被作业与实验引用" />
-          <Stat label="草稿" value={stats.draft} icon={Pencil} />
-          <Stat label="已共享" value={stats.shared} icon={Share2} hint="其他学校可复用" />
+          <Stat label="题目总数" value={totalCount ?? '—'} icon={Database} hint="不受题型筛选影响" />
+          <Stat label="已发布" value={publishedCount ?? '—'} icon={Send} hint="可被作业与实验引用" />
+          <Stat label="草稿" value={draftCount ?? '—'} icon={Pencil} />
+          <Stat label="已共享" value={sharedCount ?? '—'} icon={Share2} hint="其他学校可复用" />
         </div>
       </PageSection>
 
@@ -255,20 +263,20 @@ export default function TeacherQuestionsPage() {
         </TabsList>
 
         <TabsContent value="items">
-          <PageSection
-            title="题目列表"
-            description={`共 ${items.total} 道题目`}
-            actions={
-              <SegmentedControl
-                aria-label="按题目类型筛选"
-                size="sm"
-                options={TYPE_FILTERS}
-                value={typeFilter}
-                onValueChange={setTypeFilter}
-              />
-            }
-          >
+          <PageSection title="题目列表" description={`共 ${items.total} 道题目`}>
             <div className="flex flex-col gap-4">
+              <FilterBar label="题目筛选">
+                <FilterField label="题目类型" group>
+                  <SegmentedControl
+                    aria-label="按题目类型筛选"
+                    size="sm"
+                    options={TYPE_FILTERS}
+                    value={typeFilter}
+                    onValueChange={setTypeFilter}
+                  />
+                </FilterField>
+              </FilterBar>
+
               {actionError ? <Callout tone="danger">{actionError}</Callout> : null}
 
               <ResourceState

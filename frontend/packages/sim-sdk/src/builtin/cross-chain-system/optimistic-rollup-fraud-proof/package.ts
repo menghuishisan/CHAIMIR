@@ -14,7 +14,7 @@ export const optimisticRollupFraudProofSimulation: SimPackage<OptimisticRollupSt
     { id: 'select', kind: 'select-element', label: '选择 batch 或争议步骤', description: '查看 batch、争议区间和状态根。', emits: 'select', target: 'element', elementFilter: 'rollup-dispute' },
     { id: 'advance', kind: 'button', label: '推进挑战流程', description: '按 optimistic rollup 欺诈证明流程推进。', emits: 'advance', labelTag: 'normal', availableWhen: (state) => (state as OptimisticRollupState).phaseIndex < 5 },
     { id: 'attack', kind: 'button', label: '提交错误状态根', description: '模拟 sequencer 提交错误 claimedRoot。', emits: 'attack', labelTag: 'attack' },
-    { id: 'recover', kind: 'button', label: '提交正确状态根', description: '修正 claimedRoot 并进入最终确认。', emits: 'recover', labelTag: 'perturb' },
+    { id: 'recover', kind: 'button', label: '提交正确状态根', description: '修正 claimedRoot 并进入最终确认。', emits: 'recover', labelTag: 'recover' },
   ],
   render: renderOptimisticRollupView,
   narrative: optimisticRollupNarrative,

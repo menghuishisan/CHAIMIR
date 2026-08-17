@@ -3,11 +3,11 @@ package content
 
 import (
 	"sort"
-	"time"
 
 	"chaimir/internal/contracts"
 	"chaimir/internal/platform/ids"
 	"chaimir/internal/platform/jsonx"
+	"chaimir/internal/platform/timex"
 	"chaimir/pkg/apperr"
 	"chaimir/pkg/crypto"
 )
@@ -31,14 +31,14 @@ func itemDTO(item Item) ItemDTO {
 		Status:          item.Status,
 		UsageCount:      item.UsageCount,
 		VersionHash:     item.VersionHash,
-		CreatedAt:       formatTime(item.CreatedAt),
-		UpdatedAt:       formatTime(item.UpdatedAt),
+		CreatedAt:       timex.RFC3339OrEmpty(item.CreatedAt),
+		UpdatedAt:       timex.RFC3339OrEmpty(item.UpdatedAt),
 	}
 }
 
 // itemSnapshotDTO 转换内容快照为 HTTP DTO,full 响应可携带敏感路径清单。
 func itemSnapshotDTO(item ItemWithBody, includeSensitivePaths bool) (ItemSnapshotDTO, error) {
-	body, err := cloneMapStrict(item.Body)
+	body, err := jsonx.CloneObjectStrict(item.Body)
 	if err != nil {
 		return ItemSnapshotDTO{}, err
 	}
@@ -51,7 +51,7 @@ func itemSnapshotDTO(item ItemWithBody, includeSensitivePaths bool) (ItemSnapsho
 
 // contractSnapshot 转换为跨模块内容快照。
 func contractSnapshot(item ItemWithBody) (contracts.ContentItemSnapshot, error) {
-	body, err := cloneMapStrict(item.Body)
+	body, err := jsonx.CloneObjectStrict(item.Body)
 	if err != nil {
 		return contracts.ContentItemSnapshot{}, err
 	}
@@ -72,19 +72,19 @@ func contractSnapshot(item ItemWithBody) (contracts.ContentItemSnapshot, error) 
 
 // categoryDTO 转换分类响应。
 func categoryDTO(category Category) CategoryDTO {
-	return CategoryDTO{ID: ids.ID(category.ID), ParentID: ids.ID(category.ParentID), Name: category.Name, Sort: category.Sort, CreatedAt: formatTime(category.CreatedAt), UpdatedAt: formatTime(category.UpdatedAt)}
+	return CategoryDTO{ID: ids.ID(category.ID), ParentID: ids.ID(category.ParentID), Name: category.Name, Sort: category.Sort, CreatedAt: timex.RFC3339OrEmpty(category.CreatedAt), UpdatedAt: timex.RFC3339OrEmpty(category.UpdatedAt)}
 }
 
 // paperDTO 转换试卷响应。
 func paperDTO(paper Paper) PaperDTO {
-	return PaperDTO{ID: ids.ID(paper.ID), Name: paper.Name, AuthorID: ids.ID(paper.AuthorID), GenMode: paper.GenMode, GenCriteria: paper.GenCriteria, CreatedAt: formatTime(paper.CreatedAt), UpdatedAt: formatTime(paper.UpdatedAt)}
+	return PaperDTO{ID: ids.ID(paper.ID), Name: paper.Name, AuthorID: ids.ID(paper.AuthorID), GenMode: paper.GenMode, GenCriteria: paper.GenCriteria, CreatedAt: timex.RFC3339OrEmpty(paper.CreatedAt), UpdatedAt: timex.RFC3339OrEmpty(paper.UpdatedAt)}
 }
 
 // paperDetailDTO 转换试卷详情响应。
 func paperDetailDTO(detail PaperWithItems) (PaperDetailDTO, error) {
 	items := make([]PaperItemFaceDTO, 0, len(detail.Items))
 	for _, item := range detail.Items {
-		body, err := cloneMapStrict(item.Body)
+		body, err := jsonx.CloneObjectStrict(item.Body)
 		if err != nil {
 			return PaperDetailDTO{}, err
 		}
@@ -123,11 +123,6 @@ func versionHash(item Item, body map[string]any, sensitive []string) (string, er
 	return crypto.SHA256Hex(raw), nil
 }
 
-// cloneMapStrict 深拷贝 JSON 对象,转换失败时显式返回错误避免坏正文伪装为空对象。
-func cloneMapStrict(in map[string]any) (map[string]any, error) {
-	return jsonx.CloneObjectStrict(in)
-}
-
 // cloneStrings 拷贝字符串切片。
 func cloneStrings(in []string) []string {
 	if len(in) == 0 {
@@ -152,12 +147,4 @@ func normalizedStrings(in []string) []string {
 	}
 	sort.Strings(out)
 	return out
-}
-
-// formatTime 输出统一 RFC3339 时间字符串。
-func formatTime(value time.Time) string {
-	if value.IsZero() {
-		return ""
-	}
-	return value.UTC().Format(time.RFC3339)
 }

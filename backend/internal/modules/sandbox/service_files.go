@@ -5,7 +5,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
-	"fmt"
 	"log/slog"
 	"path"
 	"strings"
@@ -22,7 +21,7 @@ import (
 )
 
 // PutSandboxFile 把提交代码或公开脚本写入沙箱工作区,隐藏判题资产必须走私有域接口。
-func (s *Service) PutSandboxFile(ctx context.Context, req contracts.SandboxFileWriteRequest) error {
+func (s *Service) putSandboxFileContract(ctx context.Context, req contracts.SandboxFileWriteRequest) error {
 	if req.TenantID <= 0 || req.SandboxID <= 0 || req.ContentBase64 == "" || !validSourceRef(req.SourceRef) {
 		return apperr.ErrSandboxFileWriteRequestInvalid
 	}
@@ -44,7 +43,7 @@ func (s *Service) PutSandboxFile(ctx context.Context, req contracts.SandboxFileW
 	target := path.Join(runtime.AdapterSpec.WorkspaceDir, relative)
 	command := workspaceCommand(runtime.AdapterSpec.WorkspaceOps.WriteFile, runtime.AdapterSpec.WorkspaceDir, target, "")
 	if _, stderr, err := s.orchestrator.Exec(ctx, sb.Namespace, runtimeExecTarget(runtime), command, content, false); err != nil {
-		return apperr.ErrSandboxFileInvalid.WithCause(fmt.Errorf("%w: %s", err, string(stderr)))
+		return sandboxExecFailure(apperr.ErrSandboxFileInvalid, err, stderr)
 	}
 	if err := s.store.TenantTx(ctx, req.TenantID, func(ctx context.Context, tx TxStore) error {
 		detail, err := jsonBytes(map[string]any{"path": relative, "mode": "write"})
@@ -63,7 +62,7 @@ func (s *Service) PutSandboxFile(ctx context.Context, req contracts.SandboxFileW
 }
 
 // PutSandboxPrivateArchive 将隐藏测试、答案或评分脚本安全解包到私有判题域。
-func (s *Service) PutSandboxPrivateArchive(ctx context.Context, req contracts.SandboxPrivateArchiveInjectRequest) error {
+func (s *Service) putSandboxPrivateArchiveContract(ctx context.Context, req contracts.SandboxPrivateArchiveInjectRequest) error {
 	if req.TenantID <= 0 || req.SandboxID <= 0 || req.ContentBase64 == "" || !validSourceRef(req.SourceRef) {
 		return apperr.ErrSandboxPrivateArchiveInvalid
 	}
@@ -94,7 +93,7 @@ func (s *Service) PutSandboxPrivateArchive(ctx context.Context, req contracts.Sa
 	}
 	command := workspaceCommand(runtime.AdapterSpec.WorkspaceOps.UnpackTar, domain.MountPath, domain.MountPath, "")
 	if _, stderr, err := s.orchestrator.Exec(ctx, sb.Namespace, runtimeExecTarget(runtime), command, tarball, false); err != nil {
-		return apperr.ErrSandboxPrivateArchiveInvalid.WithCause(fmt.Errorf("%w: %s", err, string(stderr)))
+		return sandboxExecFailure(apperr.ErrSandboxPrivateArchiveInvalid, err, stderr)
 	}
 	if err := s.store.TenantTx(ctx, req.TenantID, func(ctx context.Context, tx TxStore) error {
 		detail, err := jsonBytes(map[string]any{"domain": req.Domain, "archive": req.ArchiveName})
@@ -143,7 +142,7 @@ func (s *Service) ReadSandboxFile(ctx context.Context, tenantID, sandboxID int64
 	command := workspaceCommand(runtime.AdapterSpec.WorkspaceOps.ReadFile, runtime.AdapterSpec.WorkspaceDir, target, "")
 	stdout, stderr, err := s.orchestrator.Exec(ctx, sb.Namespace, runtimeExecTarget(runtime), command, nil, false)
 	if err != nil {
-		return FileReadResponse{}, apperr.ErrSandboxFileReadFailed.WithCause(fmt.Errorf("%w: %s", err, string(stderr)))
+		return FileReadResponse{}, sandboxExecFailure(apperr.ErrSandboxFileReadFailed, err, stderr)
 	}
 	return FileReadResponse{
 		RelativePath:  relative,
@@ -178,7 +177,7 @@ func (s *Service) ListSandboxFiles(ctx context.Context, tenantID, sandboxID int6
 	command := workspaceCommand(runtime.AdapterSpec.WorkspaceOps.ListFiles, runtime.AdapterSpec.WorkspaceDir, target, "")
 	stdout, stderr, err := s.orchestrator.Exec(ctx, sb.Namespace, runtimeExecTarget(runtime), command, nil, false)
 	if err != nil {
-		return FileListResponse{}, apperr.ErrSandboxFileListFailed.WithCause(fmt.Errorf("%w: %s", err, string(stderr)))
+		return FileListResponse{}, sandboxExecFailure(apperr.ErrSandboxFileListFailed, err, stderr)
 	}
 	var entries []FileEntryResponse
 	if err := jsonx.DecodeStrict(stdout, &entries); err != nil {
@@ -204,7 +203,7 @@ func (s *Service) ListSandboxFilesForOwner(ctx context.Context, tenantID, accoun
 }
 
 // SaveSandboxFiles 校验来源归属后立即持久化当前工作区,返回保存后的代码引用与哈希。
-func (s *Service) SaveSandboxFiles(ctx context.Context, req contracts.SandboxSaveRequest) (string, string, error) {
+func (s *Service) saveSandboxFilesContract(ctx context.Context, req contracts.SandboxSaveRequest) (string, string, error) {
 	if req.TenantID <= 0 || req.SandboxID <= 0 || !validSourceRef(req.SourceRef) {
 		return "", "", apperr.ErrSandboxContractRequestInvalid
 	}
@@ -233,7 +232,7 @@ func (s *Service) saveSandboxFiles(ctx context.Context, tenantID, sandboxID int6
 	command := workspaceCommand(runtime.AdapterSpec.WorkspaceOps.PackTar, runtime.AdapterSpec.WorkspaceDir, runtime.AdapterSpec.WorkspaceDir, "")
 	stdout, stderr, err := s.orchestrator.Exec(ctx, sb.Namespace, runtimeExecTarget(runtime), command, nil, false)
 	if err != nil {
-		return "", "", apperr.ErrSandboxFilePersistFailed.WithCause(fmt.Errorf("%w: %s", err, string(stderr)))
+		return "", "", sandboxExecFailure(apperr.ErrSandboxFilePersistFailed, err, stderr)
 	}
 	hash := crypto.SHA256Hex(stdout)
 	if err := s.minio.Put(ctx, s.minio.BucketCode(), sb.CodeStorageKey, bytes.NewReader(stdout), int64(len(stdout)), "application/x-tar"); err != nil {
@@ -278,7 +277,7 @@ func (s *Service) SaveSandboxFilesForOwner(ctx context.Context, tenantID, accoun
 }
 
 // ExecSandboxCommand 在沙箱内执行受限命令,供判题 worker 运行套件。
-func (s *Service) ExecSandboxCommand(ctx context.Context, req contracts.SandboxExecRequest) (contracts.SandboxExecResult, error) {
+func (s *Service) execSandboxCommandContract(ctx context.Context, req contracts.SandboxExecRequest) (contracts.SandboxExecResult, error) {
 	if req.TenantID <= 0 || req.SandboxID <= 0 || !safeNonShellCommand(req.Command) || !validSourceRef(req.SourceRef) {
 		return contracts.SandboxExecResult{}, apperr.ErrSandboxContractRequestInvalid
 	}
@@ -311,7 +310,7 @@ func (s *Service) ExecSandboxCommand(ctx context.Context, req contracts.SandboxE
 	}
 	stdout, stderr, err := s.orchestrator.Exec(execCtx, sb.Namespace, target, req.Command, req.Stdin, false)
 	if err != nil {
-		return contracts.SandboxExecResult{}, apperr.ErrSandboxExecFailed.WithCause(fmt.Errorf("%w: %s", err, string(stderr)))
+		return contracts.SandboxExecResult{}, sandboxExecFailure(apperr.ErrSandboxExecFailed, err, stderr)
 	}
 	if err := s.store.TenantTx(ctx, req.TenantID, func(ctx context.Context, tx TxStore) error {
 		detail, err := jsonBytes(map[string]any{"command": req.Command[0]})

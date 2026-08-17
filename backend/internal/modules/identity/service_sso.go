@@ -165,7 +165,7 @@ func (s *Service) validateSSOConfig(req SSOConfigRequest) error {
 		}
 		required := []string{"bind_dn", "bind_password", "base_dn", "user_filter", "match_attribute"}
 		for _, key := range required {
-			if stringField(req.Config, key) == "" {
+			if strings.TrimSpace(jsonx.StringField(req.Config, key)) == "" {
 				return apperr.ErrIdentitySSOConfigInvalid
 			}
 		}
@@ -184,7 +184,7 @@ func (s *Service) secureSSOConfig(req SSOConfigRequest) (map[string]any, error) 
 	if req.Type != SSOTypeLDAP {
 		return out, nil
 	}
-	password := stringField(out, "bind_password")
+	password := strings.TrimSpace(jsonx.StringField(out, "bind_password"))
 	if password == "" {
 		return nil, apperr.ErrIdentitySSOConfigInvalid
 	}
@@ -271,23 +271,17 @@ func (s *Service) ldapConfigFromJSON(raw []byte) (ldapConfig, error) {
 		return ldapConfig{}, apperr.ErrIdentitySSOSecretInvalid.WithCause(err)
 	}
 	cfg := ldapConfig{
-		URL:            stringField(revealed, "url"),
-		BindDN:         stringField(revealed, "bind_dn"),
-		BindPassword:   stringField(revealed, "bind_password"),
-		BaseDN:         stringField(revealed, "base_dn"),
-		UserFilter:     stringField(revealed, "user_filter"),
-		MatchAttribute: stringField(revealed, "match_attribute"),
+		URL:            strings.TrimSpace(jsonx.StringField(revealed, "url")),
+		BindDN:         strings.TrimSpace(jsonx.StringField(revealed, "bind_dn")),
+		BindPassword:   strings.TrimSpace(jsonx.StringField(revealed, "bind_password")),
+		BaseDN:         strings.TrimSpace(jsonx.StringField(revealed, "base_dn")),
+		UserFilter:     strings.TrimSpace(jsonx.StringField(revealed, "user_filter")),
+		MatchAttribute: strings.TrimSpace(jsonx.StringField(revealed, "match_attribute")),
 	}
 	if cfg.URL == "" || cfg.BindDN == "" || cfg.BindPassword == "" || cfg.BaseDN == "" || cfg.UserFilter == "" || cfg.MatchAttribute == "" {
 		return ldapConfig{}, apperr.ErrIdentitySSOConfigInvalid
 	}
 	return cfg, nil
-}
-
-// stringField 从配置 JSON map 中读取字符串字段并去除空白。
-// 严格取值复用 jsonx.StringField(不做数字宽松转换),这里只加 SSO 配置字段特有的去空白语义。
-func stringField(data map[string]any, key string) string {
-	return strings.TrimSpace(jsonx.StringField(data, key))
 }
 
 // loadEnabledSSOConfig 读取租户启用中的指定 SSO 配置,避免 API 层碰数据库。

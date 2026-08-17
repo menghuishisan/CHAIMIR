@@ -240,9 +240,10 @@ func (t *txStore) CreateBackupRecord(ctx context.Context, id int64, req BackupRe
 }
 
 // ListBackupRecords 查询备份记录和总数。
-func (t *txStore) ListBackupRecords(ctx context.Context, page, size int) ([]BackupRecordDTO, int64, error) {
+// status 传 0 表示不按结果过滤;总数按同一条件计,与列表同口径。
+func (t *txStore) ListBackupRecords(ctx context.Context, status int16, page, size int) ([]BackupRecordDTO, int64, error) {
 	limit, offset := pagex.LimitOffset(page, size)
-	rows, err := t.q.ListBackupRecords(ctx, sqlcgen.ListBackupRecordsParams{Limit: limit, Offset: offset})
+	rows, err := t.q.ListBackupRecords(ctx, sqlcgen.ListBackupRecordsParams{Status: status, PageLimit: limit, PageOffset: offset})
 	if err != nil {
 		return nil, 0, err
 	}
@@ -250,7 +251,7 @@ func (t *txStore) ListBackupRecords(ctx context.Context, page, size int) ([]Back
 	for _, row := range rows {
 		out = append(out, backupDTO(row))
 	}
-	total, err := t.q.CountBackupRecords(ctx)
+	total, err := t.q.CountBackupRecords(ctx, status)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -264,28 +265,20 @@ func configDTO(row sqlcgen.SystemConfig) ConfigDTO {
 
 // configLogDTO 转换配置历史行。
 func configLogDTO(row sqlcgen.ConfigChangeLog) ConfigChangeLogDTO {
-	return ConfigChangeLogDTO{ID: ids.ID(row.ID), ConfigID: ids.ID(row.ConfigID), TenantID: ids.ID(pgtypex.Int8Value(row.TenantID)), OldValue: jsonx.ObjectMap(row.OldValue), NewValue: jsonx.ObjectMap(row.NewValue), OperatorID: ids.ID(row.OperatorID), CreatedAt: row.CreatedAt.Time.Format(time.RFC3339)}
+	return ConfigChangeLogDTO{ID: ids.ID(row.ID), ConfigID: ids.ID(row.ConfigID), TenantID: ids.ID(pgtypex.Int8Value(row.TenantID)), OldValue: jsonx.ObjectMap(row.OldValue), NewValue: jsonx.ObjectMap(row.NewValue), OperatorID: ids.ID(row.OperatorID), CreatedAt: timex.RFC3339OrEmpty(timex.FromTimestamptz(row.CreatedAt))}
 }
 
 // alertRuleDTO 转换告警规则行。
 func alertRuleDTO(row sqlcgen.AlertRule) AlertRuleDTO {
-	return AlertRuleDTO{ID: ids.ID(row.ID), Scope: row.Scope, TenantID: ids.ID(pgtypex.Int8Value(row.TenantID)), Name: row.Name, Metric: row.Metric, Condition: jsonx.ObjectMap(row.Condition), Level: row.Level, Enabled: row.Enabled, CreatedAt: row.CreatedAt.Time.Format(time.RFC3339), UpdatedAt: row.UpdatedAt.Time.Format(time.RFC3339)}
+	return AlertRuleDTO{ID: ids.ID(row.ID), Scope: row.Scope, TenantID: ids.ID(pgtypex.Int8Value(row.TenantID)), Name: row.Name, Metric: row.Metric, Condition: jsonx.ObjectMap(row.Condition), Level: row.Level, Enabled: row.Enabled, CreatedAt: timex.RFC3339OrEmpty(timex.FromTimestamptz(row.CreatedAt)), UpdatedAt: timex.RFC3339OrEmpty(timex.FromTimestamptz(row.UpdatedAt))}
 }
 
 // alertEventDTO 转换告警事件行。
 func alertEventDTO(row sqlcgen.AlertEvent) AlertEventDTO {
-	return AlertEventDTO{ID: ids.ID(row.ID), RuleID: ids.ID(row.RuleID), TenantID: ids.ID(pgtypex.Int8Value(row.TenantID)), Level: row.Level, Message: row.Message, Status: row.Status, HandlerID: ids.ID(pgtypex.Int8Value(row.HandlerID)), TriggeredAt: row.TriggeredAt.Time.Format(time.RFC3339), HandledAt: formatOptionalTime(row.HandledAt)}
+	return AlertEventDTO{ID: ids.ID(row.ID), RuleID: ids.ID(row.RuleID), TenantID: ids.ID(pgtypex.Int8Value(row.TenantID)), Level: row.Level, Message: row.Message, Status: row.Status, HandlerID: ids.ID(pgtypex.Int8Value(row.HandlerID)), TriggeredAt: timex.RFC3339OrEmpty(timex.FromTimestamptz(row.TriggeredAt)), HandledAt: timex.RFC3339OrEmpty(timex.FromTimestamptz(row.HandledAt))}
 }
 
 // backupDTO 转换备份记录行。
 func backupDTO(row sqlcgen.BackupRecord) BackupRecordDTO {
-	return BackupRecordDTO{ID: ids.ID(row.ID), Type: row.Type, SizeBytes: row.SizeBytes, Status: row.Status, StartedAt: row.StartedAt.Time.Format(time.RFC3339), FinishedAt: formatOptionalTime(row.FinishedAt)}
-}
-
-// formatOptionalTime 把可空时间转换为 API 字符串。
-func formatOptionalTime(v pgtype.Timestamptz) string {
-	if !v.Valid {
-		return ""
-	}
-	return v.Time.UTC().Format(time.RFC3339)
+	return BackupRecordDTO{ID: ids.ID(row.ID), Type: row.Type, SizeBytes: row.SizeBytes, Status: row.Status, StartedAt: timex.RFC3339OrEmpty(timex.FromTimestamptz(row.StartedAt)), FinishedAt: timex.RFC3339OrEmpty(timex.FromTimestamptz(row.FinishedAt))}
 }

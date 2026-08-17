@@ -16,8 +16,12 @@ import (
 )
 
 // ListTasks 按租户分页查询判题任务,供教师和学校管理员查看队列与人工评分项。
-func (s *Service) ListTasks(ctx context.Context, tenantID, accountID int64, sourceRef string, pendingManual bool, page, size int) ([]map[string]any, int64, int, int, error) {
+// state 取运维分组(空串不筛 / active 排队与执行中 / abnormal 超时失败出错),非法值按不筛处理前先拒绝。
+func (s *Service) ListTasks(ctx context.Context, tenantID, accountID int64, sourceRef string, pendingManual bool, state string, page, size int) ([]JudgeTaskDTO, int64, int, int, error) {
 	if tenantID <= 0 || accountID <= 0 {
+		return nil, 0, 0, 0, apperr.ErrJudgeSubmitInvalid
+	}
+	if !validTaskState(state) {
 		return nil, 0, 0, 0, apperr.ErrJudgeSubmitInvalid
 	}
 	page, size = pagex.Normalize(page, size)
@@ -28,7 +32,7 @@ func (s *Service) ListTasks(ctx context.Context, tenantID, accountID int64, sour
 	)
 	if err := s.store.TenantTx(ctx, tenantID, func(ctx context.Context, tx TxStore) error {
 		var err error
-		items, total, err = tx.ListJudgeTasks(ctx, tenantID, strings.TrimSpace(sourceRef), pendingManual, accountID, limit, offset)
+		items, total, err = tx.ListJudgeTasks(ctx, tenantID, strings.TrimSpace(sourceRef), pendingManual, accountID, state, limit, offset)
 		if err != nil {
 			return apperr.ErrJudgeTaskNotFound.WithCause(err)
 		}
@@ -36,9 +40,9 @@ func (s *Service) ListTasks(ctx context.Context, tenantID, accountID int64, sour
 	}); err != nil {
 		return nil, 0, 0, 0, err
 	}
-	out := make([]map[string]any, 0, len(items))
+	out := make([]JudgeTaskDTO, 0, len(items))
 	for _, item := range items {
-		out = append(out, taskInfoToMap(item))
+		out = append(out, judgeTaskDTOFromModel(item))
 	}
 	return out, total, page, size, nil
 }
@@ -153,12 +157,12 @@ func (s *Service) RejudgeBatch(ctx context.Context, tenantID int64, sourceRef st
 }
 
 // ManualScore 保存人工评分结果并在同一事务写入终态 outbox。
-func (s *Service) ManualScore(ctx context.Context, tenantID, taskID, scorerID int64, req ManualScoreRequest) (map[string]any, error) {
+func (s *Service) ManualScore(ctx context.Context, tenantID, taskID, scorerID int64, req ManualScoreRequest) (JudgeTaskDTO, error) {
 	if tenantID <= 0 || taskID <= 0 || scorerID <= 0 {
-		return nil, apperr.ErrJudgeSubmitInvalid
+		return JudgeTaskDTO{}, apperr.ErrJudgeSubmitInvalid
 	}
 	if err := validateManualScore(req); err != nil {
-		return nil, err
+		return JudgeTaskDTO{}, err
 	}
 	var info JudgeTaskInfo
 	if err := s.store.TenantTx(ctx, tenantID, func(ctx context.Context, tx TxStore) error {
@@ -210,16 +214,16 @@ func (s *Service) ManualScore(ctx context.Context, tenantID, taskID, scorerID in
 		info = JudgeTaskInfo{Task: task, Result: &saved}
 		return nil
 	}); err != nil {
-		return nil, err
+		return JudgeTaskDTO{}, err
 	}
 	s.publishProgress(ctx, tenantID, taskID, JudgeTaskStatusDone, ProgressStageDone, "判题任务已完成")
 	if err := s.publishPendingOutbox(ctx); err != nil {
-		return nil, err
+		return JudgeTaskDTO{}, err
 	}
 	if err := s.writeAuditFromContext(ctx, tenantID, "judge.manual_score", "judge_task", taskID, map[string]any{"score": req.Score, "max_score": req.MaxScore, "scorer_id": scorerID}); err != nil {
-		return nil, err
+		return JudgeTaskDTO{}, err
 	}
-	return taskInfoToMap(info), nil
+	return judgeTaskDTOFromModel(info), nil
 }
 
 // ProgressSubscription 校验任务存在后返回进度订阅 topic 和当前快照。

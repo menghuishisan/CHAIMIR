@@ -264,7 +264,7 @@ function AddMembersModal({ courseId, onClose, onAdded }: AddMembersModalProps) {
           <Button variant="outline" onClick={onClose}>
             取消
           </Button>
-          <Button variant="seal" loading={working} onClick={() => void submit()}>
+          <Button variant="primary" loading={working} onClick={() => void submit()}>
             添加学生
           </Button>
         </ModalFooter>

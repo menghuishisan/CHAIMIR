@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"chaimir/internal/platform/config"
+	"chaimir/internal/platform/ids"
 	"chaimir/internal/platform/intx"
 	"chaimir/internal/platform/tenant"
 
@@ -112,7 +113,7 @@ func (d *DB) WithTenantTxID(ctx context.Context, tenantID int64, fn TxFunc) erro
 		return fmt.Errorf("tenant_id 必须大于 0")
 	}
 	return runTx(ctx, d.app, func(ctx context.Context, tx pgx.Tx) error {
-		if _, err := tx.Exec(ctx, "SELECT set_config('app.tenant_id', $1, true)", fmt.Sprintf("%d", tenantID)); err != nil {
+		if _, err := tx.Exec(ctx, "SELECT set_config('app.tenant_id', $1, true)", ids.Format(tenantID)); err != nil {
 			return fmt.Errorf("注入 app.tenant_id 失败: %w", err)
 		}
 		return fn(ctx, tx)

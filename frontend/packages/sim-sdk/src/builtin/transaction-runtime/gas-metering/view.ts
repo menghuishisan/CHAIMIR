@@ -21,7 +21,6 @@ export function renderGasView(state: GasState): TeachingFrame {
       intent: 'observe',
       what: state.explanation.effect,
       why: state.explanation.reason,
-      watch: summary,
     },
     focus: {
       primary: selectedOrFrameFocus(state.selectedElementId, ['gas-pipeline']),

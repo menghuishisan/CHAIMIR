@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"chaimir/internal/contracts"
+	"chaimir/internal/platform/ids"
 	"chaimir/internal/platform/workload"
 	"chaimir/pkg/crypto"
 
@@ -890,7 +891,7 @@ ON CONFLICT (tenant_id, contest_id, team_id) DO UPDATE SET score=EXCLUDED.score,
 		return err
 	}
 	snapshotAt := end
-	ranking, _ := jsonb([]map[string]any{{"rank": 1, "team_id": fmt.Sprintf("%d", acceptanceIDs.TeamA), "score": 500, "solved_count": 1, "last_solve_at": snapshotAt, "updated_at": snapshotAt}})
+	ranking, _ := jsonb([]map[string]any{{"rank": 1, "team_id": ids.Format(acceptanceIDs.TeamA), "score": 500, "solved_count": 1, "last_solve_at": snapshotAt, "updated_at": snapshotAt}})
 	if err := execJSON(ctx, tx, `
 INSERT INTO contest_ladder_snapshot (id, tenant_id, contest_id, snapshot_status, ranking)
 VALUES ($1,$2,$3,6,$4)
@@ -900,7 +901,7 @@ ON CONFLICT (tenant_id, contest_id, snapshot_status) DO UPDATE SET ranking=EXCLU
 	}
 	battleConfig, _ := jsonb(map[string]any{
 		"runtime_code": "evm-foundry", "runtime_image_version": "2026.06",
-		"tool_codes": []string{"code-server"}, "init_code_ref": acceptanceInitCodeRef, "init_script_ref": acceptanceInitScriptRef,
+		"tool_codes": []string{"code-server"},
 	})
 	if err := execJSON(ctx, tx, `
 INSERT INTO contest (id, tenant_id, organizer_id, name, mode, match_mode, team_mode, signup_start, signup_end, start_at, end_at, freeze_minutes, rules, status)
@@ -960,7 +961,7 @@ ON CONFLICT (id) DO UPDATE SET contest_id=EXCLUDED.contest_id, problem_id=EXCLUD
 		acceptanceIDs.BattleEntryB, acceptanceIDs.TenantID, acceptanceIDs.BattleContest, acceptanceIDs.BattleContestProblem, acceptanceIDs.BattleTeamB, strings.Repeat("b", 64)); err != nil {
 		return err
 	}
-	scoreDelta, _ := jsonb(map[string]any{"team_a": fmt.Sprintf("%d", acceptanceIDs.BattleTeamA), "team_b": fmt.Sprintf("%d", acceptanceIDs.BattleTeamB), "rating_a_before": 1200, "rating_b_before": 1200, "rating_a_after": 1216, "rating_b_after": 1184, "delta_a": 16, "delta_b": -16})
+	scoreDelta, _ := jsonb(map[string]any{"team_a": ids.Format(acceptanceIDs.BattleTeamA), "team_b": ids.Format(acceptanceIDs.BattleTeamB), "rating_a_before": 1200, "rating_b_before": 1200, "rating_a_after": 1216, "rating_b_after": 1184, "delta_a": 16, "delta_b": -16})
 	if err := execJSON(ctx, tx, `
 INSERT INTO battle_match (id, tenant_id, contest_id, problem_id, entry_a_id, entry_b_id, source_ref, sandbox_ref, judge_task_ref, result, score_delta, replay_ref, status, matched_at, finished_at)
 VALUES ($1,$2,$3,$4,$5,$6,'contest:2026:battle:acceptance-001','sandbox:acceptance-battle-001','judge:acceptance-battle-001',1,$7,NULL,3,now() - interval '18 minutes',now() - interval '10 minutes')

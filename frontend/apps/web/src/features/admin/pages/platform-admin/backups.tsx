@@ -6,7 +6,6 @@
 //
 // 最近一次成功备份的时间是最该盯的数字,故单独放在指标带首位。
 
-import { useMemo } from 'react'
 import { CircleCheck, CircleX, Database, Save } from 'lucide-react'
 import { BackupStatus, type BackupRecord } from '@chaimir/api-client'
 import {
@@ -23,7 +22,7 @@ import {
 } from '@chaimir/ui'
 import { api } from '../../../../app/api'
 import { ResourceState } from '../../../../components/ResourceState'
-import { usePagedResource } from '../../../../hooks'
+import { useAsyncResource, usePagedResource, useResourceTotal } from '../../../../hooks'
 import { formatDateTime, formatDuration, formatFileSize } from '../../../../utils/formatters'
 import {
   backupStatusLabel,
@@ -37,20 +36,26 @@ import {
 export default function PlatformBackupsPage() {
   const backups = usePagedResource<BackupRecord>((params) => api.admin.listBackups(params), [])
 
-  const stats = useMemo(() => {
-    const list = backups.data ? backups.data.list : []
-    const succeeded = list.filter((item) => item.status === BackupStatus.SUCCEEDED)
-    const latest = succeeded.reduce<BackupRecord | undefined>((newest, item) => {
-      if (!newest) return item
-      return new Date(item.started_at) > new Date(newest.started_at) ? item : newest
-    }, undefined)
-    return {
-      latest,
-      succeeded: succeeded.length,
-      failed: list.filter((item) => item.status === BackupStatus.FAILED).length,
-      running: list.filter((item) => item.status === BackupStatus.RUNNING).length,
-    }
-  }, [backups.data])
+  // 指标带取服务端全量口径。「最近一次成功」单独按成功结果取第一条:
+  // 只看当前页会在这一页恰好没有成功记录时误报「暂无成功记录」。
+  const latestSucceeded = useAsyncResource(
+    () => api.admin.listBackups({ status: BackupStatus.SUCCEEDED, page: 1, size: 1 }),
+    [],
+    () => false,
+  )
+  const succeededCount = useResourceTotal(
+    (params) => api.admin.listBackups({ status: BackupStatus.SUCCEEDED, ...params }),
+    [],
+  )
+  const failedCount = useResourceTotal(
+    (params) => api.admin.listBackups({ status: BackupStatus.FAILED, ...params }),
+    [],
+  )
+  const runningCount = useResourceTotal(
+    (params) => api.admin.listBackups({ status: BackupStatus.RUNNING, ...params }),
+    [],
+  )
+  const latest = latestSucceeded.data ? latestSucceeded.data.list[0] : undefined
 
   const columns: TableColumn<BackupRecord>[] = [
     {
@@ -112,18 +117,18 @@ export default function PlatformBackupsPage() {
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <Stat
             label="最近一次成功"
-            value={stats.latest ? formatDateTime(stats.latest.started_at) : '暂无成功记录'}
+            value={latest ? formatDateTime(latest.started_at) : '暂无成功记录'}
             icon={CircleCheck}
-            hint={stats.latest ? formatFileSize(stats.latest.size_bytes) : '往前翻页查看'}
+            hint={latest ? formatFileSize(latest.size_bytes) : '备份成功后显示时间与大小'}
           />
-          <Stat label="已成功" value={stats.succeeded} icon={CircleCheck} />
+          <Stat label="已成功" value={succeededCount ?? '—'} icon={CircleCheck} />
           <Stat
             label="已失败"
-            value={stats.failed}
+            value={failedCount ?? '—'}
             icon={CircleX}
-            hint={stats.failed > 0 ? '需要查原因' : '暂无失败'}
+            hint={failedCount === 0 ? '暂无失败' : '需要查原因'}
           />
-          <Stat label="进行中" value={stats.running} icon={Database} />
+          <Stat label="进行中" value={runningCount ?? '—'} icon={Database} />
         </div>
       </PageSection>
 

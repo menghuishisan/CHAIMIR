@@ -303,7 +303,7 @@ function LevelConfigFormModal({ config, onClose, onSaved }: LevelConfigFormModal
             </FormField>
           </div>
 
-          <div className="flex flex-col gap-3 rounded-md border border-line bg-surface-sunken p-4">
+          <div className="flex flex-col gap-3 well p-4">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <p className="text-base text-ink">等级档位</p>
               <Button
@@ -319,9 +319,10 @@ function LevelConfigFormModal({ config, onClose, onSaved }: LevelConfigFormModal
             {rules.length === 0 ? (
               <Empty icon={GraduationCap} title="还没有档位" description="至少添加一档。" />
             ) : (
-              <div className="flex flex-col gap-2">
+              // 井内的并列条目用分隔线区分,不再各自画盒(规范 §6.5.1)
+              <div className="flex flex-col divide-y divide-line">
                 {rules.map((rule, index) => (
-                  <div key={index} className="flex flex-wrap items-end gap-2 rounded-md border border-line bg-surface p-3">
+                  <div key={index} className="flex flex-wrap items-end gap-2 py-3 first:pt-0 last:pb-0">
                     <FormField label="不低于" htmlFor={`rule-min-${index}`} className="mb-0 w-24">
                       <Input
                         id={`rule-min-${index}`}
@@ -367,7 +368,7 @@ function LevelConfigFormModal({ config, onClose, onSaved }: LevelConfigFormModal
             )}
           </div>
 
-          <div className="grid gap-4 rounded-md border border-line bg-surface-sunken p-4 sm:grid-cols-2">
+          <div className="grid gap-4 well p-4 sm:grid-cols-2">
             <FormField
               label="不及格门数上限"
               htmlFor="level-fail"
@@ -405,7 +406,7 @@ function LevelConfigFormModal({ config, onClose, onSaved }: LevelConfigFormModal
           <Button variant="outline" onClick={onClose}>
             取消
           </Button>
-          <Button variant="seal" loading={working} onClick={() => void submit()}>
+          <Button variant="primary" loading={working} onClick={() => void submit()}>
             {editing ? '保存规则' : '创建规则'}
           </Button>
         </ModalFooter>
@@ -619,7 +620,7 @@ function SemesterFormModal({ onClose, onSaved }: SemesterFormModalProps) {
             <Button type="button" variant="outline" onClick={onClose}>
               取消
             </Button>
-            <Button type="submit" variant="seal" loading={working}>
+            <Button type="submit" variant="primary" loading={working}>
               创建学期
             </Button>
           </ModalFooter>
@@ -738,7 +739,7 @@ function WarningRulesForm({ rules, onSaved }: WarningRulesFormProps) {
           {formError ? <Callout tone="danger">{formError}</Callout> : null}
 
           <div className="flex items-center gap-2">
-            <Button type="submit" variant="seal" leftIcon={CircleCheck} loading={working}>
+            <Button type="submit" variant="primary" leftIcon={CircleCheck} loading={working}>
               保存规则
             </Button>
             <span className="text-sm text-ink-sub">

@@ -280,7 +280,7 @@ export function ContestFormModal({ contest, onClose, onSaved }: ContestFormModal
             </FormField>
 
             {isBattle ? (
-              <div className="grid gap-4 rounded-md border border-line bg-surface-sunken p-4 sm:grid-cols-2">
+              <div className="grid gap-4 well p-4 sm:grid-cols-2">
                 <FormField label="对局匹配方式" htmlFor={`${fieldId}-match`} required>
                   <Select
                     id={`${fieldId}-match`}
@@ -304,7 +304,7 @@ export function ContestFormModal({ contest, onClose, onSaved }: ContestFormModal
                 </FormField>
               </div>
             ) : (
-              <div className="grid gap-4 rounded-md border border-line bg-surface-sunken p-4 sm:grid-cols-2">
+              <div className="grid gap-4 well p-4 sm:grid-cols-2">
                 <FormField label="允许重复提交" required>
                   <SegmentedControl
                     aria-label="是否允许重复提交"
@@ -339,7 +339,7 @@ export function ContestFormModal({ contest, onClose, onSaved }: ContestFormModal
             <Button type="button" variant="outline" onClick={onClose}>
               取消
             </Button>
-            <Button type="submit" variant="seal" loading={submitting}>
+            <Button type="submit" variant="primary" loading={submitting}>
               {editing ? '保存修改' : '创建赛事'}
             </Button>
           </ModalFooter>

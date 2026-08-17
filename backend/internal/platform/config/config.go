@@ -134,6 +134,7 @@ type MinIOConfig struct {
 type AuthConfig struct {
 	JWTSigningKey             string
 	AccessTTLMin              int
+	PathTicketTTLSeconds      int
 	RefreshTTLDay             int
 	JWTIssuer                 string
 	EncryptionKey             string
@@ -317,6 +318,7 @@ type SandboxConfig struct {
 	PrepullLimitMemory            string
 	ChainRPCTimeoutSeconds        int
 	ExecTimeoutSeconds            int
+	ExecOutputMaxBytes            int64
 	InitArchiveMaxBytes           int64
 	InitArchiveMaxFiles           int
 	InitArchiveMaxUnpackedBytes   int64
@@ -579,6 +581,7 @@ func Load() (*Config, error) {
 	c.Auth = AuthConfig{
 		JWTSigningKey:             req("JWT_SIGNING_KEY"),
 		AccessTTLMin:              reqInt("JWT_ACCESS_TTL_MIN"),
+		PathTicketTTLSeconds:      reqInt("JWT_PATH_TICKET_TTL_SECONDS"),
 		RefreshTTLDay:             reqInt("JWT_REFRESH_TTL_DAY"),
 		JWTIssuer:                 req("JWT_ISSUER"),
 		EncryptionKey:             req("APP_ENCRYPTION_KEY"),
@@ -751,6 +754,7 @@ func Load() (*Config, error) {
 		PrepullLimitMemory:            req("SANDBOX_PREPULL_LIMIT_MEMORY"),
 		ChainRPCTimeoutSeconds:        reqInt("SANDBOX_CHAIN_RPC_TIMEOUT_SECONDS"),
 		ExecTimeoutSeconds:            reqInt("SANDBOX_EXEC_TIMEOUT_SECONDS"),
+		ExecOutputMaxBytes:            reqInt64("SANDBOX_EXEC_OUTPUT_MAX_BYTES"),
 		InitArchiveMaxBytes:           reqInt64("SANDBOX_INIT_ARCHIVE_MAX_BYTES"),
 		InitArchiveMaxFiles:           reqInt("SANDBOX_INIT_ARCHIVE_MAX_FILES"),
 		InitArchiveMaxUnpackedBytes:   reqInt64("SANDBOX_INIT_ARCHIVE_MAX_UNPACKED_BYTES"),
@@ -810,6 +814,9 @@ func Load() (*Config, error) {
 	// 的 MaxAge 无从计算,必须在启动时拦下而不是留到运行期表现为「登录后立刻掉线」。
 	if c.Auth.AccessTTLMin <= 0 {
 		errs = append(errs, "JWT_ACCESS_TTL_MIN 必须大于 0")
+	}
+	if c.Auth.PathTicketTTLSeconds <= 0 {
+		errs = append(errs, "JWT_PATH_TICKET_TTL_SECONDS 必须大于 0")
 	}
 	if c.Auth.RefreshTTLDay <= 0 {
 		errs = append(errs, "JWT_REFRESH_TTL_DAY 必须大于 0")
@@ -1125,6 +1132,9 @@ func Load() (*Config, error) {
 	}
 	if c.Sandbox.ExecTimeoutSeconds <= 0 {
 		errs = append(errs, "SANDBOX_EXEC_TIMEOUT_SECONDS 必须大于 0")
+	}
+	if c.Sandbox.ExecOutputMaxBytes <= 0 {
+		errs = append(errs, "SANDBOX_EXEC_OUTPUT_MAX_BYTES 必须大于 0")
 	}
 	if c.Sandbox.InitArchiveMaxBytes <= 0 {
 		errs = append(errs, "SANDBOX_INIT_ARCHIVE_MAX_BYTES 必须大于 0")

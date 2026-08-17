@@ -62,10 +62,17 @@ export function finalizeZkRollupState(state: ZkRollupState): ZkRollupState {
 
 /** zkRollupCheckpoint 执行当前内置仿真的状态推进、事件计算或校验逻辑。 */
 export function zkRollupCheckpoint(state: ZkRollupState): CheckpointResult {
+  const rejected = state.phaseIndex === 5;
   return {
-    achieved: state.verifierAccepted || state.phaseIndex === 5,
+    achieved: state.verifierAccepted || rejected,
     answer: { proofValid: state.proofValid, verifierAccepted: state.verifierAccepted, rootMatches: state.publicInputRoot === state.newRoot },
-    explanation: state.verifierAccepted ? 'proof 与 public inputs 匹配,L1 接受 newRoot。' : 'proof 或 public input 不匹配,L1 保持旧状态根。',
+    // 「验证结果正确」两种都算达成:证明有效被接受、证明无效被拒绝。
+    // 说明必须把「已拒绝」这一支写出来,否则达成态会配上一句否定的解释,自相矛盾。
+    explanation: state.verifierAccepted
+      ? 'proof 与 public inputs 匹配,L1 接受 newRoot。'
+      : rejected
+        ? 'proof 或 public input 不匹配,L1 已拒绝这个 batch 并保持旧状态根 —— 这正是应有的结果。'
+        : '还没有验证结论,proof 与 public input 尚未校验完。',
   };
 }
 

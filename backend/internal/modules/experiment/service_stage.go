@@ -10,6 +10,7 @@ import (
 	"sync"
 
 	"chaimir/internal/contracts"
+	"chaimir/internal/platform/jsonx"
 	"chaimir/pkg/apperr"
 )
 
@@ -237,7 +238,11 @@ func componentsForStage(cfg ComponentConfig, stage StageConfig, checkpoints []Ch
 // applyStageBindings 复制仿真参数并注入阶段绑定值。
 func applyStageBindings(sim SimComponent, bindings []ParamBinding, checkpoints []CheckpointResult) (SimComponent, error) {
 	out := sim
-	out.Params = cloneAnyMap(sim.Params)
+	params, err := jsonx.CloneObjectStrict(sim.Params)
+	if err != nil {
+		return SimComponent{}, apperr.ErrExperimentInvalid.WithCause(err)
+	}
+	out.Params = params
 	for _, binding := range bindings {
 		if strings.TrimSpace(binding.TargetComponent) != strings.TrimSpace(sim.ID) {
 			continue

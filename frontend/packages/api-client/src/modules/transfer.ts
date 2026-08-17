@@ -2,8 +2,9 @@
 
 import { ApiClient } from '../client'
 import type { AttachmentResponse } from '../client'
+import type { PaginatedResponse } from '../types/common'
 import type { TransferChannel, TransferStatus } from '../constants/transfer'
-import type { TransferDownloadGrant, TransferTask, TransferTaskListResponse } from '../types/transfer'
+import type { TransferDownloadGrant, TransferTask } from '../types/transfer'
 import type { StorageApi } from './storage'
 
 /**
@@ -27,7 +28,7 @@ export class TransferApi {
     status?: TransferStatus
     page?: number
     size?: number
-  }): Promise<TransferTaskListResponse> {
+  }): Promise<PaginatedResponse<TransferTask>> {
     return this.client.get('/transfer/tasks', params)
   }
 

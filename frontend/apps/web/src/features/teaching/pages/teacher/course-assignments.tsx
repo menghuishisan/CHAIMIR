@@ -403,7 +403,7 @@ function AssignmentFormModal({
             <Button type="button" variant="outline" onClick={onClose}>
               取消
             </Button>
-            <Button type="submit" variant="seal" loading={working}>
+            <Button type="submit" variant="primary" loading={working}>
               {editing ? '保存修改' : '创建作业'}
             </Button>
           </ModalFooter>
@@ -466,7 +466,7 @@ function AssignmentItemsEditor({ items, onChange }: AssignmentItemsEditorProps) 
           {items.map((item, index) => (
             <div
               key={`${item.item_code}-${item.item_version}`}
-              className="flex flex-wrap items-end gap-3 rounded-md border border-line bg-surface p-3"
+              className="flex flex-wrap items-end gap-3 well p-3"
             >
               <div className="min-w-0 flex-1">
                 <div className="truncate text-base text-ink">
@@ -619,7 +619,7 @@ function ItemPickerModal({ selectedCodes, onClose, onPick }: ItemPickerModalProp
           </Button>
           <Button
             type="button"
-            variant="seal"
+            variant="primary"
             disabled={picked.length === 0}
             onClick={() => onPick(picked)}
           >

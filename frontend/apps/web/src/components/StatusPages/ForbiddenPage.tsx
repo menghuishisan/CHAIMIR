@@ -25,6 +25,7 @@ export function ForbiddenPage({ roles }: ForbiddenPageProps) {
   return (
     <AppStatusScreen
       icon={ShieldX}
+      tone="danger"
       title="没有访问这个页面的权限"
       description="你当前的账号角色无法查看该区域。如果你认为这是误判,请联系本校管理员。"
       actions={

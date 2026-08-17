@@ -277,7 +277,7 @@ func traceIDFromLogContext(ctx context.Context) string {
 
 // runRuntimeCapabilitySelftest 用标准 L2 能力执行 reset/deploy/query/reset 自检闭环。
 func (s *Service) runRuntimeCapabilitySelftest(ctx context.Context, sb Sandbox, runtime Runtime) error {
-	if runtime.AdapterLevel < 2 && strings.TrimSpace(runtime.CapabilityImpl) == "" && strings.TrimSpace(runtime.PluginRef) == "" {
+	if runtime.AdapterLevel < RuntimeAdapterLevelStandard && strings.TrimSpace(runtime.CapabilityImpl) == "" && strings.TrimSpace(runtime.PluginRef) == "" {
 		return nil
 	}
 	cap, err := s.resolveCapability(runtime)

@@ -15,13 +15,13 @@ export function safeInternalNavigation(value: unknown): string | undefined {
   }
 }
 
-/** 只接受 HTTP(S) 认证地址,拒绝 javascript/data 等危险协议和凭据嵌入。 */
-export function safeExternalHttpUrl(value: unknown): string | undefined {
+/** 只接受 HTTPS 认证地址,拒绝降级传输、危险协议和凭据嵌入。 */
+export function safeExternalHttpsUrl(value: unknown): string | undefined {
   if (typeof value !== 'string') return undefined
 
   try {
     const parsed = new URL(value)
-    if (!['http:', 'https:'].includes(parsed.protocol) || parsed.username || parsed.password) return undefined
+    if (parsed.protocol !== 'https:' || parsed.username || parsed.password) return undefined
     return parsed.toString()
   } catch {
     return undefined

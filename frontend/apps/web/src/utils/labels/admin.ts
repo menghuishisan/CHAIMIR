@@ -3,6 +3,7 @@
 import type { StatusTone } from '@chaimir/ui'
 import {
   AdminScope,
+  AlertLevel,
   AlertStatus,
   AuditActorRole,
   BackupStatus,
@@ -41,30 +42,38 @@ export function alertStatusTone(status: AlertStatus): StatusTone {
   return ALERT_STATUS_TONES[status]
 }
 
-/**
- * 告警级别文案。level 是后端开放的数字分级(1 最高),
- * 未登记的级别按数字表达但补上「级」字,不让界面出现裸数字。
- */
-const ALERT_LEVEL_LABELS: Record<number, string> = {
-  1: '紧急',
-  2: '重要',
-  3: '提醒',
+/** 告警级别文案与后端 1 提示、2 警告、3 严重、4 紧急的闭集契约一致。 */
+const ALERT_LEVEL_LABELS: Record<AlertLevel, string> = {
+  [AlertLevel.NOTICE]: '提示',
+  [AlertLevel.WARNING]: '警告',
+  [AlertLevel.SEVERE]: '严重',
+  [AlertLevel.CRITICAL]: '紧急',
+}
+
+const ALERT_LEVEL_TONES: Record<AlertLevel, StatusTone> = {
+  [AlertLevel.NOTICE]: 'info',
+  [AlertLevel.WARNING]: 'warning',
+  [AlertLevel.SEVERE]: 'danger',
+  [AlertLevel.CRITICAL]: 'danger',
 }
 
 /** alertLevelLabel 返回告警级别文案。 */
-export function alertLevelLabel(level: number): string {
-  return ALERT_LEVEL_LABELS[level] ?? `${level} 级`
+export function alertLevelLabel(level: AlertLevel): string {
+  return ALERT_LEVEL_LABELS[level]
 }
 
-/** alertLevelTone 返回告警级别语义色:越高越紧急。 */
-export function alertLevelTone(level: number): StatusTone {
-  if (level <= 1) return 'danger'
-  if (level === 2) return 'warning'
-  return 'info'
+/** alertLevelTone 返回告警级别语义色。 */
+export function alertLevelTone(level: AlertLevel): StatusTone {
+  return ALERT_LEVEL_TONES[level]
 }
 
 /** ALERT_LEVELS 供规则表单按登记顺序渲染级别选项。 */
-export const ALERT_LEVELS = [1, 2, 3] as const
+export const ALERT_LEVELS = [
+  AlertLevel.NOTICE,
+  AlertLevel.WARNING,
+  AlertLevel.SEVERE,
+  AlertLevel.CRITICAL,
+] as const satisfies readonly AlertLevel[]
 
 const BACKUP_TYPE_LABELS: Record<BackupType, string> = {
   [BackupType.FULL]: '全量备份',
@@ -244,6 +253,38 @@ const STATISTICS_METRIC_LABELS: Record<string, string> = {
 export function statisticsMetricLabel(key: string): string | undefined {
   return STATISTICS_METRIC_LABELS[key]
 }
+
+/** 一组语义相近的统计指标,对应看板上的一张趋势图。 */
+export interface StatisticsMetricGroup {
+  id: string
+  title: string
+  /** 该组包含的指标键;逐日快照里没出现的键自动跳过 */
+  keys: string[]
+}
+
+/**
+ * 统计指标的分组:一张折线图最多 6 条系列(规范 §8.1),而已登记指标有 14 个,
+ * 全塞一张图会糊成一团。故按语义分组,每组一张图;各端只会渲染出自己数据里真有的那几组。
+ */
+export const STATISTICS_METRIC_GROUPS: StatisticsMetricGroup[] = [
+  {
+    id: 'account',
+    title: '账号',
+    keys: ['account_count', 'active_account_count', 'new_account_count'],
+  },
+  { id: 'tenant', title: '学校', keys: ['tenant_count'] },
+  {
+    id: 'teaching',
+    title: '教学',
+    keys: ['course_count', 'active_course_count', 'experiment_count', 'active_instance_count'],
+  },
+  {
+    id: 'contest',
+    title: '竞赛与判题',
+    keys: ['contest_count', 'active_contest_count', 'submission_count', 'judge_task_count'],
+  },
+  { id: 'resource', title: '资源与时长', keys: ['active_sandbox_count', 'learning_duration_sec'] },
+]
 
 /**
  * 系统配置项的用户向名称与说明。

@@ -24,6 +24,7 @@ import {
   ImagePrepullStatus,
   RuntimeImageStatus,
   RuntimeSelftestStatus,
+  RuntimeStatus,
   type SandboxRuntime,
   type SandboxRuntimeImage,
 } from '@chaimir/api-client'
@@ -47,7 +48,6 @@ import {
   PageScaffold,
   PageSection,
   Skeleton,
-  Stat,
   StatusIndicator,
   Table,
   toast,
@@ -170,27 +170,8 @@ function RuntimeOverview({
   return (
     <PageSection title="当前状态" description="声明内容在运行时列表页的「修改声明」里改。">
       <div className="flex flex-col gap-4">
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <Stat
-            label="开放状态"
-            value={runtimeStatusLabel(runtime.status)}
-            icon={Server}
-            hint={runtime.status === 1 ? '学校可以选用' : '暂不分配给学校'}
-          />
-          <Stat
-            label="自检结果"
-            value={runtimeSelftestStatusLabel(runtime.selftest_status)}
-            icon={ShieldCheck}
-          />
-          <Stat label="镜像版本数" value={images.length} icon={Container} />
-          <Stat
-            label="默认镜像"
-            value={defaultImage ? defaultImage.version : '未指定'}
-            icon={Container}
-            hint={defaultImage ? '自检与新环境用这个版本' : '指定后才能自检'}
-          />
-        </div>
-
+        {/* 开放状态与自检结果已由下方两个状态指示灯表达,镜像版本数与默认镜像是声明属性,
+            统一进属性表,不占指标位(规范 §6.5) */}
         <div className="flex flex-col gap-4">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div className="min-w-0">
@@ -214,6 +195,20 @@ function RuntimeOverview({
           <DescriptionList
             columns={2}
             items={[
+              {
+                term: '开放状态',
+                description:
+                  runtime.status === RuntimeStatus.AVAILABLE
+                    ? `${runtimeStatusLabel(runtime.status)} · 学校可以选用`
+                    : `${runtimeStatusLabel(runtime.status)} · 暂不分配给学校`,
+              },
+              {
+                term: '默认镜像',
+                description: defaultImage
+                  ? `${defaultImage.version}(自检与新环境用这个版本)`
+                  : '未指定,指定后才能自检',
+              },
+              { term: '镜像版本数', description: `${images.length} 个` },
               { term: '工作区目录', description: runtime.adapter_spec.workspace_dir, mono: true },
               {
                 term: '主环境',
@@ -577,7 +572,7 @@ function ImageFormModal({ runtimeId, onClose, onSaved }: ImageFormModalProps) {
             <Button type="button" variant="outline" onClick={onClose}>
               取消
             </Button>
-            <Button type="submit" variant="seal" loading={working}>
+            <Button type="submit" variant="primary" loading={working}>
               登记版本
             </Button>
           </ModalFooter>
@@ -740,7 +735,7 @@ function SelftestSection({ runtime, images, onDone }: SelftestSectionProps) {
             读取上次结果
           </Button>
           <Button
-            variant="seal"
+            variant="primary"
             leftIcon={ShieldCheck}
             loading={working}
             disabled={blockers.length > 0}

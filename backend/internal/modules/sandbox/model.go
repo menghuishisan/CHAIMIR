@@ -237,11 +237,11 @@ type PrepullImageSpec struct {
 	EphemeralMounts []workload.EphemeralMountSpec
 }
 
-// CommandToolPolicy 描述命令工具允许执行的入口命令和超时边界。
+// CommandToolPolicy 描述命令工具允许执行的完整 argv 白名单和超时边界。
 type CommandToolPolicy struct {
-	AllowedCommands       []string `json:"allowed_commands"`
-	DefaultTimeoutSeconds int32    `json:"default_timeout_seconds"`
-	MaxTimeoutSeconds     int32    `json:"max_timeout_seconds"`
+	AllowedArgv           [][]string `json:"allowed_argv"`
+	DefaultTimeoutSeconds int32      `json:"default_timeout_seconds"`
+	MaxTimeoutSeconds     int32      `json:"max_timeout_seconds"`
 }
 
 // CreateSandboxPlan 汇总创建沙箱时 service 交给编排器的完整上下文。

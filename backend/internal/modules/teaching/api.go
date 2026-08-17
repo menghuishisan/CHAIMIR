@@ -565,6 +565,7 @@ func (a teachingAPI) submitAssignment(c *gin.Context) {
 }
 
 // listSubmissions 查询作业提交分页。
+// status=0 表示不按批改状态过滤;越界状态在边界处拒绝,不进服务层。
 func (a teachingAPI) listSubmissions(c *gin.Context) {
 	id, ok := httpx.PathID(c, "id")
 	if !ok {
@@ -574,7 +575,11 @@ func (a teachingAPI) listSubmissions(c *gin.Context) {
 	if !ok {
 		return
 	}
-	out, total, p, s, err := a.svc.ListSubmissions(c.Request.Context(), id, page, size)
+	status, ok := httpx.QueryInt16(c, "status", httpx.QueryIntRule{Default: 0, Min: 0, Max: int64(SubmissionStatusGraded), HasMax: true})
+	if !ok {
+		return
+	}
+	out, total, p, s, err := a.svc.ListSubmissions(c.Request.Context(), id, status, page, size)
 	httpx.WritePage(c, out, total, p, s, err)
 }
 
@@ -815,7 +820,7 @@ func (a teachingAPI) exportGrades(c *gin.Context) {
 
 // internalStats 读取租户级教学统计。
 func (a teachingAPI) internalStats(c *gin.Context) {
-	tenantID, ok := httpx.QueryInt(c, "tenant_id", httpx.QueryIntRule{Min: 1})
+	tenantID, ok := httpx.QueryID(c, "tenant_id", true)
 	if !ok {
 		return
 	}
@@ -829,7 +834,7 @@ func (a teachingAPI) internalCourseGrades(c *gin.Context) {
 	if !ok {
 		return
 	}
-	tenantID, ok := httpx.QueryInt(c, "tenant_id", httpx.QueryIntRule{Min: 1})
+	tenantID, ok := httpx.QueryID(c, "tenant_id", true)
 	if !ok {
 		return
 	}

@@ -67,7 +67,7 @@ export function ChainProgress({
   const blockClass = (i: number): string => {
     if (failedIndexes.includes(i)) return "border-danger bg-danger-bg";
     if (i < safeDone) return onDark ? "border-jade-400 bg-jade-400" : "border-jade-500 bg-jade-500";
-    if (i === safeDone) return "border-accent bg-jade-400/20";
+    if (i === safeDone) return "border-accent bg-on-dark-accent-soft";
     return onDark ? "border-dark-line bg-transparent" : "border-line-strong bg-transparent";
   };
 

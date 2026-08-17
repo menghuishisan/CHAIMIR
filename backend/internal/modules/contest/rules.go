@@ -8,9 +8,28 @@ import (
 	"time"
 
 	"chaimir/internal/platform/auth"
-	"chaimir/internal/platform/jsonx"
+	"chaimir/internal/platform/ids"
 	"chaimir/pkg/apperr"
 )
+
+var (
+	// contestModeRegistry 注册平台内置和后续扩展的竞赛类型。
+	contestModeRegistry = map[int16]string{ContestModeSolve: "solve", ContestModeBattle: "battle"}
+	// battleRuleRegistry 注册平台内置和后续扩展的对局规则。
+	battleRuleRegistry = map[int16]string{BattleRuleAttackDefense: "attack-defense", BattleRuleGame: "game"}
+)
+
+// registeredContestMode 判断竞赛类型是否已注册。
+func registeredContestMode(mode int16) bool {
+	_, ok := contestModeRegistry[mode]
+	return ok
+}
+
+// registeredBattleRule 判断对局规则是否已注册。
+func registeredBattleRule(rule int16) bool {
+	_, ok := battleRuleRegistry[rule]
+	return ok
+}
 
 // validateContestRequest 校验赛事管理输入和时间线。
 func validateContestRequest(req ContestRequest) (ContestRequest, error) {
@@ -49,45 +68,55 @@ func validateProblemRequest(req ProblemRequest, mode int16) (ProblemRequest, err
 	if req.ItemCode == "" || req.ItemVersion == "" || req.Score <= 0 {
 		return ProblemRequest{}, apperr.ErrContestProblemInvalid
 	}
-	if req.DynamicScore == nil {
-		req.DynamicScore = map[string]any{}
+	if req.DynamicScore != nil {
+		if req.DynamicScore.MinScore <= 0 || req.DynamicScore.MinScore > req.Score || req.DynamicScore.DecayPerSolve <= 0 {
+			return ProblemRequest{}, apperr.ErrContestProblemInvalid
+		}
 	}
 	if mode == ContestModeBattle {
 		if !registeredBattleRule(req.BattleRule) {
 			return ProblemRequest{}, apperr.ErrContestProblemInvalid
 		}
-		if err := validateBattleConfig(req.BattleConfig); err != nil {
+		battleConfig, err := validateBattleConfig(req.BattleConfig)
+		if err != nil {
 			return ProblemRequest{}, err
 		}
+		req.BattleConfig = battleConfig
 	} else {
+		if req.BattleRule != 0 || req.BattleConfig != nil {
+			return ProblemRequest{}, apperr.ErrContestProblemInvalid
+		}
 		req.BattleRule = 0
-		req.BattleConfig = map[string]any{}
+		req.BattleConfig = nil
 	}
 	return req, nil
 }
 
-// validateBattleConfig 校验对抗题执行所需的沙箱运行时配置。
-func validateBattleConfig(cfg map[string]any) error {
-	if len(cfg) == 0 {
-		return apperr.ErrContestProblemInvalid
+// validateBattleConfig 校验并规范化对抗题执行所需的沙箱运行时配置。
+func validateBattleConfig(cfg *BattleRuntimeConfig) (*BattleRuntimeConfig, error) {
+	if cfg == nil {
+		return nil, apperr.ErrContestProblemInvalid
 	}
-	for _, key := range []string{"runtime_code", "runtime_image_version"} {
-		if strings.TrimSpace(jsonx.StringValue(cfg[key])) == "" {
-			return apperr.ErrContestProblemInvalid
-		}
+	normalized := BattleRuntimeConfig{
+		RuntimeCode:         strings.TrimSpace(cfg.RuntimeCode),
+		RuntimeImageVersion: strings.TrimSpace(cfg.RuntimeImageVersion),
 	}
-	if raw, ok := cfg["tool_codes"]; ok {
-		items, ok := raw.([]any)
-		if !ok {
-			return apperr.ErrContestProblemInvalid
-		}
-		for _, item := range items {
-			if strings.TrimSpace(jsonx.StringValue(item)) == "" {
-				return apperr.ErrContestProblemInvalid
-			}
-		}
+	if normalized.RuntimeCode == "" || normalized.RuntimeImageVersion == "" {
+		return nil, apperr.ErrContestProblemInvalid
 	}
-	return nil
+	seen := make(map[string]struct{}, len(cfg.ToolCodes))
+	for _, raw := range cfg.ToolCodes {
+		toolCode := strings.TrimSpace(raw)
+		if toolCode == "" {
+			return nil, apperr.ErrContestProblemInvalid
+		}
+		if _, exists := seen[toolCode]; exists {
+			continue
+		}
+		seen[toolCode] = struct{}{}
+		normalized.ToolCodes = append(normalized.ToolCodes, toolCode)
+	}
+	return &normalized, nil
 }
 
 // validateContestTransition 校验竞赛生命周期状态流转。
@@ -173,17 +202,17 @@ func validateContestRunning(item Contest) error {
 
 // contestSourceRef 生成竞赛级来源引用,用于结束归档级联回收。
 func contestSourceRef(contestID int64, now time.Time) string {
-	return fmt.Sprintf("contest:%04d:contest:%d", now.Year(), contestID)
+	return fmt.Sprintf("contest:%04d:contest:%s", now.Year(), ids.Format(contestID))
 }
 
 // submissionSourceRef 生成解题提交来源引用。
 func submissionSourceRef(id int64, now time.Time) string {
-	return fmt.Sprintf("contest:%04d:submission:%d", now.Year(), id)
+	return fmt.Sprintf("contest:%04d:submission:%s", now.Year(), ids.Format(id))
 }
 
 // battleSourceRef 生成对抗对局来源引用。
 func battleSourceRef(id int64, now time.Time) string {
-	return fmt.Sprintf("contest:%04d:battle:%d", now.Year(), id)
+	return fmt.Sprintf("contest:%04d:battle:%s", now.Year(), ids.Format(id))
 }
 
 // isSHA256Hex 校验参赛提交的内容哈希格式,与 M3 判题契约保持一致。
@@ -290,5 +319,5 @@ func validatePrevalidateRequest(req PrevalidateRequest) (PrevalidateRequest, err
 
 // stableContestCode 为漏洞题固化生成稳定内容 code。
 func stableContestCode(problem VulnProblem) string {
-	return fmt.Sprintf("VULN-%d", problem.ID)
+	return "VULN-" + ids.Format(problem.ID)
 }

@@ -20,18 +20,27 @@ const battleReplayArchiveVersion = 1
 
 type battleReplayArchive struct {
 	Version      int                           `json:"version"`
-	MatchID      string                        `json:"match_id"`
-	TaskID       string                        `json:"task_id"`
+	MatchID      ids.ID                        `json:"match_id"`
+	TaskID       ids.ID                        `json:"task_id"`
 	SourceRef    string                        `json:"source_ref"`
 	InitialState battleReplayInitialState      `json:"initial_state"`
 	Actions      []contracts.JudgeReplayAction `json:"actions"`
-	Result       contracts.JudgeTaskResult     `json:"result"`
+	Result       battleReplayResult            `json:"result"`
 	FinishedAt   time.Time                     `json:"finished_at"`
 }
 
+// battleReplayResult 是归档中的判定结果,动作序列只在 archive.actions 保存一份。
+type battleReplayResult struct {
+	Passed    bool                          `json:"passed"`
+	Score     int32                         `json:"score"`
+	MaxScore  int32                         `json:"max_score"`
+	Details   []contracts.JudgeResultDetail `json:"details"`
+	ResultRef string                        `json:"result_ref,omitempty"`
+}
+
 type battleReplayInitialState struct {
-	ContestID  int64                  `json:"contest_id"`
-	ProblemID  int64                  `json:"problem_id"`
+	ContestID  ids.ID                 `json:"contest_id"`
+	ProblemID  ids.ID                 `json:"problem_id"`
 	BattleRule int16                  `json:"battle_rule"`
 	EntryA     battleReplayEntryState `json:"entry_a"`
 	EntryB     battleReplayEntryState `json:"entry_b"`
@@ -84,18 +93,24 @@ func (s *Service) prepareBattleReplay(ctx context.Context, tenantID, taskID int6
 	}
 	archive := battleReplayArchive{
 		Version:   battleReplayArchiveVersion,
-		MatchID:   ids.Format(match.ID),
-		TaskID:    ids.Format(taskID),
+		MatchID:   ids.ID(match.ID),
+		TaskID:    ids.ID(taskID),
 		SourceRef: sourceRef,
 		InitialState: battleReplayInitialState{
-			ContestID:  match.ContestID,
-			ProblemID:  match.ProblemID,
+			ContestID:  ids.ID(match.ContestID),
+			ProblemID:  ids.ID(match.ProblemID),
 			BattleRule: problem.BattleRule,
 			EntryA:     battleReplayEntryState{Role: entryA.Role, VersionNo: entryA.VersionNo, ArtifactHash: entryA.ArtifactHash},
 			EntryB:     battleReplayEntryState{Role: entryB.Role, VersionNo: entryB.VersionNo, ArtifactHash: entryB.ArtifactHash},
 		},
-		Actions:    result.Replay.Actions,
-		Result:     result,
+		Actions: result.Replay.Actions,
+		Result: battleReplayResult{
+			Passed:    result.Passed,
+			Score:     result.Score,
+			MaxScore:  result.MaxScore,
+			Details:   result.Details,
+			ResultRef: result.ResultRef,
+		},
 		FinishedAt: timex.Now(),
 	}
 	raw, err := json.Marshal(archive)

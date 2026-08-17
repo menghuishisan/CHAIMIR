@@ -51,11 +51,11 @@ export interface SendSMSRequest {
   tenant_id?: SnowflakeID
 }
 
-export interface WebSocketTicketRequest {
+export interface PathTicketRequest {
   path: string
 }
 
-export interface WebSocketTicketResponse {
+export interface PathTicketResponse {
   ticket: string
   expires_at: string
 }

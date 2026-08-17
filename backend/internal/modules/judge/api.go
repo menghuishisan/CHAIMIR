@@ -166,12 +166,12 @@ func (a judgeAPI) rejudgeTask(c *gin.Context) {
 	if current, ok := tenant.FromContext(c.Request.Context()); ok {
 		if current.IsSystem && current.TenantID > 0 {
 			out, err := a.svc.RejudgeTask(c.Request.Context(), current.TenantID, id)
-			httpx.Write(c, taskInfoToMap(out), err)
+			httpx.Write(c, judgeTaskDTOFromModel(out), err)
 			return
 		}
 		if current.TenantID > 0 && current.AccountID > 0 {
 			out, err := a.svc.RejudgeTaskForUser(c.Request.Context(), current.TenantID, current.AccountID, id)
-			httpx.Write(c, taskInfoToMap(out), err)
+			httpx.Write(c, judgeTaskDTOFromModel(out), err)
 			return
 		}
 	}
@@ -216,6 +216,7 @@ func (a judgeAPI) similarity(c *gin.Context) {
 }
 
 // listTasks 查询教师可见的判题任务分页。
+// state 是运维分组(空/active/abnormal),取值校验在 service 完成。
 func (a judgeAPI) listTasks(c *gin.Context) {
 	current, ok := currentTenantIdentity(c)
 	if !ok {
@@ -225,7 +226,7 @@ func (a judgeAPI) listTasks(c *gin.Context) {
 	if !ok {
 		return
 	}
-	items, total, p, s, err := a.svc.ListTasks(c.Request.Context(), current.TenantID, current.AccountID, c.Query("source_ref"), c.Query("pending_manual") == "true", page, size)
+	items, total, p, s, err := a.svc.ListTasks(c.Request.Context(), current.TenantID, current.AccountID, c.Query("source_ref"), c.Query("pending_manual") == "true", c.Query("state"), page, size)
 	httpx.WritePage(c, items, total, p, s, err)
 }
 
@@ -240,7 +241,7 @@ func (a judgeAPI) getTask(c *gin.Context) {
 		return
 	}
 	out, err := a.svc.GetTaskInfoForUser(c.Request.Context(), current.TenantID, current.AccountID, id)
-	httpx.Write(c, taskInfoToMap(out), err)
+	httpx.Write(c, judgeTaskDTOFromModel(out), err)
 }
 
 // manualScore 绑定教师人工评分请求。

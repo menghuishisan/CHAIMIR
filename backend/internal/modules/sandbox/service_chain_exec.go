@@ -52,7 +52,7 @@ func (c execChainCapability) runJSON(ctx context.Context, sb Sandbox, runtime Ru
 	defer cancel()
 	stdout, stderr, err := c.orchestrator.Exec(runCtx, sb.Namespace, runtimeExecTarget(runtime), spec.Command, stdin, false)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %s", err, string(stderr))
+		return nil, sandboxExecFailure(apperr.ErrSandboxChainFailed, err, stderr)
 	}
 	if len(bytes.TrimSpace(stdout)) == 0 {
 		return map[string]any{}, nil

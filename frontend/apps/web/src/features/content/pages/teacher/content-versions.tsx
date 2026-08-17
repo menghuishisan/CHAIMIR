@@ -231,7 +231,7 @@ function NewVersionForm({ item, versions, onDone }: NewVersionFormProps) {
         </FormField>
       </div>
 
-      <Button variant="seal" leftIcon={GitBranch} loading={working} onClick={() => void submit()}>
+      <Button variant="primary" leftIcon={GitBranch} loading={working} onClick={() => void submit()}>
         创建新版本
       </Button>
     </div>
@@ -311,7 +311,7 @@ function CloneForm({ item, onDone }: CloneFormProps) {
         </Callout>
       ) : null}
 
-      <Button variant="seal" leftIcon={Copy} loading={working} onClick={() => void submit()}>
+      <Button variant="primary" leftIcon={Copy} loading={working} onClick={() => void submit()}>
         克隆为新题目
       </Button>
     </div>

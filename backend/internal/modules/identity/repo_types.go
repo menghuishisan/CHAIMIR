@@ -85,6 +85,15 @@ type AccountQuery struct {
 	Size         int32
 }
 
+// TenantListQuery 描述平台租户列表过滤和分页字段。
+// Status 传 0、Keyword 传空串表示该维度不过滤(与账号列表同一约定)。
+type TenantListQuery struct {
+	Status  int16
+	Keyword string
+	Page    int
+	Size    int
+}
+
 // CreateSessionInput 描述租户 Refresh 会话写入字段。
 type CreateSessionInput struct {
 	ID               int64

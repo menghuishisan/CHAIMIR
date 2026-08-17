@@ -9,8 +9,8 @@
 //   平台管理员发全平台(它的会话没有租户,发本校范围会落到一个不存在的归属上)。
 // 故由调用方通过 publisher 显式声明,页面不在运行时判角色枚举。
 
-import { useCallback, useMemo, useState } from 'react'
-import { Megaphone, Plus, Send, Users } from 'lucide-react'
+import { useCallback, useState } from 'react'
+import { Megaphone, Plus, Send } from 'lucide-react'
 import {
   AnnouncementScope,
   UserRole,
@@ -40,7 +40,6 @@ import {
   Pagination,
   SegmentedControl,
   Skeleton,
-  Stat,
   Textarea,
   toast,
 } from '@chaimir/ui'
@@ -98,21 +97,11 @@ export interface AnnouncementsPageProps {
 export default function AnnouncementsPage({ publisher }: AnnouncementsPageProps) {
   const [createOpen, setCreateOpen] = useState(false)
   const copy = PUBLISHER_COPY[publisher]
-  const isPlatform = publisher === 'platform'
 
   const announcements = usePagedResource<Announcement>(
     (params) => api.notify.getAnnouncements(params),
     [],
   )
-
-  const stats = useMemo(() => {
-    const list = announcements.data ? announcements.data.list : []
-    return {
-      platform: list.filter((item) => item.scope === AnnouncementScope.PLATFORM).length,
-      tenant: list.filter((item) => item.scope === AnnouncementScope.TENANT).length,
-      roles: list.filter((item) => item.scope === AnnouncementScope.ROLES).length,
-    }
-  }, [announcements.data])
 
   return (
     <PageScaffold>
@@ -128,24 +117,10 @@ export default function AnnouncementsPage({ publisher }: AnnouncementsPageProps)
         }
       />
 
-      <PageSection>
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          <Stat label="公告总数" value={announcements.total} icon={Megaphone} />
-          {isPlatform ? (
-            <>
-              <Stat label="平台公告" value={stats.platform} icon={Send} />
-              <Stat label="覆盖学校" value="全部" icon={Users} hint="平台公告对所有学校可见" />
-            </>
-          ) : (
-            <>
-              <Stat label="全校公告" value={stats.tenant} icon={Users} />
-              <Stat label="定向公告" value={stats.roles} icon={Send} />
-            </>
-          )}
-        </div>
-      </PageSection>
-
-      <PageSection title="已发布公告" description={copy.listDescription}>
+      {/* 不做指标带:公告总数已在下方分组说明里给出,而按范围分桶(平台/全校/定向)没有服务端聚合,
+          用当前页数出来就是错数;「覆盖学校 全部」是范围常量而非可度量数字(规范 §6.5)。
+          每条公告的范围与定向角色在卡片标题的标签里可见。 */}
+      <PageSection title="已发布公告" description={`共 ${announcements.total} 条。${copy.listDescription}`}>
         <ResourceState
           resource={announcements}
           emptyIcon={Megaphone}

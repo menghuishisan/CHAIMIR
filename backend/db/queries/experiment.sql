@@ -258,10 +258,12 @@ FROM experiment_report
 WHERE tenant_id = $1 AND instance_id = $2 AND student_id = $3;
 
 -- name: ListExperimentReports :many
+-- status 传 0 不按状态过滤;传具体状态供批改台按「待批改/已批改」取数与计数。
 SELECT r.id, r.tenant_id, r.instance_id, r.student_id, r.content_ref, COALESCE(r.manual_score::float8, 0)::float8 AS manual_score, r.comment, r.status, r.submitted_at
 FROM experiment_report r
 JOIN experiment_instance i ON i.tenant_id = r.tenant_id AND i.id = r.instance_id
 WHERE r.tenant_id = $1 AND i.experiment_id = $2
+  AND (sqlc.arg(status)::smallint = 0 OR r.status = sqlc.arg(status)::smallint)
 ORDER BY r.submitted_at DESC, r.id DESC
 LIMIT $3 OFFSET $4;
 
@@ -269,7 +271,8 @@ LIMIT $3 OFFSET $4;
 SELECT COUNT(*)::bigint
 FROM experiment_report r
 JOIN experiment_instance i ON i.tenant_id = r.tenant_id AND i.id = r.instance_id
-WHERE r.tenant_id = $1 AND i.experiment_id = $2;
+WHERE r.tenant_id = $1 AND i.experiment_id = $2
+  AND (sqlc.arg(status)::smallint = 0 OR r.status = sqlc.arg(status)::smallint);
 
 -- name: SumCheckpointScores :one
 SELECT COALESCE(SUM(score)::float8, 0)::float8

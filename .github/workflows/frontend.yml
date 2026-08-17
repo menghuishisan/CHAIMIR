@@ -88,6 +88,8 @@ jobs:
       - name: 构建四端静态资源
         working-directory: frontend
         run: pnpm build
+      - name: 全仓完整契约与打包边界审查
+        run: node scripts/audit/index.mjs
 
   build-push:
     needs: [detect-image-build, lint-build]

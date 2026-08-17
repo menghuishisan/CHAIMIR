@@ -143,3 +143,17 @@ export enum ClassStatus {
   ACTIVE = 1,
   ARCHIVED = 2,
 }
+
+/** 租户功能开关模块与后端 identity.TenantModule* 保持一致。 */
+export const TENANT_MODULE = {
+  TEACHING: 'teaching',
+  EXPERIMENT: 'experiment',
+  CONTEST: 'contest',
+  SIM: 'sim',
+  GRADE: 'grade',
+} as const
+
+export type TenantModule = typeof TENANT_MODULE[keyof typeof TENANT_MODULE]
+
+/** TENANT_MODULE_VALUES 是页面按契约顺序渲染模块开关的唯一取值清单。 */
+export const TENANT_MODULE_VALUES = Object.values(TENANT_MODULE) as TenantModule[]

@@ -2,6 +2,8 @@
 // 对应后端 M2 模块
 
 import { ApiClient } from '../client'
+import { API_BASE_PATH } from '../constants'
+import type { IdentityApi } from './identity'
 import type {
   SandboxChainRequest,
   SandboxChainResponse,
@@ -31,7 +33,10 @@ export class SandboxApi {
   /**
    * constructor 注入统一 API 客户端，避免沙箱模块自行拼接鉴权和错误协议。
    */
-  constructor(private client: ApiClient) {}
+  constructor(
+    private client: ApiClient,
+    private identity: IdentityApi,
+  ) {}
 
   /**
    * 查询编排目录：可用运行时（含其可用镜像版本）与可用工具。
@@ -220,10 +225,12 @@ export class SandboxApi {
   /**
    * 获取 Web 工具代理 URL
    */
-  getToolProxyUrl(instanceId: string, toolCode: string, proxyPath = '', toolOrigin: string): string {
+  async getToolProxyUrl(instanceId: string, toolCode: string, proxyPath = '', toolOrigin: string): Promise<string> {
     const normalizedPath = proxyPath.replace(/^\/+/, '')
     const encodedTool = encodeURIComponent(toolCode)
+    const pathPrefix = `${API_BASE_PATH}/sandbox/sandboxes/${instanceId}/tools/${encodedTool}`
     const path = `/sandbox/sandboxes/${instanceId}/tools/${encodedTool}/${normalizedPath}`
-    return this.client.browserURLAtOrigin(toolOrigin, path)
+    const { ticket } = await this.identity.issueBrowserAccessTicket(pathPrefix)
+    return this.client.browserURLAtOrigin(toolOrigin, path, { ticket })
   }
 }

@@ -17,7 +17,6 @@ export function renderZkRollupView(state: ZkRollupState): TeachingFrame {
       intent: state.phaseIndex >= 3 ? 'verify' : 'observe',
       what: state.explanation.effect,
       why: state.explanation.reason,
-      watch: summary,
     },
     focus: {
       primary: selectedOrFrameFocus(state.selectedElementId, [state.phaseIndex >= 3 ? 'proof' : 'zk-rollup-pipeline']),

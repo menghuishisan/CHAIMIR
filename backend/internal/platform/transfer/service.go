@@ -105,22 +105,22 @@ func (s *Service) GetTask(ctx context.Context, tenantID, taskID int64) (Task, er
 	return s.store.GetTask(ctx, tenantID, taskID)
 }
 
-// ListTasks 查询当前账号的导入导出任务。
-func (s *Service) ListTasks(ctx context.Context, query TaskListQuery) ([]Task, int, int, error) {
+// ListTasks 查询当前账号的导入导出任务,返回当前页、总记录数与规范化后的分页参数。
+func (s *Service) ListTasks(ctx context.Context, query TaskListQuery) ([]Task, int64, int, int, error) {
 	if query.TenantID < 0 || query.AccountID <= 0 {
-		return nil, 0, 0, apperr.ErrTransferTaskInvalid
+		return nil, 0, 0, 0, apperr.ErrTransferTaskInvalid
 	}
 	if query.Channel != "" {
 		if err := validateChannel(query.Channel); err != nil {
-			return nil, 0, 0, apperr.ErrTransferTaskInvalid.WithCause(err)
+			return nil, 0, 0, 0, apperr.ErrTransferTaskInvalid.WithCause(err)
 		}
 	}
 	if query.Status != "" && !validStatus(query.Status) {
-		return nil, 0, 0, apperr.ErrTransferTaskInvalid
+		return nil, 0, 0, 0, apperr.ErrTransferTaskInvalid
 	}
 	page, size := pagex.Normalize(query.Page, query.Size)
 	limit, offset := pagex.LimitOffset(page, size)
-	items, err := s.store.ListTasks(ctx, ListTasksQuery{
+	items, total, err := s.store.ListTasks(ctx, ListTasksQuery{
 		TenantID:  query.TenantID,
 		AccountID: query.AccountID,
 		Channel:   query.Channel,
@@ -129,9 +129,9 @@ func (s *Service) ListTasks(ctx context.Context, query TaskListQuery) ([]Task, i
 		Offset:    offset,
 	})
 	if err != nil {
-		return nil, 0, 0, err
+		return nil, 0, 0, 0, err
 	}
-	return items, page, size, nil
+	return items, total, page, size, nil
 }
 
 // CompleteTask 完成任务并登记统一文件服务对象引用。
@@ -176,7 +176,7 @@ func (s *Service) BuildDownloadGrant(ctx context.Context, tenantID, taskID, acco
 	if err != nil {
 		return DownloadGrantDTO{}, apperr.ErrTransferTaskNotDownloadable.WithCause(err)
 	}
-	return DownloadGrantDTO{Token: token, Task: TaskToDTO(task), ExpiresAt: formatOptionalTime(grant.ExpiresAt)}, nil
+	return DownloadGrantDTO{Token: token, Task: TaskToDTO(task), ExpiresAt: timex.RFC3339OrEmpty(grant.ExpiresAt)}, nil
 }
 
 // EnsureTaskOwner 校验任务访问者必须在同租户内,且只能读本人任务或由租户管理员读取。
@@ -204,10 +204,10 @@ func TaskToDTO(task Task) TaskDTO {
 		ArtifactSize:        task.Artifact.Size,
 		ArtifactContentType: task.Artifact.ContentType,
 		ArtifactFileName:    task.Artifact.FileName,
-		CreatedAt:           formatOptionalTime(task.CreatedAt),
-		UpdatedAt:           formatOptionalTime(task.UpdatedAt),
-		CompletedAt:         formatOptionalTime(task.CompletedAt),
-		NextAttemptAfter:    formatOptionalTime(task.NextAttemptAfter),
+		CreatedAt:           timex.RFC3339OrEmpty(task.CreatedAt),
+		UpdatedAt:           timex.RFC3339OrEmpty(task.UpdatedAt),
+		CompletedAt:         timex.RFC3339OrEmpty(task.CompletedAt),
+		NextAttemptAfter:    timex.RFC3339OrEmpty(task.NextAttemptAfter),
 	}
 }
 
@@ -228,12 +228,4 @@ func validStatus(status Status) bool {
 	default:
 		return false
 	}
-}
-
-// formatOptionalTime 统一输出 RFC3339 时间,零值字段省略为空字符串。
-func formatOptionalTime(t time.Time) string {
-	if t.IsZero() {
-		return ""
-	}
-	return timex.UTC(t).Format(time.RFC3339)
 }

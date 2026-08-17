@@ -42,11 +42,11 @@ type SendSMSRequest struct {
 
 type RefreshRequest struct{}
 
-type WebSocketTicketRequest struct {
+type PathTicketRequest struct {
 	Path string `json:"path"`
 }
 
-type WebSocketTicketResponse struct {
+type PathTicketResponse struct {
 	Ticket    string `json:"ticket"`
 	ExpiresAt string `json:"expires_at"`
 }
@@ -330,4 +330,11 @@ type SSOConfigRequest struct {
 type LDAPLoginRequest struct {
 	Username string `json:"username"`
 	Password string `json:"password"`
+}
+
+// TenantBrandDTO 是登录页面读取的学校品牌信息。
+type TenantBrandDTO struct {
+	DisplayName string `json:"display_name"`
+	// LogoImage 是 data URI 形式的校徽;没有校徽或非私有化部署时为空串。
+	LogoImage string `json:"logo_image"`
 }

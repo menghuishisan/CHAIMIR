@@ -23,8 +23,6 @@ export interface RoleNavigationGroup {
 }
 
 export interface RoleNavigationConfig extends RoleRouteConfig {
-  /** 侧栏品牌区与窄屏顶栏显示的端名 */
-  brandName: string
   /**
    * 该端是否有站内信收件箱(顶栏通知铃铛)。
    * M10 收件箱、未读数、通知偏好、公告已读和业务 WS 都要求租户身份,

@@ -6,11 +6,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"strconv"
 	"strings"
 	"time"
 
 	"chaimir/internal/platform/config"
+	"chaimir/internal/platform/ids"
 
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
@@ -126,7 +126,7 @@ func ObjectKey(tenantID int64, module, resourceType string, parts ...string) (st
 	if tenantID < 0 {
 		return "", fmt.Errorf("对象 key 缺少租户或平台作用域")
 	}
-	segs := append([]string{strconv.FormatInt(tenantID, 10), module, resourceType}, parts...)
+	segs := append([]string{ids.Format(tenantID), module, resourceType}, parts...)
 	for _, seg := range segs {
 		if seg != strings.TrimSpace(seg) || seg == "" || seg == "." || seg == ".." || strings.Contains(seg, "/") || strings.Contains(seg, "\\") {
 			return "", fmt.Errorf("对象 key 段不安全: %q", seg)

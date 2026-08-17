@@ -73,72 +73,6 @@ func NewService(deps ServiceDeps) (*Service, error) {
 	return &Service{store: deps.Store, ids: deps.IDs, redis: deps.Redis, hub: deps.Hub, roles: deps.Roles, audit: deps.Audit, cfg: deps.Config}, nil
 }
 
-// Send 渲染模板并按接收人偏好写入站内信。
-func (s *Service) Send(ctx context.Context, req contracts.NotifySendRequest) error {
-	input, err := validateSendRequest(SendRequest{TenantID: ids.ID(req.TenantID), Type: req.Type, Receivers: req.Receivers, Params: req.Params, Link: req.Link})
-	if err != nil {
-		return err
-	}
-	delivered := make([]int64, 0, len(input.Receivers))
-	err = s.store.TenantTx(ctx, input.TenantID.Int64(), func(ctx context.Context, tx TxStore) error {
-		tpl, err := tx.GetNotificationTemplate(ctx, input.Type)
-		if err != nil {
-			return apperr.ErrNotifyTemplateUnavailable.WithCause(err)
-		}
-		title, content, err := renderNotificationTemplate(tpl, input.Params)
-		if err != nil {
-			return err
-		}
-		rows := make([]notificationRecord, 0, len(input.Receivers))
-		for _, receiverID := range input.Receivers {
-			enabled := true
-			if !tpl.Force {
-				enabled, err = tx.PreferenceEnabled(ctx, input.TenantID.Int64(), receiverID, input.Type)
-				if err != nil {
-					return apperr.ErrNotifySendFailed.WithCause(err)
-				}
-			}
-			if !enabled {
-				continue
-			}
-			rows = append(rows, notificationRecord{ID: s.ids.Generate(), TenantID: input.TenantID.Int64(), ReceiverID: receiverID, Type: input.Type, Title: title, Content: content, Link: input.Link})
-			delivered = append(delivered, receiverID)
-		}
-		if len(rows) == 0 {
-			return nil
-		}
-		if err := s.checkRateLimit(ctx, input.TenantID.Int64(), input.Type); err != nil {
-			return err
-		}
-		return tx.CreateNotifications(ctx, rows)
-	})
-	if err != nil {
-		return err
-	}
-	for _, receiverID := range delivered {
-		if err := s.refreshUnread(ctx, input.TenantID.Int64(), receiverID); err != nil {
-			logging.ErrorContext(ctx, "刷新通知未读数失败", err.Error(), slog.Int64("tenant_id", input.TenantID.Int64()), slog.Int64("receiver_id", receiverID))
-		}
-	}
-	return nil
-}
-
-// Push 向统一 WebSocket topic 推送业务实时消息。
-func (s *Service) Push(ctx context.Context, req contracts.NotifyPushRequest) error {
-	if req.TenantID <= 0 || strings.TrimSpace(req.Topic) == "" {
-		return apperr.ErrNotifyPushFailed
-	}
-	if err := ValidatePushTopic(req.TenantID, req.Topic); err != nil {
-		return err
-	}
-	data, err := jsonx.AnyBytes(map[string]any{"topic": req.Topic, "payload": req.Payload}, apperr.ErrNotifyPushFailed)
-	if err != nil {
-		return apperr.ErrNotifyPushFailed.WithCause(err)
-	}
-	s.hub.Broadcast(req.Topic, data)
-	return nil
-}
-
 // Inbox 查询当前用户站内信。
 func (s *Service) Inbox(ctx context.Context, isRead *bool, typ string, page, size int) ([]NotificationDTO, int64, error) {
 	id, err := currentIdentity(ctx)
@@ -406,7 +340,7 @@ func (s *Service) broadcastAnnouncement(ctx context.Context, ann AnnouncementDTO
 	if ann.TenantID <= 0 {
 		return
 	}
-	data, err := jsonx.AnyBytes(map[string]any{"type": "announcement", "announcement_id": fmt.Sprintf("%d", ann.ID), "scope": ann.Scope}, apperr.ErrNotifyPushFailed)
+	data, err := jsonx.AnyBytes(map[string]any{"type": "announcement", "announcement_id": ids.Format(ann.ID.Int64()), "scope": ann.Scope}, apperr.ErrNotifyPushFailed)
 	if err != nil {
 		logging.ErrorContext(ctx, "公告实时提醒序列化失败", err.Error(), slog.Int64("tenant_id", ann.TenantID.Int64()), slog.Int64("announcement_id", ann.ID.Int64()))
 		return
@@ -424,7 +358,7 @@ func (s *Service) RunCleanupOnce(ctx context.Context) error {
 
 // checkRateLimit 使用 Redis 窗口计数限制通知发送频率。
 func (s *Service) checkRateLimit(ctx context.Context, tenantID int64, typ string) error {
-	key := fmt.Sprintf("tenant:%d:notify:send:%s", tenantID, strings.ToLower(strings.TrimSpace(typ)))
+	key := fmt.Sprintf("tenant:%s:notify:send:%s", ids.Format(tenantID), strings.ToLower(strings.TrimSpace(typ)))
 	count, err := s.redis.IncrWithTTL(ctx, key, time.Duration(s.cfg.SendRateWindowSeconds)*time.Second)
 	if err != nil {
 		return apperr.ErrNotifySendFailed.WithCause(err)
@@ -477,7 +411,7 @@ func (s *Service) countUnread(ctx context.Context, tenantID, accountID int64) (i
 
 // unreadKey 生成 M10 未读缓存键。
 func unreadKey(tenantID, accountID int64) string {
-	return fmt.Sprintf("tenant:%d:unread:%d", tenantID, accountID)
+	return fmt.Sprintf("tenant:%s:unread:%s", ids.Format(tenantID), ids.Format(accountID))
 }
 
 // currentIdentity 读取通知模块要求的租户用户身份。

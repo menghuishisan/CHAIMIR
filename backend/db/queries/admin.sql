@@ -127,11 +127,14 @@ VALUES ($1, $2, $3, $4, $5, now(), $6)
 RETURNING id, type, storage_ref, size_bytes, status, started_at, finished_at;
 
 -- name: ListBackupRecords :many
+-- status 传 0 不按结果过滤;传具体结果供备份巡检按「已成功/已失败/进行中」取数与计数。
 SELECT id, type, storage_ref, size_bytes, status, started_at, finished_at
 FROM backup_record
+WHERE (sqlc.arg(status)::smallint = 0 OR status = sqlc.arg(status)::smallint)
 ORDER BY started_at DESC
-LIMIT $1 OFFSET $2;
+LIMIT sqlc.arg(page_limit)::int OFFSET sqlc.arg(page_offset)::int;
 
 -- name: CountBackupRecords :one
 SELECT count(*)::bigint
-FROM backup_record;
+FROM backup_record
+WHERE (sqlc.arg(status)::smallint = 0 OR status = sqlc.arg(status)::smallint);

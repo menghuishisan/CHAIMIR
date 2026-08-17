@@ -59,7 +59,7 @@ import {
 } from '@chaimir/ui'
 import { api } from '../../../../app/api'
 import { ResourceState } from '../../../../components/ResourceState'
-import { useAsyncResource, usePagedResource } from '../../../../hooks'
+import { useAsyncResource, usePagedResource, useResourceTotal } from '../../../../hooks'
 import { formatDateTime, formatScore } from '../../../../utils/formatters'
 import {
   experimentCollabModeLabel,
@@ -113,13 +113,27 @@ function ReportsContent({ experiment }: { experiment: Experiment }) {
     [experiment.id],
   )
 
-  const stats = useMemo(() => {
-    const list = reports.data ? reports.data.list : []
-    return {
-      pending: list.filter((item) => item.status === ExperimentReportStatus.SUBMITTED).length,
-      graded: list.filter((item) => item.status === ExperimentReportStatus.GRADED).length,
-    }
-  }, [reports.data])
+  // 指标带取服务端全量口径:待批改是教师最常看的数字,不能用当前页数出来的近似值
+  const totalCount = useResourceTotal(
+    (params) => api.experiment.listReports(experiment.id, params),
+    [experiment.id],
+  )
+  const pendingCount = useResourceTotal(
+    (params) =>
+      api.experiment.listReports(experiment.id, {
+        status: ExperimentReportStatus.SUBMITTED,
+        ...params,
+      }),
+    [experiment.id],
+  )
+  const gradedCount = useResourceTotal(
+    (params) =>
+      api.experiment.listReports(experiment.id, {
+        status: ExperimentReportStatus.GRADED,
+        ...params,
+      }),
+    [experiment.id],
+  )
 
   const columns: TableColumn<ReportDTO>[] = [
     {
@@ -205,9 +219,9 @@ function ReportsContent({ experiment }: { experiment: Experiment }) {
 
       <PageSection>
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <Stat label="报告总数" value={reports.total} icon={FileText} />
-          <Stat label="待批改" value={stats.pending} icon={ClipboardCheck} />
-          <Stat label="已批改" value={stats.graded} icon={ClipboardCheck} />
+          <Stat label="报告总数" value={totalCount ?? '—'} icon={FileText} />
+          <Stat label="待批改" value={pendingCount ?? '—'} icon={ClipboardCheck} />
+          <Stat label="已批改" value={gradedCount ?? '—'} icon={ClipboardCheck} />
           <Stat
             label="检查点合计"
             value={experiment.components.checkpoints.reduce((sum, item) => sum + item.score, 0)}
@@ -353,7 +367,7 @@ function GradeReportModal({ report, onClose, onSaved }: GradeReportModalProps) {
           <Button variant="outline" onClick={onClose}>
             取消
           </Button>
-          <Button variant="seal" loading={working} onClick={() => void submit()}>
+          <Button variant="primary" loading={working} onClick={() => void submit()}>
             提交批改
           </Button>
         </ModalFooter>
@@ -417,7 +431,7 @@ function GroupsPanel({ experiment }: { experiment: Experiment }) {
           {(list) => (
             <div className="flex flex-col gap-3">
               {list.map((group) => (
-                <div key={group.id} className="flex flex-col gap-2 rounded-md border border-line p-3">
+                <div key={group.id} className="flex flex-col gap-2 well p-3">
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <span className="min-w-0 truncate text-base text-ink">{group.name}</span>
                     <Badge
@@ -549,7 +563,7 @@ function CreateGroupModal({ experimentId, onClose, onCreated }: CreateGroupModal
             <Button type="button" variant="outline" onClick={onClose}>
               取消
             </Button>
-            <Button type="submit" variant="seal" loading={working}>
+            <Button type="submit" variant="primary" loading={working}>
               创建小组
             </Button>
           </ModalFooter>
@@ -713,7 +727,7 @@ function AddMemberModal({ group, roles, onClose, onSaved }: AddMemberModalProps)
             )}
 
             {group.members.length > 0 ? (
-              <div className="rounded-md border border-line bg-surface-sunken p-3">
+              <div className="well p-3">
                 <p className="text-sm text-ink-sub">当前已有 {group.members.length} 名成员。</p>
               </div>
             ) : (
@@ -726,7 +740,7 @@ function AddMemberModal({ group, roles, onClose, onSaved }: AddMemberModalProps)
             <Button type="button" variant="outline" onClick={onClose}>
               取消
             </Button>
-            <Button type="submit" variant="seal" loading={working}>
+            <Button type="submit" variant="primary" loading={working}>
               加入小组
             </Button>
           </ModalFooter>

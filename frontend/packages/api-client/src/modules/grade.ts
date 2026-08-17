@@ -2,7 +2,7 @@
 // 对应后端 M11 模块的当前接口。
 
 import { ApiClient } from '../client'
-import type { GradeAppealStatus, GradeReviewStatus, TranscriptScope } from '../constants/grade'
+import type { GradeAppealStatus, GradeReviewStatus, GradeWarningStatus, TranscriptScope } from '../constants/grade'
 import type { PaginatedResponse, SnowflakeID } from '../types/common'
 import type {
   GradeAppeal,
@@ -171,9 +171,14 @@ export class GradeApi {
   }
 
   /**
-   * 查询当前用户可见的学业预警。
+   * 查询当前用户可见的学业预警。状态筛选由服务端执行,total 与筛选同口径。
    */
-  async listWarnings(params?: { student_id?: string; page?: number; size?: number }): Promise<PaginatedResponse<GradeWarning>> {
+  async listWarnings(params?: {
+    student_id?: string
+    status?: GradeWarningStatus
+    page?: number
+    size?: number
+  }): Promise<PaginatedResponse<GradeWarning>> {
     return this.client.get('/grade-center/warnings', params)
   }
 

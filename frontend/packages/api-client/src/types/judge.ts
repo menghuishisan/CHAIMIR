@@ -1,6 +1,11 @@
 // ===== M3 Judge 模块 =====
 
-import type { JudgeTaskStatus, JudgerStatus, JudgerType } from '../constants/judge'
+import type {
+  JudgeTaskStatus,
+  JudgerSelftestStatus,
+  JudgerStatus,
+  JudgerType,
+} from '../constants/judge'
 import type { SnowflakeID } from './common'
 import type { WorkloadComponent } from './workload'
 
@@ -69,6 +74,7 @@ export interface JudgerResourceSpec {
 
 export interface Judger extends JudgerRequest {
   id: SnowflakeID
+  selftest_status: JudgerSelftestStatus
   created_at?: string
   updated_at?: string
 }

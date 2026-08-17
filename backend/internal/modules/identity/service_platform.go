@@ -178,7 +178,9 @@ func (s *Service) ListApplicationsByPlatform(ctx context.Context, status int16) 
 }
 
 // ListTenantsByPlatform 分页读取平台租户列表,用于 SaaS 平台学校管理页。
-func (s *Service) ListTenantsByPlatform(ctx context.Context, page, size int) ([]TenantDTO, int64, int, int, error) {
+// status 传 0、keyword 传空串表示该维度不过滤;过滤与计数都在服务端完成,
+// 前端不得再对当前页做二次筛选(否则分页与总数会自相矛盾)。
+func (s *Service) ListTenantsByPlatform(ctx context.Context, status int16, keyword string, page, size int) ([]TenantDTO, int64, int, int, error) {
 	if err := s.ensurePlatformLayerEnabled(); err != nil {
 		return nil, 0, page, size, err
 	}
@@ -190,7 +192,12 @@ func (s *Service) ListTenantsByPlatform(ctx context.Context, page, size int) ([]
 	var rows []Tenant
 	var total int64
 	if err := s.store.PlatformTx(ctx, func(ctx context.Context, tx TxStore) error {
-		items, count, err := tx.ListTenants(ctx, page, size)
+		items, count, err := tx.ListTenants(ctx, TenantListQuery{
+			Status:  status,
+			Keyword: strings.TrimSpace(keyword),
+			Page:    page,
+			Size:    size,
+		})
 		if err != nil {
 			return err
 		}

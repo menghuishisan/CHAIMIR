@@ -44,7 +44,8 @@ export function Stat({ label, value, icon, delta, hint, chain, className }: Stat
   const deltaTone = delta ? (delta.tone ?? (delta.direction === "up" ? "positive" : "negative")) : undefined;
 
   return (
-    <div className={cn("rounded-lg border border-line bg-surface p-5", className)}>
+    // 抬起片(规范 §6.5.1 第 1 级):与 Card 同一层语言,不画边框
+    <div className={cn("rounded-lg bg-surface p-5 shadow-xs", className)}>
       <div className="flex items-center justify-between gap-2">
         <span className="text-sm text-ink-sub">{label}</span>
         {icon && <Icon icon={icon} size="lg" className="text-ink-faint" />}

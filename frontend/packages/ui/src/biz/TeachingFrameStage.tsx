@@ -1,10 +1,11 @@
 /**
- * TeachingFrameStage:把 TeachingFrame 按 layout 分区渲染成三栏内容(规范 §7.1)。
+ * TeachingFrameStage:把 TeachingFrame 按 layout 分区渲染成三区骨架内容(规范 §7.1)。
  * 三个导出对应工作台壳的三个槽位,共用同一份帧数据:
- * TeachingFrameBrief(左:这一步做了什么/为什么重要/看哪里)、
- * TeachingFrameStage(中:layout.primary 主舞台)、
- * TeachingFrameAside(右:证据/时间线/指标/追踪/检查点)。
- * 三者都是纯受控展示组件:不取数、不持有仿真运行时,选中态与选择回调由页面从仿真状态传入。
+ * TeachingFrameBrief(左辅助区:这一步做了什么/为什么重要)、
+ * TeachingFrameStage(中主舞台:layout.primary,永不滚动)、
+ * TeachingFrameAside(左辅助区其余段:证据/指标/追踪/检查点)。
+ * 消息/调用这类无界元素不在这三处出现 —— 它们归右侧事件流(见 frameStream / TeachingFrameStream)。
+ * 全部为纯受控展示组件:不取数、不持有仿真运行时,选中态与选择回调由页面从仿真状态传入。
  */
 import { cn } from "../lib/cn";
 import { Icon } from "../lib/icon";
@@ -57,7 +58,7 @@ function AnnotationList({ label, annotations }: AnnotationListProps) {
   );
 }
 
-/* ---------------------------------------------------------------- 左栏:阶段说明 */
+/* ---------------------------------------------------------------- 左辅助区:阶段说明 */
 
 export interface TeachingFrameBriefProps {
   frame: TeachingFrame;
@@ -66,14 +67,14 @@ export interface TeachingFrameBriefProps {
 
 /**
  * TeachingFrameBrief:阶段说明区(§7.2 B「这一步做了什么 + 为什么重要」)。
- * 三段释义按固定顺序给出,标题旁标注本屏意图;summary 作为整帧一句话结论收尾。
+ * 只有两段:不做「看哪里」—— frame.focus 已经用舞台高亮指出该看哪个元素,
+ * 再用一段文字复述状态摘要只是重复。标题旁标注本屏意图;summary 作为整帧一句话结论收尾。
  */
 export function TeachingFrameBrief({ frame, className }: TeachingFrameBriefProps) {
   const { phase, summary } = frame;
   const sections: Array<[string, string]> = [
     ["这一步做了什么", phase.explanation.what],
     ["为什么重要", phase.explanation.why],
-    ["看哪里", phase.explanation.watch],
   ];
 
   return (
@@ -95,7 +96,7 @@ export function TeachingFrameBrief({ frame, className }: TeachingFrameBriefProps
   );
 }
 
-/* ---------------------------------------------------------------- 中栏:主舞台 */
+/* ---------------------------------------------------------------- 中主舞台 */
 
 export interface TeachingFrameStageProps {
   frame: TeachingFrame;
@@ -108,6 +109,8 @@ export interface TeachingFrameStageProps {
 
 /**
  * TeachingFrameStage:主舞台 —— 渲染 layout.primary 指向的模式。
+ * 舞台永不滚动(§7.1):自身撑满槽位高度,图形取剩余高度按 viewBox 缩放,
+ * 清单超长由清单自身滚动(高度分配落在 PatternFrame)。
  * 该模式上的标注紧随视图展示;target 未指向本帧任何模式或元素的标注也在此统一列出,
  * 保证作者写下的标注不会因为编号写错而被静默丢弃。
  */
@@ -122,22 +125,28 @@ export function TeachingFrameStage({
   const primaryAnnotations = primary ? byPattern.get(primary.id) : undefined;
 
   return (
-    <div className={cn("flex flex-col gap-3 p-4", className)}>
+    <div className={cn("flex h-full min-h-0 flex-col gap-3 p-4", className)}>
       {primary && (
         <>
-          <h2 className="text-sm font-semibold text-on-dark">{primary.title}</h2>
-          <PatternView
-            pattern={primary}
-            focus={frame.focus}
-            density="stage"
-            selectedElementId={selectedElementId}
-            onSelectElement={onSelectElement}
-          />
+          <h2 className="shrink-0 text-sm font-semibold text-on-dark">{primary.title}</h2>
+          <div className="min-h-0 flex-1">
+            <PatternView
+              pattern={primary}
+              focus={frame.focus}
+              density="stage"
+              selectedElementId={selectedElementId}
+              onSelectElement={onSelectElement}
+            />
+          </div>
         </>
       )}
-      {primaryAnnotations && <AnnotationList label="本视图标注" annotations={primaryAnnotations} />}
+      {primaryAnnotations && (
+        <div className="shrink-0">
+          <AnnotationList label="本视图标注" annotations={primaryAnnotations} />
+        </div>
+      )}
       {unassigned.length > 0 && (
-        <div className="rounded-md border border-dark-line bg-dark-elevated p-2">
+        <div className="shrink-0 rounded-md border border-dark-line bg-dark-elevated p-2">
           <h3 className="mb-1 text-xs font-medium text-on-dark">其他说明</h3>
           <AnnotationList label="其他说明" annotations={unassigned} />
         </div>
@@ -146,7 +155,7 @@ export function TeachingFrameStage({
   );
 }
 
-/* ---------------------------------------------------------------- 右栏:辅助区 */
+/* ---------------------------------------------------------------- 左辅助区:模式段 */
 
 export interface TeachingFrameAsideProps {
   frame: TeachingFrame;
@@ -156,9 +165,9 @@ export interface TeachingFrameAsideProps {
 }
 
 /**
- * TeachingFrameAside:辅助区 —— 按证据 → 时间线 → 指标 → 执行追踪 → 检查点顺序排面板。
- * 每块面板标出职责与视图标题,内容用 panel 密度渲染(约 288px 窄栏可读);
- * 主舞台已渲染的模式不在此重复(见 frameLayout.asidePanels)。
+ * TeachingFrameAside:左辅助区的模式段 —— 按证据 → 指标 → 执行追踪 → 检查点顺序排面板。
+ * 每块面板标出职责与视图标题,内容用 panel 密度渲染(约 300px 窄栏可读);
+ * 主舞台已渲染的模式与时间线泳道不在此重复(见 frameLayout.asidePanels)。
  */
 export function TeachingFrameAside({
   frame,

@@ -1,10 +1,16 @@
 // ===== M2 Sandbox 模块 =====
 
 import type { SnowflakeID } from './common'
-import type { WorkloadComponent, WorkloadNetworkRule, WorkloadRoute, WorkloadService } from './workload'
+import type {
+  WorkloadComponent,
+  WorkloadNetworkRule,
+  WorkloadRoute,
+  WorkloadService,
+} from './workload'
 import type {
   ImagePrepullStatus,
   RuntimeImageStatus,
+  RuntimeAdapterLevel,
   RuntimeSelftestStatus,
   RuntimeStatus,
   SandboxPhase,
@@ -105,7 +111,7 @@ export interface SandboxRuntimeRequest {
   code: string
   name: string
   eco: string
-  adapter_level: number
+  adapter_level: RuntimeAdapterLevel
   adapter_spec: SandboxAdapterSpec
   capability_impl: string
   plugin_ref: string
@@ -118,7 +124,7 @@ export interface SandboxAdapterSpec {
     name: string
     mount_path: string
     student_access: 'none' | 'read_only' | 'read_write'
-    persistence: 'ephemeral' | 'minio_code'
+    persistence: 'ephemeral' | 'minio_code' | 'snapshot'
     snapshot_scope: 'never' | 'always' | 'snapshot_enabled'
   }>
   runtime_container: WorkloadComponent
@@ -138,7 +144,10 @@ export interface SandboxAdapterSpec {
     terminal: string[]
     selftest: string[]
   }
-  capability_commands?: Record<'deploy' | 'tx' | 'query' | 'reset', { command: string[]; timeout_seconds: number }>
+  capability_commands?: Record<
+    'deploy' | 'tx' | 'query' | 'reset',
+    { command: string[]; timeout_seconds: number }
+  >
 }
 
 export interface SandboxRuntime extends Omit<SandboxRuntimeRequest, 'status'> {
@@ -182,7 +191,7 @@ export interface SandboxToolResourceSpec {
   routes?: WorkloadRoute[]
   network_rules?: WorkloadNetworkRule[]
   command_policy?: {
-    allowed_commands: string[]
+    allowed_argv: string[][]
     default_timeout_seconds: number
     max_timeout_seconds: number
   }
@@ -196,7 +205,7 @@ export interface SandboxToolDefinition extends SandboxToolRequest {
 /**
  * SandboxOrchestrationCatalog 是编排目录响应:业务模块选运行时与工具只需这些字段。
  * 它刻意不是 SandboxRuntime / SandboxToolDefinition 的子集别名 —— 适配器清单、镜像地址、
- * 命令白名单与自检详情属平台运维面,后端也不下发,故编排面按独立类型对接。
+ * 完整 argv 白名单与自检详情属平台运维面,后端也不下发,故编排面按独立类型对接。
  */
 export interface SandboxOrchestrationCatalog {
   runtimes: SandboxCatalogRuntime[]

@@ -15,6 +15,8 @@ import {
   CardBody,
   CardHeader,
   CoverImage,
+  FilterBar,
+  FilterField,
   FormField,
   Input,
   PageBody,
@@ -31,7 +33,7 @@ import {
 } from '@chaimir/ui'
 import { api } from '../../../../app/api'
 import { ResourceState } from '../../../../components/ResourceState'
-import { usePagedResource } from '../../../../hooks'
+import { usePagedResource, useResourceTotal } from '../../../../hooks'
 import { formatDate } from '../../../../utils/formatters'
 import {
   courseStatusLabel,
@@ -67,9 +69,22 @@ export default function StudentCoursesPage() {
     [statusFilter],
   )
 
-  const list = courses.data ? courses.data.list : []
-  const runningCount = list.filter((course) => course.status === CourseStatus.RUNNING).length
-  const totalCredits = list.reduce((sum, course) => sum + course.credits, 0)
+  // 指标带取服务端全量口径,不随下方状态筛选变化。
+  // 「学分合计」需要跨全部课程求和,服务端没有这个聚合,故不做这张卡 ——
+  // 原先带的「以当前页课程累计」只是给错数加了个说明(规范 §6.5);每门课的学分在行内可见。
+  const totalCount = useResourceTotal(
+    (params) => api.teaching.getCourses({ role: 'student', ...params }),
+    [],
+  )
+  const runningCount = useResourceTotal(
+    (params) =>
+      api.teaching.getCourses({ role: 'student', status: CourseStatus.RUNNING, ...params }),
+    [],
+  )
+  const endedCount = useResourceTotal(
+    (params) => api.teaching.getCourses({ role: 'student', status: CourseStatus.ENDED, ...params }),
+    [],
+  )
 
   const columns: TableColumn<Course>[] = [
     {
@@ -149,55 +164,52 @@ export default function StudentCoursesPage() {
 
       <PageSection>
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          <Stat label="已加入课程" value={courses.total} icon={BookOpen} hint="本学期及历史全部课程" />
-          <Stat label="进行中" value={runningCount} icon={Layers} hint="正在上课的课程数" />
-          <Stat
-            label="学分合计"
-            value={totalCredits}
-            icon={GraduationCap}
-            hint="以当前页课程累计"
-          />
+          <Stat label="已加入课程" value={totalCount ?? '—'} icon={BookOpen} hint="本学期及历史全部课程" />
+          <Stat label="进行中" value={runningCount ?? '—'} icon={Layers} hint="正在上课的课程数" />
+          <Stat label="已结课" value={endedCount ?? '—'} icon={GraduationCap} hint="成绩已可查看" />
         </div>
       </PageSection>
 
       <PageBody rail={<JoinCourseCard onJoined={courses.reload} />}>
-        <PageSection
-          title="课程列表"
-          description={`共 ${courses.total} 门课程`}
-          actions={
-            <SegmentedControl
-              aria-label="按课程状态筛选"
-              size="sm"
-              options={STATUS_FILTERS.map((item) => ({ value: item.value, label: item.label }))}
-              value={statusFilter}
-              onValueChange={setStatusFilter}
-            />
-          }
-        >
-          <ResourceState
-            resource={courses}
-            emptyIcon={BookOpen}
-            emptyTitle="还没有加入任何课程"
-            emptyDescription="向老师索取课程邀请码,在右侧填入即可加入课程开始学习。"
-            skeleton={<Table columns={columns} data={[]} rowKey={() => ''} loading />}
-          >
-            {(page) => (
-              <div className="flex flex-col gap-4">
-                <Table
-                  columns={columns}
-                  data={page.list}
-                  rowKey={(course) => course.id}
-                  onRowClick={(course) => navigate(`/student/courses/${course.id}`)}
+        <PageSection title="课程列表" description={`共 ${courses.total} 门课程`}>
+          <div className="flex flex-col gap-4">
+            <FilterBar label="课程筛选">
+              <FilterField label="课程状态" group>
+                <SegmentedControl
+                  aria-label="按课程状态筛选"
+                  size="sm"
+                  options={STATUS_FILTERS.map((item) => ({ value: item.value, label: item.label }))}
+                  value={statusFilter}
+                  onValueChange={setStatusFilter}
                 />
-                <Pagination
-                  page={courses.page}
-                  pageSize={courses.pageSize}
-                  total={courses.total}
-                  onPageChange={courses.setPage}
-                />
-              </div>
-            )}
-          </ResourceState>
+              </FilterField>
+            </FilterBar>
+
+            <ResourceState
+              resource={courses}
+              emptyIcon={BookOpen}
+              emptyTitle="还没有加入任何课程"
+              emptyDescription="向老师索取课程邀请码,在右侧填入即可加入课程开始学习。"
+              skeleton={<Table columns={columns} data={[]} rowKey={() => ''} loading />}
+            >
+              {(page) => (
+                <div className="flex flex-col gap-4">
+                  <Table
+                    columns={columns}
+                    data={page.list}
+                    rowKey={(course) => course.id}
+                    onRowClick={(course) => navigate(`/student/courses/${course.id}`)}
+                  />
+                  <Pagination
+                    page={courses.page}
+                    pageSize={courses.pageSize}
+                    total={courses.total}
+                    onPageChange={courses.setPage}
+                  />
+                </div>
+              )}
+            </ResourceState>
+          </div>
         </PageSection>
       </PageBody>
     </PageScaffold>
@@ -261,7 +273,7 @@ function JoinCourseCard({ onJoined }: JoinCourseCardProps) {
               onChange={(event) => setInviteCode(event.target.value)}
             />
           </FormField>
-          <Button type="submit" variant="seal" leftIcon={TicketCheck} loading={submitting} className="mt-4 w-full">
+          <Button type="submit" variant="primary" leftIcon={TicketCheck} loading={submitting} className="mt-4 w-full">
             加入课程
           </Button>
         </form>

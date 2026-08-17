@@ -169,7 +169,7 @@ function ApplicationReview({ application, onReviewed }: ApplicationReviewProps) 
           ) : null}
 
           {application.tenant_id ? (
-            <div className="flex flex-wrap items-center gap-2 rounded-md border border-line bg-surface-sunken p-3">
+            <div className="flex flex-wrap items-center gap-2 well p-3">
               <Badge tone="success">已开通</Badge>
               <span className="text-sm text-ink-sub">这份申请对应的学校已经创建。</span>
               <Button
@@ -194,7 +194,7 @@ function ApplicationReview({ application, onReviewed }: ApplicationReviewProps) 
       >
         {pending ? (
           <div className="flex flex-wrap items-center gap-2">
-            <Button variant="seal" leftIcon={CircleCheck} onClick={() => setAction('approve')}>
+            <Button variant="primary" leftIcon={CircleCheck} onClick={() => setAction('approve')}>
               通过并开通学校
             </Button>
             <Button variant="outline" leftIcon={CircleX} onClick={() => setAction('reject')}>
@@ -317,7 +317,7 @@ function ApproveModal({ application, onClose, onDone }: ReviewModalProps) {
             </Callout>
           </ModalBody>
           <ModalFooter>
-            <Button variant="seal" onClick={() => onDone()}>
+            <Button variant="primary" onClick={() => onDone()}>
               我已记录,关闭
             </Button>
           </ModalFooter>
@@ -404,7 +404,7 @@ function ApproveModal({ application, onClose, onDone }: ReviewModalProps) {
             <Button type="button" variant="outline" onClick={onClose}>
               取消
             </Button>
-            <Button type="submit" variant="seal" leftIcon={ShieldCheck} loading={working}>
+            <Button type="submit" variant="primary" leftIcon={ShieldCheck} loading={working}>
               确认开通
             </Button>
           </ModalFooter>

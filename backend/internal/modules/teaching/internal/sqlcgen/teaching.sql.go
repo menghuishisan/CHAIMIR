@@ -336,16 +336,23 @@ FROM submission
 WHERE tenant_id = $1
   AND assignment_id = $2
   AND ($3::bigint = 0 OR submission.student_id = $3::bigint)
+  AND ($4::smallint = 0 OR submission.status = $4::smallint)
 `
 
 type CountSubmissionsByAssignmentParams struct {
 	TenantID     int64 `json:"tenant_id"`
 	AssignmentID int64 `json:"assignment_id"`
 	StudentID    int64 `json:"student_id"`
+	Status       int16 `json:"status"`
 }
 
 func (q *Queries) CountSubmissionsByAssignment(ctx context.Context, arg CountSubmissionsByAssignmentParams) (int64, error) {
-	row := q.db.QueryRow(ctx, countSubmissionsByAssignment, arg.TenantID, arg.AssignmentID, arg.StudentID)
+	row := q.db.QueryRow(ctx, countSubmissionsByAssignment,
+		arg.TenantID,
+		arg.AssignmentID,
+		arg.StudentID,
+		arg.Status,
+	)
 	var column_1 int64
 	err := row.Scan(&column_1)
 	return column_1, err
@@ -2440,6 +2447,7 @@ FROM submission
 WHERE tenant_id = $1
   AND assignment_id = $2
   AND ($5::bigint = 0 OR submission.student_id = $5::bigint)
+  AND ($6::smallint = 0 OR submission.status = $6::smallint)
 ORDER BY submitted_at DESC, id DESC
 LIMIT $3 OFFSET $4
 `
@@ -2450,10 +2458,12 @@ type ListSubmissionsByAssignmentParams struct {
 	Limit        int32 `json:"limit"`
 	Offset       int32 `json:"offset"`
 	StudentID    int64 `json:"student_id"`
+	Status       int16 `json:"status"`
 }
 
 // student_id 传 0 回该作业全部学生提交(授课教师批改视角);传具体学生只回其本人提交
 // (学生自读视角,student_id 由服务端填会话账号,不接受客户端传参)。
+// status 传 0 不按状态过滤;传具体状态供批改台按「待批改/已出分」取数与计数。
 func (q *Queries) ListSubmissionsByAssignment(ctx context.Context, arg ListSubmissionsByAssignmentParams) ([]Submission, error) {
 	rows, err := q.db.Query(ctx, listSubmissionsByAssignment,
 		arg.TenantID,
@@ -2461,6 +2471,7 @@ func (q *Queries) ListSubmissionsByAssignment(ctx context.Context, arg ListSubmi
 		arg.Limit,
 		arg.Offset,
 		arg.StudentID,
+		arg.Status,
 	)
 	if err != nil {
 		return nil, err

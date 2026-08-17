@@ -25,14 +25,14 @@ const OUTPUT = join(REPO_ROOT, 'backend/internal/modules/sim/builtin_catalog.jso
 const BUILTIN_CODE_PREFIX = 'builtin__'
 
 /**
- * loadVite 从 frontend 工作区解析 Vite 的 ESM 入口。
- * 本脚本住在仓库根的 scripts/(全仓脚本唯一落点),而 vite 只装在 frontend 工作区,
- * 故按 frontend/package.json 的解析上下文取包路径;
+ * loadVite 从 Web 应用工作区解析 Vite 的 ESM 入口。
+ * 本脚本住在仓库根的 scripts/(全仓脚本唯一落点),而 Vite 是 apps/web 的构建依赖,
+ * 故按 frontend/apps/web/package.json 的解析上下文取包路径;
  * 直接 `import('vite')` 会命中它的 CJS 入口(exports.require 分支),那个入口不导出 createServer。
  */
 async function loadVite() {
-  const requireFromFrontend = createRequire(join(REPO_ROOT, 'frontend/package.json'))
-  const manifest = requireFromFrontend.resolve('vite/package.json')
+  const requireFromWebApp = createRequire(join(REPO_ROOT, 'frontend/apps/web/package.json'))
+  const manifest = requireFromWebApp.resolve('vite/package.json')
   const esmEntry = join(dirname(manifest), 'dist/node/index.js')
   return import(pathToFileURL(esmEntry).href)
 }

@@ -2130,13 +2130,17 @@ const listTenantsPaged = `-- name: ListTenantsPaged :many
 SELECT id, code, name, type, status, deploy_mode, expire_at, logo_ref, display_name, feature_flags, auth_mode, enable_activation_code, created_at, updated_at,
        COUNT(*) OVER() AS total_count
 FROM tenant
+WHERE ($3::smallint = 0 OR status = $3)
+  AND ($4::text = '' OR name ILIKE '%' || $4 || '%' OR code ILIKE '%' || $4 || '%')
 ORDER BY created_at DESC, id DESC
 LIMIT $1 OFFSET $2
 `
 
 type ListTenantsPagedParams struct {
-	Limit  int32 `json:"limit"`
-	Offset int32 `json:"offset"`
+	Limit   int32  `json:"limit"`
+	Offset  int32  `json:"offset"`
+	Column3 int16  `json:"column_3"`
+	Column4 string `json:"column_4"`
 }
 
 type ListTenantsPagedRow struct {
@@ -2158,7 +2162,12 @@ type ListTenantsPagedRow struct {
 }
 
 func (q *Queries) ListTenantsPaged(ctx context.Context, arg ListTenantsPagedParams) ([]ListTenantsPagedRow, error) {
-	rows, err := q.db.Query(ctx, listTenantsPaged, arg.Limit, arg.Offset)
+	rows, err := q.db.Query(ctx, listTenantsPaged,
+		arg.Limit,
+		arg.Offset,
+		arg.Column3,
+		arg.Column4,
+	)
 	if err != nil {
 		return nil, err
 	}

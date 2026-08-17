@@ -33,6 +33,18 @@ export const SANDBOX_PHASES = [
   SandboxPhase.FULLY_READY,
 ] as const
 
+/** SANDBOX_STATUSES 是进度推送允许出现的封闭运行状态集合。 */
+export const SANDBOX_STATUSES = [
+  SandboxStatus.CREATING,
+  SandboxStatus.RUNNING,
+  SandboxStatus.PAUSED,
+  SandboxStatus.RECYCLING,
+  SandboxStatus.DESTROYED,
+  SandboxStatus.FAILED,
+  SandboxStatus.READY,
+  SandboxStatus.IDLE,
+] as const
+
 const SANDBOX_STATUS_LABELS: Record<SandboxStatus, string> = {
   [SandboxStatus.CREATING]: '正在创建',
   [SandboxStatus.RUNNING]: '运行中',
@@ -214,3 +226,13 @@ export function toolStatusTone(status: ToolStatus): StatusTone {
 
 /** TOOL_STATUSES 供表单渲染工具定义状态选项。 */
 export const TOOL_STATUSES = [ToolStatus.AVAILABLE, ToolStatus.DISABLED] as const
+
+/**
+ * ecoTagsLabel 返回工具适用生态的用户向文案。
+ * 后端用 `*` 表示不限生态(如受控终端),直接把星号显示给管理员是内部记法泄漏(FE-4);
+ * 空数组同样按不限生态呈现 —— 两者对使用者是同一件事。
+ */
+export function ecoTagsLabel(ecoTags: string[]): string {
+  if (ecoTags.length === 0 || ecoTags.includes('*')) return '不限生态'
+  return ecoTags.join('、')
+}

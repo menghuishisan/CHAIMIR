@@ -79,6 +79,34 @@ func (q *Queries) ClaimDueTransferTasks(ctx context.Context, arg ClaimDueTransfe
 	return items, nil
 }
 
+const countTransferTasks = `-- name: CountTransferTasks :one
+SELECT count(*)::bigint
+FROM transfer_task
+WHERE tenant_id = $1
+  AND account_id = $2
+  AND ($3::varchar = '' OR channel = $3)
+  AND ($4::varchar = '' OR status = $4)
+`
+
+type CountTransferTasksParams struct {
+	TenantID  int64  `json:"tenant_id"`
+	AccountID int64  `json:"account_id"`
+	Column3   string `json:"column_3"`
+	Column4   string `json:"column_4"`
+}
+
+func (q *Queries) CountTransferTasks(ctx context.Context, arg CountTransferTasksParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countTransferTasks,
+		arg.TenantID,
+		arg.AccountID,
+		arg.Column3,
+		arg.Column4,
+	)
+	var column_1 int64
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
 const createTransferTask = `-- name: CreateTransferTask :one
 INSERT INTO transfer_task (
     id, tenant_id, account_id, channel, subject, status, content_type, file_name,

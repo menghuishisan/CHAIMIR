@@ -56,7 +56,7 @@ import {
 } from '@chaimir/ui'
 import { api } from '../../../../app/api'
 import { ResourceState } from '../../../../components/ResourceState'
-import { useAsyncResource, usePagedResource } from '../../../../hooks'
+import { useAsyncResource, usePagedResource, useResourceTotal } from '../../../../hooks'
 import { GradeAppeals } from '../../../grade/pages/teacher/grade-appeals'
 import { formatDateTime, formatScore } from '../../../../utils/formatters'
 import {
@@ -181,14 +181,22 @@ function SubmissionsPanel({ assignmentId }: { assignmentId: string }) {
     [assignmentId],
   )
 
-  const stats = useMemo(() => {
-    const list = submissions.data ? submissions.data.list : []
-    return {
-      pending: list.filter((item) => item.status === SubmissionStatus.PENDING).length,
-      graded: list.filter((item) => item.status === SubmissionStatus.GRADED).length,
-      late: list.filter((item) => item.is_late).length,
-    }
-  }, [submissions.data])
+  // 指标带取服务端全量口径:待批改是教师最常看的数字,不能用当前页数出来的近似值。
+  // 「迟交」没有服务端筛选参数,故不做这张卡:迟交在每一行的标签里可见(规范 §6.5)。
+  const totalCount = useResourceTotal(
+    (params) => api.teaching.getSubmissions(assignmentId, params),
+    [assignmentId],
+  )
+  const pendingCount = useResourceTotal(
+    (params) =>
+      api.teaching.getSubmissions(assignmentId, { status: SubmissionStatus.PENDING, ...params }),
+    [assignmentId],
+  )
+  const gradedCount = useResourceTotal(
+    (params) =>
+      api.teaching.getSubmissions(assignmentId, { status: SubmissionStatus.GRADED, ...params }),
+    [assignmentId],
+  )
 
   const columns: TableColumn<Submission>[] = [
     {
@@ -257,11 +265,10 @@ function SubmissionsPanel({ assignmentId }: { assignmentId: string }) {
   return (
     <>
       <PageSection>
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <Stat label="提交总数" value={submissions.total} icon={ClipboardCheck} />
-          <Stat label="待批改" value={stats.pending} icon={CheckSquare} />
-          <Stat label="已出分" value={stats.graded} icon={ClipboardCheck} />
-          <Stat label="迟交" value={stats.late} icon={ClipboardCheck} />
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          <Stat label="提交总数" value={totalCount ?? '—'} icon={ClipboardCheck} />
+          <Stat label="待批改" value={pendingCount ?? '—'} icon={CheckSquare} />
+          <Stat label="已出分" value={gradedCount ?? '—'} icon={ClipboardCheck} />
         </div>
       </PageSection>
 
@@ -404,7 +411,7 @@ function GradeSubmissionModal({ submission, onClose, onSaved, onError }: GradeSu
           <Button variant="outline" onClick={onClose}>
             取消
           </Button>
-          <Button variant="seal" loading={working} onClick={() => void submit()}>
+          <Button variant="primary" loading={working} onClick={() => void submit()}>
             提交批改
           </Button>
         </ModalFooter>
@@ -465,7 +472,7 @@ function JudgeTasksPanel({ assignmentId }: { assignmentId: string }) {
             <div className="flex flex-col gap-3">
               {actionError ? <Callout tone="danger">{actionError}</Callout> : null}
               {page.list.map((task) => (
-                <div key={task.task_id} className="flex flex-col gap-2 rounded-md border border-line p-3">
+                <div key={task.task_id} className="flex flex-col gap-2 well p-3">
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <StatusIndicator
                       tone={judgeTaskStatusTone(task.status)}
@@ -636,7 +643,7 @@ function ManualScoreModal({ task, onClose, onSaved }: ManualScoreModalProps) {
           <Button variant="outline" onClick={onClose}>
             取消
           </Button>
-          <Button variant="seal" loading={working} onClick={() => void submit()}>
+          <Button variant="primary" loading={working} onClick={() => void submit()}>
             提交评分
           </Button>
         </ModalFooter>

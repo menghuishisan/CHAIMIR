@@ -13,6 +13,7 @@ import (
 	"chaimir/internal/platform/httpx"
 	"chaimir/internal/platform/response"
 	"chaimir/internal/platform/tenant"
+	"chaimir/internal/platform/timex"
 	"chaimir/pkg/apperr"
 	pkgcrypto "chaimir/pkg/crypto"
 	"chaimir/pkg/logging"
@@ -76,7 +77,7 @@ func (a downloadAPI) download(c *gin.Context) {
 		return
 	}
 	if grant.Mode != DownloadModeStream {
-		if err := consumeDownloadGrant(c.Request.Context(), a.consumer, token, grant.ExpiresAt, time.Now().UTC()); err != nil {
+		if err := consumeDownloadGrant(c.Request.Context(), a.consumer, token, grant.ExpiresAt, timex.Now()); err != nil {
 			response.Fail(c, err)
 			return
 		}

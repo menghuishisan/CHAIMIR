@@ -101,6 +101,10 @@ WHERE judge_task.tenant_id = $1
   AND ($2::text = '' OR judge_task.source_ref = $2)
   AND ($3::boolean = false OR (judge_task.status = 2 AND judger.type = 6))
   AND ($4::bigint = 0 OR judge_task.source_owner_id = $4 OR judge_task.submitter_id = $4)
+  -- state 与列表逐字同口径,否则指标带与分页会自相矛盾
+  AND ($5::text = ''
+       OR ($5::text = 'active' AND judge_task.status IN (1, 2))
+       OR ($5::text = 'abnormal' AND judge_task.status IN (4, 5, 6)))
 `
 
 type CountJudgeTasksParams struct {
@@ -108,6 +112,7 @@ type CountJudgeTasksParams struct {
 	Column2  string `json:"column_2"`
 	Column3  bool   `json:"column_3"`
 	Column4  int64  `json:"column_4"`
+	State    string `json:"state"`
 }
 
 func (q *Queries) CountJudgeTasks(ctx context.Context, arg CountJudgeTasksParams) (int64, error) {
@@ -116,6 +121,7 @@ func (q *Queries) CountJudgeTasks(ctx context.Context, arg CountJudgeTasksParams
 		arg.Column2,
 		arg.Column3,
 		arg.Column4,
+		arg.State,
 	)
 	var column_1 int64
 	err := row.Scan(&column_1)
@@ -794,17 +800,22 @@ WHERE t.tenant_id = $1
   AND ($2::text = '' OR t.source_ref = $2)
   AND ($3::boolean = false OR (t.status = 2 AND j.type = 6))
   AND ($4::bigint = 0 OR t.source_owner_id = $4 OR t.submitter_id = $4)
+  -- state 取运维分组:active=排队/执行中(1,2),abnormal=超时/失败/出错(4,5,6),空串不筛
+  AND ($5::text = ''
+       OR ($5::text = 'active' AND t.status IN (1, 2))
+       OR ($5::text = 'abnormal' AND t.status IN (4, 5, 6)))
 ORDER BY t.created_at DESC, t.id DESC
-LIMIT $5 OFFSET $6
+LIMIT $7::int OFFSET $6::int
 `
 
 type ListJudgeTasksParams struct {
-	TenantID int64  `json:"tenant_id"`
-	Column2  string `json:"column_2"`
-	Column3  bool   `json:"column_3"`
-	Column4  int64  `json:"column_4"`
-	Limit    int32  `json:"limit"`
-	Offset   int32  `json:"offset"`
+	TenantID   int64  `json:"tenant_id"`
+	Column2    string `json:"column_2"`
+	Column3    bool   `json:"column_3"`
+	Column4    int64  `json:"column_4"`
+	State      string `json:"state"`
+	PageOffset int32  `json:"page_offset"`
+	PageLimit  int32  `json:"page_limit"`
 }
 
 type ListJudgeTasksRow struct {
@@ -847,8 +858,9 @@ func (q *Queries) ListJudgeTasks(ctx context.Context, arg ListJudgeTasksParams) 
 		arg.Column2,
 		arg.Column3,
 		arg.Column4,
-		arg.Limit,
-		arg.Offset,
+		arg.State,
+		arg.PageOffset,
+		arg.PageLimit,
 	)
 	if err != nil {
 		return nil, err

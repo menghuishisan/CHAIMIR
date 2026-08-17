@@ -22,12 +22,6 @@ export interface TransferTask {
   next_attempt_after?: string
 }
 
-export interface TransferTaskListResponse {
-  items: TransferTask[]
-  page: number
-  size: number
-}
-
 export interface TransferDownloadGrant {
   token: string
   // 授权只对 succeeded 且已登记产物的任务签发(BuildDownloadGrant),产物字段在授权响应里必定存在。

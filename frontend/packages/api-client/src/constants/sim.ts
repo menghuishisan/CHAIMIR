@@ -29,13 +29,14 @@ export const SIM_REVIEW_RESULT = {
 
 export type SimReviewResult = (typeof SIM_REVIEW_RESULT)[keyof typeof SIM_REVIEW_RESULT]
 
-export const SIM_SHARE_STATUS = {
-  ACTIVE: 'active',
-  REVOKED: 'revoked',
-  EXPIRED: 'expired',
+/** 仿真包自动校验子项的封闭结果值。 */
+export const SIM_VALIDATION_STATUS = {
+  PASSED: 'passed',
+  FAILED: 'failed',
 } as const
 
-export type SimShareStatus = (typeof SIM_SHARE_STATUS)[keyof typeof SIM_SHARE_STATUS]
+export type SimValidationStatusValue =
+  (typeof SIM_VALIDATION_STATUS)[keyof typeof SIM_VALIDATION_STATUS]
 
 /**
  * 隔离执行 WebSocket 的客户端命令类型（后端 `modules/sim/enum.go` 的 BackendCommandKind 同源）。

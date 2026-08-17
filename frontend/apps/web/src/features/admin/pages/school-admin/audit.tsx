@@ -9,7 +9,7 @@
 
 import { useCallback, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router'
-import { Download, FileText, Search, UserSearch } from 'lucide-react'
+import { Download, FileText, Search } from 'lucide-react'
 import {
   type Account,
   type AuditLogEntry,
@@ -27,7 +27,6 @@ import {
   PageSection,
   Pagination,
   Select,
-  Stat,
   Table,
   toast,
   type TableColumn,
@@ -42,6 +41,7 @@ import {
   auditTargetTypeLabel,
 } from '../../../../utils/labels/admin'
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
+import { TraceIdCell } from '../../TraceIdCell'
 
 /** 账号选择器一次取回的条数:后端分页上限 100。 */
 const ACCOUNT_PICKER_SIZE = 100
@@ -177,12 +177,7 @@ export default function SchoolAdminAuditPage() {
     {
       key: 'trace_id',
       header: '操作编号',
-      render: (entry) =>
-        entry.trace_id ? (
-          <span className="truncate font-mono text-xs text-ink-faint">{entry.trace_id}</span>
-        ) : (
-          <span className="text-ink-sub">—</span>
-        ),
+      render: (entry) => <TraceIdCell traceId={entry.trace_id} />,
     },
   ]
 
@@ -200,22 +195,15 @@ export default function SchoolAdminAuditPage() {
         }
       />
 
-      <PageSection>
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          <Stat label="查询到的记录" value={logs.total} icon={FileText} />
-          <Stat
-            label="筛选条件"
-            value={hasFilters ? '已设置' : '无'}
-            icon={Search}
-            hint={hasFilters ? '导出会按当前条件' : '导出会包含全部记录'}
-          />
-          <Stat label="可查询范围" value="本校" icon={UserSearch} hint="平台级操作在平台端审计" />
-        </div>
-      </PageSection>
-
+      {/* 不做指标带:记录条数在下方分组说明里,「筛选条件」与「可查询范围」是筛选状态与范围常量,
+          不是可度量的数字(规范 §6.5)。导出口径改在查询条件区就近说明。 */}
       <PageSection
         title="查询条件"
-        description="按人、按动作、按对象或按时间范围筛选。不填即查全部。"
+        description={
+          hasFilters
+            ? '按人、按动作、按对象或按时间范围筛选。导出会按当前条件。'
+            : '按人、按动作、按对象或按时间范围筛选。不填即查全部,导出会包含全部记录。'
+        }
       >
         <form
           className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3"
@@ -326,7 +314,7 @@ export default function SchoolAdminAuditPage() {
             )}
           </ResourceState>
 
-          <div className="flex flex-wrap items-center gap-2 rounded-md border border-line bg-surface-sunken p-3">
+          <div className="flex flex-wrap items-center gap-2 well p-3">
             <span className="text-sm text-ink-sub">导出的文件在任务与下载页取件。</span>
             <Button variant="ghost" size="sm" onClick={() => navigate('/school-admin/tasks')}>
               去任务与下载

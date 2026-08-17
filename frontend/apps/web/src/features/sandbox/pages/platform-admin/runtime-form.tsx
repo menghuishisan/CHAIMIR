@@ -13,6 +13,7 @@
 
 import { useCallback, useId, useMemo, useState } from 'react'
 import {
+  RuntimeAdapterLevel,
   RuntimeStatus,
   type SandboxAdapterSpec,
   type SandboxRuntime,
@@ -43,9 +44,21 @@ import { userFacingErrorMessage } from '../../../../utils/userFacingError'
 
 /** 适配层级:1 只托管环境,2 提供标准链能力,3 自带插件实现。 */
 const ADAPTER_LEVELS = [
-  { value: '1', label: '一级 · 只托管环境', hint: '平台只负责启动环境,链操作由学生自己在终端完成' },
-  { value: '2', label: '二级 · 声明标准链能力', hint: '用命令声明部署/交易/查询/重置,平台统一调用' },
-  { value: '3', label: '三级 · 自带插件实现', hint: '链能力由运行时插件实现,平台按插件名称调用' },
+  {
+    value: String(RuntimeAdapterLevel.HOSTED),
+    label: '一级 · 只托管环境',
+    hint: '平台只负责启动环境,链操作由学生自己在终端完成',
+  },
+  {
+    value: String(RuntimeAdapterLevel.STANDARD),
+    label: '二级 · 声明标准链能力',
+    hint: '用命令声明部署/交易/查询/重置,平台统一调用',
+  },
+  {
+    value: String(RuntimeAdapterLevel.PLUGIN),
+    label: '三级 · 自带插件实现',
+    hint: '链能力由运行时插件实现,平台按插件名称调用',
+  },
 ] as const
 
 /** 可提交的状态:可用由自检结果决定,不接受手填(后端 validateRuntimeRequest)。 */
@@ -102,16 +115,18 @@ export function RuntimeFormModal({ runtime, onClose, onSaved }: RuntimeFormModal
   const [code, setCode] = useState(runtime?.code ?? '')
   const [name, setName] = useState(runtime?.name ?? '')
   const [eco, setEco] = useState(runtime?.eco ?? '')
-  const [adapterLevel, setAdapterLevel] = useState(String(runtime?.adapter_level ?? 2))
+  const [adapterLevel, setAdapterLevel] = useState(
+    String(runtime?.adapter_level ?? RuntimeAdapterLevel.STANDARD)
+  )
   const [capabilityImpl, setCapabilityImpl] = useState(runtime?.capability_impl ?? '')
   const [pluginRef, setPluginRef] = useState(runtime?.plugin_ref ?? '')
   const [status, setStatus] = useState(
     String(
-      runtime?.status === RuntimeStatus.DISABLED ? RuntimeStatus.DISABLED : RuntimeStatus.ONBOARDING,
-    ),
+      runtime?.status === RuntimeStatus.DISABLED ? RuntimeStatus.DISABLED : RuntimeStatus.ONBOARDING
+    )
   )
   const [specText, setSpecText] = useState(() =>
-    runtime ? JSON.stringify(runtime.adapter_spec, null, 2) : SPEC_TEMPLATE,
+    runtime ? JSON.stringify(runtime.adapter_spec, null, 2) : SPEC_TEMPLATE
   )
 
   const [errors, setErrors] = useState<Record<string, string | null>>({})
@@ -144,7 +159,7 @@ export function RuntimeFormModal({ runtime, onClose, onSaved }: RuntimeFormModal
           code: code.trim(),
           name: name.trim(),
           eco: eco.trim(),
-          adapter_level: Number(adapterLevel),
+          adapter_level: Number(adapterLevel) as RuntimeAdapterLevel,
           adapter_spec: parsed.spec as SandboxAdapterSpec,
           capability_impl: capabilityImpl.trim(),
           plugin_ref: pluginRef.trim(),
@@ -172,7 +187,7 @@ export function RuntimeFormModal({ runtime, onClose, onSaved }: RuntimeFormModal
       pluginRef,
       runtime?.id,
       status,
-    ],
+    ]
   )
 
   const levelHint = ADAPTER_LEVELS.find((item) => item.value === adapterLevel)?.hint
@@ -205,7 +220,12 @@ export function RuntimeFormModal({ runtime, onClose, onSaved }: RuntimeFormModal
                   onChange={(event) => setCode(event.target.value)}
                 />
               </FormField>
-              <FormField label="运行时名称" htmlFor={`${fieldId}-name`} required error={errors.name}>
+              <FormField
+                label="运行时名称"
+                htmlFor={`${fieldId}-name`}
+                required
+                error={errors.name}
+              >
                 <Input
                   id={`${fieldId}-name`}
                   value={name}
@@ -310,7 +330,7 @@ export function RuntimeFormModal({ runtime, onClose, onSaved }: RuntimeFormModal
             <Button type="button" variant="outline" onClick={onClose}>
               取消
             </Button>
-            <Button type="submit" variant="seal" loading={submitting}>
+            <Button type="submit" variant="primary" loading={submitting}>
               {editing ? '保存声明' : '登记运行时'}
             </Button>
           </ModalFooter>
@@ -347,7 +367,7 @@ function SpecSummary({ summary, error }: { summary?: SpecSummaryData; error?: st
     )
   }
   return (
-    <div className="flex flex-col gap-3 rounded-md border border-line bg-surface-sunken p-4">
+    <div className="flex flex-col gap-3 well p-4">
       <div className="flex flex-wrap items-center gap-2">
         <span className="text-base text-ink">系统从清单里读到</span>
         {summary.hasCapabilityCommands ? (
@@ -362,7 +382,11 @@ function SpecSummary({ summary, error }: { summary?: SpecSummaryData; error?: st
         items={[
           { term: '工作区目录', description: summary.workspaceDir, mono: true },
           { term: '主环境', description: summary.containerName, mono: true },
-          { term: '主环境镜像', description: summary.imageUrl || '按镜像版本登记时指定', mono: true },
+          {
+            term: '主环境镜像',
+            description: summary.imageUrl || '按镜像版本登记时指定',
+            mono: true,
+          },
           { term: '对外端口', description: `${summary.portCount} 个` },
           { term: '附加组件', description: `${summary.sidecarCount} 个` },
           { term: '数据卷域', description: `${summary.volumeCount} 个` },

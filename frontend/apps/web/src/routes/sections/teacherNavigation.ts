@@ -18,7 +18,6 @@ import type { RoleNavigationConfig } from '../../layouts/main/navigation'
 
 export const teacherNavigation: RoleNavigationConfig = {
   ...ROLE_ROUTES.teacher,
-  brandName: 'Chaimir 教学端',
   hasNotificationInbox: true,
   groups: [
     {

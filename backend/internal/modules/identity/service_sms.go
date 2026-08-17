@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"chaimir/internal/platform/ids"
 	"chaimir/internal/platform/intx"
 	"chaimir/internal/platform/tenant"
 	"chaimir/internal/platform/timex"
@@ -37,7 +38,7 @@ func (s *Service) SendSMS(ctx context.Context, req SendSMSRequest) error {
 		return apperr.ErrInternal.WithCause(err)
 	}
 	// 先写短间隔限频键,避免短信网关慢响应时同一号码被并发刷爆。
-	resendKey := fmt.Sprintf("identity:sms:resend:%d:%s:%d", tenantID, phoneHash, req.Scene)
+	resendKey := fmt.Sprintf("identity:sms:resend:%s:%s:%d", ids.Format(tenantID), phoneHash, req.Scene)
 	ok, err := s.redis.SetNX(ctx, resendKey, time.Duration(s.cfg.SMSResendSeconds)*time.Second)
 	if err != nil {
 		return apperr.ErrInternal.WithCause(err)
@@ -46,7 +47,7 @@ func (s *Service) SendSMS(ctx context.Context, req SendSMSRequest) error {
 		return apperr.ErrIdentitySMSTooFrequent
 	}
 	// 每日上限按手机号哈希统计,日志和 Redis key 都不暴露手机号明文。
-	dayKey := fmt.Sprintf("identity:sms:day:%d:%s:%s", tenantID, phoneHash, timex.Now().Format("20060102"))
+	dayKey := fmt.Sprintf("identity:sms:day:%s:%s:%s", ids.Format(tenantID), phoneHash, timex.Now().Format("20060102"))
 	count, err := s.redis.IncrWithTTL(ctx, dayKey, 24*time.Hour)
 	if err != nil {
 		return apperr.ErrInternal.WithCause(err)

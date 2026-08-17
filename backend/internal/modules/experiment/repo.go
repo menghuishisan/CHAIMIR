@@ -60,7 +60,7 @@ type TxStore interface {
 	GradeReport(context.Context, int64, int64, float64, string) (ExperimentReport, error)
 	GetReport(context.Context, int64, int64) (ExperimentReport, error)
 	GetReportByInstanceStudent(context.Context, int64, int64, int64) (ExperimentReport, error)
-	ListReports(context.Context, int64, int64, int, int) ([]ExperimentReport, int64, error)
+	ListReports(context.Context, int64, int64, int16, int, int) ([]ExperimentReport, int64, error)
 	SumScores(context.Context, int64, int64) (float64, error)
 	Stats(context.Context, int64, int64) (ExperimentStatsSnapshot, error)
 	CreateExperimentScoreOutbox(context.Context, int64, ExperimentInstance, string, time.Time) (ExperimentScoreOutbox, error)
@@ -488,13 +488,14 @@ func (tx *txStore) GetReportByInstanceStudent(ctx context.Context, tenantID, ins
 }
 
 // ListReports 查询实验报告分页。
-func (tx *txStore) ListReports(ctx context.Context, tenantID, experimentID int64, page, size int) ([]ExperimentReport, int64, error) {
+// status 传 0 表示不按批改状态过滤;总数按同一条件计,与列表同口径。
+func (tx *txStore) ListReports(ctx context.Context, tenantID, experimentID int64, status int16, page, size int) ([]ExperimentReport, int64, error) {
 	limit, offset := pagex.LimitOffset(page, size)
-	rows, err := tx.q.ListExperimentReports(ctx, sqlcgen.ListExperimentReportsParams{TenantID: tenantID, ExperimentID: experimentID, Limit: limit, Offset: offset})
+	rows, err := tx.q.ListExperimentReports(ctx, sqlcgen.ListExperimentReportsParams{TenantID: tenantID, ExperimentID: experimentID, Status: status, Limit: limit, Offset: offset})
 	if err != nil {
 		return nil, 0, apperr.ErrExperimentReportInvalid.WithCause(err)
 	}
-	total, err := tx.q.CountExperimentReports(ctx, sqlcgen.CountExperimentReportsParams{TenantID: tenantID, ExperimentID: experimentID})
+	total, err := tx.q.CountExperimentReports(ctx, sqlcgen.CountExperimentReportsParams{TenantID: tenantID, ExperimentID: experimentID, Status: status})
 	if err != nil {
 		return nil, 0, apperr.ErrExperimentReportInvalid.WithCause(err)
 	}

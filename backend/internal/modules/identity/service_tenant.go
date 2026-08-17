@@ -76,7 +76,10 @@ func (s *Service) UpdateTenantConfigByAdmin(ctx context.Context, req TenantConfi
 
 // validateTenantConfigRequest 校验租户配置输入,避免非法认证模式或不可序列化开关写入配置。
 func validateTenantConfigRequest(req TenantConfigRequest) error {
-	return ValidateAuthMode(req.AuthMode)
+	if err := ValidateAuthMode(req.AuthMode); err != nil {
+		return err
+	}
+	return ValidateTenantFeatureFlags(req.FeatureFlags)
 }
 
 // ListSSOConfigsByAdmin 读取当前租户的 CAS/LDAP 配置,敏感字段返回前必须脱敏。

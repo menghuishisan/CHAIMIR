@@ -202,7 +202,7 @@ export function AccountFormModal({ account, onClose, onSaved }: AccountFormModal
             </Callout>
           </ModalBody>
           <ModalFooter>
-            <Button variant="seal" onClick={() => onSaved()}>
+            <Button variant="primary" onClick={() => onSaved()}>
               我已记录,关闭
             </Button>
           </ModalFooter>
@@ -363,7 +363,7 @@ export function AccountFormModal({ account, onClose, onSaved }: AccountFormModal
             </ResourceState>
 
             {!editing ? (
-              <div className="flex flex-col gap-3 rounded-md border border-line bg-surface-sunken p-4">
+              <div className="flex flex-col gap-3 well p-4">
                 <Checkbox
                   checked={useActivation}
                   label="用激活码开通(本人自行设置密码)"
@@ -400,7 +400,7 @@ export function AccountFormModal({ account, onClose, onSaved }: AccountFormModal
             <Button type="button" variant="outline" onClick={onClose}>
               取消
             </Button>
-            <Button type="submit" variant="seal" loading={submitting}>
+            <Button type="submit" variant="primary" loading={submitting}>
               {editing ? '保存资料' : '开通账号'}
             </Button>
           </ModalFooter>

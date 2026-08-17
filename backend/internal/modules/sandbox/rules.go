@@ -58,7 +58,7 @@ func validateRuntimeRequest(req RuntimeRequest, cfg config.SandboxConfig) (Adapt
 	if !codePattern.MatchString(req.Code) || strings.TrimSpace(req.Name) == "" || strings.TrimSpace(req.Eco) == "" {
 		return AdapterSpec{}, apperr.ErrSandboxRuntimeCreateInvalid
 	}
-	if req.AdapterLevel < 1 || req.AdapterLevel > 3 || len(req.AdapterSpec) == 0 {
+	if req.AdapterLevel < RuntimeAdapterLevelHosted || req.AdapterLevel > RuntimeAdapterLevelPlugin || len(req.AdapterSpec) == 0 {
 		return AdapterSpec{}, apperr.ErrSandboxAdapterSpecInvalid
 	}
 	if req.Status != 0 && req.Status != RuntimeStatusOnboarding && req.Status != RuntimeStatusDisabled {
@@ -71,7 +71,7 @@ func validateRuntimeRequest(req RuntimeRequest, cfg config.SandboxConfig) (Adapt
 	if err := normalizeAndValidateAdapterSpec(&spec, cfg); err != nil {
 		return AdapterSpec{}, err
 	}
-	if req.AdapterLevel >= 2 &&
+	if req.AdapterLevel >= RuntimeAdapterLevelStandard &&
 		strings.TrimSpace(req.CapabilityImpl) == "" &&
 		strings.TrimSpace(req.PluginRef) == "" &&
 		!hasCapabilityCommands(spec.CapabilityCommands) {
@@ -190,29 +190,33 @@ func validateCommandToolRuntimeSpec(spec *ToolResourceSpec, cfg config.SandboxCo
 	return nil
 }
 
-// validateCommandToolPolicy 校验命令工具只允许声明固定入口命令和正数超时。
+// validateCommandToolPolicy 校验命令工具只允许声明完整 argv 白名单和正数超时。
 func validateCommandToolPolicy(policy *CommandToolPolicy) error {
-	if policy == nil || len(policy.AllowedCommands) == 0 || policy.DefaultTimeoutSeconds <= 0 || policy.MaxTimeoutSeconds <= 0 || policy.DefaultTimeoutSeconds > policy.MaxTimeoutSeconds {
+	if policy == nil || len(policy.AllowedArgv) == 0 || policy.DefaultTimeoutSeconds <= 0 || policy.MaxTimeoutSeconds <= 0 || policy.DefaultTimeoutSeconds > policy.MaxTimeoutSeconds {
 		return apperr.ErrSandboxToolCreateInvalid
 	}
 	seen := map[string]struct{}{}
-	for i := range policy.AllowedCommands {
-		command := strings.TrimSpace(policy.AllowedCommands[i])
-		if command == "" || strings.ContainsAny(command, `/\`) {
+	for i := range policy.AllowedArgv {
+		argv := policy.AllowedArgv[i]
+		if !safeNonShellCommand(argv) {
 			return apperr.ErrSandboxToolCreateInvalid
 		}
-		if _, exists := seen[command]; exists {
+		for j := range argv {
+			argv[j] = strings.TrimSpace(argv[j])
+		}
+		key := strings.Join(argv, "\x00")
+		if _, exists := seen[key]; exists {
 			return apperr.ErrSandboxToolCreateInvalid
 		}
-		seen[command] = struct{}{}
-		policy.AllowedCommands[i] = command
+		seen[key] = struct{}{}
+		policy.AllowedArgv[i] = argv
 	}
 	return nil
 }
 
 // commandPolicyConfigured 判断非命令工具是否误带命令策略。
 func commandPolicyConfigured(policy CommandToolPolicy) bool {
-	return len(policy.AllowedCommands) > 0 || policy.DefaultTimeoutSeconds != 0 || policy.MaxTimeoutSeconds != 0
+	return len(policy.AllowedArgv) > 0 || policy.DefaultTimeoutSeconds != 0 || policy.MaxTimeoutSeconds != 0
 }
 
 // validatePrepullCommand 校验镜像预拉取自检命令由 manifest 显式声明且没有空参数。

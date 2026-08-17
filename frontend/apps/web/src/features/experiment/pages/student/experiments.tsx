@@ -6,7 +6,7 @@
 
 import { useCallback, useState } from 'react'
 import { useNavigate } from 'react-router'
-import { FlaskConical, Play, Target, Users } from 'lucide-react'
+import { FlaskConical, Play } from 'lucide-react'
 import { ExperimentCollabMode, type StudentExperiment } from '@chaimir/api-client'
 import {
   Badge,
@@ -17,7 +17,6 @@ import {
   PageScaffold,
   PageSection,
   Pagination,
-  Stat,
   StatusIndicator,
   Table,
   type TableColumn,
@@ -71,10 +70,6 @@ export default function StudentExperimentsPage() {
     },
     [navigate],
   )
-
-  const list = experiments.data ? experiments.data.list : []
-  const groupCount = list.filter((item) => item.collab_mode === ExperimentCollabMode.GROUP).length
-  const reportCount = list.filter((item) => item.require_report).length
 
   const columns: TableColumn<StudentExperiment>[] = [
     {
@@ -159,14 +154,8 @@ export default function StudentExperimentsPage() {
         icon={FlaskConical}
       />
 
-      <PageSection>
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          <Stat label="可做实验" value={experiments.total} icon={FlaskConical} />
-          <Stat label="小组实验" value={groupCount} icon={Users} hint="需要分组后进入" />
-          <Stat label="需交报告" value={reportCount} icon={Target} />
-        </div>
-      </PageSection>
-
+      {/* 不做指标带:可做实验数已在下方分组说明里给出,而「小组实验/需交报告」没有服务端聚合,
+          用当前页数出来就是错数(规范 §6.5);这两项在每一行的标签里逐条可见。 */}
       <PageSection title="实验列表" description={`共 ${experiments.total} 个实验`}>
         <div className="flex flex-col gap-4">
           {actionError ? <Callout tone="danger">{actionError}</Callout> : null}

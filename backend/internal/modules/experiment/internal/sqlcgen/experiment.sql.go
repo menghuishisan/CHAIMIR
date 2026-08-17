@@ -142,15 +142,17 @@ SELECT COUNT(*)::bigint
 FROM experiment_report r
 JOIN experiment_instance i ON i.tenant_id = r.tenant_id AND i.id = r.instance_id
 WHERE r.tenant_id = $1 AND i.experiment_id = $2
+  AND ($3::smallint = 0 OR r.status = $3::smallint)
 `
 
 type CountExperimentReportsParams struct {
 	TenantID     int64 `json:"tenant_id"`
 	ExperimentID int64 `json:"experiment_id"`
+	Status       int16 `json:"status"`
 }
 
 func (q *Queries) CountExperimentReports(ctx context.Context, arg CountExperimentReportsParams) (int64, error) {
-	row := q.db.QueryRow(ctx, countExperimentReports, arg.TenantID, arg.ExperimentID)
+	row := q.db.QueryRow(ctx, countExperimentReports, arg.TenantID, arg.ExperimentID, arg.Status)
 	var column_1 int64
 	err := row.Scan(&column_1)
 	return column_1, err
@@ -1106,6 +1108,7 @@ SELECT r.id, r.tenant_id, r.instance_id, r.student_id, r.content_ref, COALESCE(r
 FROM experiment_report r
 JOIN experiment_instance i ON i.tenant_id = r.tenant_id AND i.id = r.instance_id
 WHERE r.tenant_id = $1 AND i.experiment_id = $2
+  AND ($5::smallint = 0 OR r.status = $5::smallint)
 ORDER BY r.submitted_at DESC, r.id DESC
 LIMIT $3 OFFSET $4
 `
@@ -1115,6 +1118,7 @@ type ListExperimentReportsParams struct {
 	ExperimentID int64 `json:"experiment_id"`
 	Limit        int32 `json:"limit"`
 	Offset       int32 `json:"offset"`
+	Status       int16 `json:"status"`
 }
 
 type ListExperimentReportsRow struct {
@@ -1129,12 +1133,14 @@ type ListExperimentReportsRow struct {
 	SubmittedAt pgtype.Timestamptz `json:"submitted_at"`
 }
 
+// status 传 0 不按状态过滤;传具体状态供批改台按「待批改/已批改」取数与计数。
 func (q *Queries) ListExperimentReports(ctx context.Context, arg ListExperimentReportsParams) ([]ListExperimentReportsRow, error) {
 	rows, err := q.db.Query(ctx, listExperimentReports,
 		arg.TenantID,
 		arg.ExperimentID,
 		arg.Limit,
 		arg.Offset,
+		arg.Status,
 	)
 	if err != nil {
 		return nil, err

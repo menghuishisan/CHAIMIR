@@ -14,9 +14,9 @@ import {
   DrawerTitle,
   IconButton,
   cn,
+  useMediaQuery,
 } from '@chaimir/ui'
 import { RouteErrorBoundary } from '../../components/RouteErrorBoundary'
-import { useMediaQuery } from '../../hooks'
 import type { RoleNavigationConfig } from './navigation'
 import { AppSidebar } from './AppSidebar'
 import { NotificationBell } from './NotificationBell'
@@ -109,13 +109,11 @@ export function MainLayout({ config }: MainLayoutProps) {
             />
           ) : null}
 
-          {/* 窄屏顶栏承载品牌与端名(侧栏收进抽屉后品牌需有落点) */}
+          {/* 窄屏顶栏承载品牌(侧栏收进抽屉后锁定组合需有落点),同样不加端名(§1.3) */}
           {!isDesktop ? (
             <span className="flex min-w-0 flex-1 items-center gap-2">
               <BrandMark size="sm" className="text-accent" />
-              <span className="truncate text-sm font-semibold text-on-dark">
-                {config.brandName}
-              </span>
+              <span className="truncate text-sm font-semibold text-on-dark">Chaimir</span>
             </span>
           ) : (
             <span className="flex-1" />

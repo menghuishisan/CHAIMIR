@@ -26,9 +26,8 @@ func registerTenantRoutes(r gin.IRouter, svc *Service, authn *auth.Manager) {
 	// 它不接受任何租户标识参数,只在私有化部署下有内容,故不存在租户枚举面
 	// (见 docs/01-身份与租户/03-接口设计.md)。免鉴权且要读一次对象存储,
 	// 所以复用认证入口同一套来源限流,不新开配置项。
-	r.Group("/tenant").GET("/brand",
-		httpx.RateLimitMiddleware(svc.redis, "identity:brand-rate", svc.cfg.AuthRateMax, time.Duration(svc.cfg.AuthRateWindowSeconds)*time.Second),
-		api.getBrand)
+	brand := r.Group("/tenant", httpx.RateLimitMiddleware(svc.redis, "identity:brand-rate", svc.cfg.AuthRateMax, time.Duration(svc.cfg.AuthRateWindowSeconds)*time.Second))
+	brand.GET("/brand", api.getBrand)
 	g := r.Group("/tenant", authn.Middleware(), auth.RequireTenantAnyRole(svc, contracts.RoleSchoolAdmin))
 	g.GET("/config", api.getConfig)
 	g.PATCH("/config", api.updateConfig)

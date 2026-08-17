@@ -42,7 +42,7 @@
           "kind": "button",
           "label": "恢复投票",
           "emits": "recover",
-          "label_tag": "perturb"
+          "label_tag": "recover"
         }
       ],
       "render": {
@@ -243,7 +243,7 @@
           "kind": "button",
           "label": "恢复广播",
           "emits": "recover",
-          "label_tag": "perturb"
+          "label_tag": "recover"
         }
       ],
       "render": {
@@ -431,7 +431,7 @@
           "kind": "button",
           "label": "同步轻客户端",
           "emits": "recover",
-          "label_tag": "perturb"
+          "label_tag": "recover"
         }
       ],
       "render": {
@@ -591,7 +591,7 @@
           "kind": "button",
           "label": "等待最终性",
           "emits": "recover",
-          "label_tag": "perturb"
+          "label_tag": "recover"
         }
       ],
       "render": {
@@ -759,7 +759,7 @@
           "kind": "button",
           "label": "重新中继",
           "emits": "recover",
-          "label_tag": "perturb"
+          "label_tag": "recover"
         }
       ],
       "render": {
@@ -926,7 +926,7 @@
           "kind": "button",
           "label": "过滤签名",
           "emits": "recover",
-          "label_tag": "perturb"
+          "label_tag": "recover"
         }
       ],
       "render": {
@@ -1094,7 +1094,7 @@
           "kind": "button",
           "label": "提交正确状态根",
           "emits": "recover",
-          "label_tag": "perturb"
+          "label_tag": "recover"
         }
       ],
       "render": {
@@ -1105,7 +1105,7 @@
             "mode": "pipeline",
             "roles": [
               "primary",
-              "timeline"
+              "evidence"
             ]
           },
           {
@@ -1287,7 +1287,7 @@
           "kind": "button",
           "label": "轮换版本",
           "emits": "recover",
-          "label_tag": "perturb"
+          "label_tag": "recover"
         }
       ],
       "render": {
@@ -1455,7 +1455,7 @@
           "kind": "button",
           "label": "修正证明输入",
           "emits": "recover",
-          "label_tag": "perturb"
+          "label_tag": "recover"
         }
       ],
       "render": {
@@ -1656,7 +1656,7 @@
           "kind": "button",
           "label": "执行修复",
           "emits": "recover",
-          "label_tag": "perturb"
+          "label_tag": "recover"
         }
       ],
       "render": {
@@ -1853,7 +1853,7 @@
           "kind": "button",
           "label": "执行修复",
           "emits": "recover",
-          "label_tag": "perturb"
+          "label_tag": "recover"
         }
       ],
       "render": {
@@ -2034,7 +2034,7 @@
           "kind": "button",
           "label": "执行修复",
           "emits": "recover",
-          "label_tag": "perturb"
+          "label_tag": "recover"
         }
       ],
       "render": {
@@ -2216,7 +2216,7 @@
           "kind": "button",
           "label": "执行修复",
           "emits": "recover",
-          "label_tag": "perturb"
+          "label_tag": "recover"
         }
       ],
       "render": {
@@ -2406,7 +2406,7 @@
           "kind": "button",
           "label": "执行修复",
           "emits": "recover",
-          "label_tag": "perturb"
+          "label_tag": "recover"
         }
       ],
       "render": {
@@ -2592,7 +2592,7 @@
           "kind": "button",
           "label": "执行重组",
           "emits": "recover",
-          "label_tag": "perturb"
+          "label_tag": "recover"
         }
       ],
       "render": {
@@ -2767,7 +2767,7 @@
           "kind": "button",
           "label": "重建根",
           "emits": "recover",
-          "label_tag": "perturb"
+          "label_tag": "recover"
         }
       ],
       "render": {
@@ -2942,7 +2942,7 @@
           "kind": "button",
           "label": "重算根哈希",
           "emits": "recover",
-          "label_tag": "perturb"
+          "label_tag": "recover"
         }
       ],
       "render": {
@@ -3117,7 +3117,7 @@
           "kind": "button",
           "label": "回滚快照",
           "emits": "recover",
-          "label_tag": "perturb"
+          "label_tag": "recover"
         }
       ],
       "render": {
@@ -3292,7 +3292,7 @@
           "kind": "button",
           "label": "更新集合",
           "emits": "recover",
-          "label_tag": "perturb"
+          "label_tag": "recover"
         }
       ],
       "render": {
@@ -3460,7 +3460,7 @@
           "kind": "button",
           "label": "执行修复",
           "emits": "recover",
-          "label_tag": "perturb"
+          "label_tag": "recover"
         }
       ],
       "render": {
@@ -3671,7 +3671,7 @@
           "kind": "button",
           "label": "执行修复",
           "emits": "recover",
-          "label_tag": "perturb"
+          "label_tag": "recover"
         }
       ],
       "render": {
@@ -3857,7 +3857,7 @@
           "kind": "button",
           "label": "执行修复",
           "emits": "recover",
-          "label_tag": "perturb"
+          "label_tag": "recover"
         }
       ],
       "render": {
@@ -4038,7 +4038,7 @@
           "kind": "button",
           "label": "执行修复",
           "emits": "recover",
-          "label_tag": "perturb"
+          "label_tag": "recover"
         }
       ],
       "render": {
@@ -4221,7 +4221,7 @@
           "kind": "button",
           "label": "执行修复",
           "emits": "recover",
-          "label_tag": "perturb"
+          "label_tag": "recover"
         }
       ],
       "render": {
@@ -4407,7 +4407,7 @@
           "kind": "button",
           "label": "执行修复",
           "emits": "recover",
-          "label_tag": "perturb"
+          "label_tag": "recover"
         }
       ],
       "render": {
@@ -4584,7 +4584,7 @@
           "kind": "button",
           "label": "执行视图切换",
           "emits": "recover",
-          "label_tag": "perturb"
+          "label_tag": "recover"
         }
       ],
       "render": {
@@ -4809,7 +4809,7 @@
           "kind": "button",
           "label": "执行修复",
           "emits": "recover",
-          "label_tag": "perturb"
+          "label_tag": "recover"
         }
       ],
       "render": {
@@ -5044,7 +5044,7 @@
           "kind": "button",
           "label": "执行修复",
           "emits": "recover",
-          "label_tag": "perturb"
+          "label_tag": "recover"
         }
       ],
       "render": {
@@ -5278,7 +5278,7 @@
           "kind": "button",
           "label": "执行修复",
           "emits": "recover",
-          "label_tag": "perturb"
+          "label_tag": "recover"
         }
       ],
       "render": {
@@ -5502,7 +5502,7 @@
           "kind": "button",
           "label": "重算根摘要",
           "emits": "recover",
-          "label_tag": "perturb"
+          "label_tag": "recover"
         }
       ],
       "render": {
@@ -5670,7 +5670,7 @@
           "kind": "button",
           "label": "提高低价报价",
           "emits": "recover",
-          "label_tag": "perturb"
+          "label_tag": "recover"
         }
       ],
       "render": {
@@ -5871,7 +5871,7 @@
           "kind": "button",
           "label": "处理返回值",
           "emits": "recover",
-          "label_tag": "perturb"
+          "label_tag": "recover"
         }
       ],
       "render": {
@@ -6046,7 +6046,7 @@
           "kind": "button",
           "label": "提高 gasLimit",
           "emits": "recover",
-          "label_tag": "perturb"
+          "label_tag": "recover"
         }
       ],
       "render": {
@@ -6214,7 +6214,7 @@
           "kind": "button",
           "label": "足额替换",
           "emits": "recover",
-          "label_tag": "perturb"
+          "label_tag": "recover"
         }
       ],
       "render": {
@@ -6410,7 +6410,7 @@
           "kind": "button",
           "label": "替换交易",
           "emits": "recover",
-          "label_tag": "perturb"
+          "label_tag": "recover"
         }
       ],
       "render": {
@@ -6578,7 +6578,7 @@
           "kind": "button",
           "label": "重新提交",
           "emits": "recover",
-          "label_tag": "perturb"
+          "label_tag": "recover"
         }
       ],
       "render": {
@@ -6753,7 +6753,7 @@
           "kind": "button",
           "label": "应用最小权限",
           "emits": "recover",
-          "label_tag": "perturb"
+          "label_tag": "recover"
         }
       ],
       "render": {
@@ -6928,7 +6928,7 @@
           "kind": "button",
           "label": "启用限额防护",
           "emits": "recover",
-          "label_tag": "perturb"
+          "label_tag": "recover"
         }
       ],
       "render": {
@@ -7103,7 +7103,7 @@
           "kind": "button",
           "label": "启用 checked",
           "emits": "recover",
-          "label_tag": "perturb"
+          "label_tag": "recover"
         }
       ],
       "render": {
@@ -7271,7 +7271,7 @@
           "kind": "button",
           "label": "启用多源聚合",
           "emits": "recover",
-          "label_tag": "perturb"
+          "label_tag": "recover"
         }
       ],
       "render": {
@@ -7446,7 +7446,7 @@
           "kind": "button",
           "label": "启用重入锁",
           "emits": "recover",
-          "label_tag": "perturb"
+          "label_tag": "recover"
         }
       ],
       "render": {

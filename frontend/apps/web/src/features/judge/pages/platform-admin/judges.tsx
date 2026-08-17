@@ -19,6 +19,8 @@ import {
   CardBody,
   CardHeader,
   DescriptionList,
+  FilterBar,
+  FilterField,
   PageHeader,
   PageScaffold,
   PageSection,
@@ -109,17 +111,20 @@ export default function PlatformJudgesPage() {
       <PageSection
         title="判题器列表"
         description="按类型筛选。停用的判题器不会分配新任务,已排队的任务照旧执行完。"
-        actions={
-          <SegmentedControl
-            aria-label="按判题器类型筛选"
-            size="sm"
-            options={TYPE_FILTERS.map((item) => ({ value: item.value, label: item.label }))}
-            value={typeFilter}
-            onValueChange={setTypeFilter}
-          />
-        }
       >
         <div className="flex flex-col gap-4">
+          <FilterBar label="判题器筛选">
+            <FilterField label="判题器类型" group>
+              <SegmentedControl
+                aria-label="按判题器类型筛选"
+                size="sm"
+                options={TYPE_FILTERS.map((item) => ({ value: item.value, label: item.label }))}
+                value={typeFilter}
+                onValueChange={setTypeFilter}
+              />
+            </FilterField>
+          </FilterBar>
+
           {actionError ? <Callout tone="danger">{actionError}</Callout> : null}
 
           <ResourceState

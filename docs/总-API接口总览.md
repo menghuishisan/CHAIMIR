@@ -37,7 +37,7 @@
 - 登录前定位租户:`X-Tenant-Code`(学校短码)。
 - Access 15min,Refresh 7d 轮转;单端登录。
 - 浏览器原生 WebSocket 不能设置 `Authorization` 头时,前端先通过 `POST /api/v1/auth/ws-ticket` 使用当前登录态为目标 WS path 换取短时路径绑定票据,再以 `?ticket=<ws_ticket>` 建连;后端校验票据路径和服务端会话,不得在普通 WS URL 中携带 access token。
-- iframe/Web 工具入口不能设置 `Authorization` 头时,仅 sandbox Web 工具代理允许一次性 `?token=<access_token>` 进入;后端校验后写路径受限 HttpOnly Cookie 并清除 query,不得把 token 透传给工具容器。
+- iframe/Web 工具入口不能设置 `Authorization` 头时,前端先通过 `POST /api/v1/auth/browser-ticket` 为工具代理路径前缀换取短时票据,再以 `?ticket=<browser_ticket>` 首次进入;后端校验票据、服务端会话与路径前缀后重新签发 access token,写入路径受限 HttpOnly Cookie 并清除 query。access token 不得出现在 URL,票据和平台 Cookie 均不得透传给工具容器。
 
 ### 4. 接口分类
 - **`[用户]`**:前端调用,JWT + 角色鉴权。
@@ -76,6 +76,7 @@
 ### M1 身份与租户 `/api/v1`
 - `/auth/*`:登录(手机号/学号/短信)、刷新、登出、找回、SSO。
 - `/auth/ws-ticket`:为浏览器 WebSocket 签发短时路径绑定连接票据。
+- `/auth/browser-ticket`:为浏览器 Web 工具代理签发短时路径前缀绑定入口票据。
 - `/platform/applications`、`/platform/tenants`:入驻审核、租户管理 `[平台管理员]`。
 - `/tenant/config`、`/tenant/sso`:租户配置。`POST /tenant/logo` 上传校徽(multipart,**上传即生效**,同一请求内落 `logo_ref` 并返回新的配置视图),`DELETE /tenant/logo` 移除;`PATCH /tenant/config` 不接受 `logo_ref`。`GET /tenant/brand` 是**免鉴权且无参数**的品牌读取口,返回 `{ display_name, logo_image }`,仅 `deploy_mode=school` 下有内容 —— SaaS 登录页面对未确定租户,本无校徽可显示,而带 `tenant_code` 的公开端点会成为廉价的租户枚举通道。校徽以 data URI 内联下发而不签发投放授权:登录页没有会话,授权绑不到账号(详见 M1 接口设计 §4)。
 - `/org/*`:院系/专业/班级。读对教师/学校管理员开放,写只对学校管理员开放;`GET /org/classes/{id}/students` 是教师侧挑选学生的唯一入口,只出编号/姓名/学号。
@@ -104,7 +105,7 @@
 
 `stream` 之所以不能沿用一次性消费:播放器为拖动进度会对同一资源发多个分段请求,首个请求就会烧掉一次性令牌。它以更短有效期(`STORAGE_STREAM_GRANT_TTL_SECONDS`)与同样的租户+账号+资源前缀绑定换取可重复性,不放宽任何一项边界校验。两种 mode 共用同一端点、同一 grant 构造器与签名器,不新增第二条投放路由。
 
-**鉴权载体**:`<video src>`、`<img src>` 这类由浏览器自身发起的请求发不出 `Authorization` 头,故本入口接受 **Bearer 头**(XHR 取件)**或路径受限 Cookie**(浏览器直连),沿用 M2 浏览器工具代理已有的 `chaimir_access` 机制(`auth.FileAccessMiddleware` 与工具代理的 `BrowserAccessMiddleware` 共用同一实现,差异只有「是否接受 query token」一项)。Cookie 由签发 `mode=stream` 授权的业务接口在响应中写入(M6 课时材料授权即在此写),作用域限定 `storage.DownloadCookiePath`(`/api/v1/storage`)、`HttpOnly`,有效期与 access token 一致。本入口**不接受 query 形式的 access token** —— `token` 参数位已被投放授权占用,同名两义会让验签路径产生歧义。授权本身仍绑定租户与账号,`authorizeDownloadGrant` 的会话比对不因载体变化而放宽。
+**鉴权载体**:`<video src>`、`<img src>` 这类由浏览器自身发起的请求发不出 `Authorization` 头,故本入口接受 **Bearer 头**(XHR 取件)**或路径受限 Cookie**(浏览器直连),沿用 M2 浏览器工具代理已有的 `chaimir_access` 机制。两个入口共用 Cookie 与会话校验底座,但首次建链方式不同:M2 工具代理只接受 `/auth/browser-ticket` 签发的短时路径票据,统一文件服务由签发 `mode=stream` 授权的业务接口直接写 Cookie。文件服务**不接受任何 query 形式的 access token** —— `token` 参数位只表示投放授权,同名两义会让验签路径产生歧义。Cookie 作用域限定 `storage.DownloadCookiePath`(`/api/v1/storage`)、`HttpOnly`,有效期与 access token 一致;授权仍绑定租户、账号与资源前缀,`authorizeDownloadGrant` 的会话比对不因载体变化而放宽。
 
 > 所有模块签发的授权都只能由本入口消费。业务模块和前端页面不得拼接 MinIO 地址、复制 token 验签逻辑或新增模块私有下载路由。
 

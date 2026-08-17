@@ -25,12 +25,8 @@ type operationsStats struct {
 }
 
 // ResourceQuotaSnapshot 输出平台看板需要的资源配额摘要。
-func (o operationsStats) ResourceQuotaSnapshot() map[string]any {
-	return map[string]any{
-		"max_concurrent_sandbox": o.MaxConcurrentSandbox,
-		"max_cpu":                o.MaxCPU,
-		"max_memory_mb":          o.MaxMemoryMB,
-	}
+func (o operationsStats) ResourceQuotaSnapshot() *ResourceQuotaSnapshotDTO {
+	return &ResourceQuotaSnapshotDTO{MaxConcurrentSandbox: o.MaxConcurrentSandbox, MaxCPU: o.MaxCPU, MaxMemoryMB: o.MaxMemoryMB}
 }
 
 // aggregateTenantOperations 通过下层只读 contracts 汇总全平台运营指标。

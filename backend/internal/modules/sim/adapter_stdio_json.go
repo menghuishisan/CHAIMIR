@@ -14,14 +14,15 @@ import (
 	"io"
 	"log/slog"
 	"sort"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"chaimir/internal/platform/config"
+	"chaimir/internal/platform/ids"
 	"chaimir/internal/platform/jsonx"
 	platformk8s "chaimir/internal/platform/k8s"
+	"chaimir/pkg/limitio"
 	"chaimir/pkg/logging"
 
 	corev1 "k8s.io/api/core/v1"
@@ -306,14 +307,14 @@ func (a *StdioJSONAdapter) prepareSession(ctx context.Context, session SessionWi
 		"app.kubernetes.io/name":      "sim-backend",
 		"app.kubernetes.io/component": "stdio-json",
 		"chaimir.io/adapter":          a.profile.Code,
-		"chaimir.io/session-id":       strconv.FormatInt(session.ID, 10),
+		"chaimir.io/session-id":       ids.Format(session.ID),
 	}
 	namespaceLabels := map[string]string{
 		"app.kubernetes.io/name":             "sim-backend",
 		"app.kubernetes.io/component":        "stdio-json",
 		"app.kubernetes.io/part-of":          "chaimir",
 		"chaimir.io/adapter":                 a.profile.Code,
-		"chaimir.io/session-id":              strconv.FormatInt(session.ID, 10),
+		"chaimir.io/session-id":              ids.Format(session.ID),
 		"chaimir.io/sim":                     "true",
 		"chaimir.io/managed-by":              "chaimir-backend",
 		"pod-security.kubernetes.io/enforce": "restricted",
@@ -659,8 +660,8 @@ func (a *StdioJSONAdapter) execRunnerRaw(ctx context.Context, namespace string, 
 	}
 	execCtx, cancel := context.WithTimeout(ctx, time.Duration(a.profile.ExecTimeoutSeconds)*time.Second)
 	defer cancel()
-	stdout := newLimitedBuffer(a.profile.MaxOutputBytes)
-	stderr := newLimitedBuffer(a.profile.MaxOutputBytes)
+	stdout := limitio.NewBuffer(a.profile.MaxOutputBytes)
+	stderr := limitio.NewBuffer(a.profile.MaxOutputBytes)
 	if err := a.k8s.Exec(execCtx, namespace, stdioJSONPod, stdioJSONContainer, a.profile.Command, bytes.NewReader(input), stdout, stderr, false); err != nil {
 		return nil, fmt.Errorf("隔离执行镜像执行失败: %w: %s", err, stderr.String())
 	}
@@ -707,7 +708,7 @@ func validateBackendStateScale(state map[string]any, scaleLimit map[string]any) 
 
 // namespace 返回只由受控前缀和服务端会话编号构成的资源名。
 func (a *StdioJSONAdapter) namespace(sessionID int64) string {
-	return a.cfg.NamespacePrefix + strconv.FormatInt(sessionID, 10)
+	return a.cfg.NamespacePrefix + ids.Format(sessionID)
 }
 
 // stdioJSONResources 把已在启动配置层校验过的 quantity 转为 Pod 资源对象。
@@ -750,37 +751,3 @@ func stdioJSONTolerations(items []config.SandboxToleration) []corev1.Toleration 
 	}
 	return out
 }
-
-// limitedBuffer 限制 Kubernetes exec 的单路输出大小。
-type limitedBuffer struct {
-	buffer bytes.Buffer
-	limit  int64
-}
-
-// newLimitedBuffer 构造显式上限的输出缓冲区。
-func newLimitedBuffer(limit int64) *limitedBuffer { return &limitedBuffer{limit: limit} }
-
-// Write 在超过上限时中止 exec 流,防止异常镜像耗尽后端内存。
-func (b *limitedBuffer) Write(data []byte) (int, error) {
-	remaining := b.limit - int64(b.buffer.Len())
-	if remaining <= 0 {
-		return 0, fmt.Errorf("计算输出超过部署上限")
-	}
-	if int64(len(data)) > remaining {
-		written, err := b.buffer.Write(data[:remaining])
-		if err != nil {
-			return written, fmt.Errorf("写入受限计算输出失败: %w", err)
-		}
-		return written, fmt.Errorf("计算输出超过部署上限")
-	}
-	return b.buffer.Write(data)
-}
-
-// Bytes 返回已接收的受限输出。
-func (b *limitedBuffer) Bytes() []byte { return b.buffer.Bytes() }
-
-// Len 返回已收集的输出长度,供调用方区分"镜像没输出"与"输出无效"。
-func (b *limitedBuffer) Len() int { return b.buffer.Len() }
-
-// String 返回已接收的受限输出文本。
-func (b *limitedBuffer) String() string { return b.buffer.String() }

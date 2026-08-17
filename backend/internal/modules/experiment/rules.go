@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"chaimir/internal/platform/auth"
+	"chaimir/internal/platform/ids"
 	"chaimir/internal/platform/jsonx"
 	"chaimir/pkg/apperr"
 )
@@ -365,7 +366,7 @@ func validateManualScore(score float64) error {
 
 // sourceRefForInstance 按全局 source_ref 规范生成实验实例来源引用。
 func sourceRefForInstance(id int64, now time.Time) string {
-	return fmt.Sprintf("experiment:%04d:instance:%d", now.Year(), id)
+	return fmt.Sprintf("experiment:%04d:instance:%s", now.Year(), ids.Format(id))
 }
 
 // validExperimentSourceRef 校验事件来源确属 M7 实例。

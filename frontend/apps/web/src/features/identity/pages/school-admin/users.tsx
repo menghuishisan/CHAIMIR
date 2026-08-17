@@ -33,7 +33,8 @@ import {
   Button,
   Callout,
   Checkbox,
-  FormField,
+  FilterBar,
+  FilterField,
   IconButton,
   Input,
   Menu,
@@ -62,7 +63,8 @@ import {
 } from '@chaimir/ui'
 import { api } from '../../../../app/api'
 import { ResourceState } from '../../../../components/ResourceState'
-import { useAsyncResource, usePagedResource } from '../../../../hooks'
+import { downloadAttachment } from '../../../../utils/downloadAttachment'
+import { useAsyncResource, usePagedResource, useResourceTotal } from '../../../../hooks'
 import { formatDate } from '../../../../utils/formatters'
 import {
   accountStatusLabel,
@@ -231,12 +233,7 @@ export default function SchoolAdminUsersPage() {
     setActionError(undefined)
     try {
       const file = await api.identity.downloadAccountImportTemplate({ type })
-      const url = URL.createObjectURL(file.blob)
-      const anchor = document.createElement('a')
-      anchor.href = url
-      anchor.download = file.fileName
-      anchor.click()
-      URL.revokeObjectURL(url)
+      downloadAttachment(file)
     } catch (error) {
       setActionError(userFacingErrorMessage(error, '模板下载没有成功,请稍后重试。'))
     }
@@ -251,14 +248,20 @@ export default function SchoolAdminUsersPage() {
     })
   }, [])
 
-  const stats = useMemo(() => {
-    const list = accounts.data ? accounts.data.list : []
-    return {
-      pending: list.filter((item) => item.status === AccountStatus.PENDING).length,
-      active: list.filter((item) => item.status === AccountStatus.ACTIVE).length,
-      disabled: list.filter((item) => item.status === AccountStatus.DISABLED).length,
-    }
-  }, [accounts.data])
+  // 指标带取服务端全量口径,不随下方筛选变化:它回答「本校账号整体状况」
+  const totalCount = useResourceTotal((params) => api.identity.getAccounts(params), [])
+  const pendingCount = useResourceTotal(
+    (params) => api.identity.getAccounts({ status: AccountStatus.PENDING, ...params }),
+    [],
+  )
+  const activeCount = useResourceTotal(
+    (params) => api.identity.getAccounts({ status: AccountStatus.ACTIVE, ...params }),
+    [],
+  )
+  const disabledCount = useResourceTotal(
+    (params) => api.identity.getAccounts({ status: AccountStatus.DISABLED, ...params }),
+    [],
+  )
 
   const classOptions = useMemo(
     () => [
@@ -362,39 +365,45 @@ export default function SchoolAdminUsersPage() {
 
       <PageSection>
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <Stat label="账号总数" value={accounts.total} icon={Users} />
-          <Stat label="待激活" value={stats.pending} icon={UserPlus} hint="尚未设置密码" />
-          <Stat label="正常" value={stats.active} icon={UserCheck} />
-          <Stat label="已停用" value={stats.disabled} icon={CircleSlash} />
+          <Stat label="账号总数" value={totalCount ?? '—'} icon={Users} hint="不受下方筛选影响" />
+          <Stat label="待激活" value={pendingCount ?? '—'} icon={UserPlus} hint="尚未设置密码" />
+          <Stat label="正常" value={activeCount ?? '—'} icon={UserCheck} />
+          <Stat label="已停用" value={disabledCount ?? '—'} icon={CircleSlash} />
         </div>
       </PageSection>
 
-      <PageSection
-        title="账号列表"
-        description={`共 ${accounts.total} 个账号`}
-        actions={
-          <div className="flex flex-wrap items-end gap-2">
-            <SegmentedControl
-              aria-label="按身份筛选"
-              size="sm"
-              options={ROLE_FILTERS.map((item) => ({ value: item.value, label: item.label }))}
-              value={roleFilter}
-              onValueChange={(value) => {
-                setRoleFilter(value)
-                setSelected(new Set())
-              }}
-            />
-            <SegmentedControl
-              aria-label="按账号状态筛选"
-              size="sm"
-              options={STATUS_FILTERS.map((item) => ({ value: item.value, label: item.label }))}
-              value={statusFilter}
-              onValueChange={(value) => {
-                setStatusFilter(value)
-                setSelected(new Set())
-              }}
-            />
-            <FormField label="班级" htmlFor="users-class" className="mb-0">
+      <PageSection title="账号列表" description={`共 ${accounts.total} 个账号`}>
+        <div className="flex flex-col gap-4">
+          <FilterBar
+            label="账号筛选"
+            onSubmit={() => setSearchTerm(keyword.trim())}
+            submitLabel="搜索"
+          >
+            <FilterField label="身份" group>
+              <SegmentedControl
+                aria-label="按身份筛选"
+                size="sm"
+                options={ROLE_FILTERS.map((item) => ({ value: item.value, label: item.label }))}
+                value={roleFilter}
+                onValueChange={(value) => {
+                  setRoleFilter(value)
+                  setSelected(new Set())
+                }}
+              />
+            </FilterField>
+            <FilterField label="账号状态" group>
+              <SegmentedControl
+                aria-label="按账号状态筛选"
+                size="sm"
+                options={STATUS_FILTERS.map((item) => ({ value: item.value, label: item.label }))}
+                value={statusFilter}
+                onValueChange={(value) => {
+                  setStatusFilter(value)
+                  setSelected(new Set())
+                }}
+              />
+            </FilterField>
+            <FilterField label="班级" htmlFor="users-class">
               <Select
                 id="users-class"
                 options={classOptions}
@@ -402,34 +411,20 @@ export default function SchoolAdminUsersPage() {
                 placeholder="全部班级"
                 onValueChange={setClassFilter}
               />
-            </FormField>
-            <form
-              className="flex items-end gap-2"
-              onSubmit={(event) => {
-                event.preventDefault()
-                setSearchTerm(keyword.trim())
-              }}
-            >
-              <FormField label="搜索" htmlFor="users-keyword" className="mb-0">
-                <Input
-                  id="users-keyword"
-                  value={keyword}
-                  placeholder="姓名或学工号"
-                  onChange={(event) => setKeyword(event.target.value)}
-                />
-              </FormField>
-              <Button type="submit" variant="outline" size="sm">
-                搜索
-              </Button>
-            </form>
-          </div>
-        }
-      >
-        <div className="flex flex-col gap-4">
+            </FilterField>
+            <FilterField label="姓名或学工号" htmlFor="users-keyword">
+              <Input
+                id="users-keyword"
+                value={keyword}
+                placeholder="输入关键词"
+                onChange={(event) => setKeyword(event.target.value)}
+              />
+            </FilterField>
+          </FilterBar>
           {actionError ? <Callout tone="danger">{actionError}</Callout> : null}
 
           {selected.size > 0 ? (
-            <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-line bg-surface-sunken p-3">
+            <div className="flex flex-wrap items-center justify-between gap-3 well p-3">
               <span className="text-sm text-ink">已选择 {selected.size} 个账号</span>
               <div className="flex flex-wrap items-center gap-2">
                 <Button variant="outline" size="sm" onClick={() => setBatchAction('disable')}>
@@ -581,7 +576,7 @@ export default function SchoolAdminUsersPage() {
             <Button variant="outline" onClick={() => setBatchAction(undefined)}>
               取消
             </Button>
-            <Button variant="seal" loading={working} onClick={() => void runBatch()}>
+            <Button variant="primary" loading={working} onClick={() => void runBatch()}>
               确认处理
             </Button>
           </ModalFooter>

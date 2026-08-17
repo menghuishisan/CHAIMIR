@@ -14,6 +14,18 @@ var (
 	codePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{1,62}[a-z0-9]$`)
 )
 
+// validTaskState 判断任务列表的运维分组取值是否受支持。
+// 分组语义与 db/queries/judge.sql 里 ListJudgeTasks/CountJudgeTasks 的 state 条件一一对应,
+// 两处必须同时改,否则指标带与列表会给出不同口径。
+func validTaskState(state string) bool {
+	switch state {
+	case TaskStateAll, TaskStateActive, TaskStateAbnormal:
+		return true
+	default:
+		return false
+	}
+}
+
 // isSHA256Hex 校验内容哈希格式。
 func isSHA256Hex(value string) bool {
 	value = strings.TrimSpace(value)

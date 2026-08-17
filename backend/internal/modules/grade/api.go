@@ -59,7 +59,7 @@ func (a gradeAPI) listOwnReviews(c *gin.Context) {
 	if !ok {
 		return
 	}
-	status, ok := httpx.QueryInt16(c, "status", httpx.QueryIntRule{Default: 0, Min: 0, Max: 3, HasMax: true})
+	status, ok := httpx.QueryInt16(c, "status", httpx.QueryIntRule{Default: 0, Min: 0, Max: int64(ReviewStatusRejected), HasMax: true})
 	if !ok {
 		return
 	}
@@ -131,7 +131,7 @@ func (a gradeAPI) listReviews(c *gin.Context) {
 	if !ok {
 		return
 	}
-	status, ok := httpx.QueryInt16(c, "status", httpx.QueryIntRule{Default: 0, Min: 0, Max: 3, HasMax: true})
+	status, ok := httpx.QueryInt16(c, "status", httpx.QueryIntRule{Default: 0, Min: 0, Max: int64(ReviewStatusRejected), HasMax: true})
 	if !ok {
 		return
 	}
@@ -168,7 +168,7 @@ func (a gradeAPI) studentGrades(c *gin.Context) {
 	if !ok {
 		return
 	}
-	semesterID, ok := httpx.QueryInt(c, "semester", httpx.QueryIntRule{Default: 0, Min: 0})
+	semesterID, ok := httpx.QueryID(c, "semester", false)
 	if !ok {
 		return
 	}
@@ -215,7 +215,7 @@ func (a gradeAPI) listAppeals(c *gin.Context) {
 	if !ok {
 		return
 	}
-	status, ok := httpx.QueryInt16(c, "status", httpx.QueryIntRule{Default: 0, Min: 0, Max: 4, HasMax: true})
+	status, ok := httpx.QueryInt16(c, "status", httpx.QueryIntRule{Default: 0, Min: 0, Max: int64(AppealStatusRejected), HasMax: true})
 	if !ok {
 		return
 	}
@@ -265,11 +265,16 @@ func (a gradeAPI) listWarnings(c *gin.Context) {
 	if !ok {
 		return
 	}
-	studentID, ok := httpx.QueryInt(c, "student_id", httpx.QueryIntRule{Default: 0, Min: 0})
+	studentID, ok := httpx.QueryID(c, "student_id", false)
 	if !ok {
 		return
 	}
-	out11, total, p, s, err := a.svc.ListWarnings(c.Request.Context(), studentID, page, size)
+	// status=0 表示不过滤;上限对齐 WarningStatusNotifyFailed,越界参数在边界处拒绝
+	status, ok := httpx.QueryInt16(c, "status", httpx.QueryIntRule{Default: 0, Min: 0, Max: int64(WarningStatusNotifyFailed), HasMax: true})
+	if !ok {
+		return
+	}
+	out11, total, p, s, err := a.svc.ListWarnings(c.Request.Context(), studentID, status, page, size)
 	httpx.WritePage(c, out11, total, p, s, err)
 }
 

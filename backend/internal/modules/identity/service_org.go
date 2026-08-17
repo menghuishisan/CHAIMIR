@@ -254,6 +254,26 @@ func (s *Service) ListClassesForViewer(ctx context.Context, majorID int64) ([]Cl
 	return out, nil
 }
 
+// ListClassStudentsForViewer 供教师/学校管理员在浏览器里按班级挑选学生。
+// 组织结构本就对教师只读开放(`/org/classes`),班内学生名录是同一维度的下一层;
+// 账号目录 `/accounts` 仍只对学校管理员开放,教师拿不到全校账号与其手机号、状态、角色。
+// 实现直接复用契约方法,租户边界取自服务端会话 —— 同一份查询不写两遍。
+func (s *Service) ListClassStudentsForViewer(ctx context.Context, classID int64) ([]ClassStudentDTO, error) {
+	id, err := requireTenantAnyRole(ctx, s, contracts.RoleTeacher, contracts.RoleSchoolAdmin)
+	if err != nil {
+		return nil, err
+	}
+	students, err := s.ListClassStudents(ctx, id.TenantID, classID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]ClassStudentDTO, 0, len(students))
+	for _, student := range students {
+		out = append(out, ClassStudentDTO{ID: ids.ID(student.AccountID), Name: student.Name, No: student.No})
+	}
+	return out, nil
+}
+
 // CreateClassByAdmin 创建班级并绑定专业和入学年份。
 func (s *Service) CreateClassByAdmin(ctx context.Context, req ClassRequest) (ClassDTO, error) {
 	id, err := requireTenantRole(ctx, s, contracts.RoleSchoolAdmin)
@@ -646,9 +666,9 @@ func parseOrgImportRecords(records [][]string) ([]orgImportRow, []ImportRowResul
 			}
 		} else {
 			// 专业和班级第三列都是上级 ID,后续按 kind 区分院系或专业。
-			parentID, err := strconv.ParseInt(strings.TrimSpace(record[2]), 10, 64)
+			parentID, ok := ids.Parse(strings.TrimSpace(record[2]))
 			row.ParentID = ids.ID(parentID)
-			if err != nil || row.ParentID <= 0 {
+			if !ok {
 				result.Error = "上级组织 ID 不正确"
 			}
 			if row.Kind == "class" {

@@ -33,6 +33,7 @@ import {
 import { api } from '../../../../app/api'
 import { ResourceState } from '../../../../components/ResourceState'
 import { useAsyncResource } from '../../../../hooks'
+import { downloadAttachment } from '../../../../utils/downloadAttachment'
 import { formatDuration, formatFileSize, formatShortDateTime } from '../../../../utils/formatters'
 import {
   isLessonMaterialType,
@@ -47,9 +48,6 @@ interface LessonView {
   lesson: Lesson
   progress: Progress | undefined
 }
-
-/** 图文课时的正文键,与 content_ref 形状表一致。 */
-const MARKDOWN_KEY = 'markdown'
 
 /** 视频播放位置回写节流:每 15 秒最多写一次,避免播放中高频打服务端。 */
 const VIDEO_POSITION_REPORT_INTERVAL_MS = 15_000
@@ -154,8 +152,8 @@ function LessonBody({ lesson, progress, onProgressChanged }: LessonBodyProps) {
   const navigate = useNavigate()
 
   if (lesson.content_type === LessonContentType.MARKDOWN) {
-    const markdown = lesson.content_ref[MARKDOWN_KEY]
-    if (typeof markdown === 'string' && markdown.trim() !== '') {
+    const markdown = lesson.content_ref.markdown
+    if (markdown?.trim()) {
       return (
         <Card>
           <CardBody>
@@ -401,12 +399,7 @@ function LessonAttachment({ lessonId, fileName, size, contentType }: LessonAttac
       // 一次性授权:重新换取而不是复用页面加载时那份,避免它已被消费或过期
       const grant = await api.teaching.issueLessonMaterialAccess(lessonId)
       const attachment = await api.storage.consumeGrant(grant.token)
-      const url = URL.createObjectURL(attachment.blob)
-      const anchor = document.createElement('a')
-      anchor.href = url
-      anchor.download = attachment.fileName
-      anchor.click()
-      URL.revokeObjectURL(url)
+      downloadAttachment(attachment)
     } catch (error) {
       setActionError(userFacingErrorMessage(error, '资料下载没有完成,请稍后重试。'))
     } finally {

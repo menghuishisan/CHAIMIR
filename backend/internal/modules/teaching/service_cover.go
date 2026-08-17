@@ -17,10 +17,10 @@ import (
 	"bytes"
 	"context"
 	"path"
-	"strconv"
 	"strings"
 
 	"chaimir/internal/contracts"
+	"chaimir/internal/platform/ids"
 	"chaimir/internal/platform/storage"
 	"chaimir/internal/platform/upload"
 	"chaimir/pkg/apperr"
@@ -41,20 +41,6 @@ type CourseCoverUploadRequest struct {
 	FileName    string
 	ContentType string
 	Content     []byte
-}
-
-// CourseCoverUploadDTO 是封面上传后的受控对象引用。
-type CourseCoverUploadDTO struct {
-	ObjectRef string `json:"object_ref"`
-	FileName  string `json:"file_name"`
-	Size      int64  `json:"size"`
-}
-
-// CourseCoverAccessDTO 是封面的短时投放授权响应。
-type CourseCoverAccessDTO struct {
-	Token     string `json:"token"`
-	Mode      string `json:"mode"`
-	ExpiresAt string `json:"expires_at"`
 }
 
 // UploadCourseCover 校验封面并写入上传教师的暂存位,只返回对象引用,不改课程记录。
@@ -82,7 +68,7 @@ func (s *Service) UploadCourseCover(ctx context.Context, req CourseCoverUploadRe
 		ResourceType: courseCoverResourceType,
 		// 资源段用上传教师的账号:课程还不存在时也要有互不冲突的暂存位,
 		// 否则同租户两位教师上传会互相冲掉对方的图。
-		ResourceID:      strconv.FormatInt(id.AccountID, 10),
+		ResourceID:      ids.Format(id.AccountID),
 		FileName:        fileName,
 		ContentType:     contentType,
 		Size:            int64(len(req.Content)),
@@ -139,7 +125,7 @@ func (s *Service) IssueCourseCoverAccess(ctx context.Context, courseID int64) (C
 		ObjectRef:    course.CoverRef,
 		Module:       teachingModuleName,
 		ResourceType: courseCoverResourceType,
-		ResourceID:   strconv.FormatInt(courseID, 10),
+		ResourceID:   ids.Format(courseID),
 		Mode:         storage.DownloadModeStream,
 	})
 	if err != nil {
@@ -172,7 +158,7 @@ func (s *Service) promoteCourseCover(ctx context.Context, tenantID, accountID, c
 		return "", apperr.ErrTeachingCourseCoverInvalid
 	}
 	targetKey, err := storage.ObjectKey(tenantID, teachingModuleName, courseCoverResourceType,
-		strconv.FormatInt(accountID, 10), strconv.FormatInt(courseID, 10), fileName)
+		ids.Format(accountID), ids.Format(courseID), fileName)
 	if err != nil {
 		return "", apperr.ErrTeachingCourseCoverInvalid.WithCause(err)
 	}
@@ -192,7 +178,7 @@ func (s *Service) promoteCourseCover(ctx context.Context, tenantID, accountID, c
 
 // courseCoverStagePrefix 返回某位教师的封面暂存位前缀。
 func (s *Service) courseCoverStagePrefix(tenantID, accountID int64) (string, error) {
-	prefix, err := storage.ObjectKey(tenantID, teachingModuleName, courseCoverResourceType, strconv.FormatInt(accountID, 10))
+	prefix, err := storage.ObjectKey(tenantID, teachingModuleName, courseCoverResourceType, ids.Format(accountID))
 	if err != nil {
 		return "", apperr.ErrTeachingCourseCoverInvalid.WithCause(err)
 	}

@@ -5,7 +5,7 @@
 // 取件经统一文件服务:downloadArtifact 内部签发一次性授权并交给 api.storage 消费,
 // 保存文件名取自响应头,页面不拼接对象存储地址、不自造文件名。
 
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useState } from 'react'
 import { Download, FileDown, ListChecks, RefreshCw } from 'lucide-react'
 import { TRANSFER_STATUS, type TransferChannel, type TransferTask } from '@chaimir/api-client'
 import {
@@ -13,6 +13,8 @@ import {
   Breadcrumb,
   Button,
   Callout,
+  FilterBar,
+  FilterField,
   IconButton,
   PageHeader,
   PageScaffold,
@@ -27,7 +29,8 @@ import {
 } from '@chaimir/ui'
 import { api } from '../../../app/api'
 import { ResourceState } from '../../../components/ResourceState'
-import { usePagedResource } from '../../../hooks'
+import { usePagedResource, useResourceTotal } from '../../../hooks'
+import { downloadAttachment } from '../../../utils/downloadAttachment'
 import { formatFileSize, formatShortDateTime } from '../../../utils/formatters'
 import {
   transferChannelLabel,
@@ -36,6 +39,7 @@ import {
   transferTaskSubjectLabel,
 } from '../../../utils/labels/transfer'
 import { userFacingErrorMessage } from '../../../utils/userFacingError'
+import { TRANSFER_ACTIVE_STATUSES } from '../../../utils/transfer'
 
 /** 通道筛选项:值为空串表示不过滤。 */
 const CHANNEL_FILTERS = [
@@ -43,13 +47,6 @@ const CHANNEL_FILTERS = [
   { value: 'import', label: '导入' },
   { value: 'export', label: '导出' },
 ] as const
-
-/** 处理中的状态:决定指标带的「进行中」计数与刷新提示。 */
-const ACTIVE_STATUSES: ReadonlySet<TransferTask['status']> = new Set([
-  TRANSFER_STATUS.PENDING,
-  TRANSFER_STATUS.RUNNING,
-  TRANSFER_STATUS.RETRYING,
-])
 
 /**
  * TransferTasksPage 列出导入导出任务并提供产物下载。
@@ -62,21 +59,29 @@ export default function TransferTasksPage() {
 
   const tasks = usePagedResource<TransferTask>(
     (params) =>
-      api.transfer
-        .listTasks({
-          channel: channel ? (channel as TransferChannel) : undefined,
-          ...params,
-        })
-        // transfer 列表响应是 { items, page, size } 而非统一分页信封:
-        // 在此收敛成分页 Hook 的形状,总数按当前页推算(后端未提供 total)
-        .then((response) => ({
-          list: response.items,
-          total: response.items.length + (response.page - 1) * response.size,
-          page: response.page,
-          size: response.size,
-        })),
+      api.transfer.listTasks({
+        channel: channel ? (channel as TransferChannel) : undefined,
+        ...params,
+      }),
     [channel],
   )
+
+  // 指标带取服务端全量口径,与表格的通道筛选无关:这里回答「我的任务整体如何」,
+  // 表格回答「我筛的这一段是什么」。状态全集是 pending/running/retrying/succeeded/failed,
+  // 因此「进行中」= 总数 − 已完成 − 失败 是精确减法,不是近似。
+  const totalCount = useResourceTotal((params) => api.transfer.listTasks(params), [])
+  const succeededCount = useResourceTotal(
+    (params) => api.transfer.listTasks({ status: TRANSFER_STATUS.SUCCEEDED, ...params }),
+    [],
+  )
+  const failedCount = useResourceTotal(
+    (params) => api.transfer.listTasks({ status: TRANSFER_STATUS.FAILED, ...params }),
+    [],
+  )
+  const activeCount =
+    totalCount === undefined || succeededCount === undefined || failedCount === undefined
+      ? undefined
+      : totalCount - succeededCount - failedCount
 
   /** downloadArtifact 取件:每次重新签发一次性授权,不复用旧 token。 */
   const downloadArtifact = useCallback(async (task: TransferTask) => {
@@ -84,12 +89,7 @@ export default function TransferTasksPage() {
     setActionError(undefined)
     try {
       const file = await api.transfer.downloadArtifact(task.task_id)
-      const url = URL.createObjectURL(file.blob)
-      const anchor = document.createElement('a')
-      anchor.href = url
-      anchor.download = file.fileName
-      anchor.click()
-      URL.revokeObjectURL(url)
+      downloadAttachment(file)
       toast.success('文件已开始下载')
     } catch (error) {
       setActionError(userFacingErrorMessage(error, '下载没有完成,请稍后重试。'))
@@ -122,15 +122,6 @@ export default function TransferTasksPage() {
     },
     [tasks],
   )
-
-  const stats = useMemo(() => {
-    const list = tasks.data ? tasks.data.list : []
-    return {
-      activeCount: list.filter((task) => ACTIVE_STATUSES.has(task.status)).length,
-      succeededCount: list.filter((task) => task.status === TRANSFER_STATUS.SUCCEEDED).length,
-      failedCount: list.filter((task) => task.status === TRANSFER_STATUS.FAILED).length,
-    }
-  }, [tasks.data])
 
   const columns: TableColumn<TransferTask>[] = [
     {
@@ -188,7 +179,7 @@ export default function TransferTasksPage() {
       align: 'right',
       render: (task) => (
         <div className="flex items-center justify-end gap-1">
-          {ACTIVE_STATUSES.has(task.status) ? (
+          {TRANSFER_ACTIVE_STATUSES.has(task.status) ? (
             <Button
               variant="ghost"
               size="sm"
@@ -209,7 +200,7 @@ export default function TransferTasksPage() {
             >
               下载
             </Button>
-          ) : !ACTIVE_STATUSES.has(task.status) ? (
+          ) : !TRANSFER_ACTIVE_STATUSES.has(task.status) ? (
             <span className="text-sm text-ink-faint">无可下载文件</span>
           ) : null}
         </div>
@@ -235,32 +226,36 @@ export default function TransferTasksPage() {
       />
 
       <PageSection>
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <Stat label="任务总数" value={totalCount ?? '—'} icon={ListChecks} hint="不受下方筛选影响" />
           <Stat
             label="进行中"
-            value={stats.activeCount}
+            value={activeCount ?? '—'}
             icon={RefreshCw}
-            hint={stats.activeCount > 0 ? '处理完成后可刷新查看' : undefined}
+            hint={activeCount !== undefined && activeCount > 0 ? '处理完成后可刷新查看' : undefined}
           />
-          <Stat label="已完成" value={stats.succeededCount} icon={FileDown} />
-          <Stat label="处理失败" value={stats.failedCount} icon={ListChecks} />
+          <Stat label="已完成" value={succeededCount ?? '—'} icon={FileDown} />
+          <Stat label="处理失败" value={failedCount ?? '—'} icon={ListChecks} />
         </div>
       </PageSection>
 
       <PageSection
         title="任务记录"
         description="按更新时间从新到旧排列。"
-        actions={
-          <SegmentedControl
-            aria-label="按任务类型筛选"
-            size="sm"
-            options={CHANNEL_FILTERS.map((item) => ({ value: item.value, label: item.label }))}
-            value={channel}
-            onValueChange={setChannel}
-          />
-        }
       >
         <div className="flex flex-col gap-4">
+          <FilterBar label="任务筛选">
+            <FilterField label="任务类型" group>
+              <SegmentedControl
+                aria-label="按任务类型筛选"
+                size="sm"
+                options={CHANNEL_FILTERS.map((item) => ({ value: item.value, label: item.label }))}
+                value={channel}
+                onValueChange={setChannel}
+              />
+            </FilterField>
+          </FilterBar>
+
           {actionError ? <Callout tone="danger">{actionError}</Callout> : null}
 
           <ResourceState

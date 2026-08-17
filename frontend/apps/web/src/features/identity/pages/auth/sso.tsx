@@ -11,7 +11,7 @@ import { Button, Icon } from '@chaimir/ui'
 import { ArrowLeft, LoaderCircle } from 'lucide-react'
 import { api } from '../../../../app/api'
 import { loginEntryPath, persistLoginTokens } from '../../../../utils/authSession'
-import { safeExternalHttpUrl } from '../../../../utils/safeNavigation'
+import { safeExternalHttpsUrl } from '../../../../utils/safeNavigation'
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
 import { passwordRequiredError, requiredError, useFieldErrors } from './auth-form'
 import {
@@ -79,7 +79,7 @@ export default function SsoCallbackPage() {
     setFormError(null)
     try {
       const { redirect_url } = await api.identity.getCASLoginUrl(tenantCode, ssoServiceUrl(tenantCode))
-      const safeRedirectUrl = safeExternalHttpUrl(redirect_url)
+      const safeRedirectUrl = safeExternalHttpsUrl(redirect_url)
       if (!safeRedirectUrl) throw new Error('认证地址无效')
       window.location.assign(safeRedirectUrl)
     } catch (redirectError) {

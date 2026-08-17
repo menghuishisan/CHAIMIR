@@ -204,14 +204,14 @@ func (s *Service) GetAssignmentForStudent(ctx context.Context, assignmentID int6
 }
 
 // SaveDraft 保存服务端权威作答草稿。
-func (s *Service) SaveDraft(ctx context.Context, assignmentID int64, req DraftRequest) (map[string]any, error) {
+func (s *Service) SaveDraft(ctx context.Context, assignmentID int64, req DraftRequest) (DraftSaveDTO, error) {
 	id, err := currentIdentity(ctx)
 	if err != nil {
-		return nil, err
+		return DraftSaveDTO{}, err
 	}
 	req, err = validateDraftRequest(req)
 	if err != nil {
-		return nil, err
+		return DraftSaveDTO{}, err
 	}
 	var draft SubmissionDraft
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
@@ -225,9 +225,9 @@ func (s *Service) SaveDraft(ctx context.Context, assignmentID int64, req DraftRe
 		draft, err = tx.UpsertDraft(ctx, SubmissionDraft{ID: s.ids.Generate(), TenantID: id.TenantID, AssignmentID: assignmentID, StudentID: id.AccountID, Content: req.Content})
 		return err
 	}); err != nil {
-		return nil, mapAssignmentError(err)
+		return DraftSaveDTO{}, mapAssignmentError(err)
 	}
-	return map[string]any{"updated_at": formatTime(draft.UpdatedAt)}, nil
+	return DraftSaveDTO{UpdatedAt: timex.RFC3339OrEmpty(draft.UpdatedAt)}, nil
 }
 
 // GetDraft 读取服务端权威作答草稿,不存在时显式返回 exists=false。
@@ -390,8 +390,8 @@ func (s *Service) GradeSubmission(ctx context.Context, submissionID int64, req G
 // ListSubmissions 查询作业提交情况。
 // 授课教师看到该作业全部学生提交(批改视角);课程内学生只看到本人的历次提交
 // (自读视角 —— 学生提交后刷新页面需据此取回 submission_id 再看反馈)。
-// 学生编号取自服务端会话,不接受客户端传参。
-func (s *Service) ListSubmissions(ctx context.Context, assignmentID int64, page, size int) ([]SubmissionDTO, int64, int, int, error) {
+// 学生编号取自服务端会话,不接受客户端传参;status 传 0 表示不按批改状态过滤。
+func (s *Service) ListSubmissions(ctx context.Context, assignmentID int64, status int16, page, size int) ([]SubmissionDTO, int64, int, int, error) {
 	id, err := currentIdentity(ctx)
 	if err != nil {
 		return nil, 0, 0, 0, err
@@ -412,7 +412,14 @@ func (s *Service) ListSubmissions(ctx context.Context, assignmentID int64, page,
 		if isTeacher {
 			studentFilter = 0
 		}
-		subs, total, err = tx.ListSubmissionsByAssignment(ctx, id.TenantID, assignmentID, studentFilter, page, size)
+		subs, total, err = tx.ListSubmissionsByAssignment(ctx, SubmissionListQuery{
+			TenantID:     id.TenantID,
+			AssignmentID: assignmentID,
+			StudentID:    studentFilter,
+			Status:       status,
+			Page:         page,
+			Size:         size,
+		})
 		return err
 	}); err != nil {
 		return nil, 0, 0, 0, mapAssignmentError(err)
@@ -600,7 +607,7 @@ func (s *Service) refreshAssignmentUsageRefs(ctx context.Context, tenantID int64
 		seen[key] = struct{}{}
 		refs = append(refs, contracts.ContentItemRef{ItemCode: item.ItemCode, ItemVersion: item.ItemVersion})
 	}
-	sourceRef := fmt.Sprintf("teaching:%d:assignment:%d", assignment.CreatedAt.Year(), assignment.ID)
+	sourceRef := fmt.Sprintf("teaching:%d:assignment:%s", assignment.CreatedAt.Year(), ids.Format(assignment.ID))
 	if err := s.content.ReplaceUsageRefs(ctx, tenantID, "teaching.assignment", sourceRef, refs); err != nil {
 		return apperr.ErrTeachingAssignmentInvalid.WithCause(err)
 	}
@@ -609,5 +616,5 @@ func (s *Service) refreshAssignmentUsageRefs(ctx context.Context, tenantID int64
 
 // sourceRefForSubmissionItem 构造 M6 提交题目来源标识。
 func sourceRefForSubmissionItem(submissionID, assignmentItemID int64) string {
-	return fmt.Sprintf("teaching:%d:submission-item:%d-%d", timex.Now().Year(), submissionID, assignmentItemID)
+	return fmt.Sprintf("teaching:%d:submission-item:%s-%s", timex.Now().Year(), ids.Format(submissionID), ids.Format(assignmentItemID))
 }

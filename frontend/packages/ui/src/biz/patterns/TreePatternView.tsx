@@ -7,6 +7,7 @@ import { cn } from "../../lib/cn";
 import { Icon } from "../../lib/icon";
 import { EMPHASIS_BOX, resolveEmphasis, shortLabel } from "../frameVisual";
 import { TONE_TEXT } from "./darkTone";
+import { PatternFrame } from "./PatternFrame";
 import type { PatternViewProps } from "./types";
 import { GitBranch } from "lucide-react";
 import type { TreeNode, TreePattern } from "@chaimir/sim-sdk";
@@ -104,16 +105,18 @@ export function TreePatternView({
   onSelectElement,
 }: PatternViewProps<TreePattern>) {
   return (
-    <ul aria-label={`${pattern.title} 树节点`} className="flex flex-col gap-1">
-      <TreeRow
-        node={pattern.data.root}
-        depth={0}
-        highlightedPath={pattern.data.highlightedPath}
-        focus={focus}
-        selectedElementId={selectedElementId}
-        onSelectElement={onSelectElement}
-        hashLength={density === "panel" ? 8 : 18}
-      />
-    </ul>
+    <PatternFrame density={density}>
+      <ul aria-label={`${pattern.title} 树节点`} className="flex flex-col gap-1">
+        <TreeRow
+          node={pattern.data.root}
+          depth={0}
+          highlightedPath={pattern.data.highlightedPath}
+          focus={focus}
+          selectedElementId={selectedElementId}
+          onSelectElement={onSelectElement}
+          hashLength={density === "panel" ? 8 : 18}
+        />
+      </ul>
+    </PatternFrame>
   );
 }

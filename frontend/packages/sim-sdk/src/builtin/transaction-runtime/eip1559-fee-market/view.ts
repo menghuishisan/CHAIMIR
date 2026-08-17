@@ -18,7 +18,6 @@ export function renderFeeMarketView(state: FeeMarketState): TeachingFrame {
       intent: state.phaseIndex === 4 ? 'compare' : 'observe',
       what: state.explanation.effect,
       why: state.explanation.reason,
-      watch: summary,
     },
     focus: {
       primary: selectedOrFrameFocus(state.selectedElementId, focusIds(state)),

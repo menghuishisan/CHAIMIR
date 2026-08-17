@@ -8,15 +8,14 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"log/slog"
 	"maps"
 	"reflect"
-	"strconv"
 	"strings"
 	"time"
 
 	"chaimir/internal/contracts"
+	"chaimir/internal/platform/ids"
 	"chaimir/internal/platform/intx"
 	"chaimir/internal/platform/jsonx"
 	"chaimir/internal/platform/timex"
@@ -145,7 +144,7 @@ func (s *Service) taskWithExecutionExpectation(ctx context.Context, task JudgeTa
 func needsSandbox(task JudgeTask) bool {
 	switch task.InputSnapshot.JudgerType {
 	case JudgerTypeFlag:
-		return strings.TrimSpace(stringValue(task.InputSnapshot.Expectation["flag_chain_target"])) != ""
+		return strings.TrimSpace(jsonx.StringFromAny(task.InputSnapshot.Expectation["flag_chain_target"])) != ""
 	case JudgerTypeSimCheckpoint:
 		return false
 	default:
@@ -577,7 +576,7 @@ func (s *Service) executeJudgerSelftest(ctx context.Context, j Judger) error {
 		ID:          s.ids.Generate(),
 		TenantID:    int64FromAny(j.ResourceSpec.Selftest["tenant_id"]),
 		SubmitterID: int64FromAny(j.ResourceSpec.Selftest["submitter_id"]),
-		SourceRef:   stringValue(j.ResourceSpec.Selftest["source_ref"]),
+		SourceRef:   strings.TrimSpace(jsonx.StringFromAny(j.ResourceSpec.Selftest["source_ref"])),
 		InputSnapshot: JudgeInputSnapshot{
 			JudgerType:               j.Type,
 			RuntimeCode:              j.ResourceSpec.RuntimeCode,
@@ -692,8 +691,8 @@ func (s *Service) destroyJudgeSandbox(ctx context.Context, task JudgeTask, sandb
 // parseSandboxRef 解析复用沙箱引用,统一只接受十进制沙箱 ID。
 func parseSandboxRef(raw string) (int64, error) {
 	value := strings.TrimSpace(raw)
-	id, err := strconv.ParseInt(value, 10, 64)
-	if err != nil || id <= 0 {
+	id, ok := ids.Parse(value)
+	if !ok {
 		return 0, apperr.ErrJudgeSubmitInvalid
 	}
 	return id, nil
@@ -704,7 +703,7 @@ func judgeSandboxRef(id int64) string {
 	if id <= 0 {
 		return ""
 	}
-	return fmt.Sprintf("sandbox:%d", id)
+	return "sandbox:" + ids.Format(id)
 }
 
 // int64FromAny 从自检 JSON 配置读取 int64。

@@ -47,4 +47,16 @@ export const EXPERIMENT_STAGE_STATUS = {
   ACTIVE: 'active',
 } as const
 
-export type ExperimentStageStatus = (typeof EXPERIMENT_STAGE_STATUS)[keyof typeof EXPERIMENT_STAGE_STATUS]
+export type ExperimentStageStatus =
+  (typeof EXPERIMENT_STAGE_STATUS)[keyof typeof EXPERIMENT_STAGE_STATUS]
+
+/**
+ * 实验发布校验问题等级与后端 experiment enum.go 保持一致。
+ */
+export const EXPERIMENT_VALIDATION_LEVEL = {
+  ERROR: 'error',
+  WARNING: 'warning',
+} as const
+
+export type ExperimentValidationLevel =
+  (typeof EXPERIMENT_VALIDATION_LEVEL)[keyof typeof EXPERIMENT_VALIDATION_LEVEL]

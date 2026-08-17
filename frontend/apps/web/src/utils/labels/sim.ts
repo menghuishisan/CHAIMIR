@@ -5,11 +5,9 @@ import {
   SIM_COMPUTE,
   SIM_PACKAGE_STATUS,
   SIM_REVIEW_RESULT,
-  SIM_SHARE_STATUS,
   type SimCompute,
   type SimPackageStatus,
   type SimReviewResult,
-  type SimShareStatus,
 } from '@chaimir/api-client'
 
 const COMPUTE_LABELS: Record<SimCompute, string> = {
@@ -70,27 +68,20 @@ export function simReviewResultTone(result: SimReviewResult): StatusTone {
   return REVIEW_RESULT_TONES[result]
 }
 
-const SHARE_STATUS_LABELS: Record<SimShareStatus, string> = {
-  [SIM_SHARE_STATUS.ACTIVE]: '分享有效',
-  [SIM_SHARE_STATUS.REVOKED]: '分享已撤销',
-  [SIM_SHARE_STATUS.EXPIRED]: '分享已过期',
-}
-
-/** simShareStatusLabel 返回分享状态文案。 */
-export function simShareStatusLabel(status: SimShareStatus): string {
-  return SHARE_STATUS_LABELS[status]
-}
-
 /**
- * 仿真场景分类的用户向名称。category 是后端开放字符串(仿真包元数据自带),
- * 未登记的分类直接显示原值 —— 它是包作者写的业务分类名,不是内部标识。
+ * 仿真场景分类的用户向名称。键必须与 `packages/sim-sdk/src/types.ts` 的 `SimCategory`
+ * 七个取值逐字对齐 —— 之前这里写的是 crypto/contract/ledger 三个不存在的键,导致 41 个内置包里
+ * 有 29 个把 `contract-security`、`transaction-runtime` 这类内部取值直接显示给学生(违反 FE-4)。
+ * 扩展包(教师/第三方)可自带分类字符串,未登记时按原值显示:那是包作者写的业务分类名,不是内部标识。
  */
 const CATEGORY_LABELS: Record<string, string> = {
   consensus: '共识机制',
-  crypto: '密码学',
+  cryptography: '密码学',
   network: '网络与传播',
-  contract: '智能合约',
-  ledger: '账本结构',
+  'data-structure': '账本与数据结构',
+  'contract-security': '合约安全',
+  'transaction-runtime': '交易与执行',
+  'cross-chain-system': '跨链与扩容',
 }
 
 /** simCategoryLabel 返回仿真分类文案。 */

@@ -12,8 +12,6 @@ import (
 	"chaimir/internal/platform/pgtypex"
 	"chaimir/internal/platform/timex"
 	"chaimir/pkg/apperr"
-
-	"github.com/jackc/pgx/v5/pgtype"
 )
 
 // CreateLevelConfig 创建等级映射配置。
@@ -400,9 +398,10 @@ func (t *txStore) CreateAcademicWarning(ctx context.Context, id, tenantID, stude
 }
 
 // ListAcademicWarnings 查询学业预警分页列表和总数。
-func (t *txStore) ListAcademicWarnings(ctx context.Context, studentID int64, page, size int) ([]WarningDTO, int64, error) {
+// status 传 0 表示不按确认状态过滤,与 SQL 中的可选条件一致。
+func (t *txStore) ListAcademicWarnings(ctx context.Context, studentID int64, status int16, page, size int) ([]WarningDTO, int64, error) {
 	limit, offset := pagex.LimitOffset(page, size)
-	rows, err := t.q.ListAcademicWarnings(ctx, sqlcgen.ListAcademicWarningsParams{StudentID: studentID, PageOffset: offset, PageLimit: limit})
+	rows, err := t.q.ListAcademicWarnings(ctx, sqlcgen.ListAcademicWarningsParams{StudentID: studentID, Status: status, PageOffset: offset, PageLimit: limit})
 	if err != nil {
 		return nil, 0, err
 	}
@@ -410,7 +409,7 @@ func (t *txStore) ListAcademicWarnings(ctx context.Context, studentID int64, pag
 	for _, row := range rows {
 		out = append(out, warningDTO(row))
 	}
-	total, err := t.q.CountAcademicWarnings(ctx, studentID)
+	total, err := t.q.CountAcademicWarnings(ctx, sqlcgen.CountAcademicWarningsParams{StudentID: studentID, Status: status})
 	if err != nil {
 		return nil, 0, err
 	}
@@ -460,7 +459,7 @@ func (t *txStore) ListTranscriptRecords(ctx context.Context, studentID int64, pa
 
 // levelConfigDTO 转换等级配置行。
 func levelConfigDTO(row sqlcgen.GradeLevelConfig) LevelConfigDTO {
-	return LevelConfigDTO{ID: ids.ID(row.ID), TenantID: ids.ID(row.TenantID), Name: row.Name, Mapping: jsonx.Decode(row.Mapping, []LevelRule{}), WarningRules: jsonx.Decode(row.WarningRules, WarningRules{}), IsDefault: row.IsDefault, CreatedAt: formatTime(row.CreatedAt), UpdatedAt: formatTime(row.UpdatedAt)}
+	return LevelConfigDTO{ID: ids.ID(row.ID), TenantID: ids.ID(row.TenantID), Name: row.Name, Mapping: jsonx.Decode(row.Mapping, []LevelRule{}), WarningRules: jsonx.Decode(row.WarningRules, WarningRules{}), IsDefault: row.IsDefault, CreatedAt: timex.RFC3339OrEmpty(timex.FromTimestamptz(row.CreatedAt)), UpdatedAt: timex.RFC3339OrEmpty(timex.FromTimestamptz(row.UpdatedAt))}
 }
 
 // semesterDTO 转换学期行。
@@ -470,12 +469,12 @@ func semesterDTO(row sqlcgen.Semester) SemesterDTO {
 
 // reviewDTO 转换审核行。
 func reviewDTO(row sqlcgen.GradeReview) ReviewDTO {
-	return ReviewDTO{ID: ids.ID(row.ID), TenantID: ids.ID(row.TenantID), CourseID: ids.ID(row.CourseID), SemesterID: ids.ID(pgtypex.Int8Value(row.SemesterID)), SubmitterID: ids.ID(row.SubmitterID), ReviewerID: ids.ID(pgtypex.Int8Value(row.ReviewerID)), Status: row.Status, IsLocked: row.IsLocked, Comment: pgtypex.TextValue(row.Comment), SubmittedAt: formatTime(row.SubmittedAt), ReviewedAt: formatOptionalTime(row.ReviewedAt)}
+	return ReviewDTO{ID: ids.ID(row.ID), TenantID: ids.ID(row.TenantID), CourseID: ids.ID(row.CourseID), SemesterID: ids.ID(pgtypex.Int8Value(row.SemesterID)), SubmitterID: ids.ID(row.SubmitterID), ReviewerID: ids.ID(pgtypex.Int8Value(row.ReviewerID)), Status: row.Status, IsLocked: row.IsLocked, Comment: pgtypex.TextValue(row.Comment), SubmittedAt: timex.RFC3339OrEmpty(timex.FromTimestamptz(row.SubmittedAt)), ReviewedAt: timex.RFC3339OrEmpty(timex.FromTimestamptz(row.ReviewedAt))}
 }
 
 // gradeLockOutbox 转换成绩锁事件 outbox 行。
 func gradeLockOutbox(row sqlcgen.GradeLockOutbox) GradeLockOutbox {
-	return GradeLockOutbox{ID: row.ID, TenantID: row.TenantID, ReviewID: row.ReviewID, CourseID: row.CourseID, Locked: row.Locked, Reason: row.Reason, TraceID: row.TraceID, Status: row.Status, RetryCount: row.RetryCount, LastError: pgtypex.TextValue(row.LastError), CreatedAt: formatTime(row.CreatedAt), UpdatedAt: formatTime(row.UpdatedAt)}
+	return GradeLockOutbox{ID: row.ID, TenantID: row.TenantID, ReviewID: row.ReviewID, CourseID: row.CourseID, Locked: row.Locked, Reason: row.Reason, TraceID: row.TraceID, Status: row.Status, RetryCount: row.RetryCount, LastError: pgtypex.TextValue(row.LastError), CreatedAt: timex.RFC3339OrEmpty(timex.FromTimestamptz(row.CreatedAt)), UpdatedAt: timex.RFC3339OrEmpty(timex.FromTimestamptz(row.UpdatedAt))}
 }
 
 // semesterGradeSummary 转换学期成绩聚合行。
@@ -485,28 +484,15 @@ func semesterGradeSummary(row sqlcgen.StudentSemesterGrade) GradeSummaryDTO {
 
 // appealDTO 转换申诉行。
 func appealDTO(row sqlcgen.GradeAppeal) AppealDTO {
-	return AppealDTO{ID: ids.ID(row.ID), TenantID: ids.ID(row.TenantID), StudentID: ids.ID(row.StudentID), CourseID: ids.ID(row.CourseID), Reason: row.Reason, Status: row.Status, HandlerID: ids.ID(pgtypex.Int8Value(row.HandlerID)), ResultComment: pgtypex.TextValue(row.ResultComment), CreatedAt: formatTime(row.CreatedAt), HandledAt: formatOptionalTime(row.HandledAt)}
+	return AppealDTO{ID: ids.ID(row.ID), TenantID: ids.ID(row.TenantID), StudentID: ids.ID(row.StudentID), CourseID: ids.ID(row.CourseID), Reason: row.Reason, Status: row.Status, HandlerID: ids.ID(pgtypex.Int8Value(row.HandlerID)), ResultComment: pgtypex.TextValue(row.ResultComment), CreatedAt: timex.RFC3339OrEmpty(timex.FromTimestamptz(row.CreatedAt)), HandledAt: timex.RFC3339OrEmpty(timex.FromTimestamptz(row.HandledAt))}
 }
 
 // warningDTO 转换预警行。
 func warningDTO(row sqlcgen.AcademicWarning) WarningDTO {
-	return WarningDTO{ID: ids.ID(row.ID), TenantID: ids.ID(row.TenantID), StudentID: ids.ID(row.StudentID), SemesterID: ids.ID(row.SemesterID), Type: row.Type, Detail: jsonx.ObjectMap(row.Detail), Status: row.Status, CreatedAt: formatTime(row.CreatedAt)}
+	return WarningDTO{ID: ids.ID(row.ID), TenantID: ids.ID(row.TenantID), StudentID: ids.ID(row.StudentID), SemesterID: ids.ID(row.SemesterID), Type: row.Type, Detail: jsonx.ObjectMap(row.Detail), Status: row.Status, CreatedAt: timex.RFC3339OrEmpty(timex.FromTimestamptz(row.CreatedAt))}
 }
 
 // transcriptDTO 转换成绩单记录行。
 func transcriptDTO(row sqlcgen.TranscriptRecord) TranscriptDTO {
-	return TranscriptDTO{ID: ids.ID(row.ID), TenantID: ids.ID(row.TenantID), StudentID: ids.ID(row.StudentID), Scope: row.Scope, SemesterID: ids.ID(pgtypex.Int8Value(row.SemesterID)), PDFRef: row.PdfRef, GeneratedAt: formatTime(row.GeneratedAt)}
-}
-
-// formatTime 格式化必填时间。
-func formatTime(v pgtype.Timestamptz) string {
-	return timex.FromTimestamptz(v).Format(time.RFC3339)
-}
-
-// formatOptionalTime 格式化可空时间。
-func formatOptionalTime(v pgtype.Timestamptz) string {
-	if !v.Valid {
-		return ""
-	}
-	return timex.FromTimestamptz(v).Format(time.RFC3339)
+	return TranscriptDTO{ID: ids.ID(row.ID), TenantID: ids.ID(row.TenantID), StudentID: ids.ID(row.StudentID), Scope: row.Scope, SemesterID: ids.ID(pgtypex.Int8Value(row.SemesterID)), PDFRef: row.PdfRef, GeneratedAt: timex.RFC3339OrEmpty(timex.FromTimestamptz(row.GeneratedAt))}
 }

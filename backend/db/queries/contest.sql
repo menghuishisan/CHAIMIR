@@ -22,16 +22,19 @@ FROM contest
 WHERE tenant_id = $1 AND deleted_at IS NULL AND ($2::smallint = 0 OR status = $2);
 
 -- name: ListStudentContests :many
+-- status 传 0 回学生可发现的全部赛事(草稿态不可见);传具体状态时仍受可见区间约束。
 SELECT id, tenant_id, organizer_id, name, mode, match_mode, team_mode, signup_start, signup_end, start_at, end_at, freeze_minutes, rules, status, created_at, updated_at, deleted_at
 FROM contest
 WHERE tenant_id = $1 AND deleted_at IS NULL AND status BETWEEN 2 AND 6
+  AND (sqlc.arg(status)::smallint = 0 OR status = sqlc.arg(status)::smallint)
 ORDER BY updated_at DESC, id DESC
-LIMIT $2 OFFSET $3;
+LIMIT sqlc.arg(page_limit)::int OFFSET sqlc.arg(page_offset)::int;
 
 -- name: CountStudentContests :one
 SELECT COUNT(*)::bigint
 FROM contest
-WHERE tenant_id = $1 AND deleted_at IS NULL AND status BETWEEN 2 AND 6;
+WHERE tenant_id = $1 AND deleted_at IS NULL AND status BETWEEN 2 AND 6
+  AND (sqlc.arg(status)::smallint = 0 OR status = sqlc.arg(status)::smallint);
 
 -- name: UpdateContest :one
 UPDATE contest

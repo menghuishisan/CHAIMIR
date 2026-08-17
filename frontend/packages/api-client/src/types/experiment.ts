@@ -1,12 +1,14 @@
 // ===== M7 Experiment 模块 =====
 
 import type { SnowflakeID } from './common'
+import type { JudgeSandboxMode } from '../constants/judge'
 import type {
   ExperimentCollabMode,
   ExperimentInstanceStatus,
   ExperimentReportStatus,
   ExperimentStageStatus,
   ExperimentStatus,
+  ExperimentValidationLevel,
 } from '../constants/experiment'
 import type { SandboxToolKind, SandboxToolStatus } from '../constants/sandbox'
 
@@ -65,7 +67,7 @@ export interface StudentSimComponent {
 export interface StudentCheckpointConfig {
   id: string
   score: number
-  mode?: string
+  mode?: JudgeSandboxMode
 }
 
 export interface StudentStageConfig {
@@ -110,7 +112,7 @@ export interface CheckpointConfig {
   item_code: string
   item_version: string
   score: number
-  mode?: string
+  mode?: JudgeSandboxMode
   env_id?: string
   sim_id?: string
   extra_input?: Record<string, unknown>
@@ -169,7 +171,7 @@ export interface ValidationResult {
 }
 
 export interface ValidationIssue {
-  level: string
+  level: ExperimentValidationLevel
   message: string
 }
 

@@ -1,8 +1,9 @@
 /**
- * frameLayout:把 TeachingFrame.layout 解析成三栏骨架各自要渲染的内容(§7.1 主次结构)。
- * 只做分区与归位:主舞台取 layout.primary,辅助区按 evidence → timeline → metrics → trace → checkpoints
- * 顺序取其余模式(跨区去重、跳过主舞台),标注按 target 归到拥有该编号的模式上。
- * 分区规则集中在此,三个视图组件(Brief/Stage/Aside)对同一帧得出一致结论。
+ * frameLayout:把 TeachingFrame.layout 解析成三区骨架各自要渲染的内容(§7.1 主次结构)。
+ * 只做分区与归位:主舞台取 layout.primary,左辅助区按 evidence → metrics → trace → checkpoints
+ * 顺序取其余模式(跨区去重、跳过主舞台),右事件流取无界元素(见 frameStream),
+ * 标注按 target 归到拥有该编号的模式上。
+ * 分区规则集中在此,各视图组件对同一帧得出一致结论。
  */
 import { patternElementIds } from "./frameVisual";
 import type { FrameAnnotation, PatternBinding, TeachingFrame } from "@chaimir/sim-sdk";
@@ -21,11 +22,14 @@ export interface AnnotationPartition {
   unassigned: FrameAnnotation[];
 }
 
-/** 辅助区职责的固定顺序与用户向名称:证据先于时间线,追踪与检查点收尾 */
+/**
+ * 辅助区职责的固定顺序与用户向名称:证据先于指标,追踪与检查点收尾。
+ * 不含 timeline:消息/调用时序即右侧事件流(§7.1 状态与事件分流),
+ * 在辅助区再放一份泳道等于同一批消息出现两遍。
+ */
 function regionEntries(layout: TeachingFrame["layout"]): Array<[string[], string]> {
   return [
     [layout.evidence ?? [], "证据"],
-    [layout.timeline ? [layout.timeline] : [], "时间线"],
     [layout.metrics ?? [], "指标"],
     [layout.trace ? [layout.trace] : [], "执行追踪"],
     [layout.checkpoints ?? [], "检查点"],
@@ -50,13 +54,14 @@ export function pickPatterns(frame: TeachingFrame, ids: string[]): PatternBindin
 }
 
 /**
- * asidePanels:辅助区面板序列。
- * 同一模式可被多个区同时引用(如既是 primary 又是 evidence),此处按首次出现的职责收敛一次,
- * 主舞台已渲染的模式不再在辅助区重复出现。
+ * asidePanels:左辅助区面板序列。
+ * 同一模式可被多个区同时引用(如既是 primary 又是 evidence),此处按首次出现的职责收敛一次;
+ * 主舞台已渲染的模式、以及被声明为 timeline 的模式(那是右侧事件流)都不在辅助区重复出现。
  */
 export function asidePanels(frame: TeachingFrame): AsidePanel[] {
   const byId = patternIndex(frame);
   const used = new Set<string>([frame.layout.primary]);
+  if (frame.layout.timeline) used.add(frame.layout.timeline);
   const panels: AsidePanel[] = [];
   for (const [ids, region] of regionEntries(frame.layout)) {
     for (const id of ids) {

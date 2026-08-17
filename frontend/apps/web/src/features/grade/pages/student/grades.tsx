@@ -24,8 +24,11 @@ import {
   Card,
   CardBody,
   CardHeader,
-  DescriptionList,
+  ChartContainer,
+  CompareBarChart,
   Empty,
+  FilterBar,
+  FilterField,
   FormField,
   PageBody,
   PageHeader,
@@ -43,6 +46,7 @@ import { api } from '../../../../app/api'
 import { ResourceState } from '../../../../components/ResourceState'
 import { useSession } from '../../../../components/RoleGuard'
 import { useAsyncResource } from '../../../../hooks'
+import { downloadAttachment } from '../../../../utils/downloadAttachment'
 import { formatDateTime, formatGpa, formatScore } from '../../../../utils/formatters'
 import { transcriptScopeLabel } from '../../../../utils/labels/grade'
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
@@ -187,32 +191,37 @@ function GradeContent({ studentId, view, semesterId, onSemesterChange }: GradeCo
         <PageSection
           title="课程成绩"
           description={`共 ${summary.course_grades.length} 门课程 · 统计时间 ${formatDateTime(summary.computed_at)}`}
-          actions={
-            <SegmentedControl
-              aria-label="按学期筛选成绩"
-              size="sm"
-              options={semesterOptions.slice(0, 4)}
-              value={semesterId}
-              onValueChange={onSemesterChange}
-            />
-          }
         >
-          <Table
-            columns={columns}
-            data={summary.course_grades}
-            rowKey={(grade) => grade.course_id}
-            empty={
-              <Empty
-                icon={GraduationCap}
-                title="这个范围内还没有成绩"
-                description="换个学期看看,或等课程成绩审核通过后再来。"
-              />
-            }
-          />
+          <div className="flex flex-col gap-4">
+            <FilterBar label="课程成绩筛选">
+              <FilterField label="学期" group>
+                <SegmentedControl
+                  aria-label="按学期筛选成绩"
+                  size="sm"
+                  options={semesterOptions.slice(0, 4)}
+                  value={semesterId}
+                  onValueChange={onSemesterChange}
+                />
+              </FilterField>
+            </FilterBar>
+
+            <Table
+              columns={columns}
+              data={summary.course_grades}
+              rowKey={(grade) => grade.course_id}
+              empty={
+                <Empty
+                  icon={GraduationCap}
+                  title="这个范围内还没有成绩"
+                  description="换个学期看看,或等课程成绩审核通过后再来。"
+                />
+              }
+            />
+          </div>
         </PageSection>
 
         {history.length > 0 ? (
-          <PageSection title="各学期绩点" description="按学期结算的平均学分绩点。">
+          <PageSection>
             <SemesterGpaList history={history} semesters={semesters} />
           </PageSection>
         ) : null}
@@ -227,8 +236,10 @@ interface SemesterGpaListProps {
 }
 
 /**
- * SemesterGpaList 列出各学期绩点。
+ * SemesterGpaList 呈现各学期结算绩点。
  * 学期名从学期清单换取:汇总记录只带 semester_id,不把内部编号显示给用户。
+ * 学期是离散维度而不是连续时间轴,故按「维度对比」用柱状(规范 §8.1),
+ * 逐学期数字仍可在图上切到数据表读(§8.2 的等价替代由 ChartContainer 提供)。
  */
 function SemesterGpaList({ history, semesters }: SemesterGpaListProps) {
   const semesterName = useMemo(
@@ -236,19 +247,41 @@ function SemesterGpaList({ history, semesters }: SemesterGpaListProps) {
     [semesters],
   )
 
+  const rows = useMemo(
+    () =>
+      history.map((item) => ({
+        semester: item.semester_id
+          ? (semesterName.get(item.semester_id) ?? '未登记学期')
+          : '全部学期',
+        gpa: Number(item.gpa.toFixed(2)),
+        credits: item.total_credits,
+      })),
+    [history, semesterName],
+  )
+
+  const best = rows.reduce((top, row) => (row.gpa > top.gpa ? row : top), rows[0])
+
   return (
-    <Card>
-      <CardBody>
-        <DescriptionList
-          columns={2}
-          items={history.map((item) => ({
-            term: item.semester_id ? (semesterName.get(item.semester_id) ?? '学期成绩') : '全部学期',
-            description: `绩点 ${formatGpa(item.gpa)} · ${item.total_credits} 学分`,
-            mono: true,
-          }))}
-        />
-      </CardBody>
-    </Card>
+    <ChartContainer
+      title="各学期绩点"
+      description="按学期结算的平均学分绩点与已修学分。"
+      ariaSummary={`共 ${rows.length} 个学期:${rows
+        .map((row) => `${row.semester} 绩点 ${row.gpa}、${row.credits} 学分`)
+        .join(';')}。绩点最高的是 ${best.semester}(${best.gpa})。`}
+      dataTable={{
+        columns: ['学期', '绩点', '已修学分'],
+        rows: rows.map((row) => [row.semester, row.gpa, row.credits]),
+      }}
+    >
+      <CompareBarChart
+        data={rows}
+        xKey="semester"
+        series={[
+          { key: 'gpa', name: '平均学分绩点' },
+          { key: 'credits', name: '已修学分' },
+        ]}
+      />
+    </ChartContainer>
   )
 }
 
@@ -285,12 +318,7 @@ function TranscriptCard({ studentId, semesters }: TranscriptCardProps) {
       })
       const grant = await api.grade.downloadTranscript(transcript.id)
       const file = await api.storage.consumeGrant(grant.token)
-      const url = URL.createObjectURL(file.blob)
-      const anchor = document.createElement('a')
-      anchor.href = url
-      anchor.download = file.fileName
-      anchor.click()
-      URL.revokeObjectURL(url)
+      downloadAttachment(file)
       toast.success('成绩单已生成')
     } catch (error) {
       setActionError(userFacingErrorMessage(error, '成绩单生成失败,请稍后重试。'))
@@ -442,7 +470,7 @@ function AppealCard({ grades, courses }: AppealCardProps) {
           </FormField>
           <Button
             type="submit"
-            variant="seal"
+            variant="primary"
             leftIcon={MessageSquareWarning}
             loading={submitting}
             disabled={courseOptions.length === 0}

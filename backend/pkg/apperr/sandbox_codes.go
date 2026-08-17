@@ -139,6 +139,8 @@ const (
 	CodeSandboxFileEntryInvalid = "22043"
 	// CodeSandboxRecycleEventPublishFailed 表示沙箱回收事件发布失败。
 	CodeSandboxRecycleEventPublishFailed = "22044"
+	// CodeSandboxExecOutputLimitExceeded 表示非交互命令输出超过控制面允许上限。
+	CodeSandboxExecOutputLimitExceeded = "22045"
 )
 
 const (
@@ -313,6 +315,8 @@ var (
 	ErrSandboxFileEntryInvalid = New(CodeSandboxFileEntryInvalid, "目录信息不正确,请稍后重试")
 	// ErrSandboxRecycleEventPublishFailed 表示回收事件暂时无法同步。
 	ErrSandboxRecycleEventPublishFailed = New(CodeSandboxRecycleEventPublishFailed, "实验环境释放状态暂时无法同步,请稍后重试")
+	// ErrSandboxExecOutputLimitExceeded 表示命令输出超过控制面允许上限。
+	ErrSandboxExecOutputLimitExceeded = New(CodeSandboxExecOutputLimitExceeded, "命令输出内容过多,请减少输出后重试")
 )
 
 var (

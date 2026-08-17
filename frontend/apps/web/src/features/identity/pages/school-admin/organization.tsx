@@ -38,6 +38,8 @@ import {
   CardHeader,
   Checkbox,
   Empty,
+  FilterBar,
+  FilterField,
   FormField,
   IconButton,
   Input,
@@ -57,32 +59,14 @@ import {
   StatusIndicator,
   Table,
   toast,
-  type StatusTone,
   type TableColumn,
 } from '@chaimir/ui'
 import { api } from '../../../../app/api'
 import { ResourceState } from '../../../../components/ResourceState'
 import { useAsyncResource } from '../../../../hooks'
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
+import { CLASS_STATUS_FILTERS, CLASS_STATUS_LABELS, CLASS_STATUS_TONES } from '../../../../utils/labels/identity'
 import { OrgImportModal } from './org-import'
-
-/** 班级状态文案与语义色:校管端需要区分在读与已归档班级。 */
-const CLASS_STATUS_LABELS: Record<ClassStatus, string> = {
-  [ClassStatus.ACTIVE]: '在读',
-  [ClassStatus.ARCHIVED]: '已归档',
-}
-
-const CLASS_STATUS_TONES: Record<ClassStatus, StatusTone> = {
-  [ClassStatus.ACTIVE]: 'success',
-  [ClassStatus.ARCHIVED]: 'neutral',
-}
-
-/** 班级状态筛选项:值为空串表示不过滤。 */
-const STATUS_FILTERS = [
-  { value: '', label: '全部' },
-  { value: String(ClassStatus.ACTIVE), label: '在读' },
-  { value: String(ClassStatus.ARCHIVED), label: '已归档' },
-] as const
 
 /** OrgView 是组织结构一次读齐的三层数据。 */
 interface OrgView {
@@ -584,22 +568,7 @@ function ClassesSection({
       title="班级明细"
       description={`共 ${rows.length} 个班级。升届把班级整体升到下一年级,归档把某一届班级转为已归档。`}
       actions={
-        <div className="flex flex-wrap items-end gap-2">
-          <SegmentedControl
-            aria-label="按班级状态筛选"
-            size="sm"
-            options={STATUS_FILTERS.map((item) => ({ value: item.value, label: item.label }))}
-            value={statusFilter}
-            onValueChange={onStatusChange}
-          />
-          <FormField label="按名称筛选" htmlFor="org-keyword" className="mb-0">
-            <Input
-              id="org-keyword"
-              value={keyword}
-              placeholder="班级、专业或院系名"
-              onChange={(event) => onKeywordChange(event.target.value)}
-            />
-          </FormField>
+        <div className="flex flex-wrap items-center gap-2">
           <Button variant="outline" size="sm" leftIcon={MoveUp} onClick={onPromote}>
             批量升届
           </Button>
@@ -618,24 +587,46 @@ function ClassesSection({
         </div>
       }
     >
-      <Table
-        columns={columns}
-        data={rows}
-        rowKey={(row) => row.entity.id}
-        empty={
-          <Empty
-            icon={Users}
-            title={keyword || statusFilter ? '没有匹配的班级' : '还没有班级'}
-            description={
-              keyword || statusFilter
-                ? '换个条件再试,或清空筛选查看全部班级。'
-                : view.majors.length === 0
-                  ? '先建专业,才能在专业下建班级。'
-                  : '班级是学生账号的归属,开通学生账号前先建班级。'
-            }
-          />
-        }
-      />
+      <div className="flex flex-col gap-4">
+        <FilterBar label="班级筛选">
+          <FilterField label="班级状态" group>
+            <SegmentedControl
+              aria-label="按班级状态筛选"
+              size="sm"
+              options={CLASS_STATUS_FILTERS.map((item) => ({ value: item.value, label: item.label }))}
+              value={statusFilter}
+              onValueChange={onStatusChange}
+            />
+          </FilterField>
+          <FilterField label="名称" htmlFor="org-keyword">
+            <Input
+              id="org-keyword"
+              value={keyword}
+              placeholder="班级、专业或院系名"
+              onChange={(event) => onKeywordChange(event.target.value)}
+            />
+          </FilterField>
+        </FilterBar>
+
+        <Table
+          columns={columns}
+          data={rows}
+          rowKey={(row) => row.entity.id}
+          empty={
+            <Empty
+              icon={Users}
+              title={keyword || statusFilter ? '没有匹配的班级' : '还没有班级'}
+              description={
+                keyword || statusFilter
+                  ? '换个条件再试,或清空筛选查看全部班级。'
+                  : view.majors.length === 0
+                    ? '先建专业,才能在专业下建班级。'
+                    : '班级是学生账号的归属,开通学生账号前先建班级。'
+              }
+            />
+          }
+        />
+      </div>
     </PageSection>
   )
 }
@@ -705,7 +696,7 @@ function DepartmentFormModal({ department, onClose, onSaved }: DepartmentFormMod
             <Button type="button" variant="outline" onClick={onClose}>
               取消
             </Button>
-            <Button type="submit" variant="seal" loading={working}>
+            <Button type="submit" variant="primary" loading={working}>
               {editing ? '保存修改' : '创建院系'}
             </Button>
           </ModalFooter>
@@ -787,7 +778,7 @@ function MajorFormModal({ major, departments, onClose, onSaved }: MajorFormModal
             <Button type="button" variant="outline" onClick={onClose}>
               取消
             </Button>
-            <Button type="submit" variant="seal" loading={working}>
+            <Button type="submit" variant="primary" loading={working}>
               {editing ? '保存修改' : '创建专业'}
             </Button>
           </ModalFooter>
@@ -903,7 +894,7 @@ function ClassFormModal({ item, majors, onClose, onSaved }: ClassFormModalProps)
             <Button type="button" variant="outline" onClick={onClose}>
               取消
             </Button>
-            <Button type="submit" variant="seal" loading={working}>
+            <Button type="submit" variant="primary" loading={working}>
               {editing ? '保存修改' : '创建班级'}
             </Button>
           </ModalFooter>
@@ -982,7 +973,7 @@ function PromoteClassesModal({ classes, onClose, onDone }: PromoteClassesModalPr
             <Empty icon={Users} title="没有在读班级" description="只有在读班级可以升届。" />
           ) : (
             <FormField label="选择班级" required>
-              <div className="flex max-h-72 flex-col gap-2 overflow-y-auto rounded-md border border-line p-3">
+              <div className="flex max-h-72 flex-col gap-2 overflow-y-auto well p-3">
                 {activeClasses.map((item) => (
                   <Checkbox
                     key={item.id}
@@ -1008,7 +999,7 @@ function PromoteClassesModal({ classes, onClose, onDone }: PromoteClassesModalPr
           <Button variant="outline" onClick={onClose}>
             取消
           </Button>
-          <Button variant="seal" loading={working} onClick={() => void submit()}>
+          <Button variant="primary" loading={working} onClick={() => void submit()}>
             确认升届 {selected.size > 0 ? `${selected.size} 个班级` : ''}
           </Button>
         </ModalFooter>
@@ -1094,7 +1085,7 @@ function ArchiveClassesModal({ classes, onClose, onDone }: ArchiveClassesModalPr
             取消
           </Button>
           <Button
-            variant="seal"
+            variant="primary"
             loading={working}
             disabled={yearOptions.length === 0}
             onClick={() => void submit()}

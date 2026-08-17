@@ -324,7 +324,7 @@ func (a simAPI) destroySession(c *gin.Context) {
 		return
 	}
 	err := a.svc.DestroySession(c.Request.Context(), contracts.SimDestroySessionRequest{TenantID: tenantID, SessionID: id, SourceRef: sourceRef})
-	httpx.Write(c, gin.H{}, err)
+	httpx.Write(c, struct{}{}, err)
 }
 
 // recycleSessions 按来源批量归档内部会话。
@@ -344,7 +344,7 @@ func (a simAPI) recycleSessions(c *gin.Context) {
 	}
 	req.SourceRef = sourceRef
 	err := a.svc.RecycleBySourceRef(c.Request.Context(), contracts.SimRecycleRequest{TenantID: tenantID, SourceRef: req.SourceRef, Reason: req.Reason})
-	httpx.Write(c, gin.H{}, err)
+	httpx.Write(c, struct{}{}, err)
 }
 
 // reportCheckpoint 绑定内部检查点上报。
@@ -361,7 +361,7 @@ func (a simAPI) reportCheckpoint(c *gin.Context) {
 	if !httpx.BindJSONWithError(c, &req, apperr.ErrSimCheckpointInvalid) {
 		return
 	}
-	httpx.Write(c, gin.H{}, a.svc.ReportCheckpointFromHTTP(c.Request.Context(), tenantID, id, req))
+	httpx.Write(c, struct{}{}, a.svc.ReportCheckpointFromHTTP(c.Request.Context(), tenantID, id, req))
 }
 
 // shareSession 创建分享码。

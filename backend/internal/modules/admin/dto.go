@@ -1,7 +1,57 @@
 // admin dto 文件定义 M9 HTTP 请求和响应结构。
 package admin
 
-import "chaimir/internal/platform/ids"
+import (
+	"time"
+
+	"chaimir/internal/platform/ids"
+)
+
+// MonitoringPanel 是外接监控系统的安全嵌入入口响应。
+type MonitoringPanel struct {
+	Name string `json:"name"`
+	URL  string `json:"url"`
+}
+
+// ResourceQuotaSnapshotDTO 是看板资源配额的固定摘要结构。
+type ResourceQuotaSnapshotDTO struct {
+	MaxConcurrentSandbox int64 `json:"max_concurrent_sandbox"`
+	MaxCPU               int64 `json:"max_cpu"`
+	MaxMemoryMB          int64 `json:"max_memory_mb"`
+}
+
+// DashboardDTO 是平台和学校看板聚合输出。
+type DashboardDTO struct {
+	Scope                 int16                     `json:"scope"`
+	TenantID              ids.ID                    `json:"tenant_id,omitempty"`
+	TenantCount           int64                     `json:"tenant_count,omitempty"`
+	AccountCount          int64                     `json:"account_count"`
+	TeacherCount          int64                     `json:"teacher_count"`
+	StudentCount          int64                     `json:"student_count"`
+	ActiveAccountCount    int64                     `json:"active_account_count"`
+	CourseCount           int64                     `json:"course_count"`
+	ActiveCourseCount     int64                     `json:"active_course_count"`
+	ExperimentCount       int64                     `json:"experiment_count"`
+	ActiveInstanceCount   int64                     `json:"active_instance_count"`
+	ContestCount          int64                     `json:"contest_count"`
+	ActiveContestCount    int64                     `json:"active_contest_count"`
+	ActiveSandboxCount    int64                     `json:"active_sandbox_count"`
+	PendingApplyCount     int64                     `json:"pending_apply_count,omitempty"`
+	ResourceQuotaSnapshot *ResourceQuotaSnapshotDTO `json:"resource_quota_snapshot,omitempty"`
+	GeneratedAt           time.Time                 `json:"generated_at"`
+}
+
+// ConfigDTO 表示系统配置响应。
+type ConfigDTO struct {
+	ID        ids.ID         `json:"id"`
+	Scope     int16          `json:"scope"`
+	TenantID  ids.ID         `json:"tenant_id,omitempty"`
+	Key       string         `json:"key"`
+	Value     map[string]any `json:"value"`
+	Version   int32          `json:"version"`
+	UpdatedBy ids.ID         `json:"updated_by"`
+	UpdatedAt time.Time      `json:"updated_at"`
+}
 
 // ConfigUpdateRequest 是配置更新和回滚请求。
 type ConfigUpdateRequest struct {
@@ -72,6 +122,15 @@ type AlertEventDTO struct {
 	HandlerID   ids.ID `json:"handler_id,omitempty"`
 	TriggeredAt string `json:"triggered_at"`
 	HandledAt   string `json:"handled_at,omitempty"`
+}
+
+// AlertEventPushDTO 是告警处理完成后发送到告警 topic 的精确实时负载。
+type AlertEventPushDTO struct {
+	EventID   ids.ID `json:"event_id"`
+	RuleID    ids.ID `json:"rule_id"`
+	Level     int16  `json:"level"`
+	Status    int16  `json:"status"`
+	HandlerID ids.ID `json:"handler_id"`
 }
 
 // StatisticsDTO 表示运营统计时间序列响应。

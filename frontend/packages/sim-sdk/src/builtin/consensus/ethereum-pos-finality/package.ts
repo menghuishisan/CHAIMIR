@@ -14,7 +14,7 @@ export const ethereumPosFinalitySimulation: SimPackage<EthPosFinalityState> = {
     { id: 'select', kind: 'select-element', label: '选择区块或验证者', description: '查看链头、投票和最终性状态。', emits: 'select', target: 'element', elementFilter: 'eth-pos-element' },
     { id: 'advance', kind: 'button', label: '推进 slot', description: '按 Ethereum PoS 规则推进一个阶段。', emits: 'advance', labelTag: 'normal' },
     { id: 'attack', kind: 'button', label: '延迟验证者', description: '让部分 attestation 延迟到达,观察 head 和 finality 区别。', emits: 'attack', labelTag: 'attack' },
-    { id: 'recover', kind: 'button', label: '恢复投票', description: '让延迟验证者恢复在线。', emits: 'recover', labelTag: 'perturb' },
+    { id: 'recover', kind: 'button', label: '恢复投票', description: '让延迟验证者恢复在线。', emits: 'recover', labelTag: 'recover' },
   ],
   render: renderEthPosFinalityView,
   narrative: ethPosFinalityNarrative,

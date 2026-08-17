@@ -30,7 +30,7 @@ type TxStore interface {
 	CreateContest(context.Context, Contest) (Contest, error)
 	GetContest(context.Context, int64, int64) (Contest, error)
 	ListContests(context.Context, int64, int16, int, int) ([]Contest, int64, error)
-	ListStudentContests(context.Context, int64, int, int) ([]Contest, int64, error)
+	ListStudentContests(context.Context, int64, int16, int, int) ([]Contest, int64, error)
 	UpdateContest(context.Context, Contest) (Contest, error)
 	SetContestStatus(context.Context, int64, int64, int16) (Contest, error)
 	UpsertContestProblem(context.Context, ContestProblem) (ContestProblem, error)
@@ -165,9 +165,10 @@ func (tx *txStore) ListContests(ctx context.Context, tenantID int64, status int1
 }
 
 // ListStudentContests 查询学生可发现的非草稿竞赛分页。
-func (tx *txStore) ListStudentContests(ctx context.Context, tenantID int64, page, size int) ([]Contest, int64, error) {
+// status 传 0 表示不按状态过滤;总数按同一条件计,与列表同口径。
+func (tx *txStore) ListStudentContests(ctx context.Context, tenantID int64, status int16, page, size int) ([]Contest, int64, error) {
 	limit, offset := pagex.LimitOffset(page, size)
-	rows, err := tx.q.ListStudentContests(ctx, sqlcgen.ListStudentContestsParams{TenantID: tenantID, Limit: limit, Offset: offset})
+	rows, err := tx.q.ListStudentContests(ctx, sqlcgen.ListStudentContestsParams{TenantID: tenantID, Status: status, PageLimit: limit, PageOffset: offset})
 	if err != nil {
 		return nil, 0, err
 	}
@@ -179,7 +180,7 @@ func (tx *txStore) ListStudentContests(ctx context.Context, tenantID int64, page
 		}
 		items = append(items, item)
 	}
-	total, err := tx.q.CountStudentContests(ctx, tenantID)
+	total, err := tx.q.CountStudentContests(ctx, sqlcgen.CountStudentContestsParams{TenantID: tenantID, Status: status})
 	return items, total, err
 }
 
@@ -207,11 +208,11 @@ func (tx *txStore) SetContestStatus(ctx context.Context, tenantID, id int64, sta
 
 // UpsertContestProblem 新增或更新赛题配置。
 func (tx *txStore) UpsertContestProblem(ctx context.Context, item ContestProblem) (ContestProblem, error) {
-	dynamic, err := encodeJSON(item.DynamicScore, apperr.ErrContestProblemInvalid)
+	dynamic, err := encodeOptionalJSON(item.DynamicScore, apperr.ErrContestProblemInvalid)
 	if err != nil {
 		return ContestProblem{}, err
 	}
-	battleConfig, err := encodeJSON(item.BattleConfig, apperr.ErrContestProblemInvalid)
+	battleConfig, err := encodeOptionalJSON(item.BattleConfig, apperr.ErrContestProblemInvalid)
 	if err != nil {
 		return ContestProblem{}, err
 	}
@@ -633,7 +634,7 @@ func (tx *txStore) ListActiveBattleSourceRefsForArchive(ctx context.Context, ten
 
 // FinishBattleMatch 保存对局终态结果。
 func (tx *txStore) FinishBattleMatch(ctx context.Context, item BattleMatch) (BattleMatch, error) {
-	delta, err := encodeJSON(item.ScoreDelta, apperr.ErrContestBattleMatchFailed)
+	delta, err := encodeJSON(battleScoreDeltaForJSON(item.ScoreDelta), apperr.ErrContestBattleMatchFailed)
 	if err != nil {
 		return BattleMatch{}, err
 	}
@@ -655,7 +656,7 @@ func (tx *txStore) FailBattleMatch(ctx context.Context, tenantID, id int64) (Bat
 
 // UpsertLadderSnapshot 保存封榜或归档阶段的权威榜单快照。
 func (tx *txStore) UpsertLadderSnapshot(ctx context.Context, item LadderSnapshot) (LadderSnapshot, error) {
-	raw, err := encodeJSON(item.Ranking, apperr.ErrContestInvalid)
+	raw, err := encodeJSON(ladderSnapshotEntriesJSON(item.Ranking), apperr.ErrContestInvalid)
 	if err != nil {
 		return LadderSnapshot{}, err
 	}

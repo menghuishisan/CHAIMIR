@@ -22,6 +22,8 @@ import {
   CardHeader,
   ChainProgress,
   DescriptionList,
+  FilterBar,
+  FilterField,
   PageHeader,
   PageScaffold,
   PageSection,
@@ -115,17 +117,20 @@ export default function PlatformRuntimesPage() {
       <PageSection
         title="运行时列表"
         description="按状态筛选。点进详情做镜像登记、预拉取与自检。"
-        actions={
-          <SegmentedControl
-            aria-label="按运行时状态筛选"
-            size="sm"
-            options={STATUS_FILTERS.map((item) => ({ value: item.value, label: item.label }))}
-            value={statusFilter}
-            onValueChange={setStatusFilter}
-          />
-        }
       >
         <div className="flex flex-col gap-4">
+          <FilterBar label="运行时筛选">
+            <FilterField label="运行时状态" group>
+              <SegmentedControl
+                aria-label="按运行时状态筛选"
+                size="sm"
+                options={STATUS_FILTERS.map((item) => ({ value: item.value, label: item.label }))}
+                value={statusFilter}
+                onValueChange={setStatusFilter}
+              />
+            </FilterField>
+          </FilterBar>
+
           <ResourceState
             resource={runtimes}
             emptyIcon={Server}

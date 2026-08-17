@@ -5,8 +5,8 @@
 //
 // 抽题条件按结构化字段渲染,不给裸 JSON(旧前端组卷条件是裸 JSON 文本域)。
 
-import { useCallback, useMemo, useState } from 'react'
-import { Dices, FileText, Plus, RefreshCw } from 'lucide-react'
+import { useCallback, useState } from 'react'
+import { FileText, Plus, RefreshCw } from 'lucide-react'
 import {
   ContentDifficulty,
   ContentType,
@@ -43,7 +43,6 @@ import {
   SegmentedControl,
   Select,
   Skeleton,
-  Stat,
   Table,
   toast,
   type TableColumn,
@@ -72,14 +71,6 @@ export default function TeacherExamsPage() {
   const [detailTarget, setDetailTarget] = useState<Paper>()
 
   const papers = usePagedResource<Paper>((params) => api.content.listPapers(params), [])
-
-  const stats = useMemo(() => {
-    const list = papers.data ? papers.data.list : []
-    return {
-      manual: list.filter((paper) => paper.gen_mode === PaperMode.MANUAL).length,
-      random: list.filter((paper) => paper.gen_mode === PaperMode.RANDOM).length,
-    }
-  }, [papers.data])
 
   const columns: TableColumn<Paper>[] = [
     {
@@ -137,14 +128,8 @@ export default function TeacherExamsPage() {
         }
       />
 
-      <PageSection>
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          <Stat label="试卷总数" value={papers.total} icon={FileText} />
-          <Stat label="手动选题" value={stats.manual} icon={FileText} />
-          <Stat label="条件抽题" value={stats.random} icon={Dices} hint="可重新抽取" />
-        </div>
-      </PageSection>
-
+      {/* 不做指标带:试卷份数已在下方分组说明里给出,而「手动选题/条件抽题」没有服务端聚合,
+          用当前页数出来就是错数(规范 §6.5);组卷方式在每一行的标签里可见。 */}
       <PageSection title="试卷列表" description={`共 ${papers.total} 份试卷`}>
         <ResourceState
           resource={papers}
@@ -321,7 +306,7 @@ function PaperFormModal({ onClose, onSaved }: PaperFormModalProps) {
             </FormField>
 
             {isRandom ? (
-              <div className="flex flex-col gap-4 rounded-md border border-line bg-surface-sunken p-4">
+              <div className="flex flex-col gap-4 well p-4">
                 <div className="text-sm font-medium text-ink">抽题条件</div>
 
                 <div className="grid gap-4 sm:grid-cols-2">
@@ -413,11 +398,12 @@ function PaperFormModal({ onClose, onSaved }: PaperFormModalProps) {
                     description="从题库选题后设置每题分值。"
                   />
                 ) : (
-                  <div className="flex flex-col gap-2">
+                  // 井内的并列条目用分隔线区分,不再各自画盒(规范 §6.5.1:不出现第三级容器)
+                  <div className="flex flex-col divide-y divide-line">
                     {items.map((item, index) => (
                       <div
                         key={`${item.code}-${item.version}`}
-                        className="flex flex-wrap items-end gap-3 rounded-md border border-line p-3"
+                        className="flex flex-wrap items-end gap-3 py-3 first:pt-0 last:pb-0"
                       >
                         <div className="min-w-0 flex-1">
                           <div className="truncate text-base text-ink">
@@ -463,7 +449,7 @@ function PaperFormModal({ onClose, onSaved }: PaperFormModalProps) {
             <Button type="button" variant="outline" onClick={onClose}>
               取消
             </Button>
-            <Button type="submit" variant="seal" loading={working}>
+            <Button type="submit" variant="primary" loading={working}>
               创建试卷
             </Button>
           </ModalFooter>
@@ -575,7 +561,7 @@ function PaperItemPicker({ selectedCodes, onClose, onPick }: PaperItemPickerProp
           <Button type="button" variant="outline" onClick={onClose}>
             取消
           </Button>
-          <Button type="button" variant="seal" disabled={picked.length === 0} onClick={() => onPick(picked)}>
+          <Button type="button" variant="primary" disabled={picked.length === 0} onClick={() => onPick(picked)}>
             添加 {picked.length > 0 ? `${picked.length} 道` : ''}题目
           </Button>
         </ModalFooter>
@@ -666,7 +652,7 @@ function PaperDetailModal({ paper, onClose, onChanged }: PaperDetailModalProps) 
             关闭
           </Button>
           {isRandom ? (
-            <Button variant="seal" leftIcon={RefreshCw} loading={working} onClick={() => void regenerate()}>
+            <Button variant="primary" leftIcon={RefreshCw} loading={working} onClick={() => void regenerate()}>
               重新抽题
             </Button>
           ) : null}

@@ -81,6 +81,9 @@ jobs:
         with:
           go-version: 1.26.6
           cache-dependency-path: backend/go.sum
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "24"
       - name: 静态检查(go vet + golangci-lint)
         working-directory: backend
         run: |
@@ -89,11 +92,13 @@ jobs:
       - name: 源码安全扫描(gosec + govulncheck)
         working-directory: backend
         run: |
-          go run github.com/securego/gosec/v2/cmd/gosec@v2.28.0 -nosec=false -severity high -confidence medium -exclude-dir=sqlcgen ./...
+          go run github.com/securego/gosec/v2/cmd/gosec@v2.28.0 -nosec=false -severity low -confidence low -exclude-generated ./...
           go run golang.org/x/vuln/cmd/govulncheck@v1.1.4 ./...
-      - name: 单元测试(含 RLS 越权用例)
+      - name: 后端构建与仓库内测试
         working-directory: backend
         run: go test ./... -race -count=1
+      - name: 全仓源码契约审查
+        run: node scripts/audit/index.mjs --source-only
 
   build-push:
     # 仅 main 推送且测试通过后构建推送(PR 只验证不推送)。

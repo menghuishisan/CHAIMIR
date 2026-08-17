@@ -8,7 +8,7 @@
 
 import { useCallback, useMemo, useState } from 'react'
 import { useNavigate, useParams } from 'react-router'
-import { ListOrdered, Lock, Play, Swords, Trophy, UserPlus, Users } from 'lucide-react'
+import { ListOrdered, Play, Swords, Trophy, UserPlus, Users } from 'lucide-react'
 import {
   ContestStatus,
   TeamMode,
@@ -138,8 +138,9 @@ function ContestDetailContent({ contest, record, onRefresh }: ContestDetailConte
         }
       />
 
+      {/* 指标带只放我的成绩;赛制、对抗形式与封榜时长是赛事静态属性,列在右侧「赛程」卡里 */}
       <PageSection>
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="grid gap-4 sm:grid-cols-2">
           <Stat
             label="我的得分"
             value={record ? formatScore(record.score) : '—'}
@@ -152,8 +153,6 @@ function ContestDetailContent({ contest, record, onRefresh }: ContestDetailConte
             icon={ListOrdered}
             hint={isContestLeaderboardFrozen(contest.status) ? '封榜中,名次暂停更新' : undefined}
           />
-          <Stat label="赛制" value={contestModeLabel(contest.mode)} icon={Swords} hint={contest.match_mode ? matchModeLabel(contest.match_mode) : undefined} />
-          <Stat label="封榜时长" value={`${contest.freeze_minutes} 分钟`} icon={Lock} />
         </div>
       </PageSection>
 
@@ -338,7 +337,7 @@ function ContestActionCard({
             {isSolo && signupError ? <Callout tone="danger">{signupError}</Callout> : null}
             <Button
               type="submit"
-              variant="seal"
+              variant="primary"
               leftIcon={UserPlus}
               loading={signingUp}
               className={isSolo ? 'w-full' : 'mt-4 w-full'}
@@ -376,6 +375,7 @@ function ContestActionCard({
 
 /**
  * ContestScheduleCard 展示赛程时间与规则要点。
+ * 赛制、参赛形式与封榜时长都是赛事的静态属性,统一在这里列出,不占指标位(规范 §6.5)。
  */
 function ContestScheduleCard({ contest }: { contest: Contest }) {
   const items = useMemo(
@@ -384,7 +384,15 @@ function ContestScheduleCard({ contest }: { contest: Contest }) {
       { term: '报名截止', description: formatDateTime(contest.signup_end), mono: true },
       { term: '比赛开始', description: formatDateTime(contest.start_at), mono: true },
       { term: '比赛结束', description: formatDateTime(contest.end_at), mono: true },
+      { term: '赛制', description: contestModeLabel(contest.mode) },
+      ...(contest.match_mode
+        ? [{ term: '对抗形式', description: matchModeLabel(contest.match_mode) }]
+        : []),
       { term: '参赛形式', description: teamModeLabel(contest.team_mode) },
+      {
+        term: '封榜时长',
+        description: contest.freeze_minutes > 0 ? `${contest.freeze_minutes} 分钟` : '不封榜',
+      },
     ],
     [contest],
   )

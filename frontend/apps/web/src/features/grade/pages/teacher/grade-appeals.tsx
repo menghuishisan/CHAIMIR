@@ -23,6 +23,8 @@ import {
   Button,
   Callout,
   DescriptionList,
+  FilterBar,
+  FilterField,
   FormField,
   Modal,
   ModalBody,
@@ -212,17 +214,20 @@ export function GradeAppeals({ canRecompute = false }: GradeAppealsProps) {
     <PageSection
       title="成绩申诉"
       description={`共 ${appeals.total} 条申诉。受理会解锁该课程成绩,处理结论学生可见。`}
-      actions={
-        <SegmentedControl
-          aria-label="按申诉状态筛选"
-          size="sm"
-          options={STATUS_FILTERS.map((item) => ({ value: item.value, label: item.label }))}
-          value={statusFilter}
-          onValueChange={setStatusFilter}
-        />
-      }
     >
       <div className="flex flex-col gap-4">
+        <FilterBar label="成绩申诉筛选">
+          <FilterField label="申诉状态" group>
+            <SegmentedControl
+              aria-label="按申诉状态筛选"
+              size="sm"
+              options={STATUS_FILTERS.map((item) => ({ value: item.value, label: item.label }))}
+              value={statusFilter}
+              onValueChange={setStatusFilter}
+            />
+          </FilterField>
+        </FilterBar>
+
         {canRecompute ? (
           <Callout tone="info">
             受理后由授课教师改分,改分事件会自动触发绩点重算。如果学生反馈绩点没更新,可以在已受理的申诉上手动重算一次。
@@ -466,7 +471,7 @@ function RecomputeModal({ appeal, courseName, onClose, onDone }: RecomputeModalP
           <Button variant="outline" onClick={onClose}>
             取消
           </Button>
-          <Button variant="seal" leftIcon={RefreshCw} loading={working} onClick={() => void submit()}>
+          <Button variant="primary" leftIcon={RefreshCw} loading={working} onClick={() => void submit()}>
             开始重算
           </Button>
         </ModalFooter>

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"chaimir/internal/contracts"
+	"chaimir/internal/platform/ids"
 	"chaimir/internal/platform/response"
 	"chaimir/internal/platform/tenant"
 	"chaimir/internal/platform/timex"
@@ -31,8 +32,8 @@ const (
 	RefreshRequestHeader = "X-Chaimir-Refresh"
 	// RefreshRequestHeaderValue 是刷新接口要求的固定请求头值,仅用于确认请求来自受控客户端。
 	RefreshRequestHeaderValue = "1"
-	// BrowserAccessTokenQuery 是浏览器无法设置 Authorization 头时使用的一次性入口参数。
-	BrowserAccessTokenQuery = "token"
+	// BrowserAccessTicketQuery 是浏览器无法设置 Authorization 头时使用的短时入口票据参数。
+	BrowserAccessTicketQuery = "ticket"
 	// ServiceNameHeader 标识内部服务调用方。
 	ServiceNameHeader = "X-Chaimir-Service"
 	// ServiceTenantHeader 显式携带内部服务请求绑定的租户边界。
@@ -51,12 +52,12 @@ func ValidRefreshRequestHeader(value string) bool {
 }
 
 type serviceSourceRefKey struct{}
-type browserAccessTokenSource string
+type browserAccessSource string
 
 const (
-	browserAccessTokenSourceHeader browserAccessTokenSource = "header"
-	browserAccessTokenSourceQuery  browserAccessTokenSource = "query"
-	browserAccessTokenSourceCookie browserAccessTokenSource = "cookie"
+	browserAccessSourceHeader browserAccessSource = "header"
+	browserAccessSourceTicket browserAccessSource = "ticket"
+	browserAccessSourceCookie browserAccessSource = "cookie"
 )
 
 const (
@@ -172,30 +173,39 @@ func sameRequestHost(raw, requestHost string) bool {
 	return err == nil && (parsed.Scheme == "http" || parsed.Scheme == "https") && parsed.Host == requestHost && parsed.User == nil
 }
 
-// BrowserAccessMiddleware 校验浏览器内嵌工具入口的 Bearer、一次性 query token 或路径受限 Cookie。
+// BrowserAccessMiddleware 校验浏览器内嵌工具入口的 Bearer、短时路径票据或路径受限 Cookie。
 func (m *Manager) BrowserAccessMiddleware() gin.HandlerFunc {
 	return m.browserAccessGuard(true)
 }
 
 // FileAccessMiddleware 校验统一文件服务入口的 Bearer 或路径受限 Cookie。
-// 与工具代理入口的差别只有一项:本入口**不接受** query 形式的 access token ——
+// 与工具代理入口的差别只有一项:本入口不接受浏览器路径票据 ——
 // `token` 参数位已被投放授权占用,同名两义会让验签路径产生歧义
 // (见 docs/总-API接口总览.md §统一文件服务「鉴权载体」)。
 func (m *Manager) FileAccessMiddleware() gin.HandlerFunc {
 	return m.browserAccessGuard(false)
 }
 
-// browserAccessGuard 是两个浏览器直连入口共用的鉴权实现,只由 allowQueryToken 表达差异。
-func (m *Manager) browserAccessGuard(allowQueryToken bool) gin.HandlerFunc {
+// browserAccessGuard 是两个浏览器直连入口共用的鉴权实现,只由 allowBrowserTicket 表达差异。
+func (m *Manager) browserAccessGuard(allowBrowserTicket bool) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		claims, token, source, ok := m.browserAccessClaims(c, allowQueryToken)
+		claims, token, source, ok := m.browserAccessClaims(c, allowBrowserTicket)
 		if !ok {
 			return
 		}
 		if !m.validateAccessSession(c, claims) {
 			return
 		}
-		if source == browserAccessTokenSourceCookie && browserAccessCSRFBlocked(c) {
+		if source == browserAccessSourceTicket {
+			var err error
+			token, err = m.IssueAccess(claims.TenantID, claims.AccountID, claims.SessionID, claims.IsPlatform)
+			if err != nil {
+				response.Fail(c, apperr.ErrInternal.WithCause(err))
+				c.Abort()
+				return
+			}
+		}
+		if source == browserAccessSourceCookie && browserAccessCSRFBlocked(c) {
 			response.Fail(c, apperr.ErrForbidden)
 			c.Abort()
 			return
@@ -392,24 +402,34 @@ func (m *Manager) accessClaims(c *gin.Context) (*Claims, string, bool) {
 	return claims, token, true
 }
 
-// browserAccessClaims 按浏览器真实能力依次读取 Header、query token 和路径受限 Cookie。
-// allowQueryToken=false 时跳过 query 分支,供 `token` 参数位另有语义的入口使用。
-func (m *Manager) browserAccessClaims(c *gin.Context, allowQueryToken bool) (*Claims, string, browserAccessTokenSource, bool) {
+// browserAccessClaims 按浏览器真实能力依次读取 Header、短时路径票据和路径受限 Cookie。
+// allowBrowserTicket=false 时跳过票据分支,供统一文件服务等已有 query 语义的入口使用。
+func (m *Manager) browserAccessClaims(c *gin.Context, allowBrowserTicket bool) (*Claims, string, browserAccessSource, bool) {
 	if token, ok := bearerAccessToken(c); ok {
 		claims, ok := m.verifyAccessClaims(c, token)
-		return claims, token, browserAccessTokenSourceHeader, ok
+		return claims, token, browserAccessSourceHeader, ok
 	}
-	if allowQueryToken {
-		if token := strings.TrimSpace(c.Query(BrowserAccessTokenQuery)); token != "" {
-			claims, ok := m.verifyAccessClaims(c, token)
-			return claims, token, browserAccessTokenSourceQuery, ok
+	if allowBrowserTicket {
+		if ticket := strings.TrimSpace(c.Query(BrowserAccessTicketQuery)); ticket != "" {
+			if c.Request.Method != http.MethodGet && c.Request.Method != http.MethodHead {
+				response.Fail(c, apperr.ErrUnauthorized)
+				c.Abort()
+				return nil, "", "", false
+			}
+			claims, err := m.VerifyBrowserAccessTicket(ticket, c.Request.URL.Path)
+			if err != nil {
+				response.Fail(c, apperr.ErrUnauthorized.WithCause(err))
+				c.Abort()
+				return nil, "", "", false
+			}
+			return claims, ticket, browserAccessSourceTicket, true
 		}
 	}
 	if cookie, err := c.Request.Cookie(BrowserAccessCookieName); err == nil {
 		token := strings.TrimSpace(cookie.Value)
 		if token != "" {
 			claims, ok := m.verifyAccessClaims(c, token)
-			return claims, token, browserAccessTokenSourceCookie, ok
+			return claims, token, browserAccessSourceCookie, ok
 		}
 	}
 	response.Fail(c, apperr.ErrUnauthorized)
@@ -448,10 +468,10 @@ func VerifiedAccessToken(c *gin.Context) (string, bool) {
 	return raw, ok && strings.TrimSpace(raw) != ""
 }
 
-// BrowserAccessFromQuery 判断当前请求是否通过一次性 query token 完成鉴权。
-func BrowserAccessFromQuery(c *gin.Context) bool {
+// BrowserAccessFromTicket 判断当前请求是否通过短时浏览器路径票据完成鉴权。
+func BrowserAccessFromTicket(c *gin.Context) bool {
 	source, ok := c.Get(browserAccessSourceKey)
-	return ok && source == string(browserAccessTokenSourceQuery)
+	return ok && source == string(browserAccessSourceTicket)
 }
 
 // SetBrowserAccessCookie 写入路径受限 HttpOnly access cookie,供浏览器直连入口
@@ -613,8 +633,8 @@ func (m *Manager) injectServiceIdentity(c *gin.Context) bool {
 		c.Abort()
 		return false
 	}
-	tenantID, err := strconv.ParseInt(tenantIDRaw, 10, 64)
-	if err != nil || tenantID <= 0 {
+	tenantID, ok := ids.Parse(tenantIDRaw)
+	if !ok {
 		response.Fail(c, apperr.ErrServiceUnauthorized)
 		c.Abort()
 		return false

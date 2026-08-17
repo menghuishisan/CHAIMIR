@@ -1,6 +1,12 @@
 // ===== M9 Admin 模块 =====
 
-import type { AdminScope, AlertStatus, BackupStatus, BackupType } from '../constants/admin'
+import type {
+  AdminScope,
+  AlertLevel,
+  AlertStatus,
+  BackupStatus,
+  BackupType,
+} from '../constants/admin'
 import type { AuditActorRole } from '../constants/identity'
 import type { SnowflakeID } from './common'
 
@@ -47,7 +53,7 @@ export interface AlertRule {
   name: string
   metric: string
   condition: Record<string, unknown>
-  level: number
+  level: AlertLevel
   enabled: boolean
   created_at: string
   updated_at: string
@@ -59,7 +65,7 @@ export interface AlertRuleRequest {
   name: string
   metric: string
   condition: Record<string, unknown>
-  level: number
+  level: AlertLevel
   enabled: boolean
 }
 
@@ -67,7 +73,7 @@ export interface AlertEvent {
   id: SnowflakeID
   rule_id: SnowflakeID
   tenant_id?: SnowflakeID
-  level: number
+  level: AlertLevel
   message: string
   status: AlertStatus
   handler_id?: SnowflakeID
@@ -111,8 +117,14 @@ export interface Dashboard {
   active_contest_count: number
   active_sandbox_count: number
   pending_apply_count?: number
-  resource_quota_snapshot?: Record<string, unknown>
+  resource_quota_snapshot?: ResourceQuotaSnapshot
   generated_at: string
+}
+
+export interface ResourceQuotaSnapshot {
+  max_concurrent_sandbox: number
+  max_cpu: number
+  max_memory_mb: number
 }
 
 export interface MonitoringPanel {

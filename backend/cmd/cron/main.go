@@ -16,7 +16,6 @@ import (
 	"path/filepath"
 	"strings"
 	"syscall"
-	"time"
 
 	"chaimir/internal/modules/admin"
 	"chaimir/internal/platform/config"
@@ -155,7 +154,7 @@ func runBackup(ctx context.Context, cfg *config.Config, database *db.DB, objects
 	storageRef, manifestSize, err := writeBackupManifest(ctx, objects, backupManifest{
 		Version:   1,
 		Batch:     batch,
-		CreatedAt: timex.Now().UTC().Format(time.RFC3339),
+		CreatedAt: timex.RFC3339OrEmpty(timex.Now()),
 		Database: backupManifestObject{
 			Bucket:      objects.BucketBackup(),
 			Key:         dbKey,

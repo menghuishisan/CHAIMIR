@@ -4,9 +4,7 @@ package teaching
 import (
 	"bytes"
 	"context"
-	"fmt"
 	"log/slog"
-	"strconv"
 	"strings"
 	"time"
 
@@ -433,12 +431,18 @@ func (s *Service) ComputeCourseGrades(ctx context.Context, courseID int64) ([]Gr
 			if weight.SourceType != GradeSourceAssignment {
 				continue
 			}
-			assignmentID, err := strconv.ParseInt(weight.SourceRef, 10, 64)
-			if err != nil {
+			assignmentID, ok := ids.Parse(weight.SourceRef)
+			if !ok {
 				return apperr.ErrTeachingGradeWeightInvalid
 			}
-			// studentID 传 0:成绩计算要覆盖全班每个学生的提交,不限定单人
-			subs, _, err := tx.ListSubmissionsByAssignment(ctx, id.TenantID, assignmentID, 0, 1, s.cfg.CourseGradesMaxRows)
+			// StudentID 留 0:成绩计算要覆盖全班每个学生的提交,不限定单人
+			// Status 留 0:成绩取各人最高分,未出分的提交按 0 分参与比较,不预先筛状态
+			subs, _, err := tx.ListSubmissionsByAssignment(ctx, SubmissionListQuery{
+				TenantID:     id.TenantID,
+				AssignmentID: assignmentID,
+				Page:         1,
+				Size:         s.cfg.CourseGradesMaxRows,
+			})
 			if err != nil {
 				return err
 			}
@@ -566,7 +570,7 @@ func (s *Service) ExportGrades(ctx context.Context, courseID int64) (transfer.Ta
 	}); err != nil {
 		return transfer.TaskDTO{}, mapGradeError(err)
 	}
-	fileName := fmt.Sprintf("course-%d-grades.xlsx", courseID)
+	fileName := "course-" + ids.Format(courseID) + "-grades.xlsx"
 	task, err := s.transfers.CreateTask(ctx, transfer.NewTaskRequest{
 		TenantID:    id.TenantID,
 		AccountID:   id.AccountID,
@@ -615,7 +619,7 @@ func (s *Service) ExportGrades(ctx context.Context, courseID int64) (transfer.Ta
 		AccountID:       id.AccountID,
 		Module:          "transfer",
 		ResourceType:    string(transfer.ChannelExport),
-		ResourceID:      strconv.FormatInt(task.TaskID, 10),
+		ResourceID:      ids.Format(task.TaskID),
 		FileName:        fileName,
 		ContentType:     upload.XLSXContentType,
 		Size:            int64(len(data)),
@@ -637,92 +641,6 @@ func (s *Service) ExportGrades(ctx context.Context, courseID int64) (transfer.Ta
 		return transfer.TaskDTO{}, apperr.ErrTeachingGradeExportFailed.WithCause(err)
 	}
 	return exportTaskDTO(completed), nil
-}
-
-// GetCourse 实现 M6 对 M11 的课程归属只读契约。
-func (s *Service) GetCourse(ctx context.Context, tenantID, courseID int64) (contracts.TeachingCourseInfo, error) {
-	var course Course
-	if err := s.store.TenantTx(ctx, tenantID, func(ctx context.Context, tx TxStore) error {
-		var err error
-		course, err = tx.GetCourse(ctx, tenantID, courseID)
-		return err
-	}); err != nil {
-		return contracts.TeachingCourseInfo{}, mapCourseError(err)
-	}
-	return contractCourse(course), nil
-}
-
-// GetCourseGrade 实现 M6 对 M11 的学生单课程成绩只读契约。
-func (s *Service) GetCourseGrade(ctx context.Context, tenantID, courseID, studentID int64) (contracts.TeachingCourseGrade, error) {
-	var grade CourseGrade
-	if err := s.store.TenantTx(ctx, tenantID, func(ctx context.Context, tx TxStore) error {
-		var err error
-		grade, err = tx.GetCourseGrade(ctx, tenantID, courseID, studentID)
-		return err
-	}); err != nil {
-		return contracts.TeachingCourseGrade{}, mapGradeError(err)
-	}
-	return contractGrade(grade), nil
-}
-
-// IsCourseMember 实现 M6 对 M11 的课程成员只读契约。
-func (s *Service) IsCourseMember(ctx context.Context, tenantID, courseID, studentID int64) (bool, error) {
-	if err := s.store.TenantTx(ctx, tenantID, func(ctx context.Context, tx TxStore) error {
-		_, err := tx.GetCourseMember(ctx, tenantID, courseID, studentID)
-		return err
-	}); err != nil {
-		if isNoRows(err) {
-			return false, nil
-		}
-		return false, mapCourseError(err)
-	}
-	return true, nil
-}
-
-// ListCourseGrades 实现 M6 对 M11 的只读成绩契约。
-func (s *Service) ListCourseGrades(ctx context.Context, tenantID, courseID int64) ([]contracts.TeachingCourseGrade, error) {
-	grades, err := s.listCourseGradesForTenant(ctx, tenantID, courseID)
-	if err != nil {
-		return nil, err
-	}
-	out := make([]contracts.TeachingCourseGrade, 0, len(grades))
-	for _, grade := range grades {
-		out = append(out, contractGrade(grade))
-	}
-	return out, nil
-}
-
-// ListStudentGrades 实现 M6 对 M11 的学生成绩只读契约。
-func (s *Service) ListStudentGrades(ctx context.Context, tenantID, studentID int64) ([]contracts.TeachingCourseGrade, error) {
-	var grades []CourseGrade
-	if err := s.store.TenantTx(ctx, tenantID, func(ctx context.Context, tx TxStore) error {
-		var err error
-		grades, err = tx.ListStudentGrades(ctx, tenantID, studentID)
-		return err
-	}); err != nil {
-		return nil, mapGradeError(err)
-	}
-	out := make([]contracts.TeachingCourseGrade, 0, len(grades))
-	for _, grade := range grades {
-		out = append(out, contractGrade(grade))
-	}
-	return out, nil
-}
-
-// Stats 实现 M6 对 M9 的教学统计只读契约。
-func (s *Service) Stats(ctx context.Context, tenantID int64) (contracts.TeachingStats, error) {
-	var stats contracts.TeachingStats
-	if err := s.store.TenantTx(ctx, tenantID, func(ctx context.Context, tx TxStore) error {
-		got, err := tx.Stats(ctx, tenantID)
-		if err != nil {
-			return err
-		}
-		stats = contracts.TeachingStats{TenantID: tenantID, CourseCount: got.CourseCount, ActiveCourseCount: got.ActiveCourseCount, LearningDurationSec: got.LearningDurationSec}
-		return nil
-	}); err != nil {
-		return contracts.TeachingStats{}, mapCourseError(err)
-	}
-	return stats, nil
 }
 
 // HandleGradeLockChanged 处理 M11 驱动的写保护投影事件。
@@ -791,7 +709,7 @@ func (s *Service) enqueueTeachingGradeEventOutbox(ctx context.Context, tx TxStor
 	if tenantID <= 0 || courseID <= 0 || studentID <= 0 || traceID == "" {
 		return apperr.ErrTeachingGradeEventPublishFailed
 	}
-	if _, err := tx.CreateTeachingGradeEventOutbox(ctx, s.ids.Generate(), tenantID, courseID, studentID, traceID, timeNowUTC()); err != nil {
+	if _, err := tx.CreateTeachingGradeEventOutbox(ctx, s.ids.Generate(), tenantID, courseID, studentID, traceID, timex.Now()); err != nil {
 		return apperr.ErrTeachingGradeEventPublishFailed.WithCause(err)
 	}
 	return nil
@@ -860,9 +778,4 @@ func (s *Service) drainTeachingGradeEventOutboxBestEffort(ctx context.Context) {
 	if err := s.RunTeachingGradeEventOutboxOnce(ctx); err != nil {
 		logging.ErrorContext(ctx, "teaching grade event outbox drain failed", err.Error())
 	}
-}
-
-// timeNowUTC 便于事件时间统一走 UTC。
-func timeNowUTC() time.Time {
-	return timex.Now()
 }

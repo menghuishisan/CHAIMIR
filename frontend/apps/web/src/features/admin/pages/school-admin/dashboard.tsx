@@ -4,10 +4,9 @@
 // 一页承载本校当下概览 + 运营统计趋势 —— 统计是看板内页(对齐清单 §3.3),
 // 两者同源于 M9,拆成两个侧栏项会让管理员在两页之间来回对照。
 //
-// 指标带用真实聚合值;趋势用后端按日聚合的 metrics(开放对象),
-// 只呈现已登记的键 —— 未登记键不猜语义、不把内部键名抛到界面上。
+// 指标带用真实聚合值;趋势区与平台看板共用 StatisticsTrendSection(两端接口同形,只有取数不同)。
 
-import { useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import { useNavigate } from 'react-router'
 import {
   Activity,
@@ -15,35 +14,25 @@ import {
   FlaskConical,
   LayoutDashboard,
   Swords,
-  TrendingUp,
   Users,
 } from 'lucide-react'
-import type { Dashboard, Statistics } from '@chaimir/api-client'
+import type { Dashboard } from '@chaimir/api-client'
 import {
-  Badge,
   Breadcrumb,
   Button,
-  Callout,
   DescriptionList,
-  Empty,
-  FormField,
-  Input,
   PageHeader,
   PageScaffold,
   PageSection,
   Skeleton,
   Stat,
-  Table,
-  type TableColumn,
 } from '@chaimir/ui'
 import { api } from '../../../../app/api'
 import { ResourceState } from '../../../../components/ResourceState'
 import { useAsyncResource } from '../../../../hooks'
-import { formatDate, formatDateTime } from '../../../../utils/formatters'
+import { formatDateTime } from '../../../../utils/formatters'
 import { statisticsMetricLabel } from '../../../../utils/labels/admin'
-
-/** 趋势默认区间:近 30 天。 */
-const DEFAULT_RANGE_DAYS = 30
+import { StatisticsTrendSection } from '../../StatisticsTrendSection'
 
 /**
  * SchoolAdminDashboardPage 呈现本校概览与运营统计。
@@ -75,7 +64,11 @@ export default function SchoolAdminDashboardPage() {
         {(data) => <DashboardContent dashboard={data} />}
       </ResourceState>
 
-      <StatisticsSection />
+      <StatisticsTrendSection
+        load={(range) => api.admin.getSchoolStatistics(range)}
+        idPrefix="school"
+        description="按日聚合的历史快照。先看趋势图,需要逐日数字时在每张图上切到数据表。"
+      />
     </PageScaffold>
   )
 }
@@ -150,7 +143,7 @@ function DashboardContent({ dashboard }: { dashboard: Dashboard }) {
       ) : null}
 
       <PageSection>
-        <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-line bg-surface-sunken p-4">
+        <div className="flex flex-wrap items-center justify-between gap-3 well p-4">
           <div className="min-w-0">
             <p className="text-sm text-ink">数据生成于 {formatDateTime(dashboard.generated_at)}</p>
             <p className="text-xs text-ink-sub">概览按周期聚合,不是实时值。需要看实时状态请去对应功能页。</p>
@@ -167,138 +160,6 @@ function DashboardContent({ dashboard }: { dashboard: Dashboard }) {
       </PageSection>
     </>
   )
-}
-
-/** MetricRow 是统计表格的一行:一个日期 + 一个指标 + 值。 */
-interface MetricRow {
-  date: string
-  term: string
-  value: string
-}
-
-/**
- * StatisticsSection 展示按日聚合的运营统计。
- * 后端按 from/to 返回逐日快照,metrics 是开放对象:
- * 页面把它摊平成「日期 × 指标」行,未登记的指标键跳过。
- */
-function StatisticsSection() {
-  const [from, setFrom] = useState(() => isoDate(-DEFAULT_RANGE_DAYS))
-  const [to, setTo] = useState(() => isoDate(0))
-  const [range, setRange] = useState({ from: isoDate(-DEFAULT_RANGE_DAYS), to: isoDate(0) })
-
-  const statistics = useAsyncResource(
-    () => api.admin.getSchoolStatistics({ from: range.from, to: range.to }),
-    [range.from, range.to],
-    (value) => value.length === 0,
-  )
-
-  const rows = useMemo<MetricRow[]>(() => {
-    const list = statistics.data ?? []
-    const out: MetricRow[] = []
-    for (const item of list) {
-      for (const [key, value] of Object.entries(item.metrics)) {
-        const term = statisticsMetricLabel(key)
-        if (!term) continue
-        out.push({
-          date: item.date,
-          term,
-          value: typeof value === 'number' ? String(value) : typeof value === 'string' ? value : '—',
-        })
-      }
-    }
-    return out
-  }, [statistics.data])
-
-  const latest = useMemo<Statistics | undefined>(() => {
-    const list = statistics.data ?? []
-    return list.length > 0 ? list[list.length - 1] : undefined
-  }, [statistics.data])
-
-  const columns: TableColumn<MetricRow>[] = [
-    {
-      key: 'date',
-      header: '日期',
-      render: (row) => (
-        <span className="whitespace-nowrap font-mono text-xs tabular-nums text-ink-sub">
-          {formatDate(row.date)}
-        </span>
-      ),
-    },
-    { key: 'term', header: '指标' },
-    { key: 'value', header: '数值', align: 'right', mono: true },
-  ]
-
-  return (
-    <PageSection
-      title="运营统计"
-      description="每日记录的历史数据,帮助您了解学校的运营变化趋势。"
-      actions={
-        <form
-          className="flex flex-wrap items-end gap-2"
-          onSubmit={(event) => {
-            event.preventDefault()
-            setRange({ from, to })
-          }}
-        >
-          <FormField label="开始日期" htmlFor="stats-from" className="mb-0">
-            <Input
-              id="stats-from"
-              type="date"
-              value={from}
-              onChange={(event) => setFrom(event.target.value)}
-            />
-          </FormField>
-          <FormField label="结束日期" htmlFor="stats-to" className="mb-0">
-            <Input id="stats-to" type="date" value={to} onChange={(event) => setTo(event.target.value)} />
-          </FormField>
-          <Button type="submit" variant="outline" size="sm" leftIcon={TrendingUp}>
-            查看
-          </Button>
-        </form>
-      }
-    >
-      <div className="flex flex-col gap-4">
-        {latest ? (
-          <div className="flex flex-wrap items-center gap-2">
-            <Badge tone="neutral">最新快照 {formatDate(latest.date)}</Badge>
-            <Badge tone="jade">共 {(statistics.data ?? []).length} 天数据</Badge>
-          </div>
-        ) : null}
-
-        <ResourceState
-          resource={statistics}
-          emptyIcon={TrendingUp}
-          emptyDescription="这个区间内还没有统计数据。统计每日生成,新学校需要等待一天。"
-          emptyTitle="暂无统计数据"
-          skeleton={<Table columns={columns} data={[]} rowKey={() => ''} loading />}
-        >
-          {() =>
-            rows.length === 0 ? (
-              <Empty
-                icon={TrendingUp}
-                title="这段时间没有可呈现的指标"
-                description="当前区间内暂无可显示的统计指标。"
-              />
-            ) : (
-              <Table columns={columns} data={rows} rowKey={(row) => `${row.date}-${row.term}`} />
-            )
-          }
-        </ResourceState>
-
-        <Callout tone="info">
-          需要更细的实时数据请去对应功能页:判题与实验环境在教师端实时监控,沙箱资源在平台端。
-        </Callout>
-      </div>
-    </PageSection>
-  )
-}
-
-/** isoDate 按天偏移生成 date 控件需要的 YYYY-MM-DD。 */
-function isoDate(offsetDays: number): string {
-  const date = new Date()
-  date.setDate(date.getDate() + offsetDays)
-  const pad = (n: number) => String(n).padStart(2, '0')
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
 }
 
 /**

@@ -273,11 +273,13 @@ ORDER BY id ASC;
 -- name: ListSubmissionsByAssignment :many
 -- student_id 传 0 回该作业全部学生提交(授课教师批改视角);传具体学生只回其本人提交
 -- (学生自读视角,student_id 由服务端填会话账号,不接受客户端传参)。
+-- status 传 0 不按状态过滤;传具体状态供批改台按「待批改/已出分」取数与计数。
 SELECT id, tenant_id, assignment_id, student_id, attempt_no, content_ref, judge_task_ref, auto_score, manual_score, final_score, comment, is_late, status, submitted_at
 FROM submission
 WHERE tenant_id = $1
   AND assignment_id = $2
   AND (sqlc.arg(student_id)::bigint = 0 OR submission.student_id = sqlc.arg(student_id)::bigint)
+  AND (sqlc.arg(status)::smallint = 0 OR submission.status = sqlc.arg(status)::smallint)
 ORDER BY submitted_at DESC, id DESC
 LIMIT $3 OFFSET $4;
 
@@ -286,7 +288,8 @@ SELECT COUNT(*)::bigint
 FROM submission
 WHERE tenant_id = $1
   AND assignment_id = $2
-  AND (sqlc.arg(student_id)::bigint = 0 OR submission.student_id = sqlc.arg(student_id)::bigint);
+  AND (sqlc.arg(student_id)::bigint = 0 OR submission.student_id = sqlc.arg(student_id)::bigint)
+  AND (sqlc.arg(status)::smallint = 0 OR submission.status = sqlc.arg(status)::smallint);
 
 -- name: UpdateSubmissionManualGrade :one
 UPDATE submission

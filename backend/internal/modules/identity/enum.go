@@ -86,3 +86,16 @@ const (
 	ClassStatusActive   int16 = 1
 	ClassStatusArchived int16 = 2
 )
+
+const (
+	// TenantModuleTeaching 表示教学业务模块开关。
+	TenantModuleTeaching = "teaching"
+	// TenantModuleExperiment 表示实验业务模块开关。
+	TenantModuleExperiment = "experiment"
+	// TenantModuleContest 表示竞赛业务模块开关。
+	TenantModuleContest = "contest"
+	// TenantModuleSim 表示仿真业务模块开关。
+	TenantModuleSim = "sim"
+	// TenantModuleGrade 表示成绩业务模块开关。
+	TenantModuleGrade = "grade"
+)

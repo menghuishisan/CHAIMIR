@@ -29,8 +29,25 @@ CREATE TABLE IF NOT EXISTS contest_problem (
     item_code VARCHAR(96) NOT NULL,
     item_version VARCHAR(32) NOT NULL,
     score INT NOT NULL CHECK (score > 0),
-    dynamic_score JSONB,
-    battle_config JSONB,
+    dynamic_score JSONB CHECK (
+        dynamic_score IS NULL OR (
+            jsonb_typeof(dynamic_score) = 'object'
+            AND dynamic_score ?& ARRAY['min_score', 'decay_per_solve']
+            AND dynamic_score - ARRAY['min_score', 'decay_per_solve'] = '{}'::jsonb
+            AND jsonb_typeof(dynamic_score->'min_score') = 'number'
+            AND jsonb_typeof(dynamic_score->'decay_per_solve') = 'number'
+        )
+    ),
+    battle_config JSONB CHECK (
+        battle_config IS NULL OR (
+            jsonb_typeof(battle_config) = 'object'
+            AND battle_config ?& ARRAY['runtime_code', 'runtime_image_version']
+            AND battle_config - ARRAY['runtime_code', 'runtime_image_version', 'tool_codes'] = '{}'::jsonb
+            AND jsonb_typeof(battle_config->'runtime_code') = 'string'
+            AND jsonb_typeof(battle_config->'runtime_image_version') = 'string'
+            AND (NOT (battle_config ? 'tool_codes') OR jsonb_typeof(battle_config->'tool_codes') = 'array')
+        )
+    ),
     battle_rule SMALLINT CHECK (battle_rule IS NULL OR battle_rule > 0),
     seq INT NOT NULL DEFAULT 0,
     UNIQUE (tenant_id, id),
@@ -117,7 +134,32 @@ CREATE TABLE IF NOT EXISTS battle_match (
     sandbox_ref VARCHAR(64),
     judge_task_ref VARCHAR(64),
     result SMALLINT CHECK (result IS NULL OR result IN (1, 2, 3)),
-    score_delta JSONB NOT NULL DEFAULT '{}'::jsonb,
+    score_delta JSONB NOT NULL DEFAULT '{}'::jsonb CHECK (
+        score_delta = '{}'::jsonb OR (
+            jsonb_typeof(score_delta) = 'object'
+            AND score_delta ?& ARRAY[
+                'team_a', 'team_b', 'rating_a_before', 'rating_b_before', 'rating_a_after',
+                'rating_b_after', 'delta_a', 'delta_b', 'k_factor', 'result'
+            ]
+            AND score_delta - ARRAY[
+                'team_a', 'team_b', 'rating_a_before', 'rating_b_before', 'rating_a_after',
+                'rating_b_after', 'delta_a', 'delta_b', 'k_factor', 'result'
+            ] = '{}'::jsonb
+            AND jsonb_typeof(score_delta->'team_a') = 'string'
+            AND jsonb_typeof(score_delta->'team_b') = 'string'
+            AND score_delta->>'team_a' ~ '^[1-9][0-9]*$'
+            AND score_delta->>'team_b' ~ '^[1-9][0-9]*$'
+            AND jsonb_typeof(score_delta->'rating_a_before') = 'number'
+            AND jsonb_typeof(score_delta->'rating_b_before') = 'number'
+            AND jsonb_typeof(score_delta->'rating_a_after') = 'number'
+            AND jsonb_typeof(score_delta->'rating_b_after') = 'number'
+            AND jsonb_typeof(score_delta->'delta_a') = 'number'
+            AND jsonb_typeof(score_delta->'delta_b') = 'number'
+            AND jsonb_typeof(score_delta->'k_factor') = 'number'
+            AND jsonb_typeof(score_delta->'result') = 'number'
+            AND score_delta->>'result' IN ('1', '2', '3')
+        )
+    ),
     replay_ref VARCHAR(255),
     status SMALLINT NOT NULL CHECK (status IN (1, 2, 3, 4)),
     matched_at TIMESTAMPTZ NOT NULL DEFAULT now(),

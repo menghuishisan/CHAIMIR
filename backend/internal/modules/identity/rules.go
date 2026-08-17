@@ -95,6 +95,40 @@ func ValidateAuthMode(mode int16) error {
 	}
 }
 
+// ValidateTenantFeatureFlags 校验租户功能开关中的 modules 封闭集合,缺省未配置表示全部启用。
+func ValidateTenantFeatureFlags(flags map[string]any) error {
+	raw, ok := flags["modules"]
+	if !ok {
+		return nil
+	}
+	items, ok := raw.([]any)
+	if !ok || len(items) == 0 {
+		return apperr.ErrIdentityTenantConfigInvalid
+	}
+	seen := make(map[string]struct{}, len(items))
+	for _, item := range items {
+		module, ok := item.(string)
+		if !ok || !isKnownTenantModule(module) {
+			return apperr.ErrIdentityTenantConfigInvalid
+		}
+		if _, exists := seen[module]; exists {
+			return apperr.ErrIdentityTenantConfigInvalid
+		}
+		seen[module] = struct{}{}
+	}
+	return nil
+}
+
+// isKnownTenantModule 判断租户功能开关是否属于平台登记的模块集合。
+func isKnownTenantModule(module string) bool {
+	switch module {
+	case TenantModuleTeaching, TenantModuleExperiment, TenantModuleContest, TenantModuleSim, TenantModuleGrade:
+		return true
+	default:
+		return false
+	}
+}
+
 // EnsureAccountCanLogin 校验账号状态是否允许进入认证成功路径。
 func EnsureAccountCanLogin(account Account, now time.Time) error {
 	if account.LockedUntil != nil && now.Before(*account.LockedUntil) {

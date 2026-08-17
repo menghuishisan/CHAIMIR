@@ -104,11 +104,20 @@ export class ApiClient {
       async (response) => {
         const requestConfig = response.config as RetriableRequestConfig
 
-        // 统一文件服务下载流不使用 JSON 信封(API 总览 §统一文件服务)，按原样透出。
-        // 同时带出 Content-Disposition：保存文件名的唯一来源是后端响应头，
-        // 拦截器是能拿到响应头的唯一位置，故在此打包给 getAttachment。
+        // 成功下载按原样透出;失败仍是平台统一 JSON 信封,必须复用同一错误和刷新链路。
         if (requestConfig.responseType === 'blob') {
-          return { blob: response.data, disposition: response.headers['content-disposition'] } as never
+          const disposition = response.headers['content-disposition']
+          if (typeof disposition === 'string' && disposition.trim() !== '') {
+            return { blob: response.data, disposition } as never
+          }
+          const apiResponse = await envelopeFromBlob(response.data)
+          if (!apiResponse) {
+            return Promise.reject(new ApiError(API_TRANSPORT_ERROR_MESSAGES.MALFORMED_RESPONSE))
+          }
+          if (apiResponse.code === API_SUCCESS_CODE) {
+            return Promise.reject(new ApiError(API_TRANSPORT_ERROR_MESSAGES.MALFORMED_RESPONSE))
+          }
+          return this.handleEnvelope(apiResponse, requestConfig) as never
         }
 
         // 边界校验：不是平台信封的 200 响应来自网关而非后端，按传输层失败处理
@@ -116,30 +125,34 @@ export class ApiClient {
           return Promise.reject(new ApiError(API_TRANSPORT_ERROR_MESSAGES.MALFORMED_RESPONSE))
         }
 
-        const apiResponse = response.data
-        if (apiResponse.code === API_SUCCESS_CODE) {
-          return (apiResponse.data !== undefined ? apiResponse.data : apiResponse) as never
-        }
-
-        // 登录态失效：用 Refresh Token 轮转一次并重放原请求
-        if (this.shouldRefresh(apiResponse, requestConfig)) {
-          requestConfig.chaimirRetried = true
-          try {
-            await this.refreshAccessToken()
-          } catch {
-            // 轮转失败已在 performTokenRefresh 内触发未登录处理，此处只回用户向错误
-            return Promise.reject(transformApiError(apiResponse))
-          }
-          return this.client.request(requestConfig) as never
-        }
-
-        if (apiResponse.code === API_ERROR_CODES.UNAUTHORIZED) {
-          this.config.onUnauthorized?.()
-        }
-        return Promise.reject(transformApiError(apiResponse))
+        return this.handleEnvelope(response.data, requestConfig) as never
       },
       (error: AxiosError) => Promise.reject(transformTransportError(error))
     )
+  }
+
+  /** handleEnvelope 统一处理普通 JSON 请求与 Blob 失败响应中的平台信封。 */
+  private async handleEnvelope(apiResponse: ApiResponse, requestConfig: RetriableRequestConfig): Promise<unknown> {
+    if (apiResponse.code === API_SUCCESS_CODE) {
+      return apiResponse.data !== undefined ? apiResponse.data : apiResponse
+    }
+
+    // 登录态失效：用 Refresh Token 轮转一次并重放原请求。
+    if (this.shouldRefresh(apiResponse, requestConfig)) {
+      requestConfig.chaimirRetried = true
+      try {
+        await this.refreshAccessToken()
+      } catch {
+        // 轮转失败已在 performTokenRefresh 内触发未登录处理，此处只回用户向错误。
+        throw transformApiError(apiResponse)
+      }
+      return this.client.request(requestConfig)
+    }
+
+    if (apiResponse.code === API_ERROR_CODES.UNAUTHORIZED) {
+      this.config.onUnauthorized?.()
+    }
+    throw transformApiError(apiResponse)
   }
 
   /** shouldRefresh 只对后端明确的登录失效错误触发一次令牌轮转。 */
@@ -263,14 +276,7 @@ export class ApiClient {
   }
 
   /**
-   * 基于后端 HTTP 根地址生成浏览器工具代理入口地址。
-   */
-  public browserURL(path: string, query?: Record<string, string | undefined>): string {
-    return `${this.baseURL()}${normalizePath(path)}${this.browserTokenQuery(query)}`
-  }
-
-  /**
-   * 基于独立工具 origin 生成浏览器工具代理入口地址。
+   * 基于独立工具 origin 生成浏览器工具代理入口地址;鉴权 query 由上层短时票据接口显式传入。
    * 工具页必须与平台页面分 origin，避免被嵌入页面读取平台 DOM 或同源凭据。
    */
   public browserURLAtOrigin(origin: string, path: string, query?: Record<string, string | undefined>): string {
@@ -290,25 +296,7 @@ export class ApiClient {
     ) {
       throw new Error('工具代理 origin 必须使用 HTTPS')
     }
-    return `${parsedOrigin.origin}${normalizePath(path)}${this.browserTokenQuery(query)}`
-  }
-
-  /**
-   * 构造浏览器工具代理入口使用的一次性 token 查询参数。
-   */
-  public browserTokenQuery(extra?: Record<string, string | undefined>): string {
-    const params = new URLSearchParams()
-    for (const [key, value] of Object.entries(extra || {})) {
-      if (value) {
-        params.set(key, value)
-      }
-    }
-    const token = this.config.getToken?.()
-    if (token) {
-      params.set('token', token)
-    }
-    const query = params.toString()
-    return query ? `?${query}` : ''
+    return `${parsedOrigin.origin}${normalizePath(path)}${queryString(query)}`
   }
 
   // === 文件上传 ===
@@ -427,6 +415,17 @@ function isEnvelope(data: unknown): data is ApiResponse {
   if (!data || typeof data !== 'object') return false
   const candidate = data as Record<string, unknown>
   return typeof candidate.code === 'string' && typeof candidate.message === 'string'
+}
+
+/** envelopeFromBlob 从无附件响应头的 Blob 中恢复平台错误信封。 */
+async function envelopeFromBlob(data: unknown): Promise<ApiResponse | undefined> {
+  if (!(data instanceof Blob)) return undefined
+  try {
+    const parsed: unknown = JSON.parse(await data.text())
+    return isEnvelope(parsed) ? parsed : undefined
+  } catch {
+    return undefined
+  }
 }
 
 /**

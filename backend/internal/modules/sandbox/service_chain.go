@@ -10,7 +10,7 @@ import (
 )
 
 // ChainDeploy 调用统一链部署能力。
-func (s *Service) ChainDeploy(ctx context.Context, req contracts.SandboxChainDeployRequest) (map[string]any, error) {
+func (s *Service) chainDeployContract(ctx context.Context, req contracts.SandboxChainDeployRequest) (map[string]any, error) {
 	if req.TenantID <= 0 || req.SandboxID <= 0 || len(req.Payload) == 0 || !validSourceRef(req.SourceRef) {
 		return nil, apperr.ErrSandboxDeployRequestInvalid
 	}
@@ -29,7 +29,7 @@ func (s *Service) ChainDeploy(ctx context.Context, req contracts.SandboxChainDep
 }
 
 // ChainSendTx 调用统一链交易能力。
-func (s *Service) ChainSendTx(ctx context.Context, req contracts.SandboxChainTxRequest) (map[string]any, error) {
+func (s *Service) chainSendTxContract(ctx context.Context, req contracts.SandboxChainTxRequest) (map[string]any, error) {
 	if req.TenantID <= 0 || req.SandboxID <= 0 || len(req.Payload) == 0 || !validSourceRef(req.SourceRef) {
 		return nil, apperr.ErrSandboxTxRequestInvalid
 	}
@@ -48,7 +48,7 @@ func (s *Service) ChainSendTx(ctx context.Context, req contracts.SandboxChainTxR
 }
 
 // ChainQuery 调用统一链查询能力。
-func (s *Service) ChainQuery(ctx context.Context, req contracts.SandboxChainQueryRequest) (map[string]any, error) {
+func (s *Service) chainQueryContract(ctx context.Context, req contracts.SandboxChainQueryRequest) (map[string]any, error) {
 	if req.TenantID <= 0 || req.SandboxID <= 0 || req.Target == "" || !validSourceRef(req.SourceRef) {
 		return nil, apperr.ErrSandboxContractRequestInvalid
 	}
@@ -67,7 +67,7 @@ func (s *Service) ChainQuery(ctx context.Context, req contracts.SandboxChainQuer
 }
 
 // ChainReset 调用统一链重置能力。
-func (s *Service) ChainReset(ctx context.Context, req contracts.SandboxChainResetRequest) error {
+func (s *Service) chainResetContract(ctx context.Context, req contracts.SandboxChainResetRequest) error {
 	if req.TenantID <= 0 || req.SandboxID <= 0 || !validSourceRef(req.SourceRef) {
 		return apperr.ErrSandboxContractRequestInvalid
 	}
@@ -192,7 +192,7 @@ func (s *Service) markSandboxExecutionActive(ctx context.Context, sb Sandbox) er
 // resolveCapability 只从服务端注册表解析 L2/L3 能力,禁止按 plugin_ref 动态加载任意代码。
 func (s *Service) resolveCapability(runtime Runtime) (ChainCapability, error) {
 	key := strings.TrimSpace(runtime.CapabilityImpl)
-	if runtime.AdapterLevel == 3 {
+	if runtime.AdapterLevel == RuntimeAdapterLevelPlugin {
 		key = strings.TrimSpace(runtime.PluginRef)
 	}
 	if key == "" {

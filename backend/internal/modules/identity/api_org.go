@@ -108,7 +108,7 @@ func (a orgAPI) deleteDepartment(c *gin.Context) {
 
 // listMajors 返回专业列表,支持 department_id 查询过滤。
 func (a orgAPI) listMajors(c *gin.Context) {
-	departmentID, ok := httpx.QueryInt(c, "department_id", httpx.QueryIntRule{BitSize: 64, Min: 0})
+	departmentID, ok := httpx.QueryID(c, "department_id", false)
 	if !ok {
 		return
 	}
@@ -167,7 +167,7 @@ func (a orgAPI) deleteMajor(c *gin.Context) {
 
 // listClasses 返回班级列表,支持 major_id 查询过滤。
 func (a orgAPI) listClasses(c *gin.Context) {
-	majorID, ok := httpx.QueryInt(c, "major_id", httpx.QueryIntRule{BitSize: 64, Min: 0})
+	majorID, ok := httpx.QueryID(c, "major_id", false)
 	if !ok {
 		return
 	}

@@ -102,7 +102,7 @@ func (s *Service) CreateLesson(ctx context.Context, chapterID int64, req LessonR
 	if err != nil {
 		return LessonDTO{}, err
 	}
-	lesson := Lesson{ID: s.ids.Generate(), TenantID: id.TenantID, ChapterID: chapterID, Title: req.Title, ContentType: req.ContentType, ContentRef: req.ContentRef, Sort: req.Sort}
+	lesson := Lesson{ID: s.ids.Generate(), TenantID: id.TenantID, ChapterID: chapterID, Title: req.Title, ContentType: req.ContentType, ContentRef: lessonContentRefMap(req.ContentType, req.ContentRef), Sort: req.Sort}
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
 		chapter, err := tx.GetChapter(ctx, id.TenantID, chapterID)
 		if err != nil {
@@ -174,7 +174,12 @@ func (s *Service) UpdateLesson(ctx context.Context, lessonID int64, req LessonRe
 		if err := ensureTeacherOwned(course, id.AccountID); err != nil {
 			return err
 		}
-		current.Title, current.ContentType, current.ContentRef, current.Sort = req.Title, req.ContentType, req.ContentRef, req.Sort
+		nextContentRef := lessonContentRefMap(req.ContentType, req.ContentRef)
+		// 同一材料形态只改标题/排序时保留服务端对象引用;客户端从未获得 object_ref。
+		if req.ContentType == current.ContentType && (req.ContentType == LessonContentVideo || req.ContentType == LessonContentAttachment) {
+			nextContentRef = current.ContentRef
+		}
+		current.Title, current.ContentType, current.ContentRef, current.Sort = req.Title, req.ContentType, nextContentRef, req.Sort
 		lesson, err = tx.UpdateLesson(ctx, current)
 		return err
 	}); err != nil {

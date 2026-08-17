@@ -7,6 +7,7 @@ import { cn } from "../../lib/cn";
 import { Icon } from "../../lib/icon";
 import { EMPHASIS_BOX, progressPercent, resolveEmphasis } from "../frameVisual";
 import { TONE_ICON, TONE_TEXT, type DarkTone } from "./darkTone";
+import { PatternFrame } from "./PatternFrame";
 import type { PatternViewProps } from "./types";
 import type { PipelinePattern, PipelineStep } from "@chaimir/sim-sdk";
 
@@ -37,8 +38,9 @@ export function PipelinePatternView({
   const compact = density === "panel";
 
   return (
-    <ol aria-label={`${pattern.title} 步骤`} className="flex flex-col gap-1.5">
-      {steps.map((step, index) => {
+    <PatternFrame density={density}>
+      <ol aria-label={`${pattern.title} 步骤`} className="flex flex-col gap-1.5">
+        {steps.map((step, index) => {
         const tone = STEP_TONE[step.status];
         const emphasis = resolveEmphasis(step.id, focus, step.meta);
         const isCurrent = step.id === currentStepId;
@@ -57,7 +59,9 @@ export function PipelinePatternView({
                 {step.detail}
               </span>
             )}
-            {step.process && (
+            {/* 进度条只给正在跑的那一步:未开始是 0%、已完成是 100%,画出来只是噪声,
+                状态词已经说清了 */}
+            {step.process && step.status === "running" && (
               <span className="mt-1 flex items-center gap-2">
                 {/* 静态进度条:进行中的过程用长度表达,禁用脉冲/呼吸动画 */}
                 <span className="h-1 min-w-0 flex-1 overflow-hidden rounded-full bg-dark-line">
@@ -67,7 +71,9 @@ export function PipelinePatternView({
                   />
                 </span>
                 <span className="shrink-0 text-xs tabular-nums text-on-dark-sub">
-                  {step.process.label} {progressPercent(step.process.progress)}%
+                  {step.process.label
+                    ? `${step.process.label} ${progressPercent(step.process.progress)}%`
+                    : `${progressPercent(step.process.progress)}%`}
                 </span>
               </span>
             )}
@@ -100,7 +106,8 @@ export function PipelinePatternView({
             )}
           </li>
         );
-      })}
-    </ol>
+        })}
+      </ol>
+    </PatternFrame>
   );
 }

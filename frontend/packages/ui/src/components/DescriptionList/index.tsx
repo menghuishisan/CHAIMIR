@@ -42,7 +42,10 @@ export function DescriptionList({ items, columns = 1, dense = false, className }
             className={cn(
               dense ? "mt-0.5" : "mt-1",
               "text-base text-ink",
-              item.mono && "font-mono tabular-nums",
+              // 长值必须在容器内换行:mono 值多为哈希/镜像摘要/trace_id(无空格可断),用 break-all
+              // 兜住;普通文案用 break-words 防长英文标识溢出栅格(规范 §5.1)
+              "break-words",
+              item.mono && "break-all font-mono tabular-nums",
             )}
           >
             {item.description}

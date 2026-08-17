@@ -92,12 +92,17 @@ func (a platformAPI) rejectApplication(c *gin.Context) {
 }
 
 // listTenants 读取平台租户列表,API 层不直接访问 repo。
+// status=0 表示不按状态过滤;keyword 同时匹配学校名称与短名。
 func (a platformAPI) listTenants(c *gin.Context) {
 	page, size, ok := httpx.Page(c)
 	if !ok {
 		return
 	}
-	out, total, p, s, err := a.svc.ListTenantsByPlatform(c.Request.Context(), page, size)
+	status, ok := httpx.QueryInt16(c, "status", httpx.QueryIntRule{Default: 0, Min: 0, Max: int64(TenantStatusExpired), HasMax: true})
+	if !ok {
+		return
+	}
+	out, total, p, s, err := a.svc.ListTenantsByPlatform(c.Request.Context(), status, c.Query("keyword"), page, size)
 	httpx.WritePage(c, out, total, p, s, err)
 }
 

@@ -45,7 +45,6 @@ export interface TeachingFrameInput {
     intent?: TeachingFrame['phase']['intent'];
     what: string;
     why: string;
-    watch: string;
   };
   patterns: PatternBinding[];
   focus: TeachingFrame['focus'];
@@ -94,7 +93,7 @@ export function commonAlgorithmInteractions(targetFilter: string, terminalPhaseI
     { id: 'select', kind: 'select-element', label: '选择对象', description: '选择画面中的对象,查看它在当前算法流程中的状态。', emits: 'select', target: 'element', elementFilter: targetFilter },
     advance,
     { id: 'attack', kind: 'button', label: '注入异常', description: '注入该算法需要处理的异常输入或攻击路径。', emits: 'attack', labelTag: 'attack' },
-    { id: 'recover', kind: 'button', label: '执行修复', description: '按该算法的恢复或防护规则处理异常。', emits: 'recover', labelTag: 'perturb' },
+    { id: 'recover', kind: 'button', label: '执行修复', description: '按该算法的恢复或防护规则处理异常。', emits: 'recover', labelTag: 'recover' },
   ];
 }
 
@@ -158,7 +157,6 @@ export function teachingFrame(input: TeachingFrameInput): TeachingFrame {
       explanation: {
         what: input.phase.what,
         why: input.phase.why,
-        watch: input.phase.watch,
       },
     },
     focus: input.focus,

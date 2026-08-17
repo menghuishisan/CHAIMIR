@@ -11,7 +11,12 @@
 // 故由调用方通过 global 显式声明,不复制第二份表单。
 
 import { useCallback, useId, useState } from 'react'
-import { VulnLevel, type VulnSource, type VulnSourceRequest } from '@chaimir/api-client'
+import {
+  VulnLevel,
+  type VulnSource,
+  type VulnSourceRequest,
+  type VulnSourceType,
+} from '@chaimir/api-client'
 import {
   Button,
   Callout,
@@ -76,16 +81,16 @@ export function VulnSourceFormModal({
   const [defaultLevel, setDefaultLevel] = useState(String(source?.default_level ?? VulnLevel.B))
   const [enabled, setEnabled] = useState(source?.enabled ?? true)
   const [endpoint, setEndpoint] = useState(
-    readString(source?.config, VULN_SOURCE_CONFIG_FIELDS.endpoint),
+    readString(source?.config, VULN_SOURCE_CONFIG_FIELDS.endpoint)
   )
   const [method, setMethod] = useState(
-    readString(source?.config, VULN_SOURCE_CONFIG_FIELDS.method) || VULN_SOURCE_METHODS[0],
+    readString(source?.config, VULN_SOURCE_CONFIG_FIELDS.method) || VULN_SOURCE_METHODS[0]
   )
   const [timeoutSeconds, setTimeoutSeconds] = useState(
-    String(readNumber(source?.config, VULN_SOURCE_CONFIG_FIELDS.timeoutSeconds, 15)),
+    String(readNumber(source?.config, VULN_SOURCE_CONFIG_FIELDS.timeoutSeconds, 15))
   )
   const [casesPath, setCasesPath] = useState(
-    readString(source?.config, VULN_SOURCE_CONFIG_FIELDS.casesPath),
+    readString(source?.config, VULN_SOURCE_CONFIG_FIELDS.casesPath)
   )
   const [mapping, setMapping] = useState(() => readMapping(source))
 
@@ -119,7 +124,7 @@ export function VulnSourceFormModal({
       // 配置按结构化字段组装:键名与后端读取的键一致,不接受用户手写 JSON
       const payload: VulnSourceRequest = {
         id: source?.id,
-        type: Number(type),
+        type: Number(type) as VulnSourceType,
         name: name.trim(),
         default_level: Number(defaultLevel) as VulnLevel,
         enabled,
@@ -172,7 +177,7 @@ export function VulnSourceFormModal({
       timeoutSeconds,
       type,
       validate,
-    ],
+    ]
   )
 
   return (
@@ -282,11 +287,12 @@ export function VulnSourceFormModal({
               </FormField>
             </div>
 
-            <div className="flex flex-col gap-4 rounded-md border border-line bg-surface-sunken p-4">
+            <div className="flex flex-col gap-4 well p-4">
               <div>
                 <p className="text-base text-ink">数据对应关系</p>
                 <p className="text-sm text-ink-sub">
-                  填写外部数据中对应信息的位置。嵌套内容用点号连接,如 <span className="font-mono">detail.body</span>。
+                  填写外部数据中对应信息的位置。嵌套内容用点号连接,如{' '}
+                  <span className="font-mono">detail.body</span>。
                 </p>
               </div>
 
@@ -303,10 +309,17 @@ export function VulnSourceFormModal({
                     value={mapping.externalRef}
                     placeholder="填写案例编号所在字段"
                     invalid={Boolean(errors.externalRef)}
-                    onChange={(event) => patchMapping(setMapping, { externalRef: event.target.value })}
+                    onChange={(event) =>
+                      patchMapping(setMapping, { externalRef: event.target.value })
+                    }
                   />
                 </FormField>
-                <FormField label="标题" htmlFor={`${fieldId}-map-title`} required error={errors.title}>
+                <FormField
+                  label="标题"
+                  htmlFor={`${fieldId}-map-title`}
+                  required
+                  error={errors.title}
+                >
                   <Input
                     id={`${fieldId}-map-title`}
                     value={mapping.title}
@@ -355,7 +368,9 @@ export function VulnSourceFormModal({
                     id={`${fieldId}-map-runtime`}
                     value={mapping.runtimeMode}
                     placeholder="填写复现方式所在字段"
-                    onChange={(event) => patchMapping(setMapping, { runtimeMode: event.target.value })}
+                    onChange={(event) =>
+                      patchMapping(setMapping, { runtimeMode: event.target.value })
+                    }
                   />
                 </FormField>
               </div>
@@ -379,7 +394,7 @@ export function VulnSourceFormModal({
             <Button type="button" variant="outline" onClick={onClose}>
               取消
             </Button>
-            <Button type="submit" variant="seal" loading={submitting}>
+            <Button type="submit" variant="primary" loading={submitting}>
               {editing ? '保存配置' : '添加来源'}
             </Button>
           </ModalFooter>
@@ -414,7 +429,7 @@ function readMapping(source: VulnSource | undefined): MappingState {
 /** patchMapping 局部更新映射编辑态。 */
 function patchMapping(
   setState: React.Dispatch<React.SetStateAction<MappingState>>,
-  patch: Partial<MappingState>,
+  patch: Partial<MappingState>
 ): void {
   setState((current) => ({ ...current, ...patch }))
 }
@@ -426,7 +441,11 @@ function readString(source: Record<string, unknown> | undefined, key: string): s
 }
 
 /** readNumber 从开放对象里读数字字段;非数字回默认值。 */
-function readNumber(source: Record<string, unknown> | undefined, key: string, fallback: number): number {
+function readNumber(
+  source: Record<string, unknown> | undefined,
+  key: string,
+  fallback: number
+): number {
   const value = source?.[key]
   return typeof value === 'number' && Number.isFinite(value) ? value : fallback
 }

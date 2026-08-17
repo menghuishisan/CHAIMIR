@@ -11,6 +11,94 @@ import (
 	"chaimir/pkg/apperr"
 )
 
+// GetContentFace 实现跨模块题面读取契约。
+func (s *Service) GetContentFace(ctx context.Context, tenantID int64, ref contracts.ContentItemRef) (contracts.ContentItemSnapshot, error) {
+	item, err := s.getItemWithBody(ctx, tenantID, ref.ItemCode, ref.ItemVersion)
+	if err != nil {
+		return contracts.ContentItemSnapshot{}, err
+	}
+	if item.TenantID != tenantID && item.Visibility != VisibilityShared {
+		return contracts.ContentItemSnapshot{}, apperr.ErrContentNotFound
+	}
+	if item.Status != StatusPublished && item.Status != StatusDeprecated {
+		return contracts.ContentItemSnapshot{}, apperr.ErrContentVersionNotPublished
+	}
+	face, err := faceSnapshot(item)
+	if err != nil {
+		return contracts.ContentItemSnapshot{}, apperr.ErrContentBodyInvalid.WithCause(err)
+	}
+	return contractSnapshot(face)
+}
+
+// GetContentFull 实现跨模块全量读取契约。
+func (s *Service) GetContentFull(ctx context.Context, tenantID int64, ref contracts.ContentItemRef) (contracts.ContentItemSnapshot, error) {
+	item, err := s.getItemWithBody(ctx, tenantID, ref.ItemCode, ref.ItemVersion)
+	if err != nil {
+		return contracts.ContentItemSnapshot{}, err
+	}
+	if item.TenantID != tenantID {
+		return contracts.ContentItemSnapshot{}, apperr.ErrContentFullAccessDenied
+	}
+	if item.Status != StatusPublished && item.Status != StatusDeprecated {
+		return contracts.ContentItemSnapshot{}, apperr.ErrContentVersionNotPublished
+	}
+	return contractSnapshot(item)
+}
+
+// BatchGetContentFace 实现跨模块批量题面读取契约。
+func (s *Service) BatchGetContentFace(ctx context.Context, tenantID int64, refs []contracts.ContentItemRef) ([]contracts.ContentItemSnapshot, error) {
+	if tenantID <= 0 || len(refs) == 0 || len(refs) > 100 {
+		return nil, apperr.ErrContentQueryInvalid
+	}
+	out := make([]contracts.ContentItemSnapshot, 0, len(refs))
+	for _, ref := range refs {
+		item, err := s.GetContentFace(ctx, tenantID, ref)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, item)
+	}
+	return out, nil
+}
+
+// ReplaceUsageRefs 实现跨模块内容引用集合替换契约。
+func (s *Service) ReplaceUsageRefs(ctx context.Context, tenantID int64, sourceScope, sourceRef string, refs []contracts.ContentItemRef) error {
+	sourceScope = stringsTrim(sourceScope)
+	sourceRef = stringsTrim(sourceRef)
+	if tenantID <= 0 || sourceScope == "" || sourceRef == "" || len(sourceScope) > 32 || len(sourceRef) > 128 || len(refs) > 200 {
+		return apperr.ErrContentInvalid
+	}
+	seen := map[string]struct{}{}
+	next := make([]UsageRef, 0, len(refs))
+	if err := s.store.TenantTx(ctx, tenantID, func(ctx context.Context, tx TxStore) error {
+		for _, ref := range refs {
+			if !validCode(ref.ItemCode) || !validVersion(ref.ItemVersion) {
+				return apperr.ErrContentInvalid
+			}
+			key := ref.ItemCode + "\x00" + ref.ItemVersion
+			if _, ok := seen[key]; ok {
+				continue
+			}
+			seen[key] = struct{}{}
+			item, err := tx.GetPublishedItemForUsage(ctx, tenantID, ref.ItemCode, ref.ItemVersion)
+			if isNoRows(err) {
+				return apperr.ErrContentVersionNotPublished
+			}
+			if err != nil {
+				return err
+			}
+			next = append(next, UsageRef{ID: s.ids.Generate(), TenantID: tenantID, ItemID: item.ID, ItemCode: item.Code, ItemVersion: item.Version, SourceScope: sourceScope, SourceRef: sourceRef})
+		}
+		return tx.ReplaceUsageRefs(ctx, tenantID, sourceScope, sourceRef, next)
+	}); err != nil {
+		if ae, ok := apperr.As(err); ok {
+			return ae
+		}
+		return apperr.ErrContentInvalid.WithCause(err)
+	}
+	return nil
+}
+
 // GetJudgeSpec 按租户与锁定版本读取判题配置与答案快照。
 func (s *Service) GetJudgeSpec(ctx context.Context, tenantID int64, itemCode, itemVersion string) (contracts.ContentJudgeSpec, error) {
 	item, err := s.GetContentFull(ctx, tenantID, contracts.ContentItemRef{ItemCode: itemCode, ItemVersion: itemVersion})
@@ -19,11 +107,11 @@ func (s *Service) GetJudgeSpec(ctx context.Context, tenantID int64, itemCode, it
 	}
 	spec := contracts.ContentJudgeSpec{ItemCode: item.ItemCode, ItemVersion: item.ItemVersion, VersionHash: item.VersionHash}
 	if raw, ok := item.Body["judge_config"].(map[string]any); ok {
-		spec.JudgerCode = stringFromAny(raw["judger_code"])
-		spec.SuiteRef = stringFromAny(raw["suite_ref"])
+		spec.JudgerCode = jsonx.StringValue(raw["judger_code"])
+		spec.SuiteRef = jsonx.StringValue(raw["suite_ref"])
 		spec.MaxScore = int32FromAny(raw["max_score"])
 		if expectation, ok := raw["expectation"].(map[string]any); ok {
-			cloned, err := cloneMapStrict(expectation)
+			cloned, err := jsonx.CloneObjectStrict(expectation)
 			if err != nil {
 				return contracts.ContentJudgeSpec{}, apperr.ErrContentBodyInvalid.WithCause(err)
 			}
@@ -34,12 +122,12 @@ func (s *Service) GetJudgeSpec(ctx context.Context, tenantID int64, itemCode, it
 		spec.MaxScore = int32FromAny(item.Body["max_score"])
 	}
 	if spec.SuiteRef == "" {
-		spec.SuiteRef = stringFromAny(item.Body["suite_ref"])
+		spec.SuiteRef = jsonx.StringValue(item.Body["suite_ref"])
 	}
 	if spec.Expectation == nil {
 		spec.Expectation = map[string]any{}
 		if expectation, ok := item.Body["expectation"].(map[string]any); ok {
-			cloned, err := cloneMapStrict(expectation)
+			cloned, err := jsonx.CloneObjectStrict(expectation)
 			if err != nil {
 				return contracts.ContentJudgeSpec{}, apperr.ErrContentBodyInvalid.WithCause(err)
 			}
@@ -106,14 +194,6 @@ func (s *Service) SystemImportContentFromHTTP(ctx context.Context, req SystemImp
 		return ItemSnapshotDTO{}, err
 	}
 	return ItemSnapshotDTO{ItemDTO: ItemDTO{Code: snapshot.ItemCode, Version: snapshot.ItemVersion, Type: snapshot.Type, Title: snapshot.Title, Difficulty: snapshot.Difficulty, Visibility: snapshot.Visibility, Tags: snapshot.Tags, KnowledgePoints: snapshot.KnowledgePoints, VersionHash: snapshot.VersionHash, Status: snapshot.Status}, Body: snapshot.Body}, nil
-}
-
-// stringFromAny 从 JSON 动态值读取字符串。
-func stringFromAny(value any) string {
-	if s, ok := value.(string); ok {
-		return s
-	}
-	return ""
 }
 
 // int32FromAny 从 JSON 动态值读取整数。

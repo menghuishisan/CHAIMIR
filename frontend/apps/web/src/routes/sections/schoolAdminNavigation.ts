@@ -19,7 +19,6 @@ import type { RoleNavigationConfig } from '../../layouts/main/navigation'
 
 export const schoolAdminNavigation: RoleNavigationConfig = {
   ...ROLE_ROUTES.schoolAdmin,
-  brandName: 'Chaimir 校管端',
   hasNotificationInbox: true,
   groups: [
     {

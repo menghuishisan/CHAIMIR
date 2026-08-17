@@ -3,9 +3,7 @@
 // 赛题 = M5 题目引用 + 赛内分值 + 动态分规则 + (对抗赛)对抗配置。
 // 题目从题库已发布内容里选并锁版本,不让教师手填题目编号与版本号。
 //
-// 动态分与对抗配置都是 JSONB 开放对象,但后端读的键是固定的
-// (`min_score`/`decay_per_solve`;`runtime_code`/`runtime_image_version`/`tool_codes`),
-// 故按这些键渲染结构化字段,不给裸 JSON 文本域。
+// 动态分与对抗配置使用前后端共用的固定结构,不给裸 JSON 文本域。
 //
 // 答案黑盒:题面正文与判题配置不在本页展开,只呈现标题、分值与类型 ——
 // 教师编排需要的是"选哪道题、值多少分",不需要在这里读答案。
@@ -54,15 +52,6 @@ import { userFacingErrorMessage } from '../../../../utils/userFacingError'
 /** 题目选择器一次取回的条数:后端分页上限 100。 */
 const ITEM_PICKER_SIZE = 100
 
-/** 动态分规则在 dynamic_score 里的键:与后端 service_solve 读取的键一致。 */
-const DYNAMIC_MIN_SCORE = 'min_score'
-const DYNAMIC_DECAY_PER_SOLVE = 'decay_per_solve'
-
-/** 对抗配置在 battle_config 里的键:后端 validateBattleConfig 要求前两个必填。 */
-const BATTLE_RUNTIME_CODE = 'runtime_code'
-const BATTLE_RUNTIME_IMAGE_VERSION = 'runtime_image_version'
-const BATTLE_TOOL_CODES = 'tool_codes'
-
 export interface ContestProblemsProps {
   contest: Contest
 }
@@ -104,11 +93,11 @@ export function ContestProblems({ contest }: ContestProblemsProps) {
       key: 'dynamic_score',
       header: '动态分',
       render: (problem) => {
-        const decay = readNumber(problem.dynamic_score, DYNAMIC_DECAY_PER_SOLVE, 0)
+        const decay = problem.dynamic_score?.decay_per_solve ?? 0
         if (decay <= 0) return <span className="text-ink-sub">固定分值</span>
         return (
           <span className="text-sm text-ink-sub">
-            每通过一队降 {decay} 分,最低 {readNumber(problem.dynamic_score, DYNAMIC_MIN_SCORE, problem.score)} 分
+            每通过一队降 {decay} 分,最低 {problem.dynamic_score?.min_score ?? problem.score} 分
           </span>
         )
       },
@@ -207,24 +196,20 @@ function ProblemFormModal({ contest, problem, nextSeq, onClose, onSaved }: Probl
   const [score, setScore] = useState(String(problem?.score ?? 100))
   const [seq, setSeq] = useState(String(problem?.seq ?? nextSeq))
   const [dynamicEnabled, setDynamicEnabled] = useState(
-    readNumber(problem?.dynamic_score, DYNAMIC_DECAY_PER_SOLVE, 0) > 0,
+    (problem?.dynamic_score?.decay_per_solve ?? 0) > 0,
   )
   const [minScore, setMinScore] = useState(
-    String(readNumber(problem?.dynamic_score, DYNAMIC_MIN_SCORE, 60)),
+    String(problem?.dynamic_score?.min_score ?? 60),
   )
   const [decay, setDecay] = useState(
-    String(readNumber(problem?.dynamic_score, DYNAMIC_DECAY_PER_SOLVE, 5)),
+    String(problem?.dynamic_score?.decay_per_solve ?? 5),
   )
   const [battleRule, setBattleRule] = useState(String(problem?.battle_rule ?? BATTLE_RULES[0]))
-  const [runtimeCode, setRuntimeCode] = useState(
-    readString(problem?.battle_config, BATTLE_RUNTIME_CODE),
-  )
+  const [runtimeCode, setRuntimeCode] = useState(problem?.battle_config?.runtime_code ?? '')
   const [imageVersion, setImageVersion] = useState(
-    readString(problem?.battle_config, BATTLE_RUNTIME_IMAGE_VERSION),
+    problem?.battle_config?.runtime_image_version ?? '',
   )
-  const [toolCodes, setToolCodes] = useState<string[]>(
-    readStringArray(problem?.battle_config, BATTLE_TOOL_CODES),
-  )
+  const [toolCodes, setToolCodes] = useState<string[]>(problem?.battle_config?.tool_codes ?? [])
   const [formError, setFormError] = useState<string>()
   const [submitting, setSubmitting] = useState(false)
 
@@ -256,19 +241,24 @@ function ProblemFormModal({ contest, problem, nextSeq, onClose, onSaved }: Probl
         return
       }
       const scoreValue = Number(score)
-      if (!Number.isFinite(scoreValue) || scoreValue <= 0) {
-        setFormError('分值需要是大于 0 的数字')
+      if (!Number.isInteger(scoreValue) || scoreValue <= 0) {
+        setFormError('分值需要是大于 0 的整数')
+        return
+      }
+      const seqValue = Number(seq)
+      if (!Number.isInteger(seqValue) || seqValue <= 0) {
+        setFormError('序号需要是大于 0 的整数')
         return
       }
       if (dynamicEnabled) {
         const minValue = Number(minScore)
         const decayValue = Number(decay)
-        if (!Number.isFinite(minValue) || minValue <= 0 || minValue > scoreValue) {
-          setFormError('最低分需要大于 0 且不超过题目分值')
+        if (!Number.isInteger(minValue) || minValue <= 0 || minValue > scoreValue) {
+          setFormError('最低分需要是正整数且不超过题目分值')
           return
         }
-        if (!Number.isFinite(decayValue) || decayValue <= 0) {
-          setFormError('每队衰减需要是大于 0 的数字')
+        if (!Number.isInteger(decayValue) || decayValue <= 0) {
+          setFormError('每队衰减需要是大于 0 的整数')
           return
         }
       }
@@ -282,17 +272,17 @@ function ProblemFormModal({ contest, problem, nextSeq, onClose, onSaved }: Probl
         item_code: itemCode,
         item_version: itemVersion,
         score: scoreValue,
-        seq: Number(seq) || nextSeq,
+        seq: seqValue,
         // 动态分与对抗配置按结构化字段组装,不接受用户手写 JSON
         dynamic_score: dynamicEnabled
-          ? { [DYNAMIC_MIN_SCORE]: Number(minScore), [DYNAMIC_DECAY_PER_SOLVE]: Number(decay) }
-          : {},
+          ? { min_score: Number(minScore), decay_per_solve: Number(decay) }
+          : undefined,
         battle_rule: isBattle ? (Number(battleRule) as BattleRule) : undefined,
         battle_config: isBattle
           ? {
-              [BATTLE_RUNTIME_CODE]: runtimeCode,
-              [BATTLE_RUNTIME_IMAGE_VERSION]: imageVersion,
-              ...(toolCodes.length > 0 ? { [BATTLE_TOOL_CODES]: toolCodes } : {}),
+              runtime_code: runtimeCode,
+              runtime_image_version: imageVersion,
+              ...(toolCodes.length > 0 ? { tool_codes: toolCodes } : {}),
             }
           : undefined,
       }
@@ -319,7 +309,6 @@ function ProblemFormModal({ contest, problem, nextSeq, onClose, onSaved }: Probl
       isBattle,
       itemRef,
       minScore,
-      nextSeq,
       onSaved,
       runtimeCode,
       score,
@@ -373,6 +362,7 @@ function ProblemFormModal({ contest, problem, nextSeq, onClose, onSaved }: Probl
                   id="problem-score"
                   type="number"
                   min="1"
+                  step="1"
                   value={score}
                   onChange={(event) => setScore(event.target.value)}
                 />
@@ -382,13 +372,14 @@ function ProblemFormModal({ contest, problem, nextSeq, onClose, onSaved }: Probl
                   id="problem-seq"
                   type="number"
                   min="1"
+                  step="1"
                   value={seq}
                   onChange={(event) => setSeq(event.target.value)}
                 />
               </FormField>
             </div>
 
-            <div className="flex flex-col gap-3 rounded-md border border-line bg-surface-sunken p-4">
+            <div className="flex flex-col gap-3 well p-4">
               <Checkbox
                 checked={dynamicEnabled}
                 label="按通过队数递减分值(动态分)"
@@ -406,6 +397,7 @@ function ProblemFormModal({ contest, problem, nextSeq, onClose, onSaved }: Probl
                       id="problem-decay"
                       type="number"
                       min="1"
+                      step="1"
                       value={decay}
                       onChange={(event) => setDecay(event.target.value)}
                     />
@@ -420,6 +412,7 @@ function ProblemFormModal({ contest, problem, nextSeq, onClose, onSaved }: Probl
                       id="problem-min-score"
                       type="number"
                       min="1"
+                      step="1"
                       value={minScore}
                       onChange={(event) => setMinScore(event.target.value)}
                     />
@@ -431,7 +424,7 @@ function ProblemFormModal({ contest, problem, nextSeq, onClose, onSaved }: Probl
             </div>
 
             {isBattle ? (
-              <div className="flex flex-col gap-4 rounded-md border border-line bg-surface-sunken p-4">
+              <div className="flex flex-col gap-4 well p-4">
                 <FormField label="对抗规则" required helper="决定这道题怎么判胜负">
                   <SegmentedControl
                     aria-label="对抗规则"
@@ -523,7 +516,7 @@ function ProblemFormModal({ contest, problem, nextSeq, onClose, onSaved }: Probl
             <Button type="button" variant="outline" onClick={onClose}>
               取消
             </Button>
-            <Button type="submit" variant="seal" loading={submitting}>
+            <Button type="submit" variant="primary" loading={submitting}>
               {editing ? '保存赛题' : '添加赛题'}
             </Button>
           </ModalFooter>
@@ -531,23 +524,4 @@ function ProblemFormModal({ contest, problem, nextSeq, onClose, onSaved }: Probl
       </ModalContent>
     </Modal>
   )
-}
-
-/** readNumber 从开放对象里读数字字段;非数字回默认值(不把对象塞进控件)。 */
-function readNumber(source: Record<string, unknown> | undefined, key: string, fallback: number): number {
-  const value = source?.[key]
-  return typeof value === 'number' && Number.isFinite(value) ? value : fallback
-}
-
-/** readString 从开放对象里读字符串字段;非字符串回空串。 */
-function readString(source: Record<string, unknown> | undefined, key: string): string {
-  const value = source?.[key]
-  return typeof value === 'string' ? value : ''
-}
-
-/** readStringArray 从开放对象里读字符串数组;非数组回空数组。 */
-function readStringArray(source: Record<string, unknown> | undefined, key: string): string[] {
-  const value = source?.[key]
-  if (!Array.isArray(value)) return []
-  return value.filter((item): item is string => typeof item === 'string')
 }

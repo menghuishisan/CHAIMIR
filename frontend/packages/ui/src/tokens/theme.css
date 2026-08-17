@@ -76,6 +76,10 @@
   --color-on-dark-faint: #51625a; /* 仅装饰,不承载信息 */
   --color-on-dark-danger: #f2a6a8; /* 深底错误文字(crimson 亮档),对 dark-bg ≈8.9:1 */
   --color-accent: #3fd2a8; /* jade-400:焦点环/指示条/深底点睛,对 dark-bg ≈9:1 */
+  /* 深底的玉色薄底与薄边(激活/选中/当前项)。光面侧对应的是 --color-primary-soft,
+     深色侧此前各处直接写 jade-400/10~/25,同一个语义出现四档透明度,故统一收成两个令牌。 */
+  --color-on-dark-accent-soft: rgb(63 210 168 / 0.15);
+  --color-on-dark-accent-line: rgb(63 210 168 / 0.4);
   /* 深底辅助数据色(§8.1:玉为首,琥珀/蓝/紫为辅;仅用于深色语境的图表系列与状态区分,
      不得用于光面。对 dark-bg 依次 ≈11.4:1 / 9.7:1 / 10.0:1,对 dark-elevated 亦 ≥7.9:1) */
   --color-on-dark-amber: #e8c877;
@@ -99,6 +103,7 @@
   --color-primary-hover: #096549;
   --color-primary-soft: #e7f6f0; /* 玉浅底(激活/选中底) */
   --color-seal: #df4b34; /* 品牌章 */
+  --color-seal-soft: rgb(223 75 52 / 0.1); /* 朱砂浅底(对抗能量类徽标),与玉的 primary-soft 同位 */
   --color-seal-action: #c13a26; /* 落印类实底按钮,白字 ≈5.8:1 */
   --color-seal-action-hover: #a32e1d;
   --color-energy: #e96b52; /* 对抗/能量深底点睛 */
@@ -395,6 +400,13 @@
   --content-max: 1240px;
   --pane-inset: 14px;
 
+  /* 沉浸态工作台栏宽(规范 §2.4 / §7.1 三区骨架):
+     左辅助区 300 / 右事件流 320 / 收起后的竖向把手 40。
+     主舞台不参与宽度计算,取 flex-1 吃掉两侧释放的空间。 */
+  --wb-aside-w: 300px;
+  --wb-stream-w: 320px;
+  --wb-rail-w: 40px;
+
   --t-press: 120ms;
   --t-fast: 160ms;
   --t-base: 200ms;
@@ -432,6 +444,24 @@
 /* ---------- 侧栏宽度过渡(§4.4:只动导航宽度,属性名集中于主题层) ---------- */
 @utility transition-sidebar {
   transition-property: width;
+}
+
+/* ---------- 沉浸态工作台栏宽(§7.1:栏宽走令牌,组件不写任意值) ----------
+   收起态用把手宽 --wb-rail-w;主舞台不在这里出现 —— 它取 flex-1 吃掉释放的宽度。 */
+@utility w-wb-aside {
+  width: var(--wb-aside-w);
+}
+@utility w-wb-stream {
+  width: var(--wb-stream-w);
+}
+@utility w-wb-rail {
+  width: var(--wb-rail-w);
+}
+
+/* ---------- 竖排文字(§7.1:侧栏收起为竖向把手时,面板名沿把手竖排) ---------- */
+@utility text-vertical {
+  writing-mode: vertical-rl;
+  text-orientation: mixed;
 }
 
 /* ---------- Select 浮层原点(跟随 Radix 触发源,避免业务层写任意值) ---------- */
@@ -472,6 +502,17 @@
   @media (min-width: 48rem) {
     padding: var(--pane-inset);
   }
+}
+
+/* ---------- 凹陷井(§6.5.1 第 2 级:抬起片内部的字段分组/只读信息块) ----------
+   只用凹陷底色表达「同一张纸上的一块凹区」,不画边框、不加投影 ——
+   近白描边矩形套在近白圆角卡片里、卡片又套在近白圆角光面里,就是「壳里套壳」。
+   只定圆角与底色:内距在调用处显式写(p-4 分组 / p-3 信息条),
+   避免两个不同工具类同时定 padding 后靠样式表顺序决胜负。
+   只放在 Card / Table / Stat 这类抬起片内部;井里不再套井。 */
+@utility well {
+  border-radius: var(--radius-md);
+  background-color: var(--color-surface-sunken);
 }
 
 /* ---------- 层级工具类(§2.4:z-index 只许引用令牌阶) ---------- */

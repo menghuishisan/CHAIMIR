@@ -7,16 +7,18 @@
 // 状态三档由后端 UpdateTenantStatusByPlatform 限定(正常/停用/到期),
 // 停用与到期的后果不同,故各自说明再确认。到期时间只在这条接口上可改。
 
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useState } from 'react'
 import { useNavigate } from 'react-router'
 import { Building, CalendarClock, CircleSlash, Search, ShieldCheck } from 'lucide-react'
-import { DeployMode, TenantStatus, type Tenant } from '@chaimir/api-client'
+import { TenantStatus, type Tenant } from '@chaimir/api-client'
 import {
   Badge,
   Breadcrumb,
   Button,
   Callout,
   DescriptionList,
+  FilterBar,
+  FilterField,
   FormField,
   Input,
   Modal,
@@ -40,7 +42,7 @@ import {
 } from '@chaimir/ui'
 import { api } from '../../../../app/api'
 import { ResourceState } from '../../../../components/ResourceState'
-import { usePagedResource } from '../../../../hooks'
+import { usePagedResource, useResourceTotal } from '../../../../hooks'
 import { formatDate, formatDateTime } from '../../../../utils/formatters'
 import {
   TENANT_STATUSES,
@@ -76,35 +78,36 @@ const STATUS_COPY: Record<TenantStatus, { title: string; description: string; da
 export default function PlatformSchoolsPage() {
   const navigate = useNavigate()
   const [keyword, setKeyword] = useState('')
+  const [searchTerm, setSearchTerm] = useState('')
   const [statusFilter, setStatusFilter] = useState<string>('')
   const [target, setTarget] = useState<Tenant>()
 
-  const tenants = usePagedResource<Tenant>((params) => api.identity.getTenants(params), [])
+  // 状态与关键词都交给服务端:对当前页做二次筛选会让「共 N 所」与看到的行数、
+  // 以及翻页范围三者互相矛盾(筛掉的行仍占着页码)。
+  const tenants = usePagedResource<Tenant>(
+    (params) =>
+      api.identity.getTenants({
+        status: statusFilter ? (Number(statusFilter) as TenantStatus) : undefined,
+        keyword: searchTerm || undefined,
+        ...params,
+      }),
+    [statusFilter, searchTerm],
+  )
 
-  // 后端租户列表不带关键词与状态参数,故筛选在本页对当前页做:
-  // 平台租户量级远小于账号,分页够用;不自造后端没有的查询参数。
-  const visible = useMemo(() => {
-    const list = tenants.data ? tenants.data.list : []
-    const text = keyword.trim().toLowerCase()
-    return list.filter((tenant) => {
-      if (statusFilter && tenant.status !== Number(statusFilter)) return false
-      if (text === '') return true
-      return (
-        tenant.name.toLowerCase().includes(text) ||
-        tenant.code.toLowerCase().includes(text) ||
-        (tenant.display_name ?? '').toLowerCase().includes(text)
-      )
-    })
-  }, [keyword, statusFilter, tenants.data])
-
-  const stats = useMemo(() => {
-    const list = tenants.data ? tenants.data.list : []
-    return {
-      active: list.filter((item) => item.status === TenantStatus.ACTIVE).length,
-      saas: list.filter((item) => item.deploy_mode === DeployMode.SAAS).length,
-      expiring: list.filter((item) => item.expire_at !== undefined).length,
-    }
-  }, [tenants.data])
+  // 指标带取全量口径,不随下方筛选变化:它回答「平台整体有多少学校、多少在正常使用」。
+  const totalCount = useResourceTotal((params) => api.identity.getTenants(params), [])
+  const activeCount = useResourceTotal(
+    (params) => api.identity.getTenants({ status: TenantStatus.ACTIVE, ...params }),
+    [],
+  )
+  const disabledCount = useResourceTotal(
+    (params) => api.identity.getTenants({ status: TenantStatus.DISABLED, ...params }),
+    [],
+  )
+  const expiredCount = useResourceTotal(
+    (params) => api.identity.getTenants({ status: TenantStatus.EXPIRED, ...params }),
+    [],
+  )
 
   const columns: TableColumn<Tenant>[] = [
     {
@@ -182,74 +185,76 @@ export default function PlatformSchoolsPage() {
 
       <PageSection>
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <Stat label="学校总数" value={tenants.total} icon={Building} />
-          <Stat label="正常使用" value={stats.active} icon={ShieldCheck} />
-          <Stat label="平台托管" value={stats.saas} icon={Building} hint="其余为学校自建" />
-          <Stat label="已设到期" value={stats.expiring} icon={CalendarClock} hint="需要关注续期" />
+          <Stat label="学校总数" value={totalCount ?? '—'} icon={Building} hint="不受下方筛选影响" />
+          <Stat label="正常使用" value={activeCount ?? '—'} icon={ShieldCheck} />
+          <Stat label="已停用" value={disabledCount ?? '—'} icon={Building} hint="该校师生无法登录" />
+          <Stat label="已到期" value={expiredCount ?? '—'} icon={CalendarClock} hint="需要关注续期" />
         </div>
       </PageSection>
 
       <PageSection
         title="学校列表"
-        description={`共 ${tenants.total} 所学校。按名称或短名搜索,按状态筛选。`}
-        actions={
-          <div className="flex flex-wrap items-end gap-2">
-            <SegmentedControl
-              aria-label="按学校状态筛选"
-              size="sm"
-              options={[
-                { value: '', label: '全部' },
-                ...TENANT_STATUSES.map((status) => ({
-                  value: String(status),
-                  label: tenantStatusLabel(status),
-                })),
-              ]}
-              value={statusFilter}
-              onValueChange={setStatusFilter}
-            />
-            <Input
-            aria-label="按学校名称或短名搜索"
-              leftIcon={Search}
-              value={keyword}
-              placeholder="搜索学校"
-              onChange={(event) => setKeyword(event.target.value)}
-            />
-          </div>
-        }
+        description={`共 ${tenants.total} 所学校。`}
       >
-        <ResourceState
-          resource={tenants}
-          emptyIcon={Building}
-          emptyTitle="还没有开通学校"
-          emptyDescription="通过入驻申请审核后,学校会出现在这里。"
-          emptyAction={
-            <Button variant="primary" onClick={() => navigate('/platform-admin/applications')}>
-              去入驻申请
-            </Button>
-          }
-          skeleton={<Table columns={columns} data={[]} rowKey={() => ''} loading />}
-        >
-          {(page) => (
-            <div className="flex flex-col gap-4">
-              <Table
-                columns={columns}
-                data={visible}
-                rowKey={(item) => item.id}
-                empty={
-                  <span className="text-sm text-ink-sub">
-                    这一页没有匹配的学校,换个条件或翻页看看。
-                  </span>
-                }
+        <div className="flex flex-col gap-4">
+          <FilterBar label="学校筛选" onSubmit={() => setSearchTerm(keyword.trim())} submitLabel="搜索">
+            <FilterField label="学校状态" group>
+              <SegmentedControl
+                aria-label="按学校状态筛选"
+                size="sm"
+                options={[
+                  { value: '', label: '全部' },
+                  ...TENANT_STATUSES.map((status) => ({
+                    value: String(status),
+                    label: tenantStatusLabel(status),
+                  })),
+                ]}
+                value={statusFilter}
+                onValueChange={setStatusFilter}
               />
-              <Pagination
-                page={tenants.page}
-                pageSize={tenants.pageSize}
-                total={page.total}
-                onPageChange={tenants.setPage}
+            </FilterField>
+            <FilterField label="学校名称或短名" htmlFor="schools-keyword">
+              <Input
+                id="schools-keyword"
+                leftIcon={Search}
+                value={keyword}
+                placeholder="输入关键词"
+                onChange={(event) => setKeyword(event.target.value)}
               />
-            </div>
-          )}
-        </ResourceState>
+            </FilterField>
+          </FilterBar>
+
+          <ResourceState
+            resource={tenants}
+            emptyIcon={Building}
+            emptyTitle={statusFilter || searchTerm ? '没有匹配的学校' : '还没有开通学校'}
+            emptyDescription={
+              statusFilter || searchTerm
+                ? '换个状态或关键词再试,也可以清空条件看全部学校。'
+                : '通过入驻申请审核后,学校会出现在这里。'
+            }
+            emptyAction={
+              statusFilter || searchTerm ? undefined : (
+                <Button variant="primary" onClick={() => navigate('/platform-admin/applications')}>
+                  去入驻申请
+                </Button>
+              )
+            }
+            skeleton={<Table columns={columns} data={[]} rowKey={() => ''} loading />}
+          >
+            {(page) => (
+              <div className="flex flex-col gap-4">
+                <Table columns={columns} data={page.list} rowKey={(item) => item.id} />
+                <Pagination
+                  page={tenants.page}
+                  pageSize={tenants.pageSize}
+                  total={page.total}
+                  onPageChange={tenants.setPage}
+                />
+              </div>
+            )}
+          </ResourceState>
+        </div>
       </PageSection>
 
       {target ? (

@@ -5,7 +5,6 @@ import (
 	"context"
 
 	"chaimir/internal/contracts"
-	"chaimir/internal/platform/ids"
 	"chaimir/internal/platform/pagex"
 	"chaimir/internal/platform/tenant"
 	"chaimir/pkg/apperr"
@@ -99,26 +98,6 @@ func (s *Service) ListClassStudents(ctx context.Context, tenantID, classID int64
 	for _, student := range students {
 		// 本契约不下发手机号:选课只需要姓名与学号,查询也没有取回手机号密文。
 		out = append(out, ToContractAccount(student, ""))
-	}
-	return out, nil
-}
-
-// ListClassStudentsForViewer 供教师/学校管理员在浏览器里按班级挑选学生。
-// 组织结构本就对教师只读开放(`/org/classes`),班内学生名录是同一维度的下一层;
-// 账号目录 `/accounts` 仍只对学校管理员开放,教师拿不到全校账号与其手机号、状态、角色。
-// 实现直接复用契约方法,租户边界取自服务端会话 —— 同一份查询不写两遍。
-func (s *Service) ListClassStudentsForViewer(ctx context.Context, classID int64) ([]ClassStudentDTO, error) {
-	id, err := requireTenantAnyRole(ctx, s, contracts.RoleTeacher, contracts.RoleSchoolAdmin)
-	if err != nil {
-		return nil, err
-	}
-	students, err := s.ListClassStudents(ctx, id.TenantID, classID)
-	if err != nil {
-		return nil, err
-	}
-	out := make([]ClassStudentDTO, 0, len(students))
-	for _, student := range students {
-		out = append(out, ClassStudentDTO{ID: ids.ID(student.AccountID), Name: student.Name, No: student.No})
 	}
 	return out, nil
 }

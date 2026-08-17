@@ -8,6 +8,7 @@ import { cn } from "../../lib/cn";
 import { Icon } from "../../lib/icon";
 import { matrixCellId, resolveEmphasis, type FrameEmphasis } from "../frameVisual";
 import { TONE_ICON, TONE_TEXT, type DarkTone } from "./darkTone";
+import { PatternFrame } from "./PatternFrame";
 import type { PatternViewProps } from "./types";
 import type { MatrixCell, MatrixPattern } from "@chaimir/sim-sdk";
 
@@ -60,32 +61,35 @@ export function MatrixPatternView({
   if (density === "panel") {
     // 窄栏:按行分组的清单,每行下列出各列结果
     return (
-      <div className="flex flex-col gap-2" aria-label={`${pattern.title} 矩阵`}>
-        {rows.map((row, rowIndex) => (
-          <div key={row} className="rounded-md border border-dark-line bg-dark-elevated p-2">
-            <div className="mb-1 text-xs font-medium text-on-dark">{row}</div>
-            <ul className="flex flex-col gap-1">
-              {columns.map((column, columnIndex) => {
-                const cell = cells[rowIndex]?.[columnIndex];
-                if (!cell) return null;
-                const id = matrixCellId(row, column);
-                const emphasis = resolveEmphasis(id, focus, cell.meta);
-                return (
-                  <li key={column} className={cn("flex flex-col", CELL_EMPHASIS[emphasis])}>
-                    <span className="text-xs text-on-dark-sub">{column}</span>
-                    {cellNode(cell)}
-                  </li>
-                );
-              })}
-            </ul>
-          </div>
-        ))}
-      </div>
+      <PatternFrame density={density}>
+        <div className="flex flex-col gap-2" aria-label={`${pattern.title} 矩阵`}>
+          {rows.map((row, rowIndex) => (
+            <div key={row} className="rounded-md border border-dark-line bg-dark-elevated p-2">
+              <div className="mb-1 text-xs font-medium text-on-dark">{row}</div>
+              <ul className="flex flex-col gap-1">
+                {columns.map((column, columnIndex) => {
+                  const cell = cells[rowIndex]?.[columnIndex];
+                  if (!cell) return null;
+                  const id = matrixCellId(row, column);
+                  const emphasis = resolveEmphasis(id, focus, cell.meta);
+                  return (
+                    <li key={column} className={cn("flex flex-col", CELL_EMPHASIS[emphasis])}>
+                      <span className="text-xs text-on-dark-sub">{column}</span>
+                      {cellNode(cell)}
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          ))}
+        </div>
+      </PatternFrame>
     );
   }
 
   return (
-    <div className="overflow-x-auto rounded-md border border-dark-line">
+    <PatternFrame density={density}>
+      <div className="overflow-x-auto rounded-md border border-dark-line">
       <table className="w-full border-collapse text-sm">
         <caption className="sr-only">{pattern.title}</caption>
         <thead>
@@ -138,6 +142,7 @@ export function MatrixPatternView({
           ))}
         </tbody>
       </table>
-    </div>
+      </div>
+    </PatternFrame>
   );
 }

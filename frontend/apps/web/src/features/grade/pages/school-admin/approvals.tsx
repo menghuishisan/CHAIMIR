@@ -18,6 +18,8 @@ import {
   Button,
   Callout,
   DescriptionList,
+  FilterBar,
+  FilterField,
   FormField,
   Modal,
   ModalBody,
@@ -41,7 +43,7 @@ import {
 } from '@chaimir/ui'
 import { api } from '../../../../app/api'
 import { ResourceState } from '../../../../components/ResourceState'
-import { useAsyncResource, usePagedResource } from '../../../../hooks'
+import { useAsyncResource, usePagedResource, useResourceTotal } from '../../../../hooks'
 import { formatDateTime } from '../../../../utils/formatters'
 import { gradeReviewStatusLabel, gradeReviewStatusTone } from '../../../../utils/labels/grade'
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
@@ -117,14 +119,21 @@ export default function SchoolAdminApprovalsPage() {
     [semesters.data],
   )
 
-  const stats = useMemo(() => {
-    const list = reviews.data ? reviews.data.list : []
-    return {
-      pending: list.filter((item) => item.status === GradeReviewStatus.PENDING).length,
-      approved: list.filter((item) => item.status === GradeReviewStatus.APPROVED).length,
-      locked: list.filter((item) => item.is_locked).length,
-    }
-  }, [reviews.data])
+  // 指标带取服务端全量口径,不随下方状态筛选变化。
+  // 「已锁定」没有服务端筛选参数,故不做这张卡:锁定状态在每一行的操作列里可见(规范 §6.5)。
+  const totalCount = useResourceTotal((params) => api.grade.listReviews(params), [])
+  const pendingCount = useResourceTotal(
+    (params) => api.grade.listReviews({ status: GradeReviewStatus.PENDING, ...params }),
+    [],
+  )
+  const approvedCount = useResourceTotal(
+    (params) => api.grade.listReviews({ status: GradeReviewStatus.APPROVED, ...params }),
+    [],
+  )
+  const rejectedCount = useResourceTotal(
+    (params) => api.grade.listReviews({ status: GradeReviewStatus.REJECTED, ...params }),
+    [],
+  )
 
   const columns: TableColumn<GradeReview>[] = [
     {
@@ -226,47 +235,49 @@ export default function SchoolAdminApprovalsPage() {
 
       <PageSection>
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <Stat label="报送记录" value={reviews.total} icon={Send} />
-          <Stat label="待审核" value={stats.pending} icon={CircleCheck} hint="需要你处理" />
-          <Stat label="已通过" value={stats.approved} icon={CircleCheck} />
-          <Stat label="已锁定" value={stats.locked} icon={LockOpen} hint="教师不能再调分" />
+          <Stat label="报送记录" value={totalCount ?? '—'} icon={Send} hint="不受下方筛选影响" />
+          <Stat label="待审核" value={pendingCount ?? '—'} icon={CircleCheck} hint="需要你处理" />
+          <Stat label="已通过" value={approvedCount ?? '—'} icon={CircleCheck} />
+          <Stat label="已驳回" value={rejectedCount ?? '—'} icon={LockOpen} hint="教师可改分后重报" />
         </div>
       </PageSection>
 
-      <PageSection
-        title="报送记录"
-        description={`共 ${reviews.total} 条`}
-        actions={
-          <SegmentedControl
-            aria-label="按审核状态筛选"
-            size="sm"
-            options={STATUS_FILTERS.map((item) => ({ value: item.value, label: item.label }))}
-            value={statusFilter}
-            onValueChange={setStatusFilter}
-          />
-        }
-      >
-        <ResourceState
-          resource={reviews}
-          emptyIcon={Send}
-          emptyTitle={statusFilter ? '这个状态下没有记录' : '还没有成绩报送'}
-          emptyDescription={
-            statusFilter ? '换个状态看看。' : '教师在教学端确认课程成绩后报送,记录会出现在这里。'
-          }
-          skeleton={<Table columns={columns} data={[]} rowKey={() => ''} loading />}
-        >
-          {(page) => (
-            <div className="flex flex-col gap-4">
-              <Table columns={columns} data={page.list} rowKey={(item) => item.id} />
-              <Pagination
-                page={reviews.page}
-                pageSize={reviews.pageSize}
-                total={reviews.total}
-                onPageChange={reviews.setPage}
+      <PageSection title="报送记录" description={`共 ${reviews.total} 条`}>
+        <div className="flex flex-col gap-4">
+          <FilterBar label="报送记录筛选">
+            <FilterField label="审核状态" group>
+              <SegmentedControl
+                aria-label="按审核状态筛选"
+                size="sm"
+                options={STATUS_FILTERS.map((item) => ({ value: item.value, label: item.label }))}
+                value={statusFilter}
+                onValueChange={setStatusFilter}
               />
-            </div>
-          )}
-        </ResourceState>
+            </FilterField>
+          </FilterBar>
+
+          <ResourceState
+            resource={reviews}
+            emptyIcon={Send}
+            emptyTitle={statusFilter ? '这个状态下没有记录' : '还没有成绩报送'}
+            emptyDescription={
+              statusFilter ? '换个状态看看。' : '教师在教学端确认课程成绩后报送,记录会出现在这里。'
+            }
+            skeleton={<Table columns={columns} data={[]} rowKey={() => ''} loading />}
+          >
+            {(page) => (
+              <div className="flex flex-col gap-4">
+                <Table columns={columns} data={page.list} rowKey={(item) => item.id} />
+                <Pagination
+                  page={reviews.page}
+                  pageSize={reviews.pageSize}
+                  total={reviews.total}
+                  onPageChange={reviews.setPage}
+                />
+              </div>
+            )}
+          </ResourceState>
+        </div>
       </PageSection>
 
       {/* 批量成绩单:出成绩单的前提是成绩已锁定,故归到本页而不是单独放侧栏 */}

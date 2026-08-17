@@ -42,27 +42,27 @@ type ContestDTO struct {
 
 // ProblemRequest 是竞赛题目编排请求。
 type ProblemRequest struct {
-	ItemCode     string         `json:"item_code"`
-	ItemVersion  string         `json:"item_version"`
-	Score        int32          `json:"score"`
-	DynamicScore map[string]any `json:"dynamic_score"`
-	BattleConfig map[string]any `json:"battle_config"`
-	BattleRule   int16          `json:"battle_rule"`
-	Seq          int32          `json:"seq"`
+	ItemCode     string               `json:"item_code"`
+	ItemVersion  string               `json:"item_version"`
+	Score        int32                `json:"score"`
+	DynamicScore *DynamicScoreConfig  `json:"dynamic_score,omitempty"`
+	BattleConfig *BattleRuntimeConfig `json:"battle_config,omitempty"`
+	BattleRule   int16                `json:"battle_rule"`
+	Seq          int32                `json:"seq"`
 }
 
 // ProblemDTO 是竞赛题目引用输出。
 type ProblemDTO struct {
-	ID           ids.ID         `json:"id"`
-	ContestID    ids.ID         `json:"contest_id"`
-	ItemCode     string         `json:"item_code"`
-	ItemVersion  string         `json:"item_version"`
-	Score        int32          `json:"score"`
-	DynamicScore map[string]any `json:"dynamic_score,omitempty"`
-	BattleConfig map[string]any `json:"battle_config,omitempty"`
-	BattleRule   int16          `json:"battle_rule,omitempty"`
-	Seq          int32          `json:"seq"`
-	Face         map[string]any `json:"face,omitempty"`
+	ID           ids.ID               `json:"id"`
+	ContestID    ids.ID               `json:"contest_id"`
+	ItemCode     string               `json:"item_code"`
+	ItemVersion  string               `json:"item_version"`
+	Score        int32                `json:"score"`
+	DynamicScore *DynamicScoreConfig  `json:"dynamic_score,omitempty"`
+	BattleConfig *BattleRuntimeConfig `json:"battle_config,omitempty"`
+	BattleRule   int16                `json:"battle_rule,omitempty"`
+	Seq          int32                `json:"seq"`
+	Face         map[string]any       `json:"face,omitempty"`
 }
 
 // SignupRequest 是学生报名或创建队伍请求。
@@ -160,20 +160,34 @@ type BattleEntryDTO struct {
 
 // BattleMatchDTO 是对局输出。
 type BattleMatchDTO struct {
-	ID              ids.ID         `json:"id"`
-	ContestID       ids.ID         `json:"contest_id"`
-	ProblemID       ids.ID         `json:"problem_id"`
-	EntryAID        ids.ID         `json:"entry_a_id"`
-	EntryBID        ids.ID         `json:"entry_b_id"`
-	SourceRef       string         `json:"source_ref"`
-	SandboxRef      string         `json:"sandbox_ref,omitempty"`
-	JudgeTaskRef    string         `json:"judge_task_ref,omitempty"`
-	Result          int16          `json:"result,omitempty"`
-	ScoreDelta      map[string]any `json:"score_delta"`
-	ReplayAvailable bool           `json:"replay_available"`
-	Status          int16          `json:"status"`
-	MatchedAt       time.Time      `json:"matched_at"`
-	FinishedAt      time.Time      `json:"finished_at,omitempty"`
+	ID              ids.ID               `json:"id"`
+	ContestID       ids.ID               `json:"contest_id"`
+	ProblemID       ids.ID               `json:"problem_id"`
+	EntryAID        ids.ID               `json:"entry_a_id"`
+	EntryBID        ids.ID               `json:"entry_b_id"`
+	SourceRef       string               `json:"source_ref"`
+	SandboxRef      string               `json:"sandbox_ref,omitempty"`
+	JudgeTaskRef    string               `json:"judge_task_ref,omitempty"`
+	Result          int16                `json:"result,omitempty"`
+	ScoreDelta      *BattleScoreDeltaDTO `json:"score_delta,omitempty"`
+	ReplayAvailable bool                 `json:"replay_available"`
+	Status          int16                `json:"status"`
+	MatchedAt       time.Time            `json:"matched_at"`
+	FinishedAt      time.Time            `json:"finished_at,omitempty"`
+}
+
+// BattleScoreDeltaDTO 是对局结算的公开固定结构,雪花 ID 始终以字符串输出。
+type BattleScoreDeltaDTO struct {
+	TeamAID       ids.ID  `json:"team_a"`
+	TeamBID       ids.ID  `json:"team_b"`
+	RatingABefore float64 `json:"rating_a_before"`
+	RatingBBefore float64 `json:"rating_b_before"`
+	RatingAAfter  float64 `json:"rating_a_after"`
+	RatingBAfter  float64 `json:"rating_b_after"`
+	DeltaA        float64 `json:"delta_a"`
+	DeltaB        float64 `json:"delta_b"`
+	KFactor       float64 `json:"k_factor"`
+	Result        int16   `json:"result"`
 }
 
 // BattleReplayDownloadGrantDTO 是对局回放统一文件服务取件授权响应。
@@ -182,6 +196,12 @@ type BattleReplayDownloadGrantDTO struct {
 	Mode      string `json:"mode"`
 	FileName  string `json:"file_name"`
 	ExpiresAt string `json:"expires_at"`
+}
+
+// BattleReplayRefDTO 是对局回放可用性确认响应,不暴露对象存储引用。
+type BattleReplayRefDTO struct {
+	MatchID   ids.ID `json:"match_id"`
+	Available bool   `json:"available"`
 }
 
 // LadderDTO 是排行榜输出。
@@ -194,13 +214,29 @@ type LadderDTO struct {
 	UpdatedAt   time.Time `json:"updated_at"`
 }
 
+// LeaderboardPushDTO 是竞赛排行榜变化发送到 leaderboard topic 的精确实时负载。
+type LeaderboardPushDTO struct {
+	ContestID ids.ID      `json:"contest_id"`
+	Items     []LadderDTO `json:"items"`
+}
+
 // ResultSnapshotDTO 是竞赛归档后的最终榜单快照输出。
 type ResultSnapshotDTO struct {
-	ID           ids.ID           `json:"id"`
-	TenantID     ids.ID           `json:"tenant_id,omitempty"`
-	ContestID    ids.ID           `json:"contest_id"`
-	FinalRanking []map[string]any `json:"final_ranking"`
-	GeneratedAt  time.Time        `json:"generated_at"`
+	ID           ids.ID                   `json:"id"`
+	TenantID     ids.ID                   `json:"tenant_id,omitempty"`
+	ContestID    ids.ID                   `json:"contest_id"`
+	FinalRanking []LadderSnapshotEntryDTO `json:"final_ranking"`
+	GeneratedAt  time.Time                `json:"generated_at"`
+}
+
+// LadderSnapshotEntryDTO 是最终榜单快照的公开固定结构。
+type LadderSnapshotEntryDTO struct {
+	TeamID      ids.ID    `json:"team_id"`
+	Score       float64   `json:"score"`
+	SolvedCount int32     `json:"solved_count"`
+	LastSolveAt time.Time `json:"last_solve_at,omitempty"`
+	Rank        int32     `json:"rank"`
+	UpdatedAt   time.Time `json:"updated_at"`
 }
 
 // CheatRecordRequest 是违规判定请求。

@@ -7,6 +7,7 @@ import (
 	"chaimir/internal/platform/auth"
 	"chaimir/internal/platform/httpx"
 	"chaimir/internal/platform/tenant"
+	"chaimir/internal/platform/timex"
 	"chaimir/pkg/apperr"
 
 	"github.com/gin-gonic/gin"
@@ -30,6 +31,7 @@ func registerAuthRoutes(r gin.IRouter, svc *Service, authn *auth.Manager) {
 	g.POST("/sms/send", rateLimit, api.sendSMS)
 	g.POST("/refresh", rateLimit, api.refreshToken)
 	g.POST("/ws-ticket", authn.Middleware(), api.issueWebSocketTicket)
+	g.POST("/browser-ticket", authn.Middleware(), api.issueBrowserAccessTicket)
 	g.POST("/password/reset", rateLimit, api.resetPassword)
 	g.POST("/activate", rateLimit, api.activate)
 	g.POST("/logout", authn.Middleware(), api.logout)
@@ -133,7 +135,17 @@ func (a authAPI) refreshToken(c *gin.Context) {
 
 // issueWebSocketTicket 用当前服务端会话为指定实时通道签发短时连接票据。
 func (a authAPI) issueWebSocketTicket(c *gin.Context) {
-	var req WebSocketTicketRequest
+	a.issuePathTicket(c, a.authn.IssueWebSocketTicket)
+}
+
+// issueBrowserAccessTicket 用当前服务端会话为浏览器工具路径前缀签发短时入口票据。
+func (a authAPI) issueBrowserAccessTicket(c *gin.Context) {
+	a.issuePathTicket(c, a.authn.IssueBrowserAccessTicket)
+}
+
+// issuePathTicket 统一绑定路径票据请求与当前服务端会话,具体 token 类型由 auth 签发器决定。
+func (a authAPI) issuePathTicket(c *gin.Context, issue func(auth.SessionIdentity) (string, time.Time, error)) {
+	var req PathTicketRequest
 	if !httpx.BindJSON(c, &req) {
 		return
 	}
@@ -146,7 +158,7 @@ func (a authAPI) issueWebSocketTicket(c *gin.Context) {
 	if !ok {
 		return
 	}
-	ticket, expiresAt, err := a.authn.IssueWebSocketTicket(auth.SessionIdentity{
+	ticket, expiresAt, err := issue(auth.SessionIdentity{
 		TenantID:   id.TenantID,
 		AccountID:  id.AccountID,
 		SessionID:  sessionID,
@@ -157,7 +169,7 @@ func (a authAPI) issueWebSocketTicket(c *gin.Context) {
 		httpx.Write(c, gin.H{}, apperr.ErrUnauthorized.WithCause(err))
 		return
 	}
-	httpx.Write(c, WebSocketTicketResponse{Ticket: ticket, ExpiresAt: expiresAt.Format(time.RFC3339)}, nil)
+	httpx.Write(c, PathTicketResponse{Ticket: ticket, ExpiresAt: timex.RFC3339OrEmpty(expiresAt)}, nil)
 }
 
 // resetPassword 绑定找回密码请求,短信校验和密码更新由 service 原子处理。

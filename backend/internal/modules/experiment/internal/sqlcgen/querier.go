@@ -36,6 +36,7 @@ type Querier interface {
 	ListCheckpointResults(ctx context.Context, arg ListCheckpointResultsParams) ([]ListCheckpointResultsRow, error)
 	// 按实验列出全部分组,供教师编组视角一次取齐(小组编号只在创建响应出现过一次,无列表则无法再定位)。
 	ListExperimentGroups(ctx context.Context, arg ListExperimentGroupsParams) ([]ExperimentGroup, error)
+	// status 传 0 不按状态过滤;传具体状态供批改台按「待批改/已批改」取数与计数。
 	ListExperimentReports(ctx context.Context, arg ListExperimentReportsParams) ([]ListExperimentReportsRow, error)
 	ListExperiments(ctx context.Context, arg ListExperimentsParams) ([]Experiment, error)
 	ListGroupMembers(ctx context.Context, arg ListGroupMembersParams) ([]GroupMember, error)

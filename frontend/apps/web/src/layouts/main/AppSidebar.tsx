@@ -23,12 +23,10 @@ export function AppSidebar({ config, collapsed = false, onToggleCollapsed }: App
   const online = useOnlineStatus()
   return (
     <div className="flex h-full min-h-0 flex-col px-3 py-4">
-      {/* 品牌:主标志 + 端名(标志不承担导航,只承担识别,规范 §1.3) */}
+      {/* 品牌:锁定组合 = 主标志 + Chaimir,旁边不加角色名/端名(规范 §1.3);角色由分组导航与头像菜单表达 */}
       <div className={cn('flex items-center gap-2.5 px-2 pb-4', collapsed && 'justify-center px-0')}>
         <BrandMark size="md" className="text-accent" label={collapsed ? 'Chaimir' : undefined} />
-        {!collapsed && (
-          <span className="truncate text-sm font-semibold text-on-dark">{config.brandName}</span>
-        )}
+        {!collapsed && <span className="truncate text-sm font-semibold text-on-dark">Chaimir</span>}
       </div>
 
       {/* 分组导航:独立滚动,不带动整页 */}
@@ -117,7 +115,7 @@ function SidebarLink({ item, collapsed }: { item: RoleNavigationItem; collapsed:
           'relative flex items-center gap-2.5 rounded-md px-2.5 py-2 text-sm transition-colors duration-fast',
           collapsed && 'justify-center px-0 py-2.5',
           isActive
-            ? 'bg-jade-400/10 font-medium text-accent before:absolute before:left-0 before:top-1/2 before:h-4 before:w-0.5 before:-translate-y-1/2 before:rounded-full before:bg-accent'
+            ? 'bg-on-dark-accent-soft font-medium text-accent before:absolute before:left-0 before:top-1/2 before:h-4 before:w-0.5 before:-translate-y-1/2 before:rounded-full before:bg-accent'
             : 'text-on-dark-sub hover:bg-dark-elevated hover:text-on-dark',
         )
       }

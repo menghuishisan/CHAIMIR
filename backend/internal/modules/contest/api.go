@@ -92,12 +92,17 @@ func (a contestAPI) registerPlatformRoutes(g gin.IRouter) {
 }
 
 // listStudentContests 返回学生可发现的非草稿竞赛。
+// status=0 表示不过滤;传具体状态时仍受可见区间约束(草稿态永不可见)。
 func (a contestAPI) listStudentContests(c *gin.Context) {
 	page, size, ok := httpx.Page(c)
 	if !ok {
 		return
 	}
-	out, total, p, s, err := a.svc.ListStudentContests(c.Request.Context(), page, size)
+	status, ok := httpx.QueryInt16(c, "status", httpx.QueryIntRule{Default: 0, Min: 0, Max: 6, HasMax: true})
+	if !ok {
+		return
+	}
+	out, total, p, s, err := a.svc.ListStudentContests(c.Request.Context(), status, page, size)
 	httpx.WritePage(c, out, total, p, s, err)
 }
 
@@ -445,7 +450,7 @@ func (a contestAPI) listCheatSuspects(c *gin.Context) {
 	if !ok {
 		return
 	}
-	problemID, ok := httpx.QueryInt(c, "problem_id", httpx.QueryIntRule{Min: 1})
+	problemID, ok := httpx.QueryID(c, "problem_id", true)
 	if !ok {
 		return
 	}
@@ -490,7 +495,7 @@ func (a contestAPI) syncVulnSource(c *gin.Context) {
 
 // listVulnProblems 查询漏洞题草稿。
 func (a contestAPI) listVulnProblems(c *gin.Context) {
-	sourceID, ok := httpx.QueryInt(c, "source_id", httpx.QueryIntRule{Default: 0, Min: 0})
+	sourceID, ok := httpx.QueryID(c, "source_id", false)
 	if !ok {
 		return
 	}
@@ -542,7 +547,7 @@ func (a contestAPI) finalizeVulnProblem(c *gin.Context) {
 
 // internalStats 读取内部竞赛统计。
 func (a contestAPI) internalStats(c *gin.Context) {
-	tenantID, ok := httpx.QueryInt(c, "tenant_id", httpx.QueryIntRule{Min: 1})
+	tenantID, ok := httpx.QueryID(c, "tenant_id", true)
 	if !ok {
 		return
 	}
@@ -556,7 +561,7 @@ func (a contestAPI) internalAchievements(c *gin.Context) {
 	if !ok {
 		return
 	}
-	tenantID, ok := httpx.QueryInt(c, "tenant_id", httpx.QueryIntRule{Min: 1})
+	tenantID, ok := httpx.QueryID(c, "tenant_id", true)
 	if !ok {
 		return
 	}

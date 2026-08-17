@@ -8,7 +8,7 @@
 
 import { useCallback, useState } from 'react'
 import { useNavigate } from 'react-router'
-import { Bell, BellOff, CheckCheck, Inbox, Megaphone, Settings2, Trash2 } from 'lucide-react'
+import { Bell, BellOff, CheckCheck, Inbox, Lock, Megaphone, Settings2, Trash2 } from 'lucide-react'
 import type { Announcement, Notification, NotificationPreference } from '@chaimir/api-client'
 import {
   Badge,
@@ -18,6 +18,9 @@ import {
   Card,
   CardBody,
   CardHeader,
+  FilterBar,
+  FilterField,
+  Icon,
   IconButton,
   PageBody,
   PageHeader,
@@ -206,21 +209,24 @@ function NotificationList() {
       title="站内消息"
       description={`共 ${notifications.total} 条`}
       actions={
-        <div className="flex flex-wrap items-center gap-2">
-          <SegmentedControl
-            aria-label="按已读状态筛选"
-            size="sm"
-            options={READ_FILTERS.map((item) => ({ value: item.value, label: item.label }))}
-            value={readFilter}
-            onValueChange={setReadFilter}
-          />
-          <Button variant="outline" size="sm" leftIcon={CheckCheck} loading={markingAll} onClick={() => void markAllRead()}>
-            全部已读
-          </Button>
-        </div>
+        <Button variant="outline" size="sm" leftIcon={CheckCheck} loading={markingAll} onClick={() => void markAllRead()}>
+          全部已读
+        </Button>
       }
     >
       <div className="flex flex-col gap-4">
+        <FilterBar label="站内消息筛选">
+          <FilterField label="已读状态" group>
+            <SegmentedControl
+              aria-label="按已读状态筛选"
+              size="sm"
+              options={READ_FILTERS.map((item) => ({ value: item.value, label: item.label }))}
+              value={readFilter}
+              onValueChange={setReadFilter}
+            />
+          </FilterField>
+        </FilterBar>
+
         {actionError ? <Callout tone="danger">{actionError}</Callout> : null}
 
         <ResourceState
@@ -378,7 +384,7 @@ function PreferencePanel() {
             通知偏好
           </span>
         }
-        description="关掉不想收到的提醒类型。重要通知不能关闭。"
+        description="关掉不想收到的提醒类型。"
       />
       <CardBody>
         <ResourceState
@@ -388,21 +394,41 @@ function PreferencePanel() {
           emptyDescription="平台还没有开放可关闭的通知类型。"
           skeleton={<Skeleton variant="line" lines={4} />}
         >
-          {(list) => (
-            <div className="flex flex-col gap-4">
-              {actionError ? <Callout tone="danger">{actionError}</Callout> : null}
-              <div className="flex flex-col gap-3">
-                {list.map((preference) => (
-                  <PreferenceRow
-                    key={preference.type}
-                    preference={preference}
-                    pending={pendingType === preference.type}
-                    onToggle={(enabled) => void togglePreference(preference, enabled)}
-                  />
-                ))}
+          {(list) => {
+            // 强制类型单独成组:同一句「不能关闭」说明只写一次,避免在一张卡里重复八遍
+            const optional = list.filter((preference) => !preference.force)
+            const forced = list.filter((preference) => preference.force)
+            return (
+              <div className="flex flex-col gap-4">
+                {actionError ? <Callout tone="danger">{actionError}</Callout> : null}
+                {optional.length > 0 ? (
+                  <div className="flex flex-col gap-3">
+                    {optional.map((preference) => (
+                      <PreferenceRow
+                        key={preference.type}
+                        preference={preference}
+                        pending={pendingType === preference.type}
+                        onToggle={(enabled) => void togglePreference(preference, enabled)}
+                      />
+                    ))}
+                  </div>
+                ) : null}
+                {forced.length > 0 ? (
+                  <div className="flex flex-col gap-3 border-t border-line pt-4">
+                    <p className="text-xs text-ink-sub">{FORCED_PREFERENCE_HINT}</p>
+                    {forced.map((preference) => (
+                      <PreferenceRow
+                        key={preference.type}
+                        preference={preference}
+                        pending={pendingType === preference.type}
+                        onToggle={(enabled) => void togglePreference(preference, enabled)}
+                      />
+                    ))}
+                  </div>
+                ) : null}
               </div>
-            </div>
-          )}
+            )
+          }}
         </ResourceState>
       </CardBody>
     </Card>
@@ -417,7 +443,8 @@ interface PreferenceRowProps {
 
 /**
  * PreferenceRow 渲染单个偏好开关。
- * 强制类型的开关禁用并给出原因,而不是让用户点了才发现关不掉。
+ * 强制类型换锁形图标并禁用开关:不可关闭这件事不能只靠开关变淡一档表达(规范 §3.2 色非唯一);
+ * 原因说明由所在分组统一给出,不在每一行重复同一句话。
  */
 function PreferenceRow({ preference, pending, onToggle }: PreferenceRowProps) {
   const label = notificationTypeLabel(preference.type)
@@ -426,17 +453,19 @@ function PreferenceRow({ preference, pending, onToggle }: PreferenceRowProps) {
     <div className="flex items-start justify-between gap-3">
       <div className="min-w-0">
         <div className="flex items-center gap-1.5 text-base text-ink">
-          <Bell aria-hidden="true" className="size-3.5 shrink-0 text-ink-faint" />
+          <Icon
+            icon={preference.force ? Lock : Bell}
+            size="xs"
+            className="shrink-0 text-ink-sub"
+            aria-hidden
+          />
           <span className="min-w-0 truncate">{label}</span>
         </div>
-        {preference.force ? (
-          <p className="mt-0.5 text-xs text-ink-sub">{FORCED_PREFERENCE_HINT}</p>
-        ) : null}
       </div>
       <Switch
         checked={preference.enabled}
         disabled={preference.force || pending}
-        aria-label={`接收${label}通知`}
+        aria-label={preference.force ? `${label}通知不能关闭` : `接收${label}通知`}
         onCheckedChange={onToggle}
       />
     </div>

@@ -316,10 +316,16 @@ const countStudentContests = `-- name: CountStudentContests :one
 SELECT COUNT(*)::bigint
 FROM contest
 WHERE tenant_id = $1 AND deleted_at IS NULL AND status BETWEEN 2 AND 6
+  AND ($2::smallint = 0 OR status = $2::smallint)
 `
 
-func (q *Queries) CountStudentContests(ctx context.Context, tenantID int64) (int64, error) {
-	row := q.db.QueryRow(ctx, countStudentContests, tenantID)
+type CountStudentContestsParams struct {
+	TenantID int64 `json:"tenant_id"`
+	Status   int16 `json:"status"`
+}
+
+func (q *Queries) CountStudentContests(ctx context.Context, arg CountStudentContestsParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countStudentContests, arg.TenantID, arg.Status)
 	var column_1 int64
 	err := row.Scan(&column_1)
 	return column_1, err
@@ -1832,18 +1838,26 @@ const listStudentContests = `-- name: ListStudentContests :many
 SELECT id, tenant_id, organizer_id, name, mode, match_mode, team_mode, signup_start, signup_end, start_at, end_at, freeze_minutes, rules, status, created_at, updated_at, deleted_at
 FROM contest
 WHERE tenant_id = $1 AND deleted_at IS NULL AND status BETWEEN 2 AND 6
+  AND ($2::smallint = 0 OR status = $2::smallint)
 ORDER BY updated_at DESC, id DESC
-LIMIT $2 OFFSET $3
+LIMIT $4::int OFFSET $3::int
 `
 
 type ListStudentContestsParams struct {
-	TenantID int64 `json:"tenant_id"`
-	Limit    int32 `json:"limit"`
-	Offset   int32 `json:"offset"`
+	TenantID   int64 `json:"tenant_id"`
+	Status     int16 `json:"status"`
+	PageOffset int32 `json:"page_offset"`
+	PageLimit  int32 `json:"page_limit"`
 }
 
+// status 传 0 回学生可发现的全部赛事(草稿态不可见);传具体状态时仍受可见区间约束。
 func (q *Queries) ListStudentContests(ctx context.Context, arg ListStudentContestsParams) ([]Contest, error) {
-	rows, err := q.db.Query(ctx, listStudentContests, arg.TenantID, arg.Limit, arg.Offset)
+	rows, err := q.db.Query(ctx, listStudentContests,
+		arg.TenantID,
+		arg.Status,
+		arg.PageOffset,
+		arg.PageLimit,
+	)
 	if err != nil {
 		return nil, err
 	}

@@ -1,5 +1,10 @@
 // 沙箱契约常量：维护前端需要与后端 sandbox/contracts 枚举编号对齐的值。
 
+import { API_BASE_PATH } from './http'
+
+/** 平台内置工具入口模板的固定前缀，与后端 validBuiltinEndpointTemplate 保持一致。 */
+export const SANDBOX_BUILTIN_ENDPOINT_TEMPLATE_PREFIX = `${API_BASE_PATH}/sandbox/sandboxes/{sandbox_id}`
+
 export enum SandboxPhase {
   ALLOCATING = 1,
   READY = 2,
@@ -23,6 +28,12 @@ export enum SandboxToolKind {
   TERMINAL = 2,
   WEB_EMBED = 3,
   COMMAND = 4,
+}
+
+export enum RuntimeAdapterLevel {
+  HOSTED = 1,
+  STANDARD = 2,
+  PLUGIN = 3,
 }
 
 export enum RuntimeStatus {

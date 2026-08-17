@@ -18,7 +18,8 @@ import {
   CardBody,
   CardHeader,
   Empty,
-  FormField,
+  FilterBar,
+  FilterField,
   Input,
   PageHeader,
   PageScaffold,
@@ -27,30 +28,12 @@ import {
   Stat,
   StatusIndicator,
   Table,
-  type StatusTone,
   type TableColumn,
 } from '@chaimir/ui'
 import { api } from '../../../../app/api'
 import { ResourceState } from '../../../../components/ResourceState'
 import { useAsyncResource } from '../../../../hooks'
-
-/** 班级状态筛选项:值为空串表示不过滤。 */
-const STATUS_FILTERS = [
-  { value: '', label: '全部' },
-  { value: String(ClassStatus.ACTIVE), label: '在读' },
-  { value: String(ClassStatus.ARCHIVED), label: '已归档' },
-] as const
-
-/** 班级状态文案与语义色:只在本页用到,不进 labels 全局登记(其他端各有自己的班级视图)。 */
-const CLASS_STATUS_LABELS: Record<ClassStatus, string> = {
-  [ClassStatus.ACTIVE]: '在读',
-  [ClassStatus.ARCHIVED]: '已归档',
-}
-
-const CLASS_STATUS_TONES: Record<ClassStatus, StatusTone> = {
-  [ClassStatus.ACTIVE]: 'success',
-  [ClassStatus.ARCHIVED]: 'neutral',
-}
+import { CLASS_STATUS_FILTERS, CLASS_STATUS_LABELS, CLASS_STATUS_TONES } from '../../../../utils/labels/identity'
 
 /** OrgView 是组织结构一次读齐的三层数据。 */
 interface OrgView {
@@ -227,45 +210,45 @@ function OrgContent({ view, keyword, statusFilter, onKeywordChange, onStatusChan
         )}
       </PageSection>
 
-      <PageSection
-        title="班级明细"
-        description={`共 ${classRows.length} 个班级`}
-        actions={
-          <div className="flex flex-wrap items-end gap-2">
-            <SegmentedControl
-              aria-label="按班级状态筛选"
-              size="sm"
-              options={STATUS_FILTERS.map((item) => ({ value: item.value, label: item.label }))}
-              value={statusFilter}
-              onValueChange={onStatusChange}
-            />
-            <FormField label="按名称筛选" htmlFor="org-keyword" className="mb-0">
+      <PageSection title="班级明细" description={`共 ${classRows.length} 个班级`}>
+        <div className="flex flex-col gap-4">
+          <FilterBar label="班级筛选">
+            <FilterField label="班级状态" group>
+              <SegmentedControl
+                aria-label="按班级状态筛选"
+                size="sm"
+                options={CLASS_STATUS_FILTERS.map((item) => ({ value: item.value, label: item.label }))}
+                value={statusFilter}
+                onValueChange={onStatusChange}
+              />
+            </FilterField>
+            <FilterField label="名称" htmlFor="org-keyword">
               <Input
                 id="org-keyword"
                 value={keyword}
                 placeholder="班级、专业或院系名"
                 onChange={(event) => onKeywordChange(event.target.value)}
               />
-            </FormField>
-          </div>
-        }
-      >
-        <Table
-          columns={columns}
-          data={classRows}
-          rowKey={(row) => row.entity.id}
-          empty={
-            <Empty
-              icon={Users}
-              title={keyword || statusFilter ? '没有匹配的班级' : '还没有班级'}
-              description={
-                keyword || statusFilter
-                  ? '换个条件再试,或清空筛选查看全部班级。'
-                  : '学校管理员建立班级后会显示在这里。'
-              }
-            />
-          }
-        />
+            </FilterField>
+          </FilterBar>
+
+          <Table
+            columns={columns}
+            data={classRows}
+            rowKey={(row) => row.entity.id}
+            empty={
+              <Empty
+                icon={Users}
+                title={keyword || statusFilter ? '没有匹配的班级' : '还没有班级'}
+                description={
+                  keyword || statusFilter
+                    ? '换个条件再试,或清空筛选查看全部班级。'
+                    : '学校管理员建立班级后会显示在这里。'
+                }
+              />
+            }
+          />
+        </div>
       </PageSection>
 
       <Callout tone="info">

@@ -22,7 +22,7 @@ export interface ElementListItem {
   detail?: string;
   /** 帧焦点解析后的强调档 */
   emphasis: FrameEmphasis;
-  /** 过程进度(0~1),存在即渲染静态进度条 */
+  /** 过程进度(0~1);只有真的在推进(0<p<1)时才渲染进度条 */
   progress?: number;
   /** 过程说明(如「区块传播中」) */
   progressLabel?: string;
@@ -55,6 +55,7 @@ export function ElementList({
   className,
 }: ElementListProps) {
   const interactive = Boolean(onSelectElement);
+  /** 过程条:只在过程真的在推进时出现(0=还没开始、1=已结束,状态词已经说清,画条只是噪声) */
   return (
     <ul aria-label={label} className={cn("flex flex-col gap-1", className)}>
       {items.map((item) => {
@@ -77,7 +78,7 @@ export function ElementList({
                   .join(" · ")}
               </span>
             )}
-            {item.progress !== undefined && (
+            {item.progress !== undefined && item.progress > 0 && item.progress < 1 && (
               <span className="mt-1 flex items-center gap-2">
                 {/* 静态进度条:过程用长度表达,不用脉冲动画 */}
                 <span className="h-1 min-w-0 flex-1 overflow-hidden rounded-full bg-dark-line">

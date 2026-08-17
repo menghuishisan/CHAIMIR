@@ -58,6 +58,7 @@ class ErrorBoundaryView extends React.Component<RouteErrorBoundaryProps, RouteEr
       return (
         <AppStatusScreen
           icon={TriangleAlert}
+          tone="danger"
           title="页面加载出现问题"
           description="这个页面暂时无法显示,可以重新加载再试一次。"
           traceId={this.state.traceId}

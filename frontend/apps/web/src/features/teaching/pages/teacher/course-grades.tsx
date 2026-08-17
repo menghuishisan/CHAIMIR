@@ -315,7 +315,7 @@ function WeightFormModal({ courseId, current, onClose, onSaved }: WeightFormModa
         </ModalHeader>
         <ModalBody className="flex flex-col gap-4">
           {rows.map((row, index) => (
-            <div key={index} className="flex flex-wrap items-end gap-3 rounded-md border border-line p-3">
+            <div key={index} className="flex flex-wrap items-end gap-3 well p-3">
               <FormField label="成绩来源" htmlFor={`weight-source-${index}`} className="mb-0 w-36">
                 <Select
                   id={`weight-source-${index}`}
@@ -402,7 +402,7 @@ function WeightFormModal({ courseId, current, onClose, onSaved }: WeightFormModa
           <Button variant="outline" onClick={onClose}>
             取消
           </Button>
-          <Button variant="seal" loading={working} onClick={() => void submit()}>
+          <Button variant="primary" loading={working} onClick={() => void submit()}>
             保存权重
           </Button>
         </ModalFooter>
@@ -456,7 +456,7 @@ function OverrideGradeModal({ courseId, grade, onClose, onSaved }: OverrideGrade
           </ModalDescription>
         </ModalHeader>
         <ModalBody className="flex flex-col gap-4">
-          <div className="rounded-md border border-line bg-surface-sunken p-3 text-sm text-ink-sub">
+          <div className="well p-3 text-sm text-ink-sub">
             按权重计算:{formatScore(grade.auto_total)} 分
           </div>
           <FormField label="调整后的总评" htmlFor="override-total" required error={formError}>
@@ -476,7 +476,7 @@ function OverrideGradeModal({ courseId, grade, onClose, onSaved }: OverrideGrade
           <Button variant="outline" onClick={onClose}>
             取消
           </Button>
-          <Button variant="seal" loading={working} onClick={() => void submit()}>
+          <Button variant="primary" loading={working} onClick={() => void submit()}>
             保存调分
           </Button>
         </ModalFooter>

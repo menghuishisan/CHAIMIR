@@ -14,6 +14,8 @@ import {
   Breadcrumb,
   Button,
   Callout,
+  FilterBar,
+  FilterField,
   Input,
   PageHeader,
   PageScaffold,
@@ -70,14 +72,17 @@ export default function PlatformApplicationsPage() {
     )
   }, [keyword, list])
 
-  const stats = useMemo(
-    () => ({
-      pending: list.filter((item) => item.status === ApplicationStatus.PENDING).length,
-      approved: list.filter((item) => item.status === ApplicationStatus.APPROVED).length,
-      rejected: list.filter((item) => item.status === ApplicationStatus.REJECTED).length,
-    }),
-    [list],
-  )
+  // 指标带必须是全量口径,故单独取一份不带状态筛选的清单:
+  // 复用上面这份会让「待审核」在筛「已开通」时变成 0(规范 §6.5)。
+  const allApplications = useAsyncResource(() => api.identity.getApplications(), [])
+  const stats = useMemo(() => {
+    const all = allApplications.data ?? []
+    return {
+      pending: all.filter((item) => item.status === ApplicationStatus.PENDING).length,
+      approved: all.filter((item) => item.status === ApplicationStatus.APPROVED).length,
+      rejected: all.filter((item) => item.status === ApplicationStatus.REJECTED).length,
+    }
+  }, [allApplications.data])
 
   const columns: TableColumn<TenantApplication>[] = [
     {
@@ -157,34 +162,36 @@ export default function PlatformApplicationsPage() {
             icon={Inbox}
             hint={stats.pending > 0 ? '需要你处理' : '暂时没有积压'}
           />
-          <Stat label="已开通" value={stats.approved} icon={CircleCheck} />
+          <Stat label="已开通" value={stats.approved} icon={CircleCheck} hint="不受下方筛选影响" />
           <Stat label="已驳回" value={stats.rejected} icon={CircleX} />
         </div>
       </PageSection>
 
       <PageSection
         title="申请记录"
-        description="按学校名称或联系人搜索。审核在详情页完成,那里能看到完整联系方式。"
-        actions={
-          <div className="flex flex-wrap items-end gap-2">
-            <SegmentedControl
-              aria-label="按审核状态筛选"
-              size="sm"
-              options={STATUS_FILTERS.map((item) => ({ value: item.value, label: item.label }))}
-              value={statusFilter}
-              onValueChange={setStatusFilter}
-            />
-            <Input
-              aria-label="按学校名称或联系人搜索"
-              leftIcon={Search}
-              value={keyword}
-              placeholder="搜索申请"
-              onChange={(event) => setKeyword(event.target.value)}
-            />
-          </div>
-        }
+        description="审核在详情页完成,那里能看到完整联系方式。"
       >
         <div className="flex flex-col gap-4">
+          <FilterBar label="申请记录筛选">
+            <FilterField label="审核状态" group>
+              <SegmentedControl
+                aria-label="按审核状态筛选"
+                size="sm"
+                options={STATUS_FILTERS.map((item) => ({ value: item.value, label: item.label }))}
+                value={statusFilter}
+                onValueChange={setStatusFilter}
+              />
+            </FilterField>
+            <FilterField label="学校名称或联系人" htmlFor="applications-keyword">
+              <Input
+                id="applications-keyword"
+                leftIcon={Search}
+                value={keyword}
+                placeholder="输入关键词"
+                onChange={(event) => setKeyword(event.target.value)}
+              />
+            </FilterField>
+          </FilterBar>
           <ResourceState
             resource={applications}
             emptyIcon={Inbox}

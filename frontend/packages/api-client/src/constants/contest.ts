@@ -65,6 +65,12 @@ export enum CheatAction {
   DISQUALIFY = 3,
 }
 
+export enum VulnSourceType {
+  SWC = 1,
+  INTELLIGENCE = 2,
+  CVE_ONCHAIN = 3,
+}
+
 export enum VulnLevel {
   A = 1,
   B = 2,

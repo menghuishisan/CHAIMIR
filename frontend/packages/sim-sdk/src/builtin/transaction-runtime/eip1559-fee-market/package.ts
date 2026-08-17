@@ -14,7 +14,7 @@ export const eip1559FeeMarketSimulation: SimPackage<FeeMarketState> = {
     { id: 'select', kind: 'select-element', label: '选择交易', description: '查看交易报价、入块和费用拆分状态。', emits: 'select', target: 'element', elementFilter: 'eip-tx' },
     { id: 'advance', kind: 'button', label: '推进费用市场', description: '按 EIP-1559 规则推进一个阶段。', emits: 'advance', labelTag: 'normal' },
     { id: 'attack', kind: 'button', label: '制造拥堵', description: '加入高 gas 需求交易,观察 base fee 上升。', emits: 'attack', labelTag: 'attack' },
-    { id: 'recover', kind: 'button', label: '提高低价报价', description: '让低价等待交易重新报价。', emits: 'recover', labelTag: 'perturb' },
+    { id: 'recover', kind: 'button', label: '提高低价报价', description: '让低价等待交易重新报价。', emits: 'recover', labelTag: 'recover' },
   ],
   render: renderFeeMarketView,
   narrative: feeMarketNarrative,

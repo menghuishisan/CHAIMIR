@@ -14,7 +14,7 @@ export const reentrancySimulation: SimPackage<ReentrancyState> = {
     { id: 'select', kind: 'select-element', label: '选择参与方', description: '查看调用栈中的参与方状态。', emits: 'select', target: 'element', elementFilter: 'security-actor' },
     { id: 'advance', kind: 'button', label: '推进阶段', description: '推进重入攻击流程。', emits: 'advance', labelTag: 'normal', availableWhen: (state) => (state as ReentrancyState).phaseIndex < 2 },
     { id: 'attack', kind: 'button', label: '触发回调重入', description: '让攻击合约在回调中重复提款。', emits: 'attack', labelTag: 'attack', availableWhen: (state) => { const current = state as ReentrancyState; return current.phaseIndex === 2 && !current.reentered && !current.lockEnabled } },
-    { id: 'recover', kind: 'button', label: '启用重入锁', description: '按安全顺序修复提款流程。', emits: 'recover', labelTag: 'perturb', availableWhen: (state) => { const current = state as ReentrancyState; return current.phaseIndex === 3 && current.reentered && !current.lockEnabled } },
+    { id: 'recover', kind: 'button', label: '启用重入锁', description: '按安全顺序修复提款流程。', emits: 'recover', labelTag: 'recover', availableWhen: (state) => { const current = state as ReentrancyState; return current.phaseIndex === 3 && current.reentered && !current.lockEnabled } },
   ],
   render: renderReentrancyView,
   narrative: reentrancyNarrative,

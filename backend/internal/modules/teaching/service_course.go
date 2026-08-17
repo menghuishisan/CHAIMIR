@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"chaimir/internal/contracts"
+	"chaimir/internal/platform/jsonx"
 	"chaimir/internal/platform/pagex"
 	"chaimir/internal/platform/response"
 	"chaimir/internal/platform/timex"
@@ -371,7 +372,7 @@ func (s *Service) cloneCourseGraph(ctx context.Context, tx TxStore, source Cours
 		Status:     CourseStatusDraft,
 		Visibility: CourseVisibilityPrivate,
 	}
-	schedule, err := cloneMap(source.Schedule)
+	schedule, err := jsonx.CloneObjectStrict(source.Schedule)
 	if err != nil {
 		return Course{}, err
 	}
@@ -408,7 +409,7 @@ func (s *Service) cloneChaptersAndLessons(ctx context.Context, tx TxStore, sourc
 			return nil, err
 		}
 		for _, lesson := range lessons {
-			contentRef, err := cloneMap(lesson.ContentRef)
+			contentRef, err := jsonx.CloneObjectStrict(lesson.ContentRef)
 			if err != nil {
 				return nil, err
 			}
@@ -435,7 +436,7 @@ func (s *Service) cloneAssignments(ctx context.Context, tx TxStore, source Cours
 				return apperr.ErrTeachingAssignmentInvalid
 			}
 		}
-		latePenalty, err := cloneMap(assignment.LatePenalty)
+		latePenalty, err := jsonx.CloneObjectStrict(assignment.LatePenalty)
 		if err != nil {
 			return err
 		}

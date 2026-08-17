@@ -135,7 +135,7 @@ export function AccountImportModal({ onClose, onCommitted }: AccountImportModalP
             <Table columns={codeColumns} data={activationCodes} rowKey={(item) => item.account_id} />
           </ModalBody>
           <ModalFooter>
-            <Button variant="seal" onClick={() => onCommitted()}>
+            <Button variant="primary" onClick={() => onCommitted()}>
               我已记录,关闭
             </Button>
           </ModalFooter>
@@ -188,7 +188,7 @@ export function AccountImportModal({ onClose, onCommitted }: AccountImportModalP
           ) : null}
 
           {preview ? (
-            <div className="flex flex-col gap-3 rounded-md border border-line bg-surface-sunken p-4">
+            <div className="flex flex-col gap-3 well p-4">
               <div className="flex flex-wrap items-center gap-2">
                 <Badge tone="neutral">共 {preview.total} 行</Badge>
                 <Badge tone="success">可导入 {preview.valid} 行</Badge>
@@ -226,7 +226,7 @@ export function AccountImportModal({ onClose, onCommitted }: AccountImportModalP
                 换个文件
               </Button>
               <Button
-                variant="seal"
+                variant="primary"
                 leftIcon={CircleCheck}
                 loading={working}
                 disabled={preview.valid === 0}
@@ -237,7 +237,7 @@ export function AccountImportModal({ onClose, onCommitted }: AccountImportModalP
             </>
           ) : (
             <Button
-              variant="seal"
+              variant="primary"
               leftIcon={FileSpreadsheet}
               loading={working}
               disabled={!file}

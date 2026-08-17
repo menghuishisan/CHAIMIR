@@ -67,7 +67,7 @@ export function SimShareModal({ sessionId, onClose }: SimShareModalProps) {
         </ModalHeader>
         <ModalBody className="flex flex-col gap-4">
           {code ? (
-            <div className="flex flex-col gap-2 rounded-md border border-line bg-surface-sunken p-3">
+            <div className="flex flex-col gap-2 well p-3">
               <span className="text-sm text-ink-sub">公开回放链接</span>
               <span className="break-all font-mono text-sm text-ink">{link}</span>
               <Button
@@ -103,7 +103,7 @@ export function SimShareModal({ sessionId, onClose }: SimShareModalProps) {
             {code ? '关闭' : '取消'}
           </Button>
           {code ? null : (
-            <Button variant="seal" leftIcon={Share2} loading={working} onClick={() => void submit()}>
+            <Button variant="primary" leftIcon={Share2} loading={working} onClick={() => void submit()}>
               生成分享码
             </Button>
           )}

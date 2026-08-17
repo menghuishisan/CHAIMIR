@@ -56,6 +56,8 @@ paths:
     $ref: './paths/identity.yaml#/api/v1/auth/refresh'
   /api/v1/auth/ws-ticket:
     $ref: './paths/identity.yaml#/api/v1/auth/ws-ticket'
+  /api/v1/auth/browser-ticket:
+    $ref: './paths/identity.yaml#/api/v1/auth/browser-ticket'
   /api/v1/auth/password/reset:
     $ref: './paths/identity.yaml#/api/v1/auth/password/reset'
   /api/v1/auth/activate:
@@ -80,6 +82,10 @@ paths:
     $ref: './paths/identity.yaml#/api/v1/platform/tenants/{id}'
   /api/v1/tenant/config:
     $ref: './paths/identity.yaml#/api/v1/tenant/config'
+  /api/v1/tenant/brand:
+    $ref: './paths/identity.yaml#/api/v1/tenant/brand'
+  /api/v1/tenant/logo:
+    $ref: './paths/identity.yaml#/api/v1/tenant/logo'
   /api/v1/tenant/sso:
     $ref: './paths/identity.yaml#/api/v1/tenant/sso'
   /api/v1/org/departments:
@@ -314,6 +320,10 @@ paths:
     $ref: './paths/content.yaml#/api/v1/content/papers/{id}/regenerate'
   /api/v1/teaching/courses:
     $ref: './paths/teaching.yaml#/api/v1/teaching/courses'
+  /api/v1/teaching/courses/cover:
+    $ref: './paths/teaching.yaml#/api/v1/teaching/courses/cover'
+  /api/v1/teaching/courses/{id}/cover/access:
+    $ref: './paths/teaching.yaml#/api/v1/teaching/courses/{id}/cover/access'
   /api/v1/teaching/courses/join:
     $ref: './paths/teaching.yaml#/api/v1/teaching/courses/join'
   /api/v1/teaching/courses/{id}:
@@ -631,13 +641,18 @@ components:
       in: query
       name: ticket
       description: M1 `/api/v1/auth/ws-ticket` 签发的短时路径绑定 WebSocket 连接票据。
+    browserTicketAuth:
+      type: apiKey
+      in: query
+      name: ticket
+      description: M1 `/api/v1/auth/browser-ticket` 签发的短时路径前缀绑定浏览器工具入口票据。
     browserAccessCookie:
       type: apiKey
       in: cookie
       name: chaimir_access
       description: >-
         路径受限 HttpOnly access cookie,供浏览器自身发起、发不出 Authorization 头的请求复用平台鉴权
-        (内嵌工具代理资源加载、统一文件服务流式投放)。由对应业务入口按最小作用域写入。
+        (内嵌工具代理资源加载、统一文件服务流式投放)。工具代理由 browser ticket 换取,文件流由业务授权接口写入。
   parameters:
     IDPath:
       name: id

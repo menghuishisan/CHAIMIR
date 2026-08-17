@@ -16,14 +16,13 @@ $ErrorActionPreference = "Stop"
 
 $scriptDir = $PSScriptRoot
 $repoRoot = Resolve-Path (Join-Path $scriptDir "../..")
+Import-Module (Join-Path $repoRoot "images/lib/ImageMetadata.psm1") -Force
 if (-not $LogDir) {
     $LogDir = Join-Path $repoRoot ".tmp/e2e-sms"
 }
 New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
 
 $label = "chaimir.io/e2e=sms-gateway"
-# 使用正式镜像锁中的 Node 基座 digest，确保 E2E 夹具也通过集群签名准入。
-$gatewayImage = "registry.chaimir.io/base/node-builder@sha256:e6613c834ef13f9613344b87c84cc0a0bf2db5166b5bbfaad02d0ebdb8eeb3fc"
 $gatewayManifest = Join-Path $LogDir "sms-gateway-resources.yaml"
 $gatewayConfig = Join-Path $LogDir "sms-gateway-configmap.yaml"
 $gatewayForwardLog = Join-Path $LogDir "sms-gateway-port-forward.log"
@@ -66,6 +65,24 @@ if ($Cleanup) {
     Remove-Fixture
     exit 0
 }
+
+# E2E 夹具复用正式 registry 配置与 digest 锁，避免脚本复制镜像引用后随锁更新漂移。
+$digestLock = Read-ChaimirDigestLock -Path (Join-Path $repoRoot "images/image-digests.lock") -Required
+$nodeBuilderDigest = $digestLock["base/node-builder"]
+if ([string]::IsNullOrWhiteSpace($nodeBuilderDigest)) {
+    throw "images/image-digests.lock 缺少 base/node-builder"
+}
+$registryLine = Get-Content -LiteralPath (Join-Path $repoRoot "deploy/config/chaimir.env") |
+    Where-Object { $_ -match '^IMAGE_REGISTRY=(.+)$' } |
+    Select-Object -First 1
+if (-not $registryLine -or $registryLine -notmatch '^IMAGE_REGISTRY=(.+)$') {
+    throw "deploy/config/chaimir.env 缺少 IMAGE_REGISTRY"
+}
+$imageRegistry = $Matches[1].Trim().TrimEnd('/')
+if ([string]::IsNullOrWhiteSpace($imageRegistry)) {
+    throw "deploy/config/chaimir.env 的 IMAGE_REGISTRY 不能为空"
+}
+$gatewayImage = "$imageRegistry/base/node-builder@$nodeBuilderDigest"
 
 # 删除同一标签的上轮残留，避免旧 token 或旧脚本继续接收请求。
 Remove-Fixture

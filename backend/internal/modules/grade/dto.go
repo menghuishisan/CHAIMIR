@@ -1,7 +1,22 @@
 // grade dto 文件定义 M11 HTTP 请求结构。
 package grade
 
-import "chaimir/internal/platform/ids"
+import (
+	"time"
+
+	"chaimir/internal/platform/ids"
+)
+
+// GradeSummaryDTO 是学生成绩聚合响应。
+type GradeSummaryDTO struct {
+	StudentID     ids.ID             `json:"student_id"`
+	SemesterID    ids.ID             `json:"semester_id,omitempty"`
+	TotalCredits  float64            `json:"total_credits"`
+	GPA           float64            `json:"gpa"`
+	CumulativeGPA float64            `json:"cumulative_gpa"`
+	CourseGrades  []CourseGradeInput `json:"course_grades"`
+	ComputedAt    time.Time          `json:"computed_at"`
+}
 
 // LevelConfigRequest 是等级映射配置请求。
 type LevelConfigRequest struct {

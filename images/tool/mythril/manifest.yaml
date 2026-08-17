@@ -39,8 +39,8 @@ tool:
     - sleep
     - "2147483647"
   command_policy:
-    allowed_commands:
-      - myth
+    allowed_argv:
+      - ["myth"]
     default_timeout_seconds: 120
     max_timeout_seconds: 300
 ports: []

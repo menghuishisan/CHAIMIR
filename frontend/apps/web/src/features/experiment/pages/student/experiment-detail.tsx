@@ -7,7 +7,7 @@
 
 import { useCallback, useMemo, useState } from 'react'
 import { useNavigate, useParams } from 'react-router'
-import { FlaskConical, Layers, Play, Target, Users } from 'lucide-react'
+import { FlaskConical, Layers, Play, Target } from 'lucide-react'
 import {
   EXPERIMENT_STAGE_STATUS,
   ExperimentCollabMode,
@@ -38,7 +38,6 @@ import { api } from '../../../../app/api'
 import { ResourceState } from '../../../../components/ResourceState'
 import { useAsyncResource } from '../../../../hooks'
 import {
-  experimentCollabModeLabel,
   experimentStageStatusLabel,
   experimentStageStatusTone,
   experimentStatusLabel,
@@ -193,8 +192,10 @@ function ExperimentDetailContent({ experiment }: { experiment: StudentExperiment
         }
       />
 
+      {/* 指标带只放可度量的检查点与阶段数;完成方式与是否交报告是实验属性,
+          在右侧「实验要求」里已逐项列出,不占指标位(规范 §6.5) */}
       <PageSection>
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           <Stat
             label="检查点"
             value={experiment.components.checkpoints.length}
@@ -204,12 +205,6 @@ function ExperimentDetailContent({ experiment }: { experiment: StudentExperiment
           />
           <Stat label="检查点总分" value={checkpointTotal} icon={Target} />
           <Stat label="实验阶段" value={stages.length} icon={Layers} />
-          <Stat
-            label="完成方式"
-            value={experimentCollabModeLabel(experiment.collab_mode)}
-            icon={Users}
-            hint={experiment.require_report ? '需要提交实验报告' : '不需要提交报告'}
-          />
         </div>
       </PageSection>
 

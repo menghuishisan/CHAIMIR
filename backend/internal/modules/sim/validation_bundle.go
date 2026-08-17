@@ -403,6 +403,9 @@ func interactionSchemaFromManifest(in simInteractionDef) (InteractionEventSchema
 	if id == "" || strings.TrimSpace(in.Label) == "" || !eventTypePattern.MatchString(strings.TrimSpace(in.Emits)) || !validInteractionKind(kind) || (target != "global" && target != "element") {
 		return InteractionEventSchema{}, []string{"manifest:interaction-invalid"}
 	}
+	if !validInteractionLabelTag(in.LabelTag) {
+		return InteractionEventSchema{}, []string{"manifest:interaction-invalid"}
+	}
 	if kind == "select-element" && target != "element" {
 		return InteractionEventSchema{}, []string{"manifest:interaction-invalid"}
 	}
@@ -531,6 +534,18 @@ func positiveJSONInt(value any) (int, bool) {
 func validInteractionKind(value string) bool {
 	switch value {
 	case "button", "slider", "hold", "select-element", "drag", "form":
+		return true
+	default:
+		return false
+	}
+}
+
+// validInteractionLabelTag 校验交互视觉标签是否落在封闭四值集(见 docs/04-仿真可视化引擎/03 §3.3)。
+// 空值合法,运行时按 normal 处理;但未知值必须在上架前拒绝 ——
+// 标签决定按钮配色与攻击类的二次确认,认不出的标签会让扩展包的破坏性操作画成普通推进色。
+func validInteractionLabelTag(value string) bool {
+	switch strings.TrimSpace(value) {
+	case "", "normal", "recover", "perturb", "attack":
 		return true
 	default:
 		return false

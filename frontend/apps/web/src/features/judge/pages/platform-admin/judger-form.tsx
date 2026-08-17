@@ -444,7 +444,7 @@ export function JudgerFormModal({ judger, onClose, onSaved }: JudgerFormModalPro
             )}
 
             {needsRuntime ? (
-              <div className="flex flex-col gap-4 rounded-md border border-line bg-surface-sunken p-4">
+              <div className="flex flex-col gap-4 well p-4">
                 <div>
                   <p className="text-base text-ink">链环境</p>
                   <p className="text-sm text-ink-sub">
@@ -559,7 +559,7 @@ export function JudgerFormModal({ judger, onClose, onSaved }: JudgerFormModalPro
             ) : null}
 
             {needsCommand ? (
-              <div className="flex flex-col gap-4 rounded-md border border-line bg-surface-sunken p-4">
+              <div className="flex flex-col gap-4 well p-4">
                 <div>
                   <p className="text-base text-ink">执行入口</p>
                   <p className="text-sm text-ink-sub">
@@ -661,7 +661,7 @@ export function JudgerFormModal({ judger, onClose, onSaved }: JudgerFormModalPro
             <Button type="button" variant="outline" onClick={onClose}>
               取消
             </Button>
-            <Button type="submit" variant="seal" loading={submitting}>
+            <Button type="submit" variant="primary" loading={submitting}>
               {editing ? '保存配置' : '登记判题器'}
             </Button>
           </ModalFooter>

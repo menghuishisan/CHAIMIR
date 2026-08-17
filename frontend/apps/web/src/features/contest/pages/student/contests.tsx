@@ -22,7 +22,7 @@ import {
 } from '@chaimir/ui'
 import { api } from '../../../../app/api'
 import { ResourceState } from '../../../../components/ResourceState'
-import { useAsyncResource, usePagedResource } from '../../../../hooks'
+import { useAsyncResource, usePagedResource, useResourceTotal } from '../../../../hooks'
 import { formatDateTime, formatRelativeDeadline } from '../../../../utils/formatters'
 import {
   contestModeLabel,
@@ -52,9 +52,16 @@ export default function StudentContestsPage() {
     [records.data],
   )
 
-  const list = contests.data ? contests.data.list : []
-  const signupOpenCount = list.filter((item) => item.status === SIGNUP_OPEN_STATUS).length
-  const runningCount = list.filter((item) => item.status === ContestStatus.RUNNING).length
+  // 指标带取服务端全量口径:第 1 页的 20 条里数出来的「报名中 3」在赛事更多时是错数
+  const totalCount = useResourceTotal((params) => api.contest.getStudentContests(params), [])
+  const signupOpenCount = useResourceTotal(
+    (params) => api.contest.getStudentContests({ status: SIGNUP_OPEN_STATUS, ...params }),
+    [],
+  )
+  const runningCount = useResourceTotal(
+    (params) => api.contest.getStudentContests({ status: ContestStatus.RUNNING, ...params }),
+    [],
+  )
 
   const columns: TableColumn<Contest>[] = [
     {
@@ -125,9 +132,9 @@ export default function StudentContestsPage() {
 
       <PageSection>
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          <Stat label="可参与赛事" value={contests.total} icon={Swords} />
-          <Stat label="报名中" value={signupOpenCount} icon={UserCheck} hint="报名窗口尚未关闭" />
-          <Stat label="进行中" value={runningCount} icon={Trophy} />
+          <Stat label="可参与赛事" value={totalCount ?? '—'} icon={Swords} />
+          <Stat label="报名中" value={signupOpenCount ?? '—'} icon={UserCheck} hint="报名窗口尚未关闭" />
+          <Stat label="进行中" value={runningCount ?? '—'} icon={Trophy} />
         </div>
       </PageSection>
 

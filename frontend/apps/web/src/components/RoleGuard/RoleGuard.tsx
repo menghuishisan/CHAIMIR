@@ -46,6 +46,7 @@ const VerifiedRoleGuard: React.FC<RoleGuardProps> = ({ allowedRoles }) => {
     return (
       <AppStatusScreen
         icon={ShieldAlert}
+        tone="danger"
         title="暂时无法校验访问权限"
         description="请检查网络后重试;若持续失败,请联系本校管理员。"
         traceId={resource.error?.traceId}

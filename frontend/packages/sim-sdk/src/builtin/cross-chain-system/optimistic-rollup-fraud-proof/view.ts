@@ -18,19 +18,19 @@ export function renderOptimisticRollupView(state: OptimisticRollupState): Teachi
       intent: state.phaseIndex >= 2 ? 'attack' : 'observe',
       what: state.explanation.effect,
       why: state.explanation.reason,
-      watch: summary,
     },
     focus: {
       primary: selectedOrFrameFocus(state.selectedElementId, state.phaseIndex >= 3 ? ['l2tx-2'] : [state.batchId]),
       secondary: ['op-rollup-chain'],
       muted: state.fraudProven ? [state.batchId] : [],
     },
-    // 三个视图各有职责:争议树是执行追踪(争议阶段升为主舞台),流程恒为时间线,L1 链状态为证据。
+    // 三个视图各有职责:争议树是执行追踪(争议阶段升为主舞台),流程与 L1 链状态为证据。
+    // 流程步骤是有界元素(阶段数由协议定死),故归证据而非时间线 —— 时间线只放随时间增长的
+    // 消息/调用,它由右侧事件流承载(规范 §7.1 状态与事件分流)。
     // 每个 pattern 都必须在 layout 里声明职责 —— 未声明的视图会被运行时协议校验拒绝(装配即失败)。
     layout: {
       primary,
-      evidence: ['op-rollup-chain'],
-      timeline: 'op-rollup-pipeline',
+      evidence: ['op-rollup-pipeline', 'op-rollup-chain'],
       trace: 'op-rollup-dispute',
     },
     patterns: [

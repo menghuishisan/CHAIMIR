@@ -2,11 +2,10 @@
 package notify
 
 import (
-	"fmt"
 	"regexp"
-	"strconv"
 	"strings"
 
+	"chaimir/internal/platform/ids"
 	"chaimir/pkg/apperr"
 )
 
@@ -55,8 +54,8 @@ func ValidatePushTopic(tenantID int64, topic string) error {
 		if topicTenantID(topic) != tenantID {
 			return apperr.ErrNotifyTopicForbidden
 		}
-		accountID, err := strconv.ParseInt(matches[2], 10, 64)
-		if err != nil || accountID <= 0 {
+		_, ok := ids.Parse(matches[2])
+		if !ok {
 			return apperr.ErrNotifySubscribeInvalid
 		}
 		return nil
@@ -78,12 +77,12 @@ func ValidatePushTopic(tenantID int64, topic string) error {
 
 // personalNotifyTopic 生成当前租户下个人红点 topic,避免账号 ID 单独暴露为跨租户通道名。
 func personalNotifyTopic(tenantID, accountID int64) string {
-	return fmt.Sprintf("tenant:%d:notify:%d", tenantID, accountID)
+	return "tenant:" + ids.Format(tenantID) + ":notify:" + ids.Format(accountID)
 }
 
 // tenantAlertTopic 生成当前租户告警 topic。
 func tenantAlertTopic(tenantID int64) string {
-	return fmt.Sprintf("tenant:%d:alert", tenantID)
+	return "tenant:" + ids.Format(tenantID) + ":alert"
 }
 
 // topicTenantID 解析所有 M10 统一实时 topic 的租户前缀,不命中时返回 0。
@@ -92,8 +91,8 @@ func topicTenantID(topic string) int64 {
 	if len(matches) != 2 {
 		return 0
 	}
-	tenantID, err := strconv.ParseInt(matches[1], 10, 64)
-	if err != nil {
+	tenantID, ok := ids.Parse(matches[1])
+	if !ok {
 		return 0
 	}
 	return tenantID
@@ -105,8 +104,8 @@ func businessTopicTenantID(topic string) int64 {
 	if len(matches) != 3 {
 		return 0
 	}
-	tenantID, err := strconv.ParseInt(matches[1], 10, 64)
-	if err != nil {
+	tenantID, ok := ids.Parse(matches[1])
+	if !ok {
 		return 0
 	}
 	return tenantID

@@ -333,7 +333,7 @@ export function CourseFormModal({ course, onClose, onSaved }: CourseFormModalPro
             <Button type="button" variant="outline" onClick={onClose}>
               取消
             </Button>
-            <Button type="submit" variant="seal" loading={submitting}>
+            <Button type="submit" variant="primary" loading={submitting}>
               {editing ? '保存修改' : '创建课程'}
             </Button>
           </ModalFooter>

@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/base64"
 	"errors"
-	"fmt"
 	"io"
 	"strings"
 
@@ -111,7 +110,7 @@ func (s *Service) RunCommandToolForOwner(ctx context.Context, tenantID, accountI
 	if target == "" {
 		return ToolRunResponse{}, apperr.ErrSandboxToolProxyUnavailable
 	}
-	if !commandToolCommandAllowed(tool.ResourceSpec.CommandPolicy, req.Command[0]) {
+	if !commandToolCommandAllowed(tool.ResourceSpec.CommandPolicy, req.Command) {
 		return ToolRunResponse{}, apperr.ErrSandboxToolRunRequestInvalid
 	}
 	defaultTimeout, ok := intx.Int32(s.cfg.ExecTimeoutSeconds)
@@ -136,7 +135,7 @@ func (s *Service) RunCommandToolForOwner(ctx context.Context, tenantID, accountI
 				ExitCode:     exitCode,
 			}, nil
 		}
-		return ToolRunResponse{}, apperr.ErrSandboxExecFailed.WithCause(fmt.Errorf("%w: %s", err, string(stderr)))
+		return ToolRunResponse{}, sandboxExecFailure(apperr.ErrSandboxExecFailed, err, stderr)
 	}
 	if err := s.recordCommandToolRun(ctx, sb, tool, req.Command); err != nil {
 		return ToolRunResponse{}, err
@@ -198,14 +197,23 @@ func commandToolExecTarget(tool SandboxTool) string {
 	return toolComponentPodName(tool.ToolCode, component.Name) + "/" + component.Name
 }
 
-// commandToolCommandAllowed 判断请求命令是否命中工具白名单。
-func commandToolCommandAllowed(policy CommandToolPolicy, command string) bool {
-	command = strings.TrimSpace(command)
-	if command == "" {
+// commandToolCommandAllowed 判断请求 argv 是否逐项命中工具白名单。
+func commandToolCommandAllowed(policy CommandToolPolicy, command []string) bool {
+	if !safeNonShellCommand(command) {
 		return false
 	}
-	for _, allowed := range policy.AllowedCommands {
-		if command == strings.TrimSpace(allowed) {
+	for _, allowed := range policy.AllowedArgv {
+		if len(command) != len(allowed) {
+			continue
+		}
+		matched := true
+		for i := range command {
+			if command[i] != allowed[i] {
+				matched = false
+				break
+			}
+		}
+		if matched {
 			return true
 		}
 	}

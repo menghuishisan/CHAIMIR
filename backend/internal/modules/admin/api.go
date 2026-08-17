@@ -127,7 +127,7 @@ func (a adminAPI) configHistory(c *gin.Context) {
 	if !ok {
 		return
 	}
-	tenantID, ok := httpx.QueryInt(c, "tenant_id", httpx.QueryIntRule{Default: 0, Min: 0})
+	tenantID, ok := httpx.QueryID(c, "tenant_id", false)
 	if !ok {
 		return
 	}
@@ -214,18 +214,23 @@ func (a adminAPI) monitoringPanels(c *gin.Context) {
 }
 
 // listBackups 查询备份记录。
+// status=0 表示不按结果过滤;越界状态在边界处拒绝,不进服务层。
 func (a adminAPI) listBackups(c *gin.Context) {
 	page, size, ok := httpx.Page(c)
 	if !ok {
 		return
 	}
-	out11, total, p, s, err := a.svc.ListBackups(c.Request.Context(), page, size)
+	status, ok := httpx.QueryInt16(c, "status", httpx.QueryIntRule{Default: 0, Min: 0, Max: int64(BackupStatusFailed), HasMax: true})
+	if !ok {
+		return
+	}
+	out11, total, p, s, err := a.svc.ListBackups(c.Request.Context(), status, page, size)
 	httpx.WritePage(c, out11, total, p, s, err)
 }
 
 // auditQuery 解析审计中心文档定义的过滤条件。
 func auditQuery(c *gin.Context, page, size int) (contracts.AuditQuery, bool) {
-	actorID, ok := httpx.QueryInt(c, "actor_id", httpx.QueryIntRule{Min: 0})
+	actorID, ok := httpx.QueryID(c, "actor_id", false)
 	if !ok {
 		return contracts.AuditQuery{}, false
 	}

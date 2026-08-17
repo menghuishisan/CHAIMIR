@@ -20,12 +20,12 @@ type TokenType string
 const (
 	// AccessToken 表示短期 JWT access token。
 	AccessToken TokenType = "access"
-	// WebSocketTicket 表示只能用于指定 WebSocket 路径的一次性连接票据。
+	// WebSocketTicket 表示只能用于指定 WebSocket 路径的短时连接票据。
 	WebSocketTicket TokenType = "ws_ticket"
-	// webSocketTicketTTL 限制浏览器 WebSocket URL 中可见凭证的可用窗口。
-	webSocketTicketTTL = 30 * time.Second
-	// maxWebSocketTicketPathLength 限制票据绑定路径长度,避免异常 URL 被签入凭证。
-	maxWebSocketTicketPathLength = 512
+	// BrowserAccessTicket 表示只能用于指定浏览器工具路径前缀的短时入口票据。
+	BrowserAccessTicket TokenType = "browser_ticket"
+	// maxPathTicketPathLength 限制票据绑定路径长度,避免异常 URL 被签入凭证。
+	maxPathTicketPathLength = 512
 )
 
 // Claims 是 access token 的受控载荷。
@@ -35,7 +35,7 @@ type Claims struct {
 	SessionID  int64     `json:"sid"`
 	IsPlatform bool      `json:"plat"`
 	Type       TokenType `json:"typ"`
-	WSPath     string    `json:"wsp,omitempty"`
+	BoundPath  string    `json:"pth,omitempty"`
 	jwt.RegisteredClaims
 }
 
@@ -59,6 +59,7 @@ type Manager struct {
 	signingKey     []byte
 	hmacKey        []byte
 	accessTTL      time.Duration
+	pathTicketTTL  time.Duration
 	refreshTTL     time.Duration
 	issuer         string
 	serviceMaxSkew time.Duration
@@ -71,6 +72,7 @@ func NewManager(cfg config.AuthConfig) *Manager {
 		signingKey:     []byte(cfg.JWTSigningKey),
 		hmacKey:        []byte(cfg.HMACKey),
 		accessTTL:      time.Duration(cfg.AccessTTLMin) * time.Minute,
+		pathTicketTTL:  time.Duration(cfg.PathTicketTTLSeconds) * time.Second,
 		refreshTTL:     time.Duration(cfg.RefreshTTLDay) * 24 * time.Hour,
 		issuer:         cfg.JWTIssuer,
 		serviceMaxSkew: time.Duration(cfg.ServiceAuthMaxSkewSeconds) * time.Second,
@@ -106,36 +108,12 @@ func (m *Manager) IssueAccess(tenantID, accountID, sessionID int64, isPlatform b
 
 // IssueWebSocketTicket 签发短时、路径绑定的 WebSocket 连接票据。
 func (m *Manager) IssueWebSocketTicket(id SessionIdentity) (string, time.Time, error) {
-	wsPath, err := normalizeWebSocketTicketPath(id.Path)
-	if err != nil {
-		return "", time.Time{}, err
-	}
-	if id.AccountID <= 0 || id.SessionID <= 0 {
-		return "", time.Time{}, errors.New("WebSocket 票据身份载荷不完整")
-	}
-	if !id.IsPlatform && id.TenantID <= 0 {
-		return "", time.Time{}, errors.New("WebSocket 票据缺少租户边界")
-	}
-	now := timex.Now()
-	expiresAt := now.Add(webSocketTicketTTL)
-	claims := Claims{
-		TenantID:   id.TenantID,
-		AccountID:  id.AccountID,
-		SessionID:  id.SessionID,
-		IsPlatform: id.IsPlatform,
-		Type:       WebSocketTicket,
-		WSPath:     wsPath,
-		RegisteredClaims: jwt.RegisteredClaims{
-			Issuer:    m.issuer,
-			IssuedAt:  jwt.NewNumericDate(now),
-			ExpiresAt: jwt.NewNumericDate(expiresAt),
-		},
-	}
-	signed, err := jwt.NewWithClaims(jwt.SigningMethodHS256, claims).SignedString(m.signingKey)
-	if err != nil {
-		return "", time.Time{}, fmt.Errorf("签发 WebSocket 票据失败: %w", err)
-	}
-	return signed, expiresAt, nil
+	return m.issuePathTicket(id, WebSocketTicket, "WebSocket")
+}
+
+// IssueBrowserAccessTicket 签发短时、路径前缀绑定的浏览器工具入口票据。
+func (m *Manager) IssueBrowserAccessTicket(id SessionIdentity) (string, time.Time, error) {
+	return m.issuePathTicket(id, BrowserAccessTicket, "浏览器工具")
 }
 
 // VerifyAccess 校验 access token 的签名、时效和最小身份边界。
@@ -152,18 +130,7 @@ func (m *Manager) VerifyAccess(tokenString string) (*Claims, error) {
 
 // VerifyWebSocketTicket 校验连接票据签名、时效、身份载荷和路径绑定。
 func (m *Manager) VerifyWebSocketTicket(tokenString, requestPath string) (*Claims, error) {
-	expectedPath, err := normalizeWebSocketTicketPath(requestPath)
-	if err != nil {
-		return nil, err
-	}
-	claims, err := m.parseClaims(tokenString)
-	if err != nil {
-		return nil, err
-	}
-	if claims.Type != WebSocketTicket {
-		return nil, errors.New("WebSocket 票据类型不匹配")
-	}
-	claimPath, err := normalizeWebSocketTicketPath(claims.WSPath)
+	claims, claimPath, expectedPath, err := m.verifyPathTicket(tokenString, requestPath, WebSocketTicket, "WebSocket")
 	if err != nil {
 		return nil, err
 	}
@@ -171,6 +138,72 @@ func (m *Manager) VerifyWebSocketTicket(tokenString, requestPath string) (*Claim
 		return nil, errors.New("WebSocket 票据路径不匹配")
 	}
 	return claims, nil
+}
+
+// VerifyBrowserAccessTicket 校验浏览器工具票据签名、时效、身份载荷和路径前缀。
+func (m *Manager) VerifyBrowserAccessTicket(tokenString, requestPath string) (*Claims, error) {
+	claims, claimPath, expectedPath, err := m.verifyPathTicket(tokenString, requestPath, BrowserAccessTicket, "浏览器工具")
+	if err != nil {
+		return nil, err
+	}
+	if expectedPath != claimPath && !strings.HasPrefix(expectedPath, claimPath+"/") {
+		return nil, errors.New("浏览器工具票据路径不匹配")
+	}
+	return claims, nil
+}
+
+// issuePathTicket 统一签发短时路径票据,由 token 类型区分 WS 精确路径与工具路径前缀语义。
+func (m *Manager) issuePathTicket(id SessionIdentity, tokenType TokenType, label string) (string, time.Time, error) {
+	boundPath, err := normalizePathTicketPath(id.Path)
+	if err != nil {
+		return "", time.Time{}, err
+	}
+	if id.AccountID <= 0 || id.SessionID <= 0 {
+		return "", time.Time{}, fmt.Errorf("%s票据身份载荷不完整", label)
+	}
+	if !id.IsPlatform && id.TenantID <= 0 {
+		return "", time.Time{}, fmt.Errorf("%s票据缺少租户边界", label)
+	}
+	now := timex.Now()
+	expiresAt := now.Add(m.pathTicketTTL)
+	claims := Claims{
+		TenantID:   id.TenantID,
+		AccountID:  id.AccountID,
+		SessionID:  id.SessionID,
+		IsPlatform: id.IsPlatform,
+		Type:       tokenType,
+		BoundPath:  boundPath,
+		RegisteredClaims: jwt.RegisteredClaims{
+			Issuer:    m.issuer,
+			IssuedAt:  jwt.NewNumericDate(now),
+			ExpiresAt: jwt.NewNumericDate(expiresAt),
+		},
+	}
+	signed, err := jwt.NewWithClaims(jwt.SigningMethodHS256, claims).SignedString(m.signingKey)
+	if err != nil {
+		return "", time.Time{}, fmt.Errorf("签发%s票据失败: %w", label, err)
+	}
+	return signed, expiresAt, nil
+}
+
+// verifyPathTicket 统一校验路径票据的公共签名、类型和规范化路径。
+func (m *Manager) verifyPathTicket(tokenString, requestPath string, tokenType TokenType, label string) (*Claims, string, string, error) {
+	expectedPath, err := normalizePathTicketPath(requestPath)
+	if err != nil {
+		return nil, "", "", err
+	}
+	claims, err := m.parseClaims(tokenString)
+	if err != nil {
+		return nil, "", "", err
+	}
+	if claims.Type != tokenType {
+		return nil, "", "", fmt.Errorf("%s票据类型不匹配", label)
+	}
+	claimPath, err := normalizePathTicketPath(claims.BoundPath)
+	if err != nil {
+		return nil, "", "", err
+	}
+	return claims, claimPath, expectedPath, nil
 }
 
 // parseClaims 校验 JWT 签名、签发方、时效和共享身份边界。
@@ -197,17 +230,22 @@ func (m *Manager) parseClaims(tokenString string) (*Claims, error) {
 	return claims, nil
 }
 
-// normalizeWebSocketTicketPath 校验并规范化票据绑定路径,不接受查询串或绝对 URL。
-func normalizeWebSocketTicketPath(raw string) (string, error) {
-	path := strings.TrimSpace(raw)
-	if path == "" || len(path) > maxWebSocketTicketPathLength {
-		return "", errors.New("WebSocket 路径无效")
+// normalizePathTicketPath 校验并规范化票据绑定路径,不接受查询串、绝对 URL 或逃逸片段。
+func normalizePathTicketPath(raw string) (string, error) {
+	path := strings.TrimSuffix(strings.TrimSpace(raw), "/")
+	if path == "" || len(path) > maxPathTicketPathLength {
+		return "", errors.New("票据路径无效")
 	}
 	if !strings.HasPrefix(path, "/api/") {
-		return "", errors.New("WebSocket 路径缺少 API 边界")
+		return "", errors.New("票据路径缺少 API 边界")
 	}
 	if strings.Contains(path, "?") || strings.Contains(path, "#") || strings.Contains(path, "//") {
-		return "", errors.New("WebSocket 路径包含无效片段")
+		return "", errors.New("票据路径包含无效片段")
+	}
+	for _, segment := range strings.Split(path, "/") {
+		if segment == "." || segment == ".." {
+			return "", errors.New("票据路径包含逃逸片段")
+		}
 	}
 	return path, nil
 }

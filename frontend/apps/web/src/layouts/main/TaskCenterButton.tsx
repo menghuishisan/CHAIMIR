@@ -19,6 +19,7 @@ import {
 import { api } from '../../app/api'
 import { useAsyncResource } from '../../hooks'
 import { formatShortDateTime } from '../../utils/formatters'
+import { TRANSFER_ACTIVE_STATUSES } from '../../utils/transfer'
 import {
   transferTaskStatusLabel,
   transferTaskStatusTone,
@@ -27,13 +28,6 @@ import {
 
 /** 下拉内展示的任务条数:面板是「最近」摘要,全量在任务中心页 */
 const RECENT_SIZE = 5
-
-/** 进行中的状态:决定按钮上是否显示玉色提示点 */
-const ACTIVE_STATUSES: ReadonlySet<TransferTask['status']> = new Set([
-  'pending',
-  'running',
-  'retrying',
-])
 
 export interface TaskCenterButtonProps {
   /** 任务中心页路径(角色区内) */
@@ -50,7 +44,7 @@ export function TaskCenterButton({ tasksPath }: TaskCenterButtonProps) {
   const tasks = useAsyncResource(
     () => api.transfer.listTasks({ page: 1, size: RECENT_SIZE }),
     [],
-    (value) => value.items.length === 0,
+    (value) => value.list.length === 0,
   )
   const { reload } = tasks
 
@@ -61,7 +55,7 @@ export function TaskCenterButton({ tasksPath }: TaskCenterButtonProps) {
 
   // 首次读取完成前没有任务数据,此时按钮不带提示点
   const activeCount = tasks.data
-    ? tasks.data.items.filter((task) => ACTIVE_STATUSES.has(task.status)).length
+    ? tasks.data.list.filter((task) => TRANSFER_ACTIVE_STATUSES.has(task.status)).length
     : 0
 
   return (
@@ -117,7 +111,7 @@ export function TaskCenterButton({ tasksPath }: TaskCenterButtonProps) {
             ) : null}
 
             {tasks.status === 'success' && tasks.data
-              ? tasks.data.items.map((task) => <TaskRow key={task.task_id} task={task} />)
+              ? tasks.data.list.map((task) => <TaskRow key={task.task_id} task={task} />)
               : null}
           </div>
 

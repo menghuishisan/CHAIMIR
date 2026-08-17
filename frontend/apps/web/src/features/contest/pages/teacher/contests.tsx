@@ -2,7 +2,7 @@
 // 赛事状态是有向流转:草稿→报名→进行中→封榜→结束→归档。
 // 归档会生成结果快照且不可逆,故走确认;其余流转也各自确认,避免误点改变学生可见性。
 
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useState } from 'react'
 import { useNavigate } from 'react-router'
 import { Bug, Flag, Lock, MoreVertical, Play, Plus, Snowflake, Trophy } from 'lucide-react'
 import { ContestStatus, type Contest } from '@chaimir/api-client'
@@ -10,6 +10,8 @@ import {
   Breadcrumb,
   Button,
   Callout,
+  FilterBar,
+  FilterField,
   IconButton,
   Menu,
   MenuContent,
@@ -36,7 +38,7 @@ import {
 } from '@chaimir/ui'
 import { api } from '../../../../app/api'
 import { ResourceState } from '../../../../components/ResourceState'
-import { usePagedResource } from '../../../../hooks'
+import { usePagedResource, useResourceTotal } from '../../../../hooks'
 import { formatDateTime } from '../../../../utils/formatters'
 import {
   contestModeLabel,
@@ -129,16 +131,29 @@ export default function TeacherContestsPage() {
     }
   }, [confirm, contests])
 
-  const stats = useMemo(() => {
-    const list = contests.data ? contests.data.list : []
-    return {
-      signup: list.filter((item) => item.status === ContestStatus.SIGNUP).length,
-      running: list.filter(
-        (item) => item.status === ContestStatus.RUNNING || item.status === ContestStatus.FROZEN,
-      ).length,
-      draft: list.filter((item) => item.status === ContestStatus.DRAFT).length,
-    }
-  }, [contests.data])
+  // 指标带取服务端全量口径,不随下方状态筛选变化。
+  // 「进行中」在后端是两个状态(进行中/封榜中),分别取总数后相加 —— 状态互斥,相加精确。
+  const totalCount = useResourceTotal((params) => api.contest.getContests(params), [])
+  const signupCount = useResourceTotal(
+    (params) => api.contest.getContests({ status: ContestStatus.SIGNUP, ...params }),
+    [],
+  )
+  const runningOnlyCount = useResourceTotal(
+    (params) => api.contest.getContests({ status: ContestStatus.RUNNING, ...params }),
+    [],
+  )
+  const frozenCount = useResourceTotal(
+    (params) => api.contest.getContests({ status: ContestStatus.FROZEN, ...params }),
+    [],
+  )
+  const draftCount = useResourceTotal(
+    (params) => api.contest.getContests({ status: ContestStatus.DRAFT, ...params }),
+    [],
+  )
+  const runningCount =
+    runningOnlyCount === undefined || frozenCount === undefined
+      ? undefined
+      : runningOnlyCount + frozenCount
 
   const columns: TableColumn<Contest>[] = [
     {
@@ -221,27 +236,27 @@ export default function TeacherContestsPage() {
 
       <PageSection>
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <Stat label="赛事总数" value={contests.total} icon={Trophy} />
-          <Stat label="报名中" value={stats.signup} icon={Flag} />
-          <Stat label="进行中" value={stats.running} icon={Play} />
-          <Stat label="草稿" value={stats.draft} icon={Plus} hint="发布后学生可见" />
+          <Stat label="赛事总数" value={totalCount ?? '—'} icon={Trophy} hint="不受下方筛选影响" />
+          <Stat label="报名中" value={signupCount ?? '—'} icon={Flag} />
+          <Stat label="进行中" value={runningCount ?? '—'} icon={Play} hint="含封榜中" />
+          <Stat label="草稿" value={draftCount ?? '—'} icon={Plus} hint="发布后学生可见" />
         </div>
       </PageSection>
 
-      <PageSection
-        title="赛事列表"
-        description={`共 ${contests.total} 场赛事`}
-        actions={
-          <SegmentedControl
-            aria-label="按赛事状态筛选"
-            size="sm"
-            options={STATUS_FILTERS.map((item) => ({ value: item.value, label: item.label }))}
-            value={statusFilter}
-            onValueChange={setStatusFilter}
-          />
-        }
-      >
+      <PageSection title="赛事列表" description={`共 ${contests.total} 场赛事`}>
         <div className="flex flex-col gap-4">
+          <FilterBar label="赛事筛选">
+            <FilterField label="赛事状态" group>
+              <SegmentedControl
+                aria-label="按赛事状态筛选"
+                size="sm"
+                options={STATUS_FILTERS.map((item) => ({ value: item.value, label: item.label }))}
+                value={statusFilter}
+                onValueChange={setStatusFilter}
+              />
+            </FilterField>
+          </FilterBar>
+
           {actionError ? <Callout tone="danger">{actionError}</Callout> : null}
 
           <ResourceState

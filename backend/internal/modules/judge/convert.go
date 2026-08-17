@@ -2,6 +2,8 @@
 package judge
 
 import (
+	"fmt"
+
 	"chaimir/internal/contracts"
 	"chaimir/internal/platform/ids"
 	"chaimir/internal/platform/jsonx"
@@ -37,7 +39,7 @@ func contractTaskInfoFromModel(info JudgeTaskInfo) contracts.JudgeTaskInfo {
 		SourceRef:   info.Task.SourceRef,
 		SubmitterID: info.Task.SubmitterID,
 		Status:      contractStatus(info.Task.Status),
-		Result:      contractResult(info.Result),
+		Result:      contractResult(info.Task, info.Result),
 	}
 }
 
@@ -58,7 +60,7 @@ func contractStatus(status int16) int16 {
 }
 
 // contractResult 转换判题结果,缺失结果时返回零值摘要。
-func contractResult(result *JudgeResult) contracts.JudgeTaskResult {
+func contractResult(task JudgeTask, result *JudgeResult) contracts.JudgeTaskResult {
 	if result == nil {
 		return contracts.JudgeTaskResult{}
 	}
@@ -77,52 +79,64 @@ func contractResult(result *JudgeResult) contracts.JudgeTaskResult {
 		Score:     result.Score,
 		MaxScore:  result.MaxScore,
 		Details:   details,
-		ResultRef: resultRef(result.TaskID),
+		ResultRef: resultRef(task),
 		Replay:    result.Replay,
 	}
 }
 
-// taskInfoToMap 转成 API 响应 map,避免直接暴露内部字段。
-func taskInfoToMap(info JudgeTaskInfo) map[string]any {
-	out := map[string]any{
-		"task_id":      ids.Format(info.Task.ID),
-		"tenant_id":    ids.Format(info.Task.TenantID),
-		"source_ref":   info.Task.SourceRef,
-		"submitter_id": ids.Format(info.Task.SubmitterID),
-		"status":       statusText(info.Task.Status),
-		"existing":     info.Existing,
+// judgeTaskDTOFromModel 转换任务及其最新结果为公开 HTTP DTO。
+func judgeTaskDTOFromModel(info JudgeTaskInfo) JudgeTaskDTO {
+	out := JudgeTaskDTO{
+		TaskID:      ids.ID(info.Task.ID),
+		TenantID:    ids.ID(info.Task.TenantID),
+		SourceRef:   info.Task.SourceRef,
+		SubmitterID: ids.ID(info.Task.SubmitterID),
+		Status:      statusText(info.Task.Status),
+		Existing:    info.Existing,
 	}
 	if info.Result != nil {
-		out["result"] = map[string]any{
-			"passed":     info.Result.Passed,
-			"score":      info.Result.Score,
-			"max_score":  info.Result.MaxScore,
-			"version":    info.Result.Version,
-			"is_rejudge": info.Result.IsRejudge,
-			"details":    info.Result.Details,
-			"result_ref": resultRef(info.Task.ID),
+		details := make([]JudgeResultDetailDTO, 0, len(info.Result.Details))
+		for _, detail := range info.Result.Details {
+			details = append(details, JudgeResultDetailDTO{
+				Case:          detail.Case,
+				Source:        detail.Source,
+				Target:        detail.Target,
+				Passed:        detail.Passed,
+				ExpectedLabel: detail.ExpectedLabel,
+				Actual:        detail.Actual,
+				Hint:          detail.Hint,
+			})
+		}
+		out.Result = &JudgeTaskResultDTO{
+			Passed:    info.Result.Passed,
+			Score:     info.Result.Score,
+			MaxScore:  info.Result.MaxScore,
+			Version:   info.Result.Version,
+			IsRejudge: info.Result.IsRejudge,
+			Details:   details,
+			ResultRef: resultRef(info.Task),
 		}
 	}
 	return out
 }
 
-// judgerToMap 转换判题器定义为 API 输出。
-func judgerToMap(j Judger) (map[string]any, error) {
+// judgerDTOFromModel 转换判题器定义为公开 HTTP DTO。
+func judgerDTOFromModel(j Judger) (JudgerDTO, error) {
 	spec, err := jsonx.AnyBytes(j.ResourceSpec, apperr.ErrJudgerConfigInvalid)
 	if err != nil {
-		return nil, err
+		return JudgerDTO{}, err
 	}
-	return map[string]any{
-		"id":                  ids.Format(j.ID),
-		"code":                j.Code,
-		"name":                j.Name,
-		"type":                j.Type,
-		"executor_ref":        j.ExecutorRef,
-		"runtime_required":    j.RuntimeRequired,
-		"default_timeout_sec": j.DefaultTimeoutSec,
-		"resource_spec":       jsonx.RawMessage(spec),
-		"selftest_status":     j.SelftestStatus,
-		"status":              j.Status,
+	return JudgerDTO{
+		ID:                ids.ID(j.ID),
+		Code:              j.Code,
+		Name:              j.Name,
+		Type:              j.Type,
+		ExecutorRef:       j.ExecutorRef,
+		RuntimeRequired:   j.RuntimeRequired,
+		DefaultTimeoutSec: j.DefaultTimeoutSec,
+		ResourceSpec:      spec,
+		SelftestStatus:    j.SelftestStatus,
+		Status:            j.Status,
 	}, nil
 }
 
@@ -141,6 +155,6 @@ func fingerprintToMatch(fp SubmissionFingerprint, score float64) contracts.Finge
 }
 
 // resultRef 生成面向调用方的判题结果引用,供实验记录关联判题详情。
-func resultRef(taskID int64) string {
-	return "judge:2026:result:" + ids.Format(taskID)
+func resultRef(task JudgeTask) string {
+	return fmt.Sprintf("judge:%04d:result:%s", task.CreatedAt.Year(), ids.Format(task.ID))
 }

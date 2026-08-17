@@ -57,6 +57,15 @@ const (
 )
 
 const (
+	// TaskStateAll 表示不按运维分组筛选任务。
+	TaskStateAll = ""
+	// TaskStateActive 表示排队中与执行中的任务(status 1、2)。
+	TaskStateActive = "active"
+	// TaskStateAbnormal 表示需要人工介入的任务:超时、失败与出错(status 4、5、6)。
+	TaskStateAbnormal = "abnormal"
+)
+
+const (
 	// JudgeOutboxPending 表示终态事件待发布。
 	JudgeOutboxPending int16 = 1
 	// JudgeOutboxPublished 表示终态事件已发布。

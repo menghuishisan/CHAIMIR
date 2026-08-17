@@ -2,7 +2,11 @@
 package contest
 
 import (
+	"bytes"
+	"time"
+
 	"chaimir/internal/modules/contest/internal/sqlcgen"
+	"chaimir/internal/platform/ids"
 	"chaimir/internal/platform/jsonx"
 	"chaimir/internal/platform/pgtypex"
 	"chaimir/internal/platform/timex"
@@ -20,15 +24,28 @@ func contestFromRow(row sqlcgen.Contest) (Contest, error) {
 
 // problemFromRow 转换竞赛题目行。
 func problemFromRow(row sqlcgen.ContestProblem) (ContestProblem, error) {
-	dynamic, err := decodeMap(row.DynamicScore, apperr.ErrContestProblemInvalid)
+	dynamic, err := decodeOptionalJSON[DynamicScoreConfig](row.DynamicScore, apperr.ErrContestProblemInvalid)
 	if err != nil {
 		return ContestProblem{}, err
 	}
-	battleConfig, err := decodeMap(row.BattleConfig, apperr.ErrContestProblemInvalid)
+	battleConfig, err := decodeOptionalJSON[BattleRuntimeConfig](row.BattleConfig, apperr.ErrContestProblemInvalid)
 	if err != nil {
 		return ContestProblem{}, err
 	}
 	return ContestProblem{ID: row.ID, TenantID: row.TenantID, ContestID: row.ContestID, ItemCode: row.ItemCode, ItemVersion: row.ItemVersion, Score: row.Score, DynamicScore: dynamic, BattleConfig: battleConfig, BattleRule: pgtypex.Int2Value(row.BattleRule), Seq: row.Seq}, nil
+}
+
+// decodeOptionalJSON 严格解析可空的固定 JSONB 结构。
+func decodeOptionalJSON[T any](raw []byte, invalid *apperr.Error) (*T, error) {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
+		return nil, nil
+	}
+	var out T
+	if err := jsonx.DecodeStrictKnownFields(trimmed, &out); err != nil {
+		return nil, invalid.WithCause(err)
+	}
+	return &out, nil
 }
 
 // teamFromRows 组合队伍和成员。
@@ -62,7 +79,7 @@ func battleEntryFromRow(row sqlcgen.BattleEntry) BattleEntry {
 
 // battleMatchFromRow 转换对局行。
 func battleMatchFromRow(row sqlcgen.BattleMatch) (BattleMatch, error) {
-	delta, err := decodeMap(row.ScoreDelta, apperr.ErrContestBattleMatchFailed)
+	delta, err := decodeBattleScoreDelta(row.ScoreDelta, apperr.ErrContestBattleMatchFailed)
 	if err != nil {
 		return BattleMatch{}, err
 	}
@@ -86,11 +103,110 @@ func ladderFromUpsertRow(row sqlcgen.CreateOrUpdateLadderRankRow) LadderRank {
 
 // ladderSnapshotFromRow 转换封榜或归档排行榜快照行。
 func ladderSnapshotFromRow(row sqlcgen.ContestLadderSnapshot) (LadderSnapshot, error) {
-	items, err := decodeMapSlice(row.Ranking, apperr.ErrContestInvalid)
+	items, err := decodeLadderSnapshotEntries(row.Ranking, apperr.ErrContestInvalid)
 	if err != nil {
 		return LadderSnapshot{}, err
 	}
 	return LadderSnapshot{ID: row.ID, TenantID: row.TenantID, ContestID: row.ContestID, SnapshotStatus: row.SnapshotStatus, Ranking: items, GeneratedAt: timex.FromTimestamptz(row.GeneratedAt)}, nil
+}
+
+// ladderSnapshotEntryJSON 是 JSONB 中保存的快照结构,雪花 ID 使用字符串。
+type ladderSnapshotEntryJSON struct {
+	TeamID      string    `json:"team_id"`
+	Score       float64   `json:"score"`
+	SolvedCount int32     `json:"solved_count"`
+	LastSolveAt time.Time `json:"last_solve_at,omitempty"`
+	Rank        int32     `json:"rank"`
+	UpdatedAt   time.Time `json:"updated_at"`
+}
+
+// battleScoreDeltaJSON 是 score_delta 的唯一数据库 JSONB 结构,雪花 ID 固定使用字符串。
+type battleScoreDeltaJSON struct {
+	TeamAID       ids.ID  `json:"team_a"`
+	TeamBID       ids.ID  `json:"team_b"`
+	RatingABefore float64 `json:"rating_a_before"`
+	RatingBBefore float64 `json:"rating_b_before"`
+	RatingAAfter  float64 `json:"rating_a_after"`
+	RatingBAfter  float64 `json:"rating_b_after"`
+	DeltaA        float64 `json:"delta_a"`
+	DeltaB        float64 `json:"delta_b"`
+	KFactor       float64 `json:"k_factor"`
+	Result        int16   `json:"result"`
+}
+
+// decodeBattleScoreDelta 严格解析对局结算,只接受字符串雪花 ID 的最终存储契约。
+func decodeBattleScoreDelta(raw []byte, invalid *apperr.Error) (*BattleScoreDelta, error) {
+	trimmed := bytes.TrimSpace(raw)
+	if bytes.Equal(trimmed, []byte("{}")) {
+		return nil, nil
+	}
+	var encoded battleScoreDeltaJSON
+	if err := jsonx.DecodeStrictKnownFields(trimmed, &encoded); err != nil {
+		return nil, invalid.WithCause(err)
+	}
+	if encoded.TeamAID <= 0 || encoded.TeamBID <= 0 || (encoded.Result != BattleResultAWin && encoded.Result != BattleResultBWin && encoded.Result != BattleResultDraw) {
+		return nil, invalid
+	}
+	return &BattleScoreDelta{
+		TeamAID:       encoded.TeamAID.Int64(),
+		TeamBID:       encoded.TeamBID.Int64(),
+		RatingABefore: encoded.RatingABefore,
+		RatingBBefore: encoded.RatingBBefore,
+		RatingAAfter:  encoded.RatingAAfter,
+		RatingBAfter:  encoded.RatingBAfter,
+		DeltaA:        encoded.DeltaA,
+		DeltaB:        encoded.DeltaB,
+		KFactor:       encoded.KFactor,
+		Result:        encoded.Result,
+	}, nil
+}
+
+// battleScoreDeltaForJSON 把领域模型转换为数据库 JSONB 的字符串 ID 结构。
+func battleScoreDeltaForJSON(item *BattleScoreDelta) *battleScoreDeltaJSON {
+	if item == nil {
+		return nil
+	}
+	return &battleScoreDeltaJSON{
+		TeamAID:       ids.ID(item.TeamAID),
+		TeamBID:       ids.ID(item.TeamBID),
+		RatingABefore: item.RatingABefore,
+		RatingBBefore: item.RatingBBefore,
+		RatingAAfter:  item.RatingAAfter,
+		RatingBAfter:  item.RatingBAfter,
+		DeltaA:        item.DeltaA,
+		DeltaB:        item.DeltaB,
+		KFactor:       item.KFactor,
+		Result:        item.Result,
+	}
+}
+
+// decodeLadderSnapshotEntries 严格解析快照并把公开字符串 ID 转回内部 int64。
+func decodeLadderSnapshotEntries(raw []byte, invalid *apperr.Error) ([]LadderSnapshotEntry, error) {
+	if len(raw) == 0 {
+		return []LadderSnapshotEntry{}, nil
+	}
+	var encoded []ladderSnapshotEntryJSON
+	if err := jsonx.DecodeStrictKnownFields(raw, &encoded); err != nil {
+		return nil, invalid.WithCause(err)
+	}
+	out := make([]LadderSnapshotEntry, 0, len(encoded))
+	for _, entry := range encoded {
+		teamID, ok := ids.Parse(entry.TeamID)
+		if !ok {
+			return nil, invalid
+		}
+		out = append(out, LadderSnapshotEntry{TeamID: teamID, Score: entry.Score, SolvedCount: entry.SolvedCount, LastSolveAt: entry.LastSolveAt, Rank: entry.Rank, UpdatedAt: entry.UpdatedAt})
+	}
+	return out, nil
+}
+
+// ladderSnapshotEntriesJSON 把内部快照转换为 JSONB 的稳定字符串 ID 结构。
+func ladderSnapshotEntriesJSON(entries []LadderSnapshotEntry) []ladderSnapshotEntryJSON {
+	out := make([]ladderSnapshotEntryJSON, 0, len(entries))
+	for _, entry := range entries {
+		out = append(out, ladderSnapshotEntryJSON{TeamID: ids.Format(entry.TeamID), Score: entry.Score, SolvedCount: entry.SolvedCount, LastSolveAt: entry.LastSolveAt, Rank: entry.Rank, UpdatedAt: entry.UpdatedAt})
+	}
+	return out
 }
 
 // cheatFromRow 转换违规记录行。
@@ -163,4 +279,12 @@ func encodeJSON(v any, invalid *apperr.Error) ([]byte, error) {
 		return nil, err
 	}
 	return raw, nil
+}
+
+// encodeOptionalJSON 将可空固定结构序列化为 JSONB;nil 保持数据库 NULL。
+func encodeOptionalJSON[T any](v *T, invalid *apperr.Error) ([]byte, error) {
+	if v == nil {
+		return nil, nil
+	}
+	return encodeJSON(v, invalid)
 }

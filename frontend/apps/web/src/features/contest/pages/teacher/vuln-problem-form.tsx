@@ -320,7 +320,7 @@ export function VulnProblemFormModal({ sources, onClose, onSaved }: VulnProblemF
             <Button type="button" variant="outline" onClick={onClose}>
               取消
             </Button>
-            <Button type="submit" variant="seal" loading={submitting}>
+            <Button type="submit" variant="primary" loading={submitting}>
               保存草稿
             </Button>
           </ModalFooter>
@@ -346,7 +346,7 @@ function ChainStepEditor({ title, description, steps, onChange }: ChainStepEdito
   const fieldId = useId()
 
   return (
-    <div className="flex flex-col gap-3 rounded-md border border-line bg-surface-sunken p-4">
+    <div className="flex flex-col gap-3 well p-4">
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div className="min-w-0">
           <p className="text-base text-ink">{title}</p>
@@ -365,9 +365,10 @@ function ChainStepEditor({ title, description, steps, onChange }: ChainStepEdito
       {steps.length === 0 ? (
         <p className="text-sm text-ink-sub">没有步骤。这一段可以留空。</p>
       ) : (
-        <div className="flex flex-col gap-3">
+        // 井内的并列条目用分隔线区分,不再各自画盒(规范 §6.5.1)
+        <div className="flex flex-col divide-y divide-line">
           {steps.map((step, index) => (
-            <div key={index} className="flex flex-col gap-2 rounded-md border border-line bg-surface p-3">
+            <div key={index} className="flex flex-col gap-2 py-3 first:pt-0 last:pb-0">
               <div className="flex flex-wrap items-end gap-3">
                 <Badge tone="neutral">第 {index + 1} 步</Badge>
                 <FormField label="操作" htmlFor={`${fieldId}-op-${index}`} className="mb-0 flex-1">
@@ -434,7 +435,7 @@ function AssertionEditor({ assertions, error, onChange }: AssertionEditorProps) 
   const fieldId = useId()
 
   return (
-    <div className="flex flex-col gap-3 rounded-md border border-line bg-surface-sunken p-4">
+    <div className="flex flex-col gap-3 well p-4">
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div className="min-w-0">
           <p className="text-base text-ink">判定断言</p>
@@ -459,9 +460,9 @@ function AssertionEditor({ assertions, error, onChange }: AssertionEditorProps) 
           description="没有断言无法判断漏洞是否被利用,预验证会直接失败。"
         />
       ) : (
-        <div className="flex flex-col gap-3">
+        <div className="flex flex-col divide-y divide-line">
           {assertions.map((assertion, index) => (
-            <div key={index} className="flex flex-col gap-3 rounded-md border border-line bg-surface p-3">
+            <div key={index} className="flex flex-col gap-3 py-3 first:pt-0 last:pb-0">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <Badge tone="neutral">断言 {index + 1}</Badge>
                 <IconButton

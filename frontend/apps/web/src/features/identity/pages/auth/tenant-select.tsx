@@ -96,9 +96,9 @@ export default function TenantSelectPage() {
                   type="button"
                   disabled={submittingTenantId !== null}
                   onClick={() => handleSelect(tenant.tenant_id)}
-                  className="pressable flex w-full items-center gap-3 rounded-lg border border-dark-line bg-dark-surface px-4 py-3 text-left hover:border-jade-400/40 hover:bg-dark-elevated disabled:pointer-events-none disabled:opacity-50"
+                  className="pressable flex w-full items-center gap-3 rounded-lg border border-dark-line bg-dark-surface px-4 py-3 text-left hover:border-on-dark-accent-line hover:bg-dark-elevated disabled:pointer-events-none disabled:opacity-50"
                 >
-                  <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-jade-400/10">
+                  <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-on-dark-accent-soft">
                     <Icon icon={Building2} size="sm" className="text-accent" />
                   </span>
                   <span className="min-w-0 flex-1">

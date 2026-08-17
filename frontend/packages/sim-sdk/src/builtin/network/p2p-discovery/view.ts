@@ -24,7 +24,6 @@ export function renderDiscoveryView(state: DiscoveryState): TeachingFrame {
       intent: 'observe',
       what: state.explanation.effect,
       why: state.explanation.reason,
-      watch: summary,
     },
     focus: {
       primary: selectedOrFrameFocus(state.selectedElementId, ['discovery-graph']),

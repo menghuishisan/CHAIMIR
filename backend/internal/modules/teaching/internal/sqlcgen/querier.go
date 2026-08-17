@@ -74,6 +74,7 @@ type Querier interface {
 	ListStudentProgressByCourse(ctx context.Context, arg ListStudentProgressByCourseParams) ([]LessonProgress, error)
 	// student_id 传 0 回该作业全部学生提交(授课教师批改视角);传具体学生只回其本人提交
 	// (学生自读视角,student_id 由服务端填会话账号,不接受客户端传参)。
+	// status 传 0 不按状态过滤;传具体状态供批改台按「待批改/已出分」取数与计数。
 	ListSubmissionsByAssignment(ctx context.Context, arg ListSubmissionsByAssignmentParams) ([]Submission, error)
 	ListTeacherCourses(ctx context.Context, arg ListTeacherCoursesParams) ([]ListTeacherCoursesRow, error)
 	MarkJudgeOutboxFailedResult(ctx context.Context, arg MarkJudgeOutboxFailedResultParams) (SubmissionJudgeOutbox, error)

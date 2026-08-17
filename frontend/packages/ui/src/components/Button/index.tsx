@@ -1,6 +1,7 @@
 /**
  * Button:平台统一按钮组件。
- * CVA 变体:primary(玉实底)/ seal(朱砂落印)/ outline / ghost / danger / on-dark(深色语境);
+ * CVA 变体:primary(玉实底)/ seal(朱砂落印)/ outline / ghost / danger /
+ * on-dark(深色语境描边)/ on-dark-warning(深色语境需注意描边);
  * 尺寸 sm/md/lg;按压反馈走 pressable 工具类。
  * loading 时以 LoaderCircle 旋转图标替换左图标,但不设原生 disabled:
  * 原生 disabled 会让浏览器把焦点甩回 body,读屏用户丢失上下文;
@@ -28,6 +29,10 @@ export const buttonVariants = cva(
         ghost: "text-ink-sub hover:bg-surface-hover hover:text-ink",
         danger: "bg-danger text-on-solid hover:bg-danger-hover",
         "on-dark": "border border-dark-line text-on-dark-sub hover:bg-dark-elevated hover:text-on-dark",
+        // 深色语境的「需注意」描边按钮:仿真里的扰动类操作用它,与玉实底的推进/修复、
+        // 朱砂实底的攻击三者一眼可分(§7.2 B 交互分四类)
+        "on-dark-warning":
+          "border border-on-dark-amber bg-transparent text-on-dark-amber hover:bg-dark-elevated",
       },
       size: {
         sm: "h-8 px-3 text-sm",

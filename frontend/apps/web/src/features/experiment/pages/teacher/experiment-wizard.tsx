@@ -10,6 +10,7 @@ import { ArrowLeft, ArrowRight, CircleCheck, LayoutTemplate, Send } from 'lucide
 import {
   ExperimentCollabMode,
   ExperimentStatus,
+  EXPERIMENT_VALIDATION_LEVEL,
   type Course,
   type Experiment,
   type ValidationResult,
@@ -37,10 +38,7 @@ import {
 import { api } from '../../../../app/api'
 import { ResourceState } from '../../../../components/ResourceState'
 import { useAsyncResource } from '../../../../hooks'
-import {
-  experimentStatusLabel,
-  experimentStatusTone,
-} from '../../../../utils/labels/experiment'
+import { experimentStatusLabel, experimentStatusTone } from '../../../../utils/labels/experiment'
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
 import { WizardBasicStep } from './wizard-basic'
 import { WizardCheckpointsStep } from './wizard-checkpoints'
@@ -128,7 +126,7 @@ function NewExperimentBootstrap() {
           <Callout tone="info" title="编排分四步">
             基础信息 → 环境与仿真 → 实验阶段 → 检查点。全部配置完成后校验并发布。
           </Callout>
-          <Button variant="seal" loading={creating} onClick={() => void createDraft()}>
+          <Button variant="primary" loading={creating} onClick={() => void createDraft()}>
             开始编排
           </Button>
         </div>
@@ -152,7 +150,7 @@ function WizardLoader({ experimentId }: { experimentId: string }) {
         api.teaching.getCourses({ role: 'teacher', page: 1, size: COURSE_PICKER_SIZE }),
       ]).then(([experiment, courses]) => ({ experiment, courses: courses.list })),
     [experimentId],
-    (value) => value.experiment === undefined,
+    (value) => value.experiment === undefined
   )
 
   return (
@@ -207,7 +205,8 @@ function WizardContent({ experiment, courses, onSaved }: WizardContentProps) {
 
     if (stepKey === 'basic') {
       next.name = draft.name.trim() === '' ? '请输入实验名称' : null
-      next.description = draft.description.trim() === '' ? '请填写实验说明,学生需要知道要做什么' : null
+      next.description =
+        draft.description.trim() === '' ? '请填写实验说明,学生需要知道要做什么' : null
       next.groupSize =
         draft.collab_mode === ExperimentCollabMode.GROUP && draft.group_config.size < 2
           ? '小组实验每组至少 2 人'
@@ -224,7 +223,8 @@ function WizardContent({ experiment, courses, onSaved }: WizardContentProps) {
     if (stepKey === 'stages') {
       // 不分阶段是合法的;分了阶段则每个阶段都必须有内容(阶段表单已校验,此处兜住整体)
       next.stages = draft.components.stages.some(
-        (stage) => (stage.components.envs?.length ?? 0) === 0 && (stage.components.sims?.length ?? 0) === 0,
+        (stage) =>
+          (stage.components.envs?.length ?? 0) === 0 && (stage.components.sims?.length ?? 0) === 0
       )
         ? '有阶段没有启用任何组件,请补齐或删除该阶段'
         : null
@@ -291,7 +291,7 @@ function WizardContent({ experiment, courses, onSaved }: WizardContentProps) {
         label: step.label,
         description: step.description,
       })),
-    [],
+    []
   )
 
   return (
@@ -316,7 +316,15 @@ function WizardContent({ experiment, courses, onSaved }: WizardContentProps) {
               label={experimentStatusLabel(experiment.status)}
             />
             <Autosave
-              state={persistence.saving ? 'saving' : persistence.saveError ? 'error' : persistence.savedAt ? 'saved' : 'idle'}
+              state={
+                persistence.saving
+                  ? 'saving'
+                  : persistence.saveError
+                    ? 'error'
+                    : persistence.savedAt
+                      ? 'saved'
+                      : 'idle'
+              }
               savedAt={persistence.savedAt}
               onRetry={() => void saveCurrent()}
             />
@@ -334,7 +342,12 @@ function WizardContent({ experiment, courses, onSaved }: WizardContentProps) {
           {actionError ? <Callout tone="danger">{actionError}</Callout> : null}
 
           {stepKey === 'basic' ? (
-            <WizardBasicStep draft={draft} courses={courses} errors={errors} onChange={patchDraft} />
+            <WizardBasicStep
+              draft={draft}
+              courses={courses}
+              errors={errors}
+              onChange={patchDraft}
+            />
           ) : null}
           {stepKey === 'components' ? (
             <WizardComponentsStep draft={draft} errors={errors} onChange={patchDraft} />
@@ -372,7 +385,12 @@ function WizardContent({ experiment, courses, onSaved }: WizardContentProps) {
                 校验并发布
               </Button>
             ) : (
-              <Button variant="primary" leftIcon={ArrowRight} loading={persistence.saving} onClick={() => void goNext()}>
+              <Button
+                variant="primary"
+                leftIcon={ArrowRight}
+                loading={persistence.saving}
+                onClick={() => void goNext()}
+              >
                 保存并进入下一步
               </Button>
             )}
@@ -380,7 +398,10 @@ function WizardContent({ experiment, courses, onSaved }: WizardContentProps) {
         </div>
       </PageSection>
 
-      <Modal open={validateResult !== undefined} onOpenChange={(open) => !open && setValidateResult(undefined)}>
+      <Modal
+        open={validateResult !== undefined}
+        onOpenChange={(open) => !open && setValidateResult(undefined)}
+      >
         <ModalContent size="lg">
           <ModalHeader>
             <ModalTitle>发布前校验结果</ModalTitle>
@@ -402,8 +423,12 @@ function WizardContent({ experiment, courses, onSaved }: WizardContentProps) {
               <ul className="flex flex-col gap-2">
                 {validateResult?.issues.map((issue, index) => (
                   <li key={index} className="flex items-start gap-2 text-sm">
-                    <Badge tone={issue.level === 'error' ? 'danger' : 'warning'}>
-                      {issue.level === 'error' ? '必须修正' : '建议检查'}
+                    <Badge
+                      tone={
+                        issue.level === EXPERIMENT_VALIDATION_LEVEL.ERROR ? 'danger' : 'warning'
+                      }
+                    >
+                      {issue.level === EXPERIMENT_VALIDATION_LEVEL.ERROR ? '必须修正' : '建议检查'}
                     </Badge>
                     <span className="min-w-0 text-ink">{issue.message}</span>
                   </li>

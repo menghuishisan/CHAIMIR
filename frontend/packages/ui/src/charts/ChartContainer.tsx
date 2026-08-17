@@ -4,9 +4,14 @@
  * 以及必填的读屏摘要(ariaSummary)与数据表替代(dataTable)。所有图表必须包在本容器内。
  * 支持两种语境:paper(宣纸光面页面)与 dark(墨底沉浸舞台/深色面板),同一组件切换语义色,
  * 不在业务层复制第二个容器。
+ *
+ * 视图切换用 SegmentedControl、重试用 Button —— 两者都是设计系统既有组件(§5.1),
+ * 在这里手拼一套两态按钮会让触达高度、焦点环与墨底变体各出一份。
  */
 import { useState, type ReactNode } from "react";
 import { cn } from "../lib/cn";
+import { Button } from "../components/Button";
+import { SegmentedControl } from "../components/SegmentedControl";
 import type { ChartContext } from "./palette";
 
 /** 数据表替代:列头 + 行数据(与图表同源) */
@@ -43,10 +48,11 @@ export interface ChartContainerProps {
   className?: string;
 }
 
-/** 视图切换小按钮的公共类(两态按钮,aria-pressed 表达当前视图);
- *  pressable 已含颜色过渡契约(theme.css),不再叠加 transition-colors */
-const TOGGLE_BTN =
-  "pressable min-h-11 rounded-sm px-2 py-1 text-xs focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-2";
+/** 视图切换两档:同一份数据换呈现方式,属视图切换而非筛选(§6.5.2) */
+const VIEW_OPTIONS = [
+  { value: "chart", label: "图表" },
+  { value: "table", label: "数据表" },
+] as const;
 
 /** 两种语境的语义类:光面走 ink/surface/line,墨底走 on-dark/dark-* 系令牌 */
 const STYLES: Record<
@@ -54,12 +60,9 @@ const STYLES: Record<
   {
     title: string;
     description: string;
-    toggleOn: string;
-    toggleOff: string;
     skeleton: string;
     errorBox: string;
     errorText: string;
-    retryBtn: string;
     emptyBox: string;
     emptyText: string;
     tableWrap: string;
@@ -71,15 +74,12 @@ const STYLES: Record<
   paper: {
     title: "text-ink",
     description: "text-ink-sub",
-    toggleOn: "bg-primary-soft text-primary",
-    toggleOff: "text-ink-sub hover:bg-surface-hover hover:text-ink",
     skeleton: "skeleton-shimmer",
-    errorBox: "border-danger-border bg-danger-bg",
+    errorBox: "bg-danger-bg",
     errorText: "text-danger",
-    retryBtn: "border-line bg-surface text-ink hover:bg-surface-hover",
-    emptyBox: "border-line bg-surface-sunken",
+    emptyBox: "bg-surface shadow-xs",
     emptyText: "text-ink-sub",
-    tableWrap: "border-line",
+    tableWrap: "bg-surface shadow-xs",
     tableHead: "border-line bg-surface-sunken text-ink-sub",
     tableRow: "border-line",
     tableCell: "text-ink",
@@ -87,15 +87,12 @@ const STYLES: Record<
   dark: {
     title: "text-on-dark",
     description: "text-on-dark-sub",
-    toggleOn: "bg-dark-elevated text-accent",
-    toggleOff: "text-on-dark-sub hover:bg-dark-elevated hover:text-on-dark",
     skeleton: "bg-dark-elevated",
-    errorBox: "border-dark-line bg-dark-elevated",
+    errorBox: "border border-dark-line bg-dark-elevated",
     errorText: "text-on-dark-danger",
-    retryBtn: "border-dark-line bg-dark-surface text-on-dark hover:bg-dark-elevated",
-    emptyBox: "border-dark-line bg-dark-surface",
+    emptyBox: "border border-dark-line bg-dark-surface",
     emptyText: "text-on-dark-sub",
-    tableWrap: "border-dark-line",
+    tableWrap: "border border-dark-line",
     tableHead: "border-dark-line bg-dark-elevated text-on-dark-sub",
     tableRow: "border-dark-line",
     tableCell: "text-on-dark",
@@ -135,24 +132,14 @@ export function ChartContainer({
             {description && <p className={cn("mt-0.5 text-sm", styles.description)}>{description}</p>}
           </div>
           {isNormal && (
-            <div className="flex shrink-0 items-center gap-1" role="group" aria-label="图表视图切换">
-              <button
-                type="button"
-                aria-pressed={view === "chart"}
-                onClick={() => setView("chart")}
-                className={cn(TOGGLE_BTN, view === "chart" ? styles.toggleOn : styles.toggleOff)}
-              >
-                图表
-              </button>
-              <button
-                type="button"
-                aria-pressed={view === "table"}
-                onClick={() => setView("table")}
-                className={cn(TOGGLE_BTN, view === "table" ? styles.toggleOn : styles.toggleOff)}
-              >
-                数据表
-              </button>
-            </div>
+            <SegmentedControl
+              aria-label="图表视图切换"
+              size="sm"
+              onDark={context === "dark"}
+              options={VIEW_OPTIONS.map((option) => ({ value: option.value, label: option.label }))}
+              value={view}
+              onValueChange={(value) => setView(value === "table" ? "table" : "chart")}
+            />
           )}
         </div>
       )}
@@ -172,24 +159,20 @@ export function ChartContainer({
         <div
           style={{ height }}
           className={cn(
-            "flex flex-col items-center justify-center gap-3 rounded-md border px-4 text-center",
+            "flex flex-col items-center justify-center gap-3 rounded-md px-4 text-center",
             styles.errorBox,
           )}
           role="alert"
         >
           <p className={cn("text-sm", styles.errorText)}>{error}</p>
           {onRetry && (
-            <button
-              type="button"
+            <Button
+              variant={context === "dark" ? "on-dark" : "outline"}
+              size="sm"
               onClick={onRetry}
-              // pressable 已含颜色过渡契约(theme.css),不再叠加 transition-colors
-              className={cn(
-                "pressable min-h-11 rounded-md border px-3 py-1.5 text-sm focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-2",
-                styles.retryBtn,
-              )}
             >
               重试
-            </button>
+            </Button>
           )}
         </div>
       )}
@@ -199,7 +182,7 @@ export function ChartContainer({
         <div
           style={{ height }}
           className={cn(
-            "flex flex-col items-center justify-center gap-1 rounded-md border px-4 text-center",
+            "flex flex-col items-center justify-center gap-1 rounded-md px-4 text-center",
             styles.emptyBox,
           )}
         >
@@ -217,7 +200,7 @@ export function ChartContainer({
       {isNormal && view === "table" && (
         <div
           style={{ height }}
-          className={cn("overflow-y-auto rounded-md border", styles.tableWrap)}
+          className={cn("overflow-y-auto rounded-md", styles.tableWrap)}
         >
           <table className="w-full border-collapse text-sm">
             <thead>

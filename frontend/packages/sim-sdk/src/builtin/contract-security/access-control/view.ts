@@ -20,7 +20,6 @@ export function renderAccessView(state: AccessState): TeachingFrame {
       intent: 'observe',
       what: state.explanation.effect,
       why: state.explanation.reason,
-      watch: summary,
     },
     focus: {
       primary: selectedOrFrameFocus(state.selectedElementId, ['access-graph']),

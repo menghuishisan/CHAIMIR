@@ -16,17 +16,11 @@
 // 每次提交都会产生一条审核记录,记录里带包的编码、版本与当前状态。
 
 import { useCallback, useMemo, useState } from 'react'
-import {
-  Archive,
-  ArchiveRestore,
-  CircleCheck,
-  CircleX,
-  Shield,
-  ShieldCheck,
-} from 'lucide-react'
+import { Archive, ArchiveRestore, CircleCheck, CircleX, Shield, ShieldCheck } from 'lucide-react'
 import {
   SIM_PACKAGE_STATUS,
   SIM_REVIEW_RESULT,
+  SIM_VALIDATION_STATUS,
   type SimPackageReview,
   type SimReviewResult,
   type SimValidationReport,
@@ -40,6 +34,8 @@ import {
   CardBody,
   CardHeader,
   DescriptionList,
+  FilterBar,
+  FilterField,
   FormField,
   Modal,
   ModalBody,
@@ -61,7 +57,7 @@ import {
 } from '@chaimir/ui'
 import { api } from '../../../../app/api'
 import { ResourceState } from '../../../../components/ResourceState'
-import { usePagedResource } from '../../../../hooks'
+import { usePagedResource, useResourceTotal } from '../../../../hooks'
 import { formatDateTime } from '../../../../utils/formatters'
 import {
   simCategoryLabel,
@@ -73,9 +69,12 @@ import {
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
 import { SimPreviewFrames } from '../../SimPreviewFrames'
 
-/** 审核状态筛选项:值为空串表示不过滤。 */
+/**
+ * 审核状态筛选项:三个结论已经穷尽所有记录,故不给「全部」——
+ * GET /sim/reviews 不带 result 时后端按待审核处理(docs/04-仿真可视化引擎/05-接口设计.md §4),
+ * 摆一个叫「全部」却只回待审核的选项等于让页面说假话。
+ */
 const RESULT_FILTERS = [
-  { value: '', label: '全部' },
   { value: SIM_REVIEW_RESULT.PENDING, label: '待审核' },
   { value: SIM_REVIEW_RESULT.APPROVED, label: '已通过' },
   { value: SIM_REVIEW_RESULT.REJECTED, label: '已退回' },
@@ -110,8 +109,7 @@ const ACTION_COPY: Record<
   },
   archive: {
     title: '下架这个场景',
-    description:
-      '下架后学校不能再新建这个场景的推演。已经在进行的推演不受影响,历史回放仍可查看。',
+    description: '下架后学校不能再新建这个场景的推演。已经在进行的推演不受影响,历史回放仍可查看。',
     confirm: '确认下架',
     danger: true,
   },
@@ -126,26 +124,29 @@ const ACTION_COPY: Record<
  * PlatformSimulationsPage 承载仿真场景包的审核与上下架治理。
  */
 export default function PlatformSimulationsPage() {
-  const [resultFilter, setResultFilter] = useState<string>(SIM_REVIEW_RESULT.PENDING)
+  const [resultFilter, setResultFilter] = useState<SimReviewResult>(SIM_REVIEW_RESULT.PENDING)
   const [target, setTarget] = useState<{ review: SimPackageReview; action: GovernanceAction }>()
 
   const reviews = usePagedResource<SimPackageReview>(
-    (params) =>
-      api.sim.getReviews({
-        result: resultFilter ? (resultFilter as SimReviewResult) : undefined,
-        ...params,
-      }),
-    [resultFilter],
+    (params) => api.sim.getReviews({ result: resultFilter, ...params }),
+    [resultFilter]
   )
 
-  const stats = useMemo(() => {
-    const list = reviews.data ? reviews.data.list : []
-    return {
-      pending: list.filter((item) => item.result === SIM_REVIEW_RESULT.PENDING).length,
-      published: list.filter((item) => item.package?.status === SIM_PACKAGE_STATUS.PUBLISHED).length,
-      archived: list.filter((item) => item.package?.status === SIM_PACKAGE_STATUS.ARCHIVED).length,
-    }
-  }, [reviews.data])
+  // 指标带取服务端全量口径,不随下方筛选变化;三张卡同为「审核记录条数」,可以并列比较。
+  // 不放「已上架/已下架场景」:那是包的状态,而 GET /sim/packages 在 teacher 组,
+  // 平台身份调用必然被拒(见文件头);拿不到的数不摆卡,更不用别的口径顶替。
+  const pendingCount = useResourceTotal(
+    (params) => api.sim.getReviews({ result: SIM_REVIEW_RESULT.PENDING, ...params }),
+    []
+  )
+  const approvedCount = useResourceTotal(
+    (params) => api.sim.getReviews({ result: SIM_REVIEW_RESULT.APPROVED, ...params }),
+    []
+  )
+  const rejectedCount = useResourceTotal(
+    (params) => api.sim.getReviews({ result: SIM_REVIEW_RESULT.REJECTED, ...params }),
+    []
+  )
 
   return (
     <PageScaffold>
@@ -157,39 +158,55 @@ export default function PlatformSimulationsPage() {
       />
 
       <PageSection>
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <Stat label="提交记录" value={reviews.total} icon={Shield} />
+        <div className="grid gap-4 sm:grid-cols-3">
           <Stat
             label="待审核"
-            value={stats.pending}
+            value={pendingCount ?? '—'}
             icon={ShieldCheck}
-            hint={stats.pending > 0 ? '需要你处理' : '暂时没有积压'}
+            hint={pendingCount === 0 ? '暂时没有积压' : '需要你处理'}
           />
-          <Stat label="已上架" value={stats.published} icon={CircleCheck} />
-          <Stat label="已下架" value={stats.archived} icon={Archive} />
+          <Stat
+            label="已通过"
+            value={approvedCount ?? '—'}
+            icon={CircleCheck}
+            hint="通过即已上架"
+          />
+          <Stat
+            label="已退回"
+            value={rejectedCount ?? '—'}
+            icon={CircleX}
+            hint="教师可修改后重提"
+          />
         </div>
       </PageSection>
 
       <PageSection
         title="提交记录"
         description="每一条对应一次场景包提交。四项自动校验全过才能通过审核。"
-        actions={
-          <SegmentedControl
-            aria-label="按审核状态筛选"
-            size="sm"
-            options={RESULT_FILTERS.map((item) => ({ value: item.value, label: item.label }))}
-            value={resultFilter}
-            onValueChange={setResultFilter}
-          />
-        }
       >
         <div className="flex flex-col gap-4">
+          <FilterBar label="提交记录筛选">
+            <FilterField label="审核状态" group>
+              <SegmentedControl
+                aria-label="按审核状态筛选"
+                size="sm"
+                options={RESULT_FILTERS.map((item) => ({ value: item.value, label: item.label }))}
+                value={resultFilter}
+                onValueChange={(value) => setResultFilter(value as SimReviewResult)}
+              />
+            </FilterField>
+          </FilterBar>
+
           <ResourceState
             resource={reviews}
             emptyIcon={Shield}
-            emptyTitle={resultFilter ? '这个状态下没有记录' : '还没有场景包提交'}
+            emptyTitle={
+              resultFilter === SIM_REVIEW_RESULT.PENDING ? '没有待审核的记录' : '这个状态下没有记录'
+            }
             emptyDescription={
-              resultFilter ? '换个状态看看。' : '教师在教学端提交仿真场景包后,记录会出现在这里。'
+              resultFilter === SIM_REVIEW_RESULT.PENDING
+                ? '教师在教学端提交仿真场景包后,记录会出现在这里。'
+                : '换个状态看看。'
             }
             skeleton={<Skeleton variant="line" lines={4} />}
           >
@@ -298,9 +315,7 @@ function ReviewCard({ review, onAct }: ReviewCardProps) {
             ))}
           </div>
           {!allPassed && pending ? (
-            <span className="text-sm text-ink-sub">
-              有校验项没通过,这个包只能退回给作者修改。
-            </span>
+            <span className="text-sm text-ink-sub">有校验项没通过,这个包只能退回给作者修改。</span>
           ) : null}
         </div>
 
@@ -318,7 +333,12 @@ function ReviewCard({ review, onAct }: ReviewCardProps) {
               >
                 通过并上架
               </Button>
-              <Button variant="outline" size="sm" leftIcon={CircleX} onClick={() => onAct('reject')}>
+              <Button
+                variant="outline"
+                size="sm"
+                leftIcon={CircleX}
+                onClick={() => onAct('reject')}
+              >
                 退回作者
               </Button>
             </>
@@ -485,12 +505,16 @@ function readValidations(report: SimValidationReport): ValidationView[] {
       const scan = report.static_scan
       return {
         label: step.label,
-        passed: scan?.status === 'passed',
+        passed: scan?.status === SIM_VALIDATION_STATUS.PASSED,
         detail: (scan?.findings ?? []).join('、'),
       }
     }
     const status = item && 'status' in item ? item.status : undefined
     const message = item && 'message' in item ? item.message : undefined
-    return { label: step.label, passed: status === 'passed', detail: message ?? '' }
+    return {
+      label: step.label,
+      passed: status === SIM_VALIDATION_STATUS.PASSED,
+      detail: message ?? '',
+    }
   })
 }

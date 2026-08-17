@@ -3,6 +3,35 @@ package teaching
 
 import "chaimir/internal/platform/ids"
 
+// CourseCoverUploadDTO 是封面上传后的受控对象引用。
+type CourseCoverUploadDTO struct {
+	ObjectRef string `json:"object_ref"`
+	FileName  string `json:"file_name"`
+	Size      int64  `json:"size"`
+}
+
+// CourseCoverAccessDTO 是封面的短时投放授权响应。
+type CourseCoverAccessDTO struct {
+	Token     string `json:"token"`
+	Mode      string `json:"mode"`
+	ExpiresAt string `json:"expires_at"`
+}
+
+// LessonMaterialAccessDTO 是课时材料的短时投放授权响应。
+type LessonMaterialAccessDTO struct {
+	Token       string `json:"token"`
+	Mode        string `json:"mode"`
+	FileName    string `json:"file_name"`
+	Size        int64  `json:"size"`
+	ContentType string `json:"content_type"`
+	ExpiresAt   string `json:"expires_at"`
+}
+
+// DraftSaveDTO 是服务端草稿保存成功后的固定响应。
+type DraftSaveDTO struct {
+	UpdatedAt string `json:"updated_at"`
+}
+
 type CourseDTO struct {
 	ID          ids.ID         `json:"id"`
 	TenantID    ids.ID         `json:"tenant_id"`
@@ -56,21 +85,41 @@ type ChapterDTO struct {
 }
 
 type LessonRequest struct {
-	Title       string         `json:"title"`
-	ContentType int16          `json:"content_type"`
-	ContentRef  map[string]any `json:"content_ref"`
-	Sort        int32          `json:"sort"`
+	Title       string                  `json:"title"`
+	ContentType int16                   `json:"content_type"`
+	ContentRef  LessonContentRefRequest `json:"content_ref"`
+	Sort        int32                   `json:"sort"`
+}
+
+// LessonContentRefRequest 是教师按课时形态提交的公开内容引用。
+// 视频和附件的对象引用只能由独立上传接口写入,客户端请求中没有对象存储字段。
+type LessonContentRefRequest struct {
+	Markdown     string `json:"markdown,omitempty"`
+	ExperimentID ids.ID `json:"experiment_id,omitempty"`
+	PackageCode  string `json:"package_code,omitempty"`
+	Version      string `json:"version,omitempty"`
 }
 
 type LessonDTO struct {
-	ID          ids.ID         `json:"id"`
-	ChapterID   ids.ID         `json:"chapter_id"`
-	Title       string         `json:"title"`
-	ContentType int16          `json:"content_type"`
-	ContentRef  map[string]any `json:"content_ref"`
-	Sort        int32          `json:"sort"`
-	CreatedAt   string         `json:"created_at"`
-	UpdatedAt   string         `json:"updated_at"`
+	ID          ids.ID              `json:"id"`
+	ChapterID   ids.ID              `json:"chapter_id"`
+	Title       string              `json:"title"`
+	ContentType int16               `json:"content_type"`
+	ContentRef  LessonContentRefDTO `json:"content_ref"`
+	Sort        int32               `json:"sort"`
+	CreatedAt   string              `json:"created_at"`
+	UpdatedAt   string              `json:"updated_at"`
+}
+
+// LessonContentRefDTO 是课时读取时的固定内容引用结构,不暴露 object_ref。
+type LessonContentRefDTO struct {
+	FileName     string `json:"file_name,omitempty"`
+	Size         int64  `json:"size,omitempty"`
+	ContentType  string `json:"content_type,omitempty"`
+	Markdown     string `json:"markdown,omitempty"`
+	ExperimentID ids.ID `json:"experiment_id,omitempty"`
+	PackageCode  string `json:"package_code,omitempty"`
+	Version      string `json:"version,omitempty"`
 }
 
 type OutlineDTO struct {

@@ -3,6 +3,7 @@ package sandbox
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -14,12 +15,14 @@ import (
 	"chaimir/internal/platform/audit"
 	"chaimir/internal/platform/config"
 	"chaimir/internal/platform/eventbus"
+	"chaimir/internal/platform/ids"
 	"chaimir/internal/platform/response"
 	"chaimir/internal/platform/storage"
 	"chaimir/internal/platform/timex"
 	"chaimir/internal/platform/workload"
 	"chaimir/internal/platform/ws"
 	"chaimir/pkg/apperr"
+	"chaimir/pkg/limitio"
 	"chaimir/pkg/logging"
 	"chaimir/pkg/snowflake"
 )
@@ -52,6 +55,14 @@ type Orchestrator interface {
 	ToolReady(ctx context.Context, sb Sandbox, tool Tool) error
 	// SnapshotSupported 返回当前集群是否安装并启用 CSI 快照能力。
 	SnapshotSupported(ctx context.Context) (bool, error)
+}
+
+// sandboxExecFailure 保留统一的输出超限错误,其余底层执行失败映射到调用场景已有错误码。
+func sandboxExecFailure(fallback *apperr.Error, err error, stderr []byte) error {
+	if errors.Is(err, limitio.ErrLimitExceeded) {
+		return apperr.ErrSandboxExecOutputLimitExceeded.WithCause(err)
+	}
+	return fallback.WithCause(fmt.Errorf("%w: %s", err, string(stderr)))
 }
 
 // PrepullResult 描述 K8s 预拉取 DaemonSet 的真实节点状态。
@@ -160,7 +171,7 @@ func NewService(deps ServiceDeps) (*Service, error) {
 }
 
 // ValidateSandboxTemplate 校验教师/业务模块声明的实验环境能解析到当前可调度的运行时、镜像和工具。
-func (s *Service) ValidateSandboxTemplate(ctx context.Context, req contracts.SandboxCreateRequest) error {
+func (s *Service) validateSandboxTemplateContract(ctx context.Context, req contracts.SandboxCreateRequest) error {
 	input := createInputFromContract(req)
 	if err := validateCreateRequest(input); err != nil {
 		return err
@@ -172,7 +183,7 @@ func (s *Service) ValidateSandboxTemplate(ctx context.Context, req contracts.San
 }
 
 // CreateSandbox 创建沙箱控制面记录并异步推进 K8s 启动。
-func (s *Service) CreateSandbox(ctx context.Context, req contracts.SandboxCreateRequest) (contracts.SandboxInfo, error) {
+func (s *Service) createSandboxContract(ctx context.Context, req contracts.SandboxCreateRequest) (contracts.SandboxInfo, error) {
 	input := createInputFromContract(req)
 	if err := validateCreateRequest(input); err != nil {
 		return contracts.SandboxInfo{}, err
@@ -297,7 +308,7 @@ func (s *Service) cleanupCreatedSandboxAfterAuditFailure(ctx context.Context, sb
 }
 
 // GetSandbox 查询单个沙箱当前状态与工具接入信息。
-func (s *Service) GetSandbox(ctx context.Context, tenantID, sandboxID int64) (contracts.SandboxInfo, error) {
+func (s *Service) getSandboxContract(ctx context.Context, tenantID, sandboxID int64) (contracts.SandboxInfo, error) {
 	return s.info(ctx, tenantID, sandboxID)
 }
 
@@ -314,7 +325,7 @@ func (s *Service) GetSandboxForOwner(ctx context.Context, tenantID, accountID, s
 }
 
 // PauseSandbox 暂停沙箱,按需创建 CSI 快照后释放计算工作负载。
-func (s *Service) PauseSandbox(ctx context.Context, req contracts.SandboxControlRequest) error {
+func (s *Service) pauseSandboxContract(ctx context.Context, req contracts.SandboxControlRequest) error {
 	if err := validateSandboxControlRequest(req); err != nil {
 		return err
 	}
@@ -381,7 +392,7 @@ func (s *Service) PauseSandbox(ctx context.Context, req contracts.SandboxControl
 }
 
 // ResumeSandbox 恢复沙箱为运行态。
-func (s *Service) ResumeSandbox(ctx context.Context, req contracts.SandboxControlRequest) error {
+func (s *Service) resumeSandboxContract(ctx context.Context, req contracts.SandboxControlRequest) error {
 	if err := validateSandboxControlRequest(req); err != nil {
 		return err
 	}
@@ -427,7 +438,7 @@ func (s *Service) resumePausedSandbox(ctx context.Context, sb Sandbox) error {
 }
 
 // DestroySandbox 主动销毁单个沙箱。
-func (s *Service) DestroySandbox(ctx context.Context, req contracts.SandboxControlRequest) error {
+func (s *Service) destroySandboxContract(ctx context.Context, req contracts.SandboxControlRequest) error {
 	if err := validateSandboxControlRequest(req); err != nil {
 		return err
 	}
@@ -465,7 +476,7 @@ func validateSandboxControlRequest(req contracts.SandboxControlRequest) error {
 }
 
 // RecycleBySourceRef 按来源标识级联回收沙箱。
-func (s *Service) RecycleBySourceRef(ctx context.Context, req contracts.SandboxRecycleRequest) error {
+func (s *Service) recycleBySourceRefContract(ctx context.Context, req contracts.SandboxRecycleRequest) error {
 	if req.TenantID <= 0 || !validSourceRef(req.SourceRef) {
 		return apperr.ErrSandboxRecycleRequestInvalid
 	}
@@ -603,7 +614,7 @@ func (s *Service) toolsForSandbox(ctx context.Context, tenantID, sandboxID int64
 }
 
 // Stats 返回租户级沙箱资源统计。
-func (s *Service) Stats(ctx context.Context, tenantID int64) (contracts.SandboxQuotaStats, error) {
+func (s *Service) statsContract(ctx context.Context, tenantID int64) (contracts.SandboxQuotaStats, error) {
 	var quota TenantQuota
 	var active int64
 	if err := s.store.TenantTx(ctx, tenantID, func(ctx context.Context, tx TxStore) error {
@@ -698,7 +709,7 @@ func (s *Service) createSandboxRecord(ctx context.Context, tx TxStore, req Creat
 	if req.SnapshotEnabled {
 		snapshotExpireAt = now.Add(time.Duration(req.SnapshotRetentionMinutes) * time.Minute)
 	}
-	codeKey, err := storage.ObjectKey(req.TenantID, "sandbox", "code", fmt.Sprintf("%d", id), "workspace.tar")
+	codeKey, err := storage.ObjectKey(req.TenantID, "sandbox", "code", ids.Format(id), "workspace.tar")
 	if err != nil {
 		return Sandbox{}, apperr.ErrSandboxCreateFailed.WithCause(err)
 	}
@@ -747,17 +758,17 @@ func toolEndpoint(sandboxID int64, tool Tool) string {
 	case SandboxToolKindBuiltin:
 		return renderBuiltinToolEndpoint(sandboxID, tool.ResourceSpec)
 	case SandboxToolKindTerminal:
-		return fmt.Sprintf("/api/v1/sandbox/sandboxes/%d/terminal", sandboxID)
+		return "/api/v1/sandbox/sandboxes/" + ids.Format(sandboxID) + "/terminal"
 	case SandboxToolKindCommand:
-		return fmt.Sprintf("/api/v1/sandbox/sandboxes/%d/command-tools/%s/run", sandboxID, tool.Code)
+		return "/api/v1/sandbox/sandboxes/" + ids.Format(sandboxID) + "/command-tools/" + tool.Code + "/run"
 	default:
-		return fmt.Sprintf("/api/v1/sandbox/sandboxes/%d/tools/%s/", sandboxID, tool.Code)
+		return "/api/v1/sandbox/sandboxes/" + ids.Format(sandboxID) + "/tools/" + tool.Code + "/"
 	}
 }
 
 // renderBuiltinToolEndpoint 渲染平台内置工具端点模板,模板已在注册规则中限定到 sandbox 模块路径。
 func renderBuiltinToolEndpoint(sandboxID int64, spec ToolResourceSpec) string {
-	return strings.ReplaceAll(strings.TrimSpace(spec.BuiltinEndpoint), "{sandbox_id}", fmt.Sprintf("%d", sandboxID))
+	return strings.ReplaceAll(strings.TrimSpace(spec.BuiltinEndpoint), "{sandbox_id}", ids.Format(sandboxID))
 }
 
 // info 汇总沙箱、运行时、镜像和工具接入信息。
@@ -1206,5 +1217,5 @@ func toolCompatible(eco string, tags []string) bool {
 
 // namespaceFor 根据配置前缀和沙箱 ID 生成动态命名空间。
 func namespaceFor(prefix string, id int64) string {
-	return fmt.Sprintf("%s-%d", strings.Trim(prefix, "-"), id)
+	return strings.Trim(prefix, "-") + "-" + ids.Format(id)
 }

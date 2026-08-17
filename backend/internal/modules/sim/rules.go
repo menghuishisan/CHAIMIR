@@ -5,11 +5,11 @@ import (
 	"encoding/hex"
 	"fmt"
 	"regexp"
-	"strconv"
 	"strings"
 	"time"
 
 	"chaimir/internal/platform/auth"
+	"chaimir/internal/platform/ids"
 	"chaimir/internal/platform/jsonx"
 	"chaimir/pkg/apperr"
 	"chaimir/pkg/privacy"
@@ -145,7 +145,7 @@ func validatePackageRequest(req SubmitPackageRequest, authorID int64) error {
 	if !jsonObject(req.ScaleLimit) {
 		return apperr.ErrSimPackageInvalid
 	}
-	if authorID <= 0 || !strings.HasPrefix(req.Code, "teacher_"+strconv.FormatInt(authorID, 10)+"__") {
+	if authorID <= 0 || !strings.HasPrefix(req.Code, "teacher_"+ids.Format(authorID)+"__") {
 		return apperr.ErrSimPackageInvalid
 	}
 	return nil

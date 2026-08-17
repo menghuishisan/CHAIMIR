@@ -44,7 +44,7 @@ type TxStore interface {
 	ListPlatformStatistics(context.Context, int16, int64, string, string) ([]StatisticsDTO, error)
 	UpsertPlatformStatistics(context.Context, int64, int16, int64, string, map[string]any) (StatisticsDTO, error)
 	CreateBackupRecord(context.Context, int64, BackupRecordCreate) (BackupRecordDTO, error)
-	ListBackupRecords(context.Context, int, int) ([]BackupRecordDTO, int64, error)
+	ListBackupRecords(context.Context, int16, int, int) ([]BackupRecordDTO, int64, error)
 }
 
 // RecordBackupResult 写入受控运维备份任务结果,仅供组合根 cron 命令使用。

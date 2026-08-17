@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"chaimir/internal/contracts"
+	"chaimir/internal/platform/ids"
 	"chaimir/internal/platform/pagex"
 	"chaimir/pkg/apperr"
 )
@@ -273,7 +274,7 @@ func (s *Service) validateExperimentComponents(ctx context.Context, item Experim
 				InitCodeRef:              env.InitCodeRef,
 				InitScriptRef:            env.InitScriptRef,
 				OwnerAccountID:           item.AuthorID,
-				SourceRef:                fmt.Sprintf("experiment:%d:definition:%d", item.CreatedAt.Year(), item.ID),
+				SourceRef:                fmt.Sprintf("experiment:%d:definition:%s", item.CreatedAt.Year(), ids.Format(item.ID)),
 				KeepAlive:                env.KeepAlive,
 				SnapshotEnabled:          env.SnapshotEnabled,
 				KeepAliveMinutes:         env.KeepAliveMinutes,
@@ -324,7 +325,7 @@ func (s *Service) refreshContentUsageRefs(ctx context.Context, item Experiment) 
 		seen[key] = true
 		refs = append(refs, contracts.ContentItemRef{ItemCode: cp.ItemCode, ItemVersion: cp.ItemVersion})
 	}
-	sourceRef := fmt.Sprintf("experiment:%d:definition:%d", item.CreatedAt.Year(), item.ID)
+	sourceRef := fmt.Sprintf("experiment:%d:definition:%s", item.CreatedAt.Year(), ids.Format(item.ID))
 	if err := s.content.ReplaceUsageRefs(ctx, item.TenantID, "experiment.definition", sourceRef, refs); err != nil {
 		return apperr.ErrExperimentContentUsageFailed.WithCause(err)
 	}

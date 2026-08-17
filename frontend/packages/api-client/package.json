@@ -7,7 +7,7 @@
   "scripts": {
     "dev": "tsc --watch --noEmit",
     "build": "tsc --noEmit",
-    "lint": "eslint src --ext .ts",
+    "lint": "eslint src",
     "type-check": "tsc --noEmit"
   },
   "dependencies": {

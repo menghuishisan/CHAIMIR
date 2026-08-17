@@ -17,6 +17,7 @@ import type {
   VulnPrevalidateStatus,
   VulnProblemStatus,
   VulnRuntimeMode,
+  VulnSourceType,
 } from '../constants/contest'
 import type { SandboxStatus } from '../constants/sandbox'
 
@@ -57,8 +58,8 @@ export interface ContestProblem {
   item_code: string
   item_version: string
   score: number
-  dynamic_score?: Record<string, unknown>
-  battle_config?: Record<string, unknown>
+  dynamic_score?: ContestDynamicScoreConfig
+  battle_config?: ContestBattleRuntimeConfig
   battle_rule?: BattleRule
   seq: number
   face?: Record<string, unknown>
@@ -68,10 +69,23 @@ export interface ContestProblemRequest {
   item_code: string
   item_version: string
   score: number
-  dynamic_score?: Record<string, unknown>
-  battle_config?: Record<string, unknown>
+  dynamic_score?: ContestDynamicScoreConfig
+  battle_config?: ContestBattleRuntimeConfig
   battle_rule?: BattleRule
   seq: number
+}
+
+/** ContestDynamicScoreConfig 是按已解出队伍数衰减的固定计分参数。 */
+export interface ContestDynamicScoreConfig {
+  min_score: number
+  decay_per_solve: number
+}
+
+/** ContestBattleRuntimeConfig 是对抗题启动沙箱所需的固定运行时参数。 */
+export interface ContestBattleRuntimeConfig {
+  runtime_code: string
+  runtime_image_version: string
+  tool_codes?: string[]
 }
 
 export interface ContestTeam {
@@ -167,11 +181,24 @@ export interface BattleMatch {
   sandbox_ref?: string
   judge_task_ref?: string
   result?: BattleResult
-  score_delta: Record<string, unknown>
+  score_delta?: BattleScoreDelta
   replay_available: boolean
   status: BattleMatchStatus
   matched_at: string
   finished_at?: string
+}
+
+export interface BattleScoreDelta {
+  team_a: SnowflakeID
+  team_b: SnowflakeID
+  rating_a_before: number
+  rating_b_before: number
+  rating_a_after: number
+  rating_b_after: number
+  delta_a: number
+  delta_b: number
+  k_factor: number
+  result: BattleResult
 }
 
 export interface BattleReplayRef {
@@ -184,6 +211,62 @@ export interface BattleReplayDownloadGrant {
   mode: 'download'
   file_name: string
   expires_at: string
+}
+
+/**
+ * 对局回放归档的正文结构,镜像后端 `contest/service_battle_replay.go` 的 battleReplayArchive。
+ * 它不是 REST 响应,而是经「签发授权 → 统一文件服务取件」拿到的 JSON 归档
+ * (见 docs/08-竞赛/04-接口设计.md §对局回放);故类型在此登记,校验在消费方边界处做。
+ */
+export interface BattleReplayArchive {
+  /** 归档协议版本;不认识的版本一律拒绝解析,不做兼容猜测 */
+  version: number
+  match_id: SnowflakeID
+  task_id: SnowflakeID
+  source_ref: string
+  initial_state: BattleReplayInitialState
+  /** M3 从 M2 链能力调用收集到的可复现动作序列,按执行顺序排列 */
+  actions: BattleReplayAction[]
+  result: BattleReplayResult
+  finished_at: string
+}
+
+export interface BattleReplayInitialState {
+  contest_id: SnowflakeID
+  problem_id: SnowflakeID
+  battle_rule: BattleRule
+  entry_a: BattleReplayEntryState
+  entry_b: BattleReplayEntryState
+}
+
+export interface BattleReplayEntryState {
+  role: BattleRole
+  version_no: number
+  artifact_hash: string
+}
+
+export interface BattleReplayAction {
+  seq: number
+  /** 链操作类型:deploy 部署 / tx 交易 / reset 重置(与 M3 runChainStep 的封闭集一致) */
+  op: string
+  payload?: Record<string, unknown>
+  output?: Record<string, unknown>
+}
+
+export interface BattleReplayResult {
+  passed: boolean
+  score: number
+  max_score: number
+  details: BattleReplayResultDetail[]
+  result_ref?: string
+}
+
+export interface BattleReplayResultDetail {
+  case: string
+  passed: boolean
+  expected_label?: string
+  actual?: string
+  hint?: string
 }
 
 export interface LadderRank {
@@ -199,8 +282,17 @@ export interface ResultSnapshot {
   id: SnowflakeID
   tenant_id?: SnowflakeID
   contest_id: SnowflakeID
-  final_ranking: Record<string, unknown>[]
+  final_ranking: LadderSnapshotEntry[]
   generated_at: string
+}
+
+export interface LadderSnapshotEntry {
+  team_id: SnowflakeID
+  score: number
+  solved_count: number
+  last_solve_at?: string
+  rank: number
+  updated_at: string
 }
 
 export interface CheatRecordRequest {
@@ -239,7 +331,7 @@ export interface ContestRecord {
 
 export interface VulnSourceRequest {
   id?: SnowflakeID
-  type: number
+  type: VulnSourceType
   name: string
   config: Record<string, unknown>
   default_level: VulnLevel
@@ -248,7 +340,7 @@ export interface VulnSourceRequest {
 
 export interface VulnSource {
   id: SnowflakeID
-  type: number
+  type: VulnSourceType
   name: string
   config: Record<string, unknown>
   default_level: VulnLevel

@@ -133,7 +133,7 @@ export function WizardComponentsStep({ draft, errors, onChange }: WizardComponen
               {draft.components.envs.map((env, index) => (
                 <div
                   key={env.id}
-                  className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-line p-3"
+                  className="flex flex-wrap items-center justify-between gap-3 well p-3"
                 >
                   <div className="min-w-0">
                     <div className="truncate text-base text-ink">代码环境 {index + 1}</div>
@@ -188,7 +188,7 @@ export function WizardComponentsStep({ draft, errors, onChange }: WizardComponen
               {draft.components.sims.map((sim, index) => (
                 <div
                   key={sim.id}
-                  className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-line p-3"
+                  className="flex flex-wrap items-center justify-between gap-3 well p-3"
                 >
                   <div className="min-w-0">
                     <div className="truncate text-base text-ink">仿真场景 {index + 1}</div>
@@ -416,7 +416,7 @@ function EnvFormModal({ env, usedIds, onClose, onSave }: EnvFormModalProps) {
             )}
           </ResourceState>
 
-          <div className="flex flex-col gap-3 rounded-md border border-line bg-surface-sunken p-4">
+          <div className="flex flex-col gap-3 well p-4">
             <Checkbox
               checked={keepAlive}
               label="学生退出后保留环境一段时间"
@@ -450,7 +450,7 @@ function EnvFormModal({ env, usedIds, onClose, onSave }: EnvFormModalProps) {
           <Button variant="outline" onClick={onClose}>
             取消
           </Button>
-          <Button variant="seal" onClick={submit}>
+          <Button variant="primary" onClick={submit}>
             {editing ? '保存环境' : '添加环境'}
           </Button>
         </ModalFooter>
@@ -623,7 +623,7 @@ function SimFormModal({ sim, usedIds, onClose, onSave }: SimFormModalProps) {
           <Button variant="outline" onClick={onClose}>
             取消
           </Button>
-          <Button variant="seal" onClick={submit}>
+          <Button variant="primary" onClick={submit}>
             {editing ? '保存场景' : '添加场景'}
           </Button>
         </ModalFooter>

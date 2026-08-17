@@ -31,8 +31,8 @@ type ContestProblem struct {
 	ItemCode     string
 	ItemVersion  string
 	Score        int32
-	DynamicScore map[string]any
-	BattleConfig map[string]any
+	DynamicScore *DynamicScoreConfig
+	BattleConfig *BattleRuntimeConfig
 	BattleRule   int16
 	Seq          int32
 }
@@ -104,11 +104,25 @@ type BattleMatch struct {
 	SandboxRef   string
 	JudgeTaskRef string
 	Result       int16
-	ScoreDelta   map[string]any
+	ScoreDelta   *BattleScoreDelta
 	ReplayRef    string
 	Status       int16
 	MatchedAt    time.Time
 	FinishedAt   time.Time
+}
+
+// BattleScoreDelta 是对局结算领域模型,数据库 JSONB 编解码由 row_convert 统一处理。
+type BattleScoreDelta struct {
+	TeamAID       int64
+	TeamBID       int64
+	RatingABefore float64
+	RatingBBefore float64
+	RatingAAfter  float64
+	RatingBAfter  float64
+	DeltaA        float64
+	DeltaB        float64
+	KFactor       float64
+	Result        int16
 }
 
 // LadderRank 是排行榜积分投影。
@@ -130,8 +144,18 @@ type LadderSnapshot struct {
 	TenantID       int64
 	ContestID      int64
 	SnapshotStatus int16
-	Ranking        []map[string]any
+	Ranking        []LadderSnapshotEntry
 	GeneratedAt    time.Time
+}
+
+// LadderSnapshotEntry 是排行榜快照中固定字段的内部结构。
+type LadderSnapshotEntry struct {
+	TeamID      int64     `json:"team_id"`
+	Score       float64   `json:"score"`
+	SolvedCount int32     `json:"solved_count"`
+	LastSolveAt time.Time `json:"last_solve_at,omitempty"`
+	Rank        int32     `json:"rank"`
+	UpdatedAt   time.Time `json:"updated_at"`
 }
 
 // CheatRecord 是教师或管理员确认后的违规处理记录。

@@ -12,14 +12,9 @@
 // 规则的 condition 是 JSONB,按「比较方式 + 阈值 + 持续时间」三个显式字段组装;
 // 指标从已登记清单里选,不让管理员手写指标名(写错要等到告警不触发才发现)。
 
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useState } from 'react'
 import { BellRing, CircleCheck, CircleSlash, Plus, Settings2 } from 'lucide-react'
-import {
-  AdminScope,
-  AlertStatus,
-  type AlertEvent,
-  type AlertRule,
-} from '@chaimir/api-client'
+import { AdminScope, AlertStatus, type AlertEvent, type AlertRule } from '@chaimir/api-client'
 import {
   Badge,
   Breadcrumb,
@@ -30,6 +25,8 @@ import {
   CardHeader,
   Checkbox,
   DescriptionList,
+  FilterBar,
+  FilterField,
   FormField,
   Input,
   Modal,
@@ -58,7 +55,7 @@ import {
 } from '@chaimir/ui'
 import { api } from '../../../app/api'
 import { ResourceState } from '../../../components/ResourceState'
-import { useAsyncResource, usePagedResource } from '../../../hooks'
+import { useAsyncResource, usePagedResource, useResourceTotal } from '../../../hooks'
 import { formatDateTime } from '../../../utils/formatters'
 import {
   ALERT_CONDITION_OPERATORS,
@@ -183,7 +180,7 @@ function AlertEventsSection({ eventScope }: { eventScope: string }) {
         status: statusFilter ? (Number(statusFilter) as AlertStatus) : undefined,
         ...params,
       }),
-    [statusFilter],
+    [statusFilter]
   )
 
   const handle = useCallback(async () => {
@@ -202,13 +199,18 @@ function AlertEventsSection({ eventScope }: { eventScope: string }) {
     }
   }, [events, target])
 
-  const stats = useMemo(() => {
-    const list = events.data ? events.data.list : []
-    return {
-      pending: list.filter((item) => item.status === AlertStatus.PENDING).length,
-      urgent: list.filter((item) => item.level <= 1).length,
-    }
-  }, [events.data])
+  // 指标带取服务端全量口径,不随下方状态筛选变化。
+  // 告警级别没有服务端筛选参数,故不做「紧急」卡:用当前页数出来的紧急数是错数,
+  // 级别本身在表格里逐条可见(见规范 §6.5 指标带口径)。
+  const totalCount = useResourceTotal((params) => api.admin.listAlertEvents(params), [])
+  const pendingCount = useResourceTotal(
+    (params) => api.admin.listAlertEvents({ status: AlertStatus.PENDING, ...params }),
+    []
+  )
+  const handledCount = useResourceTotal(
+    (params) => api.admin.listAlertEvents({ status: AlertStatus.HANDLED, ...params }),
+    []
+  )
 
   const columns: TableColumn<AlertEvent>[] = [
     {
@@ -237,7 +239,10 @@ function AlertEventsSection({ eventScope }: { eventScope: string }) {
       header: '状态',
       render: (event) => (
         <div className="flex flex-wrap items-center gap-1.5">
-          <StatusIndicator tone={alertStatusTone(event.status)} label={alertStatusLabel(event.status)} />
+          <StatusIndicator
+            tone={alertStatusTone(event.status)}
+            label={alertStatusLabel(event.status)}
+          />
           {event.handled_at ? (
             <Badge tone="neutral">{formatDateTime(event.handled_at)}</Badge>
           ) : null}
@@ -278,31 +283,31 @@ function AlertEventsSection({ eventScope }: { eventScope: string }) {
     <>
       <PageSection>
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          <Stat label="告警总数" value={events.total} icon={BellRing} />
-          <Stat label="待处理" value={stats.pending} icon={BellRing} hint="需要跟进" />
           <Stat
-            label="紧急"
-            value={stats.urgent}
+            label="告警总数"
+            value={totalCount ?? '—'}
             icon={BellRing}
-            hint={stats.urgent > 0 ? '优先处理' : '暂无紧急告警'}
+            hint="不受下方筛选影响"
           />
+          <Stat label="待处理" value={pendingCount ?? '—'} icon={BellRing} hint="需要跟进" />
+          <Stat label="已处理" value={handledCount ?? '—'} icon={BellRing} />
         </div>
       </PageSection>
 
-      <PageSection
-        title="告警事件"
-        description={`共 ${events.total} 条,范围为${eventScope}。`}
-        actions={
-          <SegmentedControl
-            aria-label="按处理状态筛选"
-            size="sm"
-            options={STATUS_FILTERS.map((item) => ({ value: item.value, label: item.label }))}
-            value={statusFilter}
-            onValueChange={setStatusFilter}
-          />
-        }
-      >
+      <PageSection title="告警事件" description={`共 ${events.total} 条,范围为${eventScope}。`}>
         <div className="flex flex-col gap-4">
+          <FilterBar label="告警事件筛选">
+            <FilterField label="处理状态" group>
+              <SegmentedControl
+                aria-label="按处理状态筛选"
+                size="sm"
+                options={STATUS_FILTERS.map((item) => ({ value: item.value, label: item.label }))}
+                value={statusFilter}
+                onValueChange={setStatusFilter}
+              />
+            </FilterField>
+          </FilterBar>
+
           {actionError ? <Callout tone="danger">{actionError}</Callout> : null}
 
           <ResourceState
@@ -350,7 +355,7 @@ function AlertEventsSection({ eventScope }: { eventScope: string }) {
                 <Button variant="outline" onClick={() => setTarget(undefined)}>
                   取消
                 </Button>
-                <Button variant="seal" loading={working} onClick={() => void handle()}>
+                <Button variant="primary" loading={working} onClick={() => void handle()}>
                   确认
                 </Button>
               </ModalFooter>
@@ -379,7 +384,7 @@ function AlertRulesSection({ scope, description, emptyDescription }: AlertRulesS
   const rules = useAsyncResource(
     () => api.admin.listAlertRules({ scope }),
     [scope],
-    (value) => value.length === 0,
+    (value) => value.length === 0
   )
 
   return (
@@ -454,7 +459,11 @@ function AlertRuleCard({ rule, onEdit }: AlertRuleCardProps) {
         description={alertMetricLabel(rule.metric)}
         actions={
           <div className="flex items-center gap-2">
-            {rule.enabled ? <Badge tone="success">已启用</Badge> : <Badge tone="neutral">已停用</Badge>}
+            {rule.enabled ? (
+              <Badge tone="success">已启用</Badge>
+            ) : (
+              <Badge tone="neutral">已停用</Badge>
+            )}
             <Button variant="ghost" size="sm" onClick={onEdit}>
               编辑
             </Button>
@@ -499,13 +508,13 @@ function AlertRuleFormModal({ rule, scope, onClose, onSaved }: AlertRuleFormModa
   const [name, setName] = useState(rule?.name ?? '')
   const [metric, setMetric] = useState(rule?.metric ?? ALERT_METRICS[0].value)
   const [operator, setOperator] = useState(
-    readString(rule?.condition, CONDITION_FIELDS.operator) || ALERT_CONDITION_OPERATORS[0].value,
+    readString(rule?.condition, CONDITION_FIELDS.operator) || ALERT_CONDITION_OPERATORS[0].value
   )
   const [threshold, setThreshold] = useState(
-    String(readNumber(rule?.condition, CONDITION_FIELDS.threshold)),
+    String(readNumber(rule?.condition, CONDITION_FIELDS.threshold))
   )
   const [duration, setDuration] = useState(
-    String(readNumber(rule?.condition, CONDITION_FIELDS.durationSeconds) || 60),
+    String(readNumber(rule?.condition, CONDITION_FIELDS.durationSeconds) || 60)
   )
   const [level, setLevel] = useState(String(rule?.level ?? ALERT_LEVELS[1]))
   const [enabled, setEnabled] = useState(rule?.enabled ?? true)
@@ -555,7 +564,7 @@ function AlertRuleFormModal({ rule, scope, onClose, onSaved }: AlertRuleFormModa
         setWorking(false)
       }
     },
-    [duration, editing, enabled, level, metric, name, onSaved, operator, rule?.id, scope, threshold],
+    [duration, editing, enabled, level, metric, name, onSaved, operator, rule?.id, scope, threshold]
   )
 
   return (
@@ -569,8 +578,17 @@ function AlertRuleFormModal({ rule, scope, onClose, onSaved }: AlertRuleFormModa
         </ModalHeader>
         <form onSubmit={submit} noValidate>
           <ModalBody className="flex flex-col gap-4">
-            <FormField label="规则名称" htmlFor="rule-name" required helper="告警列表里显示这个名字">
-              <Input id="rule-name" value={name} onChange={(event) => setName(event.target.value)} />
+            <FormField
+              label="规则名称"
+              htmlFor="rule-name"
+              required
+              helper="告警列表里显示这个名字"
+            >
+              <Input
+                id="rule-name"
+                value={name}
+                onChange={(event) => setName(event.target.value)}
+              />
             </FormField>
 
             <FormField label="监控指标" htmlFor="rule-metric" required>
@@ -643,7 +661,7 @@ function AlertRuleFormModal({ rule, scope, onClose, onSaved }: AlertRuleFormModa
             <Button type="button" variant="outline" onClick={onClose}>
               取消
             </Button>
-            <Button type="submit" variant="seal" loading={working}>
+            <Button type="submit" variant="primary" loading={working}>
               {editing ? '保存规则' : '创建规则'}
             </Button>
           </ModalFooter>

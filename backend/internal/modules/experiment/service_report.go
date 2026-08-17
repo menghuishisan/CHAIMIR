@@ -4,10 +4,10 @@ package experiment
 import (
 	"context"
 	"path"
-	"strconv"
 	"strings"
 
 	"chaimir/internal/contracts"
+	"chaimir/internal/platform/ids"
 	"chaimir/internal/platform/pagex"
 	"chaimir/internal/platform/storage"
 	"chaimir/pkg/apperr"
@@ -80,7 +80,7 @@ func validateReportObjectRef(bucket string, tenantID, instanceID, studentID int6
 	if ref.Bucket != bucket {
 		return apperr.ErrExperimentReportInvalid
 	}
-	prefix, err := storage.ObjectKey(tenantID, "experiment", "report", strconv.FormatInt(instanceID, 10), strconv.FormatInt(studentID, 10))
+	prefix, err := storage.ObjectKey(tenantID, "experiment", "report", ids.Format(instanceID), ids.Format(studentID))
 	if err != nil {
 		return apperr.ErrExperimentReportInvalid.WithCause(err)
 	}
@@ -91,8 +91,8 @@ func validateReportObjectRef(bucket string, tenantID, instanceID, studentID int6
 	return nil
 }
 
-// ListReports 查询某实验下的报告列表。
-func (s *Service) ListReports(ctx context.Context, experimentID int64, page, size int) ([]ReportDTO, int64, int, int, error) {
+// ListReports 查询某实验下的报告列表;status 传 0 表示不按批改状态过滤。
+func (s *Service) ListReports(ctx context.Context, experimentID int64, status int16, page, size int) ([]ReportDTO, int64, int, int, error) {
 	id, err := currentIdentity(ctx)
 	if err != nil {
 		return nil, 0, 0, 0, err
@@ -108,7 +108,7 @@ func (s *Service) ListReports(ctx context.Context, experimentID int64, page, siz
 		if err := ensureTeacherCanManage(id.AccountID, s.isSchoolAdmin(ctx, id.AccountID), exp); err != nil {
 			return err
 		}
-		items, total, err = tx.ListReports(ctx, id.TenantID, experimentID, page, size)
+		items, total, err = tx.ListReports(ctx, id.TenantID, experimentID, status, page, size)
 		return err
 	}); err != nil {
 		return nil, 0, 0, 0, err

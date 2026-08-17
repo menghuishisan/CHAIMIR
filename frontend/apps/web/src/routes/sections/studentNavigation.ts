@@ -14,7 +14,6 @@ import type { RoleNavigationConfig } from '../../layouts/main/navigation'
 
 export const studentNavigation: RoleNavigationConfig = {
   ...ROLE_ROUTES.student,
-  brandName: 'Chaimir 学台',
   hasNotificationInbox: true,
   groups: [
     {

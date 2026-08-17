@@ -20,12 +20,12 @@ import {
   Badge,
   Button,
   ChainProgress,
-  TeachingFrameAside,
-  TeachingFrameBrief,
   TeachingFrameStage,
+  TeachingFrameStream,
   WorkbenchShell,
   WorkbenchTopbar,
-  frameHasAside,
+  frameStreamEntries,
+  frameHasStream,
   toast,
   useReducedMotion,
 } from '@chaimir/ui'
@@ -47,7 +47,8 @@ import { moveCommand, replayMoves } from '../../replayMoves'
 import { narrativeProgress, useSimPlayback } from '../../playback'
 import { SimPlaybackControls } from '../../SimPlaybackControls'
 import { SimShareModal } from '../../SimShareModal'
-import { CheckpointPanel, CodeTraceSection, InteractionPanel } from '../../WorkbenchPanels'
+import { SimWorkbenchAside } from '../../SimWorkbenchAside'
+import { InteractionPanel } from '../../WorkbenchPanels'
 import { useIsolatedSimStream, type IsolatedSnapshot } from '../../isolatedStream'
 
 /** 默认随机种子:固定值保证「同一个场景每次进来都一样」,换条件是显式动作。 */
@@ -122,6 +123,7 @@ function SimSession({ packageCode, version, sessionId }: SimSessionProps) {
     return (
       <AppStatusScreen
         icon={TriangleAlert}
+        tone="danger"
         title="上次的推演没能恢复"
         description={replay.error?.message}
         traceId={replay.error?.traceId}
@@ -336,6 +338,7 @@ function SimRuntime({ packageCode, version, sessionId, restore }: SimRuntimeProp
     return (
       <AppStatusScreen
         icon={TriangleAlert}
+        tone="danger"
         title="这个场景没能跑起来"
         description={error}
         fullScreen={false}
@@ -374,10 +377,15 @@ function SimRuntime({ packageCode, version, sessionId, restore }: SimRuntimeProp
 
   const frame = snapshot.view
   const narrativeDone = narrativeProgress(descriptor, snapshot)
+  // 事件流:只有会产生消息/调用的场景才挂这一栏(默克尔树这类只有有界元素,给它空栏是占屏幕);
+  // 条数供壳在收起的把手上给未读计数(收起不等于失联)
+  const hasStream = frameHasStream(frame)
+  const streamCount = frameStreamEntries(frame).length
 
   return (
     <>
       <WorkbenchShell
+        workbench="sim"
         topbar={
           <WorkbenchTopbar
             onExit={exit}
@@ -395,15 +403,33 @@ function SimRuntime({ packageCode, version, sessionId, restore }: SimRuntimeProp
             }
             cta={
               sessionId ? (
-                <Button variant="seal" size="sm" leftIcon={Share2} onClick={() => setShareOpen(true)}>
+                <Button variant="primary" size="sm" leftIcon={Share2} onClick={() => setShareOpen(true)}>
                   分享这次推演
                 </Button>
               ) : undefined
             }
           />
         }
-        left={<TeachingFrameBrief frame={frame} />}
-        leftLabel="场景说明"
+        left={
+          <SimWorkbenchAside
+            frame={frame}
+            checkpoints={descriptor.checkpoints}
+            checkpointResults={snapshot.checkpointResults}
+            codeTrace={descriptor.codeTrace}
+            trace={snapshot.state._trace}
+            selectedElementId={snapshot.state.selectedElementId}
+            onSelectElement={selectElement}
+            actions={
+              <InteractionPanel
+                interactions={descriptor.interactions}
+                availability={snapshot.interactionAvailability}
+                selectedElementId={snapshot.state.selectedElementId}
+                onInteract={interact}
+              />
+            }
+          />
+        }
+        leftLabel="说明与操作"
         stage={
           <TeachingFrameStage
             frame={frame}
@@ -412,28 +438,16 @@ function SimRuntime({ packageCode, version, sessionId, restore }: SimRuntimeProp
           />
         }
         right={
-          <div className="flex flex-col">
-            <InteractionPanel
-              interactions={descriptor.interactions}
-              availability={snapshot.interactionAvailability}
+          hasStream ? (
+            <TeachingFrameStream
+              frame={frame}
               selectedElementId={snapshot.state.selectedElementId}
-              onInteract={interact}
+              onSelectElement={selectElement}
             />
-            <CheckpointPanel
-              checkpoints={descriptor.checkpoints}
-              results={snapshot.checkpointResults}
-            />
-            <CodeTraceSection codeTrace={descriptor.codeTrace} trace={snapshot.state._trace} />
-            {frameHasAside(frame) ? (
-              <TeachingFrameAside
-                frame={frame}
-                selectedElementId={snapshot.state.selectedElementId}
-                onSelectElement={selectElement}
-              />
-            ) : null}
-          </div>
+          ) : undefined
         }
-        rightLabel="操作与结论"
+        rightLabel="消息流"
+        rightCount={streamCount}
         footer={
           <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 px-4 py-2">
             <div className="flex min-w-0 flex-col">
@@ -442,12 +456,12 @@ function SimRuntime({ packageCode, version, sessionId, restore }: SimRuntimeProp
                 <span>随机条件 {seed}</span>
                 {sessionId ? (
                   reportBlocked ? (
-                    <Badge tone="warning">已脱离记录</Badge>
+                    <Badge onDark tone="warning">已脱离记录</Badge>
                   ) : (
-                    <Badge tone="jade">已记录 {reportSeq.current} 步</Badge>
+                    <Badge onDark tone="jade">已记录 {reportSeq.current} 步</Badge>
                   )
                 ) : (
-                  <Badge tone="neutral">本机推演</Badge>
+                  <Badge onDark tone="neutral">本机推演</Badge>
                 )}
               </span>
               {error ? <span className="mt-0.5 text-xs text-on-dark-danger">{error}</span> : null}
@@ -563,6 +577,7 @@ function IsolatedRuntime({ version, sessionId }: IsolatedRuntimeProps) {
     return (
       <AppStatusScreen
         icon={TriangleAlert}
+        tone="danger"
         title="没能连上服务器上的推演环境"
         description={stream.error}
         fullScreen={false}
@@ -594,10 +609,15 @@ function IsolatedRuntime({ version, sessionId }: IsolatedRuntimeProps) {
 
   const frame = snapshot.view
   const narrativeDone = narrativeProgress(descriptor, snapshot)
+  // 事件流:只有会产生消息/调用的场景才挂这一栏(默克尔树这类只有有界元素,给它空栏是占屏幕);
+  // 条数供壳在收起的把手上给未读计数(收起不等于失联)
+  const hasStream = frameHasStream(frame)
+  const streamCount = frameStreamEntries(frame).length
 
   return (
     <>
       <WorkbenchShell
+        workbench="sim"
         topbar={
           <WorkbenchTopbar
             onExit={exit}
@@ -614,14 +634,32 @@ function IsolatedRuntime({ version, sessionId }: IsolatedRuntimeProps) {
               />
             }
             cta={
-              <Button variant="seal" size="sm" leftIcon={Share2} onClick={() => setShareOpen(true)}>
+              <Button variant="primary" size="sm" leftIcon={Share2} onClick={() => setShareOpen(true)}>
                 分享这次推演
               </Button>
             }
           />
         }
-        left={<TeachingFrameBrief frame={frame} />}
-        leftLabel="场景说明"
+        left={
+          <SimWorkbenchAside
+            frame={frame}
+            checkpoints={descriptor.checkpoints}
+            checkpointResults={snapshot.checkpointResults}
+            codeTrace={descriptor.codeTrace}
+            trace={snapshot.state._trace}
+            selectedElementId={snapshot.state.selectedElementId}
+            onSelectElement={selectElement}
+            actions={
+              <InteractionPanel
+                interactions={descriptor.interactions}
+                availability={snapshot.interactionAvailability}
+                selectedElementId={snapshot.state.selectedElementId}
+                onInteract={interact}
+              />
+            }
+          />
+        }
+        leftLabel="说明与操作"
         stage={
           <TeachingFrameStage
             frame={frame}
@@ -630,28 +668,16 @@ function IsolatedRuntime({ version, sessionId }: IsolatedRuntimeProps) {
           />
         }
         right={
-          <div className="flex flex-col">
-            <InteractionPanel
-              interactions={descriptor.interactions}
-              availability={snapshot.interactionAvailability}
+          hasStream ? (
+            <TeachingFrameStream
+              frame={frame}
               selectedElementId={snapshot.state.selectedElementId}
-              onInteract={interact}
+              onSelectElement={selectElement}
             />
-            <CheckpointPanel
-              checkpoints={descriptor.checkpoints}
-              results={snapshot.checkpointResults}
-            />
-            <CodeTraceSection codeTrace={descriptor.codeTrace} trace={snapshot.state._trace} />
-            {frameHasAside(frame) ? (
-              <TeachingFrameAside
-                frame={frame}
-                selectedElementId={snapshot.state.selectedElementId}
-                onSelectElement={selectElement}
-              />
-            ) : null}
-          </div>
+          ) : undefined
         }
-        rightLabel="操作与结论"
+        rightLabel="消息流"
+        rightCount={streamCount}
         footer={<IsolatedFooter stream={stream} playback={playback} snapshot={snapshot} onStep={stepOnce} onStepBack={stepBack} onRestart={restart} />}
       />
 
@@ -690,7 +716,7 @@ function IsolatedFooter({
       <div className="flex min-w-0 flex-col">
         <span className="flex flex-wrap items-center gap-2 font-mono text-xs tabular-nums text-on-dark-sub">
           <span>推演时刻 {snapshot.tick}</span>
-          <Badge tone={stream.status === 'open' ? 'jade' : 'warning'}>
+          <Badge onDark tone={stream.status === 'open' ? 'jade' : 'warning'}>
             {stream.status === 'open' ? '正在推演' : '连接已断开'}
           </Badge>
         </span>

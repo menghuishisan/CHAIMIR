@@ -14,9 +14,11 @@ import {
   BattleMatchStatus,
   ContestStatus,
   ExperimentStatus,
+  JUDGE_TASK_STATE,
   type BattleMatch,
   type Contest,
   type JudgeTask,
+  type JudgeTaskState,
 } from '@chaimir/api-client'
 import {
   Badge,
@@ -27,6 +29,8 @@ import {
   CardBody,
   CardHeader,
   DescriptionList,
+  FilterBar,
+  FilterField,
   IconButton,
   Modal,
   ModalBody,
@@ -48,7 +52,7 @@ import {
 } from '@chaimir/ui'
 import { api } from '../../../../app/api'
 import { ResourceState } from '../../../../components/ResourceState'
-import { useAsyncResource } from '../../../../hooks'
+import { useAsyncResource, useResourceTotal } from '../../../../hooks'
 import { formatShortDateTime } from '../../../../utils/formatters'
 import {
   battleMatchStatusLabel,
@@ -67,51 +71,79 @@ import { userFacingErrorMessage } from '../../../../utils/userFacingError'
 /** 监控面板一次取回的条数:监控看的是"当下有没有问题",不是全量历史。 */
 const MONITOR_SIZE = 30
 
-/** 判题状态筛选:异常态是教师真正要处理的。 */
+/** 判题状态筛选:异常态是教师真正要处理的。值直接作为服务端 state 参数,空串表示不筛。 */
 const JUDGE_FILTERS = [
-  { value: 'abnormal', label: '需要处理' },
-  { value: 'active', label: '进行中' },
-  { value: 'all', label: '全部' },
+  { value: JUDGE_TASK_STATE.ABNORMAL, label: '需要处理' },
+  { value: JUDGE_TASK_STATE.ACTIVE, label: '进行中' },
+  { value: '', label: '全部' },
 ] as const
 
 /**
  * TeacherMonitoringPage 汇总判题、实验与对局的实时状态。
  */
 export default function TeacherMonitoringPage() {
-  const [judgeFilter, setJudgeFilter] = useState<string>('abnormal')
+  const [judgeFilter, setJudgeFilter] = useState<string>(JUDGE_TASK_STATE.ABNORMAL)
   const [detailTask, setDetailTask] = useState<JudgeTask>()
 
+  // 筛选交给服务端:在本机对最近 30 条再筛一次,会在这 30 条里恰好没有异常任务时
+  // 显示「没有需要处理的判题任务」,而队列里可能积压着更早的失败任务。
   const judgeTasks = useAsyncResource(
-    () => api.judge.getTasks({ page: 1, size: MONITOR_SIZE }),
+    () =>
+      api.judge.getTasks({
+        state: judgeFilter ? (judgeFilter as JudgeTaskState) : undefined,
+        page: 1,
+        size: MONITOR_SIZE,
+      }),
+    [judgeFilter],
+    () => false,
+  )
+  // 对局监控要的是「正在打的赛事」,按状态向服务端取,而不是在最近 30 场里挑
+  const runningContestsResource = useAsyncResource(
+    () => api.contest.getContests({ status: ContestStatus.RUNNING, page: 1, size: MONITOR_SIZE }),
     [],
     () => false,
   )
-  const contests = useAsyncResource(
-    () => api.contest.getContests({ page: 1, size: MONITOR_SIZE }),
+  const frozenContestsResource = useAsyncResource(
+    () => api.contest.getContests({ status: ContestStatus.FROZEN, page: 1, size: MONITOR_SIZE }),
     [],
     () => false,
   )
 
-  const judgeStats = useMemo(() => {
-    const list = judgeTasks.data?.list ?? []
-    return {
-      active: list.filter((task) => isJudgeTaskActive(task.status)).length,
-      abnormal: list.filter((task) => isJudgeTaskAbnormal(task.status)).length,
-    }
-  }, [judgeTasks.data])
+  // 指标带取服务端全量口径:队列积压多少条不能由最近 30 条推断
+  const activeTaskCount = useResourceTotal(
+    (params) => api.judge.getTasks({ state: JUDGE_TASK_STATE.ACTIVE, ...params }),
+    [],
+  )
+  const abnormalTaskCount = useResourceTotal(
+    (params) => api.judge.getTasks({ state: JUDGE_TASK_STATE.ABNORMAL, ...params }),
+    [],
+  )
+  const runningContestCount = useResourceTotal(
+    (params) => api.contest.getContests({ status: ContestStatus.RUNNING, ...params }),
+    [],
+  )
+  const frozenContestCount = useResourceTotal(
+    (params) => api.contest.getContests({ status: ContestStatus.FROZEN, ...params }),
+    [],
+  )
+  const liveContestCount =
+    runningContestCount === undefined || frozenContestCount === undefined
+      ? undefined
+      : runningContestCount + frozenContestCount
 
   const runningContests = useMemo(
-    () =>
-      (contests.data?.list ?? []).filter(
-        (contest) => contest.status === ContestStatus.RUNNING || contest.status === ContestStatus.FROZEN,
-      ),
-    [contests.data],
+    () => [
+      ...(runningContestsResource.data?.list ?? []),
+      ...(frozenContestsResource.data?.list ?? []),
+    ],
+    [frozenContestsResource.data, runningContestsResource.data],
   )
 
   const refreshAll = useCallback(() => {
     judgeTasks.reload()
-    contests.reload()
-  }, [contests, judgeTasks])
+    runningContestsResource.reload()
+    frozenContestsResource.reload()
+  }, [frozenContestsResource, judgeTasks, runningContestsResource])
 
   return (
     <PageScaffold>
@@ -130,27 +162,23 @@ export default function TeacherMonitoringPage() {
         }
       />
 
+      {/* 指标带只放服务端全量计数;「监控范围 最近 30 条」是范围常量而非可度量数字,
+          改由判题任务分组说明承载(规范 §6.5)。 */}
       <PageSection>
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           <Stat
             label="判题进行中"
-            value={judgeStats.active}
+            value={activeTaskCount ?? '—'}
             icon={RefreshCw}
             hint="排队与判题中的任务"
           />
           <Stat
             label="判题需要处理"
-            value={judgeStats.abnormal}
+            value={abnormalTaskCount ?? '—'}
             icon={RotateCcw}
-            hint={judgeStats.abnormal > 0 ? '失败、超时或出错' : '暂无异常'}
+            hint={abnormalTaskCount === 0 ? '暂无异常' : '失败、超时或出错'}
           />
-          <Stat label="进行中竞赛" value={runningContests.length} icon={Swords} />
-          <Stat
-            label="监控范围"
-            value={`最近 ${MONITOR_SIZE} 条`}
-            icon={Activity}
-            hint="监控看当下状态,历史记录在各业务页"
-          />
+          <Stat label="进行中竞赛" value={liveContestCount ?? '—'} icon={Swords} hint="含封榜中" />
         </div>
       </PageSection>
 
@@ -194,13 +222,6 @@ function JudgeMonitorSection({
 }: JudgeMonitorSectionProps) {
   const [rejudgingId, setRejudgingId] = useState<string>()
   const [actionError, setActionError] = useState<string>()
-
-  const filtered = useMemo(() => {
-    const list = tasks.data?.list ?? []
-    if (filter === 'abnormal') return list.filter((task) => isJudgeTaskAbnormal(task.status))
-    if (filter === 'active') return list.filter((task) => isJudgeTaskActive(task.status))
-    return list
-  }, [filter, tasks.data])
 
   const rejudge = useCallback(
     async (task: JudgeTask) => {
@@ -297,18 +318,20 @@ function JudgeMonitorSection({
   return (
     <PageSection
       title="判题任务"
-      description="失败、超时或出错的任务可以重判。重判会用原始提交重新执行。"
-      actions={
-        <SegmentedControl
-          aria-label="按判题状态筛选"
-          size="sm"
-          options={JUDGE_FILTERS.map((item) => ({ value: item.value, label: item.label }))}
-          value={filter}
-          onValueChange={onFilterChange}
-        />
-      }
+      description={`按提交时间从新到旧,最多列出最近 ${MONITOR_SIZE} 条。失败、超时或出错的任务可以重判,重判会用原始提交重新执行。`}
     >
       <div className="flex flex-col gap-4">
+        <FilterBar label="判题任务筛选">
+          <FilterField label="判题状态" group>
+            <SegmentedControl
+              aria-label="按判题状态筛选"
+              size="sm"
+              options={JUDGE_FILTERS.map((item) => ({ value: item.value, label: item.label }))}
+              value={filter}
+              onValueChange={onFilterChange}
+            />
+          </FilterField>
+        </FilterBar>
         {actionError ? <Callout tone="danger">{actionError}</Callout> : null}
 
         <ResourceState
@@ -318,13 +341,15 @@ function JudgeMonitorSection({
           emptyDescription="学生提交编程题或竞赛答题后会产生判题任务。"
           skeleton={<Table columns={columns} data={[]} rowKey={() => ''} loading />}
         >
-          {() =>
-            filtered.length === 0 ? (
+          {(page) =>
+            page.list.length === 0 ? (
               <Callout tone="success">
-                {filter === 'abnormal' ? '没有需要处理的判题任务。' : '这个筛选下没有任务。'}
+                {filter === JUDGE_TASK_STATE.ABNORMAL
+                  ? '没有需要处理的判题任务。'
+                  : '这个筛选下没有任务。'}
               </Callout>
             ) : (
-              <Table columns={columns} data={filtered} rowKey={(task) => task.task_id} />
+              <Table columns={columns} data={page.list} rowKey={(task) => task.task_id} />
             )
           }
         </ResourceState>
@@ -424,7 +449,7 @@ function JudgeTaskDetailBody({ task }: { task: JudgeTask }) {
             {details.map((item, index) => (
               <li
                 key={`${item.case ?? item.target ?? item.source ?? 'item'}-${index}`}
-                className="flex flex-col gap-1 rounded-md border border-line p-3"
+                className="flex flex-col gap-1 well p-3"
               >
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <span className="min-w-0 truncate text-sm text-ink">
@@ -599,38 +624,43 @@ function BattleMonitorSection({ contests }: { contests: Contest[] }) {
       title="竞赛对局"
       description="对抗赛的对局执行状态。长时间未结束的对局需要检查参战物是否有问题。"
       actions={
-        <div className="flex flex-wrap items-center gap-2">
-          <SegmentedControl
-            aria-label="选择要监控的竞赛"
+        activeContestId ? (
+          <Button
+            variant="ghost"
             size="sm"
-            options={contests.slice(0, 3).map((contest) => ({
-              value: contest.id,
-              label: `${contest.name} · ${contestStatusLabel(contest.status)}`,
-            }))}
-            value={activeContestId}
-            onValueChange={setSelectedId}
-          />
-          {activeContestId ? (
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => navigate(`/teacher/contests/${activeContestId}`)}
-            >
-              管理赛事
-            </Button>
-          ) : null}
-        </div>
+            onClick={() => navigate(`/teacher/contests/${activeContestId}`)}
+          >
+            管理赛事
+          </Button>
+        ) : undefined
       }
     >
-      <ResourceState
-        resource={matches}
-        emptyIcon={Swords}
-        emptyTitle="还没有对局"
-        emptyDescription="学生提交参战物后系统会安排对局。解题赛没有对局记录。"
-        skeleton={<Table columns={columns} data={[]} rowKey={() => ''} loading />}
-      >
-        {(page) => <Table columns={columns} data={page.list} rowKey={(match) => match.id} />}
-      </ResourceState>
+      <div className="flex flex-col gap-4">
+        <FilterBar label="竞赛对局筛选">
+          <FilterField label="监控的竞赛" group>
+            <SegmentedControl
+              aria-label="选择要监控的竞赛"
+              size="sm"
+              options={contests.slice(0, 3).map((contest) => ({
+                value: contest.id,
+                label: `${contest.name} · ${contestStatusLabel(contest.status)}`,
+              }))}
+              value={activeContestId}
+              onValueChange={setSelectedId}
+            />
+          </FilterField>
+        </FilterBar>
+
+        <ResourceState
+          resource={matches}
+          emptyIcon={Swords}
+          emptyTitle="还没有对局"
+          emptyDescription="学生提交参战物后系统会安排对局。解题赛没有对局记录。"
+          skeleton={<Table columns={columns} data={[]} rowKey={() => ''} loading />}
+        >
+          {(page) => <Table columns={columns} data={page.list} rowKey={(match) => match.id} />}
+        </ResourceState>
+      </div>
     </PageSection>
   )
 }

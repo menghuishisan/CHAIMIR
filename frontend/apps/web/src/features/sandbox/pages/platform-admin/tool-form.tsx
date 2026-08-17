@@ -4,15 +4,16 @@
 //   平台内置:只要入口地址模板,不能带组件、命令策略或网络规则;
 //   终端:什么都不要,带任何声明都会被拒;
 //   网页工具:组件、服务、代理路由三者都必须有,不能带命令策略;
-//   命令工具:恰好一个组件 + 命令白名单,不能有服务、路由或网络规则。
+//   命令工具:恰好一个组件 + 完整 argv 白名单,不能有服务、路由或网络规则。
 // 故表单按类型分叉,只渲染该类型允许的字段 —— 把四类字段并排摊出来,填错的概率高于填对。
 //
 // 容器声明本身是不定长的编排清单(镜像、端口、探针、挂载),键不可枚举,
-// 用文档编辑器并在本地做结构校验;命令白名单与超时是可枚举的,做成结构化字段。
+// 用文档编辑器并在本地做结构校验;完整 argv 白名单与超时是可枚举的,做成结构化字段。
 
 import { useCallback, useId, useMemo, useState } from 'react'
 import {
   SandboxToolKind,
+  SANDBOX_BUILTIN_ENDPOINT_TEMPLATE_PREFIX,
   ToolStatus,
   type SandboxToolRequest,
   type SandboxToolResourceSpec,
@@ -48,9 +49,6 @@ import { userFacingErrorMessage } from '../../../../utils/userFacingError'
 
 /** 工具编码规则,与后端 codePattern 一致。 */
 const CODE_PATTERN = /^[a-z][a-z0-9-]{0,30}[a-z0-9]$/
-
-/** 内置工具入口模板的固定前缀,与后端 validBuiltinEndpointTemplate 一致。 */
-const BUILTIN_ENDPOINT_PREFIX = '/api/v1/sandbox/sandboxes/{sandbox_id}'
 
 /** 命令工具的单容器清单骨架:恰好一个组件,不声明端口。 */
 const COMMAND_COMPONENT_TEMPLATE = `[
@@ -103,8 +101,8 @@ export function ToolFormModal({ onClose, onSaved }: ToolFormModalProps) {
   const [ecoTags, setEcoTags] = useState('')
   const [status, setStatus] = useState(String(ToolStatus.AVAILABLE))
 
-  const [builtinEndpoint, setBuiltinEndpoint] = useState(BUILTIN_ENDPOINT_PREFIX)
-  const [allowedCommands, setAllowedCommands] = useState('')
+  const [builtinEndpoint, setBuiltinEndpoint] = useState(SANDBOX_BUILTIN_ENDPOINT_TEMPLATE_PREFIX)
+  const [allowedArgvText, setAllowedArgvText] = useState('')
   const [defaultTimeout, setDefaultTimeout] = useState('30')
   const [maxTimeout, setMaxTimeout] = useState('120')
   const [componentsText, setComponentsText] = useState(COMMAND_COMPONENT_TEMPLATE)
@@ -116,14 +114,25 @@ export function ToolFormModal({ onClose, onSaved }: ToolFormModalProps) {
 
   const kindValue = Number(kind) as SandboxToolKind
 
-  const commandList = useMemo(
-    () =>
-      allowedCommands
-        .split(/[\s,，]+/)
-        .map((item) => item.trim())
-        .filter((item) => item !== ''),
-    [allowedCommands],
-  )
+  const allowedArgv = useMemo(() => {
+    const lines = allowedArgvText
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter((line) => line !== '')
+    const parsed: string[][] = []
+    for (const line of lines) {
+      try {
+        const value: unknown = JSON.parse(line)
+        if (!Array.isArray(value) || value.some((item) => typeof item !== 'string' || item.trim() === '')) {
+          return { value: [], error: '每行必须是非空字符串组成的 argv JSON 数组' }
+        }
+        parsed.push(value.map((item) => item.trim()))
+      } catch {
+        return { value: [], error: 'argv 白名单每行都必须是合法 JSON 数组' }
+      }
+    }
+    return { value: parsed, error: null }
+  }, [allowedArgvText])
 
   const componentsParsed = useMemo(() => parseComponents(componentsText), [componentsText])
   const webParsed = useMemo(() => parseWebEmbedSpec(webSpecText), [webSpecText])
@@ -137,7 +146,7 @@ export function ToolFormModal({ onClose, onSaved }: ToolFormModalProps) {
         return {
           components: componentsParsed.components,
           command_policy: {
-            allowed_commands: commandList,
+            allowed_argv: allowedArgv.value,
             default_timeout_seconds: Number(defaultTimeout),
             max_timeout_seconds: Number(maxTimeout),
           },
@@ -150,7 +159,7 @@ export function ToolFormModal({ onClose, onSaved }: ToolFormModalProps) {
     }
   }, [
     builtinEndpoint,
-    commandList,
+    allowedArgv,
     componentsParsed.components,
     defaultTimeout,
     kindValue,
@@ -166,7 +175,7 @@ export function ToolFormModal({ onClose, onSaved }: ToolFormModalProps) {
         : '用小写字母开头,只含小写字母、数字与连字符,长度 2 到 32 位',
       name: name.trim() === '' ? '请输入工具名称' : null,
       builtinEndpoint: null,
-      allowedCommands: null,
+      allowedArgv: null,
       timeout: null,
       components: null,
       webSpec: null,
@@ -175,22 +184,25 @@ export function ToolFormModal({ onClose, onSaved }: ToolFormModalProps) {
     if (kindValue === SandboxToolKind.BUILTIN) {
       const endpoint = builtinEndpoint.trim()
       next.builtinEndpoint =
-        endpoint.startsWith(BUILTIN_ENDPOINT_PREFIX) && !endpoint.includes('://')
+        endpoint.startsWith(SANDBOX_BUILTIN_ENDPOINT_TEMPLATE_PREFIX) && !endpoint.includes('://')
           ? null
-          : `入口模板必须以 ${BUILTIN_ENDPOINT_PREFIX} 开头,并且不能是完整网址`
+          : `入口模板必须以 ${SANDBOX_BUILTIN_ENDPOINT_TEMPLATE_PREFIX} 开头,并且不能是完整网址`
     }
 
     if (kindValue === SandboxToolKind.COMMAND) {
       const defaultValue = Number(defaultTimeout)
       const maxValue = Number(maxTimeout)
-      next.allowedCommands =
-        commandList.length === 0
-          ? '至少写一个允许执行的命令'
-          : commandList.some((item) => item.includes('/') || item.includes('\\'))
-            ? '命令只写名字,不要带路径'
-            : new Set(commandList).size !== commandList.length
-              ? '有重复的命令,去掉重复项'
-              : null
+      const argvList = allowedArgv.value
+      const keys = argvList.map((argv) => argv.join('\u0000'))
+      next.allowedArgv =
+        allowedArgv.error ??
+        (argvList.length === 0
+          ? '至少写一个完整的 argv 白名单'
+          : argvList.some((argv) => argv.some((item) => item.includes('\u0000')))
+            ? 'argv 参数不能包含控制字符'
+            : new Set(keys).size !== keys.length
+              ? '有重复的 argv 白名单,去掉重复项'
+              : null)
       next.timeout =
         !Number.isInteger(defaultValue) ||
         !Number.isInteger(maxValue) ||
@@ -212,7 +224,7 @@ export function ToolFormModal({ onClose, onSaved }: ToolFormModalProps) {
   }, [
     builtinEndpoint,
     code,
-    commandList,
+    allowedArgv,
     componentsParsed.error,
     defaultTimeout,
     kindValue,
@@ -357,28 +369,28 @@ export function ToolFormModal({ onClose, onSaved }: ToolFormModalProps) {
             {kindValue === SandboxToolKind.COMMAND ? (
               <>
                 <FormField
-                  label="允许执行的命令"
-                  htmlFor={`${fieldId}-commands`}
+                  label="允许执行的 argv"
+                  htmlFor={`${fieldId}-argv`}
                   required
-                  error={errors.allowedCommands}
-                  helper="只写命令名不带路径,多个用逗号或空格分隔。白名单之外的命令一律拒绝执行"
+                  error={errors.allowedArgv}
+                  helper={'每行填写一个完整 JSON argv 数组,例如 ["slither","--checklist"]。只允许逐项完全匹配'}
                 >
-                  <Input
-                    id={`${fieldId}-commands`}
+                  <Textarea
+                    id={`${fieldId}-argv`}
                     className="font-mono text-sm"
-                    value={allowedCommands}
-                    placeholder="solc, forge, cast"
-                    invalid={Boolean(errors.allowedCommands)}
-                    onChange={(event) => setAllowedCommands(event.target.value)}
+                    value={allowedArgvText}
+                    placeholder={'["slither","--checklist"]\n["slither","--json"]'}
+                    invalid={Boolean(errors.allowedArgv)}
+                    onChange={(event) => setAllowedArgvText(event.target.value)}
                   />
                 </FormField>
 
-                {commandList.length > 0 ? (
+                {allowedArgv.value.length > 0 ? (
                   <div className="flex flex-wrap items-center gap-1.5">
                     <span className="text-sm text-ink-sub">将放行:</span>
-                    {commandList.map((item) => (
-                      <Badge key={item} tone="jade">
-                        {item}
+                    {allowedArgv.value.map((argv) => (
+                      <Badge key={argv.join('\u0000')} tone="jade">
+                        {JSON.stringify(argv)}
                       </Badge>
                     ))}
                   </div>
@@ -502,7 +514,7 @@ export function ToolFormModal({ onClose, onSaved }: ToolFormModalProps) {
             <Button type="button" variant="outline" onClick={onClose}>
               取消
             </Button>
-            <Button type="submit" variant="seal" loading={submitting}>
+            <Button type="submit" variant="primary" loading={submitting}>
               登记工具
             </Button>
           </ModalFooter>

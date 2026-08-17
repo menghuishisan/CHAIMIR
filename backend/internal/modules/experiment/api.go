@@ -69,7 +69,7 @@ func (a experimentAPI) registerStudentRoutes(g gin.IRouter) {
 
 // listPublishedExperiments 仅向学生返回当前租户已发布实验。
 func (a experimentAPI) listPublishedExperiments(c *gin.Context) {
-	courseID, ok := httpx.QueryInt(c, "course_id", httpx.QueryIntRule{Default: 0, Min: 0})
+	courseID, ok := httpx.QueryID(c, "course_id", false)
 	if !ok {
 		return
 	}
@@ -113,7 +113,7 @@ func (a experimentAPI) registerInternalRoutes(g gin.IRouter) {
 
 // listExperiments 绑定实验列表过滤参数。
 func (a experimentAPI) listExperiments(c *gin.Context) {
-	courseID, ok := httpx.QueryInt(c, "course_id", httpx.QueryIntRule{Default: 0, Min: 0})
+	courseID, ok := httpx.QueryID(c, "course_id", false)
 	if !ok {
 		return
 	}
@@ -285,6 +285,7 @@ func (a experimentAPI) submitReport(c *gin.Context) {
 }
 
 // listReports 查询实验报告列表。
+// status=0 表示不按批改状态过滤;越界状态在边界处拒绝,不进服务层。
 func (a experimentAPI) listReports(c *gin.Context) {
 	id, ok := httpx.PathID(c, "id")
 	if !ok {
@@ -294,7 +295,11 @@ func (a experimentAPI) listReports(c *gin.Context) {
 	if !ok {
 		return
 	}
-	out, total, p, s, err := a.svc.ListReports(c.Request.Context(), id, page, size)
+	status, ok := httpx.QueryInt16(c, "status", httpx.QueryIntRule{Default: 0, Min: 0, Max: int64(ReportStatusGraded), HasMax: true})
+	if !ok {
+		return
+	}
+	out, total, p, s, err := a.svc.ListReports(c.Request.Context(), id, status, page, size)
 	httpx.WritePage(c, out, total, p, s, err)
 }
 
@@ -372,7 +377,7 @@ func (a experimentAPI) internalScore(c *gin.Context) {
 
 // internalStats 读取内部实验统计。
 func (a experimentAPI) internalStats(c *gin.Context) {
-	courseID, ok := httpx.QueryInt(c, "course_id", httpx.QueryIntRule{Default: 0, Min: 0})
+	courseID, ok := httpx.QueryID(c, "course_id", false)
 	if !ok {
 		return
 	}

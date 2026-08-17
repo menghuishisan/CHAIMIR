@@ -20,7 +20,6 @@ export function renderMempoolReplacementView(state: MempoolReplacementState): Te
       intent: state.phaseIndex === 2 ? 'verify' : 'observe',
       what: state.explanation.effect,
       why: state.explanation.reason,
-      watch: summary,
     },
     focus: {
       primary: selectedOrFrameFocus(state.selectedElementId, focusIds(state)),

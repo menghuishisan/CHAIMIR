@@ -5,10 +5,10 @@ import (
 	"bytes"
 	"context"
 	"path/filepath"
-	"strconv"
 	"strings"
 
 	"chaimir/internal/contracts"
+	"chaimir/internal/platform/ids"
 	"chaimir/internal/platform/jsonx"
 	"chaimir/internal/platform/storage"
 	"chaimir/internal/platform/upload"
@@ -21,16 +21,6 @@ type LessonMaterialUploadRequest struct {
 	FileName    string
 	ContentType string
 	Content     []byte
-}
-
-// LessonMaterialAccessDTO 是课时材料的短时投放授权响应。
-type LessonMaterialAccessDTO struct {
-	Token       string `json:"token"`
-	Mode        string `json:"mode"`
-	FileName    string `json:"file_name"`
-	Size        int64  `json:"size"`
-	ContentType string `json:"content_type"`
-	ExpiresAt   string `json:"expires_at"`
 }
 
 // UploadLessonMaterial 上传材料并只在 lesson.content_ref 中保存对象引用。
@@ -73,7 +63,7 @@ func (s *Service) UploadLessonMaterial(ctx context.Context, lessonID int64, req 
 		AccountID:       id.AccountID,
 		Module:          teachingModuleName,
 		ResourceType:    lessonMaterialResourceType,
-		ResourceID:      strconv.FormatInt(lessonID, 10),
+		ResourceID:      ids.Format(lessonID),
 		FileName:        req.FileName,
 		ContentType:     contentType,
 		Size:            int64(len(req.Content)),
@@ -122,7 +112,7 @@ func (s *Service) UploadLessonMaterial(ctx context.Context, lessonID int64, req 
 		if parseErr != nil {
 			logging.ErrorContext(ctx, "替换课时材料时旧对象引用无效", parseErr.Error())
 		} else {
-			prefix, prefixErr := storage.ObjectKey(id.TenantID, teachingModuleName, lessonMaterialResourceType, strconv.FormatInt(lessonID, 10))
+			prefix, prefixErr := storage.ObjectKey(id.TenantID, teachingModuleName, lessonMaterialResourceType, ids.Format(lessonID))
 			if prefixErr != nil {
 				logging.ErrorContext(ctx, "替换课时材料时无法生成受控材料路径", prefixErr.Error())
 			} else if oldRef.Bucket != s.storage.BucketAttach() || !strings.HasPrefix(oldRef.Key, prefix+"/") {
@@ -178,7 +168,7 @@ func (s *Service) IssueLessonMaterialAccess(ctx context.Context, lessonID int64)
 		ObjectRef:    objectRef,
 		Module:       teachingModuleName,
 		ResourceType: lessonMaterialResourceType,
-		ResourceID:   strconv.FormatInt(lessonID, 10),
+		ResourceID:   ids.Format(lessonID),
 		Mode:         mode,
 	})
 	if err != nil {

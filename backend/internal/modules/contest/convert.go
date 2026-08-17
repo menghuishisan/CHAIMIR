@@ -39,7 +39,19 @@ func battleEntryDTOFromModel(item BattleEntry) BattleEntryDTO {
 
 // battleMatchDTOFromModel 转换对局为 HTTP 输出。
 func battleMatchDTOFromModel(item BattleMatch) BattleMatchDTO {
-	return BattleMatchDTO{ID: ids.ID(item.ID), ContestID: ids.ID(item.ContestID), ProblemID: ids.ID(item.ProblemID), EntryAID: ids.ID(item.EntryAID), EntryBID: ids.ID(item.EntryBID), SourceRef: item.SourceRef, SandboxRef: item.SandboxRef, JudgeTaskRef: item.JudgeTaskRef, Result: item.Result, ScoreDelta: item.ScoreDelta, ReplayAvailable: item.ReplayRef != "", Status: item.Status, MatchedAt: item.MatchedAt, FinishedAt: item.FinishedAt}
+	var scoreDelta *BattleScoreDeltaDTO
+	if item.ScoreDelta != nil {
+		scoreDelta = &BattleScoreDeltaDTO{TeamAID: ids.ID(item.ScoreDelta.TeamAID), TeamBID: ids.ID(item.ScoreDelta.TeamBID), RatingABefore: item.ScoreDelta.RatingABefore, RatingBBefore: item.ScoreDelta.RatingBBefore, RatingAAfter: item.ScoreDelta.RatingAAfter, RatingBAfter: item.ScoreDelta.RatingBAfter, DeltaA: item.ScoreDelta.DeltaA, DeltaB: item.ScoreDelta.DeltaB, KFactor: item.ScoreDelta.KFactor, Result: item.ScoreDelta.Result}
+	}
+	return BattleMatchDTO{ID: ids.ID(item.ID), ContestID: ids.ID(item.ContestID), ProblemID: ids.ID(item.ProblemID), EntryAID: ids.ID(item.EntryAID), EntryBID: ids.ID(item.EntryBID), SourceRef: item.SourceRef, SandboxRef: item.SandboxRef, JudgeTaskRef: item.JudgeTaskRef, Result: item.Result, ScoreDelta: scoreDelta, ReplayAvailable: item.ReplayRef != "", Status: item.Status, MatchedAt: item.MatchedAt, FinishedAt: item.FinishedAt}
+}
+
+// battleScoreDeltaAuditDetail 将固定结算结构转换为审计 JSON 字段,ID 仍按字符串保存。
+func battleScoreDeltaAuditDetail(item *BattleScoreDelta) map[string]any {
+	if item == nil {
+		return nil
+	}
+	return map[string]any{"team_a": ids.Format(item.TeamAID), "team_b": ids.Format(item.TeamBID), "rating_a_before": item.RatingABefore, "rating_b_before": item.RatingBBefore, "rating_a_after": item.RatingAAfter, "rating_b_after": item.RatingBAfter, "delta_a": item.DeltaA, "delta_b": item.DeltaB, "k_factor": item.KFactor, "result": item.Result}
 }
 
 // ladderDTOFromModel 转换排行投影为 HTTP 输出。
@@ -49,7 +61,20 @@ func ladderDTOFromModel(item LadderRank) LadderDTO {
 
 // resultSnapshotDTOFromModel 把归档状态的排行榜快照转换为最终结果输出。
 func resultSnapshotDTOFromModel(item LadderSnapshot) ResultSnapshotDTO {
-	return ResultSnapshotDTO{ID: ids.ID(item.ID), TenantID: ids.ID(item.TenantID), ContestID: ids.ID(item.ContestID), FinalRanking: item.Ranking, GeneratedAt: item.GeneratedAt}
+	ranking := make([]LadderSnapshotEntryDTO, 0, len(item.Ranking))
+	for _, entry := range item.Ranking {
+		ranking = append(ranking, LadderSnapshotEntryDTO{TeamID: ids.ID(entry.TeamID), Score: entry.Score, SolvedCount: entry.SolvedCount, LastSolveAt: entry.LastSolveAt, Rank: entry.Rank, UpdatedAt: entry.UpdatedAt})
+	}
+	return ResultSnapshotDTO{ID: ids.ID(item.ID), TenantID: ids.ID(item.TenantID), ContestID: ids.ID(item.ContestID), FinalRanking: ranking, GeneratedAt: item.GeneratedAt}
+}
+
+// ladderDTOsFromSnapshot 把内部榜单快照转换为列表接口使用的公开排行 DTO。
+func ladderDTOsFromSnapshot(snapshot LadderSnapshot) []LadderDTO {
+	out := make([]LadderDTO, 0, len(snapshot.Ranking))
+	for _, entry := range snapshot.Ranking {
+		out = append(out, LadderDTO{TeamID: ids.ID(entry.TeamID), Score: entry.Score, SolvedCount: entry.SolvedCount, LastSolveAt: entry.LastSolveAt, Rank: entry.Rank, UpdatedAt: entry.UpdatedAt})
+	}
+	return out
 }
 
 // cheatDTOFromModel 转换违规记录为 HTTP 输出。

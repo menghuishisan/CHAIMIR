@@ -1,5 +1,5 @@
 // shared-replay 是公开仿真回放页(免认证深链 /sim/shared/:shareCode,全屏沉浸态)。
-// 页面做三件事:取回分享的推演记录、在隔离 Worker 里按记录逐条复现、把教学帧铺进工作台三栏。
+// 页面做三件事:取回分享的推演记录、在隔离 Worker 里按记录逐条复现、把教学帧铺进工作台三区。
 //
 // 匿名边界:全平台唯一无会话业务接口是 GET sim/shared/:code,本页只调它 ——
 //   不上报动作、不换取运行包凭据、不建立实时连接。
@@ -13,13 +13,12 @@ import { Info, LoaderCircle, Lock, TriangleAlert } from 'lucide-react'
 import {
   Button,
   ChainProgress,
-  CodeTracePanel,
-  TeachingFrameAside,
-  TeachingFrameBrief,
   TeachingFrameStage,
+  TeachingFrameStream,
   WorkbenchShell,
   WorkbenchTopbar,
-  frameHasAside,
+  frameStreamEntries,
+  frameHasStream,
   useReducedMotion,
 } from '@chaimir/ui'
 import { SimWorkerClient, isBuiltinSimulationCode } from '@chaimir/sim-sdk'
@@ -33,6 +32,7 @@ import { useImmersive } from '../../../../layouts/immersive/context'
 import { moveCommand, replayMoves } from '../../replayMoves'
 import { narrativeProgress, useSimPlayback } from '../../playback'
 import { SimPlaybackControls } from '../../SimPlaybackControls'
+import { SimWorkbenchAside } from '../../SimWorkbenchAside'
 
 /** injectedActionCount 数出快照里已复现的记录动作数(记录动作在 Worker 内是 user 事件)。 */
 function injectedActionCount(snapshot: RuntimeSnapshot): number {
@@ -59,6 +59,7 @@ export default function PublicReplayPage() {
     return (
       <AppStatusScreen
         icon={TriangleAlert}
+        tone="danger"
         title="暂时打不开这段推演"
         description={replay.error?.message}
         traceId={replay.error?.traceId}
@@ -209,6 +210,7 @@ function ReplayRuntime({ replay }: ReplayRuntimeProps) {
     return (
       <AppStatusScreen
         icon={TriangleAlert}
+        tone="danger"
         title="这段推演没能跑起来"
         description={error}
         fullScreen={false}
@@ -226,9 +228,13 @@ function ReplayRuntime({ replay }: ReplayRuntimeProps) {
   }
 
   const frame = snapshot.view
+  // 事件流:只有会产生消息/调用的场景才挂这一栏;条数供壳在收起的把手上给未读计数
+  const hasStream = frameHasStream(frame)
+  const streamCount = frameStreamEntries(frame).length
 
   return (
     <WorkbenchShell
+      workbench="sim"
       topbar={
         <WorkbenchTopbar
           onExit={exit}
@@ -246,25 +252,29 @@ function ReplayRuntime({ replay }: ReplayRuntimeProps) {
           }
         />
       }
-      left={<TeachingFrameBrief frame={frame} />}
+      // 左辅助区与登录后同构:阶段说明 / 观察结论 / 执行追踪 / 证据,只是没有操作区 ——
+      // 公开回放不接受访客操作,访客看到的教学内容与登录后一致
+      left={
+        <SimWorkbenchAside
+          frame={frame}
+          checkpoints={descriptor.checkpoints}
+          checkpointResults={snapshot.checkpointResults}
+          codeTrace={descriptor.codeTrace}
+          trace={snapshot.state._trace}
+          selectedElementId={snapshot.state.selectedElementId}
+        />
+      }
+      leftLabel="说明"
       // 只读舞台:公开回放不接受访客操作,故不传 onSelectElement;
       // 高亮跟随记录本身 —— 选中态由仿真包写在状态里,是原操作者当时的选择
       stage={<TeachingFrameStage frame={frame} selectedElementId={snapshot.state.selectedElementId} />}
       right={
-        <div className="flex flex-col">
-          {frameHasAside(frame) ? (
-            <TeachingFrameAside frame={frame} selectedElementId={snapshot.state.selectedElementId} />
-          ) : null}
-          {/* 执行追踪:公开回放同样呈现代码行与变量,访客看到的教学内容与登录后一致 */}
-          {descriptor.codeTrace ? (
-            <section className="border-t border-dark-line p-4 first:border-t-0">
-              <h2 className="mb-2 text-sm font-medium text-on-dark">执行追踪</h2>
-              <CodeTracePanel codeTrace={descriptor.codeTrace} trace={snapshot.state._trace} />
-            </section>
-          ) : null}
-        </div>
+        hasStream ? (
+          <TeachingFrameStream frame={frame} selectedElementId={snapshot.state.selectedElementId} />
+        ) : undefined
       }
-      rightLabel="辅助信息"
+      rightLabel="消息流"
+      rightCount={streamCount}
       footer={
         <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 px-4 py-2">
           <div className="flex min-w-0 flex-col">

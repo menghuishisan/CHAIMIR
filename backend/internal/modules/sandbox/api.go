@@ -511,13 +511,13 @@ func (a sandboxAPI) toolProxy(c *gin.Context) {
 	a.svc.ObserveToolAccess(c.Request.Context(), sb)
 }
 
-// prepareToolBrowserAccess 为浏览器工具写入路径受限 Cookie,并清除一次性 query token 后再进入上游代理。
+// prepareToolBrowserAccess 为浏览器工具写入路径受限 Cookie,并清除短时入口票据后再进入上游代理。
 func (a sandboxAPI) prepareToolBrowserAccess(c *gin.Context, externalPrefix string) bool {
 	token, ok := auth.VerifiedAccessToken(c)
 	if ok && a.authn != nil {
 		a.authn.SetBrowserAccessCookie(c, externalPrefix, token)
 	}
-	if !auth.BrowserAccessFromQuery(c) {
+	if !auth.BrowserAccessFromTicket(c) {
 		return true
 	}
 	c.Redirect(http.StatusFound, toolProxyCleanRequestURI(c))
@@ -671,11 +671,7 @@ func quotaScopeTenantID(c *gin.Context) (int64, bool) {
 		}
 		return id.TenantID, true
 	}
-	if strings.TrimSpace(c.Query("tenant_id")) == "" {
-		response.Fail(c, apperr.ErrQueryParamInvalid)
-		return 0, false
-	}
-	return httpx.QueryInt(c, "tenant_id", httpx.QueryIntRule{Min: 1})
+	return httpx.QueryID(c, "tenant_id", true)
 }
 
 // currentTenantIdentity 从服务端鉴权上下文读取租户身份。
@@ -758,14 +754,14 @@ func toolProxyURL(sb Sandbox, tool SandboxTool) *url.URL {
 
 // toolProxyExternalPrefix 返回浏览器可见的工具代理前缀,用于保持 Web 工具重定向不跳出鉴权入口。
 func toolProxyExternalPrefix(sandboxID int64, toolCode string) string {
-	return fmt.Sprintf("/api/v1/sandbox/sandboxes/%d/tools/%s", sandboxID, url.PathEscape(strings.TrimSpace(toolCode)))
+	return "/api/v1/sandbox/sandboxes/" + ids.Format(sandboxID) + "/tools/" + url.PathEscape(strings.TrimSpace(toolCode))
 }
 
-// toolProxyCleanRequestURI 删除浏览器入口一次性 token,确保 token 不进入上游工具日志或重定向。
+// toolProxyCleanRequestURI 删除浏览器入口短时票据,确保票据不进入上游工具日志或重定向。
 func toolProxyCleanRequestURI(c *gin.Context) string {
 	u := *c.Request.URL
 	query := u.Query()
-	query.Del(auth.BrowserAccessTokenQuery)
+	query.Del(auth.BrowserAccessTicketQuery)
 	u.RawQuery = query.Encode()
 	return u.RequestURI()
 }

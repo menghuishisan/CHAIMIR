@@ -18,7 +18,6 @@ export function renderEthPosFinalityView(state: EthPosFinalityState): TeachingFr
       intent: state.phaseIndex >= 3 ? 'verify' : 'observe',
       what: state.explanation.effect,
       why: state.explanation.reason,
-      watch: summary,
     },
     focus: {
       primary: selectedOrFrameFocus(state.selectedElementId, [state.head]),

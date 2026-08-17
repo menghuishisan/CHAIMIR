@@ -64,7 +64,7 @@ type TxStore interface {
 	ListAcceptedAppealsByCourseStudent(context.Context, int64, int64) ([]AppealDTO, error)
 	UpdateGradeAppealStatus(context.Context, int64, int16, int16, int64, string) (AppealDTO, error)
 	CreateAcademicWarning(context.Context, int64, int64, int64, int64, int16, map[string]any) (WarningDTO, error)
-	ListAcademicWarnings(context.Context, int64, int, int) ([]WarningDTO, int64, error)
+	ListAcademicWarnings(context.Context, int64, int16, int, int) ([]WarningDTO, int64, error)
 	AckAcademicWarning(context.Context, int64, int64) (WarningDTO, error)
 	CreateTranscriptRecord(context.Context, int64, int64, TranscriptRequest, string) (TranscriptDTO, error)
 	GetTranscriptRecord(context.Context, int64) (TranscriptDTO, error)

@@ -10,7 +10,7 @@
 import { useCallback, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router'
 import { CircleCheck, KeyRound, Settings, Shield } from 'lucide-react'
-import { AuthMode, DeployMode, type Tenant } from '@chaimir/api-client'
+import { AuthMode, type Tenant } from '@chaimir/api-client'
 import {
   Badge,
   Breadcrumb,
@@ -38,35 +38,18 @@ import { ResourceState } from '../../../../components/ResourceState'
 import { useAsyncResource } from '../../../../hooks'
 import { formatDate } from '../../../../utils/formatters'
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
-
-/** feature_flags 里承载启用模块的键(后端种子数据用 modules 数组)。 */
-const MODULES_KEY = 'modules'
-
-/** 可启用的业务模块:值与后端模块标识一致,文案在此登记。 */
-const MODULE_OPTIONS = [
-  { value: 'teaching', label: '教学', description: '课程、章节课时、作业与批改' },
-  { value: 'experiment', label: '实验', description: '实验编排与沙箱实验环境' },
-  { value: 'contest', label: '竞赛', description: '赛事组织、解题赛与对抗赛' },
-] as const
-
-/** 认证方式文案:与 identity 的 AuthMode 一一对应。 */
-const AUTH_MODE_LABELS: Record<AuthMode, string> = {
-  [AuthMode.LOCAL]: '平台账号密码',
-  [AuthMode.CAS]: '学校统一认证(CAS)',
-  [AuthMode.LDAP]: '目录服务(LDAP)',
-}
-
-/** 部署形态文案:只读展示,由平台管理员设定。 */
-const DEPLOY_MODE_LABELS: Record<DeployMode, string> = {
-  [DeployMode.SAAS]: '平台托管',
-  [DeployMode.SCHOOL]: '学校私有部署',
-}
+import { authModeLabel, deployModeLabel, TENANT_MODULE_OPTIONS } from '../../../../utils/labels/identity'
+import { readTenantModules, TENANT_MODULES_KEY } from '../../tenantModules'
 
 /**
  * SchoolAdminSettingsPage 维护学校展示信息与开通策略。
  */
 export default function SchoolAdminSettingsPage() {
-  const tenant = useAsyncResource(() => api.identity.getTenantConfig(), [], () => false)
+  const tenant = useAsyncResource(
+    () => api.identity.getTenantConfig(),
+    [],
+    () => false
+  )
 
   return (
     <PageScaffold>
@@ -112,7 +95,7 @@ function SettingsContent({ tenant, onSaved }: SettingsContentProps) {
   const [logoImage, setLogoImage] = useState(tenant.logo_image ?? '')
   const [authMode, setAuthMode] = useState(String(tenant.auth_mode))
   const [enableActivation, setEnableActivation] = useState(tenant.enable_activation_code)
-  const [modules, setModules] = useState<string[]>(() => readModules(tenant.feature_flags))
+  const [modules, setModules] = useState(() => readTenantModules(tenant.feature_flags))
   const [formError, setFormError] = useState<string>()
   const [working, setWorking] = useState(false)
 
@@ -123,14 +106,14 @@ function SettingsContent({ tenant, onSaved }: SettingsContentProps) {
     () => [
       { term: '学校名称', description: tenant.name },
       { term: '学校短码', description: tenant.code, mono: true },
-      { term: '部署形态', description: DEPLOY_MODE_LABELS[tenant.deploy_mode] },
+      { term: '部署形态', description: deployModeLabel(tenant.deploy_mode) },
       {
         term: '服务到期',
         description: tenant.expire_at ? formatDate(tenant.expire_at) : '长期有效',
         mono: true,
       },
     ],
-    [tenant],
+    [tenant]
   )
 
   const submit = useCallback(
@@ -150,7 +133,7 @@ function SettingsContent({ tenant, onSaved }: SettingsContentProps) {
         await api.identity.updateTenantConfig({
           display_name: displayName.trim(),
           // 未登记的开关原样保留:平台侧可能写入其他键,前端不该丢弃
-          feature_flags: { ...tenant.feature_flags, [MODULES_KEY]: modules },
+          feature_flags: { ...tenant.feature_flags, [TENANT_MODULES_KEY]: modules },
           auth_mode: authModeValue,
           enable_activation_code: enableActivation,
         })
@@ -162,7 +145,7 @@ function SettingsContent({ tenant, onSaved }: SettingsContentProps) {
         setWorking(false)
       }
     },
-    [authModeValue, displayName, enableActivation, modules, onSaved, tenant.feature_flags],
+    [authModeValue, displayName, enableActivation, modules, onSaved, tenant.feature_flags]
   )
 
   return (
@@ -229,7 +212,7 @@ function SettingsContent({ tenant, onSaved }: SettingsContentProps) {
                 helper="关掉的模块对师生不可见。已有数据不会删除,重新开启即恢复"
               >
                 <div className="flex flex-col gap-3">
-                  {MODULE_OPTIONS.map((option) => (
+                  {TENANT_MODULE_OPTIONS.map((option) => (
                     <div key={option.value} className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
                         <div className="text-base text-ink">{option.label}</div>
@@ -242,7 +225,7 @@ function SettingsContent({ tenant, onSaved }: SettingsContentProps) {
                           setModules((current) =>
                             checked
                               ? [...current, option.value]
-                              : current.filter((item) => item !== option.value),
+                              : current.filter((item) => item !== option.value)
                           )
                         }
                       />
@@ -259,9 +242,9 @@ function SettingsContent({ tenant, onSaved }: SettingsContentProps) {
                 <SegmentedControl
                   aria-label="登录方式"
                   options={[
-                    { value: String(AuthMode.LOCAL), label: AUTH_MODE_LABELS[AuthMode.LOCAL] },
-                    { value: String(AuthMode.CAS), label: AUTH_MODE_LABELS[AuthMode.CAS] },
-                    { value: String(AuthMode.LDAP), label: AUTH_MODE_LABELS[AuthMode.LDAP] },
+                    { value: String(AuthMode.LOCAL), label: authModeLabel(AuthMode.LOCAL) },
+                    { value: String(AuthMode.CAS), label: authModeLabel(AuthMode.CAS) },
+                    { value: String(AuthMode.LDAP), label: authModeLabel(AuthMode.LDAP) },
                   ]}
                   value={authMode}
                   onValueChange={setAuthMode}
@@ -272,7 +255,8 @@ function SettingsContent({ tenant, onSaved }: SettingsContentProps) {
                 <Callout tone="warning" title="别忘了填服务器参数">
                   <div className="flex flex-wrap items-center gap-2">
                     <span>
-                      {AUTH_MODE_LABELS[authModeValue]}需要在认证配置页填服务器地址等参数,否则师生无法登录。
+                      {authModeLabel(authModeValue)}
+                      需要在认证配置页填服务器地址等参数,否则师生无法登录。
                     </span>
                     <Button
                       variant="ghost"
@@ -286,7 +270,7 @@ function SettingsContent({ tenant, onSaved }: SettingsContentProps) {
                 </Callout>
               ) : null}
 
-              <div className="flex flex-col gap-3 rounded-md border border-line bg-surface-sunken p-4">
+              <div className="flex flex-col gap-3 well p-4">
                 <Checkbox
                   checked={enableActivation}
                   label="允许用激活码开通账号"
@@ -302,7 +286,7 @@ function SettingsContent({ tenant, onSaved }: SettingsContentProps) {
                   <Badge tone="neutral">
                     <span className="flex items-center gap-1">
                       <KeyRound aria-hidden className="size-3" />
-                      当前 {AUTH_MODE_LABELS[tenant.auth_mode]}
+                      当前 {authModeLabel(tenant.auth_mode)}
                     </span>
                   </Badge>
                 </div>
@@ -311,7 +295,7 @@ function SettingsContent({ tenant, onSaved }: SettingsContentProps) {
               {formError ? <Callout tone="danger">{formError}</Callout> : null}
 
               <div className="flex items-center gap-2">
-                <Button type="submit" variant="seal" leftIcon={CircleCheck} loading={working}>
+                <Button type="submit" variant="primary" leftIcon={CircleCheck} loading={working}>
                   保存配置
                 </Button>
                 <span className="text-sm text-ink-sub">修改会记入审计日志。</span>
@@ -322,12 +306,4 @@ function SettingsContent({ tenant, onSaved }: SettingsContentProps) {
       </PageSection>
     </>
   )
-}
-
-/** readModules 从开放开关里读出启用模块;非字符串数组回默认全启用。 */
-function readModules(flags: Record<string, unknown>): string[] {
-  const raw = flags[MODULES_KEY]
-  if (!Array.isArray(raw)) return MODULE_OPTIONS.map((item) => item.value)
-  const values = raw.filter((item): item is string => typeof item === 'string')
-  return values.length > 0 ? values : MODULE_OPTIONS.map((item) => item.value)
 }

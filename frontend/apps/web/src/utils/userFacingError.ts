@@ -11,13 +11,28 @@ import { ApiError } from '@chaimir/api-client'
  */
 export const RESOURCE_LOAD_FAILED_MESSAGE = '暂时无法获取数据，请稍后重试'
 
+/** 句末标点:用于判断后端文案是否已经收尾,避免和报障提示拼成一句读不断的长句。 */
+const SENTENCE_END = /[。！？!?.]$/
+
+/**
+ * traceHintText 返回报障编号提示句。
+ * 全站只有这一处拼这句话(状态屏、资源错误块与 Toast 都取它),改口径只改这里。
+ */
+export function traceHintText(traceId: string): string {
+  return `如需帮助，请提供编号 ${traceId}。`
+}
+
 /**
  * userFacingErrorMessage 返回用户向错误，并在后端签发 trace id 时附上报障编号。
+ * 拼接前先把后端文案收尾成句子:后端 message 多数不带句末标点,直接空格接提示句会显示成
+ * 「…请稍后重试 如需帮助，请提供编号 X。」这种断句。
  */
 export function userFacingErrorMessage(error: unknown, defaultMessage: string): string {
   if (!(error instanceof ApiError)) return defaultMessage
   const traceId = error.traceId
-  return traceId ? `${error.message} 如需帮助，请提供编号 ${traceId}。` : error.message
+  if (!traceId) return error.message
+  const message = SENTENCE_END.test(error.message) ? error.message : `${error.message}。`
+  return `${message} ${traceHintText(traceId)}`
 }
 
 /**

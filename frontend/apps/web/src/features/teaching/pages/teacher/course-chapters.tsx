@@ -10,6 +10,7 @@ import {
   type Chapter,
   type CourseOutline,
   type Lesson,
+  type LessonContentRefRequest,
 } from '@chaimir/api-client'
 import {
   Badge,
@@ -44,14 +45,6 @@ import {
   lessonContentTypeLabel,
 } from '../../../../utils/labels/teaching'
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
-
-/** content_ref 各形态的键,与 docs/06-教学/02-数据模型.md 的形状表一致。 */
-const MARKDOWN_KEY = 'markdown'
-const EXPERIMENT_KEY = 'experiment_id'
-const SIM_CODE_KEY = 'package_code'
-const SIM_VERSION_KEY = 'version'
-const FILE_NAME_KEY = 'file_name'
-const FILE_SIZE_KEY = 'size'
 
 export interface CourseChaptersProps {
   courseId: string
@@ -330,13 +323,11 @@ function LessonContentSummary({ lesson }: { lesson: Lesson }) {
   const ref = lesson.content_ref
 
   if (isLessonMaterialType(lesson.content_type)) {
-    const fileName = ref[FILE_NAME_KEY]
-    const size = ref[FILE_SIZE_KEY]
-    if (typeof fileName === 'string' && fileName !== '') {
+    if (ref.file_name) {
       return (
         <span className="text-xs text-ink-sub">
-          {fileName}
-          {typeof size === 'number' ? ` · ${formatFileSize(size)}` : ''}
+          {ref.file_name}
+          {typeof ref.size === 'number' ? ` · ${formatFileSize(ref.size)}` : ''}
         </span>
       )
     }
@@ -344,8 +335,7 @@ function LessonContentSummary({ lesson }: { lesson: Lesson }) {
   }
 
   if (lesson.content_type === LessonContentType.MARKDOWN) {
-    const markdown = ref[MARKDOWN_KEY]
-    return typeof markdown === 'string' && markdown.trim() !== '' ? (
+    return ref.markdown?.trim() ? (
       <span className="text-xs text-ink-sub">已填写正文</span>
     ) : (
       <Badge tone="warning">未填写正文</Badge>
@@ -353,20 +343,17 @@ function LessonContentSummary({ lesson }: { lesson: Lesson }) {
   }
 
   if (lesson.content_type === LessonContentType.EXPERIMENT) {
-    const experimentId = ref[EXPERIMENT_KEY]
-    return typeof experimentId === 'string' && experimentId !== '' ? (
+    return ref.experiment_id ? (
       <span className="text-xs text-ink-sub">已关联实验</span>
     ) : (
       <Badge tone="warning">未关联实验</Badge>
     )
   }
 
-  const packageCode = ref[SIM_CODE_KEY]
-  const version = ref[SIM_VERSION_KEY]
-  return typeof packageCode === 'string' && packageCode !== '' ? (
+  return ref.package_code ? (
     <span className="text-xs text-ink-sub">
-      {packageCode}
-      {typeof version === 'string' ? ` · ${version}` : ''}
+      {ref.package_code}
+      {ref.version ? ` · ${ref.version}` : ''}
     </span>
   ) : (
     <Badge tone="warning">未关联仿真场景</Badge>
@@ -449,7 +436,7 @@ function ChapterFormModal({ courseId, chapter, nextSort, onClose, onSaved }: Cha
             <Button type="button" variant="outline" onClick={onClose}>
               取消
             </Button>
-            <Button type="submit" variant="seal" loading={working}>
+            <Button type="submit" variant="primary" loading={working}>
               {chapter ? '保存修改' : '创建章节'}
             </Button>
           </ModalFooter>
@@ -477,10 +464,10 @@ function LessonFormModal({ chapterId, lesson, nextSort, onClose, onSaved }: Less
   const [contentType, setContentType] = useState(
     String(lesson?.content_type ?? LessonContentType.MARKDOWN),
   )
-  const [markdown, setMarkdown] = useState(readString(lesson, MARKDOWN_KEY))
-  const [experimentId, setExperimentId] = useState(readString(lesson, EXPERIMENT_KEY))
-  const [simCode, setSimCode] = useState(readString(lesson, SIM_CODE_KEY))
-  const [simVersion, setSimVersion] = useState(readString(lesson, SIM_VERSION_KEY))
+  const [markdown, setMarkdown] = useState(lesson?.content_ref.markdown ?? '')
+  const [experimentId, setExperimentId] = useState(lesson?.content_ref.experiment_id ?? '')
+  const [simCode, setSimCode] = useState(lesson?.content_ref.package_code ?? '')
+  const [simVersion, setSimVersion] = useState(lesson?.content_ref.version ?? '')
   const [file, setFile] = useState<File>()
   const [uploadProgress, setUploadProgress] = useState<number>()
   const [formError, setFormError] = useState<string>()
@@ -499,15 +486,17 @@ function LessonFormModal({ chapterId, lesson, nextSort, onClose, onSaved }: Less
   )
 
   /** buildContentRef 按形态组装 content_ref,视频与资料由上传接口写入,不在此构造。 */
-  const buildContentRef = useCallback((): Record<string, unknown> => {
-    if (typeValue === LessonContentType.MARKDOWN) return { [MARKDOWN_KEY]: markdown }
-    if (typeValue === LessonContentType.EXPERIMENT) return { [EXPERIMENT_KEY]: experimentId.trim() }
-    if (typeValue === LessonContentType.SIMULATION) {
-      return { [SIM_CODE_KEY]: simCode.trim(), [SIM_VERSION_KEY]: simVersion.trim() }
+  const buildContentRef = useCallback((): LessonContentRefRequest => {
+    if (typeValue === LessonContentType.MARKDOWN) return { markdown }
+    if (typeValue === LessonContentType.EXPERIMENT) {
+      const normalizedExperimentId = experimentId.trim()
+      return normalizedExperimentId === '' ? {} : { experiment_id: normalizedExperimentId }
     }
-    // 视频/资料:保留服务端已写入的引用,由上传接口更新
-    return lesson?.content_ref ?? {}
-  }, [experimentId, lesson?.content_ref, markdown, simCode, simVersion, typeValue])
+    if (typeValue === LessonContentType.SIMULATION) {
+      return { package_code: simCode.trim(), version: simVersion.trim() }
+    }
+    return {}
+  }, [experimentId, markdown, simCode, simVersion, typeValue])
 
   const submit = useCallback(
     async (event: React.FormEvent<HTMLFormElement>) => {
@@ -518,6 +507,11 @@ function LessonFormModal({ chapterId, lesson, nextSort, onClose, onSaved }: Less
       }
       if (typeValue === LessonContentType.SIMULATION && simCode.trim() === '') {
         setFormError('请填写仿真场景名称')
+        return
+      }
+      const materialChanged = isMaterial && (!lesson || lesson.content_type !== typeValue)
+      if (materialChanged && !file) {
+        setFormError('请选择与当前内容形态对应的文件')
         return
       }
       setFormError(undefined)
@@ -601,7 +595,7 @@ function LessonFormModal({ chapterId, lesson, nextSort, onClose, onSaved }: Less
               <FormField
                 label="关联实验"
                 htmlFor="lesson-experiment"
-                helper="填写实验编排里的实验名称,学生可从课时直接进入实验实训"
+                helper="填写实验编排生成的实验编号,学生可从课时直接进入实验实训"
               >
                 <Input
                   id="lesson-experiment"
@@ -668,7 +662,7 @@ function LessonFormModal({ chapterId, lesson, nextSort, onClose, onSaved }: Less
             <Button type="button" variant="outline" onClick={onClose}>
               取消
             </Button>
-            <Button type="submit" variant="seal" loading={working}>
+            <Button type="submit" variant="primary" loading={working}>
               {lesson ? '保存修改' : '创建课时'}
             </Button>
           </ModalFooter>
@@ -676,10 +670,4 @@ function LessonFormModal({ chapterId, lesson, nextSort, onClose, onSaved }: Less
       </ModalContent>
     </Modal>
   )
-}
-
-/** readString 从课时内容引用里读字符串字段;非字符串回空串(不把对象塞进文本控件)。 */
-function readString(lesson: Lesson | undefined, key: string): string {
-  const value = lesson?.content_ref?.[key]
-  return typeof value === 'string' ? value : ''
 }

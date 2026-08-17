@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"math"
 	"path"
-	"strconv"
 	"strings"
 	"time"
 
@@ -153,19 +152,19 @@ func (s *Service) ListBattleMatches(ctx context.Context, contestID int64, page, 
 }
 
 // GetBattleReplay 读取对局回放引用,只向参赛队伍成员开放。
-func (s *Service) GetBattleReplay(ctx context.Context, matchID int64) (map[string]any, error) {
+func (s *Service) GetBattleReplay(ctx context.Context, matchID int64) (BattleReplayRefDTO, error) {
 	id, err := currentIdentity(ctx)
 	if err != nil {
-		return nil, err
+		return BattleReplayRefDTO{}, err
 	}
 	match, err := s.authorizedBattleReplay(ctx, id.TenantID, id.AccountID, matchID)
 	if err != nil {
-		return nil, err
+		return BattleReplayRefDTO{}, err
 	}
 	if match.ReplayRef == "" {
-		return nil, apperr.ErrContestReplayUnavailable
+		return BattleReplayRefDTO{}, apperr.ErrContestReplayUnavailable
 	}
-	return map[string]any{"match_id": ids.Format(match.ID), "available": true}, nil
+	return BattleReplayRefDTO{MatchID: ids.ID(match.ID), Available: true}, nil
 }
 
 // IssueBattleReplayDownloadGrant 为已授权队伍成员签发回放归档的一次性取件授权。
@@ -199,7 +198,7 @@ func (s *Service) IssueBattleReplayDownloadGrant(ctx context.Context, matchID in
 	if err := s.writeAudit(ctx, id.TenantID, id.AccountID, contracts.RoleNumStudent, "contest.battle.replay.download_grant", auditTargetBattleMatch, matchID, map[string]any{"match_id": matchID}); err != nil {
 		return BattleReplayDownloadGrantDTO{}, err
 	}
-	return BattleReplayDownloadGrantDTO{Token: token, Mode: grant.Mode, FileName: path.Base(ref.Key), ExpiresAt: grant.ExpiresAt.Format(time.RFC3339)}, nil
+	return BattleReplayDownloadGrantDTO{Token: token, Mode: grant.Mode, FileName: path.Base(ref.Key), ExpiresAt: timex.RFC3339OrEmpty(grant.ExpiresAt)}, nil
 }
 
 // authorizedBattleReplay 读取回放并复用同一条队伍成员鉴权逻辑。
@@ -281,9 +280,9 @@ func (s *Service) reconcileRunningBattleMatches(ctx context.Context) error {
 
 // reconcileBattleMatch 根据 M3 任务终态幂等结算对局,避免 NATS 短暂失败后对局永久停留在 running。
 func (s *Service) reconcileBattleMatch(ctx context.Context, match BattleMatch) error {
-	taskID, err := strconv.ParseInt(strings.TrimSpace(match.JudgeTaskRef), 10, 64)
-	if err != nil {
-		return apperr.ErrContestBattleMatchFailed.WithCause(err)
+	taskID, ok := ids.Parse(strings.TrimSpace(match.JudgeTaskRef))
+	if !ok {
+		return apperr.ErrContestBattleMatchFailed.WithCause(fmt.Errorf("对局判题任务引用不是规范雪花 ID: %q", match.JudgeTaskRef))
 	}
 	if taskID <= 0 {
 		return apperr.ErrContestBattleMatchFailed.WithCause(fmt.Errorf("invalid judge_task_ref %q", match.JudgeTaskRef))
@@ -350,7 +349,7 @@ func (s *Service) executeBattleMatch(ctx context.Context, match BattleMatch) err
 		}
 		return apperr.ErrContestSandboxUnavailable.WithCause(err)
 	}
-	task, err := s.judge.SubmitJudgeTask(ctx, contracts.JudgeSubmitRequest{TenantID: match.TenantID, ItemCode: problem.ItemCode, ItemVersion: problem.ItemVersion, SubmitterID: ownerID, SourceRef: match.SourceRef, SourceOwnerID: ownerID, SourceCourseID: 0, SourceScope: "contest", SandboxMode: contracts.JudgeSandboxModeReuse, TargetSandboxRef: strconv.FormatInt(info.SandboxID, 10), ExtraInput: map[string]any{"entry_a": entryA.ArtifactRef, "entry_b": entryB.ArtifactRef, "entry_a_hash": entryA.ArtifactHash, "entry_b_hash": entryB.ArtifactHash, "role_a": entryA.Role, "role_b": entryB.Role}, Priority: 9})
+	task, err := s.judge.SubmitJudgeTask(ctx, contracts.JudgeSubmitRequest{TenantID: match.TenantID, ItemCode: problem.ItemCode, ItemVersion: problem.ItemVersion, SubmitterID: ownerID, SourceRef: match.SourceRef, SourceOwnerID: ownerID, SourceCourseID: 0, SourceScope: "contest", SandboxMode: contracts.JudgeSandboxModeReuse, TargetSandboxRef: ids.Format(info.SandboxID), ExtraInput: map[string]any{"entry_a": entryA.ArtifactRef, "entry_b": entryB.ArtifactRef, "entry_a_hash": entryA.ArtifactHash, "entry_b_hash": entryB.ArtifactHash, "role_a": entryA.Role, "role_b": entryB.Role}, Priority: 9})
 	if err != nil {
 		if recycleErr := s.sandbox.RecycleBySourceRef(ctx, contracts.SandboxRecycleRequest{TenantID: match.TenantID, SourceRef: match.SourceRef, Reason: "battle_judge_submit_failed"}); recycleErr != nil {
 			return apperr.ErrContestBattleMatchFailed.WithCause(fmt.Errorf("提交对局判题失败: %w; 回收沙箱失败: %v", err, recycleErr))
@@ -480,18 +479,7 @@ func (s *Service) HandleBattleJudgeCompleted(ctx context.Context, event contract
 		}
 		deltaA, deltaB := battleScoreDelta(result, ratingA, ratingB, s.cfg.BattleELOKFactor)
 		current.Result = result
-		current.ScoreDelta = map[string]any{
-			"team_a":          a.TeamID,
-			"team_b":          b.TeamID,
-			"rating_a_before": ratingA,
-			"rating_b_before": ratingB,
-			"rating_a_after":  ratingA + deltaA,
-			"rating_b_after":  ratingB + deltaB,
-			"delta_a":         deltaA,
-			"delta_b":         deltaB,
-			"k_factor":        s.cfg.BattleELOKFactor,
-			"result":          result,
-		}
+		current.ScoreDelta = &BattleScoreDelta{TeamAID: a.TeamID, TeamBID: b.TeamID, RatingABefore: ratingA, RatingBBefore: ratingB, RatingAAfter: ratingA + deltaA, RatingBAfter: ratingB + deltaB, DeltaA: deltaA, DeltaB: deltaB, KFactor: s.cfg.BattleELOKFactor, Result: result}
 		current.ReplayRef = replayRef
 		match, err = tx.FinishBattleMatch(ctx, current)
 		if err != nil {
@@ -523,7 +511,7 @@ func (s *Service) HandleBattleJudgeCompleted(ctx context.Context, event contract
 	if err := s.pushLeaderboard(ctx, match.TenantID, match.ContestID); err != nil {
 		return err
 	}
-	return s.writeAudit(ctx, match.TenantID, 0, audit.ActorRoleSystem, "contest.battle.finish", auditTargetBattleMatch, match.ID, match.ScoreDelta)
+	return s.writeAudit(ctx, match.TenantID, 0, audit.ActorRoleSystem, "contest.battle.finish", auditTargetBattleMatch, match.ID, battleScoreDeltaAuditDetail(match.ScoreDelta))
 }
 
 // HandleBattleJudgeFailed 消费 M3 判题失败事件并标记对局失败。
@@ -599,24 +587,14 @@ type battleRuntimeSpec struct {
 
 // battleRuntimeSpecFromProblem 从题目配置读取对抗执行所需运行时,配置缺失时显式失败。
 func battleRuntimeSpecFromProblem(problem ContestProblem) (battleRuntimeSpec, error) {
-	get := func(key string) string {
-		if v, ok := problem.BattleConfig[key].(string); ok {
-			return strings.TrimSpace(v)
-		}
-		return ""
-	}
-	spec := battleRuntimeSpec{RuntimeCode: get("runtime_code"), RuntimeImageVersion: get("runtime_image_version")}
-	if raw, ok := problem.BattleConfig["tool_codes"].([]any); ok {
-		for _, item := range raw {
-			if s, ok := item.(string); ok && strings.TrimSpace(s) != "" {
-				spec.ToolCodes = append(spec.ToolCodes, strings.TrimSpace(s))
-			}
-		}
-	}
-	if spec.RuntimeCode == "" || spec.RuntimeImageVersion == "" {
+	if problem.BattleConfig == nil || problem.BattleConfig.RuntimeCode == "" || problem.BattleConfig.RuntimeImageVersion == "" {
 		return battleRuntimeSpec{}, apperr.ErrContestProblemInvalid
 	}
-	return spec, nil
+	return battleRuntimeSpec{
+		RuntimeCode:         problem.BattleConfig.RuntimeCode,
+		RuntimeImageVersion: problem.BattleConfig.RuntimeImageVersion,
+		ToolCodes:           append([]string(nil), problem.BattleConfig.ToolCodes...),
+	}, nil
 }
 
 // battleRolesCompatible 判断两份参战物是否可组成对局。

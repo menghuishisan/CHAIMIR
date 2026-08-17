@@ -49,8 +49,15 @@ export class ContestApi {
     return this.client.get('/contest/contests', params)
   }
 
-  /** getStudentContests 查询学生可发现的非草稿竞赛。 */
-  async getStudentContests(params?: { page?: number; size?: number }): Promise<PaginatedResponse<Contest>> {
+  /**
+   * getStudentContests 查询学生可发现的非草稿竞赛。
+   * status 筛选由服务端执行(草稿态仍不可见),total 与筛选同口径。
+   */
+  async getStudentContests(params?: {
+    status?: ContestStatus
+    page?: number
+    size?: number
+  }): Promise<PaginatedResponse<Contest>> {
     return this.client.get('/contest/student/contests', params)
   }
 

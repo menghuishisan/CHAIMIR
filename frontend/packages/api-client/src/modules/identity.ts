@@ -3,7 +3,7 @@
 
 import { ApiClient } from '../client'
 import type { AttachmentResponse } from '../client'
-import type { AccountStatus, ApplicationStatus, BaseIdentity, ImportTemplateFormat } from '../constants/identity'
+import type { AccountStatus, ApplicationStatus, BaseIdentity, ImportTemplateFormat, TenantStatus } from '../constants/identity'
 import type { PaginatedResponse } from '../types/common'
 import type {
   LoginPlatformRequest,
@@ -11,7 +11,7 @@ import type {
   LoginNoRequest,
   LoginSMSRequest,
   SendSMSRequest,
-  WebSocketTicketResponse,
+  PathTicketResponse,
   PasswordResetRequest,
   ActivateRequest,
   LoginResponse,
@@ -99,8 +99,15 @@ export class IdentityApi {
   /**
    * 为指定实时通道换取短时连接票据。
    */
-  async issueWebSocketTicket(path: string): Promise<WebSocketTicketResponse> {
+  async issueWebSocketTicket(path: string): Promise<PathTicketResponse> {
     return this.client.post('/auth/ws-ticket', { path })
+  }
+
+  /**
+   * 为浏览器 Web 工具路径前缀换取短时入口票据。
+   */
+  async issueBrowserAccessTicket(path: string): Promise<PathTicketResponse> {
+    return this.client.post('/auth/browser-ticket', { path })
   }
 
   /**
@@ -535,9 +542,15 @@ export class IdentityApi {
   }
 
   /**
-   * 获取租户列表
+   * 获取租户列表。状态与关键词筛选由服务端执行,total 与筛选同口径。
    */
-  async getTenants(params?: { page?: number; size?: number }): Promise<PaginatedResponse<Tenant>> {
+  async getTenants(params?: {
+    status?: TenantStatus
+    /** 同时匹配学校名称与短名 */
+    keyword?: string
+    page?: number
+    size?: number
+  }): Promise<PaginatedResponse<Tenant>> {
     return this.client.get('/platform/tenants', params)
   }
 

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"chaimir/internal/platform/ids"
 	pkgcrypto "chaimir/pkg/crypto"
 
 	"github.com/go-pdf/fpdf"
@@ -20,7 +21,7 @@ func renderTranscriptPDF(summary GradeSummaryDTO, signingKey string) ([]byte, er
 	pdf.Cell(190, 10, "Chaimir Transcript")
 	pdf.Ln(14)
 	pdf.SetFont("Helvetica", "", 11)
-	pdf.Cell(190, 8, fmt.Sprintf("Student ID: %d", summary.StudentID))
+	pdf.Cell(190, 8, "Student ID: "+ids.Format(summary.StudentID.Int64()))
 	pdf.Ln(8)
 	pdf.Cell(190, 8, fmt.Sprintf("GPA: %.3f    Credits: %.1f", summary.GPA, summary.TotalCredits))
 	pdf.Ln(10)
@@ -31,7 +32,7 @@ func renderTranscriptPDF(summary GradeSummaryDTO, signingKey string) ([]byte, er
 	pdf.Ln(8)
 	pdf.SetFont("Helvetica", "", 10)
 	for _, row := range summary.CourseGrades {
-		pdf.Cell(35, 8, fmt.Sprintf("%d", row.CourseID))
+		pdf.Cell(35, 8, ids.Format(row.CourseID.Int64()))
 		pdf.Cell(35, 8, fmt.Sprintf("%.2f", row.FinalTotal))
 		pdf.Cell(35, 8, fmt.Sprintf("%.1f", row.Credits))
 		pdf.Ln(8)

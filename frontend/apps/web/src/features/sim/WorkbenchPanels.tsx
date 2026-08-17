@@ -1,29 +1,57 @@
-// 仿真工作台的操作、结论与执行追踪面板。
+// 仿真工作台的操作、观察结论与执行追踪面板。
 //
 // 两种执行位置共用它:平台内置场景在浏览器 Worker 内运行,本校自建场景在服务端隔离容器内运行,
 // 但面板拿到的都是同形的纯数据快照(见 docs/04-仿真可视化引擎/02-架构设计.md §8),
 // 故渲染只有一条路径 —— 页面不为「跑在哪」写第二套操作面板与检查器。
 //
+// 这些面板都住在左辅助区(规范 §7.2 B):观察结论与执行追踪是手风琴里的两段,
+// 「可用操作」钉在辅助区底部不参与折叠 —— 保证「做一个动作 → 看结论变化」这个回路
+// 不需要来回展开折叠。段标题由手风琴统一给出,故段内不再自带标题与分隔线。
+//
 // 交互参数控件一律用设计系统组件的深色语境变体(Input underline / Select onDark / Checkbox onDark),
 // 不在页面里手拼深色输入框:那会让沉浸态的控件质感、焦点环与无障碍语义各页一套(规范 FE-1、§7.1)。
 
 import { useState } from 'react'
+import { ShieldCheck } from 'lucide-react'
 import { Badge, Button, Checkbox, CodeTracePanel, Input, Select } from '@chaimir/ui'
+import type { ButtonProps } from '@chaimir/ui'
 import type {
   CheckpointDescriptor,
   CheckpointResult,
   CodeTraceDef,
   InteractionDescriptor,
+  InteractionTag,
   JsonObject,
   JsonValue,
   TraceInfo,
 } from '@chaimir/sim-sdk'
 
-/** 交互标签的用户向说明:扰动与攻击类操作会破坏系统,提前说清。 */
-const TAG_LABELS: Record<'normal' | 'perturb' | 'attack', string> = {
+/** 交互类别的用户向说法:扰动与攻击会破坏系统,提前说清。 */
+const TAG_LABELS: Record<InteractionTag, string> = {
   normal: '常规操作',
+  recover: '修复防护',
   perturb: '扰动',
   attack: '攻击',
+}
+
+/**
+ * 交互类别 → 按钮样式(规范 §7.2 B:配色由类别决定,不一刀切)。
+ * 普通推进=玉实底;修复/防护=玉实底带盾(与推进同色但有盾形区分,防护不是攻击);
+ * 扰动=描边 + 需注意色;攻击=朱砂实底。把防护画成攻击色是反向教学暗示,故必须分开。
+ */
+const TAG_BUTTON: Record<InteractionTag, ButtonProps['variant']> = {
+  normal: 'primary',
+  recover: 'primary',
+  perturb: 'on-dark-warning',
+  attack: 'seal',
+}
+
+/** 交互类别 → 徽标语气:修复走玉、扰动走需注意、攻击走对抗能量色 */
+const TAG_BADGE: Record<InteractionTag, 'jade' | 'warning' | 'cinnabar' | 'neutral'> = {
+  normal: 'neutral',
+  recover: 'jade',
+  perturb: 'warning',
+  attack: 'cinnabar',
 }
 
 export interface InteractionPanelProps {
@@ -48,8 +76,8 @@ export function InteractionPanel({
   if (actionable.length === 0) return null
 
   return (
-    <section className="flex flex-col gap-2 border-b border-dark-line p-4">
-      <h2 className="text-sm font-medium text-on-dark">可用操作</h2>
+    <section className="flex max-h-64 shrink-0 flex-col gap-2 overflow-y-auto border-t border-dark-line p-3">
+      <h2 className="shrink-0 text-sm font-medium text-on-dark">可用操作</h2>
       <ul className="flex flex-col gap-2">
         {actionable.map((interaction) => (
           <li key={interaction.id}>
@@ -88,17 +116,25 @@ function InteractionItem({
   const [values, setValues] = useState<JsonObject>(() =>
     Object.fromEntries(fields.map((field) => [field.name, field.default])),
   )
+  // 攻击类操作要就地二次确认(见 docs/04-仿真可视化引擎/03 §3.3):点一次转为确认/取消,
+  // 不弹模态 —— 攻击在仿真里是常规教学动作,每次弹窗会打断「做一步→看结论」的节奏
+  const [confirming, setConfirming] = useState(false)
 
   const needsElement = interaction.target === 'element'
   const blocked = !enabled || (needsElement && !selectedElementId)
+  const tag: InteractionTag = interaction.labelTag ?? 'normal'
+  const run = () => {
+    setConfirming(false)
+    onInteract(interaction, values, needsElement ? selectedElementId : undefined)
+  }
 
   return (
     <div className="flex flex-col gap-2 rounded-md border border-dark-line bg-dark-surface p-2">
       <div className="flex items-start justify-between gap-2">
         <span className="min-w-0 text-sm text-on-dark">{interaction.label}</span>
-        {interaction.labelTag && interaction.labelTag !== 'normal' ? (
-          <Badge tone={interaction.labelTag === 'attack' ? 'cinnabar' : 'warning'}>
-            {TAG_LABELS[interaction.labelTag]}
+        {tag !== 'normal' ? (
+          <Badge onDark tone={TAG_BADGE[tag]}>
+            {TAG_LABELS[tag]}
           </Badge>
         ) : null}
       </div>
@@ -151,16 +187,31 @@ function InteractionItem({
         </label>
       ))}
 
-      <div>
-        <Button
-          variant="seal"
-          size="sm"
-          disabled={blocked}
-          onClick={() => onInteract(interaction, values, needsElement ? selectedElementId : undefined)}
-        >
-          执行
-        </Button>
-      </div>
+      {confirming ? (
+        <div className="flex flex-col gap-2">
+          <p className="text-xs text-on-dark-amber">这一步会破坏当前系统状态,确认要执行吗?</p>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button variant="seal" size="sm" disabled={blocked} onClick={run}>
+              确认执行
+            </Button>
+            <Button variant="on-dark" size="sm" onClick={() => setConfirming(false)}>
+              取消
+            </Button>
+          </div>
+        </div>
+      ) : (
+        <div>
+          <Button
+            variant={TAG_BUTTON[tag]}
+            size="sm"
+            leftIcon={tag === 'recover' ? ShieldCheck : undefined}
+            disabled={blocked}
+            onClick={() => (tag === 'attack' ? setConfirming(true) : run())}
+          >
+            执行
+          </Button>
+        </div>
+      )}
       {needsElement && !selectedElementId ? (
         <p className="text-xs text-on-dark-faint">先在舞台上点一个元素,再执行这个操作。</p>
       ) : null}
@@ -182,31 +233,36 @@ export function CheckpointPanel({ checkpoints, results }: CheckpointPanelProps) 
   if (checkpoints.length === 0) return null
 
   return (
-    <section className="flex flex-col gap-2 border-b border-dark-line p-4">
-      <h2 className="text-sm font-medium text-on-dark">观察结论</h2>
-      <ul className="flex flex-col gap-2">
-        {checkpoints.map((checkpoint) => {
-          const result = results[checkpoint.id]
-          return (
-            <li
-              key={checkpoint.id}
-              className="flex flex-col gap-1 rounded-md border border-dark-line bg-dark-surface p-2"
-            >
-              <div className="flex items-start justify-between gap-2">
-                <span className="min-w-0 text-sm text-on-dark">{checkpoint.label}</span>
-                <Badge tone={result?.achieved ? 'success' : 'neutral'}>
-                  {result?.achieved ? '已观察到' : '尚未出现'}
-                </Badge>
-              </div>
-              {result?.explanation ? (
-                <p className="text-xs text-on-dark-sub">{result.explanation}</p>
-              ) : null}
-            </li>
-          )
-        })}
-      </ul>
-    </section>
+    <ul className="flex flex-col gap-2 p-3">
+      {checkpoints.map((checkpoint) => {
+        const result = results[checkpoint.id]
+        return (
+          <li
+            key={checkpoint.id}
+            className="flex flex-col gap-1 rounded-md border border-dark-line bg-dark-surface p-2"
+          >
+            <div className="flex items-start justify-between gap-2">
+              <span className="min-w-0 text-sm text-on-dark">{checkpoint.label}</span>
+              <Badge onDark tone={result?.achieved ? 'success' : 'neutral'}>
+                {result?.achieved ? '已观察到' : '尚未出现'}
+              </Badge>
+            </div>
+            {result?.explanation ? (
+              <p className="text-xs text-on-dark-sub">{result.explanation}</p>
+            ) : null}
+          </li>
+        )
+      })}
+    </ul>
   )
+}
+
+/** achievedCount 数出已观察到的结论条数,供手风琴段标题旁给出「3/5 已观察到」。 */
+export function achievedCount(
+  checkpoints: CheckpointDescriptor[],
+  results: Record<string, CheckpointResult>,
+): number {
+  return checkpoints.filter((checkpoint) => results[checkpoint.id]?.achieved === true).length
 }
 
 export interface CodeTraceSectionProps {
@@ -222,10 +278,9 @@ export function CodeTraceSection({ codeTrace, trace }: CodeTraceSectionProps) {
   if (!codeTrace) return null
 
   return (
-    <section className="border-b border-dark-line p-4 last:border-b-0">
-      <h2 className="mb-2 text-sm font-medium text-on-dark">执行追踪</h2>
+    <div className="p-3">
       <CodeTracePanel codeTrace={codeTrace} trace={trace} />
-    </section>
+    </div>
   )
 }
 

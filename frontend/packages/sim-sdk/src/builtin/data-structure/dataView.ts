@@ -6,7 +6,7 @@ import type { ChartSeries, MatrixCell, PipelineStep, ProcessSpan } from '../../t
  * pipelineSteps 生成数据结构构建或校验流程。
  */
 export function pipelineSteps(phases: Array<{ id: string; label: string; detail: string }>, activeIndex: number, failed = false): PipelineStep[] {
-  return phases.map((phase, index) => ({ id: phase.id, label: phase.label, detail: phase.detail, status: index < activeIndex ? 'complete' : index === activeIndex ? (failed ? 'failed' : 'running') : 'pending', process: processSpan(index, activeIndex, phase.label) }));
+  return phases.map((phase, index) => ({ id: phase.id, label: phase.label, detail: phase.detail, status: index < activeIndex ? 'complete' : index === activeIndex ? (failed ? 'failed' : 'running') : 'pending', process: processSpan(index, activeIndex) }));
 }
 
 /**
@@ -30,9 +30,9 @@ export function metricSeries(points: Array<{ x: number; consistency: number; ris
 /**
  * processSpan 给数据结构流程步骤附加过程进度,让渲染层展示连续推进而不是静态阶段名。
  */
-function processSpan(index: number, activeIndex: number, label: string): ProcessSpan {
+function processSpan(index: number, activeIndex: number): ProcessSpan {
   const startedAt = index * 2;
   const endedAt = startedAt + 2;
   const progress = index < activeIndex ? 1 : index === activeIndex ? 0.58 : 0;
-  return { startedAt, endedAt, progress, label };
+  return { startedAt, endedAt, progress };
 }

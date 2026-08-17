@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"strconv"
 	"strings"
 	"time"
 
@@ -621,8 +620,8 @@ func (s *Service) RejectAppeal(ctx context.Context, appealID int64, req AppealDe
 	return s.decideAppeal(ctx, appealID, AppealStatusRejected, req.Comment)
 }
 
-// ListWarnings 查询学业预警分页列表。
-func (s *Service) ListWarnings(ctx context.Context, studentID int64, page, size int) ([]WarningDTO, int64, int, int, error) {
+// ListWarnings 查询学业预警分页列表;status 传 0 表示不按确认状态过滤。
+func (s *Service) ListWarnings(ctx context.Context, studentID int64, status int16, page, size int) ([]WarningDTO, int64, int, int, error) {
 	id, err := requireTenantUser(ctx)
 	if err != nil {
 		return nil, 0, page, size, err
@@ -651,7 +650,7 @@ func (s *Service) ListWarnings(ctx context.Context, studentID int64, page, size 
 	var total int64
 	err = s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
 		var err error
-		out, total, err = tx.ListAcademicWarnings(ctx, studentID, page, size)
+		out, total, err = tx.ListAcademicWarnings(ctx, studentID, status, page, size)
 		return err
 	})
 	return out, total, page, size, mapGradeWarningErr(err)
@@ -736,7 +735,7 @@ func (s *Service) GenerateTranscript(ctx context.Context, req TranscriptRequest)
 	if err != nil {
 		return TranscriptDTO{}, apperr.ErrGradeTranscriptFailed.WithCause(err)
 	}
-	fileName := fmt.Sprintf("%d.pdf", s.ids.Generate())
+	fileName := ids.Format(s.ids.Generate()) + ".pdf"
 	plan, err := s.files.PlanUpload(ctx, storage.PlanUploadRequest{
 		TenantID:        id.TenantID,
 		AccountID:       id.AccountID,
@@ -843,7 +842,7 @@ func (s *Service) DownloadTranscript(ctx context.Context, transcriptID int64) (T
 	if err := s.writeAudit(ctx, id.TenantID, id.AccountID, s.transcriptActorRole(ctx, id.AccountID, record.StudentID.Int64()), "grade.transcript.download", auditTargetTranscript, record.ID.Int64(), map[string]any{"student_id": record.StudentID.String()}); err != nil {
 		return TranscriptDownloadGrantDTO{}, err
 	}
-	return TranscriptDownloadGrantDTO{Token: token, Transcript: record, ExpiresAt: grant.ExpiresAt.Format(time.RFC3339)}, nil
+	return TranscriptDownloadGrantDTO{Token: token, Transcript: record, ExpiresAt: timex.RFC3339OrEmpty(grant.ExpiresAt)}, nil
 }
 
 // HandleGradeUpdated 处理 M6 单课程成绩更新事件。
@@ -1028,7 +1027,7 @@ func (s *Service) recomputeStudentWarnings(ctx context.Context, tenantID, studen
 
 // summaryCacheKey 构造租户隔离的成绩概览缓存键,semester=0 表示全量概览。
 func (s *Service) summaryCacheKey(tenantID, studentID, semesterID int64) string {
-	return "tenant:" + strconv.FormatInt(tenantID, 10) + ":grade:summary:" + strconv.FormatInt(studentID, 10) + ":" + strconv.FormatInt(semesterID, 10)
+	return "tenant:" + ids.Format(tenantID) + ":grade:summary:" + ids.Format(studentID) + ":" + ids.Format(semesterID)
 }
 
 // readSummaryCache 读取成绩概览缓存;缓存失败显式记录后回源,不向用户暴露 Redis 细节。

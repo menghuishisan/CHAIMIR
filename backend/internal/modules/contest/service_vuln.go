@@ -24,6 +24,7 @@ import (
 	"chaimir/pkg/apperr"
 	"chaimir/pkg/chainassert"
 	"chaimir/pkg/logging"
+	"chaimir/pkg/textx"
 )
 
 // UpsertPlatformVulnSource 创建或更新平台全局漏洞源，不产生租户漏洞题草稿。
@@ -289,7 +290,7 @@ func (s *Service) FinalizeVulnProblem(ctx context.Context, problemID int64) (Vul
 	if item.Status != VulnProblemStatusDraft {
 		return VulnProblemDTO{}, apperr.ErrContestVulnPrevalidateFailed
 	}
-	importCtx, err := auth.WithServiceIdentity(ctx, id.TenantID, fmt.Sprintf("contest:%04d:vuln-finalize:%d", timex.Now().Year(), item.ID))
+	importCtx, err := auth.WithServiceIdentity(ctx, id.TenantID, fmt.Sprintf("contest:%04d:vuln-finalize:%s", timex.Now().Year(), ids.Format(item.ID)))
 	if err != nil {
 		return VulnProblemDTO{}, apperr.ErrContestVulnFinalizeFailed.WithCause(err)
 	}
@@ -336,7 +337,7 @@ func (s *Service) fetchVulnCases(ctx context.Context, source VulnSource) ([]Vuln
 	if method == http.MethodPost {
 		req.Header.Set("Content-Type", "application/json")
 	}
-	for key, value := range stringMapFromAny(cfg["headers"]) {
+	for key, value := range jsonx.StringMapFromAny(cfg["headers"]) {
 		if key != "" && value != "" {
 			req.Header.Set(key, value)
 		}
@@ -368,7 +369,7 @@ func (s *Service) fetchVulnCases(ctx context.Context, source VulnSource) ([]Vuln
 		return nil, apperr.ErrContestVulnSourceJSONInvalid.WithCause(err)
 	}
 	nodes := selectCases(payload, stringFromMap(cfg, "cases_path"))
-	mapping := stringMapFromAny(cfg["mapping"])
+	mapping := jsonx.StringMapFromAny(cfg["mapping"])
 	out := make([]VulnProblem, 0, len(nodes))
 	for _, node := range nodes {
 		item, err := vulnProblemFromExternal(node, mapping, source.DefaultLevel)
@@ -403,7 +404,7 @@ func (s *Service) runVulnPrevalidation(ctx context.Context, tenantID, accountID 
 
 // runVulnValidationCase 执行一条正向或反向预验证用例。
 func (s *Service) runVulnValidationCase(ctx context.Context, tenantID, accountID int64, problem VulnProblem, req PrevalidateRequest, phase string, positive bool) (result map[string]any, retErr error) {
-	sourceRef := fmt.Sprintf("contest:%04d:vuln-prevalidate-%s:%d", timex.Now().Year(), phase, problem.ID)
+	sourceRef := fmt.Sprintf("contest:%04d:vuln-prevalidate-%s:%s", timex.Now().Year(), phase, ids.Format(problem.ID))
 	info, err := s.sandbox.CreateSandbox(ctx, contracts.SandboxCreateRequest{TenantID: tenantID, RuntimeCode: req.RuntimeCode, RuntimeImageVersion: req.RuntimeImageVersion, ToolCodes: req.ToolCodes, InitCodeRef: req.InitCodeRef, InitScriptRef: req.InitScriptRef, OwnerAccountID: accountID, SourceRef: sourceRef, KeepAlive: false, SnapshotEnabled: false})
 	if err != nil {
 		return nil, apperr.ErrContestSandboxUnavailable.WithCause(err)
@@ -438,12 +439,12 @@ func (s *Service) runVulnValidationCase(ctx context.Context, tenantID, accountID
 
 // runVulnChainStep 调用 M2 链能力执行预验证步骤。
 func (s *Service) runVulnChainStep(ctx context.Context, tenantID, sandboxID int64, sourceRef string, step map[string]any) error {
-	switch strings.ToLower(stringFromAny(step["op"])) {
+	switch strings.ToLower(strings.TrimSpace(jsonx.StringFromAny(step["op"]))) {
 	case "deploy":
-		_, err := s.sandbox.ChainDeploy(ctx, contracts.SandboxChainDeployRequest{TenantID: tenantID, SandboxID: sandboxID, SourceRef: sourceRef, Payload: mapAny(step["payload"])})
+		_, err := s.sandbox.ChainDeploy(ctx, contracts.SandboxChainDeployRequest{TenantID: tenantID, SandboxID: sandboxID, SourceRef: sourceRef, Payload: jsonx.ObjectFromAny(step["payload"])})
 		return err
 	case "tx":
-		_, err := s.sandbox.ChainSendTx(ctx, contracts.SandboxChainTxRequest{TenantID: tenantID, SandboxID: sandboxID, SourceRef: sourceRef, Payload: mapAny(step["payload"])})
+		_, err := s.sandbox.ChainSendTx(ctx, contracts.SandboxChainTxRequest{TenantID: tenantID, SandboxID: sandboxID, SourceRef: sourceRef, Payload: jsonx.ObjectFromAny(step["payload"])})
 		return err
 	case "reset":
 		return s.sandbox.ChainReset(ctx, contracts.SandboxChainResetRequest{TenantID: tenantID, SandboxID: sandboxID, SourceRef: sourceRef})
@@ -484,7 +485,7 @@ func validationSteps(body map[string]any, key string) []map[string]any {
 	}
 	out := make([]map[string]any, 0, len(raw))
 	for _, item := range raw {
-		if m := mapAny(item); len(m) > 0 {
+		if m := jsonx.ObjectFromAny(item); len(m) > 0 {
 			out = append(out, m)
 		}
 	}
@@ -516,10 +517,7 @@ func safeDetailError(err error) string {
 		return ""
 	}
 	msg := logging.SanitizeError(err.Error())
-	if len(msg) > 256 {
-		return msg[:256]
-	}
-	return msg
+	return textx.TruncateRunes(msg, 256)
 }
 
 // vulnSourceFromRequest 归一化漏洞源请求。
@@ -528,7 +526,7 @@ func vulnSourceFromRequest(req VulnSourceRequest, tenantID, generatedID int64) (
 	if req.ID <= 0 {
 		req.ID = ids.ID(generatedID)
 	}
-	if req.Type <= 0 || req.Name == "" || len(req.Name) > 128 || req.Config == nil || (req.DefaultLevel != VulnLevelA && req.DefaultLevel != VulnLevelB && req.DefaultLevel != VulnLevelC) {
+	if (req.Type != VulnSourceTypeSWC && req.Type != VulnSourceTypeIntelligence && req.Type != VulnSourceTypeCVEOnchain) || req.Name == "" || len(req.Name) > 128 || req.Config == nil || (req.DefaultLevel != VulnLevelA && req.DefaultLevel != VulnLevelB && req.DefaultLevel != VulnLevelC) {
 		return VulnSource{}, apperr.ErrContestVulnSourceInvalid
 	}
 	return VulnSource{ID: req.ID.Int64(), TenantID: tenantID, Type: req.Type, Name: req.Name, Config: req.Config, DefaultLevel: req.DefaultLevel, Enabled: req.Enabled}, nil
@@ -551,7 +549,7 @@ func validateVulnSourceConfig(cfg map[string]any, defaultTimeout int) error {
 	if timeout < 1 || timeout > 60 {
 		return apperr.ErrContestVulnSourceInvalid
 	}
-	mapping := stringMapFromAny(cfg["mapping"])
+	mapping := jsonx.StringMapFromAny(cfg["mapping"])
 	for _, key := range []string{"external_ref", "title", "draft_body"} {
 		if strings.TrimSpace(mapping[key]) == "" {
 			return apperr.ErrContestVulnSourceInvalid
@@ -609,21 +607,6 @@ func vulnProblemFromExternal(item map[string]any, mapping map[string]string, def
 		return VulnProblem{}, err
 	}
 	return VulnProblem{ExternalRef: req.ExternalRef, Title: req.Title, Level: req.Level, RuntimeMode: req.RuntimeMode, DraftBody: req.DraftBody}, nil
-}
-
-// stringMapFromAny 将 JSON map 转为字符串映射,非法项按配置错误处理前保留为空。
-func stringMapFromAny(v any) map[string]string {
-	return jsonx.StringMapFromAny(v)
-}
-
-// mapAny 读取 JSON 对象。
-func mapAny(v any) map[string]any {
-	return jsonx.ObjectFromAny(v)
-}
-
-// stringFromAny 读取字符串值。
-func stringFromAny(v any) string {
-	return strings.TrimSpace(jsonx.StringFromAny(v))
 }
 
 // vulnLevelFromAny 解析 A/B/C 或 1/2/3 分级。

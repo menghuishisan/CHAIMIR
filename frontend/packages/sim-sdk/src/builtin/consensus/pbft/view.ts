@@ -26,7 +26,6 @@ export function renderPbftView(state: PbftState): TeachingFrame {
       intent: 'observe',
       what: state.explanation.effect,
       why: state.explanation.reason,
-      watch: summary,
     },
     focus: {
       primary: selectedOrFrameFocus(state.selectedElementId, ['pbft-graph']),
@@ -105,6 +104,7 @@ function pbftCells(state: PbftState): MatrixCell[][] {
 
 /**
  * processSpan 将内核消息的起止 tick 转换为渲染协议的过程片段。
+ * 不写 label:消息说明已在清单的 detail 行给出,过程条只补「还差多少」。
  */
 function processSpan(state: PbftState, message: PbftMessage) {
   const duration = Math.max(1, message.endTick - message.startTick);
@@ -112,7 +112,6 @@ function processSpan(state: PbftState, message: PbftMessage) {
     startedAt: message.startTick,
     endedAt: message.endTick,
     progress: Math.min(1, Math.max(0, (state.tick - message.startTick) / duration)),
-    label: message.detail,
   };
 }
 

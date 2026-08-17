@@ -2,6 +2,7 @@
 package sim
 
 import (
+	"encoding/json"
 	"fmt"
 
 	"chaimir/internal/contracts"
@@ -9,80 +10,87 @@ import (
 	"chaimir/pkg/apperr"
 )
 
-// packageToMap 转换仿真包为 API 输出。
-func packageToMap(pkg Package) (map[string]any, error) {
+// packageToResponse 转换仿真包为公开 HTTP DTO。
+func packageToResponse(pkg Package) (SimPackageResponse, error) {
 	compute, err := computeText(pkg.Compute)
 	if err != nil {
-		return nil, err
+		return SimPackageResponse{}, err
 	}
 	status, err := packageStatusText(pkg.Status)
 	if err != nil {
-		return nil, err
+		return SimPackageResponse{}, err
 	}
-	out := map[string]any{
-		"id":              ids.Format(pkg.ID),
-		"code":            pkg.Code,
-		"version":         pkg.Version,
-		"name":            pkg.Name,
-		"category":        pkg.Category,
-		"compute":         compute,
-		"scale_limit":     pkg.ScaleLimit,
-		"bundle_hash":     pkg.BundleHash,
-		"backend_adapter": pkg.BackendAdapter,
-		"status":          status,
-		"created_at":      pkg.CreatedAt,
-		"updated_at":      pkg.UpdatedAt,
+	scaleLimit, err := scaleLimitToResponse(pkg.ScaleLimit)
+	if err != nil {
+		return SimPackageResponse{}, err
 	}
 	if pkg.AuthorID < 0 {
-		return nil, apperr.ErrSimPackageDataCorrupt.WithCause(fmt.Errorf("仿真包 %d 的作者字段异常: author_id=%d", pkg.ID, pkg.AuthorID))
+		return SimPackageResponse{}, apperr.ErrSimPackageDataCorrupt.WithCause(fmt.Errorf("仿真包 %d 的作者字段异常: author_id=%d", pkg.ID, pkg.AuthorID))
 	}
-	return out, nil
+	return SimPackageResponse{ID: ids.ID(pkg.ID), Code: pkg.Code, Version: pkg.Version, Name: pkg.Name, Category: pkg.Category, Compute: compute, ScaleLimit: scaleLimit, BundleHash: pkg.BundleHash, Status: status, CreatedAt: pkg.CreatedAt, UpdatedAt: pkg.UpdatedAt}, nil
 }
 
-// reviewToMap 转换审核记录为 API 输出。
-func reviewToMap(review Review) (map[string]any, error) {
+// scaleLimitToResponse 将已校验的规模上限转换为固定公开结构。
+func scaleLimitToResponse(value map[string]any) (SimScaleLimitResponse, error) {
+	if !validManifestScaleLimit(value) {
+		return SimScaleLimitResponse{}, apperr.ErrSimPackageDataCorrupt.WithCause(fmt.Errorf("仿真包规模上限异常"))
+	}
+	nodes, _ := positiveJSONInt(value["nodes"])
+	maxTick, _ := positiveJSONInt(value["max_tick"])
+	maxEvents, _ := positiveJSONInt(value["max_events"])
+	return SimScaleLimitResponse{Nodes: nodes, MaxTick: maxTick, MaxEvents: maxEvents}, nil
+}
+
+// reviewToResponse 转换审核记录为公开 HTTP DTO。
+func reviewToResponse(review Review) (SimPackageReviewResponse, error) {
 	result, err := reviewResultText(review.Result)
 	if err != nil {
-		return nil, err
+		return SimPackageReviewResponse{}, err
 	}
-	out := map[string]any{
-		"id":             ids.Format(review.ID),
-		"package_id":     ids.Format(review.PackageID),
-		"submitter_id":   ids.Format(review.SubmitterID),
-		"preview_report": review.PreviewReport,
-		"result":         result,
-		"comment":        review.Comment,
-		"created_at":     review.CreatedAt,
-		"updated_at":     review.UpdatedAt,
+	report, err := validationReportToResponse(review.PreviewReport)
+	if err != nil {
+		return SimPackageReviewResponse{}, err
 	}
+	out := SimPackageReviewResponse{ID: ids.ID(review.ID), PackageID: ids.ID(review.PackageID), SubmitterID: ids.ID(review.SubmitterID), PreviewReport: report, Result: result, Comment: review.Comment, CreatedAt: review.CreatedAt, UpdatedAt: review.UpdatedAt}
 	if review.ReviewerID > 0 {
-		out["reviewer_id"] = ids.Format(review.ReviewerID)
+		out.ReviewerID = ids.ID(review.ReviewerID)
 	}
 	return out, nil
 }
 
-// reviewInfoToMap 转换审核列表投影为 API 输出。
-func reviewInfoToMap(info ReviewInfo) (map[string]any, error) {
-	out, err := reviewToMap(info.Review)
+// validationReportToResponse 解析持久化报告中的动态教学帧,其余字段使用固定 DTO。
+func validationReportToResponse(report ValidationReport) (SimValidationReportResponse, error) {
+	out := SimValidationReportResponse{
+		BundleHash:         report.BundleHash,
+		MetadataValidation: SimValidationStatusResponse(report.MetadataValidation),
+		StaticScan:         SimStaticScanReportResponse(report.StaticScan),
+		DeterminismCheck:   SimValidationStatusResponse(report.DeterminismCheck),
+		WorkerPreview:      SimValidationStatusResponse(report.WorkerPreview),
+	}
+	if len(report.PreviewFrames) == 0 {
+		return out, nil
+	}
+	if err := json.Unmarshal(report.PreviewFrames, &out.PreviewFrames); err != nil {
+		return SimValidationReportResponse{}, apperr.ErrSimReviewDataCorrupt.WithCause(fmt.Errorf("审核样例教学帧数据异常: %w", err))
+	}
+	return out, nil
+}
+
+// reviewInfoToResponse 转换审核列表投影为公开 HTTP DTO。
+func reviewInfoToResponse(info ReviewInfo) (SimPackageReviewResponse, error) {
+	out, err := reviewToResponse(info.Review)
 	if err != nil {
-		return nil, err
+		return SimPackageReviewResponse{}, err
 	}
 	compute, err := computeText(info.Compute)
 	if err != nil {
-		return nil, err
+		return SimPackageReviewResponse{}, err
 	}
 	status, err := packageStatusText(info.PackageStatus)
 	if err != nil {
-		return nil, err
+		return SimPackageReviewResponse{}, err
 	}
-	out["package"] = map[string]any{
-		"code":     info.PackageCode,
-		"version":  info.PackageVersion,
-		"name":     info.PackageName,
-		"category": info.Category,
-		"compute":  compute,
-		"status":   status,
-	}
+	out.Package = &SimReviewPackageResponse{Code: info.PackageCode, Version: info.PackageVersion, Name: info.PackageName, Category: info.Category, Compute: compute, Status: status}
 	return out, nil
 }
 
@@ -104,27 +112,27 @@ func replayToContract(session SessionWithPackage, actions []Action) contracts.Si
 	return contracts.SimReplayInfo{PackageCode: session.PackageCode, Version: session.PackageVersion, Seed: session.Seed, InitParams: session.InitParams, Actions: items}
 }
 
-// replayToMap 转换回放数据为 HTTP 输出。
-func replayToMap(session SessionWithPackage, actions []Action) map[string]any {
-	items := make([]map[string]any, 0, len(actions))
+// replayToResponse 转换登录用户回放为公开 HTTP DTO。
+func replayToResponse(session SessionWithPackage, actions []Action) SimReplayResponse {
+	items := make([]SimActionResponse, 0, len(actions))
 	for _, action := range actions {
-		items = append(items, actionToMap(action))
+		items = append(items, actionToResponse(action))
 	}
-	return map[string]any{"package_code": session.PackageCode, "version": session.PackageVersion, "seed": session.Seed, "init_params": session.InitParams, "actions": items}
+	return SimReplayResponse{PackageCode: session.PackageCode, Version: session.PackageVersion, Seed: session.Seed, InitParams: session.InitParams, Actions: items}
 }
 
-// replayToMapPublic 转换公开分享剧本,过滤检查点答案、令牌和内部绑定字段。
-func replayToMapPublic(session SessionWithPackage, actions []Action) map[string]any {
-	items := make([]map[string]any, 0, len(actions))
+// replayToPublicResponse 转换公开分享剧本,过滤检查点答案、令牌和内部绑定字段。
+func replayToPublicResponse(session SessionWithPackage, actions []Action) SimReplayResponse {
+	items := make([]SimActionResponse, 0, len(actions))
 	for _, action := range actions {
-		items = append(items, map[string]any{"seq": action.Seq, "at_tick": action.AtTick, "event_type": action.EventType, "payload": publicReplayMap(action.Payload)})
+		items = append(items, SimActionResponse{Seq: action.Seq, AtTick: action.AtTick, EventType: action.EventType, Payload: publicReplayMap(action.Payload)})
 	}
-	return map[string]any{"package_code": session.PackageCode, "version": session.PackageVersion, "seed": session.Seed, "init_params": publicReplayMap(session.InitParams), "actions": items}
+	return SimReplayResponse{PackageCode: session.PackageCode, Version: session.PackageVersion, Seed: session.Seed, InitParams: publicReplayMap(session.InitParams), Actions: items}
 }
 
-// actionToMap 转换操作为 API 输出。
-func actionToMap(action Action) map[string]any {
-	return map[string]any{"seq": action.Seq, "at_tick": action.AtTick, "event_type": action.EventType, "payload": action.Payload, "created_at": action.CreatedAt}
+// actionToResponse 转换操作为公开 HTTP DTO。
+func actionToResponse(action Action) SimActionResponse {
+	return SimActionResponse{Seq: action.Seq, AtTick: action.AtTick, EventType: action.EventType, Payload: action.Payload, CreatedAt: action.CreatedAt}
 }
 
 // packageStatusText 返回用户接口中的包状态字符串。

@@ -2,12 +2,15 @@
 package storage
 
 import (
+	"bytes"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
 	"strings"
 	"time"
 
+	"chaimir/internal/platform/ids"
 	"chaimir/internal/platform/timex"
 	pkgcrypto "chaimir/pkg/crypto"
 )
@@ -40,6 +43,18 @@ type DownloadGrant struct {
 type downloadGrantTokenEnvelope struct {
 	Payload   string `json:"payload"`
 	Signature string `json:"signature"`
+}
+
+// downloadGrantTokenPayload 是签名令牌的唯一传输结构,雪花 ID 始终编码为十进制字符串。
+type downloadGrantTokenPayload struct {
+	TenantID     string    `json:"tenant_id"`
+	AccountID    string    `json:"account_id"`
+	Module       string    `json:"module"`
+	ResourceType string    `json:"resource_type"`
+	ResourceID   string    `json:"resource_id"`
+	Mode         string    `json:"mode"`
+	ObjectRef    string    `json:"object_ref"`
+	ExpiresAt    time.Time `json:"expires_at"`
 }
 
 const maxDownloadGrantTokenLength = 8192
@@ -98,7 +113,7 @@ func SignDownloadGrantToken(grant DownloadGrant, signingKey string) (string, err
 		return "", err
 	}
 
-	payload, err := json.Marshal(grant)
+	payload, err := json.Marshal(downloadGrantTokenPayloadFromGrant(grant))
 	if err != nil {
 		return "", fmt.Errorf("编码下载授权失败: %w", err)
 	}
@@ -158,14 +173,77 @@ func verifyDownloadGrantTokenAt(token string, signingKey string, now time.Time) 
 	if err != nil {
 		return DownloadGrant{}, fmt.Errorf("解码下载授权负载失败: %w", err)
 	}
-	var grant DownloadGrant
-	if err := json.Unmarshal(payload, &grant); err != nil {
+	var tokenPayload downloadGrantTokenPayload
+	if err := decodeDownloadGrantTokenPayload(payload, &tokenPayload); err != nil {
+		return DownloadGrant{}, fmt.Errorf("解析下载授权负载失败: %w", err)
+	}
+	grant, err := tokenPayload.downloadGrant()
+	if err != nil {
 		return DownloadGrant{}, fmt.Errorf("解析下载授权负载失败: %w", err)
 	}
 	if err := validateDownloadGrant(grant, now.UTC()); err != nil {
 		return DownloadGrant{}, err
 	}
 	return grant, nil
+}
+
+// downloadGrantTokenPayloadFromGrant 把内部授权快照转换为签名负载,不把字符串 ID 扩散到内部模型。
+func downloadGrantTokenPayloadFromGrant(grant DownloadGrant) downloadGrantTokenPayload {
+	tenantID := "0"
+	if grant.TenantID > 0 {
+		tenantID = ids.Format(grant.TenantID)
+	}
+	return downloadGrantTokenPayload{
+		TenantID:     tenantID,
+		AccountID:    ids.Format(grant.AccountID),
+		Module:       grant.Module,
+		ResourceType: grant.ResourceType,
+		ResourceID:   grant.ResourceID,
+		Mode:         grant.Mode,
+		ObjectRef:    "minio://" + grant.Object.Bucket + "/" + grant.Object.Key,
+		ExpiresAt:    grant.ExpiresAt.UTC(),
+	}
+}
+
+// downloadGrant 解析签名负载中的严格字符串 ID 与对象引用。
+func (payload downloadGrantTokenPayload) downloadGrant() (DownloadGrant, error) {
+	tenantID := int64(0)
+	if payload.TenantID != "0" {
+		parsed, ok := ids.Parse(payload.TenantID)
+		if !ok {
+			return DownloadGrant{}, fmt.Errorf("下载授权 tenant_id 非法")
+		}
+		tenantID = parsed
+	}
+	accountID, ok := ids.Parse(payload.AccountID)
+	if !ok {
+		return DownloadGrant{}, fmt.Errorf("下载授权 account_id 非法")
+	}
+	objectRef, err := ParseObjectRef(payload.ObjectRef)
+	if err != nil {
+		return DownloadGrant{}, err
+	}
+	return DownloadGrant{
+		TenantID: tenantID, AccountID: accountID, Module: payload.Module,
+		ResourceType: payload.ResourceType, ResourceID: payload.ResourceID,
+		Mode: payload.Mode, Object: objectRef, ExpiresAt: payload.ExpiresAt,
+	}, nil
+}
+
+// decodeDownloadGrantTokenPayload 严格解码签名负载,拒绝未知字段和尾随内容。
+func decodeDownloadGrantTokenPayload(data []byte, dst *downloadGrantTokenPayload) error {
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(dst); err != nil {
+		return err
+	}
+	if err := decoder.Decode(&struct{}{}); err != io.EOF {
+		if err == nil {
+			return fmt.Errorf("下载授权负载包含尾随内容")
+		}
+		return err
+	}
+	return nil
 }
 
 // validateDownloadGrant 在签发和验签两端统一执行授权边界校验,避免令牌内容绕过对象前缀限制。

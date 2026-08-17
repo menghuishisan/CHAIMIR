@@ -147,7 +147,7 @@ function TeamDetail({ team, onChanged }: TeamDetailProps) {
       {actionError ? <Callout tone="danger">{actionError}</Callout> : null}
 
       {team.invite_code && !locked ? (
-        <div className="flex flex-col gap-2 rounded-md border border-line bg-surface-sunken p-3">
+        <div className="flex flex-col gap-2 well p-3">
           <span className="text-xs text-ink-sub">队伍邀请码(发给队友即可加入)</span>
           <div className="flex items-center justify-between gap-2">
             <span className="font-mono text-md tabular-nums text-ink">{team.invite_code}</span>

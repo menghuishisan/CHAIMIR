@@ -14,7 +14,7 @@ type Querier interface {
 	ClaimPendingGradeLockOutbox(ctx context.Context, arg ClaimPendingGradeLockOutboxParams) ([]GradeLockOutbox, error)
 	ClearCurrentSemesters(ctx context.Context) error
 	ClearDefaultLevelConfigs(ctx context.Context) error
-	CountAcademicWarnings(ctx context.Context, studentID int64) (int64, error)
+	CountAcademicWarnings(ctx context.Context, arg CountAcademicWarningsParams) (int64, error)
 	CountGradeAppeals(ctx context.Context, status int16) (int64, error)
 	CountGradeReviews(ctx context.Context, status int16) (int64, error)
 	CountOwnGradeReviews(ctx context.Context, arg CountOwnGradeReviewsParams) (int64, error)

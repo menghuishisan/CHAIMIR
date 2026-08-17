@@ -118,7 +118,7 @@ func NewService(deps ServiceDeps) (*Service, error) {
 }
 
 // ListJudgers 返回平台级判题器列表。
-func (s *Service) ListJudgers(ctx context.Context) ([]map[string]any, error) {
+func (s *Service) ListJudgers(ctx context.Context) ([]JudgerDTO, error) {
 	var items []Judger
 	if err := s.store.PlatformTx(ctx, func(ctx context.Context, tx TxStore) error {
 		var err error
@@ -127,9 +127,9 @@ func (s *Service) ListJudgers(ctx context.Context) ([]map[string]any, error) {
 	}); err != nil {
 		return nil, apperr.ErrJudgerNotFound.WithCause(err)
 	}
-	out := make([]map[string]any, 0, len(items))
+	out := make([]JudgerDTO, 0, len(items))
 	for _, item := range items {
-		mapped, err := judgerToMap(item)
+		mapped, err := judgerDTOFromModel(item)
 		if err != nil {
 			return nil, err
 		}
@@ -157,10 +157,10 @@ func (s *Service) ListCatalogJudgers(ctx context.Context) ([]CatalogJudger, erro
 }
 
 // CreateJudger 注册或更新判题器定义。
-func (s *Service) CreateJudger(ctx context.Context, req JudgerRequest) (map[string]any, error) {
+func (s *Service) CreateJudger(ctx context.Context, req JudgerRequest) (JudgerDTO, error) {
 	spec, err := validateJudgerRequest(req)
 	if err != nil {
-		return nil, err
+		return JudgerDTO{}, err
 	}
 	var out Judger
 	if err := s.store.PlatformTx(ctx, func(ctx context.Context, tx TxStore) error {
@@ -171,22 +171,22 @@ func (s *Service) CreateJudger(ctx context.Context, req JudgerRequest) (map[stri
 		}
 		return nil
 	}); err != nil {
-		return nil, err
+		return JudgerDTO{}, err
 	}
 	if err := s.writeAuditFromContext(ctx, 0, "judge.judger.upsert", "judger", out.ID, map[string]any{"code": out.Code}); err != nil {
-		return nil, err
+		return JudgerDTO{}, err
 	}
-	return judgerToMap(out)
+	return judgerDTOFromModel(out)
 }
 
 // UpdateJudger 更新判题器配置。
-func (s *Service) UpdateJudger(ctx context.Context, id int64, req JudgerRequest) (map[string]any, error) {
+func (s *Service) UpdateJudger(ctx context.Context, id int64, req JudgerRequest) (JudgerDTO, error) {
 	if id <= 0 {
-		return nil, apperr.ErrPathIDInvalid
+		return JudgerDTO{}, apperr.ErrPathIDInvalid
 	}
 	spec, err := validateJudgerRequest(req)
 	if err != nil {
-		return nil, err
+		return JudgerDTO{}, err
 	}
 	var out Judger
 	if err := s.store.PlatformTx(ctx, func(ctx context.Context, tx TxStore) error {
@@ -202,16 +202,16 @@ func (s *Service) UpdateJudger(ctx context.Context, id int64, req JudgerRequest)
 		}
 		return nil
 	}); err != nil {
-		return nil, err
+		return JudgerDTO{}, err
 	}
 	if err := s.writeAuditFromContext(ctx, 0, "judge.judger.update", "judger", out.ID, map[string]any{"code": out.Code}); err != nil {
-		return nil, err
+		return JudgerDTO{}, err
 	}
-	return judgerToMap(out)
+	return judgerDTOFromModel(out)
 }
 
 // RunJudgerSelftest 执行判题器样例自检,自检必须真实经过对应执行路径。
-func (s *Service) RunJudgerSelftest(ctx context.Context, id int64) (map[string]any, error) {
+func (s *Service) RunJudgerSelftest(ctx context.Context, id int64) (JudgerDTO, error) {
 	var j Judger
 	if err := s.store.PlatformTx(ctx, func(ctx context.Context, tx TxStore) error {
 		var err error
@@ -221,7 +221,7 @@ func (s *Service) RunJudgerSelftest(ctx context.Context, id int64) (map[string]a
 		}
 		return nil
 	}); err != nil {
-		return nil, err
+		return JudgerDTO{}, err
 	}
 	status := JudgerSelftestPassed
 	judgerStatus := JudgerStatusAvailable
@@ -237,173 +237,19 @@ func (s *Service) RunJudgerSelftest(ctx context.Context, id int64) (map[string]a
 		}
 		return nil
 	}); err != nil {
-		return nil, err
+		return JudgerDTO{}, err
 	}
 	if err := s.writeAuditFromContext(ctx, 0, "judge.judger.selftest", "judger", id, map[string]any{"selftest_status": status, "status": judgerStatus}); err != nil {
-		return nil, err
+		return JudgerDTO{}, err
 	}
 	if status == JudgerSelftestFailed {
-		out, err := judgerToMap(j)
+		out, err := judgerDTOFromModel(j)
 		if err != nil {
-			return nil, err
+			return JudgerDTO{}, err
 		}
 		return out, apperr.ErrJudgerSelftestFailed
 	}
-	return judgerToMap(j)
-}
-
-// SubmitJudgeTask 创建判题任务、输入快照和提交指纹。
-func (s *Service) SubmitJudgeTask(ctx context.Context, req contracts.JudgeSubmitRequest) (contracts.JudgeTaskInfo, error) {
-	if err := validateSubmitRequest(req); err != nil {
-		return contracts.JudgeTaskInfo{}, err
-	}
-	problemRef := req.ItemCode + ":" + req.ItemVersion
-	if existing, ok, err := s.findExistingTaskBySourceRef(ctx, req.TenantID, req.SourceRef, problemRef); err != nil {
-		return contracts.JudgeTaskInfo{}, err
-	} else if ok {
-		return contractTaskInfoFromModel(JudgeTaskInfo{Task: existing, Existing: true}), nil
-	}
-	spec, err := s.content.GetJudgeSpec(ctx, req.TenantID, req.ItemCode, req.ItemVersion)
-	if err != nil {
-		return contracts.JudgeTaskInfo{}, apperr.ErrJudgeSpecUnavailable.WithCause(err)
-	}
-	judgerCode := strings.TrimSpace(req.JudgerCode)
-	if judgerCode == "" {
-		judgerCode = spec.JudgerCode
-	}
-	if judgerCode == "" || (strings.TrimSpace(req.JudgerCode) != "" && strings.TrimSpace(req.JudgerCode) != spec.JudgerCode) {
-		return contracts.JudgeTaskInfo{}, apperr.ErrJudgeSubmitInvalid
-	}
-	j, err := s.loadAvailableJudger(ctx, judgerCode)
-	if err != nil {
-		return contracts.JudgeTaskInfo{}, err
-	}
-	mode, _ := normalizedSandboxMode(req.SandboxMode)
-	if j.Type == JudgerTypeManual {
-		mode = JudgeSandboxModeFresh
-	}
-	if err := validateJudgerSandboxMode(j.Type, mode, req.TargetSandboxRef); err != nil {
-		return contracts.JudgeTaskInfo{}, err
-	}
-	snapshot, err := s.buildInputSnapshot(j, spec, req.ExtraInput)
-	if err != nil {
-		return contracts.JudgeTaskInfo{}, err
-	}
-	traceID := response.TraceFromContext(ctx)
-	if strings.TrimSpace(traceID) == "" {
-		return contracts.JudgeTaskInfo{}, apperr.ErrJudgeSubmitInvalid.WithCause(fmt.Errorf("判题提交缺少 trace_id"))
-	}
-	snapshot.TraceID = traceID
-	requiresCode := judgerRequiresCode(j.Type, mode)
-	codeHash, vector, sanitizedCode, err := s.prepareSubmittedCode(ctx, req, requiresCode)
-	if err != nil {
-		return contracts.JudgeTaskInfo{}, err
-	}
-	ownership := sourceOwnershipFromRequest(req)
-	if err := validateSourceOwnership(ownership); err != nil {
-		return contracts.JudgeTaskInfo{}, err
-	}
-	task := JudgeTask{
-		ID:               s.ids.Generate(),
-		TenantID:         req.TenantID,
-		JudgerID:         j.ID,
-		SourceRef:        req.SourceRef,
-		SourceOwnerID:    ownership.OwnerID,
-		SourceCourseID:   ownership.CourseID,
-		SourceScope:      ownership.Scope,
-		SubmitterID:      req.SubmitterID,
-		ProblemRef:       problemRef,
-		CodeStorageKey:   req.CodeStorageKey,
-		CodeHash:         codeHash,
-		InputSnapshot:    snapshot,
-		SandboxMode:      mode,
-		TargetSandboxRef: strings.TrimSpace(req.TargetSandboxRef),
-		Priority:         normalizePriority(req.Priority),
-		Status:           JudgeTaskStatusQueued,
-		MaxRetries:       maxRetriesForJudger(j, s.cfg.DefaultMaxRetries),
-	}
-	if j.Type == JudgerTypeManual {
-		task.Status = JudgeTaskStatusJudging
-	}
-	if err := s.checkSubmitRate(ctx, task); err != nil {
-		return contracts.JudgeTaskInfo{}, err
-	}
-	if requiresCode {
-		archiveRef, err := s.storeSanitizedCodeArchive(ctx, task.TenantID, task.ID, sanitizedCode)
-		if err != nil {
-			return contracts.JudgeTaskInfo{}, err
-		}
-		task.InputSnapshot.SanitizedCodeArchiveName = "submission.tar"
-		task.InputSnapshot.SanitizedCodeArchiveRef = archiveRef
-	}
-	createdNew := false
-	if err := s.store.TenantTx(ctx, task.TenantID, func(ctx context.Context, tx TxStore) error {
-		requestedID := task.ID
-		created, err := tx.CreateJudgeTask(ctx, task)
-		if err != nil {
-			return apperr.ErrJudgeTaskEnqueueFailed.WithCause(err)
-		}
-		task = created
-		createdNew = task.ID == requestedID
-		if !createdNew {
-			return nil
-		}
-		if requiresCode {
-			if _, err := tx.CreateFingerprint(ctx, SubmissionFingerprint{
-				ID:          s.ids.Generate(),
-				TenantID:    task.TenantID,
-				SourceRef:   task.SourceRef,
-				ProblemRef:  task.ProblemRef,
-				SubmitterID: task.SubmitterID,
-				CodeHash:    task.CodeHash,
-				SimVector:   vector,
-			}); err != nil {
-				return apperr.ErrFingerprintSimilarityFailed.WithCause(err)
-			}
-		}
-		return nil
-	}); err != nil {
-		return contracts.JudgeTaskInfo{}, err
-	}
-	if !createdNew {
-		return contractTaskInfoFromModel(JudgeTaskInfo{Task: task, Existing: true}), nil
-	}
-	s.publishProgress(ctx, task.TenantID, task.ID, task.Status, ProgressStageQueued, "判题任务已提交")
-	if err := s.writeSystemAudit(ctx, task.TenantID, "judge.submit", "judge_task", task.ID, map[string]any{"source_ref": task.SourceRef, "problem_ref": task.ProblemRef, "submitter_id": task.SubmitterID}); err != nil {
-		return contracts.JudgeTaskInfo{}, err
-	}
-	return contractTaskInfoFromModel(JudgeTaskInfo{Task: task}), nil
-}
-
-// ValidateJudgeMode 通过 M5 锁定判题配置和 M3 判题器定义预校验沙箱模式兼容性。
-func (s *Service) ValidateJudgeMode(ctx context.Context, tenantID int64, itemCode, itemVersion, sandboxMode string) error {
-	if tenantID <= 0 || strings.TrimSpace(itemCode) == "" || strings.TrimSpace(itemVersion) == "" {
-		return apperr.ErrJudgeSubmitInvalid
-	}
-	spec, err := s.content.GetJudgeSpec(ctx, tenantID, itemCode, itemVersion)
-	if err != nil {
-		return apperr.ErrJudgeSpecUnavailable.WithCause(err)
-	}
-	if strings.TrimSpace(spec.JudgerCode) == "" {
-		return apperr.ErrJudgeSpecUnavailable
-	}
-	j, err := s.loadAvailableJudger(ctx, spec.JudgerCode)
-	if err != nil {
-		return err
-	}
-	mode, err := normalizedSandboxMode(sandboxMode)
-	if err != nil {
-		return err
-	}
-	if err := validateJudgerSupportsSandboxMode(j.Type, mode); err != nil {
-		return err
-	}
-	if mode == JudgeSandboxModeReuse {
-		if _, err := s.buildInputSnapshot(j, spec, nil); err != nil {
-			return err
-		}
-	}
-	return nil
+	return judgerDTOFromModel(j)
 }
 
 // prepareSubmittedCode 校验需要代码对象的判题输入,非代码判题器不生成归档和指纹。
@@ -454,34 +300,6 @@ func (s *Service) findExistingTaskBySourceRef(ctx context.Context, tenantID int6
 	return JudgeTask{}, false, apperr.ErrJudgeTaskEnqueueFailed.WithCause(err)
 }
 
-// GetJudgeTask 读取任务状态与结果摘要。
-func (s *Service) GetJudgeTask(ctx context.Context, tenantID, taskID int64) (contracts.JudgeTaskInfo, error) {
-	info, err := s.getTaskInfo(ctx, tenantID, taskID)
-	if err != nil {
-		return contracts.JudgeTaskInfo{}, err
-	}
-	return contractTaskInfoFromModel(info), nil
-}
-
-// CancelJudgeTask 取消排队中的判题任务。
-func (s *Service) CancelJudgeTask(ctx context.Context, tenantID, taskID int64) error {
-	return s.CancelTask(ctx, tenantID, taskID)
-}
-
-// Rejudge 按原输入快照重新判题。
-func (s *Service) Rejudge(ctx context.Context, tenantID, taskID int64) (contracts.JudgeTaskInfo, error) {
-	info, err := s.RejudgeTask(ctx, tenantID, taskID)
-	if err != nil {
-		return contracts.JudgeTaskInfo{}, err
-	}
-	return contractTaskInfoFromModel(info), nil
-}
-
-// RejudgeBySourceRef 按来源标识批量重判任务。
-func (s *Service) RejudgeBySourceRef(ctx context.Context, tenantID int64, sourceRef string) error {
-	return s.RejudgeBatch(ctx, tenantID, sourceRef)
-}
-
 // ExactFingerprints 查询完全相同提交。
 func (s *Service) ExactFingerprints(ctx context.Context, tenantID int64, problemRef, codeHash string) ([]contracts.FingerprintMatch, error) {
 	if tenantID <= 0 || strings.TrimSpace(problemRef) == "" || !isSHA256Hex(codeHash) {
@@ -503,22 +321,6 @@ func (s *Service) ExactFingerprints(ctx context.Context, tenantID int64, problem
 		out = append(out, fingerprintToMatch(item, 1))
 	}
 	return out, nil
-}
-
-// FindExactMatch 实现跨模块查重契约。
-func (s *Service) FindExactMatch(ctx context.Context, tenantID int64, problemRef, codeHash string) ([]contracts.FingerprintMatch, error) {
-	return s.ExactFingerprints(ctx, tenantID, problemRef, codeHash)
-}
-
-// FindSimilarity 实现跨模块相似度查重契约。
-func (s *Service) FindSimilarity(ctx context.Context, req contracts.FingerprintSimilarityRequest) ([]contracts.FingerprintMatch, error) {
-	return s.Similarity(ctx, req.TenantID, FingerprintSimilarityRequest{
-		ProblemRef:       req.ProblemRef,
-		CodeStorageKey:   req.CodeStorageKey,
-		CodeHash:         req.CodeHash,
-		ExcludeSourceRef: req.ExcludeSourceRef,
-		Threshold:        req.Threshold,
-	})
 }
 
 // Similarity 读取对象生成特征向量并返回相似命中。
@@ -642,14 +444,14 @@ func (s *Service) snapshotExtraInputForJudger(typ int16, expectation map[string]
 	out := map[string]any{}
 	switch typ {
 	case JudgerTypeFlag:
-		if stringValue(expectation["flag_chain_target"]) != "" {
+		if strings.TrimSpace(jsonx.StringFromAny(expectation["flag_chain_target"])) != "" {
 			return out, nil
 		}
-		key := stringValue(expectation["flag_input_key"])
+		key := strings.TrimSpace(jsonx.StringFromAny(expectation["flag_input_key"]))
 		if key == "" {
 			return nil, apperr.ErrJudgerConfigInvalid
 		}
-		value := stringValue(extra[key])
+		value := strings.TrimSpace(jsonx.StringFromAny(extra[key]))
 		if value == "" {
 			return nil, apperr.ErrJudgerConfigInvalid
 		}
@@ -791,14 +593,9 @@ func (s *Service) getTaskInfo(ctx context.Context, tenantID, taskID int64) (Judg
 // publishProgress 向任务进度 topic 广播用户向状态。
 // publishProgress 经事件总线请求 M10 统一推送判题进度,由 notify 在边界做 topic 租户校验与信封封装。
 func (s *Service) publishProgress(ctx context.Context, tenantID, taskID int64, status int16, stage, message string) {
-	raw, err := jsonx.AnyBytes(ProgressMessage{TaskID: ids.ID(taskID), Status: statusText(status), Stage: stage, Message: message}, apperr.ErrInternal)
+	payload, err := jsonx.AnyBytes(ProgressMessage{TaskID: ids.ID(taskID), Status: statusText(status), Stage: stage, Message: message}, apperr.ErrInternal)
 	if err != nil {
 		logging.ErrorContext(ctx, "judge progress serialization failed", err.Error(), slog.Int64("tenant_id", tenantID), slog.Int64("task_id", taskID), slog.String("stage", stage))
-		return
-	}
-	payload, err := jsonx.ObjectMapStrict(raw)
-	if err != nil {
-		logging.ErrorContext(ctx, "judge progress payload decode failed", err.Error(), slog.Int64("tenant_id", tenantID), slog.Int64("task_id", taskID), slog.String("stage", stage))
 		return
 	}
 	evt := contracts.NotifyPushRequestedEvent{TenantID: tenantID, TraceID: response.TraceFromContext(ctx), Topic: judgeProgressTopic(tenantID, taskID), Payload: payload}

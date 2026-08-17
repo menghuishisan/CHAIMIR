@@ -8,25 +8,6 @@ const (
 	ContestModeBattle int16 = 2
 )
 
-var (
-	// contestModeRegistry 注册平台内置和后续扩展的竞赛类型。
-	contestModeRegistry = map[int16]string{ContestModeSolve: "solve", ContestModeBattle: "battle"}
-	// battleRuleRegistry 注册平台内置和后续扩展的对局规则。
-	battleRuleRegistry = map[int16]string{BattleRuleAttackDefense: "attack-defense", BattleRuleGame: "game"}
-)
-
-// registeredContestMode 判断竞赛类型是否已注册。
-func registeredContestMode(mode int16) bool {
-	_, ok := contestModeRegistry[mode]
-	return ok
-}
-
-// registeredBattleRule 判断对局规则是否已注册。
-func registeredBattleRule(rule int16) bool {
-	_, ok := battleRuleRegistry[rule]
-	return ok
-}
-
 const (
 	// MatchModeRoundRobin 表示循环赛撮合。
 	MatchModeRoundRobin int16 = 1
@@ -115,6 +96,15 @@ const (
 	CheatActionPenalty int16 = 2
 	// CheatActionDisqualify 表示取消资格。
 	CheatActionDisqualify int16 = 3
+)
+
+const (
+	// VulnSourceTypeSWC 表示 SWC 合约弱点分类源。
+	VulnSourceTypeSWC int16 = 1
+	// VulnSourceTypeIntelligence 表示公开漏洞情报源。
+	VulnSourceTypeIntelligence int16 = 2
+	// VulnSourceTypeCVEOnchain 表示 CVE 或链上安全事件源。
+	VulnSourceTypeCVEOnchain int16 = 3
 )
 
 const (

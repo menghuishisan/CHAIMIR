@@ -7,22 +7,32 @@ export type SimCategory =
   | 'data-structure'
   | 'contract-security'
   | 'transaction-runtime'
-  | 'cross-chain-system';
+  | 'cross-chain-system'
 
-export type InteractionKind = 'button' | 'slider' | 'hold' | 'select-element' | 'drag' | 'form';
-export type InteractionTag = 'normal' | 'perturb' | 'attack';
-export type PatternMode = 'graph' | 'chain' | 'tree' | 'matrix' | 'pipeline' | 'lane' | 'chart';
-export type FrameIntent = 'observe' | 'compare' | 'verify' | 'debug' | 'attack' | 'recover' | 'replay';
+export type InteractionKind = 'button' | 'slider' | 'hold' | 'select-element' | 'drag' | 'form'
+// InteractionTag 是操作的教学类别,决定工作台按钮的配色语义(规范 §7.2 B):
+// normal 普通推进、recover 修复/防护、perturb 扰动、attack 攻击。
+// 修复与攻击必须分开:把防护动作画成攻击色是反向教学暗示。
+export type InteractionTag = 'normal' | 'recover' | 'perturb' | 'attack'
+export type PatternMode = 'graph' | 'chain' | 'tree' | 'matrix' | 'pipeline' | 'lane' | 'chart'
+export type FrameIntent =
+  | 'observe'
+  | 'compare'
+  | 'verify'
+  | 'debug'
+  | 'attack'
+  | 'recover'
+  | 'replay'
 
 export interface SimPackage<TState extends SimState = SimState> {
-  meta: SimMeta;
-  initState(params: SimInitParams, seed: number): TState;
-  reducer(state: TState, event: SimEvent, context: ReducerContext): TState;
-  interactions: InteractionDef[];
-  render(state: TState): TeachingFrame;
-  narrative: NarrativeStep[];
-  codeTrace: CodeTraceDef;
-  checkpoints: CheckpointDef[];
+  meta: SimMeta
+  initState(params: SimInitParams, seed: number): TState
+  reducer(state: TState, event: SimEvent, context: ReducerContext): TState
+  interactions: InteractionDef[]
+  render(state: TState): TeachingFrame
+  narrative: NarrativeStep[]
+  codeTrace: CodeTraceDef
+  checkpoints: CheckpointDef[]
 }
 
 // SimMeta 是仿真包的自描述元信息。
@@ -31,140 +41,141 @@ export interface SimPackage<TState extends SimState = SimState> {
 // 教师/第三方=隔离容器,见 docs/04-仿真可视化引擎/02-架构设计.md §8),不是作者可选项。
 // 让作者声明它只会产生"声明了一个平台无法运行的执行位置"这类无效状态。
 export interface SimMeta {
-  code: string;
-  name: string;
-  category: SimCategory;
-  version: string;
+  code: string
+  name: string
+  category: SimCategory
+  version: string
   /** entry 是归档内入口模块相对路径,供隔离容器装配;内置包由 registry 按 code 装配故省略。 */
-  entry?: string;
-  summary: string;
-  learningObjectives: string[];
+  entry?: string
+  summary: string
+  learningObjectives: string[]
   scaleLimit: {
-    nodes: number;
-    maxTick: number;
-    maxEvents: number;
-  };
+    nodes: number
+    maxTick: number
+    maxEvents: number
+  }
 }
 
 export interface SimInitParams {
-  [key: string]: JsonValue;
+  [key: string]: JsonValue
 }
 
 export interface SimState {
-  tick: number;
-  phase: string;
+  tick: number
+  phase: string
   /** 阶段型内置仿真用此索引声明有限流程的终态;非阶段模型可省略。 */
-  phaseIndex?: number;
-  selectedElementId?: string;
-  explanation: StepExplanation;
-  _trace?: TraceInfo;
-  metrics: Record<string, number | string | boolean>;
-  checkpointValues: Record<string, JsonValue>;
+  phaseIndex?: number
+  selectedElementId?: string
+  explanation: StepExplanation
+  _trace?: TraceInfo
+  metrics: Record<string, number | string | boolean>
+  checkpointValues: Record<string, JsonValue>
 }
 
 export interface StepExplanation {
-  title: string;
-  effect: string;
-  reason: string;
-  defaultDurationMs: number;
+  title: string
+  effect: string
+  reason: string
+  defaultDurationMs: number
 }
 
 export interface TraceInfo {
-  triggeredLines: number[];
-  variables: Record<string, JsonValue>;
-  executionPath?: string;
+  triggeredLines: number[]
+  variables: Record<string, JsonValue>
+  executionPath?: string
 }
 
 export interface SimEvent {
-  type: string;
-  source: 'tick' | 'user' | 'system';
-  atTick: number;
-  seq: number;
-  payload: JsonObject;
-  target?: string;
+  type: string
+  source: 'tick' | 'user' | 'system'
+  atTick: number
+  seq: number
+  payload: JsonObject
+  target?: string
 }
 
 export interface ReducerContext {
-  seed: number;
-  tick: number;
-  seq: number;
-  random: DeterministicRandom;
+  seed: number
+  tick: number
+  seq: number
+  random: DeterministicRandom
 }
 
 export interface DeterministicRandom {
-  next(): number;
-  int(min: number, max: number): number;
-  pick<T>(items: readonly T[]): T;
+  next(): number
+  int(min: number, max: number): number
+  pick<T>(items: readonly T[]): T
 }
 
 export interface InteractionDef {
-  id: string;
-  kind: InteractionKind;
-  label: string;
-  description: string;
-  emits: string;
-  params?: FieldDef[];
-  target?: 'global' | 'element';
-  elementFilter?: string;
-  availableWhen?: (state: SimState) => boolean;
-  labelTag?: InteractionTag;
-  cooldownMs?: number;
+  id: string
+  kind: InteractionKind
+  label: string
+  description: string
+  emits: string
+  params?: FieldDef[]
+  target?: 'global' | 'element'
+  elementFilter?: string
+  availableWhen?: (state: SimState) => boolean
+  labelTag?: InteractionTag
+  cooldownMs?: number
 }
 
-export type InteractionDescriptor = Omit<InteractionDef, 'availableWhen'>;
+export type InteractionDescriptor = Omit<InteractionDef, 'availableWhen'>
 
 export interface FieldDef {
-  name: string;
-  label: string;
-  type: 'number' | 'string' | 'boolean' | 'select' | 'range';
-  default: JsonValue;
-  min?: number;
-  max?: number;
-  step?: number;
-  options?: Array<{ label: string; value: JsonValue }>;
-  required?: boolean;
+  name: string
+  label: string
+  type: 'number' | 'string' | 'boolean' | 'select' | 'range'
+  default: JsonValue
+  min?: number
+  max?: number
+  step?: number
+  options?: Array<{ label: string; value: JsonValue }>
+  required?: boolean
 }
 
 export interface TeachingFrame {
-  summary: string;
-  phase: FramePhase;
-  focus: FrameFocus;
-  layout: FrameLayout;
-  patterns: PatternBinding[];
-  annotations?: FrameAnnotation[];
+  summary: string
+  phase: FramePhase
+  focus: FrameFocus
+  layout: FrameLayout
+  patterns: PatternBinding[]
+  annotations?: FrameAnnotation[]
 }
 
 export interface FramePhase {
-  id: string;
-  title: string;
-  intent: FrameIntent;
+  id: string
+  title: string
+  intent: FrameIntent
+  // 阶段释义只有两段(规范 §7.2 B):做了什么 / 为什么重要。
+  // 不设「看哪里」—— focus 已经用舞台高亮指出该看哪个元素,再复述一遍状态摘要只是重复。
   explanation: {
-    what: string;
-    why: string;
-    watch: string;
-  };
+    what: string
+    why: string
+  }
 }
 
 export interface FrameFocus {
-  primary: string[];
-  secondary?: string[];
-  muted?: string[];
+  primary: string[]
+  secondary?: string[]
+  muted?: string[]
 }
 
 export interface FrameLayout {
-  primary: string;
-  evidence?: string[];
-  timeline?: string;
-  metrics?: string[];
-  trace?: string;
-  checkpoints?: string[];
+  primary: string
+  evidence?: string[]
+  timeline?: string
+  metrics?: string[]
+  trace?: string
+  checkpoints?: string[]
 }
 
 export interface FrameAnnotation {
-  id: string;
-  target: string;
-  tone: 'info' | 'success' | 'warning' | 'danger';
-  text: string;
+  id: string
+  target: string
+  tone: 'info' | 'success' | 'warning' | 'danger'
+  text: string
 }
 
 export type PatternBinding =
@@ -174,258 +185,259 @@ export type PatternBinding =
   | MatrixPattern
   | PipelinePattern
   | LanePattern
-  | ChartPattern;
+  | ChartPattern
 
 export interface PatternBase<TMode extends PatternMode, TData> {
-  id: string;
-  mode: TMode;
-  title: string;
-  data: TData;
+  id: string
+  mode: TMode
+  title: string
+  data: TData
 }
 
-export interface GraphPattern
-  extends PatternBase<
-    'graph',
-    {
-      layout: 'ring' | 'grid' | 'layered';
-      nodes: GraphNode[];
-      edges: GraphEdge[];
-    }
-  > {}
+export type GraphPattern = PatternBase<
+  'graph',
+  {
+    layout: 'ring' | 'grid' | 'layered'
+    nodes: GraphNode[]
+    edges: GraphEdge[]
+  }
+>
 
 export interface GraphNode {
-  id: string;
-  label: string;
-  role: string;
-  status: 'idle' | 'active' | 'success' | 'warning' | 'danger';
-  value?: string;
-  meta?: VisualElementMeta;
+  id: string
+  label: string
+  role: string
+  status: 'idle' | 'active' | 'success' | 'warning' | 'danger'
+  value?: string
+  meta?: VisualElementMeta
 }
 
 export interface GraphEdge {
-  id: string;
-  from: string;
-  to: string;
-  label: string;
-  status: 'pending' | 'active' | 'success' | 'failed';
-  process?: ProcessSpan;
-  detail?: string;
-  meta?: VisualElementMeta;
+  id: string
+  from: string
+  to: string
+  label: string
+  status: 'pending' | 'active' | 'success' | 'failed'
+  process?: ProcessSpan
+  detail?: string
+  meta?: VisualElementMeta
 }
 
-export interface ChainPattern
-  extends PatternBase<
-    'chain',
-    {
-      blocks: ChainBlock[];
-      forks: ChainBlock[][];
-      canonicalTip?: string;
-    }
-  > {}
+export type ChainPattern = PatternBase<
+  'chain',
+  {
+    blocks: ChainBlock[]
+    forks: ChainBlock[][]
+    canonicalTip?: string
+  }
+>
 
 export interface ChainBlock {
-  id: string;
-  height: number;
-  hash: string;
-  parentHash: string;
-  label: string;
-  status: 'genesis' | 'pending' | 'canonical' | 'orphaned' | 'attacker';
-  meta?: VisualElementMeta;
+  id: string
+  height: number
+  hash: string
+  parentHash: string
+  label: string
+  status: 'genesis' | 'pending' | 'canonical' | 'orphaned' | 'attacker'
+  meta?: VisualElementMeta
 }
 
-export interface TreePattern
-  extends PatternBase<'tree', { root: TreeNode; highlightedPath: string[] }> {}
+export type TreePattern = PatternBase<'tree', { root: TreeNode; highlightedPath: string[] }>
 
 export interface TreeNode {
-  id: string;
-  label: string;
-  hash: string;
-  children?: TreeNode[];
-  meta?: VisualElementMeta;
+  id: string
+  label: string
+  hash: string
+  children?: TreeNode[]
+  meta?: VisualElementMeta
 }
 
-export interface MatrixPattern
-  extends PatternBase<
-    'matrix',
-    {
-      rows: string[];
-      columns: string[];
-      cells: MatrixCell[][];
-    }
-  > {}
+export type MatrixPattern = PatternBase<
+  'matrix',
+  {
+    rows: string[]
+    columns: string[]
+    cells: MatrixCell[][]
+  }
+>
 
 export interface MatrixCell {
-  label: string;
-  status: 'empty' | 'pending' | 'yes' | 'no' | 'fault';
-  meta?: VisualElementMeta;
+  label: string
+  status: 'empty' | 'pending' | 'yes' | 'no' | 'fault'
+  meta?: VisualElementMeta
 }
 
-export interface PipelinePattern
-  extends PatternBase<'pipeline', { steps: PipelineStep[]; currentStepId: string }> {}
+export type PipelinePattern = PatternBase<
+  'pipeline',
+  { steps: PipelineStep[]; currentStepId: string }
+>
 
 export interface PipelineStep {
-  id: string;
-  label: string;
-  status: 'pending' | 'running' | 'complete' | 'failed';
-  detail: string;
-  process?: ProcessSpan;
-  meta?: VisualElementMeta;
+  id: string
+  label: string
+  status: 'pending' | 'running' | 'complete' | 'failed'
+  detail: string
+  process?: ProcessSpan
+  meta?: VisualElementMeta
 }
 
-export interface LanePattern
-  extends PatternBase<'lane', { actors: string[]; messages: LaneMessage[]; currentTime: number }> {}
+export type LanePattern = PatternBase<
+  'lane',
+  { actors: string[]; messages: LaneMessage[]; currentTime: number }
+>
 
 export interface LaneMessage {
-  id: string;
-  from: string;
-  to: string;
-  at: number;
-  label: string;
-  status: 'sent' | 'delivered' | 'dropped';
-  endAt?: number;
-  process?: ProcessSpan;
-  detail?: string;
-  meta?: VisualElementMeta;
+  id: string
+  from: string
+  to: string
+  at: number
+  label: string
+  status: 'sent' | 'delivered' | 'dropped'
+  endAt?: number
+  process?: ProcessSpan
+  detail?: string
+  meta?: VisualElementMeta
 }
 
 export interface ProcessSpan {
-  startedAt: number;
-  endedAt: number;
-  progress: number;
-  label: string;
+  startedAt: number
+  endedAt: number
+  progress: number
+  // label 是过程短名(如「传播」「候选」),只在它能补充「正在做什么」时才写:
+  // 与元素名、状态词或 detail 重复就不要写 —— 那会让同一行出现两遍同一句话。
+  label?: string
 }
 
 export interface VisualElementMeta {
-  id: string;
-  label: string;
-  role?: string;
+  id: string
+  label: string
+  role?: string
   lifecycle: {
-    state: 'entering' | 'active' | 'settled' | 'leaving' | 'archived';
-    fromTick: number;
-    toTick?: number;
-  };
-  emphasis: 'focus' | 'context' | 'history' | 'ghost';
-  explanation?: string;
+    state: 'entering' | 'active' | 'settled' | 'leaving' | 'archived'
+    fromTick: number
+    toTick?: number
+  }
+  emphasis: 'focus' | 'context' | 'history' | 'ghost'
+  explanation?: string
 }
 
-export interface ChartPattern
-  extends PatternBase<'chart', { series: ChartSeries[]; unit: string }> {}
+export type ChartPattern = PatternBase<'chart', { series: ChartSeries[]; unit: string }>
 
 export interface ChartSeries {
-  label: string;
-  points: Array<{ x: number; y: number }>;
+  label: string
+  points: Array<{ x: number; y: number }>
 }
 
 export interface NarrativeStep {
-  id: string;
-  title: string;
-  trigger: (state: SimState, event?: SimEvent) => boolean;
-  highlight: string[];
-  explain: string;
-  question?: QuestionCheckpoint;
-  defaultDurationMs: number;
+  id: string
+  title: string
+  trigger: (state: SimState, event?: SimEvent) => boolean
+  highlight: string[]
+  explain: string
+  question?: QuestionCheckpoint
+  defaultDurationMs: number
 }
 
-export type NarrativeStepDescriptor = Omit<NarrativeStep, 'trigger'>;
+export type NarrativeStepDescriptor = Omit<NarrativeStep, 'trigger'>
 
 export interface QuestionCheckpoint {
-  prompt: string;
-  options: string[];
-  answer: string;
-  checkpointId: string;
+  prompt: string
+  options: string[]
+  answer: string
+  checkpointId: string
 }
 
 export interface CheckpointDef {
-  id: string;
-  label: string;
-  evaluate: (state: SimState) => CheckpointResult;
+  id: string
+  label: string
+  evaluate: (state: SimState) => CheckpointResult
 }
 
 export interface CheckpointResult {
-  achieved: boolean;
-  answer: JsonValue;
-  explanation: string;
+  achieved: boolean
+  answer: JsonValue
+  explanation: string
 }
 
 export interface CheckpointDescriptor {
-  id: string;
-  label: string;
+  id: string
+  label: string
 }
 
 export interface SimPackageDescriptor {
-  meta: SimMeta;
-  interactions: InteractionDescriptor[];
-  narrative: NarrativeStepDescriptor[];
-  codeTrace?: CodeTraceDef;
-  checkpoints: CheckpointDescriptor[];
+  meta: SimMeta
+  interactions: InteractionDescriptor[]
+  narrative: NarrativeStepDescriptor[]
+  codeTrace?: CodeTraceDef
+  checkpoints: CheckpointDescriptor[]
 }
 
 export interface RuntimeSnapshot {
-  state: SimState;
-  tick: number;
-  events: SimEvent[];
-  view: TeachingFrame;
-  currentStep?: NarrativeStepDescriptor;
-  interactionAvailability: Record<string, boolean>;
-  checkpointResults: Record<string, CheckpointResult>;
+  state: SimState
+  tick: number
+  events: SimEvent[]
+  view: TeachingFrame
+  currentStep?: NarrativeStepDescriptor
+  interactionAvailability: Record<string, boolean>
+  checkpointResults: Record<string, CheckpointResult>
 }
 
 export interface StageConfig {
-  stage: number;
-  title: string;
-  description?: string;
-  components: StageComponents;
-  unlockCondition?: StageUnlockCondition;
-  paramBindings?: ParamBinding[];
+  stage: number
+  title: string
+  description?: string
+  components: StageComponents
+  unlockCondition?: StageUnlockCondition
+  paramBindings?: ParamBinding[]
 }
 
 export interface StageComponents {
-  envs?: string[];
-  sims?: string[];
+  envs?: string[]
+  sims?: string[]
 }
 
 export interface StageUnlockCondition {
-  type: 'checkpoint' | 'manual';
-  checkpointId?: string;
-  minScore?: number;
+  type: 'checkpoint' | 'manual'
+  checkpointId?: string
+  minScore?: number
 }
 
 export interface ParamBinding {
-  targetComponent: string;
-  targetParam: string;
-  sourceType: 'checkpoint' | 'constant';
-  sourceRef?: string;
-  sourcePath?: string;
-  constantValue?: JsonValue;
+  targetComponent: string
+  targetParam: string
+  sourceType: 'checkpoint' | 'constant'
+  sourceRef?: string
+  sourcePath?: string
+  constantValue?: JsonValue
 }
 
 export interface StageInjectedParam {
-  _source: string;
-  _value: JsonValue;
+  _source: string
+  _value: JsonValue
 }
 
 export interface CodeTraceDef {
-  sourceCode: string;
-  language: 'solidity' | 'rust' | 'go' | 'javascript' | 'pseudocode';
-  lineMapping: LineMapping[];
-  variableWatch?: VariableWatchDef[];
+  sourceCode: string
+  language: 'solidity' | 'rust' | 'go' | 'javascript' | 'pseudocode'
+  lineMapping: LineMapping[]
+  variableWatch?: VariableWatchDef[]
 }
 
 export interface LineMapping {
-  line: number;
-  triggerCondition: string;
-  annotation?: string;
-  highlightStyle?: 'normal' | 'success' | 'error';
+  line: number
+  triggerCondition: string
+  annotation?: string
+  highlightStyle?: 'normal' | 'success' | 'error'
 }
 
 export interface VariableWatchDef {
-  name: string;
-  extract: string;
-  format?: 'hex' | 'number' | 'string' | 'bool';
+  name: string
+  extract: string
+  format?: 'hex' | 'number' | 'string' | 'bool'
 }
 
-export type JsonPrimitive = string | number | boolean | null;
-export type JsonValue = JsonPrimitive | JsonObject | JsonValue[];
+export type JsonPrimitive = string | number | boolean | null
+export type JsonValue = JsonPrimitive | JsonObject | JsonValue[]
 export interface JsonObject {
-  [key: string]: JsonValue;
+  [key: string]: JsonValue
 }

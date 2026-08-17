@@ -1,4 +1,4 @@
-// SandboxIdeWorkspace 是沙箱代码环境在应用层的唯一装配(实验工作台与竞赛答题工作台共用)。
+// SandboxIdeWorkspace 是 M2 沙箱代码环境在应用层的唯一装配(实验工作台与竞赛答题工作台共用)。
 //
 // 它把 M2 的能力拼成一个可用的工作面:文件树 + 编辑器 + 终端 + 受控命令 + 链操作 + 网页工具。
 // 三条边界必须守住:
@@ -50,7 +50,7 @@ import { api } from '../../app/api'
 import { appConfig } from '../../app/config'
 import { useTicketedWebSocket } from '../../hooks'
 import { decodeUtf8Base64, encodeUtf8Base64 } from '../../utils/base64'
-import { SANDBOX_PHASES, sandboxPhaseLabel } from '../../utils/labels/sandbox'
+import { SANDBOX_PHASES, SANDBOX_STATUSES, sandboxPhaseLabel } from '../../utils/labels/sandbox'
 import { userFacingErrorMessage } from '../../utils/userFacingError'
 
 /**
@@ -523,7 +523,7 @@ function FilesPanel({ sandboxId, onSaved }: FilesPanelProps) {
               写入
             </Button>
             <Button
-              variant="seal"
+              variant="primary"
               size="sm"
               leftIcon={Save}
               loading={busy}
@@ -626,7 +626,7 @@ function TerminalPanel({ sandboxId }: { sandboxId: string }) {
       {socket.error ? (
         <p className="shrink-0 px-3 py-2 text-xs text-on-dark-danger">{socket.error}</p>
       ) : null}
-      <div ref={host} className="min-h-0 flex-1 bg-terminal-bg" />
+      <div ref={host} className="min-h-0 flex-1 bg-terminal" />
     </div>
   )
 }
@@ -698,7 +698,7 @@ function ChainPanel({ sandboxId, operations }: ChainPanelProps) {
         {operations.map((item) => (
           <Button
             key={item}
-            variant={item === operation ? 'seal' : 'on-dark'}
+            variant={item === operation ? 'primary' : 'on-dark'}
             size="sm"
             onClick={() => {
               setOperation(item)
@@ -739,7 +739,7 @@ function ChainPanel({ sandboxId, operations }: ChainPanelProps) {
       )}
 
       <div>
-        <Button variant="seal" size="sm" leftIcon={Play} loading={busy} onClick={() => void run()}>
+        <Button variant="primary" size="sm" leftIcon={Play} loading={busy} onClick={() => void run()}>
           执行
         </Button>
       </div>
@@ -747,7 +747,7 @@ function ChainPanel({ sandboxId, operations }: ChainPanelProps) {
       {panelError ? <p className="text-xs text-on-dark-danger">{panelError}</p> : null}
 
       {result ? (
-        <pre className="min-h-0 overflow-auto rounded-md border border-dark-line bg-terminal-bg p-3 font-mono text-xs text-on-dark">
+        <pre className="min-h-0 overflow-auto rounded-md border border-dark-line bg-terminal p-3 font-mono text-xs text-on-dark">
           {result}
         </pre>
       ) : null}
@@ -813,7 +813,7 @@ function CommandPanel({ sandboxId, tools }: CommandPanelProps) {
           {tools.map((tool) => (
             <Button
               key={tool.tool_code}
-              variant={tool.tool_code === toolCode ? 'seal' : 'on-dark'}
+              variant={tool.tool_code === toolCode ? 'primary' : 'on-dark'}
               size="sm"
               onClick={() => setToolCode(tool.tool_code)}
             >
@@ -838,7 +838,7 @@ function CommandPanel({ sandboxId, tools }: CommandPanelProps) {
       </label>
 
       <div>
-        <Button variant="seal" size="sm" leftIcon={Play} loading={busy} onClick={() => void run()}>
+        <Button variant="primary" size="sm" leftIcon={Play} loading={busy} onClick={() => void run()}>
           执行
         </Button>
       </div>
@@ -846,7 +846,7 @@ function CommandPanel({ sandboxId, tools }: CommandPanelProps) {
       {panelError ? <p className="text-xs text-on-dark-danger">{panelError}</p> : null}
 
       {output ? (
-        <pre className="min-h-0 overflow-auto whitespace-pre-wrap rounded-md border border-dark-line bg-terminal-bg p-3 font-mono text-xs text-on-dark">
+        <pre className="min-h-0 overflow-auto whitespace-pre-wrap rounded-md border border-dark-line bg-terminal p-3 font-mono text-xs text-on-dark">
           {output}
         </pre>
       ) : null}
@@ -862,10 +862,32 @@ function CommandPanel({ sandboxId, tools }: CommandPanelProps) {
  * 页面不拼容器地址,也就不存在把内网地址暴露给浏览器的问题。
  */
 function WebToolPanel({ sandboxId, toolCode }: { sandboxId: string; toolCode: string }) {
-  const src = useMemo(
-    () => api.sandbox.getToolProxyUrl(sandboxId, toolCode, '', appConfig.sandboxToolOrigin),
-    [sandboxId, toolCode],
-  )
+  const [src, setSrc] = useState<string>()
+  const [loadError, setLoadError] = useState('')
+
+  useEffect(() => {
+    let active = true
+    setSrc(undefined)
+    setLoadError('')
+    void api.sandbox
+      .getToolProxyUrl(sandboxId, toolCode, '', appConfig.sandboxToolOrigin)
+      .then((url) => {
+        if (active) setSrc(url)
+      })
+      .catch((error) => {
+        if (active) setLoadError(userFacingErrorMessage(error, '这个工具暂时打不开,请稍后重试。'))
+      })
+    return () => {
+      active = false
+    }
+  }, [sandboxId, toolCode])
+
+  if (loadError) {
+    return <div className="grid h-full place-items-center px-4 text-sm text-on-dark-danger">{loadError}</div>
+  }
+  if (!src) {
+    return <div className="grid h-full place-items-center px-4 text-sm text-on-dark-sub">工具正在准备...</div>
+  }
   return (
     <iframe
       src={src}
@@ -927,13 +949,24 @@ function parseProgress(data: string): SandboxProgress | undefined {
   // 统一通道会把业务负载放在 payload 里,直连时就是负载本身
   const body = asRecord(record.payload) ?? record
   if (typeof body.stage !== 'string' || typeof body.message !== 'string') return undefined
+  if (!isSandboxPhase(body.phase) || !isSandboxStatus(body.status)) return undefined
   return {
-    phase: (typeof body.phase === 'number' ? body.phase : SandboxPhase.ALLOCATING) as SandboxPhase,
-    status: (typeof body.status === 'number' ? body.status : SandboxStatus.CREATING) as SandboxStatus,
+    phase: body.phase,
+    status: body.status,
     stage: body.stage,
     message: body.message,
     trace_id: typeof body.trace_id === 'string' ? body.trace_id : undefined,
   }
+}
+
+/** isSandboxPhase 校验进度消息中的阶段属于公开封闭枚举。 */
+function isSandboxPhase(value: unknown): value is SandboxPhase {
+  return typeof value === 'number' && (SANDBOX_PHASES as readonly number[]).includes(value)
+}
+
+/** isSandboxStatus 校验进度消息中的状态属于公开封闭枚举。 */
+function isSandboxStatus(value: unknown): value is SandboxStatus {
+  return typeof value === 'number' && (SANDBOX_STATUSES as readonly number[]).includes(value)
 }
 
 /** asRecord 把未知值收敛成对象;非对象回 undefined。 */

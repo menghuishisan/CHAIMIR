@@ -11,7 +11,7 @@ import { useState } from 'react'
 import { ChevronLeft, ChevronRight, MonitorPlay } from 'lucide-react'
 import type { SimTeachingSnapshot } from '@chaimir/api-client'
 import type { TeachingFrame } from '@chaimir/sim-sdk'
-import { Button, TeachingFrameStage } from '@chaimir/ui'
+import { Button, TeachingFrameStage, TeachingFrameStream, frameHasStream } from '@chaimir/ui'
 
 export interface SimPreviewFramesProps {
   frames?: SimTeachingSnapshot[]
@@ -66,7 +66,23 @@ export function SimPreviewFrames({ frames }: SimPreviewFramesProps) {
         <p className="border-b border-dark-line px-4 py-2 text-xs text-on-dark-sub">
           {view.summary}
         </p>
-        <TeachingFrameStage frame={view} />
+        {/* 舞台 + 消息流一起给:学生看到的就是这两块,只摊开舞台会漏掉那一帧的全部消息与调用
+            (它们按规范 §7.1 只出现在消息流里)。审核人必须看到与学生等价的信息;
+            不产生消息的场景(只有区块/树/矩阵)不给空栏,舞台独占全宽。 */}
+        {frameHasStream(view) ? (
+          <div className="grid gap-2 md:grid-cols-3">
+            <div className="h-96 md:col-span-2">
+              <TeachingFrameStage frame={view} />
+            </div>
+            <div className="h-96 border-t border-dark-line md:border-l md:border-t-0">
+              <TeachingFrameStream frame={view} />
+            </div>
+          </div>
+        ) : (
+          <div className="h-96">
+            <TeachingFrameStage frame={view} />
+          </div>
+        )}
       </div>
     </section>
   )

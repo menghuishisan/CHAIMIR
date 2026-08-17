@@ -3,14 +3,12 @@ package contest
 
 import (
 	"context"
-	"fmt"
+	"encoding/json"
 	"math"
 	"strings"
 
 	"chaimir/internal/contracts"
 	"chaimir/internal/platform/ids"
-	"chaimir/internal/platform/intx"
-	"chaimir/internal/platform/jsonx"
 	"chaimir/internal/platform/pagex"
 	"chaimir/internal/platform/response"
 	"chaimir/internal/platform/timex"
@@ -269,10 +267,7 @@ func (s *Service) ListLadder(ctx context.Context, contestID int64, page, size in
 			if err != nil {
 				return err
 			}
-			all, err := ladderDTOsFromSnapshot(snapshot)
-			if err != nil {
-				return err
-			}
+			all := ladderDTOsFromSnapshot(snapshot)
 			total = int64(len(all))
 			start := (page - 1) * size
 			if start >= len(all) {
@@ -297,19 +292,6 @@ func (s *Service) ListLadder(ctx context.Context, contestID int64, page, size in
 		return nil, 0, 0, 0, err
 	}
 	return out, total, page, size, nil
-}
-
-// ladderDTOsFromSnapshot 通过严格 DTO 契约解析冻结榜单，拒绝数字雪花 ID 和损坏快照。
-func ladderDTOsFromSnapshot(snapshot LadderSnapshot) ([]LadderDTO, error) {
-	raw, err := jsonx.AnyBytes(snapshot.Ranking, apperr.ErrContestInvalid)
-	if err != nil {
-		return nil, err
-	}
-	var out []LadderDTO
-	if err := jsonx.DecodeStrictKnownFields(raw, &out); err != nil {
-		return nil, apperr.ErrContestInvalid.WithCause(err)
-	}
-	return out, nil
 }
 
 // refreshTeamRank 依据已通过提交重算单队成绩并刷新全榜排名。
@@ -350,9 +332,12 @@ func (s *Service) pushLeaderboard(ctx context.Context, tenantID, contestID int64
 	for _, rank := range ranks {
 		items = append(items, ladderDTOFromModel(rank))
 	}
-	payload := map[string]any{"contest_id": ids.Format(contestID), "items": items}
+	payload, err := json.Marshal(LeaderboardPushDTO{ContestID: ids.ID(contestID), Items: items})
+	if err != nil {
+		return apperr.ErrContestNotifyFailed.WithCause(err)
+	}
 	// 排行榜为即时推送,统一走异步事件由 M10 兜底投递,避免通知抖动导致已判分提交回滚。
-	evt := contracts.NotifyPushRequestedEvent{TenantID: tenantID, TraceID: response.TraceFromContext(ctx), Topic: fmt.Sprintf("tenant:%d:contest:%d:leaderboard", tenantID, contestID), Payload: payload}
+	evt := contracts.NotifyPushRequestedEvent{TenantID: tenantID, TraceID: response.TraceFromContext(ctx), Topic: "tenant:" + ids.Format(tenantID) + ":contest:" + ids.Format(contestID) + ":leaderboard", Payload: payload}
 	if err := s.bus.Publish(ctx, contracts.SubjectNotifyPushRequested, evt); err != nil {
 		return apperr.ErrContestNotifyFailed.WithCause(err)
 	}
@@ -387,15 +372,15 @@ func scaledContestScore(maxScore, score, judgeMax int32) int32 {
 
 // dynamicSolveScore 按题目动态分配置计算通过提交得分。
 func (s *Service) dynamicSolveScore(ctx context.Context, tx TxStore, tenantID, contestID, problemID int64, problem ContestProblem) (int32, error) {
-	if len(problem.DynamicScore) == 0 {
+	if problem.DynamicScore == nil {
 		return problem.Score, nil
 	}
 	solved, err := tx.CountProblemSolvedTeams(ctx, tenantID, contestID, problemID)
 	if err != nil {
 		return 0, err
 	}
-	minScore := int32FromMap(problem.DynamicScore, "min_score", problem.Score)
-	decay := int32FromMap(problem.DynamicScore, "decay_per_solve", 0)
+	minScore := problem.DynamicScore.MinScore
+	decay := problem.DynamicScore.DecayPerSolve
 	if solved < 0 || decay != 0 && solved > math.MaxInt64/int64(absInt32(decay)) {
 		return 0, apperr.ErrContestProblemInvalid
 	}
@@ -411,27 +396,6 @@ func (s *Service) dynamicSolveScore(ctx context.Context, tx TxStore, tenantID, c
 		return 0, apperr.ErrContestProblemInvalid
 	}
 	return score, nil
-}
-
-// int32FromMap 从动态配置读取整数。
-func int32FromMap(m map[string]any, key string, defaultValue int32) int32 {
-	switch v := m[key].(type) {
-	case float64:
-		if math.IsNaN(v) || math.IsInf(v, 0) || math.Trunc(v) != v || v < math.MinInt32 || v > math.MaxInt32 {
-			return defaultValue
-		}
-		return int32(v)
-	case int:
-		converted, ok := intx.Int32(v)
-		if !ok {
-			return defaultValue
-		}
-		return converted
-	case int32:
-		return v
-	default:
-		return defaultValue
-	}
 }
 
 // absInt32 将 int32 绝对值提升为 int64，避免最小负数取反溢出。

@@ -54,10 +54,42 @@ func validateLessonRequest(req LessonRequest) (LessonRequest, error) {
 	if req.Title == "" || req.Sort < 0 || !validLessonContentType(req.ContentType) {
 		return LessonRequest{}, apperr.ErrTeachingLessonInvalid
 	}
-	if req.ContentRef == nil {
-		req.ContentRef = map[string]any{}
+	req.ContentRef.Markdown = strings.TrimSpace(req.ContentRef.Markdown)
+	req.ContentRef.PackageCode = strings.TrimSpace(req.ContentRef.PackageCode)
+	req.ContentRef.Version = strings.TrimSpace(req.ContentRef.Version)
+	switch req.ContentType {
+	case LessonContentVideo, LessonContentAttachment:
+		req.ContentRef = LessonContentRefRequest{}
+	case LessonContentMarkdown:
+		req.ContentRef.ExperimentID = 0
+		req.ContentRef.PackageCode = ""
+		req.ContentRef.Version = ""
+	case LessonContentExperiment:
+		req.ContentRef.Markdown = ""
+		req.ContentRef.PackageCode = ""
+		req.ContentRef.Version = ""
+	case LessonContentSimulation:
+		req.ContentRef.Markdown = ""
+		req.ContentRef.ExperimentID = 0
 	}
 	return req, nil
+}
+
+// lessonContentRefMap 把已校验的公开课时引用转换为内部 JSONB 固定形状。
+func lessonContentRefMap(contentType int16, ref LessonContentRefRequest) map[string]any {
+	switch contentType {
+	case LessonContentMarkdown:
+		return map[string]any{"markdown": ref.Markdown}
+	case LessonContentExperiment:
+		if ref.ExperimentID <= 0 {
+			return map[string]any{}
+		}
+		return map[string]any{"experiment_id": ref.ExperimentID.String()}
+	case LessonContentSimulation:
+		return map[string]any{"package_code": ref.PackageCode, "version": ref.Version}
+	default:
+		return map[string]any{}
+	}
 }
 
 // validateAssignmentRequest 校验作业输入。

@@ -5,10 +5,10 @@ import (
 	"bytes"
 	"context"
 	"log/slog"
-	"strconv"
 	"strings"
 
 	"chaimir/internal/contracts"
+	"chaimir/internal/platform/ids"
 	"chaimir/internal/platform/jsonx"
 	"chaimir/internal/platform/pagex"
 	"chaimir/internal/platform/storage"
@@ -514,7 +514,7 @@ func attachmentCopyName(targetItemID int64, sourceKey, fileName string) string {
 	if len(hash) > 12 {
 		hash = hash[:12]
 	}
-	return strconv.FormatInt(targetItemID, 10) + "-" + hash + "-" + name
+	return ids.Format(targetItemID) + "-" + hash + "-" + name
 }
 
 // ShareItem 把已发布内容放入共享库。
@@ -584,94 +584,6 @@ func (s *Service) ListShared(ctx context.Context, filter ItemListFilter) ([]Item
 		out = append(out, itemDTO(item))
 	}
 	return out, total, filter.Page, filter.Size, nil
-}
-
-// GetContentFace 实现跨模块题面读取契约。
-func (s *Service) GetContentFace(ctx context.Context, tenantID int64, ref contracts.ContentItemRef) (contracts.ContentItemSnapshot, error) {
-	item, err := s.getItemWithBody(ctx, tenantID, ref.ItemCode, ref.ItemVersion)
-	if err != nil {
-		return contracts.ContentItemSnapshot{}, err
-	}
-	if item.TenantID != tenantID && item.Visibility != VisibilityShared {
-		return contracts.ContentItemSnapshot{}, apperr.ErrContentNotFound
-	}
-	if item.Status != StatusPublished && item.Status != StatusDeprecated {
-		return contracts.ContentItemSnapshot{}, apperr.ErrContentVersionNotPublished
-	}
-	face, err := faceSnapshot(item)
-	if err != nil {
-		return contracts.ContentItemSnapshot{}, apperr.ErrContentBodyInvalid.WithCause(err)
-	}
-	return contractSnapshot(face)
-}
-
-// GetContentFull 实现跨模块全量读取契约。
-func (s *Service) GetContentFull(ctx context.Context, tenantID int64, ref contracts.ContentItemRef) (contracts.ContentItemSnapshot, error) {
-	item, err := s.getItemWithBody(ctx, tenantID, ref.ItemCode, ref.ItemVersion)
-	if err != nil {
-		return contracts.ContentItemSnapshot{}, err
-	}
-	if item.TenantID != tenantID {
-		return contracts.ContentItemSnapshot{}, apperr.ErrContentFullAccessDenied
-	}
-	if item.Status != StatusPublished && item.Status != StatusDeprecated {
-		return contracts.ContentItemSnapshot{}, apperr.ErrContentVersionNotPublished
-	}
-	return contractSnapshot(item)
-}
-
-// BatchGetContentFace 实现跨模块批量题面读取契约。
-func (s *Service) BatchGetContentFace(ctx context.Context, tenantID int64, refs []contracts.ContentItemRef) ([]contracts.ContentItemSnapshot, error) {
-	if tenantID <= 0 || len(refs) == 0 || len(refs) > 100 {
-		return nil, apperr.ErrContentQueryInvalid
-	}
-	out := make([]contracts.ContentItemSnapshot, 0, len(refs))
-	for _, ref := range refs {
-		item, err := s.GetContentFace(ctx, tenantID, ref)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, item)
-	}
-	return out, nil
-}
-
-// ReplaceUsageRefs 实现跨模块内容引用集合替换契约。
-func (s *Service) ReplaceUsageRefs(ctx context.Context, tenantID int64, sourceScope, sourceRef string, refs []contracts.ContentItemRef) error {
-	sourceScope = stringsTrim(sourceScope)
-	sourceRef = stringsTrim(sourceRef)
-	if tenantID <= 0 || sourceScope == "" || sourceRef == "" || len(sourceScope) > 32 || len(sourceRef) > 128 || len(refs) > 200 {
-		return apperr.ErrContentInvalid
-	}
-	seen := map[string]struct{}{}
-	next := make([]UsageRef, 0, len(refs))
-	if err := s.store.TenantTx(ctx, tenantID, func(ctx context.Context, tx TxStore) error {
-		for _, ref := range refs {
-			if !validCode(ref.ItemCode) || !validVersion(ref.ItemVersion) {
-				return apperr.ErrContentInvalid
-			}
-			key := ref.ItemCode + "\x00" + ref.ItemVersion
-			if _, ok := seen[key]; ok {
-				continue
-			}
-			seen[key] = struct{}{}
-			item, err := tx.GetPublishedItemForUsage(ctx, tenantID, ref.ItemCode, ref.ItemVersion)
-			if isNoRows(err) {
-				return apperr.ErrContentVersionNotPublished
-			}
-			if err != nil {
-				return err
-			}
-			next = append(next, UsageRef{ID: s.ids.Generate(), TenantID: tenantID, ItemID: item.ID, ItemCode: item.Code, ItemVersion: item.Version, SourceScope: sourceScope, SourceRef: sourceRef})
-		}
-		return tx.ReplaceUsageRefs(ctx, tenantID, sourceScope, sourceRef, next)
-	}); err != nil {
-		if ae, ok := apperr.As(err); ok {
-			return ae
-		}
-		return apperr.ErrContentInvalid.WithCause(err)
-	}
-	return nil
 }
 
 // getItemWithBody 统一读取完整内容并映射错误。

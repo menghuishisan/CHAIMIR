@@ -6,7 +6,7 @@ import type { ReactNode } from 'react'
 import type { LucideIcon } from 'lucide-react'
 import { Button, Empty, Skeleton } from '@chaimir/ui'
 import type { AsyncResourceState } from '../../hooks/useAsyncResource'
-import { RESOURCE_LOAD_FAILED_MESSAGE } from '../../utils/userFacingError'
+import { RESOURCE_LOAD_FAILED_MESSAGE, traceHintText } from '../../utils/userFacingError'
 
 export interface ResourceStateProps<T> {
   /** useAsyncResource 的返回值 */
@@ -90,10 +90,11 @@ export interface ResourceErrorProps {
  */
 export function ResourceError({ message, traceId, onRetry }: ResourceErrorProps) {
   return (
-    <div className="flex flex-col items-center gap-3 rounded-lg border border-line bg-surface px-6 py-12 text-center">
+    // 抬起片(规范 §6.5.1 第 1 级):失败块与它替代的那张表同层,故同样不画边框
+    <div className="flex flex-col items-center gap-3 rounded-lg bg-surface px-6 py-12 text-center shadow-xs">
       <p className="text-base text-ink">{message}</p>
       {traceId ? (
-        <p className="font-mono text-xs text-ink-faint">如需帮助,请提供编号 {traceId}</p>
+        <p className="font-mono text-xs text-ink-sub">{traceHintText(traceId)}</p>
       ) : null}
       <Button variant="outline" onClick={onRetry}>
         重新加载

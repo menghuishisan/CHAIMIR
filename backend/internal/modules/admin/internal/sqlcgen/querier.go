@@ -10,7 +10,7 @@ import (
 
 type Querier interface {
 	CountAlertEvents(ctx context.Context, arg CountAlertEventsParams) (int64, error)
-	CountBackupRecords(ctx context.Context) (int64, error)
+	CountBackupRecords(ctx context.Context, status int16) (int64, error)
 	CountConfigChangeLogs(ctx context.Context, configID int64) (int64, error)
 	CreateAlertEvent(ctx context.Context, arg CreateAlertEventParams) (AlertEvent, error)
 	CreateAlertRule(ctx context.Context, arg CreateAlertRuleParams) (AlertRule, error)
@@ -23,6 +23,7 @@ type Querier interface {
 	HandleAlertEvent(ctx context.Context, arg HandleAlertEventParams) (AlertEvent, error)
 	ListAlertEvents(ctx context.Context, arg ListAlertEventsParams) ([]AlertEvent, error)
 	ListAlertRules(ctx context.Context, arg ListAlertRulesParams) ([]AlertRule, error)
+	// status 传 0 不按结果过滤;传具体结果供备份巡检按「已成功/已失败/进行中」取数与计数。
 	ListBackupRecords(ctx context.Context, arg ListBackupRecordsParams) ([]BackupRecord, error)
 	ListConfigChangeLogs(ctx context.Context, arg ListConfigChangeLogsParams) ([]ConfigChangeLog, error)
 	ListPlatformStatistics(ctx context.Context, arg ListPlatformStatisticsParams) ([]PlatformStatistic, error)

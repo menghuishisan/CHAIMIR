@@ -369,7 +369,7 @@ func itemListFilterFromQuery(c *gin.Context) (ItemListFilter, bool) {
 	if !ok {
 		return ItemListFilter{}, false
 	}
-	category, ok := httpx.QueryInt(c, "category", httpx.QueryIntRule{Default: 0, Min: 0})
+	category, ok := httpx.QueryID(c, "category", false)
 	if !ok {
 		return ItemListFilter{}, false
 	}
@@ -385,7 +385,7 @@ func itemListFilterFromQuery(c *gin.Context) (ItemListFilter, bool) {
 	if !ok {
 		return ItemListFilter{}, false
 	}
-	authorID, ok := httpx.QueryInt(c, "author", httpx.QueryIntRule{Default: 0, Min: 0})
+	authorID, ok := httpx.QueryID(c, "author", false)
 	if !ok {
 		return ItemListFilter{}, false
 	}

@@ -3,15 +3,31 @@
 // 刷新不丢(FE-7)。步进用 Steps 组件,不做成手填数字输入框
 // (旧前端把 wizard_step 做成数字输入是被审查列为 P0 的问题)。
 
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useState } from 'react'
 import { useNavigate } from 'react-router'
-import { CircleCheck, ClipboardCheck, FlaskConical, LayoutTemplate, Pencil, Plus, Send, Undo2 } from 'lucide-react'
-import { ExperimentStatus, type Experiment, type ValidationResult } from '@chaimir/api-client'
+import {
+  CircleCheck,
+  ClipboardCheck,
+  FlaskConical,
+  LayoutTemplate,
+  Pencil,
+  Plus,
+  Send,
+  Undo2,
+} from 'lucide-react'
+import {
+  EXPERIMENT_VALIDATION_LEVEL,
+  ExperimentStatus,
+  type Experiment,
+  type ValidationResult,
+} from '@chaimir/api-client'
 import {
   Badge,
   Breadcrumb,
   Button,
   Callout,
+  FilterBar,
+  FilterField,
   Modal,
   ModalBody,
   ModalContent,
@@ -32,7 +48,7 @@ import {
 } from '@chaimir/ui'
 import { api } from '../../../../app/api'
 import { ResourceState } from '../../../../components/ResourceState'
-import { usePagedResource } from '../../../../hooks'
+import { usePagedResource, useResourceTotal } from '../../../../hooks'
 import { formatShortDateTime } from '../../../../utils/formatters'
 import {
   experimentCollabModeLabel,
@@ -55,7 +71,10 @@ const STATUS_FILTERS = [
 export default function TeacherExperimentsPage() {
   const navigate = useNavigate()
   const [statusFilter, setStatusFilter] = useState<string>('')
-  const [validateResult, setValidateResult] = useState<{ experiment: Experiment; result: ValidationResult }>()
+  const [validateResult, setValidateResult] = useState<{
+    experiment: Experiment
+    result: ValidationResult
+  }>()
   const [publishTarget, setPublishTarget] = useState<Experiment>()
   const [working, setWorking] = useState(false)
   const [actionError, setActionError] = useState<string>()
@@ -66,7 +85,7 @@ export default function TeacherExperimentsPage() {
         status: statusFilter ? (Number(statusFilter) as ExperimentStatus) : undefined,
         ...params,
       }),
-    [statusFilter],
+    [statusFilter]
   )
 
   /** validateExperiment 发布前校验:把问题列清楚,而不是让发布直接失败。 */
@@ -113,17 +132,25 @@ export default function TeacherExperimentsPage() {
         setActionError(userFacingErrorMessage(error, '下架没有成功,请稍后重试。'))
       }
     },
-    [experiments],
+    [experiments]
   )
 
-  const stats = useMemo(() => {
-    const list = experiments.data ? experiments.data.list : []
-    return {
-      published: list.filter((item) => item.status === ExperimentStatus.PUBLISHED).length,
-      draft: list.filter((item) => item.status === ExperimentStatus.DRAFT).length,
-      checkpoints: list.reduce((sum, item) => sum + item.components.checkpoints.length, 0),
-    }
-  }, [experiments.data])
+  // 指标带取服务端全量口径,不随下方状态筛选变化。
+  // 「检查点合计」需要跨全部实验累加,服务端没有这个聚合,故不做这张卡:
+  // 每个实验各有多少检查点在列表行里可见(规范 §6.5 指标带口径)。
+  const totalCount = useResourceTotal((params) => api.experiment.getExperiments(params), [])
+  const publishedCount = useResourceTotal(
+    (params) => api.experiment.getExperiments({ status: ExperimentStatus.PUBLISHED, ...params }),
+    []
+  )
+  const draftCount = useResourceTotal(
+    (params) => api.experiment.getExperiments({ status: ExperimentStatus.DRAFT, ...params }),
+    []
+  )
+  const unpublishedCount = useResourceTotal(
+    (params) => api.experiment.getExperiments({ status: ExperimentStatus.UNPUBLISHED, ...params }),
+    []
+  )
 
   const columns: TableColumn<Experiment>[] = [
     {
@@ -196,7 +223,12 @@ export default function TeacherExperimentsPage() {
             报告与小组
           </Button>
           {experiment.status === ExperimentStatus.PUBLISHED ? (
-            <Button variant="ghost" size="sm" leftIcon={Undo2} onClick={() => void unpublishExperiment(experiment)}>
+            <Button
+              variant="ghost"
+              size="sm"
+              leftIcon={Undo2}
+              onClick={() => void unpublishExperiment(experiment)}
+            >
               下架
             </Button>
           ) : (
@@ -223,7 +255,11 @@ export default function TeacherExperimentsPage() {
         description="配置实验的代码环境、仿真场景、阶段与检查点。发布前会先校验依赖是否完整。"
         icon={LayoutTemplate}
         actions={
-          <Button variant="primary" leftIcon={Plus} onClick={() => navigate('/teacher/experiments/new')}>
+          <Button
+            variant="primary"
+            leftIcon={Plus}
+            onClick={() => navigate('/teacher/experiments/new')}
+          >
             新建实验
           </Button>
         }
@@ -231,27 +267,37 @@ export default function TeacherExperimentsPage() {
 
       <PageSection>
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <Stat label="实验总数" value={experiments.total} icon={FlaskConical} />
-          <Stat label="已发布" value={stats.published} icon={Send} hint="学生可进入" />
-          <Stat label="草稿" value={stats.draft} icon={Pencil} />
-          <Stat label="检查点合计" value={stats.checkpoints} icon={CircleCheck} />
+          <Stat
+            label="实验总数"
+            value={totalCount ?? '—'}
+            icon={FlaskConical}
+            hint="不受下方筛选影响"
+          />
+          <Stat label="已发布" value={publishedCount ?? '—'} icon={Send} hint="学生可进入" />
+          <Stat label="草稿" value={draftCount ?? '—'} icon={Pencil} />
+          <Stat
+            label="已下架"
+            value={unpublishedCount ?? '—'}
+            icon={CircleCheck}
+            hint="学生不可再进入"
+          />
         </div>
       </PageSection>
 
-      <PageSection
-        title="实验列表"
-        description={`共 ${experiments.total} 个实验`}
-        actions={
-          <SegmentedControl
-            aria-label="按实验状态筛选"
-            size="sm"
-            options={STATUS_FILTERS.map((item) => ({ value: item.value, label: item.label }))}
-            value={statusFilter}
-            onValueChange={setStatusFilter}
-          />
-        }
-      >
+      <PageSection title="实验列表" description={`共 ${experiments.total} 个实验`}>
         <div className="flex flex-col gap-4">
+          <FilterBar label="实验筛选">
+            <FilterField label="实验状态" group>
+              <SegmentedControl
+                aria-label="按实验状态筛选"
+                size="sm"
+                options={STATUS_FILTERS.map((item) => ({ value: item.value, label: item.label }))}
+                value={statusFilter}
+                onValueChange={setStatusFilter}
+              />
+            </FilterField>
+          </FilterBar>
+
           {actionError ? <Callout tone="danger">{actionError}</Callout> : null}
 
           <ResourceState
@@ -259,11 +305,17 @@ export default function TeacherExperimentsPage() {
             emptyIcon={LayoutTemplate}
             emptyTitle={statusFilter ? '这个状态下没有实验' : '还没有实验'}
             emptyDescription={
-              statusFilter ? '换个状态看看。' : '新建实验后配置环境与检查点,校验通过即可发布给学生。'
+              statusFilter
+                ? '换个状态看看。'
+                : '新建实验后配置环境与检查点,校验通过即可发布给学生。'
             }
             emptyAction={
               statusFilter ? undefined : (
-                <Button variant="primary" leftIcon={Plus} onClick={() => navigate('/teacher/experiments/new')}>
+                <Button
+                  variant="primary"
+                  leftIcon={Plus}
+                  onClick={() => navigate('/teacher/experiments/new')}
+                >
                   新建实验
                 </Button>
               )
@@ -313,8 +365,14 @@ export default function TeacherExperimentsPage() {
                   <ul className="flex flex-col gap-2">
                     {validateResult.result.issues.map((issue, index) => (
                       <li key={index} className="flex items-start gap-2 text-sm">
-                        <Badge tone={issue.level === 'error' ? 'danger' : 'warning'}>
-                          {issue.level === 'error' ? '必须修正' : '建议检查'}
+                        <Badge
+                          tone={
+                            issue.level === EXPERIMENT_VALIDATION_LEVEL.ERROR ? 'danger' : 'warning'
+                          }
+                        >
+                          {issue.level === EXPERIMENT_VALIDATION_LEVEL.ERROR
+                            ? '必须修正'
+                            : '建议检查'}
                         </Badge>
                         <span className="min-w-0 text-ink">{issue.message}</span>
                       </li>
@@ -339,7 +397,10 @@ export default function TeacherExperimentsPage() {
         </ModalContent>
       </Modal>
 
-      <Modal open={publishTarget !== undefined} onOpenChange={(open) => !open && setPublishTarget(undefined)}>
+      <Modal
+        open={publishTarget !== undefined}
+        onOpenChange={(open) => !open && setPublishTarget(undefined)}
+      >
         <ModalContent size="sm">
           <ModalHeader>
             <ModalTitle>确认发布实验</ModalTitle>

@@ -10,7 +10,6 @@
 import { useCallback, useMemo, useState } from 'react'
 import {
   Bug,
-  CircleCheck,
   Database,
   FlaskConical,
   Plus,
@@ -34,6 +33,8 @@ import {
   CardHeader,
   DescriptionList,
   Empty,
+  FilterBar,
+  FilterField,
   PageHeader,
   PageScaffold,
   PageSection,
@@ -48,7 +49,7 @@ import {
 } from '@chaimir/ui'
 import { api } from '../../../../app/api'
 import { ResourceState } from '../../../../components/ResourceState'
-import { useAsyncResource, usePagedResource } from '../../../../hooks'
+import { useAsyncResource, usePagedResource, useResourceTotal } from '../../../../hooks'
 import { formatDateTime } from '../../../../utils/formatters'
 import {
   VULN_SOURCE_CONFIG_FIELDS,
@@ -123,14 +124,18 @@ export default function TeacherVulnWorkshopPage() {
     [problems],
   )
 
-  const stats = useMemo(() => {
-    const list = problems.data ? problems.data.list : []
-    return {
-      passed: list.filter((item) => item.prevalidate_status === VulnPrevalidateStatus.PASSED).length,
-      pending: list.filter((item) => item.prevalidate_status === VulnPrevalidateStatus.PENDING).length,
-      finalized: list.filter((item) => item.status === VulnProblemStatus.FINALIZED).length,
-    }
-  }, [problems.data])
+  // 指标带取服务端全量口径,不随下方筛选变化。
+  // 预验证状态没有服务端筛选参数,故不做「验证通过/尚未验证」两张卡:
+  // 用当前页数出来的数字在总量更大时是错数,验证状态本身在表格里逐条可见(规范 §6.5)。
+  const totalCount = useResourceTotal((params) => api.contest.listVulnProblems(params), [])
+  const draftCount = useResourceTotal(
+    (params) => api.contest.listVulnProblems({ status: VulnProblemStatus.DRAFT, ...params }),
+    [],
+  )
+  const finalizedCount = useResourceTotal(
+    (params) => api.contest.listVulnProblems({ status: VulnProblemStatus.FINALIZED, ...params }),
+    [],
+  )
 
   const columns: TableColumn<VulnProblem>[] = [
     {
@@ -243,11 +248,10 @@ export default function TeacherVulnWorkshopPage() {
       />
 
       <PageSection>
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <Stat label="漏洞题草稿" value={problems.total} icon={Bug} />
-          <Stat label="验证通过" value={stats.passed} icon={CircleCheck} hint="可固化到题库" />
-          <Stat label="尚未验证" value={stats.pending} icon={FlaskConical} />
-          <Stat label="已固化" value={stats.finalized} icon={Database} hint="可作为赛题引用" />
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          <Stat label="漏洞题总数" value={totalCount ?? '—'} icon={Bug} hint="不受下方筛选影响" />
+          <Stat label="草稿" value={draftCount ?? '—'} icon={FlaskConical} hint="预验证通过后可固化" />
+          <Stat label="已固化" value={finalizedCount ?? '—'} icon={Database} hint="可作为赛题引用" />
         </div>
       </PageSection>
 
@@ -293,29 +297,31 @@ export default function TeacherVulnWorkshopPage() {
       <PageSection
         title="漏洞题草稿"
         description={`共 ${problems.total} 条草稿。验证通过后固化进题库,才能作为赛题引用。`}
-        actions={
-          <div className="flex flex-wrap items-end gap-2">
-            <SegmentedControl
-              aria-label="按草稿状态筛选"
-              size="sm"
-              options={STATUS_FILTERS.map((item) => ({ value: item.value, label: item.label }))}
-              value={statusFilter}
-              onValueChange={setStatusFilter}
-            />
-            <Select
-              aria-label="按来源筛选"
-              options={[
-                { value: '', label: '全部来源' },
-                ...sourceList.map((source) => ({ value: source.id, label: source.name })),
-              ]}
-              value={sourceFilter}
-              placeholder="全部来源"
-              onValueChange={setSourceFilter}
-            />
-          </div>
-        }
       >
         <div className="flex flex-col gap-4">
+          <FilterBar label="漏洞题草稿筛选">
+            <FilterField label="草稿状态" group>
+              <SegmentedControl
+                aria-label="按草稿状态筛选"
+                size="sm"
+                options={STATUS_FILTERS.map((item) => ({ value: item.value, label: item.label }))}
+                value={statusFilter}
+                onValueChange={setStatusFilter}
+              />
+            </FilterField>
+            <FilterField label="来源" htmlFor="vuln-source-filter">
+              <Select
+                id="vuln-source-filter"
+                options={[
+                  { value: '', label: '全部来源' },
+                  ...sourceList.map((source) => ({ value: source.id, label: source.name })),
+                ]}
+                value={sourceFilter}
+                placeholder="全部来源"
+                onValueChange={setSourceFilter}
+              />
+            </FilterField>
+          </FilterBar>
           {actionError ? <Callout tone="danger">{actionError}</Callout> : null}
 
           <ResourceState

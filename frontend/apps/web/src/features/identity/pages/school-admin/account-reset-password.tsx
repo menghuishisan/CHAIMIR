@@ -106,7 +106,7 @@ export function ResetPasswordModal({ account, onClose, onDone }: ResetPasswordMo
             <Button type="button" variant="outline" onClick={onClose}>
               取消
             </Button>
-            <Button type="submit" variant="seal" loading={working}>
+            <Button type="submit" variant="primary" loading={working}>
               重置密码
             </Button>
           </ModalFooter>

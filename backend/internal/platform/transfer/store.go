@@ -19,7 +19,7 @@ import (
 type Store interface {
 	CreateTask(ctx context.Context, task Task) (Task, error)
 	GetTask(ctx context.Context, tenantID, taskID int64) (Task, error)
-	ListTasks(ctx context.Context, query ListTasksQuery) ([]Task, error)
+	ListTasks(ctx context.Context, query ListTasksQuery) ([]Task, int64, error)
 	UpdateTask(ctx context.Context, task Task) (Task, error)
 	ClaimDueTasks(ctx context.Context, tenantID int64, nowAt time.Time, limit int32) ([]Task, error)
 }
@@ -117,14 +117,17 @@ func (s *store) GetTask(ctx context.Context, tenantID, taskID int64) (Task, erro
 	return out, nil
 }
 
-// ListTasks 查询当前账号名下的导入导出任务。
-func (s *store) ListTasks(ctx context.Context, query ListTasksQuery) ([]Task, error) {
+// ListTasks 查询当前账号名下的导入导出任务,并在同一事务内取回符合条件的总数。
+// 总数与当前页在同一事务读取:分两次请求容易在任务状态推进时给出自相矛盾的分页。
+func (s *store) ListTasks(ctx context.Context, query ListTasksQuery) ([]Task, int64, error) {
 	if s.db == nil {
-		return nil, fmt.Errorf("transfer store 缺少 database")
+		return nil, 0, fmt.Errorf("transfer store 缺少 database")
 	}
 	var out []Task
+	var total int64
 	err := s.withTaskTx(ctx, query.TenantID, func(ctx context.Context, tx pgx.Tx) error {
-		rows, err := sqlcgen.New(tx).ListTransferTasks(ctx, sqlcgen.ListTransferTasksParams{
+		queries := sqlcgen.New(tx)
+		rows, err := queries.ListTransferTasks(ctx, sqlcgen.ListTransferTasksParams{
 			TenantID:  query.TenantID,
 			AccountID: query.AccountID,
 			Column3:   string(query.Channel),
@@ -135,13 +138,22 @@ func (s *store) ListTasks(ctx context.Context, query ListTasksQuery) ([]Task, er
 		if err != nil {
 			return err
 		}
+		total, err = queries.CountTransferTasks(ctx, sqlcgen.CountTransferTasksParams{
+			TenantID:  query.TenantID,
+			AccountID: query.AccountID,
+			Column3:   string(query.Channel),
+			Column4:   string(query.Status),
+		})
+		if err != nil {
+			return err
+		}
 		out = tasksFromRows(rows)
 		return nil
 	})
 	if err != nil {
-		return nil, mapStoreError(err)
+		return nil, 0, mapStoreError(err)
 	}
-	return out, nil
+	return out, total, nil
 }
 
 // UpdateTask 更新导入导出任务状态、重试信息和产物引用。

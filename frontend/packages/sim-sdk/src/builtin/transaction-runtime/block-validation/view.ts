@@ -20,7 +20,6 @@ export function renderBlockValidationView(state: BlockValidationState): Teaching
       intent: 'observe',
       what: state.explanation.effect,
       why: state.explanation.reason,
-      watch: summary,
     },
     focus: {
       primary: selectedOrFrameFocus(state.selectedElementId, ['block-validation-pipeline']),

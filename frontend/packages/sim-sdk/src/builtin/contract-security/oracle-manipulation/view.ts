@@ -21,7 +21,6 @@ export function renderOracleView(state: OracleState): TeachingFrame {
       intent: 'observe',
       what: state.explanation.effect,
       why: state.explanation.reason,
-      watch: summary,
     },
     focus: {
       primary: selectedOrFrameFocus(state.selectedElementId, ['oracle-graph']),

@@ -226,7 +226,7 @@ function AnnouncementComposeModal({ courseId, onClose, onPosted }: AnnouncementC
             <Button type="button" variant="outline" onClick={onClose}>
               取消
             </Button>
-            <Button type="submit" variant="seal" leftIcon={Send} loading={working}>
+            <Button type="submit" variant="primary" leftIcon={Send} loading={working}>
               发布公告
             </Button>
           </ModalFooter>

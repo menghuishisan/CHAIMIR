@@ -4,7 +4,7 @@
 // 克隆是唯一的复用方式:跨租户不能直接引用他校题目(否则他校改题会影响本校作业),
 // 也不能读他校题目的答案 —— 题面接口已剥离 answer/judge_config/flag,GET full 只对本租户作者开放。
 
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useState } from 'react'
 import { Copy, Eye, Search, Share2 } from 'lucide-react'
 import { ContentType, type ContentItem } from '@chaimir/api-client'
 import {
@@ -13,6 +13,8 @@ import {
   Button,
   Callout,
   DescriptionList,
+  FilterBar,
+  FilterField,
   FormField,
   IconButton,
   Input,
@@ -29,7 +31,6 @@ import {
   Pagination,
   SegmentedControl,
   Skeleton,
-  Stat,
   Table,
   toast,
   type TableColumn,
@@ -72,21 +73,10 @@ export default function TeacherSharedLibraryPage() {
     [submittedKeyword, typeFilter],
   )
 
-  const handleSearch = useCallback(
-    (event: React.FormEvent<HTMLFormElement>) => {
-      event.preventDefault()
-      setSubmittedKeyword(keyword.trim())
-    },
-    [keyword],
-  )
-
-  const stats = useMemo(() => {
-    const list = shared.data ? shared.data.list : []
-    return {
-      types: new Set(list.map((item) => item.type)).size,
-      knowledgePoints: new Set(list.flatMap((item) => item.knowledge_points)).size,
-    }
-  }, [shared.data])
+  // FilterBar 自己是 form 并接住回车,故这里只需要提交动作本身
+  const handleSearch = useCallback(() => {
+    setSubmittedKeyword(keyword.trim())
+  }, [keyword])
 
   const columns: TableColumn<ContentItem>[] = [
     {
@@ -174,79 +164,69 @@ export default function TeacherSharedLibraryPage() {
         icon={Share2}
       />
 
-      <PageSection>
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          <Stat label="共享题目" value={shared.total} icon={Share2} />
-          <Stat label="涵盖类型" value={stats.types} icon={Share2} />
-          <Stat label="涵盖知识点" value={stats.knowledgePoints} icon={Search} />
-        </div>
-      </PageSection>
-
-      <PageSection
-        title="共享题目"
-        description={`共 ${shared.total} 道题目`}
-        actions={
-          <div className="flex flex-wrap items-end gap-2">
-            <SegmentedControl
-              aria-label="按题目类型筛选"
-              size="sm"
-              options={TYPE_FILTERS}
-              value={typeFilter}
-              onValueChange={setTypeFilter}
-            />
-            <form onSubmit={handleSearch} className="flex items-end gap-2">
-              <FormField label="按标题搜索" className="mb-0">
-                <Input
-                  value={keyword}
-                  leftIcon={Search}
-                  placeholder="输入关键词"
-                  onChange={(event) => setKeyword(event.target.value)}
-                />
-              </FormField>
-              <Button type="submit" variant="outline">
-                搜索
-              </Button>
-            </form>
-          </div>
-        }
-      >
-        <ResourceState
-          resource={shared}
-          emptyIcon={Share2}
-          emptyTitle={submittedKeyword || typeFilter ? '没有匹配的共享题目' : '共享资源库还是空的'}
-          emptyDescription={
-            submittedKeyword || typeFilter
-              ? '换个条件再试,或清空筛选查看全部。'
-              : '其他学校把题目共享到资源库后会显示在这里。'
-          }
-          emptyAction={
-            submittedKeyword || typeFilter ? (
-              <Button
-                variant="outline"
-                onClick={() => {
-                  setKeyword('')
-                  setSubmittedKeyword('')
-                  setTypeFilter('')
-                }}
-              >
-                清空筛选
-              </Button>
-            ) : undefined
-          }
-          skeleton={<Table columns={columns} data={[]} rowKey={() => ''} loading />}
-        >
-          {(page) => (
-            <div className="flex flex-col gap-4">
-              <Table columns={columns} data={page.list} rowKey={(item) => item.id} />
-              <Pagination
-                page={shared.page}
-                pageSize={shared.pageSize}
-                total={shared.total}
-                onPageChange={shared.setPage}
+      {/* 不做指标带:共享题目数已在下方分组说明里给出,而「涵盖类型/涵盖知识点」需要跨全库去重统计,
+          服务端没有这个聚合,用当前页数出来就是错数(规范 §6.5);类型与知识点在每一行里可见。 */}
+      <PageSection title="共享题目" description={`共 ${shared.total} 道题目`}>
+        <div className="flex flex-col gap-4">
+          <FilterBar label="共享题目筛选" onSubmit={handleSearch} submitLabel="搜索">
+            <FilterField label="题目类型" group>
+              <SegmentedControl
+                aria-label="按题目类型筛选"
+                size="sm"
+                options={TYPE_FILTERS}
+                value={typeFilter}
+                onValueChange={setTypeFilter}
               />
-            </div>
-          )}
-        </ResourceState>
+            </FilterField>
+            <FilterField label="标题关键词" htmlFor="shared-keyword">
+              <Input
+                id="shared-keyword"
+                value={keyword}
+                leftIcon={Search}
+                placeholder="输入关键词"
+                onChange={(event) => setKeyword(event.target.value)}
+              />
+            </FilterField>
+          </FilterBar>
+
+          <ResourceState
+            resource={shared}
+            emptyIcon={Share2}
+            emptyTitle={submittedKeyword || typeFilter ? '没有匹配的共享题目' : '共享资源库还是空的'}
+            emptyDescription={
+              submittedKeyword || typeFilter
+                ? '换个条件再试,或清空筛选查看全部。'
+                : '其他学校把题目共享到资源库后会显示在这里。'
+            }
+            emptyAction={
+              submittedKeyword || typeFilter ? (
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    setKeyword('')
+                    setSubmittedKeyword('')
+                    setTypeFilter('')
+                  }}
+                >
+                  清空筛选
+                </Button>
+              ) : undefined
+            }
+            skeleton={<Table columns={columns} data={[]} rowKey={() => ''} loading />}
+          >
+            {(page) => (
+              <div className="flex flex-col gap-4">
+                <Table columns={columns} data={page.list} rowKey={(item) => item.id} />
+                <Pagination
+                  page={shared.page}
+                  pageSize={shared.pageSize}
+                  total={shared.total}
+                  onPageChange={shared.setPage}
+                />
+              </div>
+            )}
+          </ResourceState>
+        </div>
       </PageSection>
 
       {previewTarget ? (
@@ -437,7 +417,7 @@ function CloneSharedModal({ item, onClose, onCloned }: CloneSharedModalProps) {
           <Button variant="outline" onClick={onClose}>
             取消
           </Button>
-          <Button variant="seal" leftIcon={Copy} loading={working} onClick={() => void submit()}>
+          <Button variant="primary" leftIcon={Copy} loading={working} onClick={() => void submit()}>
             确认克隆
           </Button>
         </ModalFooter>

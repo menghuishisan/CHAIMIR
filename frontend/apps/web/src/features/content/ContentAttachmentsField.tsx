@@ -11,6 +11,7 @@ import { FileUp, Paperclip, Trash2, Download } from 'lucide-react'
 import type { ContentAttachment } from '@chaimir/api-client'
 import { Button, Callout, IconButton } from '@chaimir/ui'
 import { api } from '../../app/api'
+import { downloadAttachment } from '../../utils/downloadAttachment'
 import { formatFileSize } from '../../utils/formatters'
 import { userFacingErrorMessage } from '../../utils/userFacingError'
 
@@ -65,12 +66,7 @@ export function ContentAttachmentsField({
           object_ref: attachment.object_ref,
         })
         const file = await api.storage.consumeGrant(grant.token)
-        const url = URL.createObjectURL(file.blob)
-        const link = document.createElement('a')
-        link.href = url
-        link.download = file.fileName || attachment.file_name
-        link.click()
-        URL.revokeObjectURL(url)
+        downloadAttachment(file)
       } catch (downloadError) {
         setError(userFacingErrorMessage(downloadError, '附件没能下载,请稍后重试。'))
       }
@@ -85,7 +81,7 @@ export function ContentAttachmentsField({
           {attachments.map((attachment) => (
             <li
               key={attachment.object_ref}
-              className="flex items-center gap-2 rounded-md border border-line px-2 py-1.5"
+              className="flex items-center gap-2 well px-2 py-1.5"
             >
               <Paperclip aria-hidden="true" className="size-4 shrink-0 text-ink-faint" />
               <span className="min-w-0 flex-1 truncate text-sm text-ink">{attachment.file_name}</span>

@@ -8,7 +8,7 @@
 // 表单也没有「运行方式」:教师提交的场景一律在平台的隔离容器内运行,执行位置按代码来源派生
 // (见 docs/04-仿真可视化引擎/02-架构设计.md §8),不是提交时的可选项。
 
-import { useMemo, useState } from 'react'
+import { useState } from 'react'
 import { CircleCheck, FileSearch, Network, Pencil, Plus, Upload } from 'lucide-react'
 import {
   SIM_COMPUTE,
@@ -21,6 +21,8 @@ import {
   Breadcrumb,
   Button,
   Callout,
+  FilterBar,
+  FilterField,
   PageHeader,
   PageScaffold,
   PageSection,
@@ -33,7 +35,7 @@ import {
 } from '@chaimir/ui'
 import { api } from '../../../../app/api'
 import { ResourceState } from '../../../../components/ResourceState'
-import { usePagedResource } from '../../../../hooks'
+import { usePagedResource, useResourceTotal } from '../../../../hooks'
 import { formatShortDateTime } from '../../../../utils/formatters'
 import {
   simCategoryLabel,
@@ -89,14 +91,28 @@ export default function TeacherSimulationsPage() {
     [mine, statusFilter],
   )
 
-  const stats = useMemo(() => {
-    const list = packages.data ? packages.data.list : []
-    return {
-      published: list.filter((item) => item.status === SIM_PACKAGE_STATUS.PUBLISHED).length,
-      reviewing: list.filter((item) => item.status === SIM_PACKAGE_STATUS.REVIEWING).length,
-      rejected: list.filter((item) => item.status === SIM_PACKAGE_STATUS.REJECTED).length,
-    }
-  }, [packages.data])
+  // 指标带取服务端全量口径,且固定「我提交的」口径,不随下方状态筛选变化:
+  // 它回答「我提交的场景走到哪一步了」。全部可用场景那一档没有可分桶的服务端聚合,
+  // 数量由下方分组说明的 total 承载(规范 §6.5:拿不到全量聚合就不做这张卡)。
+  const mineTotalCount = useResourceTotal(
+    (params) => api.sim.getPackages({ mine: true, ...params }),
+    [],
+  )
+  const minePublishedCount = useResourceTotal(
+    (params) =>
+      api.sim.getPackages({ mine: true, status: SIM_PACKAGE_STATUS.PUBLISHED, ...params }),
+    [],
+  )
+  const mineReviewingCount = useResourceTotal(
+    (params) =>
+      api.sim.getPackages({ mine: true, status: SIM_PACKAGE_STATUS.REVIEWING, ...params }),
+    [],
+  )
+  const mineRejectedCount = useResourceTotal(
+    (params) =>
+      api.sim.getPackages({ mine: true, status: SIM_PACKAGE_STATUS.REJECTED, ...params }),
+    [],
+  )
 
   const columns: TableColumn<SimPackageMeta>[] = [
     {
@@ -174,14 +190,14 @@ export default function TeacherSimulationsPage() {
 
       <PageSection>
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <Stat label={mine ? '我提交的场景' : '可用场景'} value={packages.total} icon={Network} />
-          <Stat label="已上架" value={stats.published} icon={CircleCheck} hint="学生可使用" />
-          <Stat label="审核中" value={stats.reviewing} icon={Upload} hint="等待平台审核" />
+          <Stat label="我提交的场景" value={mineTotalCount ?? '—'} icon={Network} hint="不受下方筛选影响" />
+          <Stat label="已上架" value={minePublishedCount ?? '—'} icon={CircleCheck} hint="学生可使用" />
+          <Stat label="审核中" value={mineReviewingCount ?? '—'} icon={Upload} hint="等待平台审核" />
           <Stat
             label="已退回"
-            value={stats.rejected}
+            value={mineRejectedCount ?? '—'}
             icon={Pencil}
-            hint={stats.rejected > 0 ? '按审核意见修改后重新提交' : '暂无退回'}
+            hint={mineRejectedCount === 0 ? '暂无退回' : '按审核意见修改后重新提交'}
           />
         </div>
       </PageSection>
@@ -193,31 +209,33 @@ export default function TeacherSimulationsPage() {
             ? `共 ${packages.total} 个场景。草稿与已退回的可以更新后重新提交。`
             : `共 ${packages.total} 个已上架场景。这些场景可以在实验编排里作为组件引用。`
         }
-        actions={
-          <div className="flex flex-wrap items-center gap-2">
-            <SegmentedControl
-              aria-label="切换场景视角"
-              size="sm"
-              options={SCOPE_FILTERS.map((item) => ({ value: item.value, label: item.label }))}
-              value={scope}
-              onValueChange={(value) => {
-                setScope(value)
-                setStatusFilter('')
-              }}
-            />
-            {mine ? (
-              <SegmentedControl
-                aria-label="按场景状态筛选"
-                size="sm"
-                options={STATUS_FILTERS.map((item) => ({ value: item.value, label: item.label }))}
-                value={statusFilter}
-                onValueChange={setStatusFilter}
-              />
-            ) : null}
-          </div>
-        }
       >
         <div className="flex flex-col gap-4">
+          <FilterBar label="场景包筛选">
+            <FilterField label="场景视角" group>
+              <SegmentedControl
+                aria-label="切换场景视角"
+                size="sm"
+                options={SCOPE_FILTERS.map((item) => ({ value: item.value, label: item.label }))}
+                value={scope}
+                onValueChange={(value) => {
+                  setScope(value)
+                  setStatusFilter('')
+                }}
+              />
+            </FilterField>
+            {mine ? (
+              <FilterField label="场景状态" group>
+                <SegmentedControl
+                  aria-label="按场景状态筛选"
+                  size="sm"
+                  options={STATUS_FILTERS.map((item) => ({ value: item.value, label: item.label }))}
+                  value={statusFilter}
+                  onValueChange={setStatusFilter}
+                />
+              </FilterField>
+            ) : null}
+          </FilterBar>
           {mine ? null : (
             <Callout tone="info">
               这里是全平台已上架的场景,包含平台内置场景。它们由各自的提交者维护,你只能查看。

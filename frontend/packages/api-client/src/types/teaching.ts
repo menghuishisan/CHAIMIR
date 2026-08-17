@@ -72,7 +72,7 @@ export interface Lesson {
   chapter_id: SnowflakeID
   title: string
   content_type: LessonContentType
-  content_ref: Record<string, unknown>
+  content_ref: LessonContentRef
   sort: number
   created_at: string
   updated_at: string
@@ -95,8 +95,27 @@ export interface LessonMaterialAccess {
 export interface LessonRequest {
   title: string
   content_type: LessonContentType
-  content_ref: Record<string, unknown>
+  content_ref: LessonContentRefRequest
   sort: number
+}
+
+/** LessonContentRef 是课时读取时按 content_type 解释的固定引用结构。 */
+export interface LessonContentRef {
+  file_name?: string
+  size?: number
+  content_type?: string
+  markdown?: string
+  experiment_id?: SnowflakeID
+  package_code?: string
+  version?: string
+}
+
+/** LessonContentRefRequest 不接受对象存储引用;视频和附件只能走上传接口。 */
+export interface LessonContentRefRequest {
+  markdown?: string
+  experiment_id?: SnowflakeID
+  package_code?: string
+  version?: string
 }
 
 /** 封面上传结果:object_ref 随创建或编辑课程一起提交才会生效。 */
@@ -206,6 +225,11 @@ export interface Draft {
   content: Record<string, unknown>
   updated_at: string
   exists: boolean
+}
+
+/** DraftSave 是服务端草稿保存成功后的固定响应。 */
+export interface DraftSave {
+  updated_at: string
 }
 
 export interface Submission {

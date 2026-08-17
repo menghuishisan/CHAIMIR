@@ -19,6 +19,8 @@ import {
   CardBody,
   CardHeader,
   DescriptionList,
+  FilterBar,
+  FilterField,
   PageHeader,
   PageScaffold,
   PageSection,
@@ -31,6 +33,7 @@ import { api } from '../../../../app/api'
 import { ResourceState } from '../../../../components/ResourceState'
 import { useAsyncResource } from '../../../../hooks'
 import {
+  ecoTagsLabel,
   sandboxToolKindLabel,
   toolStatusLabel,
   toolStatusTone,
@@ -105,17 +108,20 @@ export default function PlatformSandboxToolsPage() {
       <PageSection
         title="工具定义"
         description="按类型筛选。不再使用的工具改成停用,不做删除 —— 历史环境仍引用着它。"
-        actions={
-          <SegmentedControl
-            aria-label="按工具类型筛选"
-            size="sm"
-            options={KIND_FILTERS.map((item) => ({ value: item.value, label: item.label }))}
-            value={kindFilter}
-            onValueChange={setKindFilter}
-          />
-        }
       >
         <div className="flex flex-col gap-4">
+          <FilterBar label="工具筛选">
+            <FilterField label="工具类型" group>
+              <SegmentedControl
+                aria-label="按工具类型筛选"
+                size="sm"
+                options={KIND_FILTERS.map((item) => ({ value: item.value, label: item.label }))}
+                value={kindFilter}
+                onValueChange={setKindFilter}
+              />
+            </FilterField>
+          </FilterBar>
+
           <ResourceState
             resource={tools}
             emptyIcon={Package}
@@ -169,7 +175,7 @@ function ToolCard({ tool }: { tool: SandboxToolDefinition }) {
   const items = useMemo(() => {
     const base = [
       { term: '工具编码', description: tool.code, mono: true },
-      { term: '适用生态', description: tool.eco_tags.join('、') || '不限生态' },
+      { term: '适用生态', description: ecoTagsLabel(tool.eco_tags) },
     ]
     switch (tool.kind) {
       case SandboxToolKind.BUILTIN:
@@ -185,7 +191,10 @@ function ToolCard({ tool }: { tool: SandboxToolDefinition }) {
         const policy = tool.resource_spec.command_policy
         return [
           ...base,
-          { term: '允许的命令', description: (policy?.allowed_commands ?? []).join('、') || '未配置' },
+          {
+            term: '允许的 argv',
+            description: (policy?.allowed_argv ?? []).map((argv) => JSON.stringify(argv)).join('、') || '未配置',
+          },
           {
             term: '超时设置',
             description: policy

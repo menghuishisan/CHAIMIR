@@ -19,11 +19,12 @@ export interface NetworkMessageView {
   status: 'sent' | 'delivered' | 'dropped';
   endAt?: number;
   detail?: string;
+  // label 是过程短名,可省略:与元素名或 detail 重复时不要写(见 ProcessSpan)。
   process?: {
     startedAt: number;
     endedAt: number;
     progress: number;
-    label: string;
+    label?: string;
   };
 }
 
@@ -61,7 +62,7 @@ export function pipelineSteps(phases: Array<{ id: string; label: string; detail:
 export function processNetworkMessage(currentTick: number, message: NetworkMessageView, detail: string): NetworkMessageView {
   const endAt = message.endAt ?? message.at + 1;
   const progress = Math.min(1, Math.max(0, (currentTick - message.at) / Math.max(1, endAt - message.at)));
-  return { ...message, endAt, detail, process: { startedAt: message.at, endedAt: endAt, progress, label: message.label } };
+  return { ...message, endAt, detail, process: { startedAt: message.at, endedAt: endAt, progress } };
 }
 
 /**

@@ -99,11 +99,13 @@ export function Table<T>({
   };
 
   return (
-    // 容器内独立横向滚动(overflow-x-auto):列过宽时只滚表格,不带动整页
-    <div className={cn("overflow-x-auto rounded-lg border border-line bg-surface", className)}>
+    // 容器内独立横向滚动(overflow-x-auto):列过宽时只滚表格,不带动整页。
+    // 整表是抬起片(规范 §6.5.1 第 1 级):不画外框,层次靠底色与落影;
+    // 表头与行的分界由表头下边线和行分隔线表达。
+    <div className={cn("overflow-x-auto rounded-lg bg-surface shadow-xs", className)}>
       <table className="w-full border-collapse">
         <thead>
-          <tr className="bg-surface-sunken">
+          <tr className="border-b border-line bg-surface-sunken">
             {columns.map((column) => {
               const isSorted = sort?.key === column.key;
               return (

@@ -23,7 +23,6 @@ import type { RoleNavigationConfig } from '../../layouts/main/navigation'
 
 export const platformAdminNavigation: RoleNavigationConfig = {
   ...ROLE_ROUTES.platformAdmin,
-  brandName: 'Chaimir 平台管理',
   // 平台管理员没有租户,M10 站内信在数据模型层不成立(notification.tenant_id NOT NULL),
   // 因此顶栏不出现通知铃铛;平台是公告发布方,公告能力落在侧栏「系统公告」。
   hasNotificationInbox: false,

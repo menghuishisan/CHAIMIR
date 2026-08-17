@@ -100,7 +100,7 @@ export function WizardBasicStep({ draft, courses, errors, onChange }: WizardBasi
         </FormField>
 
         {isGroup ? (
-          <div className="flex flex-col gap-4 rounded-md border border-line bg-surface-sunken p-4">
+          <div className="flex flex-col gap-4 well p-4">
             <FormField
               label="每组人数"
               htmlFor="wizard-group-size"

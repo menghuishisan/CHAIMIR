@@ -36,6 +36,14 @@ WHERE tenant_id = $1
 ORDER BY created_at DESC
 LIMIT $5 OFFSET $6;
 
+-- name: CountTransferTasks :one
+SELECT count(*)::bigint
+FROM transfer_task
+WHERE tenant_id = $1
+  AND account_id = $2
+  AND ($3::varchar = '' OR channel = $3)
+  AND ($4::varchar = '' OR status = $4);
+
 -- name: UpdateTransferTask :one
 UPDATE transfer_task
 SET status = $3,

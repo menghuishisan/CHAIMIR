@@ -127,10 +127,10 @@ export function BlockIncubator({
   )
 
   return (
-    <div className="flex flex-col gap-4 p-4">
+    <div className="flex h-full min-h-0 flex-col gap-4 overflow-y-auto p-4">
       <section className="flex flex-col gap-2">
         <div className="flex items-center gap-2">
-          <Blocks aria-hidden="true" className="size-4 text-on-dark-accent" />
+          <Blocks aria-hidden="true" className="size-4 text-accent" />
           <h2 className="text-sm font-medium text-on-dark">区块孵化器</h2>
         </div>
         <p className="text-xs text-on-dark-sub">

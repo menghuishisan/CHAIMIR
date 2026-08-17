@@ -101,6 +101,8 @@ interface SimMeta {
   只接受 `.mjs`:归档内没有 `package.json` 时 Node 按 CJS 解析 `.js`,而扩展包必须默认导出 `SimPackage`,
   允许 `.js` 会让"能不能装配"取决于打包方式。缺失或非法即拒绝(`41002`)—— 容器需要它才能装配,没有它包就是不可运行的。
 - `interactions[].emits` 生成 `sim_package.interaction_schema`,运行时只接受 manifest 声明过的事件和参数。
+- `interactions[].label_tag` 只接受 `normal|recover|perturb|attack`(可缺省,缺省按 `normal` 处理),未知值即拒绝上架:
+  标签决定按钮配色与攻击类的就地二次确认(§3.3),认不出的标签会让扩展包的破坏性操作画成普通推进色。
 - `render.protocol` 必须是 `teaching-frame`。
 - `render.patterns` 必须是 1~3 个封闭模式声明,每项必须有稳定 `id` 和 `mode`,`mode` 只能取 `graph|chain|tree|matrix|pipeline|lane|chart`。
 - `render.patterns[].roles` 只能用于审核该模式可承担的教学区域,取值为 `primary|evidence|timeline|metrics|trace|checkpoints`,不得再使用旧版区域字段。
@@ -167,7 +169,7 @@ interface InteractionDef {
   target?: "global" | "element"; // 默认 global
   element_filter?: string;       // target=element 时,可选元素类型过滤
   available_when?: Condition;    // 可用条件(状态/阶段表达式)
-  label_tag?: "normal" | "perturb" | "attack";  // 仅视觉
+  label_tag?: "normal" | "recover" | "perturb" | "attack";  // 仅视觉(配色)
   cooldown_ms?: number;
 }
 
@@ -214,11 +216,15 @@ interface FieldDef {
 
 | tag | 视觉 | 机制 |
 | --- | --- | --- |
-| normal | 常规色 | 普通 |
-| perturb | 橙色 | 普通 |
-| attack | 红色 + 二次确认弹窗 | 普通(仅多一步确认) |
+| normal | 玉实底(常规推进) | 普通 |
+| recover | 玉实底 + 盾形图标(修复/防护) | 普通 |
+| perturb | 描边 + 需注意色(扰动) | 普通 |
+| attack | 朱砂实底 + 就地二次确认 | 普通(仅多一步确认) |
 
 > 攻击注入 = `label_tag:"attack"` 的普通交互,无任何特殊机制。仿真可声明任意攻击/操作。
+> `recover` 与 `attack` 必须分开:把防护动作画成攻击色是反向教学暗示(前端规范 §7.2 B)。
+> 二次确认做在按钮上(点一次转为「确认攻击 / 取消」),不弹模态:攻击在仿真里是常规教学动作,
+> 每次弹窗会打断「做一步 → 看结论」的观察节奏,而就地确认同样拦住了误触。
 
 ---
 
@@ -254,10 +260,11 @@ interface FramePhase {
   id: string;
   title: string;
   intent: "observe" | "compare" | "verify" | "debug" | "attack" | "recover" | "replay";
+  // 只有两段(前端规范 §7.2 B):focus 已用舞台高亮指出该看哪个元素,
+  // 再写一段「看哪里」只是复述状态摘要。
   explanation: {
     what: string;
     why: string;
-    watch: string;
   };
 }
 
@@ -383,8 +390,7 @@ const PoWSim: SimPackage = {
       intent: s.attackActive ? "attack" : "observe",
       explanation: {
         what: s.attackActive ? "攻击者私链正在追赶公开链。" : "矿工按算力竞争新区块。",
-        why: "最长链选择决定节点最终接受哪条历史。",
-        watch: "观察主舞台链尖是否被攻击者分叉赶上。"
+        why: "最长链选择决定节点最终接受哪条历史。"
       }
     },
     focus: {

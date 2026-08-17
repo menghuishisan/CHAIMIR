@@ -27,7 +27,6 @@ export function renderRaftView(state: RaftState): TeachingFrame {
       intent: 'observe',
       what: state.explanation.effect,
       why: state.explanation.reason,
-      watch: summary,
     },
     focus: {
       primary: selectedOrFrameFocus(state.selectedElementId, ['raft-matrix']),

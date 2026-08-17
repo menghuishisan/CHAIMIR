@@ -9,13 +9,14 @@ import (
 	"fmt"
 	"os"
 	"strings"
-	"time"
 
 	"chaimir/internal/contracts"
 	"chaimir/internal/modules/identity"
 	"chaimir/internal/platform/config"
 	"chaimir/internal/platform/db"
+	"chaimir/internal/platform/ids"
 	"chaimir/internal/platform/storage"
+	"chaimir/internal/platform/timex"
 	"chaimir/pkg/crypto"
 
 	"github.com/jackc/pgx/v5"
@@ -23,107 +24,107 @@ import (
 
 // acceptanceSeedIDs 统一管理验收数据固定 ID,保证重复运行更新同一批数据。
 type acceptanceSeedIDs struct {
-	TenantID            int64
-	TenantIsolation     int64
-	DepartmentCS        int64
-	DepartmentSec       int64
-	DepartmentIsolation int64
-	MajorChain          int64
-	MajorSecurity       int64
-	MajorIsolation      int64
-	ClassChain          int64
-	ClassSecurity       int64
-	ClassIsolation      int64
-	SchoolAdmin         int64
-	TeacherMain         int64
-	TeacherAssist       int64
-	TeacherIsolation    int64
-	StudentA            int64
-	StudentB            int64
-	StudentC            int64
-	StudentIsolation    int64
-	AuthSession         int64
-	Runtime             int64
-	RuntimeImage        int64
-	Sandbox             int64
-	SandboxTool         int64
-	SandboxEvent        int64
-	Judger              int64
-	JudgerOnchain       int64
-	JudgeTask           int64
-	JudgeResult         int64
-	ContentCat          int64
-	ContentLab          int64
-	ContentContest      int64
-	ContentBattle       int64
-	ContentTheory       int64
-	Paper               int64
-	Course              int64
-	ChapterIntro        int64
-	ChapterLab          int64
-	LessonIntro         int64
-	LessonLab           int64
-	Assignment          int64
-	AssignmentItem      int64
-	SubmissionA         int64
-	DraftB              int64
-	ProgressA           int64
-	Discussion          int64
-	CourseNotice        int64
-	CourseReview        int64
-	GradeWeight         int64
-	CourseGradeA        int64
-	Experiment          int64
-	ExperimentGroup     int64
-	GroupMemberA        int64
-	GroupMemberB        int64
-	ExperimentInstance  int64
-	CheckpointResult    int64
-	ExperimentReport    int64
-	SimSession          int64
-	SimAction           int64
-	SimCheckpoint       int64
-	SimShare            int64
-	Contest             int64
-	ContestProblem      int64
-	TeamA               int64
-	TeamAMember         int64
-	SolveSubmission     int64
-	LadderRank          int64
-	ResultSnapshot      int64
-	VulnSource          int64
-	VulnProblem         int64
-	SystemAnnouncement  int64
-	NotificationA       int64
-	PreferenceA         int64
-	AnnouncementReadA   int64
-	GradeLevel          int64
-	Semester            int64
-	GradeReview         int64
-	GradeAppeal         int64
-	AcademicWarning     int64
-	Transcript          int64
-	SystemConfig        int64
-	AlertRule           int64
-	AlertEvent          int64
-	Statistics          int64
-	BackupRecord        int64
-	TransferTask        int64
-	AuditEntry          int64
-	ApplicationPending  int64
-	ApplicationRejected int64
-	ApplicationApproved int64
-	BattleContest       int64
+	TenantID             int64
+	TenantIsolation      int64
+	DepartmentCS         int64
+	DepartmentSec        int64
+	DepartmentIsolation  int64
+	MajorChain           int64
+	MajorSecurity        int64
+	MajorIsolation       int64
+	ClassChain           int64
+	ClassSecurity        int64
+	ClassIsolation       int64
+	SchoolAdmin          int64
+	TeacherMain          int64
+	TeacherAssist        int64
+	TeacherIsolation     int64
+	StudentA             int64
+	StudentB             int64
+	StudentC             int64
+	StudentIsolation     int64
+	AuthSession          int64
+	Runtime              int64
+	RuntimeImage         int64
+	Sandbox              int64
+	SandboxTool          int64
+	SandboxEvent         int64
+	Judger               int64
+	JudgerOnchain        int64
+	JudgeTask            int64
+	JudgeResult          int64
+	ContentCat           int64
+	ContentLab           int64
+	ContentContest       int64
+	ContentBattle        int64
+	ContentTheory        int64
+	Paper                int64
+	Course               int64
+	ChapterIntro         int64
+	ChapterLab           int64
+	LessonIntro          int64
+	LessonLab            int64
+	Assignment           int64
+	AssignmentItem       int64
+	SubmissionA          int64
+	DraftB               int64
+	ProgressA            int64
+	Discussion           int64
+	CourseNotice         int64
+	CourseReview         int64
+	GradeWeight          int64
+	CourseGradeA         int64
+	Experiment           int64
+	ExperimentGroup      int64
+	GroupMemberA         int64
+	GroupMemberB         int64
+	ExperimentInstance   int64
+	CheckpointResult     int64
+	ExperimentReport     int64
+	SimSession           int64
+	SimAction            int64
+	SimCheckpoint        int64
+	SimShare             int64
+	Contest              int64
+	ContestProblem       int64
+	TeamA                int64
+	TeamAMember          int64
+	SolveSubmission      int64
+	LadderRank           int64
+	ResultSnapshot       int64
+	VulnSource           int64
+	VulnProblem          int64
+	SystemAnnouncement   int64
+	NotificationA        int64
+	PreferenceA          int64
+	AnnouncementReadA    int64
+	GradeLevel           int64
+	Semester             int64
+	GradeReview          int64
+	GradeAppeal          int64
+	AcademicWarning      int64
+	Transcript           int64
+	SystemConfig         int64
+	AlertRule            int64
+	AlertEvent           int64
+	Statistics           int64
+	BackupRecord         int64
+	TransferTask         int64
+	AuditEntry           int64
+	ApplicationPending   int64
+	ApplicationRejected  int64
+	ApplicationApproved  int64
+	BattleContest        int64
 	BattleContestProblem int64
-	BattleTeamA         int64
-	BattleTeamAMember   int64
-	BattleTeamB         int64
-	BattleTeamBMember   int64
-	BattleEntryA        int64
-	BattleEntryB        int64
-	BattleMatch         int64
-	BattleLadderRankA   int64
-	BattleLadderRankB   int64
+	BattleTeamA          int64
+	BattleTeamAMember    int64
+	BattleTeamB          int64
+	BattleTeamBMember    int64
+	BattleEntryA         int64
+	BattleEntryB         int64
+	BattleMatch          int64
+	BattleLadderRankA    int64
+	BattleLadderRankB    int64
 }
 
 var acceptanceIDs = acceptanceSeedIDs{
@@ -149,9 +150,9 @@ var acceptanceIDs = acceptanceSeedIDs{
 	GradeLevel: 910000000000011001, Semester: 910000000000011002, GradeReview: 910000000000011003, GradeAppeal: 910000000000011004,
 	AcademicWarning: 910000000000011005, Transcript: 910000000000011006,
 	SystemConfig: 910000000000012001, AlertRule: 910000000000012002, AlertEvent: 910000000000012003, Statistics: 910000000000012004, BackupRecord: 910000000000012005,
-	TransferTask: 910000000000013001,
-	AuditEntry:   910000000000099001,
-	ApplicationPending:  910000000000014001, ApplicationRejected: 910000000000014002, ApplicationApproved: 910000000000014003,
+	TransferTask:       910000000000013001,
+	AuditEntry:         910000000000099001,
+	ApplicationPending: 910000000000014001, ApplicationRejected: 910000000000014002, ApplicationApproved: 910000000000014003,
 	BattleContest: 910000000000008101, BattleContestProblem: 910000000000008102,
 	BattleTeamA: 910000000000008111, BattleTeamAMember: 910000000000008112,
 	BattleTeamB: 910000000000008113, BattleTeamBMember: 910000000000008114,
@@ -227,7 +228,7 @@ func seedAcceptance(ctx context.Context, cfg *config.Config) error {
 // seedAcceptanceReplayObject 写入一份结构完整的验收回放归档,供浏览器验证授权与下载链路。
 // 归档是历史事实夹具,不代表运行时镜像已可用,也不触发沙箱或判题执行。
 func seedAcceptanceReplayObject(ctx context.Context, objects *storage.Storage, bucket string) (string, string, error) {
-	key, err := storage.ObjectKey(acceptanceIDs.TenantID, "contest", "replay", fmt.Sprintf("%d", acceptanceIDs.BattleMatch), "acceptance-battle-replay.json")
+	key, err := storage.ObjectKey(acceptanceIDs.TenantID, "contest", "replay", ids.Format(acceptanceIDs.BattleMatch), "acceptance-battle-replay.json")
 	if err != nil {
 		return "", "", err
 	}
@@ -237,19 +238,19 @@ func seedAcceptanceReplayObject(ctx context.Context, objects *storage.Storage, b
 	}
 	archive := map[string]any{
 		"version":    1,
-		"match_id":   fmt.Sprintf("%d", acceptanceIDs.BattleMatch),
+		"match_id":   ids.Format(acceptanceIDs.BattleMatch),
 		"task_id":    "acceptance-battle-task-001",
 		"source_ref": "contest:2026:battle:acceptance-001",
 		"initial_state": map[string]any{
-			"contest_id": acceptanceIDs.BattleContest,
-			"problem_id": acceptanceIDs.BattleContestProblem,
+			"contest_id":  acceptanceIDs.BattleContest,
+			"problem_id":  acceptanceIDs.BattleContestProblem,
 			"battle_rule": 1,
-			"entry_a": map[string]any{"role": 2, "version_no": 1, "artifact_hash": strings.Repeat("a", 64)},
-			"entry_b": map[string]any{"role": 1, "version_no": 1, "artifact_hash": strings.Repeat("b", 64)},
+			"entry_a":     map[string]any{"role": 2, "version_no": 1, "artifact_hash": strings.Repeat("a", 64)},
+			"entry_b":     map[string]any{"role": 1, "version_no": 1, "artifact_hash": strings.Repeat("b", 64)},
 		},
-		"actions": []map[string]any{{"seq": 1, "at_tick": 1, "event_type": "assertion", "payload": map[string]any{"passed": true}}},
-		"result": map[string]any{"passed": true, "score": 1, "max_score": 1, "details": map[string]any{"winner": "entry_a"}},
-		"finished_at": time.Now().UTC().Format(time.RFC3339),
+		"actions":     []map[string]any{{"seq": 1, "at_tick": 1, "event_type": "assertion", "payload": map[string]any{"passed": true}}},
+		"result":      map[string]any{"passed": true, "score": 1, "max_score": 1, "details": map[string]any{"winner": "entry_a"}},
+		"finished_at": timex.RFC3339OrEmpty(timex.Now()),
 	}
 	raw, err := json.Marshal(archive)
 	if err != nil {
